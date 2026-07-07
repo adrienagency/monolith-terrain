@@ -61,6 +61,10 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3 }) {
     lat,
     lon,
     zoom,
+    // exact georeference: fractional tile coords of the canvas top-left corner,
+    // so lat/lon ↔ world XZ conversions are pixel-accurate (see geo.js)
+    originTileX: cx - half,
+    originTileY: cy - half,
   }
 }
 

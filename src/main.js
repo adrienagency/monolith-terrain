@@ -23,6 +23,10 @@ import { createLabels, disposeLabels } from './labels.js'
 import { createHud3D, findPois } from './hud3d.js'
 import { createHud2D } from './hud2d.js'
 import { loadDem } from './dem.js'
+import { Globe } from './globe.js'
+import { Modes } from './modes.js'
+import { createGoto } from './goto.js'
+import { TERRAIN_SIZE } from './terrain.js'
 
 // ------------------------------------------------------------------ params
 
@@ -141,6 +145,12 @@ const params = {
   shadowMode: 'dynamic',
   shadowRes: 2048,
 
+  // globe (orbital view)
+  globeExaggeration: 18,
+  globeContourInterval: 500,
+  globeContourOpacity: 0.55,
+  globeGraticule: 0.16,
+
   // light
   sunIntensity: 8.3,
   sunAzimuth: 64,
@@ -197,6 +207,8 @@ pmrem.dispose()
 
 // ------------------------------------------------------------------ lights
 
+let globe = null // assigned after the world exists (see orbital globe section)
+
 const sun = new THREE.DirectionalLight(0xffffff, params.sunIntensity)
 sun.castShadow = true
 sun.shadow.mapSize.set(2048, 2048)
@@ -223,6 +235,7 @@ function placeSun() {
   sun.intensity = params.sunIntensity
   hemi.intensity = params.hemiIntensity
   if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
+  if (globe) globe.setSunDir(sun.position)
 }
 placeSun()
 
@@ -486,10 +499,13 @@ controls.addEventListener('start', () => {
   camera.up.set(0, 1, 0)
 })
 
+let modes = null // assigned once the globe + mode machine exist (below)
+
 // real-world mode strips the fiction: no cone/reticle, no dial platform
 function applySourceMode() {
   const real = params.source === 'real'
-  cone.group.visible = !real
+  const surface = !modes || modes.mode === 'surface'
+  cone.group.visible = !real && surface
   hud3.platform.visible = !real
   hud2.setReticleVisible(!real)
 }
@@ -571,18 +587,25 @@ window.addEventListener('pointermove', (e) => {
 
 let dem = null
 let demBusy = false
+
+// fetch tiles + rebuild; throws on failure so programmatic callers (orbital
+// dive) can hold orbit — loadRealTerrain wraps it with the GUI's error UX
+async function fetchAndBuildDem() {
+  loadingEl.textContent = 'fetching elevation tiles…'
+  loadingEl.classList.remove('hidden')
+  dem = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom })
+  terrain.setDem(dem)
+  params.source = 'real'
+  gui.controllersRecursive().forEach((c) => c.updateDisplay())
+  loadingEl.textContent = 'generating terrain…'
+  await regenerateTerrain()
+}
+
 async function loadRealTerrain() {
   if (demBusy) return
   demBusy = true
-  loadingEl.textContent = 'fetching elevation tiles…'
-  loadingEl.classList.remove('hidden')
   try {
-    dem = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom })
-    terrain.setDem(dem)
-    params.source = 'real'
-    gui.controllersRecursive().forEach((c) => c.updateDisplay())
-    loadingEl.textContent = 'generating terrain…'
-    regenerateTerrain()
+    await fetchAndBuildDem()
   } catch (err) {
     console.error('DEM load failed:', err)
     loadingEl.textContent = 'elevation fetch failed — check connection'
@@ -597,11 +620,12 @@ async function loadRealTerrain() {
 
 let rebuildPending = false
 function regenerateTerrain() {
-  if (rebuildPending) return
+  if (rebuildPending) return Promise.resolve()
   rebuildPending = true
   loadingEl.classList.remove('hidden')
-  // let the indicator paint before the synchronous rebuild blocks the thread
-  requestAnimationFrame(() =>
+  // plain timeout (not rAF — rAF never fires in a hidden tab and would stall
+  // the rebuild); 50ms still lets the indicator paint first
+  return new Promise((resolve) =>
     setTimeout(() => {
       terrain.rebuild(params)
       terrain.rebuildRoughness(params)
@@ -610,9 +634,69 @@ function regenerateTerrain() {
       if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
       rebuildPending = false
       loadingEl.classList.add('hidden')
-    }, 30)
+      resolve()
+    }, 50)
   )
 }
+
+// ------------------------------------------------------------------ orbital globe + modes
+
+globe = new Globe(params)
+globe.setVisible(false)
+scene.add(globe.group)
+globe.setSunDir(sun.position)
+
+const fogRef = scene.fog
+
+modes = new Modes({
+  camera,
+  controls,
+  globe,
+  domElement: renderer.domElement,
+  hooks: {
+    setSurfaceVisible(v) {
+      terrain.mesh.visible = v
+      labels.visible = v && params.labels
+      hud3.group.visible = v
+      hud2.setVisible(v && params.hud)
+      cone.group.visible = v && params.source !== 'real'
+      scene.fog = v ? fogRef : null
+    },
+    setEffectsEnabled(v) {
+      dofPass.enabled = v && params.bokehScale > 0
+      grain.blendMode.opacity.value = v ? params.grain : 0
+      sun.castShadow = v && params.shadowMode !== 'off'
+      renderer.shadowMap.autoUpdate = v && params.shadowMode === 'dynamic'
+      if (v && params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
+    },
+    getSurfaceLatLon: () => ({ lat: params.demLat, lon: params.demLon }),
+    surfaceCamAltMeters() {
+      if (params.source === 'real' && dem) {
+        const scale = (TERRAIN_SIZE / dem.extentMeters) * params.demExaggeration
+        return camera.position.y / scale + dem.meanM
+      }
+      return terrain.heightToFeet(camera.position.y) / 3.28084
+    },
+    async loadSurface(lat, lon) {
+      if (demBusy) throw new Error('terrain busy')
+      demBusy = true
+      try {
+        params.demLat = lat
+        params.demLon = lon
+        params.demLocation = 'Custom'
+        await fetchAndBuildDem()
+      } catch (err) {
+        loadingEl.classList.add('hidden')
+        throw err
+      } finally {
+        demBusy = false
+      }
+    },
+    surfaceMaxDistance: () => 60,
+  },
+})
+
+const gotoCtl = createGoto({ modes, announce: (m) => modes.announce(m) })
 
 // ------------------------------------------------------------------ GUI
 
@@ -678,6 +762,32 @@ fSource
   })
 fSource.add({ load: () => loadRealTerrain() }, 'load').name('load location ⤓')
 
+// go-to travel: paste coordinates or search a name, fly over the globe, dive
+const gotoState = { coords: '', place: '' }
+fSource.add(gotoState, 'coords').name('go to “lat, lon”')
+fSource.add({ go: () => gotoCtl.go(gotoState.coords) }, 'go').name('→ fly to coordinates')
+fSource.add(gotoState, 'place').name('search place')
+fSource.add({ s: () => gotoCtl.search(gotoState.place) }, 's').name('→ search & fly')
+fSource.add({ orbit: () => modes.enterOrbit() }, 'orbit').name('🌍 view planet')
+
+const fGlobe = gui.addFolder('Globe')
+fGlobe
+  .add(params, 'globeExaggeration', 0, 60, 1)
+  .name('relief exaggeration')
+  .onFinishChange((v) => globe.setExaggeration(v))
+fGlobe
+  .add(params, 'globeContourInterval', 100, 2000, 50)
+  .name('contour interval (m)')
+  .onChange((v) => (globe.uniforms.uContourInterval.value = v))
+fGlobe
+  .add(params, 'globeContourOpacity', 0, 1, 0.02)
+  .name('contour opacity')
+  .onChange((v) => (globe.uniforms.uContourOpacity.value = v))
+fGlobe
+  .add(params, 'globeGraticule', 0, 0.5, 0.01)
+  .name('graticule')
+  .onChange((v) => (globe.uniforms.uGraticuleOpacity.value = v))
+
 const fTerrain = gui.addFolder('Terrain')
 fTerrain.add(params, 'seed', 1, 9999, 1).onFinishChange(regenerateTerrain)
 fTerrain
@@ -741,7 +851,10 @@ fMap
   .add(params, 'heightPivot', 0, 1, 0.01)
   .name('height pivot')
   .onChange((v) => (terrain.mapUniforms.uHeightPivot.value = v))
-const rebuildRamp = () => terrain.rebuildRamp(params)
+const rebuildRamp = () => {
+  terrain.rebuildRamp(params)
+  globe.rebuildRamp(params) // the planet shares the map's land gradient
+}
 fMap.addColor(params, 'gradLow').name('gradient: low').onChange(rebuildRamp)
 fMap.addColor(params, 'gradMid1').name('gradient: mid 1').onChange(rebuildRamp)
 fMap.addColor(params, 'gradMid2').name('gradient: mid 2').onChange(rebuildRamp)
@@ -763,7 +876,10 @@ fMap
 fMap
   .addColor(params, 'contourColor')
   .name('contour color')
-  .onChange((v) => terrain.mapUniforms.uContourColor.value.set(v))
+  .onChange((v) => {
+    terrain.mapUniforms.uContourColor.value.set(v)
+    globe.setInk(v)
+  })
 fMap.add(params, 'gridStep', 2, 14, 0.5).name('grid size').onChange((v) => (terrain.mapUniforms.uGridStep.value = v))
 fMap.add(params, 'gridOpacity', 0, 1, 0.02).name('grid opacity').onChange((v) => (terrain.mapUniforms.uGridOpacity.value = v))
 fMap.add(params, 'labels').name('place labels').onChange((v) => (labels.visible = v))
@@ -774,16 +890,16 @@ fLook.add(params, 'contrast', -0.2, 0.5, 0.01).onChange((v) => (contrastFx.unifo
 fLook.add(params, 'saturation', -1, 0, 0.02).onChange((v) => (hueSat.saturation = v))
 fLook.add(params, 'vignette', 0, 1, 0.02).onChange((v) => (vignette.darkness = v))
 fLook.add(params, 'grain', 0, 0.5, 0.01).onChange((v) => (grain.blendMode.opacity.value = v))
-fLook.add(params, 'fogNear', 5, 60, 0.5).name('fog start').onChange((v) => (scene.fog.near = v))
-fLook.add(params, 'fogFar', 15, 90, 0.5).name('fog end').onChange((v) => (scene.fog.far = v))
+fLook.add(params, 'fogNear', 5, 60, 0.5).name('fog start').onChange((v) => (fogRef.near = v))
+fLook.add(params, 'fogFar', 15, 90, 0.5).name('fog end').onChange((v) => (fogRef.far = v))
 fLook.addColor(params, 'fogColor').onChange((v) => {
-  scene.fog.color.set(v)
+  fogRef.color.set(v)
   scene.background.set(v)
 })
 fLook.add(params, 'surveyLines').name('survey circles').onChange((v) => (hud3.lines.visible = v))
 
 const fHud = gui.addFolder('HUD')
-fHud.add(params, 'hud').name('show HUD').onChange((v) => hud2.setVisible(v))
+fHud.add(params, 'hud').name('show HUD').onChange((v) => hud2.setVisible(v && modes.mode === 'surface'))
 fHud.add(params, 'hudOpacity', 0, 1, 0.02).name('HUD opacity').onChange((v) => hud2.setOpacity(v))
 fHud
   .add(params, 'uiBlur', 0, 30, 1)
@@ -910,7 +1026,7 @@ fLight.close()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, get labels() { return labels } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, get labels() { return labels } }
 
 // real world is the default source — fetch its tiles on startup
 if (params.source === 'real') loadRealTerrain()
@@ -918,7 +1034,9 @@ if (params.source === 'real') loadRealTerrain()
 const clock = new THREE.Clock()
 
 function tick() {
-  requestAnimationFrame(tick)
+  // rAF normally; timeout fallback keeps rendering when the tab is hidden
+  if (document.hidden) setTimeout(tick, 40)
+  else requestAnimationFrame(tick)
   const dt = Math.min(clock.getDelta(), 0.05)
   const t = clock.elapsedTime
 
@@ -962,15 +1080,19 @@ function tick() {
     controls.target.lerpVectors(tween.t0, tween.t1, e)
     camera.lookAt(controls.target)
     if (tween.t >= 1) tween.active = false
-  } else {
-    controls.update()
+  } else if (modes.mode === 'surface') {
+    controls.update() // orbital-mode camera is driven by the mode machine
   }
+
+  // mode machine: altitude thresholds, glides, altimeter; globe LOD streaming
+  modes.update(dt)
+  if (modes.mode === 'orbital') globe.update(camera)
 
   // refresh camera matrices NOW so DOM projections match this frame's render
   // (otherwise labels are projected with last frame's matrices and lag behind)
   camera.updateMatrixWorld()
 
-  if (!params.paused) {
+  if (!params.paused && modes.mode === 'surface') {
     hud3.update(dt, t, params)
     cone.update(dt, t, mouse, params)
   }
@@ -991,7 +1113,7 @@ function tick() {
   }
   dof.cocMaterial.worldFocusDistance = params.focusDistance
 
-  if (params.hud) {
+  if (params.hud && modes.mode === 'surface') {
     fps += (1 / Math.max(dt, 1e-4) - fps) * 0.05
     const sph = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target))
     const secs = Math.floor(t)

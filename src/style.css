@@ -254,3 +254,78 @@ body {
   backdrop-filter: blur(10px);
   font-family: 'SF Mono', ui-monospace, monospace !important;
 }
+
+/* ---------------------------------------------------------------- modes / orbital */
+
+.altimeter {
+  position: fixed;
+  right: 24px;
+  bottom: 20px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
+  color: var(--hud-ink);
+  background: var(--hud-paper);
+  border: 1px solid var(--hud-ink);
+  padding: 6px 12px;
+  border-radius: 3px;
+  backdrop-filter: blur(var(--hud-blur));
+  pointer-events: none;
+  user-select: none;
+  z-index: 30;
+}
+
+.altimeter .alt-mode {
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: var(--hud-accent);
+  font-weight: 600;
+}
+
+.altimeter .alt-value {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  min-width: 74px;
+  text-align: right;
+}
+
+.fui-msg {
+  position: fixed;
+  left: 50%;
+  top: 64px;
+  transform: translateX(-50%);
+  font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.28em;
+  color: var(--hud-ink);
+  background: var(--hud-paper);
+  border: 1px solid var(--hud-accent);
+  border-left: 4px solid var(--hud-accent);
+  padding: 9px 18px;
+  border-radius: 3px;
+  backdrop-filter: blur(var(--hud-blur));
+  pointer-events: none;
+  user-select: none;
+  z-index: 40;
+  transition: opacity 0.35s, transform 0.35s;
+}
+
+.fui-msg.hidden {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-8px);
+}
+
+.whiteout {
+  position: fixed;
+  inset: 0;
+  background: #ffffff;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 50;
+  transition: opacity 0.46s ease;
+}
+
+.whiteout.on {
+  opacity: 1;
+}
