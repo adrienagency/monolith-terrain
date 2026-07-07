@@ -26,6 +26,7 @@ import { loadDem } from './dem.js'
 import { Globe } from './globe.js'
 import { Modes } from './modes.js'
 import { createGoto } from './goto.js'
+import { GpxLayer, parseGpx } from './gpx.js'
 import { TERRAIN_SIZE } from './terrain.js'
 
 // ------------------------------------------------------------------ params
@@ -150,6 +151,10 @@ const params = {
   globeContourInterval: 500,
   globeContourOpacity: 0.55,
   globeGraticule: 0.16,
+
+  // gpx
+  gpxVisible: true,
+  gpxAltitude: 2.2,
 
   // light
   sunIntensity: 8.3,
@@ -420,6 +425,7 @@ function startTour() {
 
   tour.aTop.set(A.x, A.h + 0.6, A.z)
   tour.bTop.set(B.x, B.h + 0.6, B.z)
+  tour.duration = params.tourDuration
   tour.bank = 0
   tour.t = 0
   tour.active = true
@@ -579,6 +585,7 @@ window.addEventListener('pointermove', (e) => {
   }
   lastPointer = { x: nx, y: ny }
   mouse.set(nx, ny)
+  if (modes && modes.mode === 'surface') gpxLayer.pointerMove(mouse, e.clientX, e.clientY)
 })
 
 // ------------------------------------------------------------------ regeneration helpers
@@ -631,6 +638,7 @@ function regenerateTerrain() {
       terrain.rebuildRoughness(params)
       regenerateLabels()
       regenerateHud()
+      gpxLayer.rebuild() // re-drape the track on the new relief
       if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
       rebuildPending = false
       loadingEl.classList.add('hidden')
@@ -697,6 +705,64 @@ modes = new Modes({
 })
 
 const gotoCtl = createGoto({ modes, announce: (m) => modes.announce(m) })
+
+// ------------------------------------------------------------------ GPX layer
+
+const gpxLayer = new GpxLayer({ scene, camera, terrain, params, getDem: () => dem })
+
+async function loadGpxText(text) {
+  try {
+    const { points, name } = parseGpx(text)
+    gpxLayer.setTrack(points, name)
+    const f = gpxLayer.frame(points)
+    params.demLat = f.lat
+    params.demLon = f.lon
+    params.demZoom = f.zoom
+    params.demLocation = 'Custom'
+    gui.controllersRecursive().forEach((c) => c.updateDisplay())
+    modes.announce(`TRACK LOADED — ${name.toUpperCase().slice(0, 24)}`)
+    // the post-rebuild hook drapes the line once the new terrain exists
+    if (modes.mode === 'orbital') await modes.flyTo(f.lat, f.lon)
+    else await loadRealTerrain()
+  } catch (err) {
+    modes.announce(`GPX ERROR — ${String(err.message).toUpperCase()}`)
+  }
+}
+
+// drag & drop a .gpx anywhere on the page
+window.addEventListener('dragover', (e) => e.preventDefault())
+window.addEventListener('drop', (e) => {
+  e.preventDefault()
+  const f = [...(e.dataTransfer?.files || [])].find((f) => /\.gpx$/i.test(f.name))
+  if (f) f.text().then(loadGpxText)
+})
+
+const gpxFileInput = document.createElement('input')
+gpxFileInput.type = 'file'
+gpxFileInput.accept = '.gpx'
+gpxFileInput.style.display = 'none'
+document.body.appendChild(gpxFileInput)
+gpxFileInput.addEventListener('change', () => {
+  const f = gpxFileInput.files?.[0]
+  if (f) f.text().then(loadGpxText)
+  gpxFileInput.value = ''
+})
+
+// hand the flight to the existing tour controller
+function flyTrack() {
+  const curve = gpxLayer.buildFlightCurve(params.gpxAltitude)
+  if (!curve || modes.mode !== 'surface') return
+  const w = gpxLayer.track.world
+  tour.curve = curve
+  tour.uA = 0.03
+  tour.aTop.copy(w[0]).add(new THREE.Vector3(0, 0.6, 0))
+  tour.bTop.copy(w[w.length - 1]).add(new THREE.Vector3(0, 0.6, 0))
+  tour.duration = THREE.MathUtils.clamp(gpxLayer.track.cumKm[gpxLayer.track.cumKm.length - 1] * 2.0, 12, 90)
+  tour.bank = 0
+  tour.t = 0
+  tour.active = true
+  tween.active = false
+}
 
 // ------------------------------------------------------------------ GUI
 
@@ -787,6 +853,13 @@ fGlobe
   .add(params, 'globeGraticule', 0, 0.5, 0.01)
   .name('graticule')
   .onChange((v) => (globe.uniforms.uGraticuleOpacity.value = v))
+
+const fGpx = gui.addFolder('GPX track')
+fGpx.add({ imp: () => gpxFileInput.click() }, 'imp').name('import .gpx ⤒ (or drag & drop)')
+fGpx.add(params, 'gpxVisible').name('show track').onChange((v) => gpxLayer.setVisible(v))
+fGpx.add(params, 'gpxAltitude', 0.8, 8, 0.1).name('fly altitude')
+fGpx.add({ fly: () => flyTrack() }, 'fly').name('▶ fly the track')
+fGpx.add({ clr: () => gpxLayer.clear() }, 'clr').name('✕ clear track')
 
 const fTerrain = gui.addFolder('Terrain')
 fTerrain.add(params, 'seed', 1, 9999, 1).onFinishChange(regenerateTerrain)
@@ -1026,7 +1099,7 @@ fLight.close()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, get labels() { return labels } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, get labels() { return labels } }
 
 // real world is the default source — fetch its tiles on startup
 if (params.source === 'real') loadRealTerrain()
@@ -1042,7 +1115,7 @@ function tick() {
 
   // cinematic tour: arc-length uniform speed + trapezoid profile + damped gimbal
   if (tour.active) {
-    tour.t = Math.min(1, tour.t + dt / params.tourDuration)
+    tour.t = Math.min(1, tour.t + dt / (tour.duration || params.tourDuration))
     const s = trapezoid(tour.t, 0.18)
 
     // position: exact on the spline, constant speed thanks to getPointAt
@@ -1139,4 +1212,5 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix()
   renderer.setSize(window.innerWidth, window.innerHeight)
   composer.setSize(window.innerWidth, window.innerHeight)
+  gpxLayer.onResize(window.innerWidth, window.innerHeight)
 })
