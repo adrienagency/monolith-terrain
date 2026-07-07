@@ -63,6 +63,36 @@ test('sphere round-trip', () => {
   }
 })
 
+test('world round-trip on a dem straddling the antimeridian', () => {
+  // patch centered at lon 179.99 (z12): its tile window crosses x = n
+  const t = latLonToTile(52.0, 179.99, 12)
+  const dem = {
+    zoom: 12,
+    size: 768,
+    originTileX: Math.floor(t.x) - 1,
+    originTileY: Math.floor(t.y) - 1,
+  }
+  // a point just across the seam, at lon -179.98, must land INSIDE the patch
+  const w = latLonToWorld(dem, 52.001, -179.98)
+  assert.ok(Math.abs(w.x) < 28 && Math.abs(w.z) < 28, `inside patch, got x=${w.x}`)
+  const back = worldToLatLon(dem, w.x, w.z)
+  close(back.lat, 52.001, 1e-9)
+  close(back.lon, -179.98, 1e-9)
+})
+
+test('parseLatLon accepts DMS pastes (Wikipedia / GPS)', () => {
+  const a = parseLatLon(`45°49'57"N 6°51'52"E`)
+  close(a.lat, 45 + 49 / 60 + 57 / 3600, 1e-9)
+  close(a.lon, 6 + 51 / 60 + 52 / 3600, 1e-9)
+  const b = parseLatLon('33°55′12″S, 18°25′26.5″E') // unicode primes + decimal seconds
+  close(b.lat, -(33 + 55 / 60 + 12 / 3600), 1e-9)
+  close(b.lon, 18 + 25 / 60 + 26.5 / 3600, 1e-9)
+  const c = parseLatLon(`45°49'N 6°51'W`) // no seconds
+  close(c.lat, 45 + 49 / 60, 1e-9)
+  close(c.lon, -(6 + 51 / 60), 1e-9)
+  assert.equal(parseLatLon(`91°00'00"N 6°51'52"E`), null)
+})
+
 test('parseLatLon accepts common paste formats', () => {
   assert.deepEqual(parseLatLon('45.8326, 6.8652'), { lat: 45.8326, lon: 6.8652 })
   assert.deepEqual(parseLatLon('  45.8326   6.8652 '), { lat: 45.8326, lon: 6.8652 })

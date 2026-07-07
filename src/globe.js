@@ -484,8 +484,10 @@ export class Globe {
   }
 
   _evict() {
+    // hard budget: least-recently-used first, sparing only tiles drawn this
+    // frame — sustained exploration must not grow the cache without bound
     const candidates = [...this.tiles.values()]
-      .filter((t) => t.z > ROOT_Z && t.state === 'ready' && this.frame - t.lastUsed > 120)
+      .filter((t) => t.z > ROOT_Z && t.state === 'ready' && !(t.mesh && t.mesh.visible))
       .sort((a, b) => a.lastUsed - b.lastUsed)
     const excess = this.tiles.size - CACHE_MAX
     for (let i = 0; i < Math.min(excess, candidates.length); i++) {

@@ -36,6 +36,34 @@ export function parseGpx(text) {
   return { points, name: name || 'TRACK' }
 }
 
+// Pick center + zoom so a whole track fits comfortably in the DEM patch.
+// Pure — exported for tests.
+export function frameTrack(points) {
+  // unwrap longitudes relative to the first point so a track crossing the
+  // antimeridian stays contiguous instead of spanning the whole planet
+  const lon0 = points[0].lon
+  let latMin = 90, latMax = -90, lonMin = Infinity, lonMax = -Infinity
+  for (const p of points) {
+    const pLon = lon0 + (((p.lon - lon0 + 540) % 360) - 180)
+    latMin = Math.min(latMin, p.lat)
+    latMax = Math.max(latMax, p.lat)
+    lonMin = Math.min(lonMin, pLon)
+    lonMax = Math.max(lonMax, pLon)
+  }
+  const lat = (latMin + latMax) / 2
+  let lon = (lonMin + lonMax) / 2
+  if (lon > 180) lon -= 360
+  else if (lon < -180) lon += 360
+  const widthM = Math.max(
+    (lonMax - lonMin) * 111320 * Math.cos((lat * Math.PI) / 180),
+    (latMax - latMin) * 110540,
+    800
+  )
+  let zoom = 14
+  while (zoom > 10 && metersPerPixel(lat, zoom) * 768 < widthM * 1.35) zoom--
+  return { lat, lon, zoom }
+}
+
 // haversine meters
 function distM(a, b) {
   const R = EARTH_RADIUS_M
@@ -127,29 +155,7 @@ export class GpxLayer {
 
   // Pick center + zoom so the whole track fits comfortably in the patch.
   frame(points) {
-    // unwrap longitudes relative to the first point so a track crossing the
-    // antimeridian stays contiguous instead of spanning the whole planet
-    const lon0 = points[0].lon
-    let latMin = 90, latMax = -90, lonMin = Infinity, lonMax = -Infinity
-    for (const p of points) {
-      const pLon = lon0 + (((p.lon - lon0 + 540) % 360) - 180)
-      latMin = Math.min(latMin, p.lat)
-      latMax = Math.max(latMax, p.lat)
-      lonMin = Math.min(lonMin, pLon)
-      lonMax = Math.max(lonMax, pLon)
-    }
-    const lat = (latMin + latMax) / 2
-    let lon = (lonMin + lonMax) / 2
-    if (lon > 180) lon -= 360
-    else if (lon < -180) lon += 360
-    const widthM = Math.max(
-      (lonMax - lonMin) * 111320 * Math.cos((lat * Math.PI) / 180),
-      (latMax - latMin) * 110540,
-      800
-    )
-    let zoom = 14
-    while (zoom > 10 && metersPerPixel(lat, zoom) * 768 < widthM * 1.35) zoom--
-    return { lat, lon, zoom }
+    return frameTrack(points)
   }
 
   setTrack(points, name) {

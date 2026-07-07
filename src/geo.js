@@ -92,11 +92,27 @@ export function sphereToLatLon(v) {
 
 // ---------------------------------------------------------------- parsing
 
-// Parse "45.8326, 6.8652", "45.8326 6.8652", "45.83°N 6.86°E", Google-Maps
-// pastes etc. Returns {lat, lon} or null — never throws.
+// Parse "45.8326, 6.8652", "45.8326 6.8652", "45.83°N 6.86°E", DMS pastes
+// like 45°49'57"N 6°51'52"E (Wikipedia/GPS), Google-Maps pastes etc.
+// Returns {lat, lon} or null — never throws.
 export function parseLatLon(text) {
   if (!text) return null
   const s = String(text).trim()
+
+  const dms = s.match(
+    /^\s*(\d{1,2})\s*°\s*(\d{1,2})\s*['′’]\s*(?:(\d{1,2}(?:[.,]\d+)?)\s*["″”]\s*)?([NSns])\s*[,;]?\s*(\d{1,3})\s*°\s*(\d{1,2})\s*['′’]\s*(?:(\d{1,2}(?:[.,]\d+)?)\s*["″”]\s*)?([EWOewo])\s*$/
+  )
+  if (dms) {
+    const toDec = (d, mn, sec) =>
+      parseInt(d, 10) + parseInt(mn, 10) / 60 + (sec ? parseFloat(sec.replace(',', '.')) : 0) / 3600
+    let lat = toDec(dms[1], dms[2], dms[3])
+    let lon = toDec(dms[5], dms[6], dms[7])
+    if (/s/i.test(dms[4])) lat = -lat
+    if (/[wo]/i.test(dms[8])) lon = -lon
+    if (Math.abs(lat) > 85 || Math.abs(lon) > 180) return null
+    return { lat, lon }
+  }
+
   const m = s.match(
     /^\s*(-?\d+(?:[.,]\d+)?)\s*°?\s*([NSns])?\s*[,;\s]\s*(-?\d+(?:[.,]\d+)?)\s*°?\s*([EWOew])?\s*$/
   )

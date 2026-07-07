@@ -47,13 +47,14 @@ class FakeDoc {
 }
 
 let parseGpx
+let frameTrack
 before(async () => {
   globalThis.DOMParser = class {
     parseFromString(text) {
       return new FakeDoc(text)
     }
   }
-  ;({ parseGpx } = await import('../src/gpx.js'))
+  ;({ parseGpx, frameTrack } = await import('../src/gpx.js'))
 })
 
 const wrap = (inner) => `<?xml version="1.0"?><gpx><trk><name>Test Trk</name><trkseg>${inner}</trkseg></trk></gpx>`
@@ -83,6 +84,26 @@ test('missing <ele> yields null (terrain fallback downstream)', () => {
 test('skips malformed points, keeps valid ones', () => {
   const { points } = parseGpx(wrap(pt('abc', 6, 1) + pt(45, 6, 1) + pt(45.001, 6.001, 2)))
   assert.equal(points.length, 2)
+})
+
+test('frameTrack centers and fits a normal track', () => {
+  const f = frameTrack([
+    { lat: 45.92, lon: 6.87 },
+    { lat: 45.93, lon: 6.92 },
+  ])
+  assert.ok(Math.abs(f.lat - 45.925) < 1e-9)
+  assert.ok(Math.abs(f.lon - 6.895) < 1e-9)
+  assert.ok(f.zoom >= 10 && f.zoom <= 14)
+})
+
+test('frameTrack stays local across the antimeridian', () => {
+  const f = frameTrack([
+    { lat: 52.0, lon: 179.98 },
+    { lat: 52.01, lon: -179.97 }, // 0.05° apart, not 359.95°
+  ])
+  assert.ok(Math.abs(f.lat - 52.005) < 1e-9)
+  assert.ok(Math.abs(Math.abs(f.lon) - 179.995) < 1e-9, `center near seam, got ${f.lon}`)
+  assert.ok(f.zoom >= 13, `local span keeps high detail, got z${f.zoom}`)
 })
 
 test('throws on non-GPX input', () => {
