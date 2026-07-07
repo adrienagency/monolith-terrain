@@ -45,7 +45,12 @@ export function metersPerPixel(lat, zoom) {
 // World axes: +x east, +z south (canvas row order), y up.
 export function latLonToWorld(dem, lat, lon) {
   const t = latLonToTile(lat, lon, dem.zoom)
-  const px = (t.x - dem.originTileX) * 256
+  const n = 2 ** dem.zoom
+  // shortest tile-x delta so patches touching the antimeridian stay local
+  // (dem.js wraps tile x when fetching, this must mirror it)
+  let dtx = t.x - dem.originTileX
+  dtx -= Math.round(dtx / n) * n
+  const px = dtx * 256
   const py = (t.y - dem.originTileY) * 256
   return {
     x: (px / dem.size - 0.5) * TERRAIN_SIZE,
@@ -56,7 +61,10 @@ export function latLonToWorld(dem, lat, lon) {
 export function worldToLatLon(dem, x, z) {
   const px = (x / TERRAIN_SIZE + 0.5) * dem.size
   const py = (z / TERRAIN_SIZE + 0.5) * dem.size
-  return tileToLatLon(dem.originTileX + px / 256, dem.originTileY + py / 256, dem.zoom)
+  const n = 2 ** dem.zoom
+  // originTileX can sit outside [0, n) for patches straddling ±180° — wrap
+  const tx = ((((dem.originTileX + px / 256) % n) + n) % n)
+  return tileToLatLon(tx, dem.originTileY + py / 256, dem.zoom)
 }
 
 // true (unexaggerated) meters per scene unit for the loaded DEM patch

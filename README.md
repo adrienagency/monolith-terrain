@@ -2,6 +2,8 @@
 
 An interactive, real-time 3D terrain map in the style of a vintage USGS topographic sheet, crossed with a sci-fi FUI overlay. Load **real-world elevation data** for anywhere on Earth, or generate procedural mountain ranges — then explore them with contour lines, hypsometric tinting, survey grids, spot elevations, clickable peak markers, radar scans, and cinematic camera tours.
 
+Zoom all the way out and the map hands over to **MONOLITH EARTH** — the whole planet rendered in the same vintage-topo language. Orbit it like a satellite, then dive back down anywhere: crossing ~8 000 m re-engages the full-effects surface mode. Drop a **GPX file** on the page to see your track draped over the real relief, with a live altitude cursor, an elevation profile, and a cinematic fly-along.
+
 **Live demo:** https://kaolti.github.io/monolith-terrain/
 
 ## How to use
@@ -9,6 +11,12 @@ An interactive, real-time 3D terrain map in the style of a vintage USGS topograp
 | Action | How |
 |---|---|
 | Look around | Drag to orbit, scroll to zoom, right-drag to pan |
+| See the planet | Keep zooming out — effects power down and the orbital view takes over (or **Terrain source → 🌍 view planet**) |
+| Return to the surface | Zoom in anywhere on the globe — under **~8 000 m** the terrain loads and effects re-engage |
+| Go somewhere exact | **Terrain source → go to "lat, lon"** (paste straight from Google Maps) or **search place** — the camera flies there over the globe and dives |
+| Load a GPX track | Drag & drop a `.gpx` anywhere on the page (or **GPX track → import**) — the map recenters and drapes the track |
+| Read the track | Hover the line (or the elevation profile strip) — altitude, distance and grade follow your pointer |
+| Fly your track | **GPX track → ▶ fly the track** — a cinematic flight along the route |
 | Inspect a peak / basin | Click a `PK-xx` / `DEP-xx` marker — the camera flies in and a data panel opens |
 | Go back | Click ✕ on the panel — the camera returns to where you were |
 | Cinematic flyover | Open **Tour**, pick *from* / *to*, press **▶ start tour** (drag to cancel mid-flight) |
@@ -22,6 +30,14 @@ An interactive, real-time 3D terrain map in the style of a vintage USGS topograp
   - **detail (zoom)** — z10–14: how large an area you get (z12 ≈ 28 km across, z13 ≈ 14 km)
   - **vertical scale** — relief exaggeration; real proportions read flat at map scale, so 1.5–3 is typical
 - **procedural noise** — seeded multi-octave simplex terrain with a hovering monolith and an excavated instrument basin. Every knob (octaves, warp, amplitude…) is live.
+
+### Orbital view (MONOLITH EARTH)
+
+The planet is built from the same AWS terrarium elevation tiles, streamed on demand through a quadtree (z2 at planet scale, z11 near the ground) and drawn by a shader that keeps the map's identity: the **land gradient you set in Map overlay**, bathymetric blues below sea level, contour lines that fade in as tiles refine, a 10° graticule and soft sun shading. Expensive effects (depth of field, shadows, grain) power down in orbit — a FUI message announces each handoff, and the permanent **altimeter** (bottom right) shows where you are. Relief exaggeration and contour styling live in the **Globe** folder.
+
+### GPX tracks
+
+Import creates an accent-colored line draped on the relief with `▶ START` / `■ END` markers, plus an interactive **elevation profile** (total distance, climb, min–max). Hovering either the 3D line or the profile drives a shared cursor with **real altitude, km from start and local grade**. Loading a track while in orbit flies the globe to it and dives automatically. Tracks with no `<ele>` data fall back to terrain elevations.
 
 ### Parameter folders
 

@@ -66,13 +66,6 @@ export class Modes {
       { passive: false }
     )
 
-    // grabbing the camera cancels a glide
-    controls.addEventListener('start', () => {
-      if (this.travel) {
-        this.travel = null
-        this.controls.enabled = true
-      }
-    })
   }
 
   // ---------------------------------------------------------------- DOM
@@ -163,6 +156,10 @@ export class Modes {
     } catch {
       this.announce('SURFACE DATA UNAVAILABLE — HOLDING ORBIT')
       this.orbAltTarget = 60000 / ORBITAL_M_PER_UNIT
+      // snap back above the dive gate NOW — the damped climb takes several
+      // frames, during which altM < DIVE_ALT_M would re-trigger _dive() every
+      // frame and hammer the tile server with doomed requests
+      this.orbAlt = Math.max(this.orbAlt, (DIVE_ALT_M * 1.1) / ORBITAL_M_PER_UNIT)
       this.controls.enabled = true
       this.busy = false
       return
@@ -182,6 +179,7 @@ export class Modes {
       this.controls.minDistance = 6
       this.controls.maxDistance = this.hooks.surfaceMaxDistance()
       this.controls.maxPolarAngle = Math.PI * 0.49
+      this.controls.rotateSpeed = 1 // orbital update scales it down to ~0.015
       this.controls.enableZoom = true
       this.controls.enablePan = true
       this.controls.enabled = true
@@ -196,8 +194,9 @@ export class Modes {
 
   // Great-circle glide to lat/lon, ending below the dive threshold so the
   // normal engagement takes over. One code path for paste, search and GPX.
+  // Returns false when navigation is already busy (dive/transition running).
   async flyTo(lat, lon) {
-    if (this.busy) return
+    if (this.busy) return false
     if (this.mode === 'surface') {
       await this.enterOrbit(1200000) // pop out high enough to see the arc
     }
@@ -208,8 +207,6 @@ export class Modes {
     this.travel = {
       t: 0,
       duration: THREE.MathUtils.clamp(2.5 + (angle / Math.PI) * 7, 2.5, 9),
-      qFrom: new THREE.Quaternion(),
-      qTo: new THREE.Quaternion(),
       fromDir,
       toDir,
       fromAlt: this.orbAlt,
@@ -217,6 +214,7 @@ export class Modes {
       endAlt: (DIVE_ALT_M * 0.92) / ORBITAL_M_PER_UNIT,
     }
     this.controls.enabled = false
+    return true
   }
 
   _updateTravel(dt) {

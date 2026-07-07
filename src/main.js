@@ -267,7 +267,8 @@ function regenerateLabels() {
   scene.remove(labels)
   disposeLabels(labels)
   labels = createLabels(terrain.sample, params.seed, labelOpts())
-  labels.visible = params.labels
+  // a rebuild can run while in orbit (dive preload, GUI) — stay hidden there
+  labels.visible = params.labels && (!modes || modes.mode === 'surface')
   scene.add(labels)
 }
 
@@ -366,6 +367,7 @@ function trapezoid(t, r) {
 }
 
 function startTour() {
+  if (modes && modes.mode !== 'surface') return // tours fly surface-space paths
   const A = pois.find((p) => p.id === params.tourFrom)
   const B = pois.find((p) => p.id === params.tourTo)
   if (!A || !B || A === B) return
@@ -522,6 +524,9 @@ function regenerateHud() {
   pois = findPois(terrain.sample, params.seed, poiFeet)
   hud3 = createHud3D(params.seed, pois, { ink: params.hudInk, accent: params.hudAccent })
   hud3.lines.visible = params.surveyLines
+  // same orbital guard as labels — GUI color changes rebuild the HUD and the
+  // fresh group must not appear over the globe
+  hud3.group.visible = !modes || modes.mode === 'surface'
   scene.add(hud3.group)
   hud2.setPois(pois)
   hud2.setStatic(params)
@@ -663,11 +668,22 @@ modes = new Modes({
   domElement: renderer.domElement,
   hooks: {
     setSurfaceVisible(v) {
+      if (!v) {
+        // entering orbit: kill any surface camera drivers — a live tour/tween
+        // would keep yanking the camera along a surface-space path and fight
+        // the orbital rig for control every frame
+        tour.active = false
+        tween.active = false
+        camera.up.set(0, 1, 0)
+      }
       terrain.mesh.visible = v
       labels.visible = v && params.labels
       hud3.group.visible = v
       hud2.setVisible(v && params.hud)
       cone.group.visible = v && params.source !== 'real'
+      // GPX sprites draw with depthTest:false — hidden with the surface or
+      // they'd float on top of the planet
+      gpxLayer.setVisible(v && params.gpxVisible)
       scene.fog = v ? fogRef : null
     },
     setEffectsEnabled(v) {
@@ -856,7 +872,7 @@ fGlobe
 
 const fGpx = gui.addFolder('GPX track')
 fGpx.add({ imp: () => gpxFileInput.click() }, 'imp').name('import .gpx ⤒ (or drag & drop)')
-fGpx.add(params, 'gpxVisible').name('show track').onChange((v) => gpxLayer.setVisible(v))
+fGpx.add(params, 'gpxVisible').name('show track').onChange((v) => gpxLayer.setVisible(v && modes.mode === 'surface'))
 fGpx.add(params, 'gpxAltitude', 0.8, 8, 0.1).name('fly altitude')
 fGpx.add({ fly: () => flyTrack() }, 'fly').name('▶ fly the track')
 fGpx.add({ clr: () => gpxLayer.clear() }, 'clr').name('✕ clear track')
@@ -955,7 +971,7 @@ fMap
   })
 fMap.add(params, 'gridStep', 2, 14, 0.5).name('grid size').onChange((v) => (terrain.mapUniforms.uGridStep.value = v))
 fMap.add(params, 'gridOpacity', 0, 1, 0.02).name('grid opacity').onChange((v) => (terrain.mapUniforms.uGridOpacity.value = v))
-fMap.add(params, 'labels').name('place labels').onChange((v) => (labels.visible = v))
+fMap.add(params, 'labels').name('place labels').onChange((v) => (labels.visible = v && modes.mode === 'surface'))
 
 const fLook = gui.addFolder('Look')
 fLook.add(params, 'exposure', 0.2, 3, 0.02).onChange((v) => (exposureFx.uniforms.get('exposure').value = v))

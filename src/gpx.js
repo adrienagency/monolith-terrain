@@ -9,7 +9,7 @@ import { Line2 } from 'three/addons/lines/Line2.js'
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js'
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js'
 import { TERRAIN_SIZE } from './terrain.js'
-import { latLonToWorld, metersPerPixel, surfaceMetersPerUnit } from './geo.js'
+import { latLonToWorld, metersPerPixel, surfaceMetersPerUnit, EARTH_RADIUS_M } from './geo.js'
 
 const MAX_POINTS = 2400 // decimation budget — hover & profile stay O(small)
 
@@ -38,7 +38,7 @@ export function parseGpx(text) {
 
 // haversine meters
 function distM(a, b) {
-  const R = 6371000
+  const R = EARTH_RADIUS_M
   const dLat = ((b.lat - a.lat) * Math.PI) / 180
   const dLon = ((b.lon - a.lon) * Math.PI) / 180
   const s =
@@ -127,15 +127,21 @@ export class GpxLayer {
 
   // Pick center + zoom so the whole track fits comfortably in the patch.
   frame(points) {
-    let latMin = 90, latMax = -90, lonMin = 180, lonMax = -180
+    // unwrap longitudes relative to the first point so a track crossing the
+    // antimeridian stays contiguous instead of spanning the whole planet
+    const lon0 = points[0].lon
+    let latMin = 90, latMax = -90, lonMin = Infinity, lonMax = -Infinity
     for (const p of points) {
+      const pLon = lon0 + (((p.lon - lon0 + 540) % 360) - 180)
       latMin = Math.min(latMin, p.lat)
       latMax = Math.max(latMax, p.lat)
-      lonMin = Math.min(lonMin, p.lon)
-      lonMax = Math.max(lonMax, p.lon)
+      lonMin = Math.min(lonMin, pLon)
+      lonMax = Math.max(lonMax, pLon)
     }
     const lat = (latMin + latMax) / 2
-    const lon = (lonMin + lonMax) / 2
+    let lon = (lonMin + lonMax) / 2
+    if (lon > 180) lon -= 360
+    else if (lon < -180) lon += 360
     const widthM = Math.max(
       (lonMax - lonMin) * 111320 * Math.cos((lat * Math.PI) / 180),
       (latMax - latMin) * 110540,
@@ -198,7 +204,9 @@ export class GpxLayer {
     const gain = eles.reduce((g, e, i) => (i && e > eles[i - 1] ? g + e - eles[i - 1] : g), 0)
     this.profileEl.querySelector('.gpx-stats').textContent =
       `${totKm.toFixed(1)} KM · ↗ ${Math.round(gain)} M · ${Math.round(Math.min(...eles))}–${Math.round(Math.max(...eles))} M`
-    this.profileEl.classList.remove('hidden')
+    // respect the layer's visibility — a terrain rebuild must not resurrect
+    // the profile strip while the track is hidden (or while in orbit)
+    this.profileEl.classList.toggle('hidden', !this.group.visible)
     this._drawProfile()
   }
 
@@ -226,7 +234,8 @@ export class GpxLayer {
     ctx.clearRect(0, 0, W, H)
 
     const eles = this._elevations()
-    const totKm = this.track.cumKm[this.track.cumKm.length - 1]
+    // guard: a stationary track (identical points) has totKm 0 → X(i) NaN
+    const totKm = Math.max(this.track.cumKm[this.track.cumKm.length - 1], 1e-6)
     const eMin = Math.min(...eles)
     const eMax = Math.max(...eles)
     const pad = 8
@@ -275,7 +284,9 @@ export class GpxLayer {
 
   // nearest track point to the pointer ray (screen-space tolerance)
   pointerMove(mouseNdc, clientX, clientY) {
-    if (!this.track?.world || !this.line?.visible) return
+    // group.visible covers the "show track" toggle — line.visible alone stays
+    // true when the layer is hidden, which kept the DOM tooltip alive
+    if (!this.track?.world || !this.line || !this.group.visible) return
     this._ray.setFromCamera(mouseNdc, this.camera)
     const ray = this._ray.ray
     const camDist = this.camera.position.distanceTo(this.cursor.visible ? this.cursor.position : ray.origin)

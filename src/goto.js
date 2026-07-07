@@ -25,8 +25,11 @@ export function createGoto({ modes, announce }) {
         announce('UNREADABLE COORDINATES — TRY “45.8326, 6.8652”')
         return false
       }
+      if (!(await modes.flyTo(c.lat, c.lon))) {
+        announce('NAVIGATION BUSY — TRY AGAIN IN A MOMENT')
+        return false
+      }
       announce(`COURSE SET — ${c.lat.toFixed(4)}, ${c.lon.toFixed(4)}`)
-      await modes.flyTo(c.lat, c.lon)
       return true
     },
 
@@ -39,8 +42,11 @@ export function createGoto({ modes, announce }) {
           announce('NO MATCH FOUND')
           return false
         }
+        if (!(await modes.flyTo(hit.lat, hit.lon))) {
+          announce('NAVIGATION BUSY — TRY AGAIN IN A MOMENT')
+          return false
+        }
         announce(`TARGET — ${hit.label.split(',').slice(0, 2).join(',').toUpperCase()}`)
-        await modes.flyTo(hit.lat, hit.lon)
         return true
       } catch {
         announce('SEARCH OFFLINE — USE COORDINATES')
