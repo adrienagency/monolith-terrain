@@ -97,11 +97,16 @@ body {
   letter-spacing: 0.14em;
   line-height: 1.75;
   text-transform: uppercase;
+  /* panels outside .hud (map overlay, landmarks, motion) don't inherit the HUD
+     ink — set it here so their text follows light/dark instead of defaulting to
+     black (which was invisible on the dark sheet) */
+  color: var(--hud-ink);
   background: var(--hud-paper);
-  border: 1px solid rgba(20, 22, 24, 0.3);
+  border: 1px solid rgba(128, 128, 128, 0.3);
   backdrop-filter: blur(var(--hud-blur));
-  padding: 10px 14px;
+  padding: 12px 16px;
   min-width: 190px;
+  border-radius: 26px; /* soft Apple-style corners */
 }
 .hud-tl { top: 34px; left: 34px; }
 .hud-brt { bottom: 78px; left: 34px; min-width: 160px; }
@@ -258,7 +263,7 @@ body {
   background: var(--hud-paper);
   border: 1px solid var(--hud-ink);
   padding: 6px 12px;
-  border-radius: 3px;
+  border-radius: 20px;
   backdrop-filter: blur(var(--hud-blur));
   pointer-events: none;
   user-select: none;
@@ -292,7 +297,7 @@ body {
   border: 1px solid var(--hud-accent);
   border-left: 4px solid var(--hud-accent);
   padding: 9px 18px;
-  border-radius: 3px;
+  border-radius: 18px;
   backdrop-filter: blur(var(--hud-blur));
   pointer-events: none;
   user-select: none;
@@ -351,7 +356,7 @@ body {
   color: var(--hud-ink);
   background: var(--hud-paper);
   border: 1px solid var(--hud-ink);
-  border-radius: 3px;
+  border-radius: 24px;
   backdrop-filter: blur(var(--hud-blur));
   z-index: 25;
   transition: opacity 0.3s;
@@ -845,7 +850,7 @@ body {
   background: var(--hud-paper);
   border: 1px solid var(--hud-ink);
   padding: 7px 11px;
-  border-radius: 3px;
+  border-radius: 16px;
   backdrop-filter: blur(var(--hud-blur));
 }
 
@@ -887,7 +892,7 @@ body.ui-hidden .lil-gui {
   --title-height: 26px;
   backdrop-filter: blur(var(--hud-blur));
   border: 1px solid var(--hud-ink);
-  border-radius: 3px;
+  border-radius: 20px;
   letter-spacing: 0.04em;
 }
 
