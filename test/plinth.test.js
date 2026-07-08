@@ -21,6 +21,21 @@ test('ring resolution matches the terrain mesh so walls have no gaps', () => {
   assert.equal(computeSlab(() => 0, 7, 8).ring.length, 32) // floor guard
 })
 
+test('ring x/z land exactly on terrain PlaneGeometry edge-vertex positions', () => {
+  // PlaneGeometry(56,56,res,res) rotated to XZ puts edge vertices at
+  // -HALF + i*(TERRAIN_SIZE/res). The wall ring MUST hit those same x/z or the
+  // wall top won't seal against the relief border.
+  const res = 1024
+  const { ring } = computeSlab((x, z) => x + z, 7, res)
+  const grid = new Set()
+  for (let i = 0; i <= res; i++) grid.add((-HALF + (TERRAIN_SIZE * i) / res).toFixed(6))
+  for (const p of ring) {
+    const onX = grid.has(p.x.toFixed(6)) || Math.abs(Math.abs(p.x) - HALF) < 1e-9
+    const onZ = grid.has(p.z.toFixed(6)) || Math.abs(Math.abs(p.z) - HALF) < 1e-9
+    assert.ok(onX && onZ, `ring point (${p.x},${p.z}) is off the mesh edge grid`)
+  }
+})
+
 test('baseY sits `depth` below a flat surface', () => {
   const { baseY, borderMin, globalMin } = computeSlab(() => 2.5, 7)
   assert.equal(borderMin, 2.5)

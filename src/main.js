@@ -182,11 +182,10 @@ const params = {
   darkMode: false,
   gridColor: '#242220',
 
-  // 3D slab the relief sits on
+  // 3D slab the relief sits on (its table is a shadow-only ShadowMaterial)
   plinth: true,
   plinthDepth: 7,
   plinthColor: '#d8d4cc',
-  baseColor: '#c8c5be',
 
   // clouds — thick and low, clinging to the summits
   cloudsEnabled: true,
