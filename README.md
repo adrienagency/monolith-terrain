@@ -43,6 +43,7 @@ Zoom all the way out and the map hands over to **MONOLITH EARTH** — the whole 
   - **vertical scale** — relief exaggeration; real proportions read flat at map scale, so 1.5–3 is typical
   - **bathymetry** — below sea level the map reads as a nautical chart: pale shallows deepening into dark water, real depths (try the Mariana Trench: `11.35, 142.2`). Ocean colors live in **Map overlay** and follow the palette.
 - **the slab** — the relief sits on a 3D plinth (walls + a neutral table that catches its shadow), so once the edges come into view it reads as a physical object. Thickness and colors are in the **Slab** folder.
+- **ground cartouche** — when a zone loads, a compass rose, the place name, coordinates (decimal + DMS), the DEM's elevation range and a short description are laid out on the ground around the slab, like a printed map sheet. Data comes from free web sources (OSM/Nominatim + Wikipedia) plus the loaded elevation; the anecdote source is a pluggable hook. Toggle in the **Slab** folder.
 - **clouds** — thick, low volumetric puffs that cling to the summits and cast visible shadows on the map (**Clouds** folder).
 - **procedural noise** — seeded multi-octave simplex terrain with a hovering monolith and an excavated instrument basin. Every knob (octaves, warp, amplitude…) is live.
 

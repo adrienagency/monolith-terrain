@@ -99,7 +99,7 @@ test('DENALI is a full USGS hypsometric band system over blue water', () => {
   // the high-rock band reads red-brown, not orange sienna
   const rock = hexToHsl(ramp(t)[5].c)
   assert.ok(rock.h <= 20, `high rock is red-brown (h=${rock.h.toFixed(0)})`)
-  // dramatic vertical relief, mounted plate (slab kept)
-  assert.ok(t.terrain.demExaggeration >= 2, 'dramatic relief')
+  // pronounced vertical relief, mounted plate (slab kept)
+  assert.ok(t.terrain.demExaggeration >= 1.7, 'pronounced relief')
   assert.equal(t.look.plinth, true, 'a mounted relief plate keeps the slab')
 })

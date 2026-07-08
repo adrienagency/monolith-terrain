@@ -215,7 +215,7 @@ export const TEMPLATES = {
       clouds: false,
       plinth: true, // a mounted USGS relief plate — keep the 3D slab + shadow
     },
-    // dramatic vertical relief, like the sculpted USGS plate
-    terrain: { demExaggeration: 2.6 },
+    // sculpted relief like the USGS plate, but not spiky
+    terrain: { demExaggeration: 1.9 },
   },
 }

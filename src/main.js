@@ -33,6 +33,7 @@ import { monochromeLook } from './palette.js'
 import { peakVantage } from './camera-poses.js'
 import { focusRayHit } from './autofocus.js'
 import { openExclusive } from './accordion.js'
+import { GroundInfoLayer } from './ground-info-layer.js'
 import { createOverlayPanel } from './overlay-panel.js'
 import { PeaksLayer } from './peaks.js'
 import { Clouds } from './clouds.js'
@@ -193,6 +194,7 @@ const params = {
   plinth: true,
   plinthDepth: 7,
   plinthColor: '#d8d4cc',
+  groundInfo: true, // cartouche (compass rose, name, coords, blurb) around the slab
 
   // clouds — thick and low, clinging to the summits
   cloudsEnabled: true,
@@ -307,6 +309,13 @@ scene.add(terrain.mesh)
 const plinth = new Plinth(scene, params)
 plinth.rebuild(terrain, params)
 plinth.setVisible(params.plinth)
+
+// cartographic cartouche laid out on the ground around the slab
+const groundInfo = new GroundInfoLayer({
+  scene,
+  getBaseY: () => plinth.baseY,
+  getInk: () => (params.darkMode ? '#e8e4da' : params.hudInk),
+})
 
 const cone = createCone()
 scene.add(cone.group)
@@ -696,6 +705,8 @@ async function fetchAndBuildDem() {
   gui.controllersRecursive().forEach((c) => c.updateDisplay())
   loadingEl.textContent = 'generating terrain…'
   await regenerateTerrain()
+  // pull the cartouche info for the new zone (async, non-blocking)
+  if (params.groundInfo) groundInfo.load(params.demLat, params.demLon, dem)
 }
 
 async function loadRealTerrain() {
@@ -773,6 +784,7 @@ modes = new Modes({
       gpxLayer.setVisible(v && params.gpxVisible)
       clouds.setVisible(v)
       plinth.setVisible(v && params.plinth)
+      groundInfo.setVisible(v && params.groundInfo)
       scene.fog = v ? fogRef : null
     },
     setEffectsEnabled(v) {
@@ -973,6 +985,7 @@ function setDarkMode(v) {
   regenerateLabels()
   regenerateHud()
   gpxLayer.setHover(-1)
+  groundInfo.rerender() // the cartouche re-inks to match the sheet
 }
 
 // full-white / full-dark museum look: relief shaded by light alone, applied
@@ -1444,6 +1457,15 @@ fSlab
   .name('thickness')
   .onFinishChange(() => plinth.rebuild(terrain, params))
 fSlab.addColor(params, 'plinthColor').name('edge color').onChange(() => plinth.setColors(params))
+fSlab
+  .add(params, 'groundInfo')
+  .name('ground cartouche')
+  .onChange((v) => {
+    groundInfo.enabled = v
+    groundInfo.setVisible(v && modes.mode === 'surface')
+    if (v && dem && !groundInfo.lastInfo) groundInfo.load(params.demLat, params.demLon, dem)
+    else if (v) groundInfo.rerender()
+  })
 fSlab.close()
 
 const fLook = gui.addFolder('Look')
@@ -1590,7 +1612,7 @@ for (const folder of gui.folders) {
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, plinth, peaksLayer, overlayPanel, landmarksPanel, motionPanel, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, gui, get labels() { return labels } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, plinth, peaksLayer, overlayPanel, landmarksPanel, motionPanel, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, gui, groundInfo, get labels() { return labels } }
 
 // real world is the default source — fetch its tiles on startup
 if (params.source === 'real') loadRealTerrain()
