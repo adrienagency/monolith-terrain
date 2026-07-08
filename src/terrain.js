@@ -33,6 +33,12 @@ export class Terrain {
       uHeightPivot: { value: params.heightPivot },
       uSlopeTint: { value: params.slopeTint },
       uContourColor: { value: new THREE.Color(params.contourColor) },
+      // real-world bathymetry: scene-space sea level + depth range (meters
+      // mapped through the DEM scale); uSeaY = -9999 disables (procedural)
+      uSeaY: { value: -9999 },
+      uSeaRange: { value: 1 },
+      uOceanShallow: { value: new THREE.Color(params.oceanShallow ?? '#dce8ec') },
+      uOceanDeep: { value: new THREE.Color(params.oceanDeep ?? '#31576b') },
       uScanT: { value: -1 }, // scan progress 0..1, negative = inactive
       uScanColor: { value: new THREE.Color(params.scanColor) },
       uScanWidth: { value: params.scanWidth },
@@ -79,6 +85,10 @@ uniform sampler2D uRampTex;
 uniform float uHeightContrast;
 uniform float uHeightPivot;
 uniform float uSlopeTint;
+uniform float uSeaY;
+uniform float uSeaRange;
+uniform vec3 uOceanShallow;
+uniform vec3 uOceanDeep;
 uniform vec3 uContourColor;
 uniform float uScanT;
 uniform vec3 uScanColor;
@@ -100,6 +110,14 @@ uniform float uScanBlur;`
   // keep the lighting/AO shading from the base surface but let the gradient own the color
   float luma = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
   diffuseColor.rgb = mix(diffuseColor.rgb, ramp * clamp(luma * 2.4, 0.2, 1.4), uTint);
+
+  // --- bathymetry: below real sea level the map reads as a nautical chart —
+  // pale shallows deepening into dark water (Mariana-trench friendly)
+  if (vWorldPos.y < uSeaY) {
+    float d01 = clamp((uSeaY - vWorldPos.y) / max(uSeaRange, 1e-4), 0.0, 1.0);
+    vec3 sea = mix(uOceanShallow, uOceanDeep, pow(d01, 0.55));
+    diffuseColor.rgb = mix(diffuseColor.rgb, sea * clamp(luma * 2.4, 0.25, 1.4), uTint);
+  }
 
   // --- contour lines: minor every interval, heavy line every 5th
   float ch = vWorldPos.y / uContourInterval;
@@ -299,6 +317,15 @@ if (uScanT >= 0.0) {
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
 
     this.mapUniforms.uHeightRange.value.set(minH, maxH)
+
+    // georeferenced sea level for the bathymetric read (real mode only)
+    if (params.source === 'real' && this.dem && this.dem.minM < -1) {
+      const demScale = (TERRAIN_SIZE / this.dem.extentMeters) * params.demExaggeration
+      this.mapUniforms.uSeaY.value = (0 - this.dem.meanM) * demScale
+      this.mapUniforms.uSeaRange.value = Math.max((0 - this.dem.minM) * demScale, 1e-3)
+    } else {
+      this.mapUniforms.uSeaY.value = -9999
+    }
 
     this.mesh.geometry.dispose()
     this.mesh.geometry = geo

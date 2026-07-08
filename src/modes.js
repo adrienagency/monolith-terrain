@@ -2,14 +2,22 @@
 // ORBITAL (the whole planet, effects powered down). Camera altitude is the
 // single driver, with hysteresis so the boundary never flaps:
 //   surface → orbital  when the user keeps zooming past the orbit gate
-//   orbital → surface  when altitude drops under ~8 000 m (Everest-class)
+//   orbital → surface  when altitude CROSSES a dive tier from above
+// Three tiers mean a Madagascar-sized view lands on real terrain (z8 patch,
+// ~470 km across) instead of a long dead zoom to the 8 000 m fine gate; once
+// on a coarse patch, zooming against the near stop REFINES to the next scale.
 // Transitions are announced FUI-style and masked by a paper whiteout.
 
 import * as THREE from 'three'
 import { R_GLOBE, ORBITAL_M_PER_UNIT, sphereToLatLon, latLonToSphere } from './geo.js'
 
-const DIVE_ALT_M = 8000 // orbital → surface engagement
-const ORBIT_ENTRY_ALT_M = 30000 // where the orbital camera starts after handoff
+// ordered fine → coarse; zoom null = the user's fine zoom (≥ 12)
+const DIVE_TIERS = [
+  { altM: 8000, zoom: null },
+  { altM: 45000, zoom: 10 },
+  { altM: 180000, zoom: 8 },
+]
+const DIVE_ALT_M = DIVE_TIERS[0].altM
 const MAX_ALT_M = 16000000 // ~2.5 earth radii — whole planet in frame
 const MSG_MS = 3600
 
@@ -19,8 +27,11 @@ export class Modes {
    *   setSurfaceVisible(bool), setEffectsEnabled(bool),
    *   getSurfaceLatLon() → {lat, lon},
    *   surfaceCamAltMeters() → number,
-   *   loadSurface(lat, lon) → Promise (resolves when terrain is rebuilt),
+   *   loadSurface(lat, lon, zoom?) → Promise (resolves when terrain is rebuilt),
    *   surfaceMaxDistance() → number (controls.maxDistance in surface mode),
+   *   getFineZoom() → number (user's detail zoom, ≥ 12),
+   *   getRefineTarget() → {lat, lon, zoom} | null (next finer scale under the
+   *     current view, null when already at fine scale),
    * }
    */
   constructor({ camera, controls, globe, domElement, hooks }) {
@@ -44,18 +55,26 @@ export class Modes {
       'wheel',
       (e) => {
         if (this.mode === 'surface') {
-          // zooming out hard against the stop opens the orbit gate
+          // zooming out hard against the stop opens the orbit gate;
+          // zooming in against the near stop on a coarse patch refines it
           if (
             e.deltaY > 0 &&
             !this.busy &&
             this.controls.getDistance() >= this.hooks.surfaceMaxDistance() * 0.965
           ) {
             this.enterOrbit()
+          } else if (
+            e.deltaY < 0 &&
+            !this.busy &&
+            this.controls.getDistance() <= this.controls.minDistance * 1.03
+          ) {
+            this._refine()
           }
           return
         }
         e.preventDefault()
         if (this.busy || this.travel) return
+        if (e.deltaY < 0) this._diveArmed = true // inward intent arms the dive
         const f = Math.exp(e.deltaY * 0.0011)
         this.orbAltTarget = THREE.MathUtils.clamp(
           this.orbAltTarget * f,
@@ -111,8 +130,13 @@ export class Modes {
 
   // ---------------------------------------------------------------- surface → orbital
 
-  async enterOrbit(entryAltM = ORBIT_ENTRY_ALT_M) {
+  async enterOrbit(entryAltM = null) {
     if (this.mode !== 'surface' || this.busy) return
+    // continuity: pop out at the altitude the surface view actually had, so a
+    // z8 patch hands over at ~500 km and a z12 patch at ~30 km
+    if (entryAltM == null) {
+      entryAltM = THREE.MathUtils.clamp(this.hooks.surfaceCamAltMeters() * 1.15, 15000, 2500000)
+    }
     this.busy = true
     this.announce('FX OFFLINE — ENTERING ORBITAL VIEW')
     const { lat, lon } = this.hooks.getSurfaceLatLon()
@@ -128,6 +152,7 @@ export class Modes {
       this.camera.updateProjectionMatrix()
 
       this.orbAlt = this.orbAltTarget = entryAltM / ORBITAL_M_PER_UNIT
+      this._diveArmed = false // require an inward zoom before re-diving
       latLonToSphere(lat, lon, R_GLOBE + this.orbAlt, this.camera.position)
       this.controls.target.set(0, 0, 0)
       this.controls.minDistance = R_GLOBE + (DIVE_ALT_M * 0.85) / ORBITAL_M_PER_UNIT
@@ -145,21 +170,23 @@ export class Modes {
 
   // ---------------------------------------------------------------- orbital → surface
 
-  async _dive() {
+  async _dive(tier = DIVE_TIERS[0]) {
     if (this.mode !== 'orbital' || this.busy) return
     this.busy = true
+    const zoom = tier.zoom ?? this.hooks.getFineZoom()
     const { lat, lon } = sphereToLatLon(this.camera.position)
-    this.announce(`ACQUIRING SURFACE DATA — ${lat.toFixed(4)}, ${lon.toFixed(4)}`)
+    this.announce(`ACQUIRING SURFACE DATA — ${lat.toFixed(4)}, ${lon.toFixed(4)} · Z${zoom}`)
     this.controls.enabled = false
     try {
-      await this.hooks.loadSurface(lat, lon)
+      await this.hooks.loadSurface(lat, lon, zoom)
     } catch {
       this.announce('SURFACE DATA UNAVAILABLE — HOLDING ORBIT')
-      this.orbAltTarget = 60000 / ORBITAL_M_PER_UNIT
+      this.orbAltTarget = Math.max(tier.altM * 1.6, 60000) / ORBITAL_M_PER_UNIT
       // snap back above the dive gate NOW — the damped climb takes several
-      // frames, during which altM < DIVE_ALT_M would re-trigger _dive() every
-      // frame and hammer the tile server with doomed requests
-      this.orbAlt = Math.max(this.orbAlt, (DIVE_ALT_M * 1.1) / ORBITAL_M_PER_UNIT)
+      // frames, during which a lingering sub-tier altitude would re-trigger
+      // _dive() every frame and hammer the tile server with doomed requests
+      this.orbAlt = Math.max(this.orbAlt, (tier.altM * 1.1) / ORBITAL_M_PER_UNIT)
+      this._diveArmed = false // a fresh inward zoom is needed to retry
       this.controls.enabled = true
       this.busy = false
       return
@@ -187,6 +214,29 @@ export class Modes {
       this.mode = 'surface'
     })
     this.announce('FX ONLINE — SURFACE MODE ENGAGED')
+    this.busy = false
+  }
+
+  // surface → surface: reload the patch two zoom steps finer, centered on
+  // what the camera is looking at — the staircase down from a z8 dive
+  async _refine() {
+    if (this.mode !== 'surface' || this.busy) return
+    const next = this.hooks.getRefineTarget()
+    if (!next) return // already at fine scale
+    this.busy = true
+    this.announce(`REFINING — ${next.lat.toFixed(4)}, ${next.lon.toFixed(4)} · Z${next.zoom}`)
+    try {
+      await this.hooks.loadSurface(next.lat, next.lon, next.zoom)
+    } catch {
+      this.announce('REFINE FAILED — HOLDING SCALE')
+      this.busy = false
+      return
+    }
+    await this._whiteout(() => {
+      this.camera.position.set(0, 18, 19)
+      this.controls.target.set(0, -0.3, 0)
+      this.controls.update()
+    })
     this.busy = false
   }
 
@@ -232,6 +282,9 @@ export class Modes {
       this.travel = null
       this.controls.enabled = true
       this.controls.update()
+      // a glide always lands on the FINE scale, explicitly (dive arming is
+      // for manual zooms only)
+      this._dive(DIVE_TIERS[0])
     }
   }
 
@@ -258,7 +311,18 @@ export class Modes {
       }
 
       this.altM = this.orbAlt * ORBITAL_M_PER_UNIT
-      if (!this.busy && !this.travel && this.altM < DIVE_ALT_M) this._dive()
+      if (!this.busy && !this.travel && this._diveArmed) {
+        // dive when an inward zoom SETTLES under a tier — never intercept a
+        // fast zoom mid-flight; the landing scale matches where you stopped
+        const settled = Math.abs(this.orbAlt - this.orbAltTarget) < this.orbAltTarget * 0.06
+        if (settled) {
+          const tier = DIVE_TIERS.find((t) => this.altM < t.altM)
+          if (tier) {
+            this._diveArmed = false
+            this._dive(tier)
+          }
+        }
+      }
     } else {
       this.altM = this.hooks.surfaceCamAltMeters()
     }

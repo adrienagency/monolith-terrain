@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test test/geo.test.js test/gpx.test.js"
+    "test": "node --test test/geo.test.js test/gpx.test.js test/palette.test.js"
   },
   "dependencies": {
     "lil-gui": "^0.20.0",

@@ -27,7 +27,11 @@ import { Globe } from './globe.js'
 import { Modes } from './modes.js'
 import { createGoto } from './goto.js'
 import { GpxLayer, parseGpx } from './gpx.js'
+import { worldToLatLon } from './geo.js'
 import { TERRAIN_SIZE } from './terrain.js'
+import { createOverlayPanel } from './overlay-panel.js'
+import { PeaksLayer } from './peaks.js'
+import { Clouds } from './clouds.js'
 
 // ------------------------------------------------------------------ params
 
@@ -156,6 +160,17 @@ const params = {
   gpxVisible: true,
   gpxAltitude: 2.2,
 
+  // ocean (real-world bathymetry read)
+  oceanShallow: '#dce8ec',
+  oceanDeep: '#31576b',
+
+  // clouds
+  cloudsEnabled: true,
+  cloudCount: 8,
+  cloudOpacity: 0.7,
+  cloudAltitude: 7.5,
+  cloudDrift: 1,
+
   // light
   sunIntensity: 8.3,
   sunAzimuth: 64,
@@ -257,6 +272,8 @@ scene.add(terrain.mesh)
 
 const cone = createCone()
 scene.add(cone.group)
+
+const clouds = new Clouds(scene, terrain, params)
 
 const labelOpts = () => ({ real: params.source === 'real', toFeet: (h) => terrain.heightToFeet(h) })
 let labels = createLabels(terrain.sample, params.seed, labelOpts())
@@ -644,6 +661,7 @@ function regenerateTerrain() {
       regenerateLabels()
       regenerateHud()
       gpxLayer.rebuild() // re-drape the track on the new relief
+      if (peaksLayer.enabled) peaksLayer.refresh()
       if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
       rebuildPending = false
       loadingEl.classList.add('hidden')
@@ -684,6 +702,7 @@ modes = new Modes({
       // GPX sprites draw with depthTest:false — hidden with the surface or
       // they'd float on top of the planet
       gpxLayer.setVisible(v && params.gpxVisible)
+      clouds.setVisible(v)
       scene.fog = v ? fogRef : null
     },
     setEffectsEnabled(v) {
@@ -701,12 +720,13 @@ modes = new Modes({
       }
       return terrain.heightToFeet(camera.position.y) / 3.28084
     },
-    async loadSurface(lat, lon) {
+    async loadSurface(lat, lon, zoom) {
       if (demBusy) throw new Error('terrain busy')
       demBusy = true
       try {
         params.demLat = lat
         params.demLon = lon
+        if (zoom) params.demZoom = zoom
         params.demLocation = 'Custom'
         await fetchAndBuildDem()
       } catch (err) {
@@ -717,10 +737,68 @@ modes = new Modes({
       }
     },
     surfaceMaxDistance: () => 60,
+    getFineZoom: () => Math.max(params.demZoom, 12),
+    // next finer scale under the current view — the staircase down from a
+    // coarse (z8/z10) dive; null once the patch is already fine
+    getRefineTarget() {
+      if (params.source !== 'real' || !dem || params.demZoom >= 12) return null
+      const { lat, lon } = worldToLatLon(dem, controls.target.x, controls.target.z)
+      return { lat, lon, zoom: Math.min(params.demZoom + 2, 12) }
+    },
   },
 })
 
 const gotoCtl = createGoto({ modes, announce: (m) => modes.announce(m) })
+
+// ------------------------------------------------------------------ map overlay panel + peaks
+
+const peaksLayer = new PeaksLayer({ terrain, getDem: () => dem, announce: (m) => modes.announce(m) })
+
+function applyPalette(p) {
+  params.gradLow = p.gradLow
+  params.gradMid1 = p.gradMid1
+  params.gradMid2 = p.gradMid2
+  params.gradHigh = p.gradHigh
+  params.gradMid1Pos = p.gradMid1Pos
+  params.gradMid2Pos = p.gradMid2Pos
+  params.oceanShallow = p.oceanShallow
+  params.oceanDeep = p.oceanDeep
+  terrain.rebuildRamp(params)
+  globe.rebuildRamp(params)
+  terrain.mapUniforms.uOceanShallow.value.set(p.oceanShallow)
+  terrain.mapUniforms.uOceanDeep.value.set(p.oceanDeep)
+  gui.controllersRecursive().forEach((c) => c.updateDisplay())
+}
+
+function applyStyle(s) {
+  Object.assign(params, s)
+  terrain.mapUniforms.uTint.value = s.mapTint
+  terrain.mapUniforms.uHeightContrast.value = s.heightContrast
+  terrain.mapUniforms.uHeightPivot.value = s.heightPivot
+  terrain.mapUniforms.uSlopeTint.value = s.slopeTint
+  gui.controllersRecursive().forEach((c) => c.updateDisplay())
+}
+
+function applyGridContour(g) {
+  Object.assign(params, g)
+  terrain.mapUniforms.uContourInterval.value = g.contourInterval
+  terrain.mapUniforms.uContourOpacity.value = g.contourOpacity
+  terrain.mapUniforms.uContourColor.value.set(g.contourColor)
+  terrain.mapUniforms.uGridStep.value = g.gridStep
+  terrain.mapUniforms.uGridOpacity.value = g.gridOpacity
+  globe.setInk(g.contourColor)
+  gui.controllersRecursive().forEach((c) => c.updateDisplay())
+}
+
+const overlayPanel = createOverlayPanel({
+  apply: {
+    palette: applyPalette,
+    style: applyStyle,
+    gridContour: applyGridContour,
+    peaks: (v) => peaksLayer.setEnabled(v),
+  },
+  announce: (m) => modes.announce(m),
+})
 
 // ------------------------------------------------------------------ GPX layer
 
@@ -831,7 +909,7 @@ fSource
 latCtrl.lat = fSource.add(params, 'demLat', -85, 85, 0.0001).name('latitude')
 latCtrl.lon = fSource.add(params, 'demLon', -180, 180, 0.0001).name('longitude')
 fSource
-  .add(params, 'demZoom', [10, 11, 12, 13, 14])
+  .add(params, 'demZoom', [8, 9, 10, 11, 12, 13, 14])
   .name('detail (zoom)')
   .onChange(() => {
     if (params.source === 'real') loadRealTerrain()
@@ -876,6 +954,14 @@ fGpx.add(params, 'gpxVisible').name('show track').onChange((v) => gpxLayer.setVi
 fGpx.add(params, 'gpxAltitude', 0.8, 8, 0.1).name('fly altitude')
 fGpx.add({ fly: () => flyTrack() }, 'fly').name('▶ fly the track')
 fGpx.add({ clr: () => gpxLayer.clear() }, 'clr').name('✕ clear track')
+
+const fClouds = gui.addFolder('Clouds')
+fClouds.add(params, 'cloudsEnabled').name('volumetric clouds').onChange(() => clouds.build(params))
+fClouds.add(params, 'cloudCount', 2, 20, 1).name('count').onFinishChange(() => clouds.build(params))
+fClouds.add(params, 'cloudOpacity', 0.1, 1, 0.05).name('opacity').onFinishChange(() => clouds.build(params))
+fClouds.add(params, 'cloudAltitude', 4, 14, 0.5).name('altitude').onFinishChange(() => clouds.build(params))
+fClouds.add(params, 'cloudDrift', 0, 4, 0.1).name('drift speed')
+fClouds.close()
 
 const fTerrain = gui.addFolder('Terrain')
 fTerrain.add(params, 'seed', 1, 9999, 1).onFinishChange(regenerateTerrain)
@@ -971,6 +1057,21 @@ fMap
   })
 fMap.add(params, 'gridStep', 2, 14, 0.5).name('grid size').onChange((v) => (terrain.mapUniforms.uGridStep.value = v))
 fMap.add(params, 'gridOpacity', 0, 1, 0.02).name('grid opacity').onChange((v) => (terrain.mapUniforms.uGridOpacity.value = v))
+fMap
+  .addColor(params, 'oceanShallow')
+  .name('ocean: shallow')
+  .onChange((v) => {
+    terrain.mapUniforms.uOceanShallow.value.set(v)
+    globe.rebuildRamp(params)
+  })
+fMap
+  .addColor(params, 'oceanDeep')
+  .name('ocean: deep')
+  .onChange((v) => {
+    terrain.mapUniforms.uOceanDeep.value.set(v)
+    globe.rebuildRamp(params)
+  })
+fMap.add({ open: () => overlayPanel.setVisible(true) }, 'open').name('open MAP OVERLAY panel ⧉')
 fMap.add(params, 'labels').name('place labels').onChange((v) => (labels.visible = v && modes.mode === 'surface'))
 
 const fLook = gui.addFolder('Look')
@@ -1115,7 +1216,7 @@ fLight.close()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, get labels() { return labels } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, peaksLayer, overlayPanel, applyPalette, applyStyle, applyGridContour, get labels() { return labels } }
 
 // real world is the default source — fetch its tiles on startup
 if (params.source === 'real') loadRealTerrain()
@@ -1177,6 +1278,15 @@ function tick() {
   modes.update(dt)
   if (modes.mode === 'orbital') globe.update(camera)
 
+  // fog carries the close-up read only: it dissipates as soon as the camera
+  // pulls one step back from max zoom, so mid-zoom never whites out
+  if (modes.mode === 'surface' && scene.fog) {
+    const dist = controls.getDistance()
+    const lift = THREE.MathUtils.smoothstep(dist, controls.minDistance * 1.15, controls.minDistance * 2.5)
+    fogRef.near = THREE.MathUtils.lerp(params.fogNear, 320, lift)
+    fogRef.far = THREE.MathUtils.lerp(params.fogFar, 520, lift)
+  }
+
   // refresh camera matrices NOW so DOM projections match this frame's render
   // (otherwise labels are projected with last frame's matrices and lag behind)
   camera.updateMatrixWorld()
@@ -1184,7 +1294,9 @@ function tick() {
   if (!params.paused && modes.mode === 'surface') {
     hud3.update(dt, t, params)
     cone.update(dt, t, mouse, params)
+    clouds.update(dt, params)
   }
+  peaksLayer.update(camera, window.innerWidth, window.innerHeight, modes.mode === 'surface')
 
   // terrain scan ripple progress
   if (scanStart >= 0) {

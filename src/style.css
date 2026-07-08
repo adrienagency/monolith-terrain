@@ -411,3 +411,156 @@ body {
   height: 96px;
   cursor: crosshair;
 }
+
+/* ---------------------------------------------------------------- map overlay panel */
+
+.map-overlay-panel {
+  position: fixed;
+  left: 24px;
+  top: 148px;
+  width: 246px;
+  z-index: 28;
+  pointer-events: auto;
+  max-height: calc(100vh - 260px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.map-overlay-panel .hud-kicker {
+  display: flex;
+  align-items: center;
+}
+
+.map-overlay-panel .mop-x {
+  all: unset;
+  cursor: pointer;
+  margin-left: auto;
+  font-size: 10px;
+  opacity: 0.55;
+  padding: 0 2px;
+}
+
+.map-overlay-panel .mop-x:hover {
+  opacity: 1;
+  color: var(--hud-accent);
+}
+
+.mop-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 8px 0 2px;
+}
+
+.mop-btns button,
+.mop-list-head button {
+  all: unset;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  padding: 6px 9px;
+  border: 1px solid var(--hud-ink);
+  background: transparent;
+  transition: background 0.15s, color 0.15s;
+}
+
+.mop-btns button:hover,
+.mop-list-head button:hover {
+  background: var(--hud-accent);
+  border-color: var(--hud-accent);
+  color: #fff;
+}
+
+.mop-list-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 6px;
+  font-size: 9px;
+  letter-spacing: 0.24em;
+}
+
+.mop-list-head .mop-list-title {
+  flex: 1;
+  opacity: 0.65;
+}
+
+.mop-list-head button {
+  padding: 2px 7px;
+}
+
+.mop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mop-pal {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.mop-pal:hover,
+.mop-pal.active {
+  border-color: var(--hud-accent);
+}
+
+.mop-pal .chip {
+  width: 22px;
+  height: 13px;
+  border: 1px solid rgba(20, 22, 24, 0.25);
+  margin-right: -1px;
+}
+
+.mop-pal i {
+  font-style: normal;
+  font-size: 8.5px;
+  letter-spacing: 0.14em;
+  opacity: 0.6;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
+.mop-peaks {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  cursor: pointer;
+  margin-top: 8px;
+  user-select: none;
+}
+
+.mop-peaks input {
+  accent-color: var(--hud-accent);
+}
+
+/* peak markers: hud-poi family, but altitude always visible below the name */
+.peak-marker {
+  position: fixed;
+  pointer-events: none;
+  z-index: 26;
+}
+
+.peak-marker .tag {
+  border-left: 3px solid var(--hud-accent);
+}
+
+.peak-marker .tag b {
+  display: block;
+}
+
+.peak-marker .tag i {
+  display: block;
+  margin-left: 0;
+  color: var(--hud-accent);
+  opacity: 0.9;
+}

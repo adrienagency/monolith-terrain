@@ -75,20 +75,22 @@ function distM(a, b) {
   return 2 * R * Math.asin(Math.sqrt(s))
 }
 
-function textSprite(text, accent) {
+function textSprite(text, color, scale = 1, opacity = 1) {
   const c = document.createElement('canvas')
-  c.width = 256
+  c.width = 512
   c.height = 80
   const ctx = c.getContext('2d')
   ctx.font = '600 44px "SF Mono", ui-monospace, monospace'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillStyle = accent
-  ctx.fillText(text, 128, 44)
+  ctx.fillStyle = color
+  ctx.fillText(text, 256, 44)
   const tex = new THREE.CanvasTexture(c)
   tex.colorSpace = THREE.SRGBColorSpace
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }))
-  sp.scale.set(3.4, 1.06, 1)
+  const sp = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, opacity })
+  )
+  sp.scale.set(6.8 * scale, 1.06 * scale, 1)
   sp.renderOrder = 20
   return sp
 }
@@ -194,19 +196,30 @@ export class GpxLayer {
     this.line.computeLineDistances()
     this.group.add(this.line)
 
-    const mk = (label, v) => {
-      const s = textSprite(label, this.params.hudAccent)
-      s.position.copy(v).add(new THREE.Vector3(0, 1.25, 0))
+    const eles = this._elevations()
+    const mk = (label, v, scale = 1, opacity = 1) => {
+      const s = textSprite(label, this.params.hudAccent, scale, opacity)
+      s.position.copy(v).add(new THREE.Vector3(0, scale > 0.8 ? 1.25 : 0.85, 0))
       this.group.add(s)
       return s
     }
-    this.startSprite = mk('▶ START', world[0])
-    this.endSprite = mk('■ END', world[world.length - 1])
+    this.startSprite = mk(`▶ START · ${Math.round(eles[0])} M`, world[0])
+    this.endSprite = mk(`■ END · ${Math.round(eles[eles.length - 1])} M`, world[world.length - 1])
+
+    // altitude waypoints along the way — one every ~2 km, six at most
+    this.waypoints = []
+    const wpKm = this.track.cumKm[this.track.cumKm.length - 1]
+    const nWp = Math.min(6, Math.max(2, Math.round(wpKm / 2)))
+    for (let k = 1; k <= nWp; k++) {
+      const target = (k / (nWp + 1)) * wpKm
+      let i = this.track.cumKm.findIndex((v) => v >= target)
+      if (i < 0) i = this.track.cumKm.length - 1
+      this.waypoints.push(mk(`◆ ${Math.round(eles[i])} M`, world[i], 0.62, 0.85))
+    }
 
     this.cursor.material.color.set(this.params.hudAccent)
     this.profileEl.querySelector('.gpx-name').textContent = this.track.name.toUpperCase().slice(0, 28)
     const totKm = this.track.cumKm[this.track.cumKm.length - 1]
-    const eles = this._elevations()
     const gain = eles.reduce((g, e, i) => (i && e > eles[i - 1] ? g + e - eles[i - 1] : g), 0)
     this.profileEl.querySelector('.gpx-stats').textContent =
       `${totKm.toFixed(1)} KM · ↗ ${Math.round(gain)} M · ${Math.round(Math.min(...eles))}–${Math.round(Math.max(...eles))} M`
@@ -403,7 +416,7 @@ export class GpxLayer {
       this.lineMat.dispose()
       this.line = null
     }
-    for (const s of [this.startSprite, this.endSprite]) {
+    for (const s of [this.startSprite, this.endSprite, ...(this.waypoints || [])]) {
       if (s) {
         this.group.remove(s)
         s.material.map.dispose()
@@ -411,6 +424,7 @@ export class GpxLayer {
       }
     }
     this.startSprite = this.endSprite = null
+    this.waypoints = []
   }
 
   clear() {
