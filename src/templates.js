@@ -12,15 +12,18 @@ export const TEMPLATES = {
     label: 'ICELAND',
     darkMode: false,
     palette: {
-      // land: steel-blue coast and mid-slopes climbing to white summits
-      // (cool, inverted-warm) — kept a touch deeper so the mid-relief reads
-      // steel-blue like the reference rather than washing out pale
-      gradLow: '#a9c2da',
-      gradMid1: '#c2d5e8',
-      gradMid2: '#e2edf6',
-      gradHigh: '#ffffff',
-      gradMid1Pos: 0.38,
-      gradMid2Pos: 0.66,
+      // 8 tints: steel-blue coast + mid-slopes climbing to white summits (cool,
+      // inverted-warm) — mid-relief stays steel-blue, not washed pale
+      rampStops: [
+        { c: '#9fbbd6', p: 0.0 },
+        { c: '#aac5dd', p: 0.16 },
+        { c: '#b8d0e5', p: 0.32 },
+        { c: '#c8dcec', p: 0.48 },
+        { c: '#dae8f2', p: 0.64 },
+        { c: '#e9f1f8', p: 0.8 },
+        { c: '#f6fafd', p: 0.92 },
+        { c: '#ffffff', p: 1.0 },
+      ],
       // water: pale shallows → mid steel → deep navy trenches
       oceanShallow: '#bcd3e6',
       oceanMid: '#5f8cbb',
@@ -33,8 +36,8 @@ export const TEMPLATES = {
       heightPivot: 0.46,
       slopeTint: 0, // no warm slope brown — this world is blue and white
     },
-    // flatten the relief toward a bathymetric plate (camera untouched)
-    terrain: { demExaggeration: 1.0 },
+    // a flattish plate, but with a touch more vertical drama than before
+    terrain: { demExaggeration: 1.3 },
     grid: {
       contourInterval: 0.12,
       contourOpacity: 0, // the reference has no contour lines
@@ -81,19 +84,22 @@ export const TEMPLATES = {
     label: 'FALLOUT WASTELANDS',
     darkMode: false,
     palette: {
-      // by elevation: bright golden-yellow plains → orange foothills → dark
-      // sienna flanks → white peaks (a non-monotonic warm ramp, the plate's
-      // signature). Plains pushed lighter/yellower toward the reference.
-      gradLow: '#e6c86e', // bright golden-yellow lowland
-      gradMid1: '#bd7a2f', // orange ochre foothills
-      gradMid2: '#653818', // dark sienna / burnt-umber flanks
-      gradHigh: '#f7f1e6', // white-hot summits
-      gradMid1Pos: 0.34,
-      gradMid2Pos: 0.7,
-      // a very light, barely-tinted sea
-      oceanShallow: '#e9e7df',
-      oceanMid: '#ddd9cd',
-      oceanDeep: '#c7c1b0',
+      // 8 tints, non-monotonic warm signature: bright golden-yellow plains →
+      // orange foothills → dark sienna/burnt-umber flanks → white-hot summits
+      rampStops: [
+        { c: '#e8cb72', p: 0.0 }, // bright golden-yellow lowland
+        { c: '#d9a84e', p: 0.16 },
+        { c: '#c2802f', p: 0.34 }, // orange ochre foothills
+        { c: '#9a5624', p: 0.52 },
+        { c: '#6e3d1a', p: 0.68 }, // dark sienna flanks
+        { c: '#8a5a30', p: 0.82 },
+        { c: '#c99a63', p: 0.92 },
+        { c: '#f7f1e6', p: 1.0 }, // white-hot summits
+      ],
+      // sea in blue tones — pale, but blue rather than beige
+      oceanShallow: '#cfe0e8',
+      oceanMid: '#8fb0c4',
+      oceanDeep: '#4d7791',
       ink: '#4a2f18',
     },
     style: {
@@ -138,8 +144,78 @@ export const TEMPLATES = {
       clouds: false,
       plinth: false,
     },
-    // relief stands proud of the golden plain, but pulled toward the flat-plate
-    // read so the mountains read as a printed relief map, not a tall diorama
-    terrain: { demExaggeration: 1.25 },
+    // pronounced relief — the mountains stand proud of the golden plain
+    terrain: { demExaggeration: 1.7 },
+  },
+
+  // DENALI — from the classic USGS shaded-relief plate of Denali National Park:
+  // a full hypsometric band system — green tundra lowlands rising through tan
+  // and ochre rock to reddish-brown high ridges, then grey scree and white
+  // snow/ice on the summits — over blue water. Strong relief, no flat plate.
+  denali: {
+    label: 'DENALI',
+    darkMode: false,
+    palette: {
+      // 8 tints low → high: forest/tundra green → khaki → tan → ochre-brown →
+      // reddish rock → grey scree → snow white
+      rampStops: [
+        { c: '#8fa871', p: 0.0 }, // green tundra lowland
+        { c: '#a9bd82', p: 0.14 },
+        { c: '#c8c891', p: 0.28 }, // khaki
+        { c: '#cdb079', p: 0.42 }, // tan
+        { c: '#bd8a56', p: 0.56 }, // ochre-brown
+        { c: '#a5673f', p: 0.7 }, // reddish rock
+        { c: '#b7a596', p: 0.84 }, // grey scree
+        { c: '#f4f2ee', p: 1.0 }, // snow / ice
+      ],
+      // blue water, deepening
+      oceanShallow: '#bcd6e4',
+      oceanMid: '#7ba7c2',
+      oceanDeep: '#3f6f92',
+      ink: '#3a3326',
+    },
+    style: {
+      mapTint: 0.82, // the band colors lead, hillshade still carves the ridges
+      heightContrast: 3.8,
+      heightPivot: 0.42,
+      slopeTint: 0.28, // a little warm shading on the steep rock faces
+    },
+    grid: {
+      contourInterval: 0.12,
+      contourOpacity: 0,
+      contourColor: '#3a3326',
+      contourWeight: 0.7,
+      gridStep: 6,
+      gridOpacity: 0,
+      gridColor: '#3a3326',
+    },
+    light: {
+      sunIntensity: 8.6,
+      sunAzimuth: 315,
+      sunElevation: 30,
+      hemiIntensity: 0.5,
+      envLight: 0.16,
+      shadowSoftness: 6,
+    },
+    surface: {
+      color: '#e7e2d6',
+      roughness: 1,
+      roughnessVariation: 0.22,
+      roughnessScale: 10,
+      bumpScale: 1.1,
+      envMapIntensity: 0.16,
+    },
+    look: {
+      fogColor: '#eceae4', // pale neutral paper behind the plate
+      exposure: 1.02,
+      contrast: 0.12,
+      saturation: 0,
+      vignette: 0.38,
+      grain: 0,
+      clouds: false,
+      plinth: true, // a mounted USGS relief plate — keep the 3D slab + shadow
+    },
+    // dramatic vertical relief, like the sculpted USGS plate
+    terrain: { demExaggeration: 2.6 },
   },
 }

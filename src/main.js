@@ -66,7 +66,7 @@ const params = {
   demLat: 36.998,
   demLon: -110.0984,
   demZoom: 12,
-  demExaggeration: 1.6,
+  demExaggeration: 2.2, // vertical relief pushed for a more dramatic read
 
   // terrain generation
   seed: 1,
@@ -99,12 +99,18 @@ const params = {
   mapTint: 1.0,
   heightContrast: 5.1,
   heightPivot: 0.53,
-  gradLow: '#ffffff',
-  gradMid1: '#ffffff',
-  gradMid2: '#ffffff',
-  gradHigh: '#ffa861',
-  gradMid1Pos: 0.35,
-  gradMid2Pos: 0.36,
+  // 8-stop hypsometric land ramp (low → high). The single source of truth for
+  // land color; templates and generated palettes fill all eight.
+  rampStops: [
+    { c: '#ffffff', p: 0.0 },
+    { c: '#ffffff', p: 0.16 },
+    { c: '#fbf6ee', p: 0.3 },
+    { c: '#f7ecd8', p: 0.44 },
+    { c: '#f3ddb6', p: 0.58 },
+    { c: '#efc588', p: 0.72 },
+    { c: '#f0ac66', p: 0.87 },
+    { c: '#ffa861', p: 1.0 },
+  ],
   slopeTint: 0.5,
   contourInterval: 0.11,
   contourOpacity: 0.5, // finer, more discreet engraving by default
@@ -240,7 +246,7 @@ controls.enableDamping = true
 controls.dampingFactor = 0.06
 controls.maxPolarAngle = Math.PI * 0.49
 controls.minDistance = 6
-controls.maxDistance = 60
+controls.maxDistance = 150 // room to frame the whole slab before the orbit gate
 controls.update()
 
 // image-based lighting for believable PBR speculars
@@ -800,7 +806,9 @@ modes = new Modes({
         demBusy = false
       }
     },
-    surfaceMaxDistance: () => 60,
+    // pull back far enough to frame the whole slab (and the ground info added
+    // around it) before the zoom-out staircase / orbit gate engages
+    surfaceMaxDistance: () => 150,
     getFineZoom: () => userFineZoom,
     // next finer scale under the current view — the staircase down from a
     // coarse (z8/z10) dive; null once the patch is already fine
@@ -834,12 +842,7 @@ const peaksLayer = new PeaksLayer({
 // the shipped survey look — what ⟲ RESET LOOK restores. Templates can now
 // change light/surface/post/toggles too, so the reset snapshots ALL of it.
 const DEFAULT_LOOK = Object.freeze({
-  gradLow: params.gradLow,
-  gradMid1: params.gradMid1,
-  gradMid2: params.gradMid2,
-  gradHigh: params.gradHigh,
-  gradMid1Pos: params.gradMid1Pos,
-  gradMid2Pos: params.gradMid2Pos,
+  rampStops: params.rampStops.map((s) => ({ ...s })),
   oceanShallow: params.oceanShallow,
   oceanMid: params.oceanMid,
   oceanDeep: params.oceanDeep,
@@ -886,15 +889,19 @@ const DEFAULT_FX = Object.freeze({
 const DEFAULT_EXAGGERATION = params.demExaggeration
 
 function applyPalette(p) {
-  params.gradLow = p.gradLow
-  params.gradMid1 = p.gradMid1
-  params.gradMid2 = p.gradMid2
-  params.gradHigh = p.gradHigh
-  params.gradMid1Pos = p.gradMid1Pos
-  params.gradMid2Pos = p.gradMid2Pos
-  params.oceanShallow = p.oceanShallow
+  // land ramp: mutate the existing stop objects in place so the GUI color
+  // pickers (bound to these references) keep following the value
+  if (p.rampStops) {
+    if (!Array.isArray(params.rampStops)) params.rampStops = []
+    p.rampStops.forEach((s, i) => {
+      if (params.rampStops[i]) Object.assign(params.rampStops[i], s)
+      else params.rampStops[i] = { ...s }
+    })
+    params.rampStops.length = p.rampStops.length
+  }
+  params.oceanShallow = p.oceanShallow ?? params.oceanShallow
   params.oceanMid = p.oceanMid ?? params.oceanMid
-  params.oceanDeep = p.oceanDeep
+  params.oceanDeep = p.oceanDeep ?? params.oceanDeep
   terrain.rebuildRamp(params)
   globe.rebuildRamp(params)
   terrain.mapUniforms.uOceanShallow.value.set(params.oceanShallow)
@@ -1367,12 +1374,15 @@ const rebuildRamp = () => {
   terrain.rebuildRamp(params)
   globe.rebuildRamp(params) // the planet shares the map's land gradient
 }
-fMap.addColor(params, 'gradLow').name('gradient: low').onChange(rebuildRamp)
-fMap.addColor(params, 'gradMid1').name('gradient: mid 1').onChange(rebuildRamp)
-fMap.addColor(params, 'gradMid2').name('gradient: mid 2').onChange(rebuildRamp)
-fMap.addColor(params, 'gradHigh').name('gradient: high').onChange(rebuildRamp)
-fMap.add(params, 'gradMid1Pos', 0, 1, 0.01).name('mid 1 position').onChange(rebuildRamp)
-fMap.add(params, 'gradMid2Pos', 0, 1, 0.01).name('mid 2 position').onChange(rebuildRamp)
+// eight hypsometric tint stops, low → high (the elevation ramp)
+const fRamp = fMap.addFolder('elevation ramp (8 tints)')
+params.rampStops.forEach((stop, i) => {
+  fRamp
+    .addColor(stop, 'c')
+    .name(`tint ${i + 1}${i === 0 ? ' (low)' : i === params.rampStops.length - 1 ? ' (high)' : ''}`)
+    .onChange(rebuildRamp)
+})
+fRamp.close()
 fMap
   .add(params, 'slopeTint', 0, 1, 0.02)
   .name('slope brown')

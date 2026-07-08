@@ -7,6 +7,7 @@
 
 import * as THREE from 'three'
 import { R_GLOBE, MERCATOR_MAX_LAT, EARTH_RADIUS_M, tileToLatLon, latLonToSphere } from './geo.js'
+import { rampColorStops } from './palette.js'
 
 const TILE_URL = (z, x, y) => `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`
 const ROOT_Z = 2
@@ -207,11 +208,8 @@ export class Globe {
     grad.addColorStop(0.0, params.oceanDeep ?? '#31576b')
     grad.addColorStop(0.19, params.oceanMid ?? '#7fa8b8')
     grad.addColorStop(0.345, params.oceanShallow ?? '#dce8ec')
-    grad.addColorStop(0.35, params.gradLow ?? '#ffffff') // coastline → land
-    const midPos = (p, lo, hi) => 0.35 + 0.65 * THREE.MathUtils.clamp(p, lo, hi)
-    grad.addColorStop(midPos(params.gradMid1Pos ?? 0.35, 0.01, 0.97), params.gradMid1 ?? '#ffffff')
-    grad.addColorStop(midPos(params.gradMid2Pos ?? 0.36, 0.02, 0.98), params.gradMid2 ?? '#ffffff')
-    grad.addColorStop(1.0, params.gradHigh ?? '#ffa861')
+    // land ramp (up to 8 stops) mapped into [0.35, 1] above the ocean band
+    for (const s of rampColorStops(params)) grad.addColorStop(0.35 + 0.65 * s.p, s.c)
     ctx.fillStyle = grad
     ctx.fillRect(0, 0, 512, 1)
     const tex = new THREE.CanvasTexture(c)

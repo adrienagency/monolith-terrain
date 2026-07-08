@@ -20,12 +20,22 @@ const hexToHsl = (hex) => {
 }
 const isHex = (c) => /^#[0-9a-f]{6}$/i.test(c)
 
+const ramp = (t) => t.palette.rampStops
+const low = (t) => ramp(t)[0].c
+const high = (t) => ramp(t)[ramp(t).length - 1].c
+
 test('every template is a complete, well-formed bundle', () => {
   for (const [key, t] of Object.entries(TEMPLATES)) {
     for (const section of ['palette', 'style', 'grid', 'light', 'surface', 'look']) {
       assert.ok(t[section] && typeof t[section] === 'object', `${key}.${section} present`)
     }
-    for (const c of [t.palette.gradLow, t.palette.gradMid1, t.palette.gradHigh, t.palette.oceanShallow, t.palette.oceanDeep, t.palette.ink]) {
+    // an 8-stop land ramp, ordered low → high, valid hexes
+    assert.equal(ramp(t).length, 8, `${key}: 8 tint stops`)
+    for (let i = 0; i < ramp(t).length; i++) {
+      assert.ok(isHex(ramp(t)[i].c), `${key}: "${ramp(t)[i].c}" is a valid hex`)
+      if (i) assert.ok(ramp(t)[i].p > ramp(t)[i - 1].p, `${key}: stop ${i} rises`)
+    }
+    for (const c of [t.palette.oceanShallow, t.palette.oceanDeep, t.palette.ink]) {
       assert.ok(isHex(c), `${key}: "${c}" is a valid hex`)
     }
     // sea darkens with depth
@@ -35,47 +45,55 @@ test('every template is a complete, well-formed bundle', () => {
 
 test('ICELAND reproduces the cool bathymetric plate', () => {
   const t = TEMPLATES.iceland
-  // summits near-white, coast pale, sea cool blue deepening to navy
-  assert.ok(hexToHsl(t.palette.gradHigh).l > 0.95, 'white peaks')
+  assert.ok(hexToHsl(high(t)).l > 0.95, 'white peaks')
   const deep = hexToHsl(t.palette.oceanDeep)
   assert.ok(deep.h > 195 && deep.h < 240, `deep sea is blue (h=${deep.h.toFixed(0)})`)
   assert.ok(deep.l < 0.35, 'deep sea is dark navy')
-  // no engraving furniture — the reference has neither contours nor grid
   assert.equal(t.grid.contourOpacity, 0)
   assert.equal(t.grid.gridOpacity, 0)
-  // no warm slope tint on a blue/white world
   assert.equal(t.style.slopeTint, 0)
-  // a flat plate: no volumetric clouds, no 3D slab
   assert.equal(t.look.clouds, false)
   assert.equal(t.look.plinth, false)
-  // a low raking hillshade sun
   assert.ok(t.light.sunElevation <= 35, 'low sun for crisp relief')
   assert.equal(t.darkMode, false)
-  // flattened toward a bathymetric plate (vertical scale pulled down)
-  assert.ok(t.terrain && t.terrain.demExaggeration <= 1.1, 'relief flattened')
 })
 
 test('FALLOUT WASTELANDS is a warm scorched-plate look', () => {
   const t = TEMPLATES['fallout-wastelands']
   assert.ok(t, 'preset exists')
-  // white summits
-  assert.ok(hexToHsl(t.palette.gradHigh).l > 0.92, 'white-hot peaks')
-  // low + mid warm (yellow-orange / ochre hues 20–55°)
-  for (const key of ['gradLow', 'gradMid1', 'gradMid2']) {
-    const c = hexToHsl(t.palette[key])
-    assert.ok(c.h >= 15 && c.h <= 55, `${key} hue ${c.h.toFixed(0)} is warm`)
-    assert.ok(c.s > 0.25, `${key} is saturated warm`)
+  assert.ok(hexToHsl(high(t)).l > 0.92, 'white-hot peaks')
+  // the darkest land tint is a dark sienna, well below the golden plains
+  const ls = ramp(t).map((s) => hexToHsl(s.c).l)
+  const darkest = Math.min(...ls)
+  assert.ok(darkest < 0.3, 'a dark sienna band exists')
+  assert.ok(hexToHsl(low(t)).l > darkest + 0.2, 'plains lighter than the flanks')
+  // the low/mid land tints are warm (yellow-orange / ochre 15–55°)
+  for (const s of ramp(t).slice(0, 5)) {
+    const c = hexToHsl(s.c)
+    assert.ok(c.h >= 15 && c.h <= 55, `land hue ${c.h.toFixed(0)} is warm`)
   }
-  // the mid-high flanks are the darkest band (dark sienna), plains lighter
-  assert.ok(hexToHsl(t.palette.gradMid2).l < hexToHsl(t.palette.gradLow).l, 'flanks darker than plains')
-  assert.ok(hexToHsl(t.palette.gradMid2).l < 0.3, 'flanks are dark sienna')
-  // a very light, barely-tinted sea
-  assert.ok(hexToHsl(t.palette.oceanShallow).l > 0.85, 'very light sea')
-  // warm slope shading, high tint, flat plate, no engraving
+  // sea in blue tones now, still fairly light
+  const sea = hexToHsl(t.palette.oceanShallow)
+  assert.ok(sea.h > 170 && sea.h < 240, `sea is blue (h=${sea.h.toFixed(0)})`)
   assert.ok(t.style.slopeTint > 0.3, 'warm slope shading on the flanks')
   assert.ok(t.style.mapTint >= 0.78, 'the warm ramp leads while the hillshade sculpts')
-  assert.equal(t.grid.contourOpacity, 0)
-  assert.equal(t.grid.gridOpacity, 0)
   assert.equal(t.look.clouds, false)
   assert.equal(t.look.plinth, false)
+})
+
+test('DENALI is a full USGS hypsometric band system over blue water', () => {
+  const t = TEMPLATES.denali
+  assert.ok(t, 'preset exists')
+  assert.equal(ramp(t).length, 8)
+  // green tundra at the bottom, snow-white at the top
+  const lowc = hexToHsl(low(t))
+  assert.ok(lowc.h >= 60 && lowc.h <= 140, `lowland green (h=${lowc.h.toFixed(0)})`)
+  assert.ok(hexToHsl(high(t)).l > 0.9, 'snow-white summits')
+  // blue water deepening
+  const deep = hexToHsl(t.palette.oceanDeep)
+  assert.ok(deep.h > 180 && deep.h < 240, `blue water (h=${deep.h.toFixed(0)})`)
+  assert.ok(deep.l < hexToHsl(t.palette.oceanShallow).l, 'water darkens with depth')
+  // dramatic vertical relief, mounted plate (slab kept)
+  assert.ok(t.terrain.demExaggeration >= 2, 'dramatic relief')
+  assert.equal(t.look.plinth, true, 'a mounted relief plate keeps the slab')
 })

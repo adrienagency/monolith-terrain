@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { generatePalette, generateStyle, generateGridContour, monochromeLook } from '../src/palette.js'
+import { generatePalette, generateStyle, generateGridContour, monochromeLook, expandToRampStops } from '../src/palette.js'
 import { mulberry32 } from '../src/noise.js'
 
 // hex → {h, s, l} (h in degrees, s/l in 0..1)
@@ -96,22 +96,38 @@ test('dark grid/contour ink is light enough to read on the dark sheet', () => {
 test('monochrome looks are near-greyscale with the relief carried by light', () => {
   const white = monochromeLook('white')
   assert.equal(white.darkMode, false)
-  // low map tint so lighting, not the ramp, paints the relief
   assert.ok(white.mapTint <= 0.3, 'white look leans on lighting')
-  for (const key of ['gradLow', 'gradMid1', 'gradMid2', 'gradHigh']) {
-    const c = hexToHsl(white[key])
-    assert.ok(c.s < 0.08, `${key} nearly desaturated`)
-    assert.ok(c.l > 0.9, `${key} near-white`)
+  for (const s of white.rampStops) {
+    const c = hexToHsl(s.c)
+    assert.ok(c.s < 0.08, `stop nearly desaturated`)
+    assert.ok(c.l > 0.9, `stop near-white`)
   }
   const dark = monochromeLook('dark')
   assert.equal(dark.darkMode, true)
   assert.ok(dark.mapTint <= 0.3, 'dark look leans on lighting')
-  for (const key of ['gradLow', 'gradMid1', 'gradMid2', 'gradHigh']) {
-    const c = hexToHsl(dark[key])
-    assert.ok(c.s < 0.12, `${key} nearly desaturated`)
-    assert.ok(c.l < 0.35, `${key} dark`)
+  for (const s of dark.rampStops) {
+    const c = hexToHsl(s.c)
+    assert.ok(c.s < 0.12, `stop nearly desaturated`)
+    assert.ok(c.l < 0.35, `stop dark`)
   }
   assert.ok(hexToHsl(dark.ink).l > 0.7, 'dark ink light enough to read')
+})
+
+test('expandToRampStops interpolates a legacy 4-stop into 8 ordered stops', () => {
+  const stops = expandToRampStops('#000000', '#404040', '#808080', '#ffffff', 0.33, 0.66, 8)
+  assert.equal(stops.length, 8)
+  assert.equal(stops[0].c, '#000000')
+  assert.equal(stops[7].c, '#ffffff')
+  for (let i = 1; i < stops.length; i++) {
+    assert.ok(stops[i].p > stops[i - 1].p, 'positions rise')
+    assert.ok(hexToHsl(stops[i].c).l >= hexToHsl(stops[i - 1].c).l - 1e-6, 'lightness climbs on a mono ramp')
+  }
+})
+
+test('generatePalette now yields an 8-stop rampStops', () => {
+  const p = generatePalette(mulberry32(3))
+  assert.ok(Array.isArray(p.rampStops) && p.rampStops.length === 8, 'eight land stops')
+  assert.ok(/^#[0-9a-f]{6}$/i.test(p.rampStops[0].c))
 })
 
 test('style + grid/contour stay inside their GUI ranges', () => {

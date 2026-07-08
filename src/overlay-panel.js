@@ -69,8 +69,14 @@ export function createOverlayPanel({ apply, announce, getMode }) {
       const p = generatePalette(Math.random, mode)
       const row = document.createElement('button')
       row.className = 'mop-pal'
+      // 4 representative land tints (low → high) keep the chip row compact
+      const stops = p.rampStops || []
+      const landChips = [0, 0.4, 0.7, 1]
+        .map((t) => stops[Math.round(t * (stops.length - 1))])
+        .filter(Boolean)
+        .map((s) => s.c)
       row.innerHTML =
-        [p.oceanDeep, p.oceanMid, p.oceanShallow, p.gradLow, p.gradMid1, p.gradMid2, p.gradHigh]
+        [p.oceanDeep, p.oceanMid, p.oceanShallow, ...landChips]
           .map((c) => `<span class="chip" style="background:${c}"></span>`)
           .join('') + `<i>${p.name}</i>`
       row.addEventListener('click', () => {

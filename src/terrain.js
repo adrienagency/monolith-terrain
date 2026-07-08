@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { Simplex2, mulberry32, fbm, ridged, smoothstep, lerp } from './noise.js'
 import { sampleDem } from './dem.js'
+import { rampColorStops } from './palette.js'
 
 export const TERRAIN_SIZE = 56
 export const BASIN_RADIUS = 6.6 // flat excavation floor
@@ -341,17 +342,15 @@ if (uScanT >= 0.0) {
     this.mesh.geometry = geo
   }
 
-  // Bake the 4-stop elevation gradient into a 1D ramp texture the shader samples.
+  // Bake the elevation gradient (up to 8 stops) into a 1D ramp texture.
   rebuildRamp(params) {
     const c = document.createElement('canvas')
     c.width = 256
     c.height = 1
     const ctx = c.getContext('2d')
     const grad = ctx.createLinearGradient(0, 0, 256, 0)
-    grad.addColorStop(0, params.gradLow)
-    grad.addColorStop(THREE.MathUtils.clamp(params.gradMid1Pos, 0.01, 0.98), params.gradMid1)
-    grad.addColorStop(THREE.MathUtils.clamp(params.gradMid2Pos, 0.02, 0.99), params.gradMid2)
-    grad.addColorStop(1, params.gradHigh)
+    const stops = rampColorStops(params)
+    for (const s of stops) grad.addColorStop(s.p, s.c)
     ctx.fillStyle = grad
     ctx.fillRect(0, 0, 256, 1)
     const tex = new THREE.CanvasTexture(c)

@@ -28,6 +28,25 @@ function mixHue(a, b, t) {
   return a + d * t
 }
 
+const clamp01 = (v) => Math.min(Math.max(v, 0), 1)
+
+// The land hypsometric ramp as an ordered list of {c, p} stops. Prefers the
+// rich 8-stop `rampStops` when present, else falls back to the legacy 4-stop
+// grad* params. Pure — shared by the terrain and globe ramp builders.
+export function rampColorStops(params) {
+  if (Array.isArray(params.rampStops) && params.rampStops.length >= 2) {
+    return params.rampStops
+      .map((s) => ({ c: s.c, p: clamp01(s.p) }))
+      .sort((a, b) => a.p - b.p)
+  }
+  return [
+    { c: params.gradLow, p: 0 },
+    { c: params.gradMid1, p: clamp01(params.gradMid1Pos ?? 0.35) },
+    { c: params.gradMid2, p: clamp01(params.gradMid2Pos ?? 0.36) },
+    { c: params.gradHigh, p: 1 },
+  ]
+}
+
 const NAMES_A = ['ATLAS', 'DUNE', 'SIENNA', 'BASALT', 'TUNDRA', 'MESA', 'FJORD', 'CALDERA', 'STEPPE', 'KARST']
 const NAMES_B = ['SURVEY', 'SHEET', 'PLATE', 'CHART', 'RELIEF', 'SECTION', 'QUAD', 'FOLIO']
 const NAMES_DARK = ['NOCTURNE', 'UMBRA', 'OBSIDIAN', 'PITCH', 'EMBER', 'CINDER', 'ONYX', 'MIDNIGHT']
@@ -127,12 +146,7 @@ export function monochromeLook(kind) {
     return {
       mode: 'dark',
       darkMode: true,
-      gradLow: '#1b1b1b',
-      gradMid1: '#292929',
-      gradMid2: '#363636',
-      gradHigh: '#454545',
-      gradMid1Pos: 0.35,
-      gradMid2Pos: 0.62,
+      rampStops: expandToRampStops('#1b1b1b', '#292929', '#363636', '#454545', 0.35, 0.62),
       oceanShallow: '#222222',
       oceanMid: '#151515',
       oceanDeep: '#0a0a0a',
@@ -152,12 +166,7 @@ export function monochromeLook(kind) {
   return {
     mode: 'light',
     darkMode: false,
-    gradLow: '#f2f2f2',
-    gradMid1: '#f6f6f6',
-    gradMid2: '#fafafa',
-    gradHigh: '#ffffff',
-    gradMid1Pos: 0.35,
-    gradMid2Pos: 0.62,
+    rampStops: expandToRampStops('#f2f2f2', '#f6f6f6', '#fafafa', '#ffffff', 0.35, 0.62),
     oceanShallow: '#ededed',
     oceanMid: '#dedede',
     oceanDeep: '#c8c8c8',
@@ -175,9 +184,42 @@ export function monochromeLook(kind) {
   }
 }
 
+// linear RGB blend of two #rrggbb hexes
+function lerpHex(a, b, t) {
+  const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16))
+  const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16))
+  const to = (v) => Math.round(v).toString(16).padStart(2, '0')
+  return `#${pa.map((v, i) => to(v + (pb[i] - v) * t)).join('')}`
+}
+
+// sample the legacy 4-stop gradient (low @0, m1 @m1p, m2 @m2p, high @1) at x
+function sampleFourStop(low, m1, m2, high, m1p, m2p, x) {
+  const stops = [
+    [0, low],
+    [clamp01(m1p), m1],
+    [clamp01(Math.max(m2p, m1p + 0.001)), m2],
+    [1, high],
+  ]
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [p0, c0] = stops[i]
+    const [p1, c1] = stops[i + 1]
+    if (x <= p1) return lerpHex(c0, c1, p1 === p0 ? 0 : (x - p0) / (p1 - p0))
+  }
+  return high
+}
+
+// expand a legacy 4-stop palette into the rich 8-stop rampStops
+export function expandToRampStops(low, m1, m2, high, m1p, m2p, n = 8) {
+  return Array.from({ length: n }, (_, i) => {
+    const x = i / (n - 1)
+    return { c: sampleFourStop(low, m1, m2, high, m1p, m2p, x), p: x }
+  })
+}
+
 export function generatePalette(rng = Math.random, mode = 'light') {
   const p = mode === 'dark' ? darkPalette(rng) : lightPalette(rng)
   p.gradMid2Pos = Math.min(p.gradMid1Pos + 0.16 + rng() * 0.26, 0.9)
+  p.rampStops = expandToRampStops(p.gradLow, p.gradMid1, p.gradMid2, p.gradHigh, p.gradMid1Pos, p.gradMid2Pos)
   return p
 }
 
