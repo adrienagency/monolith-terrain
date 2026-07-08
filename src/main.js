@@ -32,6 +32,7 @@ import { TERRAIN_SIZE } from './terrain.js'
 import { createOverlayPanel } from './overlay-panel.js'
 import { PeaksLayer } from './peaks.js'
 import { Clouds } from './clouds.js'
+import { makeDraggable } from './drag.js'
 
 // ------------------------------------------------------------------ params
 
@@ -162,7 +163,12 @@ const params = {
 
   // ocean (real-world bathymetry read)
   oceanShallow: '#dce8ec',
+  oceanMid: '#7fa8b8',
   oceanDeep: '#31576b',
+
+  // look mode
+  darkMode: false,
+  gridColor: '#242220',
 
   // clouds
   cloudsEnabled: true,
@@ -748,6 +754,11 @@ modes = new Modes({
       const { lat, lon } = worldToLatLon(dem, controls.target.x, controls.target.z)
       return { lat, lon, zoom: Math.min(params.demZoom + 2, 12) }
     },
+    getCoarsenTarget() {
+      if (params.source !== 'real' || !dem || params.demZoom <= 8) return null
+      const { lat, lon } = worldToLatLon(dem, controls.target.x, controls.target.z)
+      return { lat, lon, zoom: Math.max(params.demZoom - 2, 8) }
+    },
   },
 })
 
@@ -757,6 +768,29 @@ const gotoCtl = createGoto({ modes, announce: (m) => modes.announce(m) })
 
 const peaksLayer = new PeaksLayer({ terrain, getDem: () => dem, announce: (m) => modes.announce(m) })
 
+// the shipped survey look — what ⟲ RESET LOOK restores
+const DEFAULT_LOOK = Object.freeze({
+  gradLow: params.gradLow,
+  gradMid1: params.gradMid1,
+  gradMid2: params.gradMid2,
+  gradHigh: params.gradHigh,
+  gradMid1Pos: params.gradMid1Pos,
+  gradMid2Pos: params.gradMid2Pos,
+  oceanShallow: params.oceanShallow,
+  oceanMid: params.oceanMid,
+  oceanDeep: params.oceanDeep,
+  mapTint: params.mapTint,
+  heightContrast: params.heightContrast,
+  heightPivot: params.heightPivot,
+  slopeTint: params.slopeTint,
+  contourInterval: params.contourInterval,
+  contourOpacity: params.contourOpacity,
+  contourColor: params.contourColor,
+  gridStep: params.gridStep,
+  gridOpacity: params.gridOpacity,
+  gridColor: params.gridColor,
+})
+
 function applyPalette(p) {
   params.gradLow = p.gradLow
   params.gradMid1 = p.gradMid1
@@ -765,11 +799,18 @@ function applyPalette(p) {
   params.gradMid1Pos = p.gradMid1Pos
   params.gradMid2Pos = p.gradMid2Pos
   params.oceanShallow = p.oceanShallow
+  params.oceanMid = p.oceanMid ?? params.oceanMid
   params.oceanDeep = p.oceanDeep
   terrain.rebuildRamp(params)
   globe.rebuildRamp(params)
-  terrain.mapUniforms.uOceanShallow.value.set(p.oceanShallow)
-  terrain.mapUniforms.uOceanDeep.value.set(p.oceanDeep)
+  terrain.mapUniforms.uOceanShallow.value.set(params.oceanShallow)
+  terrain.mapUniforms.uOceanMid.value.set(params.oceanMid)
+  terrain.mapUniforms.uOceanDeep.value.set(params.oceanDeep)
+  if (p.ink) {
+    params.contourColor = p.ink
+    terrain.mapUniforms.uContourColor.value.set(p.ink)
+    globe.setInk(p.ink)
+  }
   gui.controllersRecursive().forEach((c) => c.updateDisplay())
 }
 
@@ -789,8 +830,51 @@ function applyGridContour(g) {
   terrain.mapUniforms.uContourColor.value.set(g.contourColor)
   terrain.mapUniforms.uGridStep.value = g.gridStep
   terrain.mapUniforms.uGridOpacity.value = g.gridOpacity
+  if (g.gridColor) terrain.mapUniforms.uGridColor.value.set(g.gridColor)
   globe.setInk(g.contourColor)
   gui.controllersRecursive().forEach((c) => c.updateDisplay())
+}
+
+// night survey: dark sheet, light ink, palettes flip to blacks/browns with
+// vivid summit accents — the whole look follows one switch
+function setDarkMode(v) {
+  params.darkMode = v
+  const sheet = v ? '#0e0f11' : '#ffffff'
+  params.fogColor = sheet
+  fogRef.color.set(sheet)
+  scene.background.set(sheet)
+  document.documentElement.style.setProperty('--hud-ink', v ? '#e8e4da' : params.hudInk)
+  document.documentElement.style.setProperty(
+    '--hud-paper',
+    v ? 'rgb(18 19 22 / var(--hud-bg-alpha))' : 'rgb(248 247 244 / var(--hud-bg-alpha))'
+  )
+  applyGridContour({
+    contourInterval: params.contourInterval,
+    contourOpacity: params.contourOpacity,
+    contourColor: v ? '#ece6d6' : DEFAULT_LOOK.contourColor,
+    gridStep: params.gridStep,
+    gridOpacity: params.gridOpacity,
+    gridColor: v ? '#d8d2c2' : DEFAULT_LOOK.gridColor,
+  })
+}
+
+function resetLook() {
+  setDarkMode(false)
+  applyPalette({ ...DEFAULT_LOOK, ink: DEFAULT_LOOK.contourColor })
+  applyStyle({
+    mapTint: DEFAULT_LOOK.mapTint,
+    heightContrast: DEFAULT_LOOK.heightContrast,
+    heightPivot: DEFAULT_LOOK.heightPivot,
+    slopeTint: DEFAULT_LOOK.slopeTint,
+  })
+  applyGridContour({
+    contourInterval: DEFAULT_LOOK.contourInterval,
+    contourOpacity: DEFAULT_LOOK.contourOpacity,
+    contourColor: DEFAULT_LOOK.contourColor,
+    gridStep: DEFAULT_LOOK.gridStep,
+    gridOpacity: DEFAULT_LOOK.gridOpacity,
+    gridColor: DEFAULT_LOOK.gridColor,
+  })
 }
 
 const overlayPanel = createOverlayPanel({
@@ -799,8 +883,11 @@ const overlayPanel = createOverlayPanel({
     style: applyStyle,
     gridContour: applyGridContour,
     peaks: (v) => peaksLayer.setEnabled(v),
+    reset: resetLook,
+    darkMode: setDarkMode,
   },
   announce: (m) => modes.announce(m),
+  getMode: () => (params.darkMode ? 'dark' : 'light'),
 })
 
 // ------------------------------------------------------------------ GPX layer
@@ -827,6 +914,13 @@ async function loadGpxText(text) {
     modes.announce(`GPX ERROR — ${String(err.message).toUpperCase()}`)
   }
 }
+
+// every FUI panel can be repositioned by grabbing it (its head bar when it
+// has one) — sector, telemetry, altimeter, GPX profile, map overlay
+makeDraggable(modes.altEl)
+makeDraggable(gpxLayer.profileEl, gpxLayer.profileEl.querySelector('.gpx-profile-head'))
+makeDraggable(hud2.root.querySelector('.hud-block.hud-tl'))
+makeDraggable(hud2.root.querySelector('.hud-block.hud-brt'))
 
 // drag & drop a .gpx anywhere on the page
 window.addEventListener('dragover', (e) => e.preventDefault())

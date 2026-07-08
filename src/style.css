@@ -528,7 +528,7 @@ body {
   white-space: nowrap;
 }
 
-.mop-peaks {
+.mop-check {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -539,7 +539,7 @@ body {
   user-select: none;
 }
 
-.mop-peaks input {
+.mop-check input {
   accent-color: var(--hud-accent);
 }
 
@@ -563,4 +563,30 @@ body {
   margin-left: 0;
   color: var(--hud-accent);
   opacity: 0.9;
+}
+
+/* ---------------------------------------------------------------- v3: drag + dark */
+
+.draggable-handle {
+  cursor: grab;
+  touch-action: none;
+}
+
+.draggable-handle:active {
+  cursor: grabbing;
+}
+
+.altimeter {
+  pointer-events: auto;
+}
+
+.hud-block.hud-tl,
+.hud-block.hud-brt {
+  pointer-events: auto;
+}
+
+.mop-list {
+  max-height: 34vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }

@@ -204,10 +204,9 @@ export class Globe {
     const ctx = c.getContext('2d')
     const grad = ctx.createLinearGradient(0, 0, 512, 0)
     // ocean shares the palette's sea colors so globe and surface chart agree
-    const deep = params.oceanDeep ?? '#31576b'
-    const shallow = params.oceanShallow ?? '#dce8ec'
-    grad.addColorStop(0.0, deep)
-    grad.addColorStop(0.345, shallow)
+    grad.addColorStop(0.0, params.oceanDeep ?? '#31576b')
+    grad.addColorStop(0.19, params.oceanMid ?? '#7fa8b8')
+    grad.addColorStop(0.345, params.oceanShallow ?? '#dce8ec')
     grad.addColorStop(0.35, params.gradLow ?? '#ffffff') // coastline → land
     const midPos = (p, lo, hi) => 0.35 + 0.65 * THREE.MathUtils.clamp(p, lo, hi)
     grad.addColorStop(midPos(params.gradMid1Pos ?? 0.35, 0.01, 0.97), params.gradMid1 ?? '#ffffff')

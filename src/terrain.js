@@ -38,7 +38,9 @@ export class Terrain {
       uSeaY: { value: -9999 },
       uSeaRange: { value: 1 },
       uOceanShallow: { value: new THREE.Color(params.oceanShallow ?? '#dce8ec') },
+      uOceanMid: { value: new THREE.Color(params.oceanMid ?? '#7fa8b8') },
       uOceanDeep: { value: new THREE.Color(params.oceanDeep ?? '#31576b') },
+      uGridColor: { value: new THREE.Color(params.gridColor ?? '#242220') },
       uScanT: { value: -1 }, // scan progress 0..1, negative = inactive
       uScanColor: { value: new THREE.Color(params.scanColor) },
       uScanWidth: { value: params.scanWidth },
@@ -88,7 +90,9 @@ uniform float uSlopeTint;
 uniform float uSeaY;
 uniform float uSeaRange;
 uniform vec3 uOceanShallow;
+uniform vec3 uOceanMid;
 uniform vec3 uOceanDeep;
+uniform vec3 uGridColor;
 uniform vec3 uContourColor;
 uniform float uScanT;
 uniform vec3 uScanColor;
@@ -114,8 +118,11 @@ uniform float uScanBlur;`
   // --- bathymetry: below real sea level the map reads as a nautical chart —
   // pale shallows deepening into dark water (Mariana-trench friendly)
   if (vWorldPos.y < uSeaY) {
-    float d01 = clamp((uSeaY - vWorldPos.y) / max(uSeaRange, 1e-4), 0.0, 1.0);
-    vec3 sea = mix(uOceanShallow, uOceanDeep, pow(d01, 0.55));
+    float d01 = pow(clamp((uSeaY - vWorldPos.y) / max(uSeaRange, 1e-4), 0.0, 1.0), 0.55);
+    // three-stop nautical ramp: shallows → mid blue → abyss
+    vec3 sea = d01 < 0.45
+      ? mix(uOceanShallow, uOceanMid, d01 / 0.45)
+      : mix(uOceanMid, uOceanDeep, (d01 - 0.45) / 0.55);
     diffuseColor.rgb = mix(diffuseColor.rgb, sea * clamp(luma * 2.4, 0.25, 1.4), uTint);
   }
 
@@ -140,7 +147,7 @@ uniform float uScanBlur;`
   float gx = 1.0 - smoothstep(0.0, dg.x * 1.4, distGrid.x);
   float gz = 1.0 - smoothstep(0.0, dg.y * 1.4, distGrid.y);
   float grid = max(gx, gz) * uGridOpacity;
-  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.14, 0.13, 0.12), grid);
+  diffuseColor.rgb = mix(diffuseColor.rgb, uGridColor, grid);
 
   // --- radar scan wavefront paints the surface (additive-only washes out on white terrain)
   if (uScanT >= 0.0) {

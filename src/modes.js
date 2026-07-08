@@ -11,11 +11,15 @@
 import * as THREE from 'three'
 import { R_GLOBE, ORBITAL_M_PER_UNIT, sphereToLatLon, latLonToSphere } from './geo.js'
 
-// ordered fine → coarse; zoom null = the user's fine zoom (≥ 12)
+// ordered fine → coarse; zoom null = the user's fine zoom (≥ 12).
+// Five tiers so every stop on the way down lands on a matching scale —
+// Corsica-sized views (~150 km) get z9/z8 instead of falling in a gap.
 export const DIVE_TIERS = [
   { altM: 8000, zoom: null },
-  { altM: 45000, zoom: 10 },
-  { altM: 180000, zoom: 8 },
+  { altM: 25000, zoom: 11 },
+  { altM: 50000, zoom: 10 },
+  { altM: 100000, zoom: 9 },
+  { altM: 200000, zoom: 8 },
 ]
 
 // tier a settled zoom-in engages at `altM` meters — null above every tier
@@ -37,6 +41,8 @@ export class Modes {
    *   getFineZoom() → number (user's detail zoom, ≥ 12),
    *   getRefineTarget() → {lat, lon, zoom} | null (next finer scale under the
    *     current view, null when already at fine scale),
+   *   getCoarsenTarget() → {lat, lon, zoom} | null (next wider scale, null
+   *     once the patch is z8 — then zooming out opens the orbit gate),
    * }
    */
   constructor({ camera, controls, globe, domElement, hooks }) {
@@ -60,14 +66,16 @@ export class Modes {
       'wheel',
       (e) => {
         if (this.mode === 'surface') {
-          // zooming out hard against the stop opens the orbit gate;
+          // zooming out against the stop first COARSENS the patch (z12→z10→z8,
+          // real maps at every step) and only past z8 opens the orbit gate;
           // zooming in against the near stop on a coarse patch refines it
           if (
             e.deltaY > 0 &&
             !this.busy &&
             this.controls.getDistance() >= this.hooks.surfaceMaxDistance() * 0.965
           ) {
-            this.enterOrbit()
+            if (this.hooks.getCoarsenTarget()) this._coarsen()
+            else this.enterOrbit()
           } else if (
             e.deltaY < 0 &&
             !this.busy &&
@@ -228,12 +236,25 @@ export class Modes {
     if (this.mode !== 'surface' || this.busy) return
     const next = this.hooks.getRefineTarget()
     if (!next) return // already at fine scale
+    await this._rescale(next, 'REFINING')
+  }
+
+  // surface → surface the other way: widen the map two zoom steps before
+  // handing over to orbit — every stop of the zoom-out shows a real map
+  async _coarsen() {
+    if (this.mode !== 'surface' || this.busy) return
+    const next = this.hooks.getCoarsenTarget()
+    if (!next) return
+    await this._rescale(next, 'WIDENING')
+  }
+
+  async _rescale(next, verb) {
     this.busy = true
-    this.announce(`REFINING — ${next.lat.toFixed(4)}, ${next.lon.toFixed(4)} · Z${next.zoom}`)
+    this.announce(`${verb} — ${next.lat.toFixed(4)}, ${next.lon.toFixed(4)} · Z${next.zoom}`)
     try {
       await this.hooks.loadSurface(next.lat, next.lon, next.zoom)
     } catch {
-      this.announce('REFINE FAILED — HOLDING SCALE')
+      this.announce(`${verb} FAILED — HOLDING SCALE`)
       this.busy = false
       return
     }

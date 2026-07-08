@@ -50,6 +50,49 @@ test('palettes obey the color-theory rules over many samples', () => {
   }
 })
 
+test('the 0 m zone is near-white most of the time, seas darken monotonically', () => {
+  let nearWhite = 0
+  for (let seed = 1; seed <= 300; seed++) {
+    const p = generatePalette(mulberry32(seed))
+    const low = hexToHsl(p.gradLow)
+    if (low.l > 0.9 && low.s < 0.15) nearWhite++
+    // three sea stops, strictly darker with depth
+    const sh = hexToHsl(p.oceanShallow)
+    const mid = hexToHsl(p.oceanMid)
+    const dp = hexToHsl(p.oceanDeep)
+    assert.ok(sh.l > mid.l && mid.l > dp.l, `seed ${seed}: sea not monotonic (${sh.l}/${mid.l}/${dp.l})`)
+  }
+  assert.ok(nearWhite >= 300 * 0.6, `near-white zero zone in ${nearWhite}/300 palettes — expected most`)
+})
+
+test('dark palettes: black/brown terrain, vivid fluo summits, abyssal seas, light ink', () => {
+  for (let seed = 1; seed <= 300; seed++) {
+    const p = generatePalette(mulberry32(seed), 'dark')
+    assert.equal(p.mode, 'dark')
+    const low = hexToHsl(p.gradLow)
+    assert.ok(low.l < 0.16, `seed ${seed}: dark low too bright (${low.l})`)
+    const high = hexToHsl(p.gradHigh)
+    assert.ok(high.s > 0.8, `seed ${seed}: summit not vivid (s=${high.s})`)
+    assert.ok(high.l > 0.45 && high.l < 0.72, `seed ${seed}: summit lightness off`)
+    assert.ok((high.h >= 50 && high.h <= 70) || (high.h >= 14 && high.h <= 36), `seed ${seed}: hue ${high.h} not fluo-yellow/hot-orange`)
+    const dp = hexToHsl(p.oceanDeep)
+    assert.ok(dp.l < 0.1, `seed ${seed}: abyss not near-black (${dp.l})`)
+    const ink = hexToHsl(p.ink)
+    assert.ok(ink.l > 0.7, `seed ${seed}: dark-mode ink not light`)
+    const sh = hexToHsl(p.oceanShallow)
+    const mid = hexToHsl(p.oceanMid)
+    assert.ok(sh.l > mid.l && mid.l > dp.l, `seed ${seed}: dark sea not monotonic`)
+  }
+})
+
+test('dark grid/contour ink is light enough to read on the dark sheet', () => {
+  for (let seed = 1; seed <= 100; seed++) {
+    const g = generateGridContour(mulberry32(seed), 'dark')
+    assert.ok(hexToHsl(g.contourColor).l > 0.6, `seed ${seed}: dark contour too dark`)
+    assert.ok(hexToHsl(g.gridColor).l > 0.6, `seed ${seed}: dark grid too dark`)
+  }
+})
+
 test('style + grid/contour stay inside their GUI ranges', () => {
   for (let seed = 1; seed <= 100; seed++) {
     const s = generateStyle(mulberry32(seed))

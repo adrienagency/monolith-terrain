@@ -14,7 +14,9 @@ Zoom all the way out and the map hands over to **MONOLITH EARTH** — the whole 
 | See the planet | Keep zooming out — effects power down and the orbital view takes over (or **Terrain source → 🌍 view planet**) |
 | Return to the surface | Zoom in anywhere and stop — the terrain loads at the scale you stopped at: **~180 km → z8 regional patch (Madagascar-sized), ~45 km → z10, under ~8 000 m → full detail** |
 | Go deeper | On a regional patch, zoom against the near stop — the map **refines** two zoom steps at a time (z8 → z10 → z12) |
-| Restyle the map | **MAP OVERLAY** panel (left): random palette / relief style / grid-contour, or pick from the generated palette list |
+| Restyle the map | **MAP OVERLAY** panel (left): random palette / relief style / grid-contour, a large generated palette list (near-white lowlands, three-stop seas), **⟲ RESET LOOK** |
+| Night survey | **MAP OVERLAY → ◐ DARK MODE** — black/brown terrain palettes with fluo-yellow or hot-orange summits, light ink, dark seas |
+| Rearrange the HUD | Grab any panel (SECTOR, TELEMETRY, altimeter, GPX profile, MAP OVERLAY) and drag it wherever you like |
 | Name the summits | **MAP OVERLAY → ▲ TOP-5 PEAKS** — the five highest named peaks of the patch, altitude underneath (OSM data) |
 | Clouds | **Clouds** folder — sparse drifting puffs with soft ground shadows, on/off |
 | Go somewhere exact | **Terrain source → go to "lat, lon"** (paste straight from Google Maps) or **search place** — the camera flies there over the globe and dives |

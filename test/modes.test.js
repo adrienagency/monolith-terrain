@@ -13,10 +13,11 @@ test('tiers are ordered fine → coarse with strictly rising altitudes', () => {
 test('pickDiveTier lands each altitude on the matching scale', () => {
   assert.equal(pickDiveTier(6000), DIVE_TIERS[0]) // Everest-class → fine
   assert.equal(pickDiveTier(7999), DIVE_TIERS[0])
-  assert.equal(pickDiveTier(8000), DIVE_TIERS[1]) // boundary goes coarse
-  assert.equal(pickDiveTier(20000), DIVE_TIERS[1]) // z10 regional
-  assert.equal(pickDiveTier(100000), DIVE_TIERS[2]) // Madagascar-sized → z8
-  assert.equal(pickDiveTier(179999), DIVE_TIERS[2])
-  assert.equal(pickDiveTier(180000), null) // still orbital territory
+  assert.equal(pickDiveTier(8000).zoom, 11) // boundary goes one step coarse
+  assert.equal(pickDiveTier(30000).zoom, 10)
+  assert.equal(pickDiveTier(70000).zoom, 9)
+  assert.equal(pickDiveTier(150000).zoom, 8) // Corsica / Madagascar-sized
+  assert.equal(pickDiveTier(199999).zoom, 8)
+  assert.equal(pickDiveTier(200000), null) // still orbital territory
   assert.equal(pickDiveTier(16000000), null)
 })

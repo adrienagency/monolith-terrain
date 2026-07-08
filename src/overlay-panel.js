@@ -1,22 +1,28 @@
 // MAP OVERLAY — a standalone FUI panel (same family as the SECTOR and
 // TELEMETRY blocks) living outside the lil-gui sidebar. It drives the map's
-// look: one-click random palette / style / grid-contour, an expandable list
-// of color-theory palettes, and the top-5 named peaks toggle.
+// look: random palette / style / grid-contour, a large expandable list of
+// color-theory palettes that follows the light/dark mode, a full look reset,
+// the dark-mode switch and the top-5 named peaks toggle. Draggable by its
+// title bar.
 
 import { generatePalette, generateStyle, generateGridContour } from './palette.js'
+import { makeDraggable } from './drag.js'
 
-const LIST_SIZE = 9
+const LIST_SIZE = 14
 
-export function createOverlayPanel({ apply, announce }) {
+export function createOverlayPanel({ apply, announce, getMode }) {
   const root = document.createElement('div')
   root.className = 'hud-block map-overlay-panel'
   root.innerHTML = `
-    <div class="hud-kicker"><span class="sq"></span>MAP OVERLAY<button class="mop-x" title="close">✕</button></div>
+    <div class="hud-kicker mop-drag"><span class="sq"></span>MAP OVERLAY<button class="mop-x" title="close">✕</button></div>
     <div class="mop-btns">
       <button data-a="palette">◧ RANDOM PALETTE</button>
       <button data-a="style">◨ RANDOM STYLE</button>
       <button data-a="grid">▦ RANDOM GRID / CONTOUR</button>
+      <button data-a="reset">⟲ RESET LOOK</button>
     </div>
+    <div class="hud-rule"></div>
+    <label class="mop-check"><input type="checkbox" data-a="dark"><span>◐ DARK MODE</span></label>
     <div class="hud-rule"></div>
     <div class="mop-list-head">
       <span class="mop-list-title">PALETTES</span>
@@ -25,7 +31,7 @@ export function createOverlayPanel({ apply, announce }) {
     </div>
     <div class="mop-list"></div>
     <div class="hud-rule"></div>
-    <label class="mop-peaks"><input type="checkbox" data-a="peaks"><span>▲ TOP-5 PEAKS · NAME + ALT</span></label>`
+    <label class="mop-check"><input type="checkbox" data-a="peaks"><span>▲ TOP-5 PEAKS · NAME + ALT</span></label>`
   document.body.appendChild(root)
 
   const listEl = root.querySelector('.mop-list')
@@ -34,12 +40,13 @@ export function createOverlayPanel({ apply, announce }) {
 
   function renderList() {
     listEl.innerHTML = ''
+    const mode = getMode()
     for (let i = 0; i < LIST_SIZE; i++) {
-      const p = generatePalette()
+      const p = generatePalette(Math.random, mode)
       const row = document.createElement('button')
       row.className = 'mop-pal'
       row.innerHTML =
-        [p.oceanDeep, p.oceanShallow, p.gradLow, p.gradMid1, p.gradMid2, p.gradHigh]
+        [p.oceanDeep, p.oceanMid, p.oceanShallow, p.gradLow, p.gradMid1, p.gradMid2, p.gradHigh]
           .map((c) => `<span class="chip" style="background:${c}"></span>`)
           .join('') + `<i>${p.name}</i>`
       row.addEventListener('click', () => {
@@ -53,7 +60,7 @@ export function createOverlayPanel({ apply, announce }) {
   renderList()
 
   root.querySelector('[data-a="palette"]').addEventListener('click', () => {
-    const p = generatePalette()
+    const p = generatePalette(Math.random, getMode())
     apply.palette(p)
     announce(`PALETTE — ${p.name}`)
   })
@@ -62,8 +69,14 @@ export function createOverlayPanel({ apply, announce }) {
     announce('RELIEF STYLE RANDOMIZED')
   })
   root.querySelector('[data-a="grid"]').addEventListener('click', () => {
-    apply.gridContour(generateGridContour())
+    apply.gridContour(generateGridContour(Math.random, getMode()))
     announce('GRID / CONTOUR RANDOMIZED')
+  })
+  root.querySelector('[data-a="reset"]').addEventListener('click', () => {
+    apply.reset()
+    darkBox.checked = false
+    renderList()
+    announce('LOOK RESET — SURVEY DEFAULTS')
   })
   root.querySelector('[data-a="regen"]').addEventListener('click', renderList)
   foldBtn.addEventListener('click', () => {
@@ -73,8 +86,19 @@ export function createOverlayPanel({ apply, announce }) {
   })
   root.querySelector('.mop-x').addEventListener('click', () => setVisible(false))
 
+  const darkBox = root.querySelector('[data-a="dark"]')
+  darkBox.addEventListener('change', () => {
+    apply.darkMode(darkBox.checked)
+    // land on a coherent look immediately: fresh palette of the new mode
+    apply.palette(generatePalette(Math.random, getMode()))
+    renderList() // the list follows the mode too
+    announce(darkBox.checked ? 'DARK MODE — NIGHT SURVEY' : 'LIGHT MODE — PAPER SHEET')
+  })
+
   const peaksBox = root.querySelector('[data-a="peaks"]')
   peaksBox.addEventListener('change', () => apply.peaks(peaksBox.checked))
+
+  makeDraggable(root, root.querySelector('.mop-drag'))
 
   function setVisible(v) {
     root.style.display = v ? '' : 'none'
@@ -83,6 +107,7 @@ export function createOverlayPanel({ apply, announce }) {
   return {
     root,
     setVisible,
+    renderList,
     get visible() {
       return root.style.display !== 'none'
     },
