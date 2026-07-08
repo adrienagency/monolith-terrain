@@ -25,6 +25,8 @@ export class Terrain {
       uTint: { value: params.mapTint },
       uContourInterval: { value: params.contourInterval },
       uContourOpacity: { value: params.contourOpacity },
+      uContourWeight: { value: 1 }, // line thickness scale — thinned in dark mode
+
       uGridStep: { value: params.gridStep },
       uGridOpacity: { value: params.gridOpacity },
       uHeightRange: { value: new THREE.Vector2(-0.5, 2) },
@@ -80,6 +82,7 @@ varying vec3 vWorldPos;
 uniform float uTint;
 uniform float uContourInterval;
 uniform float uContourOpacity;
+uniform float uContourWeight;
 uniform float uGridStep;
 uniform float uGridOpacity;
 uniform vec2 uHeightRange;
@@ -130,11 +133,11 @@ uniform float uScanBlur;`
   float ch = vWorldPos.y / uContourInterval;
   float dch = fwidth(ch);
   float distMinor = abs(fract(ch + 0.5) - 0.5);
-  float minorLine = 1.0 - smoothstep(0.0, dch * 1.4, distMinor);
+  float minorLine = 1.0 - smoothstep(0.0, dch * 1.4 * uContourWeight, distMinor);
   float ch5 = ch / 5.0;
   float dch5 = fwidth(ch5);
   float distMajor = abs(fract(ch5 + 0.5) - 0.5);
-  float majorLine = 1.0 - smoothstep(0.0, dch5 * 1.4, distMajor);
+  float majorLine = 1.0 - smoothstep(0.0, dch5 * 1.4 * uContourWeight, distMajor);
   // fade contours out only when they crowd below pixel size (far away / near-vertical)
   float crowd = clamp(1.0 - dch * 0.22, 0.0, 1.0);
   float contour = max(minorLine * 0.55, majorLine) * uContourOpacity * crowd;

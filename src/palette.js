@@ -140,7 +140,8 @@ export function generateGridContour(rng = Math.random, mode = 'light') {
   const inkDark = rng() < 0.7
   return {
     contourInterval: 0.06 + rng() * 0.24,
-    contourOpacity: 0.4 + rng() * 0.6,
+    // light strokes on a dark sheet read bolder — keep night contours airy
+    contourOpacity: dark ? 0.3 + rng() * 0.35 : 0.4 + rng() * 0.6,
     contourColor: dark
       ? hslToHex(30 + rng() * 40, 15 + rng() * 30, 74 + rng() * 20) // light ink on dark sheet
       : inkDark

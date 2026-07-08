@@ -15,7 +15,8 @@ Zoom all the way out and the map hands over to **MONOLITH EARTH** — the whole 
 | Return to the surface | Zoom in anywhere and stop — the terrain loads at the scale you stopped at: **~180 km → z8 regional patch (Madagascar-sized), ~45 km → z10, under ~8 000 m → full detail** |
 | Go deeper | On a regional patch, zoom against the near stop — the map **refines** two zoom steps at a time (z8 → z10 → z12) |
 | Restyle the map | **MAP OVERLAY** panel (left): random palette / relief style / grid-contour, a large generated palette list (near-white lowlands, three-stop seas), **⟲ RESET LOOK** |
-| Night survey | **MAP OVERLAY → ◐ DARK MODE** — black/brown terrain palettes with fluo-yellow or hot-orange summits, light ink, dark seas |
+| Night survey | **MAP OVERLAY → ◐ DARK MODE** — black/brown terrain palettes with fluo-yellow or hot-orange summits, light ink and thinner contours, dark seas |
+| Visit the classics | **LANDMARKS** panel — ~130 curated topographic places folded by continent, each diving at the zoom that frames it (Corsica z9, Stromboli z13) |
 | Rearrange the HUD | Grab any panel (SECTOR, TELEMETRY, altimeter, GPX profile, MAP OVERLAY) and drag it wherever you like |
 | Name the summits | **MAP OVERLAY → ▲ TOP-5 PEAKS** — the five highest named peaks of the patch, altitude underneath (OSM data) |
 | Clouds | **Clouds** folder — sparse drifting puffs with soft ground shadows, on/off |

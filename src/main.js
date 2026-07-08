@@ -33,12 +33,14 @@ import { createOverlayPanel } from './overlay-panel.js'
 import { PeaksLayer } from './peaks.js'
 import { Clouds } from './clouds.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
+import { createLandmarksPanel } from './landmarks-panel.js'
 
 // ------------------------------------------------------------------ params
 
 const DEM_PRESETS = {
   'Monument Valley': [36.998, -110.0984],
   'Grand Canyon': [36.0997, -112.1124],
+  Chamonix: [45.9237, 6.8694],
   Matterhorn: [45.9766, 7.6585],
   'Mount Fuji': [35.3606, 138.7274],
   'Death Valley': [36.2679, -116.8253],
@@ -121,7 +123,7 @@ const params = {
   contrast: 0.07,
   saturation: -0.35,
   vignette: 0.6,
-  grain: 0.35,
+  grain: 0, // off by default — opt in via Look → grain
   fogNear: 35.5,
   fogFar: 50,
   fogColor: '#ffffff',
@@ -325,8 +327,10 @@ let fps = 60
 let scanStart = -1
 
 const poiFeet = (h) => terrain.heightToFeet(h)
+// 3D survey furniture reads in light ink on the dark sheet
+const effInk = () => (params.darkMode ? '#e8e4da' : params.hudInk)
 let pois = findPois(terrain.sample, params.seed, poiFeet)
-let hud3 = createHud3D(params.seed, pois, { ink: params.hudInk, accent: params.hudAccent })
+let hud3 = createHud3D(params.seed, pois, { ink: effInk(), accent: params.hudAccent })
 hud3.lines.visible = params.surveyLines
 scene.add(hud3.group)
 
@@ -554,7 +558,7 @@ function regenerateHud() {
   scene.remove(hud3.group)
   hud3.dispose()
   pois = findPois(terrain.sample, params.seed, poiFeet)
-  hud3 = createHud3D(params.seed, pois, { ink: params.hudInk, accent: params.hudAccent })
+  hud3 = createHud3D(params.seed, pois, { ink: effInk(), accent: params.hudAccent })
   hud3.lines.visible = params.surveyLines
   // same orbital guard as labels — GUI color changes rebuild the HUD and the
   // fresh group must not appear over the globe
@@ -866,10 +870,15 @@ function setDarkMode(v) {
     gridOpacity: params.gridOpacity,
     gridColor: v ? '#d8d2c2' : DEFAULT_LOOK.gridColor,
   })
+  // light ink reads bolder on dark terrain — thin the contour strokes so the
+  // sheet keeps its engraved fineness at night
+  terrain.mapUniforms.uContourWeight.value = v ? 0.55 : 1
   // draped place/elevation labels re-render with the mode's ink (labelOpts
-  // reads params.darkMode), and the GPX profile canvas repaints with the
-  // flipped --hud-ink — both would otherwise keep dark strokes on dark paper
+  // reads params.darkMode), the 3D survey furniture (POI stems, circles)
+  // regenerates in light ink, and the GPX profile canvas repaints with the
+  // flipped --hud-ink — all would otherwise keep dark strokes on dark paper
   regenerateLabels()
+  regenerateHud()
   gpxLayer.setHover(-1)
 }
 
@@ -891,6 +900,11 @@ function resetLook() {
     gridColor: DEFAULT_LOOK.gridColor,
   })
 }
+
+const landmarksPanel = createLandmarksPanel({
+  flyTo: (lat, lon, zoom) => modes.flyTo(lat, lon, zoom),
+  announce: (m) => modes.announce(m),
+})
 
 const overlayPanel = createOverlayPanel({
   apply: {
@@ -1044,6 +1058,7 @@ fSource.add({ go: () => gotoCtl.go(gotoState.coords) }, 'go').name('→ fly to c
 fSource.add(gotoState, 'place').name('search place')
 fSource.add({ s: () => gotoCtl.search(gotoState.place) }, 's').name('→ search & fly')
 fSource.add({ orbit: () => modes.enterOrbit() }, 'orbit').name('🌍 view planet')
+fSource.add({ lmk: () => landmarksPanel.setVisible(true) }, 'lmk').name('open LANDMARKS ⧉')
 
 const fGlobe = gui.addFolder('Globe')
 fGlobe
@@ -1342,7 +1357,7 @@ fLight.close()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, peaksLayer, overlayPanel, applyPalette, applyStyle, applyGridContour, get labels() { return labels } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, peaksLayer, overlayPanel, landmarksPanel, applyPalette, applyStyle, applyGridContour, setDarkMode, get labels() { return labels } }
 
 // real world is the default source — fetch its tiles on startup
 if (params.source === 'real') loadRealTerrain()
