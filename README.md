@@ -12,7 +12,11 @@ Zoom all the way out and the map hands over to **MONOLITH EARTH** — the whole 
 |---|---|
 | Look around | Drag to orbit, scroll to zoom, right-drag to pan |
 | See the planet | Keep zooming out — effects power down and the orbital view takes over (or **Terrain source → 🌍 view planet**) |
-| Return to the surface | Zoom in anywhere on the globe — under **~8 000 m** the terrain loads and effects re-engage |
+| Return to the surface | Zoom in anywhere and stop — the terrain loads at the scale you stopped at: **~180 km → z8 regional patch (Madagascar-sized), ~45 km → z10, under ~8 000 m → full detail** |
+| Go deeper | On a regional patch, zoom against the near stop — the map **refines** two zoom steps at a time (z8 → z10 → z12) |
+| Restyle the map | **MAP OVERLAY** panel (left): random palette / relief style / grid-contour, or pick from the generated palette list |
+| Name the summits | **MAP OVERLAY → ▲ TOP-5 PEAKS** — the five highest named peaks of the patch, altitude underneath (OSM data) |
+| Clouds | **Clouds** folder — sparse drifting puffs with soft ground shadows, on/off |
 | Go somewhere exact | **Terrain source → go to "lat, lon"** (paste straight from Google Maps) or **search place** — the camera flies there over the globe and dives |
 | Load a GPX track | Drag & drop a `.gpx` anywhere on the page (or **GPX track → import**) — the map recenters and drapes the track |
 | Read the track | Hover the line (or the elevation profile strip) — altitude, distance and grade follow your pointer |
@@ -27,8 +31,9 @@ Zoom all the way out and the map hands over to **MONOLITH EARTH** — the whole 
 ### Terrain sources
 
 - **real world (DEM)** — fetches elevation tiles for the chosen coordinates and rebuilds the map with true landforms. Spot elevations and peak data show real values.
-  - **detail (zoom)** — z10–14: how large an area you get (z12 ≈ 28 km across, z13 ≈ 14 km)
+  - **detail (zoom)** — z8–14: how large an area you get (z8 ≈ 470 km across, z10 ≈ 117 km, z12 ≈ 28 km, z13 ≈ 14 km)
   - **vertical scale** — relief exaggeration; real proportions read flat at map scale, so 1.5–3 is typical
+  - **bathymetry** — below sea level the map reads as a nautical chart: pale shallows deepening into dark water, real depths (try the Mariana Trench: `11.35, 142.2`). Ocean colors live in **Map overlay** and follow the palette.
 - **procedural noise** — seeded multi-octave simplex terrain with a hovering monolith and an excavated instrument basin. Every knob (octaves, warp, amplitude…) is live.
 
 ### Orbital view (MONOLITH EARTH)

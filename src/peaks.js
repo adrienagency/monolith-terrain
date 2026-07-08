@@ -15,7 +15,9 @@ export async function fetchTopPeaks(dem, count = 5) {
   const south = worldToLatLon(dem, 0, h).lat
   const west = worldToLatLon(dem, -h, 0).lon
   const east = worldToLatLon(dem, h, 0).lon
-  const q = `[out:json][timeout:20];node["natural"="peak"]["name"](${south},${west},${north},${east});out body 150;`
+  // 500-node budget: on a dense z8 patch (whole Alps) 150 was low enough to
+  // miss the actual highest summits before the client-side sort
+  const q = `[out:json][timeout:20];node["natural"="peak"]["name"](${south},${west},${north},${east});out body 500;`
   const r = await fetch(OVERPASS, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -43,7 +45,7 @@ export class PeaksLayer {
     this.enabled = false
     this.markers = [] // { el, world }
     this._v = new THREE.Vector3()
-    this._busy = false
+    this._gen = 0 // request generation — stale fetches discard themselves
   }
 
   async setEnabled(v) {
@@ -56,11 +58,11 @@ export class PeaksLayer {
   async refresh() {
     this._clear()
     const dem = this.getDem()
-    if (!this.enabled || !dem || this._busy) return
-    this._busy = true
+    if (!this.enabled || !dem) return
+    const gen = ++this._gen // supersedes any fetch still in flight
     try {
       const peaks = await fetchTopPeaks(dem)
-      if (!this.enabled) return // toggled off while fetching
+      if (!this.enabled || gen !== this._gen) return // toggled off / superseded
       if (!peaks.length) {
         this.announce('NO NAMED PEAKS IN THIS SECTOR')
         return
@@ -72,16 +74,23 @@ export class PeaksLayer {
         const ele = p.ele ?? Math.round(this.terrain.heightToFeet(y - 0.5) / 3.28084)
         const el = document.createElement('div')
         el.className = 'hud-poi peak-marker'
-        el.innerHTML = `<span class="tag"><b>${p.name.toUpperCase()}</b><i>${Math.round(ele).toLocaleString()} M</i></span>`
+        // OSM names are untrusted — build the tag with textContent, never HTML
+        const tag = document.createElement('span')
+        tag.className = 'tag'
+        const nameEl = document.createElement('b')
+        nameEl.textContent = p.name.toUpperCase()
+        const eleEl = document.createElement('i')
+        eleEl.textContent = `${Math.round(ele).toLocaleString()} M`
+        tag.append(nameEl, eleEl)
+        el.appendChild(tag)
         document.body.appendChild(el)
         this.markers.push({ el, world: new THREE.Vector3(w.x, y, w.z) })
       }
       this.announce(`${this.markers.length} PEAKS PLOTTED`)
     } catch (err) {
+      if (gen !== this._gen) return // superseded — the newer refresh reports
       console.warn('peaks:', err.message)
       this.announce('PEAK DATA OFFLINE')
-    } finally {
-      this._busy = false
     }
   }
 

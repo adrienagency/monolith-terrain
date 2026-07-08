@@ -228,6 +228,7 @@ pmrem.dispose()
 // ------------------------------------------------------------------ lights
 
 let globe = null // assigned after the world exists (see orbital globe section)
+let clouds = null // assigned in the world section
 
 const sun = new THREE.DirectionalLight(0xffffff, params.sunIntensity)
 sun.castShadow = true
@@ -256,6 +257,7 @@ function placeSun() {
   hemi.intensity = params.hemiIntensity
   if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
   if (globe) globe.setSunDir(sun.position)
+  if (clouds) clouds.setSunDir(sun.position)
 }
 placeSun()
 
@@ -273,7 +275,8 @@ scene.add(terrain.mesh)
 const cone = createCone()
 scene.add(cone.group)
 
-const clouds = new Clouds(scene, terrain, params)
+clouds = new Clouds(scene, terrain, params)
+clouds.setSunDir(sun.position)
 
 const labelOpts = () => ({ real: params.source === 'real', toFeet: (h) => terrain.heightToFeet(h) })
 let labels = createLabels(terrain.sample, params.seed, labelOpts())
@@ -815,8 +818,10 @@ async function loadGpxText(text) {
     params.demLocation = 'Custom'
     gui.controllersRecursive().forEach((c) => c.updateDisplay())
     modes.announce(`TRACK LOADED — ${name.toUpperCase().slice(0, 24)}`)
-    // the post-rebuild hook drapes the line once the new terrain exists
-    if (modes.mode === 'orbital') await modes.flyTo(f.lat, f.lon)
+    // the post-rebuild hook drapes the line once the new terrain exists;
+    // pin the framed zoom or the dive would land on the fine (≥12) scale
+    // and clip long tracks framed at z10/z11
+    if (modes.mode === 'orbital') await modes.flyTo(f.lat, f.lon, f.zoom)
     else await loadRealTerrain()
   } catch (err) {
     modes.announce(`GPX ERROR — ${String(err.message).toUpperCase()}`)
@@ -1283,8 +1288,10 @@ function tick() {
   if (modes.mode === 'surface' && scene.fog) {
     const dist = controls.getDistance()
     const lift = THREE.MathUtils.smoothstep(dist, controls.minDistance * 1.15, controls.minDistance * 2.5)
-    fogRef.near = THREE.MathUtils.lerp(params.fogNear, 320, lift)
-    fogRef.far = THREE.MathUtils.lerp(params.fogFar, 520, lift)
+    // scaled from the GUI values (not constants) so the Look → fog sliders
+    // keep their meaning at every distance
+    fogRef.near = THREE.MathUtils.lerp(params.fogNear, params.fogNear * 9, lift)
+    fogRef.far = THREE.MathUtils.lerp(params.fogFar, params.fogFar * 10.4, lift)
   }
 
   // refresh camera matrices NOW so DOM projections match this frame's render
@@ -1294,7 +1301,7 @@ function tick() {
   if (!params.paused && modes.mode === 'surface') {
     hud3.update(dt, t, params)
     cone.update(dt, t, mouse, params)
-    clouds.update(dt, params)
+    clouds.update(dt, params, camera)
   }
   peaksLayer.update(camera, window.innerWidth, window.innerHeight, modes.mode === 'surface')
 

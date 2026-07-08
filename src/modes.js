@@ -12,11 +12,16 @@ import * as THREE from 'three'
 import { R_GLOBE, ORBITAL_M_PER_UNIT, sphereToLatLon, latLonToSphere } from './geo.js'
 
 // ordered fine → coarse; zoom null = the user's fine zoom (≥ 12)
-const DIVE_TIERS = [
+export const DIVE_TIERS = [
   { altM: 8000, zoom: null },
   { altM: 45000, zoom: 10 },
   { altM: 180000, zoom: 8 },
 ]
+
+// tier a settled zoom-in engages at `altM` meters — null above every tier
+export function pickDiveTier(altM) {
+  return DIVE_TIERS.find((t) => altM < t.altM) ?? null
+}
 const DIVE_ALT_M = DIVE_TIERS[0].altM
 const MAX_ALT_M = 16000000 // ~2.5 earth radii — whole planet in frame
 const MSG_MS = 3600
@@ -244,8 +249,9 @@ export class Modes {
 
   // Great-circle glide to lat/lon, ending below the dive threshold so the
   // normal engagement takes over. One code path for paste, search and GPX.
+  // `zoom` pins the landing scale (GPX framing); null lands on the fine zoom.
   // Returns false when navigation is already busy (dive/transition running).
-  async flyTo(lat, lon) {
+  async flyTo(lat, lon, zoom = null) {
     if (this.busy) return false
     if (this.mode === 'surface') {
       await this.enterOrbit(1200000) // pop out high enough to see the arc
@@ -262,6 +268,7 @@ export class Modes {
       fromAlt: this.orbAlt,
       cruise,
       endAlt: (DIVE_ALT_M * 0.92) / ORBITAL_M_PER_UNIT,
+      zoom,
     }
     this.controls.enabled = false
     return true
@@ -282,9 +289,9 @@ export class Modes {
       this.travel = null
       this.controls.enabled = true
       this.controls.update()
-      // a glide always lands on the FINE scale, explicitly (dive arming is
-      // for manual zooms only)
-      this._dive(DIVE_TIERS[0])
+      // a glide lands on its pinned zoom (GPX framing) or the FINE scale,
+      // explicitly (dive arming is for manual zooms only)
+      this._dive(tr.zoom ? { altM: DIVE_ALT_M, zoom: tr.zoom } : DIVE_TIERS[0])
     }
   }
 
@@ -316,7 +323,7 @@ export class Modes {
         // fast zoom mid-flight; the landing scale matches where you stopped
         const settled = Math.abs(this.orbAlt - this.orbAltTarget) < this.orbAltTarget * 0.06
         if (settled) {
-          const tier = DIVE_TIERS.find((t) => this.altM < t.altM)
+          const tier = pickDiveTier(this.altM)
           if (tier) {
             this._diveArmed = false
             this._dive(tier)
