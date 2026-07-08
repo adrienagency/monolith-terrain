@@ -30,11 +30,17 @@ export function createMotionPanel({ params, poiIds, onPause, onTour, onStop, ann
 
   const q = (a) => root.querySelector(`[data-a="${a}"]`)
   const pauseBtn = q('pause')
+  // reflect params.paused onto the button — the same flag also drives the
+  // lil-gui checkbox, so either control can flip it and syncPause keeps the
+  // label honest
+  const syncPause = () => {
+    pauseBtn.textContent = params.paused ? '▶ RESUME' : '❙❙ PAUSE'
+    pauseBtn.classList.toggle('active', params.paused)
+  }
   pauseBtn.addEventListener('click', () => {
     params.paused = !params.paused
     onPause(params.paused)
-    pauseBtn.textContent = params.paused ? '▶ RESUME' : '❙❙ PAUSE'
-    pauseBtn.classList.toggle('active', params.paused)
+    syncPause()
   })
   q('from').addEventListener('change', (e) => (params.tourFrom = e.target.value))
   q('to').addEventListener('change', (e) => (params.tourTo = e.target.value))
@@ -61,6 +67,7 @@ export function createMotionPanel({ params, poiIds, onPause, onTour, onStop, ann
 
   return {
     root,
+    syncPause,
     setVisible(v) {
       root.style.display = v ? '' : 'none'
     },

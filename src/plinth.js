@@ -8,6 +8,34 @@ import { TERRAIN_SIZE } from './terrain.js'
 
 const HALF = TERRAIN_SIZE / 2
 const EDGE_SAMPLES = 160 // per side — smooth silhouette without heavy geometry
+const INTERIOR_STEPS = 12 // coarse grid to find the global min (basin guard)
+
+// Pure: sample the border ring and pick a base level. baseY sits `depth` below
+// the LOWEST point anywhere on the patch (not just the border) so a deep
+// interior basin can never punch through the base plane. Exported for tests.
+export function computeSlab(sample, depth) {
+  let borderMin = Infinity
+  let globalMin = Infinity
+  const ring = [] // clockwise from the -x/-z corner
+  const edge = (x, z) => {
+    const y = sample(x, z)
+    if (y < borderMin) borderMin = y
+    if (y < globalMin) globalMin = y
+    ring.push({ x, z, y })
+  }
+  for (let i = 0; i < EDGE_SAMPLES; i++) edge(-HALF + (TERRAIN_SIZE * i) / EDGE_SAMPLES, -HALF)
+  for (let i = 0; i < EDGE_SAMPLES; i++) edge(HALF, -HALF + (TERRAIN_SIZE * i) / EDGE_SAMPLES)
+  for (let i = 0; i < EDGE_SAMPLES; i++) edge(HALF - (TERRAIN_SIZE * i) / EDGE_SAMPLES, HALF)
+  for (let i = 0; i < EDGE_SAMPLES; i++) edge(-HALF, HALF - (TERRAIN_SIZE * i) / EDGE_SAMPLES)
+  // coarse interior sweep for the global minimum
+  for (let j = 1; j < INTERIOR_STEPS; j++) {
+    for (let i = 1; i < INTERIOR_STEPS; i++) {
+      const y = sample(-HALF + (TERRAIN_SIZE * i) / INTERIOR_STEPS, -HALF + (TERRAIN_SIZE * j) / INTERIOR_STEPS)
+      if (y < globalMin) globalMin = y
+    }
+  }
+  return { ring, borderMin, globalMin, baseY: globalMin - depth }
+}
 
 export class Plinth {
   constructor(scene, params) {
@@ -48,20 +76,7 @@ export class Plinth {
     if (!sample) return
     this.depth = params.plinthDepth ?? this.depth
 
-    // border heights, clockwise from the -x/-z corner
-    let minH = Infinity
-    const ring = [] // {x, z, y}
-    const push = (x, z) => {
-      const y = sample(x, z)
-      if (y < minH) minH = y
-      ring.push({ x, z, y })
-    }
-    for (let i = 0; i < EDGE_SAMPLES; i++) push(-HALF + (TERRAIN_SIZE * i) / EDGE_SAMPLES, -HALF) // north
-    for (let i = 0; i < EDGE_SAMPLES; i++) push(HALF, -HALF + (TERRAIN_SIZE * i) / EDGE_SAMPLES) // east
-    for (let i = 0; i < EDGE_SAMPLES; i++) push(HALF - (TERRAIN_SIZE * i) / EDGE_SAMPLES, HALF) // south
-    for (let i = 0; i < EDGE_SAMPLES; i++) push(-HALF, HALF - (TERRAIN_SIZE * i) / EDGE_SAMPLES) // west
-
-    const baseY = minH - this.depth
+    const { ring, baseY } = computeSlab(sample, this.depth)
     this.baseY = baseY
     this.base.position.y = baseY
 

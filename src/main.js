@@ -40,6 +40,10 @@ import { createMotionPanel } from './motion-panel.js'
 
 // ------------------------------------------------------------------ params
 
+// the survey markers findPois always emits — shared by the Tour folder and
+// the MOTION panel so their from/to lists can never drift apart
+const POI_IDS = ['PK-01', 'PK-02', 'PK-03', 'PK-04', 'DEP-05']
+
 const DEM_PRESETS = {
   'Monument Valley': [36.998, -110.0984],
   'Grand Canyon': [36.0997, -112.1124],
@@ -994,8 +998,8 @@ async function loadGpxText(text) {
 // its own bottom-anchored UI
 const motionPanel = createMotionPanel({
   params,
-  poiIds: ['PK-01', 'PK-02', 'PK-03', 'PK-04', 'DEP-05'],
-  onPause: () => {},
+  poiIds: POI_IDS,
+  onPause: () => pausedCtrl?.updateDisplay(), // keep the sidebar checkbox in step
   onTour: startTour,
   onStop: () => {
     tour.active = false
@@ -1261,6 +1265,13 @@ fMap
   .name('contour opacity')
   .onChange((v) => (terrain.mapUniforms.uContourOpacity.value = v))
 fMap
+  .add(params, 'contourWeight', 0.3, 1.6, 0.05)
+  .name('contour weight')
+  .onChange((v) => {
+    // dark mode thins further; in light mode this is the live value
+    if (!params.darkMode) terrain.mapUniforms.uContourWeight.value = v
+  })
+fMap
   .addColor(params, 'contourColor')
   .name('contour color')
   .onChange((v) => {
@@ -1380,7 +1391,6 @@ fMotion.add(params, 'ringSpeed', 0, 6, 0.1).name('ring speed')
 fMotion.add(params, 'flyDuration', 0.4, 4, 0.1).name('fly duration')
 fMotion.add(params, 'flyEasing', ['smooth', 'glide', 'linear']).name('fly easing')
 
-const POI_IDS = ['PK-01', 'PK-02', 'PK-03', 'PK-04', 'DEP-05']
 const fTour = gui.addFolder('Tour')
 fTour.add(params, 'tourFrom', POI_IDS).name('from')
 fTour.add(params, 'tourTo', POI_IDS).name('to')
@@ -1420,7 +1430,7 @@ fPerf
     }
     if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
   })
-fMotion.add(params, 'paused')
+const pausedCtrl = fMotion.add(params, 'paused').onChange(() => motionPanel.syncPause())
 
 const fLight = gui.addFolder('Light')
 fLight.add(params, 'sunIntensity', 0, 16, 0.1).onChange(placeSun)
