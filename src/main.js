@@ -327,8 +327,16 @@ let fps = 60
 let scanStart = -1
 
 const poiFeet = (h) => terrain.heightToFeet(h)
+// night-survey ink set — the single source for every dark-mode surface
+const DARK = {
+  sheet: '#0e0f11',
+  ink: '#e8e4da',
+  contour: '#ece6d6',
+  grid: '#d8d2c2',
+  paper: 'rgb(18 19 22 / var(--hud-bg-alpha))',
+}
 // 3D survey furniture reads in light ink on the dark sheet
-const effInk = () => (params.darkMode ? '#e8e4da' : params.hudInk)
+const effInk = () => (params.darkMode ? DARK.ink : params.hudInk)
 let pois = findPois(terrain.sample, params.seed, poiFeet)
 let hud3 = createHud3D(params.seed, pois, { ink: effInk(), accent: params.hudAccent })
 hud3.lines.visible = params.surveyLines
@@ -852,23 +860,23 @@ function applyGridContour(g) {
 // vivid summit accents — the whole look follows one switch
 function setDarkMode(v) {
   params.darkMode = v
-  const sheet = v ? '#0e0f11' : '#ffffff'
+  const sheet = v ? DARK.sheet : '#ffffff'
   params.fogColor = sheet
   fogRef.color.set(sheet)
   scene.background.set(sheet)
   modes.whiteEl.style.background = sheet // transition flash follows the sheet
-  document.documentElement.style.setProperty('--hud-ink', v ? '#e8e4da' : params.hudInk)
+  document.documentElement.style.setProperty('--hud-ink', effInk())
   document.documentElement.style.setProperty(
     '--hud-paper',
-    v ? 'rgb(18 19 22 / var(--hud-bg-alpha))' : 'rgb(248 247 244 / var(--hud-bg-alpha))'
+    v ? DARK.paper : 'rgb(248 247 244 / var(--hud-bg-alpha))'
   )
   applyGridContour({
     contourInterval: params.contourInterval,
     contourOpacity: params.contourOpacity,
-    contourColor: v ? '#ece6d6' : DEFAULT_LOOK.contourColor,
+    contourColor: v ? DARK.contour : DEFAULT_LOOK.contourColor,
     gridStep: params.gridStep,
     gridOpacity: params.gridOpacity,
-    gridColor: v ? '#d8d2c2' : DEFAULT_LOOK.gridColor,
+    gridColor: v ? DARK.grid : DEFAULT_LOOK.gridColor,
   })
   // light ink reads bolder on dark terrain — thin the contour strokes so the
   // sheet keeps its engraved fineness at night
@@ -1250,8 +1258,9 @@ fHud
 fHud
   .addColor(params, 'hudInk')
   .name('ink color')
-  .onChange((v) => {
-    document.documentElement.style.setProperty('--hud-ink', v)
+  .onChange(() => {
+    // in dark mode the CSS ink stays light regardless of the picked value
+    document.documentElement.style.setProperty('--hud-ink', effInk())
     regenerateHud()
   })
 fHud.add(params, 'sweepSpeed', 0, 3, 0.05).name('sweep speed')

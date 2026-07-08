@@ -31,9 +31,14 @@ export function createLandmarksPanel({ flyTo, announce }) {
       const zoomEl = document.createElement('i')
       zoomEl.textContent = `Z${p.zoom}`
       row.append(nameEl, zoomEl)
-      row.addEventListener('click', () => {
+      row.addEventListener('click', async () => {
+        // same contract as goto.js: flyTo returns false while a dive or
+        // transition is running — don't announce a destination we won't fly to
+        if (!(await flyTo(p.lat, p.lon, p.zoom))) {
+          announce('NAVIGATION BUSY — TRY AGAIN IN A MOMENT')
+          return
+        }
         announce(`DESTINATION — ${p.name.toUpperCase()} · Z${p.zoom}`)
-        flyTo(p.lat, p.lon, p.zoom)
       })
       fold.appendChild(row)
     }
