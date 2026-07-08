@@ -7,13 +7,15 @@ import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
 
 const HALF = TERRAIN_SIZE / 2
-const EDGE_SAMPLES = 160 // per side — smooth silhouette without heavy geometry
 const INTERIOR_STEPS = 12 // coarse grid to find the global min (basin guard)
 
-// Pure: sample the border ring and pick a base level. baseY sits `depth` below
-// the LOWEST point anywhere on the patch (not just the border) so a deep
-// interior basin can never punch through the base plane. Exported for tests.
-export function computeSlab(sample, depth) {
+// Pure: sample the border ring and pick a base level. `samples` per side should
+// match the terrain mesh resolution so the wall top sits EXACTLY on the relief
+// border — a coarser ring leaves gaps you can see the underside through. baseY
+// sits `depth` below the LOWEST point anywhere on the patch (not just the
+// border) so a deep interior basin can never pierce the base plane. Tested.
+export function computeSlab(sample, depth, samples = 256) {
+  const n = Math.max(8, Math.round(samples))
   let borderMin = Infinity
   let globalMin = Infinity
   const ring = [] // clockwise from the -x/-z corner
@@ -23,10 +25,10 @@ export function computeSlab(sample, depth) {
     if (y < globalMin) globalMin = y
     ring.push({ x, z, y })
   }
-  for (let i = 0; i < EDGE_SAMPLES; i++) edge(-HALF + (TERRAIN_SIZE * i) / EDGE_SAMPLES, -HALF)
-  for (let i = 0; i < EDGE_SAMPLES; i++) edge(HALF, -HALF + (TERRAIN_SIZE * i) / EDGE_SAMPLES)
-  for (let i = 0; i < EDGE_SAMPLES; i++) edge(HALF - (TERRAIN_SIZE * i) / EDGE_SAMPLES, HALF)
-  for (let i = 0; i < EDGE_SAMPLES; i++) edge(-HALF, HALF - (TERRAIN_SIZE * i) / EDGE_SAMPLES)
+  for (let i = 0; i < n; i++) edge(-HALF + (TERRAIN_SIZE * i) / n, -HALF)
+  for (let i = 0; i < n; i++) edge(HALF, -HALF + (TERRAIN_SIZE * i) / n)
+  for (let i = 0; i < n; i++) edge(HALF - (TERRAIN_SIZE * i) / n, HALF)
+  for (let i = 0; i < n; i++) edge(-HALF, HALF - (TERRAIN_SIZE * i) / n)
   // coarse interior sweep for the global minimum
   for (let j = 1; j < INTERIOR_STEPS; j++) {
     for (let i = 1; i < INTERIOR_STEPS; i++) {
@@ -43,24 +45,24 @@ export class Plinth {
     this.group.name = 'plinth'
     scene.add(this.group)
 
-    // slab walls + bottom: a matte stone edge, lit by the scene sun so the
-    // cut face reads as thickness
+    // slab walls + bottom: a matte stone edge, lit by the scene sun so the cut
+    // face reads as thickness. DoubleSide so no viewing angle ever sees through
+    // the slab into a culled back face (the "underside" bug).
     this.wallMat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(params.plinthColor ?? '#d8d4cc'),
       roughness: 0.95,
       metalness: 0,
+      side: THREE.DoubleSide,
     })
     this.walls = new THREE.Mesh(new THREE.BufferGeometry(), this.wallMat)
     this.walls.castShadow = true
     this.walls.receiveShadow = true
     this.group.add(this.walls)
 
-    // the table: a wide neutral plane that only shows the slab's shadow
-    this.baseMat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(params.baseColor ?? '#c8c5be'),
-      roughness: 1,
-      metalness: 0,
-    })
+    // the table: a wide plane that shows ONLY the slab's cast shadow. A
+    // ShadowMaterial is transparent everywhere else, so the ground reads as the
+    // exact scene background color — no grey mismatch, just the shadow.
+    this.baseMat = new THREE.ShadowMaterial({ opacity: 0.26 })
     this.base = new THREE.Mesh(new THREE.PlaneGeometry(TERRAIN_SIZE * 3.4, TERRAIN_SIZE * 3.4), this.baseMat)
     this.base.rotation.x = -Math.PI / 2
     this.base.receiveShadow = true
@@ -76,7 +78,9 @@ export class Plinth {
     if (!sample) return
     this.depth = params.plinthDepth ?? this.depth
 
-    const { ring, baseY } = computeSlab(sample, this.depth)
+    // match the wall ring to the terrain mesh edge resolution so the top of the
+    // walls lands exactly on the relief border (no gaps → no visible underside)
+    const { ring, baseY } = computeSlab(sample, this.depth, params.resolution ?? 256)
     this.baseY = baseY
     this.base.position.y = baseY
 
@@ -123,7 +127,9 @@ export class Plinth {
 
   setColors(params) {
     this.wallMat.color.set(params.plinthColor ?? '#d8d4cc')
-    this.baseMat.color.set(params.baseColor ?? '#c8c5be')
+    // the table is a ShadowMaterial (no color — it only darkens the background
+    // where the shadow lands); the dark sheet reads a touch stronger
+    this.baseMat.opacity = params.darkMode ? 0.34 : 0.24
   }
 
   setVisible(v) {

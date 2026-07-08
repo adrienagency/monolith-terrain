@@ -18,7 +18,8 @@ Zoom all the way out and the map hands over to **MONOLITH EARTH** — the whole 
 | Night survey | **MAP OVERLAY → ◐ DARK MODE** — black/brown terrain palettes with fluo-yellow or hot-orange summits, light ink and thinner contours, dark seas |
 | Visit the classics | **LANDMARKS** panel — ~130 curated topographic places folded by continent, each diving at the zoom that frames it (Corsica z9, Stromboli z13) |
 | Rearrange the HUD | Grab any panel (SECTOR, TELEMETRY, altimeter, GPX profile, MAP OVERLAY, LANDMARKS, MOTION) and drag it — panels snap to each other and stack neatly |
-| Tidy up | Fold any panel to its title bar via its caret, or use the bottom-right **▤** to collapse them all; **◱ UI** hides the whole interface |
+| Tidy up | Panels fold to their title bar via the caret and behave as an accordion (opening one folds the rest); the top-center **▤** collapses them all and **◱ UI** hides the whole interface |
+| Autofocus | Depth of field focuses where the ray from the camera through your cursor meets the terrain — move the pointer to rack focus across the relief |
 | Monochrome look | **MAP OVERLAY → ◻ FULL WHITE / ◼ FULL DARK** — the relief carried by light alone, museum-slab style |
 | Playback & tours | The **MOTION** panel at the bottom: pause, cinematic tour from/to, duration and altitude |
 | Name the summits | **MAP OVERLAY → ▲ TOP-5 PEAKS** — the five highest named peaks of the patch, altitude underneath (OSM data) |

@@ -952,3 +952,21 @@ body.dark .lmk-continent {
   right: auto;
   transform: translateX(-50%);
 }
+
+/* ---------------------------------------------------------------- v7: uniform side-panel width */
+
+:root { --panel-w: 250px; }
+
+.map-overlay-panel,
+.landmarks-panel,
+.hud-block.hud-tl,
+.hud-block.hud-brt {
+  width: var(--panel-w);
+  box-sizing: border-box;
+}
+
+/* collapsed panels keep the shared width so the column stays aligned */
+.hud-block.collapsed {
+  width: var(--panel-w);
+  min-width: 0;
+}

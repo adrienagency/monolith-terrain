@@ -102,8 +102,11 @@ export function makeDraggable(el, handle = el) {
 }
 
 // Fold a panel to just its handle. `body` selects the content to hide; a caret
-// button injected at the end of the handle toggles it.
-export function makeCollapsible(el, handle, bodySelector) {
+// button injected at the end of the handle toggles it. Pass `group` to make a
+// set of panels behave as an accordion: expanding one folds its group-mates.
+const groups = new Map() // groupId → [{ setCollapsed }]
+
+export function makeCollapsible(el, handle, bodySelector, group = null) {
   const caret = document.createElement('button')
   caret.className = 'panel-caret'
   caret.title = 'collapse / expand'
@@ -118,11 +121,21 @@ export function makeCollapsible(el, handle, bodySelector) {
     el.classList.toggle('collapsed', v)
     bodies().forEach((b) => (b.style.display = v ? 'none' : ''))
   }
+  const entry = { el, setCollapsed, group }
   caret.addEventListener('click', (e) => {
     e.stopPropagation()
+    const opening = collapsed
     setCollapsed(!collapsed)
+    // accordion: opening one panel folds the others in its group
+    if (opening && group) {
+      for (const g of groups.get(group) || []) if (g !== entry && g.el.isConnected) g.setCollapsed(true)
+    }
   })
-  collapsibles.push({ el, setCollapsed })
+  collapsibles.push(entry)
+  if (group) {
+    if (!groups.has(group)) groups.set(group, [])
+    groups.get(group).push(entry)
+  }
   return setCollapsed
 }
 

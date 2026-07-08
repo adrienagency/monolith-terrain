@@ -26,6 +26,7 @@ uniform vec3 uSunDir;
 uniform float uSeed;
 uniform float uTime;
 uniform float uOpacity;
+uniform float uGroundY; // terrain height under the cloud — density dissolves here
 
 // value noise + fbm — cheap, procedural, no texture fetch
 float hash13(vec3 p) {
@@ -90,6 +91,10 @@ void main() {
     if (alpha > 0.98) break;
     vec3 q = ro + rdl * (t0 + (float(i) + 0.5) * dt);
     float d = density(q);
+    // dissolve the cloud as it meets the relief: fade density out over a soft
+    // band above the ground so contact stays wispy instead of a hard slab edge
+    float worldY = uCenter.y + q.y * uRadii.y;
+    d *= smoothstep(uGroundY - 0.3, uGroundY + 2.2, worldY);
     if (d <= 0.001) continue;
     // one cheap tap toward the sun: how buried is this sample?
     float occ = density(q + sunL * 0.28) * 0.85 + density(q + sunL * 0.6) * 0.5;
@@ -158,6 +163,10 @@ export class Clouds {
           fragmentShader: FRAG,
           transparent: true,
           depthWrite: false,
+          // no depth test: the ground-dissolve carries the terrain contact, so
+          // we avoid the hard silhouette a depth-clipped billboard cut into the
+          // relief (the straight-line artifact)
+          depthTest: false,
           uniforms: {
             uCenter: { value: new THREE.Vector3() },
             uRadii: { value: radii },
@@ -165,6 +174,7 @@ export class Clouds {
             uSeed: { value: rng() * 100 },
             uTime: { value: 0 },
             uOpacity: { value: (0.82 + rng() * 0.18) * params.cloudOpacity },
+            uGroundY: { value: 0 },
           },
         })
       )
@@ -217,6 +227,8 @@ export class Clouds {
       if (camera) c.mesh.quaternion.copy(camera.quaternion)
       c.mesh.material.uniforms.uCenter.value.copy(c.mesh.position)
       c.mesh.material.uniforms.uTime.value = this.time
+      // ground height under the cloud drives the terrain-contact dissolve
+      c.mesh.material.uniforms.uGroundY.value = inside ? groundY : -9999
 
       // shadow offset along the sun's ground projection, so it falls away from
       // the cloud like a real cast rather than sitting straight underneath

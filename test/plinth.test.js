@@ -5,14 +5,20 @@ import { TERRAIN_SIZE } from '../src/terrain.js'
 
 const HALF = TERRAIN_SIZE / 2
 
-test('ring walks the full border, four sides', () => {
-  const { ring } = computeSlab(() => 1, 7)
-  assert.equal(ring.length, 640) // 160 samples × 4 sides
+test('ring walks the full border, four sides, at the requested resolution', () => {
+  const { ring } = computeSlab(() => 1, 7, 200)
+  assert.equal(ring.length, 800) // 200 samples × 4 sides
   // every ring point sits on a border line
   for (const p of ring) {
     const onEdge = Math.abs(Math.abs(p.x) - HALF) < 1e-9 || Math.abs(Math.abs(p.z) - HALF) < 1e-9
     assert.ok(onEdge, `ring point (${p.x},${p.z}) not on the border`)
   }
+})
+
+test('ring resolution matches the terrain mesh so walls have no gaps', () => {
+  // a coarse ring would miss relief between samples → visible underside
+  assert.equal(computeSlab(() => 0, 7, 1024).ring.length, 4096)
+  assert.equal(computeSlab(() => 0, 7, 8).ring.length, 32) // floor guard
 })
 
 test('baseY sits `depth` below a flat surface', () => {

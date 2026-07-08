@@ -31,6 +31,7 @@ import { worldToLatLon } from './geo.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { monochromeLook } from './palette.js'
 import { peakVantage } from './camera-poses.js'
+import { focusRayHit } from './autofocus.js'
 import { createOverlayPanel } from './overlay-panel.js'
 import { PeaksLayer } from './peaks.js'
 import { Clouds } from './clouds.js'
@@ -68,30 +69,30 @@ const params = {
 
   // terrain generation
   seed: 1,
-  scale: 0.075,
-  octaves: 4,
-  lacunarity: 2.1,
-  gain: 0.7,
-  amplitude: 1.5,
+  scale: 0.045,
+  octaves: 2,
+  lacunarity: 1.6,
+  gain: 0.31,
+  amplitude: 1,
   warp: 1.3,
-  detail: 0.09,
-  detailScale: 0.7,
+  detail: 0.03,
+  detailScale: 0.5,
   resolution: 1024,
 
   // surface material
-  color: '#c2c2c2',
-  roughness: 0,
-  roughnessVariation: 0,
-  roughnessScale: 7.5,
-  bumpScale: 1.35,
-  envMapIntensity: 0.75,
+  color: '#dddcd5',
+  roughness: 0.88,
+  roughnessVariation: 0.14,
+  roughnessScale: 9.5,
+  bumpScale: 0.9,
+  envMapIntensity: 0.2,
 
   // camera & depth of field
-  fov: 40,
-  autoFocus: false,
-  focusDistance: 10,
-  focusRange: 18.4,
-  bokehScale: 5.8,
+  fov: 30,
+  autoFocus: true, // pointer→terrain autofocus (replaces the old cone autofocus)
+  focusDistance: 13.2698,
+  focusRange: 16,
+  bokehScale: 3.7,
 
   // map overlay
   mapTint: 1.0,
@@ -195,12 +196,12 @@ const params = {
   cloudDrift: 1,
 
   // light
-  sunIntensity: 8.3,
-  sunAzimuth: 90, // due east — a low sunrise, long warm shadows
-  sunElevation: 10,
-  hemiIntensity: 0.0,
-  envLight: 0.3,
-  shadowSoftness: 15,
+  sunIntensity: 7.6,
+  sunAzimuth: 162,
+  sunElevation: 16,
+  hemiIntensity: 0.6,
+  envLight: 0.16,
+  shadowSoftness: 5,
 }
 
 // ------------------------------------------------------------------ renderer / scene
@@ -654,6 +655,7 @@ dofPass.enabled = params.bokehScale > 0
 // ------------------------------------------------------------------ pointer
 
 const mouse = new THREE.Vector2(0, 0)
+const focusRay = new THREE.Raycaster() // reused for pointer autofocus
 let lastPointer = null
 window.addEventListener('pointermove', (e) => {
   const nx = (e.clientX / window.innerWidth) * 2 - 1
@@ -926,8 +928,7 @@ function setDarkMode(v) {
   terrain.mapUniforms.uContourWeight.value = v ? 0.5 : params.contourWeight
   // the slab and its table follow the sheet, so the object reads as one piece
   params.plinthColor = v ? DARK.plinth : LIGHT_PLINTH.plinth
-  params.baseColor = v ? DARK.base : LIGHT_PLINTH.base
-  plinth.setColors(params)
+  plinth.setColors(params) // wall follows the mode; the table is shadow-only
   // draped place/elevation labels re-render with the mode's ink (labelOpts
   // reads params.darkMode), the 3D survey furniture (POI stems, circles)
   // regenerates in light ink, and the GPX profile canvas repaints with the
@@ -1031,10 +1032,13 @@ makeDraggable(modes.altEl)
 makeDraggable(gpxLayer.profileEl, gpxLayer.profileEl.querySelector('.gpx-profile-head'))
 makeDraggable(hud2.root.querySelector('.hud-block.hud-tl'))
 makeDraggable(hud2.root.querySelector('.hud-block.hud-brt'))
-makeCollapsible(overlayPanel.root, overlayPanel.root.querySelector('.mop-drag'), '.mop-btns, .mop-mono, .mop-list-head, .mop-list, .mop-check, .hud-rule')
-makeCollapsible(landmarksPanel.root, landmarksPanel.root.querySelector('.lmk-drag'), '.lmk-list')
-makeCollapsible(hud2.root.querySelector('.hud-block.hud-tl'), hud2.root.querySelector('.hud-block.hud-tl .hud-kicker'), '.hud-dim, .hud-rule, .hud-strong')
-makeCollapsible(hud2.root.querySelector('.hud-block.hud-brt'), hud2.root.querySelector('.hud-block.hud-brt .hud-kicker'), '.hud-row')
+// all the panels share one accordion group: opening one folds the others so
+// the screen never fills up with everything expanded at once
+const ACC = 'panels'
+makeCollapsible(overlayPanel.root, overlayPanel.root.querySelector('.mop-drag'), '.mop-btns, .mop-mono, .mop-list-head, .mop-list, .mop-check, .hud-rule', ACC)
+makeCollapsible(landmarksPanel.root, landmarksPanel.root.querySelector('.lmk-drag'), '.lmk-list', ACC)
+makeCollapsible(hud2.root.querySelector('.hud-block.hud-tl'), hud2.root.querySelector('.hud-block.hud-tl .hud-kicker'), '.hud-dim, .hud-rule, .hud-strong', ACC)
+makeCollapsible(hud2.root.querySelector('.hud-block.hud-brt'), hud2.root.querySelector('.hud-block.hud-brt .hud-kicker'), '.hud-row', ACC)
 
 // fixed control bar: hide-all-UI toggle + collapse-all, always reachable
 const uiBar = document.createElement('div')
@@ -1238,7 +1242,7 @@ fCamera.add(params, 'fov', 20, 60, 1).onChange((v) => {
   camera.fov = v
   camera.updateProjectionMatrix()
 })
-fCamera.add(params, 'autoFocus').name('autofocus cone')
+fCamera.add(params, 'autoFocus').name('autofocus (pointer)')
 fCamera.add(params, 'focusDistance', 5, 60, 0.1).name('focus distance').listen()
 fCamera.add(params, 'focusRange', 0.5, 25, 0.1).name('focus range').onChange((v) => {
   dof.cocMaterial.worldFocusRange = v
@@ -1331,7 +1335,6 @@ fSlab
   .name('thickness')
   .onFinishChange(() => plinth.rebuild(terrain, params))
 fSlab.addColor(params, 'plinthColor').name('edge color').onChange(() => plinth.setColors(params))
-fSlab.addColor(params, 'baseColor').name('table color').onChange(() => plinth.setColors(params))
 fSlab.close()
 
 const fLook = gui.addFolder('Look')
@@ -1571,8 +1574,14 @@ function tick() {
     }
   }
 
-  if (params.autoFocus) {
-    params.focusDistance = camera.position.distanceTo(cone.getFocusPoint())
+  // pointer autofocus: focus where the ray from the camera through the cursor
+  // meets the terrain; on a miss (sky / off-map) hold the last valid focus
+  if (params.autoFocus && modes.mode === 'surface') {
+    focusRay.setFromCamera(mouse, camera)
+    const hit = focusRayHit(focusRay.ray.origin, focusRay.ray.direction, terrain.sample, {
+      halfExtent: TERRAIN_SIZE / 2,
+    })
+    if (hit != null) params.focusDistance += (hit - params.focusDistance) * Math.min(1, dt * 8)
   }
   dof.cocMaterial.worldFocusDistance = params.focusDistance
 
