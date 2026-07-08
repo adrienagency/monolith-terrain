@@ -12,10 +12,12 @@ export const TEMPLATES = {
     label: 'ICELAND',
     darkMode: false,
     palette: {
-      // land: pale blue coast climbing to white summits (inverted-warm, cool)
-      gradLow: '#ccdcea',
-      gradMid1: '#dce7f1',
-      gradMid2: '#edf3f9',
+      // land: steel-blue coast and mid-slopes climbing to white summits
+      // (cool, inverted-warm) — kept a touch deeper so the mid-relief reads
+      // steel-blue like the reference rather than washing out pale
+      gradLow: '#a9c2da',
+      gradMid1: '#c2d5e8',
+      gradMid2: '#e2edf6',
       gradHigh: '#ffffff',
       gradMid1Pos: 0.38,
       gradMid2Pos: 0.66,
@@ -26,11 +28,13 @@ export const TEMPLATES = {
       ink: '#3a5578',
     },
     style: {
-      mapTint: 0.6, // enough blue while the hillshade still sculpts the relief
+      mapTint: 0.68, // blue dominates the mid-slopes while the hillshade sculpts
       heightContrast: 3.4,
       heightPivot: 0.46,
       slopeTint: 0, // no warm slope brown — this world is blue and white
     },
+    // flatten the relief toward a bathymetric plate (camera untouched)
+    terrain: { demExaggeration: 1.0 },
     grid: {
       contourInterval: 0.12,
       contourOpacity: 0, // the reference has no contour lines

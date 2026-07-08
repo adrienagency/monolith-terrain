@@ -830,7 +830,8 @@ const peaksLayer = new PeaksLayer({
   },
 })
 
-// the shipped survey look — what ⟲ RESET LOOK restores
+// the shipped survey look — what ⟲ RESET LOOK restores. Templates can now
+// change light/surface/post/toggles too, so the reset snapshots ALL of it.
 const DEFAULT_LOOK = Object.freeze({
   gradLow: params.gradLow,
   gradMid1: params.gradMid1,
@@ -848,10 +849,40 @@ const DEFAULT_LOOK = Object.freeze({
   contourInterval: params.contourInterval,
   contourOpacity: params.contourOpacity,
   contourColor: params.contourColor,
+  contourWeight: params.contourWeight,
   gridStep: params.gridStep,
   gridOpacity: params.gridOpacity,
   gridColor: params.gridColor,
 })
+// the rest of the shipped scene, so a template never leaves a stuck light /
+// material / post-FX / toggle behind after RESET LOOK
+const DEFAULT_LIGHT = Object.freeze({
+  sunIntensity: params.sunIntensity,
+  sunAzimuth: params.sunAzimuth,
+  sunElevation: params.sunElevation,
+  hemiIntensity: params.hemiIntensity,
+  envLight: params.envLight,
+  shadowSoftness: params.shadowSoftness,
+})
+const DEFAULT_SURFACE = Object.freeze({
+  color: params.color,
+  roughness: params.roughness,
+  roughnessVariation: params.roughnessVariation,
+  roughnessScale: params.roughnessScale,
+  bumpScale: params.bumpScale,
+  envMapIntensity: params.envMapIntensity,
+})
+const DEFAULT_FX = Object.freeze({
+  fogColor: '#ffffff',
+  exposure: params.exposure,
+  contrast: params.contrast,
+  saturation: params.saturation,
+  vignette: params.vignette,
+  grain: params.grain,
+  clouds: params.cloudsEnabled,
+  plinth: params.plinth,
+})
+const DEFAULT_EXAGGERATION = params.demExaggeration
 
 function applyPalette(p) {
   params.gradLow = p.gradLow
@@ -976,12 +1007,20 @@ function applyLook(k) {
   if (k.grain != null) grain.blendMode.opacity.value = params.grain = k.grain
   if (k.clouds != null) {
     params.cloudsEnabled = k.clouds
-    clouds.build(params)
+    if (k.clouds) clouds.build(params) // no point rebuilding just to hide them
     clouds.setVisible(k.clouds && modes.mode === 'surface')
   }
   if (k.plinth != null) {
     params.plinth = k.plinth
     plinth.setVisible(k.plinth && modes.mode === 'surface')
+  }
+}
+// vertical relief scale — lowering it flattens the terrain toward a
+// bathymetric-plate read without touching the camera (rebuilds the DEM mesh)
+function applyTerrainScale(t) {
+  if (t.demExaggeration != null && t.demExaggeration !== params.demExaggeration) {
+    params.demExaggeration = t.demExaggeration
+    if (params.source === 'real') regenerateTerrain()
   }
 }
 function applyTemplate(t) {
@@ -992,9 +1031,12 @@ function applyTemplate(t) {
   if (t.light) applyLight(t.light)
   if (t.surface) applySurface(t.surface)
   if (t.look) applyLook(t.look)
+  if (t.terrain) applyTerrainScale(t.terrain)
   gui.controllersRecursive().forEach((c) => c.updateDisplay())
 }
 
+// RESET LOOK restores the whole shipped scene — palette + style + grid AND the
+// light / surface / post-FX / scene toggles a template may have changed
 function resetLook() {
   setDarkMode(false)
   applyPalette({ ...DEFAULT_LOOK, ink: DEFAULT_LOOK.contourColor })
@@ -1008,10 +1050,15 @@ function resetLook() {
     contourInterval: DEFAULT_LOOK.contourInterval,
     contourOpacity: DEFAULT_LOOK.contourOpacity,
     contourColor: DEFAULT_LOOK.contourColor,
+    contourWeight: DEFAULT_LOOK.contourWeight,
     gridStep: DEFAULT_LOOK.gridStep,
     gridOpacity: DEFAULT_LOOK.gridOpacity,
     gridColor: DEFAULT_LOOK.gridColor,
   })
+  applyLight({ ...DEFAULT_LIGHT })
+  applySurface({ ...DEFAULT_SURFACE })
+  applyLook({ ...DEFAULT_FX })
+  applyTerrainScale({ demExaggeration: DEFAULT_EXAGGERATION })
 }
 
 const landmarksPanel = createLandmarksPanel({
@@ -1083,7 +1130,7 @@ makeDraggable(hud2.root.querySelector('.hud-block.hud-brt'))
 // all the panels share one accordion group: opening one folds the others so
 // the screen never fills up with everything expanded at once
 const ACC = 'panels'
-makeCollapsible(overlayPanel.root, overlayPanel.root.querySelector('.mop-drag'), '.mop-btns, .mop-mono, .mop-list-head, .mop-list, .mop-check, .hud-rule', ACC)
+makeCollapsible(overlayPanel.root, overlayPanel.root.querySelector('.mop-drag'), '.mop-btns, .mop-list-title, .mop-templates, .mop-mono, .mop-list-head, .mop-list, .mop-check, .hud-rule', ACC)
 makeCollapsible(landmarksPanel.root, landmarksPanel.root.querySelector('.lmk-drag'), '.lmk-list', ACC)
 makeCollapsible(hud2.root.querySelector('.hud-block.hud-tl'), hud2.root.querySelector('.hud-block.hud-tl .hud-kicker'), '.hud-dim, .hud-rule, .hud-strong', ACC)
 makeCollapsible(hud2.root.querySelector('.hud-block.hud-brt'), hud2.root.querySelector('.hud-block.hud-brt .hud-kicker'), '.hud-row', ACC)

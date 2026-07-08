@@ -51,4 +51,6 @@ test('ICELAND reproduces the cool bathymetric plate', () => {
   // a low raking hillshade sun
   assert.ok(t.light.sunElevation <= 35, 'low sun for crisp relief')
   assert.equal(t.darkMode, false)
+  // flattened toward a bathymetric plate (vertical scale pulled down)
+  assert.ok(t.terrain && t.terrain.demExaggeration <= 1.1, 'relief flattened')
 })

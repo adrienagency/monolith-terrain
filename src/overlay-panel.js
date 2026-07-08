@@ -51,6 +51,8 @@ export function createOverlayPanel({ apply, announce, getMode }) {
     b.addEventListener('click', () => {
       apply.template(tpl)
       darkBox.checked = !!tpl.darkMode
+      renderList() // palette list follows the template's mode
+      tplEl.querySelectorAll('.mop-tpl').forEach((x) => x.classList.toggle('active', x === b))
       announce(`TEMPLATE — ${(tpl.label || key).toUpperCase()}`)
     })
     tplEl.appendChild(b)
@@ -97,6 +99,7 @@ export function createOverlayPanel({ apply, announce, getMode }) {
   root.querySelector('[data-a="reset"]').addEventListener('click', () => {
     apply.reset()
     darkBox.checked = false
+    tplEl.querySelectorAll('.mop-tpl.active').forEach((x) => x.classList.remove('active'))
     renderList()
     announce('LOOK RESET — SURVEY DEFAULTS')
   })
