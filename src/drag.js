@@ -2,7 +2,20 @@
 // explicit left/top positioning (whatever corner anchors or transforms it had
 // are dropped), then it follows the pointer, clamped to the viewport.
 
+const registry = new Set()
+
+// pull every dragged panel back into view after a window resize
+export function reclampDraggables() {
+  for (const el of registry) {
+    if (el.style.left === '') continue // never dragged — still CSS-anchored
+    const r = el.getBoundingClientRect()
+    el.style.left = `${Math.min(Math.max(r.left, -el.offsetWidth * 0.6), window.innerWidth - el.offsetWidth * 0.4)}px`
+    el.style.top = `${Math.min(Math.max(r.top, 0), window.innerHeight - 28)}px`
+  }
+}
+
 export function makeDraggable(el, handle = el) {
+  registry.add(el)
   handle.classList.add('draggable-handle')
   let dragging = false
   let ox = 0

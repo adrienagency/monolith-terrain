@@ -24,7 +24,7 @@ import { createHud3D, findPois } from './hud3d.js'
 import { createHud2D } from './hud2d.js'
 import { loadDem } from './dem.js'
 import { Globe } from './globe.js'
-import { Modes } from './modes.js'
+import { Modes, stepZoom } from './modes.js'
 import { createGoto } from './goto.js'
 import { GpxLayer, parseGpx } from './gpx.js'
 import { worldToLatLon } from './geo.js'
@@ -32,7 +32,7 @@ import { TERRAIN_SIZE } from './terrain.js'
 import { createOverlayPanel } from './overlay-panel.js'
 import { PeaksLayer } from './peaks.js'
 import { Clouds } from './clouds.js'
-import { makeDraggable } from './drag.js'
+import { makeDraggable, reclampDraggables } from './drag.js'
 
 // ------------------------------------------------------------------ params
 
@@ -284,7 +284,13 @@ scene.add(cone.group)
 clouds = new Clouds(scene, terrain, params)
 clouds.setSunDir(sun.position)
 
-const labelOpts = () => ({ real: params.source === 'real', toFeet: (h) => terrain.heightToFeet(h) })
+const labelOpts = () => ({
+  real: params.source === 'real',
+  toFeet: (h) => terrain.heightToFeet(h),
+  // dark mode: printed cartography flips to light ink or it vanishes on the
+  // near-black terrain; light mode keeps the labels' own vintage browns
+  ink: params.darkMode ? '#e8e2d2' : undefined,
+})
 let labels = createLabels(terrain.sample, params.seed, labelOpts())
 labels.visible = params.labels
 scene.add(labels)
@@ -752,12 +758,12 @@ modes = new Modes({
     getRefineTarget() {
       if (params.source !== 'real' || !dem || params.demZoom >= 12) return null
       const { lat, lon } = worldToLatLon(dem, controls.target.x, controls.target.z)
-      return { lat, lon, zoom: Math.min(params.demZoom + 2, 12) }
+      return { lat, lon, zoom: stepZoom(params.demZoom, 1) }
     },
     getCoarsenTarget() {
       if (params.source !== 'real' || !dem || params.demZoom <= 8) return null
       const { lat, lon } = worldToLatLon(dem, controls.target.x, controls.target.z)
-      return { lat, lon, zoom: Math.max(params.demZoom - 2, 8) }
+      return { lat, lon, zoom: stepZoom(params.demZoom, -1) }
     },
   },
 })
@@ -843,6 +849,7 @@ function setDarkMode(v) {
   params.fogColor = sheet
   fogRef.color.set(sheet)
   scene.background.set(sheet)
+  modes.whiteEl.style.background = sheet // transition flash follows the sheet
   document.documentElement.style.setProperty('--hud-ink', v ? '#e8e4da' : params.hudInk)
   document.documentElement.style.setProperty(
     '--hud-paper',
@@ -856,6 +863,11 @@ function setDarkMode(v) {
     gridOpacity: params.gridOpacity,
     gridColor: v ? '#d8d2c2' : DEFAULT_LOOK.gridColor,
   })
+  // draped place/elevation labels re-render with the mode's ink (labelOpts
+  // reads params.darkMode), and the GPX profile canvas repaints with the
+  // flipped --hud-ink — both would otherwise keep dark strokes on dark paper
+  regenerateLabels()
+  gpxLayer.setHover(-1)
 }
 
 function resetLook() {
@@ -1164,12 +1176,23 @@ fMap
     globe.rebuildRamp(params)
   })
 fMap
+  .addColor(params, 'oceanMid')
+  .name('ocean: mid')
+  .onChange((v) => {
+    terrain.mapUniforms.uOceanMid.value.set(v)
+    globe.rebuildRamp(params)
+  })
+fMap
   .addColor(params, 'oceanDeep')
   .name('ocean: deep')
   .onChange((v) => {
     terrain.mapUniforms.uOceanDeep.value.set(v)
     globe.rebuildRamp(params)
   })
+fMap
+  .addColor(params, 'gridColor')
+  .name('grid color')
+  .onChange((v) => terrain.mapUniforms.uGridColor.value.set(v))
 fMap.add({ open: () => overlayPanel.setVisible(true) }, 'open').name('open MAP OVERLAY panel ⧉')
 fMap.add(params, 'labels').name('place labels').onChange((v) => (labels.visible = v && modes.mode === 'surface'))
 
@@ -1442,4 +1465,5 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight)
   composer.setSize(window.innerWidth, window.innerHeight)
   gpxLayer.onResize(window.innerWidth, window.innerHeight)
+  reclampDraggables()
 })

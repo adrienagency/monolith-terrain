@@ -26,6 +26,12 @@ export const DIVE_TIERS = [
 export function pickDiveTier(altM) {
   return DIVE_TIERS.find((t) => altM < t.altM) ?? null
 }
+
+// the surface staircase arithmetic: two zoom steps at a time, fine-capped
+// going down, z8-floored going up (past z8 the orbit gate takes over)
+export function stepZoom(zoom, dir, fine = 12) {
+  return dir > 0 ? Math.min(zoom + 2, Math.max(fine, 12)) : Math.max(zoom - 2, 8)
+}
 const DIVE_ALT_M = DIVE_TIERS[0].altM
 const MAX_ALT_M = 16000000 // ~2.5 earth radii — whole planet in frame
 const MSG_MS = 3600
@@ -344,7 +350,11 @@ export class Modes {
         // fast zoom mid-flight; the landing scale matches where you stopped
         const settled = Math.abs(this.orbAlt - this.orbAltTarget) < this.orbAltTarget * 0.06
         if (settled) {
-          const tier = pickDiveTier(this.altM)
+          // pick the tier from the TARGET altitude (where the user chose to
+          // stop), not the still-damping orbAlt — settle fires up to 6% away,
+          // enough to cross a tier boundary and land one scale too coarse
+          // (e.g. wheel stop at 7 700 m read as 8 160 m → z11 instead of FINE)
+          const tier = pickDiveTier(this.orbAltTarget * ORBITAL_M_PER_UNIT)
           if (tier) {
             this._diveArmed = false
             this._dive(tier)

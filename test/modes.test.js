@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DIVE_TIERS, pickDiveTier } from '../src/modes.js'
+import { DIVE_TIERS, pickDiveTier, stepZoom } from '../src/modes.js'
 
 test('tiers are ordered fine → coarse with strictly rising altitudes', () => {
   assert.equal(DIVE_TIERS[0].zoom, null, 'first tier is the fine (user) zoom')
@@ -20,4 +20,17 @@ test('pickDiveTier lands each altitude on the matching scale', () => {
   assert.equal(pickDiveTier(199999).zoom, 8)
   assert.equal(pickDiveTier(200000), null) // still orbital territory
   assert.equal(pickDiveTier(16000000), null)
+})
+
+test('the surface staircase walks z8 ⇄ z12 two steps at a time', () => {
+  // widening (zoom-out against the stop): 12 → 10 → 8, floored at 8
+  assert.equal(stepZoom(12, -1), 10)
+  assert.equal(stepZoom(10, -1), 8)
+  assert.equal(stepZoom(9, -1), 8)
+  assert.equal(stepZoom(8, -1), 8)
+  // refining (zoom-in against the stop): 8 → 10 → 12, capped at fine
+  assert.equal(stepZoom(8, 1), 10)
+  assert.equal(stepZoom(10, 1), 12)
+  assert.equal(stepZoom(11, 1), 12)
+  assert.equal(stepZoom(12, 1, 14), 14) // user picked a finer detail zoom
 })
