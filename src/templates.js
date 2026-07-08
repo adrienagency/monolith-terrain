@@ -81,10 +81,11 @@ export const TEMPLATES = {
     label: 'FALLOUT WASTELANDS',
     darkMode: false,
     palette: {
-      // by elevation: golden plains → orange foothills → dark sienna flanks →
-      // white peaks (a non-monotonic warm ramp, the signature of the plate)
-      gradLow: '#d8b258', // light golden-orange lowland
-      gradMid1: '#b26f2c', // orange ochre foothills
+      // by elevation: bright golden-yellow plains → orange foothills → dark
+      // sienna flanks → white peaks (a non-monotonic warm ramp, the plate's
+      // signature). Plains pushed lighter/yellower toward the reference.
+      gradLow: '#e6c86e', // bright golden-yellow lowland
+      gradMid1: '#bd7a2f', // orange ochre foothills
       gradMid2: '#653818', // dark sienna / burnt-umber flanks
       gradHigh: '#f7f1e6', // white-hot summits
       gradMid1Pos: 0.34,
@@ -96,7 +97,7 @@ export const TEMPLATES = {
       ink: '#4a2f18',
     },
     style: {
-      mapTint: 0.86, // the warm ramp owns the color; hillshade still sculpts
+      mapTint: 0.8, // the warm ramp leads while the hillshade still sculpts
       heightContrast: 4.2,
       heightPivot: 0.4, // most of the range is warm; white only at the very top
       slopeTint: 0.55, // warm brown darkens the steep faces like the reference
@@ -137,7 +138,8 @@ export const TEMPLATES = {
       clouds: false,
       plinth: false,
     },
-    // pronounced relief — the mountains stand proud of the golden plain
-    terrain: { demExaggeration: 1.5 },
+    // relief stands proud of the golden plain, but pulled toward the flat-plate
+    // read so the mountains read as a printed relief map, not a tall diorama
+    terrain: { demExaggeration: 1.25 },
   },
 }

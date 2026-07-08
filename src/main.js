@@ -32,6 +32,7 @@ import { TERRAIN_SIZE } from './terrain.js'
 import { monochromeLook } from './palette.js'
 import { peakVantage } from './camera-poses.js'
 import { focusRayHit } from './autofocus.js'
+import { openExclusive } from './accordion.js'
 import { createOverlayPanel } from './overlay-panel.js'
 import { PeaksLayer } from './peaks.js'
 import { Clouds } from './clouds.js'
@@ -1571,16 +1572,11 @@ gui.close()
 
 // accordion: clicking a folder title open folds every other, so the sidebar
 // stays compact. A direct title-click listener (added after lil-gui's own, so
-// the folder is already toggled) is deterministic — unlike onOpenClose, which
-// doesn't fire on programmatic open() and passes an unreliable reference.
-// key off `_closed` (set synchronously by lil-gui) rather than the DOM class,
-// which lil-gui only flips inside a rAF and so reads stale in this handler
-const isFolderOpen = (f) => !f._closed
+// `_closed` is already toggled) is deterministic — unlike onOpenClose, which
+// doesn't fire on programmatic open() and passes an unreliable reference. The
+// exclusive-open logic is the pure openExclusive helper (unit-tested).
 for (const folder of gui.folders) {
-  folder.$title.addEventListener('click', () => {
-    if (!isFolderOpen(folder)) return // this click just closed it — nothing to do
-    for (const other of gui.folders) if (other !== folder && isFolderOpen(other)) other.close()
-  })
+  folder.$title.addEventListener('click', () => openExclusive(gui.folders, folder))
 }
 
 // ------------------------------------------------------------------ loop

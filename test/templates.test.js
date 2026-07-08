@@ -73,7 +73,7 @@ test('FALLOUT WASTELANDS is a warm scorched-plate look', () => {
   assert.ok(hexToHsl(t.palette.oceanShallow).l > 0.85, 'very light sea')
   // warm slope shading, high tint, flat plate, no engraving
   assert.ok(t.style.slopeTint > 0.3, 'warm slope shading on the flanks')
-  assert.ok(t.style.mapTint > 0.8, 'the warm ramp dominates')
+  assert.ok(t.style.mapTint >= 0.78, 'the warm ramp leads while the hillshade sculpts')
   assert.equal(t.grid.contourOpacity, 0)
   assert.equal(t.grid.gridOpacity, 0)
   assert.equal(t.look.clouds, false)
