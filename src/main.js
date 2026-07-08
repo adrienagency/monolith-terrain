@@ -30,6 +30,7 @@ import { GpxLayer, parseGpx } from './gpx.js'
 import { worldToLatLon } from './geo.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { monochromeLook } from './palette.js'
+import { peakVantage } from './camera-poses.js'
 import { createOverlayPanel } from './overlay-panel.js'
 import { PeaksLayer } from './peaks.js'
 import { Clouds } from './clouds.js'
@@ -377,11 +378,8 @@ function flyTo(pos, target) {
 // clicking a PK marker or a named summit orbits the camera just ABOVE the peak
 // and frames it — a high, slightly-offset vantage looking down at the top
 function focusOnPeak(x, h, z) {
-  const dir = new THREE.Vector3(x, 0, z)
-  if (dir.lengthSq() < 1e-4) dir.set(0, 0, 1)
-  dir.normalize()
-  const pos = new THREE.Vector3(x + dir.x * 3.4, h + 5.6, z + dir.z * 3.4)
-  flyTo(pos, new THREE.Vector3(x, h + 0.3, z))
+  const v = peakVantage(x, h, z)
+  flyTo(new THREE.Vector3(v.pos.x, v.pos.y, v.pos.z), new THREE.Vector3(v.target.x, v.target.y, v.target.z))
 }
 
 // pose to restore when a selection is closed: wherever the camera was pre-click
@@ -1599,6 +1597,22 @@ function tick() {
 }
 tick()
 
+// Nudge the two column-anchored panels off their CSS fallbacks using MEASURED
+// neighbour sizes, so the layout survives a taller SECTOR or a wider sidebar
+// (the CSS magic-number offsets stay as the headless/hidden-tab fallback).
+function arrangeInitialLayout() {
+  if (window.innerWidth < 2) return // hidden tab reports 0 — keep CSS defaults
+  const sector = hud2.root.querySelector('.hud-block.hud-tl')
+  const telemetry = hud2.root.querySelector('.hud-block.hud-brt')
+  if (sector && overlayPanel.root.style.left === '') {
+    overlayPanel.root.style.top = `${Math.round(sector.getBoundingClientRect().bottom) + 12}px`
+  }
+  if (telemetry && telemetry.style.left === '') {
+    telemetry.style.right = `${Math.round(gui.domElement.offsetWidth) + 40}px`
+  }
+}
+requestAnimationFrame(arrangeInitialLayout)
+
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
@@ -1606,4 +1620,5 @@ window.addEventListener('resize', () => {
   composer.setSize(window.innerWidth, window.innerHeight)
   gpxLayer.onResize(window.innerWidth, window.innerHeight)
   reclampDraggables()
+  arrangeInitialLayout()
 })

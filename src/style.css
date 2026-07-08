@@ -242,18 +242,7 @@ body {
 }
 .hud-x:hover { opacity: 1; color: var(--hud-accent); }
 
-/* lil-gui tweaks — frosted monochrome to match the scene */
-.lil-gui {
-  --background-color: rgba(18, 18, 18, 0.78);
-  --widget-color: rgba(255, 255, 255, 0.08);
-  --hover-color: rgba(255, 255, 255, 0.14);
-  --focus-color: rgba(255, 255, 255, 0.2);
-  --number-color: #d8d8d8;
-  --text-color: #cfcfcf;
-  --title-background-color: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(10px);
-  font-family: 'SF Mono', ui-monospace, monospace !important;
-}
+/* (lil-gui theming lives in the v6 unified-UI block below) */
 
 /* ---------------------------------------------------------------- modes / orbital */
 
@@ -553,9 +542,6 @@ body {
 .peak-marker .tag {
   pointer-events: auto;
   cursor: pointer;
-}
-
-.peak-marker .tag {
   border-left: 3px solid var(--hud-accent);
 }
 

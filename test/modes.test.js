@@ -34,3 +34,12 @@ test('the surface staircase walks z8 ⇄ z12 two steps at a time', () => {
   assert.equal(stepZoom(11, 1), 12)
   assert.equal(stepZoom(12, 1, 14), 14) // user picked a finer detail zoom
 })
+
+test('the staircase climbs to a z15 fine cap (deeper zoom)', () => {
+  // a user on detail z15 who widened to z8 can refine all the way back
+  assert.equal(stepZoom(8, 1, 15), 10)
+  assert.equal(stepZoom(10, 1, 15), 12)
+  assert.equal(stepZoom(12, 1, 15), 14)
+  assert.equal(stepZoom(14, 1, 15), 15) // last step is capped at the fine scale
+  assert.equal(stepZoom(15, -1), 13) // and widening steps back down normally
+})

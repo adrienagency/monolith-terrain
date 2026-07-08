@@ -38,7 +38,7 @@ Zoom all the way out and the map hands over to **MONOLITH EARTH** — the whole 
 ### Terrain sources
 
 - **real world (DEM)** — fetches elevation tiles for the chosen coordinates and rebuilds the map with true landforms. Spot elevations and peak data show real values.
-  - **detail (zoom)** — z8–14: how large an area you get (z8 ≈ 470 km across, z10 ≈ 117 km, z12 ≈ 28 km, z13 ≈ 14 km)
+  - **detail (zoom)** — z8–15: how large an area you get (z8 ≈ 470 km across, z10 ≈ 117 km, z12 ≈ 28 km, z13 ≈ 14 km, z15 ≈ 3.5 km for the tightest detail)
   - **vertical scale** — relief exaggeration; real proportions read flat at map scale, so 1.5–3 is typical
   - **bathymetry** — below sea level the map reads as a nautical chart: pale shallows deepening into dark water, real depths (try the Mariana Trench: `11.35, 142.2`). Ocean colors live in **Map overlay** and follow the palette.
 - **the slab** — the relief sits on a 3D plinth (walls + a neutral table that catches its shadow), so once the edges come into view it reads as a physical object. Thickness and colors are in the **Slab** folder.
@@ -55,7 +55,11 @@ Import creates an accent-colored line draped on the relief with `▶ START` / `�
 
 ### Parameter folders
 
-**Map overlay** (hypsometric gradient stops, contour interval/color, survey grid) · **Surface material** (roughness, micro bump) · **Camera & focus** (real depth of field with autofocus) · **Look** (exposure, contrast, grain, fog) · **HUD** (accent/ink colors, scan wave shape + displacement) · **Motion / Tour** (fly-to easing, tour path smoothing, banking, look-ahead) · **Performance** (render scale, static shadows, shadow resolution) · **Light** (sun azimuth/elevation, shadow softness).
+**Map overlay** (hypsometric gradient stops, contour interval/color/weight, survey grid) · **Surface material** (roughness, micro bump) · **Camera & focus** (real depth of field with autofocus) · **Slab** (thickness, edge/table color) · **Look** (exposure, contrast, grain, fog) · **HUD** (accent/ink colors, scan wave shape + displacement) · **Motion / Tour** (fly-to easing, tour path smoothing, banking, look-ahead) · **Performance** (render scale, static shadows, shadow resolution) · **Light** (sun azimuth/elevation, shadow softness).
+
+### Startup preset
+
+The app opens on a hand-tuned scene: a low **east-sunrise** sun (azimuth 90°, elevation 10°) for long warm shadows, camera at **fov 40** with real depth of field (focus 10, range 18.4, bokeh 5.8, autofocus off), a smooth **surface material** (roughness 0, roughness scale 7.5, micro bump 1.35, env 0.75), and a broad **terrain** (seed 1, scale 0.075, 4 octaves, gain 0.7, amplitude 1.5, warp 1.3, fine detail 0.09). All of it is live in the sidebar folders — the panels there and the pulled-out FUI panels share one look, and the whole UI flips to a readable dark theme with **MAP OVERLAY → ◐ DARK MODE**.
 
 ## Run locally
 

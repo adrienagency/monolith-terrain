@@ -88,7 +88,7 @@ export class PeaksLayer {
         const world = new THREE.Vector3(w.x, y, w.z)
         el.style.cursor = 'pointer'
         el.addEventListener('click', () => this.onFocus?.(world, p.name))
-        this.markers.push({ el, world })
+        this.markers.push({ el, tag, world })
       }
       this.announce(`${this.markers.length} PEAKS PLOTTED`)
     } catch (err) {
@@ -103,6 +103,10 @@ export class PeaksLayer {
       this._v.copy(m.world).project(camera)
       const on = visible && this._v.z < 1
       m.el.style.opacity = on ? 1 : 0
+      // an off-screen marker keeps its last transform (frozen), so without this
+      // its tag (pointer-events:auto) stays clickable while invisible → phantom
+      // clicks focusing a peak that isn't on screen (incl. all of orbit mode)
+      m.tag.style.pointerEvents = on ? 'auto' : 'none'
       if (on) {
         m.el.style.transform = `translate(${((this._v.x * 0.5 + 0.5) * w).toFixed(1)}px, ${((-this._v.y * 0.5 + 0.5) * h).toFixed(1)}px)`
       }
