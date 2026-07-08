@@ -14,8 +14,9 @@ const INTERIOR_STEPS = 12 // coarse grid to find the global min (basin guard)
 // border — a coarser ring leaves gaps you can see the underside through. baseY
 // sits `depth` below the LOWEST point anywhere on the patch (not just the
 // border) so a deep interior basin can never pierce the base plane. Tested.
-export function computeSlab(sample, depth, samples = 256) {
+export function computeSlab(sample, depth, samples = 256, cornerRadius = 0) {
   const n = Math.max(8, Math.round(samples))
+  const r = Math.max(0, Math.min(cornerRadius, HALF - 1))
   let borderMin = Infinity
   let globalMin = Infinity
   const ring = [] // clockwise from the -x/-z corner
@@ -25,10 +26,41 @@ export function computeSlab(sample, depth, samples = 256) {
     if (y < globalMin) globalMin = y
     ring.push({ x, z, y })
   }
-  for (let i = 0; i < n; i++) edge(-HALF + (TERRAIN_SIZE * i) / n, -HALF)
-  for (let i = 0; i < n; i++) edge(HALF, -HALF + (TERRAIN_SIZE * i) / n)
-  for (let i = 0; i < n; i++) edge(HALF - (TERRAIN_SIZE * i) / n, HALF)
-  for (let i = 0; i < n; i++) edge(-HALF, HALF - (TERRAIN_SIZE * i) / n)
+  if (r === 0) {
+    // square footprint (default): 4 sides × n samples, exactly on the mesh grid
+    for (let i = 0; i < n; i++) edge(-HALF + (TERRAIN_SIZE * i) / n, -HALF)
+    for (let i = 0; i < n; i++) edge(HALF, -HALF + (TERRAIN_SIZE * i) / n)
+    for (let i = 0; i < n; i++) edge(HALF - (TERRAIN_SIZE * i) / n, HALF)
+    for (let i = 0; i < n; i++) edge(-HALF, HALF - (TERRAIN_SIZE * i) / n)
+  } else {
+    // rounded-rectangle footprint: straight runs on the mesh grid spacing, with
+    // a quarter-circle arc filleting each of the four salient vertical corners.
+    // Traces the same clockwise perimeter so the wall builder is unchanged.
+    const inner = HALF - r
+    const step = TERRAIN_SIZE / n
+    const straightN = Math.max(1, Math.round((inner * 2) / step))
+    const arcN = Math.max(3, Math.round(n / 48))
+    const line = (x0, z0, x1, z1) => {
+      for (let i = 0; i < straightN; i++) {
+        const t = i / straightN
+        edge(x0 + (x1 - x0) * t, z0 + (z1 - z0) * t)
+      }
+    }
+    const arc = (cx, cz, a0, a1) => {
+      for (let i = 0; i < arcN; i++) {
+        const a = a0 + ((a1 - a0) * i) / arcN
+        edge(cx + Math.cos(a) * r, cz + Math.sin(a) * r)
+      }
+    }
+    line(-inner, -HALF, inner, -HALF) //  top edge   (z=-HALF)
+    arc(inner, -inner, -Math.PI / 2, 0) //  corner +x −z
+    line(HALF, -inner, HALF, inner) //  right edge  (x=+HALF)
+    arc(inner, inner, 0, Math.PI / 2) //  corner +x +z
+    line(inner, HALF, -inner, HALF) //  bottom edge (z=+HALF)
+    arc(-inner, inner, Math.PI / 2, Math.PI) //  corner −x +z
+    line(-HALF, inner, -HALF, -inner) //  left edge   (x=−HALF)
+    arc(-inner, -inner, Math.PI, Math.PI * 1.5) //  corner −x −z
+  }
   // coarse interior sweep for the global minimum
   for (let j = 1; j < INTERIOR_STEPS; j++) {
     for (let i = 1; i < INTERIOR_STEPS; i++) {
@@ -79,8 +111,11 @@ export class Plinth {
     this.depth = params.plinthDepth ?? this.depth
 
     // match the wall ring to the terrain mesh edge resolution so the top of the
-    // walls lands exactly on the relief border (no gaps → no visible underside)
-    const { ring, baseY } = computeSlab(sample, this.depth, params.resolution ?? 256)
+    // walls lands exactly on the relief border (no gaps → no visible underside).
+    // The corner radius rounds the four salient vertical edges; the terrain
+    // shader clips to the SAME rounded rectangle so nothing overhangs the walls.
+    const cornerR = (params.slabCorner ?? 0) * TERRAIN_SIZE
+    const { ring, baseY } = computeSlab(sample, this.depth, params.resolution ?? 256, cornerR)
     this.baseY = baseY
     this.base.position.y = baseY
 
@@ -109,13 +144,15 @@ export class Plinth {
       pushTri(qTop, pBot, qBot)
     }
 
-    // bottom cap (two triangles — a flat quad is plenty, it's never seen lit)
-    const c00 = new THREE.Vector3(-HALF, baseY, -HALF)
-    const c10 = new THREE.Vector3(HALF, baseY, -HALF)
-    const c11 = new THREE.Vector3(HALF, baseY, HALF)
-    const c01 = new THREE.Vector3(-HALF, baseY, HALF)
-    pushTri(c00, c10, c11)
-    pushTri(c00, c11, c01)
+    // bottom cap: a triangle fan from the centre out to every ring point, so the
+    // cap follows the exact (possibly rounded) footprint — no square overhang
+    // poking past the rounded wall bottoms. It's never seen lit; winding is moot.
+    const cen = new THREE.Vector3(0, baseY, 0)
+    for (let i = 0; i < n; i++) {
+      const p = ring[i]
+      const q = ring[(i + 1) % n]
+      pushTri(cen, new THREE.Vector3(q.x, baseY, q.z), new THREE.Vector3(p.x, baseY, p.z))
+    }
 
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))

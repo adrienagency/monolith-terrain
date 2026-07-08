@@ -137,6 +137,59 @@ export class GroundInfoLayer {
     this.meshes.push(mesh)
   }
 
+  // an UPRIGHT plane standing on the slab's south wall (faces +z), for the
+  // engraved block label. Centre at (cx, cy), just proud of the wall face.
+  _addWallPlane(canvas, cx, cy, worldW, worldH) {
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.colorSpace = THREE.SRGBColorSpace
+    tex.anisotropy = 4
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(worldW, worldH),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })
+    )
+    mesh.position.set(cx, cy, HALF + 0.06) // just outside the south wall
+    mesh.renderOrder = 6
+    this.group.add(mesh)
+    this.meshes.push(mesh)
+  }
+
+  // engrave the place name + coordinates on the block's vertical south face,
+  // flush to the lower-left (like a museum relief plate). Name in Rosarivo,
+  // coordinates in Bricolage; both left-aligned, inked to contrast the wall.
+  _sideLabel(info) {
+    const ink = this.getInk?.() || '#222'
+    const baseY = this.getBaseY?.() ?? -8
+    const xLeft = -HALF + 6.5 // clear of the rounded corner, small left margin
+    // NAME (+ country) — the identity line(s)
+    const nameLines = [String(info.name || '').toUpperCase()]
+    if (info.country && info.country.toUpperCase() !== nameLines[0]) nameLines.push(info.country.toUpperCase())
+    const nc = textCanvas(nameLines, {
+      family: TITLE_FONT,
+      weight: 400,
+      px: 60,
+      align: 'left',
+      color: inkRGBA(ink, 0.85),
+      track: 0.03,
+    }).canvas
+    // COORDINATES — one small line beneath
+    const cc = textCanvas([info.coord].filter(Boolean), {
+      family: BODY_FONT,
+      weight: 500,
+      px: 34,
+      align: 'left',
+      color: inkRGBA(ink, 0.7),
+      track: 0.06,
+    }).canvas
+    const nameH = 1.5 * nameLines.length // world height per identity block
+    const coordH = 0.82
+    const bottom = baseY + 1.5 // clear of the base table
+    const nameW = nameH * (nc.width / nc.height)
+    const coordW = coordH * (cc.width / cc.height)
+    // coords sit at the bottom, name stacks above with a small gap
+    this._addWallPlane(cc, xLeft + coordW / 2, bottom + coordH / 2, coordW, coordH)
+    this._addWallPlane(nc, xLeft + nameW / 2, bottom + coordH + 0.5 + nameH / 2, nameW, nameH)
+  }
+
   // Place a block flush to the slab on `side`, its inner edge at the safety
   // margin (HALF + GAP) so nothing ever touches the slab. `near` is the block's
   // leading edge along the run of that side. Returns the trailing edge so blocks
@@ -186,7 +239,7 @@ export class GroundInfoLayer {
 
     // TITLE + coords — below the slab (south), centered
     const titleLines = [String(info.name || '').toUpperCase()]
-    if (info.country) titleLines.push(info.country.toUpperCase())
+    if (info.country && info.country.toUpperCase() !== titleLines[0]) titleLines.push(info.country.toUpperCase())
     let z = this._place(
       // Rosarivo ships a single (400) weight — draw at 400 for a true face
       // rather than a synthesized faux-bold; the px54 size carries the title
@@ -229,6 +282,9 @@ export class GroundInfoLayer {
     // COMPASS ROSE — north-east corner
     const rose = compassCanvas(inkRGBA(ink, 0.72))
     this._addPlaneAt(rose, m + 12, -m - 12, 24, 24)
+
+    // BLOCK LABEL — name + coordinates engraved on the vertical south face
+    this._sideLabel(info)
   }
 
   // wrap a paragraph and place it flush on `side`

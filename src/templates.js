@@ -72,7 +72,8 @@ export const TEMPLATES = {
       vignette: 0.35,
       grain: 0,
       clouds: false, // a flat plate — no volumetric clouds
-      plinth: false, // and no 3D slab
+      // the 3D slab is shared by every template (one block model) so switching
+      // looks never makes the base drop out — templates only restyle it
     },
   },
 
@@ -142,7 +143,7 @@ export const TEMPLATES = {
       vignette: 0.4,
       grain: 0,
       clouds: false,
-      plinth: false,
+      // slab shared across templates — never toggled off (see ICELAND note)
     },
     // pronounced relief — the mountains stand proud of the golden plain
     terrain: { demExaggeration: 1.7 },
@@ -212,7 +213,7 @@ export const TEMPLATES = {
       saturation: 0,
       vignette: 0.38,
       grain: 0,
-      clouds: false,
+      clouds: true, // a mounted 3D plate — let the dense volumetric clouds ride over it
       plinth: true, // a mounted USGS relief plate — keep the 3D slab + shadow
     },
     // sculpted relief like the USGS plate, but not spiky

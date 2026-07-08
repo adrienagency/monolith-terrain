@@ -194,12 +194,14 @@ const params = {
   plinth: true,
   plinthDepth: 7,
   plinthColor: '#d8d4cc',
+  slabCorner: 0.08, // fillet radius on the slab's vertical corners, as a fraction
+  // of the block width (the terrain clips to the same rounded rectangle)
   groundInfo: true, // cartouche (compass rose, name, coords, blurb) around the slab
 
   // clouds — thick and low, clinging to the summits
   cloudsEnabled: true,
   cloudCount: 9,
-  cloudOpacity: 0.85,
+  cloudOpacity: 0.95,
   cloudAltitude: 2.6,
   cloudDrift: 1,
 

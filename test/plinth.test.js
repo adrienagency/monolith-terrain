@@ -51,3 +51,38 @@ test('baseY follows the GLOBAL min — a deep interior basin never pierces it', 
   assert.ok(globalMin <= -20 + 1e-9, 'interior sweep finds the pit')
   assert.ok(baseY < -20, `base (${baseY}) sits below the basin floor`)
 })
+
+test('a corner radius fillets the four salient vertical edges (rounded footprint)', () => {
+  const r = 0.08 * TERRAIN_SIZE // 8% of the block width
+  const { ring } = computeSlab(() => 0, 7, 256, r)
+  // every ring point sits INSIDE (or on) the square, and the sharp square
+  // corners are cut away: nothing intrudes nearer to a true corner than the
+  // fillet allows (the closest an arc gets is r·(√2−1))
+  const minCornerDist = r * (Math.SQRT2 - 1) - 1e-6
+  for (const p of ring) {
+    assert.ok(Math.abs(p.x) <= HALF + 1e-6 && Math.abs(p.z) <= HALF + 1e-6, 'inside the square')
+    const dc = Math.hypot(HALF - Math.abs(p.x), HALF - Math.abs(p.z))
+    assert.ok(dc >= minCornerDist, `point (${p.x.toFixed(1)},${p.z.toFixed(1)}) intrudes into the cut corner`)
+  }
+  // the straight flats still reach the full extent on all four sides
+  const reaches = (pred) => ring.some(pred)
+  assert.ok(reaches((p) => Math.abs(p.z + HALF) < 1e-6), 'top flat present (z=-HALF)')
+  assert.ok(reaches((p) => Math.abs(p.x - HALF) < 1e-6), 'right flat present (x=+HALF)')
+  assert.ok(reaches((p) => Math.abs(p.z - HALF) < 1e-6), 'bottom flat present (z=+HALF)')
+  assert.ok(reaches((p) => Math.abs(p.x + HALF) < 1e-6), 'left flat present (x=-HALF)')
+  // the rounded ring stays watertight — arc points lie on the fillet circle
+  const inner = HALF - r
+  for (const p of ring) {
+    if (Math.abs(p.x) > inner && Math.abs(p.z) > inner) {
+      const d = Math.hypot(Math.abs(p.x) - inner, Math.abs(p.z) - inner)
+      assert.ok(Math.abs(d - r) < 1e-6, `arc point off the fillet circle (d=${d.toFixed(3)}, r=${r})`)
+    }
+  }
+})
+
+test('zero corner radius keeps the exact square ring (backward compatible)', () => {
+  const sq = computeSlab(() => 0, 7, 200)
+  const sq2 = computeSlab(() => 0, 7, 200, 0)
+  assert.equal(sq.ring.length, 800)
+  assert.equal(sq2.ring.length, 800)
+})

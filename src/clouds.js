@@ -56,13 +56,17 @@ float fbm(vec3 p) {
   return v;
 }
 
-// density in ellipsoid-local unit space: puffy fbm carved by the shell falloff
+// density in ellipsoid-local unit space: puffy fbm carved by the shell falloff.
+// uDensity scales the body: >1 fills the puff (fewer holes, heavier core).
+uniform float uDensity;
 float density(vec3 q) {
-  float shell = 1.0 - smoothstep(0.35, 1.0, length(q));
+  // fuller shell (starts fading later) so the cloud carries a solid mid-body
+  float shell = 1.0 - smoothstep(0.5, 1.0, length(q));
   if (shell <= 0.0) return 0.0;
   vec3 p = q * 2.4 + vec3(uSeed * 13.7) + vec3(uTime * 0.02, 0.0, uTime * 0.013);
   float f = fbm(p);
-  return clamp((f - 0.42) * 2.2, 0.0, 1.0) * shell;
+  // lower fbm threshold = more of the volume passes as cloud; uDensity thickens
+  return clamp((f - 0.36) * 2.7, 0.0, 1.0) * shell * uDensity;
 }
 
 void main() {
@@ -98,8 +102,8 @@ void main() {
     if (d <= 0.001) continue;
     // one cheap tap toward the sun: how buried is this sample?
     float occ = density(q + sunL * 0.28) * 0.85 + density(q + sunL * 0.6) * 0.5;
-    float light = exp(-occ * 1.7);
-    float a = 1.0 - exp(-d * dt * 5.2);
+    float light = exp(-occ * 1.9);
+    float a = 1.0 - exp(-d * dt * 7.6);
     lightAcc += light * a * (1.0 - alpha);
     alpha += a * (1.0 - alpha);
   }
@@ -151,8 +155,11 @@ export class Clouds {
     this._rng = rng // respawn draws stay on the seeded stream (reproducible)
     const half = TERRAIN_SIZE / 2 - 4
     for (let i = 0; i < params.cloudCount; i++) {
+      // roughly half the field is "dense": bigger, heavier-bodied puffs that read
+      // as solid and throw a strong cast shadow; the rest stay lighter and wispy
+      const dense = rng() < 0.5
       // thicker, bulkier puffs than before — they ride low over the relief
-      const size = 3.2 + rng() * 3.4
+      const size = (dense ? 4.4 : 2.8) + rng() * (dense ? 3.6 : 2.6)
       const radii = new THREE.Vector3(size, size * (0.5 + rng() * 0.28), size * (0.6 + rng() * 0.32))
       // impostor quad big enough to cover the ellipsoid from any angle
       const quad = Math.max(radii.x, radii.z) * 2.15
@@ -173,7 +180,8 @@ export class Clouds {
             uSunDir: { value: this.sunDir.clone() },
             uSeed: { value: rng() * 100 },
             uTime: { value: 0 },
-            uOpacity: { value: (0.82 + rng() * 0.18) * params.cloudOpacity },
+            uOpacity: { value: Math.min(1, (dense ? 1.0 : 0.82 + rng() * 0.16) * params.cloudOpacity) },
+            uDensity: { value: dense ? 1.7 : 1.0 },
             uGroundY: { value: 0 },
           },
         })
@@ -185,16 +193,17 @@ export class Clouds {
       const hover = params.cloudAltitude * (0.2 + rng() * 1.4)
       mesh.position.set((rng() * 2 - 1) * half, 0, (rng() * 2 - 1) * half)
 
-      // blob shadow draped just above the relief under the cloud — larger and
-      // darker so the cast reads clearly on the map
+      // blob shadow draped just above the relief under the cloud. Dense clouds
+      // cast a wider, markedly darker shadow so the heavy puffs read as solid.
+      const shadowFactor = dense ? 0.52 : 0.3
       const shadow = new THREE.Mesh(
-        new THREE.PlaneGeometry(size * 2.7, size * 1.9),
+        new THREE.PlaneGeometry(size * (dense ? 3.1 : 2.5), size * (dense ? 2.2 : 1.7)),
         new THREE.MeshBasicMaterial({
           map: this.tex,
           color: 0x000000,
           transparent: true,
           depthWrite: false,
-          opacity: 0.3 * params.cloudOpacity,
+          opacity: shadowFactor * params.cloudOpacity,
         })
       )
       shadow.rotation.x = -Math.PI / 2
@@ -202,7 +211,7 @@ export class Clouds {
 
       this.group.add(mesh)
       this.group.add(shadow)
-      this.clouds.push({ mesh, shadow, speed: 0.14 + rng() * 0.22, size, hover })
+      this.clouds.push({ mesh, shadow, speed: 0.14 + rng() * 0.22, size, hover, shadowFactor })
     }
   }
 
@@ -240,7 +249,7 @@ export class Clouds {
       const shz = z + (sz / sl) * off
       const shIn = Math.abs(shx) < half && Math.abs(shz) < half
       c.shadow.position.set(shx, shIn ? this.terrain.sample(shx, shz) + 0.14 : 0.14, shz)
-      c.shadow.material.opacity = 0.3 * params.cloudOpacity
+      c.shadow.material.opacity = c.shadowFactor * params.cloudOpacity
     }
   }
 

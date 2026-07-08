@@ -53,7 +53,7 @@ test('ICELAND reproduces the cool bathymetric plate', () => {
   assert.equal(t.grid.gridOpacity, 0)
   assert.equal(t.style.slopeTint, 0)
   assert.equal(t.look.clouds, false)
-  assert.equal(t.look.plinth, false)
+  assert.notEqual(t.look.plinth, false, 'the 3D slab is shared — a template never hides it')
   assert.ok(t.light.sunElevation <= 35, 'low sun for crisp relief')
   assert.equal(t.darkMode, false)
 })
@@ -78,7 +78,7 @@ test('FALLOUT WASTELANDS is a warm scorched-plate look', () => {
   assert.ok(t.style.slopeTint > 0.3, 'warm slope shading on the flanks')
   assert.ok(t.style.mapTint >= 0.78, 'the warm ramp leads while the hillshade sculpts')
   assert.equal(t.look.clouds, false)
-  assert.equal(t.look.plinth, false)
+  assert.notEqual(t.look.plinth, false, 'the 3D slab is shared — a template never hides it')
 })
 
 test('DENALI is a full USGS hypsometric band system over blue water', () => {

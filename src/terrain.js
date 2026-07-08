@@ -40,6 +40,10 @@ export class Terrain {
       // mapped through the DEM scale); uSeaY = -9999 disables (procedural)
       uSeaY: { value: -9999 },
       uSeaRange: { value: 1 },
+      // clip the map to the slab's rounded-rectangle footprint (world XZ) so the
+      // block's vertical corners read soft and nothing overhangs the plinth walls
+      uSlabHalf: { value: TERRAIN_SIZE / 2 },
+      uSlabCorner: { value: (params.slabCorner ?? 0) * TERRAIN_SIZE },
       uOceanShallow: { value: new THREE.Color(params.oceanShallow ?? '#dce8ec') },
       uOceanMid: { value: new THREE.Color(params.oceanMid ?? '#7fa8b8') },
       uOceanDeep: { value: new THREE.Color(params.oceanDeep ?? '#31576b') },
@@ -98,6 +102,8 @@ uniform vec3 uOceanMid;
 uniform vec3 uOceanDeep;
 uniform vec3 uGridColor;
 uniform vec3 uContourColor;
+uniform float uSlabHalf;
+uniform float uSlabCorner;
 uniform float uScanT;
 uniform vec3 uScanColor;
 uniform float uScanWidth;
@@ -107,6 +113,15 @@ uniform float uScanBlur;`
           '#include <color_fragment>',
           `#include <color_fragment>
 {
+  // --- rounded-rect footprint clip: discard fragments outside the slab's
+  // filleted corners so the block's vertical edges read soft (matches the
+  // plinth walls). Zero radius = untouched square. SDF of a rounded box.
+  if (uSlabCorner > 0.0) {
+    vec2 cq = abs(vWorldPos.xz) - vec2(uSlabHalf - uSlabCorner);
+    float csd = length(max(cq, 0.0)) + min(max(cq.x, cq.y), 0.0) - uSlabCorner;
+    if (csd > 0.0) discard;
+  }
+
   // --- hypsometric tint: user gradient sampled by height, contrast expanded around a pivot
   float hNorm = clamp((vWorldPos.y - uHeightRange.x) / max(uHeightRange.y - uHeightRange.x, 1e-4), 0.0, 1.0);
   float rampT = clamp(0.5 + (hNorm - uHeightPivot) * uHeightContrast, 0.0, 1.0);
