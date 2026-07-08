@@ -38,10 +38,11 @@ export async function fetchTopPeaks(dem, count = 5) {
 }
 
 export class PeaksLayer {
-  constructor({ terrain, getDem, announce }) {
+  constructor({ terrain, getDem, announce, onFocus }) {
     this.terrain = terrain
     this.getDem = getDem
     this.announce = announce
+    this.onFocus = onFocus // (worldVec3, name) → orbit above the summit
     this.enabled = false
     this.markers = [] // { el, world }
     this._v = new THREE.Vector3()
@@ -84,7 +85,10 @@ export class PeaksLayer {
         tag.append(nameEl, eleEl)
         el.appendChild(tag)
         document.body.appendChild(el)
-        this.markers.push({ el, world: new THREE.Vector3(w.x, y, w.z) })
+        const world = new THREE.Vector3(w.x, y, w.z)
+        el.style.cursor = 'pointer'
+        el.addEventListener('click', () => this.onFocus?.(world, p.name))
+        this.markers.push({ el, world })
       }
       this.announce(`${this.markers.length} PEAKS PLOTTED`)
     } catch (err) {

@@ -66,31 +66,31 @@ const params = {
   demExaggeration: 1.6,
 
   // terrain generation
-  seed: 7,
-  scale: 0.055,
-  octaves: 6,
-  lacunarity: 2.2,
-  gain: 0.55,
-  amplitude: 1.8,
-  warp: 2.0,
-  detail: 0.0,
-  detailScale: 1.9,
+  seed: 1,
+  scale: 0.075,
+  octaves: 4,
+  lacunarity: 2.1,
+  gain: 0.7,
+  amplitude: 1.5,
+  warp: 1.3,
+  detail: 0.09,
+  detailScale: 0.7,
   resolution: 1024,
 
   // surface material
   color: '#c2c2c2',
-  roughness: 1.0,
-  roughnessVariation: 0.5,
-  roughnessScale: 1,
-  bumpScale: 0.2,
-  envMapIntensity: 1.5,
+  roughness: 0,
+  roughnessVariation: 0,
+  roughnessScale: 7.5,
+  bumpScale: 1.35,
+  envMapIntensity: 0.75,
 
   // camera & depth of field
-  fov: 43,
-  autoFocus: true,
-  focusDistance: 24.74,
-  focusRange: 25,
-  bokehScale: 0,
+  fov: 40,
+  autoFocus: false,
+  focusDistance: 10,
+  focusRange: 18.4,
+  bokehScale: 5.8,
 
   // map overlay
   mapTint: 1.0,
@@ -195,8 +195,8 @@ const params = {
 
   // light
   sunIntensity: 8.3,
-  sunAzimuth: 64,
-  sunElevation: 19,
+  sunAzimuth: 90, // due east — a low sunrise, long warm shadows
+  sunElevation: 10,
   hemiIntensity: 0.0,
   envLight: 0.3,
   shadowSoftness: 15,
@@ -374,6 +374,16 @@ function flyTo(pos, target) {
   tween.active = true
 }
 
+// clicking a PK marker or a named summit orbits the camera just ABOVE the peak
+// and frames it — a high, slightly-offset vantage looking down at the top
+function focusOnPeak(x, h, z) {
+  const dir = new THREE.Vector3(x, 0, z)
+  if (dir.lengthSq() < 1e-4) dir.set(0, 0, 1)
+  dir.normalize()
+  const pos = new THREE.Vector3(x + dir.x * 3.4, h + 5.6, z + dir.z * 3.4)
+  flyTo(pos, new THREE.Vector3(x, h + 0.3, z))
+}
+
 // pose to restore when a selection is closed: wherever the camera was pre-click
 const returnPose = { saved: false, pos: new THREE.Vector3(), target: new THREE.Vector3() }
 
@@ -544,8 +554,7 @@ const hud2 = createHud2D({
     selectedPoi = i
     const p = pois[i]
     hud2.setSelected(i, p)
-    const dir = new THREE.Vector3(p.x, 0, p.z).normalize()
-    flyTo(new THREE.Vector3(p.x + dir.x * 6.5, p.h + 4.2, p.z + dir.z * 6.5), new THREE.Vector3(p.x, p.h + 0.6, p.z))
+    focusOnPeak(p.x, p.h, p.z)
   },
   onDeselect() {
     selectedPoi = -1
@@ -812,7 +821,15 @@ const gotoCtl = createGoto({ modes, announce: (m) => modes.announce(m) })
 
 // ------------------------------------------------------------------ map overlay panel + peaks
 
-const peaksLayer = new PeaksLayer({ terrain, getDem: () => dem, announce: (m) => modes.announce(m) })
+const peaksLayer = new PeaksLayer({
+  terrain,
+  getDem: () => dem,
+  announce: (m) => modes.announce(m),
+  onFocus: (world, name) => {
+    modes.announce(`FOCUS — ${name.toUpperCase()}`)
+    focusOnPeak(world.x, world.y, world.z)
+  },
+})
 
 // the shipped survey look — what ⟲ RESET LOOK restores
 const DEFAULT_LOOK = Object.freeze({
@@ -885,6 +902,7 @@ function applyGridContour(g) {
 // vivid summit accents — the whole look follows one switch
 function setDarkMode(v) {
   params.darkMode = v
+  document.body.classList.toggle('dark', v) // drives the FUI + lil-gui theme
   const sheet = v ? DARK.sheet : '#ffffff'
   params.fogColor = sheet
   fogRef.color.set(sheet)
@@ -1123,7 +1141,7 @@ fSource
 latCtrl.lat = fSource.add(params, 'demLat', -85, 85, 0.0001).name('latitude')
 latCtrl.lon = fSource.add(params, 'demLon', -180, 180, 0.0001).name('longitude')
 fSource
-  .add(params, 'demZoom', [8, 9, 10, 11, 12, 13, 14])
+  .add(params, 'demZoom', [8, 9, 10, 11, 12, 13, 14, 15])
   .name('detail (zoom)')
   .onChange((v) => {
     if (v >= 12) userFineZoom = v // remember the user's chosen fine scale

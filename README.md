@@ -22,6 +22,7 @@ Zoom all the way out and the map hands over to **MONOLITH EARTH** — the whole 
 | Monochrome look | **MAP OVERLAY → ◻ FULL WHITE / ◼ FULL DARK** — the relief carried by light alone, museum-slab style |
 | Playback & tours | The **MOTION** panel at the bottom: pause, cinematic tour from/to, duration and altitude |
 | Name the summits | **MAP OVERLAY → ▲ TOP-5 PEAKS** — the five highest named peaks of the patch, altitude underneath (OSM data) |
+| Focus a peak | Click a `PK-xx` marker or a named summit — the camera orbits just above the peak and frames its top |
 | Clouds | **Clouds** folder — sparse drifting puffs with soft ground shadows, on/off |
 | Go somewhere exact | **Terrain source → go to "lat, lon"** (paste straight from Google Maps) or **search place** — the camera flies there over the globe and dives |
 | Load a GPX track | Drag & drop a `.gpx` anywhere on the page (or **GPX track → import**) — the map recenters and drapes the track |

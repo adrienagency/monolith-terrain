@@ -551,6 +551,11 @@ body {
 }
 
 .peak-marker .tag {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.peak-marker .tag {
   border-left: 3px solid var(--hud-accent);
 }
 
@@ -875,4 +880,89 @@ body.ui-hidden .gpx-profile,
 body.ui-hidden .gpx-tip,
 body.ui-hidden .lil-gui {
   display: none !important;
+}
+
+/* ---------------------------------------------------------------- v6: unified UI theme (lil-gui to match FUI) + dark legibility */
+
+/* the lil-gui sidebar wears the same paper/ink/accent as the FUI panels */
+.lil-gui {
+  --background-color: var(--hud-paper);
+  --text-color: var(--hud-ink);
+  --title-background-color: transparent;
+  --title-text-color: var(--hud-accent);
+  --widget-color: rgba(128, 128, 128, 0.16);
+  --hover-color: rgba(128, 128, 128, 0.26);
+  --focus-color: rgba(128, 128, 128, 0.34);
+  --number-color: var(--hud-accent);
+  --string-color: var(--hud-accent);
+  --font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
+  --font-size: 10px;
+  --widget-height: 22px;
+  --title-height: 26px;
+  backdrop-filter: blur(var(--hud-blur));
+  border: 1px solid var(--hud-ink);
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+}
+
+.lil-gui .title {
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  border-bottom: 1px solid color-mix(in srgb, var(--hud-ink) 30%, transparent);
+}
+
+.lil-gui.root > .children > .lil-gui > .title {
+  border-left: 3px solid var(--hud-accent);
+}
+
+/* dark mode: lift every dim label so the menus stay readable (the exact
+   complaint — palette names and secondary text vanished on the dark sheet) */
+body.dark .mop-pal i,
+body.dark .lmk-place i,
+body.dark .lmk-continent i,
+body.dark .mtn-tour label,
+body.dark .mtn-slider,
+body.dark .hud-dim,
+body.dark .hud-row span,
+body.dark .gpx-profile-head .gpx-stats {
+  opacity: 0.92;
+  color: var(--hud-ink);
+}
+
+body.dark .mop-pal .chip,
+body.dark .lmk-place,
+body.dark .mop-btns button,
+body.dark .mop-mono button,
+body.dark .lmk-continent {
+  border-color: color-mix(in srgb, var(--hud-ink) 55%, transparent);
+}
+
+/* ---------------------------------------------------------------- v6: tidy initial layout — left / right columns, bar top-center */
+
+/* left column: SECTOR (top) then MAP OVERLAY under it, then MOTION low-left */
+.hud-block.hud-tl { top: 16px; left: 16px; bottom: auto; }
+.map-overlay-panel { left: 16px; top: 150px; right: auto; max-height: 52vh; }
+.motion-panel { left: 16px; bottom: 16px; top: auto; right: auto; transform: none; }
+
+/* right column: lil-gui keeps its native top-right; LANDMARKS low-right,
+   TELEMETRY sits between the two bottom panels */
+.landmarks-panel { right: 16px; bottom: 16px; top: auto; max-height: 55vh; }
+.hud-block.hud-brt { right: 300px; left: auto; bottom: 16px; }
+
+/* the fixed control bar and the altimeter live top-center */
+.ui-bar {
+  top: 14px;
+  bottom: auto;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+}
+
+.altimeter {
+  top: 58px;
+  bottom: auto;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
 }
