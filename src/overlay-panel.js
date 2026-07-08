@@ -6,6 +6,7 @@
 // title bar.
 
 import { generatePalette, generateStyle, generateGridContour } from './palette.js'
+import { TEMPLATES } from './templates.js'
 import { makeDraggable } from './drag.js'
 
 const LIST_SIZE = 14
@@ -22,6 +23,9 @@ export function createOverlayPanel({ apply, announce, getMode }) {
       <button data-a="reset">⟲ RESET LOOK</button>
     </div>
     <div class="hud-rule"></div>
+    <div class="mop-list-title">TEMPLATES</div>
+    <div class="mop-templates"></div>
+    <div class="hud-rule"></div>
     <label class="mop-check"><input type="checkbox" data-a="dark"><span>◐ DARK MODE</span></label>
     <div class="mop-mono">
       <button data-a="mono-white">◻ FULL WHITE</button>
@@ -37,6 +41,20 @@ export function createOverlayPanel({ apply, announce, getMode }) {
     <div class="hud-rule"></div>
     <label class="mop-check"><input type="checkbox" data-a="peaks"><span>▲ TOP-5 PEAKS · NAME + ALT</span></label>`
   document.body.appendChild(root)
+
+  // template buttons — each applies a full reference-image look
+  const tplEl = root.querySelector('.mop-templates')
+  for (const [key, tpl] of Object.entries(TEMPLATES)) {
+    const b = document.createElement('button')
+    b.className = 'mop-tpl'
+    b.textContent = `▤ ${tpl.label || key.toUpperCase()}`
+    b.addEventListener('click', () => {
+      apply.template(tpl)
+      darkBox.checked = !!tpl.darkMode
+      announce(`TEMPLATE — ${(tpl.label || key).toUpperCase()}`)
+    })
+    tplEl.appendChild(b)
+  }
 
   const listEl = root.querySelector('.mop-list')
   const foldBtn = root.querySelector('[data-a="fold"]')

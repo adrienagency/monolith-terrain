@@ -970,3 +970,36 @@ body.dark .lmk-continent {
   width: var(--panel-w);
   min-width: 0;
 }
+
+/* ---------------------------------------------------------------- v8: template buttons */
+
+.map-overlay-panel > .mop-list-title {
+  font-size: 9px;
+  letter-spacing: 0.24em;
+  opacity: 0.65;
+  margin: 8px 0 6px;
+}
+
+.mop-templates {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.mop-tpl {
+  all: unset;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  padding: 7px 10px;
+  border: 1px solid var(--hud-ink);
+  transition: background 0.15s, color 0.15s;
+}
+
+.mop-tpl:hover,
+.mop-tpl.active {
+  background: var(--hud-accent);
+  border-color: var(--hud-accent);
+  color: #fff;
+}

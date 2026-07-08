@@ -893,6 +893,7 @@ function applyGridContour(g) {
   terrain.mapUniforms.uGridStep.value = g.gridStep
   terrain.mapUniforms.uGridOpacity.value = g.gridOpacity
   if (g.gridColor) terrain.mapUniforms.uGridColor.value.set(g.gridColor)
+  if (g.contourWeight != null && !params.darkMode) terrain.mapUniforms.uContourWeight.value = g.contourWeight
   globe.setInk(g.contourColor)
   gui.controllersRecursive().forEach((c) => c.updateDisplay())
 }
@@ -947,6 +948,53 @@ function applyMonochrome(kind) {
   applyGridContour(L)
 }
 
+// a look template: a full bundle that reproduces a reference image's style —
+// palette + oceans + grid/contour + hillshade light + surface + background +
+// post-look + scene toggles. Camera/navigation are never touched.
+function applyLight(l) {
+  Object.assign(params, l)
+  placeSun()
+  scene.environmentIntensity = params.envLight
+  sun.shadow.radius = params.shadowSoftness
+}
+function applySurface(s) {
+  Object.assign(params, s)
+  terrain.updateMaterial(params)
+  terrain.rebuildRoughness(params)
+}
+function applyLook(k) {
+  if (k.fogColor != null) {
+    params.fogColor = k.fogColor
+    fogRef.color.set(k.fogColor)
+    scene.background.set(k.fogColor)
+    modes.whiteEl.style.background = k.fogColor
+  }
+  if (k.exposure != null) exposureFx.uniforms.get('exposure').value = params.exposure = k.exposure
+  if (k.contrast != null) contrastFx.uniforms.get('contrast').value = params.contrast = k.contrast
+  if (k.saturation != null) hueSat.saturation = params.saturation = k.saturation
+  if (k.vignette != null) vignette.darkness = params.vignette = k.vignette
+  if (k.grain != null) grain.blendMode.opacity.value = params.grain = k.grain
+  if (k.clouds != null) {
+    params.cloudsEnabled = k.clouds
+    clouds.build(params)
+    clouds.setVisible(k.clouds && modes.mode === 'surface')
+  }
+  if (k.plinth != null) {
+    params.plinth = k.plinth
+    plinth.setVisible(k.plinth && modes.mode === 'surface')
+  }
+}
+function applyTemplate(t) {
+  setDarkMode(t.darkMode ?? false) // base theme first, template values override
+  if (t.palette) applyPalette(t.palette)
+  if (t.style) applyStyle(t.style)
+  if (t.grid) applyGridContour(t.grid)
+  if (t.light) applyLight(t.light)
+  if (t.surface) applySurface(t.surface)
+  if (t.look) applyLook(t.look)
+  gui.controllersRecursive().forEach((c) => c.updateDisplay())
+}
+
 function resetLook() {
   setDarkMode(false)
   applyPalette({ ...DEFAULT_LOOK, ink: DEFAULT_LOOK.contourColor })
@@ -980,6 +1028,7 @@ const overlayPanel = createOverlayPanel({
     reset: resetLook,
     darkMode: setDarkMode,
     monochrome: applyMonochrome,
+    template: applyTemplate,
   },
   announce: (m) => modes.announce(m),
   getMode: () => (params.darkMode ? 'dark' : 'light'),
@@ -1045,7 +1094,11 @@ uiBar.className = 'ui-bar'
 uiBar.innerHTML = '<button data-a="hide" title="show / hide interface">◱ UI</button><button data-a="fold" title="collapse / expand all panels">▤</button>'
 document.body.appendChild(uiBar)
 let uiHidden = false
-let allFolded = false
+// every panel starts folded to its title bar — a clean, quiet first screen
+// (the lil-gui sidebar is collapsed right after it's built, further down)
+let allFolded = true
+collapseAll(true)
+uiBar.querySelector('[data-a="fold"]').classList.toggle('active', allFolded)
 uiBar.querySelector('[data-a="hide"]').addEventListener('click', () => {
   uiHidden = !uiHidden
   setUiHidden(uiHidden)
@@ -1054,6 +1107,7 @@ uiBar.querySelector('[data-a="hide"]').addEventListener('click', () => {
 uiBar.querySelector('[data-a="fold"]').addEventListener('click', () => {
   allFolded = !allFolded
   collapseAll(allFolded)
+  uiBar.querySelector('[data-a="fold"]').classList.toggle('active', allFolded)
 })
 
 // drag & drop a .gpx anywhere on the page
@@ -1464,7 +1518,7 @@ fLight
   .name('shadow softness')
   .onChange((v) => (sun.shadow.radius = v))
 
-// only Terrain source and Tour start expanded
+// everything starts folded — the sidebar and all its folders
 fTerrain.close()
 fSurface.close()
 fCamera.close()
@@ -1474,11 +1528,12 @@ fHud.close()
 fMotion.close()
 fPerf.close()
 fLight.close()
+gui.close() // collapse the whole lil-gui sidebar to its title on load
 
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, plinth, peaksLayer, overlayPanel, landmarksPanel, motionPanel, applyPalette, applyStyle, applyGridContour, applyMonochrome, setDarkMode, get labels() { return labels } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, plinth, peaksLayer, overlayPanel, landmarksPanel, motionPanel, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, get labels() { return labels } }
 
 // real world is the default source — fetch its tiles on startup
 if (params.source === 'real') loadRealTerrain()
