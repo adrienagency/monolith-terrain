@@ -93,6 +93,12 @@ test('DENALI is a full USGS hypsometric band system over blue water', () => {
   const deep = hexToHsl(t.palette.oceanDeep)
   assert.ok(deep.h > 180 && deep.h < 240, `blue water (h=${deep.h.toFixed(0)})`)
   assert.ok(deep.l < hexToHsl(t.palette.oceanShallow).l, 'water darkens with depth')
+  // a real grey scree band sits just below the snow (desaturated, not taupe)
+  const scree = hexToHsl(ramp(t)[6].c)
+  assert.ok(scree.s < 0.12, `scree band is grey, not warm taupe (s=${scree.s.toFixed(2)})`)
+  // the high-rock band reads red-brown, not orange sienna
+  const rock = hexToHsl(ramp(t)[5].c)
+  assert.ok(rock.h <= 20, `high rock is red-brown (h=${rock.h.toFixed(0)})`)
   // dramatic vertical relief, mounted plate (slab kept)
   assert.ok(t.terrain.demExaggeration >= 2, 'dramatic relief')
   assert.equal(t.look.plinth, true, 'a mounted relief plate keeps the slab')

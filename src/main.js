@@ -889,15 +889,13 @@ const DEFAULT_FX = Object.freeze({
 const DEFAULT_EXAGGERATION = params.demExaggeration
 
 function applyPalette(p) {
-  // land ramp: mutate the existing stop objects in place so the GUI color
-  // pickers (bound to these references) keep following the value
-  if (p.rampStops) {
-    if (!Array.isArray(params.rampStops)) params.rampStops = []
-    p.rampStops.forEach((s, i) => {
-      if (params.rampStops[i]) Object.assign(params.rampStops[i], s)
-      else params.rampStops[i] = { ...s }
-    })
-    params.rampStops.length = p.rampStops.length
+  // land ramp: a fixed 8-stop system. Overwrite the existing stop objects in
+  // place (the GUI pickers are bound to these references) and NEVER resize the
+  // array, so a stray-length source can't desync the pickers from the data. A
+  // shorter source repeats its last stop; an empty one is ignored.
+  if (Array.isArray(p.rampStops) && p.rampStops.length) {
+    const src = p.rampStops
+    params.rampStops.forEach((stop, i) => Object.assign(stop, src[Math.min(i, src.length - 1)]))
   }
   params.oceanShallow = p.oceanShallow ?? params.oceanShallow
   params.oceanMid = p.oceanMid ?? params.oceanMid

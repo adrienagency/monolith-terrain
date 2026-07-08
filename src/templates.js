@@ -164,8 +164,8 @@ export const TEMPLATES = {
         { c: '#c8c891', p: 0.28 }, // khaki
         { c: '#cdb079', p: 0.42 }, // tan
         { c: '#bd8a56', p: 0.56 }, // ochre-brown
-        { c: '#a5673f', p: 0.7 }, // reddish rock
-        { c: '#b7a596', p: 0.84 }, // grey scree
+        { c: '#9a4f2c', p: 0.7 }, // reddish-brown high rock (deeper red)
+        { c: '#a7abac', p: 0.84 }, // cool grey scree before the snow
         { c: '#f4f2ee', p: 1.0 }, // snow / ice
       ],
       // blue water, deepening
