@@ -44,6 +44,29 @@ export function trimBlurb(text, maxChars = 260) {
   return (lastStop > 80 ? cut.slice(0, lastStop + 1) : cut.trimEnd() + '…').trim()
 }
 
+// split an extract into a short description (opening) and a distinct anecdote —
+// a later sentence carrying a number or a superlative, the sort of fact that
+// reads well as a standalone note. Pure & tested.
+export function splitBlurb(text) {
+  const clean = (text || '').replace(/\s+/g, ' ').trim()
+  if (!clean) return { description: '', anecdote: '' }
+  const sentences = clean.match(/[^.!?]+[.!?]+/g)?.map((s) => s.trim()) || [clean]
+  const description = trimBlurb(sentences.slice(0, 2).join(' '), 200)
+  const notable = /\d|highest|largest|longest|deepest|oldest|first|only|most|world'?s|tallest|active/i
+  const anecdote = sentences.slice(1).find((s) => notable.test(s) && s !== description) || sentences[2] || ''
+  return { description, anecdote: trimBlurb(anecdote, 170) }
+}
+
+// a real scale bar label for a patch that is `extentMeters` across: a round
+// segment (1/2/5/10/25/50/100…) near a quarter of the width. Pure & tested.
+export function scaleBar(extentMeters) {
+  if (!extentMeters || extentMeters <= 0) return ''
+  const targetKm = extentMeters / 1000 / 4
+  const steps = [1, 2, 5, 10, 25, 50, 100, 250, 500]
+  const seg = steps.reduce((best, s) => (Math.abs(s - targetKm) < Math.abs(best - targetKm) ? s : best), steps[0])
+  return `SCALE  0 ─── ${seg} ─── ${seg * 2} km`
+}
+
 // ---------------------------------------------------------------- fetchers
 
 async function reverseGeocode(lat, lon) {
@@ -72,16 +95,22 @@ async function nearbyWikipedia(lat, lon) {
   return { title: hit.title, extract: sj.extract || '' }
 }
 
-// default anecdote source — the nearest Wikipedia article's summary. Swap this
-// hook for a Claude Sonnet call (needs a key/proxy) when one is available.
+// default anecdote source — the nearest Wikipedia article's summary, split into
+// a description + a distinct anecdote. Swap this hook for a Claude Sonnet call
+// (needs a key/proxy) when one is available.
 export async function wikipediaAnecdote({ lat, lon }) {
   try {
     const { title, extract } = await nearbyWikipedia(lat, lon)
-    return { title, text: trimBlurb(extract) }
+    return { title, ...splitBlurb(extract) }
   } catch {
-    return { title: '', text: '' }
+    return { title: '', description: '', anecdote: '' }
   }
 }
+
+// memo cache of the web parts, keyed by rounded lat/lon, so reloading a zone
+// (or nudging the zoom) doesn't re-hit Nominatim/Wikipedia every time
+const webCache = new Map()
+const webKey = (lat, lon) => `${lat.toFixed(2)},${lon.toFixed(2)}`
 
 // Assemble the ground-info payload for a location. Never throws — every source
 // degrades to a sane fallback so the cartouche always has something to show.
@@ -90,23 +119,32 @@ export async function gatherGroundInfo({ lat, lon, dem, fetchAnecdote = wikipedi
     coord: formatCoord(lat, lon),
     coordDMS: `${toDMS(lat, true)}  ${toDMS(lon, false)}`,
     elevation: dem ? formatElevation(dem.minM, dem.maxM, dem.meanM) : '',
+    scale: dem ? scaleBar(dem.extentMeters) : '',
     name: '',
     country: '',
     title: '',
-    blurb: '',
+    description: '',
+    anecdote: '',
   }
-  const [place, anecdote] = await Promise.allSettled([
-    reverseGeocode(lat, lon),
-    Promise.resolve(fetchAnecdote({ lat, lon })),
-  ])
-  if (place.status === 'fulfilled') {
-    out.name = place.value.name
-    out.country = place.value.country
+  const key = webKey(lat, lon)
+  let web = webCache.get(key)
+  if (!web) {
+    const [place, anecdote] = await Promise.allSettled([
+      reverseGeocode(lat, lon),
+      // wrap in an async call so a hook that throws *synchronously* becomes a
+      // rejected settlement rather than escaping gatherGroundInfo
+      (async () => fetchAnecdote({ lat, lon }))(),
+    ])
+    web = {
+      name: place.status === 'fulfilled' ? place.value.name : '',
+      country: place.status === 'fulfilled' ? place.value.country : '',
+      title: anecdote.status === 'fulfilled' ? anecdote.value?.title || '' : '',
+      description: anecdote.status === 'fulfilled' ? anecdote.value?.description || '' : '',
+      anecdote: anecdote.status === 'fulfilled' ? anecdote.value?.anecdote || '' : '',
+    }
+    webCache.set(key, web)
   }
-  if (anecdote.status === 'fulfilled' && anecdote.value) {
-    out.title = anecdote.value.title || ''
-    out.blurb = anecdote.value.text || ''
-  }
+  Object.assign(out, web)
   if (!out.name) out.name = out.title || 'UNCHARTED SECTOR'
   return out
 }

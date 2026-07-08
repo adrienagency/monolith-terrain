@@ -145,43 +145,47 @@ export class GroundInfoLayer {
     // compass rose — top-right of the sheet
     this._addPlane(compassCanvas(ink), margin + 14, -margin - 2, 22)
 
-    // title block — below the slab (south), centered
+    // title block — below the slab (south), centered. Long names shrink to the
+    // fixed world width, so they never overlap the coord block below.
     const titleLines = [String(info.name || '').toUpperCase()]
     if (info.country) titleLines.push(info.country.toUpperCase())
-    this._addPlane(textCanvas(titleLines, { px: 52, align: 'center', color: ink, track: 0.16 }).canvas, 0, margin + 8, 46)
+    this._addPlane(textCanvas(titleLines, { px: 52, align: 'center', color: ink, track: 0.16 }).canvas, 0, margin + 7, 46)
     this._addPlane(
       textCanvas([info.coord, info.coordDMS].filter(Boolean), { px: 30, align: 'center', color: ink, track: 0.12 })
         .canvas,
       0,
-      margin + 22,
+      margin + 26,
       40
     )
 
-    // elevation + a scale note — top-left
-    if (info.elevation) {
-      this._addPlane(
-        textCanvas([info.elevation, '0    10    20 km'], { px: 28, color: ink, track: 0.1 }).canvas,
-        -margin - 6,
-        -margin,
-        40
-      )
+    // elevation + a real scale bar — top-left
+    const statLines = [info.elevation, info.scale].filter(Boolean)
+    if (statLines.length) {
+      this._addPlane(textCanvas(statLines, { px: 28, color: ink, track: 0.1 }).canvas, -margin - 6, -margin, 40)
     }
 
-    // description blurb — down the left side, wrapped
-    if (info.blurb) {
-      const words = info.blurb.split(' ')
-      const lines = []
-      let cur = ''
-      for (const w of words) {
-        if ((cur + w).length > 34) {
-          lines.push(cur.trim())
-          cur = ''
-        }
-        cur += w + ' '
+    // description — down the left side, wrapped
+    if (info.description) this._addWrapped(info.description, -margin - 8, margin - 8, { px: 26, font: 400, max: 8 })
+
+    // anecdote — a distinct note on the right side, marked with a ◆
+    if (info.anecdote) this._addWrapped(`◆ ${info.anecdote}`, margin + 10, margin - 8, { px: 25, font: 400, max: 7 })
+  }
+
+  // wrap a paragraph to ~34 chars/line and lay it flat at (x, z)
+  _addWrapped(text, x, z, { px, font, max }) {
+    const ink = this.getInk?.() || '#222'
+    const words = text.split(' ')
+    const lines = []
+    let cur = ''
+    for (const w of words) {
+      if ((cur + w).length > 34) {
+        lines.push(cur.trim())
+        cur = ''
       }
-      if (cur.trim()) lines.push(cur.trim())
-      this._addPlane(textCanvas(lines.slice(0, 8), { px: 26, font: 400, color: ink, track: 0.05 }).canvas, -margin - 8, margin - 4, 42)
+      cur += w + ' '
     }
+    if (cur.trim()) lines.push(cur.trim())
+    this._addPlane(textCanvas(lines.slice(0, max), { px, font, color: ink, track: 0.05 }).canvas, x, z, 42)
   }
 
   // re-lay the current info (e.g. after a dark-mode toggle changes the ink)
