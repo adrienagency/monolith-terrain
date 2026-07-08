@@ -631,6 +631,9 @@ window.addEventListener('pointermove', (e) => {
 
 let dem = null
 let demBusy = false
+// the finest zoom the USER chose — dives and the staircase overwrite
+// params.demZoom freely, but refining always climbs back to this
+let userFineZoom = Math.max(params.demZoom, 12)
 
 // fetch tiles + rebuild; throws on failure so programmatic callers (orbital
 // dive) can hold orbit — loadRealTerrain wraps it with the GUI's error UX
@@ -752,13 +755,13 @@ modes = new Modes({
       }
     },
     surfaceMaxDistance: () => 60,
-    getFineZoom: () => Math.max(params.demZoom, 12),
+    getFineZoom: () => userFineZoom,
     // next finer scale under the current view — the staircase down from a
     // coarse (z8/z10) dive; null once the patch is already fine
     getRefineTarget() {
-      if (params.source !== 'real' || !dem || params.demZoom >= 12) return null
+      if (params.source !== 'real' || !dem || params.demZoom >= userFineZoom) return null
       const { lat, lon } = worldToLatLon(dem, controls.target.x, controls.target.z)
-      return { lat, lon, zoom: stepZoom(params.demZoom, 1) }
+      return { lat, lon, zoom: stepZoom(params.demZoom, 1, userFineZoom) }
     },
     getCoarsenTarget() {
       if (params.source !== 'real' || !dem || params.demZoom <= 8) return null
@@ -1022,7 +1025,8 @@ latCtrl.lon = fSource.add(params, 'demLon', -180, 180, 0.0001).name('longitude')
 fSource
   .add(params, 'demZoom', [8, 9, 10, 11, 12, 13, 14])
   .name('detail (zoom)')
-  .onChange(() => {
+  .onChange((v) => {
+    if (v >= 12) userFineZoom = v // remember the user's chosen fine scale
     if (params.source === 'real') loadRealTerrain()
   })
 fSource

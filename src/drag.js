@@ -7,6 +7,10 @@ const registry = new Set()
 // pull every dragged panel back into view after a window resize
 export function reclampDraggables() {
   for (const el of registry) {
+    if (!el.isConnected) {
+      registry.delete(el)
+      continue
+    }
     if (el.style.left === '') continue // never dragged — still CSS-anchored
     const r = el.getBoundingClientRect()
     el.style.left = `${Math.min(Math.max(r.left, -el.offsetWidth * 0.6), window.innerWidth - el.offsetWidth * 0.4)}px`
