@@ -143,6 +143,7 @@ export class Clouds {
     this._dispose()
     if (!params.cloudsEnabled) return
     const rng = mulberry32((params.seed ?? 7) * 31 + 5)
+    this._rng = rng // respawn draws stay on the seeded stream (reproducible)
     const half = TERRAIN_SIZE / 2 - 4
     for (let i = 0; i < params.cloudCount; i++) {
       const size = 2.4 + rng() * 2.8
@@ -197,7 +198,7 @@ export class Clouds {
       c.mesh.position.x += c.speed * params.cloudDrift * dt
       if (c.mesh.position.x > half + c.size * 2) {
         c.mesh.position.x = -half - c.size * 2
-        c.mesh.position.z = (Math.random() * 2 - 1) * (half - 4)
+        c.mesh.position.z = (this._rng() * 2 - 1) * (half - 4)
       }
       // impostor faces the camera; the raymarch volume stays world-anchored
       if (camera) c.mesh.quaternion.copy(camera.quaternion)
