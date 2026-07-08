@@ -1565,22 +1565,28 @@ fLight
   .name('shadow softness')
   .onChange((v) => (sun.shadow.radius = v))
 
-// everything starts folded — the sidebar and all its folders
-fTerrain.close()
-fSurface.close()
-fCamera.close()
-fMap.close()
-fLook.close()
-fHud.close()
-fMotion.close()
-fPerf.close()
-fLight.close()
-gui.close() // collapse the whole lil-gui sidebar to its title on load
+// everything starts folded — every sidebar folder and the sidebar itself
+gui.folders.forEach((f) => f.close())
+gui.close()
+
+// accordion: clicking a folder title open folds every other, so the sidebar
+// stays compact. A direct title-click listener (added after lil-gui's own, so
+// the folder is already toggled) is deterministic — unlike onOpenClose, which
+// doesn't fire on programmatic open() and passes an unreliable reference.
+// key off `_closed` (set synchronously by lil-gui) rather than the DOM class,
+// which lil-gui only flips inside a rAF and so reads stale in this handler
+const isFolderOpen = (f) => !f._closed
+for (const folder of gui.folders) {
+  folder.$title.addEventListener('click', () => {
+    if (!isFolderOpen(folder)) return // this click just closed it — nothing to do
+    for (const other of gui.folders) if (other !== folder && isFolderOpen(other)) other.close()
+  })
+}
 
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, plinth, peaksLayer, overlayPanel, landmarksPanel, motionPanel, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, get labels() { return labels } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, plinth, peaksLayer, overlayPanel, landmarksPanel, motionPanel, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, gui, get labels() { return labels } }
 
 // real world is the default source — fetch its tiles on startup
 if (params.source === 'real') loadRealTerrain()

@@ -54,3 +54,28 @@ test('ICELAND reproduces the cool bathymetric plate', () => {
   // flattened toward a bathymetric plate (vertical scale pulled down)
   assert.ok(t.terrain && t.terrain.demExaggeration <= 1.1, 'relief flattened')
 })
+
+test('FALLOUT WASTELANDS is a warm scorched-plate look', () => {
+  const t = TEMPLATES['fallout-wastelands']
+  assert.ok(t, 'preset exists')
+  // white summits
+  assert.ok(hexToHsl(t.palette.gradHigh).l > 0.92, 'white-hot peaks')
+  // low + mid warm (yellow-orange / ochre hues 20–55°)
+  for (const key of ['gradLow', 'gradMid1', 'gradMid2']) {
+    const c = hexToHsl(t.palette[key])
+    assert.ok(c.h >= 15 && c.h <= 55, `${key} hue ${c.h.toFixed(0)} is warm`)
+    assert.ok(c.s > 0.25, `${key} is saturated warm`)
+  }
+  // the mid-high flanks are the darkest band (dark sienna), plains lighter
+  assert.ok(hexToHsl(t.palette.gradMid2).l < hexToHsl(t.palette.gradLow).l, 'flanks darker than plains')
+  assert.ok(hexToHsl(t.palette.gradMid2).l < 0.3, 'flanks are dark sienna')
+  // a very light, barely-tinted sea
+  assert.ok(hexToHsl(t.palette.oceanShallow).l > 0.85, 'very light sea')
+  // warm slope shading, high tint, flat plate, no engraving
+  assert.ok(t.style.slopeTint > 0.3, 'warm slope shading on the flanks')
+  assert.ok(t.style.mapTint > 0.8, 'the warm ramp dominates')
+  assert.equal(t.grid.contourOpacity, 0)
+  assert.equal(t.grid.gridOpacity, 0)
+  assert.equal(t.look.clouds, false)
+  assert.equal(t.look.plinth, false)
+})
