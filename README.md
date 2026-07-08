@@ -17,7 +17,10 @@ Zoom all the way out and the map hands over to **MONOLITH EARTH** — the whole 
 | Restyle the map | **MAP OVERLAY** panel (left): random palette / relief style / grid-contour, a large generated palette list (near-white lowlands, three-stop seas), **⟲ RESET LOOK** |
 | Night survey | **MAP OVERLAY → ◐ DARK MODE** — black/brown terrain palettes with fluo-yellow or hot-orange summits, light ink and thinner contours, dark seas |
 | Visit the classics | **LANDMARKS** panel — ~130 curated topographic places folded by continent, each diving at the zoom that frames it (Corsica z9, Stromboli z13) |
-| Rearrange the HUD | Grab any panel (SECTOR, TELEMETRY, altimeter, GPX profile, MAP OVERLAY) and drag it wherever you like |
+| Rearrange the HUD | Grab any panel (SECTOR, TELEMETRY, altimeter, GPX profile, MAP OVERLAY, LANDMARKS, MOTION) and drag it — panels snap to each other and stack neatly |
+| Tidy up | Fold any panel to its title bar via its caret, or use the bottom-right **▤** to collapse them all; **◱ UI** hides the whole interface |
+| Monochrome look | **MAP OVERLAY → ◻ FULL WHITE / ◼ FULL DARK** — the relief carried by light alone, museum-slab style |
+| Playback & tours | The **MOTION** panel at the bottom: pause, cinematic tour from/to, duration and altitude |
 | Name the summits | **MAP OVERLAY → ▲ TOP-5 PEAKS** — the five highest named peaks of the patch, altitude underneath (OSM data) |
 | Clouds | **Clouds** folder — sparse drifting puffs with soft ground shadows, on/off |
 | Go somewhere exact | **Terrain source → go to "lat, lon"** (paste straight from Google Maps) or **search place** — the camera flies there over the globe and dives |
@@ -37,6 +40,8 @@ Zoom all the way out and the map hands over to **MONOLITH EARTH** — the whole 
   - **detail (zoom)** — z8–14: how large an area you get (z8 ≈ 470 km across, z10 ≈ 117 km, z12 ≈ 28 km, z13 ≈ 14 km)
   - **vertical scale** — relief exaggeration; real proportions read flat at map scale, so 1.5–3 is typical
   - **bathymetry** — below sea level the map reads as a nautical chart: pale shallows deepening into dark water, real depths (try the Mariana Trench: `11.35, 142.2`). Ocean colors live in **Map overlay** and follow the palette.
+- **the slab** — the relief sits on a 3D plinth (walls + a neutral table that catches its shadow), so once the edges come into view it reads as a physical object. Thickness and colors are in the **Slab** folder.
+- **clouds** — thick, low volumetric puffs that cling to the summits and cast visible shadows on the map (**Clouds** folder).
 - **procedural noise** — seeded multi-octave simplex terrain with a hovering monolith and an excavated instrument basin. Every knob (octaves, warp, amplitude…) is live.
 
 ### Orbital view (MONOLITH EARTH)

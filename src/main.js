@@ -29,11 +29,14 @@ import { createGoto } from './goto.js'
 import { GpxLayer, parseGpx } from './gpx.js'
 import { worldToLatLon } from './geo.js'
 import { TERRAIN_SIZE } from './terrain.js'
+import { monochromeLook } from './palette.js'
 import { createOverlayPanel } from './overlay-panel.js'
 import { PeaksLayer } from './peaks.js'
 import { Clouds } from './clouds.js'
-import { makeDraggable, reclampDraggables } from './drag.js'
+import { Plinth } from './plinth.js'
+import { makeDraggable, makeCollapsible, collapseAll, setUiHidden, reclampDraggables } from './drag.js'
 import { createLandmarksPanel } from './landmarks-panel.js'
+import { createMotionPanel } from './motion-panel.js'
 
 // ------------------------------------------------------------------ params
 
@@ -97,10 +100,11 @@ const params = {
   gradMid2Pos: 0.36,
   slopeTint: 0.5,
   contourInterval: 0.11,
-  contourOpacity: 1,
+  contourOpacity: 0.5, // finer, more discreet engraving by default
+  contourWeight: 0.7,
   contourColor: '#000000',
   gridStep: 5,
-  gridOpacity: 1,
+  gridOpacity: 0.4,
   labels: true,
 
   // HUD
@@ -172,11 +176,17 @@ const params = {
   darkMode: false,
   gridColor: '#242220',
 
-  // clouds
+  // 3D slab the relief sits on
+  plinth: true,
+  plinthDepth: 7,
+  plinthColor: '#d8d4cc',
+  baseColor: '#c8c5be',
+
+  // clouds — thick and low, clinging to the summits
   cloudsEnabled: true,
-  cloudCount: 8,
-  cloudOpacity: 0.7,
-  cloudAltitude: 7.5,
+  cloudCount: 9,
+  cloudOpacity: 0.85,
+  cloudAltitude: 2.6,
   cloudDrift: 1,
 
   // light
@@ -241,12 +251,13 @@ let clouds = null // assigned in the world section
 const sun = new THREE.DirectionalLight(0xffffff, params.sunIntensity)
 sun.castShadow = true
 sun.shadow.mapSize.set(2048, 2048)
-sun.shadow.camera.left = -26
-sun.shadow.camera.right = 26
-sun.shadow.camera.top = 26
-sun.shadow.camera.bottom = -26
-sun.shadow.camera.near = 4
-sun.shadow.camera.far = 80
+// wide enough to catch the slab's cast shadow spilling onto the base
+sun.shadow.camera.left = -42
+sun.shadow.camera.right = 42
+sun.shadow.camera.top = 42
+sun.shadow.camera.bottom = -42
+sun.shadow.camera.near = 2
+sun.shadow.camera.far = 130
 sun.shadow.bias = -0.0001
 sun.shadow.normalBias = 0.02
 sun.shadow.radius = params.shadowSoftness
@@ -279,6 +290,11 @@ function applyShadowMode() {
 
 const terrain = new Terrain(params)
 scene.add(terrain.mesh)
+
+// the 3D slab the relief sits on (walls + shadow-catching base)
+const plinth = new Plinth(scene, params)
+plinth.rebuild(terrain, params)
+plinth.setVisible(params.plinth)
 
 const cone = createCone()
 scene.add(cone.group)
@@ -334,7 +350,10 @@ const DARK = {
   contour: '#ece6d6',
   grid: '#d8d2c2',
   paper: 'rgb(18 19 22 / var(--hud-bg-alpha))',
+  plinth: '#26262a',
+  base: '#151517',
 }
+const LIGHT_PLINTH = { plinth: '#d8d4cc', base: '#c8c5be' }
 // 3D survey furniture reads in light ink on the dark sheet
 const effInk = () => (params.darkMode ? DARK.ink : params.hudInk)
 let pois = findPois(terrain.sample, params.seed, poiFeet)
@@ -688,6 +707,7 @@ function regenerateTerrain() {
     setTimeout(() => {
       terrain.rebuild(params)
       terrain.rebuildRoughness(params)
+      plinth.rebuild(terrain, params) // walls hug the new relief border
       regenerateLabels()
       regenerateHud()
       gpxLayer.rebuild() // re-drape the track on the new relief
@@ -733,6 +753,7 @@ modes = new Modes({
       // they'd float on top of the planet
       gpxLayer.setVisible(v && params.gpxVisible)
       clouds.setVisible(v)
+      plinth.setVisible(v && params.plinth)
       scene.fog = v ? fogRef : null
     },
     setEffectsEnabled(v) {
@@ -870,6 +891,8 @@ function setDarkMode(v) {
     '--hud-paper',
     v ? DARK.paper : 'rgb(248 247 244 / var(--hud-bg-alpha))'
   )
+  // panels need to be more opaque at night to stay readable over the dark 3D
+  document.documentElement.style.setProperty('--hud-bg-alpha', v ? 0.9 : params.uiBgOpacity)
   applyGridContour({
     contourInterval: params.contourInterval,
     contourOpacity: params.contourOpacity,
@@ -878,9 +901,13 @@ function setDarkMode(v) {
     gridOpacity: params.gridOpacity,
     gridColor: v ? DARK.grid : DEFAULT_LOOK.gridColor,
   })
-  // light ink reads bolder on dark terrain — thin the contour strokes so the
-  // sheet keeps its engraved fineness at night
-  terrain.mapUniforms.uContourWeight.value = v ? 0.55 : 1
+  // light ink reads bolder on dark terrain — thin the contour strokes further
+  // so the sheet keeps its engraved fineness at night
+  terrain.mapUniforms.uContourWeight.value = v ? 0.5 : params.contourWeight
+  // the slab and its table follow the sheet, so the object reads as one piece
+  params.plinthColor = v ? DARK.plinth : LIGHT_PLINTH.plinth
+  params.baseColor = v ? DARK.base : LIGHT_PLINTH.base
+  plinth.setColors(params)
   // draped place/elevation labels re-render with the mode's ink (labelOpts
   // reads params.darkMode), the 3D survey furniture (POI stems, circles)
   // regenerates in light ink, and the GPX profile canvas repaints with the
@@ -888,6 +915,16 @@ function setDarkMode(v) {
   regenerateLabels()
   regenerateHud()
   gpxLayer.setHover(-1)
+}
+
+// full-white / full-dark museum look: relief shaded by light alone, applied
+// in one shot (mode + palette + style + grid + slab)
+function applyMonochrome(kind) {
+  const L = monochromeLook(kind)
+  setDarkMode(L.darkMode) // flips sheet/paper/plinth/ink first
+  applyPalette(L)
+  applyStyle(L)
+  applyGridContour(L)
 }
 
 function resetLook() {
@@ -922,6 +959,7 @@ const overlayPanel = createOverlayPanel({
     peaks: (v) => peaksLayer.setEnabled(v),
     reset: resetLook,
     darkMode: setDarkMode,
+    monochrome: applyMonochrome,
   },
   announce: (m) => modes.announce(m),
   getMode: () => (params.darkMode ? 'dark' : 'light'),
@@ -952,12 +990,48 @@ async function loadGpxText(text) {
   }
 }
 
+// MOTION panel — playback + cinematic tour, pulled out of the sidebar into
+// its own bottom-anchored UI
+const motionPanel = createMotionPanel({
+  params,
+  poiIds: ['PK-01', 'PK-02', 'PK-03', 'PK-04', 'DEP-05'],
+  onPause: () => {},
+  onTour: startTour,
+  onStop: () => {
+    tour.active = false
+    camera.up.set(0, 1, 0)
+  },
+  announce: (m) => modes.announce(m),
+})
+
 // every FUI panel can be repositioned by grabbing it (its head bar when it
-// has one) — sector, telemetry, altimeter, GPX profile, map overlay
+// has one) and folded down to its title; sector/telemetry/altimeter/GPX
+// profile/map overlay/landmarks/motion
 makeDraggable(modes.altEl)
 makeDraggable(gpxLayer.profileEl, gpxLayer.profileEl.querySelector('.gpx-profile-head'))
 makeDraggable(hud2.root.querySelector('.hud-block.hud-tl'))
 makeDraggable(hud2.root.querySelector('.hud-block.hud-brt'))
+makeCollapsible(overlayPanel.root, overlayPanel.root.querySelector('.mop-drag'), '.mop-btns, .mop-mono, .mop-list-head, .mop-list, .mop-check, .hud-rule')
+makeCollapsible(landmarksPanel.root, landmarksPanel.root.querySelector('.lmk-drag'), '.lmk-list')
+makeCollapsible(hud2.root.querySelector('.hud-block.hud-tl'), hud2.root.querySelector('.hud-block.hud-tl .hud-kicker'), '.hud-dim, .hud-rule, .hud-strong')
+makeCollapsible(hud2.root.querySelector('.hud-block.hud-brt'), hud2.root.querySelector('.hud-block.hud-brt .hud-kicker'), '.hud-row')
+
+// fixed control bar: hide-all-UI toggle + collapse-all, always reachable
+const uiBar = document.createElement('div')
+uiBar.className = 'ui-bar'
+uiBar.innerHTML = '<button data-a="hide" title="show / hide interface">◱ UI</button><button data-a="fold" title="collapse / expand all panels">▤</button>'
+document.body.appendChild(uiBar)
+let uiHidden = false
+let allFolded = false
+uiBar.querySelector('[data-a="hide"]').addEventListener('click', () => {
+  uiHidden = !uiHidden
+  setUiHidden(uiHidden)
+  uiBar.querySelector('[data-a="hide"]').classList.toggle('active', uiHidden)
+})
+uiBar.querySelector('[data-a="fold"]').addEventListener('click', () => {
+  allFolded = !allFolded
+  collapseAll(allFolded)
+})
 
 // drag & drop a .gpx anywhere on the page
 window.addEventListener('dragover', (e) => e.preventDefault())
@@ -1223,6 +1297,16 @@ fMap
 fMap.add({ open: () => overlayPanel.setVisible(true) }, 'open').name('open MAP OVERLAY panel ⧉')
 fMap.add(params, 'labels').name('place labels').onChange((v) => (labels.visible = v && modes.mode === 'surface'))
 
+const fSlab = gui.addFolder('Slab')
+fSlab.add(params, 'plinth').name('show slab').onChange((v) => plinth.setVisible(v && modes.mode === 'surface'))
+fSlab
+  .add(params, 'plinthDepth', 2, 16, 0.5)
+  .name('thickness')
+  .onFinishChange(() => plinth.rebuild(terrain, params))
+fSlab.addColor(params, 'plinthColor').name('edge color').onChange(() => plinth.setColors(params))
+fSlab.addColor(params, 'baseColor').name('table color').onChange(() => plinth.setColors(params))
+fSlab.close()
+
 const fLook = gui.addFolder('Look')
 fLook.add(params, 'exposure', 0.2, 3, 0.02).onChange((v) => (exposureFx.uniforms.get('exposure').value = v))
 fLook.add(params, 'contrast', -0.2, 0.5, 0.01).onChange((v) => (contrastFx.uniforms.get('contrast').value = v))
@@ -1366,7 +1450,7 @@ fLight.close()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, peaksLayer, overlayPanel, landmarksPanel, applyPalette, applyStyle, applyGridContour, setDarkMode, get labels() { return labels } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, plinth, peaksLayer, overlayPanel, landmarksPanel, motionPanel, applyPalette, applyStyle, applyGridContour, applyMonochrome, setDarkMode, get labels() { return labels } }
 
 // real world is the default source — fetch its tiles on startup
 if (params.source === 'real') loadRealTerrain()

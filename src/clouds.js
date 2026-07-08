@@ -146,8 +146,9 @@ export class Clouds {
     this._rng = rng // respawn draws stay on the seeded stream (reproducible)
     const half = TERRAIN_SIZE / 2 - 4
     for (let i = 0; i < params.cloudCount; i++) {
-      const size = 2.4 + rng() * 2.8
-      const radii = new THREE.Vector3(size, size * (0.3 + rng() * 0.14), size * (0.55 + rng() * 0.3))
+      // thicker, bulkier puffs than before — they ride low over the relief
+      const size = 3.2 + rng() * 3.4
+      const radii = new THREE.Vector3(size, size * (0.5 + rng() * 0.28), size * (0.6 + rng() * 0.32))
       // impostor quad big enough to cover the ellipsoid from any angle
       const quad = Math.max(radii.x, radii.z) * 2.15
       const mesh = new THREE.Mesh(
@@ -163,22 +164,27 @@ export class Clouds {
             uSunDir: { value: this.sunDir.clone() },
             uSeed: { value: rng() * 100 },
             uTime: { value: 0 },
-            uOpacity: { value: (0.75 + rng() * 0.25) * params.cloudOpacity },
+            uOpacity: { value: (0.82 + rng() * 0.18) * params.cloudOpacity },
           },
         })
       )
       mesh.renderOrder = 15
-      mesh.position.set((rng() * 2 - 1) * half, params.cloudAltitude + (rng() * 2 - 1) * 1.4, (rng() * 2 - 1) * half)
+      // hover: how high the cloud floats above the ground under it. Kept low
+      // (0.2–1.6 × the base altitude) so clouds cling to summits and the
+      // tallest peaks can pierce them
+      const hover = params.cloudAltitude * (0.2 + rng() * 1.4)
+      mesh.position.set((rng() * 2 - 1) * half, 0, (rng() * 2 - 1) * half)
 
-      // blob shadow draped just above the relief under the cloud
+      // blob shadow draped just above the relief under the cloud — larger and
+      // darker so the cast reads clearly on the map
       const shadow = new THREE.Mesh(
-        new THREE.PlaneGeometry(size * 2.4, size * 1.5),
+        new THREE.PlaneGeometry(size * 2.7, size * 1.9),
         new THREE.MeshBasicMaterial({
           map: this.tex,
           color: 0x000000,
           transparent: true,
           depthWrite: false,
-          opacity: 0.12 * params.cloudOpacity,
+          opacity: 0.3 * params.cloudOpacity,
         })
       )
       shadow.rotation.x = -Math.PI / 2
@@ -186,7 +192,7 @@ export class Clouds {
 
       this.group.add(mesh)
       this.group.add(shadow)
-      this.clouds.push({ mesh, shadow, speed: 0.14 + rng() * 0.22, size })
+      this.clouds.push({ mesh, shadow, speed: 0.14 + rng() * 0.22, size, hover })
     }
   }
 
@@ -200,18 +206,29 @@ export class Clouds {
         c.mesh.position.x = -half - c.size * 2
         c.mesh.position.z = (this._rng() * 2 - 1) * (half - 4)
       }
+      const { x, z } = c.mesh.position
+      const inside = Math.abs(x) < half && Math.abs(z) < half
+      // ride the relief: sit `hover` above the ground under the cloud, so the
+      // band dips over valleys and the highest summits punch through
+      const groundY = inside ? this.terrain.sample(x, z) : 0
+      c.mesh.position.y = groundY + c.hover
+
       // impostor faces the camera; the raymarch volume stays world-anchored
       if (camera) c.mesh.quaternion.copy(camera.quaternion)
       c.mesh.material.uniforms.uCenter.value.copy(c.mesh.position)
       c.mesh.material.uniforms.uTime.value = this.time
 
-      const { x, z } = c.mesh.position
-      c.shadow.position.set(
-        x,
-        Math.abs(x) < half && Math.abs(z) < half ? this.terrain.sample(x, z) + 0.14 : 0.14,
-        z
-      )
-      c.shadow.material.opacity = 0.12 * params.cloudOpacity
+      // shadow offset along the sun's ground projection, so it falls away from
+      // the cloud like a real cast rather than sitting straight underneath
+      const sx = -this.sunDir.x
+      const sz = -this.sunDir.z
+      const sl = Math.hypot(sx, sz) || 1
+      const off = c.hover * 0.6
+      const shx = x + (sx / sl) * off
+      const shz = z + (sz / sl) * off
+      const shIn = Math.abs(shx) < half && Math.abs(shz) < half
+      c.shadow.position.set(shx, shIn ? this.terrain.sample(shx, shz) + 0.14 : 0.14, shz)
+      c.shadow.material.opacity = 0.3 * params.cloudOpacity
     }
   }
 

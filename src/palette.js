@@ -118,6 +118,63 @@ function darkPalette(rng) {
   }
 }
 
+// Monochrome presets — the relief itself, shaded by light alone, no
+// hypsometric color (the museum-slab look from the references). Returns a
+// full look object (palette + style + grid + plinth + mode flags) so a single
+// apply switches everything.
+export function monochromeLook(kind) {
+  if (kind === 'dark') {
+    return {
+      mode: 'dark',
+      darkMode: true,
+      gradLow: '#1b1b1b',
+      gradMid1: '#292929',
+      gradMid2: '#363636',
+      gradHigh: '#454545',
+      gradMid1Pos: 0.35,
+      gradMid2Pos: 0.62,
+      oceanShallow: '#222222',
+      oceanMid: '#151515',
+      oceanDeep: '#0a0a0a',
+      ink: '#cccccc',
+      mapTint: 0.28, // let the lit surface carry the relief, not the ramp
+      heightContrast: 4,
+      heightPivot: 0.5,
+      slopeTint: 0.12,
+      contourInterval: 0.13,
+      contourOpacity: 0.32,
+      contourColor: '#cfccc4',
+      gridStep: 6,
+      gridOpacity: 0.14,
+      gridColor: '#b9b6ae',
+    }
+  }
+  return {
+    mode: 'light',
+    darkMode: false,
+    gradLow: '#f2f2f2',
+    gradMid1: '#f6f6f6',
+    gradMid2: '#fafafa',
+    gradHigh: '#ffffff',
+    gradMid1Pos: 0.35,
+    gradMid2Pos: 0.62,
+    oceanShallow: '#ededed',
+    oceanMid: '#dedede',
+    oceanDeep: '#c8c8c8',
+    ink: '#999999',
+    mapTint: 0.22,
+    heightContrast: 4,
+    heightPivot: 0.5,
+    slopeTint: 0.16,
+    contourInterval: 0.13,
+    contourOpacity: 0.34,
+    contourColor: '#a8a59d',
+    gridStep: 6,
+    gridOpacity: 0.16,
+    gridColor: '#b4b1a8',
+  }
+}
+
 export function generatePalette(rng = Math.random, mode = 'light') {
   const p = mode === 'dark' ? darkPalette(rng) : lightPalette(rng)
   p.gradMid2Pos = Math.min(p.gradMid1Pos + 0.16 + rng() * 0.26, 0.9)

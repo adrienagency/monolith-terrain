@@ -25,7 +25,7 @@ export class Terrain {
       uTint: { value: params.mapTint },
       uContourInterval: { value: params.contourInterval },
       uContourOpacity: { value: params.contourOpacity },
-      uContourWeight: { value: 1 }, // line thickness scale — thinned in dark mode
+      uContourWeight: { value: params.contourWeight ?? 0.7 }, // line thickness scale
 
       uGridStep: { value: params.gridStep },
       uGridOpacity: { value: params.gridOpacity },

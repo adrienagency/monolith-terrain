@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { generatePalette, generateStyle, generateGridContour } from '../src/palette.js'
+import { generatePalette, generateStyle, generateGridContour, monochromeLook } from '../src/palette.js'
 import { mulberry32 } from '../src/noise.js'
 
 // hex → {h, s, l} (h in degrees, s/l in 0..1)
@@ -91,6 +91,27 @@ test('dark grid/contour ink is light enough to read on the dark sheet', () => {
     assert.ok(hexToHsl(g.contourColor).l > 0.6, `seed ${seed}: dark contour too dark`)
     assert.ok(hexToHsl(g.gridColor).l > 0.6, `seed ${seed}: dark grid too dark`)
   }
+})
+
+test('monochrome looks are near-greyscale with the relief carried by light', () => {
+  const white = monochromeLook('white')
+  assert.equal(white.darkMode, false)
+  // low map tint so lighting, not the ramp, paints the relief
+  assert.ok(white.mapTint <= 0.3, 'white look leans on lighting')
+  for (const key of ['gradLow', 'gradMid1', 'gradMid2', 'gradHigh']) {
+    const c = hexToHsl(white[key])
+    assert.ok(c.s < 0.08, `${key} nearly desaturated`)
+    assert.ok(c.l > 0.9, `${key} near-white`)
+  }
+  const dark = monochromeLook('dark')
+  assert.equal(dark.darkMode, true)
+  assert.ok(dark.mapTint <= 0.3, 'dark look leans on lighting')
+  for (const key of ['gradLow', 'gradMid1', 'gradMid2', 'gradHigh']) {
+    const c = hexToHsl(dark[key])
+    assert.ok(c.s < 0.12, `${key} nearly desaturated`)
+    assert.ok(c.l < 0.35, `${key} dark`)
+  }
+  assert.ok(hexToHsl(dark.ink).l > 0.7, 'dark ink light enough to read')
 })
 
 test('style + grid/contour stay inside their GUI ranges', () => {

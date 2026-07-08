@@ -23,6 +23,10 @@ export function createOverlayPanel({ apply, announce, getMode }) {
     </div>
     <div class="hud-rule"></div>
     <label class="mop-check"><input type="checkbox" data-a="dark"><span>◐ DARK MODE</span></label>
+    <div class="mop-mono">
+      <button data-a="mono-white">◻ FULL WHITE</button>
+      <button data-a="mono-dark">◼ FULL DARK</button>
+    </div>
     <div class="hud-rule"></div>
     <div class="mop-list-head">
       <span class="mop-list-title">PALETTES</span>
@@ -85,6 +89,19 @@ export function createOverlayPanel({ apply, announce, getMode }) {
     foldBtn.textContent = folded ? '▸' : '▾'
   })
   root.querySelector('.mop-x').addEventListener('click', () => setVisible(false))
+
+  root.querySelector('[data-a="mono-white"]').addEventListener('click', () => {
+    apply.monochrome('white')
+    darkBox.checked = false
+    renderList()
+    announce('FULL WHITE — RELIEF IN LIGHT ALONE')
+  })
+  root.querySelector('[data-a="mono-dark"]').addEventListener('click', () => {
+    apply.monochrome('dark')
+    darkBox.checked = true
+    renderList()
+    announce('FULL DARK — NIGHT SLAB')
+  })
 
   const darkBox = root.querySelector('[data-a="dark"]')
   darkBox.addEventListener('change', () => {
