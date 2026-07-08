@@ -43,15 +43,27 @@ test('every template is a complete, well-formed bundle', () => {
   }
 })
 
-test('ICELAND reproduces the cool bathymetric plate', () => {
+test('ICELAND uses the user-tuned blue plate base settings', () => {
   const t = TEMPLATES.iceland
-  assert.ok(hexToHsl(high(t)).l > 0.95, 'white peaks')
+  // bold electric-blue lowland climbing to a light-grey summit cap
+  assert.ok(hexToHsl(low(t)).h > 195 && hexToHsl(low(t)).h < 220, 'electric-blue lowland')
+  assert.ok(hexToHsl(high(t)).l > 0.8, 'light summit cap')
   const deep = hexToHsl(t.palette.oceanDeep)
   assert.ok(deep.h > 195 && deep.h < 240, `deep sea is blue (h=${deep.h.toFixed(0)})`)
   assert.ok(deep.l < 0.35, 'deep sea is dark navy')
-  assert.equal(t.grid.contourOpacity, 0)
-  assert.equal(t.grid.gridOpacity, 0)
-  assert.equal(t.style.slopeTint, 0)
+  // the captured base settings: crisp indigo contours + a light survey grid + slope shading
+  assert.equal(t.style.mapTint, 0.68)
+  assert.equal(t.style.heightContrast, 3.4)
+  assert.equal(t.style.heightPivot, 0.49)
+  assert.equal(t.style.slopeTint, 0.48)
+  assert.equal(t.grid.contourInterval, 0.29)
+  assert.equal(t.grid.contourOpacity, 0.86)
+  assert.equal(t.grid.contourColor, '#0c0b7a')
+  assert.equal(t.grid.contourWeight, 0.55)
+  assert.equal(t.grid.gridStep, 5)
+  assert.equal(t.grid.gridOpacity, 0.54)
+  assert.equal(t.grid.gridColor, '#242220')
+  assert.equal(t.palette.oceanMid, '#6cb3fe')
   assert.equal(t.look.clouds, false)
   assert.notEqual(t.look.plinth, false, 'the 3D slab is shared — a template never hides it')
   assert.ok(t.light.sunElevation <= 35, 'low sun for crisp relief')

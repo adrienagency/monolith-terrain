@@ -93,7 +93,7 @@ const params = {
   fov: 30,
   autoFocus: true, // pointer→terrain autofocus (replaces the old cone autofocus)
   focusDistance: 13.2698,
-  focusRange: 16,
+  focusRange: 45, // wide in-focus band by default — most of the relief stays sharp
   bokehScale: 3.7,
 
   // map overlay
@@ -246,6 +246,7 @@ camera.position.set(0, 18, 19)
 
 const controls = new OrbitControls(camera, renderer.domElement)
 controls.target.set(0, -0.3, 0)
+controls.zoomToCursor = true // dolly toward the exact point under the mouse
 controls.enableDamping = true
 controls.dampingFactor = 0.06
 controls.maxPolarAngle = Math.PI * 0.49
@@ -1365,7 +1366,7 @@ fCamera.add(params, 'fov', 20, 60, 1).onChange((v) => {
 })
 fCamera.add(params, 'autoFocus').name('autofocus (pointer)')
 fCamera.add(params, 'focusDistance', 5, 60, 0.1).name('focus distance').listen()
-fCamera.add(params, 'focusRange', 0.5, 25, 0.1).name('focus range').onChange((v) => {
+fCamera.add(params, 'focusRange', 0.5, 60, 0.1).name('focus range').onChange((v) => {
   dof.cocMaterial.worldFocusRange = v
 })
 fCamera.add(params, 'bokehScale', 0, 8, 0.1).name('bokeh scale').onChange((v) => {

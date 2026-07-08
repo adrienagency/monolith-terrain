@@ -12,40 +12,40 @@ export const TEMPLATES = {
     label: 'ICELAND',
     darkMode: false,
     palette: {
-      // 8 tints: steel-blue coast + mid-slopes climbing to white summits (cool,
-      // inverted-warm) — mid-relief stays steel-blue, not washed pale
+      // 8 tints tuned by the user's ICELAND base settings — bold electric blues
+      // through pale ice to a light-grey summit cap
       rampStops: [
-        { c: '#9fbbd6', p: 0.0 },
-        { c: '#aac5dd', p: 0.16 },
-        { c: '#b8d0e5', p: 0.32 },
+        { c: '#0082e6', p: 0.0 },
+        { c: '#6bb5f5', p: 0.16 },
+        { c: '#338ad7', p: 0.32 },
         { c: '#c8dcec', p: 0.48 },
-        { c: '#dae8f2', p: 0.64 },
-        { c: '#e9f1f8', p: 0.8 },
-        { c: '#f6fafd', p: 0.92 },
-        { c: '#ffffff', p: 1.0 },
+        { c: '#1c9ffd', p: 0.64 },
+        { c: '#dbdeff', p: 0.8 },
+        { c: '#559eec', p: 0.92 },
+        { c: '#d9d9d9', p: 1.0 },
       ],
-      // water: pale shallows → mid steel → deep navy trenches
+      // water: pale shallows → mid blue → deep navy trenches
       oceanShallow: '#bcd3e6',
-      oceanMid: '#5f8cbb',
+      oceanMid: '#6cb3fe',
       oceanDeep: '#22406b',
-      ink: '#3a5578',
+      ink: '#0c0b7a', // deep indigo ink, matching the contour lines
     },
     style: {
       mapTint: 0.68, // blue dominates the mid-slopes while the hillshade sculpts
       heightContrast: 3.4,
-      heightPivot: 0.46,
-      slopeTint: 0, // no warm slope brown — this world is blue and white
+      heightPivot: 0.49,
+      slopeTint: 0.48, // a touch of slope shading sculpts the flanks
     },
     // a flattish plate, but with a touch more vertical drama than before
     terrain: { demExaggeration: 1.3 },
     grid: {
-      contourInterval: 0.12,
-      contourOpacity: 0, // the reference has no contour lines
-      contourColor: '#3a5578',
-      contourWeight: 0.7,
-      gridStep: 6,
-      gridOpacity: 0, // and no survey grid
-      gridColor: '#3a5578',
+      contourInterval: 0.29,
+      contourOpacity: 0.86, // crisp indigo contour lines
+      contourColor: '#0c0b7a',
+      contourWeight: 0.55,
+      gridStep: 5,
+      gridOpacity: 0.54, // a light survey grid over the plate
+      gridColor: '#242220',
     },
     // low, raking sun from the upper-left for the crisp bathymetric hillshade
     light: {
