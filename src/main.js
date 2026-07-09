@@ -38,7 +38,7 @@ import { createOverlayPanel } from './overlay-panel.js'
 import { PeaksLayer } from './peaks.js'
 import { Clouds } from './clouds.js'
 import { Traffic } from './traffic.js'
-import { Lake } from './lake.js'
+import { Lake, REFLECTION_TYPES } from './lake.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, makeCollapsible, collapseAll, setUiHidden, reclampDraggables } from './drag.js'
 import { createLandmarksPanel } from './landmarks-panel.js'
@@ -225,6 +225,7 @@ const params = {
   lakeColor: '#8fc6e8',
   lakeRoughness: 0.08, // 0 = mirror-polished water, higher = frosted (blur)
   lakeClarity: 30, // absorption distance: small = opaque depths, large = crystal clear
+  lakeReflection: 'studio', // what the polished surface mirrors
   lakesAltitude: true, // glass sheets on flat DEM regions above sea level
 
   // light
@@ -1550,6 +1551,7 @@ fLake.add(params, 'lakesAltitude').name('altitude lakes').onChange(lakeRebuild)
 fLake.addColor(params, 'lakeColor').name('water colour').onChange(() => lake.updateMaterial(params))
 fLake.add(params, 'lakeRoughness', 0, 1, 0.01).name('blur (0 = clear)').onChange(() => lake.updateMaterial(params))
 fLake.add(params, 'lakeClarity', 2, 100, 0.5).name('clarity (depth tint)').onChange(() => lake.updateMaterial(params))
+fLake.add(params, 'lakeReflection', REFLECTION_TYPES).name('reflections').onChange(() => lake.updateMaterial(params))
 fLake.close()
 
 const fSlab = gui.addFolder('Slab')

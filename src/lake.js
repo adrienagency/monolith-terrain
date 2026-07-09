@@ -86,6 +86,39 @@ function glassMaterial(params) {
   })
 }
 
+// what the polished surface mirrors — 'studio' is the scene's default room
+// light; the gradients are tiny equirect skies (auto-PMREMed by the renderer)
+export const REFLECTION_TYPES = ['studio', 'sky', 'sunset', 'mirror', 'none']
+
+function gradientSky(top, horizon, bottom) {
+  const w = 64
+  const h = 32
+  const data = new Uint8Array(w * h * 4)
+  const cTop = new THREE.Color(top)
+  const cHor = new THREE.Color(horizon)
+  const cBot = new THREE.Color(bottom)
+  const c = new THREE.Color()
+  for (let y = 0; y < h; y++) {
+    const t = y / (h - 1) // 0 = zenith … 1 = nadir on the equirect
+    if (t < 0.5) c.lerpColors(cTop, cHor, t * 2)
+    else c.lerpColors(cHor, cBot, (t - 0.5) * 2)
+    for (let x = 0; x < w; x++) {
+      const o = (y * w + x) * 4
+      data[o] = Math.round(c.r * 255)
+      data[o + 1] = Math.round(c.g * 255)
+      data[o + 2] = Math.round(c.b * 255)
+      data[o + 3] = 255
+    }
+  }
+  const tex = new THREE.DataTexture(data, w, h)
+  tex.mapping = THREE.EquirectangularReflectionMapping
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.magFilter = THREE.LinearFilter
+  tex.minFilter = THREE.LinearFilter
+  tex.needsUpdate = true
+  return tex
+}
+
 export class Lake {
   constructor(scene, params) {
     this.group = new THREE.Group()
@@ -128,6 +161,7 @@ export class Lake {
     this.group.add(this.sea)
 
     this.lakeMeshes = []
+    this.updateMaterial(params) // normalize ior/reflections to the params
   }
 
   // rebuild everything for the current zone: the sea block up to elevation 0,
@@ -191,11 +225,38 @@ export class Lake {
   }
 
   updateMaterial(params) {
+    const rough = params.lakeRoughness ?? 0.08
+    // near-clear glass must NOT distort what's underneath: ior 1 sends the
+    // transmission ray straight through (zero bend, tint/absorption intact),
+    // and the water ior only fades back in with the frosted look
+    const bend = Math.min(1, Math.max(0, (rough - 0.02) / 0.13))
+    const refl = this._reflection(params.lakeReflection ?? 'studio')
     for (const mat of [this.seaMat, this.lakeMat]) {
       mat.color.set(params.lakeColor ?? '#8fc6e8')
       mat.attenuationColor.set(params.lakeColor ?? '#8fc6e8')
-      mat.roughness = params.lakeRoughness ?? 0.08
-      mat.attenuationDistance = params.lakeClarity ?? 12
+      mat.roughness = rough
+      mat.attenuationDistance = params.lakeClarity ?? 30
+      mat.ior = 1 + 0.33 * bend
+      mat.envMap = refl.map // null falls back to scene.environment
+      mat.envMapIntensity = refl.intensity
+    }
+  }
+
+  // reflection presets — gradient skies are built once and cached
+  _reflection(type) {
+    if (!this._skies) this._skies = {}
+    const sky = (key, top, hor, bot) => (this._skies[key] ??= gradientSky(top, hor, bot))
+    switch (type) {
+      case 'sky':
+        return { map: sky('sky', '#7db8e8', '#dceefb', '#f5fafe'), intensity: 1.4 }
+      case 'sunset':
+        return { map: sky('sunset', '#31406e', '#ff9e5e', '#ffd9a0'), intensity: 1.5 }
+      case 'mirror': // the studio room, pushed hard — chrome-like water
+        return { map: null, intensity: 2.6 }
+      case 'none':
+        return { map: null, intensity: 0 }
+      default: // 'studio' — the scene's room light
+        return { map: null, intensity: 1.1 }
     }
   }
 
