@@ -154,6 +154,9 @@ const DECK_FRAG = /* glsl */ `
   uniform float uScale;      // noise tiling across the deck
   uniform float uCoverGate;  // 0 = unbroken sheet, higher = more open sky
   uniform float uBillow;     // 0 = flat slab, 1 = tall domed tops
+  uniform float uAltSpread;  // per-cloud altitude variation (staggered layers)
+  uniform float uDriftVar;   // per-cloud speed variation
+  uniform float uContrast;   // density contrast: <1 softer, >1 harder-edged
   uniform float uSunStep;    // world-units per sun-march step
   uniform vec3 uSunDir;      // direction the sunlight travels (sun → scene)
   uniform vec3 uSunColor;    // warm at sunset, white at noon
@@ -179,21 +182,36 @@ const DECK_FRAG = /* glsl */ `
     return smoothstep(uCoverGate, uCoverGate + 0.25, c) * edge;
   }
 
+  // per-cloud character, sampled ONCE per ray at the entry point (rays are
+  // near-vertical over the map, so the XZ cell barely changes along a ray):
+  // x = local drift-speed random, y = local altitude offset, z = local density
+  vec3 cloudCell(vec2 pxz) {
+    vec2 a = texture(uVolume, vec3(pxz * 0.5 + 11.31, 0.62)).rg;
+    float b = texture(uVolume, vec3(pxz * 0.37 + 3.71, 0.18)).g;
+    return vec3(a.x, a.y, b);
+  }
+
   // density: billow noise carved by a flat-based, dome-topped vertical profile.
   // The local cloud TOP rises with coverage strength — that's the vertical
-  // billowing: strong cells tower, weak cells stay shallow.
-  float densityAt(vec3 wp) {
+  // billowing: strong cells tower, weak cells stay shallow. "cell" carries the
+  // per-cloud drift/altitude/density character.
+  float densityAt(vec3 wp, vec3 cell) {
     vec3 p = (wp - uBoxMin) / (uBoxMax - uBoxMin);
-    float cover = coverAt(p.xz);
+    float drift = uDrift * (1.0 + (cell.x - 0.5) * 2.0 * uDriftVar);
+    float altOff = (cell.y - 0.5) * uAltSpread * 0.9;
+    float cover = coverAt(vec2(p.x + drift - uDrift, p.z)); // cell-speed drift
     if (cover <= 0.003) return 0.0;
+    float h = p.y - altOff; // staggered flight levels per cloud
     float top = mix(0.28, 1.0, cover * uBillow); // domed tops follow coverage
-    float base = smoothstep(0.0, 0.08, p.y);      // flat-ish underside
-    float crown = 1.0 - smoothstep(top - 0.3, top, p.y);
+    float base = smoothstep(0.0, 0.08, h);        // flat-ish underside
+    float crown = 1.0 - smoothstep(top - 0.3, top, h);
     float profile = base * crown * cover;
     if (profile <= 0.0) return 0.0;
-    vec3 coord = vec3(p.x + uDrift, p.y, p.z) * uScale;
+    vec3 coord = vec3(p.x + drift, p.y, p.z) * uScale;
     float billow = texture(uVolume, fract(coord)).r;
-    return sat(billow - (1.0 - profile)) * uDensity;
+    float d = sat(billow - (1.0 - profile));
+    d = pow(d, uContrast); // contrast: sharpen or soften the cloud bodies
+    return d * uDensity * mix(0.55, 1.45, cell.z); // per-cloud density
   }
 
   float beer(float depth) { return exp(-depth); }
@@ -223,10 +241,10 @@ const DECK_FRAG = /* glsl */ `
   }
 
   // short march toward the sun → how buried is this sample?
-  float sunDepth(vec3 wp, vec3 toSun) {
+  float sunDepth(vec3 wp, vec3 toSun, vec3 cell) {
     float d = 0.0;
     for (int j = 1; j <= SUN_STEPS; j++) {
-      d += densityAt(wp + toSun * (uSunStep * float(j)));
+      d += densityAt(wp + toSun * (uSunStep * float(j)), cell);
       if (d >= 1.6) break;
     }
     return d;
@@ -249,12 +267,15 @@ const DECK_FRAG = /* glsl */ `
     float dt = (span.y - span.x) / float(MARCH_STEPS);
     float transmittance = 1.0;
     vec3 light = vec3(0.0);
+    // per-cloud character at the ray's entry footprint (one lookup per ray)
+    vec3 pEntry = (ro + rd * span.x - uBoxMin) / (uBoxMax - uBoxMin);
+    vec3 cell = cloudCell(pEntry.xz);
 
     for (int i = 0; i < MARCH_STEPS; i++) {
       vec3 wp = ro + rd * (span.x + (float(i) + jitter) * dt);
-      float d = densityAt(wp);
+      float d = densityAt(wp, cell);
       if (d <= 0.002) continue;
-      float depth = sunDepth(wp, toSun);
+      float depth = sunDepth(wp, toSun, cell);
       vec3 sun = uSunColor * uBrightness * scatter(depth, cosA);
       vec3 col = sun + uAmbColor;
       float extinction = d * dt * 0.9;
@@ -295,9 +316,10 @@ export class Clouds {
 
     const half = TERRAIN_SIZE / 2
     // the deck can sit anywhere from ground level (altitude 0) to high above
-    const bottom = params.cloudAltitude ?? 7
-    const billow = params.cloudBillow ?? 0.6
-    const thickness = 4.5 + 7 * billow
+    const bottom = params.cloudAltitude ?? 4.5
+    const billow = params.cloudBillow ?? 0.4
+    // headroom grows with the billow AND the per-cloud altitude spread
+    const thickness = 4.5 + 7 * billow + 5 * (params.cloudAltSpread ?? 0.5)
 
     const material = new THREE.ShaderMaterial({
       glslVersion: THREE.GLSL3,
@@ -319,8 +341,11 @@ export class Clouds {
         uDrift: { value: 0 },
         uDensity: { value: params.cloudOpacity ?? 0.85 },
         uScale: { value: params.cloudScale ?? 3 },
-        uCoverGate: { value: params.cloudCoverage ?? 0.45 },
+        uCoverGate: { value: params.cloudCoverage ?? 0.62 },
         uBillow: { value: billow },
+        uAltSpread: { value: params.cloudAltSpread ?? 0.5 },
+        uDriftVar: { value: params.cloudDriftVar ?? 0.5 },
+        uContrast: { value: params.cloudContrast ?? 1 },
         uSunStep: { value: thickness * 0.16 },
         uSunDir: { value: this.sunDir.clone().negate() },
         uSunColor: { value: new THREE.Color(1, 1, 1) },
@@ -344,10 +369,11 @@ export class Clouds {
   // column the shader sees (at drift 0 — the terrain offsets it as time passes)
   _bakeShadow(params, data) {
     const N = 128
-    const gate = params.cloudCoverage ?? 0.45
-    const billow = params.cloudBillow ?? 0.6
-    const scale = params.cloudScale ?? 3
-    const density = params.cloudOpacity ?? 0.85
+    const gate = params.cloudCoverage ?? 0.62
+    const billow = params.cloudBillow ?? 0.4
+    const scale = params.cloudScale ?? 5
+    const density = params.cloudOpacity ?? 1.5
+    const contrast = params.cloudContrast ?? 1
     const px = new Uint8Array(N * N)
     const sat = (v) => Math.min(1, Math.max(0, v))
     for (let j = 0; j < N; j++) {
@@ -360,6 +386,8 @@ export class Clouds {
         const cover = sat((c - gate) / 0.25) * edge
         let acc = 0
         if (cover > 0.003) {
+          // per-cloud density character (mirrors cloudCell's z component)
+          const denMul = 0.55 + 0.9 * readVolume(data, x * 0.37 + 3.71, z * 0.37 + 3.71, 0.18, 1)
           const top = 0.28 + (1 - 0.28) * cover * billow
           for (let s = 0; s < 8; s++) {
             const y = (s + 0.5) / 8
@@ -368,10 +396,10 @@ export class Clouds {
             const profile = base * crown * cover
             if (profile <= 0) continue
             const b = readVolume(data, x * scale, y * scale, z * scale, 0)
-            acc += sat(b - (1 - profile)) * density
+            acc += Math.pow(sat(b - (1 - profile)), contrast) * density * denMul
           }
         }
-        px[j * N + i] = Math.round(sat(acc / 2.2) * 255)
+        px[j * N + i] = Math.round(sat(acc / 2.6) * 255)
       }
     }
     const tex = new THREE.DataTexture(px, N, N, THREE.RedFormat)
@@ -391,10 +419,13 @@ export class Clouds {
     const u = this.deck.material.uniforms
     const drift = this.time * (params.cloudDrift ?? 1) * 0.004
     u.uDrift.value = drift
-    u.uDensity.value = params.cloudOpacity ?? 0.85
-    u.uScale.value = params.cloudScale ?? 3
-    u.uCoverGate.value = params.cloudCoverage ?? 0.45
-    u.uBrightness.value = params.cloudBrightness ?? 2.5
+    u.uDensity.value = params.cloudOpacity ?? 1.5
+    u.uScale.value = params.cloudScale ?? 5
+    u.uCoverGate.value = params.cloudCoverage ?? 0.62
+    u.uBrightness.value = params.cloudBrightness ?? 2.9
+    u.uAltSpread.value = params.cloudAltSpread ?? 0.5
+    u.uDriftVar.value = params.cloudDriftVar ?? 0.5
+    u.uContrast.value = params.cloudContrast ?? 1
 
     // the deck reacts to the sun: warm sunset light when the sun sits low, a
     // cooler dimmer ambient as it drops — like a real evening sky

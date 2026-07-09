@@ -64,7 +64,7 @@ test('ICELAND uses the user-tuned blue plate base settings', () => {
   assert.equal(t.grid.gridOpacity, 0.54)
   assert.equal(t.grid.gridColor, '#242220')
   assert.equal(t.palette.oceanMid, '#6cb3fe')
-  assert.equal(t.look.clouds, false)
+  assert.equal(t.look.clouds, true, 'the volumetric deck is on for every look')
   assert.notEqual(t.look.plinth, false, 'the 3D slab is shared — a template never hides it')
   assert.ok(t.light.sunElevation <= 35, 'low sun for crisp relief')
   assert.equal(t.darkMode, false)
@@ -89,7 +89,7 @@ test('FALLOUT WASTELANDS is a warm scorched-plate look', () => {
   assert.ok(sea.h > 170 && sea.h < 240, `sea is blue (h=${sea.h.toFixed(0)})`)
   assert.ok(t.style.slopeTint > 0.3, 'warm slope shading on the flanks')
   assert.ok(t.style.mapTint >= 0.78, 'the warm ramp leads while the hillshade sculpts')
-  assert.equal(t.look.clouds, false)
+  assert.equal(t.look.clouds, true, 'the volumetric deck is on for every look')
   assert.notEqual(t.look.plinth, false, 'the 3D slab is shared — a template never hides it')
 })
 

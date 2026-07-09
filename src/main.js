@@ -37,6 +37,7 @@ import { GroundInfoLayer } from './ground-info-layer.js'
 import { createOverlayPanel } from './overlay-panel.js'
 import { PeaksLayer } from './peaks.js'
 import { Clouds } from './clouds.js'
+import { Traffic } from './traffic.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, makeCollapsible, collapseAll, setUiHidden, reclampDraggables } from './drag.js'
 import { createLandmarksPanel } from './landmarks-panel.js'
@@ -201,14 +202,18 @@ const params = {
   groundInfo: true, // cartouche (compass rose, name, coords, blurb) around the slab
 
   // clouds — thick and low, clinging to the summits
+  // volumetric cloud deck — user-tuned base settings, active on every template
   cloudsEnabled: true,
-  cloudOpacity: 0.85, // density scale of the volumetric deck
-  cloudAltitude: 7, // deck base height in world units — 0 puts the clouds at ground level
-  cloudDrift: 1,
-  cloudScale: 3, // noise tiling across the deck (higher = smaller cloud cells)
-  cloudCoverage: 0.45, // 0 = continuous sheet, higher = broken cumulus with gaps
-  cloudBillow: 0.6, // vertical billowing: 0 = flat slab, 1 = tall domed tops
-  cloudBrightness: 2.5, // sunlight brightness inside the deck
+  cloudOpacity: 1.5, // density scale of the volumetric deck
+  cloudAltitude: 4.5, // deck base height in world units — 0 puts the clouds at ground level
+  cloudDrift: 3,
+  cloudScale: 5, // noise tiling across the deck (higher = smaller cloud cells)
+  cloudCoverage: 0.62, // 0 = continuous sheet, higher = broken cumulus with gaps
+  cloudBillow: 0.4, // vertical billowing: 0 = flat slab, 1 = tall domed tops
+  cloudBrightness: 2.9, // sunlight brightness inside the deck
+  cloudAltSpread: 0.5, // per-cloud altitude variation: 0 = one flight level, 1 = staggered layers
+  cloudDriftVar: 0.5, // per-cloud speed variation: 0 = uniform drift, 1 = very uneven
+  cloudContrast: 1, // density contrast: <1 fluffier/softer, >1 harder-edged
 
   // light
   sunIntensity: 7.6,
@@ -330,6 +335,9 @@ scene.add(cone.group)
 
 clouds = new Clouds(scene, terrain, params)
 clouds.setSunDir(sun.position)
+
+// ambient airliners + SpaceX pad watcher (models fetched, see public/models)
+const traffic = new Traffic(scene, terrain, params)
 
 const labelOpts = () => ({
   real: params.source === 'real',
@@ -746,6 +754,7 @@ async function fetchAndBuildDem() {
   await regenerateTerrain()
   // pull the cartouche info for the new zone (async, non-blocking)
   if (params.groundInfo) groundInfo.load(params.demLat, params.demLon, dem)
+  traffic.setZone(dem) // SpaceX pad watcher (Starbase / LC-39A in view?)
 }
 
 async function loadRealTerrain() {
@@ -825,6 +834,7 @@ modes = new Modes({
       clouds.setVisible(v)
       plinth.setVisible(v && params.plinth)
       groundInfo.setVisible(v && params.groundInfo)
+      traffic.setVisible(v)
       scene.fog = v ? fogRef : null
     },
     setEffectsEnabled(v) {
@@ -1371,8 +1381,11 @@ fClouds.add(params, 'cloudScale', 0.5, 5, 0.1).name('cloud scale').onFinishChang
 fClouds.add(params, 'cloudCoverage', 0, 0.8, 0.01).name('gaps (0 = sheet)').onFinishChange(() => clouds.build(params))
 fClouds.add(params, 'cloudBillow', 0, 1, 0.05).name('vertical billow').onFinishChange(() => clouds.build(params))
 fClouds.add(params, 'cloudBrightness', 0.5, 5, 0.1).name('brightness')
+fClouds.add(params, 'cloudContrast', 0.4, 2.5, 0.05).name('contrast')
 fClouds.add(params, 'cloudAltitude', 0, 16, 0.5).name('altitude (0 = ground)').onFinishChange(() => clouds.build(params))
+fClouds.add(params, 'cloudAltSpread', 0, 1, 0.05).name('altitude spread').onFinishChange(() => clouds.build(params))
 fClouds.add(params, 'cloudDrift', 0, 4, 0.1).name('drift speed')
+fClouds.add(params, 'cloudDriftVar', 0, 1, 0.05).name('drift variation')
 fClouds.close()
 
 const fTerrain = gui.addFolder('Terrain')
@@ -1750,6 +1763,7 @@ function tick() {
     hud3.update(dt, t, params)
     cone.update(dt, t, mouse, params)
     clouds.update(dt, params, camera)
+    traffic.update(dt)
   }
   peaksLayer.update(camera, window.innerWidth, window.innerHeight, modes.mode === 'surface')
 

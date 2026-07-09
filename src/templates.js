@@ -71,7 +71,7 @@ export const TEMPLATES = {
       saturation: -0.15,
       vignette: 0.35,
       grain: 0,
-      clouds: false, // a flat plate — no volumetric clouds
+      clouds: true, // the volumetric deck is on for every look
       // the 3D slab is shared by every template (one block model) so switching
       // looks never makes the base drop out — templates only restyle it
     },
@@ -142,7 +142,7 @@ export const TEMPLATES = {
       saturation: 0.05, // let the ochres stay saturated and warm
       vignette: 0.4,
       grain: 0,
-      clouds: false,
+      clouds: true, // the volumetric deck is on for every look
       // slab shared across templates — never toggled off (see ICELAND note)
     },
     // elevation shared from the per-zoom exaggeration model (not per template)
@@ -218,5 +218,69 @@ export const TEMPLATES = {
       plinth: true, // a mounted USGS relief plate — keep the 3D slab + shadow
     },
     // elevation shared from the per-zoom exaggeration model (not per template)
+  },
+
+  // TOOTHPASTE — user-tuned electric gel plate: minty pale lowlands diving into
+  // saturated toothpaste blues, a near-black band before an electric blue cap,
+  // crisp indigo contours over a tight light grid.
+  toothpaste: {
+    label: 'TOOTHPASTE',
+    darkMode: false,
+    palette: {
+      rampStops: [
+        { c: '#dff3fb', p: 0.0 },
+        { c: '#add1e6', p: 0.14 },
+        { c: '#3595e9', p: 0.28 },
+        { c: '#7dccfc', p: 0.42 },
+        { c: '#256da7', p: 0.56 },
+        { c: '#2165a6', p: 0.7 },
+        { c: '#0c1655', p: 0.84 },
+        { c: '#5465d4', p: 1.0 },
+      ],
+      oceanShallow: '#bcd3e6',
+      oceanMid: '#6cb3fe',
+      oceanDeep: '#22406b',
+      ink: '#0c0b7a',
+    },
+    style: {
+      mapTint: 0.8,
+      heightContrast: 3.4,
+      heightPivot: 0.46,
+      slopeTint: 0, // capture: slope brown 0 — pure gel, no earthy shading
+    },
+    grid: {
+      contourInterval: 0.09,
+      contourOpacity: 0.38,
+      contourColor: '#0c0b7a',
+      contourWeight: 0.5,
+      gridStep: 2,
+      gridOpacity: 0.22,
+      gridColor: '#242220',
+    },
+    light: {
+      sunIntensity: 8.5,
+      sunAzimuth: 315,
+      sunElevation: 30,
+      hemiIntensity: 0.55,
+      envLight: 0.15,
+      shadowSoftness: 7,
+    },
+    surface: {
+      color: '#eef6fb',
+      roughness: 1,
+      roughnessVariation: 0.2,
+      roughnessScale: 10,
+      bumpScale: 1.1,
+      envMapIntensity: 0.15,
+    },
+    look: {
+      fogColor: '#e8f4fb',
+      exposure: 1.02,
+      contrast: 0.12,
+      saturation: 0,
+      vignette: 0.35,
+      grain: 0,
+      clouds: true,
+    },
   },
 }
