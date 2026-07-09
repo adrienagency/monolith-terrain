@@ -36,8 +36,8 @@ export const TEMPLATES = {
       heightPivot: 0.49,
       slopeTint: 0.48, // a touch of slope shading sculpts the flanks
     },
-    // a flattish plate, but with a touch more vertical drama than before
-    terrain: { demExaggeration: 1.3 },
+    // elevation is NOT set per template — a single per-zoom exaggeration model
+    // (tunable + saved) governs the relief for every look
     grid: {
       contourInterval: 0.29,
       contourOpacity: 0.86, // crisp indigo contour lines
@@ -145,8 +145,7 @@ export const TEMPLATES = {
       clouds: false,
       // slab shared across templates — never toggled off (see ICELAND note)
     },
-    // pronounced relief — the mountains stand proud of the golden plain
-    terrain: { demExaggeration: 1.7 },
+    // elevation shared from the per-zoom exaggeration model (not per template)
   },
 
   // DENALI — from the classic USGS shaded-relief plate of Denali National Park:
@@ -218,7 +217,6 @@ export const TEMPLATES = {
       clouds: true, // a mounted 3D plate — let the dense volumetric clouds ride over it
       plinth: true, // a mounted USGS relief plate — keep the 3D slab + shadow
     },
-    // sculpted relief like the USGS plate, but not spiky
-    terrain: { demExaggeration: 1.9 },
+    // elevation shared from the per-zoom exaggeration model (not per template)
   },
 }

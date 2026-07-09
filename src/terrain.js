@@ -5,15 +5,6 @@ import { rampColorStops } from './palette.js'
 
 export const TERRAIN_SIZE = 56
 
-// Coarse continental blocks (low zoom, the first steps down from the orbital
-// view) are visually flat because the relief is tiny next to the huge footprint.
-// Boost the vertical exaggeration at those scales so there's something to see;
-// regional/local tiers (z8+) render at the base exaggeration.
-export function zoomExagBoost(zoom) {
-  if (zoom == null || zoom >= 8) return 1
-  return { 7: 3, 6: 6, 5: 12 }[zoom] ?? 12
-}
-
 export const BASIN_RADIUS = 6.6 // flat excavation floor
 export const BASIN_BLEND = 9.0 // where flat floor blends back into mountains
 export const FLOOR_Y = -0.35
@@ -240,8 +231,8 @@ if (uScanT >= 0.0) {
   // Sampler over a fetched real-world DEM: world xz → bilinear meters → scene units.
   _makeDemSampler(params) {
     const dem = this.dem
-    // coarse continental blocks get a big vertical boost so they aren't flat
-    const scale = (TERRAIN_SIZE / dem.extentMeters) * params.demExaggeration * zoomExagBoost(params.demZoom)
+    // demExaggeration is the per-zoom value chosen in the UI (coarse blocks big)
+    const scale = (TERRAIN_SIZE / dem.extentMeters) * params.demExaggeration
     const meanM = dem.meanM
     this._h2ft = (h) => Math.round((h / scale + meanM) * 3.28084)
 
@@ -380,7 +371,7 @@ if (uScanT >= 0.0) {
     // template gets a clear shoreline and consistent bathymetry, even where the
     // patch has no sub-sea data (then uSeaY simply sits below the terrain).
     if (params.source === 'real' && this.dem) {
-      const demScale = (TERRAIN_SIZE / this.dem.extentMeters) * params.demExaggeration * zoomExagBoost(params.demZoom)
+      const demScale = (TERRAIN_SIZE / this.dem.extentMeters) * params.demExaggeration
       this.mapUniforms.uSeaY.value = (0 - this.dem.meanM) * demScale
       this.mapUniforms.uSeaRange.value = Math.max((0 - this.dem.minM) * demScale, 1e-3)
     } else {

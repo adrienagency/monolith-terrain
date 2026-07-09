@@ -114,7 +114,7 @@ test('DENALI is a full USGS hypsometric band system over blue water', () => {
   assert.equal(t.grid.gridOpacity, 0.32)
   assert.equal(t.light.sunElevation, 11)
   assert.equal(t.light.sunAzimuth, 142)
-  // pronounced vertical relief, mounted plate (slab kept)
-  assert.ok(t.terrain.demExaggeration >= 1.7, 'pronounced relief')
+  // elevation is centralised in the per-zoom model — no per-template exaggeration
+  assert.equal(t.terrain, undefined, 'elevation is not set per template')
   assert.equal(t.look.plinth, true, 'a mounted relief plate keeps the slab')
 })

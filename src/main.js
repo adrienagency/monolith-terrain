@@ -699,9 +699,40 @@ let demBusy = false
 // params.demZoom freely, but refining always climbs back to this
 let userFineZoom = Math.max(params.demZoom, 12)
 
+// --- per-zoom vertical exaggeration ------------------------------------------
+// ONE elevation model shared by every look (templates never touch it). Each zoom
+// tier carries its own exaggeration that you tune with the slider and it PERSISTS
+// (localStorage) — so continental blocks (z5/6/7) can stand tall while close-ups
+// stay subtle, entirely to your taste. Coarse blocks default high because their
+// relief is tiny next to the huge footprint.
+const BASE_EXAG = 2.2
+const ZOOM_EXAG_DEFAULTS = { 5: 26, 6: 13, 7: 6.6 }
+const ZOOM_EXAG_KEY = 'monolith.zoomExag'
+let zoomExagStore = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(ZOOM_EXAG_KEY) || '{}') || {}
+  } catch {
+    return {}
+  }
+})()
+const exagForZoom = (z) => zoomExagStore[z] ?? ZOOM_EXAG_DEFAULTS[z] ?? BASE_EXAG
+function saveZoomExag(z, v) {
+  zoomExagStore[z] = v
+  try {
+    localStorage.setItem(ZOOM_EXAG_KEY, JSON.stringify(zoomExagStore))
+  } catch {}
+}
+let exagCtrl = null
+// pull the current zoom's exaggeration into params + refresh the slider label
+function syncExagToZoom() {
+  params.demExaggeration = exagForZoom(params.demZoom)
+  if (exagCtrl) exagCtrl.updateDisplay().name(`vertical scale · z${params.demZoom}`)
+}
+
 // fetch tiles + rebuild; throws on failure so programmatic callers (orbital
 // dive) can hold orbit — loadRealTerrain wraps it with the GUI's error UX
 async function fetchAndBuildDem() {
+  syncExagToZoom() // this zoom's saved (or default) vertical exaggeration
   loadingEl.textContent = 'fetching elevation tiles…'
   loadingEl.classList.remove('hidden')
   dem = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom })
@@ -904,7 +935,6 @@ const DEFAULT_FX = Object.freeze({
   clouds: params.cloudsEnabled,
   plinth: params.plinth,
 })
-const DEFAULT_EXAGGERATION = params.demExaggeration
 
 function applyPalette(p) {
   // land ramp: a fixed 8-stop system. Overwrite the existing stop objects in
@@ -1040,14 +1070,6 @@ function applyLook(k) {
     plinth.setVisible(k.plinth && modes.mode === 'surface')
   }
 }
-// vertical relief scale — lowering it flattens the terrain toward a
-// bathymetric-plate read without touching the camera (rebuilds the DEM mesh)
-function applyTerrainScale(t) {
-  if (t.demExaggeration != null && t.demExaggeration !== params.demExaggeration) {
-    params.demExaggeration = t.demExaggeration
-    if (params.source === 'real') regenerateTerrain()
-  }
-}
 function applyTemplate(t) {
   setDarkMode(t.darkMode ?? false) // base theme first, template values override
   if (t.palette) applyPalette(t.palette)
@@ -1056,7 +1078,8 @@ function applyTemplate(t) {
   if (t.light) applyLight(t.light)
   if (t.surface) applySurface(t.surface)
   if (t.look) applyLook(t.look)
-  if (t.terrain) applyTerrainScale(t.terrain)
+  // elevation is NOT part of a look — the per-zoom exaggeration model owns it,
+  // so switching templates never changes the relief (or recolours it via slope)
   gui.controllersRecursive().forEach((c) => c.updateDisplay())
 }
 
@@ -1083,7 +1106,7 @@ function resetLook() {
   applyLight({ ...DEFAULT_LIGHT })
   applySurface({ ...DEFAULT_SURFACE })
   applyLook({ ...DEFAULT_FX })
-  applyTerrainScale({ demExaggeration: DEFAULT_EXAGGERATION })
+  // elevation is per-zoom (persisted), not part of the look — left untouched
 }
 
 const landmarksPanel = createLandmarksPanel({
@@ -1274,12 +1297,31 @@ fSource
     if (v >= 12) userFineZoom = v // remember the user's chosen fine scale
     if (params.source === 'real') loadRealTerrain()
   })
-fSource
-  .add(params, 'demExaggeration', 0.5, 5, 0.1)
-  .name('vertical scale')
-  .onFinishChange(() => {
+// per-zoom vertical exaggeration — finer step, wide range (coarse blocks need
+// big values), and every edit is SAVED for the current zoom
+exagCtrl = fSource
+  .add(params, 'demExaggeration', 0.5, 40, 0.05)
+  .name(`vertical scale · z${params.demZoom}`)
+  .onFinishChange((v) => {
+    saveZoomExag(params.demZoom, v)
     if (params.source === 'real') regenerateTerrain()
   })
+// forget this zoom's saved exaggeration → back to the built-in default
+fSource
+  .add(
+    {
+      reset: () => {
+        delete zoomExagStore[params.demZoom]
+        try {
+          localStorage.setItem(ZOOM_EXAG_KEY, JSON.stringify(zoomExagStore))
+        } catch {}
+        syncExagToZoom() // falls back to the built-in default for this zoom
+        if (params.source === 'real') regenerateTerrain()
+      },
+    },
+    'reset'
+  )
+  .name('↺ reset exaggeration (this zoom)')
 fSource.add({ load: () => loadRealTerrain() }, 'load').name('load location ⤓')
 
 // go-to travel: paste coordinates or search a name, fly over the globe, dive
