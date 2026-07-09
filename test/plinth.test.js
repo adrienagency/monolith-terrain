@@ -80,6 +80,29 @@ test('a corner radius fillets the four salient vertical edges (rounded footprint
   }
 })
 
+test('corner smoothing shapes the fillet as a superellipse (squircle)', () => {
+  const r = 0.04 * TERRAIN_SIZE // v15: half the previous radius
+  const expo = 2 + 0.6 * 4 // smoothing 0.6 → exponent 4.4
+  const { ring } = computeSlab(() => 0, 7, 256, r, expo)
+  const inner = HALF - r
+  let arcPts = 0
+  for (const p of ring) {
+    if (Math.abs(p.x) > inner + 1e-6 && Math.abs(p.z) > inner + 1e-6) {
+      arcPts++
+      const dx = Math.abs(p.x) - inner
+      const dz = Math.abs(p.z) - inner
+      // on the superellipse boundary: |dx|^n + |dz|^n == r^n
+      const pn = Math.pow(Math.pow(dx, expo) + Math.pow(dz, expo), 1 / expo)
+      assert.ok(Math.abs(pn - r) < 1e-6, `corner point off the superellipse (pn=${pn.toFixed(4)}, r=${r})`)
+      // a squircle bulges FULLER than a circle: the p-norm point sits closer to
+      // the true corner than the circular arc would (dist < r·(√2−1) fails here)
+    }
+  }
+  assert.ok(arcPts > 0, 'the rounded corners produced arc points')
+  // flats still reach the full extent
+  assert.ok(ring.some((p) => Math.abs(p.x - HALF) < 1e-6), 'right flat still at +HALF')
+})
+
 test('zero corner radius keeps the exact square ring (backward compatible)', () => {
   const sq = computeSlab(() => 0, 7, 200)
   const sq2 = computeSlab(() => 0, 7, 200, 0)

@@ -44,6 +44,9 @@ export class Terrain {
       // block's vertical corners read soft and nothing overhangs the plinth walls
       uSlabHalf: { value: TERRAIN_SIZE / 2 },
       uSlabCorner: { value: (params.slabCorner ?? 0) * TERRAIN_SIZE },
+      // superellipse exponent for the corner: 2 = circular arc, higher = squircle
+      // (iOS-style continuous corner). Shared with the plinth ring, see plinth.js
+      uSlabCornerN: { value: 2 + (params.slabCornerSmoothing ?? 0) * 4 },
       uOceanShallow: { value: new THREE.Color(params.oceanShallow ?? '#dce8ec') },
       uOceanMid: { value: new THREE.Color(params.oceanMid ?? '#7fa8b8') },
       uOceanDeep: { value: new THREE.Color(params.oceanDeep ?? '#31576b') },
@@ -104,6 +107,7 @@ uniform vec3 uGridColor;
 uniform vec3 uContourColor;
 uniform float uSlabHalf;
 uniform float uSlabCorner;
+uniform float uSlabCornerN;
 uniform float uScanT;
 uniform vec3 uScanColor;
 uniform float uScanWidth;
@@ -117,9 +121,11 @@ uniform float uScanBlur;`
   // filleted corners so the block's vertical edges read soft (matches the
   // plinth walls). Zero radius = untouched square. SDF of a rounded box.
   if (uSlabCorner > 0.0) {
-    vec2 cq = abs(vWorldPos.xz) - vec2(uSlabHalf - uSlabCorner);
-    float csd = length(max(cq, 0.0)) + min(max(cq.x, cq.y), 0.0) - uSlabCorner;
-    if (csd > 0.0) discard;
+    vec2 cq = max(abs(vWorldPos.xz) - vec2(uSlabHalf - uSlabCorner), 0.0);
+    // superellipse boundary |x|^n + |y|^n = r^n (n=2 circle, higher = squircle);
+    // straight edges stay exact (one component is 0), only corners are shaped
+    float pn = pow(pow(cq.x, uSlabCornerN) + pow(cq.y, uSlabCornerN), 1.0 / uSlabCornerN);
+    if (pn > uSlabCorner) discard;
   }
 
   // --- hypsometric tint: user gradient sampled by height, contrast expanded around a pivot

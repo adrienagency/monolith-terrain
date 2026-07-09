@@ -194,8 +194,10 @@ const params = {
   plinth: true,
   plinthDepth: 7,
   plinthColor: '#d8d4cc',
-  slabCorner: 0.08, // fillet radius on the slab's vertical corners, as a fraction
+  slabCorner: 0.04, // fillet radius on the slab's vertical corners, as a fraction
   // of the block width (the terrain clips to the same rounded rectangle)
+  slabCornerSmoothing: 0.6, // 0 = plain circular arc, →1 = squircle (iOS-style
+  // continuous corner); drives a superellipse exponent shared by ring + clip
   groundInfo: true, // cartouche (compass rose, name, coords, blurb) around the slab
 
   // clouds — thick and low, clinging to the summits

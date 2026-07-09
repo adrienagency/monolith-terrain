@@ -1,15 +1,55 @@
-// Sparse volumetric clouds: each cloud is a camera-facing impostor quad whose
-// fragment shader RAYMARCHES a 3D fbm density field inside the cloud's
-// ellipsoid — real light accumulation toward the sun, not a flat sprite.
-// Deliberately discreet (a handful of small clouds, slow drift) with soft
-// blob shadows hugging the relief. The map stays the hero.
+// Volumetric clouds — a proper raymarched cloud field. Each cloud is a
+// camera-facing impostor whose fragment shader ray-marches a shared 3D Perlin
+// noise volume (the technique from three.js' `webgl_volume_cloud` example),
+// lit with a Beer–Lambert light march toward the sun for real self-shadowing
+// and a powder term for the bright rims. Sparse, low-drifting cumulus that
+// cling to the relief; some are dense and throw a strong ground shadow. The
+// map stays the hero — clouds are discreet but no longer flat and cheap.
 
 import * as THREE from 'three'
+import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { mulberry32 } from './noise.js'
 
+// ---- shared 3D noise volume: billowy FBM Perlin baked once into a Data3DTexture
+function buildNoiseTexture(size = 64) {
+  const data = new Uint8Array(size * size * size)
+  const perlin = new ImprovedNoise()
+  let i = 0
+  for (let z = 0; z < size; z++) {
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        // FBM of Perlin; the |·| billow gives puffy cumulus rather than smoke
+        let f = 0,
+          amp = 0.5,
+          fr = 0.09
+        for (let o = 0; o < 4; o++) {
+          f += amp * perlin.noise(x * fr, y * fr, z * fr)
+          fr *= 2.15
+          amp *= 0.5
+        }
+        const v = 1.0 - Math.abs(f) // billow: ridged, fuller cores
+        data[i++] = Math.max(0, Math.min(255, Math.round(v * 255)))
+      }
+    }
+  }
+  const tex = new THREE.Data3DTexture(data, size, size, size)
+  tex.format = THREE.RedFormat
+  tex.minFilter = THREE.LinearFilter
+  tex.magFilter = THREE.LinearFilter
+  tex.wrapS = tex.wrapT = tex.wrapR = THREE.RepeatWrapping
+  tex.unpackAlignment = 1
+  tex.needsUpdate = true
+  return tex
+}
+
 const VERT = /* glsl */ `
-varying vec3 vWorldPos;
+precision highp float;
+in vec3 position;
+uniform mat4 modelMatrix;
+uniform mat4 viewMatrix;
+uniform mat4 projectionMatrix;
+out vec3 vWorldPos;
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorldPos = wp.xyz;
@@ -19,99 +59,86 @@ void main() {
 
 const FRAG = /* glsl */ `
 precision highp float;
-varying vec3 vWorldPos;
+precision highp sampler3D;
+in vec3 vWorldPos;
+out vec4 outColor;
+
+uniform vec3 cameraPosition;
 uniform vec3 uCenter;
-uniform vec3 uRadii;   // ellipsoid semi-axes (world units)
+uniform vec3 uRadii;     // ellipsoid semi-axes (world units)
 uniform vec3 uSunDir;
-uniform float uSeed;
 uniform float uTime;
 uniform float uOpacity;
-uniform float uGroundY; // terrain height under the cloud — density dissolves here
-
-// value noise + fbm — cheap, procedural, no texture fetch
-float hash13(vec3 p) {
-  p = fract(p * 0.3183099 + 0.1);
-  p *= 17.0;
-  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
-}
-float noise3(vec3 x) {
-  vec3 i = floor(x);
-  vec3 f = fract(x);
-  f = f * f * (3.0 - 2.0 * f);
-  return mix(
-    mix(mix(hash13(i), hash13(i + vec3(1, 0, 0)), f.x),
-        mix(hash13(i + vec3(0, 1, 0)), hash13(i + vec3(1, 1, 0)), f.x), f.y),
-    mix(mix(hash13(i + vec3(0, 0, 1)), hash13(i + vec3(1, 0, 1)), f.x),
-        mix(hash13(i + vec3(0, 1, 1)), hash13(i + vec3(1, 1, 1)), f.x), f.y),
-    f.z);
-}
-float fbm(vec3 p) {
-  float v = 0.0;
-  float a = 0.55;
-  for (int i = 0; i < 4; i++) {
-    v += a * noise3(p);
-    p = p * 2.13 + vec3(11.3, 7.1, 5.7);
-    a *= 0.5;
-  }
-  return v;
-}
-
-// density in ellipsoid-local unit space: puffy fbm carved by the shell falloff.
-// uDensity scales the body: >1 fills the puff (fewer holes, heavier core).
 uniform float uDensity;
-float density(vec3 q) {
-  // fuller shell (starts fading later) so the cloud carries a solid mid-body
+uniform float uThreshold; // carve level — lower = more cloud
+uniform float uGroundY;   // terrain height under the cloud (contact dissolve)
+uniform sampler3D uNoise;
+uniform float uFreq;      // noise frequency in cloud-local space
+uniform vec3 uSeed;       // per-cloud offset → each puff is a distinct shape
+
+// density at a world point. The noise is sampled in the cloud's OWN local space
+// (q = point in unit-ellipsoid space) offset by uSeed, so each cloud is a
+// coherent puff that translates rigidly and only evolves slowly via uTime —
+// rather than boiling as it drifts through a world-space field.
+float cloudAt(vec3 wp) {
+  vec3 q = (wp - uCenter) / uRadii;
   float shell = 1.0 - smoothstep(0.5, 1.0, length(q));
   if (shell <= 0.0) return 0.0;
-  vec3 p = q * 2.4 + vec3(uSeed * 13.7) + vec3(uTime * 0.02, 0.0, uTime * 0.013);
-  float f = fbm(p);
-  // lower fbm threshold = more of the volume passes as cloud; uDensity thickens
-  return clamp((f - 0.36) * 2.7, 0.0, 1.0) * shell * uDensity;
+  vec3 uvw = q * uFreq + uSeed + vec3(uTime * 0.01, 0.0, uTime * 0.006);
+  float base = texture(uNoise, uvw).r;
+  float det = texture(uNoise, uvw * 3.0 + 3.3).r;
+  float d = base - (1.0 - det) * 0.3; // erode edges with detail → wispier rims
+  d = smoothstep(uThreshold, uThreshold + 0.55, d);
+  d *= smoothstep(uGroundY - 0.3, uGroundY + 2.2, wp.y); // wispy relief contact
+  return clamp(d * shell * uDensity, 0.0, 1.0);
 }
 
 void main() {
-  // ray through this fragment, in ellipsoid-local unit-sphere space
-  vec3 ro = (cameraPosition - uCenter) / uRadii;
-  vec3 rd = normalize((vWorldPos - cameraPosition));
-  vec3 rdl = normalize(rd / uRadii);
-
-  // unit-sphere intersection
-  float b = dot(ro, rdl);
-  float c = dot(ro, ro) - 1.0;
-  float h = b * b - c;
+  vec3 ro = cameraPosition;
+  vec3 rd = normalize(vWorldPos - cameraPosition);
+  // ray vs unit sphere in ellipsoid-local space
+  vec3 roL = (ro - uCenter) / uRadii;
+  vec3 rdL = rd / uRadii;
+  float a = dot(rdL, rdL);
+  float b = dot(roL, rdL);
+  float c = dot(roL, roL) - 1.0;
+  float h = b * b - a * c;
   if (h < 0.0) discard;
   h = sqrt(h);
-  float t0 = max(-b - h, 0.0);
-  float t1 = -b + h;
+  float t0 = max((-b - h) / a, 0.0);
+  float t1 = (-b + h) / a;
   if (t1 <= t0) discard;
 
-  vec3 sunL = normalize(uSunDir / uRadii);
-  const int STEPS = 20;
+  const int STEPS = 28;
   float dt = (t1 - t0) / float(STEPS);
-  float alpha = 0.0;
-  float lightAcc = 0.0;
-
+  vec3 sunL = normalize(uSunDir);
+  float transmittance = 1.0;
+  vec3 scatter = vec3(0.0);
+  // dither the ray start by a screen-space hash so the fixed step count can't
+  // band the thin dense cores at grazing angles
+  vec3 h3 = fract(vec3(gl_FragCoord.xyx) * 0.1031);
+  h3 += dot(h3, h3.yzx + 33.33);
+  float jitter = fract((h3.x + h3.y) * h3.z);
   for (int i = 0; i < STEPS; i++) {
-    if (alpha > 0.98) break;
-    vec3 q = ro + rdl * (t0 + (float(i) + 0.5) * dt);
-    float d = density(q);
-    // dissolve the cloud as it meets the relief: fade density out over a soft
-    // band above the ground so contact stays wispy instead of a hard slab edge
-    float worldY = uCenter.y + q.y * uRadii.y;
-    d *= smoothstep(uGroundY - 0.3, uGroundY + 2.2, worldY);
-    if (d <= 0.001) continue;
-    // one cheap tap toward the sun: how buried is this sample?
-    float occ = density(q + sunL * 0.28) * 0.85 + density(q + sunL * 0.6) * 0.5;
-    float light = exp(-occ * 1.9);
-    float a = 1.0 - exp(-d * dt * 7.6);
-    lightAcc += light * a * (1.0 - alpha);
-    alpha += a * (1.0 - alpha);
+    vec3 wp = ro + rd * (t0 + (float(i) + jitter) * dt);
+    float d = cloudAt(wp);
+    if (d > 0.001) {
+      // short light march toward the sun → Beer–Lambert self-shadowing
+      float ld = 0.0;
+      for (int j = 1; j <= 4; j++) ld += cloudAt(wp + sunL * (float(j) * 0.6));
+      float light = exp(-ld * 0.6);
+      // sunlit crown (warm white) fading to a cool shadowed underside — natural
+      // cumulus shading, no inverted powder term
+      vec3 col = mix(vec3(0.55, 0.6, 0.68), vec3(1.0, 0.99, 0.96), light);
+      float dens = d * dt * 5.5;
+      scatter += col * dens * transmittance;
+      transmittance *= exp(-dens);
+      if (transmittance < 0.02) break;
+    }
   }
-  if (alpha < 0.015) discard;
-
-  // paper-friendly cloud color: bright sunlit white, cool-grey shadowed core
-  vec3 col = mix(vec3(0.72, 0.75, 0.79), vec3(1.0), clamp(lightAcc / max(alpha, 1e-3), 0.0, 1.0));
-  gl_FragColor = vec4(col, alpha * uOpacity);
+  float alpha = (1.0 - transmittance) * uOpacity;
+  if (alpha < 0.01) discard;
+  outColor = vec4(scatter / max(1.0 - transmittance, 1e-3), alpha);
 }
 `
 
@@ -137,6 +164,7 @@ export class Clouds {
     this.group.name = 'clouds'
     scene.add(this.group)
     this.tex = shadowTexture()
+    this.noiseTex = buildNoiseTexture(64) // shared volume, baked once
     this.clouds = []
     this.time = 0
     this.sunDir = new THREE.Vector3(0.5, 0.7, 0.4)
@@ -158,38 +186,41 @@ export class Clouds {
       // roughly half the field is "dense": bigger, heavier-bodied puffs that read
       // as solid and throw a strong cast shadow; the rest stay lighter and wispy
       const dense = rng() < 0.5
-      // thicker, bulkier puffs than before — they ride low over the relief
       const size = (dense ? 4.4 : 2.8) + rng() * (dense ? 3.6 : 2.6)
       const radii = new THREE.Vector3(size, size * (0.5 + rng() * 0.28), size * (0.6 + rng() * 0.32))
-      // impostor quad big enough to cover the ellipsoid from any angle
-      const quad = Math.max(radii.x, radii.z) * 2.15
+      // impostor quad big enough to cover the ellipsoid silhouette from any angle
+      const quad = Math.max(radii.x, radii.y, radii.z) * 2.4
       const mesh = new THREE.Mesh(
         new THREE.PlaneGeometry(quad, quad),
-        new THREE.ShaderMaterial({
+        new THREE.RawShaderMaterial({
+          glslVersion: THREE.GLSL3,
           vertexShader: VERT,
           fragmentShader: FRAG,
           transparent: true,
           depthWrite: false,
-          // no depth test: the ground-dissolve carries the terrain contact, so
-          // we avoid the hard silhouette a depth-clipped billboard cut into the
-          // relief (the straight-line artifact)
+          // no depth test: the ground-dissolve carries the terrain contact, so we
+          // avoid the hard silhouette a depth-clipped billboard cuts into the relief
           depthTest: false,
           uniforms: {
             uCenter: { value: new THREE.Vector3() },
             uRadii: { value: radii },
             uSunDir: { value: this.sunDir.clone() },
-            uSeed: { value: rng() * 100 },
             uTime: { value: 0 },
             uOpacity: { value: Math.min(1, (dense ? 1.0 : 0.82 + rng() * 0.16) * params.cloudOpacity) },
             uDensity: { value: dense ? 1.7 : 1.0 },
+            uThreshold: { value: dense ? 0.3 : 0.42 },
             uGroundY: { value: 0 },
+            uNoise: { value: this.noiseTex },
+            uFreq: { value: 1.7 },
+            uSeed: { value: new THREE.Vector3(rng() * 10, rng() * 10, rng() * 10) },
           },
         })
       )
       mesh.renderOrder = 15
+      mesh.frustumCulled = false // the impostor is small; the volume extends past it
       // hover: how high the cloud floats above the ground under it. Kept low
-      // (0.2–1.6 × the base altitude) so clouds cling to summits and the
-      // tallest peaks can pierce them
+      // (0.2–1.6 × the base altitude) so clouds cling to summits and the tallest
+      // peaks can pierce them
       const hover = params.cloudAltitude * (0.2 + rng() * 1.4)
       mesh.position.set((rng() * 2 - 1) * half, 0, (rng() * 2 - 1) * half)
 
@@ -236,7 +267,6 @@ export class Clouds {
       if (camera) c.mesh.quaternion.copy(camera.quaternion)
       c.mesh.material.uniforms.uCenter.value.copy(c.mesh.position)
       c.mesh.material.uniforms.uTime.value = this.time
-      // ground height under the cloud drives the terrain-contact dissolve
       c.mesh.material.uniforms.uGroundY.value = inside ? groundY : -9999
 
       // shadow offset along the sun's ground projection, so it falls away from

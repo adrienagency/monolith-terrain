@@ -14,9 +14,10 @@ const INTERIOR_STEPS = 12 // coarse grid to find the global min (basin guard)
 // border — a coarser ring leaves gaps you can see the underside through. baseY
 // sits `depth` below the LOWEST point anywhere on the patch (not just the
 // border) so a deep interior basin can never pierce the base plane. Tested.
-export function computeSlab(sample, depth, samples = 256, cornerRadius = 0) {
+export function computeSlab(sample, depth, samples = 256, cornerRadius = 0, cornerExp = 2) {
   const n = Math.max(8, Math.round(samples))
   const r = Math.max(0, Math.min(cornerRadius, HALF - 1))
+  const expo = Math.max(2, cornerExp) // superellipse exponent (2 = circle)
   let borderMin = Infinity
   let globalMin = Infinity
   const ring = [] // clockwise from the -x/-z corner
@@ -46,10 +47,17 @@ export function computeSlab(sample, depth, samples = 256, cornerRadius = 0) {
         edge(x0 + (x1 - x0) * t, z0 + (z1 - z0) * t)
       }
     }
+    // superellipse corner: point = center + r·(sgn·|cos|^(2/n), sgn·|sin|^(2/n)).
+    // n=2 reduces to a circular arc; higher n bulges toward a squircle. Matches
+    // the terrain shader's p-norm clip so the map edge and wall stay aligned.
     const arc = (cx, cz, a0, a1) => {
       for (let i = 0; i < arcN; i++) {
         const a = a0 + ((a1 - a0) * i) / arcN
-        edge(cx + Math.cos(a) * r, cz + Math.sin(a) * r)
+        const ca = Math.cos(a)
+        const sa = Math.sin(a)
+        const ex = Math.sign(ca) * Math.pow(Math.abs(ca), 2 / expo) * r
+        const ez = Math.sign(sa) * Math.pow(Math.abs(sa), 2 / expo) * r
+        edge(cx + ex, cz + ez)
       }
     }
     line(-inner, -HALF, inner, -HALF) //  top edge   (z=-HALF)
@@ -115,7 +123,8 @@ export class Plinth {
     // The corner radius rounds the four salient vertical edges; the terrain
     // shader clips to the SAME rounded rectangle so nothing overhangs the walls.
     const cornerR = (params.slabCorner ?? 0) * TERRAIN_SIZE
-    const { ring, baseY } = computeSlab(sample, this.depth, params.resolution ?? 256, cornerR)
+    const cornerExp = 2 + (params.slabCornerSmoothing ?? 0) * 4
+    const { ring, baseY } = computeSlab(sample, this.depth, params.resolution ?? 256, cornerR, cornerExp)
     this.baseY = baseY
     this.base.position.y = baseY
 
