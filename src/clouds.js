@@ -11,25 +11,73 @@ import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { mulberry32 } from './noise.js'
 
-// ---- shared 3D noise volume: billowy FBM Perlin baked once into a Data3DTexture
+// ---- shared 3D noise volume: a tileable "Perlin-Worley" field baked once into a
+// Data3DTexture. Inverted Worley (cellular) noise makes the tightly-packed billows
+// of cumulus; plain Perlin alone looks procedural and lacks them (Schneider/Nubis).
+// We dilate a Perlin FBM with an inverted-Worley FBM to keep Perlin's connectedness
+// while gaining Worley's cauliflower billows.
 function buildNoiseTexture(size = 64) {
   const data = new Uint8Array(size * size * size)
   const perlin = new ImprovedNoise()
+
+  // integer hash → 3 pseudo-random feature offsets in [0,1) for a Worley cell
+  const hash = (x, y, z) => {
+    let h = (x * 374761393 + y * 668265263 + z * 1274126177) | 0
+    h = (h ^ (h >>> 13)) * 1274126177
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967295
+  }
+  // tileable Worley: nearest-feature-point distance over a wrapped freq³ cell grid
+  const worley = (px, py, pz, freq) => {
+    const cx = Math.floor(px * freq),
+      cy = Math.floor(py * freq),
+      cz = Math.floor(pz * freq)
+    let minD = 1e9
+    for (let dz = -1; dz <= 1; dz++)
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const ax = cx + dx,
+            ay = cy + dy,
+            az = cz + dz
+          const wx = ((ax % freq) + freq) % freq,
+            wy = ((ay % freq) + freq) % freq,
+            wz = ((az % freq) + freq) % freq
+          const fx = ax + hash(wx, wy, wz),
+            fy = ay + hash(wy, wz, wx),
+            fz = az + hash(wz, wx, wy)
+          const ex = fx / freq - px,
+            ey = fy / freq - py,
+            ez = fz / freq - pz
+          const d = ex * ex + ey * ey + ez * ez
+          if (d < minD) minD = d
+        }
+    return Math.min(1, Math.sqrt(minD) * freq)
+  }
+  // inverted-Worley FBM → billows (high near cell centres)
+  const worleyFbm = (x, y, z) =>
+    (1 - worley(x, y, z, 4)) * 0.625 + (1 - worley(x, y, z, 8)) * 0.25 + (1 - worley(x, y, z, 16)) * 0.125
+
+  const remap = (v, a, b) => Math.min(1, Math.max(0, (v - a) / (b - a)))
   let i = 0
   for (let z = 0; z < size; z++) {
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
-        // FBM of Perlin; the |·| billow gives puffy cumulus rather than smoke
-        let f = 0,
+        const nx = x / size,
+          ny = y / size,
+          nz = z / size
+        // Perlin FBM in [0,1]
+        let pf = 0,
           amp = 0.5,
-          fr = 0.09
-        for (let o = 0; o < 4; o++) {
-          f += amp * perlin.noise(x * fr, y * fr, z * fr)
-          fr *= 2.15
+          fr = 4
+        for (let o = 0; o < 3; o++) {
+          pf += amp * perlin.noise(nx * fr, ny * fr, nz * fr)
+          fr *= 2
           amp *= 0.5
         }
-        const v = 1.0 - Math.abs(f) // billow: ridged, fuller cores
-        data[i++] = Math.max(0, Math.min(255, Math.round(v * 255)))
+        pf = pf * 0.5 + 0.5
+        const w = worleyFbm(nx, ny, nz)
+        // Perlin-Worley: dilate Perlin by the inverted-Worley billows
+        const pw = remap(pf, w - 1, 1)
+        data[i++] = Math.max(0, Math.min(255, Math.round(pw * 255)))
       }
     }
   }
@@ -65,105 +113,143 @@ out vec4 outColor;
 
 uniform vec3 cameraPosition;
 uniform vec3 uCenter;
-uniform vec3 uRadii;     // ellipsoid semi-axes (world units)
-uniform vec3 uSunDir;
+uniform vec3 uRadii;      // half-extents of the cloud's bounding box (world units)
+uniform vec3 uSunDir;     // direction TO the sun (normalized)
+uniform vec3 uSunCol;     // sunlight colour
+uniform vec3 uAmbCol;     // sky ambient / multiple-scatter fill colour
 uniform float uTime;
 uniform float uOpacity;
 uniform float uDensity;
-uniform float uThreshold; // carve level — lower = more cloud
+uniform float uCover;     // coverage bias: >0 fuller clouds, <0 wispier
+uniform float uErode;     // edge-erosion strength (detail Worley subtract)
 uniform float uGroundY;   // terrain height under the cloud (contact dissolve)
 uniform sampler3D uNoise;
-uniform float uFreq;      // noise frequency in cloud-local space
-uniform vec3 uSeed;       // per-cloud offset → each puff is a distinct shape
+uniform float uFreq;      // base-noise frequency in cloud-local space
+uniform vec3 uSeed;       // per-cloud offset → each cloud is a distinct shape
 
-// density at a world point. Noise is sampled in the cloud's OWN local space
-// (q = point in unit-ellipsoid space) offset by uSeed, so each cloud is a
-// coherent puff that translates rigidly and only evolves slowly via uTime.
-// CRUCIAL for it to read as a cloud and not a sphere: the coverage threshold
-// RISES toward the rim, so the fractal noise — not the ellipsoid — defines a
-// ragged, broken silhouette (the standard real-time cumulus shaping trick).
-// per-direction surface radius: low-frequency noise sampled by DIRECTION pushes
-// the cloud's boundary in and out by lobe, so the silhouette is an irregular
-// cauliflower — the key to not looking like a smooth egg.
-float surfaceRadius(vec3 dir) {
-  // two octaves of directional noise → big lobes + smaller bulges = cauliflower
-  float lobe = texture(uNoise, dir * 1.2 + uSeed).r * 0.65
-             + texture(uNoise, dir * 3.0 + uSeed * 1.7).r * 0.35;
-  return mix(0.26, 0.98, lobe);
+const float PI = 3.14159265;
+
+// Henyey–Greenstein phase: forward-biased Mie scattering → the sunlit silver lining
+float hg(float cosA, float g) {
+  float g2 = g * g;
+  return (1.0 - g2) / (4.0 * PI * pow(1.0 + g2 - 2.0 * g * cosA, 1.5));
 }
 
-float cloudAt(vec3 wp) {
-  vec3 q = (wp - uCenter) / uRadii;
-  float r = length(q);
-  if (r >= 1.0) return 0.0;
-  vec3 dir = q / max(r, 1e-4);
-  float surf = surfaceRadius(dir);
-  // WIDE feathery falloff from a dense-ish core to a soft rim (not a hard shell)
-  float body = 1.0 - smoothstep(surf * 0.35, surf, r);
-  if (body <= 0.0) return 0.0;
-  // billow carve punches real holes → translucent, broken cloud (not a solid mass)
-  vec3 uvw = q * uFreq + uSeed + vec3(uTime * 0.012, 0.0, uTime * 0.007);
-  float n = texture(uNoise, uvw).r * 0.6 + texture(uNoise, uvw * 2.6 + 3.1).r * 0.4;
-  float carve = smoothstep(uThreshold, uThreshold + 0.32, n);
-  float d = body * carve;
-  d *= smoothstep(uGroundY - 0.3, uGroundY + 2.2, wp.y); // wispy relief contact
-  return clamp(d * uDensity, 0.0, 1.0);
+// --- Nubis-style density (Schneider / Horizon Zero Dawn) -------------------
+// The SHAPE comes from noise, not from a primitive. We build a soft "dimensional
+// profile" (flat-bottomed, billowing-topped, horizontally bounded envelope) and
+// let the noise carve the actual silhouette via  density = base - (1 - profile),
+// then erode the edges with higher-frequency detail. No ellipsoid, no egg.
+
+// vertical profile: hard-ish FLAT BASE rising to a dense mid-body that tapers and
+// billows toward the top — the signature cumulus shape
+float heightProfile(float h) {
+  float base = smoothstep(0.03, 0.14, h);   // flat cut at the bottom
+  float top = pow(clamp(1.0 - h, 0.0, 1.0), 0.6); // taper up top
+  return base * top;
 }
 
-// cheap density for the sun light-march (self-shadowing only) — same lumpy shell
+float baseNoise(vec3 uvw) {
+  // 2-octave billow FBM, then a contrast curve so it reads as packed billows
+  // with gaps (cauliflower) rather than a smooth grey field
+  float n = texture(uNoise, uvw).r * 0.65 + texture(uNoise, uvw * 2.4 + 4.7).r * 0.35;
+  return smoothstep(0.28, 0.72, n);
+}
+
+float cloudDensity(vec3 wp, out float hOut) {
+  vec3 local = (wp - uCenter) / uRadii; // box space
+  float h = clamp(local.y * 0.5 + 0.5, 0.0, 1.0);
+  hOut = h;
+  float rh = length(local.xz);
+  if (rh >= 1.15 || h <= 0.02 || h >= 0.99) return 0.0;
+  // dimensional profile: vertical cumulus shape × soft horizontal coverage
+  float cover = 1.0 - smoothstep(0.45, 1.1, rh);
+  float profile = heightProfile(h) * cover;
+  if (profile <= 0.0) return 0.0;
+  // base billow noise (cloud-local so each puff is coherent & drifts rigidly)
+  vec3 uvw = local * uFreq + uSeed + vec3(uTime * 0.012, 0.0, uTime * 0.007);
+  float base = baseNoise(uvw);
+  // Nubis subtraction: the profile cuts the noise → noise defines a ragged,
+  // flat-bottomed, cauliflower silhouette. uCover biases coverage fuller/wispier.
+  float d = clamp(base - (1.0 - profile) + uCover, 0.0, 1.0);
+  if (d <= 0.0) return 0.0;
+  // erode edges with high-frequency detail (more where d is low → wisps)
+  float detail = texture(uNoise, uvw * 4.3 + 9.1).r;
+  d = clamp(d - detail * uErode * (1.0 - d), 0.0, 1.0);
+  d *= smoothstep(uGroundY - 0.3, uGroundY + 2.0, wp.y); // wispy relief contact
+  return d * uDensity;
+}
+
+// cheap 1-octave density for the sun light-march (self-shadowing only)
 float cloudLight(vec3 wp) {
-  vec3 q = (wp - uCenter) / uRadii;
-  float r = length(q);
-  if (r >= 1.0) return 0.0;
-  float surf = surfaceRadius(q / max(r, 1e-4));
-  return clamp((1.0 - smoothstep(surf * 0.35, surf, r)) * uDensity, 0.0, 1.0);
+  vec3 local = (wp - uCenter) / uRadii;
+  float h = clamp(local.y * 0.5 + 0.5, 0.0, 1.0);
+  float rh = length(local.xz);
+  if (rh >= 1.15 || h <= 0.02 || h >= 0.99) return 0.0;
+  float profile = heightProfile(h) * (1.0 - smoothstep(0.45, 1.1, rh));
+  if (profile <= 0.0) return 0.0;
+  vec3 uvw = local * uFreq + uSeed + vec3(uTime * 0.012, 0.0, uTime * 0.007);
+  float d = clamp(texture(uNoise, uvw).r - (1.0 - profile) + uCover, 0.0, 1.0);
+  return d * uDensity;
 }
 
 void main() {
   vec3 ro = cameraPosition;
   vec3 rd = normalize(vWorldPos - cameraPosition);
-  // ray vs unit sphere in ellipsoid-local space
+  // ray vs the cloud's local bounding sphere (radius 1.18 covers the box)
   vec3 roL = (ro - uCenter) / uRadii;
   vec3 rdL = rd / uRadii;
   float a = dot(rdL, rdL);
   float b = dot(roL, rdL);
-  float c = dot(roL, roL) - 1.0;
-  float h = b * b - a * c;
-  if (h < 0.0) discard;
-  h = sqrt(h);
-  float t0 = max((-b - h) / a, 0.0);
-  float t1 = (-b + h) / a;
+  float c = dot(roL, roL) - 1.39; // 1.18^2
+  float disc = b * b - a * c;
+  if (disc < 0.0) discard;
+  disc = sqrt(disc);
+  float t0 = max((-b - disc) / a, 0.0);
+  float t1 = (-b + disc) / a;
   if (t1 <= t0) discard;
 
-  const int STEPS = 28;
+  const int STEPS = 32;
   float dt = (t1 - t0) / float(STEPS);
   vec3 sunL = normalize(uSunDir);
+  // forward + back Henyey–Greenstein lobes → silver lining looking toward the sun
+  float cosT = dot(rd, sunL);
+  float phase = mix(hg(cosT, 0.75), hg(cosT, -0.2), 0.35) + 0.35;
+
   float transmittance = 1.0;
   vec3 scatter = vec3(0.0);
-  // dither the ray start by a screen-space hash so the fixed step count can't
-  // band the thin dense cores at grazing angles
+  // dither the ray start so the fixed step count can't band dense cores
   vec3 h3 = fract(vec3(gl_FragCoord.xyx) * 0.1031);
   h3 += dot(h3, h3.yzx + 33.33);
   float jitter = fract((h3.x + h3.y) * h3.z);
+
   for (int i = 0; i < STEPS; i++) {
     vec3 wp = ro + rd * (t0 + (float(i) + jitter) * dt);
-    float d = cloudAt(wp);
+    float h;
+    float d = cloudDensity(wp, h);
     if (d > 0.001) {
-      // cheap light march toward the sun → Beer–Lambert self-shadowing, with
-      // enough contrast to give bright sunlit tops and clearly shadowed undersides
+      // secondary march toward the sun (cone-ish, jittered) → Beer–Lambert
       float ld = 0.0;
-      for (int j = 1; j <= 4; j++) ld += cloudLight(wp + sunL * (float(j) * 0.7));
-      float light = exp(-ld * 1.05);
-      vec3 col = mix(vec3(0.46, 0.52, 0.62), vec3(1.0, 0.99, 0.95), light);
-      float dens = d * dt * 3.6;
-      scatter += col * dens * transmittance;
-      transmittance *= exp(-dens);
+      for (int j = 1; j <= 5; j++) ld += cloudLight(wp + sunL * (float(j) * 0.65));
+      float beer = exp(-ld * 1.15);
+      // Beer–Powder: darken the sun-facing edges, then restore inner glow
+      float powder = 1.0 - exp(-ld * 2.2);
+      float sun = beer * mix(1.0, powder, 0.4);
+      // bright cumulus: a high white floor so they read as clouds, the sun-march
+      // adds lit tops / shadowed undersides, the HG phase paints the silver lining
+      float shade = mix(0.78, 1.12, sun);
+      vec3 col = uSunCol * shade * (1.0 + 0.45 * sun * phase) + uAmbCol * 0.14;
+      // energy-conserving front-to-back integration
+      float dens = d * dt * 4.0;
+      float t = exp(-dens);
+      scatter += col * (1.0 - t) * transmittance;
+      transmittance *= t;
       if (transmittance < 0.02) break;
     }
   }
   float alpha = (1.0 - transmittance) * uOpacity;
   if (alpha < 0.01) discard;
-  outColor = vec4(scatter / max(1.0 - transmittance, 1e-3), alpha);
+  outColor = vec4(scatter, alpha);
 }
 `
 
@@ -211,11 +297,15 @@ export class Clouds {
       // roughly half the field is "dense": bigger, heavier-bodied puffs that read
       // as solid and throw a strong cast shadow; the rest stay lighter and wispy
       const dense = rng() < 0.5
-      const size = (dense ? 3.4 : 2.2) + rng() * (dense ? 2.6 : 2.0)
-      // flatter than tall — cumulus spread horizontally
-      const radii = new THREE.Vector3(size, size * (0.44 + rng() * 0.2), size * (0.72 + rng() * 0.3))
-      // impostor quad big enough to cover the ellipsoid silhouette from any angle
-      const quad = Math.max(radii.x, radii.y, radii.z) * 2.4
+      const size = (dense ? 2.8 : 1.9) + rng() * (dense ? 2.0 : 1.6)
+      // cumulus have a flat base but billow UPWARD — near as tall as they are wide,
+      // and often elongated on one horizontal axis (irregular box, never a ball)
+      const tall = 0.78 + rng() * 0.3
+      const ex = 0.85 + rng() * 0.85
+      const ez = 0.85 + rng() * 0.85
+      const radii = new THREE.Vector3(size * ex, size * tall, size * ez)
+      // impostor quad big enough to cover the volume's bounding sphere from any angle
+      const quad = Math.max(radii.x, radii.y, radii.z) * 2.5
       const mesh = new THREE.Mesh(
         new THREE.PlaneGeometry(quad, quad),
         new THREE.RawShaderMaterial({
@@ -232,14 +322,17 @@ export class Clouds {
             uRadii: { value: radii },
             uSunDir: { value: this.sunDir.clone() },
             uTime: { value: 0 },
-            uOpacity: { value: Math.min(1, (dense ? 0.92 : 0.68 + rng() * 0.15) * params.cloudOpacity) },
-            uDensity: { value: dense ? 1.5 : 1.0 },
-            // core coverage: dense puffs fuller, light ones wispier, both around
-            // the user-tunable base (lower = fuller)
-            uThreshold: { value: (params.cloudCoverage ?? 0.46) + (dense ? -0.06 : 0.06) },
+            uOpacity: { value: Math.min(1, (dense ? 0.95 : 0.8 + rng() * 0.12) * params.cloudOpacity) },
+            uDensity: { value: dense ? 1.5 : 1.15 },
+            // coverage bias: fuller for dense clouds, wispier for light ones,
+            // around the user-tunable base (slider: lower cloudCoverage = fuller)
+            uCover: { value: 0.5 - (params.cloudCoverage ?? 0.4) + (dense ? 0.06 : -0.05) },
+            uErode: { value: dense ? 0.3 : 0.45 }, // light clouds more feathered
+            uSunCol: { value: new THREE.Color(1.0, 0.98, 0.94) },
+            uAmbCol: { value: new THREE.Color(0.6, 0.66, 0.76) },
             uGroundY: { value: 0 },
             uNoise: { value: this.noiseTex },
-            uFreq: { value: params.cloudDetail ?? 2.0 },
+            uFreq: { value: params.cloudDetail ?? 2.6 },
             uSeed: { value: new THREE.Vector3(rng() * 10, rng() * 10, rng() * 10) },
           },
         })
@@ -249,7 +342,7 @@ export class Clouds {
       // hover: how high the cloud floats above the ground under it. Kept low
       // (0.2–1.6 × the base altitude) so clouds cling to summits and the tallest
       // peaks can pierce them
-      const hover = params.cloudAltitude * (0.2 + rng() * 1.4)
+      const hover = params.cloudAltitude * (0.7 + rng() * 1.4) + radii.y * 0.6
       mesh.position.set((rng() * 2 - 1) * half, 0, (rng() * 2 - 1) * half)
 
       // blob shadow draped just above the relief under the cloud. Dense clouds
