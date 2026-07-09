@@ -57,6 +57,9 @@ export class Terrain {
       uCloudShadow: { value: blackTexture() },
       uCloudShadowOff: { value: new THREE.Vector2() },
       uCloudShadowK: { value: 0 },
+      // fake subsurface scattering: backlit thin relief glows in the map colour
+      uSSS: { value: params.sssStrength ?? 0 },
+      uSSSunDir: { value: new THREE.Vector3(0.5, 0.7, 0.4) }, // direction TO the sun
       // superellipse exponent for the corner: 2 = circular arc, higher = squircle
       // (iOS-style continuous corner). Shared with the plinth ring, see plinth.js
       uSlabCornerN: { value: 2 + (params.slabCornerSmoothing ?? 0) * 4 },
@@ -124,6 +127,8 @@ uniform float uSlabCornerN;
 uniform sampler2D uCloudShadow;
 uniform vec2 uCloudShadowOff;
 uniform float uCloudShadowK;
+uniform float uSSS;
+uniform vec3 uSSSunDir;
 uniform float uScanT;
 uniform vec3 uScanColor;
 uniform float uScanWidth;
@@ -154,6 +159,7 @@ uniform float uScanBlur;`
   // = uSeaY) it is ALWAYS the ocean bathymetry ramp; the land hypsometric ramp
   // never bleeds underwater, so displacement noise below 0 keeps the sea colour.
   bool underwater = vWorldPos.y < uSeaY;
+  float hNorm = clamp((vWorldPos.y - uHeightRange.x) / max(uHeightRange.y - uHeightRange.x, 1e-4), 0.0, 1.0);
   vec3 mapCol;
   if (underwater) {
     float d01 = pow(clamp((uSeaY - vWorldPos.y) / max(uSeaRange, 1e-4), 0.0, 1.0), 0.55);
@@ -162,12 +168,22 @@ uniform float uScanBlur;`
       ? mix(uOceanShallow, uOceanMid, d01 / 0.45)
       : mix(uOceanMid, uOceanDeep, (d01 - 0.45) / 0.55);
   } else {
-    float hNorm = clamp((vWorldPos.y - uHeightRange.x) / max(uHeightRange.y - uHeightRange.x, 1e-4), 0.0, 1.0);
     float rampT = clamp(0.5 + (hNorm - uHeightPivot) * uHeightContrast, 0.0, 1.0);
     mapCol = texture2D(uRampTex, vec2(rampT, 0.5)).rgb;
     mapCol = mix(mapCol, vec3(0.42, 0.31, 0.21), smoothstep(0.3, 0.8, slope) * uSlopeTint);
   }
   diffuseColor.rgb = mix(diffuseColor.rgb, mapCol * clamp(luma * 2.4, 0.2, 1.4), uTint);
+
+  // --- fake subsurface scattering (Frostbite-style approximated translucency):
+  // looking toward the sun, light "passes through" thin material — steep ridge
+  // flanks and high crests glow in the local map colour, like a wax relief
+  if (uSSS > 0.001) {
+    vec3 viewD = normalize(vWorldPos - cameraPosition);
+    vec3 transH = normalize(-uSSSunDir + wN * 0.4); // light travel, normal-distorted
+    float backlit = pow(clamp(dot(viewD, transH), 0.0, 1.0), 3.0);
+    float thin = clamp(slope * 0.7 + hNorm * 0.5, 0.0, 1.0); // ridges & peaks
+    diffuseColor.rgb += mapCol * backlit * thin * uSSS * 1.6;
+  }
 
   // --- coastline: a crisp line exactly at sea level (elevation 0), drawn in the
   // template ink so the shore is unmistakable on every look

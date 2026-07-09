@@ -214,6 +214,8 @@ const params = {
   cloudAltSpread: 0.5, // per-cloud altitude variation: 0 = one flight level, 1 = staggered layers
   cloudDriftVar: 0.5, // per-cloud speed variation: 0 = uniform drift, 1 = very uneven
   cloudContrast: 1, // density contrast: <1 fluffier/softer, >1 harder-edged
+  cloudSSS: 0.8, // cloud translucency: thin wisps light up as the sun shines through
+  sssStrength: 0.35, // terrain fake-SSS: backlit thin relief glows like a wax model
 
   // light
   sunIntensity: 7.6,
@@ -304,7 +306,11 @@ function placeSun() {
   if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
   if (globe) globe.setSunDir(sun.position)
   if (clouds) clouds.setSunDir(sun.position)
+  // the terrain's fake-SSS glow tracks the same sun (terrainRef: placeSun runs
+  // once at boot before the terrain const exists)
+  if (terrainRef) terrainRef.mapUniforms.uSSSunDir.value.copy(sun.position).normalize()
 }
+let terrainRef = null
 placeSun()
 
 function applyShadowMode() {
@@ -316,6 +322,8 @@ function applyShadowMode() {
 // ------------------------------------------------------------------ world
 
 const terrain = new Terrain(params)
+terrainRef = terrain
+placeSun() // now that the terrain exists, aim its SSS sun too
 scene.add(terrain.mesh)
 
 // the 3D slab the relief sits on (walls + shadow-catching base)
@@ -1382,6 +1390,7 @@ fClouds.add(params, 'cloudCoverage', 0, 0.8, 0.01).name('gaps (0 = sheet)').onFi
 fClouds.add(params, 'cloudBillow', 0, 1, 0.05).name('vertical billow').onFinishChange(() => clouds.build(params))
 fClouds.add(params, 'cloudBrightness', 0.5, 5, 0.1).name('brightness')
 fClouds.add(params, 'cloudContrast', 0.4, 2.5, 0.05).name('contrast')
+fClouds.add(params, 'cloudSSS', 0, 2, 0.05).name('translucency')
 fClouds.add(params, 'cloudAltitude', 0, 16, 0.5).name('altitude (0 = ground)').onFinishChange(() => clouds.build(params))
 fClouds.add(params, 'cloudAltSpread', 0, 1, 0.05).name('altitude spread').onFinishChange(() => clouds.build(params))
 fClouds.add(params, 'cloudDrift', 0, 4, 0.1).name('drift speed')
@@ -1425,6 +1434,12 @@ fSurface
   .onFinishChange(() => terrain.rebuildRoughness(params))
 fSurface.add(params, 'bumpScale', 0, 2, 0.05).name('micro bump').onChange(() => terrain.updateMaterial(params))
 fSurface.add(params, 'envMapIntensity', 0, 1.5, 0.05).name('env reflection').onChange(() => terrain.updateMaterial(params))
+fSurface
+  .add(params, 'sssStrength', 0, 1, 0.02)
+  .name('translucency (SSS)')
+  .onChange((v) => {
+    terrain.mapUniforms.uSSS.value = v
+  })
 
 const fCamera = gui.addFolder('Camera & focus')
 fCamera.add(params, 'fov', 20, 60, 1).onChange((v) => {

@@ -157,6 +157,7 @@ const DECK_FRAG = /* glsl */ `
   uniform float uAltSpread;  // per-cloud altitude variation (staggered layers)
   uniform float uDriftVar;   // per-cloud speed variation
   uniform float uContrast;   // density contrast: <1 softer, >1 harder-edged
+  uniform float uSSS;        // translucency: thin cloud lights up as sun passes through
   uniform float uSunStep;    // world-units per sun-march step
   uniform vec3 uSunDir;      // direction the sunlight travels (sun → scene)
   uniform vec3 uSunColor;    // warm at sunset, white at noon
@@ -277,7 +278,11 @@ const DECK_FRAG = /* glsl */ `
       if (d <= 0.002) continue;
       float depth = sunDepth(wp, toSun, cell);
       vec3 sun = uSunColor * uBrightness * scatter(depth, cosA);
-      vec3 col = sun + uAmbColor;
+      // translucency: where the sun-march found little material, light passes
+      // straight through — thin rims and wisps glow, strongest facing the sun
+      float thin = exp(-depth * 2.0);
+      vec3 sss = uSunColor * uSSS * thin * (0.35 + 0.65 * sat(cosA));
+      vec3 col = sun + sss + uAmbColor;
       float extinction = d * dt * 0.9;
       float stepTrans = exp(-extinction);
       light += col * (1.0 - stepTrans) * transmittance;
@@ -346,6 +351,7 @@ export class Clouds {
         uAltSpread: { value: params.cloudAltSpread ?? 0.5 },
         uDriftVar: { value: params.cloudDriftVar ?? 0.5 },
         uContrast: { value: params.cloudContrast ?? 1 },
+        uSSS: { value: params.cloudSSS ?? 0.8 },
         uSunStep: { value: thickness * 0.16 },
         uSunDir: { value: this.sunDir.clone().negate() },
         uSunColor: { value: new THREE.Color(1, 1, 1) },
@@ -426,6 +432,7 @@ export class Clouds {
     u.uAltSpread.value = params.cloudAltSpread ?? 0.5
     u.uDriftVar.value = params.cloudDriftVar ?? 0.5
     u.uContrast.value = params.cloudContrast ?? 1
+    u.uSSS.value = params.cloudSSS ?? 0.8
 
     // the deck reacts to the sun: warm sunset light when the sun sits low, a
     // cooler dimmer ambient as it drops — like a real evening sky
