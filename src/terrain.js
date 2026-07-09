@@ -5,6 +5,13 @@ import { rampColorStops } from './palette.js'
 
 export const TERRAIN_SIZE = 56
 
+// 1×1 black texture — inert placeholder for the cloud-shadow sampler
+function blackTexture() {
+  const tex = new THREE.DataTexture(new Uint8Array([0]), 1, 1, THREE.RedFormat)
+  tex.needsUpdate = true
+  return tex
+}
+
 export const BASIN_RADIUS = 6.6 // flat excavation floor
 export const BASIN_BLEND = 9.0 // where flat floor blends back into mountains
 export const FLOOR_Y = -0.35
@@ -45,6 +52,11 @@ export class Terrain {
       // block's vertical corners read soft and nothing overhangs the plinth walls
       uSlabHalf: { value: TERRAIN_SIZE / 2 },
       uSlabCorner: { value: (params.slabCorner ?? 0) * TERRAIN_SIZE },
+      // drifting cloud shadows, baked by the cloud deck (clouds.js) — a black
+      // placeholder keeps the sampler valid until the deck provides its map
+      uCloudShadow: { value: blackTexture() },
+      uCloudShadowOff: { value: new THREE.Vector2() },
+      uCloudShadowK: { value: 0 },
       // superellipse exponent for the corner: 2 = circular arc, higher = squircle
       // (iOS-style continuous corner). Shared with the plinth ring, see plinth.js
       uSlabCornerN: { value: 2 + (params.slabCornerSmoothing ?? 0) * 4 },
@@ -109,6 +121,9 @@ uniform vec3 uContourColor;
 uniform float uSlabHalf;
 uniform float uSlabCorner;
 uniform float uSlabCornerN;
+uniform sampler2D uCloudShadow;
+uniform vec2 uCloudShadowOff;
+uniform float uCloudShadowK;
 uniform float uScanT;
 uniform vec3 uScanColor;
 uniform float uScanWidth;
@@ -160,6 +175,14 @@ uniform float uScanBlur;`
     float coastAA = max(fwidth(vWorldPos.y), 1e-4);
     float coast = 1.0 - smoothstep(0.0, coastAA * 2.5, abs(vWorldPos.y - uSeaY));
     diffuseColor.rgb = mix(diffuseColor.rgb, uContourColor, coast * 0.9);
+  }
+
+  // --- drifting cloud shadows, cast by the volumetric deck overhead (strength
+  // rises with sun elevation — clouds only throw shadows when the sun is above)
+  if (uCloudShadowK > 0.001) {
+    vec2 suv = vWorldPos.xz / (uSlabHalf * 2.0) + 0.5;
+    float cloudShade = texture2D(uCloudShadow, fract(suv + uCloudShadowOff)).r;
+    diffuseColor.rgb *= 1.0 - cloudShade * uCloudShadowK;
   }
 
   // --- contour lines: minor every interval, heavy line every 5th

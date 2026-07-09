@@ -203,10 +203,11 @@ const params = {
   // clouds — thick and low, clinging to the summits
   cloudsEnabled: true,
   cloudOpacity: 0.85, // density scale of the volumetric deck
-  cloudAltitude: 2.6, // how high the deck floats above the tallest relief
+  cloudAltitude: 7, // deck base height in world units — 0 puts the clouds at ground level
   cloudDrift: 1,
   cloudScale: 3, // noise tiling across the deck (higher = smaller cloud cells)
   cloudCoverage: 0.45, // 0 = continuous sheet, higher = broken cumulus with gaps
+  cloudBillow: 0.6, // vertical billowing: 0 = flat slab, 1 = tall domed tops
   cloudBrightness: 2.5, // sunlight brightness inside the deck
 
   // light
@@ -327,7 +328,7 @@ const groundInfo = new GroundInfoLayer({
 const cone = createCone()
 scene.add(cone.group)
 
-clouds = new Clouds(scene, terrain, params, renderer)
+clouds = new Clouds(scene, terrain, params)
 clouds.setSunDir(sun.position)
 
 const labelOpts = () => ({
@@ -1363,12 +1364,14 @@ fGpx.add({ clr: () => gpxLayer.clear() }, 'clr').name('✕ clear track')
 
 const fClouds = gui.addFolder('Clouds')
 fClouds.add(params, 'cloudsEnabled').name('volumetric clouds').onChange(() => clouds.build(params))
-// density/scale/brightness/drift are live uniforms (no rebuild needed)
+// density/brightness/drift are live uniforms; scale/gaps/billow/altitude also
+// rebake the ground-shadow map, so they rebuild on release
 fClouds.add(params, 'cloudOpacity', 0.05, 1.5, 0.05).name('density')
-fClouds.add(params, 'cloudScale', 0.5, 5, 0.1).name('cloud scale')
-fClouds.add(params, 'cloudCoverage', 0, 0.8, 0.01).name('gaps (0 = sheet)')
+fClouds.add(params, 'cloudScale', 0.5, 5, 0.1).name('cloud scale').onFinishChange(() => clouds.build(params))
+fClouds.add(params, 'cloudCoverage', 0, 0.8, 0.01).name('gaps (0 = sheet)').onFinishChange(() => clouds.build(params))
+fClouds.add(params, 'cloudBillow', 0, 1, 0.05).name('vertical billow').onFinishChange(() => clouds.build(params))
 fClouds.add(params, 'cloudBrightness', 0.5, 5, 0.1).name('brightness')
-fClouds.add(params, 'cloudAltitude', 0, 14, 0.5).name('altitude').onFinishChange(() => clouds.build(params))
+fClouds.add(params, 'cloudAltitude', 0, 16, 0.5).name('altitude (0 = ground)').onFinishChange(() => clouds.build(params))
 fClouds.add(params, 'cloudDrift', 0, 4, 0.1).name('drift speed')
 fClouds.close()
 
