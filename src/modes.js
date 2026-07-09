@@ -12,14 +12,20 @@ import * as THREE from 'three'
 import { R_GLOBE, ORBITAL_M_PER_UNIT, sphereToLatLon, latLonToSphere } from './geo.js'
 
 // ordered fine → coarse; zoom null = the user's fine zoom (≥ 12).
-// Five tiers so every stop on the way down lands on a matching scale —
-// Corsica-sized views (~150 km) get z9/z8 instead of falling in a gap.
+// Eight tiers so every stop on the way down lands on a matching real-terrain
+// block instead of the globe. The globe is glitchy above ~4 000 km, so we now
+// dive onto continental-scale blocks from that altitude down (a z5 patch spans
+// ~3 760 km): z5 @ 4 000 km, z6 @ 1 600 km, z7 @ 600 km, then the regional/local
+// tiers. Corsica-sized views (~150 km) still get z8.
 export const DIVE_TIERS = [
   { altM: 8000, zoom: null },
   { altM: 25000, zoom: 11 },
   { altM: 50000, zoom: 10 },
   { altM: 100000, zoom: 9 },
   { altM: 200000, zoom: 8 },
+  { altM: 600000, zoom: 7 },
+  { altM: 1600000, zoom: 6 },
+  { altM: 4000000, zoom: 5 },
 ]
 
 // tier a settled zoom-in engages at `altM` meters — null above every tier
@@ -28,9 +34,10 @@ export function pickDiveTier(altM) {
 }
 
 // the surface staircase arithmetic: two zoom steps at a time, fine-capped
-// going down, z8-floored going up (past z8 the orbit gate takes over)
+// going down, z5-floored going up (past the z5 continental block the orbit gate
+// takes over, ~4 000 km up)
 export function stepZoom(zoom, dir, fine = 12) {
-  return dir > 0 ? Math.min(zoom + 2, Math.max(fine, 12)) : Math.max(zoom - 2, 8)
+  return dir > 0 ? Math.min(zoom + 2, Math.max(fine, 12)) : Math.max(zoom - 2, 5)
 }
 const DIVE_ALT_M = DIVE_TIERS[0].altM
 const MAX_ALT_M = 16000000 // ~2.5 earth radii — whole planet in frame
@@ -154,7 +161,9 @@ export class Modes {
     // continuity: pop out at the altitude the surface view actually had, so a
     // z8 patch hands over at ~500 km and a z12 patch at ~30 km
     if (entryAltM == null) {
-      entryAltM = THREE.MathUtils.clamp(this.hooks.surfaceCamAltMeters() * 1.15, 15000, 2500000)
+      // pop out just above the block's own altitude; a coarse z5 continental
+      // block (~3 500 km up) hands over above the 4 000 km globe gate
+      entryAltM = THREE.MathUtils.clamp(this.hooks.surfaceCamAltMeters() * 1.15, 15000, 6000000)
     }
     this.busy = true
     this.announce('FX OFFLINE — ENTERING ORBITAL VIEW')

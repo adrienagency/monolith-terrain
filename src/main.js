@@ -837,7 +837,8 @@ modes = new Modes({
       return { lat, lon, zoom: stepZoom(params.demZoom, 1, userFineZoom) }
     },
     getCoarsenTarget() {
-      if (params.source !== 'real' || !dem || params.demZoom <= 8) return null
+      // widen down to the z5 continental block; past that the orbit gate opens
+      if (params.source !== 'real' || !dem || params.demZoom <= 5) return null
       const { lat, lon } = worldToLatLon(dem, controls.target.x, controls.target.z)
       return { lat, lon, zoom: stepZoom(params.demZoom, -1) }
     },
@@ -1269,7 +1270,7 @@ fSource
 latCtrl.lat = fSource.add(params, 'demLat', -85, 85, 0.0001).name('latitude')
 latCtrl.lon = fSource.add(params, 'demLon', -180, 180, 0.0001).name('longitude')
 fSource
-  .add(params, 'demZoom', [8, 9, 10, 11, 12, 13, 14, 15])
+  .add(params, 'demZoom', [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
   .name('detail (zoom)')
   .onChange((v) => {
     if (v >= 12) userFineZoom = v // remember the user's chosen fine scale

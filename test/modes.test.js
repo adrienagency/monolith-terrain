@@ -18,17 +18,24 @@ test('pickDiveTier lands each altitude on the matching scale', () => {
   assert.equal(pickDiveTier(70000).zoom, 9)
   assert.equal(pickDiveTier(150000).zoom, 8) // Corsica / Madagascar-sized
   assert.equal(pickDiveTier(199999).zoom, 8)
-  assert.equal(pickDiveTier(200000), null) // still orbital territory
+  // continental blocks now load from 4 000 km down (was orbital-only)
+  assert.equal(pickDiveTier(300000).zoom, 7)
+  assert.equal(pickDiveTier(1000000).zoom, 6)
+  assert.equal(pickDiveTier(3000000).zoom, 5) // ~z5 block, ~3 760 km across
+  assert.equal(pickDiveTier(3999999).zoom, 5)
+  assert.equal(pickDiveTier(4000000), null) // globe territory above 4 000 km
   assert.equal(pickDiveTier(16000000), null)
 })
 
-test('the surface staircase walks z8 ⇄ z12 two steps at a time', () => {
-  // widening (zoom-out against the stop): 12 → 10 → 8, floored at 8
+test('the surface staircase walks z5 ⇄ z12 two steps at a time', () => {
+  // widening (zoom-out against the stop): 12 → 10 → 8 → 6 → 5, floored at z5
   assert.equal(stepZoom(12, -1), 10)
   assert.equal(stepZoom(10, -1), 8)
-  assert.equal(stepZoom(9, -1), 8)
-  assert.equal(stepZoom(8, -1), 8)
-  // refining (zoom-in against the stop): 8 → 10 → 12, capped at fine
+  assert.equal(stepZoom(8, -1), 6)
+  assert.equal(stepZoom(6, -1), 5)
+  assert.equal(stepZoom(5, -1), 5) // continental floor
+  // refining (zoom-in against the stop): 5 → 7 → … → 12, capped at fine
+  assert.equal(stepZoom(5, 1), 7)
   assert.equal(stepZoom(8, 1), 10)
   assert.equal(stepZoom(10, 1), 12)
   assert.equal(stepZoom(11, 1), 12)
