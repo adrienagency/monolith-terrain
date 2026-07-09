@@ -216,11 +216,16 @@ const params = {
   cloudDriftVar: 0.5, // per-cloud speed variation: 0 = uniform drift, 1 = very uneven
   cloudContrast: 1, // density contrast: <1 fluffier/softer, >1 harder-edged
   cloudSSS: 0.8, // cloud translucency: thin wisps light up as the sun shines through
-  transmission: 0.5, // terrain glass: real PBR refraction (0 = opaque rock, 1 = full glass)
+  // terrain glass: 0 = opaque rock. Keep 0 while the water glass is on — three
+  // excludes transmissive objects from the refraction buffer, so a transmissive
+  // terrain becomes invisible through the water.
+  transmission: 0,
   // the sea as a glass block: colour-tinted, environment-reflecting
   lakeEnabled: true,
   lakeColor: '#8fc6e8',
-  lakeRoughness: 0.08, // 0 = mirror-polished water, higher = frosted
+  lakeRoughness: 0.08, // 0 = mirror-polished water, higher = frosted (blur)
+  lakeClarity: 30, // absorption distance: small = opaque depths, large = crystal clear
+  lakesAltitude: true, // glass sheets on flat DEM regions above sea level
 
   // light
   sunIntensity: 7.6,
@@ -796,7 +801,7 @@ function regenerateTerrain() {
       terrain.rebuild(params)
       terrain.rebuildRoughness(params)
       plinth.rebuild(terrain, params) // walls hug the new relief border
-      lake.build(terrain.mapUniforms.uSeaY.value, plinth.baseY, params) // glass sea to the new level
+      lake.rebuild({ seaY: terrain.mapUniforms.uSeaY.value, baseY: plinth.baseY, dem: terrain.dem, params }) // glass sea + altitude lakes
       regenerateLabels()
       regenerateHud()
       gpxLayer.rebuild() // re-drape the track on the new relief
@@ -1538,12 +1543,13 @@ fMap.add({ open: () => overlayPanel.setVisible(true) }, 'open').name('open MAP O
 fMap.add(params, 'labels').name('place labels').onChange((v) => (labels.visible = v && modes.mode === 'surface'))
 
 const fLake = gui.addFolder('Water glass')
-fLake
-  .add(params, 'lakeEnabled')
-  .name('glass sea')
-  .onChange(() => lake.build(terrain.mapUniforms.uSeaY.value, plinth.baseY, params))
+const lakeRebuild = () =>
+  lake.rebuild({ seaY: terrain.mapUniforms.uSeaY.value, baseY: plinth.baseY, dem: terrain.dem, params })
+fLake.add(params, 'lakeEnabled').name('glass sea').onChange(lakeRebuild)
+fLake.add(params, 'lakesAltitude').name('altitude lakes').onChange(lakeRebuild)
 fLake.addColor(params, 'lakeColor').name('water colour').onChange(() => lake.updateMaterial(params))
-fLake.add(params, 'lakeRoughness', 0, 0.4, 0.01).name('polish (0 = mirror)').onChange(() => lake.updateMaterial(params))
+fLake.add(params, 'lakeRoughness', 0, 1, 0.01).name('blur (0 = clear)').onChange(() => lake.updateMaterial(params))
+fLake.add(params, 'lakeClarity', 2, 100, 0.5).name('clarity (depth tint)').onChange(() => lake.updateMaterial(params))
 fLake.close()
 
 const fSlab = gui.addFolder('Slab')
