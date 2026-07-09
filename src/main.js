@@ -202,10 +202,12 @@ const params = {
 
   // clouds — thick and low, clinging to the summits
   cloudsEnabled: true,
-  cloudCount: 5,
-  cloudOpacity: 0.95,
-  cloudAltitude: 2.6,
+  cloudOpacity: 0.85, // density scale of the volumetric deck
+  cloudAltitude: 2.6, // how high the deck floats above the tallest relief
   cloudDrift: 1,
+  cloudScale: 3, // noise tiling across the deck (higher = smaller cloud cells)
+  cloudCoverage: 0.45, // 0 = continuous sheet, higher = broken cumulus with gaps
+  cloudBrightness: 2.5, // sunlight brightness inside the deck
 
   // light
   sunIntensity: 7.6,
@@ -325,7 +327,7 @@ const groundInfo = new GroundInfoLayer({
 const cone = createCone()
 scene.add(cone.group)
 
-clouds = new Clouds(scene, terrain, params)
+clouds = new Clouds(scene, terrain, params, renderer)
 clouds.setSunDir(sun.position)
 
 const labelOpts = () => ({
@@ -777,6 +779,7 @@ function regenerateTerrain() {
       regenerateLabels()
       regenerateHud()
       gpxLayer.rebuild() // re-drape the track on the new relief
+      if (clouds) clouds.build(params) // deck re-floats above the new relief
       if (peaksLayer.enabled) peaksLayer.refresh()
       if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
       rebuildPending = false
@@ -1360,9 +1363,12 @@ fGpx.add({ clr: () => gpxLayer.clear() }, 'clr').name('✕ clear track')
 
 const fClouds = gui.addFolder('Clouds')
 fClouds.add(params, 'cloudsEnabled').name('volumetric clouds').onChange(() => clouds.build(params))
-fClouds.add(params, 'cloudCount', 2, 20, 1).name('count').onFinishChange(() => clouds.build(params))
-fClouds.add(params, 'cloudOpacity', 0.1, 1, 0.05).name('opacity').onFinishChange(() => clouds.build(params))
-fClouds.add(params, 'cloudAltitude', 4, 14, 0.5).name('altitude').onFinishChange(() => clouds.build(params))
+// density/scale/brightness/drift are live uniforms (no rebuild needed)
+fClouds.add(params, 'cloudOpacity', 0.05, 1.5, 0.05).name('density')
+fClouds.add(params, 'cloudScale', 0.5, 5, 0.1).name('cloud scale')
+fClouds.add(params, 'cloudCoverage', 0, 0.8, 0.01).name('gaps (0 = sheet)')
+fClouds.add(params, 'cloudBrightness', 0.5, 5, 0.1).name('brightness')
+fClouds.add(params, 'cloudAltitude', 0, 14, 0.5).name('altitude').onFinishChange(() => clouds.build(params))
 fClouds.add(params, 'cloudDrift', 0, 4, 0.1).name('drift speed')
 fClouds.close()
 
