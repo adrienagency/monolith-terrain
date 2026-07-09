@@ -128,27 +128,37 @@ uniform float uScanBlur;`
     if (pn > uSlabCorner) discard;
   }
 
-  // --- hypsometric tint: user gradient sampled by height, contrast expanded around a pivot
-  float hNorm = clamp((vWorldPos.y - uHeightRange.x) / max(uHeightRange.y - uHeightRange.x, 1e-4), 0.0, 1.0);
-  float rampT = clamp(0.5 + (hNorm - uHeightPivot) * uHeightContrast, 0.0, 1.0);
-  vec3 ramp = texture2D(uRampTex, vec2(rampT, 0.5)).rgb;
   // smooth interpolated normal (world space) — screen-space derivatives look blotchy
   vec3 wN = inverseTransformDirection(normalize(vNormal), viewMatrix);
   float slope = 1.0 - clamp(wN.y, 0.0, 1.0);
-  ramp = mix(ramp, vec3(0.42, 0.31, 0.21), smoothstep(0.3, 0.8, slope) * uSlopeTint);
   // keep the lighting/AO shading from the base surface but let the gradient own the color
   float luma = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
-  diffuseColor.rgb = mix(diffuseColor.rgb, ramp * clamp(luma * 2.4, 0.2, 1.4), uTint);
 
-  // --- bathymetry: below real sea level the map reads as a nautical chart —
-  // pale shallows deepening into dark water (Mariana-trench friendly)
-  if (vWorldPos.y < uSeaY) {
+  // --- map colour, centralised for EVERY template: below sea level (elevation 0
+  // = uSeaY) it is ALWAYS the ocean bathymetry ramp; the land hypsometric ramp
+  // never bleeds underwater, so displacement noise below 0 keeps the sea colour.
+  bool underwater = vWorldPos.y < uSeaY;
+  vec3 mapCol;
+  if (underwater) {
     float d01 = pow(clamp((uSeaY - vWorldPos.y) / max(uSeaRange, 1e-4), 0.0, 1.0), 0.55);
     // three-stop nautical ramp: shallows → mid blue → abyss
-    vec3 sea = d01 < 0.45
+    mapCol = d01 < 0.45
       ? mix(uOceanShallow, uOceanMid, d01 / 0.45)
       : mix(uOceanMid, uOceanDeep, (d01 - 0.45) / 0.55);
-    diffuseColor.rgb = mix(diffuseColor.rgb, sea * clamp(luma * 2.4, 0.25, 1.4), uTint);
+  } else {
+    float hNorm = clamp((vWorldPos.y - uHeightRange.x) / max(uHeightRange.y - uHeightRange.x, 1e-4), 0.0, 1.0);
+    float rampT = clamp(0.5 + (hNorm - uHeightPivot) * uHeightContrast, 0.0, 1.0);
+    mapCol = texture2D(uRampTex, vec2(rampT, 0.5)).rgb;
+    mapCol = mix(mapCol, vec3(0.42, 0.31, 0.21), smoothstep(0.3, 0.8, slope) * uSlopeTint);
+  }
+  diffuseColor.rgb = mix(diffuseColor.rgb, mapCol * clamp(luma * 2.4, 0.2, 1.4), uTint);
+
+  // --- coastline: a crisp line exactly at sea level (elevation 0), drawn in the
+  // template ink so the shore is unmistakable on every look
+  if (uSeaY > -9000.0) {
+    float coastAA = max(fwidth(vWorldPos.y), 1e-4);
+    float coast = 1.0 - smoothstep(0.0, coastAA * 2.5, abs(vWorldPos.y - uSeaY));
+    diffuseColor.rgb = mix(diffuseColor.rgb, uContourColor, coast * 0.9);
   }
 
   // --- contour lines: minor every interval, heavy line every 5th
@@ -350,8 +360,10 @@ if (uScanT >= 0.0) {
 
     this.mapUniforms.uHeightRange.value.set(minH, maxH)
 
-    // georeferenced sea level for the bathymetric read (real mode only)
-    if (params.source === 'real' && this.dem && this.dem.minM < -1) {
+    // georeferenced sea level (elevation 0) — ALWAYS active in real mode so every
+    // template gets a clear shoreline and consistent bathymetry, even where the
+    // patch has no sub-sea data (then uSeaY simply sits below the terrain).
+    if (params.source === 'real' && this.dem) {
       const demScale = (TERRAIN_SIZE / this.dem.extentMeters) * params.demExaggeration
       this.mapUniforms.uSeaY.value = (0 - this.dem.meanM) * demScale
       this.mapUniforms.uSeaRange.value = Math.max((0 - this.dem.minM) * demScale, 1e-3)
