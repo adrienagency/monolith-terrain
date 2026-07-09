@@ -88,7 +88,46 @@ function glassMaterial(params) {
 
 // what the polished surface mirrors — 'studio' is the scene's default room
 // light; the gradients are tiny equirect skies (auto-PMREMed by the renderer)
-export const REFLECTION_TYPES = ['studio', 'sky', 'sunset', 'mirror', 'none']
+export const REFLECTION_TYPES = ['studio', 'window', 'sky', 'sunset', 'mirror', 'none']
+
+// dim room with two bright mullioned windows — the classic product-photo
+// glint: sharp pale rectangles sliding on the glass as the camera moves
+function windowSky() {
+  const w = 256
+  const h = 128
+  const data = new Uint8Array(w * h * 4)
+  const put = (x, y, r, g, b) => {
+    const o = (y * w + x) * 4
+    data[o] = r
+    data[o + 1] = g
+    data[o + 2] = b
+    data[o + 3] = 255
+  }
+  for (let y = 0; y < h; y++) {
+    const t = y / (h - 1)
+    const v = Math.round(34 + 26 * Math.sin(t * Math.PI)) // dim grey room, lighter walls
+    for (let x = 0; x < w; x++) put(x, y, v, v + 2, v + 6)
+  }
+  // window = bright panes split by mullion bars; a second dimmer one opposite
+  const drawWindow = (cx, cy, ww, wh, lum) => {
+    for (let y = cy - wh; y <= cy + wh; y++)
+      for (let x = cx - ww; x <= cx + ww; x++) {
+        if (y < 0 || y >= h || x < 0 || x >= w) continue
+        const mullion = Math.abs(x - cx) < 2 || Math.abs(y - cy) < 2
+        const l = mullion ? 30 : lum
+        put(x, y, l, l, Math.min(255, l + 4))
+      }
+  }
+  drawWindow(64, 44, 22, 26, 255) // key window, high in the "room"
+  drawWindow(192, 52, 16, 20, 140) // fill window, opposite side, dimmer
+  const tex = new THREE.DataTexture(data, w, h)
+  tex.mapping = THREE.EquirectangularReflectionMapping
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.magFilter = THREE.LinearFilter
+  tex.minFilter = THREE.LinearFilter
+  tex.needsUpdate = true
+  return tex
+}
 
 function gradientSky(top, horizon, bottom) {
   const w = 64
@@ -131,11 +170,25 @@ export class Lake {
     this.lakeMat = glassMaterial(params)
     this.lakeMat.thickness = 0.6
 
+    // the block's SIDE faces are plain tinted glass, NOT transmission: a
+    // grazing view through a transmission side face refracts its sample far
+    // across the buffer (dark rippled bands along the slab edge), while a
+    // simple translucent pane reads as a clean water slice
+    this.seaSideMat = new THREE.MeshPhysicalMaterial({
+      color: new THREE.Color(params.lakeColor ?? '#8fc6e8'),
+      transparent: true,
+      opacity: 0.55,
+      roughness: params.lakeRoughness ?? 0.08,
+      metalness: 0,
+      envMapIntensity: 1.1,
+      depthWrite: false,
+    })
+
     // clip the sea block to the slab's superellipse footprint, like the terrain
     const half = TERRAIN_SIZE / 2
     const r = (params.slabCorner ?? 0) * TERRAIN_SIZE
     const n = 2 + (params.slabCornerSmoothing ?? 0) * 4
-    this.seaMat.onBeforeCompile = (shader) => {
+    const clip = (shader) => {
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `#include <common>\nvarying vec3 vLakeWorld;`)
         .replace(
@@ -151,11 +204,15 @@ export class Lake {
         .replace('#include <common>', `#include <common>\nvarying vec3 vLakeWorld;`)
         .replace('#include <begin_vertex>', `#include <begin_vertex>\nvLakeWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;`)
     }
+    this.seaMat.onBeforeCompile = clip
+    this.seaSideMat.onBeforeCompile = clip
 
     // real-size geometry, never a scaled unit box: three multiplies `thickness`
     // by the mesh's model scale for the refraction/absorption ray, so a box
-    // scaled ~120× in x/z gets a kilometric light path and tints to black
-    this.sea = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), this.seaMat)
+    // scaled ~120× in x/z gets a kilometric light path and tints to black.
+    // BoxGeometry groups: +x,-x,+y,-y,+z,-z — transmission glass on top only.
+    this.seaMats = [this.seaSideMat, this.seaSideMat, this.seaMat, this.seaSideMat, this.seaSideMat, this.seaSideMat]
+    this.sea = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), this.seaMats)
     this.sea.renderOrder = 3
     this.sea.visible = false
     this.group.add(this.sea)
@@ -240,6 +297,10 @@ export class Lake {
       mat.envMap = refl.map // null falls back to scene.environment
       mat.envMapIntensity = refl.intensity
     }
+    this.seaSideMat.color.set(params.lakeColor ?? '#8fc6e8')
+    this.seaSideMat.roughness = rough
+    this.seaSideMat.envMap = refl.map
+    this.seaSideMat.envMapIntensity = refl.intensity
   }
 
   // reflection presets — gradient skies are built once and cached
@@ -247,6 +308,8 @@ export class Lake {
     if (!this._skies) this._skies = {}
     const sky = (key, top, hor, bot) => (this._skies[key] ??= gradientSky(top, hor, bot))
     switch (type) {
+      case 'window':
+        return { map: (this._skies.window ??= windowSky()), intensity: 1.6 }
       case 'sky':
         return { map: sky('sky', '#7db8e8', '#dceefb', '#f5fafe'), intensity: 1.4 }
       case 'sunset':

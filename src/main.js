@@ -1716,7 +1716,7 @@ for (const folder of gui.folders) {
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, plinth, peaksLayer, overlayPanel, landmarksPanel, motionPanel, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, gui, groundInfo, get labels() { return labels } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, plinth, peaksLayer, overlayPanel, landmarksPanel, motionPanel, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, gui, groundInfo, renderer, composer, lake, get labels() { return labels } }
 
 // real world is the default source — fetch its tiles on startup
 if (params.source === 'real') loadRealTerrain()
