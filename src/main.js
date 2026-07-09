@@ -204,6 +204,8 @@ const params = {
   cloudsEnabled: true,
   cloudCount: 9,
   cloudOpacity: 0.95,
+  cloudCoverage: 0.46, // core coverage: lower = fuller/denser clouds, higher = wispier
+  cloudDetail: 2.0, // noise frequency: higher = more, finer lumps
   cloudAltitude: 2.6,
   cloudDrift: 1,
 
@@ -1319,6 +1321,8 @@ const fClouds = gui.addFolder('Clouds')
 fClouds.add(params, 'cloudsEnabled').name('volumetric clouds').onChange(() => clouds.build(params))
 fClouds.add(params, 'cloudCount', 2, 20, 1).name('count').onFinishChange(() => clouds.build(params))
 fClouds.add(params, 'cloudOpacity', 0.1, 1, 0.05).name('opacity').onFinishChange(() => clouds.build(params))
+fClouds.add(params, 'cloudCoverage', 0.3, 0.62, 0.01).name('coverage (fuller ← →wispy)').onFinishChange(() => clouds.build(params))
+fClouds.add(params, 'cloudDetail', 1.2, 3.2, 0.1).name('detail (lumpiness)').onFinishChange(() => clouds.build(params))
 fClouds.add(params, 'cloudAltitude', 4, 14, 0.5).name('altitude').onFinishChange(() => clouds.build(params))
 fClouds.add(params, 'cloudDrift', 0, 4, 0.1).name('drift speed')
 fClouds.close()

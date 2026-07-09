@@ -76,21 +76,35 @@ uniform sampler3D uNoise;
 uniform float uFreq;      // noise frequency in cloud-local space
 uniform vec3 uSeed;       // per-cloud offset → each puff is a distinct shape
 
-// density at a world point. The noise is sampled in the cloud's OWN local space
+// density at a world point. Noise is sampled in the cloud's OWN local space
 // (q = point in unit-ellipsoid space) offset by uSeed, so each cloud is a
-// coherent puff that translates rigidly and only evolves slowly via uTime —
-// rather than boiling as it drifts through a world-space field.
+// coherent puff that translates rigidly and only evolves slowly via uTime.
+// CRUCIAL for it to read as a cloud and not a sphere: the coverage threshold
+// RISES toward the rim, so the fractal noise — not the ellipsoid — defines a
+// ragged, broken silhouette (the standard real-time cumulus shaping trick).
+float coverage(float r) { return mix(uThreshold, 1.04, r * r); }
+
 float cloudAt(vec3 wp) {
   vec3 q = (wp - uCenter) / uRadii;
-  float shell = 1.0 - smoothstep(0.5, 1.0, length(q));
-  if (shell <= 0.0) return 0.0;
-  vec3 uvw = q * uFreq + uSeed + vec3(uTime * 0.01, 0.0, uTime * 0.006);
-  float base = texture(uNoise, uvw).r;
-  float det = texture(uNoise, uvw * 3.0 + 3.3).r;
-  float d = base - (1.0 - det) * 0.3; // erode edges with detail → wispier rims
-  d = smoothstep(uThreshold, uThreshold + 0.55, d);
+  float r = length(q);
+  if (r >= 1.0) return 0.0;
+  vec3 uvw = q * uFreq + uSeed + vec3(uTime * 0.012, 0.0, uTime * 0.007);
+  // 2-octave billow FBM — broad body + medium lumps
+  float n = texture(uNoise, uvw).r * 0.68 + texture(uNoise, uvw * 2.9 + 1.7).r * 0.32;
+  // coverage requirement climbs from uThreshold at the core to >1 at the rim:
+  // only noise peaks survive near the edge → tendrils and holes, never a ball
+  float d = smoothstep(0.0, 0.16, n - coverage(r));
   d *= smoothstep(uGroundY - 0.3, uGroundY + 2.2, wp.y); // wispy relief contact
-  return clamp(d * shell * uDensity, 0.0, 1.0);
+  return clamp(d * uDensity, 0.0, 1.0);
+}
+
+// cheap 1-octave density for the sun light-march (self-shadowing only)
+float cloudLight(vec3 wp) {
+  vec3 q = (wp - uCenter) / uRadii;
+  float r = length(q);
+  if (r >= 1.0) return 0.0;
+  float n = texture(uNoise, q * uFreq + uSeed).r;
+  return clamp(smoothstep(0.0, 0.16, n - coverage(r)) * uDensity, 0.0, 1.0);
 }
 
 void main() {
@@ -123,14 +137,14 @@ void main() {
     vec3 wp = ro + rd * (t0 + (float(i) + jitter) * dt);
     float d = cloudAt(wp);
     if (d > 0.001) {
-      // short light march toward the sun → Beer–Lambert self-shadowing
+      // short, cheap light march toward the sun → Beer–Lambert self-shadowing
       float ld = 0.0;
-      for (int j = 1; j <= 4; j++) ld += cloudAt(wp + sunL * (float(j) * 0.6));
-      float light = exp(-ld * 0.6);
+      for (int j = 1; j <= 3; j++) ld += cloudLight(wp + sunL * (float(j) * 0.75));
+      float light = exp(-ld * 0.7);
       // sunlit crown (warm white) fading to a cool shadowed underside — natural
       // cumulus shading, no inverted powder term
       vec3 col = mix(vec3(0.55, 0.6, 0.68), vec3(1.0, 0.99, 0.96), light);
-      float dens = d * dt * 5.5;
+      float dens = d * dt * 4.6;
       scatter += col * dens * transmittance;
       transmittance *= exp(-dens);
       if (transmittance < 0.02) break;
@@ -186,8 +200,9 @@ export class Clouds {
       // roughly half the field is "dense": bigger, heavier-bodied puffs that read
       // as solid and throw a strong cast shadow; the rest stay lighter and wispy
       const dense = rng() < 0.5
-      const size = (dense ? 4.4 : 2.8) + rng() * (dense ? 3.6 : 2.6)
-      const radii = new THREE.Vector3(size, size * (0.5 + rng() * 0.28), size * (0.6 + rng() * 0.32))
+      const size = (dense ? 3.8 : 2.4) + rng() * (dense ? 3.0 : 2.2)
+      // flatter than tall — cumulus spread horizontally
+      const radii = new THREE.Vector3(size, size * (0.42 + rng() * 0.2), size * (0.7 + rng() * 0.3))
       // impostor quad big enough to cover the ellipsoid silhouette from any angle
       const quad = Math.max(radii.x, radii.y, radii.z) * 2.4
       const mesh = new THREE.Mesh(
@@ -206,12 +221,14 @@ export class Clouds {
             uRadii: { value: radii },
             uSunDir: { value: this.sunDir.clone() },
             uTime: { value: 0 },
-            uOpacity: { value: Math.min(1, (dense ? 1.0 : 0.82 + rng() * 0.16) * params.cloudOpacity) },
-            uDensity: { value: dense ? 1.7 : 1.0 },
-            uThreshold: { value: dense ? 0.3 : 0.42 },
+            uOpacity: { value: Math.min(1, (dense ? 0.95 : 0.6 + rng() * 0.15) * params.cloudOpacity) },
+            uDensity: { value: dense ? 1.5 : 1.0 },
+            // core coverage: dense puffs fuller, light ones wispier, both around
+            // the user-tunable base (lower = fuller)
+            uThreshold: { value: (params.cloudCoverage ?? 0.46) + (dense ? -0.06 : 0.06) },
             uGroundY: { value: 0 },
             uNoise: { value: this.noiseTex },
-            uFreq: { value: 1.7 },
+            uFreq: { value: params.cloudDetail ?? 2.0 },
             uSeed: { value: new THREE.Vector3(rng() * 10, rng() * 10, rng() * 10) },
           },
         })
