@@ -20,12 +20,18 @@ export const FLOOR_Y = -0.35
 // with real vertex normals so PBR lighting and DOF read the actual relief.
 export class Terrain {
   constructor(params) {
-    this.material = new THREE.MeshStandardMaterial({
+    // Physical material so the relief can turn to GLASS: `transmission` is real
+    // PBR refraction (three renders the scene behind into a buffer), giving the
+    // translucent-slab look — dial it with the "transmission (glass)" slider.
+    this.material = new THREE.MeshPhysicalMaterial({
       color: new THREE.Color(params.color),
       roughness: 1, // actual roughness baked into the roughness map
       metalness: 0,
       vertexColors: true,
       envMapIntensity: params.envMapIntensity,
+      transmission: params.transmission ?? 0,
+      thickness: 3,
+      ior: 1.45,
     })
 
     // topographic map overlay: hypsometric tint, contour lines and survey grid,
@@ -57,9 +63,6 @@ export class Terrain {
       uCloudShadow: { value: blackTexture() },
       uCloudShadowOff: { value: new THREE.Vector2() },
       uCloudShadowK: { value: 0 },
-      // fake subsurface scattering: backlit thin relief glows in the map colour
-      uSSS: { value: params.sssStrength ?? 0 },
-      uSSSunDir: { value: new THREE.Vector3(0.5, 0.7, 0.4) }, // direction TO the sun
       // superellipse exponent for the corner: 2 = circular arc, higher = squircle
       // (iOS-style continuous corner). Shared with the plinth ring, see plinth.js
       uSlabCornerN: { value: 2 + (params.slabCornerSmoothing ?? 0) * 4 },
@@ -127,8 +130,6 @@ uniform float uSlabCornerN;
 uniform sampler2D uCloudShadow;
 uniform vec2 uCloudShadowOff;
 uniform float uCloudShadowK;
-uniform float uSSS;
-uniform vec3 uSSSunDir;
 uniform float uScanT;
 uniform vec3 uScanColor;
 uniform float uScanWidth;
@@ -173,17 +174,6 @@ uniform float uScanBlur;`
     mapCol = mix(mapCol, vec3(0.42, 0.31, 0.21), smoothstep(0.3, 0.8, slope) * uSlopeTint);
   }
   diffuseColor.rgb = mix(diffuseColor.rgb, mapCol * clamp(luma * 2.4, 0.2, 1.4), uTint);
-
-  // --- fake subsurface scattering (Frostbite-style approximated translucency):
-  // looking toward the sun, light "passes through" thin material — steep ridge
-  // flanks and high crests glow in the local map colour, like a wax relief
-  if (uSSS > 0.001) {
-    vec3 viewD = normalize(vWorldPos - cameraPosition);
-    vec3 transH = normalize(-uSSSunDir + wN * 0.4); // light travel, normal-distorted
-    float backlit = pow(clamp(dot(viewD, transH), 0.0, 1.0), 3.0);
-    float thin = clamp(slope * 0.7 + hNorm * 0.5, 0.0, 1.0); // ridges & peaks
-    diffuseColor.rgb += mapCol * backlit * thin * uSSS * 1.6;
-  }
 
   // --- coastline: a crisp line exactly at sea level (elevation 0), drawn in the
   // template ink so the shore is unmistakable on every look
@@ -485,5 +475,6 @@ if (uScanT >= 0.0) {
     this.material.color.set(params.color)
     this.material.envMapIntensity = params.envMapIntensity
     this.material.bumpScale = params.bumpScale
+    this.material.transmission = params.transmission ?? 0
   }
 }

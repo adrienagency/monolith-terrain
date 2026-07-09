@@ -38,6 +38,7 @@ import { createOverlayPanel } from './overlay-panel.js'
 import { PeaksLayer } from './peaks.js'
 import { Clouds } from './clouds.js'
 import { Traffic } from './traffic.js'
+import { Lake } from './lake.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, makeCollapsible, collapseAll, setUiHidden, reclampDraggables } from './drag.js'
 import { createLandmarksPanel } from './landmarks-panel.js'
@@ -215,7 +216,11 @@ const params = {
   cloudDriftVar: 0.5, // per-cloud speed variation: 0 = uniform drift, 1 = very uneven
   cloudContrast: 1, // density contrast: <1 fluffier/softer, >1 harder-edged
   cloudSSS: 0.8, // cloud translucency: thin wisps light up as the sun shines through
-  sssStrength: 0.35, // terrain fake-SSS: backlit thin relief glows like a wax model
+  transmission: 0.5, // terrain glass: real PBR refraction (0 = opaque rock, 1 = full glass)
+  // the sea as a glass block: colour-tinted, environment-reflecting
+  lakeEnabled: true,
+  lakeColor: '#8fc6e8',
+  lakeRoughness: 0.08, // 0 = mirror-polished water, higher = frosted
 
   // light
   sunIntensity: 7.6,
@@ -306,11 +311,7 @@ function placeSun() {
   if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
   if (globe) globe.setSunDir(sun.position)
   if (clouds) clouds.setSunDir(sun.position)
-  // the terrain's fake-SSS glow tracks the same sun (terrainRef: placeSun runs
-  // once at boot before the terrain const exists)
-  if (terrainRef) terrainRef.mapUniforms.uSSSunDir.value.copy(sun.position).normalize()
 }
-let terrainRef = null
 placeSun()
 
 function applyShadowMode() {
@@ -322,8 +323,6 @@ function applyShadowMode() {
 // ------------------------------------------------------------------ world
 
 const terrain = new Terrain(params)
-terrainRef = terrain
-placeSun() // now that the terrain exists, aim its SSS sun too
 scene.add(terrain.mesh)
 
 // the 3D slab the relief sits on (walls + shadow-catching base)
@@ -346,6 +345,9 @@ clouds.setSunDir(sun.position)
 
 // ambient airliners + SpaceX pad watcher (models fetched, see public/models)
 const traffic = new Traffic(scene, terrain, params)
+
+// the sea as a colour-tintable, environment-reflecting glass block
+const lake = new Lake(scene, params)
 
 const labelOpts = () => ({
   real: params.source === 'real',
@@ -794,6 +796,7 @@ function regenerateTerrain() {
       terrain.rebuild(params)
       terrain.rebuildRoughness(params)
       plinth.rebuild(terrain, params) // walls hug the new relief border
+      lake.build(terrain.mapUniforms.uSeaY.value, plinth.baseY, params) // glass sea to the new level
       regenerateLabels()
       regenerateHud()
       gpxLayer.rebuild() // re-drape the track on the new relief
@@ -843,6 +846,7 @@ modes = new Modes({
       plinth.setVisible(v && params.plinth)
       groundInfo.setVisible(v && params.groundInfo)
       traffic.setVisible(v)
+      lake.setVisible(v)
       scene.fog = v ? fogRef : null
     },
     setEffectsEnabled(v) {
@@ -1435,11 +1439,9 @@ fSurface
 fSurface.add(params, 'bumpScale', 0, 2, 0.05).name('micro bump').onChange(() => terrain.updateMaterial(params))
 fSurface.add(params, 'envMapIntensity', 0, 1.5, 0.05).name('env reflection').onChange(() => terrain.updateMaterial(params))
 fSurface
-  .add(params, 'sssStrength', 0, 1, 0.02)
-  .name('translucency (SSS)')
-  .onChange((v) => {
-    terrain.mapUniforms.uSSS.value = v
-  })
+  .add(params, 'transmission', 0, 1, 0.02)
+  .name('transmission (glass)')
+  .onChange(() => terrain.updateMaterial(params))
 
 const fCamera = gui.addFolder('Camera & focus')
 fCamera.add(params, 'fov', 20, 60, 1).onChange((v) => {
@@ -1534,6 +1536,15 @@ fMap
   .onChange((v) => terrain.mapUniforms.uGridColor.value.set(v))
 fMap.add({ open: () => overlayPanel.setVisible(true) }, 'open').name('open MAP OVERLAY panel ⧉')
 fMap.add(params, 'labels').name('place labels').onChange((v) => (labels.visible = v && modes.mode === 'surface'))
+
+const fLake = gui.addFolder('Water glass')
+fLake
+  .add(params, 'lakeEnabled')
+  .name('glass sea')
+  .onChange(() => lake.build(terrain.mapUniforms.uSeaY.value, plinth.baseY, params))
+fLake.addColor(params, 'lakeColor').name('water colour').onChange(() => lake.updateMaterial(params))
+fLake.add(params, 'lakeRoughness', 0, 0.4, 0.01).name('polish (0 = mirror)').onChange(() => lake.updateMaterial(params))
+fLake.close()
 
 const fSlab = gui.addFolder('Slab')
 fSlab.add(params, 'plinth').name('show slab').onChange((v) => plinth.setVisible(v && modes.mode === 'surface'))
