@@ -159,15 +159,17 @@ export const TEMPLATES = {
     palette: {
       // 8 tints low → high: forest/tundra green → khaki → tan → ochre-brown →
       // reddish rock → grey scree → snow white
+      // user-tuned DENALI base ramp: green tundra → sage → khaki → tan → ochre
+      // → red-brown rock → near-black brown → light-grey summit cap
       rampStops: [
-        { c: '#8fa871', p: 0.0 }, // green tundra lowland
-        { c: '#a9bd82', p: 0.14 },
-        { c: '#c8c891', p: 0.28 }, // khaki
+        { c: '#819669', p: 0.0 }, // green tundra lowland
+        { c: '#b3c388', p: 0.14 },
+        { c: '#abb795', p: 0.28 },
         { c: '#cdb079', p: 0.42 }, // tan
         { c: '#bd8a56', p: 0.56 }, // ochre-brown
-        { c: '#9a4f2c', p: 0.7 }, // reddish-brown high rock (deeper red)
-        { c: '#a7abac', p: 0.84 }, // cool grey scree before the snow
-        { c: '#f4f2ee', p: 1.0 }, // snow / ice
+        { c: '#9a4f2c', p: 0.7 }, // reddish-brown high rock
+        { c: '#49330d', p: 0.84 }, // deep umber
+        { c: '#d9d7d3', p: 1.0 }, // light-grey summit cap
       ],
       // blue water, deepening
       oceanShallow: '#bcd6e4',
@@ -179,24 +181,24 @@ export const TEMPLATES = {
       mapTint: 0.82, // the band colors lead, hillshade still carves the ridges
       heightContrast: 3.8,
       heightPivot: 0.42,
-      slopeTint: 0.28, // a little warm shading on the steep rock faces
+      slopeTint: 0.08, // barely any warm slope shading
     },
     grid: {
-      contourInterval: 0.12,
-      contourOpacity: 0,
-      contourColor: '#3a3326',
-      contourWeight: 0.7,
-      gridStep: 6,
-      gridOpacity: 0,
+      contourInterval: 0.31,
+      contourOpacity: 0.52,
+      contourColor: '#332305',
+      contourWeight: 0.85,
+      gridStep: 3,
+      gridOpacity: 0.32,
       gridColor: '#3a3326',
     },
     light: {
-      sunIntensity: 8.6,
-      sunAzimuth: 315,
-      sunElevation: 30,
+      sunIntensity: 5.3,
+      sunAzimuth: 142,
+      sunElevation: 11,
       hemiIntensity: 0.5,
-      envLight: 0.16,
-      shadowSoftness: 6,
+      envLight: 0.18,
+      shadowSoftness: 9,
     },
     surface: {
       color: '#e7e2d6',

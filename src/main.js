@@ -204,7 +204,7 @@ const params = {
   cloudsEnabled: true,
   cloudCount: 9,
   cloudOpacity: 0.95,
-  cloudCoverage: 0.46, // core coverage: lower = fuller/denser clouds, higher = wispier
+  cloudCoverage: 0.38, // core coverage: lower = fuller/denser clouds, higher = wispier
   cloudDetail: 2.0, // noise frequency: higher = more, finer lumps
   cloudAltitude: 2.6,
   cloudDrift: 1,

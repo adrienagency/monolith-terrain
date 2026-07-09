@@ -97,20 +97,23 @@ test('DENALI is a full USGS hypsometric band system over blue water', () => {
   const t = TEMPLATES.denali
   assert.ok(t, 'preset exists')
   assert.equal(ramp(t).length, 8)
-  // green tundra at the bottom, snow-white at the top
+  // green tundra at the bottom, light-grey summit cap at the top
   const lowc = hexToHsl(low(t))
   assert.ok(lowc.h >= 60 && lowc.h <= 140, `lowland green (h=${lowc.h.toFixed(0)})`)
-  assert.ok(hexToHsl(high(t)).l > 0.9, 'snow-white summits')
+  assert.ok(hexToHsl(high(t)).l > 0.8, 'light summit cap')
   // blue water deepening
   const deep = hexToHsl(t.palette.oceanDeep)
   assert.ok(deep.h > 180 && deep.h < 240, `blue water (h=${deep.h.toFixed(0)})`)
   assert.ok(deep.l < hexToHsl(t.palette.oceanShallow).l, 'water darkens with depth')
-  // a real grey scree band sits just below the snow (desaturated, not taupe)
-  const scree = hexToHsl(ramp(t)[6].c)
-  assert.ok(scree.s < 0.12, `scree band is grey, not warm taupe (s=${scree.s.toFixed(2)})`)
   // the high-rock band reads red-brown, not orange sienna
   const rock = hexToHsl(ramp(t)[5].c)
   assert.ok(rock.h <= 20, `high rock is red-brown (h=${rock.h.toFixed(0)})`)
+  // captured base settings: visible contours + a light survey grid
+  assert.equal(t.grid.contourOpacity, 0.52)
+  assert.equal(t.grid.gridStep, 3)
+  assert.equal(t.grid.gridOpacity, 0.32)
+  assert.equal(t.light.sunElevation, 11)
+  assert.equal(t.light.sunAzimuth, 142)
   // pronounced vertical relief, mounted plate (slab kept)
   assert.ok(t.terrain.demExaggeration >= 1.7, 'pronounced relief')
   assert.equal(t.look.plinth, true, 'a mounted relief plate keeps the slab')
