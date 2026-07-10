@@ -65,3 +65,25 @@ test('a contour band on a smooth slope is rejected — lakes are blobs, not stri
   const dem = makeDem(size, (x) => 200 + x * 0.3)
   assert.equal(detectLakes(dem, { minCells: 50 }).length, 0)
 })
+
+test('an elongated water-flat ribbon is accepted — real lakes can be long (Annecy)', () => {
+  const size = 64
+  // 44×5 cells, perfectly flat at 446.7 m (a mountain ribbon lake): the old
+  // thinness check killed it, the flatness rule must keep it
+  const dem = makeDem(size, (x, y) => (x >= 10 && x < 54 && y >= 20 && y < 25 ? 446.5 : rugged(x, y)))
+  const lakes = detectLakes(dem, { minCells: 50 })
+  assert.equal(lakes.length, 1)
+  assert.equal(lakes[0].elevM, 446.5)
+  assert.equal(lakes[0].cells.length, 44 * 5)
+})
+
+test('an elongated band WITH internal spread is still rejected as a contour band', () => {
+  const size = 64
+  // same ribbon footprint but tilted 0.2 m per row across its narrow side:
+  // no real water surface tilts like that. The tolerance splits it into thin
+  // strips with ~0.2 m spread each — not flat, not blob-shaped, all rejected
+  const dem = makeDem(size, (x, y) =>
+    x >= 10 && x < 54 && y >= 20 && y < 25 ? 300 + (y - 20) * 0.2 : rugged(x, y)
+  )
+  assert.equal(detectLakes(dem, { minCells: 50 }).length, 0)
+})

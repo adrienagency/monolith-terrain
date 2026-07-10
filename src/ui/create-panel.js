@@ -137,6 +137,16 @@ export function buildCreatePanel(ctx) {
   sTer.body.querySelector('.ce-btn-row').append(
     button('Reset scale for this zoom', () => { ctx.resetZoomExag(); refreshAll() }, { ghost: true })
   )
+  const isolate = toggle({
+    label: 'Isolate the zone',
+    get: () => params.regionMode ?? false,
+    set: (v) => {
+      params.regionMode = v
+      ctx.setRegionMode(v)
+    },
+  })
+  isolate.setAttribute('data-tip', 'Cut the map to the country or region under your view — no square base.')
+  sTer.body.append(isolate)
 
   // --------------------------------------------------------------- Clouds
   const sCld = addTo(section('Clouds'))

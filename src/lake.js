@@ -7,7 +7,10 @@
 //    footprint and its top perimeter carries a small rounded bevel.
 //  · ALTITUDE LAKES: real lakes sit perfectly FLAT in the DEM, so connected
 //    flat regions above sea level are detected by flood fill and each gets a
-//    thin glass sheet at its own elevation (mountain lakes, reservoirs…).
+//    raised glass PLATE at its own elevation (mountain lakes, reservoirs…):
+//    a smooth Chaikin-rounded shoreline instead of the DEM pixel staircase,
+//    the top sitting proud of the land, a small rounded bevel on its edge,
+//    and short tinted walls dropping into the terrain bowl.
 // Shared controls: colour, blur (frosted ↔ clear), clarity (how far light
 // travels before the water tint absorbs it — shallow reads clear, deep
 // tinted) and waves (a gentle animated swell of the glass top, pinned at the
@@ -26,13 +29,20 @@ import { MeshTransmissionMaterial } from './vendor/MeshTransmissionMaterial.js'
 // Find connected near-flat regions above sea level in the raw DEM (meters).
 // Water surfaces are EXACTLY flat in the source data (sub-meter after tile
 // resampling), while a loose tolerance on a smooth slope grows "contour
-// bands" — connected strips along a level set that are not water at all. So:
-// tight tolerance + a compactness check (lakes are blobs, bands are strips).
-// Pure — unit-tested.
-export function detectLakes(dem, { tolM = 0.35, minCells = null, minFill = 0.25 } = {}) {
+// bands" — connected strips along a level set that are not water at all.
+// The strongest water signature is the ELEVATION SPREAD inside the region:
+// a real lake is flat to centimetres even when it is a long mountain ribbon
+// (Annecy is 14 km by 3 km), while a contour band spans its whole ±tol range
+// (~2*tolM). So: truly flat regions are accepted whatever their shape, and
+// only regions with real internal spread must also look like blobs, which
+// kills the bands without killing elongated lakes. Pure — unit-tested.
+export function detectLakes(dem, { tolM = 0.35, minCells = null, minFill = 0.25, flatM = 0.15 } = {}) {
   if (!dem || !dem.data) return []
   const { data, size } = dem
-  const min = minCells ?? Math.max(30, Math.round((size / 256) ** 2 * 25))
+  // area floor: scales with the grid so it stays a constant fraction of the
+  // map. 12 keeps mid-size alpine lakes (Annecy is ~150 cells on a 768 grid
+  // at a 330 km view) while still dropping single-cell noise flats.
+  const min = minCells ?? Math.max(30, Math.round((size / 256) ** 2 * 12))
   const visited = new Uint8Array(size * size)
   const lakes = []
   const stack = new Int32Array(size * size)
@@ -49,6 +59,8 @@ export function detectLakes(dem, { tolM = 0.35, minCells = null, minFill = 0.25 
       maxX = -1,
       minY = size,
       maxY = -1
+    let minH = h0,
+      maxH = h0
     while (top > 0) {
       const i = stack[--top]
       cells.push(i)
@@ -58,6 +70,9 @@ export function detectLakes(dem, { tolM = 0.35, minCells = null, minFill = 0.25 
       if (x > maxX) maxX = x
       if (y < minY) minY = y
       if (y > maxY) maxY = y
+      const v = data[i]
+      if (v < minH) minH = v
+      if (v > maxH) maxH = v
       // 4-neighbourhood, same water surface = same elevation within tolerance
       if (x > 0 && !visited[i - 1] && Math.abs(data[i - 1] - h0) <= tolM) (visited[i - 1] = 1), (stack[top++] = i - 1)
       if (x < size - 1 && !visited[i + 1] && Math.abs(data[i + 1] - h0) <= tolM) (visited[i + 1] = 1), (stack[top++] = i + 1)
@@ -67,15 +82,17 @@ export function detectLakes(dem, { tolM = 0.35, minCells = null, minFill = 0.25 
         (visited[i + size] = 1), (stack[top++] = i + size)
     }
     if (cells.length < min) continue
-    // shape checks — lakes are blobs, contour bands along slopes are strips:
-    // · a snaking band covers only a sliver of its bounding box (fill)
-    // · a straight band fills its box but is far thinner than a blob of the
-    //   same area, whose narrow side ≈ √area (thinness)
+    // acceptance — flatness first, shape second:
+    // · spread ≤ flatM: the surface is water-flat, accept ANY outline
+    // · otherwise fall back to the blob checks: a snaking band covers only a
+    //   sliver of its bounding box (fill), a straight band is far thinner
+    //   than a blob of the same area, whose narrow side ≈ √area (thinness)
+    const flat = maxH - minH <= flatM
     const w = maxX - minX + 1
     const h = maxY - minY + 1
     const fill = cells.length / (w * h)
     const thin = Math.min(w, h) < 0.4 * Math.sqrt(cells.length)
-    if (fill >= minFill && !thin) lakes.push({ cells, elevM: h0, size })
+    if (flat || (fill >= minFill && !thin)) lakes.push({ cells, elevM: h0, size })
   }
   return lakes
 }
@@ -254,6 +271,261 @@ function beveledPrismGeometry(contour, y0, y1, bevel, bevelSegments = 4, capRing
   return geo
 }
 
+// ---------------------------------------------------- smooth lake outlines
+// The DEM cell mask is a hard pixel staircase; the lake plate wants a smooth
+// shoreline. Pipeline: trace the mask's boundary edges into a closed loop,
+// thin the stairs, round them with Chaikin corner-cutting, then give every
+// point an outward normal for the prism builder.
+
+// trace the OUTER boundary loop of a set of DEM cells, in world XZ, with
+// positive shoelace winding. Inner loops (islands inside the lake) are
+// dropped — the plate spans them and terrain tall enough simply pierces the
+// glass, exactly like islands pierce the sea slab.
+function traceLakeOutline(cells, size) {
+  const inLake = new Set(cells)
+  const C = size + 1 // corner grid pitch
+  const edges = new Map() // corner -> neighbouring corners along boundary edges
+  const link = (a, b) => {
+    let l = edges.get(a)
+    if (!l) edges.set(a, (l = []))
+    l.push(b)
+  }
+  for (const i of cells) {
+    const x = i % size
+    const z = (i / size) | 0
+    const c00 = z * C + x
+    const c10 = c00 + 1
+    const c01 = c00 + C
+    const c11 = c01 + 1
+    if (x === 0 || !inLake.has(i - 1)) (link(c00, c01), link(c01, c00))
+    if (x === size - 1 || !inLake.has(i + 1)) (link(c10, c11), link(c11, c10))
+    if (z === 0 || !inLake.has(i - size)) (link(c00, c10), link(c10, c00))
+    if (z === size - 1 || !inLake.has(i + size)) (link(c01, c11), link(c11, c01))
+  }
+  // walk the edge graph into closed loops with a CONSISTENT TURN RULE: at
+  // every corner, prefer turning the same way relative to the incoming
+  // direction (turn, straight, other turn, back). At checkerboard pinches —
+  // corners where two lake cells only touch diagonally and four boundary
+  // edges meet — this hugs one lobe instead of dead-ending mid-walk, so
+  // every traversal closes.
+  const used = new Set()
+  const ekey = (a, b) => (a < b ? a * C * C + b : b * C * C + a)
+  const dirOf = (from, to) => {
+    const d = to - from
+    if (d === 1) return [1, 0]
+    if (d === -1) return [-1, 0]
+    if (d === C) return [0, 1]
+    return [0, -1]
+  }
+  const loops = []
+  for (const [start, nbrs] of edges) {
+    for (const first of nbrs) {
+      if (used.has(ekey(start, first))) continue
+      const loop = [start]
+      used.add(ekey(start, first))
+      let prev = start
+      let cur = first
+      let guard = 0
+      while (cur !== start && guard++ < 500000) {
+        loop.push(cur)
+        const [dx, dz] = dirOf(prev, cur)
+        // preference: right turn, straight, left turn, back
+        const prefs = [
+          [dz, -dx],
+          [dx, dz],
+          [-dz, dx],
+          [-dx, -dz],
+        ]
+        let nxt = -1
+        for (const [px, pz] of prefs) {
+          const cand = cur + px + pz * C
+          const nbrsHere = edges.get(cur)
+          if (nbrsHere && nbrsHere.includes(cand) && !used.has(ekey(cur, cand))) {
+            nxt = cand
+            break
+          }
+        }
+        if (nxt === -1) break
+        used.add(ekey(cur, nxt))
+        prev = cur
+        cur = nxt
+      }
+      if (cur === start && loop.length >= 4) loops.push(loop)
+    }
+  }
+  if (!loops.length) return null
+  const toWorld = (k) => ({ x: ((k % C) / size - 0.5) * TERRAIN_SIZE, z: (((k / C) | 0) / size - 0.5) * TERRAIN_SIZE })
+  let best = null
+  let bestArea = 0
+  for (const loop of loops) {
+    const pts = loop.map(toWorld)
+    let a = 0
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i]
+      const q = pts[(i + 1) % pts.length]
+      a += p.x * q.z - q.x * p.z
+    }
+    if (Math.abs(a) > Math.abs(bestArea)) {
+      bestArea = a
+      best = pts
+    }
+  }
+  if (bestArea < 0) best.reverse() // the builder expects positive winding
+  return best
+}
+
+// classic corner-cutting: each pass replaces every edge with its 1/4 and 3/4
+// points — two passes turn the cell staircase into a soft shoreline while
+// staying close to the original area (convex corners shrink a hair, concave
+// ones fill in)
+function chaikinClosed(pts, iterations = 2) {
+  let p = pts
+  for (let it = 0; it < iterations; it++) {
+    const out = []
+    for (let i = 0; i < p.length; i++) {
+      const a = p[i]
+      const b = p[(i + 1) % p.length]
+      out.push({ x: 0.75 * a.x + 0.25 * b.x, z: 0.75 * a.z + 0.25 * b.z })
+      out.push({ x: 0.25 * a.x + 0.75 * b.x, z: 0.25 * a.z + 0.75 * b.z })
+    }
+    p = out
+  }
+  return p
+}
+
+function decimateClosed(pts, maxN) {
+  if (pts.length <= maxN) return pts
+  const step = pts.length / maxN
+  const out = []
+  for (let i = 0; i < maxN; i++) out.push(pts[Math.floor(i * step)])
+  return out
+}
+
+// outward normals by central difference — right-hand perp of the tangent for
+// a positive-shoelace loop
+function contourNormals(pts) {
+  const n = pts.length
+  return pts.map((p, i) => {
+    const a = pts[(i - 1 + n) % n]
+    const b = pts[(i + 1) % n]
+    const tx = b.x - a.x
+    const tz = b.z - a.z
+    const len = Math.hypot(tx, tz) || 1
+    return { x: p.x, z: p.z, nx: tz / len, nz: -tx / len }
+  })
+}
+
+// ear-clipping triangulation of a simple polygon with positive shoelace
+// winding, emitted wound to face +y. O(n^2), fine for shoreline budgets.
+function earClipUp(poly) {
+  const cross = (a, b, c) => (b.x - a.x) * (c.z - b.z) - (b.z - a.z) * (c.x - b.x)
+  const inTri = (p, a, b, c) =>
+    (b.x - a.x) * (p.z - a.z) - (b.z - a.z) * (p.x - a.x) >= 0 &&
+    (c.x - b.x) * (p.z - b.z) - (c.z - b.z) * (p.x - b.x) >= 0 &&
+    (a.x - c.x) * (p.z - c.z) - (a.z - c.z) * (p.x - c.x) >= 0
+  const V = poly.map((_, i) => i)
+  const idx = []
+  let guard = 0
+  while (V.length > 3 && guard++ < 100000) {
+    let clipped = false
+    for (let vi = 0; vi < V.length; vi++) {
+      const i0 = V[(vi - 1 + V.length) % V.length]
+      const i1 = V[vi]
+      const i2 = V[(vi + 1) % V.length]
+      const a = poly[i0]
+      const b = poly[i1]
+      const c = poly[i2]
+      if (cross(a, b, c) <= 1e-9) continue // reflex or degenerate corner
+      let ear = true
+      for (const j of V) {
+        if (j === i0 || j === i1 || j === i2) continue
+        if (inTri(poly[j], a, b, c)) {
+          ear = false
+          break
+        }
+      }
+      if (!ear) continue
+      idx.push(i0, i2, i1) // reversed relative to winding = faces up
+      V.splice(vi, 1)
+      clipped = true
+      break
+    }
+    if (!clipped) break // numeric stalemate — ship what we have
+  }
+  if (V.length === 3) idx.push(V[0], V[2], V[1])
+  return idx
+}
+
+// raised glass plate for one altitude lake: short walls dropping into the
+// terrain bowl (no visible gap), a rounded top bevel like the sea slab's,
+// then a few inset rings easing the wave weight from the pinned rim to 1,
+// and an ear-clipped flat middle. Groups: material 0 = top (transmission),
+// material 1 = walls + bevel (tinted side glass).
+function lakePrismGeometry(contour, yBottom, yTop, bevel, fadeDist, bevelSegments = 3, fadeRings = 3) {
+  const M = contour.length
+  const pos = []
+  const nrm = []
+  const wgt = []
+  const put = (x, y, z, nx, ny, nz, w) => {
+    pos.push(x, y, z)
+    nrm.push(nx, ny, nz)
+    wgt.push(w)
+  }
+
+  const rings = [{ y: yBottom, inset: 0, nk: 1, ny: 0 }, { y: yTop - bevel, inset: 0, nk: 1, ny: 0 }]
+  for (let k = 1; k <= bevelSegments; k++) {
+    const phi = (k / bevelSegments) * (Math.PI / 2)
+    rings.push({
+      y: yTop - bevel + bevel * Math.sin(phi),
+      inset: bevel * (1 - Math.cos(phi)),
+      nk: Math.cos(phi),
+      ny: Math.sin(phi),
+    })
+  }
+  const R = rings.length
+  for (const ring of rings)
+    for (const p of contour)
+      put(p.x - p.nx * ring.inset, ring.y, p.z - p.nz * ring.inset, p.nx * ring.nk, ring.ny, p.nz * ring.nk, 0)
+
+  // top: inset fade rings (weight eases in), all flat at yTop
+  const capStart = pos.length / 3
+  for (let j = 1; j <= fadeRings; j++) {
+    const inset = bevel + (fadeDist * j) / fadeRings
+    for (const p of contour) put(p.x - p.nx * inset, yTop, p.z - p.nz * inset, 0, 1, 0, j / fadeRings)
+  }
+
+  const idx = []
+  for (let a = 0; a < R - 1; a++)
+    for (let i = 0; i < M; i++) {
+      const j = (i + 1) % M
+      idx.push(a * M + i, (a + 1) * M + i, (a + 1) * M + j, a * M + i, (a + 1) * M + j, a * M + j)
+    }
+  const sideCount = idx.length
+  const ringStart = (j) => (j === 0 ? (R - 1) * M : capStart + (j - 1) * M)
+  for (let jr = 0; jr < fadeRings; jr++) {
+    const A = ringStart(jr)
+    const B = ringStart(jr + 1)
+    for (let i = 0; i < M; i++) {
+      const j = (i + 1) % M
+      idx.push(A + i, B + i, B + j, A + i, B + j, A + j)
+    }
+  }
+  // flat middle — ear-clip the innermost ring's footprint
+  const inner = ringStart(fadeRings)
+  const innerPoly = contour.map((p) => ({ x: p.x - p.nx * (bevel + fadeDist), z: p.z - p.nz * (bevel + fadeDist) }))
+  for (const t of earClipUp(innerPoly)) idx.push(inner + t)
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
+  geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(nrm), 3))
+  geo.setAttribute('waveWeight', new THREE.BufferAttribute(new Float32Array(wgt), 1))
+  geo.setIndex(idx)
+  geo.addGroup(0, sideCount, 1) // walls + bevel → tinted side glass
+  geo.addGroup(sideCount, idx.length - sideCount, 0) // top → transmission
+  geo.computeBoundingSphere()
+  return geo
+}
+
 // what the polished surface mirrors — 'studio' is the scene's default room
 // light; the gradients are tiny equirect skies (auto-PMREMed by the renderer)
 export const REFLECTION_TYPES = ['studio', 'window', 'sky', 'sunset', 'mirror', 'none']
@@ -410,93 +682,38 @@ export class Lake {
     const lakes = detectLakes(dem)
     for (const lake of lakes) {
       const { cells, elevM, size } = lake
-      const cell = TERRAIN_SIZE / size
-      // one flat quad per DEM cell, merged into a single sheet at the lake's
-      // elevation — raised past the fine-detail grain so it stays underwater
-      const y = (elevM - dem.meanM) * scale + 0.04 + (params.detail ?? 0) * 0.6
+      // the lake's water level, raised past the fine-detail grain
+      const yLake = (elevM - dem.meanM) * scale + 0.04 + (params.detail ?? 0) * 0.6
+      // the plate sits PROUD of the land — a visible slab of glass resting in
+      // the landscape, not a film painted onto it
+      const lift = 0.15
+      const yTop = yLake + lift
+      const yBottom = yLake - 0.6 // walls sink into the terrain bowl — no gap
 
-      // shore fade for the lakeWaves swell: a small multi-source BFS from the
-      // border cells gives each cell its distance to the shore, and the wave
-      // weight eases 0 → 1 over the first three cells — the waterline stays
-      // pinned so the sheet never lifts off its own coast
-      const inLake = new Set(cells)
-      const depth = new Map()
-      let ring = []
-      const neighbours = (i) => {
-        const x = i % size
-        return [x > 0 ? i - 1 : -1, x < size - 1 ? i + 1 : -1, i - size, i + size]
+      // pixel staircase -> smooth shoreline
+      const raw = traceLakeOutline(cells, size)
+      if (!raw || raw.length < 8) continue
+      let pts = decimateClosed(raw, 220)
+      pts = chaikinClosed(pts, 2)
+      let per = 0
+      let area2 = 0
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i]
+        const q = pts[(i + 1) % pts.length]
+        per += Math.hypot(q.x - p.x, q.z - p.z)
+        area2 += p.x * q.z - q.x * p.z
       }
-      for (const i of cells)
-        if (neighbours(i).some((n) => n < 0 || n >= size * size || !inLake.has(n))) {
-          depth.set(i, 0)
-          ring.push(i)
-        }
-      for (let d = 1; d <= 2 && ring.length; d++) {
-        const next = []
-        for (const i of ring)
-          for (const n of neighbours(i))
-            if (n >= 0 && n < size * size && inLake.has(n) && !depth.has(n)) {
-              depth.set(n, d)
-              next.push(n)
-            }
-        ring = next
-      }
+      // point budget follows the perimeter; inset sizes follow the lake's
+      // mean half-width so bevel + fade rings can never fold across a narrow
+      // ribbon and self-intersect
+      const budget = Math.max(48, Math.min(240, Math.round(per / 0.14)))
+      const contour = contourNormals(decimateClosed(pts, budget))
+      const halfWidth = Math.abs(area2) / Math.max(1e-6, per)
+      const bevel = Math.max(0.015, Math.min(0.08, lift * 0.5, halfWidth * 0.15))
+      const fadeDist = Math.min(0.5, halfWidth * 0.3)
 
-      // weights are authored at CELL CORNERS, not per cell: adjacent quads
-      // share their edge corners, so coincident vertices always carry the
-      // same weight and the displaced sheet stays crack-free (a per-cell
-      // constant weight stepped 0, 1/3, 2/3 … between neighbours and opened
-      // visible slits along every shore contour). A corner's weight is the
-      // MIN over its ≤4 incident cells — anything touching the shore stays
-      // pinned at 0, and the field is piecewise-linear in between.
-      const cellW = (gx, gy) => {
-        if (gx < 0 || gy < 0 || gx >= size || gy >= size) return 0
-        const idx = gy * size + gx
-        if (!inLake.has(idx)) return 0
-        return depth.has(idx) ? depth.get(idx) / 3 : 1
-      }
-      const cornerCache = new Map()
-      const cornerW = (gx, gy) => {
-        const key = gy * (size + 1) + gx
-        let w = cornerCache.get(key)
-        if (w === undefined) {
-          w = Math.min(cellW(gx - 1, gy - 1), cellW(gx, gy - 1), cellW(gx - 1, gy), cellW(gx, gy))
-          cornerCache.set(key, w)
-        }
-        return w
-      }
-
-      const pos = new Float32Array(cells.length * 18)
-      const wgt = new Float32Array(cells.length * 6)
-      let o = 0
-      let wo = 0
-      for (const i of cells) {
-        const gx = i % size
-        const gz = (i / size) | 0
-        const cx = (gx / size - 0.5) * TERRAIN_SIZE
-        const cz = (gz / size - 0.5) * TERRAIN_SIZE
-        const x0 = cx,
-          x1 = cx + cell,
-          z0 = cz,
-          z1 = cz + cell
-        pos.set([x0, y, z0, x0, y, z1, x1, y, z1, x0, y, z0, x1, y, z1, x1, y, z0], o)
-        o += 18
-        // same corner order as the six vertices above
-        const w00 = cornerW(gx, gz)
-        const w01 = cornerW(gx, gz + 1)
-        const w11 = cornerW(gx + 1, gz + 1)
-        const w10 = cornerW(gx + 1, gz)
-        wgt.set([w00, w01, w11, w00, w11, w10], wo)
-        wo += 6
-      }
-      const geo = new THREE.BufferGeometry()
-      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
-      const normals = new Float32Array(pos.length)
-      for (let k = 1; k < normals.length; k += 3) normals[k] = 1
-      geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
-      geo.setAttribute('waveWeight', new THREE.BufferAttribute(wgt, 1))
-      geo.computeBoundingSphere()
-      const mesh = new THREE.Mesh(geo, this.lakeMat)
+      const geo = lakePrismGeometry(contour, yBottom, yTop, bevel, fadeDist)
+      const mesh = new THREE.Mesh(geo, [this.lakeMat, this.seaSideMat])
       mesh.renderOrder = 3
       this.group.add(mesh)
       this.lakeMeshes.push(mesh)

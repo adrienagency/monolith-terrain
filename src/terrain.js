@@ -12,6 +12,13 @@ function blackTexture() {
   return tex
 }
 
+// 1×1 white texture — inert placeholder for the region-mask sampler
+function whiteTexture() {
+  const tex = new THREE.DataTexture(new Uint8Array([255]), 1, 1, THREE.RedFormat)
+  tex.needsUpdate = true
+  return tex
+}
+
 export const BASIN_RADIUS = 6.6 // flat excavation floor
 export const BASIN_BLEND = 9.0 // where flat floor blends back into mountains
 export const FLOOR_Y = -0.35
@@ -66,6 +73,12 @@ export class Terrain {
       // superellipse exponent for the corner: 2 = circular arc, higher = squircle
       // (iOS-style continuous corner). Shared with the plinth ring, see plinth.js
       uSlabCornerN: { value: 2 + (params.slabCornerSmoothing ?? 0) * 4 },
+      // region cutout ("individualiser la zone"): white-inside/black-outside
+      // mask rendered over the DEM footprint (region-mask.js). When uRegionOn
+      // the terrain is clipped to the admin boundary and the superellipse slab
+      // clip is bypassed. Placeholder stays white so sampling is always valid.
+      uRegionMask: { value: (this._regionPlaceholder = whiteTexture()) },
+      uRegionOn: { value: 0 },
       uOceanShallow: { value: new THREE.Color(params.oceanShallow ?? '#dce8ec') },
       uOceanMid: { value: new THREE.Color(params.oceanMid ?? '#7fa8b8') },
       uOceanDeep: { value: new THREE.Color(params.oceanDeep ?? '#31576b') },
@@ -137,6 +150,8 @@ uniform vec3 uContourColor;
 uniform float uSlabHalf;
 uniform float uSlabCorner;
 uniform float uSlabCornerN;
+uniform sampler2D uRegionMask;
+uniform float uRegionOn;
 uniform sampler2D uCloudShadow;
 uniform vec2 uCloudShadowOff;
 uniform float uCloudShadowK;
@@ -162,10 +177,18 @@ float scanHash(vec2 p) {
           '#include <color_fragment>',
           `#include <color_fragment>
 {
-  // --- rounded-rect footprint clip: discard fragments outside the slab's
-  // filleted corners so the block's vertical edges read soft (matches the
-  // plinth walls). Zero radius = untouched square. SDF of a rounded box.
-  if (uSlabCorner > 0.0) {
+  // --- region cutout: clip the relief to the admin-boundary mask (white
+  // inside / black outside, rendered over the DEM footprint in world XZ by
+  // region-mask.js) so the landform stands alone like a country cutout. The
+  // mask is pre-blurred, so the 0.5 iso-line cuts a smooth boundary. When
+  // active it REPLACES the superellipse slab clip below.
+  if (uRegionOn > 0.5) {
+    vec2 rmUv = vWorldPos.xz / (uSlabHalf * 2.0) + 0.5;
+    if (texture2D(uRegionMask, rmUv).r < 0.5) discard;
+  } else if (uSlabCorner > 0.0) {
+    // --- rounded-rect footprint clip: discard fragments outside the slab's
+    // filleted corners so the block's vertical edges read soft (matches the
+    // plinth walls). Zero radius = untouched square. SDF of a rounded box.
     vec2 cq = max(abs(vWorldPos.xz) - vec2(uSlabHalf - uSlabCorner), 0.0);
     // superellipse boundary |x|^n + |y|^n = r^n (n=2 circle, higher = squircle);
     // straight edges stay exact (one component is 0), only corners are shaped
@@ -334,6 +357,25 @@ if (uScanT >= 0.0 && (uScanType == 0 || uScanType == 3)) {
     this.dem = dem
   }
 
+  // Region cutout ("individualiser la zone"): pass the mask texture built by
+  // region-mask.js fetchRegionMask() to clip the relief to an admin boundary,
+  // or null to restore the full square slab. The previous mask is disposed.
+  setRegionMask(texture) {
+    const prev = this.mapUniforms.uRegionMask.value
+    if (texture) {
+      if (prev !== texture) {
+        this.mapUniforms.uRegionMask.value = texture
+        if (prev && prev !== this._regionPlaceholder) prev.dispose()
+      }
+      this.mapUniforms.uRegionOn.value = 1
+    } else {
+      this._regionPlaceholder ??= whiteTexture()
+      this.mapUniforms.uRegionMask.value = this._regionPlaceholder
+      if (prev && prev !== this._regionPlaceholder) prev.dispose()
+      this.mapUniforms.uRegionOn.value = 0
+    }
+  }
+
   // scene height → display elevation in feet (real when a DEM drives the terrain)
   heightToFeet(h) {
     return this._h2ft ? this._h2ft(h) : Math.round(4800 + h * 420)
@@ -483,7 +525,13 @@ if (uScanT >= 0.0 && (uScanType == 0 || uScanType == 3)) {
     // patch has no sub-sea data (then uSeaY simply sits below the terrain).
     if (params.source === 'real' && this.dem) {
       const demScale = (TERRAIN_SIZE / this.dem.extentMeters) * params.demExaggeration
-      this.mapUniforms.uSeaY.value = (0 - this.dem.meanM) * demScale
+      // fine-zoom tiles carry NO bathymetry: their sea is a flat plain at
+      // exactly 0 m, which lands exactly ON uSeaY and paints as LAND (the
+      // "black grainy sea" the dark templates expose). Lift the waterline a
+      // touch over half a metre so a bathymetry-less sea still reads ocean;
+      // real coastlines shift by an invisible ~0.6 m.
+      const seaEps = Math.max(0.6 * demScale, 0.004)
+      this.mapUniforms.uSeaY.value = (0 - this.dem.meanM) * demScale + seaEps
       this.mapUniforms.uSeaRange.value = Math.max((0 - this.dem.minM) * demScale, 1e-3)
     } else {
       this.mapUniforms.uSeaY.value = -9999

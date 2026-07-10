@@ -39,6 +39,7 @@ import { Lake } from './lake.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
+import { fetchRegionMask } from './region-mask.js'
 import { refreshAll } from './ui/kit.js'
 import { buildTopBar, buildBottomBar } from './ui/bars.js'
 import { buildCreatePanel } from './ui/create-panel.js'
@@ -207,6 +208,7 @@ const params = {
   slabCornerSmoothing: 0.6, // 0 = plain circular arc, →1 = squircle (iOS-style
   // continuous corner); drives a superellipse exponent shared by ring + clip
   groundInfo: true, // cartouche (compass rose, name, coords, blurb) around the slab
+  regionMode: false, // cut the map to the admin boundary under the view (no square base)
 
   // clouds — thick and low, clinging to the summits
   // volumetric cloud deck — user-tuned base settings, active on every template
@@ -227,7 +229,7 @@ const params = {
   // terrain becomes invisible through the water.
   transmission: 0,
   // the sea as a glass block: colour-tinted, environment-reflecting
-  lakeEnabled: true,
+  lakeEnabled: false, // opt-in — the glass stays off until switched on
   lakeColor: '#8fc6e8',
   lakeRoughness: 0.08, // 0 = mirror-polished water, higher = frosted (blur)
   lakeClarity: 30, // absorption distance: small = opaque depths, large = crystal clear
@@ -790,6 +792,7 @@ async function fetchAndBuildDem() {
   // pull the cartouche info for the new zone (async, non-blocking)
   if (params.groundInfo) groundInfo.load(params.demLat, params.demLon, dem)
   traffic.setZone(dem) // SpaceX pad watcher (Starbase / LC-39A in view?)
+  if (params.regionMode) applyRegionMode() // re-cut to the new zone's boundary
 }
 
 async function loadRealTerrain() {
@@ -1231,6 +1234,34 @@ scan = new ScanController(terrain.mapUniforms, TERRAIN_SIZE / 2)
 const lakeRebuild = () =>
   lake.rebuild({ seaY: terrain.mapUniforms.uSeaY.value, baseY: plinth.baseY, dem: terrain.dem, params })
 
+// "individualiser la zone" — clip the map to the administrative boundary under
+// the view (continent/country/region/departement by zoom). The landform sits
+// straight on the ground: no plinth, no square ocean slab.
+let regionBusy = false
+async function applyRegionMode() {
+  if (!params.regionMode || params.source !== 'real' || !dem) {
+    terrain.setRegionMask(null)
+    plinth.setVisible(params.plinth && modes.mode === 'surface')
+    lakeRebuild() // restore the sea slab if the glass is on
+    return
+  }
+  if (regionBusy) return
+  regionBusy = true
+  try {
+    const r = await fetchRegionMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem })
+    if (!params.regionMode) return // user toggled off while fetching
+    terrain.setRegionMask(r ? r.maskTexture : null)
+    plinth.setVisible(false)
+    if (lake.sea) lake.sea.visible = false // the ocean slab would spill past the boundary
+    if (r) modes.announce(`ZONE — ${String(r.name).toUpperCase()}`)
+    else modes.announce('ZONE — NO BOUNDARY AT THIS SCALE')
+  } catch {
+    terrain.setRegionMask(null)
+  } finally {
+    regionBusy = false
+  }
+}
+
 // export renders offline: the RAF chain pauses and the scene advances at a
 // fixed timestep so the video is deterministic whatever the encode speed
 let loopPaused = false
@@ -1353,6 +1384,7 @@ const createPanel = buildCreatePanel({
     tour.active = false
     camera.up.set(0, 1, 0)
   },
+  setRegionMode: () => applyRegionMode(),
   syncDark: () => topBar.syncDark(),
 })
 

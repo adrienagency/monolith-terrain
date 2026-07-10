@@ -150,6 +150,7 @@ const DECK_FRAG = /* glsl */ `
   uniform vec3 uBoxMin;
   uniform vec3 uBoxMax;
   uniform float uDrift;      // rigid drift offset, in box-normalised x
+  uniform vec2 uPhase;       // random layout offset (reroll) — applied to EVERY field lookup
   uniform float uDensity;
   uniform float uScale;      // noise tiling across the deck
   uniform float uCoverGate;  // 0 = unbroken sheet, higher = more open sky
@@ -178,7 +179,7 @@ const DECK_FRAG = /* glsl */ `
   // local coverage: low-frequency cells (squared to bite), gated by the slider,
   // faded toward the deck edges so the field ends softly at the map border
   float coverAt(vec2 pxz) {
-    float c = texture(uVolume, vec3((pxz + vec2(uDrift, 0.0)) * 0.9, 0.35)).g;
+    float c = texture(uVolume, vec3((pxz + uPhase + vec2(uDrift, 0.0)) * 0.9, 0.35)).g;
     float edge = 1.0 - sat((length(pxz - 0.5) - 0.28) / 0.24);
     return smoothstep(uCoverGate, uCoverGate + 0.25, c) * edge;
   }
@@ -187,8 +188,9 @@ const DECK_FRAG = /* glsl */ `
   // near-vertical over the map, so the XZ cell barely changes along a ray):
   // x = local drift-speed random, y = local altitude offset, z = local density
   vec3 cloudCell(vec2 pxz) {
-    vec2 a = texture(uVolume, vec3(pxz * 0.5 + 11.31, 0.62)).rg;
-    float b = texture(uVolume, vec3(pxz * 0.37 + 3.71, 0.18)).g;
+    vec2 q = pxz + uPhase; // the reroll phase shifts the whole field rigidly
+    vec2 a = texture(uVolume, vec3(q * 0.5 + 11.31, 0.62)).rg;
+    float b = texture(uVolume, vec3(q * 0.37 + 3.71, 0.18)).g;
     return vec3(a.x, a.y, b);
   }
 
@@ -198,7 +200,12 @@ const DECK_FRAG = /* glsl */ `
   // per-cloud drift/altitude/density character.
   float densityAt(vec3 wp, vec3 cell) {
     vec3 p = (wp - uBoxMin) / (uBoxMax - uBoxMin);
-    float drift = uDrift * (1.0 + (cell.x - 0.5) * 2.0 * uDriftVar);
+    // per-cloud speed variation, BOUNDED: cells oscillate around the common
+    // drift (same slope as the old uDrift*(1+..) form near t=0) instead of
+    // diverging forever — unbounded per-cell offsets spatially shredded the
+    // coverage field at large drift and the whole deck vanished
+    float wander = 0.3 * sin(uDrift * 3.3333);
+    float drift = uDrift + (cell.x - 0.5) * 2.0 * uDriftVar * wander;
     float altOff = (cell.y - 0.5) * uAltSpread * 0.9;
     float cover = coverAt(vec2(p.x + drift - uDrift, p.z)); // cell-speed drift
     if (cover <= 0.003) return 0.0;
@@ -208,7 +215,7 @@ const DECK_FRAG = /* glsl */ `
     float crown = 1.0 - smoothstep(top - 0.3, top, h);
     float profile = base * crown * cover;
     if (profile <= 0.0) return 0.0;
-    vec3 coord = vec3(p.x + drift, p.y, p.z) * uScale;
+    vec3 coord = vec3(p.x + uPhase.x + drift, p.y, p.z + uPhase.y) * uScale;
     float billow = texture(uVolume, fract(coord)).r;
     float d = sat(billow - (1.0 - profile));
     d = pow(d, uContrast); // contrast: sharpen or soften the cloud bodies
@@ -305,6 +312,7 @@ export class Clouds {
     this.deck = null
     this.shadowTex = null
     this.time = 0
+    this.phase = new THREE.Vector2(0, 0) // random layout offset, set by reroll()
     this.sunDir = new THREE.Vector3(0.5, 0.7, 0.4) // direction TO the sun
     this.build(params)
   }
@@ -314,11 +322,78 @@ export class Clouds {
     if (this.deck) this.deck.material.uniforms.uSunDir.value.copy(this.sunDir).negate()
   }
 
-  // start the deck at a fresh random drift phase — called when the VIEW
-  // changes (new zone / zoom tier), never on slider rebuilds, so tuning a
-  // cloud setting doesn't teleport the layout you're looking at
+  // start the deck at a fresh random LAYOUT — called when the VIEW changes
+  // (new zone / zoom tier), never on slider rebuilds, so tuning a cloud
+  // setting doesn't teleport the layout you're looking at.
+  // NOTE: this must NOT touch this.time. The old version set time to a huge
+  // random value, but uDrift feeds the per-cell speed variation, so a large
+  // drift decorrelated the coverage/billow lookups and the deck went blank.
+  // Instead we shift every field lookup by a random uPhase offset — and we
+  // rejection-sample that offset against the CPU coverage field so a fresh
+  // zone never lands on an empty stretch of sky.
   reroll() {
-    this.time = Math.random() * 6000
+    if (!sharedVolume || !this.deck) {
+      this.phase.set(Math.random(), Math.random())
+      if (this.deck) this.deck.material.uniforms.uPhase.value.copy(this.phase)
+      return
+    }
+    const { data } = sharedVolume
+    const u = this.deck.material.uniforms
+    const gate = u.uCoverGate.value
+    const billow = u.uBillow.value
+    const scale = u.uScale.value
+    const contrast = u.uContrast.value
+    const drift = u.uDrift.value
+    const altSpread = u.uAltSpread.value
+    const sat = (v) => Math.min(1, Math.max(0, v))
+    // total cloud mass over the map at this phase — a CPU mirror of densityAt
+    // (coverage gate, per-cloud altitude offset + density, vertical profile,
+    // billow carve), so the score tracks what the raymarch will actually show
+    const score = (px, pz) => {
+      const N = 20
+      let mass = 0
+      for (let j = 0; j < N; j++)
+        for (let i = 0; i < N; i++) {
+          const x = (i + 0.5) / N
+          const z = (j + 0.5) / N
+          const c = readVolume(data, (x + px + drift) * 0.9, (z + pz) * 0.9, 0.35, 1)
+          const edge = 1 - sat((Math.hypot(x - 0.5, z - 0.5) - 0.28) / 0.24)
+          const cover = sat((c - gate) / 0.25) * edge
+          if (cover <= 0.003) continue
+          // per-cloud character (mirrors cloudCell): altitude offset + density
+          const cellY = readVolume(data, (x + px) * 0.5 + 11.31, (z + pz) * 0.5 + 11.31, 0.62, 1)
+          const denMul = 0.55 + 0.9 * readVolume(data, (x + px) * 0.37 + 3.71, (z + pz) * 0.37 + 3.71, 0.18, 1)
+          const altOff = (cellY - 0.5) * altSpread * 0.9
+          const top = 0.28 + 0.72 * cover * billow
+          let acc = 0
+          for (let s = 0; s < 8; s++) {
+            const h = (s + 0.5) / 8 - altOff
+            const profile = sat(h / 0.08) * (1 - sat((h - (top - 0.3)) / 0.3)) * cover
+            if (profile <= 0) continue
+            const b = readVolume(data, (x + px + drift) * scale, ((s + 0.5) / 8) * scale, (z + pz) * scale, 0)
+            acc += Math.pow(sat(b - (1 - profile)), contrast) * denMul
+          }
+          mass += Math.min(acc, 2) // cap so one giant bank can't buy an empty sky
+        }
+      return mass / (N * N)
+    }
+    // accept the FIRST decent candidate (≈ top half of random phases) rather
+    // than the best of the batch — an argmax would keep converging on the same
+    // densest bank, so quick consecutive rerolls would all look alike
+    let best = [0, 0]
+    let bestS = -1
+    for (let k = 0; k < 20; k++) {
+      const px = Math.random()
+      const pz = Math.random()
+      const s = score(px, pz)
+      if (s > bestS) {
+        bestS = s
+        best = [px, pz]
+      }
+      if (s >= 0.055) break
+    }
+    this.phase.set(best[0], best[1])
+    u.uPhase.value.copy(this.phase)
   }
 
   build(params) {
@@ -351,6 +426,7 @@ export class Clouds {
         uBoxMin: { value: new THREE.Vector3(-half, bottom, -half) },
         uBoxMax: { value: new THREE.Vector3(half, bottom + thickness, half) },
         uDrift: { value: 0 },
+        uPhase: { value: this.phase.clone() },
         uDensity: { value: params.cloudOpacity ?? 0.85 },
         uScale: { value: params.cloudScale ?? 3 },
         uCoverGate: { value: params.cloudCoverage ?? 0.62 },
@@ -432,6 +508,7 @@ export class Clouds {
     const u = this.deck.material.uniforms
     const drift = this.time * (params.cloudDrift ?? 1) * 0.004
     u.uDrift.value = drift
+    u.uPhase.value.copy(this.phase)
     u.uDensity.value = params.cloudOpacity ?? 1.5
     u.uScale.value = params.cloudScale ?? 5
     u.uCoverGate.value = params.cloudCoverage ?? 0.62
@@ -460,12 +537,13 @@ export class Clouds {
         const s = this.sunDir
         const deckMid = this.deck.position.y
         const slant = Math.max(0.25, s.y)
-        // the deck shifts coverage by exactly -drift in normalized map space,
-        // so the baked shadow must sample at +drift with NO scale division —
-        // the old /cloudScale made shadows diverge from the visible clouds
+        // the deck shifts coverage by exactly -(drift + phase) in normalized
+        // map space, so the baked shadow must sample at +drift+phase with NO
+        // scale division — the old /cloudScale made shadows diverge from the
+        // visible clouds
         mu.uCloudShadowOff.value.set(
-          drift - (s.x / slant) * (deckMid / TERRAIN_SIZE) * 0.5,
-          -(s.z / slant) * (deckMid / TERRAIN_SIZE) * 0.5
+          drift + this.phase.x - (s.x / slant) * (deckMid / TERRAIN_SIZE) * 0.5,
+          this.phase.y - (s.z / slant) * (deckMid / TERRAIN_SIZE) * 0.5
         )
       }
     }
