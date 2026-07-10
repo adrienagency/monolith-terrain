@@ -398,7 +398,13 @@ export class Clouds {
 
   build(params) {
     this._dispose()
-    if (!params.cloudsEnabled) return
+    if (!params.cloudsEnabled) {
+      // no deck = no shadows: clear the terrain's baked shadow strength, or
+      // the last deck's shadows stay painted on the ground forever
+      const mu = this.terrain?.mapUniforms
+      if (mu?.uCloudShadowK) mu.uCloudShadowK.value = 0
+      return
+    }
     const { tex, data } = bakeVolume()
 
     const half = TERRAIN_SIZE / 2
