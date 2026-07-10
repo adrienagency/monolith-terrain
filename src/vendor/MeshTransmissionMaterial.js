@@ -39,8 +39,39 @@
 //   distortionScale    noise frequency in world units (0.5)
 //   temporalDistortion how much `time` scrolls the noise (0 = frozen)
 //   time               feed a clock here (optional) to animate distortion
+//                      and the wave swell
+//   waveAmp            vertical swell of the surface in world units (0 = off):
+//                      two superposed travelling sines displace the vertices
+//                      and nudge the normals analytically so reflections
+//                      ripple. Scaled per vertex by the geometry attribute
+//                      `waveWeight` (float 0..1); geometry WITHOUT that
+//                      attribute stays rigid (a disabled attribute reads 0),
+//                      so shores and rims can be pinned by authoring weights.
 
 import * as THREE from 'three'
+
+// vertex-stage swell: shared by begin_vertex (displacement) and
+// beginnormal_vertex (analytic normal nudge). Local space equals world space
+// for the lake meshes (identity transforms), which keeps the phase continuous
+// across the sea slab and every altitude sheet.
+const mtmWaveVertGLSL = /* glsl */ `
+uniform float time;
+uniform float waveAmp;
+attribute float waveWeight;
+
+// returns (d/dx, height, d/dz) of the unit swell at a ground position.
+// Wavelengths sit around 7 world units — long enough that the sea cap grid
+// (vertex spacing ~1-3 units) samples them far above Nyquist, so the glass
+// reads as a gentle undulation rather than aliased chop.
+vec3 mtmWave( const in vec2 xz ) {
+  const vec2 k1 = vec2( 0.675, 0.475 );
+  const vec2 k2 = vec2( -0.425, 0.825 );
+  float p1 = dot( xz, k1 ) + time * 0.55;
+  float p2 = dot( xz, k2 ) - time * 0.8;
+  vec2 g = 0.62 * cos( p1 ) * k1 + 0.38 * cos( p2 ) * k2;
+  return vec3( g.x, 0.62 * sin( p1 ) + 0.38 * sin( p2 ), g.y );
+}
+`
 
 // noise + hash toolbox from drei's MeshTransmissionMaterial (N8Programs),
 // names prefixed to avoid colliding with other shader patches
@@ -185,6 +216,7 @@ export class MeshTransmissionMaterial extends THREE.MeshPhysicalMaterial {
       distortionScale = 0.5,
       temporalDistortion = 0,
       time = 0,
+      waveAmp = 0,
       ...physical
     } = parameters
     super(physical)
@@ -196,6 +228,7 @@ export class MeshTransmissionMaterial extends THREE.MeshPhysicalMaterial {
       distortionScale: { value: distortionScale },
       temporalDistortion: { value: temporalDistortion },
       time: { value: time },
+      waveAmp: { value: waveAmp },
     }
 
     this.onBeforeCompile = (shader) => {
@@ -255,6 +288,33 @@ export class MeshTransmissionMaterial extends THREE.MeshPhysicalMaterial {
         )
         .replace('#include <transmission_pars_fragment>', pars)
         .replace('#include <transmission_fragment>', mtmTransmissionFragmentGLSL)
+
+      // wave swell (vertex stage): displace the surface and tilt the normal
+      // with the analytic slope of the same function, both scaled by the
+      // per-vertex waveWeight so authored shores and rims stay pinned. The
+      // normal patch lands in beginnormal_vertex, which three runs before
+      // begin_vertex, so it reads the undisplaced `position` directly.
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>\n${mtmWaveVertGLSL}`)
+        .replace(
+          '#include <beginnormal_vertex>',
+          `#include <beginnormal_vertex>
+          {
+            float mtmWA = waveAmp * waveWeight;
+            if ( mtmWA > 0.0 ) {
+              vec3 mtmW = mtmWave( position.xz );
+              objectNormal = normalize( objectNormal + vec3( - mtmW.x, 0.0, - mtmW.z ) * mtmWA );
+            }
+          }`
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          {
+            float mtmWA2 = waveAmp * waveWeight;
+            if ( mtmWA2 > 0.0 ) transformed.y += mtmWA2 * mtmWave( transformed.xz ).y;
+          }`
+        )
     }
 
     // convenient property access, drei-style: material.blurStrength = 2 etc.

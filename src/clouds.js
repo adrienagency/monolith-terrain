@@ -314,6 +314,13 @@ export class Clouds {
     if (this.deck) this.deck.material.uniforms.uSunDir.value.copy(this.sunDir).negate()
   }
 
+  // start the deck at a fresh random drift phase — called when the VIEW
+  // changes (new zone / zoom tier), never on slider rebuilds, so tuning a
+  // cloud setting doesn't teleport the layout you're looking at
+  reroll() {
+    this.time = Math.random() * 6000
+  }
+
   build(params) {
     this._dispose()
     if (!params.cloudsEnabled) return
@@ -453,8 +460,11 @@ export class Clouds {
         const s = this.sunDir
         const deckMid = this.deck.position.y
         const slant = Math.max(0.25, s.y)
+        // the deck shifts coverage by exactly -drift in normalized map space,
+        // so the baked shadow must sample at +drift with NO scale division —
+        // the old /cloudScale made shadows diverge from the visible clouds
         mu.uCloudShadowOff.value.set(
-          drift / (params.cloudScale ?? 3) - (s.x / slant) * (deckMid / TERRAIN_SIZE) * 0.5,
+          drift - (s.x / slant) * (deckMid / TERRAIN_SIZE) * 0.5,
           -(s.z / slant) * (deckMid / TERRAIN_SIZE) * 0.5
         )
       }

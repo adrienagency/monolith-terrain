@@ -8,8 +8,10 @@
 //  · ALTITUDE LAKES: real lakes sit perfectly FLAT in the DEM, so connected
 //    flat regions above sea level are detected by flood fill and each gets a
 //    thin glass sheet at its own elevation (mountain lakes, reservoirs…).
-// Shared controls: colour, blur (frosted ↔ clear) and clarity (how far light
-// travels before the water tint absorbs it — shallow reads clear, deep tinted).
+// Shared controls: colour, blur (frosted ↔ clear), clarity (how far light
+// travels before the water tint absorbs it — shallow reads clear, deep
+// tinted) and waves (a gentle animated swell of the glass top, pinned at the
+// slab rim and every shoreline; needs lake.update(dt) ticking to drift).
 
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
@@ -78,10 +80,32 @@ export function detectLakes(dem, { tolM = 0.35, minCells = null, minFill = 0.25 
   return lakes
 }
 
+// A very dark lakeColor used to turn the thin altitude sheets into solid
+// black slabs with hard edges (the Embalse del Ebro bug). Two terms in the
+// transmission shader can each fully kill a colour channel:
+//  · Beer-Lambert absorption takes -log(attenuationColor) per channel, and
+//    -log(0) is an INFINITE coefficient — the channel dies over ANY path
+//    length, even the 0.6 units of a sheet;
+//  · the transmitted light is ALSO multiplied by the base colour
+//    (transmittance = diffuseColor * volumeAttenuation(...) in three), a
+//    thickness-INDEPENDENT tint — a zero channel there blacks out thin and
+//    thick glass alike.
+// Floor both tints so no channel is ever fully dead: blacks become dark
+// glass instead of holes, while any normal colour is bit-identical.
+function tintFloor(target, color, floor) {
+  target.set(color)
+  target.r = Math.max(floor, target.r)
+  target.g = Math.max(floor, target.g)
+  target.b = Math.max(floor, target.b)
+  return target
+}
+const attenuationTint = (target, color) => tintFloor(target, color, 0.02)
+const glassTint = (target, color) => tintFloor(target, color, 0.12)
+
 function glassMaterial(params) {
   return new MeshTransmissionMaterial({
     samples: 6, // stochastic taps per pixel — drei's default, silky at 1080p
-    color: new THREE.Color(params.lakeColor ?? '#8fc6e8'),
+    color: glassTint(new THREE.Color(), params.lakeColor ?? '#8fc6e8'),
     transmission: 1, // full glass — see straight through
     roughness: params.lakeRoughness ?? 0.08, // = the blur of the glass
     metalness: 0,
@@ -89,7 +113,7 @@ function glassMaterial(params) {
     envMapIntensity: 1.1, // the environment reflects in the surface
     // depth absorption: light travelling through the volume takes the water
     // tint — shallow water reads clear, deep water saturates (the "clarity")
-    attenuationColor: new THREE.Color(params.lakeColor ?? '#8fc6e8'),
+    attenuationColor: attenuationTint(new THREE.Color(), params.lakeColor ?? '#8fc6e8'),
     attenuationDistance: params.lakeClarity ?? 12,
     depthWrite: false,
     blurStrength: 1, // world-space cone factor of the frosted blur
@@ -106,7 +130,7 @@ function glassMaterial(params) {
 // closed contour of the rounded-superellipse footprint in the XZ plane, with
 // analytic outward normals: straight edges between four corner arcs of
 // radius r and exponent n — the same curve the slab and the old clip used
-function superellipseContour(half, r, n, cornerSegments = 8) {
+function superellipseContour(half, r, n, cornerSegments = 16) {
   const pts = []
   const c = half - r
   const e = 2 / n
@@ -136,11 +160,27 @@ function superellipseContour(half, r, n, cornerSegments = 8) {
 
 // prism over the contour from y0 to y1 whose TOP edge is rounded over with
 // radius `bevel` (quarter-circle profile, smooth analytic normals). Groups:
-// material 0 = the flat top cap (transmission glass), material 1 = walls,
-// bevel and bottom (plain tinted glass) — the round-over catching the env
-// glint as a tinted rim reads like a polished slab edge
-function beveledPrismGeometry(contour, y0, y1, bevel, bevelSegments = 4) {
+// material 0 = the top cap (transmission glass), material 1 = walls, bevel
+// and bottom (plain tinted glass) — the round-over catching the env glint as
+// a tinted rim reads like a polished slab edge. The cap is a radial GRID
+// (not a fan) so the lakeWaves vertex swell has vertices to move, and every
+// vertex carries a `waveWeight`: 0 on the rim/bevel/walls (the edge stays
+// welded shut), easing to 1 a little way inside the footprint. The grid is
+// sampled well above the swell's Nyquist rate (wavelengths ~7 world units vs
+// ~1.2 radial and ~3 tangential vertex spacing) so the undulation reads
+// smooth, never as crawling aliased lumps.
+function beveledPrismGeometry(contour, y0, y1, bevel, bevelSegments = 4, capRings = 24) {
   const M = contour.length
+  const pos = []
+  const nrm = []
+  const wgt = []
+  const put = (x, y, z, nx, ny, nz, w) => {
+    pos.push(x, y, z)
+    nrm.push(nx, ny, nz)
+    wgt.push(w)
+    return pos.length / 3 - 1
+  }
+
   // horizontal rings bottom→top: wall base, wall top, then the round-over
   // (inset walks inward along the contour normal as the profile turns up)
   const rings = [{ y: y0, inset: 0, nk: 1, ny: 0 }, { y: y1 - bevel, inset: 0, nk: 1, ny: 0 }]
@@ -154,32 +194,31 @@ function beveledPrismGeometry(contour, y0, y1, bevel, bevelSegments = 4) {
     })
   }
   const R = rings.length
-  const pos = new Float32Array((R * M + 2 + M) * 3)
-  const nrm = new Float32Array(pos.length)
-  let o = 0
   for (const ring of rings)
-    for (const p of contour) {
-      pos[o] = p.x - p.nx * ring.inset
-      pos[o + 1] = ring.y
-      pos[o + 2] = p.z - p.nz * ring.inset
-      nrm[o] = p.nx * ring.nk
-      nrm[o + 1] = ring.ny
-      nrm[o + 2] = p.nz * ring.nk
-      o += 3
+    for (const p of contour)
+      put(p.x - p.nx * ring.inset, ring.y, p.z - p.nz * ring.inset, p.nx * ring.nk, ring.ny, p.nz * ring.nk, 0)
+
+  // bottom cap ring + centre: same base positions but facing down (hard
+  // edge — it sits on the plinth, never seen rounded)
+  const botRing = R * M
+  for (const p of contour) put(p.x, y0, p.z, 0, -1, 0, 0)
+  const botCenter = put(0, y0, 0, 0, -1, 0, 0)
+
+  // top cap: rings shrinking from the round-over rim to the centre. The
+  // wave weight fades in over the outer 30% so the rim stays pinned to the
+  // (rigid) bevel while the middle of the plate is free to swell.
+  const rim = (R - 1) * M // ring already placed, weight 0
+  const capStart = pos.length / 3
+  for (let j = 1; j < capRings; j++) {
+    const t = j / capRings // 0 = rim … 1 = centre
+    const w = Math.min(1, t / 0.3)
+    for (let i = 0; i < M; i++) {
+      const rx = pos[(rim + i) * 3]
+      const rz = pos[(rim + i) * 3 + 2]
+      put(rx * (1 - t), y1, rz * (1 - t), 0, 1, 0, w * w * (3 - 2 * w))
     }
-  const topCenter = R * M
-  const botCenter = R * M + 1
-  pos.set([0, y1, 0], topCenter * 3)
-  nrm.set([0, 1, 0], topCenter * 3)
-  pos.set([0, y0, 0], botCenter * 3)
-  nrm.set([0, -1, 0], botCenter * 3)
-  // bottom cap needs its own ring: same positions as the wall base but
-  // facing down (hard edge — it sits on the plinth, never seen rounded)
-  const botRing = R * M + 2
-  for (let i = 0; i < M; i++) {
-    pos.set([contour[i].x, y0, contour[i].z], (botRing + i) * 3)
-    nrm.set([0, -1, 0], (botRing + i) * 3)
   }
+  const topCenter = put(0, y1, 0, 0, 1, 0, 1)
 
   const idx = []
   // walls + round-over: quad strips between consecutive rings
@@ -191,13 +230,23 @@ function beveledPrismGeometry(contour, y0, y1, bevel, bevelSegments = 4) {
   // bottom cap (fan, facing down)
   for (let i = 0; i < M; i++) idx.push(botCenter, botRing + i, botRing + ((i + 1) % M))
   const sideCount = idx.length
-  // top cap (fan over the round-over's rim, facing up) — the glass surface
-  const rim = (R - 1) * M
-  for (let i = 0; i < M; i++) idx.push(topCenter, rim + ((i + 1) % M), rim + i)
+  // top cap (concentric strips from the rim inward, then a small centre fan)
+  const capRing = (j) => (j === 0 ? rim : capStart + (j - 1) * M) // ring start index
+  for (let jr = 0; jr < capRings - 1; jr++) {
+    const A = capRing(jr) // outer
+    const B = capRing(jr + 1) // inner
+    for (let i = 0; i < M; i++) {
+      const j = (i + 1) % M
+      idx.push(A + i, B + i, B + j, A + i, B + j, A + j)
+    }
+  }
+  const last = capRing(capRings - 1)
+  for (let i = 0; i < M; i++) idx.push(topCenter, last + ((i + 1) % M), last + i)
 
   const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
-  geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3))
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
+  geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(nrm), 3))
+  geo.setAttribute('waveWeight', new THREE.BufferAttribute(new Float32Array(wgt), 1))
   geo.setIndex(idx)
   geo.addGroup(0, sideCount, 1) // walls + bevel + bottom → tinted side glass
   geo.addGroup(sideCount, idx.length - sideCount, 0) // top cap → transmission
@@ -365,23 +414,87 @@ export class Lake {
       // one flat quad per DEM cell, merged into a single sheet at the lake's
       // elevation — raised past the fine-detail grain so it stays underwater
       const y = (elevM - dem.meanM) * scale + 0.04 + (params.detail ?? 0) * 0.6
+
+      // shore fade for the lakeWaves swell: a small multi-source BFS from the
+      // border cells gives each cell its distance to the shore, and the wave
+      // weight eases 0 → 1 over the first three cells — the waterline stays
+      // pinned so the sheet never lifts off its own coast
+      const inLake = new Set(cells)
+      const depth = new Map()
+      let ring = []
+      const neighbours = (i) => {
+        const x = i % size
+        return [x > 0 ? i - 1 : -1, x < size - 1 ? i + 1 : -1, i - size, i + size]
+      }
+      for (const i of cells)
+        if (neighbours(i).some((n) => n < 0 || n >= size * size || !inLake.has(n))) {
+          depth.set(i, 0)
+          ring.push(i)
+        }
+      for (let d = 1; d <= 2 && ring.length; d++) {
+        const next = []
+        for (const i of ring)
+          for (const n of neighbours(i))
+            if (n >= 0 && n < size * size && inLake.has(n) && !depth.has(n)) {
+              depth.set(n, d)
+              next.push(n)
+            }
+        ring = next
+      }
+
+      // weights are authored at CELL CORNERS, not per cell: adjacent quads
+      // share their edge corners, so coincident vertices always carry the
+      // same weight and the displaced sheet stays crack-free (a per-cell
+      // constant weight stepped 0, 1/3, 2/3 … between neighbours and opened
+      // visible slits along every shore contour). A corner's weight is the
+      // MIN over its ≤4 incident cells — anything touching the shore stays
+      // pinned at 0, and the field is piecewise-linear in between.
+      const cellW = (gx, gy) => {
+        if (gx < 0 || gy < 0 || gx >= size || gy >= size) return 0
+        const idx = gy * size + gx
+        if (!inLake.has(idx)) return 0
+        return depth.has(idx) ? depth.get(idx) / 3 : 1
+      }
+      const cornerCache = new Map()
+      const cornerW = (gx, gy) => {
+        const key = gy * (size + 1) + gx
+        let w = cornerCache.get(key)
+        if (w === undefined) {
+          w = Math.min(cellW(gx - 1, gy - 1), cellW(gx, gy - 1), cellW(gx - 1, gy), cellW(gx, gy))
+          cornerCache.set(key, w)
+        }
+        return w
+      }
+
       const pos = new Float32Array(cells.length * 18)
+      const wgt = new Float32Array(cells.length * 6)
       let o = 0
+      let wo = 0
       for (const i of cells) {
-        const cx = ((i % size) / size - 0.5) * TERRAIN_SIZE
-        const cz = (((i / size) | 0) / size - 0.5) * TERRAIN_SIZE
+        const gx = i % size
+        const gz = (i / size) | 0
+        const cx = (gx / size - 0.5) * TERRAIN_SIZE
+        const cz = (gz / size - 0.5) * TERRAIN_SIZE
         const x0 = cx,
           x1 = cx + cell,
           z0 = cz,
           z1 = cz + cell
         pos.set([x0, y, z0, x0, y, z1, x1, y, z1, x0, y, z0, x1, y, z1, x1, y, z0], o)
         o += 18
+        // same corner order as the six vertices above
+        const w00 = cornerW(gx, gz)
+        const w01 = cornerW(gx, gz + 1)
+        const w11 = cornerW(gx + 1, gz + 1)
+        const w10 = cornerW(gx + 1, gz)
+        wgt.set([w00, w01, w11, w00, w11, w10], wo)
+        wo += 6
       }
       const geo = new THREE.BufferGeometry()
       geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
       const normals = new Float32Array(pos.length)
       for (let k = 1; k < normals.length; k += 3) normals[k] = 1
       geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+      geo.setAttribute('waveWeight', new THREE.BufferAttribute(wgt, 1))
       geo.computeBoundingSphere()
       const mesh = new THREE.Mesh(geo, this.lakeMat)
       mesh.renderOrder = 3
@@ -406,12 +519,17 @@ export class Lake {
     const over = t * t * (3 - 2 * t)
     const refl = this._reflection(params.lakeReflection ?? 'studio')
     for (const mat of [this.seaMat, this.lakeMat]) {
-      mat.color.set(params.lakeColor ?? '#8fc6e8')
-      mat.attenuationColor.set(params.lakeColor ?? '#8fc6e8')
+      glassTint(mat.color, params.lakeColor ?? '#8fc6e8')
+      attenuationTint(mat.attenuationColor, params.lakeColor ?? '#8fc6e8')
       mat.roughness = rough
       mat.attenuationDistance = params.lakeClarity ?? 30
       mat.ior = 1 + 0.15 * over
       mat.distortion = 0.3 * over
+      // gentle water undulation of the glass top: 0 = mirror-flat (default),
+      // 1 = ±0.06 world units of travelling swell. Pinned to zero at the
+      // slab rim and along every lake shore, so the bevel and coastlines
+      // never crack open. Animated by the lake.update(dt) clock.
+      mat.waveAmp = 0.06 * (params.lakeWaves ?? 0)
       mat.envMap = refl.map // null falls back to scene.environment
       mat.envMapIntensity = refl.intensity
     }
@@ -423,9 +541,10 @@ export class Lake {
 
   // OPTIONAL per-frame hook — the glass renders correctly WITHOUT it, since
   // the material reads three's built-in transmission buffer (refreshed by the
-  // renderer on its own; no private FBO pass). Wiring it up only animates the
-  // heavy-frost warp: above 60% blur the simplex distortion drifts slowly
-  // instead of being frozen. Integration, if ever wanted in main.js:
+  // renderer on its own; no private FBO pass). Wiring it up animates the two
+  // time-driven looks: the lakeWaves swell drifts across the glass, and above
+  // 60% blur the simplex frost warp swims slowly instead of being frozen.
+  // Integration, if ever wanted in main.js:
   //   lake.update(dt) // once per frame, before composer.render()
   update(dt = 0.016) {
     this._time = (this._time ?? 0) + dt

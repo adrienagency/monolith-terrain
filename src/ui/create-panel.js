@@ -171,6 +171,7 @@ export function buildCreatePanel(ctx) {
     color({ label: 'Water colour', get: () => params.lakeColor, set: (v) => { params.lakeColor = v; ctx.lake.updateMaterial(params) } }),
     slider({ label: 'Blur', min: 0, max: 1, step: 0.01, get: () => params.lakeRoughness, set: (v) => { params.lakeRoughness = v; ctx.lake.updateMaterial(params) } }),
     slider({ label: 'Clarity', min: 2, max: 100, step: 0.5, get: () => params.lakeClarity, set: (v) => { params.lakeClarity = v; ctx.lake.updateMaterial(params) } }),
+    slider({ label: 'Waves', min: 0, max: 1, step: 0.01, get: () => params.lakeWaves ?? 0, set: (v) => { params.lakeWaves = v; ctx.lake.updateMaterial(params) } }),
     select({ label: 'Reflections', options: [...REFLECTION_TYPES], get: () => params.lakeReflection, set: (v) => { params.lakeReflection = v; ctx.lake.updateMaterial(params) } })
   )
 

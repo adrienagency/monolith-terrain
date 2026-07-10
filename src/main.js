@@ -85,8 +85,8 @@ const params = {
   gain: 0.31,
   amplitude: 1,
   warp: 1.3,
-  detail: 0.03,
-  detailScale: 0.5,
+  detail: 0.02,
+  detailScale: 0.8,
   resolution: 1024,
 
   // surface material
@@ -232,6 +232,7 @@ const params = {
   lakeRoughness: 0.08, // 0 = mirror-polished water, higher = frosted (blur)
   lakeClarity: 30, // absorption distance: small = opaque depths, large = crystal clear
   lakeReflection: 'studio', // what the polished surface mirrors
+  lakeWaves: 0, // gentle animated swell on the glass top (0 = mirror flat)
   lakesAltitude: true, // glass sheets on flat DEM regions above sea level
 
   // light
@@ -749,7 +750,9 @@ let userFineZoom = Math.max(params.demZoom, 12)
 // stay subtle, entirely to your taste. Coarse blocks default high because their
 // relief is tiny next to the huge footprint.
 const BASE_EXAG = 2.2
-const ZOOM_EXAG_DEFAULTS = { 5: 26, 6: 13, 7: 6.6 }
+// user-tuned elevation baseline for the coarse (>100 km) views — z7 pinned at
+// 4.05 from the reference settings, z5/z6 scaled in the same proportion
+const ZOOM_EXAG_DEFAULTS = { 5: 16, 6: 8, 7: 4.05 }
 const ZOOM_EXAG_KEY = 'monolith.zoomExag'
 let zoomExagStore = (() => {
   try {
@@ -780,6 +783,7 @@ async function fetchAndBuildDem() {
   dem = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom })
   terrain.setDem(dem)
   params.source = 'real'
+  clouds?.reroll() // a new view level deserves a fresh cloud layout
   refreshAll()
   loadingEl.textContent = 'generating terrain…'
   await regenerateTerrain()
@@ -1547,7 +1551,7 @@ function tick() {
     })
   }
 
-  lake.update?.(dt) // animates the heavy-frost warp (only visible above 60% blur)
+  lake.update?.(dt) // drives the glass swell (lakeWaves) and heavy-frost warp
   composer.render(dt)
   if (recorder.recording) recorder.captureFrame()
 }
