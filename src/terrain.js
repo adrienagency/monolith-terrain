@@ -76,6 +76,9 @@ export class Terrain {
       uScanBlur: { value: params.scanBlur },
       uScanDispH: { value: params.scanDispHeight },
       uScanDispW: { value: params.scanDispFalloff },
+      uScanType: { value: 0 }, // 0 radar, 1 elevation, 2 gridline, 3 sonar, 4 holo
+      uScanOrigin: { value: new THREE.Vector2(0, 0) }, // scan epicenter, world XZ
+      uScanMax: { value: TERRAIN_SIZE * 0.75 }, // radius that guarantees full coverage
     }
     this.rebuildRamp(params)
     this.material.onBeforeCompile = (shader) => {
@@ -87,17 +90,24 @@ export class Terrain {
 varying vec3 vWorldPos;
 uniform float uScanT;
 uniform float uScanDispH;
-uniform float uScanDispW;`
+uniform float uScanDispW;
+uniform int uScanType;
+uniform vec2 uScanOrigin;
+uniform float uScanMax;`
         )
         .replace(
           '#include <begin_vertex>',
           `#include <begin_vertex>
-// scan wave physically lifts the surface as it sweeps outward
-if (uScanT >= 0.0) {
-  float dV = length(transformed.xz);
-  float RV = uScanT * 42.0;
+// scan wave physically lifts the surface as it sweeps outward from the scan
+// origin -- only the radial scans (radar, sonar) displace geometry
+if (uScanT >= 0.0 && (uScanType == 0 || uScanType == 3)) {
+  float dV = distance(transformed.xz, uScanOrigin);
+  // radar eases its radius (matches the fragment ring); sonar rings run linear
+  float tV = (uScanType == 0) ? (1.0 - pow(1.0 - uScanT, 3.0)) : uScanT;
+  float RV = tV * uScanMax;
   float bumpV = exp(-pow((dV - RV) / max(uScanDispW, 0.05), 2.0));
-  transformed.y += uScanDispH * bumpV * (1.0 - smoothstep(0.6, 1.0, uScanT));
+  float liftScaleV = (uScanType == 3) ? 0.4 : 1.0;
+  transformed.y += uScanDispH * liftScaleV * bumpV * (1.0 - smoothstep(0.6, 1.0, uScanT));
 }
 vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
         )
@@ -133,7 +143,20 @@ uniform float uCloudShadowK;
 uniform float uScanT;
 uniform vec3 uScanColor;
 uniform float uScanWidth;
-uniform float uScanBlur;`
+uniform float uScanBlur;
+uniform int uScanType;
+uniform vec2 uScanOrigin;
+uniform float uScanMax;
+
+// --- scan helpers (shared by every scan type) ---
+// antialiased ring/band mask: 1 at distance R, feathered over width w + blur
+float scanBand(float d, float R, float w, float blur) {
+  return 1.0 - smoothstep(0.0, max(blur, fwidth(d)), abs(d - R) - w * 0.5);
+}
+// cheap stateless hash for shimmer / flicker / blocky-reveal patterns
+float scanHash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}`
         )
         .replace(
           '#include <color_fragment>',
@@ -214,27 +237,86 @@ uniform float uScanBlur;`
   float grid = max(gx, gz) * uGridOpacity;
   diffuseColor.rgb = mix(diffuseColor.rgb, uGridColor, grid);
 
-  // --- radar scan wavefront paints the surface (additive-only washes out on white terrain)
+  // --- scan effects: 5 selectable sweep styles painted over the map
+  // (mix toward uScanColor -- additive-only washes out on white terrain)
   if (uScanT >= 0.0) {
-    float dScan = length(vWorldPos.xz);
-    float Rs = uScanT * 42.0;
-    float aaS = fwidth(dScan);
-    float edgeS = abs(dScan - Rs) - uScanWidth * 0.5;
-    float bandS = 1.0 - smoothstep(0.0, max(uScanBlur, aaS), edgeS);
-    float fadeS = 1.0 - smoothstep(0.6, 1.0, uScanT);
-    diffuseColor.rgb = mix(diffuseColor.rgb, uScanColor, clamp(bandS * fadeS, 0.0, 0.95));
+    if (uScanType == 0) {
+      // 0 RADAR: eased expanding ring + inner echo ring + filled trail
+      float tS = 1.0 - pow(1.0 - uScanT, 3.0);
+      float dS = distance(vWorldPos.xz, uScanOrigin);
+      float RS = tS * uScanMax;
+      float mainS = scanBand(dS, RS, uScanWidth, uScanBlur);
+      float echoS = scanBand(dS, RS * 0.82, uScanWidth * 0.6, uScanBlur) * 0.4;
+      float trailS = smoothstep(RS, RS - uScanMax * 0.25, dS) * 0.10;
+      float fadeS = 1.0 - smoothstep(0.6, 1.0, uScanT);
+      diffuseColor.rgb = mix(diffuseColor.rgb, uScanColor, clamp((mainS + echoS + trailS) * fadeS, 0.0, 0.95));
+    } else if (uScanType == 1) {
+      // 1 ELEVATION SLICE: a horizontal plane rises from sea level (or the
+      // terrain floor) to the summit, flashing contour lines in its wake
+      float y0S = (uSeaY > -9000.0) ? uSeaY : uHeightRange.x;
+      float planeYS = mix(y0S, uHeightRange.y, uScanT);
+      float sliceAA = uScanWidth * 0.35 + fwidth(vWorldPos.y);
+      float sliceS = 1.0 - smoothstep(0.0, sliceAA, abs(vWorldPos.y - planeYS));
+      // contour flash: re-light the contour lines within 1.5 intervals below the plane
+      float wakeSpanS = uContourInterval * 1.5;
+      float belowS = planeYS - vWorldPos.y; // > 0 under the plane
+      float wakeS = (belowS > 0.0) ? (1.0 - smoothstep(0.0, wakeSpanS, belowS)) : 0.0;
+      float flashS = max(minorLine * 0.55, majorLine) * wakeS * 0.8;
+      float fadeS = 1.0 - smoothstep(0.85, 1.0, uScanT);
+      diffuseColor.rgb = mix(diffuseColor.rgb, uScanColor, clamp((sliceS + flashS) * fadeS, 0.0, 0.95));
+    } else if (uScanType == 2) {
+      // 2 GRIDLINE SWEEP: a bright vertical line marches across the slab in X,
+      // shimmering per survey-grid row and re-lighting the grid behind it
+      float tS = uScanT < 0.5 ? 2.0 * uScanT * uScanT : 1.0 - pow(-2.0 * uScanT + 2.0, 2.0) * 0.5;
+      float lineXS = mix(-uSlabHalf, uSlabHalf, tS);
+      float shimmerS = scanHash(vec2(floor(vWorldPos.z / uGridStep), floor(uScanT * 24.0)));
+      float dxS = vWorldPos.x - lineXS;
+      float lineS = 1.0 - smoothstep(0.0, max(uScanBlur, fwidth(vWorldPos.x)), abs(dxS) - uScanWidth * 0.5);
+      lineS *= 0.7 + 0.6 * shimmerS;
+      // grid-highlight trail behind the moving line (line travels -X to +X)
+      float wakeS = (dxS < 0.0) ? (1.0 - smoothstep(0.0, uSlabHalf * 0.8, -dxS)) : 0.0;
+      float trailS = max(gx, gz) * wakeS * 0.35;
+      float fadeS = 1.0 - smoothstep(0.85, 1.0, uScanT);
+      diffuseColor.rgb = mix(diffuseColor.rgb, uScanColor, clamp((lineS + trailS) * fadeS, 0.0, 0.95));
+    } else if (uScanType == 3) {
+      // 3 SONAR: three staggered rings, each fainter and wider, distance-attenuated
+      float dS = distance(vWorldPos.xz, uScanOrigin);
+      float pingS = 0.0;
+      for (int i = 0; i < 3; i++) {
+        float fi = float(i);
+        float ti = uScanT - fi * 0.15;
+        if (ti > 0.0) {
+          float Ri = ti * uScanMax;
+          float attenS = pow(0.55, fi) / (1.0 + dS * 0.06);
+          pingS += scanBand(dS, Ri, uScanWidth * (1.0 + fi * 0.4), uScanBlur) * attenS;
+        }
+      }
+      float fadeS = 1.0 - smoothstep(0.7, 1.0, uScanT);
+      diffuseColor.rgb = mix(diffuseColor.rgb, uScanColor, clamp(pingS * fadeS, 0.0, 0.95));
+    } else if (uScanType == 4) {
+      // 4 HOLO: hologram materialisation -- scrolling scanlines, blocky reveal,
+      // vertical grille and a global luminance flicker, all under a sine envelope
+      float envS = sin(3.14159265359 * uScanT);
+      float stripeS = smoothstep(0.35, 0.5, fract(vWorldPos.y * 6.0 - uScanT * 14.0)) * 0.25;
+      float grilleS = smoothstep(0.4, 0.5, fract(vWorldPos.x * 4.0)) * 0.15;
+      float revealS = step(scanHash(floor(vWorldPos.xz * 3.0)), uScanT * 1.6);
+      float flickS = 1.0 + (scanHash(vec2(floor(uScanT * 40.0), 1.0)) - 0.5) * 0.18;
+      float holoS = (0.3 + stripeS + grilleS) * revealS * envS * flickS;
+      diffuseColor.rgb = mix(diffuseColor.rgb, uScanColor, clamp(holoS, 0.0, 0.6));
+    }
   }
 }`
         )
         .replace(
           '#include <emissivemap_fragment>',
           `#include <emissivemap_fragment>
-// radar scan ripple: an emissive wavefront expanding from the center across the relief
-if (uScanT >= 0.0) {
-  float d = length(vWorldPos.xz);
-  float R = uScanT * 42.0;
-  float edgeE = abs(d - R) - uScanWidth * 0.5;
-  float band = 1.0 - smoothstep(0.0, max(uScanBlur, fwidth(d)), edgeE);
+// scan ripple: an emissive wavefront expanding from the scan origin across the
+// relief -- only the radial scans (radar, sonar) glow
+if (uScanT >= 0.0 && (uScanType == 0 || uScanType == 3)) {
+  float d = distance(vWorldPos.xz, uScanOrigin);
+  float tE = (uScanType == 0) ? (1.0 - pow(1.0 - uScanT, 3.0)) : uScanT;
+  float R = tE * uScanMax;
+  float band = scanBand(d, R, uScanWidth, uScanBlur);
   float fade = 1.0 - smoothstep(0.6, 1.0, uScanT);
   totalEmissiveRadiance += uScanColor * band * fade * 0.5;
 }`

@@ -14,31 +14,6 @@ body {
   height: 100vh;
 }
 
-.overlay {
-  position: fixed;
-  left: 24px;
-  bottom: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  pointer-events: none;
-  font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
-  color: rgba(20, 20, 20, 0.82);
-  user-select: none;
-}
-
-.overlay .title {
-  font-size: 13px;
-  letter-spacing: 0.35em;
-  font-weight: 600;
-}
-
-.overlay .sub {
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  opacity: 0.6;
-}
-
 #loading {
   position: fixed;
   left: 50%;
@@ -97,9 +72,9 @@ body {
   letter-spacing: 0.14em;
   line-height: 1.75;
   text-transform: uppercase;
-  /* panels outside .hud (map overlay, landmarks, motion) don't inherit the HUD
-     ink — set it here so their text follows light/dark instead of defaulting to
-     black (which was invisible on the dark sheet) */
+  /* panels outside .hud don't inherit the HUD ink — set it here so their text
+     follows light/dark instead of defaulting to black (which was invisible on
+     the dark sheet) */
   color: var(--hud-ink);
   background: var(--hud-paper);
   border: 1px solid rgba(128, 128, 128, 0.3);
@@ -245,8 +220,6 @@ body {
   padding: 0 3px;
 }
 .hud-x:hover { opacity: 1; color: var(--hud-accent); }
-
-/* (lil-gui theming lives in the v6 unified-UI block below) */
 
 /* ---------------------------------------------------------------- modes / orbital */
 
@@ -405,137 +378,6 @@ body {
   cursor: crosshair;
 }
 
-/* ---------------------------------------------------------------- map overlay panel */
-
-.map-overlay-panel {
-  position: fixed;
-  left: 24px;
-  top: 148px;
-  width: 246px;
-  z-index: 28;
-  pointer-events: auto;
-  max-height: calc(100vh - 260px);
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-
-.map-overlay-panel .hud-kicker {
-  display: flex;
-  align-items: center;
-}
-
-.map-overlay-panel .mop-x {
-  all: unset;
-  cursor: pointer;
-  margin-left: auto;
-  font-size: 10px;
-  opacity: 0.55;
-  padding: 0 2px;
-}
-
-.map-overlay-panel .mop-x:hover {
-  opacity: 1;
-  color: var(--hud-accent);
-}
-
-.mop-btns {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  margin: 8px 0 2px;
-}
-
-.mop-btns button,
-.mop-list-head button {
-  all: unset;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 9.5px;
-  letter-spacing: 0.18em;
-  padding: 6px 9px;
-  border: 1px solid var(--hud-ink);
-  background: transparent;
-  transition: background 0.15s, color 0.15s;
-}
-
-.mop-btns button:hover,
-.mop-list-head button:hover {
-  background: var(--hud-accent);
-  border-color: var(--hud-accent);
-  color: #fff;
-}
-
-.mop-list-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 8px 0 6px;
-  font-size: 9px;
-  letter-spacing: 0.24em;
-}
-
-.mop-list-head .mop-list-title {
-  flex: 1;
-  opacity: 0.65;
-}
-
-.mop-list-head button {
-  padding: 2px 7px;
-}
-
-.mop-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.mop-pal {
-  all: unset;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 4px 6px;
-  border: 1px solid transparent;
-  transition: border-color 0.15s;
-}
-
-.mop-pal:hover,
-.mop-pal.active {
-  border-color: var(--hud-accent);
-}
-
-.mop-pal .chip {
-  width: 22px;
-  height: 13px;
-  border: 1px solid rgba(20, 22, 24, 0.25);
-  margin-right: -1px;
-}
-
-.mop-pal i {
-  font-style: normal;
-  font-size: 8.5px;
-  letter-spacing: 0.14em;
-  opacity: 0.6;
-  margin-left: 8px;
-  white-space: nowrap;
-}
-
-.mop-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 9.5px;
-  letter-spacing: 0.18em;
-  cursor: pointer;
-  margin-top: 8px;
-  user-select: none;
-}
-
-.mop-check input {
-  accent-color: var(--hud-accent);
-}
-
 /* peak markers: hud-poi family, but altitude always visible below the name */
 .peak-marker {
   position: fixed;
@@ -580,235 +422,7 @@ body {
   pointer-events: auto;
 }
 
-.mop-list {
-  max-height: 34vh;
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-
-/* ---------------------------------------------------------------- landmarks panel */
-
-.landmarks-panel {
-  position: fixed;
-  right: 320px;
-  top: 16px;
-  width: 250px;
-  z-index: 27;
-  pointer-events: auto;
-  max-height: calc(100vh - 60px);
-  display: flex;
-  flex-direction: column;
-}
-
-.landmarks-panel .hud-kicker {
-  display: flex;
-  align-items: center;
-}
-
-.landmarks-panel .mop-x {
-  all: unset;
-  cursor: pointer;
-  margin-left: auto;
-  font-size: 10px;
-  opacity: 0.55;
-  padding: 0 2px;
-}
-
-.landmarks-panel .mop-x:hover {
-  opacity: 1;
-  color: var(--hud-accent);
-}
-
-.lmk-list {
-  margin-top: 6px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.lmk-continent {
-  all: unset;
-  cursor: pointer;
-  font-family: inherit;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 10px;
-  letter-spacing: 0.22em;
-  font-weight: 600;
-  padding: 6px 8px;
-  border: 1px solid var(--hud-ink);
-  transition: background 0.15s, color 0.15s;
-}
-
-.lmk-continent:hover {
-  background: var(--hud-accent);
-  border-color: var(--hud-accent);
-  color: #fff;
-}
-
-.lmk-continent .lmk-arrow {
-  width: 10px;
-}
-
-.lmk-continent i {
-  font-style: normal;
-  margin-left: auto;
-  opacity: 0.55;
-  font-weight: 400;
-}
-
-.lmk-fold {
-  display: flex;
-  flex-direction: column;
-  padding: 2px 0 6px 6px;
-}
-
-.lmk-place {
-  all: unset;
-  cursor: pointer;
-  font-family: inherit;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
-  padding: 3px 6px;
-  border-left: 2px solid transparent;
-  transition: border-color 0.12s, color 0.12s;
-}
-
-.lmk-place:hover {
-  border-left-color: var(--hud-accent);
-  color: var(--hud-accent);
-}
-
-.lmk-place i {
-  font-style: normal;
-  margin-left: auto;
-  opacity: 0.5;
-  font-size: 8.5px;
-}
-
-/* ---------------------------------------------------------------- v5: motion panel, ui bar, collapse, mono, plinth */
-
-.motion-panel {
-  position: fixed;
-  left: 50%;
-  bottom: 16px;
-  transform: translateX(-50%);
-  width: 260px;
-  z-index: 28;
-  pointer-events: auto;
-}
-
-.motion-panel .hud-kicker {
-  display: flex;
-  align-items: center;
-}
-
-.mtn-body {
-  margin-top: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.mtn-row {
-  display: flex;
-  gap: 5px;
-}
-
-.mtn-row button,
-.mtn-tour select {
-  all: unset;
-  cursor: pointer;
-  font-family: inherit;
-  flex: 1;
-  text-align: center;
-  font-size: 9.5px;
-  letter-spacing: 0.14em;
-  padding: 6px 8px;
-  border: 1px solid var(--hud-ink);
-  transition: background 0.15s, color 0.15s;
-}
-
-.mtn-row button:hover,
-.mtn-row button.active {
-  background: var(--hud-accent);
-  border-color: var(--hud-accent);
-  color: #fff;
-}
-
-.mtn-tour {
-  display: flex;
-  gap: 6px;
-}
-
-.mtn-tour label {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-size: 8px;
-  letter-spacing: 0.2em;
-  opacity: 0.7;
-}
-
-.mtn-tour select {
-  cursor: pointer;
-  text-align: left;
-  padding: 4px 6px;
-  color: var(--hud-ink);
-  background: var(--hud-paper);
-}
-
-.mtn-slider {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 8.5px;
-  letter-spacing: 0.16em;
-  opacity: 0.85;
-}
-
-.mtn-slider input {
-  flex: 1;
-  accent-color: var(--hud-accent);
-}
-
-.mtn-slider b {
-  width: 34px;
-  text-align: right;
-  font-weight: 600;
-}
-
-.mop-mono {
-  display: flex;
-  gap: 5px;
-  margin: 6px 0 2px;
-}
-
-.mop-mono button {
-  all: unset;
-  cursor: pointer;
-  font-family: inherit;
-  flex: 1;
-  text-align: center;
-  font-size: 9px;
-  letter-spacing: 0.16em;
-  padding: 6px 4px;
-  border: 1px solid var(--hud-ink);
-  transition: background 0.15s, color 0.15s;
-}
-
-.mop-mono button:hover {
-  background: var(--hud-accent);
-  border-color: var(--hud-accent);
-  color: #fff;
-}
+/* ---------------------------------------------------------------- v5: collapse caret */
 
 .panel-caret {
   all: unset;
@@ -829,90 +443,10 @@ body {
   min-width: 150px;
 }
 
-.ui-bar {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  display: flex;
-  gap: 6px;
-  z-index: 60;
-  pointer-events: auto;
-}
-
-.ui-bar button {
-  all: unset;
-  cursor: pointer;
-  font-family: 'SF Mono', ui-monospace, monospace;
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  color: var(--hud-ink);
-  background: var(--hud-paper);
-  border: 1px solid var(--hud-ink);
-  padding: 7px 11px;
-  border-radius: 3px;
-  backdrop-filter: blur(var(--hud-blur));
-}
-
-.ui-bar button:hover,
-.ui-bar button.active {
-  background: var(--hud-accent);
-  border-color: var(--hud-accent);
-  color: #fff;
-}
-
-/* hide-all-UI toggle: everything but the fixed bar itself */
-body.ui-hidden .hud,
-body.ui-hidden .map-overlay-panel,
-body.ui-hidden .landmarks-panel,
-body.ui-hidden .motion-panel,
-body.ui-hidden .altimeter,
-body.ui-hidden .gpx-profile,
-body.ui-hidden .gpx-tip,
-body.ui-hidden .lil-gui {
-  display: none !important;
-}
-
-/* ---------------------------------------------------------------- v6: unified UI theme (lil-gui to match FUI) + dark legibility */
-
-/* the lil-gui sidebar wears the same paper/ink/accent as the FUI panels */
-.lil-gui {
-  --background-color: var(--hud-paper);
-  --text-color: var(--hud-ink);
-  --title-background-color: transparent;
-  --title-text-color: var(--hud-accent);
-  --widget-color: rgba(128, 128, 128, 0.16);
-  --hover-color: rgba(128, 128, 128, 0.26);
-  --focus-color: rgba(128, 128, 128, 0.34);
-  --number-color: var(--hud-accent);
-  --string-color: var(--hud-accent);
-  --font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
-  --font-size: 10px;
-  --widget-height: 22px;
-  --title-height: 26px;
-  backdrop-filter: blur(var(--hud-blur));
-  border: 1px solid var(--hud-ink);
-  border-radius: 3px;
-  letter-spacing: 0.04em;
-}
-
-.lil-gui .title {
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  border-bottom: 1px solid color-mix(in srgb, var(--hud-ink) 30%, transparent);
-}
-
-.lil-gui.root > .children > .lil-gui > .title {
-  border-left: 3px solid var(--hud-accent);
-}
+/* ---------------------------------------------------------------- v6: dark legibility */
 
 /* dark mode: lift every dim label so the menus stay readable (the exact
-   complaint — palette names and secondary text vanished on the dark sheet) */
-body.dark .mop-pal i,
-body.dark .lmk-place i,
-body.dark .lmk-continent i,
-body.dark .mtn-tour label,
-body.dark .mtn-slider,
+   complaint — secondary text vanished on the dark sheet) */
 body.dark .hud-dim,
 body.dark .hud-row span,
 body.dark .gpx-profile-head .gpx-stats {
@@ -920,35 +454,13 @@ body.dark .gpx-profile-head .gpx-stats {
   color: var(--hud-ink);
 }
 
-body.dark .mop-pal .chip,
-body.dark .lmk-place,
-body.dark .mop-btns button,
-body.dark .mop-mono button,
-body.dark .lmk-continent {
-  border-color: color-mix(in srgb, var(--hud-ink) 55%, transparent);
-}
+/* ---------------------------------------------------------------- v6: tidy initial layout */
 
-/* ---------------------------------------------------------------- v6: tidy initial layout — left / right columns, bar top-center */
-
-/* left column: SECTOR (top) then MAP OVERLAY under it, then MOTION low-left */
+/* left column: SECTOR top-left; TELEMETRY low-left */
 .hud-block.hud-tl { top: 16px; left: 16px; bottom: auto; }
-.map-overlay-panel { left: 16px; top: 150px; right: auto; max-height: 52vh; }
-.motion-panel { left: 16px; bottom: 16px; top: auto; right: auto; transform: none; }
-
-/* right column: lil-gui keeps its native top-right; LANDMARKS low-right,
-   TELEMETRY sits between the two bottom panels */
-.landmarks-panel { right: 16px; bottom: 16px; top: auto; max-height: 55vh; }
 .hud-block.hud-brt { right: 300px; left: auto; bottom: 16px; }
 
-/* the fixed control bar and the altimeter live top-center */
-.ui-bar {
-  top: 14px;
-  bottom: auto;
-  left: 50%;
-  right: auto;
-  transform: translateX(-50%);
-}
-
+/* the altimeter lives top-center */
 .altimeter {
   top: 58px;
   bottom: auto;
@@ -961,8 +473,6 @@ body.dark .lmk-continent {
 
 :root { --panel-w: 250px; }
 
-.map-overlay-panel,
-.landmarks-panel,
 .hud-block.hud-tl,
 .hud-block.hud-brt {
   width: var(--panel-w);
@@ -973,37 +483,4 @@ body.dark .lmk-continent {
 .hud-block.collapsed {
   width: var(--panel-w);
   min-width: 0;
-}
-
-/* ---------------------------------------------------------------- v8: template buttons */
-
-.map-overlay-panel > .mop-list-title {
-  font-size: 9px;
-  letter-spacing: 0.24em;
-  opacity: 0.65;
-  margin: 8px 0 6px;
-}
-
-.mop-templates {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.mop-tpl {
-  all: unset;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 9.5px;
-  letter-spacing: 0.18em;
-  padding: 7px 10px;
-  border: 1px solid var(--hud-ink);
-  transition: background 0.15s, color 0.15s;
-}
-
-.mop-tpl:hover,
-.mop-tpl.active {
-  background: var(--hud-accent);
-  border-color: var(--hud-accent);
-  color: #fff;
 }

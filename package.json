@@ -10,7 +10,7 @@
     "test": "node --test test/geo.test.js test/gpx.test.js test/palette.test.js test/modes.test.js test/landmarks.test.js test/drag.test.js test/plinth.test.js test/camera-poses.test.js test/autofocus.test.js test/templates.test.js test/accordion.test.js test/ground-info.test.js test/lake.test.js"
   },
   "dependencies": {
-    "lil-gui": "^0.20.0",
+    "mediabunny": "^1.50.8",
     "postprocessing": "^6.36.4",
     "three": "^0.172.0"
   },

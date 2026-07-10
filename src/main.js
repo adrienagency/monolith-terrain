@@ -1,7 +1,6 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
-import GUI from 'lil-gui'
 import {
   EffectComposer,
   RenderPass,
@@ -32,17 +31,20 @@ import { TERRAIN_SIZE } from './terrain.js'
 import { monochromeLook } from './palette.js'
 import { peakVantage } from './camera-poses.js'
 import { focusRayHit } from './autofocus.js'
-import { openExclusive } from './accordion.js'
 import { GroundInfoLayer } from './ground-info-layer.js'
-import { createOverlayPanel } from './overlay-panel.js'
 import { PeaksLayer } from './peaks.js'
 import { Clouds } from './clouds.js'
 import { Traffic } from './traffic.js'
-import { Lake, REFLECTION_TYPES } from './lake.js'
+import { Lake } from './lake.js'
 import { Plinth } from './plinth.js'
-import { makeDraggable, makeCollapsible, collapseAll, setUiHidden, reclampDraggables } from './drag.js'
-import { createLandmarksPanel } from './landmarks-panel.js'
-import { createMotionPanel } from './motion-panel.js'
+import { makeDraggable, reclampDraggables } from './drag.js'
+import { ScanController } from './scan.js'
+import { refreshAll } from './ui/kit.js'
+import { buildTopBar, buildBottomBar } from './ui/bars.js'
+import { buildCreatePanel } from './ui/create-panel.js'
+import { buildExplorePanel } from './ui/explore-panel.js'
+import { openExportModal } from './ui/export-modal.js'
+import './ui/v28.css'
 
 // ------------------------------------------------------------------ params
 
@@ -123,8 +125,8 @@ const params = {
   gridOpacity: 0.4,
   labels: true,
 
-  // HUD
-  hud: true,
+  // HUD (legacy FUI blocks — off by default in the v28 UI)
+  hud: false,
   hudOpacity: 1,
   uiBlur: 9,
   uiBgOpacity: 0.4,
@@ -393,7 +395,7 @@ const tween = {
 }
 let selectedPoi = -1
 let fps = 60
-let scanStart = -1
+let scan = null // ScanController — instantiated once the terrain exists
 
 const poiFeet = (h) => terrain.heightToFeet(h)
 // night-survey ink set — the single source for every dark-mode surface
@@ -609,7 +611,7 @@ const hud2 = createHud2D({
     returnPose.saved = false
   },
   onScan() {
-    scanStart = performance.now() / 1000
+    scan?.trigger(0, { x: controls.target.x, z: controls.target.z }, params.scanDuration)
     cone.kick(3)
   },
 })
@@ -749,11 +751,10 @@ function saveZoomExag(z, v) {
     localStorage.setItem(ZOOM_EXAG_KEY, JSON.stringify(zoomExagStore))
   } catch {}
 }
-let exagCtrl = null
-// pull the current zoom's exaggeration into params + refresh the slider label
+// pull the current zoom's exaggeration into params + refresh the UI controls
 function syncExagToZoom() {
   params.demExaggeration = exagForZoom(params.demZoom)
-  if (exagCtrl) exagCtrl.updateDisplay().name(`vertical scale · z${params.demZoom}`)
+  refreshAll()
 }
 
 // fetch tiles + rebuild; throws on failure so programmatic callers (orbital
@@ -765,7 +766,7 @@ async function fetchAndBuildDem() {
   dem = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom })
   terrain.setDem(dem)
   params.source = 'real'
-  gui.controllersRecursive().forEach((c) => c.updateDisplay())
+  refreshAll()
   loadingEl.textContent = 'generating terrain…'
   await regenerateTerrain()
   // pull the cartouche info for the new zone (async, non-blocking)
@@ -990,7 +991,7 @@ function applyPalette(p) {
     terrain.mapUniforms.uContourColor.value.set(p.ink)
     globe.setInk(p.ink)
   }
-  gui.controllersRecursive().forEach((c) => c.updateDisplay())
+  refreshAll()
 }
 
 function applyStyle(s) {
@@ -999,7 +1000,7 @@ function applyStyle(s) {
   terrain.mapUniforms.uHeightContrast.value = s.heightContrast
   terrain.mapUniforms.uHeightPivot.value = s.heightPivot
   terrain.mapUniforms.uSlopeTint.value = s.slopeTint
-  gui.controllersRecursive().forEach((c) => c.updateDisplay())
+  refreshAll()
 }
 
 function applyGridContour(g) {
@@ -1012,7 +1013,7 @@ function applyGridContour(g) {
   if (g.gridColor) terrain.mapUniforms.uGridColor.value.set(g.gridColor)
   if (g.contourWeight != null && !params.darkMode) terrain.mapUniforms.uContourWeight.value = g.contourWeight
   globe.setInk(g.contourColor)
-  gui.controllersRecursive().forEach((c) => c.updateDisplay())
+  refreshAll()
 }
 
 // night survey: dark sheet, light ink, palettes flip to blacks/browns with
@@ -1112,7 +1113,7 @@ function applyTemplate(t) {
   if (t.look) applyLook(t.look)
   // elevation is NOT part of a look — the per-zoom exaggeration model owns it,
   // so switching templates never changes the relief (or recolours it via slope)
-  gui.controllersRecursive().forEach((c) => c.updateDisplay())
+  refreshAll()
 }
 
 // RESET LOOK restores the whole shipped scene — palette + style + grid AND the
@@ -1141,26 +1142,6 @@ function resetLook() {
   // elevation is per-zoom (persisted), not part of the look — left untouched
 }
 
-const landmarksPanel = createLandmarksPanel({
-  flyTo: (lat, lon, zoom) => modes.flyTo(lat, lon, zoom),
-  announce: (m) => modes.announce(m),
-})
-
-const overlayPanel = createOverlayPanel({
-  apply: {
-    palette: applyPalette,
-    style: applyStyle,
-    gridContour: applyGridContour,
-    peaks: (v) => peaksLayer.setEnabled(v),
-    reset: resetLook,
-    darkMode: setDarkMode,
-    monochrome: applyMonochrome,
-    template: applyTemplate,
-  },
-  announce: (m) => modes.announce(m),
-  getMode: () => (params.darkMode ? 'dark' : 'light'),
-})
-
 // ------------------------------------------------------------------ GPX layer
 
 const gpxLayer = new GpxLayer({ scene, camera, terrain, params, getDem: () => dem })
@@ -1174,7 +1155,7 @@ async function loadGpxText(text) {
     params.demLon = f.lon
     params.demZoom = f.zoom
     params.demLocation = 'Custom'
-    gui.controllersRecursive().forEach((c) => c.updateDisplay())
+    refreshAll()
     modes.announce(`TRACK LOADED — ${name.toUpperCase().slice(0, 24)}`)
     // the post-rebuild hook drapes the line once the new terrain exists;
     // pin the framed zoom or the dive would land on the fine (≥12) scale
@@ -1186,56 +1167,9 @@ async function loadGpxText(text) {
   }
 }
 
-// MOTION panel — playback + cinematic tour, pulled out of the sidebar into
-// its own bottom-anchored UI
-const motionPanel = createMotionPanel({
-  params,
-  poiIds: POI_IDS,
-  onPause: () => pausedCtrl?.updateDisplay(), // keep the sidebar checkbox in step
-  onTour: startTour,
-  onStop: () => {
-    tour.active = false
-    camera.up.set(0, 1, 0)
-  },
-  announce: (m) => modes.announce(m),
-})
-
-// every FUI panel can be repositioned by grabbing it (its head bar when it
-// has one) and folded down to its title; sector/telemetry/altimeter/GPX
-// profile/map overlay/landmarks/motion
+// the altimeter chip and the GPX profile strip stay repositionable
 makeDraggable(modes.altEl)
 makeDraggable(gpxLayer.profileEl, gpxLayer.profileEl.querySelector('.gpx-profile-head'))
-makeDraggable(hud2.root.querySelector('.hud-block.hud-tl'))
-makeDraggable(hud2.root.querySelector('.hud-block.hud-brt'))
-// all the panels share one accordion group: opening one folds the others so
-// the screen never fills up with everything expanded at once
-const ACC = 'panels'
-makeCollapsible(overlayPanel.root, overlayPanel.root.querySelector('.mop-drag'), '.mop-btns, .mop-list-title, .mop-templates, .mop-mono, .mop-list-head, .mop-list, .mop-check, .hud-rule', ACC)
-makeCollapsible(landmarksPanel.root, landmarksPanel.root.querySelector('.lmk-drag'), '.lmk-list', ACC)
-makeCollapsible(hud2.root.querySelector('.hud-block.hud-tl'), hud2.root.querySelector('.hud-block.hud-tl .hud-kicker'), '.hud-dim, .hud-rule, .hud-strong', ACC)
-makeCollapsible(hud2.root.querySelector('.hud-block.hud-brt'), hud2.root.querySelector('.hud-block.hud-brt .hud-kicker'), '.hud-row', ACC)
-
-// fixed control bar: hide-all-UI toggle + collapse-all, always reachable
-const uiBar = document.createElement('div')
-uiBar.className = 'ui-bar'
-uiBar.innerHTML = '<button data-a="hide" title="show / hide interface">◱ UI</button><button data-a="fold" title="collapse / expand all panels">▤</button>'
-document.body.appendChild(uiBar)
-let uiHidden = false
-// every panel starts folded to its title bar — a clean, quiet first screen
-// (the lil-gui sidebar is collapsed right after it's built, further down)
-let allFolded = true
-collapseAll(true)
-uiBar.querySelector('[data-a="fold"]').classList.toggle('active', allFolded)
-uiBar.querySelector('[data-a="hide"]').addEventListener('click', () => {
-  uiHidden = !uiHidden
-  setUiHidden(uiHidden)
-  uiBar.querySelector('[data-a="hide"]').classList.toggle('active', uiHidden)
-})
-uiBar.querySelector('[data-a="fold"]').addEventListener('click', () => {
-  allFolded = !allFolded
-  collapseAll(allFolded)
-  uiBar.querySelector('[data-a="fold"]').classList.toggle('active', allFolded)
-})
 
 // drag & drop a .gpx anywhere on the page
 window.addEventListener('dragover', (e) => e.preventDefault())
@@ -1274,462 +1208,161 @@ function flyTrack() {
 
 // ------------------------------------------------------------------ GUI
 
-const gui = new GUI({ title: 'EXPERIMENT / 001' })
+scan = new ScanController(terrain.mapUniforms, TERRAIN_SIZE / 2)
 
-const copyCtrl = gui
-  .add(
-    {
-      async copy() {
-        const json = JSON.stringify(params, null, 2)
-        try {
-          await navigator.clipboard.writeText(json)
-        } catch {
-          const ta = document.createElement('textarea')
-          ta.value = json
-          document.body.appendChild(ta)
-          ta.select()
-          document.execCommand('copy')
-          ta.remove()
-        }
-        copyCtrl.name('copied ✓')
-        setTimeout(() => copyCtrl.name('copy parameters'), 1200)
-      },
-    },
-    'copy'
-  )
-  .name('copy parameters')
-
-const fSource = gui.addFolder('Terrain source')
-fSource
-  .add(params, 'source', { 'procedural noise': 'noise', 'real world (DEM)': 'real' })
-  .name('source')
-  .onChange((v) => {
-    if (v === 'real') loadRealTerrain()
-    else regenerateTerrain()
-  })
-const latCtrl = { lat: null, lon: null }
-fSource
-  .add(params, 'demLocation', Object.keys(DEM_PRESETS))
-  .name('location')
-  .onChange((name) => {
-    const p = DEM_PRESETS[name]
-    if (!p) return // Custom: use the lat/lon fields below
-    params.demLat = p[0]
-    params.demLon = p[1]
-    latCtrl.lat.updateDisplay()
-    latCtrl.lon.updateDisplay()
-    if (params.source === 'real') loadRealTerrain()
-  })
-latCtrl.lat = fSource.add(params, 'demLat', -85, 85, 0.0001).name('latitude')
-latCtrl.lon = fSource.add(params, 'demLon', -180, 180, 0.0001).name('longitude')
-fSource
-  .add(params, 'demZoom', [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
-  .name('detail (zoom)')
-  .onChange((v) => {
-    if (v >= 12) userFineZoom = v // remember the user's chosen fine scale
-    if (params.source === 'real') loadRealTerrain()
-  })
-// per-zoom vertical exaggeration — finer step, wide range (coarse blocks need
-// big values), and every edit is SAVED for the current zoom
-exagCtrl = fSource
-  .add(params, 'demExaggeration', 0.5, 40, 0.05)
-  .name(`vertical scale · z${params.demZoom}`)
-  .onFinishChange((v) => {
-    saveZoomExag(params.demZoom, v)
-    if (params.source === 'real') regenerateTerrain()
-  })
-// forget this zoom's saved exaggeration → back to the built-in default
-fSource
-  .add(
-    {
-      reset: () => {
-        delete zoomExagStore[params.demZoom]
-        try {
-          localStorage.setItem(ZOOM_EXAG_KEY, JSON.stringify(zoomExagStore))
-        } catch {}
-        syncExagToZoom() // falls back to the built-in default for this zoom
-        if (params.source === 'real') regenerateTerrain()
-      },
-    },
-    'reset'
-  )
-  .name('↺ reset exaggeration (this zoom)')
-fSource.add({ load: () => loadRealTerrain() }, 'load').name('load location ⤓')
-
-// go-to travel: paste coordinates or search a name, fly over the globe, dive
-const gotoState = { coords: '', place: '' }
-fSource.add(gotoState, 'coords').name('go to “lat, lon”')
-fSource.add({ go: () => gotoCtl.go(gotoState.coords) }, 'go').name('→ fly to coordinates')
-fSource.add(gotoState, 'place').name('search place')
-fSource.add({ s: () => gotoCtl.search(gotoState.place) }, 's').name('→ search & fly')
-fSource.add({ orbit: () => modes.enterOrbit() }, 'orbit').name('🌍 view planet')
-fSource.add({ lmk: () => landmarksPanel.setVisible(true) }, 'lmk').name('open LANDMARKS ⧉')
-
-const fGlobe = gui.addFolder('Globe')
-fGlobe
-  .add(params, 'globeExaggeration', 0, 60, 1)
-  .name('relief exaggeration')
-  .onFinishChange((v) => globe.setExaggeration(v))
-fGlobe
-  .add(params, 'globeContourInterval', 100, 2000, 50)
-  .name('contour interval (m)')
-  .onChange((v) => (globe.uniforms.uContourInterval.value = v))
-fGlobe
-  .add(params, 'globeContourOpacity', 0, 1, 0.02)
-  .name('contour opacity')
-  .onChange((v) => (globe.uniforms.uContourOpacity.value = v))
-fGlobe
-  .add(params, 'globeGraticule', 0, 0.5, 0.01)
-  .name('graticule')
-  .onChange((v) => (globe.uniforms.uGraticuleOpacity.value = v))
-
-const fGpx = gui.addFolder('GPX track')
-fGpx.add({ imp: () => gpxFileInput.click() }, 'imp').name('import .gpx ⤒ (or drag & drop)')
-fGpx.add(params, 'gpxVisible').name('show track').onChange((v) => gpxLayer.setVisible(v && modes.mode === 'surface'))
-fGpx.add(params, 'gpxAltitude', 0.8, 8, 0.1).name('fly altitude')
-fGpx.add({ fly: () => flyTrack() }, 'fly').name('▶ fly the track')
-fGpx.add({ clr: () => gpxLayer.clear() }, 'clr').name('✕ clear track')
-
-const fClouds = gui.addFolder('Clouds')
-fClouds.add(params, 'cloudsEnabled').name('volumetric clouds').onChange(() => clouds.build(params))
-// density/brightness/drift are live uniforms; scale/gaps/billow/altitude also
-// rebake the ground-shadow map, so they rebuild on release
-fClouds.add(params, 'cloudOpacity', 0.05, 1.5, 0.05).name('density')
-fClouds.add(params, 'cloudScale', 0.5, 5, 0.1).name('cloud scale').onFinishChange(() => clouds.build(params))
-fClouds.add(params, 'cloudCoverage', 0, 0.8, 0.01).name('gaps (0 = sheet)').onFinishChange(() => clouds.build(params))
-fClouds.add(params, 'cloudBillow', 0, 1, 0.05).name('vertical billow').onFinishChange(() => clouds.build(params))
-fClouds.add(params, 'cloudBrightness', 0.5, 5, 0.1).name('brightness')
-fClouds.add(params, 'cloudContrast', 0.4, 2.5, 0.05).name('contrast')
-fClouds.add(params, 'cloudSSS', 0, 2, 0.05).name('translucency')
-fClouds.add(params, 'cloudAltitude', 0, 16, 0.5).name('altitude (0 = ground)').onFinishChange(() => clouds.build(params))
-fClouds.add(params, 'cloudAltSpread', 0, 1, 0.05).name('altitude spread').onFinishChange(() => clouds.build(params))
-fClouds.add(params, 'cloudDrift', 0, 4, 0.1).name('drift speed')
-fClouds.add(params, 'cloudDriftVar', 0, 1, 0.05).name('drift variation')
-fClouds.close()
-
-const fTerrain = gui.addFolder('Terrain')
-fTerrain.add(params, 'seed', 1, 9999, 1).onFinishChange(regenerateTerrain)
-fTerrain
-  .add(
-    {
-      randomize() {
-        params.seed = Math.floor(Math.random() * 9999) + 1
-        gui.controllersRecursive().forEach((c) => c.updateDisplay())
-        regenerateTerrain()
-      },
-    },
-    'randomize'
-  )
-  .name('randomize seed')
-fTerrain.add(params, 'scale', 0.04, 0.4, 0.005).onFinishChange(regenerateTerrain)
-fTerrain.add(params, 'octaves', 2, 8, 1).onFinishChange(regenerateTerrain)
-fTerrain.add(params, 'lacunarity', 1.6, 3.2, 0.05).onFinishChange(regenerateTerrain)
-fTerrain.add(params, 'gain', 0.3, 0.7, 0.01).onFinishChange(regenerateTerrain)
-fTerrain.add(params, 'amplitude', 0.5, 7, 0.1).onFinishChange(regenerateTerrain)
-fTerrain.add(params, 'warp', 0, 6, 0.1).name('domain warp').onFinishChange(regenerateTerrain)
-fTerrain.add(params, 'detail', 0, 0.8, 0.01).name('fine detail').onFinishChange(regenerateTerrain)
-fTerrain.add(params, 'detailScale', 0.5, 6, 0.1).onFinishChange(regenerateTerrain)
-fTerrain.add(params, 'resolution', [256, 384, 512, 768, 1024]).onFinishChange(regenerateTerrain)
-
-const fSurface = gui.addFolder('Surface material')
-fSurface.addColor(params, 'color').onChange(() => terrain.updateMaterial(params))
-fSurface.add(params, 'roughness', 0, 1, 0.01).onFinishChange(() => terrain.rebuildRoughness(params))
-fSurface
-  .add(params, 'roughnessVariation', 0, 0.6, 0.01)
-  .name('roughness noise')
-  .onFinishChange(() => terrain.rebuildRoughness(params))
-fSurface
-  .add(params, 'roughnessScale', 1, 16, 0.5)
-  .name('roughness scale')
-  .onFinishChange(() => terrain.rebuildRoughness(params))
-fSurface.add(params, 'bumpScale', 0, 2, 0.05).name('micro bump').onChange(() => terrain.updateMaterial(params))
-fSurface.add(params, 'envMapIntensity', 0, 1.5, 0.05).name('env reflection').onChange(() => terrain.updateMaterial(params))
-fSurface
-  .add(params, 'transmission', 0, 1, 0.02)
-  .name('transmission (glass)')
-  .onChange(() => terrain.updateMaterial(params))
-
-const fCamera = gui.addFolder('Camera & focus')
-fCamera.add(params, 'fov', 20, 60, 1).onChange((v) => {
-  camera.fov = v
-  camera.updateProjectionMatrix()
-})
-fCamera.add(params, 'autoFocus').name('autofocus (pointer)')
-fCamera.add(params, 'focusDistance', 5, 60, 0.1).name('focus distance').listen()
-fCamera.add(params, 'focusRange', 0.5, 60, 0.1).name('focus range').onChange((v) => {
-  dof.cocMaterial.worldFocusRange = v
-})
-fCamera.add(params, 'bokehScale', 0, 8, 0.1).name('bokeh scale').onChange((v) => {
-  dof.bokehScale = v
-  dofPass.enabled = v > 0
-})
-
-const fMap = gui.addFolder('Map overlay')
-fMap.add(params, 'mapTint', 0, 1, 0.02).name('hypsometric tint').onChange((v) => (terrain.mapUniforms.uTint.value = v))
-fMap
-  .add(params, 'heightContrast', 0.5, 20, 0.1)
-  .name('height contrast')
-  .onChange((v) => (terrain.mapUniforms.uHeightContrast.value = v))
-fMap
-  .add(params, 'heightPivot', 0, 1, 0.01)
-  .name('height pivot')
-  .onChange((v) => (terrain.mapUniforms.uHeightPivot.value = v))
-const rebuildRamp = () => {
-  terrain.rebuildRamp(params)
-  globe.rebuildRamp(params) // the planet shares the map's land gradient
-}
-// eight hypsometric tint stops, low → high (the elevation ramp)
-const fRamp = fMap.addFolder('elevation ramp (8 tints)')
-params.rampStops.forEach((stop, i) => {
-  fRamp
-    .addColor(stop, 'c')
-    .name(`tint ${i + 1}${i === 0 ? ' (low)' : i === params.rampStops.length - 1 ? ' (high)' : ''}`)
-    .onChange(rebuildRamp)
-})
-fRamp.close()
-fMap
-  .add(params, 'slopeTint', 0, 1, 0.02)
-  .name('slope brown')
-  .onChange((v) => (terrain.mapUniforms.uSlopeTint.value = v))
-fMap
-  .add(params, 'contourInterval', 0.04, 0.6, 0.01)
-  .name('contour interval')
-  .onChange((v) => (terrain.mapUniforms.uContourInterval.value = v))
-fMap
-  .add(params, 'contourOpacity', 0, 1, 0.02)
-  .name('contour opacity')
-  .onChange((v) => (terrain.mapUniforms.uContourOpacity.value = v))
-fMap
-  .add(params, 'contourWeight', 0.3, 1.6, 0.05)
-  .name('contour weight')
-  .onChange((v) => {
-    // dark mode thins further; in light mode this is the live value
-    if (!params.darkMode) terrain.mapUniforms.uContourWeight.value = v
-  })
-fMap
-  .addColor(params, 'contourColor')
-  .name('contour color')
-  .onChange((v) => {
-    terrain.mapUniforms.uContourColor.value.set(v)
-    globe.setInk(v)
-  })
-fMap.add(params, 'gridStep', 2, 14, 0.5).name('grid size').onChange((v) => (terrain.mapUniforms.uGridStep.value = v))
-fMap.add(params, 'gridOpacity', 0, 1, 0.02).name('grid opacity').onChange((v) => (terrain.mapUniforms.uGridOpacity.value = v))
-fMap
-  .addColor(params, 'oceanShallow')
-  .name('ocean: shallow')
-  .onChange((v) => {
-    terrain.mapUniforms.uOceanShallow.value.set(v)
-    globe.rebuildRamp(params)
-  })
-fMap
-  .addColor(params, 'oceanMid')
-  .name('ocean: mid')
-  .onChange((v) => {
-    terrain.mapUniforms.uOceanMid.value.set(v)
-    globe.rebuildRamp(params)
-  })
-fMap
-  .addColor(params, 'oceanDeep')
-  .name('ocean: deep')
-  .onChange((v) => {
-    terrain.mapUniforms.uOceanDeep.value.set(v)
-    globe.rebuildRamp(params)
-  })
-fMap
-  .addColor(params, 'gridColor')
-  .name('grid color')
-  .onChange((v) => terrain.mapUniforms.uGridColor.value.set(v))
-fMap.add({ open: () => overlayPanel.setVisible(true) }, 'open').name('open MAP OVERLAY panel ⧉')
-fMap.add(params, 'labels').name('place labels').onChange((v) => (labels.visible = v && modes.mode === 'surface'))
-
-const fLake = gui.addFolder('Water glass')
 const lakeRebuild = () =>
   lake.rebuild({ seaY: terrain.mapUniforms.uSeaY.value, baseY: plinth.baseY, dem: terrain.dem, params })
-fLake.add(params, 'lakeEnabled').name('glass sea').onChange(lakeRebuild)
-fLake.add(params, 'lakesAltitude').name('altitude lakes').onChange(lakeRebuild)
-fLake.addColor(params, 'lakeColor').name('water colour').onChange(() => lake.updateMaterial(params))
-fLake.add(params, 'lakeRoughness', 0, 1, 0.01).name('blur (0 = clear)').onChange(() => lake.updateMaterial(params))
-fLake.add(params, 'lakeClarity', 2, 100, 0.5).name('clarity (depth tint)').onChange(() => lake.updateMaterial(params))
-fLake.add(params, 'lakeReflection', REFLECTION_TYPES).name('reflections').onChange(() => lake.updateMaterial(params))
-fLake.close()
 
-const fSlab = gui.addFolder('Slab')
-fSlab.add(params, 'plinth').name('show slab').onChange((v) => plinth.setVisible(v && modes.mode === 'surface'))
-fSlab
-  .add(params, 'plinthDepth', 2, 16, 0.5)
-  .name('thickness')
-  .onFinishChange(() => plinth.rebuild(terrain, params))
-fSlab.addColor(params, 'plinthColor').name('edge color').onChange(() => plinth.setColors(params))
-fSlab
-  .add(params, 'groundInfo')
-  .name('ground cartouche')
-  .onChange((v) => {
+// export renders offline: the RAF chain pauses and the scene advances at a
+// fixed timestep so the video is deterministic whatever the encode speed
+let loopPaused = false
+function stepScene(t, dt) {
+  if (tour.active || tween.active) updateCameraMotion(dt)
+  if (!params.paused) {
+    clouds.update(dt, params, camera)
+    traffic.update(dt)
+  }
+  camera.updateMatrixWorld()
+}
+
+const topBar = buildTopBar({
+  params,
+  setDarkMode: (v) => {
+    setDarkMode(v)
+    refreshAll()
+  },
+  enterOrbit: () => modes.enterOrbit(),
+  openExport: () =>
+    openExportModal({
+      renderer,
+      composer,
+      camera,
+      pauseLoop: () => {
+        loopPaused = true
+        // kill the already-scheduled frame too, or a synchronous export
+        // failure would leave two rAF chains running after resume
+        cancelAnimationFrame(rafId)
+        clearTimeout(tickTimer)
+      },
+      resumeLoop: () => {
+        loopPaused = false
+        clock.getDelta() // swallow the paused span so dt doesn't jump
+        tick()
+      },
+      step: stepScene,
+    }),
+})
+
+buildBottomBar({
+  goto: gotoCtl,
+  openGpx: () => gpxFileInput.click(),
+})
+
+const createPanel = buildCreatePanel({
+  params,
+  terrain,
+  globe,
+  clouds,
+  lake,
+  plinth,
+  modes,
+  camera,
+  controls,
+  renderer,
+  composer,
+  dof,
+  dofPass,
+  exposureFx,
+  contrastFx,
+  hueSat,
+  vignette,
+  grain,
+  fogRef,
+  scene,
+  sun,
+  placeSun,
+  applyShadowMode,
+  regenerateTerrain,
+  loadRealTerrain,
+  applyTemplate,
+  applyPalette,
+  applyStyle,
+  applyGridContour,
+  applyMonochrome,
+  resetLook,
+  setDarkMode,
+  lakeRebuild,
+  rebuildRamp: () => {
+    terrain.rebuildRamp(params)
+    globe.rebuildRamp(params)
+  },
+  peaksLayer,
+  setLabelsVisible: (v) => (labels.visible = v && modes.mode === 'surface'),
+  saveZoomExag,
+  resetZoomExag: () => {
+    delete zoomExagStore[params.demZoom]
+    try {
+      localStorage.setItem(ZOOM_EXAG_KEY, JSON.stringify(zoomExagStore))
+    } catch {}
+    syncExagToZoom()
+    if (params.source === 'real') regenerateTerrain()
+  },
+  onZoomPicked: (v) => {
+    if (v >= 12) userFineZoom = v // remember the user's chosen fine scale
+    if (params.source === 'real') loadRealTerrain()
+  },
+  setGroundInfo: (v) => {
     groundInfo.enabled = v
     groundInfo.setVisible(v && modes.mode === 'surface')
     if (v && dem && !groundInfo.lastInfo) groundInfo.load(params.demLat, params.demLon, dem)
     else if (v) groundInfo.rerender()
-  })
-fSlab.close()
-
-const fLook = gui.addFolder('Look')
-fLook.add(params, 'exposure', 0.2, 3, 0.02).onChange((v) => (exposureFx.uniforms.get('exposure').value = v))
-fLook.add(params, 'contrast', -0.2, 0.5, 0.01).onChange((v) => (contrastFx.uniforms.get('contrast').value = v))
-fLook.add(params, 'saturation', -1, 0, 0.02).onChange((v) => (hueSat.saturation = v))
-fLook.add(params, 'vignette', 0, 1, 0.02).onChange((v) => (vignette.darkness = v))
-fLook.add(params, 'grain', 0, 0.5, 0.01).onChange((v) => (grain.blendMode.opacity.value = v))
-fLook.add(params, 'fogNear', 5, 60, 0.5).name('fog start').onChange((v) => (fogRef.near = v))
-fLook.add(params, 'fogFar', 15, 90, 0.5).name('fog end').onChange((v) => (fogRef.far = v))
-fLook.addColor(params, 'fogColor').onChange((v) => {
-  fogRef.color.set(v)
-  scene.background.set(v)
-})
-fLook.add(params, 'surveyLines').name('survey circles').onChange((v) => (hud3.lines.visible = v))
-
-const fHud = gui.addFolder('HUD')
-fHud.add(params, 'hud').name('show HUD').onChange((v) => hud2.setVisible(v && modes.mode === 'surface'))
-fHud.add(params, 'hudOpacity', 0, 1, 0.02).name('HUD opacity').onChange((v) => hud2.setOpacity(v))
-fHud
-  .add(params, 'uiBlur', 0, 30, 1)
-  .name('panel blur')
-  .onChange((v) => document.documentElement.style.setProperty('--hud-blur', `${v}px`))
-fHud
-  .add(params, 'uiBgOpacity', 0, 1, 0.02)
-  .name('panel bg opacity')
-  .onChange((v) => document.documentElement.style.setProperty('--hud-bg-alpha', v))
-fHud
-  .addColor(params, 'hudAccent')
-  .name('accent color')
-  .onChange((v) => {
-    document.documentElement.style.setProperty('--hud-accent', v)
-    regenerateHud()
-  })
-fHud
-  .addColor(params, 'hudInk')
-  .name('ink color')
-  .onChange(() => {
-    // in dark mode the CSS ink stays light regardless of the picked value
-    document.documentElement.style.setProperty('--hud-ink', effInk())
-    regenerateHud()
-  })
-fHud.add(params, 'sweepSpeed', 0, 3, 0.05).name('sweep speed')
-fHud
-  .addColor(params, 'scanColor')
-  .name('scan color')
-  .onChange((v) => terrain.mapUniforms.uScanColor.value.set(v))
-fHud.add(params, 'scanDuration', 1, 8, 0.1).name('scan duration')
-fHud
-  .add(params, 'scanWidth', 0.05, 4, 0.05)
-  .name('scan width')
-  .onChange((v) => (terrain.mapUniforms.uScanWidth.value = v))
-fHud
-  .add(params, 'scanBlur', 0, 3, 0.02)
-  .name('scan blur')
-  .onChange((v) => (terrain.mapUniforms.uScanBlur.value = v))
-fHud
-  .add(params, 'scanDispHeight', 0, 2, 0.02)
-  .name('wave height')
-  .onChange((v) => (terrain.mapUniforms.uScanDispH.value = v))
-fHud
-  .add(params, 'scanDispFalloff', 0.1, 6, 0.05)
-  .name('wave falloff')
-  .onChange((v) => (terrain.mapUniforms.uScanDispW.value = v))
-fHud.add({ scan: () => (scanStart = performance.now() / 1000) }, 'scan').name('trigger scan')
-
-const fMotion = gui.addFolder('Motion')
-fMotion.add(params, 'coneSpin', 0, 3, 0.05).name('cone spin')
-fMotion.add(params, 'coneTilt', 0, 0.5, 0.01).name('cursor tilt')
-fMotion.add(params, 'coneDrift', 0, 2, 0.05).name('cursor drift')
-fMotion.add(params, 'bob', 0, 0.3, 0.01).name('hover bob')
-fMotion.add(params, 'ringSpeed', 0, 6, 0.1).name('ring speed')
-fMotion.add(params, 'flyDuration', 0.4, 4, 0.1).name('fly duration')
-fMotion.add(params, 'flyEasing', ['smooth', 'glide', 'linear']).name('fly easing')
-
-const fTour = gui.addFolder('Tour')
-fTour.add(params, 'tourFrom', POI_IDS).name('from')
-fTour.add(params, 'tourTo', POI_IDS).name('to')
-fTour.add(params, 'tourDuration', 4, 40, 0.5).name('duration (s)')
-fTour.add(params, 'tourAltitude', 0.8, 10, 0.1).name('altitude')
-fTour.add(params, 'tourSmoothing', 0, 1, 0.02).name('path smoothing')
-fTour.add(params, 'tourLook', 0.02, 0.3, 0.01).name('look ahead')
-fTour.add(params, 'tourBank', 0, 3, 0.05).name('bank into turns')
-fTour.add({ start: startTour }, 'start').name('▶ start tour')
-fTour.add(
-  {
-    stop: () => {
-      tour.active = false
-      camera.up.set(0, 1, 0)
-    },
   },
-  'stop'
-).name('■ stop')
-
-const fPerf = gui.addFolder('Performance')
-fPerf
-  .add(params, 'pixelRatio', 0.5, 2, 0.05)
-  .name('render scale')
-  .onChange((v) => {
-    renderer.setPixelRatio(v)
-    composer.setSize(window.innerWidth, window.innerHeight)
-  })
-fPerf.add(params, 'shadowMode', ['dynamic', 'static', 'off']).name('shadows').onChange(applyShadowMode)
-fPerf
-  .add(params, 'shadowRes', [1024, 2048, 4096])
-  .name('shadow resolution')
-  .onChange((v) => {
+  setShadowRes: (v) => {
     sun.shadow.mapSize.set(v, v)
     if (sun.shadow.map) {
       sun.shadow.map.dispose()
       sun.shadow.map = null
     }
     if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
+  },
+  flyTrack,
+  stopTour: () => {
+    tour.active = false
+    camera.up.set(0, 1, 0)
+  },
+  syncDark: () => topBar.syncDark(),
+})
+
+const explorePanel = buildExplorePanel({
+  flyTo: (lat, lon, zoom) => modes.flyTo(lat, lon, zoom),
+  runScan: (typeId) => scan.trigger(typeId, { x: controls.target.x, z: controls.target.z }, params.scanDuration),
+})
+
+// auto-fold: expanding a section on one side collapses the opposite panel so
+// the map always keeps breathing room
+for (const s of createPanel.sections)
+  s.head.addEventListener('click', () => {
+    if (s.open) explorePanel.setCollapsed(true)
   })
-const pausedCtrl = fMotion.add(params, 'paused').onChange(() => motionPanel.syncPause())
+for (const s of explorePanel.sections)
+  s.head.addEventListener('click', () => {
+    if (s.open) createPanel.setCollapsed(true)
+  })
+explorePanel.setCollapsed(true)
 
-const fLight = gui.addFolder('Light')
-fLight.add(params, 'sunIntensity', 0, 16, 0.1).onChange(placeSun)
-fLight.add(params, 'sunAzimuth', 0, 360, 1).onChange(placeSun)
-fLight.add(params, 'sunElevation', 5, 85, 1).onChange(placeSun)
-fLight.add(params, 'hemiIntensity', 0, 2, 0.05).name('ambient').onChange(placeSun)
-fLight
-  .add(params, 'envLight', 0, 1.5, 0.02)
-  .name('env light (shadow fill)')
-  .onChange((v) => (scene.environmentIntensity = v))
-fLight
-  .add(params, 'shadowSoftness', 0, 30, 0.5)
-  .name('shadow softness')
-  .onChange((v) => (sun.shadow.radius = v))
-
-// everything starts folded — every sidebar folder and the sidebar itself
-gui.folders.forEach((f) => f.close())
-gui.close()
-
-// accordion: clicking a folder title open folds every other, so the sidebar
-// stays compact. A direct title-click listener (added after lil-gui's own, so
-// `_closed` is already toggled) is deterministic — unlike onOpenClose, which
-// doesn't fire on programmatic open() and passes an unreliable reference. The
-// exclusive-open logic is the pure openExclusive helper (unit-tested).
-for (const folder of gui.folders) {
-  folder.$title.addEventListener('click', () => openExclusive(gui.folders, folder))
-}
 
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, plinth, peaksLayer, overlayPanel, landmarksPanel, motionPanel, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, gui, groundInfo, renderer, composer, lake, get labels() { return labels } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, lake, get scan() { return scan }, get labels() { return labels } }
 
 // real world is the default source — fetch its tiles on startup
 if (params.source === 'real') loadRealTerrain()
 
 const clock = new THREE.Clock()
 
-function tick() {
-  // rAF normally; timeout fallback keeps rendering when the tab is hidden
-  if (document.hidden) setTimeout(tick, 40)
-  else requestAnimationFrame(tick)
-  const dt = Math.min(clock.getDelta(), 0.05)
-  const t = clock.elapsedTime
-
+// camera motion for one frame — shared by the live loop and offline export
+function updateCameraMotion(dt) {
   // cinematic tour: arc-length uniform speed + trapezoid profile + damped gimbal
   if (tour.active) {
     tour.t = Math.min(1, tour.t + dt / (tour.duration || params.tourDuration))
@@ -1773,6 +1406,19 @@ function tick() {
   } else if (modes.mode === 'surface') {
     controls.update() // orbital-mode camera is driven by the mode machine
   }
+}
+
+let rafId = 0
+let tickTimer = 0
+function tick() {
+  if (loopPaused) return // offline export owns the frame clock while it runs
+  // rAF normally; timeout fallback keeps rendering when the tab is hidden
+  if (document.hidden) tickTimer = setTimeout(tick, 40)
+  else rafId = requestAnimationFrame(tick)
+  const dt = Math.min(clock.getDelta(), 0.05)
+  const t = clock.elapsedTime
+
+  updateCameraMotion(dt)
 
   // mode machine: altitude thresholds, glides, altimeter; globe LOD streaming
   modes.update(dt)
@@ -1801,16 +1447,8 @@ function tick() {
   }
   peaksLayer.update(camera, window.innerWidth, window.innerHeight, modes.mode === 'surface')
 
-  // terrain scan ripple progress
-  if (scanStart >= 0) {
-    const p = (performance.now() / 1000 - scanStart) / params.scanDuration
-    if (p >= 1) {
-      scanStart = -1
-      terrain.mapUniforms.uScanT.value = -1
-    } else {
-      terrain.mapUniforms.uScanT.value = p
-    }
-  }
+  // terrain scan progress (uScanT 0→1, auto-idle)
+  scan?.update()
 
   // pointer autofocus: focus where the ray from the camera through the cursor
   // meets the terrain; on a miss (sky / off-map) hold the last valid focus
@@ -1844,28 +1482,12 @@ function tick() {
 }
 tick()
 
-// Nudge the two column-anchored panels off their CSS fallbacks using MEASURED
-// neighbour sizes, so the layout survives a taller SECTOR or a wider sidebar
-// (the CSS magic-number offsets stay as the headless/hidden-tab fallback).
-function arrangeInitialLayout() {
-  if (window.innerWidth < 2) return // hidden tab reports 0 — keep CSS defaults
-  const sector = hud2.root.querySelector('.hud-block.hud-tl')
-  const telemetry = hud2.root.querySelector('.hud-block.hud-brt')
-  if (sector && overlayPanel.root.style.left === '') {
-    overlayPanel.root.style.top = `${Math.round(sector.getBoundingClientRect().bottom) + 12}px`
-  }
-  if (telemetry && telemetry.style.left === '') {
-    telemetry.style.right = `${Math.round(gui.domElement.offsetWidth) + 40}px`
-  }
-}
-requestAnimationFrame(arrangeInitialLayout)
-
 window.addEventListener('resize', () => {
+  if (loopPaused) return // an offline export owns the renderer size right now
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
   renderer.setSize(window.innerWidth, window.innerHeight)
   composer.setSize(window.innerWidth, window.innerHeight)
   gpxLayer.onResize(window.innerWidth, window.innerHeight)
   reclampDraggables()
-  arrangeInitialLayout()
 })
