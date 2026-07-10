@@ -223,6 +223,7 @@ body {
 
 /* ---------------------------------------------------------------- modes / orbital */
 
+/* altitude chip — same glass grammar as the v28 bars (tokens in ui/v28.css) */
 .altimeter {
   position: fixed;
   right: 24px;
@@ -230,36 +231,40 @@ body {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
-  color: var(--hud-ink);
-  background: var(--hud-paper);
-  border: 1px solid var(--hud-ink);
-  padding: 6px 12px;
-  border-radius: 3px;
-  backdrop-filter: blur(var(--hud-blur));
+  font-family: var(--ce-font, 'Bricolage Grotesque', system-ui, sans-serif);
+  color: var(--ce-ink, #1c1e22);
+  background: var(--ce-glass, rgba(252, 252, 253, 0.62));
+  border: 1px solid var(--ce-border, rgba(255, 255, 255, 0.55));
+  padding: 7px 16px;
+  border-radius: 999px;
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  backdrop-filter: blur(20px) saturate(1.5);
+  box-shadow: var(--ce-shadow, 0 10px 40px rgba(20, 24, 35, 0.12));
   pointer-events: none;
   user-select: none;
   z-index: 30;
 }
 
 .altimeter .alt-mode {
-  font-size: 9px;
-  letter-spacing: 0.3em;
-  color: var(--hud-accent);
-  font-weight: 600;
+  font-size: 9.5px;
+  letter-spacing: 0.22em;
+  color: var(--ce-muted, rgba(28, 30, 34, 0.55));
+  font-weight: 700;
 }
 
 .altimeter .alt-value {
+  font-family: var(--ce-mono, ui-monospace, monospace);
   font-size: 13px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.04em;
   min-width: 74px;
   text-align: right;
+  font-weight: 600;
 }
 
 .fui-msg {
   position: fixed;
   left: 50%;
-  top: 64px;
+  top: 112px;
   transform: translateX(-50%);
   font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
   font-size: 12px;
@@ -460,9 +465,9 @@ body.dark .gpx-profile-head .gpx-stats {
 .hud-block.hud-tl { top: 16px; left: 16px; bottom: auto; }
 .hud-block.hud-brt { right: 300px; left: auto; bottom: 16px; }
 
-/* the altimeter lives top-center */
+/* the altimeter lives top-center, tucked under the top bar */
 .altimeter {
-  top: 58px;
+  top: 64px;
   bottom: auto;
   left: 50%;
   right: auto;

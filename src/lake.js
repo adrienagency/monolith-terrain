@@ -1,8 +1,10 @@
 // Water as GLASS — two kinds:
 //  · the SEA: a transparent slab of physical glass filling everything below
-//    sea level (elevation 0). Real PBR transmission shows the bathymetry
+//    sea level (elevation 0). Frosted-glass transmission (drei's
+//    MeshTransmissionMaterial technique, vendored) shows the bathymetry
 //    through it, the environment reflects off its polished top, and islands
-//    pierce the surface. Clipped to the slab's superellipse footprint.
+//    pierce the surface. The slab geometry follows the plinth's superellipse
+//    footprint and its top perimeter carries a small rounded bevel.
 //  · ALTITUDE LAKES: real lakes sit perfectly FLAT in the DEM, so connected
 //    flat regions above sea level are detected by flood fill and each gets a
 //    thin glass sheet at its own elevation (mountain lakes, reservoirs…).
@@ -11,6 +13,12 @@
 
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
+// the community-standard frosted-glass material (pmndrs drei's
+// MeshTransmissionMaterial, vendored + adapted in src/vendor/ — see the
+// file header there for lineage and what was changed). Key property here:
+// its blur follows roughness even at ior 1, so the bathymetry under the
+// glass stays geometrically undistorted while still frosting over.
+import { MeshTransmissionMaterial } from './vendor/MeshTransmissionMaterial.js'
 
 // ---------------------------------------------------------- lake detection
 // Find connected near-flat regions above sea level in the raw DEM (meters).
@@ -71,19 +79,130 @@ export function detectLakes(dem, { tolM = 0.35, minCells = null, minFill = 0.25 
 }
 
 function glassMaterial(params) {
-  return new THREE.MeshPhysicalMaterial({
+  return new MeshTransmissionMaterial({
+    samples: 6, // stochastic taps per pixel — drei's default, silky at 1080p
     color: new THREE.Color(params.lakeColor ?? '#8fc6e8'),
     transmission: 1, // full glass — see straight through
     roughness: params.lakeRoughness ?? 0.08, // = the blur of the glass
     metalness: 0,
-    ior: 1.33, // water
+    ior: 1, // optically neutral by default — updateMaterial drives it
     envMapIntensity: 1.1, // the environment reflects in the surface
     // depth absorption: light travelling through the volume takes the water
     // tint — shallow water reads clear, deep water saturates (the "clarity")
     attenuationColor: new THREE.Color(params.lakeColor ?? '#8fc6e8'),
     attenuationDistance: params.lakeClarity ?? 12,
     depthWrite: false,
+    blurStrength: 1, // world-space cone factor of the frosted blur
+    distortionScale: 0.25, // frost-warp noise frequency (only shows > 60% blur)
+    temporalDistortion: 0.15, // noise drift speed IF lake.update(dt) is wired
   })
+}
+
+// ------------------------------------------------- beveled sea-slab geometry
+// The sea block used to be a BoxGeometry clipped to the slab's superellipse
+// by a fragment discard; now the geometry itself follows the footprint (so
+// the discard is gone) and the top perimeter carries a small round-over.
+
+// closed contour of the rounded-superellipse footprint in the XZ plane, with
+// analytic outward normals: straight edges between four corner arcs of
+// radius r and exponent n — the same curve the slab and the old clip used
+function superellipseContour(half, r, n, cornerSegments = 8) {
+  const pts = []
+  const c = half - r
+  const e = 2 / n
+  // corner order walks the contour continuously; `rev` flips the sweep so
+  // each arc starts where the previous straight edge ends
+  const corners = [
+    [1, 1, false],
+    [-1, 1, true],
+    [-1, -1, false],
+    [1, -1, true],
+  ]
+  for (const [sx, sz, rev] of corners) {
+    for (let k = 0; k <= cornerSegments; k++) {
+      const t = ((rev ? cornerSegments - k : k) / cornerSegments) * (Math.PI / 2)
+      const x = sx * (c + r * Math.cos(t) ** e)
+      const z = sz * (c + r * Math.sin(t) ** e)
+      // gradient of the superellipse — lands exactly on the straight-edge
+      // normals at t = 0 and t = pi/2, so shading is seamless all around
+      let nx = sx * Math.cos(t) ** (2 - e)
+      let nz = sz * Math.sin(t) ** (2 - e)
+      const len = Math.hypot(nx, nz) || 1
+      pts.push({ x, z, nx: nx / len, nz: nz / len })
+    }
+  }
+  return pts
+}
+
+// prism over the contour from y0 to y1 whose TOP edge is rounded over with
+// radius `bevel` (quarter-circle profile, smooth analytic normals). Groups:
+// material 0 = the flat top cap (transmission glass), material 1 = walls,
+// bevel and bottom (plain tinted glass) — the round-over catching the env
+// glint as a tinted rim reads like a polished slab edge
+function beveledPrismGeometry(contour, y0, y1, bevel, bevelSegments = 4) {
+  const M = contour.length
+  // horizontal rings bottom→top: wall base, wall top, then the round-over
+  // (inset walks inward along the contour normal as the profile turns up)
+  const rings = [{ y: y0, inset: 0, nk: 1, ny: 0 }, { y: y1 - bevel, inset: 0, nk: 1, ny: 0 }]
+  for (let k = 1; k <= bevelSegments; k++) {
+    const phi = (k / bevelSegments) * (Math.PI / 2)
+    rings.push({
+      y: y1 - bevel + bevel * Math.sin(phi),
+      inset: bevel * (1 - Math.cos(phi)),
+      nk: Math.cos(phi), // horizontal share of the normal
+      ny: Math.sin(phi), // vertical share
+    })
+  }
+  const R = rings.length
+  const pos = new Float32Array((R * M + 2 + M) * 3)
+  const nrm = new Float32Array(pos.length)
+  let o = 0
+  for (const ring of rings)
+    for (const p of contour) {
+      pos[o] = p.x - p.nx * ring.inset
+      pos[o + 1] = ring.y
+      pos[o + 2] = p.z - p.nz * ring.inset
+      nrm[o] = p.nx * ring.nk
+      nrm[o + 1] = ring.ny
+      nrm[o + 2] = p.nz * ring.nk
+      o += 3
+    }
+  const topCenter = R * M
+  const botCenter = R * M + 1
+  pos.set([0, y1, 0], topCenter * 3)
+  nrm.set([0, 1, 0], topCenter * 3)
+  pos.set([0, y0, 0], botCenter * 3)
+  nrm.set([0, -1, 0], botCenter * 3)
+  // bottom cap needs its own ring: same positions as the wall base but
+  // facing down (hard edge — it sits on the plinth, never seen rounded)
+  const botRing = R * M + 2
+  for (let i = 0; i < M; i++) {
+    pos.set([contour[i].x, y0, contour[i].z], (botRing + i) * 3)
+    nrm.set([0, -1, 0], (botRing + i) * 3)
+  }
+
+  const idx = []
+  // walls + round-over: quad strips between consecutive rings
+  for (let a = 0; a < R - 1; a++)
+    for (let i = 0; i < M; i++) {
+      const j = (i + 1) % M
+      idx.push(a * M + i, (a + 1) * M + i, (a + 1) * M + j, a * M + i, (a + 1) * M + j, a * M + j)
+    }
+  // bottom cap (fan, facing down)
+  for (let i = 0; i < M; i++) idx.push(botCenter, botRing + i, botRing + ((i + 1) % M))
+  const sideCount = idx.length
+  // top cap (fan over the round-over's rim, facing up) — the glass surface
+  const rim = (R - 1) * M
+  for (let i = 0; i < M; i++) idx.push(topCenter, rim + ((i + 1) % M), rim + i)
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+  geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3))
+  geo.setIndex(idx)
+  geo.addGroup(0, sideCount, 1) // walls + bevel + bottom → tinted side glass
+  geo.addGroup(sideCount, idx.length - sideCount, 0) // top cap → transmission
+  geo.computeBoundingSphere()
+  return geo
 }
 
 // what the polished surface mirrors — 'studio' is the scene's default room
@@ -165,9 +284,12 @@ export class Lake {
     scene.add(this.group)
 
     // sea block and altitude sheets need different `thickness` (a material
-    // property in three), so they get separate materials
+    // property in three), so they get separate materials — named, so any
+    // shader diagnostics in the console point at the culprit
     this.seaMat = glassMaterial(params)
+    this.seaMat.name = 'lake-sea-glass'
     this.lakeMat = glassMaterial(params)
+    this.lakeMat.name = 'lake-sheet-glass'
     this.lakeMat.thickness = 0.6
 
     // the block's SIDE faces are plain tinted glass, NOT transmission: a
@@ -183,36 +305,16 @@ export class Lake {
       envMapIntensity: 1.1,
       depthWrite: false,
     })
+    this.seaSideMat.name = 'lake-sea-side'
 
-    // clip the sea block to the slab's superellipse footprint, like the terrain
-    const half = TERRAIN_SIZE / 2
-    const r = (params.slabCorner ?? 0) * TERRAIN_SIZE
-    const n = 2 + (params.slabCornerSmoothing ?? 0) * 4
-    const clip = (shader) => {
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', `#include <common>\nvarying vec3 vLakeWorld;`)
-        .replace(
-          '#include <color_fragment>',
-          `#include <color_fragment>
-  {
-    vec2 cq = max(abs(vLakeWorld.xz) - vec2(${(half - r).toFixed(3)}), 0.0);
-    float pn = pow(pow(cq.x, ${n.toFixed(2)}) + pow(cq.y, ${n.toFixed(2)}), 1.0 / ${n.toFixed(2)});
-    if (pn > ${r.toFixed(3)}) discard;
-  }`
-        )
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', `#include <common>\nvarying vec3 vLakeWorld;`)
-        .replace('#include <begin_vertex>', `#include <begin_vertex>\nvLakeWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;`)
-    }
-    this.seaMat.onBeforeCompile = clip
-    this.seaSideMat.onBeforeCompile = clip
-
-    // real-size geometry, never a scaled unit box: three multiplies `thickness`
-    // by the mesh's model scale for the refraction/absorption ray, so a box
-    // scaled ~120× in x/z gets a kilometric light path and tints to black.
-    // BoxGeometry groups: +x,-x,+y,-y,+z,-z — transmission glass on top only.
-    this.seaMats = [this.seaSideMat, this.seaSideMat, this.seaMat, this.seaSideMat, this.seaSideMat, this.seaSideMat]
-    this.sea = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), this.seaMats)
+    // the sea geometry itself follows the slab's superellipse footprint now
+    // (built in rebuild), so the old fragment-discard clip is gone. Real-size
+    // geometry, never a scaled unit box: three multiplies `thickness` by the
+    // mesh's model scale for the refraction/absorption ray, so a box scaled
+    // ~120× in x/z gets a kilometric light path and tints to black.
+    // Geometry groups: 0 = flat top cap (transmission), 1 = walls/bevel/bottom.
+    this.seaMats = [this.seaMat, this.seaSideMat]
+    this.sea = new THREE.Mesh(new THREE.BufferGeometry(), this.seaMats)
     this.sea.renderOrder = 3
     this.sea.visible = false
     this.group.add(this.sea)
@@ -230,9 +332,16 @@ export class Lake {
     } else {
       const bottom = baseY + 0.05
       const top = seaY - 0.015 // a hair under the coastline so the shore stays crisp
+      // footprint = the slab's rounded superellipse, a hair inside the slab
+      const half = (TERRAIN_SIZE / 2) * 0.998
+      const r = Math.min(half - 0.01, Math.max(0.01, (params.slabCorner ?? 0) * TERRAIN_SIZE))
+      const n = 2 + (params.slabCornerSmoothing ?? 0) * 4
+      // the "very slightly rounded" top edge — capped on shallow slabs so the
+      // round-over never eats more than half the block's height
+      const bevel = Math.min(0.2, Math.max(0.02, (top - bottom) * 0.45))
       this.sea.geometry.dispose()
-      this.sea.geometry = new THREE.BoxGeometry(TERRAIN_SIZE * 0.998, top - bottom, TERRAIN_SIZE * 0.998)
-      this.sea.position.set(0, (top + bottom) / 2, 0)
+      this.sea.geometry = beveledPrismGeometry(superellipseContour(half, r, n), bottom, top, bevel)
+      this.sea.position.set(0, 0, 0) // geometry is built in world coordinates
       // absorption path length — capped: the seabed's own depth-graded ramp
       // already paints deep vs shallow, and a full-box path powers the tint
       // to black on deep-ocean zones
@@ -283,17 +392,26 @@ export class Lake {
 
   updateMaterial(params) {
     const rough = params.lakeRoughness ?? 0.08
-    // near-clear glass must NOT distort what's underneath: ior 1 sends the
-    // transmission ray straight through (zero bend, tint/absorption intact),
-    // and the water ior only fades back in with the frosted look
-    const bend = Math.min(1, Math.max(0, (rough - 0.02) / 0.13))
+    // lakeRoughness drives THREE things inside the transmission material:
+    //  · the gloss of the reflections (plain PBR roughness, top and sides)
+    //  · the frosted-glass blur (mip frost + stochastic cone — both follow
+    //    roughness directly, see src/vendor/MeshTransmissionMaterial.js)
+    //  · above 60% only: a gentle optical thickening. Below that mark the
+    //    surface under the glass must NOT distort, so ior stays at exactly 1
+    //    (the refraction ray is the straight view ray — zero offset, zero
+    //    chromatic spread) while blur and absorption keep working. Past 0.6
+    //    a soft smoothstep eases in a touch of water ior and a slow simplex
+    //    warp of the normal — heavy frost is allowed to swim a little.
+    const t = Math.min(1, Math.max(0, (rough - 0.6) / 0.4))
+    const over = t * t * (3 - 2 * t)
     const refl = this._reflection(params.lakeReflection ?? 'studio')
     for (const mat of [this.seaMat, this.lakeMat]) {
       mat.color.set(params.lakeColor ?? '#8fc6e8')
       mat.attenuationColor.set(params.lakeColor ?? '#8fc6e8')
       mat.roughness = rough
       mat.attenuationDistance = params.lakeClarity ?? 30
-      mat.ior = 1 + 0.33 * bend
+      mat.ior = 1 + 0.15 * over
+      mat.distortion = 0.3 * over
       mat.envMap = refl.map // null falls back to scene.environment
       mat.envMapIntensity = refl.intensity
     }
@@ -301,6 +419,18 @@ export class Lake {
     this.seaSideMat.roughness = rough
     this.seaSideMat.envMap = refl.map
     this.seaSideMat.envMapIntensity = refl.intensity
+  }
+
+  // OPTIONAL per-frame hook — the glass renders correctly WITHOUT it, since
+  // the material reads three's built-in transmission buffer (refreshed by the
+  // renderer on its own; no private FBO pass). Wiring it up only animates the
+  // heavy-frost warp: above 60% blur the simplex distortion drifts slowly
+  // instead of being frozen. Integration, if ever wanted in main.js:
+  //   lake.update(dt) // once per frame, before composer.render()
+  update(dt = 0.016) {
+    this._time = (this._time ?? 0) + dt
+    this.seaMat.time = this._time
+    this.lakeMat.time = this._time
   }
 
   // reflection presets — gradient skies are built once and cached

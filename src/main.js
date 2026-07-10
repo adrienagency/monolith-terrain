@@ -42,8 +42,12 @@ import { ScanController } from './scan.js'
 import { refreshAll } from './ui/kit.js'
 import { buildTopBar, buildBottomBar } from './ui/bars.js'
 import { buildCreatePanel } from './ui/create-panel.js'
+import { buildCameraPanel } from './ui/camera-panel.js'
 import { buildExplorePanel } from './ui/explore-panel.js'
+import { buildScanPanel } from './ui/scan-panel.js'
 import { openExportModal } from './ui/export-modal.js'
+import { initTips } from './ui/tips.js'
+import { Recorder } from './export-recorder.js'
 import './ui/v28.css'
 
 // ------------------------------------------------------------------ params
@@ -624,12 +628,22 @@ document.documentElement.style.setProperty('--hud-ink', params.hudInk)
 document.documentElement.style.setProperty('--hud-blur', `${params.uiBlur}px`)
 document.documentElement.style.setProperty('--hud-bg-alpha', params.uiBgOpacity)
 
-// user grabbing the camera cancels any fly-to or tour
+// user grabbing the camera cancels any fly-to or tour, and pauses the idle
+// planet spin for a moment (the spin must never compose with a held drag)
+let lastUserInput = 0
+let controlsHeld = false
 controls.addEventListener('start', () => {
   tween.active = false
   tour.active = false
   camera.up.set(0, 1, 0)
+  controlsHeld = true
+  lastUserInput = performance.now()
 })
+controls.addEventListener('end', () => {
+  controlsHeld = false
+  lastUserInput = performance.now()
+})
+window.addEventListener('wheel', () => (lastUserInput = performance.now()), { passive: true })
 
 let modes = null // assigned once the globe + mode machine exist (below)
 
@@ -1225,18 +1239,23 @@ function stepScene(t, dt) {
   camera.updateMatrixWorld()
 }
 
+initTips()
+const recorder = new Recorder({ renderer })
+
 const topBar = buildTopBar({
   params,
   setDarkMode: (v) => {
     setDarkMode(v)
     refreshAll()
   },
-  enterOrbit: () => modes.enterOrbit(),
+  // the Globe button always shows the WHOLE planet, spinning slowly
+  enterOrbit: () => modes.enterOrbit(16000000),
   openExport: () =>
     openExportModal({
       renderer,
       composer,
       camera,
+      recorder,
       pauseLoop: () => {
         loopPaused = true
         // kill the already-scheduled frame too, or a synchronous export
@@ -1333,22 +1352,56 @@ const createPanel = buildCreatePanel({
   syncDark: () => topBar.syncDark(),
 })
 
+const cameraPanel = buildCameraPanel({
+  params,
+  camera,
+  controls,
+  renderer,
+  composer,
+  dof,
+  dofPass,
+  applyShadowMode,
+  setShadowRes: (v) => {
+    sun.shadow.mapSize.set(v, v)
+    if (sun.shadow.map) {
+      sun.shadow.map.dispose()
+      sun.shadow.map = null
+    }
+    if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
+  },
+  flyTrack,
+  stopTour: () => {
+    tour.active = false
+    camera.up.set(0, 1, 0)
+  },
+})
+
 const explorePanel = buildExplorePanel({
   flyTo: (lat, lon, zoom) => modes.flyTo(lat, lon, zoom),
+})
+
+const scanPanel = buildScanPanel({
   runScan: (typeId) => scan.trigger(typeId, { x: controls.target.x, z: controls.target.z }, params.scanDuration),
 })
 
-// auto-fold: expanding a section on one side collapses the opposite panel so
-// the map always keeps breathing room
-for (const s of createPanel.sections)
-  s.head.addEventListener('click', () => {
-    if (s.open) explorePanel.setCollapsed(true)
-  })
-for (const s of explorePanel.sections)
-  s.head.addEventListener('click', () => {
-    if (s.open) createPanel.setCollapsed(true)
-  })
-explorePanel.setCollapsed(true)
+// auto-fold: expanding a section in one panel folds its dock neighbour so a
+// column never grows past the screen
+const foldPairs = [
+  [createPanel, cameraPanel],
+  [cameraPanel, createPanel],
+  [explorePanel, scanPanel],
+  [scanPanel, explorePanel],
+]
+for (const [a, b] of foldPairs)
+  for (const s of a.sections)
+    s.head.addEventListener('click', () => {
+      if (s.open) {
+        b.setCollapsed(true)
+        for (const t of b.sections) t.setOpen(false)
+      }
+    })
+cameraPanel.setCollapsed(true)
+scanPanel.setCollapsed(true)
 
 
 // ------------------------------------------------------------------ loop
@@ -1410,6 +1463,15 @@ function updateCameraMotion(dt) {
 
 let rafId = 0
 let tickTimer = 0
+// a pending rAF never fires once the tab goes hidden — swap the chain onto
+// the timeout fallback at that exact moment so rendering never stalls
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && !loopPaused) {
+    cancelAnimationFrame(rafId)
+    clearTimeout(tickTimer)
+    tick()
+  }
+})
 function tick() {
   if (loopPaused) return // offline export owns the frame clock while it runs
   // rAF normally; timeout fallback keeps rendering when the tab is hidden
@@ -1420,9 +1482,16 @@ function tick() {
 
   updateCameraMotion(dt)
 
+  // idle planet spin: in orbital view the Earth slowly turns under the camera
+  // until the user takes the controls back
+  if (modes.mode === 'orbital' && !modes.busy && !controlsHeld && performance.now() - lastUserInput > 3000) {
+    camera.position.applyAxisAngle(UP, dt * 0.035)
+    camera.lookAt(0, 0, 0)
+  }
+
   // mode machine: altitude thresholds, glides, altimeter; globe LOD streaming
   modes.update(dt)
-  if (modes.mode === 'orbital') globe.update(camera)
+  if (modes.mode === 'orbital') globe.update(camera, dt)
 
   // fog carries the close-up read only: it dissipates as soon as the camera
   // pulls one step back from max zoom, so mid-zoom never whites out
@@ -1478,7 +1547,9 @@ function tick() {
     })
   }
 
+  lake.update?.(dt) // animates the heavy-frost warp (only visible above 60% blur)
   composer.render(dt)
+  if (recorder.recording) recorder.captureFrame()
 }
 tick()
 

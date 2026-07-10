@@ -27,15 +27,23 @@ export function buildTopBar(ctx) {
   mark.innerHTML = '<i>◍</i>Clean Earth'
   bar.append(mark)
 
-  bar.append(
-    iconButton(I.globe, 'View the planet', () => ctx.enterOrbit()),
-    iconButton(I.export, 'Export image or video', () => ctx.openExport())
-  )
+  const globeBtn = iconButton(I.globe, '', () => ctx.enterOrbit())
+  globeBtn.setAttribute('data-tip', 'Pull all the way out and watch the planet slowly turn.')
+  bar.append(globeBtn)
 
-  const dark = iconButton(I.moon, 'Dark mode', () => {
+  // export earns a labelled pill — it is a primary action, not tucked-away chrome
+  const exportBtn = el('button', 'ce-pillbtn accent')
+  exportBtn.type = 'button'
+  exportBtn.innerHTML = `${I.export}<span>Export</span>`
+  exportBtn.setAttribute('data-tip', 'Save what you see as an image, or record a video.')
+  exportBtn.addEventListener('click', () => ctx.openExport())
+  bar.append(exportBtn)
+
+  const dark = iconButton(I.moon, '', () => {
     ctx.setDarkMode(!ctx.params.darkMode)
     syncDark()
   })
+  dark.setAttribute('data-tip', 'Switch the interface between light and dark.')
   const syncDark = () => {
     dark.innerHTML = ctx.params.darkMode ? I.sun : I.moon
     dark.classList.toggle('on', !!ctx.params.darkMode)
@@ -43,7 +51,9 @@ export function buildTopBar(ctx) {
   syncDark()
   bar.append(dark)
 
-  bar.append(iconButton(I.eyeOff, 'Hide interface', () => setNoUi(true)))
+  const hideBtn = iconButton(I.eyeOff, '', () => setNoUi(true))
+  hideBtn.setAttribute('data-tip', 'Hide every panel — only a small eye button stays.')
+  bar.append(hideBtn)
 
   // the single button that survives no-UI mode
   const eye = el('button', 'ce-eye ce-glassbox')
@@ -85,8 +95,8 @@ export function buildBottomBar(ctx) {
 
   const gpx = el('button', 'ce-pillbtn')
   gpx.type = 'button'
-  gpx.title = 'Import a GPX track (or drop the file anywhere)'
   gpx.innerHTML = `${I.route}<span>GPX</span>`
+  gpx.setAttribute('data-tip', 'Import a GPX track and drape it on the relief.')
   gpx.addEventListener('click', () => ctx.openGpx())
 
   bar.append(search, gpx)

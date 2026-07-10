@@ -1,23 +1,31 @@
-// Panel shell — glass card docked left or right, draggable by its header
-// with hard magnetic docking (a panel always lands flush on a side), a
-// collapse chevron, and exclusive accordion sections.
+// Panel shell v2 — glass cards stacked in left/right dock columns, the same
+// visual grammar as the top and bottom bars. A panel collapses to its header
+// pill; dragging its header moves it between docks with hard magnetic snap.
 
 import { el } from './kit.js'
 
-const DOCK_MARGIN = 14
-const TOP_MIN = 60
+const docks = {}
+function dockColumn(side) {
+  if (!docks[side]) {
+    const d = el('div', `ce-dock ce-dock-${side}`)
+    document.body.append(d)
+    docks[side] = d
+  }
+  return docks[side]
+}
 
 export class Panel {
-  constructor({ title, side = 'left', width = 264 }) {
+  constructor({ title, icon = '', side = 'left', width = 264, tip = '' }) {
     this.side = side
-    this.root = el('aside', `ce-panel ce-dock-${side}`)
+    this.root = el('aside', 'ce-panel ce-glassbox')
     this.root.style.width = width + 'px'
 
     this.head = el('header', 'ce-panel-head')
-    this.grip = el('span', 'ce-panel-title', title)
+    if (tip) this.head.setAttribute('data-tip', tip)
+    this.grip = el('span', 'ce-panel-title')
+    this.grip.innerHTML = `${icon}<span>${title}</span>`
     this.collapseBtn = el('button', 'ce-panel-collapse')
     this.collapseBtn.type = 'button'
-    this.collapseBtn.title = 'Collapse'
     this.head.append(this.grip, this.collapseBtn)
 
     this.body = el('div', 'ce-panel-body')
@@ -26,18 +34,21 @@ export class Panel {
     this.sections = []
     this.collapseBtn.addEventListener('click', (e) => {
       e.stopPropagation()
-      this.setCollapsed(!this.root.classList.contains('collapsed'))
+      this.setCollapsed(!this.collapsed)
     })
     this._initDrag()
-    document.body.append(this.root)
-    this._top = null // null = CSS default
+    dockColumn(side).append(this.root)
+  }
+
+  get collapsed() {
+    return this.root.classList.contains('collapsed')
   }
 
   setCollapsed(v) {
     this.root.classList.toggle('collapsed', v)
   }
 
-  // exclusive accordion: opening one section folds the others
+  // exclusive accordion: opening one section folds the others in this panel
   addSection(sec) {
     this.sections.push(sec)
     this.body.append(sec.root)
@@ -54,49 +65,42 @@ export class Panel {
     this.body.append(...nodes)
   }
 
-  // hard magnetic docking: while dragging the card follows the pointer,
-  // on release it snaps flush to whichever half of the screen it's on;
-  // vertical position is kept (clamped under the top bar)
+  // hard magnetic docking: the card follows the pointer while dragged, then
+  // lands in the dock column of whichever half of the screen it's over
   _initDrag() {
-    let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false
+    let sx = 0
+    let sy = 0
+    let dragging = false
     const onMove = (e) => {
       if (!dragging) return
-      const dx = e.clientX - sx
-      const dy = e.clientY - sy
-      this.root.style.transition = 'none'
-      this.root.style.transform = `translate(${ox + dx}px, ${oy + dy}px)`
+      this.root.style.transform = `translate(${e.clientX - sx}px, ${e.clientY - sy}px)`
     }
-    const onUp = (e) => {
+    const finish = (e, commit) => {
       if (!dragging) return
       dragging = false
       window.removeEventListener('pointermove', onMove)
-      const r = this.root.getBoundingClientRect()
-      const side = r.left + r.width / 2 < window.innerWidth / 2 ? 'left' : 'right'
-      this.dock(side, Math.max(TOP_MIN, Math.min(r.top, window.innerHeight - 120)))
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+      this.root.classList.remove('dragging')
+      this.root.style.transform = ''
+      if (!commit) return // cancelled gesture: snap home, change nothing
+      const side = e.clientX < window.innerWidth / 2 ? 'left' : 'right'
+      if (side !== this.side) {
+        this.side = side
+        dockColumn(side).append(this.root)
+      }
     }
+    const onUp = (e) => finish(e, true)
+    const onCancel = (e) => finish(e, false)
     this.head.addEventListener('pointerdown', (e) => {
       if (e.target === this.collapseBtn) return
       dragging = true
       sx = e.clientX
       sy = e.clientY
-      const m = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(this.root.style.transform)
-      ox = m ? parseFloat(m[1]) : 0
-      oy = m ? parseFloat(m[2]) : 0
+      this.root.classList.add('dragging')
       window.addEventListener('pointermove', onMove)
-      window.addEventListener('pointerup', onUp, { once: true })
+      window.addEventListener('pointerup', onUp)
+      window.addEventListener('pointercancel', onCancel)
     })
-  }
-
-  dock(side, top) {
-    this.side = side
-    this.root.classList.remove('ce-dock-left', 'ce-dock-right')
-    this.root.classList.add(`ce-dock-${side}`)
-    this.root.style.transition = 'transform .28s cubic-bezier(.2,.9,.25,1)'
-    this.root.style.transform = 'translate(0px, 0px)'
-    this.root.style.top = top != null ? top + 'px' : ''
-    this.root.style.left = ''
-    this.root.style.right = ''
-    if (side === 'left') this.root.style.left = DOCK_MARGIN + 'px'
-    else this.root.style.right = DOCK_MARGIN + 'px'
   }
 }

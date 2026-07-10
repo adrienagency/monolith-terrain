@@ -169,28 +169,81 @@ body.dark {
   width: 14px;
   height: 14px;
 }
+.ce-pillbtn.accent {
+  background: var(--ce-accent);
+  color: #fff;
+}
+.ce-pillbtn.accent:hover {
+  filter: brightness(1.07);
+  background: var(--ce-accent);
+}
+.ce-topbar .ce-pillbtn {
+  height: 30px;
+  margin: 0 2px;
+}
+
+/* discreet hover tooltip */
+.ce-tip {
+  position: fixed;
+  transform: translateX(-50%);
+  z-index: 120;
+  background: var(--ce-glass-strong);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
+  border: 1px solid var(--ce-border);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-family: var(--ce-font);
+  font-size: 11px;
+  color: var(--ce-ink);
+  max-width: 250px;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+  box-shadow: 0 4px 18px rgba(20, 24, 35, 0.14);
+}
+.ce-tip.on {
+  opacity: 1;
+}
 
 /* --------------------------------------------------------------- panels */
-.ce-panel {
+.ce-dock {
   position: fixed;
   top: 64px;
+  bottom: 92px;
   z-index: 55;
-  max-height: calc(100vh - 150px);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  gap: 10px;
+  pointer-events: none;
+  align-items: flex-start;
 }
 .ce-dock-left {
   left: 14px;
 }
 .ce-dock-right {
   right: 14px;
+  align-items: flex-end;
+}
+.ce-panel {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+.ce-panel.dragging {
+  opacity: 0.85;
+  transition: none;
 }
 .ce-panel-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 11px 10px 11px 16px;
+  padding: 10px 10px 10px 14px;
   cursor: grab;
   flex: none;
 }
@@ -198,11 +251,19 @@ body.dark {
   cursor: grabbing;
 }
 .ce-panel-title {
-  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
   font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ce-muted);
+  letter-spacing: 0.02em;
+  color: var(--ce-ink);
+}
+.ce-panel-title svg {
+  width: 15px;
+  height: 15px;
+  color: var(--ce-accent);
+  flex: none;
 }
 .ce-panel-collapse {
   width: 24px;
@@ -639,4 +700,66 @@ body.ce-noui .ce-eye {
 .ce-eye svg {
   width: 16px;
   height: 16px;
+}
+
+/* ------------------------------------------------------------- REC pill */
+.ce-rec {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  user-select: none;
+}
+.ce-rec-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e53935;
+  animation: ce-rec-pulse 1.6s ease-in-out infinite;
+}
+@keyframes ce-rec-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(229, 57, 53, 0.4);
+  }
+  50% {
+    opacity: 0.55;
+    box-shadow: 0 0 0 5px rgba(229, 57, 53, 0);
+  }
+}
+.ce-rec-time {
+  font-family: var(--ce-mono);
+  font-size: 12px;
+  min-width: 32px;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+.ce-rec .ce-btn {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 11px;
+  border-radius: 999px;
+}
+/* stays visible in no-UI mode — hiding the UI is exactly how you get a
+   clean recording, but the Stop control must remain reachable */
+body.ce-noui .ce-rec {
+  display: flex !important;
+}
+.ce-rec-note {
+  font-size: 12px;
+  color: var(--ce-muted);
+  margin: 2px 0 10px;
+}
+
+/* the REC pill sits above the bottom bar so it never fights the altimeter */
+.ce-rec {
+  top: auto !important;
+  bottom: 72px;
 }

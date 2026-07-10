@@ -1,16 +1,25 @@
-// Export modal — still image (PNG/JPEG) or MP4 capture of the scene.
-// deps = { renderer, composer, camera, pauseLoop, resumeLoop, step }
-// step(timeSec, dtSec) advances the scene deterministically for video frames.
+// Export modal — still image (PNG/JPEG) or live MP4 recording of the scene.
+// deps = { renderer, composer, camera, recorder }
+// `recorder` is a Recorder instance (src/export-recorder.js); MP4 export is
+// start/stop live capture at screen size — the modal closes on start and a
+// REC pill (top-center) shows elapsed time with a Stop button.
+// pauseLoop/resumeLoop/step are still accepted for backward compat but are
+// no longer used (the old fixed-duration offline render path is gone).
 
 import { el, segmented, select, button } from './kit.js'
-import { exportImage, exportVideo, downloadBlob } from '../export.js'
+import { exportImage, downloadBlob } from '../export.js'
 
 const RATIOS = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1, '4:5': 4 / 5 }
 const SIZES = ['1280', '1920', '2560', '3840']
 const even = (n) => Math.max(2, 2 * Math.round(n / 2))
 
+const fmtElapsed = (sec) => {
+  const s = Math.max(0, Math.floor(sec))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
 export function openExportModal(deps) {
-  const state = { format: 'png', ratio: '16:9', size: '1920', duration: '5', fps: '30' }
+  const state = { format: 'png', ratio: '16:9', size: '1920' }
   let exporting = false
 
   const veil = el('div', 'ce-modal-veil')
@@ -53,29 +62,15 @@ export function openExportModal(deps) {
     get: () => state.size,
     set: (v) => (state.size = v),
   })
-  const durationRow = select({
-    label: 'Duration',
-    options: [
-      { label: '3 s', value: '3' },
-      { label: '5 s', value: '5' },
-      { label: '10 s', value: '10' },
-    ],
-    get: () => state.duration,
-    set: (v) => (state.duration = v),
-  })
-  const fpsRow = segmented({
-    label: 'Frame rate',
-    options: ['30', '60'],
-    get: () => state.fps,
-    set: (v) => (state.fps = v),
-  })
+  const recNote = el('div', 'ce-rec-note', 'Records the live view until you stop.')
 
   const syncRows = () => {
     const video = state.format === 'mp4'
-    durationRow.style.display = video ? '' : 'none'
-    fpsRow.style.display = video ? '' : 'none'
+    ratioRow.style.display = video ? 'none' : ''
+    sizeRow.style.display = video ? 'none' : ''
+    recNote.style.display = video ? '' : 'none'
+    exportBtn.textContent = video ? 'Start recording' : 'Export'
   }
-  syncRows()
 
   const progress = el('div', 'ce-progress')
   const fill = el('i')
@@ -88,8 +83,9 @@ export function openExportModal(deps) {
   const exportBtn = button('Export', () => run(), { accent: true })
   const actions = el('div', 'ce-modal-actions')
   actions.append(cancelBtn, exportBtn)
+  syncRows()
 
-  card.append(formatRow, ratioRow, sizeRow, durationRow, fpsRow, status, progress, actions)
+  card.append(formatRow, ratioRow, sizeRow, recNote, status, progress, actions)
   veil.append(card)
   document.body.append(veil)
 
@@ -117,35 +113,40 @@ export function openExportModal(deps) {
 
   async function run() {
     if (exporting) return
+    if (state.format === 'mp4') {
+      // one recording at a time — a second Start would orphan the first pill
+      if (deps.recorder?.recording) {
+        close()
+        return
+      }
+      setBusy(true)
+      status.textContent = 'Starting…'
+      try {
+        await deps.recorder.start()
+      } catch (err) {
+        console.error('Recording failed to start:', err)
+        setBusy(false)
+        status.style.display = ''
+        status.textContent = 'Recording failed to start'
+        return
+      }
+      setBusy(false)
+      close()
+      showRecPill(deps.recorder)
+      return
+    }
     const { width, height } = dims()
     const { renderer, composer, camera } = deps
     setBusy(true)
     try {
-      if (state.format === 'mp4') {
-        status.textContent = 'Rendering…'
-        deps.pauseLoop()
-        try {
-          const blob = await exportVideo({
-            renderer, composer, camera, width, height,
-            fps: parseInt(state.fps, 10),
-            duration: parseInt(state.duration, 10),
-            step: deps.step,
-            onProgress: (p) => (fill.style.width = `${Math.round(p * 100)}%`),
-          })
-          downloadBlob(blob, 'clean-earth.mp4')
-        } finally {
-          deps.resumeLoop()
-        }
-      } else {
-        status.textContent = 'Exporting…'
-        fill.style.width = '50%'
-        const png = state.format === 'png'
-        const blob = await exportImage({
-          renderer, composer, camera, width, height,
-          format: png ? 'image/png' : 'image/jpeg',
-        })
-        downloadBlob(blob, `clean-earth-${width}x${height}.${png ? 'png' : 'jpg'}`)
-      }
+      status.textContent = 'Exporting…'
+      fill.style.width = '50%'
+      const png = state.format === 'png'
+      const blob = await exportImage({
+        renderer, composer, camera, width, height,
+        format: png ? 'image/png' : 'image/jpeg',
+      })
+      downloadBlob(blob, `clean-earth-${width}x${height}.${png ? 'png' : 'jpg'}`)
       setBusy(false)
       close()
     } catch (err) {
@@ -154,5 +155,66 @@ export function openExportModal(deps) {
       status.style.display = ''
       status.textContent = 'Export failed'
     }
+  }
+}
+
+// Discreet REC pill — fixed top-center under the top bar while a live
+// recording runs. Deliberately NOT hidden by the no-UI mode (see v28.css):
+// users hide the UI while recording precisely to get a clean capture.
+function showRecPill(recorder) {
+  const pill = el('div', 'ce-rec ce-glassbox')
+  const dot = el('span', 'ce-rec-dot')
+  const time = el('span', 'ce-rec-time', '0:00')
+  const stopBtn = button('Stop', () => finish(), {})
+  pill.append(dot, time, stopBtn)
+  document.body.append(pill)
+
+  let done = false
+  const timer = setInterval(() => {
+    time.textContent = fmtElapsed(recorder.elapsed)
+  }, 250)
+
+  function teardown() {
+    clearInterval(timer)
+    recorder.onError = null
+    recorder.onAutoStop = null
+  }
+
+  async function finish() {
+    if (done) return
+    done = true
+    stopBtn.disabled = true
+    teardown()
+    try {
+      const blob = await recorder.stop()
+      downloadBlob(blob, 'clean-earth-recording.mp4')
+      pill.remove()
+    } catch (err) {
+      console.warn('Recording failed:', err)
+      fail()
+    }
+  }
+
+  function fail() {
+    stopBtn.remove()
+    dot.remove()
+    time.textContent = 'Recording failed'
+    setTimeout(() => pill.remove(), 2000)
+  }
+
+  // canvas was resized mid-recording — the recorder finalized gracefully
+  recorder.onAutoStop = (blob) => {
+    if (done) return
+    done = true
+    teardown()
+    downloadBlob(blob, 'clean-earth-recording.mp4')
+    pill.remove()
+  }
+  recorder.onError = (err) => {
+    if (done) return
+    done = true
+    console.warn('Recording failed:', err)
+    teardown()
+    fail()
   }
 }

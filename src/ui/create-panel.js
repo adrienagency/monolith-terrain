@@ -1,47 +1,29 @@
 // CREATE panel — everything that makes the map, in one place (right dock).
-// Two tabs, Figma-style: Style (the look of the map) and Camera (viewpoint,
-// focus, motion, performance). Sections are exclusive accordions.
+// Sections are exclusive accordions. Camera lives in its own sibling panel.
 
-import { el, slider, color, swatch, toggle, select, segmented, button, section, refreshAll } from './kit.js'
+import { el, slider, color, swatch, toggle, select, button, section, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
 import { TEMPLATES } from '../templates.js'
 import { generatePalette, generateStyle, generateGridContour } from '../palette.js'
 import { REFLECTION_TYPES } from '../lake.js'
 
+const ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h10M18 8h2M4 16h2M10 16h10"/><circle cx="16" cy="8" r="2.2"/><circle cx="8" cy="16" r="2.2"/></svg>'
+
 export function buildCreatePanel(ctx) {
   const { params } = ctx
-  const panel = new Panel({ title: 'Create', side: 'right', width: 268 })
+  const panel = new Panel({
+    title: 'Create',
+    icon: ICON,
+    side: 'right',
+    width: 268,
+    tip: 'Shape the look of the map — templates, colors, clouds, water, light.',
+  })
 
-  // --- tabs
-  const tabs = el('div', 'ce-row')
-  const styleTab = el('div')
-  const cameraTab = el('div')
-  let tab = 'style'
-  tabs.append(
-    segmented({
-      options: [
-        { label: 'Style', value: 'style' },
-        { label: 'Camera', value: 'camera' },
-      ],
-      get: () => tab,
-      set: (v) => {
-        tab = v
-        styleTab.style.display = v === 'style' ? '' : 'none'
-        cameraTab.style.display = v === 'camera' ? '' : 'none'
-      },
-    }).firstChild
-  )
-  cameraTab.style.display = 'none'
-  panel.add(tabs, styleTab, cameraTab)
-
-  const addTo = (host, sec) => {
-    panel.addSection(sec)
-    host.append(sec.root)
-    return sec
-  }
+  const addTo = (sec) => panel.addSection(sec)
 
   // ------------------------------------------------------------ Templates
-  const sTpl = addTo(styleTab, section('Templates', { open: true }))
+  const sTpl = addTo(section('Templates', { open: true }))
   const cards = el('div', 'ce-cards')
   const tplButtons = []
   for (const key of Object.keys(TEMPLATES)) {
@@ -77,7 +59,7 @@ export function buildCreatePanel(ctx) {
 
   // --------------------------------------------------------------- Colors
   const mode = () => (params.darkMode ? 'dark' : 'light')
-  const sCol = addTo(styleTab, section('Colors'))
+  const sCol = addTo(section('Colors'))
   sCol.body.append(el('div', 'ce-label', 'Elevation ramp, low to high'))
   const ramp = el('div', 'ce-ramp')
   params.rampStops.forEach((stop, i) => {
@@ -108,7 +90,7 @@ export function buildCreatePanel(ctx) {
   sCol.body.append(shuffleRow)
 
   // ------------------------------------------------------------ Map style
-  const sMap = addTo(styleTab, section('Map style'))
+  const sMap = addTo(section('Map style'))
   const u = () => ctx.terrain.mapUniforms
   sMap.body.append(
     slider({ label: 'Hypsometric tint', min: 0, max: 1, step: 0.02, get: () => params.mapTint, set: (v) => { params.mapTint = v; u().uTint.value = v } }),
@@ -125,7 +107,7 @@ export function buildCreatePanel(ctx) {
   )
 
   // -------------------------------------------------------------- Terrain
-  const sTer = addTo(styleTab, section('Terrain'))
+  const sTer = addTo(section('Terrain'))
   const exag = slider({
     label: 'Vertical scale',
     min: 0.5,
@@ -157,7 +139,7 @@ export function buildCreatePanel(ctx) {
   )
 
   // --------------------------------------------------------------- Clouds
-  const sCld = addTo(styleTab, section('Clouds'))
+  const sCld = addTo(section('Clouds'))
   const rebuildClouds = () => ctx.clouds.build(params)
   const cloudLive = (label, key, min, max, step) =>
     slider({ label, min, max, step, get: () => params[key], set: (v) => { params[key] = v } })
@@ -182,7 +164,7 @@ export function buildCreatePanel(ctx) {
   )
 
   // ---------------------------------------------------------------- Water
-  const sWat = addTo(styleTab, section('Water'))
+  const sWat = addTo(section('Water'))
   sWat.body.append(
     toggle({ label: 'Glass sea', get: () => params.lakeEnabled, set: (v) => { params.lakeEnabled = v; ctx.lakeRebuild() } }),
     toggle({ label: 'Altitude lakes', get: () => params.lakesAltitude, set: (v) => { params.lakesAltitude = v; ctx.lakeRebuild() } }),
@@ -193,7 +175,7 @@ export function buildCreatePanel(ctx) {
   )
 
   // ---------------------------------------------------------------- Light
-  const sLig = addTo(styleTab, section('Light'))
+  const sLig = addTo(section('Light'))
   sLig.body.append(
     slider({ label: 'Sun intensity', min: 0, max: 16, step: 0.1, get: () => params.sunIntensity, set: (v) => { params.sunIntensity = v; ctx.placeSun() } }),
     slider({ label: 'Sun azimuth', min: 0, max: 360, step: 1, get: () => params.sunAzimuth, set: (v) => { params.sunAzimuth = v; ctx.placeSun() } }),
@@ -204,7 +186,7 @@ export function buildCreatePanel(ctx) {
   )
 
   // ---------------------------------------------------------------- Block
-  const sBlk = addTo(styleTab, section('Block'))
+  const sBlk = addTo(section('Block'))
   sBlk.body.append(
     toggle({ label: 'Show block', get: () => params.plinth, set: (v) => { params.plinth = v; ctx.plinth.setVisible(v && ctx.modes.mode === 'surface') } }),
     slider({ label: 'Thickness', min: 2, max: 16, step: 0.5, get: () => params.plinthDepth, set: (v) => { params.plinthDepth = v } }),
@@ -214,7 +196,7 @@ export function buildCreatePanel(ctx) {
   sBlk.body.children[1].querySelector('input').addEventListener('change', () => ctx.plinth.rebuild(ctx.terrain, params))
 
   // -------------------------------------------------------------- Effects
-  const sFx = addTo(styleTab, section('Effects'))
+  const sFx = addTo(section('Effects'))
   sFx.body.append(
     slider({ label: 'Exposure', min: 0.2, max: 3, step: 0.02, get: () => params.exposure, set: (v) => { params.exposure = v; ctx.exposureFx.uniforms.get('exposure').value = v } }),
     slider({ label: 'Contrast', min: -0.2, max: 0.5, step: 0.01, get: () => params.contrast, set: (v) => { params.contrast = v; ctx.contrastFx.uniforms.get('contrast').value = v } }),
@@ -224,36 +206,6 @@ export function buildCreatePanel(ctx) {
     slider({ label: 'Fog start', min: 5, max: 60, step: 0.5, get: () => params.fogNear, set: (v) => { params.fogNear = v; ctx.fogRef.near = v } }),
     slider({ label: 'Fog end', min: 15, max: 90, step: 0.5, get: () => params.fogFar, set: (v) => { params.fogFar = v; ctx.fogRef.far = v } }),
     color({ label: 'Fog colour', get: () => params.fogColor, set: (v) => { params.fogColor = v; ctx.fogRef.color.set(v); ctx.scene.background.set(v) } })
-  )
-
-  // ============================================================== Camera tab
-  const sCam = addTo(cameraTab, section('Lens & focus', { open: true }))
-  sCam.body.append(
-    slider({ label: 'Field of view', min: 20, max: 60, step: 1, get: () => params.fov, set: (v) => { params.fov = v; ctx.camera.fov = v; ctx.camera.updateProjectionMatrix() } }),
-    toggle({ label: 'Autofocus (pointer)', get: () => params.autoFocus, set: (v) => { params.autoFocus = v } }),
-    slider({ label: 'Focus distance', min: 5, max: 60, step: 0.1, get: () => params.focusDistance, set: (v) => { params.focusDistance = v } }),
-    slider({ label: 'Focus range', min: 0.5, max: 60, step: 0.1, get: () => params.focusRange, set: (v) => { params.focusRange = v; ctx.dof.cocMaterial.worldFocusRange = v } }),
-    slider({ label: 'Bokeh', min: 0, max: 8, step: 0.1, get: () => params.bokehScale, set: (v) => { params.bokehScale = v; ctx.dof.bokehScale = v; ctx.dofPass.enabled = v > 0 } })
-  )
-
-  const sMot = addTo(cameraTab, section('Motion'))
-  sMot.body.append(
-    toggle({ label: 'Pause ambient motion', get: () => params.paused, set: (v) => { params.paused = v } }),
-    slider({ label: 'Fly duration', min: 0.4, max: 4, step: 0.1, get: () => params.flyDuration, set: (v) => { params.flyDuration = v } }),
-    select({ label: 'Fly easing', options: ['smooth', 'glide', 'linear'], get: () => params.flyEasing, set: (v) => { params.flyEasing = v } })
-  )
-  const flyRow = el('div', 'ce-btn-row')
-  flyRow.append(
-    button('Fly the GPX track', () => ctx.flyTrack(), { accent: true }),
-    button('Stop', () => ctx.stopTour(), { ghost: true })
-  )
-  sMot.body.append(flyRow)
-
-  const sPerf = addTo(cameraTab, section('Performance'))
-  sPerf.body.append(
-    slider({ label: 'Render scale', min: 0.5, max: 2, step: 0.05, get: () => params.pixelRatio, set: (v) => { params.pixelRatio = v; ctx.renderer.setPixelRatio(v); ctx.composer.setSize(window.innerWidth, window.innerHeight) } }),
-    select({ label: 'Shadows', options: ['dynamic', 'static', 'off'], get: () => params.shadowMode, set: (v) => { params.shadowMode = v; ctx.applyShadowMode() } }),
-    select({ label: 'Shadow resolution', options: ['1024', '2048', '4096'], get: () => String(params.shadowRes), set: (v) => { params.shadowRes = +v; ctx.setShadowRes(+v) } })
   )
 
   return panel

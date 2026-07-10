@@ -165,6 +165,9 @@ export class Modes {
       // block (~3 500 km up) hands over above the 4 000 km globe gate
       entryAltM = THREE.MathUtils.clamp(this.hooks.surfaceCamAltMeters() * 1.15, 15000, 6000000)
     }
+    // an explicit altitude must respect the orbit ceiling too, or the camera
+    // would sit above controls.maxDistance and snap every frame
+    entryAltM = Math.min(entryAltM, MAX_ALT_M)
     this.busy = true
     this.announce('FX OFFLINE — ENTERING ORBITAL VIEW')
     const { lat, lon } = this.hooks.getSurfaceLatLon()

@@ -4,18 +4,31 @@
 // hypsometric ramp, bathymetric blues, contour lines, 10° graticule, paper
 // noise. Refinement is hole-free: a tile only subdivides once all four
 // children have their data, so the parent keeps rendering until then.
+// A slowly orbiting cloud shell (globe-clouds.js) dresses the planet view.
 
 import * as THREE from 'three'
 import { R_GLOBE, MERCATOR_MAX_LAT, EARTH_RADIUS_M, tileToLatLon, latLonToSphere } from './geo.js'
 import { rampColorStops } from './palette.js'
+import { GlobeClouds } from './globe-clouds.js'
 
 const TILE_URL = (z, x, y) => `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`
 const ROOT_Z = 2
 const MAX_Z = 11
-const GRID = 24 // segments per patch edge
 const MAX_CONCURRENT = 6
 const CACHE_MAX = 420 // ready tiles kept before LRU eviction
 const SPLIT_RATIO = 0.38 // tile chord / camera distance beyond which we refine
+const MERGE_RATIO = SPLIT_RATIO * 0.8 // hysteresis: refined tiles only coarsen below this
+
+// segments per patch edge — low zooms form the planet silhouette in the full
+// view, so they get denser grids: a z3 tile spans 45 degrees of longitude and
+// 24 segments there leaves visibly flat facets (and jagged exaggerated relief)
+// on the limb
+function gridFor(z) {
+  if (z <= 2) return 64
+  if (z <= 3) return 48
+  if (z <= 5) return 32
+  return 24
+}
 
 // ---------------------------------------------------------------- shader
 
@@ -121,20 +134,28 @@ async function fetchTile(z, x, y, signal) {
     heights[i] = rgba[i * 4] * 256 + rgba[i * 4 + 1] + rgba[i * 4 + 2] / 256 - 32768
   }
   const texture = new THREE.CanvasTexture(c)
-  texture.generateMipmaps = true
-  texture.minFilter = THREE.LinearMipmapLinearFilter
+  // NO mipmaps: terrarium packs meters into r*256 + g + b/256, and mip
+  // generation rounds each channel to 8 bits independently — a half-unit
+  // rounding of the r channel alone injects up to ~128 m of elevation noise
+  // into every minified sample, which the contour shader turns into speckled
+  // garbage all over the aerial view. Plain bilinear filtering is exact here
+  // (the decode is a linear combination of the channels), so we keep it.
+  texture.generateMipmaps = false
+  texture.minFilter = THREE.LinearFilter
   texture.magFilter = THREE.LinearFilter
   texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping
-  texture.anisotropy = 4
   return { texture, heights }
 }
 
 function sampleHeights(heights, u, v) {
-  // bilinear sample, u/v in [0,1], row 0 = north
-  const x = Math.min(Math.max(u * 255, 0), 254.999)
-  const y = Math.min(Math.max(v * 255, 0), 254.999)
-  const x0 = Math.floor(x)
-  const y0 = Math.floor(y)
+  // bilinear sample, u/v in [0,1], row 0 = north. Pixel CENTERS sit at
+  // (i + 0.5)/256 — the same convention the GPU uses when the fragment shader
+  // reads uTex — so vertex relief and shaded texture stay registered instead
+  // of sliding half a pixel apart.
+  const x = Math.min(Math.max(u * 256 - 0.5, 0), 255)
+  const y = Math.min(Math.max(v * 256 - 0.5, 0), 255)
+  const x0 = Math.min(Math.floor(x), 254)
+  const y0 = Math.min(Math.floor(y), 254)
   const fx = x - x0
   const fy = y - y0
   const i = y0 * 256 + x0
@@ -184,6 +205,10 @@ export class Globe {
     this._buildPoleCaps()
     this._buildAtmosphere()
 
+    // orbiting cloud cover — lives inside group so globe.setVisible rules it
+    this.clouds = new GlobeClouds(R_GLOBE)
+    this.group.add(this.clouds.group)
+
     // roots load immediately so entering orbit never shows a bare sphere
     const n = 2 ** ROOT_Z
     this.roots = []
@@ -221,6 +246,7 @@ export class Globe {
 
   setSunDir(v) {
     this.uniforms.uSunDir.value.copy(v).normalize()
+    this.clouds?.setSunDir(v)
   }
 
   setInk(color) {
@@ -233,8 +259,8 @@ export class Globe {
     for (const north of [true, false]) {
       const geo = new THREE.SphereGeometry(
         R_GLOBE * 1.0005,
-        48,
-        8,
+        96,
+        12,
         0,
         Math.PI * 2,
         north ? 0 : Math.PI - THREE.MathUtils.degToRad(90 - MERCATOR_MAX_LAT),
@@ -248,7 +274,7 @@ export class Globe {
   }
 
   _buildAtmosphere() {
-    const geo = new THREE.SphereGeometry(R_GLOBE * 1.018, 64, 48)
+    const geo = new THREE.SphereGeometry(R_GLOBE * 1.018, 96, 64)
     const mat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -338,13 +364,22 @@ export class Globe {
   }
 
   _buildMesh(t) {
-    const G = GRID
+    const G = gridFor(t.z)
     const nV = (G + 1) * (G + 1)
     const positions = new Float32Array(nV * 3)
+    const normals = new Float32Array(nV * 3)
     const uvs = new Float32Array(nV * 2)
     const latlons = new Float32Array(nV * 2)
     const dispScale = (R_GLOBE / EARTH_RADIUS_M) * this.exaggeration
     const v3 = new THREE.Vector3()
+
+    // every vertex is projected EXACTLY onto the sphere (+ displaced along the
+    // radius) — never interpolated across a flat quad
+    const posAt = (u, v, out) => {
+      const { lat, lon } = tileToLatLon(t.x + u, t.y + v, t.z)
+      const h = Math.max(sampleHeights(t.heights, u, v), 0) // oceans stay on the sphere
+      return latLonToSphere(lat, lon, R_GLOBE + h * dispScale, out)
+    }
 
     let k = 0
     for (let j = 0; j <= G; j++) {
@@ -352,8 +387,7 @@ export class Globe {
         const u = i / G
         const v = j / G
         const { lat, lon } = tileToLatLon(t.x + u, t.y + v, t.z)
-        const h = Math.max(sampleHeights(t.heights, u, v), 0) // oceans stay on the sphere
-        latLonToSphere(lat, lon, R_GLOBE + h * dispScale, v3)
+        posAt(u, v, v3)
         positions[k * 3] = v3.x
         positions[k * 3 + 1] = v3.y
         positions[k * 3 + 2] = v3.z
@@ -362,6 +396,37 @@ export class Globe {
         latlons[k * 2] = lat
         latlons[k * 2 + 1] = lon
         k++
+      }
+    }
+
+    // analytic normals via central differences on the displaced surface.
+    // computeVertexNormals would average the skirt walls into the border
+    // vertices, tilting them and drawing a dark shading seam around every
+    // tile — the "grid of outlines" glitch in the aerial view.
+    {
+      const eps = 1 / G
+      const pE = new THREE.Vector3()
+      const pW = new THREE.Vector3()
+      const pN = new THREE.Vector3()
+      const pS = new THREE.Vector3()
+      let m = 0
+      for (let j = 0; j <= G; j++) {
+        for (let i = 0; i <= G; i++) {
+          const u = i / G
+          const v = j / G
+          posAt(u + eps, v, pE)
+          posAt(u - eps, v, pW)
+          posAt(u, v - eps, pN)
+          posAt(u, v + eps, pS)
+          // dv points south, du points east: south x east faces outward
+          pS.sub(pN)
+          pE.sub(pW)
+          v3.crossVectors(pS, pE).normalize()
+          normals[m * 3] = v3.x
+          normals[m * 3 + 1] = v3.y
+          normals[m * 3 + 2] = v3.z
+          m++
+        }
       }
     }
 
@@ -384,12 +449,18 @@ export class Globe {
     for (let i = G - 1; i >= 0; i--) border.push(G * (G + 1) + i) // south row
     for (let j = G - 1; j >= 1; j--) border.push(j * (G + 1)) // west col
 
-    const skirtDrop = Math.max(t.chord * 0.02, 0.05)
+    // deep enough to swallow cross-LOD height mismatches (a few hundred
+    // exaggerated meters at most), but capped — the old chord-proportional
+    // drop dug multi-unit trenches on z2/z3 tiles that read as dark bands at
+    // the limb
+    const skirtDrop = Math.min(Math.max(t.chord * 0.012, 0.1), 0.9)
     const total = nV + border.length
     const pos2 = new Float32Array(total * 3)
+    const nrm2 = new Float32Array(total * 3)
     const uv2 = new Float32Array(total * 2)
     const ll2 = new Float32Array(total * 2)
     pos2.set(positions)
+    nrm2.set(normals)
     uv2.set(uvs)
     ll2.set(latlons)
     border.forEach((src, bi) => {
@@ -398,6 +469,10 @@ export class Globe {
       pos2[dst * 3] = positions[src * 3] * inv
       pos2[dst * 3 + 1] = positions[src * 3 + 1] * inv
       pos2[dst * 3 + 2] = positions[src * 3 + 2] * inv
+      // skirts inherit the rim normal so the wall shades exactly like the edge
+      nrm2[dst * 3] = normals[src * 3]
+      nrm2[dst * 3 + 1] = normals[src * 3 + 1]
+      nrm2[dst * 3 + 2] = normals[src * 3 + 2]
       uv2[dst * 2] = uvs[src * 2]
       uv2[dst * 2 + 1] = uvs[src * 2 + 1]
       ll2[dst * 2] = latlons[src * 2]
@@ -413,10 +488,10 @@ export class Globe {
 
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(pos2, 3))
+    geo.setAttribute('normal', new THREE.BufferAttribute(nrm2, 3))
     geo.setAttribute('uv', new THREE.BufferAttribute(uv2, 2))
     geo.setAttribute('latlon', new THREE.BufferAttribute(ll2, 2))
     geo.setIndex(indices)
-    geo.computeVertexNormals()
     geo.computeBoundingSphere()
 
     const mesh = new THREE.Mesh(geo, this._materialFor(t.texture))
@@ -430,8 +505,11 @@ export class Globe {
 
   // Traverse the quadtree: a tile subdivides only when all four children are
   // ready, so coverage is always complete. Returns the number of drawn tiles.
-  update(camera) {
+  // dt (seconds, optional — callers passing only the camera keep working)
+  // drives the orbiting cloud cover.
+  update(camera, dt = 0.016) {
     if (!this.enabled) return 0
+    this.clouds.update(camera, dt)
     this.frame++
     const camPos = camera.position
     const camDir = camPos.clone().normalize()
@@ -451,22 +529,28 @@ export class Globe {
 
     t.lastUsed = this.frame
     const dist = Math.max(camPos.distanceTo(t.center) - t.chord * 0.5, 1)
-    const wantSplit = t.z < MAX_Z && t.chord / dist > SPLIT_RATIO
+    // hysteresis: a tile that already refined only coarsens once the ratio
+    // falls well below the split point, so hovering at the threshold no
+    // longer flickers between parent and children every few frames
+    const ratio = t.chord / dist
+    const wantSplit = t.z < MAX_Z && ratio > (t.refined ? MERGE_RATIO : SPLIT_RATIO)
 
     if (wantSplit) {
       const kids = this._children(t)
       for (const k of kids) {
         k.lastUsed = this.frame // protect loading/fresh children from LRU
-        if (k.state === 'empty') this._request(k, t.chord / dist)
+        if (k.state === 'empty') this._request(k, ratio)
       }
       // hole-free rule: descend only when all four children can draw —
       // any error keeps the parent covering the whole quad
       if (kids.every((k) => k.state === 'ready' && k.mesh)) {
+        t.refined = true
         for (const k of kids) this._traverse(k, camPos, camDir)
         return
       }
     }
 
+    t.refined = false
     if (t.state === 'ready' && t.mesh) {
       t.mesh.visible = true
       this._drawn++
@@ -520,6 +604,7 @@ export class Globe {
   }
 
   dispose() {
+    this.clouds.dispose()
     for (const t of this.tiles.values()) {
       if (t.mesh) {
         t.mesh.geometry.dispose()
