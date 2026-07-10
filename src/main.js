@@ -792,7 +792,9 @@ async function fetchAndBuildDem() {
   dem = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom })
   terrain.setDem(dem)
   params.source = 'real'
-  clouds?.reroll() // a new view level deserves a fresh cloud layout
+  try {
+    clouds?.reroll() // a new view level deserves a fresh cloud layout
+  } catch {} // a cosmetic cloud hiccup must never abort a terrain build
   refreshAll()
   loadingEl.textContent = 'generating terrain…'
   await regenerateTerrain()

@@ -41,11 +41,26 @@ export class Recorder {
   async start() {
     if (this._recording) return
     const canvas = this.renderer.domElement
+    // H.264 refuses ODD dimensions outright — and the live canvas is whatever
+    // window-width x pixel-ratio happens to be. When either side is odd, we
+    // record through an even-sized bridge canvas (one drawImage per frame,
+    // clipping a single pixel) instead of failing the whole recording.
+    const evenW = canvas.width & ~1
+    const evenH = canvas.height & ~1
+    if (evenW !== canvas.width || evenH !== canvas.height) {
+      this._bridge = document.createElement('canvas')
+      this._bridge.width = evenW
+      this._bridge.height = evenH
+      this._bridgeCtx = this._bridge.getContext('2d')
+    } else {
+      this._bridge = null
+      this._bridgeCtx = null
+    }
     this.output = new Output({
       format: new Mp4OutputFormat({ fastStart: 'in-memory' }),
       target: new BufferTarget(),
     })
-    this.source = new CanvasSource(canvas, {
+    this.source = new CanvasSource(this._bridge ?? canvas, {
       codec: 'avc',
       bitrate: QUALITY_HIGH,
       keyFrameInterval: 2,
@@ -72,6 +87,7 @@ export class Recorder {
         return
       }
       if (this._busy) return // encoder backed up — drop this frame
+      if (this._bridgeCtx) this._bridgeCtx.drawImage(this.renderer.domElement, 0, 0)
       const t = (performance.now() - this._t0) / 1000
       const dt = t - this._lastT
       this._lastT = t
