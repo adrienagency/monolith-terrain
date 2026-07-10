@@ -87,3 +87,26 @@ test('an elongated band WITH internal spread is still rejected as a contour band
   )
   assert.equal(detectLakes(dem, { minCells: 50 }).length, 0)
 })
+
+test('a crescent lake with resampling wobble on its fringe is accepted (Leman)', () => {
+  const size = 64
+  // a curved lake: low bounding-box fill, and a fringe of cells wobbled by
+  // tile resampling across the full flood tolerance — the spread test fails,
+  // the dominant-value (mode) test must still recognise water
+  const inCrescent = (x, y) => {
+    const dx = x - 32
+    const dy = y - 44
+    const r = Math.hypot(dx, dy)
+    return r > 14 && r < 22 && dy < -4 // an arc band, ~330 cells
+  }
+  let fringe = 0
+  const dem = makeDem(size, (x, y) => {
+    if (!inCrescent(x, y)) return rugged(x, y)
+    // every 5th lake cell wobbles up to +-0.3 m (shoreline resampling)
+    fringe++
+    return fringe % 5 === 0 ? 371 + (fringe % 2 ? 0.3 : -0.3) : 371
+  })
+  const lakes = detectLakes(dem, { minCells: 50 })
+  assert.equal(lakes.length, 1)
+  assert.ok(Math.abs(lakes[0].elevM - 371) <= 0.3)
+})

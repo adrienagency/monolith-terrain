@@ -6,11 +6,12 @@
 //    pierce the surface. The slab geometry follows the plinth's superellipse
 //    footprint and its top perimeter carries a small rounded bevel.
 //  · ALTITUDE LAKES: real lakes sit perfectly FLAT in the DEM, so connected
-//    flat regions above sea level are detected by flood fill and each gets a
-//    raised glass PLATE at its own elevation (mountain lakes, reservoirs…):
+//    flat regions above sea level are detected by flood fill and each gets
+//    CARVED glass water at its own elevation (mountain lakes, reservoirs…):
 //    a smooth Chaikin-rounded shoreline instead of the DEM pixel staircase,
-//    the top sitting proud of the land, a small rounded bevel on its edge,
-//    and short tinted walls dropping into the terrain bowl.
+//    the surface flush with the surrounding ground — the land rising around
+//    it is what reads as the carve — and short buried walls capping the
+//    volume. Shown whenever lakesAltitude is on, independent of the sea.
 // Shared controls: colour, blur (frosted ↔ clear), clarity (how far light
 // travels before the water tint absorbs it — shallow reads clear, deep
 // tinted) and waves (a gentle animated swell of the glass top, pinned at the
@@ -61,6 +62,7 @@ export function detectLakes(dem, { tolM = 0.35, minCells = null, minFill = 0.25,
       maxY = -1
     let minH = h0,
       maxH = h0
+    const histo = new Map() // 0.1 m bins — see the mode test below
     while (top > 0) {
       const i = stack[--top]
       cells.push(i)
@@ -73,6 +75,8 @@ export function detectLakes(dem, { tolM = 0.35, minCells = null, minFill = 0.25,
       const v = data[i]
       if (v < minH) minH = v
       if (v > maxH) maxH = v
+      const q = Math.round(v * 10)
+      histo.set(q, (histo.get(q) || 0) + 1)
       // 4-neighbourhood, same water surface = same elevation within tolerance
       if (x > 0 && !visited[i - 1] && Math.abs(data[i - 1] - h0) <= tolM) (visited[i - 1] = 1), (stack[top++] = i - 1)
       if (x < size - 1 && !visited[i + 1] && Math.abs(data[i + 1] - h0) <= tolM) (visited[i + 1] = 1), (stack[top++] = i + 1)
@@ -82,17 +86,24 @@ export function detectLakes(dem, { tolM = 0.35, minCells = null, minFill = 0.25,
         (visited[i + size] = 1), (stack[top++] = i + size)
     }
     if (cells.length < min) continue
-    // acceptance — flatness first, shape second:
+    // acceptance — water signature first, shape second:
     // · spread ≤ flatM: the surface is water-flat, accept ANY outline
+    // · mode ≥ 60%: tile resampling wobbles a big lake's shoreline cells by
+    //   up to ±tol (Léman spans the full 0.7 m at 160 km views, failing the
+    //   spread test), but the BULK of a real lake still lands on one exact
+    //   value — >60% of cells in a single 0.1 m bin. A contour band on a
+    //   slope spreads uniformly across its range and never concentrates.
     // · otherwise fall back to the blob checks: a snaking band covers only a
     //   sliver of its bounding box (fill), a straight band is far thinner
     //   than a blob of the same area, whose narrow side ≈ √area (thinness)
-    const flat = maxH - minH <= flatM
+    let modeCount = 0
+    for (const c of histo.values()) if (c > modeCount) modeCount = c
+    const watery = maxH - minH <= flatM || modeCount / cells.length >= 0.6
     const w = maxX - minX + 1
     const h = maxY - minY + 1
     const fill = cells.length / (w * h)
     const thin = Math.min(w, h) < 0.4 * Math.sqrt(cells.length)
-    if (flat || (fill >= minFill && !thin)) lakes.push({ cells, elevM: h0, size })
+    if (watery || (fill >= minFill && !thin)) lakes.push({ cells, elevM: h0, size })
   }
   return lakes
 }
@@ -417,6 +428,11 @@ function contourNormals(pts) {
 
 // ear-clipping triangulation of a simple polygon with positive shoelace
 // winding, emitted wound to face +y. O(n^2), fine for shoreline budgets.
+// Never leaves the interior hollow: if no textbook ear exists (numerical
+// stalemates on long near-collinear shoreline runs used to leave lakes as
+// empty outline rings), the most convex corner is force-clipped — for a
+// simple input polygon the error is bounded by numeric noise, and a filled
+// lake with a hairline overlap beats a hollow one.
 function earClipUp(poly) {
   const cross = (a, b, c) => (b.x - a.x) * (c.z - b.z) - (b.z - a.z) * (c.x - b.x)
   const inTri = (p, a, b, c) =>
@@ -428,6 +444,8 @@ function earClipUp(poly) {
   let guard = 0
   while (V.length > 3 && guard++ < 100000) {
     let clipped = false
+    let bestVi = -1
+    let bestCross = 0
     for (let vi = 0; vi < V.length; vi++) {
       const i0 = V[(vi - 1 + V.length) % V.length]
       const i1 = V[vi]
@@ -435,7 +453,12 @@ function earClipUp(poly) {
       const a = poly[i0]
       const b = poly[i1]
       const c = poly[i2]
-      if (cross(a, b, c) <= 1e-9) continue // reflex or degenerate corner
+      const cr = cross(a, b, c)
+      if (cr > bestCross) {
+        bestCross = cr
+        bestVi = vi
+      }
+      if (cr <= 1e-9) continue // reflex or degenerate corner
       let ear = true
       for (const j of V) {
         if (j === i0 || j === i1 || j === i2) continue
@@ -450,18 +473,29 @@ function earClipUp(poly) {
       clipped = true
       break
     }
-    if (!clipped) break // numeric stalemate — ship what we have
+    if (!clipped) {
+      if (bestVi === -1) break // no convex corner left at all — degenerate
+      const i0 = V[(bestVi - 1 + V.length) % V.length]
+      const i1 = V[bestVi]
+      const i2 = V[(bestVi + 1) % V.length]
+      idx.push(i0, i2, i1)
+      V.splice(bestVi, 1)
+    }
   }
   if (V.length === 3) idx.push(V[0], V[2], V[1])
   return idx
 }
 
-// raised glass plate for one altitude lake: short walls dropping into the
-// terrain bowl (no visible gap), a rounded top bevel like the sea slab's,
-// then a few inset rings easing the wave weight from the pinned rim to 1,
-// and an ear-clipped flat middle. Groups: material 0 = top (transmission),
-// material 1 = walls + bevel (tinted side glass).
-function lakePrismGeometry(contour, yBottom, yTop, bevel, fadeDist, bevelSegments = 3, fadeRings = 3) {
+// CARVED water for one altitude lake: the glass top sits FLUSH with the
+// surrounding terrain level (the DEM already holds lakes as flats at shore
+// height — the water reads as recessed because the land rises around it),
+// so no lift and no bevel: just short buried walls, one small inset ring
+// easing the wave weight in, and an ear-clipped flat middle. If the inset
+// ring's polygon self-intersects on a concave shore (detected by an
+// incomplete triangulation), the fill falls back to the rim polygon itself,
+// which is simple by construction — filled and rigid beats hollow.
+// Groups: material 0 = top (transmission), material 1 = walls (tinted).
+function lakePrismGeometry(contour, yBottom, yTop, fadeInset) {
   const M = contour.length
   const pos = []
   const nrm = []
@@ -472,55 +506,48 @@ function lakePrismGeometry(contour, yBottom, yTop, bevel, fadeDist, bevelSegment
     wgt.push(w)
   }
 
-  const rings = [{ y: yBottom, inset: 0, nk: 1, ny: 0 }, { y: yTop - bevel, inset: 0, nk: 1, ny: 0 }]
-  for (let k = 1; k <= bevelSegments; k++) {
-    const phi = (k / bevelSegments) * (Math.PI / 2)
-    rings.push({
-      y: yTop - bevel + bevel * Math.sin(phi),
-      inset: bevel * (1 - Math.cos(phi)),
-      nk: Math.cos(phi),
-      ny: Math.sin(phi),
-    })
-  }
-  const R = rings.length
-  for (const ring of rings)
-    for (const p of contour)
-      put(p.x - p.nx * ring.inset, ring.y, p.z - p.nz * ring.inset, p.nx * ring.nk, ring.ny, p.nz * ring.nk, 0)
-
-  // top: inset fade rings (weight eases in), all flat at yTop
-  const capStart = pos.length / 3
-  for (let j = 1; j <= fadeRings; j++) {
-    const inset = bevel + (fadeDist * j) / fadeRings
-    for (const p of contour) put(p.x - p.nx * inset, yTop, p.z - p.nz * inset, 0, 1, 0, j / fadeRings)
-  }
+  // walls: two rings on the exact contour, top edge flush
+  for (const ring of [{ y: yBottom }, { y: yTop }])
+    for (const p of contour) put(p.x, ring.y, p.z, p.nx, 0, p.nz, 0)
 
   const idx = []
-  for (let a = 0; a < R - 1; a++)
-    for (let i = 0; i < M; i++) {
-      const j = (i + 1) % M
-      idx.push(a * M + i, (a + 1) * M + i, (a + 1) * M + j, a * M + i, (a + 1) * M + j, a * M + j)
-    }
-  const sideCount = idx.length
-  const ringStart = (j) => (j === 0 ? (R - 1) * M : capStart + (j - 1) * M)
-  for (let jr = 0; jr < fadeRings; jr++) {
-    const A = ringStart(jr)
-    const B = ringStart(jr + 1)
-    for (let i = 0; i < M; i++) {
-      const j = (i + 1) % M
-      idx.push(A + i, B + i, B + j, A + i, B + j, A + j)
-    }
+  for (let i = 0; i < M; i++) {
+    const j = (i + 1) % M
+    idx.push(i, M + i, M + j, i, M + j, j)
   }
-  // flat middle — ear-clip the innermost ring's footprint
-  const inner = ringStart(fadeRings)
-  const innerPoly = contour.map((p) => ({ x: p.x - p.nx * (bevel + fadeDist), z: p.z - p.nz * (bevel + fadeDist) }))
-  for (const t of earClipUp(innerPoly)) idx.push(inner + t)
+  const sideCount = idx.length
+
+  // cap rim: same positions as the top wall ring but facing up (the wall
+  // ring keeps its horizontal normals — sharing verts would fake a dome
+  // edge on what must read as a dead-flat flush surface)
+  const rim = pos.length / 3
+  for (const p of contour) put(p.x, yTop, p.z, 0, 1, 0, 0)
+
+  // interior fill — try the inset ring (gives the swell interior vertices),
+  // validated by triangle count: a full triangulation of an M-gon has M-2
+  // triangles, anything less means the inset polygon folded
+  const innerPoly = contour.map((p) => ({ x: p.x - p.nx * fadeInset, z: p.z - p.nz * fadeInset }))
+  const innerTris = fadeInset > 0 ? earClipUp(innerPoly) : []
+  if (fadeInset > 0 && innerTris.length === (M - 2) * 3) {
+    const inner = pos.length / 3
+    for (const p of innerPoly) put(p.x, yTop, p.z, 0, 1, 0, 1)
+    // rim -> inner ring strip (top-facing), then the ear-clipped middle
+    for (let i = 0; i < M; i++) {
+      const j = (i + 1) % M
+      idx.push(rim + i, inner + i, inner + j, rim + i, inner + j, rim + j)
+    }
+    for (const t of innerTris) idx.push(inner + t)
+  } else {
+    // fallback: fill the rim polygon directly (simple by construction)
+    for (const t of earClipUp(contour)) idx.push(rim + t)
+  }
 
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
   geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(nrm), 3))
   geo.setAttribute('waveWeight', new THREE.BufferAttribute(new Float32Array(wgt), 1))
   geo.setIndex(idx)
-  geo.addGroup(0, sideCount, 1) // walls + bevel → tinted side glass
+  geo.addGroup(0, sideCount, 1) // walls → tinted side glass
   geo.addGroup(sideCount, idx.length - sideCount, 0) // top → transmission
   geo.computeBoundingSphere()
   return geo
@@ -644,8 +671,10 @@ export class Lake {
     this.updateMaterial(params) // normalize ior/reflections to the params
   }
 
-  // rebuild everything for the current zone: the sea block up to elevation 0,
-  // and one glass sheet per detected altitude lake
+  // rebuild everything for the current zone: the sea block up to elevation 0
+  // (gated by lakeEnabled), and one carved glass lake per detected flat —
+  // gated ONLY by lakesAltitude, so mountain lakes show even while the sea
+  // glass is switched off
   rebuild({ seaY, baseY, dem, params }) {
     // --- sea block
     if (!params.lakeEnabled || seaY < -9000 || seaY <= baseY + 0.1) {
@@ -676,7 +705,7 @@ export class Lake {
       this.group.remove(m)
     }
     this.lakeMeshes = []
-    if (!params.lakeEnabled || !params.lakesAltitude || !dem) return
+    if (!params.lakesAltitude || !dem) return
 
     const scale = (TERRAIN_SIZE / dem.extentMeters) * params.demExaggeration
     const lakes = detectLakes(dem)
@@ -684,11 +713,11 @@ export class Lake {
       const { cells, elevM, size } = lake
       // the lake's water level, raised past the fine-detail grain
       const yLake = (elevM - dem.meanM) * scale + 0.04 + (params.detail ?? 0) * 0.6
-      // the plate sits PROUD of the land — a visible slab of glass resting in
-      // the landscape, not a film painted onto it
-      const lift = 0.15
-      const yTop = yLake + lift
-      const yBottom = yLake - 0.6 // walls sink into the terrain bowl — no gap
+      // CARVED water: the glass sits flush with the surrounding ground (the
+      // DEM holds lakes as flats at shore level — the land rising around is
+      // what reads as the carve); a whisker of lift avoids z-fighting
+      const yTop = yLake + 0.02
+      const yBottom = yLake - 0.5 // buried walls cap the volume — no gap
 
       // pixel staircase -> smooth shoreline
       const raw = traceLakeOutline(cells, size)
@@ -703,16 +732,14 @@ export class Lake {
         per += Math.hypot(q.x - p.x, q.z - p.z)
         area2 += p.x * q.z - q.x * p.z
       }
-      // point budget follows the perimeter; inset sizes follow the lake's
-      // mean half-width so bevel + fade rings can never fold across a narrow
-      // ribbon and self-intersect
+      // point budget follows the perimeter; the wave fade inset follows the
+      // lake's mean half-width so it cannot fold across a narrow ribbon
       const budget = Math.max(48, Math.min(240, Math.round(per / 0.14)))
       const contour = contourNormals(decimateClosed(pts, budget))
       const halfWidth = Math.abs(area2) / Math.max(1e-6, per)
-      const bevel = Math.max(0.015, Math.min(0.08, lift * 0.5, halfWidth * 0.15))
-      const fadeDist = Math.min(0.5, halfWidth * 0.3)
+      const fadeInset = Math.min(0.4, halfWidth * 0.25)
 
-      const geo = lakePrismGeometry(contour, yBottom, yTop, bevel, fadeDist)
+      const geo = lakePrismGeometry(contour, yBottom, yTop, fadeInset)
       const mesh = new THREE.Mesh(geo, [this.lakeMat, this.seaSideMat])
       mesh.renderOrder = 3
       this.group.add(mesh)

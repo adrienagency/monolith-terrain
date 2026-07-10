@@ -198,10 +198,20 @@ function project(dem, lon, lat, size) {
   return [(w.x / TERRAIN_SIZE + 0.5) * size, (w.z / TERRAIN_SIZE + 0.5) * size]
 }
 
+// Elevation (meters) at or below which a masked pixel counts as SEA and is
+// removed from the region: OSM admin polygons extend into territorial waters,
+// but the requested boundary is the LAND outline (islands included — they sit
+// above sea level so they survive automatically). Slightly above 0 so noisy
+// coastal samples do not leave salt-and-pepper fringes.
+export const LAND_MIN_ELEV_M = 0.3
+
 // Draw the MultiPolygon white-on-black over the DEM footprint. Each polygon is
 // its own evenodd path (outer ring + holes) — adjacent undissolved polygons
-// (continents.json) union cleanly. A separate 1.5px blur pass anti-aliases the
-// boundary without seams between adjacent fills.
+// (continents.json) union cleanly. The admin fill is then clipped to LAND by
+// zeroing every white pixel whose DEM elevation sits at/below LAND_MIN_ELEV_M
+// (drops the maritime part of the polygons, keeps islands). The 1.5px blur
+// pass runs LAST so boundary and coastline both come out soft, seam-free.
+// Returns { texture, canvas } — the canvas backs the texture (do not mutate).
 export function rasterizeMask(coordinates, dem, size = MASK_SIZE) {
   const sharp = document.createElement('canvas')
   sharp.width = sharp.height = size
@@ -222,6 +232,27 @@ export function rasterizeMask(coordinates, dem, size = MASK_SIZE) {
     ctx.fill('evenodd')
   }
 
+  // land clip: mask and DEM cover the same footprint, so mask pixel → DEM
+  // sample is a plain scale (nearest neighbour — the blur below softens it).
+  // Caveat: inland land BELOW sea level (Netherlands polders, Death Valley)
+  // gets clipped too — acceptable v1, the DEM cannot tell it from sea.
+  if (dem.data) {
+    const id = ctx.getImageData(0, 0, size, size)
+    const px = id.data
+    const demSize = dem.size
+    const k = demSize / size
+    for (let y = 0; y < size; y++) {
+      const row = Math.min(demSize - 1, (y * k) | 0) * demSize
+      for (let x = 0; x < size; x++) {
+        const i = (y * size + x) * 4
+        if (px[i] > 0 && dem.data[row + Math.min(demSize - 1, (x * k) | 0)] <= LAND_MIN_ELEV_M) {
+          px[i] = px[i + 1] = px[i + 2] = 0
+        }
+      }
+    }
+    ctx.putImageData(id, 0, 0)
+  }
+
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = size
   const bctx = canvas.getContext('2d')
@@ -238,17 +269,19 @@ export function rasterizeMask(coordinates, dem, size = MASK_SIZE) {
   tex.generateMipmaps = false
   tex.colorSpace = THREE.NoColorSpace
   tex.needsUpdate = true
-  return tex
+  return { texture: tex, canvas }
 }
 
 // ---------------------------------------------------------------- public API
 
 // Resolve + rasterize the admin boundary for the current view.
-//   { lat, lon, zoom, dem } → { maskTexture, name, level } | null
+//   { lat, lon, zoom, dem } → { maskTexture, maskCanvas, name, level } | null
 // zoom is the app's demZoom (LEVEL_TABLE above); dem is the loaded DEM patch
-// (dem.js) whose georeferencing positions the mask. Returns null when the view
-// is whole-earth (z<5), when no polygon exists, or on any network failure —
-// the caller keeps the square slab in that case.
+// (dem.js) whose georeferencing positions the mask AND whose heightfield clips
+// it to land. maskCanvas is the 2048² canvas backing maskTexture — hand it to
+// region-plate.js buildRegionPlate to fit the plate. Returns null when the
+// view is whole-earth (z<5), when no polygon exists, or on any network
+// failure — the caller keeps the square slab in that case.
 export async function fetchRegionMask({ lat, lon, zoom, dem }) {
   const levelRow = levelForDemZoom(zoom)
   if (!levelRow || !dem) return null
@@ -260,8 +293,10 @@ export async function fetchRegionMask({ lat, lon, zoom, dem }) {
     if (!boundary || !boundary.coordinates.length) return null
     const near = filterFarParts(boundary.coordinates, dem)
     if (!near.length) return null
+    const raster = rasterizeMask(near, dem)
     return {
-      maskTexture: rasterizeMask(near, dem),
+      maskTexture: raster.texture,
+      maskCanvas: raster.canvas,
       name: boundary.name,
       level: levelRow.level,
     }

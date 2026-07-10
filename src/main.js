@@ -40,6 +40,7 @@ import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
 import { fetchRegionMask } from './region-mask.js'
+import { buildRegionPlate } from './region-plate.js'
 import { refreshAll } from './ui/kit.js'
 import { buildTopBar, buildBottomBar } from './ui/bars.js'
 import { buildCreatePanel } from './ui/create-panel.js'
@@ -70,12 +71,13 @@ const DEM_PRESETS = {
 }
 
 const params = {
-  // terrain source
+  // terrain source — boots over Auvergne-Rhone-Alpes with the three big
+  // alpine lakes in frame: Annecy, Bourget (Aix-les-Bains) and Leman (Geneva)
   source: 'real',
-  demLocation: 'Monument Valley',
-  demLat: 36.998,
-  demLon: -110.0984,
-  demZoom: 12,
+  demLocation: 'Custom',
+  demLat: 46.0,
+  demLon: 6.15,
+  demZoom: 9,
   demExaggeration: 2.2, // vertical relief pushed for a more dramatic read
 
   // terrain generation
@@ -403,6 +405,7 @@ const tween = {
 let selectedPoi = -1
 let fps = 60
 let scan = null // ScanController — instantiated once the terrain exists
+let regionPlate = null // adaptive plate under the cut landform (region mode)
 
 const poiFeet = (h) => terrain.heightToFeet(h)
 // night-survey ink set — the single source for every dark-mode surface
@@ -871,7 +874,8 @@ modes = new Modes({
       // they'd float on top of the planet
       gpxLayer.setVisible(v && params.gpxVisible)
       clouds.setVisible(v)
-      plinth.setVisible(v && params.plinth)
+      plinth.setVisible(v && params.plinth && !params.regionMode)
+      if (regionPlate) regionPlate.mesh.visible = v
       groundInfo.setVisible(v && params.groundInfo)
       traffic.setVisible(v)
       lake.setVisible(v)
@@ -1238,9 +1242,17 @@ const lakeRebuild = () =>
 // the view (continent/country/region/departement by zoom). The landform sits
 // straight on the ground: no plinth, no square ocean slab.
 let regionBusy = false
+function disposeRegionPlate() {
+  if (!regionPlate) return
+  scene.remove(regionPlate.mesh)
+  regionPlate.mesh.geometry.dispose()
+  regionPlate.mesh.material.dispose()
+  regionPlate = null
+}
 async function applyRegionMode() {
   if (!params.regionMode || params.source !== 'real' || !dem) {
     terrain.setRegionMask(null)
+    disposeRegionPlate()
     plinth.setVisible(params.plinth && modes.mode === 'surface')
     lakeRebuild() // restore the sea slab if the glass is on
     return
@@ -1253,10 +1265,21 @@ async function applyRegionMode() {
     terrain.setRegionMask(r ? r.maskTexture : null)
     plinth.setVisible(false)
     if (lake.sea) lake.sea.visible = false // the ocean slab would spill past the boundary
+    // the cut landform sits on a thin plate fitted to it with a small margin
+    disposeRegionPlate()
+    if (r) {
+      const p = buildRegionPlate({ maskCanvas: r.maskCanvas, params, topY: terrain.mapUniforms.uSeaY.value - 0.02 })
+      if (p) {
+        regionPlate = p
+        p.mesh.visible = modes.mode === 'surface'
+        scene.add(p.mesh)
+      }
+    }
     if (r) modes.announce(`ZONE — ${String(r.name).toUpperCase()}`)
     else modes.announce('ZONE — NO BOUNDARY AT THIS SCALE')
   } catch {
     terrain.setRegionMask(null)
+    disposeRegionPlate()
   } finally {
     regionBusy = false
   }
