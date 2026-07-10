@@ -47,10 +47,12 @@ import { buildCreatePanel } from './ui/create-panel.js'
 import { buildCameraPanel } from './ui/camera-panel.js'
 import { buildExplorePanel } from './ui/explore-panel.js'
 import { buildScanPanel } from './ui/scan-panel.js'
-import { openExportModal } from './ui/export-modal.js'
 import { initTips } from './ui/tips.js'
-import { Recorder } from './export-recorder.js'
+import { createAdaptiveQuality } from './perf.js'
 import './ui/v28.css'
+// the export stack (modal + Recorder + mediabunny encoder) is heavy and only
+// needed on demand — it is dynamic-import()ed on the first Export click, so
+// it lives in its own async chunk and never delays first paint
 
 // ------------------------------------------------------------------ params
 
@@ -652,6 +654,8 @@ controls.addEventListener('end', () => {
 window.addEventListener('wheel', () => (lastUserInput = performance.now()), { passive: true })
 
 let modes = null // assigned once the globe + mode machine exist (below)
+let aq = null // adaptive quality controller (perf.js) — built after the panels
+let recorder = null // Recorder instance, lazy-loaded with the export stack
 
 // real-world mode strips the fiction: no cone/reticle, no dial platform
 function applySourceMode() {
@@ -887,6 +891,9 @@ modes = new Modes({
       sun.castShadow = v && params.shadowMode !== 'off'
       renderer.shadowMap.autoUpdate = v && params.shadowMode === 'dynamic'
       if (v && params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
+      // the restore above reads raw params — re-assert the active quality
+      // tier on top so a globe round-trip can't silently undo degraded mode
+      if (v) aq?.reassert()
     },
     getSurfaceLatLon: () => ({ lat: params.demLat, lon: params.demLon }),
     surfaceCamAltMeters() {
@@ -1298,7 +1305,6 @@ function stepScene(t, dt) {
 }
 
 initTips()
-const recorder = new Recorder({ renderer })
 
 const topBar = buildTopBar({
   params,
@@ -1308,7 +1314,14 @@ const topBar = buildTopBar({
   },
   // the Globe button always shows the WHOLE planet, spinning slowly
   enterOrbit: () => modes.enterOrbit(16000000),
-  openExport: () =>
+  // first click pulls the export stack in (modal + Recorder + mediabunny) —
+  // bars.js shows a busy state on the button while the chunk downloads
+  openExport: async () => {
+    const [{ openExportModal }, { Recorder }] = await Promise.all([
+      import('./ui/export-modal.js'),
+      import('./export-recorder.js'),
+    ])
+    if (!recorder) recorder = new Recorder({ renderer })
     openExportModal({
       renderer,
       composer,
@@ -1327,7 +1340,8 @@ const topBar = buildTopBar({
         tick()
       },
       step: stepScene,
-    }),
+    })
+  },
 })
 
 buildBottomBar({
@@ -1462,11 +1476,29 @@ for (const [a, b] of foldPairs)
 cameraPanel.setCollapsed(true)
 scanPanel.setCollapsed(true)
 
+// adaptive quality — built once the composer, panels and mode machine exist
+// so tier changes can announce, re-sync the Camera panel and stay quiet in
+// orbital view / during a live recording (a pixelRatio change would resize
+// the canvas mid-encode and abort the MP4)
+aq = createAdaptiveQuality({
+  params,
+  renderer,
+  composer,
+  dof,
+  dofPass,
+  lake,
+  grain,
+  applyShadowMode,
+  announce: (m) => modes.announce(m),
+  refreshAll,
+  canStep: () => modes.mode === 'surface' && !modes.busy && !recorder?.recording,
+})
+
 
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, lake, get scan() { return scan }, get labels() { return labels } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, lake, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
 
 // real world is the default source — fetch its tiles on startup
 if (params.source === 'real') loadRealTerrain()
@@ -1607,8 +1639,9 @@ function tick() {
   }
 
   lake.update?.(dt) // drives the glass swell (lakeWaves) and heavy-frost warp
+  aq.update(dt) // adaptive quality: sample FPS, step tiers when sustained
   composer.render(dt)
-  if (recorder.recording) recorder.captureFrame()
+  if (recorder?.recording) recorder.captureFrame() // null until first export
 }
 tick()
 

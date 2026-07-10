@@ -1,4 +1,4 @@
-/* Clean Earth UI v28 — sober glassmorphism, Figma-grade simplicity.
+/* ShibuMap UI v28 — sober glassmorphism, Figma-grade simplicity.
    Tokens resolve per theme via body.dark. */
 
 :root {
@@ -762,4 +762,86 @@ body.ce-noui .ce-rec {
 .ce-rec {
   top: auto !important;
   bottom: 72px;
+}
+
+/* ------------------------------------------------------- tablet (coarse) */
+/* Touch devices: bigger targets everywhere, same aesthetic. Sliders get a
+   16px thumb, rows and section heads grow to comfortable tap heights, the
+   panels widen a touch, the bottom bar inputs reach 44px, and the hover
+   tooltips — meaningless without a pointer to hover — are gone. */
+@media (pointer: coarse) {
+  .ce-panel {
+    width: 292px !important; /* Panel() sets an inline width — override it */
+  }
+  .ce-row {
+    min-height: 34px;
+    margin: 10px 0;
+  }
+  .ce-row-inline {
+    min-height: 34px;
+  }
+  .ce-section-head {
+    min-height: 40px;
+    padding: 12px 10px;
+    font-size: 13px;
+  }
+  .ce-panel-head {
+    padding: 12px 12px 12px 16px;
+  }
+  .ce-panel-collapse {
+    width: 32px;
+    height: 32px;
+  }
+  .ce-panel-collapse::before {
+    left: 12px;
+    top: 13px;
+  }
+  .ce-slider {
+    height: 28px; /* fatter hit area — the 3px track auto-centers in it */
+  }
+  .ce-slider::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+    margin-top: -6.5px;
+  }
+  .ce-slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+  }
+  .ce-toggle {
+    transform: scale(1.15);
+    transform-origin: right center;
+  }
+  .ce-select {
+    min-height: 34px;
+  }
+  .ce-btn {
+    min-height: 34px;
+  }
+  .ce-seg-btn {
+    min-height: 30px;
+  }
+  .ce-icon-btn {
+    width: 38px;
+    height: 38px;
+  }
+  .ce-topbar .ce-pillbtn {
+    height: 38px;
+  }
+  .ce-bottombar {
+    padding: 7px;
+  }
+  .ce-bottombar .ce-search input,
+  .ce-bottombar .ce-pillbtn {
+    height: 44px;
+    font-size: 14px;
+  }
+  .ce-eye {
+    width: 44px;
+    height: 44px;
+  }
+  /* tooltips need hover — a touch UI has none */
+  .ce-tip {
+    display: none !important;
+  }
 }

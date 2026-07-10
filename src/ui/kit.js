@@ -1,4 +1,4 @@
-// Clean Earth UI kit — small DOM control factory for the v28 interface.
+// ShibuMap UI kit — small DOM control factory for the v28 interface.
 // Every control binds to a getter/setter pair (usually into `params`) and
 // registers a refresh() so panels can re-sync after a template swap or
 // reset without rebuilding the DOM.

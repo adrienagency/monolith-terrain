@@ -146,7 +146,7 @@ export function openExportModal(deps) {
         renderer, composer, camera, width, height,
         format: png ? 'image/png' : 'image/jpeg',
       })
-      downloadBlob(blob, `clean-earth-${width}x${height}.${png ? 'png' : 'jpg'}`)
+      downloadBlob(blob, `shibumap-${width}x${height}.${png ? 'png' : 'jpg'}`)
       setBusy(false)
       close()
     } catch (err) {
@@ -187,7 +187,7 @@ function showRecPill(recorder) {
     teardown()
     try {
       const blob = await recorder.stop()
-      downloadBlob(blob, 'clean-earth-recording.mp4')
+      downloadBlob(blob, 'shibumap-recording.mp4')
       pill.remove()
     } catch (err) {
       console.warn('Recording failed:', err)
@@ -207,7 +207,7 @@ function showRecPill(recorder) {
     if (done) return
     done = true
     teardown()
-    downloadBlob(blob, 'clean-earth-recording.mp4')
+    downloadBlob(blob, 'shibumap-recording.mp4')
     pill.remove()
   }
   recorder.onError = (err) => {

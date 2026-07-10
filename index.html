@@ -3,7 +3,43 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Clean Earth — living topographic maps</title>
+    <title>ShibuMap — quiet, living topographic maps</title>
+    <meta
+      name="description"
+      content="Explore any place on Earth as an elegant 3D relief map. Vintage topographic styles, volumetric clouds, glass lakes, country cutouts — search a place, shape the look, export images and videos. Free, in your browser."
+    />
+    <link rel="canonical" href="https://shibumap.com/" />
+    <meta name="theme-color" content="#f4f3f0" />
+    <meta name="robots" content="index, follow" />
+    <!-- Open Graph / social cards -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ShibuMap" />
+    <meta property="og:title" content="ShibuMap — quiet, living topographic maps" />
+    <meta
+      property="og:description"
+      content="Turn any place on Earth into an elegant 3D relief map. Search, style, explore — then export it as an image or a video."
+    />
+    <meta property="og:url" content="https://shibumap.com/" />
+    <meta property="og:image" content="https://shibumap.com/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="ShibuMap — quiet, living topographic maps" />
+    <meta
+      name="twitter:description"
+      content="Turn any place on Earth into an elegant 3D relief map. Search, style, explore — then export it as an image or a video."
+    />
+    <meta name="twitter:image" content="https://shibumap.com/og.png" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "ShibuMap",
+        "url": "https://shibumap.com/",
+        "description": "Interactive 3D topographic maps of anywhere on Earth — vintage relief styles, volumetric clouds, glass lakes, administrative cutouts, image and video export.",
+        "applicationCategory": "DesignApplication",
+        "operatingSystem": "Web browser (desktop and tablet)",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" }
+      }
+    </script>
     <!-- ground-cartouche fonts: Rosarivo (titles) + Bricolage Grotesque (body) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -16,6 +52,6 @@
   <body>
     <div id="app"></div>
     <div id="loading" class="hidden">generating terrain&hellip;</div>
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/boot.js"></script>
   </body>
 </html>

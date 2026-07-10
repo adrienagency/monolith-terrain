@@ -24,19 +24,31 @@ export function buildTopBar(ctx) {
   const bar = el('div', 'ce-topbar ce-glassbox')
 
   const mark = el('span', 'ce-wordmark')
-  mark.innerHTML = '<i>◍</i>Clean Earth'
+  mark.innerHTML = '<i>◍</i>ShibuMap'
   bar.append(mark)
 
   const globeBtn = iconButton(I.globe, '', () => ctx.enterOrbit())
   globeBtn.setAttribute('data-tip', 'Pull all the way out and watch the planet slowly turn.')
   bar.append(globeBtn)
 
-  // export earns a labelled pill — it is a primary action, not tucked-away chrome
+  // export earns a labelled pill — it is a primary action, not tucked-away chrome.
+  // openExport is async (the export stack is lazy-loaded on first click): the
+  // button goes busy until the modal is up, so a slow network can't double-open.
   const exportBtn = el('button', 'ce-pillbtn accent')
   exportBtn.type = 'button'
   exportBtn.innerHTML = `${I.export}<span>Export</span>`
   exportBtn.setAttribute('data-tip', 'Save what you see as an image, or record a video.')
-  exportBtn.addEventListener('click', () => ctx.openExport())
+  exportBtn.addEventListener('click', async () => {
+    if (exportBtn.disabled) return
+    exportBtn.disabled = true
+    try {
+      await ctx.openExport()
+    } catch (err) {
+      console.error('Export failed to open:', err)
+    } finally {
+      exportBtn.disabled = false
+    }
+  })
   bar.append(exportBtn)
 
   const dark = iconButton(I.moon, '', () => {
