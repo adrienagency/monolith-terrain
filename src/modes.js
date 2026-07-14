@@ -99,8 +99,11 @@ export class Modes {
           } else if (
             e.deltaY < 0 &&
             !this.busy &&
-            this.controls.getDistance() <= this.controls.minDistance * 1.03
+            (this.controls.getDistance() <= this.controls.minDistance * 1.03 ||
+              this.hooks.nearGround?.())
           ) {
+            // refine when pinned against the near stop OR skimming the ground
+            // (target far ahead → getDistance never reaches the stop)
             this._refine()
           }
           return

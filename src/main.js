@@ -46,6 +46,8 @@ import { ScanController } from './scan.js'
 import { fetchRegionMask } from './region-mask.js'
 import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
 import { buildRegionPlate } from './region-plate.js'
+import { buildRegionSkirt } from './region-skirt.js'
+import { makeSocleEnvMap } from './socle-env.js'
 import { refreshAll } from './ui/kit.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCredits } from './ui/bars.js'
 import { buildCreatePanel } from './ui/create-panel.js'
@@ -409,6 +411,9 @@ scene.add(terrain.mesh)
 // the 3D slab the relief sits on (walls + shadow-catching base)
 const plinth = new Plinth(scene, params)
 plinth.rebuild(terrain, params)
+// give the socle its own punchy studio env so metals/glass/carbon reflect real
+// highlights (the terrain keeps the neutral RoomEnvironment on scene.environment)
+plinth.setEnvMap(makeSocleEnvMap(renderer))
 // push the chosen socle material (default = matte stone, i.e. the original look)
 function applyPlinthMaterial() {
   const glass = params.plinthFinish === 'glass'
@@ -484,6 +489,8 @@ let selectedPoi = -1
 let fps = 60
 let scan = null // ScanController — instantiated once the terrain exists
 let regionPlate = null // adaptive plate under the cut landform (region mode)
+let regionSkirt = null // vertical curtain welding the cut edge down to a base
+let regionMaskCanvas = null // current zone mask, kept so the skirt can rebuild on terrain regen
 
 const poiFeet = (h) => terrain.heightToFeet(h)
 // night-survey ink set — the single source for every dark-mode surface
@@ -832,8 +839,10 @@ let demBusy = false
 const COAST_CACHE_MAX = 16
 const coastMaskCache = new Map()
 // the finest zoom the USER chose — dives and the staircase overwrite
-// params.demZoom freely, but refining always climbs back to this
-let userFineZoom = Math.max(params.demZoom, 12)
+// params.demZoom freely, but refining always climbs back to this. Default to the
+// finest tiles available (z15) so zooming all the way in actually reaches full
+// detail; picking a coarser "Detail (zoom)" lowers it again.
+let userFineZoom = Math.max(params.demZoom, 15)
 
 // --- per-zoom vertical exaggeration ------------------------------------------
 // ONE elevation model shared by every look (templates never touch it). Each zoom
@@ -975,6 +984,7 @@ function regenerateTerrain() {
       terrain.rebuild(params)
       terrain.rebuildRoughness(params)
       plinth.rebuild(terrain, params) // walls hug the new relief border
+      if (params.regionMode && regionMaskCanvas) rebuildRegionSkirt() // re-weld the cut curtain to the new heights
       realWater?.rebuild({ terrain, params }) // water simulation follows the new relief
       cityLabels.rebuild({ dem: terrain.dem, terrain, params }) // city names re-drape on the new relief
       regenerateLabels()
@@ -1025,6 +1035,7 @@ modes = new Modes({
       clouds.setVisible(v)
       plinth.setVisible(v && params.plinth && !params.regionMode)
       if (regionPlate) regionPlate.mesh.visible = v
+      if (regionSkirt) regionSkirt.mesh.visible = v
       groundInfo.setVisible(v && params.groundInfo)
       traffic.setVisible(v)
       realWater?.setVisible(v)
@@ -1083,6 +1094,11 @@ modes = new Modes({
       const { lat, lon } = worldToLatLon(dem, controls.target.x, controls.target.z)
       return { lat, lon, zoom: stepZoom(params.demZoom, -1) }
     },
+    // true when the camera is skimming the relief — refine can then fire on a
+    // zoom-in even though the orbit target is far ahead (so getDistance() never
+    // reaches the near stop). Fixes "won't reach z15 with the camera at ground
+    // level". The scene-space y is a few units at ground; the default frame is y≈18.
+    nearGround: () => params.source === 'real' && !!dem && camera.position.y < 6,
   },
 })
 
@@ -1403,10 +1419,37 @@ function disposeRegionPlate() {
   regionPlate.mesh.material.dispose()
   regionPlate = null
 }
+function disposeRegionSkirt() {
+  if (!regionSkirt) return
+  scene.remove(regionSkirt.mesh)
+  regionSkirt.mesh.geometry.dispose()
+  // material is shared with the plinth — do NOT dispose it here
+  regionSkirt = null
+}
+// (re)build the vertical curtain around the isolated zone from the current mask
+// + terrain heightfield. Shares the plinth wall material so the socle finish
+// (PBR / glass) carries onto the cut.
+function rebuildRegionSkirt() {
+  disposeRegionSkirt()
+  if (!params.regionMode || !regionMaskCanvas || !terrain.sample) return
+  const s = buildRegionSkirt({
+    maskCanvas: regionMaskCanvas,
+    sample: terrain.sample,
+    material: plinth.wallMat,
+    depth: params.plinthDepth ?? 6,
+  })
+  if (s) {
+    regionSkirt = s
+    s.mesh.visible = modes.mode === 'surface'
+    scene.add(s.mesh)
+  }
+}
 async function applyRegionMode() {
   if (!params.regionMode || params.source !== 'real' || !dem) {
     terrain.setRegionMask(null)
     disposeRegionPlate()
+    disposeRegionSkirt()
+    regionMaskCanvas = null
     plinth.setVisible(params.plinth && modes.mode === 'surface')
     waterRebuild() // restore the open-sea surface once the region clip is gone
     return
@@ -1419,14 +1462,19 @@ async function applyRegionMode() {
     terrain.setRegionMask(r ? r.maskTexture : null)
     plinth.setVisible(false)
     waterRebuild() // regionMode is on — the sim drops its sea (it would spill past the boundary) but keeps the lakes
-    // Isolate-the-zone drops the base entirely — the cut landform floats with no
-    // socle (user request). Any previously built plate is removed.
+    // Isolate-the-zone drops the flat slab, but a vertical curtain still closes
+    // the cut so a boundary over a summit or a trench never shows the map's
+    // underside. It welds to the terrain height and shares the socle material.
     disposeRegionPlate()
+    regionMaskCanvas = r ? r.maskCanvas : null
+    rebuildRegionSkirt()
     if (r) modes.announce(`ZONE — ${String(r.name).toUpperCase()}`)
     else modes.announce('ZONE — NO BOUNDARY AT THIS SCALE')
   } catch {
     terrain.setRegionMask(null)
     disposeRegionPlate()
+    disposeRegionSkirt()
+    regionMaskCanvas = null
   } finally {
     regionBusy = false
   }

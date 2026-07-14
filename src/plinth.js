@@ -6,8 +6,10 @@
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
 import { PBR_BY_ID, GLASS_BY_ID } from './material-presets.js'
+import { TEXTURE_BUILDERS } from './material-textures.js'
 
 const HALF = TERRAIN_SIZE / 2
+const UVSCALE = 6 // world units per texture tile on the socle walls
 const INTERIOR_STEPS = 12 // coarse grid to find the global min (basin guard)
 
 // Pure: sample the border ring and pick a base level. `samples` per side should
@@ -150,6 +152,7 @@ export class Plinth {
     if (finish === 'glass') {
       const p = GLASS_BY_ID[id] || GLASS_BY_ID.clear
       this.isGlass = true
+      this._clearMaps()
       m.color.set('#ffffff') // clear base; the tint rides on attenuation
       m.metalness = 0
       m.roughness = diffusion == null ? p.diffusion : diffusion
@@ -159,6 +162,7 @@ export class Plinth {
       m.attenuationColor.set(p.color)
       m.attenuationDistance = p.attenuation
       m.clearcoat = 0
+      m.anisotropy = 0
       m.specularIntensity = 1
       m.transparent = true
       m.envMapIntensity = 1.4
@@ -178,11 +182,42 @@ export class Plinth {
       m.clearcoatRoughness = p.clearcoatRoughness ?? 0
       m.ior = p.ior ?? 1.5
       m.transparent = false
-      m.envMapIntensity = 1
+      m.envMapIntensity = p.envMapIntensity ?? 1
+      // textured finishes (e.g. carbon): albedo + normal + roughness maps plus
+      // anisotropy/clearcoat for the woven, lacquered look
+      const build = p.tex && TEXTURE_BUILDERS[p.tex]
+      if (build) {
+        const t = build()
+        m.map = t.map
+        m.normalMap = t.normalMap
+        m.roughnessMap = t.roughnessMap
+        m.normalScale.set(p.normalScale ?? 1, p.normalScale ?? 1)
+        m.anisotropy = p.anisotropy ?? 0
+        m.anisotropyRotation = p.anisotropyRotation ?? 0
+      } else {
+        this._clearMaps()
+        m.anisotropy = p.anisotropy ?? 0
+        m.anisotropyRotation = 0
+      }
       this.glassPool.visible = false
       this.glassPoolMat.opacity = 0
     }
     m.needsUpdate = true
+  }
+
+  _clearMaps() {
+    const m = this.wallMat
+    m.map = null
+    m.normalMap = null
+    m.roughnessMap = null
+  }
+
+  // give the socle walls their own studio env map (overrides scene.environment
+  // for this material only, so metals/glass/carbon get punchy reflections while
+  // the terrain keeps the neutral room env)
+  setEnvMap(tex) {
+    this.wallMat.envMap = tex
+    this.wallMat.needsUpdate = true
   }
 
   // rebuild the walls to hug the current relief border; call after every
@@ -206,41 +241,55 @@ export class Plinth {
     const n = ring.length
     const positions = []
     const normals = []
-    const pushTri = (a, b, c) => {
+    const uvs = [] // wall UVs so textured finishes (carbon weave etc.) can map
+    // uv runs along the perimeter (u) and up from the base (v), world-scaled so a
+    // texture tile is a fixed physical size on the block, seams staying subtle.
+    const pushTri = (a, b, c, uva, uvb, uvc) => {
       const ab = new THREE.Vector3().subVectors(b, a)
       const ac = new THREE.Vector3().subVectors(c, a)
       const nm = new THREE.Vector3().crossVectors(ab, ac).normalize()
-      for (const v of [a, b, c]) {
+      const tri = [[a, uva], [b, uvb], [c, uvc]]
+      for (const [v, uv] of tri) {
         positions.push(v.x, v.y, v.z)
         normals.push(nm.x, nm.y, nm.z)
+        uvs.push(uv[0], uv[1])
       }
     }
 
     // side walls: each border segment → quad down to baseY
+    let acc = 0 // running perimeter distance for u
     for (let i = 0; i < n; i++) {
       const p = ring[i]
       const q = ring[(i + 1) % n]
+      const segLen = Math.hypot(q.x - p.x, q.z - p.z)
+      const u0 = acc / UVSCALE
+      const u1 = (acc + segLen) / UVSCALE
+      acc += segLen
+      const vpTop = (p.y - baseY) / UVSCALE
+      const vqTop = (q.y - baseY) / UVSCALE
       const pTop = new THREE.Vector3(p.x, p.y, p.z)
       const qTop = new THREE.Vector3(q.x, q.y, q.z)
       const pBot = new THREE.Vector3(p.x, baseY, p.z)
       const qBot = new THREE.Vector3(q.x, baseY, q.z)
-      pushTri(pTop, pBot, qTop)
-      pushTri(qTop, pBot, qBot)
+      pushTri(pTop, pBot, qTop, [u0, vpTop], [u0, 0], [u1, vqTop])
+      pushTri(qTop, pBot, qBot, [u1, vqTop], [u0, 0], [u1, 0])
     }
 
     // bottom cap: a triangle fan from the centre out to every ring point, so the
     // cap follows the exact (possibly rounded) footprint — no square overhang
     // poking past the rounded wall bottoms. It's never seen lit; winding is moot.
     const cen = new THREE.Vector3(0, baseY, 0)
+    const capUv = (x, z) => [x / UVSCALE, z / UVSCALE]
     for (let i = 0; i < n; i++) {
       const p = ring[i]
       const q = ring[(i + 1) % n]
-      pushTri(cen, new THREE.Vector3(q.x, baseY, q.z), new THREE.Vector3(p.x, baseY, p.z))
+      pushTri(cen, new THREE.Vector3(q.x, baseY, q.z), new THREE.Vector3(p.x, baseY, p.z), capUv(0, 0), capUv(q.x, q.z), capUv(p.x, p.z))
     }
 
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
     geo.computeBoundingSphere()
     this.walls.geometry.dispose()
     this.walls.geometry = geo

@@ -30,7 +30,7 @@ export const PBR_PRESETS = [
   { id: 'gunmetal',   name: 'Gunmetal',        color: '#4b4e55', roughness: 0.35, metalness: 1 },
   { id: 'anodblack',  name: 'Anodised black',  color: '#2a2c30', roughness: 0.45, metalness: 0.9 },
   // --- coated / composite ---
-  { id: 'carbon',     name: 'Carbon fibre',    color: '#1b1d22', roughness: 0.35, metalness: 0.2, clearcoat: 1,   clearcoatRoughness: 0.15 },
+  { id: 'carbon',     name: 'Carbon fibre',    color: '#1b1d22', roughness: 0.42, metalness: 0.5, clearcoat: 1, clearcoatRoughness: 0.08, tex: 'carbon', anisotropy: 0.7, anisotropyRotation: 0, normalScale: 1.3, envMapIntensity: 1.5 },
   { id: 'porcelain',  name: 'Porcelain',       color: '#f3f1ec', roughness: 0.25, metalness: 0,   clearcoat: 0.6, clearcoatRoughness: 0.2 },
   { id: 'ceramic',    name: 'Glossy ceramic',  color: '#e9e4dc', roughness: 0.3,  metalness: 0,   clearcoat: 0.5, clearcoatRoughness: 0.25 },
   // --- stone / mineral ---

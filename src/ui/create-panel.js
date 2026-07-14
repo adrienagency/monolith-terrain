@@ -146,13 +146,14 @@ export function buildCreatePanel(ctx) {
   sTer.body.append(resWrap)
   function rebuildRes() {
     const atMax = params.demZoom >= (ctx.getFineZoom?.() ?? 15)
+    if (params.resolution > 2048) params.resolution = 2048 // hard ceiling
     if (!atMax && params.resolution > 1024) params.resolution = 1024
     const base = ['256', '384', '512', '768', '1024']
-    const opts = atMax ? [...base, '2048', '4096'] : base
+    const opts = atMax ? [...base, '2048'] : base
     resWrap.replaceChildren(
       select({ label: 'Mesh resolution', options: opts, get: () => String(params.resolution), set: (v) => { params.resolution = +v; ctx.regenerateTerrain() } })
     )
-    if (atMax) resWrap.append(el('div', 'ce-note ce-warn', '⚠ 2048 / 4096 are extremely heavy — they can slow the tab to a crawl or crash it. Use only briefly, at this zoom.'))
+    if (atMax) resWrap.append(el('div', 'ce-note ce-warn', '⚠ 2048 is very heavy — it can slow the tab to a crawl. Use only briefly, at this zoom.'))
   }
   rebuildRes()
   // detail sliders regenerate on release
