@@ -49,6 +49,10 @@ import { buildRegionPlate } from './region-plate.js'
 import { buildRegionSkirt } from './region-skirt.js'
 import { makeSocleEnvMap } from './socle-env.js'
 import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
+import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, loadUserTemplates, saveUserTemplates } from './templates-user.js'
+import { DroneCam } from './drone-cam.js'
+import { findRacesNear } from './race-info.js'
+import { buildRacePanel } from './ui/race-panel.js'
 import { refreshAll } from './ui/kit.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCredits } from './ui/bars.js'
 import { buildCreatePanel } from './ui/create-panel.js'
@@ -760,6 +764,7 @@ let controlsHeld = false
 controls.addEventListener('start', () => {
   tween.active = false
   tour.active = false
+  drone.stop() // grabbing the camera cancels the drone follow
   camera.up.set(0, 1, 0)
   controlsHeld = true
   lastUserInput = performance.now()
@@ -1346,6 +1351,90 @@ function applyTemplate(t) {
   refreshAll()
 }
 
+// ---- user templates: save the current look, restyle the current view with a
+// saved one (never moving the camera/location), export/import as .json ----
+let userTemplates = loadUserTemplates()
+
+// push a captured look onto the live scene. Assign every look key onto params
+// first, then run the same scene pushers a built-in template uses.
+function applyUserTemplate(tmpl) {
+  const L = tmpl.look || {}
+  for (const k of TEMPLATE_KEYS) if (k in L) params[k] = L[k] == null ? L[k] : JSON.parse(JSON.stringify(L[k]))
+  setDarkMode(params.darkMode ?? false)
+  applyPalette({ rampStops: params.rampStops, oceanShallow: params.oceanShallow, oceanMid: params.oceanMid, oceanDeep: params.oceanDeep, ink: params.contourColor })
+  applyStyle({ mapTint: params.mapTint, heightContrast: params.heightContrast, heightPivot: params.heightPivot, slopeTint: params.slopeTint })
+  applyGridContour({ contourInterval: params.contourInterval, contourOpacity: params.contourOpacity, contourColor: params.contourColor, contourWeight: params.contourWeight, gridStep: params.gridStep, gridOpacity: params.gridOpacity, gridColor: params.gridColor })
+  applyLight({ sunIntensity: params.sunIntensity, sunAzimuth: params.sunAzimuth, sunElevation: params.sunElevation, hemiIntensity: params.hemiIntensity, envLight: params.envLight, shadowSoftness: params.shadowSoftness, timeOfDay: params.timeOfDay })
+  applySurface({ roughness: params.roughness, roughnessVariation: params.roughnessVariation, roughnessScale: params.roughnessScale, bumpScale: params.bumpScale, envMapIntensity: params.envMapIntensity })
+  applyLook({ fogColor: params.fogColor, exposure: params.exposure, contrast: params.contrast, saturation: params.saturation, vignette: params.vignette, grain: params.grain, clouds: params.cloudsEnabled, plinth: params.plinth })
+  fogRef.near = params.fogNear
+  fogRef.far = params.fogFar
+  applyPlinthMaterial()
+  terrain.setMaterialMode(params.terrainSurfaceMat || '', params)
+  terrain.setLiquidMetal(!!params.liquidMetal, params)
+  terrain.setSurfaceFx(params.surfaceFx | 0)
+  if ((params.surfaceFx | 0) > 0 && params.fx?.[params.surfaceFx]) terrain.applyFxParams(params.fx[params.surfaceFx])
+  if (clouds) {
+    if (params.cloudsEnabled) clouds.build(params)
+    clouds.setVisible(params.cloudsEnabled && modes.mode === 'surface')
+  }
+  refreshAll()
+}
+
+// grab a small thumbnail of the live render (avoids me taking screenshots).
+// Draw the WebGL canvas into a downscaled 2D canvas → JPEG data URL.
+function captureThumbnail(w = 160, h = 90) {
+  try {
+    const src = renderer.domElement
+    const c = document.createElement('canvas')
+    c.width = w
+    c.height = h
+    const ctx = c.getContext('2d')
+    // cover-fit the (wide) canvas into the thumb
+    const sr = src.width / src.height
+    const tr = w / h
+    let sw = src.width, sh = src.height, sx = 0, sy = 0
+    if (sr > tr) { sw = src.height * tr; sx = (src.width - sw) / 2 } else { sh = src.width / tr; sy = (src.height - sh) / 2 }
+    ctx.drawImage(src, sx, sy, sw, sh, 0, 0, w, h)
+    return c.toDataURL('image/jpeg', 0.72)
+  } catch { return null }
+}
+
+function persistUserTemplates() {
+  saveUserTemplates(userTemplates)
+}
+function saveCurrentTemplate(name) {
+  // force a fresh frame so the thumbnail matches what's on screen
+  composer.render()
+  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: String(name || 'My look').slice(0, 40), thumb: captureThumbnail(), look: captureLook(params) }
+  userTemplates.push(t)
+  persistUserTemplates()
+  return t
+}
+function deleteUserTemplate(id) {
+  userTemplates = userTemplates.filter((t) => t.id !== id)
+  persistUserTemplates()
+}
+function exportUserTemplate(id) {
+  const t = userTemplates.find((x) => x.id === id)
+  if (!t) return
+  const blob = new Blob([serializeTemplate(t)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${t.name.replace(/[^a-z0-9-_]+/gi, '-')}.shibumap-template.json`
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 4000)
+}
+function importTemplateText(text) {
+  const parsed = parseTemplate(text)
+  if (!parsed) return null
+  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: parsed.name, thumb: parsed.thumb, look: parsed.look }
+  userTemplates.push(t)
+  persistUserTemplates()
+  return t
+}
+
 // RESET LOOK restores the whole shipped scene — palette + style + grid AND the
 // light / surface / post-FX / scene toggles a template may have changed
 function resetLook() {
@@ -1376,6 +1465,8 @@ function resetLook() {
 
 const gpxLayer = new GpxLayer({ scene, camera, terrain, params, getDem: () => dem })
 
+const racePanel = buildRacePanel()
+
 async function loadGpxText(text) {
   try {
     const { points, name } = parseGpx(text)
@@ -1387,6 +1478,9 @@ async function loadGpxText(text) {
     params.demLocation = 'Custom'
     refreshAll()
     modes.announce(`TRACK LOADED — ${name.toUpperCase().slice(0, 24)}`)
+    // is there a known race at this location? (live Wikipedia, non-blocking) —
+    // the user can open its info card or ignore the badge
+    findRacesNear(f.lat, f.lon).then((cands) => racePanel.offer(cands)).catch(() => {})
     // the post-rebuild hook drapes the line once the new terrain exists;
     // pin the framed zoom or the dive would land on the fine (≥12) scale
     // and clip long tracks framed at z10/z11
@@ -1421,19 +1515,17 @@ gpxFileInput.addEventListener('change', () => {
 })
 
 // hand the flight to the existing tour controller
+// cinematic drone follow-cam for the GPX track (terrain-aware chase camera)
+const drone = new DroneCam({ camera, controls, sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0 })
+
 function flyTrack() {
-  const curve = gpxLayer.buildFlightCurve(params.gpxAltitude)
-  if (!curve || modes.mode !== 'surface') return
-  const w = gpxLayer.track.world
-  tour.curve = curve
-  tour.uA = 0.03
-  tour.aTop.copy(w[0]).add(new THREE.Vector3(0, 0.6, 0))
-  tour.bTop.copy(w[w.length - 1]).add(new THREE.Vector3(0, 0.6, 0))
-  tour.duration = THREE.MathUtils.clamp(gpxLayer.track.cumKm[gpxLayer.track.cumKm.length - 1] * 2.0, 12, 90)
-  tour.bank = 0
-  tour.t = 0
-  tour.active = true
+  const w = gpxLayer.track?.world
+  if (!w || w.length < 2 || modes.mode !== 'surface') return
+  const km = gpxLayer.track.cumKm[gpxLayer.track.cumKm.length - 1]
+  const duration = THREE.MathUtils.clamp(km * 2.2, 14, 95)
+  tour.active = false
   tween.active = false
+  drone.start(w, { duration })
 }
 
 // ------------------------------------------------------------------ GUI
@@ -1518,7 +1610,7 @@ async function applyRegionMode() {
 // fixed timestep so the video is deterministic whatever the encode speed
 let loopPaused = false
 function stepScene(t, dt) {
-  if (tour.active || tween.active) updateCameraMotion(dt)
+  if (drone.active || tour.active || tween.active) updateCameraMotion(dt)
   if (!params.paused) {
     clouds.update(dt, params, camera)
     traffic.update(dt)
@@ -1623,6 +1715,13 @@ const createPanel = buildCreatePanel({
   regenerateTerrain,
   loadRealTerrain,
   applyTemplate,
+  // user templates (save/apply/export/import saved looks)
+  getUserTemplates: () => userTemplates,
+  applyUserTemplate,
+  saveCurrentTemplate,
+  deleteUserTemplate,
+  exportUserTemplate,
+  importTemplateText,
   applyPalette,
   applyStyle,
   applyGridContour,
@@ -1674,6 +1773,7 @@ const createPanel = buildCreatePanel({
   flyTrack,
   stopTour: () => {
     tour.active = false
+    drone.stop()
     camera.up.set(0, 1, 0)
   },
   setRegionMode: () => applyRegionMode(),
@@ -1783,6 +1883,7 @@ const cameraPanel = buildCameraPanel({
   flyTrack,
   stopTour: () => {
     tour.active = false
+    drone.stop()
     camera.up.set(0, 1, 0)
   },
 })
@@ -1836,7 +1937,7 @@ aq = createAdaptiveQuality({
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
 
 // real world is the default source — fetch its tiles on startup
 if (params.source === 'real') loadRealTerrain()
@@ -1845,6 +1946,11 @@ const clock = new THREE.Clock()
 
 // camera motion for one frame — shared by the live loop and offline export
 function updateCameraMotion(dt) {
+  // drone follow-cam for the GPX track — chase the route from behind/above
+  if (drone.active) {
+    drone.update(dt)
+    return
+  }
   // cinematic tour: arc-length uniform speed + trapezoid profile + damped gimbal
   if (tour.active) {
     tour.t = Math.min(1, tour.t + dt / (tour.duration || params.tourDuration))

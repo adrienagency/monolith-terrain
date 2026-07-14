@@ -46,6 +46,54 @@ export function buildCreatePanel(ctx) {
     cards.append(card)
   }
   sTpl.body.append(cards)
+
+  // --- user templates: saved looks with a thumbnail, apply / export / delete,
+  // plus save-current and load-from-file. Applying never moves the view. ---
+  const userWrap = el('div', 'ce-utpl-grid')
+  sTpl.body.append(userWrap)
+  function renderUserTemplates() {
+    userWrap.replaceChildren()
+    for (const t of ctx.getUserTemplates?.() ?? []) {
+      const card = el('div', 'ce-utpl')
+      const thumb = t.thumb ? `<img class="ce-utpl-img" src="${t.thumb}" alt="">` : '<div class="ce-utpl-img"></div>'
+      card.innerHTML = `${thumb}<span class="ce-utpl-name">${(t.name || 'Look').replace(/</g, '')}</span>
+        <button class="ce-utpl-x" title="Delete" type="button">✕</button>
+        <button class="ce-utpl-dl" title="Export .json" type="button">⭳</button>`
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.ce-utpl-x, .ce-utpl-dl')) return
+        ctx.applyUserTemplate(t); refreshAll(); ctx.syncDark?.()
+      })
+      card.querySelector('.ce-utpl-x').addEventListener('click', () => { ctx.deleteUserTemplate(t.id); renderUserTemplates() })
+      card.querySelector('.ce-utpl-dl').addEventListener('click', () => ctx.exportUserTemplate(t.id))
+      userWrap.append(card)
+    }
+  }
+  renderUserTemplates()
+
+  const tplRow = el('div', 'ce-btn-row')
+  const fileInput = el('input')
+  fileInput.type = 'file'
+  fileInput.accept = '.json,application/json'
+  fileInput.style.display = 'none'
+  fileInput.addEventListener('change', async () => {
+    for (const f of fileInput.files) {
+      const text = await f.text()
+      if (!ctx.importTemplateText(text)) alert(`"${f.name}" is not a ShibuMap template file.`)
+    }
+    fileInput.value = ''
+    renderUserTemplates()
+  })
+  tplRow.append(
+    button('Save this look', () => {
+      const name = prompt('Name this template:', 'My look')
+      if (name == null) return
+      ctx.saveCurrentTemplate(name)
+      renderUserTemplates()
+    }, { accent: true }),
+    button('Load template…', () => fileInput.click(), { ghost: true })
+  )
+  sTpl.body.append(tplRow, fileInput)
+
   sTpl.body.append(
     toggle({ label: 'Dark mode', get: () => params.darkMode, set: (v) => { ctx.setDarkMode(v); refreshAll(); ctx.syncDark?.() } })
   )
