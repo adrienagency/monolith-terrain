@@ -100,10 +100,10 @@ export class CityLabels {
       // marker dot at the city itself
       const dot = new THREE.Mesh(
         dotGeo.clone(),
-        new THREE.MeshBasicMaterial({ color: ink, transparent: true, opacity: 0.85, depthWrite: false })
+        new THREE.MeshBasicMaterial({ color: ink, transparent: true, opacity: 0.85, depthWrite: false, depthTest: false })
       )
       dot.position.set(p.w.x, y, p.w.z)
-      dot.renderOrder = 3
+      dot.renderOrder = 10
       this.group.add(dot)
       this.meshes.push(dot)
       // name draped just north of the dot; capitals read a touch larger
@@ -111,11 +111,11 @@ export class CityLabels {
       const w = Math.min(6, (p.cap ? 0.34 : 0.3) * p.name.length + 0.9)
       const mesh = new THREE.Mesh(
         new THREE.PlaneGeometry(w, w / aspect),
-        new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.92, depthWrite: false })
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.92, depthWrite: false, depthTest: false })
       )
       mesh.rotation.x = -Math.PI / 2
       mesh.position.set(p.w.x, y + 0.02, p.w.z - 0.28 - (w / aspect) * 0.5)
-      mesh.renderOrder = 3
+      mesh.renderOrder = 10
       this.group.add(mesh)
       this.meshes.push(mesh)
     }
