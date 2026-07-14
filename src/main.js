@@ -331,8 +331,9 @@ scene.add(sun)
 const hemi = new THREE.HemisphereLight(0xdadada, 0x5c5c5c, params.hemiIntensity)
 scene.add(hemi)
 
-// studio lighting rig: 24 h sun cycle + 8 presets (see lighting.js)
-const studio = new StudioLighting({ scene, sun, hemi })
+// studio lighting rig (8 presets + 24h cycle) is behind FLAGS.lightingPresets
+// (v40, disabled in prod); null when off — the base sun/hemi rig stays active
+const studio = FLAGS.lightingPresets ? new StudioLighting({ scene, sun, hemi }) : null
 // apply the 24 h time-of-day slider: writes sun az/el/intensity/colour + hemi
 function applyTimeOfDay(hour) {
   const s = sunFromHour(hour)
@@ -352,6 +353,7 @@ function setStudioBackground(hex) {
   scene.background = hex ? new THREE.Color(hex) : new THREE.Color(params.fogColor)
 }
 function applyLightPreset(name) {
+  if (!studio) return // presets disabled — base sun rig governs
   params.lightPreset = name
   if (name === 'map-default') sun.color.set(0xffffff) // hand colour back to the template
   studio.apply(name, { params, placeSun, setBackground: setStudioBackground })

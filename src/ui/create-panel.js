@@ -192,16 +192,18 @@ export function buildCreatePanel(ctx) {
 
   // ---------------------------------------------------------------- Light
   const sLig = addTo(section('Light'))
-  // studio lighting presets — reconfigure sun + hemi + IBL (+ softbox area
-  // lights / accent spot) into a photographer's rig (see lighting.js)
-  sLig.body.append(
-    select({ label: 'Studio preset', options: ctx.lightPresets, get: () => params.lightPreset, set: (v) => { ctx.applyLightPreset(v); refreshAll() } })
-  )
-  // 24 h sun cycle: one slider drives azimuth, elevation, intensity and warmth
-  sLig.body.append(
-    slider({ label: 'Time of day (h)', min: 0, max: 24, step: 0.25, get: () => params.timeOfDay, set: (v) => { params.timeOfDay = v; ctx.applyTimeOfDay(v); refreshAll() } })
-  )
-  sLig.body.append(el('div', 'ce-label', 'Manual sun overrides (also driven by the two above)'))
+  if (FLAGS.lightingPresets) {
+    // studio lighting presets — reconfigure sun + hemi + IBL (+ softbox area
+    // lights / accent spot) into a photographer's rig (see lighting.js)
+    sLig.body.append(
+      select({ label: 'Studio preset', options: ctx.lightPresets, get: () => params.lightPreset, set: (v) => { ctx.applyLightPreset(v); refreshAll() } })
+    )
+    // 24 h sun cycle: one slider drives azimuth, elevation, intensity and warmth
+    sLig.body.append(
+      slider({ label: 'Time of day (h)', min: 0, max: 24, step: 0.25, get: () => params.timeOfDay, set: (v) => { params.timeOfDay = v; ctx.applyTimeOfDay(v); refreshAll() } })
+    )
+    sLig.body.append(el('div', 'ce-label', 'Manual sun overrides (also driven by the two above)'))
+  }
   sLig.body.append(
     slider({ label: 'Sun intensity', min: 0, max: 16, step: 0.1, get: () => params.sunIntensity, set: (v) => { params.sunIntensity = v; ctx.placeSun() } }),
     slider({ label: 'Sun azimuth', min: 0, max: 360, step: 1, get: () => params.sunAzimuth, set: (v) => { params.sunAzimuth = v; ctx.placeSun() } }),
