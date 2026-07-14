@@ -57,17 +57,5 @@ export function buildScanPanel(ctx) {
   note.style.marginTop = '4px'
   sFancy.body.append(note)
 
-  sFancy.body.append(
-    select({
-      label: 'Backdrop',
-      options: [{ value: '', label: 'None' }, ...ctx.backdrops],
-      get: () => ctx.getBackdrop() ?? '',
-      set: (v) => ctx.setBackdrop(v || null),
-    })
-  )
-  const backdropNote = el('div', 'ce-label', 'An animated paper-shader field behind the relief.')
-  backdropNote.style.marginTop = '4px'
-  sFancy.body.append(backdropNote)
-
   return panel
 }

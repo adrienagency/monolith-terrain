@@ -233,7 +233,7 @@ export function buildCreatePanel(ctx) {
     slider({ label: 'Grain', min: 0, max: 0.5, step: 0.01, get: () => params.grain, set: (v) => { params.grain = v; ctx.grain.blendMode.opacity.value = v } }),
     slider({ label: 'Fog start', min: 5, max: 60, step: 0.5, get: () => params.fogNear, set: (v) => { params.fogNear = v; ctx.fogRef.near = v } }),
     slider({ label: 'Fog end', min: 15, max: 90, step: 0.5, get: () => params.fogFar, set: (v) => { params.fogFar = v; ctx.fogRef.far = v } }),
-    color({ label: 'Fog colour', get: () => params.fogColor, set: (v) => { params.fogColor = v; ctx.fogRef.color.set(v); if (ctx.scene.background?.isColor) ctx.scene.background.set(v) } }) // no-op while a Fancy backdrop texture is active
+    color({ label: 'Fog colour', get: () => params.fogColor, set: (v) => { params.fogColor = v; ctx.fogRef.color.set(v); ctx.scene.background.set(v) } })
   )
 
   return panel
