@@ -51,7 +51,7 @@ et ce qui reste à faire.
 
 | Fonction | Statut | Flag | Fichier(s) | Note |
 |---|---|---|---|---|
-| **Simulation d'eau** (vagues Gerstner, caustiques, transparence) | 🟡 | `water` | `ocean.js`, `lake.js` | Rejetée par Adrien (« ne me parlait pas »). Code gardé. Réactiver : `FLAGS.water = true` |
+| **Simulation d'eau** (vagues Gerstner, caustiques, transparence) | 🟡 | `water` | `ocean.js` | Rejetée par Adrien (« ne me parlait pas »). Code gardé. Réactiver : `FLAGS.water = true`. (`lake.js` n'est PAS désactivé : son `detectLakes` reste actif — voir ligne « Détection lacs ».) |
 | **Éclairage studio** (8 presets + tirette 24h) | 🟡 | `lightingPresets` | `lighting.js` | Rejeté (« pas convaincant »). Rig soleil/hemi de base reste actif. Réactiver : `FLAGS.lightingPresets = true` |
 
 ## Backlog / idées

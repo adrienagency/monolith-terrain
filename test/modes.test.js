@@ -40,6 +40,8 @@ test('the surface staircase widens through z5 to the z4 continental block', () =
   assert.equal(stepZoom(5, 1), 7)
   assert.equal(stepZoom(8, 1), 10)
   assert.equal(stepZoom(10, 1), 12)
+  assert.equal(stepZoom(11, 1), 12) // caps at the fine scale (default 12)
+  assert.equal(stepZoom(12, 1, 14), 14) // user picked a finer detail zoom
 })
 
 test('the staircase climbs to a z15 fine cap (deeper zoom)', () => {
