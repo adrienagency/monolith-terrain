@@ -419,17 +419,15 @@ if (uScanT >= 0.0 && (uScanType == 0 || uScanType == 3)) {
   }
 
   setCoastMask(texture) {
-    const prev = this.mapUniforms.uCoastMask.value
+    // coast masks are owned by main.js's LRU cache — NEVER dispose here: the
+    // previously active texture is usually still cached, and disposing it on a
+    // swap would kill a live cache entry. The cache disposes on eviction only.
     if (texture) {
-      if (prev !== texture) {
-        this.mapUniforms.uCoastMask.value = texture
-        if (prev && prev !== this._coastPlaceholder) prev.dispose()
-      }
+      this.mapUniforms.uCoastMask.value = texture
       this.mapUniforms.uCoastMaskOn.value = 1
     } else {
       this._coastPlaceholder ??= whiteTexture()
       this.mapUniforms.uCoastMask.value = this._coastPlaceholder
-      if (prev && prev !== this._coastPlaceholder) prev.dispose()
       this.mapUniforms.uCoastMaskOn.value = 0
     }
   }

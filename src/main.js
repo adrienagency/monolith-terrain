@@ -43,7 +43,7 @@ import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
 import { fetchRegionMask } from './region-mask.js'
-import { fetchCoastMask } from './coast-mask.js'
+import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
 import { buildRegionPlate } from './region-plate.js'
 import { refreshAll } from './ui/kit.js'
 import { buildTopBar, buildBottomBar, buildIsoButton } from './ui/bars.js'
@@ -797,7 +797,12 @@ window.addEventListener('pointermove', (e) => {
 
 let dem = null
 let demBusy = false
-const coastMaskCache = new Map() // patch key → THREE texture
+// patch key → Promise<{maskTexture}|null>. Memoises the in-flight fetch (dedupes
+// A→B→A within one fetch) and is LRU-bounded (Map keeps insertion order; a hit
+// re-inserts to mark it most-recently-used). Evicted masks are disposed unless
+// still the active one — the cache is the sole owner of coast-mask lifecycles.
+const COAST_CACHE_MAX = 16
+const coastMaskCache = new Map()
 // the finest zoom the USER chose — dives and the staircase overwrite
 // params.demZoom freely, but refining always climbs back to this
 let userFineZoom = Math.max(params.demZoom, 12)
@@ -878,24 +883,36 @@ async function fetchAndBuildDem() {
   // pull the cartouche info for the new zone (async, non-blocking)
   if (params.groundInfo) groundInfo.load(params.demLat, params.demLon, dem)
   // real coastline (Natural Earth) at coarse zoom — async, non-blocking; the
-  // shader falls back to the elevation isoline until it arrives / if it fails
-  {
+  // shader falls back to the elevation isoline until it arrives / if it fails.
+  if (params.demZoom >= COAST_ZOOM_MIN && params.demZoom <= COAST_ZOOM_MAX) {
     const key = `${params.demZoom}:${params.demLat.toFixed(3)},${params.demLon.toFixed(3)}`
-    const cached = coastMaskCache.get(key)
-    if (cached) {
-      terrain.setCoastMask(cached)
-    } else {
-      terrain.setCoastMask(null)
-      fetchCoastMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem })
-        .then((res) => {
-          if (!res) return
-          coastMaskCache.set(key, res.maskTexture)
-          // only apply if we're still on the same patch
-          const stillHere = `${params.demZoom}:${params.demLat.toFixed(3)},${params.demLon.toFixed(3)}` === key
-          if (stillHere) terrain.setCoastMask(res.maskTexture)
+    let job = coastMaskCache.get(key)
+    if (job) coastMaskCache.delete(key) // re-insert below to mark most-recently-used
+    else job = fetchCoastMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem })
+    coastMaskCache.set(key, job)
+    // LRU eviction: drop the oldest entries, disposing their masks (never the active one)
+    while (coastMaskCache.size > COAST_CACHE_MAX) {
+      const lru = coastMaskCache.keys().next().value
+      const evicted = coastMaskCache.get(lru)
+      coastMaskCache.delete(lru)
+      evicted
+        ?.then((res) => {
+          const tex = res?.maskTexture
+          if (tex && tex !== terrain.mapUniforms.uCoastMask.value) tex.dispose()
         })
         .catch(() => {})
     }
+    terrain.setCoastMask(null) // fallback until this patch's mask resolves
+    job
+      .then((res) => {
+        if (!res) return
+        // only apply if we're still on the same patch
+        const stillHere = `${params.demZoom}:${params.demLat.toFixed(3)},${params.demLon.toFixed(3)}` === key
+        if (stillHere) terrain.setCoastMask(res.maskTexture)
+      })
+      .catch(() => {})
+  } else {
+    terrain.setCoastMask(null)
   }
   traffic.setZone(dem) // SpaceX pad watcher (Starbase / LC-39A in view?)
   if (params.regionMode) applyRegionMode() // re-cut to the new zone's boundary
