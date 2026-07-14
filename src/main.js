@@ -579,6 +579,7 @@ hud3.lines.visible = params.surveyLines
 scene.add(hud3.group)
 
 function flyTo(pos, target) {
+  cameraAuto.stop() // any programmatic move cancels a looping automation
   tween.p0.copy(camera.position)
   tween.t0.copy(controls.target)
   tween.p1.copy(pos)
@@ -655,6 +656,7 @@ function trapezoid(t, r) {
 
 function startTour() {
   if (modes && modes.mode !== 'surface') return // tours fly surface-space paths
+  cameraAuto.stop()
   const A = pois.find((p) => p.id === params.tourFrom)
   const B = pois.find((p) => p.id === params.tourTo)
   if (!A || !B || A === B) return
@@ -1568,6 +1570,7 @@ function flyTrack() {
   const duration = THREE.MathUtils.clamp(km * 2.2, 14, 95)
   tour.active = false
   tween.active = false
+  cameraAuto.stop()
   drone.start(w, { duration })
 }
 
@@ -1653,8 +1656,7 @@ async function applyRegionMode() {
 // fixed timestep so the video is deterministic whatever the encode speed
 let loopPaused = false
 function stepScene(t, dt) {
-  if (cameraAuto.active) cameraAuto.update(dt)
-  else if (drone.active || tour.active || tween.active) updateCameraMotion(dt)
+  if (cameraAuto.active || drone.active || tour.active || tween.active) updateCameraMotion(dt)
   if (!params.paused) {
     clouds.update(dt, params, camera)
     traffic.update(dt)
@@ -1671,7 +1673,7 @@ const topBar = buildTopBar({
     refreshAll()
   },
   // the Globe button always shows the WHOLE planet, spinning slowly
-  enterOrbit: () => modes.enterOrbit(16000000),
+  enterOrbit: () => { cameraAuto.stop(); modes.enterOrbit(16000000) },
   // the "?" button replays the guided tour (lazy-loaded, tiny)
   startTutorial: async () => {
     const { startTutorial } = await import('./ui/tutorial.js')
@@ -2002,6 +2004,12 @@ const clock = new THREE.Clock()
 
 // camera motion for one frame — shared by the live loop and offline export
 function updateCameraMotion(dt) {
+  // looping cinematic camera automation (Camera panel) — checked here so BOTH
+  // the live tick() and the offline export step drive it
+  if (cameraAuto.active) {
+    cameraAuto.update(dt)
+    return
+  }
   // drone follow-cam for the GPX track — chase the route from behind/above
   if (drone.active) {
     drone.update(dt)
