@@ -14,7 +14,11 @@
 import * as THREE from 'three'
 
 export const COAST_ZOOM_MIN = 4
-export const COAST_ZOOM_MAX = 8
+export const COAST_ZOOM_MAX = 12
+// z4–z8 use the bundled Natural Earth 10m land (Phase 1). z9–z12 switch to the
+// finer OSM-derived land grid (Phase 2) — real shoreline for bays/estuaries.
+export const COAST_NE_MAX = 8
+export const GRID_ZOOM = 6 // the OSM land grid is cut into slippy z6 tiles
 export const MASK_SIZE = 2048
 
 const clampLat = (lat) => Math.min(85.05, Math.max(-85.05, lat))
@@ -49,6 +53,23 @@ export function landPolygonsInBBox(features, bbox) {
     }
   }
   return kept
+}
+
+// lon/lat → slippy tile (x,y) at gridZoom, clamped in range (pure, tested)
+export function lonLatToGridTile(lon, lat, gridZoom) {
+  const n = 2 ** gridZoom
+  const la = clampLat(lat) * (Math.PI / 180)
+  const x = Math.floor(((lon + 180) / 360) * n)
+  const y = Math.floor(((1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2) * n)
+  const clamp = (v) => Math.max(0, Math.min(n - 1, v))
+  return [clamp(x), clamp(y)]
+}
+
+// the grid tiles covering a lon/lat bbox (north = smaller tileY) — pure, tested
+export function gridTileRange(bbox, gridZoom) {
+  const [xW, yN] = lonLatToGridTile(bbox.west, bbox.north, gridZoom)
+  const [xE, yS] = lonLatToGridTile(bbox.east, bbox.south, gridZoom)
+  return { x0: Math.min(xW, xE), x1: Math.max(xW, xE), y0: Math.min(yN, yS), y1: Math.max(yN, yS) }
 }
 
 // lon/lat bbox of the DEM patch footprint, from its four corners
@@ -128,8 +149,10 @@ function rasterize(ringGroups, dem, size) {
 }
 
 // ---- data (lazy, memoised) ----
-// public/ is served at the site root by Vite, so public/data/land-10m.json is
-// fetched as 'data/land-10m.json' — the exact pattern cities.js uses.
+// public/ is served at the site root by Vite, so public/data/* is fetched
+// relative to the site root — the exact pattern cities.js uses.
+
+// z4–z8: the bundled Natural Earth 10m land (one file, whole world)
 let landPromise = null
 function loadLand() {
   landPromise ??= fetch('data/land-10m.json').then((r) => {
@@ -139,20 +162,44 @@ function loadLand() {
   return landPromise
 }
 
+// z9–z12: the finer OSM-derived land grid, cut into slippy z6 tiles at
+// data/coast-z6/{x}/{y}.json. Ocean tiles are omitted (404 = no land), and
+// each fetched tile's features are memoised (adjacent patches reuse them).
+const gridCache = new Map() // "x/y" → Promise<Feature[]>
+function fetchGridTile(x, y) {
+  const key = `${x}/${y}`
+  let p = gridCache.get(key)
+  if (!p) {
+    p = fetch(`data/coast-z6/${x}/${y}.json`)
+      .then((r) => (r.ok ? r.json().then((fc) => fc.features || []) : [])) // 404 → ocean
+      .catch(() => [])
+    gridCache.set(key, p)
+  }
+  return p
+}
+async function loadGridFeatures(bbox) {
+  const { x0, x1, y0, y1 } = gridTileRange(bbox, GRID_ZOOM)
+  const jobs = []
+  for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) jobs.push(fetchGridTile(x, y))
+  const tiles = await Promise.all(jobs)
+  return tiles.flat()
+}
+
 // ---- public API ----
 // Build the land/sea mask for the current patch, or null when out of the
-// coarse band (z4–z8) or on any failure — the caller then keeps the current
-// elevation-based rendering (repli).
+// coast band (z4–z12) or on any failure — the caller then keeps the current
+// elevation-based rendering (repli). z4–z8 use Natural Earth 10m; z9–z12 use
+// the finer OSM z6 land grid.
 export async function fetchCoastMask({ lat, lon, zoom, dem }) {
   if (!dem || zoom < COAST_ZOOM_MIN || zoom > COAST_ZOOM_MAX) return null
   try {
-    const fc = await loadLand()
     const bbox = patchLatLonBBox(dem)
-    const rings = landPolygonsInBBox(fc.features, bbox)
+    const features = zoom <= COAST_NE_MAX ? (await loadLand()).features : await loadGridFeatures(bbox)
+    const rings = landPolygonsInBBox(features, bbox)
     // no land in view (open ocean) is legitimate — still return a mask so the
     // shader paints all-sea rather than falling back to the noisy 0-isoline
     const tex = rasterize(rings, dem, MASK_SIZE)
-    return { maskTexture: tex }
+    return { maskTexture: tex, source: zoom <= COAST_NE_MAX ? 'ne' : 'osm' }
   } catch (err) {
     console.warn('coast mask failed:', err)
     return null

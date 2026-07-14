@@ -166,6 +166,13 @@ export function buildCredits() {
   inspoBtn.type = 'button'
   inspoBtn.textContent = 'Inspiration'
   wrap.append(inspoBtn)
+
+  // OSM attribution — required (ODbL) because the fine-zoom (z9–z12) coastline
+  // is derived from OpenStreetMap. Natural Earth (z4–z8) is public domain.
+  wrap.append(
+    el('span', 'ce-credit-dot', '·'),
+    extLink('https://www.openstreetmap.org/copyright', '© OpenStreetMap', 'ce-credit-link')
+  )
   document.body.append(wrap)
 
   // popup (built once, toggled)

@@ -1,6 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { bboxIntersects, ringBBox, landPolygonsInBBox, projectPatchPx } from '../src/coast-mask.js'
+import {
+  bboxIntersects,
+  ringBBox,
+  landPolygonsInBBox,
+  projectPatchPx,
+  lonLatToGridTile,
+  gridTileRange,
+} from '../src/coast-mask.js'
 
 test('bboxIntersects: overlap, touch, and disjoint', () => {
   const a = { west: 0, south: 0, east: 10, north: 10 }
@@ -54,4 +61,25 @@ test('projectPatchPx maps north to the top of the canvas', () => {
   const yNorth = projectPatchPx(dem, 6, 60, 1024)[1]
   const ySouth = projectPatchPx(dem, 6, 40, 1024)[1]
   assert.ok(ySouth > yNorth, 'lower latitude maps further down the canvas (larger py)')
+})
+
+test('lonLatToGridTile: slippy z6 tile of a lon/lat, clamped in range', () => {
+  assert.deepEqual(lonLatToGridTile(0, 0, 6), [32, 32]) // centre of the world
+  assert.deepEqual(lonLatToGridTile(-180, 0, 6), [0, 32]) // west edge
+  assert.deepEqual(lonLatToGridTile(179.9, 0, 6), [63, 32]) // east edge (last col)
+  const [, yN] = lonLatToGridTile(0, 60, 6)
+  const [, yS] = lonLatToGridTile(0, 40, 6)
+  assert.ok(yN < yS, 'higher latitude → smaller tileY (further north = top)')
+  assert.deepEqual(lonLatToGridTile(200, 100, 6), [63, lonLatToGridTile(0, 85.05, 6)[1]]) // clamped
+})
+
+test('gridTileRange: the z6 tiles covering a patch bbox (north = smaller y)', () => {
+  const bbox = { west: 6, south: 41, east: 13, north: 44 } // central Italy patch
+  const r = gridTileRange(bbox, 6)
+  assert.ok(r.x0 <= r.x1 && r.y0 <= r.y1, 'ranges are ordered')
+  // west/east corners define x0/x1; north/south define y0/y1
+  assert.equal(r.x0, lonLatToGridTile(6, 44, 6)[0])
+  assert.equal(r.x1, lonLatToGridTile(13, 41, 6)[0])
+  assert.equal(r.y0, lonLatToGridTile(6, 44, 6)[1]) // north edge → smallest y
+  assert.equal(r.y1, lonLatToGridTile(13, 41, 6)[1]) // south edge → largest y
 })
