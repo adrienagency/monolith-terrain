@@ -864,6 +864,10 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // Noise-driven roughness map (green channel is what three.js reads) + bump map
   // reused for micro relief that's finer than the vertex grid.
   rebuildRoughness(params) {
+    // an opaque relief material (wood/fabric/carbon) OWNS the roughnessMap — and
+    // for wood/fabric it's a shared cached texture. Never dispose/overwrite it on
+    // a terrain regen, or the material breaks and the cached texture is destroyed.
+    if (this.materialMode && this.materialMode !== 'glass') return
     const size = 512
     const rng = mulberry32(params.seed + 777)
     const s = new Simplex2(rng)
@@ -992,7 +996,6 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       // none — restore the topographic look
       m.map = null
       m.normalMap = null
-      m.roughnessMap = null
       m.normalScale.set(1, 1)
       m.metalness = 0
       m.roughness = 1
@@ -1000,6 +1003,8 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       m.color.set(params.color ?? '#ffffff')
       this._matPreset = null
       this.mapUniforms.uTint.value = params.mapTint ?? 1
+      // restore the procedural terrain roughness/bump the relief material replaced
+      this.rebuildRoughness(params)
     }
     m.needsUpdate = true
   }

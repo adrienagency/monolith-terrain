@@ -57,11 +57,16 @@ export function captureLook(params) {
 export function serializeTemplate(t) {
   return JSON.stringify({ format: FORMAT, version: VERSION, name: t.name, thumb: t.thumb, look: t.look }, null, 0)
 }
+// only accept a thumbnail that is a real base64 image data URL — an imported
+// .json is untrusted, and the value is later used as an <img src>, so a crafted
+// string could otherwise smuggle markup/handlers into the DOM.
+const THUMB_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/
 export function parseTemplate(text) {
   let o
   try { o = JSON.parse(text) } catch { return null }
   if (!o || o.format !== FORMAT || !o.look || typeof o.look !== 'object') return null
-  return { name: String(o.name || 'Imported').slice(0, 40), thumb: o.thumb || null, look: o.look }
+  const thumb = typeof o.thumb === 'string' && THUMB_RE.test(o.thumb) ? o.thumb : null
+  return { name: String(o.name || 'Imported').slice(0, 40), thumb, look: o.look }
 }
 
 // ---- localStorage list ----
@@ -71,6 +76,8 @@ export function loadUserTemplates() {
     return Array.isArray(arr) ? arr.filter((t) => t && t.look) : []
   } catch { return [] }
 }
+// returns false if storage is full (thumbnails are data URLs and add up) so the
+// caller can tell the user instead of silently losing the save
 export function saveUserTemplates(list) {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(list)) } catch {}
+  try { localStorage.setItem(LS_KEY, JSON.stringify(list)); return true } catch { return false }
 }

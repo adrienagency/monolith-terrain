@@ -9,7 +9,7 @@ import { fetchRaceDetail } from '../race-info.js'
 export function buildRacePanel() {
   const badge = el('button', 'ce-race-badge hidden')
   badge.type = 'button'
-  badge.innerHTML = '<span class="ce-race-flag">🏁</span> Course détectée — voir les infos'
+  badge.innerHTML = '<span class="ce-race-flag">🏁</span> Race detected — view info'
   const card = el('div', 'ce-race-card ce-glassbox hidden')
   document.body.append(badge, card)
 
@@ -37,13 +37,13 @@ export function buildRacePanel() {
   }
 
   function renderList() {
-    card.replaceChildren(head('Courses à cet endroit', null))
+    card.replaceChildren(head('Races here', null))
     const list = el('div', 'ce-race-list')
     for (const c of candidates) {
       const row = el('button', 'ce-race-row')
       row.type = 'button'
       const thumb = c.thumb ? `<img class="ce-race-thumb" src="${c.thumb}" alt="">` : '<span class="ce-race-thumb"></span>'
-      const meta = c.participants ? `${c.participants.toLocaleString('fr-FR')} participants` : ''
+      const meta = c.participants ? `${c.participants.toLocaleString('en-US')} participants` : ''
       row.innerHTML = `${thumb}<span class="ce-race-rowtxt"><b>${esc(c.title)}</b><small>${meta}</small></span>`
       row.addEventListener('click', () => openDetail(c))
       list.append(row)
@@ -54,19 +54,19 @@ export function buildRacePanel() {
 
   async function openDetail(c) {
     const back = candidates.length > 1 ? renderList : null
-    card.replaceChildren(head(c.title, back), el('div', 'ce-race-body', 'Chargement…'))
+    card.replaceChildren(head(c.title, back), el('div', 'ce-race-body', 'Loading…'))
     card.classList.remove('hidden')
     const d = await fetchRaceDetail(c)
     const body = el('div', 'ce-race-body')
-    if (c.participants) body.append(el('div', 'ce-race-tag', `${c.participants.toLocaleString('fr-FR')} participants`))
+    if (c.participants) body.append(el('div', 'ce-race-tag', `${c.participants.toLocaleString('en-US')} participants`))
     if (d.description) body.append(el('p', 'ce-race-desc', d.description))
     if (d.winners?.length) {
-      body.append(el('div', 'ce-race-sub', 'Palmarès'))
+      body.append(el('div', 'ce-race-sub', 'Notable results'))
       const ul = el('ul', 'ce-race-win')
       for (const w of d.winners) ul.append(el('li', null, w))
       body.append(ul)
     }
-    const link = el('a', 'ce-race-link', 'Article Wikipédia ↗')
+    const link = el('a', 'ce-race-link', 'Wikipedia article ↗')
     link.href = d.url
     link.target = '_blank'
     link.rel = 'noopener'

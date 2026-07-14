@@ -379,7 +379,7 @@ body.dark {
 /* known-race badge + info card */
 .ce-race-badge {
   position: fixed;
-  bottom: 82px; /* clear of the bottom search bar */
+  bottom: 158px; /* above the GPX elevation-profile strip (which appears on the same load) */
   left: 50%;
   transform: translateX(-50%);
   z-index: 96;
@@ -404,7 +404,7 @@ body.dark {
 @keyframes ce-race-pop { from { opacity: 0; transform: translate(-50%, 8px); } }
 .ce-race-card {
   position: fixed;
-  bottom: 82px; /* anchored above the search bar, grows upward */
+  bottom: 158px; /* anchored above the GPX profile strip, grows upward */
   left: 50%;
   transform: translateX(-50%);
   z-index: 97;
@@ -868,6 +868,8 @@ body.ce-noui .ce-panel,
 body.ce-noui .hud,
 body.ce-noui .altimeter,
 body.ce-noui .ce-credits,
+body.ce-noui .ce-race-badge,
+body.ce-noui .ce-race-card,
 body.ce-noui .gpx-profile {
   display: none !important;
 }

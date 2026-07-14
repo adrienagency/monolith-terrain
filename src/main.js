@@ -1374,6 +1374,9 @@ function applyUserTemplate(tmpl) {
   fogRef.far = params.fogFar
   applyPlinthMaterial()
   terrain.setMaterialMode(params.terrainSurfaceMat || '', params)
+  if (params.terrainSurfaceMat && params.terrainSurfaceMat !== 'glass' && params.terrainMatRoughness != null) {
+    terrain.setTerrainMatRoughness(params.terrainMatRoughness) // honour the saved finish
+  }
   terrain.setLiquidMetal(!!params.liquidMetal, params)
   terrain.setSurfaceFx(params.surfaceFx | 0)
   if ((params.surfaceFx | 0) > 0 && params.fx?.[params.surfaceFx]) terrain.applyFxParams(params.fx[params.surfaceFx])
@@ -1404,12 +1407,20 @@ function captureThumbnail(w = 160, h = 90) {
 }
 
 function persistUserTemplates() {
-  saveUserTemplates(userTemplates)
+  if (!saveUserTemplates(userTemplates)) {
+    // storage full — drop the just-added entry and tell the user
+    userTemplates.pop()
+    saveUserTemplates(userTemplates)
+    alert('Template storage is full — delete a saved look (or export it to a file) and try again.')
+    return false
+  }
+  return true
 }
 function saveCurrentTemplate(name) {
   // force a fresh frame so the thumbnail matches what's on screen
   composer.render()
-  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: String(name || 'My look').slice(0, 40), thumb: captureThumbnail(), look: captureLook(params) }
+  const clean = String(name || '').trim().slice(0, 40) || 'My look'
+  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: clean, thumb: captureThumbnail(), look: captureLook(params) }
   userTemplates.push(t)
   persistUserTemplates()
   return t
@@ -1469,8 +1480,11 @@ function resetLook() {
 const gpxLayer = new GpxLayer({ scene, camera, terrain, params, getDem: () => dem })
 
 const racePanel = buildRacePanel()
+let gpxLoadSeq = 0 // guards against a slow race-lookup for an old track winning
 
 async function loadGpxText(text) {
+  const seq = ++gpxLoadSeq
+  racePanel.hide() // clear any stale race badge from a previous track
   try {
     const { points, name } = parseGpx(text)
     gpxLayer.setTrack(points, name)
@@ -1482,8 +1496,8 @@ async function loadGpxText(text) {
     refreshAll()
     modes.announce(`TRACK LOADED — ${name.toUpperCase().slice(0, 24)}`)
     // is there a known race at this location? (live Wikipedia, non-blocking) —
-    // the user can open its info card or ignore the badge
-    findRacesNear(f.lat, f.lon).then((cands) => racePanel.offer(cands)).catch(() => {})
+    // only the latest track's lookup may show its badge
+    findRacesNear(f.lat, f.lon).then((cands) => { if (seq === gpxLoadSeq) racePanel.offer(cands) }).catch(() => {})
     // the post-rebuild hook drapes the line once the new terrain exists;
     // pin the framed zoom or the dive would land on the fine (≥12) scale
     // and clip long tracks framed at z10/z11
@@ -1785,11 +1799,18 @@ const createPanel = buildCreatePanel({
 
 // Shaders panel — right dock, between Create and Camera (created here so it
 // docks between them). Holds the surface-shader treatments split out of Scan.
+let shadersRefreshFn = () => {} // re-renders the Shaders panel controls on exclusivity changes
 const shadersPanel = buildShadersPanel({
+  registerRefresh: (fn) => { shadersRefreshFn = fn },
   getLiquidMetal: () => params.liquidMetal,
   setLiquidMetal: (v) => {
     params.liquidMetal = v
+    // Liquid metal, a relief material and the topographic map all own the terrain
+    // material — they're mutually exclusive. Turning LM on clears a relief material.
+    if (v && params.terrainSurfaceMat) { params.terrainSurfaceMat = ''; terrain.setMaterialMode('', params) }
     terrain.setLiquidMetal(v, params)
+    shadersRefreshFn()
+    refreshAll()
   },
   lmControls: [
     { k: 'lmMetalness', label: 'Metalness', min: 0, max: 1 },
@@ -1827,9 +1848,13 @@ const shadersPanel = buildShadersPanel({
   getSurfaceMat: () => params.terrainSurfaceMat,
   setSurfaceMat: (id) => {
     params.terrainSurfaceMat = id || ''
+    // exclusive with Liquid metal — picking a relief material turns LM off
+    if (id && params.liquidMetal) { params.liquidMetal = false; terrain.setLiquidMetal(false, params) }
     terrain.setMaterialMode(params.terrainSurfaceMat, params)
     // seed the roughness slider from the material's own default so it reads right
     if (id && id !== 'glass') params.terrainMatRoughness = terrain.material.roughness
+    shadersRefreshFn()
+    refreshAll()
   },
   getSurfaceMatBump: () => params.terrainSurfaceBump,
   setSurfaceMatBump: (v) => {

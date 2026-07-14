@@ -55,10 +55,14 @@ export function buildCreatePanel(ctx) {
     userWrap.replaceChildren()
     for (const t of ctx.getUserTemplates?.() ?? []) {
       const card = el('div', 'ce-utpl')
-      const thumb = t.thumb ? `<img class="ce-utpl-img" src="${t.thumb}" alt="">` : '<div class="ce-utpl-img"></div>'
-      card.innerHTML = `${thumb}<span class="ce-utpl-name">${(t.name || 'Look').replace(/</g, '')}</span>
-        <button class="ce-utpl-x" title="Delete" type="button">✕</button>
-        <button class="ce-utpl-dl" title="Export .json" type="button">⭳</button>`
+      // build with DOM APIs (not innerHTML) so an imported template's thumb/name
+      // can never inject markup — the thumb is a user-supplied string
+      const img = el(t.thumb ? 'img' : 'div', 'ce-utpl-img')
+      if (t.thumb) { img.src = t.thumb; img.alt = '' }
+      const nm = el('span', 'ce-utpl-name')
+      nm.textContent = t.name || 'Look'
+      card.append(img, nm)
+      card.insertAdjacentHTML('beforeend', '<button class="ce-utpl-x" title="Delete" type="button">✕</button><button class="ce-utpl-dl" title="Export .json" type="button">⭳</button>')
       card.addEventListener('click', (e) => {
         if (e.target.closest('.ce-utpl-x, .ce-utpl-dl')) return
         ctx.applyUserTemplate(t); refreshAll(); ctx.syncDark?.()

@@ -152,6 +152,7 @@ export class Plinth {
     if (finish === 'glass') {
       const p = GLASS_BY_ID[id] || GLASS_BY_ID.clear
       this.isGlass = true
+      this._pbrColored = false
       const diff = diffusion == null ? p.diffusion : diffusion
       // Frosted/diffuse glass driven by a micro-facet NORMAL map rather than raw
       // transmission roughness (which mip-blurs into chunky artefacts). A capped
@@ -181,6 +182,9 @@ export class Plinth {
     } else {
       const p = PBR_BY_ID[id] || { color: fallbackColor, roughness: 0.95, metalness: 0 }
       this.isGlass = false
+      // a real PBR preset owns the wall colour — the dark-mode/edge-colour reset
+      // in setColors must not clobber it (only the plain default 'stone' takes it)
+      this._pbrColored = !!(id && id !== 'stone')
       m.color.set(p.color)
       m.metalness = p.metalness ?? 0
       m.roughness = p.roughness ?? 0.9
@@ -307,9 +311,10 @@ export class Plinth {
   }
 
   setColors(params) {
-    // glass keeps its clear white base (tint rides on attenuation) — only a
-    // solid socle takes the edge colour.
-    if (!this.isGlass) this.wallMat.color.set(params.plinthColor ?? '#d8d4cc')
+    // glass keeps its clear white base (tint rides on attenuation), and a real
+    // PBR preset keeps its own colour — only the plain default socle takes the
+    // edge/dark-mode colour.
+    if (!this.isGlass && !this._pbrColored) this.wallMat.color.set(params.plinthColor ?? '#d8d4cc')
     // the table is a ShadowMaterial (no color — it only darkens the background
     // where the shadow lands); the dark sheet reads a touch stronger
     this.baseMat.opacity = params.darkMode ? 0.34 : 0.24

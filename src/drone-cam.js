@@ -105,7 +105,10 @@ export class DroneCam {
     const span = worldPts.reduce((s, p, i) => (i ? s + Math.hypot(p.x - worldPts[i - 1].x, p.z - worldPts[i - 1].z) : 0), 0)
     const spacing = Math.max(0.4, span / 260)
     const path = smoothPath(resamplePath(worldPts, spacing), 2, 2)
+    // a stationary / near-single-point track collapses the resample to one point;
+    // CatmullRomCurve3 of <2 points yields NaN poses. Bail cleanly instead.
     const v = path.map((p) => new THREE.Vector3(p.x, p.y, p.z))
+    if (v.length < 2 || span < 1e-3) return false
     this.curve = new THREE.CatmullRomCurve3(v, false, 'centripetal', 0.5)
     this.curve.arcLengthDivisions = 800
     this.curve.updateArcLengths()

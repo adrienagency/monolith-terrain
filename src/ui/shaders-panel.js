@@ -100,5 +100,7 @@ export function buildShadersPanel(ctx) {
   renderLm()
   renderMat()
   renderFx()
+  // let main.js re-render these when an exclusivity change flips LM ↔ relief material
+  ctx.registerRefresh?.(() => { renderLm(); renderMat(); renderFx() })
   return panel
 }
