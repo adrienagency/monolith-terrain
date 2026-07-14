@@ -8,8 +8,11 @@ import { MeshTransmissionMaterial } from './vendor/MeshTransmissionMaterial.js'
 
 // full-relief opaque material modes (glass is handled separately). Each drapes
 // its texture stack over the whole terrain and fades the hypsometric paint.
+//   dir  → real CC0 PBR set lazy-loaded from public/textures (Poly Haven, CC0)
+//   tex  → procedural CanvasTexture stack (material-textures.js)
 const OPAQUE_TERRAIN_MATS = {
-  wood: { tex: 'wood', metalness: 0, roughness: 0.68, normalScale: 1.3, envMapIntensity: 0.6, repeat: 6 },
+  wood: { dir: 'textures/wood/', metalness: 0, roughness: 0.75, normalScale: 1.0, envMapIntensity: 0.55, repeat: 3.5 },
+  fabric: { dir: 'textures/fabric/', metalness: 0, roughness: 0.92, normalScale: 1.2, envMapIntensity: 0.35, repeat: 6 },
   carbon: { tex: 'carbon', metalness: 0.45, roughness: 0.5, normalScale: 1.2, envMapIntensity: 1.3, repeat: 10 },
 }
 
@@ -423,14 +426,16 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     mapCol = texture2D(uRampTex, vec2(rampT, 0.5)).rgb;
     mapCol = mix(mapCol, vec3(0.42, 0.31, 0.21), smoothstep(0.3, 0.8, slope) * uSlopeTint);
   }
-  // Fancy surface shader: paint the animated pattern over the map albedo, so
-  // it drapes on the relief and is lit like the surface (Liquid metal = the
-  // material sibling of this). Off (0) leaves the paper map untouched.
+  float fxShade = clamp(luma * 2.4, 0.2, 1.4);
+  diffuseColor.rgb = mix(diffuseColor.rgb, mapCol * fxShade, uTint);
+
+  // Fancy surface shader paints OVER the final surface — the hypsometric map OR
+  // a relief material (wood/carbon/...). Materials sit BELOW the shaders, so a
+  // shader shows on top of whatever the relief is wearing. Off (0) = untouched.
   if (uSurfaceFx > 0) {
-    vec3 fxc = surfaceFx(uSurfaceFx, vWorldPos.xz * 0.15, uFxTime);
-    mapCol = mix(mapCol, fxBlend(mapCol, fxc, uFxBlend), uFxOpacity); // Appearance: blend + opacity
+    vec3 fxc = surfaceFx(uSurfaceFx, vWorldPos.xz * 0.15, uFxTime) * fxShade;
+    diffuseColor.rgb = mix(diffuseColor.rgb, fxBlend(diffuseColor.rgb, fxc, uFxBlend), uFxOpacity); // Appearance
   }
-  diffuseColor.rgb = mix(diffuseColor.rgb, mapCol * clamp(luma * 2.4, 0.2, 1.4), uTint);
 
   // --- coastline: a fine, discreet line at sea level (elevation 0), drawn in
   // the template ink. Kept thin so the shore reads without shouting.
@@ -946,23 +951,33 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const m = this.material
     const preset = OPAQUE_TERRAIN_MATS[id]
     if (preset) {
-      const t = TEXTURE_BUILDERS[preset.tex]?.()
-      if (t) {
-        // clone so the terrain tiles denser than the socle
-        const rep = preset.repeat ?? 7
-        this._surfMap = swapClone(this._surfMap, t.map, rep)
-        this._surfNm = swapClone(this._surfNm, t.normalMap, rep)
-        this._surfRm = swapClone(this._surfRm, t.roughnessMap, rep)
+      const scale = params.terrainMatScale ?? 1
+      const rep = (preset.repeat ?? 6) * scale
+      if (preset.dir) {
+        // real CC0 PBR set (Poly Haven), lazy-loaded + cached; mutate repeat live
+        const set = this._loadTextureSet(preset.dir)
+        for (const k of ['map', 'normalMap', 'roughnessMap']) set[k]?.repeat.set(rep, rep)
+        m.map = set.map
+        m.normalMap = set.normalMap
+        m.roughnessMap = set.roughnessMap
+        this._surfSet = set
+      } else {
+        const t = TEXTURE_BUILDERS[preset.tex]?.()
+        this._surfMap = swapClone(this._surfMap, t?.map, rep)
+        this._surfNm = swapClone(this._surfNm, t?.normalMap, rep)
+        this._surfRm = swapClone(this._surfRm, t?.roughnessMap, rep)
         m.map = this._surfMap || null
         m.normalMap = this._surfNm || null
         m.roughnessMap = this._surfRm || null
-        const b = (params.terrainSurfaceBump ?? 1) * (preset.normalScale ?? 1)
-        m.normalScale.set(b, b)
-        m.metalness = preset.metalness ?? 0
-        m.roughness = preset.roughness ?? 0.8
-        m.envMapIntensity = preset.envMapIntensity ?? params.envMapIntensity ?? 1
-        this.mapUniforms.uTint.value = 0 // drop the hypsometric paint → pure material
       }
+      const b = (params.terrainSurfaceBump ?? 1) * (preset.normalScale ?? 1)
+      m.normalScale.set(b, b)
+      m.metalness = preset.metalness ?? 0
+      m.roughness = preset.roughness ?? 0.8 // slider (setTerrainMatRoughness) tunes live
+      m.envMapIntensity = preset.envMapIntensity ?? params.envMapIntensity ?? 1
+      m.color.set('#ffffff') // let the albedo map show its true colour
+      this._matPreset = preset
+      this.mapUniforms.uTint.value = 0 // drop the hypsometric paint → pure material
     } else {
       // none — restore the topographic look
       m.map = null
@@ -972,9 +987,37 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       m.metalness = 0
       m.roughness = 1
       m.envMapIntensity = params.envMapIntensity ?? 1
+      m.color.set(params.color ?? '#ffffff')
+      this._matPreset = null
       this.mapUniforms.uTint.value = params.mapTint ?? 1
     }
     m.needsUpdate = true
+  }
+  // lazy-load + cache a real PBR texture set from public/textures/<dir>/
+  _loadTextureSet(dir) {
+    this._texSets = this._texSets || {}
+    if (this._texSets[dir]) return this._texSets[dir]
+    const loader = (this._texLoader = this._texLoader || new THREE.TextureLoader())
+    const mk = (file, srgb) => {
+      const t = loader.load(dir + file)
+      t.wrapS = t.wrapT = THREE.RepeatWrapping
+      t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace
+      t.anisotropy = 8
+      return t
+    }
+    const set = { map: mk('diff.jpg', true), normalMap: mk('nor_gl.jpg', false), roughnessMap: mk('rough.jpg', false) }
+    this._texSets[dir] = set
+    return set
+  }
+  // live tiling-scale knob for the opaque relief materials
+  setTerrainMatScale(scale) {
+    const p = this._matPreset
+    if (!p || this.materialMode === 'glass') return
+    const rep = (p.repeat ?? 6) * scale
+    for (const t of [this.material.map, this.material.normalMap, this.material.roughnessMap]) t?.repeat.set(rep, rep)
+  }
+  setTerrainMatRoughness(r) {
+    if (this._matPreset && this.materialMode !== 'glass') this.material.roughness = r
   }
   _makeGlassMaterial() {
     this.glassMaterial = new MeshTransmissionMaterial({

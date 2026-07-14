@@ -237,6 +237,8 @@ const params = {
   // relief into a material — '' | 'glass' | 'wood' | 'carbon'
   terrainSurfaceMat: '',
   terrainSurfaceBump: 1.3, // bump for the opaque terrain materials (wood/carbon)
+  terrainMatScale: 1, // tiling scale for the opaque relief materials (repetition)
+  terrainMatRoughness: 0.75, // seeded from the preset on select; live-tunable
   terrainGlassFrost: 0.5, // glass roughness (frost) — blurry by default
   terrainGlassThickness: 8,
   terrainGlassTint: '#bfe4ff',
@@ -1715,18 +1717,32 @@ const shadersPanel = buildShadersPanel({
   // metal): premium transmission glass, or an opaque wood/carbon swap
   surfaceMatList: [
     { value: 'glass', label: 'Glass (premium)' },
-    { value: 'wood', label: 'Wood' },
+    { value: 'wood', label: 'Wood (CC0)' },
+    { value: 'fabric', label: 'Fabric — denim' },
     { value: 'carbon', label: 'Carbon fibre' },
   ],
   getSurfaceMat: () => params.terrainSurfaceMat,
   setSurfaceMat: (id) => {
     params.terrainSurfaceMat = id || ''
     terrain.setMaterialMode(params.terrainSurfaceMat, params)
+    // seed the roughness slider from the material's own default so it reads right
+    if (id && id !== 'glass') params.terrainMatRoughness = terrain.material.roughness
   },
   getSurfaceMatBump: () => params.terrainSurfaceBump,
   setSurfaceMatBump: (v) => {
     params.terrainSurfaceBump = v
     terrain.setSurfaceMaterialBump(v)
+  },
+  // live tiling + finish knobs for the opaque relief materials
+  getMatScale: () => params.terrainMatScale,
+  setMatScale: (v) => {
+    params.terrainMatScale = v
+    terrain.setTerrainMatScale(v)
+  },
+  getMatRoughness: () => params.terrainMatRoughness,
+  setMatRoughness: (v) => {
+    params.terrainMatRoughness = v
+    terrain.setTerrainMatRoughness(v)
   },
   // live glass knobs (only shown when the relief material is Glass)
   glassControls: [
