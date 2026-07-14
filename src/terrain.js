@@ -242,12 +242,12 @@ float scanHash(vec2 p) {
   }
   diffuseColor.rgb = mix(diffuseColor.rgb, mapCol * clamp(luma * 2.4, 0.2, 1.4), uTint);
 
-  // --- coastline: a crisp line exactly at sea level (elevation 0), drawn in the
-  // template ink so the shore is unmistakable on every look
+  // --- coastline: a fine, discreet line at sea level (elevation 0), drawn in
+  // the template ink. Kept thin so the shore reads without shouting.
   if (uSeaY > -9000.0) {
     float coastAA = max(fwidth(vWorldPos.y), 1e-4);
-    float coast = 1.0 - smoothstep(0.0, coastAA * 2.5, abs(vWorldPos.y - uSeaY));
-    diffuseColor.rgb = mix(diffuseColor.rgb, uContourColor, coast * 0.9);
+    float coast = 1.0 - smoothstep(0.0, coastAA * 1.3, abs(vWorldPos.y - uSeaY));
+    diffuseColor.rgb = mix(diffuseColor.rgb, uContourColor, coast * 0.55);
   }
 
   // --- drifting cloud shadows, cast by the volumetric deck overhead (strength
