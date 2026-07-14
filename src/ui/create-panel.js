@@ -94,6 +94,7 @@ export function buildCreatePanel(ctx) {
   nameInput.placeholder = 'Name this look…'
   nameInput.maxLength = 40
   const doSave = () => {
+    if (!nameInput.value.trim()) { nameInput.focus(); return } // name required
     ctx.saveCurrentTemplate(nameInput.value)
     nameInput.value = ''
     renderUserTemplates()

@@ -1952,7 +1952,6 @@ const scanPanel = buildScanPanel({
 shadersPanel.setCollapsed(true)
 cameraPanel.setCollapsed(true)
 scanPanel.setCollapsed(true)
-scanPanel.setCollapsed(true)
 
 // adaptive quality — built once the composer, panels and mode machine exist
 // so tier changes can announce, re-sync the Camera panel and stay quiet in
@@ -2066,9 +2065,16 @@ function tick() {
   modes.update(dt)
   if (modes.mode === 'orbital') globe.update(camera, dt)
 
-  // fog is driven directly by the Effects sliders (fogNear/fogFar) — the old
-  // per-frame auto-scaling silently overrode those values (near*9/far*10.4),
-  // pushing the fog hundreds of units away so it never showed at normal zoom.
+  // fog respects the Effects sliders at normal viewing (so it actually shows —
+  // the old code scaled near*9/far*10.4 at every distance and hid it), and only
+  // lifts outward when the camera is pulled far back to frame the whole slab, so
+  // the relief never whites out near the orbit gate.
+  if (modes.mode === 'surface' && scene.fog) {
+    const dist = controls.getDistance()
+    const lift = THREE.MathUtils.smoothstep(dist, 55, 115)
+    fogRef.near = THREE.MathUtils.lerp(params.fogNear, dist + 45, lift)
+    fogRef.far = THREE.MathUtils.lerp(params.fogFar, dist + 130, lift)
+  }
 
   // refresh camera matrices NOW so DOM projections match this frame's render
   // (otherwise labels are projected with last frame's matrices and lag behind)
