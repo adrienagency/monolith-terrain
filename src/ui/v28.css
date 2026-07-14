@@ -677,6 +677,7 @@ body.ce-noui .ce-bottombar,
 body.ce-noui .ce-panel,
 body.ce-noui .hud,
 body.ce-noui .altimeter,
+body.ce-noui .ce-credits,
 body.ce-noui .gpx-profile {
   display: none !important;
 }
@@ -950,5 +951,118 @@ body.ce-noui .ce-rec {
   /* tooltips need hover — a touch UI has none */
   .ce-tip {
     display: none !important;
+  }
+}
+
+/* ---- bottom-left credit + inspiration popup ---------------------------- */
+/* Deliberately quiet: hairline-small, muted ink, never competes with the map. */
+.ce-credits {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--ce-font);
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+  pointer-events: none; /* only the links are clickable */
+}
+.ce-credit-link {
+  pointer-events: auto;
+  color: var(--ce-muted);
+  text-decoration: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+.ce-credit-link:hover {
+  color: var(--ce-accent);
+}
+.ce-credit-dot {
+  color: var(--ce-muted);
+  opacity: 0.5;
+}
+
+.ce-inspo-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(16, 18, 22, 0.28);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.22s ease, visibility 0.22s ease;
+}
+.ce-inspo-backdrop.open {
+  opacity: 1;
+  visibility: visible;
+}
+.ce-inspo-card {
+  width: min(380px, 100%);
+  padding: 22px 22px 16px;
+  transform: translateY(6px) scale(0.985);
+  transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.ce-inspo-backdrop.open .ce-inspo-card {
+  transform: none;
+}
+.ce-inspo-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ce-ink);
+  letter-spacing: -0.01em;
+}
+.ce-inspo-sub {
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--ce-muted);
+}
+.ce-inspo-list {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ce-inspo-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  margin: 0 -10px;
+  border-radius: 10px;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+.ce-inspo-row:hover {
+  background: var(--ce-hover);
+}
+.ce-inspo-name {
+  font-size: 13.5px;
+  color: var(--ce-ink);
+}
+.ce-inspo-row:hover .ce-inspo-name {
+  color: var(--ce-accent);
+}
+.ce-inspo-host {
+  font-family: var(--ce-mono);
+  font-size: 11px;
+  color: var(--ce-muted);
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ce-inspo-backdrop,
+  .ce-inspo-card {
+    transition: none;
   }
 }

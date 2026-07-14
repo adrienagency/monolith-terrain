@@ -685,4 +685,28 @@ if (uScanT >= 0.0 && (uScanType == 0 || uScanType == 3)) {
     this.material.bumpScale = params.bumpScale
     this.material.transmission = params.transmission ?? 0
   }
+
+  // "Liquid metal" look — chrome the raised relief so the scene environment
+  // reflects off it instead of the paper map. Fully reversible: off restores
+  // the current template's material (envMap / transmission / map tint) from
+  // params. metalness/roughness/uTint survive a geometry rebuild, so only
+  // updateMaterial() (envMap/transmission) needs re-asserting after a template
+  // change — the caller does that.
+  setLiquidMetal(on, params) {
+    const m = this.material
+    if (on) {
+      m.metalness = 1
+      m.roughness = 0.16 // multiplies the roughness map: shiny with a little flow
+      m.envMapIntensity = 2.0
+      m.transmission = 0
+      this.mapUniforms.uTint.value = 0.1 // fade the paper colour so the metal reads
+    } else {
+      m.metalness = 0
+      m.roughness = 1
+      m.envMapIntensity = params.envMapIntensity
+      m.transmission = params.transmission ?? 0
+      this.mapUniforms.uTint.value = params.mapTint
+    }
+    m.needsUpdate = true
+  }
 }

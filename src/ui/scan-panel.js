@@ -1,7 +1,7 @@
 // SCAN panel — the terrain scanner as its own first-class panel in the left
 // dock, a sibling of Explore (not a child of it).
 
-import { el, button, section } from './kit.js'
+import { el, button, section, toggle } from './kit.js'
 import { Panel } from './shell.js'
 import { SCAN_TYPES } from '../scan.js'
 
@@ -47,6 +47,15 @@ export function buildScanPanel(ctx) {
   run.setAttribute('data-tip', 'Trigger the selected sweep on the current view.')
   trig.append(run)
   sScan.body.append(trig)
+
+  // Fancy — experimental surface treatments (paper → other materials)
+  const sFancy = panel.addSection(section('Fancy', { open: false }))
+  sFancy.body.append(
+    toggle({ label: 'Liquid metal', get: () => ctx.getLiquidMetal(), set: (v) => ctx.setLiquidMetal(v) })
+  )
+  const note = el('div', 'ce-label', 'Chrome the relief — reflections take over from the paper map.')
+  note.style.marginTop = '4px'
+  sFancy.body.append(note)
 
   return panel
 }

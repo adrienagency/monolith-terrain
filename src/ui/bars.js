@@ -133,3 +133,64 @@ export function buildBottomBar(ctx) {
   document.body.append(bar)
   return { root: bar, input }
 }
+
+// Other beautiful 3D-map makers — the company ShibuMap keeps. First is the one
+// Adrien flagged; the rest are real web tools in the same relief-map space.
+const INSPIRATIONS = [
+  { name: 'Longitude.one — Maps', host: 'longitude.one', url: 'https://www.longitude.one/maps' },
+  { name: 'Elastic Terrain', host: 'elasticterrain.xyz', url: 'http://elasticterrain.xyz/' },
+  { name: '3D Mapper', host: '3d-mapper.com', url: 'https://3d-mapper.com/online-3d-map/' },
+  { name: 'FreeTopoMaps', host: 'freetopomaps.io', url: 'https://freetopomaps.io/' },
+  { name: '3D Map Generator', host: '3d-map-generator.com', url: 'https://3d-map-generator.com/' },
+]
+
+function extLink(href, text, cls) {
+  const a = el('a', cls)
+  a.href = href
+  a.target = '_blank'
+  a.rel = 'noopener noreferrer'
+  a.textContent = text
+  return a
+}
+
+// bottom-left: a quiet studio credit + an "Inspiration" popup listing kindred
+// 3D-map makers. Deliberately understated so it never competes with the relief.
+export function buildCredits() {
+  const wrap = el('div', 'ce-credits')
+  wrap.append(
+    extLink('https://adrienagency.com', '© Adrien Agency', 'ce-credit-link'),
+    el('span', 'ce-credit-dot', '·')
+  )
+
+  const inspoBtn = el('button', 'ce-credit-link')
+  inspoBtn.type = 'button'
+  inspoBtn.textContent = 'Inspiration'
+  wrap.append(inspoBtn)
+  document.body.append(wrap)
+
+  // popup (built once, toggled)
+  const backdrop = el('div', 'ce-inspo-backdrop')
+  const card = el('div', 'ce-inspo-card ce-glassbox')
+  card.append(
+    el('div', 'ce-inspo-title', 'Kindred maps'),
+    el('div', 'ce-inspo-sub', 'Other makers of beautiful 3D relief maps.')
+  )
+  const list = el('div', 'ce-inspo-list')
+  for (const item of INSPIRATIONS) {
+    const row = extLink(item.url, '', 'ce-inspo-row')
+    row.innerHTML = `<span class="ce-inspo-name">${item.name}</span><span class="ce-inspo-host">${item.host} ↗</span>`
+    list.append(row)
+  }
+  card.append(list)
+  backdrop.append(card)
+  document.body.append(backdrop)
+
+  const close = () => backdrop.classList.remove('open')
+  inspoBtn.addEventListener('click', () => backdrop.classList.add('open'))
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop) close()
+  })
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') close()
+  })
+}

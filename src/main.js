@@ -46,7 +46,7 @@ import { fetchRegionMask } from './region-mask.js'
 import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
 import { buildRegionPlate } from './region-plate.js'
 import { refreshAll } from './ui/kit.js'
-import { buildTopBar, buildBottomBar, buildIsoButton } from './ui/bars.js'
+import { buildTopBar, buildBottomBar, buildIsoButton, buildCredits } from './ui/bars.js'
 import { buildCreatePanel } from './ui/create-panel.js'
 import { buildCameraPanel } from './ui/camera-panel.js'
 import { buildExplorePanel } from './ui/explore-panel.js'
@@ -106,6 +106,7 @@ const params = {
   roughnessScale: 9.5,
   bumpScale: 0.9,
   envMapIntensity: 0.2,
+  liquidMetal: false, // "Fancy" look — chrome the relief (Scan panel)
 
   // camera & depth of field
   fov: 30,
@@ -1231,6 +1232,7 @@ function applySurface(s) {
   Object.assign(params, s)
   terrain.updateMaterial(params)
   terrain.rebuildRoughness(params)
+  if (params.liquidMetal) terrain.setLiquidMetal(true, params) // keep the chrome over template swaps
 }
 function applyLook(k) {
   if (k.fogColor != null) {
@@ -1472,6 +1474,10 @@ buildBottomBar({
   openGpx: () => gpxFileInput.click(),
 })
 
+// bottom-left: quiet credit to the studio + a curated "inspiration" list of
+// other beautiful 3D-map makers (opens a small popup)
+buildCredits()
+
 // bottom-right: one click to the isometric museum view — whole block, plate
 // and cartouche in frame (45° azimuth, museum-shelf elevation)
 // distance ×2 vs the first guess: at fov 30 the block's corner-on diagonal
@@ -1596,6 +1602,11 @@ const explorePanel = buildExplorePanel({
 
 const scanPanel = buildScanPanel({
   runScan: (typeId) => scan.trigger(typeId, { x: controls.target.x, z: controls.target.z }, params.scanDuration),
+  getLiquidMetal: () => params.liquidMetal,
+  setLiquidMetal: (v) => {
+    params.liquidMetal = v
+    terrain.setLiquidMetal(v, params)
+  },
 })
 
 // auto-fold: expanding a section in one panel folds its dock neighbour so a
