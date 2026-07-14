@@ -4,6 +4,25 @@ import { sampleDem } from './dem.js'
 import { rampColorStops } from './palette.js'
 import { buildSeaMask, blurMask } from './sea-mask.js'
 import { TEXTURE_BUILDERS } from './material-textures.js'
+import { MeshTransmissionMaterial } from './vendor/MeshTransmissionMaterial.js'
+
+// full-relief opaque material modes (glass is handled separately). Each drapes
+// its texture stack over the whole terrain and fades the hypsometric paint.
+const OPAQUE_TERRAIN_MATS = {
+  wood: { tex: 'wood', metalness: 0, roughness: 0.68, normalScale: 1.3, envMapIntensity: 0.6, repeat: 6 },
+  carbon: { tex: 'carbon', metalness: 0.45, roughness: 0.5, normalScale: 1.2, envMapIntensity: 1.3, repeat: 10 },
+}
+
+// dispose the previous clone and return a fresh tiled clone of `src`
+function swapClone(prev, src, repeat) {
+  if (prev) prev.dispose()
+  if (!src) return null
+  const c = src.clone()
+  c.wrapS = c.wrapT = THREE.RepeatWrapping
+  c.repeat.set(repeat, repeat)
+  c.needsUpdate = true
+  return c
+}
 
 export const TERRAIN_SIZE = 56
 
@@ -908,39 +927,86 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     if (this.mapUniforms.uLmOn.value > 0.5 && speed > 0) this.mapUniforms.uLmFlow.value += dt * speed
   }
 
-  // Drape a material texture (carbon / wood / frost) over the relief as a SURFACE
-  // FINISH — its normal + roughness maps give the relief a woven, grained or
-  // frosted micro-surface, keeping the hypsometric colours. Lives next to Liquid
-  // metal in the Shaders panel. Pass id='' (or falsy) to remove.
-  setSurfaceMaterial(id, params = {}) {
+  // Turn the WHOLE relief into a material (like Liquid metal, but a full swap):
+  //   'glass'          → premium transmission glass (MeshTransmissionMaterial):
+  //                      the mountain becomes a refracting glass sculpture
+  //   'wood'|'carbon'|'marble' → opaque textured material draped over the relief
+  //                      (albedo + normal + roughness), the hypso paint faded out
+  //   ''               → back to the topographic map
+  setMaterialMode(id, params = {}) {
+    this.materialMode = id || ''
+    if (id === 'glass') {
+      if (!this.glassMaterial) this._makeGlassMaterial()
+      this.applyTerrainGlass(params)
+      this.mesh.material = this.glassMaterial
+      return
+    }
+    // opaque / none: reuse the terrain's own MeshPhysicalMaterial
+    this.mesh.material = this.material
     const m = this.material
-    if (id && TEXTURE_BUILDERS[id]) {
-      const t = TEXTURE_BUILDERS[id]()
-      // clone so the terrain tiles at its own density, independent of the socle
-      const nm = t.normalMap.clone()
-      nm.repeat.set(7, 7)
-      nm.needsUpdate = true
-      const rm = t.roughnessMap.clone()
-      rm.repeat.set(7, 7)
-      rm.needsUpdate = true
-      if (this._surfNm) this._surfNm.dispose()
-      if (this._surfRm) this._surfRm.dispose()
-      this._surfNm = nm
-      this._surfRm = rm
-      m.normalMap = nm
-      m.roughnessMap = rm
-      const b = params.terrainSurfaceBump ?? 1
-      m.normalScale.set(b, b)
+    const preset = OPAQUE_TERRAIN_MATS[id]
+    if (preset) {
+      const t = TEXTURE_BUILDERS[preset.tex]?.()
+      if (t) {
+        // clone so the terrain tiles denser than the socle
+        const rep = preset.repeat ?? 7
+        this._surfMap = swapClone(this._surfMap, t.map, rep)
+        this._surfNm = swapClone(this._surfNm, t.normalMap, rep)
+        this._surfRm = swapClone(this._surfRm, t.roughnessMap, rep)
+        m.map = this._surfMap || null
+        m.normalMap = this._surfNm || null
+        m.roughnessMap = this._surfRm || null
+        const b = (params.terrainSurfaceBump ?? 1) * (preset.normalScale ?? 1)
+        m.normalScale.set(b, b)
+        m.metalness = preset.metalness ?? 0
+        m.roughness = preset.roughness ?? 0.8
+        m.envMapIntensity = preset.envMapIntensity ?? params.envMapIntensity ?? 1
+        this.mapUniforms.uTint.value = 0 // drop the hypsometric paint → pure material
+      }
     } else {
+      // none — restore the topographic look
+      m.map = null
       m.normalMap = null
       m.roughnessMap = null
       m.normalScale.set(1, 1)
-      if (this._surfNm) { this._surfNm.dispose(); this._surfNm = null }
-      if (this._surfRm) { this._surfRm.dispose(); this._surfRm = null }
+      m.metalness = 0
+      m.roughness = 1
+      m.envMapIntensity = params.envMapIntensity ?? 1
+      this.mapUniforms.uTint.value = params.mapTint ?? 1
     }
     m.needsUpdate = true
   }
+  _makeGlassMaterial() {
+    this.glassMaterial = new MeshTransmissionMaterial({
+      samples: 6,
+      transmission: 1,
+      thickness: 8,
+      roughness: 0.15,
+      ior: 1.45,
+      metalness: 0,
+      envMap: this.material.envMap || null,
+      envMapIntensity: 1.4,
+      attenuationColor: new THREE.Color('#bfe4ff'),
+      attenuationDistance: 12,
+      side: THREE.DoubleSide,
+      blurStrength: 1.2,
+    })
+  }
+  // live glass knobs (frost, tint, thickness, reflection)
+  applyTerrainGlass(params = {}) {
+    if (!this.glassMaterial) this._makeGlassMaterial()
+    const g = this.glassMaterial
+    if (params.terrainGlassFrost != null) g.roughness = params.terrainGlassFrost
+    if (params.terrainGlassThickness != null) g.thickness = params.terrainGlassThickness
+    if (params.terrainGlassTint) g.attenuationColor.set(params.terrainGlassTint)
+    if (params.terrainGlassClarity != null) g.attenuationDistance = params.terrainGlassClarity
+    if (params.terrainGlassReflection != null) g.envMapIntensity = params.terrainGlassReflection
+    if (!g.envMap) g.envMap = this.material.envMap || null
+    g.needsUpdate = true
+  }
   setSurfaceMaterialBump(b) {
-    if (this.material.normalMap) this.material.normalScale.set(b, b)
+    if (this.materialMode && this.materialMode !== 'glass' && this.material.normalMap) {
+      this.material.normalScale.set(b, b)
+    }
   }
 }

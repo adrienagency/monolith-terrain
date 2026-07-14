@@ -35,11 +35,12 @@ export function buildShadersPanel(ctx) {
     }
   }
 
-  // --- Surface material (carbon / wood / frost draped over the relief) ---
+  // --- Material: turn the WHOLE relief into glass / wood / carbon (a full
+  // material swap, like Liquid metal — not a shader overlay) ---
   s.body.append(
     select({
-      label: 'Surface material',
-      options: [{ value: '', label: 'None' }, ...ctx.surfaceMatList],
+      label: 'Relief material',
+      options: [{ value: '', label: 'Topographic (none)' }, ...ctx.surfaceMatList],
       get: () => ctx.getSurfaceMat() || '',
       set: (v) => { ctx.setSurfaceMat(v); renderMat() },
     })
@@ -48,8 +49,16 @@ export function buildShadersPanel(ctx) {
   s.body.append(matCtl)
   function renderMat() {
     matCtl.replaceChildren()
-    if (!ctx.getSurfaceMat()) return
-    matCtl.append(slider({ label: 'Bump', min: 0, max: 3, step: 0.05, get: () => ctx.getSurfaceMatBump(), set: (v) => ctx.setSurfaceMatBump(v) }))
+    const id = ctx.getSurfaceMat()
+    if (!id) return
+    if (id === 'glass') {
+      matCtl.append(color({ label: 'Glass tint', get: () => ctx.getGlassTint(), set: (v) => ctx.setGlassTint(v) }))
+      for (const c of ctx.glassControls) {
+        matCtl.append(slider({ label: c.label, min: c.min, max: c.max, step: c.k === 'terrainGlassThickness' || c.k === 'terrainGlassClarity' ? 0.5 : 0.01, get: () => ctx.getGlassParam(c.k), set: (v) => ctx.setGlassParam(c.k, v) }))
+      }
+    } else {
+      matCtl.append(slider({ label: 'Bump', min: 0, max: 3, step: 0.05, get: () => ctx.getSurfaceMatBump(), set: (v) => ctx.setSurfaceMatBump(v) }))
+    }
   }
 
   // --- Surface shader picker ---

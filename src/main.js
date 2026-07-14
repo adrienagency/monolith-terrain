@@ -49,7 +49,6 @@ import { buildRegionPlate } from './region-plate.js'
 import { buildRegionSkirt } from './region-skirt.js'
 import { makeSocleEnvMap } from './socle-env.js'
 import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
-import { SURFACE_MATERIALS } from './material-textures.js'
 import { refreshAll } from './ui/kit.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCredits } from './ui/bars.js'
 import { buildCreatePanel } from './ui/create-panel.js'
@@ -234,9 +233,15 @@ const params = {
   plinthGlassProjection: 0.5,
   plinthGlassBump: 0.6, // frost micro-facet strength (glass bump slider)
   plinthBump: 1.5, // textured-PBR relief strength (carbon/wood bump slider)
-  // terrain surface material overlay (Shaders panel, next to Liquid metal)
-  terrainSurfaceMat: '', // '' | 'carbon' | 'wood' | 'frost'
-  terrainSurfaceBump: 1.2,
+  // terrain MATERIAL mode (Shaders panel, next to Liquid metal): turns the whole
+  // relief into a material — '' | 'glass' | 'wood' | 'carbon'
+  terrainSurfaceMat: '',
+  terrainSurfaceBump: 1.3, // bump for the opaque terrain materials (wood/carbon)
+  terrainGlassFrost: 0.16, // glass roughness (frost) when the relief is glass
+  terrainGlassThickness: 8,
+  terrainGlassTint: '#bfe4ff',
+  terrainGlassClarity: 12, // attenuation distance — lower = deeper tint
+  terrainGlassReflection: 1.4,
   slabCorner: 0.04, // fillet radius on the slab's vertical corners, as a fraction
   // of the block width (the terrain clips to the same rounded rectangle)
   slabCornerSmoothing: 0.6, // 0 = plain circular arc, →1 = squircle (iOS-style
@@ -1706,18 +1711,39 @@ const shadersPanel = buildShadersPanel({
     params.fx[id][key] = val
     if (params.surfaceFx === id) terrain.applyFxParams(params.fx[id]) // speed/opacity/blend re-pushed
   },
-  // terrain surface material — the same procedural textures as the socle, draped
-  // over the relief (normal + roughness finish), sibling of Liquid metal
-  surfaceMatList: SURFACE_MATERIALS.map(({ id, label }) => ({ value: id, label })),
+  // terrain MATERIAL — turns the WHOLE relief into a material (sibling of Liquid
+  // metal): premium transmission glass, or an opaque wood/carbon swap
+  surfaceMatList: [
+    { value: 'glass', label: 'Glass (premium)' },
+    { value: 'wood', label: 'Wood' },
+    { value: 'carbon', label: 'Carbon fibre' },
+  ],
   getSurfaceMat: () => params.terrainSurfaceMat,
   setSurfaceMat: (id) => {
     params.terrainSurfaceMat = id || ''
-    terrain.setSurfaceMaterial(params.terrainSurfaceMat, params)
+    terrain.setMaterialMode(params.terrainSurfaceMat, params)
   },
   getSurfaceMatBump: () => params.terrainSurfaceBump,
   setSurfaceMatBump: (v) => {
     params.terrainSurfaceBump = v
     terrain.setSurfaceMaterialBump(v)
+  },
+  // live glass knobs (only shown when the relief material is Glass)
+  glassControls: [
+    { k: 'terrainGlassFrost', label: 'Frost', min: 0, max: 1 },
+    { k: 'terrainGlassThickness', label: 'Thickness', min: 1, max: 20 },
+    { k: 'terrainGlassClarity', label: 'Clarity', min: 2, max: 60 },
+    { k: 'terrainGlassReflection', label: 'Reflection', min: 0, max: 3 },
+  ],
+  getGlassParam: (k) => params[k],
+  setGlassParam: (k, v) => {
+    params[k] = v
+    terrain.applyTerrainGlass(params)
+  },
+  getGlassTint: () => params.terrainGlassTint,
+  setGlassTint: (v) => {
+    params.terrainGlassTint = v
+    terrain.applyTerrainGlass(params)
   },
 })
 
