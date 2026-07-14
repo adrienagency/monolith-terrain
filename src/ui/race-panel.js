@@ -95,7 +95,3 @@ export function buildRacePanel() {
 
   return { offer, hide }
 }
-
-function esc(s = '') {
-  return String(s).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))
-}

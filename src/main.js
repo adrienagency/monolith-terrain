@@ -1338,7 +1338,8 @@ function applyLook(k) {
   }
   if (k.plinth != null) {
     params.plinth = k.plinth
-    plinth.setVisible(k.plinth && modes.mode === 'surface')
+    // region-isolate drops the slab — a template must never re-show it under the cut
+    plinth.setVisible(k.plinth && modes.mode === 'surface' && !params.regionMode)
   }
 }
 function applyTemplate(t) {
