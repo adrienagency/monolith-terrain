@@ -6,23 +6,8 @@ import { buildSeaMask, blurMask } from './sea-mask.js'
 
 export const TERRAIN_SIZE = 56
 
-// Fancy > Surface shader: animated procedural patterns painted onto the relief
-// albedo (ids match the `surfaceFx` GLSL switch in the fragment shader). 0 = off.
-export const SURFACE_FX = [
-  { id: 1, label: 'Mesh gradient' },
-  { id: 2, label: 'Grain gradient' },
-  { id: 3, label: 'Dithering' },
-  { id: 4, label: 'Voronoi' },
-  { id: 5, label: 'Warp' },
-  { id: 6, label: 'Waves' },
-  { id: 7, label: 'Swirl' },
-  { id: 8, label: 'Spiral' },
-  { id: 9, label: 'Metaballs' },
-  { id: 10, label: 'God rays' },
-  { id: 11, label: 'Dot grid' },
-  { id: 12, label: 'Noise field' },
-  { id: 13, label: 'Neuro' },
-]
+// Fancy surface-shader ids match the `surfaceFx` GLSL switch below; their
+// labels, defaults and per-effect controls live in src/fx-meta.js.
 
 // 1×1 black texture — inert placeholder for the cloud-shadow sampler
 function blackTexture() {
@@ -94,6 +79,17 @@ export class Terrain {
       uFxTime: { value: 0 },
       uFxScale: { value: 1 },
       uFxOpacity: { value: 1 },
+      uFxColA: { value: new THREE.Color('#e9e2d3') },
+      uFxColB: { value: new THREE.Color('#a9765a') },
+      uFxColC: { value: new THREE.Color('#20242c') },
+      uFxP1: { value: 0.5 },
+      uFxP2: { value: 0.5 },
+      uFxP3: { value: 0.5 },
+      // Liquid metal: animated molten flow (perturbs the normal so the chrome
+      // reflections ripple). uLmFlowAmt 0 = still mirror.
+      uLmOn: { value: 0 },
+      uLmFlow: { value: 0 },
+      uLmFlowAmt: { value: 0 },
       // clip the map to the slab's rounded-rectangle footprint (world XZ) so the
       // block's vertical corners read soft and nothing overhangs the plinth walls
       uSlabHalf: { value: TERRAIN_SIZE / 2 },
@@ -211,21 +207,33 @@ float scanHash(vec2 p) {
 }
 
 // --- Fancy surface shaders (self-contained, animated procedural patterns
-// painted onto the relief albedo; see surfaceFx switch). ---
+// painted onto the relief albedo; each effect reads the shared uFx* controls
+// so the UI can expose per-shader options; see the surfaceFx switch). ---
 uniform int uSurfaceFx;
-uniform float uFxTime;
+uniform float uFxTime;   // accumulated at the effect's speed (0 = frozen)
 uniform float uFxScale;
 uniform float uFxOpacity;
+uniform vec3 uFxColA;    // per-effect colours (meaning depends on the effect)
+uniform vec3 uFxColB;
+uniform vec3 uFxColC;
+uniform float uFxP1;     // per-effect scalar knobs (0..1)
+uniform float uFxP2;
+uniform float uFxP3;
+uniform float uLmOn;
+uniform float uLmFlow;
+uniform float uLmFlowAmt;
 float fxHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 vec2 fxHash2(vec2 p) { return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453); }
 float fxNoise(vec2 p) {
   vec2 i = floor(p), f = fract(p);
-  vec2 u = f * f * (3.0 - 2.0 * f);
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0); // quintic C2 (no shading discontinuities)
   return mix(mix(fxHash(i), fxHash(i + vec2(1.0, 0.0)), u.x),
              mix(fxHash(i + vec2(0.0, 1.0)), fxHash(i + vec2(1.0, 1.0)), u.x), u.y);
 }
 float fxFbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { v += a * fxNoise(p); p = p * 2.03 + 17.1; a *= 0.5; } return v; }
-vec3 fxPal(float t, vec3 a, vec3 b, vec3 c, vec3 d) { return a + b * cos(6.28318 * (c * t + d)); }
+// user-driven 3-stop colour ramp (A→B→C)
+vec3 fxGrad3(float t, vec3 a, vec3 b, vec3 c) { t = clamp(t, 0.0, 1.0); return t < 0.5 ? mix(a, b, t * 2.0) : mix(b, c, (t - 0.5) * 2.0); }
+vec2 fxRot(vec2 v, float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c) * v; }
 float fxBayer(vec2 q) {
   vec2 c = floor(mod(q, 4.0)); int idx = int(c.x + c.y * 4.0);
   float m[16];
@@ -241,39 +249,51 @@ float fxVoro(vec2 p, float t) {
   }
   return sqrt(md);
 }
+// nervous glowing filaments — 15 rotated sine layers (after Paper "neuro-noise")
+float fxNeuro(vec2 uv, float t) {
+  vec2 sa = vec2(0.0); vec2 res = vec2(0.0); float scale = 8.0;
+  for (int j = 0; j < 15; j++) {
+    uv = fxRot(uv, 1.0); sa = fxRot(sa, 1.0);
+    vec2 layer = uv * scale + float(j) + sa - t;
+    sa += sin(layer); res += (0.5 + 0.5 * cos(layer)) / scale; scale *= 1.2;
+  }
+  return res.x + res.y;
+}
+// infrared thermal ramp: cold navy → violet → red → orange → white-hot
+vec3 fxThermal(float t) {
+  t = clamp(t, 0.0, 1.0);
+  vec3 c = mix(vec3(0.0, 0.02, 0.12), vec3(0.35, 0.0, 0.5), smoothstep(0.0, 0.28, t));
+  c = mix(c, vec3(0.86, 0.11, 0.12), smoothstep(0.22, 0.52, t));
+  c = mix(c, vec3(1.0, 0.6, 0.0), smoothstep(0.48, 0.72, t));
+  c = mix(c, vec3(1.0, 0.95, 0.45), smoothstep(0.68, 0.9, t));
+  c = mix(c, vec3(1.0), smoothstep(0.9, 1.0, t));
+  return c;
+}
 vec3 surfaceFx(int id, vec2 p, float t) {
   p *= uFxScale;
-  if (id == 1) { float w = fxFbm(p * 0.6 + vec2(t * 0.08, -t * 0.06));
-    return fxPal(w + t * 0.03, vec3(0.55, 0.5, 0.5), vec3(0.45), vec3(1.0, 0.9, 0.7), vec3(0.1, 0.3, 0.6)); }
-  if (id == 2) { float w = fxFbm(p * 0.9 + t * 0.1); float g = fxNoise(p * 40.0) * 0.12;
-    return fxPal(w, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.2, 0.4, 0.6)) * (0.9 + g); }
-  if (id == 3) { float v = fxFbm(p * 0.8 + t * 0.08); float b = fxBayer(p * 8.0); float d = step(b, v);
-    return mix(vec3(0.09, 0.1, 0.13), vec3(0.95, 0.93, 0.86), d); }
-  if (id == 4) { float v = fxVoro(p * 1.4, t);
-    vec3 c = fxPal(v * 1.3, vec3(0.5), vec3(0.5), vec3(1.0, 0.8, 0.5), vec3(0.0, 0.2, 0.5));
-    return mix(vec3(0.05), c, smoothstep(0.0, 0.15, v)); }
-  if (id == 5) { vec2 q = p; for (int i = 0; i < 3; i++) { q += 0.4 * vec2(fxFbm(q + t * 0.1), fxFbm(q + 4.0 - t * 0.1)); }
-    return fxPal(fxFbm(q * 0.5), vec3(0.5), vec3(0.5), vec3(1.0, 0.7, 0.4), vec3(0.1, 0.35, 0.55)); }
-  if (id == 6) { float w = sin(p.x * 2.0 + 1.4 * sin(p.y * 1.3 + t)); float m2 = smoothstep(-0.1, 0.1, w);
-    return mix(vec3(0.12, 0.14, 0.2), vec3(0.9, 0.85, 0.7), m2); }
-  if (id == 7) { float a = atan(p.y, p.x); float r = length(p); float w = sin(a * 4.0 + r * 1.5 - t * 1.2);
-    return fxPal(0.5 + 0.5 * w, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.0, 0.33, 0.66)); }
-  if (id == 8) { float a = atan(p.y, p.x); float r = length(p); float s = sin(a * 3.0 + log(r + 1.0) * 6.0 - t * 1.5);
-    return mix(vec3(0.06, 0.07, 0.1), vec3(0.85, 0.8, 0.95), smoothstep(0.0, 0.2, s)); }
-  if (id == 9) { float m2 = 0.0; for (int i = 0; i < 6; i++) { float fi = float(i);
-      vec2 c = 1.6 * vec2(sin(t * 0.5 + fi * 1.7), cos(t * 0.4 + fi * 2.3)); m2 += 0.35 / (0.05 + dot(p - c, p - c)); }
-    float k = smoothstep(1.0, 2.2, m2);
-    return mix(vec3(0.08, 0.09, 0.13), fxPal(m2 * 0.1, vec3(0.5), vec3(0.5), vec3(1.0, 0.6, 0.4), vec3(0.0, 0.2, 0.4)), k); }
+  if (id == 1) { float w = fxFbm(p * 0.6 + vec2(t * 0.1, -t * 0.07)); return fxGrad3(w, uFxColA, uFxColB, uFxColC); }
+  if (id == 2) { float w = fxFbm(p * 0.9 + t * 0.1); float g = (fxNoise(p * 40.0) - 0.5) * uFxP1; return fxGrad3(w, uFxColA, uFxColB, uFxColC) + g; }
+  if (id == 3) { float v = fxFbm(p * 0.8 + t * 0.08); float b = fxBayer(p * (4.0 + uFxP1 * 14.0)); return mix(uFxColA, uFxColB, step(b, v)); }
+  if (id == 4) { float v = fxVoro(p * (0.8 + uFxP1 * 2.0), t); return mix(uFxColB, uFxColA, smoothstep(0.0, 0.04 + uFxP2 * 0.3, v)); }
+  if (id == 5) { vec2 q = p; for (int i = 0; i < 3; i++) { q += 0.4 * vec2(fxFbm(q + vec2(0.0, 0.0) + t * 0.1), fxFbm(q + vec2(5.2, 1.3) - t * 0.1)); } return fxGrad3(fxFbm(q * 0.5), uFxColA, uFxColB, uFxColC); }
+  if (id == 6) { float w = sin(p.x * (1.0 + uFxP1 * 5.0) + (0.5 + uFxP2 * 2.0) * sin(p.y * 1.3 + t)); return mix(uFxColA, uFxColB, smoothstep(-0.12, 0.12, w)); }
+  if (id == 7) { float a = atan(p.y, p.x); float r = length(p); float w = sin(a * (2.0 + uFxP1 * 8.0) + r * 1.5 - t * 1.2); return fxGrad3(0.5 + 0.5 * w, uFxColA, uFxColB, uFxColC); }
+  if (id == 8) { float a = atan(p.y, p.x); float r = length(p); float s = sin(a * (2.0 + uFxP1 * 6.0) + log(r + 1.0) * 6.0 - t * 1.5); return mix(uFxColA, uFxColB, smoothstep(0.0, 0.2, s)); }
+  if (id == 9) { float m2 = 0.0; int nb = int(3.0 + uFxP1 * 9.0); for (int i = 0; i < 12; i++) { if (i >= nb) break; float fi = float(i);
+      vec2 c = 1.6 * vec2(sin(t * 0.5 + fi * 1.7), cos(t * 0.4 + fi * 2.3)); m2 += (0.2 + uFxP2 * 0.4) / (0.05 + dot(p - c, p - c)); }
+    return mix(uFxColA, uFxColB, smoothstep(1.0, 2.2, m2)); }
   if (id == 10) { float a = atan(p.y, p.x); float r = length(p);
-    float rays = 0.5 + 0.5 * sin(a * 22.0 + fxNoise(vec2(a * 3.0, t * 0.3)) * 4.0); float glow = exp(-r * 0.4);
-    return mix(vec3(0.05, 0.06, 0.09), vec3(1.0, 0.92, 0.72), rays * glow); }
-  if (id == 11) { vec2 g = fract(p * 3.0) - 0.5; float d = length(g); float dotv = 1.0 - smoothstep(0.18, 0.24, d);
-    float hue = fxNoise(floor(p * 3.0) + t * 0.05);
-    return mix(vec3(0.92, 0.9, 0.84), fxPal(hue, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.0, 0.3, 0.6)), dotv); }
-  if (id == 12) { float n = fxFbm(p * 0.8 + t * 0.06);
-    return fxPal(n, vec3(0.5), vec3(0.45), vec3(1.0, 0.9, 0.8), vec3(0.2, 0.35, 0.5)); }
-  if (id == 13) { float n = abs(fxFbm(p * 1.2 + t * 0.05) * 2.0 - 1.0); float fil = smoothstep(0.05, 0.0, n);
-    return mix(vec3(0.05, 0.06, 0.09), vec3(0.6, 0.9, 1.0), fil); }
+    float rays = 0.5 + 0.5 * sin(a * (8.0 + uFxP1 * 34.0) + fxNoise(vec2(a * 3.0, t * 0.3)) * 4.0); float glow = exp(-r * 0.4);
+    return mix(uFxColA, uFxColB, rays * glow); }
+  if (id == 11) { vec2 g = fract(p * (2.0 + uFxP1 * 4.0)) - 0.5; float d = length(g); float dv = 1.0 - smoothstep(0.16 + uFxP2 * 0.1, 0.23 + uFxP2 * 0.1, d); return mix(uFxColA, uFxColB, dv); }
+  if (id == 12) { float n = fxFbm(p * 0.8 + t * 0.06); return fxGrad3(n, uFxColA, uFxColB, uFxColC); }
+  if (id == 13) { float n = fxNeuro(p * 0.9, t * 0.5);
+    n = (1.0 + uFxP1 * 2.0) * n * n; n = pow(n, 0.7 + 6.0 * uFxP2); n = min(1.4, n);
+    float blend = smoothstep(0.7, 1.4, n);
+    return mix(uFxColC, mix(uFxColB, uFxColA, blend), min(n, 1.0)); }
+  if (id == 14) { float h = fxFbm(p * (0.5 + uFxP3 * 1.5) + t * 0.15) * 0.65 + 0.35 * (0.5 + 0.5 * sin(t + p.x));
+    vec3 th = fxThermal(h * (0.7 + uFxP1)); float band = smoothstep(0.45, 0.5, fract(h * (4.0 + uFxP2 * 24.0)));
+    return mix(th, th * 0.55, band * uFxP2); }
   return vec3(0.5);
 }`
         )
@@ -484,6 +504,21 @@ if (uScanT >= 0.0 && (uScanType == 0 || uScanType == 3)) {
   totalEmissiveRadiance += uScanColor * band * fade * 0.5;
 }`
         )
+        .replace(
+          '#include <normal_fragment_maps>',
+          `#include <normal_fragment_maps>
+// Liquid metal: a slow molten flow ripples the surface normal so the chrome
+// reflections drift across the relief (uLmFlowAmt 0 = a still mirror)
+if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
+  vec2 fp = vWorldPos.xz * 0.55;
+  float e = 0.12;
+  float n0 = fxFbm(fp + uLmFlow);
+  float nx = fxFbm(fp + vec2(e, 0.0) + uLmFlow);
+  float nz = fxFbm(fp + vec2(0.0, e) + uLmFlow);
+  vec3 grad = vec3(nx - n0, 0.0, nz - n0) * uLmFlowAmt * 3.0;
+  normal = normalize(normal - grad);
+}`
+        )
     }
     this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material)
     this.mesh.receiveShadow = true
@@ -530,13 +565,23 @@ if (uScanT >= 0.0 && (uScanType == 0 || uScanType == 3)) {
     }
   }
 
-  // Fancy > Surface shader: select the animated pattern (0 = off). Drive it with
-  // tickSurfaceFx(dt) each frame so it animates.
+  // Fancy > Surface shader: select the animated pattern (0 = off) and push its
+  // per-effect params to the uniforms. Drive it with tickSurfaceFx(dt, speed).
   setSurfaceFx(id) {
     this.mapUniforms.uSurfaceFx.value = id | 0
   }
-  tickSurfaceFx(dt) {
-    if (this.mapUniforms.uSurfaceFx.value > 0) this.mapUniforms.uFxTime.value += dt
+  applyFxParams(pp) {
+    const u = this.mapUniforms
+    u.uFxColA.value.set(pp.colA)
+    u.uFxColB.value.set(pp.colB)
+    u.uFxColC.value.set(pp.colC)
+    u.uFxScale.value = pp.scale
+    u.uFxP1.value = pp.p1
+    u.uFxP2.value = pp.p2
+    u.uFxP3.value = pp.p3
+  }
+  tickSurfaceFx(dt, speed) {
+    if (this.mapUniforms.uSurfaceFx.value > 0) this.mapUniforms.uFxTime.value += dt * speed
   }
 
   // scene height → display elevation in feet (real when a DEM drives the terrain)
@@ -801,19 +846,27 @@ if (uScanT >= 0.0 && (uScanType == 0 || uScanType == 3)) {
   // change — the caller does that.
   setLiquidMetal(on, params) {
     const m = this.material
+    const u = this.mapUniforms
     if (on) {
-      m.metalness = 1
-      m.roughness = 0.16 // multiplies the roughness map: shiny with a little flow
-      m.envMapIntensity = 2.0
+      m.metalness = params.lmMetalness ?? 1
+      m.roughness = params.lmRoughness ?? 0.16 // multiplies the roughness map
+      m.envMapIntensity = params.lmReflection ?? 2.0
       m.transmission = 0
-      this.mapUniforms.uTint.value = 0.1 // fade the paper colour so the metal reads
+      u.uTint.value = 0.1 // fade the paper colour so the metal reads
+      u.uLmOn.value = 1
+      u.uLmFlowAmt.value = (params.lmSpeed ?? 0.4) > 0 ? 0.5 : 0 // 0 speed = still mirror
     } else {
       m.metalness = 0
       m.roughness = 1
       m.envMapIntensity = params.envMapIntensity
       m.transmission = params.transmission ?? 0
-      this.mapUniforms.uTint.value = params.mapTint
+      u.uTint.value = params.mapTint
+      u.uLmOn.value = 0
+      u.uLmFlowAmt.value = 0
     }
     m.needsUpdate = true
+  }
+  tickLiquidMetal(dt, speed) {
+    if (this.mapUniforms.uLmOn.value > 0.5 && speed > 0) this.mapUniforms.uLmFlow.value += dt * speed
   }
 }

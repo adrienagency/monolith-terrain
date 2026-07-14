@@ -89,6 +89,14 @@ export function buildCreatePanel(ctx) {
   )
   sCol.body.append(shuffleRow)
 
+  // ------------------------------------------------------------ Background
+  // The scene backdrop behind the block. Changing it moves the fog to the same
+  // colour, so the relief always fades into its own background.
+  const sBg = addTo(section('Background'))
+  sBg.body.append(
+    color({ label: 'Background', get: () => params.fogColor, set: (v) => { params.fogColor = v; ctx.scene.background.set(v); ctx.fogRef.color.set(v); refreshAll() } })
+  )
+
   // ------------------------------------------------------------ Map style
   const sMap = addTo(section('Map style'))
   const u = () => ctx.terrain.mapUniforms

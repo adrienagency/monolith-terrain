@@ -1,7 +1,7 @@
 // SCAN panel — the terrain scanner as its own first-class panel in the left
 // dock, a sibling of Explore (not a child of it).
 
-import { el, button, section, toggle, select } from './kit.js'
+import { el, button, section, toggle, select, color, slider } from './kit.js'
 import { Panel } from './shell.js'
 import { SCAN_TYPES } from '../scan.js'
 
@@ -48,28 +48,51 @@ export function buildScanPanel(ctx) {
   trig.append(run)
   sScan.body.append(trig)
 
-  // Fancy — experimental surface treatments (paper → other materials)
+  // Fancy — animated shader treatments painted onto the relief SURFACE
   const sFancy = panel.addSection(section('Fancy', { open: false }))
-  sFancy.body.append(
-    toggle({ label: 'Liquid metal', get: () => ctx.getLiquidMetal(), set: (v) => ctx.setLiquidMetal(v) })
-  )
-  const note = el('div', 'ce-label', 'Chrome the relief — reflections take over from the paper map.')
-  note.style.marginTop = '4px'
-  sFancy.body.append(note)
 
-  // animated procedural shaders painted onto the relief surface (like Liquid
-  // metal, but coloured & moving) — self-contained GLSL, no dependency
+  // Liquid metal — chrome the relief (its own controls appear when it's on)
+  sFancy.body.append(
+    toggle({ label: 'Liquid metal', get: () => ctx.getLiquidMetal(), set: (v) => { ctx.setLiquidMetal(v); renderLmControls() } })
+  )
+  const lmControls = el('div', 'ce-fx-controls')
+  sFancy.body.append(lmControls)
+  function renderLmControls() {
+    lmControls.replaceChildren()
+    if (!ctx.getLiquidMetal()) return
+    for (const ctl of ctx.lmControls) {
+      lmControls.append(
+        slider({ label: ctl.label, min: ctl.min, max: ctl.max, step: 0.01,
+          get: () => ctx.getLmParam(ctl.k), set: (v) => ctx.setLmParam(ctl.k, v) })
+      )
+    }
+  }
+
+  // Surface shader — animated procedural pattern on the albedo; per-effect
+  // controls rebuild under the picker when the effect changes
   sFancy.body.append(
     select({
       label: 'Surface shader',
-      options: [{ value: '', label: 'None' }, ...ctx.surfaceFx],
+      options: [{ value: '', label: 'None' }, ...ctx.surfaceFxList],
       get: () => (ctx.getSurfaceFx() ? String(ctx.getSurfaceFx()) : ''),
-      set: (v) => ctx.setSurfaceFx(v ? parseInt(v, 10) : 0),
+      set: (v) => { ctx.setSurfaceFx(v ? parseInt(v, 10) : 0); renderFxControls() },
     })
   )
-  const fxNote = el('div', 'ce-label', 'An animated shader running on the relief surface.')
-  fxNote.style.marginTop = '4px'
-  sFancy.body.append(fxNote)
+  const fxControls = el('div', 'ce-fx-controls')
+  sFancy.body.append(fxControls)
+  function renderFxControls() {
+    fxControls.replaceChildren()
+    const id = ctx.getSurfaceFx()
+    const meta = id && ctx.fxMeta[id]
+    if (!meta) return
+    for (const ctl of meta.c) {
+      const opts = { label: ctl.label, get: () => ctx.getFxParam(id, ctl.k), set: (v) => ctx.setFxParam(id, ctl.k, v) }
+      fxControls.append(ctl.type === 'color' ? color(opts) : slider({ ...opts, min: ctl.min, max: ctl.max, step: 0.01 }))
+    }
+  }
+
+  renderLmControls()
+  renderFxControls()
 
   return panel
 }

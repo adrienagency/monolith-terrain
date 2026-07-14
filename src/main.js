@@ -27,7 +27,8 @@ import { Modes, stepZoom } from './modes.js'
 import { createGoto } from './goto.js'
 import { GpxLayer, parseGpx } from './gpx.js'
 import { worldToLatLon } from './geo.js'
-import { TERRAIN_SIZE, SURFACE_FX } from './terrain.js'
+import { TERRAIN_SIZE } from './terrain.js'
+import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
 import { monochromeLook } from './palette.js'
 import { peakVantage } from './camera-poses.js'
 import { focusRayHit } from './autofocus.js'
@@ -107,7 +108,12 @@ const params = {
   bumpScale: 0.9,
   envMapIntensity: 0.2,
   liquidMetal: false, // "Fancy" look — chrome the relief (Scan panel)
+  lmMetalness: 1,
+  lmRoughness: 0.16,
+  lmReflection: 2.0,
+  lmSpeed: 0.4, // liquid-metal molten-flow speed (0 = still mirror)
   surfaceFx: 0, // "Fancy" look — animated surface shader id, 0 = off (Scan panel)
+  fx: defaultFxParams(), // per-effect saved params, keyed by shader id
 
   // camera & depth of field
   fov: 30,
@@ -1608,11 +1614,30 @@ const scanPanel = buildScanPanel({
     params.liquidMetal = v
     terrain.setLiquidMetal(v, params)
   },
-  surfaceFx: SURFACE_FX.map(({ id, label }) => ({ value: String(id), label })),
+  lmControls: [
+    { k: 'lmMetalness', label: 'Metalness', min: 0, max: 1 },
+    { k: 'lmRoughness', label: 'Polish', min: 0.02, max: 0.6 },
+    { k: 'lmReflection', label: 'Reflection', min: 0, max: 3 },
+    { k: 'lmSpeed', label: 'Flow speed', min: 0, max: 1.5 },
+  ],
+  getLmParam: (k) => params[k],
+  setLmParam: (k, v) => {
+    params[k] = v
+    if (params.liquidMetal) terrain.setLiquidMetal(true, params)
+  },
+  surfaceFxList: FX_LIST.map(({ id, label }) => ({ value: String(id), label })),
+  fxMeta: FX_META,
   getSurfaceFx: () => params.surfaceFx,
   setSurfaceFx: (id) => {
     params.surfaceFx = id | 0
     terrain.setSurfaceFx(params.surfaceFx)
+    if (params.surfaceFx > 0) terrain.applyFxParams(params.fx[params.surfaceFx])
+  },
+  getFxParam: (id, key) => params.fx[id]?.[key],
+  setFxParam: (id, key, val) => {
+    if (!params.fx[id]) return
+    params.fx[id][key] = val
+    if (params.surfaceFx === id) terrain.applyFxParams(params.fx[id]) // speed is JS-only; re-push the rest
   },
 })
 
@@ -1762,7 +1787,8 @@ function tick() {
     cone.update(dt, t, mouse, params)
     clouds.update(dt, params, camera)
     traffic.update(dt)
-    terrain.tickSurfaceFx(dt) // advance the animated Fancy surface shader, if any
+    terrain.tickSurfaceFx(dt, params.fx[params.surfaceFx]?.speed ?? 0) // animate at the effect's speed
+    terrain.tickLiquidMetal(dt, params.lmSpeed) // molten flow when liquid metal is on
   }
   peaksLayer.update(camera, window.innerWidth, window.innerHeight, modes.mode === 'surface')
 
