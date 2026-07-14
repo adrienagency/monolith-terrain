@@ -5,6 +5,7 @@ import { el, slider, color, swatch, toggle, select, button, section, refreshAll 
 import { Panel } from './shell.js'
 import { TEMPLATES } from '../templates.js'
 import { generatePalette, generateStyle, generateGridContour } from '../palette.js'
+import { FLAGS } from '../flags.js'
 
 const ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h10M18 8h2M4 16h2M10 16h10"/><circle cx="16" cy="8" r="2.2"/><circle cx="8" cy="16" r="2.2"/></svg>'
@@ -174,18 +175,20 @@ export function buildCreatePanel(ctx) {
   )
 
   // ---------------------------------------------------------------- Water
-  // The water simulation (v37): translucent sunlit shallows with bold caustic
-  // rays, darkening depths, gentle Beaufort sea states. The old glass water
-  // is gone. GPU-heavy, so it stays opt-in with a plain warning.
-  const sWat = addTo(section('Water'))
-  sWat.body.append(
-    toggle({ label: 'Water simulation (beta)', get: () => params.waterReal, set: (v) => { params.waterReal = v; ctx.waterRebuild() } }),
-    el('div', 'ce-label', 'GPU-heavy — may slow down some computers. Turn it off anytime.'),
-    color({ label: 'Water colour', get: () => params.lakeColor, set: (v) => { params.lakeColor = v; ctx.realWater?.setLook(params) } }),
-    slider({ label: 'Sea state (F1–F3)', min: 1, max: 3, step: 1, get: () => params.waterWind ?? 2, set: (v) => { params.waterWind = v; ctx.realWater?.setWind(v) } }),
-    slider({ label: 'Transparency', min: 0, max: 1, step: 0.01, get: () => params.waterTransparency ?? 0.4, set: (v) => { params.waterTransparency = v; ctx.realWater?.setLook(params) } }),
-    slider({ label: 'Sun reflection', min: 0, max: 2, step: 0.02, get: () => params.waterSunFx ?? 1, set: (v) => { params.waterSunFx = v; ctx.realWater?.setLook(params) } })
-  )
+  if (FLAGS.water) {
+    // The water simulation (v37): translucent sunlit shallows with bold caustic
+    // rays, darkening depths, gentle Beaufort sea states. The old glass water
+    // is gone. GPU-heavy, so it stays opt-in with a plain warning.
+    const sWat = addTo(section('Water'))
+    sWat.body.append(
+      toggle({ label: 'Water simulation (beta)', get: () => params.waterReal, set: (v) => { params.waterReal = v; ctx.waterRebuild() } }),
+      el('div', 'ce-label', 'GPU-heavy — may slow down some computers. Turn it off anytime.'),
+      color({ label: 'Water colour', get: () => params.lakeColor, set: (v) => { params.lakeColor = v; ctx.realWater?.setLook(params) } }),
+      slider({ label: 'Sea state (F1–F3)', min: 1, max: 3, step: 1, get: () => params.waterWind ?? 2, set: (v) => { params.waterWind = v; ctx.realWater?.setWind(v) } }),
+      slider({ label: 'Transparency', min: 0, max: 1, step: 0.01, get: () => params.waterTransparency ?? 0.4, set: (v) => { params.waterTransparency = v; ctx.realWater?.setLook(params) } }),
+      slider({ label: 'Sun reflection', min: 0, max: 2, step: 0.02, get: () => params.waterSunFx ?? 1, set: (v) => { params.waterSunFx = v; ctx.realWater?.setLook(params) } })
+    )
+  }
 
   // ---------------------------------------------------------------- Light
   const sLig = addTo(section('Light'))

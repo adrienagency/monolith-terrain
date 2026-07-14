@@ -36,6 +36,7 @@ import { PeaksLayer } from './peaks.js'
 import { Clouds } from './clouds.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
+import { FLAGS } from './flags.js'
 import { CityLabels } from './cities.js'
 import { StudioLighting, sunFromHour, LIGHT_PRESETS } from './lighting.js'
 import { Plinth } from './plinth.js'
@@ -407,7 +408,8 @@ clouds.setSunDir(sun.position)
 const traffic = new Traffic(scene, terrain, params)
 
 // the sea as a colour-tintable, environment-reflecting glass block
-const realWater = new RealWater(scene) // the water simulation — empty until waterReal is on
+// water simulation is behind FLAGS.water (v37, disabled in prod); null when off
+const realWater = FLAGS.water ? new RealWater(scene) : null
 const cityLabels = new CityLabels(scene) // principal cities, populated per zone
 
 const labelOpts = () => ({
@@ -878,7 +880,7 @@ function regenerateTerrain() {
       terrain.rebuild(params)
       terrain.rebuildRoughness(params)
       plinth.rebuild(terrain, params) // walls hug the new relief border
-      realWater.rebuild({ terrain, params }) // water simulation follows the new relief
+      realWater?.rebuild({ terrain, params }) // water simulation follows the new relief
       cityLabels.rebuild({ dem: terrain.dem, terrain, params }) // city names re-drape on the new relief
       regenerateLabels()
       regenerateHud()
@@ -930,7 +932,7 @@ modes = new Modes({
       if (regionPlate) regionPlate.mesh.visible = v
       groundInfo.setVisible(v && params.groundInfo)
       traffic.setVisible(v)
-      realWater.setVisible(v)
+      realWater?.setVisible(v)
       cityLabels.setVisible(v && params.cityLabels)
       isoBtn?.setVisible(v) // the isometric shortcut only makes sense over the block
       scene.fog = v ? fogRef : null
@@ -1292,7 +1294,7 @@ function flyTrack() {
 
 scan = new ScanController(terrain.mapUniforms, TERRAIN_SIZE / 2)
 
-const waterRebuild = () => realWater.rebuild({ terrain, params })
+const waterRebuild = () => realWater?.rebuild({ terrain, params })
 
 // "individualiser la zone" — clip the map to the administrative boundary under
 // the view (continent/country/region/departement by zoom). The landform sits
@@ -1708,7 +1710,7 @@ function tick() {
     })
   }
 
-  realWater.update(dt, sun) // water simulation: waves, caustics, sun glint
+  realWater?.update(dt, sun) // water simulation: waves, caustics, sun glint
   aq.update(dt) // adaptive quality: sample FPS, step tiers when sustained
   composer.render(dt)
   if (recorder?.recording) recorder.captureFrame() // null until first export
