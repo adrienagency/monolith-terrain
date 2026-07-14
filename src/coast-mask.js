@@ -12,8 +12,6 @@
 // region-mask.js) so the working "isolate the zone" path is left untouched.
 
 import * as THREE from 'three'
-import { latLonToWorld } from './geo.js'
-import { TERRAIN_SIZE } from './terrain.js'
 
 export const COAST_ZOOM_MIN = 4
 export const COAST_ZOOM_MAX = 8
@@ -71,11 +69,27 @@ export function patchLatLonBBox(dem) {
   return { west, south, east, north }
 }
 
-// ---- browser rasterizer (self-contained) ----
+// ---- projection (pure, unit tested) ----
 
-function project(dem, lon, lat, size) {
-  const w = latLonToWorld(dem, clampLat(lat), lon)
-  return [(w.x / TERRAIN_SIZE + 0.5) * size, (w.z / TERRAIN_SIZE + 0.5) * size]
+// lon/lat → mask-canvas pixel over the DEM patch footprint, WITHOUT the
+// antimeridian shortest-delta wrap that geo.latLonToWorld applies. That wrap
+// tears any polygon spanning >180° of longitude — Afro-Eurasia spans ~198° — so
+// at coarse zoom (small tile count) its far-east vertices fold to the opposite
+// canvas edge, and the evenodd fill parity flips in latitude bands (the
+// "Denmark / North Sea inverted" coarse-zoom bug). A land polygon must be drawn
+// as ONE continuous shape, so longitude is projected continuously here; parts
+// beyond the patch simply fall off-canvas and are clipped. Same footprint
+// mapping as the shader (uSlabHalf*2 = TERRAIN_SIZE) — only the wrap is dropped.
+// (Patches straddling ±180° remain a known Phase-1 limitation, as before.)
+export function projectPatchPx(dem, lon, lat, size) {
+  const n = 2 ** dem.zoom
+  const la = clampLat(lat) * (Math.PI / 180)
+  const tx = ((lon + 180) / 360) * n
+  const ty = ((1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2) * n
+  return [
+    (((tx - dem.originTileX) * 256) / dem.size) * size,
+    (((ty - dem.originTileY) * 256) / dem.size) * size,
+  ]
 }
 
 function rasterize(ringGroups, dem, size) {
@@ -89,7 +103,7 @@ function rasterize(ringGroups, dem, size) {
     ctx.beginPath()
     for (const ring of rings) {
       for (let i = 0; i < ring.length; i++) {
-        const [px, py] = project(dem, ring[i][0], ring[i][1], size)
+        const [px, py] = projectPatchPx(dem, ring[i][0], ring[i][1], size)
         if (i === 0) ctx.moveTo(px, py)
         else ctx.lineTo(px, py)
       }
