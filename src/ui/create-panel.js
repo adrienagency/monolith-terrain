@@ -152,7 +152,13 @@ export function buildCreatePanel(ctx) {
   // colour, so the relief always fades into its own background.
   const sBg = addTo(section('Background'))
   sBg.body.append(
-    select({ label: 'Type', options: ctx.bgModes, get: () => params.bgMode, set: (v) => { params.bgMode = v; ctx.applyBackground(); renderBg() } }),
+    select({ label: 'Type', options: ctx.bgModes, get: () => params.bgMode, set: (v) => {
+      const wasSolid = params.bgMode === 'solid' || !params.bgMode
+      params.bgMode = v
+      // activating a gradient auto-derives harmonious stops from the map palette
+      if (v !== 'solid' && wasSolid) ctx.autoBgColours(); else ctx.applyBackground()
+      renderBg(); refreshAll()
+    } }),
     color({ label: 'Colour A', get: () => params.fogColor, set: (v) => { params.fogColor = v; ctx.fogRef.color.set(v); ctx.applyBackground() } })
   )
   const bgWrap = el('div')
@@ -167,6 +173,9 @@ export function buildCreatePanel(ctx) {
     if (params.bgMode === 'linear') {
       bgWrap.append(slider({ label: 'Angle', min: 0, max: 360, step: 1, get: () => params.bgAngle, set: (v) => { params.bgAngle = v; ctx.applyBackground() } }))
     }
+    const r = el('div', 'ce-btn-row')
+    r.append(button('Auto colours from map', () => { ctx.autoBgColours(); refreshAll() }, { ghost: true }))
+    bgWrap.append(r)
   }
   renderBg()
 

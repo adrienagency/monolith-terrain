@@ -26,6 +26,19 @@ export function buildCameraPanel(ctx) {
     slider({ label: 'Bokeh', min: 0, max: 8, step: 0.1, get: () => params.bokehScale, set: (v) => { params.bokehScale = v; ctx.dof.bokehScale = v; ctx.dofPass.enabled = v > 0 } })
   )
 
+  // looping cinematic camera moves — orbit / fly-over / crane, etc.
+  const sAuto = panel.addSection(section('Automation'))
+  sAuto.body.append(
+    select({ label: 'Move', options: ctx.cameraMoves, get: () => params.camMove, set: (v) => { params.camMove = v; if (ctx.isCameraAuto()) ctx.playCamera(v, params.camSpeed) } }),
+    slider({ label: 'Speed', min: 0.1, max: 3, step: 0.05, get: () => params.camSpeed, set: (v) => { params.camSpeed = v; ctx.setCameraSpeed(v) } })
+  )
+  const autoRow = el('div', 'ce-btn-row')
+  autoRow.append(
+    button('Play', () => ctx.playCamera(params.camMove, params.camSpeed), { accent: true }),
+    button('Stop', () => ctx.stopCamera(), { ghost: true })
+  )
+  sAuto.body.append(autoRow)
+
   const sMot = panel.addSection(section('Motion'))
   sMot.body.append(
     toggle({ label: 'Pause ambient motion', get: () => params.paused, set: (v) => { params.paused = v } }),

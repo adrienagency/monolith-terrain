@@ -56,6 +56,31 @@ export function makeGradientTexture({ mode = 'linear', a = '#ffffff', b = '#cbd5
   return tex
 }
 
+// Derive a harmonious 3-stop background from the current map palette (colour
+// theory): the light top comes from the highest land tint (sky), the middle
+// from a mid elevation, the deep bottom from the ocean — each pulled toward the
+// backdrop role (lighter + a touch desaturated up top, deeper below) so the
+// gradient echoes the map yet recedes behind the relief.
+const clampF = (x) => Math.max(0, Math.min(1, x))
+export function deriveBgColors(params = {}) {
+  const stops = Array.isArray(params.rampStops) ? params.rampStops : []
+  const n = stops.length
+  const at = (i) => (stops[Math.max(0, Math.min(n - 1, i))]?.c) || '#cbd5e1'
+  const top = new THREE.Color(n ? at(n - 1) : '#e9eef4')
+  const mid = new THREE.Color(n ? at(Math.floor(n * 0.45)) : '#b9c4d2')
+  const deep = new THREE.Color(params.oceanDeep || (n ? at(0) : '#334155'))
+  const tweak = (col, dl, sMul) => {
+    const h = {}
+    col.getHSL(h)
+    return '#' + new THREE.Color().setHSL(h.h, clampF(h.s * sMul), clampF(h.l + dl)).getHexString()
+  }
+  return {
+    a: tweak(top, 0.16, 0.55), // airy sky
+    b: tweak(mid, 0.04, 0.72),
+    c: tweak(deep, -0.04, 0.85), // grounded base
+  }
+}
+
 export const BG_MODES = [
   { value: 'solid', label: 'Solid' },
   { value: 'linear', label: 'Linear gradient' },

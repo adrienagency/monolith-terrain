@@ -51,9 +51,8 @@ import { makeSocleEnvMap } from './socle-env.js'
 import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
 import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, loadUserTemplates, saveUserTemplates } from './templates-user.js'
 import { DroneCam } from './drone-cam.js'
-import { makeGradientTexture, BG_MODES } from './background.js'
-import { findRacesNear } from './race-info.js'
-import { buildRacePanel } from './ui/race-panel.js'
+import { makeGradientTexture, deriveBgColors, BG_MODES } from './background.js'
+import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
 import { refreshAll } from './ui/kit.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCredits } from './ui/bars.js'
 import { buildCreatePanel } from './ui/create-panel.js'
@@ -185,6 +184,9 @@ const params = {
   bgColorB: '#dfe6ef',
   bgColorC: '#c7d2df',
   bgAngle: 135,
+  // camera automations (looping cinematic moves)
+  camMove: 'orbit',
+  camSpeed: 1,
   surveyLines: true,
 
   // motion
@@ -337,6 +339,15 @@ function applyBackground() {
     _bgTex = makeGradientTexture({ mode: params.bgMode, a: params.fogColor, b: params.bgColorB, c: params.bgColorC, angle: params.bgAngle })
     scene.background = _bgTex
   }
+}
+// pull a harmonious gradient out of the current map palette (colour theory)
+function autoBgColours() {
+  const { a, b, c } = deriveBgColors(params)
+  params.fogColor = a
+  params.bgColorB = b
+  params.bgColorC = c
+  fogRef?.color.set(a)
+  applyBackground()
 }
 scene.background = new THREE.Color(params.fogColor)
 // linear fog: near/far give direct control over where the fade starts and
@@ -783,6 +794,7 @@ controls.addEventListener('start', () => {
   tween.active = false
   tour.active = false
   drone.stop() // grabbing the camera cancels the drone follow
+  cameraAuto.stop() // …and any looping camera automation
   camera.up.set(0, 1, 0)
   controlsHeld = true
   lastUserInput = performance.now()
@@ -1499,12 +1511,7 @@ function resetLook() {
 
 const gpxLayer = new GpxLayer({ scene, camera, terrain, params, getDem: () => dem })
 
-const racePanel = buildRacePanel()
-let gpxLoadSeq = 0 // guards against a slow race-lookup for an old track winning
-
 async function loadGpxText(text) {
-  const seq = ++gpxLoadSeq
-  racePanel.hide() // clear any stale race badge from a previous track
   try {
     const { points, name } = parseGpx(text)
     gpxLayer.setTrack(points, name)
@@ -1515,9 +1522,6 @@ async function loadGpxText(text) {
     params.demLocation = 'Custom'
     refreshAll()
     modes.announce(`TRACK LOADED — ${name.toUpperCase().slice(0, 24)}`)
-    // is there a known race at this location? (live Wikipedia, non-blocking) —
-    // only the latest track's lookup may show its badge
-    findRacesNear(f.lat, f.lon).then((cands) => { if (seq === gpxLoadSeq) racePanel.offer(cands) }).catch(() => {})
     // the post-rebuild hook drapes the line once the new terrain exists;
     // pin the framed zoom or the dive would land on the fine (≥12) scale
     // and clip long tracks framed at z10/z11
@@ -1554,6 +1558,8 @@ gpxFileInput.addEventListener('change', () => {
 // hand the flight to the existing tour controller
 // cinematic drone follow-cam for the GPX track (terrain-aware chase camera)
 const drone = new DroneCam({ camera, controls, sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0 })
+// looping cinematic camera moves (orbit / fly-over / crane…) for the Camera panel
+const cameraAuto = new CameraAutomation({ camera, controls })
 
 function flyTrack() {
   const w = gpxLayer.track?.world
@@ -1647,7 +1653,8 @@ async function applyRegionMode() {
 // fixed timestep so the video is deterministic whatever the encode speed
 let loopPaused = false
 function stepScene(t, dt) {
-  if (drone.active || tour.active || tween.active) updateCameraMotion(dt)
+  if (cameraAuto.active) cameraAuto.update(dt)
+  else if (drone.active || tour.active || tween.active) updateCameraMotion(dt)
   if (!params.paused) {
     clouds.update(dt, params, camera)
     traffic.update(dt)
@@ -1793,6 +1800,7 @@ const createPanel = buildCreatePanel({
   },
   getFineZoom: () => userFineZoom, // finest scale reached — gates the 2048/4096 mesh tiers
   applyBackground, // solid / gradient scene background
+  autoBgColours, // derive gradient stops from the map palette
   bgModes: BG_MODES,
   applyPlinthMaterial, // socle PBR / glass material picker (Block panel)
   setGroundInfo: (v) => {
@@ -1921,6 +1929,17 @@ const cameraPanel = buildCameraPanel({
   composer,
   dof,
   dofPass,
+  // camera automations
+  cameraMoves: CAMERA_MOVES.map(({ id, label }) => ({ value: id, label })),
+  isCameraAuto: () => cameraAuto.active,
+  playCamera: (move, speed) => {
+    if (modes.mode !== 'surface') return
+    tour.active = false
+    drone.stop()
+    cameraAuto.start(move, speed)
+  },
+  stopCamera: () => cameraAuto.stop(),
+  setCameraSpeed: (s) => cameraAuto.setSpeed(s),
   applyShadowMode,
   setShadowRes: (v) => {
     sun.shadow.mapSize.set(v, v)
@@ -1974,7 +1993,7 @@ aq = createAdaptiveQuality({
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
 
 // real world is the default source — fetch its tiles on startup
 if (params.source === 'real') loadRealTerrain()
