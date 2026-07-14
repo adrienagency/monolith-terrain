@@ -4,3 +4,6 @@ dist/
 
 # Local Netlify folder
 .netlify
+
+# raw Natural Earth source for cities.json (derived output lives in public/data)
+places.geojson
