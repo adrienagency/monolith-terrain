@@ -5,7 +5,7 @@ import { el, slider, color, swatch, toggle, select, segmented, button, section, 
 import { Panel } from './shell.js'
 import { TEMPLATES } from '../templates.js'
 import { generatePalette, generateStyle, generateGridContour } from '../palette.js'
-import { PBR_PRESETS, GLASS_PRESETS, GLASS_BY_ID } from '../material-presets.js'
+import { PBR_PRESETS, GLASS_PRESETS, GLASS_BY_ID, PBR_BY_ID } from '../material-presets.js'
 import { FLAGS } from '../flags.js'
 
 const ICON =
@@ -260,13 +260,19 @@ export function buildCreatePanel(ctx) {
       segmented({ label: 'Material finish', options: [{ value: 'solid', label: 'Solid' }, { value: 'glass', label: 'Glass' }], get: () => params.plinthFinish, set: (v) => { params.plinthFinish = v; ctx.applyPlinthMaterial(); rebuildMat() } }),
       select({ label: glass ? 'Glass' : 'PBR material', options: list.map((p) => ({ value: p.id, label: p.name })), get: () => (glass ? params.plinthGlass : params.plinthPbr), set: (v) => {
         if (glass) { params.plinthGlass = v; params.plinthGlassDiffusion = GLASS_BY_ID[v].diffusion } else params.plinthPbr = v
-        ctx.applyPlinthMaterial(); refreshAll()
+        ctx.applyPlinthMaterial(); rebuildMat()
       } }),
     ]
     if (glass) {
       kids.push(
         slider({ label: 'Diffusion (frost)', min: 0, max: 1, step: 0.01, get: () => params.plinthGlassDiffusion, set: (v) => { params.plinthGlassDiffusion = v; ctx.applyPlinthMaterial() } }),
+        slider({ label: 'Bump', min: 0, max: 2, step: 0.02, get: () => params.plinthGlassBump, set: (v) => { params.plinthGlassBump = v; ctx.applyPlinthMaterial() } }),
         slider({ label: 'Ground glow', min: 0, max: 1, step: 0.01, get: () => params.plinthGlassProjection, set: (v) => { params.plinthGlassProjection = v; ctx.applyPlinthMaterial() } })
+      )
+    } else if (PBR_BY_ID[params.plinthPbr]?.tex) {
+      // textured PBR (carbon, wood): exaggerated relief with a live bump slider
+      kids.push(
+        slider({ label: 'Bump', min: 0, max: 3, step: 0.05, get: () => params.plinthBump, set: (v) => { params.plinthBump = v; ctx.applyPlinthMaterial() } })
       )
     }
     matWrap.replaceChildren(...kids)

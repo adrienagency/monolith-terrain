@@ -48,6 +48,8 @@ import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
 import { buildRegionPlate } from './region-plate.js'
 import { buildRegionSkirt } from './region-skirt.js'
 import { makeSocleEnvMap } from './socle-env.js'
+import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
+import { SURFACE_MATERIALS } from './material-textures.js'
 import { refreshAll } from './ui/kit.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCredits } from './ui/bars.js'
 import { buildCreatePanel } from './ui/create-panel.js'
@@ -227,9 +229,14 @@ const params = {
   // glass preset with frost (diffusion) + coloured ground projection
   plinthFinish: 'solid',
   plinthPbr: 'stone',
-  plinthGlass: 'clear',
-  plinthGlassDiffusion: 0.0,
+  plinthGlass: 'frosted', // grainy/diffuse by default
+  plinthGlassDiffusion: 0.7,
   plinthGlassProjection: 0.5,
+  plinthGlassBump: 0.6, // frost micro-facet strength (glass bump slider)
+  plinthBump: 1.5, // textured-PBR relief strength (carbon/wood bump slider)
+  // terrain surface material overlay (Shaders panel, next to Liquid metal)
+  terrainSurfaceMat: '', // '' | 'carbon' | 'wood' | 'frost'
+  terrainSurfaceBump: 1.2,
   slabCorner: 0.04, // fillet radius on the slab's vertical corners, as a fraction
   // of the block width (the terrain clips to the same rounded rectangle)
   slabCornerSmoothing: 0.6, // 0 = plain circular arc, →1 = squircle (iOS-style
@@ -414,6 +421,7 @@ plinth.rebuild(terrain, params)
 // give the socle its own punchy studio env so metals/glass/carbon reflect real
 // highlights (the terrain keeps the neutral RoomEnvironment on scene.environment)
 plinth.setEnvMap(makeSocleEnvMap(renderer))
+let cartoucheRef = null // set once the ground cartouche exists (avoids TDZ at boot)
 // push the chosen socle material (default = matte stone, i.e. the original look)
 function applyPlinthMaterial() {
   const glass = params.plinthFinish === 'glass'
@@ -422,8 +430,25 @@ function applyPlinthMaterial() {
     id: glass ? params.plinthGlass : params.plinthPbr,
     diffusion: glass ? params.plinthGlassDiffusion : undefined,
     projection: params.plinthGlassProjection,
+    glassBump: params.plinthGlassBump,
+    bump: params.plinthBump,
     fallbackColor: params.plinthColor,
   })
+  // keep the engraved socle name readable whatever the material — re-render the
+  // cartouche so its ink flips to contrast the new surface
+  cartoucheRef?.rerender?.()
+}
+// high-contrast ink for the name engraved on the socle face, chosen against the
+// current material's base tone (dark carbon/glass → light ink, and vice versa)
+function socleWallInk() {
+  const glass = params.plinthFinish === 'glass'
+  let hex = params.plinthColor
+  if (glass) hex = (GLASS_BY_ID[params.plinthGlass] || {}).color || '#8899aa'
+  else hex = (PBR_BY_ID[params.plinthPbr] || {}).color || params.plinthColor
+  const c = new THREE.Color(hex)
+  const lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+  // glass reads mid-to-dark against the sky behind it → bias toward light ink
+  return lum < (glass ? 0.6 : 0.5) ? '#f4f1ea' : '#1a1c20'
 }
 applyPlinthMaterial()
 plinth.setVisible(params.plinth)
@@ -433,7 +458,9 @@ const groundInfo = new GroundInfoLayer({
   scene,
   getBaseY: () => plinth.baseY,
   getInk: () => (params.darkMode ? '#e8e4da' : params.hudInk),
+  getWallInk: () => socleWallInk(), // engraved name flips to contrast the socle material
 })
+cartoucheRef = groundInfo
 
 const cone = createCone()
 scene.add(cone.group)
@@ -1678,6 +1705,19 @@ const shadersPanel = buildShadersPanel({
     if (!params.fx[id]) return
     params.fx[id][key] = val
     if (params.surfaceFx === id) terrain.applyFxParams(params.fx[id]) // speed/opacity/blend re-pushed
+  },
+  // terrain surface material — the same procedural textures as the socle, draped
+  // over the relief (normal + roughness finish), sibling of Liquid metal
+  surfaceMatList: SURFACE_MATERIALS.map(({ id, label }) => ({ value: id, label })),
+  getSurfaceMat: () => params.terrainSurfaceMat,
+  setSurfaceMat: (id) => {
+    params.terrainSurfaceMat = id || ''
+    terrain.setSurfaceMaterial(params.terrainSurfaceMat, params)
+  },
+  getSurfaceMatBump: () => params.terrainSurfaceBump,
+  setSurfaceMatBump: (v) => {
+    params.terrainSurfaceBump = v
+    terrain.setSurfaceMaterialBump(v)
   },
 })
 

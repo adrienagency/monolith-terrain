@@ -35,6 +35,23 @@ export function buildShadersPanel(ctx) {
     }
   }
 
+  // --- Surface material (carbon / wood / frost draped over the relief) ---
+  s.body.append(
+    select({
+      label: 'Surface material',
+      options: [{ value: '', label: 'None' }, ...ctx.surfaceMatList],
+      get: () => ctx.getSurfaceMat() || '',
+      set: (v) => { ctx.setSurfaceMat(v); renderMat() },
+    })
+  )
+  const matCtl = el('div', 'ce-fx-controls')
+  s.body.append(matCtl)
+  function renderMat() {
+    matCtl.replaceChildren()
+    if (!ctx.getSurfaceMat()) return
+    matCtl.append(slider({ label: 'Bump', min: 0, max: 3, step: 0.05, get: () => ctx.getSurfaceMatBump(), set: (v) => ctx.setSurfaceMatBump(v) }))
+  }
+
   // --- Surface shader picker ---
   s.body.append(
     select({
@@ -68,6 +85,7 @@ export function buildShadersPanel(ctx) {
   }
 
   renderLm()
+  renderMat()
   renderFx()
   return panel
 }

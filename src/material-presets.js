@@ -42,16 +42,16 @@ export const PBR_PRESETS = [
   { id: 'sandstone',  name: 'Sandstone',       color: '#d8c4a0', roughness: 0.85, metalness: 0 },
   { id: 'terracotta', name: 'Terracotta',      color: '#c06a44', roughness: 0.8,  metalness: 0 },
   // --- warm ---
-  { id: 'oak',        name: 'Oak wood',        color: '#b08a55', roughness: 0.6,  metalness: 0,   clearcoat: 0.2, clearcoatRoughness: 0.5 },
+  { id: 'oak',        name: 'Oak wood',        color: '#b08a55', roughness: 0.62, metalness: 0,   clearcoat: 0.18, clearcoatRoughness: 0.5, tex: 'wood', normalScale: 1.0, envMapIntensity: 0.7 },
 ]
 
 // Glass — `diffusion` seeds the roughness (frost); the Block panel exposes it as
 // a live slider. `attenuation` is the distance (world units) over which the tint
 // deepens; smaller = more saturated glass.
 export const GLASS_PRESETS = [
-  { id: 'clear',     name: 'Clear',        color: '#ffffff', diffusion: 0.0,  transmission: 1.0,  ior: 1.5,  thickness: 4, attenuation: 40 },
-  { id: 'satin',     name: 'Satin',        color: '#f2f4f6', diffusion: 0.28, transmission: 1.0,  ior: 1.5,  thickness: 4, attenuation: 30 },
-  { id: 'frosted',   name: 'Frosted',      color: '#ffffff', diffusion: 0.6,  transmission: 1.0,  ior: 1.5,  thickness: 5, attenuation: 24 },
+  { id: 'clear',     name: 'Clear',        color: '#ffffff', diffusion: 0.12, transmission: 1.0,  ior: 1.5,  thickness: 4, attenuation: 40 },
+  { id: 'satin',     name: 'Satin',        color: '#f2f4f6', diffusion: 0.4,  transmission: 1.0,  ior: 1.5,  thickness: 4, attenuation: 30 },
+  { id: 'frosted',   name: 'Frosted',      color: '#ffffff', diffusion: 0.7,  transmission: 1.0,  ior: 1.5,  thickness: 5, attenuation: 24 },
   { id: 'smoked',    name: 'Smoked grey',  color: '#6d7075', diffusion: 0.06, transmission: 0.96, ior: 1.5,  thickness: 6, attenuation: 8 },
   { id: 'graphiteg', name: 'Graphite',     color: '#3a3d42', diffusion: 0.12, transmission: 0.9,  ior: 1.52, thickness: 6, attenuation: 6 },
   { id: 'obsidian',  name: 'Obsidian',     color: '#1b1d22', diffusion: 0.08, transmission: 0.72, ior: 1.55, thickness: 7, attenuation: 4 },

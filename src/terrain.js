@@ -3,6 +3,7 @@ import { Simplex2, mulberry32, fbm, ridged, smoothstep, lerp } from './noise.js'
 import { sampleDem } from './dem.js'
 import { rampColorStops } from './palette.js'
 import { buildSeaMask, blurMask } from './sea-mask.js'
+import { TEXTURE_BUILDERS } from './material-textures.js'
 
 export const TERRAIN_SIZE = 56
 
@@ -905,5 +906,41 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   }
   tickLiquidMetal(dt, speed) {
     if (this.mapUniforms.uLmOn.value > 0.5 && speed > 0) this.mapUniforms.uLmFlow.value += dt * speed
+  }
+
+  // Drape a material texture (carbon / wood / frost) over the relief as a SURFACE
+  // FINISH — its normal + roughness maps give the relief a woven, grained or
+  // frosted micro-surface, keeping the hypsometric colours. Lives next to Liquid
+  // metal in the Shaders panel. Pass id='' (or falsy) to remove.
+  setSurfaceMaterial(id, params = {}) {
+    const m = this.material
+    if (id && TEXTURE_BUILDERS[id]) {
+      const t = TEXTURE_BUILDERS[id]()
+      // clone so the terrain tiles at its own density, independent of the socle
+      const nm = t.normalMap.clone()
+      nm.repeat.set(7, 7)
+      nm.needsUpdate = true
+      const rm = t.roughnessMap.clone()
+      rm.repeat.set(7, 7)
+      rm.needsUpdate = true
+      if (this._surfNm) this._surfNm.dispose()
+      if (this._surfRm) this._surfRm.dispose()
+      this._surfNm = nm
+      this._surfRm = rm
+      m.normalMap = nm
+      m.roughnessMap = rm
+      const b = params.terrainSurfaceBump ?? 1
+      m.normalScale.set(b, b)
+    } else {
+      m.normalMap = null
+      m.roughnessMap = null
+      m.normalScale.set(1, 1)
+      if (this._surfNm) { this._surfNm.dispose(); this._surfNm = null }
+      if (this._surfRm) { this._surfRm.dispose(); this._surfRm = null }
+    }
+    m.needsUpdate = true
+  }
+  setSurfaceMaterialBump(b) {
+    if (this.material.normalMap) this.material.normalScale.set(b, b)
   }
 }

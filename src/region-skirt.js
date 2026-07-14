@@ -22,11 +22,23 @@ const HALF = TERRAIN_SIZE / 2
 function maskSampler(maskCanvas) {
   const size = maskCanvas.width
   const data = maskCanvas.getContext('2d').getImageData(0, 0, size, size).data
-  return (x, z) => {
-    const px = Math.round((x / TERRAIN_SIZE + 0.5) * size)
-    const py = Math.round((z / TERRAIN_SIZE + 0.5) * size)
+  const at = (px, py) => {
     if (px < 0 || py < 0 || px >= size || py >= size) return 0
     return data[(py * size + px) * 4]
+  }
+  // bilinear — a smooth iso-line (no stair-stepped, sliver-prone contour)
+  return (x, z) => {
+    const fx = (x / TERRAIN_SIZE + 0.5) * size - 0.5
+    const fy = (z / TERRAIN_SIZE + 0.5) * size - 0.5
+    const x0 = Math.floor(fx)
+    const y0 = Math.floor(fy)
+    const tx = fx - x0
+    const ty = fy - y0
+    const a = at(x0, y0)
+    const b = at(x0 + 1, y0)
+    const c = at(x0, y0 + 1)
+    const d = at(x0 + 1, y0 + 1)
+    return a * (1 - tx) * (1 - ty) + b * tx * (1 - ty) + c * (1 - tx) * ty + d * tx * ty
   }
 }
 
@@ -109,28 +121,39 @@ export function buildRegionSkirt({ maskCanvas, sample, material, depth = 5, grid
 
   const positions = []
   const normals = []
-  const pushTri = (a, b, cc) => {
+  const uvs = [] // so textured/frosted socle materials grain the skirt too
+  const UVSCALE = 6
+  const pushTri = (a, b, cc, ua, ub, uc) => {
     const ab = new THREE.Vector3().subVectors(b, a)
     const ac = new THREE.Vector3().subVectors(cc, a)
     const nm = new THREE.Vector3().crossVectors(ab, ac).normalize()
-    for (const v of [a, b, cc]) {
+    const tri = [[a, ua], [b, ub], [cc, uc]]
+    for (const [v, uv] of tri) {
       positions.push(v.x, v.y, v.z)
       normals.push(nm.x, nm.y, nm.z)
+      uvs.push(uv[0], uv[1])
     }
   }
   const EPS = 0.05 // lift the wall top a hair so it overlaps the surface (no seam)
   for (const s of segs) {
+    // skip degenerate slivers — near-zero-length segments render as icicle spikes
+    const segLen = Math.hypot(s.bx - s.ax, s.bz - s.az)
+    if (segLen < 1e-3) continue
     const aTop = new THREE.Vector3(s.ax, s.ya + EPS, s.az)
     const bTop = new THREE.Vector3(s.bx, s.yb + EPS, s.bz)
     const aBot = new THREE.Vector3(s.ax, baseY, s.az)
     const bBot = new THREE.Vector3(s.bx, baseY, s.bz)
-    pushTri(aTop, aBot, bTop)
-    pushTri(bTop, aBot, bBot)
+    const u1 = segLen / UVSCALE
+    const vaT = (s.ya - baseY) / UVSCALE
+    const vbT = (s.yb - baseY) / UVSCALE
+    pushTri(aTop, aBot, bTop, [0, vaT], [0, 0], [u1, vbT])
+    pushTri(bTop, aBot, bBot, [u1, vbT], [0, 0], [u1, 0])
   }
 
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
   geo.computeBoundingSphere()
   const mesh = new THREE.Mesh(geo, material)
   mesh.name = 'region-skirt'

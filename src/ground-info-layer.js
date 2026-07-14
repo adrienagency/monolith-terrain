@@ -108,9 +108,10 @@ function compassCanvas(color) {
 }
 
 export class GroundInfoLayer {
-  constructor({ scene, getBaseY, getInk }) {
+  constructor({ scene, getBaseY, getInk, getWallInk }) {
     this.getBaseY = getBaseY
     this.getInk = getInk
+    this.getWallInk = getWallInk // ink for the name engraved on the block face (material-aware)
     this.group = new THREE.Group()
     this.group.name = 'ground-info'
     scene.add(this.group)
@@ -157,7 +158,9 @@ export class GroundInfoLayer {
   // flush to the lower-left (like a museum relief plate). Name in Rosarivo,
   // coordinates in Bricolage; both left-aligned, inked to contrast the wall.
   _sideLabel(info) {
-    const ink = this.getInk?.() || '#222'
+    // engraved-name ink follows the socle material (dark carbon/glass → light ink)
+    // so the label never sinks into the surface and stays legible
+    const ink = this.getWallInk?.() || this.getInk?.() || '#222'
     const baseY = this.getBaseY?.() ?? -8
     const xLeft = -HALF + 6.5 // clear of the rounded corner, small left margin
     // NAME (+ country) — the identity line(s)

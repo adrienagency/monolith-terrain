@@ -147,15 +147,24 @@ export class Plinth {
   // Apply a socle material. `finish` is 'solid' (PBR presets) or 'glass'
   // (transmissive presets). `diffusion`/`projection` are the live glass sliders
   // (frost roughness, ground-pool strength); undefined = use the preset value.
-  setMaterial({ finish = 'solid', id, diffusion, projection = 0.5, fallbackColor = '#d8d4cc' } = {}) {
+  setMaterial({ finish = 'solid', id, diffusion, projection = 0.5, glassBump = 0.6, bump = 1.3, fallbackColor = '#d8d4cc' } = {}) {
     const m = this.wallMat
     if (finish === 'glass') {
       const p = GLASS_BY_ID[id] || GLASS_BY_ID.clear
       this.isGlass = true
-      this._clearMaps()
+      const diff = diffusion == null ? p.diffusion : diffusion
+      // Frosted/diffuse glass driven by a micro-facet NORMAL map rather than raw
+      // transmission roughness (which mip-blurs into chunky artefacts). A capped
+      // roughness gives a soft blur; the frost bump does the real scattering, so
+      // it reads grainy and diffuse without the visual bugs.
+      const frost = TEXTURE_BUILDERS.frost()
       m.color.set('#ffffff') // clear base; the tint rides on attenuation
+      m.map = null
+      m.normalMap = frost.normalMap
+      m.roughnessMap = frost.roughnessMap
+      m.normalScale.set(glassBump, glassBump)
       m.metalness = 0
-      m.roughness = diffusion == null ? p.diffusion : diffusion
+      m.roughness = Math.min(0.06 + diff * 0.34, 0.42) // capped — no chunky mip blur
       m.transmission = p.transmission
       m.ior = p.ior
       m.thickness = p.thickness
@@ -183,19 +192,21 @@ export class Plinth {
       m.ior = p.ior ?? 1.5
       m.transparent = false
       m.envMapIntensity = p.envMapIntensity ?? 1
-      // textured finishes (e.g. carbon): albedo + normal + roughness maps plus
-      // anisotropy/clearcoat for the woven, lacquered look
+      // textured finishes (carbon, wood): albedo + normal + roughness maps; the
+      // bump slider drives normalScale (exaggerated relief)
       const build = p.tex && TEXTURE_BUILDERS[p.tex]
       if (build) {
         const t = build()
-        m.map = t.map
+        m.map = t.map ?? null
         m.normalMap = t.normalMap
         m.roughnessMap = t.roughnessMap
-        m.normalScale.set(p.normalScale ?? 1, p.normalScale ?? 1)
+        const b = bump * (p.normalScale ?? 1)
+        m.normalScale.set(b, b)
         m.anisotropy = p.anisotropy ?? 0
         m.anisotropyRotation = p.anisotropyRotation ?? 0
       } else {
         this._clearMaps()
+        m.normalScale.set(1, 1)
         m.anisotropy = p.anisotropy ?? 0
         m.anisotropyRotation = 0
       }
