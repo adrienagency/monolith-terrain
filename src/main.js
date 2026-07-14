@@ -43,6 +43,7 @@ import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
 import { fetchRegionMask } from './region-mask.js'
+import { fetchCoastMask } from './coast-mask.js'
 import { buildRegionPlate } from './region-plate.js'
 import { refreshAll } from './ui/kit.js'
 import { buildTopBar, buildBottomBar, buildIsoButton } from './ui/bars.js'
@@ -796,6 +797,7 @@ window.addEventListener('pointermove', (e) => {
 
 let dem = null
 let demBusy = false
+const coastMaskCache = new Map() // patch key → THREE texture
 // the finest zoom the USER chose — dives and the staircase overwrite
 // params.demZoom freely, but refining always climbs back to this
 let userFineZoom = Math.max(params.demZoom, 12)
@@ -875,6 +877,26 @@ async function fetchAndBuildDem() {
   await regenerateTerrain()
   // pull the cartouche info for the new zone (async, non-blocking)
   if (params.groundInfo) groundInfo.load(params.demLat, params.demLon, dem)
+  // real coastline (Natural Earth) at coarse zoom — async, non-blocking; the
+  // shader falls back to the elevation isoline until it arrives / if it fails
+  {
+    const key = `${params.demZoom}:${params.demLat.toFixed(3)},${params.demLon.toFixed(3)}`
+    const cached = coastMaskCache.get(key)
+    if (cached) {
+      terrain.setCoastMask(cached)
+    } else {
+      terrain.setCoastMask(null)
+      fetchCoastMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem })
+        .then((res) => {
+          if (!res) return
+          coastMaskCache.set(key, res.maskTexture)
+          // only apply if we're still on the same patch
+          const stillHere = `${params.demZoom}:${params.demLat.toFixed(3)},${params.demLon.toFixed(3)}` === key
+          if (stillHere) terrain.setCoastMask(res.maskTexture)
+        })
+        .catch(() => {})
+    }
+  }
   traffic.setZone(dem) // SpaceX pad watcher (Starbase / LC-39A in view?)
   if (params.regionMode) applyRegionMode() // re-cut to the new zone's boundary
 }
