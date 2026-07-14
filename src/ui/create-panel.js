@@ -126,7 +126,7 @@ export function buildCreatePanel(ctx) {
     select({ label: 'Detail (zoom)', options: ['5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'], get: () => String(params.demZoom), set: (v) => { params.demZoom = +v; ctx.onZoomPicked(+v) } }),
     exag,
     el('div', 'ce-btn-row'),
-    slider({ label: 'Fine detail', min: 0, max: 0.8, step: 0.01, get: () => params.detail, set: (v) => { params.detail = v } }),
+    slider({ label: 'Fine detail', min: 0, max: 0.8, step: 0.01, get: () => params.detail, set: (v) => { params.detail = v; ctx.saveZoomDetail?.(params.demZoom, v) } }),
     slider({ label: 'Detail scale', min: 0.5, max: 6, step: 0.1, get: () => params.detailScale, set: (v) => { params.detailScale = v } }),
     select({ label: 'Mesh resolution', options: ['256', '384', '512', '768', '1024'], get: () => String(params.resolution), set: (v) => { params.resolution = +v; ctx.regenerateTerrain() } })
   )

@@ -52,6 +52,7 @@ import { buildExplorePanel } from './ui/explore-panel.js'
 import { buildScanPanel } from './ui/scan-panel.js'
 import { initTips } from './ui/tips.js'
 import { createAdaptiveQuality } from './perf.js'
+import { detailForZoom } from './zoom-detail.js'
 import './ui/v28.css'
 // the export stack (modal + Recorder + mediabunny encoder) is heavy and only
 // needed on demand — it is dynamic-import()ed on the first Export click, so
@@ -832,10 +833,35 @@ function syncExagToZoom() {
   refreshAll()
 }
 
+// --- per-zoom fine detail -----------------------------------------------------
+// At continental scale (z4-6) the procedural FBM "fine detail" reads as fake
+// stippling on the plains, so it's force-zeroed by default there; z7+ keeps the
+// base value. A user override in localStorage always wins, mirroring exaggeration.
+const DETAIL_KEY = 'monolith.zoomDetail'
+const BASE_DETAIL = 0.02
+let zoomDetailStore = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(DETAIL_KEY) || '{}') || {}
+  } catch {
+    return {}
+  }
+})()
+function saveZoomDetail(z, v) {
+  zoomDetailStore[z] = v
+  try {
+    localStorage.setItem(DETAIL_KEY, JSON.stringify(zoomDetailStore))
+  } catch {}
+}
+// pull the current zoom's fine-detail (0 at continental scale) into params
+function syncDetailToZoom() {
+  params.detail = detailForZoom(params.demZoom, zoomDetailStore, BASE_DETAIL)
+}
+
 // fetch tiles + rebuild; throws on failure so programmatic callers (orbital
 // dive) can hold orbit — loadRealTerrain wraps it with the GUI's error UX
 async function fetchAndBuildDem() {
   syncExagToZoom() // this zoom's saved (or default) vertical exaggeration
+  syncDetailToZoom() // fine-detail off at continental scale (z<=6)
   loadingStatus.textContent = 'fetching elevation tiles…'
   loadingEl.classList.remove('hidden')
   dem = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom })
@@ -1465,6 +1491,7 @@ const createPanel = buildCreatePanel({
   peaksLayer,
   setLabelsVisible: (v) => (labels.visible = v && modes.mode === 'surface'),
   saveZoomExag,
+  saveZoomDetail,
   resetZoomExag: () => {
     delete zoomExagStore[params.demZoom]
     try {
