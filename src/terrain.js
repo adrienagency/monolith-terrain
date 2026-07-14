@@ -1002,6 +1002,9 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       m.envMapIntensity = params.envMapIntensity ?? 1
       m.color.set(params.color ?? '#ffffff')
       this._matPreset = null
+      // detach the material's (possibly shared, cached) roughnessMap BEFORE
+      // rebuildRoughness so it isn't disposed out from under the texture cache
+      m.roughnessMap = null
       this.mapUniforms.uTint.value = params.mapTint ?? 1
       // restore the procedural terrain roughness/bump the relief material replaced
       this.rebuildRoughness(params)

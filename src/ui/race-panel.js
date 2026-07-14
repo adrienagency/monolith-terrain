@@ -42,9 +42,14 @@ export function buildRacePanel() {
     for (const c of candidates) {
       const row = el('button', 'ce-race-row')
       row.type = 'button'
-      const thumb = c.thumb ? `<img class="ce-race-thumb" src="${c.thumb}" alt="">` : '<span class="ce-race-thumb"></span>'
-      const meta = c.participants ? `${c.participants.toLocaleString('en-US')} participants` : ''
-      row.innerHTML = `${thumb}<span class="ce-race-rowtxt"><b>${esc(c.title)}</b><small>${meta}</small></span>`
+      // build with DOM APIs — c.thumb is an external URL, don't interpolate it
+      const img = el(c.thumb ? 'img' : 'span', 'ce-race-thumb')
+      if (c.thumb) { img.src = c.thumb; img.alt = '' }
+      const txt = el('span', 'ce-race-rowtxt')
+      const b = el('b'); b.textContent = c.title
+      const sm = el('small'); sm.textContent = c.participants ? `${c.participants.toLocaleString('en-US')} participants` : ''
+      txt.append(b, sm)
+      row.append(img, txt)
       row.addEventListener('click', () => openDetail(c))
       list.append(row)
     }

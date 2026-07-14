@@ -101,6 +101,7 @@ export class DroneCam {
 
   // worldPts: ordered GPX track points {x,y,z} at ground level (direction = order)
   start(worldPts, { duration = 30 } = {}) {
+    this.active = false // a bail below leaves no stale flight running
     if (!worldPts || worldPts.length < 2) return false
     const span = worldPts.reduce((s, p, i) => (i ? s + Math.hypot(p.x - worldPts[i - 1].x, p.z - worldPts[i - 1].z) : 0), 0)
     const spacing = Math.max(0.4, span / 260)
