@@ -148,6 +148,21 @@ pourrait recevoir le même traitement plus tard, hors périmètre.
 
 Dépendances : `cities.js` uniquement.
 
+### 7. Trait de côte plus fin et discret — `terrain.js`
+
+Le trait de côte est une ligne d'encre dessinée exactement à 0 m dans le shader
+terrain (`terrain.js:245-250`) : épaisseur pilotée par le facteur `coastAA * 2.5`
+et intensité par `coast * 0.9` (mélange vers `uContourColor`). Adrien le trouve
+trop épais/marqué.
+
+Fix : l'affiner (facteur ~2.5 → ~1.3) et le rendre plus discret (mélange
+~0.9 → ~0.55). Purement visuel, indépendant de la donnée côtière (Spec 2). Le
+tracé reste au même endroit — c'est seulement le poids du trait qui change. La
+**justesse** du tracé (le trait ne colle pas à la vraie côte) n'est PAS traitée
+ici : c'est le Spec 2.
+
+Dépendances : `terrain.js` uniquement.
+
 ## État prod attendu après exécution
 
 Baseline v34 + trafic varié ON + mer OFF + éclairage-presets OFF + fine-detail
@@ -158,10 +173,18 @@ un dernier feu vert manuel.
 
 ## Hors périmètre (→ Spec 2)
 
-- Justesse de la côte / du niveau de la mer sur données réelles.
+- **Justesse du tracé de côte** — PRIORITÉ du Spec 2. Symptôme signalé par Adrien
+  (vue Italie ~434 km) : le trait noir ne suit pas la vraie côte, l'Italie est
+  « réduite au niveau de Venise » (le côté Adriatique est mangé vers l'intérieur).
+  Le trait est l'isoligne 0 m d'un DEM bruité, pas la vraie côte. Spec 2 le
+  remplace par une donnée vectorielle réelle (Natural Earth au coarse, OSM au
+  fin) rastérisée en masque terre/mer.
+- Le Spec 2 doit **vérifier le tracé contre de vraies cartes de référence** (pas
+  seulement numériquement) — c'est ce qui manquait aux sessions passées.
+- Diagnostic à faire en tête de Spec 2 : distinguer la coarseness du DEM d'un
+  éventuel excès du flood-fill `sea-mask.js` ou du `seaEps` (`terrain.js:554`).
 - Faux lacs restants dus au DEM bruité (le masque `sea-mask.js` v40 reste le
-  garde-fou courant).
-- Trait de côte maritime précis (donnée vectorielle Natural Earth / OSM).
+  garde-fou courant en attendant).
 - Le `/find-skills` d'Adrien sera exploité au Spec 2 (skill de données géo/OSM).
 
 ## Critères de succès

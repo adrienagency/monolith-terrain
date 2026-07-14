@@ -487,6 +487,56 @@ git commit -m "fix: city labels always render above relief (depthTest off, highe
 
 ---
 
+### Task 7: Trait de côte plus fin et discret
+
+**Files:**
+- Modify: `src/terrain.js` (coastline block L245-250)
+
+**Interfaces:** none (self-contained shader tweak). This changes only the line
+weight/opacity of the sea-level stroke — NOT where it sits (accuracy = Spec 2).
+
+- [ ] **Step 1: Affiner et adoucir le trait de côte**
+
+In `src/terrain.js`, the coastline block (L245-250) currently is:
+```glsl
+  // --- coastline: a crisp line exactly at sea level (elevation 0), drawn in the
+  // template ink so the shore is unmistakable on every look
+  if (uSeaY > -9000.0) {
+    float coastAA = max(fwidth(vWorldPos.y), 1e-4);
+    float coast = 1.0 - smoothstep(0.0, coastAA * 2.5, abs(vWorldPos.y - uSeaY));
+    diffuseColor.rgb = mix(diffuseColor.rgb, uContourColor, coast * 0.9);
+  }
+```
+Make it thinner (AA factor 2.5 → 1.3) and more discreet (mix 0.9 → 0.55):
+```glsl
+  // --- coastline: a fine, discreet line at sea level (elevation 0), drawn in
+  // the template ink. Kept thin so the shore reads without shouting.
+  if (uSeaY > -9000.0) {
+    float coastAA = max(fwidth(vWorldPos.y), 1e-4);
+    float coast = 1.0 - smoothstep(0.0, coastAA * 1.3, abs(vWorldPos.y - uSeaY));
+    diffuseColor.rgb = mix(diffuseColor.rgb, uContourColor, coast * 0.55);
+  }
+```
+
+- [ ] **Step 2: Lancer l'app et vérifier**
+
+Reload the preview on a coastal view (Italy, or any Explore place with a shore):
+- Le trait de côte est nettement **plus fin et plus discret** qu'avant, sans
+  disparaître.
+- `read_console_messages` → aucune erreur de compilation shader (`Shader Error`).
+  ⚠️ Piège connu : un cold-load (onglet frais) dit la vérité — les erreurs de
+  shader fantômes du HMR après édition d'uniforms n'existent qu'en intermédiaire.
+- Take a `screenshot` (MCP `computer`) as before/after proof.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/terrain.js
+git commit -m "style: thinner, more discreet sea-level coastline stroke"
+```
+
+---
+
 ### Task 6: Fichier de travail `docs/fonctions.md`
 
 **Files:**
@@ -551,10 +601,11 @@ git commit -m "docs: living feature-status table (prod / dev-flag / backlog)"
 - Fine-detail z≤6 (§4) → Task 3. ✓
 - Palier z4 (§5) → Task 4. ✓
 - Labels au-dessus du relief (§6) → Task 5. ✓
+- Trait de côte fin/discret (§7) → Task 7. ✓
 - Critères de succès (tests verts, réactivation flag, dézoom z4→globe, labels non tronqués) → couverts par les steps de vérif de chaque task. ✓
 
 **Placeholder scan:** aucun TBD/TODO ; tout le code des steps est concret. ✓
 
 **Type consistency:** `FLAGS.{water,lightingPresets}` cohérent entre Task 1/2 et l'UI. `detailForZoom(zoom, store, base)` / `DETAIL_DEFAULTS` cohérents entre Task 3 (def) et Task 4 (usage `DETAIL_DEFAULTS[4]=0` déjà posé en Task 3). `stepZoom` floor 4 cohérent avec `getCoarsenTarget` guard `<= 4` et le tier z4 de `DIVE_TIERS`. `saveZoomDetail` exposé sur ctx (Task 3 Step 6) et consommé par le slider. ✓
 
-**Ordre d'exécution :** 1 (flags+mer) → 2 (éclairage) → 3 (fine-detail) → 4 (z4, dépend de Task 3) → 5 (labels) → 6 (doc, en dernier pour refléter l'état final).
+**Ordre d'exécution :** 1 (flags+mer) → 2 (éclairage) → 3 (fine-detail) → 4 (z4, dépend de Task 3) → 5 (labels) → 7 (trait de côte fin) → 6 (doc, en dernier pour refléter l'état final). (Task 7 est placée après Task 5 dans le fichier ; la numérotation 6/7 est décorrélée de l'ordre — le doc reste la dernière tâche.)
