@@ -5,6 +5,7 @@
 import { el } from './kit.js'
 
 const docks = {}
+const dockPanels = { left: [], right: [] } // for the exclusive per-column accordion
 function dockColumn(side) {
   if (!docks[side]) {
     const d = el('div', `ce-dock ce-dock-${side}`)
@@ -38,6 +39,7 @@ export class Panel {
     })
     this._initDrag()
     dockColumn(side).append(this.root)
+    dockPanels[side].push(this)
   }
 
   get collapsed() {
@@ -46,6 +48,9 @@ export class Panel {
 
   setCollapsed(v) {
     this.root.classList.toggle('collapsed', v)
+    // exclusive column accordion: expanding a panel folds its dock neighbours so
+    // the column never overflows and one panel is open at a time
+    if (!v) for (const p of dockPanels[this.side] || []) if (p !== this) p.root.classList.add('collapsed')
   }
 
   // exclusive accordion: opening one section folds the others in this panel
@@ -86,7 +91,11 @@ export class Panel {
       if (!commit) return // cancelled gesture: snap home, change nothing
       const side = e.clientX < window.innerWidth / 2 ? 'left' : 'right'
       if (side !== this.side) {
+        const arr = dockPanels[this.side]
+        const i = arr.indexOf(this)
+        if (i >= 0) arr.splice(i, 1)
         this.side = side
+        dockPanels[side].push(this)
         dockColumn(side).append(this.root)
       }
     }

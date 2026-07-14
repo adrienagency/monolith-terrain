@@ -490,6 +490,27 @@ body.dark {
 .ce-race-link { font-size: 12px; color: var(--ce-accent); text-decoration: none; font-weight: 600; }
 .ce-race-link:hover { text-decoration: underline; }
 
+/* inline template-name field */
+.ce-tpl-name {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  border: 1px solid var(--ce-hairline);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ce-ink);
+  font-family: var(--ce-font);
+  font-size: 12px;
+  padding: 0 9px;
+  outline: none;
+}
+.ce-tpl-name:focus {
+  border-color: var(--ce-accent);
+}
+.ce-tpl-name::placeholder {
+  color: var(--ce-muted);
+}
+
 /* user template cards (saved looks with a thumbnail) */
 .ce-utpl-grid {
   display: grid;

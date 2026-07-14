@@ -51,6 +51,7 @@ import { makeSocleEnvMap } from './socle-env.js'
 import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
 import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, loadUserTemplates, saveUserTemplates } from './templates-user.js'
 import { DroneCam } from './drone-cam.js'
+import { makeGradientTexture, BG_MODES } from './background.js'
 import { findRacesNear } from './race-info.js'
 import { buildRacePanel } from './ui/race-panel.js'
 import { refreshAll } from './ui/kit.js'
@@ -179,6 +180,11 @@ const params = {
   fogNear: 35.5,
   fogFar: 50,
   fogColor: '#ffffff',
+  // background: solid (fogColor) or a gradient (linear/radial/mesh) of A(fogColor)/B/C
+  bgMode: 'solid',
+  bgColorB: '#dfe6ef',
+  bgColorC: '#c7d2df',
+  bgAngle: 135,
   surveyLines: true,
 
   // motion
@@ -321,6 +327,17 @@ renderer.toneMapping = THREE.NoToneMapping
 container.appendChild(renderer.domElement)
 
 const scene = new THREE.Scene()
+// background can be a flat colour or a gradient texture (disposed on change)
+let _bgTex = null
+function applyBackground() {
+  if (_bgTex) { _bgTex.dispose(); _bgTex = null }
+  if (!params.bgMode || params.bgMode === 'solid') {
+    scene.background = new THREE.Color(params.fogColor)
+  } else {
+    _bgTex = makeGradientTexture({ mode: params.bgMode, a: params.fogColor, b: params.bgColorB, c: params.bgColorC, angle: params.bgAngle })
+    scene.background = _bgTex
+  }
+}
 scene.background = new THREE.Color(params.fogColor)
 // linear fog: near/far give direct control over where the fade starts and
 // where the terrain is fully swallowed, hiding the mesh edge
@@ -388,7 +405,8 @@ function applyTimeOfDay(hour) {
 }
 // restore the scene background when a dark preset is cleared
 function setStudioBackground(hex) {
-  scene.background = hex ? new THREE.Color(hex) : new THREE.Color(params.fogColor)
+  if (hex) { if (_bgTex) { _bgTex.dispose(); _bgTex = null } scene.background = new THREE.Color(hex) }
+  else applyBackground()
 }
 function applyLightPreset(name) {
   if (!studio) return // presets disabled — base sun rig governs
@@ -1261,7 +1279,7 @@ function setDarkMode(v) {
   const sheet = v ? DARK.sheet : '#ffffff'
   params.fogColor = sheet
   fogRef.color.set(sheet)
-  scene.background.set(sheet)
+  applyBackground() // params.fogColor already = sheet; rebuilds solid/gradient bg
   modes.whiteEl.style.background = sheet // transition flash follows the sheet
   document.documentElement.style.setProperty('--hud-ink', effInk())
   document.documentElement.style.setProperty(
@@ -1323,7 +1341,7 @@ function applyLook(k) {
   if (k.fogColor != null) {
     params.fogColor = k.fogColor
     fogRef.color.set(k.fogColor)
-    scene.background.set(k.fogColor)
+    applyBackground()
     modes.whiteEl.style.background = k.fogColor
   }
   if (k.exposure != null) exposureFx.uniforms.get('exposure').value = params.exposure = k.exposure
@@ -1373,6 +1391,7 @@ function applyUserTemplate(tmpl) {
   applyLook({ fogColor: params.fogColor, exposure: params.exposure, contrast: params.contrast, saturation: params.saturation, vignette: params.vignette, grain: params.grain, clouds: params.cloudsEnabled, plinth: params.plinth })
   fogRef.near = params.fogNear
   fogRef.far = params.fogFar
+  applyBackground() // solid/gradient background from the captured look
   applyPlinthMaterial()
   terrain.setMaterialMode(params.terrainSurfaceMat || '', params)
   if (params.terrainSurfaceMat && params.terrainSurfaceMat !== 'glass' && params.terrainMatRoughness != null) {
@@ -1773,6 +1792,8 @@ const createPanel = buildCreatePanel({
     if (params.source === 'real') loadRealTerrain()
   },
   getFineZoom: () => userFineZoom, // finest scale reached — gates the 2048/4096 mesh tiers
+  applyBackground, // solid / gradient scene background
+  bgModes: BG_MODES,
   applyPlinthMaterial, // socle PBR / glass material picker (Block panel)
   setGroundInfo: (v) => {
     groundInfo.enabled = v
@@ -1925,24 +1946,12 @@ const scanPanel = buildScanPanel({
   runScan: (typeId) => scan.trigger(typeId, { x: controls.target.x, z: controls.target.z }, params.scanDuration),
 })
 
-// auto-fold: expanding a section in one panel folds its dock neighbour so a
-// column never grows past the screen
-const foldPairs = [
-  [createPanel, cameraPanel], [createPanel, shadersPanel],
-  [cameraPanel, createPanel], [cameraPanel, shadersPanel],
-  [shadersPanel, createPanel], [shadersPanel, cameraPanel],
-  [explorePanel, scanPanel],
-  [scanPanel, explorePanel],
-]
-for (const [a, b] of foldPairs)
-  for (const s of a.sections)
-    s.head.addEventListener('click', () => {
-      if (s.open) {
-        b.setCollapsed(true)
-        for (const t of b.sections) t.setOpen(false)
-      }
-    })
+// the exclusive per-column accordion now lives in the Panel shell (setCollapsed
+// folds dock neighbours), so expanding any panel collapses the others in its
+// column. Start with only Create/Explore open.
+shadersPanel.setCollapsed(true)
 cameraPanel.setCollapsed(true)
+scanPanel.setCollapsed(true)
 scanPanel.setCollapsed(true)
 
 // adaptive quality — built once the composer, panels and mode machine exist
@@ -2057,16 +2066,9 @@ function tick() {
   modes.update(dt)
   if (modes.mode === 'orbital') globe.update(camera, dt)
 
-  // fog carries the close-up read only: it dissipates as soon as the camera
-  // pulls one step back from max zoom, so mid-zoom never whites out
-  if (modes.mode === 'surface' && scene.fog) {
-    const dist = controls.getDistance()
-    const lift = THREE.MathUtils.smoothstep(dist, controls.minDistance * 1.15, controls.minDistance * 2.5)
-    // scaled from the GUI values (not constants) so the Look → fog sliders
-    // keep their meaning at every distance
-    fogRef.near = THREE.MathUtils.lerp(params.fogNear, params.fogNear * 9, lift)
-    fogRef.far = THREE.MathUtils.lerp(params.fogFar, params.fogFar * 10.4, lift)
-  }
+  // fog is driven directly by the Effects sliders (fogNear/fogFar) — the old
+  // per-frame auto-scaling silently overrode those values (near*9/far*10.4),
+  // pushing the fog hundreds of units away so it never showed at normal zoom.
 
   // refresh camera matrices NOW so DOM projections match this frame's render
   // (otherwise labels are projected with last frame's matrices and lag behind)

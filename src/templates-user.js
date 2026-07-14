@@ -28,6 +28,8 @@ export const TEMPLATE_KEYS = [
   'color', 'roughness', 'roughnessVariation', 'roughnessScale', 'bumpScale', 'envMapIntensity',
   // post FX
   'exposure', 'contrast', 'saturation', 'vignette', 'grain', 'fogNear', 'fogFar', 'fogColor',
+  // background (solid / gradient)
+  'bgMode', 'bgColorB', 'bgColorC', 'bgAngle',
   // socle (block)
   'plinth', 'plinthDepth', 'plinthColor', 'plinthFinish', 'plinthPbr', 'plinthGlass',
   'plinthGlassDiffusion', 'plinthGlassProjection', 'plinthGlassBump', 'plinthBump',

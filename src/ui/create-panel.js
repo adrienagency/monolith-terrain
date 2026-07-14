@@ -87,15 +87,19 @@ export function buildCreatePanel(ctx) {
     fileInput.value = ''
     renderUserTemplates()
   })
-  tplRow.append(
-    button('Save this look', () => {
-      const name = prompt('Name this template:', 'My look')
-      if (name == null) return
-      ctx.saveCurrentTemplate(name)
-      renderUserTemplates()
-    }, { accent: true }),
-    button('Load template…', () => fileInput.click(), { ghost: true })
-  )
+  // inline name field instead of prompt() — prompt is blocked in some embedded
+  // contexts (a likely cause of "save doesn't work") and is off-brand
+  const nameInput = el('input', 'ce-tpl-name')
+  nameInput.type = 'text'
+  nameInput.placeholder = 'Name this look…'
+  nameInput.maxLength = 40
+  const doSave = () => {
+    ctx.saveCurrentTemplate(nameInput.value)
+    nameInput.value = ''
+    renderUserTemplates()
+  }
+  nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doSave() } })
+  tplRow.append(nameInput, button('Save', doSave, { accent: true }), button('Load…', () => fileInput.click(), { ghost: true }))
   sTpl.body.append(tplRow, fileInput)
 
   sTpl.body.append(
@@ -147,8 +151,23 @@ export function buildCreatePanel(ctx) {
   // colour, so the relief always fades into its own background.
   const sBg = addTo(section('Background'))
   sBg.body.append(
-    color({ label: 'Background', get: () => params.fogColor, set: (v) => { params.fogColor = v; ctx.scene.background.set(v); ctx.fogRef.color.set(v); refreshAll() } })
+    select({ label: 'Type', options: ctx.bgModes, get: () => params.bgMode, set: (v) => { params.bgMode = v; ctx.applyBackground(); renderBg() } }),
+    color({ label: 'Colour A', get: () => params.fogColor, set: (v) => { params.fogColor = v; ctx.fogRef.color.set(v); ctx.applyBackground() } })
   )
+  const bgWrap = el('div')
+  sBg.body.append(bgWrap)
+  function renderBg() {
+    bgWrap.replaceChildren()
+    if (params.bgMode === 'solid' || !params.bgMode) return
+    bgWrap.append(
+      color({ label: 'Colour B', get: () => params.bgColorB, set: (v) => { params.bgColorB = v; ctx.applyBackground() } }),
+      color({ label: 'Colour C', get: () => params.bgColorC, set: (v) => { params.bgColorC = v; ctx.applyBackground() } })
+    )
+    if (params.bgMode === 'linear') {
+      bgWrap.append(slider({ label: 'Angle', min: 0, max: 360, step: 1, get: () => params.bgAngle, set: (v) => { params.bgAngle = v; ctx.applyBackground() } }))
+    }
+  }
+  renderBg()
 
   // ------------------------------------------------------------ Map style
   const sMap = addTo(section('Map style'))
@@ -345,7 +364,7 @@ export function buildCreatePanel(ctx) {
     slider({ label: 'Grain', min: 0, max: 0.5, step: 0.01, get: () => params.grain, set: (v) => { params.grain = v; ctx.grain.blendMode.opacity.value = v } }),
     slider({ label: 'Fog start', min: 5, max: 60, step: 0.5, get: () => params.fogNear, set: (v) => { params.fogNear = v; ctx.fogRef.near = v } }),
     slider({ label: 'Fog end', min: 15, max: 90, step: 0.5, get: () => params.fogFar, set: (v) => { params.fogFar = v; ctx.fogRef.far = v } }),
-    color({ label: 'Fog colour', get: () => params.fogColor, set: (v) => { params.fogColor = v; ctx.fogRef.color.set(v); ctx.scene.background.set(v) } })
+    color({ label: 'Fog colour', get: () => params.fogColor, set: (v) => { params.fogColor = v; ctx.fogRef.color.set(v); ctx.applyBackground() } })
   )
 
   return panel

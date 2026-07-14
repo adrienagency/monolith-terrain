@@ -16,7 +16,7 @@ export function buildShadersPanel(ctx) {
     title: 'Shaders',
     icon: ICON,
     side: 'right',
-    width: 264,
+    width: 268, // match Create/Camera so the right dock aligns cleanly
     tip: 'Animated shader treatments painted onto the relief surface.',
   })
   const s = panel.addSection(section('Surface', { open: false }))

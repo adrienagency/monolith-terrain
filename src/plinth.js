@@ -115,33 +115,53 @@ export class Plinth {
     this.base.receiveShadow = true
     this.group.add(this.base)
 
-    // glass ground-pool: three's transmission can't tint the shadow, so for a
-    // glass socle we lay a soft radial disc of the glass colour on the table —
-    // the "projection de la couleur du verre sur le sol" the user asked for.
-    const g = document.createElement('canvas')
-    g.width = g.height = 256
-    const gc = g.getContext('2d')
-    const grad = gc.createRadialGradient(128, 128, 10, 128, 128, 128)
-    grad.addColorStop(0, 'rgba(255,255,255,1)')
-    grad.addColorStop(0.55, 'rgba(255,255,255,0.55)')
-    grad.addColorStop(1, 'rgba(255,255,255,0)')
-    gc.fillStyle = grad
-    gc.fillRect(0, 0, 256, 256)
-    this.glassPoolTex = new THREE.CanvasTexture(g)
+    // glass ground-pool: light through a coloured glass casts a coloured shadow
+    // on the table. three's transmission can't tint the shadow, so we paint the
+    // glass colour into a rounded-rect glow (matching the block footprint) and
+    // MULTIPLY it onto the ground — which reads as a coloured shadow that is
+    // strong on a light table and fades on a dark one, exactly like real glass.
+    this._poolCanvas = document.createElement('canvas')
+    this._poolCanvas.width = this._poolCanvas.height = 256
+    this._paintGlassPool('#ffffff', 0)
+    this.glassPoolTex = new THREE.CanvasTexture(this._poolCanvas)
     this.glassPoolMat = new THREE.MeshBasicMaterial({
       map: this.glassPoolTex,
       transparent: true,
-      opacity: 0,
       depthWrite: false,
-      blending: THREE.NormalBlending,
+      blending: THREE.MultiplyBlending, // coloured shadow: white table × tint = tint
     })
-    this.glassPool = new THREE.Mesh(new THREE.PlaneGeometry(TERRAIN_SIZE * 1.25, TERRAIN_SIZE * 1.25), this.glassPoolMat)
+    this.glassPool = new THREE.Mesh(new THREE.PlaneGeometry(TERRAIN_SIZE * 1.08, TERRAIN_SIZE * 1.08), this.glassPoolMat)
     this.glassPool.rotation.x = -Math.PI / 2
     this.glassPool.renderOrder = 1
     this.glassPool.visible = false
     this.group.add(this.glassPool)
 
     this.depth = params.plinthDepth ?? 7
+  }
+
+  // Paint the ground-pool: a rounded-rect glow whose centre is the glass colour
+  // (lerped from white by `strength`) fading to white at the edges. Multiplied
+  // onto the table it becomes a coloured shadow — strong on light, faint on dark.
+  _paintGlassPool(hex, strength) {
+    const s = Math.max(0, Math.min(1, strength))
+    const gc = this._poolCanvas.getContext('2d')
+    gc.clearRect(0, 0, 256, 256)
+    gc.fillStyle = '#ffffff' // white = multiply no-op → bare table
+    gc.fillRect(0, 0, 256, 256)
+    if (s <= 0.001) return
+    const c = new THREE.Color(hex)
+    const ch = (v) => Math.round(255 * (1 - s * (1 - v)))
+    gc.save()
+    gc.beginPath()
+    gc.roundRect(24, 24, 208, 208, 48) // rounded footprint, follows the block
+    gc.clip()
+    const grad = gc.createRadialGradient(128, 128, 20, 128, 128, 150)
+    grad.addColorStop(0, `rgb(${ch(c.r)},${ch(c.g)},${ch(c.b)})`)
+    grad.addColorStop(0.6, `rgb(${ch(0.5 + c.r * 0.5)},${ch(0.5 + c.g * 0.5)},${ch(0.5 + c.b * 0.5)})`)
+    grad.addColorStop(1, '#ffffff')
+    gc.fillStyle = grad
+    gc.fillRect(0, 0, 256, 256)
+    gc.restore()
   }
 
   // Apply a socle material. `finish` is 'solid' (PBR presets) or 'glass'
@@ -176,8 +196,9 @@ export class Plinth {
       m.specularIntensity = 1
       m.transparent = true
       m.envMapIntensity = 1.4
-      this.glassPoolMat.color.set(p.color)
-      this.glassPoolMat.opacity = 0.55 * projection
+      this._paintGlassPool(p.color, projection)
+      this.glassPoolTex.needsUpdate = true
+      this._poolStrength = projection
       this.glassPool.visible = this.group.visible && projection > 0.001
     } else {
       const p = PBR_BY_ID[id] || { color: fallbackColor, roughness: 0.95, metalness: 0 }
@@ -215,7 +236,7 @@ export class Plinth {
         m.anisotropyRotation = 0
       }
       this.glassPool.visible = false
-      this.glassPoolMat.opacity = 0
+      this._poolStrength = 0
     }
     m.needsUpdate = true
   }
@@ -322,6 +343,6 @@ export class Plinth {
 
   setVisible(v) {
     this.group.visible = v
-    this.glassPool.visible = v && this.isGlass && this.glassPoolMat.opacity > 0.001
+    this.glassPool.visible = v && this.isGlass && (this._poolStrength ?? 0) > 0.001
   }
 }
