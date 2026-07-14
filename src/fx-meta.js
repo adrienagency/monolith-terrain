@@ -46,12 +46,23 @@ export const FX_META = {
 
 export const FX_LIST = Object.entries(FX_META).map(([id, m]) => ({ id: Number(id), label: m.label }))
 
+// Appearance blend modes — the Figma / W3C compositing set. Index = the uFxBlend
+// value handled by fxBlend() in terrain.js. ("Pass through" is group-only, so a
+// single effect starts at Normal.)
+export const BLEND_MODES = [
+  'Normal', 'Darken', 'Multiply', 'Plus darker', 'Colour burn',
+  'Lighten', 'Screen', 'Plus lighter', 'Colour dodge',
+  'Overlay', 'Soft light', 'Hard light',
+  'Difference', 'Exclusion',
+  'Hue', 'Saturation', 'Colour', 'Luminosity',
+]
+
 // a fresh params store: { [id]: {colA,colB,colC,speed,scale,p1,p2,p3} } seeded
 // from each effect's defaults (missing keys fall back to neutral values)
 export function defaultFxParams() {
   const store = {}
   for (const [id, m] of Object.entries(FX_META)) {
-    store[id] = { colA: '#ffffff', colB: '#808080', colC: '#000000', speed: 0.15, scale: 1, p1: 0.5, p2: 0.5, p3: 0.5, ...m.d }
+    store[id] = { colA: '#ffffff', colB: '#808080', colC: '#000000', speed: 0.15, scale: 1, p1: 0.5, p2: 0.5, p3: 0.5, opacity: 1, blend: 0, ...m.d }
   }
   return store
 }

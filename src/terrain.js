@@ -85,6 +85,7 @@ export class Terrain {
       uFxP1: { value: 0.5 },
       uFxP2: { value: 0.5 },
       uFxP3: { value: 0.5 },
+      uFxBlend: { value: 0 }, // Appearance blend mode (Figma set), 0 = Normal
       // Liquid metal: animated molten flow (perturbs the normal so the chrome
       // reflections ripple). uLmFlowAmt 0 = still mirror.
       uLmOn: { value: 0 },
@@ -219,6 +220,7 @@ uniform vec3 uFxColC;
 uniform float uFxP1;     // per-effect scalar knobs (0..1)
 uniform float uFxP2;
 uniform float uFxP3;
+uniform int uFxBlend;    // Appearance blend mode (see fxBlend)
 uniform float uLmOn;
 uniform float uLmFlow;
 uniform float uLmFlowAmt;
@@ -295,6 +297,40 @@ vec3 surfaceFx(int id, vec2 p, float t) {
     vec3 th = fxThermal(h * (0.7 + uFxP1)); float band = smoothstep(0.45, 0.5, fract(h * (4.0 + uFxP2 * 24.0)));
     return mix(th, th * 0.55, band * uFxP2); }
   return vec3(0.5);
+}
+// --- Appearance blend modes (Figma / W3C compositing set) — b = backdrop map,
+// s = the shader colour. Separable ops are channel-wise; the last four are the
+// non-separable HSL modes. ---
+float blLum(vec3 c) { return dot(c, vec3(0.3, 0.59, 0.11)); }
+vec3 blClip(vec3 c) { float l = blLum(c); float mn = min(min(c.r, c.g), c.b); float mx = max(max(c.r, c.g), c.b);
+  if (mn < 0.0) c = l + (c - l) * l / (l - mn + 1e-5);
+  if (mx > 1.0) c = l + (c - l) * (1.0 - l) / (mx - l + 1e-5);
+  return clamp(c, 0.0, 1.0); }
+vec3 blSetLum(vec3 c, float l) { return blClip(c + (l - blLum(c))); }
+float blSat(vec3 c) { return max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b); }
+vec3 blSetSat(vec3 c, float s) { float mn = min(min(c.r, c.g), c.b), mx = max(max(c.r, c.g), c.b);
+  return mx > mn ? (c - mn) / (mx - mn) * s : vec3(0.0); }
+vec3 blHard(vec3 b, vec3 s) { return mix(b + s - b * s - (1.0 - 2.0 * s) * b, b * 2.0 * s, step(s, vec3(0.5))); }
+vec3 fxBlend(vec3 b, vec3 s, int m) {
+  if (m == 1) return min(b, s);                                  // Darken
+  if (m == 2) return b * s;                                      // Multiply
+  if (m == 3) return max(vec3(0.0), b + s - 1.0);                // Plus darker (linear burn)
+  if (m == 4) return 1.0 - min(vec3(1.0), (1.0 - b) / max(s, 1e-4)); // Colour burn
+  if (m == 5) return max(b, s);                                  // Lighten
+  if (m == 6) return b + s - b * s;                              // Screen
+  if (m == 7) return min(vec3(1.0), b + s);                      // Plus lighter (linear dodge)
+  if (m == 8) return min(vec3(1.0), b / max(1.0 - s, 1e-4));     // Colour dodge
+  if (m == 9) return blHard(s, b);                               // Overlay (hard-light swapped)
+  if (m == 10) { vec3 d = mix(((16.0 * b - 12.0) * b + 4.0) * b, sqrt(b), step(vec3(0.25), b));
+    return mix(b - (1.0 - 2.0 * s) * b * (1.0 - b), b + (2.0 * s - 1.0) * (d - b), step(vec3(0.5), s)); } // Soft light
+  if (m == 11) return blHard(b, s);                              // Hard light
+  if (m == 12) return abs(b - s);                                // Difference
+  if (m == 13) return b + s - 2.0 * b * s;                       // Exclusion
+  if (m == 14) return blSetLum(blSetSat(s, blSat(b)), blLum(b)); // Hue
+  if (m == 15) return blSetLum(blSetSat(b, blSat(s)), blLum(b)); // Saturation
+  if (m == 16) return blSetLum(s, blLum(b));                     // Colour
+  if (m == 17) return blSetLum(b, blLum(s));                     // Luminosity
+  return s;                                                      // Normal
 }`
         )
         .replace(
@@ -371,7 +407,8 @@ vec3 surfaceFx(int id, vec2 p, float t) {
   // it drapes on the relief and is lit like the surface (Liquid metal = the
   // material sibling of this). Off (0) leaves the paper map untouched.
   if (uSurfaceFx > 0) {
-    mapCol = mix(mapCol, surfaceFx(uSurfaceFx, vWorldPos.xz * 0.15, uFxTime), uFxOpacity);
+    vec3 fxc = surfaceFx(uSurfaceFx, vWorldPos.xz * 0.15, uFxTime);
+    mapCol = mix(mapCol, fxBlend(mapCol, fxc, uFxBlend), uFxOpacity); // Appearance: blend + opacity
   }
   diffuseColor.rgb = mix(diffuseColor.rgb, mapCol * clamp(luma * 2.4, 0.2, 1.4), uTint);
 
@@ -579,6 +616,8 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     u.uFxP1.value = pp.p1
     u.uFxP2.value = pp.p2
     u.uFxP3.value = pp.p3
+    u.uFxOpacity.value = pp.opacity ?? 1 // Appearance
+    u.uFxBlend.value = pp.blend | 0
   }
   tickSurfaceFx(dt, speed) {
     if (this.mapUniforms.uSurfaceFx.value > 0) this.mapUniforms.uFxTime.value += dt * speed
@@ -720,8 +759,6 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       let v = lerp(0.62, 0.95, Math.pow(hn, 0.85))
       v *= lerp(0.78, 1.0, Math.pow(Math.max(0, ny), 0.6))
       v += fbm(sTint, x * 1.7, z * 1.7, 2, 2.2, 0.5) * 0.05
-      const r = Math.sqrt(x * x + z * z)
-      if (r < BASIN_BLEND) v = lerp(0.52, v, smoothstep(BASIN_RADIUS, BASIN_BLEND, r))
       colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = v
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))

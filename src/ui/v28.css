@@ -1066,3 +1066,13 @@ body.ce-noui .ce-rec {
     transition: none;
   }
 }
+
+/* ---- Shaders panel: Appearance mini-header --------------------------- */
+.ce-fx-head {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ce-muted);
+  margin: 8px 0 1px;
+}

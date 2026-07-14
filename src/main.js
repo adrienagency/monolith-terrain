@@ -52,6 +52,7 @@ import { buildCreatePanel } from './ui/create-panel.js'
 import { buildCameraPanel } from './ui/camera-panel.js'
 import { buildExplorePanel } from './ui/explore-panel.js'
 import { buildScanPanel } from './ui/scan-panel.js'
+import { buildShadersPanel } from './ui/shaders-panel.js'
 import { initTips } from './ui/tips.js'
 import { createAdaptiveQuality } from './perf.js'
 import { detailForZoom } from './zoom-detail.js'
@@ -1489,12 +1490,16 @@ buildCredits()
 // and cartouche in frame (45° azimuth, museum-shelf elevation)
 // distance ×2 vs the first guess: at fov 30 the block's corner-on diagonal
 // (~79 units) needs ~107 units of camera range for plate + cartouche to fit
-const ISO = { pos: new THREE.Vector3(62, 52, 62), target: new THREE.Vector3(0, -1.5, 0) }
+// isometric shortcut: keep the museum-shelf angle but pull the camera as far
+// back as the current view allows, so the WHOLE zone fits (no zoom-level change)
+const ISO_DIR = new THREE.Vector3(62, 52, 62).normalize()
+const ISO_TARGET = new THREE.Vector3(0, -1.5, 0)
 isoBtn = buildIsoButton({
   flyIso: () => {
     if (modes.mode !== 'surface' || modes.busy) return
     tour.active = false
-    flyTo(ISO.pos.clone(), ISO.target.clone())
+    const dist = controls.maxDistance * 0.97 // the farthest the surface stop permits
+    flyTo(ISO_DIR.clone().multiplyScalar(dist), ISO_TARGET.clone())
   },
 })
 
@@ -1579,6 +1584,41 @@ const createPanel = buildCreatePanel({
   syncDark: () => topBar.syncDark(),
 })
 
+// Shaders panel — right dock, between Create and Camera (created here so it
+// docks between them). Holds the surface-shader treatments split out of Scan.
+const shadersPanel = buildShadersPanel({
+  getLiquidMetal: () => params.liquidMetal,
+  setLiquidMetal: (v) => {
+    params.liquidMetal = v
+    terrain.setLiquidMetal(v, params)
+  },
+  lmControls: [
+    { k: 'lmMetalness', label: 'Metalness', min: 0, max: 1 },
+    { k: 'lmRoughness', label: 'Polish', min: 0.02, max: 0.6 },
+    { k: 'lmReflection', label: 'Reflection', min: 0, max: 3 },
+    { k: 'lmSpeed', label: 'Flow speed', min: 0, max: 1.5 },
+  ],
+  getLmParam: (k) => params[k],
+  setLmParam: (k, v) => {
+    params[k] = v
+    if (params.liquidMetal) terrain.setLiquidMetal(true, params)
+  },
+  surfaceFxList: FX_LIST.map(({ id, label }) => ({ value: String(id), label })),
+  fxMeta: FX_META,
+  getSurfaceFx: () => params.surfaceFx,
+  setSurfaceFx: (id) => {
+    params.surfaceFx = id | 0
+    terrain.setSurfaceFx(params.surfaceFx)
+    if (params.surfaceFx > 0) terrain.applyFxParams(params.fx[params.surfaceFx])
+  },
+  getFxParam: (id, key) => params.fx[id]?.[key],
+  setFxParam: (id, key, val) => {
+    if (!params.fx[id]) return
+    params.fx[id][key] = val
+    if (params.surfaceFx === id) terrain.applyFxParams(params.fx[id]) // speed/opacity/blend re-pushed
+  },
+})
+
 const cameraPanel = buildCameraPanel({
   params,
   camera,
@@ -1609,43 +1649,14 @@ const explorePanel = buildExplorePanel({
 
 const scanPanel = buildScanPanel({
   runScan: (typeId) => scan.trigger(typeId, { x: controls.target.x, z: controls.target.z }, params.scanDuration),
-  getLiquidMetal: () => params.liquidMetal,
-  setLiquidMetal: (v) => {
-    params.liquidMetal = v
-    terrain.setLiquidMetal(v, params)
-  },
-  lmControls: [
-    { k: 'lmMetalness', label: 'Metalness', min: 0, max: 1 },
-    { k: 'lmRoughness', label: 'Polish', min: 0.02, max: 0.6 },
-    { k: 'lmReflection', label: 'Reflection', min: 0, max: 3 },
-    { k: 'lmSpeed', label: 'Flow speed', min: 0, max: 1.5 },
-  ],
-  getLmParam: (k) => params[k],
-  setLmParam: (k, v) => {
-    params[k] = v
-    if (params.liquidMetal) terrain.setLiquidMetal(true, params)
-  },
-  surfaceFxList: FX_LIST.map(({ id, label }) => ({ value: String(id), label })),
-  fxMeta: FX_META,
-  getSurfaceFx: () => params.surfaceFx,
-  setSurfaceFx: (id) => {
-    params.surfaceFx = id | 0
-    terrain.setSurfaceFx(params.surfaceFx)
-    if (params.surfaceFx > 0) terrain.applyFxParams(params.fx[params.surfaceFx])
-  },
-  getFxParam: (id, key) => params.fx[id]?.[key],
-  setFxParam: (id, key, val) => {
-    if (!params.fx[id]) return
-    params.fx[id][key] = val
-    if (params.surfaceFx === id) terrain.applyFxParams(params.fx[id]) // speed is JS-only; re-push the rest
-  },
 })
 
 // auto-fold: expanding a section in one panel folds its dock neighbour so a
 // column never grows past the screen
 const foldPairs = [
-  [createPanel, cameraPanel],
-  [cameraPanel, createPanel],
+  [createPanel, cameraPanel], [createPanel, shadersPanel],
+  [cameraPanel, createPanel], [cameraPanel, shadersPanel],
+  [shadersPanel, createPanel], [shadersPanel, cameraPanel],
   [explorePanel, scanPanel],
   [scanPanel, explorePanel],
 ]
