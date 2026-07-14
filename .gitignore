@@ -7,3 +7,6 @@ dist/
 
 # raw Natural Earth source for cities.json (derived output lives in public/data)
 places.geojson
+
+# z6 land-polygon coastline grid (generated at build time, not committed — present on disk for Netlify deploy)
+public/data/coast-z6/
