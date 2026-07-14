@@ -978,10 +978,10 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   }
   _makeGlassMaterial() {
     this.glassMaterial = new MeshTransmissionMaterial({
-      samples: 6,
+      samples: 8, // a few more taps so the strong default frost stays smooth
       transmission: 1,
       thickness: 8,
-      roughness: 0.15,
+      roughness: 0.5, // blurry frosted glass by default
       ior: 1.45,
       metalness: 0,
       envMap: this.material.envMap || null,
@@ -989,7 +989,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       attenuationColor: new THREE.Color('#bfe4ff'),
       attenuationDistance: 12,
       side: THREE.DoubleSide,
-      blurStrength: 1.2,
+      blurStrength: 2.0, // wide transmission cone → real blur, not just a sheen
     })
   }
   // live glass knobs (frost, tint, thickness, reflection)

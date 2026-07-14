@@ -237,7 +237,7 @@ const params = {
   // relief into a material — '' | 'glass' | 'wood' | 'carbon'
   terrainSurfaceMat: '',
   terrainSurfaceBump: 1.3, // bump for the opaque terrain materials (wood/carbon)
-  terrainGlassFrost: 0.16, // glass roughness (frost) when the relief is glass
+  terrainGlassFrost: 0.5, // glass roughness (frost) — blurry by default
   terrainGlassThickness: 8,
   terrainGlassTint: '#bfe4ff',
   terrainGlassClarity: 12, // attenuation distance — lower = deeper tint
