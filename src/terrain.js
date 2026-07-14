@@ -16,6 +16,15 @@ const OPAQUE_TERRAIN_MATS = {
   carbon: { tex: 'carbon', metalness: 0.45, roughness: 0.5, normalScale: 1.2, envMapIntensity: 1.3, repeat: 10 },
 }
 
+// Tiling density scales with the DEM zoom so a relief material never reads as
+// obvious repetition when the whole continent is in frame (coarse zoom) yet
+// keeps its detail up close. Central helper → every material (incl. future ones)
+// inherits it. z15 → full density, coarse → few large tiles.
+function zoomRepeat(z = 15) {
+  const f = (z - 3) / 12
+  return Math.max(0.22, Math.min(1, f))
+}
+
 // dispose the previous clone and return a fresh tiled clone of `src`
 function swapClone(prev, src, repeat) {
   if (prev) prev.dispose()
@@ -952,7 +961,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const preset = OPAQUE_TERRAIN_MATS[id]
     if (preset) {
       const scale = params.terrainMatScale ?? 1
-      const rep = (preset.repeat ?? 6) * scale
+      const rep = (preset.repeat ?? 6) * scale * zoomRepeat(params.demZoom)
       if (preset.dir) {
         // real CC0 PBR set (Poly Haven), lazy-loaded + cached; mutate repeat live
         const set = this._loadTextureSet(preset.dir)
@@ -977,6 +986,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       m.envMapIntensity = preset.envMapIntensity ?? params.envMapIntensity ?? 1
       m.color.set('#ffffff') // let the albedo map show its true colour
       this._matPreset = preset
+      this._matZoom = params.demZoom
       this.mapUniforms.uTint.value = 0 // drop the hypsometric paint → pure material
     } else {
       // none — restore the topographic look
@@ -1010,11 +1020,18 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     return set
   }
   // live tiling-scale knob for the opaque relief materials
-  setTerrainMatScale(scale) {
+  setTerrainMatScale(scale, demZoom) {
     const p = this._matPreset
     if (!p || this.materialMode === 'glass') return
-    const rep = (p.repeat ?? 6) * scale
+    const rep = (p.repeat ?? 6) * scale * zoomRepeat(demZoom ?? this._matZoom ?? 15)
+    this._matScale = scale
     for (const t of [this.material.map, this.material.normalMap, this.material.roughnessMap]) t?.repeat.set(rep, rep)
+  }
+  // re-tile the active material when the DEM zoom changes (regen) so the pattern
+  // density tracks the view scale
+  refreshMatTiling(params) {
+    this._matZoom = params.demZoom
+    if (this._matPreset && this.materialMode !== 'glass') this.setTerrainMatScale(params.terrainMatScale ?? 1, params.demZoom)
   }
   setTerrainMatRoughness(r) {
     if (this._matPreset && this.materialMode !== 'glass') this.material.roughness = r

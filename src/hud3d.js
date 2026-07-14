@@ -91,13 +91,8 @@ function drawDial(ctx, size, ink, accent, rng) {
   ctx.fillStyle = ink
   ctx.lineWidth = 2
 
-  // concentric engraved circles
-  for (const f of [0.2, 0.34, 0.55, 0.78, 0.985]) {
-    ctx.globalAlpha = f > 0.9 ? 0.85 : 0.45
-    ctx.beginPath()
-    ctx.arc(0, 0, R * f, 0, Math.PI * 2)
-    ctx.stroke()
-  }
+  // (concentric engraved circles removed — the rings read as clutter over the
+  // real relief; ticks/crosshair/glyphs stay for the instrument feel)
 
   // degree ticks + labels every 30°
   ctx.globalAlpha = 0.8
@@ -158,18 +153,10 @@ function drawDial(ctx, size, ink, accent, rng) {
     }
   }
 
-  // accent arcs + chips
+  // accent chips (concentric accent arcs removed with the rings)
   ctx.strokeStyle = accent
   ctx.fillStyle = accent
   ctx.lineWidth = 5
-  for (let i = 0; i < 4; i++) {
-    const start = rng() * Math.PI * 2
-    const len = (14 + rng() * 55) * DEG
-    ctx.globalAlpha = 0.85
-    ctx.beginPath()
-    ctx.arc(0, 0, R * [0.34, 0.55, 0.78, 0.985][i], start, start + len)
-    ctx.stroke()
-  }
   for (let i = 0; i < 7; i++) {
     const a = rng() * Math.PI * 2
     const r = R * (0.25 + rng() * 0.68)
@@ -235,10 +222,8 @@ export function createHud3D(seed, pois, { ink, accent }) {
   // dial + rings + sweep live in their own subgroup so real-world mode can hide them
   const platform = new THREE.Group()
   const dial = flatPlane(canvasTex(2048, (ctx, s) => drawDial(ctx, s, ink, accent, rng)), 12.6, baseY, 0.95)
-  const ringA = flatPlane(canvasTex(1024, (ctx, s) => drawDashRing(ctx, s, ink, 0.86, 24)), 10.6, baseY + 0.02, 0.85)
-  const ringB = flatPlane(canvasTex(1024, (ctx, s) => drawDashRing(ctx, s, accent, 0.62, 48)), 8.0, baseY + 0.03, 0.7)
   const sweep = flatPlane(canvasTex(1024, (ctx, s) => drawSweep(ctx, s, accent)), 12.2, baseY + 0.01, 0.8)
-  platform.add(dial, ringA, ringB, sweep)
+  platform.add(dial, sweep)
   group.add(platform)
 
   // POI stems: thin vertical hairline + accent cap marker
@@ -256,21 +241,10 @@ export function createHud3D(seed, pois, { ink, accent }) {
     group.add(stem, cap, base)
   })
 
-  // faint survey circles sweeping out over the terrain
+  // (the faint concentric survey circles that used to sweep over the terrain
+  // were removed — they read as clutter on the real relief. The group stays for
+  // API compatibility with the surveyLines toggle, just empty.)
   const lines = new THREE.Group()
-  const lineMat = new THREE.MeshBasicMaterial({
-    color: new THREE.Color(ink),
-    transparent: true,
-    opacity: 0.22,
-    depthWrite: false,
-  })
-  for (const radius of [7.6, 9.6, 12.2, 15.2, 18.6]) {
-    const torus = new THREE.TorusGeometry(radius, 0.014, 4, 320)
-    torus.rotateX(Math.PI / 2)
-    const ring = new THREE.Mesh(torus, lineMat)
-    ring.position.y = 0.42
-    lines.add(ring)
-  }
   group.add(lines)
 
   // expanding scan pulses (spawned on demand)
@@ -288,8 +262,6 @@ export function createHud3D(seed, pois, { ink, accent }) {
       pulses.push(p)
     },
     update(dt, t, { ringSpeed, sweepSpeed }) {
-      ringA.rotation.z += 0.11 * ringSpeed * dt
-      ringB.rotation.z -= 0.07 * ringSpeed * dt
       sweep.rotation.z -= sweepSpeed * dt
       dial.material.opacity = 0.88 + Math.sin(t * 1.8) * 0.07
       for (let i = pulses.length - 1; i >= 0; i--) {

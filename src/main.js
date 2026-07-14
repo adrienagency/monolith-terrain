@@ -795,6 +795,7 @@ function regenerateHud() {
   pois = findPois(terrain.sample, params.seed, poiFeet)
   hud3 = createHud3D(params.seed, pois, { ink: effInk(), accent: params.hudAccent })
   hud3.lines.visible = params.surveyLines
+  hud3.platform.visible = params.source !== 'real' // FUI dial only on generated terrain
   // same orbital guard as labels — GUI color changes rebuild the HUD and the
   // fresh group must not appear over the globe
   hud3.group.visible = !modes || modes.mode === 'surface'
@@ -991,6 +992,7 @@ async function fetchAndBuildDem() {
     terrain.setCoastMask(null)
   }
   traffic.setZone(dem) // SpaceX pad watcher (Starbase / LC-39A in view?)
+  terrain.refreshMatTiling(params) // relief material tiling tracks the new zoom
   if (params.regionMode) applyRegionMode() // re-cut to the new zone's boundary
 }
 
@@ -1023,6 +1025,7 @@ function regenerateTerrain() {
       terrain.rebuild(params)
       terrain.rebuildRoughness(params)
       plinth.rebuild(terrain, params) // walls hug the new relief border
+      terrain.refreshMatTiling(params) // re-tile the relief material to the new zoom scale
       if (params.regionMode && regionMaskCanvas) rebuildRegionSkirt() // re-weld the cut curtain to the new heights
       realWater?.rebuild({ terrain, params }) // water simulation follows the new relief
       cityLabels.rebuild({ dem: terrain.dem, terrain, params }) // city names re-drape on the new relief
@@ -1837,7 +1840,7 @@ const shadersPanel = buildShadersPanel({
   getMatScale: () => params.terrainMatScale,
   setMatScale: (v) => {
     params.terrainMatScale = v
-    terrain.setTerrainMatScale(v)
+    terrain.setTerrainMatScale(v, params.demZoom)
   },
   getMatRoughness: () => params.terrainMatRoughness,
   setMatRoughness: (v) => {

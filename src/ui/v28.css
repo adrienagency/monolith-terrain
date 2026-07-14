@@ -379,47 +379,49 @@ body.dark {
 /* known-race badge + info card */
 .ce-race-badge {
   position: fixed;
-  top: 58px;
+  bottom: 82px; /* clear of the bottom search bar */
   left: 50%;
   transform: translateX(-50%);
-  z-index: 70;
+  z-index: 96;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  height: 32px;
-  padding: 0 14px;
+  gap: 8px;
+  height: 36px;
+  padding: 0 18px;
   border: 0;
   border-radius: 999px;
   background: var(--ce-accent);
   color: #fff;
   font-family: var(--ce-font);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 6px 22px rgba(20, 24, 35, 0.22);
+  box-shadow: 0 8px 26px rgba(20, 24, 35, 0.28);
   animation: ce-race-pop 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .ce-race-badge:hover { filter: brightness(1.08); }
-.ce-race-flag { font-size: 14px; }
-@keyframes ce-race-pop { from { opacity: 0; transform: translate(-50%, -6px); } }
+.ce-race-flag { font-size: 15px; }
+@keyframes ce-race-pop { from { opacity: 0; transform: translate(-50%, 8px); } }
 .ce-race-card {
   position: fixed;
-  top: 58px;
+  bottom: 82px; /* anchored above the search bar, grows upward */
   left: 50%;
   transform: translateX(-50%);
-  z-index: 71;
-  width: min(360px, calc(100vw - 28px));
-  max-height: 70vh;
+  z-index: 97;
+  width: min(380px, calc(100vw - 28px));
+  max-height: min(60vh, calc(100vh - 180px));
   overflow: hidden auto;
   padding: 0;
   display: flex;
   flex-direction: column;
+  background: var(--ce-glass-strong); /* opaque enough that nothing bleeds through */
+  animation: ce-race-pop 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .ce-race-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 11px 12px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--ce-hairline);
   position: sticky;
   top: 0;
