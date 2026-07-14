@@ -1,7 +1,7 @@
 // SCAN panel — the terrain scanner as its own first-class panel in the left
 // dock, a sibling of Explore (not a child of it).
 
-import { el, button, section, toggle } from './kit.js'
+import { el, button, section, toggle, select } from './kit.js'
 import { Panel } from './shell.js'
 import { SCAN_TYPES } from '../scan.js'
 
@@ -56,6 +56,18 @@ export function buildScanPanel(ctx) {
   const note = el('div', 'ce-label', 'Chrome the relief — reflections take over from the paper map.')
   note.style.marginTop = '4px'
   sFancy.body.append(note)
+
+  sFancy.body.append(
+    select({
+      label: 'Backdrop',
+      options: [{ value: '', label: 'None' }, ...ctx.backdrops],
+      get: () => ctx.getBackdrop() ?? '',
+      set: (v) => ctx.setBackdrop(v || null),
+    })
+  )
+  const backdropNote = el('div', 'ce-label', 'An animated paper-shader field behind the relief.')
+  backdropNote.style.marginTop = '4px'
+  sFancy.body.append(backdropNote)
 
   return panel
 }

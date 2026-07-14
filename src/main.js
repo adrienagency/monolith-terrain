@@ -38,6 +38,7 @@ import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
 import { CityLabels } from './cities.js'
+import { FancyBackdrop, SHADERS } from './fancy-backdrop.js'
 import { StudioLighting, sunFromHour, LIGHT_PRESETS } from './lighting.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
@@ -107,6 +108,7 @@ const params = {
   bumpScale: 0.9,
   envMapIntensity: 0.2,
   liquidMetal: false, // "Fancy" look — chrome the relief (Scan panel)
+  backdrop: null, // "Fancy" look — paper-shader id behind the relief, or null (Scan panel)
 
   // camera & depth of field
   fov: 30,
@@ -290,6 +292,16 @@ scene.background = new THREE.Color(params.fogColor)
 // linear fog: near/far give direct control over where the fade starts and
 // where the terrain is fully swallowed, hiding the mesh edge
 scene.fog = new THREE.Fog(new THREE.Color(params.fogColor), params.fogNear, params.fogFar)
+
+// Fancy > Backdrop: swaps scene.background between the plain fog-colour
+// Color (default) and an animated paper-shader CanvasTexture. Elsewhere the
+// code mutates scene.background via `.set(hex)` assuming it's always a
+// Color — that throws once it's a Texture, so every such call site is
+// guarded with `?.isColor` (grep `scene.background` to find them all).
+function setSceneBackground(tex) {
+  scene.background = tex ?? new THREE.Color(params.fogColor)
+}
+const fancyBackdrop = new FancyBackdrop({ setBackground: setSceneBackground })
 
 const camera = new THREE.PerspectiveCamera(params.fov, window.innerWidth / window.innerHeight, 0.5, 220)
 camera.position.set(0, 18, 19)
@@ -1176,7 +1188,7 @@ function setDarkMode(v) {
   const sheet = v ? DARK.sheet : '#ffffff'
   params.fogColor = sheet
   fogRef.color.set(sheet)
-  scene.background.set(sheet)
+  if (scene.background?.isColor) scene.background.set(sheet) // no-op while a Fancy backdrop texture is active
   modes.whiteEl.style.background = sheet // transition flash follows the sheet
   document.documentElement.style.setProperty('--hud-ink', effInk())
   document.documentElement.style.setProperty(
@@ -1238,7 +1250,7 @@ function applyLook(k) {
   if (k.fogColor != null) {
     params.fogColor = k.fogColor
     fogRef.color.set(k.fogColor)
-    scene.background.set(k.fogColor)
+    if (scene.background?.isColor) scene.background.set(k.fogColor) // no-op while a Fancy backdrop texture is active
     modes.whiteEl.style.background = k.fogColor
   }
   if (k.exposure != null) exposureFx.uniforms.get('exposure').value = params.exposure = k.exposure
@@ -1607,6 +1619,12 @@ const scanPanel = buildScanPanel({
     params.liquidMetal = v
     terrain.setLiquidMetal(v, params)
   },
+  backdrops: SHADERS.map(({ id, label }) => ({ value: id, label })),
+  getBackdrop: () => params.backdrop,
+  setBackdrop: (id) => {
+    params.backdrop = id
+    fancyBackdrop.set(id)
+  },
 })
 
 // auto-fold: expanding a section in one panel folds its dock neighbour so a
@@ -1791,6 +1809,7 @@ function tick() {
 
   realWater?.update(dt, sun) // water simulation: waves, caustics, sun glint
   aq.update(dt) // adaptive quality: sample FPS, step tiers when sustained
+  fancyBackdrop.update() // re-upload the active paper-shader canvas, if any
   composer.render(dt)
   if (recorder?.recording) recorder.captureFrame() // null until first export
 }
