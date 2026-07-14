@@ -22,24 +22,24 @@ test('pickDiveTier lands each altitude on the matching scale', () => {
   assert.equal(pickDiveTier(300000).zoom, 7)
   assert.equal(pickDiveTier(1000000).zoom, 6)
   assert.equal(pickDiveTier(3000000).zoom, 5) // ~z5 block, ~3 760 km across
+  assert.equal(pickDiveTier(5000000).zoom, 4) // ~z4 continental block, ~7 500 km
+  assert.equal(pickDiveTier(9000000), null) // above z4 -> orbit gate (globe)
   assert.equal(pickDiveTier(3999999).zoom, 5)
-  assert.equal(pickDiveTier(4000000), null) // globe territory above 4 000 km
-  assert.equal(pickDiveTier(16000000), null)
+  assert.equal(pickDiveTier(4000000).zoom, 4) // z5 boundary rolls into the z4 continental block
+  assert.equal(pickDiveTier(16000000), null) // globe territory above the z4 block
 })
 
-test('the surface staircase walks z5 ⇄ z12 two steps at a time', () => {
-  // widening (zoom-out against the stop): 12 → 10 → 8 → 6 → 5, floored at z5
+test('the surface staircase widens through z5 to the z4 continental block', () => {
   assert.equal(stepZoom(12, -1), 10)
   assert.equal(stepZoom(10, -1), 8)
   assert.equal(stepZoom(8, -1), 6)
   assert.equal(stepZoom(6, -1), 5)
-  assert.equal(stepZoom(5, -1), 5) // continental floor
-  // refining (zoom-in against the stop): 5 → 7 → … → 12, capped at fine
+  assert.equal(stepZoom(5, -1), 4) // z5 -> z4 (one final step to the continental block)
+  assert.equal(stepZoom(4, -1), 4) // continental floor
+  // refining (zoom-in against the stop) unchanged: 2 steps at a time
   assert.equal(stepZoom(5, 1), 7)
   assert.equal(stepZoom(8, 1), 10)
   assert.equal(stepZoom(10, 1), 12)
-  assert.equal(stepZoom(11, 1), 12)
-  assert.equal(stepZoom(12, 1, 14), 14) // user picked a finer detail zoom
 })
 
 test('the staircase climbs to a z15 fine cap (deeper zoom)', () => {

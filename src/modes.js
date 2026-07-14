@@ -12,11 +12,12 @@ import * as THREE from 'three'
 import { R_GLOBE, ORBITAL_M_PER_UNIT, sphereToLatLon, latLonToSphere } from './geo.js'
 
 // ordered fine → coarse; zoom null = the user's fine zoom (≥ 12).
-// Eight tiers so every stop on the way down lands on a matching real-terrain
-// block instead of the globe. The globe is glitchy above ~4 000 km, so we now
-// dive onto continental-scale blocks from that altitude down (a z5 patch spans
-// ~3 760 km): z5 @ 4 000 km, z6 @ 1 600 km, z7 @ 600 km, then the regional/local
-// tiers. Corsica-sized views (~150 km) still get z8.
+// Nine tiers so every stop on the way down lands on a matching real-terrain
+// block instead of the globe. The globe is glitchy above ~8 000 km, so we now
+// dive onto continental-scale blocks from that altitude down (a z4 patch spans
+// ~7 500 km, a z5 patch ~3 760 km): z4 @ 8 000 km, z5 @ 4 000 km, z6 @ 1 600 km,
+// z7 @ 600 km, then the regional/local tiers. Corsica-sized views (~150 km)
+// still get z8.
 export const DIVE_TIERS = [
   { altM: 8000, zoom: null },
   { altM: 25000, zoom: 11 },
@@ -26,6 +27,7 @@ export const DIVE_TIERS = [
   { altM: 600000, zoom: 7 },
   { altM: 1600000, zoom: 6 },
   { altM: 4000000, zoom: 5 },
+  { altM: 8000000, zoom: 4 }, // continental block (~7 500 km); above this the globe opens
 ]
 
 // tier a settled zoom-in engages at `altM` meters — null above every tier
@@ -34,10 +36,15 @@ export function pickDiveTier(altM) {
 }
 
 // the surface staircase arithmetic: two zoom steps at a time, fine-capped
-// going down, z5-floored going up (past the z5 continental block the orbit gate
-// takes over, ~4 000 km up)
+// going down; widening past the z5 continental block takes one final step to
+// the z4 continental block (~7 500 km), then floors there — past that the
+// orbit gate takes over
 export function stepZoom(zoom, dir, fine = 12) {
-  return dir > 0 ? Math.min(zoom + 2, Math.max(fine, 12)) : Math.max(zoom - 2, 5)
+  if (dir > 0) return Math.min(zoom + 2, Math.max(fine, 12))
+  // widen 2 steps at a time down to z5, then a single step to the z4
+  // continental block before the orbit gate; floored at z4
+  if (zoom <= 5) return Math.max(zoom - 1, 4)
+  return Math.max(zoom - 2, 5)
 }
 const DIVE_ALT_M = DIVE_TIERS[0].altM
 const MAX_ALT_M = 16000000 // ~2.5 earth radii — whole planet in frame
@@ -161,9 +168,9 @@ export class Modes {
     // continuity: pop out at the altitude the surface view actually had, so a
     // z8 patch hands over at ~500 km and a z12 patch at ~30 km
     if (entryAltM == null) {
-      // pop out just above the block's own altitude; a coarse z5 continental
-      // block (~3 500 km up) hands over above the 4 000 km globe gate
-      entryAltM = THREE.MathUtils.clamp(this.hooks.surfaceCamAltMeters() * 1.15, 15000, 6000000)
+      // pop out just above the block's own altitude; a coarse z4 continental
+      // block (~7 500 km up) hands over above the 8 000 km globe gate
+      entryAltM = THREE.MathUtils.clamp(this.hooks.surfaceCamAltMeters() * 1.15, 15000, 9000000)
     }
     // an explicit altitude must respect the orbit ceiling too, or the camera
     // would sit above controls.maxDistance and snap every frame

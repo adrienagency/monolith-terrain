@@ -811,7 +811,7 @@ const BASE_EXAG = 2.2
 // tall — the relief read like spikes (user feedback v40). Halved+ so a country
 // sits as a gentle raised-relief plate; the ocean mask now keeps the low ground
 // clean so it can stay subtle without phantom lakes appearing.
-const ZOOM_EXAG_DEFAULTS = { 5: 5, 6: 4, 7: 3.2 }
+const ZOOM_EXAG_DEFAULTS = { 4: 2.5, 5: 5, 6: 4, 7: 3.2 }
 const ZOOM_EXAG_KEY = 'monolith.zoomExag'
 let zoomExagStore = (() => {
   try {
@@ -1011,8 +1011,8 @@ modes = new Modes({
       return { lat, lon, zoom: stepZoom(params.demZoom, 1, userFineZoom) }
     },
     getCoarsenTarget() {
-      // widen down to the z5 continental block; past that the orbit gate opens
-      if (params.source !== 'real' || !dem || params.demZoom <= 5) return null
+      // widen down to the z4 continental block; past that the orbit gate opens
+      if (params.source !== 'real' || !dem || params.demZoom <= 4) return null
       const { lat, lon } = worldToLatLon(dem, controls.target.x, controls.target.z)
       return { lat, lon, zoom: stepZoom(params.demZoom, -1) }
     },
