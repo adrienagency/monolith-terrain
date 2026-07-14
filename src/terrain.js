@@ -67,6 +67,8 @@ export class Terrain {
       // sub-sea DEM pockets render as land valleys, not phantom lakes/inlets.
       uSeaMask: { value: (this._seaPlaceholder = whiteTexture()) },
       uSeaMaskOn: { value: 0 },
+      uCoastMask: { value: (this._coastPlaceholder = whiteTexture()) },
+      uCoastMaskOn: { value: 0 },
       // clip the map to the slab's rounded-rectangle footprint (world XZ) so the
       // block's vertical corners read soft and nothing overhangs the plinth walls
       uSlabHalf: { value: TERRAIN_SIZE / 2 },
@@ -150,6 +152,8 @@ uniform float uSeaY;
 uniform float uSeaRange;
 uniform sampler2D uSeaMask;
 uniform float uSeaMaskOn;
+uniform sampler2D uCoastMask;
+uniform float uCoastMaskOn;
 uniform vec3 uOceanShallow;
 uniform vec3 uOceanMid;
 uniform vec3 uOceanDeep;
@@ -220,7 +224,18 @@ float scanHash(vec2 p) {
     vec2 smUv = vWorldPos.xz / (uSlabHalf * 2.0) + 0.5;
     seaMask = texture2D(uSeaMask, smUv).r;
   }
-  bool underwater = vWorldPos.y < uSeaY && seaMask > 0.5;
+  // coarse-zoom coast (z4–z8): the real Natural-Earth land/sea mask is the
+  // source of truth — a cell is sea because the vector coast says so, not
+  // because its (noisy, coarse) DEM height dipped below 0. Fixes flooded flat
+  // coasts AND phantom inland lakes. Off (z9+ / fetch failed) → old behaviour.
+  float landness = 1.0;
+  if (uCoastMaskOn > 0.5) {
+    vec2 cmUv = vWorldPos.xz / (uSlabHalf * 2.0) + 0.5;
+    landness = texture2D(uCoastMask, cmUv).r;
+  }
+  bool underwater = uCoastMaskOn > 0.5
+    ? (landness < 0.5)
+    : (vWorldPos.y < uSeaY && seaMask > 0.5);
   float hNorm = clamp((vWorldPos.y - uHeightRange.x) / max(uHeightRange.y - uHeightRange.x, 1e-4), 0.0, 1.0);
   vec3 mapCol;
   if (underwater) {
@@ -244,7 +259,13 @@ float scanHash(vec2 p) {
 
   // --- coastline: a fine, discreet line at sea level (elevation 0), drawn in
   // the template ink. Kept thin so the shore reads without shouting.
-  if (uSeaY > -9000.0) {
+  // coastline: at coarse zoom follow the mask's 0.5 contour (the real shore);
+  // otherwise the sea-level (elevation 0) isoline as before.
+  if (uCoastMaskOn > 0.5) {
+    float caa = max(fwidth(landness), 1e-4);
+    float coast = 1.0 - smoothstep(0.0, caa * 1.5, abs(landness - 0.5));
+    diffuseColor.rgb = mix(diffuseColor.rgb, uContourColor, coast * 0.55);
+  } else if (uSeaY > -9000.0) {
     float coastAA = max(fwidth(vWorldPos.y), 1e-4);
     float coast = 1.0 - smoothstep(0.0, coastAA * 1.3, abs(vWorldPos.y - uSeaY));
     diffuseColor.rgb = mix(diffuseColor.rgb, uContourColor, coast * 0.55);
@@ -394,6 +415,22 @@ if (uScanT >= 0.0 && (uScanType == 0 || uScanType == 3)) {
       this.mapUniforms.uRegionMask.value = this._regionPlaceholder
       if (prev && prev !== this._regionPlaceholder) prev.dispose()
       this.mapUniforms.uRegionOn.value = 0
+    }
+  }
+
+  setCoastMask(texture) {
+    const prev = this.mapUniforms.uCoastMask.value
+    if (texture) {
+      if (prev !== texture) {
+        this.mapUniforms.uCoastMask.value = texture
+        if (prev && prev !== this._coastPlaceholder) prev.dispose()
+      }
+      this.mapUniforms.uCoastMaskOn.value = 1
+    } else {
+      this._coastPlaceholder ??= whiteTexture()
+      this.mapUniforms.uCoastMask.value = this._coastPlaceholder
+      if (prev && prev !== this._coastPlaceholder) prev.dispose()
+      this.mapUniforms.uCoastMaskOn.value = 0
     }
   }
 
