@@ -376,6 +376,19 @@ body.dark {
   font-size: 11px;
   color: var(--ce-ink);
 }
+.ce-note {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--ce-muted);
+  margin: 4px 2px 2px;
+}
+.ce-warn {
+  color: #d98a2b;
+  border-left: 2px solid #d98a2b;
+  padding: 4px 0 4px 7px;
+  background: rgba(217, 138, 43, 0.07);
+  border-radius: 3px;
+}
 
 /* slider */
 .ce-slider {

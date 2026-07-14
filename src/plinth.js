@@ -5,6 +5,7 @@
 
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
+import { PBR_BY_ID, GLASS_BY_ID } from './material-presets.js'
 
 const HALF = TERRAIN_SIZE / 2
 const INTERIOR_STEPS = 12 // coarse grid to find the global min (basin guard)
@@ -88,12 +89,16 @@ export class Plinth {
     // slab walls + bottom: a matte stone edge, lit by the scene sun so the cut
     // face reads as thickness. DoubleSide so no viewing angle ever sees through
     // the slab into a culled back face (the "underside" bug).
-    this.wallMat = new THREE.MeshStandardMaterial({
+    // MeshPhysicalMaterial so the same slab can be a matte stone, a polished
+    // metal, OR real transmissive glass (transmission/ior/thickness) depending
+    // on the preset the user gives it in the Block panel.
+    this.wallMat = new THREE.MeshPhysicalMaterial({
       color: new THREE.Color(params.plinthColor ?? '#d8d4cc'),
       roughness: 0.95,
       metalness: 0,
       side: THREE.DoubleSide,
     })
+    this.isGlass = false
     this.walls = new THREE.Mesh(new THREE.BufferGeometry(), this.wallMat)
     this.walls.castShadow = true
     this.walls.receiveShadow = true
@@ -108,7 +113,76 @@ export class Plinth {
     this.base.receiveShadow = true
     this.group.add(this.base)
 
+    // glass ground-pool: three's transmission can't tint the shadow, so for a
+    // glass socle we lay a soft radial disc of the glass colour on the table —
+    // the "projection de la couleur du verre sur le sol" the user asked for.
+    const g = document.createElement('canvas')
+    g.width = g.height = 256
+    const gc = g.getContext('2d')
+    const grad = gc.createRadialGradient(128, 128, 10, 128, 128, 128)
+    grad.addColorStop(0, 'rgba(255,255,255,1)')
+    grad.addColorStop(0.55, 'rgba(255,255,255,0.55)')
+    grad.addColorStop(1, 'rgba(255,255,255,0)')
+    gc.fillStyle = grad
+    gc.fillRect(0, 0, 256, 256)
+    this.glassPoolTex = new THREE.CanvasTexture(g)
+    this.glassPoolMat = new THREE.MeshBasicMaterial({
+      map: this.glassPoolTex,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.NormalBlending,
+    })
+    this.glassPool = new THREE.Mesh(new THREE.PlaneGeometry(TERRAIN_SIZE * 1.25, TERRAIN_SIZE * 1.25), this.glassPoolMat)
+    this.glassPool.rotation.x = -Math.PI / 2
+    this.glassPool.renderOrder = 1
+    this.glassPool.visible = false
+    this.group.add(this.glassPool)
+
     this.depth = params.plinthDepth ?? 7
+  }
+
+  // Apply a socle material. `finish` is 'solid' (PBR presets) or 'glass'
+  // (transmissive presets). `diffusion`/`projection` are the live glass sliders
+  // (frost roughness, ground-pool strength); undefined = use the preset value.
+  setMaterial({ finish = 'solid', id, diffusion, projection = 0.5, fallbackColor = '#d8d4cc' } = {}) {
+    const m = this.wallMat
+    if (finish === 'glass') {
+      const p = GLASS_BY_ID[id] || GLASS_BY_ID.clear
+      this.isGlass = true
+      m.color.set('#ffffff') // clear base; the tint rides on attenuation
+      m.metalness = 0
+      m.roughness = diffusion == null ? p.diffusion : diffusion
+      m.transmission = p.transmission
+      m.ior = p.ior
+      m.thickness = p.thickness
+      m.attenuationColor.set(p.color)
+      m.attenuationDistance = p.attenuation
+      m.clearcoat = 0
+      m.specularIntensity = 1
+      m.transparent = true
+      m.envMapIntensity = 1.4
+      this.glassPoolMat.color.set(p.color)
+      this.glassPoolMat.opacity = 0.55 * projection
+      this.glassPool.visible = this.group.visible && projection > 0.001
+    } else {
+      const p = PBR_BY_ID[id] || { color: fallbackColor, roughness: 0.95, metalness: 0 }
+      this.isGlass = false
+      m.color.set(p.color)
+      m.metalness = p.metalness ?? 0
+      m.roughness = p.roughness ?? 0.9
+      m.transmission = 0
+      m.thickness = 0
+      m.attenuationDistance = Infinity
+      m.clearcoat = p.clearcoat ?? 0
+      m.clearcoatRoughness = p.clearcoatRoughness ?? 0
+      m.ior = p.ior ?? 1.5
+      m.transparent = false
+      m.envMapIntensity = 1
+      this.glassPool.visible = false
+      this.glassPoolMat.opacity = 0
+    }
+    m.needsUpdate = true
   }
 
   // rebuild the walls to hug the current relief border; call after every
@@ -127,6 +201,7 @@ export class Plinth {
     const { ring, baseY } = computeSlab(sample, this.depth, params.resolution ?? 256, cornerR, cornerExp)
     this.baseY = baseY
     this.base.position.y = baseY
+    this.glassPool.position.y = baseY + 0.05 // glass colour pools just over the table
 
     const n = ring.length
     const positions = []
@@ -172,7 +247,9 @@ export class Plinth {
   }
 
   setColors(params) {
-    this.wallMat.color.set(params.plinthColor ?? '#d8d4cc')
+    // glass keeps its clear white base (tint rides on attenuation) — only a
+    // solid socle takes the edge colour.
+    if (!this.isGlass) this.wallMat.color.set(params.plinthColor ?? '#d8d4cc')
     // the table is a ShadowMaterial (no color — it only darkens the background
     // where the shadow lands); the dark sheet reads a touch stronger
     this.baseMat.opacity = params.darkMode ? 0.34 : 0.24
@@ -180,5 +257,6 @@ export class Plinth {
 
   setVisible(v) {
     this.group.visible = v
+    this.glassPool.visible = v && this.isGlass && this.glassPoolMat.opacity > 0.001
   }
 }

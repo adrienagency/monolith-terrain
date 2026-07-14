@@ -80,13 +80,13 @@ const DEM_PRESETS = {
 }
 
 const params = {
-  // terrain source — boots over Auvergne-Rhone-Alpes with the three big
-  // alpine lakes in frame: Annecy, Bourget (Aix-les-Bains) and Leman (Geneva)
+  // terrain source — boots directly over Annecy and its surroundings (the lake,
+  // the Bauges and the Aravis in frame)
   source: 'real',
   demLocation: 'Custom',
-  demLat: 46.0,
-  demLon: 6.15,
-  demZoom: 9,
+  demLat: 45.9,
+  demLon: 6.13,
+  demZoom: 10,
   demExaggeration: 2.2, // vertical relief pushed for a more dramatic read
 
   // terrain generation
@@ -221,6 +221,13 @@ const params = {
   plinth: true,
   plinthDepth: 7,
   plinthColor: '#d8d4cc',
+  // socle material (Block panel): 'solid' → a PBR preset, 'glass' → a physical
+  // glass preset with frost (diffusion) + coloured ground projection
+  plinthFinish: 'solid',
+  plinthPbr: 'stone',
+  plinthGlass: 'clear',
+  plinthGlassDiffusion: 0.0,
+  plinthGlassProjection: 0.5,
   slabCorner: 0.04, // fillet radius on the slab's vertical corners, as a fraction
   // of the block width (the terrain clips to the same rounded rectangle)
   slabCornerSmoothing: 0.6, // 0 = plain circular arc, →1 = squircle (iOS-style
@@ -402,6 +409,18 @@ scene.add(terrain.mesh)
 // the 3D slab the relief sits on (walls + shadow-catching base)
 const plinth = new Plinth(scene, params)
 plinth.rebuild(terrain, params)
+// push the chosen socle material (default = matte stone, i.e. the original look)
+function applyPlinthMaterial() {
+  const glass = params.plinthFinish === 'glass'
+  plinth.setMaterial({
+    finish: params.plinthFinish,
+    id: glass ? params.plinthGlass : params.plinthPbr,
+    diffusion: glass ? params.plinthGlassDiffusion : undefined,
+    projection: params.plinthGlassProjection,
+    fallbackColor: params.plinthColor,
+  })
+}
+applyPlinthMaterial()
 plinth.setVisible(params.plinth)
 
 // cartographic cartouche laid out on the ground around the slab
@@ -1400,16 +1419,9 @@ async function applyRegionMode() {
     terrain.setRegionMask(r ? r.maskTexture : null)
     plinth.setVisible(false)
     waterRebuild() // regionMode is on — the sim drops its sea (it would spill past the boundary) but keeps the lakes
-    // the cut landform sits on a thin plate fitted to it with a small margin
+    // Isolate-the-zone drops the base entirely — the cut landform floats with no
+    // socle (user request). Any previously built plate is removed.
     disposeRegionPlate()
-    if (r) {
-      const p = buildRegionPlate({ maskCanvas: r.maskCanvas, params, topY: terrain.mapUniforms.uSeaY.value - 0.02 })
-      if (p) {
-        regionPlate = p
-        p.mesh.visible = modes.mode === 'surface'
-        scene.add(p.mesh)
-      }
-    }
     if (r) modes.announce(`ZONE — ${String(r.name).toUpperCase()}`)
     else modes.announce('ZONE — NO BOUNDARY AT THIS SCALE')
   } catch {
@@ -1561,6 +1573,8 @@ const createPanel = buildCreatePanel({
     if (v >= 12) userFineZoom = v // remember the user's chosen fine scale
     if (params.source === 'real') loadRealTerrain()
   },
+  getFineZoom: () => userFineZoom, // finest scale reached — gates the 2048/4096 mesh tiers
+  applyPlinthMaterial, // socle PBR / glass material picker (Block panel)
   setGroundInfo: (v) => {
     groundInfo.enabled = v
     groundInfo.setVisible(v && modes.mode === 'surface')

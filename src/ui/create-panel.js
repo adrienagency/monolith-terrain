@@ -1,10 +1,11 @@
 // CREATE panel — everything that makes the map, in one place (right dock).
 // Sections are exclusive accordions. Camera lives in its own sibling panel.
 
-import { el, slider, color, swatch, toggle, select, button, section, refreshAll } from './kit.js'
+import { el, slider, color, swatch, toggle, select, segmented, button, section, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
 import { TEMPLATES } from '../templates.js'
 import { generatePalette, generateStyle, generateGridContour } from '../palette.js'
+import { PBR_PRESETS, GLASS_PRESETS, GLASS_BY_ID } from '../material-presets.js'
 import { FLAGS } from '../flags.js'
 
 const ICON =
@@ -131,13 +132,29 @@ export function buildCreatePanel(ctx) {
     if (params.source === 'real') ctx.regenerateTerrain()
   })
   sTer.body.append(
-    select({ label: 'Detail (zoom)', options: ['5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'], get: () => String(params.demZoom), set: (v) => { params.demZoom = +v; ctx.onZoomPicked(+v) } }),
+    select({ label: 'Detail (zoom)', options: ['5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'], get: () => String(params.demZoom), set: (v) => { params.demZoom = +v; ctx.onZoomPicked(+v); rebuildRes() } }),
     exag,
     el('div', 'ce-btn-row'),
     slider({ label: 'Fine detail', min: 0, max: 0.8, step: 0.01, get: () => params.detail, set: (v) => { params.detail = v; ctx.saveZoomDetail?.(params.demZoom, v) } }),
-    slider({ label: 'Detail scale', min: 0.5, max: 6, step: 0.1, get: () => params.detailScale, set: (v) => { params.detailScale = v } }),
-    select({ label: 'Mesh resolution', options: ['256', '384', '512', '768', '1024'], get: () => String(params.resolution), set: (v) => { params.resolution = +v; ctx.regenerateTerrain() } })
+    slider({ label: 'Detail scale', min: 0.5, max: 6, step: 0.1, get: () => params.detailScale, set: (v) => { params.detailScale = v } })
   )
+
+  // Mesh resolution — the ultra-heavy 2048 / 4096 tiers are offered ONLY at the
+  // finest zoom (where the DEM actually carries that much detail). Rebuilt on
+  // every zoom change; leaving max zoom clamps a high pick back down to 1024.
+  const resWrap = el('div')
+  sTer.body.append(resWrap)
+  function rebuildRes() {
+    const atMax = params.demZoom >= (ctx.getFineZoom?.() ?? 15)
+    if (!atMax && params.resolution > 1024) params.resolution = 1024
+    const base = ['256', '384', '512', '768', '1024']
+    const opts = atMax ? [...base, '2048', '4096'] : base
+    resWrap.replaceChildren(
+      select({ label: 'Mesh resolution', options: opts, get: () => String(params.resolution), set: (v) => { params.resolution = +v; ctx.regenerateTerrain() } })
+    )
+    if (atMax) resWrap.append(el('div', 'ce-note ce-warn', '⚠ 2048 / 4096 are extremely heavy — they can slow the tab to a crawl or crash it. Use only briefly, at this zoom.'))
+  }
+  rebuildRes()
   // detail sliders regenerate on release
   for (const inp of sTer.body.querySelectorAll('.ce-slider')) {
     if (inp === exag.querySelector('input')) continue
@@ -226,10 +243,38 @@ export function buildCreatePanel(ctx) {
   sBlk.body.append(
     toggle({ label: 'Show block', get: () => params.plinth, set: (v) => { params.plinth = v; ctx.plinth.setVisible(v && ctx.modes.mode === 'surface') } }),
     slider({ label: 'Thickness', min: 2, max: 16, step: 0.5, get: () => params.plinthDepth, set: (v) => { params.plinthDepth = v } }),
-    color({ label: 'Edge colour', get: () => params.plinthColor, set: (v) => { params.plinthColor = v; ctx.plinth.setColors(params) } }),
-    toggle({ label: 'Ground cartouche', get: () => params.groundInfo, set: (v) => { params.groundInfo = v; ctx.setGroundInfo(v) } })
+    color({ label: 'Edge colour', get: () => params.plinthColor, set: (v) => { params.plinthColor = v; ctx.plinth.setColors(params) } })
   )
   sBlk.body.children[1].querySelector('input').addEventListener('change', () => ctx.plinth.rebuild(ctx.terrain, params))
+
+  // Socle material — give the block a real finish: 25 PBR solids (metals, stone,
+  // ceramics) OR 25 physical glasses. Glass adds a Diffusion (frost) knob and a
+  // Ground glow that pools the glass colour onto the table below.
+  const matWrap = el('div')
+  sBlk.body.append(matWrap)
+  function rebuildMat() {
+    const glass = params.plinthFinish === 'glass'
+    const list = glass ? GLASS_PRESETS : PBR_PRESETS
+    const kids = [
+      segmented({ label: 'Material finish', options: [{ value: 'solid', label: 'Solid' }, { value: 'glass', label: 'Glass' }], get: () => params.plinthFinish, set: (v) => { params.plinthFinish = v; ctx.applyPlinthMaterial(); rebuildMat() } }),
+      select({ label: glass ? 'Glass' : 'PBR material', options: list.map((p) => ({ value: p.id, label: p.name })), get: () => (glass ? params.plinthGlass : params.plinthPbr), set: (v) => {
+        if (glass) { params.plinthGlass = v; params.plinthGlassDiffusion = GLASS_BY_ID[v].diffusion } else params.plinthPbr = v
+        ctx.applyPlinthMaterial(); refreshAll()
+      } }),
+    ]
+    if (glass) {
+      kids.push(
+        slider({ label: 'Diffusion (frost)', min: 0, max: 1, step: 0.01, get: () => params.plinthGlassDiffusion, set: (v) => { params.plinthGlassDiffusion = v; ctx.applyPlinthMaterial() } }),
+        slider({ label: 'Ground glow', min: 0, max: 1, step: 0.01, get: () => params.plinthGlassProjection, set: (v) => { params.plinthGlassProjection = v; ctx.applyPlinthMaterial() } })
+      )
+    }
+    matWrap.replaceChildren(...kids)
+  }
+  rebuildMat()
+
+  sBlk.body.append(
+    toggle({ label: 'Ground cartouche', get: () => params.groundInfo, set: (v) => { params.groundInfo = v; ctx.setGroundInfo(v) } })
+  )
 
   // -------------------------------------------------------------- Effects
   const sFx = addTo(section('Effects'))
