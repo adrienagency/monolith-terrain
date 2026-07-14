@@ -154,6 +154,7 @@ const DECK_FRAG = /* glsl */ `
   uniform float uDensity;
   uniform float uScale;      // noise tiling across the deck
   uniform float uCoverGate;  // 0 = unbroken sheet, higher = more open sky
+  uniform float uCenterClear; // 0 = clouds over centre, 1 = clear centre (donut)
   uniform float uBillow;     // 0 = flat slab, 1 = tall domed tops
   uniform float uAltSpread;  // per-cloud altitude variation (staggered layers)
   uniform float uDriftVar;   // per-cloud speed variation
@@ -177,10 +178,16 @@ const DECK_FRAG = /* glsl */ `
   }
 
   // local coverage: low-frequency cells (squared to bite), gated by the slider,
-  // faded toward the deck edges so the field ends softly at the map border
+  // faded toward the deck edges so the field ends softly at the map border.
+  // A donut radial profile CLEARS the middle so the deck never walls off the
+  // subject on zoom-in — clouds sit in a ring around the block, not over it
+  // (uCenterClear 0 = old centre-heavy behaviour, 1 = wide clear centre).
   float coverAt(vec2 pxz) {
     float c = texture(uVolume, vec3((pxz + uPhase + vec2(uDrift, 0.0)) * 0.9, 0.35)).g;
-    float edge = 1.0 - sat((length(pxz - 0.5) - 0.28) / 0.24);
+    float d = length(pxz - 0.5);
+    float outer = 1.0 - sat((d - 0.30) / 0.22);   // soft rim fade at the map border
+    float inner = smoothstep(0.02, 0.24, d);       // clear the central disc
+    float edge = outer * mix(1.0, inner, uCenterClear);
     return smoothstep(uCoverGate, uCoverGate + 0.25, c) * edge;
   }
 
@@ -219,6 +226,10 @@ const DECK_FRAG = /* glsl */ `
     float billow = texture(uVolume, fract(coord)).r;
     float d = sat(billow - (1.0 - profile));
     d = pow(d, uContrast); // contrast: sharpen or soften the cloud bodies
+    // a cloud is never allowed to sit ON the lens: density fades out inside a
+    // small bubble around the camera, so flying through the deck stays a
+    // wisp-past-the-window moment instead of a white wall
+    d *= smoothstep(2.0, 4.5, distance(wp, cameraPosition));
     return d * uDensity * mix(0.55, 1.45, cell.z); // per-cloud density
   }
 
@@ -314,6 +325,7 @@ export class Clouds {
     this.time = 0
     this.phase = new THREE.Vector2(0, 0) // random layout offset, set by reroll()
     this.sunDir = new THREE.Vector3(0.5, 0.7, 0.4) // direction TO the sun
+    this.fade = 0 // deck fades IN after every (re)build — no cloud pops on the lens
     this.build(params)
   }
 
@@ -332,6 +344,7 @@ export class Clouds {
   // rejection-sample that offset against the CPU coverage field so a fresh
   // zone never lands on an empty stretch of sky.
   reroll() {
+    this.fade = 0 // fresh layout eases in instead of popping over the view
     if (!sharedVolume || !this.deck) {
       this.phase.set(Math.random(), Math.random())
       if (this.deck) this.deck.material.uniforms.uPhase.value.copy(this.phase)
@@ -345,7 +358,12 @@ export class Clouds {
     const contrast = u.uContrast.value
     const drift = u.uDrift.value
     const altSpread = u.uAltSpread.value
+    const centerClear = u.uCenterClear.value
     const sat = (v) => Math.min(1, Math.max(0, v))
+    const smoothstep01 = (a, b, x) => {
+      const t = sat((x - a) / (b - a))
+      return t * t * (3 - 2 * t)
+    }
     // total cloud mass over the map at this phase — a CPU mirror of densityAt
     // (coverage gate, per-cloud altitude offset + density, vertical profile,
     // billow carve), so the score tracks what the raymarch will actually show
@@ -357,7 +375,12 @@ export class Clouds {
           const x = (i + 0.5) / N
           const z = (j + 0.5) / N
           const c = readVolume(data, (x + px + drift) * 0.9, (z + pz) * 0.9, 0.35, 1)
-          const edge = 1 - sat((Math.hypot(x - 0.5, z - 0.5) - 0.28) / 0.24)
+          // mirror the shader's donut radial profile so reroll scores the
+          // ring, not the (now-cleared) centre
+          const d = Math.hypot(x - 0.5, z - 0.5)
+          const outer = 1 - sat((d - 0.3) / 0.22)
+          const inner = smoothstep01(0.02, 0.24, d)
+          const edge = outer * (1 - centerClear + centerClear * inner)
           const cover = sat((c - gate) / 0.25) * edge
           if (cover <= 0.003) continue
           // per-cloud character (mirrors cloudCell): altitude offset + density
@@ -398,6 +421,7 @@ export class Clouds {
 
   build(params) {
     this._dispose()
+    this.fade = 0 // rebuilt deck eases in — a zoom-tier change never walls the camera
     if (!params.cloudsEnabled) {
       // no deck = no shadows: clear the terrain's baked shadow strength, or
       // the last deck's shadows stay painted on the ground forever
@@ -436,6 +460,7 @@ export class Clouds {
         uDensity: { value: params.cloudOpacity ?? 0.85 },
         uScale: { value: params.cloudScale ?? 3 },
         uCoverGate: { value: params.cloudCoverage ?? 0.62 },
+        uCenterClear: { value: params.cloudCenterClear ?? 0.5 },
         uBillow: { value: billow },
         uAltSpread: { value: params.cloudAltSpread ?? 0.5 },
         uDriftVar: { value: params.cloudDriftVar ?? 0.5 },
@@ -511,13 +536,15 @@ export class Clouds {
   update(dt, params) {
     if (!this.deck) return
     this.time += dt
+    this.fade = Math.min(1, this.fade + dt / 2.2) // ~2 s ease-in after (re)build
     const u = this.deck.material.uniforms
     const drift = this.time * (params.cloudDrift ?? 1) * 0.004
     u.uDrift.value = drift
     u.uPhase.value.copy(this.phase)
-    u.uDensity.value = params.cloudOpacity ?? 1.5
+    u.uDensity.value = (params.cloudOpacity ?? 1.5) * this.fade
     u.uScale.value = params.cloudScale ?? 5
     u.uCoverGate.value = params.cloudCoverage ?? 0.62
+    u.uCenterClear.value = params.cloudCenterClear ?? 0.5
     u.uBrightness.value = params.cloudBrightness ?? 2.9
     u.uAltSpread.value = params.cloudAltSpread ?? 0.5
     u.uDriftVar.value = params.cloudDriftVar ?? 0.5
@@ -537,7 +564,7 @@ export class Clouds {
     const mu = this.terrain.mapUniforms
     if (mu && mu.uCloudShadowK) {
       const on = params.cloudsEnabled && this.group.visible
-      const k = on ? Math.min(1, Math.max(0, (elev - 8) / 24)) * 0.42 : 0
+      const k = on ? Math.min(1, Math.max(0, (elev - 8) / 24)) * 0.42 * this.fade : 0
       mu.uCloudShadowK.value = k
       if (mu.uCloudShadowOff) {
         const s = this.sunDir

@@ -5,7 +5,6 @@ import { el, slider, color, swatch, toggle, select, button, section, refreshAll 
 import { Panel } from './shell.js'
 import { TEMPLATES } from '../templates.js'
 import { generatePalette, generateStyle, generateGridContour } from '../palette.js'
-import { REFLECTION_TYPES } from '../lake.js'
 
 const ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h10M18 8h2M4 16h2M10 16h10"/><circle cx="16" cy="8" r="2.2"/><circle cx="8" cy="16" r="2.2"/></svg>'
@@ -93,6 +92,7 @@ export function buildCreatePanel(ctx) {
   const sMap = addTo(section('Map style'))
   const u = () => ctx.terrain.mapUniforms
   sMap.body.append(
+    toggle({ label: 'City labels', get: () => params.cityLabels, set: (v) => { params.cityLabels = v; ctx.cityRebuild() } }),
     slider({ label: 'Hypsometric tint', min: 0, max: 1, step: 0.02, get: () => params.mapTint, set: (v) => { params.mapTint = v; u().uTint.value = v } }),
     slider({ label: 'Height contrast', min: 0.5, max: 20, step: 0.1, get: () => params.heightContrast, set: (v) => { params.heightContrast = v; u().uHeightContrast.value = v } }),
     slider({ label: 'Height pivot', min: 0, max: 1, step: 0.01, get: () => params.heightPivot, set: (v) => { params.heightPivot = v; u().uHeightPivot.value = v } }),
@@ -174,19 +174,31 @@ export function buildCreatePanel(ctx) {
   )
 
   // ---------------------------------------------------------------- Water
+  // The water simulation (v37): translucent sunlit shallows with bold caustic
+  // rays, darkening depths, gentle Beaufort sea states. The old glass water
+  // is gone. GPU-heavy, so it stays opt-in with a plain warning.
   const sWat = addTo(section('Water'))
   sWat.body.append(
-    toggle({ label: 'Glass sea', get: () => params.lakeEnabled, set: (v) => { params.lakeEnabled = v; ctx.lakeRebuild() } }),
-    toggle({ label: 'Altitude lakes', get: () => params.lakesAltitude, set: (v) => { params.lakesAltitude = v; ctx.lakeRebuild() } }),
-    color({ label: 'Water colour', get: () => params.lakeColor, set: (v) => { params.lakeColor = v; ctx.lake.updateMaterial(params) } }),
-    slider({ label: 'Blur', min: 0, max: 1, step: 0.01, get: () => params.lakeRoughness, set: (v) => { params.lakeRoughness = v; ctx.lake.updateMaterial(params) } }),
-    slider({ label: 'Clarity', min: 2, max: 100, step: 0.5, get: () => params.lakeClarity, set: (v) => { params.lakeClarity = v; ctx.lake.updateMaterial(params) } }),
-    slider({ label: 'Waves', min: 0, max: 1, step: 0.01, get: () => params.lakeWaves ?? 0, set: (v) => { params.lakeWaves = v; ctx.lake.updateMaterial(params) } }),
-    select({ label: 'Reflections', options: [...REFLECTION_TYPES], get: () => params.lakeReflection, set: (v) => { params.lakeReflection = v; ctx.lake.updateMaterial(params) } })
+    toggle({ label: 'Water simulation (beta)', get: () => params.waterReal, set: (v) => { params.waterReal = v; ctx.waterRebuild() } }),
+    el('div', 'ce-label', 'GPU-heavy — may slow down some computers. Turn it off anytime.'),
+    color({ label: 'Water colour', get: () => params.lakeColor, set: (v) => { params.lakeColor = v; ctx.realWater?.setLook(params) } }),
+    slider({ label: 'Sea state (F1–F3)', min: 1, max: 3, step: 1, get: () => params.waterWind ?? 2, set: (v) => { params.waterWind = v; ctx.realWater?.setWind(v) } }),
+    slider({ label: 'Transparency', min: 0, max: 1, step: 0.01, get: () => params.waterTransparency ?? 0.4, set: (v) => { params.waterTransparency = v; ctx.realWater?.setLook(params) } }),
+    slider({ label: 'Sun reflection', min: 0, max: 2, step: 0.02, get: () => params.waterSunFx ?? 1, set: (v) => { params.waterSunFx = v; ctx.realWater?.setLook(params) } })
   )
 
   // ---------------------------------------------------------------- Light
   const sLig = addTo(section('Light'))
+  // studio lighting presets — reconfigure sun + hemi + IBL (+ softbox area
+  // lights / accent spot) into a photographer's rig (see lighting.js)
+  sLig.body.append(
+    select({ label: 'Studio preset', options: ctx.lightPresets, get: () => params.lightPreset, set: (v) => { ctx.applyLightPreset(v); refreshAll() } })
+  )
+  // 24 h sun cycle: one slider drives azimuth, elevation, intensity and warmth
+  sLig.body.append(
+    slider({ label: 'Time of day (h)', min: 0, max: 24, step: 0.25, get: () => params.timeOfDay, set: (v) => { params.timeOfDay = v; ctx.applyTimeOfDay(v); refreshAll() } })
+  )
+  sLig.body.append(el('div', 'ce-label', 'Manual sun overrides (also driven by the two above)'))
   sLig.body.append(
     slider({ label: 'Sun intensity', min: 0, max: 16, step: 0.1, get: () => params.sunIntensity, set: (v) => { params.sunIntensity = v; ctx.placeSun() } }),
     slider({ label: 'Sun azimuth', min: 0, max: 360, step: 1, get: () => params.sunAzimuth, set: (v) => { params.sunAzimuth = v; ctx.placeSun() } }),

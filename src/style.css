@@ -14,21 +14,82 @@ body {
   height: 100vh;
 }
 
+/* branded loader — site name, baseline, and a little plane crossing the
+   track left to right while tiles fetch / terrain builds */
 #loading {
   position: fixed;
   left: 50%;
-  bottom: 28px;
-  transform: translateX(-50%);
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 26px 42px 20px;
+  border-radius: 14px;
+  background: rgba(252, 251, 248, 0.82);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 18px 50px rgba(20, 24, 28, 0.14);
+  backdrop-filter: blur(14px);
+  text-align: center;
+  transition: opacity 0.3s;
+  z-index: 60;
+  pointer-events: none;
+}
+
+#loading .ld-name {
+  font-family: 'Rosarivo', Georgia, serif;
+  font-size: 30px;
+  letter-spacing: 0.04em;
+  color: #23201a;
+}
+
+#loading .ld-base {
+  font-family: 'Bricolage Grotesque', system-ui, sans-serif;
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  color: rgba(35, 32, 26, 0.62);
+}
+
+#loading .ld-track {
+  position: relative;
+  width: 230px;
+  height: 22px;
+  margin-top: 10px;
+  overflow: hidden;
+}
+
+#loading .ld-track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px dashed rgba(35, 32, 26, 0.28);
+}
+
+#loading .ld-plane {
+  position: absolute;
+  top: 50%;
+  left: -26px;
+  width: 20px;
+  height: 20px;
+  color: #23201a;
+  transform: translateY(-50%);
+  animation: ld-fly 2.4s linear infinite;
+}
+
+@keyframes ld-fly {
+  from { left: -26px; }
+  to { left: 240px; }
+}
+
+#loading .ld-status {
   font-family: 'SF Mono', ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 10.5px;
   letter-spacing: 0.15em;
-  color: rgba(15, 15, 15, 0.75);
-  background: rgba(255, 255, 255, 0.35);
-  border: 1px solid rgba(0, 0, 0, 0.15);
-  padding: 6px 14px;
-  border-radius: 3px;
-  backdrop-filter: blur(6px);
-  transition: opacity 0.2s;
+  color: rgba(35, 32, 26, 0.55);
+  text-transform: lowercase;
 }
 
 #loading.hidden {

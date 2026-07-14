@@ -1,7 +1,8 @@
 // Ambient traffic over the map — two citizens of the diorama:
-//  · small airliners, tinted with the current template's dominant colour, that
-//    occasionally cross the scene through the cloud deck (1-in-5 roll every
-//    few seconds, one plane at a time — discreet, the map stays the hero);
+//  · occasional AIRCRAFT crossing the scene, one at a time and deliberately
+//    rare (the map stays the hero): an airliner (GLB), or one of three
+//    procedurally-built gliders of the sky — hot-air balloon, sailplane,
+//    paraglider — each with its own altitude band, speed and motion habit;
 //  · a SpaceX pad watcher: when the loaded zone contains Starbase (Boca Chica)
 //    or Kennedy LC-39A, a user-supplied Starship + launch-tower model appears
 //    on the pad and lifts off from time to time.
@@ -20,8 +21,9 @@ import { TERRAIN_SIZE } from './terrain.js'
 import { latLonToWorld } from './geo.js'
 
 const HALF = TERRAIN_SIZE / 2
-const SPAWN_CHECK_S = 7 // roll the dice this often
-const SPAWN_CHANCE = 1 / 5
+const SPAWN_CHECK_S = 14 // roll the dice this often
+const SPAWN_CHANCE = 1 / 9 // rare on purpose — a visitor, not a flight corridor
+const DESPAWN_QUIET_S = 20 // extra silence after a craft leaves
 
 // famous pads the watcher recognises (lat, lon)
 const SPACEX_PADS = [
@@ -39,7 +41,7 @@ export class Traffic {
     this.loader = new GLTFLoader()
 
     this.planeProto = null
-    this.plane = null // { obj, dir, speed, life }
+    this.craft = null // { type, obj, dir, side, speed, life, baseY, phase }
     this.sinceRoll = 0
 
     this.pad = null // { obj, rocket, baseY, state, t }
@@ -72,19 +74,104 @@ export class Traffic {
     return new THREE.Color(hex)
   }
 
-  _spawnPlane() {
-    if (!this.planeProto) return
-    const obj = this.planeProto.clone(true)
-    // tint every mesh with the template's dominant colour (cloned materials)
+  _mat(color, rough = 0.6) {
+    return new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0 })
+  }
+
+  // ------- procedural sky citizens — all built facing +Z, ~diorama scale
+  _buildBalloon(tint) {
+    const g = new THREE.Group()
+    const envelope = new THREE.Mesh(new THREE.SphereGeometry(0.5, 20, 16), this._mat(tint, 0.5))
+    envelope.scale.set(1, 1.15, 1)
+    envelope.position.y = 0.95
+    const throat = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.25, 12), this._mat(tint.clone().multiplyScalar(0.8)))
+    throat.rotation.x = Math.PI
+    throat.position.y = 0.35
+    const basket = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.16), this._mat(new THREE.Color('#6b4a2f'), 0.9))
+    basket.position.y = 0.1
+    const ropeMat = this._mat(new THREE.Color('#4a4a4a'), 0.9)
+    for (const [dx, dz] of [[-0.06, -0.06], [0.06, -0.06], [-0.06, 0.06], [0.06, 0.06]]) {
+      const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.22, 4), ropeMat)
+      rope.position.set(dx, 0.26, dz)
+      g.add(rope)
+    }
+    g.add(envelope, throat, basket)
+    return g
+  }
+
+  _buildGlider(tint) {
+    const g = new THREE.Group()
+    const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.05, 1.2, 8), this._mat(tint, 0.35))
+    fuselage.rotation.x = Math.PI / 2
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.02, 0.17), this._mat(tint, 0.35))
+    wing.position.set(0, 0.03, 0.1)
+    const tailH = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.015, 0.12), this._mat(tint, 0.35))
+    tailH.position.set(0, 0.14, -0.56)
+    const tailV = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.16, 0.14), this._mat(tint, 0.35))
+    tailV.position.set(0, 0.07, -0.56)
+    g.add(fuselage, wing, tailH, tailV)
+    return g
+  }
+
+  _buildParaglider(tint) {
+    const g = new THREE.Group()
+    // canopy: a shallow arc over the pilot
+    const canopy = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.05, 6, 14, Math.PI * 0.8), this._mat(tint, 0.6))
+    canopy.rotation.z = Math.PI * 0.1
+    canopy.rotation.x = Math.PI / 2 - 0.25
+    canopy.position.y = 0.42
+    const pilot = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, 0.09, 3, 8), this._mat(new THREE.Color('#333333'), 0.8))
+    const lineMat = this._mat(new THREE.Color('#555555'), 0.9)
+    for (const dx of [-0.25, 0.25]) {
+      const line = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.42, 3), lineMat)
+      line.position.set(dx * 0.5, 0.22, 0)
+      line.rotation.z = dx > 0 ? -0.5 : 0.5
+      g.add(line)
+    }
+    g.add(canopy, pilot)
+    return g
+  }
+
+  // one craft at a time, chosen by weighted lottery. Each type gets its own
+  // altitude band, speed and a small motion habit applied in update():
+  //  · balloon — low, very slow, bobs gently, drifts long
+  //  · glider — high, quiet, a slow banked weave
+  //  · paraglider — hugs the relief band, slow S-turns
+  _spawnCraft() {
     const tint = this._dominantColor()
-    obj.traverse((n) => {
-      if (n.isMesh) {
-        n.material = n.material.clone()
-        if (n.material.color) n.material.color.copy(tint)
-        n.material.map = null
-      }
-    })
-    // cross the whole map on a random heading, inside the cloud band
+    const cloudAlt = this.params.cloudAltitude ?? 4.5
+    const roll = Math.random()
+    let type, obj, speed, alt
+    if (roll < 0.35 && this.planeProto) {
+      type = 'plane'
+      obj = this.planeProto.clone(true)
+      obj.traverse((n) => {
+        if (n.isMesh) {
+          n.material = n.material.clone()
+          if (n.material.color) n.material.color.copy(tint)
+          n.material.map = null
+        }
+      })
+      speed = 3.5 + Math.random() * 2.5
+      alt = cloudAlt + 2 + Math.random() * 4
+    } else if (roll < 0.62) {
+      type = 'balloon'
+      obj = this._buildBalloon(tint)
+      speed = 0.7 + Math.random() * 0.4
+      alt = Math.max(3, cloudAlt - 1 + Math.random() * 2.5)
+    } else if (roll < 0.85) {
+      type = 'glider'
+      obj = this._buildGlider(tint)
+      speed = 2.2 + Math.random() * 1.2
+      alt = cloudAlt + 1 + Math.random() * 3
+    } else {
+      type = 'paraglider'
+      obj = this._buildParaglider(tint)
+      speed = 0.9 + Math.random() * 0.5
+      alt = Math.max(2.5, cloudAlt - 2 + Math.random() * 1.5)
+    }
+    if (!obj) return
+    // cross the map on a random heading
     const ang = Math.random() * Math.PI * 2
     const dir = new THREE.Vector3(Math.cos(ang), 0, Math.sin(ang))
     const side = new THREE.Vector3(-dir.z, 0, dir.x)
@@ -93,11 +180,11 @@ export class Traffic {
       .clone()
       .multiplyScalar(-(HALF + 8))
       .addScaledVector(side, offset)
-    start.y = (this.params.cloudAltitude ?? 4.5) + 2 + Math.random() * 4
+    start.y = alt
     obj.position.copy(start)
     obj.lookAt(start.clone().add(dir))
     this.group.add(obj)
-    this.plane = { obj, dir, speed: 3.5 + Math.random() * 2.5, life: 0 }
+    this.craft = { type, obj, dir, side, speed, life: 0, baseY: alt, phase: Math.random() * Math.PI * 2 }
   }
 
   // called after a DEM zone loads: shows the pad when a famous site is in view
@@ -132,20 +219,44 @@ export class Traffic {
   }
 
   update(dt) {
-    // ---- airliners
+    // ---- sky traffic (one craft at a time)
     this.sinceRoll += dt
-    if (!this.plane && this.planeProto && this.sinceRoll >= SPAWN_CHECK_S) {
+    if (!this.craft && this.sinceRoll >= SPAWN_CHECK_S) {
       this.sinceRoll = 0
-      if (Math.random() < SPAWN_CHANCE) this._spawnPlane()
+      if (Math.random() < SPAWN_CHANCE) this._spawnCraft()
     }
-    if (this.plane) {
-      const p = this.plane
+    if (this.craft) {
+      const p = this.craft
       p.obj.position.addScaledVector(p.dir, p.speed * dt)
       p.life += dt
+      // motion habits
+      if (p.type === 'balloon') {
+        p.obj.position.y = p.baseY + Math.sin(p.life * 0.45 + p.phase) * 0.35
+      } else if (p.type === 'paraglider') {
+        // lazy S-turns across the heading
+        p.obj.position.addScaledVector(p.side, Math.cos(p.life * 0.5 + p.phase) * 0.5 * dt)
+        p.obj.rotation.z = Math.sin(p.life * 0.5 + p.phase) * 0.25
+      } else if (p.type === 'glider') {
+        p.obj.position.y = p.baseY + Math.sin(p.life * 0.25 + p.phase) * 0.6
+        p.obj.rotation.z = Math.sin(p.life * 0.25 + p.phase) * 0.12
+      }
       const { x, z } = p.obj.position
-      if (Math.abs(x) > HALF + 10 || Math.abs(z) > HALF + 10 || p.life > 60) {
+      // slow craft get a longer life budget — enough to finish the crossing.
+      // The bound sits past the farthest possible spawn point (√(36² + 16.8²)
+      // ≈ 39.7) so a steep-heading craft can never despawn on frame one.
+      const lifeMax = p.speed < 1.5 ? 130 : 60
+      if (Math.abs(x) > HALF + 13 || Math.abs(z) > HALF + 13 || p.life > lifeMax) {
         this.group.remove(p.obj)
-        this.plane = null
+        // free the craft's GPU buffers — procedural crafts build fresh
+        // geometries/materials each spawn, the plane clones its materials
+        p.obj.traverse((n) => {
+          if (n.isMesh) {
+            n.geometry.dispose()
+            for (const m of Array.isArray(n.material) ? n.material : [n.material]) m.dispose()
+          }
+        })
+        this.craft = null
+        this.sinceRoll = -DESPAWN_QUIET_S // a beat of empty sky before the next roll
       }
     }
 

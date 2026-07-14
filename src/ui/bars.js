@@ -18,6 +18,8 @@ const I = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.5-4.5"/></svg>',
   route:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="19" r="2.4"/><circle cx="18" cy="5" r="2.4"/><path d="M8 17.5C11 15 9 11 12 9.5S16.5 8 16.5 6.8"/></svg>',
+  iso: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 4.6v8.8L12 21l-8-4.6V7.6L12 3z"/><path d="M12 12l8-4.4M12 12L4 7.6M12 12v9"/></svg>',
+  help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.6 2.6 0 115 .8c-.5 1.4-2.1 1.7-2.1 3.2"/><circle cx="12" cy="16.8" r="0.4" fill="currentColor"/></svg>',
 }
 
 export function buildTopBar(ctx) {
@@ -63,6 +65,10 @@ export function buildTopBar(ctx) {
   syncDark()
   bar.append(dark)
 
+  const helpBtn = iconButton(I.help, '', () => ctx.startTutorial?.())
+  helpBtn.setAttribute('data-tip', 'A one-minute tour of everything on this screen.')
+  bar.append(helpBtn)
+
   const hideBtn = iconButton(I.eyeOff, '', () => setNoUi(true))
   hideBtn.setAttribute('data-tip', 'Hide every panel — only a small eye button stays.')
   bar.append(hideBtn)
@@ -80,6 +86,18 @@ export function buildTopBar(ctx) {
 
   document.body.append(bar, eye)
   return { root: bar, syncDark }
+}
+
+// fixed bottom-right: one click to the isometric museum view — the whole
+// block on its plate with the cartouche text readable around it
+export function buildIsoButton(ctx) {
+  const btn = el('button', 'ce-isobtn ce-glassbox')
+  btn.type = 'button'
+  btn.innerHTML = I.iso
+  btn.setAttribute('data-tip', 'Isometric view — the full block, plate and cartouche.')
+  btn.addEventListener('click', () => ctx.flyIso())
+  document.body.append(btn)
+  return { root: btn, setVisible: (v) => btn.classList.toggle('off', !v) }
 }
 
 export function buildBottomBar(ctx) {

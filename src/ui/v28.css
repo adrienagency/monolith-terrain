@@ -702,6 +702,113 @@ body.ce-noui .ce-eye {
   height: 16px;
 }
 
+/* --------------------------------------------------- isometric view button */
+.ce-isobtn {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 60;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: 1px solid var(--ce-border);
+  color: var(--ce-ink);
+}
+.ce-isobtn svg {
+  width: 20px;
+  height: 20px;
+}
+.ce-isobtn:hover {
+  border-color: var(--ce-accent);
+  color: var(--ce-accent);
+}
+.ce-isobtn.off,
+body.ce-noui .ce-isobtn {
+  display: none;
+}
+
+/* --------------------------------------------------------------- guided tour */
+.ce-tour {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+}
+.ce-tour.dim {
+  background: rgba(18, 21, 25, 0.45);
+}
+.ce-tour-spot {
+  position: absolute;
+  border-radius: 14px;
+  border: 1.5px solid var(--ce-accent);
+  /* the giant shadow IS the dimmer — everything but the spotlighted zone */
+  box-shadow: 0 0 0 9999px rgba(18, 21, 25, 0.45);
+  pointer-events: none;
+  transition: left 0.25s ease, top 0.25s ease, width 0.25s ease, height 0.25s ease;
+}
+.ce-tour-card {
+  position: absolute;
+  box-sizing: border-box; /* the JS clamps against width:340 — padding must live inside it */
+  padding: 16px 18px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--ce-border);
+  transition: left 0.25s ease, top 0.25s ease;
+}
+.ce-tour-text {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ce-ink);
+}
+.ce-tour-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  gap: 10px;
+}
+.ce-tour-dots {
+  display: flex;
+  gap: 5px;
+}
+.ce-tour-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ce-border);
+}
+.ce-tour-dots i.on {
+  background: var(--ce-accent);
+}
+.ce-tour-skip {
+  font-size: 12px;
+  color: var(--ce-ink);
+  opacity: 0.55;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 2px;
+}
+.ce-tour-skip:hover {
+  opacity: 1;
+}
+.ce-tour-next {
+  min-width: 44px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--ce-accent);
+  color: var(--ce-accent);
+  background: none;
+  font-size: 15px;
+  cursor: pointer;
+}
+.ce-tour-next:hover {
+  background: var(--ce-accent);
+  color: #fff;
+}
+
 /* ------------------------------------------------------------- REC pill */
 .ce-rec {
   position: fixed;

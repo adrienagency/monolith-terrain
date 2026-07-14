@@ -35,14 +35,16 @@ import { GroundInfoLayer } from './ground-info-layer.js'
 import { PeaksLayer } from './peaks.js'
 import { Clouds } from './clouds.js'
 import { Traffic } from './traffic.js'
-import { Lake } from './lake.js'
+import { RealWater } from './ocean.js'
+import { CityLabels } from './cities.js'
+import { StudioLighting, sunFromHour, LIGHT_PRESETS } from './lighting.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
 import { fetchRegionMask } from './region-mask.js'
 import { buildRegionPlate } from './region-plate.js'
 import { refreshAll } from './ui/kit.js'
-import { buildTopBar, buildBottomBar } from './ui/bars.js'
+import { buildTopBar, buildBottomBar, buildIsoButton } from './ui/bars.js'
 import { buildCreatePanel } from './ui/create-panel.js'
 import { buildCameraPanel } from './ui/camera-panel.js'
 import { buildExplorePanel } from './ui/explore-panel.js'
@@ -232,14 +234,17 @@ const params = {
   // excludes transmissive objects from the refraction buffer, so a transmissive
   // terrain becomes invisible through the water.
   transmission: 0,
-  // the sea as a glass block: colour-tinted, environment-reflecting
-  lakeEnabled: false, // opt-in — the glass stays off until switched on
-  lakeColor: '#8fc6e8',
-  lakeRoughness: 0.08, // 0 = mirror-polished water, higher = frosted (blur)
-  lakeClarity: 30, // absorption distance: small = opaque depths, large = crystal clear
-  lakeReflection: 'studio', // what the polished surface mirrors
-  lakeWaves: 0, // gentle animated swell on the glass top (0 = mirror flat)
-  lakesAltitude: true, // glass sheets on flat DEM regions above sea level
+  // WATER SIMULATION (the glass sea/lakes are gone — this is the only water):
+  // translucent sunlit shallows with bold caustics, darkening depths,
+  // Beaufort sea state — GPU-heavy, so opt-in
+  lakeColor: '#8fc6e8', // base water tint (shallow/deep derive from it)
+  waterReal: false,
+  waterWind: 2, // Beaufort force F1..F3 (capped at 3 — beyond stopped reading as a diorama)
+  waterTransparency: 0.4, // 0 = milky veil, 1 = crystal — above and below the surface
+  waterSunFx: 1, // sun on the water: glint above + caustic rays below (0..2)
+
+  // principal cities draped on the map (Natural Earth) — off in one click
+  cityLabels: true,
 
   // light
   sunIntensity: 7.6,
@@ -248,12 +253,17 @@ const params = {
   hemiIntensity: 0.6,
   envLight: 0.16,
   shadowSoftness: 5,
+  timeOfDay: 10, // 24 h sun-cycle slider (0..24) — drives sun az/el/intensity/colour
+  lightPreset: 'map-default', // studio lighting preset (lighting.js)
 }
 
 // ------------------------------------------------------------------ renderer / scene
 
 const container = document.getElementById('app')
 const loadingEl = document.getElementById('loading')
+// the loader is a branded card (name + baseline + plane) — status text lives
+// in its own line so updating it never wipes the markup
+const loadingStatus = loadingEl.querySelector('.ld-status') ?? loadingEl
 
 const renderer = new THREE.WebGLRenderer({
   powerPreference: 'high-performance',
@@ -320,12 +330,43 @@ scene.add(sun)
 const hemi = new THREE.HemisphereLight(0xdadada, 0x5c5c5c, params.hemiIntensity)
 scene.add(hemi)
 
+// studio lighting rig: 24 h sun cycle + 8 presets (see lighting.js)
+const studio = new StudioLighting({ scene, sun, hemi })
+// apply the 24 h time-of-day slider: writes sun az/el/intensity/colour + hemi
+function applyTimeOfDay(hour) {
+  const s = sunFromHour(hour)
+  params.sunAzimuth = s.azimuth
+  params.sunElevation = s.elevation
+  params.sunIntensity = s.intensity
+  params.hemiIntensity = s.hemiIntensity
+  params.envLight = s.envIntensity
+  sun.color.copy(s.color)
+  hemi.color.copy(s.hemiSky)
+  hemi.groundColor.copy(s.hemiGround)
+  scene.environmentIntensity = s.envIntensity
+  placeSun()
+}
+// restore the scene background when a dark preset is cleared
+function setStudioBackground(hex) {
+  scene.background = hex ? new THREE.Color(hex) : new THREE.Color(params.fogColor)
+}
+function applyLightPreset(name) {
+  params.lightPreset = name
+  if (name === 'map-default') sun.color.set(0xffffff) // hand colour back to the template
+  studio.apply(name, { params, placeSun, setBackground: setStudioBackground })
+}
+
 function placeSun() {
   const az = THREE.MathUtils.degToRad(params.sunAzimuth)
   const el = THREE.MathUtils.degToRad(params.sunElevation)
   const r = 34
   sun.position.set(Math.cos(az) * Math.cos(el) * r, Math.sin(el) * r, Math.sin(az) * Math.cos(el) * r)
-  sun.intensity = params.sunIntensity
+  // a grazing sun hits sun-facing slopes nearly head-on and used to blow the
+  // whole scene past the ACES shoulder. Attenuate like the atmosphere does,
+  // normalised so the default elevation (16°) keeps its exact tuned look and
+  // higher suns are never brightened (min 1) — only LOW suns get dimmer.
+  const atten = (e) => 0.35 + 0.65 * Math.pow(Math.max(Math.sin(e), 0), 0.7)
+  sun.intensity = params.sunIntensity * Math.min(1, atten(el) / atten(THREE.MathUtils.degToRad(16)))
   hemi.intensity = params.hemiIntensity
   if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
   if (globe) globe.setSunDir(sun.position)
@@ -366,7 +407,8 @@ clouds.setSunDir(sun.position)
 const traffic = new Traffic(scene, terrain, params)
 
 // the sea as a colour-tintable, environment-reflecting glass block
-const lake = new Lake(scene, params)
+const realWater = new RealWater(scene) // the water simulation — empty until waterReal is on
+const cityLabels = new CityLabels(scene) // principal cities, populated per zone
 
 const labelOpts = () => ({
   real: params.source === 'real',
@@ -654,6 +696,7 @@ controls.addEventListener('end', () => {
 window.addEventListener('wheel', () => (lastUserInput = performance.now()), { passive: true })
 
 let modes = null // assigned once the globe + mode machine exist (below)
+let isoBtn = null // assigned once the bars exist — referenced by the mode hooks
 let aq = null // adaptive quality controller (perf.js) — built after the panels
 let recorder = null // Recorder instance, lazy-loaded with the export stack
 
@@ -759,9 +802,11 @@ let userFineZoom = Math.max(params.demZoom, 12)
 // stay subtle, entirely to your taste. Coarse blocks default high because their
 // relief is tiny next to the huge footprint.
 const BASE_EXAG = 2.2
-// user-tuned elevation baseline for the coarse (>100 km) views — z7 pinned at
-// 4.05 from the reference settings, z5/z6 scaled in the same proportion
-const ZOOM_EXAG_DEFAULTS = { 5: 16, 6: 8, 7: 4.05 }
+// per-zoom vertical exaggeration. Coarse continental views (z5-7) were far too
+// tall — the relief read like spikes (user feedback v40). Halved+ so a country
+// sits as a gentle raised-relief plate; the ocean mask now keeps the low ground
+// clean so it can stay subtle without phantom lakes appearing.
+const ZOOM_EXAG_DEFAULTS = { 5: 5, 6: 4, 7: 3.2 }
 const ZOOM_EXAG_KEY = 'monolith.zoomExag'
 let zoomExagStore = (() => {
   try {
@@ -787,7 +832,7 @@ function syncExagToZoom() {
 // dive) can hold orbit — loadRealTerrain wraps it with the GUI's error UX
 async function fetchAndBuildDem() {
   syncExagToZoom() // this zoom's saved (or default) vertical exaggeration
-  loadingEl.textContent = 'fetching elevation tiles…'
+  loadingStatus.textContent = 'fetching elevation tiles…'
   loadingEl.classList.remove('hidden')
   dem = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom })
   terrain.setDem(dem)
@@ -796,7 +841,7 @@ async function fetchAndBuildDem() {
     clouds?.reroll() // a new view level deserves a fresh cloud layout
   } catch {} // a cosmetic cloud hiccup must never abort a terrain build
   refreshAll()
-  loadingEl.textContent = 'generating terrain…'
+  loadingStatus.textContent = 'generating terrain…'
   await regenerateTerrain()
   // pull the cartouche info for the new zone (async, non-blocking)
   if (params.groundInfo) groundInfo.load(params.demLat, params.demLon, dem)
@@ -811,10 +856,10 @@ async function loadRealTerrain() {
     await fetchAndBuildDem()
   } catch (err) {
     console.error('DEM load failed:', err)
-    loadingEl.textContent = 'elevation fetch failed — check connection'
+    loadingStatus.textContent = 'elevation fetch failed — check connection'
     setTimeout(() => {
       loadingEl.classList.add('hidden')
-      loadingEl.textContent = 'generating terrain…'
+      loadingStatus.textContent = 'generating terrain…'
     }, 2600)
   } finally {
     demBusy = false
@@ -833,7 +878,8 @@ function regenerateTerrain() {
       terrain.rebuild(params)
       terrain.rebuildRoughness(params)
       plinth.rebuild(terrain, params) // walls hug the new relief border
-      lake.rebuild({ seaY: terrain.mapUniforms.uSeaY.value, baseY: plinth.baseY, dem: terrain.dem, params }) // glass sea + altitude lakes
+      realWater.rebuild({ terrain, params }) // water simulation follows the new relief
+      cityLabels.rebuild({ dem: terrain.dem, terrain, params }) // city names re-drape on the new relief
       regenerateLabels()
       regenerateHud()
       gpxLayer.rebuild() // re-drape the track on the new relief
@@ -884,7 +930,9 @@ modes = new Modes({
       if (regionPlate) regionPlate.mesh.visible = v
       groundInfo.setVisible(v && params.groundInfo)
       traffic.setVisible(v)
-      lake.setVisible(v)
+      realWater.setVisible(v)
+      cityLabels.setVisible(v && params.cityLabels)
+      isoBtn?.setVisible(v) // the isometric shortcut only makes sense over the block
       scene.fog = v ? fogRef : null
     },
     setEffectsEnabled(v) {
@@ -1244,8 +1292,7 @@ function flyTrack() {
 
 scan = new ScanController(terrain.mapUniforms, TERRAIN_SIZE / 2)
 
-const lakeRebuild = () =>
-  lake.rebuild({ seaY: terrain.mapUniforms.uSeaY.value, baseY: plinth.baseY, dem: terrain.dem, params })
+const waterRebuild = () => realWater.rebuild({ terrain, params })
 
 // "individualiser la zone" — clip the map to the administrative boundary under
 // the view (continent/country/region/departement by zoom). The landform sits
@@ -1263,7 +1310,7 @@ async function applyRegionMode() {
     terrain.setRegionMask(null)
     disposeRegionPlate()
     plinth.setVisible(params.plinth && modes.mode === 'surface')
-    lakeRebuild() // restore the sea slab if the glass is on
+    waterRebuild() // restore the open-sea surface once the region clip is gone
     return
   }
   if (regionBusy) return
@@ -1273,7 +1320,7 @@ async function applyRegionMode() {
     if (!params.regionMode) return // user toggled off while fetching
     terrain.setRegionMask(r ? r.maskTexture : null)
     plinth.setVisible(false)
-    if (lake.sea) lake.sea.visible = false // the ocean slab would spill past the boundary
+    waterRebuild() // regionMode is on — the sim drops its sea (it would spill past the boundary) but keeps the lakes
     // the cut landform sits on a thin plate fitted to it with a small margin
     disposeRegionPlate()
     if (r) {
@@ -1316,6 +1363,11 @@ const topBar = buildTopBar({
   },
   // the Globe button always shows the WHOLE planet, spinning slowly
   enterOrbit: () => modes.enterOrbit(16000000),
+  // the "?" button replays the guided tour (lazy-loaded, tiny)
+  startTutorial: async () => {
+    const { startTutorial } = await import('./ui/tutorial.js')
+    startTutorial()
+  },
   // first click pulls the export stack in (modal + Recorder + mediabunny) —
   // bars.js shows a busy state on the button while the chunk downloads
   openExport: async () => {
@@ -1351,12 +1403,24 @@ buildBottomBar({
   openGpx: () => gpxFileInput.click(),
 })
 
+// bottom-right: one click to the isometric museum view — whole block, plate
+// and cartouche in frame (45° azimuth, museum-shelf elevation)
+// distance ×2 vs the first guess: at fov 30 the block's corner-on diagonal
+// (~79 units) needs ~107 units of camera range for plate + cartouche to fit
+const ISO = { pos: new THREE.Vector3(62, 52, 62), target: new THREE.Vector3(0, -1.5, 0) }
+isoBtn = buildIsoButton({
+  flyIso: () => {
+    if (modes.mode !== 'surface' || modes.busy) return
+    tour.active = false
+    flyTo(ISO.pos.clone(), ISO.target.clone())
+  },
+})
+
 const createPanel = buildCreatePanel({
   params,
   terrain,
   globe,
   clouds,
-  lake,
   plinth,
   modes,
   camera,
@@ -1384,7 +1448,12 @@ const createPanel = buildCreatePanel({
   applyMonochrome,
   resetLook,
   setDarkMode,
-  lakeRebuild,
+  waterRebuild,
+  realWater,
+  cityRebuild: () => cityLabels.rebuild({ dem: terrain.dem, terrain, params }),
+  applyTimeOfDay,
+  applyLightPreset,
+  lightPresets: Object.entries(LIGHT_PRESETS).map(([value, p]) => ({ value, label: p.label })),
   rebuildRamp: () => {
     terrain.rebuildRamp(params)
     globe.rebuildRamp(params)
@@ -1488,7 +1557,6 @@ aq = createAdaptiveQuality({
   composer,
   dof,
   dofPass,
-  lake,
   grain,
   applyShadowMode,
   announce: (m) => modes.announce(m),
@@ -1500,7 +1568,7 @@ aq = createAdaptiveQuality({
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, lake, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
 
 // real world is the default source — fetch its tiles on startup
 if (params.source === 'real') loadRealTerrain()
@@ -1640,12 +1708,21 @@ function tick() {
     })
   }
 
-  lake.update?.(dt) // drives the glass swell (lakeWaves) and heavy-frost warp
+  realWater.update(dt, sun) // water simulation: waves, caustics, sun glint
   aq.update(dt) // adaptive quality: sample FPS, step tiers when sustained
   composer.render(dt)
   if (recorder?.recording) recorder.captureFrame() // null until first export
 }
 tick()
+
+// first visit only: the guided tour introduces the UI once the boot view has
+// had a moment to settle (replayable anytime from the "?" in the top bar)
+setTimeout(async () => {
+  try {
+    const { maybeStartTutorial } = await import('./ui/tutorial.js')
+    maybeStartTutorial()
+  } catch {}
+}, 4500)
 
 window.addEventListener('resize', () => {
   if (loopPaused) return // an offline export owns the renderer size right now

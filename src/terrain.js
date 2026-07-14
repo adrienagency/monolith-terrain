@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { Simplex2, mulberry32, fbm, ridged, smoothstep, lerp } from './noise.js'
 import { sampleDem } from './dem.js'
 import { rampColorStops } from './palette.js'
+import { buildSeaMask, blurMask } from './sea-mask.js'
 
 export const TERRAIN_SIZE = 56
 
@@ -61,6 +62,11 @@ export class Terrain {
       // mapped through the DEM scale); uSeaY = -9999 disables (procedural)
       uSeaY: { value: -9999 },
       uSeaRange: { value: 1 },
+      // ocean mask (sea-mask.js): white = the real sea (connected to the map
+      // edge, or a large basin). The height test is ANDed with this so isolated
+      // sub-sea DEM pockets render as land valleys, not phantom lakes/inlets.
+      uSeaMask: { value: (this._seaPlaceholder = whiteTexture()) },
+      uSeaMaskOn: { value: 0 },
       // clip the map to the slab's rounded-rectangle footprint (world XZ) so the
       // block's vertical corners read soft and nothing overhangs the plinth walls
       uSlabHalf: { value: TERRAIN_SIZE / 2 },
@@ -142,6 +148,8 @@ uniform float uHeightPivot;
 uniform float uSlopeTint;
 uniform float uSeaY;
 uniform float uSeaRange;
+uniform sampler2D uSeaMask;
+uniform float uSeaMaskOn;
 uniform vec3 uOceanShallow;
 uniform vec3 uOceanMid;
 uniform vec3 uOceanDeep;
@@ -205,7 +213,14 @@ float scanHash(vec2 p) {
   // --- map colour, centralised for EVERY template: below sea level (elevation 0
   // = uSeaY) it is ALWAYS the ocean bathymetry ramp; the land hypsometric ramp
   // never bleeds underwater, so displacement noise below 0 keeps the sea colour.
-  bool underwater = vWorldPos.y < uSeaY;
+  // The ocean mask gates it: a sub-sea cell only paints as water where the mask
+  // says REAL sea (edge-connected / big basin), killing phantom coarse-zoom lakes.
+  float seaMask = 1.0;
+  if (uSeaMaskOn > 0.5) {
+    vec2 smUv = vWorldPos.xz / (uSlabHalf * 2.0) + 0.5;
+    seaMask = texture2D(uSeaMask, smUv).r;
+  }
+  bool underwater = vWorldPos.y < uSeaY && seaMask > 0.5;
   float hNorm = clamp((vWorldPos.y - uHeightRange.x) / max(uHeightRange.y - uHeightRange.x, 1e-4), 0.0, 1.0);
   vec3 mapCol;
   if (underwater) {
@@ -215,7 +230,13 @@ float scanHash(vec2 p) {
       ? mix(uOceanShallow, uOceanMid, d01 / 0.45)
       : mix(uOceanMid, uOceanDeep, (d01 - 0.45) / 0.55);
   } else {
-    float rampT = clamp(0.5 + (hNorm - uHeightPivot) * uHeightContrast, 0.0, 1.0);
+    // the pivot can never sink below sea level: with a low pivot the whole
+    // coastal band rides the top of the ramp and land loses its low tints
+    float pivotFloor = uSeaY > -9000.0
+      ? clamp((uSeaY - uHeightRange.x) / max(uHeightRange.y - uHeightRange.x, 1e-4), 0.0, 0.95) + 0.02
+      : 0.0;
+    float pivot = max(uHeightPivot, pivotFloor);
+    float rampT = clamp(0.5 + (hNorm - pivot) * uHeightContrast, 0.0, 1.0);
     mapCol = texture2D(uRampTex, vec2(rampT, 0.5)).rgb;
     mapCol = mix(mapCol, vec3(0.42, 0.31, 0.21), smoothstep(0.3, 0.8, slope) * uSlopeTint);
   }
@@ -533,12 +554,34 @@ if (uScanT >= 0.0 && (uScanType == 0 || uScanType == 3)) {
       const seaEps = Math.max(0.6 * demScale, 0.004)
       this.mapUniforms.uSeaY.value = (0 - this.dem.meanM) * demScale + seaEps
       this.mapUniforms.uSeaRange.value = Math.max((0 - this.dem.minM) * demScale, 1e-3)
+      this._buildSeaMask()
     } else {
       this.mapUniforms.uSeaY.value = -9999
+      this.mapUniforms.uSeaMaskOn.value = 0
     }
 
     this.mesh.geometry.dispose()
     this.mesh.geometry = geo
+  }
+
+  // Flood-fill the real ocean from the DEM and upload it as a mask texture
+  // (see sea-mask.js). Sampled in world XZ, same footprint as the region mask.
+  _buildSeaMask() {
+    const dem = this.dem
+    if (!dem || !dem.data) {
+      this.mapUniforms.uSeaMaskOn.value = 0
+      return
+    }
+    const { mask, size } = blurMask(buildSeaMask(dem), 1)
+    // one red channel; flipY off so texel row r ↔ world +z (matches the sampler)
+    const tex = new THREE.DataTexture(mask, size, size, THREE.RedFormat)
+    tex.flipY = false
+    tex.magFilter = THREE.LinearFilter
+    tex.minFilter = THREE.LinearFilter
+    tex.needsUpdate = true
+    this.mapUniforms.uSeaMask.value?.dispose?.()
+    this.mapUniforms.uSeaMask.value = tex
+    this.mapUniforms.uSeaMaskOn.value = 1
   }
 
   // Bake the elevation gradient (up to 8 stops) into a 1D ramp texture.
