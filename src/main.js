@@ -27,7 +27,7 @@ import { Modes, stepZoom } from './modes.js'
 import { createGoto } from './goto.js'
 import { GpxLayer, parseGpx } from './gpx.js'
 import { worldToLatLon } from './geo.js'
-import { TERRAIN_SIZE } from './terrain.js'
+import { TERRAIN_SIZE, SURFACE_FX } from './terrain.js'
 import { monochromeLook } from './palette.js'
 import { peakVantage } from './camera-poses.js'
 import { focusRayHit } from './autofocus.js'
@@ -107,6 +107,7 @@ const params = {
   bumpScale: 0.9,
   envMapIntensity: 0.2,
   liquidMetal: false, // "Fancy" look — chrome the relief (Scan panel)
+  surfaceFx: 0, // "Fancy" look — animated surface shader id, 0 = off (Scan panel)
 
   // camera & depth of field
   fov: 30,
@@ -1607,6 +1608,12 @@ const scanPanel = buildScanPanel({
     params.liquidMetal = v
     terrain.setLiquidMetal(v, params)
   },
+  surfaceFx: SURFACE_FX.map(({ id, label }) => ({ value: String(id), label })),
+  getSurfaceFx: () => params.surfaceFx,
+  setSurfaceFx: (id) => {
+    params.surfaceFx = id | 0
+    terrain.setSurfaceFx(params.surfaceFx)
+  },
 })
 
 // auto-fold: expanding a section in one panel folds its dock neighbour so a
@@ -1755,6 +1762,7 @@ function tick() {
     cone.update(dt, t, mouse, params)
     clouds.update(dt, params, camera)
     traffic.update(dt)
+    terrain.tickSurfaceFx(dt) // advance the animated Fancy surface shader, if any
   }
   peaksLayer.update(camera, window.innerWidth, window.innerHeight, modes.mode === 'surface')
 

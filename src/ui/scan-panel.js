@@ -57,5 +57,19 @@ export function buildScanPanel(ctx) {
   note.style.marginTop = '4px'
   sFancy.body.append(note)
 
+  // animated procedural shaders painted onto the relief surface (like Liquid
+  // metal, but coloured & moving) — self-contained GLSL, no dependency
+  sFancy.body.append(
+    select({
+      label: 'Surface shader',
+      options: [{ value: '', label: 'None' }, ...ctx.surfaceFx],
+      get: () => (ctx.getSurfaceFx() ? String(ctx.getSurfaceFx()) : ''),
+      set: (v) => ctx.setSurfaceFx(v ? parseInt(v, 10) : 0),
+    })
+  )
+  const fxNote = el('div', 'ce-label', 'An animated shader running on the relief surface.')
+  fxNote.style.marginTop = '4px'
+  sFancy.body.append(fxNote)
+
   return panel
 }
