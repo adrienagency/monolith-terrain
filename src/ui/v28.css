@@ -1175,3 +1175,70 @@ body.ce-noui .ce-rec {
   color: var(--ce-muted);
   margin: 8px 0 1px;
 }
+
+/* ------------------------------------------- relief-material vignette picker */
+.ce-mat-pick {
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 2px 0 4px;
+  padding-right: 2px;
+}
+.ce-mat-cat {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ce-muted);
+  margin: 9px 2px 4px;
+}
+.ce-mat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.ce-mat-vig {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: center;
+}
+.ce-mat-vig-img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--ce-track);
+  border: 1.5px solid var(--ce-hairline);
+  transition: border-color 0.15s, transform 0.12s;
+}
+.ce-mat-vig-none {
+  background:
+    repeating-linear-gradient(45deg, var(--ce-track) 0 5px, var(--ce-hover) 5px 10px);
+}
+.ce-mat-vig:hover .ce-mat-vig-img {
+  border-color: var(--ce-accent);
+  transform: translateY(-1px);
+}
+.ce-mat-vig.on .ce-mat-vig-img {
+  border-color: var(--ce-accent);
+  box-shadow: 0 0 0 2px var(--ce-accent) inset;
+}
+.ce-mat-vig-name {
+  font-size: 9.5px;
+  line-height: 1.15;
+  color: var(--ce-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ce-mat-vig.on .ce-mat-vig-name {
+  color: var(--ce-ink);
+  font-weight: 600;
+}

@@ -51,7 +51,7 @@ import { makeSocleEnvMap } from './socle-env.js'
 import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
 import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, stripFromLook, loadUserTemplates, saveUserTemplates } from './templates-user.js'
 import { DroneCam } from './drone-cam.js'
-import { makeGradientTexture, deriveBgColors, BG_MODES } from './background.js'
+import { makeGradientTexture, deriveBgColors, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
 import { refreshAll } from './ui/kit.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCredits } from './ui/bars.js'
@@ -184,6 +184,7 @@ const params = {
   // The gradient's top colour is bgColorA — SEPARATE from the fog colour, so a
   // gradient never washes out the fog.
   bgMode: 'solid',
+  bgEnv: '', // '' = none; otherwise an HDRI sky id (overrides the solid/gradient backdrop)
   bgColorA: '#e9eef4',
   bgColorB: '#dfe6ef',
   bgColorC: '#c7d2df',
@@ -337,6 +338,11 @@ const scene = new THREE.Scene()
 // background can be a flat colour or a gradient texture (disposed on change)
 let _bgTex = null
 function applyBackground() {
+  // an HDRI sky, when chosen, takes over the whole backdrop + lighting
+  if (params.bgEnv) { applyEnvironment(); return }
+  // no HDRI → make sure neutral IBL is back (a sky may have replaced it)
+  if (scene.environment !== roomEnvTex) scene.environment = roomEnvTex
+  _envBg = null
   if (_bgTex) { _bgTex.dispose(); _bgTex = null }
   if (!params.bgMode || params.bgMode === 'solid') {
     scene.background = new THREE.Color(params.fogColor) // solid backdrop = the fog colour
@@ -344,6 +350,31 @@ function applyBackground() {
     _bgTex = makeGradientTexture({ mode: params.bgMode, a: params.bgColorA, b: params.bgColorB, c: params.bgColorC, angle: params.bgAngle })
     scene.background = _bgTex
   }
+}
+// HDRI sky environment: the equirect drives both the backdrop and the image-based
+// lighting (reflections). Textures are lazy-loaded + cached. Clearing bgEnv
+// restores the neutral RoomEnvironment and the gradient/solid backdrop.
+const _envCache = {} // id → { bg: equirect texture, env: PMREM texture }
+let _envBg = null // currently applied equirect background (for restore bookkeeping)
+function applyEnvironment() {
+  const meta = ENV_BY_ID[params.bgEnv]
+  if (!meta) { params.bgEnv = ''; scene.environment = roomEnvTex; applyBackground(); return }
+  const cached = _envCache[meta.id]
+  const use = (entry) => {
+    if (_bgTex) { _bgTex.dispose(); _bgTex = null }
+    _envBg = entry.bg
+    scene.background = entry.bg
+    scene.environment = entry.env
+  }
+  if (cached) { use(cached); return }
+  new THREE.TextureLoader().load(meta.img, (tex) => {
+    tex.mapping = THREE.EquirectangularReflectionMapping
+    tex.colorSpace = THREE.SRGBColorSpace
+    const env = pmrem.fromEquirectangular(tex).texture
+    const entry = { bg: tex, env }
+    _envCache[meta.id] = entry
+    if (params.bgEnv === meta.id) use(entry) // still selected once it loads
+  })
 }
 // pull a harmonious gradient out of the current map palette (colour theory)
 function autoBgColours() {
@@ -375,11 +406,12 @@ controls.minDistance = 6
 controls.maxDistance = 150 // room to frame the whole slab before the orbit gate
 controls.update()
 
-// image-based lighting for believable PBR speculars
+// image-based lighting for believable PBR speculars. Kept alive (not disposed)
+// so an HDRI sky environment can be PMREM-processed on demand — see applyEnvironment.
 const pmrem = new THREE.PMREMGenerator(renderer)
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+const roomEnvTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+scene.environment = roomEnvTex
 scene.environmentIntensity = params.envLight
-pmrem.dispose()
 
 // ------------------------------------------------------------------ lights
 
@@ -1433,6 +1465,7 @@ function applyUserTemplate(tmpl) {
     clouds.setVisible(params.cloudsEnabled && modes.mode === 'surface')
   }
   shadersRefreshFn() // rebuild the relief-material sub-controls (Scale/Bump/Roughness/Noise) for the applied look
+  bgRefreshFn() // resync the Background HDRI-sky highlight to the applied look
   refreshAll()
 }
 
@@ -1749,7 +1782,9 @@ isoBtn = buildIsoButton({
   },
 })
 
+let bgRefreshFn = () => {} // re-renders the Background HDRI picker highlight after a template/reset (declared before the panel build so registerBgRefresh isn't a TDZ access)
 const createPanel = buildCreatePanel({
+  registerBgRefresh: (fn) => { bgRefreshFn = fn },
   params,
   terrain,
   globe,
@@ -1818,6 +1853,9 @@ const createPanel = buildCreatePanel({
   applyBackground, // solid / gradient scene background
   autoBgColours, // derive gradient stops from the map palette
   bgModes: BG_MODES,
+  environments: ENVIRONMENTS, // HDRI sky list for the Background picker
+  getBgEnv: () => params.bgEnv || '',
+  setBgEnv: (id) => { params.bgEnv = id || ''; applyBackground() },
   setFogEnabled: (v) => { scene.fog = v && modes.mode === 'surface' ? fogRef : null },
   applyPlinthMaterial, // socle PBR / glass material picker (Block panel)
   setGroundInfo: (v) => {
@@ -1885,15 +1923,8 @@ const shadersPanel = buildShadersPanel({
     if (params.surfaceFx === id) terrain.applyFxParams(params.fx[id]) // speed/opacity/blend re-pushed
   },
   // terrain MATERIAL — turns the WHOLE relief into a material (sibling of Liquid
-  // metal): premium transmission glass, or an opaque wood/carbon swap
-  surfaceMatList: [
-    { value: 'glass', label: 'Glass (premium)' },
-    { value: 'sand', label: 'Sand (moving)' },
-    { value: 'grass', label: 'Grass' },
-    { value: 'wood', label: 'Wood' },
-    { value: 'fabric', label: 'Fabric — denim' },
-    { value: 'carbon', label: 'Carbon fibre' },
-  ],
+  // metal): the Shaders-panel picker builds its list straight from the shared
+  // material catalog (src/material-catalog.js), grouped into vignette categories.
   getSurfaceMat: () => params.terrainSurfaceMat,
   setSurfaceMat: (id) => {
     params.terrainSurfaceMat = id || ''

@@ -87,3 +87,16 @@ export const BG_MODES = [
   { value: 'radial', label: 'Radial gradient' },
   { value: 'mesh', label: 'Mesh gradient' },
 ]
+
+// HDRI sky environments — a real panorama used both as the scene backdrop and as
+// image-based lighting (reflections on glass/metal relief). Selecting one takes
+// over from the solid/gradient backdrop; clearing it restores the gradient. The
+// equirect .jpg is a tonemapped CC0 sky (ambientCG); thumb is its preview.
+// Structured as a list so new skies are a one-line addition.
+export const ENVIRONMENTS = [
+  { id: 'daysky062b', label: 'Jour clair', img: 'textures/env/daysky062b.jpg', thumb: 'textures/env/daysky062b-thumb.jpg' },
+  { id: 'daysky064b', label: 'Jour voilé', img: 'textures/env/daysky064b.jpg', thumb: 'textures/env/daysky064b-thumb.jpg' },
+  { id: 'eveningsky016b', label: 'Soir doré', img: 'textures/env/eveningsky016b.jpg', thumb: 'textures/env/eveningsky016b-thumb.jpg' },
+  { id: 'eveningsky018a', label: 'Crépuscule', img: 'textures/env/eveningsky018a.jpg', thumb: 'textures/env/eveningsky018a-thumb.jpg' },
+]
+export const ENV_BY_ID = Object.fromEntries(ENVIRONMENTS.map((e) => [e.id, e]))

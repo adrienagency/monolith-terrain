@@ -28,8 +28,8 @@ export const TEMPLATE_KEYS = [
   'color', 'roughness', 'roughnessVariation', 'roughnessScale', 'bumpScale', 'envMapIntensity',
   // post FX + fog
   'exposure', 'contrast', 'saturation', 'vignette', 'grain', 'fogNear', 'fogFar', 'fogColor', 'fogEnabled',
-  // background (solid / gradient)
-  'bgMode', 'bgColorA', 'bgColorB', 'bgColorC', 'bgAngle',
+  // background (solid / gradient / HDRI sky)
+  'bgMode', 'bgColorA', 'bgColorB', 'bgColorC', 'bgAngle', 'bgEnv',
   // camera lens / depth-of-field + shadow look (NOT position/location)
   'fov', 'autoFocus', 'focusDistance', 'focusRange', 'bokehScale', 'shadowMode',
   // socle (block)

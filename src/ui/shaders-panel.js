@@ -7,6 +7,7 @@
 import { el, section, toggle, select, color, slider } from './kit.js'
 import { Panel } from './shell.js'
 import { BLEND_MODES } from '../fx-meta.js'
+import { materialsByCategory } from '../material-catalog.js'
 
 const ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="9.5" r="5.5"/><circle cx="15" cy="14.5" r="5.5"/></svg>'
@@ -35,18 +36,45 @@ export function buildShadersPanel(ctx) {
     }
   }
 
-  // --- Material: turn the WHOLE relief into glass / wood / carbon (a full
-  // material swap, like Liquid metal — not a shader overlay) ---
-  s.body.append(
-    select({
-      label: 'Relief material',
-      options: [{ value: '', label: 'Topographic (none)' }, ...ctx.surfaceMatList],
-      get: () => ctx.getSurfaceMat() || '',
-      set: (v) => { ctx.setSurfaceMat(v); renderMat() },
-    })
-  )
+  // --- Material: turn the WHOLE relief into a real PBR material (glass, rock,
+  // sand, marble, …). A vignette picker grouped by category so you choose by
+  // look, not by a word — a full material swap, like Liquid metal ---
+  s.body.append(el('div', 'ce-fx-head', 'Relief material'))
+  const matPick = el('div', 'ce-mat-pick')
+  s.body.append(matPick)
   const matCtl = el('div', 'ce-fx-controls')
   s.body.append(matCtl)
+
+  // build the vignette grid: a "None" tile + one titled group per category
+  function renderPicker() {
+    matPick.replaceChildren()
+    const cur = ctx.getSurfaceMat() || ''
+    const tile = (id, label, media) => {
+      const b = el('button', `ce-mat-vig${cur === id ? ' on' : ''}`)
+      b.type = 'button'
+      b.setAttribute('data-tip', label)
+      b.append(media, el('span', 'ce-mat-vig-name', label))
+      b.addEventListener('click', () => { ctx.setSurfaceMat(id); renderPicker(); renderMat() })
+      return b
+    }
+    // None / topographic
+    const none = el('span', 'ce-mat-vig-img ce-mat-vig-none')
+    const noneGrid = el('div', 'ce-mat-grid')
+    noneGrid.append(tile('', 'Aucun', none))
+    matPick.append(noneGrid)
+    // categories
+    for (const cat of materialsByCategory()) {
+      matPick.append(el('div', 'ce-mat-cat', cat.label))
+      const grid = el('div', 'ce-mat-grid')
+      for (const m of cat.items) {
+        let media
+        if (m.thumb) { media = el('img', 'ce-mat-vig-img'); media.src = m.thumb; media.alt = m.label; media.loading = 'lazy' }
+        else { media = el('span', 'ce-mat-vig-img'); if (m.swatch) media.style.background = m.swatch }
+        grid.append(tile(m.id, m.label, media))
+      }
+      matPick.append(grid)
+    }
+  }
   function renderMat() {
     matCtl.replaceChildren()
     const id = ctx.getSurfaceMat()
@@ -61,7 +89,7 @@ export function buildShadersPanel(ctx) {
         slider({ label: 'Scale (tiling)', min: 0.3, max: 4, step: 0.05, get: () => ctx.getMatScale(), set: (v) => ctx.setMatScale(v) }),
         slider({ label: 'Bump', min: 0, max: 3, step: 0.05, get: () => ctx.getSurfaceMatBump(), set: (v) => ctx.setSurfaceMatBump(v) }),
         slider({ label: 'Roughness', min: 0, max: 1, step: 0.01, get: () => ctx.getMatRoughness(), set: (v) => ctx.setMatRoughness(v) }),
-        slider({ label: 'Noise (patchy 3D)', min: 0, max: 1, step: 0.01, get: () => ctx.getMatNoise(), set: (v) => ctx.setMatNoise(v) })
+        slider({ label: 'Noise (révèle le dessous)', min: 0, max: 1, step: 0.01, get: () => ctx.getMatNoise(), set: (v) => ctx.setMatNoise(v) })
       )
     }
   }
@@ -99,9 +127,11 @@ export function buildShadersPanel(ctx) {
   }
 
   renderLm()
+  renderPicker()
   renderMat()
   renderFx()
-  // let main.js re-render these when an exclusivity change flips LM ↔ relief material
-  ctx.registerRefresh?.(() => { renderLm(); renderMat(); renderFx() })
+  // let main.js re-render these when an exclusivity change flips LM ↔ relief
+  // material, or a template swaps the material out from under the picker
+  ctx.registerRefresh?.(() => { renderLm(); renderPicker(); renderMat(); renderFx() })
   return panel
 }

@@ -1,3 +1,14 @@
-Poly Haven CC0
-ambientCG Ground080, CC0
-ambientCG Grass007, CC0
+All textures and HDRIs here are CC0 (public domain) — no attribution required.
+Credits kept for provenance.
+
+Poly Haven — CC0
+ambientCG — CC0:
+  Ground080 (sand), Grass007 (grass), Ground081 (terre)
+  Rock036, Rock058, Rock063, Rock064, Rocks011
+  Marble006, Marble021, Onyx002
+  Snow014, Snow015
+  Fabric048, Fabric062
+  Metal042A, Metal048C
+
+HDRI skies — ambientCG, CC0 (tonemapped JPG equirect, in env/):
+  DaySkyHDRI062B, DaySkyHDRI064B, EveningSkyHDRI016B, EveningSkyHDRI018A

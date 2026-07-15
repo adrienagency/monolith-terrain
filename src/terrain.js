@@ -4,21 +4,19 @@ import { sampleDem } from './dem.js'
 import { rampColorStops } from './palette.js'
 import { buildSeaMask, blurMask } from './sea-mask.js'
 import { TEXTURE_BUILDERS } from './material-textures.js'
+import { MATERIALS } from './material-catalog.js'
 import { MeshTransmissionMaterial } from './vendor/MeshTransmissionMaterial.js'
 
-// full-relief opaque material modes (glass is handled separately). Each drapes
-// its texture stack over the whole terrain and fades the hypsometric paint.
-//   dir  → real CC0 PBR set lazy-loaded from public/textures (Poly Haven, CC0)
+// full-relief opaque material modes (glass is handled separately). Derived from
+// the shared material catalog so a new relief material is a single entry there —
+// this map, the picker, and templates all pick it up automatically. Each preset
+// drapes its texture stack over the terrain and fades the hypsometric paint.
+//   dir  → real CC0 PBR set lazy-loaded from public/textures/<id>/
 //   tex  → procedural CanvasTexture stack (material-textures.js)
-const OPAQUE_TERRAIN_MATS = {
-  wood: { tex: 'wood', metalness: 0, roughness: 0.7, normalScale: 1.0, envMapIntensity: 0.5, repeat: 4 },
-  fabric: { dir: 'textures/fabric/', metalness: 0, roughness: 0.92, normalScale: 1.2, envMapIntensity: 0.35, repeat: 6 },
-  carbon: { tex: 'carbon', metalness: 0.45, roughness: 0.5, normalScale: 1.2, envMapIntensity: 1.3, repeat: 10 },
-  // real CC0 sand PBR (ambientCG Ground080), kept fully PBR but drifting slowly
-  // like blowing/moving sand — flow scrolls the maps each frame
-  sand: { dir: 'textures/sand/', metalness: 0, roughness: 0.95, normalScale: 1.3, envMapIntensity: 0.5, repeat: 7, flow: 0.012 },
-  grass: { dir: 'textures/grass/', metalness: 0, roughness: 0.9, normalScale: 1.4, envMapIntensity: 0.35, repeat: 8 },
-}
+//   flow → >0 scrolls the maps each frame (moving sand)
+const OPAQUE_TERRAIN_MATS = Object.fromEntries(
+  MATERIALS.filter((m) => m.kind === 'dir' || m.kind === 'tex').map((m) => [m.id, m])
+)
 
 // Tiling density scales with the DEM zoom so a relief material never reads as
 // obvious repetition when the whole continent is in frame (coarse zoom) yet
@@ -159,10 +157,13 @@ export class Terrain {
       uScanOrigin: { value: new THREE.Vector2(0, 0) }, // scan epicenter, world XZ
       uScanMax: { value: TERRAIN_SIZE * 0.75 }, // radius that guarantees full coverage
       // material noise: a relief material can be broken up by procedural noise —
-      // lifted into 3D where the noise is high, punched transparent where it's low
+      // lifted into 3D where the noise is high, and FADED AWAY where it's low so
+      // the layer underneath (the hypsometric map paint / a surface shader) shows
+      // through. The transition is soft (smoothstep band), never a hard cut.
       uMatNoiseOn: { value: 0 },
-      uMatNoiseAmt: { value: 0 }, // displacement height
-      uMatNoiseCut: { value: 0 }, // transparency threshold (higher = more holes)
+      uMatNoiseAmt: { value: 0 }, // displacement height of the raised material patches
+      uMatNoiseCut: { value: 0 }, // reveal threshold (higher = more of the map shows through)
+      uMatNoiseSoft: { value: 0.2 }, // half-width of the smoothstep band → diffuse edges
       uMatNoiseScale: { value: 0.5 }, // patch frequency in world units
     }
     this.rebuildRamp(params)
@@ -181,6 +182,8 @@ uniform vec2 uScanOrigin;
 uniform float uScanMax;
 uniform float uMatNoiseOn;
 uniform float uMatNoiseAmt;
+uniform float uMatNoiseCut;
+uniform float uMatNoiseSoft;
 uniform float uMatNoiseScale;
 float mnHash(vec2 p){ p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
 float mnNoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(mnHash(i), mnHash(i+vec2(1.0,0.0)), f.x), mix(mnHash(i+vec2(0.0,1.0)), mnHash(i+vec2(1.0,1.0)), f.x), f.y); }`
@@ -188,8 +191,14 @@ float mnNoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); ret
         .replace(
           '#include <begin_vertex>',
           `#include <begin_vertex>
-// material noise: lift the relief material into 3D where the noise is high
-if (uMatNoiseOn > 0.5) { transformed.y += uMatNoiseAmt * (mnNoise(transformed.xz * uMatNoiseScale) - 0.35); }
+// material noise: raise the relief material into 3D where the noise is high, and
+// leave the low areas at the base height so the revealed map reads flat underneath.
+// Same soft band as the fragment reveal so the geometry and the paint agree.
+if (uMatNoiseOn > 0.5) {
+  float mn = mnNoise(transformed.xz * uMatNoiseScale);
+  float matMask = smoothstep(uMatNoiseCut - uMatNoiseSoft, uMatNoiseCut + uMatNoiseSoft, mn);
+  transformed.y += uMatNoiseAmt * matMask * mn;
+}
 // scan wave physically lifts the surface as it sweeps outward from the scan
 // origin -- only the radial scans (radar, sonar) displace geometry
 if (uScanT >= 0.0 && (uScanType == 0 || uScanType == 3)) {
@@ -210,6 +219,7 @@ vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
 varying vec3 vWorldPos;
 uniform float uMatNoiseOn;
 uniform float uMatNoiseCut;
+uniform float uMatNoiseSoft;
 uniform float uMatNoiseScale;
 float mnHash(vec2 p){ p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
 float mnNoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(mnHash(i), mnHash(i+vec2(1.0,0.0)), f.x), mix(mnHash(i+vec2(0.0,1.0)), mnHash(i+vec2(1.0,1.0)), f.x), f.y); }
@@ -391,9 +401,8 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
           '#include <color_fragment>',
           `#include <color_fragment>
 {
-  // --- material noise: punch the relief material transparent where the noise
-  // falls below the cut (paired with the vertex lift → patchy 3D + holes)
-  if (uMatNoiseOn > 0.5 && mnNoise(vWorldPos.xz * uMatNoiseScale) < uMatNoiseCut) discard;
+  // --- material noise reveal is applied further down at the paint mix (it fades
+  // the relief material toward the map/shader underneath — see uMatNoiseOn there)
   // --- region cutout: clip the relief to the admin-boundary mask (white
   // inside / black outside, rendered over the DEM footprint in world XZ by
   // region-mask.js) so the landform stands alone like a country cutout. The
@@ -461,7 +470,20 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     mapCol = mix(mapCol, vec3(0.42, 0.31, 0.21), smoothstep(0.3, 0.8, slope) * uSlopeTint);
   }
   float fxShade = clamp(luma * 2.4, 0.2, 1.4);
-  diffuseColor.rgb = mix(diffuseColor.rgb, mapCol * fxShade, uTint);
+  // material noise reveal: where the noise is below the (soft) cut, push the tint
+  // back toward 1 so the map paint shows through the relief material — a diffuse,
+  // holeless dissolve that lets you see the layer underneath. The revealed map is
+  // lifted back toward its natural brightness (not shaded by the material albedo)
+  // so it reads as the real map/shader colour, never a muddy hole.
+  float effTint = uTint;
+  float paintShade = fxShade;
+  if (uMatNoiseOn > 0.5) {
+    float mn = mnNoise(vWorldPos.xz * uMatNoiseScale);
+    float reveal = 1.0 - smoothstep(uMatNoiseCut - uMatNoiseSoft, uMatNoiseCut + uMatNoiseSoft, mn);
+    effTint = mix(uTint, 1.0, reveal);
+    paintShade = mix(fxShade, 1.0, reveal);
+  }
+  diffuseColor.rgb = mix(diffuseColor.rgb, mapCol * paintShade, effTint);
 
   // Fancy surface shader paints OVER the final surface — the hypsometric map OR
   // a relief material (wood/carbon/...). Materials sit BELOW the shaders, so a
@@ -1074,13 +1096,15 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   setTerrainMatRoughness(r) {
     if (this._matPreset && this.materialMode !== 'glass') this.material.roughness = r
   }
-  // procedural noise on the relief material: 3D lift where high, transparent
-  // (holes) where low. 0 = off. Only meaningful for an opaque relief material.
+  // procedural noise on the relief material: 3D lift where the noise is high, and
+  // a soft dissolve to the map/shader underneath where it's low. 0 = off. Only
+  // meaningful for an opaque relief material.
   setMatNoise(v) {
     const on = v > 0.001 && this._matPreset && this.materialMode !== 'glass'
     this.mapUniforms.uMatNoiseOn.value = on ? 1 : 0
-    this.mapUniforms.uMatNoiseAmt.value = v * 1.2
-    this.mapUniforms.uMatNoiseCut.value = v * 0.5
+    this.mapUniforms.uMatNoiseAmt.value = v * 1.0 // raised-patch height
+    this.mapUniforms.uMatNoiseCut.value = v * 0.55 // more strength → more map shows through
+    this.mapUniforms.uMatNoiseSoft.value = 0.12 + v * 0.16 // diffuse edge, softer at higher strength
   }
   // drift the relief material's maps for "moving sand" (keeps the PBR intact —
   // it's the same textures, just scrolling). Called each frame from the loop.

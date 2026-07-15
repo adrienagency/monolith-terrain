@@ -169,6 +169,33 @@ export function buildCreatePanel(ctx) {
   // The scene backdrop behind the block. Changing it moves the fog to the same
   // colour, so the relief always fades into its own background.
   const sBg = addTo(section('Background'))
+  // --- Environnement (HDRI sky) — a vignette picker; selecting a sky takes over
+  // the backdrop + lighting, clearing it returns to the solid/gradient below ---
+  sBg.body.append(el('div', 'ce-fx-head', 'Environnement (HDRI)'))
+  const envPick = el('div', 'ce-mat-pick')
+  sBg.body.append(envPick)
+  function renderEnvPicker() {
+    envPick.replaceChildren()
+    const cur = ctx.getBgEnv()
+    const grid = el('div', 'ce-mat-grid')
+    const tile = (id, label, media) => {
+      const b = el('button', `ce-mat-vig${cur === id ? ' on' : ''}`)
+      b.type = 'button'
+      b.setAttribute('data-tip', label)
+      b.append(media, el('span', 'ce-mat-vig-name', label))
+      b.addEventListener('click', () => { ctx.setBgEnv(id); renderEnvPicker() })
+      return b
+    }
+    const none = el('span', 'ce-mat-vig-img ce-mat-vig-none')
+    grid.append(tile('', 'Aucun', none))
+    for (const e of ctx.environments) {
+      const img = el('img', 'ce-mat-vig-img'); img.src = e.thumb; img.alt = e.label; img.loading = 'lazy'
+      grid.append(tile(e.id, e.label, img))
+    }
+    envPick.append(grid)
+  }
+  renderEnvPicker()
+  ctx.registerBgRefresh?.(renderEnvPicker) // let a template/reset resync the sky highlight
   sBg.body.append(
     select({ label: 'Type', options: ctx.bgModes, get: () => params.bgMode, set: (v) => {
       const wasSolid = params.bgMode === 'solid' || !params.bgMode
