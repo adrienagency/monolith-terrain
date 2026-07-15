@@ -11,9 +11,12 @@ import { MeshTransmissionMaterial } from './vendor/MeshTransmissionMaterial.js'
 //   dir  → real CC0 PBR set lazy-loaded from public/textures (Poly Haven, CC0)
 //   tex  → procedural CanvasTexture stack (material-textures.js)
 const OPAQUE_TERRAIN_MATS = {
-  wood: { dir: 'textures/wood/', metalness: 0, roughness: 0.75, normalScale: 1.0, envMapIntensity: 0.55, repeat: 3.5 },
+  wood: { tex: 'wood', metalness: 0, roughness: 0.7, normalScale: 1.0, envMapIntensity: 0.5, repeat: 4 },
   fabric: { dir: 'textures/fabric/', metalness: 0, roughness: 0.92, normalScale: 1.2, envMapIntensity: 0.35, repeat: 6 },
   carbon: { tex: 'carbon', metalness: 0.45, roughness: 0.5, normalScale: 1.2, envMapIntensity: 1.3, repeat: 10 },
+  // real CC0 sand PBR (ambientCG Ground080), kept fully PBR but drifting slowly
+  // like blowing/moving sand — flow scrolls the maps each frame
+  sand: { dir: 'textures/sand/', metalness: 0, roughness: 0.95, normalScale: 1.3, envMapIntensity: 0.5, repeat: 7, flow: 0.006 },
 }
 
 // Tiling density scales with the DEM zoom so a relief material never reads as
@@ -990,6 +993,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       m.envMapIntensity = preset.envMapIntensity ?? params.envMapIntensity ?? 1
       m.color.set('#ffffff') // let the albedo map show its true colour
       this._matPreset = preset
+      this._matFlow = preset.flow ?? 0 // >0 → drifting (moving sand)
       this._matZoom = params.demZoom
       this.mapUniforms.uTint.value = 0 // drop the hypsometric paint → pure material
     } else {
@@ -1002,6 +1006,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       m.envMapIntensity = params.envMapIntensity ?? 1
       m.color.set(params.color ?? '#ffffff')
       this._matPreset = null
+      this._matFlow = 0
       // detach the material's (possibly shared, cached) roughnessMap BEFORE
       // rebuildRoughness so it isn't disposed out from under the texture cache
       m.roughnessMap = null
@@ -1043,6 +1048,15 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   }
   setTerrainMatRoughness(r) {
     if (this._matPreset && this.materialMode !== 'glass') this.material.roughness = r
+  }
+  // drift the relief material's maps for "moving sand" (keeps the PBR intact —
+  // it's the same textures, just scrolling). Called each frame from the loop.
+  tickSurfaceMaterial(dt) {
+    if (!this._matFlow || this.materialMode === 'glass') return
+    const d = this._matFlow * dt
+    for (const t of [this.material.map, this.material.normalMap, this.material.roughnessMap]) {
+      if (t) { t.offset.x += d; t.offset.y += d * 0.6 }
+    }
   }
   _makeGlassMaterial() {
     this.glassMaterial = new MeshTransmissionMaterial({

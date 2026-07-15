@@ -26,10 +26,12 @@ export const TEMPLATE_KEYS = [
   'shadowSoftness', 'timeOfDay', 'shadowMode',
   // surface material scalars
   'color', 'roughness', 'roughnessVariation', 'roughnessScale', 'bumpScale', 'envMapIntensity',
-  // post FX
-  'exposure', 'contrast', 'saturation', 'vignette', 'grain', 'fogNear', 'fogFar', 'fogColor',
+  // post FX + fog
+  'exposure', 'contrast', 'saturation', 'vignette', 'grain', 'fogNear', 'fogFar', 'fogColor', 'fogEnabled',
   // background (solid / gradient)
-  'bgMode', 'bgColorB', 'bgColorC', 'bgAngle',
+  'bgMode', 'bgColorA', 'bgColorB', 'bgColorC', 'bgAngle',
+  // camera lens / depth-of-field + shadow look (NOT position/location)
+  'fov', 'autoFocus', 'focusDistance', 'focusRange', 'bokehScale', 'shadowMode',
   // socle (block)
   'plinth', 'plinthDepth', 'plinthColor', 'plinthFinish', 'plinthPbr', 'plinthGlass',
   'plinthGlassDiffusion', 'plinthGlassProjection', 'plinthGlassBump', 'plinthBump',
@@ -56,19 +58,27 @@ export function captureLook(params) {
 }
 
 // ---- file (export / import) ----
+// A template carries a colour STRIP (vignette) — an array of hex swatches from
+// its palette — instead of a screenshot thumbnail. `shaders` flags whether it
+// uses a surface shader / liquid metal, which sorts it into a category.
 export function serializeTemplate(t) {
-  return JSON.stringify({ format: FORMAT, version: VERSION, name: t.name, thumb: t.thumb, look: t.look }, null, 0)
+  return JSON.stringify({ format: FORMAT, version: VERSION, name: t.name, strip: t.strip, shaders: t.shaders, look: t.look }, null, 0)
 }
-// only accept a thumbnail that is a real base64 image data URL — an imported
-// .json is untrusted, and the value is later used as an <img src>, so a crafted
-// string could otherwise smuggle markup/handlers into the DOM.
-const THUMB_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/
+const HEX_RE = /^#[0-9a-fA-F]{3,8}$/
 export function parseTemplate(text) {
   let o
   try { o = JSON.parse(text) } catch { return null }
   if (!o || o.format !== FORMAT || !o.look || typeof o.look !== 'object') return null
-  const thumb = typeof o.thumb === 'string' && THUMB_RE.test(o.thumb) ? o.thumb : null
-  return { name: String(o.name || 'Imported').slice(0, 40), thumb, look: o.look }
+  const strip = Array.isArray(o.strip) ? o.strip.filter((c) => typeof c === 'string' && HEX_RE.test(c)).slice(0, 8) : []
+  return { name: String(o.name || 'Imported').slice(0, 40), strip, shaders: !!o.shaders, look: o.look }
+}
+
+// derive the vignette strip + shader category from a captured look
+export function stripFromLook(look = {}) {
+  const stops = Array.isArray(look.rampStops) ? look.rampStops : []
+  const strip = stops.map((s) => s && s.c).filter((c) => typeof c === 'string' && HEX_RE.test(c))
+  const shaders = (look.surfaceFx | 0) > 0 || !!look.liquidMetal || (look.terrainSurfaceMat && look.terrainSurfaceMat !== '')
+  return { strip: strip.length ? strip : ['#cbd5e1'], shaders }
 }
 
 // ---- localStorage list ----

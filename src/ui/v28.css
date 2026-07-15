@@ -397,51 +397,27 @@ body.dark {
   color: var(--ce-muted);
 }
 
-/* user template cards (saved looks with a thumbnail) */
-.ce-utpl-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  margin: 8px 0 4px;
+/* user template cards — colour-strip vignettes grouped by category */
+.ce-utpl-cat {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ce-muted);
+  margin: 10px 2px 2px;
 }
-.ce-utpl {
+.ce-utpl-card {
   position: relative;
-  border: 1px solid var(--ce-hairline);
-  border-radius: 10px;
-  overflow: hidden;
-  cursor: pointer;
-  background: var(--ce-hover);
-  transition: border-color 0.15s;
-}
-.ce-utpl:hover {
-  border-color: var(--ce-accent);
-}
-.ce-utpl-img {
-  display: block;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-  background: var(--ce-track);
-}
-.ce-utpl-name {
-  display: block;
-  padding: 4px 7px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--ce-ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .ce-utpl-x,
 .ce-utpl-dl {
   position: absolute;
-  top: 4px;
+  top: 5px;
   width: 18px;
   height: 18px;
   border: 0;
   border-radius: 5px;
-  background: rgba(20, 22, 26, 0.55);
+  background: rgba(20, 22, 26, 0.5);
   color: #fff;
   font-size: 10px;
   line-height: 1;
@@ -452,12 +428,12 @@ body.dark {
   opacity: 0;
   transition: opacity 0.15s;
 }
-.ce-utpl:hover .ce-utpl-x,
-.ce-utpl:hover .ce-utpl-dl {
+.ce-utpl-card:hover .ce-utpl-x,
+.ce-utpl-card:hover .ce-utpl-dl {
   opacity: 1;
 }
-.ce-utpl-x { right: 4px; }
-.ce-utpl-dl { right: 26px; }
+.ce-utpl-x { right: 5px; }
+.ce-utpl-dl { right: 27px; }
 .ce-utpl-x:hover { background: #c0392b; }
 .ce-utpl-dl:hover { background: var(--ce-accent); }
 .ce-note {

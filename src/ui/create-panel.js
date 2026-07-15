@@ -49,27 +49,40 @@ export function buildCreatePanel(ctx) {
 
   // --- user templates: saved looks with a thumbnail, apply / export / delete,
   // plus save-current and load-from-file. Applying never moves the view. ---
-  const userWrap = el('div', 'ce-utpl-grid')
+  // saved-look cards use a colour-strip VIGNETTE (like the built-in cards) and
+  // are grouped into two categories: Simple (no shader) and Shaders.
+  const userWrap = el('div')
   sTpl.body.append(userWrap)
+  function makeCard(t) {
+    const card = el('button', 'ce-card ce-utpl-card')
+    card.type = 'button'
+    const strip = (t.strip || []).map((c) => `<i style="background:${/^#[0-9a-fA-F]{3,8}$/.test(c) ? c : '#ccc'}"></i>`).join('')
+    const nm = el('span', 'ce-card-name')
+    nm.textContent = t.name || 'Look'
+    card.append(nm)
+    card.insertAdjacentHTML('beforeend', `<span class="ce-card-strip">${strip}</span>`)
+    card.insertAdjacentHTML('beforeend', '<button class="ce-utpl-x" title="Delete" type="button">✕</button><button class="ce-utpl-dl" title="Export .json" type="button">⭳</button>')
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.ce-utpl-x, .ce-utpl-dl')) return
+      ctx.applyUserTemplate(t); refreshAll(); ctx.syncDark?.()
+    })
+    card.querySelector('.ce-utpl-x').addEventListener('click', () => { ctx.deleteUserTemplate(t.id); renderUserTemplates() })
+    card.querySelector('.ce-utpl-dl').addEventListener('click', () => ctx.exportUserTemplate(t.id))
+    return card
+  }
   function renderUserTemplates() {
     userWrap.replaceChildren()
-    for (const t of ctx.getUserTemplates?.() ?? []) {
-      const card = el('div', 'ce-utpl')
-      // build with DOM APIs (not innerHTML) so an imported template's thumb/name
-      // can never inject markup — the thumb is a user-supplied string
-      const img = el(t.thumb ? 'img' : 'div', 'ce-utpl-img')
-      if (t.thumb) { img.src = t.thumb; img.alt = '' }
-      const nm = el('span', 'ce-utpl-name')
-      nm.textContent = t.name || 'Look'
-      card.append(img, nm)
-      card.insertAdjacentHTML('beforeend', '<button class="ce-utpl-x" title="Delete" type="button">✕</button><button class="ce-utpl-dl" title="Export .json" type="button">⭳</button>')
-      card.addEventListener('click', (e) => {
-        if (e.target.closest('.ce-utpl-x, .ce-utpl-dl')) return
-        ctx.applyUserTemplate(t); refreshAll(); ctx.syncDark?.()
-      })
-      card.querySelector('.ce-utpl-x').addEventListener('click', () => { ctx.deleteUserTemplate(t.id); renderUserTemplates() })
-      card.querySelector('.ce-utpl-dl').addEventListener('click', () => ctx.exportUserTemplate(t.id))
-      userWrap.append(card)
+    const all = ctx.getUserTemplates?.() ?? []
+    const groups = [
+      ['Simple', all.filter((t) => !t.shaders)],
+      ['Shaders', all.filter((t) => t.shaders)],
+    ]
+    for (const [label, items] of groups) {
+      if (!items.length) continue
+      userWrap.append(el('div', 'ce-utpl-cat', label))
+      const grid = el('div', 'ce-cards')
+      for (const t of items) grid.append(makeCard(t))
+      userWrap.append(grid)
     }
   }
   renderUserTemplates()
@@ -159,7 +172,7 @@ export function buildCreatePanel(ctx) {
       if (v !== 'solid' && wasSolid) ctx.autoBgColours(); else ctx.applyBackground()
       renderBg(); refreshAll()
     } }),
-    color({ label: 'Colour A', get: () => params.fogColor, set: (v) => { params.fogColor = v; ctx.fogRef.color.set(v); ctx.applyBackground() } })
+    color({ label: 'Colour A (top)', get: () => params.bgColorA, set: (v) => { params.bgColorA = v; ctx.applyBackground() } })
   )
   const bgWrap = el('div')
   sBg.body.append(bgWrap)
@@ -372,9 +385,10 @@ export function buildCreatePanel(ctx) {
     slider({ label: 'Saturation', min: -1, max: 0, step: 0.02, get: () => params.saturation, set: (v) => { params.saturation = v; ctx.hueSat.saturation = v } }),
     slider({ label: 'Vignette', min: 0, max: 1, step: 0.02, get: () => params.vignette, set: (v) => { params.vignette = v; ctx.vignette.darkness = v } }),
     slider({ label: 'Grain', min: 0, max: 0.5, step: 0.01, get: () => params.grain, set: (v) => { params.grain = v; ctx.grain.blendMode.opacity.value = v } }),
+    toggle({ label: 'Fog', get: () => params.fogEnabled, set: (v) => { params.fogEnabled = v; ctx.setFogEnabled(v) } }),
     slider({ label: 'Fog start', min: 5, max: 60, step: 0.5, get: () => params.fogNear, set: (v) => { params.fogNear = v; ctx.fogRef.near = v } }),
     slider({ label: 'Fog end', min: 15, max: 90, step: 0.5, get: () => params.fogFar, set: (v) => { params.fogFar = v; ctx.fogRef.far = v } }),
-    color({ label: 'Fog colour', get: () => params.fogColor, set: (v) => { params.fogColor = v; ctx.fogRef.color.set(v); ctx.applyBackground() } })
+    color({ label: 'Fog colour', get: () => params.fogColor, set: (v) => { params.fogColor = v; ctx.fogRef.color.set(v); if (params.bgMode === 'solid') ctx.applyBackground() } })
   )
 
   return panel

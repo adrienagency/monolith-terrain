@@ -49,7 +49,7 @@ import { buildRegionPlate } from './region-plate.js'
 import { buildRegionSkirt } from './region-skirt.js'
 import { makeSocleEnvMap } from './socle-env.js'
 import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
-import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, loadUserTemplates, saveUserTemplates } from './templates-user.js'
+import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, stripFromLook, loadUserTemplates, saveUserTemplates } from './templates-user.js'
 import { DroneCam } from './drone-cam.js'
 import { makeGradientTexture, deriveBgColors, BG_MODES } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
@@ -179,8 +179,12 @@ const params = {
   fogNear: 35.5,
   fogFar: 50,
   fogColor: '#ffffff',
-  // background: solid (fogColor) or a gradient (linear/radial/mesh) of A(fogColor)/B/C
+  fogEnabled: true, // depth fog on/off (Effects)
+  // background: solid (fogColor) or a gradient (linear/radial/mesh) of A/B/C.
+  // The gradient's top colour is bgColorA — SEPARATE from the fog colour, so a
+  // gradient never washes out the fog.
   bgMode: 'solid',
+  bgColorA: '#e9eef4',
   bgColorB: '#dfe6ef',
   bgColorC: '#c7d2df',
   bgAngle: 135,
@@ -334,19 +338,22 @@ let _bgTex = null
 function applyBackground() {
   if (_bgTex) { _bgTex.dispose(); _bgTex = null }
   if (!params.bgMode || params.bgMode === 'solid') {
-    scene.background = new THREE.Color(params.fogColor)
+    scene.background = new THREE.Color(params.fogColor) // solid backdrop = the fog colour
   } else {
-    _bgTex = makeGradientTexture({ mode: params.bgMode, a: params.fogColor, b: params.bgColorB, c: params.bgColorC, angle: params.bgAngle })
+    _bgTex = makeGradientTexture({ mode: params.bgMode, a: params.bgColorA, b: params.bgColorB, c: params.bgColorC, angle: params.bgAngle })
     scene.background = _bgTex
   }
 }
 // pull a harmonious gradient out of the current map palette (colour theory)
 function autoBgColours() {
   const { a, b, c } = deriveBgColors(params)
-  params.fogColor = a
+  params.bgColorA = a // gradient top (airy)
   params.bgColorB = b
   params.bgColorC = c
-  fogRef?.color.set(a)
+  // the fog fades the relief to a MID haze (b), distinct from the light top, so
+  // depth fog stays clearly visible in front of the gradient
+  params.fogColor = b
+  fogRef?.color.set(b)
   applyBackground()
 }
 scene.background = new THREE.Color(params.fogColor)
@@ -1115,7 +1122,7 @@ modes = new Modes({
       realWater?.setVisible(v)
       cityLabels.setVisible(v && params.cityLabels)
       isoBtn?.setVisible(v) // the isometric shortcut only makes sense over the block
-      scene.fog = v ? fogRef : null
+      scene.fog = v && params.fogEnabled ? fogRef : null
     },
     setEffectsEnabled(v) {
       dofPass.enabled = v && params.bokehScale > 0
@@ -1405,7 +1412,13 @@ function applyUserTemplate(tmpl) {
   applyLook({ fogColor: params.fogColor, exposure: params.exposure, contrast: params.contrast, saturation: params.saturation, vignette: params.vignette, grain: params.grain, clouds: params.cloudsEnabled, plinth: params.plinth })
   fogRef.near = params.fogNear
   fogRef.far = params.fogFar
+  scene.fog = params.fogEnabled && modes.mode === 'surface' ? fogRef : null
   applyBackground() // solid/gradient background from the captured look
+  // camera lens / depth-of-field / shadow look
+  if (params.fov != null) { camera.fov = params.fov; camera.updateProjectionMatrix() }
+  if (params.bokehScale != null) { dof.bokehScale = params.bokehScale; dofPass.enabled = params.bokehScale > 0 }
+  if (params.focusRange != null) dof.cocMaterial.worldFocusRange = params.focusRange
+  if (params.shadowMode) applyShadowMode()
   applyPlinthMaterial()
   terrain.setMaterialMode(params.terrainSurfaceMat || '', params)
   if (params.terrainSurfaceMat && params.terrainSurfaceMat !== 'glass' && params.terrainMatRoughness != null) {
@@ -1451,10 +1464,10 @@ function persistUserTemplates() {
   return true
 }
 function saveCurrentTemplate(name) {
-  // force a fresh frame so the thumbnail matches what's on screen
-  composer.render()
   const clean = String(name || '').trim().slice(0, 40) || 'My look'
-  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: clean, thumb: captureThumbnail(), look: captureLook(params) }
+  const look = captureLook(params)
+  const { strip, shaders } = stripFromLook(look)
+  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: clean, strip, shaders, look }
   userTemplates.push(t)
   persistUserTemplates()
   return t
@@ -1477,7 +1490,7 @@ function exportUserTemplate(id) {
 function importTemplateText(text) {
   const parsed = parseTemplate(text)
   if (!parsed) return null
-  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: parsed.name, thumb: parsed.thumb, look: parsed.look }
+  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: parsed.name, strip: parsed.strip, shaders: parsed.shaders, look: parsed.look }
   userTemplates.push(t)
   persistUserTemplates()
   return t
@@ -1804,6 +1817,7 @@ const createPanel = buildCreatePanel({
   applyBackground, // solid / gradient scene background
   autoBgColours, // derive gradient stops from the map palette
   bgModes: BG_MODES,
+  setFogEnabled: (v) => { scene.fog = v && modes.mode === 'surface' ? fogRef : null },
   applyPlinthMaterial, // socle PBR / glass material picker (Block panel)
   setGroundInfo: (v) => {
     groundInfo.enabled = v
@@ -1873,7 +1887,8 @@ const shadersPanel = buildShadersPanel({
   // metal): premium transmission glass, or an opaque wood/carbon swap
   surfaceMatList: [
     { value: 'glass', label: 'Glass (premium)' },
-    { value: 'wood', label: 'Wood (CC0)' },
+    { value: 'sand', label: 'Sand (moving)' },
+    { value: 'wood', label: 'Wood' },
     { value: 'fabric', label: 'Fabric — denim' },
     { value: 'carbon', label: 'Carbon fibre' },
   ],
@@ -2114,6 +2129,7 @@ function tick() {
     traffic.update(dt)
     terrain.tickSurfaceFx(dt, params.fx[params.surfaceFx]?.speed ?? 0) // animate at the effect's speed
     terrain.tickLiquidMetal(dt, params.lmSpeed) // molten flow when liquid metal is on
+    terrain.tickSurfaceMaterial(dt) // drifting sand (relief material flow)
   }
   peaksLayer.update(camera, window.innerWidth, window.innerHeight, modes.mode === 'surface')
 

@@ -141,23 +141,26 @@ export function carbonTextures() {
 
 // ============================================================ WOOD (oak)
 function woodFields() {
+  // Straight, continuous grain running along y — long parallel grain lines,
+  // gently warped across x, with fine fibre streaks and a slow tonal drift. No
+  // concentric growth rings (those read as repeating "planks"); this reads as an
+  // endless plank of wood and tiles seamlessly.
   const h = new Float32Array(SIZE * SIZE)
-  const ring = new Float32Array(SIZE * SIZE) // 0..1, 1 = on a dark ring line
-  const P = 8 // noise lattice period (tileable)
+  const ring = new Float32Array(SIZE * SIZE) // grain-line darkness
+  const P = 8 // tileable lattice period
   for (let y = 0; y < SIZE; y++) {
     for (let x = 0; x < SIZE; x++) {
       const u = (x / SIZE) * P
       const v = (y / SIZE) * P
-      // growth rings: concentric bands warped by noise, off a distant centre
-      const warp = fbm(u * 0.6, v * 0.6, P, 3) * 1.6
-      const rr = Math.hypot(u - P * 1.6, (v - P * 0.5) * 0.35) + warp
-      const rings = 0.5 + 0.5 * Math.sin(rr * 3.2)
-      const ringLine = Math.pow(rings, 6) // sharp dark lines where rings peak
-      // fine long grain running along y (streaks)
-      const grain = fbm(u * 2.0, v * 14.0, P, 3)
+      const warp = fbm(u * 0.5, v * 0.22, P, 3) * 1.3 // gentle waviness across the grain
+      const grainPos = u * 3.2 + warp
+      const lines = 0.5 + 0.5 * Math.sin(grainPos * Math.PI)
+      const grainLine = Math.pow(lines, 4) // soft dark grain lines
+      const fibre = fbm(u * 3.2, v * 22.0, P, 3) // fine streaks along the length
+      const tone = fbm(u * 0.7, v * 0.4, P, 2) // slow tonal drift → not obviously tiling
       const i = y * SIZE + x
-      ring[i] = ringLine
-      h[i] = 0.6 * (1 - ringLine) + 0.4 * grain
+      ring[i] = grainLine
+      h[i] = 0.5 * (1 - grainLine) + 0.32 * fibre + 0.18 * tone
     }
   }
   return { h, ring }

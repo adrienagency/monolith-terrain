@@ -115,11 +115,12 @@ export class Traffic {
 
   _buildParaglider(tint) {
     const g = new THREE.Group()
-    // canopy: a shallow arc over the pilot
-    const canopy = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.05, 6, 14, Math.PI * 0.8), this._mat(tint, 0.6))
-    canopy.rotation.z = Math.PI * 0.1
-    canopy.rotation.x = Math.PI / 2 - 0.25
-    canopy.position.y = 0.42
+    // canopy: an upper-semicircle wing DOMING over the pilot (spans left↔right,
+    // arcs up). The old arc was tilted out of plane, which read as flying upside
+    // down; a plain ∩ in the vertical plane sits the right way up.
+    const canopy = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.05, 6, 22, Math.PI), this._mat(tint, 0.6))
+    canopy.rotation.x = 0.12 // a touch of forward pitch, like a glide
+    canopy.position.y = 0.24
     const pilot = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, 0.09, 3, 8), this._mat(new THREE.Color('#333333'), 0.8))
     const lineMat = this._mat(new THREE.Color('#555555'), 0.9)
     for (const dx of [-0.25, 0.25]) {
