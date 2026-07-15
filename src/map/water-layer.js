@@ -52,7 +52,10 @@ export class WaterLayer {
       this._addLayer('lakes', { ...base, widthPx: 1.2 }),
       this._addLayer('coastline', { ...base, widthPx: 1.2 }),
     ])
-    if (id !== this._buildId || dem !== terrain.dem) return
+    if (id !== this._buildId || dem !== terrain.dem) {
+      for (const objs of groups) if (objs) for (const o of objs) o.traverse((m) => { if (m.isLine2) { m.geometry.dispose(); m.material.dispose() } })
+      return
+    }
     for (const objs of groups) if (objs) for (const o of objs) { o.traverse((m) => { if (m.material) m.material.opacity = params.waterOpacity ?? 0.9 }); this.group.add(o) }
   }
   setVisible(v) { this.group.visible = v }

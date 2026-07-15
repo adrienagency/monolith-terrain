@@ -19,6 +19,10 @@ export class MapLayers {
   }
   setLayerVisible(id, v) { this._layers[id]?.setVisible(v && this._surfaceVisible) }
   setOpacity(id, v) { this._layers[id]?.setOpacity?.(v) }
+  // keep fat-line screen-space widths correct after a viewport resize
+  onResize(w, h) {
+    for (const l of [this.roads, this.water]) l.group.traverse((o) => { if (o.material && o.material.isLineMaterial) o.material.resolution.set(w, h) })
+  }
   // hide the whole set outside surface mode (globe/export)
   setSurfaceVisible(v) {
     this._surfaceVisible = v

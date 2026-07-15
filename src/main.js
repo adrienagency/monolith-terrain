@@ -1473,6 +1473,7 @@ function applyUserTemplate(tmpl) {
   shadersRefreshFn() // rebuild the relief-material sub-controls (Scale/Bump/Roughness/Noise) for the applied look
   bgRefreshFn() // resync the Background HDRI-sky highlight to the applied look
   refreshAll()
+  rebuildMapLayers() // re-derive roads/water/places for the current location under the restored look
 }
 
 // grab a small thumbnail of the live render for the template card
@@ -2249,5 +2250,6 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight)
   composer.setSize(window.innerWidth, window.innerHeight)
   gpxLayer.onResize(window.innerWidth, window.innerHeight)
+  mapLayers.onResize(window.innerWidth, window.innerHeight)
   reclampDraggables()
 })
