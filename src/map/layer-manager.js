@@ -19,6 +19,9 @@ export class MapLayers {
   }
   setLayerVisible(id, v) { this._layers[id]?.setVisible(v && this._surfaceVisible) }
   setOpacity(id, v) { this._layers[id]?.setOpacity?.(v) }
+  // SP2: OSM attribution (ODbL) + loading state, derived from the live layers
+  isOsmActive() { return Object.values(this._layers).some((l) => l.usingOsm) }
+  isLoading() { return Object.values(this._layers).some((l) => l.loading) }
   // keep fat-line screen-space widths correct after a viewport resize
   onResize(w, h) {
     for (const l of [this.roads, this.water]) l.group.traverse((o) => { if (o.material && o.material.isLineMaterial) o.material.resolution.set(w, h) })

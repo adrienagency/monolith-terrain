@@ -1634,9 +1634,21 @@ scan = new ScanController(terrain.mapUniforms, TERRAIN_SIZE / 2)
 
 const waterRebuild = () => realWater?.rebuild({ terrain, params })
 
+// OSM attribution + loading status for the Map layers (ODbL requires the credit)
+const osmCredit = document.createElement('div')
+osmCredit.className = 'osm-credit'
+osmCredit.innerHTML = '<span class="osm-status"></span>© OpenStreetMap contributors'
+osmCredit.style.display = 'none'
+document.body.appendChild(osmCredit)
+function refreshOsmCredit() {
+  const on = mapLayers.isOsmActive(), loading = mapLayers.isLoading()
+  osmCredit.style.display = on || loading ? 'flex' : 'none'
+  osmCredit.querySelector('.osm-status').textContent = loading ? 'Détail OSM · chargement… ' : ''
+}
+
 // rebuild all map layers (roads/water/places) for the current zone — used by
 // the Map panel toggles (Task 12)
-const rebuildMapLayers = () => mapLayers.rebuild({ dem, terrain, params })
+const rebuildMapLayers = () => { refreshOsmCredit(); return mapLayers.rebuild({ dem, terrain, params }).then(() => refreshOsmCredit()) }
 
 // "individualiser la zone" — clip the map to the administrative boundary under
 // the view (continent/country/region/departement by zoom). The landform sits
