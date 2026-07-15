@@ -116,6 +116,23 @@ at `terrain.sample + offset` (never below the surface) with normal depth testing
 the whole system consistent, **`cities.js` is switched from its current `depthTest:false`
 (x-ray) to depth-tested** and folded into the Places layer.
 
+### Contrast & legibility (dark mode + low-contrast map)
+Info must never disappear into the map — neither in dark mode nor over a low-contrast
+region (a pale plateau, a busy material, a mid-tone hypsometric band).
+
+1. **Dark-mode ink.** Every layer's ink follows the theme — light ink on dark, dark ink
+   on light — extending the rule `cities.js` already uses
+   (`ink = params.darkMode ? '#e8e2d4' : '#2e2820'`). A dark-mode toggle re-inks the whole
+   Map layer set (rebuild), like the existing labels/cartouche.
+2. **Contrast halo / casing (the real guarantee).** Independent of theme, every info
+   element carries a contrasting outline in the *opposite* tone so it reads over any map
+   colour: place labels get a soft text halo (light halo around dark text, dark halo around
+   light text) drawn on the canvas texture; lines (roads/rivers/coastline) get a thin
+   **casing** — a slightly wider underline stroke in the opposite tone rendered just beneath
+   the coloured line. This is the standard cartographic technique and makes the layers
+   legible even where the map/relief contrast is weak. The halo/casing tone flips with dark
+   mode along with the ink.
+
 ---
 
 ## 5. UI — the "Map" panel
