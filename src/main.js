@@ -38,7 +38,7 @@ import { Clouds } from './clouds.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
-import { CityLabels } from './cities.js'
+import { MapLayers } from './map/layer-manager.js'
 import { StudioLighting, sunFromHour, LIGHT_PRESETS } from './lighting.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
@@ -296,8 +296,13 @@ const params = {
   waterTransparency: 0.4, // 0 = milky veil, 1 = crystal — above and below the surface
   waterSunFx: 1, // sun on the water: glint above + caustic rays below (0..2)
 
-  // principal cities draped on the map (Natural Earth) — off in one click
-  cityLabels: true,
+  // SP1 map overlay layers (roads/water/places), draped on the relief
+  roadsEnabled: false,
+  roadsOpacity: 0.9,
+  waterEnabled: false,
+  waterOpacity: 0.9,
+  placesEnabled: true,
+  placesDensity: 1,
 
   // light
   sunIntensity: 7.6,
@@ -554,7 +559,7 @@ const traffic = new Traffic(scene, terrain, params)
 // the sea as a colour-tintable, environment-reflecting glass block
 // water simulation is behind FLAGS.water (v37, disabled in prod); null when off
 const realWater = FLAGS.water ? new RealWater(scene) : null
-const cityLabels = new CityLabels(scene) // principal cities, populated per zone
+const mapLayers = new MapLayers(scene) // roads/water/places overlays, populated per zone
 
 const labelOpts = () => ({
   real: params.source === 'real',
@@ -1100,7 +1105,7 @@ function regenerateTerrain() {
       terrain.refreshMatTiling(params) // re-tile the relief material to the new zoom scale
       if (params.regionMode && regionMaskCanvas) rebuildRegionSkirt() // re-weld the cut curtain to the new heights
       realWater?.rebuild({ terrain, params }) // water simulation follows the new relief
-      cityLabels.rebuild({ dem: terrain.dem, terrain, params }) // city names re-drape on the new relief
+      mapLayers.rebuild({ dem: terrain.dem, terrain, params }) // roads/water/places re-drape on the new relief
       regenerateLabels()
       regenerateHud()
       gpxLayer.rebuild() // re-drape the track on the new relief
@@ -1153,7 +1158,7 @@ modes = new Modes({
       groundInfo.setVisible(v && params.groundInfo)
       traffic.setVisible(v)
       realWater?.setVisible(v)
-      cityLabels.setVisible(v && params.cityLabels)
+      mapLayers.setSurfaceVisible(v)
       isoBtn?.setVisible(v) // the isometric shortcut only makes sense over the block
       scene.fog = v && params.fogEnabled ? fogRef : null
     },
@@ -1627,6 +1632,10 @@ scan = new ScanController(terrain.mapUniforms, TERRAIN_SIZE / 2)
 
 const waterRebuild = () => realWater?.rebuild({ terrain, params })
 
+// rebuild all map layers (roads/water/places) for the current zone — used by
+// the Map panel toggles (Task 12)
+const rebuildMapLayers = () => mapLayers.rebuild({ dem, terrain, params })
+
 // "individualiser la zone" — clip the map to the administrative boundary under
 // the view (continent/country/region/departement by zoom). The landform sits
 // straight on the ground: no plinth, no square ocean slab.
@@ -1825,7 +1834,8 @@ const createPanel = buildCreatePanel({
   setDarkMode,
   waterRebuild,
   realWater,
-  cityRebuild: () => cityLabels.rebuild({ dem: terrain.dem, terrain, params }),
+  mapLayers,
+  rebuildMapLayers,
   applyTimeOfDay,
   applyLightPreset,
   lightPresets: Object.entries(LIGHT_PRESETS).map(([value, p]) => ({ value, label: p.label })),
@@ -2048,7 +2058,7 @@ aq = createAdaptiveQuality({
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
 
 // real world is the default source — fetch its tiles on startup
 if (params.source === 'real') loadRealTerrain()

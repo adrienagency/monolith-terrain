@@ -150,7 +150,7 @@ function rasterize(ringGroups, dem, size) {
 
 // ---- data (lazy, memoised) ----
 // public/ is served at the site root by Vite, so public/data/* is fetched
-// relative to the site root — the exact pattern cities.js uses.
+// relative to the site root — the same pattern the map overlay layers use.
 
 // z4–z8: the bundled Natural Earth 10m land (one file, whole world)
 let landPromise = null

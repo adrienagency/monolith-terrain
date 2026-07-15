@@ -14,7 +14,7 @@
 - Layer data is **Natural Earth — public domain, NO attribution** required or shown in SP1.
 - Draping rule: every vertex/label sits at **`terrain.sample(x,z) + offset`** (never below surface), materials use **`depthTest: true`, `depthWrite: false`** (realistic occlusion — a foreground peak may occlude).
 - Place names use the existing serif face: **`Rosarivo, Georgia, 'Times New Roman', serif`**, with a **contrast halo**; lines get a **contrast casing**. Ink + halo/casing tone **flip with `params.darkMode`** (dark ink `#e8e2d4` region ink light; light-mode ink `#2e2820`).
-- Total shipped layer data **< ~1 MB**, each file **lazy-fetched** from `public/data/map/` on first use (never in the JS bundle).
+- Layer data files are **lazy-fetched** from `public/data/map/` on first use (never in the JS bundle) and cached client-side. The build script **simplifies geometry** (Douglas–Peucker) and uses ~4-decimal precision so each coarse global file stays well-bounded: **places ≤ ~300 KB, rivers/lakes/coastline ≤ ~500 KB each, roads ≤ ~2 MB** (roads is the largest; SP2's OSM tiling replaces whole-file loading with per-tile fetches). If a raw layer is much larger, simplify harder or filter by `scalerank` — do not ship multi-MB unsimplified files.
 - New panel titled **`Map`**, right dock, built with the existing `src/ui/kit.js` + `shell.js` grammar.
 - Keep a clean **`DataProvider`** seam so SP2 (OSM/Overpass/PMTiles) needs no layer/UI changes.
 - Follow existing conventions: async rebuild guarded by an incrementing build id; dispose geometry/material/texture on rebuild; `latLonToWorld(dem, lat, lon)` + `terrain.sample(x,z)` for georeferencing/draping.

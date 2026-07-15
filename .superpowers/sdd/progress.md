@@ -42,3 +42,38 @@ Final whole-branch review (opus, 692a740~1..3b3d9d2): MERGE-READY: yes, 0 Critic
 - Important #1 (cache disposed-while-cached + unbounded growth) → FIXED in b275c20 (LRU cap 16, setCoastMask no longer disposes, in-flight promise memoised). Live-verified Italy->France->Italy.
 - Minor: lat/lon unused; patchLatLonBBox dup; antimeridian unhandled; stale comment. Left (non-blocking).
 SPEC 2 PHASE 1 COMPLETE. Tests 93/93. Prod still v34 (nothing pushed/deployed).
+
+---
+
+# Spec — Map layers panel (SP1)
+
+Plan: docs/superpowers/plans/2026-07-15-map-layers-panel.md
+Baseline: f723b7e  ·  Branch: feat/orbital-globe
+
+- [x] Task 1: build-mapdata + data (commits 996df30..966f6f2, review clean)
+  - sizes: roads 1.95MB, coastline 471KB, rivers 473KB, lakes 305KB, places 276KB
+  - MINOR (watch at render): coastline DP epsilon 0.09° may look blocky; build-script re-simplifies per scalerank pass (one-time, fine)
+
+- [x] Task 2: geo-data.js + tests (commit 182d1cd, review Minor→fixed)
+  - fix: registered test/geo-data.test.js in npm test script (commit follow-up). 101/101.
+
+- [x] Task 3: draped-line.js + tests (commit edc1a36, review clean, 104/104)
+  - implementer fixed brief float32 test (10.1 not exact in Float32) — good catch
+
+- [x] Task 4: place-pick.js + tests (commit 084dcdf, review clean, 106/106)
+  - MINOR (final review): test2 does not isolate halfLimit (maxN:1 short-circuits); code correct, brief-inherited gap
+
+- [x] Task 5: text-label.js (commit 3372c10, controller-reviewed verbatim+node-check, browser-verify deferred)
+
+- [x] Task 6: line-object.js Line2 builder (commit 1686808, controller-reviewed, vite build OK)
+  - NOTE: THREE.Color(rgba) drops alpha; layers set material.opacity globally so inert
+
+- [x] Task 7: roads-layer.js (commit 77a5367, controller-reviewed verbatim+node-check)
+  - NOTE: 2 Line2 per ring (casing+ink) = draw calls; watch perf on dense patches
+
+- [x] Task 8: water-layer.js (commit a0a8b4c, controller-reviewed; brief ring-bug corrected via ringsOf helper)
+  - MINOR (final review): superseded rebuild drops built Line2 objs without explicit .dispose() -> small GPU leak on rapid zone switch (roads/places share pattern)
+
+- [x] Task 9: places-layer.js (commit 70b5fb7, controller-reviewed verbatim; cities.js preserved for Task 11)
+
+- [x] Task 10: layer-manager.js (commit a16c2b1, controller-reviewed verbatim)
