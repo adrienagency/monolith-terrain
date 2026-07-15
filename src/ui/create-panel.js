@@ -54,8 +54,11 @@ export function buildCreatePanel(ctx) {
   const userWrap = el('div')
   sTpl.body.append(userWrap)
   function makeCard(t) {
-    const card = el('button', 'ce-card ce-utpl-card')
-    card.type = 'button'
+    // a div (not a button) so the delete/export buttons nest validly inside it
+    const card = el('div', 'ce-card ce-utpl-card')
+    card.setAttribute('role', 'button')
+    card.tabIndex = 0
+    card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click() } })
     const strip = (t.strip || []).map((c) => `<i style="background:${/^#[0-9a-fA-F]{3,8}$/.test(c) ? c : '#ccc'}"></i>`).join('')
     const nm = el('span', 'ce-card-name')
     nm.textContent = t.name || 'Look'

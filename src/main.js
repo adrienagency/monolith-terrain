@@ -1434,25 +1434,6 @@ function applyUserTemplate(tmpl) {
   refreshAll()
 }
 
-// grab a small thumbnail of the live render (avoids me taking screenshots).
-// Draw the WebGL canvas into a downscaled 2D canvas → JPEG data URL.
-function captureThumbnail(w = 160, h = 90) {
-  try {
-    const src = renderer.domElement
-    const c = document.createElement('canvas')
-    c.width = w
-    c.height = h
-    const ctx = c.getContext('2d')
-    // cover-fit the (wide) canvas into the thumb
-    const sr = src.width / src.height
-    const tr = w / h
-    let sw = src.width, sh = src.height, sx = 0, sy = 0
-    if (sr > tr) { sw = src.height * tr; sx = (src.width - sw) / 2 } else { sh = src.width / tr; sy = (src.height - sh) / 2 }
-    ctx.drawImage(src, sx, sy, sw, sh, 0, 0, w, h)
-    return c.toDataURL('image/jpeg', 0.72)
-  } catch { return null }
-}
-
 function persistUserTemplates() {
   if (!saveUserTemplates(userTemplates)) {
     // storage full — drop the just-added entry and tell the user

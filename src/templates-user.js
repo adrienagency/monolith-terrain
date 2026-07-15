@@ -77,7 +77,7 @@ export function parseTemplate(text) {
 export function stripFromLook(look = {}) {
   const stops = Array.isArray(look.rampStops) ? look.rampStops : []
   const strip = stops.map((s) => s && s.c).filter((c) => typeof c === 'string' && HEX_RE.test(c))
-  const shaders = (look.surfaceFx | 0) > 0 || !!look.liquidMetal || (look.terrainSurfaceMat && look.terrainSurfaceMat !== '')
+  const shaders = !!((look.surfaceFx | 0) > 0 || look.liquidMetal || (look.terrainSurfaceMat && look.terrainSurfaceMat !== ''))
   return { strip: strip.length ? strip : ['#cbd5e1'], shaders }
 }
 

@@ -1055,7 +1055,8 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     if (!this._matFlow || this.materialMode === 'glass') return
     const d = this._matFlow * dt
     for (const t of [this.material.map, this.material.normalMap, this.material.roughnessMap]) {
-      if (t) { t.offset.x += d; t.offset.y += d * 0.6 }
+      // wrap in [0,1) so a long session never grows the offset unbounded
+      if (t) { t.offset.x = (t.offset.x + d) % 1; t.offset.y = (t.offset.y + d * 0.6) % 1 }
     }
   }
   _makeGlassMaterial() {
