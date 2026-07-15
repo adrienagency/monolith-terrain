@@ -661,11 +661,42 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
         if (prev && prev !== this._regionPlaceholder) prev.dispose()
       }
       this.mapUniforms.uRegionOn.value = 1
+      // capture CPU pixels so overlay lines can be clipped to the region silhouette
+      const cv = texture?.image
+      if (cv && cv.width) {
+        const c = document.createElement('canvas'); c.width = cv.width; c.height = cv.height
+        const cx = c.getContext('2d'); cx.drawImage(cv, 0, 0)
+        this._regionImage = cx.getImageData(0, 0, cv.width, cv.height)
+      }
     } else {
       this._regionPlaceholder ??= whiteTexture()
       this.mapUniforms.uRegionMask.value = this._regionPlaceholder
       if (prev && prev !== this._regionPlaceholder) prev.dispose()
       this.mapUniforms.uRegionOn.value = 0
+      this._regionImage = null
+    }
+  }
+
+  // world XZ → region-mask coverage in [0,1] (1 = inside / no mask). uv = xz/T + 0.5
+  regionSample(x, z) {
+    const img = this._regionImage
+    if (!img) return 1
+    const u = x / TERRAIN_SIZE + 0.5, v = z / TERRAIN_SIZE + 0.5
+    if (u < 0 || u > 1 || v < 0 || v > 1) return 0
+    const px = Math.min(img.width - 1, (u * img.width) | 0)
+    const py = Math.min(img.height - 1, (v * img.height) | 0)
+    return img.data[(py * img.width + px) * 4] / 255 // red channel
+  }
+  // the block footprint for overlay clipping (slab superellipse + region cutout)
+  blockFootprint() {
+    const u = this.mapUniforms
+    const regionOn = u.uRegionOn.value > 0.5
+    return {
+      half: u.uSlabHalf.value,
+      corner: u.uSlabCorner.value,
+      cornerN: u.uSlabCornerN.value,
+      regionOn,
+      regionSample: regionOn ? (x, z) => this.regionSample(x, z) : null,
     }
   }
 
