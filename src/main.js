@@ -1106,7 +1106,8 @@ function regenerateTerrain() {
       terrain.refreshMatTiling(params) // re-tile the relief material to the new zoom scale
       if (params.regionMode && regionMaskCanvas) rebuildRegionSkirt() // re-weld the cut curtain to the new heights
       realWater?.rebuild({ terrain, params }) // water simulation follows the new relief
-      mapLayers.rebuild({ dem: terrain.dem, terrain, params }) // roads/water/places re-drape on the new relief
+      const _mlp = mapLayers.rebuild({ dem: terrain.dem, terrain, params }) // roads/water/places re-drape on the new relief
+      refreshOsmCredit(); _mlp.then(() => refreshOsmCredit())
       regenerateLabels()
       regenerateHud()
       gpxLayer.rebuild() // re-drape the track on the new relief
@@ -1648,7 +1649,7 @@ function refreshOsmCredit() {
 
 // rebuild all map layers (roads/water/places) for the current zone — used by
 // the Map panel toggles (Task 12)
-const rebuildMapLayers = () => { refreshOsmCredit(); return mapLayers.rebuild({ dem, terrain, params }).then(() => refreshOsmCredit()) }
+const rebuildMapLayers = () => { const p = mapLayers.rebuild({ dem, terrain, params }); refreshOsmCredit(); return p.then(() => refreshOsmCredit()) }
 
 // "individualiser la zone" — clip the map to the administrative boundary under
 // the view (continent/country/region/departement by zoom). The landform sits

@@ -693,7 +693,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const regionOn = u.uRegionOn.value > 0.5
     return {
       half: u.uSlabHalf.value,
-      corner: u.uSlabCorner.value,
+      corner: regionOn ? 0 : u.uSlabCorner.value,
       cornerN: u.uSlabCornerN.value,
       regionOn,
       regionSample: regionOn ? (x, z) => this.regionSample(x, z) : null,

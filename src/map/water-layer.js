@@ -42,26 +42,27 @@ export class WaterLayer {
 
     // rivers: OSM waterways when zoomed in, else NE river centerlines
     let riverRings = null
+    let osmOk = false
     if (useOsm) {
       this.loading = true
       const feats = await fetchOverpassLines(bounds, 'water')
       this.loading = false
       if (id !== this._buildId || dem !== terrain.dem) return
-      if (feats) riverRings = feats.map((f) => f.coords)
+      if (feats) { riverRings = feats.map((f) => f.coords); osmOk = true }
     }
     if (!riverRings) riverRings = await this._neRings('rivers', bounds, zoom)
     // lakes + coastline: always Natural Earth
     const lakeRings = await this._neRings('lakes', bounds, zoom)
     const coastRings = await this._neRings('coastline', bounds, zoom)
     if (id !== this._buildId || dem !== terrain.dem) return
-    this.usingOsm = useOsm && riverRings != null
+    this.usingOsm = osmOk
 
-    const insideBlock = makeInsideBlock(terrain.blockFootprint())
+    const fp = terrain.blockFootprint(); const insideBlock = makeInsideBlock(fp)
     const sample = (x, z) => (terrain.sample ? terrain.sample(x, z) : 0)
     const resolution = new THREE.Vector2(window.innerWidth, window.innerHeight)
     const ink = params.darkMode ? '#8fb7cf' : '#4d7fa6'
     const casing = params.darkMode ? 'rgba(15,17,20,0.5)' : 'rgba(252,250,246,0.6)'
-    const clipAll = (ringList) => { const runs = []; for (const r of ringList) { const pts = latlonToWorldPts(r, dem, latLonToWorld); runs.push(...clipPolylineToBlock(pts, insideBlock)) } return runs }
+    const clipAll = (ringList) => { const runs = []; for (const r of ringList) { const pts = latlonToWorldPts(r, dem, latLonToWorld); runs.push(...clipPolylineToBlock(pts, insideBlock, fp.regionOn ? 0.3 : 0.6)) } return runs }
 
     const groups = [
       { runs: clipAll(riverRings), widthPx: 1.4 },
