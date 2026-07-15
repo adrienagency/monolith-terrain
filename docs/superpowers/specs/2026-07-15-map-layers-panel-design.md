@@ -53,8 +53,11 @@ A Node script `scripts/build-mapdata.mjs`:
    `coastline.json`, `roads.json`, and an extended `places.json` (multi-tier,
    supersedes `cities.json`).
 
-Target: **< ~1 MB total**, each file lazy-fetched on first use of its layer (never in
-the JS bundle) — same discipline as today's 73 KB `cities.json`.
+Target: **per-file budgets** (roads ≤ ~2 MB, rivers/lakes/coastline ≤ ~500 KB, places ≤
+~300 KB — global vertex density makes a single "< 1 MB total" impractical without the
+per-tile fetching that is SP2's job), each file lazy-fetched on first use of its layer
+(never in the JS bundle) and cached — same discipline as today's 73 KB `cities.json`.
+Geometry is Douglas–Peucker–simplified at build time to hold these budgets.
 
 ---
 
