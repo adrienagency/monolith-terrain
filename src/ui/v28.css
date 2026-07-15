@@ -408,6 +408,32 @@ body.dark {
 }
 .ce-utpl-card {
   position: relative;
+  border: 1px solid var(--ce-hairline);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--ce-hover);
+  transition: border-color 0.15s;
+}
+.ce-utpl-card:hover {
+  border-color: var(--ce-accent);
+}
+.ce-utpl-img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  background: var(--ce-track);
+}
+.ce-utpl-name {
+  display: block;
+  padding: 4px 8px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ce-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ce-utpl-x,
 .ce-utpl-dl {

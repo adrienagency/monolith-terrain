@@ -60,7 +60,8 @@ export function buildShadersPanel(ctx) {
       matCtl.append(
         slider({ label: 'Scale (tiling)', min: 0.3, max: 4, step: 0.05, get: () => ctx.getMatScale(), set: (v) => ctx.setMatScale(v) }),
         slider({ label: 'Bump', min: 0, max: 3, step: 0.05, get: () => ctx.getSurfaceMatBump(), set: (v) => ctx.setSurfaceMatBump(v) }),
-        slider({ label: 'Roughness', min: 0, max: 1, step: 0.01, get: () => ctx.getMatRoughness(), set: (v) => ctx.setMatRoughness(v) })
+        slider({ label: 'Roughness', min: 0, max: 1, step: 0.01, get: () => ctx.getMatRoughness(), set: (v) => ctx.setMatRoughness(v) }),
+        slider({ label: 'Noise (patchy 3D)', min: 0, max: 1, step: 0.01, get: () => ctx.getMatNoise(), set: (v) => ctx.setMatNoise(v) })
       )
     }
   }

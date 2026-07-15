@@ -37,7 +37,7 @@ export const TEMPLATE_KEYS = [
   'plinthGlassDiffusion', 'plinthGlassProjection', 'plinthGlassBump', 'plinthBump',
   'slabCorner', 'slabCornerSmoothing', 'groundInfo',
   // relief material
-  'terrainSurfaceMat', 'terrainSurfaceBump', 'terrainMatScale', 'terrainMatRoughness',
+  'terrainSurfaceMat', 'terrainSurfaceBump', 'terrainMatScale', 'terrainMatRoughness', 'terrainMatNoise',
   'terrainGlassFrost', 'terrainGlassThickness', 'terrainGlassTint', 'terrainGlassClarity', 'terrainGlassReflection',
   // liquid metal
   'liquidMetal', 'lmMetalness', 'lmRoughness', 'lmReflection', 'lmSpeed',
@@ -62,15 +62,22 @@ export function captureLook(params) {
 // its palette — instead of a screenshot thumbnail. `shaders` flags whether it
 // uses a surface shader / liquid metal, which sorts it into a category.
 export function serializeTemplate(t) {
-  return JSON.stringify({ format: FORMAT, version: VERSION, name: t.name, strip: t.strip, shaders: t.shaders, look: t.look }, null, 0)
+  return JSON.stringify({ format: FORMAT, version: VERSION, name: t.name, thumb: t.thumb, strip: t.strip, shaders: t.shaders, look: t.look }, null, 0)
 }
 const HEX_RE = /^#[0-9a-fA-F]{3,8}$/
+// only accept an image data URL for the thumbnail — an imported .json is
+// untrusted and the value is used as an <img src>
+const THUMB_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/
 export function parseTemplate(text) {
   let o
   try { o = JSON.parse(text) } catch { return null }
   if (!o || o.format !== FORMAT || !o.look || typeof o.look !== 'object') return null
+  const thumb = typeof o.thumb === 'string' && THUMB_RE.test(o.thumb) ? o.thumb : null
+  // re-derive strip + category from the actual look rather than trusting the
+  // file's flags (a hand-edited/older export could mis-sort itself)
+  const derived = stripFromLook(o.look)
   const strip = Array.isArray(o.strip) ? o.strip.filter((c) => typeof c === 'string' && HEX_RE.test(c)).slice(0, 8) : []
-  return { name: String(o.name || 'Imported').slice(0, 40), strip, shaders: !!o.shaders, look: o.look }
+  return { name: String(o.name || 'Imported').slice(0, 40), thumb, strip: strip.length ? strip : derived.strip, shaders: derived.shaders, look: o.look }
 }
 
 // derive the vignette strip + shader category from a captured look

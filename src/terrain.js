@@ -16,7 +16,8 @@ const OPAQUE_TERRAIN_MATS = {
   carbon: { tex: 'carbon', metalness: 0.45, roughness: 0.5, normalScale: 1.2, envMapIntensity: 1.3, repeat: 10 },
   // real CC0 sand PBR (ambientCG Ground080), kept fully PBR but drifting slowly
   // like blowing/moving sand — flow scrolls the maps each frame
-  sand: { dir: 'textures/sand/', metalness: 0, roughness: 0.95, normalScale: 1.3, envMapIntensity: 0.5, repeat: 7, flow: 0.006 },
+  sand: { dir: 'textures/sand/', metalness: 0, roughness: 0.95, normalScale: 1.3, envMapIntensity: 0.5, repeat: 7, flow: 0.012 },
+  grass: { dir: 'textures/grass/', metalness: 0, roughness: 0.9, normalScale: 1.4, envMapIntensity: 0.35, repeat: 8 },
 }
 
 // Tiling density scales with the DEM zoom so a relief material never reads as
@@ -157,6 +158,12 @@ export class Terrain {
       uScanType: { value: 0 }, // 0 radar, 1 elevation, 2 gridline, 3 sonar, 4 holo
       uScanOrigin: { value: new THREE.Vector2(0, 0) }, // scan epicenter, world XZ
       uScanMax: { value: TERRAIN_SIZE * 0.75 }, // radius that guarantees full coverage
+      // material noise: a relief material can be broken up by procedural noise —
+      // lifted into 3D where the noise is high, punched transparent where it's low
+      uMatNoiseOn: { value: 0 },
+      uMatNoiseAmt: { value: 0 }, // displacement height
+      uMatNoiseCut: { value: 0 }, // transparency threshold (higher = more holes)
+      uMatNoiseScale: { value: 0.5 }, // patch frequency in world units
     }
     this.rebuildRamp(params)
     this.material.onBeforeCompile = (shader) => {
@@ -171,11 +178,18 @@ uniform float uScanDispH;
 uniform float uScanDispW;
 uniform int uScanType;
 uniform vec2 uScanOrigin;
-uniform float uScanMax;`
+uniform float uScanMax;
+uniform float uMatNoiseOn;
+uniform float uMatNoiseAmt;
+uniform float uMatNoiseScale;
+float mnHash(vec2 p){ p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
+float mnNoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(mnHash(i), mnHash(i+vec2(1.0,0.0)), f.x), mix(mnHash(i+vec2(0.0,1.0)), mnHash(i+vec2(1.0,1.0)), f.x), f.y); }`
         )
         .replace(
           '#include <begin_vertex>',
           `#include <begin_vertex>
+// material noise: lift the relief material into 3D where the noise is high
+if (uMatNoiseOn > 0.5) { transformed.y += uMatNoiseAmt * (mnNoise(transformed.xz * uMatNoiseScale) - 0.35); }
 // scan wave physically lifts the surface as it sweeps outward from the scan
 // origin -- only the radial scans (radar, sonar) displace geometry
 if (uScanT >= 0.0 && (uScanType == 0 || uScanType == 3)) {
@@ -194,6 +208,11 @@ vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
           '#include <common>',
           `#include <common>
 varying vec3 vWorldPos;
+uniform float uMatNoiseOn;
+uniform float uMatNoiseCut;
+uniform float uMatNoiseScale;
+float mnHash(vec2 p){ p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
+float mnNoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(mnHash(i), mnHash(i+vec2(1.0,0.0)), f.x), mix(mnHash(i+vec2(0.0,1.0)), mnHash(i+vec2(1.0,1.0)), f.x), f.y); }
 uniform float uTint;
 uniform float uContourInterval;
 uniform float uContourOpacity;
@@ -372,6 +391,9 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
           '#include <color_fragment>',
           `#include <color_fragment>
 {
+  // --- material noise: punch the relief material transparent where the noise
+  // falls below the cut (paired with the vertex lift → patchy 3D + holes)
+  if (uMatNoiseOn > 0.5 && mnNoise(vWorldPos.xz * uMatNoiseScale) < uMatNoiseCut) discard;
   // --- region cutout: clip the relief to the admin-boundary mask (white
   // inside / black outside, rendered over the DEM footprint in world XZ by
   // region-mask.js) so the landform stands alone like a country cutout. The
@@ -959,6 +981,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     if (id === 'glass') {
       if (!this.glassMaterial) this._makeGlassMaterial()
       this.applyTerrainGlass(params)
+      this.mapUniforms.uMatNoiseOn.value = 0
       this.mesh.material = this.glassMaterial
       return
     }
@@ -996,6 +1019,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       this._matFlow = preset.flow ?? 0 // >0 → drifting (moving sand)
       this._matZoom = params.demZoom
       this.mapUniforms.uTint.value = 0 // drop the hypsometric paint → pure material
+      this.setMatNoise(params.terrainMatNoise ?? 0) // patchy 3D + holes
     } else {
       // none — restore the topographic look
       m.map = null
@@ -1011,6 +1035,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       // rebuildRoughness so it isn't disposed out from under the texture cache
       m.roughnessMap = null
       this.mapUniforms.uTint.value = params.mapTint ?? 1
+      this.mapUniforms.uMatNoiseOn.value = 0 // no material noise on the plain map
       // restore the procedural terrain roughness/bump the relief material replaced
       this.rebuildRoughness(params)
     }
@@ -1048,6 +1073,14 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   }
   setTerrainMatRoughness(r) {
     if (this._matPreset && this.materialMode !== 'glass') this.material.roughness = r
+  }
+  // procedural noise on the relief material: 3D lift where high, transparent
+  // (holes) where low. 0 = off. Only meaningful for an opaque relief material.
+  setMatNoise(v) {
+    const on = v > 0.001 && this._matPreset && this.materialMode !== 'glass'
+    this.mapUniforms.uMatNoiseOn.value = on ? 1 : 0
+    this.mapUniforms.uMatNoiseAmt.value = v * 1.2
+    this.mapUniforms.uMatNoiseCut.value = v * 0.5
   }
   // drift the relief material's maps for "moving sand" (keeps the PBR intact —
   // it's the same textures, just scrolling). Called each frame from the loop.

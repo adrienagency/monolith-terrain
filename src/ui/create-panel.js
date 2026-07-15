@@ -54,16 +54,18 @@ export function buildCreatePanel(ctx) {
   const userWrap = el('div')
   sTpl.body.append(userWrap)
   function makeCard(t) {
-    // a div (not a button) so the delete/export buttons nest validly inside it
-    const card = el('div', 'ce-card ce-utpl-card')
+    // image-thumbnail card (a div so the action buttons nest validly)
+    const card = el('div', 'ce-utpl-card')
     card.setAttribute('role', 'button')
     card.tabIndex = 0
     card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click() } })
-    const strip = (t.strip || []).map((c) => `<i style="background:${/^#[0-9a-fA-F]{3,8}$/.test(c) ? c : '#ccc'}"></i>`).join('')
-    const nm = el('span', 'ce-card-name')
+    // thumbnail via DOM APIs (never innerHTML — thumb is user-supplied)
+    const media = el(t.thumb ? 'img' : 'div', 'ce-utpl-img')
+    if (t.thumb) { media.src = t.thumb; media.alt = '' }
+    else if (t.strip?.length) media.style.background = `linear-gradient(90deg, ${t.strip.filter((c) => /^#[0-9a-fA-F]{3,8}$/.test(c)).join(',')})`
+    const nm = el('span', 'ce-utpl-name')
     nm.textContent = t.name || 'Look'
-    card.append(nm)
-    card.insertAdjacentHTML('beforeend', `<span class="ce-card-strip">${strip}</span>`)
+    card.append(media, nm)
     card.insertAdjacentHTML('beforeend', '<button class="ce-utpl-x" title="Delete" type="button">✕</button><button class="ce-utpl-dl" title="Export .json" type="button">⭳</button>')
     card.addEventListener('click', (e) => {
       if (e.target.closest('.ce-utpl-x, .ce-utpl-dl')) return

@@ -255,6 +255,7 @@ const params = {
   terrainSurfaceBump: 1.3, // bump for the opaque terrain materials (wood/carbon)
   terrainMatScale: 1, // tiling scale for the opaque relief materials (repetition)
   terrainMatRoughness: 0.75, // seeded from the preset on select; live-tunable
+  terrainMatNoise: 0, // procedural noise: patchy 3D lift + transparent holes
   terrainGlassFrost: 0.5, // glass roughness (frost) — blurry by default
   terrainGlassThickness: 8,
   terrainGlassTint: '#bfe4ff',
@@ -1431,7 +1432,25 @@ function applyUserTemplate(tmpl) {
     if (params.cloudsEnabled) clouds.build(params)
     clouds.setVisible(params.cloudsEnabled && modes.mode === 'surface')
   }
+  shadersRefreshFn() // rebuild the relief-material sub-controls (Scale/Bump/Roughness/Noise) for the applied look
   refreshAll()
+}
+
+// grab a small thumbnail of the live render for the template card
+function captureThumbnail(w = 200, h = 120) {
+  try {
+    const src = renderer.domElement
+    const c = document.createElement('canvas')
+    c.width = w
+    c.height = h
+    const ctx = c.getContext('2d')
+    const sr = src.width / src.height
+    const tr = w / h
+    let sw = src.width, sh = src.height, sx = 0, sy = 0
+    if (sr > tr) { sw = src.height * tr; sx = (src.width - sw) / 2 } else { sh = src.width / tr; sy = (src.height - sh) / 2 }
+    ctx.drawImage(src, sx, sy, sw, sh, 0, 0, w, h)
+    return c.toDataURL('image/jpeg', 0.75)
+  } catch { return null }
 }
 
 function persistUserTemplates() {
@@ -1445,10 +1464,11 @@ function persistUserTemplates() {
   return true
 }
 function saveCurrentTemplate(name) {
+  composer.render() // fresh frame so the thumbnail matches the screen
   const clean = String(name || '').trim().slice(0, 40) || 'My look'
   const look = captureLook(params)
   const { strip, shaders } = stripFromLook(look)
-  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: clean, strip, shaders, look }
+  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: clean, thumb: captureThumbnail(), strip, shaders, look }
   userTemplates.push(t)
   persistUserTemplates()
   return t
@@ -1471,7 +1491,7 @@ function exportUserTemplate(id) {
 function importTemplateText(text) {
   const parsed = parseTemplate(text)
   if (!parsed) return null
-  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: parsed.name, strip: parsed.strip, shaders: parsed.shaders, look: parsed.look }
+  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: parsed.name, thumb: parsed.thumb, strip: parsed.strip, shaders: parsed.shaders, look: parsed.look }
   userTemplates.push(t)
   persistUserTemplates()
   return t
@@ -1869,6 +1889,7 @@ const shadersPanel = buildShadersPanel({
   surfaceMatList: [
     { value: 'glass', label: 'Glass (premium)' },
     { value: 'sand', label: 'Sand (moving)' },
+    { value: 'grass', label: 'Grass' },
     { value: 'wood', label: 'Wood' },
     { value: 'fabric', label: 'Fabric — denim' },
     { value: 'carbon', label: 'Carbon fibre' },
@@ -1899,6 +1920,11 @@ const shadersPanel = buildShadersPanel({
   setMatRoughness: (v) => {
     params.terrainMatRoughness = v
     terrain.setTerrainMatRoughness(v)
+  },
+  getMatNoise: () => params.terrainMatNoise,
+  setMatNoise: (v) => {
+    params.terrainMatNoise = v
+    terrain.setMatNoise(v)
   },
   // live glass knobs (only shown when the relief material is Glass)
   glassControls: [
