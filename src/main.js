@@ -60,6 +60,7 @@ import { buildCameraPanel } from './ui/camera-panel.js'
 import { buildExplorePanel } from './ui/explore-panel.js'
 import { buildScanPanel } from './ui/scan-panel.js'
 import { buildShadersPanel } from './ui/shaders-panel.js'
+import { buildMapPanel } from './ui/map-panel.js'
 import { initTips } from './ui/tips.js'
 import { createAdaptiveQuality } from './perf.js'
 import { detailForZoom } from './zoom-detail.js'
@@ -2022,6 +2023,18 @@ const cameraPanel = buildCameraPanel({
   },
 })
 
+// Map panel — right dock, after Camera (docks Create, Shaders, Camera, Map).
+// Holds the cartographic layers (roads/water/places) plus the contour/grid/
+// marker controls relocated out of Create's old "Map style" section.
+const mapPanel = buildMapPanel({
+  params,
+  u: () => terrain.mapUniforms,
+  mapLayers,
+  rebuildMapLayers,
+  peaksLayer,
+  setLabelsVisible: (v) => (labels.visible = v && modes.mode === 'surface'),
+})
+
 const explorePanel = buildExplorePanel({
   flyTo: (lat, lon, zoom) => modes.flyTo(lat, lon, zoom),
 })
@@ -2035,6 +2048,7 @@ const scanPanel = buildScanPanel({
 // column. Start with only Create/Explore open.
 shadersPanel.setCollapsed(true)
 cameraPanel.setCollapsed(true)
+mapPanel.setCollapsed(true)
 scanPanel.setCollapsed(true)
 
 // adaptive quality — built once the composer, panels and mode machine exist
