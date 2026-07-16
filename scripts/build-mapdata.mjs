@@ -12,9 +12,9 @@ import { mkdir, writeFile } from 'node:fs/promises'
 const BASE = 'https://raw.githubusercontent.com/martynafford/natural-earth-geojson/master'
 const OUT = new URL('../public/data/map/', import.meta.url)
 
-// layer → [resolution, theme, NE file, keep-props builder]. rivers/lakes/
-// coastline use 50m (coarse world) to stay well under the size budget; roads
-// and places use 10m for a usable network / a rich place list.
+// layer → [resolution, theme, NE file, keep-props builder]. lakes/coastline
+// use 50m (coarse world) to stay well under the size budget; roads, places,
+// and rivers (for density + the strokeweig width attribute) use 10m.
 const round = (n) => Math.round(n * 1e4) / 1e4
 const round5 = (n) => Math.round(n * 1e5) / 1e5
 
@@ -120,12 +120,12 @@ const scalerankOf = (p) => p.scalerank ?? p.SCALERANK ?? 10
 async function main() {
   await mkdir(OUT, { recursive: true })
 
-  // rivers/lakes/coastline use 50m (coarse world) source: the 10m variants
-  // are 5-9 MB even after trimming (dense per-vertex geometry dwarfs the
-  // property savings), blowing well past the size budget. Roads keeps 10m
-  // below for a usable network, per the brief. Douglas-Peucker simplification
-  // (epsilon in degrees, tuned per layer below) further bounds payload size
-  // without dropping features.
+  // lakes/coastline use 50m (coarse world) source: the 10m variants are
+  // 5-9 MB even after trimming (dense per-vertex geometry dwarfs the
+  // property savings), blowing well past the size budget. Rivers and roads
+  // use 10m below for density / a usable network, per the brief.
+  // Douglas-Peucker simplification (epsilon in degrees, tuned per layer
+  // below) further bounds payload size without dropping features.
   const RIVERS_EPS = 0.01
   const LAKES_EPS = 0.008
   const COAST_EPS = 0.09
@@ -134,7 +134,29 @@ async function main() {
   // larger payload (~5-8 MB) for fidelity, per the fix in task 6.
   const ROADS_EPS = 0.0005
 
-  const rivers = trimFeatures(await ne('50m', 'physical', 'ne_50m_rivers_lake_centerlines'), (p) => ({ name: nameOf(p), min_zoom: numZoom(p), scalerank: scalerankOf(p), kind: 'river' }), RIVERS_EPS)
+  // rivers: 10m gives natural per-feature line width via `strokeweig`
+  // (cartographic stroke weight, 0-9) and far more features than the 50m
+  // centerlines (461). Base layer is the global `_scale_rank` variant (the
+  // one NE ships strokeweig on); `_europe` and `_north_america` are regional
+  // supplements with extra density, merged in when reachable. Falls back to
+  // 50m (no strokeweig on that layer, so width falls back to 2 everywhere)
+  // if the 10m mirror path 404s.
+  const strokeweightOf = (p) => p.strokeweig ?? p.strokeweight ?? 2
+  const riverKeep = (p) => ({ name: nameOf(p), min_zoom: numZoom(p), scalerank: scalerankOf(p), kind: 'river', strokeweight: strokeweightOf(p) })
+  let riversRaw
+  try {
+    const [global10m, europe, northAmerica] = await Promise.all([
+      ne('10m', 'physical', 'ne_10m_rivers_lake_centerlines_scale_rank'),
+      ne('10m', 'physical', 'ne_10m_rivers_europe').catch((e) => { console.warn('rivers_europe supplement unavailable:', e.message); return null }),
+      ne('10m', 'physical', 'ne_10m_rivers_north_america').catch((e) => { console.warn('rivers_north_america supplement unavailable:', e.message); return null }),
+    ])
+    const features = [...global10m.features, ...(europe?.features ?? []), ...(northAmerica?.features ?? [])]
+    riversRaw = { type: 'FeatureCollection', features }
+  } catch (e) {
+    console.warn('NE 10m rivers unavailable, falling back to 50m centerlines:', e.message)
+    riversRaw = await ne('50m', 'physical', 'ne_50m_rivers_lake_centerlines')
+  }
+  const rivers = trimFeatures(riversRaw, riverKeep, RIVERS_EPS)
   await writeFile(new URL('rivers.json', OUT), JSON.stringify(rivers))
 
   const lakes = trimFeatures(await ne('50m', 'physical', 'ne_50m_lakes'), (p) => ({ name: nameOf(p), min_zoom: numZoom(p), scalerank: scalerankOf(p), kind: 'lake' }), LAKES_EPS)
