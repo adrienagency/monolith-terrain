@@ -9,7 +9,11 @@ import { labelScale } from './place-scale.js'
 const HALF = TERRAIN_SIZE / 2
 const CLEARANCE = 1.5 // world units the label floats above the taller of local ground / patch summit
 const GRID = 24 // coarse sample grid used to find the patch's max terrain height
-const BASE_H = 0.09 // screen-space label height (sizeAttenuation:false) for scale 1; width follows the texture's own aspect
+// Screen-space label height for scale 1. With sizeAttenuation:false the sprite
+// scale is in CLIP units, not world units — 2.0 spans the whole viewport height —
+// so a readable ~16 px name on a ~900 px viewport needs a small value here.
+// (0.09 rendered names at roughly a sixth of the screen.)
+const BASE_H = 0.018
 
 export class PlacesLayer {
   constructor(scene) {
