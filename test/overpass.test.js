@@ -10,15 +10,24 @@ test('buildQuery: roads uses highway + south,west,north,east bbox', () => {
   assert.match(q, /out geom;/)
 })
 
-test('roadHighwayFilter: 1 and 2 share the same generous drivable filter, 3 is unrestricted', () => {
+test('roadHighwayFilter: every notch uses the bare tag test — a regex predicate 504s on Overpass', () => {
+  // Regression guard. A `["highway"~"^(motorway|…)$"]` predicate makes Overpass
+  // scan every way rather than use the tag index: measured live on a Chamonix
+  // z13 bbox it took 6.5 s and returned 504, while `way["highway"]` returned
+  // 4570 ways in 927 ms. The 504 → null → Natural Earth fallback (empty at that
+  // zoom) is exactly why notches 1 and 2 rendered nothing and notch 3 worked.
+  for (const detail of [1, 2, 3, undefined]) {
+    assert.equal(roadHighwayFilter(detail), '["highway"]')
+    assert.equal(/~/.test(roadHighwayFilter(detail)), false, 'no regex predicate')
+  }
+})
+
+test('roadHighwayFilter: all notches share one filter, so relative tiering does the filtering client-side', () => {
   // detail 1 and 2 must fetch the SAME broad set — relative tiering (road-tier.js)
   // decides client-side which classes actually render at each notch, so an
   // absolute server-side filter (the old bug) would starve it of data.
   assert.equal(roadHighwayFilter(1), roadHighwayFilter(2))
-  assert.match(roadHighwayFilter(1), /motorway\|trunk\|primary/)
-  assert.match(roadHighwayFilter(1), /residential/)
-  assert.equal(/footway|path/.test(roadHighwayFilter(1)), false)
-  assert.equal(roadHighwayFilter(3), '["highway"]') // all
+  assert.equal(roadHighwayFilter(2), roadHighwayFilter(3))
 })
 
 test('buildQuery: water uses waterway', () => {
@@ -42,10 +51,13 @@ test('bboxKey rounds to 3 decimals', () => {
   assert.equal(bboxKey({ minLat: 45.80001, minLon: 6.1, maxLat: 45.95, maxLon: 6.3 }, 'roads'), 'roads:45.8,6.1,45.95,6.3')
 })
 
-test('bboxKey: roads cache key derives from the filter variant, so detail 1/2 (same filter) collide and detail 3 (different filter) does not', () => {
+test('bboxKey: roads cache key derives from the filter, so every notch reuses one cached fetch', () => {
+  // All three notches now share a filter, so moving the slider re-filters the
+  // cached ways client-side instead of re-hitting rate-limited public Overpass.
   const keyFor = (detail) => bboxKey(bbox, 'roads', roadHighwayFilter(detail))
   assert.equal(keyFor(1), keyFor(2))
-  assert.notEqual(keyFor(1), keyFor(3))
+  assert.equal(keyFor(2), keyFor(3))
+  assert.notEqual(bboxKey(bbox, 'roads', '["highway"]'), bboxKey(bbox, 'water', undefined))
 })
 
 test('buildAreaQuery: well-formed water-area query with south,west,north,east bbox', () => {

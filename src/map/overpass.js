@@ -3,18 +3,25 @@
 export const OVERPASS_URL = 'https://overpass-api.de/api/interpreter'
 export const WAY_TAG = { roads: 'highway', water: 'waterway' }
 
-// Road detail notch → Overpass highway tag predicate. Full geometry fidelity is
-// always preserved — this only changes WHICH highway classes are queried.
-// Tiering (which classes actually render at a given notch) is RELATIVE and
-// happens client-side in road-tier.js, based on whatever classes are present
-// in the fetched patch — so the fetch itself must be generous enough to have
-// data to rank. Detail 1 and 2 therefore share one broad drivable-set filter
-// (an absolute server-side filter is what caused roads to render empty on
-// patches with no motorway); 3 = every highway=* way, unrestricted.
-export function roadHighwayFilter(detail = 1) {
-  if (detail >= 3) return '["highway"]'
-  const drivable = 'motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service'
-  return `["highway"~"^(${drivable})(_link)?$"]`
+// Overpass highway predicate. ALWAYS the bare tag test, for every detail notch.
+//
+// Do NOT reintroduce a `["highway"~"^(motorway|trunk|…)$"]` regex here. A regex
+// predicate makes Overpass scan every way in the bbox instead of hitting the tag
+// index, and on a dense patch it blows the timeout: measured against the live
+// API on a Chamonix z13 bbox, `way["highway"]` returned 4570 ways in 927 ms while
+// the regex form took 6.5 s and came back **504**. The 504 made fetchOverpassLines
+// return null, which silently fell back to Natural Earth — which carries nothing
+// at that zoom — so notches 1 and 2 rendered an EMPTY map while notch 3 (the only
+// one already using the bare tag) worked. That was the whole bug.
+//
+// Fidelity is unaffected (no simplification either way), and filtering is not
+// lost: which classes actually render at a notch is decided client-side and
+// RELATIVELY in road-tier.js, from whatever classes the patch really contains.
+// One predicate for all notches also means all three share a single cache entry,
+// so moving the slider re-filters instantly instead of re-hitting rate-limited
+// public Overpass.
+export function roadHighwayFilter() {
+  return '["highway"]'
 }
 
 // Overpass bbox order is (south,west,north,east) = (minLat,minLon,maxLat,maxLon)
