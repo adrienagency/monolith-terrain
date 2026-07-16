@@ -1268,6 +1268,7 @@ modes = new Modes({
       mapLayers.setSurfaceVisible(v)
       isoBtn?.setVisible(v) // the isometric shortcut only makes sense over the block
       scene.fog = v && params.fogEnabled ? fogRef : null
+      refreshOsmCredit() // GeoNames credit only applies in surface mode — resync on mode change
     },
     setEffectsEnabled(v) {
       dofPass.enabled = v && params.bokehScale > 0
@@ -1414,6 +1415,8 @@ const DEFAULT_MAPLAYERS = Object.freeze({
   roadsEnabled: params.roadsEnabled,
   roadsOpacity: params.roadsOpacity,
   roadsDetail: params.roadsDetail,
+  roadsCasing: true,
+  roadColor: '',
   waterEnabled: params.waterEnabled,
   waterOpacity: params.waterOpacity,
   placesEnabled: params.placesEnabled,
@@ -1870,7 +1873,7 @@ function refreshOsmCredit() {
   const on = mapLayers.isOsmActive(), loading = mapLayers.isLoading()
   const lines = []
   if (on || loading) lines.push('© OpenStreetMap contributors')
-  if (params.placesEnabled) lines.push('© GeoNames (CC BY 4.0)')
+  if (params.placesEnabled && params.source === 'real' && modes.mode === 'surface') lines.push('© GeoNames (CC BY 4.0)')
   osmCredit.style.display = lines.length ? 'flex' : 'none'
   osmCredit.querySelector('.osm-status').textContent = loading ? 'Détail OSM · chargement… ' : ''
   osmCredit.querySelector('.osm-credit-lines').textContent = lines.join(' · ')
@@ -2420,6 +2423,7 @@ const shortcutsCtx = {
     setDarkMode(!params.darkMode)
     refreshAll()
     topBar.syncDark()
+    history?.record() // keyboard toggle should be one undoable step, like the UI switch
   },
   reframe: () => cameraPreset('home'),
   toggleShortcuts: () => shortcutsOverlay.toggle(),

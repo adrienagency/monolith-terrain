@@ -793,7 +793,11 @@ export class GpxLayer {
 
   setVisible(v) {
     this.group.visible = v
-    if (!v) this.setHover(-1, false)
+    if (!v) {
+      this.setHover(-1, false)
+      this.pause?.()
+      this.headLabel?.classList.add('hidden')
+    }
     this.profileEl.classList.toggle('hidden', !v || !this.track)
   }
 
