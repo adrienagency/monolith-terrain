@@ -252,7 +252,8 @@ const params = {
   plinthGlassBump: 0.6, // frost micro-facet strength (glass bump slider)
   plinthBump: 1.5, // textured-PBR relief strength (carbon/wood bump slider)
   // terrain MATERIAL mode (Shaders panel, next to Liquid metal): turns the whole
-  // relief into a material — '' | 'glass' | 'wood' | 'carbon'
+  // relief into a material — '' (topographic) or any id in the material catalog
+  // (glass, grass, rock…, carbon). An unknown id falls back to topographic.
   terrainSurfaceMat: '',
   terrainSurfaceBump: 1.3, // bump for the opaque terrain materials (wood/carbon)
   terrainMatScale: 1, // tiling scale for the opaque relief materials (repetition)
@@ -1121,9 +1122,8 @@ function regenerateTerrain() {
     setTimeout(() => {
       terrain.rebuild(params)
       terrain.rebuildRoughness(params)
-      plinth.rebuild(terrain, params) // walls hug the new relief border
+      plinth.rebuild(terrain, params) // walls hug the new relief border (also re-welds the region skirt in region mode — see the plinth.rebuild wrapper)
       terrain.refreshMatTiling(params) // re-tile the relief material to the new zoom scale
-      if (params.regionMode && regionMaskCanvas) rebuildRegionSkirt() // re-weld the cut curtain to the new heights
       realWater?.rebuild({ terrain, params }) // water simulation follows the new relief
       const _mlp = mapLayers.rebuild({ dem: terrain.dem, terrain, params }) // roads/water/places re-drape on the new relief
       refreshOsmCredit(); _mlp.then(() => refreshOsmCredit())
