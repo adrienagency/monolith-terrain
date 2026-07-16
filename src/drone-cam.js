@@ -236,6 +236,35 @@ export class DroneCam {
     this.posHalfLife = 0.9 // s — heavy extra smoothing on top of the already-smooth spine
     this.rotHalfLife = 0.5 // s — final orientation smoothing
 
+    // ---- cinematic VARIATION (task 16) — layered ON TOP of the fixed
+    // arm/lift rig above, not a replacement for it. The brief: "parfois elle
+    // se rapproche... parfois elle s'éloigne... elle ne reste jamais
+    // vraiment très loin" (breathing standoff) plus "parfois elle tourne"
+    // (a slow heading drift) — reusing the exact sine-breathing SHAPE
+    // CameraAutomation's own "pushpull"/"pan" moves use (see
+    // camera-automation.js), just far smaller amplitude and much slower, so
+    // the measured anti-nausea contract above (peak yaw / % frames in the
+    // dead-zone box) doesn't regress:
+    //   · breathAmp/breathFreqRad scale arm AND lift TOGETHER (a real dolly
+    //     move, not a height-only change) — +/-22% around the tuned base, so
+    //     the worst case (36*1.22 ≈ 44) still sits inside the "arm 36..48"
+    //     band the tuning table above already measured as safe (94%+/lowering
+    //     yaw). "Jamais très loin" is satisfied by the amplitude bound itself,
+    //     not by clamping later.
+    //   · orbitBiasAmpDeg/orbitBiasFreqRad add a tiny extra heading wobble
+    //     UNDER the exact same slewHeading()/maxYawRateDeg cap as the real
+    //     dead-zone correction (see _applyPose()) — so peak yaw literally
+    //     cannot exceed the cap no matter what this adds; only the box-time
+    //     percentage needs re-measuring, which the task-16 report does.
+    //   · Both run on the SAME slow clock (_breathT), reset to 0 in start()
+    //     so a fresh flight never begins mid-swing.
+    this.breathAmp = 0.22
+    this.breathFreqRad = (2 * Math.PI) / 65 // one full closer/further cycle per ~65s
+    this.orbitBiasAmpDeg = 4
+    this.orbitBiasFreqRad = (2 * Math.PI) / 90 // slower than the breathing, so the two never beat together
+    this._breathT = 0
+    this._standoffMul = 1
+
     this._pos = new THREE.Vector3()
     this._headingDir = new THREE.Vector3(0, 0, 1) // current, rate-limited facing (horizontal, unit)
     this._pitch = 0 // current, rate-limited vertical aim angle (rad, +up)
@@ -290,6 +319,10 @@ export class DroneCam {
     if (this._headingDir.lengthSq() < 1e-8) this._headingDir.set(0, 0, 1)
     this._headingDir.normalize()
     this._pitch = 0
+    // reset the cinematic-variation clock so a fresh flight always begins at
+    // the base standoff / zero bias, never mid-swing from a previous flight
+    this._breathT = 0
+    this._standoffMul = 1
 
     // seat the camera at the initial pose immediately — no slew-in lurch
     this._solvePosition(this.t, this._pos)
@@ -303,16 +336,19 @@ export class DroneCam {
     this.active = false
   }
 
-  // camera position at path fraction s: fixed arm/lift behind + above the
-  // SPINE (never the raw path) along the CURRENT (already rate-limited)
-  // heading. Ground/ridge clearance still reads the real terrain underneath
-  // so the rig never clips into relief.
+  // camera position at path fraction s: arm/lift (breathing — see
+  // this._standoffMul, set each frame in _applyPose from the slow sine
+  // clock) behind + above the SPINE (never the raw path) along the CURRENT
+  // (already rate-limited) heading. Ground/ridge clearance still reads the
+  // real terrain underneath so the rig never clips into relief.
   _solvePosition(s, outPos) {
     this.spine.getPointAt(s, _spinePt)
+    const arm = this.arm * this._standoffMul
+    const lift = this.lift * this._standoffMul
     outPos.set(
-      _spinePt.x - this._headingDir.x * this.arm,
-      _spinePt.y + this.lift,
-      _spinePt.z - this._headingDir.z * this.arm
+      _spinePt.x - this._headingDir.x * arm,
+      _spinePt.y + lift,
+      _spinePt.z - this._headingDir.z * arm
     )
     if (this.sampleGround) {
       const gc = this.sampleGround(outPos.x, outPos.z)
@@ -349,6 +385,12 @@ export class DroneCam {
   // shared by update()/updateAt(): dead-zone yaw (task 13 — see the class
   // comment), damp the position onto the spine, then dead-zone pitch.
   _applyPose(dt, s, arrived) {
+    // advance the slow cinematic-variation clock and derive this frame's
+    // standoff breathing multiplier (arm/lift, read by _solvePosition below)
+    // — see the constructor comment above breathAmp/breathFreqRad.
+    this._breathT += Math.max(dt, 0)
+    this._standoffMul = 1 + this.breathAmp * Math.sin(this._breathT * this.breathFreqRad)
+
     // 1) yaw: ONLY correct when the subject is nearing/outside the box's
     // horizontal range — otherwise hold the current heading exactly (the
     // "does not correct at all" dead-zone behaviour). diff is measured
@@ -389,6 +431,20 @@ export class DroneCam {
       _targetDir.copy(this._headingDir).multiplyScalar(Math.cos(yaw))
       _targetDir.x += _right.x * Math.sin(yaw)
       _targetDir.z += _right.z * Math.sin(yaw)
+      _targetDir.normalize()
+    } else {
+      // "parfois elle tourne pour bien garder le point" (task 16 §4) — a
+      // tiny, very slow extra heading wobble reusing the same rotate-by-angle
+      // shape as CameraAutomation's "pan" move (see camera-automation.js),
+      // layered UNDER the dead-zone: it only flavours the otherwise-static
+      // HOLD case above, never fights an urgent xOut correction. Its own
+      // angular rate (amplitude x frequency) is a couple tenths of a deg/s —
+      // far under maxYawRateDeg — so it drifts smoothly rather than ever
+      // hitting the same rate cap a real correction would.
+      const bias = THREE.MathUtils.degToRad(this.orbitBiasAmpDeg) * Math.sin(this._breathT * this.orbitBiasFreqRad)
+      _targetDir.copy(this._headingDir).multiplyScalar(Math.cos(bias))
+      _targetDir.x += _right.x * Math.sin(bias)
+      _targetDir.z += _right.z * Math.sin(bias)
       _targetDir.normalize()
     }
     // still the SAME hard cap as ever — a correction engaging never means a

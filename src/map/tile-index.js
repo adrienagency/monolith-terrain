@@ -4,11 +4,16 @@
 // zoom mapping, and the tile-covering math both the build script and the
 // client tile-loader need to agree on.
 
-// Region currently covered by water tiles: Annecy, Chamonix, Léman, Bourget,
-// Geneva (lon 5.0–8.0, lat 44.5–47.0). Widen this bbox — and rerun
-// `npm run build:watertiles` — to cover more of the world; every consumer
-// (build script, tile-loader, water-layer) keys off this one constant.
+// Region currently covered by tiled Overture layers: Annecy, Chamonix,
+// Léman, Bourget, Geneva (lon 5.0–8.0, lat 44.5–47.0). Widen this bbox — and
+// rerun EVERY `build:*tiles` script (water, road, …) — to cover more of the
+// world; every consumer (build scripts, tile-loader, water-layer,
+// roads-layer) keys off this one constant. `REGION` is the neutral alias new
+// (non-water) tiled layers should import; `WATER_REGION` is kept as the
+// original name so existing imports/tests are unaffected — both point at the
+// exact same object, there is only one region.
 export const WATER_REGION = { minLon: 5.0, minLat: 44.5, maxLon: 8.0, maxLat: 47.0 }
+export const REGION = WATER_REGION
 
 // LOD level → slippy tile zoom used to write/fetch tiles, and the demZoom
 // band (inclusive upper bound) that LOD serves. demZoomMax: Infinity for the
@@ -33,14 +38,38 @@ export const LOD_LEVELS = [
   { lod: 2, tileZoom: 11, demZoomMax: Infinity },
 ]
 
-export function lodForZoom(demZoom) {
-  for (const l of LOD_LEVELS) if (demZoom <= l.demZoomMax) return l.lod
-  return LOD_LEVELS[LOD_LEVELS.length - 1].lod
+// Road tiles reuse the exact same 3-level, demZoom<=8 / 9-11 / >=12 SCHEME
+// (far/mid/close) as water's LOD_LEVELS above, but need much finer slippy
+// tile zooms at every level: a road network is far denser than a water/lake
+// layer (measured: ~1.8M kept road segments region-wide vs. water's ~258k),
+// so water's tile-zoom values would blow the ~2 MB/tile ceiling by 10-20x.
+// Chosen by direct measurement (task-18 report) — for each LOD, the
+// COARSEST tileZoom whose biggest tile still lands under ~2 MB, against the
+// per-LOD class-rank gate in build-road-tiles.mjs:
+//   LOD0 z8  (far):  motorway/trunk only     -> 3.8 MB region-wide, biggest ~1.0 MB
+//   LOD1 z11 (mid):  + primary/secondary     -> 42 MB region-wide, biggest ~0.9 MB
+//   LOD2 z14 (close): everything             -> ~1 GB region-wide, biggest ~1.1 MB
+// LOD2's total is large in absolute terms, but that's the measured cost of
+// "never simplify, never drop footway/steps at the closest zoom" applied to
+// a real, densely-mapped alpine region — not a tiling inefficiency (z13
+// already blows the 2 MB ceiling at ~3.1 MB biggest tile).
+export const ROAD_LOD_LEVELS = [
+  { lod: 0, tileZoom: 8, demZoomMax: 8 },
+  { lod: 1, tileZoom: 11, demZoomMax: 11 },
+  { lod: 2, tileZoom: 14, demZoomMax: Infinity },
+]
+
+// `levels` defaults to LOD_LEVELS (water) so every existing call site is
+// unaffected; pass ROAD_LOD_LEVELS (or any other per-layer table) explicitly
+// for a layer whose tile density needs a different tileZoom per LOD.
+export function lodForZoom(demZoom, levels = LOD_LEVELS) {
+  for (const l of levels) if (demZoom <= l.demZoomMax) return l.lod
+  return levels[levels.length - 1].lod
 }
 
-export function tileZoomForLod(lod) {
-  const l = LOD_LEVELS.find((x) => x.lod === lod)
-  return l ? l.tileZoom : LOD_LEVELS[LOD_LEVELS.length - 1].tileZoom
+export function tileZoomForLod(lod, levels = LOD_LEVELS) {
+  const l = levels.find((x) => x.lod === lod)
+  return l ? l.tileZoom : levels[levels.length - 1].tileZoom
 }
 
 // Standard Web-Mercator slippy-tile projection: lon/lat -> fractional tile

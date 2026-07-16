@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { WATER_REGION, LOD_LEVELS, lodForZoom, tileZoomForLod, tilesForBBox, inRegion } from '../src/map/tile-index.js'
+import { WATER_REGION, REGION, LOD_LEVELS, ROAD_LOD_LEVELS, lodForZoom, tileZoomForLod, tilesForBBox, inRegion } from '../src/map/tile-index.js'
 
 test('lodForZoom: far/mid/close bands match the demZoomMax boundaries', () => {
   assert.equal(lodForZoom(1), 0)
@@ -65,4 +65,35 @@ test('inRegion: a patch far outside the water region is not in-region', () => {
 
 test('inRegion: a patch just touching the region edge counts as overlapping', () => {
   assert.equal(inRegion({ minLon: 4.5, maxLon: 5.0, minLat: 45.0, maxLat: 45.5 }, WATER_REGION), true)
+})
+
+// --- REGION alias / per-layer LOD tables (task 18: tiled Overture roads) ---
+
+test('REGION is the exact same object as WATER_REGION — one region, one source of truth', () => {
+  assert.equal(REGION, WATER_REGION)
+})
+
+test('lodForZoom/tileZoomForLod: default `levels` param keeps every existing (water) call site unaffected', () => {
+  assert.equal(lodForZoom(8), 0)
+  assert.equal(lodForZoom(12), 2)
+  assert.equal(tileZoomForLod(0), 8)
+  assert.equal(tileZoomForLod(2), 11)
+})
+
+test('lodForZoom/tileZoomForLod: an explicit `levels` table (ROAD_LOD_LEVELS) is honored instead of the default', () => {
+  assert.equal(lodForZoom(8, ROAD_LOD_LEVELS), 0)
+  assert.equal(lodForZoom(9, ROAD_LOD_LEVELS), 1) // just past LOD0's boundary
+  assert.equal(lodForZoom(11, ROAD_LOD_LEVELS), 1) // boundary — still LOD1
+  assert.equal(lodForZoom(12, ROAD_LOD_LEVELS), 2) // just past — LOD2
+  assert.equal(tileZoomForLod(0, ROAD_LOD_LEVELS), 8)
+  assert.equal(tileZoomForLod(1, ROAD_LOD_LEVELS), 11)
+  assert.equal(tileZoomForLod(2, ROAD_LOD_LEVELS), 14)
+})
+
+test('ROAD_LOD_LEVELS and LOD_LEVELS share the same demZoom band SCHEME (far<=8, mid 9-11, close>=12), only tileZoom differs', () => {
+  assert.deepEqual(LOD_LEVELS.map((l) => l.demZoomMax), ROAD_LOD_LEVELS.map((l) => l.demZoomMax))
+  // road tiles need finer (higher) zooms than water at every LOD — denser data, smaller tiles
+  for (let i = 0; i < LOD_LEVELS.length; i++) {
+    assert.ok(ROAD_LOD_LEVELS[i].tileZoom >= LOD_LEVELS[i].tileZoom, `LOD${i}: road tileZoom should be >= water's`)
+  }
 })

@@ -216,5 +216,79 @@ test('DroneCam dead-zone: peak yaw stays capped and the tracked point mostly sta
   assert.ok(pctInBox >= 85, `only ${pctInBox.toFixed(1)}% of frames kept the tracked point inside the dead-zone box`)
 })
 
+// ---- task 16 §4: cinematic standoff-breathing + orbit-bias variation -----
+// Layered ON TOP of the same rig above — these tests prove the addition (a)
+// actually varies the standoff and (b) doesn't blow the exact same measured
+// contract the test above guards (peak yaw capped, % frames in box), using
+// the identical zigzag-climb fixture and duration so the numbers are
+// directly comparable to the baseline test's own 85%/9.5 thresholds.
+test('DroneCam standoff breathes (closer/further) but never strays far from the tuned base', () => {
+  const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 400)
+  const controls = { target: new THREE.Vector3() }
+  const drone = new DroneCam({ camera, controls, sampleGround: () => 0 })
+  const worldPts = buildZigzagClimb()
+  const duration = 60
+  assert.ok(drone.start(worldPts, { duration }))
+
+  const dt = 1 / 30
+  let minStandoff = Infinity
+  let maxStandoff = -Infinity
+  let s = 0
+  let guard = 0
+  while (s < 1 && guard++ < 5000) {
+    s = Math.min(1, s + dt / duration)
+    drone.updateAt(dt, s)
+    const standoff = drone.arm * drone._standoffMul
+    minStandoff = Math.min(minStandoff, standoff)
+    maxStandoff = Math.max(maxStandoff, standoff)
+  }
+  assert.ok(maxStandoff - minStandoff > 1, `expected real breathing variation, got range ${minStandoff.toFixed(2)}..${maxStandoff.toFixed(2)}`)
+  // "jamais très loin": the whole excursion stays inside the tuning table's
+  // own measured-safe arm band (see the big comment above `this.arm`)
+  assert.ok(minStandoff >= drone.arm * 0.7, `standoff dipped too close: ${minStandoff.toFixed(2)}`)
+  assert.ok(maxStandoff <= drone.arm * 1.35, `standoff strayed too far: ${maxStandoff.toFixed(2)}`)
+})
+
+test('DroneCam breathing/orbit-bias variation does not regress the dead-zone contract', () => {
+  const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 400)
+  const controls = { target: new THREE.Vector3() }
+  const drone = new DroneCam({ camera, controls, sampleGround: () => 0 })
+  const worldPts = buildZigzagClimb()
+  const duration = 60 // same duration as the baseline "dead-zone" test above
+  assert.ok(drone.start(worldPts, { duration }))
+
+  const dt = 1 / 30
+  const prevHeading = new THREE.Vector3()
+  const vSub = new THREE.Vector3()
+  const vNdc = new THREE.Vector3()
+  let peakYawDegS = 0
+  let framesInBox = 0
+  let totalFrames = 0
+  let s = 0
+  let guard = 0
+  while (s < 1 && guard++ < 5000) {
+    prevHeading.copy(drone._headingDir)
+    s = Math.min(1, s + dt / duration)
+    drone.updateAt(dt, s)
+    totalFrames++
+    const cosA = Math.max(-1, Math.min(1, prevHeading.dot(drone._headingDir)))
+    peakYawDegS = Math.max(peakYawDegS, ((Math.acos(cosA) * 180) / Math.PI) / dt)
+    camera.updateMatrixWorld(true)
+    drone.curve.getPointAt(s, vSub)
+    vNdc.copy(vSub).project(camera)
+    if (
+      vNdc.x >= drone.deadzone.xMin && vNdc.x <= drone.deadzone.xMax &&
+      vNdc.y >= drone.deadzone.yMin && vNdc.y <= drone.deadzone.yMax
+    ) framesInBox++
+  }
+  const pctInBox = (framesInBox / totalFrames) * 100
+  // the hard rate cap is architectural (slewHeading clamps every frame
+  // regardless of what target the breathing/bias feeds it) — this can never
+  // regress, but assert it anyway as a tripwire against a future change to
+  // the cap-application itself.
+  assert.ok(peakYawDegS <= 9.5, `peak yaw ${peakYawDegS.toFixed(2)} deg/s exceeds the ~9°/s anti-nausea cap`)
+  assert.ok(pctInBox >= 85, `only ${pctInBox.toFixed(1)}% of frames kept the tracked point inside the dead-zone box (variation regressed it)`)
+})
+
 function THREE_deg(d) { return (d * Math.PI) / 180 }
 function THREE_clampDot(d) { return Math.max(-1, Math.min(1, d)) }
