@@ -180,7 +180,7 @@ const params = {
   fogNear: 35.5,
   fogFar: 50,
   fogColor: '#ffffff',
-  fogEnabled: true, // depth fog on/off (Effects)
+  fogEnabled: false, // depth fog on/off (Effects)
   // background: solid (fogColor) or a gradient (linear/radial/mesh) of A/B/C.
   // The gradient's top colour is bgColorA — SEPARATE from the fog colour, so a
   // gradient never washes out the fog.
@@ -272,7 +272,7 @@ const params = {
 
   // clouds — thick and low, clinging to the summits
   // volumetric cloud deck — user-tuned base settings, active on every template
-  cloudsEnabled: true,
+  cloudsEnabled: false,
   cloudOpacity: 1.5, // density scale of the volumetric deck
   cloudAltitude: 4.5, // deck base height in world units — 0 puts the clouds at ground level
   cloudDrift: 3,
@@ -396,8 +396,12 @@ function autoBgColours() {
 }
 scene.background = new THREE.Color(params.fogColor)
 // linear fog: near/far give direct control over where the fade starts and
-// where the terrain is fully swallowed, hiding the mesh edge
-scene.fog = new THREE.Fog(new THREE.Color(params.fogColor), params.fogNear, params.fogFar)
+// where the terrain is fully swallowed, hiding the mesh edge. The Fog object
+// is always created (later code reads/writes its color/near/far regardless of
+// whether fog is currently active) but only attached to the scene when the
+// param is on, so fog off at startup means no fog is applied at all.
+const fogRef = new THREE.Fog(new THREE.Color(params.fogColor), params.fogNear, params.fogFar)
+scene.fog = params.fogEnabled ? fogRef : null
 
 const camera = new THREE.PerspectiveCamera(params.fov, window.innerWidth / window.innerHeight, 0.5, 220)
 camera.position.set(0, 18, 19)
@@ -1127,8 +1131,6 @@ globe = new Globe(params)
 globe.setVisible(false)
 scene.add(globe.group)
 globe.setSunDir(sun.position)
-
-const fogRef = scene.fog
 
 modes = new Modes({
   camera,

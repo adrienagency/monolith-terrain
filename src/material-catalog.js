@@ -36,7 +36,6 @@ export const MATERIALS = [
   { id: 'grass', label: 'Herbe', cat: 'nature', kind: 'dir', dir: 'textures/grass/', thumb: thumb('grass'), metalness: 0, roughness: 0.9, normalScale: 1.4, envMapIntensity: 0.35, repeat: 8 },
 
   // --- roche -------------------------------------------------------------
-  { id: 'rock064', label: 'Roche pâle', cat: 'roche', kind: 'dir', dir: 'textures/rock064/', thumb: thumb('rock064'), metalness: 0, roughness: 0.95, normalScale: 1.5, envMapIntensity: 0.4, repeat: 5 },
   { id: 'rock036', label: 'Roche foncée', cat: 'roche', kind: 'dir', dir: 'textures/rock036/', thumb: thumb('rock036'), metalness: 0, roughness: 0.9, normalScale: 1.4, envMapIntensity: 0.4, repeat: 5 },
   { id: 'rock058', label: 'Roche brute', cat: 'roche', kind: 'dir', dir: 'textures/rock058/', thumb: thumb('rock058'), metalness: 0, roughness: 0.95, normalScale: 1.6, envMapIntensity: 0.4, repeat: 5 },
   { id: 'rock063', label: 'Roche patinée', cat: 'roche', kind: 'dir', dir: 'textures/rock063/', thumb: thumb('rock063'), metalness: 0, roughness: 0.92, normalScale: 1.5, envMapIntensity: 0.4, repeat: 5 },
@@ -53,19 +52,15 @@ export const MATERIALS = [
 
   // --- neige -------------------------------------------------------------
   { id: 'snow014', label: 'Neige fraîche', cat: 'neige', kind: 'dir', dir: 'textures/snow014/', thumb: thumb('snow014'), metalness: 0, roughness: 0.6, normalScale: 1.1, envMapIntensity: 0.8, repeat: 6 },
-  { id: 'snow015', label: 'Neige tassée', cat: 'neige', kind: 'dir', dir: 'textures/snow015/', thumb: thumb('snow015'), metalness: 0, roughness: 0.62, normalScale: 1.0, envMapIntensity: 0.8, repeat: 6 },
 
   // --- tissu -------------------------------------------------------------
-  { id: 'fabric', label: 'Denim', cat: 'tissu', kind: 'dir', dir: 'textures/fabric/', thumb: thumb('fabric'), metalness: 0, roughness: 0.92, normalScale: 1.2, envMapIntensity: 0.35, repeat: 6 },
   { id: 'fabric062', label: 'Toile', cat: 'tissu', kind: 'dir', dir: 'textures/fabric062/', thumb: thumb('fabric062'), metalness: 0, roughness: 0.9, normalScale: 1.2, envMapIntensity: 0.35, repeat: 7 },
-  { id: 'fabric048', label: 'Laine', cat: 'tissu', kind: 'dir', dir: 'textures/fabric048/', thumb: thumb('fabric048'), metalness: 0, roughness: 0.9, normalScale: 1.3, envMapIntensity: 0.35, repeat: 7 },
 
   // --- métal -------------------------------------------------------------
   { id: 'metal042a', label: 'Métal brossé', cat: 'metal', kind: 'dir', dir: 'textures/metal042a/', thumb: thumb('metal042a'), metalness: 0.9, roughness: 0.4, normalScale: 1.2, envMapIntensity: 1.4, repeat: 6 },
   { id: 'metal048c', label: 'Métal patiné', cat: 'metal', kind: 'dir', dir: 'textures/metal048c/', thumb: thumb('metal048c'), metalness: 0.85, roughness: 0.45, normalScale: 1.3, envMapIntensity: 1.4, repeat: 6 },
 
   // --- procédural (canvas) ----------------------------------------------
-  { id: 'wood', label: 'Bois', cat: 'atelier', kind: 'tex', tex: 'wood', swatch: 'linear-gradient(135deg,#8a5a2b,#b07d47 50%,#6f4522)', metalness: 0, roughness: 0.7, normalScale: 1.0, envMapIntensity: 0.5, repeat: 4 },
   { id: 'carbon', label: 'Carbone', cat: 'atelier', kind: 'tex', tex: 'carbon', swatch: 'linear-gradient(135deg,#1f2226,#3a3f45 50%,#15171a)', metalness: 0.45, roughness: 0.5, normalScale: 1.2, envMapIntensity: 1.3, repeat: 10 },
 ]
 
