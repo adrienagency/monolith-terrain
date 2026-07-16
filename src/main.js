@@ -330,7 +330,13 @@ const params = {
   placesEnabled: true,
   placesDensity: 1,
   placesSize: 1,
-  placesHalo: false,
+  // ON by default: the outline is what makes the names read cleanly over busy
+  // relief ("mets un contour blanc autour des lettres"). It used to default off
+  // because the old centred strokeText bled half its width INTO the glyph and
+  // made type look mushy — text-label.js now stamps a ring of fills around the
+  // letterform instead, so the ink glyph stays crisp and there's no reason to
+  // ship it off.
+  placesHalo: true,
 
   // light
   sunIntensity: 7.6,
