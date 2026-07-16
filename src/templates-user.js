@@ -52,7 +52,7 @@ export const TEMPLATE_KEYS = [
   'cloudBillow', 'cloudBrightness', 'cloudAltSpread', 'cloudDriftVar', 'cloudContrast', 'cloudSSS',
   // Route (GPX) styling — not the track itself, see note above
   'gpxWidth', 'gpxColor', 'gpxAutoContrast', 'gpxGradient', 'gpxGradientMode', 'gpxGlow', 'gpxShimmer',
-  'gpxPoints', 'gpxStart', 'gpxEnd', 'gpxAltReadout', 'gpxSlopeReadout',
+  'gpxPoints', 'gpxStart', 'gpxEnd', 'gpxKm', 'gpxAltReadout', 'gpxSlopeReadout',
 ]
 
 const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)))

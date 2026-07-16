@@ -188,7 +188,9 @@ export class GpxLayer {
   setTrack(points, name) {
     const cumKm = [0]
     for (let i = 1; i < points.length; i++) cumKm.push(cumKm[i - 1] + distM(points[i - 1], points[i]) / 1000)
-    this.track = { points, name, cumKm, world: null }
+    // pointNames: optional index -> custom label map, set via setPointName();
+    // a fresh track always starts with no custom names
+    this.track = { points, name, cumKm, world: null, pointNames: {} }
   }
 
   // (Re)drape the loaded track onto the current terrain patch — called after
@@ -284,24 +286,84 @@ export class GpxLayer {
       this.group.add(this.glowLine)
     }
 
+    // track points — small dots at the (already decimated) vertices, one cheap
+    // THREE.Points draw call so a long track doesn't spam individual meshes
+    if (this.params.gpxPoints) {
+      const ptsGeo = new THREE.BufferGeometry()
+      ptsGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
+      this.pointsMat = new THREE.PointsMaterial({
+        color: new THREE.Color(lineColor),
+        size: 4,
+        sizeAttenuation: false,
+        depthWrite: false,
+        transparent: true,
+        opacity: 0.85,
+      })
+      this.pointsObj = new THREE.Points(ptsGeo, this.pointsMat)
+      this.pointsObj.renderOrder = 7
+      this.group.add(this.pointsObj)
+    }
+
+    const names = this.track.pointNames || {}
     const mk = (label, v, scale = 1, opacity = 1) => {
       const s = textSprite(label, this.params.hudAccent, scale, opacity)
       s.position.copy(v).add(new THREE.Vector3(0, scale > 0.8 ? 1.25 : 0.85, 0))
       this.group.add(s)
       return s
     }
-    this.startSprite = mk(`▶ START · ${Math.round(eles[0])} M`, world[0])
-    this.endSprite = mk(`■ END · ${Math.round(eles[eles.length - 1])} M`, world[world.length - 1])
 
-    // altitude waypoints along the way — one every ~2 km, six at most
+    // start / finish markers — independently toggleable; a custom name (set
+    // via setPointName on index 0 / last) overrides the default label
+    const lastIdx = eles.length - 1
+    this.startSprite = this.params.gpxStart
+      ? mk(names[0] ? `▶ ${names[0]}` : `▶ START · ${Math.round(eles[0])} M`, world[0])
+      : null
+    this.endSprite = this.params.gpxEnd
+      ? mk(names[lastIdx] ? `■ ${names[lastIdx]}` : `■ END · ${Math.round(eles[lastIdx])} M`, world[world.length - 1])
+      : null
+
+    // altitude waypoints along the way — one every ~2 km, six at most, plus
+    // any custom-named point so a name set via the panel is always visible
     this.waypoints = []
     const wpKm = this.track.cumKm[this.track.cumKm.length - 1]
     const nWp = Math.min(6, Math.max(2, Math.round(wpKm / 2)))
+    const wpIndices = new Set()
     for (let k = 1; k <= nWp; k++) {
       const target = (k / (nWp + 1)) * wpKm
       let i = this.track.cumKm.findIndex((v) => v >= target)
       if (i < 0) i = this.track.cumKm.length - 1
-      this.waypoints.push(mk(`◆ ${Math.round(eles[i])} M`, world[i], 0.62, 0.85))
+      wpIndices.add(i)
+    }
+    for (const idxStr of Object.keys(names)) {
+      const i = parseInt(idxStr, 10)
+      if (Number.isFinite(i) && i > 0 && i < lastIdx) wpIndices.add(i)
+    }
+    for (const i of wpIndices) {
+      const label = names[i] ? `◆ ${names[i]}` : `◆ ${Math.round(eles[i])} M`
+      this.waypoints.push(mk(label, world[i], 0.62, 0.85))
+    }
+
+    // km markers — small tick + "N KM" label every whole km, strided so a
+    // long track stays capped at roughly 25 markers
+    this.kmMarkers = []
+    if (this.params.gpxKm) {
+      const totKmWhole = Math.floor(this.track.cumKm[this.track.cumKm.length - 1])
+      if (totKmWhole >= 1) {
+        const stride = Math.max(1, Math.ceil(totKmWhole / 25))
+        this._kmTickGeo = new THREE.SphereGeometry(0.12, 8, 6)
+        this._kmTickMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(lineColor), depthTest: false })
+        for (let km = stride; km <= totKmWhole; km += stride) {
+          let i = this.track.cumKm.findIndex((v) => v >= km)
+          if (i < 0) i = this.track.cumKm.length - 1
+          const tick = new THREE.Mesh(this._kmTickGeo, this._kmTickMat)
+          tick.position.copy(world[i])
+          tick.renderOrder = 19
+          this.group.add(tick)
+          this.kmMarkers.push(tick)
+          const label = mk(`${km} KM`, world[i], 0.42, 0.7)
+          this.kmMarkers.push(label)
+        }
+      }
     }
 
     this.cursor.material.color.set(this.params.hudAccent)
@@ -526,12 +588,15 @@ export class GpxLayer {
       this.glowMat?.color.set(c)
     }
     this.cursor.material.color.set(c)
+    this.pointsMat?.color.set(c)
+    this._kmTickMat?.color.set(c)
   }
 
   setWidth(v) {
     if (this.lineMat) this.lineMat.linewidth = v
     if (this.casingMat) this.casingMat.linewidth = v + 2.5
     if (this.glowMat) this.glowMat.linewidth = v * 2.4
+    if (this.pointsMat) this.pointsMat.size = Math.max(2, v * 1.3)
   }
 
   // rebuilds the line so the casing can be added/removed (its geometry is
@@ -572,6 +637,40 @@ export class GpxLayer {
     this.lineMat.dashOffset -= dt * 3
   }
 
+  // rebuild-driven toggles — geometry (points/ticks/labels) is only
+  // constructed when its flag is on, so each of these needs a rebuild()
+  setPoints(v) {
+    this.params.gpxPoints = v
+    this.rebuild()
+  }
+
+  setStart(v) {
+    this.params.gpxStart = v
+    this.rebuild()
+  }
+
+  setEnd(v) {
+    this.params.gpxEnd = v
+    this.rebuild()
+  }
+
+  setKm(v) {
+    this.params.gpxKm = v
+    this.rebuild()
+  }
+
+  // stores (or clears, when name is empty) a custom label for a track-point
+  // index — shown on the waypoint/start/end sprite in place of the default
+  // elevation readout; index is a plain track-point index (e.g. hoverIdx)
+  setPointName(index, name) {
+    if (!this.track || index == null || index < 0) return
+    if (!this.track.pointNames) this.track.pointNames = {}
+    const trimmed = (name || '').trim()
+    if (trimmed) this.track.pointNames[index] = trimmed
+    else delete this.track.pointNames[index]
+    this.rebuild()
+  }
+
   setVisible(v) {
     this.group.visible = v
     if (!v) this.setHover(-1, false)
@@ -608,6 +707,29 @@ export class GpxLayer {
     }
     this.startSprite = this.endSprite = null
     this.waypoints = []
+    if (this.pointsObj) {
+      this.group.remove(this.pointsObj)
+      this.pointsObj.geometry.dispose()
+      this.pointsMat.dispose()
+      this.pointsObj = null
+      this.pointsMat = null
+    }
+    for (const m of this.kmMarkers || []) {
+      this.group.remove(m)
+      if (m.isSprite) {
+        m.material.map.dispose()
+        m.material.dispose()
+      }
+    }
+    this.kmMarkers = []
+    if (this._kmTickGeo) {
+      this._kmTickGeo.dispose()
+      this._kmTickGeo = null
+    }
+    if (this._kmTickMat) {
+      this._kmTickMat.dispose()
+      this._kmTickMat = null
+    }
   }
 
   clear() {

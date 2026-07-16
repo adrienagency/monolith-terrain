@@ -244,6 +244,7 @@ const params = {
   gpxPoints: true,
   gpxStart: true,
   gpxEnd: true,
+  gpxKm: true,
   gpxAltReadout: true,
   gpxSlopeReadout: false,
 
