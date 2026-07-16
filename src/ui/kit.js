@@ -134,6 +134,15 @@ export function segmented({ label, options, get, set }) {
   return root
 }
 
+// conditionally shows/hides an element on every refreshAll() pass — for a
+// control whose visibility depends on another control's value (e.g. a mode
+// select shown only while its parent toggle is on), so it re-syncs after a
+// template load or any other bulk params change.
+export function visibleWhen(node, predicate) {
+  const refresh = track(() => { node.style.display = predicate() ? '' : 'none' }, node)
+  refresh()
+}
+
 export function button(label, onClick, { accent = false, ghost = false } = {}) {
   const b = el('button', `ce-btn${accent ? ' accent' : ''}${ghost ? ' ghost' : ''}`, label)
   b.type = 'button'

@@ -2571,6 +2571,7 @@ function tick() {
     terrain.tickSurfaceFx(dt, params.fx[params.surfaceFx]?.speed ?? 0) // animate at the effect's speed
     terrain.tickLiquidMetal(dt, params.lmSpeed) // molten flow when liquid metal is on
     terrain.tickSurfaceMaterial(dt) // drifting sand (relief material flow)
+    gpxLayer.tick?.(dt) // shimmer: flowing dashOffset highlight along the route line
   }
   peaksLayer.update(camera, window.innerWidth, window.innerHeight, modes.mode === 'surface')
 

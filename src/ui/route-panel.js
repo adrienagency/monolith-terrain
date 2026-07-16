@@ -1,9 +1,9 @@
 // ROUTE panel — the GPX track as a first-class layer: load a file, style the
-// line (width/colour/auto-contrast casing). Later Parcours tasks extend this
-// same panel with gradient/glow/shimmer, points, and playback.
+// line (width/colour/auto-contrast casing, gradient/glow/shimmer). Later
+// Parcours tasks extend this same panel with points and playback.
 // Docked in the left column, after Camera (Explore, Scan, Camera, Route).
 
-import { slider, color, toggle, button, section } from './kit.js'
+import { slider, color, toggle, select, visibleWhen, button, section } from './kit.js'
 import { Panel } from './shell.js'
 
 const ICON =
@@ -39,6 +39,37 @@ export function buildRoutePanel(ctx) {
       label: 'Auto-contrast casing',
       get: () => params.gpxAutoContrast,
       set: (v) => { params.gpxAutoContrast = v; ctx.gpx.setAutoContrast(v) },
+    })
+  )
+
+  const sStyle = panel.addSection(section('Line effects', { open: false }))
+  const modeRow = select({
+    label: 'Gradient mode',
+    options: [
+      { value: 'elevation', label: 'Elevation' },
+      { value: 'slope', label: 'Slope' },
+      { value: 'progress', label: 'Progress' },
+    ],
+    get: () => params.gpxGradientMode,
+    set: (v) => ctx.gpx.setGradient(params.gpxGradient, v),
+  })
+  visibleWhen(modeRow, () => params.gpxGradient)
+  sStyle.body.append(
+    toggle({
+      label: 'Gradient along track',
+      get: () => params.gpxGradient,
+      set: (v) => ctx.gpx.setGradient(v, params.gpxGradientMode),
+    }),
+    modeRow,
+    toggle({
+      label: 'Glow',
+      get: () => params.gpxGlow,
+      set: (v) => ctx.gpx.setGlow(v),
+    }),
+    toggle({
+      label: 'Shimmer',
+      get: () => params.gpxShimmer,
+      set: (v) => ctx.gpx.setShimmer(v),
     })
   )
 

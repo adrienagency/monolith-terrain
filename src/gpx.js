@@ -64,6 +64,29 @@ export function frameTrack(points) {
   return { lat, lon, zoom }
 }
 
+// ---------------------------------------------------------------- colour ramps
+
+// cool -> warm hue sweep (blue through to red), used for the elevation ramp
+function elevationRampColor(t) {
+  const hue = THREE.MathUtils.lerp(0.62, 0.0, THREE.MathUtils.clamp(t, 0, 1))
+  return new THREE.Color().setHSL(hue, 0.82, 0.52)
+}
+
+// green (flat) -> amber (moderate) -> red (steep) by absolute grade %
+function slopeRampColor(gradePct) {
+  const g = Math.min(Math.abs(gradePct), 18)
+  let hue
+  if (g <= 4) hue = THREE.MathUtils.lerp(0.34, 0.14, g / 4) // green -> amber
+  else hue = THREE.MathUtils.lerp(0.14, 0.0, Math.min((g - 4) / 10, 1)) // amber -> red
+  return new THREE.Color().setHSL(hue, 0.8, 0.5)
+}
+
+// pleasant hue sweep along the track's index (start -> end)
+function progressRampColor(t) {
+  const hue = (0.58 + THREE.MathUtils.lerp(0, 0.72, THREE.MathUtils.clamp(t, 0, 1))) % 1
+  return new THREE.Color().setHSL(hue, 0.72, 0.55)
+}
+
 // haversine meters
 function distM(a, b) {
   const R = EARTH_RADIUS_M
@@ -108,6 +131,8 @@ export class GpxLayer {
     scene.add(this.group)
     this.line = null
     this.lineMat = null
+    this.glowLine = null
+    this.glowMat = null
     this.hoverIdx = -1
 
     // hover cursor: accent sphere pinned to the nearest track point
@@ -211,20 +236,54 @@ export class GpxLayer {
       this.group.add(this.casingLine)
     }
 
+    const eles = this._elevations()
+    const gradientOn = !!this.params.gpxGradient
+    const vertexColors = gradientOn ? this._trackColors(eles) : null
+
     const geo = new LineGeometry()
     geo.setPositions(pts)
+    if (vertexColors) geo.setColors(vertexColors)
     this.lineMat = new LineMaterial({
-      color: new THREE.Color(lineColor),
+      // vertex colours are multiplied by the base colour in LineMaterial's
+      // shader — go white so the ramp shows true when it's driving the line
+      color: new THREE.Color(gradientOn ? '#ffffff' : lineColor),
       linewidth: width,
       alphaToCoverage: false,
+      vertexColors: gradientOn,
     })
     this.lineMat.resolution.set(window.innerWidth, window.innerHeight)
+    if (this.params.gpxShimmer) {
+      this.lineMat.dashed = true
+      this.lineMat.dashSize = Math.max(0.6, width * 0.8)
+      this.lineMat.gapSize = Math.max(0.6, width * 0.8)
+    }
     this.line = new Line2(geo, this.lineMat)
     this.line.computeLineDistances()
     this.line.renderOrder = 6
     this.group.add(this.line)
 
-    const eles = this._elevations()
+    // glow: a second, wider, additive, low-opacity halo behind the main line
+    if (this.params.gpxGlow) {
+      const glowGeo = new LineGeometry()
+      glowGeo.setPositions(pts)
+      if (vertexColors) glowGeo.setColors(vertexColors)
+      this.glowMat = new LineMaterial({
+        color: new THREE.Color(gradientOn ? '#ffffff' : lineColor),
+        linewidth: width * 2.4,
+        transparent: true,
+        opacity: 0.35,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        vertexColors: gradientOn,
+        alphaToCoverage: false,
+      })
+      this.glowMat.resolution.set(window.innerWidth, window.innerHeight)
+      this.glowLine = new Line2(glowGeo, this.glowMat)
+      this.glowLine.computeLineDistances()
+      this.glowLine.renderOrder = 4
+      this.group.add(this.glowLine)
+    }
+
     const mk = (label, v, scale = 1, opacity = 1) => {
       const s = textSprite(label, this.params.hudAccent, scale, opacity)
       s.position.copy(v).add(new THREE.Vector3(0, scale > 0.8 ? 1.25 : 0.85, 0))
@@ -265,6 +324,36 @@ export class GpxLayer {
       const w = this.track.world?.[i]
       return w && dem ? (w.y - 0.16) * mPerUnit + dem.meanM : 0
     })
+  }
+
+  // per-vertex [r,g,b, r,g,b, ...] ramp for the gradient modes, one triple
+  // per track point (parallel to the pts/world arrays built in rebuild()).
+  _trackColors(eles) {
+    const cumKm = this.track.cumKm
+    const n = eles.length
+    const eMin = Math.min(...eles)
+    const eMax = Math.max(...eles)
+    const eRange = Math.max(eMax - eMin, 1e-6)
+    const mode = this.params.gpxGradientMode || 'elevation'
+    const out = new Array(n * 3)
+    for (let i = 0; i < n; i++) {
+      let c
+      if (mode === 'slope') {
+        const j = Math.min(i + 1, n - 1)
+        const k = Math.max(i - 1, 0)
+        const dKm = cumKm[j] - cumKm[k]
+        const grade = dKm > 0 ? ((eles[j] - eles[k]) / (dKm * 1000)) * 100 : 0
+        c = slopeRampColor(grade)
+      } else if (mode === 'progress') {
+        c = progressRampColor(n > 1 ? i / (n - 1) : 0)
+      } else {
+        c = elevationRampColor((eles[i] - eMin) / eRange)
+      }
+      out[i * 3] = c.r
+      out[i * 3 + 1] = c.g
+      out[i * 3 + 2] = c.b
+    }
+    return out
   }
 
   // ---------------------------------------------------------------- profile
@@ -425,17 +514,24 @@ export class GpxLayer {
   onResize(w, h) {
     this.lineMat?.resolution.set(w, h)
     this.casingMat?.resolution.set(w, h)
+    this.glowMat?.resolution.set(w, h)
   }
 
   setColor(color) {
     const c = color || this.params.hudAccent
-    this.lineMat?.color.set(c)
+    // when the gradient ramp is driving the line, its base colour must stay
+    // white (see rebuild()) — the accent swatch only applies to the solid path
+    if (!this.params.gpxGradient) {
+      this.lineMat?.color.set(c)
+      this.glowMat?.color.set(c)
+    }
     this.cursor.material.color.set(c)
   }
 
   setWidth(v) {
     if (this.lineMat) this.lineMat.linewidth = v
     if (this.casingMat) this.casingMat.linewidth = v + 2.5
+    if (this.glowMat) this.glowMat.linewidth = v * 2.4
   }
 
   // rebuilds the line so the casing can be added/removed (its geometry is
@@ -443,6 +539,37 @@ export class GpxLayer {
   setAutoContrast(v) {
     this.params.gpxAutoContrast = v
     this.rebuild()
+  }
+
+  // gradient / glow need the geometry (vertex colours) or a second line
+  // rebuilt; shimmer only flips a material flag so it stays cheap.
+  setGradient(on, mode) {
+    this.params.gpxGradient = on
+    if (mode) this.params.gpxGradientMode = mode
+    this.rebuild()
+  }
+
+  setGlow(v) {
+    this.params.gpxGlow = v
+    this.rebuild()
+  }
+
+  setShimmer(v) {
+    this.params.gpxShimmer = v
+    if (!this.lineMat) return
+    this.lineMat.dashed = v
+    if (v) {
+      const width = this.params.gpxWidth ?? 3
+      this.lineMat.dashSize = Math.max(0.6, width * 0.8)
+      this.lineMat.gapSize = Math.max(0.6, width * 0.8)
+    }
+  }
+
+  // decrements dashOffset each frame for the flowing shimmer highlight —
+  // called from the main render loop's tick() while shimmer is on.
+  tick(dt) {
+    if (!this.params.gpxShimmer || !this.lineMat?.dashed) return
+    this.lineMat.dashOffset -= dt * 3
   }
 
   setVisible(v) {
@@ -457,6 +584,13 @@ export class GpxLayer {
       this.line.geometry.dispose()
       this.lineMat.dispose()
       this.line = null
+    }
+    if (this.glowLine) {
+      this.group.remove(this.glowLine)
+      this.glowLine.geometry.dispose()
+      this.glowMat.dispose()
+      this.glowLine = null
+      this.glowMat = null
     }
     if (this.casingLine) {
       this.group.remove(this.casingLine)
