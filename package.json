@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "build:mapdata": "node scripts/build-mapdata.mjs",
     "build:places": "node scripts/build-places.mjs",
-    "test": "node --test test/geo.test.js test/gpx.test.js test/palette.test.js test/modes.test.js test/landmarks.test.js test/drag.test.js test/plinth.test.js test/camera-poses.test.js test/autofocus.test.js test/templates.test.js test/accordion.test.js test/ground-info.test.js test/lake.test.js test/region-mask.test.js test/region-plate.test.js test/zoom-detail.test.js test/coast-mask.test.js test/geo-data.test.js test/draped-line.test.js test/place-pick.test.js test/block-clip.test.js test/overpass.test.js test/places-minzoom.test.js test/history.test.js test/shortcuts.test.js test/river-width.test.js test/place-scale.test.js"
+    "build:watertiles": "node scripts/build-water-tiles.mjs",
+    "test": "node --test test/geo.test.js test/gpx.test.js test/palette.test.js test/modes.test.js test/landmarks.test.js test/drag.test.js test/plinth.test.js test/camera-poses.test.js test/autofocus.test.js test/templates.test.js test/accordion.test.js test/ground-info.test.js test/lake.test.js test/region-mask.test.js test/region-plate.test.js test/zoom-detail.test.js test/coast-mask.test.js test/geo-data.test.js test/draped-line.test.js test/place-pick.test.js test/block-clip.test.js test/overpass.test.js test/places-minzoom.test.js test/history.test.js test/shortcuts.test.js test/river-width.test.js test/place-scale.test.js test/tile-index.test.js test/tile-loader.test.js"
   },
   "dependencies": {
     "mediabunny": "^1.50.8",
@@ -17,6 +18,7 @@
     "three": "^0.172.0"
   },
   "devDependencies": {
+    "@duckdb/node-api": "^1.5.4-r.1",
     "vite": "^6.0.7"
   }
 }

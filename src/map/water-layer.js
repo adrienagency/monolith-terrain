@@ -7,6 +7,18 @@ import { fetchOverpassLines, fetchOverpassAreas } from './overpass.js'
 import { makeInsideBlock, clipPolylineToBlock, blockOutline, clipPolygonToBlock } from './block-clip.js'
 import { OSM_MIN_ZOOM } from './roads-layer.js'
 import { riverWidthPx } from './river-width.js'
+import { WATER_REGION, inRegion, lodForZoom, tileZoomForLod } from './tile-index.js'
+import { loadWaterTiles, loadWaterTileManifest, hasTilesForLod } from './tile-loader.js'
+
+// Lakes render above every other map layer, in a distinctly more saturated
+// blue than the general water ink — an explicit user request ("je tiens
+// vraiment à ce que les lacs apparaissent au dessus de tout le reste, en
+// bleu assez visible"). renderOrder 26 clears roads (20) and the general
+// water fill (17); depthTest is disabled on lake meshes/lines specifically
+// (mirrors the always-on-top city-label sprites in places-layer.js) so a
+// lake never gets hidden behind a draped road or another water body at
+// nearly the same elevation.
+const LAKE_RENDER_ORDER = 26
 
 // Filled water-body mesh: clip the ring's XZ contour to the block footprint
 // BEFORE triangulating (Sutherland-Hodgman against the slab outline), drape
@@ -55,13 +67,16 @@ function _buildFilledRing(ringLatLon, dem, sample, outline, fp, insideBlock) {
   return geo
 }
 
-// Shared fill-material spec for draped water-body meshes (OSM areas + NE lakes).
-function _fillMaterial(ink, opacity) {
+// Shared fill-material spec for draped water-body meshes (OSM areas + NE/tile
+// lakes). `depthTest: false` is used for the lake-specific material so lakes
+// stay visible above everything else (see LAKE_RENDER_ORDER above).
+function _fillMaterial(ink, opacity, { depthTest = true } = {}) {
   return new THREE.MeshBasicMaterial({
     color: new THREE.Color(ink),
     transparent: true,
     opacity,
     depthWrite: false,
+    depthTest,
     side: THREE.DoubleSide,
     polygonOffset: true,
     polygonOffsetFactor: -1,
@@ -132,11 +147,46 @@ export class WaterLayer {
       if (areas) areaRings = areas.map((a) => a.ring)
     }
     if (!riverEntries) riverEntries = await this._neRiverRings(bounds, zoom)
-    // lakes + coastline: always Natural Earth
-    const lakeRings = await this._neRings('lakes', bounds, zoom)
+
+    // Lakes + other water areas: tiled Overture data when the patch sits
+    // inside the covered region AND tiles actually exist for this LOD;
+    // otherwise fall back to Natural Earth exactly as before (the rest of
+    // the world must keep working exactly as now — NE's `lakes` layer is a
+    // coverage problem, not a precision one, but it's the only thing we
+    // have outside the built region). Tile-sourced `lake` features get the
+    // special "on top, vivid blue" treatment below; every other kept
+    // subtype (river/water/canal/pond/reservoir) merges into `areaRings`,
+    // the same bucket Overpass water AREAs already feed.
+    let lakeRings
+    let tileOk = false
+    if (inRegion(bounds, WATER_REGION)) {
+      const manifest = await loadWaterTileManifest()
+      const lod = lodForZoom(zoom)
+      if (hasTilesForLod(manifest, lod)) {
+        const tileFC = await loadWaterTiles(bounds, tileZoomForLod(lod))
+        if (id !== this._buildId || dem !== terrain.dem) return
+        const tileFeats = clipToPatch(tileFC.features, bounds)
+        const tileLakeRings = []
+        const tileAreaRings = []
+        for (const f of tileFeats) {
+          const rings = ringsOf(f.geometry)
+          if (f.properties?.subtype === 'lake') tileLakeRings.push(...rings)
+          else tileAreaRings.push(...rings)
+        }
+        lakeRings = tileLakeRings
+        if (tileAreaRings.length) areaRings = [...(areaRings || []), ...tileAreaRings]
+        tileOk = true
+      }
+    }
+    if (!tileOk) lakeRings = await this._neRings('lakes', bounds, zoom)
+
     const coastRings = await this._neRings('coastline', bounds, zoom)
     if (id !== this._buildId || dem !== terrain.dem) return
-    this.usingOsm = osmOk
+    // Overture's base/water theme is derived from OSM (ODbL) same as the
+    // Overpass paths, so rendering tile-sourced water requires the same
+    // "© OpenStreetMap contributors" credit — refreshOsmCredit() in main.js
+    // reads this flag.
+    this.usingOsm = osmOk || tileOk
 
     const fp = terrain.blockFootprint(); const insideBlock = makeInsideBlock(fp)
     // Computed once per rebuild (depends only on fp) and shared by every
@@ -145,6 +195,10 @@ export class WaterLayer {
     const sample = (x, z) => (terrain.sample ? terrain.sample(x, z) : 0)
     const resolution = new THREE.Vector2(window.innerWidth, window.innerHeight)
     const ink = params.darkMode ? '#7fb2d6' : '#2b7fc4'
+    // Lakes get a distinctly more saturated blue than the general water ink
+    // in both themes — "en bleu assez visible" — while still respecting the
+    // existing dark-mode ink flip.
+    const lakeInk = params.darkMode ? '#63d1ff' : '#0f6fd6'
     const casing = params.darkMode ? 'rgba(15,17,20,0.5)' : 'rgba(252,250,246,0.6)'
     const clipAll = (ringList) => { const runs = []; for (const r of ringList) { const pts = latlonToWorldPts(r, dem, latLonToWorld); runs.push(...clipPolylineToBlock(pts, insideBlock, fp.regionOn ? 0.3 : 0.6)) } return runs }
 
@@ -160,14 +214,16 @@ export class WaterLayer {
     }
 
     const groups = [
-      ...[...riverBuckets.entries()].map(([widthPx, rings]) => ({ runs: clipAll(rings), widthPx })),
-      { runs: clipAll(lakeRings), widthPx: 1.2 },
-      { runs: clipAll(coastRings), widthPx: 1.2 },
+      ...[...riverBuckets.entries()].map(([widthPx, rings]) => ({ runs: clipAll(rings), widthPx, color: ink, order: 18 })),
+      // lake outline: on top of everything, vivid blue — matches the lake fill below
+      { runs: clipAll(lakeRings), widthPx: 1.4, color: lakeInk, order: LAKE_RENDER_ORDER },
+      { runs: clipAll(coastRings), widthPx: 1.2, color: ink, order: 18 },
     ]
     for (const g of groups) {
       if (!g.runs.length) continue
-      const obj = buildLineSegments(g.runs, sample, { color: ink, casing, widthPx: g.widthPx, offset: 0.07, renderOrder: 18, resolution })
-      obj.traverse((o) => { if (o.material) o.material.opacity = params.waterOpacity ?? 0.9 })
+      const obj = buildLineSegments(g.runs, sample, { color: g.color, casing, widthPx: g.widthPx, offset: 0.07, renderOrder: g.order, resolution })
+      const onTop = g.order === LAKE_RENDER_ORDER
+      obj.traverse((o) => { if (o.material) { o.material.opacity = params.waterOpacity ?? 0.9; if (onTop) o.material.depthTest = false } })
       this.group.add(obj)
     }
 
@@ -190,12 +246,15 @@ export class WaterLayer {
         }
       }
       if (lakeRings.length) {
-        const lakeMaterial = _fillMaterial(ink, fillOpacity)
+        // Lakes above everything else, in a clearly-visible blue —
+        // LAKE_RENDER_ORDER + depthTest:false (see the constant and
+        // _fillMaterial above).
+        const lakeMaterial = _fillMaterial(lakeInk, fillOpacity, { depthTest: false })
         for (const ring of lakeRings) {
           const geo = _buildFilledRing(ring, dem, sample, outline, fp, insideBlock)
           if (!geo) continue
           const mesh = new THREE.Mesh(geo, lakeMaterial)
-          mesh.renderOrder = 17
+          mesh.renderOrder = LAKE_RENDER_ORDER
           this.group.add(mesh)
         }
       }
