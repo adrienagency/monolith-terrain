@@ -11,15 +11,15 @@ export function buildMapPanel(ctx) {
   sLayers.body.append(
     toggle({ label: 'Roads', get: () => params.roadsEnabled, set: (v) => { params.roadsEnabled = v; ctx.rebuildMapLayers() } }),
     slider({ label: 'Roads opacity', min: 0, max: 1, step: 0.02, get: () => params.roadsOpacity, set: (v) => { params.roadsOpacity = v; ctx.mapLayers.setOpacity('roads', v) } }),
-    slider({ label: 'Détail routes', min: 0, max: 2, step: 1, get: () => params.roadsDetail, set: (v) => { params.roadsDetail = v; ctx.rebuildMapLayers() } }),
-    color({ label: 'Couleur routes', get: () => params.roadColor, set: (v) => { params.roadColor = v; ctx.rebuildMapLayers() } }),
+    slider({ label: 'Roads detail', min: 0, max: 2, step: 1, get: () => params.roadsDetail, set: (v) => { params.roadsDetail = v; ctx.rebuildMapLayers() } }),
+    color({ label: 'Roads colour', get: () => params.roadColor, set: (v) => { params.roadColor = v; ctx.rebuildMapLayers() } }),
     toggle({ label: 'Rivers & water', get: () => params.waterEnabled, set: (v) => { params.waterEnabled = v; ctx.rebuildMapLayers() } }),
     slider({ label: 'Water opacity', min: 0, max: 1, step: 0.02, get: () => params.waterOpacity, set: (v) => { params.waterOpacity = v; ctx.mapLayers.setOpacity('water', v) } }),
     toggle({ label: 'Places', get: () => params.placesEnabled, set: (v) => { params.placesEnabled = v; ctx.rebuildMapLayers() } }),
     slider({ label: 'Places density', min: 0.4, max: 2, step: 0.1, get: () => params.placesDensity, set: (v) => { params.placesDensity = v; ctx.rebuildMapLayers() } })
   )
 
-  const sContour = panel.addSection(section('Contours & grid'))
+  const sContour = panel.addSection(section('Contours & Grid'))
   sContour.body.append(
     slider({ label: 'Contour interval', min: 0.04, max: 0.6, step: 0.01, get: () => params.contourInterval, set: (v) => { params.contourInterval = v; u().uContourInterval.value = v } }),
     slider({ label: 'Contour opacity', min: 0, max: 1, step: 0.02, get: () => params.contourOpacity, set: (v) => { params.contourOpacity = v; u().uContourOpacity.value = v } }),

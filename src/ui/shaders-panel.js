@@ -66,7 +66,7 @@ export function buildShadersPanel(ctx) {
     // None / topographic
     const none = el('span', 'ce-mat-vig-img ce-mat-vig-none')
     const noneGrid = el('div', 'ce-mat-grid')
-    noneGrid.append(tile('', 'Aucun', none))
+    noneGrid.append(tile('', 'None', none))
     matPick.append(noneGrid)
     // categories
     for (const cat of materialsByCategory()) {
@@ -96,8 +96,8 @@ export function buildShadersPanel(ctx) {
         slider({ label: 'Scale (tiling)', min: 0.3, max: 4, step: 0.05, get: () => ctx.getMatScale(), set: (v) => ctx.setMatScale(v) }),
         slider({ label: 'Bump', min: 0, max: 3, step: 0.05, get: () => ctx.getSurfaceMatBump(), set: (v) => ctx.setSurfaceMatBump(v) }),
         slider({ label: 'Roughness', min: 0, max: 1, step: 0.01, get: () => ctx.getMatRoughness(), set: (v) => ctx.setMatRoughness(v) }),
-        slider({ label: 'Noise (révèle le dessous)', min: 0, max: 1, step: 0.01, get: () => ctx.getMatNoise(), set: (v) => ctx.setMatNoise(v) }),
-        toggle({ label: 'Au-dessus du niveau zéro', get: () => ctx.getMatAboveZero(), set: (v) => ctx.setMatAboveZero(v) })
+        slider({ label: 'Noise (reveals base)', min: 0, max: 1, step: 0.01, get: () => ctx.getMatNoise(), set: (v) => ctx.setMatNoise(v) }),
+        toggle({ label: 'Above zero level', get: () => ctx.getMatAboveZero(), set: (v) => ctx.setMatAboveZero(v) })
       )
     }
   }

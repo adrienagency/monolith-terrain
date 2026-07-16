@@ -15,6 +15,12 @@
   --ce-track: rgba(28, 30, 34, 0.14);
   --ce-hover: rgba(28, 30, 34, 0.05);
   --ce-radius: 16px;
+
+  /* spacing scale — one token per relationship, used everywhere that
+     relationship occurs so the panel rhythm stays even. */
+  --ce-gap-control: 8px; /* between sibling controls (rows) in a group */
+  --ce-gap-group: 14px; /* before an L3 sub-group heading / between groups */
+  --ce-gap-tight: 6px; /* between a heading/label and the content it introduces */
 }
 body.dark {
   --ce-ink: #e8e9ec;
@@ -321,13 +327,17 @@ body.dark {
   background: transparent;
   color: var(--ce-ink);
   font-family: var(--ce-font);
-  font-size: 12.5px;
-  font-weight: 600;
   cursor: pointer;
   border-radius: 10px;
 }
 .ce-section-head:hover {
   background: var(--ce-hover);
+}
+/* L2 section header — same weight/case/size wherever a section title appears */
+.ce-section-head .ce-section-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: normal;
 }
 .ce-chev {
   width: 7px;
@@ -343,7 +353,7 @@ body.dark {
 }
 .ce-section-body {
   display: none;
-  padding: 2px 8px 12px;
+  padding: var(--ce-gap-tight) 8px var(--ce-gap-group);
 }
 .ce-section.open .ce-section-body {
   display: block;
@@ -351,7 +361,7 @@ body.dark {
 
 /* ----------------------------------------------------------------- rows */
 .ce-row {
-  margin: 8px 0;
+  margin: var(--ce-gap-control) 0;
 }
 .ce-row-inline {
   display: flex;
@@ -359,13 +369,16 @@ body.dark {
   justify-content: space-between;
   gap: 10px;
 }
+/* L4 control label — every slider/toggle/color/select label span shares this */
 .ce-label {
   display: flex;
   align-items: center;
   justify-content: space-between;
   font-size: 12px;
-  color: var(--ce-muted);
-  margin-bottom: 4px;
+  font-weight: 500;
+  letter-spacing: normal;
+  color: var(--ce-ink);
+  margin-bottom: var(--ce-gap-tight);
   gap: 8px;
 }
 .ce-row-inline .ce-label {
@@ -398,14 +411,6 @@ body.dark {
 }
 
 /* user template cards — colour-strip vignettes grouped by category */
-.ce-utpl-cat {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ce-muted);
-  margin: 10px 2px 2px;
-}
 .ce-utpl-card {
   position: relative;
   border: 1px solid var(--ce-hairline);
@@ -538,7 +543,7 @@ body.dark {
 .ce-ramp {
   display: flex;
   gap: 4px;
-  margin: 8px 0;
+  margin: var(--ce-gap-control) 0;
 }
 .ce-ramp .ce-swatch {
   flex: 1;
@@ -654,7 +659,7 @@ body.dark {
 .ce-btn-row {
   display: flex;
   gap: 6px;
-  margin: 8px 0;
+  margin: var(--ce-gap-control) 0;
 }
 .ce-btn-row .ce-btn {
   flex: 1;
@@ -665,7 +670,7 @@ body.dark {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
-  margin: 8px 0;
+  margin: var(--ce-gap-control) 0;
 }
 .ce-card {
   border: 1px solid var(--ce-hairline);
@@ -727,7 +732,7 @@ body.dark {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
-  margin: 8px 0;
+  margin: var(--ce-gap-control) 0;
 }
 
 /* --------------------------------------------------------------- modal */
@@ -990,6 +995,8 @@ body.ce-noui .ce-rec {
   .ce-section-head {
     min-height: 40px;
     padding: 12px 10px;
+  }
+  .ce-section-head .ce-section-title {
     font-size: 13px;
   }
   .ce-panel-head {
@@ -1166,14 +1173,28 @@ body.ce-noui .ce-rec {
   }
 }
 
-/* ---- Shaders panel: Appearance mini-header --------------------------- */
-.ce-fx-head {
+/* ---- L3 sub-group heading — unified across the panels ---------------- */
+/* Every sub-group caption resolves to this one rule so the same hierarchy
+   level always looks identical: Shaders' "Appearance"/"Relief material"
+   (.ce-fx-head), material category captions (.ce-mat-cat), and user-template
+   category captions (.ce-utpl-cat). Keep the class names distinct (they mark
+   different DOM contexts) but the visual treatment is shared. */
+.ce-fx-head,
+.ce-mat-cat,
+.ce-utpl-cat {
   font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ce-muted);
-  margin: 8px 0 1px;
+  margin: var(--ce-gap-group) 0 var(--ce-gap-tight);
+}
+/* a sub-group heading that opens its section needs no extra top gap — the
+   section body's own top padding already sets that rhythm */
+.ce-section-body > .ce-fx-head:first-child,
+.ce-section-body > .ce-mat-cat:first-child,
+.ce-section-body > .ce-utpl-cat:first-child {
+  margin-top: 0;
 }
 
 /* ------------------------------------------- relief-material vignette picker */
@@ -1182,14 +1203,6 @@ body.ce-noui .ce-rec {
   overflow-y: auto;
   margin: 2px 0 4px;
   padding-right: 2px;
-}
-.ce-mat-cat {
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ce-muted);
-  margin: 9px 2px 4px;
 }
 .ce-mat-grid {
   display: grid;

@@ -17,7 +17,7 @@ export function buildCameraPanel(ctx) {
     tip: 'Viewpoint, focus, motion and rendering performance.',
   })
 
-  const sCam = panel.addSection(section('Lens & focus', { open: false }))
+  const sCam = panel.addSection(section('Lens & Focus', { open: false }))
   sCam.body.append(
     slider({ label: 'Field of view', min: 20, max: 60, step: 1, get: () => params.fov, set: (v) => { params.fov = v; ctx.camera.fov = v; ctx.camera.updateProjectionMatrix() } }),
     toggle({ label: 'Autofocus (pointer)', get: () => params.autoFocus, set: (v) => { params.autoFocus = v } }),

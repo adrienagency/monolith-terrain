@@ -135,7 +135,7 @@ export function buildCreatePanel(ctx) {
 
   // --------------------------------------------------------------- Colors
   const mode = () => (params.darkMode ? 'dark' : 'light')
-  const sCol = addTo(section('Colors'))
+  const sCol = addTo(section('Colours'))
   sCol.body.append(el('div', 'ce-label', 'Elevation ramp, low to high'))
   const ramp = el('div', 'ce-ramp')
   params.rampStops.forEach((stop, i) => {
@@ -171,7 +171,7 @@ export function buildCreatePanel(ctx) {
   const sBg = addTo(section('Background'))
   // --- Environnement (HDRI sky) — a vignette picker; selecting a sky takes over
   // the backdrop + lighting, clearing it returns to the solid/gradient below ---
-  sBg.body.append(el('div', 'ce-fx-head', 'Environnement (HDRI)'))
+  sBg.body.append(el('div', 'ce-fx-head', 'Environment (HDRI)'))
   const envPick = el('div', 'ce-mat-pick')
   sBg.body.append(envPick)
   function renderEnvPicker() {
@@ -187,7 +187,7 @@ export function buildCreatePanel(ctx) {
       return b
     }
     const none = el('span', 'ce-mat-vig-img ce-mat-vig-none')
-    grid.append(tile('', 'Aucun', none))
+    grid.append(tile('', 'None', none))
     for (const e of ctx.environments) {
       const img = el('img', 'ce-mat-vig-img'); img.src = e.thumb; img.alt = e.label; img.loading = 'lazy'
       grid.append(tile(e.id, e.label, img))
@@ -225,7 +225,7 @@ export function buildCreatePanel(ctx) {
   renderBg()
 
   // ------------------------------------------------------------ Map style
-  const sMap = addTo(section('Map style'))
+  const sMap = addTo(section('Map Style'))
   const u = () => ctx.terrain.mapUniforms
   sMap.body.append(
     slider({ label: 'Hypsometric tint', min: 0, max: 1, step: 0.02, get: () => params.mapTint, set: (v) => { params.mapTint = v; u().uTint.value = v } }),
@@ -326,7 +326,7 @@ export function buildCreatePanel(ctx) {
     const sWat = addTo(section('Water'))
     sWat.body.append(
       toggle({ label: 'Water simulation (beta)', get: () => params.waterReal, set: (v) => { params.waterReal = v; ctx.waterRebuild() } }),
-      el('div', 'ce-label', 'GPU-heavy — may slow down some computers. Turn it off anytime.'),
+      el('div', 'ce-note', 'GPU-heavy — may slow down some computers. Turn it off anytime.'),
       color({ label: 'Water colour', get: () => params.lakeColor, set: (v) => { params.lakeColor = v; ctx.realWater?.setLook(params) } }),
       slider({ label: 'Sea state (F1–F3)', min: 1, max: 3, step: 1, get: () => params.waterWind ?? 2, set: (v) => { params.waterWind = v; ctx.realWater?.setWind(v) } }),
       slider({ label: 'Transparency', min: 0, max: 1, step: 0.01, get: () => params.waterTransparency ?? 0.4, set: (v) => { params.waterTransparency = v; ctx.realWater?.setLook(params) } }),
@@ -346,7 +346,7 @@ export function buildCreatePanel(ctx) {
     sLig.body.append(
       slider({ label: 'Time of day (h)', min: 0, max: 24, step: 0.25, get: () => params.timeOfDay, set: (v) => { params.timeOfDay = v; ctx.applyTimeOfDay(v); refreshAll() } })
     )
-    sLig.body.append(el('div', 'ce-label', 'Manual sun overrides (also driven by the two above)'))
+    sLig.body.append(el('div', 'ce-note', 'Manual sun overrides (also driven by the two above)'))
   }
   sLig.body.append(
     slider({ label: 'Sun intensity', min: 0, max: 16, step: 0.1, get: () => params.sunIntensity, set: (v) => { params.sunIntensity = v; ctx.placeSun() } }),
