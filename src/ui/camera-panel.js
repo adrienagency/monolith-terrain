@@ -23,7 +23,8 @@ export function buildCameraPanel(ctx) {
     toggle({ label: 'Autofocus (pointer)', get: () => params.autoFocus, set: (v) => { params.autoFocus = v } }),
     slider({ label: 'Focus distance', min: 5, max: 60, step: 0.1, get: () => params.focusDistance, set: (v) => { params.focusDistance = v } }),
     slider({ label: 'Focus range', min: 0.5, max: 60, step: 0.1, get: () => params.focusRange, set: (v) => { params.focusRange = v; ctx.dof.cocMaterial.worldFocusRange = v } }),
-    slider({ label: 'Bokeh', min: 0, max: 8, step: 0.1, get: () => params.bokehScale, set: (v) => { params.bokehScale = v; ctx.dof.bokehScale = v; ctx.dofPass.enabled = v > 0 } })
+    toggle({ label: 'Depth of field', get: () => params.bokehEnabled, set: (v) => { params.bokehEnabled = v; ctx.dofPass.enabled = v && params.bokehScale > 0 } }),
+    slider({ label: 'Bokeh', min: 0, max: 8, step: 0.1, get: () => params.bokehScale, set: (v) => { params.bokehScale = v; ctx.dof.bokehScale = v; ctx.dofPass.enabled = params.bokehEnabled && v > 0 } })
   )
 
   // looping cinematic camera moves — orbit / fly-over / crane, etc.

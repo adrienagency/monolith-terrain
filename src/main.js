@@ -134,6 +134,10 @@ const params = {
   autoFocus: true, // pointer→terrain autofocus (replaces the old cone autofocus)
   focusDistance: 13.2698,
   focusRange: 45, // wide in-focus band by default — most of the relief stays sharp
+  // Depth of field is OFF by default and gated by an explicit flag, mirroring
+  // fogEnabled. bokehScale alone can't serve as the gate: it doubles as the
+  // strength slider, so "off" would mean losing the user's chosen strength.
+  bokehEnabled: false,
   bokehScale: 3.7,
 
   // map overlay
@@ -1035,8 +1039,8 @@ const smaa = new SMAAEffect()
 const dofPass = new EffectPass(camera, dof)
 composer.addPass(dofPass)
 composer.addPass(new EffectPass(camera, exposureFx, toneMap, hueSat, contrastFx, grain, vignette, smaa))
-// skip the whole DOF pass when bokeh is zero — it's pure cost with no visual effect
-dofPass.enabled = params.bokehScale > 0
+// skip the whole DOF pass when bokeh is off or zero — it's pure cost with no visual effect
+dofPass.enabled = params.bokehEnabled && params.bokehScale > 0
 
 // ------------------------------------------------------------------ pointer
 
@@ -1274,7 +1278,7 @@ modes = new Modes({
       refreshOsmCredit() // GeoNames credit only applies in surface mode — resync on mode change
     },
     setEffectsEnabled(v) {
-      dofPass.enabled = v && params.bokehScale > 0
+      dofPass.enabled = v && params.bokehEnabled && params.bokehScale > 0
       grain.blendMode.opacity.value = v ? params.grain : 0
       sun.castShadow = v && params.shadowMode !== 'off'
       renderer.shadowMap.autoUpdate = v && params.shadowMode === 'dynamic'
@@ -1602,7 +1606,7 @@ function applyUserTemplate(tmpl) {
   applyBackground() // solid/gradient background from the captured look
   // camera lens / depth-of-field / shadow look
   if (params.fov != null) { camera.fov = params.fov; camera.updateProjectionMatrix() }
-  if (params.bokehScale != null) { dof.bokehScale = params.bokehScale; dofPass.enabled = params.bokehScale > 0 }
+  if (params.bokehScale != null) { dof.bokehScale = params.bokehScale; dofPass.enabled = params.bokehEnabled && params.bokehScale > 0 }
   if (params.focusRange != null) dof.cocMaterial.worldFocusRange = params.focusRange
   if (params.shadowMode) applyShadowMode()
   applyPlinthMaterial()
@@ -1761,6 +1765,9 @@ function resetAll() {
   // fog off
   params.fogEnabled = false
   scene.fog = null
+  // depth of field off
+  params.bokehEnabled = false
+  dofPass.enabled = false
   // map overlay layers (roads/water/places)
   Object.assign(params, DEFAULT_MAPLAYERS)
   rebuildMapLayers()

@@ -111,8 +111,10 @@ export function createAdaptiveQuality({
     if (!dirty.dof) {
       // T2+: kill the whole DoF pass but leave params.bokehScale alone — the
       // Camera panel keeps showing the user's bokeh, and stepping back up
-      // re-enables the pass exactly as they left it
-      dofPass.enabled = n < 2 && params.bokehScale > 0
+      // re-enables the pass exactly as they left it. bokehEnabled is the user's
+      // explicit gate and always wins: auto-quality may only ever turn DoF OFF,
+      // never switch it back on behind their back.
+      dofPass.enabled = n < 2 && params.bokehEnabled && params.bokehScale > 0
     }
     if (!dirty.grain) {
       params.grain = n >= 3 ? 0 : base.grain

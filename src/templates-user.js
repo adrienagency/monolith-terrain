@@ -35,7 +35,7 @@ export const TEMPLATE_KEYS = [
   // background (solid / gradient / HDRI sky)
   'bgMode', 'bgColorA', 'bgColorB', 'bgColorC', 'bgAngle', 'bgEnv',
   // camera lens / depth-of-field + shadow look (NOT position/location)
-  'fov', 'autoFocus', 'focusDistance', 'focusRange', 'bokehScale', 'shadowMode',
+  'fov', 'autoFocus', 'focusDistance', 'focusRange', 'bokehEnabled', 'bokehScale', 'shadowMode',
   // socle (block)
   'plinth', 'plinthDepth', 'plinthColor', 'plinthFinish', 'plinthPbr', 'plinthGlass',
   'plinthGlassDiffusion', 'plinthGlassProjection', 'plinthGlassBump', 'plinthBump',
