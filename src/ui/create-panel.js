@@ -1,7 +1,7 @@
 // CREATE panel — everything that makes the map, in one place (right dock).
 // Sections are exclusive accordions. Camera lives in its own sibling panel.
 
-import { el, slider, color, swatch, toggle, select, segmented, button, section, refreshAll } from './kit.js'
+import { el, slider, color, swatch, toggle, select, segmented, button, section, refreshAll, visibleWhen } from './kit.js'
 import { Panel } from './shell.js'
 import { generatePalette, generateStyle, generateGridContour } from '../palette.js'
 import { PBR_PRESETS, GLASS_PRESETS, GLASS_BY_ID, PBR_BY_ID } from '../material-presets.js'
@@ -193,7 +193,11 @@ export function buildCreatePanel(ctx) {
     return s
   }
   sCld.body.append(
-    toggle({ label: 'Volumetric clouds', get: () => params.cloudsEnabled, set: (v) => { params.cloudsEnabled = v; rebuildClouds() } }),
+    toggle({ label: 'Volumetric clouds', get: () => params.cloudsEnabled, set: (v) => { params.cloudsEnabled = v; rebuildClouds(); refreshAll() } })
+  )
+  // 11 dependent sliders — kept in full (per Adrien: the controls stay, they
+  // just go inert-looking and hide while the deck itself is off)
+  const cloudRows = [
     cloudLive('Density', 'cloudOpacity', 0.05, 1.5, 0.05),
     cloudBaked('Scale', 'cloudScale', 0.5, 5, 0.1),
     cloudBaked('Gaps', 'cloudCoverage', 0, 0.8, 0.01),
@@ -204,8 +208,10 @@ export function buildCreatePanel(ctx) {
     cloudBaked('Altitude', 'cloudAltitude', 0, 16, 0.5),
     cloudBaked('Altitude spread', 'cloudAltSpread', 0, 1, 0.05),
     cloudLive('Drift speed', 'cloudDrift', 0, 4, 0.1),
-    cloudLive('Drift variation', 'cloudDriftVar', 0, 1, 0.05)
-  )
+    cloudLive('Drift variation', 'cloudDriftVar', 0, 1, 0.05),
+  ]
+  sCld.body.append(...cloudRows)
+  for (const row of cloudRows) visibleWhen(row, () => params.cloudsEnabled)
 
   // ---------------------------------------------------------------- Water
   if (FLAGS.water) {
@@ -214,13 +220,17 @@ export function buildCreatePanel(ctx) {
     // is gone. GPU-heavy, so it stays opt-in with a plain warning.
     const sWat = addTo(section('Water'))
     sWat.body.append(
-      toggle({ label: 'Water simulation (beta)', get: () => params.waterReal, set: (v) => { params.waterReal = v; ctx.waterRebuild() } }),
-      el('div', 'ce-note', 'GPU-heavy — may slow down some computers. Turn it off anytime.'),
+      toggle({ label: 'Water simulation (beta)', get: () => params.waterReal, set: (v) => { params.waterReal = v; ctx.waterRebuild(); refreshAll() } }),
+      el('div', 'ce-note', 'GPU-heavy — may slow down some computers. Turn it off anytime.')
+    )
+    const waterRows = [
       color({ label: 'Water colour', get: () => params.lakeColor, set: (v) => { params.lakeColor = v; ctx.realWater?.setLook(params) } }),
       slider({ label: 'Sea state (F1–F3)', min: 1, max: 3, step: 1, get: () => params.waterWind ?? 2, set: (v) => { params.waterWind = v; ctx.realWater?.setWind(v) } }),
       slider({ label: 'Transparency', min: 0, max: 1, step: 0.01, get: () => params.waterTransparency ?? 0.4, set: (v) => { params.waterTransparency = v; ctx.realWater?.setLook(params) } }),
-      slider({ label: 'Sun reflection', min: 0, max: 2, step: 0.02, get: () => params.waterSunFx ?? 1, set: (v) => { params.waterSunFx = v; ctx.realWater?.setLook(params) } })
-    )
+      slider({ label: 'Sun reflection', min: 0, max: 2, step: 0.02, get: () => params.waterSunFx ?? 1, set: (v) => { params.waterSunFx = v; ctx.realWater?.setLook(params) } }),
+    ]
+    sWat.body.append(...waterRows)
+    for (const row of waterRows) visibleWhen(row, () => params.waterReal)
   }
 
   // ---------------------------------------------------------------- Light
@@ -298,11 +308,15 @@ export function buildCreatePanel(ctx) {
     slider({ label: 'Saturation', min: -1, max: 0, step: 0.02, get: () => params.saturation, set: (v) => { params.saturation = v; ctx.hueSat.saturation = v } }),
     slider({ label: 'Vignette', min: 0, max: 1, step: 0.02, get: () => params.vignette, set: (v) => { params.vignette = v; ctx.vignette.darkness = v } }),
     slider({ label: 'Grain', min: 0, max: 0.5, step: 0.01, get: () => params.grain, set: (v) => { params.grain = v; ctx.grain.blendMode.opacity.value = v } }),
-    toggle({ label: 'Fog', get: () => params.fogEnabled, set: (v) => { params.fogEnabled = v; ctx.setFogEnabled(v) } }),
+    toggle({ label: 'Fog', get: () => params.fogEnabled, set: (v) => { params.fogEnabled = v; ctx.setFogEnabled(v); refreshAll() } })
+  )
+  const fogRows = [
     slider({ label: 'Fog start', min: 5, max: 60, step: 0.5, get: () => params.fogNear, set: (v) => { params.fogNear = v; ctx.fogRef.near = v } }),
     slider({ label: 'Fog end', min: 15, max: 90, step: 0.5, get: () => params.fogFar, set: (v) => { params.fogFar = v; ctx.fogRef.far = v } }),
-    color({ label: 'Fog colour', get: () => params.fogColor, set: (v) => { params.fogColor = v; ctx.fogRef.color.set(v); if (params.bgMode === 'solid') ctx.applyBackground() } })
-  )
+    color({ label: 'Fog colour', get: () => params.fogColor, set: (v) => { params.fogColor = v; ctx.fogRef.color.set(v); if (params.bgMode === 'solid') ctx.applyBackground() } }),
+  ]
+  sFx.body.append(...fogRows)
+  for (const row of fogRows) visibleWhen(row, () => params.fogEnabled)
 
   return panel
 }
