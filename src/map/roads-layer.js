@@ -33,7 +33,7 @@ export class RoadsLayer {
     const zoom = params.demZoom ?? 8
     // the detail notch pulls full-OSM roads from further out: crank detail → OSM
     // kicks in at a lower zoom, so more road detail is visible when zoomed back.
-    const osmThreshold = params.roadsDetail >= 2 ? 10 : params.roadsDetail >= 1 ? 11 : OSM_MIN_ZOOM
+    const osmThreshold = params.roadsDetail >= 3 ? 10 : params.roadsDetail >= 2 ? 11 : 12
     const useOsm = zoom >= osmThreshold
 
     // gather rings as {coords:[lon,lat][], klass} from the chosen tier
@@ -50,9 +50,9 @@ export class RoadsLayer {
       const fc = await loadLayer('roads')
       if (id !== this._buildId || dem !== terrain.dem || !fc) return
       rings = []
-      const rankMax = params.roadsDetail >= 2 ? 99 : params.roadsDetail >= 1 ? 9 : 7
+      const rankMax = params.roadsDetail >= 3 ? 5 : params.roadsDetail >= 2 ? 4 : 3
       for (const f of filterByZoom(clipToPatch(fc.features, bounds), zoom)) {
-        if ((f.properties.scalerank ?? 10) > rankMax) continue
+        if ((f.properties.scalerank ?? 9) > rankMax) continue
         const rs = f.geometry.type === 'MultiLineString' ? f.geometry.coordinates : [f.geometry.coordinates]
         for (const r of rs) rings.push({ coords: r, klass: f.properties.kind || 'secondary' })
       }

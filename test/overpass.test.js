@@ -5,17 +5,17 @@ import { buildQuery, parseOverpass, bboxKey, roadHighwayFilter, buildAreaQuery, 
 const bbox = { minLat: 45.8, minLon: 6.1, maxLat: 45.95, maxLon: 6.3 }
 
 test('buildQuery: roads uses highway + south,west,north,east bbox', () => {
-  const q = buildQuery(bbox, 'roads', 2)
+  const q = buildQuery(bbox, 'roads', 3)
   assert.match(q, /way\["highway"\]\(45\.8,6\.1,45\.95,6\.3\);/)
   assert.match(q, /out geom;/)
 })
 
-test('roadHighwayFilter: 0 major, 1 drivable, 2 all', () => {
-  assert.match(roadHighwayFilter(0), /motorway\|trunk\|primary/)
-  assert.equal(/residential/.test(roadHighwayFilter(0)), false)
-  assert.match(roadHighwayFilter(1), /residential/)
-  assert.equal(/footway|path/.test(roadHighwayFilter(1)), false)
-  assert.equal(roadHighwayFilter(2), '["highway"]') // all
+test('roadHighwayFilter: 1 major, 2 drivable, 3 all', () => {
+  assert.match(roadHighwayFilter(1), /motorway\|trunk\|primary/)
+  assert.equal(/residential/.test(roadHighwayFilter(1)), false)
+  assert.match(roadHighwayFilter(2), /residential/)
+  assert.equal(/footway|path/.test(roadHighwayFilter(2)), false)
+  assert.equal(roadHighwayFilter(3), '["highway"]') // all
 })
 
 test('buildQuery: water uses waterway', () => {
