@@ -47,6 +47,7 @@ export function buildShadersPanel(ctx) {
 
   // build the vignette grid: a "None" tile + one titled group per category
   function renderPicker() {
+    const st = matPick.scrollTop
     matPick.replaceChildren()
     const cur = ctx.getSurfaceMat() || ''
     const tile = (id, label, media) => {
@@ -54,7 +55,12 @@ export function buildShadersPanel(ctx) {
       b.type = 'button'
       b.setAttribute('data-tip', label)
       b.append(media, el('span', 'ce-mat-vig-name', label))
-      b.addEventListener('click', () => { ctx.setSurfaceMat(id); renderPicker(); renderMat() })
+      b.addEventListener('click', () => {
+        ctx.setSurfaceMat(id)
+        matPick.querySelectorAll('.ce-mat-vig.on').forEach((t) => t.classList.remove('on'))
+        b.classList.add('on')
+        renderMat()
+      })
       return b
     }
     // None / topographic
@@ -74,6 +80,7 @@ export function buildShadersPanel(ctx) {
       }
       matPick.append(grid)
     }
+    matPick.scrollTop = st
   }
   function renderMat() {
     matCtl.replaceChildren()
