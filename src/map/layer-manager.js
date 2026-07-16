@@ -6,13 +6,16 @@ import { PlacesLayer } from './places-layer.js'
 // so a new zone/zoom (or a dark-mode/opacity change) is a single rebuild call.
 // SP2 will inject an OSM DataProvider here without touching layer code.
 export class MapLayers {
-  constructor(scene) {
+  constructor(scene, camera = null) {
     this.roads = new RoadsLayer(scene)
     this.water = new WaterLayer(scene)
-    this.places = new PlacesLayer(scene)
+    this.places = new PlacesLayer(scene, camera)
     this._layers = { roads: this.roads, water: this.water, places: this.places }
     this._surfaceVisible = true
   }
+  // null-safe: places.refresh()/declutter fall back to "show everything" until
+  // a camera is set
+  setCamera(camera) { this.places.setCamera?.(camera) }
   async rebuild(ctx) {
     await Promise.all(Object.values(this._layers).map((l) => l.rebuild(ctx)))
     this.setSurfaceVisible(this._surfaceVisible)

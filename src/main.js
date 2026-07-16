@@ -328,6 +328,8 @@ const params = {
   waterOpacity: 0.9,
   placesEnabled: true,
   placesDensity: 1,
+  placesSize: 1,
+  placesHalo: false,
 
   // light
   sunIntensity: 7.6,
@@ -600,7 +602,7 @@ const traffic = new Traffic(scene, terrain, params)
 // the sea as a colour-tintable, environment-reflecting glass block
 // water simulation is behind FLAGS.water (v37, disabled in prod); null when off
 const realWater = FLAGS.water ? new RealWater(scene) : null
-const mapLayers = new MapLayers(scene) // roads/water/places overlays, populated per zone
+const mapLayers = new MapLayers(scene, camera) // roads/water/places overlays, populated per zone
 
 const labelOpts = () => ({
   real: params.source === 'real',
@@ -1421,6 +1423,8 @@ const DEFAULT_MAPLAYERS = Object.freeze({
   waterOpacity: params.waterOpacity,
   placesEnabled: params.placesEnabled,
   placesDensity: params.placesDensity,
+  placesSize: params.placesSize,
+  placesHalo: params.placesHalo,
 })
 
 function applyPalette(p) {
@@ -2463,6 +2467,7 @@ window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, glob
 if (params.source === 'real') loadRealTerrain()
 
 const clock = new THREE.Clock()
+let placesRefreshAcc = 0 // throttles the places-layer screen-space declutter refresh (see tick())
 
 // camera motion for one frame — shared by the live loop and offline export
 function updateCameraMotion(dt) {
@@ -2580,6 +2585,15 @@ function tick() {
     gpxLayer.tick?.(dt) // shimmer: flowing dashOffset highlight along the route line
   }
   peaksLayer.update(camera, window.innerWidth, window.innerHeight, modes.mode === 'surface')
+
+  // city-label declutter is screen-space (depends on camera projection), so it
+  // goes stale as soon as the camera moves — re-run the visibility-only pass
+  // at ~5Hz rather than every frame (rebuild() already ran it once synchronously)
+  placesRefreshAcc += dt
+  if (placesRefreshAcc >= 0.2) {
+    placesRefreshAcc = 0
+    mapLayers.places.refresh?.()
+  }
 
   // terrain scan progress (uScanT 0→1, auto-idle)
   scan?.update()

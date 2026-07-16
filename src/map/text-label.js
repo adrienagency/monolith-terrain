@@ -13,8 +13,8 @@ export function makeLabelTexture(text, { size = 88, weight = 500, color = '#2e28
   let width = 0
   for (const ch of text) width += probe.measureText(ch).width + gap
   width -= gap
-  const haloW = Math.max(2, size * 0.09)
-  const pad = size * 0.4 + haloW
+  const haloW = halo ? Math.max(2, size * 0.09) : 0
+  const pad = halo ? size * 0.4 + haloW : size * 0.25
   const c = document.createElement('canvas')
   c.width = Math.ceil(width + pad * 2)
   c.height = Math.ceil(size * 1.6)
@@ -27,7 +27,7 @@ export function makeLabelTexture(text, { size = 88, weight = 500, color = '#2e28
   ctx.fillStyle = color
   let x = pad
   for (const ch of text) {
-    ctx.strokeText(ch, x, c.height / 2) // halo first
+    if (halo) ctx.strokeText(ch, x, c.height / 2) // halo first
     ctx.fillText(ch, x, c.height / 2) // ink on top
     x += ctx.measureText(ch).width + gap
   }
