@@ -10,10 +10,10 @@ import { LineGeometry } from 'three/addons/lines/LineGeometry.js'
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { latLonToWorld, metersPerPixel, surfaceMetersPerUnit, EARTH_RADIUS_M } from './geo.js'
-import { resamplePath, smoothPath } from './drone-cam.js'
+import { loadLayer } from './map/geo-data.js'
+import { makeLabelTexture, labelInk, labelFontReady } from './map/text-label.js'
 
 const MAX_POINTS = 2400 // decimation budget — hover & profile stay O(small)
-const _headCurvePos = new THREE.Vector3() // scratch — avoid a per-frame alloc in _updateHead()
 
 export function parseGpx(text) {
   const doc = new DOMParser().parseFromString(text, 'application/xml')
@@ -107,6 +107,134 @@ function distM(a, b) {
   return 2 * R * Math.asin(Math.sqrt(s))
 }
 
+// ---------------------------------------------------------------- reveal head
+
+// The SINGLE source of truth for "where is the reveal head" — the exact real
+// track vertex the Line2 is currently cut to (see _applyReveal()). Both the
+// geometry reveal AND the playback-head marker call this one function so
+// they can never compute two different answers again (see the task-16 bug
+// report: a separately-smoothed curve for the marker was exactly what made
+// the triangle and the drawn line disagree).
+export function revealVertexIndex(t, segCount) {
+  const n = segCount || 0
+  if (n <= 0) return 0
+  return THREE.MathUtils.clamp(Math.round(THREE.MathUtils.clamp(t, 0, 1) * n), 0, n)
+}
+
+// One step of critically-damped exponential follow of the marker's OWN
+// transform toward the true reveal-head vertex (mutates + returns `disp`).
+// This is the "smoothing in TIME, not space" fix: the target itself is
+// always the exact real vertex above (never a different, smoother curve) —
+// any visual softness comes from how the marker's displayed position chases
+// that target frame to frame, exactly like DroneCam's own posHalfLife
+// critical-damping. `valid` false means "no prior position to ease from"
+// (a fresh track / a restarted play()) — snap instead of easing in from a
+// stale spot.
+export function stepHeadFollow(disp, target, lambda, dt, valid) {
+  if (!valid) {
+    disp.copy(target)
+  } else {
+    disp.x = THREE.MathUtils.damp(disp.x, target.x, lambda, dt)
+    disp.y = THREE.MathUtils.damp(disp.y, target.y, lambda, dt)
+    disp.z = THREE.MathUtils.damp(disp.z, target.z, lambda, dt)
+  }
+  return disp
+}
+
+// lambda for stepHeadFollow — half-life ~1/14 s (THREE.MathUtils.damp's decay
+// constant, not a literal half-life, but in that ballpark): fast enough that
+// the displayed marker stays within a small fraction of a track-vertex
+// spacing of the true head at any normal playback speed (measured — see the
+// task-16 report), while still smoothing away the frame-to-frame speed/
+// direction judder of uneven GPS vertex spacing.
+const HEAD_FOLLOW_LAMBDA = 14
+
+// ---------------------------------------------------------------- km labels
+
+// A track-length-adaptive km-label interval, snapped to a human ladder
+// (never "every 7km") — targets a roughly constant LABEL COUNT across track
+// lengths instead of a constant spacing, so a 5km loop gets one or two
+// discreet labels instead of none, and an 80km epic gets ~5 instead of 8
+// crowding the line. See buildRoutePanel/rebuild()'s "km markers" section.
+const KM_LADDER = [1, 2, 5, 10, 20, 50, 100]
+const TARGET_KM_LABELS = 5
+export function pickKmInterval(totalKm) {
+  if (!(totalKm > 0)) return KM_LADDER[0]
+  const raw = totalKm / TARGET_KM_LABELS
+  let best = KM_LADDER[0]
+  let bestDiff = Infinity
+  for (const step of KM_LADDER) {
+    const diff = Math.abs(step - raw)
+    if (diff < bestDiff) {
+      bestDiff = diff
+      best = step
+    }
+  }
+  return best
+}
+
+// ---------------------------------------------------------------- villages
+
+// Along-track village "announcements" (task 16 §3): pick real places (rows
+// from loadLayer('places'), each [name, lat, lon, pop, capital, minZoom] per
+// geo-data.js) that sit within `radiusWorld` of some point on the track and
+// have pop > minPop. `toWorld(lat, lon)` is injected (not `dem` directly) so
+// this stays pure/testable, mirroring place-pick.js's pickPlaces() — same
+// idea, different selection geometry (along-track nearest-point vs viewport
+// bbox). Rows arrive prominence-sorted (population descending, per
+// pickPlaces' own comment); a greedy minKmSpacing pass (same shape as
+// pickPlaces' minDist) keeps two closely-spaced named places from both
+// firing almost simultaneously, favouring the more prominent one.
+export function pickVillagesAlongTrack(rows, { toWorld, world, cumKm, minPop = 5000, radiusWorld = 5, minKmSpacing = 0.3 } = {}) {
+  const candidates = []
+  for (const row of rows) {
+    const [name, lat, lon, pop] = row
+    if (!(pop > minPop)) continue
+    const w = toWorld(lat, lon)
+    let bestI = -1
+    let bestD = Infinity
+    for (let i = 0; i < world.length; i++) {
+      const dx = world[i].x - w.x
+      const dz = world[i].z - w.z
+      const d = dx * dx + dz * dz
+      if (d < bestD) {
+        bestD = d
+        bestI = i
+      }
+    }
+    if (bestD > radiusWorld * radiusWorld || bestI < 0) continue
+    candidates.push({ name, pop, idx: bestI, km: cumKm[bestI], w })
+  }
+  const hits = []
+  for (const c of candidates) {
+    if (hits.some((h) => Math.abs(h.km - c.km) < minKmSpacing)) continue
+    hits.push(c)
+  }
+  hits.sort((a, b) => a.km - b.km)
+  return hits
+}
+
+// Lead distance (km) a village announcement appears BEFORE the head reaches
+// it — proportional to track length (a long track covers ground "faster" in
+// km per unit of the journey, so it earns a longer heads-up), clamped to a
+// sensible 100m..1.2km band so a short local loop still gets a real lead and
+// a huge multi-day route doesn't announce absurdly early.
+export function villageLeadKm(totalKm) {
+  return THREE.MathUtils.clamp(totalKm * 0.02, 0.1, 1.2)
+}
+
+// Opacity of a village announcement at the head's current km: ramps 0->1
+// over the lead-in (reaching full opacity exactly as the head arrives), then
+// eases back out over `fadeKm` after passing — long enough that the name is
+// still readable for a beat once the head is abreast of it, not gone the
+// instant it arrives.
+export function villageOpacity(km, hitKm, leadKm, fadeKm) {
+  if (km < hitKm - leadKm) return 0
+  if (km < hitKm) return (km - (hitKm - leadKm)) / leadKm
+  if (km < hitKm + fadeKm) return 1 - (km - hitKm) / fadeKm
+  return 0
+}
+
 // Screen-space label size for scale=1, in CLIP units (sizeAttenuation:false) —
 // the EXACT same sizing trap as PlacesLayer.BASE_H (see places-layer.js's big
 // comment above its own BASE_H): a sprite's real on-screen size is
@@ -166,6 +294,22 @@ function triangleTexture(px = 64) {
 // label since this is a pointer, not text (tuned via measurement, see report)
 const HEAD_MARKER_BASE_H = 0.006
 
+// village announcements (task 16 §3) — "plus de 5k habitants" per the brief,
+// verbatim.
+const VILLAGE_MIN_POP = 5000
+// "à côté de la route" — 600m gives a real named place near the road some
+// slack for the GeoNames point not sitting exactly on the road centreline,
+// while still excluding a village merely visible in the distance across a
+// valley (a few km away) that the rider never actually passes.
+const VILLAGE_RADIUS_M = 600
+const VILLAGE_LINE_HEIGHT = 2.4 // world units — a real vertical mark, not a leader tick
+const VILLAGE_LABEL_GAP = 0.35 // above the line's top
+// same BASE_H sizing convention as places-layer.js's own BASE_H (0.007 puts a
+// normal place name at ~8.5-14px cap-height, see its big comment) — these ARE
+// place names, of the same visual class, just triggered along-track instead
+// of by viewport picking, so they should read at the same size.
+const VILLAGE_LABEL_BASE_H = 0.007
+
 export class GpxLayer {
   constructor({ scene, camera, terrain, params, getDem }) {
     this.scene = scene
@@ -205,9 +349,12 @@ export class GpxLayer {
 
     // playback-head marker: black downward-pointing triangle, billboarded +
     // screen-space sized (see triangleTexture()/HEAD_MARKER_BASE_H above).
-    // Positioned each frame in _updateHead() along the lightly-smoothed
-    // _headCurve (see _buildHeadCurve()), never the raw per-vertex track, so
-    // its motion doesn't visibly stutter as headT advances continuously.
+    // Positioned each frame in _updateHead() at the EXACT reveal-head vertex
+    // (see revealVertexIndex()) — the same point _applyReveal() cuts the
+    // real Line2 to, never a separately-smoothed curve (see the task-16 bug
+    // report). _headDisp/_headDispValid are the critically-damped follow
+    // state that keeps its motion from stuttering (smoothing in TIME, not
+    // space — see stepHeadFollow()).
     this.headMarker = new THREE.Sprite(
       new THREE.SpriteMaterial({ map: triangleTexture(), depthTest: false, transparent: true })
     )
@@ -216,7 +363,19 @@ export class GpxLayer {
     this.headMarker.renderOrder = 23
     this.headMarker.visible = false
     this.group.add(this.headMarker)
-    this._headCurve = null
+    this._headDisp = new THREE.Vector3()
+    this._headDispValid = false
+
+    // along-track village announcements (task 16 §3) — precomputed once per
+    // rebuild() (see _buildVillages()), then just a cheap opacity lookup per
+    // frame in _updateVillages(). _villageBuildId guards the async
+    // loadLayer('places') fetch against a rebuild() that starts a newer one
+    // before the previous fetch resolves.
+    this._villageHits = []
+    this._villageMarkers = []
+    this._villageLeadKm = 0
+    this._villageFadeKm = 0
+    this._villageBuildId = 0
 
     this._buildDom()
     this._ray = new THREE.Raycaster()
@@ -295,7 +454,6 @@ export class GpxLayer {
     }
     this.track.world = world
     this._segCount = Math.max(0, world.length - 1)
-    this._buildHeadCurve(world)
 
     const lineColor = this.params.gpxColor || this.params.hudAccent
     const width = this.params.gpxWidth ?? 3
@@ -411,24 +569,23 @@ export class GpxLayer {
       this.waypoints.push(mk(label, world[i], 0.62, 0.85))
     }
 
-    // km markers — small tick + "N KM" label every whole km, strided so a
-    // long track stays capped at roughly 25 markers
+    // km markers — a small, quiet "N KM" text every so often (no dots — see
+    // the task-16 brief: the old marker dots read as "moche"/ugly). The
+    // interval adapts to the track's own length via pickKmInterval() so a
+    // 5km loop and an 80km epic both land around ~5 discreet labels instead
+    // of one fixed spacing crowding or starving either end. Scale/opacity
+    // are deliberately smaller & quieter than the waypoint diamonds above —
+    // secondary to the track, not competing with it.
     this.kmMarkers = []
     if (this.params.gpxKm) {
-      const totKmWhole = Math.floor(this.track.cumKm[this.track.cumKm.length - 1])
+      const totKm = this.track.cumKm[this.track.cumKm.length - 1]
+      const totKmWhole = Math.floor(totKm)
       if (totKmWhole >= 1) {
-        const stride = Math.max(1, Math.ceil(totKmWhole / 25))
-        this._kmTickGeo = new THREE.SphereGeometry(0.12, 8, 6)
-        this._kmTickMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(lineColor), depthTest: false })
+        const stride = pickKmInterval(totKm)
         for (let km = stride; km <= totKmWhole; km += stride) {
           let i = this.track.cumKm.findIndex((v) => v >= km)
           if (i < 0) i = this.track.cumKm.length - 1
-          const tick = new THREE.Mesh(this._kmTickGeo, this._kmTickMat)
-          tick.position.copy(world[i])
-          tick.renderOrder = 19
-          this.group.add(tick)
-          this.kmMarkers.push(tick)
-          const label = mk(`${km} KM`, world[i], 0.42, 0.7)
+          const label = mk(`${km} KM`, world[i], 0.36, 0.6)
           this.kmMarkers.push(label)
         }
       }
@@ -449,29 +606,117 @@ export class GpxLayer {
     // persisted reveal amount so a rebuild mid-playback (e.g. a terrain
     // rebuild) doesn't snap the drawn line back to 100%
     this._applyReveal(this._revealT)
+
+    // along-track village announcements (task 16 §3) — dispose the previous
+    // build's markers right away (their ground heights belong to the old
+    // terrain/dem) and kick off the async re-pick. loadLayer('places') is
+    // cached after the first call (see geo-data.js), so every rebuild after
+    // the track's first load resolves near-instantly; _villageBuildId guards
+    // against a rebuild() firing again before an in-flight fetch resolves.
+    this._disposeVillages()
+    const villageBuildId = ++this._villageBuildId
+    this._buildVillages(villageBuildId, dem, world, totKm)
   }
 
-  // Light smoothing for the playback-head triangle's motion — same recipe
-  // (and same spacing/pass counts) as DroneCam's own "subject" curve
-  // (drone-cam.js start(): span/260 spacing, then smoothPath(...,2,2)). This
-  // is deliberately LIGHT, not the heavy decimated "spine" the camera flies
-  // against (~14 control points + a wide multi-pass blur) — the marker must
-  // still visibly follow the route's real shape, switchbacks stay
-  // switchbacks, it just shouldn't stutter from vertex-to-vertex GPS jitter
-  // as headT advances continuously between discrete track points.
-  _buildHeadCurve(world) {
-    this._headCurve = null
-    if (!world || world.length < 2) return
-    let span = 0
-    for (let i = 1; i < world.length; i++) span += world[i].distanceTo(world[i - 1])
-    if (span < 1e-3) return
-    const spacing = Math.max(0.4, span / 260)
-    const smoothed = smoothPath(resamplePath(world, spacing), 2, 2).map((p) => new THREE.Vector3(p.x, p.y, p.z))
-    if (smoothed.length < 2) return
-    const curve = new THREE.CatmullRomCurve3(smoothed, false, 'centripetal', 0.5)
-    curve.arcLengthDivisions = 400
-    curve.updateArcLengths()
-    this._headCurve = curve
+  // Fetches places (cached after the first call), picks the along-track
+  // hits once, and builds their (initially invisible) markers. Never
+  // throws — a failed/late fetch just means no village announcements.
+  async _buildVillages(buildId, dem, world, totKm) {
+    if (!dem) return
+    try {
+      const [rows] = await Promise.all([loadLayer('places'), labelFontReady()])
+      if (buildId !== this._villageBuildId || !this.track || !Array.isArray(rows)) return
+      const radiusWorld = VILLAGE_RADIUS_M / surfaceMetersPerUnit(dem)
+      this._villageHits = pickVillagesAlongTrack(rows, {
+        toWorld: (lat, lon) => latLonToWorld(dem, lat, lon),
+        world,
+        cumKm: this.track.cumKm,
+        minPop: VILLAGE_MIN_POP,
+        radiusWorld,
+      })
+      this._villageLeadKm = villageLeadKm(totKm)
+      this._villageFadeKm = this._villageLeadKm * 1.5
+      this._buildVillageMarkers()
+    } catch {
+      this._villageHits = []
+    }
+  }
+
+  // Builds one (vertical line + name label, both initially opacity 0) per
+  // precomputed hit — reuses text-label.js's makeLabelTexture(), same
+  // BASE_H sizing convention as a normal place name (see VILLAGE_LABEL_BASE_H
+  // above). Per-frame work is just an opacity lookup in _updateVillages().
+  _buildVillageMarkers() {
+    this._disposeVillages()
+    if (!this._villageHits.length) return
+    const ink = labelInk(this.params.darkMode)
+    const accentColor = new THREE.Color(this.params.hudAccent)
+    for (const hit of this._villageHits) {
+      const groundY = this.terrain.sample ? this.terrain.sample(hit.w.x, hit.w.z) : 0
+      const lineGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(hit.w.x, groundY, hit.w.z),
+        new THREE.Vector3(hit.w.x, groundY + VILLAGE_LINE_HEIGHT, hit.w.z),
+      ])
+      const line = new THREE.Line(
+        lineGeo,
+        new THREE.LineBasicMaterial({ color: accentColor, transparent: true, opacity: 0, depthWrite: false })
+      )
+      line.renderOrder = 24
+      line.visible = false
+      this.group.add(line)
+
+      const { tex, aspect } = makeLabelTexture(hit.name.toUpperCase(), { color: ink.color, halo: ink.halo, weight: 700 })
+      const label = new THREE.Sprite(
+        new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0, depthTest: false, depthWrite: false })
+      )
+      label.material.sizeAttenuation = false
+      label.scale.set(VILLAGE_LABEL_BASE_H * aspect, VILLAGE_LABEL_BASE_H, 1)
+      label.position.set(hit.w.x, groundY + VILLAGE_LINE_HEIGHT + VILLAGE_LABEL_GAP, hit.w.z)
+      label.renderOrder = 25
+      label.visible = false
+      this.group.add(label)
+
+      this._villageMarkers.push({ hit, line, label })
+    }
+  }
+
+  // Per-frame (well, per _updateHead call — playback only): cheap opacity
+  // lookup against the precomputed hits, no track/place re-scan (see the
+  // task-16 brief: "précalcule... une fois, ne scanne pas par frame").
+  _updateVillages(km) {
+    if (!this._villageMarkers.length) return
+    for (const m of this._villageMarkers) {
+      const op = villageOpacity(km, m.hit.km, this._villageLeadKm, this._villageFadeKm)
+      const visible = op > 0.002
+      m.line.visible = visible
+      m.label.visible = visible
+      m.line.material.opacity = op
+      m.label.material.opacity = op
+    }
+  }
+
+  _disposeVillages() {
+    for (const m of this._villageMarkers) {
+      this.group.remove(m.line)
+      m.line.geometry.dispose()
+      m.line.material.dispose()
+      this.group.remove(m.label)
+      m.label.material.map?.dispose()
+      m.label.material.dispose()
+    }
+    this._villageMarkers = []
+  }
+
+  // hides (opacity 0) every village marker without disposing them — used
+  // when playback stops/hides so a paused/stopped view doesn't leave a
+  // half-faded announcement hanging.
+  _hideVillages() {
+    for (const m of this._villageMarkers) {
+      m.line.visible = false
+      m.label.visible = false
+      m.line.material.opacity = 0
+      m.label.material.opacity = 0
+    }
   }
 
   _elevations() {
@@ -602,9 +847,9 @@ export class GpxLayer {
   // (from the 3D scene or the profile strip) shows the accent sphere;
   // playback (from _updateHead()) shows the black triangle marker instead —
   // see the task-13 brief's "circle -> triangle" ask. The triangle's own
-  // position/visibility is actually set in _updateHead() (it needs the
-  // smoothed _headCurve, not track.world[i]); this only suppresses the
-  // sphere so the two markers never show at once.
+  // position/visibility is actually set in _updateHead() (the exact reveal-
+  // head vertex, damped in time — see stepHeadFollow()); this only
+  // suppresses the sphere so the two markers never show at once.
   setHover(i, fromScene, clientX, clientY, isPlaybackHead = false) {
     this.hoverIdx = i
     if (i < 0 || !this.track?.world) {
@@ -697,7 +942,6 @@ export class GpxLayer {
       this.glowMat?.color.set(c)
     }
     this.cursor.material.color.set(c)
-    this._kmTickMat?.color.set(c)
   }
 
   setWidth(v) {
@@ -744,7 +988,10 @@ export class GpxLayer {
 
   play() {
     if (!this.track?.world || this.track.world.length < 2) return
-    if (this.headT >= 1) this.headT = 0
+    if (this.headT >= 1) {
+      this.headT = 0
+      this._headDispValid = false // restarting from the top — snap, don't ease across from the old end position
+    }
     this.playing = true
   }
 
@@ -755,7 +1002,9 @@ export class GpxLayer {
   stop() {
     this.playing = false
     this.headT = 0
+    this._headDispValid = false
     this._applyReveal(1) // restore the full line
+    this._hideVillages()
     this.headLabel?.classList.add('hidden')
     this.setHover(-1, false)
   }
@@ -773,8 +1022,7 @@ export class GpxLayer {
   // .setPositions, which sets it to the full segment count by default).
   _applyReveal(t) {
     this._revealT = THREE.MathUtils.clamp(t, 0, 1)
-    const n = this._segCount || 0
-    const count = n <= 0 ? 0 : THREE.MathUtils.clamp(Math.round(this._revealT * n), 0, n)
+    const count = revealVertexIndex(this._revealT, this._segCount)
     if (this.line) this.line.geometry.instanceCount = count
     if (this.glowLine) this.glowLine.geometry.instanceCount = count
   }
@@ -784,9 +1032,10 @@ export class GpxLayer {
   // DOM tooltip suppressed since fromScene is false here).
   _updateHead(dt) {
     const world = this.track.world
-    const n = world.length - 1
-    if (n < 0) return
-    const headIdx = THREE.MathUtils.clamp(Math.round(this.headT * n), 0, n)
+    // the SAME formula _applyReveal() just cut the real Line2 to — see
+    // revealVertexIndex()'s own comment. This is what fixes the task-16 bug:
+    // one function, one answer, used by both the geometry and the marker.
+    const headIdx = revealVertexIndex(this.headT, this._segCount)
     this.setHover(headIdx, false, undefined, undefined, true) // playback: triangle, not the hover sphere
 
     const eles = this._elevations()
@@ -804,13 +1053,16 @@ export class GpxLayer {
     this._dispSlope =
       this._dispSlope == null ? targetSlope : THREE.MathUtils.damp(this._dispSlope, targetSlope, lambda, dt)
 
-    // marker position: the LIGHTLY smoothed _headCurve (see _buildHeadCurve),
-    // sampled continuously at headT — not world[headIdx], which would jump
-    // vertex-to-vertex and make the triangle's motion visibly stutter even
-    // though headT itself advances smoothly frame to frame ("ses déplacements
-    // ne sont pas saccadés"). Falls back to the raw vertex if the curve
-    // couldn't be built (degenerate/near-stationary track).
-    const pos = this._headCurve ? this._headCurve.getPointAt(THREE.MathUtils.clamp(this.headT, 0, 1), _headCurvePos) : world[headIdx]
+    // marker position: EXACTLY the real track vertex the Line2 is cut to
+    // (world[headIdx] — same idx as above), critically-damped in TIME (never
+    // a different, smoother curve — see stepHeadFollow()'s comment and the
+    // task-16 bug report). world[headIdx].y already carries the real terrain
+    // sample from rebuild() (terrain.sample(x,z) + 0.16), so riding it also
+    // fixes "le triangle doit suivre le dénivelé" for free — no separate
+    // elevation lookup needed.
+    stepHeadFollow(this._headDisp, world[headIdx], HEAD_FOLLOW_LAMBDA, dt, this._headDispValid)
+    this._headDispValid = true
+    const pos = this._headDisp
     const camDist = this.camera.position.distanceTo(pos)
     // apex-to-ground gap scales with camera distance (same 0.02 factor as the
     // hover cursor's own distance-scaled size, just above) so the triangle
@@ -833,6 +1085,8 @@ export class GpxLayer {
     this._headSlopeEl.textContent = `${this._dispSlope >= 0 ? '+' : ''}${this._dispSlope.toFixed(1)}%`
     this._headSlopeEl.classList.toggle('hidden', !showSlope)
     this.headLabel.classList.toggle('hidden', !(showAlt || showSlope))
+
+    this._updateVillages(cumKm[headIdx])
   }
 
   // rebuild-driven toggles — geometry (ticks/labels) is only constructed
@@ -902,22 +1156,18 @@ export class GpxLayer {
       }
     }
     this.kmMarkers = []
-    if (this._kmTickGeo) {
-      this._kmTickGeo.dispose()
-      this._kmTickGeo = null
-    }
-    if (this._kmTickMat) {
-      this._kmTickMat.dispose()
-      this._kmTickMat = null
-    }
   }
 
   clear() {
     this._disposeLine()
+    this._disposeVillages()
     this.track = null
     this.cursor.visible = false
     this.headMarker.visible = false
-    this._headCurve = null
+    this._headDispValid = false
+    this._villageHits = []
+    this._villageLeadKm = 0
+    this._villageFadeKm = 0
     this.tipEl.classList.add('hidden')
     this.profileEl.classList.add('hidden')
     this.playing = false
