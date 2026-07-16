@@ -28,8 +28,8 @@ export class PlacesLayer {
 
     const zoom = params.demZoom ?? 8
     const density = params.placesDensity ?? 1
-    const maxN = Math.round((zoom >= 10 ? 26 : zoom >= 8 ? 18 : 12) * density)
-    const minDist = TERRAIN_SIZE * (zoom >= 10 ? 0.05 : 0.085)
+    const maxN = Math.round((zoom >= 13 ? 60 : zoom >= 11 ? 40 : zoom >= 9 ? 26 : zoom >= 7 ? 16 : 10) * density)
+    const minDist = TERRAIN_SIZE * (zoom >= 12 ? 0.035 : zoom >= 10 ? 0.05 : 0.085)
     const picks = pickPlaces(rows, { zoom, toWorld: (lat, lon) => latLonToWorld(dem, lat, lon), halfLimit: HALF * 0.96, maxN, minDist })
     if (!picks.length) return
 

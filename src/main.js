@@ -1653,16 +1653,22 @@ scan = new ScanController(terrain.mapUniforms, TERRAIN_SIZE / 2)
 
 const waterRebuild = () => realWater?.rebuild({ terrain, params })
 
-// OSM attribution + loading status for the Map layers (ODbL requires the credit)
+// OSM attribution + loading status for the Map layers (ODbL requires the credit).
+// Places (villages/towns) now come from GeoNames, which requires its own CC-BY
+// credit — shown alongside OSM when both are active, or on its own otherwise.
 const osmCredit = document.createElement('div')
 osmCredit.className = 'osm-credit'
-osmCredit.innerHTML = '<span class="osm-status"></span>© OpenStreetMap contributors'
+osmCredit.innerHTML = '<span class="osm-status"></span><span class="osm-credit-lines"></span>'
 osmCredit.style.display = 'none'
 document.body.appendChild(osmCredit)
 function refreshOsmCredit() {
   const on = mapLayers.isOsmActive(), loading = mapLayers.isLoading()
-  osmCredit.style.display = on || loading ? 'flex' : 'none'
+  const lines = []
+  if (on || loading) lines.push('© OpenStreetMap contributors')
+  if (params.placesEnabled) lines.push('© GeoNames (CC BY 4.0)')
+  osmCredit.style.display = lines.length ? 'flex' : 'none'
   osmCredit.querySelector('.osm-status').textContent = loading ? 'Détail OSM · chargement… ' : ''
+  osmCredit.querySelector('.osm-credit-lines').textContent = lines.join(' · ')
 }
 
 // rebuild all map layers (roads/water/places) for the current zone — used by
