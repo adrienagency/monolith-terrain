@@ -508,6 +508,18 @@ scene.add(terrain.mesh)
 // the 3D slab the relief sits on (walls + shadow-catching base)
 const plinth = new Plinth(scene, params)
 plinth.rebuild(terrain, params)
+// the Block panel's Thickness slider (create-panel.js) calls plinth.rebuild()
+// directly on 'change' — a light rebuild that skips a full terrain regen. In
+// region mode the plinth walls are hidden and the visible depth instead comes
+// from the cut-edge skirt (region-skirt.js buildRegionSkirt), which reads the
+// SAME params.plinthDepth (both compute baseY = lowestPoint - depth, so the
+// two feel identical). Wrap the rebuild so the slider re-welds the skirt too —
+// otherwise the skirt keeps its stale depth until the next full terrain rebuild.
+const _plinthRebuild = plinth.rebuild.bind(plinth)
+plinth.rebuild = (t, p) => {
+  _plinthRebuild(t, p)
+  if (p.regionMode && regionMaskCanvas) rebuildRegionSkirt()
+}
 // give the socle its own punchy studio env so metals/glass/carbon reflect real
 // highlights (the terrain keeps the neutral RoomEnvironment on scene.environment)
 plinth.setEnvMap(makeSocleEnvMap(renderer))
