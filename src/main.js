@@ -55,6 +55,7 @@ import { makeGradientTexture, deriveBgColors, BG_MODES, ENVIRONMENTS, ENV_BY_ID 
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
 import { refreshAll } from './ui/kit.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCredits } from './ui/bars.js'
+import { buildTemplatesPanel } from './ui/templates-panel.js'
 import { buildCreatePanel } from './ui/create-panel.js'
 import { buildCameraPanel } from './ui/camera-panel.js'
 import { buildExplorePanel } from './ui/explore-panel.js'
@@ -1302,6 +1303,36 @@ const DEFAULT_FX = Object.freeze({
   clouds: params.cloudsEnabled,
   plinth: params.plinth,
 })
+// snapshots for RESET MAP (Templates panel) — background, socle material and
+// the map overlay layers, none of which RESET LOOK touches
+const DEFAULT_BG = Object.freeze({
+  bgMode: params.bgMode,
+  bgEnv: params.bgEnv,
+  bgColorA: params.bgColorA,
+  bgColorB: params.bgColorB,
+  bgColorC: params.bgColorC,
+  bgAngle: params.bgAngle,
+})
+const DEFAULT_PLINTH = Object.freeze({
+  plinthDepth: params.plinthDepth,
+  plinthColor: params.plinthColor,
+  plinthFinish: params.plinthFinish,
+  plinthPbr: params.plinthPbr,
+  plinthGlass: params.plinthGlass,
+  plinthGlassDiffusion: params.plinthGlassDiffusion,
+  plinthGlassProjection: params.plinthGlassProjection,
+  plinthGlassBump: params.plinthGlassBump,
+  plinthBump: params.plinthBump,
+})
+const DEFAULT_MAPLAYERS = Object.freeze({
+  roadsEnabled: params.roadsEnabled,
+  roadsOpacity: params.roadsOpacity,
+  roadsDetail: params.roadsDetail,
+  waterEnabled: params.waterEnabled,
+  waterOpacity: params.waterOpacity,
+  placesEnabled: params.placesEnabled,
+  placesDensity: params.placesDensity,
+})
 
 function applyPalette(p) {
   // land ramp: a fixed 8-stop system. Overwrite the existing stop objects in
@@ -1582,6 +1613,45 @@ function resetLook() {
   // elevation is per-zoom (persisted), not part of the look — left untouched
 }
 
+// RESET MAP (Templates panel) — extends RESET LOOK to also clear everything
+// else a template or a panel can leave dangling: background, socle material,
+// the whole-relief material / liquid metal / surface shader, clouds, fog and
+// the map overlay layers (roads/water/places). Location/zoom are never
+// touched — this is a look reset, not a "start over" — and any function it
+// calls is declared further down in this file; that's fine, resetAll is only
+// ever invoked from a UI click, long after the whole module has finished
+// initialising.
+function resetAll() {
+  resetLook()
+  // background — clear the HDRI sky / gradient and fall back to the shipped
+  // solid backdrop, then resync the Background panel's sky picker highlight
+  Object.assign(params, DEFAULT_BG)
+  applyBackground()
+  bgRefreshFn()
+  // socle (Block panel) material
+  Object.assign(params, DEFAULT_PLINTH)
+  applyPlinthMaterial()
+  plinth.rebuild(terrain, params)
+  // whole-relief material / liquid metal / surface shader (Shaders panel) —
+  // mutually exclusive, so clearing all three in turn is always safe
+  params.terrainSurfaceMat = ''
+  terrain.setMaterialMode('', params)
+  params.liquidMetal = false
+  terrain.setLiquidMetal(false, params)
+  params.surfaceFx = 0
+  terrain.setSurfaceFx(0)
+  shadersRefreshFn()
+  // clouds off
+  params.cloudsEnabled = false
+  clouds.setVisible(false)
+  // fog off
+  params.fogEnabled = false
+  scene.fog = null
+  // map overlay layers (roads/water/places)
+  Object.assign(params, DEFAULT_MAPLAYERS)
+  rebuildMapLayers()
+}
+
 // ------------------------------------------------------------------ GPX layer
 
 const gpxLayer = new GpxLayer({ scene, camera, terrain, params, getDem: () => dem })
@@ -1831,7 +1901,10 @@ isoBtn = buildIsoButton({
 })
 
 let bgRefreshFn = () => {} // re-renders the Background HDRI picker highlight after a template/reset (declared before the panel build so registerBgRefresh isn't a TDZ access)
-const createPanel = buildCreatePanel({
+// shared by the Templates panel AND the Create panel — Templates needs the
+// same template/reset/dark-mode methods Create used to hold before its
+// Templates section was split out into its own panel (Task 5)
+const panelCtx = {
   registerBgRefresh: (fn) => { bgRefreshFn = fn },
   params,
   terrain,
@@ -1929,7 +2002,13 @@ const createPanel = buildCreatePanel({
   },
   setRegionMode: () => applyRegionMode(),
   syncDark: () => topBar.syncDark(),
-})
+  resetAll, // Templates panel's "Reset map" button
+}
+
+// Templates panel docks ABOVE Create in the right dock — built first so it
+// lands first in the DOM (dock columns stack panels in append order).
+const templatesPanel = buildTemplatesPanel(panelCtx)
+const createPanel = buildCreatePanel(panelCtx)
 
 // Shaders panel — right dock, between Create and Map (created here so it
 // docks between them). Holds the surface-shader treatments split out of Scan.
@@ -2089,7 +2168,9 @@ const cameraPanel = buildCameraPanel({
 
 // the exclusive per-column accordion now lives in the Panel shell (setCollapsed
 // folds dock neighbours), so expanding any panel collapses the others in its
-// column. Start with only Create/Explore open.
+// column. Start with only Create/Explore open (Templates docks above Create
+// but stays collapsed until clicked, same as Shaders/Map).
+templatesPanel.setCollapsed(true)
 shadersPanel.setCollapsed(true)
 cameraPanel.setCollapsed(true)
 mapPanel.setCollapsed(true)

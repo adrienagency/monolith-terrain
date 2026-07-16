@@ -3,7 +3,6 @@
 
 import { el, slider, color, swatch, toggle, select, segmented, button, section, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
-import { TEMPLATES } from '../templates.js'
 import { generatePalette, generateStyle, generateGridContour } from '../palette.js'
 import { PBR_PRESETS, GLASS_PRESETS, GLASS_BY_ID, PBR_BY_ID } from '../material-presets.js'
 import { FLAGS } from '../flags.js'
@@ -22,116 +21,6 @@ export function buildCreatePanel(ctx) {
   })
 
   const addTo = (sec) => panel.addSection(sec)
-
-  // ------------------------------------------------------------ Templates
-  const sTpl = addTo(section('Templates', { open: true }))
-  const cards = el('div', 'ce-cards')
-  const tplButtons = []
-  for (const key of Object.keys(TEMPLATES)) {
-    const t = TEMPLATES[key]
-    const card = el('button', 'ce-card')
-    card.type = 'button'
-    const stops = t.palette?.rampStops?.map((s) => s.c) ?? []
-    card.innerHTML = `<span class="ce-card-name">${(t.label ?? key).replace(/-/g, ' ')}</span><span class="ce-card-strip">${stops
-      .map((c) => `<i style="background:${c}"></i>`)
-      .join('')}</span>`
-    card.addEventListener('click', () => {
-      ctx.applyTemplate(t)
-      tplButtons.forEach((b) => b.classList.remove('on'))
-      card.classList.add('on')
-      refreshAll()
-      ctx.syncDark?.()
-    })
-    tplButtons.push(card)
-    cards.append(card)
-  }
-  sTpl.body.append(cards)
-
-  // --- user templates: saved looks with a thumbnail, apply / export / delete,
-  // plus save-current and load-from-file. Applying never moves the view. ---
-  // saved-look cards use a colour-strip VIGNETTE (like the built-in cards) and
-  // are grouped into two categories: Simple (no shader) and Shaders.
-  const userWrap = el('div')
-  sTpl.body.append(userWrap)
-  function makeCard(t) {
-    // image-thumbnail card (a div so the action buttons nest validly)
-    const card = el('div', 'ce-utpl-card')
-    card.setAttribute('role', 'button')
-    card.tabIndex = 0
-    card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click() } })
-    // thumbnail via DOM APIs (never innerHTML — thumb is user-supplied)
-    const media = el(t.thumb ? 'img' : 'div', 'ce-utpl-img')
-    if (t.thumb) { media.src = t.thumb; media.alt = '' }
-    else if (t.strip?.length) media.style.background = `linear-gradient(90deg, ${t.strip.filter((c) => /^#[0-9a-fA-F]{3,8}$/.test(c)).join(',')})`
-    const nm = el('span', 'ce-utpl-name')
-    nm.textContent = t.name || 'Look'
-    card.append(media, nm)
-    card.insertAdjacentHTML('beforeend', '<button class="ce-utpl-x" title="Delete" type="button">✕</button><button class="ce-utpl-dl" title="Export .json" type="button">⭳</button>')
-    card.addEventListener('click', (e) => {
-      if (e.target.closest('.ce-utpl-x, .ce-utpl-dl')) return
-      ctx.applyUserTemplate(t); refreshAll(); ctx.syncDark?.()
-    })
-    card.querySelector('.ce-utpl-x').addEventListener('click', () => { ctx.deleteUserTemplate(t.id); renderUserTemplates() })
-    card.querySelector('.ce-utpl-dl').addEventListener('click', () => ctx.exportUserTemplate(t.id))
-    return card
-  }
-  function renderUserTemplates() {
-    userWrap.replaceChildren()
-    const all = ctx.getUserTemplates?.() ?? []
-    const groups = [
-      ['Simple', all.filter((t) => !t.shaders)],
-      ['Shaders', all.filter((t) => t.shaders)],
-    ]
-    for (const [label, items] of groups) {
-      if (!items.length) continue
-      userWrap.append(el('div', 'ce-utpl-cat', label))
-      const grid = el('div', 'ce-cards')
-      for (const t of items) grid.append(makeCard(t))
-      userWrap.append(grid)
-    }
-  }
-  renderUserTemplates()
-
-  const tplRow = el('div', 'ce-btn-row')
-  const fileInput = el('input')
-  fileInput.type = 'file'
-  fileInput.accept = '.json,application/json'
-  fileInput.style.display = 'none'
-  fileInput.addEventListener('change', async () => {
-    for (const f of fileInput.files) {
-      const text = await f.text()
-      if (!ctx.importTemplateText(text)) alert(`"${f.name}" is not a ShibuMap template file.`)
-    }
-    fileInput.value = ''
-    renderUserTemplates()
-  })
-  // inline name field instead of prompt() — prompt is blocked in some embedded
-  // contexts (a likely cause of "save doesn't work") and is off-brand
-  const nameInput = el('input', 'ce-tpl-name')
-  nameInput.type = 'text'
-  nameInput.placeholder = 'Name this look…'
-  nameInput.maxLength = 40
-  const doSave = () => {
-    if (!nameInput.value.trim()) { nameInput.focus(); return } // name required
-    ctx.saveCurrentTemplate(nameInput.value)
-    nameInput.value = ''
-    renderUserTemplates()
-  }
-  nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doSave() } })
-  tplRow.append(nameInput, button('Save', doSave, { accent: true }), button('Load…', () => fileInput.click(), { ghost: true }))
-  sTpl.body.append(tplRow, fileInput)
-
-  sTpl.body.append(
-    toggle({ label: 'Dark mode', get: () => params.darkMode, set: (v) => { ctx.setDarkMode(v); refreshAll(); ctx.syncDark?.() } })
-  )
-  const monoRow = el('div', 'ce-btn-row')
-  monoRow.append(
-    button('Mono white', () => { ctx.applyMonochrome('white'); refreshAll(); ctx.syncDark?.() }),
-    button('Mono dark', () => { ctx.applyMonochrome('dark'); refreshAll(); ctx.syncDark?.() })
-  )
-  const resetRow = el('div', 'ce-btn-row')
-  resetRow.append(button('Reset look', () => { ctx.resetLook(); tplButtons.forEach((b) => b.classList.remove('on')); refreshAll(); ctx.syncDark?.() }, { ghost: true }))
-  sTpl.body.append(monoRow, resetRow)
 
   // --------------------------------------------------------------- Colors
   const mode = () => (params.darkMode ? 'dark' : 'light')
