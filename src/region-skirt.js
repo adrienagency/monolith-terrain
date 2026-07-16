@@ -94,6 +94,21 @@ export function traceSkirt({ maskCanvas, sample, grid = 300, threshold = 127 }) 
       }
     }
   }
+  // Close the SQUARE PATCH EDGE too: where the region fills to ±HALF the mask has
+  // no iso-crossing (it's white to the edge), so the terrain would be cut open at
+  // the block boundary. Emit a wall segment along each patch-edge interval whose
+  // midpoint lies inside the region — the extruder walls it like any iso segment.
+  const insideAt = (x, z) => mask(x, z) >= threshold
+  for (let k = 0; k < grid; k++) {
+    const a = -HALF + k * step
+    const b = a + step
+    const mid = (a + b) / 2
+    if (insideAt(HALF - 1e-3, mid)) segs.push({ ax: HALF, az: a, bx: HALF, bz: b })
+    if (insideAt(-HALF + 1e-3, mid)) segs.push({ ax: -HALF, az: a, bx: -HALF, bz: b })
+    if (insideAt(mid, HALF - 1e-3)) segs.push({ ax: a, az: HALF, bx: b, bz: HALF })
+    if (insideAt(mid, -HALF + 1e-3)) segs.push({ ax: a, az: -HALF, bx: b, bz: -HALF })
+  }
+
   return { segs, interiorMin: interiorMin === Infinity ? 0 : interiorMin }
 }
 
