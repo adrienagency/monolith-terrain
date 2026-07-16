@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildQuery, parseOverpass, bboxKey, roadHighwayFilter, buildAreaQuery, parseOverpassAreas } from '../src/map/overpass.js'
+import { buildQuery, parseOverpass, bboxKey, roadHighwayFilter, buildAreaQuery, parseOverpassAreas, assertSaneSize, OVERPASS_MAXSIZE } from '../src/map/overpass.js'
 
 const bbox = { minLat: 45.8, minLon: 6.1, maxLat: 45.95, maxLon: 6.3 }
 
@@ -94,4 +94,33 @@ test('parseOverpassAreas: skips a 3-point or open way', () => {
   const shortWay = { type: 'way', geometry: [ { lat: 0, lon: 0 }, { lat: 0, lon: 1 }, { lat: 1, lon: 1 } ] }
   assert.equal(parseOverpassAreas({ elements: [ openWay ] }).length, 0)
   assert.equal(parseOverpassAreas({ elements: [ shortWay ] }).length, 0)
+})
+
+// --- payload guard -----------------------------------------------------------
+// Regression guard for a measured hang risk: a z12 (24km) bbox over central
+// Paris returned 351,414 ways / 238 MB with a 200 OK. Because it SUCCEEDS, the
+// "null → Natural Earth" fallback never fires and the tab tries to parse 238 MB.
+
+test('buildQuery: every query carries the maxsize memory ceiling', () => {
+  // Plain substring, deliberately not a RegExp: `\[` inside a template literal
+  // collapses to `[`, which builds a character CLASS — that assertion matches
+  // almost any string and silently tests nothing.
+  const needle = `[maxsize:${OVERPASS_MAXSIZE}]`
+  for (const kind of ['roads', 'water']) {
+    assert.ok(buildQuery(bbox, kind, 1).includes(needle), `${kind} query missing ${needle}`)
+  }
+  assert.ok(buildAreaQuery(bbox).includes(needle), `area query missing ${needle}`)
+})
+
+test('assertSaneSize: rejects an oversized body before it is parsed', () => {
+  const res = (len) => ({ headers: { get: () => len } })
+  assert.throws(() => assertSaneSize(res(String(OVERPASS_MAXSIZE + 1))), /overpass payload/)
+  // the real measured Paris case
+  assert.throws(() => assertSaneSize(res(String(238 * 1024 * 1024))), /overpass payload/)
+})
+
+test('assertSaneSize: lets sane and unmeasurable bodies through', () => {
+  const res = (len) => ({ headers: { get: () => len } })
+  assert.doesNotThrow(() => assertSaneSize(res(String(15 * 1024 * 1024)))) // Chamonix z12, measured sane
+  assert.doesNotThrow(() => assertSaneSize(res(null))) // chunked: no Content-Length → maxsize is the guard
 })

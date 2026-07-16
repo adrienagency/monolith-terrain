@@ -24,12 +24,23 @@ export function roadHighwayFilter() {
   return '["highway"]'
 }
 
+// Server-side memory ceiling per query, in bytes. This is a LOAD-BEARING guard,
+// not a tuning knob. Without it a dense-city patch succeeds and hands us a
+// payload big enough to hang the tab: a z12 (24 km) bbox over central Paris
+// measured **351,414 ways / 238 MB** — a 200 OK, so the "we fall back to Natural
+// Earth on failure" safety net never fires. Sparse patches are unaffected (the
+// same z12 width over Chamonix is ~10.7k ways / 15 MB). Overpass rejects a query
+// that would exceed maxsize, and that error takes the normal null → Natural
+// Earth path, which is a real graceful degradation rather than a frozen browser.
+export const OVERPASS_MAXSIZE = 48 * 1024 * 1024
+
 // Overpass bbox order is (south,west,north,east) = (minLat,minLon,maxLat,maxLon)
 export function buildQuery(bbox, kind, detail = 1) {
   const b = `${bbox.minLat},${bbox.minLon},${bbox.maxLat},${bbox.maxLon}`
-  if (kind === 'roads') return `[out:json][timeout:25];way${roadHighwayFilter(detail)}(${b});out geom;`
+  const head = `[out:json][timeout:25][maxsize:${OVERPASS_MAXSIZE}]`
+  if (kind === 'roads') return `${head};way${roadHighwayFilter(detail)}(${b});out geom;`
   const tag = WAY_TAG[kind]
-  return `[out:json][timeout:25];way["${tag}"](${b});out geom;`
+  return `${head};way["${tag}"](${b});out geom;`
 }
 
 // Overpass `out geom` gives each way a `geometry:[{lat,lon},…]`. Keep every vertex.
@@ -49,7 +60,8 @@ export function parseOverpass(json, kind) {
 // matches buildQuery: (south,west,north,east).
 export function buildAreaQuery(bbox) {
   const b = `${bbox.minLat},${bbox.minLon},${bbox.maxLat},${bbox.maxLon}`
-  return `[out:json][timeout:25];(way["natural"="water"](${b});way["waterway"="riverbank"](${b});relation["natural"="water"](${b}););out geom;`
+  // same maxsize guard as buildQuery — see OVERPASS_MAXSIZE
+  return `[out:json][timeout:25][maxsize:${OVERPASS_MAXSIZE}];(way["natural"="water"](${b});way["waterway"="riverbank"](${b});relation["natural"="water"](${b}););out geom;`
 }
 
 function closedRing(geometry) {
@@ -89,6 +101,17 @@ export function bboxKey(bbox, kind, variant) {
   return kind === 'roads' && variant !== undefined ? `${base}:${variant}` : base
 }
 
+// Client-side companion to OVERPASS_MAXSIZE: that caps the SERVER's memory, not
+// the bytes it ships us, so refuse an oversized body before spending a main-
+// thread .json() parse on it. Throwing here joins the same null → Natural Earth
+// fallback as any other failure. Content-Length can be absent (chunked); then we
+// let it through rather than reject a payload we can't measure — maxsize is the
+// primary guard, this is the belt to its braces.
+export function assertSaneSize(response, limit = OVERPASS_MAXSIZE) {
+  const len = Number(response.headers?.get?.('content-length'))
+  if (Number.isFinite(len) && len > limit) throw new Error(`overpass payload ${len} > ${limit}`)
+}
+
 // cache by zone+kind(+detail), dedupe in-flight, min gap between network hits, null on fail
 const _cache = new Map()
 let _lastAt = 0
@@ -103,6 +126,7 @@ export async function fetchOverpassLines(bbox, kind, { detail = 1, url = OVERPAS
       _lastAt = Date.now()
       const r = await fetch(url, { method: 'POST', body, headers: { 'Content-Type': 'text/plain' } })
       if (!r.ok) throw new Error(`overpass ${r.status}`)
+      assertSaneSize(r)
       return parseOverpass(await r.json(), kind)
     })()
     _cache.set(key, job)
@@ -127,6 +151,7 @@ export async function fetchOverpassAreas(bbox, { url = OVERPASS_URL, minInterval
       _lastAt = Date.now()
       const r = await fetch(url, { method: 'POST', body, headers: { 'Content-Type': 'text/plain' } })
       if (!r.ok) throw new Error(`overpass ${r.status}`)
+      assertSaneSize(r)
       return parseOverpassAreas(await r.json())
     })()
     _cache.set(key, job)
