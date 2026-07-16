@@ -38,7 +38,7 @@ export class RoadsLayer {
     let osmOk = false
     if (useOsm) {
       this.loading = true
-      const feats = await fetchOverpassLines(bounds, 'roads')
+      const feats = await fetchOverpassLines(bounds, 'roads', { detail: params.roadsDetail })
       this.loading = false
       if (id !== this._buildId || dem !== terrain.dem) return
       if (feats) { rings = feats.map((f) => ({ coords: f.coords, klass: roadClass(f.kind) })); osmOk = true }
@@ -57,7 +57,7 @@ export class RoadsLayer {
     const fp = terrain.blockFootprint(); const insideBlock = makeInsideBlock(fp)
     const sample = (x, z) => (terrain.sample ? terrain.sample(x, z) : 0)
     const resolution = new THREE.Vector2(window.innerWidth, window.innerHeight)
-    const ink = params.darkMode ? '#d9c7b0' : '#3a3128'
+    const ink = params.roadColor || (params.darkMode ? '#d9c7b0' : '#3a3128')
     const casing = params.darkMode ? 'rgba(15,17,20,0.6)' : 'rgba(252,250,246,0.7)'
     // clip every ring to the block, bucket runs by weight class
     const byClass = { motorway: [], primary: [], secondary: [] }

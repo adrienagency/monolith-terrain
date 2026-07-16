@@ -300,6 +300,8 @@ const params = {
   // SP1 map overlay layers (roads/water/places), draped on the relief
   roadsEnabled: false,
   roadsOpacity: 0.9,
+  roadsDetail: 0,
+  roadColor: '',
   waterEnabled: false,
   waterOpacity: 0.9,
   placesEnabled: true,
