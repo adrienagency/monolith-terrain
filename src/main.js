@@ -303,6 +303,7 @@ const params = {
   roadsEnabled: false,
   roadsOpacity: 0.9,
   roadsDetail: 0,
+  roadsCasing: true,
   roadColor: '',
   waterEnabled: false,
   waterOpacity: 0.9,

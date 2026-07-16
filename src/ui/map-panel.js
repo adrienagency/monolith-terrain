@@ -12,6 +12,7 @@ export function buildMapPanel(ctx) {
     toggle({ label: 'Roads', get: () => params.roadsEnabled, set: (v) => { params.roadsEnabled = v; ctx.rebuildMapLayers() } }),
     slider({ label: 'Roads opacity', min: 0, max: 1, step: 0.02, get: () => params.roadsOpacity, set: (v) => { params.roadsOpacity = v; ctx.mapLayers.setOpacity('roads', v) } }),
     slider({ label: 'Roads detail', min: 0, max: 2, step: 1, get: () => params.roadsDetail, set: (v) => { params.roadsDetail = v; ctx.rebuildMapLayers() } }),
+    toggle({ label: 'Casing', get: () => params.roadsCasing, set: (v) => { params.roadsCasing = v; ctx.rebuildMapLayers() } }),
     color({ label: 'Roads colour', get: () => params.roadColor, set: (v) => { params.roadColor = v; ctx.rebuildMapLayers() } }),
     toggle({ label: 'Rivers & water', get: () => params.waterEnabled, set: (v) => { params.waterEnabled = v; ctx.rebuildMapLayers() } }),
     slider({ label: 'Water opacity', min: 0, max: 1, step: 0.02, get: () => params.waterOpacity, set: (v) => { params.waterOpacity = v; ctx.mapLayers.setOpacity('water', v) } }),
