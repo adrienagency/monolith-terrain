@@ -1,7 +1,7 @@
 // CAMERA panel — viewpoint, focus, motion and performance. Docked in the
 // left dock, directly below Scan.
 
-import { el, slider, toggle, select, button, section } from './kit.js'
+import { el, slider, toggle, select, button, section, visibleWhen, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
 
 const ICON =
@@ -18,14 +18,18 @@ export function buildCameraPanel(ctx) {
   })
 
   const sCam = panel.addSection(section('Lens & Focus', { open: false }))
+  // Focus distance/range are cut: main.js lerps focusDistance toward the pointer
+  // every frame while autoFocus is on (the default), so the sliders snapped back
+  // in ~125ms and were never actually usable. The params + worldFocusDistance/
+  // worldFocusRange writes stay live internally (main.js) — only the dead UI goes.
+  const bokehSlider = slider({ label: 'Bokeh', min: 0, max: 8, step: 0.1, get: () => params.bokehScale, set: (v) => { params.bokehScale = v; ctx.dof.bokehScale = v; ctx.dofPass.enabled = params.bokehEnabled && v > 0 } })
   sCam.body.append(
     slider({ label: 'Field of view', min: 20, max: 60, step: 1, get: () => params.fov, set: (v) => { params.fov = v; ctx.camera.fov = v; ctx.camera.updateProjectionMatrix() } }),
     toggle({ label: 'Autofocus (pointer)', get: () => params.autoFocus, set: (v) => { params.autoFocus = v } }),
-    slider({ label: 'Focus distance', min: 5, max: 60, step: 0.1, get: () => params.focusDistance, set: (v) => { params.focusDistance = v } }),
-    slider({ label: 'Focus range', min: 0.5, max: 60, step: 0.1, get: () => params.focusRange, set: (v) => { params.focusRange = v; ctx.dof.cocMaterial.worldFocusRange = v } }),
-    toggle({ label: 'Depth of field', get: () => params.bokehEnabled, set: (v) => { params.bokehEnabled = v; ctx.dofPass.enabled = v && params.bokehScale > 0 } }),
-    slider({ label: 'Bokeh', min: 0, max: 8, step: 0.1, get: () => params.bokehScale, set: (v) => { params.bokehScale = v; ctx.dof.bokehScale = v; ctx.dofPass.enabled = params.bokehEnabled && v > 0 } })
+    toggle({ label: 'Depth of field', get: () => params.bokehEnabled, set: (v) => { params.bokehEnabled = v; ctx.dofPass.enabled = v && params.bokehScale > 0; refreshAll() } }),
+    bokehSlider
   )
+  visibleWhen(bokehSlider, () => params.bokehEnabled)
 
   // looping cinematic camera moves — orbit / fly-over / crane, etc.
   const sAuto = panel.addSection(section('Automation'))

@@ -5,7 +5,7 @@
 // Reset-look behaviour to background, socle, relief material, clouds, fog
 // and the map overlay layers. Location/zoom are never touched.
 
-import { el, button, toggle, section, refreshAll } from './kit.js'
+import { el, button, section, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
 import { TEMPLATES } from '../templates.js'
 
@@ -140,9 +140,8 @@ export function buildTemplatesPanel(ctx) {
   tplRow.append(nameInput, button('Save', doSave, { accent: true }), button('Load…', () => fileInput.click(), { ghost: true }))
   sTpl.body.append(tplRow, fileInput)
 
-  sTpl.body.append(
-    toggle({ label: 'Dark mode', get: () => params.darkMode, set: (v) => { ctx.setDarkMode(v); refreshAll(); ctx.syncDark?.() } })
-  )
+  // Dark mode toggle lives ONLY in the top bar (bars.js moon button) now — this
+  // was a second control on the exact same param, easy to leave out of sync.
   const monoRow = el('div', 'ce-btn-row')
   monoRow.append(
     button('Mono white', () => { ctx.applyMonochrome('white'); refreshAll(); ctx.syncDark?.() }),

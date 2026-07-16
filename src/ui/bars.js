@@ -1,7 +1,7 @@
 // Top bar (wordmark, globe, export, theme, hide-UI) and bottom bar
 // (place search + GPX import) — the two fixed chrome pieces of the v28 UI.
 
-import { el, iconButton } from './kit.js'
+import { el, iconButton, refreshAll } from './kit.js'
 import { parseLatLon } from '../geo.js'
 
 const I = {
@@ -58,8 +58,9 @@ export function buildTopBar(ctx) {
   const dark = iconButton(I.moon, '', () => {
     ctx.setDarkMode(!ctx.params.darkMode)
     syncDark()
+    refreshAll() // resyncs dark-mode-gated controls (e.g. Map → Contour weight)
   })
-  dark.setAttribute('data-tip', 'Switch the interface between light and dark.')
+  dark.setAttribute('data-tip', "Switch the map's look between light and dark — palette, contours, seas, fog.")
   const syncDark = () => {
     dark.innerHTML = ctx.params.darkMode ? I.sun : I.moon
     dark.classList.toggle('on', !!ctx.params.darkMode)
@@ -140,16 +141,6 @@ export function buildBottomBar(ctx) {
   return { root: bar, input }
 }
 
-// Other beautiful 3D-map makers — the company ShibuMap keeps. First is the one
-// Adrien flagged; the rest are real web tools in the same relief-map space.
-const INSPIRATIONS = [
-  { name: 'Longitude.one — Maps', host: 'longitude.one', url: 'https://www.longitude.one/maps' },
-  { name: 'Elastic Terrain', host: 'elasticterrain.xyz', url: 'http://elasticterrain.xyz/' },
-  { name: '3D Mapper', host: '3d-mapper.com', url: 'https://3d-mapper.com/online-3d-map/' },
-  { name: 'FreeTopoMaps', host: 'freetopomaps.io', url: 'https://freetopomaps.io/' },
-  { name: '3D Map Generator', host: '3d-map-generator.com', url: 'https://3d-map-generator.com/' },
-]
-
 function extLink(href, text, cls) {
   const a = el('a', cls)
   a.href = href
@@ -159,51 +150,31 @@ function extLink(href, text, cls) {
   return a
 }
 
-// bottom-left: a quiet studio credit + an "Inspiration" popup listing kindred
-// 3D-map makers. Deliberately understated so it never competes with the relief.
+// bottom-left: ONE line, ONE corner, ONE size — the studio credit plus every
+// legally-required attribution. Adrien Agency + OpenStreetMap (ODbL, the
+// fine-zoom z9–z12 coastline) are static; GeoNames (CC BY 4.0, gated to when
+// place labels are actually showing) and the OSM loading status are appended
+// live by main.js via setExtra() so nothing duplicates a second corner/size.
+// Deliberately understated so it never competes with the relief, and clear of
+// the isometric-view button (bottom-right).
 export function buildCredits() {
   const wrap = el('div', 'ce-credits')
   wrap.append(
     extLink('https://adrienagency.com', '© Adrien Agency', 'ce-credit-link'),
-    el('span', 'ce-credit-dot', '·')
-  )
-
-  const inspoBtn = el('button', 'ce-credit-link')
-  inspoBtn.type = 'button'
-  inspoBtn.textContent = 'Inspiration'
-  wrap.append(inspoBtn)
-
-  // OSM attribution — required (ODbL) because the fine-zoom (z9–z12) coastline
-  // is derived from OpenStreetMap. Natural Earth (z4–z8) is public domain.
-  wrap.append(
     el('span', 'ce-credit-dot', '·'),
-    extLink('https://www.openstreetmap.org/copyright', '© OpenStreetMap', 'ce-credit-link')
+    extLink('https://www.openstreetmap.org/copyright', '© OpenStreetMap contributors', 'ce-credit-link')
   )
+  const extraDot = el('span', 'ce-credit-dot', '·')
+  extraDot.style.display = 'none'
+  const extra = el('span', 'ce-credit-extra')
+  wrap.append(extraDot, extra)
   document.body.append(wrap)
 
-  // popup (built once, toggled)
-  const backdrop = el('div', 'ce-inspo-backdrop')
-  const card = el('div', 'ce-inspo-card ce-glassbox')
-  card.append(
-    el('div', 'ce-inspo-title', 'Kindred maps'),
-    el('div', 'ce-inspo-sub', 'Other makers of beautiful 3D relief maps.')
-  )
-  const list = el('div', 'ce-inspo-list')
-  for (const item of INSPIRATIONS) {
-    const row = extLink(item.url, '', 'ce-inspo-row')
-    row.innerHTML = `<span class="ce-inspo-name">${item.name}</span><span class="ce-inspo-host">${item.host} ↗</span>`
-    list.append(row)
+  return {
+    root: wrap,
+    setExtra(text) {
+      extra.textContent = text || ''
+      extraDot.style.display = text ? '' : 'none'
+    },
   }
-  card.append(list)
-  backdrop.append(card)
-  document.body.append(backdrop)
-
-  const close = () => backdrop.classList.remove('open')
-  inspoBtn.addEventListener('click', () => backdrop.classList.add('open'))
-  backdrop.addEventListener('click', (e) => {
-    if (e.target === backdrop) close()
-  })
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') close()
-  })
 }
