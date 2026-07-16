@@ -16,6 +16,7 @@ const OUT = new URL('../public/data/map/', import.meta.url)
 // coastline use 50m (coarse world) to stay well under the size budget; roads
 // and places use 10m for a usable network / a rich place list.
 const round = (n) => Math.round(n * 1e4) / 1e4
+const round5 = (n) => Math.round(n * 1e5) / 1e5
 
 // --- Douglas-Peucker line simplification -----------------------------------
 // points: array of [lon, lat] pairs. epsilon: perpendicular-distance
@@ -89,8 +90,8 @@ function simplifyGeometry(geom, epsilon) {
   }
 }
 
-function quantize(geom) {
-  const walk = (c) => (typeof c[0] === 'number' ? [round(c[0]), round(c[1])] : c.map(walk))
+function quantize(geom, roundFn = round) {
+  const walk = (c) => (typeof c[0] === 'number' ? [roundFn(c[0]), roundFn(c[1])] : c.map(walk))
   return { ...geom, coordinates: walk(geom.coordinates) }
 }
 async function ne(resolution, theme, file) {
@@ -99,7 +100,7 @@ async function ne(resolution, theme, file) {
   if (!r.ok) throw new Error(`fetch ${file}: ${r.status} (${url})`)
   return r.json()
 }
-function trimFeatures(fc, keep, epsilon = 0) {
+function trimFeatures(fc, keep, epsilon = 0, roundFn = round) {
   return {
     type: 'FeatureCollection',
     features: fc.features
@@ -107,7 +108,7 @@ function trimFeatures(fc, keep, epsilon = 0) {
       .map((f) => {
         const geom = epsilon > 0 ? simplifyGeometry(f.geometry, epsilon) : f.geometry
         if (!geom) return null
-        return { type: 'Feature', properties: keep(f.properties || {}), geometry: quantize(geom) }
+        return { type: 'Feature', properties: keep(f.properties || {}), geometry: quantize(geom, roundFn) }
       })
       .filter(Boolean),
   }
@@ -128,7 +129,10 @@ async function main() {
   const RIVERS_EPS = 0.01
   const LAKES_EPS = 0.008
   const COAST_EPS = 0.09
-  const ROADS_EPS = 0.02
+  // Roads use a near-lossless epsilon and 5-decimal (~1.1 m) quantization so
+  // far-view road shapes stay faithful to the source geometry; this trades a
+  // larger payload (~5-8 MB) for fidelity, per the fix in task 6.
+  const ROADS_EPS = 0.0005
 
   const rivers = trimFeatures(await ne('50m', 'physical', 'ne_50m_rivers_lake_centerlines'), (p) => ({ name: nameOf(p), min_zoom: numZoom(p), scalerank: scalerankOf(p), kind: 'river' }), RIVERS_EPS)
   await writeFile(new URL('rivers.json', OUT), JSON.stringify(rivers))
@@ -142,29 +146,20 @@ async function main() {
   // roads: map NE `type` to our 3 classes so the renderer styles by weight
   const roadClass = (t = '') => (/Major Highway|Freeway|Beltway/i.test(t) ? 'motorway' : /Secondary|Road/i.test(t) ? 'secondary' : 'primary')
   const roadsRaw = await ne('10m', 'cultural', 'ne_10m_roads')
-  const buildRoads = (maxScalerank) =>
-    trimFeatures(
-      { type: 'FeatureCollection', features: roadsRaw.features.filter((f) => f.geometry && (maxScalerank == null || scalerankOf(f.properties || {}) <= maxScalerank)) },
-      (p) => ({ name: nameOf(p), min_zoom: numZoom(p), scalerank: scalerankOf(p), kind: roadClass(p.type ?? p.TYPE) }),
-      ROADS_EPS,
-    )
-  const ROADS_BUDGET = 2 * 1024 * 1024
-  let roads = buildRoads(null)
-  let roadsJson = JSON.stringify(roads)
-  let roadsScalerankCap = null
-  // Simplification alone (bounded at ROADS_EPS ~0.02 deg so roads still read
-  // as roads, not straight segments) isn't enough to bring the dense 10m
-  // road network under the 2 MB budget — fall back to dropping less
-  // important roads by scalerank, tightening the cap until the budget is
-  // met, so we keep as much of the network as the budget allows.
-  for (const cap of [7, 6, 5, 4, 3, 2, 1]) {
-    if (roadsJson.length <= ROADS_BUDGET) break
-    roadsScalerankCap = cap
-    roads = buildRoads(cap)
-    roadsJson = JSON.stringify(roads)
-  }
+  // Scalerank cap relaxed from 3 to 5 (was tightened all the way to 3 to fit
+  // a strict 2 MB budget under the old aggressive epsilon). With near-lossless
+  // ROADS_EPS the full unfiltered network is ~21 MB, so we still cap — just
+  // much less aggressively — to land in the ~5-8 MB range while keeping
+  // faithful shapes and including more of the road network than before.
+  const ROADS_SCALERANK_CAP = 5
+  const roads = trimFeatures(
+    { type: 'FeatureCollection', features: roadsRaw.features.filter((f) => f.geometry && scalerankOf(f.properties || {}) <= ROADS_SCALERANK_CAP) },
+    (p) => ({ name: nameOf(p), min_zoom: numZoom(p), scalerank: scalerankOf(p), kind: roadClass(p.type ?? p.TYPE) }),
+    ROADS_EPS,
+    round5,
+  )
+  const roadsJson = JSON.stringify(roads)
   await writeFile(new URL('roads.json', OUT), roadsJson)
-  if (roadsScalerankCap != null) console.log(`roads.json: simplification alone did not hit the 2 MB budget — filtered to scalerank <= ${roadsScalerankCap}`)
 
   // places: compact array, sorted by population desc for greedy zoom picking
   const pp = await ne('10m', 'cultural', 'ne_10m_populated_places')
