@@ -43,6 +43,20 @@ function tierClass(tier) {
   return tier === 0 ? 'motorway' : tier === 1 ? 'primary' : 'secondary'
 }
 
+// Tailwind slate, weighted by the same RELATIVE tier that decides line width:
+// heaviest class (whatever is tier 0 in THIS patch — motorway if present,
+// else the nationals) reads darkest, lighter classes fade toward slate-400.
+// Dark mode inverts the ramp (heaviest = lightest) for the same reason
+// text-label.js's ink ramp does — strongest contrast for the important thing.
+const ROAD_SLATE_LIGHT = { motorway: '#475569', primary: '#64748b', secondary: '#94a3b8' } // 600,500,400
+const ROAD_SLATE_DARK = { motorway: '#cbd5e1', primary: '#94a3b8', secondary: '#64748b' } // 300,400,500
+// `params.roadColor` is a user override: when set it wins outright, uniformly
+// across every class — the user asked for ONE colour, not a ramp.
+function roadInk(klass, params) {
+  if (params.roadColor) return params.roadColor
+  return (params.darkMode ? ROAD_SLATE_DARK : ROAD_SLATE_LIGHT)[klass]
+}
+
 export class RoadsLayer {
   constructor(scene) {
     this.group = new THREE.Group(); this.group.name = 'roads'; scene.add(this.group)
@@ -96,7 +110,6 @@ export class RoadsLayer {
     const fp = terrain.blockFootprint(); const insideBlock = makeInsideBlock(fp)
     const sample = (x, z) => (terrain.sample ? terrain.sample(x, z) : 0)
     const resolution = new THREE.Vector2(window.innerWidth, window.innerHeight)
-    const ink = params.roadColor || (params.darkMode ? '#d9c7b0' : '#3a3128')
     // clip every ring to the block, bucket runs by weight class
     const byClass = { motorway: [], primary: [], secondary: [] }
     for (const r of rings) {
@@ -106,7 +119,7 @@ export class RoadsLayer {
     }
     for (const klass of Object.keys(byClass)) {
       if (!byClass[klass].length) continue
-      const obj = buildLineSegments(byClass[klass], sample, { color: ink, widthPx: STYLE[klass].widthPx, offset: 0.08, renderOrder: 20, resolution })
+      const obj = buildLineSegments(byClass[klass], sample, { color: roadInk(klass, params), widthPx: STYLE[klass].widthPx, offset: 0.08, renderOrder: 20, resolution })
       obj.traverse((o) => { if (o.material) o.material.opacity = params.roadsOpacity ?? 0.9 })
       this.group.add(obj)
     }

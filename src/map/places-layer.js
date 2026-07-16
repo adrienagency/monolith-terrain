@@ -4,14 +4,17 @@ import { TERRAIN_SIZE } from '../terrain.js'
 import { loadLayer } from './geo-data.js'
 import { pickPlaces } from './place-pick.js'
 import { makeLabelTexture, labelInk, labelFontReady } from './text-label.js'
-import { labelScale } from './place-scale.js'
+import { labelScale, placeTier } from './place-scale.js'
 
 const HALF = TERRAIN_SIZE / 2
-// World units the label floats above the city's OWN ground point. It does NOT
-// need to clear the patch's highest summit: the sprite is depthTest:false, so it
-// is always drawn over the relief and can never sink into rock. Anchoring to the
-// city's own GPS/terrain height keeps the name visually attached to its city
-// instead of hovering absurdly high over a distant peak.
+// World units the label floats above the city's OWN ground point. Anchored to
+// the city's own GPS/terrain height so the name stays visually attached to
+// its city instead of hovering absurdly high over a distant peak.
+// NOTE: sprite/dot/leader are depthTest:true (relief must occlude a name
+// sitting behind a ridge — see the Map task on hiding city names behind
+// mountains), so a label whose anchor sits just behind a summit at this
+// clearance WILL be cut by the terrain. That is intentional: only labels for
+// cities actually visible from the current camera should read.
 const CLEARANCE = 0.9
 // Screen-space label height for scale 1, in CLIP units (sizeAttenuation:false),
 // NOT world units. Careful: the on-screen size is NOT scale/2*viewport — Three's
@@ -92,20 +95,22 @@ export class PlacesLayer {
     const picks = pickPlaces(rows, { zoom, toWorld: (lat, lon) => latLonToWorld(dem, lat, lon), halfLimit: HALF * 0.96, maxN, minDist })
     if (!picks.length) return
 
-    const ink = labelInk(params.darkMode)
     const sizeMul = params.placesSize ?? 1
-    const halo = params.placesHalo ? ink.halo : null
     const dotGeo = new THREE.CircleGeometry(0.075, 12); dotGeo.rotateX(-Math.PI / 2)
-    const dotMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(ink.color), transparent: true, opacity: 0.85, depthWrite: false, depthTest: false })
-    const leaderMat = new THREE.LineBasicMaterial({ color: new THREE.Color(ink.color), transparent: true, opacity: 0.55, depthWrite: false, depthTest: false })
 
     for (const p of picks) {
       const groundY = terrain.sample ? terrain.sample(p.w.x, p.w.z) : 0
       const labelY = groundY + CLEARANCE
       const scale = labelScale(p.pop, p.cap) * sizeMul
+      // shared with labelScale's tier so a place's colour darkness always
+      // tracks the same importance ranking that picks its size
+      const ink = labelInk(params.darkMode, placeTier(p.pop))
+      const halo = params.placesHalo ? ink.halo : null
 
-      // ground dot, anchored at the city's real elevation
-      const dot = new THREE.Mesh(dotGeo.clone(), dotMat.clone())
+      // ground dot, anchored at the city's real elevation. depthTest:true so
+      // relief occludes it exactly like the label above it — a dot behind a
+      // ridge must disappear along with its name, not float free of it.
+      const dot = new THREE.Mesh(dotGeo.clone(), new THREE.MeshBasicMaterial({ color: new THREE.Color(ink.color), transparent: true, opacity: 0.85, depthWrite: false, depthTest: true }))
       dot.position.set(p.w.x, groundY + 0.05, p.w.z)
       dot.renderOrder = 29
       this.group.add(dot); this.meshes.push(dot)
@@ -115,16 +120,19 @@ export class PlacesLayer {
         new THREE.Vector3(p.w.x, groundY + 0.05, p.w.z),
         new THREE.Vector3(p.w.x, labelY - BASE_H * scale * 0.5, p.w.z),
       ])
-      const leader = new THREE.Line(leaderGeo, leaderMat.clone())
+      const leader = new THREE.Line(leaderGeo, new THREE.LineBasicMaterial({ color: new THREE.Color(ink.color), transparent: true, opacity: 0.55, depthWrite: false, depthTest: true }))
       leader.renderOrder = 29
       this.group.add(leader); this.meshes.push(leader)
 
-      // upright billboard sprite — never occluded (depthTest:false) and never
-      // shrinks away when zoomed out (sizeAttenuation:false, screen-space scale)
+      // upright billboard sprite. depthTest:true so a name behind a ridge is
+      // genuinely hidden by the relief — previously depthTest:false let city
+      // names read straight through mountains, which is the bug this fixes.
+      // Still never shrinks away when zoomed out (sizeAttenuation:false,
+      // screen-space scale).
       // 800/700, the top of Bricolage's real 200..800 axis — the names read too
       // thin at 600/700 and the ask was to bolden them, NOT to enlarge them.
       const { tex, aspect } = makeLabelTexture(p.name.toUpperCase(), { color: ink.color, halo, weight: p.cap ? 800 : 700 })
-      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }))
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, depthWrite: false }))
       sprite.material.sizeAttenuation = false
       sprite.scale.set(BASE_H * scale * aspect, BASE_H * scale, 1)
       sprite.position.set(p.w.x, labelY, p.w.z)

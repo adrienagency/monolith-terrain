@@ -26,6 +26,19 @@ const TIERS = [
 ]
 const VILLAGE = 1.15 // below 10k; popToMinZoom only reveals these when close in
 
+// Population -> discrete tier INDEX, 0 = most important (metropolis) through
+// TIERS.length = least (village). This is the single source of truth for
+// "how important is this place" — labelScale (size) and text-label's slate
+// ink ramp (colour) both key off it, so a place's size and colour darkness
+// can never disagree with each other.
+export function placeTier(pop) {
+  const p = Math.max(0, pop || 0)
+  for (let i = 0; i < TIERS.length; i++) {
+    if (p >= TIERS[i][0]) return i
+  }
+  return TIERS.length // village
+}
+
 // A capital is a rank of function, not of size, so it gets a modest nudge rather
 // than a multiplier that can leapfrog a whole tier. 1.12 is deliberately small
 // enough that a capital never outsizes a genuinely bigger city: Paris
@@ -35,10 +48,7 @@ const VILLAGE = 1.15 // below 10k; popToMinZoom only reveals these when close in
 const CAPITAL_NUDGE = 1.12
 
 export function labelScale(pop, capital) {
-  const p = Math.max(0, pop || 0)
-  let s = VILLAGE
-  for (const [floor, scale] of TIERS) {
-    if (p >= floor) { s = scale; break }
-  }
+  const tier = placeTier(pop)
+  const s = tier < TIERS.length ? TIERS[tier][1] : VILLAGE
   return capital ? s * CAPITAL_NUDGE : s
 }
