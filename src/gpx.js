@@ -242,30 +242,6 @@ export class GpxLayer {
     const lineColor = this.params.gpxColor || this.params.hudAccent
     const width = this.params.gpxWidth ?? 3
 
-    // auto-contrast casing: a wider, dark/light-mode-aware line drawn under
-    // the track (same idea as the map road casing) so the route stays
-    // legible over any terrain tone. Lower renderOrder + depthWrite:false
-    // keeps it from fighting the main line or the terrain depth buffer.
-    if (this.params.gpxAutoContrast) {
-      const casingGeo = new LineGeometry()
-      casingGeo.setPositions(pts)
-      const casingColor = this.params.darkMode ? 'rgba(10,12,15,0.7)' : 'rgba(252,250,246,0.85)'
-      this.casingMat = new LineMaterial({
-        color: new THREE.Color(casingColor),
-        linewidth: width + 2.5,
-        transparent: true,
-        depthTest: true,
-        depthWrite: false,
-        worldUnits: false,
-        alphaToCoverage: false,
-      })
-      this.casingMat.resolution.set(window.innerWidth, window.innerHeight)
-      this.casingLine = new Line2(casingGeo, this.casingMat)
-      this.casingLine.computeLineDistances()
-      this.casingLine.renderOrder = 5
-      this.group.add(this.casingLine)
-    }
-
     const eles = this._elevations()
     const gradientOn = !!this.params.gpxGradient
     const vertexColors = gradientOn ? this._trackColors(eles) : null
@@ -340,8 +316,10 @@ export class GpxLayer {
       return s
     }
 
-    // start / finish markers — independently toggleable; a custom name (set
-    // via setPointName on index 0 / last) overrides the default label.
+    // start / finish markers — ONE toggle governs both (gpxMarkers): a route
+    // has a start and an end, showing only one rarely makes sense, so this
+    // is a single on/off rather than two independent switches. A custom name
+    // (set via setPointName on index 0 / last) overrides the default label.
     //
     // Loop detection: compare the first/last track points in WORLD units
     // (not lat/lon — this is what's actually drawn) against a tolerance
@@ -359,7 +337,7 @@ export class GpxLayer {
     const loopTol = Math.max(1, worldLen * 0.015)
     const isLoop = world.length > 1 && world[0].distanceTo(world[world.length - 1]) <= loopTol
 
-    if (isLoop && this.params.gpxStart && this.params.gpxEnd) {
+    if (isLoop && this.params.gpxMarkers) {
       // same place — one combined sprite, no separate end marker at all
       let label
       if (names[0] && names[lastIdx]) label = `◆ ${names[0]} & ${names[lastIdx]}`
@@ -369,10 +347,10 @@ export class GpxLayer {
       this.startSprite = mk(label, world[0])
       this.endSprite = null
     } else {
-      this.startSprite = this.params.gpxStart
+      this.startSprite = this.params.gpxMarkers
         ? mk(names[0] ? `▶ ${names[0]}` : `▶ START · ${Math.round(eles[0])} M`, world[0])
         : null
-      this.endSprite = this.params.gpxEnd
+      this.endSprite = this.params.gpxMarkers
         ? mk(names[lastIdx] ? `■ ${names[lastIdx]}` : `■ FINISH · ${Math.round(eles[lastIdx])} M`, world[world.length - 1])
         : null
     }
@@ -635,7 +613,6 @@ export class GpxLayer {
 
   onResize(w, h) {
     this.lineMat?.resolution.set(w, h)
-    this.casingMat?.resolution.set(w, h)
     this.glowMat?.resolution.set(w, h)
   }
 
@@ -654,16 +631,8 @@ export class GpxLayer {
 
   setWidth(v) {
     if (this.lineMat) this.lineMat.linewidth = v
-    if (this.casingMat) this.casingMat.linewidth = v + 2.5
     if (this.glowMat) this.glowMat.linewidth = v * 2.4
     if (this.pointsMat) this.pointsMat.size = Math.max(2, v * 1.3)
-  }
-
-  // rebuilds the line so the casing can be added/removed (its geometry is
-  // only constructed when the flag is on, see rebuild()).
-  setAutoContrast(v) {
-    this.params.gpxAutoContrast = v
-    this.rebuild()
   }
 
   // gradient / glow need the geometry (vertex colours) or a second line
@@ -744,15 +713,14 @@ export class GpxLayer {
     this.params.gpxSlopeReadout = v
   }
 
-  // limits how much of the line/casing/glow Line2 draws — instanceCount is
-  // the fat-line addon's per-segment draw-range knob (see LineSegmentsGeometry
+  // limits how much of the line/glow Line2 draws — instanceCount is the
+  // fat-line addon's per-segment draw-range knob (see LineSegmentsGeometry
   // .setPositions, which sets it to the full segment count by default).
   _applyReveal(t) {
     this._revealT = THREE.MathUtils.clamp(t, 0, 1)
     const n = this._segCount || 0
     const count = n <= 0 ? 0 : THREE.MathUtils.clamp(Math.round(this._revealT * n), 0, n)
     if (this.line) this.line.geometry.instanceCount = count
-    if (this.casingLine) this.casingLine.geometry.instanceCount = count
     if (this.glowLine) this.glowLine.geometry.instanceCount = count
   }
 
@@ -804,13 +772,9 @@ export class GpxLayer {
     this.rebuild()
   }
 
-  setStart(v) {
-    this.params.gpxStart = v
-    this.rebuild()
-  }
-
-  setEnd(v) {
-    this.params.gpxEnd = v
+  // single toggle for both markers — see the rebuild() comment above
+  setMarkers(v) {
+    this.params.gpxMarkers = v
     this.rebuild()
   }
 
@@ -855,13 +819,6 @@ export class GpxLayer {
       this.glowMat.dispose()
       this.glowLine = null
       this.glowMat = null
-    }
-    if (this.casingLine) {
-      this.group.remove(this.casingLine)
-      this.casingLine.geometry.dispose()
-      this.casingMat.dispose()
-      this.casingLine = null
-      this.casingMat = null
     }
     for (const s of [this.startSprite, this.endSprite, ...(this.waypoints || [])]) {
       if (s) {

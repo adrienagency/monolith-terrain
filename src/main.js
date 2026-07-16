@@ -239,7 +239,6 @@ const params = {
   gpxAltitude: 2.2,
   gpxWidth: 3,
   gpxColor: '',
-  gpxAutoContrast: true,
   // gradient defaults ON — "par défaut, sur la trace GPX, le gradient doit se
   // faire du vert foncé vers le rouge vif" only shows up if a loaded GPX
   // draws the ramp without the user having to flip a toggle first
@@ -248,8 +247,7 @@ const params = {
   gpxGlow: false,
   gpxShimmer: false,
   gpxPoints: true,
-  gpxStart: true,
-  gpxEnd: true,
+  gpxMarkers: true, // single toggle for BOTH start + finish markers
   gpxKm: true,
   gpxAltReadout: true,
   gpxSlopeReadout: false,

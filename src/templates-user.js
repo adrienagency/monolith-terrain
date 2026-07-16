@@ -50,9 +50,12 @@ export const TEMPLATE_KEYS = [
   // clouds
   'cloudsEnabled', 'cloudOpacity', 'cloudAltitude', 'cloudDrift', 'cloudScale', 'cloudCoverage',
   'cloudBillow', 'cloudBrightness', 'cloudAltSpread', 'cloudDriftVar', 'cloudContrast', 'cloudSSS',
-  // Route (GPX) styling — not the track itself, see note above
-  'gpxWidth', 'gpxColor', 'gpxAutoContrast', 'gpxGradient', 'gpxGradientMode', 'gpxGlow', 'gpxShimmer',
-  'gpxPoints', 'gpxStart', 'gpxEnd', 'gpxKm', 'gpxAltReadout', 'gpxSlopeReadout',
+  // Route (GPX) styling — not the track itself, see note above. A template
+  // saved before the start/finish markers became one toggle may still carry
+  // the old 'gpxStart'/'gpxEnd' keys; they're simply not in this list any
+  // more so they're ignored on load (harmless) rather than breaking.
+  'gpxWidth', 'gpxColor', 'gpxGradient', 'gpxGradientMode', 'gpxGlow', 'gpxShimmer',
+  'gpxPoints', 'gpxMarkers', 'gpxKm', 'gpxAltReadout', 'gpxSlopeReadout',
 ]
 
 const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)))

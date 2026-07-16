@@ -1,6 +1,6 @@
 // ROUTE panel — the GPX track as a first-class layer: load a file, style the
-// line (width/colour/auto-contrast casing, gradient/glow/shimmer). Later
-// Parcours tasks extend this same panel with points and playback.
+// line (width/colour, gradient/glow/shimmer). Later Parcours tasks extend
+// this same panel with points and playback.
 // Docked in the left column, after Camera (Explore, Scan, Camera, Route).
 
 import { slider, color, toggle, select, visibleWhen, button, section, el, refreshAll } from './kit.js'
@@ -34,11 +34,6 @@ export function buildRoutePanel(ctx) {
       label: 'Colour',
       get: () => params.gpxColor || params.hudAccent,
       set: (v) => { params.gpxColor = v; ctx.gpx.setColor(v) },
-    }),
-    toggle({
-      label: 'Auto-contrast casing',
-      get: () => params.gpxAutoContrast,
-      set: (v) => { params.gpxAutoContrast = v; ctx.gpx.setAutoContrast(v) },
     })
   )
 
@@ -81,14 +76,9 @@ export function buildRoutePanel(ctx) {
       set: (v) => ctx.gpx.setPoints(v),
     }),
     toggle({
-      label: 'Start marker',
-      get: () => params.gpxStart,
-      set: (v) => ctx.gpx.setStart(v),
-    }),
-    toggle({
-      label: 'Finish marker',
-      get: () => params.gpxEnd,
-      set: (v) => ctx.gpx.setEnd(v),
+      label: 'Start & finish markers',
+      get: () => params.gpxMarkers,
+      set: (v) => ctx.gpx.setMarkers(v),
     }),
     toggle({
       label: 'Km markers',
