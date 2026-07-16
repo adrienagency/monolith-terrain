@@ -1173,6 +1173,125 @@ body.ce-noui .ce-rec {
   }
 }
 
+/* ------------------------------------------------- shortcuts help overlay */
+.ce-shortcuts-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(16, 18, 22, 0.28);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.22s ease, visibility 0.22s ease;
+}
+.ce-shortcuts-overlay.open {
+  opacity: 1;
+  visibility: visible;
+}
+.ce-shortcuts-card {
+  width: min(560px, 100%);
+  max-height: min(640px, 84vh);
+  overflow-y: auto;
+  padding: 20px 22px 22px;
+  transform: translateY(6px) scale(0.985);
+  transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.ce-shortcuts-overlay.open .ce-shortcuts-card {
+  transform: none;
+}
+.ce-shortcuts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ce-shortcuts-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ce-ink);
+  letter-spacing: -0.01em;
+}
+.ce-shortcuts-close {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ce-muted);
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.15s, color 0.15s;
+}
+.ce-shortcuts-close:hover {
+  background: var(--ce-hover);
+  color: var(--ce-ink);
+}
+.ce-shortcuts-body {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px 24px;
+}
+.ce-shortcuts-group {
+  min-width: 0;
+}
+.ce-shortcuts-cat {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ce-muted);
+  margin-bottom: 6px;
+}
+.ce-shortcuts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ce-shortcuts-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+}
+.ce-shortcuts-label {
+  font-size: 12.5px;
+  color: var(--ce-ink);
+}
+.ce-shortcuts-keys {
+  display: flex;
+  gap: 3px;
+  flex: none;
+}
+.ce-kbd {
+  font-family: var(--ce-mono);
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: var(--ce-track);
+  color: var(--ce-ink);
+  border: 1px solid var(--ce-hairline);
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .ce-shortcuts-body {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ce-shortcuts-overlay,
+  .ce-shortcuts-card {
+    transition: none;
+  }
+}
+
 /* ---- L3 sub-group heading — unified across the panels ---------------- */
 /* Every sub-group caption resolves to this one rule so the same hierarchy
    level always looks identical: Shaders' "Appearance"/"Relief material"

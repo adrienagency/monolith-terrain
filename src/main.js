@@ -53,8 +53,11 @@ import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, stripFrom
 import { DroneCam } from './drone-cam.js'
 import { makeGradientTexture, deriveBgColors, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
+import { History } from './history.js'
+import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCredits } from './ui/bars.js'
+import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
 import { buildTemplatesPanel } from './ui/templates-panel.js'
 import { buildCreatePanel } from './ui/create-panel.js'
 import { buildCameraPanel } from './ui/camera-panel.js'
@@ -661,6 +664,74 @@ function flyTo(pos, target) {
 function focusOnPeak(x, h, z) {
   const v = peakVantage(x, h, z)
   flyTo(new THREE.Vector3(v.pos.x, v.pos.y, v.pos.z), new THREE.Vector3(v.target.x, v.target.y, v.target.z))
+}
+
+// ---- keyboard-shortcut camera presets (numpad) --------------------------
+// World axes: +x east, +z south (see geo.js). Presets orbit the CURRENT
+// controls.target at the CURRENT camera distance — only the angle changes,
+// the same idea as Blender's numpad views — so a preset never yanks the
+// framing away from wherever the user already is.
+const CAM_PRESET_ELEV = THREE.MathUtils.degToRad(35) // cardinal + iso elevation
+function normXZ(x, z) {
+  const len = Math.hypot(x, z) || 1
+  return { x: x / len, z: z / len }
+}
+const CAM_PRESET_DIR = {
+  north: { x: 0, z: -1 },
+  south: { x: 0, z: 1 },
+  east: { x: 1, z: 0 },
+  west: { x: -1, z: 0 },
+  nw: normXZ(-1, -1),
+  ne: normXZ(1, -1),
+  sw: normXZ(-1, 1),
+  se: normXZ(1, 1),
+}
+function orbitPresetPose(dir) {
+  const target = controls.target.clone()
+  const dist = THREE.MathUtils.clamp(camera.position.distanceTo(target) || 20, controls.minDistance, controls.maxDistance)
+  const horiz = Math.cos(CAM_PRESET_ELEV) * dist
+  const y = Math.sin(CAM_PRESET_ELEV) * dist
+  return { pos: new THREE.Vector3(target.x + dir.x * horiz, target.y + y, target.z + dir.z * horiz), target }
+}
+const DOLLY_FACTOR = 0.82
+function dollyCamera(factor) {
+  const target = controls.target.clone()
+  const off = camera.position.clone().sub(target)
+  let dist = off.length()
+  if (dist < 1e-4) return
+  dist = THREE.MathUtils.clamp(dist * factor, controls.minDistance, controls.maxDistance)
+  off.setLength(dist)
+  flyTo(target.clone().add(off), target)
+}
+// name → 'top' | 'north' | 'south' | 'east' | 'west' | 'nw' | 'ne' | 'sw' | 'se'
+// | 'home' | 'dollyIn' | 'dollyOut'. Null-safe: a bad name, or firing before
+// the mode machine exists / mid-transition, is a silent no-op.
+function cameraPreset(name) {
+  if (!modes || modes.mode !== 'surface' || modes.busy) return
+  if (name === 'home') {
+    flyTo(HOME.pos, HOME.target)
+    return
+  }
+  if (name === 'dollyIn') {
+    dollyCamera(DOLLY_FACTOR)
+    return
+  }
+  if (name === 'dollyOut') {
+    dollyCamera(1 / DOLLY_FACTOR)
+    return
+  }
+  if (name === 'top') {
+    const target = controls.target.clone()
+    const dist = THREE.MathUtils.clamp(camera.position.distanceTo(target) || 20, controls.minDistance, controls.maxDistance)
+    // nudged a hair off the exact vertical so camera.lookAt's forward vector
+    // is never perfectly parallel to the default up vector
+    flyTo(new THREE.Vector3(target.x + 0.01, target.y + dist, target.z + 0.01), target)
+    return
+  }
+  const dir = CAM_PRESET_DIR[name]
+  if (!dir) return
+  const pose = orbitPresetPose(dir)
+  flyTo(pose.pos, pose.target)
 }
 
 // pose to restore when a selection is closed: wherever the camera was pre-click
@@ -1430,6 +1501,7 @@ function applyMonochrome(kind) {
   applyPalette(L)
   applyStyle(L)
   applyGridContour(L)
+  history?.record() // committed look change — one undo step
 }
 
 // a look template: a full bundle that reproduces a reference image's style —
@@ -1481,6 +1553,7 @@ function applyTemplate(t) {
   // elevation is NOT part of a look — the per-zoom exaggeration model owns it,
   // so switching templates never changes the relief (or recolours it via slope)
   refreshAll()
+  history?.record() // committed look change — one undo step
 }
 
 // ---- user templates: save the current look, restyle the current view with a
@@ -1524,7 +1597,23 @@ function applyUserTemplate(tmpl) {
   bgRefreshFn() // resync the Background HDRI-sky highlight to the applied look
   refreshAll()
   rebuildMapLayers() // re-derive roads/water/places for the current location under the restored look
+  // A history.record() taken right here re-captures EXACTLY what was just
+  // applied (captureLook(params) after the assignment above), so it dedups
+  // cleanly against the snapshot undo()/redo() just pushed through this same
+  // function — no feedback loop, see history.js's record() dedup.
+  history?.record()
 }
+
+// undo/redo apply target: pushes a captured "look" snapshot (see
+// templates-user.js's TEMPLATE_KEYS / captureLook) back onto the live scene
+// through the exact same pipeline a saved user template uses.
+function applyAllParams(snap) {
+  applyUserTemplate({ look: snap })
+}
+
+// bounded undo/redo stack over the look surface (palette/style/grid/light/
+// surface/look/background/plinth/material/liquid-metal/surfaceFx/map layers)
+const history = new History(() => captureLook(params), (snap) => applyAllParams(snap))
 
 // grab a small thumbnail of the live render for the template card
 function captureThumbnail(w = 200, h = 120) {
@@ -1650,6 +1739,7 @@ function resetAll() {
   // map overlay layers (roads/water/places)
   Object.assign(params, DEFAULT_MAPLAYERS)
   rebuildMapLayers()
+  history?.record() // committed look change — one undo step
 }
 
 // ------------------------------------------------------------------ GPX layer
@@ -1715,6 +1805,34 @@ function flyTrack() {
   tween.active = false
   cameraAuto.stop()
   drone.start(w, { duration })
+}
+
+// ---- Space/Esc playback (keyboard shortcuts) -----------------------------
+// Bridges to whatever playback mechanism is live: a loaded GPX track's
+// drone fly-along takes priority (start/stop only — DroneCam has no pause),
+// otherwise the Camera panel's looping automation. Full Parcours progressive-
+// reveal playback lands in a later task; until then this is a safe,
+// null-checked bridge to what already exists.
+function togglePlay() {
+  if (!modes || modes.mode !== 'surface' || modes.busy) return
+  if (gpxLayer?.track?.world) {
+    if (drone.active) drone.stop()
+    else flyTrack()
+    return
+  }
+  if (cameraAuto.active) cameraAuto.stop()
+  else {
+    tour.active = false
+    drone.stop()
+    cameraAuto.start(params.camMove, params.camSpeed)
+  }
+}
+function stopPlay() {
+  tour.active = false
+  tween.active = false
+  drone.stop()
+  cameraAuto.stop()
+  camera.up.set(0, 1, 0)
 }
 
 // ------------------------------------------------------------------ GUI
@@ -1817,6 +1935,65 @@ async function applyRegionMode() {
   }
 }
 
+// ---- keyboard-shortcut layer toggles -------------------------------------
+// contours/grid opacity is flipped between 0 and the last non-zero value
+// (falling back to the shipped default) so re-pressing the key restores
+// whatever the user had dialled in, not just the frozen default.
+let storedContourOpacity = null
+let storedGridOpacity = null
+function toggleLayer(id) {
+  if (!terrain?.mapUniforms) return
+  switch (id) {
+    case 'roads':
+      params.roadsEnabled = !params.roadsEnabled
+      rebuildMapLayers()
+      break
+    case 'water':
+      params.waterEnabled = !params.waterEnabled
+      rebuildMapLayers()
+      break
+    case 'places':
+      params.placesEnabled = !params.placesEnabled
+      rebuildMapLayers()
+      break
+    case 'contours':
+      if (params.contourOpacity > 0) {
+        storedContourOpacity = params.contourOpacity
+        params.contourOpacity = 0
+      } else {
+        params.contourOpacity = storedContourOpacity ?? DEFAULT_LOOK.contourOpacity
+        storedContourOpacity = null
+      }
+      terrain.mapUniforms.uContourOpacity.value = params.contourOpacity
+      break
+    case 'grid':
+      if (params.gridOpacity > 0) {
+        storedGridOpacity = params.gridOpacity
+        params.gridOpacity = 0
+      } else {
+        params.gridOpacity = storedGridOpacity ?? DEFAULT_LOOK.gridOpacity
+        storedGridOpacity = null
+      }
+      terrain.mapUniforms.uGridOpacity.value = params.gridOpacity
+      break
+    default:
+      return
+  }
+  refreshAll()
+  // roads/water/places/contourOpacity/gridOpacity are all TEMPLATE_KEYS —
+  // a keyboard toggle never touches a `.ce-dock` control, so it would be
+  // invisible to the debounced dock listener below without this explicit
+  // record (history?. — this can fire before `history` exists only if a key
+  // is somehow pressed mid-boot, which bindShortcuts is wired late enough
+  // to avoid, but the guard costs nothing)
+  history?.record()
+}
+function toggleRegion() {
+  params.regionMode = !params.regionMode
+  applyRegionMode()
+  refreshAll()
+}
+
 // export renders offline: the RAF chain pauses and the scene advances at a
 // fixed timestep so the video is deterministic whatever the encode speed
 let loopPaused = false
@@ -1831,6 +2008,42 @@ function stepScene(t, dt) {
 
 initTips()
 
+// first click pulls the export stack in (modal + Recorder + mediabunny) —
+// bars.js shows a busy state on the button while the chunk downloads. Named
+// so both the top-bar Export pill AND the "E" keyboard shortcut can open it.
+async function openExportUI() {
+  const [{ openExportModal }, { Recorder }] = await Promise.all([
+    import('./ui/export-modal.js'),
+    import('./export-recorder.js'),
+  ])
+  if (!recorder) recorder = new Recorder({ renderer })
+  openExportModal({
+    renderer,
+    composer,
+    camera,
+    recorder,
+    pauseLoop: () => {
+      loopPaused = true
+      // kill the already-scheduled frame too, or a synchronous export
+      // failure would leave two rAF chains running after resume
+      cancelAnimationFrame(rafId)
+      clearTimeout(tickTimer)
+    },
+    resumeLoop: () => {
+      loopPaused = false
+      clock.getDelta() // swallow the paused span so dt doesn't jump
+      tick()
+    },
+    step: stepScene,
+  })
+}
+
+// keyboard-shortcuts help overlay — built once, toggled by the top-bar
+// keyboard icon, the "?" shortcut, and (closing only) Escape/backdrop-click.
+// Reads the SHORTCUTS registry live, so a future entry there needs no
+// changes here.
+const shortcutsOverlay = buildShortcutsOverlay()
+
 const topBar = buildTopBar({
   params,
   setDarkMode: (v) => {
@@ -1844,37 +2057,12 @@ const topBar = buildTopBar({
     const { startTutorial } = await import('./ui/tutorial.js')
     startTutorial()
   },
-  // first click pulls the export stack in (modal + Recorder + mediabunny) —
-  // bars.js shows a busy state on the button while the chunk downloads
-  openExport: async () => {
-    const [{ openExportModal }, { Recorder }] = await Promise.all([
-      import('./ui/export-modal.js'),
-      import('./export-recorder.js'),
-    ])
-    if (!recorder) recorder = new Recorder({ renderer })
-    openExportModal({
-      renderer,
-      composer,
-      camera,
-      recorder,
-      pauseLoop: () => {
-        loopPaused = true
-        // kill the already-scheduled frame too, or a synchronous export
-        // failure would leave two rAF chains running after resume
-        cancelAnimationFrame(rafId)
-        clearTimeout(tickTimer)
-      },
-      resumeLoop: () => {
-        loopPaused = false
-        clock.getDelta() // swallow the paused span so dt doesn't jump
-        tick()
-      },
-      step: stepScene,
-    })
-  },
+  openExport: openExportUI,
+  // "?" keyboard-shortcuts help — self-updating overlay, reads SHORTCUTS live
+  toggleShortcuts: () => shortcutsOverlay.toggle(),
 })
 
-buildBottomBar({
+const bottomBar = buildBottomBar({
   goto: gotoCtl,
   openGpx: () => gpxFileInput.click(),
 })
@@ -2193,6 +2381,48 @@ aq = createAdaptiveQuality({
   canStep: () => modes.mode === 'surface' && !modes.busy && !recorder?.recording,
 })
 
+// ------------------------------------------------------------------ keyboard shortcuts + undo/redo
+
+const shortcutsCtx = {
+  cameraPreset,
+  togglePlay,
+  stopPlay,
+  undo: () => history.undo(),
+  redo: () => history.redo(),
+  toggleUI: () => document.body.classList.toggle('ce-noui'),
+  toggleDark: () => {
+    setDarkMode(!params.darkMode)
+    refreshAll()
+    topBar.syncDark()
+  },
+  reframe: () => cameraPreset('home'),
+  toggleShortcuts: () => shortcutsOverlay.toggle(),
+  focusSearch: () => bottomBar.input?.focus(),
+  openExport: () => openExportUI(),
+  toggleLayer,
+  toggleRegion,
+}
+bindShortcuts(shortcutsCtx)
+
+// debounced "committed change" hook for undo/redo: a slider drag / colour
+// pick / toggle / select anywhere inside a dock panel collapses into ONE
+// history entry ~400ms after the user stops interacting — 'change' fires
+// once per commit for toggles/selects/colour inputs, 'pointerup' catches the
+// end of a slider drag. History.record() dedups no-ops on its own.
+function debounce(fn, ms) {
+  let t = null
+  return (...args) => {
+    clearTimeout(t)
+    t = setTimeout(() => fn(...args), ms)
+  }
+}
+const recordHistoryDebounced = debounce(() => history.record(), 400)
+document.addEventListener('change', (e) => { if (e.target?.closest?.('.ce-dock')) recordHistoryDebounced() }, true)
+document.addEventListener('pointerup', (e) => { if (e.target?.closest?.('.ce-dock')) recordHistoryDebounced() }, true)
+
+// seed the first undo step so the FIRST committed edit has a state to undo
+// back to (record() dedups, so this is free even if nothing changes first)
+history.record()
 
 // ------------------------------------------------------------------ loop
 

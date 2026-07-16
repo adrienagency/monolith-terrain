@@ -20,6 +20,8 @@ const I = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="19" r="2.4"/><circle cx="18" cy="5" r="2.4"/><path d="M8 17.5C11 15 9 11 12 9.5S16.5 8 16.5 6.8"/></svg>',
   iso: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 4.6v8.8L12 21l-8-4.6V7.6L12 3z"/><path d="M12 12l8-4.4M12 12L4 7.6M12 12v9"/></svg>',
   help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.6 2.6 0 115 .8c-.5 1.4-2.1 1.7-2.1 3.2"/><circle cx="12" cy="16.8" r="0.4" fill="currentColor"/></svg>',
+  keyboard:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="6" width="19" height="13" rx="2"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M6 13.5h.01M9.5 13.5h.01M13 13.5h.01M16.5 13.5h.01M8 16.5h8" stroke-linecap="round"/></svg>',
 }
 
 export function buildTopBar(ctx) {
@@ -68,6 +70,10 @@ export function buildTopBar(ctx) {
   const helpBtn = iconButton(I.help, '', () => ctx.startTutorial?.())
   helpBtn.setAttribute('data-tip', 'A one-minute tour of everything on this screen.')
   bar.append(helpBtn)
+
+  const shortcutsBtn = iconButton(I.keyboard, '', () => ctx.toggleShortcuts?.())
+  shortcutsBtn.setAttribute('data-tip', 'Keyboard shortcuts — camera, layers, undo/redo.')
+  bar.append(shortcutsBtn)
 
   const hideBtn = iconButton(I.eyeOff, '', () => setNoUi(true))
   hideBtn.setAttribute('data-tip', 'Hide every panel — only a small eye button stays.')
