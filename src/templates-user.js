@@ -34,8 +34,9 @@ export const TEMPLATE_KEYS = [
   'exposure', 'contrast', 'saturation', 'vignette', 'grain', 'fogNear', 'fogFar', 'fogColor', 'fogEnabled',
   // background (solid / gradient / HDRI sky)
   'bgMode', 'bgColorA', 'bgColorB', 'bgColorC', 'bgAngle', 'bgEnv',
-  // camera lens / depth-of-field + shadow look (NOT position/location)
-  'fov', 'autoFocus', 'focusDistance', 'focusRange', 'bokehEnabled', 'bokehScale', 'shadowMode',
+  // camera lens / depth-of-field (NOT position/location) — shadowMode lives in
+  // the light group above; listed once there, not duplicated here
+  'fov', 'autoFocus', 'focusDistance', 'focusRange', 'bokehEnabled', 'bokehScale',
   // socle (block)
   'plinth', 'plinthDepth', 'plinthColor', 'plinthFinish', 'plinthPbr', 'plinthGlass',
   'plinthGlassDiffusion', 'plinthGlassProjection', 'plinthGlassBump', 'plinthBump',

@@ -17,10 +17,8 @@ import {
   BlendFunction,
 } from 'postprocessing'
 import { Terrain } from './terrain.js'
-import { createCone } from './cone.js'
 import { createLabels, disposeLabels } from './labels.js'
 import { createHud3D, findPois } from './hud3d.js'
-import { createHud2D } from './hud2d.js'
 import { loadDem } from './dem.js'
 import { Globe } from './globe.js'
 import { Modes, stepZoom } from './modes.js'
@@ -45,7 +43,6 @@ import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
 import { fetchRegionMask } from './region-mask.js'
 import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
-import { buildRegionPlate } from './region-plate.js'
 import { buildRegionSkirt } from './region-skirt.js'
 import { makeSocleEnvMap } from './socle-env.js'
 import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
@@ -165,9 +162,10 @@ const params = {
   gridOpacity: 0.4,
   labels: true,
 
-  // HUD (legacy FUI blocks — off by default in the v28 UI)
-  hud: false,
-  hudOpacity: 1,
+  // legacy FUI chrome vars — hud/hudOpacity drove the now-removed hud2d.js
+  // screen-space overlay (unreachable: no UI ever set params.hud); uiBlur/
+  // uiBgOpacity/hudAccent/hudInk stay — they drive live CSS custom properties
+  // (--hud-blur/--hud-bg-alpha/--hud-accent/--hud-ink) used across the chrome.
   uiBlur: 9,
   uiBgOpacity: 0.4,
   hudAccent: '#ff4d00',
@@ -205,10 +203,6 @@ const params = {
   surveyLines: true,
 
   // motion
-  coneSpin: 0,
-  coneTilt: 0,
-  coneDrift: 0,
-  bob: 0,
   ringSpeed: 1.0,
   flyDuration: 1.8,
   flyEasing: 'smooth',
@@ -599,9 +593,6 @@ const groundInfo = new GroundInfoLayer({
 })
 cartoucheRef = groundInfo
 
-const cone = createCone()
-scene.add(cone.group)
-
 clouds = new Clouds(scene, terrain, params)
 clouds.setSunDir(sun.position)
 
@@ -649,10 +640,7 @@ const tween = {
   t0: new THREE.Vector3(),
   t1: new THREE.Vector3(),
 }
-let selectedPoi = -1
-let fps = 60
 let scan = null // ScanController — instantiated once the terrain exists
-let regionPlate = null // adaptive plate under the cut landform (region mode)
 let regionSkirt = null // vertical curtain welding the cut edge down to a base
 let regionMaskCanvas = null // current zone mask, kept so the skirt can rebuild on terrain regen
 
@@ -759,9 +747,6 @@ function cameraPreset(name) {
   const pose = orbitPresetPose(dir)
   flyTo(pose.pos, pose.target)
 }
-
-// pose to restore when a selection is closed: wherever the camera was pre-click
-const returnPose = { saved: false, pos: new THREE.Vector3(), target: new THREE.Vector3() }
 
 // ------------------------------------------------------------------ tour mode
 
@@ -921,33 +906,6 @@ function tourGaze(s, camPos, out) {
   return out
 }
 
-const hud2 = createHud2D({
-  onSelectPoi(i) {
-    if (selectedPoi === -1) {
-      returnPose.pos.copy(camera.position)
-      returnPose.target.copy(controls.target)
-      returnPose.saved = true
-    }
-    selectedPoi = i
-    const p = pois[i]
-    hud2.setSelected(i, p)
-    focusOnPeak(p.x, p.h, p.z)
-  },
-  onDeselect() {
-    selectedPoi = -1
-    hud2.setSelected(-1, null)
-    flyTo(returnPose.saved ? returnPose.pos : HOME.pos, returnPose.saved ? returnPose.target : HOME.target)
-    returnPose.saved = false
-  },
-  onScan() {
-    scan?.trigger(0, { x: controls.target.x, z: controls.target.z }, params.scanDuration)
-    cone.kick(3)
-  },
-})
-hud2.setPois(pois)
-hud2.setStatic(params)
-hud2.setVisible(params.hud)
-hud2.setOpacity(params.hudOpacity)
 document.documentElement.style.setProperty('--hud-accent', params.hudAccent)
 document.documentElement.style.setProperty('--hud-ink', params.hudInk)
 document.documentElement.style.setProperty('--hud-blur', `${params.uiBlur}px`)
@@ -977,13 +935,10 @@ let isoBtn = null // assigned once the bars exist — referenced by the mode hoo
 let aq = null // adaptive quality controller (perf.js) — built after the panels
 let recorder = null // Recorder instance, lazy-loaded with the export stack
 
-// real-world mode strips the fiction: no cone/reticle, no dial platform
+// real-world mode strips the fiction: no dial platform
 function applySourceMode() {
   const real = params.source === 'real'
-  const surface = !modes || modes.mode === 'surface'
-  cone.group.visible = !real && surface
   hud3.platform.visible = !real
-  hud2.setReticleVisible(!real)
 }
 
 function regenerateHud() {
@@ -997,10 +952,6 @@ function regenerateHud() {
   // fresh group must not appear over the globe
   hud3.group.visible = !modes || modes.mode === 'surface'
   scene.add(hud3.group)
-  hud2.setPois(pois)
-  hud2.setStatic(params)
-  selectedPoi = -1
-  hud2.setSelected(-1, null)
   applySourceMode()
 }
 applySourceMode()
@@ -1050,15 +1001,9 @@ dofPass.enabled = params.bokehEnabled && params.bokehScale > 0
 
 const mouse = new THREE.Vector2(0, 0)
 const focusRay = new THREE.Raycaster() // reused for pointer autofocus
-let lastPointer = null
 window.addEventListener('pointermove', (e) => {
   const nx = (e.clientX / window.innerWidth) * 2 - 1
   const ny = -((e.clientY / window.innerHeight) * 2 - 1)
-  if (lastPointer) {
-    const speed = Math.hypot(nx - lastPointer.x, ny - lastPointer.y)
-    cone.kick(speed * 6)
-  }
-  lastPointer = { x: nx, y: ny }
   mouse.set(nx, ny)
   if (modes && modes.mode === 'surface') gpxLayer.pointerMove(mouse, e.clientX, e.clientY)
 })
@@ -1264,14 +1209,11 @@ modes = new Modes({
       terrain.mesh.visible = v
       labels.visible = v && params.labels
       hud3.group.visible = v
-      hud2.setVisible(v && params.hud)
-      cone.group.visible = v && params.source !== 'real'
       // GPX sprites draw with depthTest:false — hidden with the surface or
       // they'd float on top of the planet
       gpxLayer.setVisible(v && params.gpxVisible)
       clouds.setVisible(v)
       plinth.setVisible(v && params.plinth && !params.regionMode)
-      if (regionPlate) regionPlate.mesh.visible = v
       if (regionSkirt) regionSkirt.mesh.visible = v
       groundInfo.setVisible(v && params.groundInfo)
       traffic.setVisible(v)
@@ -1907,20 +1849,15 @@ const waterRebuild = () => realWater?.rebuild({ terrain, params })
 
 // OSM attribution + loading status for the Map layers (ODbL requires the credit).
 // Places (villages/towns) now come from GeoNames, which requires its own CC-BY
-// credit — shown alongside OSM when both are active, or on its own otherwise.
-const osmCredit = document.createElement('div')
-osmCredit.className = 'osm-credit'
-osmCredit.innerHTML = '<span class="osm-status"></span><span class="osm-credit-lines"></span>'
-osmCredit.style.display = 'none'
-document.body.appendChild(osmCredit)
+// credit — merged into the single bottom-left credit line (bars.js buildCredits)
+// rather than a second corner, so nothing overlaps the isometric-view button
+// and there's one line/one corner/one size instead of two.
 function refreshOsmCredit() {
-  const on = mapLayers.isOsmActive(), loading = mapLayers.isLoading()
-  const lines = []
-  if (on || loading) lines.push('© OpenStreetMap contributors')
-  if (params.placesEnabled && params.source === 'real' && modes.mode === 'surface') lines.push('© GeoNames (CC BY 4.0)')
-  osmCredit.style.display = lines.length ? 'flex' : 'none'
-  osmCredit.querySelector('.osm-status').textContent = loading ? 'Détail OSM · chargement… ' : ''
-  osmCredit.querySelector('.osm-credit-lines').textContent = lines.join(' · ')
+  const loading = mapLayers.isLoading()
+  const parts = []
+  if (loading) parts.push('OSM · chargement…')
+  if (params.placesEnabled && params.source === 'real' && modes.mode === 'surface') parts.push('© GeoNames (CC BY 4.0)')
+  credits.setExtra(parts.join(' · '))
 }
 
 // rebuild all map layers (roads/water/places) for the current zone — used by
@@ -1931,13 +1868,6 @@ const rebuildMapLayers = () => { const p = mapLayers.rebuild({ dem, terrain, par
 // the view (continent/country/region/departement by zoom). The landform sits
 // straight on the ground: no plinth, no square ocean slab.
 let regionBusy = false
-function disposeRegionPlate() {
-  if (!regionPlate) return
-  scene.remove(regionPlate.mesh)
-  regionPlate.mesh.geometry.dispose()
-  regionPlate.mesh.material.dispose()
-  regionPlate = null
-}
 function disposeRegionSkirt() {
   if (!regionSkirt) return
   scene.remove(regionSkirt.mesh)
@@ -1966,7 +1896,6 @@ function rebuildRegionSkirt() {
 async function applyRegionMode() {
   if (!params.regionMode || params.source !== 'real' || !dem) {
     terrain.setRegionMask(null)
-    disposeRegionPlate()
     disposeRegionSkirt()
     regionMaskCanvas = null
     plinth.setVisible(params.plinth && modes.mode === 'surface')
@@ -1984,14 +1913,12 @@ async function applyRegionMode() {
     // Isolate-the-zone drops the flat slab, but a vertical curtain still closes
     // the cut so a boundary over a summit or a trench never shows the map's
     // underside. It welds to the terrain height and shares the socle material.
-    disposeRegionPlate()
     regionMaskCanvas = r ? r.maskCanvas : null
     rebuildRegionSkirt()
     if (r) modes.announce(`ZONE — ${String(r.name).toUpperCase()}`)
     else modes.announce('ZONE — NO BOUNDARY AT THIS SCALE')
   } catch {
     terrain.setRegionMask(null)
-    disposeRegionPlate()
     disposeRegionSkirt()
     regionMaskCanvas = null
   } finally {
@@ -2144,9 +2071,10 @@ function syncGpxProfilePosition() {
 }
 syncGpxProfilePosition()
 
-// bottom-left: quiet credit to the studio + a curated "inspiration" list of
-// other beautiful 3D-map makers (opens a small popup)
-buildCredits()
+// bottom-left: studio credit + every required attribution (OSM/GeoNames), one
+// line/one corner/one size. refreshOsmCredit() (above) appends GeoNames +
+// loading status live via credits.setExtra().
+const credits = buildCredits()
 
 // bottom-right: one click to the isometric museum view — whole block, plate
 // and cartouche in frame (45° azimuth, museum-shelf elevation)
@@ -2639,7 +2567,6 @@ function tick() {
 
   if (!params.paused && modes.mode === 'surface') {
     hud3.update(dt, t, params)
-    cone.update(dt, t, mouse, params)
     clouds.update(dt, params, camera)
     traffic.update(dt)
     terrain.tickSurfaceFx(dt, params.fx[params.surfaceFx]?.speed ?? 0) // animate at the effect's speed
@@ -2671,23 +2598,6 @@ function tick() {
     if (hit != null) params.focusDistance += (hit - params.focusDistance) * Math.min(1, dt * 8)
   }
   dof.cocMaterial.worldFocusDistance = params.focusDistance
-
-  if (params.hud && modes.mode === 'surface') {
-    fps += (1 / Math.max(dt, 1e-4) - fps) * 0.05
-    const sph = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target))
-    const secs = Math.floor(t)
-    hud2.update(dt, camera, window.innerWidth, window.innerHeight, {
-      conePoint: cone.getFocusPoint(),
-      pois,
-      az: THREE.MathUtils.radToDeg(sph.theta),
-      el: 90 - THREE.MathUtils.radToDeg(sph.phi),
-      focus: params.focusDistance,
-      fps,
-      clock: `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`,
-      coneAlt: cone.group.position.y,
-      spin: params.coneSpin,
-    })
-  }
 
   realWater?.update(dt, sun) // water simulation: waves, caustics, sun glint
   aq.update(dt) // adaptive quality: sample FPS, step tiers when sustained
