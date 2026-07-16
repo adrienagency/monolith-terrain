@@ -1,6 +1,13 @@
-// Fetch GeoNames cities5000 (all populated places with population > 5000),
+// Fetch GeoNames cities1000 (all populated places with population > 1000),
 // tier them by population -> min_zoom, and emit a compact array to
 // public/data/map/places.json for progressive label reveal on the globe.
+// cities1000 (not cities5000) is required so villages like Chamonix
+// (~8,600) and its neighbouring hamlets exist in the data at all — see
+// place-tier.js for how those low-population rows map to deep-zoom-only
+// reveal. The full set is kept (no top-N truncation): truncating by
+// population is what silently deleted every place below ~12k previously,
+// which is what caused "medium towns don't appear" — a truncated file
+// has no population floor guarantee at any particular zoom.
 // Public domain (GeoNames, CC BY 4.0 — https://www.geonames.org/).
 // Run: npm run build:places
 import { mkdir, writeFile, rm } from 'node:fs/promises'
@@ -9,10 +16,9 @@ import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { popToMinZoom } from '../src/map/place-tier.js'
 
-const URL_ZIP = 'https://download.geonames.org/export/dump/cities5000.zip'
-const TXT_NAME = 'cities5000.txt'
+const URL_ZIP = 'https://download.geonames.org/export/dump/cities1000.zip'
+const TXT_NAME = 'cities1000.txt'
 const OUT = new URL('../public/data/map/', import.meta.url)
-const MAX_ENTRIES = 40000
 
 const round = (n) => Math.round(n * 1e4) / 1e4
 
@@ -23,7 +29,7 @@ async function fetchZipText() {
   const buf = Buffer.from(await res.arrayBuffer())
 
   const tmpDir = await mkdirTemp()
-  const zipPath = join(tmpDir, 'cities5000.zip')
+  const zipPath = join(tmpDir, 'cities1000.zip')
   await writeFile(zipPath, buf)
   try {
     // git-bash / unix `unzip` extracts straight to stdout with -p, no
@@ -62,9 +68,11 @@ function parseRows(text) {
 
 async function main() {
   const text = await fetchZipText()
-  let rows = parseRows(text)
+  const rows = parseRows(text)
+  // Sort by population descending (not a truncation cutoff — kept in full)
+  // so downstream consumers that assume prominence-descending order, like
+  // place-pick.js's greedy picker, get the biggest places first for free.
   rows.sort((a, b) => b[3] - a[3])
-  if (rows.length > MAX_ENTRIES) rows = rows.slice(0, MAX_ENTRIES)
 
   await mkdir(OUT, { recursive: true })
   await writeFile(new URL('places.json', OUT), JSON.stringify(rows))

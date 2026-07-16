@@ -66,8 +66,29 @@ export class PlacesLayer {
 
     const zoom = params.demZoom ?? 8
     const density = params.placesDensity ?? 1
-    const maxN = Math.round((zoom >= 13 ? 60 : zoom >= 11 ? 40 : zoom >= 9 ? 26 : zoom >= 7 ? 16 : 10) * density)
-    const minDist = TERRAIN_SIZE * (zoom >= 12 ? 0.035 : zoom >= 10 ? 0.05 : 0.085)
+    // These caps are a coarse world-space PRE-filter that runs before the
+    // precise screen-space declutter below (_declutter() / spriteScreenSize()).
+    // They used to be tuned against cities5000 truncated to the top 40k by
+    // population (~12k-pop floor, sparse). Now that places.json is the full,
+    // untruncated cities1000 set (~1k-pop floor), a real patch has far more
+    // zoom-eligible rows — measured ~150-200 eligible rows in dense metros
+    // (Paris, the Ruhr) at zoom 9 vs. ~20-70 before. With the old caps
+    // (maxN 26, minDist 0.085*TERRAIN_SIZE ≈ 14km real-world at z9) minDist
+    // alone discarded ~75% of eligible rows before declutter ever saw them —
+    // e.g. Paris z9 kept only 7 of 26 zoom+maxN-eligible picks, silently
+    // dropping real, distinct suburb towns (Boulogne-Billancourt, Nanterre,
+    // Versailles, Saint-Denis...) because they sat within 14km of central
+    // Paris, not because they visually overlapped its label on screen.
+    // minDist is tightened (~0.02-0.06, ≈2-7km real-world depending on zoom)
+    // so it only catches near-duplicate rows (e.g. GeoNames listing several
+    // Paris arrondissements a couple km apart as separate PPL rows), and
+    // maxN is raised so dense-metro patches have enough headroom to fill
+    // out the picks — the actual "is this label visually too close to
+    // another" decision is left entirely to the screen-space declutter pass,
+    // which already measures real projected pixel rects and is unaffected
+    // by this change.
+    const maxN = Math.round((zoom >= 13 ? 90 : zoom >= 11 ? 60 : zoom >= 9 ? 40 : zoom >= 7 ? 24 : 12) * density)
+    const minDist = TERRAIN_SIZE * (zoom >= 12 ? 0.02 : zoom >= 10 ? 0.03 : zoom >= 9 ? 0.04 : 0.06)
     const picks = pickPlaces(rows, { zoom, toWorld: (lat, lon) => latLonToWorld(dem, lat, lon), halfLimit: HALF * 0.96, maxN, minDist })
     if (!picks.length) return
 
