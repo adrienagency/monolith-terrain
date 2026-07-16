@@ -25,11 +25,13 @@ function seg(pos, color, widthPx, renderOrder, resolution) {
   l.renderOrder = renderOrder
   return l
 }
-export function buildLineSegments(runs, sample, { color, casing, widthPx, offset, renderOrder, resolution }) {
+// No casing pass: the halo/outline under map lines was removed site-wide —
+// "tu peux retirer tous les casing du site, l'effet ne va pas". Don't add it
+// back as an option; the ink lines carry their own contrast.
+export function buildLineSegments(runs, sample, { color, widthPx, offset, renderOrder, resolution }) {
   const g = new THREE.Group()
   const pos = segPositions(runs, sample, offset)
   if (!pos.length) return g
-  if (casing) g.add(seg(pos, casing, widthPx + 2.0, renderOrder, resolution))
   g.add(seg(pos, color, widthPx, renderOrder + 1, resolution))
   return g
 }

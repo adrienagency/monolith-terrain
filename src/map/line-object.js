@@ -18,11 +18,11 @@ function line(positions, color, widthPx, renderOrder, resolution) {
   return l
 }
 
-export function buildLineObject(worldPts, sample, { color, casing, widthPx, offset, renderOrder, resolution }) {
+// No casing pass — see buildLineSegments; casing was removed site-wide.
+export function buildLineObject(worldPts, sample, { color, widthPx, offset, renderOrder, resolution }) {
   const dense = densifyWorld(worldPts, STEP)
   const positions = [...drapeWorld(dense, sample, offset)]
   const g = new THREE.Group()
-  if (casing) g.add(line(positions, casing, widthPx + 2.0, renderOrder, resolution)) // casing sits just under the ink line
   g.add(line(positions, color, widthPx, renderOrder + 1, resolution))
   return g
 }

@@ -13,14 +13,14 @@ let _fontReady = null
 export function labelFontReady() {
   if (!_fontReady) {
     _fontReady = Promise.all([
-      document.fonts?.load(`600 88px ${FONT}`),
       document.fonts?.load(`700 88px ${FONT}`),
+      document.fonts?.load(`800 88px ${FONT}`),
     ]).catch(() => {})
   }
   return _fontReady
 }
 
-export function makeLabelTexture(text, { size = 88, weight = 600, color = '#2e2820', halo = 'rgba(255,255,255,0.9)', track = 0.12 } = {}) {
+export function makeLabelTexture(text, { size = 88, weight = 700, color = '#2e2820', halo = 'rgba(255,255,255,0.9)', track = 0.12 } = {}) {
   const font = `${weight} ${size}px ${FONT}`
   const probe = document.createElement('canvas').getContext('2d')
   probe.font = font

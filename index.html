@@ -40,11 +40,16 @@
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" }
       }
     </script>
-    <!-- ground-cartouche fonts: Rosarivo (titles) + Bricolage Grotesque (body) -->
+    <!-- ground-cartouche fonts: Rosarivo (titles) + Bricolage Grotesque (body).
+         Bricolage's real wght axis is 200..800 (Google Fonts serves
+         `font-weight: 200 800`; asking for 900 is a 400). We used to request
+         only 300..700, which silently capped the map's city labels at 700 —
+         they read too thin and no amount of `weight: 800` in canvas could fix
+         it, because the face simply wasn't loaded that heavy. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Rosarivo:ital@0;1&family=Bricolage+Grotesque:opsz,wght@12..96,300..700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Rosarivo:ital@0;1&family=Bricolage+Grotesque:opsz,wght@12..96,200..800&display=swap"
       rel="stylesheet"
     />
     <link

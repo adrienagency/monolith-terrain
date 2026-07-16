@@ -97,7 +97,6 @@ export class RoadsLayer {
     const sample = (x, z) => (terrain.sample ? terrain.sample(x, z) : 0)
     const resolution = new THREE.Vector2(window.innerWidth, window.innerHeight)
     const ink = params.roadColor || (params.darkMode ? '#d9c7b0' : '#3a3128')
-    const casing = params.roadsCasing === false ? null : (params.darkMode ? 'rgba(15,17,20,0.6)' : 'rgba(252,250,246,0.7)')
     // clip every ring to the block, bucket runs by weight class
     const byClass = { motorway: [], primary: [], secondary: [] }
     for (const r of rings) {
@@ -107,7 +106,7 @@ export class RoadsLayer {
     }
     for (const klass of Object.keys(byClass)) {
       if (!byClass[klass].length) continue
-      const obj = buildLineSegments(byClass[klass], sample, { color: ink, casing, widthPx: STYLE[klass].widthPx, offset: 0.08, renderOrder: 20, resolution })
+      const obj = buildLineSegments(byClass[klass], sample, { color: ink, widthPx: STYLE[klass].widthPx, offset: 0.08, renderOrder: 20, resolution })
       obj.traverse((o) => { if (o.material) o.material.opacity = params.roadsOpacity ?? 0.9 })
       this.group.add(obj)
     }

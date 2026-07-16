@@ -121,7 +121,9 @@ export class PlacesLayer {
 
       // upright billboard sprite — never occluded (depthTest:false) and never
       // shrinks away when zoomed out (sizeAttenuation:false, screen-space scale)
-      const { tex, aspect } = makeLabelTexture(p.name.toUpperCase(), { color: ink.color, halo, weight: p.cap ? 700 : 600 })
+      // 800/700, the top of Bricolage's real 200..800 axis — the names read too
+      // thin at 600/700 and the ask was to bolden them, NOT to enlarge them.
+      const { tex, aspect } = makeLabelTexture(p.name.toUpperCase(), { color: ink.color, halo, weight: p.cap ? 800 : 700 })
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }))
       sprite.material.sizeAttenuation = false
       sprite.scale.set(BASE_H * scale * aspect, BASE_H * scale, 1)
