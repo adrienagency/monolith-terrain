@@ -10,11 +10,14 @@ test('buildQuery: roads uses highway + south,west,north,east bbox', () => {
   assert.match(q, /out geom;/)
 })
 
-test('roadHighwayFilter: 1 major, 2 drivable, 3 all', () => {
+test('roadHighwayFilter: 1 and 2 share the same generous drivable filter, 3 is unrestricted', () => {
+  // detail 1 and 2 must fetch the SAME broad set — relative tiering (road-tier.js)
+  // decides client-side which classes actually render at each notch, so an
+  // absolute server-side filter (the old bug) would starve it of data.
+  assert.equal(roadHighwayFilter(1), roadHighwayFilter(2))
   assert.match(roadHighwayFilter(1), /motorway\|trunk\|primary/)
-  assert.equal(/residential/.test(roadHighwayFilter(1)), false)
-  assert.match(roadHighwayFilter(2), /residential/)
-  assert.equal(/footway|path/.test(roadHighwayFilter(2)), false)
+  assert.match(roadHighwayFilter(1), /residential/)
+  assert.equal(/footway|path/.test(roadHighwayFilter(1)), false)
   assert.equal(roadHighwayFilter(3), '["highway"]') // all
 })
 
@@ -37,6 +40,12 @@ test('parseOverpass keeps ALL vertices, maps tags', () => {
 
 test('bboxKey rounds to 3 decimals', () => {
   assert.equal(bboxKey({ minLat: 45.80001, minLon: 6.1, maxLat: 45.95, maxLon: 6.3 }, 'roads'), 'roads:45.8,6.1,45.95,6.3')
+})
+
+test('bboxKey: roads cache key derives from the filter variant, so detail 1/2 (same filter) collide and detail 3 (different filter) does not', () => {
+  const keyFor = (detail) => bboxKey(bbox, 'roads', roadHighwayFilter(detail))
+  assert.equal(keyFor(1), keyFor(2))
+  assert.notEqual(keyFor(1), keyFor(3))
 })
 
 test('buildAreaQuery: well-formed water-area query with south,west,north,east bbox', () => {

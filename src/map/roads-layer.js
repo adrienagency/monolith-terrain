@@ -5,15 +5,14 @@ import { latlonToWorldPts } from './draped-line.js'
 import { buildLineSegments } from './line-segments.js'
 import { fetchOverpassLines } from './overpass.js'
 import { makeInsideBlock, clipPolylineToBlock } from './block-clip.js'
+import { roadRank, relativeTiers, tierDepth } from './road-tier.js'
 
 export const OSM_MIN_ZOOM = 12 // at/above this demZoom, roads come from full-detail OSM
 
 const STYLE = { motorway: { widthPx: 2.6 }, primary: { widthPx: 1.8 }, secondary: { widthPx: 1.1 } }
-// OSM highway value → our 3 weight classes (keeps ALL roads, just styles them)
-function roadClass(h = '') {
-  if (/^(motorway|trunk)(_link)?$/.test(h)) return 'motorway'
-  if (/^primary(_link)?$/.test(h)) return 'primary'
-  return 'secondary'
+// Relative tier (0 = most important class PRESENT in the patch) → weight class.
+function tierClass(tier) {
+  return tier === 0 ? 'motorway' : tier === 1 ? 'primary' : 'secondary'
 }
 
 export class RoadsLayer {
@@ -36,7 +35,7 @@ export class RoadsLayer {
     const osmThreshold = params.roadsDetail >= 3 ? 10 : params.roadsDetail >= 2 ? 11 : 12
     const useOsm = zoom >= osmThreshold
 
-    // gather rings as {coords:[lon,lat][], klass} from the chosen tier
+    // gather rings as {coords:[lon,lat][], rank} from the chosen tier
     let rings = null
     let osmOk = false
     if (useOsm) {
@@ -44,20 +43,26 @@ export class RoadsLayer {
       const feats = await fetchOverpassLines(bounds, 'roads', { detail: params.roadsDetail })
       this.loading = false
       if (id !== this._buildId || dem !== terrain.dem) return
-      if (feats) { rings = feats.map((f) => ({ coords: f.coords, klass: roadClass(f.kind) })); osmOk = true }
+      if (feats) { rings = feats.map((f) => ({ coords: f.coords, rank: roadRank(f.kind) })); osmOk = true }
     }
     if (!rings) { // Natural Earth tier (or OSM failed → fallback)
       const fc = await loadLayer('roads')
       if (id !== this._buildId || dem !== terrain.dem || !fc) return
       rings = []
-      const rankMax = params.roadsDetail >= 3 ? 5 : params.roadsDetail >= 2 ? 4 : 3
       for (const f of filterByZoom(clipToPatch(fc.features, bounds), zoom)) {
-        if ((f.properties.scalerank ?? 9) > rankMax) continue
         const rs = f.geometry.type === 'MultiLineString' ? f.geometry.coordinates : [f.geometry.coordinates]
-        for (const r of rs) rings.push({ coords: r, klass: f.properties.kind || 'secondary' })
+        for (const r of rs) rings.push({ coords: r, rank: f.properties.scalerank ?? 9 })
       }
     }
     this.usingOsm = osmOk
+
+    // Tiers are RELATIVE to whatever ranks are actually present in this patch:
+    // whatever the most important class present is becomes tier 0, so a valley
+    // with no motorway still renders its nationals at the heaviest weight
+    // instead of the patch coming back empty.
+    const tiers = relativeTiers(rings.map((r) => r.rank))
+    const depth = tierDepth(params.roadsDetail)
+    rings = rings.filter((r) => tiers.get(r.rank) < depth)
 
     const fp = terrain.blockFootprint(); const insideBlock = makeInsideBlock(fp)
     const sample = (x, z) => (terrain.sample ? terrain.sample(x, z) : 0)
@@ -69,7 +74,7 @@ export class RoadsLayer {
     for (const r of rings) {
       const pts = latlonToWorldPts(r.coords, dem, latLonToWorld)
       const runs = clipPolylineToBlock(pts, insideBlock, fp.regionOn ? 0.3 : 0.6)
-      if (runs.length) (byClass[r.klass] || byClass.secondary).push(...runs)
+      if (runs.length) byClass[tierClass(tiers.get(r.rank))].push(...runs)
     }
     for (const klass of Object.keys(byClass)) {
       if (!byClass[klass].length) continue

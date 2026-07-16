@@ -5,12 +5,16 @@ export const WAY_TAG = { roads: 'highway', water: 'waterway' }
 
 // Road detail notch → Overpass highway tag predicate. Full geometry fidelity is
 // always preserved — this only changes WHICH highway classes are queried.
-// 1 = major (motorway/trunk/primary), 2 = +drivable, 3 = every highway=* way.
+// Tiering (which classes actually render at a given notch) is RELATIVE and
+// happens client-side in road-tier.js, based on whatever classes are present
+// in the fetched patch — so the fetch itself must be generous enough to have
+// data to rank. Detail 1 and 2 therefore share one broad drivable-set filter
+// (an absolute server-side filter is what caused roads to render empty on
+// patches with no motorway); 3 = every highway=* way, unrestricted.
 export function roadHighwayFilter(detail = 1) {
   if (detail >= 3) return '["highway"]'
-  const major = 'motorway|trunk|primary'
-  const drivable = major + '|secondary|tertiary|residential|unclassified|service|living_street'
-  return `["highway"~"^(${detail >= 2 ? drivable : major})(_link)?$"]`
+  const drivable = 'motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service'
+  return `["highway"~"^(${drivable})(_link)?$"]`
 }
 
 // Overpass bbox order is (south,west,north,east) = (minLat,minLon,maxLat,maxLon)
@@ -67,17 +71,23 @@ export function parseOverpassAreas(json) {
   return out
 }
 
-export function bboxKey(bbox, kind, detail) {
+// `variant` is what distinguishes cache entries for the same bbox+kind — for
+// roads this is the Overpass filter STRING (not the raw detail notch), so
+// detail 1 and 2 (which now share a filter) collide onto the same cache
+// entry and toggling the notch reuses the cached response instead of
+// re-hitting rate-limited public Overpass.
+export function bboxKey(bbox, kind, variant) {
   const r = (n) => Math.round(n * 1000) / 1000
   const base = `${kind}:${r(bbox.minLat)},${r(bbox.minLon)},${r(bbox.maxLat)},${r(bbox.maxLon)}`
-  return kind === 'roads' && detail !== undefined ? `${base}:${detail}` : base
+  return kind === 'roads' && variant !== undefined ? `${base}:${variant}` : base
 }
 
 // cache by zone+kind(+detail), dedupe in-flight, min gap between network hits, null on fail
 const _cache = new Map()
 let _lastAt = 0
 export async function fetchOverpassLines(bbox, kind, { detail = 1, url = OVERPASS_URL, minInterval = 1200 } = {}) {
-  const key = bboxKey(bbox, kind, detail)
+  const variant = kind === 'roads' ? roadHighwayFilter(detail) : detail
+  const key = bboxKey(bbox, kind, variant)
   if (!_cache.has(key)) {
     const body = buildQuery(bbox, kind, detail)
     const job = (async () => {
