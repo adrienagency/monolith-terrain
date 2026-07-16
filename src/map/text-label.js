@@ -1,11 +1,26 @@
 import * as THREE from 'three'
 
-// A serif place label drawn to a transparent canvas with a contrasting HALO so
-// it stays legible over any map colour. `color` is the ink; `halo` is the
-// opposite tone (light halo around dark ink, and vice-versa in dark mode).
-const FONT = "Rosarivo, Georgia, 'Times New Roman', serif"
+// A place label drawn to a transparent canvas with a contrasting HALO so it
+// stays legible over any map colour. `color` is the ink; `halo` is the opposite
+// tone (light halo around dark ink, and vice-versa in dark mode). Uses the
+// site's sans face (Rosarivo, the serif, stays reserved for map titles).
+const FONT = "'Bricolage Grotesque', system-ui, sans-serif"
 
-export function makeLabelTexture(text, { size = 88, weight = 500, color = '#2e2820', halo = 'rgba(255,255,255,0.9)', track = 0.16 } = {}) {
+// Canvas silently falls back to a system face when the webfont isn't parsed yet,
+// which would render every label in the wrong typeface. Warm the exact weights
+// we draw with; fonts.load is a no-op once resolved, so calling it is cheap.
+let _fontReady = null
+export function labelFontReady() {
+  if (!_fontReady) {
+    _fontReady = Promise.all([
+      document.fonts?.load(`600 88px ${FONT}`),
+      document.fonts?.load(`700 88px ${FONT}`),
+    ]).catch(() => {})
+  }
+  return _fontReady
+}
+
+export function makeLabelTexture(text, { size = 88, weight = 600, color = '#2e2820', halo = 'rgba(255,255,255,0.9)', track = 0.12 } = {}) {
   const font = `${weight} ${size}px ${FONT}`
   const probe = document.createElement('canvas').getContext('2d')
   probe.font = font

@@ -3,7 +3,7 @@ import { latLonToWorld } from '../geo.js'
 import { TERRAIN_SIZE } from '../terrain.js'
 import { loadLayer } from './geo-data.js'
 import { pickPlaces } from './place-pick.js'
-import { makeLabelTexture, labelInk } from './text-label.js'
+import { makeLabelTexture, labelInk, labelFontReady } from './text-label.js'
 import { labelScale } from './place-scale.js'
 
 const HALF = TERRAIN_SIZE / 2
@@ -13,11 +13,20 @@ const HALF = TERRAIN_SIZE / 2
 // city's own GPS/terrain height keeps the name visually attached to its city
 // instead of hovering absurdly high over a distant peak.
 const CLEARANCE = 0.9
-// Screen-space label height for scale 1. With sizeAttenuation:false the sprite
-// scale is in CLIP units, not world units — 2.0 spans the whole viewport height —
-// so a readable ~16 px name on a ~900 px viewport needs a small value here.
-// (0.09 rendered names at roughly a sixth of the screen.)
-const BASE_H = 0.013
+// Screen-space label height for scale 1, in CLIP units (sizeAttenuation:false),
+// NOT world units. Careful: the on-screen size is NOT scale/2*viewport — Three's
+// sprite shader multiplies scale by -mvPosition.z to cancel the perspective
+// divide, so the real NDC size is projectionMatrix[0]*scale.x by
+// projectionMatrix[5]*scale.y. At this app's 30° fov that factor is 1/tan(15°)
+// ≈ 3.7, i.e. labels render ~3.7x bigger than the naive formula suggests — the
+// trap that made earlier passes ship names far larger than intended.
+// 0.007 puts a small town near 8.5 px cap-height and a capital near 14 px.
+const BASE_H = 0.007
+// Real screen size of a sprite quad, in CSS px — see the BASE_H note above.
+function spriteScreenSize(sprite, camera, vw, vh) {
+  const P = camera.projectionMatrix.elements
+  return { w: Math.abs(P[0] * sprite.scale.x) / 2 * vw, h: Math.abs(P[5] * sprite.scale.y) / 2 * vh }
+}
 // padding added around a label's projected screen rect before the overlap test —
 // keeps names from touching even when their boxes just barely clear each other
 const DECLUTTER_PAD_PX = 3
@@ -52,7 +61,7 @@ export class PlacesLayer {
     const id = ++this._buildId
     this._clear()
     if (!params.placesEnabled || !dem || params.source !== 'real') return
-    const rows = await loadLayer('places')
+    const [rows] = await Promise.all([loadLayer('places'), labelFontReady()])
     if (id !== this._buildId || dem !== terrain.dem || !Array.isArray(rows)) return
 
     const zoom = params.demZoom ?? 8
@@ -91,7 +100,7 @@ export class PlacesLayer {
 
       // upright billboard sprite — never occluded (depthTest:false) and never
       // shrinks away when zoomed out (sizeAttenuation:false, screen-space scale)
-      const { tex, aspect } = makeLabelTexture(p.name.toUpperCase(), { color: ink.color, halo, weight: p.cap ? 700 : 500 })
+      const { tex, aspect } = makeLabelTexture(p.name.toUpperCase(), { color: ink.color, halo, weight: p.cap ? 700 : 600 })
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }))
       sprite.material.sizeAttenuation = false
       sprite.scale.set(BASE_H * scale * aspect, BASE_H * scale, 1)
@@ -126,8 +135,9 @@ export class PlacesLayer {
       if (ndc.z > 1) { e.sprite.visible = false; e.dot.visible = false; e.leader.visible = false; continue }
       const cx = (ndc.x * 0.5 + 0.5) * vw
       const cy = (1 - (ndc.y * 0.5 + 0.5)) * vh
-      const w = (e.sprite.scale.x / 2) * vw + DECLUTTER_PAD_PX
-      const h = (e.sprite.scale.y / 2) * vh + DECLUTTER_PAD_PX
+      const s = spriteScreenSize(e.sprite, camera, vw, vh)
+      const w = s.w / 2 + DECLUTTER_PAD_PX
+      const h = s.h / 2 + DECLUTTER_PAD_PX
       const rect = { left: cx - w, right: cx + w, top: cy - h, bottom: cy + h }
       const overlaps = accepted.some((r) => rect.left < r.right && rect.right > r.left && rect.top < r.bottom && rect.bottom > r.top)
       const visible = !overlaps
