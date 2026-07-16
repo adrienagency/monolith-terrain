@@ -165,6 +165,9 @@ export class Terrain {
       uMatNoiseCut: { value: 0 }, // reveal threshold (higher = more of the map shows through)
       uMatNoiseSoft: { value: 0.2 }, // half-width of the smoothstep band → diffuse edges
       uMatNoiseScale: { value: 0.5 }, // patch frequency in world units
+      // "Au-dessus du niveau zéro": when on, the relief material paints only
+      // above sea level; below uSeaY the surface shows the hypsometric map colour.
+      uMatAboveZero: { value: 0 },
     }
     this.rebuildRamp(params)
     this.material.onBeforeCompile = (shader) => {
@@ -221,6 +224,7 @@ uniform float uMatNoiseOn;
 uniform float uMatNoiseCut;
 uniform float uMatNoiseSoft;
 uniform float uMatNoiseScale;
+uniform float uMatAboveZero;
 float mnHash(vec2 p){ p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
 float mnNoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(mnHash(i), mnHash(i+vec2(1.0,0.0)), f.x), mix(mnHash(i+vec2(0.0,1.0)), mnHash(i+vec2(1.0,1.0)), f.x), f.y); }
 uniform float uTint;
@@ -482,6 +486,14 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     float reveal = 1.0 - smoothstep(uMatNoiseCut - uMatNoiseSoft, uMatNoiseCut + uMatNoiseSoft, mn);
     effTint = mix(uTint, 1.0, reveal);
     paintShade = mix(fxShade, 1.0, reveal);
+  }
+  // "Au-dessus du niveau zéro": below sea level, force the map paint through
+  // regardless of the material noise reveal, so the relief material only shows
+  // above uSeaY.
+  if (uMatAboveZero > 0.5) {
+    float below = 1.0 - smoothstep(uSeaY - 0.05, uSeaY + 0.05, vWorldPos.y);
+    effTint = max(effTint, below);           // below sea → show the map paint
+    paintShade = mix(paintShade, 1.0, below);
   }
   diffuseColor.rgb = mix(diffuseColor.rgb, mapCol * paintShade, effTint);
 
@@ -1035,6 +1047,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       if (!this.glassMaterial) this._makeGlassMaterial()
       this.applyTerrainGlass(params)
       this.mapUniforms.uMatNoiseOn.value = 0
+      this.mapUniforms.uMatAboveZero.value = 0
       this.mesh.material = this.glassMaterial
       return
     }
@@ -1073,6 +1086,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       this._matZoom = params.demZoom
       this.mapUniforms.uTint.value = 0 // drop the hypsometric paint → pure material
       this.setMatNoise(params.terrainMatNoise ?? 0) // patchy 3D + holes
+      this.setMatAboveZero(params.terrainMatAboveZero)
     } else {
       // none — restore the topographic look
       m.map = null
@@ -1089,6 +1103,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       m.roughnessMap = null
       this.mapUniforms.uTint.value = params.mapTint ?? 1
       this.mapUniforms.uMatNoiseOn.value = 0 // no material noise on the plain map
+      this.mapUniforms.uMatAboveZero.value = 0
       // restore the procedural terrain roughness/bump the relief material replaced
       this.rebuildRoughness(params)
     }
@@ -1137,6 +1152,9 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     this.mapUniforms.uMatNoiseCut.value = v * 0.55 // more strength → more map shows through
     this.mapUniforms.uMatNoiseSoft.value = 0.12 + v * 0.16 // diffuse edge, softer at higher strength
   }
+  // "Au-dessus du niveau zéro": relief material only paints above sea level;
+  // below uSeaY the surface falls back to the hypsometric map colour.
+  setMatAboveZero(v) { this.mapUniforms.uMatAboveZero.value = v ? 1 : 0 }
   // drift the relief material's maps for "moving sand" (keeps the PBR intact —
   // it's the same textures, just scrolling). Called each frame from the loop.
   tickSurfaceMaterial(dt) {

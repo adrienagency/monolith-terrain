@@ -258,6 +258,7 @@ const params = {
   terrainMatScale: 1, // tiling scale for the opaque relief materials (repetition)
   terrainMatRoughness: 0.75, // seeded from the preset on select; live-tunable
   terrainMatNoise: 0, // procedural noise: patchy 3D lift + transparent holes
+  terrainMatAboveZero: false, // relief material paints only above sea level (uSeaY)
   terrainGlassFrost: 0.5, // glass roughness (frost) — blurry by default
   terrainGlassThickness: 8,
   terrainGlassTint: '#bfe4ff',
@@ -1997,6 +1998,11 @@ const shadersPanel = buildShadersPanel({
   setMatNoise: (v) => {
     params.terrainMatNoise = v
     terrain.setMatNoise(v)
+  },
+  getMatAboveZero: () => params.terrainMatAboveZero,
+  setMatAboveZero: (v) => {
+    params.terrainMatAboveZero = v
+    terrain.setMatAboveZero(v)
   },
   // live glass knobs (only shown when the relief material is Glass)
   glassControls: [

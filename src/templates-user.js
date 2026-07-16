@@ -38,7 +38,7 @@ export const TEMPLATE_KEYS = [
   'plinthGlassDiffusion', 'plinthGlassProjection', 'plinthGlassBump', 'plinthBump',
   'slabCorner', 'slabCornerSmoothing', 'groundInfo',
   // relief material
-  'terrainSurfaceMat', 'terrainSurfaceBump', 'terrainMatScale', 'terrainMatRoughness', 'terrainMatNoise',
+  'terrainSurfaceMat', 'terrainSurfaceBump', 'terrainMatScale', 'terrainMatRoughness', 'terrainMatNoise', 'terrainMatAboveZero',
   'terrainGlassFrost', 'terrainGlassThickness', 'terrainGlassTint', 'terrainGlassClarity', 'terrainGlassReflection',
   // liquid metal
   'liquidMetal', 'lmMetalness', 'lmRoughness', 'lmReflection', 'lmSpeed',
