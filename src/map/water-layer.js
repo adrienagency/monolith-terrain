@@ -8,10 +8,13 @@ import { makeInsideBlock, clipPolylineToBlock } from './block-clip.js'
 import { OSM_MIN_ZOOM } from './roads-layer.js'
 import { riverWidthPx } from './river-width.js'
 
-// Filled water-area mesh: triangulate the ring's XZ contour, drape each vertex on
+// Filled water-body mesh: triangulate the ring's XZ contour, drape each vertex on
 // the relief, drop triangles whose centroid falls outside the block footprint.
-function buildWaterAreaGeometry(ring, dem, sample, insideBlock) {
-  const pts = latlonToWorldPts(ring, dem, latLonToWorld)
+// Shared by the OSM water-area fill (rivers/lakes at OSM zoom) and the Natural
+// Earth lakes fill (waterFill option) — one triangulate/drape implementation.
+function _buildFilledRing(ringLatLon, dem, sample, insideBlock) {
+  if (ringLatLon.length < 4) return null
+  const pts = latlonToWorldPts(ringLatLon, dem, latLonToWorld)
   if (pts.length < 3) return null
   const contour = pts.map((p) => new THREE.Vector2(p.x, p.z))
   const tris = THREE.ShapeUtils.triangulateShape(contour, [])
@@ -35,6 +38,19 @@ function buildWaterAreaGeometry(ring, dem, sample, insideBlock) {
   geo.setIndex(index)
   geo.computeVertexNormals()
   return geo
+}
+
+// Shared fill-material spec for draped water-body meshes (OSM areas + NE lakes).
+function _fillMaterial(ink, opacity) {
+  return new THREE.MeshBasicMaterial({
+    color: new THREE.Color(ink),
+    transparent: true,
+    opacity,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+  })
 }
 
 function ringsOf(g) {
@@ -137,24 +153,33 @@ export class WaterLayer {
       this.group.add(obj)
     }
 
-    // Filled water AREAS (riverbanks/lakes): real varying river width, draped on
-    // the relief, just under the waterway lines/streams.
-    if (areaRings && areaRings.length) {
-      const areaMaterial = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(ink),
-        transparent: true,
-        opacity: params.waterOpacity ?? 0.9,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-      })
-      for (const ring of areaRings) {
-        const geo = buildWaterAreaGeometry(ring, dem, sample, insideBlock)
-        if (!geo) continue
-        const mesh = new THREE.Mesh(geo, areaMaterial)
-        mesh.renderOrder = 17
-        this.group.add(mesh)
+    // Lakes & seas fill option: filled draped polygons instead of outline-only.
+    // Covers both the OSM water AREAs (riverbanks/lake bodies/seas at OSM zoom,
+    // real varying width) and the Natural Earth `lakes` polygons (always
+    // available, coarser). Outlines above still render either way, for
+    // definition; when the option is off, water renders exactly as before
+    // (outline-only).
+    if (params.waterFill) {
+      const fillOpacity = params.waterOpacity ?? 0.9
+      if (areaRings && areaRings.length) {
+        const areaMaterial = _fillMaterial(ink, fillOpacity)
+        for (const ring of areaRings) {
+          const geo = _buildFilledRing(ring, dem, sample, insideBlock)
+          if (!geo) continue
+          const mesh = new THREE.Mesh(geo, areaMaterial)
+          mesh.renderOrder = 17
+          this.group.add(mesh)
+        }
+      }
+      if (lakeRings.length) {
+        const lakeMaterial = _fillMaterial(ink, fillOpacity)
+        for (const ring of lakeRings) {
+          const geo = _buildFilledRing(ring, dem, sample, insideBlock)
+          if (!geo) continue
+          const mesh = new THREE.Mesh(geo, lakeMaterial)
+          mesh.renderOrder = 17
+          this.group.add(mesh)
+        }
       }
     }
   }

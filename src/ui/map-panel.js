@@ -16,6 +16,7 @@ export function buildMapPanel(ctx) {
     color({ label: 'Roads colour', get: () => params.roadColor, set: (v) => { params.roadColor = v; ctx.rebuildMapLayers() } }),
     toggle({ label: 'Rivers & water', get: () => params.waterEnabled, set: (v) => { params.waterEnabled = v; ctx.rebuildMapLayers() } }),
     slider({ label: 'Water opacity', min: 0, max: 1, step: 0.02, get: () => params.waterOpacity, set: (v) => { params.waterOpacity = v; ctx.mapLayers.setOpacity('water', v) } }),
+    toggle({ label: 'Lakes & seas fill', get: () => params.waterFill, set: (v) => { params.waterFill = v; ctx.rebuildMapLayers() } }),
     toggle({ label: 'Places', get: () => params.placesEnabled, set: (v) => { params.placesEnabled = v; ctx.rebuildMapLayers() } }),
     slider({ label: 'Places density', min: 0.4, max: 2, step: 0.1, get: () => params.placesDensity, set: (v) => { params.placesDensity = v; ctx.rebuildMapLayers() } }),
     slider({ label: 'Places size', min: 0.5, max: 2, step: 0.05, get: () => params.placesSize, set: (v) => { params.placesSize = v; ctx.rebuildMapLayers() } }),
