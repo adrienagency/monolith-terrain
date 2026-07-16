@@ -12,9 +12,9 @@ import { mkdir, writeFile } from 'node:fs/promises'
 const BASE = 'https://raw.githubusercontent.com/martynafford/natural-earth-geojson/master'
 const OUT = new URL('../public/data/map/', import.meta.url)
 
-// layer → [resolution, theme, NE file, keep-props builder]. lakes/coastline
-// use 50m (coarse world) to stay well under the size budget; roads, places,
-// and rivers (for density + the strokeweig width attribute) use 10m.
+// layer → [resolution, theme, NE file, keep-props builder]. lakes, coastline,
+// rivers, and roads all use 10m (fine) source for far-view precision; places
+// also uses 10m.
 const round = (n) => Math.round(n * 1e4) / 1e4
 const round5 = (n) => Math.round(n * 1e5) / 1e5
 
@@ -120,15 +120,13 @@ const scalerankOf = (p) => p.scalerank ?? p.SCALERANK ?? 10
 async function main() {
   await mkdir(OUT, { recursive: true })
 
-  // lakes/coastline use 50m (coarse world) source: the 10m variants are
-  // 5-9 MB even after trimming (dense per-vertex geometry dwarfs the
-  // property savings), blowing well past the size budget. Rivers and roads
-  // use 10m below for density / a usable network, per the brief.
-  // Douglas-Peucker simplification (epsilon in degrees, tuned per layer
-  // below) further bounds payload size without dropping features.
-  const RIVERS_EPS = 0.01
-  const LAKES_EPS = 0.008
-  const COAST_EPS = 0.09
+  // lakes/coastline/rivers all use 10m (fine) source with a near-lossless
+  // Douglas-Peucker epsilon, matching the roads treatment below, so far-view
+  // water shapes stay faithful to the source geometry instead of looking
+  // blocky. This trades a larger payload for fidelity, per task 4.
+  const RIVERS_EPS = 0.0005
+  const LAKES_EPS = 0.0005
+  const COAST_EPS = 0.0005
   // Roads use a near-lossless epsilon and 5-decimal (~1.1 m) quantization so
   // far-view road shapes stay faithful to the source geometry; this trades a
   // larger payload (~5-8 MB) for fidelity, per the fix in task 6.
@@ -156,13 +154,13 @@ async function main() {
     console.warn('NE 10m rivers unavailable, falling back to 50m centerlines:', e.message)
     riversRaw = await ne('50m', 'physical', 'ne_50m_rivers_lake_centerlines')
   }
-  const rivers = trimFeatures(riversRaw, riverKeep, RIVERS_EPS)
+  const rivers = trimFeatures(riversRaw, riverKeep, RIVERS_EPS, round5)
   await writeFile(new URL('rivers.json', OUT), JSON.stringify(rivers))
 
-  const lakes = trimFeatures(await ne('50m', 'physical', 'ne_50m_lakes'), (p) => ({ name: nameOf(p), min_zoom: numZoom(p), scalerank: scalerankOf(p), kind: 'lake' }), LAKES_EPS)
+  const lakes = trimFeatures(await ne('10m', 'physical', 'ne_10m_lakes'), (p) => ({ name: nameOf(p), min_zoom: numZoom(p), scalerank: scalerankOf(p), kind: 'lake' }), LAKES_EPS, round5)
   await writeFile(new URL('lakes.json', OUT), JSON.stringify(lakes))
 
-  const coast = trimFeatures(await ne('50m', 'physical', 'ne_50m_coastline'), (p) => ({ name: '', min_zoom: numZoom(p), scalerank: scalerankOf(p), kind: 'coast' }), COAST_EPS)
+  const coast = trimFeatures(await ne('10m', 'physical', 'ne_10m_coastline'), (p) => ({ name: '', min_zoom: numZoom(p), scalerank: scalerankOf(p), kind: 'coast' }), COAST_EPS, round5)
   await writeFile(new URL('coastline.json', OUT), JSON.stringify(coast))
 
   // roads: map NE `type` to our 3 classes so the renderer styles by weight
