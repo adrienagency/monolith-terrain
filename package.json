@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "build:mapdata": "node scripts/build-mapdata.mjs",
     "build:places": "node scripts/build-places.mjs",
-    "test": "node --test test/geo.test.js test/gpx.test.js test/palette.test.js test/modes.test.js test/landmarks.test.js test/drag.test.js test/plinth.test.js test/camera-poses.test.js test/autofocus.test.js test/templates.test.js test/accordion.test.js test/ground-info.test.js test/lake.test.js test/region-mask.test.js test/region-plate.test.js test/zoom-detail.test.js test/coast-mask.test.js test/geo-data.test.js test/draped-line.test.js test/place-pick.test.js test/block-clip.test.js test/overpass.test.js test/places-minzoom.test.js"
+    "test": "node --test test/geo.test.js test/gpx.test.js test/palette.test.js test/modes.test.js test/landmarks.test.js test/drag.test.js test/plinth.test.js test/camera-poses.test.js test/autofocus.test.js test/templates.test.js test/accordion.test.js test/ground-info.test.js test/lake.test.js test/region-mask.test.js test/region-plate.test.js test/zoom-detail.test.js test/coast-mask.test.js test/geo-data.test.js test/draped-line.test.js test/place-pick.test.js test/block-clip.test.js test/overpass.test.js test/places-minzoom.test.js test/history.test.js"
   },
   "dependencies": {
     "mediabunny": "^1.50.8",
