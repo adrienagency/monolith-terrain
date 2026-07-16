@@ -85,6 +85,38 @@ test('tierDepth: for a fixed notch, depth is monotonically non-decreasing as zoo
   }
 })
 
+// --- task 18: roadRank against Overture's `class` vocabulary (not OSM's) ---
+// roadRank was written for OSM highway=* values. Overture transportation's
+// `class` is documented as the same vocabulary, but the task explicitly says
+// CHECK, don't assume — so this locks in the actual measured behaviour
+// against the real class histogram from the task-18 Chamonix-valley spike
+// (service 1104, path 880, footway 467, track 465, residential 450,
+// unclassified 232, tertiary 151, unknown 95, steps 86, secondary 83, trunk
+// 59, pedestrian 34, living_street 10, cycleway 10) plus the classes that
+// appear region-wide (motorway, primary).
+test('roadRank: every class value observed in the Overture region-wide/Chamonix histograms maps to a defined rank', () => {
+  const observed = {
+    motorway: 0, trunk: 0, primary: 1, secondary: 2, tertiary: 3,
+    unclassified: 4, residential: 4, living_street: 4, service: 5,
+    track: 6, path: 6, footway: 6, cycleway: 6, steps: 6,
+  }
+  for (const [cls, expected] of Object.entries(observed)) assert.equal(roadRank(cls), expected, cls)
+})
+
+test("roadRank: Overture's own catch-all `unknown` (not an OSM highway=* value) falls to the same default bucket (7) as any unrecognized class — conservative, unchanged from OSM behaviour", () => {
+  assert.equal(roadRank('unknown'), 7)
+})
+
+test('roadRank: `pedestrian` (present in the measured histogram, 34 segments) falls to the default bucket (7) rather than joining footway/track (6) — pre-existing OSM-vocabulary gap, NOT introduced by the Overture switch', () => {
+  // Documents a real finding from checking (not assuming) the mapping: OSM
+  // highway=pedestrian already fell through roadRank's default before this
+  // task touched anything, since the /^(track|path|footway|cycleway|
+  // bridleway|steps)$/ regex never included it. Overture's `class=pedestrian`
+  // hits the exact same code path and gets the exact same (pre-existing)
+  // rank — behaviour is unchanged, just now exercised by real Overture data.
+  assert.equal(roadRank('pedestrian'), 7)
+})
+
 test('tierDepth: at any given zoom, higher notches are never MORE restrictive than lower ones', () => {
   for (const zoom of [8, 9, 10, 11, 12, 13, 16]) {
     const d1 = tierDepth(1, zoom), d2 = tierDepth(2, zoom), d3 = tierDepth(3, zoom)

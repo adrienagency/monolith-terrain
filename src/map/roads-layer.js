@@ -6,6 +6,8 @@ import { buildLineSegments } from './line-segments.js'
 import { fetchOverpassLines } from './overpass.js'
 import { makeInsideBlock, clipPolylineToBlock } from './block-clip.js'
 import { roadRank, relativeTiers, tierDepth } from './road-tier.js'
+import { REGION as ROAD_REGION, ROAD_LOD_LEVELS, inRegion, lodForZoom, tileZoomForLod } from './tile-index.js'
+import { loadRoadTiles, loadRoadTileManifest, hasTilesForLod } from './tile-loader.js'
 
 // At/above this demZoom, roads AND water come from full-detail OSM (shared
 // with water-layer.js, which imports this same constant).
@@ -75,20 +77,53 @@ export class RoadsLayer {
     // OSM activation is one shared threshold for every notch (see the
     // OSM_MIN_ZOOM comment above for why) — which classes actually render
     // is decided client-side and zoom-aware by tierDepth() below, not by
-    // gating the fetch per-notch.
+    // gating the fetch per-notch. This now gates ONLY the live-Overpass
+    // fallback below; the tiled Overture path runs at ANY zoom (see below).
     const useOsm = zoom >= OSM_MIN_ZOOM
 
     // gather rings as {coords:[lon,lat][], rank} from the chosen tier
     let rings = null
+    // true whenever roads come from Overture tiles OR live Overpass — both
+    // are ODbL/OSM-derived and need the same "© OpenStreetMap contributors"
+    // credit (refreshOsmCredit() in main.js reads this flag).
     let osmOk = false
-    if (useOsm) {
+
+    // Tiled Overture roads: in-region + built for this LOD -> this REPLACES
+    // live Overpass for in-region patches, at ANY zoom (not gated by
+    // OSM_MIN_ZOOM), mirroring exactly how WaterLayer's lake tiles activate
+    // purely on inRegion + hasTilesForLod. This is the whole point of task
+    // 18: Overpass's own docs list this app's use (non-mapper-facing,
+    // backend-style traffic on the public instance) as unacceptable, and a
+    // z12 (24 km) bbox over central Paris can return 351,414 ways / 238 MB
+    // with a 200 OK — the "fetch fails -> Natural Earth" net never fires and
+    // the tab chokes. See build-road-tiles.mjs for how the tiles are built
+    // and the task-18 report for the measured numbers.
+    if (inRegion(bounds, ROAD_REGION)) {
+      const manifest = await loadRoadTileManifest()
+      const lod = lodForZoom(zoom, ROAD_LOD_LEVELS)
+      if (hasTilesForLod(manifest, lod)) {
+        const tileFC = await loadRoadTiles(bounds, tileZoomForLod(lod, ROAD_LOD_LEVELS))
+        if (id !== this._buildId || dem !== terrain.dem) return
+        rings = []
+        for (const f of clipToPatch(tileFC.features, bounds)) {
+          const rank = roadRank(f.properties?.class)
+          const rs = f.geometry.type === 'MultiLineString' ? f.geometry.coordinates : [f.geometry.coordinates]
+          for (const r of rs) rings.push({ coords: r, rank })
+        }
+        osmOk = true
+      }
+    }
+    // Live Overpass: fallback-of-a-fallback now — only reached for an
+    // out-of-region patch (or a zoom whose LOD hasn't been built), and only
+    // above OSM_MIN_ZOOM exactly as before.
+    if (!rings && useOsm) {
       this.loading = true
       const feats = await fetchOverpassLines(bounds, 'roads', { detail: params.roadsDetail })
       this.loading = false
       if (id !== this._buildId || dem !== terrain.dem) return
       if (feats) { rings = feats.map((f) => ({ coords: f.coords, rank: roadRank(f.kind) })); osmOk = true }
     }
-    if (!rings) { // Natural Earth tier (or OSM failed → fallback)
+    if (!rings) { // Natural Earth tier (or tiles/OSM unavailable → fallback), unchanged
       const fc = await loadLayer('roads')
       if (id !== this._buildId || dem !== terrain.dem || !fc) return
       rings = []
