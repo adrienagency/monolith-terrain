@@ -184,16 +184,44 @@ export class GpxLayer {
     }
     this.track.world = world
 
+    const lineColor = this.params.gpxColor || this.params.hudAccent
+    const width = this.params.gpxWidth ?? 3
+
+    // auto-contrast casing: a wider, dark/light-mode-aware line drawn under
+    // the track (same idea as the map road casing) so the route stays
+    // legible over any terrain tone. Lower renderOrder + depthWrite:false
+    // keeps it from fighting the main line or the terrain depth buffer.
+    if (this.params.gpxAutoContrast) {
+      const casingGeo = new LineGeometry()
+      casingGeo.setPositions(pts)
+      const casingColor = this.params.darkMode ? 'rgba(10,12,15,0.7)' : 'rgba(252,250,246,0.85)'
+      this.casingMat = new LineMaterial({
+        color: new THREE.Color(casingColor),
+        linewidth: width + 2.5,
+        transparent: true,
+        depthTest: true,
+        depthWrite: false,
+        worldUnits: false,
+        alphaToCoverage: false,
+      })
+      this.casingMat.resolution.set(window.innerWidth, window.innerHeight)
+      this.casingLine = new Line2(casingGeo, this.casingMat)
+      this.casingLine.computeLineDistances()
+      this.casingLine.renderOrder = 5
+      this.group.add(this.casingLine)
+    }
+
     const geo = new LineGeometry()
     geo.setPositions(pts)
     this.lineMat = new LineMaterial({
-      color: new THREE.Color(this.params.hudAccent),
-      linewidth: 3,
+      color: new THREE.Color(lineColor),
+      linewidth: width,
       alphaToCoverage: false,
     })
     this.lineMat.resolution.set(window.innerWidth, window.innerHeight)
     this.line = new Line2(geo, this.lineMat)
     this.line.computeLineDistances()
+    this.line.renderOrder = 6
     this.group.add(this.line)
 
     const eles = this._elevations()
@@ -396,11 +424,25 @@ export class GpxLayer {
 
   onResize(w, h) {
     this.lineMat?.resolution.set(w, h)
+    this.casingMat?.resolution.set(w, h)
   }
 
   setColor(color) {
-    this.lineMat?.color.set(color)
-    this.cursor.material.color.set(color)
+    const c = color || this.params.hudAccent
+    this.lineMat?.color.set(c)
+    this.cursor.material.color.set(c)
+  }
+
+  setWidth(v) {
+    if (this.lineMat) this.lineMat.linewidth = v
+    if (this.casingMat) this.casingMat.linewidth = v + 2.5
+  }
+
+  // rebuilds the line so the casing can be added/removed (its geometry is
+  // only constructed when the flag is on, see rebuild()).
+  setAutoContrast(v) {
+    this.params.gpxAutoContrast = v
+    this.rebuild()
   }
 
   setVisible(v) {
@@ -415,6 +457,13 @@ export class GpxLayer {
       this.line.geometry.dispose()
       this.lineMat.dispose()
       this.line = null
+    }
+    if (this.casingLine) {
+      this.group.remove(this.casingLine)
+      this.casingLine.geometry.dispose()
+      this.casingMat.dispose()
+      this.casingLine = null
+      this.casingMat = null
     }
     for (const s of [this.startSprite, this.endSprite, ...(this.waypoints || [])]) {
       if (s) {

@@ -61,6 +61,7 @@ import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
 import { buildTemplatesPanel } from './ui/templates-panel.js'
 import { buildCreatePanel } from './ui/create-panel.js'
 import { buildCameraPanel } from './ui/camera-panel.js'
+import { buildRoutePanel } from './ui/route-panel.js'
 import { buildExplorePanel } from './ui/explore-panel.js'
 import { buildScanPanel } from './ui/scan-panel.js'
 import { buildShadersPanel } from './ui/shaders-panel.js'
@@ -232,6 +233,19 @@ const params = {
   // gpx
   gpxVisible: true,
   gpxAltitude: 2.2,
+  gpxWidth: 3,
+  gpxColor: '',
+  gpxAutoContrast: true,
+  // reserved for later Parcours tasks (gradient / glow / shimmer / points / playback)
+  gpxGradient: false,
+  gpxGradientMode: 'elevation',
+  gpxGlow: false,
+  gpxShimmer: false,
+  gpxPoints: true,
+  gpxStart: true,
+  gpxEnd: true,
+  gpxAltReadout: true,
+  gpxSlopeReadout: false,
 
   // ocean (real-world bathymetry read)
   oceanShallow: '#dce8ec',
@@ -1597,6 +1611,7 @@ function applyUserTemplate(tmpl) {
   bgRefreshFn() // resync the Background HDRI-sky highlight to the applied look
   refreshAll()
   rebuildMapLayers() // re-derive roads/water/places for the current location under the restored look
+  gpxLayer.rebuild() // re-drape with the restored line width/colour/casing
   // A history.record() taken right here re-captures EXACTLY what was just
   // applied (captureLook(params) after the assignment above), so it dedups
   // cleanly against the snapshot undo()/redo() just pushed through this same
@@ -2354,6 +2369,14 @@ const cameraPanel = buildCameraPanel({
   },
 })
 
+// Route panel — left dock, docked directly below Camera (Explore, Scan,
+// Camera, Route). Exposes the loaded GPX track: load button + line styling.
+const routePanel = buildRoutePanel({
+  params,
+  gpx: gpxLayer,
+  loadGpx: () => gpxFileInput.click(),
+})
+
 // the exclusive per-column accordion now lives in the Panel shell (setCollapsed
 // folds dock neighbours), so expanding any panel collapses the others in its
 // column. Start with only Create/Explore open (Templates docks above Create
@@ -2363,6 +2386,7 @@ shadersPanel.setCollapsed(true)
 cameraPanel.setCollapsed(true)
 mapPanel.setCollapsed(true)
 scanPanel.setCollapsed(true)
+routePanel.setCollapsed(true)
 
 // adaptive quality — built once the composer, panels and mode machine exist
 // so tier changes can announce, re-sync the Camera panel and stay quiet in

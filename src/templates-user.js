@@ -12,7 +12,10 @@ const VERSION = 1
 
 // The look whitelist — every param a template restores. Deliberately EXCLUDES
 // demLat/demLon/demZoom/demLocation/source (location), camera pose, regionMode,
-// GPX, and per-zoom exaggeration, so a template never moves or reshapes the view.
+// the loaded GPX track itself (path/visibility/altitude), and per-zoom
+// exaggeration, so a template never moves or reshapes the view. GPX *styling*
+// (width/colour/casing/gradient/glow/…) is a look param like roadColor and
+// IS included, so a template restyles whatever track happens to be loaded.
 export const TEMPLATE_KEYS = [
   // colours / ramp / oceans / theme
   'rampStops', 'oceanShallow', 'oceanMid', 'oceanDeep', 'darkMode',
@@ -47,6 +50,9 @@ export const TEMPLATE_KEYS = [
   // clouds
   'cloudsEnabled', 'cloudOpacity', 'cloudAltitude', 'cloudDrift', 'cloudScale', 'cloudCoverage',
   'cloudBillow', 'cloudBrightness', 'cloudAltSpread', 'cloudDriftVar', 'cloudContrast', 'cloudSSS',
+  // Route (GPX) styling — not the track itself, see note above
+  'gpxWidth', 'gpxColor', 'gpxAutoContrast', 'gpxGradient', 'gpxGradientMode', 'gpxGlow', 'gpxShimmer',
+  'gpxPoints', 'gpxStart', 'gpxEnd', 'gpxAltReadout', 'gpxSlopeReadout',
 ]
 
 const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)))
