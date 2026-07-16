@@ -182,12 +182,26 @@ export class DroneCam {
     this.onDone = null
 
     // ---- rig tuning -------------------------------------------------------
-    // tuned to the ~56-unit terrain footprint; heights are exaggerated
-    // metres. arm/lift are roughly 2x the old chase-cam's, per the brief's
-    // explicit "plus loin" ask — standing farther back is itself the primary
-    // anti-nausea lever (a wiggle subtends a smaller screen angle).
-    this.arm = 12 // fixed traveling distance behind the spine (world units)
-    this.lift = 7 // fixed height above the spine's own (already-smoothed) elevation
+    // Tuned to the ~56-unit terrain footprint; heights are exaggerated metres.
+    //
+    // Standoff is the single most load-bearing number in this file, because it
+    // resolves what looks like a contradiction in the brief — "ne quasiment pas
+    // tourner" AND "on doit toujours voir le point d'avancement". A rate-limited
+    // camera cannot do both up close: capped at a few deg/s it simply can't
+    // catch a subject that swings fast, so the point overshoots the frame.
+    // Standing farther back shrinks the angle the same world movement subtends,
+    // which fixes BOTH at once. Measured on a 12-hairpin climb (% of frames with
+    // the head inside the dead-zone box / peak yaw):
+    //     arm 12, lift  7 -> 64.0% / 8.3 deg/s   (too close: drifts out constantly)
+    //     arm 18, lift 10 -> 83.8% / 7.9
+    //     arm 26, lift 14 -> 93.9% / 6.7
+    //     arm 36, lift 18 -> 96.3% / 3.2         <- chosen
+    //     arm 48, lift 24 -> 94.7% / 0.4         (starts regressing again)
+    // Hence the user's own instinct — "la caméra doit être plus loin" — was the
+    // fix, not a preference. Retune these two together, and re-measure both
+    // numbers: pushing one without the other trades one requirement for the other.
+    this.arm = 36 // fixed traveling distance behind the spine (world units)
+    this.lift = 18 // fixed height above the spine's own (already-smoothed) elevation
     this.clearance = 2.6 // minimum gap kept over the ground / ridges
     // hard caps on how fast the rig is allowed to turn — THIS (not the spine
     // smoothing alone) is the actual nausea guarantee: even a pathological
