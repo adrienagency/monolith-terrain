@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildQuery, parseOverpass, bboxKey, roadHighwayFilter } from '../src/map/overpass.js'
+import { buildQuery, parseOverpass, bboxKey, roadHighwayFilter, buildAreaQuery, parseOverpassAreas } from '../src/map/overpass.js'
 
 const bbox = { minLat: 45.8, minLon: 6.1, maxLat: 45.95, maxLon: 6.3 }
 
@@ -37,4 +37,40 @@ test('parseOverpass keeps ALL vertices, maps tags', () => {
 
 test('bboxKey rounds to 3 decimals', () => {
   assert.equal(bboxKey({ minLat: 45.80001, minLon: 6.1, maxLat: 45.95, maxLon: 6.3 }, 'roads'), 'roads:45.8,6.1,45.95,6.3')
+})
+
+test('buildAreaQuery: well-formed water-area query with south,west,north,east bbox', () => {
+  const q = buildAreaQuery(bbox)
+  assert.match(q, /way\["natural"="water"\]\(45\.8,6\.1,45\.95,6\.3\);/)
+  assert.match(q, /way\["waterway"="riverbank"\]\(45\.8,6\.1,45\.95,6\.3\);/)
+  assert.match(q, /relation\["natural"="water"\]\(45\.8,6\.1,45\.95,6\.3\);/)
+  assert.match(q, /out geom;/)
+})
+
+test('parseOverpassAreas: closed way -> one ring', () => {
+  const json = { elements: [
+    { type: 'way', geometry: [ { lat: 0, lon: 0 }, { lat: 0, lon: 1 }, { lat: 1, lon: 1 }, { lat: 1, lon: 0 }, { lat: 0, lon: 0 } ] },
+  ] }
+  const areas = parseOverpassAreas(json)
+  assert.equal(areas.length, 1)
+  assert.deepEqual(areas[0].ring, [ [0, 0], [1, 0], [1, 1], [0, 1], [0, 0] ])
+})
+
+test('parseOverpassAreas: relation contributes one ring per outer member', () => {
+  const json = { elements: [
+    { type: 'relation', members: [
+      { role: 'outer', geometry: [ { lat: 0, lon: 0 }, { lat: 0, lon: 1 }, { lat: 1, lon: 1 }, { lat: 1, lon: 0 } ] },
+      { role: 'outer', geometry: [ { lat: 10, lon: 10 }, { lat: 10, lon: 11 }, { lat: 11, lon: 11 }, { lat: 11, lon: 10 } ] },
+      { role: 'inner', geometry: [ { lat: 5, lon: 5 }, { lat: 5, lon: 6 }, { lat: 6, lon: 6 }, { lat: 6, lon: 5 } ] },
+    ] },
+  ] }
+  const areas = parseOverpassAreas(json)
+  assert.equal(areas.length, 2)
+})
+
+test('parseOverpassAreas: skips a 3-point or open way', () => {
+  const openWay = { type: 'way', geometry: [ { lat: 0, lon: 0 }, { lat: 0, lon: 1 }, { lat: 1, lon: 1 }, { lat: 1, lon: 0.5 } ] }
+  const shortWay = { type: 'way', geometry: [ { lat: 0, lon: 0 }, { lat: 0, lon: 1 }, { lat: 1, lon: 1 } ] }
+  assert.equal(parseOverpassAreas({ elements: [ openWay ] }).length, 0)
+  assert.equal(parseOverpassAreas({ elements: [ shortWay ] }).length, 0)
 })

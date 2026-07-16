@@ -34,6 +34,39 @@ export function parseOverpass(json, kind) {
   return out
 }
 
+// Water AREAS (riverbanks/lakes) — polygons, not lines. Overpass bbox order
+// matches buildQuery: (south,west,north,east).
+export function buildAreaQuery(bbox) {
+  const b = `${bbox.minLat},${bbox.minLon},${bbox.maxLat},${bbox.maxLon}`
+  return `[out:json][timeout:25];(way["natural"="water"](${b});way["waterway"="riverbank"](${b});relation["natural"="water"](${b}););out geom;`
+}
+
+function closedRing(geometry) {
+  if (!Array.isArray(geometry) || geometry.length < 4) return null
+  const first = geometry[0], last = geometry[geometry.length - 1]
+  if (first.lat !== last.lat || first.lon !== last.lon) return null
+  return geometry.map((g) => [g.lon, g.lat])
+}
+
+// `out geom` gives ways a `geometry:[{lat,lon},…]` and relations `members:[{role,geometry},…]`.
+// A way is one ring if closed. A relation contributes one ring per `outer` member.
+// Holes/inner roles are ignored for v1.
+export function parseOverpassAreas(json) {
+  const out = []
+  for (const e of json?.elements || []) {
+    if (e.type === 'way') {
+      const ring = closedRing(e.geometry)
+      if (ring) out.push({ ring })
+    } else if (e.type === 'relation' && Array.isArray(e.members)) {
+      for (const m of e.members) {
+        if (m.role !== 'outer' || !Array.isArray(m.geometry) || m.geometry.length < 4) continue
+        out.push({ ring: m.geometry.map((g) => [g.lon, g.lat]) })
+      }
+    }
+  }
+  return out
+}
+
 export function bboxKey(bbox, kind, detail) {
   const r = (n) => Math.round(n * 1000) / 1000
   const base = `${kind}:${r(bbox.minLat)},${r(bbox.minLon)},${r(bbox.maxLat)},${r(bbox.maxLon)}`
@@ -54,6 +87,30 @@ export async function fetchOverpassLines(bbox, kind, { detail = 0, url = OVERPAS
       const r = await fetch(url, { method: 'POST', body, headers: { 'Content-Type': 'text/plain' } })
       if (!r.ok) throw new Error(`overpass ${r.status}`)
       return parseOverpass(await r.json(), kind)
+    })()
+    _cache.set(key, job)
+    job.catch(() => _cache.delete(key))
+  }
+  try { return await _cache.get(key) } catch { return null }
+}
+
+function areaBboxKey(bbox) {
+  const r = (n) => Math.round(n * 1000) / 1000
+  return `areas:${r(bbox.minLat)},${r(bbox.minLon)},${r(bbox.maxLat)},${r(bbox.maxLon)}`
+}
+
+// Same cache/dedupe/throttle contract as fetchOverpassLines, but for water AREAS.
+export async function fetchOverpassAreas(bbox, { url = OVERPASS_URL, minInterval = 1200 } = {}) {
+  const key = areaBboxKey(bbox)
+  if (!_cache.has(key)) {
+    const body = buildAreaQuery(bbox)
+    const job = (async () => {
+      const wait = Math.max(0, _lastAt + minInterval - Date.now())
+      if (wait) await new Promise((r) => setTimeout(r, wait))
+      _lastAt = Date.now()
+      const r = await fetch(url, { method: 'POST', body, headers: { 'Content-Type': 'text/plain' } })
+      if (!r.ok) throw new Error(`overpass ${r.status}`)
+      return parseOverpassAreas(await r.json())
     })()
     _cache.set(key, job)
     job.catch(() => _cache.delete(key))

@@ -3,10 +3,39 @@ import { latLonToWorld } from '../geo.js'
 import { loadLayer, patchBounds, clipToPatch, filterByZoom } from './geo-data.js'
 import { latlonToWorldPts } from './draped-line.js'
 import { buildLineSegments } from './line-segments.js'
-import { fetchOverpassLines } from './overpass.js'
+import { fetchOverpassLines, fetchOverpassAreas } from './overpass.js'
 import { makeInsideBlock, clipPolylineToBlock } from './block-clip.js'
 import { OSM_MIN_ZOOM } from './roads-layer.js'
 import { riverWidthPx } from './river-width.js'
+
+// Filled water-area mesh: triangulate the ring's XZ contour, drape each vertex on
+// the relief, drop triangles whose centroid falls outside the block footprint.
+function buildWaterAreaGeometry(ring, dem, sample, insideBlock) {
+  const pts = latlonToWorldPts(ring, dem, latLonToWorld)
+  if (pts.length < 3) return null
+  const contour = pts.map((p) => new THREE.Vector2(p.x, p.z))
+  const tris = THREE.ShapeUtils.triangulateShape(contour, [])
+  if (!tris.length) return null
+  const positions = new Float32Array(pts.length * 3)
+  for (let i = 0; i < pts.length; i++) {
+    positions[i * 3] = pts[i].x
+    positions[i * 3 + 1] = sample(pts[i].x, pts[i].z) + 0.06
+    positions[i * 3 + 2] = pts[i].z
+  }
+  const index = []
+  for (const [a, b, c] of tris) {
+    const cx = (pts[a].x + pts[b].x + pts[c].x) / 3
+    const cz = (pts[a].z + pts[b].z + pts[c].z) / 3
+    if (!insideBlock(cx, cz)) continue
+    index.push(a, b, c)
+  }
+  if (!index.length) return null
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  geo.setIndex(index)
+  geo.computeVertexNormals()
+  return geo
+}
 
 function ringsOf(g) {
   if (!g) return []
@@ -22,7 +51,7 @@ export class WaterLayer {
     this._buildId = 0; this.usingOsm = false; this.loading = false
   }
   _clear() {
-    this.group.traverse((o) => { if (o.isLineSegments2 || o.isLine2) { o.geometry.dispose(); o.material.dispose() } })
+    this.group.traverse((o) => { if (o.isLineSegments2 || o.isLine2 || o.isMesh) { o.geometry.dispose(); o.material.dispose() } })
     this.group.clear()
   }
   // Natural Earth line rings for a static layer (lakes/coastline)
@@ -57,13 +86,19 @@ export class WaterLayer {
     // entry carries its source strokeweight (OSM ways have none, so they
     // fall back to riverWidthPx's default) so widths can vary per feature.
     let riverEntries = null
+    let areaRings = null
     let osmOk = false
     if (useOsm) {
       this.loading = true
-      const feats = await fetchOverpassLines(bounds, 'water')
+      const [feats, areas] = await Promise.all([
+        fetchOverpassLines(bounds, 'water'),
+        fetchOverpassAreas(bounds),
+      ])
       this.loading = false
       if (id !== this._buildId || dem !== terrain.dem) return
       if (feats) { riverEntries = feats.map((f) => ({ ring: f.coords, strokeweight: undefined })); osmOk = true }
+      // area fetch is best-effort: failure/throttle just means no filled polygons, lines still render
+      if (areas) areaRings = areas.map((a) => a.ring)
     }
     if (!riverEntries) riverEntries = await this._neRiverRings(bounds, zoom)
     // lakes + coastline: always Natural Earth
@@ -100,6 +135,27 @@ export class WaterLayer {
       const obj = buildLineSegments(g.runs, sample, { color: ink, casing, widthPx: g.widthPx, offset: 0.07, renderOrder: 18, resolution })
       obj.traverse((o) => { if (o.material) o.material.opacity = params.waterOpacity ?? 0.9 })
       this.group.add(obj)
+    }
+
+    // Filled water AREAS (riverbanks/lakes): real varying river width, draped on
+    // the relief, just under the waterway lines/streams.
+    if (areaRings && areaRings.length) {
+      const areaMaterial = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(ink),
+        transparent: true,
+        opacity: params.waterOpacity ?? 0.9,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+      })
+      for (const ring of areaRings) {
+        const geo = buildWaterAreaGeometry(ring, dem, sample, insideBlock)
+        if (!geo) continue
+        const mesh = new THREE.Mesh(geo, areaMaterial)
+        mesh.renderOrder = 17
+        this.group.add(mesh)
+      }
     }
   }
   setVisible(v) { this.group.visible = v }
