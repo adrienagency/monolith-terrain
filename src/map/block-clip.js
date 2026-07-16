@@ -1,6 +1,8 @@
 // The block footprint, in JS, so overlay lines can be clipped to exactly what the
 // terrain shows. slabInside mirrors terrain.js's slab-corner discard (superellipse).
 
+import * as THREE from 'three'
+
 export function slabInside(x, z, half, corner, cornerN) {
   if (Math.abs(x) > half || Math.abs(z) > half) return false
   if (corner <= 0) return true
@@ -141,4 +143,48 @@ export function clipPolygonToBlock(poly, outline) {
     subject = output
   }
   return subject.length < 3 ? [] : _close(subject)
+}
+
+// Triangulate a (possibly concave, with holes) polygon and clip EACH
+// resulting triangle to the block outline individually, rather than
+// clipping the whole polygon first and triangulating whatever survives.
+//
+// Order matters: Sutherland-Hodgman (clipPolygonToBlock, above) is only
+// exact when the SUBJECT is convex, same as the clip window. A concave
+// subject — e.g. a river polygon that leaves the block and re-enters it —
+// clipped whole can come back as a single ring that bridges two separate
+// inside-runs with a straight edge hugging the clip boundary; a downstream
+// triangulator then treats that ring as an ordinary simple polygon and
+// happily fills the bogus bridge, painting water where the river never
+// went. A single triangle is always convex, so clipping triangle-by-
+// triangle AFTER triangulating the ORIGINAL polygon (holes correctly
+// excluded by earcut, exactly as GeoJSON intends) can't produce that
+// failure — each individual triangle clip is exact.
+//
+// `outer`/`holes` are arrays of {x,z} world-space points (open or closed
+// GeoJSON-ring convention, either winding — one polygon "part" of a
+// Polygon/MultiPolygon geometry). `outline` is a convex closed ring (e.g.
+// from blockOutline()). Returns an array of small convex polygons
+// ({x,z}[], closed, 3-7 verts), one per surviving clipped triangle —
+// fan-triangulate each for rendering. Every point in every returned polygon
+// satisfies slabInside (clipPolygonToBlock's containment guarantee, now
+// applied per-triangle instead of once for the whole subject).
+export function triangulateAndClip(outer, holes, outline) {
+  if (!outer || outer.length < 3) return []
+  const outerV2 = outer.map((p) => new THREE.Vector2(p.x, p.z))
+  const holesV2 = (holes || []).filter((h) => h && h.length >= 3).map((h) => h.map((p) => new THREE.Vector2(p.x, p.z)))
+  const tris = THREE.ShapeUtils.triangulateShape(outerV2, holesV2)
+  if (!tris.length) return []
+  // triangulateShape MUTATES outerV2 and each ring in holesV2 in place
+  // (drops a trailing vertex that duplicates the first one) before indexing
+  // into them concatenated in that order — build the lookup after calling
+  // it, not before, or the indices point at the wrong vertices.
+  const allVerts = outerV2.concat(...holesV2)
+  const out = []
+  for (const [ia, ib, ic] of tris) {
+    const triPts = [allVerts[ia], allVerts[ib], allVerts[ic]].map((v) => ({ x: v.x, z: v.y }))
+    const clipped = clipPolygonToBlock(triPts, outline)
+    if (clipped.length >= 3) out.push(clipped)
+  }
+  return out
 }

@@ -4,90 +4,132 @@ import { loadLayer, patchBounds, clipToPatch, filterByZoom } from './geo-data.js
 import { latlonToWorldPts } from './draped-line.js'
 import { buildLineSegments } from './line-segments.js'
 import { fetchOverpassLines, fetchOverpassAreas } from './overpass.js'
-import { makeInsideBlock, clipPolylineToBlock, blockOutline, clipPolygonToBlock } from './block-clip.js'
+import { makeInsideBlock, clipPolylineToBlock, blockOutline, triangulateAndClip } from './block-clip.js'
 import { OSM_MIN_ZOOM } from './roads-layer.js'
 import { riverWidthPx } from './river-width.js'
 import { WATER_REGION, inRegion, lodForZoom, tileZoomForLod } from './tile-index.js'
 import { loadWaterTiles, loadWaterTileManifest, hasTilesForLod } from './tile-loader.js'
 
-// Lakes render above every other map layer, in a distinctly more saturated
-// blue than the general water ink — an explicit user request ("je tiens
-// vraiment à ce que les lacs apparaissent au dessus de tout le reste, en
-// bleu assez visible"). renderOrder 26 clears roads (20) and the general
-// water fill (17); depthTest is disabled on lake meshes/lines specifically
-// (mirrors the always-on-top city-label sprites in places-layer.js) so a
-// lake never gets hidden behind a draped road or another water body at
-// nearly the same elevation.
+// Lakes render above every other DRAPED MAP LAYER (roads, rivers, contours,
+// the general water fill), in a distinctly more saturated blue than the
+// general water ink — an explicit user request ("je tiens vraiment à ce que
+// les lacs apparaissent au dessus de tout le reste, en bleu assez visible").
+// renderOrder 26 clears roads (20) and the general water fill (17), and
+// polygonOffset (in _fillMaterial / line-segments.js) breaks ties among
+// draped layers sitting at nearly the same world height. depthTest stays ON
+// (true) for lakes exactly like every other layer, though: the terrain mesh
+// itself must still occlude a lake behind a mountain, or the mountain reads
+// as transparent. The two are not in tension — renderOrder+polygonOffset
+// settle ordering AMONG draped layers, while depthTest keeps the terrain
+// (a separate, non-draped surface) opaque against all of them.
 const LAKE_RENDER_ORDER = 26
 
-// Filled water-body mesh: clip the ring's XZ contour to the block footprint
-// BEFORE triangulating (Sutherland-Hodgman against the slab outline), drape
-// each vertex on the relief. Clipping before triangulation — rather than
-// dropping triangles by centroid after — is required because
-// THREE.ShapeUtils.triangulateShape emits triangles spanning the interior; a
-// post-hoc centroid filter punches holes in lakes instead of trimming the
-// ring to the boundary. `outline` is the convex slab polygon from
-// blockOutline(fp), computed once per rebuild by the caller.
-// Shared by the OSM water-area fill (rivers/lakes at OSM zoom) and the Natural
-// Earth lakes fill (waterFill option) — one triangulate/drape implementation.
-function _buildFilledRing(ringLatLon, dem, sample, outline, fp, insideBlock) {
-  if (ringLatLon.length < 4) return null
-  const pts = latlonToWorldPts(ringLatLon, dem, latLonToWorld)
-  if (pts.length < 3) return null
-  const clipped = clipPolygonToBlock(pts, outline)
-  if (clipped.length < 3) return null
-  const contour = clipped.map((p) => new THREE.Vector2(p.x, p.z))
-  const tris = THREE.ShapeUtils.triangulateShape(contour, [])
-  if (!tris.length) return null
-  const positions = new Float32Array(clipped.length * 3)
-  for (let i = 0; i < clipped.length; i++) {
-    positions[i * 3] = clipped[i].x
-    positions[i * 3 + 1] = sample(clipped[i].x, clipped[i].z) + 0.06
-    positions[i * 3 + 2] = clipped[i].z
-  }
+// Triangulate a polygon "part" (one outer ring + its holes, in GeoJSON
+// lon/lat) and drape it onto the terrain, clipped to the block footprint.
+//
+// Order matters here: triangulate the ORIGINAL outer+holes shape first (see
+// triangulateAndClip in block-clip.js for why), THEN clip each resulting
+// triangle to the block outline and fan-triangulate what's left. Clipping
+// per-triangle instead of clipping the whole ring up front is what keeps a
+// concave river polygon that leaves and re-enters the block from growing a
+// bogus filled bridge across the gap (see block-clip.js's doc comment on
+// triangulateAndClip). Holes (islands) are passed straight to earcut so
+// they're never filled in as water in the first place.
+//
+// `part` is `{ outer, holes }`, both GeoJSON lon/lat rings (holes may be
+// empty/omitted). `outline` is blockOutline(fp), computed once per rebuild
+// by the caller. Shared by the OSM water-area fill (rivers/lakes at OSM
+// zoom) and the Natural Earth / Overture-tile lakes fill (waterFill option)
+// — one triangulate/clip/drape implementation.
+function _buildFilledRing(part, dem, sample, outline, fp, insideBlock) {
+  if (!part?.outer || part.outer.length < 4) return null
+  const outerPts = latlonToWorldPts(part.outer, dem, latLonToWorld)
+  if (outerPts.length < 3) return null
+  const holePts = (part.holes || [])
+    .filter((h) => h.length >= 4)
+    .map((h) => latlonToWorldPts(h, dem, latLonToWorld))
+    .filter((h) => h.length >= 3)
+
+  const clippedTris = triangulateAndClip(outerPts, holePts, outline)
+  if (!clippedTris.length) return null
+
+  const positions = []
   const index = []
-  for (const [a, b, c] of tris) {
-    // Slab containment is already guaranteed by the Sutherland-Hodgman clip
-    // above (the outline is convex, so SH is exact). Region mode's mask is
-    // arbitrary/concave, so SH doesn't apply to it — fall back to the old
-    // per-triangle centroid test against insideBlock (slab+region) for that
-    // part only; the region mask stays approximate, as it was before this fix.
+  for (const poly of clippedTris) {
+    // clipPolygonToBlock (used inside triangulateAndClip) returns a closed
+    // ring; drop the duplicate closing vertex before fan-triangulating.
+    const open =
+      poly.length > 1 && poly[0].x === poly[poly.length - 1].x && poly[0].z === poly[poly.length - 1].z
+        ? poly.slice(0, -1)
+        : poly
+    if (open.length < 3) continue
+    // Region mode's mask is arbitrary/concave, so Sutherland-Hodgman doesn't
+    // apply to it — fall back to a centroid test against insideBlock (which
+    // composes slab + region), same approximation as before this fix, just
+    // applied per output triangle-polygon instead of per whole ring. Slab
+    // containment itself is already guaranteed by the per-triangle clip
+    // above, so this check only matters when a region cutout is active.
     if (fp.regionOn) {
-      const cx = (clipped[a].x + clipped[b].x + clipped[c].x) / 3
-      const cz = (clipped[a].z + clipped[b].z + clipped[c].z) / 3
+      let cx = 0, cz = 0
+      for (const p of open) { cx += p.x; cz += p.z }
+      cx /= open.length; cz /= open.length
       if (!insideBlock(cx, cz)) continue
     }
-    index.push(a, b, c)
+    const base = positions.length / 3
+    for (const p of open) positions.push(p.x, sample(p.x, p.z) + 0.06, p.z)
+    for (let k = 1; k < open.length - 1; k++) index.push(base, base + k, base + k + 1)
   }
   if (!index.length) return null
   const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
   geo.setIndex(index)
   geo.computeVertexNormals()
   return geo
 }
 
 // Shared fill-material spec for draped water-body meshes (OSM areas + NE/tile
-// lakes). `depthTest: false` is used for the lake-specific material so lakes
-// stay visible above everything else (see LAKE_RENDER_ORDER above).
-function _fillMaterial(ink, opacity, { depthTest = true } = {}) {
+// lakes). depthTest is always ON: the terrain must occlude water like any
+// other geometry (see LAKE_RENDER_ORDER above for how lakes still win
+// against other draped layers without it).
+function _fillMaterial(ink, opacity) {
   return new THREE.MeshBasicMaterial({
     color: new THREE.Color(ink),
     transparent: true,
     opacity,
     depthWrite: false,
-    depthTest,
+    depthTest: true,
     side: THREE.DoubleSide,
     polygonOffset: true,
     polygonOffsetFactor: -1,
   })
 }
 
-function ringsOf(g) {
+// Flat list of every ring in a geometry — outer rings AND holes alike — for
+// LINE/outline rendering, where each boundary (including an island's
+// shoreline inside a lake) is legitimately its own line loop.
+//
+// Do NOT use this for fill (see polygonPartsOf below): a GeoJSON `Polygon`'s
+// coordinates are `[outer, hole1, hole2, …]`, and treating every hole as
+// though it were its own outer ring — which is what this function
+// necessarily does — is exactly the "water is drawn where there is none"
+// bug: every island inside a lake/river got filled in solid.
+function flatRingsOf(g) {
   if (!g) return []
   if (g.type === 'LineString') return [g.coordinates]
   if (g.type === 'MultiLineString' || g.type === 'Polygon') return g.coordinates
   if (g.type === 'MultiPolygon') return g.coordinates.flat()
+  return []
+}
+
+// Polygon "parts" — `{ outer, holes }` — for FILL rendering, preserving
+// GeoJSON polygon structure so holes can be excluded correctly (see
+// _buildFilledRing / triangulateAndClip). A `Polygon` is one part; a
+// `MultiPolygon` is several independent parts, each with its own holes.
+// Non-polygon geometry (lines) can't be filled and yields nothing.
+function polygonPartsOf(g) {
+  if (!g) return []
+  if (g.type === 'Polygon') return g.coordinates.length ? [{ outer: g.coordinates[0], holes: g.coordinates.slice(1) }] : []
+  if (g.type === 'MultiPolygon') return g.coordinates.filter((p) => p.length).map((p) => ({ outer: p[0], holes: p.slice(1) }))
   return []
 }
 
@@ -100,12 +142,22 @@ export class WaterLayer {
     this.group.traverse((o) => { if (o.isLineSegments2 || o.isLine2 || o.isMesh) { o.geometry.dispose(); o.material.dispose() } })
     this.group.clear()
   }
-  // Natural Earth line rings for a static layer (lakes/coastline)
+  // Natural Earth line rings for a static layer (lakes/coastline) — flat,
+  // outline-only (see flatRingsOf).
   async _neRings(name, bounds, zoom) {
     const fc = await loadLayer(name)
     if (!fc) return []
     const out = []
-    for (const f of filterByZoom(clipToPatch(fc.features, bounds), zoom)) for (const r of ringsOf(f.geometry)) if (r.length >= 2) out.push(r)
+    for (const f of filterByZoom(clipToPatch(fc.features, bounds), zoom)) for (const r of flatRingsOf(f.geometry)) if (r.length >= 2) out.push(r)
+    return out
+  }
+  // Natural Earth polygon parts for a static layer, preserving holes — for
+  // fill rendering only (see polygonPartsOf).
+  async _neParts(name, bounds, zoom) {
+    const fc = await loadLayer(name)
+    if (!fc) return []
+    const out = []
+    for (const f of filterByZoom(clipToPatch(fc.features, bounds), zoom)) for (const part of polygonPartsOf(f.geometry)) out.push(part)
     return out
   }
   // Natural Earth river rings, each tagged with its source feature's
@@ -116,7 +168,7 @@ export class WaterLayer {
     const out = []
     for (const f of filterByZoom(clipToPatch(fc.features, bounds), zoom)) {
       const strokeweight = f.properties?.strokeweight
-      for (const r of ringsOf(f.geometry)) if (r.length >= 2) out.push({ ring: r, strokeweight })
+      for (const r of flatRingsOf(f.geometry)) if (r.length >= 2) out.push({ ring: r, strokeweight })
     }
     return out
   }
@@ -132,7 +184,7 @@ export class WaterLayer {
     // entry carries its source strokeweight (OSM ways have none, so they
     // fall back to riverWidthPx's default) so widths can vary per feature.
     let riverEntries = null
-    let areaRings = null
+    let areaParts = null
     let osmOk = false
     if (useOsm) {
       this.loading = true
@@ -143,8 +195,9 @@ export class WaterLayer {
       this.loading = false
       if (id !== this._buildId || dem !== terrain.dem) return
       if (feats) { riverEntries = feats.map((f) => ({ ring: f.coords, strokeweight: undefined })); osmOk = true }
-      // area fetch is best-effort: failure/throttle just means no filled polygons, lines still render
-      if (areas) areaRings = areas.map((a) => a.ring)
+      // area fetch is best-effort: failure/throttle just means no filled polygons, lines still render.
+      // Overpass areas never carry holes (parseOverpassAreas ignores inner members for v1).
+      if (areas) areaParts = areas.map((a) => ({ outer: a.ring, holes: [] }))
     }
     if (!riverEntries) riverEntries = await this._neRiverRings(bounds, zoom)
 
@@ -155,9 +208,12 @@ export class WaterLayer {
     // coverage problem, not a precision one, but it's the only thing we
     // have outside the built region). Tile-sourced `lake` features get the
     // special "on top, vivid blue" treatment below; every other kept
-    // subtype (river/water/canal/pond/reservoir) merges into `areaRings`,
-    // the same bucket Overpass water AREAs already feed.
-    let lakeRings
+    // subtype (river/water/canal/pond/reservoir) merges into `areaParts`,
+    // the same bucket Overpass water AREAs already feed. `lakeLines` is the
+    // flat (holes-as-loops) ring list used for outline drawing; `lakeParts`
+    // preserves outer+hole structure for fill (islands must not be filled).
+    let lakeLines
+    let lakeParts
     let tileOk = false
     if (inRegion(bounds, WATER_REGION)) {
       const manifest = await loadWaterTileManifest()
@@ -166,19 +222,27 @@ export class WaterLayer {
         const tileFC = await loadWaterTiles(bounds, tileZoomForLod(lod))
         if (id !== this._buildId || dem !== terrain.dem) return
         const tileFeats = clipToPatch(tileFC.features, bounds)
-        const tileLakeRings = []
-        const tileAreaRings = []
+        const tileLakeLines = []
+        const tileLakeParts = []
+        const tileAreaParts = []
         for (const f of tileFeats) {
-          const rings = ringsOf(f.geometry)
-          if (f.properties?.subtype === 'lake') tileLakeRings.push(...rings)
-          else tileAreaRings.push(...rings)
+          if (f.properties?.subtype === 'lake') {
+            tileLakeLines.push(...flatRingsOf(f.geometry))
+            tileLakeParts.push(...polygonPartsOf(f.geometry))
+          } else {
+            tileAreaParts.push(...polygonPartsOf(f.geometry))
+          }
         }
-        lakeRings = tileLakeRings
-        if (tileAreaRings.length) areaRings = [...(areaRings || []), ...tileAreaRings]
+        lakeLines = tileLakeLines
+        lakeParts = tileLakeParts
+        if (tileAreaParts.length) areaParts = [...(areaParts || []), ...tileAreaParts]
         tileOk = true
       }
     }
-    if (!tileOk) lakeRings = await this._neRings('lakes', bounds, zoom)
+    if (!tileOk) {
+      lakeLines = await this._neRings('lakes', bounds, zoom)
+      lakeParts = await this._neParts('lakes', bounds, zoom)
+    }
 
     const coastRings = await this._neRings('coastline', bounds, zoom)
     if (id !== this._buildId || dem !== terrain.dem) return
@@ -190,7 +254,7 @@ export class WaterLayer {
 
     const fp = terrain.blockFootprint(); const insideBlock = makeInsideBlock(fp)
     // Computed once per rebuild (depends only on fp) and shared by every
-    // filled-ring build below — see _buildFilledRing.
+    // filled-ring build below — see _buildFilledRing / triangulateAndClip.
     const outline = blockOutline(fp)
     const sample = (x, z) => (terrain.sample ? terrain.sample(x, z) : 0)
     const resolution = new THREE.Vector2(window.innerWidth, window.innerHeight)
@@ -199,7 +263,6 @@ export class WaterLayer {
     // in both themes — "en bleu assez visible" — while still respecting the
     // existing dark-mode ink flip.
     const lakeInk = params.darkMode ? '#63d1ff' : '#0f6fd6'
-    const casing = params.darkMode ? 'rgba(15,17,20,0.5)' : 'rgba(252,250,246,0.6)'
     const clipAll = (ringList) => { const runs = []; for (const r of ringList) { const pts = latlonToWorldPts(r, dem, latLonToWorld); runs.push(...clipPolylineToBlock(pts, insideBlock, fp.regionOn ? 0.3 : 0.6)) } return runs }
 
     // LineSegments2 batches one width per draw call, so per-feature width
@@ -216,42 +279,42 @@ export class WaterLayer {
     const groups = [
       ...[...riverBuckets.entries()].map(([widthPx, rings]) => ({ runs: clipAll(rings), widthPx, color: ink, order: 18 })),
       // lake outline: on top of everything, vivid blue — matches the lake fill below
-      { runs: clipAll(lakeRings), widthPx: 1.4, color: lakeInk, order: LAKE_RENDER_ORDER },
+      { runs: clipAll(lakeLines), widthPx: 1.4, color: lakeInk, order: LAKE_RENDER_ORDER },
       { runs: clipAll(coastRings), widthPx: 1.2, color: ink, order: 18 },
     ]
     for (const g of groups) {
       if (!g.runs.length) continue
-      const obj = buildLineSegments(g.runs, sample, { color: g.color, casing, widthPx: g.widthPx, offset: 0.07, renderOrder: g.order, resolution })
-      const onTop = g.order === LAKE_RENDER_ORDER
-      obj.traverse((o) => { if (o.material) { o.material.opacity = params.waterOpacity ?? 0.9; if (onTop) o.material.depthTest = false } })
+      const obj = buildLineSegments(g.runs, sample, { color: g.color, widthPx: g.widthPx, offset: 0.07, renderOrder: g.order, resolution })
+      obj.traverse((o) => { if (o.material) o.material.opacity = params.waterOpacity ?? 0.9 })
       this.group.add(obj)
     }
 
     // Lakes & seas fill option: filled draped polygons instead of outline-only.
     // Covers both the OSM water AREAs (riverbanks/lake bodies/seas at OSM zoom,
-    // real varying width) and the Natural Earth `lakes` polygons (always
-    // available, coarser). Outlines above still render either way, for
-    // definition; when the option is off, water renders exactly as before
-    // (outline-only).
+    // real varying width) and the Natural Earth `lakes` / Overture-tile
+    // polygons (always available, coarser off-region). Outlines above still
+    // render either way, for definition; when the option is off, water
+    // renders exactly as before (outline-only).
     if (params.waterFill) {
       const fillOpacity = params.waterOpacity ?? 0.9
-      if (areaRings && areaRings.length) {
+      if (areaParts && areaParts.length) {
         const areaMaterial = _fillMaterial(ink, fillOpacity)
-        for (const ring of areaRings) {
-          const geo = _buildFilledRing(ring, dem, sample, outline, fp, insideBlock)
+        for (const part of areaParts) {
+          const geo = _buildFilledRing(part, dem, sample, outline, fp, insideBlock)
           if (!geo) continue
           const mesh = new THREE.Mesh(geo, areaMaterial)
           mesh.renderOrder = 17
           this.group.add(mesh)
         }
       }
-      if (lakeRings.length) {
+      if (lakeParts.length) {
         // Lakes above everything else, in a clearly-visible blue —
-        // LAKE_RENDER_ORDER + depthTest:false (see the constant and
-        // _fillMaterial above).
-        const lakeMaterial = _fillMaterial(lakeInk, fillOpacity, { depthTest: false })
-        for (const ring of lakeRings) {
-          const geo = _buildFilledRing(ring, dem, sample, outline, fp, insideBlock)
+        // LAKE_RENDER_ORDER + polygonOffset (see the constant and
+        // _fillMaterial above). depthTest stays on: the terrain still
+        // occludes the lake behind a mountain.
+        const lakeMaterial = _fillMaterial(lakeInk, fillOpacity)
+        for (const part of lakeParts) {
+          const geo = _buildFilledRing(part, dem, sample, outline, fp, insideBlock)
           if (!geo) continue
           const mesh = new THREE.Mesh(geo, lakeMaterial)
           mesh.renderOrder = LAKE_RENDER_ORDER
