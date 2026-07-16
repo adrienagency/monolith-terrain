@@ -135,6 +135,16 @@ export class GpxLayer {
     this.glowMat = null
     this.hoverIdx = -1
 
+    // progressive-reveal playback: headT is the play position (0..1, by
+    // segment index) — _revealT is what's currently drawn (persists across
+    // rebuild() so a mid-playback terrain rebuild doesn't snap the line back)
+    this.playing = false
+    this.headT = 0
+    this._revealT = 1
+    this._segCount = 0
+    this._dispAlt = null
+    this._dispSlope = null
+
     // hover cursor: accent sphere pinned to the nearest track point
     this.cursor = new THREE.Mesh(
       new THREE.SphereGeometry(0.26, 20, 14),
@@ -176,6 +186,16 @@ export class GpxLayer {
       this.setHover(i, false)
     })
     this.profileCanvas.addEventListener('pointerleave', () => this.setHover(-1, false))
+
+    // playback head label: altitude + slope readouts, tweened, floating near
+    // the moving head (position:fixed DOM, same idea as gpx-tip)
+    const head = document.createElement('div')
+    head.className = 'gpx-head-label hidden'
+    head.innerHTML = '<div class="gpx-head-alt hidden"></div><div class="gpx-head-slope hidden"></div>'
+    document.body.appendChild(head)
+    this.headLabel = head
+    this._headAltEl = head.querySelector('.gpx-head-alt')
+    this._headSlopeEl = head.querySelector('.gpx-head-slope')
   }
 
   // ---------------------------------------------------------------- data
@@ -210,6 +230,7 @@ export class GpxLayer {
       pts.push(w.x, y, w.z)
     }
     this.track.world = world
+    this._segCount = Math.max(0, world.length - 1)
 
     const lineColor = this.params.gpxColor || this.params.hudAccent
     const width = this.params.gpxWidth ?? 3
@@ -376,6 +397,11 @@ export class GpxLayer {
     // the profile strip while the track is hidden (or while in orbit)
     this.profileEl.classList.toggle('hidden', !this.group.visible)
     this._drawProfile()
+
+    // a fresh line/casing/glow always starts fully revealed — reapply the
+    // persisted reveal amount so a rebuild mid-playback (e.g. a terrain
+    // rebuild) doesn't snap the drawn line back to 100%
+    this._applyReveal(this._revealT)
   }
 
   _elevations() {
@@ -630,11 +656,105 @@ export class GpxLayer {
     }
   }
 
-  // decrements dashOffset each frame for the flowing shimmer highlight —
-  // called from the main render loop's tick() while shimmer is on.
+  // decrements dashOffset each frame for the flowing shimmer highlight, and
+  // (while playing) advances the progressive-reveal head — called from the
+  // main render loop each frame with a real per-frame dt.
   tick(dt) {
-    if (!this.params.gpxShimmer || !this.lineMat?.dashed) return
-    this.lineMat.dashOffset -= dt * 3
+    if (this.params.gpxShimmer && this.lineMat?.dashed) this.lineMat.dashOffset -= dt * 3
+
+    if (this.playing && this.track?.world?.length > 1) {
+      const totalKm = this.track.cumKm[this.track.cumKm.length - 1] || 0
+      const duration = Math.min(90, Math.max(8, totalKm * 1.5))
+      this.headT = Math.min(1, this.headT + dt / duration)
+      this._applyReveal(this.headT)
+      this._updateHead(dt)
+      if (this.headT >= 1) this.playing = false // reached the end — auto-pause
+    }
+  }
+
+  // ---------------------------------------------------------------- playback
+
+  isPlaying() {
+    return this.playing
+  }
+
+  play() {
+    if (!this.track?.world || this.track.world.length < 2) return
+    if (this.headT >= 1) this.headT = 0
+    this.playing = true
+  }
+
+  pause() {
+    this.playing = false
+  }
+
+  stop() {
+    this.playing = false
+    this.headT = 0
+    this._applyReveal(1) // restore the full line
+    this.headLabel?.classList.add('hidden')
+    this.setHover(-1, false)
+  }
+
+  setAltReadout(v) {
+    this.params.gpxAltReadout = v
+  }
+
+  setSlopeReadout(v) {
+    this.params.gpxSlopeReadout = v
+  }
+
+  // limits how much of the line/casing/glow Line2 draws — instanceCount is
+  // the fat-line addon's per-segment draw-range knob (see LineSegmentsGeometry
+  // .setPositions, which sets it to the full segment count by default).
+  _applyReveal(t) {
+    this._revealT = THREE.MathUtils.clamp(t, 0, 1)
+    const n = this._segCount || 0
+    const count = n <= 0 ? 0 : THREE.MathUtils.clamp(Math.round(this._revealT * n), 0, n)
+    if (this.line) this.line.geometry.instanceCount = count
+    if (this.casingLine) this.casingLine.geometry.instanceCount = count
+    if (this.glowLine) this.glowLine.geometry.instanceCount = count
+  }
+
+  // positions the head marker + tweened alt/slope label at the current
+  // headT, and drives the profile-strip cursor to match (setHover keeps the
+  // DOM tooltip suppressed since fromScene is false here).
+  _updateHead(dt) {
+    const world = this.track.world
+    const n = world.length - 1
+    if (n < 0) return
+    const headIdx = THREE.MathUtils.clamp(Math.round(this.headT * n), 0, n)
+    this.setHover(headIdx, false)
+
+    const eles = this._elevations()
+    const cumKm = this.track.cumKm
+    const j = Math.min(headIdx + 1, eles.length - 1)
+    const k = Math.max(headIdx - 1, 0)
+    const dKm = cumKm[j] - cumKm[k]
+    const targetSlope = dKm > 0 ? ((eles[j] - eles[k]) / (dKm * 1000)) * 100 : 0
+    const targetAlt = eles[headIdx]
+
+    // ease toward the sampled value instead of snapping, so the digits
+    // visibly animate as the head advances
+    const lambda = 6
+    this._dispAlt = this._dispAlt == null ? targetAlt : THREE.MathUtils.damp(this._dispAlt, targetAlt, lambda, dt)
+    this._dispSlope =
+      this._dispSlope == null ? targetSlope : THREE.MathUtils.damp(this._dispSlope, targetSlope, lambda, dt)
+
+    const pos = world[headIdx]
+    const v = pos.clone().project(this.camera)
+    const x = (v.x * 0.5 + 0.5) * window.innerWidth
+    const y = (-v.y * 0.5 + 0.5) * window.innerHeight
+    this.headLabel.style.left = `${x + 18}px`
+    this.headLabel.style.top = `${y - 10}px`
+
+    const showAlt = !!this.params.gpxAltReadout
+    const showSlope = !!this.params.gpxSlopeReadout
+    this._headAltEl.textContent = `ALT ${Math.round(this._dispAlt)} M`
+    this._headAltEl.classList.toggle('hidden', !showAlt)
+    this._headSlopeEl.textContent = `${this._dispSlope >= 0 ? '+' : ''}${this._dispSlope.toFixed(1)}%`
+    this._headSlopeEl.classList.toggle('hidden', !showSlope)
+    this.headLabel.classList.toggle('hidden', !(showAlt || showSlope))
   }
 
   // rebuild-driven toggles — geometry (points/ticks/labels) is only
@@ -678,6 +798,7 @@ export class GpxLayer {
   }
 
   _disposeLine() {
+    this._segCount = 0
     if (this.line) {
       this.group.remove(this.line)
       this.line.geometry.dispose()
@@ -738,5 +859,11 @@ export class GpxLayer {
     this.cursor.visible = false
     this.tipEl.classList.add('hidden')
     this.profileEl.classList.add('hidden')
+    this.playing = false
+    this.headT = 0
+    this._revealT = 1
+    this._dispAlt = null
+    this._dispSlope = null
+    this.headLabel?.classList.add('hidden')
   }
 }

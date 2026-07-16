@@ -122,5 +122,43 @@ export function buildRoutePanel(ctx) {
   nameRow.append(nameInput, button('Name point', doNamePoint, { ghost: true }))
   sPoints.body.append(nameRow)
 
+  // Playback — progressive reveal: a head travels the track, the line draws
+  // up to it, and animated altitude/slope readouts float at the tip (Space
+  // plays/pauses, Esc stops — see the shortcuts ctx in main.js).
+  const sPlay = panel.addSection(section('Playback', { open: false }))
+  const playRow = el('div', 'ce-btn-row')
+  const playBtn = button('▶ Play', () => {
+    if (!ctx.gpx.track) return
+    ctx.gpx.isPlaying() ? ctx.gpx.pause() : ctx.gpx.play()
+    syncPlayBtn()
+  }, { accent: true })
+  const stopBtn = button('■ Stop', () => {
+    ctx.gpx.stop()
+    syncPlayBtn()
+  }, { ghost: true })
+  function syncPlayBtn() {
+    const playing = !!ctx.gpx.isPlaying?.()
+    playBtn.textContent = playing ? '⏸ Pause' : '▶ Play'
+    playBtn.classList.toggle('on', playing)
+  }
+  syncPlayBtn()
+  // playback can also start/stop/end via Space/Esc or naturally reach the
+  // end of the track — poll lightly so the button label stays in sync
+  setInterval(syncPlayBtn, 200)
+  playRow.append(playBtn, stopBtn)
+  sPlay.body.append(
+    playRow,
+    toggle({
+      label: 'Altitude readout',
+      get: () => params.gpxAltReadout,
+      set: (v) => ctx.gpx.setAltReadout(v),
+    }),
+    toggle({
+      label: 'Slope readout',
+      get: () => params.gpxSlopeReadout,
+      set: (v) => ctx.gpx.setSlopeReadout(v),
+    })
+  )
+
   return panel
 }

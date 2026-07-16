@@ -384,6 +384,39 @@ body {
   opacity: 0;
 }
 
+.gpx-head-label {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  background: var(--hud-paper);
+  border: 1px solid var(--hud-accent);
+  padding: 4px 8px;
+  border-radius: 2px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 36;
+  transition: opacity 0.12s;
+}
+
+.gpx-head-label.hidden {
+  opacity: 0;
+}
+
+.gpx-head-alt,
+.gpx-head-slope {
+  color: var(--hud-accent);
+  font-weight: 600;
+}
+
+.gpx-head-alt.hidden,
+.gpx-head-slope.hidden {
+  display: none;
+}
+
 .gpx-profile {
   position: fixed;
   left: 50%;

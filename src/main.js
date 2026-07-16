@@ -1825,15 +1825,15 @@ function flyTrack() {
 
 // ---- Space/Esc playback (keyboard shortcuts) -----------------------------
 // Bridges to whatever playback mechanism is live: a loaded GPX track's
-// drone fly-along takes priority (start/stop only — DroneCam has no pause),
-// otherwise the Camera panel's looping automation. Full Parcours progressive-
-// reveal playback lands in a later task; until then this is a safe,
-// null-checked bridge to what already exists.
+// progressive-reveal (Parcours) playback takes priority — Space play/pauses
+// the head travelling along the route, Esc stops and restores the full
+// line. With no track loaded, Space falls back to the Camera panel's
+// looping automation (the drone fly-along is still reachable from the
+// Camera panel's "Fly the GPX track" button, just no longer tied to Space).
 function togglePlay() {
   if (!modes || modes.mode !== 'surface' || modes.busy) return
-  if (gpxLayer?.track?.world) {
-    if (drone.active) drone.stop()
-    else flyTrack()
+  if (gpxLayer?.track) {
+    gpxLayer.isPlaying() ? gpxLayer.pause() : gpxLayer.play()
     return
   }
   if (cameraAuto.active) cameraAuto.stop()
@@ -1848,6 +1848,7 @@ function stopPlay() {
   tween.active = false
   drone.stop()
   cameraAuto.stop()
+  gpxLayer?.stop()
   camera.up.set(0, 1, 0)
 }
 
