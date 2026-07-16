@@ -58,3 +58,87 @@ export function clipPolylineToBlock(pts, insideBlock, step = 0.6, bisect = 7) {
   if (run && run.length >= 2) runs.push(run)
   return runs
 }
+
+// The slab superellipse (fp.half/corner/cornerN — region cutout NOT included,
+// see makeInsideBlock) as a convex polygon, for use as a Sutherland-Hodgman
+// clip window. Built by ray-marching from the origin: for each of `n` angles,
+// bisect along the ray (same idea as clipPolylineToBlock's boundary()) to find
+// where slabInside flips inside->outside. Every sampled point is ON the true
+// boundary to within bisection precision, so the polygon is INSCRIBED in the
+// real superellipse — i.e. conservative, never outside it. That's the whole
+// point: clipping against this polygon can only pull geometry further inside
+// the block, never let it stick out. Returned ring is closed (first === last),
+// matching the GeoJSON ring convention used elsewhere in this file, and wound
+// counter-clockwise in the (x,z) plane (theta increasing).
+export function blockOutline(fp, n = 192, bisect = 30) {
+  const { half, corner, cornerN } = fp
+  const maxR = Math.SQRT2 * half + 1
+  const out = []
+  for (let i = 0; i < n; i++) {
+    const theta = (i / n) * Math.PI * 2
+    const dx = Math.cos(theta), dz = Math.sin(theta)
+    let lo = 0, hi = maxR
+    for (let k = 0; k < bisect; k++) {
+      const mid = (lo + hi) / 2
+      if (slabInside(dx * mid, dz * mid, half, corner, cornerN)) lo = mid; else hi = mid
+    }
+    out.push({ x: dx * lo, z: dz * lo })
+  }
+  out.push({ x: out[0].x, z: out[0].z })
+  return out
+}
+
+// Drop a closing duplicate vertex (ring[0] === ring[last]) if present, so
+// clip math below can work with a plain open vertex loop.
+function _open(ring) {
+  if (ring.length > 1) {
+    const a = ring[0], b = ring[ring.length - 1]
+    if (a.x === b.x && a.z === b.z) return ring.slice(0, -1)
+  }
+  return ring
+}
+
+function _close(ring) {
+  return ring.length ? [...ring, { x: ring[0].x, z: ring[0].z }] : ring
+}
+
+// Segment/segment intersection of (p1,p2) against the infinite line through
+// (a,b) — used only where callers already know the segments cross.
+function _intersect(p1, p2, a, b) {
+  const denom = (p1.x - p2.x) * (a.z - b.z) - (p1.z - p2.z) * (a.x - b.x)
+  if (Math.abs(denom) < 1e-12) return { x: p2.x, z: p2.z }
+  const t = ((p1.x - a.x) * (a.z - b.z) - (p1.z - a.z) * (a.x - b.x)) / denom
+  return { x: p1.x + t * (p2.x - p1.x), z: p1.z + t * (p2.z - p1.z) }
+}
+
+// Sutherland-Hodgman clip of `poly` (array of {x,z}, closed or open ring)
+// against `outline` (a CONVEX closed ring, e.g. from blockOutline — this
+// algorithm is only valid against a convex clip window). Returns a closed
+// polygon [{x,z},...], or [] if fully clipped away or degenerate (<3 verts).
+// A polygon entirely inside `outline` is returned with its original vertices
+// (no vertices inserted) since every clip-edge pass is a no-op.
+export function clipPolygonToBlock(poly, outline) {
+  let subject = _open(poly)
+  const clip = _open(outline)
+  if (subject.length < 3 || clip.length < 3) return []
+
+  for (let i = 0; i < clip.length && subject.length; i++) {
+    const a = clip[i], b = clip[(i + 1) % clip.length]
+    const edgeX = b.x - a.x, edgeZ = b.z - a.z
+    const inside = (p) => edgeX * (p.z - a.z) - edgeZ * (p.x - a.x) >= 0
+    const output = []
+    for (let j = 0; j < subject.length; j++) {
+      const curr = subject[j]
+      const prev = subject[(j - 1 + subject.length) % subject.length]
+      const currIn = inside(curr), prevIn = inside(prev)
+      if (currIn) {
+        if (!prevIn) output.push(_intersect(prev, curr, a, b))
+        output.push(curr)
+      } else if (prevIn) {
+        output.push(_intersect(prev, curr, a, b))
+      }
+    }
+    subject = output
+  }
+  return subject.length < 3 ? [] : _close(subject)
+}

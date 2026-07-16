@@ -4,32 +4,47 @@ import { loadLayer, patchBounds, clipToPatch, filterByZoom } from './geo-data.js
 import { latlonToWorldPts } from './draped-line.js'
 import { buildLineSegments } from './line-segments.js'
 import { fetchOverpassLines, fetchOverpassAreas } from './overpass.js'
-import { makeInsideBlock, clipPolylineToBlock } from './block-clip.js'
+import { makeInsideBlock, clipPolylineToBlock, blockOutline, clipPolygonToBlock } from './block-clip.js'
 import { OSM_MIN_ZOOM } from './roads-layer.js'
 import { riverWidthPx } from './river-width.js'
 
-// Filled water-body mesh: triangulate the ring's XZ contour, drape each vertex on
-// the relief, drop triangles whose centroid falls outside the block footprint.
+// Filled water-body mesh: clip the ring's XZ contour to the block footprint
+// BEFORE triangulating (Sutherland-Hodgman against the slab outline), drape
+// each vertex on the relief. Clipping before triangulation — rather than
+// dropping triangles by centroid after — is required because
+// THREE.ShapeUtils.triangulateShape emits triangles spanning the interior; a
+// post-hoc centroid filter punches holes in lakes instead of trimming the
+// ring to the boundary. `outline` is the convex slab polygon from
+// blockOutline(fp), computed once per rebuild by the caller.
 // Shared by the OSM water-area fill (rivers/lakes at OSM zoom) and the Natural
 // Earth lakes fill (waterFill option) — one triangulate/drape implementation.
-function _buildFilledRing(ringLatLon, dem, sample, insideBlock) {
+function _buildFilledRing(ringLatLon, dem, sample, outline, fp, insideBlock) {
   if (ringLatLon.length < 4) return null
   const pts = latlonToWorldPts(ringLatLon, dem, latLonToWorld)
   if (pts.length < 3) return null
-  const contour = pts.map((p) => new THREE.Vector2(p.x, p.z))
+  const clipped = clipPolygonToBlock(pts, outline)
+  if (clipped.length < 3) return null
+  const contour = clipped.map((p) => new THREE.Vector2(p.x, p.z))
   const tris = THREE.ShapeUtils.triangulateShape(contour, [])
   if (!tris.length) return null
-  const positions = new Float32Array(pts.length * 3)
-  for (let i = 0; i < pts.length; i++) {
-    positions[i * 3] = pts[i].x
-    positions[i * 3 + 1] = sample(pts[i].x, pts[i].z) + 0.06
-    positions[i * 3 + 2] = pts[i].z
+  const positions = new Float32Array(clipped.length * 3)
+  for (let i = 0; i < clipped.length; i++) {
+    positions[i * 3] = clipped[i].x
+    positions[i * 3 + 1] = sample(clipped[i].x, clipped[i].z) + 0.06
+    positions[i * 3 + 2] = clipped[i].z
   }
   const index = []
   for (const [a, b, c] of tris) {
-    const cx = (pts[a].x + pts[b].x + pts[c].x) / 3
-    const cz = (pts[a].z + pts[b].z + pts[c].z) / 3
-    if (!insideBlock(cx, cz)) continue
+    // Slab containment is already guaranteed by the Sutherland-Hodgman clip
+    // above (the outline is convex, so SH is exact). Region mode's mask is
+    // arbitrary/concave, so SH doesn't apply to it — fall back to the old
+    // per-triangle centroid test against insideBlock (slab+region) for that
+    // part only; the region mask stays approximate, as it was before this fix.
+    if (fp.regionOn) {
+      const cx = (clipped[a].x + clipped[b].x + clipped[c].x) / 3
+      const cz = (clipped[a].z + clipped[b].z + clipped[c].z) / 3
+      if (!insideBlock(cx, cz)) continue
+    }
     index.push(a, b, c)
   }
   if (!index.length) return null
@@ -124,6 +139,9 @@ export class WaterLayer {
     this.usingOsm = osmOk
 
     const fp = terrain.blockFootprint(); const insideBlock = makeInsideBlock(fp)
+    // Computed once per rebuild (depends only on fp) and shared by every
+    // filled-ring build below — see _buildFilledRing.
+    const outline = blockOutline(fp)
     const sample = (x, z) => (terrain.sample ? terrain.sample(x, z) : 0)
     const resolution = new THREE.Vector2(window.innerWidth, window.innerHeight)
     const ink = params.darkMode ? '#7fb2d6' : '#2b7fc4'
@@ -164,7 +182,7 @@ export class WaterLayer {
       if (areaRings && areaRings.length) {
         const areaMaterial = _fillMaterial(ink, fillOpacity)
         for (const ring of areaRings) {
-          const geo = _buildFilledRing(ring, dem, sample, insideBlock)
+          const geo = _buildFilledRing(ring, dem, sample, outline, fp, insideBlock)
           if (!geo) continue
           const mesh = new THREE.Mesh(geo, areaMaterial)
           mesh.renderOrder = 17
@@ -174,7 +192,7 @@ export class WaterLayer {
       if (lakeRings.length) {
         const lakeMaterial = _fillMaterial(ink, fillOpacity)
         for (const ring of lakeRings) {
-          const geo = _buildFilledRing(ring, dem, sample, insideBlock)
+          const geo = _buildFilledRing(ring, dem, sample, outline, fp, insideBlock)
           if (!geo) continue
           const mesh = new THREE.Mesh(geo, lakeMaterial)
           mesh.renderOrder = 17
