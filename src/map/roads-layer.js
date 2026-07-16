@@ -31,7 +31,10 @@ export class RoadsLayer {
     if (!params.roadsEnabled || !dem || params.source !== 'real') { this.usingOsm = false; this.loading = false; return }
     const bounds = patchBounds(dem)
     const zoom = params.demZoom ?? 8
-    const useOsm = zoom >= OSM_MIN_ZOOM
+    // the detail notch pulls full-OSM roads from further out: crank detail → OSM
+    // kicks in at a lower zoom, so more road detail is visible when zoomed back.
+    const osmThreshold = params.roadsDetail >= 2 ? 10 : params.roadsDetail >= 1 ? 11 : OSM_MIN_ZOOM
+    const useOsm = zoom >= osmThreshold
 
     // gather rings as {coords:[lon,lat][], klass} from the chosen tier
     let rings = null
