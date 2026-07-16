@@ -100,7 +100,11 @@ export class DroneCam {
   }
 
   // worldPts: ordered GPX track points {x,y,z} at ground level (direction = order)
-  start(worldPts, { duration = 30 } = {}) {
+  // seedAt: path fraction (0..1) to seat the initial pose at — lets a caller
+  // that resumes mid-track (e.g. GPX playback follow, unpaused partway
+  // through) start the chase from where the subject already is instead of
+  // snapping back to the beginning.
+  start(worldPts, { duration = 30, seedAt = 0 } = {}) {
     this.active = false // a bail below leaves no stale flight running
     if (!worldPts || worldPts.length < 2) return false
     const span = worldPts.reduce((s, p, i) => (i ? s + Math.hypot(p.x - worldPts[i - 1].x, p.z - worldPts[i - 1].z) : 0), 0)
@@ -114,9 +118,9 @@ export class DroneCam {
     this.curve.arcLengthDivisions = 800
     this.curve.updateArcLengths()
     this.duration = duration
-    this.t = 0
+    this.t = THREE.MathUtils.clamp(seedAt, 0, 1)
     // seat the camera at the initial chase pose so it doesn't lurch from wherever
-    this._solve(0, this._pos, this._look)
+    this._solve(this.t, this._pos, this._look)
     this.camera.position.copy(this._pos)
     this.controls.target.copy(this._look)
     this._bank = 0
@@ -167,7 +171,24 @@ export class DroneCam {
   update(dt) {
     if (!this.active || !this.curve) return
     this.t = Math.min(1, this.t + dt / (this.duration || 30))
-    const s = trapezoid(this.t)
+    this._applyPose(dt, trapezoid(this.t), this.t >= 1)
+  }
+
+  // Follow mode: drive the chase pose from an explicit path fraction instead
+  // of the internal timer/trapezoid. A caller (GPX playback follow) hands in
+  // its OWN progress value every frame — since the reveal head and the
+  // camera then both read that exact same number, they can never drift
+  // apart the way two independently-timed animations could.
+  updateAt(dt, s) {
+    if (!this.active || !this.curve) return
+    const clamped = THREE.MathUtils.clamp(s, 0, 1)
+    this.t = clamped
+    this._applyPose(dt, clamped, clamped >= 1)
+  }
+
+  // shared by update()/updateAt(): solve the desired pose at path fraction
+  // `s`, critically damp the camera/target toward it, bank into turns.
+  _applyPose(dt, s, arrived) {
     this._solve(s, _dPos, _dLook)
 
     // frame-rate-independent critical damping toward the desired pose
@@ -184,7 +205,6 @@ export class DroneCam {
     this.curve.getTangentAt(s, _v1)
     this.curve.getTangentAt(Math.min(s + 0.02, 1), _v2)
     const curl = _v1.x * _v2.z - _v1.z * _v2.x
-    const arrived = this.t >= 1
     const bankTarget = arrived ? 0 : THREE.MathUtils.clamp(curl * 12, -0.45, 0.45)
     this._bank += (bankTarget - this._bank) * (1 - Math.pow(2, -dt / 0.45))
     this._q.multiply(this._qr.setFromAxisAngle(this._z, this._bank))

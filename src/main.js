@@ -240,8 +240,10 @@ const params = {
   gpxWidth: 3,
   gpxColor: '',
   gpxAutoContrast: true,
-  // reserved for later Parcours tasks (gradient / glow / shimmer / points / playback)
-  gpxGradient: false,
+  // gradient defaults ON — "par défaut, sur la trace GPX, le gradient doit se
+  // faire du vert foncé vers le rouge vif" only shows up if a loaded GPX
+  // draws the ramp without the user having to flip a toggle first
+  gpxGradient: true,
   gpxGradientMode: 'elevation',
   gpxGlow: false,
   gpxShimmer: false,
@@ -251,6 +253,11 @@ const params = {
   gpxKm: true,
   gpxAltReadout: true,
   gpxSlopeReadout: false,
+  // drone-follow during playback: off by default (opt-in cinematic extra),
+  // 1x matches the default reveal pace (totalKm*1.5s, see gpx.js tick());
+  // 0.5x–3x covers "slow enough to read the terrain" to "quick preview"
+  gpxFollow: false,
+  gpxFollowSpeed: 1,
 
   // ocean (real-world bathymetry read)
   oceanShallow: '#dce8ec',
@@ -1839,6 +1846,28 @@ function flyTrack() {
   drone.start(w, { duration })
 }
 
+// ---- GPX drone-follow (Route panel "Follow" toggle) ------------------------
+// Engaged explicitly (Play pressed while Follow is on, or Follow flipped on
+// mid-playback) and disengaged explicitly (pause/stop, Esc, or the user
+// grabbing the camera — controls' 'start' handler already calls drone.stop()
+// for every other automation, so follow rides along for free). It never
+// re-engages itself, so grabbing OrbitControls can't be "fought" by a
+// follow that keeps trying to resume — same rule tour/cameraAuto follow.
+// The per-frame drive itself (drone.updateAt, fed gpxLayer.headT) lives in
+// updateCameraMotion() below, reusing DroneCam wholesale — no new camera rig.
+function engageGpxFollow() {
+  if (!params.gpxFollow || !gpxLayer.isPlaying() || modes.mode !== 'surface') return
+  const w = gpxLayer.track?.world
+  if (!w || w.length < 2) return
+  tour.active = false
+  tween.active = false
+  cameraAuto.stop()
+  drone.start(w, { seedAt: gpxLayer.headT }) // resume-in-place, not a snap back to the start
+}
+function disengageGpxFollow() {
+  if (drone.active) drone.stop()
+}
+
 // ---- Space/Esc playback (keyboard shortcuts) -----------------------------
 // Bridges to whatever playback mechanism is live: a loaded GPX track's
 // progressive-reveal (Parcours) playback takes priority — Space play/pauses
@@ -1849,7 +1878,13 @@ function flyTrack() {
 function togglePlay() {
   if (!modes || modes.mode !== 'surface' || modes.busy) return
   if (gpxLayer?.track) {
-    gpxLayer.isPlaying() ? gpxLayer.pause() : gpxLayer.play()
+    if (gpxLayer.isPlaying()) {
+      gpxLayer.pause()
+      disengageGpxFollow()
+    } else {
+      gpxLayer.play()
+      engageGpxFollow()
+    }
     return
   }
   if (cameraAuto.active) cameraAuto.stop()
@@ -2031,7 +2066,7 @@ function toggleRegion() {
 // fixed timestep so the video is deterministic whatever the encode speed
 let loopPaused = false
 function stepScene(t, dt) {
-  if (cameraAuto.active || drone.active || tour.active || tween.active) updateCameraMotion(dt)
+  if (cameraAuto.active || drone.active || tour.active || tween.active || (params.gpxFollow && gpxLayer.isPlaying())) updateCameraMotion(dt)
   if (!params.paused) {
     clouds.update(dt, params, camera)
     traffic.update(dt)
@@ -2099,6 +2134,19 @@ const bottomBar = buildBottomBar({
   goto: gotoCtl,
   openGpx: () => gpxFileInput.click(),
 })
+
+// the GPX profile strip docks at the same bottom-centre spot as the search
+// bar — measure the bar's REAL rendered rect (its height changes across the
+// pointer:coarse/touch breakpoint, see v28.css) and push the profile's
+// `bottom` up above it with a fixed gap, so the two can never overlap
+// (a z-index bump alone would leave them stacked, not "remonté")
+function syncGpxProfilePosition() {
+  const r = bottomBar.root.getBoundingClientRect()
+  const gap = 14
+  const bottomPx = Math.round(window.innerHeight - r.top + gap)
+  document.documentElement.style.setProperty('--gpx-profile-bottom', `${bottomPx}px`)
+}
+syncGpxProfilePosition()
 
 // bottom-left: quiet credit to the studio + a curated "inspiration" list of
 // other beautiful 3D-map makers (opens a small popup)
@@ -2393,6 +2441,8 @@ const routePanel = buildRoutePanel({
   params,
   gpx: gpxLayer,
   loadGpx: () => gpxFileInput.click(),
+  startFollow: engageGpxFollow,
+  stopFollow: disengageGpxFollow,
 })
 
 // the exclusive per-column accordion now lives in the Panel shell (setCollapsed
@@ -2484,6 +2534,14 @@ function updateCameraMotion(dt) {
   // the live tick() and the offline export step drive it
   if (cameraAuto.active) {
     cameraAuto.update(dt)
+    return
+  }
+  // GPX playback drone-follow: driven by the reveal head's OWN progress
+  // (gpxLayer.headT), not DroneCam's internal timer — see updateAt(). Must
+  // be checked before the generic drone.active branch below, which still
+  // owns the separate "Fly the GPX track" cinematic (Camera panel).
+  if (params.gpxFollow && gpxLayer.isPlaying() && drone.active) {
+    drone.updateAt(dt, gpxLayer.headT)
     return
   }
   // drone follow-cam for the GPX track — chase the route from behind/above
@@ -2659,5 +2717,6 @@ window.addEventListener('resize', () => {
   composer.setSize(window.innerWidth, window.innerHeight)
   gpxLayer.onResize(window.innerWidth, window.innerHeight)
   mapLayers.onResize(window.innerWidth, window.innerHeight)
+  syncGpxProfilePosition()
   reclampDraggables()
 })

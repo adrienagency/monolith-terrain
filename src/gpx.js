@@ -66,10 +66,17 @@ export function frameTrack(points) {
 
 // ---------------------------------------------------------------- colour ramps
 
-// cool -> warm hue sweep (blue through to red), used for the elevation ramp
+// dark green -> bright red, used for the elevation ramp (the default gradient
+// mode). Hue sweeps green -> amber -> orange -> red (0.33 -> 0.0) so the
+// transition reads naturally; saturation and lightness both rise with it too
+// — a hue-only sweep at constant tone doesn't land as "foncé" (dark) at the
+// low end or "vif" (vivid/bright) at the high end, only a colour-only shift.
 function elevationRampColor(t) {
-  const hue = THREE.MathUtils.lerp(0.62, 0.0, THREE.MathUtils.clamp(t, 0, 1))
-  return new THREE.Color().setHSL(hue, 0.82, 0.52)
+  const c = THREE.MathUtils.clamp(t, 0, 1)
+  const hue = THREE.MathUtils.lerp(0.33, 0.0, c)
+  const sat = THREE.MathUtils.lerp(0.65, 0.9, c)
+  const light = THREE.MathUtils.lerp(0.25, 0.55, c)
+  return new THREE.Color().setHSL(hue, sat, light)
 }
 
 // green (flat) -> amber (moderate) -> red (steep) by absolute grade %
@@ -334,14 +341,41 @@ export class GpxLayer {
     }
 
     // start / finish markers — independently toggleable; a custom name (set
-    // via setPointName on index 0 / last) overrides the default label
+    // via setPointName on index 0 / last) overrides the default label.
+    //
+    // Loop detection: compare the first/last track points in WORLD units
+    // (not lat/lon — this is what's actually drawn) against a tolerance
+    // relative to the track's own drawn length, not a fixed distance. A
+    // fixed meter threshold would false-match a tiny out-and-back track or
+    // miss an obvious loop on a huge one. A closed loop rarely re-samples
+    // the exact same GPS fix as the start, so this must not be an exact
+    // equality check either — 1.5% of the total drawn length, floored at 1
+    // world unit (roughly one GPS sample's worth of jitter at this scale),
+    // is generous enough to catch a real loop's closing gap without
+    // mistaking two merely-nearby points for the same place.
     const lastIdx = eles.length - 1
-    this.startSprite = this.params.gpxStart
-      ? mk(names[0] ? `▶ ${names[0]}` : `▶ START · ${Math.round(eles[0])} M`, world[0])
-      : null
-    this.endSprite = this.params.gpxEnd
-      ? mk(names[lastIdx] ? `■ ${names[lastIdx]}` : `■ END · ${Math.round(eles[lastIdx])} M`, world[world.length - 1])
-      : null
+    let worldLen = 0
+    for (let i = 1; i < world.length; i++) worldLen += world[i].distanceTo(world[i - 1])
+    const loopTol = Math.max(1, worldLen * 0.015)
+    const isLoop = world.length > 1 && world[0].distanceTo(world[world.length - 1]) <= loopTol
+
+    if (isLoop && this.params.gpxStart && this.params.gpxEnd) {
+      // same place — one combined sprite, no separate end marker at all
+      let label
+      if (names[0] && names[lastIdx]) label = `◆ ${names[0]} & ${names[lastIdx]}`
+      else if (names[0]) label = `◆ ${names[0]}`
+      else if (names[lastIdx]) label = `◆ ${names[lastIdx]}`
+      else label = `◆ START & FINISH · ${Math.round(eles[0])} M`
+      this.startSprite = mk(label, world[0])
+      this.endSprite = null
+    } else {
+      this.startSprite = this.params.gpxStart
+        ? mk(names[0] ? `▶ ${names[0]}` : `▶ START · ${Math.round(eles[0])} M`, world[0])
+        : null
+      this.endSprite = this.params.gpxEnd
+        ? mk(names[lastIdx] ? `■ ${names[lastIdx]}` : `■ FINISH · ${Math.round(eles[lastIdx])} M`, world[world.length - 1])
+        : null
+    }
 
     // altitude waypoints along the way — one every ~2 km, six at most, plus
     // any custom-named point so a name set via the panel is always visible
@@ -665,7 +699,13 @@ export class GpxLayer {
     if (this.playing && this.track?.world?.length > 1) {
       const totalKm = this.track.cumKm[this.track.cumKm.length - 1] || 0
       const duration = Math.min(90, Math.max(8, totalKm * 1.5))
-      this.headT = Math.min(1, this.headT + dt / duration)
+      // the Follow-speed slider (Route panel) only scales the advance rate
+      // while drone-follow is actually on — normal playback pace is
+      // untouched otherwise. Because the reveal head AND the chase camera
+      // (driven from this same headT, see main.js) both read this one
+      // value, they can never drift apart regardless of speed.
+      const speedMul = this.params.gpxFollow ? THREE.MathUtils.clamp(this.params.gpxFollowSpeed || 1, 0.1, 6) : 1
+      this.headT = Math.min(1, this.headT + (dt * speedMul) / duration)
       this._applyReveal(this.headT)
       this._updateHead(dt)
       if (this.headT >= 1) this.playing = false // reached the end — auto-pause

@@ -420,7 +420,12 @@ body {
 .gpx-profile {
   position: fixed;
   left: 50%;
-  bottom: 18px;
+  /* pushed above the place-search bar at the same bottom-centre spot — the
+     real value is measured at runtime from the bar's rendered rect (see
+     syncGpxProfilePosition() in main.js), since the bar's height changes
+     across the pointer:coarse (touch) breakpoint; 82px is a same-order-of-
+     magnitude fallback for the rare frame before that JS runs */
+  bottom: var(--gpx-profile-bottom, 82px);
   transform: translateX(-50%);
   width: min(760px, 62vw);
   font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;

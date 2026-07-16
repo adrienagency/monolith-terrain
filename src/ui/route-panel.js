@@ -3,7 +3,7 @@
 // Parcours tasks extend this same panel with points and playback.
 // Docked in the left column, after Camera (Explore, Scan, Camera, Route).
 
-import { slider, color, toggle, select, visibleWhen, button, section, el } from './kit.js'
+import { slider, color, toggle, select, visibleWhen, button, section, el, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
 
 const ICON =
@@ -129,11 +129,18 @@ export function buildRoutePanel(ctx) {
   const playRow = el('div', 'ce-btn-row')
   const playBtn = button('▶ Play', () => {
     if (!ctx.gpx.track) return
-    ctx.gpx.isPlaying() ? ctx.gpx.pause() : ctx.gpx.play()
+    if (ctx.gpx.isPlaying()) {
+      ctx.gpx.pause()
+      ctx.stopFollow?.()
+    } else {
+      ctx.gpx.play()
+      ctx.startFollow?.() // no-op unless the Follow toggle below is on
+    }
     syncPlayBtn()
   }, { accent: true })
   const stopBtn = button('■ Stop', () => {
     ctx.gpx.stop()
+    ctx.stopFollow?.()
     syncPlayBtn()
   }, { ghost: true })
   function syncPlayBtn() {
@@ -146,6 +153,15 @@ export function buildRoutePanel(ctx) {
   // end of the track — poll lightly so the button label stays in sync
   setInterval(syncPlayBtn, 200)
   playRow.append(playBtn, stopBtn)
+  const followSpeedRow = slider({
+    label: 'Follow speed',
+    min: 0.5,
+    max: 3,
+    step: 0.25,
+    get: () => params.gpxFollowSpeed,
+    set: (v) => { params.gpxFollowSpeed = v },
+  })
+  visibleWhen(followSpeedRow, () => params.gpxFollow)
   sPlay.body.append(
     playRow,
     toggle({
@@ -157,7 +173,21 @@ export function buildRoutePanel(ctx) {
       label: 'Slope readout',
       get: () => params.gpxSlopeReadout,
       set: (v) => ctx.gpx.setSlopeReadout(v),
-    })
+    }),
+    toggle({
+      // drone-cam chase, not a flat top-down follow — trails the reveal
+      // head with the same smooth easing as "Fly the GPX track" (Camera
+      // panel), just synced frame-for-frame to playback instead of timed
+      label: 'Drone follow',
+      get: () => params.gpxFollow,
+      set: (v) => {
+        params.gpxFollow = v
+        if (v) ctx.startFollow?.()
+        else ctx.stopFollow?.()
+        refreshAll() // reveals/hides the Follow-speed slider right away
+      },
+    }),
+    followSpeedRow
   )
 
   return panel
