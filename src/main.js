@@ -239,8 +239,6 @@ const params = {
   gpxGradient: true,
   gpxGradientMode: 'elevation',
   gpxGlow: false,
-  gpxShimmer: false,
-  gpxPoints: true,
   gpxMarkers: true, // single toggle for BOTH start + finish markers
   gpxKm: true,
   gpxAltReadout: true,

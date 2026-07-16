@@ -30,12 +30,25 @@
 //     smaller screen angle from farther away), and the spine's own smoothed
 //     elevation already delivers "climb progressively" without a separate
 //     dial.
-//   · Lower-third framing is SOLVED, not eyeballed. solvePitchForNdcY()
-//     inverts the perspective projection to find the exact pitch that
-//     places the rider's point at a target NDC.y (~-0.375, mid of the
-//     -0.3..-0.45 lower-third band) — and because that means looking a bit
-//     ABOVE the rider, "keep the point low on screen" and "look up the
-//     mountain when climbing" fall out of the SAME formula.
+//   · DEAD-ZONE framing, not continuous framing (task 13). A fixed NDC box
+//     (this.deadzone) is the region the tracked point must stay inside —
+//     like a helicopter pilot tailing a car: while the subject sits inside
+//     the box, NEITHER yaw nor pitch corrects at all, the rig just keeps
+//     flying its current bearing (arm/lift still travel behind the spine,
+//     so it keeps moving). Only once the subject nears/exits the box
+//     (this.deadzoneMargin inset, so correction starts a touch before the
+//     true edge — no on/off flip-flop right at the boundary) does a
+//     correction target engage — solved exactly the same way framing always
+//     was (solvePitchForNdcY(), see below), then eased in through the SAME
+//     yaw/pitch rate caps as everything else, never a snap.
+//   · Horizontal (yaw) framing REUSES solvePitchForNdcY() rather than a
+//     bespoke solver: NDC.x is the identical rotate-and-project problem as
+//     NDC.y, just in the (forward,right) plane instead of (forward,up) — the
+//     derivation never assumed which horizontal axis it rotates around, so
+//     relabeling "up" as "right" and vFov as the horizontal FOV gets yaw for
+//     free (see _applyPose()). ndcYForPitch() is the forward evaluator
+//     (given diff/heading/pitch, what NDC.y results) used to measure whether
+//     the subject is CURRENTLY inside the box before deciding to correct.
 //   · Frame-rate-independent critical damping on top of all of the above
 //     for extra silkiness: x += (target-x)·(1-2^(-dt/half)).
 
@@ -141,6 +154,21 @@ export function solvePitchForNdcY(diff, forward0, targetNdcY, vFovRad) {
   return Math.atan2(s, c)
 }
 
+// Forward evaluator — the exact ndc.y(a) formula from solvePitchForNdcY's own
+// derivation comment above, evaluated at a given pitch rather than solved for
+// one. Used to measure whether the tracked point is CURRENTLY inside the
+// dead-zone box before deciding a correction is even needed (see
+// _applyPose()/_aim() below) — solvePitchForNdcY answers "what pitch puts it
+// at T", this answers "given the current pitch, where IS it".
+export function ndcYForPitch(diff, forward0, pitch, vFovRad) {
+  const A = diff.y
+  const B = diff.x * forward0.x + diff.z * forward0.z
+  const k = Math.tan(vFovRad / 2)
+  const c = Math.cos(pitch)
+  const s = Math.sin(pitch)
+  return (A * c - B * s) / ((B * c + A * s) * k)
+}
+
 // ---- controller -------------------------------------------------------------
 
 export class DroneCam {
@@ -166,9 +194,31 @@ export class DroneCam {
     // input cannot spin the camera faster than these.
     this.maxYawRateDeg = 9 // deg/s — "ne quasiment pas tourner, ou très lentement"
     this.maxPitchRateDeg = 16 // deg/s — vertical aim may move a bit more freely than yaw
-    // where the tracked point should sit vertically on screen: NDC y, 0 =
-    // center, -1 = bottom. Mid of the requested -0.30..-0.45 lower-third band.
+    // where a correction re-centers the tracked point once triggered: NDC y,
+    // 0 = center, -1 = bottom. Mid of the requested -0.30..-0.45 lower-third
+    // band — kept even under dead-zone framing (task 13) since it still
+    // sits comfortably inside the box below and re-centering there (not the
+    // box's own vertical middle) is what makes "look up the mountain when
+    // climbing" fall out of the same solvePitchForNdcY formula.
     this.targetNdcY = -0.375
+    // Fixed NDC dead-zone box (task 13) — measured by the user off their own
+    // screenshot of the "blue frame", so it's a literal constant, not derived
+    // from any panel geometry. The tracked point (this.curve's subject, the
+    // real lightly-smoothed path — see start()) must stay inside this while
+    // playing; the rig only corrects when it nears/exits it.
+    this.deadzone = { xMin: -0.54, xMax: 0.61, yMin: -0.70, yMax: 0.32 }
+    // Soft inset: a correction engages this far inside the box, before the
+    // point actually reaches the true edge. Without it, sitting right at the
+    // boundary would flip correction on/off every frame as normal per-frame
+    // noise straddles the line. Combined with re-centering to a point WELL
+    // inside the box (targetNdcY/targetNdcX, not just past the margin), once
+    // triggered a correction moves the point solidly back inside — it has to
+    // drift all the way back out to re-trigger, so there's no flip-flop.
+    this.deadzoneMargin = 0.06
+    // where a horizontal correction re-centers to — the box's own midpoint,
+    // since (unlike targetNdcY) there's no other established "where the
+    // point belongs" convention for X yet.
+    this.targetNdcX = (this.deadzone.xMin + this.deadzone.xMax) / 2
     this.posHalfLife = 0.9 // s — heavy extra smoothing on top of the already-smooth spine
     this.rotHalfLife = 0.5 // s — final orientation smoothing
 
@@ -282,22 +332,62 @@ export class DroneCam {
     this._applyPose(dt, clamped, clamped >= 1)
   }
 
-  // shared by update()/updateAt(): slew the heading, damp the position onto
-  // the spine, then solve+slew the framing pitch.
+  // shared by update()/updateAt(): dead-zone yaw (task 13 — see the class
+  // comment), damp the position onto the spine, then dead-zone pitch.
   _applyPose(dt, s, arrived) {
-    // 1) slew the heading toward the spine's tangent at s — the hard cap on
-    // angular velocity that makes hairpins physically unable to spin the
-    // camera fast, however sharp they are.
-    this.spine.getTangentAt(s, _stan)
-    _targetDir.set(_stan.x, 0, _stan.z)
-    if (_targetDir.lengthSq() < 1e-8) _targetDir.copy(this._headingDir)
-    else _targetDir.normalize()
-    const maxYawStep = THREE.MathUtils.degToRad(this.maxYawRateDeg) * Math.max(dt, 0)
-    const slewed = slewHeading(this._headingDir, _targetDir, maxYawStep)
-    this._headingDir.set(slewed.x, 0, slewed.z)
+    // 1) yaw: ONLY correct when the subject is nearing/outside the box's
+    // horizontal range — otherwise hold the current heading exactly (the
+    // "does not correct at all" dead-zone behaviour). diff is measured
+    // against THIS._POS/THIS._HEADINGDIR AS THEY STAND FROM LAST FRAME
+    // (position hasn't been re-solved for this frame yet) — using the
+    // not-yet-updated position is unavoidable here (position itself is
+    // computed FROM the heading below, so using the not-yet-computed new
+    // position would be circular) and is a one-frame-lagged approximation;
+    // harmless given how heavily damped this whole rig already is.
+    this.curve.getPointAt(s, _subj)
+    _diff.subVectors(_subj, this._pos)
+    const vFov = THREE.MathUtils.degToRad(this.camera.fov)
+    const aspect = this.camera.aspect || 1
+    // horizontal FOV from vertical FOV + aspect — the "hFovRad" the yaw-as-
+    // pitch relabeling trick below needs (see the class comment).
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect)
 
-    // 2) position: fixed arm/lift behind the spine along that same slewed
-    // heading, then a long critical-damping pass on top ("lisser énormément").
+    // right0: this._headingDir rotated -90° about world up (cross(up,fwd)).
+    // Reused as the "up0" role in the pitch-formula relabeling: the SAME
+    // right0 must be used both to measure the current NDC.x below and to
+    // reconstruct the corrected direction after solving — the solve+
+    // reconstruct pair is self-consistent regardless of right0's chirality,
+    // AS LONG AS both steps agree on it, which they do here.
+    _right.set(this._headingDir.z, 0, -this._headingDir.x)
+    const rightComp = _diff.x * _right.x + _diff.z * _right.z
+    _yawDiff.set(_diff.x, rightComp, _diff.z)
+    // "what NDC.x is it at RIGHT NOW" — pitch argument 0 means "no additional
+    // rotation beyond the current heading" (a small approximation: it treats
+    // the camera as level for this purpose, ignoring the true camera pitch's
+    // second-order effect on horizontal framing — negligible at this rig's
+    // modest pitch range).
+    const actualNdcX = ndcYForPitch(_yawDiff, this._headingDir, 0, hFov)
+    const xOut = actualNdcX < this.deadzone.xMin + this.deadzoneMargin || actualNdcX > this.deadzone.xMax - this.deadzoneMargin
+    _targetDir.copy(this._headingDir)
+    if (dt <= 0 || xOut) {
+      let yaw = solvePitchForNdcY(_yawDiff, this._headingDir, this.targetNdcX, hFov)
+      yaw = THREE.MathUtils.clamp(yaw, -1.1, 1.1) // guard degenerate geometry
+      _targetDir.copy(this._headingDir).multiplyScalar(Math.cos(yaw))
+      _targetDir.x += _right.x * Math.sin(yaw)
+      _targetDir.z += _right.z * Math.sin(yaw)
+      _targetDir.normalize()
+    }
+    // still the SAME hard cap as ever — a correction engaging never means a
+    // snap, it's eased in through this exact rate limiter like everything else.
+    const maxYawStep = THREE.MathUtils.degToRad(this.maxYawRateDeg) * Math.max(dt, 0)
+    if (dt <= 0) this._headingDir.copy(_targetDir)
+    else {
+      const slewed = slewHeading(this._headingDir, _targetDir, maxYawStep)
+      this._headingDir.set(slewed.x, 0, slewed.z)
+    }
+
+    // 2) position: fixed arm/lift behind the spine along that (possibly
+    // just-turned) heading, then a long critical-damping pass on top.
     this._solvePosition(s, _desiredPos)
     const fp = dt <= 0 ? 1 : 1 - Math.pow(2, -dt / this.posHalfLife)
     this._pos.lerp(_desiredPos, fp)
@@ -306,18 +396,23 @@ export class DroneCam {
     this._aim(dt, s, arrived)
   }
 
-  // 3) orientation: solve the pitch that puts the real subject (the "point
-  // d'avancée") at targetNdcY, rate-limit that pitch the same way as yaw,
-  // then build a roll-free look-at quaternion — this rig never banks, since
-  // roll is rotation too and the brief wants almost none.
+  // 3) orientation: dead-zone pitch (mirrors the yaw gate above, using the
+  // real solvePitchForNdcY this time — no relabeling needed), rate-limited
+  // the same way as yaw, then a roll-free look-at quaternion — this rig
+  // never banks, since roll is rotation too and the brief wants almost none.
   _aim(dt, s, arrived) {
     this.curve.getPointAt(s, _subj)
     this.controls.target.copy(_subj) // grabbing OrbitControls pivots around the rider, not empty air
-    _diff.subVectors(_subj, this._pos)
+    _diff.subVectors(_subj, this._pos) // NOW using this frame's just-solved position — no circularity for pitch (position doesn't depend on it)
 
     const vFov = THREE.MathUtils.degToRad(this.camera.fov)
-    let targetPitch = solvePitchForNdcY(_diff, this._headingDir, this.targetNdcY, vFov)
-    targetPitch = THREE.MathUtils.clamp(targetPitch, -1.1, 1.1) // guard degenerate geometry (~63°)
+    const actualNdcY = ndcYForPitch(_diff, this._headingDir, this._pitch, vFov)
+    const yOut = actualNdcY < this.deadzone.yMin + this.deadzoneMargin || actualNdcY > this.deadzone.yMax - this.deadzoneMargin
+    let targetPitch = this._pitch
+    if (dt <= 0 || yOut) {
+      targetPitch = solvePitchForNdcY(_diff, this._headingDir, this.targetNdcY, vFov)
+      targetPitch = THREE.MathUtils.clamp(targetPitch, -1.1, 1.1) // guard degenerate geometry (~63°)
+    }
     if (dt <= 0) {
       this._pitch = targetPitch
     } else {
@@ -352,3 +447,5 @@ const _fwd = new THREE.Vector3()
 const _lookAt = new THREE.Vector3()
 const _targetDir = new THREE.Vector3()
 const _desiredPos = new THREE.Vector3()
+const _right = new THREE.Vector3()
+const _yawDiff = new THREE.Vector3()

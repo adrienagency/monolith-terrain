@@ -1,6 +1,6 @@
 // ROUTE panel — the GPX track as a first-class layer: load a file, style the
-// line (width/colour, gradient/glow/shimmer). Later Parcours tasks extend
-// this same panel with points and playback.
+// line (width/colour, gradient/glow). Later Parcours tasks extend this same
+// panel with points and playback.
 // Docked in the left column, after Camera (Explore, Scan, Camera, Route).
 
 import { slider, color, toggle, select, visibleWhen, button, section, el, refreshAll } from './kit.js'
@@ -19,8 +19,22 @@ export function buildRoutePanel(ctx) {
     tip: 'Load a GPX track and style the line draped over the relief.',
   })
 
+  // Track section stays FIRST and open by default (see the task-13 report) —
+  // Width/Colour are the controls a user reaches for right after loading a
+  // file, so they shouldn't require expanding anything.
   const sTrack = panel.addSection(section('Track', { open: true }))
   sTrack.body.append(button('Load GPX…', () => ctx.loadGpx(), { accent: true }))
+  const colorRow = color({
+    label: 'Colour',
+    get: () => params.gpxColor || params.hudAccent,
+    set: (v) => { params.gpxColor = v; ctx.gpx.setColor(v) },
+  })
+  // Honesty fix: when the gradient ramp is on, gpx.js rebuild() forces the
+  // line material's base colour to white and drives it from per-vertex
+  // gradient colours instead (see its comment) — the Colour swatch would
+  // silently do nothing while that's active. Rather than ship a control that
+  // lies about having an effect, only surface it while Gradient is off.
+  visibleWhen(colorRow, () => !params.gpxGradient)
   sTrack.body.append(
     slider({
       label: 'Width',
@@ -30,11 +44,7 @@ export function buildRoutePanel(ctx) {
       get: () => params.gpxWidth,
       set: (v) => { params.gpxWidth = v; ctx.gpx.setWidth(v) },
     }),
-    color({
-      label: 'Colour',
-      get: () => params.gpxColor || params.hudAccent,
-      set: (v) => { params.gpxColor = v; ctx.gpx.setColor(v) },
-    })
+    colorRow
   )
 
   const sStyle = panel.addSection(section('Line effects', { open: false }))
@@ -53,28 +63,18 @@ export function buildRoutePanel(ctx) {
     toggle({
       label: 'Gradient along track',
       get: () => params.gpxGradient,
-      set: (v) => ctx.gpx.setGradient(v, params.gpxGradientMode),
+      set: (v) => { ctx.gpx.setGradient(v, params.gpxGradientMode); refreshAll() }, // updates modeRow + colorRow visibility right away
     }),
     modeRow,
     toggle({
       label: 'Glow',
       get: () => params.gpxGlow,
       set: (v) => ctx.gpx.setGlow(v),
-    }),
-    toggle({
-      label: 'Shimmer',
-      get: () => params.gpxShimmer,
-      set: (v) => ctx.gpx.setShimmer(v),
     })
   )
 
   const sPoints = panel.addSection(section('Points & markers', { open: false }))
   sPoints.body.append(
-    toggle({
-      label: 'Track points',
-      get: () => params.gpxPoints,
-      set: (v) => ctx.gpx.setPoints(v),
-    }),
     toggle({
       label: 'Start & finish markers',
       get: () => params.gpxMarkers,

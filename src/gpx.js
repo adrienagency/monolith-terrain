@@ -10,8 +10,10 @@ import { LineGeometry } from 'three/addons/lines/LineGeometry.js'
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { latLonToWorld, metersPerPixel, surfaceMetersPerUnit, EARTH_RADIUS_M } from './geo.js'
+import { resamplePath, smoothPath } from './drone-cam.js'
 
 const MAX_POINTS = 2400 // decimation budget — hover & profile stay O(small)
+const _headCurvePos = new THREE.Vector3() // scratch — avoid a per-frame alloc in _updateHead()
 
 export function parseGpx(text) {
   const doc = new DOMParser().parseFromString(text, 'application/xml')
@@ -105,6 +107,20 @@ function distM(a, b) {
   return 2 * R * Math.asin(Math.sqrt(s))
 }
 
+// Screen-space label size for scale=1, in CLIP units (sizeAttenuation:false) —
+// the EXACT same sizing trap as PlacesLayer.BASE_H (see places-layer.js's big
+// comment above its own BASE_H): a sprite's real on-screen size is
+// projectionMatrix[0/5]*scale, NOT scale/2*viewport — at this app's 30° fov
+// that's a ~3.7x factor. Previously this sprite had no sizeAttenuation set at
+// all (Three's default `true`), so it was sized in actual WORLD units (6.8
+// world units wide) and only shrank with perspective distance — with the
+// camera close to the route that's what made "START & FINISH · 25" span ~40%
+// of the screen. Tuned so the label reads at the same visual size as a city
+// name (places-layer.js labels land ~7.5–14px cap-height, measured live) —
+// see the task-13 report for the exact px this produced.
+const GPX_LABEL_BASE_H = 0.0128
+const GPX_LABEL_ASPECT = 512 / 80
+
 function textSprite(text, color, scale = 1, opacity = 1) {
   const c = document.createElement('canvas')
   c.width = 512
@@ -120,10 +136,35 @@ function textSprite(text, color, scale = 1, opacity = 1) {
   const sp = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, opacity })
   )
-  sp.scale.set(6.8 * scale, 1.06 * scale, 1)
+  sp.material.sizeAttenuation = false
+  sp.scale.set(GPX_LABEL_BASE_H * scale * GPX_LABEL_ASPECT, GPX_LABEL_BASE_H * scale, 1)
   sp.renderOrder = 20
   return sp
 }
+
+// Black, downward-pointing triangle for the playback-head marker (replaces
+// the old hover-cursor sphere during playback — see setHover()'s
+// isPlaybackHead branch). Drawn once, sizeAttenuation:false like the labels
+// above, so it stays a legible, constant screen size at any zoom.
+function triangleTexture(px = 64) {
+  const c = document.createElement('canvas')
+  c.width = px
+  c.height = px
+  const ctx = c.getContext('2d')
+  ctx.fillStyle = '#000'
+  ctx.beginPath()
+  ctx.moveTo(px * 0.5, px * 0.94) // apex, pointing down
+  ctx.lineTo(px * 0.06, px * 0.14)
+  ctx.lineTo(px * 0.94, px * 0.14)
+  ctx.closePath()
+  ctx.fill()
+  const tex = new THREE.CanvasTexture(c)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+// same BASE_H sizing convention as GPX_LABEL_BASE_H above — smaller than a
+// label since this is a pointer, not text (tuned via measurement, see report)
+const HEAD_MARKER_BASE_H = 0.006
 
 export class GpxLayer {
   constructor({ scene, camera, terrain, params, getDem }) {
@@ -152,7 +193,8 @@ export class GpxLayer {
     this._dispAlt = null
     this._dispSlope = null
 
-    // hover cursor: accent sphere pinned to the nearest track point
+    // hover cursor: accent sphere pinned to the nearest track point (mouse
+    // hover only — see setHover()'s isPlaybackHead branch)
     this.cursor = new THREE.Mesh(
       new THREE.SphereGeometry(0.26, 20, 14),
       new THREE.MeshBasicMaterial({ color: params.hudAccent, depthTest: false })
@@ -160,6 +202,21 @@ export class GpxLayer {
     this.cursor.renderOrder = 21
     this.cursor.visible = false
     this.group.add(this.cursor)
+
+    // playback-head marker: black downward-pointing triangle, billboarded +
+    // screen-space sized (see triangleTexture()/HEAD_MARKER_BASE_H above).
+    // Positioned each frame in _updateHead() along the lightly-smoothed
+    // _headCurve (see _buildHeadCurve()), never the raw per-vertex track, so
+    // its motion doesn't visibly stutter as headT advances continuously.
+    this.headMarker = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: triangleTexture(), depthTest: false, transparent: true })
+    )
+    this.headMarker.material.sizeAttenuation = false
+    this.headMarker.scale.set(HEAD_MARKER_BASE_H, HEAD_MARKER_BASE_H, 1)
+    this.headMarker.renderOrder = 23
+    this.headMarker.visible = false
+    this.group.add(this.headMarker)
+    this._headCurve = null
 
     this._buildDom()
     this._ray = new THREE.Raycaster()
@@ -238,6 +295,7 @@ export class GpxLayer {
     }
     this.track.world = world
     this._segCount = Math.max(0, world.length - 1)
+    this._buildHeadCurve(world)
 
     const lineColor = this.params.gpxColor || this.params.hudAccent
     const width = this.params.gpxWidth ?? 3
@@ -258,11 +316,6 @@ export class GpxLayer {
       vertexColors: gradientOn,
     })
     this.lineMat.resolution.set(window.innerWidth, window.innerHeight)
-    if (this.params.gpxShimmer) {
-      this.lineMat.dashed = true
-      this.lineMat.dashSize = Math.max(0.6, width * 0.8)
-      this.lineMat.gapSize = Math.max(0.6, width * 0.8)
-    }
     this.line = new Line2(geo, this.lineMat)
     this.line.computeLineDistances()
     this.line.renderOrder = 6
@@ -288,24 +341,6 @@ export class GpxLayer {
       this.glowLine.computeLineDistances()
       this.glowLine.renderOrder = 4
       this.group.add(this.glowLine)
-    }
-
-    // track points — small dots at the (already decimated) vertices, one cheap
-    // THREE.Points draw call so a long track doesn't spam individual meshes
-    if (this.params.gpxPoints) {
-      const ptsGeo = new THREE.BufferGeometry()
-      ptsGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
-      this.pointsMat = new THREE.PointsMaterial({
-        color: new THREE.Color(lineColor),
-        size: 4,
-        sizeAttenuation: false,
-        depthWrite: false,
-        transparent: true,
-        opacity: 0.85,
-      })
-      this.pointsObj = new THREE.Points(ptsGeo, this.pointsMat)
-      this.pointsObj.renderOrder = 7
-      this.group.add(this.pointsObj)
     }
 
     const names = this.track.pointNames || {}
@@ -414,6 +449,29 @@ export class GpxLayer {
     // persisted reveal amount so a rebuild mid-playback (e.g. a terrain
     // rebuild) doesn't snap the drawn line back to 100%
     this._applyReveal(this._revealT)
+  }
+
+  // Light smoothing for the playback-head triangle's motion — same recipe
+  // (and same spacing/pass counts) as DroneCam's own "subject" curve
+  // (drone-cam.js start(): span/260 spacing, then smoothPath(...,2,2)). This
+  // is deliberately LIGHT, not the heavy decimated "spine" the camera flies
+  // against (~14 control points + a wide multi-pass blur) — the marker must
+  // still visibly follow the route's real shape, switchbacks stay
+  // switchbacks, it just shouldn't stutter from vertex-to-vertex GPS jitter
+  // as headT advances continuously between discrete track points.
+  _buildHeadCurve(world) {
+    this._headCurve = null
+    if (!world || world.length < 2) return
+    let span = 0
+    for (let i = 1; i < world.length; i++) span += world[i].distanceTo(world[i - 1])
+    if (span < 1e-3) return
+    const spacing = Math.max(0.4, span / 260)
+    const smoothed = smoothPath(resamplePath(world, spacing), 2, 2).map((p) => new THREE.Vector3(p.x, p.y, p.z))
+    if (smoothed.length < 2) return
+    const curve = new THREE.CatmullRomCurve3(smoothed, false, 'centripetal', 0.5)
+    curve.arcLengthDivisions = 400
+    curve.updateArcLengths()
+    this._headCurve = curve
   }
 
   _elevations() {
@@ -539,18 +597,32 @@ export class GpxLayer {
     this.setHover(best, true, clientX, clientY)
   }
 
-  setHover(i, fromScene, clientX, clientY) {
+  // isPlaybackHead distinguishes the two callers that share this bookkeeping
+  // (hoverIdx tracking, profile crosshair, tooltip text): mouse-driven hover
+  // (from the 3D scene or the profile strip) shows the accent sphere;
+  // playback (from _updateHead()) shows the black triangle marker instead —
+  // see the task-13 brief's "circle -> triangle" ask. The triangle's own
+  // position/visibility is actually set in _updateHead() (it needs the
+  // smoothed _headCurve, not track.world[i]); this only suppresses the
+  // sphere so the two markers never show at once.
+  setHover(i, fromScene, clientX, clientY, isPlaybackHead = false) {
     this.hoverIdx = i
     if (i < 0 || !this.track?.world) {
       this.cursor.visible = false
+      this.headMarker.visible = false
       this.tipEl.classList.add('hidden')
       this._drawProfile()
       return
     }
-    this.cursor.visible = true
-    this.cursor.position.copy(this.track.world[i])
-    const s = Math.max(0.5, this.camera.position.distanceTo(this.cursor.position) * 0.02)
-    this.cursor.scale.setScalar(s)
+    if (isPlaybackHead) {
+      this.cursor.visible = false
+    } else {
+      this.headMarker.visible = false
+      this.cursor.visible = true
+      this.cursor.position.copy(this.track.world[i])
+      const s = Math.max(0.5, this.camera.position.distanceTo(this.cursor.position) * 0.02)
+      this.cursor.scale.setScalar(s)
+    }
 
     const eles = this._elevations()
     const km = this.track.cumKm[i]
@@ -625,18 +697,15 @@ export class GpxLayer {
       this.glowMat?.color.set(c)
     }
     this.cursor.material.color.set(c)
-    this.pointsMat?.color.set(c)
     this._kmTickMat?.color.set(c)
   }
 
   setWidth(v) {
     if (this.lineMat) this.lineMat.linewidth = v
     if (this.glowMat) this.glowMat.linewidth = v * 2.4
-    if (this.pointsMat) this.pointsMat.size = Math.max(2, v * 1.3)
   }
 
-  // gradient / glow need the geometry (vertex colours) or a second line
-  // rebuilt; shimmer only flips a material flag so it stays cheap.
+  // gradient / glow need the geometry (vertex colours) or a second line rebuilt.
   setGradient(on, mode) {
     this.params.gpxGradient = on
     if (mode) this.params.gpxGradientMode = mode
@@ -648,23 +717,9 @@ export class GpxLayer {
     this.rebuild()
   }
 
-  setShimmer(v) {
-    this.params.gpxShimmer = v
-    if (!this.lineMat) return
-    this.lineMat.dashed = v
-    if (v) {
-      const width = this.params.gpxWidth ?? 3
-      this.lineMat.dashSize = Math.max(0.6, width * 0.8)
-      this.lineMat.gapSize = Math.max(0.6, width * 0.8)
-    }
-  }
-
-  // decrements dashOffset each frame for the flowing shimmer highlight, and
-  // (while playing) advances the progressive-reveal head — called from the
+  // advances the progressive-reveal head while playing — called from the
   // main render loop each frame with a real per-frame dt.
   tick(dt) {
-    if (this.params.gpxShimmer && this.lineMat?.dashed) this.lineMat.dashOffset -= dt * 3
-
     if (this.playing && this.track?.world?.length > 1) {
       const totalKm = this.track.cumKm[this.track.cumKm.length - 1] || 0
       const duration = Math.min(90, Math.max(8, totalKm * 1.5))
@@ -732,7 +787,7 @@ export class GpxLayer {
     const n = world.length - 1
     if (n < 0) return
     const headIdx = THREE.MathUtils.clamp(Math.round(this.headT * n), 0, n)
-    this.setHover(headIdx, false)
+    this.setHover(headIdx, false, undefined, undefined, true) // playback: triangle, not the hover sphere
 
     const eles = this._elevations()
     const cumKm = this.track.cumKm
@@ -749,7 +804,22 @@ export class GpxLayer {
     this._dispSlope =
       this._dispSlope == null ? targetSlope : THREE.MathUtils.damp(this._dispSlope, targetSlope, lambda, dt)
 
-    const pos = world[headIdx]
+    // marker position: the LIGHTLY smoothed _headCurve (see _buildHeadCurve),
+    // sampled continuously at headT — not world[headIdx], which would jump
+    // vertex-to-vertex and make the triangle's motion visibly stutter even
+    // though headT itself advances smoothly frame to frame ("ses déplacements
+    // ne sont pas saccadés"). Falls back to the raw vertex if the curve
+    // couldn't be built (degenerate/near-stationary track).
+    const pos = this._headCurve ? this._headCurve.getPointAt(THREE.MathUtils.clamp(this.headT, 0, 1), _headCurvePos) : world[headIdx]
+    const camDist = this.camera.position.distanceTo(pos)
+    // apex-to-ground gap scales with camera distance (same 0.02 factor as the
+    // hover cursor's own distance-scaled size, just above) so the triangle
+    // visually "points at" the track at any zoom instead of the gap shrinking
+    // or ballooning as the camera moves.
+    const off = THREE.MathUtils.clamp(camDist * 0.02, 0.3, 3)
+    this.headMarker.position.set(pos.x, pos.y + off, pos.z)
+    this.headMarker.visible = true
+
     const v = pos.clone().project(this.camera)
     const x = (v.x * 0.5 + 0.5) * window.innerWidth
     const y = (-v.y * 0.5 + 0.5) * window.innerHeight
@@ -765,13 +835,8 @@ export class GpxLayer {
     this.headLabel.classList.toggle('hidden', !(showAlt || showSlope))
   }
 
-  // rebuild-driven toggles — geometry (points/ticks/labels) is only
-  // constructed when its flag is on, so each of these needs a rebuild()
-  setPoints(v) {
-    this.params.gpxPoints = v
-    this.rebuild()
-  }
-
+  // rebuild-driven toggles — geometry (ticks/labels) is only constructed
+  // when its flag is on, so each of these needs a rebuild()
   // single toggle for both markers — see the rebuild() comment above
   setMarkers(v) {
     this.params.gpxMarkers = v
@@ -829,13 +894,6 @@ export class GpxLayer {
     }
     this.startSprite = this.endSprite = null
     this.waypoints = []
-    if (this.pointsObj) {
-      this.group.remove(this.pointsObj)
-      this.pointsObj.geometry.dispose()
-      this.pointsMat.dispose()
-      this.pointsObj = null
-      this.pointsMat = null
-    }
     for (const m of this.kmMarkers || []) {
       this.group.remove(m)
       if (m.isSprite) {
@@ -858,6 +916,8 @@ export class GpxLayer {
     this._disposeLine()
     this.track = null
     this.cursor.visible = false
+    this.headMarker.visible = false
+    this._headCurve = null
     this.tipEl.classList.add('hidden')
     this.profileEl.classList.add('hidden')
     this.playing = false
