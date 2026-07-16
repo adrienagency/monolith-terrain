@@ -7,8 +7,12 @@ import { makeLabelTexture, labelInk } from './text-label.js'
 import { labelScale } from './place-scale.js'
 
 const HALF = TERRAIN_SIZE / 2
-const CLEARANCE = 1.5 // world units the label floats above the taller of local ground / patch summit
-const GRID = 24 // coarse sample grid used to find the patch's max terrain height
+// World units the label floats above the city's OWN ground point. It does NOT
+// need to clear the patch's highest summit: the sprite is depthTest:false, so it
+// is always drawn over the relief and can never sink into rock. Anchoring to the
+// city's own GPS/terrain height keeps the name visually attached to its city
+// instead of hovering absurdly high over a distant peak.
+const CLEARANCE = 0.9
 // Screen-space label height for scale 1. With sizeAttenuation:false the sprite
 // scale is in CLIP units, not world units — 2.0 spans the whole viewport height —
 // so a readable ~16 px name on a ~900 px viewport needs a small value here.
@@ -44,21 +48,6 @@ export class PlacesLayer {
     this.meshes = []
     this._entries = []
   }
-  // Coarse scan of the terrain over the visible patch to find its highest point,
-  // so labels can float above every summit rather than just their own city's spot.
-  _patchMaxY(terrain) {
-    if (!terrain.sample) return 0
-    let maxY = 0
-    for (let i = 0; i <= GRID; i++) {
-      const x = -HALF + (TERRAIN_SIZE * i) / GRID
-      for (let j = 0; j <= GRID; j++) {
-        const z = -HALF + (TERRAIN_SIZE * j) / GRID
-        const h = terrain.sample(x, z)
-        if (h > maxY) maxY = h
-      }
-    }
-    return maxY
-  }
   async rebuild({ dem, terrain, params }) {
     const id = ++this._buildId
     this._clear()
@@ -76,14 +65,13 @@ export class PlacesLayer {
     const ink = labelInk(params.darkMode)
     const sizeMul = params.placesSize ?? 1
     const halo = params.placesHalo ? ink.halo : null
-    const patchMaxY = this._patchMaxY(terrain)
     const dotGeo = new THREE.CircleGeometry(0.075, 12); dotGeo.rotateX(-Math.PI / 2)
     const dotMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(ink.color), transparent: true, opacity: 0.85, depthWrite: false, depthTest: false })
     const leaderMat = new THREE.LineBasicMaterial({ color: new THREE.Color(ink.color), transparent: true, opacity: 0.55, depthWrite: false, depthTest: false })
 
     for (const p of picks) {
       const groundY = terrain.sample ? terrain.sample(p.w.x, p.w.z) : 0
-      const labelY = Math.max(groundY, patchMaxY) + CLEARANCE
+      const labelY = groundY + CLEARANCE
       const scale = labelScale(p.pop, p.cap) * sizeMul
 
       // ground dot, anchored at the city's real elevation
