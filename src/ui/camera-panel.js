@@ -1,5 +1,5 @@
-// CAMERA panel — viewpoint, focus, motion and performance. A first-class
-// sibling of Create in the right dock, not a child of it.
+// CAMERA panel — viewpoint, focus, motion and performance. Docked in the
+// left dock, directly below Scan.
 
 import { el, slider, toggle, select, button, section } from './kit.js'
 import { Panel } from './shell.js'
@@ -12,7 +12,7 @@ export function buildCameraPanel(ctx) {
   const panel = new Panel({
     title: 'Camera',
     icon: ICON,
-    side: 'right',
+    side: 'left',
     width: 268,
     tip: 'Viewpoint, focus, motion and rendering performance.',
   })

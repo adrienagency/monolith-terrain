@@ -1931,7 +1931,7 @@ const createPanel = buildCreatePanel({
   syncDark: () => topBar.syncDark(),
 })
 
-// Shaders panel — right dock, between Create and Camera (created here so it
+// Shaders panel — right dock, between Create and Map (created here so it
 // docks between them). Holds the surface-shader treatments split out of Scan.
 let shadersRefreshFn = () => {} // re-renders the Shaders panel controls on exclusivity changes
 const shadersPanel = buildShadersPanel({
@@ -2030,6 +2030,27 @@ const shadersPanel = buildShadersPanel({
   },
 })
 
+// Map panel — right dock, after Shaders (docks Create, Shaders, Map).
+// Holds the cartographic layers (roads/water/places) plus the contour/grid/
+// marker controls relocated out of Create's old "Map style" section.
+const mapPanel = buildMapPanel({
+  params,
+  u: () => terrain.mapUniforms,
+  mapLayers,
+  rebuildMapLayers,
+  peaksLayer,
+  setLabelsVisible: (v) => (labels.visible = v && modes.mode === 'surface'),
+})
+
+const explorePanel = buildExplorePanel({
+  flyTo: (lat, lon, zoom) => modes.flyTo(lat, lon, zoom),
+})
+
+const scanPanel = buildScanPanel({
+  runScan: (typeId) => scan.trigger(typeId, { x: controls.target.x, z: controls.target.z }, params.scanDuration),
+})
+
+// Camera panel — left dock, docked directly below Scan (Explore, Scan, Camera).
 const cameraPanel = buildCameraPanel({
   params,
   camera,
@@ -2064,26 +2085,6 @@ const cameraPanel = buildCameraPanel({
     drone.stop()
     camera.up.set(0, 1, 0)
   },
-})
-
-// Map panel — right dock, after Camera (docks Create, Shaders, Camera, Map).
-// Holds the cartographic layers (roads/water/places) plus the contour/grid/
-// marker controls relocated out of Create's old "Map style" section.
-const mapPanel = buildMapPanel({
-  params,
-  u: () => terrain.mapUniforms,
-  mapLayers,
-  rebuildMapLayers,
-  peaksLayer,
-  setLabelsVisible: (v) => (labels.visible = v && modes.mode === 'surface'),
-})
-
-const explorePanel = buildExplorePanel({
-  flyTo: (lat, lon, zoom) => modes.flyTo(lat, lon, zoom),
-})
-
-const scanPanel = buildScanPanel({
-  runScan: (typeId) => scan.trigger(typeId, { x: controls.target.x, z: controls.target.z }, params.scanDuration),
 })
 
 // the exclusive per-column accordion now lives in the Panel shell (setCollapsed
