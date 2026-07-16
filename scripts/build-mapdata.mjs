@@ -166,12 +166,25 @@ async function main() {
   // roads: map NE `type` to our 3 classes so the renderer styles by weight
   const roadClass = (t = '') => (/Major Highway|Freeway|Beltway/i.test(t) ? 'motorway' : /Secondary|Road/i.test(t) ? 'secondary' : 'primary')
   const roadsRaw = await ne('10m', 'cultural', 'ne_10m_roads')
-  // Scalerank cap relaxed from 3 to 5 (was tightened all the way to 3 to fit
-  // a strict 2 MB budget under the old aggressive epsilon). With near-lossless
-  // ROADS_EPS the full unfiltered network is ~21 MB, so we still cap — just
-  // much less aggressively — to land in the ~5-8 MB range while keeping
-  // faithful shapes and including more of the road network than before.
-  const ROADS_SCALERANK_CAP = 5
+  // Scalerank cap relaxed from 5 to 7 (task 7 — mid-zoom band, 10-50 km, was
+  // starved: NE hit 0 roads by demZoom 11/46 km because cap 5 keeps only
+  // motorway-class). Measured against the live NE 10m source (56,601 raw
+  // features; scalerank histogram 3:10024 4:5707 5:4107 6:5771 7:8521
+  // 8:7107 9:13152 10:2212 — nothing above 10 in this source despite the
+  // schema allowing higher):
+  //   cap 5 (old):  19,838 features, 7.42 MB
+  //   cap 7 (new):  34,130 features, 13.21 MB
+  //   cap 8:        41,237 features, 16.02 MB  (over the ~15 MB ceiling)
+  //   uncapped(10): 56,601 features, 21.73 MB
+  // Cap 7 is the highest cap that still fits under the ~15 MB single-layer
+  // ceiling — it folds in scalerank 6 (secondary) and 7 (tertiary-ish),
+  // which is exactly the class Chamonix's mid-zoom band needed. Going to 8
+  // would blow the budget for +7 MB of marginal detail already covered by
+  // the OSM tier once zoomed further in. ROADS_EPS/geometry fidelity is
+  // untouched — this only changes which features are INCLUDED, never how
+  // their shapes are simplified (road geometry must never be simplified
+  // further, per the standing project constraint).
+  const ROADS_SCALERANK_CAP = 7
   const roads = trimFeatures(
     { type: 'FeatureCollection', features: roadsRaw.features.filter((f) => f.geometry && scalerankOf(f.properties || {}) <= ROADS_SCALERANK_CAP) },
     (p) => ({ name: nameOf(p), min_zoom: numZoom(p), scalerank: scalerankOf(p), kind: roadClass(p.type ?? p.TYPE) }),

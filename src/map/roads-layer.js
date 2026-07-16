@@ -7,7 +7,35 @@ import { fetchOverpassLines } from './overpass.js'
 import { makeInsideBlock, clipPolylineToBlock } from './block-clip.js'
 import { roadRank, relativeTiers, tierDepth } from './road-tier.js'
 
-export const OSM_MIN_ZOOM = 12 // at/above this demZoom, roads come from full-detail OSM
+// At/above this demZoom, roads AND water come from full-detail OSM (shared
+// with water-layer.js, which imports this same constant).
+//
+// Roads used to gate OSM per-notch (detail>=3 -> z10, >=2 -> z11, else z12),
+// on the theory that more detail should mean "reach for OSM from further
+// out". That theory broke on measurement: roadHighwayFilter() already
+// returns the SAME bare `["highway"]` predicate for every notch (see
+// overpass.js), so all three notches fetch identical Overpass data and only
+// differ in client-side tier filtering (road-tier.js). Gating the FETCH
+// itself per-notch just meant notch 1/2 got zero OSM roads until z12 (empty
+// mid-zoom band) while notch 3 got the full unfiltered payload three zoom
+// levels earlier — measured at 43,943+ segments with no cap, i.e. the
+// "trop de détail" half of the bug report.
+//
+// One shared threshold, live-measured against the public Overpass API at a
+// real patch bbox (see task-7 report for the full table):
+//   demZoom 10 (91 km): Chamonix 234,594 ways / 286 MB — unusable
+//   demZoom 11 (46 km): Chamonix  48,707 ways /  62 MB — still too heavy
+//   demZoom 12 (24 km): Chamonix  10,752 ways /  15 MB — sane
+// 12 is the lowest zoom whose payload is sane for the common (non-dense)
+// case. It is NOT sane everywhere: the same z12 bbox over central Paris
+// measured 351,414 ways / 238 MB, and z13/z14 Paris bboxes 504'd outright.
+// That's an accepted risk, not a regression: fetchOverpassLines already
+// falls back to the Natural Earth tier on any fetch failure (never blank),
+// and Part 1 of this fix un-starved that NE tier, so a dense-city 504 now
+// degrades to "richer NE roads" instead of "no roads at all". Tier DEPTH
+// (tierDepth in road-tier.js) is what keeps the sane cases from flooding —
+// zoom-aware per notch, see that file for the full curve.
+export const OSM_MIN_ZOOM = 12
 
 const STYLE = { motorway: { widthPx: 2.6 }, primary: { widthPx: 1.8 }, secondary: { widthPx: 1.1 } }
 // Relative tier (0 = most important class PRESENT in the patch) → weight class.
@@ -30,10 +58,11 @@ export class RoadsLayer {
     if (!params.roadsEnabled || !dem || params.source !== 'real') { this.usingOsm = false; this.loading = false; return }
     const bounds = patchBounds(dem)
     const zoom = params.demZoom ?? 8
-    // the detail notch pulls full-OSM roads from further out: crank detail → OSM
-    // kicks in at a lower zoom, so more road detail is visible when zoomed back.
-    const osmThreshold = params.roadsDetail >= 3 ? 10 : params.roadsDetail >= 2 ? 11 : 12
-    const useOsm = zoom >= osmThreshold
+    // OSM activation is one shared threshold for every notch (see the
+    // OSM_MIN_ZOOM comment above for why) — which classes actually render
+    // is decided client-side and zoom-aware by tierDepth() below, not by
+    // gating the fetch per-notch.
+    const useOsm = zoom >= OSM_MIN_ZOOM
 
     // gather rings as {coords:[lon,lat][], rank} from the chosen tier
     let rings = null
@@ -61,7 +90,7 @@ export class RoadsLayer {
     // with no motorway still renders its nationals at the heaviest weight
     // instead of the patch coming back empty.
     const tiers = relativeTiers(rings.map((r) => r.rank))
-    const depth = tierDepth(params.roadsDetail)
+    const depth = tierDepth(params.roadsDetail, zoom)
     rings = rings.filter((r) => tiers.get(r.rank) < depth)
 
     const fp = terrain.blockFootprint(); const insideBlock = makeInsideBlock(fp)

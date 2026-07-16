@@ -44,8 +44,51 @@ test('relativeTiers: empty input yields an empty map', () => {
   assert.equal(relativeTiers([]).size, 0)
 })
 
-test('tierDepth: 1 -> 2, 2 -> 4, 3 -> unrestricted', () => {
-  assert.equal(tierDepth(1), 2)
-  assert.equal(tierDepth(2), 4)
-  assert.equal(tierDepth(3), Infinity)
+test('tierDepth: far zoom (demZoom<=9, the 181km+ band) caps every notch, including 3', () => {
+  assert.equal(tierDepth(1, 9), 1)
+  assert.equal(tierDepth(2, 9), 1)
+  assert.equal(tierDepth(3, 9), 2)
+  assert.notEqual(tierDepth(3, 9), Infinity)
+})
+
+test('tierDepth: mid-zoom band (demZoom 10-11, the reported 46-91km bug band) stays finite for notch 3', () => {
+  // this is exactly the band the bug report measured as either empty
+  // (notch 1/2, before OSM_MIN_ZOOM was shared) or flooded with 43,943+
+  // unrestricted OSM segments (notch 3, before tierDepth was zoom-aware).
+  assert.equal(tierDepth(3, 10), 4)
+  assert.equal(tierDepth(3, 11), 4)
+  assert.notEqual(tierDepth(3, 10), Infinity)
+  assert.notEqual(tierDepth(3, 11), Infinity)
+})
+
+test('tierDepth: close zoom (demZoom>=13) leaves notch 3 fully unrestricted — must not regress', () => {
+  assert.equal(tierDepth(3, 13), Infinity)
+  assert.equal(tierDepth(3, 20), Infinity)
+})
+
+test('tierDepth: notch 1/2 plateau at their historical constant depths once zoomed in', () => {
+  assert.equal(tierDepth(1, 13), 2)
+  assert.equal(tierDepth(2, 13), 4)
+  assert.equal(tierDepth(1, 20), 2)
+  assert.equal(tierDepth(2, 20), 4)
+})
+
+test('tierDepth: for a fixed notch, depth is monotonically non-decreasing as zoom increases (progressive opening)', () => {
+  const zooms = [4, 8, 9, 10, 11, 12, 13, 16]
+  for (const detail of [1, 2, 3]) {
+    let prev = -Infinity
+    for (const zoom of zooms) {
+      const d = tierDepth(detail, zoom)
+      assert.ok(d >= prev, `detail ${detail} zoom ${zoom}: depth ${d} regressed below previous ${prev}`)
+      prev = d
+    }
+  }
+})
+
+test('tierDepth: at any given zoom, higher notches are never MORE restrictive than lower ones', () => {
+  for (const zoom of [8, 9, 10, 11, 12, 13, 16]) {
+    const d1 = tierDepth(1, zoom), d2 = tierDepth(2, zoom), d3 = tierDepth(3, zoom)
+    assert.ok(d1 <= d2, `zoom ${zoom}: notch1 depth ${d1} > notch2 depth ${d2}`)
+    assert.ok(d2 <= d3, `zoom ${zoom}: notch2 depth ${d2} > notch3 depth ${d3}`)
+  }
 })
