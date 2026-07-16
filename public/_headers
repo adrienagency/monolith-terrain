@@ -1,0 +1,33 @@
+# Netlify cache policy.
+#
+# Netlify's default for EVERY asset is `public,max-age=0,must-revalidate`, which
+# forces a revalidation round-trip per file on every single load — even when the
+# browser already holds the bytes. Measured on shibumap.com before this file:
+# the content-hashed JS bundles, roads.json (2.8 MB brotli) and every water tile
+# all revalidated on each visit. Netlify already brotli-compresses these for us
+# (a 1,091,243 B tile ships as 240,795 B, 4.5x), so transfer was never the
+# problem — the needless round-trips were.
+
+# Vite content-hashes these filenames, so the bytes behind a given name can
+# never change. Revalidating them is pure waste; cache them forever.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Fonts and textures are equally static in practice.
+/textures/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Map data is NOT content-hashed, so it can't be immutable: a rebuild reuses the
+# same paths. Cache for a day, then serve stale instantly while refreshing in the
+# background — revisiting a zone stops costing a round-trip per tile. The cost is
+# that a data rebuild takes up to a day to reach a returning visitor; if that
+# ever matters, version the path (e.g. /data/water-tiles/<release>/…) and make
+# this immutable too.
+/data/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+# The entry point must stay fresh: it's what points at the hashed asset names.
+/
+  Cache-Control: public, max-age=0, must-revalidate
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
