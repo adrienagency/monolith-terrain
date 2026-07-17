@@ -137,9 +137,63 @@
 //         caps sit well under the ~102°/s peak that was measured literally
 //         nauseating in the original brief (task 13) — see this.
 //         maxYawRateDeg's own comment for the re-measured peak this actually
-//         produces on the real Europaweg fixture, and the task-28 report for
-//         the full before/after acceptance numbers (mean/median |NDC| dist
-//         from centre, % on-screen, occlusion%, min clearance).
+//         produces on the real Europaweg fixture.
+//
+//     BUG CAUGHT MID-TASK: a first pass raised only the rate caps and left
+//     the dead-zone GATE in place, still keyed off the old (and, it turns
+//     out, badly asymmetric) box — deadzone.yMin/yMax spanned -0.43..0.80
+//     (1.23 NDC units tall) against xMin/xMax's -0.36..0.35 (0.61 wide), so
+//     pitch corrections engaged far less often than yaw's even after the
+//     cap raise (a cap only matters once something asks to move). Live
+//     playback caught this immediately: "tu suis latéralement, la caméra
+//     s'élève, mais il n'y a quasiment aucun mouvement pour que la caméra
+//     pivote vers le haut ou vers le bas, du coup, le curseur sort
+//     largement de la zone centrale". Retiring the gate on BOTH axes (not
+//     just raising the caps) is what actually fixed it — see _aim()'s own
+//     comment. This is also why the acceptance numbers below are split by
+//     axis (mean |NDC.x| vs mean |NDC.y| separately), not just a combined
+//     distance: a combined average is exactly the kind of number that would
+//     have hidden this bug (X was fine the whole time; only Y was broken).
+//
+//     MEASURED on the real europaweg.gpx fixture (4,911 GPX points -> 1,637
+//     drape-resampled world points, 37.13km, reveal duration 55.7s, driven
+//     deterministically via updateAt() at dt=1/30 — see the module doc/test
+//     fixture notes), same-session BEFORE/AFTER comparison (task-26 code —
+//     commit cb0b2f8 — vs this commit, both run against the byte-identical
+//     frozen world-point array and the SAME live terrain.sample(), so the
+//     only variable is the code):
+//       Follow speed 1x (default):
+//         mean |NDC.x|  0.052 -> 0.036   mean |NDC.y|  0.435 -> 0.187
+//         mean |NDC| dist (combined) 0.444 -> 0.199   median 0.365 -> 0.110
+//         % on-screen   96.9% -> 97.1%   peak yaw 13.0 -> 50.0°/s (at cap)
+//         peak pitch 22.0 -> 85.0°/s (at cap)   min clearance 2.6 -> 2.6 (floor, unchanged)
+//       Follow speed 3x (top of the UI slider):
+//         mean |NDC.x|  0.107 -> 0.053   mean |NDC.y|  0.551 -> 0.223
+//         mean |NDC| dist (combined) 0.579 -> 0.241   median 0.512 -> 0.131
+//         % on-screen   88.7% -> 95.2%
+//     The Y-axis number is the headline: it was the axis the field report
+//     was about, and it drops by more than half at every speed tested,
+//     while X (already fine) improves too. % on-screen improves most at the
+//     higher speeds, where the old dead-zone rig was furthest behind.
+//       Occlusion (independent line-of-sight check, SEPARATE from
+//       resolveOcclusion's own march, same methodology the task-26 report
+//       used): 14-step (matches this.occlusionSteps) 2.45% -> 2.57%;
+//       24-step (finer, catches what a 14-step march can step over) 16.5%
+//       -> 17.1%. ESSENTIALLY UNCHANGED, as expected — this task touched
+//       framing only, never resolveOcclusion or its tuning. Flagged
+//       here anyway because it does NOT reproduce the task-26 report's
+//       claimed 0.0%: on the current live terrain state, occlusion was
+//       ALREADY nonzero under an independent check before any task-28
+//       change, most likely because a coarse (14-sample) ray march
+//       structurally under-detects on this fixture's own extreme relief —
+//       a narrow balcony trail cut into a ~1000m valley wall, at the
+//       tight 4.5/2.25 standoff task 26 landed on. Re-tuning
+//       resolveOcclusion itself is out of this task's scope (framing/rate
+//       caps only) and risks second-guessing a separately-reviewed
+//       decision; recorded here as a known pre-existing gap, not a task-28
+//       regression — min ground clearance held at exactly 2.6 (the floor)
+//       in every run, so the camera never burrowed into terrain either way.
+//
 //     What's UNCHANGED and still absolute: no roll, ever; occlusion
 //     avoidance (resolveOcclusion()) still runs on the realized position
 //     every frame, unaffected by any of the above since it operates AFTER
@@ -519,10 +573,12 @@ export class DroneCam {
     // fractional increases since task 13. 85 keeps the same ~1.7x
     // pitch:yaw ratio every prior round in this file used (22/13 ≈ 1.69,
     // 85/50 = 1.7). Both remain under half the ~102°/s peak that was
-    // measured literally nauseating in the original task-13 brief — see the
-    // task-28 report for the actual peak yaw this produces on the real
-    // Europaweg fixture (the cap is a ceiling, not a target: continuous
-    // centering only saturates it during the sharpest switchbacks).
+    // measured literally nauseating in the original task-13 brief. Measured
+    // on the real Europaweg fixture (see the class comment's TASK 28 note
+    // for the full before/after table): peak yaw saturates the cap exactly
+    // at 50.0°/s and peak pitch at 85.0°/s — the cap IS the ceiling reached
+    // on this fixture's sharpest switchbacks, continuous centering keeps
+    // asking for more than either cap allows through most of the climb.
     this.maxYawRateDeg = 50 // deg/s
     this.maxPitchRateDeg = 85 // deg/s
     // task 28: CONTINUOUS centering target (see the class comment's TASK 28
