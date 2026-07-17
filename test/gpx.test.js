@@ -54,6 +54,7 @@ let pickKmInterval
 let pickVillagesAlongTrack
 let villageLeadKm
 let villageOpacity
+let detectLoop
 let THREE
 before(async () => {
   globalThis.DOMParser = class {
@@ -71,6 +72,7 @@ before(async () => {
     pickVillagesAlongTrack,
     villageLeadKm,
     villageOpacity,
+    detectLoop,
   } = await import('../src/gpx.js'))
 })
 
@@ -263,6 +265,33 @@ test('villageLeadKm scales with track length within its clamped band', () => {
   assert.equal(villageLeadKm(1), 0.1) // clamped to the 100m floor
   assert.equal(villageLeadKm(200), 1.2) // clamped to the 1.2km ceiling
   assert.ok(villageLeadKm(30) > villageLeadKm(10), 'a longer track gets a longer lead')
+})
+
+// ---- loop detection (task 22 §6: reused by arch.js for start/finish arches) --
+
+test('detectLoop: a track ending back near its own start is a loop', () => {
+  const world = [
+    { x: 0, y: 0, z: 0 },
+    { x: 10, y: 0, z: 0 },
+    { x: 10, y: 0, z: 10 },
+    { x: 0.2, y: 0, z: 0.1 }, // close to start, within 1.5% of the ~30-unit drawn length
+  ]
+  assert.equal(detectLoop(world), true)
+})
+
+test('detectLoop: an out-and-back that ends far from its start is not a loop', () => {
+  const world = [
+    { x: 0, y: 0, z: 0 },
+    { x: 10, y: 0, z: 0 },
+    { x: 20, y: 0, z: 0 },
+  ]
+  assert.equal(detectLoop(world), false)
+})
+
+test('detectLoop is degenerate-safe (empty / single-point track)', () => {
+  assert.equal(detectLoop([]), false)
+  assert.equal(detectLoop([{ x: 0, y: 0, z: 0 }]), false)
+  assert.equal(detectLoop(null), false)
 })
 
 test('villageOpacity ramps in before the hit, peaks at it, fades out after', () => {

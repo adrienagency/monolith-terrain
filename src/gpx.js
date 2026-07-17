@@ -12,6 +12,7 @@ import { TERRAIN_SIZE } from './terrain.js'
 import { latLonToWorld, metersPerPixel, surfaceMetersPerUnit, EARTH_RADIUS_M } from './geo.js'
 import { loadLayer } from './map/geo-data.js'
 import { makeLabelTexture, labelInk, labelFontReady } from './map/text-label.js'
+import { computeArchSpecs, buildArchMesh } from './arch.js'
 
 const MAX_POINTS = 2400 // decimation budget — hover & profile stay O(small)
 
@@ -94,6 +95,38 @@ function slopeRampColor(gradePct) {
 function progressRampColor(t) {
   const hue = (0.58 + THREE.MathUtils.lerp(0, 0.72, THREE.MathUtils.clamp(t, 0, 1))) % 1
   return new THREE.Color().setHSL(hue, 0.72, 0.55)
+}
+
+// plain-object 3D distance (not THREE.Vector3.distanceTo) so detectLoop stays
+// usable from a unit test with bare {x,y,z} points, no THREE instance needed.
+function dist3(a, b) {
+  const dx = a.x - b.x
+  const dy = (a.y ?? 0) - (b.y ?? 0)
+  const dz = a.z - b.z
+  return Math.sqrt(dx * dx + dy * dy + dz * dz)
+}
+
+// Is this drawn (world-space) track a loop? Same tolerance rule rebuild() has
+// always used (see its own comment, preserved verbatim below) — extracted so
+// arch.js (task 22 §6: one arch on a loop, two on a point-to-point route) and
+// the GpxLayerManager can both reuse the EXACT same answer rebuild() draws
+// from, instead of a second, driftable copy of this math.
+//
+// Loop detection: compare the first/last track points in WORLD units (not
+// lat/lon — this is what's actually drawn) against a tolerance relative to
+// the track's own drawn length, not a fixed distance. A fixed meter
+// threshold would false-match a tiny out-and-back track or miss an obvious
+// loop on a huge one. A closed loop rarely re-samples the exact same GPS fix
+// as the start, so this must not be an exact equality check either — 1.5% of
+// the total drawn length, floored at 1 world unit (roughly one GPS sample's
+// worth of jitter at this scale), is generous enough to catch a real loop's
+// closing gap without mistaking two merely-nearby points for the same place.
+export function detectLoop(world) {
+  if (!world || world.length < 2) return false
+  let worldLen = 0
+  for (let i = 1; i < world.length; i++) worldLen += dist3(world[i], world[i - 1])
+  const loopTol = Math.max(1, worldLen * 0.015)
+  return dist3(world[0], world[world.length - 1]) <= loopTol
 }
 
 // haversine meters
@@ -249,7 +282,7 @@ export function villageOpacity(km, hitKm, leadKm, fadeKm) {
 const GPX_LABEL_BASE_H = 0.0128
 const GPX_LABEL_ASPECT = 512 / 80
 
-function textSprite(text, color, scale = 1, opacity = 1) {
+function textSprite(text, color, scale = 1, opacity = 1, renderOrder = 20) {
   const c = document.createElement('canvas')
   c.width = 512
   c.height = 80
@@ -266,7 +299,7 @@ function textSprite(text, color, scale = 1, opacity = 1) {
   )
   sp.material.sizeAttenuation = false
   sp.scale.set(GPX_LABEL_BASE_H * scale * GPX_LABEL_ASPECT, GPX_LABEL_BASE_H * scale, 1)
-  sp.renderOrder = 20
+  sp.renderOrder = renderOrder
   return sp
 }
 
@@ -293,6 +326,15 @@ function triangleTexture(px = 64) {
 // same BASE_H sizing convention as GPX_LABEL_BASE_H above — smaller than a
 // label since this is a pointer, not text (tuned via measurement, see report)
 const HEAD_MARKER_BASE_H = 0.006
+
+// same sizeAttenuation:false / BASE_H convention yet again (see the big
+// comment on GPX_LABEL_BASE_H above — this app's #1 recurring sizing trap:
+// real on-screen size = projectionMatrix[5]*scale, ~3.7x the naive
+// scale/2*viewport formula at this app's 30° fov). Square aspect (the sport
+// icons are 24x24), sized between the label (0.0128) and the pointer
+// triangle (0.006) — big enough to read as a small glyph, not a smudge, at
+// the ~14-16px measured live (see the task-22 report).
+const HEAD_ICON_BASE_H = 0.011
 
 // village announcements (task 16 §3) — "plus de 5k habitants" per the brief,
 // verbatim.
@@ -365,6 +407,32 @@ export class GpxLayer {
     this.group.add(this.headMarker)
     this._headDisp = new THREE.Vector3()
     this._headDispValid = false
+
+    // sport-type billboard riding above the playback head (task 22 §4) —
+    // same sizeAttenuation:false convention as the triangle above; empty
+    // (no map) until setIcon() is called, so a layer with no icon assigned
+    // costs nothing extra. Texture lifecycle is owned by the CALLER
+    // (GpxLayerManager, which may share one texture across several layers
+    // using the same default sport) — this class only assigns/clears the
+    // material's map, never disposes it.
+    this.headIcon = new THREE.Sprite(new THREE.SpriteMaterial({ map: null, depthTest: false, transparent: true }))
+    this.headIcon.material.sizeAttenuation = false
+    this.headIcon.scale.set(HEAD_ICON_BASE_H, HEAD_ICON_BASE_H, 1)
+    this.headIcon.renderOrder = 24
+    this.headIcon.visible = false
+    this.group.add(this.headIcon)
+
+    // multi-layer stacking (task 22 §2, "comme dans Figma") — an additive
+    // renderOrder offset + a tiny world-Y nudge, set via setRenderDepth()
+    // from GpxLayerManager.reorder(). Both default to zero, so a bare
+    // `new GpxLayer(...)` (every pre-existing single-track call site) keeps
+    // the EXACT renderOrder/height values it always had.
+    this._renderOffset = 0
+    this._depthOffsetY = 0
+
+    // start/finish 3D arches (task 22 §6) — built in rebuild(), disposed in
+    // _disposeArches(); see that method + arch.js for the placement math.
+    this._archGroups = []
 
     // along-track village announcements (task 16 §3) — precomputed once per
     // rebuild() (see _buildVillages()), then just a cheap opacity lookup per
@@ -448,7 +516,10 @@ export class GpxLayer {
     for (const p of this.track.points) {
       const w = latLonToWorld(dem, p.lat, p.lon)
       const inside = Math.abs(w.x) < TERRAIN_SIZE / 2 && Math.abs(w.z) < TERRAIN_SIZE / 2
-      const y = inside ? this.terrain.sample(w.x, w.z) + 0.16 : 0.16
+      // _depthOffsetY (task 22 §2): a small per-layer lift so two stacked
+      // layers whose tracks coincide (e.g. the same GPX loaded twice) don't
+      // z-fight — see GpxLayerManager.reorder()/setRenderDepth().
+      const y = (inside ? this.terrain.sample(w.x, w.z) + 0.16 : 0.16) + this._depthOffsetY
       world.push(new THREE.Vector3(w.x, y, w.z))
       pts.push(w.x, y, w.z)
     }
@@ -461,6 +532,7 @@ export class GpxLayer {
     const eles = this._elevations()
     const gradientOn = !!this.params.gpxGradient
     const vertexColors = gradientOn ? this._trackColors(eles) : null
+    const ro = this._renderOffset
 
     const geo = new LineGeometry()
     geo.setPositions(pts)
@@ -476,7 +548,7 @@ export class GpxLayer {
     this.lineMat.resolution.set(window.innerWidth, window.innerHeight)
     this.line = new Line2(geo, this.lineMat)
     this.line.computeLineDistances()
-    this.line.renderOrder = 6
+    this.line.renderOrder = 6 + ro
     this.group.add(this.line)
 
     // glow: a second, wider, additive, low-opacity halo behind the main line
@@ -497,40 +569,35 @@ export class GpxLayer {
       this.glowMat.resolution.set(window.innerWidth, window.innerHeight)
       this.glowLine = new Line2(glowGeo, this.glowMat)
       this.glowLine.computeLineDistances()
-      this.glowLine.renderOrder = 4
+      this.glowLine.renderOrder = 4 + ro
       this.group.add(this.glowLine)
     }
 
     const names = this.track.pointNames || {}
     const mk = (label, v, scale = 1, opacity = 1) => {
-      const s = textSprite(label, this.params.hudAccent, scale, opacity)
+      const s = textSprite(label, this.params.hudAccent, scale, opacity, 20 + ro)
       s.position.copy(v).add(new THREE.Vector3(0, scale > 0.8 ? 1.25 : 0.85, 0))
       this.group.add(s)
       return s
     }
 
-    // start / finish markers — ONE toggle governs both (gpxMarkers): a route
-    // has a start and an end, showing only one rarely makes sense, so this
-    // is a single on/off rather than two independent switches. A custom name
-    // (set via setPointName on index 0 / last) overrides the default label.
-    //
-    // Loop detection: compare the first/last track points in WORLD units
-    // (not lat/lon — this is what's actually drawn) against a tolerance
-    // relative to the track's own drawn length, not a fixed distance. A
-    // fixed meter threshold would false-match a tiny out-and-back track or
-    // miss an obvious loop on a huge one. A closed loop rarely re-samples
-    // the exact same GPS fix as the start, so this must not be an exact
-    // equality check either — 1.5% of the total drawn length, floored at 1
-    // world unit (roughly one GPS sample's worth of jitter at this scale),
-    // is generous enough to catch a real loop's closing gap without
-    // mistaking two merely-nearby points for the same place.
+    // start / finish — ONE toggle governs both (gpxMarkers): a route has a
+    // start and an end, showing only one rarely makes sense, so this is a
+    // single on/off rather than two independent switches. A 3D arch (task 22
+    // §6, see _buildArches()) now REPLACES the old flat ◆/▶/■ text sprites —
+    // showing both would be redundant (the brief: "don't show both") — so
+    // those sprites are built ONLY as the arch's fallback when the arch
+    // itself can't be placed (a degenerate 1-point track with no direction
+    // to orient a gate against).
     const lastIdx = eles.length - 1
-    let worldLen = 0
-    for (let i = 1; i < world.length; i++) worldLen += world[i].distanceTo(world[i - 1])
-    const loopTol = Math.max(1, worldLen * 0.015)
-    const isLoop = world.length > 1 && world[0].distanceTo(world[world.length - 1]) <= loopTol
+    const isLoop = detectLoop(world)
+    this._disposeArches()
+    const archesBuilt = this.params.gpxMarkers ? this._buildArches(world, isLoop, names, eles) : false
 
-    if (isLoop && this.params.gpxMarkers) {
+    if (archesBuilt) {
+      this.startSprite = null
+      this.endSprite = null
+    } else if (isLoop && this.params.gpxMarkers) {
       // same place — one combined sprite, no separate end marker at all
       let label
       if (names[0] && names[lastIdx]) label = `◆ ${names[0]} & ${names[lastIdx]}`
@@ -661,7 +728,7 @@ export class GpxLayer {
         lineGeo,
         new THREE.LineBasicMaterial({ color: accentColor, transparent: true, opacity: 0, depthWrite: false })
       )
-      line.renderOrder = 24
+      line.renderOrder = 24 + this._renderOffset
       line.visible = false
       this.group.add(line)
 
@@ -672,7 +739,7 @@ export class GpxLayer {
       label.material.sizeAttenuation = false
       label.scale.set(VILLAGE_LABEL_BASE_H * aspect, VILLAGE_LABEL_BASE_H, 1)
       label.position.set(hit.w.x, groundY + VILLAGE_LINE_HEIGHT + VILLAGE_LABEL_GAP, hit.w.z)
-      label.renderOrder = 25
+      label.renderOrder = 25 + this._renderOffset
       label.visible = false
       this.group.add(label)
 
@@ -717,6 +784,48 @@ export class GpxLayer {
       m.line.material.opacity = 0
       m.label.material.opacity = 0
     }
+  }
+
+  // ---------------------------------------------------------------- arches
+
+  // Builds the start/finish 3D arch(es) for the current track (task 22 §6) —
+  // called from rebuild(), gated by params.gpxMarkers (the arch REPLACES the
+  // old flat ◆/▶/■ sprites — see rebuild()'s own comment on why both
+  // shouldn't show). Returns true if at least one arch was actually placed,
+  // false for a degenerate (<2 point) track — the caller falls back to the
+  // flat sprites only in that false case, so a track never ends up with
+  // neither kind of start/finish marker.
+  _buildArches(world, isLoop, names, eles) {
+    if (!world || world.length < 2) return false
+    const specs = computeArchSpecs(world, isLoop)
+    if (!specs.length) return false
+    const inkInfo = labelInk(this.params.darkMode)
+    for (const spec of specs) {
+      const group = buildArchMesh(spec, {
+        THREE,
+        sampleGround: (x, z) => this.terrain.sample?.(x, z) ?? spec.pos.y,
+        makeLabel: (text) => makeLabelTexture(text, { color: inkInfo.color, halo: inkInfo.halo, weight: 700 }),
+        ink: this.params.darkMode ? '#e7e9ec' : '#2b2f33',
+        renderOrder: 22 + this._renderOffset,
+      })
+      this.group.add(group)
+      this._archGroups.push(group)
+    }
+    return true
+  }
+
+  _disposeArches() {
+    for (const group of this._archGroups) {
+      this.group.remove(group)
+      group.traverse((obj) => {
+        obj.geometry?.dispose?.()
+        if (obj.material) {
+          obj.material.map?.dispose?.()
+          obj.material.dispose()
+        }
+      })
+    }
+    this._archGroups = []
   }
 
   _elevations() {
@@ -855,6 +964,7 @@ export class GpxLayer {
     if (i < 0 || !this.track?.world) {
       this.cursor.visible = false
       this.headMarker.visible = false
+      this.headIcon.visible = false
       this.tipEl.classList.add('hidden')
       this._drawProfile()
       return
@@ -863,6 +973,7 @@ export class GpxLayer {
       this.cursor.visible = false
     } else {
       this.headMarker.visible = false
+      this.headIcon.visible = false
       this.cursor.visible = true
       this.cursor.position.copy(this.track.world[i])
       const s = Math.max(0.5, this.camera.position.distanceTo(this.cursor.position) * 0.02)
@@ -959,6 +1070,24 @@ export class GpxLayer {
   setGlow(v) {
     this.params.gpxGlow = v
     this.rebuild()
+  }
+
+  // sport-icon billboard above the playback head (task 22 §4/§3) — texture
+  // lifecycle stays with the caller (see the headIcon constructor comment).
+  // Pass null to clear (a layer with no icon assigned, or while its texture
+  // is still loading).
+  setIcon(tex) {
+    this.headIcon.material.map = tex || null
+    this.headIcon.material.needsUpdate = true
+  }
+
+  // multi-layer stacking (task 22 §2) — additive renderOrder + a small
+  // world-Y nudge, applied on the NEXT rebuild(). See the constructor
+  // comment on _renderOffset/_depthOffsetY for why both default to zero.
+  setRenderDepth(renderOffset, yNudge = 0) {
+    this._renderOffset = renderOffset || 0
+    this._depthOffsetY = yNudge || 0
+    if (this.track) this.rebuild()
   }
 
   // advances the progressive-reveal head while playing — called from the
@@ -1072,6 +1201,16 @@ export class GpxLayer {
     this.headMarker.position.set(pos.x, pos.y + off, pos.z)
     this.headMarker.visible = true
 
+    // sport-icon billboard (task 22 §4): rides ABOVE the triangle, same
+    // camera-distance-scaled gap logic so it clears the triangle's own apex
+    // at any zoom instead of overlapping it up close or drifting away far out.
+    if (this.headIcon.material.map) {
+      this.headIcon.position.set(pos.x, pos.y + off * 2.4, pos.z)
+      this.headIcon.visible = true
+    } else {
+      this.headIcon.visible = false
+    }
+
     const v = pos.clone().project(this.camera)
     const x = (v.x * 0.5 + 0.5) * window.innerWidth
     const y = (-v.y * 0.5 + 0.5) * window.innerHeight
@@ -1125,6 +1264,7 @@ export class GpxLayer {
   }
 
   _disposeLine() {
+    this._disposeArches()
     this._segCount = 0
     if (this.line) {
       this.group.remove(this.line)
@@ -1164,6 +1304,7 @@ export class GpxLayer {
     this.track = null
     this.cursor.visible = false
     this.headMarker.visible = false
+    this.headIcon.visible = false
     this._headDispValid = false
     this._villageHits = []
     this._villageLeadKm = 0
