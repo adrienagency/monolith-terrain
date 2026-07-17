@@ -576,6 +576,17 @@ body.dark .ce-toast {
   opacity: 0.9;
 }
 
+/* peak hover card (CLASS/ELEV/GRID/STATUS) — reuses .hud-panel/.hud-row/
+   .accent (see peaks.js's buildHoverCard()); position:fixed matches the
+   .peak-marker transform math above (both project against window w/h, not
+   scrolled document coordinates), and it sits one z-index above the marker
+   it's describing. */
+.peak-hud-panel {
+  position: fixed;
+  z-index: 27;
+  transition: opacity 0.12s;
+}
+
 /* ---------------------------------------------------------------- v3: drag + dark */
 
 .draggable-handle {
