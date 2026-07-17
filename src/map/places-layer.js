@@ -3,7 +3,7 @@ import { latLonToWorld } from '../geo.js'
 import { TERRAIN_SIZE } from '../terrain.js'
 import { loadLayer } from './geo-data.js'
 import { pickPlaces } from './place-pick.js'
-import { makeLabelTexture, labelInk, labelFontReady } from './text-label.js'
+import { makeLabelTexture, labelInk, labelPlate, labelFontReady } from './text-label.js'
 import { labelScale, placeTier } from './place-scale.js'
 
 const HALF = TERRAIN_SIZE / 2
@@ -22,9 +22,20 @@ const CLEARANCE = 0.9
 // divide, so the real NDC size is projectionMatrix[0]*scale.x by
 // projectionMatrix[5]*scale.y. At this app's 30° fov that factor is 1/tan(15°)
 // ≈ 3.7, i.e. labels render ~3.7x bigger than the naive formula suggests — the
-// trap that made earlier passes ship names far larger than intended.
-// 0.007 puts a small town near 8.5 px cap-height and a capital near 14 px.
-const BASE_H = 0.007
+// trap that made earlier passes ship names far larger than intended. This
+// formula is camera-DISTANCE independent by construction (sizeAttenuation is
+// off) — a label is exactly as many px tall whether the camera is a distant
+// top-down overview or parked low over the next hairpin turn.
+// task 27 §2: 0.007 measured ~5.8-6.5px cap-height for the smallest (village)
+// tier at a real ~945px-tall viewport ("je veux que ça soit vraiment
+// visible" — that's not it, especially with a low, close reference-style
+// camera drawing attention to detail everywhere else in the frame). Bumped
+// to 0.010 (~1.43x): village -> ~9px, a mid town -> ~12px, a capital ->
+// ~26px, measured with the exact live formula below, not guessed — see the
+// task-27 report for the before/after numbers. Paired with the new
+// labelPlate() background (see text-label.js) for the contrast the raw
+// glyph size alone still can't guarantee at the low end.
+const BASE_H = 0.01
 // Real screen size of a sprite quad, in CSS px — see the BASE_H note above.
 function spriteScreenSize(sprite, camera, vw, vh) {
   const P = camera.projectionMatrix.elements
@@ -102,10 +113,19 @@ export class PlacesLayer {
       const groundY = terrain.sample ? terrain.sample(p.w.x, p.w.z) : 0
       const labelY = groundY + CLEARANCE
       const scale = labelScale(p.pop, p.cap) * sizeMul
-      // shared with labelScale's tier so a place's colour darkness always
-      // tracks the same importance ranking that picks its size
-      const ink = labelInk(params.darkMode, placeTier(p.pop))
+      // shared with labelScale's tier so a place's colour darkness, and now
+      // the plate's own opacity (task 27 §2), always track the same
+      // importance ranking that picks the label's size — never a second,
+      // driftable ranking
+      const tier = placeTier(p.pop)
+      const ink = labelInk(params.darkMode, tier)
       const halo = params.placesHalo ? ink.halo : null
+      // task 27 §2: "si il faut mettre un cartouche derrière le texte, on le
+      // fait" — the same "Text halo" toggle now gates the stronger plate
+      // treatment instead of the old thin ring (makeLabelTexture drops the
+      // ring itself whenever a plate is present — see its own comment), so
+      // switching it off still yields the older bare-ink look.
+      const plate = params.placesHalo ? labelPlate(params.darkMode, tier) : null
 
       // ground dot, anchored at the city's real elevation. depthTest:true so
       // relief occludes it exactly like the label above it — a dot behind a
@@ -131,7 +151,7 @@ export class PlacesLayer {
       // screen-space scale).
       // 800/700, the top of Bricolage's real 200..800 axis — the names read too
       // thin at 600/700 and the ask was to bolden them, NOT to enlarge them.
-      const { tex, aspect } = makeLabelTexture(p.name.toUpperCase(), { color: ink.color, halo, weight: p.cap ? 800 : 700 })
+      const { tex, aspect } = makeLabelTexture(p.name.toUpperCase(), { color: ink.color, halo, plate, weight: p.cap ? 800 : 700 })
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, depthWrite: false }))
       sprite.material.sizeAttenuation = false
       sprite.scale.set(BASE_H * scale * aspect, BASE_H * scale, 1)

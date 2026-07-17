@@ -11,7 +11,7 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { latLonToWorld, metersPerPixel, surfaceMetersPerUnit, EARTH_RADIUS_M } from './geo.js'
 import { loadLayer } from './map/geo-data.js'
-import { makeLabelTexture, labelInk, labelFontReady } from './map/text-label.js'
+import { makeLabelTexture, labelInk, labelPlate, labelFontReady } from './map/text-label.js'
 import { computeArchSpecs, buildArchMesh, disposeArchGroup } from './arch.js'
 
 const MAX_POINTS = 2400 // decimation budget — hover & profile stay O(small)
@@ -469,11 +469,14 @@ const VILLAGE_MIN_POP = 5000
 const VILLAGE_RADIUS_M = 600
 const VILLAGE_LINE_HEIGHT = 2.4 // world units — a real vertical mark, not a leader tick
 const VILLAGE_LABEL_GAP = 0.35 // above the line's top
-// same BASE_H sizing convention as places-layer.js's own BASE_H (0.007 puts a
-// normal place name at ~8.5-14px cap-height, see its big comment) — these ARE
-// place names, of the same visual class, just triggered along-track instead
-// of by viewport picking, so they should read at the same size.
-const VILLAGE_LABEL_BASE_H = 0.007
+// same BASE_H sizing convention as places-layer.js's own BASE_H (task 27 §2
+// bumped it 0.007 -> 0.010, see its big comment for the measured px) — these
+// ARE place names, of the same visual class, just triggered along-track
+// instead of by viewport picking, so they should read at the same size. If
+// anything these are the MORE important case for "je veux voir les
+// informations des villes et villages qu'on traverse" — an announced
+// village IS a village the route passes through, verbatim.
+const VILLAGE_LABEL_BASE_H = 0.01
 
 export class GpxLayer {
   constructor({ scene, camera, terrain, params, getDem }) {
@@ -843,10 +846,15 @@ export class GpxLayer {
   // precomputed hit — reuses text-label.js's makeLabelTexture(), same
   // BASE_H sizing convention as a normal place name (see VILLAGE_LABEL_BASE_H
   // above). Per-frame work is just an opacity lookup in _updateVillages().
+  // ink/plate both use tier 0 (the boldest step of labelInk/labelPlate's
+  // ranking) — every announced village is, by construction, a name worth
+  // the rider's attention right now, not one competing against neighbours
+  // for screen space the way the viewport-picked Places layer's tiers do.
   _buildVillageMarkers() {
     this._disposeVillages()
     if (!this._villageHits.length) return
     const ink = labelInk(this.params.darkMode)
+    const plate = labelPlate(this.params.darkMode)
     const accentColor = new THREE.Color(this.params.hudAccent)
     for (const hit of this._villageHits) {
       const groundY = this.terrain.sample ? this.terrain.sample(hit.w.x, hit.w.z) : 0
@@ -862,7 +870,7 @@ export class GpxLayer {
       line.visible = false
       this.group.add(line)
 
-      const { tex, aspect } = makeLabelTexture(hit.name.toUpperCase(), { color: ink.color, halo: ink.halo, weight: 700 })
+      const { tex, aspect } = makeLabelTexture(hit.name.toUpperCase(), { color: ink.color, halo: ink.halo, plate, weight: 700 })
       const label = new THREE.Sprite(
         new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0, depthTest: false, depthWrite: false })
       )
