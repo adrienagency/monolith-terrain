@@ -37,25 +37,23 @@
 //     widens the shot, not tightens it: a bend is exactly where the rig
 //     would need to turn faster, so this is what pays for a materially
 //     closer baseline without moving the yaw-rate cap.
-//   · DEAD-ZONE framing, not continuous framing (task 13). A fixed NDC box
-//     (this.deadzone) is the region the tracked point must stay inside —
-//     like a helicopter pilot tailing a car: while the subject sits inside
-//     the box, NEITHER yaw nor pitch corrects at all, the rig just keeps
-//     flying its current bearing (arm/lift still travel behind the spine,
-//     so it keeps moving). Only once the subject nears/exits the box
-//     (this.deadzoneMargin inset, so correction starts a touch before the
-//     true edge — no on/off flip-flop right at the boundary) does a
-//     correction target engage — solved exactly the same way framing always
-//     was (solvePitchForNdcY(), see below), then eased in through the SAME
-//     yaw/pitch rate caps as everything else, never a snap.
+//   · CONTINUOUS CENTERING, not dead-zone framing (task 13/20/24, REVERSED by
+//     task 28 — see the TASK 28 note below). Every frame, both yaw and pitch
+//     solve a target that puts the tracked point at (targetNdcX, targetNdcY)
+//     — near screen centre — and slew toward it under the SAME rate caps as
+//     always (maxYawRateDeg/maxPitchRateDeg, see _applyPose()). There is no
+//     more "inside the box, don't correct" hold state: the rig is ALWAYS
+//     actively re-centring, exactly the third-person "follow effect" the
+//     task-28 brief asks for. The old task-13/20/24 dead-zone box
+//     (this.deadzone/this.deadzoneMargin) is gone along with it — see the
+//     TASK 28 note for why continuous correction only reads as "following"
+//     rather than "twitchy" once the rate caps are raised enough to keep up.
 //   · Horizontal (yaw) framing REUSES solvePitchForNdcY() rather than a
 //     bespoke solver: NDC.x is the identical rotate-and-project problem as
 //     NDC.y, just in the (forward,right) plane instead of (forward,up) — the
 //     derivation never assumed which horizontal axis it rotates around, so
 //     relabeling "up" as "right" and vFov as the horizontal FOV gets yaw for
-//     free (see _applyPose()). ndcYForPitch() is the forward evaluator
-//     (given diff/heading/pitch, what NDC.y results) used to measure whether
-//     the subject is CURRENTLY inside the box before deciding to correct.
+//     free (see _applyPose()).
 //   · Frame-rate-independent critical damping on top of all of the above
 //     for extra silkiness: x += (target-x)·(1-2^(-dt/half)).
 //
@@ -75,21 +73,21 @@
 //     not the heavily-smoothed spine. What still keeps this from being the
 //     original corner-chasing nausea is UNCHANGED: slewHeading's per-frame
 //     rate cap (maxYawRateDeg/maxPitchRateDeg) bounds every turn regardless
-//     of how hard the now-more-forceful target swings, the dead-zone box
-//     still only engages a correction near the frame's edge instead of
-//     continuously, and there's still no roll. Two additions layer on top:
+//     of how hard the now-more-forceful target swings — the dead-zone box
+//     that used to gate WHEN a correction engaged is gone (task 28, see
+//     below), but the cap that bounds HOW FAST any correction moves never
+//     was — and there's still no roll. Two additions layer on top:
 //       - ORBIT BIAS: a slow (orbitPeriodSec), bounded (orbitAmp)
 //         oscillation of the horizontal framing target (see targetNdcX
-//         usage in _applyPose()), clamped inside the dead-zone box. This is
-//         NOT the task-16 orbit-bias removed above (see the constructor
-//         note on _breathT) — that one rotated the heading directly every
-//         frame and integrated into unbounded drift. This one only nudges
-//         WHERE a dead-zone correction re-centers to, so it inherits the
-//         box's hard bounds and can never drift past them, and it only
-//         moves the camera when a correction was going to fire anyway —
-//         "elle peut se déplacer tout autour du pointeur", a slow
-//         deliberate settle from one side of directly-behind to the other,
-//         not a spin.
+//         usage in _applyPose()). This is NOT the task-16 orbit-bias removed
+//         above (see the constructor note on _breathT) — that one rotated
+//         the heading directly every frame and integrated into unbounded
+//         drift. This one only nudges WHERE the continuous yaw correction
+//         re-centers to, and a sine wave of amplitude orbitAmp is bounded by
+//         construction (no clamp needed, unlike when this had to be kept
+//         inside the now-removed dead-zone box) — "elle peut se déplacer
+//         tout autour du pointeur", a slow deliberate settle from one side
+//         of directly-behind to the other, not a spin.
 //       - OCCLUSION AVOIDANCE (resolveOcclusion(), ask 3): every frame,
 //         after the position is solved and damped, march a ray from the
 //         SUBJECT outward to the camera's own realized position, comparing
@@ -109,6 +107,47 @@
 //         machinery: once a frame isn't occluded the clamp just doesn't
 //         fire, and the ordinary damped chase (posHalfLife) glides the arm
 //         back out on its own.
+//
+//   · TASK 28 — CONTINUOUS CENTERING, more freedom. Verbatim brief: "la
+//     caméra n'est pas assez réactive pour suivre la tête de course, laisse
+//     lui plus de liberté de mouvement, pour qu'elle ait toujours le point
+//     de tête de course vers le centre de l'écran. un espèce de follow
+//     effect en fait" — a deliberate REVERSAL of the task-13 dead-zone
+//     design (see the class comment's opening bullets): the user has moved
+//     on from "hold bearing until the subject nears the box edge" to
+//     "always be correcting toward centre". Two changes, both load-bearing:
+//       - The dead-zone gate itself is gone: _applyPose() no longer checks
+//         whether the tracked point is inside a box before deciding to
+//         correct — it ALWAYS solves a fresh target (targetNdcX/targetNdcY,
+//         both ~0 — screen centre) via solvePitchForNdcY() and slews toward
+//         it. The former this.deadzone/this.deadzoneMargin fields are
+//         removed; there is no more "hold" branch, only "always correct".
+//       - maxYawRateDeg/maxPitchRateDeg raised 13/22 -> 50/85 deg/s — by the
+//         USER'S OWN explicit call ("je pense que tu peux passer de 13 à 50
+//         sans problème"), not a value this file arrived at by its own
+//         nausea-sweep methodology. This is the number that makes
+//         continuous correction actually read as tight tracking instead of
+//         a permanent slow crawl toward a target that's already moved on —
+//         a dead-zone rig could get away with a low cap because it only had
+//         to correct occasionally; a continuously-correcting rig needs to
+//         cover the SAME angular ground every single frame, so the cap has
+//         to be high enough that "always correcting" doesn't itself become
+//         the new sluggishness. 85 deg/s pitch keeps the same ~1.7x
+//         yaw:pitch ratio every prior round in this file has used. Both
+//         caps sit well under the ~102°/s peak that was measured literally
+//         nauseating in the original brief (task 13) — see this.
+//         maxYawRateDeg's own comment for the re-measured peak this actually
+//         produces on the real Europaweg fixture, and the task-28 report for
+//         the full before/after acceptance numbers (mean/median |NDC| dist
+//         from centre, % on-screen, occlusion%, min clearance).
+//     What's UNCHANGED and still absolute: no roll, ever; occlusion
+//     avoidance (resolveOcclusion()) still runs on the realized position
+//     every frame, unaffected by any of the above since it operates AFTER
+//     yaw/pitch/position are solved; ground clearance (this.clearance)
+//     still clamps every frame. Continuous centering does NOT mean
+//     unbounded or unlimited — it means the target is always centre and the
+//     ONLY thing standing between "always correcting" and "spinning wildly"
+//     is the same rate-cap guarantee this file has leaned on since task 13.
 
 import * as THREE from 'three'
 
@@ -296,10 +335,13 @@ export function solvePitchForNdcY(diff, forward0, targetNdcY, vFovRad) {
 
 // Forward evaluator — the exact ndc.y(a) formula from solvePitchForNdcY's own
 // derivation comment above, evaluated at a given pitch rather than solved for
-// one. Used to measure whether the tracked point is CURRENTLY inside the
-// dead-zone box before deciding a correction is even needed (see
-// _applyPose()/_aim() below) — solvePitchForNdcY answers "what pitch puts it
-// at T", this answers "given the current pitch, where IS it".
+// one: solvePitchForNdcY answers "what pitch puts it at T", this answers
+// "given the current pitch, where IS it". No longer read by DroneCam itself
+// since task 28 retired the dead-zone gate that used to consult it (framing
+// is now solved unconditionally every frame — see the class comment's TASK
+// 28 note) — kept exported as the tested inverse of solvePitchForNdcY, and
+// because it's the natural tool for anything that DOES need "where is the
+// point right now" (e.g. diagnostics/tests) without re-deriving the formula.
 export function ndcYForPitch(diff, forward0, pitch, vFovRad) {
   const A = diff.y
   const B = diff.x * forward0.x + diff.z * forward0.z
@@ -462,56 +504,50 @@ export class DroneCam {
     this.clearance = 2.6 // minimum gap kept over the ground / ridges
     // hard caps on how fast the rig is allowed to turn — THIS (not the spine
     // smoothing alone) is the actual nausea guarantee: even a pathological
-    // input cannot spin the camera faster than these. Raised from 9/16 (task
-    // 24 — see the arm/lift comment above) so a correction, once it engages,
-    // visibly moves the rig instead of crawling — still well under a doubling
-    // of the original nausea-safe cap.
-    this.maxYawRateDeg = 13 // deg/s — "ne quasiment pas tourner" loosened for "bouge beaucoup plus avec la tête"
-    this.maxPitchRateDeg = 22 // deg/s — vertical aim may move a bit more freely than yaw (same ~1.7x ratio as before)
-    // where a correction re-centers the tracked point once triggered: NDC y,
-    // 0 = center, -1 = bottom. Recomputed for task 20's new box (below) —
-    // biased toward yMin, same "look up the mountain when climbing" intent
-    // as the old -0.375 had for the old box, just re-anchored: the new box's
-    // own vertical middle is (-0.43+0.74)/2 = +0.155 (this box sits much
-    // higher on screen than the old one), so re-centering to the box's own
-    // middle would already point mostly at sky/summit with no headroom left
-    // to correct further upward on a real climb. -0.15 keeps a comfortable
-    // gap above deadzoneMargin's -0.37 trigger line (no flip-flop risk) while
-    // still sitting in the box's own lower third, not its middle.
-    this.targetNdcY = -0.15
-    // NDC dead-zone box (task 20) — REPLACES the task-13 box above. Measured
-    // by the user off a fresh screenshot of their own "blue frame" (image
-    // 1130x604, box px x 390..735 / y 79..433 -> NDC), so — same as the
-    // box it replaces — this is a literal constant tied to that screenshot,
-    // not derived from any panel geometry, and NOT meant to be "tidied" back
-    // to something symmetric: the user's own box is narrower in x and sits
-    // noticeably higher (taller above center than below) than a centered box
-    // would be. Pixel measurement has ~±0.03 slop; treat these as "tall,
-    // fairly narrow, slightly high-of-centre", not as exact to 3 decimals.
-    // Task 24: widened a few hundredths on every side from the task-20 box
-    // ({-0.31,0.30,-0.43,0.74}) — "plus de liberté de mouvement": more room
-    // for the head to roam before a correction engages at all, so the rig
-    // holds its bearing longer and reads as following rather than locking.
-    this.deadzone = { xMin: -0.36, xMax: 0.35, yMin: -0.48, yMax: 0.80 }
-    // Soft inset: a correction engages this far inside the box, before the
-    // point actually reaches the true edge. Without it, sitting right at the
-    // boundary would flip correction on/off every frame as normal per-frame
-    // noise straddles the line. Combined with re-centering to a point WELL
-    // inside the box (targetNdcY/targetNdcX, not just past the margin), once
-    // triggered a correction moves the point solidly back inside — it has to
-    // drift all the way back out to re-trigger, so there's no flip-flop.
-    // Trimmed from 0.06 (task 24) — a smaller inset means more of the box's
-    // own width is actually usable drift room before a correction claims it.
-    this.deadzoneMargin = 0.04
-    // where a horizontal correction re-centers to — the box's own midpoint,
-    // since (unlike targetNdcY) there's no other established "where the
-    // point belongs" convention for X yet.
-    this.targetNdcX = (this.deadzone.xMin + this.deadzone.xMax) / 2
+    // input cannot spin the camera faster than these.
+    //
+    // Task 28: "la caméra n'est pas assez réactive pour suivre la tête de
+    // course, laisse lui plus de liberté de mouvement" + the dead-zone gate
+    // itself retired (see this.targetNdcX/targetNdcY below and the class
+    // comment's TASK 28 note) means the rig now solves a fresh correction
+    // EVERY frame instead of only near a box edge — a continuously-correcting
+    // rig needs a materially higher cap than an occasionally-correcting one
+    // just to avoid being the new bottleneck. Raised 13/22 -> 50/85 deg/s BY
+    // THE USER'S OWN EXPLICIT CALL after seeing 13 fail live ("je pense que
+    // tu peux passer de 13 à 50 sans problème") — not this file's own
+    // nausea-sweep methodology, which had held the line at ever-smaller
+    // fractional increases since task 13. 85 keeps the same ~1.7x
+    // pitch:yaw ratio every prior round in this file used (22/13 ≈ 1.69,
+    // 85/50 = 1.7). Both remain under half the ~102°/s peak that was
+    // measured literally nauseating in the original task-13 brief — see the
+    // task-28 report for the actual peak yaw this produces on the real
+    // Europaweg fixture (the cap is a ceiling, not a target: continuous
+    // centering only saturates it during the sharpest switchbacks).
+    this.maxYawRateDeg = 50 // deg/s
+    this.maxPitchRateDeg = 85 // deg/s
+    // task 28: CONTINUOUS centering target (see the class comment's TASK 28
+    // note) — both axes solve toward here every frame, no more "only once
+    // the point nears a box edge". Literal "toujours vers le centre de
+    // l'écran": both 0 (dead centre), not the old task-20 box's off-centre
+    // bias (targetNdcY was -0.15, "look up the mountain when climbing" —
+    // that bias only made sense as a re-centering point INSIDE a much
+    // taller-than-wide box; with no box left and continuous correction,
+    // biasing off-centre would directly contradict the brief's own "vers le
+    // centre" wording, not serve it).
+    this.targetNdcY = 0
+    this.targetNdcX = 0
     // task 26: damping now smooths a chase against the real (curve-anchored)
     // subject rather than an already-smooth spine — still the same role
     // (extra silkiness on top of the rate caps), just a livelier target.
-    this.posHalfLife = 0.9 // s — smoothing on top of the rate-limited chase
-    this.rotHalfLife = 0.5 // s — final orientation smoothing
+    // Task 28: tightened 0.9/0.5 -> 0.45/0.25 (halved) alongside the rate-cap
+    // raise — "plus de liberté de mouvement" applies to the WHOLE chase, not
+    // just the yaw/pitch caps; a rig that can now turn 4x faster but still
+    // spends the old 0.9s settling its position into that turn would just
+    // move the lag from one stage to the other. Still real smoothing (not
+    // zero), just proportionally faster, same as every other number this
+    // task raised.
+    this.posHalfLife = 0.45 // s — smoothing on top of the rate-limited chase
+    this.rotHalfLife = 0.25 // s — final orientation smoothing
 
     // ---- cinematic VARIATION — layered ON TOP of the arm/lift rig above,
     // not a replacement for it.
@@ -573,14 +609,11 @@ export class DroneCam {
     this._standoffMul = 1
 
     // ---- THIRD-PERSON ORBIT (task 26, ask 2's "se déplacer tout autour du
-    // pointeur") — see the class comment's TASK 26 note for the full
-    // rationale on why this is safe (bounded inside the dead-zone box,
-    // unlike the removed task-16 orbit-bias above). Reuses _breathT's
-    // already-running clock. orbitAmp is in the same NDC units as the
-    // deadzone box itself, so it's easy to reason about relative to
-    // deadzoneMargin/targetNdcX — comfortably inside the box's own half-width
-    // ((xMax-xMin)/2 = 0.355) so the oscillation itself never forces a
-    // correction, it only shifts where one settles once triggered.
+    // pointeur") — see the class comment's TASK 26/28 notes for the full
+    // rationale on why this is safe: a sine wave of amplitude orbitAmp is
+    // bounded by construction, no clamp against a box needed (task 28
+    // removed the dead-zone box this used to be clamped inside — see
+    // targetNdcX/targetNdcY above). Reuses _breathT's already-running clock.
     this.orbitAmp = 0.16 // NDC units either side of targetNdcX the settle point drifts
     this.orbitPeriodSec = 34 // s for one full left→right→left cycle — slow and deliberate, not a spin
 
@@ -840,9 +873,9 @@ export class DroneCam {
       this._standoffMul += (targetStandoffMul - this._standoffMul) * zf
     }
 
-    // 1) yaw: ONLY correct when the subject is nearing/outside the box's
-    // horizontal range — otherwise hold the current heading exactly (the
-    // "does not correct at all" dead-zone behaviour). diff is measured
+    // 1) yaw: task 28 — ALWAYS solve a fresh correction target toward screen
+    // centre, every frame (the dead-zone "hold until near the box edge" gate
+    // is gone, see the class comment's TASK 28 note). diff is measured
     // against THIS._POS/THIS._HEADINGDIR AS THEY STAND FROM LAST FRAME
     // (position hasn't been re-solved for this frame yet) — using the
     // not-yet-updated position is unavoidable here (position itself is
@@ -858,46 +891,23 @@ export class DroneCam {
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect)
 
     // right0: this._headingDir rotated -90° about world up (cross(up,fwd)).
-    // Reused as the "up0" role in the pitch-formula relabeling: the SAME
-    // right0 must be used both to measure the current NDC.x below and to
-    // reconstruct the corrected direction after solving — the solve+
-    // reconstruct pair is self-consistent regardless of right0's chirality,
-    // AS LONG AS both steps agree on it, which they do here.
+    // Reused as the "up0" role in the pitch-formula relabeling below.
     _right.set(this._headingDir.z, 0, -this._headingDir.x)
     const rightComp = _diff.x * _right.x + _diff.z * _right.z
     _yawDiff.set(_diff.x, rightComp, _diff.z)
-    // "what NDC.x is it at RIGHT NOW" — pitch argument 0 means "no additional
-    // rotation beyond the current heading" (a small approximation: it treats
-    // the camera as level for this purpose, ignoring the true camera pitch's
-    // second-order effect on horizontal framing — negligible at this rig's
-    // modest pitch range).
-    const actualNdcX = ndcYForPitch(_yawDiff, this._headingDir, 0, hFov)
-    const xOut = actualNdcX < this.deadzone.xMin + this.deadzoneMargin || actualNdcX > this.deadzone.xMax - this.deadzoneMargin
-    _targetDir.copy(this._headingDir)
-    if (dt <= 0 || xOut) {
-      // task 26 ORBIT BIAS: a slow, bounded sine drift of WHERE a correction
-      // re-centers to (see the class comment's TASK 26 note + the
-      // orbitAmp/orbitPeriodSec constructor comment) — clamped back inside
-      // the box so it can never push the settle point past deadzoneMargin's
-      // own trigger line (no flip-flop, no drift past the box).
-      const orbitBias = Math.sin((this._breathT / this.orbitPeriodSec) * Math.PI * 2) * this.orbitAmp
-      const orbitTargetX = THREE.MathUtils.clamp(
-        this.targetNdcX + orbitBias,
-        this.deadzone.xMin + this.deadzoneMargin * 1.5,
-        this.deadzone.xMax - this.deadzoneMargin * 1.5
-      )
-      let yaw = solvePitchForNdcY(_yawDiff, this._headingDir, orbitTargetX, hFov)
-      yaw = THREE.MathUtils.clamp(yaw, -1.1, 1.1) // guard degenerate geometry
-      _targetDir.copy(this._headingDir).multiplyScalar(Math.cos(yaw))
-      _targetDir.x += _right.x * Math.sin(yaw)
-      _targetDir.z += _right.z * Math.sin(yaw)
-      _targetDir.normalize()
-    }
-    // HOLD case (point inside the box): _targetDir stays the current heading —
-    // the rig just keeps travelling. No decorative wobble here: see the
-    // removed-orbit-bias note in the constructor for why (it integrated into
-    // unbounded drift and fought the framing box).
-    // still the SAME hard cap as ever — a correction engaging never means a
+    // task 26 ORBIT BIAS: a slow, bounded sine drift of WHERE the continuous
+    // correction re-centers to (see the class comment's TASK 26/28 notes +
+    // the orbitAmp/orbitPeriodSec constructor comment) — a sine of amplitude
+    // orbitAmp is bounded by construction, no clamp needed.
+    const orbitBias = Math.sin((this._breathT / this.orbitPeriodSec) * Math.PI * 2) * this.orbitAmp
+    const orbitTargetX = this.targetNdcX + orbitBias
+    let yaw = solvePitchForNdcY(_yawDiff, this._headingDir, orbitTargetX, hFov)
+    yaw = THREE.MathUtils.clamp(yaw, -1.1, 1.1) // guard degenerate geometry
+    _targetDir.copy(this._headingDir).multiplyScalar(Math.cos(yaw))
+    _targetDir.x += _right.x * Math.sin(yaw)
+    _targetDir.z += _right.z * Math.sin(yaw)
+    _targetDir.normalize()
+    // still the SAME hard cap as ever — continuous correction never means a
     // snap, it's eased in through this exact rate limiter like everything else.
     const maxYawStep = THREE.MathUtils.degToRad(this.maxYawRateDeg) * Math.max(dt, 0)
     if (dt <= 0) this._headingDir.copy(_targetDir)
@@ -935,23 +945,28 @@ export class DroneCam {
     this._aim(dt, s, arrived)
   }
 
-  // 3) orientation: dead-zone pitch (mirrors the yaw gate above, using the
-  // real solvePitchForNdcY this time — no relabeling needed), rate-limited
-  // the same way as yaw, then a roll-free look-at quaternion — this rig
-  // never banks, since roll is rotation too and the brief wants almost none.
+  // 3) orientation: task 28 — pitch ALWAYS solves toward targetNdcY, every
+  // frame, exactly like yaw above (the old dead-zone gate — solve only once
+  // ndcYForPitch() reported the point nearing/outside deadzone.yMin/yMax —
+  // is gone). This mirrors the yaw fix precisely, and fixes a real bug the
+  // old asymmetric box hid: deadzone.yMin/yMax spanned -0.43..0.80, a 1.23
+  // NDC-unit-tall gate versus xMin/xMax's 0.61-wide one — pitch corrections
+  // fired barely at all next to yaw's, so the head tracked laterally but
+  // rode away vertically (exactly the field report: "tu suis latéralement,
+  // la caméra s'élève, mais il n'y a quasiment aucun mouvement pour que la
+  // caméra pivote vers le haut ou vers le bas"). Continuous solving removes
+  // the asymmetry by construction — there's no more box for either axis to
+  // be lopsided against. Rate-limited the same way as yaw, then a roll-free
+  // look-at quaternion — this rig never banks, since roll is rotation too
+  // and the brief wants almost none.
   _aim(dt, s, arrived) {
     this.curve.getPointAt(s, _subj)
     this.controls.target.copy(_subj) // grabbing OrbitControls pivots around the rider, not empty air
     _diff.subVectors(_subj, this._pos) // NOW using this frame's just-solved position — no circularity for pitch (position doesn't depend on it)
 
     const vFov = THREE.MathUtils.degToRad(this.camera.fov)
-    const actualNdcY = ndcYForPitch(_diff, this._headingDir, this._pitch, vFov)
-    const yOut = actualNdcY < this.deadzone.yMin + this.deadzoneMargin || actualNdcY > this.deadzone.yMax - this.deadzoneMargin
-    let targetPitch = this._pitch
-    if (dt <= 0 || yOut) {
-      targetPitch = solvePitchForNdcY(_diff, this._headingDir, this.targetNdcY, vFov)
-      targetPitch = THREE.MathUtils.clamp(targetPitch, -1.1, 1.1) // guard degenerate geometry (~63°)
-    }
+    let targetPitch = solvePitchForNdcY(_diff, this._headingDir, this.targetNdcY, vFov)
+    targetPitch = THREE.MathUtils.clamp(targetPitch, -1.1, 1.1) // guard degenerate geometry (~63°)
     if (dt <= 0) {
       this._pitch = targetPitch
     } else {

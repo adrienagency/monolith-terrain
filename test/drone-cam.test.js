@@ -226,7 +226,54 @@ function buildZigzagClimb() {
   return pts
 }
 
-test('DroneCam dead-zone: peak yaw stays capped and the tracked point mostly stays in the box', () => {
+// Drives a flight and returns the per-axis + combined centering/rate
+// measurements every DroneCam integration test below needs — shared so the
+// "before/after task 28" numbers in each test are directly comparable.
+// Split by axis (mean/median |NDC.x|, |NDC.y| separately) is deliberate: a
+// single combined |NDC| distance can hide an axis-specific bug (task 28's
+// own field report — pitch barely moving while yaw tracked fine — is
+// exactly the kind of asymmetry a combined-only metric would have missed).
+function driveFollow(drone, { dt = 1 / 30, duration = 60 } = {}) {
+  const prevHeading = new THREE.Vector3()
+  let prevPitch = drone._pitch
+  let peakYawDegS = 0
+  let peakPitchDegS = 0
+  let totalFrames = 0
+  const absX = []
+  const absY = []
+  const vSub = new THREE.Vector3()
+  const vNdc = new THREE.Vector3()
+  const camera = drone.camera
+  let s = 0
+  let guard = 0
+  while (s < 1 && guard++ < 5000) {
+    prevHeading.copy(drone._headingDir)
+    prevPitch = drone._pitch
+    s = Math.min(1, s + dt / duration)
+    drone.updateAt(dt, s)
+    totalFrames++
+    const cosA = Math.max(-1, Math.min(1, prevHeading.dot(drone._headingDir)))
+    peakYawDegS = Math.max(peakYawDegS, ((Math.acos(cosA) * 180) / Math.PI) / dt)
+    peakPitchDegS = Math.max(peakPitchDegS, (Math.abs(drone._pitch - prevPitch) * 180 / Math.PI) / dt)
+
+    // measure against the ACTUAL rendered pose (post-slerp camera.quaternion),
+    // not the internal correction target — that's what a viewer really sees.
+    camera.updateMatrixWorld(true)
+    drone.curve.getPointAt(s, vSub)
+    vNdc.copy(vSub).project(camera)
+    absX.push(Math.abs(vNdc.x))
+    absY.push(Math.abs(vNdc.y))
+  }
+  const mean = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length
+  const median = (arr) => { const s = arr.slice().sort((a, b) => a - b); return s[Math.floor(s.length / 2)] }
+  return {
+    totalFrames, peakYawDegS, peakPitchDegS,
+    meanAbsNdcX: mean(absX), meanAbsNdcY: mean(absY),
+    medianAbsNdcX: median(absX), medianAbsNdcY: median(absY),
+  }
+}
+
+test('DroneCam continuous centering: peak yaw/pitch stay capped and the tracked point sits close to screen centre on BOTH axes', () => {
   const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 400)
   const controls = { target: new THREE.Vector3() }
   const drone = new DroneCam({ camera, controls, sampleGround: () => 0 })
@@ -238,54 +285,28 @@ test('DroneCam dead-zone: peak yaw stays capped and the tracked point mostly sta
   // sampling in a throttled/hidden tab is useless) — drive updateAt with a
   // fixed dt and an explicit progress fraction rather than wall-clock time,
   // exactly like main.js's GPX playback follow does via gpxLayer.headT.
-  const dt = 1 / 30
-  const duration = 60
-  const prevHeading = new THREE.Vector3()
-  let peakYawDegS = 0
-  let framesInBox = 0
-  let totalFrames = 0
-  const vSub = new THREE.Vector3()
-  const vNdc = new THREE.Vector3()
-  let s = 0
-  let guard = 0
-  while (s < 1 && guard++ < 5000) {
-    prevHeading.copy(drone._headingDir)
-    s = Math.min(1, s + dt / duration)
-    drone.updateAt(dt, s)
-    totalFrames++
-    const cosA = Math.max(-1, Math.min(1, prevHeading.dot(drone._headingDir)))
-    const yawRateDeg = ((Math.acos(cosA) * 180) / Math.PI) / dt
-    peakYawDegS = Math.max(peakYawDegS, yawRateDeg)
-
-    // measure against the ACTUAL rendered pose (post-slerp camera.quaternion),
-    // not the internal correction target — that's what a viewer really sees.
-    // Sample the subject at the SAME `s` just fed to updateAt (not drone.t —
-    // update()'s OWN internal timer would need trapezoid(t) instead, which
-    // is why this test uses updateAt with an explicit s, matching the real
-    // GPX-follow call site in main.js exactly).
-    camera.updateMatrixWorld(true)
-    drone.curve.getPointAt(s, vSub)
-    vNdc.copy(vSub).project(camera)
-    if (
-      vNdc.x >= drone.deadzone.xMin && vNdc.x <= drone.deadzone.xMax &&
-      vNdc.y >= drone.deadzone.yMin && vNdc.y <= drone.deadzone.yMax
-    ) framesInBox++
-  }
-  const pctInBox = (framesInBox / totalFrames) * 100
-  assert.ok(totalFrames > 100, `flight should run many frames, got ${totalFrames}`)
-  // task 24: cap raised 9 -> 13 deg/s (see drone-cam.js's this.maxYawRateDeg
-  // comment) — "plus de liberté de mouvement", so peak yaw on this same
-  // torture fixture now saturates the new cap (measured 13.00) instead of 9.
-  assert.ok(peakYawDegS <= 13.5, `peak yaw ${peakYawDegS.toFixed(2)} deg/s exceeds the ~13°/s anti-nausea cap`)
-  assert.ok(pctInBox >= 85, `only ${pctInBox.toFixed(1)}% of frames kept the tracked point inside the dead-zone box`)
+  const m = driveFollow(drone, { dt: 1 / 30, duration: 60 })
+  assert.ok(m.totalFrames > 100, `flight should run many frames, got ${m.totalFrames}`)
+  // task 28: caps raised 13/22 -> 50/85 deg/s BY THE USER'S OWN CALL (see
+  // drone-cam.js's this.maxYawRateDeg comment) — continuous centering
+  // (every frame, not just near a dead-zone edge) saturates these on this
+  // torture fixture, same relationship as every prior round in this file.
+  assert.ok(m.peakYawDegS <= 50.5, `peak yaw ${m.peakYawDegS.toFixed(2)} deg/s exceeds the 50°/s anti-nausea cap`)
+  assert.ok(m.peakPitchDegS <= 85.5, `peak pitch ${m.peakPitchDegS.toFixed(2)} deg/s exceeds the 85°/s cap`)
+  // BOTH axes must track close to centre — this is the task-28 acceptance
+  // bar, and the split-by-axis assertion is exactly what would have caught
+  // the field-reported pitch-barely-moves bug (a combined-only metric could
+  // pass with X perfect and Y terrible, averaging out to "fine").
+  assert.ok(m.meanAbsNdcX < 0.35, `mean |NDC.x| ${m.meanAbsNdcX.toFixed(3)} too far from centre`)
+  assert.ok(m.meanAbsNdcY < 0.35, `mean |NDC.y| ${m.meanAbsNdcY.toFixed(3)} too far from centre`)
 })
 
 // ---- task 16 §4: cinematic standoff-breathing variation (orbit-bias removed — it integrated into drift) -----
 // Layered ON TOP of the same rig above — these tests prove the addition (a)
 // actually varies the standoff and (b) doesn't blow the exact same measured
-// contract the test above guards (peak yaw capped, % frames in box), using
-// the identical zigzag-climb fixture and duration so the numbers are
-// directly comparable to the baseline test's own 85%/9.5 thresholds.
+// contract the test above guards (peak yaw/pitch capped, both axes close to
+// centre), using the identical zigzag-climb fixture and duration so the
+// numbers are directly comparable to the baseline test's own thresholds.
 test('DroneCam standoff breathes (closer/further) but never strays far from the tuned base', () => {
   const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 400)
   const controls = { target: new THREE.Vector3() }
@@ -323,45 +344,22 @@ test('DroneCam standoff breathes (closer/further) but never strays far from the 
   assert.ok(maxStandoff <= 18, `standoff strayed too far: ${maxStandoff.toFixed(2)}`)
 })
 
-test('DroneCam breathing variation does not regress the dead-zone contract', () => {
+test('DroneCam breathing variation does not regress the continuous-centering contract', () => {
   const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 400)
   const controls = { target: new THREE.Vector3() }
   const drone = new DroneCam({ camera, controls, sampleGround: () => 0 })
   const worldPts = buildZigzagClimb()
-  const duration = 60 // same duration as the baseline "dead-zone" test above
+  const duration = 60 // same duration as the baseline centering test above
   assert.ok(drone.start(worldPts, { duration }))
 
-  const dt = 1 / 30
-  const prevHeading = new THREE.Vector3()
-  const vSub = new THREE.Vector3()
-  const vNdc = new THREE.Vector3()
-  let peakYawDegS = 0
-  let framesInBox = 0
-  let totalFrames = 0
-  let s = 0
-  let guard = 0
-  while (s < 1 && guard++ < 5000) {
-    prevHeading.copy(drone._headingDir)
-    s = Math.min(1, s + dt / duration)
-    drone.updateAt(dt, s)
-    totalFrames++
-    const cosA = Math.max(-1, Math.min(1, prevHeading.dot(drone._headingDir)))
-    peakYawDegS = Math.max(peakYawDegS, ((Math.acos(cosA) * 180) / Math.PI) / dt)
-    camera.updateMatrixWorld(true)
-    drone.curve.getPointAt(s, vSub)
-    vNdc.copy(vSub).project(camera)
-    if (
-      vNdc.x >= drone.deadzone.xMin && vNdc.x <= drone.deadzone.xMax &&
-      vNdc.y >= drone.deadzone.yMin && vNdc.y <= drone.deadzone.yMax
-    ) framesInBox++
-  }
-  const pctInBox = (framesInBox / totalFrames) * 100
+  const m = driveFollow(drone, { dt: 1 / 30, duration })
   // the hard rate cap is architectural (slewHeading clamps every frame
   // regardless of what target the breathing/bias feeds it) — this can never
   // regress, but assert it anyway as a tripwire against a future change to
-  // the cap-application itself. Cap raised 9 -> 13 deg/s, task 24 (see above).
-  assert.ok(peakYawDegS <= 13.5, `peak yaw ${peakYawDegS.toFixed(2)} deg/s exceeds the ~13°/s anti-nausea cap`)
-  assert.ok(pctInBox >= 85, `only ${pctInBox.toFixed(1)}% of frames kept the tracked point inside the dead-zone box (variation regressed it)`)
+  // the cap-application itself. Cap raised 13 -> 50 deg/s, task 28 (see above).
+  assert.ok(m.peakYawDegS <= 50.5, `peak yaw ${m.peakYawDegS.toFixed(2)} deg/s exceeds the 50°/s anti-nausea cap`)
+  assert.ok(m.meanAbsNdcX < 0.35, `mean |NDC.x| ${m.meanAbsNdcX.toFixed(3)} too far from centre (variation regressed it)`)
+  assert.ok(m.meanAbsNdcY < 0.35, `mean |NDC.y| ${m.meanAbsNdcY.toFixed(3)} too far from centre (variation regressed it)`)
 })
 
 // ---- task 22 §5: sequenced-playback handover between GPX layers -----------
@@ -421,8 +419,8 @@ test('DroneCam.retarget() hands over to a new track without exceeding the yaw-ra
     s = Math.min(1, s + dt / duration)
     drive(s)
   }
-  // cap raised 9 -> 13 deg/s, task 24 (see drone-cam.js's this.maxYawRateDeg comment)
-  assert.ok(peakYawDegS <= 13.5, `peak yaw ${peakYawDegS.toFixed(2)} deg/s exceeds the ~13°/s anti-nausea cap across the handover`)
+  // cap raised 13 -> 50 deg/s, task 28 (see drone-cam.js's this.maxYawRateDeg comment)
+  assert.ok(peakYawDegS <= 50.5, `peak yaw ${peakYawDegS.toFixed(2)} deg/s exceeds the 50°/s anti-nausea cap across the handover`)
 })
 
 test('DroneCam.retarget() leaves the current flight untouched on a degenerate track', () => {
