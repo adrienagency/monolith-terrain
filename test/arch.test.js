@@ -106,9 +106,12 @@ test('classifyArchSize degrades to scale 1 rather than dividing by ~zero on a de
 })
 
 // task 25 §3: the gate must straddle the track (feet either side of the
-// track point) and stay perpendicular to the direction of travel.
+// track point) and stay perpendicular to the direction of travel. Uses
+// kind:'finish' — the one kind archFeet does NOT 180°-flip (see its own
+// comment) — so postA/postB line up with the plain perpOf(dir) formula;
+// the flip itself is covered separately below.
 test('archTransform: the two feet straddle spec.pos symmetrically along perp(dir)', () => {
-  const spec = { kind: 'start', pos: { x: 10, y: 0, z: 20 }, dir: { x: 1, z: 0 } }
+  const spec = { kind: 'finish', pos: { x: 10, y: 0, z: 20 }, dir: { x: 1, z: 0 } }
   const proto = { widthIsX: true, worldWidth: 2, worldHeight: 1, worldDepth: 0.3 }
   const { postA, postB } = archTransform(spec, 0, 0, proto)
   // perpOf({x:1,z:0}) = {x:0, z:-1}
@@ -124,7 +127,7 @@ test('archTransform: gate position sits at the AVERAGE of the two ground samples
 })
 
 test('archTransform: level ground (equal foot heights) yields zero roll', () => {
-  const spec = { kind: 'start', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0, z: 1 } }
+  const spec = { kind: 'finish', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0, z: 1 } }
   const proto = { widthIsX: true, worldWidth: 1, worldHeight: 1, worldDepth: 0.2 }
   const { quaternion } = archTransform(spec, 3, 3, proto)
   // pure yaw, no roll: the local width axis (local +X, since widthIsX) should
@@ -175,7 +178,7 @@ test('archTransform returns a unit (proper-rotation) quaternion for widthIsX=fal
 // lands on world dir — for BOTH branches, not just the one the old tests
 // above happened to exercise.
 test('archTransform (widthIsX=true): local +X (width) maps onto world perp(dir)', () => {
-  const spec = { kind: 'start', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0.6, z: 0.8 } }
+  const spec = { kind: 'finish', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0.6, z: 0.8 } }
   const proto = { widthIsX: true, worldWidth: 1, worldHeight: 1, worldDepth: 0.2 }
   const { quaternion } = archTransform(spec, 0, 0, proto)
   const v = new Vector3(1, 0, 0).applyQuaternion(quaternion)
@@ -191,7 +194,7 @@ test('archTransform (widthIsX=true): local +X (width) maps onto world perp(dir)'
 // postB" for this branch — harmless, since the two feet are otherwise
 // interchangeable.
 test('archTransform (widthIsX=false): local +Z (width) maps onto world -perp(dir)', () => {
-  const spec = { kind: 'start', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0.6, z: 0.8 } }
+  const spec = { kind: 'finish', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0.6, z: 0.8 } }
   const proto = { widthIsX: false, worldWidth: 1, worldHeight: 1, worldDepth: 0.2 }
   const { quaternion } = archTransform(spec, 0, 0, proto)
   const v = new Vector3(0, 0, 1).applyQuaternion(quaternion)
@@ -209,6 +212,34 @@ test('archTransform (widthIsX=false): postA/postB stay consistent with the actua
   assert.ok(Math.abs(postA.z - (spec.pos.z + v.z * half)) < 1e-6)
   assert.ok(Math.abs(postB.x - (spec.pos.x - v.x * half)) < 1e-6)
   assert.ok(Math.abs(postB.z - (spec.pos.z - v.z * half)) < 1e-6)
+})
+
+// task 25 §5: which physical face reads which baked word is fixed by the
+// GLB (verified live: "Text_2" always reads FINISH from -N, "Text" always
+// reads START from -N — see buildArchMesh's own comment). A 'start' or
+// 'loop' gate must therefore face 180° opposite of a 'finish' gate built
+// from the SAME numeric dir, or the wrong word ends up facing the runner
+// at one of the two ends (the exact bug this task caught and fixed).
+test('archTransform: a start gate faces 180° opposite of a finish gate given the identical dir', () => {
+  const dir = { x: 0.6, z: 0.8 }
+  const proto = { widthIsX: false, worldWidth: 1, worldHeight: 1, worldDepth: 0.2 }
+  const start = archTransform({ kind: 'start', pos: { x: 0, y: 0, z: 0 }, dir }, 0, 0, proto)
+  const finish = archTransform({ kind: 'finish', pos: { x: 0, y: 0, z: 0 }, dir }, 0, 0, proto)
+  // local +X is the depth/forward axis for widthIsX=false (see archFeet) —
+  // it should point in exactly opposite world directions for the two kinds
+  const vStart = new Vector3(1, 0, 0).applyQuaternion(start.quaternion)
+  const vFinish = new Vector3(1, 0, 0).applyQuaternion(finish.quaternion)
+  assert.ok(Math.abs(vStart.x + vFinish.x) < 1e-6 && Math.abs(vStart.z + vFinish.z) < 1e-6)
+})
+
+test('archTransform: a loop gate (outDir) faces the same way a start gate with dir=outDir would', () => {
+  const outDir = { x: 0.6, z: 0.8 }
+  const proto = { widthIsX: false, worldWidth: 1, worldHeight: 1, worldDepth: 0.2 }
+  const loop = archTransform({ kind: 'loop', pos: { x: 0, y: 0, z: 0 }, outDir, inDir: { x: -1, z: 0 } }, 0, 0, proto)
+  const start = archTransform({ kind: 'start', pos: { x: 0, y: 0, z: 0 }, dir: outDir }, 0, 0, proto)
+  const vLoop = new Vector3(1, 0, 0).applyQuaternion(loop.quaternion)
+  const vStart = new Vector3(1, 0, 0).applyQuaternion(start.quaternion)
+  assert.ok(Math.abs(vLoop.x - vStart.x) < 1e-6 && Math.abs(vLoop.z - vStart.z) < 1e-6)
 })
 
 // task 25 §4: "a black arch with black text is useless" — textInkFor must

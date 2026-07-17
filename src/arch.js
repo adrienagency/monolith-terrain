@@ -154,8 +154,45 @@ export function classifyArchSize(size) {
 // Returns world-space position (the track point itself, at the AVERAGE of
 // the two ground samples) + a quaternion, plus the two foot positions (XZ)
 // a caller needs to take those terrain samples from in the first place.
-export function archTransform(spec, groundA, groundB, proto) {
-  const dir = primaryDir(spec)
+//
+// Which physical face reads which word (task 25 §5) is fixed by the GLB
+// itself, not chosen here: measured live, the mesh named "Text" always
+// reads "START" from the -N side and "Text_2" always reads "FINISH" from
+// the -N side — i.e. handing archTransform the SAME `dir` for a 'start' and
+// a 'finish' spec would put the SAME word ("FINISH") facing the runner at
+// BOTH gates, since it's the same rigid relationship every time. A runner
+// stands on the -N side of EITHER gate (about to depart in +N, or about to
+// cross into +N) and must read the word that matches — so 'start' (and
+// 'loop', which orients off the departure/outDir heading — see
+// computeArchSpecs) negate the heading before building N, flipping the
+// WHOLE gate 180° so the "-N" position now carries the departure word.
+// 'finish' needs no flip: the model's own -N side already reads FINISH.
+// buildArchMesh's own text-visibility choice (which of the two meshes to
+// show on a single-face point-to-point gate) must stay paired with this
+// exact convention — see its comment.
+// Shared by archTransform below AND buildArchMesh (which needs postA/postB
+// BEFORE it has ground samples to build a full transform with — a caller
+// must sample terrain.sample() at exactly these two points, not an
+// independently-recomputed pair, or the roll term below ends up pairing
+// groundA/groundB with the WRONG physical foot). Returns the world basis
+// (N/U/up, all unit, handedness-safe — see archTransform's own comment)
+// alongside the two foot points, so both call sites derive everything from
+// one place instead of two formulas that could quietly drift apart.
+export function archFeet(spec, proto) {
+  const trueDir = primaryDir(spec)
+  // Which physical face reads which word (task 25 §5) is fixed by the GLB
+  // itself: measured live, the mesh named "Text" always reads "START" from
+  // the -N side and "Text_2" always reads "FINISH" from the -N side — i.e.
+  // using the SAME dir for a 'start' and a 'finish' spec would put the SAME
+  // word ("FINISH") facing the runner at BOTH gates. A runner stands on the
+  // -N side of EITHER gate (about to depart in +N, or about to cross into
+  // +N) and must read the word that matches — so 'start' (and 'loop', which
+  // orients off the departure/outDir heading — see computeArchSpecs)
+  // negate the heading, flipping the WHOLE gate 180° so "-N" now carries
+  // the departure word. 'finish' needs no flip. buildArchMesh's own
+  // text-visibility choice must stay paired with this exact convention.
+  const faceSign = spec.kind === 'finish' ? 1 : -1
+  const dir = { x: trueDir.x * faceSign, z: trueDir.z * faceSign }
   const N = new THREE.Vector3(dir.x, 0, dir.z).normalize() // world depth/forward dir
   // U (world width dir) is built as a CROSS PRODUCT, not perpOf(dir) fed
   // straight into makeBasis — perpOf is only a 2D rotate-90°, it says
@@ -171,21 +208,24 @@ export function archTransform(spec, groundA, groundB, proto) {
   const upHint = new THREE.Vector3(0, 1, 0)
   const U = new THREE.Vector3().crossVectors(upHint, N).normalize()
   const up = new THREE.Vector3().crossVectors(N, U).normalize()
+  // the world direction the rotation actually assigns to the proto's own
+  // "positive width" local axis — widthDir matches whichever sign
+  // archTransform's basis (below) feeds makeBasis's third column, so
+  // postA/postB stay consistent with the rotation by construction.
+  const widthDir = proto.widthIsX ? U : U.clone().negate()
+  const half = proto.worldWidth / 2
+  const postA = { x: spec.pos.x + widthDir.x * half, z: spec.pos.z + widthDir.z * half }
+  const postB = { x: spec.pos.x - widthDir.x * half, z: spec.pos.z - widthDir.z * half }
+  return { N, U, up, postA, postB }
+}
+
+export function archTransform(spec, groundA, groundB, proto) {
+  const { N, U, up, postA, postB } = archFeet(spec, proto)
 
   const basis = new THREE.Matrix4()
   if (proto.widthIsX) basis.makeBasis(U, up, N)
   else basis.makeBasis(N, up, U.clone().negate())
   const qYaw = new THREE.Quaternion().setFromRotationMatrix(basis)
-
-  // postA/postB (the two foot sample points) MUST use the SAME world
-  // direction the rotation actually assigns to the proto's own "positive
-  // width" local axis — widthDir below matches whichever sign each branch
-  // above just fed into makeBasis's third column, so the roll term (next)
-  // banks toward the physically correct foot instead of fighting the yaw.
-  const widthDir = proto.widthIsX ? U : U.clone().negate()
-  const half = proto.worldWidth / 2
-  const postA = { x: spec.pos.x + widthDir.x * half, z: spec.pos.z + widthDir.z * half }
-  const postB = { x: spec.pos.x - widthDir.x * half, z: spec.pos.z - widthDir.z * half }
 
   const roll = proto.worldWidth > 1e-6 ? Math.atan2((groundB ?? 0) - (groundA ?? 0), proto.worldWidth) : 0
   const qRoll = new THREE.Quaternion().setFromAxisAngle(N, roll)
@@ -317,11 +357,10 @@ export function buildArchMesh(spec, { sampleGround, ink = '#2b2f33', textInk, re
   loadArchProto().then((proto) => {
     if (group.userData.disposed || !proto) return
 
-    const dir = primaryDir(spec)
-    const perp = perpOf(dir)
-    const half = proto.worldWidth / 2
-    const postA = { x: spec.pos.x + perp.x * half, z: spec.pos.z + perp.z * half }
-    const postB = { x: spec.pos.x - perp.x * half, z: spec.pos.z - perp.z * half }
+    // SAME postA/postB archTransform itself will use internally (see
+    // archFeet) — sampling anything else here would pair groundA/groundB
+    // with the wrong physical foot once archTransform recomputes them.
+    const { postA, postB } = archFeet(spec, proto)
     const groundA = sampleGround ? sampleGround(postA.x, postA.z) : spec.pos.y
     const groundB = sampleGround ? sampleGround(postB.x, postB.z) : spec.pos.y
 
@@ -339,10 +378,15 @@ export function buildArchMesh(spec, { sampleGround, ink = '#2b2f33', textInk, re
     // whichever baked text mesh is the WRONG word for this gate, rather
     // than ship an arch that reads e.g. "FINISH" on its back face at the
     // start line. A loop gate keeps BOTH — that's the one case where both
-    // words are simultaneously correct (see computeArchSpecs). See
-    // labelTextForMesh below for how "which mesh is which word" is decided.
+    // words are simultaneously correct (see computeArchSpecs). Index
+    // convention (0="Text_2"/FINISH, 1="Text"/START — measured live off the
+    // actual GLB, traversal order) must stay paired with archFeet's own
+    // faceSign choice above: 'finish' does not flip the gate, so its own
+    // -N side (where the mesh order puts FINISH) is already correct
+    // (index 0); every other kind flips the gate 180°, so its -N side now
+    // carries START (index 1) instead.
     if (spec.kind !== 'loop' && textMeshes.length > 1) {
-      const wanted = spec.kind === 'start' ? 0 : 1 // index convention — see labelTextForMesh
+      const wanted = spec.kind === 'finish' ? 0 : 1
       textMeshes.forEach((m, i) => { m.visible = i === wanted })
     }
 
