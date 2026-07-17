@@ -57,6 +57,7 @@ let villageOpacity
 let detectLoop
 let HM_APEX_V
 let HEAD_MARKER_GROUND_GAP
+let slopeRampColor
 let THREE
 before(async () => {
   globalThis.DOMParser = class {
@@ -77,6 +78,7 @@ before(async () => {
     detectLoop,
     HM_APEX_V,
     HEAD_MARKER_GROUND_GAP,
+    slopeRampColor,
   } = await import('../src/gpx.js'))
 })
 
@@ -326,4 +328,54 @@ test('HEAD_MARKER_GROUND_GAP is a small, fixed world-unit constant', () => {
   // it's a plain number, not a function — nothing here CAN read camera
   // distance, which is the structural guarantee the brief asked for
   assert.equal(typeof HEAD_MARKER_GROUND_GAP, 'number')
+})
+
+// ---- six-stop slope ramp (task 27 §1) --------------------------------------
+// "Pente faible bleu > vert > jaune > orange > rouge > noir (pente max)" —
+// pin the six named stops themselves (hue-only HSL can't reach black, which
+// is exactly why this ramp uses explicit RGB stops now) plus monotonic,
+// smooth interpolation between them.
+
+test('slope ramp hits blue at 0%, black at/above the domain max', () => {
+  const blue = slopeRampColor(0)
+  assert.ok(blue.b > blue.r && blue.b > blue.g, `expected blue at 0%, got r${blue.r.toFixed(2)} g${blue.g.toFixed(2)} b${blue.b.toFixed(2)}`)
+  const black = slopeRampColor(20)
+  assert.ok(black.r < 0.15 && black.g < 0.15 && black.b < 0.15, `expected near-black at the domain max, got r${black.r.toFixed(2)} g${black.g.toFixed(2)} b${black.b.toFixed(2)}`)
+  // clamped, not extrapolated — a grade far past the domain max is still black
+  const clamped = slopeRampColor(60)
+  assert.ok(Math.abs(clamped.r - black.r) < 1e-6 && Math.abs(clamped.g - black.g) < 1e-6 && Math.abs(clamped.b - black.b) < 1e-6, 'clamps past the domain max')
+})
+
+test('slope ramp passes through green, yellow, orange, red at their stops', () => {
+  const green = slopeRampColor(4)
+  assert.ok(green.g > green.r && green.g > green.b, `expected green at 4%, got r${green.r.toFixed(2)} g${green.g.toFixed(2)} b${green.b.toFixed(2)}`)
+  const yellow = slopeRampColor(8)
+  // THREE.Color's hex constructor converts sRGB -> linear working space
+  // (ColorManagement), so the green channel here reads lower than the
+  // sRGB hex '#f4d30a' literal would suggest — assert against the actual
+  // linear-space values, not the naive sRGB ones
+  assert.ok(yellow.r > 0.8 && yellow.g > 0.5 && yellow.b < 0.2, `expected yellow at 8%, got r${yellow.r.toFixed(2)} g${yellow.g.toFixed(2)} b${yellow.b.toFixed(2)}`)
+  const orange = slopeRampColor(12)
+  assert.ok(orange.r > 0.8 && orange.g > 0.15 && orange.g < 0.7 && orange.b < 0.2, `expected orange at 12%, got r${orange.r.toFixed(2)} g${orange.g.toFixed(2)} b${orange.b.toFixed(2)}`)
+  const red = slopeRampColor(16)
+  assert.ok(red.r > 0.7 && red.g < 0.35 && red.b < 0.25, `expected red at 16%, got r${red.r.toFixed(2)} g${red.g.toFixed(2)} b${red.b.toFixed(2)}`)
+})
+
+test('slope ramp is a symmetric, monotonically smooth function of |grade| (no wraparound jumps)', () => {
+  // negative and positive grades of the same magnitude land on the same
+  // colour — the ramp reads "how steep", not "up vs down"
+  const pos = slopeRampColor(9.4)
+  const neg = slopeRampColor(-9.4)
+  assert.ok(Math.abs(pos.r - neg.r) < 1e-9 && Math.abs(pos.g - neg.g) < 1e-9 && Math.abs(pos.b - neg.b) < 1e-9, 'symmetric in sign')
+  // no channel ever jumps by more than one stop's worth between adjacent
+  // percentage points — catches a reintroduced hue wraparound (e.g. a lerp
+  // that swings through purple/magenta between blue and green)
+  let prev = slopeRampColor(0)
+  let maxStep = 0
+  for (let g = 0.5; g <= 20; g += 0.5) {
+    const c = slopeRampColor(g)
+    maxStep = Math.max(maxStep, Math.abs(c.r - prev.r), Math.abs(c.g - prev.g), Math.abs(c.b - prev.b))
+    prev = c
+  }
+  assert.ok(maxStep < 0.3, `largest single 0.5%-grade colour step was ${maxStep.toFixed(2)}, expected smooth interpolation`)
 })

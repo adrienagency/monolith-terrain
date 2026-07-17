@@ -82,13 +82,52 @@ function elevationRampColor(t) {
   return new THREE.Color().setHSL(hue, sat, light)
 }
 
-// green (flat) -> amber (moderate) -> red (steep) by absolute grade %
-function slopeRampColor(gradePct) {
-  const g = Math.min(Math.abs(gradePct), 18)
-  let hue
-  if (g <= 4) hue = THREE.MathUtils.lerp(0.34, 0.14, g / 4) // green -> amber
-  else hue = THREE.MathUtils.lerp(0.14, 0.0, Math.min((g - 4) / 10, 1)) // amber -> red
-  return new THREE.Color().setHSL(hue, 0.8, 0.5)
+// six-stop grade ramp: blue (flat) -> green -> yellow -> orange -> red ->
+// black (max), per the user's exact spec ("pente faible bleu > vert >
+// jaune > orange > rouge > noir"). This REPLACES a 2-segment HSL hue sweep
+// (green->amber->red) that was abandoned outright, not just re-tuned: a
+// hue-only lerp can never reach black (black has no hue — it's zero
+// lightness), and blue->green->yellow->orange->red is not a monotonic hue
+// path either (blue sits at hue ~0.6, red wraps back near hue ~0.0/1.0 —
+// naively lerping hue between arbitrary stops crosses through purple/magenta
+// instead of the intended sequence). So this uses explicit RGB colour stops
+// and lerps between the bracketing pair with THREE.Color.lerpColors, which
+// interpolates in RGB space and has no wraparound to get wrong.
+const SLOPE_STOPS = [
+  new THREE.Color('#1e78e0'), // blue   — flat
+  new THREE.Color('#2fb350'), // green
+  new THREE.Color('#f4d30a'), // yellow
+  new THREE.Color('#ff8c1a'), // orange
+  new THREE.Color('#e3342f'), // red
+  new THREE.Color('#141414'), // black  — max
+]
+// Grade domain, chosen from the two real fixtures (see the task report for
+// the full measured distribution), not guessed:
+//  - _staging/test-track.gpx (Jura gravel/road, 222km, D+4000): abs grade
+//    p50 2.5%, p90 8.0%, p95 10.2%, p99 15.9%, max 33%.
+//  - _staging/europaweg.gpx (Valais alpine trail, 39km, 1316->2350m,
+//    D+2880): abs grade p50 10.7%, p90 37.8%, max 104% (GPS-noisy switchback
+//    sections, not literal — a hiking trail's point-to-point grade spikes
+//    hard on tight hairpins).
+// A real road climb like the reference's Côte de Domancy averages 9.4%.
+// 0-20%, in even 4-point steps, puts that squarely in the yellow/orange
+// middle of the ramp (the brief's own bar: a climb must not pin one end)
+// while still giving the Jura fixture a full spread (its p95 lands in
+// orange, only its rare >20% kickers reach black) and letting the alpine
+// trail legitimately run hot — a route that's genuinely often above 20%
+// SHOULD read red/black, that's the point of colouring by what the athlete
+// feels instead of by altitude.
+const SLOPE_DOMAIN_MAX = 20
+// exported so test/gpx.test.js can pin the ramp's actual colours/domain —
+// same rationale as HM_APEX_V/HEAD_MARKER_GROUND_GAP above: a pure function,
+// no DOM required, worth locking down directly rather than only indirectly
+// through _trackColors.
+export function slopeRampColor(gradePct) {
+  const g = THREE.MathUtils.clamp(Math.abs(gradePct), 0, SLOPE_DOMAIN_MAX)
+  const f = (g / SLOPE_DOMAIN_MAX) * (SLOPE_STOPS.length - 1)
+  const i = Math.min(Math.floor(f), SLOPE_STOPS.length - 2)
+  const out = new THREE.Color()
+  return out.lerpColors(SLOPE_STOPS[i], SLOPE_STOPS[i + 1], f - i)
 }
 
 // pleasant hue sweep along the track's index (start -> end)

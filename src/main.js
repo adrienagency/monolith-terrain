@@ -229,9 +229,12 @@ const params = {
   gpxColor: '',
   // gradient defaults ON — "par défaut, sur la trace GPX, le gradient doit se
   // faire du vert foncé vers le rouge vif" only shows up if a loaded GPX
-  // draws the ramp without the user having to flip a toggle first
+  // draws the ramp without the user having to flip a toggle first.
+  // Default MODE is 'slope' (not 'elevation'): the reference video colours
+  // its route by gradient (blue on the flat, red on the climb), not by
+  // absolute altitude — colour what the athlete feels, not where they are.
   gpxGradient: true,
-  gpxGradientMode: 'elevation',
+  gpxGradientMode: 'slope',
   gpxGlow: false,
   gpxMarkers: true, // single toggle for BOTH start + finish markers
   gpxArchColor: '', // task 25 §4 — '' = darkMode-driven default (see gpx.js _buildArches)
