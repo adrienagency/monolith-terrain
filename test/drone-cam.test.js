@@ -253,12 +253,14 @@ test('DroneCam standoff breathes (closer/further) but never strays far from the 
   // to `arm`. A relative bound silently tightens whenever the baseline changes:
   // this assertion originally allowed arm*1.35 with arm=36 (=48.6 absolute), and
   // task-20's 50%-closer baseline (arm 24) turned the same expression into 32.4
-  // absolute — stricter than anyone intended, purely by accident. The absolute
-  // fences come from the measured arm sweep recorded above `this.arm`: 36 was
-  // the proven constant and 48 still held 94.7% in-box, so 50 is the far fence;
-  // 14 keeps the tightest col push-in (24 * 0.72 ≈ 17) clear of nausea range.
-  assert.ok(minStandoff >= 14, `standoff dipped too close: ${minStandoff.toFixed(2)}`)
-  assert.ok(maxStandoff <= 50, `standoff strayed too far: ${maxStandoff.toFixed(2)}`)
+  // absolute — stricter than anyone intended, purely by accident. Task 26 halved
+  // the baseline again (arm 12 -> 6, see this.arm's comment in drone-cam.js) —
+  // measured on this exact fixture that moves the range to ~7.33..11.70, so the
+  // fences below are rescaled by the same ~1/2 factor as the baseline itself
+  // (14 -> 6.5, 50 -> 25), same margin either side of the measured range as the
+  // task-24 fences kept around theirs.
+  assert.ok(minStandoff >= 6.5, `standoff dipped too close: ${minStandoff.toFixed(2)}`)
+  assert.ok(maxStandoff <= 25, `standoff strayed too far: ${maxStandoff.toFixed(2)}`)
 })
 
 test('DroneCam breathing variation does not regress the dead-zone contract', () => {

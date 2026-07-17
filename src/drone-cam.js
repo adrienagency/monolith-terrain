@@ -1,6 +1,9 @@
-// Drone follow camera for GPX playback. A cinematic TRAVELING shot that
-// stands well off the route and drifts along it — never a corner-chasing
-// pursuit cam.
+// Third-person follow camera for GPX playback (task 26). A game-style chase
+// cam that tracks the runner's OWN path, orbits around them a little as they
+// advance, and sometimes pushes in hard — not the earlier cinematic
+// TRAVELING shot that stood off the route and drifted along it
+// independently of the runner's own turns (see the TASK 26 note below for
+// why that changed and what still keeps it from being a nausea machine).
 //
 // The nausea this replaces came from one root cause: the old rig was a
 // function of the track's own local shape — every hairpin, every GPS
@@ -55,6 +58,57 @@
 //     the subject is CURRENTLY inside the box before deciding to correct.
 //   · Frame-rate-independent critical damping on top of all of the above
 //     for extra silkiness: x += (target-x)·(1-2^(-dt/half)).
+//
+//   · TASK 26 — THIRD-PERSON MODEL. The brief's three asks: (1) halve the
+//     median standoff again, (2) "suivre littéralement le pointeur, comme
+//     un jeu à la troisième personne, mais la caméra peut aussi se déplacer
+//     tout autour du pointeur qui avance, avec un peu de recul, et parfois
+//     zoomer de façon importante", (3) never let terrain sit between camera
+//     and pointer. (2) is a real reversal of this file's founding rule
+//     above ("stop reading the track directly at all") — the user is
+//     explicitly asking for the traveling-shot detachment that rule was
+//     built to prevent. So: the SPINE still exists and still drives the
+//     content-aware zoom drama (buildDramaProfile()/dramaStandoffMul(), the
+//     "parfois zoomer" half of ask 2) and still seeds the first heading —
+//     but the camera's POSITION now orbits `this.curve`, the real
+//     (lightly-smoothed, GPS-jitter-only) subject path, in _solvePosition(),
+//     not the heavily-smoothed spine. What still keeps this from being the
+//     original corner-chasing nausea is UNCHANGED: slewHeading's per-frame
+//     rate cap (maxYawRateDeg/maxPitchRateDeg) bounds every turn regardless
+//     of how hard the now-more-forceful target swings, the dead-zone box
+//     still only engages a correction near the frame's edge instead of
+//     continuously, and there's still no roll. Two additions layer on top:
+//       - ORBIT BIAS: a slow (orbitPeriodSec), bounded (orbitAmp)
+//         oscillation of the horizontal framing target (see targetNdcX
+//         usage in _applyPose()), clamped inside the dead-zone box. This is
+//         NOT the task-16 orbit-bias removed above (see the constructor
+//         note on _breathT) — that one rotated the heading directly every
+//         frame and integrated into unbounded drift. This one only nudges
+//         WHERE a dead-zone correction re-centers to, so it inherits the
+//         box's hard bounds and can never drift past them, and it only
+//         moves the camera when a correction was going to fire anyway —
+//         "elle peut se déplacer tout autour du pointeur", a slow
+//         deliberate settle from one side of directly-behind to the other,
+//         not a spin.
+//       - OCCLUSION AVOIDANCE (resolveOcclusion(), ask 3): every frame,
+//         after the position is solved and damped, march a ray from the
+//         SUBJECT outward to the camera's own realized position, comparing
+//         each step against sampleGround(x,z) — the same height-field query
+//         this.clearance already uses. Where the ground first pokes through
+//         the line, the camera is a "spring arm" that pulls straight back
+//         in along that ray to just before it — the classic third-person
+//         camera-collision fix, done with a height-field march (cheap,
+//         reuses the rig's existing sampleGround) rather than a
+//         THREE.Raycaster against the terrain mesh (no mesh reference is
+//         even available here — only sampleGround is — and a handful of
+//         height lookups is far cheaper per-frame than a triangle raycast
+//         against a whole terrain mesh). This runs on the REALIZED position
+//         every frame, not eased in, because the ask was literal ("la
+//         caméra doit se déplacer pour toujours voir le pointeur" — ALWAYS,
+//         not eventually). Easing back OUT once clear needs no extra
+//         machinery: once a frame isn't occluded the clamp just doesn't
+//         fire, and the ordinary damped chase (posHalfLife) glides the arm
+//         back out on its own.
 
 import * as THREE from 'three'
 
@@ -255,6 +309,44 @@ export function ndcYForPitch(diff, forward0, pitch, vFovRad) {
   return (A * c - B * s) / ((B * c + A * s) * k)
 }
 
+// ---- occlusion avoidance (task 26 §3, unit-tested) --------------------------
+
+// "Spring arm" camera collision: march a ray from the SUBJECT outward to the
+// camera's own desired position, comparing each step's line-of-sight height
+// against sampleGround(x,z) — the same terrain query this.clearance already
+// leans on. The first step where the ground pokes through the line is where
+// a ridge/mountain would start blocking the shot; the camera gets pulled
+// straight back in along that SAME ray to just before it (one step of
+// buffer, then a caller-supplied skin margin so it eases off before actually
+// grazing, not exactly at the graze point). This is a purely geometric,
+// per-frame check — no scene graph or mesh needed, just the height-field
+// sampleGround() the rig already has — so it costs `steps` calls to
+// sampleGround, the same order of magnitude as the ground-clearance lookahead
+// _solvePosition() already does every frame.
+// minT floors how far the arm is allowed to collapse (as a fraction of the
+// original subject→camera distance) so an extreme case (subject standing
+// right against a wall) can't zero the camera onto the subject.
+// Returns the (possibly pulled-in) position and whether a pull actually
+// happened — the caller (DroneCam._applyPose) uses `pulled` to know whether
+// to re-clamp ground clearance (pulling toward the subject can lower the
+// camera's Y as a side effect of shortening the whole 3D offset).
+export function resolveOcclusion(subjPt, camPos, sampleGround, { steps = 14, skin = 0.35, minT = 0.2 } = {}) {
+  if (!sampleGround) return { x: camPos.x, y: camPos.y, z: camPos.z, pulled: false }
+  const dx = camPos.x - subjPt.x
+  const dy = camPos.y - subjPt.y
+  const dz = camPos.z - subjPt.z
+  let blockT = -1
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps
+    const gh = sampleGround(subjPt.x + dx * t, subjPt.z + dz * t)
+    const lineY = subjPt.y + dy * t
+    if (gh + skin > lineY) { blockT = t; break }
+  }
+  if (blockT < 0) return { x: camPos.x, y: camPos.y, z: camPos.z, pulled: false }
+  const safeT = Math.max(minT, blockT - 1 / steps)
+  return { x: subjPt.x + dx * safeT, y: subjPt.y + dy * safeT, z: subjPt.z + dz * safeT, pulled: true }
+}
+
 // ---- controller -------------------------------------------------------------
 
 export class DroneCam {
@@ -334,8 +426,28 @@ export class DroneCam {
     // vomir" corner-chasing nausea the brief opened with, so this raises it
     // by less than half rather than doubling it outright — the user asked for
     // more life, not a return to the pursuit-cam that started this file.
-    this.arm = 12 // baseline traveling distance behind the spine (world units) — task 24: half of task-20's 24
-    this.lift = 6 // baseline height above the spine's own (already-smoothed) elevation — half of task-20's 12
+    //
+    // Task 26: "son point de distance médian doit encore être 50% plus près"
+    // — literal halving again (12/6 -> 6/3), same pattern as every prior
+    // round in this table — BUT this round also changes what arm/lift are
+    // measured FROM: _solvePosition() below now orbits this.curve (the real
+    // subject path) instead of this.spine (see the class comment's TASK 26
+    // note), and resolveOcclusion() can pull the realized distance in
+    // further still on top of that. So "half the constant" alone doesn't
+    // prove "half the median" the way it used to when the anchor was a
+    // fixed smoothed spine — measured on the real torture fixture instead
+    // (europaweg.gpx, a Valais valley with ~1000m walls, driven
+    // deterministically via updateAt() exactly like the task-13/20/24 tables
+    // above, see the task-26 report for the full before/after numbers):
+    //     before (task 24 code, arm 12/lift 6, spine-anchored):
+    //       median standoff 20.16, range 13.49..26.35, peak yaw 13.0°/s,
+    //       11.0% of frames occluded by terrain, 100% on-screen
+    //     after (this code, arm 6/lift 3, curve-anchored + orbit + occlusion):
+    //       see the task-26 report for the re-measured median/range/yaw/
+    //       occlusion% — this comment intentionally doesn't duplicate a
+    //       number that would go stale the next time this file is retuned.
+    this.arm = 6 // baseline distance behind the SUBJECT (world units) — task 26: half of task-24's 12
+    this.lift = 3 // baseline height above the subject — task 26: half of task-24's 6
     this.clearance = 2.6 // minimum gap kept over the ground / ridges
     // hard caps on how fast the rig is allowed to turn — THIS (not the spine
     // smoothing alone) is the actual nausea guarantee: even a pathological
@@ -384,7 +496,10 @@ export class DroneCam {
     // since (unlike targetNdcY) there's no other established "where the
     // point belongs" convention for X yet.
     this.targetNdcX = (this.deadzone.xMin + this.deadzone.xMax) / 2
-    this.posHalfLife = 0.9 // s — heavy extra smoothing on top of the already-smooth spine
+    // task 26: damping now smooths a chase against the real (curve-anchored)
+    // subject rather than an already-smooth spine — still the same role
+    // (extra silkiness on top of the rate caps), just a livelier target.
+    this.posHalfLife = 0.9 // s — smoothing on top of the rate-limited chase
     this.rotHalfLife = 0.5 // s — final orientation smoothing
 
     // ---- cinematic VARIATION — layered ON TOP of the arm/lift rig above,
@@ -445,6 +560,32 @@ export class DroneCam {
     this._dramaClimb = null // per-sample lookup tables built in start(), see buildDramaProfile()
     this._dramaBend = null
     this._standoffMul = 1
+
+    // ---- THIRD-PERSON ORBIT (task 26, ask 2's "se déplacer tout autour du
+    // pointeur") — see the class comment's TASK 26 note for the full
+    // rationale on why this is safe (bounded inside the dead-zone box,
+    // unlike the removed task-16 orbit-bias above). Reuses _breathT's
+    // already-running clock. orbitAmp is in the same NDC units as the
+    // deadzone box itself, so it's easy to reason about relative to
+    // deadzoneMargin/targetNdcX — comfortably inside the box's own half-width
+    // ((xMax-xMin)/2 = 0.355) so the oscillation itself never forces a
+    // correction, it only shifts where one settles once triggered.
+    this.orbitAmp = 0.16 // NDC units either side of targetNdcX the settle point drifts
+    this.orbitPeriodSec = 34 // s for one full left→right→left cycle — slow and deliberate, not a spin
+
+    // ---- OCCLUSION AVOIDANCE (task 26 §3) — tuning for resolveOcclusion()
+    // above, applied every frame in _applyPose() to the REALIZED camera
+    // position (see the class comment's TASK 26 note for why it's not
+    // eased in). occlusionSteps trades per-frame cost for how finely a
+    // ridge edge is resolved; occlusionSkin is a small buffer so the arm
+    // eases off before the line-of-sight literally grazes the terrain
+    // texture (which would flicker in and out of "blocked" every frame from
+    // float noise alone); occlusionMinT floors how far the arm can collapse
+    // (as a fraction of its own current length) so a subject standing right
+    // against a wall can't zero the camera onto them.
+    this.occlusionSteps = 14
+    this.occlusionSkin = 0.35
+    this.occlusionMinT = 0.22
 
     this._pos = new THREE.Vector3()
     this._headingDir = new THREE.Vector3(0, 0, 1) // current, rate-limited facing (horizontal, unit)
@@ -561,6 +702,8 @@ export class DroneCam {
     // seat the camera at the initial pose immediately — no slew-in lurch
     this._solvePosition(this.t, this._pos)
     this.camera.position.copy(this._pos)
+    this.curve.getPointAt(this.t, _subj)
+    this._resolveOcclusion(_subj) // never seat the very first frame occluded either
     this._aim(0, this.t, false) // dt=0 → snaps orientation instead of slewing in
     this.active = true
     return true
@@ -584,31 +727,55 @@ export class DroneCam {
 
   // camera position at path fraction s: arm/lift (content-aware — see
   // this._standoffMul, eased each frame in _applyPose toward
-  // _standoffMulAt(s)'s terrain-driven target) behind + above the SPINE
-  // (never the raw path) along the CURRENT (already rate-limited) heading.
-  // Ground/ridge clearance still reads the real terrain underneath so the
-  // rig never clips into relief.
+  // _standoffMulAt(s)'s terrain-driven target) behind + above the SUBJECT
+  // (this.curve — the real, lightly-smoothed path; task 26 moved this off
+  // the spine, see the class comment's TASK 26 note) along the CURRENT
+  // (already rate-limited) heading. Ground/ridge clearance still reads the
+  // real terrain underneath so the rig never clips into relief; this is a
+  // cheap first pass (lift only) — resolveOcclusion() in _applyPose()/
+  // start() is the harder guarantee that also pulls the arm in when lifting
+  // alone can't clear the line of sight.
   _solvePosition(s, outPos) {
-    this.spine.getPointAt(s, _spinePt)
+    this.curve.getPointAt(s, _subj)
     const arm = this.arm * this._standoffMul
     const lift = this.lift * this._standoffMul
     outPos.set(
-      _spinePt.x - this._headingDir.x * arm,
-      _spinePt.y + lift,
-      _spinePt.z - this._headingDir.z * arm
+      _subj.x - this._headingDir.x * arm,
+      _subj.y + lift,
+      _subj.z - this._headingDir.z * arm
     )
     if (this.sampleGround) {
       const gc = this.sampleGround(outPos.x, outPos.z)
       if (outPos.y < gc + this.clearance) outPos.y = gc + this.clearance
-      // lift over any ridge on the sight-line to the spine point
+      // lift over any ridge on the sight-line to the subject
       for (let k = 0.2; k < 0.99; k += 0.2) {
-        const px = outPos.x + (_spinePt.x - outPos.x) * k
-        const pz = outPos.z + (_spinePt.z - outPos.z) * k
+        const px = outPos.x + (_subj.x - outPos.x) * k
+        const pz = outPos.z + (_subj.z - outPos.z) * k
         const gh = this.sampleGround(px, pz) + this.clearance * 0.7
-        const need = (gh - _spinePt.y * k) / (1 - k)
+        const need = (gh - _subj.y * k) / (1 - k)
         if (need > outPos.y) outPos.y = need
       }
     }
+  }
+
+  // Occlusion guarantee (task 26 §3) — mutates this._pos IN PLACE to the
+  // resolveOcclusion() result for the subject at `subjPt`, then re-clamps
+  // ground clearance (pulling the arm in toward the subject shortens the
+  // WHOLE 3D offset, so the Y component can dip back under the clearance
+  // floor even though _solvePosition() already cleared it once). Called on
+  // the REALIZED position, every frame, not eased — see the class comment.
+  _resolveOcclusion(subjPt) {
+    if (!this.sampleGround) return
+    const r = resolveOcclusion(subjPt, this._pos, this.sampleGround, {
+      steps: this.occlusionSteps,
+      skin: this.occlusionSkin,
+      minT: this.occlusionMinT,
+    })
+    if (!r.pulled) return
+    this._pos.set(r.x, r.y, r.z)
+    const gc = this.sampleGround(this._pos.x, this._pos.z)
+    if (this._pos.y < gc + this.clearance) this._pos.y = gc + this.clearance
+    this.camera.position.copy(this._pos)
   }
 
   // interpolated read of the baked drama profile at path fraction s — see
@@ -697,7 +864,18 @@ export class DroneCam {
     const xOut = actualNdcX < this.deadzone.xMin + this.deadzoneMargin || actualNdcX > this.deadzone.xMax - this.deadzoneMargin
     _targetDir.copy(this._headingDir)
     if (dt <= 0 || xOut) {
-      let yaw = solvePitchForNdcY(_yawDiff, this._headingDir, this.targetNdcX, hFov)
+      // task 26 ORBIT BIAS: a slow, bounded sine drift of WHERE a correction
+      // re-centers to (see the class comment's TASK 26 note + the
+      // orbitAmp/orbitPeriodSec constructor comment) — clamped back inside
+      // the box so it can never push the settle point past deadzoneMargin's
+      // own trigger line (no flip-flop, no drift past the box).
+      const orbitBias = Math.sin((this._breathT / this.orbitPeriodSec) * Math.PI * 2) * this.orbitAmp
+      const orbitTargetX = THREE.MathUtils.clamp(
+        this.targetNdcX + orbitBias,
+        this.deadzone.xMin + this.deadzoneMargin * 1.5,
+        this.deadzone.xMax - this.deadzoneMargin * 1.5
+      )
+      let yaw = solvePitchForNdcY(_yawDiff, this._headingDir, orbitTargetX, hFov)
       yaw = THREE.MathUtils.clamp(yaw, -1.1, 1.1) // guard degenerate geometry
       _targetDir.copy(this._headingDir).multiplyScalar(Math.cos(yaw))
       _targetDir.x += _right.x * Math.sin(yaw)
@@ -717,12 +895,17 @@ export class DroneCam {
       this._headingDir.set(slewed.x, 0, slewed.z)
     }
 
-    // 2) position: content-aware arm/lift behind the spine along that
+    // 2) position: content-aware arm/lift behind the subject along that
     // (possibly just-turned) heading, then a long critical-damping pass on top.
     this._solvePosition(s, _desiredPos)
     const fp = dt <= 0 ? 1 : 1 - Math.pow(2, -dt / this.posHalfLife)
     this._pos.lerp(_desiredPos, fp)
     this.camera.position.copy(this._pos)
+
+    // 2b) occlusion guarantee (task 26 §3) — _subj here is exactly the same
+    // curve.getPointAt(s) evaluated for the yaw section above (s hasn't
+    // changed since), so no extra curve evaluation is needed.
+    this._resolveOcclusion(_subj)
 
     this._aim(dt, s, arrived)
   }
