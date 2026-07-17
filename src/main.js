@@ -337,6 +337,12 @@ const params = {
   // letterform instead, so the ink glyph stays crisp and there's no reason to
   // ship it off.
   placesHalo: true,
+  // Summit markers (Map panel "Markers" section): ON by default — the v1
+  // experience always showed the top-N named peaks on a real-terrain patch;
+  // this key simply never existed in params before (see peaksLayer.setEnabled
+  // below, near its construction), so the toggle silently stayed off no
+  // matter what map-panel.js's `?? false` fallback read.
+  peaksEnabled: true,
 
   // light
   sunIntensity: 7.6,
@@ -1232,6 +1238,14 @@ const peaksLayer = new PeaksLayer({
     focusOnPeak(world.x, world.y, world.z)
   },
 })
+// boot-time default (params.peaksEnabled, above): setEnabled(true) here is a
+// safe no-op until a real DEM exists (refresh() bails on !dem) — the actual
+// population happens the first time regenerateTerrain() runs after dem loads
+// (see its own `if (peaksLayer.enabled) peaksLayer.refresh()` call). Without
+// this line the layer was NEVER enabled anywhere at boot — the Map panel
+// toggle was the only thing that ever called setEnabled — so summits stayed
+// invisible until a user found and flipped that switch by hand.
+peaksLayer.setEnabled(params.peaksEnabled)
 
 // the shipped survey look — what ⟲ RESET LOOK restores. Templates can now
 // change light/surface/post/toggles too, so the reset snapshots ALL of it.
