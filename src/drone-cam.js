@@ -412,13 +412,13 @@ export class DroneCam {
     this._up = new THREE.Vector3(0, 1, 0)
   }
 
-  // worldPts: ordered GPX track points {x,y,z} at ground level (direction = order)
-  // seedAt: path fraction (0..1) to seat the initial pose at — lets a caller
-  // that resumes mid-track (e.g. GPX playback follow, unpaused partway
-  // through) start the flight from where the subject already is instead of
-  // snapping back to the beginning.
-  start(worldPts, { duration = 30, seedAt = 0 } = {}) {
-    this.active = false // a bail below leaves no stale flight running
+  // Shared by start()/retarget(): builds this.curve (subject) + this.spine
+  // (heavily smoothed camera path) + the baked drama profile from a fresh
+  // worldPts array. Deliberately touches NOTHING about the rig's current
+  // pose (position/heading/pitch/t) — that split is exactly what lets
+  // retarget() continue a flight instead of re-seating it. Returns false
+  // (leaving prior state untouched) on a degenerate/too-short input.
+  _buildCurves(worldPts) {
     if (!worldPts || worldPts.length < 2) return false
     const span = worldPts.reduce((s, p, i) => (i ? s + Math.hypot(p.x - worldPts[i - 1].x, p.z - worldPts[i - 1].z) : 0), 0)
     if (span < 1e-3) return false
@@ -432,9 +432,9 @@ export class DroneCam {
     // a stationary / near-single-point track collapses the resample to one point;
     // CatmullRomCurve3 of <2 points yields NaN poses. Bail cleanly instead.
     if (subjV.length < 2) return false
-    this.curve = new THREE.CatmullRomCurve3(subjV, false, 'centripetal', 0.5)
-    this.curve.arcLengthDivisions = 800
-    this.curve.updateArcLengths()
+    const curve = new THREE.CatmullRomCurve3(subjV, false, 'centripetal', 0.5)
+    curve.arcLengthDivisions = 800
+    curve.updateArcLengths()
 
     // spine: the heavily low-passed curve the camera itself actually flies.
     // ~14 control points over the WHOLE track (however long) plus a wide,
@@ -444,15 +444,15 @@ export class DroneCam {
     const spineSpacing = Math.max(3, span / 14)
     let spineV = smoothPath(resamplePath(worldPts, spineSpacing), 6, 4).map((p) => new THREE.Vector3(p.x, p.y, p.z))
     if (spineV.length < 2) spineV = subjV.slice() // very short/degenerate track: fall back to the subject curve
-    this.spine = new THREE.CatmullRomCurve3(spineV, false, 'centripetal', 0.5)
-    this.spine.arcLengthDivisions = 400
-    this.spine.updateArcLengths()
+    const spine = new THREE.CatmullRomCurve3(spineV, false, 'centripetal', 0.5)
+    spine.arcLengthDivisions = 400
+    spine.updateArcLengths()
 
     // content-aware zoom-drama profile (task 20) — sampled once per flight
     // into a lookup table _standoffMulAt() interpolates every frame. Two
     // signals, both read at the SAME s so they line up sample-for-sample:
     //   · elevs[i] — the spine's own (already-smoothed) elevation.
-    //   · wobble[i] — how far the REAL subject curve (this.curve, the
+    //   · wobble[i] — how far the REAL subject curve (curve, the
     //     lightly-smoothed path — switchbacks intact) sits sideways off the
     //     spine at that s, measured in the spine's own local right axis.
     //     This is deliberately NOT the spine's own heading (see
@@ -463,16 +463,16 @@ export class DroneCam {
     // Sample count scales with the spine's own arc length so a long race
     // gets proportionally finer resolution than a short loop, same idea as
     // subjSpacing/spineSpacing above.
-    const spineLen = this.spine.getLength()
+    const spineLen = spine.getLength()
     const dramaN = THREE.MathUtils.clamp(Math.round(spineLen / 1.2), 48, 420)
     const elevs = new Array(dramaN)
     const wobble = new Array(dramaN)
     for (let i = 0; i < dramaN; i++) {
       const s = i / (dramaN - 1)
-      this.spine.getPointAt(s, _spinePt)
+      spine.getPointAt(s, _spinePt)
       elevs[i] = _spinePt.y
-      this.spine.getTangentAt(s, _stan)
-      this.curve.getPointAt(s, _subj)
+      spine.getTangentAt(s, _stan)
+      curve.getPointAt(s, _subj)
       const rx = _stan.z, rz = -_stan.x // spine's local right (unit, since getTangentAt is unit)
       wobble[i] = (_subj.x - _spinePt.x) * rx + (_subj.z - _spinePt.z) * rz
     }
@@ -483,8 +483,21 @@ export class DroneCam {
       lookaheadFrac: this.zoomLookaheadFrac,
       bendLookaheadFrac: this.zoomBendLookaheadFrac,
     })
+    this.curve = curve
+    this.spine = spine
     this._dramaClimb = drama.climb
     this._dramaBend = drama.bend
+    return true
+  }
+
+  // worldPts: ordered GPX track points {x,y,z} at ground level (direction = order)
+  // seedAt: path fraction (0..1) to seat the initial pose at — lets a caller
+  // that resumes mid-track (e.g. GPX playback follow, unpaused partway
+  // through) start the flight from where the subject already is instead of
+  // snapping back to the beginning.
+  start(worldPts, { duration = 30, seedAt = 0 } = {}) {
+    this.active = false // a bail below leaves no stale flight running
+    if (!this._buildCurves(worldPts)) return false
 
     this.duration = duration
     this.t = THREE.MathUtils.clamp(seedAt, 0, 1)
@@ -509,6 +522,18 @@ export class DroneCam {
     this._aim(0, this.t, false) // dt=0 → snaps orientation instead of slewing in
     this.active = true
     return true
+  }
+
+  // Sequenced-playback handover (task 22 §5) — swap the flight onto a NEW
+  // track's curve/spine WITHOUT re-seating position/heading/pitch/t the way
+  // start() does. The existing per-frame rate limiter (maxYawRateDeg/
+  // maxPitchRateDeg, same cap as any other frame) then eases the camera from
+  // wherever it already is onto the new spine, so a leg transition reads as
+  // one continuous shot rather than a cut. Leaves the current flight running
+  // untouched (including this.active) on a degenerate input — a bad handover
+  // should never kill an otherwise-fine flight.
+  retarget(worldPts) {
+    return this._buildCurves(worldPts)
   }
 
   stop() {

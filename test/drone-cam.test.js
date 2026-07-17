@@ -299,5 +299,76 @@ test('DroneCam breathing variation does not regress the dead-zone contract', () 
   assert.ok(pctInBox >= 85, `only ${pctInBox.toFixed(1)}% of frames kept the tracked point inside the dead-zone box (variation regressed it)`)
 })
 
+// ---- task 22 §5: sequenced-playback handover between GPX layers -----------
+// A second leg, offset far from the first AND facing a different direction —
+// exactly the "different track" scenario retarget() exists for. Reusing
+// start()'s zigzag-climb shape (same turn/step tuning) but translated well
+// clear of leg A and walked in the opposite compass direction, so a NAIVE
+// re-seat (start() again) would visibly snap: a fresh start() at s=0 on this
+// track points ~180° from wherever leg A's camera was heading when it ended.
+function buildOffsetZigzagClimb() {
+  const pts = buildZigzagClimb()
+  return pts.map((p) => ({ x: -p.x + 400, y: p.y, z: -p.z + 250 }))
+}
+
+test('DroneCam.retarget() hands over to a new track without exceeding the yaw-rate cap (no snap)', () => {
+  const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 400)
+  const controls = { target: new THREE.Vector3() }
+  const drone = new DroneCam({ camera, controls, sampleGround: () => 0 })
+  const legA = buildZigzagClimb()
+  const legB = buildOffsetZigzagClimb()
+  const duration = 60
+  assert.ok(drone.start(legA, { duration }))
+
+  const dt = 1 / 30
+  const prevHeading = new THREE.Vector3()
+  let peakYawDegS = 0
+  const drive = (s) => {
+    prevHeading.copy(drone._headingDir)
+    drone.updateAt(dt, s)
+    const cosA = Math.max(-1, Math.min(1, prevHeading.dot(drone._headingDir)))
+    peakYawDegS = Math.max(peakYawDegS, ((Math.acos(cosA) * 180) / Math.PI) / dt)
+  }
+
+  // fly most of leg A, same as a real playback approaching the end of a track
+  let s = 0
+  while (s < 1) {
+    s = Math.min(1, s + dt / duration)
+    drive(s)
+  }
+  const headingBeforeHandover = drone._headingDir.clone()
+  const posBeforeHandover = drone._pos.clone()
+
+  // the handover itself — GpxLayerManager.tick()'s onTrackTransition moment
+  const ok = drone.retarget(legB)
+  assert.ok(ok, 'retarget should succeed on a valid second track')
+  // retarget must NOT re-seat position/heading — that's the whole point
+  assert.ok(drone._pos.distanceTo(posBeforeHandover) < 1e-6, 'retarget moved the camera instantly — that is a snap')
+  assert.ok(drone._headingDir.distanceTo(headingBeforeHandover) < 1e-6, 'retarget re-seated heading instantly — that is a snap')
+
+  // fly leg B from its own start; the rig should EASE onto the new spine
+  // (heading, standoff, framing) under the exact same rate cap as any other
+  // frame — never a discontinuous jump, no matter how differently leg B is
+  // oriented from where leg A left off.
+  s = 0
+  let guard = 0
+  while (s < 1 && guard++ < 5000) {
+    s = Math.min(1, s + dt / duration)
+    drive(s)
+  }
+  assert.ok(peakYawDegS <= 9.5, `peak yaw ${peakYawDegS.toFixed(2)} deg/s exceeds the ~9°/s anti-nausea cap across the handover`)
+})
+
+test('DroneCam.retarget() leaves the current flight untouched on a degenerate track', () => {
+  const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 400)
+  const controls = { target: new THREE.Vector3() }
+  const drone = new DroneCam({ camera, controls, sampleGround: () => 0 })
+  assert.ok(drone.start(buildZigzagClimb(), { duration: 60 }))
+  const curveBefore = drone.curve
+  assert.equal(drone.retarget([{ x: 0, y: 0, z: 0 }]), false)
+  assert.equal(drone.curve, curveBefore, 'a degenerate retarget must not touch the live curve')
+  assert.ok(drone.active, 'a degenerate retarget must not kill the running flight')
+})
+
 function THREE_deg(d) { return (d * Math.PI) / 180 }
 function THREE_clampDot(d) { return Math.max(-1, Math.min(1, d)) }
