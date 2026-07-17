@@ -212,7 +212,10 @@ test('DroneCam dead-zone: peak yaw stays capped and the tracked point mostly sta
   }
   const pctInBox = (framesInBox / totalFrames) * 100
   assert.ok(totalFrames > 100, `flight should run many frames, got ${totalFrames}`)
-  assert.ok(peakYawDegS <= 9.5, `peak yaw ${peakYawDegS.toFixed(2)} deg/s exceeds the ~9°/s anti-nausea cap`)
+  // task 24: cap raised 9 -> 13 deg/s (see drone-cam.js's this.maxYawRateDeg
+  // comment) — "plus de liberté de mouvement", so peak yaw on this same
+  // torture fixture now saturates the new cap (measured 13.00) instead of 9.
+  assert.ok(peakYawDegS <= 13.5, `peak yaw ${peakYawDegS.toFixed(2)} deg/s exceeds the ~13°/s anti-nausea cap`)
   assert.ok(pctInBox >= 85, `only ${pctInBox.toFixed(1)}% of frames kept the tracked point inside the dead-zone box`)
 })
 
@@ -294,8 +297,8 @@ test('DroneCam breathing variation does not regress the dead-zone contract', () 
   // the hard rate cap is architectural (slewHeading clamps every frame
   // regardless of what target the breathing/bias feeds it) — this can never
   // regress, but assert it anyway as a tripwire against a future change to
-  // the cap-application itself.
-  assert.ok(peakYawDegS <= 9.5, `peak yaw ${peakYawDegS.toFixed(2)} deg/s exceeds the ~9°/s anti-nausea cap`)
+  // the cap-application itself. Cap raised 9 -> 13 deg/s, task 24 (see above).
+  assert.ok(peakYawDegS <= 13.5, `peak yaw ${peakYawDegS.toFixed(2)} deg/s exceeds the ~13°/s anti-nausea cap`)
   assert.ok(pctInBox >= 85, `only ${pctInBox.toFixed(1)}% of frames kept the tracked point inside the dead-zone box (variation regressed it)`)
 })
 
@@ -356,7 +359,8 @@ test('DroneCam.retarget() hands over to a new track without exceeding the yaw-ra
     s = Math.min(1, s + dt / duration)
     drive(s)
   }
-  assert.ok(peakYawDegS <= 9.5, `peak yaw ${peakYawDegS.toFixed(2)} deg/s exceeds the ~9°/s anti-nausea cap across the handover`)
+  // cap raised 9 -> 13 deg/s, task 24 (see drone-cam.js's this.maxYawRateDeg comment)
+  assert.ok(peakYawDegS <= 13.5, `peak yaw ${peakYawDegS.toFixed(2)} deg/s exceeds the ~13°/s anti-nausea cap across the handover`)
 })
 
 test('DroneCam.retarget() leaves the current flight untouched on a degenerate track', () => {
@@ -368,6 +372,42 @@ test('DroneCam.retarget() leaves the current flight untouched on a degenerate tr
   assert.equal(drone.retarget([{ x: 0, y: 0, z: 0 }]), false)
   assert.equal(drone.curve, curveBefore, 'a degenerate retarget must not touch the live curve')
   assert.ok(drone.active, 'a degenerate retarget must not kill the running flight')
+})
+
+// ---- task 24: closer standoff (arm 24->12) must still clear real relief ----
+// A bumpy "mountain" ground function (real elevation variation, not flat 0
+// like every fixture above) — the closer/looser task-24 tuning is only safe
+// if _solvePosition()'s clearance clamp (this.clearance, plus its own
+// look-ahead ridge lift) still holds against genuine terrain, not just flat
+// ground where a clearance bug would never show up.
+function mountainGround(x, z) {
+  return 8 + 6 * Math.sin(x * 0.04) * Math.cos(z * 0.05) + 3 * Math.sin(x * 0.11 + z * 0.07)
+}
+
+test('DroneCam never dips below ground clearance over rugged terrain (task 24 closer standoff)', () => {
+  const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 400)
+  const controls = { target: new THREE.Vector3() }
+  const drone = new DroneCam({ camera, controls, sampleGround: mountainGround })
+  const worldPts = buildZigzagClimb()
+  const duration = 60
+  assert.ok(drone.start(worldPts, { duration }))
+
+  const dt = 1 / 30
+  let minClearanceGap = Infinity
+  let s = 0
+  let guard = 0
+  while (s < 1 && guard++ < 5000) {
+    s = Math.min(1, s + dt / duration)
+    drone.updateAt(dt, s)
+    const groundHere = mountainGround(camera.position.x, camera.position.z)
+    minClearanceGap = Math.min(minClearanceGap, camera.position.y - groundHere)
+  }
+  // must never go below the configured clearance (2.6) minus a tiny float
+  // slop — a smaller absolute margin here would mean the rig is clipping in.
+  assert.ok(
+    minClearanceGap >= drone.clearance - 0.05,
+    `camera dipped to ${minClearanceGap.toFixed(3)} world units above ground, below the ${drone.clearance} clearance floor`
+  )
 })
 
 function THREE_deg(d) { return (d * Math.PI) / 180 }

@@ -237,10 +237,12 @@ const params = {
   gpxKm: true,
   gpxAltReadout: true,
   gpxSlopeReadout: false,
-  // drone-follow during playback: off by default (opt-in cinematic extra),
-  // 1x matches the default reveal pace (totalKm*1.5s, see gpx.js tick());
-  // 0.5x–3x covers "slow enough to read the terrain" to "quick preview"
-  gpxFollow: false,
+  // drone-follow during playback: ON by default (task 24 — "par défaut on
+  // active le drone follow"), the playback IS the product so the cinematic
+  // chase should be what an organiser sees without having to find the
+  // toggle. 1x matches the default reveal pace (totalKm*1.5s, see gpx.js
+  // tick()); 0.5x–3x covers "slow enough to read the terrain" to "quick preview"
+  gpxFollow: true,
   gpxFollowSpeed: 1,
 
   // ocean (real-world bathymetry read)

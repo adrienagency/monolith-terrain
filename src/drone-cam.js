@@ -301,14 +301,50 @@ export class DroneCam {
     // not a blind close-in. See the buildDramaProfile()/dramaStandoffMul()
     // comment and the task-20 report for the re-measured in-box% / peak-yaw
     // numbers under this scheme.
-    this.arm = 24 // baseline traveling distance behind the spine (world units) — see task-20 note above
-    this.lift = 12 // baseline height above the spine's own (already-smoothed) elevation
+    //
+    // Task 24: "la caméra du drone est beaucoup trop lointaine, il faut que tu
+    // zoom de la moitié de la distance actuelle sur le point d'avancement" +
+    // "laisse-lui plus de liberté de mouvement pour qu'il bouge beaucoup plus
+    // avec la tête de course" — two explicit asks, both costing the SAME
+    // budget this table has protected since task 13: arm/lift HALVED again
+    // (24/12 -> 12/6, the literal "moitié de la distance actuelle"), and the
+    // yaw/pitch rate caps + dead-zone box loosened (see maxYawRateDeg/
+    // maxPitchRateDeg/deadzoneMargin/deadzone below) so a correction — once it
+    // engages — moves faster and the box gives more room before one triggers,
+    // i.e. genuinely more visible movement with the head, not the same
+    // locked-down framing at a tighter crop. Re-measured on the SAME
+    // buildZigzagClimb() torture fixture drone-cam.test.js already drives (55°
+    // switchbacks, monotonic climb — this fixture's own extreme bend keeps
+    // dramaStandoffMul() near its bendPullOut ceiling almost throughout, which
+    // is why halving the nominal arm/lift barely moves this particular
+    // worst-case number — the realized on-screen distance is still widened by
+    // the SAME drama system, just off a smaller base):
+    //     arm 12, lift 6, yaw-cap 13°/s, pitch-cap 22°/s, widened box -> 100% in-box / 13.0°/s peak
+    //     (measured on a bumpy sampleGround too: min ground clearance 13.3
+    //     world units against a 2.6 floor — no ridge penetration)
+    // The in-box% barely moved because this fixture's drama pull-out already
+    // protected it; the peak yaw rose from 9.0 to exactly the new 13°/s cap
+    // (the correction now saturates the cap on this fixture, same as it did
+    // at 9°/s before) — the real, INTENDED effect of this change is the
+    // camera physically standing half as far off on calmer stretches (where
+    // dramaStandoffMul isn't already maxed out) and reacting faster when it
+    // does correct, not a change to this worst-case fixture's own ceiling.
+    // 13°/s is a deliberate midpoint, not the top of the earlier sweep table:
+    // the ORIGINAL 9°/s cap was chosen specifically to kill the "envie de
+    // vomir" corner-chasing nausea the brief opened with, so this raises it
+    // by less than half rather than doubling it outright — the user asked for
+    // more life, not a return to the pursuit-cam that started this file.
+    this.arm = 12 // baseline traveling distance behind the spine (world units) — task 24: half of task-20's 24
+    this.lift = 6 // baseline height above the spine's own (already-smoothed) elevation — half of task-20's 12
     this.clearance = 2.6 // minimum gap kept over the ground / ridges
     // hard caps on how fast the rig is allowed to turn — THIS (not the spine
     // smoothing alone) is the actual nausea guarantee: even a pathological
-    // input cannot spin the camera faster than these.
-    this.maxYawRateDeg = 9 // deg/s — "ne quasiment pas tourner, ou très lentement"
-    this.maxPitchRateDeg = 16 // deg/s — vertical aim may move a bit more freely than yaw
+    // input cannot spin the camera faster than these. Raised from 9/16 (task
+    // 24 — see the arm/lift comment above) so a correction, once it engages,
+    // visibly moves the rig instead of crawling — still well under a doubling
+    // of the original nausea-safe cap.
+    this.maxYawRateDeg = 13 // deg/s — "ne quasiment pas tourner" loosened for "bouge beaucoup plus avec la tête"
+    this.maxPitchRateDeg = 22 // deg/s — vertical aim may move a bit more freely than yaw (same ~1.7x ratio as before)
     // where a correction re-centers the tracked point once triggered: NDC y,
     // 0 = center, -1 = bottom. Recomputed for task 20's new box (below) —
     // biased toward yMin, same "look up the mountain when climbing" intent
@@ -329,7 +365,11 @@ export class DroneCam {
     // noticeably higher (taller above center than below) than a centered box
     // would be. Pixel measurement has ~±0.03 slop; treat these as "tall,
     // fairly narrow, slightly high-of-centre", not as exact to 3 decimals.
-    this.deadzone = { xMin: -0.31, xMax: 0.30, yMin: -0.43, yMax: 0.74 }
+    // Task 24: widened a few hundredths on every side from the task-20 box
+    // ({-0.31,0.30,-0.43,0.74}) — "plus de liberté de mouvement": more room
+    // for the head to roam before a correction engages at all, so the rig
+    // holds its bearing longer and reads as following rather than locking.
+    this.deadzone = { xMin: -0.36, xMax: 0.35, yMin: -0.48, yMax: 0.80 }
     // Soft inset: a correction engages this far inside the box, before the
     // point actually reaches the true edge. Without it, sitting right at the
     // boundary would flip correction on/off every frame as normal per-frame
@@ -337,7 +377,9 @@ export class DroneCam {
     // inside the box (targetNdcY/targetNdcX, not just past the margin), once
     // triggered a correction moves the point solidly back inside — it has to
     // drift all the way back out to re-trigger, so there's no flip-flop.
-    this.deadzoneMargin = 0.06
+    // Trimmed from 0.06 (task 24) — a smaller inset means more of the box's
+    // own width is actually usable drift room before a correction claims it.
+    this.deadzoneMargin = 0.04
     // where a horizontal correction re-centers to — the box's own midpoint,
     // since (unlike targetNdcY) there's no other established "where the
     // point belongs" convention for X yet.
