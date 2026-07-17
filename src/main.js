@@ -861,7 +861,13 @@ let controlsHeld = false
 controls.addEventListener('start', () => {
   tween.active = false
   tour.active = false
-  drone.stop() // grabbing the camera cancels the drone follow
+  // task 30: grabbing the camera cancels the drone follow — EXCEPT mid GPX
+  // playback with Follow on, where a drag nudges the camera without ending
+  // the follow (see updateCameraMotion()'s controlsHeld branch below, which
+  // suspends the drone's own aiming for as long as controlsHeld stays true
+  // instead of calling drone.stop()/disengageGpxFollow() here).
+  const gpxFollowing = params.gpxFollow && gpxLayer.isPlaying() && drone.active
+  if (!gpxFollowing) drone.stop()
   cameraAuto.stop() // …and any looping camera automation
   camera.up.set(0, 1, 0)
   controlsHeld = true
@@ -1821,11 +1827,16 @@ function flyTrack() {
 
 // ---- GPX drone-follow (Route panel "Follow" toggle) ------------------------
 // Engaged explicitly (Play pressed while Follow is on, or Follow flipped on
-// mid-playback) and disengaged explicitly (pause/stop, Esc, or the user
-// grabbing the camera — controls' 'start' handler already calls drone.stop()
-// for every other automation, so follow rides along for free). It never
-// re-engages itself, so grabbing OrbitControls can't be "fought" by a
-// follow that keeps trying to resume — same rule tour/cameraAuto follow.
+// mid-playback) and disengaged explicitly (pause/stop, Esc, the Route
+// panel's exit-follow (✕) button, or the user grabbing the camera for every
+// OTHER automation — see the controls 'start' handler above). Task 30: a
+// drag/zoom DURING GPX follow no longer disengages it — the 'start' handler
+// leaves drone.active/params.gpxFollow untouched in that one case, and
+// updateCameraMotion()'s controlsHeld branch suspends the drone's per-frame
+// aiming (without stopping it) for as long as the user holds the controls,
+// resuming smoothly on release. It never re-engages itself on its own, so
+// grabbing OrbitControls for anything else can't be "fought" by a follow
+// that keeps trying to resume — same rule tour/cameraAuto follow.
 // The per-frame drive itself (drone.updateAt, fed gpxLayer.headT) lives in
 // updateCameraMotion() below, reusing DroneCam wholesale — no new camera rig.
 function engageGpxFollow() {
@@ -2601,7 +2612,23 @@ function updateCameraMotion(dt) {
   // be checked before the generic drone.active branch below, which still
   // owns the separate "Fly the GPX track" cinematic (Camera panel).
   if (params.gpxFollow && gpxLayer.isPlaying() && drone.active) {
-    drone.updateAt(dt, gpxLayer.headT)
+    // task 30: the user is holding OrbitControls (dragging/zooming) — let
+    // THEM drive the camera this frame instead of the drone overwriting it
+    // right back. followPivot() keeps the orbit pivot on the moving head
+    // (so a drag orbits/zooms around the advancing runner, "un peu de
+    // recul" per the brief) and syncToCamera() re-anchors the rig's
+    // internal pose to wherever the user leaves it, so the moment they let
+    // go, the very next updateAt() call eases FROM that pose back toward
+    // the drone's own framing under its existing rate caps/damping — never
+    // a snap. drone.active/gpxFollow are never touched here, so this is a
+    // suspend, not a stop (see the controls 'start' handler above).
+    if (controlsHeld) {
+      drone.followPivot(gpxLayer.headT)
+      controls.update()
+      drone.syncToCamera()
+    } else {
+      drone.updateAt(dt, gpxLayer.headT)
+    }
     return
   }
   // drone follow-cam for the GPX track — chase the route from behind/above

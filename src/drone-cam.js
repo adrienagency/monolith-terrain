@@ -912,6 +912,42 @@ export class DroneCam {
     this._applyPose(dt, clamped, clamped >= 1)
   }
 
+  // ---- user-grab handoff (task 30) ------------------------------------
+  // "Laisse la possibilité à l'utilisateur de bouger la caméra sans arrêter
+  // le suivi" — while the user is actively dragging OrbitControls during GPX
+  // follow, main.js stops calling updateAt() every frame (which would
+  // otherwise overwrite camera.position/quaternion right back, fighting the
+  // drag) and calls these two instead. The rig stays `active` the whole
+  // time — never drone.stop() — so this is a SUSPEND, not a cancel.
+
+  // Keep OrbitControls' pivot on the advancing subject while the drone isn't
+  // driving the camera itself, so a drag orbits/zooms around the MOVING head
+  // (per the brief) rather than a point that's gone stale by the time the
+  // user lets go. Deliberately does not touch camera position/heading/pitch
+  // — that's the whole point of "suspended".
+  followPivot(s) {
+    if (!this.curve) return
+    this.curve.getPointAt(THREE.MathUtils.clamp(s, 0, 1), _subj)
+    this.controls.target.copy(_subj)
+  }
+
+  // Re-anchor the rig's internal pose to wherever the camera actually is
+  // right now (e.g. just after OrbitControls moved it under a user drag).
+  // Call every frame while suspended so that whenever the user releases the
+  // controls, updateAt()'s existing damped chase (posHalfLife/rotHalfLife —
+  // the SAME easing an ordinary correction already uses, see _applyPose())
+  // glides FROM the user's own framing TOWARD the drone's target instead of
+  // snapping back to a stale pre-drag pose the rig never got to update.
+  syncToCamera() {
+    this._pos.copy(this.camera.position)
+    _fwd.set(0, 0, -1).applyQuaternion(this.camera.quaternion) // camera looks down -Z locally
+    const horizLen = Math.hypot(_fwd.x, _fwd.z)
+    if (horizLen > 1e-6) {
+      this._headingDir.set(_fwd.x / horizLen, 0, _fwd.z / horizLen)
+      this._pitch = Math.atan2(_fwd.y, horizLen)
+    }
+  }
+
   // shared by update()/updateAt(): dead-zone yaw (task 13 — see the class
   // comment), damp the position onto the spine, then dead-zone pitch.
   _applyPose(dt, s, arrived) {
