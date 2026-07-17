@@ -156,18 +156,36 @@ export function classifyArchSize(size) {
 // a caller needs to take those terrain samples from in the first place.
 export function archTransform(spec, groundA, groundB, proto) {
   const dir = primaryDir(spec)
-  const perp = perpOf(dir)
-  const half = proto.worldWidth / 2
-  const postA = { x: spec.pos.x + perp.x * half, z: spec.pos.z + perp.z * half }
-  const postB = { x: spec.pos.x - perp.x * half, z: spec.pos.z - perp.z * half }
-
-  const U = new THREE.Vector3(perp.x, 0, perp.z).normalize() // world width dir
   const N = new THREE.Vector3(dir.x, 0, dir.z).normalize() // world depth/forward dir
-  const upV = new THREE.Vector3(0, 1, 0)
+  // U (world width dir) is built as a CROSS PRODUCT, not perpOf(dir) fed
+  // straight into makeBasis — perpOf is only a 2D rotate-90°, it says
+  // nothing about handedness, and feeding it into makeBasis in the "wrong"
+  // slot silently builds a REFLECTION (determinant -1) instead of a
+  // rotation: setFromRotationMatrix does not throw on that, it just returns
+  // a non-unit, physically meaningless quaternion (caught by this file's
+  // own tests below via .length()). Cross products are handedness-safe by
+  // construction: up = N × U guarantees U × up === N always (proper for the
+  // widthIsX branch below); N × up === -U always, which is why the OTHER
+  // branch feeds U negated — that pairing is forced by the algebra, not a
+  // free choice.
+  const upHint = new THREE.Vector3(0, 1, 0)
+  const U = new THREE.Vector3().crossVectors(upHint, N).normalize()
+  const up = new THREE.Vector3().crossVectors(N, U).normalize()
+
   const basis = new THREE.Matrix4()
-  if (proto.widthIsX) basis.makeBasis(U, upV, N)
-  else basis.makeBasis(N, upV, U)
+  if (proto.widthIsX) basis.makeBasis(U, up, N)
+  else basis.makeBasis(N, up, U.clone().negate())
   const qYaw = new THREE.Quaternion().setFromRotationMatrix(basis)
+
+  // postA/postB (the two foot sample points) MUST use the SAME world
+  // direction the rotation actually assigns to the proto's own "positive
+  // width" local axis — widthDir below matches whichever sign each branch
+  // above just fed into makeBasis's third column, so the roll term (next)
+  // banks toward the physically correct foot instead of fighting the yaw.
+  const widthDir = proto.widthIsX ? U : U.clone().negate()
+  const half = proto.worldWidth / 2
+  const postA = { x: spec.pos.x + widthDir.x * half, z: spec.pos.z + widthDir.z * half }
+  const postB = { x: spec.pos.x - widthDir.x * half, z: spec.pos.z - widthDir.z * half }
 
   const roll = proto.worldWidth > 1e-6 ? Math.atan2((groundB ?? 0) - (groundA ?? 0), proto.worldWidth) : 0
   const qRoll = new THREE.Quaternion().setFromAxisAngle(N, roll)

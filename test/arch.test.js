@@ -145,6 +145,72 @@ test('archTransform: uneven feet produce a nonzero roll banking toward the lower
   assert.ok(Math.abs(vTilted.y) > 1e-6) // the width axis is no longer perfectly horizontal
 })
 
+// Regression test for a real bug caught during task 25's own verification:
+// makeBasis(xAxis, yAxis, zAxis) silently builds a REFLECTION (determinant
+// -1), not a rotation, unless xAxis × yAxis === zAxis exactly. The
+// widthIsX=false branch (the ACTUAL shipped arch.glb's own case — see the
+// task report) got this wrong; THREE.Quaternion.setFromRotationMatrix does
+// not throw on a reflection, it just returns a non-unit, meaningless
+// quaternion — which then LOOKED plausible in a live render (a near-degenerate
+// quaternion can still be close to identity) until checked rigorously. Every
+// quaternion archTransform returns must be a genuine unit rotation, for
+// BOTH widthIsX branches, at an arbitrary (non-axis-aligned) heading.
+test('archTransform returns a unit (proper-rotation) quaternion for widthIsX=true', () => {
+  const spec = { kind: 'start', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0.6, z: 0.8 } }
+  const proto = { widthIsX: true, worldWidth: 1, worldHeight: 1, worldDepth: 0.2 }
+  const { quaternion } = archTransform(spec, 0.1, -0.2, proto)
+  assert.ok(Math.abs(quaternion.length() - 1) < 1e-6)
+})
+
+test('archTransform returns a unit (proper-rotation) quaternion for widthIsX=false', () => {
+  const spec = { kind: 'start', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0.6, z: 0.8 } }
+  const proto = { widthIsX: false, worldWidth: 1, worldHeight: 1, worldDepth: 0.2 }
+  const { quaternion } = archTransform(spec, 0.1, -0.2, proto)
+  assert.ok(Math.abs(quaternion.length() - 1) < 1e-6)
+})
+
+// Beyond "unit length", the rotation must actually DO what the module doc
+// comment promises: proto's own width axis (local X when widthIsX, else
+// local Z) lands on world perp(dir), and its depth axis (the other one)
+// lands on world dir — for BOTH branches, not just the one the old tests
+// above happened to exercise.
+test('archTransform (widthIsX=true): local +X (width) maps onto world perp(dir)', () => {
+  const spec = { kind: 'start', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0.6, z: 0.8 } }
+  const proto = { widthIsX: true, worldWidth: 1, worldHeight: 1, worldDepth: 0.2 }
+  const { quaternion } = archTransform(spec, 0, 0, proto)
+  const v = new Vector3(1, 0, 0).applyQuaternion(quaternion)
+  const perp = perpOf(spec.dir)
+  assert.ok(Math.abs(v.x - perp.x) < 1e-6 && Math.abs(v.y) < 1e-6 && Math.abs(v.z - perp.z) < 1e-6)
+})
+
+// widthIsX=false pairs local X (depth) with N, which forces local Z (width)
+// onto -perp(dir), not +perp(dir) — proper-rotation handedness (N × up ===
+// -U always, see archTransform's own comment) leaves no other choice. Not
+// a bug: postA/postB (below) are built from that SAME -perp direction, so
+// "which physical foot is postA" just swaps with "which physical foot is
+// postB" for this branch — harmless, since the two feet are otherwise
+// interchangeable.
+test('archTransform (widthIsX=false): local +Z (width) maps onto world -perp(dir)', () => {
+  const spec = { kind: 'start', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0.6, z: 0.8 } }
+  const proto = { widthIsX: false, worldWidth: 1, worldHeight: 1, worldDepth: 0.2 }
+  const { quaternion } = archTransform(spec, 0, 0, proto)
+  const v = new Vector3(0, 0, 1).applyQuaternion(quaternion)
+  const perp = perpOf(spec.dir)
+  assert.ok(Math.abs(v.x + perp.x) < 1e-6 && Math.abs(v.y) < 1e-6 && Math.abs(v.z + perp.z) < 1e-6)
+})
+
+test('archTransform (widthIsX=false): postA/postB stay consistent with the actual rotated width axis', () => {
+  const spec = { kind: 'start', pos: { x: 5, y: 0, z: -3 }, dir: { x: 0.6, z: 0.8 } }
+  const proto = { widthIsX: false, worldWidth: 2, worldHeight: 1, worldDepth: 0.2 }
+  const { postA, postB, quaternion } = archTransform(spec, 0, 0, proto)
+  const v = new Vector3(0, 0, 1).applyQuaternion(quaternion) // the actual world width direction
+  const half = proto.worldWidth / 2
+  assert.ok(Math.abs(postA.x - (spec.pos.x + v.x * half)) < 1e-6)
+  assert.ok(Math.abs(postA.z - (spec.pos.z + v.z * half)) < 1e-6)
+  assert.ok(Math.abs(postB.x - (spec.pos.x - v.x * half)) < 1e-6)
+  assert.ok(Math.abs(postB.z - (spec.pos.z - v.z * half)) < 1e-6)
+})
+
 // task 25 §4: "a black arch with black text is useless" — textInkFor must
 // pick the OPPOSITE end of the lightness scale from whatever colour it's
 // handed, never the same one.
