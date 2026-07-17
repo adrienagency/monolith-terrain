@@ -55,6 +55,8 @@ let pickVillagesAlongTrack
 let villageLeadKm
 let villageOpacity
 let detectLoop
+let HM_APEX_V
+let HEAD_MARKER_GROUND_GAP
 let THREE
 before(async () => {
   globalThis.DOMParser = class {
@@ -73,6 +75,8 @@ before(async () => {
     villageLeadKm,
     villageOpacity,
     detectLoop,
+    HM_APEX_V,
+    HEAD_MARKER_GROUND_GAP,
   } = await import('../src/gpx.js'))
 })
 
@@ -303,4 +307,23 @@ test('villageOpacity ramps in before the hit, peaks at it, fades out after', () 
   assert.ok(Math.abs(villageOpacity(10, hitKm, lead, fade) - 1) < 1e-9, 'full opacity exactly at arrival')
   assert.ok(villageOpacity(10.4, hitKm, lead, fade) > 0 && villageOpacity(10.4, hitKm, lead, fade) < 1, 'fading out after passing')
   assert.equal(villageOpacity(11, hitKm, lead, fade), 0, 'gone well after passing')
+})
+
+// ---- composed playback-head marker (task 24 §2) ----------------------------
+// "Fais attention à ce que ce pointeur soit vraiment juste au dessus du sol,
+// toujours" — the apex-to-ground gap must be a genuine WORLD-SPACE constant,
+// never a function of camera distance. This is only true because the sprite
+// pivots on its own apex (HM_APEX_V ~ 0) rather than its geometric centre —
+// pin both numbers so a future change can't silently reintroduce a
+// distance-scaled offset (the exact bug this task fixed).
+
+test('HM_APEX_V pins the sprite pivot to the triangle apex (not the sprite centre)', () => {
+  assert.ok(Math.abs(HM_APEX_V) < 1e-6, `expected the pivot at the apex (~0), got ${HM_APEX_V}`)
+})
+
+test('HEAD_MARKER_GROUND_GAP is a small, fixed world-unit constant', () => {
+  assert.ok(HEAD_MARKER_GROUND_GAP > 0 && HEAD_MARKER_GROUND_GAP < 0.3, `gap ${HEAD_MARKER_GROUND_GAP} is not in a "small and constant" band`)
+  // it's a plain number, not a function — nothing here CAN read camera
+  // distance, which is the structural guarantee the brief asked for
+  assert.equal(typeof HEAD_MARKER_GROUND_GAP, 'number')
 })

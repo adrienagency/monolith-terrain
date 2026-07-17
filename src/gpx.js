@@ -303,38 +303,122 @@ function textSprite(text, color, scale = 1, opacity = 1, renderOrder = 20) {
   return sp
 }
 
-// Black, downward-pointing triangle for the playback-head marker (replaces
-// the old hover-cursor sphere during playback — see setHover()'s
-// isPlaybackHead branch). Drawn once, sizeAttenuation:false like the labels
-// above, so it stays a legible, constant screen size at any zoom.
-function triangleTexture(px = 64) {
+// ---- composed playback-head marker (task 24 §2) ----------------------------
+// "Un pointeur = une badge carrée arrondie portant l'icône du sport, posée
+// directement SUR un triangle pointant vers le bas" — ONE sprite, ONE
+// texture, baked together in a single canvas, replacing the old two
+// INDEPENDENT sprites (a bare triangle + a separately-positioned icon
+// billboard) that could only ever be kept aligned by two matching per-frame
+// offset formulas agreeing exactly — which is exactly the kind of thing that
+// silently drifts apart the moment one of the two offsets is tuned alone.
+// Baking them into one texture makes drifting apart structurally impossible.
+//
+// Layout (canvas px, see the constants below): the triangle is drawn FIRST
+// with its apex at the very last pixel row and its base overlapping UP into
+// where the badge will be; the rounded-square badge is drawn SECOND on top,
+// its bottom edge covering that overlap — the two shapes read as one
+// continuous pin silhouette with no visible seam. The sport icon (if any) is
+// recoloured to solid white (see recolorToWhite() below — the source-in
+// compositing trick preserves the icon's exact alpha mask/anti-aliasing
+// while discarding its original ink colour) and drawn centred in the badge.
+const HM_W = 100
+const HM_H = 98
+const HM_BADGE = { x: 8, y: 6, w: 84, h: 84, r: 18 }
+const HM_TRI = { apexX: 50, apexY: HM_H, baseY: 74, halfW: 17 } // apex sits on the LAST row on purpose (see the sprite.center note below)
+
+// Recolours a dark-ink icon canvas to solid white, preserving its alpha mask
+// exactly (anti-aliased edges included) — "source-in" draws the new fill
+// only where the EXISTING (destination) pixels already had alpha, using the
+// new fill's own alpha × the destination's, so the icon's silhouette survives
+// untouched while its colour is replaced outright. Lets every sport icon
+// (rasterized once, dark ink, for the panel row + the map) read against the
+// marker's own dark badge without sport-icons.js needing a second colour pass.
+function recolorToWhite(srcCanvas) {
   const c = document.createElement('canvas')
-  c.width = px
-  c.height = px
+  c.width = srcCanvas.width
+  c.height = srcCanvas.height
   const ctx = c.getContext('2d')
-  ctx.fillStyle = '#000'
+  ctx.drawImage(srcCanvas, 0, 0)
+  ctx.globalCompositeOperation = 'source-in'
+  ctx.fillStyle = '#fff'
+  ctx.fillRect(0, 0, c.width, c.height)
+  return c
+}
+
+function roundedRectPath(ctx, x, y, w, h, r) {
   ctx.beginPath()
-  ctx.moveTo(px * 0.5, px * 0.94) // apex, pointing down
-  ctx.lineTo(px * 0.06, px * 0.14)
-  ctx.lineTo(px * 0.94, px * 0.14)
+  ctx.moveTo(x + r, y)
+  ctx.arcTo(x + w, y, x + w, y + h, r)
+  ctx.arcTo(x + w, y + h, x, y + h, r)
+  ctx.arcTo(x, y + h, x, y, r)
+  ctx.arcTo(x, y, x + w, y, r)
+  ctx.closePath()
+}
+
+// Builds the composed marker texture. `iconCanvas` is the RASTERIZED sport
+// icon (see sport-icons.js's rasterizeToCanvas — a small square canvas, dark
+// ink on transparent) or null (no icon yet / none assigned — the badge still
+// draws, just empty, so the marker's silhouette never flickers in/out as
+// icons load). `ink` is the badge/triangle fill colour.
+export function composeHeadMarkerTexture(iconCanvas, ink = '#17191b') {
+  const c = document.createElement('canvas')
+  c.width = HM_W
+  c.height = HM_H
+  const ctx = c.getContext('2d')
+  ctx.fillStyle = ink
+  // triangle first — apex down, base overlapping up into the badge's own
+  // footprint so the badge (drawn next) hides the seam
+  ctx.beginPath()
+  ctx.moveTo(HM_TRI.apexX, HM_TRI.apexY)
+  ctx.lineTo(HM_TRI.apexX - HM_TRI.halfW, HM_TRI.baseY)
+  ctx.lineTo(HM_TRI.apexX + HM_TRI.halfW, HM_TRI.baseY)
   ctx.closePath()
   ctx.fill()
+  // badge on top — a rounded square "holding" the icon
+  roundedRectPath(ctx, HM_BADGE.x, HM_BADGE.y, HM_BADGE.w, HM_BADGE.h, HM_BADGE.r)
+  ctx.fill()
+  if (iconCanvas) {
+    const white = recolorToWhite(iconCanvas)
+    const inset = HM_BADGE.w * 0.16
+    ctx.drawImage(white, HM_BADGE.x + inset, HM_BADGE.y + inset, HM_BADGE.w - inset * 2, HM_BADGE.h - inset * 2)
+  }
   const tex = new THREE.CanvasTexture(c)
   tex.colorSpace = THREE.SRGBColorSpace
   return tex
 }
-// same BASE_H sizing convention as GPX_LABEL_BASE_H above — smaller than a
-// label since this is a pointer, not text (tuned via measurement, see report)
-const HEAD_MARKER_BASE_H = 0.006
+const HM_ASPECT = HM_W / HM_H
+const HEAD_MARKER_INK = '#17191b' // same dark ink as the arch's default (light-mode) fill
 
-// same sizeAttenuation:false / BASE_H convention yet again (see the big
-// comment on GPX_LABEL_BASE_H above — this app's #1 recurring sizing trap:
-// real on-screen size = projectionMatrix[5]*scale, ~3.7x the naive
-// scale/2*viewport formula at this app's 30° fov). Square aspect (the sport
-// icons are 24x24), sized between the label (0.0128) and the pointer
-// triangle (0.006) — big enough to read as a small glyph, not a smudge, at
-// the ~14-16px measured live (see the task-22 report).
-const HEAD_ICON_BASE_H = 0.011
+// same sizeAttenuation:false / BASE_H sizing convention as GPX_LABEL_BASE_H
+// above (this app's #1 recurring sizing trap: real on-screen size =
+// projectionMatrix[5]*scale, ~3.7x the naive scale/2*viewport formula at
+// this app's 30° fov) — KEPT even though the marker itself was rebuilt (task
+// 24 §2), per the brief's own instruction. Tuned so the badge portion (which
+// dominates the composed shape, ~86% of its own height) reads at roughly the
+// old standalone icon's size (0.011) — see the task-24 report for the
+// measured live px.
+const HEAD_MARKER_BASE_H = 0.013
+// The sprite's PIVOT (THREE.Sprite.center, not just its texture) is set to
+// the triangle's apex — see the constructor below — rather than the default
+// centre. This is what makes the ground-clearance gap a genuine WORLD-SPACE
+// constant instead of a fraction of the sprite's own (distance-dependent,
+// sizeAttenuation:false) on-screen footprint: with a centred pivot, "how far
+// below centre is the apex" would itself grow with camera distance (the
+// footprint grows to hold its screen size constant), so ANY fixed fraction
+// of it would silently balloon at range — exactly the bug the brief flags.
+// Anchoring at the apex sidesteps the whole problem: `sprite.position` IS
+// the apex, so a fixed world-unit gap really stays fixed. See
+// HEAD_MARKER_GROUND_GAP below.
+// exported (alongside HEAD_MARKER_GROUND_GAP) purely so test/gpx.test.js can
+// pin these two numbers without a DOM — the rest of composeHeadMarkerTexture
+// needs document.createElement('canvas') and stays DOM-only, same pattern as
+// every other rasterizer in this codebase (see sport-icons.js's own comment).
+export const HM_APEX_V = (HM_H - HM_TRI.apexY) / HM_H // ~0 — apex sits on the last row by construction
+// Small, CONSTANT world-space clearance between the apex and
+// terrain.sample() at the head — "vraiment juste au dessus du sol,
+// toujours", measured (not scaled by camera distance, see the pivot note
+// above) across a playback run in the task-24 report.
+export const HEAD_MARKER_GROUND_GAP = 0.05
 
 // village announcements (task 16 §3) — "plus de 5k habitants" per the brief,
 // verbatim.
@@ -389,38 +473,35 @@ export class GpxLayer {
     this.cursor.visible = false
     this.group.add(this.cursor)
 
-    // playback-head marker: black downward-pointing triangle, billboarded +
-    // screen-space sized (see triangleTexture()/HEAD_MARKER_BASE_H above).
+    // playback-head marker (task 24 §2): ONE composed sprite — a rounded
+    // badge (holding the sport icon) sitting directly on a downward-pointing
+    // triangle, baked into a single texture so the two parts can never drift
+    // apart (see composeHeadMarkerTexture() above). Billboarded +
+    // screen-space sized as usual (sizeAttenuation:false, HEAD_MARKER_BASE_H).
+    // `center` is set to the triangle's APEX (not the sprite's geometric
+    // centre) — see HM_APEX_V's comment — so `this.headMarker.position` IS
+    // the apex, letting _updateHead() add a small, genuinely constant
+    // world-space gap instead of one that scales with camera distance.
     // Positioned each frame in _updateHead() at the EXACT reveal-head vertex
     // (see revealVertexIndex()) — the same point _applyReveal() cuts the
     // real Line2 to, never a separately-smoothed curve (see the task-16 bug
     // report). _headDisp/_headDispValid are the critically-damped follow
     // state that keeps its motion from stuttering (smoothing in TIME, not
-    // space — see stepHeadFollow()).
+    // space — see stepHeadFollow()). No icon yet (setIcon() rebuilds the
+    // texture once the sport/custom icon resolves) so the badge starts empty
+    // rather than costing an extra sprite.
     this.headMarker = new THREE.Sprite(
-      new THREE.SpriteMaterial({ map: triangleTexture(), depthTest: false, transparent: true })
+      new THREE.SpriteMaterial({ map: composeHeadMarkerTexture(null, HEAD_MARKER_INK), depthTest: false, transparent: true })
     )
     this.headMarker.material.sizeAttenuation = false
-    this.headMarker.scale.set(HEAD_MARKER_BASE_H, HEAD_MARKER_BASE_H, 1)
+    this.headMarker.center.set(0.5, HM_APEX_V)
+    this.headMarker.scale.set(HEAD_MARKER_BASE_H * HM_ASPECT, HEAD_MARKER_BASE_H, 1)
     this.headMarker.renderOrder = 23
     this.headMarker.visible = false
     this.group.add(this.headMarker)
     this._headDisp = new THREE.Vector3()
     this._headDispValid = false
-
-    // sport-type billboard riding above the playback head (task 22 §4) —
-    // same sizeAttenuation:false convention as the triangle above; empty
-    // (no map) until setIcon() is called, so a layer with no icon assigned
-    // costs nothing extra. Texture lifecycle is owned by the CALLER
-    // (GpxLayerManager, which may share one texture across several layers
-    // using the same default sport) — this class only assigns/clears the
-    // material's map, never disposes it.
-    this.headIcon = new THREE.Sprite(new THREE.SpriteMaterial({ map: null, depthTest: false, transparent: true }))
-    this.headIcon.material.sizeAttenuation = false
-    this.headIcon.scale.set(HEAD_ICON_BASE_H, HEAD_ICON_BASE_H, 1)
-    this.headIcon.renderOrder = 24
-    this.headIcon.visible = false
-    this.group.add(this.headIcon)
+    this._headIconCanvas = null // the RAW icon canvas last passed to setIcon() — kept so a future ink/theme change could rebuild without a caller round-trip
 
     // multi-layer stacking (task 22 §2, "comme dans Figma") — an additive
     // renderOrder offset + a tiny world-Y nudge, set via setRenderDepth()
@@ -974,7 +1055,6 @@ export class GpxLayer {
     if (i < 0 || !this.track?.world) {
       this.cursor.visible = false
       this.headMarker.visible = false
-      this.headIcon.visible = false
       this.tipEl.classList.add('hidden')
       this._drawProfile()
       return
@@ -983,7 +1063,6 @@ export class GpxLayer {
       this.cursor.visible = false
     } else {
       this.headMarker.visible = false
-      this.headIcon.visible = false
       this.cursor.visible = true
       this.cursor.position.copy(this.track.world[i])
       const s = Math.max(0.5, this.camera.position.distanceTo(this.cursor.position) * 0.02)
@@ -1082,13 +1161,23 @@ export class GpxLayer {
     this.rebuild()
   }
 
-  // sport-icon billboard above the playback head (task 22 §4/§3) — texture
-  // lifecycle stays with the caller (see the headIcon constructor comment).
-  // Pass null to clear (a layer with no icon assigned, or while its texture
-  // is still loading).
+  // sport icon shown INSIDE the composed head-marker badge (task 22 §4/§3,
+  // rebuilt task 24 §2). `tex` is the SOURCE icon texture (a THREE.Texture
+  // whose .image is the small rasterized icon canvas — see sport-icons.js's
+  // rasterizeToCanvas + main.js's caching); lifecycle of THAT source texture
+  // still stays with the caller (GpxLayerManager may share/reuse one across
+  // several layers). What's NEW here: this class now bakes that icon into
+  // its OWN composed marker texture (see composeHeadMarkerTexture()), so
+  // THIS derived texture is what GpxLayer owns and must dispose itself —
+  // every call replaces it. Pass null/undefined to clear (no icon assigned,
+  // or its texture is still loading) — the badge still draws, just empty.
   setIcon(tex) {
-    this.headIcon.material.map = tex || null
-    this.headIcon.material.needsUpdate = true
+    const iconCanvas = tex?.image instanceof HTMLCanvasElement ? tex.image : null
+    this._headIconCanvas = iconCanvas
+    const newMap = composeHeadMarkerTexture(iconCanvas, HEAD_MARKER_INK)
+    this.headMarker.material.map?.dispose()
+    this.headMarker.material.map = newMap
+    this.headMarker.material.needsUpdate = true
   }
 
   // multi-layer stacking (task 22 §2) — additive renderOrder + a small
@@ -1202,24 +1291,20 @@ export class GpxLayer {
     stepHeadFollow(this._headDisp, world[headIdx], HEAD_FOLLOW_LAMBDA, dt, this._headDispValid)
     this._headDispValid = true
     const pos = this._headDisp
-    const camDist = this.camera.position.distanceTo(pos)
-    // apex-to-ground gap scales with camera distance (same 0.02 factor as the
-    // hover cursor's own distance-scaled size, just above) so the triangle
-    // visually "points at" the track at any zoom instead of the gap shrinking
-    // or ballooning as the camera moves.
-    const off = THREE.MathUtils.clamp(camDist * 0.02, 0.3, 3)
-    this.headMarker.position.set(pos.x, pos.y + off, pos.z)
+    // task 24 §2: a small, CONSTANT world-space gap above the ground — NOT
+    // scaled by camera distance (the old `camDist * 0.02` formula this
+    // replaces is exactly the bug the brief flagged: "vraiment juste au
+    // dessus du sol, toujours" means the same tiny gap at any zoom/pitch,
+    // not one that balloons far from the camera). This is only possible
+    // because the sprite's pivot is the triangle's own apex (see
+    // HM_APEX_V/this.headMarker.center in the constructor) — position.y
+    // here already carries world[headIdx].y = terrain.sample(x,z) + 0.16
+    // (the line's own anti-z-fight lift, see the comment above), so the
+    // apex sits ~0.16+0.05 world units above the true terrain sample —
+    // small and, critically, the SAME at any zoom (see the task-24 report's
+    // measured gap across a full playback run).
+    this.headMarker.position.set(pos.x, pos.y + HEAD_MARKER_GROUND_GAP, pos.z)
     this.headMarker.visible = true
-
-    // sport-icon billboard (task 22 §4): rides ABOVE the triangle, same
-    // camera-distance-scaled gap logic so it clears the triangle's own apex
-    // at any zoom instead of overlapping it up close or drifting away far out.
-    if (this.headIcon.material.map) {
-      this.headIcon.position.set(pos.x, pos.y + off * 2.4, pos.z)
-      this.headIcon.visible = true
-    } else {
-      this.headIcon.visible = false
-    }
 
     const v = pos.clone().project(this.camera)
     const x = (v.x * 0.5 + 0.5) * window.innerWidth
@@ -1330,7 +1415,6 @@ export class GpxLayer {
     this.track = null
     this.cursor.visible = false
     this.headMarker.visible = false
-    this.headIcon.visible = false
     this._headDispValid = false
     this._villageHits = []
     this._villageLeadKm = 0
