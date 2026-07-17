@@ -11,7 +11,7 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { latLonToWorld, metersPerPixel, surfaceMetersPerUnit, EARTH_RADIUS_M } from './geo.js'
 import { loadLayer } from './map/geo-data.js'
-import { makeLabelTexture, labelInk, labelPlate, labelFontReady } from './map/text-label.js'
+import { makeLabelTexture, labelPlate, labelPlateInk, labelFontReady } from './map/text-label.js'
 import { computeArchSpecs, buildArchMesh, disposeArchGroup } from './arch.js'
 
 const MAX_POINTS = 2400 // decimation budget — hover & profile stay O(small)
@@ -853,7 +853,11 @@ export class GpxLayer {
   _buildVillageMarkers() {
     this._disposeVillages()
     if (!this._villageHits.length) return
-    const ink = labelInk(this.params.darkMode)
+    // task 29: the plate deliberately runs OPPOSITE the theme (dark plate on
+    // a light map, light plate on a dark map — see labelPlate), so the text
+    // drawn on top of it must run opposite labelInk's normal on-map ink too,
+    // via labelPlateInk, or it reads dark-on-dark / light-on-light.
+    const plateInk = labelPlateInk(this.params.darkMode)
     const plate = labelPlate(this.params.darkMode)
     const accentColor = new THREE.Color(this.params.hudAccent)
     for (const hit of this._villageHits) {
@@ -870,7 +874,7 @@ export class GpxLayer {
       line.visible = false
       this.group.add(line)
 
-      const { tex, aspect } = makeLabelTexture(hit.name.toUpperCase(), { color: ink.color, halo: ink.halo, plate, weight: 700 })
+      const { tex, aspect } = makeLabelTexture(hit.name.toUpperCase(), { color: plateInk, plate, weight: 700 })
       const label = new THREE.Sprite(
         new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0, depthTest: false, depthWrite: false })
       )

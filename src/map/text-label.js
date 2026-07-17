@@ -44,8 +44,11 @@ const HALO_STEPS = 14 // fill copies around the ring — enough to look continuo
 // (whatever material the caller's sprite uses), so it inherits the same
 // "occluded behind a ridge" behaviour as the text — it can't become a way to
 // punch a name through a mountain.
-const PLATE_HEIGHT_FRAC = 0.76 // of `size` — generous around the ~0.43*size cap-height (measured)
-const PLATE_MARGIN_FRAC = 0.34 // of `size`, extra half-width pad reserved on each side for the plate
+// task 29: "laisse un peu de marge de respiration" — the first pass read
+// cramped against the plate edge at real rendered size. Both bumped for
+// real breathing room around the ~0.43*size cap-height (measured).
+const PLATE_HEIGHT_FRAC = 0.98 // of `size`
+const PLATE_MARGIN_FRAC = 0.55 // of `size`, extra half-width pad reserved on each side for the plate
 
 function roundedRectPath(ctx, x, y, w, h, r) {
   ctx.beginPath()
@@ -140,17 +143,31 @@ export function labelInk(darkMode, tier = 0) {
     : { color: SLATE_LIGHT[i], halo: 'rgba(255,255,255,0.95)' }
 }
 
-// task 27 §2 — background plate colour for makeLabelTexture's `plate` option.
-// Same base tone family as labelInk's halo (light plate behind dark ink,
-// dark plate behind light ink), but its OPACITY ranks by tier instead of
-// being flat. A plate is a much bigger, bolder shape than the old halo ring
-// — if every tier's plate were equally opaque, a village would suddenly
-// read as visually as "important" as a capital, flattening the exact
-// importance ordering labelScale (size) and labelInk (ink darkness) already
-// agree on. Ranking the plate too keeps all three in lockstep: the biggest,
-// darkest-inked place also gets the boldest plate.
+// task 27 §2 / task 29 fix — background plate colour for makeLabelTexture's
+// `plate` option ("fais ces cadres en couleur opposée au fond" — the plate
+// must contrast the MAP, not just be a fixed slate). labelInk's halo is a
+// thin ring meant to lift a glyph edge off whatever variegated map texture
+// sits directly under it — same tone as the theme is fine there. A plate is
+// a big solid shape instead: if it matched the theme's own tone it would
+// just blend into a same-toned patch of map, so it deliberately runs the
+// OPPOSITE way — dark plate in light mode (light map), light plate in dark
+// mode (dark map). OPACITY still ranks by tier instead of being flat: a
+// plate is a much bigger, bolder shape than the old halo ring — if every
+// tier's plate were equally opaque, a village would suddenly read as
+// visually as "important" as a capital, flattening the exact importance
+// ordering labelScale (size) and labelInk (ink darkness) already agree on.
 const PLATE_ALPHA = [0.92, 0.88, 0.82, 0.76, 0.7, 0.64] // tier 0 (metropolis) -> 5 (village)
 export function labelPlate(darkMode, tier = 0) {
   const a = PLATE_ALPHA[Math.max(0, Math.min(PLATE_ALPHA.length - 1, tier))]
-  return darkMode ? `rgba(15,17,20,${a})` : `rgba(255,255,255,${a})`
+  return darkMode ? `rgba(255,255,255,${a})` : `rgba(15,17,20,${a})`
+}
+
+// Ink colour for text drawn ON a plate (see labelPlate), as opposed to
+// straight on the map. Because the plate deliberately runs opposite the
+// theme (dark plate in light mode, light plate in dark mode — see above),
+// text sitting on it must ALSO run opposite labelInk's normal on-map ink,
+// or it sits dark-on-dark / light-on-light and disappears into the very
+// plate meant to make it legible. Same tier ramps as labelInk, just flipped.
+export function labelPlateInk(darkMode, tier = 0) {
+  return labelInk(!darkMode, tier).color
 }

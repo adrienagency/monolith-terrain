@@ -1,20 +1,22 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { labelInk, labelPlate } from '../src/map/text-label.js'
+import { labelInk, labelPlate, labelPlateInk } from '../src/map/text-label.js'
 
-// ---- task 27 §2: background plate/cartouche ---------------------------
-// "si il faut mettre un cartouche derrière le texte, on le fait" — the plate
-// must stay theme-aware (same tone family as the halo it replaces) AND rank
-// by tier so it can never flatten the importance ordering labelScale/
-// labelInk already encode (a plate is a much bigger, bolder shape than the
-// old thin halo ring — equal opacity everywhere would make every place read
-// as equally important).
+// ---- task 27 §2 / task 29: background plate/cartouche ------------------
+// "fais ces cadres en couleur opposée au fond" — the plate must contrast
+// the MAP, not just be a fixed tone: dark plate in light mode (light map),
+// light plate in dark mode (dark map) — the OPPOSITE of the theme, not the
+// same tone family as labelInk's halo. It must also still rank by tier so
+// it can never flatten the importance ordering labelScale/labelInk already
+// encode (a plate is a much bigger, bolder shape than the old thin halo
+// ring — equal opacity everywhere would make every place read as equally
+// important).
 
-test('labelPlate is theme-aware: light-mode plate is light, dark-mode plate is dark', () => {
+test('labelPlate is theme-OPPOSITE: light-mode plate is dark, dark-mode plate is light', () => {
   const light = labelPlate(false, 0)
   const dark = labelPlate(true, 0)
-  assert.match(light, /^rgba\(255,255,255,/, `expected a light plate in light mode, got ${light}`)
-  assert.match(dark, /^rgba\(15,17,20,/, `expected a dark plate in dark mode, got ${dark}`)
+  assert.match(light, /^rgba\(15,17,20,/, `expected a dark plate in light mode (opposite the light map), got ${light}`)
+  assert.match(dark, /^rgba\(255,255,255,/, `expected a light plate in dark mode (opposite the dark map), got ${dark}`)
 })
 
 test('labelPlate opacity strictly decreases from tier 0 (most important) to the least', () => {
@@ -36,15 +38,22 @@ test('labelPlate clamps out-of-range tiers instead of returning undefined/NaN', 
   assert.equal(aboveRange, labelPlate(false, 5))
 })
 
-test('labelPlate stays the same opaque tone family as labelInk halo (same contrast pairing)', () => {
-  // labelInk's halo is a fixed opacity per theme; labelPlate is the same
-  // base RGB, just tier-ranked and usually more opaque (a real background,
-  // not a thin ring) — pin the shared RGB triplet so the two can't drift
-  // into mismatched tones
+test('labelPlate runs the OPPOSITE RGB triplet from labelInk halo (contrasts the map, not the theme)', () => {
+  // labelInk's halo stays theme-toned (a thin ring lifting a glyph off the
+  // map texture directly under it); labelPlate is a big solid shape that
+  // must instead oppose the map background, so its base RGB is the OTHER
+  // one from the halo's, at each theme.
   const inkHaloLight = labelInk(false, 0).halo
   const plateLight = labelPlate(false, 0)
-  assert.equal(inkHaloLight.match(/rgba\((\d+,\d+,\d+),/)[1], plateLight.match(/rgba\((\d+,\d+,\d+),/)[1])
+  assert.notEqual(inkHaloLight.match(/rgba\((\d+,\d+,\d+),/)[1], plateLight.match(/rgba\((\d+,\d+,\d+),/)[1])
   const inkHaloDark = labelInk(true, 0).halo
   const plateDark = labelPlate(true, 0)
-  assert.equal(inkHaloDark.match(/rgba\((\d+,\d+,\d+),/)[1], plateDark.match(/rgba\((\d+,\d+,\d+),/)[1])
+  assert.notEqual(inkHaloDark.match(/rgba\((\d+,\d+,\d+),/)[1], plateDark.match(/rgba\((\d+,\d+,\d+),/)[1])
+})
+
+test('labelPlateInk is the opposite tone from labelInk at the same theme (readable on the opposed plate)', () => {
+  for (const tier of [0, 3, 5]) {
+    assert.equal(labelPlateInk(false, tier), labelInk(true, tier).color)
+    assert.equal(labelPlateInk(true, tier), labelInk(false, tier).color)
+  }
 })
