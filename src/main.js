@@ -47,7 +47,7 @@ import { buildRegionSkirt } from './region-skirt.js'
 import { makeSocleEnvMap } from './socle-env.js'
 import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
 import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, stripFromLook, loadUserTemplates, saveUserTemplates } from './templates-user.js'
-import { captureShareState, parseShareState, encodeShareState, decodeShareState } from './share-link.js'
+import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT } from './share-link.js'
 import { DroneCam } from './drone-cam.js'
 import { makeGradientTexture, deriveBgColors, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
@@ -367,6 +367,26 @@ if (location.hash.startsWith('#s=')) {
     }
   } catch (err) {
     console.warn('share link ignored:', err) // a garbled/old-format fragment just boots the default view
+  }
+}
+
+// #r=<id> — a PUBLISHED race link (Netlify Blobs, see netlify/functions/race.mjs
+// and share-link.js). Unlike #s= this is unavoidably async (a network fetch), so
+// it can't patch `params` before first read the way #s= does. Instead: fire the
+// fetch NOW so it runs in parallel with the whole app boot, and let the boot
+// kick at the bottom of this file await it — on success the payload's state is
+// applied and its GPX loaded (loadGpxText re-frames and reloads the terrain
+// itself); on any failure the app just boots the default view, never a blank
+// screen. The payload is exactly as untrusted as a pasted #s= fragment — anyone
+// can POST to the endpoint — so it goes through parseRacePayload (garbage → null).
+let pendingRaceFetch = null
+if (location.hash.startsWith('#r=')) {
+  const raceId = location.hash.slice(3)
+  if (/^[A-Za-z0-9_-]{4,64}$/.test(raceId)) {
+    pendingRaceFetch = fetch(`${RACE_ENDPOINT}?id=${encodeURIComponent(raceId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => (j && j.ok && j.payload ? j.payload : null)) // GET returns { ok, payload }
+      .catch(() => null)
   }
 }
 
@@ -1956,15 +1976,36 @@ async function shareCurrentView() {
     tx: controls.target.x, ty: controls.target.y, tz: controls.target.z,
   }
   const state = captureShareState(params, cam, BASE_TEMPLATE_LOOK)
-  const encoded = encodeShareState(state)
-  const url = `${location.origin}${location.pathname}#s=${encoded}`
   const hasTrack = !!gpxLayer.track
-  const note = hasTrack ? ' — your GPX track isn’t included' : ''
+
+  // With a track loaded, publish it (Netlify Blobs via netlify/functions/race.mjs)
+  // and hand out the short #r= link — the whole point of sharing a race is that
+  // the recipient sees the course. Publish failure degrades HONESTLY to the
+  // inline #s= link with `published: false`, so the toast can say the track
+  // didn't make it — a link that silently drops the course would be worse.
+  let url = null
+  let published = false
+  if (hasTrack) {
+    try {
+      const res = await fetch(RACE_ENDPOINT, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ gpx: trackToGpx(gpxLayer.track), state }),
+      })
+      const j = res.ok ? await res.json() : null
+      if (j?.ok && typeof j.id === 'string' && /^[A-Za-z0-9_-]{4,64}$/.test(j.id)) {
+        url = `${location.origin}${location.pathname}#r=${j.id}`
+        published = true
+      }
+    } catch {} // network/function down — fall through to the inline link
+  }
+  if (!url) url = `${location.origin}${location.pathname}#s=${encodeShareState(state)}`
+  const note = hasTrack && !published ? ' — your GPX track isn’t included' : ''
 
   if (navigator.share) {
     try {
       await navigator.share({ title: 'ShibuMap', text: `A view I made with ShibuMap${note}`, url })
-      return { ok: true, shared: true, hasTrack }
+      return { ok: true, shared: true, hasTrack, published }
     } catch (err) {
       if (err?.name === 'AbortError') return { ok: false, cancelled: true } // user dismissed the OS share sheet
       // any other share-sheet failure falls through to the clipboard below
@@ -1972,9 +2013,9 @@ async function shareCurrentView() {
   }
   try {
     await navigator.clipboard.writeText(url)
-    return { ok: true, copied: true, hasTrack }
+    return { ok: true, copied: true, hasTrack, published }
   } catch {
-    return { ok: false, url, hasTrack } // clipboard blocked — nothing more we can do automatically
+    return { ok: false, url, hasTrack, published } // clipboard blocked — nothing more we can do automatically
   }
 }
 
@@ -2390,8 +2431,40 @@ history.record()
 // console access for debugging/scripting
 window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
 
-// real world is the default source — fetch its tiles on startup
-if (params.source === 'real') loadRealTerrain()
+// real world is the default source — fetch its tiles on startup. A published
+// race link (#r=, fetch fired at module scope so it ran during boot) takes
+// over the initial view instead: its GPX load re-frames and fetches the right
+// terrain itself, so booting the default view first would just load a terrain
+// we immediately throw away. Any failure — 404, storage down, garbage payload —
+// falls back to the normal default boot, never a blank screen.
+async function bootInitialView() {
+  const payload = pendingRaceFetch ? await pendingRaceFetch : null
+  const race = payload ? parseRacePayload(payload, BASE_TEMPLATE_LOOK) : null
+  if (!race) {
+    if (pendingRaceFetch) loadingStatus.textContent = 'race link unavailable — loading the default view…'
+    if (params.source === 'real') loadRealTerrain()
+    return
+  }
+  if (race.state) {
+    Object.assign(params, race.state.look)
+    params.demLat = race.state.loc.lat
+    params.demLon = race.state.loc.lon
+    params.demZoom = race.state.loc.zoom
+    params.demLocation = 'Custom'
+    if (race.state.cam) pendingShareCam = race.state.cam
+  }
+  // race.logo is stored/validated but not consumed yet — the race-info panel
+  // (layers lot) will surface it. loadGpxText frames the track, loads terrain,
+  // and applies the pending camera once the view exists.
+  await loadGpxText(race.gpx)
+  if (pendingShareCam) {
+    camera.position.set(pendingShareCam.px, pendingShareCam.py, pendingShareCam.pz)
+    controls.target.set(pendingShareCam.tx, pendingShareCam.ty, pendingShareCam.tz)
+    controls.update()
+    pendingShareCam = null
+  }
+}
+bootInitialView()
 
 const clock = new THREE.Clock()
 let placesRefreshAcc = 0 // throttles the places-layer screen-space declutter refresh (see tick())

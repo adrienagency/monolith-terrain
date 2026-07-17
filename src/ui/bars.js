@@ -69,7 +69,9 @@ export function buildTopBar(ctx) {
       if (res?.cancelled) {
         // user backed out of the OS share sheet — no feedback needed
       } else if (res?.ok) {
-        const trackNote = res.hasTrack ? ' — GPX track not included' : ''
+        // three honest cases: track published in the link / publish failed so
+        // the link is look-only / no track loaded at all (nothing to say)
+        const trackNote = res.hasTrack ? (res.published ? ' — course included' : ' — course couldn’t be published') : ''
         showToast((res.copied ? 'Link copied' : 'Shared') + trackNote)
       } else {
         showToast('Could not create the link')
