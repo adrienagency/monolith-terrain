@@ -1,0 +1,17 @@
+# ShibuMap — Netlify config.
+#
+# Build/publish match the deploy command this project actually uses
+# (see the task-21 report / README): `npx vite build && netlify deploy
+# --prod --dir dist --site 74e18fe8-c86f-47ad-9807-479cd59f1d8c`.
+#
+# Functions: netlify/functions/race.mjs backs the `#r=<id>` share-link form
+# (GPX-carrying links) via Netlify Blobs — see that file's own header for the
+# full contract.
+
+[build]
+  command = "npx vite build"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"

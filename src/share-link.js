@@ -1,24 +1,35 @@
 // Share link — pack the current look + location + camera pose into a short,
 // URL-safe fragment so pasting the link reproduces the same view elsewhere.
 //
-// GPX tracks are deliberately NEVER included: a track can be megabytes and
-// simply cannot fit in a URL. See main.js's Share wiring for the disclosure
-// shown to the user when a track is loaded — silently dropping it would be
-// worse than saying so.
+// Two link forms now exist:
+//  - `#s=<diff>` — the original, zero-network, fully-inline fragment below.
+//    Used whenever no GPX track is loaded: nothing to publish, nothing that
+//    can ever 404 later.
+//  - `#r=<id>` — used when a track IS loaded. A track (even decimated, see
+//    gpx.js's MAX_POINTS) is tens to hundreds of KB and simply cannot fit in
+//    a URL, so the payload (GPX text + this same diffed state, see
+//    captureShareState below) is POSTed to Netlify Blobs instead (see
+//    netlify/functions/race.mjs) and the link carries only the short id.
+//    parseRacePayload() below is the untrusted-input gate for whatever comes
+//    back from that fetch — same rigour as parseShareState, since anyone can
+//    POST to that endpoint.
 //
-// No compression library. The payload is a DIFF against the app's own
-// hard-coded defaults (BASE_TEMPLATE_LOOK, captured once at boot in main.js
-// before anything mutates params) — only keys the user actually changed
-// travel at all, which keeps most real links short without needing a real
-// compressor. This also keeps encode/decode fully SYNCHRONOUS (plain
-// JSON + base64url, no Streams API): main.js has to apply a restored state
-// before anything else reads `params`, well before any await could resolve,
-// so an async decode was never an option here.
+// No compression library for the `#s=` path. That payload is a DIFF against
+// the app's own hard-coded defaults (BASE_TEMPLATE_LOOK, captured once at
+// boot in main.js before anything mutates params) — only keys the user
+// actually changed travel at all, which keeps most real links short without
+// needing a real compressor. This also keeps encode/decode fully
+// SYNCHRONOUS (plain JSON + base64url, no Streams API): main.js has to apply
+// a restored `#s=` state before anything else reads `params`, well before
+// any await could resolve, so an async decode was never an option there. The
+// `#r=` path is unavoidably async (it's a network fetch) — main.js defers
+// applying it until well after boot, see its "race-link restore" section.
 //
 // Pure/DOM-free (besides TextEncoder/TextDecoder/btoa/atob, available in
 // both the browser and Node's test runner) — same contract as
 // templates-user.js: capture, (de)serialize, validate. DOM wiring (the Share
-// button, camera-pose capture, the GPX-not-included notice) lives in main.js.
+// button, camera-pose capture, the actual fetch/POST calls) lives in main.js
+// — this file never touches the network itself.
 
 import { TEMPLATE_KEYS, captureLook } from './templates-user.js'
 
@@ -175,4 +186,72 @@ export function decodeShareState(str) {
   } catch {
     return null
   }
+}
+
+// ---------------------------------------------------------------- publish (Blobs)
+
+// Netlify Function endpoint backing the `#r=<id>` link form (see
+// netlify/functions/race.mjs — POST to publish, GET ?id= to fetch).
+export const RACE_ENDPOINT = '/.netlify/functions/race'
+
+// A published race link is capped well above any real (already-decimated —
+// see gpx.js's MAX_POINTS) track, but still bounded: this is the CLIENT-side
+// mirror of the ceiling netlify/functions/race.mjs enforces server-side.
+// Kept here, next to RACE_ENDPOINT, as the one place both main.js and the
+// function's own limits are meant to agree with (the function can't import
+// from src/ — see its own header comment — so the numbers are duplicated
+// there, not shared by reference).
+export const RACE_GPX_MAX_CHARS = 2_000_000
+export const RACE_LOGO_MAX_CHARS = 2_000_000
+
+function escapeXml(s) {
+  return String(s).replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]))
+}
+
+// GpxLayer's `track` ({ points: [{lat,lon,ele}], name }) → a small, real,
+// re-parseable GPX 1.1 document. NOT the organiser's original file
+// byte-for-byte — gpx.js's parseGpx() already decimated it to MAX_POINTS
+// (2400) the moment it was loaded, and this just re-serializes exactly those
+// points. That decimation is the thing that makes publishing affordable at
+// all: a real multi-thousand-point race GPX (hundreds of KB to ~1 MB raw)
+// comes back out at a few hundred KB at most, every time, with no separate
+// compression step needed.
+export function trackToGpx(track) {
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<gpx version="1.1" creator="ShibuMap" xmlns="http://www.topografix.com/GPX/1/1">',
+    `<trk><name>${escapeXml(track?.name || 'Track')}</name><trkseg>`,
+  ]
+  for (const p of track?.points || []) {
+    if (!isNum(p.lat) || !isNum(p.lon)) continue
+    const lat = p.lat.toFixed(6)
+    const lon = p.lon.toFixed(6)
+    if (isNum(p.ele)) lines.push(`<trkpt lat="${lat}" lon="${lon}"><ele>${p.ele.toFixed(1)}</ele></trkpt>`)
+    else lines.push(`<trkpt lat="${lat}" lon="${lon}"></trkpt>`)
+  }
+  lines.push('</trkseg></trk>', '</gpx>')
+  return lines.join('')
+}
+
+const LOGO_DATA_URL_RE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/
+
+// Untrusted decoded response from GET RACE_ENDPOINT?id=… → a safe
+// { gpx, logo, state } or null. `state`, if present, is re-validated through
+// parseShareState (same `base` contract) — a stored payload is exactly as
+// untrusted as a pasted #s= fragment (anyone can POST to the publish
+// endpoint), so it gets the same scrutiny before touching app state. Never
+// throws.
+export function parseRacePayload(raw, base) {
+  if (!raw || typeof raw !== 'object') return null
+  if (typeof raw.gpx !== 'string' || !raw.gpx || raw.gpx.length > RACE_GPX_MAX_CHARS) return null
+
+  let logo = null
+  const dataUrl = typeof raw.logo === 'string' ? raw.logo : raw.logo?.dataUrl
+  if (typeof dataUrl === 'string' && dataUrl.length <= RACE_LOGO_MAX_CHARS && LOGO_DATA_URL_RE.test(dataUrl)) {
+    logo = dataUrl
+  }
+
+  const state = raw.state && typeof raw.state === 'object' ? parseShareState(raw.state, base) : null
+
+  return { gpx: raw.gpx, logo, state }
 }
