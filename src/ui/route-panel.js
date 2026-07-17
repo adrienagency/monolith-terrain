@@ -338,16 +338,32 @@ export function buildRoutePanel(ctx) {
     ctx.stopFollow?.()
     syncPlayBtn()
   }, { ghost: true })
+  // task 30: "mets une croix de fermeture quelque part pour quitter le mode
+  // suivi" — a quiet exit-follow control, visible only while the drone is
+  // actually chasing the head (playing + Follow on), so a drag no longer
+  // needs to be the only way out. ctx.stopFollow is disengageGpxFollow
+  // (main.js) — same call the Follow toggle's own "off" path already uses;
+  // this also flips params.gpxFollow off so the toggle itself reflects the
+  // exit rather than reading "on" over a follow that's no longer running.
+  const exitFollowBtn = button('✕ Exit follow', () => {
+    params.gpxFollow = false
+    ctx.stopFollow?.()
+    refreshAll() // syncs the Follow toggle + hides the speed slider right away
+    syncPlayBtn()
+  }, { ghost: true })
+  exitFollowBtn.classList.add('ce-exit-follow')
+  exitFollowBtn.title = 'Return to manual camera control'
   function syncPlayBtn() {
     const playing = !!ctx.gpx.isPlaying?.()
     playBtn.textContent = playing ? '⏸ Pause' : '▶ Play'
     playBtn.classList.toggle('on', playing)
+    exitFollowBtn.style.display = playing && params.gpxFollow ? '' : 'none'
   }
   syncPlayBtn()
   // playback can also start/stop/end via Space/Esc or naturally reach the
   // end of the track — poll lightly so the button label stays in sync
   setInterval(syncPlayBtn, 200)
-  playRow.append(playBtn, stopBtn)
+  playRow.append(playBtn, stopBtn, exitFollowBtn)
   const followSpeedRow = slider({
     label: 'Follow speed',
     min: 0.5,

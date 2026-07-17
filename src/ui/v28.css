@@ -779,6 +779,17 @@ body.dark {
 .ce-btn-row .ce-btn {
   flex: 1;
 }
+/* task 30: exit-follow sits in the same row as Play/Stop but reads as a
+   quiet, secondary escape hatch rather than a third equal action — narrower
+   than its flex:1 siblings, muted until hovered (same restraint the gpx
+   layer remove (✕) button uses, see .ce-gpx-remove). */
+.ce-btn-row .ce-btn.ce-exit-follow {
+  flex: 0 0 auto;
+  padding: 0 10px;
+}
+.ce-exit-follow:hover {
+  color: var(--ce-accent);
+}
 
 /* ---------------------------------------------------------- template cards */
 .ce-cards {
