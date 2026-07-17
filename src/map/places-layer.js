@@ -26,16 +26,22 @@ const CLEARANCE = 0.9
 // formula is camera-DISTANCE independent by construction (sizeAttenuation is
 // off) — a label is exactly as many px tall whether the camera is a distant
 // top-down overview or parked low over the next hairpin turn.
-// task 27 §2: 0.007 measured ~5.8-6.5px cap-height for the smallest (village)
-// tier at a real ~945px-tall viewport ("je veux que ça soit vraiment
-// visible" — that's not it, especially with a low, close reference-style
-// camera drawing attention to detail everywhere else in the frame). Bumped
-// to 0.010 (~1.43x): village -> ~9px, a mid town -> ~12px, a capital ->
-// ~26px, measured with the exact live formula below, not guessed — see the
-// task-27 report for the before/after numbers. Paired with the new
-// labelPlate() background (see text-label.js) for the contrast the raw
-// glyph size alone still can't guarantee at the low end.
-const BASE_H = 0.01
+// task 27 §2 bumped this 0.007 -> 0.010 to fix legibility for a low, close
+// reference-style GPX camera. task 29 reverts it back: because this formula
+// is DISTANCE-independent by construction (sizeAttenuation is off, see
+// above), that same 0.010 also applies at a continental/wide DEM view where
+// the whole map is tiny on screen — a metropolis label there rendered as an
+// ~26px headline over a patch a few px wide ("les noms semblent devenus
+// énormes !"). 0.010 was only ever justified by the GPX close-camera case,
+// and gpx.js's along-track village announcements already carry their OWN
+// independent size constant (VILLAGE_LABEL_BASE_H, still 0.010 — see
+// gpx.js), so reverting BASE_H here costs that case nothing. Back to 0.007:
+// village -> ~5.8-6.5px, a mid town -> ~8px, a capital -> ~14px cap-height,
+// measured with the exact live formula below at a real ~945px-tall
+// viewport, both at a continental demZoom (labels read as normal map
+// labels, not headlines) and at a close demZoom (still legible, just not
+// competing with the GPX-only plated village announcements for boldness).
+const BASE_H = 0.007
 // Real screen size of a sprite quad, in CSS px — see the BASE_H note above.
 function spriteScreenSize(sprite, camera, vw, vh) {
   const P = camera.projectionMatrix.elements
