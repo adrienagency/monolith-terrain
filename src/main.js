@@ -324,7 +324,7 @@ const params = {
   roadsOpacity: 0.9,
   roadsDetail: 1,
   roadColor: '',
-  waterEnabled: false,
+  waterEnabled: true, // lakes on by default — the world lake layer is cheap (fetch-on-view)
   waterOpacity: 0.9,
   waterFill: true,
   placesEnabled: true,
