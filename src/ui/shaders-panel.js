@@ -8,9 +8,28 @@ import { el, section, toggle, select, color, slider } from './kit.js'
 import { Panel } from './shell.js'
 import { BLEND_MODES } from '../fx-meta.js'
 import { materialsByCategory } from '../material-catalog.js'
+import { requestFxThumb } from './fx-thumbs.js'
 
 const ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="9.5" r="5.5"/><circle cx="15" cy="14.5" r="5.5"/></svg>'
+
+// shared vignette-tile builder — one visual language for every picker in this
+// panel (Shaders, Relief material). A tile with real image media carries no
+// label (the picture IS the name); only the textless fallback (e.g. "None")
+// keeps its caption.
+function vigTile({ id, cur, label, media, showName, onPick }) {
+  const b = el('button', `ce-mat-vig${cur === id ? ' on' : ''}`)
+  b.type = 'button'
+  b.setAttribute('data-tip', label)
+  b.append(media)
+  if (showName) b.append(el('span', 'ce-mat-vig-name', label))
+  b.addEventListener('click', () => {
+    onPick()
+    b.parentElement.querySelectorAll('.ce-mat-vig.on').forEach((t) => t.classList.remove('on'))
+    b.classList.add('on')
+  })
+  return b
+}
 
 export function buildShadersPanel(ctx) {
   const panel = new Panel({
@@ -20,53 +39,69 @@ export function buildShadersPanel(ctx) {
     width: 268, // match Create/Camera so the right dock aligns cleanly
     tip: 'Animated shader treatments painted onto the relief surface.',
   })
-  const s = panel.addSection(section('Surface', { open: false }))
 
-  // --- Liquid metal (its own controls appear when it's on) ---
-  s.body.append(
-    toggle({ label: 'Liquid metal', get: () => ctx.getLiquidMetal(), set: (v) => { ctx.setLiquidMetal(v); renderLm() } })
-  )
-  const lmCtl = el('div', 'ce-fx-controls')
-  s.body.append(lmCtl)
-  function renderLm() {
-    lmCtl.replaceChildren()
-    if (!ctx.getLiquidMetal()) return
-    for (const c of ctx.lmControls) {
-      lmCtl.append(slider({ label: c.label, min: c.min, max: c.max, step: 0.01, get: () => ctx.getLmParam(c.k), set: (v) => ctx.setLmParam(c.k, v) }))
+  // --- 1. Shaders: animated procedural treatments painted onto the relief ---
+  const sFx = panel.addSection(section('Shaders', { open: false }))
+  const fxPick = el('div', 'ce-mat-pick')
+  sFx.body.append(fxPick)
+  const appear = el('div', 'ce-fx-controls') // Appearance: opacity + blend
+  const fxCtl = el('div', 'ce-fx-controls') // per-effect options
+  sFx.body.append(appear, fxCtl)
+
+  function renderFxPicker() {
+    fxPick.replaceChildren()
+    const cur = ctx.getSurfaceFx() ? Number(ctx.getSurfaceFx()) : 0
+    const grid = el('div', 'ce-mat-grid')
+    const none = el('span', 'ce-mat-vig-img ce-mat-vig-none')
+    grid.append(vigTile({ id: 0, cur, label: 'None', media: none, showName: true, onPick: () => { ctx.setSurfaceFx(0); renderFx() } }))
+    for (const { value, label } of ctx.surfaceFxList) {
+      const id = parseInt(value, 10)
+      const media = el('img', 'ce-mat-vig-img')
+      media.alt = label
+      requestFxThumb(id, (url) => { media.src = url })
+      grid.append(vigTile({ id, cur, label, media, showName: false, onPick: () => { ctx.setSurfaceFx(id); renderFx() } }))
+    }
+    fxPick.append(grid)
+  }
+
+  function renderFx() {
+    appear.replaceChildren()
+    fxCtl.replaceChildren()
+    const id = ctx.getSurfaceFx()
+    const meta = id && ctx.fxMeta[id]
+    if (!meta) return
+    // Appearance — how the shader sits over the map (like Figma's Appearance)
+    appear.append(el('div', 'ce-fx-head', 'Appearance'))
+    appear.append(
+      slider({ label: 'Opacity', min: 0, max: 1, step: 0.01, get: () => ctx.getFxParam(id, 'opacity'), set: (v) => ctx.setFxParam(id, 'opacity', v) }),
+      select({ label: 'Blend', options: BLEND_MODES.map((label, i) => ({ value: String(i), label })), get: () => String(ctx.getFxParam(id, 'blend') || 0), set: (v) => ctx.setFxParam(id, 'blend', parseInt(v, 10)) })
+    )
+    // Per-effect knobs
+    for (const c of meta.c) {
+      const opts = { label: c.label, get: () => ctx.getFxParam(id, c.k), set: (v) => ctx.setFxParam(id, c.k, v) }
+      fxCtl.append(c.type === 'color' ? color(opts) : slider({ ...opts, min: c.min, max: c.max, step: 0.01 }))
     }
   }
 
-  // --- Material: turn the WHOLE relief into a real PBR material (glass, rock,
-  // sand, marble, …). A vignette picker grouped by category so you choose by
-  // look, not by a word — a full material swap, like Liquid metal ---
-  s.body.append(el('div', 'ce-fx-head', 'Relief material'))
+  // --- 2. Relief material: turn the WHOLE relief into a real PBR material
+  // (glass, rock, sand, marble, …). A vignette picker grouped by category so
+  // you choose by look, not by a word — a full material swap ---
+  const sMat = panel.addSection(section('Relief material', { open: false }))
   const matPick = el('div', 'ce-mat-pick')
-  s.body.append(matPick)
+  sMat.body.append(matPick)
   const matCtl = el('div', 'ce-fx-controls')
-  s.body.append(matCtl)
+  sMat.body.append(matCtl)
 
   // build the vignette grid: a "None" tile + one titled group per category
   function renderPicker() {
     const st = matPick.scrollTop
     matPick.replaceChildren()
     const cur = ctx.getSurfaceMat() || ''
-    const tile = (id, label, media) => {
-      const b = el('button', `ce-mat-vig${cur === id ? ' on' : ''}`)
-      b.type = 'button'
-      b.setAttribute('data-tip', label)
-      b.append(media, el('span', 'ce-mat-vig-name', label))
-      b.addEventListener('click', () => {
-        ctx.setSurfaceMat(id)
-        matPick.querySelectorAll('.ce-mat-vig.on').forEach((t) => t.classList.remove('on'))
-        b.classList.add('on')
-        renderMat()
-      })
-      return b
-    }
+    const tile = (id, label, media, showName) => vigTile({ id, cur, label, media, showName, onPick: () => { ctx.setSurfaceMat(id); renderMat() } })
     // None / topographic
     const none = el('span', 'ce-mat-vig-img ce-mat-vig-none')
     const noneGrid = el('div', 'ce-mat-grid')
-    noneGrid.append(tile('', 'None', none))
+    noneGrid.append(tile('', 'None', none, true))
     matPick.append(noneGrid)
     // categories
     for (const cat of materialsByCategory()) {
@@ -76,7 +111,7 @@ export function buildShadersPanel(ctx) {
         let media
         if (m.thumb) { media = el('img', 'ce-mat-vig-img'); media.src = m.thumb; media.alt = m.label; media.loading = 'lazy' }
         else { media = el('span', 'ce-mat-vig-img'); if (m.swatch) media.style.background = m.swatch }
-        grid.append(tile(m.id, m.label, media))
+        grid.append(tile(m.id, m.label, media, false))
       }
       matPick.append(grid)
     }
@@ -102,44 +137,29 @@ export function buildShadersPanel(ctx) {
     }
   }
 
-  // --- Surface shader picker ---
-  s.body.append(
-    select({
-      label: 'Surface shader',
-      options: [{ value: '', label: 'None' }, ...ctx.surfaceFxList],
-      get: () => (ctx.getSurfaceFx() ? String(ctx.getSurfaceFx()) : ''),
-      set: (v) => { ctx.setSurfaceFx(v ? parseInt(v, 10) : 0); renderFx() },
-    })
+  // --- 3. Fancy: the liquid-metal treatment (its own controls appear when
+  // it's on) — same peer level as Shaders and Relief material ---
+  const sFancy = panel.addSection(section('Fancy', { open: false }))
+  sFancy.body.append(
+    toggle({ label: 'Liquid metal', get: () => ctx.getLiquidMetal(), set: (v) => { ctx.setLiquidMetal(v); renderLm() } })
   )
-  const appear = el('div', 'ce-fx-controls') // Appearance: opacity + blend
-  const fxCtl = el('div', 'ce-fx-controls') // per-effect options
-  s.body.append(appear, fxCtl)
-
-  function renderFx() {
-    appear.replaceChildren()
-    fxCtl.replaceChildren()
-    const id = ctx.getSurfaceFx()
-    const meta = id && ctx.fxMeta[id]
-    if (!meta) return
-    // Appearance — how the shader sits over the map (like Figma's Appearance)
-    appear.append(el('div', 'ce-fx-head', 'Appearance'))
-    appear.append(
-      slider({ label: 'Opacity', min: 0, max: 1, step: 0.01, get: () => ctx.getFxParam(id, 'opacity'), set: (v) => ctx.setFxParam(id, 'opacity', v) }),
-      select({ label: 'Blend', options: BLEND_MODES.map((label, i) => ({ value: String(i), label })), get: () => String(ctx.getFxParam(id, 'blend') || 0), set: (v) => ctx.setFxParam(id, 'blend', parseInt(v, 10)) })
-    )
-    // Per-effect knobs
-    for (const c of meta.c) {
-      const opts = { label: c.label, get: () => ctx.getFxParam(id, c.k), set: (v) => ctx.setFxParam(id, c.k, v) }
-      fxCtl.append(c.type === 'color' ? color(opts) : slider({ ...opts, min: c.min, max: c.max, step: 0.01 }))
+  const lmCtl = el('div', 'ce-fx-controls')
+  sFancy.body.append(lmCtl)
+  function renderLm() {
+    lmCtl.replaceChildren()
+    if (!ctx.getLiquidMetal()) return
+    for (const c of ctx.lmControls) {
+      lmCtl.append(slider({ label: c.label, min: c.min, max: c.max, step: 0.01, get: () => ctx.getLmParam(c.k), set: (v) => ctx.setLmParam(c.k, v) }))
     }
   }
 
   renderLm()
+  renderFxPicker()
+  renderFx()
   renderPicker()
   renderMat()
-  renderFx()
   // let main.js re-render these when an exclusivity change flips LM ↔ relief
   // material, or a template swaps the material out from under the picker
-  ctx.registerRefresh?.(() => { renderLm(); renderPicker(); renderMat(); renderFx() })
+  ctx.registerRefresh?.(() => { renderLm(); renderFxPicker(); renderFx(); renderPicker(); renderMat() })
   return panel
 }
