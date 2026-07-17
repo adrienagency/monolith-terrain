@@ -59,9 +59,34 @@ export const ROAD_LOD_LEVELS = [
   { lod: 2, tileZoom: 13, demZoomMax: Infinity },
 ]
 
+// World lake layer (task 19). Unlike LOD_LEVELS/ROAD_LOD_LEVELS — which only
+// ever cover REGION (the Alps box) — these tiles are written for the WHOLE
+// PLANET, so there is no `inRegion` gate on this layer at all. That changes
+// which tradeoff matters: for a region layer the binding constraint is
+// bytes-per-tile, but for a world layer it's ALSO the total tile COUNT (one
+// file per non-empty tile, worldwide), which is why the coarse LODs stay
+// coarse and lean on the area floor instead of on finer tiles.
+//
+// Same demZoom band SCHEME as water/roads (far <=8, mid 9-11, close >=12) so
+// all three layers answer "how zoomed in am I" identically — only tileZoom
+// and the gate differ. Lakes are a far sparser layer than water-with-rivers
+// (measured: `lake` is 23.5% of the Alps water bytes / 2.4% of the raw
+// region's water vertices), so lake tiles can afford to be COARSER than
+// water's at every LOD and still stay under the ~2 MB/tile ceiling.
+//
+// tileZoom and the per-LOD area floor are both MEASURED choices — see the
+// area-band table in the task-19 report and LAKE_AREA_GATES_KM2 in
+// build-world-lake-tiles.mjs. Re-measure both if you touch either.
+export const LAKE_LOD_LEVELS = [
+  { lod: 0, tileZoom: 5, demZoomMax: 8 },
+  { lod: 1, tileZoom: 7, demZoomMax: 11 },
+  { lod: 2, tileZoom: 9, demZoomMax: Infinity },
+]
+
 // `levels` defaults to LOD_LEVELS (water) so every existing call site is
-// unaffected; pass ROAD_LOD_LEVELS (or any other per-layer table) explicitly
-// for a layer whose tile density needs a different tileZoom per LOD.
+// unaffected; pass ROAD_LOD_LEVELS / LAKE_LOD_LEVELS (or any other per-layer
+// table) explicitly for a layer whose tile density needs a different tileZoom
+// per LOD.
 export function lodForZoom(demZoom, levels = LOD_LEVELS) {
   for (const l of levels) if (demZoom <= l.demZoomMax) return l.lod
   return levels[levels.length - 1].lod

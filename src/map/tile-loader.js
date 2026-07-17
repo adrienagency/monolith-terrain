@@ -81,6 +81,16 @@ const _road = makeTileSource('road-tiles')
 export const loadRoadTiles = _road.loadTiles
 export const loadRoadTileManifest = _road.loadManifest
 
+// World lake layer (task 19): lake-only, global coverage, no region gate —
+// unlike water/road tiles this kind is fetched everywhere on Earth, not just
+// inside WATER_REGION. Same fetch/cache/dedupe contract, own cache under
+// public/data/lake-tiles/ so a z/x/y key never collides with water's or
+// road's tile at the same coordinates (different tileZoom scheme entirely,
+// see LAKE_LOD_LEVELS in tile-index.js).
+const _lake = makeTileSource('lake-tiles')
+export const loadLakeTiles = _lake.loadTiles
+export const loadLakeTileManifest = _lake.loadManifest
+
 // Whether the manifest actually has any tiles written for this LOD (a bare
 // `tiles: 0` entry, e.g. from a future LOD not yet built, counts as none).
 // Shared by every tiled layer's manifest — the shape is the same regardless
@@ -92,4 +102,4 @@ export function hasTilesForLod(manifest, lod) {
 }
 
 // exposed for tests
-export const _clearCache = () => { _water.clearCache(); _road.clearCache() }
+export const _clearCache = () => { _water.clearCache(); _road.clearCache(); _lake.clearCache() }

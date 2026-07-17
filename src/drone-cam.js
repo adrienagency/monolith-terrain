@@ -24,12 +24,16 @@
 //   · No roll, ever. Roll is rotation too, and the brief asks for almost
 //     none — this rig only ever yaws (slowly) and pitches (to frame), so
 //     lookAt is always built with a fixed world up vector.
-//   · Fixed arm/lift ("traveling", not chase). Distance behind + height
-//     above the spine are constant, not slope-reactive — standing well
-//     back is itself the primary anti-nausea lever (a wiggle subtends a
-//     smaller screen angle from farther away), and the spine's own smoothed
-//     elevation already delivers "climb progressively" without a separate
-//     dial.
+//   · Arm/lift ("traveling", not chase) — standing well back is the primary
+//     anti-nausea lever (a wiggle subtends a smaller screen angle from
+//     farther away). Task 20 makes the distance CONTENT-AWARE rather than
+//     constant (see buildDramaProfile()/dramaStandoffMul() below): it reads
+//     no more than the spine already exposes — its own smoothed elevation
+//     (grade) and its own heading (bend) — never the raw track, same rule as
+//     everywhere else in this file. Bend is deliberately the thing that
+//     widens the shot, not tightens it: a bend is exactly where the rig
+//     would need to turn faster, so this is what pays for a materially
+//     closer baseline without moving the yaw-rate cap.
 //   · DEAD-ZONE framing, not continuous framing (task 13). A fixed NDC box
 //     (this.deadzone) is the region the tracked point must stay inside —
 //     like a helicopter pilot tailing a car: while the subject sits inside
@@ -107,6 +111,88 @@ function trapezoid(t, ramp = 0.16) {
   if (t < ramp) return (t * t) / (2 * ramp) / (1 - ramp)
   if (t > 1 - ramp) { const u = 1 - t; return 1 - (u * u) / (2 * ramp) / (1 - ramp) }
   return (t - ramp / 2) / (1 - ramp)
+}
+
+// ---- content-aware zoom drama (task 20, unit-tested) ------------------------
+
+// From per-sample elevation + subject-wobble arrays (evenly spaced along the
+// SPINE's own arc length — see start()), derive two [0..1] "drama" profiles
+// the standoff multiplier below reads:
+//   · climb — how hard the terrain is pitching (rise/run magnitude, either
+//     direction), smoothed then given a forward MAX-lookahead so a col's
+//     pull-in begins before the col, not at it (real operators anticipate).
+//   · bend — how far the REAL (lightly-smoothed) subject path is currently
+//     wandering sideways off the spine, i.e. `wobble` in start()'s caller.
+//     This, not the spine's own heading, is the thing that actually drives
+//     the dead-zone's x-correction (see _applyPose()): the spine is heavily
+//     smoothed on purpose, so a switchback climb can read as almost straight
+//     on the spine while the subject is still swinging hard side to side
+//     underneath it — measuring the spine's tangent alone would miss
+//     exactly the sections a tighter camera can least afford. bend gets its
+//     OWN short forward lookahead too ("anticipating the spine's bends" —
+//     widen a beat before a technical section, not mid-swing through it).
+// Both are box-blurred first (same shape as smoothPath, just on a scalar
+// array) so a single noisy sample can't spike the multiplier for one frame.
+export function buildDramaProfile(elevs, wobble, sampleSpacingWorld, {
+  gradeNorm = 0.1,
+  bendNorm = 3,
+  lookaheadFrac = 0.03,
+  bendLookaheadFrac = 0.02,
+  smoothPasses = 3,
+  smoothWin = 3,
+} = {}) {
+  const n = elevs ? elevs.length : 0
+  if (n < 3) return { climb: new Array(Math.max(n, 0)).fill(0), bend: new Array(Math.max(n, 0)).fill(0) }
+  const spacing = Math.max(1e-6, sampleSpacingWorld)
+
+  const grade = new Array(n)
+  for (let i = 0; i < n; i++) {
+    const a = Math.max(0, i - 1)
+    const b = Math.min(n - 1, i + 1)
+    grade[i] = Math.abs((elevs[b] - elevs[a]) / (spacing * (b - a || 1)))
+  }
+  const bendRaw = wobble.map((v) => Math.abs(v))
+
+  const boxBlur = (arr) => {
+    let cur = arr.slice()
+    for (let pass = 0; pass < smoothPasses; pass++) {
+      const next = new Array(n)
+      for (let i = 0; i < n; i++) {
+        let sum = 0, cnt = 0
+        for (let j = Math.max(0, i - smoothWin); j <= Math.min(n - 1, i + smoothWin); j++) { sum += cur[j]; cnt++ }
+        next[i] = sum / cnt
+      }
+      cur = next
+    }
+    return cur
+  }
+  const gradeSm = boxBlur(grade)
+  const bendSm = boxBlur(bendRaw)
+
+  const maxAhead = (arr, frac) => {
+    const lookaheadSamples = Math.max(0, Math.round(frac * n))
+    const out = new Array(n)
+    for (let i = 0; i < n; i++) {
+      let m = arr[i]
+      for (let j = i + 1; j <= Math.min(n - 1, i + lookaheadSamples); j++) m = Math.max(m, arr[j])
+      out[i] = m
+    }
+    return out
+  }
+  const climb = maxAhead(gradeSm, lookaheadFrac).map((v) => Math.min(1, v / gradeNorm))
+  const bendOut = maxAhead(bendSm, bendLookaheadFrac).map((v) => Math.min(1, v / bendNorm))
+  return { climb, bend: bendOut }
+}
+
+// Standoff multiplier (applied to this.arm/this.lift) from the drama pair at
+// one sample: push IN on calm+dramatic terrain, push OUT hard on any bend
+// (regardless of terrain — this is the "payment" for a closer baseline, see
+// the this.arm constructor comment), and pull out generally on calm+boring
+// (flat) terrain. `calm` gates BOTH the tightening and the flat-pullout terms
+// so a bend never gets tightened into, only ever widened out of.
+export function dramaStandoffMul(climb, bend, { pushIn = 0.28, flatPullOut = 0.55, bendPullOut = 0.95 } = {}) {
+  const calm = 1 - bend
+  return 1 - pushIn * climb * calm + flatPullOut * (1 - climb) * calm + bendPullOut * bend
 }
 
 // ---- pure camera-rig helpers (unit-tested) ----------------------------------
@@ -195,13 +281,28 @@ export class DroneCam {
     //     arm 12, lift  7 -> 64.0% / 8.3 deg/s   (too close: drifts out constantly)
     //     arm 18, lift 10 -> 83.8% / 7.9
     //     arm 26, lift 14 -> 93.9% / 6.7
-    //     arm 36, lift 18 -> 96.3% / 3.2         <- chosen
+    //     arm 36, lift 18 -> 96.3% / 3.2         <- chosen (task 13)
     //     arm 48, lift 24 -> 94.7% / 0.4         (starts regressing again)
     // Hence the user's own instinct — "la caméra doit être plus loin" — was the
     // fix, not a preference. Retune these two together, and re-measure both
     // numbers: pushing one without the other trades one requirement for the other.
-    this.arm = 36 // fixed traveling distance behind the spine (world units)
-    this.lift = 18 // fixed height above the spine's own (already-smoothed) elevation
+    //
+    // Task 20: "augmente de 50% le zoom de suivi live" reads as "closer", i.e.
+    // the STANDOFF itself, not the FOV — so this.arm/this.lift below are now
+    // 36/1.5=24 and 18/1.5=12, the literal 50%-closer baseline the user asked
+    // for. Taken alone (a flat closer standoff, the arm-18 row above) that
+    // regresses BOTH numbers this table exists to protect: ~84% in-box and
+    // ~7.9deg/s peak yaw, against a narrower new box (see this.deadzone below)
+    // that makes staying in-box strictly harder still. dramaStandoffMul() below
+    // is what pays for it back: it multiplies this baseline UP well past 36
+    // (toward the arm-48 row, i.e. the *safest* end of this table) whenever the
+    // spine is bending, and only lets it run tighter than 24 on stretches the
+    // spine itself is calm AND climbing/descending hard — a real col push-in,
+    // not a blind close-in. See the buildDramaProfile()/dramaStandoffMul()
+    // comment and the task-20 report for the re-measured in-box% / peak-yaw
+    // numbers under this scheme.
+    this.arm = 24 // baseline traveling distance behind the spine (world units) — see task-20 note above
+    this.lift = 12 // baseline height above the spine's own (already-smoothed) elevation
     this.clearance = 2.6 // minimum gap kept over the ground / ridges
     // hard caps on how fast the rig is allowed to turn — THIS (not the spine
     // smoothing alone) is the actual nausea guarantee: even a pathological
@@ -209,18 +310,26 @@ export class DroneCam {
     this.maxYawRateDeg = 9 // deg/s — "ne quasiment pas tourner, ou très lentement"
     this.maxPitchRateDeg = 16 // deg/s — vertical aim may move a bit more freely than yaw
     // where a correction re-centers the tracked point once triggered: NDC y,
-    // 0 = center, -1 = bottom. Mid of the requested -0.30..-0.45 lower-third
-    // band — kept even under dead-zone framing (task 13) since it still
-    // sits comfortably inside the box below and re-centering there (not the
-    // box's own vertical middle) is what makes "look up the mountain when
-    // climbing" fall out of the same solvePitchForNdcY formula.
-    this.targetNdcY = -0.375
-    // Fixed NDC dead-zone box (task 13) — measured by the user off their own
-    // screenshot of the "blue frame", so it's a literal constant, not derived
-    // from any panel geometry. The tracked point (this.curve's subject, the
-    // real lightly-smoothed path — see start()) must stay inside this while
-    // playing; the rig only corrects when it nears/exits it.
-    this.deadzone = { xMin: -0.54, xMax: 0.61, yMin: -0.70, yMax: 0.32 }
+    // 0 = center, -1 = bottom. Recomputed for task 20's new box (below) —
+    // biased toward yMin, same "look up the mountain when climbing" intent
+    // as the old -0.375 had for the old box, just re-anchored: the new box's
+    // own vertical middle is (-0.43+0.74)/2 = +0.155 (this box sits much
+    // higher on screen than the old one), so re-centering to the box's own
+    // middle would already point mostly at sky/summit with no headroom left
+    // to correct further upward on a real climb. -0.15 keeps a comfortable
+    // gap above deadzoneMargin's -0.37 trigger line (no flip-flop risk) while
+    // still sitting in the box's own lower third, not its middle.
+    this.targetNdcY = -0.15
+    // NDC dead-zone box (task 20) — REPLACES the task-13 box above. Measured
+    // by the user off a fresh screenshot of their own "blue frame" (image
+    // 1130x604, box px x 390..735 / y 79..433 -> NDC), so — same as the
+    // box it replaces — this is a literal constant tied to that screenshot,
+    // not derived from any panel geometry, and NOT meant to be "tidied" back
+    // to something symmetric: the user's own box is narrower in x and sits
+    // noticeably higher (taller above center than below) than a centered box
+    // would be. Pixel measurement has ~±0.03 slop; treat these as "tall,
+    // fairly narrow, slightly high-of-centre", not as exact to 3 decimals.
+    this.deadzone = { xMin: -0.31, xMax: 0.30, yMin: -0.43, yMax: 0.74 }
     // Soft inset: a correction engages this far inside the box, before the
     // point actually reaches the true edge. Without it, sitting right at the
     // boundary would flip correction on/off every frame as normal per-frame
@@ -236,33 +345,63 @@ export class DroneCam {
     this.posHalfLife = 0.9 // s — heavy extra smoothing on top of the already-smooth spine
     this.rotHalfLife = 0.5 // s — final orientation smoothing
 
-    // ---- cinematic VARIATION (task 16) — layered ON TOP of the fixed
-    // arm/lift rig above, not a replacement for it. The brief: "parfois elle
-    // se rapproche... parfois elle s'éloigne... elle ne reste jamais
-    // vraiment très loin" (breathing standoff) plus "parfois elle tourne"
-    // (a slow heading drift) — reusing the exact sine-breathing SHAPE
-    // CameraAutomation's own "pushpull"/"pan" moves use (see
-    // camera-automation.js), just far smaller amplitude and much slower, so
-    // the measured anti-nausea contract above (peak yaw / % frames in the
-    // dead-zone box) doesn't regress:
-    //   · breathAmp/breathFreqRad scale arm AND lift TOGETHER (a real dolly
-    //     move, not a height-only change) — +/-22% around the tuned base, so
-    //     the worst case (36*1.22 ≈ 44) still sits inside the "arm 36..48"
-    //     band the tuning table above already measured as safe (94%+/lowering
-    //     yaw). "Jamais très loin" is satisfied by the amplitude bound itself,
-    //     not by clamping later.
-    //   · orbitBiasAmpDeg/orbitBiasFreqRad add a tiny extra heading wobble
-    //     UNDER the exact same slewHeading()/maxYawRateDeg cap as the real
-    //     dead-zone correction (see _applyPose()) — so peak yaw literally
-    //     cannot exceed the cap no matter what this adds; only the box-time
-    //     percentage needs re-measuring, which the task-16 report does.
-    //   · Both run on the SAME slow clock (_breathT), reset to 0 in start()
-    //     so a fresh flight never begins mid-swing.
-    this.breathAmp = 0.22
-    this.breathFreqRad = (2 * Math.PI) / 65 // one full closer/further cycle per ~65s
-    this.orbitBiasAmpDeg = 4
-    this.orbitBiasFreqRad = (2 * Math.PI) / 90 // slower than the breathing, so the two never beat together
+    // ---- cinematic VARIATION — layered ON TOP of the arm/lift rig above,
+    // not a replacement for it.
+    //
+    // NOTE: there used to be a decorative "orbit bias" heading wobble here
+    // ("parfois elle tourne", task 16). It was removed — twice a bug:
+    //   1. It was applied relative to the CURRENT heading every frame
+    //      (_targetDir = heading rotated by bias), so instead of a bounded
+    //      ±amp offset it INTEGRATED — the heading drifted continuously until
+    //      the dead-zone correction yanked it back, a permanent limit cycle.
+    //      Measured: amp 4° and amp 1.5° both produced the same one-sided
+    //      drift (median NDC.x +0.15, every post-settle miss to the right,
+    //      75.5% in-box); amp 0 gave 95.2% and median +0.06. Amplitude only
+    //      set the drift SPEED, not its extent.
+    //   2. Re-reading the brief, the turning was never decorative: "parfois
+    //      elle tourne POUR BIEN GARDER LE POINT dans le suivi" — turning in
+    //      service of framing, which is exactly what the dead-zone correction
+    //      already does. A wobble that fights the framing box is the opposite
+    //      of what was asked.
     this._breathT = 0
+
+    // ---- CONTENT-AWARE ZOOM DRAMA (task 20) — REPLACES task 16's blind
+    // sine "breathing" standoff (a fixed clock, oblivious to the route) with
+    // one driven by the track's own terrain: "elle zoom beaucoup [au] passage
+    // de col... et dézoome [sur les] zones à plat longues". Two signals are
+    // read off the SPINE (never the raw path — same rule as everywhere else
+    // in this file) once in start() and baked into a per-sample lookup table
+    // (buildDramaProfile()) so _applyPose() is a cheap interpolated read, not
+    // per-frame recomputation:
+    //   · climb[s] — the spine's own (already-smoothed) elevation gradient,
+    //     normalized by zoomGradeNorm, MAX-ahead over zoomLookaheadFrac of
+    //     the route so the push-in starts BEFORE the col, the way an
+    //     operator anticipates rather than reacts.
+    //   · bend[s] — how far the REAL subject path wanders sideways off the
+    //     spine (see start()'s `wobble` array — NOT the spine's own heading,
+    //     which is too smoothed to see a switchback coming), normalized by
+    //     zoomBendNorm. This is what pays for the 50%-closer baseline (see
+    //     the this.arm comment above): heavy subject-vs-spine wobble is
+    //     precisely where the dead-zone x-correction fires most, so
+    //     dramaStandoffMul() below treats it as its OWN reason to pull the
+    //     standoff wide — independent of, and overriding, whatever the
+    //     terrain is doing — while only allowing the tight, close-in push on
+    //     stretches that are climbing/descending hard AND calm.
+    // dramaStandoffMul(climb, bend) turns the pair into a standoff
+    // multiplier on this.arm/this.lift; _applyPose() eases the REALIZED
+    // multiplier toward that target over zoomHalfLife seconds (a dolly move,
+    // not a snap-zoom) — combined with the spatial lookahead above, the move
+    // is largely complete by the time the camera reaches the feature.
+    this.zoomGradeNorm = 0.1 // rise/run that reads as "full" climb drama (~10% grade)
+    this.zoomBendNorm = 3 // world units of subject-vs-spine lateral wobble that reads as "full" bend
+    this.zoomLookaheadFrac = 0.03 // anticipate: climb drama starts ~3% of the route early
+    this.zoomBendLookaheadFrac = 0.02 // anticipate: widen ~2% of the route before a wobbly section
+    this.zoomPushIn = 0.28 // max tightening (of this.arm/lift) on calm, dramatic terrain
+    this.zoomFlatPullOut = 0.55 // pull-out on calm, boring (flat) terrain
+    this.zoomBendPullOut = 0.95 // pull-out specifically where the spine bends — the "payment" above
+    this.zoomHalfLife = 2.2 // s — how long the dolly itself takes to reach a new target (slower than posHalfLife: this is a deliberate creative move, not damping noise)
+    this._dramaClimb = null // per-sample lookup tables built in start(), see buildDramaProfile()
+    this._dramaBend = null
     this._standoffMul = 1
 
     this._pos = new THREE.Vector3()
@@ -309,6 +448,44 @@ export class DroneCam {
     this.spine.arcLengthDivisions = 400
     this.spine.updateArcLengths()
 
+    // content-aware zoom-drama profile (task 20) — sampled once per flight
+    // into a lookup table _standoffMulAt() interpolates every frame. Two
+    // signals, both read at the SAME s so they line up sample-for-sample:
+    //   · elevs[i] — the spine's own (already-smoothed) elevation.
+    //   · wobble[i] — how far the REAL subject curve (this.curve, the
+    //     lightly-smoothed path — switchbacks intact) sits sideways off the
+    //     spine at that s, measured in the spine's own local right axis.
+    //     This is deliberately NOT the spine's own heading (see
+    //     buildDramaProfile()'s comment): the spine erases switchbacks by
+    //     design, so its tangent alone reads "calm" through exactly the
+    //     technical sections that most need a wider camera. wobble instead
+    //     measures the thing that actually fires the dead-zone x-correction.
+    // Sample count scales with the spine's own arc length so a long race
+    // gets proportionally finer resolution than a short loop, same idea as
+    // subjSpacing/spineSpacing above.
+    const spineLen = this.spine.getLength()
+    const dramaN = THREE.MathUtils.clamp(Math.round(spineLen / 1.2), 48, 420)
+    const elevs = new Array(dramaN)
+    const wobble = new Array(dramaN)
+    for (let i = 0; i < dramaN; i++) {
+      const s = i / (dramaN - 1)
+      this.spine.getPointAt(s, _spinePt)
+      elevs[i] = _spinePt.y
+      this.spine.getTangentAt(s, _stan)
+      this.curve.getPointAt(s, _subj)
+      const rx = _stan.z, rz = -_stan.x // spine's local right (unit, since getTangentAt is unit)
+      wobble[i] = (_subj.x - _spinePt.x) * rx + (_subj.z - _spinePt.z) * rz
+    }
+    const sampleSpacingWorld = spineLen / Math.max(1, dramaN - 1)
+    const drama = buildDramaProfile(elevs, wobble, sampleSpacingWorld, {
+      gradeNorm: this.zoomGradeNorm,
+      bendNorm: this.zoomBendNorm,
+      lookaheadFrac: this.zoomLookaheadFrac,
+      bendLookaheadFrac: this.zoomBendLookaheadFrac,
+    })
+    this._dramaClimb = drama.climb
+    this._dramaBend = drama.bend
+
     this.duration = duration
     this.t = THREE.MathUtils.clamp(seedAt, 0, 1)
 
@@ -320,9 +497,11 @@ export class DroneCam {
     this._headingDir.normalize()
     this._pitch = 0
     // reset the cinematic-variation clock so a fresh flight always begins at
-    // the base standoff / zero bias, never mid-swing from a previous flight
+    // zero orbit-bias, never mid-swing from a previous flight — but seed the
+    // standoff multiplier from the CONTENT at the seed point itself (not a
+    // neutral 1) so a resume mid-climb doesn't visibly pop as it eases in
     this._breathT = 0
-    this._standoffMul = 1
+    this._standoffMul = this._standoffMulAt(this.t)
 
     // seat the camera at the initial pose immediately — no slew-in lurch
     this._solvePosition(this.t, this._pos)
@@ -336,11 +515,12 @@ export class DroneCam {
     this.active = false
   }
 
-  // camera position at path fraction s: arm/lift (breathing — see
-  // this._standoffMul, set each frame in _applyPose from the slow sine
-  // clock) behind + above the SPINE (never the raw path) along the CURRENT
-  // (already rate-limited) heading. Ground/ridge clearance still reads the
-  // real terrain underneath so the rig never clips into relief.
+  // camera position at path fraction s: arm/lift (content-aware — see
+  // this._standoffMul, eased each frame in _applyPose toward
+  // _standoffMulAt(s)'s terrain-driven target) behind + above the SPINE
+  // (never the raw path) along the CURRENT (already rate-limited) heading.
+  // Ground/ridge clearance still reads the real terrain underneath so the
+  // rig never clips into relief.
   _solvePosition(s, outPos) {
     this.spine.getPointAt(s, _spinePt)
     const arm = this.arm * this._standoffMul
@@ -364,6 +544,22 @@ export class DroneCam {
     }
   }
 
+  // interpolated read of the baked drama profile at path fraction s — see
+  // the "CONTENT-AWARE ZOOM DRAMA" constructor comment and
+  // buildDramaProfile()/dramaStandoffMul() above.
+  _standoffMulAt(s) {
+    const climb = this._dramaClimb, bend = this._dramaBend
+    if (!climb || !climb.length) return 1
+    const n = climb.length
+    const f = THREE.MathUtils.clamp(s, 0, 1) * (n - 1)
+    const i0 = Math.floor(f)
+    const i1 = Math.min(n - 1, i0 + 1)
+    const frac = f - i0
+    const c = THREE.MathUtils.lerp(climb[i0], climb[i1], frac)
+    const b = THREE.MathUtils.lerp(bend[i0], bend[i1], frac)
+    return dramaStandoffMul(c, b, { pushIn: this.zoomPushIn, flatPullOut: this.zoomFlatPullOut, bendPullOut: this.zoomBendPullOut })
+  }
+
   update(dt) {
     if (!this.active || !this.curve) return
     this.t = Math.min(1, this.t + dt / (this.duration || 30))
@@ -385,11 +581,19 @@ export class DroneCam {
   // shared by update()/updateAt(): dead-zone yaw (task 13 — see the class
   // comment), damp the position onto the spine, then dead-zone pitch.
   _applyPose(dt, s, arrived) {
-    // advance the slow cinematic-variation clock and derive this frame's
-    // standoff breathing multiplier (arm/lift, read by _solvePosition below)
-    // — see the constructor comment above breathAmp/breathFreqRad.
+    // advance the slow cinematic-variation clock and ease this frame's
+    // standoff multiplier (arm/lift, read by
+    // _solvePosition below) toward the content-aware target from
+    // _standoffMulAt(s) — see the "CONTENT-AWARE ZOOM DRAMA" constructor
+    // comment. Eased, not snapped: zoomHalfLife is the dolly's own pace,
+    // layered on top of the spatial lookahead baked into the profile itself.
     this._breathT += Math.max(dt, 0)
-    this._standoffMul = 1 + this.breathAmp * Math.sin(this._breathT * this.breathFreqRad)
+    const targetStandoffMul = this._standoffMulAt(s)
+    if (dt <= 0) this._standoffMul = targetStandoffMul
+    else {
+      const zf = 1 - Math.pow(2, -dt / this.zoomHalfLife)
+      this._standoffMul += (targetStandoffMul - this._standoffMul) * zf
+    }
 
     // 1) yaw: ONLY correct when the subject is nearing/outside the box's
     // horizontal range — otherwise hold the current heading exactly (the
@@ -432,21 +636,11 @@ export class DroneCam {
       _targetDir.x += _right.x * Math.sin(yaw)
       _targetDir.z += _right.z * Math.sin(yaw)
       _targetDir.normalize()
-    } else {
-      // "parfois elle tourne pour bien garder le point" (task 16 §4) — a
-      // tiny, very slow extra heading wobble reusing the same rotate-by-angle
-      // shape as CameraAutomation's "pan" move (see camera-automation.js),
-      // layered UNDER the dead-zone: it only flavours the otherwise-static
-      // HOLD case above, never fights an urgent xOut correction. Its own
-      // angular rate (amplitude x frequency) is a couple tenths of a deg/s —
-      // far under maxYawRateDeg — so it drifts smoothly rather than ever
-      // hitting the same rate cap a real correction would.
-      const bias = THREE.MathUtils.degToRad(this.orbitBiasAmpDeg) * Math.sin(this._breathT * this.orbitBiasFreqRad)
-      _targetDir.copy(this._headingDir).multiplyScalar(Math.cos(bias))
-      _targetDir.x += _right.x * Math.sin(bias)
-      _targetDir.z += _right.z * Math.sin(bias)
-      _targetDir.normalize()
     }
+    // HOLD case (point inside the box): _targetDir stays the current heading —
+    // the rig just keeps travelling. No decorative wobble here: see the
+    // removed-orbit-bias note in the constructor for why (it integrated into
+    // unbounded drift and fought the framing box).
     // still the SAME hard cap as ever — a correction engaging never means a
     // snap, it's eased in through this exact rate limiter like everything else.
     const maxYawStep = THREE.MathUtils.degToRad(this.maxYawRateDeg) * Math.max(dt, 0)
@@ -456,8 +650,8 @@ export class DroneCam {
       this._headingDir.set(slewed.x, 0, slewed.z)
     }
 
-    // 2) position: fixed arm/lift behind the spine along that (possibly
-    // just-turned) heading, then a long critical-damping pass on top.
+    // 2) position: content-aware arm/lift behind the spine along that
+    // (possibly just-turned) heading, then a long critical-damping pass on top.
     this._solvePosition(s, _desiredPos)
     const fp = dt <= 0 ? 1 : 1 - Math.pow(2, -dt / this.posHalfLife)
     this._pos.lerp(_desiredPos, fp)

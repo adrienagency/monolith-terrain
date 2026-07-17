@@ -216,7 +216,7 @@ test('DroneCam dead-zone: peak yaw stays capped and the tracked point mostly sta
   assert.ok(pctInBox >= 85, `only ${pctInBox.toFixed(1)}% of frames kept the tracked point inside the dead-zone box`)
 })
 
-// ---- task 16 §4: cinematic standoff-breathing + orbit-bias variation -----
+// ---- task 16 §4: cinematic standoff-breathing variation (orbit-bias removed — it integrated into drift) -----
 // Layered ON TOP of the same rig above — these tests prove the addition (a)
 // actually varies the standoff and (b) doesn't blow the exact same measured
 // contract the test above guards (peak yaw capped, % frames in box), using
@@ -242,14 +242,23 @@ test('DroneCam standoff breathes (closer/further) but never strays far from the 
     minStandoff = Math.min(minStandoff, standoff)
     maxStandoff = Math.max(maxStandoff, standoff)
   }
-  assert.ok(maxStandoff - minStandoff > 1, `expected real breathing variation, got range ${minStandoff.toFixed(2)}..${maxStandoff.toFixed(2)}`)
-  // "jamais très loin": the whole excursion stays inside the tuning table's
-  // own measured-safe arm band (see the big comment above `this.arm`)
-  assert.ok(minStandoff >= drone.arm * 0.7, `standoff dipped too close: ${minStandoff.toFixed(2)}`)
-  assert.ok(maxStandoff <= drone.arm * 1.35, `standoff strayed too far: ${maxStandoff.toFixed(2)}`)
+  // "varier beaucoup plus le zoom" — the drama system must produce a genuinely
+  // wide excursion, not a timid wobble (dramaStandoffMul spans ~0.72..1.95 by
+  // design: push in on a col, pull out on flats and bends).
+  assert.ok(maxStandoff - minStandoff > 4, `expected real zoom drama, got range ${minStandoff.toFixed(2)}..${maxStandoff.toFixed(2)}`)
+  // "jamais vraiment très loin" — bounded in ABSOLUTE world units, not relative
+  // to `arm`. A relative bound silently tightens whenever the baseline changes:
+  // this assertion originally allowed arm*1.35 with arm=36 (=48.6 absolute), and
+  // task-20's 50%-closer baseline (arm 24) turned the same expression into 32.4
+  // absolute — stricter than anyone intended, purely by accident. The absolute
+  // fences come from the measured arm sweep recorded above `this.arm`: 36 was
+  // the proven constant and 48 still held 94.7% in-box, so 50 is the far fence;
+  // 14 keeps the tightest col push-in (24 * 0.72 ≈ 17) clear of nausea range.
+  assert.ok(minStandoff >= 14, `standoff dipped too close: ${minStandoff.toFixed(2)}`)
+  assert.ok(maxStandoff <= 50, `standoff strayed too far: ${maxStandoff.toFixed(2)}`)
 })
 
-test('DroneCam breathing/orbit-bias variation does not regress the dead-zone contract', () => {
+test('DroneCam breathing variation does not regress the dead-zone contract', () => {
   const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 400)
   const controls = { target: new THREE.Vector3() }
   const drone = new DroneCam({ camera, controls, sampleGround: () => 0 })

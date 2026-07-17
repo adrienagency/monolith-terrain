@@ -7,8 +7,8 @@ import { fetchOverpassLines, fetchOverpassAreas } from './overpass.js'
 import { makeInsideBlock, clipPolylineToBlock, blockOutline, triangulateAndClip } from './block-clip.js'
 import { OSM_MIN_ZOOM } from './roads-layer.js'
 import { riverWidthPx } from './river-width.js'
-import { WATER_REGION, inRegion, lodForZoom, tileZoomForLod } from './tile-index.js'
-import { loadWaterTiles, loadWaterTileManifest, hasTilesForLod } from './tile-loader.js'
+import { WATER_REGION, LAKE_LOD_LEVELS, inRegion, lodForZoom, tileZoomForLod } from './tile-index.js'
+import { loadWaterTiles, loadWaterTileManifest, loadLakeTiles, loadLakeTileManifest, hasTilesForLod } from './tile-loader.js'
 
 // Lakes render above every other DRAPED MAP LAYER (roads, rivers, contours,
 // the general water fill), in a distinctly more saturated blue than the
@@ -239,7 +239,40 @@ export class WaterLayer {
         tileOk = true
       }
     }
+    // World lake layer (task 19): OUTSIDE the rich-water Alps region (or, on
+    // the rare edge where inRegion is true but that LOD's Alps tiles are
+    // missing), fall back to the WORLD lake-only tile set instead of jumping
+    // straight to Natural Earth. This is what actually fixes the coverage
+    // gap NE has everywhere outside the Alps box (1345 lakes worldwide, 3 in
+    // all of France) — composition is: in-region = rich water (river/canal/
+    // pond/reservoir/water) + lakes from the Alps tiles; out-of-region =
+    // lakes ONLY (no river/canal/etc — the world tile set never carries
+    // those subtypes) + Natural Earth for coastline (unchanged, below). No
+    // region gate here on purpose: LAKE_LOD_LEVELS tiles are written GLOBALLY,
+    // so every patch on Earth is eligible, not just ones near the built area.
+    let worldLakeOk = false
     if (!tileOk) {
+      const lakeManifest = await loadLakeTileManifest()
+      const lakeLod = lodForZoom(zoom, LAKE_LOD_LEVELS)
+      if (hasTilesForLod(lakeManifest, lakeLod)) {
+        const lakeFC = await loadLakeTiles(bounds, tileZoomForLod(lakeLod, LAKE_LOD_LEVELS))
+        if (id !== this._buildId || dem !== terrain.dem) return
+        const lakeFeats = clipToPatch(lakeFC.features, bounds)
+        const worldLakeLines = []
+        const worldLakeParts = []
+        for (const f of lakeFeats) {
+          worldLakeLines.push(...flatRingsOf(f.geometry))
+          worldLakeParts.push(...polygonPartsOf(f.geometry))
+        }
+        lakeLines = worldLakeLines
+        lakeParts = worldLakeParts
+        worldLakeOk = true
+      }
+    }
+    // Last-resort fallback: neither the Alps tile set nor the world lake
+    // tile set had anything for this LOD/patch (e.g. world lake tiles not
+    // yet built) — degrade to Natural Earth exactly as before this task.
+    if (!tileOk && !worldLakeOk) {
       lakeLines = await this._neRings('lakes', bounds, zoom)
       lakeParts = await this._neParts('lakes', bounds, zoom)
     }
@@ -247,10 +280,11 @@ export class WaterLayer {
     const coastRings = await this._neRings('coastline', bounds, zoom)
     if (id !== this._buildId || dem !== terrain.dem) return
     // Overture's base/water theme is derived from OSM (ODbL) same as the
-    // Overpass paths, so rendering tile-sourced water requires the same
+    // Overpass paths, so rendering tile-sourced water — Alps rich-water tiles
+    // OR world lake-only tiles, same theme/license — requires the same
     // "© OpenStreetMap contributors" credit — refreshOsmCredit() in main.js
     // reads this flag.
-    this.usingOsm = osmOk || tileOk
+    this.usingOsm = osmOk || tileOk || worldLakeOk
 
     const fp = terrain.blockFootprint(); const insideBlock = makeInsideBlock(fp)
     // Computed once per rebuild (depends only on fp) and shared by every

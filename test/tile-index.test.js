@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { WATER_REGION, REGION, LOD_LEVELS, ROAD_LOD_LEVELS, lodForZoom, tileZoomForLod, tilesForBBox, inRegion } from '../src/map/tile-index.js'
+import { WATER_REGION, REGION, LOD_LEVELS, ROAD_LOD_LEVELS, LAKE_LOD_LEVELS, lodForZoom, tileZoomForLod, tilesForBBox, inRegion } from '../src/map/tile-index.js'
 
 test('lodForZoom: far/mid/close bands match the demZoomMax boundaries', () => {
   assert.equal(lodForZoom(1), 0)
@@ -109,4 +109,43 @@ test('ROAD_LOD_LEVELS and LOD_LEVELS share the same demZoom band SCHEME (far<=8,
   for (let i = 0; i < LOD_LEVELS.length; i++) {
     assert.ok(ROAD_LOD_LEVELS[i].tileZoom >= LOD_LEVELS[i].tileZoom, `LOD${i}: road tileZoom should be >= water's`)
   }
+})
+
+// --- world lake layer (task 19) ---
+
+test('LAKE_LOD_LEVELS shares the same demZoom band SCHEME as water/roads — one answer to "how zoomed in am I"', () => {
+  assert.deepEqual(LAKE_LOD_LEVELS.map((l) => l.demZoomMax), LOD_LEVELS.map((l) => l.demZoomMax))
+})
+
+test('lodForZoom/tileZoomForLod honor an explicit LAKE_LOD_LEVELS table', () => {
+  assert.equal(lodForZoom(8, LAKE_LOD_LEVELS), 0)
+  assert.equal(lodForZoom(9, LAKE_LOD_LEVELS), 1) // just past LOD0's boundary
+  assert.equal(lodForZoom(11, LAKE_LOD_LEVELS), 1) // boundary — still LOD1
+  assert.equal(lodForZoom(12, LAKE_LOD_LEVELS), 2) // just past — LOD2
+  assert.equal(tileZoomForLod(0, LAKE_LOD_LEVELS), 5)
+  assert.equal(tileZoomForLod(1, LAKE_LOD_LEVELS), 7)
+  assert.equal(tileZoomForLod(2, LAKE_LOD_LEVELS), 9)
+})
+
+test('lake tiles are COARSER than water tiles at every LOD — lakes are a far sparser layer, and this one covers the whole planet', () => {
+  // The property worth pinning, beyond the literals: `lake` measured 2.4% of
+  // the raw region water vertices / 23.5% of the shipped Alps water bytes, so
+  // a lake tile can cover much more ground than a water tile (which carries
+  // rivers) and still stay under the ~2 MB/tile ceiling. This layer is also
+  // GLOBAL, so total tile COUNT is a real constraint — coarser tiles are how
+  // that stays tractable, not an accident.
+  for (let i = 0; i < LAKE_LOD_LEVELS.length; i++) {
+    assert.ok(
+      LAKE_LOD_LEVELS[i].tileZoom < LOD_LEVELS[i].tileZoom,
+      `LOD${i}: world-lake tileZoom (${LAKE_LOD_LEVELS[i].tileZoom}) should be coarser than water's (${LOD_LEVELS[i].tileZoom})`
+    )
+  }
+})
+
+test('tilesForBBox at the world-lake LOD0 zoom covers a whole-planet bbox without exploding', () => {
+  // A z5 world grid is 32x32 = 1024 tiles max — the ceiling on how many tiles
+  // a fully-zoomed-out view could ever ask for at the coarsest lake LOD.
+  const tiles = tilesForBBox({ minLon: -180, maxLon: 180, minLat: -85, maxLat: 85 }, tileZoomForLod(0, LAKE_LOD_LEVELS))
+  assert.ok(tiles.length <= 1024, `expected <=1024 tiles at z5, got ${tiles.length}`)
+  for (const t of tiles) assert.ok(Number.isInteger(t.x) && Number.isInteger(t.y))
 })

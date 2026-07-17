@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { loadWaterTiles, loadWaterTileManifest, loadRoadTiles, loadRoadTileManifest, hasTilesForLod, _clearCache } from '../src/map/tile-loader.js'
+import { loadWaterTiles, loadWaterTileManifest, loadRoadTiles, loadRoadTileManifest, loadLakeTiles, loadLakeTileManifest, hasTilesForLod, _clearCache } from '../src/map/tile-loader.js'
 
 const fc = (features) => ({ type: 'FeatureCollection', features })
 const feat = (id, coords = [[6, 45], [6.1, 45], [6.1, 45.1], [6, 45.1], [6, 45]]) => ({
@@ -123,6 +123,58 @@ test('loadRoadTileManifest: fetches from road-tiles/index.json, caches, never th
   _clearCache()
   global.fetch = () => Promise.reject(new Error('down'))
   await assert.doesNotReject(loadRoadTileManifest())
+})
+
+// --- world lake tiles (task 19): same loadTiles/loadManifest contract as
+// water/roads, own cache under public/data/lake-tiles/. Unlike water/road
+// tiles this kind has no region gate in the client (WaterLayer decides when
+// to reach for it, tile-loader.js itself is region-agnostic for every kind).
+
+test('loadLakeTiles: fetches from lake-tiles/, not water-tiles/ or road-tiles/, and merges features', () => {
+  _clearCache()
+  const calls = fakeFetch({
+    '2/2/1': fc([feat('l1')]),
+    '2/3/1': fc([feat('l2')]),
+  })
+  return loadLakeTiles({ minLon: 80, maxLon: 100, minLat: 10, maxLat: 20 }, 2).then((result) => {
+    const ids = result.features.map((f) => f.properties.id).sort()
+    assert.deepEqual(ids, ['l1', 'l2'])
+    assert.ok(calls.every((u) => /lake-tiles\//.test(u)), `expected only lake-tiles/ URLs, got ${JSON.stringify(calls)}`)
+  })
+})
+
+test('loadLakeTiles keeps a separate cache from water/road tiles — same z/x/y key does not collide', async () => {
+  _clearCache()
+  const lakeFeat = feat('only-in-lakes')
+  const waterFeat = feat('only-in-water')
+  global.fetch = (url) => {
+    if (url.includes('lake-tiles')) return Promise.resolve({ ok: true, json: () => Promise.resolve(fc([lakeFeat])) })
+    if (url.includes('water-tiles')) return Promise.resolve({ ok: true, json: () => Promise.resolve(fc([waterFeat])) })
+    return Promise.resolve({ ok: false })
+  }
+  const bbox = { minLon: 0, maxLon: 1, minLat: 0, maxLat: 1 }
+  const lakeResult = await loadLakeTiles(bbox, 5)
+  const waterResult = await loadWaterTiles(bbox, 5)
+  assert.deepEqual(lakeResult.features.map((f) => f.properties.id), ['only-in-lakes'])
+  assert.deepEqual(waterResult.features.map((f) => f.properties.id), ['only-in-water'])
+})
+
+test('loadLakeTiles: a missing tile (404) contributes nothing, not an error — most of the planet is not lake', async () => {
+  _clearCache()
+  fakeFetch({ '2/2/1': fc([feat('a')]) }) // '2/3/1' absent -> ok:false
+  const result = await loadLakeTiles({ minLon: 80, maxLon: 100, minLat: 10, maxLat: 20 }, 2)
+  assert.deepEqual(result.features.map((f) => f.properties.id), ['a'])
+})
+
+test('loadLakeTileManifest: fetches from lake-tiles/index.json, caches, never throws on failure', async () => {
+  _clearCache()
+  const calls = []
+  global.fetch = (url) => { calls.push(url); return Promise.resolve({ ok: false }) }
+  assert.equal(await loadLakeTileManifest(), null)
+  assert.ok(calls[0].includes('lake-tiles/index.json'), calls[0])
+  _clearCache()
+  global.fetch = () => Promise.reject(new Error('down'))
+  await assert.doesNotReject(loadLakeTileManifest())
 })
 
 test('hasTilesForLod: true only when the manifest lists a nonzero tile count for that LOD', () => {
