@@ -469,6 +469,133 @@ body.dark {
   border-radius: 3px;
 }
 
+/* GPX layer stack (Route panel "Layers" section, task 22 §1/2/3) — a
+   Figma-style row list: drag handle, icon, name, visibility, remove. */
+.ce-gpx-layers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.ce-gpx-layers-empty {
+  font-size: 11px;
+  color: var(--ce-muted);
+  line-height: 1.4;
+  padding: 6px 2px;
+}
+.ce-gpx-layers-empty.hidden {
+  display: none;
+}
+.ce-gpx-layer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  border: 1px solid var(--ce-hairline);
+  border-radius: 8px;
+  background: var(--ce-hover);
+  transition: border-color 0.15s, opacity 0.15s;
+}
+.ce-gpx-layer.active {
+  border-color: var(--ce-accent);
+}
+.ce-gpx-layer.dragging {
+  opacity: 0.4;
+}
+.ce-gpx-drag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--ce-muted);
+  cursor: grab;
+}
+.ce-gpx-drag svg {
+  width: 14px;
+  height: 14px;
+}
+.ce-gpx-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border: 1px solid var(--ce-hairline);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ce-ink);
+  cursor: pointer;
+}
+.ce-gpx-icon-btn:hover {
+  border-color: var(--ce-accent);
+}
+.ce-gpx-icon-btn svg {
+  width: 14px;
+  height: 14px;
+}
+.ce-gpx-lname {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+}
+.ce-gpx-eye,
+.ce-gpx-remove {
+  width: 24px;
+  height: 24px;
+}
+.ce-gpx-remove:hover {
+  color: #c0392b;
+}
+.ce-gpx-cap {
+  font-family: var(--ce-mono);
+  font-size: 10.5px;
+  color: var(--ce-muted);
+  align-self: center;
+  white-space: nowrap;
+}
+.ce-gpx-iconpicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px;
+  margin: -2px 0 2px;
+  border: 1px solid var(--ce-hairline);
+  border-radius: 8px;
+  background: var(--ce-track);
+}
+.ce-gpx-iconopt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ce-ink);
+  cursor: pointer;
+}
+.ce-gpx-iconopt:hover {
+  background: var(--ce-hover);
+}
+.ce-gpx-iconopt.on {
+  border-color: var(--ce-accent);
+  color: var(--ce-accent);
+}
+.ce-gpx-iconopt svg {
+  width: 15px;
+  height: 15px;
+}
+.ce-gpx-iconupload {
+  border-left: 1px solid var(--ce-hairline);
+  border-radius: 6px 6px 6px 6px;
+  margin-left: 2px;
+  padding-left: 2px;
+}
+
 /* slider */
 .ce-slider {
   -webkit-appearance: none;

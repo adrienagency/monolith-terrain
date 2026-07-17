@@ -112,6 +112,18 @@ export function isValidIconDataUrl(dataUrl) {
 
 // ---------------------------------------------------------------- rasterizers (DOM)
 
+// data:image/svg+xml decodes as a STANDALONE XML document — unlike
+// innerHTML (how every SPORTS icon and panel ICON constant in this app
+// normally gets drawn, which HTML5-parses a bare <svg> with no namespace
+// just fine), Image.src on an <svg> missing xmlns fails to decode entirely
+// (a silent onerror, no detail). None of this file's own SPORTS markup (nor
+// a typical hand-authored icon someone uploads) bothers with xmlns since
+// HTML parsing never needed it — inject it here, once, at the one call site
+// that actually requires it, rather than demand every SVG source carry it.
+function withXmlns(svg) {
+  return /\sxmlns\s*=/.test(svg) ? svg : svg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"')
+}
+
 // Draws sanitized SVG markup (or a plain raster data URL) onto a small square
 // canvas and hands back an ImageBitmap-ish <canvas> element a caller turns
 // into a THREE.CanvasTexture — kept out of the pure section above so
@@ -122,7 +134,7 @@ export function rasterizeToCanvas(svgOrDataUrl, { size = 128, color = '#3a4147' 
     const src = isDataUrl
       ? svgOrDataUrl
       : 'data:image/svg+xml;base64,' +
-        btoa(unescape(encodeURIComponent(svgOrDataUrl.replace(/currentColor/g, color))))
+        btoa(unescape(encodeURIComponent(withXmlns(svgOrDataUrl.replace(/currentColor/g, color)))))
     const img = new Image()
     img.crossOrigin = 'anonymous'
     img.onload = () => {

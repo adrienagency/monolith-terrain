@@ -23,7 +23,9 @@ import { loadDem } from './dem.js'
 import { Globe } from './globe.js'
 import { Modes, stepZoom } from './modes.js'
 import { createGoto } from './goto.js'
-import { GpxLayer, parseGpx } from './gpx.js'
+import { frameTrack } from './gpx.js'
+import { GpxLayerManager } from './gpx-layers.js'
+import { SPORTS, DEFAULT_SPORT, sanitizeSvgMarkup, isValidIconDataUrl, rasterizeToCanvas } from './ui/sport-icons.js'
 import { worldToLatLon } from './geo.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
@@ -1102,7 +1104,7 @@ function regenerateTerrain() {
       refreshOsmCredit(); _mlp.then(() => refreshOsmCredit())
       regenerateLabels()
       regenerateHud()
-      gpxLayer.rebuild() // re-drape the track on the new relief
+      gpxLayer.rebuildAll() // re-drape every loaded track on the new relief
       if (clouds) clouds.build(params) // deck re-floats above the new relief
       if (peaksLayer.enabled) peaksLayer.refresh()
       if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
@@ -1391,7 +1393,7 @@ function setDarkMode(v) {
   // flipped --hud-ink — all would otherwise keep dark strokes on dark paper
   regenerateLabels()
   regenerateHud()
-  gpxLayer.setHover(-1)
+  gpxLayer.setHoverClear()
   groundInfo.rerender() // the cartouche re-inks to match the sheet
 }
 
@@ -1499,7 +1501,7 @@ function applyUserTemplate(tmpl) {
   bgRefreshFn() // resync the Background HDRI-sky highlight to the applied look
   refreshAll()
   rebuildMapLayers() // re-derive roads/water/places for the current location under the restored look
-  gpxLayer.rebuild() // re-drape with the restored line width/colour/casing
+  gpxLayer.rebuildAll() // re-drape every loaded track with the restored line width/colour/casing
   // A history.record() taken right here re-captures EXACTLY what was just
   // applied (captureLook(params) after the assignment above), so it dedups
   // cleanly against the snapshot undo()/redo() just pushed through this same
@@ -1648,21 +1650,43 @@ function resetAll() {
   history?.record() // committed look change — one undo step
 }
 
-// ------------------------------------------------------------------ GPX layer
+// ------------------------------------------------------------------ GPX layer(s)
+// task 22: gpxLayer is now a GpxLayerManager — a stack of up to MAX_LAYERS
+// GpxLayer instances (gpx-layers.js). It exposes the same track/headT/
+// play()/pause()/setColor()-etc. surface a single GpxLayer always did (see
+// its own file header for why: a drop-in replacement, zero-touch for every
+// call site below that predates multi-layer support), plus addLayer/
+// removeLayer/reorder/focus for the Route panel's layer list.
 
-const gpxLayer = new GpxLayer({ scene, camera, terrain, params, getDem: () => dem })
+const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: () => dem })
+
+// every layer gets its own bottom-centre profile strip (only the focused
+// one is ever visible at once — see GpxLayerManager._syncProfileVisibility)
+// — wire each newly-added one draggable exactly once.
+const _draggedProfiles = new WeakSet()
+gpxLayer.onChange = (layers) => {
+  for (const l of layers) {
+    if (_draggedProfiles.has(l.gpx.profileEl)) continue
+    _draggedProfiles.add(l.gpx.profileEl)
+    makeDraggable(l.gpx.profileEl, l.gpx.profileEl.querySelector('.gpx-profile-head'))
+  }
+}
 
 async function loadGpxText(text) {
   try {
-    const { points, name } = parseGpx(text)
-    gpxLayer.setTrack(points, name)
-    const f = gpxLayer.frame(points)
+    const entry = gpxLayer.addLayer(text)
+    if (!entry) {
+      modes.announce('LAYER LIMIT — 10 GPX TRACKS MAX')
+      return
+    }
+    const track = entry.gpx.track
+    const f = frameTrack(track.points)
     params.demLat = f.lat
     params.demLon = f.lon
     params.demZoom = f.zoom
     params.demLocation = 'Custom'
     refreshAll()
-    modes.announce(`TRACK LOADED — ${name.toUpperCase().slice(0, 24)}`)
+    modes.announce(`TRACK LOADED — ${track.name.toUpperCase().slice(0, 24)}`)
     // the post-rebuild hook drapes the line once the new terrain exists;
     // pin the framed zoom or the dive would land on the fine (≥12) scale
     // and clip long tracks framed at z10/z11
@@ -1673,9 +1697,9 @@ async function loadGpxText(text) {
   }
 }
 
-// the altimeter chip and the GPX profile strip stay repositionable
+// the altimeter chip stays repositionable (GPX profile strips are wired
+// draggable per-layer as they're added — see gpxLayer.onChange above)
 makeDraggable(modes.altEl)
-makeDraggable(gpxLayer.profileEl, gpxLayer.profileEl.querySelector('.gpx-profile-head'))
 
 // drag & drop a .gpx anywhere on the page
 window.addEventListener('dragover', (e) => e.preventDefault())
@@ -1695,6 +1719,68 @@ gpxFileInput.addEventListener('change', () => {
   if (f) f.text().then(loadGpxText)
   gpxFileInput.value = ''
 })
+
+// ---- GPX sport-icon head billboard (task 22 §3/4) --------------------------
+// One CanvasTexture per built-in sport, rasterized once from sport-icons.js's
+// inline SVG table (rasterizeToCanvas is async — an Image decode — so build
+// the whole small set up front rather than resolving per-frame/per-layer).
+// GpxLayerManager.setDefaultIconResolver expects a SYNCHRONOUS (sportKey) =>
+// texture lookup, hence the cache instead of resolving on demand.
+const _sportIconTex = new Map()
+Promise.all(
+  SPORTS.map((s) =>
+    rasterizeToCanvas(s.svg, { size: 128, color: '#232019' }).then((canvas) => {
+      const tex = new THREE.CanvasTexture(canvas)
+      tex.colorSpace = THREE.SRGBColorSpace
+      _sportIconTex.set(s.key, tex)
+    })
+  )
+).then(() => gpxLayer.setDefaultIconResolver((sportKey) => _sportIconTex.get(sportKey) || _sportIconTex.get(DEFAULT_SPORT)))
+
+// custom per-layer icon upload (task 22 §3) — one hidden file input shared
+// by every layer row's "Upload…" button (see route-panel.js); the row that
+// triggered it is remembered in a closure var since the <input> itself only
+// knows "a file changed", not which layer asked.
+let _iconUploadTargetId = null
+const iconFileInput = document.createElement('input')
+iconFileInput.type = 'file'
+iconFileInput.accept = 'image/*,.svg'
+iconFileInput.style.display = 'none'
+document.body.appendChild(iconFileInput)
+iconFileInput.addEventListener('change', async () => {
+  const f = iconFileInput.files?.[0]
+  const targetId = _iconUploadTargetId
+  iconFileInput.value = ''
+  _iconUploadTargetId = null
+  if (!f || !targetId) return
+  try {
+    const isSvg = /\.svg$/i.test(f.name) || f.type === 'image/svg+xml'
+    let canvas
+    if (isSvg) {
+      const clean = sanitizeSvgMarkup(await f.text())
+      if (!clean) { modes.announce('ICON REJECTED — INVALID SVG'); return }
+      canvas = await rasterizeToCanvas(clean, { size: 128, color: '#232019' })
+    } else {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const r = new FileReader()
+        r.onload = () => resolve(r.result)
+        r.onerror = () => reject(new Error('read failed'))
+        r.readAsDataURL(f)
+      })
+      if (!isValidIconDataUrl(dataUrl)) { modes.announce('ICON REJECTED — TOO LARGE OR UNSUPPORTED TYPE'); return }
+      canvas = await rasterizeToCanvas(dataUrl, { size: 128 })
+    }
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.colorSpace = THREE.SRGBColorSpace
+    gpxLayer.setCustomIcon(targetId, tex)
+  } catch (err) {
+    modes.announce(`ICON ERROR — ${String(err.message).toUpperCase()}`)
+  }
+})
+function requestIconUpload(layerId) {
+  _iconUploadTargetId = layerId
+  iconFileInput.click()
+}
 
 // hand the flight to the existing tour controller
 // cinematic drone follow-cam for the GPX track (terrain-aware chase camera)
@@ -1733,6 +1819,18 @@ function engageGpxFollow() {
 }
 function disengageGpxFollow() {
   if (drone.active) drone.stop()
+}
+// Sequenced-playback handover (task 22 §5) — GpxLayerManager.tick() auto-
+// advances focus + play() to the next layer on its own, so this is the ONLY
+// call site for a mid-sequence leg change (fresh plays still go through
+// engageGpxFollow() above, from the Play button). If follow is engaged,
+// retarget() (not start()) keeps the SAME flight running onto the new
+// track's world spine — the whole point being that a leg change reads as
+// one continuous shot, never a cut (see drone-cam.js's own retarget() note).
+gpxLayer.onTrackTransition = (fromLayer, toLayer, idx) => {
+  if (!params.gpxFollow || !drone.active) return
+  const w = toLayer?.gpx?.track?.world
+  if (w && w.length >= 2) drone.retarget(w)
 }
 
 // ---- Space/Esc playback (keyboard shortcuts) -----------------------------
@@ -2352,6 +2450,7 @@ const routePanel = buildRoutePanel({
   loadGpx: () => gpxFileInput.click(),
   startFollow: engageGpxFollow,
   stopFollow: disengageGpxFollow,
+  uploadIcon: requestIconUpload,
 })
 
 // the exclusive per-column accordion now lives in the Panel shell (setCollapsed
