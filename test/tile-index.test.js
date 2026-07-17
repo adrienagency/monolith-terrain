@@ -113,18 +113,24 @@ test('ROAD_LOD_LEVELS and LOD_LEVELS share the same demZoom band SCHEME (far<=8,
 
 // --- world lake layer (task 19) ---
 
-test('LAKE_LOD_LEVELS shares the same demZoom band SCHEME as water/roads — one answer to "how zoomed in am I"', () => {
-  assert.deepEqual(LAKE_LOD_LEVELS.map((l) => l.demZoomMax), LOD_LEVELS.map((l) => l.demZoomMax))
+test('LAKE_LOD_LEVELS: two LODs — the close band deliberately reuses the mid tiles', () => {
+  // There used to be a third LOD (z9, >= 0.5 km2). It measured 1.74 GB of the
+  // layer's 1.91 GB total (91%) even after sub-pixel simplification — the same
+  // standard that deferred the 887 MB road tiles says that does not ship. The
+  // close band (demZoom >= 12) therefore serves the z7 tiles too; sub-5 km2
+  // lakes outside the Alps rich-water region are the recorded v1 loss.
+  assert.equal(LAKE_LOD_LEVELS.length, 2)
+  assert.equal(LAKE_LOD_LEVELS[LAKE_LOD_LEVELS.length - 1].demZoomMax, Infinity)
 })
 
 test('lodForZoom/tileZoomForLod honor an explicit LAKE_LOD_LEVELS table', () => {
   assert.equal(lodForZoom(8, LAKE_LOD_LEVELS), 0)
   assert.equal(lodForZoom(9, LAKE_LOD_LEVELS), 1) // just past LOD0's boundary
-  assert.equal(lodForZoom(11, LAKE_LOD_LEVELS), 1) // boundary — still LOD1
-  assert.equal(lodForZoom(12, LAKE_LOD_LEVELS), 2) // just past — LOD2
+  assert.equal(lodForZoom(11, LAKE_LOD_LEVELS), 1)
+  assert.equal(lodForZoom(12, LAKE_LOD_LEVELS), 1) // close band reuses the z7 tiles
+  assert.equal(lodForZoom(20, LAKE_LOD_LEVELS), 1)
   assert.equal(tileZoomForLod(0, LAKE_LOD_LEVELS), 5)
   assert.equal(tileZoomForLod(1, LAKE_LOD_LEVELS), 7)
-  assert.equal(tileZoomForLod(2, LAKE_LOD_LEVELS), 9)
 })
 
 test('lake tiles are COARSER than water tiles at every LOD — lakes are a far sparser layer, and this one covers the whole planet', () => {

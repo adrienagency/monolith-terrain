@@ -77,10 +77,17 @@ export const ROAD_LOD_LEVELS = [
 // tileZoom and the per-LOD area floor are both MEASURED choices — see the
 // area-band table in the task-19 report and LAKE_AREA_GATES_KM2 in
 // build-world-lake-tiles.mjs. Re-measure both if you touch either.
+// TWO LODs, deliberately — there used to be a third (z9, lakes >= 0.5 km2) and
+// it measured **1.74 GB of the layer's 1.91 GB total** (91%) even after
+// per-LOD sub-pixel simplification. Same standard that deferred the 887 MB
+// road tiles: that does not ship. The close band reuses the z7 tiles (named
+// lakes >= 5 km2, worldwide, 171 MB total). What's lost: sub-5 km2 lakes
+// OUTSIDE the Alps rich-water region at close zoom — an honest v1 tradeoff;
+// the z9 build path still exists in build-world-lake-tiles.mjs for a future
+// PMTiles/on-demand delivery.
 export const LAKE_LOD_LEVELS = [
   { lod: 0, tileZoom: 5, demZoomMax: 8 },
-  { lod: 1, tileZoom: 7, demZoomMax: 11 },
-  { lod: 2, tileZoom: 9, demZoomMax: Infinity },
+  { lod: 1, tileZoom: 7, demZoomMax: Infinity },
 ]
 
 // `levels` defaults to LOD_LEVELS (water) so every existing call site is
