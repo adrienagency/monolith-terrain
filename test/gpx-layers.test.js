@@ -48,6 +48,20 @@ test('layerDepth is stable for a single layer (no stacking needed)', () => {
   assert.deepEqual(layerDepth(0, 1), { renderOffset: 0, yNudge: 0 })
 })
 
+// Pins the exact semantics from the brief — "au niveau des calques, le 1 est
+// toujours au dessus du 2" (standard vertical layer stacking, like Figma: the
+// FIRST row in the panel list renders on top of the SECOND). Both renderOrder
+// (renderOffset, read by gpx.js's setRenderDepth -> line.renderOrder) AND the
+// world-Y nudge (yNudge, so two coincident tracks don't z-fight) must agree —
+// a mismatch between the two would mean depth-testing and draw-order disagree
+// about which layer is "on top".
+test('layerDepth: index 0 renders above index 1 — both renderOffset and yNudge agree', () => {
+  const top = layerDepth(0, 2) // panel row 1 ("layer 1")
+  const second = layerDepth(1, 2) // panel row 2 ("layer 2")
+  assert.ok(top.renderOffset > second.renderOffset, 'layer 1 must draw after (on top of) layer 2')
+  assert.ok(top.yNudge > second.yNudge, 'layer 1 must sit physically higher than layer 2')
+})
+
 // ---- nextLayerIndex (sequenced playback order — task 22 §5) ----------------
 
 test('nextLayerIndex advances through the list in panel order', () => {
