@@ -10,6 +10,31 @@ import { riverWidthPx } from './river-width.js'
 import { WATER_REGION, LAKE_LOD_LEVELS, inRegion, lodForZoom, tileZoomForLod } from './tile-index.js'
 import { loadWaterTiles, loadWaterTileManifest, loadLakeTiles, loadLakeTileManifest, hasTilesForLod } from './tile-loader.js'
 
+// Client-side waterway-kind filter for the zoomed Overpass waterway LINES
+// (fetchOverpassLines(bounds, 'water') below). The Overpass query itself
+// stays the bare `way["waterway"]` tag test on purpose — DO NOT turn this
+// into a `["waterway"~"^(river|riverbank)$"]` regex predicate. Regex
+// predicates make Overpass scan every way in the bbox instead of hitting the
+// tag index (the exact failure mode documented for roads in overpass.js's
+// comment on roadHighwayFilter: a filtered predicate measured a 504 against
+// the live public API on a dense bbox, while the bare tag returned in <1s).
+// So filtering happens here instead, client-side, after parseOverpass has
+// already run — cheap, and it can't take the whole layer down with a 504.
+//
+// Product requirement (Adrien, verbatim): "on retire les torrents, et les
+// cours d'eau, on ne garde que points d'eau, les lacs, les mares, les
+// fleuves et les rivières." Alpine torrents are almost always tagged
+// waterway=stream in OSM (occasionally a nonstandard waterway=torrent);
+// keeping only `river` and `riverbank` drops those along with every other
+// minor/artificial watercourse tag (brook/ditch/drain/canal/pressurised/…),
+// leaving just the named rivers the requirement asks for. Lakes/ponds are a
+// separate code path entirely (the AREA fetch below + the tiled/NE lake
+// layers), unaffected by this filter.
+const RIVER_WATERWAY_KINDS = new Set(['river', 'riverbank'])
+export function filterRiverwayLines(feats) {
+  return feats.filter((f) => RIVER_WATERWAY_KINDS.has(f.kind))
+}
+
 // Lakes render above every other DRAPED MAP LAYER (roads, rivers, contours,
 // the general water fill), in a distinctly more saturated blue than the
 // general water ink — an explicit user request ("je tiens vraiment à ce que
@@ -194,7 +219,7 @@ export class WaterLayer {
       ])
       this.loading = false
       if (id !== this._buildId || dem !== terrain.dem) return
-      if (feats) { riverEntries = feats.map((f) => ({ ring: f.coords, strokeweight: undefined })); osmOk = true }
+      if (feats) { riverEntries = filterRiverwayLines(feats).map((f) => ({ ring: f.coords, strokeweight: undefined })); osmOk = true }
       // area fetch is best-effort: failure/throttle just means no filled polygons, lines still render.
       // Overpass areas never carry holes (parseOverpassAreas ignores inner members for v1).
       if (areas) areaParts = areas.map((a) => ({ outer: a.ring, holes: [] }))

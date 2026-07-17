@@ -28,10 +28,26 @@ const SOURCE = `s3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=ba
 
 const OUT = new URL('../public/data/water-tiles/', import.meta.url)
 
-// Subtypes kept: lake, river, water, canal, pond, reservoir. Dropped:
-// stream, human_made, wastewater, spring, physical — measured at 67% of all
-// vertices in this region and never wanted at these map scales.
-const KEEP_SUBTYPES = ['lake', 'river', 'water', 'canal', 'pond', 'reservoir']
+// Subtypes kept: lake, river, water, pond, reservoir. Dropped: canal,
+// stream, human_made, wastewater, spring, physical.
+//
+// `canal` dropped per product requirement (Adrien, verbatim): "on retire les
+// torrents, et les cours d'eau, on ne garde que points d'eau, les lacs, les
+// mares, les fleuves et les rivières" — canal is neither a lac/mare/fleuve/
+// rivière, it's an artificial waterway, same bucket as the already-dropped
+// stream/torrent-adjacent classes.
+//
+// `reservoir` is KEPT — a judgment call, flagged here for Adrien to overrule:
+// Serre-Ponçon-class artificial lakes (a dam-formed reservoir that reads and
+// functions exactly as a lac to anyone standing at it, and to a trail-race
+// organiser routing around it) are tagged `reservoir` in Overture, not
+// `lake`. Cutting the subtype would delete real "points d'eau/lacs" the
+// requirement clearly wants kept, so `reservoir` stays alongside lake/pond.
+//
+// stream/human_made/wastewater/spring/physical were already dropped —
+// measured at 67% of all vertices in this region and never wanted at these
+// map scales.
+const KEEP_SUBTYPES = ['lake', 'river', 'water', 'pond', 'reservoir']
 
 // Per-LOD area gate, in km² of REAL surface area (not degrees — degrees are
 // converted per-feature using the feature's own center-latitude cos factor,
