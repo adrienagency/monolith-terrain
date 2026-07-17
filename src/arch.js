@@ -1,12 +1,24 @@
-// Start/finish 3D arches (task 22 §6) — "une petite arche en 3D rectangulaire
-// avec marqué start du côté où part la course, et finish du côté où elle se
-// termine. Si ce n'est pas une boucle, alors on a deux arches."
+// Start/finish 3D arches (task 22 §6, rebuilt task 24, rebuilt AGAIN task 25
+// — "l'arche, c'est totalement à côté de la plaque. Pourquoi les piliers
+// sont décalés et tout n'est pas en un seul morceau ?"). The task-24
+// procedural gate (two BoxGeometry posts + a beam, built from independent
+// numbers) read as "deux bâtons", not one gate. The user stopped and
+// modelled the arch themselves instead — this module now LOADS that model
+// (public/models/arch.glb) rather than building geometry, which structurally
+// rules out the old bug: posts and beam are one rigid mesh, they cannot end
+// up disjoint or offset from each other by construction.
 //
-// Two parts, same split as everywhere else in this codebase: pure placement
-// math (unit-tested, no THREE/DOM) below, then a THREE mesh builder that
-// consumes it. gpx.js owns detectLoop() (the loop/point-to-point decision);
-// this module only answers "given the drawn world points and that decision,
-// where do the arch(es) go and which way do they face".
+// Same split as before, now three parts: pure placement + orientation math
+// (unit-tested, no DOM — THREE's own Vector3/Quaternion/Matrix4 classes are
+// plain math, no canvas/document involved, so they're fine in node --test
+// same as gpx.js's own THREE usage), a small DOM-only loader/cache, and a
+// THREE mesh builder that consumes both. gpx.js owns detectLoop() (the
+// loop/point-to-point decision); this module only answers "given the drawn
+// world points and that decision, where do the arch(es) go and which way do
+// they face".
+
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
 // ---------------------------------------------------------------- placement
 
@@ -35,9 +47,10 @@ export function headingAt(world, idx) {
 //     on separate faces — 'outDir' is the departure heading (what a runner
 //     about to start sees facing them), 'inDir' is the arrival heading on
 //     the closing leg (what a finishing runner sees facing them). These are
-//     generally different directions (a loop doesn't reverse over itself),
-//     which is exactly why the two faces are tracked independently instead
-//     of assuming they're opposite sides of one flat sign.
+//     generally different directions (a loop doesn't reverse over itself);
+//     the GLB is a single rigid gate, so it can only be oriented once — see
+//     buildArchMesh's own comment on why 'outDir' wins for the physical
+//     straddle axis while both labels still ship on the model's two faces.
 export function computeArchSpecs(world, isLoop) {
   if (!world || world.length < 2) return []
   const last = world.length - 1
@@ -57,137 +70,286 @@ export function computeArchSpecs(world, isLoop) {
   ]
 }
 
-// ---------------------------------------------------------------- sizing
-
-// Fixed world-unit scale, same order of magnitude as gpx.js's own
-// VILLAGE_LINE_HEIGHT (2.4 world units) — the existing "a real vertical mark
-// at this app's terrain scale" reference — rather than a function of route
-// length: the terrain patch itself (TERRAIN_SIZE) is what sets the visual
-// scale a track drapes onto, not the route's real-world km, so a fixed span
-// reads sensibly whether the loaded race is 5km or 220km.
-//
-// Task 24 rebuild: the old arch (POST_THICK 0.14 against a 2.6-tall post —
-// an 18.6:1 height:width sliver) read as "deux bâtons" with text floating
-// between them, not a gate. The user's own reference photo + literal ask —
-// "deux pylônes de 400x100px et une traverse de 600x100px" — gives a real
-// truss gantry's proportions: a shared 100px module sizes BOTH the pylon's
-// own width and the beam's own thickness (both "100" in the reference),
-// while the pylon reads 400:100 = 4:1 (height:width) and the beam 600:100 =
-// 6:1 (length:thickness). ARCH_UNIT below IS that module — every other
-// constant is derived from it so the ratios stay exact by construction
-// rather than by eyeballing four independent numbers:
-//   pylon width  (ARCH_POST_THICK)          = 1 × unit
-//   pylon height (ARCH_HEIGHT)              = 4 × unit   (the 4:1 ratio)
-//   beam thickness (ARCH_BEAM_THICK)        = 1 × unit   (same module as the pylon's width)
-//   beam length = span + one post thickness = 6 × unit   (the 6:1 ratio) →
-//     solving for the span that makes that true: span = 5 × unit
-export const ARCH_UNIT = 0.5 // the shared "100px" module — tune ONE number to rescale the whole gate
-export const ARCH_POST_THICK = ARCH_UNIT // pylon width — "100"
-export const ARCH_HEIGHT = ARCH_UNIT * 4 // pylon height — "400" (4:1 height:width per pylon)
-export const ARCH_BEAM_THICK = ARCH_UNIT // beam thickness — the OTHER "100"
-export const ARCH_SPAN = ARCH_UNIT * 5 // clear width a runner passes through — chosen so beamLen (span + one post thickness) lands exactly on 6×unit below
-export const ARCH_BANNER_GAP = 0.03 // banner plane floats this far in FRONT of the beam's face (avoids z-fighting; reads as flush-mounted, not floating)
-
-// ---------------------------------------------------------------- mesh (THREE)
-
-// perp: the horizontal axis the two posts straddle (rotate `dir` -90°) —
-// exported alongside the pure functions above since callers building a mesh
-// need the exact same perpendicular the placement math implies.
+// perp: the horizontal axis the two feet straddle (rotate `dir` -90°).
 export function perpOf(dir) {
   return { x: dir.z, z: -dir.x }
 }
 
-// Builds one arch (rectangular gate: two posts + a beam) with 1 or 2 label
-// faces, terrain-anchored (each post samples its own ground height, so a
-// gate straddling a cross-slope doesn't float). `THREE` and `sampleGround`
-// are injected (same DI pattern as GpxLayer's own getDem/terrain) so this
-// stays swappable in isolation; `makeLabel(text) -> {tex, aspect}` is
-// text-label.js's makeLabelTexture, injected rather than imported so this
-// module doesn't have to agree with gpx.js on which label renderer to use.
-export function buildArchMesh(spec, { THREE, sampleGround, makeLabel, ink = '#17191b', renderOrder = 0 }) {
-  const group = new THREE.Group()
-  group.name = 'gpx-arch'
+// the gate's own primary facing direction — for a loop this is the
+// DEPARTURE heading (see computeArchSpecs's comment: the model is one rigid
+// piece, it gets ONE physical orientation, chosen the same way the task-24
+// procedural gate chose it — off the first face).
+export function primaryDir(spec) {
+  return spec.kind === 'loop' ? spec.outDir : spec.dir
+}
 
-  const faces =
-    spec.kind === 'loop'
-      ? [
-          { text: 'START', dir: spec.outDir },
-          { text: 'FINISH', dir: spec.inDir },
-        ]
-      : [{ text: spec.kind === 'start' ? 'START' : 'FINISH', dir: spec.dir }]
+// ---------------------------------------------------------------- sizing
+//
+// The old (task 24) procedural gate's own measured world size — kept ONLY
+// as the reference this task's "5x smaller" (§2 of the brief) is defined
+// against, not to build geometry from anymore:
+//   pylon width/beam thickness (module)   = 0.5
+//   pylon height                          = 2.0  (4 x module)
+//   clear span                            = 2.5  (5 x module)
+//   beam length (span + one post thickness, flush with both posts' outer
+//     faces — the old gate's own full straddle width)   = 3.0
+//   total height, ground to top of beam                  = 2.5
+const OLD_ARCH_UNIT = 0.5
+const OLD_ARCH_POST_THICK = OLD_ARCH_UNIT
+const OLD_ARCH_HEIGHT = OLD_ARCH_UNIT * 4
+const OLD_ARCH_BEAM_THICK = OLD_ARCH_UNIT
+const OLD_ARCH_SPAN = OLD_ARCH_UNIT * 5
+export const OLD_ARCH_WIDTH = OLD_ARCH_SPAN + OLD_ARCH_POST_THICK // 3.0 — full straddle width
+export const OLD_ARCH_TOTAL_HEIGHT = OLD_ARCH_HEIGHT + OLD_ARCH_BEAM_THICK // 2.5 — ground to beam top
 
-  // posts + beam are shared by every face at this position — built once off
-  // the FIRST face's perpendicular (all faces share the same `pos`; the
-  // gate itself doesn't rotate per-label, only the label planes do)
-  const perp = perpOf(faces[0].dir)
-  const half = ARCH_SPAN / 2
+// New target: the GLB is normalized so its OWN measured straddle width
+// lands here — exactly one fifth of the old gate's straddle width (task 25
+// §2: "5x smaller"). Every other new-gate dimension (height, depth/
+// thickness) falls out of this ONE number times the model's own aspect
+// ratio, the same "tune one number, everything else follows" principle
+// ARCH_UNIT used for the procedural gate.
+export const ARCH_TARGET_WIDTH = OLD_ARCH_WIDTH / 5
+export const ARCH_MODEL_URL = 'models/arch.glb'
+
+// ---------------------------------------------------------- proto measurement
+//
+// Pure: given the proto's own measured LOCAL bounding-box size (a THREE
+// Box3's .getSize() result, or any {x,y,z}), decide which local horizontal
+// axis is the model's own "width" (the wider of X/Z — the beam spans this
+// one) vs its "depth" (the thinner one — the walk-through/thickness axis),
+// and the uniform scale that lands the width on ARCH_TARGET_WIDTH. Never
+// assumes which of X/Z is which — derives it from the measured box, per the
+// brief ("do not hardcode a guess").
+export function classifyArchSize(size) {
+  const widthIsX = size.x >= size.z
+  const rawWidth = widthIsX ? size.x : size.z
+  const rawDepth = widthIsX ? size.z : size.x
+  const scale = rawWidth > 1e-6 ? ARCH_TARGET_WIDTH / rawWidth : 1
+  return {
+    widthIsX,
+    scale,
+    worldWidth: rawWidth * scale,
+    worldHeight: size.y * scale,
+    worldDepth: rawDepth * scale,
+  }
+}
+
+// ---------------------------------------------------------- orientation math
+//
+// Pure (THREE's Vector3/Quaternion/Matrix4 are plain math, no DOM — same as
+// gpx.js's own module-level THREE usage, safe in node --test). Given a spec,
+// terrain samples at the two feet, and the proto's classifyArchSize() result,
+// returns exactly where + how to rotate ONE clone of the loaded gate:
+//   - yaw: the proto's own measured WIDTH axis (local X or Z, whichever
+//     classifyArchSize picked) is rotated onto world perp(dir), and its
+//     DEPTH axis onto world dir — so the gate straddles the track with its
+//     thin axis matching the direction runners pass through it.
+//   - roll: the model is ONE rigid mesh, so unlike the old procedural gate
+//     (which stretched two independent post cylinders to reach each post's
+//     own ground height) it cannot give its two feet independently
+//     different heights — instead the WHOLE gate banks, about its own
+//     depth (walk-through) axis, by the angle that puts its two edges at
+//     groundA and groundB respectively. "Both feet on the terrain" (task 25
+//     §3) via a small tilt rather than an impossible per-leg stretch.
+// Returns world-space position (the track point itself, at the AVERAGE of
+// the two ground samples) + a quaternion, plus the two foot positions (XZ)
+// a caller needs to take those terrain samples from in the first place.
+export function archTransform(spec, groundA, groundB, proto) {
+  const dir = primaryDir(spec)
+  const perp = perpOf(dir)
+  const half = proto.worldWidth / 2
   const postA = { x: spec.pos.x + perp.x * half, z: spec.pos.z + perp.z * half }
   const postB = { x: spec.pos.x - perp.x * half, z: spec.pos.z - perp.z * half }
-  const groundA = sampleGround ? sampleGround(postA.x, postA.z) : spec.pos.y
-  const groundB = sampleGround ? sampleGround(postB.x, postB.z) : spec.pos.y
-  const postMat = new THREE.MeshStandardMaterial({ color: ink, roughness: 0.55, metalness: 0.05 })
 
-  const mkPost = (p, ground) => {
-    const h = ARCH_HEIGHT
-    const m = new THREE.Mesh(new THREE.BoxGeometry(ARCH_POST_THICK, h, ARCH_POST_THICK), postMat)
-    m.position.set(p.x, ground + h / 2, p.z)
-    m.renderOrder = renderOrder
-    return m
+  const U = new THREE.Vector3(perp.x, 0, perp.z).normalize() // world width dir
+  const N = new THREE.Vector3(dir.x, 0, dir.z).normalize() // world depth/forward dir
+  const upV = new THREE.Vector3(0, 1, 0)
+  const basis = new THREE.Matrix4()
+  if (proto.widthIsX) basis.makeBasis(U, upV, N)
+  else basis.makeBasis(N, upV, U)
+  const qYaw = new THREE.Quaternion().setFromRotationMatrix(basis)
+
+  const roll = proto.worldWidth > 1e-6 ? Math.atan2((groundB ?? 0) - (groundA ?? 0), proto.worldWidth) : 0
+  const qRoll = new THREE.Quaternion().setFromAxisAngle(N, roll)
+  const quaternion = qRoll.multiply(qYaw)
+
+  const gA = groundA ?? spec.pos.y
+  const gB = groundB ?? spec.pos.y
+  return {
+    position: { x: spec.pos.x, y: (gA + gB) / 2, z: spec.pos.z },
+    quaternion,
+    postA,
+    postB,
   }
-  const postMeshA = mkPost(postA, groundA)
-  const postMeshB = mkPost(postB, groundB)
-  group.add(postMeshA, postMeshB)
+}
 
-  const beamY = Math.max(groundA, groundB) + ARCH_HEIGHT
-  const beamLen = Math.hypot(postA.x - postB.x, postA.z - postB.z) + ARCH_POST_THICK
-  const beam = new THREE.Mesh(new THREE.BoxGeometry(beamLen, ARCH_BEAM_THICK, ARCH_BEAM_THICK), postMat)
-  beam.position.set(spec.pos.x, beamY, spec.pos.z)
-  beam.rotation.y = Math.atan2(postA.x - postB.x, postA.z - postB.z)
-  beam.renderOrder = renderOrder
-  group.add(beam)
+// Fixed, high-contrast text ink for a given arch fill colour — "a black
+// arch with black text is useless" (task 25 §4). The baked text is now real
+// extruded 3D geometry, not a canvas texture, so there's no halo/outline
+// trick available (that was makeLabelTexture's job for the old flat
+// banners) — the only lever left is picking black-ish or white-ish ink by
+// the chosen arch colour's own relative luminance, same threshold rule of
+// thumb used for any swatch-vs-text contrast decision.
+export function textInkFor(archColorHex) {
+  const c = new THREE.Color(archColorHex)
+  const lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+  return lum > 0.5 ? '#17191b' : '#f5f6f7'
+}
 
-  // banner plane(s) — one per face, MOUNTED ON THE BEAM (task 24): "une
-  // traverse... avec marqué start/finish", "comme le panneau de la photo" —
-  // a flat wordmark carried BY the crossbar, not floating text between two
-  // posts. So this is now sized from the SPAN (wide, banner-shaped — close
-  // to the beam's own length) rather than from the post height, and sits at
-  // the beam's own Y, flush against its front face instead of dangling
-  // below it. Oriented so its FRONT (the readable side) points back along
-  // the direction the runner is arriving FROM, i.e. it faces the runner as
-  // they approach the gate.
-  const beamHalf = beamLen / 2
-  faces.forEach((f, i) => {
-    const { tex, aspect } = makeLabel(f.text)
-    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.FrontSide, depthWrite: false })
-    // width-driven: read close to the beam's own length (a banner spanning
-    // the gate), height follows the label texture's own aspect — capped so
-    // a very short word (e.g. a 2-letter placeholder) can't blow up taller
-    // than the beam can sensibly carry.
-    const bannerW = Math.min(ARCH_SPAN * 0.86, beamHalf * 1.72)
-    const bannerH = Math.min(bannerW / aspect, ARCH_BEAM_THICK * 3.2)
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(bannerW, bannerH), mat)
-    // flush-mounted on the beam's FRONT face: offset along the face normal
-    // (-dir, same axis the rotation below points it) by half the beam's own
-    // thickness plus a hairline gap — reads as attached to the crossbar,
-    // never floating clear of it. A tiny extra offset along perp(dir) (the
-    // beam's own length axis) keeps two coincident loop faces (same pos,
-    // near-identical dir) from z-fighting each other.
-    const nx = -f.dir.x
-    const nz = -f.dir.z
-    const faceOff = ARCH_BEAM_THICK / 2 + ARCH_BANNER_GAP
-    const p = perpOf(f.dir)
-    const sideEps = (i === 0 ? 1 : -1) * 0.02
-    mesh.position.set(
-      spec.pos.x + nx * faceOff + p.x * sideEps,
-      beamY,
-      spec.pos.z + nz * faceOff + p.z * sideEps
-    )
-    // face AGAINST the arrival direction (normal = -dir) — a plane's default
-    // normal is +Z, so yaw it to point -dir
-    mesh.rotation.y = Math.atan2(-f.dir.x, -f.dir.z)
-    mesh.renderOrder = renderOrder + 1
-    group.add(mesh)
+// ---------------------------------------------------------------- GLB proto
+//
+// Loaded ONCE (module-level cache) — every arch on a route (up to 2, task 25
+// §1) clones this same normalized prototype rather than re-parsing the GLB.
+// Strips any light the file carries: it ships a "Default Ambient Light"
+// node (see the task brief) that must NEVER enter the live scene — it would
+// silently brighten the whole map. A failed/missing load resolves to
+// `null`; callers must degrade quietly (no fallback geometry, no error UI —
+// the arch simply never appears, playback is unaffected).
+let _archProtoPromise = null
+
+function stripLights(root) {
+  const lights = []
+  root.traverse((n) => { if (n.isLight) lights.push(n) })
+  for (const l of lights) l.parent?.remove(l)
+}
+
+function normalizeArchProto(scene) {
+  stripLights(scene)
+  const box = new THREE.Box3().setFromObject(scene)
+  const size = box.getSize(new THREE.Vector3())
+  const center = box.getCenter(new THREE.Vector3())
+  const info = classifyArchSize(size)
+
+  // recenter horizontally and drop the bottom to local y=0, so a caller can
+  // place THIS group's own origin at ground level and rotate about it
+  // without the mesh swimming off-centre first
+  scene.position.set(-center.x, -box.min.y, -center.z)
+  const root = new THREE.Group()
+  root.name = 'gpx-arch-proto'
+  root.add(scene)
+  root.scale.setScalar(info.scale)
+
+  const textMeshes = []
+  const frameMeshes = []
+  scene.traverse((n) => {
+    if (!n.isMesh) return
+    ;(/^text/i.test(n.name) ? textMeshes : frameMeshes).push(n)
+  })
+
+  return { root, textMeshes, frameMeshes, ...info }
+}
+
+function loadArchProto() {
+  if (!_archProtoPromise) {
+    _archProtoPromise = new Promise((resolve) => {
+      new GLTFLoader().load(
+        ARCH_MODEL_URL,
+        (gltf) => {
+          try {
+            resolve(normalizeArchProto(gltf.scene))
+          } catch {
+            resolve(null)
+          }
+        },
+        undefined,
+        () => resolve(null) // missing/broken GLB — degrade quietly, no arch ever appears
+      )
+    })
+  }
+  return _archProtoPromise
+}
+
+// clone the cached proto's Object3D hierarchy for one arch instance. Deep
+// clone shares geometry (never mutated, never disposed per-instance — see
+// disposeArchGroup) and starts with the proto's own shared default
+// materials, which every mesh gets REPLACED on below (buildArchMesh), so
+// the shared proto is never touched by an instance's own colouring.
+function cloneProto(proto) {
+  const inst = proto.root.clone(true)
+  const textMeshes = []
+  const frameMeshes = []
+  inst.traverse((n) => {
+    if (!n.isMesh) return
+    n.userData.sharedGeometry = true // disposeArchGroup must not free this
+    ;(/^text/i.test(n.name) ? textMeshes : frameMeshes).push(n)
+  })
+  return { inst, textMeshes, frameMeshes }
+}
+
+// ---------------------------------------------------------------- mesh (THREE)
+
+// Builds one arch and returns a THREE.Group IMMEDIATELY (synchronous — same
+// contract gpx.js's _buildArches() already relies on). The group starts
+// empty; loadArchProto() is async, so the actual clone is added into it
+// whenever the (module-cached, load-once) prototype resolves — after the
+// very first arch anywhere in the app that's already-resolved and happens
+// on the same tick. If the GLB is missing/broken the group is left empty
+// forever: no crash, no fallback shape, playback is unaffected (task 25's
+// "degrade quietly"). Track render never waits on this.
+//
+// `sampleGround(x, z) -> y` is DI'd (same pattern as the old procedural
+// builder) so this stays swappable in isolation. `ink` is the user-chosen
+// arch colour (task 25 §4); `textInk` overrides the auto-contrast pick from
+// textInkFor() if the caller wants to force one.
+export function buildArchMesh(spec, { sampleGround, ink = '#2b2f33', textInk, renderOrder = 0 } = {}) {
+  const group = new THREE.Group()
+  group.name = 'gpx-arch'
+  group.userData.spec = spec
+
+  loadArchProto().then((proto) => {
+    if (group.userData.disposed || !proto) return
+
+    const dir = primaryDir(spec)
+    const perp = perpOf(dir)
+    const half = proto.worldWidth / 2
+    const postA = { x: spec.pos.x + perp.x * half, z: spec.pos.z + perp.z * half }
+    const postB = { x: spec.pos.x - perp.x * half, z: spec.pos.z - perp.z * half }
+    const groundA = sampleGround ? sampleGround(postA.x, postA.z) : spec.pos.y
+    const groundB = sampleGround ? sampleGround(postB.x, postB.z) : spec.pos.y
+
+    const { position, quaternion } = archTransform(spec, groundA, groundB, proto)
+    const { inst, textMeshes, frameMeshes } = cloneProto(proto)
+
+    const frameMat = new THREE.MeshStandardMaterial({ color: ink, roughness: 0.55, metalness: 0.05 })
+    const resolvedTextInk = textInk || textInkFor(ink)
+    const textMat = new THREE.MeshStandardMaterial({ color: resolvedTextInk, roughness: 0.4, metalness: 0.05 })
+    for (const m of frameMeshes) m.material = frameMat
+    for (const m of textMeshes) m.material = textMat
+
+    // task 25 §5: for a point-to-point gate (a SINGLE relevant face — only
+    // 'START' at the departure gate, only 'FINISH' at the arrival one) hide
+    // whichever baked text mesh is the WRONG word for this gate, rather
+    // than ship an arch that reads e.g. "FINISH" on its back face at the
+    // start line. A loop gate keeps BOTH — that's the one case where both
+    // words are simultaneously correct (see computeArchSpecs). See
+    // labelTextForMesh below for how "which mesh is which word" is decided.
+    if (spec.kind !== 'loop' && textMeshes.length > 1) {
+      const wanted = spec.kind === 'start' ? 0 : 1 // index convention — see labelTextForMesh
+      textMeshes.forEach((m, i) => { m.visible = i === wanted })
+    }
+
+    inst.position.set(position.x, position.y, position.z)
+    inst.quaternion.copy(quaternion)
+    inst.traverse((n) => { if (n.isMesh) n.renderOrder = renderOrder })
+    group.add(inst)
   })
 
   return group
+}
+
+// Marks a group's async population as cancelled (a route can reload before
+// the GLB clone lands) and frees everything ALREADY attached. Geometry is
+// shared with the cached prototype (see cloneProto) and is never disposed
+// here — only the per-instance materials (frameMat/textMat above, unique to
+// this group) are. gpx.js's _disposeArches() calls this instead of its own
+// traverse+dispose so that sharing rule lives in exactly one place.
+export function disposeArchGroup(group) {
+  group.userData.disposed = true
+  group.traverse((obj) => {
+    if (obj.isMesh && !obj.userData.sharedGeometry) obj.geometry?.dispose?.()
+    if (obj.material) {
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material]
+      for (const m of mats) { m.map?.dispose?.(); m.dispose() }
+    }
+  })
 }

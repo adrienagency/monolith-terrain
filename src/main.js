@@ -234,6 +234,7 @@ const params = {
   gpxGradientMode: 'elevation',
   gpxGlow: false,
   gpxMarkers: true, // single toggle for BOTH start + finish markers
+  gpxArchColor: '', // task 25 §4 — '' = darkMode-driven default (see gpx.js _buildArches)
   gpxKm: true,
   gpxAltReadout: true,
   gpxSlopeReadout: false,

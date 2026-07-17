@@ -291,6 +291,9 @@ export class GpxLayerManager {
   setMarkers(v) {
     for (const l of this.layers) l.gpx.setMarkers(v)
   }
+  setArchColor(v) {
+    for (const l of this.layers) l.gpx.setArchColor(v)
+  }
   setKm(v) {
     for (const l of this.layers) l.gpx.setKm(v)
   }

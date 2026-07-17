@@ -12,7 +12,7 @@ import { TERRAIN_SIZE } from './terrain.js'
 import { latLonToWorld, metersPerPixel, surfaceMetersPerUnit, EARTH_RADIUS_M } from './geo.js'
 import { loadLayer } from './map/geo-data.js'
 import { makeLabelTexture, labelInk, labelFontReady } from './map/text-label.js'
-import { computeArchSpecs, buildArchMesh } from './arch.js'
+import { computeArchSpecs, buildArchMesh, disposeArchGroup } from './arch.js'
 
 const MAX_POINTS = 2400 // decimation budget — hover & profile stay O(small)
 
@@ -879,24 +879,29 @@ export class GpxLayer {
 
   // ---------------------------------------------------------------- arches
 
-  // Builds the start/finish 3D arch(es) for the current track (task 22 §6) —
-  // called from rebuild(), gated by params.gpxMarkers (the arch REPLACES the
-  // old flat ◆/▶/■ sprites — see rebuild()'s own comment on why both
-  // shouldn't show). Returns true if at least one arch was actually placed,
-  // false for a degenerate (<2 point) track — the caller falls back to the
-  // flat sprites only in that false case, so a track never ends up with
-  // neither kind of start/finish marker.
+  // Builds the start/finish 3D arch(es) for the current track (task 22 §6,
+  // now the user's own modelled GLB — task 25) — called from rebuild(),
+  // gated by params.gpxMarkers (the arch REPLACES the old flat ◆/▶/■
+  // sprites — see rebuild()'s own comment on why both shouldn't show).
+  // Returns true if at least one arch was actually placed, false for a
+  // degenerate (<2 point) track — the caller falls back to the flat sprites
+  // only in that false case, so a track never ends up with neither kind of
+  // start/finish marker. buildArchMesh() itself is synchronous (returns a
+  // group immediately, populates it once the GLB — loaded once, cached —
+  // resolves), so this stays synchronous too.
   _buildArches(world, isLoop, names, eles) {
     if (!world || world.length < 2) return false
     const specs = computeArchSpecs(world, isLoop)
     if (!specs.length) return false
-    const inkInfo = labelInk(this.params.darkMode)
+    // task 25 §4: "l'utilisateur pourra choisir la couleur de l'arche" — an
+    // explicit choice (params.gpxArchColor) wins; empty (the default, same
+    // sentinel convention as gpxColor) falls back to the old darkMode-driven
+    // ink so an untouched arch still reads correctly in both look modes.
+    const archColor = this.params.gpxArchColor || (this.params.darkMode ? '#e7e9ec' : '#2b2f33')
     for (const spec of specs) {
       const group = buildArchMesh(spec, {
-        THREE,
         sampleGround: (x, z) => this.terrain.sample?.(x, z) ?? spec.pos.y,
-        makeLabel: (text) => makeLabelTexture(text, { color: inkInfo.color, halo: inkInfo.halo, weight: 700 }),
-        ink: this.params.darkMode ? '#e7e9ec' : '#2b2f33',
+        ink: archColor,
         renderOrder: 22 + this._renderOffset,
       })
       this.group.add(group)
@@ -908,13 +913,7 @@ export class GpxLayer {
   _disposeArches() {
     for (const group of this._archGroups) {
       this.group.remove(group)
-      group.traverse((obj) => {
-        obj.geometry?.dispose?.()
-        if (obj.material) {
-          obj.material.map?.dispose?.()
-          obj.material.dispose()
-        }
-      })
+      disposeArchGroup(group)
     }
     this._archGroups = []
   }
@@ -1328,6 +1327,14 @@ export class GpxLayer {
   // single toggle for both markers — see the rebuild() comment above
   setMarkers(v) {
     this.params.gpxMarkers = v
+    this.rebuild()
+  }
+
+  // task 25 §4 — user-choosable arch colour; '' resets to the darkMode
+  // default (see _buildArches). Full rebuild, same as setGlow/setMarkers
+  // above: cheapest correct way to re-run _buildArches with the new colour.
+  setArchColor(v) {
+    this.params.gpxArchColor = v
     this.rebuild()
   }
 

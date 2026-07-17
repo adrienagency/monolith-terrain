@@ -270,12 +270,21 @@ export function buildRoutePanel(ctx) {
   )
 
   const sPoints = panel.addSection(section('Points & markers', { open: false }))
+  const archColorRow = color({
+    label: 'Arch colour',
+    get: () => params.gpxArchColor || (params.darkMode ? '#e7e9ec' : '#2b2f33'),
+    set: (v) => ctx.gpx.setArchColor(v),
+  })
+  // only meaningful while the arch itself is showing — same visibleWhen
+  // pattern the track Colour swatch uses above for its own gating toggle
+  visibleWhen(archColorRow, () => params.gpxMarkers)
   sPoints.body.append(
     toggle({
       label: 'Start & finish markers',
       get: () => params.gpxMarkers,
-      set: (v) => ctx.gpx.setMarkers(v),
+      set: (v) => { ctx.gpx.setMarkers(v); refreshAll() }, // reveals/hides the Arch colour swatch right away
     }),
+    archColorRow,
     toggle({
       label: 'Km markers',
       get: () => params.gpxKm,
