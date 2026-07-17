@@ -3,7 +3,7 @@ import { latLonToWorld } from '../geo.js'
 import { TERRAIN_SIZE } from '../terrain.js'
 import { loadLayer } from './geo-data.js'
 import { pickPlaces } from './place-pick.js'
-import { makeLabelTexture, labelInk, labelPlate, labelFontReady } from './text-label.js'
+import { makeLabelTexture, labelInk, labelFontReady } from './text-label.js'
 import { labelScale, placeTier } from './place-scale.js'
 
 const HALF = TERRAIN_SIZE / 2
@@ -113,19 +113,17 @@ export class PlacesLayer {
       const groundY = terrain.sample ? terrain.sample(p.w.x, p.w.z) : 0
       const labelY = groundY + CLEARANCE
       const scale = labelScale(p.pop, p.cap) * sizeMul
-      // shared with labelScale's tier so a place's colour darkness, and now
-      // the plate's own opacity (task 27 §2), always track the same
-      // importance ranking that picks the label's size — never a second,
-      // driftable ranking
+      // shared with labelScale's tier so a place's colour darkness always
+      // tracks the same importance ranking that picks its size
       const tier = placeTier(p.pop)
       const ink = labelInk(params.darkMode, tier)
       const halo = params.placesHalo ? ink.halo : null
-      // task 27 §2: "si il faut mettre un cartouche derrière le texte, on le
-      // fait" — the same "Text halo" toggle now gates the stronger plate
-      // treatment instead of the old thin ring (makeLabelTexture drops the
-      // ring itself whenever a plate is present — see its own comment), so
-      // switching it off still yields the older bare-ink look.
-      const plate = params.placesHalo ? labelPlate(params.darkMode, tier) : null
+      // NOTE: no background plate here. task 27 §2's plate was authorised
+      // only for gpx.js's along-track village announcements (a name worth
+      // the rider's attention right now, over a low/close camera) — it was
+      // mistakenly ALSO wired onto every viewport-picked city name via this
+      // same "Text halo" toggle, plating the entire map's worth of labels.
+      // See gpx.js's _buildVillageMarkers() for the real, intentional use.
 
       // ground dot, anchored at the city's real elevation. depthTest:true so
       // relief occludes it exactly like the label above it — a dot behind a
@@ -151,7 +149,7 @@ export class PlacesLayer {
       // screen-space scale).
       // 800/700, the top of Bricolage's real 200..800 axis — the names read too
       // thin at 600/700 and the ask was to bolden them, NOT to enlarge them.
-      const { tex, aspect } = makeLabelTexture(p.name.toUpperCase(), { color: ink.color, halo, plate, weight: p.cap ? 800 : 700 })
+      const { tex, aspect } = makeLabelTexture(p.name.toUpperCase(), { color: ink.color, halo, weight: p.cap ? 800 : 700 })
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, depthWrite: false }))
       sprite.material.sizeAttenuation = false
       sprite.scale.set(BASE_H * scale * aspect, BASE_H * scale, 1)
