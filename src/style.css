@@ -494,6 +494,25 @@ body.dark .ce-toast {
   pointer-events: none;
 }
 
+/* race-name header (task 22 §7) — an editorial line above the technical
+   track-name bar; Rosarivo matches the loading screen's own race-name
+   treatment (#loading .ld-name) so the same "this is the race's title" cue
+   carries from boot into the profile strip. */
+.gpx-race-name {
+  padding: 8px 10px 0;
+  font-family: 'Rosarivo', Georgia, serif;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+  color: var(--hud-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gpx-race-name.hidden {
+  display: none;
+}
+
 .gpx-profile-head {
   display: flex;
   align-items: center;

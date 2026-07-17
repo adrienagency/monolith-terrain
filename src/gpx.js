@@ -460,10 +460,15 @@ export class GpxLayer {
 
     const wrap = document.createElement('div')
     wrap.className = 'gpx-profile hidden'
+    // race-name header (task 22 §7): "ce nom apparaitra au dessus du profil
+    // de la course en bas" — a dedicated line ABOVE the existing (small,
+    // monospace) track-name bar, editorial/Rosarivo styling (see style.css),
+    // hidden by default (an unset race name shouldn't show an empty bar).
     wrap.innerHTML =
-      '<div class="gpx-profile-head"><span class="gpx-name">TRACK</span><span class="gpx-stats"></span><button class="gpx-close">✕</button></div><canvas width="720" height="96"></canvas>'
+      '<div class="gpx-race-name hidden"></div><div class="gpx-profile-head"><span class="gpx-name">TRACK</span><span class="gpx-stats"></span><button class="gpx-close">✕</button></div><canvas width="720" height="96"></canvas>'
     document.body.appendChild(wrap)
     this.profileEl = wrap
+    this.raceNameEl = wrap.querySelector('.gpx-race-name')
     this.profileCanvas = wrap.querySelector('canvas')
     wrap.querySelector('.gpx-close').addEventListener('click', () => this.clear())
 
@@ -502,6 +507,11 @@ export class GpxLayer {
     // pointNames: optional index -> custom label map, set via setPointName();
     // a fresh track always starts with no custom names
     this.track = { points, name, cumKm, world: null, pointNames: {} }
+    // race-name default = the GPX's own <name> (task 22 §7 spec: "nommer sa
+    // course" — an organiser who never touches the field still sees a name,
+    // not blank chrome); setRaceName() is the same call the panel's editable
+    // field makes later, so overriding it just re-runs this one path.
+    this.setRaceName(name)
   }
 
   // (Re)drape the loaded track onto the current terrain patch — called after
@@ -1239,6 +1249,22 @@ export class GpxLayer {
   setKm(v) {
     this.params.gpxKm = v
     this.rebuild()
+  }
+
+  // Race name (task 22 §7) — organiser-entered, shown above this profile
+  // strip's own track-name bar. An empty name hides the line entirely
+  // rather than showing blank chrome (the track-name bar below already
+  // covers "no name set" — see rebuild()'s '.gpx-name' text). Stored on the
+  // instance (not just painted to the DOM) so the Route panel's race-name
+  // field can read back the current value when focus moves between layers
+  // — see GpxLayerManager.raceName / setRaceName().
+  setRaceName(name) {
+    const trimmed = (name || '').trim()
+    this.raceName = trimmed
+    if (this.raceNameEl) {
+      this.raceNameEl.textContent = trimmed
+      this.raceNameEl.classList.toggle('hidden', !trimmed)
+    }
   }
 
   // stores (or clears, when name is empty) a custom label for a track-point

@@ -110,6 +110,27 @@ export class GpxLayerManager {
   get currentTrack() {
     return (this.playingLayer || this.activeLayer)?.gpx.track || null
   }
+  // `track` is an alias of currentTrack — main.js's flyTrack()/follow-cam/
+  // share-link code all read `gpxLayer.track` (the single-GpxLayer name);
+  // keeping that exact getter name here is what lets the manager drop
+  // straight into main.js's `const gpxLayer = new GpxLayerManager(...)`
+  // without touching every call site that predates multi-layer support.
+  get track() {
+    return this.currentTrack
+  }
+  // the focused layer's own hover state — route-panel.js's "Name point"
+  // field reads this (see setPointName() below, which routes the same way)
+  get hoverIdx() {
+    return this.activeLayer?.gpx.hoverIdx ?? -1
+  }
+  // the focused layer's race name (task 22 §7) — the Route panel's
+  // race-name field both reads (this getter) and writes (setRaceName()
+  // below) through the manager the same way it already does for
+  // hoverIdx/setPointName, so the field always reflects whichever layer is
+  // focused.
+  get raceName() {
+    return this.activeLayer?.gpx.raceName ?? ''
+  }
 
   // ---------------------------------------------------------------- add / remove / reorder
 
@@ -281,6 +302,10 @@ export class GpxLayerManager {
   }
   setPointName(index, name) {
     this.activeLayer?.gpx.setPointName(index, name)
+  }
+  setRaceName(name) {
+    this.activeLayer?.gpx.setRaceName(name)
+    this.onChange?.(this.layers) // panel row label may read the race name too
   }
 
   // ---------------------------------------------------------------- sequenced playback
