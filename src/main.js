@@ -47,6 +47,7 @@ import { buildRegionSkirt } from './region-skirt.js'
 import { makeSocleEnvMap } from './socle-env.js'
 import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
 import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, stripFromLook, loadUserTemplates, saveUserTemplates } from './templates-user.js'
+import { captureShareState, parseShareState, encodeShareState, decodeShareState } from './share-link.js'
 import { DroneCam } from './drone-cam.js'
 import { makeGradientTexture, deriveBgColors, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
@@ -72,10 +73,6 @@ import './ui/v28.css'
 // it lives in its own async chunk and never delays first paint
 
 // ------------------------------------------------------------------ params
-
-// the survey markers findPois always emits — shared by the Tour folder and
-// the MOTION panel so their from/to lists can never drift apart
-const POI_IDS = ['PK-01', 'PK-02', 'PK-03', 'PK-04', 'DEP-05']
 
 const DEM_PRESETS = {
   'Monument Valley': [36.998, -110.0984],
@@ -202,20 +199,15 @@ const params = {
   camSpeed: 1,
   surveyLines: true,
 
-  // motion
+  // motion — flyDuration/flyEasing drive the general camera-to-camera tween
+  // (cameraPreset, dolly, click-to-focus…), not just the old Motion panel;
+  // paused gates ambient animation in tick(). No dedicated UI exposes these
+  // three any more (Camera → Motion was cut — dead controls, see commit
+  // message), but all three stay live and load-bearing.
   ringSpeed: 1.0,
   flyDuration: 1.8,
   flyEasing: 'smooth',
   paused: false,
-
-  // tour
-  tourFrom: 'PK-01',
-  tourTo: 'PK-02',
-  tourDuration: 14,
-  tourAltitude: 2.5,
-  tourSmoothing: 0.7,
-  tourLook: 0.1,
-  tourBank: 0.8,
 
   // performance
   pixelRatio: Math.min(window.devicePixelRatio, 2),
@@ -349,13 +341,63 @@ const params = {
   lightPreset: 'map-default', // studio lighting preset (lighting.js)
 }
 
+// ------------------------------------------------------------------ share-link restore
+// The reference every share link diffs against (see share-link.js) — captured
+// BEFORE anything below mutates params, so it always matches the app's own
+// hard-coded defaults, exactly like whatever the sender's boot computed.
+const BASE_TEMPLATE_LOOK = Object.freeze(captureLook(params))
+
+// A pasted share link carries #s=<payload> in the URL HASH — never the query
+// string, since lat/lon is location data and a hash fragment is never sent
+// over the network to any server (see share-link.js for the encoding). This
+// has to be fully synchronous: it must land before anything below reads
+// `params` for the first time, and nothing here can afford to await.
+let pendingShareCam = null // applied once `camera`/`controls` exist, below
+if (location.hash.startsWith('#s=')) {
+  try {
+    const decoded = decodeShareState(location.hash.slice(3))
+    const shared = decoded && parseShareState(decoded, BASE_TEMPLATE_LOOK)
+    if (shared) {
+      Object.assign(params, shared.look) // every key here is one of TEMPLATE_KEYS — see parseShareState
+      params.demLat = shared.loc.lat
+      params.demLon = shared.loc.lon
+      params.demZoom = shared.loc.zoom
+      params.demLocation = 'Custom'
+      pendingShareCam = shared.cam
+    }
+  } catch (err) {
+    console.warn('share link ignored:', err) // a garbled/old-format fragment just boots the default view
+  }
+}
+
 // ------------------------------------------------------------------ renderer / scene
 
 const container = document.getElementById('app')
 const loadingEl = document.getElementById('loading')
-// the loader is a branded card (name + baseline + plane) — status text lives
-// in its own line so updating it never wipes the markup
+// the loader is a branded card (name + baseline + spinning planet) — status
+// text lives in its own line so updating it never wipes the markup
 const loadingStatus = loadingEl.querySelector('.ld-status') ?? loadingEl
+
+// the loader paints inline (index.html) the instant the HTML parses, well
+// before this module even finishes loading — window.__ldStart timestamps
+// that exact moment. hideLoading() enforces "at least 2s on screen" against
+// THAT clock (never a flash), but only for the very first dismissal: once the
+// initial view is up, later fetches (search, zoom refine…) reuse the same
+// card and should hide the instant they're done, not linger.
+const LOADING_MIN_MS = 2000
+const loadingStart = typeof window.__ldStart === 'number' ? window.__ldStart : performance.now()
+let loadingDismissedOnce = false
+function hideLoading() {
+  if (loadingDismissedOnce) {
+    loadingEl.classList.add('hidden')
+    return
+  }
+  const wait = Math.max(0, LOADING_MIN_MS - (performance.now() - loadingStart))
+  setTimeout(() => {
+    loadingDismissedOnce = true
+    loadingEl.classList.add('hidden')
+  }, wait)
+}
 
 const renderer = new THREE.WebGLRenderer({
   powerPreference: 'high-performance',
@@ -448,6 +490,14 @@ controls.maxPolarAngle = Math.PI * 0.49
 controls.minDistance = 6
 controls.maxDistance = 150 // room to frame the whole slab before the orbit gate
 controls.update()
+// a share link's camera pose overrides the default HOME framing — world-space
+// coordinates are already relative to whatever demLat/demLon just got applied
+// above, so this is portable across locations with no further translation
+if (pendingShareCam) {
+  camera.position.set(pendingShareCam.px, pendingShareCam.py, pendingShareCam.pz)
+  controls.target.set(pendingShareCam.tx, pendingShareCam.ty, pendingShareCam.tz)
+  controls.update()
+}
 
 // image-based lighting for believable PBR speculars. Kept alive (not disposed)
 // so an HDRI sky environment can be PMREM-processed on demand — see applyEnvironment.
@@ -752,163 +802,18 @@ function cameraPreset(name) {
   flyTo(pose.pos, pose.target)
 }
 
-// ------------------------------------------------------------------ tour mode
-
-// One continuous Catmull-Rom spline: current camera pose → above the FROM poi →
-// arc across the terrain → standoff short of the TO poi. Sampled by ARC LENGTH
-// (uniform speed), driven by a trapezoidal velocity profile, with all rotation
-// going through a damped "gimbal" controller so snaps are impossible.
-
-const TOUR_N = 240
-const tour = {
-  active: false,
-  t: 0,
-  bank: 0,
-  uA: 0.2, // arc-length fraction where the path passes over the FROM poi
-  curve: null,
-  aTop: new THREE.Vector3(),
-  bTop: new THREE.Vector3(),
-}
-const _tp = new THREE.Vector3()
-const _tg = new THREE.Vector3()
-const _tt0 = new THREE.Vector3()
-const _tt1 = new THREE.Vector3()
-const _tm = new THREE.Matrix4()
-const _tq = new THREE.Quaternion()
-const _tqr = new THREE.Quaternion()
-const Z_AXIS = new THREE.Vector3(0, 0, 1)
+// `tour.active` is read (and defensively reset to false) in several places
+// shared with the GPX-follow / drone-cam wiring — kept as a minimal shell so
+// those checks stay valid. What used to DRIVE it — startTour/tourGaze, a
+// Catmull-Rom flight between two survey markers (tourFrom/tourTo) with a
+// trapezoidal speed profile and a damped gimbal — was UI-orphaned back at
+// v28 ("Tour folder POI fiction", see that commit) and never wired to
+// anything since: startTour had zero call sites anywhere in the app. Removed
+// here as part of the Camera → Motion cleanup rather than left as a
+// live/dead twin (the trap this repo already has one instance of in
+// region-skirt.js vs. the deleted region-plate.js).
+const tour = { active: false }
 const UP = new THREE.Vector3(0, 1, 0)
-
-function boxBlur(arr, radius, passes = 1) {
-  let a = arr
-  for (let p = 0; p < passes; p++) {
-    const out = new Float32Array(a.length)
-    for (let i = 0; i < a.length; i++) {
-      let s = 0
-      let c = 0
-      for (let j = Math.max(0, i - radius); j <= Math.min(a.length - 1, i + radius); j++) {
-        s += a[j]
-        c++
-      }
-      out[i] = s / c
-    }
-    a = out
-  }
-  return a
-}
-
-// trapezoidal velocity: accelerate → cruise at constant speed → decelerate
-function trapezoid(t, r) {
-  t = THREE.MathUtils.clamp(t, 0, 1)
-  if (t < r) return (t * t) / (2 * r * (1 - r))
-  if (t > 1 - r) {
-    const u = 1 - t
-    return 1 - (u * u) / (2 * r * (1 - r))
-  }
-  return (t - r / 2) / (1 - r)
-}
-
-function startTour() {
-  if (modes && modes.mode !== 'surface') return // tours fly surface-space paths
-  cameraAuto.stop()
-  const A = pois.find((p) => p.id === params.tourFrom)
-  const B = pois.find((p) => p.id === params.tourTo)
-  if (!A || !B || A === B) return
-
-  // ground path A → standoff short of B (ending on B itself would degenerate
-  // to a vertical view), arced sideways for a more interesting line
-  const a = new THREE.Vector3(A.x, 0, A.z)
-  const bFull = new THREE.Vector3(B.x, 0, B.z)
-  const dist = a.distanceTo(bFull)
-  const dirAB = bFull.clone().sub(a).normalize()
-  const b = bFull.clone().addScaledVector(dirAB, -Math.min(7, dist * 0.4))
-  const mid = a.clone().add(b).multiplyScalar(0.5)
-  mid.addScaledVector(new THREE.Vector3(-dirAB.z, 0, dirAB.x), dist * 0.22)
-
-  const px = new Float32Array(TOUR_N)
-  const pz = new Float32Array(TOUR_N)
-  const ground = new Float32Array(TOUR_N)
-  for (let i = 0; i < TOUR_N; i++) {
-    const t = i / (TOUR_N - 1)
-    const u = 1 - t
-    px[i] = u * u * a.x + 2 * u * t * mid.x + t * t * b.x
-    pz[i] = u * u * a.z + 2 * u * t * mid.z + t * t * b.z
-    ground[i] = terrain.sample(px[i], pz[i])
-  }
-
-  // altitude: clearance envelope (rolling max) blurred hard — rises over
-  // mountains as one long swell, never tracks bumps
-  const radius = Math.round(4 + params.tourSmoothing * 30)
-  const envelope = new Float32Array(TOUR_N)
-  for (let i = 0; i < TOUR_N; i++) {
-    let m = -Infinity
-    for (let j = Math.max(0, i - radius); j <= Math.min(TOUR_N - 1, i + radius); j++) m = Math.max(m, ground[j])
-    envelope[i] = m
-  }
-  const smoothY = boxBlur(envelope, radius, 3)
-
-  // one continuous spline starting at the CURRENT camera position — the
-  // approach is just the first leg of the same flight, no phase transition
-  const pts = [camera.position.clone()]
-  for (let i = 0; i < TOUR_N; i += 20) pts.push(new THREE.Vector3(px[i], smoothY[i] + params.tourAltitude, pz[i]))
-  pts.push(new THREE.Vector3(px[TOUR_N - 1], smoothY[TOUR_N - 1] + params.tourAltitude, pz[TOUR_N - 1]))
-  tour.curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal', 0.5)
-  tour.curve.arcLengthDivisions = 400
-  tour.curve.updateArcLengths()
-
-  // arc-length fraction where we pass over the FROM poi (gaze switches there)
-  let bestD = Infinity
-  for (let i = 0; i <= 200; i++) {
-    const s = i / 200
-    tour.curve.getPointAt(s, _tp)
-    const d = Math.hypot(_tp.x - A.x, _tp.z - A.z)
-    if (d < bestD) {
-      bestD = d
-      tour.uA = s
-    }
-  }
-
-  tour.aTop.set(A.x, A.h + 0.6, A.z)
-  tour.bTop.set(B.x, B.h + 0.6, B.z)
-  tour.duration = params.tourDuration
-  tour.bank = 0
-  tour.t = 0
-  tour.active = true
-  tween.active = false
-}
-
-// gaze target along the flight: frame the FROM poi on approach, then look
-// ahead down the path, converging onto the TO poi at the end
-function tourGaze(s, camPos, out) {
-  const ahead = Math.min(s + params.tourLook, 1)
-  tour.curve.getPointAt(ahead, out)
-  out.y -= params.tourAltitude * 0.7 // gaze slightly below the flight line
-  // hand the gaze off BEFORE we're overhead the FROM poi — looking straight
-  // down while passing over it flips the heading violently
-  const fromBlend = THREE.MathUtils.smoothstep(s, tour.uA * 0.15, tour.uA * 0.75)
-  out.lerp(tour.aTop, 1 - fromBlend)
-  out.lerp(tour.bTop, THREE.MathUtils.smoothstep(s, 0.85, 1))
-
-  // pitch clamp: never look down steeper than ~72°, pushing the gaze point
-  // forward instead — guards against gimbal flips in every configuration
-  const dx = out.x - camPos.x
-  const dz = out.z - camPos.z
-  const horiz = Math.hypot(dx, dz)
-  const drop = camPos.y - out.y
-  const minHoriz = drop * 0.33
-  if (drop > 0 && horiz < minHoriz) {
-    if (horiz > 1e-4) {
-      const k = minHoriz / horiz
-      out.x = camPos.x + dx * k
-      out.z = camPos.z + dz * k
-    } else {
-      tour.curve.getTangentAt(s, _tt0)
-      out.x = camPos.x + _tt0.x * minHoriz
-      out.z = camPos.z + _tt0.z * minHoriz
-    }
-  }
-  return out
-}
 
 document.documentElement.style.setProperty('--hud-accent', params.hudAccent)
 document.documentElement.style.setProperty('--hud-ink', params.hudInk)
@@ -1151,7 +1056,7 @@ async function loadRealTerrain() {
     console.error('DEM load failed:', err)
     loadingStatus.textContent = 'elevation fetch failed — check connection'
     setTimeout(() => {
-      loadingEl.classList.add('hidden')
+      hideLoading()
       loadingStatus.textContent = 'generating terrain…'
     }, 2600)
   } finally {
@@ -1182,7 +1087,7 @@ function regenerateTerrain() {
       if (peaksLayer.enabled) peaksLayer.refresh()
       if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
       rebuildPending = false
-      loadingEl.classList.add('hidden')
+      hideLoading()
       resolve()
     }, 50)
   )
@@ -1255,7 +1160,7 @@ modes = new Modes({
         params.demLocation = 'Custom'
         await fetchAndBuildDem()
       } catch (err) {
-        loadingEl.classList.add('hidden')
+        hideLoading()
         throw err
       } finally {
         demBusy = false
@@ -2039,6 +1944,40 @@ async function openExportUI() {
 // changes here.
 const shortcutsOverlay = buildShortcutsOverlay()
 
+// ------------------------------------------------------------------ share link
+// Builds a URL that reproduces the current look + location + camera pose
+// (encoding lives in share-link.js). GPX is deliberately never included — a
+// track can be megabytes and would blow any URL budget, so a link made while
+// one is loaded says so explicitly (see the toast in bars.js) rather than
+// silently dropping it.
+async function shareCurrentView() {
+  const cam = {
+    px: camera.position.x, py: camera.position.y, pz: camera.position.z,
+    tx: controls.target.x, ty: controls.target.y, tz: controls.target.z,
+  }
+  const state = captureShareState(params, cam, BASE_TEMPLATE_LOOK)
+  const encoded = encodeShareState(state)
+  const url = `${location.origin}${location.pathname}#s=${encoded}`
+  const hasTrack = !!gpxLayer.track
+  const note = hasTrack ? ' — your GPX track isn’t included' : ''
+
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'ShibuMap', text: `A view I made with ShibuMap${note}`, url })
+      return { ok: true, shared: true, hasTrack }
+    } catch (err) {
+      if (err?.name === 'AbortError') return { ok: false, cancelled: true } // user dismissed the OS share sheet
+      // any other share-sheet failure falls through to the clipboard below
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(url)
+    return { ok: true, copied: true, hasTrack }
+  } catch {
+    return { ok: false, url, hasTrack } // clipboard blocked — nothing more we can do automatically
+  }
+}
+
 const topBar = buildTopBar({
   params,
   setDarkMode: (v) => {
@@ -2055,6 +1994,7 @@ const topBar = buildTopBar({
   openExport: openExportUI,
   // "?" keyboard-shortcuts help — self-updating overlay, reads SHORTCUTS live
   toggleShortcuts: () => shortcutsOverlay.toggle(),
+  share: shareCurrentView,
 })
 
 const bottomBar = buildBottomBar({
@@ -2477,40 +2417,9 @@ function updateCameraMotion(dt) {
     drone.update(dt)
     return
   }
-  // cinematic tour: arc-length uniform speed + trapezoid profile + damped gimbal
-  if (tour.active) {
-    tour.t = Math.min(1, tour.t + dt / (tour.duration || params.tourDuration))
-    const s = trapezoid(tour.t, 0.18)
-
-    // position: exact on the spline, constant speed thanks to getPointAt
-    tour.curve.getPointAt(s, _tp)
-    camera.position.copy(_tp)
-
-    // desired orientation: look at the gaze target, rolled into the turn
-    tourGaze(s, _tp, _tg)
-    controls.target.copy(_tg)
-    _tm.lookAt(camera.position, _tg, UP)
-    _tq.setFromRotationMatrix(_tm)
-    tour.curve.getTangentAt(s, _tt0)
-    tour.curve.getTangentAt(Math.min(s + 0.02, 1), _tt1)
-    const curl = _tt0.x * _tt1.z - _tt0.z * _tt1.x // signed xz turn over the window
-    const arrived = tour.t >= 1
-    // after arrival: settle — unwind the bank and let the gimbal fully converge
-    // before handing off, so OrbitControls has nothing to snap to
-    const bankTarget = arrived ? 0 : THREE.MathUtils.clamp(curl * 15 * params.tourBank, -0.5, 0.5)
-    tour.bank = THREE.MathUtils.damp(tour.bank, bankTarget, 2.5, dt)
-    _tq.multiply(_tqr.setFromAxisAngle(Z_AXIS, tour.bank))
-
-    // gimbal: rotation chases the desired orientation with a max slew rate,
-    // so it can never jump — 80°/s hard ceiling
-    const angle = camera.quaternion.angleTo(_tq)
-    if (angle > 1e-5) {
-      const f = Math.min(1 - Math.exp(-3.2 * dt), (1.4 * dt) / angle)
-      camera.quaternion.slerp(_tq, f)
-    }
-
-    if (arrived && angle < 0.001 && Math.abs(tour.bank) < 0.001) tour.active = false
-  } else if (tween.active) {
+  // tour.active can never actually be true any more (see the `tour` shell's
+  // comment above) — the general fly-to tween below is what's left to drive
+  if (tween.active) {
     tween.t = Math.min(1, tween.t + dt / params.flyDuration)
     const e = EASINGS[params.flyEasing](tween.t)
     camera.position.lerpVectors(tween.p0, tween.p1, e)

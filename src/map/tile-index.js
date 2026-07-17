@@ -56,7 +56,7 @@ export const LOD_LEVELS = [
 export const ROAD_LOD_LEVELS = [
   { lod: 0, tileZoom: 8, demZoomMax: 8 },
   { lod: 1, tileZoom: 11, demZoomMax: 11 },
-  { lod: 2, tileZoom: 14, demZoomMax: Infinity },
+  { lod: 2, tileZoom: 13, demZoomMax: Infinity },
 ]
 
 // `levels` defaults to LOD_LEVELS (water) so every existing call site is

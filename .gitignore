@@ -21,3 +21,4 @@ public/data/water-tiles/
 # the closest LOD keeps every road class including footway/steps per the
 # project's no-simplification rule, see build-road-tiles.mjs)
 public/data/road-tiles/
+_staging/

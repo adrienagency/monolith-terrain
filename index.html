@@ -60,16 +60,42 @@
   </head>
   <body>
     <div id="app"></div>
-    <div id="loading" class="hidden">
+    <!-- Loader: no "hidden" class here on purpose — this whole card is inline
+         markup + CSS so it paints on first byte, before style.css's webfonts
+         swap in and long before the JS bundle (Three.js + the app) has even
+         been fetched. main.js only ever ADDS the .hidden class once the real
+         terrain is built (see loadingStatus/loadingEl in main.js) and never
+         before a 2s-minimum has elapsed, so this can't flash. -->
+    <div id="loading">
       <div class="ld-name">ShibuMap</div>
       <div class="ld-base">Any place on Earth, as a quiet relief map</div>
-      <div class="ld-track" aria-hidden="true">
-        <svg class="ld-plane" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M21.5 12.7c.8-.3.8-1.1 0-1.4l-5.9-1.9L9.3 2.9c-.4-.5-1-.4-1.2.2l1.6 6.1-5.2-.9-1.7-2.2c-.3-.4-.9-.3-.9.2l.6 3.9c.1.4.1.8 0 1.2l-.6 3.9c-.1.5.6.7.9.2l1.7-2.2 5.2-.9-1.6 6.1c.2.6.8.7 1.2.2l6.3-6.5 5.9-1.5z"/>
-        </svg>
-      </div>
+      <!-- small planet, tilted on its axis (axis drawn through it), spinning
+           on itself — pure SVG/CSS, no image, no JS required to animate -->
+      <svg class="ld-globe" viewBox="0 0 64 64" aria-hidden="true">
+        <defs>
+          <radialGradient id="ldShade" cx="34%" cy="30%" r="78%">
+            <stop offset="0%" stop-color="#fdfcf9"/>
+            <stop offset="55%" stop-color="#ddd9cf"/>
+            <stop offset="100%" stop-color="#a8a496"/>
+          </radialGradient>
+        </defs>
+        <g class="ld-tilt">
+          <line class="ld-axis" x1="32" y1="3" x2="32" y2="61"/>
+          <circle class="ld-pole" cx="32" cy="4.5" r="1.1"/>
+          <circle class="ld-pole" cx="32" cy="59.5" r="1.1"/>
+          <circle class="ld-sphere" cx="32" cy="32" r="16.5" fill="url(#ldShade)"/>
+          <ellipse class="ld-equator" cx="32" cy="32" rx="16.5" ry="5.2"/>
+          <ellipse class="ld-merid ld-merid-1" cx="32" cy="32" rx="16.5" ry="16.5"/>
+          <ellipse class="ld-merid ld-merid-2" cx="32" cy="32" rx="16.5" ry="16.5"/>
+          <ellipse class="ld-merid ld-merid-3" cx="32" cy="32" rx="16.5" ry="16.5"/>
+        </g>
+      </svg>
       <div class="ld-status">generating terrain&hellip;</div>
     </div>
+    <!-- timestamps the moment the loader actually painted, NOT when the JS
+         bundle finishes booting — main.js reads this to enforce "at least 2s
+         on screen" from the true start, so a fast connection never flashes it -->
+    <script>window.__ldStart = performance.now()</script>
     <script type="module" src="/src/boot.js"></script>
   </body>
 </html>

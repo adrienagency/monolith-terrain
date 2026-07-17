@@ -3,6 +3,7 @@
 
 import { el, iconButton, refreshAll } from './kit.js'
 import { parseLatLon } from '../geo.js'
+import { showToast } from './toast.js'
 
 const I = {
   globe:
@@ -16,6 +17,8 @@ const I = {
   eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>',
   search:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.5-4.5"/></svg>',
+  share:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.3 10.7l7.3-4.3M8.3 13.3l7.3 4.3"/></svg>',
   route:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="19" r="2.4"/><circle cx="18" cy="5" r="2.4"/><path d="M8 17.5C11 15 9 11 12 9.5S16.5 8 16.5 6.8"/></svg>',
   iso: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 4.6v8.8L12 21l-8-4.6V7.6L12 3z"/><path d="M12 12l8-4.4M12 12L4 7.6M12 12v9"/></svg>',
@@ -54,6 +57,32 @@ export function buildTopBar(ctx) {
     }
   })
   bar.append(exportBtn)
+
+  // one click copies a link that reproduces this exact look + location +
+  // camera (navigator.share on mobile hands it to the OS share sheet
+  // instead — "facilitate sharing", per the brief)
+  const shareBtn = iconButton(I.share, '', async () => {
+    if (shareBtn.disabled) return
+    shareBtn.disabled = true
+    try {
+      const res = await ctx.share()
+      if (res?.cancelled) {
+        // user backed out of the OS share sheet — no feedback needed
+      } else if (res?.ok) {
+        const trackNote = res.hasTrack ? ' — GPX track not included' : ''
+        showToast((res.copied ? 'Link copied' : 'Shared') + trackNote)
+      } else {
+        showToast('Could not create the link')
+      }
+    } catch (err) {
+      console.error('Share failed:', err)
+      showToast('Could not create the link')
+    } finally {
+      shareBtn.disabled = false
+    }
+  })
+  shareBtn.setAttribute('data-tip', 'Copy a link to this exact view — look, location and camera. GPX tracks are never included.')
+  bar.append(shareBtn)
 
   const dark = iconButton(I.moon, '', () => {
     ctx.setDarkMode(!ctx.params.darkMode)

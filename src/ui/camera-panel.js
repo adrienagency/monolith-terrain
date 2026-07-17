@@ -1,5 +1,5 @@
-// CAMERA panel — viewpoint, focus, motion and performance. Docked in the
-// left dock, directly below Scan.
+// CAMERA panel — viewpoint, focus, cinematic automation and performance.
+// Docked in the left dock, directly below Scan.
 
 import { el, slider, toggle, select, button, section, visibleWhen, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
@@ -14,7 +14,7 @@ export function buildCameraPanel(ctx) {
     icon: ICON,
     side: 'left',
     width: 268,
-    tip: 'Viewpoint, focus, motion and rendering performance.',
+    tip: 'Viewpoint, focus, cinematic automation and rendering performance.',
   })
 
   const sCam = panel.addSection(section('Lens & Focus', { open: false }))
@@ -43,18 +43,6 @@ export function buildCameraPanel(ctx) {
     button('Stop', () => ctx.stopCamera(), { ghost: true })
   )
   sAuto.body.append(autoRow)
-
-  const sMot = panel.addSection(section('Motion'))
-  sMot.body.append(
-    toggle({ label: 'Pause ambient motion', get: () => params.paused, set: (v) => { params.paused = v } }),
-    slider({ label: 'Fly duration', min: 0.4, max: 4, step: 0.1, get: () => params.flyDuration, set: (v) => { params.flyDuration = v } }),
-    select({ label: 'Fly easing', options: ['smooth', 'glide', 'linear'], get: () => params.flyEasing, set: (v) => { params.flyEasing = v } })
-  )
-  const flyRow = el('div', 'ce-btn-row')
-  const flyBtn = button('Fly the GPX track', () => ctx.flyTrack(), { accent: true })
-  flyBtn.setAttribute('data-tip', 'Load a GPX first, then fly along it like a drone.')
-  flyRow.append(flyBtn, button('Stop', () => ctx.stopTour(), { ghost: true }))
-  sMot.body.append(flyRow)
 
   const sPerf = panel.addSection(section('Performance'))
   sPerf.body.append(

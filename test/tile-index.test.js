@@ -87,7 +87,20 @@ test('lodForZoom/tileZoomForLod: an explicit `levels` table (ROAD_LOD_LEVELS) is
   assert.equal(lodForZoom(12, ROAD_LOD_LEVELS), 2) // just past — LOD2
   assert.equal(tileZoomForLod(0, ROAD_LOD_LEVELS), 8)
   assert.equal(tileZoomForLod(1, ROAD_LOD_LEVELS), 11)
-  assert.equal(tileZoomForLod(2, ROAD_LOD_LEVELS), 14)
+  // The close-LOD literal is a MEASURED tradeoff, not a free choice. Tiling only
+  // redistributes bytes, it never shrinks them — the region's road network is
+  // ~850 MB either way, so pick by file count and fetches-per-view:
+  //   z14 -> 22,556 tiles / 1,051 MB / ~1.0 MB biggest tile / 64 fetches per view
+  //   z13 ->  5,834 tiles /   887 MB / 2.9 MB biggest tile / ~16 fetches per view
+  // Re-measure BOTH if you touch it.
+  assert.equal(tileZoomForLod(2, ROAD_LOD_LEVELS), 13)
+  // The property worth pinning, beyond the literal: roads are ~7x denser than
+  // water, so their close tiles must stay finer than water's or a single tile
+  // becomes unloadable.
+  assert.ok(
+    tileZoomForLod(2, ROAD_LOD_LEVELS) > tileZoomForLod(2),
+    'road close-LOD tiles must be finer than water close-LOD tiles'
+  )
 })
 
 test('ROAD_LOD_LEVELS and LOD_LEVELS share the same demZoom band SCHEME (far<=8, mid 9-11, close>=12), only tileZoom differs', () => {

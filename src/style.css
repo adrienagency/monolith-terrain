@@ -51,37 +51,54 @@ body {
   color: rgba(35, 32, 26, 0.62);
 }
 
-#loading .ld-track {
-  position: relative;
-  width: 230px;
-  height: 22px;
-  margin-top: 10px;
-  overflow: hidden;
+/* small tilted planet, spinning on itself. The tilt (axis drawn through the
+   sphere) is a static rotation of the whole group; the "spin" is faked with
+   three meridian ellipses that squash from the sphere's full width down to a
+   sliver and back — the classic pure-CSS globe trick, staggered so it reads
+   as continuous rotation rather than a pulse. GPU-only properties (transform,
+   opacity) throughout, so it stays smooth even while the main bundle is
+   still parsing. */
+#loading .ld-globe {
+  width: 58px;
+  height: 58px;
+  margin-top: 8px;
+  overflow: visible;
 }
-
-#loading .ld-track::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  border-top: 1px dashed rgba(35, 32, 26, 0.28);
+#loading .ld-tilt {
+  transform: rotate(-16deg);
+  transform-origin: 32px 32px;
 }
-
-#loading .ld-plane {
-  position: absolute;
-  top: 50%;
-  left: -26px;
-  width: 20px;
-  height: 20px;
-  color: #23201a;
-  transform: translateY(-50%);
-  animation: ld-fly 2.4s linear infinite;
+#loading .ld-axis {
+  stroke: rgba(35, 32, 26, 0.4);
+  stroke-width: 1;
+  stroke-dasharray: 1.5 2.5;
+  stroke-linecap: round;
 }
-
-@keyframes ld-fly {
-  from { left: -26px; }
-  to { left: 240px; }
+#loading .ld-pole {
+  fill: rgba(35, 32, 26, 0.5);
+}
+#loading .ld-equator {
+  fill: none;
+  stroke: rgba(35, 32, 26, 0.18);
+  stroke-width: 0.7;
+}
+#loading .ld-merid {
+  fill: none;
+  stroke: rgba(35, 32, 26, 0.32);
+  stroke-width: 0.8;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ld-spin 3.2s ease-in-out infinite;
+}
+#loading .ld-merid-2 {
+  animation-delay: -1.0667s; /* a third out of phase — three lines, evenly spaced */
+}
+#loading .ld-merid-3 {
+  animation-delay: -2.1333s;
+}
+@keyframes ld-spin {
+  0%, 100% { transform: scaleX(1); }
+  50% { transform: scaleX(0.04); }
 }
 
 #loading .ld-status {
@@ -94,6 +111,40 @@ body {
 
 #loading.hidden {
   opacity: 0;
+}
+
+/* transient toast (Share button feedback) — bottom-centre, matches the
+   loader card's glass treatment so it reads as the same visual family */
+.ce-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 32px;
+  transform: translate(-50%, 8px);
+  max-width: min(86vw, 420px);
+  padding: 11px 18px;
+  border-radius: 10px;
+  background: rgba(252, 251, 248, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 12px 34px rgba(20, 24, 28, 0.16);
+  backdrop-filter: blur(14px);
+  font-family: 'Bricolage Grotesque', system-ui, sans-serif;
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
+  color: #23201a;
+  text-align: center;
+  z-index: 80;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s, transform 0.25s;
+}
+.ce-toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+body.dark .ce-toast {
+  background: rgba(18, 19, 22, 0.9);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #e8e4da;
 }
 
 /* ------------------------------------------------------------- HUD (FUI) */
