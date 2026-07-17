@@ -56,15 +56,89 @@ const OUT = new URL('../public/data/lake-tiles/', import.meta.url)
 // LOD1 (mid, z7): the >=1 km² band — "a lake you'd name on a regional map".
 // LOD2 (close, z9): the floor a trail-race organiser actually cares about —
 //   a small named alpine lake next to a col must be there.
+// MEASURED, first full run (2026-07-17): area gates ALONE cannot bound this
+// layer. At gates 100/1/0.1 the world came out at **9.0 GB / 24,598 tiles,
+// biggest tile 41.5 MB** — full-fidelity shoreline is simply heavy (≥1 km²
+// alone was 49,856 lakes / 1.7 GB, ~34 KB/lake), and one monster (the
+// Caspian) rode whole into every LOD. So each LOD also SIMPLIFIES
+// (Douglas-Peucker, helpers below) with a tolerance chosen to stay around
+// one on-screen pixel at that LOD's intended viewing distance — invisible
+// where it's used, and the only thing that makes "worldwide" a real size.
+// (The project's "never simplify" rule is about routes/ruisseaux as drawn at
+// map scale — a sub-pixel shoreline tolerance at continental distance is a
+// different animal, and the in-region Alps tiles stay near-lossless for
+// close-ups.)
+//   LOD0 z5, views ≥360 km wide: 1 px ≈ 280 m → eps 0.0025°
+//   LOD1 z7, views 90-180 km:    1 px ≈  70 m → eps 0.0006°
+//   LOD2 z9, views ≤46 km:       1 px ≈  19 m → eps 0.00017°
 const LAKE_AREA_GATES_KM2 = [
-  { lod: 0, minAreaKm2: 100 }, // z5 far — only big lakes
-  { lod: 1, minAreaKm2: 1 }, // z7 mid
-  { lod: 2, minAreaKm2: 0.1 }, // z9 close — everything above a small floor
+  { lod: 0, minAreaKm2: 100, epsilonDeg: 0.0025 }, // z5 far — only big lakes
+  { lod: 1, minAreaKm2: 5, epsilonDeg: 0.0006 }, // z7 mid — lakes you'd name on a regional map
+  { lod: 2, minAreaKm2: 0.5, epsilonDeg: 0.00017 }, // z9 close — small named alpine lakes
 ]
 
 // The coarsest floor gates the SQL: no LOD wants anything below it, so
 // nothing below it is ever fetched.
 const MIN_GATE_KM2 = Math.min(...LAKE_AREA_GATES_KM2.map((g) => g.minAreaKm2))
+
+// --- Douglas-Peucker simplification ------------------------------------------
+// Copied verbatim from scripts/build-mapdata.mjs (which top-level-executes on
+// import, so it can't be imported from). Iterative (explicit stack), keeps
+// endpoints, ring-closure preserved.
+function perpDist(p, a, b) {
+  const [px, py] = p, [ax, ay] = a, [bx, by] = b
+  const dx = bx - ax, dy = by - ay
+  const lenSq = dx * dx + dy * dy
+  if (lenSq === 0) return Math.hypot(px - ax, py - ay)
+  const t = ((px - ax) * dx + (py - ay) * dy) / lenSq
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+}
+function simplifyLine(points, epsilon) {
+  if (points.length < 3) return points
+  const keep = new Uint8Array(points.length)
+  keep[0] = 1
+  keep[points.length - 1] = 1
+  const stack = [[0, points.length - 1]]
+  while (stack.length) {
+    const [start, end] = stack.pop()
+    if (end <= start + 1) continue
+    let maxDist = -1, maxIdx = -1
+    for (let i = start + 1; i < end; i++) {
+      const d = perpDist(points[i], points[start], points[end])
+      if (d > maxDist) { maxDist = d; maxIdx = i }
+    }
+    if (maxDist > epsilon) {
+      keep[maxIdx] = 1
+      stack.push([start, maxIdx], [maxIdx, end])
+    }
+  }
+  const out = []
+  for (let i = 0; i < points.length; i++) if (keep[i]) out.push(points[i])
+  return out
+}
+function simplifyRing(ring, epsilon) {
+  if (ring.length < 4) return ring
+  const open = ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1] ? ring.slice(0, -1) : ring.slice()
+  const simplified = simplifyLine(open, epsilon)
+  if (simplified.length < 3) return null // collapsed — can't form a ring
+  return [...simplified, simplified[0]]
+}
+function simplifyGeometry(geom, epsilon) {
+  switch (geom.type) {
+    case 'Polygon': {
+      const rings = geom.coordinates.map((r) => simplifyRing(r, epsilon)).filter(Boolean)
+      return rings.length === 0 ? null : { ...geom, coordinates: rings }
+    }
+    case 'MultiPolygon': {
+      const polys = geom.coordinates
+        .map((poly) => poly.map((r) => simplifyRing(r, epsilon)).filter(Boolean))
+        .filter((poly) => poly.length > 0)
+      return polys.length === 0 ? null : { ...geom, coordinates: polys }
+    }
+    default:
+      return geom // lakes are polygons; anything else passes through untouched
+  }
+}
 
 // Continent bbox windows. The world query is run per-continent and unioned,
 // NOT as one global scan — see the comment on `APPROX_KM2` below for why this
@@ -168,7 +242,17 @@ async function main() {
   for (let i = 0; i < LAKE_LOD_LEVELS.length; i++) {
     const { lod, tileZoom } = LAKE_LOD_LEVELS[i]
     const gate = LAKE_AREA_GATES_KM2[i]
-    const kept = features.filter((f) => f.areaKm2 >= gate.minAreaKm2)
+    // Each LOD gets its OWN simplified copy at that LOD's sub-pixel epsilon —
+    // see the note above LAKE_AREA_GATES_KM2 for why gates alone measured 9 GB.
+    // A lake whose ring collapses entirely at this epsilon is genuinely
+    // invisible at this LOD's viewing distance: drop it.
+    const kept = features
+      .filter((f) => f.areaKm2 >= gate.minAreaKm2)
+      .map((f) => {
+        const g = simplifyGeometry(f.geometry, gate.epsilonDeg)
+        return g ? { ...f, geometry: g } : null
+      })
+      .filter(Boolean)
 
     // Feature/tile assignment: duplicate a feature into EVERY tile its bbox
     // intersects (via the same tilesForBBox the client uses), and dedupe
