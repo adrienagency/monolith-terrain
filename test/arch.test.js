@@ -1,6 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { headingAt, computeArchSpecs, perpOf, ARCH_SPAN, ARCH_HEIGHT } from '../src/arch.js'
+import {
+  headingAt,
+  computeArchSpecs,
+  perpOf,
+  ARCH_SPAN,
+  ARCH_HEIGHT,
+  ARCH_POST_THICK,
+  ARCH_BEAM_THICK,
+} from '../src/arch.js'
 
 test('headingAt points from the previous point to the next, normalized', () => {
   const world = [{ x: 0, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }, { x: 20, y: 0, z: 0 }]
@@ -51,4 +59,22 @@ test('perpOf rotates a heading 90 degrees (unit length preserved)', () => {
 test('arch sizing constants are positive and in a sane world-unit band', () => {
   assert.ok(ARCH_SPAN > 0.5 && ARCH_SPAN < 10)
   assert.ok(ARCH_HEIGHT > 0.5 && ARCH_HEIGHT < 10)
+})
+
+// task 24: "deux pylônes de 400x100px et une traverse de 600x100px" — a real
+// truss gantry, not two thin sticks. Pins the exact ratios from the brief:
+// pylon height:width = 4:1, beam length:thickness = 6:1, beam spanning the
+// FULL clear width (span + one post thickness, so its ends land flush with
+// each post's outer face).
+test('arch pylon is a 4:1 height:width rectangle, not a thin flagpole', () => {
+  assert.ok(Math.abs(ARCH_HEIGHT / ARCH_POST_THICK - 4) < 1e-9)
+})
+
+test('arch beam is a 6:1 length:thickness rectangle and spans the full gate width', () => {
+  const beamLen = ARCH_SPAN + ARCH_POST_THICK // same formula buildArchMesh uses
+  assert.ok(Math.abs(beamLen / ARCH_BEAM_THICK - 6) < 1e-9)
+})
+
+test('the pylon width and the beam thickness share the same module (both "100" in the reference photo)', () => {
+  assert.equal(ARCH_POST_THICK, ARCH_BEAM_THICK)
 })

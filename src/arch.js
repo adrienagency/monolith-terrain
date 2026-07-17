@@ -65,11 +65,28 @@ export function computeArchSpecs(world, isLoop) {
 // length: the terrain patch itself (TERRAIN_SIZE) is what sets the visual
 // scale a track drapes onto, not the route's real-world km, so a fixed span
 // reads sensibly whether the loaded race is 5km or 220km.
-export const ARCH_SPAN = 2.0 // clear width a runner passes through
-export const ARCH_HEIGHT = 2.6 // post height above the ground
-export const ARCH_POST_THICK = 0.14
-export const ARCH_BEAM_THICK = 0.18
-export const ARCH_LABEL_GAP = 0.22 // label plane floats this far below the beam's underside
+//
+// Task 24 rebuild: the old arch (POST_THICK 0.14 against a 2.6-tall post —
+// an 18.6:1 height:width sliver) read as "deux bâtons" with text floating
+// between them, not a gate. The user's own reference photo + literal ask —
+// "deux pylônes de 400x100px et une traverse de 600x100px" — gives a real
+// truss gantry's proportions: a shared 100px module sizes BOTH the pylon's
+// own width and the beam's own thickness (both "100" in the reference),
+// while the pylon reads 400:100 = 4:1 (height:width) and the beam 600:100 =
+// 6:1 (length:thickness). ARCH_UNIT below IS that module — every other
+// constant is derived from it so the ratios stay exact by construction
+// rather than by eyeballing four independent numbers:
+//   pylon width  (ARCH_POST_THICK)          = 1 × unit
+//   pylon height (ARCH_HEIGHT)              = 4 × unit   (the 4:1 ratio)
+//   beam thickness (ARCH_BEAM_THICK)        = 1 × unit   (same module as the pylon's width)
+//   beam length = span + one post thickness = 6 × unit   (the 6:1 ratio) →
+//     solving for the span that makes that true: span = 5 × unit
+export const ARCH_UNIT = 0.5 // the shared "100px" module — tune ONE number to rescale the whole gate
+export const ARCH_POST_THICK = ARCH_UNIT // pylon width — "100"
+export const ARCH_HEIGHT = ARCH_UNIT * 4 // pylon height — "400" (4:1 height:width per pylon)
+export const ARCH_BEAM_THICK = ARCH_UNIT // beam thickness — the OTHER "100"
+export const ARCH_SPAN = ARCH_UNIT * 5 // clear width a runner passes through — chosen so beamLen (span + one post thickness) lands exactly on 6×unit below
+export const ARCH_BANNER_GAP = 0.03 // banner plane floats this far in FRONT of the beam's face (avoids z-fighting; reads as flush-mounted, not floating)
 
 // ---------------------------------------------------------------- mesh (THREE)
 
@@ -129,18 +146,42 @@ export function buildArchMesh(spec, { THREE, sampleGround, makeLabel, ink = '#17
   beam.renderOrder = renderOrder
   group.add(beam)
 
-  // label plane(s) — one per face, oriented so its FRONT (the side you read
-  // text on) points back along the direction the runner is arriving FROM,
-  // i.e. it faces the runner as they approach the gate. A tiny along-dir
-  // epsilon offset keeps two coincident loop faces from z-fighting.
-  const labelY = beamY - ARCH_LABEL_GAP
+  // banner plane(s) — one per face, MOUNTED ON THE BEAM (task 24): "une
+  // traverse... avec marqué start/finish", "comme le panneau de la photo" —
+  // a flat wordmark carried BY the crossbar, not floating text between two
+  // posts. So this is now sized from the SPAN (wide, banner-shaped — close
+  // to the beam's own length) rather than from the post height, and sits at
+  // the beam's own Y, flush against its front face instead of dangling
+  // below it. Oriented so its FRONT (the readable side) points back along
+  // the direction the runner is arriving FROM, i.e. it faces the runner as
+  // they approach the gate.
+  const beamHalf = beamLen / 2
   faces.forEach((f, i) => {
     const { tex, aspect } = makeLabel(f.text)
     const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.FrontSide, depthWrite: false })
-    const planeH = ARCH_HEIGHT * 0.4
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(planeH * aspect, planeH), mat)
-    const eps = (i === 0 ? 1 : -1) * 0.03
-    mesh.position.set(spec.pos.x + f.dir.x * eps, labelY, spec.pos.z + f.dir.z * eps)
+    // width-driven: read close to the beam's own length (a banner spanning
+    // the gate), height follows the label texture's own aspect — capped so
+    // a very short word (e.g. a 2-letter placeholder) can't blow up taller
+    // than the beam can sensibly carry.
+    const bannerW = Math.min(ARCH_SPAN * 0.86, beamHalf * 1.72)
+    const bannerH = Math.min(bannerW / aspect, ARCH_BEAM_THICK * 3.2)
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(bannerW, bannerH), mat)
+    // flush-mounted on the beam's FRONT face: offset along the face normal
+    // (-dir, same axis the rotation below points it) by half the beam's own
+    // thickness plus a hairline gap — reads as attached to the crossbar,
+    // never floating clear of it. A tiny extra offset along perp(dir) (the
+    // beam's own length axis) keeps two coincident loop faces (same pos,
+    // near-identical dir) from z-fighting each other.
+    const nx = -f.dir.x
+    const nz = -f.dir.z
+    const faceOff = ARCH_BEAM_THICK / 2 + ARCH_BANNER_GAP
+    const p = perpOf(f.dir)
+    const sideEps = (i === 0 ? 1 : -1) * 0.02
+    mesh.position.set(
+      spec.pos.x + nx * faceOff + p.x * sideEps,
+      beamY,
+      spec.pos.z + nz * faceOff + p.z * sideEps
+    )
     // face AGAINST the arrival direction (normal = -dir) — a plane's default
     // normal is +Z, so yaw it to point -dir
     mesh.rotation.y = Math.atan2(-f.dir.x, -f.dir.z)
