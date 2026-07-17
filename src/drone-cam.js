@@ -442,12 +442,23 @@ export class DroneCam {
     //     before (task 24 code, arm 12/lift 6, spine-anchored):
     //       median standoff 20.16, range 13.49..26.35, peak yaw 13.0°/s,
     //       11.0% of frames occluded by terrain, 100% on-screen
-    //     after (this code, arm 6/lift 3, curve-anchored + orbit + occlusion):
-    //       see the task-26 report for the re-measured median/range/yaw/
-    //       occlusion% — this comment intentionally doesn't duplicate a
-    //       number that would go stale the next time this file is retuned.
-    this.arm = 6 // baseline distance behind the SUBJECT (world units) — task 26: half of task-24's 12
-    this.lift = 3 // baseline height above the subject — task 26: half of task-24's 6
+    //     after, curve-anchored + orbit + occlusion, arm/lift swept at a
+    //     fixed 1:2 ratio to land the MEASURED median (not the raw constant)
+    //     at 50% closer:
+    //       arm 6.0, lift 3.0 (a literal half of task-24's 12/6) -> median 11.41
+    //       arm 5.1, lift 1.53                                  -> median 10.64
+    //       arm 4.5, lift 2.25                                  -> median  9.99  <- chosen
+    //       arm 4.2, lift 2.10                                  -> median  9.68
+    //     a flat half of the CONSTANT (6/3) undershoots the 50%-closer ask
+    //     because curve-anchoring + resolveOcclusion's pull-in already widen
+    //     the realized distance beyond what the old spine-anchored constant
+    //     implied — the class comment's TASK 26 note says why this table
+    //     has to be re-measured on the real fixture instead of just halved
+    //     on paper this time. 4.5/2.25 is the closest to the exact 50%
+    //     target (10.08) on this exact measurement; see the task-26 report
+    //     for the full re-measured range/yaw/occlusion%/on-screen% table.
+    this.arm = 4.5 // baseline distance behind the SUBJECT (world units) — task 26, see the sweep above
+    this.lift = 2.25 // baseline height above the subject — same 1:2 ratio as every prior round
     this.clearance = 2.6 // minimum gap kept over the ground / ridges
     // hard caps on how fast the rig is allowed to turn — THIS (not the spine
     // smoothing alone) is the actual nausea guarantee: even a pathological
@@ -900,6 +911,20 @@ export class DroneCam {
     this._solvePosition(s, _desiredPos)
     const fp = dt <= 0 ? 1 : 1 - Math.pow(2, -dt / this.posHalfLife)
     this._pos.lerp(_desiredPos, fp)
+    // the LERP itself is a straight line between two independently-clamped
+    // endpoints (last frame's realized position and this frame's freshly
+    // solved+clamped target) — over genuinely rugged terrain the ground
+    // under the MIDDLE of that line can still be higher than the
+    // interpolated Y even though both endpoints were individually safe
+    // (e.g. the straight line crosses over a ridge crest between them).
+    // Task 26's occlusion pull-in makes the desired position swing around a
+    // lot more frame-to-frame than the old spine-anchored rig did, which
+    // makes this latent gap easier to hit — re-clamp the REALIZED lerped
+    // point against the ground directly under IT, not just its endpoints.
+    if (this.sampleGround) {
+      const gc = this.sampleGround(this._pos.x, this._pos.z)
+      if (this._pos.y < gc + this.clearance) this._pos.y = gc + this.clearance
+    }
     this.camera.position.copy(this._pos)
 
     // 2b) occlusion guarantee (task 26 §3) — _subj here is exactly the same

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
-import { resamplePath, smoothPath, slewHeading, solvePitchForNdcY, ndcYForPitch, DroneCam } from '../src/drone-cam.js'
+import { resamplePath, smoothPath, slewHeading, solvePitchForNdcY, ndcYForPitch, resolveOcclusion, DroneCam } from '../src/drone-cam.js'
 
 const len = (pts) => pts.reduce((s, p, i) => (i ? s + Math.hypot(p.x - pts[i - 1].x, p.y - pts[i - 1].y, p.z - pts[i - 1].z) : 0), 0)
 
@@ -126,6 +126,67 @@ test('ndcYForPitch at pitch 0 matches the natural (unrotated) projection', () =>
   assert.ok(Math.abs(got - expected) < 1e-9)
 })
 
+// ---- resolveOcclusion: the "spring arm" camera-collision guarantee (task 26 §3) --
+
+test('resolveOcclusion: flat/clear ground never pulls the camera in', () => {
+  const subj = { x: 0, y: 0, z: 0 }
+  const cam = { x: 0, y: 5, z: -10 }
+  const flat = () => -5 // well below the whole sight-line
+  const r = resolveOcclusion(subj, cam, flat)
+  assert.equal(r.pulled, false)
+  assert.equal(r.x, cam.x)
+  assert.equal(r.y, cam.y)
+  assert.equal(r.z, cam.z)
+})
+
+test('resolveOcclusion: a wall between subject and camera pulls the camera in along the same ray', () => {
+  const subj = { x: 0, y: 0, z: 0 }
+  const cam = { x: 0, y: 2, z: -10 } // camera 10 units behind, slightly above
+  // a ridge that only pokes above the line of sight in the FAR half (near the
+  // camera) — close to the subject the ground stays low and clear.
+  const wall = (x, z) => (Math.abs(z) > 5 ? 100 : -10)
+  const r = resolveOcclusion(subj, cam, wall, { steps: 20, skin: 0.1, minT: 0.1 })
+  assert.equal(r.pulled, true)
+  // pulled STRICTLY closer to the subject than the original camera position
+  const distBefore = Math.hypot(cam.x - subj.x, cam.y - subj.y, cam.z - subj.z)
+  const distAfter = Math.hypot(r.x - subj.x, r.y - subj.y, r.z - subj.z)
+  assert.ok(distAfter < distBefore, `expected a pull-in, got ${distAfter} >= ${distBefore}`)
+  // still along the SAME ray (direction preserved, only magnitude shrunk) —
+  // the "spring arm" contract: a game-style collision shortens the arm, it
+  // doesn't sidestep it.
+  const dirBefore = { x: (cam.x - subj.x) / distBefore, y: (cam.y - subj.y) / distBefore, z: (cam.z - subj.z) / distBefore }
+  const dirAfter = { x: (r.x - subj.x) / distAfter, y: (r.y - subj.y) / distAfter, z: (r.z - subj.z) / distAfter }
+  assert.ok(Math.abs(dirBefore.x - dirAfter.x) < 1e-6 && Math.abs(dirBefore.y - dirAfter.y) < 1e-6 && Math.abs(dirBefore.z - dirAfter.z) < 1e-6)
+})
+
+test('resolveOcclusion: pulled-in position actually clears the ground it was blocked by', () => {
+  const subj = { x: 0, y: 0, z: 0 }
+  const cam = { x: 0, y: 1, z: -20 }
+  const wall = (x, z) => (Math.abs(z) > 8 ? 50 : -10)
+  const r = resolveOcclusion(subj, cam, wall, { steps: 30, skin: 0.2, minT: 0.05 })
+  assert.equal(r.pulled, true)
+  assert.ok(Math.abs(r.z) <= 8 + 1e-9, `pulled-in position ${r.z} should sit at/before the wall at z=±8`)
+})
+
+test('resolveOcclusion: minT floors how far the arm can collapse, even against a wall right at the subject', () => {
+  const subj = { x: 0, y: 0, z: 0 }
+  const cam = { x: 0, y: 0, z: -10 }
+  const wallEverywhere = () => 1000 // blocks at every sampled step, including the first
+  const r = resolveOcclusion(subj, cam, wallEverywhere, { steps: 10, skin: 0.1, minT: 0.3 })
+  assert.equal(r.pulled, true)
+  const dist = Math.hypot(r.x - subj.x, r.y - subj.y, r.z - subj.z)
+  const original = Math.hypot(cam.x - subj.x, cam.y - subj.y, cam.z - subj.z)
+  assert.ok(dist >= original * 0.3 - 1e-6, `expected the minT floor (30% of ${original}) to hold, got ${dist}`)
+})
+
+test('resolveOcclusion: no sampleGround means no-op (degenerate caller, e.g. tests without terrain)', () => {
+  const subj = { x: 0, y: 0, z: 0 }
+  const cam = { x: 1, y: 2, z: 3 }
+  const r = resolveOcclusion(subj, cam, null)
+  assert.equal(r.pulled, false)
+  assert.deepEqual({ x: r.x, y: r.y, z: r.z }, cam)
+})
+
 // ---- DroneCam integration: the dead-zone box + anti-nausea guarantees -----
 
 // A switchback "climb": legs alternate ~75° turns while gaining elevation,
@@ -248,19 +309,18 @@ test('DroneCam standoff breathes (closer/further) but never strays far from the 
   // "varier beaucoup plus le zoom" — the drama system must produce a genuinely
   // wide excursion, not a timid wobble (dramaStandoffMul spans ~0.72..1.95 by
   // design: push in on a col, pull out on flats and bends).
-  assert.ok(maxStandoff - minStandoff > 4, `expected real zoom drama, got range ${minStandoff.toFixed(2)}..${maxStandoff.toFixed(2)}`)
-  // "jamais vraiment très loin" — bounded in ABSOLUTE world units, not relative
-  // to `arm`. A relative bound silently tightens whenever the baseline changes:
-  // this assertion originally allowed arm*1.35 with arm=36 (=48.6 absolute), and
-  // task-20's 50%-closer baseline (arm 24) turned the same expression into 32.4
-  // absolute — stricter than anyone intended, purely by accident. Task 26 halved
-  // the baseline again (arm 12 -> 6, see this.arm's comment in drone-cam.js) —
-  // measured on this exact fixture that moves the range to ~7.33..11.70, so the
-  // fences below are rescaled by the same ~1/2 factor as the baseline itself
-  // (14 -> 6.5, 50 -> 25), same margin either side of the measured range as the
-  // task-24 fences kept around theirs.
-  assert.ok(minStandoff >= 6.5, `standoff dipped too close: ${minStandoff.toFixed(2)}`)
-  assert.ok(maxStandoff <= 25, `standoff strayed too far: ${maxStandoff.toFixed(2)}`)
+  // Task 26 landed arm/lift at 4.5/2.25 (not a flat half of task-24's 12/6) to
+  // hit the MEASURED 50%-closer median on the real europaweg.gpx fixture — see
+  // this.arm's comment in drone-cam.js for the sweep. On THIS fixture that
+  // moves the range to ~5.50..8.78 (range 3.28), so the thresholds below are
+  // rescaled to match: the range floor drops from 4 to 3 (same ~8% margin
+  // below the measured 3.28 as the old floor kept below its own 4.37), and the
+  // absolute fences keep the same asymmetric margin the task-24 fences did
+  // (floor a little under the measured min, ceiling generously over the
+  // measured max to leave room for a more dramatic fixture later): 5.0 and 18.
+  assert.ok(maxStandoff - minStandoff > 3, `expected real zoom drama, got range ${minStandoff.toFixed(2)}..${maxStandoff.toFixed(2)}`)
+  assert.ok(minStandoff >= 5.0, `standoff dipped too close: ${minStandoff.toFixed(2)}`)
+  assert.ok(maxStandoff <= 18, `standoff strayed too far: ${maxStandoff.toFixed(2)}`)
 })
 
 test('DroneCam breathing variation does not regress the dead-zone contract', () => {
