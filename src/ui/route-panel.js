@@ -62,7 +62,7 @@ export function buildRoutePanel(ctx) {
   // (Width/Colour/Gradient/Glow/Markers/Km, above and below) stays GLOBAL —
   // see gpx-layers.js's own file header for why — so this section is the
   // only place per-layer identity lives.
-  const sLayers = panel.addSection(section('Layers', { open: true }))
+  const sLayers = panel.addSection(section('GPX layers', { open: true }))
   const listEl = el('div', 'ce-gpx-layers')
   const emptyEl = el('div', 'ce-gpx-layers-empty', 'No tracks loaded yet — Load GPX above to add the first one.')
   const addRow = el('div', 'ce-btn-row')
@@ -363,8 +363,10 @@ export function buildRoutePanel(ctx) {
     toggle({
       // drone-cam chase, not a flat top-down follow — trails the reveal
       // head with the same smooth easing as "Fly the GPX track" (Camera
-      // panel), just synced frame-for-frame to playback instead of timed
-      label: 'Drone follow',
+      // panel), just synced frame-for-frame to playback instead of timed.
+      // Label is "Follow", not "Drone follow" (task 24 — the user struck
+      // through "Drone" on their annotated screenshot).
+      label: 'Follow',
       get: () => params.gpxFollow,
       set: (v) => {
         params.gpxFollow = v
