@@ -196,12 +196,6 @@ export class DroneCam {
     this.maxYawRateDeg = 120
     this.maxPitchRateDeg = 160
     this.rotHalfLife = 0.09
-    this.floorStiffness = 60 // ground BOUNCE spring, under-damped on purpose
-    this.floorDamping = 7
-    this._yVel = 0
-    this._lastY = null
-    this._occT = 0
-    this._occW = 0
 
     this._q = new THREE.Quaternion()
     this._m = new THREE.Matrix4()
@@ -278,8 +272,6 @@ export class DroneCam {
     this.duration = duration
     this.t = THREE.MathUtils.clamp(seedAt, 0, 1)
     this._desiredFor(this.t, this._pos)
-    this._yVel = 0
-    this._lastY = null
     this.camera.position.copy(this._pos)
     this._aim(0, this.t, false)
     this.active = true
@@ -332,6 +324,17 @@ export class DroneCam {
     this._desiredFor(s, _desired)
     this.curve.getPointAt(s, _subj)
 
+    // Ground clearance is solved on the DESIRED point, BEFORE damping. The
+    // old order — damp first, then clamp the realized position every frame —
+    // glued the camera to the terrain profile whenever the chosen view
+    // crossed high ground ('vient se caler au sol'), because the clamp
+    // re-traced every bump. Lifting the target instead lets the damping
+    // smooth the ride over the same relief.
+    if (this.sampleGround && !this.topDown) {
+      const g = this.sampleGround(_desired.x, _desired.z)
+      if (_desired.y < g + this.clearance) _desired.y = g + this.clearance
+    }
+
     if (dt <= 0) this._pos.copy(_desired)
     else {
       this._pos.x = damp(this._pos.x, _desired.x, this.posHalfLife, dt)
@@ -339,36 +342,17 @@ export class DroneCam {
       this._pos.y = damp(this._pos.y, _desired.y, this.posHalfLifeY, dt)
     }
 
-    // ground BOUNCE: soft spring under clearance, hard floor below
-    if (this.sampleGround && !this.topDown) {
-      const h = Math.min(Math.max(dt, 1 / 240), 1 / 20)
-      const gc = this.sampleGround(this._pos.x, this._pos.z)
-      const floor = gc + this.clearance
-      if (this._pos.y < floor) {
-        this._yVel += (floor - this._pos.y) * this.floorStiffness * h
-        this._yVel *= Math.exp(-this.floorDamping * h)
-        this._pos.y += this._yVel * h
-      } else this._yVel *= Math.exp(-5 * h)
-      const hard = gc + this.clearance * 0.7
-      if (this._pos.y < hard) { this._pos.y = hard; this._yVel = Math.max(this._yVel, 0) }
+    // absolute safety only — the lifted target means this almost never fires;
+    // it exists so damping lag can't carry the camera into rock on a cliff
+    if (this.sampleGround) {
+      const hard = this.sampleGround(this._pos.x, this._pos.z) + this.clearance * 0.7
+      if (this._pos.y < hard) this._pos.y = hard
     }
 
-    // de-occlusion net, gated + damped (Cinemachine pattern) — the user's
-    // distant side views rarely need it, but a ridge can still slide between
-    const r = resolveOcclusion(_subj, this._pos, this.sampleGround, { steps: 10, skin: 0.35, minT: 0.35 })
-    this._occT = r.pulled ? (this._occT || 0) + Math.max(dt, 0) : 0
-    const occWant = r.pulled && this._occT > 0.15 ? 1 : 0
-    this._occW = damp(this._occW || 0, occWant, occWant ? 0.15 : 0.6, Math.max(dt, 1 / 240))
-    if (r.pulled && this._occW > 0.01) {
-      const w = Math.min(this._occW, 1)
-      this._pos.x += (r.x - this._pos.x) * w
-      this._pos.y += (r.y - this._pos.y) * w
-      this._pos.z += (r.z - this._pos.z) * w
-      if (this.sampleGround) {
-        const hard = this.sampleGround(this._pos.x, this._pos.z) + this.clearance * 0.7
-        if (this._pos.y < hard) { this._pos.y = hard; this._yVel = Math.max(this._yVel, 0) }
-      }
-    }
+    // NO de-occlusion, on purpose. The view is the USER'S choice now: if a
+    // ridge crosses it, the honest behaviour is to keep the chosen angle and
+    // let them tap another view key — the old auto pull-in read as the camera
+    // 'zooming on its own', the exact reported bug.
 
     this.camera.position.copy(this._pos)
     this._standoffMul = this._pos.distanceTo(_subj) / this.arm
