@@ -40,7 +40,7 @@ import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
 import { MapLayers } from './map/layer-manager.js'
 import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED } from './map/aerial-layer.js'
-import { lightingFor } from './daycycle.js'
+import { lightingFor, darkModeFor } from './daycycle.js'
 import { SunDisc } from './sun-disc.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
@@ -605,6 +605,17 @@ function applyTimeOfDay(hour) {
   // `const mapLayers` binding exists, and `mapLayers?.` does NOT save you from
   // a temporal dead zone — it throws, aborting the whole module.
   mapLayers.setSun({ dir: sun.position, color: s.sunColor, sky: s.hemiSky })
+
+  // Night at this PLACE puts the whole UI in dark mode, and daylight brings it
+  // back. Guarded on change: setDarkMode rebuilds the background, contours and
+  // grid, and applyTimeOfDay fires on every drag of the 24 h slider. The
+  // hysteresis lives in darkModeFor — see its comment for why a bare threshold
+  // would flap here.
+  // s.sunElevation, NOT s.elevation: the latter is where the LIGHT is placed
+  // (lifted above ground at night so the moon shines from above), which would
+  // read as broad daylight at midnight.
+  const wantDark = darkModeFor(s.sunElevation, params.darkMode)
+  if (wantDark !== params.darkMode) setDarkMode(wantDark)
 }
 
 function placeSun() {

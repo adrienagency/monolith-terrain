@@ -96,64 +96,74 @@ const SKY_NIGHT = '#141d33'
 const GROUND_DAY = '#4a3a2a'
 const GROUND_NIGHT = '#12141c'
 
+// The elevation the LIGHT is placed at, given the sun's true elevation.
+//
+// Above the horizon it is simply the sun. Below, the light lifts smoothly to a
+// high, soft "moon" instead of following the sun underground — but it lifts
+// CONTINUOUSLY, and it keeps the sun's own bearing. The previous version put
+// the moon at the antipode and switched to it at the nautical boundary, which
+// spun the light 179 degrees in a single step ("l'éclairage change de sens",
+// measured at 3.9h and 20.4h). Nothing here may branch on a threshold.
+export function lightElevationFor(el) {
+  if (el >= 2) return el
+  const t = clamp01((2 - el) / 20) // 0 at +2 deg, 1 at -18 deg
+  return 2 + t * 38
+}
+
 // hour + place → every number the light rig needs. `date` defaults to today:
 // the cycle follows the real season (a December 17 h in Annecy is night; a
 // June 17 h is broad day) — that's a feature, not drift.
+//
+// EVERY value below is a continuous function of the sun's true elevation.
+// There are no mode branches any more: `mode` is reported for callers that
+// want to know where they are (dark mode keys off it), but nothing in the
+// numbers steps when it changes.
 export function lightingFor(hour, latDeg, lonDeg, date = new Date()) {
   const when = solarHourToDate(hour, lonDeg, date)
   const sun = sunPosition(when, latDeg, lonDeg)
   const el = sun.elevation
 
-  // day strength: 0 at the horizon, 1 once the sun is 35° up
-  const day = clamp01(el / 35)
-  // civil twilight 0..-6°, nautical -6..-12°, full night below
-  const civil = clamp01(1 + el / 6) // 1 at horizon, 0 at -6°
-  const naut = clamp01(1 + (el + 6) / 6) // 1 at -6°, 0 at -12°
+  const day = clamp01(el / 35) // 0 at the horizon, 1 once well up
+  const civil = clamp01(1 + el / 6) // 1 at the horizon, 0 at -6 deg
+  const naut = clamp01(1 + (el + 6) / 6) // 1 at -6 deg, 0 at -12 deg
+  const warm = 1 - clamp01(el / 45) // low sun is golden, high sun is white
 
-  if (el > 0) {
-    // ----- day: warmth fades with altitude, intensity rises with it
-    const warm = 1 - clamp01(el / 45)
-    return {
-      mode: 'day',
-      azimuth: sun.azimuth,
-      elevation: el,
-      sunColor: mix(SUN_DAY, SUN_GOLDEN, warm),
-      sunIntensity: 0.8 + 3.0 * day, // toned down: the old 1.4+7.0 blew past the ACES shoulder on lit slopes
-      hemiSky: mix(SKY_DUSK, SKY_DAY, clamp01(el / 12)),
-      hemiGround: GROUND_DAY,
-      hemiIntensity: 0.32 + 0.5 * day,
-      envIntensity: 0.14 + 0.26 * day,
-    }
-  }
-  if (el > -6) {
-    // ----- civil twilight: the sun is set but the sky still carries the scene.
-    // The directional light dies out here (continuous with day's 1.4 floor).
-    return {
-      mode: 'twilight',
-      azimuth: sun.azimuth,
-      elevation: 2, // grazing fill from where the sun went down
-      sunColor: SUN_GOLDEN,
-      sunIntensity: 0.8 * civil, // stays continuous with day's floor above
-      hemiSky: mix(SKY_NAUT, SKY_DUSK, civil),
-      hemiGround: mix(GROUND_NIGHT, GROUND_DAY, civil),
-      hemiIntensity: 0.22 + 0.1 * civil,
-      envIntensity: 0.1 + 0.04 * civil,
-    }
-  }
-  // ----- night (nautical band eases into it): the directional light becomes
-  // the MOON — GTA-style celestial swap, one light plays both bodies. A true
-  // lunar ephemeris would add real drama (some nights are moonless); until
-  // someone asks, a serene fixed moon opposite the sun keeps every night
-  // readable, which for a map is the point.
+  // Day colour eases into golden as the sun drops, then golden eases into
+  // moonlight through the nautical band. Both ends meet exactly.
+  const dayColor = mix(SUN_DAY, SUN_GOLDEN, warm)
+  const sunColor = el > 0 ? dayColor : mix(MOON, SUN_GOLDEN, naut)
+
+  // Intensity: the day arc runs down to 0.8 at the horizon, then CROSS-FADES
+  // to moonlight over civil twilight — 0.8 at the horizon, 0.22 by -6 deg,
+  // flat after. Fading twilight out and moonlight in on different bands (my
+  // first attempt) left a dip to near-black at exactly -6 deg, darker than
+  // deep night; one shared weight cannot dip.
+  const sunIntensity = el > 0 ? 0.8 + 3.0 * day : 0.8 * civil + 0.22 * (1 - civil)
+
+  const mode = el > 0 ? 'day' : el > -6 ? 'twilight' : 'night'
+
   return {
-    mode: 'night',
-    azimuth: (sun.azimuth + 180) % 360,
-    elevation: 35,
-    sunColor: MOON,
-    sunIntensity: 0.22,
-    hemiSky: mix(SKY_NIGHT, SKY_NAUT, naut),
-    hemiGround: GROUND_NIGHT,
-    hemiIntensity: 0.2,
-    envIntensity: 0.09,
+    mode,
+    azimuth: sun.azimuth, // always the sun's own bearing — it never flips
+    elevation: lightElevationFor(el), // where the LIGHT is placed
+    sunElevation: el, // where the SUN actually is: the honest answer to 'is it night here'
+    sunColor,
+    sunIntensity,
+    hemiSky: el > 0 ? mix(SKY_DUSK, SKY_DAY, clamp01(el / 12)) : mix(mix(SKY_NIGHT, SKY_NAUT, naut), SKY_DUSK, civil),
+    hemiGround: mix(GROUND_NIGHT, GROUND_DAY, el > 0 ? 1 : civil),
+    hemiIntensity: el > 0 ? 0.32 + 0.5 * day : 0.2 + 0.02 * naut + 0.1 * civil,
+    envIntensity: el > 0 ? 0.14 + 0.26 * day : 0.09 + 0.01 * naut + 0.04 * civil,
   }
+}
+
+// Should the UI be in dark mode at this solar elevation?
+//
+// A SCHMITT TRIGGER, not a threshold: `currentlyDark` widens whichever way we
+// are already going. Dragging the 24 h slider across a bare threshold would
+// flip the theme back and forth on every frame, and setDarkMode is expensive
+// (it rebuilds the background, the contours and the grid). The band also
+// matches how dusk actually reads — it goes dark once the sun is properly
+// down (-3 deg), and comes back only once it is properly up again (0 deg).
+export function darkModeFor(elevationDeg, currentlyDark = false) {
+  return currentlyDark ? elevationDeg < 0 : elevationDeg < -3
 }
