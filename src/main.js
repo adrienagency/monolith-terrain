@@ -327,6 +327,11 @@ const params = {
   waterEnabled: true, // lakes on by default — the world lake layer is cheap (fetch-on-view)
   waterOpacity: 0.9,
   waterFill: true,
+  // Coastline outline — OFF. Natural Earth 1:10m is too coarse to trace a real
+  // coast: its straight chords cut corners the terrain + bathymetry underneath
+  // already draw correctly, so the map reads better bare than outlined. Kept as
+  // an option rather than removed. See water-layer.js's coastRings.
+  coastLine: false,
   placesEnabled: true,
   placesDensity: 1,
   placesSize: 1,
@@ -1334,6 +1339,7 @@ const DEFAULT_MAPLAYERS = Object.freeze({
   waterEnabled: params.waterEnabled,
   waterOpacity: params.waterOpacity,
   waterFill: params.waterFill,
+  coastLine: false, // stays off through a Reset map — see the param's own note
   placesEnabled: params.placesEnabled,
   placesDensity: params.placesDensity,
   placesSize: params.placesSize,

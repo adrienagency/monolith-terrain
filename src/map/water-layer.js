@@ -302,7 +302,14 @@ export class WaterLayer {
       lakeParts = await this._neParts('lakes', bounds, zoom)
     }
 
-    const coastRings = await this._neRings('coastline', bounds, zoom)
+    // Coastline OUTLINE — off by default (params.coastLine). It comes from the
+    // same Natural Earth 1:10m source whose coarseness got the NE lakes layer
+    // replaced: drawn over a coast, its straight chords visibly cut corners the
+    // terrain and bathymetry underneath already render correctly, so the map
+    // reads better with no outline at all than with a wrong one. Kept behind
+    // the flag rather than deleted — the rings are still fetched only when it's
+    // on, so leaving it off costs nothing.
+    const coastRings = params.coastLine ? await this._neRings('coastline', bounds, zoom) : []
     if (id !== this._buildId || dem !== terrain.dem) return
     // Overture's base/water theme is derived from OSM (ODbL) same as the
     // Overpass paths, so rendering tile-sourced water — Alps rich-water tiles

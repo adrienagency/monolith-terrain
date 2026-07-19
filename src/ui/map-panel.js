@@ -15,17 +15,20 @@ export function buildMapPanel(ctx) {
   const waterToggle = toggle({ label: 'Rivers & water', get: () => params.waterEnabled, set: (v) => { params.waterEnabled = v; ctx.rebuildMapLayers(); refreshAll() } })
   const waterOpacity = slider({ label: 'Water opacity', min: 0, max: 1, step: 0.02, get: () => params.waterOpacity, set: (v) => { params.waterOpacity = v; ctx.mapLayers.setOpacity('water', v) } })
   const waterFill = toggle({ label: 'Lakes & seas fill', get: () => params.waterFill, set: (v) => { params.waterFill = v; ctx.rebuildMapLayers() } })
+  // off by default — Natural Earth's 1:10m coast is too coarse to trace a real
+  // shoreline; kept as an option rather than deleted. See water-layer.js.
+  const coastLine = toggle({ label: 'Coastline outline', get: () => params.coastLine, set: (v) => { params.coastLine = v; ctx.rebuildMapLayers() } })
   const placesToggle = toggle({ label: 'Places', get: () => params.placesEnabled, set: (v) => { params.placesEnabled = v; ctx.rebuildMapLayers(); refreshAll() } })
   const placesDensity = slider({ label: 'Places density', min: 0.4, max: 2, step: 0.1, get: () => params.placesDensity, set: (v) => { params.placesDensity = v; ctx.rebuildMapLayers() } })
   const placesSize = slider({ label: 'Places size', min: 0.5, max: 2, step: 0.05, get: () => params.placesSize, set: (v) => { params.placesSize = v; ctx.rebuildMapLayers() } })
   const placesHalo = toggle({ label: 'Text halo', get: () => params.placesHalo, set: (v) => { params.placesHalo = v; ctx.rebuildMapLayers() } })
   sLayers.body.append(
     roadsToggle, roadsOpacity, roadsDetail, roadsColour,
-    waterToggle, waterOpacity, waterFill,
+    waterToggle, waterOpacity, waterFill, coastLine,
     placesToggle, placesDensity, placesSize, placesHalo
   )
   for (const row of [roadsOpacity, roadsDetail, roadsColour]) visibleWhen(row, () => params.roadsEnabled)
-  for (const row of [waterOpacity, waterFill]) visibleWhen(row, () => params.waterEnabled)
+  for (const row of [waterOpacity, waterFill, coastLine]) visibleWhen(row, () => params.waterEnabled)
   for (const row of [placesDensity, placesSize, placesHalo]) visibleWhen(row, () => params.placesEnabled)
 
   const sContour = panel.addSection(section('Contours & Grid'))
