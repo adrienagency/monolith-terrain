@@ -130,6 +130,11 @@ export function aerialZoomFor(bbox, { maxZoom = IGN_MAX_ZOOM, budgetPx = TARGET_
   return best
 }
 
+// Returned by build() when a newer build has taken over. Distinct from null
+// (genuine failure) and from a built layer: the caller must leave everything
+// exactly as it is, because someone else is already producing the real answer.
+export const SUPERSEDED = Object.freeze({ superseded: true })
+
 export class AerialLayer {
   // `maxTexturePx` is the DEVICE's limit (THREE.WebGLRenderer exposes it as
   // renderer.capabilities.maxTextureSize). We never ask for more than it or
@@ -176,7 +181,12 @@ export class AerialLayer {
         } catch {}
       })
     )
-    if (id !== this._buildId || !ok) return null
+    // Being superseded is NORMAL — the user moved or rezoomed while tiles were
+    // in flight — and it must be reported as its own thing. It used to share
+    // `null` with real failure, so a caller that reacts to failure (by warning
+    // the user and switching the layer off) fired on every ordinary race.
+    if (id !== this._buildId) return SUPERSEDED
+    if (!ok) return null
 
     const uv = aerialUvTransform(bbox, tileGridMerc(x0, y0, cols, rows, z))
 

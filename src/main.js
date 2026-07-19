@@ -39,7 +39,7 @@ import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
 import { MapLayers } from './map/layer-manager.js'
-import { AerialLayer, blockBounds, aerialUnavailable } from './map/aerial-layer.js'
+import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED } from './map/aerial-layer.js'
 import { StudioLighting, sunFromHour, LIGHT_PRESETS } from './lighting.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
@@ -1131,6 +1131,12 @@ function regenerateTerrain() {
       terrain.refreshMatTiling(params) // re-tile the relief material to the new zoom scale
       realWater?.rebuild({ terrain, params }) // water simulation follows the new relief
       const _mlp = mapLayers.rebuild({ dem: terrain.dem, terrain, params }) // roads/water/places re-drape on the new relief
+      // The aerial skin has to re-derive here too. This calls mapLayers.rebuild
+      // DIRECTLY rather than through the rebuildMapLayers wrapper, and that
+      // wrapper was the only thing refreshing the photo — so a zoom change
+      // re-drew the vectors but left the OLD mosaic stretched across the new
+      // block: imagery that visibly ignored the terrain scale.
+      refreshAerial()
       refreshOsmCredit(); _mlp.then(() => refreshOsmCredit())
       regenerateLabels()
       regenerateHud()
@@ -1974,6 +1980,12 @@ async function refreshAerial() {
   }
 
   const built = await aerialLayer.build(bounds)
+
+  // A newer build owns the layer now — touch NOTHING. Treating this as failure
+  // is what made the layer switch itself off whenever two refreshes overlapped,
+  // which is the ordinary case every time the user changes scale.
+  if (built === SUPERSEDED) return
+
   terrain.setAerial(built)
   if (!built) {
     // Covered on paper but every tile failed — a network/provider problem, NOT

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { aerialCovers, aerialUnavailable, aerialUvTransform, aerialZoomFor, lonLatToMerc } from '../src/map/aerial-layer.js'
+import { aerialCovers, aerialUnavailable, aerialUvTransform, aerialZoomFor, lonLatToMerc, SUPERSEDED } from '../src/map/aerial-layer.js'
 import { tilesForBBox } from '../src/map/tile-index.js'
 
 test('aerialCovers: an Annecy patch is covered', () => {
@@ -129,4 +129,20 @@ test('aerialZoomFor: a device that only guarantees 2048 is respected', () => {
   const tiles = tilesForBBox(patch, z)
   const xs = tiles.map((t) => t.x)
   assert.ok((Math.max(...xs) - Math.min(...xs) + 1) * 256 <= 2048)
+})
+
+// --- superseded is not failure ------------------------------------------------
+
+test('SUPERSEDED is a distinct sentinel, not a falsy value', () => {
+  // The bug: build() returned null BOTH when every tile failed and when a
+  // newer build took over. A caller that reacts to failure by warning the user
+  // and switching the layer off then fired on every ordinary race — and a race
+  // is the NORMAL case, because changing scale triggers two refreshes.
+  assert.ok(SUPERSEDED, 'must be truthy, or `if (!built)` swallows it again')
+  assert.notEqual(SUPERSEDED, null)
+  assert.equal(SUPERSEDED.superseded, true)
+})
+
+test('SUPERSEDED is frozen — callers compare identity, not shape', () => {
+  assert.ok(Object.isFrozen(SUPERSEDED))
 })
