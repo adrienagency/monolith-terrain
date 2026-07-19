@@ -40,7 +40,7 @@ import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
 import { MapLayers } from './map/layer-manager.js'
 import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED } from './map/aerial-layer.js'
-import { StudioLighting, sunFromHour, LIGHT_PRESETS } from './lighting.js'
+import { lightingFor } from './daycycle.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
@@ -364,7 +364,6 @@ const params = {
   envLight: 0.16,
   shadowSoftness: 5,
   timeOfDay: 10, // 24 h sun-cycle slider (0..24) — drives sun az/el/intensity/colour
-  lightPreset: 'map-default', // studio lighting preset (lighting.js)
 }
 
 // ------------------------------------------------------------------ share-link restore
@@ -576,33 +575,24 @@ scene.add(sun)
 const hemi = new THREE.HemisphereLight(0xdadada, 0x5c5c5c, params.hemiIntensity)
 scene.add(hemi)
 
-// studio lighting rig (8 presets + 24h cycle) is behind FLAGS.lightingPresets
-// (v40, disabled in prod); null when off — the base sun/hemi rig stays active
-const studio = FLAGS.lightingPresets ? new StudioLighting({ scene, sun, hemi }) : null
-// apply the 24 h time-of-day slider: writes sun az/el/intensity/colour + hemi
+// The 24 h day/night cycle — the ONE control the lighting has now (the studio
+// presets and the six manual sun sliders are gone by request: "retire le
+// systeme d'eclairage et mets juste une tirette de 24h"). lightingFor computes
+// the REAL sun for the block's own lat/lon (see daycycle.js), so this must
+// re-run whenever the hour OR the location changes — loadRealTerrain calls it
+// after every move.
 function applyTimeOfDay(hour) {
-  const s = sunFromHour(hour)
+  const s = lightingFor(hour, params.demLat, params.demLon)
   params.sunAzimuth = s.azimuth
   params.sunElevation = s.elevation
-  params.sunIntensity = s.intensity
+  params.sunIntensity = s.sunIntensity
   params.hemiIntensity = s.hemiIntensity
   params.envLight = s.envIntensity
-  sun.color.copy(s.color)
-  hemi.color.copy(s.hemiSky)
-  hemi.groundColor.copy(s.hemiGround)
+  sun.color.set(s.sunColor)
+  hemi.color.set(s.hemiSky)
+  hemi.groundColor.set(s.hemiGround)
   scene.environmentIntensity = s.envIntensity
   placeSun()
-}
-// restore the scene background when a dark preset is cleared
-function setStudioBackground(hex) {
-  if (hex) { if (_bgTex) { _bgTex.dispose(); _bgTex = null } scene.background = new THREE.Color(hex) }
-  else applyBackground()
-}
-function applyLightPreset(name) {
-  if (!studio) return // presets disabled — base sun rig governs
-  params.lightPreset = name
-  if (name === 'map-default') sun.color.set(0xffffff) // hand colour back to the template
-  studio.apply(name, { params, placeSun, setBackground: setStudioBackground })
 }
 
 function placeSun() {
@@ -1059,6 +1049,7 @@ async function fetchAndBuildDem() {
   } catch {} // a cosmetic cloud hiccup must never abort a terrain build
   refreshAll()
   loadingStatus.textContent = 'generating terrain…'
+  applyTimeOfDay(params.timeOfDay ?? 10) // the sun is location-true — re-aim it for the new place
   await regenerateTerrain()
   // pull the cartouche info for the new zone (async, non-blocking)
   if (params.groundInfo) groundInfo.load(params.demLat, params.demLon, dem)
@@ -1463,8 +1454,11 @@ function applyMonochrome(kind) {
 // post-look + scene toggles. Camera/navigation are never touched.
 function applyLight(l) {
   Object.assign(params, l)
-  placeSun()
-  scene.environmentIntensity = params.envLight
+  // The day cycle owns the sun now: whatever legacy sun keys a template
+  // carries (old saves have manual azimuth/elevation), the light that actually
+  // lands is derived from timeOfDay for the current place. The legacy keys
+  // still load harmlessly — they're simply re-derived over.
+  applyTimeOfDay(params.timeOfDay ?? 10)
   sun.shadow.radius = params.shadowSoftness
 }
 function applySurface(s) {
@@ -2344,8 +2338,6 @@ const panelCtx = {
   rebuildMapLayers,
   refreshAerial,
   applyTimeOfDay,
-  applyLightPreset,
-  lightPresets: Object.entries(LIGHT_PRESETS).map(([value, p]) => ({ value, label: p.label })),
   rebuildRamp: () => {
     terrain.rebuildRamp(params)
     globe.rebuildRamp(params)
@@ -2651,7 +2643,7 @@ history.record()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
 
 // real world is the default source — fetch its tiles on startup. A published
 // race link (#r=, fetch fired at module scope so it ran during boot) takes

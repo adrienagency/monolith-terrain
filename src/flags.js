@@ -4,5 +4,4 @@
 // feature's code stays in the repo — flip the flag to true to bring it back.
 export const FLAGS = {
   water: false, // v37 water simulation (ocean.js) — rejected by Adrien, kept disabled
-  lightingPresets: false, // v40 studio presets + 24h slider (lighting.js) — rejected, kept disabled
 }

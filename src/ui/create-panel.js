@@ -234,26 +234,14 @@ export function buildCreatePanel(ctx) {
   }
 
   // ---------------------------------------------------------------- Light
+  // ONE control: the 24 h day/night cycle. The studio presets and the six
+  // manual sun sliders were removed by request — the hour drives the real sun
+  // (computed for the block's own lat/lon, see daycycle.js): position, warmth,
+  // intensity, sky fill, and the moon at night.
   const sLig = addTo(section('Light'))
-  if (FLAGS.lightingPresets) {
-    // studio lighting presets — reconfigure sun + hemi + IBL (+ softbox area
-    // lights / accent spot) into a photographer's rig (see lighting.js)
-    sLig.body.append(
-      select({ label: 'Studio preset', options: ctx.lightPresets, get: () => params.lightPreset, set: (v) => { ctx.applyLightPreset(v); refreshAll() } })
-    )
-    // 24 h sun cycle: one slider drives azimuth, elevation, intensity and warmth
-    sLig.body.append(
-      slider({ label: 'Time of day (h)', min: 0, max: 24, step: 0.25, get: () => params.timeOfDay, set: (v) => { params.timeOfDay = v; ctx.applyTimeOfDay(v); refreshAll() } })
-    )
-    sLig.body.append(el('div', 'ce-note', 'Manual sun overrides (also driven by the two above)'))
-  }
   sLig.body.append(
-    slider({ label: 'Sun intensity', min: 0, max: 16, step: 0.1, get: () => params.sunIntensity, set: (v) => { params.sunIntensity = v; ctx.placeSun() } }),
-    slider({ label: 'Sun azimuth', min: 0, max: 360, step: 1, get: () => params.sunAzimuth, set: (v) => { params.sunAzimuth = v; ctx.placeSun() } }),
-    slider({ label: 'Sun elevation', min: 5, max: 85, step: 1, get: () => params.sunElevation, set: (v) => { params.sunElevation = v; ctx.placeSun() } }),
-    slider({ label: 'Ambient', min: 0, max: 2, step: 0.05, get: () => params.hemiIntensity, set: (v) => { params.hemiIntensity = v; ctx.placeSun() } }),
-    slider({ label: 'Shadow fill', min: 0, max: 1.5, step: 0.02, get: () => params.envLight, set: (v) => { params.envLight = v; ctx.scene.environmentIntensity = v } }),
-    slider({ label: 'Shadow softness', min: 0, max: 30, step: 0.5, get: () => params.shadowSoftness, set: (v) => { params.shadowSoftness = v; ctx.sun.shadow.radius = v } })
+    slider({ label: 'Time of day (h)', min: 0, max: 24, step: 0.1, get: () => params.timeOfDay, set: (v) => { params.timeOfDay = v; ctx.applyTimeOfDay(v) } }),
+    el('div', 'ce-note', 'The real sun for this place — dawn, noon, dusk, moonlight.')
   )
 
   // ---------------------------------------------------------------- Block
