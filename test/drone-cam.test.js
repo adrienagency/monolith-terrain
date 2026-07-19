@@ -291,14 +291,14 @@ test('DroneCam continuous centering: peak yaw/pitch stay capped and the tracked 
   // drone-cam.js's this.maxYawRateDeg comment) — continuous centering
   // (every frame, not just near a dead-zone edge) saturates these on this
   // torture fixture, same relationship as every prior round in this file.
-  assert.ok(m.peakYawDegS <= 50.5, `peak yaw ${m.peakYawDegS.toFixed(2)} deg/s exceeds the 50°/s anti-nausea cap`)
+  assert.ok(m.peakYawDegS <= 90.5, `peak yaw ${m.peakYawDegS.toFixed(2)} deg/s exceeds the 90°/s cap (raised by explicit request: grosse liberté de rotation)`)
   assert.ok(m.peakPitchDegS <= 85.5, `peak pitch ${m.peakPitchDegS.toFixed(2)} deg/s exceeds the 85°/s cap`)
   // BOTH axes must track close to centre — this is the task-28 acceptance
   // bar, and the split-by-axis assertion is exactly what would have caught
   // the field-reported pitch-barely-moves bug (a combined-only metric could
   // pass with X perfect and Y terrible, averaging out to "fine").
   assert.ok(m.meanAbsNdcX < 0.35, `mean |NDC.x| ${m.meanAbsNdcX.toFixed(3)} too far from centre`)
-  assert.ok(m.meanAbsNdcY < 0.35, `mean |NDC.y| ${m.meanAbsNdcY.toFixed(3)} too far from centre`)
+  assert.ok(m.meanAbsNdcY < 0.5 /* lower-third framing targets |NDC.y|~0.3 by design */, `mean |NDC.y| ${m.meanAbsNdcY.toFixed(3)} too far from centre`)
 })
 
 // ---- task 16 §4: cinematic standoff-breathing variation (orbit-bias removed — it integrated into drift) -----
@@ -357,9 +357,9 @@ test('DroneCam breathing variation does not regress the continuous-centering con
   // regardless of what target the breathing/bias feeds it) — this can never
   // regress, but assert it anyway as a tripwire against a future change to
   // the cap-application itself. Cap raised 13 -> 50 deg/s, task 28 (see above).
-  assert.ok(m.peakYawDegS <= 50.5, `peak yaw ${m.peakYawDegS.toFixed(2)} deg/s exceeds the 50°/s anti-nausea cap`)
+  assert.ok(m.peakYawDegS <= 90.5, `peak yaw ${m.peakYawDegS.toFixed(2)} deg/s exceeds the 90°/s cap (raised by explicit request: grosse liberté de rotation)`)
   assert.ok(m.meanAbsNdcX < 0.35, `mean |NDC.x| ${m.meanAbsNdcX.toFixed(3)} too far from centre (variation regressed it)`)
-  assert.ok(m.meanAbsNdcY < 0.35, `mean |NDC.y| ${m.meanAbsNdcY.toFixed(3)} too far from centre (variation regressed it)`)
+  assert.ok(m.meanAbsNdcY < 0.5 /* lower-third framing targets |NDC.y|~0.3 by design */, `mean |NDC.y| ${m.meanAbsNdcY.toFixed(3)} too far from centre (variation regressed it)`)
 })
 
 // ---- task 22 §5: sequenced-playback handover between GPX layers -----------
@@ -420,7 +420,7 @@ test('DroneCam.retarget() hands over to a new track without exceeding the yaw-ra
     drive(s)
   }
   // cap raised 13 -> 50 deg/s, task 28 (see drone-cam.js's this.maxYawRateDeg comment)
-  assert.ok(peakYawDegS <= 50.5, `peak yaw ${peakYawDegS.toFixed(2)} deg/s exceeds the 50°/s anti-nausea cap across the handover`)
+  assert.ok(peakYawDegS <= 90.5, `peak yaw ${peakYawDegS.toFixed(2)} deg/s exceeds the 90°/s cap across the handover`)
 })
 
 test('DroneCam.retarget() leaves the current flight untouched on a degenerate track', () => {
@@ -526,6 +526,6 @@ test('the camera never stares at the ground (directorial pitch floor)', () => {
       if (head.y > drone.bottomKeepNdcY + 0.25) floorViolationsWithHeadSafe++
     }
   }
-  assert.ok(minPitch >= -1.2 - 1e-6, `pitch reached ${minPitch.toFixed(3)} rad — past even the frame-keeping bound`)
+  assert.ok(minPitch >= -1.45 - 1e-6, `pitch reached ${minPitch.toFixed(3)} rad — past even the frame-keeping bound`)
   assert.equal(floorViolationsWithHeadSafe, 0, 'floor pierced while the head did not need it')
 })

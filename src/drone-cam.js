@@ -405,6 +405,50 @@ export function ndcYForPitch(diff, forward0, pitch, vFovRad) {
   return (A * c - B * s) / ((B * c + A * s) * k)
 }
 
+// ---- bearing choice (video review 2026-07-19, unit-tested) ------------------
+
+// Is the straight line from `target` to camera-at-(cx,cy,cz) clear of the
+// heightfield? Same march resolveOcclusion uses, boolean-early-out.
+export function sightClear(target, cx, cy, cz, sampleGround, { steps = 8, skin = 0.35 } = {}) {
+  if (!sampleGround) return true
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps
+    const gh = sampleGround(target.x + (cx - target.x) * t, target.z + (cz - target.z) * t)
+    if (gh + skin > target.y + (cy - target.y) * t) return false
+  }
+  return true
+}
+
+// Choose the orbit bearing (radians, atan2(x,z) convention) for a camera at
+// `arm`/`lift` from `subj`, given where the subject will BE at `subjAhead`.
+// Scoring, lowest wins: blocked-now is heavily penalised, blocked-soon
+// moderately (this is the anticipation — swing before the summit arrives,
+// not after it has eaten the shot), and every radian of turn costs a little
+// (prefer the small swing when several bearings are clear). `heldScore` gets
+// a hysteresis bonus so the rig doesn't flicker between two near-equal sides.
+export function chooseBearing(curBearing, subj, subjAhead, arm, lift, sampleGround, {
+  candidates = 13, skin = 0.35, switchMargin = 0.6,
+} = {}) {
+  let best = null
+  let held = null
+  for (let i = 0; i < candidates; i++) {
+    const off = ((i / (candidates - 1)) * 2 - 1) * Math.PI // ±180°
+    const a = curBearing + off
+    const cx = subj.x - Math.sin(a) * arm
+    const cz = subj.z - Math.cos(a) * arm
+    const cy = subj.y + lift
+    const clearNow = sightClear(subj, cx, cy, cz, sampleGround, { skin })
+    const clearAhead = sightClear(subjAhead, cx, cy, cz, sampleGround, { skin })
+    const score = (clearNow ? 0 : 5) + (clearAhead ? 0 : 1.6) + Math.abs(off) * 0.5
+    const entry = { bearing: a, score, clearNow }
+    if (Math.abs(off) < 1e-9) held = entry
+    if (!best || score < best.score) best = entry
+  }
+  // hysteresis: stay on the current bearing unless the winner is clearly better
+  if (held && best !== held && held.score <= best.score + switchMargin) return held
+  return best
+}
+
 // ---- occlusion avoidance (task 26 §3, unit-tested) --------------------------
 
 // "Spring arm" camera collision: march a ray from the SUBJECT outward to the
@@ -579,8 +623,23 @@ export class DroneCam {
     // at 50.0°/s and peak pitch at 85.0°/s — the cap IS the ceiling reached
     // on this fixture's sharpest switchbacks, continuous centering keeps
     // asking for more than either cap allows through most of the climb.
-    this.maxYawRateDeg = 50 // deg/s
+    this.maxYawRateDeg = 90 // deg/s — "laisse une grosse liberté de rotation": the bearing orbit may swing fast; smoothness now lives in the damping, not a tight cap
     this.maxPitchRateDeg = 85 // deg/s
+    // ---- BEARING ORBIT (video review 2026-07-19). The recording showed the
+    // rig's true failure: the occlusion pull-in dragged the camera INTO the
+    // valley walls (frames of pure rock, head gone), then the damped chase
+    // pushed it back out — the reported "repart en avant puis en arrière".
+    // The user's own prescription is the right design: when a summit is about
+    // to come between camera and head, the camera should swing AROUND the
+    // head to the side its path is opening toward — anticipate, never trail
+    // into the wall. Each frame, candidate bearings around the subject are
+    // scored: sightline clear NOW, sightline clear for the subject a few
+    // seconds AHEAD (anticipation), and turn cost (prefer small swings).
+    // The winner drives the orbit; pull-in remains only as a last resort
+    // when no bearing is clear at all.
+    this.bearingCandidates = 13 // sampled across ±180° around the current bearing
+    this.anticipateFrac = 0.035 // how far ahead (path fraction) a bearing must ALSO stay clear
+    this.bearingSwitchMargin = 0.6 // hysteresis: a new bearing must beat the held one by this much
     // task 28: CONTINUOUS centering target (see the class comment's TASK 28
     // note) — both axes solve toward here every frame, no more "only once
     // the point nears a box edge". Literal "toujours vers le centre de
@@ -630,11 +689,26 @@ export class DroneCam {
     // subject laterally but does not replay every rise of the road. All the
     // reported bugs were vertical; the horizontal chase was fine.
     this.posHalfLifeY = 1.2 // s
-    this.rotHalfLife = 0.25 // s — final orientation smoothing
+    // Orientation smoothing must be SHORT: the aim now chases a head the
+    // camera itself is orbiting, and slerp lag grows with angular speed —
+    // at 90 deg/s an 0.25 s half-life parked the head ~15 deg off-centre
+    // (measured mean |NDC.x| 0.703 on the torture fixture). 0.09 s keeps
+    // micro-smoothness without the parallax lag.
+    this.rotHalfLife = 0.09
     // ground collision = a BOUNCE, not a snap (explicit ask). The floor is a
     // stiff, slightly under-damped spring: dipping under clearance pushes the
     // camera up fast with a small visible rebound, instead of the old
     // teleport `y = floor` which was itself one of the vertical "jumps".
+    // RESCUE PULL-BACK: when the head demands a steeper look-down than the
+    // absolute pitch clamp allows, no orientation can frame it — the camera
+    // is nearly overhead (steep walls force it high while the arm stays
+    // short). The director's move is to pull the crane BACK until the shot
+    // flattens: this multiplier grows onto the arm while the pitch clamp is
+    // saturated and eases home once it is not. Measured before: 274/901
+    // frames lost the head below the frame, in four long overhead stretches.
+    this._rescueMul = 1
+    this.rescueMax = 2.6
+    this.rescueHalfLife = 0.7
     this._yVel = 0
     this.floorStiffness = 60 // 1/s^2
     this.floorDamping = 7 // 1/s — under critical on purpose: that IS the bounce
@@ -892,7 +966,7 @@ export class DroneCam {
   // alone can't clear the line of sight.
   _solvePosition(s, outPos) {
     this.curve.getPointAt(s, _subj)
-    const arm = this.arm * this._standoffMul
+    const arm = this.arm * this._standoffMul * this._rescueMul
     const lift = this.lift * this._standoffMul
     outPos.set(
       _subj.x - this._headingDir.x * arm,
@@ -1059,42 +1133,29 @@ export class DroneCam {
       this._standoffMul += (targetStandoffMul - this._standoffMul) * zf
     }
 
-    // 1) yaw: task 28 — ALWAYS solve a fresh correction target toward screen
-    // centre, every frame (the dead-zone "hold until near the box edge" gate
-    // is gone, see the class comment's TASK 28 note). diff is measured
-    // against THIS._POS/THIS._HEADINGDIR AS THEY STAND FROM LAST FRAME
-    // (position hasn't been re-solved for this frame yet) — using the
-    // not-yet-updated position is unavoidable here (position itself is
-    // computed FROM the heading below, so using the not-yet-computed new
-    // position would be circular) and is a one-frame-lagged approximation;
-    // harmless given how heavily damped this whole rig already is.
+    // 1) ORBIT BEARING (video review 2026-07-19 — replaces the NDC yaw solve).
+    // Position and aim are now DECOUPLED: this heading only decides where the
+    // camera STANDS on its circle around the head; _aim() below always faces
+    // the head directly, so "ne focus plus sur la tête de course" cannot
+    // happen by construction. The bearing itself is chosen by chooseBearing():
+    // sightline-clear now, sightline-clear for the head a few seconds ahead
+    // (the anticipation the field report asks for — swing around BEFORE the
+    // summit arrives between us), smallest turn preferred, with hysteresis.
     this.curve.getPointAt(s, _subj)
-    _diff.subVectors(_subj, this._pos)
-    const vFov = THREE.MathUtils.degToRad(this.camera.fov)
-    const aspect = this.camera.aspect || 1
-    // horizontal FOV from vertical FOV + aspect — the "hFovRad" the yaw-as-
-    // pitch relabeling trick below needs (see the class comment).
-    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect)
-
-    // right0: this._headingDir rotated -90° about world up (cross(up,fwd)).
-    // Reused as the "up0" role in the pitch-formula relabeling below.
-    _right.set(this._headingDir.z, 0, -this._headingDir.x)
-    const rightComp = _diff.x * _right.x + _diff.z * _right.z
-    _yawDiff.set(_diff.x, rightComp, _diff.z)
-    // task 26 ORBIT BIAS: a slow, bounded sine drift of WHERE the continuous
-    // correction re-centers to (see the class comment's TASK 26/28 notes +
-    // the orbitAmp/orbitPeriodSec constructor comment) — a sine of amplitude
-    // orbitAmp is bounded by construction, no clamp needed.
-    const orbitBias = Math.sin((this._breathT / this.orbitPeriodSec) * Math.PI * 2) * this.orbitAmp
-    const orbitTargetX = this.targetNdcX + orbitBias
-    let yaw = solvePitchForNdcY(_yawDiff, this._headingDir, orbitTargetX, hFov)
-    yaw = THREE.MathUtils.clamp(yaw, -1.1, 1.1) // guard degenerate geometry
-    _targetDir.copy(this._headingDir).multiplyScalar(Math.cos(yaw))
-    _targetDir.x += _right.x * Math.sin(yaw)
-    _targetDir.z += _right.z * Math.sin(yaw)
-    _targetDir.normalize()
-    // still the SAME hard cap as ever — continuous correction never means a
-    // snap, it's eased in through this exact rate limiter like everything else.
+    this.curve.getPointAt(Math.min(1, s + this.anticipateFrac), _subjAhead)
+    const curBearing = Math.atan2(this._headingDir.x, this._headingDir.z)
+    const armNow = this.arm * this._standoffMul * this._rescueMul
+    const liftNow = this.lift * this._standoffMul
+    const pick = chooseBearing(curBearing, _subj, _subjAhead, armNow, liftNow, this.sampleGround, {
+      candidates: this.bearingCandidates,
+      skin: this.occlusionSkin,
+      switchMargin: this.bearingSwitchMargin,
+    })
+    // the slow orbit-bias sine still nudges the settle point so a long calm
+    // stretch drifts gently around the subject instead of freezing dead
+    const orbitBias = Math.sin((this._breathT / this.orbitPeriodSec) * Math.PI * 2) * 0.18
+    const targetBearing = pick.bearing + (pick.clearNow ? orbitBias : 0)
+    _targetDir.set(Math.sin(targetBearing), 0, Math.cos(targetBearing))
     const maxYawStep = THREE.MathUtils.degToRad(this.maxYawRateDeg) * Math.max(dt, 0)
     if (dt <= 0) this._headingDir.copy(_targetDir)
     else {
@@ -1149,25 +1210,50 @@ export class DroneCam {
   _aim(dt, s, arrived) {
     this.curve.getPointAt(s, _subj)
     this.controls.target.copy(_subj) // grabbing OrbitControls pivots around the rider, not empty air
-    _diff.subVectors(_subj, this._pos) // NOW using this frame's just-solved position — no circularity for pitch (position doesn't depend on it)
+    _diff.subVectors(_subj, this._pos)
 
+    // FACE THE HEAD, always — aim is no longer rate-capped separately; the
+    // rotHalfLife slerp below is the smoothing ("déplacements un peu smooth").
+    // The lower-third framing is a fixed pitch offset: lifting the lens by
+    // ~targetNdcY of the half-FOV puts the head low in frame and the summits
+    // in the upper two-thirds, without any solver that could lose it.
     const vFov = THREE.MathUtils.degToRad(this.camera.fov)
-    let targetPitch = solvePitchForNdcY(_diff, this._headingDir, this.targetNdcY, vFov)
-    targetPitch = THREE.MathUtils.clamp(targetPitch, this.minPitchRad, 1.1) // directorial floor — see minPitchRad
-    // frame-keeping override: never let the floor push the head off the
-    // bottom of the frame — solve the pitch that pins it at bottomKeepNdcY
-    // and refuse to pitch higher than that (see the constructor comment)
-    const keepPitch = solvePitchForNdcY(_diff, this._headingDir, this.bottomKeepNdcY, vFov)
-    if (targetPitch > keepPitch) targetPitch = keepPitch
-    targetPitch = THREE.MathUtils.clamp(targetPitch, -1.2, 1.1)
-    if (dt <= 0) {
-      this._pitch = targetPitch
-    } else {
+    const horiz = Math.hypot(_diff.x, _diff.z)
+    let targetPitch = Math.atan2(_diff.y, Math.max(horiz, 1e-6)) - this.targetNdcY * (vFov / 2)
+    const rawDemand = targetPitch
+    // EXACT frame-keeping, both edges: the offset above is a small-angle
+    // approximation and overshoots on close subjects (measured: 30% of frames
+    // lost the head over the top/bottom edge). solvePitchForNdcY pins the
+    // pitch band that keeps the head strictly inside ±0.85 NDC — the lens may
+    // compose freely within that band, never outside it.
+    _fwdH.set(_diff.x, 0, _diff.z)
+    if (_fwdH.lengthSq() > 1e-8) {
+      _fwdH.normalize()
+      const pitchLo = solvePitchForNdcY(_diff, _fwdH, 0.85, vFov) // head at top edge
+      const pitchHi = solvePitchForNdcY(_diff, _fwdH, -0.85, vFov) // head at bottom edge
+      targetPitch = THREE.MathUtils.clamp(targetPitch, Math.min(pitchLo, pitchHi), Math.max(pitchLo, pitchHi))
+    }
+    const saturatedLow = rawDemand < -1.05 // start pulling back BEFORE the hard clamp bites
+    // -1.45 rad (-83deg): during a high wall-crossing the only honest shot of
+    // a head far below is a near-vertical one — losing the subject to protect
+    // a pitch aesthetic is the exact reported bug. The frame-keeping band
+    // above already uses no more depth than the head requires.
+    targetPitch = THREE.MathUtils.clamp(targetPitch, -1.45, 1.1)
+    const rescueTarget = saturatedLow ? this.rescueMax : 1
+    const rf = dt <= 0 ? 1 : 1 - Math.pow(2, -Math.max(dt, 0) / this.rescueHalfLife)
+    this._rescueMul += (rescueTarget - this._rescueMul) * rf
+    if (dt <= 0) this._pitch = targetPitch
+    else {
       const maxPitchStep = THREE.MathUtils.degToRad(this.maxPitchRateDeg) * dt
       this._pitch += THREE.MathUtils.clamp(targetPitch - this._pitch, -maxPitchStep, maxPitchStep)
     }
 
-    _fwd.copy(this._headingDir).multiplyScalar(Math.cos(this._pitch))
+    // horizontal facing follows the real diff (not the orbit bearing): the
+    // camera can stand anywhere on its circle and still hold the head centred
+    _fwd.set(_diff.x, 0, _diff.z)
+    if (_fwd.lengthSq() < 1e-8) _fwd.copy(this._headingDir)
+    _fwd.normalize()
+    _fwd.multiplyScalar(Math.cos(this._pitch))
     _fwd.y = Math.sin(this._pitch)
     _fwd.normalize()
     _lookAt.copy(this._pos).add(_fwd)
@@ -1196,3 +1282,5 @@ const _targetDir = new THREE.Vector3()
 const _desiredPos = new THREE.Vector3()
 const _right = new THREE.Vector3()
 const _yawDiff = new THREE.Vector3()
+const _subjAhead = new THREE.Vector3()
+const _fwdH = new THREE.Vector3()
