@@ -2817,8 +2817,14 @@ function tick() {
     camera.lookAt(0, 0, 0)
   }
 
-  // mode machine: altitude thresholds, glides, altimeter; globe LOD streaming
-  modes.update(dt)
+  // mode machine: altitude thresholds, glides, altimeter; globe LOD streaming.
+  // SUSPENDED during GPX follow: the rail legitimately flies low over the
+  // relief, and the mode machine read that as "zooming against the near
+  // stop" and fired REFINE transitions mid-playback — whiteout, terrain
+  // reload, arrival re-pose. That is the "elle switch d'une vue à l'autre,
+  // décroche totalement" field bug, and it clobbered EVERY camera rig alike,
+  // which is why six rewrites changed nothing on screen.
+  if (!(drone.active && params.gpxFollow && gpxLayer.isPlaying())) modes.update(dt)
   if (modes.mode === 'orbital') globe.update(camera, dt)
 
   // fog respects the Effects sliders at normal viewing (so it actually shows —
