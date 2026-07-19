@@ -39,6 +39,8 @@ import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
 import { MapLayers } from './map/layer-manager.js'
+import { AerialLayer } from './map/aerial-layer.js'
+import { patchBounds } from './map/geo-data.js'
 import { StudioLighting, sunFromHour, LIGHT_PRESETS } from './lighting.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
@@ -332,6 +334,11 @@ const params = {
   // already draw correctly, so the map reads better bare than outlined. Kept as
   // an option rather than removed. See water-layer.js's coastRings.
   coastLine: false,
+  // Aerial photo skin — OFF. First narrow test: IGN orthophotos, Annecy only.
+  // The product's identity is the quiet editorial relief; photography is a tool
+  // the organiser reaches for, never the default look. See map/aerial-layer.js.
+  aerialEnabled: false,
+  aerialOpacity: 0.85,
   placesEnabled: true,
   placesDensity: 1,
   placesSize: 1,
@@ -1926,12 +1933,36 @@ function refreshOsmCredit() {
   const parts = []
   if (loading) parts.push('OSM · chargement…')
   if (params.placesEnabled && params.source === 'real' && modes.mode === 'surface') parts.push('© GeoNames (CC BY 4.0)')
+  // IGN's Licence Ouverte requires visible attribution while its imagery is on
+  // screen — and only while it is: aerialAttribution is null the moment the
+  // layer is off OR the patch leaves the covered area.
+  if (aerialAttribution) parts.push(aerialAttribution)
   credits.setExtra(parts.join(' · '))
 }
 
 // rebuild all map layers (roads/water/places) for the current zone — used by
 // the Map panel toggles (Task 12)
-const rebuildMapLayers = () => { const p = mapLayers.rebuild({ dem, terrain, params }); refreshOsmCredit(); return p.then(() => refreshOsmCredit()) }
+// Aerial photo skin — a narrow first test: IGN orthophotos, Annecy only, off by
+// default (see src/map/aerial-layer.js for why it's scoped to one area, and for
+// the licence notes). Nothing is hosted; tiles come per view from IGN's public
+// WMTS. Rides rebuildMapLayers so it follows every location change on its own.
+const aerialLayer = new AerialLayer()
+let aerialAttribution = null
+async function refreshAerial() {
+  if (!params.aerialEnabled || !dem || params.source !== 'real') {
+    terrain.setAerial(null)
+    aerialAttribution = null
+    refreshOsmCredit()
+    return
+  }
+  const built = await aerialLayer.build(patchBounds(dem))
+  terrain.setAerial(built)
+  // null when the patch is outside the covered area — the credit must then
+  // disappear too, since nothing of IGN's is on screen
+  aerialAttribution = built ? built.attribution : null
+  refreshOsmCredit()
+}
+const rebuildMapLayers = () => { const p = mapLayers.rebuild({ dem, terrain, params }); refreshOsmCredit(); refreshAerial(); return p.then(() => refreshOsmCredit()) }
 
 // "individualiser la zone" — clip the map to the administrative boundary under
 // the view (continent/country/region/departement by zoom). The landform sits
@@ -2266,6 +2297,7 @@ const panelCtx = {
   realWater,
   mapLayers,
   rebuildMapLayers,
+  refreshAerial,
   applyTimeOfDay,
   applyLightPreset,
   lightPresets: Object.entries(LIGHT_PRESETS).map(([value, p]) => ({ value, label: p.label })),

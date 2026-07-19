@@ -21,7 +21,7 @@ export const TEMPLATE_KEYS = [
   'rampStops', 'oceanShallow', 'oceanMid', 'oceanDeep', 'darkMode',
   // map style
   'mapTint', 'heightContrast', 'heightPivot', 'slopeTint',
-  'roadsEnabled', 'roadsOpacity', 'roadsDetail', 'roadColor', 'waterEnabled', 'waterOpacity', 'waterFill', 'coastLine', 'placesEnabled', 'placesDensity', 'placesSize', 'placesHalo',
+  'roadsEnabled', 'roadsOpacity', 'roadsDetail', 'roadColor', 'waterEnabled', 'waterOpacity', 'waterFill', 'coastLine', 'aerialEnabled', 'aerialOpacity', 'placesEnabled', 'placesDensity', 'placesSize', 'placesHalo',
   // grid / contour / ink
   'contourInterval', 'contourOpacity', 'contourWeight', 'contourColor',
   'gridStep', 'gridOpacity', 'gridColor', 'hudInk', 'hudAccent', 'labels',

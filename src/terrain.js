@@ -130,6 +130,15 @@ export class Terrain {
       // block's vertical corners read soft and nothing overhangs the plinth walls
       uSlabHalf: { value: TERRAIN_SIZE / 2 },
       uSlabCorner: { value: (params.slabCorner ?? 0) * TERRAIN_SIZE },
+      // optional aerial-photo skin (src/map/aerial-layer.js) — off unless a
+      // texture is set. uAerialOffset/Scale place the tile mosaic on the block
+      // (the grid always overhangs the patch); uAerialOpacity is the dial that
+      // decides how much of the product's own look survives — see the mix below.
+      uAerial: { value: blackTexture() }, // never null: a null sampler fails to compile on some drivers
+      uAerialOn: { value: 0 },
+      uAerialOpacity: { value: 0.85 },
+      uAerialOffset: { value: new THREE.Vector2(0, 0) },
+      uAerialScale: { value: new THREE.Vector2(1, 1) },
       // drifting cloud shadows, baked by the cloud deck (clouds.js) — a black
       // placeholder keeps the sampler valid until the deck provides its map
       uCloudShadow: { value: blackTexture() },
@@ -257,6 +266,11 @@ uniform sampler2D uRegionMask;
 uniform float uRegionOn;
 uniform sampler2D uCloudShadow;
 uniform vec2 uCloudShadowOff;
+uniform sampler2D uAerial;
+uniform float uAerialOn;
+uniform float uAerialOpacity;
+uniform vec2 uAerialOffset;
+uniform vec2 uAerialScale;
 uniform float uCloudShadowK;
 uniform float uScanT;
 uniform vec3 uScanColor;
@@ -424,6 +438,22 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     paintShade = mix(paintShade, 1.0, below);
   }
   diffuseColor.rgb = mix(diffuseColor.rgb, mapCol * paintShade, effTint);
+
+  // Optional aerial photo, applied HERE on purpose: over the hypsometric paint
+  // but UNDER the contours, grid and labels below — so the drawn cartography
+  // still sits on top of the photograph rather than being buried by it. That
+  // ordering is most of what keeps this from becoming a plain satellite viewer.
+  if (uAerialOn > 0.5) {
+    vec2 aUv = vWorldPos.xz / (uSlabHalf * 2.0) + 0.5;
+    aUv.y = 1.0 - aUv.y; // texture rows run north->south, world +Z runs south->north
+    aUv = uAerialOffset + aUv * uAerialScale; // place the mosaic (see aerialUvTransform)
+    vec3 aerial = texture2D(uAerial, aUv).rgb;
+    // Modulate by the paint's own luminance instead of replacing it: the
+    // hillshade and hypsometric shading keep reading THROUGH the photo, so the
+    // relief still sculpts and the map keeps its own light.
+    float shade = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+    diffuseColor.rgb = mix(diffuseColor.rgb, aerial * (0.6 + 0.8 * shade), uAerialOpacity);
+  }
 
   // Fancy surface shader paints OVER the final surface — the hypsometric map OR
   // a relief material (wood/carbon/...). Materials sit BELOW the shaders, so a
@@ -658,6 +688,23 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // per-effect params to the uniforms. Drive it with tickSurfaceFx(dt, speed).
   setSurfaceFx(id) {
     this.mapUniforms.uSurfaceFx.value = id | 0
+  }
+  // Aerial photo skin — pass the object AerialLayer.build() returns, or null to
+  // clear. The placeholder stays bound when off (a null sampler can fail to
+  // compile), so uAerialOn is what actually gates the blend, not the texture.
+  setAerial(built) {
+    const u = this.mapUniforms
+    if (built && built.texture) {
+      u.uAerial.value = built.texture
+      u.uAerialOn.value = 1
+      u.uAerialOffset.value.set(built.uv.offset[0], built.uv.offset[1])
+      u.uAerialScale.value.set(built.uv.scale[0], built.uv.scale[1])
+    } else {
+      u.uAerialOn.value = 0
+    }
+  }
+  setAerialOpacity(v) {
+    this.mapUniforms.uAerialOpacity.value = v
   }
   applyFxParams(pp) {
     const u = this.mapUniforms
