@@ -59,6 +59,7 @@ import { History } from './history.js'
 import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
 import { showNotice } from './ui/toast.js'
+import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCredits } from './ui/bars.js'
 import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
 import { buildTemplatesPanel } from './ui/templates-panel.js'
@@ -1899,9 +1900,10 @@ function engageGpxFollow() {
   tour.active = false
   tween.active = false
   cameraAuto.stop()
-  drone.start(w, { seedAt: gpxLayer.headT }) // resume-in-place, not a snap back to the start
+  if (drone.start(w, { seedAt: gpxLayer.headT })) showFollowPad(drone) // resume-in-place, not a snap back to the start
 }
 function disengageGpxFollow() {
+  hideFollowPad()
   if (drone.active) drone.stop()
 }
 // Sequenced-playback handover (task 22 §5) — GpxLayerManager.tick() auto-

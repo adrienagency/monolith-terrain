@@ -160,7 +160,7 @@ function trapezoid(t, ramp = 0.16) {
 const damp = (cur, target, halfLife, dt) => cur + (target - cur) * (1 - Math.pow(2, -dt / halfLife))
 
 export class DroneCam {
-  // sampleGround(x, z) → terrain surface height at world XZ
+  // sampleGround(x, z) -> terrain surface height at world XZ
   constructor({ camera, controls, sampleGround }) {
     this.camera = camera
     this.controls = controls
@@ -170,37 +170,33 @@ export class DroneCam {
     this.onDone = null
 
     // ---- contract fields (read by main.js and/or the tests) ----
-    this.arm = 4.5 // baseline standoff; _standoffMul reports the rail's REALIZED distance against it
+    this.arm = 4.5
     this.clearance = 2.6
-    this.minPitchRad = -0.45 // directorial look-down floor...
-    this.bottomKeepNdcY = -0.82 // ...pierced ONLY to keep the head above the frame bottom
+    this.minPitchRad = -0.45 // kept for API compat; the user's tilt owns pitch now
+    this.bottomKeepNdcY = -0.82
     this._standoffMul = 1.3
     this._pos = new THREE.Vector3()
     this._headingDir = new THREE.Vector3(0, 0, 1)
     this._pitch = 0
 
-    // ---- bake tuning ----
-    this.railSamples = 240 // Viterbi columns over the whole track
-    // full ring of bearings: 'elle me dépasse en se retournant pour continuer
-    // à me suivre' — overtaking = standing AHEAD looking back, which is an
-    // azimuth beyond ±90°. The Viterbi continuity cost turns any switch into
-    // a smooth sweep around the point, never a cut.
-    this.azimuths = [-2.4, -1.6, -0.9, -0.45, 0, 0.45, 0.9, 1.6, 2.4]
-    // (distance, lift) rows — every row keeps lift/distance ≈ 0.4, inside
-    // tan(|minPitchRad|), so a centred head never demands a floor-piercing
-    // pitch by construction (Nesky: pitch and distance move together)
-    this.standoffs = [[5.5, 2.2], [8.2, 3.3], [11.5, 4.6]]
-    this.visSteps = 7 // heightfield samples per bake sightline
-    this.aheadCols = 4 // a candidate must also see the head this far ahead — the anticipation
-    this.dollyPeriodCols = 80 // the preferred row breathes along the route: wide, closer, wide
+    // ---- THE VIEW — user-owned, never auto-changed -----------------------
+    // FINAL DESIGN (field decision after every automatic system failed the
+    // eye test): the camera holds ONE fixed relative view around the head and
+    // simply translates with it. The user picks the view on a numpad-style
+    // 3x3 (1..9, 5 = top-down), zooms with +/- and tilts with the arrows —
+    // see setView()/zoomBy()/tiltBy() and src/ui/follow-pad.js.
+    this.viewBearingDeg = 90 // compass deg the camera sits AT from the head (90 = east of it)
+    this.topDown = false // view 5
+    this.dist = 11 // standoff, world units ('elle suit de loin')
+    this.tiltDeg = 24 // camera height angle above the head ('toujours un angle')
 
     // ---- runtime tuning ----
-    this.posHalfLife = 0.25 // s — XZ approach to the rail (quickened with the rate caps)
-    this.posHalfLifeY = 0.4 // s — light: the RAIL is already smooth; heavy runtime Y lag just dragged the camera under climbing terrain for the hard floor to catch (measured 1.5-unit floor snaps)
-    this.maxYawRateDeg = 120 // faster: the camera must never lose the thread
-    this.maxPitchRateDeg = 160 // 'surtout le tilt' — the axis that kept lagging
-    this.rotHalfLife = 0.09 // s — short: aim lag grows with orbit speed (measured)
-    this.floorStiffness = 60 // ground BOUNCE spring (explicit ask), under-damped
+    this.posHalfLife = 0.3 // s — the small follow latency (anti-nausea)
+    this.posHalfLifeY = 0.4
+    this.maxYawRateDeg = 120
+    this.maxPitchRateDeg = 160
+    this.rotHalfLife = 0.09
+    this.floorStiffness = 60 // ground BOUNCE spring, under-damped on purpose
     this.floorDamping = 7
     this._yVel = 0
     this._lastY = null
@@ -212,30 +208,27 @@ export class DroneCam {
     this._up = new THREE.Vector3(0, 1, 0)
   }
 
-  // ---- bake ----------------------------------------------------------------
+  // ---- user view controls (keyboard 1..9, +/-, arrows; clickable pad) ----
 
-  _sight(tx, ty, tz, cx, cy, cz) {
-    const g = this.sampleGround
-    if (!g) return true
-    for (let i = 1; i <= this.visSteps; i++) {
-      const t = i / this.visSteps
-      if (g(tx + (cx - tx) * t, tz + (cz - tz) * t) + 0.35 > ty + (cy - ty) * t) return false
-    }
-    return true
+  // Numpad mapping, map north-up: 8=N 9=NE 6=E 3=SE 2=S 1=SW 4=W 7=NW around
+  // the head; 5 = top-down. The bearing is WORLD-anchored — the camera never
+  // rotates on its own ('la caméra ne change pas d'angle de vue').
+  setView(n) {
+    const compass = { 8: 0, 9: 45, 6: 90, 3: 135, 2: 180, 1: 225, 4: 270, 7: 315 }
+    if (n === 5) { this.topDown = true; return }
+    if (compass[n] === undefined) return
+    this.topDown = false
+    this.viewBearingDeg = compass[n]
   }
 
-  // Builds this.curve (subject) and this.rail (baked camera path). Touches
-  // NOTHING about the current pose — that split is what lets retarget()
-  // continue a flight. Returns false on degenerate input, leaving prior
-  // curves untouched.
+  zoomBy(factor) { this.dist = THREE.MathUtils.clamp(this.dist * factor, 3, 40) }
+  tiltBy(deltaDeg) { this.tiltDeg = THREE.MathUtils.clamp(this.tiltDeg + deltaDeg, 6, 80) }
+
+  // ---- bake: just the subject curve (Y heavily low-passed) ---------------
   _buildCurves(worldPts) {
     if (!worldPts || worldPts.length < 2) return false
     const span = worldPts.reduce((s, p, i) => (i ? s + Math.hypot(p.x - worldPts[i - 1].x, p.z - worldPts[i - 1].z) : 0), 0)
     if (span < 1e-3) return false
-
-    // Subject curve: light smoothing only — switchbacks intact, this IS the
-    // head. Y gets a much heavier low-pass for everything the camera reads:
-    // drape noise on a balcony trail is tens of metres of fake height.
     const subjSpacing = Math.max(0.4, span / 260)
     const raw = smoothPath(resamplePath(worldPts, subjSpacing), 2, 2)
     if (raw.length < 2) return false
@@ -252,171 +245,54 @@ export class DroneCam {
     const curve = new THREE.CatmullRomCurve3(subjV, false, 'centripetal', 0.5)
     curve.arcLengthDivisions = 800
     curve.updateArcLengths()
-
-    // ---- Viterbi over candidate camera states ----
-    const N = Math.max(24, Math.min(this.railSamples, subjV.length * 2))
-    const P = new Array(N)
-    const T = new Float64Array(N) // smoothed travel bearing per column
-    const pt = new THREE.Vector3(), tn = new THREE.Vector3()
-    for (let i = 0; i < N; i++) {
-      const s = i / (N - 1)
-      curve.getPointAt(s, pt); P[i] = pt.clone()
-      curve.getTangentAt(s, tn); T[i] = Math.atan2(tn.x, tn.z)
-    }
-    // unwrap then blur the bearings: raw tangents whip through switchbacks;
-    // the rail should sweep one arc through a whole staircase of them
-    for (let i = 1; i < N; i++) {
-      let d = T[i] - T[i - 1]
-      while (d > Math.PI) d -= 2 * Math.PI
-      while (d < -Math.PI) d += 2 * Math.PI
-      T[i] = T[i - 1] + d
-    }
-    for (let pass = 0; pass < 6; pass++) {
-      for (let i = 1; i < N - 1; i++) T[i] = (T[i - 1] + T[i] * 2 + T[i + 1]) / 4
-    }
-
-    const A = this.azimuths.length, D = this.standoffs.length, K = A * D
-    const posOf = (i, k, out) => {
-      const az = T[i] + Math.PI + this.azimuths[k % A]
-      const so = this.standoffs[(k / A) | 0]
-      out[0] = P[i].x + Math.sin(az) * so[0]
-      out[2] = P[i].z + Math.cos(az) * so[0]
-      out[1] = P[i].y + so[1]
-      if (this.sampleGround) out[1] = Math.max(out[1], this.sampleGround(out[0], out[2]) + this.clearance)
-    }
-    const tmp = [0, 0, 0]
-    const nodeCost = new Float64Array(N * K)
-    for (let i = 0; i < N; i++) {
-      const ahead = P[Math.min(N - 1, i + this.aheadCols)]
-      // the dolly breathes: the preferred standoff row wanders 0..2 along the
-      // route so the shot varies (wide, closer, wide) even where visibility
-      // alone would freeze one choice forever
-      const preferRow = 1 + Math.sin((i / this.dollyPeriodCols) * 2 * Math.PI)
-      for (let k = 0; k < K; k++) {
-        posOf(i, k, tmp)
-        let c = 0
-        if (!this._sight(P[i].x, P[i].y + 0.3, P[i].z, tmp[0], tmp[1], tmp[2])) c += 30 // blind NOW — near-forbidden
-        if (!this._sight(ahead.x, ahead.y + 0.3, ahead.z, tmp[0], tmp[1], tmp[2])) c += 8 // blind SOON — the anticipation
-        c += Math.abs(this.azimuths[k % A]) * 1.1 // prefer behind-ish
-        c += Math.abs(((k / A) | 0) - preferRow) * 2.2 // dolly preference
-        nodeCost[i * K + k] = c
-      }
-    }
-    let prev = new Float64Array(K), next = new Float64Array(K)
-    const back = new Int16Array(N * K)
-    const cA = new Float64Array(K * 3), cB = new Float64Array(K * 3)
-    for (let k = 0; k < K; k++) {
-      prev[k] = nodeCost[k]
-      posOf(0, k, tmp); cA[k * 3] = tmp[0]; cA[k * 3 + 1] = tmp[1]; cA[k * 3 + 2] = tmp[2]
-    }
-    for (let i = 1; i < N; i++) {
-      for (let k = 0; k < K; k++) { posOf(i, k, tmp); cB[k * 3] = tmp[0]; cB[k * 3 + 1] = tmp[1]; cB[k * 3 + 2] = tmp[2] }
-      for (let k = 0; k < K; k++) {
-        let bestC = Infinity, bestJ = 0
-        for (let j = 0; j < K; j++) {
-          const dx = cB[k * 3] - cA[j * 3], dy = cB[k * 3 + 1] - cA[j * 3 + 1], dz = cB[k * 3 + 2] - cA[j * 3 + 2]
-          const cont = Math.sqrt(dx * dx + dy * dy + dz * dz)
-          // superlinear continuity: gentle drift is nearly free, jumps are punished
-          const c = prev[j] + cont * 0.9 + cont * cont * 0.05
-          if (c < bestC) { bestC = c; bestJ = j }
-        }
-        next[k] = bestC + nodeCost[i * K + k]
-        back[i * K + k] = bestJ
-      }
-      ;[prev, next] = [next, prev]
-      cA.set(cB)
-    }
-    let kBest = 0
-    for (let j = 1; j < K; j++) if (prev[j] < prev[kBest]) kBest = j
-    const chain = new Array(N)
-    for (let i = N - 1; i >= 0; i--) { chain[i] = kBest; kBest = back[i * K + kBest] }
-
-    // discrete chain → smoothed rail → exact ground re-validation (smoothing
-    // can dip a pinned corner back under a ridge; the floor is non-negotiable)
-    let rail = chain.map((kk, i) => { posOf(i, kk, tmp); return { x: tmp[0], y: tmp[1], z: tmp[2] } })
-    rail = smoothPath(rail, 3, 3)
-    if (this.sampleGround) {
-      for (const p of rail) {
-        const floor = this.sampleGround(p.x, p.z) + this.clearance
-        if (p.y < floor) p.y = floor
-      }
-      rail = smoothPath(rail, 1, 2)
-      for (const p of rail) {
-        const floor = this.sampleGround(p.x, p.z) + this.clearance
-        if (p.y < floor) p.y = floor
-      }
-    }
-    // final visibility pass — the user's own direction, in film grammar: pass
-    // a mountain by ARCING around it (truck/pan), never by diving over or
-    // through. For each blind rail point, rotate it around its subject in
-    // growing steps (smallest swing that clears wins); only if the whole ring
-    // is blind, lift a LITTLE. Then cap the look-down angle everywhere:
-    // 'jamais une vue top down, toujours un angle' — if a point looks steeper
-    // than ~50 deg onto its subject, push it OUTWARD until the angle returns.
-    const MAX_DOWN_RATIO = 1.15 // tan(~49 deg)
-    for (let i = 0; i < rail.length; i++) {
-      const sp = P[Math.min(P.length - 1, Math.round((i / (rail.length - 1)) * (P.length - 1)))]
-      const rp = rail[i]
-      if (!this._sight(sp.x, sp.y + 0.3, sp.z, rp.x, rp.y, rp.z)) {
-        const dx = rp.x - sp.x, dz = rp.z - sp.z
-        const dist = Math.hypot(dx, dz), base = Math.atan2(dx, dz)
-        let fixed = false
-        for (const off of [0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4, 1.9, -1.9]) {
-          const x = sp.x + Math.sin(base + off) * dist
-          const z = sp.z + Math.cos(base + off) * dist
-          let y = rp.y
-          if (this.sampleGround) y = Math.max(y, this.sampleGround(x, z) + this.clearance)
-          if (this._sight(sp.x, sp.y + 0.3, sp.z, x, y, z)) { rp.x = x; rp.z = z; rp.y = y; fixed = true; break }
-        }
-        if (!fixed) for (let l = 0; l < 4 && !this._sight(sp.x, sp.y + 0.3, sp.z, rp.x, rp.y, rp.z); l++) rp.y += 0.75
-      }
-      // anti-top-down: keep the shot at an angle, always
-      const horiz = Math.max(Math.hypot(rp.x - sp.x, rp.z - sp.z), 0.5)
-      const drop = rp.y - sp.y
-      if (drop > horiz * MAX_DOWN_RATIO) {
-        const need = drop / MAX_DOWN_RATIO
-        const kx = (rp.x - sp.x) / horiz, kz = (rp.z - sp.z) / horiz
-        rp.x = sp.x + kx * need
-        rp.z = sp.z + kz * need
-        if (this.sampleGround) rp.y = Math.max(rp.y, this.sampleGround(rp.x, rp.z) + this.clearance)
-      }
-    }
-    rail = smoothPath(rail, 1, 2)
-    const railCurve = new THREE.CatmullRomCurve3(rail.map((p) => new THREE.Vector3(p.x, p.y, p.z)), false, 'centripetal', 0.5)
-    railCurve.arcLengthDivisions = 600
-    railCurve.updateArcLengths()
-
     this.curve = curve
-    this.rail = railCurve
+    // default view: SIDE-ON to the route's overall direction ('place la
+    // caméra sur le côté'), computed once — never re-aimed mid-flight
+    const a = subjV[0], b = subjV[subjV.length - 1]
+    const routeBearing = (Math.atan2(b.x - a.x, b.z - a.z) * 180) / Math.PI
+    this.viewBearingDeg = ((routeBearing + 90) % 360 + 360) % 360
     return true
   }
 
-  // ---- lifecycle -----------------------------------------------------------
+  _desiredFor(s, out) {
+    this.curve.getPointAt(s, _subj)
+    if (this.topDown) {
+      out.set(_subj.x, _subj.y + this.dist * 1.4, _subj.z + 0.001)
+      return
+    }
+    const az = (this.viewBearingDeg * Math.PI) / 180
+    const tilt = (this.tiltDeg * Math.PI) / 180
+    const horiz = this.dist * Math.cos(tilt)
+    out.set(
+      _subj.x + Math.sin(az) * horiz,
+      _subj.y + this.dist * Math.sin(tilt),
+      _subj.z + Math.cos(az) * horiz
+    )
+  }
 
-  // worldPts: ordered GPX track points at ground level (direction = order).
-  // seedAt: path fraction to seat the initial pose at (resume mid-track).
+  // ---- lifecycle ----------------------------------------------------------
+
   start(worldPts, { duration = 30, seedAt = 0 } = {}) {
     this.active = false
     if (!this._buildCurves(worldPts)) return false
     this.duration = duration
     this.t = THREE.MathUtils.clamp(seedAt, 0, 1)
-    this.rail.getPointAt(this.t, this._pos)
+    this._desiredFor(this.t, this._pos)
     this._yVel = 0
     this._lastY = null
-    this._occT = 0
-    this._occW = 0
     this.camera.position.copy(this._pos)
-    this._aim(0, this.t, false) // dt=0 → snap, no slew-in lurch
+    this._aim(0, this.t, false)
     this.active = true
     return true
   }
 
-  // Leg handover: swap onto a NEW track's curves WITHOUT re-seating
-  // position/heading/pitch/t — the runtime damping then eases the camera onto
-  // the new rail, one continuous shot. Degenerate input leaves the running
-  // flight (curve identity included) untouched.
+  // Leg handover: new curve, pose untouched — the damping eases over.
+  // Degenerate input leaves the running flight (curve identity) untouched.
   retarget(worldPts) {
-    return this._buildCurves(worldPts)
+    const keepBearing = this.viewBearingDeg // a handover must not re-aim the user's view
+    const ok = this._buildCurves(worldPts)
+    if (ok) this.viewBearingDeg = keepBearing
+    return ok
   }
 
   stop() { this.active = false }
@@ -427,8 +303,6 @@ export class DroneCam {
     this._applyPose(dt, trapezoid(this.t), this.t >= 1)
   }
 
-  // Follow mode: the caller hands in its own progress every frame (the reveal
-  // head and the camera read the same number — they cannot drift apart).
   updateAt(dt, s) {
     if (!this.active || !this.curve) return
     const clamped = THREE.MathUtils.clamp(s, 0, 1)
@@ -436,9 +310,6 @@ export class DroneCam {
     this._applyPose(dt, clamped, clamped >= 1)
   }
 
-  // Suspend-mode helpers (user grabbing OrbitControls — see main.js): keep the
-  // pivot on the advancing head; re-anchor the pose to wherever the user left
-  // the camera so resume eases out instead of snapping.
   followPivot(s) {
     if (!this.curve) return
     this.curve.getPointAt(THREE.MathUtils.clamp(s, 0, 1), _subj)
@@ -455,10 +326,10 @@ export class DroneCam {
     }
   }
 
-  // ---- runtime -------------------------------------------------------------
+  // ---- runtime ------------------------------------------------------------
 
   _applyPose(dt, s, arrived) {
-    this.rail.getPointAt(s, _desired)
+    this._desiredFor(s, _desired)
     this.curve.getPointAt(s, _subj)
 
     if (dt <= 0) this._pos.copy(_desired)
@@ -468,9 +339,8 @@ export class DroneCam {
       this._pos.y = damp(this._pos.y, _desired.y, this.posHalfLifeY, dt)
     }
 
-    // ground BOUNCE: spring floor, slightly under-damped (that IS the
-    // rebound), hard emergency floor below — clipping into rock is a bug
-    if (this.sampleGround) {
+    // ground BOUNCE: soft spring under clearance, hard floor below
+    if (this.sampleGround && !this.topDown) {
       const h = Math.min(Math.max(dt, 1 / 240), 1 / 20)
       const gc = this.sampleGround(this._pos.x, this._pos.z)
       const floor = gc + this.clearance
@@ -483,12 +353,8 @@ export class DroneCam {
       if (this._pos.y < hard) { this._pos.y = hard; this._yVel = Math.max(this._yVel, 0) }
     }
 
-    // safety net — GATED and DAMPED (field bug: the instant pull teleported
-    // the camera against the mountain for a frame, then snapped back — 'un
-    // zoom collé à la montagne, on ne voit plus rien, puis revient'). Per the
-    // Cinemachine pattern: a minimum occlusion time so one-frame flickers
-    // never engage, fast damping in, slow damping out. The pull is a WEIGHT
-    // blended toward the pulled point, never an assignment.
+    // de-occlusion net, gated + damped (Cinemachine pattern) — the user's
+    // distant side views rarely need it, but a ridge can still slide between
     const r = resolveOcclusion(_subj, this._pos, this.sampleGround, { steps: 10, skin: 0.35, minT: 0.35 })
     this._occT = r.pulled ? (this._occT || 0) + Math.max(dt, 0) : 0
     const occWant = r.pulled && this._occT > 0.15 ? 1 : 0
@@ -504,23 +370,6 @@ export class DroneCam {
       }
     }
 
-    // vertical speed cap, the LAST stage: the spring floor and the safety net
-    // are both allowed to ASK for big vertical moves, but the realized camera
-    // spreads them over frames — a crane does not teleport. The hard floor
-    // still outranks the cap: clipping into rock is worse than a fast climb.
-    if (dt > 0) {
-      if (this._lastY !== null) {
-        const maxDy = 3.5 * Math.min(dt, 1 / 20)
-        const dy = this._pos.y - this._lastY
-        if (Math.abs(dy) > maxDy) this._pos.y = this._lastY + Math.sign(dy) * maxDy
-        if (this.sampleGround) {
-          const hard = this.sampleGround(this._pos.x, this._pos.z) + this.clearance * 0.7
-          if (this._pos.y < hard) this._pos.y = hard
-        }
-      }
-      this._lastY = this._pos.y
-    } else this._lastY = this._pos.y
-
     this.camera.position.copy(this._pos)
     this._standoffMul = this._pos.distanceTo(_subj) / this.arm
     this._aim(dt, s, arrived)
@@ -528,10 +377,9 @@ export class DroneCam {
 
   _aim(dt, s, arrived) {
     this.curve.getPointAt(s, _subj)
-    this.controls.target.copy(_subj) // grabbing OrbitControls pivots around the head
+    this.controls.target.copy(_subj)
     _diff.subVectors(_subj, this._pos)
 
-    // horizontal: face the head, rate-capped
     _tDir.set(_diff.x, 0, _diff.z)
     if (_tDir.lengthSq() < 1e-8) _tDir.copy(this._headingDir)
     _tDir.normalize()
@@ -542,11 +390,9 @@ export class DroneCam {
       this._headingDir.set(sl.x, 0, sl.z)
     }
 
-    // pitch: LOCKED on the head (final spec: 'toujours toujours focus sur
-    // lui, dans les 10% du centre de l'écran'). No composition offset, no
-    // directorial floor — the only softness is the small latency below.
+    // pitch: LOCKED on the head, dead centre — the only softness is latency
     const horiz = Math.hypot(_diff.x, _diff.z)
-    const target = THREE.MathUtils.clamp(Math.atan2(_diff.y, Math.max(horiz, 1e-6)), -1.45, 1.2)
+    const target = THREE.MathUtils.clamp(Math.atan2(_diff.y, Math.max(horiz, 1e-6)), -1.5, 1.2)
     if (dt <= 0) this._pitch = target
     else {
       const maxPitchStep = THREE.MathUtils.degToRad(this.maxPitchRateDeg) * dt
