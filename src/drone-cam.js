@@ -204,6 +204,8 @@ export class DroneCam {
     this.floorDamping = 7
     this._yVel = 0
     this._lastY = null
+    this._occT = 0
+    this._occW = 0
 
     this._q = new THREE.Quaternion()
     this._m = new THREE.Matrix4()
@@ -344,6 +346,19 @@ export class DroneCam {
         if (p.y < floor) p.y = floor
       }
     }
+    // final visibility pass: smoothing may have slid a corner behind a ridge
+    // between Viterbi columns. Where the finished rail is blind to its own
+    // subject, LIFT it (Nesky: for hills, raise over the obstruction — it
+    // reads better than a sideways dodge) until the line of sight clears.
+    // This is what keeps the runtime de-occlusion net nearly idle.
+    for (let i = 0; i < rail.length; i++) {
+      const sp = P[Math.min(P.length - 1, Math.round((i / (rail.length - 1)) * (P.length - 1)))]
+      let lifted = 0
+      while (lifted < 9 && !this._sight(sp.x, sp.y + 0.3, sp.z, rail[i].x, rail[i].y, rail[i].z)) {
+        rail[i].y += 0.75; lifted += 0.75
+      }
+    }
+    rail = smoothPath(rail, 1, 2)
     const railCurve = new THREE.CatmullRomCurve3(rail.map((p) => new THREE.Vector3(p.x, p.y, p.z)), false, 'centripetal', 0.5)
     railCurve.arcLengthDivisions = 600
     railCurve.updateArcLengths()
@@ -365,6 +380,8 @@ export class DroneCam {
     this.rail.getPointAt(this.t, this._pos)
     this._yVel = 0
     this._lastY = null
+    this._occT = 0
+    this._occW = 0
     this.camera.position.copy(this._pos)
     this._aim(0, this.t, false) // dt=0 → snap, no slew-in lurch
     this.active = true
@@ -443,12 +460,21 @@ export class DroneCam {
       if (this._pos.y < hard) { this._pos.y = hard; this._yVel = Math.max(this._yVel, 0) }
     }
 
-    // safety net only — see the module header. The pull shortens the whole 3D
-    // offset, so Y can dip back under ground: the hard floor re-applies AFTER,
-    // or the net itself becomes the clip-through it exists to prevent.
+    // safety net — GATED and DAMPED (field bug: the instant pull teleported
+    // the camera against the mountain for a frame, then snapped back — 'un
+    // zoom collé à la montagne, on ne voit plus rien, puis revient'). Per the
+    // Cinemachine pattern: a minimum occlusion time so one-frame flickers
+    // never engage, fast damping in, slow damping out. The pull is a WEIGHT
+    // blended toward the pulled point, never an assignment.
     const r = resolveOcclusion(_subj, this._pos, this.sampleGround, { steps: 10, skin: 0.35, minT: 0.35 })
-    if (r.pulled) {
-      this._pos.set(r.x, r.y, r.z)
+    this._occT = r.pulled ? (this._occT || 0) + Math.max(dt, 0) : 0
+    const occWant = r.pulled && this._occT > 0.15 ? 1 : 0
+    this._occW = damp(this._occW || 0, occWant, occWant ? 0.15 : 0.6, Math.max(dt, 1 / 240))
+    if (r.pulled && this._occW > 0.01) {
+      const w = Math.min(this._occW, 1)
+      this._pos.x += (r.x - this._pos.x) * w
+      this._pos.y += (r.y - this._pos.y) * w
+      this._pos.z += (r.z - this._pos.z) * w
       if (this.sampleGround) {
         const hard = this.sampleGround(this._pos.x, this._pos.z) + this.clearance * 0.7
         if (this._pos.y < hard) { this._pos.y = hard; this._yVel = Math.max(this._yVel, 0) }
