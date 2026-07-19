@@ -2710,6 +2710,22 @@ const clock = new THREE.Clock()
 let placesRefreshAcc = 0 // throttles the places-layer screen-space declutter refresh (see tick())
 
 // camera motion for one frame — shared by the live loop and offline export
+// TEMPORARY camera-path diagnostic (field debugging with Adrien): a tiny
+// overlay naming which branch drives the camera each frame — F/f = follow
+// param, P/p = gpxLayer.isPlaying(), A/a = drone.active, TIMER! = the
+// internal-timer fallback that would desync from the head. Remove once the
+// field bug is understood.
+let __camDiagEl = null
+function __camDiag(tag) {
+  if (!__camDiagEl) {
+    __camDiagEl = document.createElement('div')
+    __camDiagEl.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:999;font:12px monospace;background:#000c;color:#0f0;padding:4px 8px;border-radius:4px;pointer-events:none'
+    document.body.append(__camDiagEl)
+  }
+  const d = window.__exp?.drone
+  __camDiagEl.textContent = `cam:${tag} headT:${(gpxLayer.headT ?? -1).toFixed(3)} droneT:${(d?.t ?? -1).toFixed(3)} rail:${d?.rail ? 'Y' : 'NO'}`
+}
+
 function updateCameraMotion(dt) {
   // looping cinematic camera automation (Camera panel) — checked here so BOTH
   // the live tick() and the offline export step drive it
@@ -2721,6 +2737,7 @@ function updateCameraMotion(dt) {
   // (gpxLayer.headT), not DroneCam's internal timer — see updateAt(). Must
   // be checked before the generic drone.active branch below, which still
   // owns the separate "Fly the GPX track" cinematic (Camera panel).
+  __camDiag('' + (params.gpxFollow ? 'F' : 'f') + (gpxLayer.isPlaying() ? 'P' : 'p') + (drone.active ? 'A' : 'a'))
   if (params.gpxFollow && gpxLayer.isPlaying() && drone.active) {
     // task 30: the user is holding OrbitControls (dragging/zooming) — let
     // THEM drive the camera this frame instead of the drone overwriting it
@@ -2743,6 +2760,7 @@ function updateCameraMotion(dt) {
   }
   // drone follow-cam for the GPX track — chase the route from behind/above
   if (drone.active) {
+    __camDiag('TIMER!') // the desync branch — if this shows during playback, THIS is the bug
     drone.update(dt)
     return
   }
