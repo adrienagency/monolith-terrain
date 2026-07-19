@@ -41,6 +41,7 @@ import { FLAGS } from './flags.js'
 import { MapLayers } from './map/layer-manager.js'
 import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED } from './map/aerial-layer.js'
 import { lightingFor } from './daycycle.js'
+import { SunDisc } from './sun-disc.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
@@ -214,7 +215,7 @@ const params = {
   paused: false,
 
   // performance
-  pixelRatio: Math.min(window.devicePixelRatio, 2),
+  pixelRatio: 2, // render scale defaults to 2 by request (the perf governor may still step it down under sustained load)
   shadowMode: 'dynamic',
   shadowRes: 2048,
 
@@ -575,12 +576,17 @@ scene.add(sun)
 const hemi = new THREE.HemisphereLight(0xdadada, 0x5c5c5c, params.hemiIntensity)
 scene.add(hemi)
 
+// the sun you can SEE — aimed by the same vector that aims the light, so the
+// disc and the shading can never disagree (see sun-disc.js)
+const sunDisc = new SunDisc(scene)
+
 // The 24 h day/night cycle — the ONE control the lighting has now (the studio
 // presets and the six manual sun sliders are gone by request: "retire le
 // systeme d'eclairage et mets juste une tirette de 24h"). lightingFor computes
 // the REAL sun for the block's own lat/lon (see daycycle.js), so this must
 // re-run whenever the hour OR the location changes — loadRealTerrain calls it
 // after every move.
+let skyState = null // last lightingFor() result — see applyTimeOfDay
 function applyTimeOfDay(hour) {
   const s = lightingFor(hour, params.demLat, params.demLon)
   params.sunAzimuth = s.azimuth
@@ -589,10 +595,16 @@ function applyTimeOfDay(hour) {
   params.hemiIntensity = s.hemiIntensity
   params.envLight = s.envIntensity
   sun.color.set(s.sunColor)
+  skyState = s // the disc and the lake surface both read the current hour from here
   hemi.color.set(s.hemiSky)
   hemi.groundColor.set(s.hemiGround)
   scene.environmentIntensity = s.envIntensity
   placeSun()
+  // The lake's glint tracks the same sun. Pushed from HERE and not from
+  // placeSun(): placeSun runs during module initialisation, before the
+  // `const mapLayers` binding exists, and `mapLayers?.` does NOT save you from
+  // a temporal dead zone — it throws, aborting the whole module.
+  mapLayers.setSun({ dir: sun.position, color: s.sunColor, sky: s.hemiSky })
 }
 
 function placeSun() {
@@ -610,6 +622,7 @@ function placeSun() {
   if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
   if (globe) globe.setSunDir(sun.position)
   if (clouds) clouds.setSunDir(sun.position)
+  sunDisc.update(sun.position, skyState?.sunColor ?? '#fff4ea', skyState?.elevation ?? params.sunElevation)
 }
 placeSun()
 
@@ -2644,6 +2657,8 @@ history.record()
 
 // console access for debugging/scripting
 window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
+
+applyTimeOfDay(params.timeOfDay ?? 10) // seed the sun/disc/lake for the opening view
 
 // real world is the default source — fetch its tiles on startup. A published
 // race link (#r=, fetch fired at module scope so it ran during boot) takes

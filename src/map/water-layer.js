@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { latLonToWorld } from '../geo.js'
+import { TERRAIN_SIZE } from '../terrain.js'
 import { loadLayer, patchBounds, clipToPatch, filterByZoom } from './geo-data.js'
 import { latlonToWorldPts } from './draped-line.js'
 import { buildLineSegments } from './line-segments.js'
@@ -7,6 +8,7 @@ import { fetchOverpassLines, fetchOverpassAreas } from './overpass.js'
 import { makeInsideBlock, clipPolylineToBlock, blockOutline, triangulateAndClip } from './block-clip.js'
 import { OSM_MIN_ZOOM } from './roads-layer.js'
 import { riverWidthPx } from './river-width.js'
+import { makeLakeMaterial } from './lake-material.js'
 import { WATER_REGION, LAKE_LOD_LEVELS, inRegion, lodForZoom, tileZoomForLod } from './tile-index.js'
 import { loadWaterTiles, loadWaterTileManifest, loadLakeTiles, loadLakeTileManifest, hasTilesForLod } from './tile-loader.js'
 
@@ -189,10 +191,25 @@ export class WaterLayer {
   constructor(scene) {
     this.group = new THREE.Group(); this.group.name = 'water'; scene.add(this.group)
     this._buildId = 0; this.usingOsm = false; this.loading = false
+    this._lakeMats = []; this._sun = null
   }
   _clear() {
     this.group.traverse((o) => { if (o.isLineSegments2 || o.isLine2 || o.isMesh) { o.geometry.dispose(); o.material.dispose() } })
     this.group.clear()
+    this._lakeMats = []
+  }
+
+  // Current sun, from the day cycle. Kept on the layer because a rebuild
+  // (zoom/pan) creates fresh materials that must be born with the right hour —
+  // pushing only to live materials would give a newly-built lake a noon glint
+  // at midnight.
+  setSun({ dir, color, sky }) {
+    this._sun = { dir, color, sky }
+    for (const m of this._lakeMats ?? []) {
+      if (dir) m.uniforms.uSunDir.value.copy(dir).normalize()
+      if (color) m.uniforms.uSunColor.value.set(color)
+      if (sky) m.uniforms.uSky.value.set(sky)
+    }
   }
   // Natural Earth line rings for a static layer (lakes/coastline) — flat,
   // outline-only (see flatRingsOf).
@@ -405,7 +422,19 @@ export class WaterLayer {
         // LAKE_RENDER_ORDER + polygonOffset (see the constant and
         // _fillMaterial above). depthTest stays on: the terrain still
         // occludes the lake behind a mountain.
-        const lakeMaterial = _fillMaterial(lakeInk, fillOpacity)
+        // Lakes get the reflective surface (graded blue + Fresnel + sun glint,
+        // see lake-material.js) rather than the flat fill the other water
+        // bodies use — a lake is the one water body big enough to read as a
+        // surface rather than a line.
+        const lakeMaterial = makeLakeMaterial({
+          ink: lakeInk,
+          sky: this._sun?.sky,
+          opacity: fillOpacity,
+          half: TERRAIN_SIZE / 2,
+          sunDir: this._sun?.dir,
+          sunColor: this._sun?.color,
+        })
+        this._lakeMats.push(lakeMaterial)
         for (const part of lakeParts) {
           const geo = _buildFilledRing(part, dem, sample, outline, fp, insideBlock, true)
           if (!geo) continue
@@ -417,6 +446,14 @@ export class WaterLayer {
     }
   }
   setVisible(v) { this.group.visible = v }
-  setOpacity(v) { this.group.traverse((o) => { if (o.material) o.material.opacity = v }) }
+  setOpacity(v) {
+    this.group.traverse((o) => {
+      if (!o.material) return
+      // the lake surface is a ShaderMaterial — its opacity lives in a uniform,
+      // and writing .opacity on it would silently do nothing
+      if (o.material.uniforms?.uOpacity) o.material.uniforms.uOpacity.value = v
+      else o.material.opacity = v
+    })
+  }
   dispose() { this._clear() }
 }

@@ -22,6 +22,8 @@ export class MapLayers {
   }
   setLayerVisible(id, v) { this._layers[id]?.setVisible(v && this._surfaceVisible) }
   setOpacity(id, v) { this._layers[id]?.setOpacity?.(v) }
+  // the day cycle's sun, forwarded to whichever layers respond to light
+  setSun(s) { this.water.setSun?.(s) }
   // SP2: OSM attribution (ODbL) + loading state, derived from the live layers
   isOsmActive() { return Object.values(this._layers).some((l) => l.usingOsm) }
   isLoading() { return Object.values(this._layers).some((l) => l.loading) }

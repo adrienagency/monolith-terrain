@@ -118,7 +118,7 @@ export function lightingFor(hour, latDeg, lonDeg, date = new Date()) {
       azimuth: sun.azimuth,
       elevation: el,
       sunColor: mix(SUN_DAY, SUN_GOLDEN, warm),
-      sunIntensity: 1.4 + 7.0 * day,
+      sunIntensity: 0.8 + 3.0 * day, // toned down: the old 1.4+7.0 blew past the ACES shoulder on lit slopes
       hemiSky: mix(SKY_DUSK, SKY_DAY, clamp01(el / 12)),
       hemiGround: GROUND_DAY,
       hemiIntensity: 0.32 + 0.5 * day,
@@ -133,7 +133,7 @@ export function lightingFor(hour, latDeg, lonDeg, date = new Date()) {
       azimuth: sun.azimuth,
       elevation: 2, // grazing fill from where the sun went down
       sunColor: SUN_GOLDEN,
-      sunIntensity: 1.4 * civil,
+      sunIntensity: 0.8 * civil, // stays continuous with day's floor above
       hemiSky: mix(SKY_NAUT, SKY_DUSK, civil),
       hemiGround: mix(GROUND_NIGHT, GROUND_DAY, civil),
       hemiIntensity: 0.22 + 0.1 * civil,
@@ -150,7 +150,7 @@ export function lightingFor(hour, latDeg, lonDeg, date = new Date()) {
     azimuth: (sun.azimuth + 180) % 360,
     elevation: 35,
     sunColor: MOON,
-    sunIntensity: 0.32,
+    sunIntensity: 0.22,
     hemiSky: mix(SKY_NIGHT, SKY_NAUT, naut),
     hemiGround: GROUND_NIGHT,
     hemiIntensity: 0.2,

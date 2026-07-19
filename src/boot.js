@@ -20,7 +20,17 @@ const gate = gateFor({
 if (gate) {
   showGate(gate)
 } else {
-  import('./main.js')
+  // A .catch is not optional here: an exception during main.js's module
+  // evaluation otherwise leaves the loader spinning forever with nothing in
+  // the console — the exact silent hang this whole gate exists to prevent.
+  import('./main.js').catch((err) => {
+    console.error('ShibuMap failed to start:', err)
+    showGate({
+      title: 'ShibuMap',
+      body: 'Something went wrong starting the map. Reloading the page usually fixes it.',
+      hint: 'shibumap.com',
+    })
+  })
 }
 
 // One card for every refusal: same look whatever the reason, because to the

@@ -47,10 +47,16 @@ test('solar time: hour 12 IS the daily elevation maximum for the place', () => {
 test('lightingFor: noon is bright and near-white, night is dim moonlight', () => {
   const noon = lightingFor(12, ANNECY.lat, ANNECY.lon, JUNE)
   assert.equal(noon.mode, 'day')
-  assert.ok(noon.sunIntensity > 7, `noon intensity ${noon.sunIntensity}`)
+  // Bounded on BOTH sides on purpose. The upper bound is the regression that
+  // was actually reported ("le soleil est beaucoup trop puissant"): a summer
+  // noon used to reach 8.4, which drove lit slopes past the ACES shoulder and
+  // flattened them to white.
+  assert.ok(noon.sunIntensity > 2.5, `noon too dim: ${noon.sunIntensity}`)
+  assert.ok(noon.sunIntensity < 4.5, `noon too hot: ${noon.sunIntensity}`)
   const night = lightingFor(1, ANNECY.lat, ANNECY.lon, JUNE)
   assert.equal(night.mode, 'night')
-  assert.ok(night.sunIntensity < 0.5, `night intensity ${night.sunIntensity}`)
+  assert.ok(night.sunIntensity < 0.35, `night intensity ${night.sunIntensity}`)
+  assert.ok(noon.sunIntensity / night.sunIntensity > 10, 'day must still read as day against night')
   assert.notEqual(noon.sunColor, night.sunColor)
 })
 
