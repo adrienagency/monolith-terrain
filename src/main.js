@@ -39,7 +39,7 @@ import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
 import { MapLayers } from './map/layer-manager.js'
-import { AerialLayer, blockBounds } from './map/aerial-layer.js'
+import { AerialLayer, blockBounds, aerialUnavailable } from './map/aerial-layer.js'
 import { StudioLighting, sunFromHour, LIGHT_PRESETS } from './lighting.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
@@ -57,6 +57,7 @@ import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
 import { History } from './history.js'
 import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
+import { showNotice } from './ui/toast.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCredits } from './ui/bars.js'
 import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
 import { buildTemplatesPanel } from './ui/templates-panel.js'
@@ -1945,7 +1946,7 @@ function refreshOsmCredit() {
 // default (see src/map/aerial-layer.js for why it's scoped to one area, and for
 // the licence notes). Nothing is hosted; tiles come per view from IGN's public
 // WMTS. Rides rebuildMapLayers so it follows every location change on its own.
-const aerialLayer = new AerialLayer()
+const aerialLayer = new AerialLayer({ maxTexturePx: renderer.capabilities.maxTextureSize })
 let aerialAttribution = null
 async function refreshAerial() {
   if (!params.aerialEnabled || !dem || params.source !== 'real') {
@@ -1954,11 +1955,38 @@ async function refreshAerial() {
     refreshOsmCredit()
     return
   }
-  const built = await aerialLayer.build(blockBounds(dem)) // the TRUE block extent, never patchBounds — see blockBounds()
+  const bounds = blockBounds(dem) // the TRUE block extent, never patchBounds — see blockBounds()
+
+  // Can't deliver here? Say so in the middle of the screen and switch the layer
+  // back off. Leaving the toggle on while nothing renders is the worst of both:
+  // the user believes photography is active and reads the plain relief AS the
+  // photo. Turning it off makes the UI tell the truth, and makes coming back
+  // into a covered area a deliberate re-enable rather than a surprise.
+  const why = aerialUnavailable(bounds)
+  if (why) {
+    params.aerialEnabled = false
+    terrain.setAerial(null)
+    aerialAttribution = null
+    refreshOsmCredit()
+    showNotice(why)
+    refreshAll() // the toggle has to move too, or the panel is lying
+    return
+  }
+
+  const built = await aerialLayer.build(bounds)
   terrain.setAerial(built)
-  // null when the patch is outside the covered area — the credit must then
-  // disappear too, since nothing of IGN's is on screen
-  aerialAttribution = built ? built.attribution : null
+  if (!built) {
+    // Covered on paper but every tile failed — a network/provider problem, NOT
+    // a coverage one, so it gets its own words. Same disable: a dead layer
+    // shouldn't sit there looking enabled.
+    params.aerialEnabled = false
+    aerialAttribution = null
+    refreshOsmCredit()
+    showNotice('Aerial photography couldn’t be loaded just now. Check your connection and try again.')
+    refreshAll()
+    return
+  }
+  aerialAttribution = built.attribution
   refreshOsmCredit()
 }
 const rebuildMapLayers = () => { const p = mapLayers.rebuild({ dem, terrain, params }); refreshOsmCredit(); refreshAerial(); return p.then(() => refreshOsmCredit()) }

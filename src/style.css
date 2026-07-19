@@ -147,6 +147,43 @@ body.dark .ce-toast {
   color: #e8e4da;
 }
 
+/* Centred notice — "what you asked for isn't available here". Dead centre and
+   larger than the toast because it explains a REFUSAL, and the user has to be
+   able to read a whole sentence before it goes. Same visual family as the
+   toast (paper, blur, soft shadow) so it reads as the same app talking. */
+.ce-notice {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(0.97);
+  max-width: min(86vw, 400px);
+  padding: 18px 26px;
+  border-radius: 14px;
+  background: rgba(252, 251, 248, 0.95);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 18px 48px rgba(20, 24, 28, 0.22);
+  backdrop-filter: blur(16px);
+  font-family: 'Bricolage Grotesque', system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  color: #23201a;
+  text-align: center;
+  z-index: 90; /* above the toast — a refusal outranks a confirmation */
+  opacity: 0;
+  pointer-events: none; /* never blocks the map underneath */
+  transition: opacity 0.3s, transform 0.3s;
+}
+.ce-notice.show {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+body.dark .ce-notice {
+  background: rgba(18, 19, 22, 0.93);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #e8e4da;
+}
+
 /* ------------------------------------------------------------- HUD (FUI) */
 :root {
   --hud-ink: #17191b;

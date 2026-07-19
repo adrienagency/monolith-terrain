@@ -20,3 +20,31 @@ export function showToast(text, { duration = 2800 } = {}) {
   toastEl.classList.add('show')
   hideTimer = setTimeout(() => toastEl.classList.remove('show'), duration)
 }
+
+// A notice sits in the MIDDLE of the view and says something the toast can't:
+// a thing you asked for cannot be delivered here. That's a different weight of
+// message from "link copied", so it gets a different place on screen and a
+// longer dwell — you have to be able to read a sentence, not just glimpse it.
+//
+// Separate element from the toast on purpose: the two can legitimately be on
+// screen at once (publish a link, discover the photo layer has no coverage),
+// and sharing one node would make the second silently eat the first.
+let noticeEl = null
+let noticeTimer = null
+
+export function showNotice(text, { duration = 5200 } = {}) {
+  if (!noticeEl) {
+    noticeEl = el('div', 'ce-notice')
+    // aria-live so a screen reader announces it: the message is the only
+    // signal that a toggle the user just flipped did nothing.
+    noticeEl.setAttribute('role', 'status')
+    noticeEl.setAttribute('aria-live', 'polite')
+    document.body.append(noticeEl)
+  }
+  noticeEl.textContent = text
+  clearTimeout(noticeTimer)
+  noticeEl.classList.remove('show')
+  void noticeEl.offsetWidth // reflow — restart the transition mid-flight
+  noticeEl.classList.add('show')
+  noticeTimer = setTimeout(() => noticeEl.classList.remove('show'), duration)
+}

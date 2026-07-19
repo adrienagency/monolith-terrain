@@ -46,11 +46,18 @@ export function blockBounds(dem) {
 }
 
 const TILE_PX = 256
-// Cap on the composited texture. 2048 keeps a 24 km patch near 12 m/px on
-// screen (~64 tiles, ~1.1 MB) and stays inside every WebGL2 device's
-// guaranteed limit. Raising it multiplies fetches AND VRAM quadratically —
-// re-measure both before touching it.
-const MAX_TEXTURE_PX = 2048
+// What we'd LIKE the composited texture to be. At the finest terrain scale
+// (z15, a ~2.5 km block) 4096 buys 0.83 m/texel — measured, and sharp enough
+// that the photo holds up against the relief instead of smearing.
+//
+// It is a wish, not a guarantee: the real ceiling is whatever the device
+// reports (WebGL2 only GUARANTEES 2048; a desktop GPU offers 16384). Pass the
+// device's own limit in — see AerialLayer's constructor.
+//
+// Cost is quadratic in both directions, and it is not small: 4096 at z15 is
+// 144 tile fetches and ~15 s on a fast connection, against ~36 fetches and ~4 s
+// at 2048. Re-measure both before moving this.
+const TARGET_TEXTURE_PX = 4096
 
 // Attribution is a LEGAL obligation under Etalab 2.0, not a courtesy. It must
 // be visible whenever the imagery is, and gone when it isn't.
@@ -75,19 +82,61 @@ export function aerialCovers(bbox) {
   return lon >= ANNECY.minLon && lon <= ANNECY.maxLon && lat >= ANNECY.minLat && lat <= ANNECY.maxLat
 }
 
-// Pick the imagery zoom whose tile grid just fills MAX_TEXTURE_PX across the
-// patch — enough resolution to look sharp, no more (every extra zoom level
-// quadruples the fetch count for detail the screen can't show).
-export function aerialZoomFor(bbox, maxZoom = IGN_MAX_ZOOM) {
-  for (let z = 6; z <= maxZoom; z++) {
-    const n = tilesForBBox(bbox, z).length
-    if (n * TILE_PX * TILE_PX >= MAX_TEXTURE_PX * MAX_TEXTURE_PX) return z
+// Why the view can't have imagery, in words the user reads — or null when
+// nothing is wrong.
+//
+// This exists because the old behaviour was to fail SILENTLY: the toggle stayed
+// on, no photo appeared, and the user was left to guess whether the layer was
+// broken, still loading, or simply absent here. A feature that can't deliver
+// has to say so.
+//
+// A missing bbox returns null, not a complaint: nothing has loaded yet is not
+// the same as "your area has no photos", and saying the latter during boot
+// would be a lie.
+export function aerialUnavailable(bbox) {
+  if (!bbox) return null
+  if (!aerialCovers(bbox)) {
+    return 'No aerial photography here yet — it currently covers Lac d’Annecy only.'
   }
-  return maxZoom
+  return null
+}
+
+// Widest side of the tile mosaic, in pixels, at a given zoom. This is what
+// actually becomes the canvas, so it — not the tile COUNT — is what has to fit
+// the texture budget.
+function mosaicPx(bbox, z) {
+  const tiles = tilesForBBox(bbox, z)
+  if (!tiles.length) return 0
+  const xs = tiles.map((t) => t.x), ys = tiles.map((t) => t.y)
+  const cols = Math.max(...xs) - Math.min(...xs) + 1
+  const rows = Math.max(...ys) - Math.min(...ys) + 1
+  return Math.max(cols, rows) * TILE_PX
+}
+
+// The FINEST imagery zoom whose mosaic still fits the texture budget.
+//
+// It used to return the first zoom that reached the budget by tile-area, which
+// meant it returned the first zoom to BLOW PAST it: at the finest terrain scale
+// that produced a 3072 px canvas against a documented 2048 cap. A cap you step
+// over is not a cap. This walks up while it still fits and stops before it
+// doesn't, so the budget is a real bound in the only unit that matters.
+export function aerialZoomFor(bbox, { maxZoom = IGN_MAX_ZOOM, budgetPx = TARGET_TEXTURE_PX } = {}) {
+  let best = 6
+  for (let z = 6; z <= maxZoom; z++) {
+    const px = mosaicPx(bbox, z)
+    if (px > budgetPx) break // every finer zoom is bigger still
+    best = z
+  }
+  return best
 }
 
 export class AerialLayer {
-  constructor() {
+  // `maxTexturePx` is the DEVICE's limit (THREE.WebGLRenderer exposes it as
+  // renderer.capabilities.maxTextureSize). We never ask for more than it or
+  // more than we want: a texture over the limit is not slow, it FAILS, and on
+  // a phone that limit can be 4x lower than on the desktop this was built on.
+  constructor({ maxTexturePx = TARGET_TEXTURE_PX } = {}) {
+    this._budgetPx = Math.min(TARGET_TEXTURE_PX, maxTexturePx)
     this._texture = null
     this._buildId = 0
   }
@@ -101,7 +150,7 @@ export class AerialLayer {
     const id = ++this._buildId
     if (!aerialCovers(bbox)) return null
 
-    const z = aerialZoomFor(bbox)
+    const z = aerialZoomFor(bbox, { budgetPx: this._budgetPx })
     const tiles = tilesForBBox(bbox, z)
     if (!tiles.length) return null
 
