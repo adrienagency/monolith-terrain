@@ -44,6 +44,7 @@ import { getStore } from '@netlify/blobs'
 
 const MAX_GPX_CHARS = 2_000_000 // ~2 MB text — real headroom over an already-decimated track
 const MAX_LOGO_DATA_URL_CHARS = 2_000_000 // base64 data URL, ~1.5 MB decoded image
+const MAX_RACE_NAME_CHARS = 200 // share.mjs bounds it again to 120 for the title; this is the storage door
 const MAX_STATE_CHARS = 60_000 // a real #s= diff is normally well under 2 KB; generous ceiling
 const MAX_BODY_CHARS = MAX_GPX_CHARS + MAX_LOGO_DATA_URL_CHARS + MAX_STATE_CHARS + 4_096
 
@@ -146,8 +147,20 @@ export default async (req) => {
     state = body.state
   }
 
+  // The race name is stored as its OWN field rather than left inside the
+  // free-form `state`, because it is the one value that later gets rendered
+  // into HTML for link previews (netlify/functions/share.mjs). A field that
+  // leaves the JSON envelope deserves its own explicit ceiling here, at the
+  // door, instead of being validated only where it happens to be used.
+  let raceName = ''
+  if (body.raceName != null) {
+    if (typeof body.raceName !== 'string') return jsonResponse({ error: 'invalid race name' }, 422)
+    if (body.raceName.length > MAX_RACE_NAME_CHARS) return jsonResponse({ error: 'race name too long' }, 422)
+    raceName = body.raceName
+  }
+
   const id = makeId()
-  const payload = { gpx, logo, state, createdAt: new Date().toISOString() }
+  const payload = { gpx, logo, state, raceName, createdAt: new Date().toISOString() }
   try {
     await store.setJSON(id, payload)
   } catch (err) {

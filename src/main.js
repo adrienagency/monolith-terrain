@@ -2188,11 +2188,17 @@ async function shareCurrentView() {
       const res = await fetch(RACE_ENDPOINT, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ gpx: trackToGpx(gpxLayer.track), state }),
+        // raceName rides along so the link can carry a real preview card —
+        // a fragment (#r=) never reaches a crawler, so the /r/<id> route is
+        // the only thing that can name the course on WhatsApp or Instagram.
+        body: JSON.stringify({ gpx: trackToGpx(gpxLayer.track), state, raceName: gpxLayer.raceName || '' }),
       })
       const j = res.ok ? await res.json() : null
       if (j?.ok && typeof j.id === 'string' && /^[A-Za-z0-9_-]{4,64}$/.test(j.id)) {
-        url = `${location.origin}${location.pathname}#r=${j.id}`
+        // The PATH form, not #r= — see netlify/functions/share.mjs. It serves
+        // the preview tags and then forwards to the app's own #r= link, so
+        // nothing downstream changes except that pasted links now unfurl.
+        url = `${location.origin}/r/${j.id}`
         published = true
       }
     } catch {} // network/function down — fall through to the inline link
