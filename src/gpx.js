@@ -436,6 +436,25 @@ const HEAD_MARKER_INK = '#17191b' // same dark ink as the arch's default (light-
 // dominates the composed shape, ~86% of its own height) reads at roughly the
 // old standalone icon's size (0.011) — see the task-24 report for the
 // measured live px.
+// How far the drawn track floats above the terrain it's draped on, in WORLD
+// units. This used to be 0.16 and it read as a visible hover — the track
+// hanging in the air over ridgelines instead of lying on them.
+//
+// The trap: a world unit is NOT a fixed real-world distance. The block is
+// always TERRAIN_SIZE (56) units wide whatever it REPRESENTS, so the same
+// 0.16 measured, live on a real track:
+//     demZoom 13 (13 km patch) ->  37 m of float
+//     demZoom 11 (19 km patch) ->  54 m   <- what the user photographed
+//     demZoom 10 (91 km patch) -> 260 m
+//     demZoom  8 (360 km patch) -> 1029 m
+// A constant lift cannot be right at every scale, so it shouldn't be doing
+// this job at all. The lift existed only to stop the line z-fighting the
+// terrain surface; polygonOffset on the line materials (see LineMaterial
+// below, and the water layer, which already solved this properly) does that
+// in depth-buffer space instead — screen-constant, scale-independent, and it
+// leaves the geometry ON the ground. What remains here is a hair of physical
+// clearance for the head marker and hover cursor to sit against.
+const DRAPE_LIFT = 0.012
 const HEAD_MARKER_BASE_H = 0.013
 // The sprite's PIVOT (THREE.Sprite.center, not just its texture) is set to
 // the triangle's apex — see the constructor below — rather than the default
@@ -652,7 +671,7 @@ export class GpxLayer {
       // _depthOffsetY (task 22 §2): a small per-layer lift so two stacked
       // layers whose tracks coincide (e.g. the same GPX loaded twice) don't
       // z-fight — see GpxLayerManager.reorder()/setRenderDepth().
-      const y = (inside ? this.terrain.sample(w.x, w.z) + 0.16 : 0.16) + this._depthOffsetY
+      const y = (inside ? this.terrain.sample(w.x, w.z) + DRAPE_LIFT : DRAPE_LIFT) + this._depthOffsetY
       world.push(new THREE.Vector3(w.x, y, w.z))
       pts.push(w.x, y, w.z)
     }
@@ -677,6 +696,14 @@ export class GpxLayer {
       linewidth: width,
       alphaToCoverage: false,
       vertexColors: gradientOn,
+      // Depth bias instead of lifting the geometry — see DRAPE_LIFT. Line2
+      // draws fat lines as instanced TRIANGLES, so polygonOffset applies to
+      // them exactly as it does to the water layer's filled rings, and it
+      // biases in DEPTH-BUFFER space: constant on screen, and it never moves
+      // the track off the ground it's supposed to be lying on.
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
     })
     this.lineMat.resolution.set(window.innerWidth, window.innerHeight)
     this.line = new Line2(geo, this.lineMat)
@@ -975,7 +1002,10 @@ export class GpxLayer {
     return this.track.points.map((p, i) => {
       if (p.ele != null && Number.isFinite(p.ele)) return p.ele
       const w = this.track.world?.[i]
-      return w && dem ? (w.y - 0.16) * mPerUnit + dem.meanM : 0
+      // subtract the SAME lift rebuild() added, or every derived altitude is
+      // off by it — this is why DRAPE_LIFT is a named constant and not a
+      // literal repeated in two places that can drift apart
+      return w && dem ? (w.y - DRAPE_LIFT) * mPerUnit + dem.meanM : 0
     })
   }
 
