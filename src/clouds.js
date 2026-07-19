@@ -165,8 +165,21 @@ const DECK_FRAG = /* glsl */ `
   uniform vec3 uSunColor;    // warm at sunset, white at noon
   uniform vec3 uAmbColor;    // sky fill
   uniform float uBrightness;
+  uniform sampler2D uTerrainTex;  // block heightfield, 0..1 over uTerrainMin..+uTerrainRange
+  uniform float uTerrainMin;
+  uniform float uTerrainRange;
 
   float sat(float v) { return clamp(v, 0.0, 1.0); }
+
+  // world height of the relief under XZ — the volumetric occluder. The clouds
+  // deliberately do NOT depth-test (the box's back-face depth says nothing
+  // about where cloud material actually is); instead the ray march itself
+  // stops when the ray dives into the mountain, which occludes softly and
+  // never leaves a hard billboard seam on a slope.
+  float terrainH(vec2 xz) {
+    vec2 uv = (xz - uBoxMin.xz) / (uBoxMax.xz - uBoxMin.xz);
+    return uTerrainMin + texture(uTerrainTex, clamp(uv, 0.0, 1.0)).r * uTerrainRange;
+  }
 
   // classic slab-method ray/box intersection
   vec2 boxSpan(vec3 ro, vec3 rd) {
@@ -276,6 +289,17 @@ const DECK_FRAG = /* glsl */ `
     span.x = max(span.x, 0.0);
     if (span.y <= span.x) discard;
 
+    // Terrain occlusion BEFORE the deck: when the deck floats above the
+    // summits, a ray can pass through a ridge on its way to the box and the
+    // in-march test below never sees it. Walk the camera->box-entry segment
+    // against the heightfield; a hit means everything beyond is hidden.
+    if (span.x > 0.0) {
+      for (int i = 1; i <= 12; i++) {
+        vec3 wp = ro + rd * (span.x * float(i) / 12.0);
+        if (wp.y < terrainH(wp.xz)) discard;
+      }
+    }
+
     vec3 toSun = -normalize(uSunDir);
     float cosA = dot(rd, -toSun);
     // jitter the start so 64 steps don't band
@@ -292,6 +316,8 @@ const DECK_FRAG = /* glsl */ `
 
     for (int i = 0; i < MARCH_STEPS; i++) {
       vec3 wp = ro + rd * (span.x + (float(i) + jitter) * dt);
+      // the ray has entered the mountain — everything beyond is occluded
+      if (wp.y < terrainH(wp.xz)) break;
       float d = densityAt(wp, cell);
       if (d <= 0.002) continue;
       float depth = sunDepth(wp, toSun, cell);
@@ -430,6 +456,7 @@ export class Clouds {
       return
     }
     const { tex, data } = bakeVolume()
+    const hf = this._bakeHeightfield()
 
     const half = TERRAIN_SIZE / 2
     // the deck can sit anywhere from ground level (altitude 0) to high above
@@ -471,6 +498,9 @@ export class Clouds {
         uSunColor: { value: new THREE.Color(1, 1, 1) },
         uAmbColor: { value: new THREE.Color(0.5, 0.56, 0.66).multiplyScalar(0.28) },
         uBrightness: { value: params.cloudBrightness ?? 2.5 },
+        uTerrainTex: { value: hf.tex },
+        uTerrainMin: { value: hf.min },
+        uTerrainRange: { value: hf.range },
       },
     })
 
@@ -585,6 +615,38 @@ export class Clouds {
   setVisible(v) {
     this.group.visible = v
     if (!v && this.terrain.mapUniforms?.uCloudShadowK) this.terrain.mapUniforms.uCloudShadowK.value = 0
+  }
+
+  // The relief as a 256x256 single-channel texture over the block, quantised
+  // to 8 bits across its own min..max (a ~15-world-unit range in 256 steps is
+  // ~6 cm — far finer than a cloud edge needs) so LinearFilter is guaranteed
+  // filterable everywhere, unlike float textures.
+  _bakeHeightfield() {
+    const N = 256
+    const sample = this.terrain?.sample
+    const half = TERRAIN_SIZE / 2
+    const heights = new Float32Array(N * N)
+    let min = Infinity, max = -Infinity
+    for (let j = 0; j < N; j++) {
+      for (let i = 0; i < N; i++) {
+        const x = -half + ((i + 0.5) / N) * TERRAIN_SIZE
+        const z = -half + ((j + 0.5) / N) * TERRAIN_SIZE
+        const h = sample ? sample(x, z) : 0
+        const v = Number.isFinite(h) ? h : 0
+        heights[j * N + i] = v
+        if (v < min) min = v
+        if (v > max) max = v
+      }
+    }
+    const range = Math.max(max - min, 1e-3)
+    const data = new Uint8Array(N * N)
+    for (let k = 0; k < data.length; k++) data[k] = Math.round(((heights[k] - min) / range) * 255)
+    this._heightTex?.dispose()
+    const tex = new THREE.DataTexture(data, N, N, THREE.RedFormat)
+    tex.magFilter = tex.minFilter = THREE.LinearFilter
+    tex.needsUpdate = true
+    this._heightTex = tex
+    return { tex, min, range }
   }
 
   _dispose() {

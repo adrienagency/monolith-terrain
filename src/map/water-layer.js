@@ -66,7 +66,27 @@ const LAKE_RENDER_ORDER = 26
 // by the caller. Shared by the OSM water-area fill (rivers/lakes at OSM
 // zoom) and the Natural Earth / Overture-tile lakes fill (waterFill option)
 // — one triangulate/clip/drape implementation.
-function _buildFilledRing(part, dem, sample, outline, fp, insideBlock) {
+// The single height a lake surface sits at: the MEDIAN of the terrain samples
+// under its vertices. Median, not mean or min: most vertices sample the water
+// surface itself (the DEM sees lake level there), while a handful land on the
+// shore slope where the polygon and the DEM disagree about the waterline —
+// those outliers must not drag the level up the hill (mean) or down into a
+// DEM pit (min). Exported for tests.
+export function waterLevelOf(heights) {
+  if (!heights.length) return 0
+  const s = [...heights].sort((a, b) => a - b)
+  const mid = s.length >> 1
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2
+}
+
+// `flat`: lakes pass true — a lake is a LEVEL PLANE, so every vertex gets the
+// part's single water level. Draping each vertex at terrain height (the old
+// behaviour, still right for rivers, which genuinely follow the ground) made
+// any shoreline overlap CLIMB the hillside: blue paint running up a mountain,
+// reported as "on voit les lacs a travers les montagnes". Flat, the same
+// overlap disappears INTO the slope and the terrain occludes it — which is
+// what a real shore does.
+function _buildFilledRing(part, dem, sample, outline, fp, insideBlock, flat = false) {
   if (!part?.outer || part.outer.length < 4) return null
   const outerPts = latlonToWorldPts(part.outer, dem, latLonToWorld)
   if (outerPts.length < 3) return null
@@ -105,6 +125,13 @@ function _buildFilledRing(part, dem, sample, outline, fp, insideBlock) {
     for (let k = 1; k < open.length - 1; k++) index.push(base, base + k, base + k + 1)
   }
   if (!index.length) return null
+  if (flat) {
+    // one level for the whole part — collected from the heights already draped
+    const heights = []
+    for (let i = 1; i < positions.length; i += 3) heights.push(positions[i])
+    const level = waterLevelOf(heights)
+    for (let i = 1; i < positions.length; i += 3) positions[i] = level
+  }
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
   geo.setIndex(index)
@@ -380,7 +407,7 @@ export class WaterLayer {
         // occludes the lake behind a mountain.
         const lakeMaterial = _fillMaterial(lakeInk, fillOpacity)
         for (const part of lakeParts) {
-          const geo = _buildFilledRing(part, dem, sample, outline, fp, insideBlock)
+          const geo = _buildFilledRing(part, dem, sample, outline, fp, insideBlock, true)
           if (!geo) continue
           const mesh = new THREE.Mesh(geo, lakeMaterial)
           mesh.renderOrder = LAKE_RENDER_ORDER
