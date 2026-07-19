@@ -236,7 +236,7 @@ const params = {
   // Default MODE is 'slope' (not 'elevation'): the reference video colours
   // its route by gradient (blue on the flat, red on the climb), not by
   // absolute altitude — colour what the athlete feels, not where they are.
-  gpxGradient: true,
+  gpxGradient: false, // gradient is an OPTION — the default track is the accent orange (gpxColor '' falls back to hudAccent)
   gpxGradientMode: 'slope',
   gpxGlow: false,
   gpxMarkers: true, // single toggle for BOTH start + finish markers

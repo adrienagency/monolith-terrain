@@ -444,7 +444,7 @@ function mountainGround(x, z) {
   return 8 + 6 * Math.sin(x * 0.04) * Math.cos(z * 0.05) + 3 * Math.sin(x * 0.11 + z * 0.07)
 }
 
-test('DroneCam never dips below ground clearance over rugged terrain (task 24 closer standoff)', () => {
+test('DroneCam ground contact is a bounded bounce, never a clip-through', () => {
   const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 400)
   const controls = { target: new THREE.Vector3() }
   const drone = new DroneCam({ camera, controls, sampleGround: mountainGround })
@@ -462,13 +462,70 @@ test('DroneCam never dips below ground clearance over rugged terrain (task 24 cl
     const groundHere = mountainGround(camera.position.x, camera.position.z)
     minClearanceGap = Math.min(minClearanceGap, camera.position.y - groundHere)
   }
-  // must never go below the configured clearance (2.6) minus a tiny float
-  // slop — a smaller absolute margin here would mean the rig is clipping in.
+  // CONTRACT CHANGED by explicit request ("éviter les collisions de la caméra
+  // avec le sol > faire un rebond"): the floor is now a slightly under-damped
+  // SPRING, so a transient dip below the 2.6 clearance is the intended
+  // rebound — the old hard `y = floor` teleport was itself one of the
+  // reported vertical jumps. What must still never happen is passing the hard
+  // floor (70% of clearance): a bounce is a look, clipping into rock is a bug.
   assert.ok(
-    minClearanceGap >= drone.clearance - 0.05,
-    `camera dipped to ${minClearanceGap.toFixed(3)} world units above ground, below the ${drone.clearance} clearance floor`
+    minClearanceGap >= drone.clearance * 0.7 - 0.05,
+    `camera dipped to ${minClearanceGap.toFixed(3)} world units above ground — past the hard floor`
   )
 })
 
 function THREE_deg(d) { return (d * Math.PI) / 180 }
 function THREE_clampDot(d) { return Math.max(-1, Math.min(1, d)) }
+
+test('a vertically-noisy GPX cannot pump the camera (stabilized gimbal)', () => {
+  // Field report: "les erreurs verticales des GPX posent beaucoup de soucis à
+  // la caméra". Feed a track whose Y alternates ±2.5 every point — far worse
+  // than real drape noise — and require the realized camera Y to move gently.
+  const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 400)
+  const controls = { target: new THREE.Vector3() }
+  const drone = new DroneCam({ camera, controls, sampleGround: () => 0 })
+  const pts = []
+  for (let i = 0; i < 120; i++) pts.push({ x: i * 0.8, y: 6 + (i % 2 ? 2.5 : -2.5), z: Math.sin(i * 0.1) * 4 })
+  assert.ok(drone.start(pts, { duration: 30 }))
+  const dt = 1 / 30
+  let prevY = camera.position.y
+  let maxStep = 0
+  for (let s = 0; s <= 1.0001; s += dt / 30) {
+    drone.updateAt(dt, Math.min(s, 1))
+    maxStep = Math.max(maxStep, Math.abs(camera.position.y - prevY))
+    prevY = camera.position.y
+  }
+  // raw noise is 5.0 units point-to-point; the camera must never see it
+  assert.ok(maxStep < 0.35, `camera Y stepped ${maxStep.toFixed(3)} in one frame — the noise got through`)
+})
+
+test('the camera never stares at the ground (directorial pitch floor)', () => {
+  // Field report: "regarde trop souvent vers le bas". Whatever the framing
+  // solver asks, realized pitch must respect minPitchRad.
+  const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 400)
+  const controls = { target: new THREE.Vector3() }
+  const drone = new DroneCam({ camera, controls, sampleGround: mountainGround })
+  assert.ok(drone.start(buildZigzagClimb(), { duration: 40 }))
+  const dt = 1 / 30
+  const fwd = new THREE.Vector3()
+  let minPitch = Infinity
+  let floorViolationsWithHeadSafe = 0
+  const head = new THREE.Vector3()
+  for (let s = 0; s <= 1.0001; s += dt / 40) {
+    const t = Math.min(s, 1)
+    drone.updateAt(dt, t)
+    fwd.set(0, 0, -1).applyQuaternion(camera.quaternion)
+    const pitch = Math.atan2(fwd.y, Math.hypot(fwd.x, fwd.z))
+    minPitch = Math.min(minPitch, pitch)
+    // The floor may ONLY be pierced in service of keeping the head framed
+    // (the frame-keeping override): if pitch is below floor while the head
+    // is comfortably high in frame, the floor just failed for no reason.
+    if (pitch < drone.minPitchRad - 0.06) {
+      drone.curve.getPointAt(t, head)
+      head.project(camera)
+      if (head.y > drone.bottomKeepNdcY + 0.25) floorViolationsWithHeadSafe++
+    }
+  }
+  assert.ok(minPitch >= -1.2 - 1e-6, `pitch reached ${minPitch.toFixed(3)} rad — past even the frame-keeping bound`)
+  assert.equal(floorViolationsWithHeadSafe, 0, 'floor pierced while the head did not need it')
+})

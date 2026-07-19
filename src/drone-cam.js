@@ -590,8 +590,31 @@ export class DroneCam {
     // taller-than-wide box; with no box left and continuous correction,
     // biasing off-centre would directly contradict the brief's own "vers le
     // centre" wording, not serve it).
-    this.targetNdcY = 0
+    // FRAMING, the film-director version. The subject sits in the LOWER THIRD
+    // of the frame, not dead centre: a chase camera above a runner that
+    // centres them must pitch down at the ground, and "regarde trop souvent
+    // vers le bas" was the exact field report. Framing them low fills the top
+    // two-thirds with the valley walls and the summits — the landscape IS the
+    // shot. minPitchRad is the hard directorial floor on top of that: no
+    // matter what the solver asks, the camera never stares down steeper than
+    // ~26 deg, which is what actually guarantees the horizon stays in frame.
+    this.targetNdcY = -0.3
     this.targetNdcX = 0
+    this.minPitchRad = -0.45
+    // ...but KEEPING THE SUBJECT IN FRAME OUTRANKS the floor. On the
+    // Europaweg wall the rig rides high above the trail (clearance + ridge
+    // lift), and an absolute floor there measured the head on screen only
+    // 48% of the time — recreating the exact "ne focus plus sur la tête de
+    // course" bug this rework is for. If respecting the floor would drop the
+    // head below bottomKeepNdcY, the floor yields.
+    this.bottomKeepNdcY = -0.82
+    // A ground vehicle does not teleport vertically, and neither does its
+    // chase car: the realized position's vertical SPEED is capped (units/s).
+    // This is what finally tames the occlusion pull-in's instant 3D jumps
+    // (measured 4.37 units in ONE frame on the Europaweg) without weakening
+    // the pull itself — the sightline recovers over a few frames instead.
+    this.maxVerticalRate = 3.5
+    this._lastY = null
     // task 26: damping now smooths a chase against the real (curve-anchored)
     // subject rather than an already-smooth spine — still the same role
     // (extra silkiness on top of the rate caps), just a livelier target.
@@ -602,8 +625,19 @@ export class DroneCam {
     // move the lag from one stage to the other. Still real smoothing (not
     // zero), just proportionally faster, same as every other number this
     // task raised.
-    this.posHalfLife = 0.45 // s — smoothing on top of the rate-limited chase
+    this.posHalfLife = 0.45 // s — smoothing on top of the rate-limited chase (XZ)
+    // Vertical gets its OWN, much slower lane: a chase vehicle tracks its
+    // subject laterally but does not replay every rise of the road. All the
+    // reported bugs were vertical; the horizontal chase was fine.
+    this.posHalfLifeY = 1.2 // s
     this.rotHalfLife = 0.25 // s — final orientation smoothing
+    // ground collision = a BOUNCE, not a snap (explicit ask). The floor is a
+    // stiff, slightly under-damped spring: dipping under clearance pushes the
+    // camera up fast with a small visible rebound, instead of the old
+    // teleport `y = floor` which was itself one of the vertical "jumps".
+    this._yVel = 0
+    this.floorStiffness = 60 // 1/s^2
+    this.floorDamping = 7 // 1/s — under critical on purpose: that IS the bounce
 
     // ---- cinematic VARIATION — layered ON TOP of the arm/lift rig above,
     // not a replacement for it.
@@ -711,7 +745,27 @@ export class DroneCam {
     // stay switchbacks here on purpose; the framing math below (not this
     // curve) is what keeps them from reading as nausea.
     const subjSpacing = Math.max(0.4, span / 260)
-    const subjV = smoothPath(resamplePath(worldPts, subjSpacing), 2, 2).map((p) => new THREE.Vector3(p.x, p.y, p.z))
+    const subjRaw = smoothPath(resamplePath(worldPts, subjSpacing), 2, 2)
+    // STABILIZED GIMBAL (field report: "changement de position verticale
+    // intempestive... je pense que les erreurs verticales des GPX posent
+    // beaucoup de soucis"). The report is right about the mechanism: the
+    // subject's Y comes from draping onto the DEM, and on a balcony trail cut
+    // into a steep wall a few metres of lateral GPS jitter re-drapes to tens
+    // of metres of height change — noise the light 2-pass smoothing above
+    // cannot touch. Everything the CAMERA reads gets a much heavier Y-ONLY
+    // low-pass: lateral tracking stays sharp (the reported bugs are all
+    // vertical), and the head MARKER itself (gpx.js) still rides the true
+    // ground. A film crew does the same thing — the chase vehicle's gimbal
+    // stabilises vertically, it does not replay every pothole.
+    const ys = subjRaw.map((p) => p.y)
+    for (let pass = 0; pass < 3; pass++) {
+      for (let i = 1; i < ys.length - 1; i++) {
+        let sum = 0, n = 0
+        for (let j = Math.max(0, i - 6); j <= Math.min(ys.length - 1, i + 6); j++) { sum += ys[j]; n++ }
+        ys[i] = sum / n
+      }
+    }
+    const subjV = subjRaw.map((p, i) => new THREE.Vector3(p.x, ys[i], p.z))
     // a stationary / near-single-point track collapses the resample to one point;
     // CatmullRomCurve3 of <2 points yields NaN poses. Bail cleanly instead.
     if (subjV.length < 2) return false
@@ -797,6 +851,7 @@ export class DroneCam {
     // standoff multiplier from the CONTENT at the seed point itself (not a
     // neutral 1) so a resume mid-climb doesn't visibly pop as it eases in
     this._breathT = 0
+    this._lastY = null // vertical rate limiter re-seats on the first frame
     this._standoffMul = this._standoffMulAt(this.t)
 
     // seat the camera at the initial pose immediately — no slew-in lurch
@@ -873,9 +928,48 @@ export class DroneCam {
     })
     if (!r.pulled) return
     this._pos.set(r.x, r.y, r.z)
-    const gc = this.sampleGround(this._pos.x, this._pos.z)
-    if (this._pos.y < gc + this.clearance) this._pos.y = gc + this.clearance
+    // the pull-in shortens the whole 3D offset, so Y can dip back under the
+    // floor — same spring treatment as the main pass, never a teleport
+    this._springFloor(1 / 60)
+    this._limitVerticalRate(1 / 60)
     this.camera.position.copy(this._pos)
+  }
+
+  // Ground floor as a SPRING (see floorStiffness/floorDamping): below
+  // clearance the camera is pushed up with a small rebound; above it the
+  // spring velocity decays. An emergency hard floor well below clearance
+  // still exists — a bounce is a look, clipping through rock is a bug.
+  _springFloor(dt) {
+    if (!this.sampleGround) return
+    const h = Math.min(Math.max(dt, 1 / 240), 1 / 20) // clamp for integrator stability
+    const gc = this.sampleGround(this._pos.x, this._pos.z)
+    const floor = gc + this.clearance
+    if (this._pos.y < floor) {
+      this._yVel += (floor - this._pos.y) * this.floorStiffness * h
+      this._yVel *= Math.exp(-this.floorDamping * h)
+      this._pos.y += this._yVel * h
+    } else {
+      this._yVel *= Math.exp(-5 * h) // fade any leftover bounce once airborne
+    }
+    const hard = gc + this.clearance * 0.7 // the bounce may dip this far, never further
+    if (this._pos.y < hard) { this._pos.y = hard; this._yVel = Math.max(this._yVel, 0) }
+  }
+
+  // Vertical speed cap on the REALIZED position — the last stage before the
+  // camera is written. Every upstream pass (ridge lift, occlusion pull,
+  // spring floor) may ASK for a big vertical move; this stage spreads it over
+  // frames. The emergency hard floor is re-applied after, because clipping
+  // into rock is worse than a fast climb.
+  _limitVerticalRate(dt) {
+    if (this._lastY === null || dt <= 0) { this._lastY = this._pos.y; return }
+    const maxDy = this.maxVerticalRate * Math.min(dt, 1 / 20)
+    const dy = this._pos.y - this._lastY
+    if (Math.abs(dy) > maxDy) this._pos.y = this._lastY + Math.sign(dy) * maxDy
+    if (this.sampleGround) {
+      const hard = this.sampleGround(this._pos.x, this._pos.z) + this.clearance * 0.7
+      if (this._pos.y < hard) this._pos.y = hard
+    }
+    this._lastY = this._pos.y
   }
 
   // interpolated read of the baked drama profile at path fraction s — see
@@ -1012,7 +1106,10 @@ export class DroneCam {
     // (possibly just-turned) heading, then a long critical-damping pass on top.
     this._solvePosition(s, _desiredPos)
     const fp = dt <= 0 ? 1 : 1 - Math.pow(2, -dt / this.posHalfLife)
-    this._pos.lerp(_desiredPos, fp)
+    const fy = dt <= 0 ? 1 : 1 - Math.pow(2, -dt / this.posHalfLifeY)
+    this._pos.x += (_desiredPos.x - this._pos.x) * fp
+    this._pos.z += (_desiredPos.z - this._pos.z) * fp
+    this._pos.y += (_desiredPos.y - this._pos.y) * fy
     // the LERP itself is a straight line between two independently-clamped
     // endpoints (last frame's realized position and this frame's freshly
     // solved+clamped target) — over genuinely rugged terrain the ground
@@ -1023,10 +1120,8 @@ export class DroneCam {
     // lot more frame-to-frame than the old spine-anchored rig did, which
     // makes this latent gap easier to hit — re-clamp the REALIZED lerped
     // point against the ground directly under IT, not just its endpoints.
-    if (this.sampleGround) {
-      const gc = this.sampleGround(this._pos.x, this._pos.z)
-      if (this._pos.y < gc + this.clearance) this._pos.y = gc + this.clearance
-    }
+    this._springFloor(dt)
+    this._limitVerticalRate(dt)
     this.camera.position.copy(this._pos)
 
     // 2b) occlusion guarantee (task 26 §3) — _subj here is exactly the same
@@ -1058,7 +1153,13 @@ export class DroneCam {
 
     const vFov = THREE.MathUtils.degToRad(this.camera.fov)
     let targetPitch = solvePitchForNdcY(_diff, this._headingDir, this.targetNdcY, vFov)
-    targetPitch = THREE.MathUtils.clamp(targetPitch, -1.1, 1.1) // guard degenerate geometry (~63°)
+    targetPitch = THREE.MathUtils.clamp(targetPitch, this.minPitchRad, 1.1) // directorial floor — see minPitchRad
+    // frame-keeping override: never let the floor push the head off the
+    // bottom of the frame — solve the pitch that pins it at bottomKeepNdcY
+    // and refuse to pitch higher than that (see the constructor comment)
+    const keepPitch = solvePitchForNdcY(_diff, this._headingDir, this.bottomKeepNdcY, vFov)
+    if (targetPitch > keepPitch) targetPitch = keepPitch
+    targetPitch = THREE.MathUtils.clamp(targetPitch, -1.2, 1.1)
     if (dt <= 0) {
       this._pitch = targetPitch
     } else {
