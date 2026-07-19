@@ -216,6 +216,9 @@ export class DroneCam {
   }
 
   zoomBy(factor) { this.dist = THREE.MathUtils.clamp(this.dist * factor, 3, 40) }
+  // left/right arrows: orbit the view around the head — still user-driven,
+  // the bearing only moves when a hand moves it
+  rotateBy(deltaDeg) { this.topDown = false; this.viewBearingDeg = ((this.viewBearingDeg + deltaDeg) % 360 + 360) % 360 }
   tiltBy(deltaDeg) { this.tiltDeg = THREE.MathUtils.clamp(this.tiltDeg + deltaDeg, 6, 80) }
 
   // ---- bake: just the subject curve (Y heavily low-passed) ---------------

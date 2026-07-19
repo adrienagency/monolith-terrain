@@ -34,6 +34,8 @@ export function showFollowPad(drone) {
   row.append(
     mk('−', 'Dézoomer (−)', () => drone.zoomBy(1.18)),
     mk('+', 'Zoomer (+)', () => drone.zoomBy(1 / 1.18)),
+    mk('◀', 'Pivoter à gauche (←)', () => drone.rotateBy(-10)),
+    mk('▶', 'Pivoter à droite (→)', () => drone.rotateBy(10)),
     mk('▲', 'Tilt haut (↑)', () => drone.tiltBy(6)),
     mk('▼', 'Tilt bas (↓)', () => drone.tiltBy(-6))
   )
@@ -48,7 +50,10 @@ export function showFollowPad(drone) {
     if (e.key === '+' || e.code === 'NumpadAdd') { drone.zoomBy(1 / 1.18); e.preventDefault(); return }
     if (e.key === '-' || e.code === 'NumpadSubtract') { drone.zoomBy(1.18); e.preventDefault(); return }
     if (e.code === 'ArrowUp') { drone.tiltBy(6); e.preventDefault(); return }
-    if (e.code === 'ArrowDown') { drone.tiltBy(-6); e.preventDefault() }
+    if (e.code === 'ArrowDown') { drone.tiltBy(-6); e.preventDefault(); return }
+    // held arrows auto-repeat: a smooth continuous orbit for free
+    if (e.code === 'ArrowLeft') { drone.rotateBy(-6); e.preventDefault(); return }
+    if (e.code === 'ArrowRight') { drone.rotateBy(6); e.preventDefault() }
   }
   document.addEventListener('keydown', keyHandler)
 }
