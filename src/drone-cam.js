@@ -195,10 +195,10 @@ export class DroneCam {
     this.dollyPeriodCols = 80 // the preferred row breathes along the route: wide, closer, wide
 
     // ---- runtime tuning ----
-    this.posHalfLife = 0.35 // s — XZ approach to the rail
+    this.posHalfLife = 0.25 // s — XZ approach to the rail (quickened with the rate caps)
     this.posHalfLifeY = 0.4 // s — light: the RAIL is already smooth; heavy runtime Y lag just dragged the camera under climbing terrain for the hard floor to catch (measured 1.5-unit floor snaps)
-    this.maxYawRateDeg = 90
-    this.maxPitchRateDeg = 85
+    this.maxYawRateDeg = 120 // faster: the camera must never lose the thread
+    this.maxPitchRateDeg = 160 // 'surtout le tilt' — the axis that kept lagging
     this.rotHalfLife = 0.09 // s — short: aim lag grows with orbit speed (measured)
     this.floorStiffness = 60 // ground BOUNCE spring (explicit ask), under-damped
     this.floorDamping = 7
@@ -346,16 +346,39 @@ export class DroneCam {
         if (p.y < floor) p.y = floor
       }
     }
-    // final visibility pass: smoothing may have slid a corner behind a ridge
-    // between Viterbi columns. Where the finished rail is blind to its own
-    // subject, LIFT it (Nesky: for hills, raise over the obstruction — it
-    // reads better than a sideways dodge) until the line of sight clears.
-    // This is what keeps the runtime de-occlusion net nearly idle.
+    // final visibility pass — the user's own direction, in film grammar: pass
+    // a mountain by ARCING around it (truck/pan), never by diving over or
+    // through. For each blind rail point, rotate it around its subject in
+    // growing steps (smallest swing that clears wins); only if the whole ring
+    // is blind, lift a LITTLE. Then cap the look-down angle everywhere:
+    // 'jamais une vue top down, toujours un angle' — if a point looks steeper
+    // than ~50 deg onto its subject, push it OUTWARD until the angle returns.
+    const MAX_DOWN_RATIO = 1.15 // tan(~49 deg)
     for (let i = 0; i < rail.length; i++) {
       const sp = P[Math.min(P.length - 1, Math.round((i / (rail.length - 1)) * (P.length - 1)))]
-      let lifted = 0
-      while (lifted < 9 && !this._sight(sp.x, sp.y + 0.3, sp.z, rail[i].x, rail[i].y, rail[i].z)) {
-        rail[i].y += 0.75; lifted += 0.75
+      const rp = rail[i]
+      if (!this._sight(sp.x, sp.y + 0.3, sp.z, rp.x, rp.y, rp.z)) {
+        const dx = rp.x - sp.x, dz = rp.z - sp.z
+        const dist = Math.hypot(dx, dz), base = Math.atan2(dx, dz)
+        let fixed = false
+        for (const off of [0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4, 1.9, -1.9]) {
+          const x = sp.x + Math.sin(base + off) * dist
+          const z = sp.z + Math.cos(base + off) * dist
+          let y = rp.y
+          if (this.sampleGround) y = Math.max(y, this.sampleGround(x, z) + this.clearance)
+          if (this._sight(sp.x, sp.y + 0.3, sp.z, x, y, z)) { rp.x = x; rp.z = z; rp.y = y; fixed = true; break }
+        }
+        if (!fixed) for (let l = 0; l < 4 && !this._sight(sp.x, sp.y + 0.3, sp.z, rp.x, rp.y, rp.z); l++) rp.y += 0.75
+      }
+      // anti-top-down: keep the shot at an angle, always
+      const horiz = Math.max(Math.hypot(rp.x - sp.x, rp.z - sp.z), 0.5)
+      const drop = rp.y - sp.y
+      if (drop > horiz * MAX_DOWN_RATIO) {
+        const need = drop / MAX_DOWN_RATIO
+        const kx = (rp.x - sp.x) / horiz, kz = (rp.z - sp.z) / horiz
+        rp.x = sp.x + kx * need
+        rp.z = sp.z + kz * need
+        if (this.sampleGround) rp.y = Math.max(rp.y, this.sampleGround(rp.x, rp.z) + this.clearance)
       }
     }
     rail = smoothPath(rail, 1, 2)
