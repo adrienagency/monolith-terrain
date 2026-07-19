@@ -1156,6 +1156,17 @@ function regenerateTerrain() {
       regenerateLabels()
       regenerateHud()
       gpxLayer.rebuildAll() // re-drape every loaded track on the new relief
+      // The follow camera's rail is BAKED against the terrain at start() time.
+      // A terrain rebuild (zoom change, GPX frameTrack reload, exaggeration)
+      // moves the ground under a baked rail — the old reactive rigs read the
+      // ground live and self-corrected, the rail cannot. Re-bake it here, on
+      // the freshly re-draped track, or the camera flies in a stale world —
+      // the exact "ca part dans tous les sens" field bug (HUD showed perfect
+      // FPA sync yet garbage on screen: right branch, wrong world).
+      if (drone.active) {
+        const w = gpxLayer.track?.world
+        if (w && w.length >= 2) drone.retarget(w)
+      }
       if (clouds) clouds.build(params) // deck re-floats above the new relief
       if (peaksLayer.enabled) peaksLayer.refresh()
       if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
