@@ -50,6 +50,12 @@ const DIVE_ALT_M = DIVE_TIERS[0].altM
 const MAX_ALT_M = 16000000 // ~2.5 earth radii — whole planet in frame
 const MSG_MS = 3600
 
+// task 30 Fix A: the isometric-ish viewing angle every dive/refine arrival
+// has always used (camera.position(0,18,19), looking at (0,-0.3,0)) — kept
+// as a fixed DIRECTION so the new far-standoff arrival (_arrivalPose()
+// below) still frames the block the same way, just from farther back.
+const _ARRIVAL_DIR = new THREE.Vector3(0, 18, 19).normalize()
+
 export class Modes {
   /**
    * hooks: {
@@ -63,6 +69,8 @@ export class Modes {
    *     current view, null when already at fine scale),
    *   getCoarsenTarget() → {lat, lon, zoom} | null (next wider scale, null
    *     once the patch is z8 — then zooming out opens the orbit gate),
+   *   sampleGroundY(x, z) → number (optional; terrain height at a world XZ —
+   *     used by _arrivalPose()'s clearance guard, see its own comment),
    * }
    */
   constructor({ camera, controls, globe, domElement, hooks }) {
@@ -211,6 +219,33 @@ export class Modes {
 
   // ---------------------------------------------------------------- orbital → surface
 
+  // task 30 Fix A: "on se retrouve très souvent le nez dans la paroi quand on
+  // passe au zoom inférieur" — every dive/refine arrival used to land the
+  // camera at a FIXED close standoff (~26 world units: position(0,18,19)
+  // against target(0,-0.3,0)) regardless of how tall the just-loaded patch's
+  // OWN relief is, so a steep peak near the block centre could easily sit
+  // taller than that fixed height. Land at the FAR end of
+  // hooks.surfaceMaxDistance() instead — the same distance the "frame the
+  // whole slab" comment on that hook already documents as safe: the block's
+  // own world footprint (TERRAIN_SIZE) never changes size across zoom tiers,
+  // only what it REPRESENTS does, so "farthest for this zoom" and "farthest,
+  // full stop" are the same number. Same viewing angle as the old fixed
+  // pose (_ARRIVAL_DIR), just farther back along it, so the framing doesn't
+  // look different — only safer. A cheap terrain-clearance guard on top:
+  // sample the ground height directly under the landing target and refuse
+  // to land below it (+ margin) — a formality at ~94% of
+  // surfaceMaxDistance() (that standoff already clears anything this app's
+  // relief produces) but a real guarantee rather than an assumption.
+  _arrivalPose() {
+    const dist = this.hooks.surfaceMaxDistance() * 0.94 // stay under the hard cap so controls.update() below doesn't immediately re-clamp it
+    const target = new THREE.Vector3(0, -0.3, 0)
+    const pos = _ARRIVAL_DIR.clone().multiplyScalar(dist)
+    const groundY = this.hooks.sampleGroundY ? this.hooks.sampleGroundY(target.x, target.z) : -Infinity
+    const minY = groundY + 3 // clearance margin, world units
+    if (pos.y < minY) pos.y = minY
+    return { pos, target }
+  }
+
   async _dive(tier = DIVE_TIERS[0]) {
     if (this.mode !== 'orbital' || this.busy) return
     this.busy = true
@@ -242,8 +277,9 @@ export class Modes {
       this.camera.far = this._surfCam.far
       this.camera.updateProjectionMatrix()
       this.camera.up.set(0, 1, 0)
-      this.camera.position.set(0, 18, 19)
-      this.controls.target.set(0, -0.3, 0)
+      const arrival = this._arrivalPose()
+      this.camera.position.copy(arrival.pos)
+      this.controls.target.copy(arrival.target)
       this.controls.minDistance = 6
       this.controls.maxDistance = this.hooks.surfaceMaxDistance()
       this.controls.maxPolarAngle = Math.PI * 0.49
@@ -287,8 +323,9 @@ export class Modes {
       return
     }
     await this._whiteout(() => {
-      this.camera.position.set(0, 18, 19)
-      this.controls.target.set(0, -0.3, 0)
+      const arrival = this._arrivalPose()
+      this.camera.position.copy(arrival.pos)
+      this.controls.target.copy(arrival.target)
       this.controls.update()
     })
     this.busy = false

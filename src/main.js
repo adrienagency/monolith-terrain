@@ -1210,6 +1210,11 @@ modes = new Modes({
     // around it) before the zoom-out staircase / orbit gate engages
     surfaceMaxDistance: () => 150,
     getFineZoom: () => userFineZoom,
+    // task 30 Fix A: terrain-clearance guard for the dive/refine arrival pose
+    // (see modes.js's _arrivalPose()) — the local relief height right under
+    // the landing target, so the arrival camera can never come to rest below
+    // the ground it just loaded.
+    sampleGroundY: (x, z) => terrain.sample?.(x, z) ?? 0,
     // next finer scale under the current view — the staircase down from a
     // coarse (z8/z10) dive; null once the patch is already fine
     getRefineTarget() {
@@ -1231,7 +1236,7 @@ modes = new Modes({
   },
 })
 
-const gotoCtl = createGoto({ modes, announce: (m) => modes.announce(m) })
+const gotoCtl = createGoto({ modes, announce: (m) => modes.announce(m), getFineZoom: () => userFineZoom })
 
 // ------------------------------------------------------------------ map overlay panel + peaks
 
