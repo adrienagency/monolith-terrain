@@ -39,8 +39,7 @@ import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
 import { MapLayers } from './map/layer-manager.js'
-import { AerialLayer } from './map/aerial-layer.js'
-import { patchBounds } from './map/geo-data.js'
+import { AerialLayer, blockBounds } from './map/aerial-layer.js'
 import { StudioLighting, sunFromHour, LIGHT_PRESETS } from './lighting.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
@@ -1955,7 +1954,7 @@ async function refreshAerial() {
     refreshOsmCredit()
     return
   }
-  const built = await aerialLayer.build(patchBounds(dem))
+  const built = await aerialLayer.build(blockBounds(dem)) // the TRUE block extent, never patchBounds — see blockBounds()
   terrain.setAerial(built)
   // null when the patch is outside the covered area — the credit must then
   // disappear too, since nothing of IGN's is on screen
@@ -2467,6 +2466,10 @@ const mapPanel = buildMapPanel({
   u: () => terrain.mapUniforms,
   mapLayers,
   rebuildMapLayers,
+  // the aerial controls need both — this panel gets its OWN ctx, so adding
+  // them to panelCtx above does nothing for it
+  terrain,
+  refreshAerial,
   peaksLayer,
   setLabelsVisible: (v) => (labels.visible = v && modes.mode === 'surface'),
 })

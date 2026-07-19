@@ -25,6 +25,25 @@
 //                        far-zoom tier when this grows past one city.
 import * as THREE from 'three'
 import { tilesForBBox } from './tile-index.js'
+import { worldToLatLon } from '../geo.js'
+import { TERRAIN_SIZE } from '../terrain.js'
+
+// The block's EXACT lon/lat footprint, from its own two corners.
+//
+// This is NOT patchBounds(): that one pads by 5% + 0.01deg on purpose, to widen
+// the net when SEARCHING for features near the patch. Using it to describe the
+// block itself measured 12% oversize and a ~5 km north-west shift of the
+// imagery — a lake climbing a hillside. A photo has to be registered to the
+// ground it's painted on, so it gets the true extent, nothing padded.
+export function blockBounds(dem) {
+  const HALF = TERRAIN_SIZE / 2
+  const nw = worldToLatLon(dem, -HALF, -HALF)
+  const se = worldToLatLon(dem, HALF, HALF)
+  return {
+    minLon: Math.min(nw.lon, se.lon), maxLon: Math.max(nw.lon, se.lon),
+    minLat: Math.min(nw.lat, se.lat), maxLat: Math.max(nw.lat, se.lat),
+  }
+}
 
 const TILE_PX = 256
 // Cap on the composited texture. 2048 keeps a 24 km patch near 12 m/px on
@@ -73,8 +92,11 @@ export class AerialLayer {
     this._buildId = 0
   }
 
-  // Returns { texture, attribution, tiles, bytes } or null when the patch
-  // isn't covered. Never throws: a failed layer must leave the map usable.
+  // `bbox` is the TRUE block extent — see blockBounds(). Do NOT pass
+  // patchBounds(): it pads by 5% + 0.01deg to widen a data SEARCH, which
+  // measured 12% oversize and ~5 km of NW shift when used as the block's own
+  // footprint. Returns { texture, uv, attribution, tiles, zoom } or null when
+  // the patch isn't covered. Never throws: a failed layer leaves the map usable.
   async build(bbox) {
     const id = ++this._buildId
     if (!aerialCovers(bbox)) return null
