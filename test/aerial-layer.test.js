@@ -7,19 +7,18 @@ test('aerialCovers: an Annecy patch is covered', () => {
   assert.equal(aerialCovers({ minLon: 6.05, maxLon: 6.25, minLat: 45.82, maxLat: 45.96 }), true)
 })
 
-test('aerialCovers: covered where a provider exists, not elsewhere', () => {
-  // Valais and Paris were UNcovered when this layer was Annecy-only; both are
-  // served now, by different countries. Munich still is not.
+test('aerialCovers: global now — the NASA floor covers land AND sea', () => {
   assert.equal(aerialCovers({ minLon: 7.7, maxLon: 7.9, minLat: 46.0, maxLat: 46.2 }), true) // Valais, CH
   assert.equal(aerialCovers({ minLon: 2.2, maxLon: 2.5, minLat: 48.8, maxLat: 48.9 }), true) // Paris, FR
-  assert.equal(aerialCovers({ minLon: 11.5, maxLon: 11.7, minLat: 48.1, maxLat: 48.2 }), false) // Munich
+  assert.equal(aerialCovers({ minLon: 4.9, maxLon: 5.1, minLat: 41.9, maxLat: 42.1 }), true) // open Mediterranean
   assert.equal(aerialCovers(null), false)
 })
 
-test('aerialCovers: judged on the CENTRE, not on overlap', () => {
-  // a huge patch whose centre sits far away must NOT count as covered just
-  // because one corner clips covered ground — the user looks at the middle
-  assert.equal(aerialCovers({ minLon: 8.0, maxLon: 16.0, minLat: 47.0, maxLat: 52.0 }), false) // centre in Germany
+test('providerFor: judged on the CENTRE, not on overlap', () => {
+  // a huge patch whose centre sits in un-served Germany must not borrow a
+  // neighbour's national provider just because a corner clips it
+  const p = providerFor({ minLon: 8.0, maxLon: 16.0, minLat: 51.0, maxLat: 55.0 }) // centre ~ Berlin area
+  assert.equal(p.id, 'nasa')
 })
 
 test('lonLatToMerc: the origin and the equator land where Mercator says', () => {
@@ -79,20 +78,13 @@ test('aerialUnavailable: a covered patch reports no problem', () => {
   assert.equal(aerialUnavailable({ minLon: 6.05, maxLon: 6.25, minLat: 45.82, maxLat: 45.96 }), null)
 })
 
-test('aerialUnavailable: an uncovered patch explains itself in plain words', () => {
-  const msg = aerialUnavailable({ minLon: 11.5, maxLon: 11.7, minLat: 48.1, maxLat: 48.2 }) // Munich
-  assert.equal(typeof msg, 'string')
-  assert.ok(msg.length > 0)
-  // it must be READABLE, not a code: no ALL-CAPS FUI shouting, no identifier
-  assert.ok(!/^[A-Z0-9 _-]+$/.test(msg), `"${msg}" reads as a code, not a sentence`)
-  assert.ok(/\s/.test(msg), 'a message the user reads has words in it')
+test('aerialUnavailable: null everywhere now that the floor is global', () => {
+  assert.equal(aerialUnavailable({ minLon: 11.5, maxLon: 11.7, minLat: 48.1, maxLat: 48.2 }), null)
+  assert.equal(aerialUnavailable({ minLon: -40.1, maxLon: -39.9, minLat: 29.9, maxLat: 30.1 }), null) // mid-Atlantic
+  assert.equal(aerialUnavailable(null), null)
 })
 
-test('aerialUnavailable: the message names where imagery DOES exist', () => {
-  // A dead end is unhelpful; the user needs to know the layer works somewhere.
-  const msg = aerialUnavailable({ minLon: 11.5, maxLon: 11.7, minLat: 48.1, maxLat: 48.2 })
-  assert.ok(/France/i.test(msg), `"${msg}" should point at the covered area`)
-})
+
 
 test('aerialUnavailable: no patch at all is not a coverage complaint', () => {
   // Nothing loaded yet is not the same as "your area has no photos" — saying
@@ -175,19 +167,44 @@ test('providerFor: Chamonix and Zermatt do NOT share a provider', () => {
   assert.notEqual(providerFor(at(6.87, 45.92)).id, providerFor(at(7.75, 46.02)).id)
 })
 
-test('providerFor: elsewhere is not covered at all', () => {
-  for (const [name, lon, lat] of [['Munich', 11.58, 48.14], ['Milan', 9.19, 45.46], ['Barcelona', 2.17, 41.39], ['London', -0.13, 51.51]]) {
-    assert.equal(providerFor(at(lon, lat)), null, name)
+test('providerFor: un-served places fall to the NASA global floor', () => {
+  for (const [name, lon, lat] of [['Milan', 9.19, 45.46], ['London', -0.13, 51.51], ['open Atlantic', -40, 30]]) {
+    assert.equal(providerFor(at(lon, lat))?.id, 'nasa', name)
+  }
+  assert.equal(providerFor(at(11.58, 48.14))?.id, 'bayern', 'Munich is served by Bavaria now')
+  assert.equal(providerFor(at(2.17, 41.39))?.id, 'pnoa', 'Barcelona is served by PNOA now')
+})
+
+test('positive-test-only providers are never reached by elimination', () => {
+  // swisstopo, PDOK, PNOA, Bavaria, NRW, Luxembourg and NLSC all answer
+  // 200-with-placeholder OUTSIDE their coverage (curl-verified) — reaching
+  // any of them by elimination silently renders blank tiles. Everything
+  // un-served must land on the global floor instead.
+  for (const [lon, lat] of [[9.19, 45.46], [-0.13, 51.51], [13.4, 52.52], [126.98, 37.57]]) {
+    assert.equal(providerFor(at(lon, lat))?.id, 'nasa', `${lon},${lat}`)
   }
 })
 
-test('providerFor: swisstopo is never reached by elimination', () => {
-  // It answers 200 OUTSIDE Switzerland instead of 404ing (verified live at
-  // Annecy), so a block must only reach it by a positive border test. If this
-  // ever regresses, foreign blocks silently render Swiss-server blanks.
-  for (const [lon, lat] of [[11.58, 48.14], [9.19, 45.46], [-0.13, 51.51], [2.35, 48.86]]) {
-    assert.notEqual(providerFor(at(lon, lat))?.id, 'swisstopo')
+test('providerFor: the new national providers route their capitals home', () => {
+  for (const [id, lon, lat] of [
+    ['basemap-at', 16.37, 48.21], ['pdok', 4.9, 52.37], ['lu-act', 6.13, 49.61],
+    ['vlaanderen', 3.72, 51.05], ['pnoa', -3.7, 40.42], ['cuzk', 14.44, 50.08],
+    ['gugik', 21.01, 52.23], ['maaamet', 24.75, 59.44], ['zbgis', 17.11, 48.15],
+    ['nrw', 6.96, 50.94], ['bayern', 11.58, 48.14],
+    ['usgs', -77.04, 38.91], ['gsi', 139.69, 35.69], ['nlsc', 121.56, 25.03],
+  ]) {
+    assert.equal(providerFor(at(lon, lat))?.id, id, `${id} capital`)
   }
+})
+
+test('providerFor: alpine + Tatra borders route to the right side', () => {
+  assert.equal(providerFor(at(11.4, 47.27))?.id, 'basemap-at', 'Innsbruck -> Austria, not Bavaria')
+  assert.equal(providerFor(at(13.04, 47.81))?.id, 'basemap-at', 'Salzburg -> Austria')
+  assert.equal(providerFor(at(19.95, 49.3))?.id, 'gugik', 'Zakopane -> Poland')
+  assert.equal(providerFor(at(20.3, 49.06))?.id, 'zbgis', 'Poprad -> Slovakia')
+  assert.equal(providerFor(at(129.07, 35.18))?.id, 'nasa', 'Busan is NOT Japan')
+  assert.equal(providerFor(at(131.9, 43.12))?.id, 'nasa', 'Vladivostok is NOT Japan')
+  assert.equal(providerFor(at(-79.38, 43.65))?.id, 'nasa', 'Toronto is NOT the USA')
 })
 
 test('pointInPolygon: a square behaves', () => {
@@ -198,12 +215,6 @@ test('pointInPolygon: a square behaves', () => {
   assert.equal(pointInPolygon(-5, 5, sq), false)
 })
 
-test('aerialUnavailable: the message names BOTH countries now', () => {
-  const msg = aerialUnavailable(at(11.58, 48.14))
-  assert.match(msg, /France/i)
-  assert.match(msg, /Switzerland/i)
-})
-
 test('every provider carries an attribution — it is a licence obligation', () => {
   for (const p of PROVIDERS) {
     assert.ok(typeof p.attribution === 'string' && p.attribution.length > 3, p.id)
@@ -212,10 +223,10 @@ test('every provider carries an attribution — it is a licence obligation', () 
   }
 })
 
-test('providerFor: the French envelope still excludes its neighbours', () => {
-  // FR_OUTLINE bulges over Switzerland on purpose (Switzerland matches first),
-  // and this is the guard that the bulge does not reach into Italy.
+test('providerFor: national envelopes still exclude their neighbours', () => {
+  // the FR bulge must not reach Italy; nobody else may claim these either —
+  // they belong to the global floor
   for (const [name, lon, lat] of [['Milan', 9.19, 45.46], ['Turin', 7.69, 45.07], ['Stuttgart', 9.18, 48.78]]) {
-    assert.equal(providerFor(at(lon, lat)), null, name)
+    assert.equal(providerFor(at(lon, lat))?.id, 'nasa', name)
   }
 })

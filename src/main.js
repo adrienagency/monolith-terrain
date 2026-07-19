@@ -2010,6 +2010,13 @@ async function refreshAerial() {
     return
   }
 
+  // Clear the PREVIOUS block's photo before the new build starts: the old
+  // texture is registered to the old block, and leaving it stretched over the
+  // new one shows Vienna's streets on Mount Fuji (observed) plus a stale
+  // credit line — legally wrong, not just visually.
+  terrain.setAerial(null)
+  aerialAttribution = null
+  refreshOsmCredit()
   const built = await aerialLayer.build(bounds)
 
   // A newer build owns the layer now — touch NOTHING. Treating this as failure
