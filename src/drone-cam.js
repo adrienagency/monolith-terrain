@@ -181,7 +181,11 @@ export class DroneCam {
 
     // ---- bake tuning ----
     this.railSamples = 240 // Viterbi columns over the whole track
-    this.azimuths = [-0.9, -0.45, 0, 0.45, 0.9] // rad around directly-behind
+    // full ring of bearings: 'elle me dépasse en se retournant pour continuer
+    // à me suivre' — overtaking = standing AHEAD looking back, which is an
+    // azimuth beyond ±90°. The Viterbi continuity cost turns any switch into
+    // a smooth sweep around the point, never a cut.
+    this.azimuths = [-2.4, -1.6, -0.9, -0.45, 0, 0.45, 0.9, 1.6, 2.4]
     // (distance, lift) rows — every row keeps lift/distance ≈ 0.4, inside
     // tan(|minPitchRad|), so a centred head never demands a floor-piercing
     // pitch by construction (Nesky: pitch and distance move together)
@@ -489,16 +493,11 @@ export class DroneCam {
       this._headingDir.set(sl.x, 0, sl.z)
     }
 
-    // pitch: head in the lower third of frame (the summits fill the rest).
-    // keep = the pitch that pins the head at the bottom edge; the floor may be
-    // pierced only down to keep, never past it. keep >= desired always (a
-    // higher on-screen placement needs MORE down-pitch), so one clamp chain
-    // expresses the whole contract.
-    const vFov = THREE.MathUtils.degToRad(this.camera.fov)
-    let target = solvePitchForNdcY(_diff, this._headingDir, -0.3, vFov)
-    const keep = solvePitchForNdcY(_diff, this._headingDir, this.bottomKeepNdcY, vFov)
-    target = Math.min(Math.max(target, this.minPitchRad), keep)
-    target = THREE.MathUtils.clamp(target, -1.45, 1.1)
+    // pitch: LOCKED on the head (final spec: 'toujours toujours focus sur
+    // lui, dans les 10% du centre de l'écran'). No composition offset, no
+    // directorial floor — the only softness is the small latency below.
+    const horiz = Math.hypot(_diff.x, _diff.z)
+    const target = THREE.MathUtils.clamp(Math.atan2(_diff.y, Math.max(horiz, 1e-6)), -1.45, 1.2)
     if (dt <= 0) this._pitch = target
     else {
       const maxPitchStep = THREE.MathUtils.degToRad(this.maxPitchRateDeg) * dt

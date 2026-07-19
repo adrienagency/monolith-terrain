@@ -499,33 +499,26 @@ test('a vertically-noisy GPX cannot pump the camera (stabilized gimbal)', () => 
   assert.ok(maxStep < 0.35, `camera Y stepped ${maxStep.toFixed(3)} in one frame — the noise got through`)
 })
 
-test('the camera never stares at the ground (directorial pitch floor)', () => {
-  // Field report: "regarde trop souvent vers le bas". Whatever the framing
-  // solver asks, realized pitch must respect minPitchRad.
+test('the head stays locked near screen centre — the final framing spec', () => {
+  // 'Calle un follow sur le point d'avancée... toujours toujours focus sur
+  // lui, dans les 10% du centre de l'écran, une toute petite latence.'
+  // This SUPERSEDES the lower-third framing and the directorial pitch floor.
   const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 400)
   const controls = { target: new THREE.Vector3() }
   const drone = new DroneCam({ camera, controls, sampleGround: mountainGround })
   assert.ok(drone.start(buildZigzagClimb(), { duration: 40 }))
   const dt = 1 / 30
-  const fwd = new THREE.Vector3()
-  let minPitch = Infinity
-  let floorViolationsWithHeadSafe = 0
   const head = new THREE.Vector3()
+  let sum = 0, n = 0
   for (let s = 0; s <= 1.0001; s += dt / 40) {
     const t = Math.min(s, 1)
     drone.updateAt(dt, t)
-    fwd.set(0, 0, -1).applyQuaternion(camera.quaternion)
-    const pitch = Math.atan2(fwd.y, Math.hypot(fwd.x, fwd.z))
-    minPitch = Math.min(minPitch, pitch)
-    // The floor may ONLY be pierced in service of keeping the head framed
-    // (the frame-keeping override): if pitch is below floor while the head
-    // is comfortably high in frame, the floor just failed for no reason.
-    if (pitch < drone.minPitchRad - 0.06) {
-      drone.curve.getPointAt(t, head)
-      head.project(camera)
-      if (head.y > drone.bottomKeepNdcY + 0.25) floorViolationsWithHeadSafe++
-    }
+    camera.updateMatrixWorld(true)
+    camera.matrixWorldInverse.copy(camera.matrixWorld).invert()
+    drone.curve.getPointAt(t, head)
+    head.project(camera)
+    sum += Math.hypot(head.x, head.y); n++
   }
-  assert.ok(minPitch >= -1.45 - 1e-6, `pitch reached ${minPitch.toFixed(3)} rad — past even the frame-keeping bound`)
-  assert.equal(floorViolationsWithHeadSafe, 0, 'floor pierced while the head did not need it')
+  const mean = sum / n
+  assert.ok(mean < 0.15, `mean NDC distance ${mean.toFixed(3)} — the head is not locked to centre`)
 })
