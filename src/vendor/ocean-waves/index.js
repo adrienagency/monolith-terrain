@@ -1,6 +1,7 @@
 import * as THREE from "three";
 
 export { GERSTNER_GLSL } from "./gerstner.glsl.js";
+export { sunLook, toHex } from "./sunlook.js";
 
 // Génération d'un état de mer aléatoire — théorie linéaire des vagues (Airy) :
 //   - relation de dispersion en eau profonde : omega = sqrt(g * k)

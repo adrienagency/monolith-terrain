@@ -334,8 +334,8 @@ const params = {
   waterReal: false,
   waterTransparency: 0.4, // 0 = milky veil, 1 = crystal — above and below the surface
   waterSunFx: 1, // sun on the water: glint above + caustic rays below (0..2)
-  seaWaveH: 0.5, // wave height, in spectrum metres — 0.5 is a resting sea
-  seaChop: 0.6, // crest sharpening 0..1 — breaking whitecaps appear past ~0.6
+  seaWaveH: 0.8, // wave height, in spectrum metres — visible resting sea (cool > realistic)
+  seaChop: 0.7, // crest sharpening 0..1 — breaking whitecaps appear past ~0.6
   seaSpeed: 1, // time multiplier over the deep-water dispersion
   seaSeed: 0, // 0 = random sea each rebuild; a saved seed replays an exact sea
 
@@ -622,6 +622,8 @@ function applyTimeOfDay(hour) {
   // `const mapLayers` binding exists, and `mapLayers?.` does NOT save you from
   // a temporal dead zone — it throws, aborting the whole module.
   mapLayers.setSun({ dir: sun.position, color: s.sunColor, sky: s.hemiSky })
+  // la mer suit le même cycle : corps d'eau éteint la nuit, ciel reflété teinté
+  realWater?.setSunState({ dayLight: s.dayLight ?? 1, skyHex: s.hemiSky })
 
   // Night at this PLACE puts the whole UI in dark mode, and daylight brings it
   // back. Guarded on change: setDarkMode rebuilds the background, contours and

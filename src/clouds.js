@@ -11,6 +11,9 @@
 import * as THREE from 'three'
 import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js'
 import { TERRAIN_SIZE } from './terrain.js'
+import { sunLook } from 'ocean-waves' // palette jour/nuit partagée (ocean-lab)
+
+const _moonTint = new THREE.Color()
 
 // ---------------------------------------------------------------- CPU noise
 // Tileable Perlin-Worley volume baked once on the CPU (same builder we used in
@@ -582,12 +585,18 @@ export class Clouds {
     u.uSSS.value = params.cloudSSS ?? 0.8
 
     // the deck reacts to the sun: warm sunset light when the sun sits low, a
-    // cooler dimmer ambient as it drops — like a real evening sky
+    // cooler dimmer ambient as it drops — like a real evening sky.
+    // v39: the shared sunLook palette also DIMS the deck at night (it used to
+    // glow warm at midnight) and cools it toward moonlight.
     const elev = params.sunElevation ?? 30
     const warmth = 1 - Math.min(1, Math.max(0, (elev - 6) / 26))
+    const look = sunLook(elev)
+    const dayF = 0.08 + 0.92 * look.dayLight
     u.uSunColor.value.setRGB(1, 1 - 0.45 * warmth, 1 - 0.68 * warmth)
+    _moonTint.setRGB(0.45, 0.55, 0.78)
+    u.uSunColor.value.lerp(_moonTint, look.night * 0.85).multiplyScalar(dayF)
     u.uAmbColor.value.setRGB(0.5 + 0.1 * warmth, 0.56 - 0.06 * warmth, 0.66 - 0.14 * warmth)
-    u.uAmbColor.value.multiplyScalar(0.28 - 0.1 * warmth)
+    u.uAmbColor.value.multiplyScalar((0.28 - 0.1 * warmth) * (0.12 + 0.88 * look.dayLight))
 
     // ground shadows: visible when the deck is on and the sun is clearly above
     // it, drifting with the clouds and offset along the sun's slant

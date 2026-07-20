@@ -30,7 +30,11 @@ const FIELD_RES = 384 // height/shore field over the whole slab
 // metres" (dominant swell λ 12-24 m); at 0.12 scene units per metre the
 // dominant wavelength lands at 1.4-2.9 scene units — the same band the old
 // four-train Beaufort system used, tuned for the diorama read
-const LEN_SCALE = 0.12
+// v39: 0.12 was "physically" scaled — the wind sea fell under the mesh grid
+// (invisible: one single swell train read on screen) and the whole sea was
+// too quiet. 0.42 is deliberately oversized: both crossed systems resolve,
+// the sea reads COOL rather than realistic (Adrien's call).
+const LEN_SCALE = 0.42
 const SPEC_AMP_SUM = 1.5 // makeSeaState normalises the summed amplitude to this
 
 // choppiness → the shading knobs the old Beaufort scale used to derive
@@ -44,7 +48,6 @@ uniform float uWaveH;    // wave height (user slider), in spectrum metres
 uniform float uChop;     // choppiness 0..1 (crest sharpening + breaking)
 uniform float uSpeedMul; // time multiplier over the deep-water dispersion
 uniform float uLenScale; // scene units per spectrum metre
-uniform float uWaveScale;   // lakes ride smaller waves than the open sea
 uniform float uWaterY;
 ${GERSTNER_GLSL}
 uniform sampler2D uField;   // R ground Y, G shore distance (slab-wide)
@@ -72,7 +75,10 @@ void main() {
 #else
   float shoreD = max((uWaterY - f.r) * 2.0, f.g);
 #endif
-  float fade = smoothstep(0.0, 0.12, shoreD) * uWaveScale;
+  // v39: the view scaling moved into uLenScale (wavelength AND amplitude
+  // together, constant steepness at every zoom — amplitude-only scaling made
+  // soft shapeless mounds at wide zooms). uWaveScale is gone from the fade.
+  float fade = smoothstep(0.0, 0.12, shoreD);
 
   // shared 16-wave random spectrum (ocean-waves lib): two crossed systems
   // (narrow swell + spread wind sea), energy-weighted Gerstner steepness,
@@ -110,6 +116,7 @@ uniform float uFoam;
 uniform float uCaustics;
 uniform float uTransp; // user slider: 0 = milky, 1 = crystal
 uniform float uSunFx;  // user slider: sun on the water, above AND below (glint + caustics)
+uniform float uDayLight; // 0 nuit -> 1 jour (sunLook.dayLight) : la mer s'éteint la nuit
 uniform sampler2D uField;
 uniform float uHalf;     // rounded-square clip: half extent…
 uniform float uCornerR;  // …and corner radius (sea only; lakes use the mask)
@@ -193,6 +200,9 @@ void main() {
 
   // depth-graded body colour: bright translucent shallows -> dark depths
   vec3 body = mix(uShallow, uDeep, dpow);
+  // day/night: the water body darkens and cools at night (the daylight
+  // palette painted a bright sea under a midnight sky — v39 feedback)
+  body *= mix(vec3(0.10, 0.16, 0.30), vec3(1.0), uDayLight);
 
   // sun rays through the water — the star of the show. Additive-only caustics
   // vanish on pale palettes (white paper + white sun = nothing), so the rays
@@ -208,7 +218,7 @@ void main() {
   float ca2 = caustic(xz * 1.8 - vec2(uTime * 0.03), uTime * 0.45);
   float causNet = clamp(ca * 1.3 + ca2 * 0.45, 0.0, 1.5);
   float causReach = 1.0 - smoothstep(0.0, 0.9, d01); // still visible mid-depth
-  float causMask = clamp(uCaustics * uSunFx, 0.0, 3.0) * causReach * sunUp;
+  float causMask = clamp(uCaustics * uSunFx, 0.0, 3.0) * causReach * sunUp * (0.05 + 0.95 * uDayLight);
   body = mix(body, body * 0.5, clamp(causMask, 0.0, 1.0) * (1.0 - clamp(causNet, 0.0, 1.0)) * 0.55);
   // capped: when the fast and slow layers coincide the additive burnt a
   // saturated white "splash" in the middle of the shallows
@@ -235,13 +245,16 @@ void main() {
   // (~1 where a crest folds) — intermittent by nature, only some waves break
   float crestFoam = uFoam * smoothstep(0.45, 0.85, vCrest) * smoothstep(0.45, 0.85, foamNoise2) * (0.25 + 0.75 * patchy);
   float foam = clamp(shoreFoam * 0.9 + crestFoam, 0.0, 1.0);
-  col = mix(col, vec3(0.96), foam);
+  col = mix(col, vec3(0.96) * mix(0.14, 1.0, uDayLight), foam);
 
   // translucency: at uTransp 0 the water is SOLID PAINT — a pure depth-ramp
   // colour, no seabed, none of the milky coastal veil the old mix produced
   // (v38 feedback); from ~0.35 up the translucent behaviour takes over fully,
-  // the slider then scaling how much of the seabed reads through
-  float alphaDepth = mix(0.62, 0.97, dpow);
+  // the slider then scaling how much of the seabed reads through.
+  // v39: shallows start far clearer (0.28, was 0.62) — the opaque pale band
+  // over coastal shelves clashed with the aerial imagery (Toulon screenshot);
+  // the map/satellite now reads through the shallow water
+  float alphaDepth = mix(0.28, 0.97, dpow);
   alphaDepth = max(alphaDepth, fres * 0.6);
   alphaDepth *= mix(1.1, 0.5, uTransp);
   float alpha = mix(1.0, clamp(alphaDepth, 0.0, 1.0), smoothstep(0.0, 0.35, uTransp));
@@ -268,14 +281,14 @@ function srgbMix(a, b, t) {
 function waterColors(params) {
   const base = params.lakeColor ?? '#8fc6e8'
   return {
-    shallow: srgbMix(base, '#2ac3b4', 0.75),
+    shallow: srgbMix(base, '#2ac3b4', 0.55), // v39: less milky — the coastal shelf was a flat pale slab on aerial
     deep: srgbMix(base, '#0b3556', 0.9),
   }
 }
 
 function waterMaterial({ isLake, params, fieldTex }) {
   const { shallow, deep } = waterColors(params)
-  const look = chopLook(params.seaChop ?? 0.6)
+  const look = chopLook(params.seaChop ?? 0.7)
   const mat = new THREE.ShaderMaterial({
     name: isLake ? 'real-water-lake' : 'real-water-sea',
     vertexShader: VERT,
@@ -292,11 +305,10 @@ function waterMaterial({ isLake, params, fieldTex }) {
         // textures below) by RealWater._applySea()
         uWaveA: { value: [] },
         uWaveB: { value: [] },
-        uWaveH: { value: params.seaWaveH ?? 0.5 },
-        uChop: { value: params.seaChop ?? 0.6 },
+        uWaveH: { value: params.seaWaveH ?? 0.8 },
+        uChop: { value: params.seaChop ?? 0.7 },
         uSpeedMul: { value: (params.seaSpeed ?? 1) * 0.4 },
         uLenScale: { value: LEN_SCALE },
-        uWaveScale: { value: isLake ? 0.5 : 1 },
         uWaterY: { value: 0 },
         // textures are assigned AFTER creation: UniformsUtils.merge CLONES any
         // texture it finds, and the clone is what lands on the GPU — dispose()
@@ -316,6 +328,7 @@ function waterMaterial({ isLake, params, fieldTex }) {
         uDetail: { value: look.detail },
         uFoam: { value: look.foam },
         uCaustics: { value: 2.4 },
+        uDayLight: { value: 1 },
         uTransp: { value: params.waterTransparency ?? 0.4 },
         uSunFx: { value: params.waterSunFx ?? 1 },
         uHalf: { value: TERRAIN_SIZE / 2 },
@@ -498,7 +511,7 @@ export class RealWater {
       const seaLift = this._seaLift()
       const mat = waterMaterial({ isLake: false, params, fieldTex })
       mat.uniforms.uWaterY.value = seaLift
-      mat.uniforms.uWaveScale.value = this._waveScale
+      mat.uniforms.uLenScale.value = LEN_SCALE * this._waveScale
       // depth budget: with real bathymetry the ramp can span a deep column;
       // fine-zoom tiles have none (flat 0 m sea) — there depth is the capped
       // shore-distance proxy, and a 2.2 budget means nothing ever reads deep.
@@ -509,7 +522,7 @@ export class RealWater {
       const r = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE))
       mat.uniforms.uHalf.value = (TERRAIN_SIZE / 2) * 0.998
       mat.uniforms.uCornerR.value = r
-      const seg = 220
+      const seg = 256
       const geo = new THREE.PlaneGeometry(TERRAIN_SIZE * 0.998, TERRAIN_SIZE * 0.998, seg, seg)
       geo.rotateX(-Math.PI / 2)
       const mesh = new THREE.Mesh(geo, mat)
@@ -540,7 +553,7 @@ export class RealWater {
       const z1 = toWorld(minY + h - 1, size)
       const mat = waterMaterial({ isLake: true, params, fieldTex })
       mat.uniforms.uWaterY.value = yLake
-      mat.uniforms.uWaveScale.value = 0.5 * this._waveScale
+      mat.uniforms.uLenScale.value = LEN_SCALE * this._waveScale * 0.5
       mat.uniforms.uMask.value = tex
       mat.uniforms.uMaskMin.value.set(x0, z0)
       mat.uniforms.uMaskSize.value.set(Math.max(1e-4, x1 - x0), Math.max(1e-4, z1 - z0))
@@ -565,11 +578,22 @@ export class RealWater {
   // push the current spectrum into every material (arrays are assigned
   // post-creation: UniformsUtils.merge would clone them at build time)
   _applySea() {
-    if (!this._sea) return
-    const u = seaStateToUniforms(this._sea)
+    if (this._sea) {
+      const u = seaStateToUniforms(this._sea)
+      for (const mat of this.materials) {
+        mat.uniforms.uWaveA.value = u.a
+        mat.uniforms.uWaveB.value = u.b
+      }
+    }
+    if (this._sunState) this.setSunState(this._sunState)
+  }
+
+  // day/night state from the shared sunLook palette (applyTimeOfDay pushes it)
+  setSunState(s) {
+    this._sunState = s
     for (const mat of this.materials) {
-      mat.uniforms.uWaveA.value = u.a
-      mat.uniforms.uWaveB.value = u.b
+      mat.uniforms.uDayLight.value = s.dayLight ?? 1
+      if (s.skyHex) mat.uniforms.uSky.value.set(s.skyHex)
     }
   }
 
@@ -587,7 +611,7 @@ export class RealWater {
   // the sea's resting height: base + the spectrum's summed amplitude in scene
   // units, so the deepest trough still clears the flat marine plain
   _seaLift() {
-    const amp = SPEC_AMP_SUM * LEN_SCALE * (this._waveH ?? 0.5) * (this._waveScale ?? 1)
+    const amp = SPEC_AMP_SUM * LEN_SCALE * (this._waveScale ?? 1) * (this._waveH ?? 0.8)
     return (this._seaBase ?? 0) + amp + 0.002
   }
 
