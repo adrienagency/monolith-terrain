@@ -17,6 +17,7 @@
   "dependencies": {
     "@netlify/blobs": "^10.7.9",
     "mediabunny": "^1.50.8",
+    "n8ao": "^2.0.0",
     "postprocessing": "^6.36.4",
     "three": "^0.172.0"
   },

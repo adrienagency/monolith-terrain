@@ -9,9 +9,7 @@ import {
   VignetteEffect,
   NoiseEffect,
   SMAAEffect,
-  SSAOEffect,
   BloomEffect,
-  NormalPass,
   HueSaturationEffect,
   BrightnessContrastEffect,
   ToneMappingEffect,
@@ -58,6 +56,7 @@ import { captureShareState, parseShareState, encodeShareState, decodeShareState,
 import { DroneCam } from './drone-cam.js'
 import { makeGradientTexture, deriveBgColors, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
+import { N8AOPostPass } from 'n8ao'
 import { History } from './history.js'
 import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
@@ -192,7 +191,7 @@ const params = {
   // quality governor sheds them on machines that can't hold 60 fps, so a
   // forked "high mode" is deliberately NOT a thing (see the plan doc).
   ssaoEnabled: true,
-  ssaoIntensity: 12,
+  ssaoIntensity: 5, // N8AO scale — its default neighbourhood, already assertive
   bloomEnabled: true,
   bloomIntensity: 0.55,
   bloomThreshold: 0.85,
@@ -951,31 +950,24 @@ applySourceMode()
 const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType })
 composer.addPass(new RenderPass(scene, camera))
 
-// AMBIENT OCCLUSION — the single biggest legibility win for a relief: every
-// gully and fold gets contact shading the directional sun alone flattens.
-// Costs an extra scene render (the normal pass) — which is exactly why the
-// adaptive governor treats AO as the first effect to shed (see perf.js).
-const normalPass = new NormalPass(scene, camera)
-composer.addPass(normalPass)
-const ssao = new SSAOEffect(camera, normalPass.texture, {
-  // the classic, documented parameter set — the world* variants proved
-  // fragile across camera/far changes. Tuned STRONG on purpose (field
-  // report: 'ça ne se voit pas du tout'): AO on a relief must read.
-  distanceThreshold: 0.97,
-  distanceFalloff: 0.03,
-  rangeThreshold: 0.0012,
-  rangeFalloff: 0.001,
-  luminanceInfluence: 0.12, // 0.55 erased AO on this app's paper-bright relief — THE invisibility bug
-  samples: 16,
-  rings: 7,
-  radius: 0.15,
-  bias: 0.025,
-  fade: 0.01,
-  intensity: params.ssaoIntensity,
-})
-const aoPass = new EffectPass(camera, ssao)
+// AMBIENT OCCLUSION — N8AO (screen-space GTAO, purpose-built library).
+// postprocessing's own SSAOEffect never bit in this pipeline at ANY setting
+// (A/B pixel probes showed zero difference at intensity 12) — replaced
+// wholesale rather than tuned further. N8AOPostPass is postprocessing-
+// compatible and self-contained: no NormalPass, it derives everything from
+// the depth buffer. aoRadius is in WORLD units — the block is 56 across.
+const aoPass = new N8AOPostPass(scene, camera, window.innerWidth, window.innerHeight)
+aoPass.configuration.aoRadius = 2.2
+aoPass.configuration.distanceFalloff = 1.2
+aoPass.configuration.intensity = params.ssaoIntensity
+aoPass.configuration.halfRes = true // quality/cost sweet spot; the governor can still shed the pass
 composer.addPass(aoPass)
 aoPass.enabled = params.ssaoEnabled
+// panel + templates talk to `ssao.intensity` — keep that surface stable
+const ssao = {
+  get intensity() { return aoPass.configuration.intensity },
+  set intensity(v) { aoPass.configuration.intensity = v },
+}
 
 // BLOOM — pre-tonemap, on the HDR buffer: sun glints on water, dusk warmth,
 // moonlight at night. mipmapBlur is the modern soft falloff, cheap.
