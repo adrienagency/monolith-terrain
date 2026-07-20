@@ -10,6 +10,7 @@ import {
   NoiseEffect,
   SMAAEffect,
   BloomEffect,
+  KernelSize,
   HueSaturationEffect,
   BrightnessContrastEffect,
   ToneMappingEffect,
@@ -985,11 +986,26 @@ const ssao = {
 
 // BLOOM — pre-tonemap, on the HDR buffer: sun glints on water, dusk warmth,
 // moonlight at night. mipmapBlur is the modern soft falloff, cheap.
+// mipmapBlur is OFF, and that is the black-rectangle fix (user-bisected: the
+// square disappears when bloom is off).
+//
+// The mipmap chain halves the frame 8 times. On this window that reads
+// 1009 -> 505 -> 253 -> 127 -> 64 -> 32 -> 16 -> 8: every level is ROUNDED,
+// so consecutive levels are never exactly 2x apart (up to 6% off by the tiny
+// levels). The upsample pass assumes an exact 2x ratio, so it samples outside
+// the valid texels, and out-of-range reads on a float target yield NaN. NaN
+// added into the frame renders BLACK, in a hard-edged rectangle — exactly the
+// reported artefact, and exactly why it came and went with the window size.
+//
+// The classic (non-mipmap) blur runs at ONE resolution: no chain, no ratio
+// error, no NaN. The falloff is slightly tighter than the mipmap version —
+// a fair trade for a bloom that cannot black out the screen.
 const bloom = new BloomEffect({
   intensity: params.bloomIntensity,
   luminanceThreshold: params.bloomThreshold,
   luminanceSmoothing: 0.2,
-  mipmapBlur: true,
+  mipmapBlur: false,
+  kernelSize: KernelSize.LARGE,
 })
 const bloomPass = new EffectPass(camera, bloom)
 composer.addPass(bloomPass)
