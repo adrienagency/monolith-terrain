@@ -24,7 +24,7 @@ export const TEMPLATE_KEYS = [
   'roadsEnabled', 'roadsOpacity', 'roadsDetail', 'roadColor', 'waterEnabled', 'waterOpacity', 'waterFill', 'coastLine', 'aerialEnabled', 'aerialOpacity', 'placesEnabled', 'placesDensity', 'placesSize', 'placesHalo',
   // animated sea (ocean-waves spectrum) — lakeColor is the shared water tint
   'waterReal', 'waterTransparency', 'waterSunFx', 'lakeColor',
-  'seaWaveH', 'seaChop', 'seaSpeed', 'seaSeed',
+  'seaWaveH', 'seaChop', 'seaSpeed', 'seaSeed', 'seaBed',
   // grid / contour / ink
   'contourInterval', 'contourOpacity', 'contourWeight', 'contourColor',
   'gridStep', 'gridOpacity', 'gridColor', 'hudInk', 'hudAccent', 'labels',

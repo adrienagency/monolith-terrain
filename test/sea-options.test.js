@@ -4,7 +4,7 @@ import { TEMPLATE_KEYS } from '../src/templates-user.js'
 import { FLAGS } from '../src/flags.js'
 
 test('la mer est persistée dans les templates/share-links', () => {
-  for (const k of ['waterReal', 'waterTransparency', 'waterSunFx', 'seaWaveH', 'seaChop', 'seaSpeed', 'seaSeed'])
+  for (const k of ['waterReal', 'waterTransparency', 'waterSunFx', 'seaWaveH', 'seaChop', 'seaSpeed', 'seaSeed', 'seaBed'])
     assert.ok(TEMPLATE_KEYS.includes(k), `clé manquante: ${k}`)
 })
 

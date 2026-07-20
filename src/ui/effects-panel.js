@@ -7,6 +7,30 @@
 import { el, section, toggle, slider, color, visibleWhen, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
 import { FLAGS } from '../flags.js'
+import { SEABEDS } from '../ocean.js'
+
+// vignette procédurale d'un fond marin : dégradé du preset + grain + glaçure
+// d'eau — même gabarit que les vignettes matériaux/HDRI (ce-mat-vig-img)
+function seabedThumb(p) {
+  if (!p.a) return el('span', 'ce-mat-vig-img ce-mat-vig-none')
+  const cv = el('canvas', 'ce-mat-vig-img')
+  cv.width = 96
+  cv.height = 56
+  const g = cv.getContext('2d')
+  const grad = g.createLinearGradient(0, 0, 96, 56)
+  grad.addColorStop(0, p.a)
+  grad.addColorStop(1, p.b)
+  g.fillStyle = grad
+  g.fillRect(0, 0, 96, 56)
+  g.fillStyle = 'rgba(255,255,255,0.06)'
+  for (let i = 0; i < 120; i++) g.fillRect(Math.random() * 96, Math.random() * 56, 1.5, 1.5)
+  const wat = g.createLinearGradient(0, 0, 0, 56)
+  wat.addColorStop(0, 'rgba(96,156,204,0.32)')
+  wat.addColorStop(1, 'rgba(18,48,88,0.42)')
+  g.fillStyle = wat
+  g.fillRect(0, 0, 96, 56)
+  return cv
+}
 
 const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>'
 
@@ -93,6 +117,28 @@ export function buildEffectsPanel(ctx) {
       color({ label: 'Water colour', get: () => params.lakeColor, set: (v) => { params.lakeColor = v; ctx.realWater?.setLook(params) } }),
       reseed,
     ]
+    // ---- fond marin : picker à vignettes (même UX que matériaux/HDRI) ----
+    const bedHead = el('div', 'ce-fx-head', 'Seabed')
+    const bedPick = el('div', 'ce-mat-pick')
+    function renderBedPicker() {
+      bedPick.replaceChildren()
+      const grid = el('div', 'ce-mat-grid')
+      for (const p of SEABEDS) {
+        const b = el('button', `ce-mat-vig${(params.seaBed ?? 'map') === p.id ? ' on' : ''}`)
+        b.type = 'button'
+        b.setAttribute('data-tip', p.id === 'map' ? 'The map itself reads through the water.' : `${p.name} floor under the sea — transparency sets how much of it shows.`)
+        b.append(seabedThumb(p), el('span', 'ce-mat-vig-name', p.name))
+        b.addEventListener('click', () => {
+          params.seaBed = p.id
+          ctx.realWater?.setSeabed(p.id)
+          renderBedPicker()
+        })
+        grid.append(b)
+      }
+      bedPick.append(grid)
+    }
+    renderBedPicker()
+    seaRows.splice(seaRows.indexOf(reseed), 0, bedHead, bedPick)
     sSea.body.append(...seaRows)
     for (const row of seaRows) visibleWhen(row, () => params.waterReal)
   }

@@ -338,6 +338,7 @@ const params = {
   seaChop: 0.7, // crest sharpening 0..1 — breaking whitecaps appear past ~0.6
   seaSpeed: 1, // time multiplier over the deep-water dispersion
   seaSeed: 0, // 0 = random sea each rebuild; a saved seed replays an exact sea
+  seaBed: 'map', // fond sous la mer (vignettes) : map | sand | lagoon | abyss | seagrass | ink
 
   // SP1 map overlay layers (roads/water/places), draped on the relief
   roadsEnabled: false,

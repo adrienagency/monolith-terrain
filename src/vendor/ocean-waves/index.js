@@ -49,19 +49,25 @@ export function makeSeaState(seed = (Math.random() * 2 ** 31) | 0) {
   const rng = mulberry32(seed);
   const waves = [];
 
-  // houle : pic spectral ÉTROIT — 3 composantes concentrent ~60 % de
-  // l'énergie, condition pour des crêtes réellement cambrées (ka visible)
-  const swellDir = rng() * Math.PI * 2;
+  // DEUX houles croisées d'énergie comparable (55°-100° d'écart) : c'est ce
+  // qui rend le croisement LISIBLE à l'écran — une seule houle dominante ne
+  // donne qu'un seul front de vagues, quel que soit le clapot par-dessus
+  // (retour Adrien v39). Pics étroits pour des crêtes cambrées.
+  const dirA = rng() * Math.PI * 2;
   addSystem(waves, rng, {
-    count: 3, dir: swellDir, spread: 0.20,
-    wlMin: 12, wlMax: 24, steep: 0.14,
+    count: 3, dir: dirA, spread: 0.18,
+    wlMin: 14, wlMax: 26, steep: 0.14,
+  });
+  const dirB = dirA + (0.95 + rng() * 0.8) * (rng() < 0.5 ? -1 : 1);
+  addSystem(waves, rng, {
+    count: 3, dir: dirB, spread: 0.22,
+    wlMin: 9, wlMax: 18, steep: 0.13,
   });
 
-  // mer du vent : plus courte, très étalée, direction croisée (45° à 110°)
-  const windDir = swellDir + (0.8 + rng() * 1.1) * (rng() < 0.5 ? -1 : 1);
+  // mer du vent : courte, très étalée, entre les deux houles
   addSystem(waves, rng, {
-    count: WAVE_COUNT - 3, dir: windDir, spread: 0.85,
-    wlMin: 2.5, wlMax: 11, steep: 0.12,
+    count: WAVE_COUNT - 6, dir: (dirA + dirB) / 2, spread: 0.9,
+    wlMin: 2.5, wlMax: 9, steep: 0.11,
   });
 
   // normalisation : l'amplitude sommée vaut ~1.5 m pour waveH = 1
