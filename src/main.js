@@ -2916,22 +2916,6 @@ const clock = new THREE.Clock()
 let placesRefreshAcc = 0 // throttles the places-layer screen-space declutter refresh (see tick())
 
 // camera motion for one frame — shared by the live loop and offline export
-// TEMPORARY camera-path diagnostic (field debugging with Adrien): a tiny
-// overlay naming which branch drives the camera each frame — F/f = follow
-// param, P/p = gpxLayer.isPlaying(), A/a = drone.active, TIMER! = the
-// internal-timer fallback that would desync from the head. Remove once the
-// field bug is understood.
-let __camDiagEl = null
-function __camDiag(tag) {
-  if (!__camDiagEl) {
-    __camDiagEl = document.createElement('div')
-    __camDiagEl.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:999;font:12px monospace;background:#000c;color:#0f0;padding:4px 8px;border-radius:4px;pointer-events:none'
-    document.body.append(__camDiagEl)
-  }
-  const d = window.__exp?.drone
-  __camDiagEl.textContent = `cam:${tag} headT:${(gpxLayer.headT ?? -1).toFixed(3)} droneT:${(d?.t ?? -1).toFixed(3)} rail:${d?.rail ? 'Y' : 'NO'}`
-}
-
 function updateCameraMotion(dt) {
   // looping cinematic camera automation (Camera panel) — checked here so BOTH
   // the live tick() and the offline export step drive it
@@ -2943,7 +2927,6 @@ function updateCameraMotion(dt) {
   // (gpxLayer.headT), not DroneCam's internal timer — see updateAt(). Must
   // be checked before the generic drone.active branch below, which still
   // owns the separate "Fly the GPX track" cinematic (Camera panel).
-  __camDiag('' + (params.gpxFollow ? 'F' : 'f') + (gpxLayer.isPlaying() ? 'P' : 'p') + (drone.active ? 'A' : 'a'))
   if (params.gpxFollow && gpxLayer.isPlaying() && drone.active) {
     // task 30: the user is holding OrbitControls (dragging/zooming) — let
     // THEM drive the camera this frame instead of the drone overwriting it
@@ -2966,7 +2949,6 @@ function updateCameraMotion(dt) {
   }
   // drone follow-cam for the GPX track — chase the route from behind/above
   if (drone.active) {
-    __camDiag('TIMER!') // the desync branch — if this shows during playback, THIS is the bug
     drone.update(dt)
     return
   }
@@ -2995,53 +2977,6 @@ document.addEventListener('visibilitychange', () => {
     tick()
   }
 })
-// BLACK-REGION DETECTOR (field debugging, 2026-07-20). The reported black
-// rectangle has resisted every offline reproduction: forensics on the
-// recording proved it is a real axis-aligned rectangle inside the canvas, but
-// no local probe (transitions, resizes, tier flips, pass bisection, GL-call
-// tracing) reproduces it. So the app now catches it ITSELF: a cheap 5x5 probe
-// every 30 frames, and when a large black area appears it freezes a full state
-// snapshot to the console. Remove once the cause is known.
-let __bdFrame = 0
-let __bdReported = false
-const __bdPix = new Uint8Array(4)
-function detectBlackRegion() {
-  if (__bdReported || ++__bdFrame % 30) return
-  const gl = renderer.getContext()
-  const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight
-  if (!W || !H) return
-  let black = 0
-  const grid = []
-  for (let ix = 1; ix <= 5; ix++) {
-    for (let iy = 1; iy <= 5; iy++) {
-      gl.readPixels(((W * ix) / 6) | 0, ((H * iy) / 6) | 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, __bdPix)
-      const dark = __bdPix[0] < 12 && __bdPix[1] < 12 && __bdPix[2] < 12
-      if (dark) black++
-      grid.push(dark ? 'X' : '.')
-    }
-  }
-  // 5..20 of 25 dark = a REGION, not a legitimately dark night scene (which
-  // darkens everywhere) and not a clean frame
-  if (black < 5 || black > 20) return
-  __bdReported = true
-  const ib = composer.inputBuffer
-  console.error('[ShibuMap] BLACK REGION DETECTED', {
-    grid: grid.join(''),
-    darkCells: black + '/25',
-    buffer: W + 'x' + H,
-    pixelRatio: renderer.getPixelRatio(),
-    window: window.innerWidth + 'x' + window.innerHeight,
-    composerInput: ib ? ib.width + 'x' + ib.height : null,
-    passes: composer.passes.map((p) => p.constructor.name.slice(0, 12) + (p.enabled ? '' : ':off')).join(' '),
-    ao: { on: aoPass.enabled, intensity: aoPass.configuration?.intensity },
-    bloom: bloomPass.enabled,
-    mode: modes.mode, busy: modes.busy, zoom: params.demZoom, hour: params.timeOfDay,
-    contextLost: gl.isContextLost(),
-    glError: gl.getError(),
-  })
-  showNotice('Affichage : zone noire détectée — l’état est dans la console (F12). Merci de me l’envoyer.')
-}
-
 function tick() {
   if (loopPaused) return // offline export owns the frame clock while it runs
   // rAF normally; timeout fallback keeps rendering when the tab is hidden
@@ -3051,7 +2986,6 @@ function tick() {
   const t = clock.elapsedTime
 
   updateCameraMotion(dt)
-  detectBlackRegion()
 
   // Post passes are OWNED here, one place, every frame. The AO pass reads the
   // normal+depth of the CURRENT camera state — during dives/orbital/terrain
