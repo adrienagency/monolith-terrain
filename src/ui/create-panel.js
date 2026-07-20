@@ -146,21 +146,20 @@ export function buildCreatePanel(ctx) {
     slider({ label: 'Detail scale', min: 0.5, max: 6, step: 0.1, get: () => params.detailScale, set: (v) => { params.detailScale = v } })
   )
 
-  // Mesh resolution — the ultra-heavy 2048 / 4096 tiers are offered ONLY at the
-  // finest zoom (where the DEM actually carries that much detail). Rebuilt on
-  // every zoom change; leaving max zoom clamps a high pick back down to 1024.
+  // Mesh resolution — 2048 is now offered at EVERY zoom (explicit request:
+  // 'laisse la possibilité de passer à 2048 de mesh sur tous les zooms'). At
+  // coarse zooms the DEM carries less detail than the mesh can express, so
+  // 2048 buys smoothness of the interpolated surface, not new information —
+  // the warning still says what it costs.
   const resWrap = el('div')
   sTer.body.append(resWrap)
   function rebuildRes() {
-    const atMax = params.demZoom >= (ctx.getFineZoom?.() ?? 15)
     if (params.resolution > 2048) params.resolution = 2048 // hard ceiling
-    if (!atMax && params.resolution > 1024) params.resolution = 1024
-    const base = ['256', '384', '512', '768', '1024']
-    const opts = atMax ? [...base, '2048'] : base
+    const opts = ['256', '384', '512', '768', '1024', '2048']
     resWrap.replaceChildren(
       select({ label: 'Mesh resolution', options: opts, get: () => String(params.resolution), set: (v) => { params.resolution = +v; ctx.regenerateTerrain() } })
     )
-    if (atMax) resWrap.append(el('div', 'ce-note ce-warn', '⚠ 2048 is very heavy — it can slow the tab to a crawl. Use only briefly, at this zoom.'))
+    if (params.resolution >= 2048) resWrap.append(el('div', 'ce-note ce-warn', '⚠ 2048 is very heavy — it can slow the tab to a crawl.'))
   }
   rebuildRes()
   // detail sliders regenerate on release

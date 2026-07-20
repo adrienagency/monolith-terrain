@@ -39,7 +39,7 @@ import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
 import { MapLayers } from './map/layer-manager.js'
-import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED } from './map/aerial-layer.js'
+import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
 import { lightingFor, darkModeFor } from './daycycle.js'
 import { SunDisc } from './sun-disc.js'
 import { Plinth } from './plinth.js'
@@ -2008,6 +2008,24 @@ async function refreshAerial() {
     showNotice(why)
     refreshAll() // the toggle has to move too, or the panel is lying
     return
+  }
+
+  // The NASA global floor stops being honest close up: at ~600 m/px a small
+  // block is a smear, not a photo. When the only provider is the global one
+  // and the terrain zoom is finer than its z8 cap can serve, say so briefly
+  // and switch off — same contract as the old no-coverage path ('en dessous
+  // de z8, tu désactives NASA').
+  {
+    const p = providerForAerial(bounds)
+    if (p?.global && params.demZoom > 8) {
+      params.aerialEnabled = false
+      terrain.setAerial(null)
+      aerialAttribution = null
+      refreshOsmCredit()
+      showNotice('No detailed imagery for this area — satellite covers it at wider zooms only.', { duration: 3200 })
+      refreshAll()
+      return
+    }
   }
 
   // Clear the PREVIOUS block's photo before the new build starts: the old
