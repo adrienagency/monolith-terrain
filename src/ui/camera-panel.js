@@ -22,11 +22,11 @@ export function buildCameraPanel(ctx) {
   // every frame while autoFocus is on (the default), so the sliders snapped back
   // in ~125ms and were never actually usable. The params + worldFocusDistance/
   // worldFocusRange writes stay live internally (main.js) — only the dead UI goes.
-  const bokehSlider = slider({ label: 'Bokeh', min: 0, max: 8, step: 0.1, get: () => params.bokehScale, set: (v) => { params.bokehScale = v; ctx.dof.bokehScale = v; ctx.dofPass.enabled = params.bokehEnabled && v > 0 } })
+  const bokehSlider = slider({ label: 'Bokeh', min: 0, max: 8, step: 0.1, get: () => params.bokehScale, set: (v) => { params.bokehScale = v; const d = ctx.getDof(); if (d) d.bokehScale = v; ctx.setDofEnabled(params.bokehEnabled && v > 0) } })
   sCam.body.append(
     slider({ label: 'Field of view', min: 20, max: 60, step: 1, get: () => params.fov, set: (v) => { params.fov = v; ctx.camera.fov = v; ctx.camera.updateProjectionMatrix() } }),
     toggle({ label: 'Autofocus (pointer)', get: () => params.autoFocus, set: (v) => { params.autoFocus = v } }),
-    toggle({ label: 'Depth of field', get: () => params.bokehEnabled, set: (v) => { params.bokehEnabled = v; ctx.dofPass.enabled = v && params.bokehScale > 0; refreshAll() } }),
+    toggle({ label: 'Depth of field', get: () => params.bokehEnabled, set: (v) => { params.bokehEnabled = v; ctx.setDofEnabled(v && params.bokehScale > 0); const d = ctx.getDof(); if (d) d.bokehScale = params.bokehScale; refreshAll() } }),
     bokehSlider
   )
   visibleWhen(bokehSlider, () => params.bokehEnabled)

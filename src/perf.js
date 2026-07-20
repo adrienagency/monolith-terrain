@@ -52,7 +52,8 @@ export function createAdaptiveQuality({
   renderer,
   composer,
   dof, // reserved — the pass toggle is enough today, kept for future levers
-  dofPass,
+  setDofEnabled = () => {}, // DoF is lazily built (see main.js ensureDof)
+  isDofEnabled = () => false,
   aoPass = null, // render-upgrade levers (2026-07-20 plan): tier 2 sheds AO,
   bloomPass = null, // tier 3 sheds bloom — one product, adaptive, no forked mode
   lake,
@@ -122,7 +123,7 @@ export function createAdaptiveQuality({
       // re-enables the pass exactly as they left it. bokehEnabled is the user's
       // explicit gate and always wins: auto-quality may only ever turn DoF OFF,
       // never switch it back on behind their back.
-      dofPass.enabled = n < 2 && params.bokehEnabled && params.bokehScale > 0
+      setDofEnabled(n < 2 && params.bokehEnabled && params.bokehScale > 0)
     }
     if (!dirty.grain) {
       params.grain = n >= 3 ? 0 : base.grain
@@ -132,7 +133,7 @@ export function createAdaptiveQuality({
     expected = {
       pixelRatio: params.pixelRatio,
       shadowMode: params.shadowMode,
-      dofEnabled: dofPass.enabled,
+      dofEnabled: isDofEnabled(),
       bokehScale: params.bokehScale,
       grain: params.grain,
     }
@@ -145,7 +146,7 @@ export function createAdaptiveQuality({
     if (!expected) return
     if (!dirty.pixelRatio && params.pixelRatio !== expected.pixelRatio) dirty.pixelRatio = true
     if (!dirty.shadows && params.shadowMode !== expected.shadowMode) dirty.shadows = true
-    if (!dirty.dof && (dofPass.enabled !== expected.dofEnabled || params.bokehScale !== expected.bokehScale))
+    if (!dirty.dof && (isDofEnabled() !== expected.dofEnabled || params.bokehScale !== expected.bokehScale))
       dirty.dof = true
     if (!dirty.grain && params.grain !== expected.grain) dirty.grain = true
   }

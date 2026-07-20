@@ -1011,15 +1011,43 @@ const bloomPass = new EffectPass(camera, bloom)
 composer.addPass(bloomPass)
 bloomPass.enabled = params.bloomEnabled
 
-const dof = new DepthOfFieldEffect(camera, {
-  focusDistance: 0.02,
-  focalLength: 0.06,
-  bokehScale: params.bokehScale,
-  height: 720,
-})
-// drive the circle-of-confusion in world units so focus params are intuitive
-dof.cocMaterial.worldFocusDistance = params.focusDistance
-dof.cocMaterial.worldFocusRange = params.focusRange
+// DEPTH OF FIELD — built ON FIRST USE, not at boot.
+//
+// Measured (2026-07-20): a DISABLED pass costs 0 ms per frame (postprocessing
+// skips it), so there is no wasted computation — but its render targets stay
+// allocated, and DoF's six targets are 136 MB. Bokeh is OFF by default, so
+// that was 136 MB of VRAM held permanently for an effect most sessions never
+// switch on. Shrinking its resolutionScale only frees 18 MB (three of the six
+// targets follow the composer's size, not the effect's), so the only real
+// answer is to not build it until it is wanted.
+//
+// Everything reads params first and the live objects second, so the app
+// behaves identically whether or not the pass exists yet.
+let dof = null
+let dofPass = null
+function ensureDof() {
+  if (dofPass) return dofPass
+  dof = new DepthOfFieldEffect(camera, {
+    focusDistance: 0.02,
+    focalLength: 0.06,
+    bokehScale: params.bokehScale,
+    height: 720,
+  })
+  // drive the circle-of-confusion in world units so focus params are intuitive
+  dof.cocMaterial.worldFocusDistance = params.focusDistance
+  dof.cocMaterial.worldFocusRange = params.focusRange
+  dofPass = new EffectPass(camera, dof)
+  // BEFORE the final colour/tonemap pass — DoF belongs in linear HDR
+  composer.addPass(dofPass, composer.passes.length - 1)
+  return dofPass
+}
+
+// The single door for turning bokeh on/off: it builds the pass on the first
+// real enable and is a cheap no-op while it stays off.
+function setDofEnabled(on) {
+  if (!on) { if (dofPass) dofPass.enabled = false; return }
+  ensureDof().enabled = true
+}
 
 // pre-tonemap exposure multiplier, operating on the HDR buffer
 class ExposureEffect extends Effect {
@@ -1041,11 +1069,9 @@ grain.blendMode.opacity.value = params.grain
 const vignette = new VignetteEffect({ darkness: params.vignette, offset: 0.28 })
 const smaa = new SMAAEffect()
 
-const dofPass = new EffectPass(camera, dof)
-composer.addPass(dofPass)
 composer.addPass(new EffectPass(camera, exposureFx, toneMap, hueSat, contrastFx, grain, vignette, smaa))
-// skip the whole DOF pass when bokeh is off or zero — it's pure cost with no visual effect
-dofPass.enabled = params.bokehEnabled && params.bokehScale > 0
+// only builds the pass if bokeh is actually on at boot (it is not, by default)
+setDofEnabled(params.bokehEnabled && params.bokehScale > 0)
 
 // ------------------------------------------------------------------ pointer
 
@@ -1293,7 +1319,7 @@ modes = new Modes({
       refreshOsmCredit() // GeoNames credit only applies in surface mode — resync on mode change
     },
     setEffectsEnabled(v) {
-      dofPass.enabled = v && params.bokehEnabled && params.bokehScale > 0
+      setDofEnabled(v && params.bokehEnabled && params.bokehScale > 0)
       grain.blendMode.opacity.value = v ? params.grain : 0
       sun.castShadow = v && params.shadowMode !== 'off'
       renderer.shadowMap.autoUpdate = v && params.shadowMode === 'dynamic'
@@ -1643,8 +1669,8 @@ function applyUserTemplate(tmpl) {
   applyBackground() // solid/gradient background from the captured look
   // camera lens / depth-of-field / shadow look
   if (params.fov != null) { camera.fov = params.fov; camera.updateProjectionMatrix() }
-  if (params.bokehScale != null) { dof.bokehScale = params.bokehScale; dofPass.enabled = params.bokehEnabled && params.bokehScale > 0 }
-  if (params.focusRange != null) dof.cocMaterial.worldFocusRange = params.focusRange
+  if (params.bokehScale != null) { if (dof) dof.bokehScale = params.bokehScale; setDofEnabled(params.bokehEnabled && params.bokehScale > 0) }
+  if (params.focusRange != null && dof) dof.cocMaterial.worldFocusRange = params.focusRange
   if (params.shadowMode) applyShadowMode()
   applyPlinthMaterial()
   terrain.setMaterialMode(params.terrainSurfaceMat || '', params)
@@ -1804,7 +1830,7 @@ function resetAll() {
   scene.fog = null
   // depth of field off
   params.bokehEnabled = false
-  dofPass.enabled = false
+  setDofEnabled(false)
   // map overlay layers (roads/water/places)
   Object.assign(params, DEFAULT_MAPLAYERS)
   rebuildMapLayers()
@@ -2470,8 +2496,11 @@ const panelCtx = {
   controls,
   renderer,
   composer,
-  dof,
-  dofPass,
+  // DoF is built on first use (see ensureDof) — hand out ACCESSORS, never the
+  // objects: a by-value capture at ctx-build time would freeze `null` forever.
+  setDofEnabled,
+  getDof: () => dof,
+  isDofEnabled: () => !!dofPass?.enabled,
   exposureFx,
   contrastFx,
   hueSat,
@@ -2705,8 +2734,9 @@ const cameraPanel = buildCameraPanel({
   controls,
   renderer,
   composer,
-  dof,
-  dofPass,
+  setDofEnabled,
+  getDof: () => dof,
+  isDofEnabled: () => !!dofPass?.enabled,
   // camera automations
   cameraMoves: CAMERA_MOVES.map(({ id, label }) => ({ value: id, label })),
   isCameraAuto: () => cameraAuto.active,
@@ -2765,8 +2795,8 @@ aq = createAdaptiveQuality({
   params,
   renderer,
   composer,
-  dof,
-  dofPass,
+  setDofEnabled,
+  isDofEnabled: () => !!dofPass?.enabled,
   aoPass,
   bloomPass,
   grain,
