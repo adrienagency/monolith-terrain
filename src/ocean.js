@@ -3,10 +3,10 @@
 //  · SHALLOWS are translucent — the seabed shows through, and animated sun
 //    caustics ("rays through the water") play over them;
 //  · DEPTHS darken and turn opaque (Beer-Lambert-ish colour ramp on depth);
-//  · SEA STATE follows the Beaufort wind scale F1..F12 — four Gerstner waves
-//    (GPU Gems 1 ch.1, the same maths jbouny/ocean uses) whose amplitude,
-//    wavelength, speed, chop, glint and whitecap foam all derive from the
-//    force. F1 is oily calm, F12 is a hurricane sea.
+//  · SEA STATE is a random 16-wave spectrum from the shared ocean-waves lib
+//    (ocean-lab): two crossed systems (narrow swell + spread wind sea), deep
+//    water dispersion, energy-weighted Gerstner steepness, jacobian breaking.
+//    Height/choppiness/speed ride user sliders; a seed replays an exact sea.
 // Depth comes from a small height+shore-distance field baked from the live
 // terrain sampler at rebuild time: R = ground Y (scene units), G = distance
 // to the nearest shore (normalised) — the fallback "depth" where the DEM
@@ -19,36 +19,34 @@
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
 import { detectLakes } from './lake.js'
+// wave engine shared with ocean-lab (C:\Dev\ocean-lab) — the Vite alias
+// resolves to the LIVE ocean-lab source when it's cloned next to this repo,
+// to the committed src/vendor/ocean-waves copy otherwise (npm run sync:waves)
+import { makeSeaState, seaStateToUniforms, GERSTNER_GLSL } from 'ocean-waves'
 
 const FIELD_RES = 384 // height/shore field over the whole slab
 
-// ---------------------------------------------------------- Beaufort scale
-// One wind force (1..3) → every wave/shading parameter. The scale stops at
-// F3 by design: past that the sea stopped reading as a quiet diorama
-// (Adrien's call) — F1 oily calm, F2 light ripples, F3 lively wavelets with
-// the first scattered whitecaps.
-export function beaufortParams(force) {
-  const t = Math.min(1, Math.max(0, (force - 1) / 2))
-  return {
-    amp: 0.005 + 0.02 * Math.pow(t, 1.3), // dominant wave amplitude budget — F3 kept gentle, steep backs bred fresnel plates
-    len: 1.6 + 1.6 * t, // dominant wavelength
-    speed: 0.22 + 0.55 * t,
-    chop: 0.15 + 0.4 * t, // Gerstner Q — a touch of crest at F3
-    detail: 0.25 + 0.5 * t, // micro-normal ripple strength
-    foam: 0.2 * t, // first scattered whitecaps at F3
-    gloss: 240 - 130 * t,
-  }
+// spectrum units → scene units: the sea state is authored in "spectrum
+// metres" (dominant swell λ 12-24 m); at 0.12 scene units per metre the
+// dominant wavelength lands at 1.4-2.9 scene units — the same band the old
+// four-train Beaufort system used, tuned for the diorama read
+const LEN_SCALE = 0.12
+const SPEC_AMP_SUM = 1.5 // makeSeaState normalises the summed amplitude to this
+
+// choppiness → the shading knobs the old Beaufort scale used to derive
+function chopLook(c) {
+  return { detail: 0.25 + 0.5 * c, foam: 0.15 + 0.25 * c, gloss: 240 - 130 * c }
 }
 
 const VERT = /* glsl */ `
 uniform float uTime;
-uniform vec4 uAmp;   // per-wave amplitude
-uniform vec4 uLen;   // per-wave wavelength
-uniform vec4 uSpd;   // per-wave phase speed
-uniform float uChop;
-uniform vec2 uDirs[4];
+uniform float uWaveH;    // wave height (user slider), in spectrum metres
+uniform float uChop;     // choppiness 0..1 (crest sharpening + breaking)
+uniform float uSpeedMul; // time multiplier over the deep-water dispersion
+uniform float uLenScale; // scene units per spectrum metre
 uniform float uWaveScale;   // lakes ride smaller waves than the open sea
 uniform float uWaterY;
+${GERSTNER_GLSL}
 uniform sampler2D uField;   // R ground Y, G shore distance (slab-wide)
 #ifdef IS_LAKE
 uniform sampler2D uMask;    // A coverage, G shore distance (lake bbox)
@@ -76,30 +74,17 @@ void main() {
 #endif
   float fade = smoothstep(0.0, 0.12, shoreD) * uWaveScale;
 
-  float dy = 0.0;
-  vec2 dxz = vec2(0.0);
-  vec3 n = vec3(0.0, 1.0, 0.0);
-  float crest = 0.0;
-  for (int i = 0; i < 4; i++) {
-    float a = (i == 0 ? uAmp.x : i == 1 ? uAmp.y : i == 2 ? uAmp.z : uAmp.w) * fade;
-    float L = (i == 0 ? uLen.x : i == 1 ? uLen.y : i == 2 ? uLen.z : uLen.w);
-    float s = (i == 0 ? uSpd.x : i == 1 ? uSpd.y : i == 2 ? uSpd.z : uSpd.w);
-    vec2 d = uDirs[i];
-    float k = 6.28318 / max(L, 1e-3);
-    float ph = dot(d, xz) * k + uTime * s * k;
-    float c = cos(ph);
-    float si = sin(ph);
-    dy += a * si;
-    dxz += uChop * a * d * c;
-    // analytic Gerstner normal accumulation
-    n.x -= d.x * a * k * c;
-    n.z -= d.y * a * k * c;
-    crest += si * (a / max(uAmp.x, 1e-4));
-  }
-  p.xz += dxz;
-  p.y += dy;
+  // shared 16-wave random spectrum (ocean-waves lib): two crossed systems
+  // (narrow swell + spread wind sea), energy-weighted Gerstner steepness,
+  // breaking measured by the surface jacobian (crest ~1 = folding whitecap).
+  // The shore fade rides inside: swell dies on the beach, never over land.
+  vec3 nAcc;
+  float crest;
+  vec3 disp = oceanGerstner(xz, uTime, uWaveH, uChop, uSpeedMul, uLenScale, fade, nAcc, crest);
+  p.xz += disp.xz;
+  p.y += disp.y;
   vCrest = crest;
-  vNorm = normalize(n);
+  vNorm = normalize(vec3(-nAcc.x, 1.0 - nAcc.y, -nAcc.z));
   vWorld = vec3(p.x, uWaterY + p.y, p.z);
 
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
@@ -246,7 +231,9 @@ void main() {
   float foamNoise = vnoise(xz * 9.0 + vec2(uTime * 0.7, -uTime * 0.5));
   float foamNoise2 = foamNoise * vnoise(xz * 21.3 - vec2(uTime * 0.4, uTime * 0.6)) * 1.6;
   float shoreFoam = (1.0 - smoothstep(0.0, 0.10, depth)) * smoothstep(0.35, 0.75, foamNoise);
-  float crestFoam = uFoam * smoothstep(0.62, 0.98, vCrest * 0.5 + 0.5) * smoothstep(0.45, 0.85, foamNoise2) * (0.25 + 0.75 * patchy);
+  // vCrest is the normalised breaking jacobian from the shared spectrum
+  // (~1 where a crest folds) — intermittent by nature, only some waves break
+  float crestFoam = uFoam * smoothstep(0.45, 0.85, vCrest) * smoothstep(0.45, 0.85, foamNoise2) * (0.25 + 0.75 * patchy);
   float foam = clamp(shoreFoam * 0.9 + crestFoam, 0.0, 1.0);
   col = mix(col, vec3(0.96), foam);
 
@@ -265,19 +252,6 @@ void main() {
   #include <fog_fragment>
 }
 `
-
-function makeWaveUniforms(force) {
-  const w = beaufortParams(force)
-  const amps = [0.42, 0.28, 0.18, 0.12].map((r) => r * w.amp)
-  const lens = [1, 0.52, 0.28, 0.16].map((r) => r * w.len)
-  const spds = lens.map((L) => w.speed * Math.sqrt(L / lens[0]))
-  return { w, amps, lens, spds }
-}
-
-// four wave trains spread over a wide fan (a cross-sea): tightly-grouped
-// headings made every crest line up in parallel rows across the whole map —
-// the "repeating waves" the client flagged
-const WAVE_HEADINGS = [0.7, 2.05, -0.55, 3.3].map((a) => new THREE.Vector2(Math.cos(a), Math.sin(a)))
 
 // shallow leans hard into saturated lagoon turquoise and deep into navy —
 // pale derivations disappeared entirely on light templates. Lerp weights
@@ -301,7 +275,7 @@ function waterColors(params) {
 
 function waterMaterial({ isLake, params, fieldTex }) {
   const { shallow, deep } = waterColors(params)
-  const { w, amps, lens, spds } = makeWaveUniforms(Math.min(3, Math.max(1, params.waterWind ?? 2)))
+  const look = chopLook(params.seaChop ?? 0.6)
   const mat = new THREE.ShaderMaterial({
     name: isLake ? 'real-water-lake' : 'real-water-sea',
     vertexShader: VERT,
@@ -314,11 +288,14 @@ function waterMaterial({ isLake, params, fieldTex }) {
       THREE.UniformsLib.fog,
       {
         uTime: { value: 0 },
-        uAmp: { value: new THREE.Vector4(...amps) },
-        uLen: { value: new THREE.Vector4(...lens) },
-        uSpd: { value: new THREE.Vector4(...spds) },
-        uChop: { value: w.chop },
-        uDirs: { value: WAVE_HEADINGS },
+        // spectrum arrays are assigned AFTER creation (same clone rule as the
+        // textures below) by RealWater._applySea()
+        uWaveA: { value: [] },
+        uWaveB: { value: [] },
+        uWaveH: { value: params.seaWaveH ?? 0.5 },
+        uChop: { value: params.seaChop ?? 0.6 },
+        uSpeedMul: { value: (params.seaSpeed ?? 1) * 0.4 },
+        uLenScale: { value: LEN_SCALE },
         uWaveScale: { value: isLake ? 0.5 : 1 },
         uWaterY: { value: 0 },
         // textures are assigned AFTER creation: UniformsUtils.merge CLONES any
@@ -335,9 +312,9 @@ function waterMaterial({ isLake, params, fieldTex }) {
         uDeep: { value: deep },
         uSky: { value: new THREE.Color('#cfe3f2') },
         uDepthMax: { value: 2.2 },
-        uGloss: { value: w.gloss },
-        uDetail: { value: w.detail },
-        uFoam: { value: w.foam },
+        uGloss: { value: look.gloss },
+        uDetail: { value: look.detail },
+        uFoam: { value: look.foam },
         uCaustics: { value: 2.4 },
         uTransp: { value: params.waterTransparency ?? 0.4 },
         uSunFx: { value: params.waterSunFx ?? 1 },
@@ -504,6 +481,11 @@ export class RealWater {
     // at a 500 km continental view the same scene-unit swell would be a
     // 30 m monster — the sea (and the lakes) calm as you zoom out
     this._waveScale = Math.min(1, Math.max(0.15, demScale / 0.008))
+    this._waveH = params.seaWaveH ?? 0.5
+
+    // random sea state (shared ocean-waves spectrum) — a saved seed replays
+    // the exact same sea (share-links), 0/undefined draws a fresh one
+    this._sea = makeSeaState(params.seaSeed || undefined)
 
     // --- open sea (skip in region mode: the plate replaces the ocean there)
     if (seaY > -9000 && !params.regionMode) {
@@ -513,7 +495,7 @@ export class RealWater {
       // the lift stays metres in real terms: a fixed scene-unit lift flooded
       // tens of metres of lowland at continental zooms (Baltic screenshot)
       this._seaBase = seaY + Math.max(2 * demScale, 0.003)
-      const seaLift = this._seaLift(params.waterWind ?? 2)
+      const seaLift = this._seaLift()
       const mat = waterMaterial({ isLake: false, params, fieldTex })
       mat.uniforms.uWaterY.value = seaLift
       mat.uniforms.uWaveScale.value = this._waveScale
@@ -533,12 +515,14 @@ export class RealWater {
       const mesh = new THREE.Mesh(geo, mat)
       // geometry is authored in world XZ at y=0; the mesh lifts it to sea level
       mesh.position.set(0, seaLift, 0)
-      mesh.renderOrder = 4
+      // above the draped OSM water polygons (17) so harbours read UNDER the
+      // animated surface (through its transparency), below GPX markers (21+)
+      mesh.renderOrder = 18
       mesh.frustumCulled = false // vertex waves move it; the slab is always on screen anyway
       this.group.add(mesh)
       this.meshes.push(mesh)
       this.materials.push(mat)
-      this._seaMesh = mesh // setWind re-seats the surface when the swell grows
+      this._seaMesh = mesh // setWaves re-seats the surface when the swell grows
     }
 
     // --- altitude lakes
@@ -568,13 +552,25 @@ export class RealWater {
       geo.translate((x0 + x1) / 2, 0, (z0 + z1) / 2)
       const mesh = new THREE.Mesh(geo, mat)
       mesh.position.y = yLake
-      mesh.renderOrder = 4
+      mesh.renderOrder = 18 // same rule as the sea: over the draped OSM water
       mesh.frustumCulled = false
       this.group.add(mesh)
       this.meshes.push(mesh)
       this.materials.push(mat)
     }
+    this._applySea()
     this.group.visible = this._surfaceVisible
+  }
+
+  // push the current spectrum into every material (arrays are assigned
+  // post-creation: UniformsUtils.merge would clone them at build time)
+  _applySea() {
+    if (!this._sea) return
+    const u = seaStateToUniforms(this._sea)
+    for (const mat of this.materials) {
+      mat.uniforms.uWaveA.value = u.a
+      mat.uniforms.uWaveB.value = u.b
+    }
   }
 
   // live look change — colour, transparency and sun sliders, no rebuild needed
@@ -588,30 +584,48 @@ export class RealWater {
     }
   }
 
-  // the sea's resting height for a given wind: base + the swell's amplitude,
-  // so the deepest trough still clears the flat marine plain
-  _seaLift(force) {
-    const f = Math.min(3, Math.max(1, force ?? 2))
-    return (this._seaBase ?? 0) + beaufortParams(f).amp * (this._waveScale ?? 1) + 0.002
+  // the sea's resting height: base + the spectrum's summed amplitude in scene
+  // units, so the deepest trough still clears the flat marine plain
+  _seaLift() {
+    const amp = SPEC_AMP_SUM * LEN_SCALE * (this._waveH ?? 0.5) * (this._waveScale ?? 1)
+    return (this._seaBase ?? 0) + amp + 0.002
   }
 
-  // live Beaufort change — no rebuild needed
-  setWind(force) {
-    const { w, amps, lens, spds } = makeWaveUniforms(Math.min(3, Math.max(1, force)))
+  _reseat() {
+    if (!this._seaMesh) return
+    const lift = this._seaLift()
+    this._seaMesh.position.y = lift
+    this._seaMesh.material.uniforms.uWaterY.value = lift
+  }
+
+  // live wave change (UI sliders) — no rebuild needed
+  setWaves({ height, choppiness, speed } = {}) {
     for (const mat of this.materials) {
-      mat.uniforms.uAmp.value.set(...amps)
-      mat.uniforms.uLen.value.set(...lens)
-      mat.uniforms.uSpd.value.set(...spds)
-      mat.uniforms.uChop.value = w.chop
-      mat.uniforms.uGloss.value = w.gloss
-      mat.uniforms.uDetail.value = w.detail
-      mat.uniforms.uFoam.value = w.foam
+      if (height !== undefined) mat.uniforms.uWaveH.value = height
+      if (choppiness !== undefined) {
+        mat.uniforms.uChop.value = choppiness
+        const l = chopLook(choppiness)
+        mat.uniforms.uDetail.value = l.detail
+        mat.uniforms.uFoam.value = l.foam
+        mat.uniforms.uGloss.value = l.gloss
+      }
+      if (speed !== undefined) mat.uniforms.uSpeedMul.value = speed * 0.4
     }
-    if (this._seaMesh) {
-      const lift = this._seaLift(force)
-      this._seaMesh.position.y = lift
-      this._seaMesh.material.uniforms.uWaterY.value = lift
+    if (height !== undefined) {
+      this._waveH = height
+      this._reseat()
     }
+  }
+
+  // replay a given sea state (share-links) / draw a brand-new random one
+  setSeed(seed) {
+    this._sea = makeSeaState(seed)
+    this._applySea()
+    return this._sea.seed
+  }
+
+  reseed() {
+    return this.setSeed((Math.random() * 2 ** 31) | 0)
   }
 
   update(dt, sun) {
