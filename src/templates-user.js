@@ -31,7 +31,8 @@ export const TEMPLATE_KEYS = [
   // surface material scalars
   'color', 'roughness', 'roughnessVariation', 'roughnessScale', 'bumpScale', 'envMapIntensity',
   // post FX + fog
-  'exposure', 'contrast', 'saturation', 'vignette', 'grain', 'fogNear', 'fogFar', 'fogColor', 'fogEnabled',
+  'exposure', 'contrast', 'saturation', 'vignette', 'grain',
+  'ssaoEnabled', 'ssaoIntensity', 'bloomEnabled', 'bloomIntensity', 'bloomThreshold', 'fogNear', 'fogFar', 'fogColor', 'fogEnabled',
   // background (solid / gradient / HDRI sky)
   'bgMode', 'bgColorA', 'bgColorB', 'bgColorC', 'bgAngle', 'bgEnv',
   // camera lens / depth-of-field (NOT position/location) — shadowMode lives in

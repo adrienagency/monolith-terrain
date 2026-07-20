@@ -53,6 +53,8 @@ export function createAdaptiveQuality({
   composer,
   dof, // reserved — the pass toggle is enough today, kept for future levers
   dofPass,
+  aoPass = null, // render-upgrade levers (2026-07-20 plan): tier 2 sheds AO,
+  bloomPass = null, // tier 3 sheds bloom — one product, adaptive, no forked mode
   lake,
   grain = null, // NoiseEffect (optional) — T3 turns film grain off
   applyShadowMode,
@@ -101,6 +103,12 @@ export function createAdaptiveQuality({
         composer.setSize(window.innerWidth, window.innerHeight)
       }
     }
+    // Render-upgrade levers. AO costs a whole extra scene pass, so it is shed
+    // first; bloom holds on until the floor tier. `&& params.x` means a manual
+    // OFF stays off whatever the tier — the governor only ever restores the
+    // user's own setting on the way back up, never a blind true.
+    if (aoPass) aoPass.enabled = params.ssaoEnabled && n < 2
+    if (bloomPass) bloomPass.enabled = params.bloomEnabled && n < 3
     if (!dirty.shadows) {
       const sm = tierShadows(n)
       if (params.shadowMode !== sm) {

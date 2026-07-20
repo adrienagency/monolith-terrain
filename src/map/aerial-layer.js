@@ -444,7 +444,7 @@ export class AerialLayer {
     this.dispose()
     const texture = new THREE.CanvasTexture(canvas)
     texture.colorSpace = THREE.SRGBColorSpace
-    texture.anisotropy = 8
+    texture.anisotropy = 16 // grazing-angle sharpness; free on any GPU of the last decade
     texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping
     texture.needsUpdate = true
     this._texture = texture

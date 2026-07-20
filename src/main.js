@@ -9,6 +9,9 @@ import {
   VignetteEffect,
   NoiseEffect,
   SMAAEffect,
+  SSAOEffect,
+  BloomEffect,
+  NormalPass,
   HueSaturationEffect,
   BrightnessContrastEffect,
   ToneMappingEffect,
@@ -183,6 +186,14 @@ const params = {
 
   // look
   exposure: 0.96,
+  // render upgrades (2026-07-20 plan): both ON by default — the adaptive
+  // quality governor sheds them on machines that can't hold 60 fps, so a
+  // forked "high mode" is deliberately NOT a thing (see the plan doc).
+  ssaoEnabled: true,
+  ssaoIntensity: 1.6,
+  bloomEnabled: true,
+  bloomIntensity: 0.55,
+  bloomThreshold: 0.85,
   contrast: 0.07,
   saturation: -0.35,
   vignette: 0.6,
@@ -937,6 +948,40 @@ applySourceMode()
 const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType })
 composer.addPass(new RenderPass(scene, camera))
 
+// AMBIENT OCCLUSION — the single biggest legibility win for a relief: every
+// gully and fold gets contact shading the directional sun alone flattens.
+// Costs an extra scene render (the normal pass) — which is exactly why the
+// adaptive governor treats AO as the first effect to shed (see perf.js).
+const normalPass = new NormalPass(scene, camera)
+composer.addPass(normalPass)
+const ssao = new SSAOEffect(camera, normalPass.texture, {
+  worldDistanceThreshold: 60,
+  worldDistanceFalloff: 10,
+  worldProximityThreshold: 8,
+  worldProximityFalloff: 1,
+  luminanceInfluence: 0.6, // lit snowfields keep their light — AO bites folds and shadow
+  samples: 12,
+  rings: 5,
+  radius: 0.08,
+  intensity: params.ssaoIntensity,
+  resolutionScale: 0.75,
+})
+const aoPass = new EffectPass(camera, ssao)
+composer.addPass(aoPass)
+aoPass.enabled = params.ssaoEnabled
+
+// BLOOM — pre-tonemap, on the HDR buffer: sun glints on water, dusk warmth,
+// moonlight at night. mipmapBlur is the modern soft falloff, cheap.
+const bloom = new BloomEffect({
+  intensity: params.bloomIntensity,
+  luminanceThreshold: params.bloomThreshold,
+  luminanceSmoothing: 0.2,
+  mipmapBlur: true,
+})
+const bloomPass = new EffectPass(camera, bloom)
+composer.addPass(bloomPass)
+bloomPass.enabled = params.bloomEnabled
+
 const dof = new DepthOfFieldEffect(camera, {
   focusDistance: 0.02,
   focalLength: 0.06,
@@ -1515,6 +1560,12 @@ function applyLook(k) {
   if (k.saturation != null) hueSat.saturation = params.saturation = k.saturation
   if (k.vignette != null) vignette.darkness = params.vignette = k.vignette
   if (k.grain != null) grain.blendMode.opacity.value = params.grain = k.grain
+  // render upgrades (2026-07-20): a template may carry the AO/bloom look
+  if (k.ssaoEnabled != null) aoPass.enabled = params.ssaoEnabled = k.ssaoEnabled
+  if (k.ssaoIntensity != null) ssao.intensity = params.ssaoIntensity = k.ssaoIntensity
+  if (k.bloomEnabled != null) bloomPass.enabled = params.bloomEnabled = k.bloomEnabled
+  if (k.bloomIntensity != null) bloom.intensity = params.bloomIntensity = k.bloomIntensity
+  if (k.bloomThreshold != null) bloom.luminanceMaterial.threshold = params.bloomThreshold = k.bloomThreshold
   if (k.clouds != null) {
     params.cloudsEnabled = k.clouds
     if (k.clouds) clouds.build(params) // no point rebuilding just to hide them
@@ -1555,7 +1606,7 @@ function applyUserTemplate(tmpl) {
   applyGridContour({ contourInterval: params.contourInterval, contourOpacity: params.contourOpacity, contourColor: params.contourColor, contourWeight: params.contourWeight, gridStep: params.gridStep, gridOpacity: params.gridOpacity, gridColor: params.gridColor })
   applyLight({ sunIntensity: params.sunIntensity, sunAzimuth: params.sunAzimuth, sunElevation: params.sunElevation, hemiIntensity: params.hemiIntensity, envLight: params.envLight, shadowSoftness: params.shadowSoftness, timeOfDay: params.timeOfDay })
   applySurface({ roughness: params.roughness, roughnessVariation: params.roughnessVariation, roughnessScale: params.roughnessScale, bumpScale: params.bumpScale, envMapIntensity: params.envMapIntensity })
-  applyLook({ fogColor: params.fogColor, exposure: params.exposure, contrast: params.contrast, saturation: params.saturation, vignette: params.vignette, grain: params.grain, clouds: params.cloudsEnabled, plinth: params.plinth })
+  applyLook({ fogColor: params.fogColor, exposure: params.exposure, contrast: params.contrast, saturation: params.saturation, vignette: params.vignette, grain: params.grain, clouds: params.cloudsEnabled, plinth: params.plinth, ssaoEnabled: params.ssaoEnabled, ssaoIntensity: params.ssaoIntensity, bloomEnabled: params.bloomEnabled, bloomIntensity: params.bloomIntensity, bloomThreshold: params.bloomThreshold })
   fogRef.near = params.fogNear
   fogRef.far = params.fogFar
   scene.fog = params.fogEnabled && modes.mode === 'surface' ? fogRef : null
@@ -2651,6 +2702,8 @@ aq = createAdaptiveQuality({
   composer,
   dof,
   dofPass,
+  aoPass,
+  bloomPass,
   grain,
   applyShadowMode,
   announce: (m) => modes.announce(m),
