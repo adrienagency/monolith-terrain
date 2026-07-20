@@ -741,3 +741,34 @@ body.dark .ce-followpad { background: rgba(18, 19, 22, 0.9); border-color: rgba(
 .ce-fp-btn:hover { background: #e8622c; color: #fff; border-color: #e8622c; }
 .ce-fp-row .ce-fp-btn { flex: 1; }
 body.dark .ce-fp-btn { background: rgba(255, 255, 255, 0.08); color: #e8e4da; border-color: rgba(255, 255, 255, 0.12); }
+
+/* ------------------------------------------------- hour pill (day/night) */
+.ce-hourpill {
+  position: fixed;
+  top: 16px;
+  right: 52px;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(252, 251, 248, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 8px 24px rgba(20, 24, 28, 0.12);
+  backdrop-filter: blur(12px);
+  font-family: 'Bricolage Grotesque', system-ui, sans-serif;
+}
+body.dark .ce-hourpill { background: rgba(18, 19, 22, 0.9); border-color: rgba(255, 255, 255, 0.1); }
+.ce-hp-glyph { font-size: 13px; }
+.ce-hourpill input[type='range'] {
+  width: 110px;
+  accent-color: #e8622c;
+}
+.ce-hp-label {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: #23201a;
+  min-width: 40px;
+}
+body.dark .ce-hp-label { color: #e8e4da; }

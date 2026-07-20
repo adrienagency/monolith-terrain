@@ -73,6 +73,8 @@ import { buildExplorePanel } from './ui/explore-panel.js'
 import { buildScanPanel } from './ui/scan-panel.js'
 import { buildShadersPanel } from './ui/shaders-panel.js'
 import { buildMapPanel } from './ui/map-panel.js'
+import { buildEffectsPanel } from './ui/effects-panel.js'
+import { buildHourPill } from './ui/hour-pill.js'
 import { initTips } from './ui/tips.js'
 import { createAdaptiveQuality } from './perf.js'
 import { detailForZoom } from './zoom-detail.js'
@@ -2624,6 +2626,18 @@ const mapPanel = buildMapPanel({
   peaksLayer,
   setLabelsVisible: (v) => (labels.visible = v && modes.mode === 'surface'),
 })
+
+const effectsPanel = buildEffectsPanel({
+  params,
+  exposureFx, contrastFx, hueSat, vignette, grain,
+  fogRef, setFogEnabled: panelCtx.setFogEnabled, applyBackground,
+  clouds,
+  ssao, bloom, aoPass, bloomPass,
+})
+
+// the 24h slider lives top-right as a pill now — the Create panel's Light
+// section is gone entirely (this was its only control)
+buildHourPill({ params, applyTimeOfDay })
 
 const explorePanel = buildExplorePanel({
   flyTo: (lat, lon, zoom) => modes.flyTo(lat, lon, zoom),

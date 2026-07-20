@@ -182,36 +182,6 @@ export function buildCreatePanel(ctx) {
   sTer.body.append(isolate)
 
   // --------------------------------------------------------------- Clouds
-  const sCld = addTo(section('Clouds'))
-  const rebuildClouds = () => ctx.clouds.build(params)
-  const cloudLive = (label, key, min, max, step) =>
-    slider({ label, min, max, step, get: () => params[key], set: (v) => { params[key] = v } })
-  const cloudBaked = (label, key, min, max, step) => {
-    const s = cloudLive(label, key, min, max, step)
-    s.querySelector('input').addEventListener('change', rebuildClouds)
-    return s
-  }
-  sCld.body.append(
-    toggle({ label: 'Volumetric clouds', get: () => params.cloudsEnabled, set: (v) => { params.cloudsEnabled = v; rebuildClouds(); refreshAll() } })
-  )
-  // 11 dependent sliders — kept in full (per Adrien: the controls stay, they
-  // just go inert-looking and hide while the deck itself is off)
-  const cloudRows = [
-    cloudLive('Density', 'cloudOpacity', 0.05, 1.5, 0.05),
-    cloudBaked('Scale', 'cloudScale', 0.5, 5, 0.1),
-    cloudBaked('Gaps', 'cloudCoverage', 0, 0.8, 0.01),
-    cloudBaked('Vertical billow', 'cloudBillow', 0, 1, 0.05),
-    cloudLive('Brightness', 'cloudBrightness', 0.5, 5, 0.1),
-    cloudLive('Contrast', 'cloudContrast', 0.4, 2.5, 0.05),
-    cloudLive('Translucency', 'cloudSSS', 0, 2, 0.05),
-    cloudBaked('Altitude', 'cloudAltitude', 0, 16, 0.5),
-    cloudBaked('Altitude spread', 'cloudAltSpread', 0, 1, 0.05),
-    cloudLive('Drift speed', 'cloudDrift', 0, 4, 0.1),
-    cloudLive('Drift variation', 'cloudDriftVar', 0, 1, 0.05),
-  ]
-  sCld.body.append(...cloudRows)
-  for (const row of cloudRows) visibleWhen(row, () => params.cloudsEnabled)
-
   // ---------------------------------------------------------------- Water
   if (FLAGS.water) {
     // The water simulation (v37): translucent sunlit shallows with bold caustic
@@ -232,18 +202,6 @@ export function buildCreatePanel(ctx) {
     for (const row of waterRows) visibleWhen(row, () => params.waterReal)
   }
 
-  // ---------------------------------------------------------------- Light
-  // ONE control: the 24 h day/night cycle. The studio presets and the six
-  // manual sun sliders were removed by request — the hour drives the real sun
-  // (computed for the block's own lat/lon, see daycycle.js): position, warmth,
-  // intensity, sky fill, and the moon at night.
-  const sLig = addTo(section('Light'))
-  sLig.body.append(
-    slider({ label: 'Time of day (h)', min: 0, max: 24, step: 0.1, get: () => params.timeOfDay, set: (v) => { params.timeOfDay = v; ctx.applyTimeOfDay(v) } }),
-    el('div', 'ce-note', 'The real sun for this place — dawn, noon, dusk, moonlight.')
-  )
-
-  // ---------------------------------------------------------------- Block
   const sBlk = addTo(section('Block'))
   sBlk.body.append(
     toggle({ label: 'Show block', get: () => params.plinth, set: (v) => { params.plinth = v; ctx.plinth.setVisible(v && ctx.modes.mode === 'surface') } }),
@@ -288,22 +246,5 @@ export function buildCreatePanel(ctx) {
   )
 
   // -------------------------------------------------------------- Effects
-  const sFx = addTo(section('Effects'))
-  sFx.body.append(
-    slider({ label: 'Exposure', min: 0.2, max: 3, step: 0.02, get: () => params.exposure, set: (v) => { params.exposure = v; ctx.exposureFx.uniforms.get('exposure').value = v } }),
-    slider({ label: 'Contrast', min: -0.2, max: 0.5, step: 0.01, get: () => params.contrast, set: (v) => { params.contrast = v; ctx.contrastFx.uniforms.get('contrast').value = v } }),
-    slider({ label: 'Saturation', min: -1, max: 0, step: 0.02, get: () => params.saturation, set: (v) => { params.saturation = v; ctx.hueSat.saturation = v } }),
-    slider({ label: 'Vignette', min: 0, max: 1, step: 0.02, get: () => params.vignette, set: (v) => { params.vignette = v; ctx.vignette.darkness = v } }),
-    slider({ label: 'Grain', min: 0, max: 0.5, step: 0.01, get: () => params.grain, set: (v) => { params.grain = v; ctx.grain.blendMode.opacity.value = v } }),
-    toggle({ label: 'Fog', get: () => params.fogEnabled, set: (v) => { params.fogEnabled = v; ctx.setFogEnabled(v); refreshAll() } })
-  )
-  const fogRows = [
-    slider({ label: 'Fog start', min: 5, max: 60, step: 0.5, get: () => params.fogNear, set: (v) => { params.fogNear = v; ctx.fogRef.near = v } }),
-    slider({ label: 'Fog end', min: 15, max: 90, step: 0.5, get: () => params.fogFar, set: (v) => { params.fogFar = v; ctx.fogRef.far = v } }),
-    color({ label: 'Fog colour', get: () => params.fogColor, set: (v) => { params.fogColor = v; ctx.fogRef.color.set(v); if (params.bgMode === 'solid') ctx.applyBackground() } }),
-  ]
-  sFx.body.append(...fogRows)
-  for (const row of fogRows) visibleWhen(row, () => params.fogEnabled)
-
   return panel
 }
