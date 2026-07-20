@@ -100,7 +100,7 @@ export function createAdaptiveQuality({
       if (params.pixelRatio !== pr) {
         params.pixelRatio = pr
         renderer.setPixelRatio(pr)
-        composer.setSize(window.innerWidth, window.innerHeight)
+        composer.setSize(window.innerWidth & ~1, window.innerHeight & ~1) // even only — fractional half-res targets are the black-rectangle bug
       }
     }
     // Render-upgrade levers. AO costs a whole extra scene pass, so it is shed

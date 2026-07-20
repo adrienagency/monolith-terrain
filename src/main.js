@@ -947,6 +947,13 @@ applySourceMode()
 
 // ------------------------------------------------------------------ post: real depth-based DOF
 
+// Post-processing passes routinely build half/quarter-resolution internal
+// targets. Handing them an ODD dimension yields FRACTIONAL texture sizes,
+// which is how the black-rectangle bug happened — so the composer is only
+// ever told even numbers. One CSS pixel of slack is invisible; a black
+// rectangle is not.
+const evenSize = () => [window.innerWidth & ~1, window.innerHeight & ~1]
+
 const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType })
 composer.addPass(new RenderPass(scene, camera))
 
@@ -956,11 +963,18 @@ composer.addPass(new RenderPass(scene, camera))
 // wholesale rather than tuned further. N8AOPostPass is postprocessing-
 // compatible and self-contained: no NormalPass, it derives everything from
 // the depth buffer. aoRadius is in WORLD units — the block is 56 across.
-const aoPass = new N8AOPostPass(scene, camera, window.innerWidth, window.innerHeight)
+const aoPass = new N8AOPostPass(scene, camera, ...evenSize())
 aoPass.configuration.aoRadius = 2.2
 aoPass.configuration.distanceFalloff = 1.2
 aoPass.configuration.intensity = params.ssaoIntensity
-aoPass.configuration.halfRes = true // quality/cost sweet spot; the governor can still shed the pass
+// FULL RES on purpose. halfRes builds internal targets at width/2, and on an
+// ODD window (1009 -> 504.5) those are FRACTIONAL: WebGL truncates the texture
+// while the shader keeps sampling on the fractional scale, so the upsample
+// reads outside the valid area, gets 0, and — since AO MULTIPLIES the colour —
+// paints a hard-edged BLACK RECTANGLE. That is the reported 'carré noir', and
+// the old SSAO had the same defect (resolutionScale 0.75 -> 756.75). The cost
+// is real, which is exactly what the adaptive governor is for.
+aoPass.configuration.halfRes = false
 composer.addPass(aoPass)
 aoPass.enabled = params.ssaoEnabled
 // panel + templates talk to `ssao.intensity` — keep that surface stable
@@ -3023,7 +3037,7 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
   renderer.setSize(window.innerWidth, window.innerHeight)
-  composer.setSize(window.innerWidth, window.innerHeight)
+  composer.setSize(...evenSize())
   gpxLayer.onResize(window.innerWidth, window.innerHeight)
   mapLayers.onResize(window.innerWidth, window.innerHeight)
   syncGpxProfilePosition()
