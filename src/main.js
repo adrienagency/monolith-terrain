@@ -2929,6 +2929,53 @@ document.addEventListener('visibilitychange', () => {
     tick()
   }
 })
+// BLACK-REGION DETECTOR (field debugging, 2026-07-20). The reported black
+// rectangle has resisted every offline reproduction: forensics on the
+// recording proved it is a real axis-aligned rectangle inside the canvas, but
+// no local probe (transitions, resizes, tier flips, pass bisection, GL-call
+// tracing) reproduces it. So the app now catches it ITSELF: a cheap 5x5 probe
+// every 30 frames, and when a large black area appears it freezes a full state
+// snapshot to the console. Remove once the cause is known.
+let __bdFrame = 0
+let __bdReported = false
+const __bdPix = new Uint8Array(4)
+function detectBlackRegion() {
+  if (__bdReported || ++__bdFrame % 30) return
+  const gl = renderer.getContext()
+  const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight
+  if (!W || !H) return
+  let black = 0
+  const grid = []
+  for (let ix = 1; ix <= 5; ix++) {
+    for (let iy = 1; iy <= 5; iy++) {
+      gl.readPixels(((W * ix) / 6) | 0, ((H * iy) / 6) | 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, __bdPix)
+      const dark = __bdPix[0] < 12 && __bdPix[1] < 12 && __bdPix[2] < 12
+      if (dark) black++
+      grid.push(dark ? 'X' : '.')
+    }
+  }
+  // 5..20 of 25 dark = a REGION, not a legitimately dark night scene (which
+  // darkens everywhere) and not a clean frame
+  if (black < 5 || black > 20) return
+  __bdReported = true
+  const ib = composer.inputBuffer
+  console.error('[ShibuMap] BLACK REGION DETECTED', {
+    grid: grid.join(''),
+    darkCells: black + '/25',
+    buffer: W + 'x' + H,
+    pixelRatio: renderer.getPixelRatio(),
+    window: window.innerWidth + 'x' + window.innerHeight,
+    composerInput: ib ? ib.width + 'x' + ib.height : null,
+    passes: composer.passes.map((p) => p.constructor.name.slice(0, 12) + (p.enabled ? '' : ':off')).join(' '),
+    ao: { on: aoPass.enabled, intensity: aoPass.configuration?.intensity },
+    bloom: bloomPass.enabled,
+    mode: modes.mode, busy: modes.busy, zoom: params.demZoom, hour: params.timeOfDay,
+    contextLost: gl.isContextLost(),
+    glError: gl.getError(),
+  })
+  showNotice('Affichage : zone noire détectée — l’état est dans la console (F12). Merci de me l’envoyer.')
+}
+
 function tick() {
   if (loopPaused) return // offline export owns the frame clock while it runs
   // rAF normally; timeout fallback keeps rendering when the tab is hidden
@@ -2938,6 +2985,7 @@ function tick() {
   const t = clock.elapsedTime
 
   updateCameraMotion(dt)
+  detectBlackRegion()
 
   // Post passes are OWNED here, one place, every frame. The AO pass reads the
   // normal+depth of the CURRENT camera state — during dives/orbital/terrain
