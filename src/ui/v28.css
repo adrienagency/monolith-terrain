@@ -949,6 +949,13 @@ body.ce-noui .ce-eye {
   border: 1px solid var(--ce-border);
   color: var(--ce-ink);
 }
+.ce-cinebtn {
+  right: 64px; /* one slot left of the iso button, same bottom row */
+}
+.ce-cinebtn.on {
+  border-color: var(--ce-accent);
+  color: var(--ce-accent);
+}
 .ce-isobtn svg {
   width: 20px;
   height: 20px;

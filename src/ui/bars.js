@@ -138,6 +138,18 @@ export function buildIsoButton(ctx) {
   return { root: btn, setVisible: (v) => btn.classList.toggle('off', !v) }
 }
 
+// Cinematic shortcut — the iso button's twin, one slot left: random looping
+// camera moves around the socle. Lit (accent) while running.
+export function buildCineButton(ctx) {
+  const btn = el('button', 'ce-isobtn ce-cinebtn ce-glassbox')
+  btn.type = 'button'
+  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="7" width="12" height="10" rx="2"/><path d="M15 10.5 21 8v8l-6-2.5"/></svg>'
+  btn.setAttribute('data-tip', 'Cinematic view — random camera moves around the block. Click again to stop.')
+  btn.addEventListener('click', () => btn.classList.toggle('on', !!ctx.toggle()))
+  document.body.append(btn)
+  return { root: btn, setVisible: (v) => btn.classList.toggle('off', !v) }
+}
+
 export function buildBottomBar(ctx) {
   const bar = el('div', 'ce-bottombar ce-glassbox')
 

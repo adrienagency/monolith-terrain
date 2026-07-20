@@ -63,7 +63,7 @@ import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
 import { showNotice } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
-import { buildTopBar, buildBottomBar, buildIsoButton, buildCredits } from './ui/bars.js'
+import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits } from './ui/bars.js'
 import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
 import { buildTemplatesPanel } from './ui/templates-panel.js'
 import { buildCreatePanel } from './ui/create-panel.js'
@@ -192,7 +192,7 @@ const params = {
   // quality governor sheds them on machines that can't hold 60 fps, so a
   // forked "high mode" is deliberately NOT a thing (see the plan doc).
   ssaoEnabled: true,
-  ssaoIntensity: 3.2,
+  ssaoIntensity: 12,
   bloomEnabled: true,
   bloomIntensity: 0.55,
   bloomThreshold: 0.85,
@@ -921,6 +921,7 @@ window.addEventListener('wheel', () => (lastUserInput = performance.now()), { pa
 
 let modes = null // assigned once the globe + mode machine exist (below)
 let isoBtn = null // assigned once the bars exist — referenced by the mode hooks
+let cineBtn = null
 let aq = null // adaptive quality controller (perf.js) — built after the panels
 let recorder = null // Recorder instance, lazy-loaded with the export stack
 
@@ -964,7 +965,7 @@ const ssao = new SSAOEffect(camera, normalPass.texture, {
   distanceFalloff: 0.03,
   rangeThreshold: 0.0012,
   rangeFalloff: 0.001,
-  luminanceInfluence: 0.55,
+  luminanceInfluence: 0.12, // 0.55 erased AO on this app's paper-bright relief — THE invisibility bug
   samples: 16,
   rings: 7,
   radius: 0.15,
@@ -1265,6 +1266,7 @@ modes = new Modes({
       realWater?.setVisible(v)
       mapLayers.setSurfaceVisible(v)
       isoBtn?.setVisible(v) // the isometric shortcut only makes sense over the block
+      cineBtn?.setVisible(v)
       scene.fog = v && params.fogEnabled ? fogRef : null
       refreshOsmCredit() // GeoNames credit only applies in surface mode — resync on mode change
     },
@@ -2398,6 +2400,29 @@ const credits = buildCredits()
 // back as the current view allows, so the WHOLE zone fits (no zoom-level change)
 const ISO_DIR = new THREE.Vector3(62, 52, 62).normalize()
 const ISO_TARGET = new THREE.Vector3(0, -1.5, 0)
+// cinematic button — same family as the iso shortcut, one step to its left:
+// each press starts a RANDOM looping camera move around the socle (the
+// existing Camera-panel automations), and while it runs the move re-rolls
+// every ~18 s so the show never settles. Press again to stop.
+let cineTimer = 0
+cineBtn = buildCineButton({
+  toggle: () => {
+    if (cameraAuto.active) {
+      cameraAuto.stop()
+      clearInterval(cineTimer)
+      return false
+    }
+    const roll = () => {
+      const m = CAMERA_MOVES[Math.floor(Math.random() * CAMERA_MOVES.length)]
+      cameraAuto.start(m.id, 0.7 + Math.random() * 0.9)
+    }
+    roll()
+    clearInterval(cineTimer)
+    cineTimer = setInterval(() => { if (cameraAuto.active) roll(); else clearInterval(cineTimer) }, 18000)
+    return true
+  },
+})
+
 isoBtn = buildIsoButton({
   flyIso: () => {
     if (modes.mode !== 'surface' || modes.busy) return
@@ -2914,7 +2939,10 @@ function tick() {
   // toward black (the reported intermittent black screen). Surface-and-settled
   // only. Bloom has no depth dependency and only follows its toggle + tier.
   aoPass.enabled = params.ssaoEnabled && params._aoTierOk !== false && modes.mode === 'surface' && !modes.busy
-  bloomPass.enabled = params.bloomEnabled && params._bloomTierOk !== false
+  // Bloom too: its mipmap chain SPREADS any NaN pixel to the whole frame —
+  // one bad texel during a transition (885 km orbital states, terrain swaps)
+  // and the entire image goes black. Surface-and-settled, same as AO.
+  bloomPass.enabled = params.bloomEnabled && params._bloomTierOk !== false && modes.mode === 'surface' && !modes.busy
 
   // idle planet spin: in orbital view the Earth slowly turns under the camera
   // until the user takes the controls back
