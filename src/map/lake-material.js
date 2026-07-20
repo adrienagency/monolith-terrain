@@ -109,7 +109,11 @@ const FRAG = /* glsl */ `
     // a second, much wider lobe: the soft sheet of brightness a water surface
     // always carries around the glint proper
     float sheen = pow(max(dot(N, H), 0.0), 5.0) * 0.10;
-    col += uSunColor * (spec * 0.85 + sheen) * uSunStrength * above;
+    // HDR on purpose: 0.85 peaked exactly AT the bloom threshold (0.85), so
+    // the glint could never ignite it — measured, not a coincidence you want.
+    // 3.0 pushes the core well past threshold; the HalfFloat buffer carries it
+    // and bloom turns it into the actual sun-on-water flare.
+    col += uSunColor * (spec * 3.0 + sheen) * uSunStrength * above;
 
     gl_FragColor = vec4(col, uOpacity);
     #include <colorspace_fragment>

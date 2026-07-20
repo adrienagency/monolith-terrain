@@ -81,7 +81,12 @@ export class SunDisc {
     this.material.opacity = opacity
     // Low sun reads warmer AND smaller-but-hazier; high sun is a tight white
     // point. Scaling with the fade is what makes it "drown" rather than blink.
-    this.material.color.set(colorHex)
+    // HDR core: an SDR disc tops out at luminance ~1.0, which grazes the
+    // bloom threshold (0.85) without ever igniting it — 'aucun halo dans le
+    // ciel' was exactly that. Pushing the colour past 1 into the HalfFloat
+    // buffer is what turns bloom into an actual solar flare; low sun boosts
+    // less (the drown-out must stay gentle).
+    this.material.color.set(colorHex).multiplyScalar(1.6 + 1.9 * opacity)
     this.sprite.scale.setScalar(13 + 9 * (1 - opacity)) // swells and hazes as it sinks
     this.sprite.position.copy(dir).setLength(DISTANCE)
   }
