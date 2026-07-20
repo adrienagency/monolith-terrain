@@ -5,7 +5,7 @@
 import { el } from './kit.js'
 
 export function buildHourPill({ params, applyTimeOfDay }) {
-  const pill = el('div', 'ce-hourpill')
+  const pill = el('div', 'ce-hourpill ce-glassbox')
   const glyph = el('span', 'ce-hp-glyph', '☀')
   const range = document.createElement('input')
   range.type = 'range'

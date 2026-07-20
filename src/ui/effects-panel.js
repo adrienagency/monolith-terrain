@@ -15,9 +15,9 @@ export function buildEffectsPanel(ctx) {
 
   // ---- render (the 2026-07-20 upgrades) ----
   const sRen = panel.addSection(section('Render', { open: true }))
-  const aoT = toggle({ label: 'Ambient occlusion', get: () => params.ssaoEnabled, set: (v) => { params.ssaoEnabled = v; ctx.aoPass.enabled = v; refreshAll() } })
+  const aoT = toggle({ label: 'Ambient occlusion', get: () => params.ssaoEnabled, set: (v) => { params.ssaoEnabled = v; refreshAll() } })
   const aoI = slider({ label: 'AO intensity', min: 0.2, max: 4, step: 0.05, get: () => params.ssaoIntensity, set: (v) => { params.ssaoIntensity = v; ctx.ssao.intensity = v } })
-  const blT = toggle({ label: 'Bloom', get: () => params.bloomEnabled, set: (v) => { params.bloomEnabled = v; ctx.bloomPass.enabled = v; refreshAll() } })
+  const blT = toggle({ label: 'Bloom', get: () => params.bloomEnabled, set: (v) => { params.bloomEnabled = v; refreshAll() } })
   const blI = slider({ label: 'Bloom intensity', min: 0, max: 2, step: 0.02, get: () => params.bloomIntensity, set: (v) => { params.bloomIntensity = v; ctx.bloom.intensity = v } })
   const blH = slider({ label: 'Bloom threshold', min: 0.4, max: 1, step: 0.01, get: () => params.bloomThreshold, set: (v) => { params.bloomThreshold = v; ctx.bloom.luminanceMaterial.threshold = v } })
   sRen.body.append(aoT, aoI, blT, blI, blH)

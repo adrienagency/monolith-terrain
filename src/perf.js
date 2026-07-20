@@ -107,8 +107,8 @@ export function createAdaptiveQuality({
     // first; bloom holds on until the floor tier. `&& params.x` means a manual
     // OFF stays off whatever the tier — the governor only ever restores the
     // user's own setting on the way back up, never a blind true.
-    if (aoPass) aoPass.enabled = params.ssaoEnabled && n < 2
-    if (bloomPass) bloomPass.enabled = params.bloomEnabled && n < 3
+    params._aoTierOk = n < 2
+    params._bloomTierOk = n < 3
     if (!dirty.shadows) {
       const sm = tierShadows(n)
       if (params.shadowMode !== sm) {

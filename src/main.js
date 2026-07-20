@@ -192,7 +192,7 @@ const params = {
   // quality governor sheds them on machines that can't hold 60 fps, so a
   // forked "high mode" is deliberately NOT a thing (see the plan doc).
   ssaoEnabled: true,
-  ssaoIntensity: 1.6,
+  ssaoIntensity: 3.2,
   bloomEnabled: true,
   bloomIntensity: 0.55,
   bloomThreshold: 0.85,
@@ -957,16 +957,20 @@ composer.addPass(new RenderPass(scene, camera))
 const normalPass = new NormalPass(scene, camera)
 composer.addPass(normalPass)
 const ssao = new SSAOEffect(camera, normalPass.texture, {
-  worldDistanceThreshold: 60,
-  worldDistanceFalloff: 10,
-  worldProximityThreshold: 8,
-  worldProximityFalloff: 1,
-  luminanceInfluence: 0.6, // lit snowfields keep their light — AO bites folds and shadow
-  samples: 12,
-  rings: 5,
-  radius: 0.08,
+  // the classic, documented parameter set — the world* variants proved
+  // fragile across camera/far changes. Tuned STRONG on purpose (field
+  // report: 'ça ne se voit pas du tout'): AO on a relief must read.
+  distanceThreshold: 0.97,
+  distanceFalloff: 0.03,
+  rangeThreshold: 0.0012,
+  rangeFalloff: 0.001,
+  luminanceInfluence: 0.55,
+  samples: 16,
+  rings: 7,
+  radius: 0.15,
+  bias: 0.025,
+  fade: 0.01,
   intensity: params.ssaoIntensity,
-  resolutionScale: 0.75,
 })
 const aoPass = new EffectPass(camera, ssao)
 composer.addPass(aoPass)
@@ -1563,9 +1567,9 @@ function applyLook(k) {
   if (k.vignette != null) vignette.darkness = params.vignette = k.vignette
   if (k.grain != null) grain.blendMode.opacity.value = params.grain = k.grain
   // render upgrades (2026-07-20): a template may carry the AO/bloom look
-  if (k.ssaoEnabled != null) aoPass.enabled = params.ssaoEnabled = k.ssaoEnabled
+  if (k.ssaoEnabled != null) params.ssaoEnabled = k.ssaoEnabled
   if (k.ssaoIntensity != null) ssao.intensity = params.ssaoIntensity = k.ssaoIntensity
-  if (k.bloomEnabled != null) bloomPass.enabled = params.bloomEnabled = k.bloomEnabled
+  if (k.bloomEnabled != null) params.bloomEnabled = k.bloomEnabled
   if (k.bloomIntensity != null) bloom.intensity = params.bloomIntensity = k.bloomIntensity
   if (k.bloomThreshold != null) bloom.luminanceMaterial.threshold = params.bloomThreshold = k.bloomThreshold
   if (k.clouds != null) {
@@ -2903,6 +2907,14 @@ function tick() {
   const t = clock.elapsedTime
 
   updateCameraMotion(dt)
+
+  // Post passes are OWNED here, one place, every frame. The AO pass reads the
+  // normal+depth of the CURRENT camera state — during dives/orbital/terrain
+  // swaps that state is mid-flight and a broken AO multiplies the whole frame
+  // toward black (the reported intermittent black screen). Surface-and-settled
+  // only. Bloom has no depth dependency and only follows its toggle + tier.
+  aoPass.enabled = params.ssaoEnabled && params._aoTierOk !== false && modes.mode === 'surface' && !modes.busy
+  bloomPass.enabled = params.bloomEnabled && params._bloomTierOk !== false
 
   // idle planet spin: in orbital view the Earth slowly turns under the camera
   // until the user takes the controls back
