@@ -3128,7 +3128,11 @@ function tick() {
     })
     if (hit != null) params.focusDistance += (hit - params.focusDistance) * Math.min(1, dt * 8)
   }
-  dof.cocMaterial.worldFocusDistance = params.focusDistance
+  // `dof` is null until bokeh is first switched on (lazy build — see
+  // ensureDof). params.focusDistance keeps tracking either way, and
+  // ensureDof() seeds the material from it, so nothing is lost while it
+  // does not exist.
+  if (dof) dof.cocMaterial.worldFocusDistance = params.focusDistance
 
   realWater?.update(dt, sun) // water simulation: waves, caustics, sun glint
   aq.update(dt) // adaptive quality: sample FPS, step tiers when sustained
