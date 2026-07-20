@@ -327,14 +327,17 @@ const params = {
   // excludes transmissive objects from the refraction buffer, so a transmissive
   // terrain becomes invisible through the water.
   transmission: 0,
-  // WATER SIMULATION (the glass sea/lakes are gone — this is the only water):
-  // translucent sunlit shallows with bold caustics, darkening depths,
-  // Beaufort sea state — GPU-heavy, so opt-in
+  // ANIMATED SEA (the glass sea/lakes are gone — this is the only water):
+  // translucent sunlit shallows with bold caustics, darkening depths, and the
+  // shared ocean-waves random spectrum (ocean-lab) — GPU-heavy, so opt-in
   lakeColor: '#8fc6e8', // base water tint (shallow/deep derive from it)
   waterReal: false,
-  waterWind: 2, // Beaufort force F1..F3 (capped at 3 — beyond stopped reading as a diorama)
   waterTransparency: 0.4, // 0 = milky veil, 1 = crystal — above and below the surface
   waterSunFx: 1, // sun on the water: glint above + caustic rays below (0..2)
+  seaWaveH: 0.5, // wave height, in spectrum metres — 0.5 is a resting sea
+  seaChop: 0.6, // crest sharpening 0..1 — breaking whitecaps appear past ~0.6
+  seaSpeed: 1, // time multiplier over the deep-water dispersion
+  seaSeed: 0, // 0 = random sea each rebuild; a saved seed replays an exact sea
 
   // SP1 map overlay layers (roads/water/places), draped on the relief
   roadsEnabled: false,
@@ -2733,6 +2736,7 @@ const effectsPanel = buildEffectsPanel({
   fogRef, setFogEnabled: panelCtx.setFogEnabled, applyBackground,
   clouds,
   ssao, bloom, aoPass, bloomPass,
+  realWater, waterRebuild,
 })
 
 // the 24h slider lives top-right as a pill now — the Create panel's Light

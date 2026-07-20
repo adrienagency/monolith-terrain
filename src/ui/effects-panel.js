@@ -4,8 +4,9 @@
 // from the Create panel, and the volumetric clouds moved with them (explicit
 // request: one home for every effect, clouds included).
 
-import { section, toggle, slider, color, visibleWhen, refreshAll } from './kit.js'
+import { el, section, toggle, slider, color, visibleWhen, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
+import { FLAGS } from '../flags.js'
 
 const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>'
 
@@ -70,6 +71,31 @@ export function buildEffectsPanel(ctx) {
   ]
   sCld.body.append(...cloudRows)
   for (const row of cloudRows) visibleWhen(row, () => params.cloudsEnabled)
+
+  // ---- sea (ocean-waves random spectrum — moved here from Create's old
+  // Water section: one home for every effect) ----
+  if (FLAGS.water) {
+    const sSea = panel.addSection(section('Sea'))
+    sSea.body.append(
+      toggle({ label: 'Animated sea', get: () => params.waterReal, set: (v) => { params.waterReal = v; ctx.waterRebuild(); refreshAll() } })
+    )
+    const reseed = el('button', 'ce-pillbtn')
+    reseed.type = 'button'
+    reseed.textContent = 'New sea state'
+    reseed.setAttribute('data-tip', 'Draw a fresh random wave spectrum — the seed is saved in share links.')
+    reseed.addEventListener('click', () => { params.seaSeed = ctx.realWater?.reseed() ?? 0 })
+    const seaRows = [
+      slider({ label: 'Wave height', min: 0, max: 2, step: 0.05, get: () => params.seaWaveH, set: (v) => { params.seaWaveH = v; ctx.realWater?.setWaves({ height: v }) } }),
+      slider({ label: 'Choppiness', min: 0, max: 1, step: 0.05, get: () => params.seaChop, set: (v) => { params.seaChop = v; ctx.realWater?.setWaves({ choppiness: v }) } }),
+      slider({ label: 'Speed', min: 0, max: 2, step: 0.05, get: () => params.seaSpeed, set: (v) => { params.seaSpeed = v; ctx.realWater?.setWaves({ speed: v }) } }),
+      slider({ label: 'Seabed transparency', min: 0, max: 1, step: 0.01, get: () => params.waterTransparency, set: (v) => { params.waterTransparency = v; ctx.realWater?.setLook(params) } }),
+      slider({ label: 'Sun reflection', min: 0, max: 2, step: 0.02, get: () => params.waterSunFx, set: (v) => { params.waterSunFx = v; ctx.realWater?.setLook(params) } }),
+      color({ label: 'Water colour', get: () => params.lakeColor, set: (v) => { params.lakeColor = v; ctx.realWater?.setLook(params) } }),
+      reseed,
+    ]
+    sSea.body.append(...seaRows)
+    for (const row of seaRows) visibleWhen(row, () => params.waterReal)
+  }
 
   return panel
 }
