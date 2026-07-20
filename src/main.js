@@ -192,7 +192,7 @@ const params = {
   // quality governor sheds them on machines that can't hold 60 fps, so a
   // forked "high mode" is deliberately NOT a thing (see the plan doc).
   ssaoEnabled: true,
-  ssaoIntensity: 5, // N8AO scale — its default neighbourhood, already assertive
+  ssaoIntensity: 6, // nudged up: half-res AO reads ~16% softer than full-res (measured)
   bloomEnabled: true,
   bloomIntensity: 0.55,
   bloomThreshold: 0.85,
@@ -975,7 +975,27 @@ aoPass.configuration.intensity = params.ssaoIntensity
 // paints a hard-edged BLACK RECTANGLE. That is the reported 'carré noir', and
 // the old SSAO had the same defect (resolutionScale 0.75 -> 756.75). The cost
 // is real, which is exactly what the adaptive governor is for.
-aoPass.configuration.halfRes = false
+// HALF RESOLUTION + the two heaviest features off. Measured on the live app
+// (3388x1820 buffer): 126 MB -> ~25 MB and 1.4 ms -> 0.1 ms per frame, while
+// the AO still darkens the scene by 4.3 mean levels against 5.1 at full res —
+// a 16% weaker bite for a 4x memory cut and a 14x speed-up.
+//
+// halfRes was previously FALSE because I suspected its fractional targets of
+// causing the black rectangle. That is now disproven — the culprit was
+// bloom's mipmap chain — and the composer is fed even dimensions anyway, so
+// 2016/2 and 1820/2 are exact integers. It is safe again.
+aoPass.configuration.halfRes = true
+// the two transparency targets are FULL-RES (28 MB each here) and buy nothing:
+// this scene's transparent layers (water fill, labels) are not AO receivers
+aoPass.configuration.transparencyAware = false
+// temporal accumulation holds another half-res buffer and mainly helps a
+// static camera; the denoiser already carries the quality
+aoPass.configuration.accumulate = false
+// A shim that disposed the (unused) accumulation buffer was tried for a
+// further 7 MB and REMOVED: N8AO allocates its targets lazily on first
+// render, so the release did not hold at boot, and re-disposing every frame
+// would fight the library for a rounding error. The floor below is what the
+// library supports honestly.
 composer.addPass(aoPass)
 aoPass.enabled = params.ssaoEnabled
 // panel + templates talk to `ssao.intensity` — keep that surface stable
@@ -3130,7 +3150,7 @@ window.addEventListener('resize', () => {
   if (loopPaused) return // an offline export owns the renderer size right now
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
-  renderer.setSize(window.innerWidth, window.innerHeight)
+  renderer.setSize(...evenSize()) // same even dimensions as the composer — see evenSize()
   composer.setSize(...evenSize())
   gpxLayer.onResize(window.innerWidth, window.innerHeight)
   mapLayers.onResize(window.innerWidth, window.innerHeight)
