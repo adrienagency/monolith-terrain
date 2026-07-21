@@ -47,13 +47,16 @@ function chopLook(c) {
 // Fonds marins (vignettes du panneau Effets > Sea). 'map' laisse la carte se
 // lire à travers l'eau ; les autres peignent un fond procédural (dégradé
 // A→B sur la profondeur + grain, caustiques du soleil sur les fonds clairs).
+// Chaque preset est une rampe de FOND appliquee au terrain sous-marin
+// (oceanShallow/Mid/Deep) - l'eau transparente au-dessus fait le reste :
+// sable clair + lame turquoise peu profonde = rendu lagon caraibes.
 export const SEABEDS = [
-  { id: 'map', name: 'Map', a: null, b: null, caustics: 0 },
-  { id: 'sand', name: 'Sand', a: '#e2d3ab', b: '#a8926a', caustics: 1 },
-  { id: 'lagoon', name: 'Lagoon', a: '#8fe8d8', b: '#0d6f83', caustics: 1 },
-  { id: 'abyss', name: 'Abyss', a: '#123050', b: '#03060d', caustics: 0 },
-  { id: 'seagrass', name: 'Seagrass', a: '#4d7a58', b: '#0f2418', caustics: 1 },
-  { id: 'ink', name: 'Ink', a: '#2c4f6b', b: '#16293a', caustics: 0 },
+  { id: 'map', name: 'Map', floor: null, caustics: 0 },
+  { id: 'sand', name: 'Sand', floor: { shallow: '#efe3c0', mid: '#dcc491', deep: '#ab9066' }, caustics: 1 },
+  { id: 'lagoon', name: 'Lagoon', floor: { shallow: '#c8f2e4', mid: '#62cfc1', deep: '#136e7d' }, caustics: 1 },
+  { id: 'abyss', name: 'Abyss', floor: { shallow: '#27435e', mid: '#122a42', deep: '#050c16' }, caustics: 0 },
+  { id: 'seagrass', name: 'Seagrass', floor: { shallow: '#7ba375', mid: '#3f6d4c', deep: '#16301f' }, caustics: 1 },
+  { id: 'ink', name: 'Ink', floor: { shallow: '#4a6a84', mid: '#2c4964', deep: '#16293a' }, caustics: 0 },
 ]
 
 const VERT = /* glsl */ `
@@ -65,6 +68,8 @@ uniform float uLenScale; // scene units per spectrum metre
 uniform float uLift;     // élévation du niveau moyen AU LARGE uniquement :
                          // à la côte le niveau meurt exactement à zéro (fade)
 uniform float uWaterY;
+uniform float uHalf;     // le deplacement horizontal des vagues s'annule au
+                         // bord du bloc pour rester soude a la jupe laterale
 ${GERSTNER_GLSL}
 uniform sampler2D uField;   // R ground Y, G shore distance (slab-wide)
 #ifdef IS_LAKE
@@ -106,7 +111,8 @@ void main() {
   vec3 nAcc;
   float crest;
   vec3 disp = oceanGerstner(xz, uTime, uWaveH, uChop, uSpeedMul, uLenScale, fade, nAcc, crest);
-  p.xz += disp.xz;
+  float edgeHold = 1.0 - smoothstep(uHalf - 2.0, uHalf - 0.15, max(abs(p.x), abs(p.z)));
+  p.xz += disp.xz * edgeHold;
   // niveau moyen : zéro exactement à la ligne de côte, remonté au large de
   // l'amplitude sommée pour que les creux ne percent jamais la plaine marine.
   // La MER ne dépasse ainsi jamais le trait de côte (retour Adrien v39).
@@ -128,11 +134,9 @@ uniform float uTime;
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform vec3 uDeep;
+uniform vec3 uShallowT; // glacis d'eau claire (peu profond)
 uniform vec3 uSky;
-uniform float uSeabedOn;       // 0 = mode Map (la carte à travers), 1 = fond peint
-uniform vec3 uSeabedA;         // fond : couleur claire (faible profondeur)
-uniform vec3 uSeabedB;         // fond : couleur sombre (profond)
-uniform float uSeabedCaustics; // caustiques du soleil sur les fonds clairs
+uniform float uSeabedCaustics; // caustiques du soleil (presets sable/lagon/posidonie)
 uniform float uFoamScale;      // moutons dosés par l'échelle de vue
 uniform float uLenScale;       // unités scène par mètre de spectre (écume en espace spectre)
 uniform float uWaterY;
@@ -226,27 +230,39 @@ void main() {
   // steep F3 wave backs, where dot(N,V)→0 saturates any exponent
   float fres = min(pow(1.0 - max(dot(N, V), 0.0), 5.0), 0.5);
 
-  // v39 : HAUTS-FONDS SUPPRIMÉS (retour Adrien — la bande pâle côtière jurait
-  // sur tous les templates). L'eau est une teinte pleine ; ce qui se lit à
-  // travers, c'est la carte (mode Map) ou le FOND choisi dans les vignettes.
-  vec3 body = uDeep;
+  // v41 : le FOND vit sur le terrain (les vignettes Seabed pilotent la rampe
+  // ocean oceanShallow/Mid/Deep du relief) - ici l'eau n'est qu'une lame
+  // teintee dont la transparence depend de la VRAIE profondeur : peu d'eau =
+  // le fond se lit (sable -> rendu lagon caraibes), profond = teinte pleine.
+  // glacis clair en eau peu profonde -> navy au large, sur la profondeur
+  // REELLE : sur un fond HDR lumineux (sable au soleil), une lame sombre
+  // semi-transparente disparait dans le tone mapping - il faut une couleur
+  // d'eau claire qui teinte le fond, pas juste de l'alpha
+  // profondeur reelle (bathymetrie seule - pas le proxy distance-au-rivage,
+  // c'etait lui le halo) ; les lacs gardent leur masque
+#ifdef IS_LAKE
+  float dR = d01;
+#else
+  float dR = clamp(max(uWaterY - f.r, 0.0) / uDepthMax, 0.0, 1.0);
+#endif
+  // le degrade lagon vit sur les ~premiers 15% du budget de profondeur
+  // (une baie de 30 m est un lagon ; uDepthMax couvre des colonnes de 1 km)
+#ifdef IS_LAKE
+  float dRt = d01;
+#else
+  float dRt = clamp(max(uWaterY - f.r, 0.0) / max(uDepthMax * 0.15, 0.02), 0.0, 1.0);
+#endif
+  vec3 body = mix(uShallowT, uDeep, pow(dRt, 0.7));
   body *= mix(vec3(0.10, 0.16, 0.30), vec3(1.0), uDayLight);
 
-  // fond marin optionnel (vignettes Seabed) : dégradé A→B sur la profondeur,
-  // grain de bruit, caustiques du soleil pour les fonds clairs (sable, lagon)
+  // caustiques du soleil : elles eclairent le FOND, donc d'autant plus
+  // visibles que l'eau est claire et peu profonde
   float sunUp = clamp(L.y, 0.0, 1.0);
-  vec3 seabed = mix(uSeabedA, uSeabedB, dpow);
-  seabed *= 0.90 + 0.20 * vnoise(xz * 2.6);
-  seabed *= mix(vec3(0.10, 0.16, 0.30), vec3(1.0), uDayLight);
   float ca = caustic(xz * 4.0 + vec2(uTime * 0.06), uTime * 0.9);
   float ca2 = caustic(xz * 1.8 - vec2(uTime * 0.03), uTime * 0.45);
   float causNet = clamp(ca * 1.3 + ca2 * 0.45, 0.0, 1.5);
-  float causMask = uSeabedCaustics * clamp(uCaustics * uSunFx, 0.0, 3.0) * sunUp * (0.05 + 0.95 * uDayLight);
-  seabed = mix(seabed, seabed * 0.55, clamp(causMask, 0.0, 1.0) * (1.0 - clamp(causNet, 0.0, 1.0)) * 0.5);
-  seabed += uSunColor * min(causNet * causMask * 0.55, 0.7);
-
-  // la transparence dose la lecture du fond à travers la teinte de l'eau
-  body = mix(body, seabed, uSeabedOn * clamp(uTransp * 1.4, 0.0, 1.0));
+  float causMask = uSeabedCaustics * clamp(uCaustics * uSunFx, 0.0, 3.0) * sunUp
+                 * (0.05 + 0.95 * uDayLight) * (1.0 - smoothstep(0.0, 0.85, dR));
 
   // large-scale patchiness: without it the glitter and the whitecaps line up
   // in parallel rows along the dominant swell — the "repeating waves" flag
@@ -272,18 +288,23 @@ void main() {
   // fronts qui arrivent vers la côte — l'écume « contact terre/hauts-fonds »
   // de la version originale, sans le halo du proxy de profondeur
   float bands = 0.5 + 0.5 * sin(vFade * 14.0 - uTime * 1.6 + foamNoise * 4.0);
-  float shoreW = (1.0 - smoothstep(0.10, 0.55, vFade)) * smoothstep(0.02, 0.10, vFade);
-  float shoreFoam = shoreW * smoothstep(0.35, 0.70, foamNoise * 0.6 + bands * 0.4) * (0.4 + 0.6 * uFoamScale);
-  float foam = clamp(crestFoam + shoreFoam * 0.9, 0.0, 1.0);
+  // v41: zone x3 et gain x1.5 - l'ecume de contact avec les cotes doit se voir
+  float shoreW = (1.0 - smoothstep(0.12, 0.85, vFade)) * smoothstep(0.004, 0.05, vFade);
+  float shoreFoam = shoreW * smoothstep(0.28, 0.62, foamNoise * 0.6 + bands * 0.4) * (0.5 + 0.5 * uFoamScale);
+  float foam = clamp(crestFoam + shoreFoam * 1.4, 0.0, 1.0);
   col = mix(col, vec3(0.96) * mix(0.14, 1.0, uDayLight), foam);
 
-  // translucency: mode Map = la carte se lit à travers (le slider dose
-  // l'opacité de la teinte) ; avec un FOND choisi l'eau est opaque, le
-  // slider dose alors la lecture du fond (voir plus haut). Aucune dépendance
-  // à la profondeur : c'était la « dalle » des hauts-fonds.
-  float alphaMap = mix(0.96, 0.30, uTransp);
-  alphaMap = max(alphaMap, fres * 0.6);
-  float alpha = mix(alphaMap, 0.97, uSeabedOn);
+  // translucency v41 : la lame d'eau s'opacifie avec la profondeur REELLE -
+  // sable + eau claire peu profonde = lagon ; large profond = teinte pleine.
+  // Le slider dose la clarte globale.
+  // plancher 0.45 : meme 50 cm d'eau gardent un glacis turquoise (lagon),
+  // sans quoi le sable se lisait a nu et l'eau disparaissait
+  float aDepth = mix(0.45, 0.95, pow(dRt, 0.55));
+  float alpha = clamp(aDepth * mix(1.15, 0.5, uTransp), 0.07, 0.97);
+  alpha = max(alpha, fres * 0.5);
+  // les caustiques remontent du fond au prorata de ce qui se lit a travers
+  col += uSunColor * min(causNet * causMask, 1.2) * (1.0 - alpha) * 0.6;
+  col = mix(col, col * (1.0 - 0.35 * clamp(causMask, 0.0, 1.0)), (1.0 - alpha) * (1.0 - clamp(causNet, 0.0, 1.0)) * 0.4);
   alpha = max(alpha, foam * 0.85);
   alpha = clamp(alpha, 0.05, 1.0) * shoreAA;
 
@@ -325,7 +346,7 @@ void main() {
     vec3 nAcc;
     float crest;
     vec3 disp = oceanGerstner(p.xz, uTime, uWaveH, uChop, uSpeedMul, uLenScale, fade, nAcc, crest);
-    y = uWaterY + disp.y + uLift * fadeLift;
+    y = uWaterY + disp.y + uLift * fadeLift + 0.025; // leger recouvrement : jamais de jour entre jupe et surface
   }
   vWorld = vec3(p.x, y, p.z);
   vec4 mv = modelViewMatrix * vec4(vWorld, 1.0);
@@ -338,6 +359,7 @@ void main() {
 
 const SKIRT_FRAG = /* glsl */ `
 uniform vec3 uDeep;
+uniform vec3 uShallowT; // glacis d'eau claire (peu profond)
 uniform vec3 uSky;
 uniform float uFrost;
 uniform float uDayLight;
@@ -383,26 +405,33 @@ void main() {
 // de la mer) → ruban vertical indexé, y = 0 (fond) / 1 (surface)
 function buildRimGeometry(half, corner) {
   const r = Math.min(Math.max(corner, 0.02), half)
-  const straight = half - r
+  const sSide = half - r
   const pts = []
-  const arc = (cx, cz, a0) => {
-    for (let i = 0; i <= 10; i++) {
-      const a = a0 + (i / 10) * (Math.PI / 2)
+  const STEP = 0.3 // ~ meme densite que la grille de la mer : pas de trous
+  const side = (x0, z0, x1, z1) => {
+    const len = Math.hypot(x1 - x0, z1 - z0)
+    const n = Math.max(2, Math.ceil(len / STEP))
+    for (let i = 1; i <= n; i++) pts.push([x0 + ((x1 - x0) * i) / n, z0 + ((z1 - z0) * i) / n])
+  }
+  const arc = (cx, cz, a0, a1) => {
+    const n = Math.max(4, Math.ceil((Math.abs(a1 - a0) * r) / STEP))
+    for (let i = 1; i <= n; i++) {
+      const a = a0 + ((a1 - a0) * i) / n
       pts.push([cx + Math.cos(a) * r, cz + Math.sin(a) * r])
     }
   }
-  const side = (x0, z0, x1, z1) => {
-    for (let i = 1; i <= 14; i++) pts.push([x0 + ((x1 - x0) * i) / 14, z0 + ((z1 - z0) * i) / 14])
-  }
-  pts.push([straight, half])
-  arc(straight, straight, Math.PI / 2)
-  side(half, straight, half, -straight)
-  arc(straight, -straight, 0)
-  side(straight, -half, -straight, -half)
-  arc(-straight, -straight, -Math.PI / 2)
-  side(-half, -straight, -half, straight)
-  arc(-straight, straight, Math.PI)
-  side(-straight, half, straight, half)
+  // parcours anti-horaire, arcs orientes correctement (le v40 tournait deux
+  // coins a l'envers : le "pli" dans l'angle venait de la)
+  pts.push([half, 0])
+  side(half, 0, half, sSide)
+  arc(sSide, sSide, 0, Math.PI / 2)
+  side(sSide, half, -sSide, half)
+  arc(-sSide, sSide, Math.PI / 2, Math.PI)
+  side(-half, sSide, -half, -sSide)
+  arc(-sSide, -sSide, Math.PI, 1.5 * Math.PI)
+  side(-sSide, -half, sSide, -half)
+  arc(sSide, -sSide, 1.5 * Math.PI, 2 * Math.PI)
+  side(half, -sSide, half, -0.0001)
   const n = pts.length
   const positions = new Float32Array(n * 2 * 3)
   const indices = []
@@ -433,13 +462,15 @@ function srgbMix(a, b, t) {
 function waterColors(params) {
   const base = params.lakeColor ?? '#8fc6e8'
   return {
-    // v39 : plus de couleur « hauts-fonds » — une seule teinte pleine
+    // v41 : le glacis clair est de retour, mais pilote par la profondeur
+    // REELLE dans le shader (le halo v37 venait du proxy distance-au-rivage)
+    shallowT: srgbMix(base, '#7fe0d8', 0.45),
     deep: srgbMix(base, '#0b3556', 0.9),
   }
 }
 
 function waterMaterial({ isLake, params, fieldTex }) {
-  const { deep } = waterColors(params)
+  const { shallowT, deep } = waterColors(params)
   const look = chopLook(params.seaChop ?? 0.7)
   const mat = new THREE.ShaderMaterial({
     name: isLake ? 'real-water-lake' : 'real-water-sea',
@@ -474,9 +505,7 @@ function waterMaterial({ isLake, params, fieldTex }) {
         uSunDir: { value: new THREE.Vector3(0.5, 0.8, 0.3) },
         uSunColor: { value: new THREE.Color('#fff3d6') },
         uDeep: { value: deep },
-        uSeabedOn: { value: 0 },
-        uSeabedA: { value: new THREE.Color('#e2d3ab') },
-        uSeabedB: { value: new THREE.Color('#a8926a') },
+        uShallowT: { value: shallowT },
         uSeabedCaustics: { value: 0 },
         uFoamScale: { value: 1 },
         uSky: { value: new THREE.Color('#cfe3f2') },
@@ -542,7 +571,7 @@ export class RealWater {
         if (j < n - 1) dist[k] = Math.min(dist[k], dist[k + n] + cell)
         if (i < n - 1 && j < n - 1) dist[k] = Math.min(dist[k], dist[k + n + 1] + cell * 1.414)
       }
-    for (let k = 0; k < n * n; k++) data[k * 2 + 1] = Math.min(1, dist[k] / 2.5) // 2.5 world units = "offshore" (6 painted huge coastal halos)
+    for (let k = 0; k < n * n; k++) data[k * 2 + 1] = Math.min(1, dist[k] / 15) // v41: declin cotier x6 (Adrien) - le halo peint qui interdisait un grand rayon a disparu avec les hauts-fonds
     // half float: linear filtering is core WebGL2 (full float linear is an
     // optional extension); the ±20-unit height range fits half precision fine
     const half = new Uint16Array(n * n * 2)
@@ -734,7 +763,7 @@ export class RealWater {
           ]),
         })
         smat.uniforms.uField.value = fieldTex // post-merge (règle du clone)
-        const sgeo = buildRimGeometry((TERRAIN_SIZE / 2) * 0.996, r)
+        const sgeo = buildRimGeometry((TERRAIN_SIZE / 2) * 0.998 - 0.02, r)
         const skirt = new THREE.Mesh(sgeo, smat)
         skirt.renderOrder = 16 // sous la surface (18) : la mer se dessine par-dessus
         skirt.frustumCulled = false
@@ -814,9 +843,10 @@ export class RealWater {
 
   // live look change — colour, transparency and sun sliders, no rebuild needed
   setLook(params) {
-    const { deep } = waterColors(params)
+    const { shallowT, deep } = waterColors(params)
     for (const mat of this.materials) {
       mat.uniforms.uDeep.value.copy(deep)
+      if (mat.uniforms.uShallowT) mat.uniforms.uShallowT.value.copy(shallowT)
       if (mat.uniforms.uTransp) mat.uniforms.uTransp.value = params.waterTransparency ?? 0.4
       if (mat.uniforms.uSunFx) mat.uniforms.uSunFx.value = params.waterSunFx ?? 1
       if (mat.uniforms.uFrost) mat.uniforms.uFrost.value = params.seaEdgeFrost ?? 0.5
@@ -848,17 +878,13 @@ export class RealWater {
   }
 
   // fond marin (vignettes Seabed) — 'map' = la carte se lit à travers
+  // le fond lui-meme est peint par le TERRAIN (rampe ocean pilotee par l'UI) ;
+  // ici on ne regle que les caustiques du preset
   setSeabed(id) {
     const preset = SEABEDS.find((s) => s.id === id) ?? SEABEDS[0]
     this._seabedId = preset.id
     for (const mat of this.materials) {
-      if (!mat.uniforms.uSeabedOn) continue
-      mat.uniforms.uSeabedOn.value = preset.a ? 1 : 0
-      if (preset.a) {
-        mat.uniforms.uSeabedA.value.set(preset.a)
-        mat.uniforms.uSeabedB.value.set(preset.b)
-      }
-      mat.uniforms.uSeabedCaustics.value = preset.caustics ?? 0
+      if (mat.uniforms.uSeabedCaustics) mat.uniforms.uSeabedCaustics.value = preset.caustics ?? 0
     }
   }
 

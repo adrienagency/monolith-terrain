@@ -12,14 +12,15 @@ import { SEABEDS } from '../ocean.js'
 // vignette procédurale d'un fond marin : dégradé du preset + grain + glaçure
 // d'eau — même gabarit que les vignettes matériaux/HDRI (ce-mat-vig-img)
 function seabedThumb(p) {
-  if (!p.a) return el('span', 'ce-mat-vig-img ce-mat-vig-none')
+  if (!p.floor) return el('span', 'ce-mat-vig-img ce-mat-vig-none')
   const cv = el('canvas', 'ce-mat-vig-img')
   cv.width = 96
   cv.height = 56
   const g = cv.getContext('2d')
   const grad = g.createLinearGradient(0, 0, 96, 56)
-  grad.addColorStop(0, p.a)
-  grad.addColorStop(1, p.b)
+  grad.addColorStop(0, p.floor.shallow)
+  grad.addColorStop(0.55, p.floor.mid)
+  grad.addColorStop(1, p.floor.deep)
   g.fillStyle = grad
   g.fillRect(0, 0, 96, 56)
   g.fillStyle = 'rgba(255,255,255,0.06)'
@@ -132,6 +133,17 @@ export function buildEffectsPanel(ctx) {
         b.append(seabedThumb(p), el('span', 'ce-mat-vig-name', p.name))
         b.addEventListener('click', () => {
           params.seaBed = p.id
+          // le fond est PEINT PAR LE TERRAIN : le preset pilote la rampe
+          // ocean du relief, l'eau transparente au-dessus fait le lagon
+          if (p.floor) {
+            params.oceanShallow = p.floor.shallow
+            params.oceanMid = p.floor.mid
+            params.oceanDeep = p.floor.deep
+            ctx.terrain?.mapUniforms.uOceanShallow.value.set(p.floor.shallow)
+            ctx.terrain?.mapUniforms.uOceanMid.value.set(p.floor.mid)
+            ctx.terrain?.mapUniforms.uOceanDeep.value.set(p.floor.deep)
+            ctx.globe?.rebuildRamp?.(params)
+          }
           ctx.realWater?.setSeabed(p.id)
           renderBedPicker()
         })

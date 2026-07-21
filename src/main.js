@@ -2742,6 +2742,7 @@ const effectsPanel = buildEffectsPanel({
   clouds,
   ssao, bloom, aoPass, bloomPass,
   realWater, waterRebuild,
+  terrain, globe,
 })
 
 // the 24h slider lives top-right as a pill now — the Create panel's Light
