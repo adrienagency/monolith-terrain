@@ -191,9 +191,9 @@ const params = {
   // render upgrades (2026-07-20 plan): both ON by default — the adaptive
   // quality governor sheds them on machines that can't hold 60 fps, so a
   // forked "high mode" is deliberately NOT a thing (see the plan doc).
-  ssaoEnabled: true,
+  ssaoEnabled: false,
   ssaoIntensity: 6, // nudged up: half-res AO reads ~16% softer than full-res (measured)
-  bloomEnabled: true,
+  bloomEnabled: false,
   bloomIntensity: 0.55,
   bloomThreshold: 0.85,
   contrast: 0.07,
@@ -327,14 +327,21 @@ const params = {
   // excludes transmissive objects from the refraction buffer, so a transmissive
   // terrain becomes invisible through the water.
   transmission: 0,
-  // WATER SIMULATION (the glass sea/lakes are gone — this is the only water):
-  // translucent sunlit shallows with bold caustics, darkening depths,
-  // Beaufort sea state — GPU-heavy, so opt-in
+  // ANIMATED SEA (the glass sea/lakes are gone — this is the only water):
+  // translucent sunlit shallows with bold caustics, darkening depths, and the
+  // shared ocean-waves random spectrum (ocean-lab) — GPU-heavy, so opt-in
   lakeColor: '#8fc6e8', // base water tint (shallow/deep derive from it)
   waterReal: false,
-  waterWind: 2, // Beaufort force F1..F3 (capped at 3 — beyond stopped reading as a diorama)
   waterTransparency: 0.4, // 0 = milky veil, 1 = crystal — above and below the surface
   waterSunFx: 1, // sun on the water: glint above + caustic rays below (0..2)
+  seaWaveH: 0.8, // wave height, in spectrum metres — visible resting sea (cool > realistic)
+  seaChop: 0.7, // crest sharpening 0..1 — breaking whitecaps appear past ~0.6
+  seaSpeed: 1, // time multiplier over the deep-water dispersion
+  seaSeed: 0, // 0 = random sea each rebuild; a saved seed replays an exact sea
+  seaBed: 'map', // fond sous la mer (vignettes) : map | sand | lagoon | abyss | seagrass | ink
+  seaEdge: true, // jupe de verre au bord du socle (comble le vide surface/fond)
+  seaEdgeFrost: 0.5, // 0 = verre clair, 1 = verre depoli
+  seaRefract: 0.6, // intensite de la refraction (deformation du fond vu a travers)
 
   // SP1 map overlay layers (roads/water/places), draped on the relief
   roadsEnabled: false,
@@ -619,6 +626,8 @@ function applyTimeOfDay(hour) {
   // `const mapLayers` binding exists, and `mapLayers?.` does NOT save you from
   // a temporal dead zone — it throws, aborting the whole module.
   mapLayers.setSun({ dir: sun.position, color: s.sunColor, sky: s.hemiSky })
+  // la mer suit le même cycle : corps d'eau éteint la nuit, ciel reflété teinté
+  realWater?.setSunState({ dayLight: s.dayLight ?? 1, skyHex: s.hemiSky })
 
   // Night at this PLACE puts the whole UI in dark mode, and daylight brings it
   // back. Guarded on change: setDarkMode rebuilds the background, contours and
@@ -2733,6 +2742,8 @@ const effectsPanel = buildEffectsPanel({
   fogRef, setFogEnabled: panelCtx.setFogEnabled, applyBackground,
   clouds,
   ssao, bloom, aoPass, bloomPass,
+  realWater, waterRebuild,
+  terrain, globe,
 })
 
 // the 24h slider lives top-right as a pill now — the Create panel's Light
@@ -3069,6 +3080,7 @@ function tick() {
   if (dof) dof.cocMaterial.worldFocusDistance = params.focusDistance
 
   realWater?.update(dt, sun) // water simulation: waves, caustics, sun glint
+  realWater?.setView(camera.position.y) // accalmie de la mer en haute altitude
   aq.update(dt) // adaptive quality: sample FPS, step tiers when sustained
   composer.render(dt)
   if (recorder?.recording) recorder.captureFrame() // null until first export

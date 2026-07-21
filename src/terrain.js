@@ -129,7 +129,9 @@ export class Terrain {
       // clip the map to the slab's rounded-rectangle footprint (world XZ) so the
       // block's vertical corners read soft and nothing overhangs the plinth walls
       uSlabHalf: { value: TERRAIN_SIZE / 2 },
-      uSlabCorner: { value: (params.slabCorner ?? 0) * TERRAIN_SIZE },
+      // v42: MEME arrondi que la mer (rayon clampe, cercle) - l'ecart entre
+      // le coin du socle et celui de l'eau se voyait (retour Adrien)
+      uSlabCorner: { value: Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE)) },
       // optional aerial-photo skin (src/map/aerial-layer.js) — off unless a
       // texture is set. uAerialOffset/Scale place the tile mosaic on the block
       // (the grid always overhangs the patch); uAerialOpacity is the dial that
@@ -146,7 +148,7 @@ export class Terrain {
       uCloudShadowK: { value: 0 },
       // superellipse exponent for the corner: 2 = circular arc, higher = squircle
       // (iOS-style continuous corner). Shared with the plinth ring, see plinth.js
-      uSlabCornerN: { value: 2 + (params.slabCornerSmoothing ?? 0) * 4 },
+      uSlabCornerN: { value: 2 }, // cercle, comme le clip de la mer (v42)
       // region cutout ("individualiser la zone"): white-inside/black-outside
       // mask rendered over the DEM footprint (region-mask.js). When uRegionOn
       // the terrain is clipped to the admin boundary and the superellipse slab
@@ -393,8 +395,11 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     vec2 cmUv = vWorldPos.xz / (uSlabHalf * 2.0) + 0.5;
     landness = texture2D(uCoastMask, cmUv).r;
   }
+  // v42: le masque cotier ne peut JAMAIS declarer sous-marine une terre
+  // au-dessus du niveau de la mer - la rampe ocean (fond marin choisi) se
+  // peignait sur des montagnes quand le masque etait faux (retour Adrien)
   bool underwater = uCoastMaskOn > 0.5
-    ? (landness < 0.5)
+    ? (landness < 0.5 && vWorldPos.y < uSeaY + 0.02)
     : (vWorldPos.y < uSeaY && seaMask > 0.5);
   float hNorm = clamp((vWorldPos.y - uHeightRange.x) / max(uHeightRange.y - uHeightRange.x, 1e-4), 0.0, 1.0);
   vec3 mapCol;

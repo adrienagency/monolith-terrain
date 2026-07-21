@@ -20,6 +20,14 @@
 //
 // Everything in this module is PURE (no THREE, no DOM): hour+place in,
 // numbers and hex colours out. main.js owns the actual lights.
+//
+// v39: the COLOUR ramps come from the shared ocean-waves lib (sunLook) — the
+// same palette that drives the ocean-lab simulator, so terrain, sea, clouds
+// and the demo all read the same golden dusk and blue night. The solar
+// GEOMETRY (sunPosition, light placement, dark-mode Schmitt trigger) is
+// untouched. Direct import of sunlook.js: pure maths, no three dependency.
+
+import { sunLook, toHex } from './vendor/ocean-waves/sunlook.js'
 
 const RAD = Math.PI / 180
 const DAY_MS = 86_400_000
@@ -84,15 +92,8 @@ const mix = (ha, hb, t) => {
   return rgb2hex([lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)])
 }
 
-// colour temperatures (same family as the old lighting.js table)
-const SUN_GOLDEN = '#ffb46b' // low sun
-const SUN_WARM = '#ffdcbe'
-const SUN_DAY = '#fff4ea' // high sun
-const MOON = '#aebfe0'
-const SKY_DAY = '#bcd4ff'
-const SKY_DUSK = '#ffb08a' // civil twilight glow
-const SKY_NAUT = '#2e4370'
-const SKY_NIGHT = '#141d33'
+// the sun/sky colour tables moved to the shared sunLook palette (vendor
+// ocean-waves) — only the hemisphere GROUND ramp stays local
 const GROUND_DAY = '#4a3a2a'
 const GROUND_NIGHT = '#12141c'
 
@@ -126,12 +127,11 @@ export function lightingFor(hour, latDeg, lonDeg, date = new Date()) {
   const day = clamp01(el / 35) // 0 at the horizon, 1 once well up
   const civil = clamp01(1 + el / 6) // 1 at the horizon, 0 at -6 deg
   const naut = clamp01(1 + (el + 6) / 6) // 1 at -6 deg, 0 at -12 deg
-  const warm = 1 - clamp01(el / 45) // low sun is golden, high sun is white
 
-  // Day colour eases into golden as the sun drops, then golden eases into
-  // moonlight through the nautical band. Both ends meet exactly.
-  const dayColor = mix(SUN_DAY, SUN_GOLDEN, warm)
-  const sunColor = el > 0 ? dayColor : mix(MOON, SUN_GOLDEN, naut)
+  // COLOURS from the shared ocean-lab palette (sunLook) — golden dusk, blue
+  // night, continuous sun→moon blend. Intensities keep the curves below,
+  // tuned against this scene's ACES exposure.
+  const look = sunLook(el)
 
   // Intensity: the day arc runs down to 0.8 at the horizon, then CROSS-FADES
   // to moonlight over civil twilight — 0.8 at the horizon, 0.22 by -6 deg,
@@ -147,12 +147,16 @@ export function lightingFor(hour, latDeg, lonDeg, date = new Date()) {
     azimuth: sun.azimuth, // always the sun's own bearing — it never flips
     elevation: lightElevationFor(el), // where the LIGHT is placed
     sunElevation: el, // where the SUN actually is: the honest answer to 'is it night here'
-    sunColor,
+    sunColor: toHex(look.lightChroma),
     sunIntensity,
-    hemiSky: el > 0 ? mix(SKY_DUSK, SKY_DAY, clamp01(el / 12)) : mix(mix(SKY_NIGHT, SKY_NAUT, naut), SKY_DUSK, civil),
+    hemiSky: toHex(look.skyTint),
     hemiGround: mix(GROUND_NIGHT, GROUND_DAY, el > 0 ? 1 : civil),
     hemiIntensity: el > 0 ? 0.32 + 0.5 * day : 0.2 + 0.02 * naut + 0.1 * civil,
     envIntensity: el > 0 ? 0.14 + 0.26 * day : 0.09 + 0.01 * naut + 0.04 * civil,
+    // facteurs partagés pour l'océan et les nuages (0 nuit → 1 jour, etc.)
+    dayLight: look.dayLight,
+    dusk: look.dusk,
+    caustStr: look.caustStr,
   }
 }
 

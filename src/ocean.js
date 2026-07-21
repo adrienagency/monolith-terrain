@@ -3,10 +3,10 @@
 //  · SHALLOWS are translucent — the seabed shows through, and animated sun
 //    caustics ("rays through the water") play over them;
 //  · DEPTHS darken and turn opaque (Beer-Lambert-ish colour ramp on depth);
-//  · SEA STATE follows the Beaufort wind scale F1..F12 — four Gerstner waves
-//    (GPU Gems 1 ch.1, the same maths jbouny/ocean uses) whose amplitude,
-//    wavelength, speed, chop, glint and whitecap foam all derive from the
-//    force. F1 is oily calm, F12 is a hurricane sea.
+//  · SEA STATE is a random 16-wave spectrum from the shared ocean-waves lib
+//    (ocean-lab): two crossed systems (narrow swell + spread wind sea), deep
+//    water dispersion, energy-weighted Gerstner steepness, jacobian breaking.
+//    Height/choppiness/speed ride user sliders; a seed replays an exact sea.
 // Depth comes from a small height+shore-distance field baked from the live
 // terrain sampler at rebuild time: R = ground Y (scene units), G = distance
 // to the nearest shore (normalised) — the fallback "depth" where the DEM
@@ -19,36 +19,61 @@
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
 import { detectLakes } from './lake.js'
+// wave engine shared with ocean-lab (C:\Dev\ocean-lab) — the Vite alias
+// resolves to the LIVE ocean-lab source when it's cloned next to this repo,
+// to the committed src/vendor/ocean-waves copy otherwise (npm run sync:waves)
+import { makeSeaState, seaStateToUniforms, GERSTNER_GLSL } from 'ocean-waves'
 
 const FIELD_RES = 384 // height/shore field over the whole slab
 
-// ---------------------------------------------------------- Beaufort scale
-// One wind force (1..3) → every wave/shading parameter. The scale stops at
-// F3 by design: past that the sea stopped reading as a quiet diorama
-// (Adrien's call) — F1 oily calm, F2 light ripples, F3 lively wavelets with
-// the first scattered whitecaps.
-export function beaufortParams(force) {
-  const t = Math.min(1, Math.max(0, (force - 1) / 2))
-  return {
-    amp: 0.005 + 0.02 * Math.pow(t, 1.3), // dominant wave amplitude budget — F3 kept gentle, steep backs bred fresnel plates
-    len: 1.6 + 1.6 * t, // dominant wavelength
-    speed: 0.22 + 0.55 * t,
-    chop: 0.15 + 0.4 * t, // Gerstner Q — a touch of crest at F3
-    detail: 0.25 + 0.5 * t, // micro-normal ripple strength
-    foam: 0.2 * t, // first scattered whitecaps at F3
-    gloss: 240 - 130 * t,
-  }
+// spectrum units → scene units: the sea state is authored in "spectrum
+// metres" (dominant swell λ 12-24 m); at 0.12 scene units per metre the
+// dominant wavelength lands at 1.4-2.9 scene units — the same band the old
+// four-train Beaufort system used, tuned for the diorama read
+// v39: 0.12 was "physically" scaled — the wind sea fell under the mesh grid
+// (invisible: one single swell train read on screen) and the whole sea was
+// too quiet. 0.42 is deliberately oversized: both crossed systems resolve,
+// the sea reads COOL rather than realistic (Adrien's call).
+const LEN_SCALE = 0.42
+const SPEC_AMP_SUM = 1.5 // makeSeaState normalises the summed amplitude to this
+
+const smooth01 = (t) => { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x) }
+const _v2 = new THREE.Vector2()
+
+// choppiness → the shading knobs the old Beaufort scale used to derive
+function chopLook(c) {
+  return { detail: 0.25 + 0.5 * c, foam: 1.9 * c * c, gloss: 240 - 130 * c } // quadratique : mer d'huile 0, agite genereux
 }
+
+// Fonds marins (vignettes du panneau Effets > Sea). 'map' laisse la carte se
+// lire à travers l'eau ; les autres peignent un fond procédural (dégradé
+// A→B sur la profondeur + grain, caustiques du soleil sur les fonds clairs).
+// Chaque preset est une rampe de FOND appliquee au terrain sous-marin
+// (oceanShallow/Mid/Deep) - l'eau transparente au-dessus fait le reste :
+// sable clair + lame turquoise peu profonde = rendu lagon caraibes.
+export const SEABEDS = [
+  { id: 'map', name: 'Map', floor: null, caustics: 0 },
+  { id: 'sand', name: 'Sand', floor: { shallow: '#efe3c0', mid: '#dcc491', deep: '#ab9066' }, caustics: 1 },
+  { id: 'lagoon', name: 'Lagoon', floor: { shallow: '#c8f2e4', mid: '#62cfc1', deep: '#136e7d' }, caustics: 1 },
+  { id: 'abyss', name: 'Abyss', floor: { shallow: '#27435e', mid: '#122a42', deep: '#050c16' }, caustics: 0 },
+  { id: 'seagrass', name: 'Seagrass', floor: { shallow: '#7ba375', mid: '#3f6d4c', deep: '#16301f' }, caustics: 1 },
+  { id: 'ink', name: 'Ink', floor: { shallow: '#4a6a84', mid: '#2c4964', deep: '#16293a' }, caustics: 0 },
+]
 
 const VERT = /* glsl */ `
 uniform float uTime;
-uniform vec4 uAmp;   // per-wave amplitude
-uniform vec4 uLen;   // per-wave wavelength
-uniform vec4 uSpd;   // per-wave phase speed
-uniform float uChop;
-uniform vec2 uDirs[4];
-uniform float uWaveScale;   // lakes ride smaller waves than the open sea
+uniform float uWaveH;    // wave height (user slider), in spectrum metres
+uniform float uChop;     // choppiness 0..1 (crest sharpening + breaking)
+uniform float uSpeedMul; // time multiplier over the deep-water dispersion
+uniform float uLenScale; // scene units per spectrum metre
+uniform float uLift;     // élévation du niveau moyen AU LARGE uniquement :
+                         // à la côte le niveau meurt exactement à zéro (fade)
 uniform float uWaterY;
+uniform float uHalf;     // le deplacement horizontal des vagues s'annule au
+                         // bord du bloc pour rester soude a la jupe laterale
+uniform float uViewCalm; // 1 pres du sol -> 0 en tres haute altitude (la mer
+                         // s'aplatit au-dela de ~10 km : vagues/ecume envahissantes)
+${GERSTNER_GLSL}
 uniform sampler2D uField;   // R ground Y, G shore distance (slab-wide)
 #ifdef IS_LAKE
 uniform sampler2D uMask;    // A coverage, G shore distance (lake bbox)
@@ -58,6 +83,7 @@ uniform vec2 uMaskSize;
 varying vec3 vWorld;
 varying vec3 vNorm;
 varying float vCrest;
+varying float vFade;
 #include <fog_pars_vertex>
 
 void main() {
@@ -74,32 +100,28 @@ void main() {
 #else
   float shoreD = max((uWaterY - f.r) * 2.0, f.g);
 #endif
-  float fade = smoothstep(0.0, 0.12, shoreD) * uWaveScale;
+  // v40: zone de déclin LARGE — les vagues s'amortissent sur une vraie bande
+  // côtière et le niveau moyen descend encore plus progressivement, pour ne
+  // jamais lire un « mur d'eau » au bord des terres (retour Adrien)
+  float fade = smoothstep(0.0, 0.35, shoreD);
+  float fadeLift = smoothstep(0.0, 0.55, shoreD);
+  vFade = fade;
 
-  float dy = 0.0;
-  vec2 dxz = vec2(0.0);
-  vec3 n = vec3(0.0, 1.0, 0.0);
-  float crest = 0.0;
-  for (int i = 0; i < 4; i++) {
-    float a = (i == 0 ? uAmp.x : i == 1 ? uAmp.y : i == 2 ? uAmp.z : uAmp.w) * fade;
-    float L = (i == 0 ? uLen.x : i == 1 ? uLen.y : i == 2 ? uLen.z : uLen.w);
-    float s = (i == 0 ? uSpd.x : i == 1 ? uSpd.y : i == 2 ? uSpd.z : uSpd.w);
-    vec2 d = uDirs[i];
-    float k = 6.28318 / max(L, 1e-3);
-    float ph = dot(d, xz) * k + uTime * s * k;
-    float c = cos(ph);
-    float si = sin(ph);
-    dy += a * si;
-    dxz += uChop * a * d * c;
-    // analytic Gerstner normal accumulation
-    n.x -= d.x * a * k * c;
-    n.z -= d.y * a * k * c;
-    crest += si * (a / max(uAmp.x, 1e-4));
-  }
-  p.xz += dxz;
-  p.y += dy;
+  // shared 16-wave random spectrum (ocean-waves lib): two crossed systems
+  // (narrow swell + spread wind sea), energy-weighted Gerstner steepness,
+  // breaking measured by the surface jacobian (crest ~1 = folding whitecap).
+  // The shore fade rides inside: swell dies on the beach, never over land.
+  vec3 nAcc;
+  float crest;
+  vec3 disp = oceanGerstner(xz, uTime, uWaveH * uViewCalm, uChop, uSpeedMul, uLenScale, fade, nAcc, crest);
+  float edgeHold = 1.0 - smoothstep(uHalf - 2.0, uHalf - 0.15, max(abs(p.x), abs(p.z)));
+  p.xz += disp.xz * edgeHold;
+  // niveau moyen : zéro exactement à la ligne de côte, remonté au large de
+  // l'amplitude sommée pour que les creux ne percent jamais la plaine marine.
+  // La MER ne dépasse ainsi jamais le trait de côte (retour Adrien v39).
+  p.y += disp.y + uLift * fadeLift;
   vCrest = crest;
-  vNorm = normalize(n);
+  vNorm = normalize(vec3(-nAcc.x, 1.0 - nAcc.y, -nAcc.z));
   vWorld = vec3(p.x, uWaterY + p.y, p.z);
 
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
@@ -114,9 +136,16 @@ const FRAG = /* glsl */ `
 uniform float uTime;
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
-uniform vec3 uShallow;
 uniform vec3 uDeep;
+uniform vec3 uShallowT; // glacis d'eau claire (peu profond)
 uniform vec3 uSky;
+uniform float uSeabedCaustics; // caustiques du soleil (presets sable/lagon/posidonie)
+uniform float uFoamScale;      // moutons dosés par l'échelle de vue
+uniform float uViewCalm;       // accalmie en haute altitude (vagues + écume + détail)
+uniform sampler2D uSceneTex;   // framebuffer copie juste avant l'eau (grab pass)
+uniform vec2 uResolution;
+uniform float uRefract;        // intensite de la refraction (slider)
+uniform float uLenScale;       // unités scène par mètre de spectre (écume en espace spectre)
 uniform float uWaterY;
 uniform float uDepthMax;
 uniform float uGloss;
@@ -125,6 +154,7 @@ uniform float uFoam;
 uniform float uCaustics;
 uniform float uTransp; // user slider: 0 = milky, 1 = crystal
 uniform float uSunFx;  // user slider: sun on the water, above AND below (glint + caustics)
+uniform float uDayLight; // 0 nuit -> 1 jour (sunLook.dayLight) : la mer s'éteint la nuit
 uniform sampler2D uField;
 uniform float uHalf;     // rounded-square clip: half extent…
 uniform float uCornerR;  // …and corner radius (sea only; lakes use the mask)
@@ -137,6 +167,7 @@ uniform float uLakeDepth;
 varying vec3 vWorld;
 varying vec3 vNorm;
 varying float vCrest;
+varying float vFade;
 #include <fog_pars_fragment>
 
 // small tiling value noise for ripples + foam breakup
@@ -197,7 +228,7 @@ void main() {
   vec2 rp = xz * 6.0;
   float n1 = vnoise(rp + vec2(uTime * 0.9, 0.0));
   float n2 = vnoise(rp * 1.9 - vec2(0.0, uTime * 1.2));
-  vec3 N = normalize(vNorm + uDetail * 0.6 * vec3(n1 - 0.5, 0.9, n2 - 0.5));
+  vec3 N = normalize(vNorm + uDetail * 0.6 * uViewCalm * vec3(n1 - 0.5, 0.9, n2 - 0.5));
 
   vec3 V = normalize(cameraPosition - vWorld);
   vec3 L = normalize(uSunDir);
@@ -206,28 +237,42 @@ void main() {
   // steep F3 wave backs, where dot(N,V)→0 saturates any exponent
   float fres = min(pow(1.0 - max(dot(N, V), 0.0), 5.0), 0.5);
 
-  // depth-graded body colour: bright translucent shallows -> dark depths
-  vec3 body = mix(uShallow, uDeep, dpow);
+  // v41 : le FOND vit sur le terrain (les vignettes Seabed pilotent la rampe
+  // ocean oceanShallow/Mid/Deep du relief) - ici l'eau n'est qu'une lame
+  // teintee dont la transparence depend de la VRAIE profondeur : peu d'eau =
+  // le fond se lit (sable -> rendu lagon caraibes), profond = teinte pleine.
+  // glacis clair en eau peu profonde -> navy au large, sur la profondeur
+  // REELLE : sur un fond HDR lumineux (sable au soleil), une lame sombre
+  // semi-transparente disparait dans le tone mapping - il faut une couleur
+  // d'eau claire qui teinte le fond, pas juste de l'alpha
+  // profondeur reelle (bathymetrie seule - pas le proxy distance-au-rivage,
+  // c'etait lui le halo) ; les lacs gardent leur masque
+#ifdef IS_LAKE
+  float dR = d01;
+#else
+  float dR = clamp(max(uWaterY - f.r, 0.0) / uDepthMax, 0.0, 1.0);
+#endif
+  // le degrade lagon vit sur les ~premiers 15% du budget de profondeur
+  // (une baie de 30 m est un lagon ; uDepthMax couvre des colonnes de 1 km)
+#ifdef IS_LAKE
+  float dRt = d01;
+#else
+  float dRt = clamp(max(uWaterY - f.r, 0.0) / max(uDepthMax * 0.15, 0.02), 0.0, 1.0);
+#endif
+  // transp 0 -> teinte pleine uDeep (peinture opaque, eau foncee possible) ;
+  // en montant le slider, le glacis clair des faibles profondeurs s'installe
+  float lagoonW = smoothstep(0.0, 0.35, uTransp);
+  vec3 body = mix(uDeep, mix(uShallowT, uDeep, pow(dRt, 0.7)), lagoonW);
+  body *= mix(vec3(0.10, 0.16, 0.30), vec3(1.0), uDayLight);
 
-  // sun rays through the water — the star of the show. Additive-only caustics
-  // vanish on pale palettes (white paper + white sun = nothing), so the rays
-  // are painted with CONTRAST: the water body between filaments is pushed
-  // darker, then bright sun-tinted filaments are layered on top — readable on
-  // any template. A second, larger and slower layer thickens the net into
-  // proper "rays". Reach extends well into mid-depths before fading.
-  // scales tuned in the v37 visual loop: 2.0/0.8 read as blurry blobs (and
-  // the slow layer produced a giant drifting blotch at plate scale); 4.0/1.8
-  // resolve into an actual sunlight net
+  // caustiques du soleil : elles eclairent le FOND, donc d'autant plus
+  // visibles que l'eau est claire et peu profonde
   float sunUp = clamp(L.y, 0.0, 1.0);
   float ca = caustic(xz * 4.0 + vec2(uTime * 0.06), uTime * 0.9);
   float ca2 = caustic(xz * 1.8 - vec2(uTime * 0.03), uTime * 0.45);
   float causNet = clamp(ca * 1.3 + ca2 * 0.45, 0.0, 1.5);
-  float causReach = 1.0 - smoothstep(0.0, 0.9, d01); // still visible mid-depth
-  float causMask = clamp(uCaustics * uSunFx, 0.0, 3.0) * causReach * sunUp;
-  body = mix(body, body * 0.5, clamp(causMask, 0.0, 1.0) * (1.0 - clamp(causNet, 0.0, 1.0)) * 0.55);
-  // capped: when the fast and slow layers coincide the additive burnt a
-  // saturated white "splash" in the middle of the shallows
-  body += uSunColor * min(causNet * causMask * 0.9, 0.85);
+  float causMask = uSeabedCaustics * clamp(uCaustics * uSunFx, 0.0, 3.0) * sunUp
+                 * (0.05 + 0.95 * uDayLight) * (1.0 - smoothstep(0.0, 0.85, dR));
 
   // large-scale patchiness: without it the glitter and the whitecaps line up
   // in parallel rows along the dominant swell — the "repeating waves" flag
@@ -240,44 +285,181 @@ void main() {
   float spec = pow(max(dot(N, H), 0.0), uGloss) * (0.5 + 1.6 * fres);
   col += uSunColor * spec * uSunFx * (0.35 + 0.85 * patchy);
 
-  // foam — shoreline wash always, whitecaps only when the wind says so.
-  // Crest foam multiplies two noise octaves: single-octave thresholding made
-  // rectangular "camo Tetris" patches on the crests (v37 visual loop finding)
-  float foamNoise = vnoise(xz * 9.0 + vec2(uTime * 0.7, -uTime * 0.5));
-  float foamNoise2 = foamNoise * vnoise(xz * 21.3 - vec2(uTime * 0.4, uTime * 0.6)) * 1.6;
-  float shoreFoam = (1.0 - smoothstep(0.0, 0.10, depth)) * smoothstep(0.35, 0.75, foamNoise);
-  float crestFoam = uFoam * smoothstep(0.62, 0.98, vCrest * 0.5 + 0.5) * smoothstep(0.45, 0.85, foamNoise2) * (0.25 + 0.75 * patchy);
-  float foam = clamp(shoreFoam * 0.9 + crestFoam, 0.0, 1.0);
-  col = mix(col, vec3(0.96), foam);
+  // foam — v40 : le bruit d'écume vit en ESPACE SPECTRE (xz / uLenScale),
+  // il suit donc la taille des vagues à tous les zooms — fini les
+  // mouchetures pixel des vues larges, et les moutons redeviennent visibles.
+  vec2 sm = xz / max(uLenScale, 1e-4);
+  float foamNoise = vnoise(sm * 0.55 + vec2(uTime * 0.25, -uTime * 0.18));
+  float foamNoise2 = foamNoise * vnoise(sm * 1.35 - vec2(uTime * 0.15, uTime * 0.2)) * 1.6;
+  // moutons : vCrest est le jacobien de déferlement normalisé du spectre
+  // (~1 quand une crête se replie) — intermittent, seules certaines cassent
+  float crestFoam = uFoam * uFoamScale * uViewCalm * smoothstep(0.30, 0.60, vCrest) * smoothstep(0.35, 0.75, foamNoise2) * (0.5 + 0.5 * patchy);
+  // écume de bord : bande étroite là où les vagues meurent (vFade), avec des
+  // fronts qui arrivent vers la côte — l'écume « contact terre/hauts-fonds »
+  // de la version originale, sans le halo du proxy de profondeur
+  float bands = 0.5 + 0.5 * sin(vFade * 14.0 - uTime * 1.6 + foamNoise * 4.0);
+  // v41: zone x3 et gain x1.5 - l'ecume de contact avec les cotes doit se voir
+  float shoreW = (1.0 - smoothstep(0.12, 0.85, vFade)) * smoothstep(0.004, 0.05, vFade);
+  float shoreFoam = shoreW * smoothstep(0.28, 0.62, foamNoise * 0.6 + bands * 0.4) * (0.5 + 0.5 * uFoamScale) * uViewCalm;
+  float foam = clamp(crestFoam + shoreFoam * 1.4, 0.0, 1.0);
 
-  // translucency: at uTransp 0 the water is SOLID PAINT — a pure depth-ramp
-  // colour, no seabed, none of the milky coastal veil the old mix produced
-  // (v38 feedback); from ~0.35 up the translucent behaviour takes over fully,
-  // the slider then scaling how much of the seabed reads through
-  float alphaDepth = mix(0.62, 0.97, dpow);
-  alphaDepth = max(alphaDepth, fres * 0.6);
-  alphaDepth *= mix(1.1, 0.5, uTransp);
-  float alpha = mix(1.0, clamp(alphaDepth, 0.0, 1.0), smoothstep(0.0, 0.35, uTransp));
-  alpha = max(alpha, foam * 0.85);
-  alpha = clamp(alpha, 0.05, 1.0) * shoreAA;
+  // v43 : COMPOSITE REFRACTE (grab pass). Le fond deja rendu est
+  // echantillonne avec un decalage de Snell : la pente de la surface devie
+  // ce qu'on voit a travers. Lisible a toutes les echelles (pas d'attenuation
+  // d'altitude), seule la cote l'eteint (vFade).
+  float wOp = mix(0.45, 0.95, pow(dRt, 0.55));
+  wOp = clamp(wOp * mix(1.15, 0.5, uTransp), 0.07, 0.97);
+  wOp = max(wOp, fres * 0.5);
+  // sous ~0.35 de transparence : PEINTURE pleine (eau foncee comme avant)
+  wOp = mix(1.0, wOp, lagoonW);
+  vec2 screenUv = gl_FragCoord.xy / uResolution;
+  vec2 refOff = N.xz * uRefract * 0.09 * vFade;
+  vec3 through = texture2D(uSceneTex, clamp(screenUv + refOff, vec2(0.001), vec2(0.999))).rgb;
+  through += uSunColor * min(causNet * causMask, 1.2) * 0.6;
+  through = mix(through, through * (1.0 - 0.35 * clamp(causMask, 0.0, 1.0)), (1.0 - clamp(causNet, 0.0, 1.0)) * 0.4);
+  col = mix(through, col, wOp);
+  col = mix(col, vec3(0.96) * mix(0.14, 1.0, uDayLight), foam);
+  float alpha = max(shoreAA, foam * 0.85);
 
   gl_FragColor = vec4(col, alpha);
   #include <fog_fragment>
 }
 `
 
-function makeWaveUniforms(force) {
-  const w = beaufortParams(force)
-  const amps = [0.42, 0.28, 0.18, 0.12].map((r) => r * w.amp)
-  const lens = [1, 0.52, 0.28, 0.16].map((r) => r * w.len)
-  const spds = lens.map((L) => w.speed * Math.sqrt(L / lens[0]))
-  return { w, amps, lens, spds }
+// ---- jupe de verre (bord des socles) --------------------------------------
+// Comble le vide entre le niveau de l'eau et le fond marin au bord du bloc :
+// un ruban vertical sur le périmètre arrondi, du fond jusqu'à la SURFACE
+// ANIMÉE (le haut du ruban suit les mêmes vagues Gerstner que la mer).
+// Effet « verre poli » : la tirette Edge frost va du verre clair au dépoli.
+const SKIRT_VERT = /* glsl */ `
+uniform float uTime;
+uniform float uWaveH;
+uniform float uChop;
+uniform float uSpeedMul;
+uniform float uLenScale;
+uniform float uLift;
+uniform float uWaterY;
+uniform float uBottomY;
+uniform float uViewCalm;
+uniform sampler2D uField;
+${GERSTNER_GLSL}
+varying vec3 vWorld;
+varying float vV;
+#include <fog_pars_vertex>
+
+void main() {
+  vec3 p = position; // xz = chemin du bord ; y = 0 (fond) / 1 (surface)
+  vV = p.y;
+  vec2 uvF = p.xz / ${TERRAIN_SIZE.toFixed(1)} + 0.5;
+  vec2 f = texture2D(uField, uvF).rg;
+  float shoreD = max((uWaterY - f.r) * 2.0, f.g);
+  float fade = smoothstep(0.0, 0.35, shoreD);
+  float fadeLift = smoothstep(0.0, 0.55, shoreD);
+  float y = uBottomY;
+  if (p.y > 0.5) {
+    vec3 nAcc;
+    float crest;
+    vec3 disp = oceanGerstner(p.xz, uTime, uWaveH * uViewCalm, uChop, uSpeedMul, uLenScale, fade, nAcc, crest);
+    y = uWaterY + disp.y + uLift * fadeLift + 0.025; // leger recouvrement : jamais de jour entre jupe et surface
+  }
+  vWorld = vec3(p.x, y, p.z);
+  vec4 mv = modelViewMatrix * vec4(vWorld, 1.0);
+  gl_Position = projectionMatrix * mv;
+  #ifdef USE_FOG
+  vFogDepth = -mv.z;
+  #endif
+}
+`
+
+const SKIRT_FRAG = /* glsl */ `
+uniform vec3 uDeep;
+uniform vec3 uShallowT; // glacis d'eau claire (peu profond)
+uniform vec3 uSky;
+uniform float uFrost;
+uniform float uDayLight;
+uniform float uWaterY;
+uniform float uBottomY;
+uniform sampler2D uField;
+varying vec3 vWorld;
+varying float vV;
+#include <fog_pars_fragment>
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x),
+             mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
 }
 
-// four wave trains spread over a wide fan (a cross-sea): tightly-grouped
-// headings made every crest line up in parallel rows across the whole map —
-// the "repeating waves" the client flagged
-const WAVE_HEADINGS = [0.7, 2.05, -0.55, 3.3].map((a) => new THREE.Vector2(Math.cos(a), Math.sin(a)))
+void main() {
+  // pas de jupe devant la terre (côte qui touche le bord du bloc)
+  vec2 uvF = vWorld.xz / ${TERRAIN_SIZE.toFixed(1)} + 0.5;
+  float ground = texture2D(uField, uvF).r;
+  if (uWaterY - ground < -0.005) discard;
+
+  float g = clamp((uWaterY - vWorld.y) / max(uWaterY - uBottomY, 1e-3), 0.0, 1.0);
+  vec3 col = uDeep * mix(1.05, 0.45, g); // s'assombrit vers le fond
+  col *= mix(vec3(0.10, 0.16, 0.30), vec3(1.0), uDayLight);
+
+  // verre poli → dépoli : grain + éclaircissement laiteux avec uFrost
+  float grain = vnoise(vWorld.xz * 6.0 + vWorld.y * 4.0) * 0.5
+              + vnoise(vWorld.xz * 17.0 - vWorld.y * 9.0) * 0.5;
+  col = mix(col, col * 0.75 + uSky * 0.30 * (0.5 + 0.5 * grain), uFrost * 0.65);
+  float alpha = mix(0.55, 0.94, uFrost);
+  alpha *= 1.0 - 0.15 * (1.0 - uFrost) * grain;
+
+  gl_FragColor = vec4(col, alpha);
+  #include <fog_fragment>
+}
+`
+
+// chemin du périmètre arrondi du bloc (mêmes demi-côté et rayon que le clip
+// de la mer) → ruban vertical indexé, y = 0 (fond) / 1 (surface)
+function buildRimGeometry(half, corner) {
+  const r = Math.min(Math.max(corner, 0.02), half)
+  const sSide = half - r
+  const pts = []
+  const STEP = 0.3 // ~ meme densite que la grille de la mer : pas de trous
+  const side = (x0, z0, x1, z1) => {
+    const len = Math.hypot(x1 - x0, z1 - z0)
+    const n = Math.max(2, Math.ceil(len / STEP))
+    for (let i = 1; i <= n; i++) pts.push([x0 + ((x1 - x0) * i) / n, z0 + ((z1 - z0) * i) / n])
+  }
+  const arc = (cx, cz, a0, a1) => {
+    const n = Math.max(4, Math.ceil((Math.abs(a1 - a0) * r) / STEP))
+    for (let i = 1; i <= n; i++) {
+      const a = a0 + ((a1 - a0) * i) / n
+      pts.push([cx + Math.cos(a) * r, cz + Math.sin(a) * r])
+    }
+  }
+  // parcours anti-horaire, arcs orientes correctement (le v40 tournait deux
+  // coins a l'envers : le "pli" dans l'angle venait de la)
+  pts.push([half, 0])
+  side(half, 0, half, sSide)
+  arc(sSide, sSide, 0, Math.PI / 2)
+  side(sSide, half, -sSide, half)
+  arc(-sSide, sSide, Math.PI / 2, Math.PI)
+  side(-half, sSide, -half, -sSide)
+  arc(-sSide, -sSide, Math.PI, 1.5 * Math.PI)
+  side(-sSide, -half, sSide, -half)
+  arc(sSide, -sSide, 1.5 * Math.PI, 2 * Math.PI)
+  side(half, -sSide, half, -0.0001)
+  const n = pts.length
+  const positions = new Float32Array(n * 2 * 3)
+  const indices = []
+  for (let i = 0; i < n; i++) {
+    positions.set([pts[i][0], 0, pts[i][1]], i * 6)
+    positions.set([pts[i][0], 1, pts[i][1]], i * 6 + 3)
+    const j = (i + 1) % n
+    indices.push(i * 2, j * 2, i * 2 + 1, i * 2 + 1, j * 2, j * 2 + 1)
+  }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  geo.setIndex(indices)
+  return geo
+}
 
 // shallow leans hard into saturated lagoon turquoise and deep into navy —
 // pale derivations disappeared entirely on light templates. Lerp weights
@@ -294,14 +476,16 @@ function srgbMix(a, b, t) {
 function waterColors(params) {
   const base = params.lakeColor ?? '#8fc6e8'
   return {
-    shallow: srgbMix(base, '#2ac3b4', 0.75),
+    // v41 : le glacis clair est de retour, mais pilote par la profondeur
+    // REELLE dans le shader (le halo v37 venait du proxy distance-au-rivage)
+    shallowT: srgbMix(base, '#7fe0d8', 0.45),
     deep: srgbMix(base, '#0b3556', 0.9),
   }
 }
 
 function waterMaterial({ isLake, params, fieldTex }) {
-  const { shallow, deep } = waterColors(params)
-  const { w, amps, lens, spds } = makeWaveUniforms(Math.min(3, Math.max(1, params.waterWind ?? 2)))
+  const { shallowT, deep } = waterColors(params)
+  const look = chopLook(params.seaChop ?? 0.7)
   const mat = new THREE.ShaderMaterial({
     name: isLake ? 'real-water-lake' : 'real-water-sea',
     vertexShader: VERT,
@@ -314,12 +498,15 @@ function waterMaterial({ isLake, params, fieldTex }) {
       THREE.UniformsLib.fog,
       {
         uTime: { value: 0 },
-        uAmp: { value: new THREE.Vector4(...amps) },
-        uLen: { value: new THREE.Vector4(...lens) },
-        uSpd: { value: new THREE.Vector4(...spds) },
-        uChop: { value: w.chop },
-        uDirs: { value: WAVE_HEADINGS },
-        uWaveScale: { value: isLake ? 0.5 : 1 },
+        // spectrum arrays are assigned AFTER creation (same clone rule as the
+        // textures below) by RealWater._applySea()
+        uWaveA: { value: [] },
+        uWaveB: { value: [] },
+        uWaveH: { value: params.seaWaveH ?? 0.8 },
+        uChop: { value: params.seaChop ?? 0.7 },
+        uSpeedMul: { value: (params.seaSpeed ?? 1) * 0.4 },
+        uLenScale: { value: LEN_SCALE },
+        uLift: { value: 0 },
         uWaterY: { value: 0 },
         // textures are assigned AFTER creation: UniformsUtils.merge CLONES any
         // texture it finds, and the clone is what lands on the GPU — dispose()
@@ -331,14 +518,21 @@ function waterMaterial({ isLake, params, fieldTex }) {
         uLakeDepth: { value: 1.15 },
         uSunDir: { value: new THREE.Vector3(0.5, 0.8, 0.3) },
         uSunColor: { value: new THREE.Color('#fff3d6') },
-        uShallow: { value: shallow },
         uDeep: { value: deep },
+        uShallowT: { value: shallowT },
+        uSeabedCaustics: { value: 0 },
+        uViewCalm: { value: 1 },
+        uFoamScale: { value: 1 },
+        uSceneTex: { value: null },
+        uResolution: { value: new THREE.Vector2(1, 1) },
+        uRefract: { value: params.seaRefract ?? 0.6 },
         uSky: { value: new THREE.Color('#cfe3f2') },
         uDepthMax: { value: 2.2 },
-        uGloss: { value: w.gloss },
-        uDetail: { value: w.detail },
-        uFoam: { value: w.foam },
+        uGloss: { value: look.gloss },
+        uDetail: { value: look.detail },
+        uFoam: { value: look.foam },
         uCaustics: { value: 2.4 },
+        uDayLight: { value: 1 },
         uTransp: { value: params.waterTransparency ?? 0.4 },
         uSunFx: { value: params.waterSunFx ?? 1 },
         uHalf: { value: TERRAIN_SIZE / 2 },
@@ -395,7 +589,7 @@ export class RealWater {
         if (j < n - 1) dist[k] = Math.min(dist[k], dist[k + n] + cell)
         if (i < n - 1 && j < n - 1) dist[k] = Math.min(dist[k], dist[k + n + 1] + cell * 1.414)
       }
-    for (let k = 0; k < n * n; k++) data[k * 2 + 1] = Math.min(1, dist[k] / 2.5) // 2.5 world units = "offshore" (6 painted huge coastal halos)
+    for (let k = 0; k < n * n; k++) data[k * 2 + 1] = Math.min(1, dist[k] / 15) // v41: declin cotier x6 (Adrien) - le halo peint qui interdisait un grand rayon a disparu avec les hauts-fonds
     // half float: linear filtering is core WebGL2 (full float linear is an
     // optional extension); the ±20-unit height range fits half precision fine
     const half = new Uint16Array(n * n * 2)
@@ -478,6 +672,8 @@ export class RealWater {
   }
 
   _clear() {
+    this._refractRT?.dispose()
+    this._refractRT = null
     for (const m of this.meshes) {
       m.geometry.dispose()
       this.group.remove(m)
@@ -504,6 +700,12 @@ export class RealWater {
     // at a 500 km continental view the same scene-unit swell would be a
     // 30 m monster — the sea (and the lakes) calm as you zoom out
     this._waveScale = Math.min(1, Math.max(0.15, demScale / 0.008))
+    this._demScale = demScale // pour setView : unites scene -> metres reels
+    this._waveH = params.seaWaveH ?? 0.5
+
+    // random sea state (shared ocean-waves spectrum) — a saved seed replays
+    // the exact same sea (share-links), 0/undefined draws a fresh one
+    this._sea = makeSeaState(params.seaSeed || undefined)
 
     // --- open sea (skip in region mode: the plate replaces the ocean there)
     if (seaY > -9000 && !params.regionMode) {
@@ -512,11 +714,18 @@ export class RealWater {
       // (the v37 "fresnel continents" were mostly this poke-through) — yet
       // the lift stays metres in real terms: a fixed scene-unit lift flooded
       // tens of metres of lowland at continental zooms (Baltic screenshot)
+      // v39: la surface repose AU NIVEAU ZERO (la mer ne depasse jamais le
+      // trait de cote) ; le niveau moyen remonte au large via uLift * fade
+      // dans le vertex — il meurt exactement a zero a la ligne de cote.
       this._seaBase = seaY + Math.max(2 * demScale, 0.003)
-      const seaLift = this._seaLift(params.waterWind ?? 2)
       const mat = waterMaterial({ isLake: false, params, fieldTex })
-      mat.uniforms.uWaterY.value = seaLift
-      mat.uniforms.uWaveScale.value = this._waveScale
+      mat.uniforms.uWaterY.value = this._seaBase
+      // plancher d'echelle : sous ~0.55 la mer du vent passe sous la maille
+      // de la grille et le croisement disparait (une seule ligne de vagues)
+      const lenSea = LEN_SCALE * Math.min(1, Math.max(0.55, this._waveScale))
+      mat.uniforms.uLenScale.value = lenSea
+      mat.uniforms.uLift.value = SPEC_AMP_SUM * lenSea * this._waveH
+      mat.uniforms.uFoamScale.value = smooth01((this._waveScale - 0.12) / 0.2) // le bruit vit en espace spectre : seul l'extreme zoom continental coupe l'ecume
       // depth budget: with real bathymetry the ramp can span a deep column;
       // fine-zoom tiles have none (flat 0 m sea) — there depth is the capped
       // shore-distance proxy, and a 2.2 budget means nothing ever reads deep.
@@ -527,25 +736,91 @@ export class RealWater {
       const r = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE))
       mat.uniforms.uHalf.value = (TERRAIN_SIZE / 2) * 0.998
       mat.uniforms.uCornerR.value = r
-      const seg = 220
+      const seg = 256
       const geo = new THREE.PlaneGeometry(TERRAIN_SIZE * 0.998, TERRAIN_SIZE * 0.998, seg, seg)
       geo.rotateX(-Math.PI / 2)
       const mesh = new THREE.Mesh(geo, mat)
-      // geometry is authored in world XZ at y=0; the mesh lifts it to sea level
-      mesh.position.set(0, seaLift, 0)
-      mesh.renderOrder = 4
+      mesh.position.set(0, this._seaBase, 0)
+      // above the draped OSM water polygons (17) so harbours read UNDER the
+      // animated surface (through its transparency), below GPX markers (21+)
+      mesh.renderOrder = 18
       mesh.frustumCulled = false // vertex waves move it; the slab is always on screen anyway
       this.group.add(mesh)
       this.meshes.push(mesh)
       this.materials.push(mat)
-      this._seaMesh = mesh // setWind re-seats the surface when the swell grows
+      this._seaMesh = mesh
+      // grab pass : copie ce qui est deja rendu (terrain + fond peint) dans
+      // une texture que le shader echantillonne avec le decalage de Snell
+      mesh.onBeforeRender = (renderer) => {
+        const size = renderer.getDrawingBufferSize(_v2)
+        if (!this._refractRT || this._refractRT.image.width !== size.x || this._refractRT.image.height !== size.y) {
+          this._refractRT?.dispose()
+          this._refractRT = new THREE.FramebufferTexture(size.x, size.y)
+          for (const m2 of this.materials) {
+            if (m2.uniforms.uSceneTex) {
+              m2.uniforms.uSceneTex.value = this._refractRT
+              m2.uniforms.uResolution.value.set(size.x, size.y)
+            }
+          }
+        }
+        renderer.copyFramebufferToTexture(this._refractRT)
+      }
+
+      // jupe de verre au bord du socle : comble le vide entre le niveau de
+      // l'eau et le fond marin sur le pourtour du bloc (option seaEdge)
+      if (params.seaEdge ?? true) {
+        const drop = Math.max(2.0, bathyScene + 0.6)
+        const smat = new THREE.ShaderMaterial({
+          name: 'real-water-skirt',
+          vertexShader: SKIRT_VERT,
+          fragmentShader: SKIRT_FRAG,
+          transparent: true,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          fog: true,
+          uniforms: THREE.UniformsUtils.merge([
+            THREE.UniformsLib.fog,
+            {
+              uTime: { value: 0 },
+              uWaveA: { value: [] },
+              uWaveB: { value: [] },
+              uWaveH: { value: params.seaWaveH ?? 0.8 },
+              uChop: { value: params.seaChop ?? 0.7 },
+              uSpeedMul: { value: (params.seaSpeed ?? 1) * 0.4 },
+              uLenScale: { value: lenSea },
+              uLift: { value: SPEC_AMP_SUM * lenSea * this._waveH },
+              uWaterY: { value: this._seaBase },
+              uBottomY: { value: this._seaBase - drop },
+              uField: { value: null },
+              uDeep: { value: waterColors(params).deep },
+              uSky: { value: new THREE.Color('#cfe3f2') },
+              uFrost: { value: params.seaEdgeFrost ?? 0.5 },
+              uDayLight: { value: 1 },
+              uViewCalm: { value: 1 },
+            },
+          ]),
+        })
+        smat.uniforms.uField.value = fieldTex // post-merge (règle du clone)
+        const sgeo = buildRimGeometry((TERRAIN_SIZE / 2) * 0.998 - 0.02, r)
+        const skirt = new THREE.Mesh(sgeo, smat)
+        skirt.renderOrder = 16 // sous la surface (18) : la mer se dessine par-dessus
+        skirt.frustumCulled = false
+        this.group.add(skirt)
+        this.meshes.push(skirt)
+        this.materials.push(smat)
+      }
     }
 
     // --- altitude lakes
     const dem = terrain.dem
     const scale = (TERRAIN_SIZE / dem.extentMeters) * params.demExaggeration
+    const cellM = dem.extentMeters / (dem.size - 1)
     for (const lake of detectLakes(dem)) {
       const { tex, minX, minY, w, h } = this._bakeLakeMask(lake)
+      // couche maritime réservée aux VRAIS lacs : longueur >= 3 km (demande
+      // Adrien v40 — detectLakes prenait des zones plates urbaines pour des
+      // plans d'eau, cf. les taches bleues d'Annecy)
+      if (Math.max(w, h) * cellM < 3000) { tex.dispose(); continue }
       this._textures.push(tex)
       const yLake = (lake.elevM - dem.meanM) * scale + 0.04 + (params.detail ?? 0) * 0.6 + 0.025
       const toWorld = (g, n) => (g / (n - 1) - 0.5) * TERRAIN_SIZE
@@ -556,7 +831,10 @@ export class RealWater {
       const z1 = toWorld(minY + h - 1, size)
       const mat = waterMaterial({ isLake: true, params, fieldTex })
       mat.uniforms.uWaterY.value = yLake
-      mat.uniforms.uWaveScale.value = 0.5 * this._waveScale
+      const lenLake = LEN_SCALE * Math.min(1, Math.max(0.55, this._waveScale)) * 0.5
+      mat.uniforms.uLenScale.value = lenLake
+      mat.uniforms.uLift.value = SPEC_AMP_SUM * lenLake * this._waveH
+      mat.uniforms.uFoamScale.value = smooth01((this._waveScale - 0.12) / 0.2) // le bruit vit en espace spectre : seul l'extreme zoom continental coupe l'ecume
       mat.uniforms.uMask.value = tex
       mat.uniforms.uMaskMin.value.set(x0, z0)
       mat.uniforms.uMaskSize.value.set(Math.max(1e-4, x1 - x0), Math.max(1e-4, z1 - z0))
@@ -568,49 +846,106 @@ export class RealWater {
       geo.translate((x0 + x1) / 2, 0, (z0 + z1) / 2)
       const mesh = new THREE.Mesh(geo, mat)
       mesh.position.y = yLake
-      mesh.renderOrder = 4
+      mesh.renderOrder = 18 // same rule as the sea: over the draped OSM water
       mesh.frustumCulled = false
       this.group.add(mesh)
       this.meshes.push(mesh)
       this.materials.push(mat)
     }
+    this._applySea()
+    this.setSeabed(params.seaBed ?? 'map')
     this.group.visible = this._surfaceVisible
+  }
+
+  // push the current spectrum into every material (arrays are assigned
+  // post-creation: UniformsUtils.merge would clone them at build time)
+  _applySea() {
+    if (this._sea) {
+      const u = seaStateToUniforms(this._sea)
+      for (const mat of this.materials) {
+        mat.uniforms.uWaveA.value = u.a
+        mat.uniforms.uWaveB.value = u.b
+      }
+    }
+    if (this._sunState) this.setSunState(this._sunState)
+  }
+
+  // day/night state from the shared sunLook palette (applyTimeOfDay pushes it)
+  setSunState(s) {
+    this._sunState = s
+    for (const mat of this.materials) {
+      mat.uniforms.uDayLight.value = s.dayLight ?? 1
+      if (s.skyHex && mat.uniforms.uSky) mat.uniforms.uSky.value.set(s.skyHex)
+    }
   }
 
   // live look change — colour, transparency and sun sliders, no rebuild needed
   setLook(params) {
-    const { shallow, deep } = waterColors(params)
+    const { shallowT, deep } = waterColors(params)
     for (const mat of this.materials) {
-      mat.uniforms.uShallow.value.copy(shallow)
       mat.uniforms.uDeep.value.copy(deep)
-      mat.uniforms.uTransp.value = params.waterTransparency ?? 0.4
-      mat.uniforms.uSunFx.value = params.waterSunFx ?? 1
+      if (mat.uniforms.uShallowT) mat.uniforms.uShallowT.value.copy(shallowT)
+      if (mat.uniforms.uTransp) mat.uniforms.uTransp.value = params.waterTransparency ?? 0.4
+      if (mat.uniforms.uSunFx) mat.uniforms.uSunFx.value = params.waterSunFx ?? 1
+      if (mat.uniforms.uFrost) mat.uniforms.uFrost.value = params.seaEdgeFrost ?? 0.5
+      if (mat.uniforms.uRefract) mat.uniforms.uRefract.value = params.seaRefract ?? 0.6
     }
   }
 
-  // the sea's resting height for a given wind: base + the swell's amplitude,
-  // so the deepest trough still clears the flat marine plain
-  _seaLift(force) {
-    const f = Math.min(3, Math.max(1, force ?? 2))
-    return (this._seaBase ?? 0) + beaufortParams(f).amp * (this._waveScale ?? 1) + 0.002
-  }
 
-  // live Beaufort change — no rebuild needed
-  setWind(force) {
-    const { w, amps, lens, spds } = makeWaveUniforms(Math.min(3, Math.max(1, force)))
+  // live wave change (UI sliders) — no rebuild needed. La hauteur ne déplace
+  // plus le maillage : le niveau moyen est porté par uLift * fade dans le
+  // vertex (zéro à la côte, quelle que soit la hauteur des vagues).
+  setWaves({ height, choppiness, speed } = {}) {
     for (const mat of this.materials) {
-      mat.uniforms.uAmp.value.set(...amps)
-      mat.uniforms.uLen.value.set(...lens)
-      mat.uniforms.uSpd.value.set(...spds)
-      mat.uniforms.uChop.value = w.chop
-      mat.uniforms.uGloss.value = w.gloss
-      mat.uniforms.uDetail.value = w.detail
-      mat.uniforms.uFoam.value = w.foam
+      if (height !== undefined) {
+        mat.uniforms.uWaveH.value = height
+        mat.uniforms.uLift.value = SPEC_AMP_SUM * mat.uniforms.uLenScale.value * height
+      }
+      if (choppiness !== undefined) {
+        mat.uniforms.uChop.value = choppiness
+        const l = chopLook(choppiness)
+        if (mat.uniforms.uDetail) {
+          mat.uniforms.uDetail.value = l.detail
+          mat.uniforms.uFoam.value = l.foam
+          mat.uniforms.uGloss.value = l.gloss
+        }
+      }
+      if (speed !== undefined) mat.uniforms.uSpeedMul.value = speed * 0.4
     }
-    if (this._seaMesh) {
-      const lift = this._seaLift(force)
-      this._seaMesh.position.y = lift
-      this._seaMesh.material.uniforms.uWaterY.value = lift
+    if (height !== undefined) this._waveH = height
+  }
+
+  // fond marin (vignettes Seabed) — 'map' = la carte se lit à travers
+  // le fond lui-meme est peint par le TERRAIN (rampe ocean pilotee par l'UI) ;
+  // ici on ne regle que les caustiques du preset
+  setSeabed(id) {
+    const preset = SEABEDS.find((s) => s.id === id) ?? SEABEDS[0]
+    this._seabedId = preset.id
+    for (const mat of this.materials) {
+      if (mat.uniforms.uSeabedCaustics) mat.uniforms.uSeabedCaustics.value = preset.caustics ?? 0
+    }
+  }
+
+  // replay a given sea state (share-links) / draw a brand-new random one
+  setSeed(seed) {
+    this._sea = makeSeaState(seed)
+    this._applySea()
+    return this._sea.seed
+  }
+
+  reseed() {
+    return this.setSeed((Math.random() * 2 ** 31) | 0)
+  }
+
+  // accalmie selon l'altitude REELLE de la camera : pleine mer sous 8 km,
+  // plate au-dela de 25 km (la mer/l'ecume envahissaient les vues continentales)
+  setView(cameraY) {
+    if (!this._demScale) return
+    const km = Math.max(0, (cameraY - (this._seaBase ?? 0)) / this._demScale / 1000)
+    const calm = smooth01((25 - km) / 17)
+    for (const mat of this.materials) {
+      if (mat.uniforms.uViewCalm) mat.uniforms.uViewCalm.value = 0.08 + 0.92 * calm
     }
   }
 
@@ -620,8 +955,8 @@ export class RealWater {
     const dir = sun ? sun.position.clone().normalize() : null
     for (const mat of this.materials) {
       mat.uniforms.uTime.value = this._time
-      if (dir) mat.uniforms.uSunDir.value.copy(dir)
-      if (sun) mat.uniforms.uSunColor.value.copy(sun.color)
+      if (dir && mat.uniforms.uSunDir) mat.uniforms.uSunDir.value.copy(dir)
+      if (sun && mat.uniforms.uSunColor) mat.uniforms.uSunColor.value.copy(sun.color)
     }
   }
 

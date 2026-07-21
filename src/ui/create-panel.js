@@ -182,25 +182,8 @@ export function buildCreatePanel(ctx) {
   sTer.body.append(isolate)
 
   // --------------------------------------------------------------- Clouds
-  // ---------------------------------------------------------------- Water
-  if (FLAGS.water) {
-    // The water simulation (v37): translucent sunlit shallows with bold caustic
-    // rays, darkening depths, gentle Beaufort sea states. The old glass water
-    // is gone. GPU-heavy, so it stays opt-in with a plain warning.
-    const sWat = addTo(section('Water'))
-    sWat.body.append(
-      toggle({ label: 'Water simulation (beta)', get: () => params.waterReal, set: (v) => { params.waterReal = v; ctx.waterRebuild(); refreshAll() } }),
-      el('div', 'ce-note', 'GPU-heavy — may slow down some computers. Turn it off anytime.')
-    )
-    const waterRows = [
-      color({ label: 'Water colour', get: () => params.lakeColor, set: (v) => { params.lakeColor = v; ctx.realWater?.setLook(params) } }),
-      slider({ label: 'Sea state (F1–F3)', min: 1, max: 3, step: 1, get: () => params.waterWind ?? 2, set: (v) => { params.waterWind = v; ctx.realWater?.setWind(v) } }),
-      slider({ label: 'Transparency', min: 0, max: 1, step: 0.01, get: () => params.waterTransparency ?? 0.4, set: (v) => { params.waterTransparency = v; ctx.realWater?.setLook(params) } }),
-      slider({ label: 'Sun reflection', min: 0, max: 2, step: 0.02, get: () => params.waterSunFx ?? 1, set: (v) => { params.waterSunFx = v; ctx.realWater?.setLook(params) } }),
-    ]
-    sWat.body.append(...waterRows)
-    for (const row of waterRows) visibleWhen(row, () => params.waterReal)
-  }
+  // Water moved to the Effects panel ("Sea" section) — one home for every
+  // effect, and the wave engine is now the shared ocean-waves spectrum.
 
   const sBlk = addTo(section('Block'))
   sBlk.body.append(

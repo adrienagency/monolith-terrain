@@ -4,8 +4,34 @@
 // from the Create panel, and the volumetric clouds moved with them (explicit
 // request: one home for every effect, clouds included).
 
-import { section, toggle, slider, color, visibleWhen, refreshAll } from './kit.js'
+import { el, section, toggle, slider, color, visibleWhen, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
+import { FLAGS } from '../flags.js'
+import { SEABEDS } from '../ocean.js'
+
+// vignette procédurale d'un fond marin : dégradé du preset + grain + glaçure
+// d'eau — même gabarit que les vignettes matériaux/HDRI (ce-mat-vig-img)
+function seabedThumb(p) {
+  if (!p.floor) return el('span', 'ce-mat-vig-img ce-mat-vig-none')
+  const cv = el('canvas', 'ce-mat-vig-img')
+  cv.width = 96
+  cv.height = 56
+  const g = cv.getContext('2d')
+  const grad = g.createLinearGradient(0, 0, 96, 56)
+  grad.addColorStop(0, p.floor.shallow)
+  grad.addColorStop(0.55, p.floor.mid)
+  grad.addColorStop(1, p.floor.deep)
+  g.fillStyle = grad
+  g.fillRect(0, 0, 96, 56)
+  g.fillStyle = 'rgba(255,255,255,0.06)'
+  for (let i = 0; i < 120; i++) g.fillRect(Math.random() * 96, Math.random() * 56, 1.5, 1.5)
+  const wat = g.createLinearGradient(0, 0, 0, 56)
+  wat.addColorStop(0, 'rgba(96,156,204,0.32)')
+  wat.addColorStop(1, 'rgba(18,48,88,0.42)')
+  g.fillStyle = wat
+  g.fillRect(0, 0, 96, 56)
+  return cv
+}
 
 const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>'
 
@@ -70,6 +96,67 @@ export function buildEffectsPanel(ctx) {
   ]
   sCld.body.append(...cloudRows)
   for (const row of cloudRows) visibleWhen(row, () => params.cloudsEnabled)
+
+  // ---- sea (ocean-waves random spectrum — moved here from Create's old
+  // Water section: one home for every effect) ----
+  if (FLAGS.water) {
+    const sSea = panel.addSection(section('Sea'))
+    sSea.body.append(
+      toggle({ label: 'Animated sea', get: () => params.waterReal, set: (v) => { params.waterReal = v; ctx.waterRebuild(); refreshAll() } })
+    )
+    const reseed = el('button', 'ce-pillbtn')
+    reseed.type = 'button'
+    reseed.textContent = 'New sea state'
+    reseed.setAttribute('data-tip', 'Draw a fresh random wave spectrum — the seed is saved in share links.')
+    reseed.addEventListener('click', () => { params.seaSeed = ctx.realWater?.reseed() ?? 0 })
+    const seaRows = [
+      slider({ label: 'Wave height', min: 0, max: 2, step: 0.05, get: () => params.seaWaveH, set: (v) => { params.seaWaveH = v; ctx.realWater?.setWaves({ height: v }) } }),
+      slider({ label: 'Choppiness', min: 0, max: 1, step: 0.05, get: () => params.seaChop, set: (v) => { params.seaChop = v; ctx.realWater?.setWaves({ choppiness: v }) } }),
+      slider({ label: 'Speed', min: 0, max: 2, step: 0.05, get: () => params.seaSpeed, set: (v) => { params.seaSpeed = v; ctx.realWater?.setWaves({ speed: v }) } }),
+      slider({ label: 'Seabed transparency', min: 0, max: 1, step: 0.01, get: () => params.waterTransparency, set: (v) => { params.waterTransparency = v; ctx.realWater?.setLook(params) } }),
+      slider({ label: 'Sun reflection', min: 0, max: 2, step: 0.02, get: () => params.waterSunFx, set: (v) => { params.waterSunFx = v; ctx.realWater?.setLook(params) } }),
+      slider({ label: 'Refraction', min: 0, max: 1, step: 0.02, get: () => params.seaRefract ?? 0.6, set: (v) => { params.seaRefract = v; ctx.realWater?.setLook(params) } }),
+      toggle({ label: 'Glass edge', get: () => params.seaEdge ?? true, set: (v) => { params.seaEdge = v; ctx.waterRebuild(); refreshAll() } }),
+      slider({ label: 'Edge frost', min: 0, max: 1, step: 0.01, get: () => params.seaEdgeFrost ?? 0.5, set: (v) => { params.seaEdgeFrost = v; ctx.realWater?.setLook(params) } }),
+      color({ label: 'Water colour', get: () => params.lakeColor, set: (v) => { params.lakeColor = v; ctx.realWater?.setLook(params) } }),
+      reseed,
+    ]
+    // ---- fond marin : picker à vignettes (même UX que matériaux/HDRI) ----
+    const bedHead = el('div', 'ce-fx-head', 'Seabed')
+    const bedPick = el('div', 'ce-mat-pick')
+    function renderBedPicker() {
+      bedPick.replaceChildren()
+      const grid = el('div', 'ce-mat-grid')
+      for (const p of SEABEDS) {
+        const b = el('button', `ce-mat-vig${(params.seaBed ?? 'map') === p.id ? ' on' : ''}`)
+        b.type = 'button'
+        b.setAttribute('data-tip', p.id === 'map' ? 'The map itself reads through the water.' : `${p.name} floor under the sea — transparency sets how much of it shows.`)
+        b.append(seabedThumb(p), el('span', 'ce-mat-vig-name', p.name))
+        b.addEventListener('click', () => {
+          params.seaBed = p.id
+          // le fond est PEINT PAR LE TERRAIN : le preset pilote la rampe
+          // ocean du relief, l'eau transparente au-dessus fait le lagon
+          if (p.floor) {
+            params.oceanShallow = p.floor.shallow
+            params.oceanMid = p.floor.mid
+            params.oceanDeep = p.floor.deep
+            ctx.terrain?.mapUniforms.uOceanShallow.value.set(p.floor.shallow)
+            ctx.terrain?.mapUniforms.uOceanMid.value.set(p.floor.mid)
+            ctx.terrain?.mapUniforms.uOceanDeep.value.set(p.floor.deep)
+            ctx.globe?.rebuildRamp?.(params)
+          }
+          ctx.realWater?.setSeabed(p.id)
+          renderBedPicker()
+        })
+        grid.append(b)
+      }
+      bedPick.append(grid)
+    }
+    renderBedPicker()
+    seaRows.splice(seaRows.indexOf(reseed), 0, bedHead, bedPick)
+    sSea.body.append(...seaRows)
+    for (const row of seaRows) visibleWhen(row, () => params.waterReal)
+  }
 
   return panel
 }
