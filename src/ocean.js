@@ -279,11 +279,12 @@ void main() {
   // (named patchy: "patch" is a reserved word in GLSL and kills the compile)
   float patchy = smoothstep(0.32, 0.72, vnoise(xz * 0.33 + vec2(uTime * 0.015, -uTime * 0.011)));
 
-  // sky reflection + sun glint (glint follows the same sun slider)
-  vec3 col = mix(body, uSky, fres * 0.35);
+  // v44: les reflets (ciel + glint solaire) sont des reflets DE SURFACE :
+  // ils s'appliquent APRES le composite de transparence, sinon ils sont
+  // dilues comme s'ils venaient du fond — le glint avait disparu (Adrien)
+  vec3 col = body;
   vec3 H = normalize(L + V);
   float spec = pow(max(dot(N, H), 0.0), uGloss) * (0.5 + 1.6 * fres);
-  col += uSunColor * spec * uSunFx * (0.35 + 0.85 * patchy);
 
   // foam — v40 : le bruit d'écume vit en ESPACE SPECTRE (xz / uLenScale),
   // il suit donc la taille des vagues à tous les zooms — fini les
@@ -318,6 +319,9 @@ void main() {
   through += uSunColor * min(causNet * causMask, 1.2) * 0.6;
   through = mix(through, through * (1.0 - 0.35 * clamp(causMask, 0.0, 1.0)), (1.0 - clamp(causNet, 0.0, 1.0)) * 0.4);
   col = mix(through, col, wOp);
+  // reflets de surface : jamais attenues par la transparence
+  col = mix(col, uSky, fres * 0.35);
+  col += uSunColor * spec * uSunFx * (0.35 + 0.85 * patchy);
   col = mix(col, vec3(0.96) * mix(0.14, 1.0, uDayLight), foam);
   float alpha = max(shoreAA, foam * 0.85);
 
