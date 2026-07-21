@@ -142,6 +142,9 @@ uniform vec3 uSky;
 uniform float uSeabedCaustics; // caustiques du soleil (presets sable/lagon/posidonie)
 uniform float uFoamScale;      // moutons dosés par l'échelle de vue
 uniform float uViewCalm;       // accalmie en haute altitude (vagues + écume + détail)
+uniform sampler2D uSceneTex;   // framebuffer copie juste avant l'eau (grab pass)
+uniform vec2 uResolution;
+uniform float uRefract;        // intensite de la refraction (slider)
 uniform float uLenScale;       // unités scène par mètre de spectre (écume en espace spectre)
 uniform float uWaterY;
 uniform float uDepthMax;
@@ -256,7 +259,10 @@ void main() {
 #else
   float dRt = clamp(max(uWaterY - f.r, 0.0) / max(uDepthMax * 0.15, 0.02), 0.0, 1.0);
 #endif
-  vec3 body = mix(uShallowT, uDeep, pow(dRt, 0.7));
+  // transp 0 -> teinte pleine uDeep (peinture opaque, eau foncee possible) ;
+  // en montant le slider, le glacis clair des faibles profondeurs s'installe
+  float lagoonW = smoothstep(0.0, 0.35, uTransp);
+  vec3 body = mix(uDeep, mix(uShallowT, uDeep, pow(dRt, 0.7)), lagoonW);
   body *= mix(vec3(0.10, 0.16, 0.30), vec3(1.0), uDayLight);
 
   // caustiques du soleil : elles eclairent le FOND, donc d'autant plus
@@ -296,21 +302,24 @@ void main() {
   float shoreW = (1.0 - smoothstep(0.12, 0.85, vFade)) * smoothstep(0.004, 0.05, vFade);
   float shoreFoam = shoreW * smoothstep(0.28, 0.62, foamNoise * 0.6 + bands * 0.4) * (0.5 + 0.5 * uFoamScale) * uViewCalm;
   float foam = clamp(crestFoam + shoreFoam * 1.4, 0.0, 1.0);
-  col = mix(col, vec3(0.96) * mix(0.14, 1.0, uDayLight), foam);
 
-  // translucency v41 : la lame d'eau s'opacifie avec la profondeur REELLE -
-  // sable + eau claire peu profonde = lagon ; large profond = teinte pleine.
-  // Le slider dose la clarte globale.
-  // plancher 0.45 : meme 50 cm d'eau gardent un glacis turquoise (lagon),
-  // sans quoi le sable se lisait a nu et l'eau disparaissait
-  float aDepth = mix(0.45, 0.95, pow(dRt, 0.55));
-  float alpha = clamp(aDepth * mix(1.15, 0.5, uTransp), 0.07, 0.97);
-  alpha = max(alpha, fres * 0.5);
-  // les caustiques remontent du fond au prorata de ce qui se lit a travers
-  col += uSunColor * min(causNet * causMask, 1.2) * (1.0 - alpha) * 0.6;
-  col = mix(col, col * (1.0 - 0.35 * clamp(causMask, 0.0, 1.0)), (1.0 - alpha) * (1.0 - clamp(causNet, 0.0, 1.0)) * 0.4);
-  alpha = max(alpha, foam * 0.85);
-  alpha = clamp(alpha, 0.05, 1.0) * shoreAA;
+  // v43 : COMPOSITE REFRACTE (grab pass). Le fond deja rendu est
+  // echantillonne avec un decalage de Snell : la pente de la surface devie
+  // ce qu'on voit a travers. Lisible a toutes les echelles (pas d'attenuation
+  // d'altitude), seule la cote l'eteint (vFade).
+  float wOp = mix(0.45, 0.95, pow(dRt, 0.55));
+  wOp = clamp(wOp * mix(1.15, 0.5, uTransp), 0.07, 0.97);
+  wOp = max(wOp, fres * 0.5);
+  // sous ~0.35 de transparence : PEINTURE pleine (eau foncee comme avant)
+  wOp = mix(1.0, wOp, lagoonW);
+  vec2 screenUv = gl_FragCoord.xy / uResolution;
+  vec2 refOff = N.xz * uRefract * 0.09 * vFade;
+  vec3 through = texture2D(uSceneTex, clamp(screenUv + refOff, vec2(0.001), vec2(0.999))).rgb;
+  through += uSunColor * min(causNet * causMask, 1.2) * 0.6;
+  through = mix(through, through * (1.0 - 0.35 * clamp(causMask, 0.0, 1.0)), (1.0 - clamp(causNet, 0.0, 1.0)) * 0.4);
+  col = mix(through, col, wOp);
+  col = mix(col, vec3(0.96) * mix(0.14, 1.0, uDayLight), foam);
+  float alpha = max(shoreAA, foam * 0.85);
 
   gl_FragColor = vec4(col, alpha);
   #include <fog_fragment>
