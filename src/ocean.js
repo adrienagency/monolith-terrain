@@ -40,6 +40,38 @@ const SPEC_AMP_SUM = 1.5 // makeSeaState normalises the summed amplitude to this
 const smooth01 = (t) => { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x) }
 const _v2 = new THREE.Vector2()
 
+// v45 : HOULE DE CÔTE — un train d'ondes concentrique porté par le champ de
+// distance au rivage (canal G de uField). Ses fronts suivent les iso-lignes
+// de la côte : ils s'enroulent autour des îles et arrivent TOUJOURS face à la
+// plage (la réfraction des vagues en eau peu profonde des photos aériennes),
+// gonflent en approchant (shoaling) puis cassent — crestS nourrit l'écume.
+// Retour Adrien : la mer spectre seule lisait comme « deux trains qui se
+// croisent », sans aucune interaction avec les terres.
+// Renvoie vec3(dy, pente·x, pente·z) ; crestS ressort pour le déferlement.
+const SHORE_SURF_GLSL = /* glsl */ `
+vec3 shoreSurf(vec2 uvF, sampler2D field, float t, float waveH, float chop, float speedMul, float lenScale, float viewCalm, out float crestS) {
+  float dShore = texture2D(field, uvF).g; // 0..1 sur ~15 unités monde
+  // bande de ressac : morte à la ligne d'eau, éteinte au large
+  float shoal = (1.0 - smoothstep(0.02, 0.22, dShore)) * smoothstep(0.006, 0.03, dShore);
+  crestS = 0.0;
+  if (shoal <= 0.001) return vec3(0.0);
+  vec2 e = vec2(1.0 / 384.0, 0.0);
+  float gX = texture2D(field, uvF + e.xy).g - texture2D(field, uvF - e.xy).g;
+  float gZ = texture2D(field, uvF + e.yx).g - texture2D(field, uvF - e.yx).g;
+  vec2 dir = vec2(gX, gZ);
+  float gLen = length(dir);
+  dir = gLen > 1e-5 ? dir / gLen : vec2(0.0);
+  float lamS = max(lenScale * 3.5, 0.4); // longueur d'onde du train de côte
+  float k = 6.28318 / lamS;
+  float ph = dShore * 15.0 * k + t * speedMul * 2.6; // fronts qui AVANCENT vers la plage
+  float amp = waveH * viewCalm * lenScale * 0.16 * shoal;
+  float s = sin(ph);
+  float c = cos(ph);
+  crestS = shoal * (0.35 + 0.65 * chop) * max(s, 0.0) * 1.6;
+  return vec3(amp * s, amp * c * k * dir.x, amp * c * k * dir.y);
+}
+`
+
 // choppiness → the shading knobs the old Beaufort scale used to derive
 function chopLook(c) {
   return { detail: 0.25 + 0.5 * c, foam: 1.9 * c * c, gloss: 240 - 130 * c } // quadratique : mer d'huile 0, agite genereux
@@ -74,6 +106,7 @@ uniform float uHalf;     // le deplacement horizontal des vagues s'annule au
 uniform float uViewCalm; // 1 pres du sol -> 0 en tres haute altitude (la mer
                          // s'aplatit au-dela de ~10 km : vagues/ecume envahissantes)
 ${GERSTNER_GLSL}
+${SHORE_SURF_GLSL}
 uniform sampler2D uField;   // R ground Y, G shore distance (slab-wide)
 #ifdef IS_LAKE
 uniform sampler2D uMask;    // A coverage, G shore distance (lake bbox)
@@ -100,12 +133,13 @@ void main() {
 #else
   float shoreD = max((uWaterY - f.r) * 2.0, f.g);
 #endif
-  // v40: zone de déclin LARGE — les vagues s'amortissent sur une vraie bande
-  // côtière et le niveau moyen descend encore plus progressivement, pour ne
-  // jamais lire un « mur d'eau » au bord des terres (retour Adrien)
-  float fade = smoothstep(0.0, 0.35, shoreD);
+  // v45 : les vagues vivent JUSQU'À la côte — le déclin v40 (0.35) aplatissait
+  // toute la frange côtière : plus aucune interaction mer/îles. Le niveau
+  // moyen (uLift) garde lui sa longue rampe : pas de mur d'eau. vFade reste
+  // le repère côtier LARGE du fragment (écume, réfraction).
+  float fade = smoothstep(0.0, 0.10, shoreD);
   float fadeLift = smoothstep(0.0, 0.55, shoreD);
-  vFade = fade;
+  vFade = smoothstep(0.0, 0.35, shoreD);
 
   // shared 16-wave random spectrum (ocean-waves lib): two crossed systems
   // (narrow swell + spread wind sea), energy-weighted Gerstner steepness,
@@ -114,6 +148,13 @@ void main() {
   vec3 nAcc;
   float crest;
   vec3 disp = oceanGerstner(xz, uTime, uWaveH * uViewCalm, uChop, uSpeedMul, uLenScale, fade, nAcc, crest);
+  // houle de côte : fronts qui suivent le trait de côte, gonflent et cassent
+  float crestS;
+  vec3 surf = shoreSurf(uvF, uField, uTime, uWaveH, uChop, uSpeedMul, uLenScale, uViewCalm, crestS);
+  disp.y += surf.x;
+  nAcc.x += surf.y;
+  nAcc.z += surf.z;
+  crest = max(crest, crestS);
   float edgeHold = 1.0 - smoothstep(uHalf - 2.0, uHalf - 0.15, max(abs(p.x), abs(p.z)));
   p.xz += disp.xz * edgeHold;
   // niveau moyen : zéro exactement à la ligne de côte, remonté au large de
@@ -299,22 +340,31 @@ void main() {
   // fronts qui arrivent vers la côte — l'écume « contact terre/hauts-fonds »
   // de la version originale, sans le halo du proxy de profondeur
   float bands = 0.5 + 0.5 * sin(vFade * 14.0 - uTime * 1.6 + foamNoise * 4.0);
-  // v41: zone x3 et gain x1.5 - l'ecume de contact avec les cotes doit se voir
-  float shoreW = (1.0 - smoothstep(0.12, 0.85, vFade)) * smoothstep(0.004, 0.05, vFade);
-  float shoreFoam = shoreW * smoothstep(0.28, 0.62, foamNoise * 0.6 + bands * 0.4) * (0.5 + 0.5 * uFoamScale) * uViewCalm;
-  float foam = clamp(crestFoam + shoreFoam * 1.4, 0.0, 1.0);
+  // v45 : jonction mer-côte des photos de référence — une bande de ressac
+  // texturée qui ourle le trait de côte, plus un LISERÉ net à la ligne d'eau
+  float shoreW = (1.0 - smoothstep(0.10, 0.75, vFade)) * smoothstep(0.002, 0.03, vFade);
+  float shoreFoam = shoreW * smoothstep(0.22, 0.55, foamNoise * 0.6 + bands * 0.4) * (0.5 + 0.5 * uFoamScale) * uViewCalm;
+  // liseré de ressac : blanc franc au contact exact, bord cassé par le bruit
+  float swash = (1.0 - smoothstep(0.0, 0.02, vFade)) * smoothstep(0.25, 0.6, foamNoise + 0.2) * uViewCalm;
+  float foam = clamp(crestFoam + shoreFoam * 1.8 + swash * 1.1, 0.0, 1.0);
 
   // v43 : COMPOSITE REFRACTE (grab pass). Le fond deja rendu est
   // echantillonne avec un decalage de Snell : la pente de la surface devie
   // ce qu'on voit a travers. Lisible a toutes les echelles (pas d'attenuation
   // d'altitude), seule la cote l'eteint (vFade).
+  // v45 : la tirette couvre une VRAIE plage — à fond, l'eau du large garde
+  // ~25 % de teinte (le fond se lit clairement) au lieu du plancher 47 % qui
+  // rendait la transparence indiscernable (retour Adrien)
   float wOp = mix(0.45, 0.95, pow(dRt, 0.55));
-  wOp = clamp(wOp * mix(1.15, 0.5, uTransp), 0.07, 0.97);
+  wOp = clamp(wOp * mix(1.15, 0.26, uTransp), 0.05, 0.97);
   wOp = max(wOp, fres * 0.5);
   // sous ~0.35 de transparence : PEINTURE pleine (eau foncee comme avant)
   wOp = mix(1.0, wOp, lagoonW);
   vec2 screenUv = gl_FragCoord.xy / uResolution;
-  vec2 refOff = N.xz * uRefract * 0.09 * vFade;
+  // v45 : la réfraction reste ACTIVE près des côtes (0.3 plancher) — c'est là
+  // que le fond a du détail à tordre ; au large un fond uniforme ne montre
+  // rien, l'ancien *vFade l'éteignait donc exactement où elle se voyait
+  vec2 refOff = N.xz * uRefract * 0.09 * (0.3 + 0.7 * vFade);
   vec3 through = texture2D(uSceneTex, clamp(screenUv + refOff, vec2(0.001), vec2(0.999))).rgb;
   through += uSunColor * min(causNet * causMask, 1.2) * 0.6;
   through = mix(through, through * (1.0 - 0.35 * clamp(causMask, 0.0, 1.0)), (1.0 - clamp(causNet, 0.0, 1.0)) * 0.4);
@@ -347,6 +397,7 @@ uniform float uBottomY;
 uniform float uViewCalm;
 uniform sampler2D uField;
 ${GERSTNER_GLSL}
+${SHORE_SURF_GLSL}
 varying vec3 vWorld;
 varying float vV;
 #include <fog_pars_vertex>
@@ -357,14 +408,16 @@ void main() {
   vec2 uvF = p.xz / ${TERRAIN_SIZE.toFixed(1)} + 0.5;
   vec2 f = texture2D(uField, uvF).rg;
   float shoreD = max((uWaterY - f.r) * 2.0, f.g);
-  float fade = smoothstep(0.0, 0.35, shoreD);
+  float fade = smoothstep(0.0, 0.10, shoreD); // v45 : même déclin serré que la surface
   float fadeLift = smoothstep(0.0, 0.55, shoreD);
   float y = uBottomY;
   if (p.y > 0.5) {
     vec3 nAcc;
     float crest;
     vec3 disp = oceanGerstner(p.xz, uTime, uWaveH * uViewCalm, uChop, uSpeedMul, uLenScale, fade, nAcc, crest);
-    y = uWaterY + disp.y + uLift * fadeLift + 0.025; // leger recouvrement : jamais de jour entre jupe et surface
+    float crestS;
+    vec3 surf = shoreSurf(uvF, uField, uTime, uWaveH, uChop, uSpeedMul, uLenScale, uViewCalm, crestS);
+    y = uWaterY + disp.y + surf.x + uLift * fadeLift + 0.025; // leger recouvrement : jamais de jour entre jupe et surface
   }
   vWorld = vec3(p.x, y, p.z);
   vec4 mv = modelViewMatrix * vec4(vWorld, 1.0);
@@ -760,6 +813,11 @@ export class RealWater {
         if (!this._refractRT || this._refractRT.image.width !== size.x || this._refractRT.image.height !== size.y) {
           this._refractRT?.dispose()
           this._refractRT = new THREE.FramebufferTexture(size.x, size.y)
+          // le composer rend en HalfFloat : la copie exige le MÊME type de
+          // stockage. RGBA8 depuis RGBA16F = INVALID_OPERATION silencieuse →
+          // texture NOIRE : c'était la cause de la transparence morte, de la
+          // réfraction inerte et des reflets ternes après l'upgrade rendu.
+          this._refractRT.type = THREE.HalfFloatType
           for (const m2 of this.materials) {
             if (m2.uniforms.uSceneTex) {
               m2.uniforms.uSceneTex.value = this._refractRT

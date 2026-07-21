@@ -24,6 +24,7 @@ const HALF = TERRAIN_SIZE / 2
 const SPAWN_CHECK_S = 14 // roll the dice this often
 const SPAWN_CHANCE = 1 / 9 // rare on purpose — a visitor, not a flight corridor
 const DESPAWN_QUIET_S = 20 // extra silence after a craft leaves
+const PEAK_CLEAR = 1.5 // craft always fly at least this far ABOVE the highest summit
 
 // famous pads the watcher recognises (lat, lon)
 const SPACEX_PADS = [
@@ -172,6 +173,11 @@ export class Traffic {
       alt = Math.max(2.5, cloudAlt - 2 + Math.random() * 1.5)
     }
     if (!obj) return
+    // never fly into the relief: hold every craft at least PEAK_CLEAR above the
+    // map's highest summit (uHeightRange.y = max terrain height, world units).
+    // Their gentle bob (≤0.6) still stays clear of the peak.
+    const peakY = this.terrain?.mapUniforms?.uHeightRange?.value?.y ?? 0
+    alt = Math.max(alt, peakY + PEAK_CLEAR)
     // cross the map on a random heading
     const ang = Math.random() * Math.PI * 2
     const dir = new THREE.Vector3(Math.cos(ang), 0, Math.sin(ang))

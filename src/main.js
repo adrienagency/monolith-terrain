@@ -746,6 +746,8 @@ const realWater = FLAGS.water ? new RealWater(scene) : null
 const creatures = FLAGS.water ? new Creatures(scene, {
   sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0,
   getSeaY: () => { const y = terrain.mapUniforms?.uSeaY?.value; return (y != null && y > -9000) ? realWater?._seaBase ?? y : null },
+  // grands fonds = la zone porte de la vraie bathymétrie profonde (≥ 80 m)
+  isDeepZone: () => (terrain.dem?.minM ?? 0) < -80,
 }) : null
 const mapLayers = new MapLayers(scene, camera) // roads/water/places overlays, populated per zone
 
