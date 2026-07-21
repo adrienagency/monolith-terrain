@@ -19,6 +19,7 @@ import {
   BlendFunction,
 } from 'postprocessing'
 import { Terrain } from './terrain.js'
+import { Creatures } from './creatures.js'
 import { createLabels, disposeLabels } from './labels.js'
 import { createHud3D, findPois } from './hud3d.js'
 import { loadDem } from './dem.js'
@@ -739,6 +740,13 @@ const traffic = new Traffic(scene, terrain, params)
 // the sea as a colour-tintable, environment-reflecting glass block
 // water simulation is behind FLAGS.water (v37, disabled in prod); null when off
 const realWater = FLAGS.water ? new RealWater(scene) : null
+// underwater life — fish + an occasional surfacing whale. Lazy-loaded on the
+// first sea enable (see creatures.js); reads sea level + ground live so a zoom
+// or a dry block never strands anyone.
+const creatures = FLAGS.water ? new Creatures(scene, {
+  sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0,
+  getSeaY: () => { const y = terrain.mapUniforms?.uSeaY?.value; return (y != null && y > -9000) ? realWater?._seaBase ?? y : null },
+}) : null
 const mapLayers = new MapLayers(scene, camera) // roads/water/places overlays, populated per zone
 
 const labelOpts = () => ({
@@ -2094,7 +2102,13 @@ function stopPlay() {
 
 scan = new ScanController(terrain.mapUniforms, TERRAIN_SIZE / 2)
 
-const waterRebuild = () => realWater?.rebuild({ terrain, params })
+const waterRebuild = () => {
+  realWater?.rebuild({ terrain, params })
+  // creatures live in the sea: appear/disappear with it, and re-seat on any
+  // rebuild (the water volume just moved under them)
+  creatures?.setEnabled(!!params.waterReal)
+  creatures?.rebuild()
+}
 
 // OSM attribution + loading status for the Map layers (ODbL requires the credit).
 // Places (villages/towns) now come from GeoNames, which requires its own CC-BY
@@ -2884,7 +2898,7 @@ history.record()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, creatures, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
 
 applyTimeOfDay(params.timeOfDay ?? 10) // seed the sun/disc/lake for the opening view
 
@@ -3080,6 +3094,7 @@ function tick() {
   if (dof) dof.cocMaterial.worldFocusDistance = params.focusDistance
 
   realWater?.update(dt, sun) // water simulation: waves, caustics, sun glint
+  creatures?.update(dt) // fish wander, whale surfaces — only when the sea is on
   realWater?.setView(camera.position.y) // accalmie de la mer en haute altitude
   aq.update(dt) // adaptive quality: sample FPS, step tiers when sustained
   composer.render(dt)
