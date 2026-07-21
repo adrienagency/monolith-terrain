@@ -339,6 +339,8 @@ const params = {
   seaSpeed: 1, // time multiplier over the deep-water dispersion
   seaSeed: 0, // 0 = random sea each rebuild; a saved seed replays an exact sea
   seaBed: 'map', // fond sous la mer (vignettes) : map | sand | lagoon | abyss | seagrass | ink
+  seaEdge: true, // jupe de verre au bord du socle (comble le vide surface/fond)
+  seaEdgeFrost: 0.5, // 0 = verre clair, 1 = verre depoli
 
   // SP1 map overlay layers (roads/water/places), draped on the relief
   roadsEnabled: false,
