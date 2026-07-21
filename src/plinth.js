@@ -267,8 +267,9 @@ export class Plinth {
     // walls lands exactly on the relief border (no gaps → no visible underside).
     // The corner radius rounds the four salient vertical edges; the terrain
     // shader clips to the SAME rounded rectangle so nothing overhangs the walls.
-    const cornerR = (params.slabCorner ?? 0) * TERRAIN_SIZE
-    const cornerExp = 2 + (params.slabCornerSmoothing ?? 0) * 4
+    // v42: meme formule que le clip de la mer (rayon clampe, cercle)
+    const cornerR = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE))
+    const cornerExp = 2
     const { ring, baseY } = computeSlab(sample, this.depth, params.resolution ?? 256, cornerR, cornerExp)
     this.baseY = baseY
     this.base.position.y = baseY

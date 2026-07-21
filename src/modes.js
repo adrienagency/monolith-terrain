@@ -314,6 +314,13 @@ export class Modes {
 
   async _rescale(next, verb) {
     this.busy = true
+    // v42: CONTINUITE D'ALTITUDE REELLE — avant, l'arrivee etait un cadrage
+    // fixe en unites scene : traverser un etage teleportait l'altitude reelle
+    // (10 km -> 149 km -> 143 km, retour Adrien). On memorise l'altitude en
+    // metres et la direction de vue, et on les retablit dans le nouvel etage
+    // (clampees a ses bornes) : l'escalier de zoom se lit comme un zoom continu.
+    const prevAltM = this.hooks.surfaceCamAltMeters?.() ?? 0
+    const prevDir = this.camera.position.clone().sub(this.controls.target)
     this.announce(`${verb} — ${next.lat.toFixed(4)}, ${next.lon.toFixed(4)} · Z${next.zoom}`)
     try {
       await this.hooks.loadSurface(next.lat, next.lon, next.zoom)
@@ -326,6 +333,19 @@ export class Modes {
       const arrival = this._arrivalPose()
       this.camera.position.copy(arrival.pos)
       this.controls.target.copy(arrival.target)
+      if (prevAltM > 1 && prevDir.lengthSq() > 1e-6) {
+        // meme direction de vue qu'avant, distance recalculee pour retrouver
+        // l'altitude reelle precedente dans la nouvelle echelle
+        const nowAlt = this.hooks.surfaceCamAltMeters?.() ?? 0
+        if (nowAlt > 1) {
+          const off = prevDir.clone().normalize().multiplyScalar(arrival.pos.distanceTo(arrival.target) * (prevAltM / nowAlt))
+          const lo = this.controls.minDistance * 1.05
+          const hi = (this.hooks.surfaceMaxDistance?.() ?? 150) * 0.95
+          const len = Math.min(hi, Math.max(lo, off.length()))
+          off.multiplyScalar(len / Math.max(off.length(), 1e-6))
+          this.camera.position.copy(this.controls.target).add(off)
+        }
+      }
       this.controls.update()
     })
     this.busy = false

@@ -115,6 +115,7 @@ export function buildEffectsPanel(ctx) {
       slider({ label: 'Speed', min: 0, max: 2, step: 0.05, get: () => params.seaSpeed, set: (v) => { params.seaSpeed = v; ctx.realWater?.setWaves({ speed: v }) } }),
       slider({ label: 'Seabed transparency', min: 0, max: 1, step: 0.01, get: () => params.waterTransparency, set: (v) => { params.waterTransparency = v; ctx.realWater?.setLook(params) } }),
       slider({ label: 'Sun reflection', min: 0, max: 2, step: 0.02, get: () => params.waterSunFx, set: (v) => { params.waterSunFx = v; ctx.realWater?.setLook(params) } }),
+      slider({ label: 'Refraction', min: 0, max: 1, step: 0.02, get: () => params.seaRefract ?? 0.6, set: (v) => { params.seaRefract = v; ctx.realWater?.setLook(params) } }),
       toggle({ label: 'Glass edge', get: () => params.seaEdge ?? true, set: (v) => { params.seaEdge = v; ctx.waterRebuild(); refreshAll() } }),
       slider({ label: 'Edge frost', min: 0, max: 1, step: 0.01, get: () => params.seaEdgeFrost ?? 0.5, set: (v) => { params.seaEdgeFrost = v; ctx.realWater?.setLook(params) } }),
       color({ label: 'Water colour', get: () => params.lakeColor, set: (v) => { params.lakeColor = v; ctx.realWater?.setLook(params) } }),

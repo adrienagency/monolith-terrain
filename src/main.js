@@ -191,9 +191,9 @@ const params = {
   // render upgrades (2026-07-20 plan): both ON by default — the adaptive
   // quality governor sheds them on machines that can't hold 60 fps, so a
   // forked "high mode" is deliberately NOT a thing (see the plan doc).
-  ssaoEnabled: true,
+  ssaoEnabled: false,
   ssaoIntensity: 6, // nudged up: half-res AO reads ~16% softer than full-res (measured)
-  bloomEnabled: true,
+  bloomEnabled: false,
   bloomIntensity: 0.55,
   bloomThreshold: 0.85,
   contrast: 0.07,
@@ -341,6 +341,7 @@ const params = {
   seaBed: 'map', // fond sous la mer (vignettes) : map | sand | lagoon | abyss | seagrass | ink
   seaEdge: true, // jupe de verre au bord du socle (comble le vide surface/fond)
   seaEdgeFrost: 0.5, // 0 = verre clair, 1 = verre depoli
+  seaRefract: 0.6, // intensite de la refraction (deformation du fond vu a travers)
 
   // SP1 map overlay layers (roads/water/places), draped on the relief
   roadsEnabled: false,
@@ -3079,6 +3080,7 @@ function tick() {
   if (dof) dof.cocMaterial.worldFocusDistance = params.focusDistance
 
   realWater?.update(dt, sun) // water simulation: waves, caustics, sun glint
+  realWater?.setView(camera.position.y) // accalmie de la mer en haute altitude
   aq.update(dt) // adaptive quality: sample FPS, step tiers when sustained
   composer.render(dt)
   if (recorder?.recording) recorder.captureFrame() // null until first export
