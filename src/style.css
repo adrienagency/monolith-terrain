@@ -767,11 +767,12 @@ body.dark .ce-fp-btn { background: rgba(255, 255, 255, 0.08); color: #e8e4da; bo
   border-radius: 12px;
   color: var(--ce-ink);
   font-family: var(--ce-font);
-  /* discrete UI (Adrien): same as the zoom stepper — outline kept, near-transparent */
-  background: rgba(150, 160, 180, 0.08);
-  border: 1px solid var(--ce-border);
-  -webkit-backdrop-filter: blur(7px) saturate(1.3);
-  backdrop-filter: blur(7px) saturate(1.3);
+  /* treated like the SURFACE readout: no outline, no background — pure float */
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 .ce-hp-glyph { font-size: 12px; opacity: 0.55; }
 .ce-hourpill input[type='range'] {
@@ -792,20 +793,20 @@ body.dark .ce-fp-btn { background: rgba(255, 255, 255, 0.08); color: #e8e4da; bo
 /* ---------------------------------------------------------------- vertical zoom stepper */
 .zoom-stepper {
   position: fixed;
-  left: 20px;
-  top: 50%;
-  transform: translateY(-50%);
+  left: 50%;
+  top: 52px; /* just under the top bar, centred (Adrien) */
+  transform: translateX(-50%);
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
-  padding: 5px;
-  border-radius: 18px;
-  /* discrete UI (Adrien): keep the outline, background almost transparent */
-  background: rgba(150, 160, 180, 0.08);
-  border: 1px solid var(--ce-border, rgba(255, 255, 255, 0.55));
-  -webkit-backdrop-filter: blur(7px) saturate(1.3);
-  backdrop-filter: blur(7px) saturate(1.3);
+  flex-direction: row; /* horizontal, floating like the SURFACE line */
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  /* treated like the SURFACE readout: no outline, no background — pure float */
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   z-index: 30;
   user-select: none;
   transition: opacity 0.25s ease;
