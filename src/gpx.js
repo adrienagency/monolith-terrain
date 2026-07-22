@@ -604,13 +604,14 @@ export class GpxLayer {
     this.tipEl = tip
 
     const wrap = document.createElement('div')
-    wrap.className = 'gpx-profile hidden'
+    // même grammaire visuelle que les panneaux (Explore…) : carte en verre
+    wrap.className = 'gpx-profile ce-glassbox hidden'
     // race-name header (task 22 §7): "ce nom apparaitra au dessus du profil
     // de la course en bas" — a dedicated line ABOVE the existing (small,
     // monospace) track-name bar, editorial/Rosarivo styling (see style.css),
     // hidden by default (an unset race name shouldn't show an empty bar).
     wrap.innerHTML =
-      '<div class="gpx-race-name hidden"></div><div class="gpx-profile-head"><span class="gpx-name">TRACK</span><span class="gpx-stats"></span><button class="gpx-collapse" aria-label="Replier le profil">▾</button><button class="gpx-close" aria-label="Fermer le parcours">✕</button></div><canvas width="720" height="96"></canvas>'
+      '<div class="gpx-race-name hidden"></div><div class="gpx-profile-head"><span class="gpx-name">TRACK</span><span class="gpx-stats"></span><button class="gpx-collapse" aria-label="Replier le profil"></button><button class="gpx-close" aria-label="Fermer le parcours">✕</button></div><canvas width="720" height="96"></canvas>'
     document.body.appendChild(wrap)
     this.profileEl = wrap
     this.raceNameEl = wrap.querySelector('.gpx-race-name')

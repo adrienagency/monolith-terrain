@@ -144,7 +144,7 @@ export class Terrain {
       // decides how much of the product's own look survives — see the mix below.
       uAerial: { value: blackTexture() }, // never null: a null sampler fails to compile on some drivers
       uAerialOn: { value: 0 },
-      uAerialOpacity: { value: 0.85 },
+      uAerialOpacity: { value: 1 },
       uAerialOffset: { value: new THREE.Vector2(0, 0) },
       uAerialScale: { value: new THREE.Vector2(1, 1) },
       // drifting cloud shadows, baked by the cloud deck (clouds.js) — a black

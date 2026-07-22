@@ -365,7 +365,7 @@ const params = {
   // The product's identity is the quiet editorial relief; photography is a tool
   // the organiser reaches for, never the default look. See map/aerial-layer.js.
   aerialEnabled: false,
-  aerialOpacity: 0.85,
+  aerialOpacity: 1, // à l'activation, la photo couvre pleinement (retour Adrien)
   placesEnabled: true,
   placesDensity: 1,
   placesSize: 1,

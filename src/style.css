@@ -519,12 +519,11 @@ body.dark .ce-notice {
      mesurée au runtime (syncGpxProfilePosition), le min() n'est qu'un fallback */
   width: var(--gpx-profile-width, min(520px, calc(100vw - 32px)));
   box-sizing: border-box;
-  font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
-  color: var(--hud-ink);
-  background: var(--hud-paper);
-  border: 1px solid var(--hud-ink);
-  border-radius: 3px;
-  backdrop-filter: blur(var(--hud-blur));
+  /* même grammaire que les panneaux Explore/Scan… : carte en verre, tokens
+     --ce-*, coins arrondis (le fond/bordure/ombre viennent de .ce-glassbox) */
+  font-family: var(--ce-font);
+  color: var(--ce-ink);
+  overflow: hidden;
   z-index: 25;
   transition: opacity 0.3s;
 }
@@ -539,11 +538,11 @@ body.dark .ce-notice {
    treatment (#loading .ld-name) so the same "this is the race's title" cue
    carries from boot into the profile strip. */
 .gpx-race-name {
-  padding: 8px 10px 0;
+  padding: 10px 14px 0;
   font-family: 'Rosarivo', Georgia, serif;
   font-size: 15px;
   letter-spacing: 0.01em;
-  color: var(--hud-ink);
+  color: var(--ce-ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -553,46 +552,76 @@ body.dark .ce-notice {
   display: none;
 }
 
+/* entête façon .ce-panel-head : titre à gauche, chevron + croix à droite */
 .gpx-profile-head {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 6px 10px 2px;
-  font-size: 9px;
-  letter-spacing: 0.22em;
+  gap: 10px;
+  padding: 10px 10px 6px 14px;
 }
 
 .gpx-profile-head .gpx-name {
-  color: var(--hud-accent);
-  font-weight: 600;
+  color: var(--ce-ink);
+  font-weight: 700;
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
 }
 
 .gpx-profile-head .gpx-stats {
-  opacity: 0.7;
   flex: 1;
+  color: var(--ce-muted);
+  font-family: var(--ce-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.gpx-profile-head .gpx-close,
+/* croix : bouton discret, même famille que les panneaux */
+.gpx-profile-head .gpx-close {
+  all: unset;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--ce-muted);
+  padding: 2px 4px;
+  border-radius: 8px;
+  flex: none;
+  transition: background 0.15s, color 0.15s;
+}
+.gpx-profile-head .gpx-close:hover {
+  background: var(--ce-hover);
+  color: var(--ce-accent);
+}
+
+/* chevron IDENTIQUE à .ce-panel-collapse (flèche CSS qui pivote au repli) */
 .gpx-profile-head .gpx-collapse {
   all: unset;
   cursor: pointer;
-  font-size: 11px;
-  opacity: 0.6;
-  padding: 0 2px;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  position: relative;
+  flex: none;
+  transition: background 0.15s;
 }
-
-.gpx-profile-head .gpx-close:hover,
 .gpx-profile-head .gpx-collapse:hover {
-  opacity: 1;
-  color: var(--hud-accent);
+  background: var(--ce-hover);
 }
-
-/* chevron pivote quand le profil est replié (même langage que les panneaux) */
-.gpx-profile-head .gpx-collapse {
-  transition: transform 0.18s ease;
+.gpx-profile-head .gpx-collapse::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 9px;
+  width: 7px;
+  height: 7px;
+  border-left: 1.5px solid var(--ce-muted);
+  border-bottom: 1.5px solid var(--ce-muted);
+  transform: rotate(-45deg);
+  transition: transform 0.2s;
 }
-.gpx-profile.collapsed .gpx-collapse {
-  transform: rotate(-90deg);
+.gpx-profile.collapsed .gpx-collapse::before {
+  transform: rotate(135deg) translate(1px, 1px);
 }
 
 .gpx-profile canvas {
@@ -600,6 +629,8 @@ body.dark .ce-notice {
   width: 100%;
   height: 96px;
   cursor: crosshair;
+  padding: 0 6px 8px;
+  box-sizing: border-box;
 }
 
 /* replié : seule la ligne d'entête reste (nom, stats, chevron, croix) */
@@ -692,8 +723,7 @@ body.dark .ce-notice {
 /* dark mode: lift every dim label so the menus stay readable (the exact
    complaint — secondary text vanished on the dark sheet) */
 body.dark .hud-dim,
-body.dark .hud-row span,
-body.dark .gpx-profile-head .gpx-stats {
+body.dark .hud-row span {
   opacity: 0.92;
   color: var(--hud-ink);
 }
