@@ -157,14 +157,16 @@ const params = {
   // 8-stop hypsometric land ramp (low → high). The single source of truth for
   // land color; templates and generated palettes fill all eight.
   rampStops: [
-    { c: '#ffffff', p: 0.0 },
-    { c: '#ffffff', p: 0.16 },
-    { c: '#fbf6ee', p: 0.3 },
-    { c: '#f7ecd8', p: 0.44 },
-    { c: '#f3ddb6', p: 0.58 },
-    { c: '#efc588', p: 0.72 },
-    { c: '#f0ac66', p: 0.87 },
-    { c: '#ffa861', p: 1.0 },
+    // Adrien's default relief ramp : snow white → clay → grey rock → tan → ochre
+    // → chocolate → ink → peak white (from his exported palette)
+    { c: '#fafafa', p: 0.0 },
+    { c: '#dbd3b8', p: 0.14 },
+    { c: '#908e89', p: 0.28 },
+    { c: '#d7c3a8', p: 0.42 },
+    { c: '#dab38b', p: 0.56 },
+    { c: '#6a4c3e', p: 0.7 },
+    { c: '#271402', p: 0.84 },
+    { c: '#fafaff', p: 1.0 },
   ],
   slopeTint: 0.5,
   contourInterval: 0.11,
@@ -271,10 +273,10 @@ const params = {
   gpxFollow: true,
   gpxFollowSpeed: 1,
 
-  // ocean (real-world bathymetry read)
-  oceanShallow: '#dce8ec',
-  oceanMid: '#7fa8b8',
-  oceanDeep: '#31576b',
+  // ocean (real-world bathymetry read) — Adrien's Caribbean-lagoon ramp
+  oceanShallow: '#c8f2e4',
+  oceanMid: '#62cfc1',
+  oceanDeep: '#136e7d',
 
   // look mode
   darkMode: false,
@@ -1353,6 +1355,11 @@ async function fetchAndBuildDem() {
   traffic.setZone(dem) // SpaceX pad watcher (Starbase / LC-39A in view?)
   terrain.refreshMatTiling(params) // relief material tiling tracks the new zoom
   if (params.regionMode) applyRegionMode() // re-cut to the new zone's boundary
+  // Adrien's saved look becomes the opening view — applied ONCE, after the very
+  // first terrain build (so rampStops/material have a mesh to land on), then
+  // never again so the user's own edits are never stomped.
+  const fromLink = location.hash.startsWith('#s=') || location.hash.startsWith('#r=')
+  if (!_startupLookApplied && !fromLink) { _startupLookApplied = true; applyUserTemplate({ look: STARTUP_LOOK }) }
 }
 
 async function loadRealTerrain() {
@@ -1578,6 +1585,35 @@ const peaksLayer = new PeaksLayer({
 // toggle was the only thing that ever called setEnabled — so summits stayed
 // invisible until a user found and flipped that switch by hand.
 peaksLayer.setEnabled(params.peaksEnabled)
+
+// Adrien's saved "isolated" look — applied ONCE at boot as the opening view
+// (imported from his exported .shibumap-template.json). It carries the whole
+// style : the white→clay→ink relief ramp, the Caribbean-lagoon ocean, the
+// animated sea, marble socle, warm morning light, film grain, etc.
+const STARTUP_LOOK = {
+  rampStops: [
+    { c: '#fafafa', p: 0 }, { c: '#dbd3b8', p: 0.14 }, { c: '#908e89', p: 0.28 }, { c: '#d7c3a8', p: 0.42 },
+    { c: '#dab38b', p: 0.56 }, { c: '#6a4c3e', p: 0.7 }, { c: '#271402', p: 0.84 }, { c: '#fafaff', p: 1 },
+  ],
+  oceanShallow: '#c8f2e4', oceanMid: '#62cfc1', oceanDeep: '#136e7d', darkMode: false,
+  mapTint: 0.8, heightContrast: 1.5, heightPivot: 0.47, slopeTint: 0.88,
+  roadsEnabled: false, roadsOpacity: 0.9, roadsDetail: 1, roadColor: '', waterEnabled: true, waterOpacity: 0.9, waterFill: true, coastLine: false,
+  aerialEnabled: false, aerialOpacity: 1, aerialCoastFade: 0.1, placesEnabled: true, placesDensity: 1, placesSize: 1, placesHalo: true,
+  waterReal: true, waterTransparency: 0.3, waterSunFx: 0.72, lakeColor: '#8fc6e8',
+  seaWaveH: 1.45, seaChop: 0.9, seaSpeed: 1.38, seaSeed: 3929, seaBed: 'lagoon', seaEdge: true, seaEdgeFrost: 0, seaRefract: 1,
+  contourInterval: 0.1303719091589592, contourOpacity: 0.7247180059533789, contourWeight: 0.85, contourColor: '#30271f',
+  gridStep: 9.629517641116472, gridOpacity: 0.7738736844361597, gridColor: '#262321', hudInk: '#17191b', hudAccent: '#ff4d00', labels: true,
+  sunIntensity: 1.860630412038343, sunAzimuth: 73.7292616914192, sunElevation: 12.374021473780667, hemiIntensity: 0.49677173533972385, envLight: 0.2319213023766564, shadowSoftness: 9, timeOfDay: 6.1, shadowMode: 'dynamic',
+  color: '#e7e2d6', roughness: 1, roughnessVariation: 0.22, roughnessScale: 10, bumpScale: 1.1, envMapIntensity: 0.16,
+  exposure: 1.24, contrast: 0.06, saturation: -0.24, vignette: 0.06, grain: 0.17,
+  ssaoEnabled: true, ssaoIntensity: 1.15, bloomEnabled: true, bloomIntensity: 0.16, bloomThreshold: 0.6, fogNear: 32, fogFar: 59, fogColor: '#ffffff', fogEnabled: false,
+  bgMode: 'solid', bgColorA: '#fcfbfb', bgColorB: '#faf9f9', bgColorC: '#f5f4f4', bgAngle: 263, bgEnv: '',
+  fov: 33, autoFocus: true, focusDistance: 147.68, focusRange: 20, bokehEnabled: true, bokehScale: 0,
+  plinth: true, plinthDepth: 7, plinthColor: '#d8d4cc', plinthFinish: 'solid', plinthPbr: 'wmarble', slabCorner: 0.04, slabCornerSmoothing: 0.6, groundInfo: true,
+  terrainSurfaceMat: '', terrainMatRoughness: 0.75, surfaceFx: 0, liquidMetal: false,
+  cloudsEnabled: false,
+}
+let _startupLookApplied = false
 
 // the shipped survey look — what ⟲ RESET LOOK restores. Templates can now
 // change light/surface/post/toggles too, so the reset snapshots ALL of it.
