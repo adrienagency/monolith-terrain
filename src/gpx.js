@@ -607,12 +607,15 @@ export class GpxLayer {
     // monospace) track-name bar, editorial/Rosarivo styling (see style.css),
     // hidden by default (an unset race name shouldn't show an empty bar).
     wrap.innerHTML =
-      '<div class="gpx-race-name hidden"></div><div class="gpx-profile-head"><span class="gpx-name">TRACK</span><span class="gpx-stats"></span><button class="gpx-close">✕</button></div><canvas width="720" height="96"></canvas>'
+      '<div class="gpx-race-name hidden"></div><div class="gpx-profile-head"><span class="gpx-name">TRACK</span><span class="gpx-stats"></span><button class="gpx-collapse" aria-label="Replier le profil">▾</button><button class="gpx-close" aria-label="Fermer le parcours">✕</button></div><canvas width="720" height="96"></canvas>'
     document.body.appendChild(wrap)
     this.profileEl = wrap
     this.raceNameEl = wrap.querySelector('.gpx-race-name')
     this.profileCanvas = wrap.querySelector('canvas')
+    // ✕ ferme le PARCOURS entier (trace 3D comprise) — navigation libre ensuite
     wrap.querySelector('.gpx-close').addEventListener('click', () => this.clear())
+    // chevron : replie le profil sur sa seule ligne d'entête (comme les panneaux)
+    wrap.querySelector('.gpx-collapse').addEventListener('click', () => wrap.classList.toggle('collapsed'))
 
     this.profileCanvas.addEventListener('pointermove', (e) => {
       if (!this.track) return

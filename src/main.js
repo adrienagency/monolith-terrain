@@ -2544,6 +2544,9 @@ function syncGpxProfilePosition() {
   const gap = 14
   const bottomPx = Math.round(window.innerHeight - r.top + gap)
   document.documentElement.style.setProperty('--gpx-profile-bottom', `${bottomPx}px`)
+  // le profil GPX s'adapte à la largeur RENDUE de la barre de recherche
+  // (retour Adrien) — mesure runtime, robuste aux breakpoints/paddings
+  document.documentElement.style.setProperty('--gpx-profile-width', `${Math.round(r.width)}px`)
 }
 syncGpxProfilePosition()
 

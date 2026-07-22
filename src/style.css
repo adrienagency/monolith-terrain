@@ -515,7 +515,10 @@ body.dark .ce-notice {
      magnitude fallback for the rare frame before that JS runs */
   bottom: var(--gpx-profile-bottom, 82px);
   transform: translateX(-50%);
-  width: min(760px, 62vw);
+  /* même largeur que la barre de recherche en dessous — la valeur RENDUE est
+     mesurée au runtime (syncGpxProfilePosition), le min() n'est qu'un fallback */
+  width: var(--gpx-profile-width, min(520px, calc(100vw - 32px)));
+  box-sizing: border-box;
   font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace;
   color: var(--hud-ink);
   background: var(--hud-paper);
@@ -569,7 +572,8 @@ body.dark .ce-notice {
   flex: 1;
 }
 
-.gpx-profile-head .gpx-close {
+.gpx-profile-head .gpx-close,
+.gpx-profile-head .gpx-collapse {
   all: unset;
   cursor: pointer;
   font-size: 11px;
@@ -577,9 +581,18 @@ body.dark .ce-notice {
   padding: 0 2px;
 }
 
-.gpx-profile-head .gpx-close:hover {
+.gpx-profile-head .gpx-close:hover,
+.gpx-profile-head .gpx-collapse:hover {
   opacity: 1;
   color: var(--hud-accent);
+}
+
+/* chevron pivote quand le profil est replié (même langage que les panneaux) */
+.gpx-profile-head .gpx-collapse {
+  transition: transform 0.18s ease;
+}
+.gpx-profile.collapsed .gpx-collapse {
+  transform: rotate(-90deg);
 }
 
 .gpx-profile canvas {
@@ -587,6 +600,15 @@ body.dark .ce-notice {
   width: 100%;
   height: 96px;
   cursor: crosshair;
+}
+
+/* replié : seule la ligne d'entête reste (nom, stats, chevron, croix) */
+.gpx-profile.collapsed canvas,
+.gpx-profile.collapsed .gpx-race-name {
+  display: none;
+}
+.gpx-profile.collapsed .gpx-profile-head {
+  padding-bottom: 6px;
 }
 
 /* peak markers: hud-poi family, but altitude always visible below the name */
