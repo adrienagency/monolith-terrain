@@ -82,6 +82,62 @@ export function computeSlab(sample, depth, samples = 256, cornerRadius = 0, corn
   return { ring, borderMin, globalMin, baseY: globalMin - depth }
 }
 
+// Build the slab wall + bottom-cap geometry for a relief `sample`. Pure and
+// self-contained (extracted from Plinth.rebuild so the block-grid neighbours
+// get the EXACT same socle). `baseYFloor` (optional) forces the base level no
+// higher than this — the damier shares the main block's baseY for a flat grid
+// bottom without ever piercing a deeper neighbour's relief.
+export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 0, cornerExp = 2, baseYFloor = null } = {}) {
+  const slab = computeSlab(sample, depth, resolution, cornerR, cornerExp)
+  const ring = slab.ring
+  const baseY = baseYFloor != null ? Math.min(baseYFloor, slab.baseY) : slab.baseY
+  const n = ring.length
+  const positions = []
+  const normals = []
+  const uvs = []
+  const pushTri = (a, b, c, uva, uvb, uvc) => {
+    const ab = new THREE.Vector3().subVectors(b, a)
+    const ac = new THREE.Vector3().subVectors(c, a)
+    const nm = new THREE.Vector3().crossVectors(ab, ac).normalize()
+    const tri = [[a, uva], [b, uvb], [c, uvc]]
+    for (const [v, uv] of tri) {
+      positions.push(v.x, v.y, v.z)
+      normals.push(nm.x, nm.y, nm.z)
+      uvs.push(uv[0], uv[1])
+    }
+  }
+  let acc = 0
+  for (let i = 0; i < n; i++) {
+    const p = ring[i]
+    const q = ring[(i + 1) % n]
+    const segLen = Math.hypot(q.x - p.x, q.z - p.z)
+    const u0 = acc / UVSCALE
+    const u1 = (acc + segLen) / UVSCALE
+    acc += segLen
+    const vpTop = (p.y - baseY) / UVSCALE
+    const vqTop = (q.y - baseY) / UVSCALE
+    const pTop = new THREE.Vector3(p.x, p.y, p.z)
+    const qTop = new THREE.Vector3(q.x, q.y, q.z)
+    const pBot = new THREE.Vector3(p.x, baseY, p.z)
+    const qBot = new THREE.Vector3(q.x, baseY, q.z)
+    pushTri(pTop, pBot, qTop, [u0, vpTop], [u0, 0], [u1, vqTop])
+    pushTri(qTop, pBot, qBot, [u1, vqTop], [u0, 0], [u1, 0])
+  }
+  const cen = new THREE.Vector3(0, baseY, 0)
+  const capUv = (x, z) => [x / UVSCALE, z / UVSCALE]
+  for (let i = 0; i < n; i++) {
+    const p = ring[i]
+    const q = ring[(i + 1) % n]
+    pushTri(cen, new THREE.Vector3(q.x, baseY, q.z), new THREE.Vector3(p.x, baseY, p.z), capUv(0, 0), capUv(q.x, q.z), capUv(p.x, p.z))
+  }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+  geo.computeBoundingSphere()
+  return { geo, baseY }
+}
+
 export class Plinth {
   constructor(scene, params) {
     this.group = new THREE.Group()
@@ -269,65 +325,10 @@ export class Plinth {
     // shader clips to the SAME rounded rectangle so nothing overhangs the walls.
     // v42: meme formule que le clip de la mer (rayon clampe, cercle)
     const cornerR = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE))
-    const cornerExp = 2
-    const { ring, baseY } = computeSlab(sample, this.depth, params.resolution ?? 256, cornerR, cornerExp)
+    const { geo, baseY } = buildSlabWalls(sample, { depth: this.depth, resolution: params.resolution ?? 256, cornerR, cornerExp: 2 })
     this.baseY = baseY
     this.base.position.y = baseY
     this.glassPool.position.y = baseY + 0.05 // glass colour pools just over the table
-
-    const n = ring.length
-    const positions = []
-    const normals = []
-    const uvs = [] // wall UVs so textured finishes (carbon weave etc.) can map
-    // uv runs along the perimeter (u) and up from the base (v), world-scaled so a
-    // texture tile is a fixed physical size on the block, seams staying subtle.
-    const pushTri = (a, b, c, uva, uvb, uvc) => {
-      const ab = new THREE.Vector3().subVectors(b, a)
-      const ac = new THREE.Vector3().subVectors(c, a)
-      const nm = new THREE.Vector3().crossVectors(ab, ac).normalize()
-      const tri = [[a, uva], [b, uvb], [c, uvc]]
-      for (const [v, uv] of tri) {
-        positions.push(v.x, v.y, v.z)
-        normals.push(nm.x, nm.y, nm.z)
-        uvs.push(uv[0], uv[1])
-      }
-    }
-
-    // side walls: each border segment → quad down to baseY
-    let acc = 0 // running perimeter distance for u
-    for (let i = 0; i < n; i++) {
-      const p = ring[i]
-      const q = ring[(i + 1) % n]
-      const segLen = Math.hypot(q.x - p.x, q.z - p.z)
-      const u0 = acc / UVSCALE
-      const u1 = (acc + segLen) / UVSCALE
-      acc += segLen
-      const vpTop = (p.y - baseY) / UVSCALE
-      const vqTop = (q.y - baseY) / UVSCALE
-      const pTop = new THREE.Vector3(p.x, p.y, p.z)
-      const qTop = new THREE.Vector3(q.x, q.y, q.z)
-      const pBot = new THREE.Vector3(p.x, baseY, p.z)
-      const qBot = new THREE.Vector3(q.x, baseY, q.z)
-      pushTri(pTop, pBot, qTop, [u0, vpTop], [u0, 0], [u1, vqTop])
-      pushTri(qTop, pBot, qBot, [u1, vqTop], [u0, 0], [u1, 0])
-    }
-
-    // bottom cap: a triangle fan from the centre out to every ring point, so the
-    // cap follows the exact (possibly rounded) footprint — no square overhang
-    // poking past the rounded wall bottoms. It's never seen lit; winding is moot.
-    const cen = new THREE.Vector3(0, baseY, 0)
-    const capUv = (x, z) => [x / UVSCALE, z / UVSCALE]
-    for (let i = 0; i < n; i++) {
-      const p = ring[i]
-      const q = ring[(i + 1) % n]
-      pushTri(cen, new THREE.Vector3(q.x, baseY, q.z), new THREE.Vector3(p.x, baseY, p.z), capUv(0, 0), capUv(q.x, q.z), capUv(p.x, p.z))
-    }
-
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-    geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
-    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
-    geo.computeBoundingSphere()
     this.walls.geometry.dispose()
     this.walls.geometry = geo
   }

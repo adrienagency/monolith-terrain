@@ -1949,7 +1949,7 @@ function resetAll() {
 // damier de blocs voisins (block-grid.js) : quand un tracé GPX déborde du bloc
 // central aux zooms fins, des blocs de même taille/apparence portent la suite
 // du tracé ; ils disparaissent au dézoom. Fondation du futur système 5×5.
-const blockGrid = new BlockGrid({ scene, params, getMainDem: () => dem, getMainTerrain: () => terrain })
+const blockGrid = new BlockGrid({ scene, params, getMainDem: () => dem, getMainTerrain: () => terrain, getPlinth: () => plinth })
 
 const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: () => dem, getGrid: () => blockGrid })
 

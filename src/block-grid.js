@@ -14,22 +14,26 @@
 // calculées en world-space) mais PAS la mer animée, le socle, les labels ni
 // l'aérien — ce sont des blocs de CONTEXTE, le bloc central reste le héros.
 
+import * as THREE from 'three'
 import { Terrain, TERRAIN_SIZE } from './terrain.js'
 import { loadDem } from './dem.js'
 import { latLonToWorld } from './geo.js'
+import { buildSlabWalls } from './plinth.js'
 
 export const GRID_R = 2 // rayon du damier : 2 → 5×5 max, centre exclu
 const NEIGHBOUR_RES = 384 // maillage des voisins : contexte, pas héros
 const DEM_CACHE_MAX = 12 // LRU des DEM voisins (clé zoom:tileX,tileY)
 
 export class BlockGrid {
-  // getMainDem() → le DEM du bloc central (la référence du damier) ;
-  // getMainTerrain() → le Terrain central (rampe de teinte continue)
-  constructor({ scene, params, getMainDem, getMainTerrain }) {
+  // getMainDem() → DEM central ; getMainTerrain() → Terrain central (teinte
+  // continue) ; getPlinth() → le socle principal (matériau + baseY partagés,
+  // pour donner aux voisins EXACTEMENT la même finition)
+  constructor({ scene, params, getMainDem, getMainTerrain, getPlinth }) {
     this.scene = scene
     this.params = params
     this.getMainDem = getMainDem
     this.getMainTerrain = getMainTerrain
+    this.getPlinth = getPlinth
     this.cells = new Map() // "i,j" → { terrain, dem, key }
     this._demCache = new Map() // LRU zoom:tx,ty → Promise<dem>
     this._syncId = 0 // invalide les chargements d'une synchro périmée
@@ -129,7 +133,29 @@ export class BlockGrid {
     const mt = this.getMainTerrain?.()
     if (mt) terrain.mapUniforms.uHeightRange.value.copy(mt.mapUniforms.uHeightRange.value)
     this.scene.add(terrain.mesh)
-    return { i, j, terrain, dem }
+
+    const cell = { i, j, terrain, dem }
+    // SOCLE : mêmes murs que le bloc principal (matériau partagé → suit le
+    // panneau Block), baseY plafonné au socle central pour un fond de damier
+    // plat sans percer un voisin plus profond
+    const plinth = this.getPlinth?.()
+    if (plinth?.wallMat && plinth.group?.visible !== false) {
+      const cornerR = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (this.params.slabCorner ?? 0) * TERRAIN_SIZE))
+      const { geo } = buildSlabWalls(terrain.sample, {
+        depth: plinth.depth ?? 7,
+        resolution: p.resolution,
+        cornerR,
+        cornerExp: 2,
+        baseYFloor: plinth.baseY,
+      })
+      const walls = new THREE.Mesh(geo, plinth.wallMat)
+      walls.castShadow = true
+      walls.receiveShadow = true
+      walls.position.set(i * TERRAIN_SIZE, 0, j * TERRAIN_SIZE)
+      this.scene.add(walls)
+      cell.walls = walls
+    }
+    return cell
   }
 
   // Hauteur du sol à un point monde QUELCONQUE du damier (drapage GPX hors du
@@ -159,6 +185,10 @@ export class BlockGrid {
   }
 
   _disposeCell(cell) {
+    if (cell.walls) {
+      this.scene.remove(cell.walls)
+      cell.walls.geometry?.dispose() // le matériau des murs est PARTAGÉ (socle principal) — ne pas disposer
+    }
     const t = cell.terrain
     if (!t) return
     this.scene.remove(t.mesh)
