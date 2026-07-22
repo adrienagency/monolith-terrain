@@ -34,6 +34,18 @@ export function buildTopBar(ctx) {
   mark.innerHTML = '<i>◍</i>ShibuMap'
   bar.append(mark)
 
+  // stage chip — states the product stage AND opens the changelog: the stage
+  // gets a receipt (everything that moved, dated). Hidden when APP_STAGE is ''.
+  let alphaChip = null
+  if (ctx.appStage) {
+    alphaChip = el('button', 'ce-alpha')
+    alphaChip.type = 'button'
+    alphaChip.textContent = ctx.appStage.toUpperCase()
+    alphaChip.setAttribute('data-tip', "ShibuMap is in alpha — click to see what's new.")
+    alphaChip.addEventListener('click', () => ctx.toggleChangelog?.())
+    bar.append(alphaChip)
+  }
+
   const globeBtn = iconButton(I.globe, '', () => ctx.enterOrbit())
   globeBtn.setAttribute('data-tip', 'Pull all the way out and watch the planet slowly turn.')
   bar.append(globeBtn)

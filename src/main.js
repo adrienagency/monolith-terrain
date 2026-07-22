@@ -66,6 +66,8 @@ import { showNotice } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits } from './ui/bars.js'
 import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
+import { buildChangelogOverlay } from './ui/changelog-overlay.js'
+import { APP_STAGE } from './changelog.js'
 import { buildTemplatesPanel } from './ui/templates-panel.js'
 import { buildCreatePanel } from './ui/create-panel.js'
 import { buildCameraPanel } from './ui/camera-panel.js'
@@ -2441,6 +2443,9 @@ async function openExportUI() {
 // changes here.
 const shortcutsOverlay = buildShortcutsOverlay()
 
+// "What's new" changelog — opened from the ALPHA chip in the top bar
+const changelogOverlay = buildChangelogOverlay()
+
 // ------------------------------------------------------------------ share link
 // Builds a URL that reproduces the current look + location + camera pose
 // (encoding lives in share-link.js). GPX is deliberately never included — a
@@ -2518,6 +2523,9 @@ const topBar = buildTopBar({
   openExport: openExportUI,
   // "?" keyboard-shortcuts help — self-updating overlay, reads SHORTCUTS live
   toggleShortcuts: () => shortcutsOverlay.toggle(),
+  // ALPHA chip → "What's new" changelog
+  appStage: APP_STAGE,
+  toggleChangelog: () => changelogOverlay.toggle(),
   share: shareCurrentView,
 })
 

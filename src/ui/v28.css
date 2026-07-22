@@ -1353,6 +1353,87 @@ body.ce-noui .ce-rec {
     grid-template-columns: 1fr;
   }
 }
+
+/* -------------------------------------------------- ALPHA chip + changelog */
+.ce-alpha {
+  border: 1px solid var(--ce-accent);
+  background: transparent;
+  color: var(--ce-accent);
+  font-family: var(--ce-mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  padding: 3px 7px;
+  border-radius: 999px;
+  cursor: pointer;
+  margin-right: 6px;
+  flex: none;
+  transition: background 0.15s, color 0.15s;
+}
+.ce-alpha:hover {
+  background: var(--ce-accent);
+  color: #fff;
+}
+
+.ce-log-stage {
+  font-family: var(--ce-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--ce-accent);
+  border: 1px solid var(--ce-accent);
+  border-radius: 999px;
+  padding: 2px 7px;
+  margin-left: 9px;
+  vertical-align: 2px;
+}
+.ce-log-intro {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ce-muted);
+}
+.ce-log-body {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ce-log-date {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+.ce-log-day {
+  font-family: var(--ce-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--ce-muted);
+  flex: none;
+}
+.ce-log-title {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--ce-ink);
+  letter-spacing: -0.01em;
+}
+.ce-log-list {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ce-log-item {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ce-ink);
+}
+.ce-log-item::marker {
+  color: var(--ce-accent);
+}
 @media (prefers-reduced-motion: reduce) {
   .ce-shortcuts-overlay,
   .ce-shortcuts-card {
