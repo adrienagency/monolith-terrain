@@ -173,6 +173,9 @@ export class BlockGrid {
   setAerialOpacity(v) {
     for (const cell of this.cells.values()) cell.terrain?.setAerialOpacity?.(v)
   }
+  setAerialCoastFade(v) {
+    for (const cell of this.cells.values()) cell.terrain?.setAerialCoastFade?.(v)
+  }
 
   // le look a changé (template, contours, rampe…) — re-peindre les voisins
   restyle(params) {

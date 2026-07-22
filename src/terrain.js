@@ -147,6 +147,12 @@ export class Terrain {
       uAerialOpacity: { value: 1 },
       uAerialOffset: { value: new THREE.Vector2(0, 0) },
       uAerialScale: { value: new THREE.Vector2(1, 1) },
+      // v49 : la photo aérienne ne vit qu'à la côte — au large elle s'estompe
+      // pour laisser place au shader de fond marin (rampe nautique + caustics).
+      // Fondu par profondeur sous le niveau de la mer (proxy de distance au
+      // rivage) : fraction de uSeaRange sur laquelle l'aérien passe de 1 à 0.
+      // 0 = fondu désactivé (photo pleine partout, ancien comportement).
+      uAerialCoastFade: { value: 0.1 },
       // drifting cloud shadows, baked by the cloud deck (clouds.js) — a black
       // placeholder keeps the sampler valid until the deck provides its map
       uCloudShadow: { value: blackTexture() },
@@ -299,6 +305,7 @@ uniform float uAerialOn;
 uniform float uAerialOpacity;
 uniform vec2 uAerialOffset;
 uniform vec2 uAerialScale;
+uniform float uAerialCoastFade;
 uniform float uCloudShadowK;
 uniform float uScanT;
 uniform vec3 uScanColor;
@@ -500,7 +507,16 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     // hillshade and hypsometric shading keep reading THROUGH the photo, so the
     // relief still sculpts and the map keeps its own light.
     float shade = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
-    diffuseColor.rgb = mix(diffuseColor.rgb, aerial * (0.6 + 0.8 * shade), uAerialOpacity);
+    // v49 : couper la photo au large. Sur terre (y >= uSeaY) fondu = 1 (photo
+    // pleine) ; sous l'eau, la photo s'estompe sur une bande de profondeur
+    // (uAerialCoastFade * uSeaRange) puis disparaît, laissant le shader de fond
+    // marin — c'est lui qui porte la rampe nautique et les caustics au-delà.
+    float aFade = 1.0;
+    if (uAerialCoastFade > 0.0 && uSeaY > -9000.0) {
+      float band = max(uSeaRange * uAerialCoastFade, 1e-4);
+      aFade = smoothstep(uSeaY - band, uSeaY, vWorldPos.y); // 1 au rivage → 0 au fond
+    }
+    diffuseColor.rgb = mix(diffuseColor.rgb, aerial * (0.6 + 0.8 * shade), uAerialOpacity * aFade);
   }
 
   // Fancy surface shader paints OVER the final surface — the hypsometric map OR
@@ -756,6 +772,11 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   }
   setAerialOpacity(v) {
     this.mapUniforms.uAerialOpacity.value = v
+  }
+  // v49 : bande de fondu côtier de la photo aérienne (fraction de uSeaRange).
+  // 0 = photo pleine partout ; >0 = elle s'estompe sous l'eau au-delà du rivage.
+  setAerialCoastFade(v) {
+    this.mapUniforms.uAerialCoastFade.value = v
   }
   applyFxParams(pp) {
     const u = this.mapUniforms

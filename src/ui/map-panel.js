@@ -5,7 +5,7 @@ const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-
 
 export function buildMapPanel(ctx) {
   const { params, u } = ctx // u() → terrain.mapUniforms
-  const panel = new Panel({ title: 'Map', icon: ICON, side: 'right', width: 268, tip: 'Cartographic layers draped on the relief.' })
+  const panel = new Panel({ title: 'Map', icon: ICON, side: 'left', width: 268, tip: 'Cartographic layers draped on the relief.' })
 
   const sLayers = panel.addSection(section('Layers', { open: true }))
   const roadsToggle = toggle({ label: 'Roads', get: () => params.roadsEnabled, set: (v) => { params.roadsEnabled = v; ctx.rebuildMapLayers(); refreshAll() } })
@@ -23,6 +23,8 @@ export function buildMapPanel(ctx) {
   // switches itself back off (see main.js refreshAerial).
   const aerialToggle = toggle({ label: 'Aerial photo', get: () => params.aerialEnabled, set: (v) => { params.aerialEnabled = v; ctx.refreshAerial(); refreshAll() } })
   const aerialOpacity = slider({ label: 'Aerial opacity', min: 0, max: 1, step: 0.02, get: () => params.aerialOpacity, set: (v) => { params.aerialOpacity = v; ctx.terrain.setAerialOpacity(v); ctx.blockGrid?.setAerialOpacity?.(v) } })
+  // v49 : la photo ne vit qu'à la côte, puis s'estompe vers le fond marin. 0 = pleine partout.
+  const aerialCoastFade = slider({ label: 'Coast cutoff', min: 0, max: 0.4, step: 0.01, get: () => params.aerialCoastFade, set: (v) => { params.aerialCoastFade = v; ctx.terrain.setAerialCoastFade(v); ctx.blockGrid?.setAerialCoastFade?.(v) } })
   const placesToggle = toggle({ label: 'Places', get: () => params.placesEnabled, set: (v) => { params.placesEnabled = v; ctx.rebuildMapLayers(); refreshAll() } })
   const placesDensity = slider({ label: 'Places density', min: 0.4, max: 2, step: 0.1, get: () => params.placesDensity, set: (v) => { params.placesDensity = v; ctx.rebuildMapLayers() } })
   const placesSize = slider({ label: 'Places size', min: 0.5, max: 2, step: 0.05, get: () => params.placesSize, set: (v) => { params.placesSize = v; ctx.rebuildMapLayers() } })
@@ -30,12 +32,12 @@ export function buildMapPanel(ctx) {
   sLayers.body.append(
     roadsToggle, roadsOpacity, roadsDetail, roadsColour,
     waterToggle, waterOpacity, waterFill, coastLine,
-    aerialToggle, aerialOpacity,
+    aerialToggle, aerialOpacity, aerialCoastFade,
     placesToggle, placesDensity, placesSize, placesHalo
   )
   for (const row of [roadsOpacity, roadsDetail, roadsColour]) visibleWhen(row, () => params.roadsEnabled)
   for (const row of [waterOpacity, waterFill, coastLine]) visibleWhen(row, () => params.waterEnabled)
-  visibleWhen(aerialOpacity, () => params.aerialEnabled)
+  for (const row of [aerialOpacity, aerialCoastFade]) visibleWhen(row, () => params.aerialEnabled)
   for (const row of [placesDensity, placesSize, placesHalo]) visibleWhen(row, () => params.placesEnabled)
 
   const sContour = panel.addSection(section('Contours & Grid'))

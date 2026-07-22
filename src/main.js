@@ -365,6 +365,7 @@ const params = {
   // the organiser reaches for, never the default look. See map/aerial-layer.js.
   aerialEnabled: false,
   aerialOpacity: 1, // à l'activation, la photo couvre pleinement (retour Adrien)
+  aerialCoastFade: 0.1, // v49 : la photo s'estompe sous l'eau au-delà du rivage (0 = off)
   placesEnabled: true,
   placesDensity: 1,
   placesSize: 1,
@@ -2305,6 +2306,7 @@ async function refreshAerial() {
     return
   }
   aerialAttribution = built.attribution
+  terrain.setAerialCoastFade(params.aerialCoastFade ?? 0.1) // v49 : couper au large
   refreshOsmCredit()
   // même finition sur les blocs voisins : leur peindre la photo aussi
   for (const cell of blockGrid.cells.values()) paintCellAerial(cell)
@@ -2327,6 +2329,7 @@ async function paintCellAerial(cell) {
   if (built === SUPERSEDED || !built?.texture) return
   cell.terrain.setAerial(built)
   cell.terrain.setAerialOpacity(params.aerialOpacity)
+  cell.terrain.setAerialCoastFade(params.aerialCoastFade ?? 0.1)
 }
 const rebuildMapLayers = () => { const p = mapLayers.rebuild({ dem, terrain, params }); refreshOsmCredit(); refreshAerial(); return p.then(() => refreshOsmCredit()) }
 
@@ -2880,23 +2883,6 @@ const shadersPanel = buildShadersPanel({
   },
 })
 
-// Map panel — right dock, after Shaders (docks Create, Shaders, Map).
-// Holds the cartographic layers (roads/water/places) plus the contour/grid/
-// marker controls relocated out of Create's old "Map style" section.
-const mapPanel = buildMapPanel({
-  params,
-  u: () => terrain.mapUniforms,
-  mapLayers,
-  rebuildMapLayers,
-  blockGrid, // le slider d'opacité aérien propage aux blocs voisins
-  // the aerial controls need both — this panel gets its OWN ctx, so adding
-  // them to panelCtx above does nothing for it
-  terrain,
-  refreshAerial,
-  peaksLayer,
-  setLabelsVisible: (v) => (labels.visible = v && modes.mode === 'surface'),
-})
-
 const effectsPanel = buildEffectsPanel({
   params,
   exposureFx, contrastFx, hueSat, vignette, grain,
@@ -2913,6 +2899,25 @@ buildHourPill({ params, applyTimeOfDay })
 
 const explorePanel = buildExplorePanel({
   flyTo: (lat, lon, zoom) => modes.flyTo(lat, lon, zoom),
+})
+
+// Map panel — LEFT dock, wedged between Explore and Scan (Explore, Map, Scan,
+// Camera, Route) per Adrien. Built HERE, after Explore and before Scan, because
+// panels dock in construction order within a column (see shell.js Panel).
+// Holds the cartographic layers (roads/water/places) plus the contour/grid/
+// marker controls relocated out of Create's old "Map style" section.
+const mapPanel = buildMapPanel({
+  params,
+  u: () => terrain.mapUniforms,
+  mapLayers,
+  rebuildMapLayers,
+  blockGrid, // le slider d'opacité aérien propage aux blocs voisins
+  // the aerial controls need both — this panel gets its OWN ctx, so adding
+  // them to panelCtx above does nothing for it
+  terrain,
+  refreshAerial,
+  peaksLayer,
+  setLabelsVisible: (v) => (labels.visible = v && modes.mode === 'surface'),
 })
 
 const scanPanel = buildScanPanel({
@@ -3004,8 +3009,11 @@ const shortcutsCtx = {
   cameraPreset,
   togglePlay,
   stopPlay,
-  undo: () => history.undo(),
-  redo: () => history.redo(),
+  // flush any pending debounced snapshot FIRST, so an edit made <400ms ago is
+  // committed before we step back — otherwise a quick Ctrl+Z after a change
+  // reverts the WRONG step (or no-ops), which read as "undo is broken" (Adrien)
+  undo: () => { recordHistoryDebounced.flush?.(); return history.undo() },
+  redo: () => { recordHistoryDebounced.flush?.(); return history.redo() },
   toggleUI: () => document.body.classList.toggle('ce-noui'),
   toggleDark: () => {
     setDarkMode(!params.darkMode)
@@ -3029,10 +3037,20 @@ bindShortcuts(shortcutsCtx)
 // end of a slider drag. History.record() dedups no-ops on its own.
 function debounce(fn, ms) {
   let t = null
-  return (...args) => {
+  let pending = null
+  const wrapped = (...args) => {
     clearTimeout(t)
-    t = setTimeout(() => fn(...args), ms)
+    pending = args
+    t = setTimeout(() => { pending = null; fn(...args) }, ms)
   }
+  // run the queued call NOW (used by undo/redo to commit a just-made edit)
+  wrapped.flush = () => {
+    if (t == null) return
+    clearTimeout(t); t = null
+    const args = pending; pending = null
+    if (args) fn(...args)
+  }
+  return wrapped
 }
 const recordHistoryDebounced = debounce(() => history.record(), 400)
 document.addEventListener('change', (e) => { if (e.target?.closest?.('.ce-dock')) recordHistoryDebounced() }, true)
@@ -3045,7 +3063,7 @@ history.record()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history }
 
 applyTimeOfDay(params.timeOfDay ?? 10) // seed the sun/disc/lake for the opening view
 

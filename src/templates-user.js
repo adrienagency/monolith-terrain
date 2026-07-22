@@ -21,7 +21,7 @@ export const TEMPLATE_KEYS = [
   'rampStops', 'oceanShallow', 'oceanMid', 'oceanDeep', 'darkMode',
   // map style
   'mapTint', 'heightContrast', 'heightPivot', 'slopeTint',
-  'roadsEnabled', 'roadsOpacity', 'roadsDetail', 'roadColor', 'waterEnabled', 'waterOpacity', 'waterFill', 'coastLine', 'aerialEnabled', 'aerialOpacity', 'placesEnabled', 'placesDensity', 'placesSize', 'placesHalo',
+  'roadsEnabled', 'roadsOpacity', 'roadsDetail', 'roadColor', 'waterEnabled', 'waterOpacity', 'waterFill', 'coastLine', 'aerialEnabled', 'aerialOpacity', 'aerialCoastFade', 'placesEnabled', 'placesDensity', 'placesSize', 'placesHalo',
   // animated sea (ocean-waves spectrum) — lakeColor is the shared water tint
   'waterReal', 'waterTransparency', 'waterSunFx', 'lakeColor',
   'seaWaveH', 'seaChop', 'seaSpeed', 'seaSeed', 'seaBed', 'seaEdge', 'seaEdgeFrost', 'seaRefract',
