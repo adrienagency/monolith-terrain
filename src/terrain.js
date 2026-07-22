@@ -454,7 +454,12 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
       float cfil = smoothstep(0.5, 1.1, cnet);
       // rayons de lumière : bandes larges et lentes qui traversent le fond
       float crays = mix(0.72, 1.0, 0.5 + 0.5 * sin(dot(vWorldPos.xz, vec2(0.33, 0.21)) + uCausT * 0.2));
-      float creach = mix(0.3, 1.0, 1.0 - d01); // plein en eau peu profonde, plancher au large
+      // v50 : les caustiques ne vivent QUE là où la lumière atteint le fond —
+      // 0 au large, plein en eau peu profonde. L'ancien plancher 0.3 laissait
+      // des filaments lumineux sur le fond profond qui, vus à travers l'eau,
+      // ressemblaient à de faux bancs de sable (retour Adrien). Les vagues, elles,
+      // gardent exactement la même hauteur.
+      float creach = smoothstep(0.0, 0.5, 1.0 - d01);
       float cglow = clamp(cfil * crays * creach * uSeaCausK, 0.0, 1.0);
       mapCol *= 1.0 - 0.2 * creach * uSeaCausK * (1.0 - cnet); // creux des mailles éteints
       mapCol = 1.0 - (1.0 - clamp(mapCol, 0.0, 1.0)) * (1.0 - cglow * 0.55); // filaments en screen

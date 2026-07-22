@@ -19,12 +19,52 @@ const UPLOAD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 export function buildRoutePanel(ctx) {
   const { params } = ctx
   const panel = new Panel({
-    title: 'Route',
+    title: 'GPX path',
     icon: ICON,
     side: 'left',
     width: 268,
     tip: 'Load a GPX track and style the line draped over the relief.',
   })
+
+  // Play / Stop live at the TOP of the panel, ALWAYS visible the moment "GPX
+  // path" is open (Adrien) — peers of the Track / GPX layers sections, not
+  // buried in a collapsed Playback section. The follow/readout options stay in
+  // the Playback section below. `syncPlayBtn` is defined here and reused there.
+  const playRow = el('div', 'ce-btn-row')
+  const playBtn = button('▶ Play', () => {
+    if (!ctx.gpx.track) return
+    if (ctx.gpx.isPlaying()) {
+      ctx.gpx.pause()
+      ctx.stopFollow?.()
+    } else {
+      ctx.gpx.play()
+      ctx.startFollow?.()
+    }
+    syncPlayBtn()
+  }, { accent: true })
+  const stopBtn = button('■ Stop', () => {
+    ctx.gpx.stop()
+    ctx.stopFollow?.()
+    syncPlayBtn()
+  }, { ghost: true })
+  const exitFollowBtn = button('✕ Exit follow', () => {
+    params.gpxFollow = false
+    ctx.stopFollow?.()
+    refreshAll()
+    syncPlayBtn()
+  }, { ghost: true })
+  exitFollowBtn.classList.add('ce-exit-follow')
+  exitFollowBtn.title = 'Return to manual camera control'
+  function syncPlayBtn() {
+    const playing = !!ctx.gpx.isPlaying?.()
+    playBtn.textContent = playing ? '⏸ Pause' : '▶ Play'
+    playBtn.classList.toggle('on', playing)
+    exitFollowBtn.style.display = playing && params.gpxFollow ? '' : 'none'
+  }
+  syncPlayBtn()
+  setInterval(syncPlayBtn, 200)
+  playRow.append(playBtn, stopBtn, exitFollowBtn)
+  panel.add(playRow)
 
   // Track section stays FIRST and open by default (see the task-13 report) —
   // Width/Colour are the controls a user reaches for right after loading a
@@ -320,50 +360,10 @@ export function buildRoutePanel(ctx) {
   // Playback — progressive reveal: a head travels the track, the line draws
   // up to it, and animated altitude/slope readouts float at the tip (Space
   // plays/pauses, Esc stops — see the shortcuts ctx in main.js).
-  const sPlay = panel.addSection(section('Playback', { open: false }))
-  const playRow = el('div', 'ce-btn-row')
-  const playBtn = button('▶ Play', () => {
-    if (!ctx.gpx.track) return
-    if (ctx.gpx.isPlaying()) {
-      ctx.gpx.pause()
-      ctx.stopFollow?.()
-    } else {
-      ctx.gpx.play()
-      ctx.startFollow?.() // no-op unless the Follow toggle below is on
-    }
-    syncPlayBtn()
-  }, { accent: true })
-  const stopBtn = button('■ Stop', () => {
-    ctx.gpx.stop()
-    ctx.stopFollow?.()
-    syncPlayBtn()
-  }, { ghost: true })
-  // task 30: "mets une croix de fermeture quelque part pour quitter le mode
-  // suivi" — a quiet exit-follow control, visible only while the drone is
-  // actually chasing the head (playing + Follow on), so a drag no longer
-  // needs to be the only way out. ctx.stopFollow is disengageGpxFollow
-  // (main.js) — same call the Follow toggle's own "off" path already uses;
-  // this also flips params.gpxFollow off so the toggle itself reflects the
-  // exit rather than reading "on" over a follow that's no longer running.
-  const exitFollowBtn = button('✕ Exit follow', () => {
-    params.gpxFollow = false
-    ctx.stopFollow?.()
-    refreshAll() // syncs the Follow toggle + hides the speed slider right away
-    syncPlayBtn()
-  }, { ghost: true })
-  exitFollowBtn.classList.add('ce-exit-follow')
-  exitFollowBtn.title = 'Return to manual camera control'
-  function syncPlayBtn() {
-    const playing = !!ctx.gpx.isPlaying?.()
-    playBtn.textContent = playing ? '⏸ Pause' : '▶ Play'
-    playBtn.classList.toggle('on', playing)
-    exitFollowBtn.style.display = playing && params.gpxFollow ? '' : 'none'
-  }
-  syncPlayBtn()
-  // playback can also start/stop/end via Space/Esc or naturally reach the
-  // end of the track — poll lightly so the button label stays in sync
-  setInterval(syncPlayBtn, 200)
-  playRow.append(playBtn, stopBtn, exitFollowBtn)
+  // Playback OPTIONS section — the Play/Stop buttons themselves now live at the
+  // TOP of the panel (always visible). This section keeps the follow + readout
+  // toggles and the follow-speed slider.
+  const sPlay = panel.addSection(section('Playback options', { open: false }))
   const followSpeedRow = slider({
     label: 'Follow speed',
     min: 0.5,
@@ -374,7 +374,6 @@ export function buildRoutePanel(ctx) {
   })
   visibleWhen(followSpeedRow, () => params.gpxFollow)
   sPlay.body.append(
-    playRow,
     toggle({
       label: 'Altitude readout',
       get: () => params.gpxAltReadout,

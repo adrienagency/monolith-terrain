@@ -239,6 +239,13 @@ body.dark {
   flex: 0 1 auto;
   overflow: hidden;
 }
+/* A collapsed panel is JUST its header and must NEVER shrink below it (Adrien :
+   la capture « écrasée » est interdite). Only the OPEN panel absorbs the height
+   pressure — it shrinks and its body scrolls (ce-panel-body is overflow-y auto),
+   so the folded neighbours always keep their full, legible header. */
+.ce-panel.collapsed {
+  flex: 0 0 auto;
+}
 .ce-panel.dragging {
   opacity: 0.85;
   transition: none;
