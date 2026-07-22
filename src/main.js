@@ -1963,37 +1963,64 @@ function resetAll() {
   history?.record() // committed look change — one undo step
 }
 
-// Élégante palette par THÉORIE DES COULEURS pour le fond + le socle du shuffle
-// (Adrien) : une teinte de base H, une harmonie (complémentaire / split-
-// complémentaire / analogue / triadique / mono), et un contraste tiré au hasard
-// BAS ou FORT. Renvoie 3 arrêts de dégradé a/b/c, un mode, un angle, et une
-// couleur de socle proche-neutre teintée du schéma.
+// Palette de fond + socle du shuffle, ACCORDÉE À LA CARTE (Adrien) : on lit la
+// teinte signature de la carte (un arrêt haut-médian de la rampe hypso, sinon
+// l'océan) et on construit le fond PAR RAPPORT à elle selon une stratégie —
+//   · match      : analogue à la carte (même famille chromatique, il se marie)
+//   · opposition : complémentaire / split-complémentaire (contraste franc mais juste)
+//   · light      : très clair, quasi-blanc à peine teinté (socle sombre en regard)
+//   · dark       : très foncé, quasi-noir teinté (socle clair en regard)
+// Contraste des arrêts tiré BAS ou FORT à chaque fois.
 function elegantColorScheme() {
   const rnd = (a, b) => a + Math.random() * (b - a)
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
   const clamp01 = (x) => Math.max(0, Math.min(1, x))
-  const clampL = (l) => Math.max(8, Math.min(94, l))
+  const clampL = (l) => Math.max(5, Math.min(97, l))
   const hsl = (h, s, l) => '#' + new THREE.Color().setHSL(((((h % 360) + 360) % 360) / 360), clamp01(s / 100), clamp01(l / 100)).getHexString()
-  const H = rnd(0, 360)
-  const harmony = pick(['complementary', 'split', 'analogous', 'triadic', 'mono'])
-  const hues =
-    harmony === 'complementary' ? [H, H, H + 180]
-    : harmony === 'split' ? [H, H + 150, H + 210]
-    : harmony === 'analogous' ? [H, H + 26, H - 26]
-    : harmony === 'triadic' ? [H, H + 120, H + 240]
-    : [H, H, H]
-  const highContrast = Math.random() < 0.5 // bas OU fort contraste (Adrien)
-  const s = rnd(16, 56) // sobre → coloré, jamais fluo
-  const lMid = rnd(30, 76)
-  const spread = highContrast ? rnd(26, 46) : rnd(6, 15)
-  const a = hsl(hues[0], s * 0.9, clampL(lMid + spread * 0.5))
+
+  // teinte signature de la carte (fraîche : applyPalette a déjà réécrit rampStops)
+  const stops = Array.isArray(params.rampStops) ? params.rampStops.map((s) => s?.c).filter(Boolean) : []
+  const sigHex = stops.length ? stops[Math.min(stops.length - 1, Math.round(stops.length * 0.6))] : (params.oceanMid || params.oceanDeep || '#6b7a8f')
+  const sh = {}; new THREE.Color(sigHex).getHSL(sh)
+  const Hmap = sh.h * 360, Smap = sh.s * 100
+
+  const strategy = pick(['match', 'match', 'opposition', 'opposition', 'light', 'dark'])
+  const highContrast = Math.random() < 0.5
+  let hues, s, lMid, spread, plinthL, plinthS
+  if (strategy === 'match') {
+    hues = [Hmap, Hmap + 24, Hmap - 24] // analogue : même famille que la carte
+    s = Math.max(12, Math.min(52, Smap * rnd(0.55, 1.0)))
+    lMid = rnd(42, 78) // un fond aéré qui laisse le relief ressortir
+    spread = highContrast ? rnd(22, 42) : rnd(6, 14)
+    plinthL = Math.random() < 0.5 ? rnd(16, 30) : rnd(80, 92); plinthS = rnd(4, 12)
+  } else if (strategy === 'opposition') {
+    hues = [Hmap + 180, Hmap + 156, Hmap + 204] // complémentaire + split
+    s = rnd(24, 56)
+    lMid = rnd(36, 72)
+    spread = highContrast ? rnd(24, 44) : rnd(8, 16)
+    plinthL = Math.random() < 0.5 ? rnd(14, 28) : rnd(82, 92); plinthS = rnd(4, 12)
+  } else if (strategy === 'light') {
+    hues = [Hmap, Hmap + 14, Hmap - 14] // quasi-blanc à peine teinté de la carte
+    s = rnd(4, 16)
+    lMid = rnd(88, 95)
+    spread = highContrast ? rnd(6, 12) : rnd(2, 5)
+    plinthL = rnd(14, 26); plinthS = rnd(3, 10) // socle sombre en regard
+  } else {
+    hues = [Hmap, Hmap + 14, Hmap - 14] // quasi-noir teinté de la carte
+    s = rnd(8, 26)
+    lMid = rnd(7, 15)
+    spread = highContrast ? rnd(5, 11) : rnd(2, 5)
+    plinthL = rnd(78, 92); plinthS = rnd(3, 10) // socle clair en regard
+  }
+  const a = hsl(hues[0], s * 0.92, clampL(lMid + spread * 0.5))
   const b = hsl(hues[1], s, clampL(lMid))
   const c = hsl(hues[2], s * 1.05, clampL(lMid - spread * 0.5))
-  const mode = pick(['solid', 'linear', 'linear', 'radial', 'mesh']) // linear pondéré
+  const mode = strategy === 'light' || strategy === 'dark'
+    ? pick(['solid', 'solid', 'linear', 'radial'])
+    : pick(['solid', 'linear', 'linear', 'radial', 'mesh'])
   const angle = Math.floor(rnd(0, 360))
-  // socle : proche-neutre teinté du schéma, soit charbon soit pierre claire
-  const plinth = hsl(H, rnd(3, 14), Math.random() < 0.5 ? rnd(14, 30) : rnd(80, 92))
-  return { mode, a, b, c, angle, plinth, harmony, highContrast }
+  const plinth = hsl(Hmap, plinthS, plinthL) // proche-neutre teinté du schéma
+  return { mode, a, b, c, angle, plinth, strategy, highContrast }
 }
 
 // SHUFFLE (Adrien) — rebats every look option at once: a coherent built-in
