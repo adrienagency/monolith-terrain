@@ -65,7 +65,11 @@ export const FLOOR_Y = -0.35
 // CPU-generated terrain: multi-scale FBM + ridged multifractal + domain warping,
 // with real vertex normals so PBR lighting and DOF read the actual relief.
 export class Terrain {
-  constructor(params) {
+  // opts.offset {x,z} : bloc VOISIN du damier (block-grid.js) — le mesh est
+  // décalé dans le monde et uBlockOffset ramène clip + masques en coordonnées
+  // locales au bloc. Le bloc principal garde (0,0) : comportement identique.
+  constructor(params, opts = {}) {
+    this.blockOffset = { x: opts.offset?.x ?? 0, z: opts.offset?.z ?? 0 }
     // Physical material so the relief can turn to GLASS: `transmission` is real
     // PBR refraction (three renders the scene behind into a buffer), giving the
     // translucent-slab look — dial it with the "transmission (glass)" slider.
@@ -129,6 +133,8 @@ export class Terrain {
       // clip the map to the slab's rounded-rectangle footprint (world XZ) so the
       // block's vertical corners read soft and nothing overhangs the plinth walls
       uSlabHalf: { value: TERRAIN_SIZE / 2 },
+      // décalage monde du bloc (damier) : clip + masques passent en local
+      uBlockOffset: { value: new THREE.Vector2(this.blockOffset.x, this.blockOffset.z) },
       // v42: MEME arrondi que la mer (rayon clampe, cercle) - l'ecart entre
       // le coin du socle et celui de l'eau se voyait (retour Adrien)
       uSlabCorner: { value: Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE)) },
@@ -264,6 +270,7 @@ uniform vec3 uContourColor;
 uniform float uSlabHalf;
 uniform float uSlabCorner;
 uniform float uSlabCornerN;
+uniform vec2 uBlockOffset;
 uniform sampler2D uRegionMask;
 uniform float uRegionOn;
 uniform sampler2D uCloudShadow;
@@ -357,13 +364,13 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   // mask is pre-blurred, so the 0.5 iso-line cuts a smooth boundary. When
   // active it REPLACES the superellipse slab clip below.
   if (uRegionOn > 0.5) {
-    vec2 rmUv = vWorldPos.xz / (uSlabHalf * 2.0) + 0.5;
+    vec2 rmUv = (vWorldPos.xz - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
     if (texture2D(uRegionMask, rmUv).r < 0.5) discard;
   } else if (uSlabCorner > 0.0) {
     // --- rounded-rect footprint clip: discard fragments outside the slab's
     // filleted corners so the block's vertical edges read soft (matches the
     // plinth walls). Zero radius = untouched square. SDF of a rounded box.
-    vec2 cq = max(abs(vWorldPos.xz) - vec2(uSlabHalf - uSlabCorner), 0.0);
+    vec2 cq = max(abs(vWorldPos.xz - uBlockOffset) - vec2(uSlabHalf - uSlabCorner), 0.0);
     // superellipse boundary |x|^n + |y|^n = r^n (n=2 circle, higher = squircle);
     // straight edges stay exact (one component is 0), only corners are shaped
     float pn = pow(pow(cq.x, uSlabCornerN) + pow(cq.y, uSlabCornerN), 1.0 / uSlabCornerN);
@@ -383,7 +390,7 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   // says REAL sea (edge-connected / big basin), killing phantom coarse-zoom lakes.
   float seaMask = 1.0;
   if (uSeaMaskOn > 0.5) {
-    vec2 smUv = vWorldPos.xz / (uSlabHalf * 2.0) + 0.5;
+    vec2 smUv = (vWorldPos.xz - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
     seaMask = texture2D(uSeaMask, smUv).r;
   }
   // coarse-zoom coast (z4–z8): the real Natural-Earth land/sea mask is the
@@ -392,7 +399,7 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   // coasts AND phantom inland lakes. Off (z9+ / fetch failed) → old behaviour.
   float landness = 1.0;
   if (uCoastMaskOn > 0.5) {
-    vec2 cmUv = vWorldPos.xz / (uSlabHalf * 2.0) + 0.5;
+    vec2 cmUv = (vWorldPos.xz - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
     landness = texture2D(uCoastMask, cmUv).r;
   }
   // v42: le masque cotier ne peut JAMAIS declarer sous-marine une terre
@@ -449,7 +456,7 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   // still sits on top of the photograph rather than being buried by it. That
   // ordering is most of what keeps this from becoming a plain satellite viewer.
   if (uAerialOn > 0.5) {
-    vec2 aUv = vWorldPos.xz / (uSlabHalf * 2.0) + 0.5;
+    vec2 aUv = (vWorldPos.xz - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
     aUv.y = 1.0 - aUv.y; // texture rows run north->south, world +Z runs south->north
     aUv = uAerialOffset + aUv * uAerialScale; // place the mosaic (see aerialUvTransform)
     vec3 aerial = texture2D(uAerial, aUv).rgb;
@@ -485,7 +492,7 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   // --- drifting cloud shadows, cast by the volumetric deck overhead (strength
   // rises with sun elevation — clouds only throw shadows when the sun is above)
   if (uCloudShadowK > 0.001) {
-    vec2 suv = vWorldPos.xz / (uSlabHalf * 2.0) + 0.5;
+    vec2 suv = (vWorldPos.xz - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
     float cloudShade = texture2D(uCloudShadow, fract(suv + uCloudShadowOff)).r;
     diffuseColor.rgb *= 1.0 - cloudShade * uCloudShadowK;
   }
@@ -616,6 +623,9 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material)
     this.mesh.receiveShadow = true
     this.mesh.castShadow = true
+    // bloc voisin : la géométrie reste bâtie autour de l'origine (le sampler
+    // est local), c'est la POSITION du mesh qui porte le décalage monde
+    this.mesh.position.set(this.blockOffset.x, 0, this.blockOffset.z)
     this.dem = null // real-world heightfield, set via setDem()
     this.rebuild(params)
     this.rebuildRoughness(params)

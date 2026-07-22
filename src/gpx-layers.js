@@ -64,12 +64,13 @@ const nextId = () => `gpx-layer-${++_uid}`
 // ---------------------------------------------------------------- manager
 
 export class GpxLayerManager {
-  constructor({ scene, camera, terrain, params, getDem }) {
+  constructor({ scene, camera, terrain, params, getDem, getGrid }) {
     this.scene = scene
     this.camera = camera
     this.terrain = terrain
     this.params = params
     this.getDem = getDem
+    this.getGrid = getGrid // damier de blocs voisins (block-grid.js), optionnel
     this.layers = [] // [{ id, gpx: GpxLayer, sport, name, visible }]
     this.activeIndex = -1 // focused layer — panel controls + which profile strip shows
     this.playingIndex = -1 // -1 = not sequencing
@@ -141,7 +142,8 @@ export class GpxLayerManager {
   addLayer(text, { sport = null } = {}) {
     if (!canAddLayer(this.layers.length)) return null
     const { points, name } = parseGpx(text)
-    const gpx = new GpxLayer({ scene: this.scene, camera: this.camera, terrain: this.terrain, params: this.params, getDem: this.getDem })
+    const gpx = new GpxLayer({ scene: this.scene, camera: this.camera, terrain: this.terrain, params: this.params, getDem: this.getDem, getGrid: this.getGrid })
+    gpx.onCleared = () => this.onTrackCleared?.(this) // ✕ du profil → main.js resynchronise le damier
     gpx.setTrack(points, name)
     const entry = { id: nextId(), gpx, sport: sport || getSport(null).key, name, visible: true }
     this.layers.push(entry)

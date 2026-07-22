@@ -5,13 +5,27 @@
 const TILE_URL = (z, x, y) => `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`
 const TILE_PX = 256
 
-export async function loadDem({ lat, lon, zoom, tilesAcross = 3 }) {
+// `originTile` (optionnel) : origine-tuile EXPLICITE {x, y} du coin haut-gauche
+// — le damier (block-grid.js) charge les blocs voisins alignés sur la grille de
+// tuiles du bloc central (originTileX ± tilesAcross) : zéro couture entre blocs.
+export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = null }) {
   const n = 2 ** zoom
-  const latRad = (lat * Math.PI) / 180
-  const cx = Math.floor(((lon + 180) / 360) * n)
-  const cy = Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n)
-
   const half = Math.floor(tilesAcross / 2)
+  let cx, cy
+  if (originTile) {
+    cx = originTile.x + half
+    cy = originTile.y + half
+    // lat/lon deviennent le CENTRE réel de cette grille de tuiles (métadonnée
+    // + metersPerPixel cohérents avec le géoréférencement)
+    const cxF = cx + 0.5, cyF = cy + 0.5
+    lon = (cxF / n) * 360 - 180
+    lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * cyF) / n))) * 180) / Math.PI
+  } else {
+    const latRad0 = (lat * Math.PI) / 180
+    cx = Math.floor(((lon + 180) / 360) * n)
+    cy = Math.floor(((1 - Math.log(Math.tan(latRad0) + 1 / Math.cos(latRad0)) / Math.PI) / 2) * n)
+  }
+  const latRad = (lat * Math.PI) / 180
   const sizePx = tilesAcross * TILE_PX
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = sizePx

@@ -68,6 +68,7 @@ import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCred
 import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
 import { buildChangelogOverlay } from './ui/changelog-overlay.js'
 import { APP_STAGE } from './changelog.js'
+import { BlockGrid } from './block-grid.js'
 import { buildTemplatesPanel } from './ui/templates-panel.js'
 import { buildCreatePanel } from './ui/create-panel.js'
 import { buildCameraPanel } from './ui/camera-panel.js'
@@ -1945,7 +1946,25 @@ function resetAll() {
 // call site below that predates multi-layer support), plus addLayer/
 // removeLayer/reorder/focus for the Route panel's layer list.
 
-const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: () => dem })
+// damier de blocs voisins (block-grid.js) : quand un tracé GPX déborde du bloc
+// central aux zooms fins, des blocs de même taille/apparence portent la suite
+// du tracé ; ils disparaissent au dézoom. Fondation du futur système 5×5.
+const blockGrid = new BlockGrid({ scene, params, getMainDem: () => dem, getMainTerrain: () => terrain })
+
+const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: () => dem, getGrid: () => blockGrid })
+
+const allGpxPoints = () => gpxLayer.layers.flatMap((l) => l.gpx.track?.points ?? [])
+// un voisin vient de finir de charger → re-draper les traces dessus
+blockGrid.onReady = () => gpxLayer.rebuildAll()
+// le damier se resynchronise à CHAQUE re-drapage global (zone, zoom, ajout de
+// calque) — idempotent, borné 5×5, cellules en cache LRU
+const _rebuildAllRaw = gpxLayer.rebuildAll.bind(gpxLayer)
+gpxLayer.rebuildAll = () => {
+  blockGrid.sync(allGpxPoints())
+  _rebuildAllRaw()
+}
+// ✕ du profil (le parcours se ferme) → les blocs devenus inutiles s'en vont
+gpxLayer.onTrackCleared = () => blockGrid.sync(allGpxPoints())
 
 // every layer gets its own bottom-centre profile strip (only the focused
 // one is ever visible at once — see GpxLayerManager._syncProfileVisibility)

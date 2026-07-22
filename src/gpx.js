@@ -498,7 +498,10 @@ const VILLAGE_LABEL_GAP = 0.35 // above the line's top
 const VILLAGE_LABEL_BASE_H = 0.01
 
 export class GpxLayer {
-  constructor({ scene, camera, terrain, params, getDem }) {
+  // getGrid (optionnel) : le damier de blocs voisins (block-grid.js) — permet
+  // de draper la trace sur les blocs adjacents quand elle déborde du central
+  constructor({ scene, camera, terrain, params, getDem, getGrid }) {
+    this.getGrid = getGrid
     this.scene = scene
     this.camera = camera
     this.terrain = terrain
@@ -668,13 +671,22 @@ export class GpxLayer {
 
     const pts = []
     const world = []
+    const grid = this.getGrid?.()
     for (const p of this.track.points) {
       const w = latLonToWorld(dem, p.lat, p.lon)
       const inside = Math.abs(w.x) < TERRAIN_SIZE / 2 && Math.abs(w.z) < TERRAIN_SIZE / 2
       // _depthOffsetY (task 22 §2): a small per-layer lift so two stacked
       // layers whose tracks coincide (e.g. the same GPX loaded twice) don't
       // z-fight — see GpxLayerManager.reorder()/setRenderDepth().
-      const y = (inside ? this.terrain.sample(w.x, w.z) + DRAPE_LIFT : DRAPE_LIFT) + this._depthOffsetY
+      // hors du bloc central : draper sur le bloc VOISIN du damier s'il est
+      // chargé (block-grid.js) ; sinon l'ancien fallback à plat
+      let y
+      if (inside) y = this.terrain.sample(w.x, w.z) + DRAPE_LIFT
+      else {
+        const h = grid?.heightAt(w.x, w.z)
+        y = (h != null ? h : 0) + DRAPE_LIFT
+      }
+      y += this._depthOffsetY
       world.push(new THREE.Vector3(w.x, y, w.z))
       pts.push(w.x, y, w.z)
     }
@@ -1518,5 +1530,6 @@ export class GpxLayer {
     this._dispAlt = null
     this._dispSlope = null
     this.headLabel?.classList.add('hidden')
+    this.onCleared?.() // le damier de blocs voisins se resynchronise (main.js)
   }
 }
