@@ -499,7 +499,9 @@ let _lastBgMul = -1 // last day/night multiplier baked into the backdrop
 // reads at midnight instead of going pure black.
 function bgDayMul() {
   const dl = skyState?.dayLight ?? 1
-  return 0.12 + 0.88 * dl
+  // deep nocturnal floor (Adrien : « vraiment plus assombrir la nuit ») — 0.04
+  // at true night so the map pops against a near-black backdrop, full by day.
+  return 0.04 + 0.96 * dl
 }
 function applyBackground() {
   const mul = bgDayMul()
@@ -507,7 +509,7 @@ function applyBackground() {
   // an HDRI sky, when chosen, takes over the whole backdrop + lighting. Its
   // brightness follows the cycle via scene.backgroundIntensity, and an opaque
   // floor keeps a ground under the socle (the shadow base would show sky).
-  if (params.bgEnv) { plinth.setGroundColor(params.bgColorA); plinth.setGroundVisible(true); applyEnvironment(); scene.backgroundIntensity = mul; return }
+  if (params.bgEnv) { plinth.setGroundVisible(true); applyEnvironment(); scene.backgroundIntensity = mul; return } // ground colour = HDRI tone (set in applyEnvironment)
   plinth.setGroundVisible(false) // solid/gradient : the shadow base IS the ground
   scene.backgroundIntensity = 1
   // no HDRI → make sure neutral IBL is back (a sky may have replaced it)
@@ -528,8 +530,27 @@ function applyBackground() {
 // HDRI sky environment: the equirect drives both the backdrop and the image-based
 // lighting (reflections). Textures are lazy-loaded + cached. Clearing bgEnv
 // restores the neutral RoomEnvironment and the gradient/solid backdrop.
-const _envCache = {} // id → { bg: equirect texture, env: PMREM texture }
+const _envCache = {} // id → { bg: equirect texture, env: PMREM texture, avg: hex }
 let _envBg = null // currently applied equirect background (for restore bookkeeping)
+// average tone of the HDRI's LOWER hemisphere (the ground/horizon band) — the
+// socle floor is coloured to it so it sits IN the panorama rather than clashing
+// (Adrien : « le socle avec un HDRI doit se rapprocher de la couleur du HDRI »).
+function hdriGroundColour(image) {
+  try {
+    const c = document.createElement('canvas')
+    c.width = 32
+    c.height = 16
+    const ctx = c.getContext('2d')
+    ctx.drawImage(image, 0, 0, 32, 16)
+    const d = ctx.getImageData(0, 8, 32, 8).data // lower half = ground/horizon
+    let r = 0, g = 0, b = 0, n = 0
+    for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++ }
+    const h = (v) => Math.round(v / n).toString(16).padStart(2, '0')
+    return '#' + h(r) + h(g) + h(b)
+  } catch {
+    return null
+  }
+}
 function applyEnvironment() {
   const meta = ENV_BY_ID[params.bgEnv]
   if (!meta) { params.bgEnv = ''; scene.environment = roomEnvTex; applyBackground(); return }
@@ -539,13 +560,14 @@ function applyEnvironment() {
     _envBg = entry.bg
     scene.background = entry.bg
     scene.environment = entry.env
+    if (entry.avg) plinth.setGroundColor(entry.avg) // socle floor = HDRI tone
   }
   if (cached) { use(cached); return }
   new THREE.TextureLoader().load(meta.img, (tex) => {
     tex.mapping = THREE.EquirectangularReflectionMapping
     tex.colorSpace = THREE.SRGBColorSpace
     const env = pmrem.fromEquirectangular(tex).texture
-    const entry = { bg: tex, env }
+    const entry = { bg: tex, env, avg: hdriGroundColour(tex.image) }
     _envCache[meta.id] = entry
     if (params.bgEnv === meta.id) use(entry) // still selected once it loads
   })
@@ -571,7 +593,10 @@ scene.background = new THREE.Color(params.fogColor)
 const fogRef = new THREE.Fog(new THREE.Color(params.fogColor), params.fogNear, params.fogFar)
 scene.fog = params.fogEnabled ? fogRef : null
 
-const camera = new THREE.PerspectiveCamera(params.fov, window.innerWidth / window.innerHeight, 0.5, 220)
+// far plane 420 (was 220) : at full pull-back the socle's far edge was clipped
+// by the draw distance — « je vois le bout du socle qui coupe » (Adrien). The
+// near/far ratio stays fine for depth precision at this scene scale.
+const camera = new THREE.PerspectiveCamera(params.fov, window.innerWidth / window.innerHeight, 0.5, 420)
 camera.position.set(0, 18, 19)
 
 const controls = new OrbitControls(camera, renderer.domElement)
@@ -1309,16 +1334,20 @@ async function fetchAndBuildDem() {
         .catch(() => {})
     }
     terrain.setCoastMask(null) // fallback until this patch's mask resolves
+    realWater?.setCoastMask(null, false)
     job
       .then((res) => {
         if (!res) return
         // only apply if we're still on the same patch
         const stillHere = `${params.demZoom}:${params.demLat.toFixed(3)},${params.demLon.toFixed(3)}` === key
-        if (stillHere) terrain.setCoastMask(res.maskTexture)
+        // the SEA reads the SAME OSM mask so its waves stop at the real shore,
+        // not the elevation contour (flat polders below sea level are land)
+        if (stillHere) { terrain.setCoastMask(res.maskTexture); realWater?.setCoastMask(res.maskTexture, true) }
       })
       .catch(() => {})
   } else {
     terrain.setCoastMask(null)
+    realWater?.setCoastMask(null, false)
   }
   traffic.setZone(dem) // SpaceX pad watcher (Starbase / LC-39A in view?)
   terrain.refreshMatTiling(params) // relief material tiling tracks the new zoom

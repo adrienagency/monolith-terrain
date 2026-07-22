@@ -118,6 +118,8 @@ uniform float uSurfCalm; // 1 en vue rapprochee -> ~0 en vue large : efface les
 ${GERSTNER_GLSL}
 ${SHORE_SURF_GLSL}
 uniform sampler2D uField;   // R ground Y, G shore distance (slab-wide)
+uniform sampler2D uCoastMask; // OSM land/sea (R : 1 land, 0 sea) — the REAL shore
+uniform float uCoastMaskOn;   // 1 when the coast mask is loaded for this patch
 #ifdef IS_LAKE
 uniform sampler2D uMask;    // A coverage, G shore distance (lake bbox)
 uniform vec2 uMaskMin;
@@ -267,10 +269,15 @@ void main() {
   float depth = mask.g * uLakeDepth;
   float shoreAA = smoothstep(0.35, 0.55, mask.a);
 #else
+  // OSM COAST MASK is the REAL land/sea boundary (Adrien) : flat polders — like
+  // Dunkirk — sit BELOW sea level yet are LAND, so the elevation test alone
+  // floods the whole town with waves. Where the mask says land, there is simply
+  // no sea, whatever the height. uvF maps 1:1 to the terrain's own coast-mask UV.
+  if (uCoastMaskOn > 0.5 && texture2D(uCoastMask, uvF).r > 0.5) discard; // OSM land (polders)
   // real bathymetry when the tiles carry it; distance-to-shore as the stand-in
   // where the sea floor is a flat 0 m plain (fine zooms)
   float depth = max(uWaterY - f.r, f.g * 1.6);
-  if (uWaterY - f.r < -0.005) discard; // land
+  if (uWaterY - f.r < -0.005) discard; // land clearly ABOVE sea (islets, DEM noise)
   float shoreAA = smoothstep(0.0, 0.02, depth);
 #endif
   float d01 = clamp(depth / uDepthMax, 0.0, 1.0);
@@ -570,6 +577,8 @@ function waterMaterial({ isLake, params, fieldTex }) {
         // texture it finds, and the clone is what lands on the GPU — dispose()
         // on the original then never frees it (v37 review finding)
         uField: { value: null },
+        uCoastMask: { value: null },
+        uCoastMaskOn: { value: 0 },
         uMask: { value: null },
         uMaskMin: { value: new THREE.Vector2() },
         uMaskSize: { value: new THREE.Vector2(1, 1) },
@@ -933,6 +942,23 @@ export class RealWater {
       }
     }
     if (this._sunState) this.setSunState(this._sunState)
+    this._pushCoastMask() // re-apply the coast mask onto the freshly built materials
+  }
+
+  // OSM coast mask (same texture the terrain uses) — gates the sea so waves stop
+  // at the REAL shoreline, not the elevation contour (flat polders below sea
+  // level are land, not sea). Stored so a rebuild re-applies it (see _applySea).
+  setCoastMask(tex, on) {
+    this._coastMask = tex || null
+    this._coastMaskOn = on ? 1 : 0
+    this._pushCoastMask()
+  }
+  _pushCoastMask() {
+    for (const mat of this.materials) {
+      if (!mat.uniforms.uCoastMask) continue
+      mat.uniforms.uCoastMask.value = this._coastMask ?? null
+      mat.uniforms.uCoastMaskOn.value = this._coastMask ? (this._coastMaskOn ?? 0) : 0
+    }
   }
 
   // day/night state from the shared sunLook palette (applyTimeOfDay pushes it)
