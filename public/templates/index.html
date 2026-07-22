@@ -460,7 +460,7 @@
         </div>
         <div class="stage-caption">
           <b>Projection en direct</b>
-          <span>Lofoten · Norvège</span>
+          <span>Yakushima · Japon</span>
         </div>
       </aside>
     </main>
@@ -475,12 +475,13 @@
          ================================================================== */
 
       // ---- réglages faciles à changer -------------------------------------
-      // zone vitrine (vol initial de la caméra) : Lofoten, Norvège
-      const SHOWCASE = { lat: 68.13, lon: 13.55, zoom: 10 }
+      // zone vitrine : Yakushima (Japon) — l'embed la charge déjà tout seul
+      // (?embed=1 = zone de test verrouillée), donc on ne renvoie PAS de goto.
+      const SHOWCASE = { lat: 30.3435, lon: 130.5, zoom: 11 }
       // commerce caché tant que false : aucun prix, aucun abonnement visible
       const ENABLE_COMMERCE = false
-      // exigences de la vitrine : jamais de bokeh, toujours la vraie mer
-      const STAGE_OVERRIDES = { bokehEnabled: false, bokehScale: 0, waterReal: true }
+      // exigences de la vitrine : jamais de bokeh ni de bloom, toujours la vraie mer
+      const STAGE_OVERRIDES = { bokehEnabled: false, bokehScale: 0, bloomEnabled: false, waterReal: true }
 
       const { palettes, templates } = window.SHIBU_SHOP
       const APP_ORIGIN = 'https://shibumap.com'

@@ -952,6 +952,13 @@ body.ce-noui .gpx-profile {
 body.ce-noui .ce-eye {
   display: inline-flex;
 }
+/* embed vitrine (shibumap.com/templates) : AUCUNE UI, pas même l'œil (Adrien) */
+body.ce-embed .ce-eye,
+body.ce-embed .ce-hourpill,
+body.ce-embed .zoom-stepper,
+body.ce-embed .ce-changelog-btn {
+  display: none !important;
+}
 .ce-eye svg {
   width: 16px;
   height: 16px;

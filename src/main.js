@@ -427,6 +427,18 @@ if (location.hash.startsWith('#s=')) {
   }
 }
 
+// EMBED (shibumap.com/templates) : la carte boote DIRECTEMENT sur la zone
+// vitrine (Yakushima) — une seule zone à charger, jamais Annecy d'abord. La page
+// hôte pilote ensuite le look/la palette. Constante changeable en une ligne.
+const IS_EMBED = new URLSearchParams(location.search).has('embed')
+const EMBED_SHOWCASE = { lat: 30.3435, lon: 130.5, zoom: 11 } // Yakushima (安房岳 / Miyanoura)
+if (IS_EMBED && !location.hash.startsWith('#s=') && !location.hash.startsWith('#r=')) {
+  params.demLat = EMBED_SHOWCASE.lat
+  params.demLon = EMBED_SHOWCASE.lon
+  params.demZoom = EMBED_SHOWCASE.zoom
+  params.demLocation = 'Yakushima'
+}
+
 // #r=<id> — a PUBLISHED race link (Netlify Blobs, see netlify/functions/race.mjs
 // and share-link.js). Unlike #s= this is unavoidably async (a network fetch), so
 // it can't patch `params` before first read the way #s= does. Instead: fire the
@@ -586,6 +598,20 @@ function autoBgColours() {
   params.fogColor = b
   fogRef?.color.set(b)
   applyBackground()
+}
+// Changer une palette adapte AUSSI le fond de la carte (Adrien : « sinon c'est
+// bizarre ») : on dérive des arrêts de fond harmonieux de la rampe, on garde le
+// mode de fond courant (uni/dégradé), puis on applique. Utilisé par TOUTES les
+// actions palette (Generate/Shuffle/cartes sauvées/message embed) — jamais par
+// l'application d'un template complet, qui porte son propre fond.
+function applyPaletteWithBg(p) {
+  applyPalette(p)
+  const { a, b, c } = deriveBgColors(params)
+  params.bgColorA = a
+  params.bgColorB = b
+  params.bgColorC = c
+  applyBackground()
+  bgRefreshFn?.()
 }
 scene.background = new THREE.Color(params.fogColor)
 // linear fog: near/far give direct control over where the fade starts and
@@ -1360,7 +1386,7 @@ async function fetchAndBuildDem() {
   // first terrain build (so rampStops/material have a mesh to land on), then
   // never again so the user's own edits are never stomped.
   const fromLink = location.hash.startsWith('#s=') || location.hash.startsWith('#r=')
-  if (!_startupLookApplied && !fromLink) { _startupLookApplied = true; applyUserTemplate({ look: STARTUP_LOOK }) }
+  if (!_startupLookApplied && !fromLink && !IS_EMBED) { _startupLookApplied = true; applyUserTemplate({ look: STARTUP_LOOK }) }
 }
 
 async function loadRealTerrain() {
@@ -1607,7 +1633,7 @@ const STARTUP_LOOK = {
   sunIntensity: 1.860630412038343, sunAzimuth: 73.7292616914192, sunElevation: 12.374021473780667, hemiIntensity: 0.49677173533972385, envLight: 0.2319213023766564, shadowSoftness: 9, timeOfDay: 6.1, shadowMode: 'dynamic',
   color: '#e7e2d6', roughness: 1, roughnessVariation: 0.22, roughnessScale: 10, bumpScale: 1.1, envMapIntensity: 0.16,
   exposure: 1.24, contrast: 0.06, saturation: -0.24, vignette: 0.06, grain: 0.17,
-  ssaoEnabled: true, ssaoIntensity: 1.15, bloomEnabled: true, bloomIntensity: 0.16, bloomThreshold: 0.6, fogNear: 32, fogFar: 59, fogColor: '#ffffff', fogEnabled: false,
+  ssaoEnabled: true, ssaoIntensity: 1.15, bloomEnabled: false, bloomIntensity: 0.16, bloomThreshold: 0.6, fogNear: 32, fogFar: 59, fogColor: '#ffffff', fogEnabled: false,
   bgMode: 'solid', bgColorA: '#fcfbfb', bgColorB: '#faf9f9', bgColorC: '#f5f4f4', bgAngle: 263, bgEnv: '',
   fov: 33, autoFocus: true, focusDistance: 147.68, focusRange: 20, bokehEnabled: true, bokehScale: 0,
   plinth: true, plinthDepth: 7, plinthColor: '#d8d4cc', plinthFinish: 'solid', plinthPbr: 'wmarble', slabCorner: 0.04, slabCornerSmoothing: 0.6, groundInfo: true,
@@ -3005,7 +3031,7 @@ const panelCtx = {
   deleteUserTemplate,
   exportUserTemplate,
   importTemplateText,
-  applyPalette,
+  applyPalette: applyPaletteWithBg, // changer une palette adapte aussi le fond (Adrien)
   applyStyle,
   applyGridContour,
   applyMonochrome,
@@ -3594,14 +3620,18 @@ tick()
 //   {type:'shibumap:goto', lat, lon, zoom} → vole vers une zone
 // Contrat STABLE : les clés de look inconnues sont ignorées (applyUserTemplate ne
 // pose que les TEMPLATE_KEYS présents), donc les mises à jour ne cassent pas le site.
-const EMBED = new URLSearchParams(location.search).has('embed')
+const EMBED = IS_EMBED
 if (EMBED) {
-  document.body.classList.add('ce-noui')
+  // vitrine shibumap.com/templates : AUCUNE UI (pas même l'œil), et la zone est
+  // VERROUILLÉE (molette neutralisée → on ne charge que le bloc de test). Seule
+  // la rotation orbitale reste. La page hôte pilote look/palette/goto.
+  document.body.classList.add('ce-noui', 'ce-embed')
+  modes.locked = true // molette off : pas de changement de zoom/zone (voir modes.js)
   window.addEventListener('message', (ev) => {
     const d = ev.data || {}
     try {
       if (d.type === 'shibumap:apply' && d.look) applyUserTemplate({ look: d.look })
-      else if (d.type === 'shibumap:palette' && d.palette) { applyPalette(d.palette); refreshAll() }
+      else if (d.type === 'shibumap:palette' && d.palette) { applyPaletteWithBg(d.palette); refreshAll() }
       else if (d.type === 'shibumap:goto' && Number.isFinite(d.lat) && Number.isFinite(d.lon)) modes.flyTo(d.lat, d.lon, d.zoom ?? 10)
     } catch {}
   })

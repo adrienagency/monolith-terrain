@@ -101,6 +101,7 @@ export class Modes {
     this.orbAlt = 0 // orbital altitude in scene units (current)
     this.orbAltTarget = 0
     this.busy = false
+    this.locked = false // embed « zone de test » : molette neutralisée (voir wheel)
     this.travel = null // great-circle glide tween
     this._surfCam = { near: camera.near, far: camera.far }
     this._zoomVel = 0 // surface inertial dolly velocity (log-dist units/s)
@@ -116,6 +117,11 @@ export class Modes {
     domElement.addEventListener(
       'wheel',
       (e) => {
+        // embed « zone de test » (Adrien) : la molette est neutralisée — pas de
+        // changement de zoom ni de zone, on ne charge que le bloc vitrine. La
+        // rotation orbitale d'OrbitControls reste libre. flyTo (piloté par la
+        // page hôte) n'est PAS bridé : c'est lui qui pose la zone au départ.
+        if (this.locked) { e.preventDefault(); return }
         if (this.mode === 'surface') {
           // pendant le suivi de tête GPX, la molette pilote le STANDOFF de la
           // caméra de suivi (zoom/dézoom autour de la tête) — pas l'escalier
