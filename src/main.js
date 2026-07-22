@@ -593,10 +593,11 @@ scene.background = new THREE.Color(params.fogColor)
 const fogRef = new THREE.Fog(new THREE.Color(params.fogColor), params.fogNear, params.fogFar)
 scene.fog = params.fogEnabled ? fogRef : null
 
-// far plane 420 (was 220) : at full pull-back the socle's far edge was clipped
-// by the draw distance — « je vois le bout du socle qui coupe » (Adrien). The
-// near/far ratio stays fine for depth precision at this scene scale.
-const camera = new THREE.PerspectiveCamera(params.fov, window.innerWidth / window.innerHeight, 0.5, 420)
+// far plane 290 (was 220) : the studio floor/base reach ~3.4× the block, whose
+// far edge was clipped at full pull-back — « je vois le bout du socle qui coupe »
+// (Adrien). 290 just covers it ; kept as low as possible so depth precision (and
+// z-fighting on the thin water layer) stays close to the long-proven 220.
+const camera = new THREE.PerspectiveCamera(params.fov, window.innerWidth / window.innerHeight, 0.5, 290)
 camera.position.set(0, 18, 19)
 
 const controls = new OrbitControls(camera, renderer.domElement)

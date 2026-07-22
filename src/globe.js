@@ -64,6 +64,21 @@ float decodeMeters(vec2 uv) {
   vec3 t = texture2D(uTex, uv).rgb * 255.0;
   return t.r * 256.0 + t.g + t.b / 256.0 - 32768.0;
 }
+// SUPERSAMPLED decode (Adrien : scintillement du monde en orbite). The height
+// texture carries no mipmaps (mip-averaging corrupts the packed metres), so a
+// single minified sample jumps frame to frame as the camera moves — the whole
+// map crawls. We DECODE five taps (each exact) across the pixel's footprint and
+// average the METRES : smooth height → smooth colour AND contours, no shimmer.
+// When the tile is not minified (fwidth tiny) the taps collapse to one, so
+// close-up detail is untouched.
+float decodeMetersAA(vec2 uv) {
+  vec2 o = fwidth(uv) * 0.5;
+  return (decodeMeters(uv)
+        + decodeMeters(uv + vec2(o.x, o.y))
+        + decodeMeters(uv + vec2(-o.x, o.y))
+        + decodeMeters(uv + vec2(o.x, -o.y))
+        + decodeMeters(uv + vec2(-o.x, -o.y))) * 0.2;
+}
 
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -72,7 +87,7 @@ float hash12(vec2 p) {
 }
 
 void main() {
-  float h = decodeMeters(vUv);
+  float h = decodeMetersAA(vUv);
 
   // hypsometric ramp: bathymetry occupies [0, 0.35], land [0.35, 1]
   float t = h < 0.0
