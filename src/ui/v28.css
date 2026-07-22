@@ -864,6 +864,13 @@ body.dark {
   color: var(--ce-muted);
   font-size: 10.5px;
 }
+/* separator between the continents and the Islands peer group (Adrien) */
+.ce-place-sep {
+  height: 1px;
+  margin: 7px 8px;
+  background: var(--ce-border, rgba(255, 255, 255, 0.5));
+  opacity: 0.6;
+}
 .ce-scan-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

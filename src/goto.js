@@ -3,10 +3,13 @@
 
 import { parseLatLon } from './geo.js'
 import { stepZoom } from './modes.js'
+import { zoomForSpanKm } from './landmarks.js'
 
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search'
 
-// name → { lat, lon, label } via Nominatim (no key; be a polite client)
+// name → { lat, lon, label, bbox } via Nominatim (no key; be a polite client).
+// bbox is Nominatim's [south, north, west, east] — used to FRAME the whole
+// feature on the socle (a country fits the block, not a tight zoom in the middle).
 export async function geocode(query) {
   const url = `${NOMINATIM}?format=json&limit=1&q=${encodeURIComponent(query)}`
   const r = await fetch(url, { headers: { Accept: 'application/json' } })
@@ -14,7 +17,24 @@ export async function geocode(query) {
   const results = await r.json()
   if (!results.length) return null
   const hit = results[0]
-  return { lat: parseFloat(hit.lat), lon: parseFloat(hit.lon), label: hit.display_name }
+  return { lat: parseFloat(hit.lat), lon: parseFloat(hit.lon), label: hit.display_name, bbox: hit.boundingbox }
+}
+
+// From Nominatim's boundingbox → { lat, lon, zoom } that frames the WHOLE
+// feature centred on the block (Adrien : « je veux voir la France, toute la
+// France tient sur le block »). Null if the bbox is missing/degenerate, so the
+// caller can fall back to its default landing zoom.
+export function frameFromBBox(bbox, { min = 4, max = 15 } = {}) {
+  if (!Array.isArray(bbox) || bbox.length < 4) return null
+  const [s, n, w, e] = bbox.map(Number)
+  if ([s, n, w, e].some((v) => !Number.isFinite(v))) return null
+  const latC = (s + n) / 2
+  const lonC = (w + e) / 2
+  const nsKm = Math.abs(n - s) * 111.32
+  const ewKm = Math.abs(e - w) * 111.32 * Math.cos((latC * Math.PI) / 180)
+  const spanKm = Math.max(nsKm, ewKm)
+  if (!(spanKm > 0)) return null
+  return { lat: latC, lon: lonC, zoom: zoomForSpanKm(spanKm, latC, { min, max }) }
 }
 
 // Wire the two GUI fields to the mode machine. `modes.flyTo` does the rest.
@@ -59,7 +79,14 @@ export function createGoto({ modes, announce, getFineZoom }) {
           announce('NO MATCH FOUND')
           return false
         }
-        if (!(await modes.flyTo(hit.lat, hit.lon, landingZoom(getFineZoom)))) {
+        // frame the WHOLE feature from its bounding box (country/city fills the
+        // block) ; fall back to the point + default landing zoom if there's no bbox
+        const fine = getFineZoom ? getFineZoom() : 15
+        const framed = frameFromBBox(hit.bbox, { min: 4, max: fine })
+        const lat = framed?.lat ?? hit.lat
+        const lon = framed?.lon ?? hit.lon
+        const zoom = framed?.zoom ?? landingZoom(getFineZoom)
+        if (!(await modes.flyTo(lat, lon, zoom))) {
           announce('NAVIGATION BUSY — TRY AGAIN IN A MOMENT')
           return false
         }

@@ -4,6 +4,73 @@
 // volcanic cone like Stromboli wants z13. Data only (pure, testable); the
 // panel lives in landmarks-panel.js.
 
+// DEM zoom that frames a feature of `spanKm` (its long axis) so the WHOLE thing
+// sits on the block, filling the socle without cropping (Adrien : « toute l'île
+// en entier, pas un gros zoom au milieu »). The block shows
+// 156543·cos(lat)/2^z × 768 px of real world (dem.js : 3×256-px tiles) ; we take
+// the largest zoom whose extent still contains the span. Pure math (no imports)
+// so this file stays testable — shared by the island list AND the search box.
+export function zoomForSpanKm(spanKm, lat, { margin = 1.05, min = 4, max = 15 } = {}) {
+  const km = Math.max(0.2, spanKm || 1)
+  const extentTop = 156543.03392 * Math.cos((lat * Math.PI) / 180) * 768
+  const z = Math.floor(Math.log2(extentTop / (km * 1000 * margin)))
+  return Math.max(min, Math.min(max, z))
+}
+
+// The world's most beautiful HIGH-RELIEF islands — volcanoes, calderas, peaks
+// and cliffs that sit whole on a socle between z9 and z15 (Adrien). Each stores
+// its centre + long-axis span (km) ; the framing zoom is derived so clicking it
+// lands on the ENTIRE island, filling the block. Curated from island-relief and
+// volcano references for dramatic topography and geographic spread.
+const ISLAND_SPANS = [
+  { name: 'Tenerife (Teide)', lat: 28.27, lon: -16.63, span: 80 },
+  { name: 'La Palma', lat: 28.68, lon: -17.87, span: 45 },
+  { name: 'Gran Canaria', lat: 27.96, lon: -15.6, span: 50 },
+  { name: 'El Hierro', lat: 27.7, lon: -18.0, span: 27 },
+  { name: 'Madeira', lat: 32.75, lon: -16.96, span: 57 },
+  { name: 'Pico (Azores)', lat: 38.47, lon: -28.4, span: 46 },
+  { name: 'São Miguel (Azores)', lat: 37.78, lon: -25.5, span: 65 },
+  { name: 'Flores (Azores)', lat: 39.44, lon: -31.2, span: 17 },
+  { name: 'Santo Antão (Cape Verde)', lat: 17.07, lon: -25.16, span: 43 },
+  { name: 'Fogo (Cape Verde)', lat: 14.95, lon: -24.35, span: 25 },
+  { name: 'La Réunion', lat: -21.12, lon: 55.52, span: 63 },
+  { name: 'Mauritius', lat: -20.3, lon: 57.55, span: 65 },
+  { name: 'Socotra', lat: 12.5, lon: 54.0, span: 130 },
+  { name: "Hawai‘i (Big Island)", lat: 19.6, lon: -155.5, span: 150 },
+  { name: 'Maui', lat: 20.8, lon: -156.32, span: 75 },
+  { name: "Kaua‘i", lat: 22.05, lon: -159.5, span: 50 },
+  { name: 'Tahiti', lat: -17.65, lon: -149.45, span: 45 },
+  { name: 'Nuku Hiva (Marquesas)', lat: -8.87, lon: -140.1, span: 30 },
+  { name: 'Fatu Hiva (Marquesas)', lat: -10.47, lon: -138.65, span: 15 },
+  { name: 'Rarotonga (Cook)', lat: -21.23, lon: -159.77, span: 11 },
+  { name: 'Bali', lat: -8.4, lon: 115.2, span: 145 },
+  { name: 'Lombok (Rinjani)', lat: -8.65, lon: 116.45, span: 80 },
+  { name: 'Jeju (Hallasan)', lat: 33.36, lon: 126.53, span: 73 },
+  { name: 'Yakushima', lat: 30.34, lon: 130.5, span: 28 },
+  { name: 'Kunashir (Kuril)', lat: 44.1, lon: 145.9, span: 120 },
+  { name: 'Isle of Skye', lat: 57.3, lon: -6.2, span: 80 },
+  { name: 'Faroe Islands', lat: 62.08, lon: -6.9, span: 110 },
+  { name: 'Jan Mayen (Beerenberg)', lat: 71.0, lon: -8.3, span: 55 },
+  { name: 'Kerguelen', lat: -49.3, lon: 69.5, span: 150 },
+  { name: 'Dominica', lat: 15.43, lon: -61.35, span: 47 },
+  { name: 'Saint Lucia (Pitons)', lat: 13.9, lon: -60.98, span: 43 },
+  { name: 'Martinique (Pelée)', lat: 14.64, lon: -61.02, span: 70 },
+  { name: 'Guadeloupe (Basse-Terre)', lat: 16.19, lon: -61.68, span: 50 },
+  { name: 'Montserrat', lat: 16.74, lon: -62.19, span: 16 },
+  { name: 'Tristan da Cunha', lat: -37.11, lon: -12.28, span: 12 },
+  { name: 'Lord Howe Island', lat: -31.55, lon: 159.08, span: 11 },
+  { name: 'Capri', lat: 40.55, lon: 14.24, span: 6 },
+  { name: 'Ischia', lat: 40.73, lon: 13.9, span: 10 },
+  { name: 'Milos', lat: 36.7, lon: 24.44, span: 23 },
+  { name: 'Naxos', lat: 37.05, lon: 25.5, span: 35 },
+]
+export const ISLANDS = ISLAND_SPANS.map((i) => ({
+  name: i.name,
+  lat: i.lat,
+  lon: i.lon,
+  zoom: zoomForSpanKm(i.span, i.lat, { min: 9, max: 15 }),
+}))
+
 export const LANDMARKS = {
   Europe: [
     { name: 'Mont Blanc', lat: 45.8326, lon: 6.8652, zoom: 12 },
