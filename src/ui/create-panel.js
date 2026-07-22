@@ -3,7 +3,7 @@
 
 import { el, slider, color, swatch, toggle, select, segmented, button, section, refreshAll, visibleWhen } from './kit.js'
 import { Panel } from './shell.js'
-import { generatePalette, generateStyle, generateGridContour } from '../palette.js'
+import { generatePalette, generateEarthPalette, generateStyle, generateGridContour } from '../palette.js'
 import { PBR_PRESETS, GLASS_PRESETS, GLASS_BY_ID, PBR_BY_ID } from '../material-presets.js'
 import { FLAGS } from '../flags.js'
 
@@ -47,6 +47,16 @@ export function buildCreatePanel(ctx) {
     color({ label: 'Ink (contours)', get: () => params.contourColor, set: (v) => { params.contourColor = v; ctx.terrain.mapUniforms.uContourColor.value.set(v); ctx.globe.setInk(v) } }),
     color({ label: 'Grid', get: () => params.gridColor, set: (v) => { params.gridColor = v; ctx.terrain.mapUniforms.uGridColor.value.set(v) } })
   )
+  // Générateur « poline-style » (Adrien) : rampe relief + rampe océan en un
+  // clic, ancres de teinte par biome terrestre — puis Save VALIDE la palette
+  // courante dans la rangée Palettes du panneau Templates (défilable).
+  let lastGenName = null
+  const genRow = el('div', 'ce-btn-row')
+  genRow.append(
+    button('Generate palette', () => { const p = generateEarthPalette(); lastGenName = p.name; ctx.applyPalette(p); refreshAll() }, { accent: true }),
+    button('Save palette', () => { ctx.saveCurrentPalette?.(lastGenName); lastGenName = null }, { ghost: true })
+  )
+  sCol.body.append(genRow)
   const shuffleRow = el('div', 'ce-btn-row')
   shuffleRow.append(
     button('Shuffle palette', () => { ctx.applyPalette(generatePalette(Math.random, mode())); refreshAll() }),

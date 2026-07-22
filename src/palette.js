@@ -251,3 +251,68 @@ export function generateGridContour(rng = Math.random, mode = 'light') {
     gridColor: dark ? hslToHex(40 + rng() * 30, 10 + rng() * 20, 70 + rng() * 18) : hslToHex(30, 8, 12 + rng() * 10),
   }
 }
+
+// ---------------------------------------------------------------- earth palettes
+// Générateur « poline-style » (meodai.github.io/poline) : des ANCRES de teinte
+// en HSL (basse / moyenne / haute altitude) interpolées par arcs de teinte
+// courts avec easing — la chroma culmine au milieu, la luminosité descend (ou
+// monte vers la neige). Chaque tirage choisit un BIOME terrestre, donc les
+// palettes restent dans les couleurs de notre planète (Adrien). Renvoie la
+// rampe 8 arrêts + la rampe océan harmonisée + l'encre, en un clic.
+function lerpHueArc(a, b, t) {
+  const d = ((b - a + 540) % 360) - 180 // arc le plus court
+  return (a + d * t + 360) % 360
+}
+const easeSmooth = (t) => t * t * (3 - 2 * t)
+
+export const EARTH_BIOMES = ['Alpine', 'High desert', 'Volcanic', 'Arctic fjord', 'Rainforest', 'Canyon', 'Steppe', 'Lagoon atoll']
+export function generateEarthPalette(rng = Math.random) {
+  const R = (a, b) => a + rng() * (b - a)
+  const pickB = (arr) => arr[Math.floor(rng() * arr.length)]
+  // ancres [teinte, saturation %, luminosité %] : bas → milieu → haut
+  const BIOMES = {
+    'Alpine': { low: [R(85, 135), R(12, 26), R(80, 88)], mid: [R(26, 42), R(18, 34), R(56, 68)], high: [R(210, 230), R(3, 8), R(94, 98)] },
+    'High desert': { low: [R(44, 54), R(22, 36), R(88, 93)], mid: [R(26, 36), R(38, 54), R(60, 70)], high: [R(10, 22), R(32, 48), R(28, 40)] },
+    'Volcanic': { low: [R(24, 44), R(6, 14), R(82, 90)], mid: [R(8, 24), R(12, 26), R(36, 50)], high: [R(0, 16), R(8, 18), R(8, 18)] },
+    'Arctic fjord': { low: [R(188, 212), R(16, 32), R(86, 92)], mid: [R(200, 224), R(22, 38), R(64, 78)], high: [R(208, 228), R(5, 12), R(95, 99)] },
+    'Rainforest': { low: [R(95, 135), R(26, 42), R(68, 80)], mid: [R(85, 112), R(32, 48), R(40, 54)], high: [R(45, 62), R(14, 24), R(84, 92)] },
+    'Canyon': { low: [R(38, 48), R(26, 40), R(88, 94)], mid: [R(16, 30), R(46, 62), R(52, 64)], high: [R(6, 18), R(48, 64), R(26, 36)] },
+    'Steppe': { low: [R(52, 68), R(18, 30), R(84, 90)], mid: [R(38, 52), R(26, 40), R(58, 68)], high: [R(24, 36), R(20, 34), R(32, 44)] },
+    'Lagoon atoll': { low: [R(160, 180), R(24, 40), R(86, 92)], mid: [R(70, 100), R(22, 36), R(58, 70)], high: [R(35, 50), R(16, 28), R(90, 96)] },
+  }
+  const biome = pickB(EARTH_BIOMES)
+  const A = BIOMES[biome]
+  const anchors = [A.low, A.mid, A.high]
+  const snowCap = biome === 'Alpine' || biome === 'Arctic fjord' || rng() < 0.25
+  const stops = []
+  for (let i = 0; i < 8; i++) {
+    const t = i / 7
+    let h, s, l
+    if (t <= 0.5) {
+      const u = easeSmooth(t / 0.5)
+      h = lerpHueArc(anchors[0][0], anchors[1][0], u)
+      s = anchors[0][1] + (anchors[1][1] - anchors[0][1]) * u
+      l = anchors[0][2] + (anchors[1][2] - anchors[0][2]) * u
+    } else {
+      const u = easeSmooth((t - 0.5) / 0.5)
+      h = lerpHueArc(anchors[1][0], anchors[2][0], u)
+      s = anchors[1][1] + (anchors[2][1] - anchors[1][1]) * u
+      l = anchors[1][2] + (anchors[2][2] - anchors[1][2]) * u
+    }
+    // arc de chroma : la saturation culmine au milieu de la rampe (poline)
+    s *= 0.82 + 0.36 * Math.sin(Math.PI * t)
+    stops.push({ c: hslToHex(h, s, l), p: +t.toFixed(2) })
+  }
+  if (snowCap) stops[7] = { c: hslToHex(anchors[2][0], R(2, 6), R(95, 99)), p: 1 }
+  // océan harmonisé : famille turquoise→azur, clair au rivage, profond au large
+  const hSea = R(168, 208)
+  const sSea = R(30, 52)
+  return {
+    name: `${biome.toUpperCase()} ${pick(rng, NAMES_B)}`,
+    rampStops: stops,
+    oceanShallow: hslToHex(hSea + R(-6, 6), sSea + R(6, 14), R(82, 90)),
+    oceanMid: hslToHex(hSea + R(-8, 8), sSea + R(10, 20), R(46, 58)),
+    oceanDeep: hslToHex(hSea + R(-10, 10), sSea * 0.85, R(15, 25)),
+    ink: hslToHex(anchors[2][0], R(10, 20), R(8, 14)),
+  }
+}

@@ -957,6 +957,51 @@ body.ce-noui .ce-eye {
   height: 16px;
 }
 
+/* ---------------------- palettes validées — rangée défilable (Adrien) */
+.ce-pal-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ce-track) transparent;
+}
+.ce-pal-card {
+  position: relative;
+  flex: 0 0 auto;
+  width: 112px;
+  border: 1px solid var(--ce-border);
+  border-radius: 10px;
+  padding: 6px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.ce-pal-card:hover { border-color: var(--ce-accent); }
+.ce-pal-strip { display: flex; height: 14px; border-radius: 4px; overflow: hidden; }
+.ce-pal-strip span { flex: 1; }
+.ce-pal-ocean { margin-top: 3px; height: 8px; }
+.ce-pal-name {
+  display: block;
+  margin-top: 5px;
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: var(--ce-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ce-pal-x {
+  position: absolute;
+  top: 2px;
+  right: 5px;
+  font-size: 9px;
+  color: var(--ce-muted);
+  opacity: 0;
+}
+.ce-pal-card:hover .ce-pal-x { opacity: 1; }
+.ce-pal-x:hover { color: var(--ce-accent); }
+
 /* --------------------------------------------------- isometric view button */
 .ce-isobtn {
   position: fixed;

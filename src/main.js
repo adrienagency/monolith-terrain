@@ -53,6 +53,7 @@ import { buildRegionSkirt } from './region-skirt.js'
 import { makeSocleEnvMap } from './socle-env.js'
 import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
 import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, stripFromLook, loadUserTemplates, saveUserTemplates } from './templates-user.js'
+import { loadUserPalettes, saveUserPalettes, paletteFromParams } from './user-palettes.js'
 import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT } from './share-link.js'
 import { DroneCam } from './drone-cam.js'
 import { makeGradientTexture, deriveBgColors, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
@@ -1861,6 +1862,9 @@ function applyTemplate(t) {
 // ---- user templates: save the current look, restyle the current view with a
 // saved one (never moving the camera/location), export/import as .json ----
 let userTemplates = loadUserTemplates()
+// palettes VALIDÉES (Create › Save palette) — rangée défilable du panneau Templates
+let userPalettes = loadUserPalettes()
+let paletteRefreshFn = () => {}
 
 // push a captured look onto the live scene. Assign every look key onto params
 // first, then run the same scene pushers a built-in template uses.
@@ -2952,6 +2956,20 @@ let bgRefreshFn = () => {} // re-renders the Background HDRI picker highlight af
 // Templates section was split out into its own panel (Task 5)
 const panelCtx = {
   registerBgRefresh: (fn) => { bgRefreshFn = fn },
+  // --- palettes validées (Create › Save palette → rangée Palettes de Templates)
+  userPalettes: () => userPalettes,
+  registerPaletteRefresh: (fn) => { paletteRefreshFn = fn },
+  saveCurrentPalette: (name) => {
+    const rec = paletteFromParams(params, name || `PALETTE ${userPalettes.length + 1}`)
+    userPalettes.unshift(rec)
+    saveUserPalettes(userPalettes)
+    paletteRefreshFn()
+    modes.announce(`PALETTE SAVED — ${rec.name}`)
+  },
+  deleteUserPalette: (id) => {
+    userPalettes = userPalettes.filter((p) => p.id !== id)
+    saveUserPalettes(userPalettes)
+  },
   params,
   terrain,
   globe,
@@ -3567,9 +3585,34 @@ function tick() {
 }
 tick()
 
+// ---- mode EMBED (shibumap.com/templates) ------------------------------------
+// ?embed=1 : aucune UI, et la page hôte pilote la carte en live par postMessage.
+// Protocole : l'app poste {type:'shibumap:ready'} à son parent ; le parent envoie
+//   {type:'shibumap:apply', look}   → applique un look (partiel ou complet, mêmes
+//                                     clés que le champ "look" des templates JSON)
+//   {type:'shibumap:palette', palette} → applique juste une palette
+//   {type:'shibumap:goto', lat, lon, zoom} → vole vers une zone
+// Contrat STABLE : les clés de look inconnues sont ignorées (applyUserTemplate ne
+// pose que les TEMPLATE_KEYS présents), donc les mises à jour ne cassent pas le site.
+const EMBED = new URLSearchParams(location.search).has('embed')
+if (EMBED) {
+  document.body.classList.add('ce-noui')
+  window.addEventListener('message', (ev) => {
+    const d = ev.data || {}
+    try {
+      if (d.type === 'shibumap:apply' && d.look) applyUserTemplate({ look: d.look })
+      else if (d.type === 'shibumap:palette' && d.palette) { applyPalette(d.palette); refreshAll() }
+      else if (d.type === 'shibumap:goto' && Number.isFinite(d.lat) && Number.isFinite(d.lon)) modes.flyTo(d.lat, d.lon, d.zoom ?? 10)
+    } catch {}
+  })
+  try { window.parent?.postMessage({ type: 'shibumap:ready' }, '*') } catch {}
+}
+
 // first visit only: the guided tour introduces the UI once the boot view has
-// had a moment to settle (replayable anytime from the "?" in the top bar)
+// had a moment to settle (replayable anytime from the "?" in the top bar).
+// Jamais en mode embed — la vitrine /templates doit rester nue.
 setTimeout(async () => {
+  if (EMBED) return
   try {
     const { maybeStartTutorial } = await import('./ui/tutorial.js')
     maybeStartTutorial()

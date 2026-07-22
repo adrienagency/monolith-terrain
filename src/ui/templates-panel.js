@@ -42,6 +42,36 @@ export function buildTemplatesPanel(ctx) {
   resetWrap.append(resetBtn)
   panel.body.append(resetWrap)
 
+  // ------------------------------------------------------------- Palettes
+  // Couleurs VALIDÉES depuis Create › Colours (Adrien) — une rangée de cartes
+  // défilable vers la droite : bande relief + bande océan, clic = appliquer.
+  const sPal = panel.addSection(section('Palettes', { open: true }))
+  const palRow = el('div', 'ce-pal-row')
+  const palEmpty = el('div', 'ce-gpx-layers-empty', 'Generate a palette in Create › Colours, then Save it — it lands here.')
+  function renderPalettes() {
+    const list = ctx.userPalettes?.() || []
+    palRow.replaceChildren()
+    palEmpty.classList.toggle('hidden', list.length > 0)
+    for (const p of list) {
+      const card = el('button', 'ce-pal-card')
+      card.type = 'button'
+      card.title = p.name
+      const strip = el('div', 'ce-pal-strip')
+      for (const s of p.rampStops) { const seg = el('span'); seg.style.background = s.c; strip.append(seg) }
+      const ocean = el('div', 'ce-pal-strip ce-pal-ocean')
+      for (const c of [p.oceanShallow, p.oceanMid, p.oceanDeep]) { const seg = el('span'); seg.style.background = c; ocean.append(seg) }
+      const nameEl = el('span', 'ce-pal-name', p.name)
+      const x = el('span', 'ce-pal-x', '✕')
+      x.addEventListener('click', (e) => { e.stopPropagation(); ctx.deleteUserPalette?.(p.id); renderPalettes() })
+      card.append(strip, ocean, nameEl, x)
+      card.addEventListener('click', () => { ctx.applyPalette({ rampStops: p.rampStops, oceanShallow: p.oceanShallow, oceanMid: p.oceanMid, oceanDeep: p.oceanDeep, ink: p.ink }); refreshAll() })
+      palRow.append(card)
+    }
+  }
+  renderPalettes()
+  ctx.registerPaletteRefresh?.(renderPalettes)
+  sPal.body.append(palRow, palEmpty)
+
   // ------------------------------------------------------------ Templates
   const sTpl = panel.addSection(section('Templates', { open: true }))
   const cards = el('div', 'ce-cards')
