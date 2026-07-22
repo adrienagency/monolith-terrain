@@ -37,6 +37,13 @@ const FIELD_RES = 384 // height/shore field over the whole slab
 const LEN_SCALE = 0.42
 const SPEC_AMP_SUM = 1.5 // makeSeaState normalises the summed amplitude to this
 
+// remous de côte : leur taille apparente devient grossière quand on s'éloigne
+// (la bande de ressac occupe alors quelques pixels et « escalier »). On fond
+// leur amplitude avec la DISTANCE D'AFFICHAGE (rayon d'orbite caméra, unités
+// scène) : pleins sous SURF_NEAR, quasi plats au-delà de SURF_FAR. (retour Adrien)
+const SURF_NEAR = 26
+const SURF_FAR = 64
+
 const smooth01 = (t) => { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x) }
 const _v2 = new THREE.Vector2()
 
@@ -105,6 +112,8 @@ uniform float uHalf;     // le deplacement horizontal des vagues s'annule au
                          // bord du bloc pour rester soude a la jupe laterale
 uniform float uViewCalm; // 1 pres du sol -> 0 en tres haute altitude (la mer
                          // s'aplatit au-dela de ~10 km : vagues/ecume envahissantes)
+uniform float uSurfCalm; // 1 en vue rapprochee -> ~0 en vue large : efface les
+                         // remous de cote grossiers quand on s'eloigne
 ${GERSTNER_GLSL}
 ${SHORE_SURF_GLSL}
 uniform sampler2D uField;   // R ground Y, G shore distance (slab-wide)
@@ -151,10 +160,10 @@ void main() {
   // houle de côte : fronts qui suivent le trait de côte, gonflent et cassent
   float crestS;
   vec3 surf = shoreSurf(uvF, uField, uTime, uWaveH, uChop, uSpeedMul, uLenScale, uViewCalm, crestS);
-  disp.y += surf.x;
-  nAcc.x += surf.y;
-  nAcc.z += surf.z;
-  crest = max(crest, crestS);
+  disp.y += surf.x * uSurfCalm;
+  nAcc.x += surf.y * uSurfCalm;
+  nAcc.z += surf.z * uSurfCalm;
+  crest = max(crest, crestS * uSurfCalm);
   float edgeHold = 1.0 - smoothstep(uHalf - 2.0, uHalf - 0.15, max(abs(p.x), abs(p.z)));
   p.xz += disp.xz * edgeHold;
   // niveau moyen : zéro exactement à la ligne de côte, remonté au large de
@@ -183,6 +192,7 @@ uniform vec3 uSky;
 uniform float uSeabedCaustics; // caustiques du soleil (presets sable/lagon/posidonie)
 uniform float uFoamScale;      // moutons dosés par l'échelle de vue
 uniform float uViewCalm;       // accalmie en haute altitude (vagues + écume + détail)
+uniform float uSurfCalm;       // 1 de près -> ~0 de loin : atténue l'écume de côte
 uniform sampler2D uSceneTex;   // framebuffer copie juste avant l'eau (grab pass)
 uniform vec2 uResolution;
 uniform float uRefract;        // intensite de la refraction (slider)
@@ -343,9 +353,9 @@ void main() {
   // v45 : jonction mer-côte des photos de référence — une bande de ressac
   // texturée qui ourle le trait de côte, plus un LISERÉ net à la ligne d'eau
   float shoreW = (1.0 - smoothstep(0.10, 0.75, vFade)) * smoothstep(0.002, 0.03, vFade);
-  float shoreFoam = shoreW * smoothstep(0.22, 0.55, foamNoise * 0.6 + bands * 0.4) * (0.5 + 0.5 * uFoamScale) * uViewCalm;
+  float shoreFoam = shoreW * smoothstep(0.22, 0.55, foamNoise * 0.6 + bands * 0.4) * (0.5 + 0.5 * uFoamScale) * uViewCalm * uSurfCalm;
   // liseré de ressac : blanc franc au contact exact, bord cassé par le bruit
-  float swash = (1.0 - smoothstep(0.0, 0.02, vFade)) * smoothstep(0.25, 0.6, foamNoise + 0.2) * uViewCalm;
+  float swash = (1.0 - smoothstep(0.0, 0.02, vFade)) * smoothstep(0.25, 0.6, foamNoise + 0.2) * uViewCalm * uSurfCalm;
   float foam = clamp(crestFoam + shoreFoam * 1.8 + swash * 1.1, 0.0, 1.0);
 
   // v43 : COMPOSITE REFRACTE (grab pass). Le fond deja rendu est
@@ -395,6 +405,7 @@ uniform float uLift;
 uniform float uWaterY;
 uniform float uBottomY;
 uniform float uViewCalm;
+uniform float uSurfCalm;
 uniform sampler2D uField;
 ${GERSTNER_GLSL}
 ${SHORE_SURF_GLSL}
@@ -417,7 +428,7 @@ void main() {
     vec3 disp = oceanGerstner(p.xz, uTime, uWaveH * uViewCalm, uChop, uSpeedMul, uLenScale, fade, nAcc, crest);
     float crestS;
     vec3 surf = shoreSurf(uvF, uField, uTime, uWaveH, uChop, uSpeedMul, uLenScale, uViewCalm, crestS);
-    y = uWaterY + disp.y + surf.x + uLift * fadeLift + 0.025; // leger recouvrement : jamais de jour entre jupe et surface
+    y = uWaterY + disp.y + surf.x * uSurfCalm + uLift * fadeLift + 0.025; // leger recouvrement : jamais de jour entre jupe et surface
   }
   vWorld = vec3(p.x, y, p.z);
   vec4 mv = modelViewMatrix * vec4(vWorld, 1.0);
@@ -579,6 +590,7 @@ function waterMaterial({ isLake, params, fieldTex }) {
         uShallowT: { value: shallowT },
         uSeabedCaustics: { value: 0 },
         uViewCalm: { value: 1 },
+        uSurfCalm: { value: 1 },
         uFoamScale: { value: 1 },
         uSceneTex: { value: null },
         uResolution: { value: new THREE.Vector2(1, 1) },
@@ -859,6 +871,7 @@ export class RealWater {
               uFrost: { value: params.seaEdgeFrost ?? 0.5 },
               uDayLight: { value: 1 },
               uViewCalm: { value: 1 },
+              uSurfCalm: { value: 1 },
             },
           ]),
         })
@@ -1001,13 +1014,18 @@ export class RealWater {
   }
 
   // accalmie selon l'altitude REELLE de la camera : pleine mer sous 8 km,
-  // plate au-dela de 25 km (la mer/l'ecume envahissaient les vues continentales)
-  setView(cameraY) {
+  // plate au-dela de 25 km (la mer/l'ecume envahissaient les vues continentales).
+  // `viewDist` = distance d'affichage (rayon d'orbite, unites scene) : elle
+  // pilote la TAILLE des remous de cote — pleins de pres, effaces de loin ou
+  // ils lisaient grossiers (retour Adrien).
+  setView(cameraY, viewDist) {
     if (!this._demScale) return
     const km = Math.max(0, (cameraY - (this._seaBase ?? 0)) / this._demScale / 1000)
     const calm = smooth01((25 - km) / 17)
+    const surfCalm = viewDist == null ? 1 : 0.08 + 0.92 * smooth01((SURF_FAR - viewDist) / (SURF_FAR - SURF_NEAR))
     for (const mat of this.materials) {
       if (mat.uniforms.uViewCalm) mat.uniforms.uViewCalm.value = 0.08 + 0.92 * calm
+      if (mat.uniforms.uSurfCalm) mat.uniforms.uSurfCalm.value = surfCalm
     }
   }
 

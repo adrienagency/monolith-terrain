@@ -1,15 +1,15 @@
-// Underwater life — fish that wander the sea and a whale that surfaces now and
-// then. Appears only when the animated sea is on AND there is real sea in the
-// block (a dry alpine valley gets nothing; a coastline gets a small
-// population).
+// Underwater life — a handful of fish that wander the sea. Appears only when
+// the animated sea is on AND there is real sea in the block (a dry alpine
+// valley gets nothing; a coastline gets a small population).
+// La baleine v45 a été RETIRÉE (retour Adrien : trop de bugs visuels) — il ne
+// reste que les poissons, 3 max.
 //
-// COST, measured and deliberate: the two skinned models are lazy-loaded on the
+// COST, measured and deliberate: the skinned model is lazy-loaded on the
 // FIRST time the sea is enabled — a visitor who never turns the sea on
-// downloads zero bytes of them. Optimised from studio assets (whale 109 MB ->
-// 2.5 MB, fish 14 MB -> 2.7 MB: 256px webp textures, Draco geometry) so the
-// pair is ~5 MB, the weight of one HDRI. Geometry is ~10k triangles each, and
-// the population is tiny (a handful of fish, one whale), so per-frame cost is
-// an AnimationMixer update and a few steering vectors — negligible.
+// downloads zero bytes of it. Optimised from the studio asset (fish 14 MB ->
+// 2.7 MB: 256px webp textures, Draco geometry). Geometry is ~10k triangles,
+// the population is tiny (3 fish), so per-frame cost is an AnimationMixer
+// update and a few steering vectors — negligible.
 //
 // WHY A SYNTHETIC DEPTH: the DEM (AWS terrarium) has no bathymetry — it floors
 // the seabed at sea level, so the sea is a flat LID with zero real volume
@@ -22,9 +22,8 @@
 //
 // The fish move FREELY in 3D (the brief: "ils peuvent aller dans la direction
 // qui leur convient"), wandering the synthetic water column with the wet
-// footprint as their only horizontal fence. The whale cruises deep and
-// occasionally rises to break the surface (its own Jump/breach animation)
-// before diving back. Nothing is on a rail — it is boids-lite steering.
+// footprint as their only horizontal fence. Nothing is on a rail — it is
+// boids-lite steering.
 
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
@@ -38,13 +37,11 @@ const SYNTH_DEPTH = 7 // invented water column below the sea sheet (world units)
 const GROUND_CLEAR = 0.6 // never swim closer than this to real terrain below
 
 export class Creatures {
-  // sampleGround(x,z) → terrain height; getSeaY() → sea surface Y or null;
-  // isDeepZone() → true si la zone a de la vraie bathymétrie profonde
-  constructor(scene, { sampleGround, getSeaY, isDeepZone }) {
+  // sampleGround(x,z) → terrain height; getSeaY() → sea surface Y or null
+  constructor(scene, { sampleGround, getSeaY }) {
     this.scene = scene
     this.sampleGround = sampleGround
     this.getSeaY = getSeaY
-    this.isDeepZone = isDeepZone
 
     this.group = new THREE.Group()
     this.group.name = 'creatures'
@@ -55,7 +52,6 @@ export class Creatures {
     this._loaded = false
     this._loading = false
     this.fish = [] // { obj, mixer, vel(Vector3), turnT, size }
-    this.whale = null // { obj, mixer, state, t, vel, size, actions }
   }
 
   // Turned by main.js when the animated sea toggles. Loads on first real
@@ -86,16 +82,9 @@ export class Creatures {
       this._fishProto = g.scene
       this._fishAnims = g.animations
       normalise(this._fishProto, 1.1)
-      if (this.enabled) this._spawnFish(3)
-    }, undefined, () => {})
-
-    loader.load('models/whale.glb', (g) => {
-      this._whaleProto = g.scene
-      this._whaleAnims = g.animations
-      normalise(this._whaleProto, 7.0)
       this._loaded = true
       this._loading = false
-      if (this.enabled) this._spawnWhale()
+      if (this.enabled) this._spawnFish(3)
     }, undefined, () => { this._loading = false })
   }
 
@@ -106,9 +95,9 @@ export class Creatures {
     return (this.sampleGround?.(x, z) ?? 1e9) <= seaY + 0.08
   }
 
-  // A random wet spot inside the block, or null. `area` demands a ring of
-  // neighbours also be wet — a whale needs open water, not a puddle.
-  _findWaterSpot(area = 0, tries = 40) {
+  // A random wet spot with a real swim column (not a puddle) inside the block,
+  // or null after `tries` misses.
+  _findWaterSpot(tries = 40) {
     const seaY = this.getSeaY?.()
     if (seaY == null) return null
     for (let i = 0; i < tries; i++) {
@@ -117,11 +106,6 @@ export class Creatures {
       if (!this._isWet(x, z)) continue
       // une vraie colonne de nage, pas une flaque : sol nettement sous le toit
       if ((this.sampleGround?.(x, z) ?? 1e9) > seaY - (CLEAR + 0.5)) continue
-      if (area > 0) {
-        let ok = true
-        for (const [dx, dz] of [[area, 0], [-area, 0], [0, area], [0, -area]]) if (!this._isWet(x + dx, z + dz)) { ok = false; break }
-        if (!ok) continue
-      }
       return { x, z, seaY }
     }
     return null
@@ -148,28 +132,9 @@ export class Creatures {
     }
   }
 
-  _spawnWhale() {
-    // GRANDS FONDS uniquement (demande Adrien) : sans vraie bathymétrie
-    // profonde dans la zone, pas de baleine — une baie plate n'en porte pas
-    if (!(this.isDeepZone?.() ?? false)) return
-    const spot = this._findWaterSpot(6) // wants open water around it
-    if (!spot) return
-    const obj = cloneSkinned(this._whaleProto)
-    const mixer = new THREE.AnimationMixer(obj)
-    const byName = (re) => this._whaleAnims.find((a) => re.test(a.name))
-    const clip = (re) => { const c = byName(re); return c && mixer.clipAction(c) }
-    const actions = { swim: clip(/Swim1/i), jump: clip(/Jump1/i), breathe: clip(/Breathe/i) }
-    ;(actions.swim ?? actions.breathe)?.play()
-    obj.position.set(spot.x, spot.seaY - SYNTH_DEPTH * 0.6, spot.z)
-    this.group.add(obj)
-    this.whale = { obj, mixer, actions, state: 'cruise', t: 6 + Math.random() * 8,
-      vel: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize().multiplyScalar(0.9), size: 7, headZ: -1 }
-  }
-
   // Steer a swimmer: wander a little, fence it into the synthetic water column
-  // and keep it over wet ground. `lift` biases the vertical target (a breach
-  // passes positive; a dive passes negative).
-  _steer(c, dt, lift = 0) {
+  // and keep it over wet ground.
+  _steer(c, dt) {
     const p = c.obj.position
     const seaY = this.getSeaY?.()
     if (seaY == null) return
@@ -177,11 +142,10 @@ export class Creatures {
     // the seabed the swimmer may not cross: the invented column floor, but
     // lifted to stay clear of any REAL terrain that rises into the column
     // (shallows, a seamount) so it never touches or tunnels through the ground.
-    const clear = c.size > 3 ? 1.4 : GROUND_CLEAR
     const ground = this.sampleGround?.(p.x, p.z) ?? -1e9
     // garde au sol : pleine quand la colonne le permet, réduite dans les
     // hauts-fonds, jamais nulle — le relief ne se traverse JAMAIS
-    const guard = Math.min(clear, Math.max(0.12, ceil - ground))
+    const guard = Math.min(GROUND_CLEAR, Math.max(0.12, ceil - ground))
     let floor = Math.max(seaY - SYNTH_DEPTH, ground + guard)
     // colonne pincée (haut-fond / terre) : demi-tour franc vers le large
     if (floor > ceil - 0.05) {
@@ -201,10 +165,9 @@ export class Creatures {
       const vx = c.vel.x * co - c.vel.z * s, vz = c.vel.x * s + c.vel.z * co
       c.vel.set(vx, c.vel.y + (Math.random() - 0.5) * 0.35, vz)
     }
-    // vertical fences (unless a breach is lifting past the surface)
-    if (lift <= 0 && p.y > ceilEff - 0.5) c.vel.y -= (p.y - (ceilEff - 0.5)) * dt * 2
+    // vertical fences: never breach the surface, never dip below the floor
+    if (p.y > ceilEff - 0.5) c.vel.y -= (p.y - (ceilEff - 0.5)) * dt * 2
     if (p.y < floor + 0.5) c.vel.y += (floor + 0.5 - p.y) * dt * 2
-    c.vel.y += lift * dt
 
     // horizontal fence: turn back toward the block centre when nearing the
     // edge OR when the water column runs out ahead (shoal or land coming)
@@ -222,24 +185,22 @@ export class Creatures {
       }
     }
 
-    // clamp speed, advance, hard-clamp Y into the column (breach excepted)
-    const maxS = c.size > 3 ? 2.2 : 3.0
+    // clamp speed, advance, hard-clamp Y into the column
+    const maxS = 3.0
     const speed = c.vel.length()
     if (speed > maxS) c.vel.multiplyScalar(maxS / speed)
     p.addScaledVector(c.vel, dt)
     // hard clamp: fish stay INSIDE [floor, ceilEff] — below the surface AND
-    // above the ground. A breach (lift > 0) may rise above the roof, never
-    // below the floor: the relief is impassable in every state.
-    if (lift <= 0) p.y = THREE.MathUtils.clamp(p.y, floor, ceilEff)
-    else p.y = Math.max(p.y, floor)
+    // above the ground; the relief is impassable in every state.
+    p.y = THREE.MathUtils.clamp(p.y, floor, ceilEff)
 
     this._face(c.obj, c.vel, c.headZ)
   }
 
-  // Aim a swimmer along its velocity WITHOUT ever rolling it upside-down.
-  // headZ = -1 means the model's nose is on local -Z (fish/whale here); +1 means
-  // +Z. Yaw turns the nose onto the heading, pitch tips it up/down, roll is held
-  // at 0 — so a diving or climbing swimmer keeps its belly down.
+  // Aim a fish along its velocity WITHOUT ever rolling it upside-down.
+  // headZ = -1 means the model's nose is on local -Z (this fish); +1 means +Z.
+  // Yaw turns the nose onto the heading, pitch tips it up/down, roll is held at
+  // 0 — so a diving or climbing fish keeps its belly down.
   _face(obj, vel, headZ = -1) {
     if (vel.lengthSq() < 1e-6) return
     const horiz = Math.hypot(vel.x, vel.z)
@@ -253,33 +214,15 @@ export class Creatures {
     if (!this.enabled || !this._loaded) return
     const d = Math.min(dt, 0.05)
     for (const f of this.fish) { f.mixer.update(d); this._steer(f, d) }
-
-    if (this.whale) {
-      const w = this.whale
-      w.mixer.update(d)
-      w.t -= dt
-      const seaY = this.getSeaY?.() ?? 0
-      if (w.state === 'cruise') {
-        this._steer(w, d)
-        if (w.t <= 0) { w.state = 'rise'; w.t = 6; w.actions.jump?.reset().setLoop(THREE.LoopOnce).play(); if (w.actions.jump) w.actions.jump.clampWhenFinished = true }
-      } else if (w.state === 'rise') {
-        this._steer(w, d, 2.6) // lift toward + through the surface
-        if (w.obj.position.y > seaY + w.size * 0.12 || w.t <= 0) { w.state = 'dive'; w.t = 8 }
-      } else {
-        this._steer(w, d, -1.6) // sink back into the column
-        if (w.obj.position.y < seaY - SYNTH_DEPTH * 0.5 || w.t <= 0) { w.state = 'cruise'; w.t = 16 + Math.random() * 16; w.actions.swim?.reset().play() }
-      }
-    }
   }
 
   // A rebuild (zoom/pan/sea-level change) invalidates every spawn point —
-  // clear and, if still enabled + loaded, re-seat everyone in the new sea.
+  // clear and, if still enabled + loaded, re-seat the fish in the new sea.
   rebuild() {
     for (const f of this.fish) this.group.remove(f.obj)
-    if (this.whale) this.group.remove(this.whale.obj)
-    this.fish = []; this.whale = null
-    if (this.enabled && this._loaded) { this._spawnFish(3); this._spawnWhale() }
+    this.fish = []
+    if (this.enabled && this._loaded) this._spawnFish(3)
   }
 
-  dispose() { this.group.clear(); this.fish = []; this.whale = null }
+  dispose() { this.group.clear(); this.fish = [] }
 }

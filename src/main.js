@@ -740,14 +740,12 @@ const traffic = new Traffic(scene, terrain, params)
 // the sea as a colour-tintable, environment-reflecting glass block
 // water simulation is behind FLAGS.water (v37, disabled in prod); null when off
 const realWater = FLAGS.water ? new RealWater(scene) : null
-// underwater life — fish + an occasional surfacing whale. Lazy-loaded on the
-// first sea enable (see creatures.js); reads sea level + ground live so a zoom
-// or a dry block never strands anyone.
+// underwater life — a few fish that wander the sea. Lazy-loaded on the first
+// sea enable (see creatures.js); reads sea level + ground live so a zoom or a
+// dry block never strands anyone.
 const creatures = FLAGS.water ? new Creatures(scene, {
   sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0,
   getSeaY: () => { const y = terrain.mapUniforms?.uSeaY?.value; return (y != null && y > -9000) ? realWater?._seaBase ?? y : null },
-  // grands fonds = la zone porte de la vraie bathymétrie profonde (≥ 80 m)
-  isDeepZone: () => (terrain.dem?.minM ?? 0) < -80,
 }) : null
 const mapLayers = new MapLayers(scene, camera) // roads/water/places overlays, populated per zone
 
@@ -3096,8 +3094,8 @@ function tick() {
   if (dof) dof.cocMaterial.worldFocusDistance = params.focusDistance
 
   realWater?.update(dt, sun) // water simulation: waves, caustics, sun glint
-  creatures?.update(dt) // fish wander, whale surfaces — only when the sea is on
-  realWater?.setView(camera.position.y) // accalmie de la mer en haute altitude
+  creatures?.update(dt) // fish wander — only when the sea is on
+  realWater?.setView(camera.position.y, controls.getDistance?.() ?? camera.position.distanceTo(controls.target)) // accalmie altitude + taille des remous de côte selon la distance d'affichage
   aq.update(dt) // adaptive quality: sample FPS, step tiers when sustained
   composer.render(dt)
   if (recorder?.recording) recorder.captureFrame() // null until first export
