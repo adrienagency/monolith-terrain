@@ -1954,8 +1954,9 @@ const blockGrid = new BlockGrid({ scene, params, getMainDem: () => dem, getMainT
 const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: () => dem, getGrid: () => blockGrid })
 
 const allGpxPoints = () => gpxLayer.layers.flatMap((l) => l.gpx.track?.points ?? [])
-// un voisin vient de finir de charger → re-draper les traces dessus
-blockGrid.onReady = () => gpxLayer.rebuildAll()
+// un voisin vient de finir de charger → re-draper les traces + peindre sa photo
+// aérienne si la couche est active (même finition que le bloc central)
+blockGrid.onReady = (cell) => { gpxLayer.rebuildAll(); paintCellAerial(cell) }
 // le damier se resynchronise à CHAQUE re-drapage global (zone, zoom, ajout de
 // calque) — idempotent, borné 5×5, cellules en cache LRU
 const _rebuildAllRaw = gpxLayer.rebuildAll.bind(gpxLayer)
@@ -2288,6 +2289,27 @@ async function refreshAerial() {
   }
   aerialAttribution = built.attribution
   refreshOsmCredit()
+  // même finition sur les blocs voisins : leur peindre la photo aussi
+  for (const cell of blockGrid.cells.values()) paintCellAerial(cell)
+}
+
+// Photo aérienne sur UNE cellule du damier — même provider/registre que le bloc
+// central. AerialLayer dédié par cellule (son _buildId ne collisionne pas avec
+// les autres). Silencieux : une cellule sans couverture garde sa carte peinte
+// (contexte), aucune notice — le bloc central porte déjà l'attribution légale.
+async function paintCellAerial(cell) {
+  if (!cell?.terrain || !cell.dem) return
+  const on = params.aerialEnabled && params.source === 'real'
+  if (!on) { cell.terrain.setAerial(null); return }
+  const bounds = blockBounds(cell.dem)
+  if (aerialUnavailable(bounds)) { cell.terrain.setAerial(null); return }
+  const prov = providerForAerial(bounds)
+  if (prov?.global && params.demZoom > 8) { cell.terrain.setAerial(null); return }
+  cell.aerial ??= new AerialLayer({ maxTexturePx: renderer.capabilities.maxTextureSize })
+  const built = await cell.aerial.build(bounds)
+  if (built === SUPERSEDED || !built?.texture) return
+  cell.terrain.setAerial(built)
+  cell.terrain.setAerialOpacity(params.aerialOpacity)
 }
 const rebuildMapLayers = () => { const p = mapLayers.rebuild({ dem, terrain, params }); refreshOsmCredit(); refreshAerial(); return p.then(() => refreshOsmCredit()) }
 
@@ -2833,6 +2855,7 @@ const mapPanel = buildMapPanel({
   u: () => terrain.mapUniforms,
   mapLayers,
   rebuildMapLayers,
+  blockGrid, // le slider d'opacité aérien propage aux blocs voisins
   // the aerial controls need both — this panel gets its OWN ctx, so adding
   // them to panelCtx above does nothing for it
   terrain,
@@ -2989,7 +3012,7 @@ history.record()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, creatures, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, creatures, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
 
 applyTimeOfDay(params.timeOfDay ?? 10) // seed the sun/disc/lake for the opening view
 

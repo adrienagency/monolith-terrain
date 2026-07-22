@@ -169,6 +169,11 @@ export class BlockGrid {
     return cell.terrain.sample(x - i * TERRAIN_SIZE, z - j * TERRAIN_SIZE)
   }
 
+  // opacité de la photo aérienne (slider Map) → toutes les cellules
+  setAerialOpacity(v) {
+    for (const cell of this.cells.values()) cell.terrain?.setAerialOpacity?.(v)
+  }
+
   // le look a changé (template, contours, rampe…) — re-peindre les voisins
   restyle(params) {
     for (const cell of this.cells.values()) {
@@ -185,6 +190,7 @@ export class BlockGrid {
   }
 
   _disposeCell(cell) {
+    cell.aerial?.dispose?.() // AerialLayer dédié de la cellule (posé par main.js)
     if (cell.walls) {
       this.scene.remove(cell.walls)
       cell.walls.geometry?.dispose() // le matériau des murs est PARTAGÉ (socle principal) — ne pas disposer
