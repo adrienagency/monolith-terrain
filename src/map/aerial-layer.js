@@ -102,11 +102,16 @@ const CH_OUTLINE = [
   [7.85, 45.92], [7.05, 45.87], [6.80, 46.05], [6.13, 46.14], [5.96, 46.13],
   [6.06, 46.42], [6.44, 46.77], [6.87, 47.00], [7.00, 47.50],
 ]
+// v48 : le bord ouest suivait une diagonale grossière qui coupait à travers la
+// BRETAGNE SUD — Lorient, Quiberon, Concarneau, Quimper tombaient hors IGN
+// (retour Adrien : « pas de carte dans le golfe du Morbihan »). Le bord épouse
+// désormais la côte atlantique et le pourtour du Finistère.
 const FR_OUTLINE = [
   [2.37, 51.03], [4.23, 50.28], [6.36, 49.46], [8.23, 48.97], [7.59, 47.59],
   [8.40, 47.00], [9.60, 46.30], [7.90, 45.85], [7.19, 44.12], [7.53, 43.78],
   [5.00, 43.00], [3.04, 42.47], [0.66, 42.69], [-1.79, 43.35], [-1.25, 44.50],
-  [-1.15, 46.20], [-2.50, 47.50], [-4.79, 48.40], [-1.85, 49.72], [1.58, 50.95],
+  [-1.15, 46.20], [-2.25, 47.05], [-2.60, 47.25], [-3.30, 47.28], [-3.90, 47.55],
+  [-4.40, 47.72], [-4.90, 47.95], [-4.95, 48.45], [-1.85, 49.72], [1.58, 50.95],
 ]
 const FR_BOXES = [
   [8.5, 41.3, 9.6, 43.1], // Corsica

@@ -156,6 +156,13 @@ test('providerFor: French places get IGN', () => {
   }
 })
 
+// v48: southern Brittany coast was cut off by a coarse diagonal — regression pin
+test('providerFor: southern Brittany coast gets IGN', () => {
+  for (const [name, lon, lat] of [['Vannes/Morbihan', -2.76, 47.63], ['Lorient', -3.37, 47.75], ['Quiberon', -3.12, 47.48], ['Concarneau', -3.92, 47.87], ['Quimper', -4.1, 47.99]]) {
+    assert.equal(providerFor(at(lon, lat))?.id, 'ign', name)
+  }
+})
+
 test('providerFor: Swiss places get swisstopo', () => {
   for (const [name, lon, lat] of [['Zermatt', 7.75, 46.02], ['Zurich', 8.54, 47.37], ['Geneva', 6.14, 46.2], ['Verbier', 7.23, 46.1], ['Lugano', 8.95, 46.0]]) {
     assert.equal(providerFor(at(lon, lat))?.id, 'swisstopo', name)

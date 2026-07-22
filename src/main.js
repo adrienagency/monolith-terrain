@@ -390,6 +390,7 @@ const params = {
   envLight: 0.16,
   shadowSoftness: 5,
   timeOfDay: 10, // 24 h sun-cycle slider (0..24) — drives sun az/el/intensity/colour
+  dayCycleSpeed: 1, // auto-cycle speed 1..100 : 1 = a full 24 h in 1 min
 }
 
 // ------------------------------------------------------------------ share-link restore

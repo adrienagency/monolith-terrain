@@ -810,6 +810,50 @@ body.dark .hud-row span {
   min-width: 38px;
   text-align: right;
 }
+/* play/pause + speed for the automatic day/night cycle */
+.ce-hp-play {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ce-ink);
+  font-size: 9px;
+  line-height: 18px;
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.ce-hp-play:hover { opacity: 0.9; }
+.ce-hp-play.on {
+  opacity: 0.95;
+  background: rgba(141, 136, 124, 0.22);
+}
+.ce-hp-speed {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 18px;
+  box-sizing: border-box;
+  padding: 0 4px;
+  border: 1px solid var(--ce-border, rgba(255, 255, 255, 0.45));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ce-ink);
+  font-family: 'SF Mono', ui-monospace, monospace;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  opacity: 0.7;
+  -moz-appearance: textfield;
+}
+.ce-hp-speed:focus { outline: none; opacity: 1; }
+.ce-hp-speed::-webkit-outer-spin-button,
+.ce-hp-speed::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
 
 /* ---------------------------------------------------------------- vertical zoom stepper */
 .zoom-stepper {
