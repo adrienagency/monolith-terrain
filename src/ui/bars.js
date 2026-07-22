@@ -176,6 +176,45 @@ export function buildCineButton(ctx) {
   return { root: btn, setVisible: (v) => btn.classList.toggle('off', !v) }
 }
 
+// bottom-LEFT twin of the iso/cine corner (Adrien) : three cartography
+// controls. Left→right: aerial-photo toggle (green tick when active), return to
+// base cartography, and a full shuffle that rebats every look option at once.
+const MC = {
+  aerial: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8" cy="10" r="1.6"/><path d="M3 16l5-4 4 3 3-2.5 6 4.5"/></svg>',
+  base: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m9 4-6 2.4v13.2L9 17l6 2.4 6-2.4V3.6L15 6 9 3.6Z"/><path d="M9 3.6V17M15 6v13.4"/></svg>',
+  shuffle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="M4 4l5 5"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12.5 10 17.5 19 6.5"/></svg>',
+}
+export function buildMapCorner(ctx) {
+  const mk = (icon, tip, extraCls = '') => {
+    const b = el('button', `ce-mapbtn ce-glassbox ${extraCls}`.trim())
+    b.type = 'button'
+    b.innerHTML = icon
+    b.setAttribute('data-tip', tip)
+    document.body.append(b)
+    return b
+  }
+  const aerial = mk(MC.aerial, 'Aerial photography — click to toggle (where imagery is available).', 'ce-mapbtn-aerial')
+  const check = el('span', 'ce-mapbtn-check')
+  check.innerHTML = MC.check
+  aerial.append(check)
+  const base = mk(MC.base, 'Back to the base cartography (Ctrl+Z also steps back).', 'ce-mapbtn-base')
+  const shuffle = mk(MC.shuffle, 'Shuffle — rebats every look option at once. Different each click.', 'ce-mapbtn-shuffle')
+
+  aerial.addEventListener('click', () => ctx.toggleAerial())
+  base.addEventListener('click', () => ctx.resetBase())
+  shuffle.addEventListener('click', () => {
+    shuffle.classList.add('spin')
+    setTimeout(() => shuffle.classList.remove('spin'), 500)
+    ctx.shuffle()
+  })
+
+  return {
+    setAerialActive: (v) => aerial.classList.toggle('on', !!v),
+    setVisible: (v) => { for (const b of [aerial, base, shuffle]) b.classList.toggle('off', !v) },
+  }
+}
+
 export function buildBottomBar(ctx) {
   const bar = el('div', 'ce-bottombar ce-glassbox')
 

@@ -997,6 +997,58 @@ body.ce-noui .ce-isobtn {
   display: none;
 }
 
+/* ------------------------------------ bottom-LEFT cartography corner (Adrien) */
+/* twin of the iso/cine corner, mirrored to the left: aerial toggle · base · shuffle */
+.ce-mapbtn {
+  position: fixed;
+  bottom: 14px;
+  z-index: 60;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: 1px solid var(--ce-border);
+  color: var(--ce-ink);
+}
+.ce-mapbtn svg {
+  width: 20px;
+  height: 20px;
+}
+.ce-mapbtn:hover {
+  border-color: var(--ce-accent);
+  color: var(--ce-accent);
+}
+.ce-mapbtn-aerial { left: 14px; }
+.ce-mapbtn-base { left: 64px; }
+.ce-mapbtn-shuffle { left: 114px; }
+/* green tick, top-right of the aerial button, only while the layer is active */
+.ce-mapbtn-check {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #2ecc71;
+  color: #fff;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 2px var(--ce-bg, #fff);
+}
+.ce-mapbtn-check svg { width: 10px; height: 10px; }
+.ce-mapbtn-aerial.on { border-color: #2ecc71; color: #2ecc71; }
+.ce-mapbtn-aerial.on .ce-mapbtn-check { display: inline-flex; }
+.ce-mapbtn-shuffle.spin svg { animation: ce-mapshuffle 0.5s ease; }
+@keyframes ce-mapshuffle { to { transform: rotate(180deg); } }
+.ce-mapbtn.off,
+body.ce-noui .ce-mapbtn {
+  display: none;
+}
+
 /* --------------------------------------------------------------- guided tour */
 .ce-tour {
   position: fixed;
@@ -1226,7 +1278,7 @@ body.ce-noui .ce-rec {
 .ce-credits {
   position: fixed;
   left: 18px;
-  bottom: 18px;
+  bottom: 64px; /* clears the bottom-left cartography button row (Adrien) */
   z-index: 40;
   display: flex;
   align-items: center;

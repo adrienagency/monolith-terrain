@@ -63,7 +63,8 @@ import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
 import { showNotice } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
-import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits } from './ui/bars.js'
+import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner } from './ui/bars.js'
+import { TEMPLATES } from './templates.js'
 import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
 import { buildChangelogOverlay } from './ui/changelog-overlay.js'
 import { APP_STAGE } from './changelog.js'
@@ -952,6 +953,7 @@ window.addEventListener('wheel', () => (lastUserInput = performance.now()), { pa
 
 let modes = null // assigned once the globe + mode machine exist (below)
 let isoBtn = null // assigned once the bars exist — referenced by the mode hooks
+let mapCorner = null // bottom-left cartography corner — assigned once bars exist
 let cineBtn = null
 let aq = null // adaptive quality controller (perf.js) — built after the panels
 let recorder = null // Recorder instance, lazy-loaded with the export stack
@@ -1399,6 +1401,7 @@ modes = new Modes({
       mapLayers.setSurfaceVisible(v)
       isoBtn?.setVisible(v) // the isometric shortcut only makes sense over the block
       cineBtn?.setVisible(v)
+      mapCorner?.setVisible(v) // cartography corner is surface-only too
       scene.fog = v && params.fogEnabled ? fogRef : null
       refreshOsmCredit() // GeoNames credit only applies in surface mode — resync on mode change
     },
@@ -1955,6 +1958,65 @@ function resetAll() {
   history?.record() // committed look change — one undo step
 }
 
+// SHUFFLE (Adrien) — rebats every look option at once: a coherent built-in
+// template as a base, then a fresh sea (new seed → different sea), a random
+// surface shader, a random hour, and a few layer toggles on top. Location and
+// camera are never touched. One history step, so Ctrl+Z / the base button both
+// undo the whole thing in one move.
+function shuffleLook() {
+  const rnd = (a, b) => a + Math.random() * (b - a)
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
+  const chance = (p) => Math.random() < p
+
+  // 1) coherent base — a random built-in template, applied inline (no interim
+  //    history.record(), unlike applyTemplate, so the shuffle stays ONE step)
+  const tpl = pick(Object.values(TEMPLATES))
+  setDarkMode(tpl.darkMode ?? false)
+  if (tpl.palette) applyPalette(tpl.palette)
+  if (tpl.style) applyStyle(tpl.style)
+  if (tpl.grid) applyGridContour(tpl.grid)
+  if (tpl.light) applyLight(tpl.light)
+  if (tpl.surface) applySurface(tpl.surface)
+  if (tpl.look) applyLook(tpl.look)
+
+  // 2) random hour of day (daylight-ish band so it rarely lands pitch black)
+  params.timeOfDay = +rnd(5.5, 19.5).toFixed(1)
+  applyTimeOfDay(params.timeOfDay)
+  hourPill?.refresh?.()
+
+  // 3) surface shader — 45% a random FX, otherwise none
+  const fxIds = FX_LIST.map((f) => f.id).filter((id) => id > 0)
+  params.surfaceFx = chance(0.45) ? pick(fxIds) : 0
+  terrain.setSurfaceFx(params.surfaceFx | 0)
+  if (params.surfaceFx > 0 && params.fx?.[params.surfaceFx]) terrain.applyFxParams(params.fx[params.surfaceFx])
+
+  // 4) animated sea — usually on, with a NEW seed so the swell differs each time
+  params.waterReal = chance(0.75)
+  params.seaSeed = Math.floor(rnd(1, 9999))
+  params.seaWaveH = +rnd(0.3, 1.6).toFixed(2)
+  params.seaChop = +rnd(0.3, 0.95).toFixed(2)
+  params.seaSpeed = +rnd(0.6, 1.6).toFixed(2)
+  params.seaBed = pick(['map', 'sand', 'lagoon', 'abyss', 'seagrass', 'ink'])
+  waterRebuild()
+  realWater?.setWaves?.({ height: params.seaWaveH, choppiness: params.seaChop, speed: params.seaSpeed })
+  realWater?.setLook?.(params)
+
+  // 5) layers — a few random toggles. Contours/grid dialled, clouds on/off,
+  //    aerial optimistically tried (refreshAerial re-disables it where there's
+  //    no imagery, so this can never leave a lying green tick)
+  params.contourOpacity = chance(0.5) ? +rnd(0.15, 0.6).toFixed(2) : 0
+  params.gridOpacity = chance(0.3) ? +rnd(0.1, 0.4).toFixed(2) : 0
+  applyGridContour({ contourInterval: params.contourInterval, contourOpacity: params.contourOpacity, contourColor: params.contourColor, contourWeight: params.contourWeight, gridStep: params.gridStep, gridOpacity: params.gridOpacity, gridColor: params.gridColor })
+  params.cloudsEnabled = chance(0.4)
+  if (clouds) { if (params.cloudsEnabled) clouds.build(params); clouds.setVisible(params.cloudsEnabled && modes.mode === 'surface') }
+  params.aerialEnabled = chance(0.3)
+  refreshAerial()
+
+  refreshAll()
+  history?.record() // one undo step for the whole shuffle
+  modes?.announce?.('SHUFFLE')
+}
+
 // ------------------------------------------------------------------ GPX layer(s)
 // task 22: gpxLayer is now a GpxLayerManager — a stack of up to MAX_LAYERS
 // GpxLayer instances (gpx-layers.js). It exposes the same track/headT/
@@ -2236,7 +2298,14 @@ function refreshOsmCredit() {
 // WMTS. Rides rebuildMapLayers so it follows every location change on its own.
 const aerialLayer = new AerialLayer({ maxTexturePx: renderer.capabilities.maxTextureSize })
 let aerialAttribution = null
+// public entry: run the refresh, then reflect the TRUE final state on the
+// bottom-left aerial button (refreshAerial self-disables where imagery is
+// missing, so the green tick must follow params, not the click)
 async function refreshAerial() {
+  await refreshAerialCore()
+  mapCorner?.setAerialActive(params.aerialEnabled && params.source === 'real')
+}
+async function refreshAerialCore() {
   if (!params.aerialEnabled || !dem || params.source !== 'real') {
     terrain.setAerial(null)
     aerialAttribution = null
@@ -2672,6 +2741,14 @@ isoBtn = buildIsoButton({
   flyIso: () => applyIsoView(isoIndex + 1),
 })
 
+// bottom-left cartography corner (Adrien) : aerial toggle · base · shuffle
+mapCorner = buildMapCorner({
+  toggleAerial: () => { params.aerialEnabled = !params.aerialEnabled; refreshAerial(); refreshAll() },
+  resetBase: () => resetAll(),
+  shuffle: () => shuffleLook(),
+})
+mapCorner.setAerialActive(params.aerialEnabled && params.source === 'real')
+
 let bgRefreshFn = () => {} // re-renders the Background HDRI picker highlight after a template/reset (declared before the panel build so registerBgRefresh isn't a TDZ access)
 // shared by the Templates panel AND the Create panel — Templates needs the
 // same template/reset/dark-mode methods Create used to hold before its
@@ -2895,7 +2972,7 @@ const effectsPanel = buildEffectsPanel({
 
 // the 24h slider lives top-right as a pill now — the Create panel's Light
 // section is gone entirely (this was its only control)
-buildHourPill({ params, applyTimeOfDay })
+const hourPill = buildHourPill({ params, applyTimeOfDay })
 
 const explorePanel = buildExplorePanel({
   flyTo: (lat, lon, zoom) => modes.flyTo(lat, lon, zoom),
