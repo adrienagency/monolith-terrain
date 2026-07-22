@@ -1986,11 +1986,21 @@ function shuffleLook() {
   applyTimeOfDay(params.timeOfDay)
   hourPill?.refresh?.()
 
-  // 3) surface shader — 45% a random FX, otherwise none
+  // 3) surface shader — 45% a random FX, but DISCREET (Adrien) : an elegant
+  //    blend MASK + low opacity so it textures the map instead of replacing it.
   const fxIds = FX_LIST.map((f) => f.id).filter((id) => id > 0)
   params.surfaceFx = chance(0.45) ? pick(fxIds) : 0
   terrain.setSurfaceFx(params.surfaceFx | 0)
-  if (params.surfaceFx > 0 && params.fx?.[params.surfaceFx]) terrain.applyFxParams(params.fx[params.surfaceFx])
+  if (params.surfaceFx > 0 && params.fx?.[params.surfaceFx]) {
+    const fp = params.fx[params.surfaceFx]
+    // BLEND_MODES indices (fx-meta.js) — les modes qui restent élégants : 10 Soft
+    // light · 9 Overlay · 2 Multiply · 6 Screen · 16 Colour · 17 Luminosity.
+    // Soft light / Overlay pondérés (les plus sûrs sur une carte claire) ; on
+    // évite Normal (remplacement) et les modes durs (burn/dodge/difference…).
+    fp.blend = pick([10, 10, 10, 9, 9, 2, 6, 16, 17])
+    fp.opacity = +rnd(0.18, 0.5).toFixed(2) // discret : une texture, pas un aplat
+    terrain.applyFxParams(fp)
+  }
 
   // 4) animated sea — usually on, with a NEW seed so the swell differs each time
   params.waterReal = chance(0.75)
