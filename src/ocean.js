@@ -269,20 +269,10 @@ void main() {
   float depth = mask.g * uLakeDepth;
   float shoreAA = smoothstep(0.35, 0.55, mask.a);
 #else
-  // OSM COAST MASK is the REAL land/sea boundary (Adrien) : flat polders — like
-  // Dunkirk — sit BELOW sea level yet are LAND, so the elevation test alone
-  // floods the whole town with waves. Where the mask says land, there is simply
-  // no sea, whatever the height. uvF maps 1:1 to the terrain's own coast-mask UV.
   // real bathymetry when the tiles carry it; distance-to-shore as the stand-in
   // where the sea floor is a flat 0 m plain (fine zooms)
   float depth = max(uWaterY - f.r, f.g * 1.6);
-  // OSM coast mask removes flat LAND at/below sea level (polders like Dunkirk the
-  // elevation test alone floods). SAFETY (Adrien) : gated to SHALLOW water only,
-  // so a coarse or wrong mask can NEVER erase open/deep sea — polders sit barely
-  // below the surface, real sea runs deep.
-  float bathy = max(uWaterY - f.r, 0.0);
-  if (uCoastMaskOn > 0.5 && bathy < uDepthMax * 0.4 && texture2D(uCoastMask, uvF).r > 0.5) discard;
-  if (uWaterY - f.r < -0.005) discard; // land clearly ABOVE sea (islets, DEM noise)
+  if (uWaterY - f.r < -0.005) discard; // land
   float shoreAA = smoothstep(0.0, 0.02, depth);
 #endif
   float d01 = clamp(depth / uDepthMax, 0.0, 1.0);
