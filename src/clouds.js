@@ -329,8 +329,14 @@ const DECK_FRAG = /* glsl */ `
       // straight through — thin rims and wisps glow, strongest facing the sun
       float thin = exp(-depth * 2.0);
       vec3 sss = uSunColor * uSSS * thin * (0.35 + 0.65 * sat(cosA));
-      vec3 col = sun + sss + uAmbColor;
-      float extinction = d * dt * 0.9;
+      // VOLUME (Adrien) : the cloud BASE lies in the shadow of the mass above it,
+      // so it reads grey/dark while the domed top catches the light — the classic
+      // 3D cumulus. Darken by height within the deck ; thick towers get a deeper,
+      // more graded belly than thin wisps.
+      float hLocal = clamp((wp.y - uBoxMin.y) / max(uBoxMax.y - uBoxMin.y, 1e-3), 0.0, 1.0);
+      float baseShade = mix(0.42, 1.0, smoothstep(0.05, 0.5, hLocal));
+      vec3 col = (sun + sss + uAmbColor) * baseShade;
+      float extinction = d * dt * 1.2; // denser : reads solid over the dark sea, not a wisp
       float stepTrans = exp(-extinction);
       light += col * (1.0 - stepTrans) * transmittance;
       transmittance *= stepTrans;

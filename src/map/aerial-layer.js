@@ -107,7 +107,9 @@ const CH_OUTLINE = [
 // (retour Adrien : « pas de carte dans le golfe du Morbihan »). Le bord épouse
 // désormais la côte atlantique et le pourtour du Finistère.
 const FR_OUTLINE = [
-  [2.37, 51.03], [4.23, 50.28], [6.36, 49.46], [8.23, 48.97], [7.59, 47.59],
+  // north tip pushed to Bray-Dunes / Dunkirk (~51.09) — the old 51.03 edge cut
+  // Dunkirk out, so it fell back to the global provider and the aerial failed
+  [2.62, 51.10], [4.23, 50.28], [6.36, 49.46], [8.23, 48.97], [7.59, 47.59],
   [8.40, 47.00], [9.60, 46.30], [7.90, 45.85], [7.19, 44.12], [7.53, 43.78],
   [5.00, 43.00], [3.04, 42.47], [0.66, 42.69], [-1.79, 43.35], [-1.25, 44.50],
   [-1.15, 46.20], [-2.25, 47.05], [-2.60, 47.25], [-3.30, 47.28], [-3.90, 47.55],
