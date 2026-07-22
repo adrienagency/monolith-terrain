@@ -117,6 +117,9 @@ export class Modes {
       'wheel',
       (e) => {
         if (this.mode === 'surface') {
+          // pendant le suivi de tête GPX, la molette pilote le STANDOFF de la
+          // caméra de suivi (zoom/dézoom autour de la tête) — pas l'escalier
+          if (this.hooks.followWheel?.(e.deltaY)) { e.preventDefault(); return }
           if (this._diveTween || this.busy) return
           e.preventDefault()
           const now = performance.now()

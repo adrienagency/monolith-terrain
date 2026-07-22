@@ -1451,6 +1451,13 @@ modes = new Modes({
     // the landing target, so the arrival camera can never come to rest below
     // the ground it just loaded.
     sampleGroundY: (x, z) => terrain.sample?.(x, z) ?? 0,
+    // molette pendant le suivi de tête GPX : zoome/dézoome le standoff du
+    // drone (consommé → l'escalier de zoom ne voit pas l'événement)
+    followWheel: (deltaY) => {
+      if (!(drone.active && params.gpxFollow && gpxLayer.isPlaying())) return false
+      drone.zoomBy(deltaY > 0 ? 1.13 : 1 / 1.13)
+      return true
+    },
     // world point under a screen NDC (for zoom-toward-cursor) — marches the
     // height field like the autofocus ray; null on a sky/off-map miss
     pointUnder: (nx, ny) => {

@@ -187,8 +187,10 @@ export class DroneCam {
     // see setView()/zoomBy()/tiltBy() and src/ui/follow-pad.js.
     this.viewBearingDeg = 90 // compass deg the camera sits AT from the head (90 = east of it)
     this.topDown = false // view 5
-    this.dist = 11 // standoff, world units ('elle suit de loin')
-    this.tiltDeg = 24 // camera height angle above the head ('toujours un angle')
+    // départ par défaut (retour Adrien) : deux fois plus loin qu'avant et un
+    // peu plus vertical — la molette zoome/dézoome librement pendant le suivi
+    this.dist = 22 // standoff, world units (avant 11)
+    this.tiltDeg = 42 // hauteur au-dessus de la tête (avant 24)
 
     // ---- runtime tuning ----
     // BEAUCOUP plus réactif (retour Adrien) : la position rattrape vite la tête
@@ -219,7 +221,7 @@ export class DroneCam {
     this.viewBearingDeg = compass[n]
   }
 
-  zoomBy(factor) { this.dist = THREE.MathUtils.clamp(this.dist * factor, 3, 40) }
+  zoomBy(factor) { this.dist = THREE.MathUtils.clamp(this.dist * factor, 3, 60) }
   // left/right arrows: orbit the view around the head — still user-driven,
   // the bearing only moves when a hand moves it
   rotateBy(deltaDeg) { this.topDown = false; this.viewBearingDeg = ((this.viewBearingDeg + deltaDeg) % 360 + 360) % 360 }

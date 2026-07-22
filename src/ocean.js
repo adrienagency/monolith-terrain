@@ -91,7 +91,8 @@ function chopLook(c) {
 // (oceanShallow/Mid/Deep) - l'eau transparente au-dessus fait le reste :
 // sable clair + lame turquoise peu profonde = rendu lagon caraibes.
 export const SEABEDS = [
-  { id: 'map', name: 'Map', floor: null, caustics: 0 },
+  // v46 : caustiques aussi sur 'map' (discrètes) — l'effet existe par défaut
+  { id: 'map', name: 'Map', floor: null, caustics: 0.7 },
   { id: 'sand', name: 'Sand', floor: { shallow: '#efe3c0', mid: '#dcc491', deep: '#ab9066' }, caustics: 1 },
   { id: 'lagoon', name: 'Lagoon', floor: { shallow: '#c8f2e4', mid: '#62cfc1', deep: '#136e7d' }, caustics: 1 },
   { id: 'abyss', name: 'Abyss', floor: { shallow: '#27435e', mid: '#122a42', deep: '#050c16' }, caustics: 0 },
@@ -316,14 +317,27 @@ void main() {
   vec3 body = mix(uDeep, mix(uShallowT, uDeep, pow(dRt, 0.7)), lagoonW);
   body *= mix(vec3(0.10, 0.16, 0.30), vec3(1.0), uDayLight);
 
-  // caustiques du soleil : elles eclairent le FOND, donc d'autant plus
-  // visibles que l'eau est claire et peu profonde
+  // v46 : CAUSTIQUES façon photos de piscine (retour Adrien) — un réseau de
+  // filaments FINS et BRILLANTS qui danse sur le fond. Même phase itérée à
+  // deux échelles, puis remise en forme (pow) pour amincir les mailles et
+  // pousser les crêtes vers le blanc brûlé. Elles vivent dans la BANDE LAGON
+  // (dRt, les premiers ~15% du budget de profondeur) — comme la vraie
+  // lumière, forte sur le sable clair, éteinte au large.
   float sunUp = clamp(L.y, 0.0, 1.0);
   float ca = caustic(xz * 4.0 + vec2(uTime * 0.06), uTime * 0.9);
   float ca2 = caustic(xz * 1.8 - vec2(uTime * 0.03), uTime * 0.45);
   float causNet = clamp(ca * 1.3 + ca2 * 0.45, 0.0, 1.5);
+  float causFil = pow(clamp(causNet, 0.0, 1.35), 3.0) * 2.2; // filaments fins, crêtes rares et chaudes
   float causMask = uSeabedCaustics * clamp(uCaustics * uSunFx, 0.0, 3.0) * sunUp
-                 * (0.05 + 0.95 * uDayLight) * (1.0 - smoothstep(0.0, 0.85, dR));
+                 * (0.05 + 0.95 * uDayLight) * (1.0 - smoothstep(0.15, 1.15, dRt));
+  vec3 causCol = mix(uSunColor, vec3(1.0), 0.55); // blanc solaire, comme les photos
+  // Le contraste des photos : creux des mailles légèrement éteint, réseau
+  // lumineux par-dessus en SCREEN BLEND — éclaire sans jamais brûler une base
+  // déjà claire (l'additif crevait tout au blanc sur le glacis lagon).
+  vec3 causGlow = clamp(causCol * causFil * clamp(causMask, 0.0, 1.6), 0.0, 1.0);
+  float causTrough = 1.0 - 0.3 * clamp(causMask, 0.0, 1.0) * (1.0 - clamp(causNet, 0.0, 1.0));
+  body = clamp(body * causTrough, 0.0, 1.0);
+  body = 1.0 - (1.0 - body) * (1.0 - causGlow * 0.35); // la lame porte les filaments à toute transparence
 
   // large-scale patchiness: without it the glitter and the whitecaps line up
   // in parallel rows along the dominant swell — the "repeating waves" flag
@@ -376,8 +390,11 @@ void main() {
   // rien, l'ancien *vFade l'éteignait donc exactement où elle se voyait
   vec2 refOff = N.xz * uRefract * 0.09 * (0.3 + 0.7 * vFade);
   vec3 through = texture2D(uSceneTex, clamp(screenUv + refOff, vec2(0.001), vec2(0.999))).rgb;
-  through += uSunColor * min(causNet * causMask, 1.2) * 0.6;
-  through = mix(through, through * (1.0 - 0.35 * clamp(causMask, 0.0, 1.0)), (1.0 - clamp(causNet, 0.0, 1.0)) * 0.4);
+  // filaments brûlés sur le FOND vu à travers l'eau + assombrissement du
+  // creux des mailles (le contraste des photos : fond légèrement éteint,
+  // réseau incandescent par-dessus)
+  through = clamp(through * (1.0 - 0.4 * clamp(causMask, 0.0, 1.0) * (1.0 - clamp(causNet, 0.0, 1.0))), 0.0, 1.0);
+  through = 1.0 - (1.0 - through) * (1.0 - causGlow * 0.75);
   col = mix(through, col, wOp);
   // reflets de surface : jamais attenues par la transparence
   col = mix(col, uSky, fres * 0.35);

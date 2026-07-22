@@ -1,47 +1,14 @@
-// On-screen view pad for GPX follow — the user drives the camera now.
-//
-// A numpad-style 3x3 (1..9) of fixed views around the race head (5 = top
-// down), + / - to zoom, arrows to tilt. Shown only while follow is active.
-// Every control exists twice on purpose: as a keyboard shortcut AND as a
-// clickable button ('pour ceux qui n'ont pas de clavier numérique').
+// Contrôles caméra du GPX follow — CLAVIER UNIQUEMENT depuis le retour Adrien :
+// le pavé 3x3 à l'écran « ne sert à rien lors de la lecture du trail et bloque
+// l'accès aux autres panneaux » — supprimé. Les raccourcis restent (numpad 1-9
+// = vues fixes autour de la tête, 5 = top-down, +/- zoom, flèches tilt/orbite)
+// et sont documentés dans l'overlay des raccourcis. La molette zoome aussi
+// pendant le suivi (voir modes.js followWheel).
 
-import { el } from './kit.js'
-
-let padEl = null
 let keyHandler = null
-
-const LABELS = { 7: '↖', 8: '↑', 9: '↗', 4: '←', 5: '⬇', 6: '→', 1: '↙', 2: '↓', 3: '↘' }
 
 export function showFollowPad(drone) {
   hideFollowPad()
-  padEl = el('div', 'ce-followpad')
-  padEl.innerHTML = ''
-  const grid = el('div', 'ce-fp-grid')
-  for (const n of [7, 8, 9, 4, 5, 6, 1, 2, 3]) {
-    const b = el('button', 'ce-fp-btn', LABELS[n])
-    b.title = n === 5 ? 'Vue top-down (5)' : `Vue ${n}`
-    b.dataset.n = n
-    b.addEventListener('click', () => drone.setView(n))
-    grid.append(b)
-  }
-  const row = el('div', 'ce-fp-row')
-  const mk = (txt, title, fn) => {
-    const b = el('button', 'ce-fp-btn', txt)
-    b.title = title
-    b.addEventListener('click', fn)
-    return b
-  }
-  row.append(
-    mk('−', 'Dézoomer (−)', () => drone.zoomBy(1.18)),
-    mk('+', 'Zoomer (+)', () => drone.zoomBy(1 / 1.18)),
-    mk('◀', 'Pivoter à gauche (←)', () => drone.rotateBy(-10)),
-    mk('▶', 'Pivoter à droite (→)', () => drone.rotateBy(10)),
-    mk('▲', 'Tilt haut (↑)', () => drone.tiltBy(6)),
-    mk('▼', 'Tilt bas (↓)', () => drone.tiltBy(-6))
-  )
-  padEl.append(grid, row)
-  document.body.append(padEl)
-
   keyHandler = (e) => {
     // never steal keys from an input field
     if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) return
@@ -60,6 +27,4 @@ export function showFollowPad(drone) {
 
 export function hideFollowPad() {
   if (keyHandler) { document.removeEventListener('keydown', keyHandler); keyHandler = null }
-  padEl?.remove()
-  padEl = null
 }

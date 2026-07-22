@@ -767,39 +767,8 @@ body.dark .hud-row span {
 }
 
 /* --------------------------------------------------- follow view pad */
-/* The 3x3 view pad shown during GPX follow — keyboard 1..9 mirrored as
-   clickable buttons, plus zoom and tilt. Bottom-right, out of the profile
-   card's way, same paper family as the toast. */
-.ce-followpad {
-  position: fixed;
-  right: 14px;
-  bottom: 74px;
-  z-index: 60;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px;
-  border-radius: 12px;
-  background: rgba(252, 251, 248, 0.92);
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 10px 30px rgba(20, 24, 28, 0.16);
-  backdrop-filter: blur(12px);
-}
-body.dark .ce-followpad { background: rgba(18, 19, 22, 0.9); border-color: rgba(255, 255, 255, 0.1); }
-.ce-fp-grid { display: grid; grid-template-columns: repeat(3, 34px); gap: 4px; }
-.ce-fp-row { display: flex; gap: 4px; justify-content: space-between; }
-.ce-fp-btn {
-  width: 34px; height: 30px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.7);
-  font: 14px 'Bricolage Grotesque', system-ui, sans-serif;
-  color: #23201a;
-  cursor: pointer;
-}
-.ce-fp-btn:hover { background: #e8622c; color: #fff; border-color: #e8622c; }
-.ce-fp-row .ce-fp-btn { flex: 1; }
-body.dark .ce-fp-btn { background: rgba(255, 255, 255, 0.08); color: #e8e4da; border-color: rgba(255, 255, 255, 0.12); }
+/* (le pavé 3x3 du GPX follow a été supprimé — clavier + molette seulement,
+   voir ui/follow-pad.js) */
 
 /* ------------------------------------------------- hour pill (day/night) */
 /* Same glass family and same column as the right-dock panels — a quiet
