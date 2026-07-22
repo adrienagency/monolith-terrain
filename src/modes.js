@@ -53,13 +53,20 @@ const MSG_MS = 3600
 // surface zoom is a CUSTOM inertial dolly (OrbitControls zoom is off): each
 // wheel notch adds to a log-space velocity that decays slowly, so the élan
 // coasts over many notches (Adrien: "au moins 20 crans"). A notch is small on
-// purpose; the momentum (ZOOM_TAU) is what gives the long, smooth glide. One
-// full level of zoom takes ~20 notches (LEVEL_SPAN / (IMPULSE·TAU)).
+// purpose; the momentum (ZOOM_TAU) is what gives the long, smooth glide. The
+// glide CLAMPS at the zone's near/far limit and never crosses a level on its
+// own — a FRESH scroll while already pinned at the limit steps to the next
+// level (Adrien: "le zoom s'arrête au max de la zone, on re-scroll pour passer").
 const ZOOM_IMPULSE = 0.05 // per wheel notch, added to the zoom velocity (log-dist/s)
 const ZOOM_TAU = 1.2 // s — velocity decay time constant; big → the coast stretches far
-const ZOOM_VEL_MAX = 1.3 // caps a fast burst so it can't overshoot a whole level in one flick
+const ZOOM_VEL_MAX = 1.3 // caps a fast burst
 const ZOOM_STOP = 0.015 // velocity below which the coast is considered spent
-const LEVEL_SPAN = 1.6 // log-distance of one level's zoom; step fires at 70% of it
+const WHEEL_GAP_MS = 220 // a wheel event this long after the last starts a FRESH gesture
+// the zone's own zoom budget (log-distance) — the glide CLAMPS here, it does not
+// run to the physical near/far stop. ~STEP_IN of zoom-in ≈ the comfortable
+// "au moins 20 crans" span; a fresh re-scroll at the limit steps a level.
+const STEP_IN = 1.2 // max zoom-IN per level (≈ 3.3×) before the in-limit
+const STEP_OUT = 0.55 // max zoom-OUT per level (≈ 1.7×) before the out-limit
 
 // task 30 Fix A: the isometric-ish viewing angle every dive/refine arrival
 // has always used (camera.position(0,18,19), looking at (0,-0.3,0)) — kept
@@ -99,7 +106,8 @@ export class Modes {
     this._zoomVel = 0 // surface inertial dolly velocity (log-dist units/s)
     this._zoomNdc = new THREE.Vector2() // cursor NDC of the last wheel notch
     this._zoomPivot = null // world point the coast zooms toward (last valid)
-    this._levelZoom = 0 // log-distance zoomed within the current level (reset per transition)
+    this._lastWheelT = 0 // ms of the last wheel event — a big gap means a fresh gesture
+    this._levelZoom = 0 // log-distance zoomed within the level; clamped to [-STEP_IN, STEP_OUT]
 
     this._buildDom()
 
@@ -111,9 +119,30 @@ export class Modes {
         if (this.mode === 'surface') {
           if (this._diveTween || this.busy) return
           e.preventDefault()
-          // add a notch of momentum to the inertial dolly (see _applyZoom). The
-          // velocity decays slowly (ZOOM_TAU) so the élan coasts over many
-          // notches. deltaY < 0 = zoom in → positive velocity.
+          const now = performance.now()
+          const fresh = now - this._lastWheelT > WHEEL_GAP_MS // a new gesture, not a continuous scroll
+          this._lastWheelT = now
+          const dist = this.controls.getDistance()
+          const inward = e.deltaY < 0
+          // "at the zone limit" = the level's zoom budget is spent (or the
+          // physical near stop / far stop is reached anyway)
+          const atInLimit = this._levelZoom <= -STEP_IN + 0.03 || dist <= this.controls.minDistance * 1.02 || this.hooks.nearGround?.()
+          const atOutLimit = this._levelZoom >= STEP_OUT - 0.03 || dist >= this.controls.maxDistance * 0.98
+          // GUARD-RAIL (Adrien): the glide stops at the zone limit; a FRESH
+          // re-scroll while already pinned there is what steps to the next level.
+          if (fresh && inward && atInLimit) {
+            this._resetZoom()
+            this._refine()
+            return
+          }
+          if (fresh && !inward && atOutLimit) {
+            this._resetZoom()
+            if (this.hooks.getCoarsenTarget()) this._coarsen()
+            else this.enterOrbit()
+            return
+          }
+          // otherwise just feed the inertial glide — it clamps at the limit and
+          // never crosses a level on its own (see _applyZoom).
           this._zoomVel = THREE.MathUtils.clamp(
             this._zoomVel + Math.sign(-e.deltaY) * ZOOM_IMPULSE,
             -ZOOM_VEL_MAX,
@@ -510,13 +539,16 @@ export class Modes {
     const min = c.minDistance
     const max = c.maxDistance
     const dist = c.getDistance()
-    const dir0 = Math.sign(this._zoomVel) // motion direction, captured before decay
     let factor = Math.exp(-this._zoomVel * dt) // vel > 0 (zoom in) → factor < 1
-    const newDist = THREE.MathUtils.clamp(dist * factor, min, max)
+    let newDist = THREE.MathUtils.clamp(dist * factor, min, max)
+    // clamp to the level's own zoom budget: the glide stops at the zone limit
+    // (Adrien) instead of running to the physical near/far stop
+    let dLog = Math.log(Math.max(newDist, 1e-6) / Math.max(dist, 1e-6))
+    if (this._levelZoom + dLog < -STEP_IN) { dLog = -STEP_IN - this._levelZoom; this._zoomVel = 0 }
+    else if (this._levelZoom + dLog > STEP_OUT) { dLog = STEP_OUT - this._levelZoom; this._zoomVel = 0 }
+    this._levelZoom += dLog
+    newDist = dist * Math.exp(dLog)
     factor = newDist / dist
-    // how much zoom has been consumed IN THIS LEVEL since the last transition
-    // (log-space, so it's a true "how many times zoomed"): negative = zoomed in
-    this._levelZoom += Math.log(newDist / Math.max(dist, 1e-6))
     const P = this._zoomPivot
     if (P && Math.abs(factor - 1) > 1e-6) {
       // scale the scene about the pivot so that point stays put on screen
@@ -528,26 +560,10 @@ export class Modes {
     }
     c.update()
     this._zoomVel *= Math.exp(-dt / ZOOM_TAU) // the coast
-    if (newDist <= min + 1e-3 || newDist >= max - 1e-3) this._zoomVel = 0 // don't grind the stop
+    // clamp at the zone limit and spend the momentum there — the glide never
+    // crosses a level; a fresh re-scroll at the limit does (see the wheel handler)
+    if (newDist <= min + 1e-3 || newDist >= max - 1e-3) this._zoomVel = 0
     if (Math.abs(this._zoomVel) < ZOOM_STOP) this._zoomVel = 0 // coast spent
-
-    // staircase (Adrien: "70% du scroll du niveau, pas la tête contre la paroi")
-    // — ONE level of zoom ≈ LEVEL_SPAN in log-distance; step at 70% of that.
-    // IN: needs the accumulated zoom-in past the threshold (so a view that just
-    // starts close doesn't refine on the first notch) OR the ground is skimmed.
-    // OUT: fires on the wide end alone — there's little dolly room before the
-    // far stop, so waiting for a full level of zoom-out would never trigger.
-    const range = max - min
-    const t = range > 1e-3 ? (newDist - min) / range : 0
-    const STEP = 0.7 * LEVEL_SPAN
-    if (dir0 > 0 && (this._levelZoom <= -STEP || this.hooks.nearGround?.())) {
-      this._zoomVel = 0
-      this._refine()
-    } else if (dir0 < 0 && (this._levelZoom >= STEP || t >= 0.7)) {
-      this._zoomVel = 0
-      if (this.hooks.getCoarsenTarget()) this._coarsen()
-      else this.enterOrbit()
-    }
   }
 
   // ---------------------------------------------------------------- per-frame
