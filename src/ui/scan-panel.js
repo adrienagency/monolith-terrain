@@ -21,7 +21,7 @@ export function buildScanPanel(ctx) {
     title: 'Scan',
     icon: ICON,
     side: 'left',
-    width: 250,
+    width: 268,
     tip: 'Run an animated survey sweep over the terrain.',
   })
 

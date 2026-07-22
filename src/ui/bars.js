@@ -122,6 +122,12 @@ export function buildTopBar(ctx) {
     document.body.classList.toggle('ce-noui', v)
   }
 
+  // final order (Adrien): wordmark · globe DARK │ share help shortcuts hide │
+  // EXPORT far right. appendChild MOVES the already-built nodes, so this just
+  // reorders them; only the two discrete vertical separators are new.
+  const sep = () => el('span', 'ce-topbar-sep')
+  bar.append(globeBtn, dark, sep(), shareBtn, helpBtn, shortcutsBtn, hideBtn, sep(), exportBtn)
+
   document.body.append(bar, eye)
   return { root: bar, syncDark }
 }

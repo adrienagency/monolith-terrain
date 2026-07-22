@@ -175,6 +175,16 @@ body.dark {
   height: 30px;
   margin: 0 2px;
 }
+/* discrete vertical separators between top-bar groups */
+.ce-topbar-sep {
+  align-self: center;
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 5px;
+  background: var(--ce-border);
+  opacity: 0.7;
+}
 
 /* discreet hover tooltip */
 .ce-tip {

@@ -13,7 +13,7 @@ export function buildExplorePanel(ctx) {
     title: 'Explore',
     icon: ICON,
     side: 'left',
-    width: 250,
+    width: 268,
     tip: 'Fly to a curated list of the most beautiful places on Earth.',
   })
 
