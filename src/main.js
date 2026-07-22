@@ -492,20 +492,36 @@ container.appendChild(renderer.domElement)
 const scene = new THREE.Scene()
 // background can be a flat colour or a gradient texture (disposed on change)
 let _bgTex = null
+let _lastBgMul = -1 // last day/night multiplier baked into the backdrop
+// Day/night FILTER on the backdrop (Adrien) : the background keeps its chosen
+// colour but is dimmed by the solar day factor — dark at night, full by day. A
+// plain multiply, the most legible "night filter". 0.12 floor so the hue still
+// reads at midnight instead of going pure black.
+function bgDayMul() {
+  const dl = skyState?.dayLight ?? 1
+  return 0.12 + 0.88 * dl
+}
 function applyBackground() {
-  // an HDRI sky, when chosen, takes over the whole backdrop + lighting
-  if (params.bgEnv) { applyEnvironment(); return }
+  const mul = bgDayMul()
+  _lastBgMul = mul
+  // an HDRI sky, when chosen, takes over the whole backdrop + lighting. Its
+  // brightness follows the cycle via scene.backgroundIntensity, and an opaque
+  // floor keeps a ground under the socle (the shadow base would show sky).
+  if (params.bgEnv) { plinth.setGroundColor(params.bgColorA); plinth.setGroundVisible(true); applyEnvironment(); scene.backgroundIntensity = mul; return }
+  plinth.setGroundVisible(false) // solid/gradient : the shadow base IS the ground
+  scene.backgroundIntensity = 1
   // no HDRI → make sure neutral IBL is back (a sky may have replaced it)
   if (scene.environment !== roomEnvTex) scene.environment = roomEnvTex
   _envBg = null
   if (_bgTex) { _bgTex.dispose(); _bgTex = null }
+  const dim = (hex) => '#' + new THREE.Color(hex).multiplyScalar(mul).getHexString()
   if (!params.bgMode || params.bgMode === 'solid') {
-    // solid backdrop = the picked Colour A (bug : lisait fogColor, donc changer
-    // la couleur unie ne changeait rien — retour Adrien). Le fond uni suit
-    // maintenant le sélecteur « Colour A ».
-    scene.background = new THREE.Color(params.bgColorA)
+    // solid backdrop = the picked Colour A (bug : lisait fogColor — retour
+    // Adrien), dimmed by the day factor so the ground (shadow base showing this
+    // background through its transparency) darkens with it too.
+    scene.background = new THREE.Color(dim(params.bgColorA))
   } else {
-    _bgTex = makeGradientTexture({ mode: params.bgMode, a: params.bgColorA, b: params.bgColorB, c: params.bgColorC, angle: params.bgAngle })
+    _bgTex = makeGradientTexture({ mode: params.bgMode, a: dim(params.bgColorA), b: dim(params.bgColorB), c: dim(params.bgColorC), angle: params.bgAngle })
     scene.background = _bgTex
   }
 }
@@ -651,6 +667,11 @@ function applyTimeOfDay(hour) {
   // read as broad daylight at midnight.
   const wantDark = darkModeFor(s.sunElevation, params.darkMode)
   if (wantDark !== params.darkMode) setDarkMode(wantDark)
+
+  // the BACKDROP (and, through the transparent shadow base, the ground) follows
+  // the cycle too — dark at night, bright by day. Re-dim only on a meaningful
+  // change so the auto-cycle never re-bakes the gradient every single frame.
+  if (Math.abs(bgDayMul() - _lastBgMul) > 0.015) applyBackground()
 }
 
 function placeSun() {

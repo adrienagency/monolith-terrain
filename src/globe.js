@@ -88,7 +88,14 @@ void main() {
   float ch5 = ch / 5.0;
   float major = 1.0 - smoothstep(0.0, fwidth(ch5) * 1.5, abs(fract(ch5 + 0.5) - 0.5));
   float crowd = clamp(1.0 - dch * 0.30, 0.0, 1.0);
-  float contour = max(minor * 0.5, major) * uContourOpacity * crowd;
+  // MINIFICATION fade (Adrien : scintillement de la map en orbite) — the height
+  // texture carries no mipmaps (they corrupt the packed metres), so when the
+  // tile shrinks in the orbital/travel view the sampled height aliases and the
+  // contour lines CRAWL. Fade them out as the tile minifies (texels per screen
+  // pixel > ~1) so the far globe reads clean; they return in full up close.
+  float texel = max(fwidth(vUv).x, fwidth(vUv).y) * 256.0;
+  float minFade = clamp(1.6 - texel * 0.55, 0.0, 1.0);
+  float contour = max(minor * 0.5, major) * uContourOpacity * crowd * minFade;
   contour *= h < 0.0 ? 0.35 : 1.0; // bathymetric contours read lighter
   col = mix(col, uInk, contour);
 

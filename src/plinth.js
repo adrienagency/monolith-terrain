@@ -171,6 +171,20 @@ export class Plinth {
     this.base.receiveShadow = true
     this.group.add(this.base)
 
+    // OPAQUE studio floor — shown ONLY when an HDRI sky is active (Adrien : « le
+    // sol disparaît avec un HDRI »). With a solid/gradient backdrop the shadow
+    // base above already reads as the ground (it shows the background through
+    // its transparency) ; but an HDRI wraps a sky panorama all around, so without
+    // this the socle floats in the sky. It's a LIT MeshStandard, so it follows
+    // the day/night cycle on its own. When it's on, the shadow base is hidden so
+    // the shadow isn't doubled — this ground receives it directly.
+    this.groundMat = new THREE.MeshStandardMaterial({ color: 0xcfd3d8, roughness: 0.96, metalness: 0 })
+    this.ground = new THREE.Mesh(new THREE.PlaneGeometry(TERRAIN_SIZE * 3.4, TERRAIN_SIZE * 3.4), this.groundMat)
+    this.ground.rotation.x = -Math.PI / 2
+    this.ground.receiveShadow = true
+    this.ground.visible = false
+    this.group.add(this.ground)
+
     // glass ground-pool: light through a coloured glass casts a coloured shadow
     // on the table. three's transmission can't tint the shadow, so we paint the
     // glass colour into a rounded-rect glow (matching the block footprint) and
@@ -328,6 +342,7 @@ export class Plinth {
     const { geo, baseY } = buildSlabWalls(sample, { depth: this.depth, resolution: params.resolution ?? 256, cornerR, cornerExp: 2 })
     this.baseY = baseY
     this.base.position.y = baseY
+    this.ground.position.y = baseY - 0.02 // opaque floor just under the shadow base
     this.glassPool.position.y = baseY + 0.05 // glass colour pools just over the table
     this.walls.geometry.dispose()
     this.walls.geometry = geo
@@ -346,5 +361,16 @@ export class Plinth {
   setVisible(v) {
     this.group.visible = v
     this.glassPool.visible = v && this.isGlass && (this._poolStrength ?? 0) > 0.001
+  }
+
+  // opaque floor: on with an HDRI (keeps a ground under the socle), off with a
+  // solid/gradient backdrop (the shadow base already reads as the ground). When
+  // it's on, hide the shadow base so the cast shadow isn't doubled.
+  setGroundVisible(v) {
+    this.ground.visible = !!v
+    this.base.visible = !v
+  }
+  setGroundColor(hex) {
+    if (hex) this.groundMat.color.set(hex)
   }
 }
