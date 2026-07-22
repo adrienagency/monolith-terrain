@@ -150,10 +150,18 @@ export function buildIsoButton(ctx) {
   const btn = el('button', 'ce-isobtn ce-glassbox')
   btn.type = 'button'
   btn.innerHTML = I.iso
-  btn.setAttribute('data-tip', 'Isometric view — the full block, plate and cartouche.')
+  // petit numéro en haut à droite de l'icône : quelle vue on regarde (Adrien)
+  const badge = el('span', 'ce-iso-badge')
+  badge.style.display = 'none'
+  btn.append(badge)
+  btn.setAttribute('data-tip', 'Isometric view — click to cycle: four angles, top-down (north), ground level.')
   btn.addEventListener('click', () => ctx.flyIso())
   document.body.append(btn)
-  return { root: btn, setVisible: (v) => btn.classList.toggle('off', !v) }
+  return {
+    root: btn,
+    setVisible: (v) => btn.classList.toggle('off', !v),
+    setBadge: (t) => { badge.textContent = t ?? ''; badge.style.display = t ? '' : 'none' },
+  }
 }
 
 // Cinematic shortcut — the iso button's twin, one slot left: random looping

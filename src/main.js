@@ -557,7 +557,9 @@ const controls = new OrbitControls(camera, renderer.domElement)
 controls.target.set(0, -0.3, 0)
 controls.enableZoom = false // zoom is the mode machine's custom inertial dolly
 controls.enableDamping = true
-controls.dampingFactor = 0.06
+// élan sur le drag (retour Adrien) : le résidu de rotation décroît lentement,
+// une rotation à la souris a de la lancée au lieu de s'arrêter net. τ ≈ 0.35 s
+controls.dampingFactor = 0.03
 controls.maxPolarAngle = Math.PI * 0.49
 controls.minDistance = 6
 controls.maxDistance = 150 // room to frame the whole slab before the orbit gate
@@ -783,11 +785,24 @@ const EASINGS = {
 }
 const tween = {
   active: false,
+  orbit: false, // true = rotation orbitale (slerp direction) plutôt qu'un lerp droit
   t: 0,
   p0: new THREE.Vector3(),
   p1: new THREE.Vector3(),
   t0: new THREE.Vector3(),
   t1: new THREE.Vector3(),
+}
+// slerp de deux directions unitaires (rotation d'orbite propre) → `out`
+const _twTgt = new THREE.Vector3()
+const _twD0 = new THREE.Vector3()
+const _twD1 = new THREE.Vector3()
+const _twDir = new THREE.Vector3()
+function slerpDir(a, b, t, out) {
+  const dot = THREE.MathUtils.clamp(a.dot(b), -1, 1)
+  if (dot > 0.9995) return out.copy(b) // quasi colinéaires : lerp suffit
+  const theta = Math.acos(dot) * t
+  out.copy(b).addScaledVector(a, -dot).normalize() // composante de b ⟂ à a
+  return out.multiplyScalar(Math.sin(theta)).addScaledVector(a, Math.cos(theta))
 }
 let scan = null // ScanController — instantiated once the terrain exists
 let regionSkirt = null // vertical curtain welding the cut edge down to a base
@@ -812,7 +827,7 @@ let hud3 = createHud3D(params.seed, pois, { ink: effInk(), accent: params.hudAcc
 hud3.lines.visible = params.surveyLines
 scene.add(hud3.group)
 
-function flyTo(pos, target) {
+function flyTo(pos, target, opts = {}) {
   cameraAuto.stop() // any programmatic move cancels a looping automation
   tween.p0.copy(camera.position)
   tween.t0.copy(controls.target)
@@ -820,6 +835,7 @@ function flyTo(pos, target) {
   tween.t1.copy(target)
   tween.t = 0
   tween.active = true
+  tween.orbit = !!opts.orbit // rotation orbitale (iso) vs déplacement droit
 }
 
 // clicking a PK marker or a named summit orbits the camera just ABOVE the peak
@@ -1999,6 +2015,9 @@ async function loadGpxText(text) {
     // and clip long tracks framed at z10/z11
     if (modes.mode === 'orbital') await modes.flyTo(f.lat, f.lon, f.zoom)
     else await loadRealTerrain()
+    // au chargement d'un GPX, on démarre en vue isométrique (Adrien) — comme un
+    // clic sur le bouton iso ; la vue est cadrée sur le bloc + son socle
+    applyIsoView(0)
   } catch (err) {
     modes.announce(`GPX ERROR — ${String(err.message).toUpperCase()}`)
   }
@@ -2600,10 +2619,30 @@ const credits = buildCredits()
 // and cartouche in frame (45° azimuth, museum-shelf elevation)
 // distance ×2 vs the first guess: at fov 30 the block's corner-on diagonal
 // (~79 units) needs ~107 units of camera range for plate + cartouche to fit
-// isometric shortcut: keep the museum-shelf angle but pull the camera as far
-// back as the current view allows, so the WHOLE zone fits (no zoom-level change)
-const ISO_DIR = new THREE.Vector3(62, 52, 62).normalize()
+// Vues cycliques du bouton iso (Adrien) : quatre angles isométriques (rotation
+// 90° entre chacun), puis un top-down orienté nord, puis une vue au raz du sol,
+// puis retour au premier. Un petit numéro sur l'icône indique la vue courante.
 const ISO_TARGET = new THREE.Vector3(0, -1.5, 0)
+const ISO_VIEWS = [
+  { name: '1', dir: new THREE.Vector3(62, 52, 62), k: 0.97, target: ISO_TARGET },
+  { name: '2', dir: new THREE.Vector3(-62, 52, 62), k: 0.97, target: ISO_TARGET },
+  { name: '3', dir: new THREE.Vector3(-62, 52, -62), k: 0.97, target: ISO_TARGET },
+  { name: '4', dir: new THREE.Vector3(62, 52, -62), k: 0.97, target: ISO_TARGET },
+  { name: '5', dir: new THREE.Vector3(0, 100, -0.6), k: 0.92, target: ISO_TARGET }, // top-down, nord en haut
+  { name: '6', dir: new THREE.Vector3(0.28, 0.17, 1), k: 0.52, target: new THREE.Vector3(0, 1.4, 0) }, // au raz du sol
+]
+let isoIndex = -1
+// vole (rotation orbitale) vers la vue iso i ; met à jour le badge de l'icône
+function applyIsoView(i) {
+  if (modes.mode !== 'surface' || modes.busy) return
+  tour.active = false
+  isoIndex = ((i % ISO_VIEWS.length) + ISO_VIEWS.length) % ISO_VIEWS.length
+  const v = ISO_VIEWS[isoIndex]
+  const dist = controls.maxDistance * v.k
+  const pos = v.target.clone().addScaledVector(v.dir.clone().normalize(), dist)
+  flyTo(pos, v.target.clone(), { orbit: true })
+  isoBtn?.setBadge(v.name)
+}
 // cinematic button — same family as the iso shortcut, one step to its left:
 // each press starts a RANDOM looping camera move around the socle (the
 // existing Camera-panel automations), and while it runs the move re-rolls
@@ -2628,12 +2667,8 @@ cineBtn = buildCineButton({
 })
 
 isoBtn = buildIsoButton({
-  flyIso: () => {
-    if (modes.mode !== 'surface' || modes.busy) return
-    tour.active = false
-    const dist = controls.maxDistance * 0.97 // the farthest the surface stop permits
-    flyTo(ISO_DIR.clone().multiplyScalar(dist), ISO_TARGET.clone())
-  },
+  // chaque clic passe à la vue suivante (rotation orbitale)
+  flyIso: () => applyIsoView(isoIndex + 1),
 })
 
 let bgRefreshFn = () => {} // re-renders the Background HDRI picker highlight after a template/reset (declared before the panel build so registerBgRefresh isn't a TDZ access)
@@ -3012,7 +3047,7 @@ history.record()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, creatures, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
+window.__exp = { scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, creatures, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder } }
 
 applyTimeOfDay(params.timeOfDay ?? 10) // seed the sun/disc/lake for the opening view
 
@@ -3096,8 +3131,20 @@ function updateCameraMotion(dt) {
   if (tween.active) {
     tween.t = Math.min(1, tween.t + dt / params.flyDuration)
     const e = EASINGS[params.flyEasing](tween.t)
-    camera.position.lerpVectors(tween.p0, tween.p1, e)
-    controls.target.lerpVectors(tween.t0, tween.t1, e)
+    if (tween.orbit) {
+      // rotation orbitale (iso) : slerp de la direction autour de la cible +
+      // lerp du rayon → une vraie rotation, jamais une corde qui plonge vers le centre
+      _twTgt.lerpVectors(tween.t0, tween.t1, e)
+      _twD0.subVectors(tween.p0, tween.t0)
+      _twD1.subVectors(tween.p1, tween.t1)
+      const r = THREE.MathUtils.lerp(_twD0.length(), _twD1.length(), e)
+      slerpDir(_twD0.normalize(), _twD1.normalize(), e, _twDir)
+      camera.position.copy(_twTgt).addScaledVector(_twDir, r)
+      controls.target.copy(_twTgt)
+    } else {
+      camera.position.lerpVectors(tween.p0, tween.p1, e)
+      controls.target.lerpVectors(tween.t0, tween.t1, e)
+    }
     camera.lookAt(controls.target)
     if (tween.t >= 1) tween.active = false
   } else if (modes.mode === 'surface') {
