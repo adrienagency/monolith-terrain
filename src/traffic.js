@@ -44,6 +44,10 @@ export class Traffic {
     this.planeProto = null
     this.craft = null // { type, obj, dir, side, speed, life, baseY, phase }
     this.sinceRoll = 0
+    // rayon monde des dalles voisines chargées (damier GPX). >0 → un aéronef
+    // continue au-dessus des dalles suivantes au lieu de disparaître au bord du
+    // bloc central : il passe de la dalle 1 à la dalle 2 sans coupure (Adrien).
+    this.spanExtra = 0
 
     this.pad = null // { obj, rocket, baseY, state, t }
     this.starshipProto = null
@@ -225,6 +229,12 @@ export class Traffic {
     }
   }
 
+  // le damier a gagné/perdu des dalles voisines → étendre (ou réduire) la zone
+  // de vol pour que l'aéronef traverse les dalles chargées sans coupure
+  setSpan(worldRadius) {
+    this.spanExtra = Math.max(0, worldRadius || 0)
+  }
+
   update(dt) {
     // ---- sky traffic (one craft at a time)
     this.sinceRoll += dt
@@ -250,9 +260,13 @@ export class Traffic {
       const { x, z } = p.obj.position
       // slow craft get a longer life budget — enough to finish the crossing.
       // The bound sits past the farthest possible spawn point (√(36² + 16.8²)
-      // ≈ 39.7) so a steep-heading craft can never despawn on frame one.
-      const lifeMax = p.speed < 1.5 ? 130 : 60
-      if (Math.abs(x) > HALF + 13 || Math.abs(z) > HALF + 13 || p.life > lifeMax) {
+      // ≈ 39.7) so a steep-heading craft can never despawn on frame one. When
+      // neighbour dalles are loaded (spanExtra > 0) the bound extends over them
+      // so the craft flies dalle-to-dalle without a cut; the life budget grows
+      // with the span so it isn't killed mid-crossing.
+      const bound = HALF + 13 + this.spanExtra
+      const lifeMax = (p.speed < 1.5 ? 130 : 60) + this.spanExtra / Math.max(p.speed, 0.5)
+      if (Math.abs(x) > bound || Math.abs(z) > bound || p.life > lifeMax) {
         this.group.remove(p.obj)
         // free the craft's GPU buffers — procedural crafts build fresh
         // geometries/materials each spawn, the plane clones its materials

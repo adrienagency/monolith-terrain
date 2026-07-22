@@ -38,6 +38,16 @@ export class BlockGrid {
     this._demCache = new Map() // LRU zoom:tx,ty → Promise<dem>
     this._syncId = 0 // invalide les chargements d'une synchro périmée
     this.onReady = null // (cell) => {} — un voisin vient d'arriver (re-drapage GPX)
+    this.onGridChanged = null // () => {} — le damier a gagné/perdu une cellule
+  }
+
+  // rayon MONDE couvert par le damier au-delà du bloc central (0 si aucun
+  // voisin) : sert au trafic aérien pour qu'un avion traverse d'une dalle à la
+  // suivante sans coupure au lieu de disparaître au bord du bloc central.
+  spanRadius() {
+    let r = 0
+    for (const cell of this.cells.values()) r = Math.max(r, Math.abs(cell.i), Math.abs(cell.j))
+    return r * TERRAIN_SIZE
   }
 
   // Quelles cellules le tracé touche-t-il ? (coordonnées monde CONTINUES du
@@ -64,12 +74,15 @@ export class BlockGrid {
     const need = dem ? this.cellsForTrack(points) : new Set()
     const syncId = ++this._syncId
     // retirer l'inutile
+    let changed = false
     for (const [key, cell] of this.cells) {
       if (!need.has(key)) {
         this._disposeCell(cell)
         this.cells.delete(key)
+        changed = true
       }
     }
+    if (changed) this.onGridChanged?.()
     if (!dem) return
     // charger le manquant
     const tilesAcross = Math.round(dem.size / 256)
@@ -90,6 +103,7 @@ export class BlockGrid {
           cell.centerKey = this._centerKey(dem)
           this.cells.set(key, cell)
           this.onReady?.(cell)
+          this.onGridChanged?.()
         })
         .catch(() => {}) // tuile océan absente etc. — la cellule reste vide
     }
@@ -155,6 +169,8 @@ export class BlockGrid {
       this.scene.add(walls)
       cell.walls = walls
     }
+    // dès la naissance, la cellule porte le matériau/shader de la dalle centrale
+    this._applyLook(cell, this.params)
     return cell
   }
 
@@ -177,19 +193,36 @@ export class BlockGrid {
     for (const cell of this.cells.values()) cell.terrain?.setAerialCoastFade?.(v)
   }
 
-  // le look a changé (template, contours, rampe…) — re-peindre les voisins
+  // le look a changé (template, contours, rampe, MATÉRIAU…) — les voisins
+  // suivent la dalle PRINCIPALE comme un composant (Adrien) : même rampe, même
+  // matériau/relief/shader de surface. Ce qui doit rester PROPRE à chaque dalle
+  // ne bouge pas : topographie (géométrie/DEM) et photo aérienne (uAerial posé
+  // par paintCellAerial), jamais retouchées ici.
   restyle(params) {
-    for (const cell of this.cells.values()) {
-      const p = { ...params, resolution: Math.min(params.resolution ?? NEIGHBOUR_RES, NEIGHBOUR_RES) }
-      cell.terrain.rebuildRamp?.(p)
-      cell.terrain.updateMaterial?.(p)
-    }
+    const mt = this.getMainTerrain?.()
+    for (const cell of this.cells.values()) this._applyLook(cell, params, mt)
+  }
+  _applyLook(cell, params, mt = this.getMainTerrain?.()) {
+    const t = cell.terrain
+    if (!t) return
+    const p = { ...params, resolution: Math.min(params.resolution ?? NEIGHBOUR_RES, NEIGHBOUR_RES) }
+    t.rebuildRamp?.(p)
+    t.updateMaterial?.(p)
+    t.setMaterialMode?.(p.terrainSurfaceMat || '', p)
+    t.setLiquidMetal?.(!!p.liquidMetal, p)
+    t.setSurfaceFx?.(p.surfaceFx | 0)
+    if ((p.surfaceFx | 0) > 0 && p.fx?.[p.surfaceFx]) t.applyFxParams?.(p.fx[p.surfaceFx])
+    t.setAerialCoastFade?.(p.aerialCoastFade ?? 0.1)
+    // continuité de teinte : aligner la plage hypsométrique sur le bloc central
+    if (mt) t.mapUniforms.uHeightRange.value.copy(mt.mapUniforms.uHeightRange.value)
   }
 
   clear() {
     this._syncId++
+    const had = this.cells.size
     for (const cell of this.cells.values()) this._disposeCell(cell)
     this.cells.clear()
+    if (had) this.onGridChanged?.()
   }
 
   _disposeCell(cell) {

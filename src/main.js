@@ -1809,6 +1809,7 @@ function applyUserTemplate(tmpl) {
   bgRefreshFn() // resync the Background HDRI-sky highlight to the applied look
   refreshAll()
   rebuildMapLayers() // re-derive roads/water/places for the current location under the restored look
+  blockGrid?.restyle(params) // les dalles voisines du damier suivent la principale
   gpxLayer.rebuildAll() // re-drape every loaded track with the restored line width/colour/casing
   // A history.record() taken right here re-captures EXACTLY what was just
   // applied (captureLook(params) after the assignment above), so it dedups
@@ -1955,6 +1956,7 @@ function resetAll() {
   // map overlay layers (roads/water/places)
   Object.assign(params, DEFAULT_MAPLAYERS)
   rebuildMapLayers()
+  blockGrid?.restyle(params) // les dalles voisines retombent aussi sur la base
   history?.record() // committed look change — one undo step
 }
 
@@ -2036,6 +2038,9 @@ const allGpxPoints = () => gpxLayer.layers.flatMap((l) => l.gpx.track?.points ??
 // un voisin vient de finir de charger → re-draper les traces + peindre sa photo
 // aérienne si la couche est active (même finition que le bloc central)
 blockGrid.onReady = (cell) => { gpxLayer.rebuildAll(); paintCellAerial(cell) }
+// le damier a gagné/perdu une dalle → le trafic aérien étend sa zone de vol
+// pour qu'un avion passe d'une dalle à la suivante sans coupure
+blockGrid.onGridChanged = () => traffic.setSpan(blockGrid.spanRadius())
 // le damier se resynchronise à CHAQUE re-drapage global (zone, zoom, ajout de
 // calque) — idempotent, borné 5×5, cellules en cache LRU
 const _rebuildAllRaw = gpxLayer.rebuildAll.bind(gpxLayer)
@@ -2873,6 +2878,7 @@ const shadersPanel = buildShadersPanel({
     // material — they're mutually exclusive. Turning LM on clears a relief material.
     if (v && params.terrainSurfaceMat) { params.terrainSurfaceMat = ''; terrain.setMaterialMode('', params) }
     terrain.setLiquidMetal(v, params)
+    blockGrid?.restyle(params) // les dalles voisines suivent la principale
     shadersRefreshFn()
     refreshAll()
   },
@@ -2894,12 +2900,13 @@ const shadersPanel = buildShadersPanel({
     params.surfaceFx = id | 0
     terrain.setSurfaceFx(params.surfaceFx)
     if (params.surfaceFx > 0) terrain.applyFxParams(params.fx[params.surfaceFx])
+    blockGrid?.restyle(params) // les dalles voisines suivent la principale
   },
   getFxParam: (id, key) => params.fx[id]?.[key],
   setFxParam: (id, key, val) => {
     if (!params.fx[id]) return
     params.fx[id][key] = val
-    if (params.surfaceFx === id) terrain.applyFxParams(params.fx[id]) // speed/opacity/blend re-pushed
+    if (params.surfaceFx === id) { terrain.applyFxParams(params.fx[id]); blockGrid?.restyle(params) } // speed/opacity/blend re-pushed + voisins
   },
   // terrain MATERIAL — turns the WHOLE relief into a material (sibling of Liquid
   // metal): the Shaders-panel picker builds its list straight from the shared
@@ -2912,6 +2919,7 @@ const shadersPanel = buildShadersPanel({
     terrain.setMaterialMode(params.terrainSurfaceMat, params)
     // seed the roughness slider from the material's own default so it reads right
     if (id && id !== 'glass') params.terrainMatRoughness = terrain.material.roughness
+    blockGrid?.restyle(params) // les dalles voisines portent le même matériau
     shadersRefreshFn()
     refreshAll()
   },
@@ -2919,6 +2927,7 @@ const shadersPanel = buildShadersPanel({
   setSurfaceMatBump: (v) => {
     params.terrainSurfaceBump = v
     terrain.setSurfaceMaterialBump(v)
+    blockGrid?.restyle(params)
   },
   // live tiling + finish knobs for the opaque relief materials
   getMatScale: () => params.terrainMatScale,
@@ -3355,6 +3364,9 @@ function tick() {
   for (const cell of blockGrid.cells.values()) {
     cell.terrain.mapUniforms.uCausT.value = terrain.mapUniforms.uCausT.value
     cell.terrain.mapUniforms.uSeaCausK.value = terrain.mapUniforms.uSeaCausK.value
+    // shader de surface : les voisins suivent le temps de la dalle principale
+    // (un composant : ils n'avancent pas leur propre horloge) — animation synchrone
+    cell.terrain.mapUniforms.uFxTime.value = terrain.mapUniforms.uFxTime.value
   }
   realWater?.setView(camera.position.y, controls.getDistance?.() ?? camera.position.distanceTo(controls.target)) // accalmie altitude + taille des remous de côte selon la distance d'affichage
   aq.update(dt) // adaptive quality: sample FPS, step tiers when sustained
