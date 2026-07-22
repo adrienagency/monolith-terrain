@@ -42,7 +42,7 @@ export const MATERIALS = [
   { id: 'rocks011', label: 'Éboulis', cat: 'roche', kind: 'dir', dir: 'textures/rocks011/', thumb: thumb('rocks011'), metalness: 0, roughness: 0.95, normalScale: 1.5, envMapIntensity: 0.4, repeat: 4 },
 
   // --- sable & sol -------------------------------------------------------
-  { id: 'sand', label: 'Sable', cat: 'sable', kind: 'dir', dir: 'textures/sand/', thumb: thumb('sand'), metalness: 0, roughness: 0.95, normalScale: 1.3, envMapIntensity: 0.5, repeat: 7, flow: 0.012 },
+  // 'sand' (Sable moucheté) retiré du catalogue (Adrien).
   { id: 'ground081', label: 'Terre', cat: 'sable', kind: 'dir', dir: 'textures/ground081/', thumb: thumb('ground081'), metalness: 0, roughness: 0.95, normalScale: 1.3, envMapIntensity: 0.45, repeat: 7 },
 
   // --- marbre & pierre ---------------------------------------------------

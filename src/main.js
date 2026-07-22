@@ -110,7 +110,7 @@ const params = {
   demLat: 45.9,
   demLon: 6.13,
   demZoom: 10,
-  demExaggeration: 2.2, // vertical relief pushed for a more dramatic read
+  demExaggeration: 2.8, // vertical relief au chargement (Adrien) — voir BASE_EXAG
 
   // terrain generation
   seed: 1,
@@ -1194,7 +1194,7 @@ let userFineZoom = Math.max(params.demZoom, 15)
 // (localStorage) — so continental blocks (z5/6/7) can stand tall while close-ups
 // stay subtle, entirely to your taste. Coarse blocks default high because their
 // relief is tiny next to the huge footprint.
-const BASE_EXAG = 2.2
+const BASE_EXAG = 2.8 // échelle verticale par défaut au chargement (Adrien)
 // per-zoom vertical exaggeration. Coarse continental views (z5-7) were far too
 // tall — the relief read like spikes (user feedback v40). Halved+ so a country
 // sits as a gentle raised-relief plate; the ocean mask now keeps the low ground

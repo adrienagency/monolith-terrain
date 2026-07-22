@@ -26,16 +26,12 @@ export const FX_META = {
     c: [col('colA', 'Colour 1'), col('colB', 'Colour 2'), col('colC', 'Colour 3'), SPEED, SCALE] },
   6: { label: 'Waves', d: { colA: '#1a1e28', colB: '#e6dcc6', speed: 0.25, scale: 1, p1: 0.35, p2: 0.35 },
     c: [col('colA', 'Trough'), col('colB', 'Crest'), sld('p1', 'Frequency'), sld('p2', 'Distortion'), SPEED, SCALE] },
-  7: { label: 'Swirl', d: { colA: '#20242c', colB: '#c98a5a', colC: '#efe7d6', speed: 0.15, scale: 1, p1: 0.4 },
-    c: [col('colA', 'Colour 1'), col('colB', 'Colour 2'), col('colC', 'Colour 3'), sld('p1', 'Arms'), SPEED, SCALE] },
-  8: { label: 'Spiral', d: { colA: '#12131a', colB: '#d8cfe6', speed: 0.15, scale: 1, p1: 0.35 },
-    c: [col('colA', 'Ground'), col('colB', 'Line'), sld('p1', 'Density'), SPEED, SCALE] },
+  // 7 Swirl · 8 Spiral · 10 God rays · 11 Dot grid retirés du catalogue (Adrien).
+  // Les branches GLSL (fx-glsl.js) restent dormantes pour ne pas casser les
+  // cartes déjà partagées qui référenceraient ces id ; ils ne sont juste plus
+  // proposés dans le picker ni tirés par le shuffle.
   9: { label: 'Metaballs', d: { colA: '#14161d', colB: '#c9885a', speed: 0.25, scale: 1, p1: 0.35, p2: 0.4 },
     c: [col('colA', 'Background'), col('colB', 'Blobs'), sld('p1', 'Count'), sld('p2', 'Size'), SPEED, SCALE] },
-  10: { label: 'God rays', d: { colA: '#0d0f16', colB: '#ffe9b8', speed: 0.15, scale: 1, p1: 0.4 },
-    c: [col('colA', 'Sky'), col('colB', 'Rays'), sld('p1', 'Density'), SPEED, SCALE] },
-  11: { label: 'Dot grid', d: { colA: '#ece4d6', colB: '#20242c', speed: 0, scale: 1, p1: 0.4, p2: 0.4 },
-    c: [col('colA', 'Paper'), col('colB', 'Dots'), sld('p1', 'Density'), sld('p2', 'Dot size'), SCALE] },
   12: { label: 'Noise field', d: { colA: PC, colB: PB, colC: PA, speed: 0.12, scale: 1 },
     c: [col('colA', 'Low'), col('colB', 'Mid'), col('colC', 'High'), SPEED, SCALE] },
   13: { label: 'Neuro', d: { colA: '#7fe9ff', colB: '#2a6cff', colC: '#0a0f1c', speed: 0.6, scale: 1, p1: 0.15, p2: 0.3 },
