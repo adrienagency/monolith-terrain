@@ -50,6 +50,17 @@ const DIVE_ALT_M = DIVE_TIERS[0].altM
 const MAX_ALT_M = 16000000 // ~2.5 earth radii — whole planet in frame
 const MSG_MS = 3600
 
+// surface zoom is a CUSTOM inertial dolly (OrbitControls zoom is off): each
+// wheel notch adds to a log-space velocity that decays slowly, so the élan
+// coasts over many notches (Adrien: "au moins 20 crans"). A notch is small on
+// purpose; the momentum (ZOOM_TAU) is what gives the long, smooth glide. One
+// full level of zoom takes ~20 notches (LEVEL_SPAN / (IMPULSE·TAU)).
+const ZOOM_IMPULSE = 0.05 // per wheel notch, added to the zoom velocity (log-dist/s)
+const ZOOM_TAU = 1.2 // s — velocity decay time constant; big → the coast stretches far
+const ZOOM_VEL_MAX = 1.3 // caps a fast burst so it can't overshoot a whole level in one flick
+const ZOOM_STOP = 0.015 // velocity below which the coast is considered spent
+const LEVEL_SPAN = 1.6 // log-distance of one level's zoom; step fires at 70% of it
+
 // task 30 Fix A: the isometric-ish viewing angle every dive/refine arrival
 // has always used (camera.position(0,18,19), looking at (0,-0.3,0)) — kept
 // as a fixed DIRECTION so the new far-standoff arrival (_arrivalPose()
@@ -85,6 +96,10 @@ export class Modes {
     this.busy = false
     this.travel = null // great-circle glide tween
     this._surfCam = { near: camera.near, far: camera.far }
+    this._zoomVel = 0 // surface inertial dolly velocity (log-dist units/s)
+    this._zoomNdc = new THREE.Vector2() // cursor NDC of the last wheel notch
+    this._zoomPivot = null // world point the coast zooms toward (last valid)
+    this._levelZoom = 0 // log-distance zoomed within the current level (reset per transition)
 
     this._buildDom()
 
@@ -94,19 +109,19 @@ export class Modes {
       'wheel',
       (e) => {
         if (this.mode === 'surface') {
-          // The wheel dollies smoothly (OrbitControls damping = the "élan").
-          // The staircase steps at 70% of THIS level's travel, not against the
-          // wall (Adrien: "pas besoin d'avoir la tête contre la paroi"): out
-          // past 70% coarsens (z12→z10→z8, real maps each step, then the orbit
-          // gate); in past 70% refines. t = 0 at the near stop, 1 at the far.
-          const range = this.controls.maxDistance - this.controls.minDistance
-          const t = range > 1e-3 ? (this.controls.getDistance() - this.controls.minDistance) / range : 0
-          if (e.deltaY > 0 && !this.busy && !this._diveTween && t >= 0.7) {
-            if (this.hooks.getCoarsenTarget()) this._coarsen()
-            else this.enterOrbit()
-          } else if (e.deltaY < 0 && !this.busy && !this._diveTween && (t <= 0.3 || this.hooks.nearGround?.())) {
-            this._refine()
-          }
+          if (this._diveTween || this.busy) return
+          e.preventDefault()
+          // add a notch of momentum to the inertial dolly (see _applyZoom). The
+          // velocity decays slowly (ZOOM_TAU) so the élan coasts over many
+          // notches. deltaY < 0 = zoom in → positive velocity.
+          this._zoomVel = THREE.MathUtils.clamp(
+            this._zoomVel + Math.sign(-e.deltaY) * ZOOM_IMPULSE,
+            -ZOOM_VEL_MAX,
+            ZOOM_VEL_MAX
+          )
+          this._zoomNdc.set((e.clientX / window.innerWidth) * 2 - 1, -((e.clientY / window.innerHeight) * 2 - 1))
+          const p = this.hooks.pointUnder?.(this._zoomNdc.x, this._zoomNdc.y)
+          if (p) this._zoomPivot = p // fixed pivot for the whole coast (zoom toward cursor)
           return
         }
         e.preventDefault()
@@ -169,6 +184,7 @@ export class Modes {
 
   async enterOrbit(entryAltM = null) {
     if (this.mode !== 'surface' || this.busy) return
+    this._resetZoom()
     // continuity: pop out at the altitude the surface view actually had, so a
     // z8 patch hands over at ~500 km and a z12 patch at ~30 km
     if (entryAltM == null) {
@@ -242,6 +258,7 @@ export class Modes {
   async _dive(tier = DIVE_TIERS[0]) {
     if (this.mode !== 'orbital' || this.busy) return
     this.busy = true
+    this._resetZoom()
     const zoom = tier.zoom ?? this.hooks.getFineZoom()
     const { lat, lon } = sphereToLatLon(this.camera.position)
     this.announce(`ACQUIRING SURFACE DATA — ${lat.toFixed(4)}, ${lon.toFixed(4)} · Z${zoom}`)
@@ -277,7 +294,7 @@ export class Modes {
       this.controls.maxDistance = this.hooks.surfaceMaxDistance()
       this.controls.maxPolarAngle = Math.PI * 0.49
       this.controls.rotateSpeed = 1 // orbital update scales it down to ~0.015
-      this.controls.enableZoom = true
+      this.controls.enableZoom = false // surface zoom is our inertial dolly
       this.controls.enablePan = true
       this.controls.enabled = true
       this.controls.update()
@@ -307,6 +324,7 @@ export class Modes {
 
   async _rescale(next, verb) {
     this.busy = true
+    this._resetZoom() // the new level starts its own scroll budget
     // v42: CONTINUITE D'ALTITUDE REELLE — avant, l'arrivee etait un cadrage
     // fixe en unites scene : traverser un etage teleportait l'altitude reelle
     // (10 km -> 149 km -> 143 km, retour Adrien). On memorise l'altitude en
@@ -433,6 +451,7 @@ export class Modes {
   // finer level centred there. `target.point` is the clicked world position.
   diveTo(target) {
     if (this.busy || this.travel || this._diveTween || this.mode !== 'surface' || !target) return
+    this._resetZoom() // cancel any coasting zoom; the dive owns the camera now
     const from = this.camera.position.clone()
     const fromT = this.controls.target.clone()
     const dist = from.distanceTo(fromT)
@@ -450,6 +469,7 @@ export class Modes {
   async _loadDive(target) {
     if (this.busy || this.mode !== 'surface' || !target) return
     this.busy = true
+    this._resetZoom()
     const prevDir = this.camera.position.clone().sub(this.controls.target)
     this.announce(`DIVING — ${target.lat.toFixed(4)}, ${target.lon.toFixed(4)} · Z${target.zoom}`)
     try {
@@ -473,6 +493,61 @@ export class Modes {
       this.controls.update()
     })
     this.busy = false
+  }
+
+  // one frame of the inertial surface dolly: scale the distance by the coasting
+  // velocity (log-space, so a notch multiplies distance), pivoting on the point
+  // under the cursor (zoom-toward-cursor), then decay the velocity. Steps the
+  // staircase when the glide crosses 70% of the level's travel in its direction.
+  _resetZoom() {
+    this._zoomVel = 0
+    this._levelZoom = 0
+  }
+
+  _applyZoom(dt) {
+    const c = this.controls
+    const cam = this.camera
+    const min = c.minDistance
+    const max = c.maxDistance
+    const dist = c.getDistance()
+    const dir0 = Math.sign(this._zoomVel) // motion direction, captured before decay
+    let factor = Math.exp(-this._zoomVel * dt) // vel > 0 (zoom in) → factor < 1
+    const newDist = THREE.MathUtils.clamp(dist * factor, min, max)
+    factor = newDist / dist
+    // how much zoom has been consumed IN THIS LEVEL since the last transition
+    // (log-space, so it's a true "how many times zoomed"): negative = zoomed in
+    this._levelZoom += Math.log(newDist / Math.max(dist, 1e-6))
+    const P = this._zoomPivot
+    if (P && Math.abs(factor - 1) > 1e-6) {
+      // scale the scene about the pivot so that point stays put on screen
+      cam.position.set(P.x + (cam.position.x - P.x) * factor, P.y + (cam.position.y - P.y) * factor, P.z + (cam.position.z - P.z) * factor)
+      c.target.set(P.x + (c.target.x - P.x) * factor, P.y + (c.target.y - P.y) * factor, P.z + (c.target.z - P.z) * factor)
+    } else {
+      _zoomDir.copy(cam.position).sub(c.target).normalize()
+      cam.position.copy(c.target).addScaledVector(_zoomDir, newDist)
+    }
+    c.update()
+    this._zoomVel *= Math.exp(-dt / ZOOM_TAU) // the coast
+    if (newDist <= min + 1e-3 || newDist >= max - 1e-3) this._zoomVel = 0 // don't grind the stop
+    if (Math.abs(this._zoomVel) < ZOOM_STOP) this._zoomVel = 0 // coast spent
+
+    // staircase (Adrien: "70% du scroll du niveau, pas la tête contre la paroi")
+    // — ONE level of zoom ≈ LEVEL_SPAN in log-distance; step at 70% of that.
+    // IN: needs the accumulated zoom-in past the threshold (so a view that just
+    // starts close doesn't refine on the first notch) OR the ground is skimmed.
+    // OUT: fires on the wide end alone — there's little dolly room before the
+    // far stop, so waiting for a full level of zoom-out would never trigger.
+    const range = max - min
+    const t = range > 1e-3 ? (newDist - min) / range : 0
+    const STEP = 0.7 * LEVEL_SPAN
+    if (dir0 > 0 && (this._levelZoom <= -STEP || this.hooks.nearGround?.())) {
+      this._zoomVel = 0
+      this._refine()
+    } else if (dir0 < 0 && (this._levelZoom >= STEP || t >= 0.7)) {
+      this._zoomVel = 0
+      if (this.hooks.getCoarsenTarget()) this._coarsen()
+      else this.enterOrbit()
+    }
   }
 
   // ---------------------------------------------------------------- per-frame
@@ -515,6 +590,8 @@ export class Modes {
         }
       }
     } else {
+      // surface inertial dolly — the long élan (see the wheel handler)
+      if (!this._diveTween && !this.busy && Math.abs(this._zoomVel) > ZOOM_STOP) this._applyZoom(dt)
       // click-to-dive lean-in tween (first beat): ease 30% toward the point,
       // then load the finer level (see diveTo). ease-in-out quad.
       if (this._diveTween && !this.busy) {
@@ -542,3 +619,5 @@ export class Modes {
           : `${Math.max(0, Math.round(this.altM))} m`
   }
 }
+
+const _zoomDir = new THREE.Vector3()

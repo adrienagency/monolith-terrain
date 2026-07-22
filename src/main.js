@@ -552,10 +552,9 @@ camera.position.set(0, 18, 19)
 
 const controls = new OrbitControls(camera, renderer.domElement)
 controls.target.set(0, -0.3, 0)
-controls.zoomToCursor = true // dolly toward the exact point under the mouse
+controls.enableZoom = false // zoom is the mode machine's custom inertial dolly
 controls.enableDamping = true
 controls.dampingFactor = 0.06
-controls.zoomSpeed = 1.35 // longer, smoother wheel steps with momentum (Adrien)
 controls.maxPolarAngle = Math.PI * 0.49
 controls.minDistance = 6
 controls.maxDistance = 150 // room to frame the whole slab before the orbit gate
@@ -1116,6 +1115,7 @@ setDofEnabled(params.bokehEnabled && params.bokehScale > 0)
 
 const mouse = new THREE.Vector2(0, 0)
 const focusRay = new THREE.Raycaster() // reused for pointer autofocus
+const _pickNdc = new THREE.Vector2() // scratch NDC for modes' pointUnder hook
 window.addEventListener('pointermove', (e) => {
   const nx = (e.clientX / window.innerWidth) * 2 - 1
   const ny = -((e.clientY / window.innerHeight) * 2 - 1)
@@ -1432,6 +1432,19 @@ modes = new Modes({
     // the landing target, so the arrival camera can never come to rest below
     // the ground it just loaded.
     sampleGroundY: (x, z) => terrain.sample?.(x, z) ?? 0,
+    // world point under a screen NDC (for zoom-toward-cursor) — marches the
+    // height field like the autofocus ray; null on a sky/off-map miss
+    pointUnder: (nx, ny) => {
+      _pickNdc.set(nx, ny)
+      focusRay.setFromCamera(_pickNdc, camera)
+      const d = focusRayHit(focusRay.ray.origin, focusRay.ray.direction, terrain.sample, { halfExtent: TERRAIN_SIZE / 2 })
+      if (d == null) return null
+      return {
+        x: focusRay.ray.origin.x + focusRay.ray.direction.x * d,
+        y: focusRay.ray.origin.y + focusRay.ray.direction.y * d,
+        z: focusRay.ray.origin.z + focusRay.ray.direction.z * d,
+      }
+    },
     // next finer scale under the current view — the staircase down from a
     // coarse (z8/z10) dive; null once the patch is already fine
     getRefineTarget() {
