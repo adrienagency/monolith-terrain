@@ -76,6 +76,7 @@ import { buildShadersPanel } from './ui/shaders-panel.js'
 import { buildMapPanel } from './ui/map-panel.js'
 import { buildEffectsPanel } from './ui/effects-panel.js'
 import { buildHourPill } from './ui/hour-pill.js'
+import { buildZoomStepper } from './ui/zoom-stepper.js'
 import { initTips } from './ui/tips.js'
 import { createAdaptiveQuality } from './perf.js'
 import { detailForZoom } from './zoom-detail.js'
@@ -1121,6 +1122,36 @@ window.addEventListener('pointermove', (e) => {
   if (modes && modes.mode === 'surface') gpxLayer.pointerMove(mouse, e.clientX, e.clientY)
 })
 
+// click-to-dive: a plain click on the map (NOT an orbit drag) plunges one level
+// onto the point under the cursor — march the height field for the hit, convert
+// to lat/lon, dive there keeping the view axis (see modes.diveTo). A drag past a
+// few px, a long press, or a click on any DOM overlay (panels/markers, which sit
+// above the canvas) never reaches here.
+let _clickDownX = 0, _clickDownY = 0, _clickDownT = 0, _clickArmed = false
+const _clickNdc = new THREE.Vector2()
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  _clickArmed = e.button === 0 && e.isPrimary
+  _clickDownX = e.clientX
+  _clickDownY = e.clientY
+  _clickDownT = performance.now()
+})
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!_clickArmed || e.button !== 0) return
+  _clickArmed = false
+  const moved = Math.hypot(e.clientX - _clickDownX, e.clientY - _clickDownY)
+  if (moved > 6 || performance.now() - _clickDownT > 400) return // it was an orbit drag / long press
+  if (!modes || modes.mode !== 'surface' || modes.busy || modes.travel) return
+  if (params.source !== 'real' || !dem || params.demZoom >= userFineZoom) return // already at finest detail
+  _clickNdc.set((e.clientX / window.innerWidth) * 2 - 1, -((e.clientY / window.innerHeight) * 2 - 1))
+  focusRay.setFromCamera(_clickNdc, camera)
+  const hitDist = focusRayHit(focusRay.ray.origin, focusRay.ray.direction, terrain.sample, { halfExtent: TERRAIN_SIZE / 2 })
+  if (hitDist == null) return // clicked the sky or off-map
+  const px = focusRay.ray.origin.x + focusRay.ray.direction.x * hitDist
+  const pz = focusRay.ray.origin.z + focusRay.ray.direction.z * hitDist
+  const { lat, lon } = worldToLatLon(dem, px, pz)
+  modes.diveTo({ lat, lon, zoom: stepZoom(params.demZoom, 1, userFineZoom) })
+})
+
 // ------------------------------------------------------------------ regeneration helpers
 
 // ------------------------------------------------------------------ real-world DEM loading
@@ -1420,6 +1451,20 @@ modes = new Modes({
 })
 
 const gotoCtl = createGoto({ modes, announce: (m) => modes.announce(m), getFineZoom: () => userFineZoom })
+
+// vertical zoom stepper (left edge) — discrete alternative to the wheel; reads
+// live staircase/orbit state each frame, only triggers modes.stepFiner/Wider
+const zoomStepper = buildZoomStepper({
+  modes,
+  getState: () => modes.mode === 'orbital'
+    ? { label: 'ORB', canFiner: true, canWider: true, busy: modes.busy || !!modes.travel }
+    : {
+        label: `Z${params.demZoom}`,
+        canFiner: params.source === 'real' && !!dem && params.demZoom < userFineZoom,
+        canWider: true, // surface always widens (coarsen, then the orbit gate)
+        busy: modes.busy,
+      },
+})
 
 // ------------------------------------------------------------------ map overlay panel + peaks
 
@@ -3038,6 +3083,7 @@ function tick() {
   // décroche totalement" field bug, and it clobbered EVERY camera rig alike,
   // which is why six rewrites changed nothing on screen.
   if (!(drone.active && params.gpxFollow && gpxLayer.isPlaying())) modes.update(dt)
+  zoomStepper.update()
   if (modes.mode === 'orbital') globe.update(camera, dt)
 
   // fog respects the Effects sliders at normal viewing (so it actually shows —

@@ -401,6 +401,72 @@ export class Modes {
     }
   }
 
+  // ---------------------------------------------------------------- public nav
+  // Explicit navigation the UI drives (vertical zoom stepper + click-to-dive).
+  // All reuse the tuned staircase internals — no new zoom behaviour, just new
+  // triggers besides the wheel.
+
+  // one level FINER (toward more detail). Surface: refine centred on the view.
+  // Orbital: nudge the altitude target inward and arm the dive (the settle→dive
+  // logic then lands at the matching scale — same path as a wheel-in notch).
+  stepFiner() {
+    if (this.busy || this.travel) return
+    if (this.mode === 'surface') this._refine()
+    else this._orbitNotch(1)
+  }
+
+  // one level WIDER. Surface: coarsen, or open the orbit gate once past z4.
+  // Orbital: nudge the altitude target outward (toward the planet).
+  stepWider() {
+    if (this.busy || this.travel) return
+    if (this.mode === 'surface') {
+      if (this.hooks.getCoarsenTarget()) this._coarsen()
+      else this.enterOrbit()
+    } else this._orbitNotch(-1)
+  }
+
+  _orbitNotch(dir) {
+    if (dir > 0) this._diveArmed = true // inward intent arms the dive, like the wheel
+    const f = dir > 0 ? 1 / 1.7 : 1.7
+    this.orbAltTarget = THREE.MathUtils.clamp(
+      this.orbAltTarget * f,
+      (DIVE_ALT_M * 0.9) / ORBITAL_M_PER_UNIT,
+      MAX_ALT_M / ORBITAL_M_PER_UNIT
+    )
+  }
+
+  // Click-to-dive: plunge one level onto an EXPLICIT point (lat/lon under the
+  // cursor), landing near the far end of the new level (the whole block in
+  // frame) while KEEPING the current view axis — the brief's "on se déplace où
+  // on a cliqué, dézoomé quasiment au max de ce niveau, même axe de vue".
+  async diveTo(target) {
+    if (this.busy || this.travel || this.mode !== 'surface' || !target) return
+    this.busy = true
+    const prevDir = this.camera.position.clone().sub(this.controls.target)
+    this.announce(`DIVING — ${target.lat.toFixed(4)}, ${target.lon.toFixed(4)} · Z${target.zoom}`)
+    try {
+      await this.hooks.loadSurface(target.lat, target.lon, target.zoom)
+    } catch {
+      this.announce('DIVE FAILED — HOLDING SCALE')
+      this.busy = false
+      return
+    }
+    await this._whiteout(() => {
+      const tgt = new THREE.Vector3(0, -0.3, 0) // the clicked point is the new block centre
+      const dist = this.hooks.surfaceMaxDistance() * 0.94 // far standoff = whole block in frame
+      const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
+      const pos = dir.multiplyScalar(dist)
+      const groundY = this.hooks.sampleGroundY ? this.hooks.sampleGroundY(tgt.x, tgt.z) : -Infinity
+      if (pos.y < groundY + 3) pos.y = groundY + 3 // same clearance guard as _arrivalPose
+      this.camera.position.copy(pos)
+      this.controls.target.copy(tgt)
+      this.controls.minDistance = 6
+      this.controls.maxDistance = this.hooks.surfaceMaxDistance()
+      this.controls.update()
+    })
+    this.busy = false
+  }
+
   // ---------------------------------------------------------------- per-frame
 
   update(dt) {

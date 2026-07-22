@@ -774,3 +774,64 @@ body.dark .ce-fp-btn { background: rgba(255, 255, 255, 0.08); color: #e8e4da; bo
   min-width: 38px;
   text-align: right;
 }
+
+/* ---------------------------------------------------------------- vertical zoom stepper */
+.zoom-stepper {
+  position: fixed;
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 18px;
+  background: var(--ce-glass, rgba(252, 252, 253, 0.62));
+  border: 1px solid var(--ce-border, rgba(255, 255, 255, 0.55));
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  backdrop-filter: blur(20px) saturate(1.5);
+  box-shadow: var(--ce-shadow, 0 10px 40px rgba(20, 24, 35, 0.12));
+  z-index: 30;
+  user-select: none;
+  transition: opacity 0.25s ease;
+}
+.zoom-stepper.zs-busy { opacity: 0.5; pointer-events: none; }
+
+.zoom-stepper .zs-btn {
+  all: unset;
+  cursor: pointer;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 13px;
+  font-family: var(--ce-font, 'Bricolage Grotesque', system-ui, sans-serif);
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--ce-ink, #1c1e22);
+  transition: background 0.15s ease, opacity 0.15s ease, transform 0.08s ease;
+}
+.zoom-stepper .zs-btn:hover { background: rgba(120, 130, 150, 0.14); }
+.zoom-stepper .zs-btn:active { transform: scale(0.9); }
+.zoom-stepper .zs-btn:disabled { opacity: 0.28; cursor: default; pointer-events: none; }
+
+.zoom-stepper .zs-label {
+  text-align: center;
+  font-family: var(--ce-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ce-muted, rgba(28, 30, 34, 0.6));
+  padding: 1px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+body.dark .zoom-stepper .zs-btn { color: var(--hud-ink, #eef1f6); }
+body.dark .zoom-stepper .zs-btn:hover { background: rgba(200, 210, 230, 0.16); }
+body.dark .zoom-stepper .zs-label { color: var(--hud-ink, #eef1f6); opacity: 0.8; }
+
+/* hide with the rest of the chrome in clean-capture mode */
+body.ce-noui .zoom-stepper { display: none; }
