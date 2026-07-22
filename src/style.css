@@ -794,19 +794,22 @@ body.dark .ce-fp-btn { background: rgba(255, 255, 255, 0.08); color: #e8e4da; bo
 .zoom-stepper {
   position: fixed;
   left: 50%;
-  top: 52px; /* just under the top bar, centred (Adrien) */
+  top: 54px; /* glued right under the top bar, centred (Adrien) */
   transform: translateX(-50%);
   display: flex;
-  flex-direction: row; /* horizontal, floating like the SURFACE line */
+  flex-direction: row; /* horizontal */
   align-items: center;
   gap: 2px;
-  padding: 0;
-  /* treated like the SURFACE readout: no outline, no background — pure float */
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
+  padding: 1px 7px;
+  /* discrete: outline + translucent fill kept, but rounded ONLY at the bottom
+     so it reads as hanging from the bar above (Adrien) */
+  border-radius: 0 0 15px 15px;
+  background: rgba(150, 160, 180, 0.1);
+  border: 1px solid var(--ce-border, rgba(255, 255, 255, 0.55));
+  border-top: 0;
+  -webkit-backdrop-filter: blur(9px) saturate(1.35);
+  backdrop-filter: blur(9px) saturate(1.35);
+  box-shadow: var(--ce-shadow, 0 10px 40px rgba(20, 24, 35, 0.12));
   z-index: 30;
   user-select: none;
   transition: opacity 0.25s ease;

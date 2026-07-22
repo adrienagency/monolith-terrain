@@ -94,24 +94,17 @@ export class Modes {
       'wheel',
       (e) => {
         if (this.mode === 'surface') {
-          // zooming out against the stop first COARSENS the patch (z12→z10→z8,
-          // real maps at every step) and only past z8 opens the orbit gate;
-          // zooming in against the near stop on a coarse patch refines it
-          if (
-            e.deltaY > 0 &&
-            !this.busy &&
-            this.controls.getDistance() >= this.hooks.surfaceMaxDistance() * 0.965
-          ) {
+          // The wheel dollies smoothly (OrbitControls damping = the "élan").
+          // The staircase steps at 70% of THIS level's travel, not against the
+          // wall (Adrien: "pas besoin d'avoir la tête contre la paroi"): out
+          // past 70% coarsens (z12→z10→z8, real maps each step, then the orbit
+          // gate); in past 70% refines. t = 0 at the near stop, 1 at the far.
+          const range = this.controls.maxDistance - this.controls.minDistance
+          const t = range > 1e-3 ? (this.controls.getDistance() - this.controls.minDistance) / range : 0
+          if (e.deltaY > 0 && !this.busy && !this._diveTween && t >= 0.7) {
             if (this.hooks.getCoarsenTarget()) this._coarsen()
             else this.enterOrbit()
-          } else if (
-            e.deltaY < 0 &&
-            !this.busy &&
-            (this.controls.getDistance() <= this.controls.minDistance * 1.03 ||
-              this.hooks.nearGround?.())
-          ) {
-            // refine when pinned against the near stop OR skimming the ground
-            // (target far ahead → getDistance never reaches the stop)
+          } else if (e.deltaY < 0 && !this.busy && !this._diveTween && (t <= 0.3 || this.hooks.nearGround?.())) {
             this._refine()
           }
           return
@@ -410,7 +403,7 @@ export class Modes {
   // Orbital: nudge the altitude target inward and arm the dive (the settle→dive
   // logic then lands at the matching scale — same path as a wheel-in notch).
   stepFiner() {
-    if (this.busy || this.travel) return
+    if (this.busy || this.travel || this._diveTween) return
     if (this.mode === 'surface') this._refine()
     else this._orbitNotch(1)
   }
@@ -418,7 +411,7 @@ export class Modes {
   // one level WIDER. Surface: coarsen, or open the orbit gate once past z4.
   // Orbital: nudge the altitude target outward (toward the planet).
   stepWider() {
-    if (this.busy || this.travel) return
+    if (this.busy || this.travel || this._diveTween) return
     if (this.mode === 'surface') {
       if (this.hooks.getCoarsenTarget()) this._coarsen()
       else this.enterOrbit()
@@ -435,12 +428,27 @@ export class Modes {
     )
   }
 
-  // Click-to-dive: plunge one level onto an EXPLICIT point (lat/lon under the
-  // cursor), landing near the far end of the new level (the whole block in
-  // frame) while KEEPING the current view axis — the brief's "on se déplace où
-  // on a cliqué, dézoomé quasiment au max de ce niveau, même axe de vue".
-  async diveTo(target) {
-    if (this.busy || this.travel || this.mode !== 'surface' || !target) return
+  // Click-to-dive, two beats (Adrien): first EASE IN toward the clicked point
+  // by 30% of the remaining zoom distance (a "lean toward it"), THEN load the
+  // finer level centred there. `target.point` is the clicked world position.
+  diveTo(target) {
+    if (this.busy || this.travel || this._diveTween || this.mode !== 'surface' || !target) return
+    const from = this.camera.position.clone()
+    const fromT = this.controls.target.clone()
+    const dist = from.distanceTo(fromT)
+    const lean = 0.3 * Math.max(0, dist - this.controls.minDistance)
+    const dir = from.clone().sub(fromT).normalize()
+    const toT = target.point ? target.point.clone() : fromT.clone()
+    const toPos = toT.clone().addScaledVector(dir, Math.max(this.controls.minDistance, dist - lean))
+    this.controls.enabled = false // the tween owns the camera until it loads
+    this._diveTween = { t: 0, dur: 0.42, from, fromT, toPos, toT, target }
+  }
+
+  // second beat: load the finer level, centred on the clicked point, landing
+  // near the far end of the new level (whole block in frame) while KEEPING the
+  // current view axis — "dézoomé quasiment au max de ce niveau, même axe de vue".
+  async _loadDive(target) {
+    if (this.busy || this.mode !== 'surface' || !target) return
     this.busy = true
     const prevDir = this.camera.position.clone().sub(this.controls.target)
     this.announce(`DIVING — ${target.lat.toFixed(4)}, ${target.lon.toFixed(4)} · Z${target.zoom}`)
@@ -507,6 +515,21 @@ export class Modes {
         }
       }
     } else {
+      // click-to-dive lean-in tween (first beat): ease 30% toward the point,
+      // then load the finer level (see diveTo). ease-in-out quad.
+      if (this._diveTween && !this.busy) {
+        const dv = this._diveTween
+        dv.t = Math.min(1, dv.t + dt / dv.dur)
+        const e = dv.t < 0.5 ? 2 * dv.t * dv.t : 1 - ((-2 * dv.t + 2) ** 2) / 2
+        this.camera.position.lerpVectors(dv.from, dv.toPos, e)
+        this.controls.target.lerpVectors(dv.fromT, dv.toT, e)
+        this.controls.update()
+        if (dv.t >= 1) {
+          this._diveTween = null
+          this.controls.enabled = true
+          this._loadDive(dv.target)
+        }
+      }
       this.altM = this.hooks.surfaceCamAltMeters()
     }
 

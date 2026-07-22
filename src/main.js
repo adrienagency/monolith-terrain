@@ -555,6 +555,7 @@ controls.target.set(0, -0.3, 0)
 controls.zoomToCursor = true // dolly toward the exact point under the mouse
 controls.enableDamping = true
 controls.dampingFactor = 0.06
+controls.zoomSpeed = 1.35 // longer, smoother wheel steps with momentum (Adrien)
 controls.maxPolarAngle = Math.PI * 0.49
 controls.minDistance = 6
 controls.maxDistance = 150 // room to frame the whole slab before the orbit gate
@@ -1147,9 +1148,11 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   const hitDist = focusRayHit(focusRay.ray.origin, focusRay.ray.direction, terrain.sample, { halfExtent: TERRAIN_SIZE / 2 })
   if (hitDist == null) return // clicked the sky or off-map
   const px = focusRay.ray.origin.x + focusRay.ray.direction.x * hitDist
+  const py = focusRay.ray.origin.y + focusRay.ray.direction.y * hitDist
   const pz = focusRay.ray.origin.z + focusRay.ray.direction.z * hitDist
   const { lat, lon } = worldToLatLon(dem, px, pz)
-  modes.diveTo({ lat, lon, zoom: stepZoom(params.demZoom, 1, userFineZoom) })
+  // pass the clicked world point so the dive leans 30% toward it before loading
+  modes.diveTo({ lat, lon, zoom: stepZoom(params.demZoom, 1, userFineZoom), point: new THREE.Vector3(px, py, pz) })
 })
 
 // ------------------------------------------------------------------ regeneration helpers
