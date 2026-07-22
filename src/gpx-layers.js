@@ -105,6 +105,11 @@ export class GpxLayerManager {
   get headT() {
     return (this.playingLayer || this.activeLayer)?.gpx.headT ?? 0
   }
+  // position monde AMORTIE de la tête de course (la sphère que l'utilisateur
+  // voit) — la caméra de suivi la vise pour la garder pile au centre
+  get headWorld() {
+    return (this.playingLayer || this.activeLayer)?.gpx.headWorld ?? null
+  }
   get currentWorld() {
     return (this.playingLayer || this.activeLayer)?.gpx.track?.world || null
   }

@@ -3117,7 +3117,8 @@ function updateCameraMotion(dt) {
       controls.update()
       drone.syncToCamera()
     } else {
-      drone.updateAt(dt, gpxLayer.headT)
+      // passe la VRAIE position monde de la tête → visée verrouillée au centre
+      drone.updateAt(dt, gpxLayer.headT, gpxLayer.headWorld)
     }
     return
   }

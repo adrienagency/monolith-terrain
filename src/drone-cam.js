@@ -191,11 +191,15 @@ export class DroneCam {
     this.tiltDeg = 24 // camera height angle above the head ('toujours un angle')
 
     // ---- runtime tuning ----
-    this.posHalfLife = 0.3 // s — the small follow latency (anti-nausea)
-    this.posHalfLifeY = 0.4
-    this.maxYawRateDeg = 120
+    // BEAUCOUP plus réactif (retour Adrien) : la position rattrape vite la tête
+    // (l'ease vient de ce damping court, pas de l'aim). L'AIM lui est verrouillé
+    // sur la tête, sans latence — la tête est TOUJOURS pile au centre.
+    this.posHalfLife = 0.12 // s — latence de suivi horizontale (avant 0.3)
+    this.posHalfLifeY = 0.18 // (avant 0.4)
+    this.maxYawRateDeg = 120 // conservés pour compat API (plus utilisés par _aim)
     this.maxPitchRateDeg = 160
     this.rotHalfLife = 0.09
+    this._headWorld = null // vraie position monde de la tête (passée par main.js)
 
     this._q = new THREE.Quaternion()
     this._m = new THREE.Matrix4()
@@ -298,8 +302,12 @@ export class DroneCam {
     this._applyPose(dt, trapezoid(this.t), this.t >= 1)
   }
 
-  updateAt(dt, s) {
+  // `headWorld` (optionnel) : la VRAIE position monde de la tête (la sphère
+  // affichée) — la caméra la vise pour la garder pile au centre, plutôt que le
+  // point de courbe baké (lissé) qui divergeait légèrement.
+  updateAt(dt, s, headWorld = null) {
     if (!this.active || !this.curve) return
+    this._headWorld = headWorld
     const clamped = THREE.MathUtils.clamp(s, 0, 1)
     this.t = clamped
     this._applyPose(dt, clamped, clamped >= 1)
@@ -323,9 +331,16 @@ export class DroneCam {
 
   // ---- runtime ------------------------------------------------------------
 
+  // la tête réelle (sphère affichée) si connue, sinon le point de courbe baké
+  _head(s, out) {
+    if (this._headWorld) out.copy(this._headWorld)
+    else this.curve.getPointAt(s, out)
+    return out
+  }
+
   _applyPose(dt, s, arrived) {
+    this._head(s, _headPt)
     this._desiredFor(s, _desired)
-    this.curve.getPointAt(s, _subj)
 
     // Ground clearance is solved on the DESIRED point, BEFORE damping. The
     // old order — damp first, then clamp the realized position every frame —
@@ -336,6 +351,17 @@ export class DroneCam {
     if (this.sampleGround && !this.topDown) {
       const g = this.sampleGround(_desired.x, _desired.z)
       if (_desired.y < g + this.clearance) _desired.y = g + this.clearance
+    }
+
+    // DÉ-OCCLUSION sur le DÉSIRÉ, AVANT le damping (Adrien : "jamais de montagne
+    // entre la caméra et la tête") : si une crête coupe la ligne tête→standoff,
+    // on rentre la position VISÉE juste avant l'obstacle ; le damping lisse le
+    // retrait et la caméra RESSORT dès la crête passée. Opérer sur le désiré
+    // (standoff plein) et pas sur _pos amorti évite le ratchet qui collait la
+    // caméra sur la tête. minT = 0.35 : jamais moins d'un tiers du standoff.
+    if (this.sampleGround && !this.topDown) {
+      const r = resolveOcclusion(_headPt, _desired, this.sampleGround, { minT: 0.35 })
+      if (r.pulled) _desired.set(r.x, r.y, r.z)
     }
 
     if (dt <= 0) this._pos.copy(_desired)
@@ -352,56 +378,32 @@ export class DroneCam {
       if (this._pos.y < hard) this._pos.y = hard
     }
 
-    // NO de-occlusion, on purpose. The view is the USER'S choice now: if a
-    // ridge crosses it, the honest behaviour is to keep the chosen angle and
-    // let them tap another view key — the old auto pull-in read as the camera
-    // 'zooming on its own', the exact reported bug.
-
     this.camera.position.copy(this._pos)
-    this._standoffMul = this._pos.distanceTo(_subj) / this.arm
+    this._standoffMul = this._pos.distanceTo(_headPt) / this.arm
     this._aim(dt, s, arrived)
   }
 
   _aim(dt, s, arrived) {
-    this.curve.getPointAt(s, _subj)
-    this.controls.target.copy(_subj)
-    _diff.subVectors(_subj, this._pos)
+    // La tête est TOUJOURS pile au centre : on vise la VRAIE position monde de
+    // la tête (headWorld) et on regarde EXACTEMENT dessus — pas de cap de
+    // vitesse, pas de slerp d'orientation. Toute la douceur (ease-in-ease-out)
+    // vient du damping de POSITION plus haut ; l'aim, lui, ne lague jamais.
+    const head = this._head(s, _headPt)
+    this.controls.target.copy(head)
+    this.camera.up.copy(this._up)
+    this.camera.lookAt(head)
+    // garde le heading/pitch cohérents pour syncToCamera() (suspension au drag)
+    _fwd.copy(head).sub(this._pos)
+    const h = Math.hypot(_fwd.x, _fwd.z)
+    if (h > 1e-6) { this._headingDir.set(_fwd.x / h, 0, _fwd.z / h); this._pitch = Math.atan2(_fwd.y, h) }
 
-    _tDir.set(_diff.x, 0, _diff.z)
-    if (_tDir.lengthSq() < 1e-8) _tDir.copy(this._headingDir)
-    _tDir.normalize()
-    const maxYawStep = THREE.MathUtils.degToRad(this.maxYawRateDeg) * Math.max(dt, 0)
-    if (dt <= 0) this._headingDir.copy(_tDir)
-    else {
-      const sl = slewHeading(this._headingDir, _tDir, maxYawStep)
-      this._headingDir.set(sl.x, 0, sl.z)
-    }
-
-    // pitch: LOCKED on the head, dead centre — the only softness is latency
-    const horiz = Math.hypot(_diff.x, _diff.z)
-    const target = THREE.MathUtils.clamp(Math.atan2(_diff.y, Math.max(horiz, 1e-6)), -1.5, 1.2)
-    if (dt <= 0) this._pitch = target
-    else {
-      const maxPitchStep = THREE.MathUtils.degToRad(this.maxPitchRateDeg) * dt
-      this._pitch += THREE.MathUtils.clamp(target - this._pitch, -maxPitchStep, maxPitchStep)
-    }
-
-    _fwd.copy(this._headingDir).multiplyScalar(Math.cos(this._pitch))
-    _fwd.y = Math.sin(this._pitch)
-    _fwd.normalize()
-    _look.copy(this._pos).add(_fwd)
-    this._m.lookAt(this._pos, _look, this._up)
-    this._q.setFromRotationMatrix(this._m)
-    const angle = this.camera.quaternion.angleTo(this._q)
-    if (dt <= 0 || angle < 1e-5) this.camera.quaternion.copy(this._q)
-    else this.camera.quaternion.slerp(this._q, 1 - Math.pow(2, -dt / this.rotHalfLife))
-
-    if (arrived && angle < 0.001) { this.active = false; this.onDone?.() }
+    if (arrived) { this.active = false; this.onDone?.() }
   }
 }
 
 const _subj = new THREE.Vector3()
 const _desired = new THREE.Vector3()
+const _headPt = new THREE.Vector3()
 const _diff = new THREE.Vector3()
 const _fwd = new THREE.Vector3()
 const _look = new THREE.Vector3()

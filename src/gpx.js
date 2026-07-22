@@ -1513,6 +1513,12 @@ export class GpxLayer {
     this.kmMarkers = []
   }
 
+  // position monde amortie de la tête (ce que l'utilisateur voit) — null tant
+  // qu'aucune tête n'est active ; la caméra de suivi la vise pour la centrer
+  get headWorld() {
+    return this._headDispValid ? this._headDisp : null
+  }
+
   clear() {
     this._disposeLine()
     this._disposeVillages()
