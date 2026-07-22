@@ -161,6 +161,10 @@ export class Terrain {
       // clip is bypassed. Placeholder stays white so sampling is always valid.
       uRegionMask: { value: (this._regionPlaceholder = whiteTexture()) },
       uRegionOn: { value: 0 },
+      // caustiques projetées AU FOND (sur le relief sous-marin) : intensité
+      // (0 = off, piloté par waterRebuild) + temps d'animation (tick main.js)
+      uSeaCausK: { value: 0 },
+      uCausT: { value: 0 },
       uOceanShallow: { value: new THREE.Color(params.oceanShallow ?? '#dce8ec') },
       uOceanMid: { value: new THREE.Color(params.oceanMid ?? '#7fa8b8') },
       uOceanDeep: { value: new THREE.Color(params.oceanDeep ?? '#31576b') },
@@ -262,6 +266,21 @@ uniform sampler2D uSeaMask;
 uniform float uSeaMaskOn;
 uniform sampler2D uCoastMask;
 uniform float uCoastMaskOn;
+uniform float uSeaCausK;
+uniform float uCausT;
+// caustique fond marin — phase itérée (Hoskins), projetée sur le RELIEF
+float seaCaustic(vec2 p, float t) {
+  vec2 ii = p;
+  float c = 1.0;
+  for (int n = 0; n < 3; n++) {
+    float ft = t * (1.0 - (3.5 / float(n + 1)));
+    ii = p + vec2(cos(ft - ii.x) + sin(ft + ii.y), sin(ft - ii.y) + cos(ft + ii.x));
+    c += 1.0 / length(vec2(p.x / (sin(ii.x + ft) / 0.6), p.y / (cos(ii.y + ft) / 0.6)));
+  }
+  c /= 3.0;
+  c = 1.17 - pow(c, 1.4);
+  return clamp(pow(abs(c), 6.0), 0.0, 1.0);
+}
 uniform vec3 uOceanShallow;
 uniform vec3 uOceanMid;
 uniform vec3 uOceanDeep;
@@ -416,6 +435,23 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     mapCol = d01 < 0.45
       ? mix(uOceanShallow, uOceanMid, d01 / 0.45)
       : mix(uOceanMid, uOceanDeep, (d01 - 0.45) / 0.55);
+    // v48 : CAUSTIQUES AU FOND (retour Adrien) — projetées sur le RELIEF
+    // sous-marin, elles épousent l'élévation réelle (vWorldPos). Motif varié :
+    // warp du domaine (casse la répétition) + deux échelles + longues bandes
+    // de rayons qui balaient lentement. Même rendu jour et nuit (photos réf.).
+    if (uSeaCausK > 0.001) {
+      vec2 cw = vWorldPos.xz + 0.9 * vec2(sin(vWorldPos.z * 0.11 + uCausT * 0.07), cos(vWorldPos.x * 0.13 - uCausT * 0.05));
+      float cc1 = seaCaustic(cw * 0.55 + vec2(uCausT * 0.05, 0.0), uCausT * 0.8);
+      float cc2 = seaCaustic(cw * 0.23 - vec2(0.0, uCausT * 0.03), uCausT * 0.5);
+      float cnet = clamp(cc1 * 1.2 + cc2 * 0.5, 0.0, 1.5);
+      float cfil = smoothstep(0.5, 1.1, cnet);
+      // rayons de lumière : bandes larges et lentes qui traversent le fond
+      float crays = mix(0.72, 1.0, 0.5 + 0.5 * sin(dot(vWorldPos.xz, vec2(0.33, 0.21)) + uCausT * 0.2));
+      float creach = mix(0.3, 1.0, 1.0 - d01); // plein en eau peu profonde, plancher au large
+      float cglow = clamp(cfil * crays * creach * uSeaCausK, 0.0, 1.0);
+      mapCol *= 1.0 - 0.2 * creach * uSeaCausK * (1.0 - cnet); // creux des mailles éteints
+      mapCol = 1.0 - (1.0 - clamp(mapCol, 0.0, 1.0)) * (1.0 - cglow * 0.55); // filaments en screen
+    }
   } else {
     // the pivot can never sink below sea level: with a low pivot the whole
     // coastal band rides the top of the ramp and land loses its low tints

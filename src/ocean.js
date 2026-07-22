@@ -317,37 +317,6 @@ void main() {
   vec3 body = mix(uDeep, mix(uShallowT, uDeep, pow(dRt, 0.7)), lagoonW);
   body *= mix(vec3(0.10, 0.16, 0.30), vec3(1.0), uDayLight);
 
-  // v46 : CAUSTIQUES façon photos de piscine (retour Adrien) — un réseau de
-  // filaments FINS et BRILLANTS qui danse sur le fond. Même phase itérée à
-  // deux échelles, puis remise en forme (pow) pour amincir les mailles et
-  // pousser les crêtes vers le blanc brûlé. Elles vivent dans la BANDE LAGON
-  // (dRt, les premiers ~15% du budget de profondeur) — comme la vraie
-  // lumière, forte sur le sable clair, éteinte au large.
-  float sunUp = clamp(L.y, 0.0, 1.0);
-  // v47 : cellules 2x plus GRANDES (lisibles en vue large — elles devenaient
-  // du bruit sub-pixel) et portée étendue : pleines dans la bande lagon,
-  // plancher ~20% même au grand large (retour Adrien : « je ne vois aucun
-  // caustic » — elles étaient confinées à un liseré côtier de quelques pixels)
-  float ca = caustic(xz * 2.1 + vec2(uTime * 0.06), uTime * 0.9);
-  float ca2 = caustic(xz * 0.95 - vec2(uTime * 0.03), uTime * 0.45);
-  float causNet = clamp(ca * 1.3 + ca2 * 0.45, 0.0, 1.5);
-  // SEUIL et non pow : le pow gardait une base uniforme qui voilait toute
-  // l'eau au large — ici zéro en dehors des crêtes, réseau pur comme les photos
-  float causFil = smoothstep(0.68, 1.2, causNet) * 1.8;
-  float causReach = 1.0 - 0.8 * smoothstep(0.0, 0.7, dR);
-  float causMask = uSeabedCaustics * clamp(uCaustics * uSunFx, 0.0, 3.0) * sunUp
-                 * (0.05 + 0.95 * uDayLight) * causReach;
-  vec3 causCol = mix(uSunColor, vec3(1.0), 0.55); // blanc solaire, comme les photos
-  // Le contraste des photos : creux des mailles légèrement éteint, réseau
-  // lumineux par-dessus en SCREEN BLEND — éclaire sans jamais brûler une base
-  // déjà claire (l'additif crevait tout au blanc sur le glacis lagon).
-  // la portée s'applique APRÈS le clamp des crêtes (sinon les crêtes déferlent
-  // à pleine puissance même au large) : plein feu en bande lagon, ~30% au large
-  vec3 causGlow = clamp(causCol * causFil * clamp(causMask, 0.0, 1.6), 0.0, 1.0) * (0.2 + 0.8 * causReach);
-  float causTrough = 1.0 - 0.3 * clamp(causMask, 0.0, 1.0) * (1.0 - clamp(causNet, 0.0, 1.0));
-  body = clamp(body * causTrough, 0.0, 1.0);
-  body = 1.0 - (1.0 - body) * (1.0 - causGlow * 0.55); // la lame porte les filaments à toute transparence
-
   // large-scale patchiness: without it the glitter and the whitecaps line up
   // in parallel rows along the dominant swell — the "repeating waves" flag
   // (named patchy: "patch" is a reserved word in GLSL and kills the compile)
@@ -399,11 +368,6 @@ void main() {
   // rien, l'ancien *vFade l'éteignait donc exactement où elle se voyait
   vec2 refOff = N.xz * uRefract * 0.09 * (0.3 + 0.7 * vFade);
   vec3 through = texture2D(uSceneTex, clamp(screenUv + refOff, vec2(0.001), vec2(0.999))).rgb;
-  // filaments brûlés sur le FOND vu à travers l'eau + assombrissement du
-  // creux des mailles (le contraste des photos : fond légèrement éteint,
-  // réseau incandescent par-dessus)
-  through = clamp(through * (1.0 - 0.4 * clamp(causMask, 0.0, 1.0) * (1.0 - clamp(causNet, 0.0, 1.0))), 0.0, 1.0);
-  through = 1.0 - (1.0 - through) * (1.0 - causGlow * 0.75);
   col = mix(through, col, wOp);
   // reflets de surface : jamais attenues par la transparence
   col = mix(col, uSky, fres * 0.35);

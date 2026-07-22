@@ -357,12 +357,10 @@ export class Modes {
   async _rescale(next, verb) {
     this.busy = true
     this._resetZoom() // the new level starts its own scroll budget
-    // v42: CONTINUITE D'ALTITUDE REELLE — avant, l'arrivee etait un cadrage
-    // fixe en unites scene : traverser un etage teleportait l'altitude reelle
-    // (10 km -> 149 km -> 143 km, retour Adrien). On memorise l'altitude en
-    // metres et la direction de vue, et on les retablit dans le nouvel etage
-    // (clampees a ses bornes) : l'escalier de zoom se lit comme un zoom continu.
-    const prevAltM = this.hooks.surfaceCamAltMeters?.() ?? 0
+    // v48 (retour Adrien) : à CHAQUE traversée d'étage (zoom comme dézoom), on
+    // arrive au POINT DE PRÉSENTATION — la même distance que la vue iso 1
+    // (maxDistance·0.97, le bloc entier cadré) — mais en GARDANT l'angle de
+    // vue de l'utilisateur. Remplace la continuité d'altitude v42.
     const prevDir = this.camera.position.clone().sub(this.controls.target)
     this.announce(`${verb} — ${next.lat.toFixed(4)}, ${next.lon.toFixed(4)} · Z${next.zoom}`)
     try {
@@ -374,21 +372,14 @@ export class Modes {
     }
     await this._whiteout(() => {
       const arrival = this._arrivalPose()
-      this.camera.position.copy(arrival.pos)
       this.controls.target.copy(arrival.target)
-      if (prevAltM > 1 && prevDir.lengthSq() > 1e-6) {
-        // meme direction de vue qu'avant, distance recalculee pour retrouver
-        // l'altitude reelle precedente dans la nouvelle echelle
-        const nowAlt = this.hooks.surfaceCamAltMeters?.() ?? 0
-        if (nowAlt > 1) {
-          const off = prevDir.clone().normalize().multiplyScalar(arrival.pos.distanceTo(arrival.target) * (prevAltM / nowAlt))
-          const lo = this.controls.minDistance * 1.05
-          const hi = (this.hooks.surfaceMaxDistance?.() ?? 150) * 0.95
-          const len = Math.min(hi, Math.max(lo, off.length()))
-          off.multiplyScalar(len / Math.max(off.length(), 1e-6))
-          this.camera.position.copy(this.controls.target).add(off)
-        }
-      }
+      const dist = (this.hooks.surfaceMaxDistance?.() ?? 150) * 0.97 // = distance de la vue iso 1
+      const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
+      const pos = this.controls.target.clone().addScaledVector(dir, dist)
+      // même garde de dégagement sol que _arrivalPose
+      const groundY = this.hooks.sampleGroundY ? this.hooks.sampleGroundY(arrival.target.x, arrival.target.z) : -Infinity
+      if (pos.y < groundY + 3) pos.y = groundY + 3
+      this.camera.position.copy(pos)
       this.controls.update()
     })
     this.busy = false
@@ -513,7 +504,7 @@ export class Modes {
     }
     await this._whiteout(() => {
       const tgt = new THREE.Vector3(0, -0.3, 0) // the clicked point is the new block centre
-      const dist = this.hooks.surfaceMaxDistance() * 0.94 // far standoff = whole block in frame
+      const dist = this.hooks.surfaceMaxDistance() * 0.97 // distance de la vue iso 1 (point de présentation)
       const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
       const pos = dir.multiplyScalar(dist)
       const groundY = this.hooks.sampleGroundY ? this.hooks.sampleGroundY(tgt.x, tgt.z) : -Infinity
