@@ -2087,6 +2087,18 @@ function shuffleLook() {
   params.aerialEnabled = chance(0.3)
   refreshAerial()
 
+  // 5b) BOKEH — profondeur de champ, parfois, pour un rendu maquette (Adrien).
+  //     Autofocus sur le relief + bande de netteté resserrée → l'avant/arrière
+  //     fond en flou. Échelle modérée (jamais le max 32, pour rester élégant).
+  params.bokehEnabled = chance(0.4)
+  if (params.bokehEnabled) {
+    params.autoFocus = true
+    params.bokehScale = +rnd(5, 18).toFixed(1)
+    params.focusRange = Math.round(rnd(14, 34))
+  }
+  setDofEnabled(params.bokehEnabled && params.bokehScale > 0)
+  if (dof) { dof.bokehScale = params.bokehScale; dof.cocMaterial.worldFocusRange = params.focusRange }
+
   // 6) FOND + SOCLE par théorie des couleurs (Adrien) : un schéma élégant
   //    (complémentaire / split / analogue / triadique / mono), contraste bas ou
   //    fort au hasard. Le fond prend un uni ou un dégradé harmonieux ; le socle

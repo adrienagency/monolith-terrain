@@ -1,7 +1,8 @@
-// EXPLORE panel — a curated list of the most beautiful places on Earth. The
-// continents are listed directly (no redundant "Places" wrapper), then, after a
-// separator, a peer group "Islands" — the world's most striking high-relief
-// islands, each framed whole on the socle (Adrien).
+// EXPLORE panel — a curated list of the most beautiful places on Earth.
+// Two top-level groups keep the panel short (Adrien): "Continents" folds the
+// seven continent lists, "Gorgeous places" holds the striking high-relief
+// islands. Each level is a single-open accordion scoped to its own siblings, so
+// opening one entry closes only its peers — never a group in another branch.
 
 import { el } from './kit.js'
 import { Panel } from './shell.js'
@@ -19,39 +20,49 @@ export function buildExplorePanel(ctx) {
     tip: 'Fly to a curated list of the most beautiful places on Earth.',
   })
 
-  const root = el('div')
-
-  // one collapsible group (a continent, or "Islands") → its list of places.
-  // Opening one closes the others (single-open accordion, same as before).
-  const addGroup = (title, places) => {
+  // one collapsible entry (header + body). Opening it closes only its direct
+  // siblings — the bodies that share this entry's parent container.
+  const group = (title, count, indent = 0) => {
+    const wrap = el('div', 'ce-xgroup')
     const head = el('button', 'ce-place')
     head.type = 'button'
-    head.innerHTML = `<span>${title}</span><small>${places.length}</small>`
-    const list = el('div')
-    list.dataset.list = '1'
-    list.style.display = 'none'
+    if (indent) head.style.paddingLeft = `${8 + indent}px`
+    head.innerHTML = `<span>${title}</span>${count != null ? `<small>${count}</small>` : ''}`
+    const body = el('div', 'ce-xbody')
+    body.style.display = 'none'
     head.addEventListener('click', () => {
-      const open = list.style.display === 'none'
-      for (const other of root.querySelectorAll('[data-list]')) other.style.display = 'none'
-      list.style.display = open ? '' : 'none'
+      const open = body.style.display === 'none'
+      const siblings = wrap.parentElement?.querySelectorAll(':scope > .ce-xgroup > .ce-xbody') || []
+      for (const s of siblings) s.style.display = 'none'
+      body.style.display = open ? '' : 'none'
     })
-    for (const p of places) {
-      const row = el('button', 'ce-place')
-      row.type = 'button'
-      row.style.paddingLeft = '18px'
-      row.innerHTML = `<span>${p.name}</span>`
-      row.addEventListener('click', () => ctx.flyTo(p.lat, p.lon, p.zoom))
-      list.append(row)
-    }
-    root.append(head, list)
+    wrap.append(head, body)
+    return { wrap, body }
   }
 
-  for (const [continent, places] of Object.entries(LANDMARKS)) addGroup(continent, places)
+  // a leaf place row: click to fly there, framed whole on the socle
+  const placeRow = (p, indent) => {
+    const row = el('button', 'ce-place')
+    row.type = 'button'
+    row.style.paddingLeft = `${8 + indent}px`
+    row.innerHTML = `<span>${p.name}</span>`
+    row.addEventListener('click', () => ctx.flyTo(p.lat, p.lon, p.zoom))
+    return row
+  }
 
-  // separator, then Islands as a peer group of the continents
-  root.append(el('div', 'ce-place-sep'))
-  addGroup('Islands', ISLANDS)
+  // ── Continents ── folds all seven continent lists
+  const continentCount = Object.values(LANDMARKS).reduce((n, l) => n + l.length, 0)
+  const continents = group('Continents', continentCount)
+  for (const [continent, places] of Object.entries(LANDMARKS)) {
+    const cg = group(continent, places.length, 14)
+    for (const p of places) cg.body.append(placeRow(p, 30))
+    continents.body.append(cg.wrap)
+  }
 
-  panel.add(root)
+  // ── Gorgeous places ── the high-relief islands, peer of Continents
+  const gorgeous = group('Gorgeous places', ISLANDS.length)
+  for (const p of ISLANDS) gorgeous.body.append(placeRow(p, 14))
+
+  panel.add(continents.wrap, gorgeous.wrap)
   return panel
 }

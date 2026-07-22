@@ -277,10 +277,34 @@ export class GroundInfoLayer {
     }
 
     // DESCRIPTION — lower-left, right-flush
-    if (info.description) this._placeWrapped(info.description, 'left', 6, body, { weight: 400, px: 21 })
+    let descEnd = null
+    if (info.description) descEnd = this._placeWrapped(info.description, 'left', 6, body, { weight: 400, px: 21 })
 
     // ANECDOTE — right side, left-flush, marked with a ◆
-    if (info.anecdote) this._placeWrapped(`◆ ${info.anecdote}`, 'right', -m - 4, body, { weight: 400, px: 20 })
+    let anecEnd = null
+    if (info.anecdote) anecEnd = this._placeWrapped(`◆ ${info.anecdote}`, 'right', -m - 4, body, { weight: 400, px: 20 })
+
+    // WIKIPEDIA CREDIT — the description + anecdote are scraped from the nearest
+    // Wikipedia article, so we say so plainly right under the blurb (Adrien :
+    // « indique bien que ça vient de wikipedia »). A dim, small line with the
+    // article title when known.
+    if (info.description || info.anecdote) {
+      const credit = info.title ? `↳ via Wikipedia — ${info.title}` : '↳ via Wikipedia'
+      const onRight = !!info.anecdote
+      this._place(
+        textCanvas([credit], {
+          family: BODY_FONT,
+          weight: 600,
+          px: 15,
+          align: onRight ? 'left' : 'right',
+          color: inkRGBA(ink, 0.5),
+          track: 0.05,
+        }).canvas,
+        onRight ? 'right' : 'left',
+        (onRight ? anecEnd : descEnd) + 0.6,
+        24
+      )
+    }
 
     // COMPASS ROSE — north-east corner
     const rose = compassCanvas(inkRGBA(ink, 0.72))
@@ -304,7 +328,7 @@ export class GroundInfoLayer {
     }
     if (cur.trim()) lines.push(cur.trim())
     const align = side === 'right' ? 'left' : side === 'left' ? 'right' : 'center'
-    this._place(
+    return this._place(
       textCanvas(lines.slice(0, 8), { family: BODY_FONT, weight, px, align, color, track: 0.02 }).canvas,
       side,
       near,
