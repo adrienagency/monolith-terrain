@@ -500,7 +500,10 @@ function applyBackground() {
   _envBg = null
   if (_bgTex) { _bgTex.dispose(); _bgTex = null }
   if (!params.bgMode || params.bgMode === 'solid') {
-    scene.background = new THREE.Color(params.fogColor) // solid backdrop = the fog colour
+    // solid backdrop = the picked Colour A (bug : lisait fogColor, donc changer
+    // la couleur unie ne changeait rien — retour Adrien). Le fond uni suit
+    // maintenant le sélecteur « Colour A ».
+    scene.background = new THREE.Color(params.bgColorA)
   } else {
     _bgTex = makeGradientTexture({ mode: params.bgMode, a: params.bgColorA, b: params.bgColorB, c: params.bgColorC, angle: params.bgAngle })
     scene.background = _bgTex
@@ -1960,6 +1963,39 @@ function resetAll() {
   history?.record() // committed look change — one undo step
 }
 
+// Élégante palette par THÉORIE DES COULEURS pour le fond + le socle du shuffle
+// (Adrien) : une teinte de base H, une harmonie (complémentaire / split-
+// complémentaire / analogue / triadique / mono), et un contraste tiré au hasard
+// BAS ou FORT. Renvoie 3 arrêts de dégradé a/b/c, un mode, un angle, et une
+// couleur de socle proche-neutre teintée du schéma.
+function elegantColorScheme() {
+  const rnd = (a, b) => a + Math.random() * (b - a)
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
+  const clamp01 = (x) => Math.max(0, Math.min(1, x))
+  const clampL = (l) => Math.max(8, Math.min(94, l))
+  const hsl = (h, s, l) => '#' + new THREE.Color().setHSL(((((h % 360) + 360) % 360) / 360), clamp01(s / 100), clamp01(l / 100)).getHexString()
+  const H = rnd(0, 360)
+  const harmony = pick(['complementary', 'split', 'analogous', 'triadic', 'mono'])
+  const hues =
+    harmony === 'complementary' ? [H, H, H + 180]
+    : harmony === 'split' ? [H, H + 150, H + 210]
+    : harmony === 'analogous' ? [H, H + 26, H - 26]
+    : harmony === 'triadic' ? [H, H + 120, H + 240]
+    : [H, H, H]
+  const highContrast = Math.random() < 0.5 // bas OU fort contraste (Adrien)
+  const s = rnd(16, 56) // sobre → coloré, jamais fluo
+  const lMid = rnd(30, 76)
+  const spread = highContrast ? rnd(26, 46) : rnd(6, 15)
+  const a = hsl(hues[0], s * 0.9, clampL(lMid + spread * 0.5))
+  const b = hsl(hues[1], s, clampL(lMid))
+  const c = hsl(hues[2], s * 1.05, clampL(lMid - spread * 0.5))
+  const mode = pick(['solid', 'linear', 'linear', 'radial', 'mesh']) // linear pondéré
+  const angle = Math.floor(rnd(0, 360))
+  // socle : proche-neutre teinté du schéma, soit charbon soit pierre claire
+  const plinth = hsl(H, rnd(3, 14), Math.random() < 0.5 ? rnd(14, 30) : rnd(80, 92))
+  return { mode, a, b, c, angle, plinth, harmony, highContrast }
+}
+
 // SHUFFLE (Adrien) — rebats every look option at once: a coherent built-in
 // template as a base, then a fresh sea (new seed → different sea), a random
 // surface shader, a random hour, and a few layer toggles on top. Location and
@@ -2023,6 +2059,26 @@ function shuffleLook() {
   if (clouds) { if (params.cloudsEnabled) clouds.build(params); clouds.setVisible(params.cloudsEnabled && modes.mode === 'surface') }
   params.aerialEnabled = chance(0.3)
   refreshAerial()
+
+  // 6) FOND + SOCLE par théorie des couleurs (Adrien) : un schéma élégant
+  //    (complémentaire / split / analogue / triadique / mono), contraste bas ou
+  //    fort au hasard. Le fond prend un uni ou un dégradé harmonieux ; le socle
+  //    prend une couleur unie proche-neutre teintée du même schéma.
+  const sch = elegantColorScheme()
+  params.bgEnv = '' // le shuffle reste procédural (pas de ciel HDRI)
+  params.bgMode = sch.mode
+  params.bgColorA = sch.a
+  params.bgColorB = sch.b
+  params.bgColorC = sch.c
+  params.bgAngle = sch.angle
+  applyBackground()
+  bgRefreshFn() // resync des sélecteurs du panneau Background
+  // socle : finition unie (stone → plinthColor visible) dans la couleur du schéma
+  params.plinthFinish = 'solid'
+  params.plinthPbr = 'stone'
+  params.plinthColor = sch.plinth
+  applyPlinthMaterial()
+  plinth.setColors(params)
 
   refreshAll()
   history?.record() // one undo step for the whole shuffle
