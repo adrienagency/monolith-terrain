@@ -1070,9 +1070,10 @@ body.store-mode .ce-changelog-btn {
   border-color: var(--ce-accent);
   color: var(--ce-accent);
 }
+/* store-mode NE cache PAS .ce-isobtn : le toggle iso et la caméra auto
+   restent actifs dans la boutique (repositionnés dans le cadre, store.css) */
 .ce-isobtn.off,
-body.ce-noui .ce-isobtn,
-body.store-mode .ce-isobtn {
+body.ce-noui .ce-isobtn {
   display: none;
 }
 

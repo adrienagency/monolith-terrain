@@ -3676,12 +3676,14 @@ const store = buildStore({
     refreshAll()
   },
   gotoShowcase: async () => {
-    if (params.demLat === EMBED_SHOWCASE.lat && params.demLon === EMBED_SHOWCASE.lon && params.demZoom === EMBED_SHOWCASE.zoom) return
-    params.demLat = EMBED_SHOWCASE.lat
-    params.demLon = EMBED_SHOWCASE.lon
-    params.demZoom = EMBED_SHOWCASE.zoom
-    params.demLocation = 'Yakushima'
-    await loadRealTerrain()
+    if (!(params.demLat === EMBED_SHOWCASE.lat && params.demLon === EMBED_SHOWCASE.lon && params.demZoom === EMBED_SHOWCASE.zoom)) {
+      params.demLat = EMBED_SHOWCASE.lat
+      params.demLon = EMBED_SHOWCASE.lon
+      params.demZoom = EMBED_SHOWCASE.zoom
+      params.demLocation = 'Yakushima'
+      await loadRealTerrain()
+    }
+    applyIsoView(0) // on arrive sur la vue isométrique 1, cadrée large (Adrien)
   },
   setLocked: (v) => { modes.locked = v },
   applyLook: (look) => { applyUserTemplate({ look }); refreshAll() },

@@ -117,11 +117,13 @@ export class Modes {
     domElement.addEventListener(
       'wheel',
       (e) => {
-        // embed « zone de test » (Adrien) : la molette est neutralisée — pas de
-        // changement de zoom ni de zone, on ne charge que le bloc vitrine. La
-        // rotation orbitale d'OrbitControls reste libre. flyTo (piloté par la
-        // page hôte) n'est PAS bridé : c'est lui qui pose la zone au départ.
-        if (this.locked) { e.preventDefault(); return }
+        // boutique/embed « zone de test » (Adrien) : le visiteur zoome et
+        // dézoome LIBREMENT dans 100 % du budget de zoom du niveau (le glissé
+        // inertiel se clampe tout seul, voir _applyZoom) — mais ne peut JAMAIS
+        // franchir un niveau ni changer de zone : les branches refine/coarsen/
+        // orbit sont neutralisées plus bas. flyTo n'est pas bridé (c'est lui
+        // qui pose la zone et les vues iso).
+        if (this.locked && this.mode !== 'surface') { e.preventDefault(); return }
         if (this.mode === 'surface') {
           // pendant le suivi de tête GPX, la molette pilote le STANDOFF de la
           // caméra de suivi (zoom/dézoom autour de la tête) — pas l'escalier
@@ -140,11 +142,13 @@ export class Modes {
           // GUARD-RAIL (Adrien): the glide stops at the zone limit; a FRESH
           // re-scroll while already pinned there is what steps to the next level.
           if (fresh && inward && atInLimit) {
+            if (this.locked) return // zone de test : on butte au plancher, pas de plongée
             this._resetZoom()
             this._refine()
             return
           }
           if (fresh && !inward && atOutLimit) {
+            if (this.locked) return // zone de test : on butte au plafond, ni recul ni orbite
             this._resetZoom()
             if (this.hooks.getCoarsenTarget()) this._coarsen()
             else this.enterOrbit()
