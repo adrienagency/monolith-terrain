@@ -60,7 +60,7 @@ export function buildCreatePanel(ctx) {
   const shuffleRow = el('div', 'ce-btn-row')
   shuffleRow.append(
     button('Shuffle palette', () => { ctx.applyPalette(generatePalette(Math.random, mode())); refreshAll() }),
-    button('Shuffle style', () => { ctx.applyStyle(generateStyle()); ctx.applyGridContour(generateGridContour(Math.random, mode())); refreshAll() })
+    button('Shuffle look', () => { ctx.applyStyle(generateStyle()); ctx.applyGridContour(generateGridContour(Math.random, mode())); refreshAll() })
   )
   sCol.body.append(shuffleRow)
 
@@ -124,7 +124,7 @@ export function buildCreatePanel(ctx) {
   renderBg()
 
   // ------------------------------------------------------------ Map style
-  const sMap = addTo(section('Map Style'))
+  const sMap = addTo(section('Shading'))
   const u = () => ctx.terrain.mapUniforms
   sMap.body.append(
     slider({ label: 'Hypsometric tint', min: 0, max: 1, step: 0.02, get: () => params.mapTint, set: (v) => { params.mapTint = v; u().uTint.value = v } }),

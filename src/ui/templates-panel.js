@@ -22,6 +22,16 @@ export function buildTemplatesPanel(ctx) {
     tip: 'Built-in and saved looks — one click restyles the whole map.',
   })
 
+  // ------------------------------------------------------------- Boutique
+  // « View templates » — morphe l'app en vitrine boutique (src/ui/store.js) :
+  // essais live sur Yakushima verrouillée, intégration vers les rangées
+  // Palettes / templates user ci-dessous.
+  const storeWrap = el('div', 'ce-btn-row')
+  const storeBtn = button('View templates', () => ctx.openStore?.(), { accent: true })
+  storeBtn.setAttribute('data-tip', 'Browse Styles & Couleurs, try them live, bring back what you like.')
+  storeWrap.append(storeBtn)
+  panel.body.append(storeWrap)
+
   // ------------------------------------------------------------- Reset map
   // Above everything else — the panic button that clears every look setting
   // (background, block, relief material, shaders, clouds, fog, map layers…)
@@ -140,6 +150,8 @@ export function buildTemplatesPanel(ctx) {
     }
   }
   renderUserTemplates()
+  // la boutique (store.js) intègre des styles → main.js nous re-rend ici
+  ctx.registerUserTplRefresh?.(renderUserTemplates)
 
   const tplRow = el('div', 'ce-btn-row')
   const fileInput = el('input')

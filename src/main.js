@@ -72,6 +72,7 @@ import { APP_STAGE } from './changelog.js'
 import { BlockGrid } from './block-grid.js'
 import { buildTemplatesPanel } from './ui/templates-panel.js'
 import { buildCreatePanel } from './ui/create-panel.js'
+import { buildStore } from './ui/store.js'
 import { buildCameraPanel } from './ui/camera-panel.js'
 import { buildRoutePanel } from './ui/route-panel.js'
 import { buildExplorePanel } from './ui/explore-panel.js'
@@ -431,6 +432,8 @@ if (location.hash.startsWith('#s=')) {
 // vitrine (Yakushima) — une seule zone à charger, jamais Annecy d'abord. La page
 // hôte pilote ensuite le look/la palette. Constante changeable en une ligne.
 const IS_EMBED = new URLSearchParams(location.search).has('embed')
+// /templates redirige ici : l'app s'ouvre directement en mode boutique
+const IS_STORE_BOOT = new URLSearchParams(location.search).has('store')
 const EMBED_SHOWCASE = { lat: 30.3435, lon: 130.5, zoom: 11 } // Yakushima (安房岳 / Miyanoura)
 if (IS_EMBED && !location.hash.startsWith('#s=') && !location.hash.startsWith('#r=')) {
   params.demLat = EMBED_SHOWCASE.lat
@@ -1065,7 +1068,13 @@ applySourceMode()
 // which is how the black-rectangle bug happened — so the composer is only
 // ever told even numbers. One CSS pixel of slack is invisible; a black
 // rectangle is not.
-const evenSize = () => [window.innerWidth & ~1, window.innerHeight & ~1]
+// Store mode (boutique) recadre #app en vitrine : la box du CONTAINER est la
+// vérité, pas la window (identiques hors boutique — #app est plein écran).
+const evenSize = () => {
+  const w = container.clientWidth || window.innerWidth
+  const h = container.clientHeight || window.innerHeight
+  return [w & ~1, h & ~1]
+}
 
 const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType })
 composer.addPass(new RenderPass(scene, camera))
@@ -1891,6 +1900,7 @@ let userTemplates = loadUserTemplates()
 // palettes VALIDÉES (Create › Save palette) — rangée défilable du panneau Templates
 let userPalettes = loadUserPalettes()
 let paletteRefreshFn = () => {}
+let userTplRefreshFn = () => {} // re-rend la rangée des templates user (boutique → intégration)
 
 // push a captured look onto the live scene. Assign every look key onto params
 // first, then run the same scene pushers a built-in template uses.
@@ -2985,6 +2995,7 @@ const panelCtx = {
   // --- palettes validées (Create › Save palette → rangée Palettes de Templates)
   userPalettes: () => userPalettes,
   registerPaletteRefresh: (fn) => { paletteRefreshFn = fn },
+  registerUserTplRefresh: (fn) => { userTplRefreshFn = fn },
   saveCurrentPalette: (name) => {
     const rec = paletteFromParams(params, name || `PALETTE ${userPalettes.length + 1}`)
     userPalettes.unshift(rec)
@@ -3638,11 +3649,58 @@ if (EMBED) {
   try { window.parent?.postMessage({ type: 'shibumap:ready' }, '*') } catch {}
 }
 
+// ---- boutique in-app (« View templates ») --------------------------------
+// Voir src/ui/store.js. Réutilise EMBED_SHOWCASE + modes.locked : la zone de
+// test Yakushima limite le chargement, comme l'embed. Le snapshot capture
+// look + zone + caméra et les restaure à la sortie — on reprend le travail
+// exactement où on l'avait laissé.
+const store = buildStore({
+  captureState: () => ({
+    look: captureLook(params),
+    lat: params.demLat, lon: params.demLon, zoom: params.demZoom, loc: params.demLocation,
+    cam: { pos: camera.position.clone(), target: controls.target.clone() },
+  }),
+  restoreState: async (s) => {
+    if (!s) return
+    applyUserTemplate({ look: s.look })
+    if (s.lat !== params.demLat || s.lon !== params.demLon || s.zoom !== params.demZoom) {
+      params.demLat = s.lat
+      params.demLon = s.lon
+      params.demZoom = s.zoom
+      params.demLocation = s.loc
+      await loadRealTerrain()
+    }
+    camera.position.copy(s.cam.pos)
+    controls.target.copy(s.cam.target)
+    controls.update()
+    refreshAll()
+  },
+  gotoShowcase: async () => {
+    if (params.demLat === EMBED_SHOWCASE.lat && params.demLon === EMBED_SHOWCASE.lon && params.demZoom === EMBED_SHOWCASE.zoom) return
+    params.demLat = EMBED_SHOWCASE.lat
+    params.demLon = EMBED_SHOWCASE.lon
+    params.demZoom = EMBED_SHOWCASE.zoom
+    params.demLocation = 'Yakushima'
+    await loadRealTerrain()
+  },
+  setLocked: (v) => { modes.locked = v },
+  applyLook: (look) => { applyUserTemplate({ look }); refreshAll() },
+  applyPalette: (p) => { applyPaletteWithBg(p); refreshAll() },
+  getUserPalettes: () => userPalettes,
+  saveShopPalettes: (list) => { userPalettes = list; saveUserPalettes(userPalettes) },
+  refreshPaletteRow: () => paletteRefreshFn(),
+  getUserTemplates: () => userTemplates,
+  importTemplateText,
+  refreshTemplateRow: () => userTplRefreshFn(),
+})
+panelCtx.openStore = () => store.enter() // le bouton lit ctx.openStore au clic, pas au build
+
 // first visit only: the guided tour introduces the UI once the boot view has
 // had a moment to settle (replayable anytime from the "?" in the top bar).
 // Jamais en mode embed — la vitrine /templates doit rester nue.
 setTimeout(async () => {
   if (EMBED) return
+  if (IS_STORE_BOOT) { store.enter(); return } // /templates → boutique directe, jamais le tour
   try {
     const { maybeStartTutorial } = await import('./ui/tutorial.js')
     maybeStartTutorial()
@@ -3651,12 +3709,13 @@ setTimeout(async () => {
 
 window.addEventListener('resize', () => {
   if (loopPaused) return // an offline export owns the renderer size right now
-  camera.aspect = window.innerWidth / window.innerHeight
+  const [rw, rh] = evenSize() // box du container (= window hors boutique)
+  camera.aspect = rw / rh
   camera.updateProjectionMatrix()
-  renderer.setSize(...evenSize()) // same even dimensions as the composer — see evenSize()
-  composer.setSize(...evenSize())
-  gpxLayer.onResize(window.innerWidth, window.innerHeight)
-  mapLayers.onResize(window.innerWidth, window.innerHeight)
+  renderer.setSize(rw, rh) // same even dimensions as the composer — see evenSize()
+  composer.setSize(rw, rh)
+  gpxLayer.onResize(rw, rh)
+  mapLayers.onResize(rw, rh)
   syncGpxProfilePosition()
   reclampDraggables()
 })
