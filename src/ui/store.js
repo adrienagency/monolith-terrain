@@ -1,5 +1,5 @@
 // Boutique in-app — « View templates » morphe l'app en vitrine (canvas dans un
-// cadre pleine largeur, Yakushima verrouillée) + colonne Styles/Couleurs
+// cadre pleine largeur, zone vitrine verrouillée — Nā Pali) + colonne Styles/Couleurs
 // testable en live. Décisions Adrien (2026-07-23) : pas d'iframe, essais par
 // appels directs, intégration = stores localStorage existants, commerce caché.
 // Le rethémage (une palette recolore toute la boutique), le hover des bandes
@@ -124,7 +124,7 @@ export function buildStore(deps) {
 
   const caption = document.createElement('div')
   caption.className = 'store-caption'
-  caption.innerHTML = '<b>Projection en direct</b> — Yakushima · Japon'
+  caption.innerHTML = '<b>Projection en direct</b> — Nā Pali · Hawaï'
 
   const veil = document.createElement('div')
   veil.className = 'store-modal-veil'
@@ -319,7 +319,7 @@ export function buildStore(deps) {
     document.body.classList.add('store-anim', 'store-mode')
     armSettle()
     deps.setLocked(true)
-    deps.gotoShowcase().catch(() => {}) // vole vers Yakushima pendant le morph
+    deps.gotoShowcase().catch(() => {}) // vole vers la zone vitrine pendant le morph
     if (!catalog) {
       try { catalog = await (await fetch(CATALOG_URL)).json() } catch { catalog = { palettes: [], templates: [] } }
       renderCatalog()

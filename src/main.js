@@ -429,17 +429,20 @@ if (location.hash.startsWith('#s=')) {
 }
 
 // EMBED (shibumap.com/templates) : la carte boote DIRECTEMENT sur la zone
-// vitrine (Yakushima) — une seule zone à charger, jamais Annecy d'abord. La page
+// vitrine — une seule zone à charger, jamais Annecy d'abord. La page
 // hôte pilote ensuite le look/la palette. Constante changeable en une ligne.
 const IS_EMBED = new URLSearchParams(location.search).has('embed')
 // /templates redirige ici : l'app s'ouvre directement en mode boutique
 const IS_STORE_BOOT = new URLSearchParams(location.search).has('store')
-const EMBED_SHOWCASE = { lat: 30.3435, lon: 130.5, zoom: 11 } // Yakushima (安房岳 / Miyanoura)
+// Nā Pali (Kauai, Hawaï), z12 : falaises cannelées plongeant dans une vraie
+// bathymétrie (-2300 m à Honopu) — choisi sur scoring DEM (falaises creusées
+// + profondeur d'eau, Adrien). Le zoom z12 est le niveau « bord de côte ».
+const EMBED_SHOWCASE = { lat: 22.19, lon: -159.66, zoom: 12, name: 'Nā Pali' }
 if (IS_EMBED && !location.hash.startsWith('#s=') && !location.hash.startsWith('#r=')) {
   params.demLat = EMBED_SHOWCASE.lat
   params.demLon = EMBED_SHOWCASE.lon
   params.demZoom = EMBED_SHOWCASE.zoom
-  params.demLocation = 'Yakushima'
+  params.demLocation = EMBED_SHOWCASE.name
 }
 
 // #r=<id> — a PUBLISHED race link (Netlify Blobs, see netlify/functions/race.mjs
@@ -3651,7 +3654,7 @@ if (EMBED) {
 
 // ---- boutique in-app (« View templates ») --------------------------------
 // Voir src/ui/store.js. Réutilise EMBED_SHOWCASE + modes.locked : la zone de
-// test Yakushima limite le chargement, comme l'embed. Le snapshot capture
+// test (EMBED_SHOWCASE) limite le chargement, comme l'embed. Le snapshot capture
 // look + zone + caméra et les restaure à la sortie — on reprend le travail
 // exactement où on l'avait laissé.
 const store = buildStore({
@@ -3680,7 +3683,7 @@ const store = buildStore({
       params.demLat = EMBED_SHOWCASE.lat
       params.demLon = EMBED_SHOWCASE.lon
       params.demZoom = EMBED_SHOWCASE.zoom
-      params.demLocation = 'Yakushima'
+      params.demLocation = EMBED_SHOWCASE.name
       await loadRealTerrain()
     }
     applyIsoView(0) // on arrive sur la vue isométrique 1, cadrée large (Adrien)
