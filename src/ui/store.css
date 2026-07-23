@@ -226,11 +226,18 @@ body.store-mode .store-col { transform: translateX(0); }
 }
 .store-bar .n { font-size: 12.5px; color: var(--st-muted); }
 .store-bar button {
-  margin-left: auto; border: 0; border-radius: 10px; cursor: pointer;
+  border: 0; border-radius: 10px; cursor: pointer;
   background: var(--st-ink); color: var(--st-bg); font-family: var(--st-sans);
   font-weight: 600; font-size: 13.5px; padding: 10px 22px;
 }
 .store-bar button:disabled { opacity: .35; cursor: default; }
+/* le compteur reste à gauche, Quitter + Valider groupés à droite */
+.store-quit { margin-left: auto; }
+.store-bar .ghost {
+  background: none; color: var(--st-muted);
+  border: 1px solid var(--st-faint); padding: 9px 18px;
+}
+.store-bar .ghost:hover { color: var(--st-ink); border-color: var(--st-ink); }
 
 /* ---- panneau « Intégrer à ShibuMap » */
 .store-modal-veil {

@@ -117,10 +117,11 @@ export function buildStore(deps) {
       <button class="store-close" title="Fermer">✕</button>
     </div>
     <div class="store-body"></div>
-    <div class="store-bar"><span class="n">0 sélectionné</span><button disabled>Valider</button></div>`
+    <div class="store-bar"><span class="n">0 sélectionné</span><button class="store-quit ghost">Quitter</button><button class="store-validate" disabled>Valider</button></div>`
   const body = col.querySelector('.store-body')
   const barN = col.querySelector('.store-bar .n')
-  const barBtn = col.querySelector('.store-bar button')
+  const barBtn = col.querySelector('.store-validate')
+  const quitBtn = col.querySelector('.store-quit')
 
   const caption = document.createElement('div')
   caption.className = 'store-caption'
@@ -344,6 +345,7 @@ export function buildStore(deps) {
   }
 
   barBtn.addEventListener('click', openIntegrate)
+  quitBtn.addEventListener('click', exit) // sortir sans rien sélectionner
   col.querySelector('.store-close').addEventListener('click', exit)
   window.addEventListener('keydown', (e) => { if (open && e.key === 'Escape') exit() })
 
