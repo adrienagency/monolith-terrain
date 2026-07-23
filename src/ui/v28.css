@@ -926,13 +926,21 @@ body.dark {
 }
 
 /* --------------------------------------------------- hide-UI master switch */
+/* body.store-mode = boutique in-app (src/ui/store.js) : même masquage total */
 body.ce-noui .ce-topbar,
 body.ce-noui .ce-bottombar,
 body.ce-noui .ce-panel,
 body.ce-noui .hud,
 body.ce-noui .altimeter,
 body.ce-noui .ce-credits,
-body.ce-noui .gpx-profile {
+body.ce-noui .gpx-profile,
+body.store-mode .ce-topbar,
+body.store-mode .ce-bottombar,
+body.store-mode .ce-panel,
+body.store-mode .hud,
+body.store-mode .altimeter,
+body.store-mode .ce-credits,
+body.store-mode .gpx-profile {
   display: none !important;
 }
 .ce-eye {
@@ -952,11 +960,15 @@ body.ce-noui .gpx-profile {
 body.ce-noui .ce-eye {
   display: inline-flex;
 }
-/* embed vitrine (shibumap.com/templates) : AUCUNE UI, pas même l'œil (Adrien) */
+/* embed vitrine + boutique in-app : AUCUNE UI, pas même l'œil (Adrien) */
 body.ce-embed .ce-eye,
 body.ce-embed .ce-hourpill,
 body.ce-embed .zoom-stepper,
-body.ce-embed .ce-changelog-btn {
+body.ce-embed .ce-changelog-btn,
+body.store-mode .ce-eye,
+body.store-mode .ce-hourpill,
+body.store-mode .zoom-stepper,
+body.store-mode .ce-changelog-btn {
   display: none !important;
 }
 .ce-eye svg {
@@ -1059,7 +1071,8 @@ body.ce-embed .ce-changelog-btn {
   color: var(--ce-accent);
 }
 .ce-isobtn.off,
-body.ce-noui .ce-isobtn {
+body.ce-noui .ce-isobtn,
+body.store-mode .ce-isobtn {
   display: none;
 }
 
@@ -1111,7 +1124,8 @@ body.ce-noui .ce-isobtn {
 .ce-mapbtn-shuffle.spin svg { animation: ce-mapshuffle 0.5s ease; }
 @keyframes ce-mapshuffle { to { transform: rotate(180deg); } }
 .ce-mapbtn.off,
-body.ce-noui .ce-mapbtn {
+body.ce-noui .ce-mapbtn,
+body.store-mode .ce-mapbtn {
   display: none;
 }
 
