@@ -15,3 +15,20 @@
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
+
+# /templates : l'ancienne vitrine statique est remplacée par la boutique
+# in-app (décision Adrien 2026-07-23) — l'app s'ouvre en mode boutique.
+# force=true : prime sur tout fichier statique résiduel. Les assets
+# téléchargeables restent servis sous /templates/assets/, et le catalogue
+# de la boutique sous /templates/data.json.
+[[redirects]]
+  from = "/templates"
+  to = "/?store=1"
+  status = 302
+  force = true
+
+[[redirects]]
+  from = "/templates/"
+  to = "/?store=1"
+  status = 302
+  force = true
