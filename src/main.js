@@ -2295,10 +2295,18 @@ const raceLabels = buildRaceLabels({
     // en lecture, un cartouche n'apparaît que quand la tête l'a atteint
     const totKm = track.cumKm[track.cumKm.length - 1]
     const headKm = gpxLayer.isPlaying?.() ? (gpxLayer.headT ?? 1) * totKm : Infinity
+    // règle du damier (Adrien) : ce qui sort des blocs chargés (5×5 max) est
+    // COUPÉ — un point au-delà de l'emprise réelle ne s'affiche pas
+    const covered = (p) => {
+      const i = Math.round(p.x / TERRAIN_SIZE)
+      const j = Math.round(p.z / TERRAIN_SIZE)
+      return (i === 0 && j === 0) || !!blockGrid?.cells?.has(`${i},${j}`)
+    }
     {
       for (const w of raceState.waypoints) {
         if (w.km > headKm) continue
         if (w.idx == null || !track.world[w.idx]) continue
+        if (!covered(track.world[w.idx])) continue
         items.push({
           id: `wp_${w.idx}`,
           kind: 'waypoint',
@@ -2312,7 +2320,7 @@ const raceLabels = buildRaceLabels({
       }
     }
     for (const p of raceState.transports.pois) {
-      if (!p.world || raceState.transports.removed.includes(p.id)) continue
+      if (!p.world || raceState.transports.removed.includes(p.id) || !covered(p.world)) continue
       items.push({ id: p.id, kind: 'transport', world: p.world, name: p.name, pictos: [p.cat] })
     }
     return items
