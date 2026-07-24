@@ -47,8 +47,14 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
   function buildNode(item) {
     const isChip = item.kind === 'transport'
     const cart = document.createElement('div')
-    cart.className = isChip ? 'rl-chip' : 'rl-cart'
-    if (isChip) {
+    cart.className = isChip ? 'rl-chip' : item.kind === 'start' ? 'rl-cart rl-start' : 'rl-cart'
+    if (item.kind === 'start') {
+      // l'étiquette la PLUS importante (Adrien) : gros logo, km totaux,
+      // jusqu'à 8 pictos — toujours visible, jamais fenêtrée par la lecture
+      const logo = item.logo ? `<img class="rl-start-logo" src="${item.logo}" alt="">` : ''
+      const pictos = (item.pictos || []).slice(0, 8).map((p) => PICTOS[p] || '').join('')
+      cart.innerHTML = `${logo}<span class="rl-start-main"><b>${item.name || 'DÉPART'}</b><i>${item.totalKm} KM${pictos ? `<span class="rl-picto">${pictos}</span>` : ''}</i></span>`
+    } else if (isChip) {
       cart.innerHTML = `${PICTOS[item.pictos?.[0]] || PICTOS.bus}<span>${item.name}</span><span class="rl-x" title="Retirer">✕</span>`
       cart.querySelector('.rl-x').addEventListener('click', (e) => { e.stopPropagation(); onRemove?.(item.id) })
     } else {
@@ -75,7 +81,7 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
       seen.add(it.id)
       const n = nodes.get(it.id)
       if (!n) nodes.set(it.id, buildNode(it))
-      else if (JSON.stringify({ ...n.item, world: 0 }) !== JSON.stringify({ ...it, world: 0 })) {
+      else if (JSON.stringify({ ...n.item, world: 0, faded: 0 }) !== JSON.stringify({ ...it, world: 0, faded: 0 })) {
         n.cart.remove(); n.anchor.remove(); n.leader.remove()
         nodes.set(it.id, buildNode(it))
       } else n.item = it // rafraîchit la référence world
@@ -99,11 +105,16 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
       n.off = off
       if (off) { n.cart.classList.add('rl-hidden'); n.anchor.classList.add('rl-hidden'); n.leader.classList.add('rl-hidden'); continue }
       n.cart.classList.remove('rl-hidden'); n.anchor.classList.remove('rl-hidden'); n.leader.classList.remove('rl-hidden')
+      // lecture : fondu LENT (1,8 s) d'apparition/disparition via .rl-faded
+      const faded = !!n.item.faded
+      n.cart.classList.toggle('rl-faded', faded)
+      n.anchor.classList.toggle('rl-faded', faded)
+      n.leader.classList.toggle('rl-faded', faded)
       n.ax = (v.x * 0.5 + 0.5) * w
       n.ay = (-v.y * 0.5 + 0.5) * h
       // la sous-ligne (altitude/barrière) déborde de ~14px sous le cartouche
       const hasSub = n.item.kind !== 'transport' && (n.item.alt != null || n.item.cutoff)
-      n.hh = n.item.kind === 'transport' ? CHIP_H : CART_H + (hasSub ? 14 : 0)
+      n.hh = n.item.kind === 'start' ? 46 : n.item.kind === 'transport' ? CHIP_H : CART_H + (hasSub ? 14 : 0)
       n.fw = n.cart.offsetWidth
       vis.push(n)
     }
@@ -134,71 +145,77 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
       by1 = Math.min(by1, py1 + 10)
       if (bx1 - bx0 < 120 || by1 - by0 < 80) { bx0 = 4; by0 = 4; bx1 = w - 4; by1 = h - 4 } // bloc minuscule à l'écran : viewport
     }
-    // 2. parti pris (Adrien) : les infos de course se notent AU-DESSUS de la
-    // carte, dans la zone aérienne vide — tous les points de passage vont en
-    // rangée(s) au-dessus de leur ancre (le ciel est autorisé), les
-    // transports (secondaires) en dessous.
-    const groups = { top: [], bottom: [] }
-    for (const n of vis) (n.item.kind === 'transport' ? groups.bottom : groups.top).push(n)
-    const skyY0 = 4 // la rangée du haut sort librement de l'emprise, vers le ciel
-    // 3. anti-chevauchement PAR DIRECTION (débrayable — params.gpxLabelAvoid) :
-    // gauche/droite s'empilent verticalement, haut/bas se répartissent
-    // horizontalement (layoutCartouches est 1D, on le réutilise sur x)
+    // 2. placement « autour de la boucle » (Adrien) : chaque étiquette reste
+    // AU PLUS PRÈS de son point, et le côté est dicté par la géométrie du
+    // tracé vue caméra — le barycentre écran des ancres approxime le centre
+    // de la boucle :
+    //   partie PROCHE de la caméra (bas écran)  → étiquette EN DESSOUS
+    //   partie LOINTAINE (haut écran)           → AU-DESSUS, dans l'air, proche
+    //   partie GAUCHE → à gauche (à droite en repli si la place manque)
+    //   partie DROITE → miroir
+    // Les transports (secondaires) vont toujours en dessous de leur ancre.
+    // L'étiquette DÉPART (kind 'start') suit la même géométrie mais reste
+    // toujours visible (jamais fenêtrée par la lecture).
+    let cx = 0
+    let cy = 0
+    for (const n of vis) { cx += n.ax; cy += n.ay }
+    cx /= vis.length
+    cy /= vis.length
+    const groups = { left: [], right: [], top: [], bottom: [] }
+    for (const n of vis) {
+      if (n.item.kind === 'transport') { groups.bottom.push(n); continue }
+      const dx = n.ax - cx
+      const dy = n.ay - cy
+      const key = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'right' : 'left') : (dy >= 0 ? 'bottom' : 'top')
+      groups[key].push(n)
+    }
+    const skyY0 = 4 // au-dessus, l'air libre est permis (mais on reste proche)
     const avoid = params.gpxLabelAvoid !== false
     const placed = []
-    // points de passage : rangées EMPILÉES VERS LE CIEL — on remplit de
-    // gauche à droite au plus près de chaque ancre ; quand une rangée est
-    // occupée à cet endroit, le cartouche monte d'un étage (jamais sur la map)
-    {
-      const group = groups.top
-      group.sort((a, b) => a.ax - b.ax)
-      // les rangées sont de VRAIES lignes horizontales, empilées depuis
-      // l'ancre la plus haute vers le ciel — les lignes de rappel descendent
-      // en pointillés vers chaque point (style affiche de course)
-      const rowH = Math.max(...group.map((n) => n.hh), 26) + 12
-      const baseY = Math.min(...group.map((n) => n.ay)) - LEAD
-      const rows = [] // endX occupé par rangée (0 = la plus basse)
-      for (const n of group) {
-        n.side = 'top'
-        const want = Math.min(Math.max(n.ax - n.fw / 2, bx0), bx1 - n.fw)
-        let r = 0
-        if (avoid) {
-          while (r < rows.length && want < rows[r] + 10) r++
-          n.fx = r < rows.length ? Math.max(want, rows[r] + 10) : want
-          rows[r] = n.fx + n.fw
-        } else n.fx = want
-        n.fy = Math.max(baseY - n.hh - r * rowH, skyY0)
-        placed.push(n)
-      }
-    }
-    // transports : une rangée discrète SOUS l'ancre
-    {
-      const group = groups.bottom
-      group.sort((a, b) => a.ax - b.ax)
-      const xs = layoutCartouches(
-        group.map((n) => ({ y: n.ax - n.fw / 2, h: n.fw })),
-        { avoid, gap: 10, minY: bx0, maxY: bx1 }
+    // placement DETERMINISTE : on pose gauche/droite (piles), puis bas,
+    // puis haut — chaque etiquette teste les rectangles DEJA poses et
+    // s'ecarte par pas dans SA direction (bas vers le bas, haut vers le
+    // ciel). Deterministe = cibles stables = le glissement converge.
+    const hits = (x, y, ww, hh2) => placed.some((m) => x < m.fx + m.fw + 12 && m.fx < x + ww + 12 && y < m.fy + m.hh + 12 && m.fy < y + hh2 + 12)
+    for (const key of ['right', 'left']) {
+      const group = groups[key]
+      if (!group.length) continue
+      group.sort((a, b) => a.ay - b.ay)
+      const ys = layoutCartouches(
+        group.map((n) => ({ y: n.ay - n.hh / 2, h: n.hh })),
+        { avoid, gap: 8, minY: by0, maxY: by1 }
       )
       group.forEach((n, i) => {
-        n.side = 'bottom'
-        n.fx = xs[i]
-        n.fy = Math.min(Math.max(n.ay + LEAD, by0), by1 - n.hh)
+        n.side = key
+        let fx = key === 'right' ? n.ax + LEAD : n.ax - LEAD - n.fw
+        if (fx < bx0 || fx + n.fw > bx1) {
+          const flip = key === 'right' ? n.ax - LEAD - n.fw : n.ax + LEAD
+          if (flip >= bx0 && flip + n.fw <= bx1) { fx = flip; n.side = key === 'right' ? 'left' : 'right' }
+          else fx = Math.min(Math.max(fx, bx0), bx1 - n.fw)
+        }
+        n.fx = fx
+        n.fy = ys[i]
         placed.push(n)
       })
     }
-    // 2b. passe corrective INTER-côtés : deux cartouches de groupes opposés
-    // peuvent encore se croiser quand leurs x se recouvrent — on pousse le
-    // plus bas sous l'autre uniquement en cas d'intersection réelle
-    if (avoid && placed.length > 1) {
-      placed.sort((a, b) => a.fy - b.fy)
-      for (let i = 1; i < placed.length; i++) {
-        for (let j = 0; j < i; j++) {
-          const a = placed[j]
-          const b = placed[i]
-          const xHit = a.fx < b.fx + b.fw && b.fx < a.fx + a.fw
-          const yHit = b.fy < a.fy + a.hh + 4
-          if (xHit && yHit && b.fy + b.hh > a.fy) b.fy = Math.min(a.fy + a.hh + 8, h - b.hh - 4)
+    for (const key of ['bottom', 'top']) {
+      const group = groups[key]
+      if (!group.length) continue
+      group.sort((a, b) => a.ax - b.ax)
+      const rowH = Math.max(...group.map((n) => n.hh)) + 10
+      for (const n of group) {
+        n.side = key
+        n.fx = Math.min(Math.max(n.ax - n.fw / 2, bx0), bx1 - n.fw)
+        const fy0 = key === 'top' ? n.ay - LEAD - n.hh : n.ay + LEAD
+        let r = 0
+        n.fy = fy0
+        if (avoid) {
+          while (r < 14 && hits(n.fx, n.fy, n.fw, n.hh)) {
+            r++
+            n.fy = key === 'top' ? Math.max(fy0 - r * rowH, skyY0) : Math.min(fy0 + r * rowH, by1 - n.hh)
+          }
         }
+        placed.push(n)
       }
     }
     // 4b. zones interdites : l'UI (profil de course, barre du bas) ne doit
@@ -233,9 +250,10 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
       if (n.ox == null) { n.ox = tox; n.oy = toy } // première pose : direct
       else {
         const d = Math.hypot(tox - n.ox, toy - n.oy)
-        // zone morte 22 px pour DÉCLENCHER un mouvement — mais une fois
-        // engagé, il glisse JUSQU'AU BOUT (sinon il fige entre deux rangées)
-        if (d > 22) n.moving = true
+        // zone morte 8 px pour DÉCLENCHER un mouvement (SOUS les marges de
+        // collision de 12 px : une étiquette figée ne peut jamais en
+        // recouvrir une autre) — une fois engagé, il glisse JUSQU'AU BOUT
+        if (d > 8) n.moving = true
         if (n.moving) {
           n.ox += (tox - n.ox) * 0.04
           n.oy += (toy - n.oy) * 0.04

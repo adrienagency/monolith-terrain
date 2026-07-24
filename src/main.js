@@ -2310,11 +2310,28 @@ const raceLabels = buildRaceLabels({
       const j = Math.round(p.z / TERRAIN_SIZE)
       return (i === 0 && j === 0) || !!blockGrid?.cells?.has(`${i},${j}`)
     }
+    // étiquette DÉPART — la plus importante : gros logo + km totaux (+ les
+    // pictos du point de départ, 8 max) ; TOUJOURS visible, jamais fenêtrée
+    if ((raceState.name || raceState.logo) && track.world[0] && covered(track.world[0])) {
+      const startWp = raceState.waypoints.find((w) => w.km < 0.5)
+      items.push({
+        id: 'race_start',
+        kind: 'start',
+        world: track.world[0],
+        name: raceState.name,
+        logo: raceState.logo,
+        totalKm: Math.round(totKm),
+        pictos: (startWp?.pictos || []).slice(0, 8),
+        faded: false,
+      })
+    }
     {
       for (const w of raceState.waypoints) {
-        if (playing && (w.km > headKm + kmLead || w.km < headKm - kmTail)) continue
         if (w.idx == null || !track.world[w.idx]) continue
         if (!covered(track.world[w.idx])) continue
+        // fenêtre de lecture : hors [−2 km, +10 km] l'étiquette reste montée
+        // mais FONDUE (opacité 0 en 1,8 s) — voir .rl-faded
+        const faded = playing && (w.km > headKm + kmLead || w.km < headKm - kmTail)
         items.push({
           id: `wp_${w.idx}`,
           kind: 'waypoint',
@@ -2324,6 +2341,7 @@ const raceLabels = buildRaceLabels({
           alt: w.alt ?? track.points?.[w.idx]?.ele ?? null,
           pictos: w.pictos,
           cutoff: w.cutoff,
+          faded,
         })
       }
     }

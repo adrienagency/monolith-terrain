@@ -77,15 +77,32 @@
 body.studio-mode .rl-chip { pointer-events: auto; }
 body.studio-mode .rl-chip .rl-x { display: inline; }
 
-/* apparition/disparition en fondu (le déplacement, lui, est lissé en JS) —
-   et une NAISSANCE douce : chaque cartouche fond depuis la transparence en
-   grossissant légèrement (mode lecture : rien n'apparaît « d'un coup ») */
+/* NAISSANCE douce + fondu de LECTURE : l'apparition/disparition pilotée par
+   la fenêtre de lecture (.rl-faded) fond sur 1,8 s (Adrien) ; le culling
+   caméra (.rl-hidden) reste instantané pour ne pas traîner en orbite */
 .rl-cart, .rl-chip, .rl-anchor, .rl-leader {
-  transition: opacity .3s ease;
+  transition: opacity 1.8s ease;
   animation: rl-in .5s ease-out;
 }
 @keyframes rl-in {
   from { opacity: 0; filter: blur(2px); }
   to { opacity: 1; filter: blur(0); }
 }
-.rl-hidden { opacity: 0 !important; pointer-events: none !important; }
+.rl-faded { opacity: 0 !important; pointer-events: none !important; }
+.rl-hidden { display: none !important; }
+
+/* ---- étiquette DÉPART — la plus importante, toujours visible ---- */
+.rl-start {
+  height: 46px; padding: 0 12px;
+  border-left-width: 4px;
+  box-shadow: 0 4px 18px rgba(23, 25, 27, 0.28);
+}
+.rl-start .rl-start-logo {
+  height: 34px; max-width: 64px; object-fit: contain; display: block;
+}
+.rl-start .rl-start-main { display: flex; flex-direction: column; gap: 1px; line-height: 1.15; }
+.rl-start .rl-start-main b { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
+.rl-start .rl-start-main i {
+  font-style: normal; display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 800; color: var(--rl-accent, #ff4d00);
+}
