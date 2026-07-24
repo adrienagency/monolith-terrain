@@ -67,7 +67,7 @@ import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
 import { showNotice } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
-import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickBar, initUiLevel } from './ui/bars.js'
+import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickBar, buildShibuChrome, initUiLevel } from './ui/bars.js'
 import { buildMiniRoute } from './ui/mini-route.js'
 import { TEMPLATES } from './templates.js'
 import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
@@ -430,6 +430,12 @@ if (location.hash.startsWith('#s=')) {
 // vitrine — une seule zone à charger, jamais Annecy d'abord. La page
 // hôte pilote ensuite le look/la palette. Constante changeable en une ligne.
 const IS_EMBED = new URLSearchParams(location.search).has('embed')
+// une « shibu » reçue (lien partagé #s=/#r=) : on ouvre un VIEWER épuré, pas
+// l'app d'édition — carto seule, contrôles de vue (iso/ciné/lecture), marque
+// en bas + CTA « Toi aussi, crée ta ShibuMap ». Jamais en embed (la vitrine
+// /templates a son propre chrome nu).
+const IS_SHIBU = (location.hash.startsWith('#s=') || location.hash.startsWith('#r=')) && !IS_EMBED
+if (IS_SHIBU) document.body.classList.add('shibu-view')
 // /templates redirige ici : l'app s'ouvre directement en mode boutique
 const IS_STORE_BOOT = new URLSearchParams(location.search).has('store')
 // lien direct organisateurs : l'app s'ouvre dans le Race Studio
@@ -3040,24 +3046,34 @@ async function shareCurrentView() {
   let url = null
   let published = false
   if (hasTrack) {
-    try {
-      const res = await fetch(RACE_ENDPOINT, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        // raceName rides along so the link can carry a real preview card —
-        // a fragment (#r=) never reaches a crawler, so the /r/<id> route is
-        // the only thing that can name the course on WhatsApp or Instagram.
-        body: JSON.stringify({ gpx: trackToGpx(gpxLayer.track), state, raceName: gpxLayer.raceName || '' }),
-      })
-      const j = res.ok ? await res.json() : null
-      if (j?.ok && typeof j.id === 'string' && /^[A-Za-z0-9_-]{4,64}$/.test(j.id)) {
-        // The PATH form, not #r= — see netlify/functions/share.mjs. It serves
-        // the preview tags and then forwards to the app's own #r= link, so
-        // nothing downstream changes except that pasted links now unfurl.
-        url = `${location.origin}/r/${j.id}`
-        published = true
+    // 2 tentatives : un échec transitoire (réseau, cold start de la function)
+    // dégradait SILENCIEUSEMENT vers le lien #s= sans la course — le pire des
+    // partages (Adrien a reçu « la carte sans le parcours »). Le retry absorbe
+    // le transitoire ; l'échec persistant reste signalé par le toast.
+    for (let attempt = 0; attempt < 2 && !published; attempt++) {
+      try {
+        const res = await fetch(RACE_ENDPOINT, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          // raceName rides along so the link can carry a real preview card —
+          // a fragment (#r=) never reaches a crawler, so the /r/<id> route is
+          // the only thing that can name the course on WhatsApp or Instagram.
+          body: JSON.stringify({ gpx: trackToGpx(gpxLayer.track), state, raceName: gpxLayer.raceName || '' }),
+        })
+        const j = res.ok ? await res.json() : null
+        if (j?.ok && typeof j.id === 'string' && /^[A-Za-z0-9_-]{4,64}$/.test(j.id)) {
+          // The PATH form, not #r= — see netlify/functions/share.mjs. It serves
+          // the preview tags and then forwards to the app's own #r= link, so
+          // nothing downstream changes except that pasted links now unfurl.
+          url = `${location.origin}/r/${j.id}`
+          published = true
+        } else if (!res.ok) {
+          console.warn(`race publish failed (HTTP ${res.status}), attempt ${attempt + 1}`)
+        }
+      } catch (err) {
+        console.warn(`race publish failed (${err?.message}), attempt ${attempt + 1}`)
       }
-    } catch {} // network/function down — fall through to the inline link
+    }
   }
   if (!url) url = `${location.origin}${location.pathname}#s=${encodeShareState(state)}`
   const note = hasTrack && !published ? ' — your GPX track isn’t included' : ''
@@ -3113,6 +3129,9 @@ const bottomBar = buildBottomBar({
 // Jamais en embed — la vitrine reste nue quoi qu'il arrive. (IS_EMBED, pas
 // EMBED : ce dernier n'est déclaré que plus bas — TDZ.)
 if (!IS_EMBED) initUiLevel()
+// viewer shibu (lien partagé) : marque en bas + CTA — le reste du chrome
+// est masqué en CSS (body.shibu-view, voir v28.css)
+if (IS_SHIBU) buildShibuChrome()
 const quickBar = buildQuickBar({
   openAtelier: () => panelCtx.openAtelier?.(),
   openStudio: () => panelCtx.openStudio?.(),
@@ -4087,6 +4106,7 @@ panelCtx.refreshRaceLabels = () => raceLabels.setDirty() // toggle infos course 
 // Jamais en mode embed — la vitrine /templates doit rester nue.
 setTimeout(() => {
   if (EMBED) return
+  if (IS_SHIBU) return // une shibu reçue : viewer épuré, jamais d'onboarding
   if (IS_STORE_BOOT) { store.enter(); return } // /templates → boutique directe
   if (IS_STUDIO_BOOT) { studio.enter(); return } // ?studio=1 → Race Studio direct
   // le HUB remplace l'ancien tutoriel auto — le « ? » de la topbar garde

@@ -977,6 +977,88 @@ body.dark {
   transition: width 0.15s linear;
 }
 
+/* ---------------------------------------------- viewer shibu (lien partagé) */
+/* Une shibu reçue : la carto seule. Restent : iso/ciné, lecture (mini
+   panneau, en lecture seule), profil GPX, marque en bas + CTA. Tout le
+   chrome d'édition disparaît. */
+body.shibu-view .ce-topbar,
+body.shibu-view .ce-bottombar,
+body.shibu-view .ce-dock,
+body.shibu-view .ce-quickbar,
+body.shibu-view .ce-hourpill,
+body.shibu-view .zoom-stepper,
+body.shibu-view .ce-changelog-btn,
+body.shibu-view .ce-mapbtn,
+body.shibu-view .ce-eye,
+body.shibu-view .ce-credits {
+  display: none !important;
+}
+/* lecture seule : pas de retrait de course, pas de fermeture du parcours */
+body.shibu-view .ce-miniroute-x,
+body.shibu-view .gpx-close {
+  display: none !important;
+}
+/* le mini panneau lecture s'affiche quel que soit le réglage simple/avancé */
+body.shibu-view .ce-miniroute.has {
+  display: flex;
+}
+.shibu-cta {
+  position: fixed;
+  bottom: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 90;
+  background: var(--ce-accent);
+  color: #fff;
+  text-decoration: none;
+  font-family: var(--ce-font);
+  font-size: 13.5px;
+  font-weight: 700;
+  padding: 13px 22px;
+  border-radius: 999px;
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--ce-accent) 45%, transparent);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.shibu-cta:hover {
+  transform: translateX(-50%) translateY(-2px);
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--ce-accent) 55%, transparent);
+}
+.shibu-cta span {
+  margin-left: 4px;
+}
+.shibu-footer {
+  position: fixed;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 89;
+  text-align: center;
+  font-family: var(--ce-font);
+  pointer-events: none;
+}
+.shibu-footer a {
+  pointer-events: auto;
+}
+.sf-brand {
+  color: var(--ce-ink);
+  text-decoration: none;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.sf-brand:hover {
+  color: var(--ce-accent);
+}
+.sf-brand i {
+  font-style: normal;
+  color: var(--ce-accent);
+}
+.sf-rights {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--ce-ink);
+  opacity: 0.55;
+}
+
 /* ------------------------------------------- mode simple / avancé (UX P3) */
 /* body.ce-simple = défaut : carte pure, AUCUN dock de panneaux. La création
    passe par les espaces (quickbar ci-dessous) ; « Avancé » (topbar) ré-affiche

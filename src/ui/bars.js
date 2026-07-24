@@ -327,6 +327,31 @@ function extLink(href, text, cls) {
 // live by main.js via setExtra() so nothing duplicates a second corner/size.
 // Deliberately understated so it never competes with the relief, and clear of
 // the isometric-view button (bottom-right).
+// Chrome du VIEWER shibu (lien partagé) : la seule écriture à l'écran est la
+// marque en bas — « ShibuMap, créé par Adrien Agency » (lien) avec les droits
+// dessous — plus un CTA très visible « Toi aussi, crée ta ShibuMap ».
+export function buildShibuChrome() {
+  const cta = document.createElement('a')
+  cta.className = 'shibu-cta'
+  cta.href = 'https://shibumap.com'
+  cta.target = '_blank'
+  cta.rel = 'noopener'
+  cta.innerHTML = 'Toi aussi, crée ta ShibuMap <span>→</span>'
+
+  const foot = el('div', 'shibu-footer')
+  const brand = document.createElement('a')
+  brand.className = 'sf-brand'
+  brand.href = 'https://adrienagency.com'
+  brand.target = '_blank'
+  brand.rel = 'noopener'
+  brand.innerHTML = 'ShibuMap<i>.</i> — créé par Adrien Agency'
+  const rights = el('div', 'sf-rights', '© Adrien Agency · © OpenStreetMap contributors')
+  foot.append(brand, rights)
+
+  document.body.append(cta, foot)
+  return { cta, foot }
+}
+
 export function buildCredits() {
   const wrap = el('div', 'ce-credits')
   wrap.append(
