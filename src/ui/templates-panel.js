@@ -13,7 +13,6 @@ const ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/></svg>'
 
 export function buildTemplatesPanel(ctx) {
-  const { params } = ctx
   const panel = new Panel({
     title: 'Templates',
     icon: ICON,

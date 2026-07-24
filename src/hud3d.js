@@ -165,29 +165,6 @@ function drawDial(ctx, size, ink, accent, rng) {
   }
 }
 
-function drawDashRing(ctx, size, ink, fraction, dashes) {
-  const cx = size / 2
-  const R = size * 0.48 * fraction
-  ctx.translate(cx, cx)
-  ctx.strokeStyle = ink
-  ctx.lineWidth = size * 0.006
-  ctx.globalAlpha = 0.75
-  const step = (Math.PI * 2) / dashes
-  for (let i = 0; i < dashes; i++) {
-    ctx.beginPath()
-    ctx.arc(0, 0, R, i * step, i * step + step * 0.55)
-    ctx.stroke()
-  }
-  // 4 bracket accents
-  ctx.lineWidth = size * 0.012
-  ctx.globalAlpha = 0.9
-  for (const a of [45, 135, 225, 315]) {
-    ctx.beginPath()
-    ctx.arc(0, 0, R * 1.06, (a - 6) * DEG, (a + 6) * DEG)
-    ctx.stroke()
-  }
-}
-
 function drawSweep(ctx, size, accent) {
   const cx = size / 2
   const R = size * 0.48

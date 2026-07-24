@@ -3,7 +3,7 @@
 // panel with points and playback.
 // Docked in the left column, after Camera (Explore, Scan, Camera, Route).
 
-import { slider, color, toggle, select, visibleWhen, button, section, el, refreshAll } from './kit.js'
+import { slider, color, toggle, visibleWhen, button, section, el, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
 import { SPORTS, getSport } from './sport-icons.js'
 import { MAX_LAYERS } from '../gpx-layers.js'

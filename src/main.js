@@ -28,7 +28,7 @@ import { createGoto } from './goto.js'
 import { frameTrack } from './gpx.js'
 import { GpxLayerManager } from './gpx-layers.js'
 import { buildRaceLabels } from './race-labels.js'
-import { snapToKm, ascentStats, serializeRace, parseRace } from './race-model.js'
+import { snapToKm, ascentStats, parseRace } from './race-model.js'
 import { SPORTS, DEFAULT_SPORT, sanitizeSvgMarkup, isValidIconDataUrl, rasterizeToCanvas } from './ui/sport-icons.js'
 import { worldToLatLon, latLonToWorld } from './geo.js'
 import { fetchTransports } from './transports.js'
@@ -96,17 +96,6 @@ import './ui/v28.css'
 
 // ------------------------------------------------------------------ params
 
-const DEM_PRESETS = {
-  'Monument Valley': [36.998, -110.0984],
-  'Grand Canyon': [36.0997, -112.1124],
-  Chamonix: [45.9237, 6.8694],
-  Matterhorn: [45.9766, 7.6585],
-  'Mount Fuji': [35.3606, 138.7274],
-  'Death Valley': [36.2679, -116.8253],
-  'Everest Massif': [27.9881, 86.925],
-  Landmannalaugar: [63.983, -19.056],
-  Custom: null,
-}
 
 const params = {
   // terrain source — boots directly over Annecy and its surroundings (the lake,
@@ -3324,7 +3313,7 @@ const panelCtx = {
 // Templates panel docks ABOVE Create in the right dock — built first so it
 // lands first in the DOM (dock columns stack panels in append order).
 const templatesPanel = buildTemplatesPanel(panelCtx)
-const createPanel = buildCreatePanel(panelCtx)
+buildCreatePanel(panelCtx) // montés pour leurs effets de bord (dock DOM)
 
 // Shaders panel — right dock, between Create and Map (created here so it
 // docks between them). Holds the surface-shader treatments split out of Scan.
@@ -3429,7 +3418,7 @@ const shadersPanel = buildShadersPanel({
   },
 })
 
-const effectsPanel = buildEffectsPanel({
+buildEffectsPanel({
   params,
   exposureFx, contrastFx, hueSat, vignette, grain,
   fogRef, setFogEnabled: panelCtx.setFogEnabled, applyBackground,
@@ -3443,7 +3432,7 @@ const effectsPanel = buildEffectsPanel({
 // section is gone entirely (this was its only control)
 const hourPill = buildHourPill({ params, applyTimeOfDay })
 
-const explorePanel = buildExplorePanel({
+buildExplorePanel({
   flyTo: (lat, lon, zoom) => modes.flyTo(lat, lon, zoom),
 })
 

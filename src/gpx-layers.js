@@ -17,7 +17,6 @@
 // genuinely varies per layer — order, sport icon, name, visibility — is
 // exactly what this file adds.
 
-import * as THREE from 'three'
 import { GpxLayer, parseGpx } from './gpx.js'
 import { getSport } from './ui/sport-icons.js'
 

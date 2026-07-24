@@ -84,7 +84,6 @@ export function makeDraggable(el, handle = el) {
   handle.addEventListener('pointermove', (e) => {
     if (!dragging) return
     const w = el.offsetWidth
-    const h = el.offsetHeight
     let left = Math.min(Math.max(e.clientX - ox, -w * 0.6), window.innerWidth - w * 0.4)
     let top = Math.min(Math.max(e.clientY - oy, 0), window.innerHeight - 28)
     ;({ left, top } = snap(el, left, top))

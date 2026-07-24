@@ -1,11 +1,10 @@
 // CREATE panel — everything that makes the map, in one place (right dock).
 // Sections are exclusive accordions. Camera lives in its own sibling panel.
 
-import { el, slider, color, swatch, toggle, select, segmented, button, section, refreshAll, visibleWhen } from './kit.js'
+import { el, slider, color, swatch, toggle, select, segmented, button, section, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
 import { generatePalette, generateEarthPalette, generateStyle, generateGridContour } from '../palette.js'
 import { PBR_PRESETS, GLASS_PRESETS, GLASS_BY_ID, PBR_BY_ID } from '../material-presets.js'
-import { FLAGS } from '../flags.js'
 
 const ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h10M18 8h2M4 16h2M10 16h10"/><circle cx="16" cy="8" r="2.2"/><circle cx="8" cy="16" r="2.2"/></svg>'
