@@ -1,4 +1,4 @@
-import { section, toggle, slider, color, visibleWhen, refreshAll } from './kit.js'
+﻿import { section, toggle, slider, color, visibleWhen, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
 
 const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z"/><path d="M9 4v14M15 6v14"/></svg>'
@@ -7,7 +7,7 @@ export function buildMapPanel(ctx) {
   const { params, u } = ctx // u() → terrain.mapUniforms
   const panel = new Panel({ title: 'Carte', icon: ICON, side: 'left', width: 268, tip: 'Les calques cartographiques drapés sur le relief.' })
 
-  const sLayers = panel.addSection(section('Calques', { open: true }))
+  const sLayers = panel.addSection(section('Calques'))
   const roadsToggle = toggle({ label: 'Routes', get: () => params.roadsEnabled, set: (v) => { params.roadsEnabled = v; ctx.rebuildMapLayers(); refreshAll() } })
   const roadsOpacity = slider({ label: 'Opacité des routes', min: 0, max: 1, step: 0.02, get: () => params.roadsOpacity, set: (v) => { params.roadsOpacity = v; ctx.mapLayers.setOpacity('roads', v) } })
   const roadsDetail = slider({ label: 'Détail des routes', min: 1, max: 3, step: 1, get: () => params.roadsDetail, set: (v) => { params.roadsDetail = v; ctx.rebuildMapLayers() } })

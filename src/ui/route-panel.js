@@ -1,4 +1,4 @@
-// ROUTE panel — the GPX track as a first-class layer: load a file, style the
+﻿// ROUTE panel — the GPX track as a first-class layer: load a file, style the
 // line (width/colour, gradient/glow). Later Parcours tasks extend this same
 // panel with points and playback.
 // Docked in the left column, after Camera (Explore, Scan, Camera, Route).
@@ -69,7 +69,7 @@ export function buildRoutePanel(ctx) {
   // Track section stays FIRST and open by default (see the task-13 report) —
   // Width/Colour are the controls a user reaches for right after loading a
   // file, so they shouldn't require expanding anything.
-  const sTrack = panel.addSection(section('Trace', { open: true }))
+  const sTrack = panel.addSection(section('Trace'))
   // Race Studio — la sous-app organisateurs (logo, points de passage, pictos,
   // transports, export projet) : voir src/ui/studio.js
   sTrack.body.append(button('Race Studio', () => ctx.openStudio?.(), { accent: true }))
@@ -105,7 +105,7 @@ export function buildRoutePanel(ctx) {
   // (Width/Colour/Gradient/Glow/Markers/Km, above and below) stays GLOBAL —
   // see gpx-layers.js's own file header for why — so this section is the
   // only place per-layer identity lives.
-  const sLayers = panel.addSection(section('Mes courses', { open: true }))
+  const sLayers = panel.addSection(section('Mes courses'))
   const listEl = el('div', 'ce-gpx-layers')
   const emptyEl = el('div', 'ce-gpx-layers-empty', 'Aucune course chargée — « Charger un GPX… » ci-dessus pour la première.')
   // (« + Ajouter une course » supprimé — doublon exact de « Charger un

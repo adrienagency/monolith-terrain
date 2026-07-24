@@ -1,4 +1,4 @@
-// Ex-panneau « Création/Couleurs » — éclaté par la réorg Adrien en trois
+﻿// Ex-panneau « Création/Couleurs » — éclaté par la réorg Adrien en trois
 // contributions, le fichier garde le code à sa place historique :
 //  - buildFondsPanel(ctx)        → panneau « Fonds » (rail gauche, mode Studio)
 //  - contributeTerrainSections() → sections Relief & détail / Ombrage / Socle
@@ -14,10 +14,14 @@ import { PBR_PRESETS, GLASS_PRESETS, GLASS_BY_ID, PBR_BY_ID } from '../material-
 const ICON_BG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M3.5 15.5 9 10l5 5 3-3 3.5 3.5"/><circle cx="9.5" cy="7.5" r="1.4"/></svg>'
 
-// ------------------------------------------------- Bibliothèque › Créer une palette
-export function buildPaletteCreation(ctx, host) {
+// ------------------------------------------------- Bibliothèque › Nouvelle palette
+// Formulaire déplié par la carte « ＋ » — les swatches éditent la carte EN
+// DIRECT (pas d'annulation possible sans snapshot) : le bouton de sortie dit
+// « Fermer », pas « Annuler ». Un seul accent par panneau (la Boutique) :
+// Enregistrer est en encre.
+export function buildPaletteCreation(ctx, host, { onClose } = {}) {
   const { params } = ctx
-  host.append(el('div', 'ce-label', 'Rampe d’altitude, du bas vers le haut'))
+  host.append(el('div', 'ce-label', 'Relief, du bas vers le haut'))
   const ramp = el('div', 'ce-ramp')
   params.rampStops.forEach((stop, i) => {
     ramp.append(
@@ -33,15 +37,16 @@ export function buildPaletteCreation(ctx, host) {
   })
   host.append(ramp)
   host.append(
-    color({ label: 'Océan peu profond', get: () => params.oceanShallow, set: (v) => { params.oceanShallow = v; ctx.terrain.mapUniforms.uOceanShallow.value.set(v); ctx.globe.rebuildRamp(params) } }),
-    color({ label: 'Océan moyen', get: () => params.oceanMid, set: (v) => { params.oceanMid = v; ctx.terrain.mapUniforms.uOceanMid.value.set(v); ctx.globe.rebuildRamp(params) } }),
-    color({ label: 'Océan profond', get: () => params.oceanDeep, set: (v) => { params.oceanDeep = v; ctx.terrain.mapUniforms.uOceanDeep.value.set(v); ctx.globe.rebuildRamp(params) } }),
+    color({ label: 'Mer, au rivage', get: () => params.oceanShallow, set: (v) => { params.oceanShallow = v; ctx.terrain.mapUniforms.uOceanShallow.value.set(v); ctx.globe.rebuildRamp(params) } }),
+    color({ label: 'Mer, au large', get: () => params.oceanMid, set: (v) => { params.oceanMid = v; ctx.terrain.mapUniforms.uOceanMid.value.set(v); ctx.globe.rebuildRamp(params) } }),
+    color({ label: 'Mer, aux fonds', get: () => params.oceanDeep, set: (v) => { params.oceanDeep = v; ctx.terrain.mapUniforms.uOceanDeep.value.set(v); ctx.globe.rebuildRamp(params) } }),
     color({ label: 'Encre (courbes)', get: () => params.contourColor, set: (v) => { params.contourColor = v; ctx.terrain.mapUniforms.uContourColor.value.set(v); ctx.globe.setInk(v) } }),
     color({ label: 'Grille', get: () => params.gridColor, set: (v) => { params.gridColor = v; ctx.terrain.mapUniforms.uGridColor.value.set(v) } })
   )
-  const saveRow = el('div', 'ce-btn-row')
+  const saveRow = el('div', 'ce-btn-row ce-lib-formrow')
   saveRow.append(
-    button('Enregistrer la palette', () => { ctx.saveCurrentPalette?.(null) }, { accent: true })
+    button('Fermer', () => onClose?.(), { ghost: true }),
+    button('Enregistrer', () => { ctx.saveCurrentPalette?.(null); onClose?.() })
   )
   host.append(saveRow)
 }
@@ -58,7 +63,7 @@ export function buildFondsPanel(ctx) {
     width: 268,
     tip: 'Le décor derrière le bloc : couleur, dégradé ou ciel (HDRI).',
   })
-  const sBg = panel.addSection(section('Fond & ciel', { open: true }))
+  const sBg = panel.addSection(section('Fond & ciel'))
   // --- Environnement (HDRI sky) — a vignette picker; selecting a sky takes over
   // the backdrop + lighting, clearing it returns to the solid/gradient below ---
   sBg.body.append(el('div', 'ce-fx-head', 'Ciel (HDRI)'))

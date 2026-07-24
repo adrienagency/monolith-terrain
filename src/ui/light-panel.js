@@ -1,4 +1,4 @@
-// Section LUMIÈRE — vit dans le panneau ÉLÉMENTS (réorg Adrien : Éléments =
+﻿// Section LUMIÈRE — vit dans le panneau ÉLÉMENTS (réorg Adrien : Éléments =
 // Lumière / Nuages / Brume / Mer). L'HEURE reste la maîtresse (elle recalcule
 // le vrai soleil du lieu — daycycle.js) ; les curseurs manuels reprennent la
 // main APRÈS elle, et bouger l'heure les réécrit — même sémantique que les
@@ -8,7 +8,7 @@ import { slider, section, el } from './kit.js'
 
 export function lightSection(ctx) {
   const { params } = ctx
-  const s = section('Lumière', { open: true })
+  const s = section('Lumière')
   s.body.append(
     el('div', 'ce-fx-head', 'Soleil'),
     slider({ label: 'Heure', min: 0, max: 24, step: 0.1, get: () => params.timeOfDay ?? 10, set: (v) => { ctx.applyTimeOfDay(v); ctx.syncHour?.() } }),

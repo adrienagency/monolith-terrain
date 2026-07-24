@@ -1,11 +1,15 @@
-// BIBLIOTHÈQUE (réorg Adrien) — seule habitante du rail droit en mode Studio.
-// Deux niveaux :
-//  1. un bouton DIRECT vers la boutique de templates (+ Réinitialiser)
-//  2. « Ma bibliothèque » :
-//     · Couleurs  → Mes palettes / Créer une palette (rampe, océans, encre —
-//       le contenu vient de create-panel via ctx.paletteCreation)
-//     · Templates → Mes templates (chargés + téléchargés) / Créer un template
-// Les rampes built-in (Iceland…) et les générateurs aléatoires sont RETIRÉS.
+// BIBLIOTHÈQUE v3 (retours Adrien) — hiérarchie :
+//   1. BOUTIQUE DE TEMPLATES en tête, accent — c'est le gagne-pain, il ne se
+//      cache pas. Seul accent PERSISTANT du panneau.
+//   2. Palettes  (repliée) : mes palettes en grille + carte « ＋ Nouvelle
+//      palette » qui déplie le formulaire (create-panel), Fermer/Enregistrer.
+//   3. Templates (repliée) : des looks COMPLETS uniquement (json entiers —
+//      couleurs, shaders, fonds, mers, nuages, profondeur de champ…). JAMAIS
+//      de palette ici. Mono clair/sombre = deux templates par défaut.
+//      Carte « ＋ Nouveau template » + ligne « Charger un fichier… ».
+//   4. Pied : « Réinitialiser la carte » en lien discret (destructif = loin
+//      des gestes courants).
+// Règle constante : toutes les sections repliées à l'ouverture du panneau.
 
 import { el, button, section, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
@@ -22,37 +26,31 @@ export function buildTemplatesPanel(ctx) {
     tip: 'Vos palettes et templates — et la boutique pour en ramener d’autres.',
   })
 
-  // ------------------------------------------------- niveau 1 : la boutique
+  // ---------------------------------------------- 1. la Boutique, en pleine lumière
   const storeWrap = el('div', 'ce-btn-row')
   const storeBtn = button('Boutique de templates', () => ctx.openStore?.(), { accent: true })
   storeBtn.setAttribute('data-tip', 'Parcourez styles et couleurs, essayez en direct, ramenez ce qui vous plaît.')
   storeWrap.append(storeBtn)
   panel.body.append(storeWrap)
 
-  const resetWrap = el('div', 'ce-btn-row')
-  const resetBtn = button(
-    'Réinitialiser la carte',
-    () => {
-      if (ctx.resetAll) {
-        ctx.resetAll()
-        refreshAll()
-        ctx.syncDark?.()
-      }
-    },
-    { ghost: true }
-  )
-  resetBtn.setAttribute('data-tip', 'Remet chaque réglage de look à sa valeur d’origine (le lieu ne bouge pas).')
-  resetWrap.append(resetBtn)
-  panel.body.append(resetWrap)
-
-  // --------------------------------------- niveau 2 : Ma bibliothèque › Couleurs
-  const sPal = panel.addSection(section('Couleurs', { open: true }))
-  sPal.body.append(el('div', 'ce-fx-head', 'Mes palettes'))
-  const palRow = el('div', 'ce-pal-row')
-  const palEmpty = el('div', 'ce-gpx-layers-empty', 'Créez une palette ci-dessous, Enregistrez-la — elle arrive ici.')
+  // --------------------------------------------------------- 2. Palettes
+  const sPal = panel.addSection(section('Palettes'))
+  const palGrid = el('div', 'ce-lib-grid')
+  const palEmpty = el('div', 'ce-gpx-layers-empty', 'Aucune palette encore — « ＋ Nouvelle palette » pour la première.')
+  const palForm = el('div', 'ce-lib-form')
+  palForm.hidden = true
+  let palFormBuilt = false
+  const togglePalForm = (show) => {
+    palForm.hidden = !show
+    if (show && !palFormBuilt) {
+      palFormBuilt = true
+      palForm.append(el('div', 'ce-lib-form-title', 'Nouvelle palette'))
+      ctx.paletteCreation?.(palForm, { onClose: () => { palForm.hidden = true } })
+    }
+  }
   function renderPalettes() {
     const list = ctx.userPalettes?.() || []
-    palRow.replaceChildren()
+    palGrid.replaceChildren()
     palEmpty.classList.toggle('hidden', list.length > 0)
     for (const p of list) {
       const card = el('button', 'ce-pal-card')
@@ -67,26 +65,25 @@ export function buildTemplatesPanel(ctx) {
       x.addEventListener('click', (e) => { e.stopPropagation(); ctx.deleteUserPalette?.(p.id); renderPalettes() })
       card.append(strip, ocean, nameEl, x)
       card.addEventListener('click', () => { ctx.applyPalette({ rampStops: p.rampStops, oceanShallow: p.oceanShallow, oceanMid: p.oceanMid, oceanDeep: p.oceanDeep, ink: p.ink }); refreshAll() })
-      palRow.append(card)
+      palGrid.append(card)
     }
+    // la création vit là où vit le contenu : dernière carte de la grille
+    const add = el('button', 'ce-lib-add')
+    add.type = 'button'
+    add.innerHTML = '<span>＋</span>Nouvelle palette'
+    add.addEventListener('click', () => togglePalForm(palForm.hidden))
+    palGrid.append(add)
   }
   renderPalettes()
   ctx.registerPaletteRefresh?.(renderPalettes)
-  sPal.body.append(palRow, palEmpty)
+  sPal.body.append(palGrid, palEmpty, palForm)
 
-  sPal.body.append(el('div', 'ce-fx-head', 'Créer une palette'))
-  const createHost = el('div')
-  sPal.body.append(createHost)
-  ctx.paletteCreation?.(createHost) // rampe + océans + encre + Enregistrer (create-panel)
-
-  // -------------------------------------- niveau 2 : Ma bibliothèque › Templates
+  // -------------------------------------------------------- 3. Templates
+  // Des looks COMPLETS uniquement — jamais de palette ici (règle Adrien).
   const sTpl = panel.addSection(section('Templates'))
-  sTpl.body.append(el('div', 'ce-fx-head', 'Mes templates'))
+  const tplGrid = el('div', 'ce-cards ce-lib-tplgrid')
+  sTpl.body.append(tplGrid)
 
-  // saved looks with a thumbnail, apply / export / delete. Applying never moves
-  // the view. Cards use a colour-strip vignette, grouped Simple / Shaders.
-  const userWrap = el('div')
-  sTpl.body.append(userWrap)
   function makeCard(t) {
     // image-thumbnail card (a div so the action buttons nest validly)
     const card = el('div', 'ce-utpl-card')
@@ -105,32 +102,67 @@ export function buildTemplatesPanel(ctx) {
       if (e.target.closest('.ce-utpl-x, .ce-utpl-dl')) return
       ctx.applyUserTemplate(t); refreshAll(); ctx.syncDark?.()
     })
-    card.querySelector('.ce-utpl-x').addEventListener('click', () => { ctx.deleteUserTemplate(t.id); renderUserTemplates() })
+    card.querySelector('.ce-utpl-x').addEventListener('click', () => { ctx.deleteUserTemplate(t.id); renderTemplates() })
     card.querySelector('.ce-utpl-dl').addEventListener('click', () => ctx.exportUserTemplate(t.id))
     return card
   }
-  const tplEmpty = el('div', 'ce-gpx-layers-empty', 'Chargez un template, ou créez-en un ci-dessous — ils se rangent ici.')
-  sTpl.body.append(tplEmpty)
-  function renderUserTemplates() {
-    userWrap.replaceChildren()
-    const all = ctx.getUserTemplates?.() ?? []
-    tplEmpty.classList.toggle('hidden', all.length > 0)
-    const groups = [
-      ['Simple', all.filter((t) => !t.shaders)],
-      ['Shaders', all.filter((t) => t.shaders)],
-    ]
-    for (const [label, items] of groups) {
-      if (!items.length) continue
-      userWrap.append(el('div', 'ce-utpl-cat', label))
-      const grid = el('div', 'ce-cards')
-      for (const t of items) grid.append(makeCard(t))
-      userWrap.append(grid)
-    }
-  }
-  renderUserTemplates()
-  // la boutique (store.js) intègre des styles → main.js nous re-rend ici
-  ctx.registerUserTplRefresh?.(renderUserTemplates)
 
+  // Mono clair / Mono sombre : eux aussi des TEMPLATES (par défaut, non
+  // supprimables) — deux cartes en tête de grille
+  function monoCard(label, mode, bg) {
+    const card = el('div', 'ce-utpl-card ce-utpl-default')
+    card.setAttribute('role', 'button')
+    card.tabIndex = 0
+    const media = el('div', 'ce-utpl-img')
+    media.style.background = bg
+    const nm = el('span', 'ce-utpl-name', label)
+    card.append(media, nm)
+    const apply = () => { ctx.applyMonochrome(mode); refreshAll(); ctx.syncDark?.() }
+    card.addEventListener('click', apply)
+    card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); apply() } })
+    return card
+  }
+
+  // ＋ Nouveau template → formulaire nom + Enregistrer (encre, pas d'accent)
+  const tplForm = el('div', 'ce-lib-form')
+  tplForm.hidden = true
+  tplForm.append(el('div', 'ce-lib-form-title', 'Nouveau template'))
+  tplForm.append(el('div', 'ce-note', 'Capture TOUT le look actuel : couleurs, matières, fonds, mers, nuages, effets…'))
+  const nameInput = el('input', 'ce-tpl-name')
+  nameInput.type = 'text'
+  nameInput.placeholder = 'Nommer ce look…'
+  nameInput.maxLength = 40
+  const doSave = () => {
+    if (!nameInput.value.trim()) { nameInput.focus(); return } // name required
+    ctx.saveCurrentTemplate(nameInput.value)
+    nameInput.value = ''
+    tplForm.hidden = true
+    renderTemplates()
+  }
+  nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doSave() } })
+  const tplFormRow = el('div', 'ce-btn-row ce-lib-formrow')
+  tplFormRow.append(button('Fermer', () => { tplForm.hidden = true }, { ghost: true }), button('Enregistrer', doSave))
+  tplForm.append(nameInput, tplFormRow)
+
+  function renderTemplates() {
+    tplGrid.replaceChildren()
+    tplGrid.append(
+      monoCard('Mono clair', 'white', 'linear-gradient(135deg, #fdfdfb, #d8d5cc)'),
+      monoCard('Mono sombre', 'dark', 'linear-gradient(135deg, #3a3a3e, #121215)')
+    )
+    for (const t of ctx.getUserTemplates?.() ?? []) tplGrid.append(makeCard(t))
+    const add = el('button', 'ce-lib-add')
+    add.type = 'button'
+    add.innerHTML = '<span>＋</span>Nouveau template'
+    add.addEventListener('click', () => { tplForm.hidden = !tplForm.hidden; if (!tplForm.hidden) nameInput.focus() })
+    tplGrid.append(add)
+  }
+  renderTemplates()
+  // la boutique (store.js) intègre des styles → main.js nous re-rend ici
+  ctx.registerUserTplRefresh?.(renderTemplates)
+  sTpl.body.append(tplForm)
+
+  // ligne de navigation : importer un fichier .shibumap-template
   const fileInput = el('input')
   fileInput.type = 'file'
   fileInput.accept = '.json,application/json'
@@ -141,36 +173,27 @@ export function buildTemplatesPanel(ctx) {
       if (!ctx.importTemplateText(text)) alert(`« ${f.name} » n’est pas un template ShibuMap.`)
     }
     fileInput.value = ''
-    renderUserTemplates()
+    renderTemplates()
   })
-  const loadRow = el('div', 'ce-btn-row')
-  loadRow.append(button('Charger un template…', () => fileInput.click(), { ghost: true }))
+  const loadRow = el('button', 'ce-lib-nav')
+  loadRow.type = 'button'
+  loadRow.innerHTML = '<span>Charger un fichier…</span><i>›</i>'
+  loadRow.addEventListener('click', () => fileInput.click())
   sTpl.body.append(loadRow, fileInput)
 
-  const monoRow = el('div', 'ce-btn-row')
-  monoRow.append(
-    button('Mono clair', () => { ctx.applyMonochrome('white'); refreshAll(); ctx.syncDark?.() }),
-    button('Mono sombre', () => { ctx.applyMonochrome('dark'); refreshAll(); ctx.syncDark?.() })
-  )
-  sTpl.body.append(monoRow)
-
-  sTpl.body.append(el('div', 'ce-fx-head', 'Créer un template'))
-  // inline name field instead of prompt() — prompt is blocked in some embedded
-  // contexts and is off-brand
-  const nameInput = el('input', 'ce-tpl-name')
-  nameInput.type = 'text'
-  nameInput.placeholder = 'Nommer ce look…'
-  nameInput.maxLength = 40
-  const doSave = () => {
-    if (!nameInput.value.trim()) { nameInput.focus(); return } // name required
-    ctx.saveCurrentTemplate(nameInput.value)
-    nameInput.value = ''
-    renderUserTemplates()
-  }
-  nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doSave() } })
-  const createRow = el('div', 'ce-btn-row')
-  createRow.append(nameInput, button('Enregistrer', doSave, { accent: true }))
-  sTpl.body.append(createRow)
+  // ------------------------------------- 4. pied : le destructif, à distance
+  const resetLink = el('button', 'ce-lib-reset')
+  resetLink.type = 'button'
+  resetLink.textContent = 'Réinitialiser la carte'
+  resetLink.setAttribute('data-tip', 'Remet chaque réglage de look à sa valeur d’origine (le lieu ne bouge pas).')
+  resetLink.addEventListener('click', () => {
+    if (ctx.resetAll) {
+      ctx.resetAll()
+      refreshAll()
+      ctx.syncDark?.()
+    }
+  })
+  panel.body.append(resetLink)
 
   return panel
 }

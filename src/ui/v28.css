@@ -207,6 +207,96 @@ body.dark {
   outline: none;
 }
 
+/* Bibliothèque v3 — grilles, carte ＋, formulaires dépliés, pied discret */
+.ce-lib-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.ce-lib-grid .ce-pal-card {
+  width: 100%;
+  min-width: 0;
+}
+.ce-lib-add {
+  border: 1px dashed var(--ce-border);
+  background: none;
+  border-radius: 10px;
+  cursor: pointer;
+  color: var(--ce-ink);
+  opacity: 0.7;
+  font: 600 11.5px var(--ce-font);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 52px;
+  padding: 8px;
+}
+.ce-lib-add:hover {
+  opacity: 1;
+  border-color: var(--ce-accent);
+  color: var(--ce-accent);
+}
+.ce-lib-add span {
+  font-size: 15px;
+  line-height: 1;
+}
+.ce-lib-form {
+  border: 1px solid var(--ce-border);
+  border-radius: 12px;
+  padding: 10px;
+  margin: 4px 0 8px;
+  background: var(--ce-hover);
+}
+.ce-lib-form-title {
+  font: 700 11px var(--ce-font);
+  color: var(--ce-ink);
+  margin-bottom: 8px;
+}
+.ce-lib-formrow {
+  justify-content: flex-end;
+}
+.ce-lib-nav {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--ce-ink);
+  font: 500 12px var(--ce-font);
+  padding: 9px 6px;
+  border-radius: 8px;
+}
+.ce-lib-nav:hover {
+  background: var(--ce-hover);
+}
+.ce-lib-nav i {
+  font-style: normal;
+  color: var(--ce-ink);
+  opacity: 0.5;
+}
+.ce-lib-reset {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: center;
+  color: var(--ce-ink);
+  opacity: 0.5;
+  font: 500 11px var(--ce-font);
+  padding: 9px 6px 11px;
+}
+.ce-lib-reset:hover {
+  opacity: 0.9;
+}
+.ce-utpl-default .ce-utpl-img {
+  border: 0.5px solid var(--ce-border);
+}
+
 /* roue crantée — panneau Paramètres globaux par-dessus la carte */
 .ce-settings-veil {
   position: fixed;

@@ -1,4 +1,4 @@
-// Effects panel — right column, below Map. Gathers everything that shapes the
+﻿// Effects panel — right column, below Map. Gathers everything that shapes the
 // IMAGE rather than the map data: the new render effects (AO, bloom), the
 // post chain (exposure/contrast/saturation/vignette/grain/fog) moved verbatim
 // from the Create panel, and the volumetric clouds moved with them (explicit
@@ -50,7 +50,7 @@ export function buildEffectsPanel(ctx) {
   if (ctx.lightCtx) elementsPanel.addSection(lightSection(ctx.lightCtx))
 
   // ---- render (the 2026-07-20 upgrades) ----
-  const sRen = panel.addSection(section('Rendu', { open: true }))
+  const sRen = panel.addSection(section('Rendu'))
   const aoT = toggle({ label: 'Ombrage des creux (SSAO)', get: () => params.ssaoEnabled, set: (v) => { params.ssaoEnabled = v; refreshAll() } })
   const aoI = slider({ label: 'Intensité de l’ombrage', min: 0.5, max: 12, step: 0.05, get: () => params.ssaoIntensity, set: (v) => { params.ssaoIntensity = v; ctx.ssao.intensity = v } })
   const blT = toggle({ label: 'Bloom (lueur)', get: () => params.bloomEnabled, set: (v) => { params.bloomEnabled = v; refreshAll() } })

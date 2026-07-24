@@ -3559,7 +3559,7 @@ const fondsPanel = buildFondsPanel(panelCtx)
 
 // Bibliothèque — seule habitante du rail droit ; « Créer une palette » lui
 // est fourni par create-panel via cette closure
-panelCtx.paletteCreation = (host) => buildPaletteCreation(panelCtx, host)
+panelCtx.paletteCreation = (host, opts) => buildPaletteCreation(panelCtx, host, opts)
 const templatesPanel = buildTemplatesPanel(panelCtx)
 
 const { elementsPanel, imagePanel } = buildEffectsPanel({
