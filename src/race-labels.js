@@ -128,10 +128,22 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
     // horizontalement (layoutCartouches est 1D, on le réutilise sur x)
     const avoid = params.gpxLabelAvoid !== false
     const placed = []
+    // occupation de TOUT l'espace (Adrien) : si une pile déborde de 55 % de
+    // la dimension disponible, on JUSTIFIE le groupe sur toute la hauteur
+    // (ou largeur) au lieu de tasser près des ancres
+    const spread = (group, sizes, span) => {
+      const total = sizes.reduce((a, s) => a + s, 0) + (group.length - 1) * 8
+      if (!avoid || total < span * 0.55) return null
+      const gap = Math.max(8, (span - 8 - total + (group.length - 1) * 8) / Math.max(1, group.length - 1))
+      let pos = 4
+      return group.map((_, i) => { const p = pos; pos += sizes[i] + gap; return p })
+    }
     for (const key of ['right', 'left']) {
       const group = groups[key]
       if (!group.length) continue
-      const ys = layoutCartouches(
+      group.sort((a, b) => a.ay - b.ay)
+      const even = spread(group, group.map((n) => n.hh), h)
+      const ys = even || layoutCartouches(
         group.map((n) => ({ y: n.ay - n.hh / 2, h: n.hh })),
         { avoid, gap: 8, minY: 4, maxY: h - 4 }
       )
@@ -145,7 +157,9 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
     for (const key of ['top', 'bottom']) {
       const group = groups[key]
       if (!group.length) continue
-      const xs = layoutCartouches(
+      group.sort((a, b) => a.ax - b.ax)
+      const even = spread(group, group.map((n) => n.fw), w)
+      const xs = even || layoutCartouches(
         group.map((n) => ({ y: n.ax - n.fw / 2, h: n.fw })),
         { avoid, gap: 10, minY: 4, maxY: w - 4 }
       )
@@ -171,18 +185,21 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
         }
       }
     }
-    // 5. application DOM — la ligne de rappel vise le bord du cartouche
-    // côté ancre (pointillés neutres, jamais la couleur du tracé — Adrien)
+    // 5. application DOM — le cartouche GLISSE vers sa place (lissage
+    // exponentiel ≈ ease-in-out, demande Adrien) ; la ligne de rappel vise
+    // son bord côté ancre (pointillés neutres, jamais la couleur du tracé)
     for (const n of placed) {
-      n.cart.style.transform = `translate(${Math.round(n.fx)}px, ${Math.round(n.fy)}px)`
+      if (n.sx == null) { n.sx = n.fx; n.sy = n.fy } // première pose : direct
+      else { n.sx += (n.fx - n.sx) * 0.16; n.sy += (n.fy - n.sy) * 0.16 }
+      n.cart.style.transform = `translate(${Math.round(n.sx)}px, ${Math.round(n.sy)}px)`
       n.anchor.style.transform = `translate(${Math.round(n.ax - 3.5)}px, ${Math.round(n.ay - 3.5)}px)`
       let tx
       let ty
-      if (n.side === 'right') { tx = n.fx; ty = n.fy + n.hh / 2 }
-      else if (n.side === 'left') { tx = n.fx + n.fw; ty = n.fy + n.hh / 2 }
+      if (n.side === 'right') { tx = n.sx; ty = n.sy + n.hh / 2 }
+      else if (n.side === 'left') { tx = n.sx + n.fw; ty = n.sy + n.hh / 2 }
       else {
-        tx = Math.min(Math.max(n.ax, n.fx + 8), n.fx + n.fw - 8)
-        ty = n.side === 'top' ? n.fy + n.hh : n.fy
+        tx = Math.min(Math.max(n.ax, n.sx + 8), n.sx + n.fw - 8)
+        ty = n.side === 'top' ? n.sy + n.hh : n.sy
       }
       const ang = Math.atan2(ty - n.ay, tx - n.ax)
       n.leader.style.width = `${Math.round(Math.hypot(tx - n.ax, ty - n.ay))}px`

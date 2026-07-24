@@ -181,7 +181,8 @@ export class GroundInfoLayer {
     const ink = this.getWallInk?.() || this.getInk?.() || '#222'
     const baseY = this.getBaseY?.() ?? -8
     const wallH = Math.abs(baseY)
-    // cartouche d'infos — haut à droite du flanc, aligné à droite
+    // cartouche d'infos — EN BAS à droite du flanc (aligné au socle : en
+    // haut il finirait par flotter sous un relief découpé — Adrien)
     const lines = []
     if (r.name) lines.push(String(r.name).toUpperCase())
     if (r.dplus != null) lines.push(`D+ ${r.dplus} M · D− ${r.dminus} M`)
@@ -191,7 +192,7 @@ export class GroundInfoLayer {
       const h = wallH * 0.3
       const w = (tc.w / tc.h) * h
       for (const side of ['south', 'north']) {
-        this._addWallPlane(tc.canvas, HALF - 6 - w / 2, baseY + wallH * 0.78, w, h, { side, list: this.raceMeshes })
+        this._addWallPlane(tc.canvas, HALF - 6 - w / 2, baseY + h / 2 + 1.1, w, h, { side, list: this.raceMeshes })
       }
     }
     // logo — centré sur le flanc, ratio préservé, ~55 % de la hauteur du mur

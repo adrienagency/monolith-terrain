@@ -105,7 +105,7 @@ export function buildRoutePanel(ctx) {
   // (Width/Colour/Gradient/Glow/Markers/Km, above and below) stays GLOBAL —
   // see gpx-layers.js's own file header for why — so this section is the
   // only place per-layer identity lives.
-  const sLayers = panel.addSection(section('GPX layers', { open: true }))
+  const sLayers = panel.addSection(section('My races', { open: true }))
   const listEl = el('div', 'ce-gpx-layers')
   const emptyEl = el('div', 'ce-gpx-layers-empty', 'No tracks loaded yet — Load GPX above to add the first one.')
   const addRow = el('div', 'ce-btn-row')
@@ -170,6 +170,19 @@ export function buildRoutePanel(ctx) {
         ctx.gpx.setLayerVisible(l.id, !l.visible)
       })
 
+      // infos course (cartouches Race Studio) — actives par défaut ; l'œil
+      // fermé les coupe aussi (voir getItems, main.js)
+      const raceBtn = el('button', 'ce-icon-btn ce-gpx-race' + (l.showRaceInfo === false ? '' : ' on'))
+      raceBtn.type = 'button'
+      raceBtn.title = l.showRaceInfo === false ? 'Afficher les infos course' : 'Masquer les infos course'
+      raceBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="14" height="8" rx="2"/><path d="M17 10h4M6 10h6"/></svg>'
+      raceBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        l.showRaceInfo = l.showRaceInfo === false
+        ctx.refreshRaceLabels?.()
+        renderLayers(ctx.gpx.layers)
+      })
+
       const removeBtn = el('button', 'ce-icon-btn ce-gpx-remove')
       removeBtn.type = 'button'
       removeBtn.title = 'Remove layer'
@@ -179,7 +192,7 @@ export function buildRoutePanel(ctx) {
         ctx.gpx.removeLayer(l.id)
       })
 
-      row.append(dragHandle, iconBtn, nameInput, eyeBtn, removeBtn)
+      row.append(dragHandle, iconBtn, nameInput, raceBtn, eyeBtn, removeBtn)
       // clicking the row (but not one of its controls) focuses this layer —
       // Points/Playback/Race-name below all act on whichever layer is focused
       row.addEventListener('click', (e) => {
@@ -286,79 +299,8 @@ export function buildRoutePanel(ctx) {
     syncRaceName()
   }
 
-  const sStyle = panel.addSection(section('Line effects', { open: false }))
-  const modeRow = select({
-    label: 'Gradient mode',
-    options: [
-      { value: 'elevation', label: 'Elevation' },
-      { value: 'slope', label: 'Slope' },
-      { value: 'progress', label: 'Progress' },
-    ],
-    get: () => params.gpxGradientMode,
-    set: (v) => ctx.gpx.setGradient(params.gpxGradient, v),
-  })
-  visibleWhen(modeRow, () => params.gpxGradient)
-  sStyle.body.append(
-    toggle({
-      label: 'Gradient along track',
-      get: () => params.gpxGradient,
-      set: (v) => { ctx.gpx.setGradient(v, params.gpxGradientMode); refreshAll() }, // updates modeRow + colorRow visibility right away
-    }),
-    modeRow,
-    toggle({
-      label: 'Glow',
-      get: () => params.gpxGlow,
-      set: (v) => ctx.gpx.setGlow(v),
-    })
-  )
-
-  const sPoints = panel.addSection(section('Points & markers', { open: false }))
-  const archColorRow = color({
-    label: 'Arch colour',
-    get: () => params.gpxArchColor || (params.darkMode ? '#e7e9ec' : '#2b2f33'),
-    set: (v) => ctx.gpx.setArchColor(v),
-  })
-  // only meaningful while the arch itself is showing — same visibleWhen
-  // pattern the track Colour swatch uses above for its own gating toggle
-  visibleWhen(archColorRow, () => params.gpxMarkers)
-  sPoints.body.append(
-    toggle({
-      label: 'Start & finish markers',
-      get: () => params.gpxMarkers,
-      set: (v) => { ctx.gpx.setMarkers(v); refreshAll() }, // reveals/hides the Arch colour swatch right away
-    }),
-    archColorRow,
-    toggle({
-      label: 'Km markers',
-      get: () => params.gpxKm,
-      set: (v) => ctx.gpx.setKm(v),
-    })
-  )
-
-  // name-point: labels the currently-hovered track point (ctx.gpx.hoverIdx);
-  // a lightweight inline field rather than a full point picker — see spec E
-  const nameRow = el('div', 'ce-btn-row')
-  const nameInput = el('input', 'ce-tpl-name')
-  nameInput.type = 'text'
-  nameInput.placeholder = 'Hover a point, then name it…'
-  nameInput.maxLength = 40
-  const doNamePoint = () => {
-    const idx = ctx.gpx.hoverIdx
-    if (idx == null || idx < 0) {
-      nameInput.focus()
-      return // nothing hovered — silently no-op rather than block the UI
-    }
-    ctx.gpx.setPointName(idx, nameInput.value)
-    nameInput.value = ''
-  }
-  nameInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      doNamePoint()
-    }
-  })
-  nameRow.append(nameInput, button('Name point', doNamePoint, { ghost: true }))
-  sPoints.body.append(nameRow)
+  // « Line effects » et « Points & markers » retirés (Adrien) : le style du
+  // tracé vit dans le Race Studio (étape ④), les points de passage aussi (②).
 
   // Playback — progressive reveal: a head travels the track, the line draws
   // up to it, and animated altitude/slope readouts float at the tip (Space

@@ -2287,9 +2287,17 @@ const raceLabels = buildRaceLabels({
   params,
   getItems: () => {
     const items = []
-    const track = gpxLayer.activeLayer?.gpx?.track
-    if (track?.world) {
+    const lay = gpxLayer.activeLayer
+    const track = lay?.gpx?.track
+    // « quand je quitte la course, les étiquettes disparaissent » — pas de
+    // trace = rien ; œil fermé ou infos course désactivées = rien non plus
+    if (!track?.world || lay.visible === false || lay.showRaceInfo === false) return items
+    // en lecture, un cartouche n'apparaît que quand la tête l'a atteint
+    const totKm = track.cumKm[track.cumKm.length - 1]
+    const headKm = gpxLayer.isPlaying?.() ? (gpxLayer.headT ?? 1) * totKm : Infinity
+    {
       for (const w of raceState.waypoints) {
+        if (w.km > headKm) continue
         if (w.idx == null || !track.world[w.idx]) continue
         items.push({
           id: `wp_${w.idx}`,
@@ -2346,8 +2354,25 @@ async function setTransportCats(cats) {
   }
   try {
     const pois = await fetchTransports(bounds, cats)
+    // proximité DIRECTE du parcours (Adrien) : on ne garde que les POI à
+    // moins de ~2,5 km de la trace (échantillonnée), sauf aéroports (rares
+    // et structurants → 15 km). Sans trace, on garde tout.
+    const track = gpxLayer.activeLayer?.gpx?.track
+    const nearTrack = (p) => {
+      if (!track?.points?.length) return true
+      const maxKm = p.cat === 'aeroport' ? 15 : 2.5
+      const cosLat = Math.cos((p.lat * Math.PI) / 180)
+      const step = Math.max(1, Math.floor(track.points.length / 400))
+      for (let i = 0; i < track.points.length; i += step) {
+        const t = track.points[i]
+        const dx = (p.lon - t.lon) * 111.32 * cosLat
+        const dy = (p.lat - t.lat) * 110.57
+        if (dx * dx + dy * dy < maxKm * maxKm) return true
+      }
+      return false
+    }
     raceState.transports.pois = pois
-      .filter((p) => cats.includes(p.cat))
+      .filter((p) => cats.includes(p.cat) && nearTrack(p))
       .map((p) => {
         const w = latLonToWorld(dem, p.lat, p.lon)
         const world = new THREE.Vector3(w.x, (terrain.sample?.(w.x, w.z) ?? 0) + 0.4, w.z)
@@ -3848,6 +3873,7 @@ const studio = buildStudio({
   share: () => shareCurrentView(),
 })
 panelCtx.openStudio = () => studio.enter()
+panelCtx.refreshRaceLabels = () => raceLabels.setDirty() // toggle infos course par calque
 
 // first visit only: the guided tour introduces the UI once the boot view has
 // had a moment to settle (replayable anytime from the "?" in the top bar).

@@ -77,4 +77,6 @@
 body.studio-mode .rl-chip { pointer-events: auto; }
 body.studio-mode .rl-chip .rl-x { display: inline; }
 
-.rl-hidden { display: none !important; }
+/* apparition/disparition en fondu (le déplacement, lui, est lissé en JS) */
+.rl-cart, .rl-chip, .rl-anchor, .rl-leader { transition: opacity .3s ease; }
+.rl-hidden { opacity: 0 !important; pointer-events: none !important; }
