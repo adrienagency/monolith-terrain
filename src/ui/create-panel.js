@@ -213,11 +213,12 @@ export function contributeTerrainSections(ctx) {
   // --------------------------------------------------------------- Socle
   const sBlk = matPanel.addSection(section('Socle'))
   sBlk.body.append(
-    toggle({ label: 'Afficher le socle', get: () => params.plinth, set: (v) => { params.plinth = v; ctx.plinth.setVisible(v && ctx.modes.mode === 'surface') } }),
-    slider({ label: 'Épaisseur', min: 2, max: 16, step: 0.5, get: () => params.plinthDepth, set: (v) => { params.plinthDepth = v } }),
+    // le toggle recale AUSSI le cartouche (textes au pied du relief) et les
+    // gravures murales (elles disparaissent sans socle) — ctx.onPlinthToggled
+    toggle({ label: 'Afficher le socle', get: () => params.plinth, set: (v) => { params.plinth = v; ctx.plinth.setVisible(v && ctx.modes.mode === 'surface'); ctx.onPlinthToggled?.() } }),
+    // (tirette Épaisseur retirée — « ne sert à rien », Adrien)
     color({ label: 'Couleur de la tranche', get: () => params.plinthColor, set: (v) => { params.plinthColor = v; ctx.plinth.setColors(params) } })
   )
-  sBlk.body.children[1].querySelector('input').addEventListener('change', () => ctx.plinth.rebuild(ctx.terrain, params))
 
   // le catalogue EXPOSÉ : 25 solides + 25 verres en grille de vignettes (même
   // langage que Matière du relief) — le menu déroulant cachait la marchandise
@@ -257,6 +258,7 @@ export function contributeTerrainSections(ctx) {
     matKnobs.replaceChildren()
     if (params.plinthFinish === 'glass') {
       matKnobs.append(
+        slider({ label: 'Déformation', min: 0, max: 1, step: 0.01, get: () => params.plinthGlassRefract ?? 0.25, set: (v) => { params.plinthGlassRefract = v; ctx.applyPlinthMaterial() } }),
         slider({ label: 'Diffusion (givre)', min: 0, max: 1, step: 0.01, get: () => params.plinthGlassDiffusion, set: (v) => { params.plinthGlassDiffusion = v; ctx.applyPlinthMaterial() } }),
         slider({ label: 'Relief', min: 0, max: 2, step: 0.02, get: () => params.plinthGlassBump, set: (v) => { params.plinthGlassBump = v; ctx.applyPlinthMaterial() } }),
         slider({ label: 'Halo au sol', min: 0, max: 1, step: 0.01, get: () => params.plinthGlassProjection, set: (v) => { params.plinthGlassProjection = v; ctx.applyPlinthMaterial() } })

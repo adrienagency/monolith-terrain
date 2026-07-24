@@ -162,6 +162,16 @@ export class Plinth {
     this.walls.receiveShadow = true
     this.group.add(this.walls)
 
+    // CŒUR opaque du bloc de verre (Adrien : « on voit à travers ») — la même
+    // géométrie parois+fond, légèrement rétrécie, teintée par le verre : le
+    // socle transparent devient un bloc de verre PLEIN. Fini l'intérieur creux
+    // (rampes marines vues de dos) et la vue traversante par en dessous.
+    this.linerMat = new THREE.MeshStandardMaterial({ color: 0x66707a, roughness: 0.9, metalness: 0 })
+    this.liner = new THREE.Mesh(new THREE.BufferGeometry(), this.linerMat)
+    this.liner.scale.set(0.985, 0.985, 0.985)
+    this.liner.visible = false
+    this.group.add(this.liner)
+
     // the table: a wide plane that shows ONLY the slab's cast shadow. A
     // ShadowMaterial is transparent everywhere else, so the ground reads as the
     // exact scene background color — no grey mismatch, just the shadow.
@@ -237,7 +247,7 @@ export class Plinth {
   // Apply a socle material. `finish` is 'solid' (PBR presets) or 'glass'
   // (transmissive presets). `diffusion`/`projection` are the live glass sliders
   // (frost roughness, ground-pool strength); undefined = use the preset value.
-  setMaterial({ finish = 'solid', id, diffusion, projection = 0.5, glassBump = 0.6, bump = 1.3, fallbackColor = '#d8d4cc' } = {}) {
+  setMaterial({ finish = 'solid', id, diffusion, projection = 0.5, glassBump = 0.6, bump = 1.3, refract = 0.25, fallbackColor = '#d8d4cc' } = {}) {
     const m = this.wallMat
     if (finish === 'glass') {
       const p = GLASS_BY_ID[id] || GLASS_BY_ID.clear
@@ -257,17 +267,20 @@ export class Plinth {
       m.metalness = 0
       m.roughness = Math.min(0.06 + diff * 0.34, 0.42) // capped — no chunky mip blur
       m.transmission = p.transmission
-      // Réfraction DOMPTÉE (Adrien : « la surface est répétée 2 fois ») —
-      // l'offset de réfraction de three est ∝ thickness × (ior-1) : avec les
-      // épaisseurs presets (4-7 unités monde) le buffer de transmission
-      // affichait une copie fantôme décalée du relief. On écrase la thickness
-      // de réfraction et on adoucit l'ior, en PRÉSERVANT la teinte
-      // Beer-Lambert (le ratio thickness/attenuationDistance est conservé).
-      const REFRACT_THICK = 1.2
-      m.ior = 1 + (p.ior - 1) * 0.35
-      m.thickness = REFRACT_THICK
+      // DÉFORMATION pilotée (tirette Adrien, 0..1) — l'offset de réfraction
+      // de three est ∝ thickness × (ior-1) : à 0 le verre est limpide (aucune
+      // copie fantôme), à 1 il tord franchement ce qu'on voit au travers. La
+      // TEINTE Beer-Lambert est préservée quel que soit le réglage (le ratio
+      // thickness/attenuationDistance est conservé).
+      const refr = Math.max(0, Math.min(1, refract))
+      const thick = 0.4 + refr * 6
+      m.ior = 1 + (p.ior - 1) * (0.12 + 0.88 * refr)
+      m.thickness = thick
       m.attenuationColor.set(p.color)
-      m.attenuationDistance = p.attenuation * (REFRACT_THICK / p.thickness)
+      m.attenuationDistance = p.attenuation * (thick / p.thickness)
+      // le cœur prend la couleur du verre, assombrie — un bloc PLEIN
+      this.linerMat.color.set(p.color).multiplyScalar(0.72)
+      this.liner.visible = this.group.visible
       m.clearcoat = 0
       m.anisotropy = 0
       m.specularIntensity = 1
@@ -280,6 +293,7 @@ export class Plinth {
     } else {
       const p = PBR_BY_ID[id] || { color: fallbackColor, roughness: 0.95, metalness: 0 }
       this.isGlass = false
+      this.liner.visible = false // les solides sont déjà pleins
       // a real PBR preset owns the wall colour — the dark-mode/edge-colour reset
       // in setColors must not clobber it (only the plain default 'stone' takes it)
       this._pbrColored = !!(id && id !== 'stone')
@@ -353,6 +367,10 @@ export class Plinth {
     this.glassPool.position.y = baseY + 0.05 // glass colour pools just over the table
     this.walls.geometry.dispose()
     this.walls.geometry = geo
+    this.liner.geometry = geo // même géométrie, rétrécie par liner.scale
+    // le rétrécissement Y (1,5 %) remonterait le fond du cœur AU-DESSUS du
+    // fond de verre vu d'en bas — on recale son origine pour rester dedans
+    this.liner.position.y = baseY * 0.015 - 0.02
   }
 
   setColors(params) {
@@ -368,6 +386,7 @@ export class Plinth {
   setVisible(v) {
     this.group.visible = v
     this.glassPool.visible = v && this.isGlass && (this._poolStrength ?? 0) > 0.001
+    this.liner.visible = v && this.isGlass
   }
 
   // opaque floor: on with an HDRI (keeps a ground under the socle), off with a

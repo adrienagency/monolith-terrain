@@ -108,10 +108,11 @@ function compassCanvas(color) {
 }
 
 export class GroundInfoLayer {
-  constructor({ scene, getBaseY, getInk, getWallInk }) {
+  constructor({ scene, getBaseY, getInk, getWallInk, wallsVisible }) {
     this.getBaseY = getBaseY
     this.getInk = getInk
     this.getWallInk = getWallInk // ink for the name engraved on the block face (material-aware)
+    this.wallsVisible = wallsVisible // socle désactivé → aucun texte mural
     this.group = new THREE.Group()
     this.group.name = 'ground-info'
     scene.add(this.group)
@@ -143,6 +144,9 @@ export class GroundInfoLayer {
   // `side` : 'south' (défaut) ou 'north' — Race Studio grave les DEUX flancs.
   // `list` : réceptacle (les plans course vivent dans raceMeshes, pas meshes).
   _addWallPlane(canvas, cx, cy, worldW, worldH, { side = 'south', list = this.meshes } = {}) {
+    // sans socle il n'y a pas de flanc — les textes muraux (nom gravé, logo,
+    // infos course) n'existent simplement pas (règle Adrien)
+    if (this.wallsVisible && !this.wallsVisible()) return
     const tex = new THREE.CanvasTexture(canvas)
     tex.colorSpace = THREE.SRGBColorSpace
     tex.anisotropy = 4

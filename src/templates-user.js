@@ -43,7 +43,7 @@ export const TEMPLATE_KEYS = [
   'fov', 'autoFocus', 'focusDistance', 'focusRange', 'bokehEnabled', 'bokehScale',
   // socle (block)
   'plinth', 'plinthDepth', 'plinthColor', 'plinthFinish', 'plinthPbr', 'plinthGlass',
-  'plinthGlassDiffusion', 'plinthGlassProjection', 'plinthGlassBump', 'plinthBump',
+  'plinthGlassDiffusion', 'plinthGlassProjection', 'plinthGlassBump', 'plinthGlassRefract', 'plinthBump',
   'slabCorner', 'slabCornerSmoothing', 'groundInfo',
   // relief material
   'terrainSurfaceMat', 'terrainSurfaceBump', 'terrainMatScale', 'terrainMatRoughness', 'terrainMatNoise', 'terrainMatAboveZero',

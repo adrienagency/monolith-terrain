@@ -297,6 +297,7 @@ const params = {
   plinthGlassDiffusion: 0.7,
   plinthGlassProjection: 0.5,
   plinthGlassBump: 0.6, // frost micro-facet strength (glass bump slider)
+  plinthGlassRefract: 0.25, // déformation du verre (offset de réfraction, 0..1)
   plinthBump: 1.5, // textured-PBR relief strength (carbon/wood bump slider)
   // terrain MATERIAL mode (Shaders panel, next to Liquid metal): turns the whole
   // relief into a material — '' (topographic) or any id in the material catalog
@@ -812,6 +813,7 @@ function applyPlinthMaterial() {
     diffusion: glass ? params.plinthGlassDiffusion : undefined,
     projection: params.plinthGlassProjection,
     glassBump: params.plinthGlassBump,
+    refract: params.plinthGlassRefract,
     bump: params.plinthBump,
     fallbackColor: params.plinthColor,
   })
@@ -837,9 +839,14 @@ plinth.setVisible(params.plinth)
 // cartographic cartouche laid out on the ground around the slab
 const groundInfo = new GroundInfoLayer({
   scene,
-  getBaseY: () => plinth.baseY,
+  // socle désactivé (Adrien) : la carte se POSE AU SOL — les textes du
+  // cartouche remontent au pied du relief (baseY + profondeur du socle)
+  getBaseY: () => (params.plinth ? plinth.baseY : plinth.baseY + plinth.depth),
   getInk: () => (params.darkMode ? '#e8e4da' : params.hudInk),
   getWallInk: () => socleWallInk(), // engraved name flips to contrast the socle material
+  // sans socle il n'y a plus de flanc : les textes muraux (nom gravé, logo,
+  // infos course) disparaissent
+  wallsVisible: () => !!params.plinth,
 })
 cartoucheRef = groundInfo
 
@@ -1752,6 +1759,7 @@ const DEFAULT_PLINTH = Object.freeze({
   plinthGlassDiffusion: params.plinthGlassDiffusion,
   plinthGlassProjection: params.plinthGlassProjection,
   plinthGlassBump: params.plinthGlassBump,
+  plinthGlassRefract: params.plinthGlassRefract,
   plinthBump: params.plinthBump,
 })
 const DEFAULT_MAPLAYERS = Object.freeze({
@@ -3444,6 +3452,12 @@ const panelCtx = {
   setRegionMode: () => applyRegionMode(),
   syncDark: () => topBar.syncDark(),
   resetAll, // Templates panel's "Reset map" button
+  // toggle du socle : recale le cartouche au sol + fait (dis)paraître les
+  // gravures murales (nom, logo, infos course) — voir wallsVisible/getBaseY
+  onPlinthToggled: () => {
+    groundInfo.rerender?.()
+    applyRaceToBlock()
+  },
 }
 
 // Réorg Adrien (mode Studio) : rail DROIT = Bibliothèque seule ; rail GAUCHE
