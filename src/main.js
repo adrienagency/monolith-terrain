@@ -29,7 +29,8 @@ import { frameTrack } from './gpx.js'
 import { GpxLayerManager } from './gpx-layers.js'
 import { buildRaceLabels } from './race-labels.js'
 import { SPORTS, DEFAULT_SPORT, sanitizeSvgMarkup, isValidIconDataUrl, rasterizeToCanvas } from './ui/sport-icons.js'
-import { worldToLatLon } from './geo.js'
+import { worldToLatLon, latLonToWorld } from './geo.js'
+import { fetchTransports, TRANSPORT_CATS } from './transports.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
 import { monochromeLook } from './palette.js'
@@ -2309,6 +2310,34 @@ const raceLabels = buildRaceLabels({
     raceLabels.setDirty()
   },
 })
+
+// active les catégories de transport (studio étape ③) : fetch Overpass sur le
+// bloc courant, résout les positions monde, alimente les chips des cartouches
+async function setTransportCats(cats) {
+  raceState.transports.cats = [...cats]
+  if (!cats.length || !dem) { raceState.transports.pois = []; raceLabels.setDirty(); return }
+  const h = TERRAIN_SIZE / 2
+  const bounds = {
+    n: worldToLatLon(dem, 0, -h).lat,
+    s: worldToLatLon(dem, 0, h).lat,
+    w: worldToLatLon(dem, -h, 0).lon,
+    e: worldToLatLon(dem, h, 0).lon,
+  }
+  try {
+    const pois = await fetchTransports(bounds, cats)
+    raceState.transports.pois = pois
+      .filter((p) => cats.includes(p.cat))
+      .map((p) => {
+        const w = latLonToWorld(dem, p.lat, p.lon)
+        const world = new THREE.Vector3(w.x, (terrain.sample?.(w.x, w.z) ?? 0) + 0.4, w.z)
+        return { ...p, world }
+      })
+  } catch (err) {
+    console.warn('transports overpass:', err.message)
+    raceState.transports.pois = []
+  }
+  raceLabels.setDirty()
+}
 
 const allGpxPoints = () => gpxLayer.layers.flatMap((l) => l.gpx.track?.points ?? [])
 // un voisin vient de finir de charger → re-draper les traces + peindre sa photo
