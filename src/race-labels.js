@@ -124,12 +124,16 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
       vis.push(n)
     }
     if (!vis.length) return
-    // 2. placement SIMPLE (Adrien, remise à plat) : l'étiquette se pose À
-    // CÔTÉ de son point — à droite par défaut, sinon à gauche, au-dessus,
-    // en dessous, puis en s'étageant verticalement. Première place LIBRE
-    // gagnée (pas de chevauchement d'étiquettes ni d'UI). Un point hors
-    // écran/hors blocs n'affiche rien (culling plus haut + getItems).
+    // 2. placement « panneau planté » (Adrien) : l'étiquette est COLLÉE à
+    // son point — en x/z elle ne s'écarte pas de plus de 1vw (donc centrée
+    // sur le point, micro-jeu horizontal), et seul le Y coulisse, de 2vh
+    // max, pour s'éviter. Face caméra par nature (HTML écran). Pas de place
+    // dans ces limites → elle se masque (les prioritaires gagnent).
+    // L'étiquette Départ/Arrivée est ÉPINGLÉE en haut de page, au-dessus de
+    // toutes les autres, sa ligne de rappel descend vers le point.
     const avoid = params.gpxLabelAvoid !== false
+    const vwLim = w / 100 // 1vw
+    const vhLim = (2 * h) / 100 // 2vh
     const placed = []
     const uiRects = []
     {
@@ -145,48 +149,57 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
     const free = (x, y, ww, hh2) => {
       if (x < 2 || y < 2 || x + ww > w - 2 || y + hh2 > h - 2) return false
       for (const r of uiRects) if (x < r.x1 && r.x0 < x + ww && y < r.y1 && r.y0 < y + hh2) return false
-      for (const m of placed) if (x < m.fx + m.fw + 8 && m.fx < x + ww + 8 && y < m.fy + m.hh + 8 && m.fy < y + hh2 + 8) return false
+      for (const m of placed) if (x < m.fx + m.fw + 6 && m.fx < x + ww + 6 && y < m.fy + m.hh + 6 && m.fy < y + hh2 + 6) return false
       return true
     }
-    // priorité de pose : Départ/Arrivée d'abord (toujours bien placés),
-    // puis les points par km croissant, puis les transports
+    // priorité : Départ/Arrivée, puis km croissants, transports en dernier
     const prio = (n) => (n.item.kind === 'start' ? -1e6 : n.item.kind === 'transport' ? 1e6 : n.item.km ?? 0)
     vis.sort((n1, n2) => prio(n1) - prio(n2))
     for (const n of vis) {
-      const cands = [
-        [n.ax + LEAD, n.ay - n.hh / 2, 'right'],
-        [n.ax - LEAD - n.fw, n.ay - n.hh / 2, 'left'],
-        [n.ax - n.fw / 2, n.ay - LEAD - n.hh, 'top'],
-        [n.ax - n.fw / 2, n.ay + LEAD, 'bottom'],
-      ]
-      for (let k = 1; k <= 6; k++) {
-        const dy = k * (n.hh + 12)
-        cands.push([n.ax + LEAD, n.ay - n.hh / 2 - dy, 'right'])
-        cands.push([n.ax + LEAD, n.ay - n.hh / 2 + dy, 'right'])
-        cands.push([n.ax - LEAD - n.fw, n.ay - n.hh / 2 - dy, 'left'])
-        cands.push([n.ax - LEAD - n.fw, n.ay - n.hh / 2 + dy, 'left'])
+      n.declutter = false
+      if (n.item.kind === 'start') {
+        // épinglée en HAUT de page, centrée, au-dessus de tout
+        n.fx = Math.min(Math.max((w - n.fw) / 2, 2), w - n.fw - 2)
+        n.fy = 8
+        n.side = 'top'
+        placed.push(n)
+        continue
+      }
+      const cx0 = n.ax - n.fw / 2 // centrée sur le point (x/z fixes)
+      const cands = []
+      // au-dessus d'abord (panneau planté), puis en dessous — jamais plus
+      // loin que 2vh ; micro-jeu horizontal de ±1vw en dernier recours
+      for (const dy of [10, Math.max(14, vhLim * 0.5), vhLim]) {
+        cands.push([cx0, n.ay - dy - n.hh])
+        cands.push([cx0 - vwLim, n.ay - dy - n.hh])
+        cands.push([cx0 + vwLim, n.ay - dy - n.hh])
+      }
+      for (const dy of [10, Math.max(14, vhLim * 0.5), vhLim]) {
+        cands.push([cx0, n.ay + dy])
+        cands.push([cx0 - vwLim, n.ay + dy])
+        cands.push([cx0 + vwLim, n.ay + dy])
       }
       let ok = false
       if (avoid) {
-        for (const [x, y, side] of cands) {
-          if (free(x, y, n.fw, n.hh)) { n.fx = x; n.fy = y; n.side = side; ok = true; break }
+        for (const [x, y] of cands) {
+          if (free(x, y, n.fw, n.hh)) {
+            n.fx = x
+            n.fy = y
+            n.side = y < n.ay ? 'top' : 'bottom'
+            ok = true
+            break
+          }
         }
       } else {
-        n.fx = Math.min(Math.max(n.ax + LEAD, 2), w - n.fw - 2)
-        n.fy = Math.min(Math.max(n.ay - n.hh / 2, 2), h - n.hh - 2)
-        n.side = 'right'
+        n.fx = Math.min(Math.max(cx0, 2), w - n.fw - 2)
+        n.fy = Math.max(2, n.ay - 10 - n.hh)
+        n.side = 'top'
         ok = true
       }
-      // aucune place libre autour du point (zone très dense en dézoom) :
-      // l'étiquette se MASQUE plutôt que d'en recouvrir une autre — les
-      // prioritaires gagnent (Départ, puis km croissants, transports enfin)
       n.declutter = !ok
       if (ok) placed.push(n)
     }
 
-    // 5. application DOM — le cartouche GLISSE vers sa place (lissage
-    // exponentiel ≈ ease-in-out, demande Adrien) ; la ligne de rappel vise
-    // son bord côté ancre (pointillés neutres, jamais la couleur du tracé)
     for (const n of vis) {
       if (n.declutter) {
         n.cart.classList.add('rl-hidden')
