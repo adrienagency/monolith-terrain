@@ -149,8 +149,10 @@ export function buildTopBar(ctx) {
       if (res?.cancelled) {
         // user backed out of the OS share sheet — no feedback needed
       } else if (res?.publishFailed) {
-        // échec dur : rien n'a été copié — un lien sans la course serait pire
-        showToast('La course n’a pas pu être publiée — aucun lien copié. Réessayez dans un instant.')
+        // échec dur : rien n'a été copié — un lien sans la course serait pire.
+        // Le détail technique reste visible pour diagnostiquer un échec durable.
+        const detail = res.failDetail ? ` (${res.failDetail})` : ''
+        showToast(`La course n’a pas pu être publiée — aucun lien copié. Réessayez dans un instant.${detail}`)
       } else if (res?.ok) {
         // three honest cases: track published in the link / publish failed so
         // the link is look-only / no track loaded at all (nothing to say)

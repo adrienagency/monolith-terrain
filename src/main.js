@@ -3051,6 +3051,29 @@ const changelogOverlay = buildChangelogOverlay()
 // track can be megabytes and would blow any URL budget, so a link made while
 // one is loaded says so explicitly (see the toast in bars.js) rather than
 // silently dropping it.
+// Le serveur (race.mjs) n'accepte que png/jpeg/webp/gif ≤ 2 M chars — un logo
+// SVG (le cas classique pour une marque) faisait 422 et coulait TOUTE la
+// publication (« la course n'a pas pu être publiée »). Ici : formats valides
+// passent tels quels, tout le reste est rastérisé en PNG 512 px ; en échec on
+// rend null — la course part SANS logo plutôt que pas du tout.
+async function logoForPublish(src) {
+  if (!src || typeof src !== 'string') return null
+  if (/^data:image\/(png|jpeg|webp|gif);base64,/.test(src) && src.length <= 2_000_000) return src
+  try {
+    const img = new Image()
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = src })
+    const w = img.naturalWidth || 512
+    const h = img.naturalHeight || 512
+    const sc = Math.min(1, 512 / Math.max(w, h))
+    const c = document.createElement('canvas')
+    c.width = Math.max(1, Math.round(w * sc))
+    c.height = Math.max(1, Math.round(h * sc))
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
+    const out = c.toDataURL('image/png')
+    return out.length <= 2_000_000 ? out : null
+  } catch { return null }
+}
+
 async function shareCurrentView() {
   const cam = {
     px: camera.position.x, py: camera.position.y, pz: camera.position.z,
@@ -3066,12 +3089,24 @@ async function shareCurrentView() {
   // didn't make it — a link that silently drops the course would be worse.
   let url = null
   let published = false
+  let failDetail = ''
   if (hasTrack) {
-    // 2 tentatives : un échec transitoire (réseau, cold start de la function)
-    // dégradait SILENCIEUSEMENT vers le lien #s= sans la course — le pire des
-    // partages (Adrien a reçu « la carte sans le parcours »). Le retry absorbe
-    // le transitoire ; l'échec persistant reste signalé par le toast.
-    for (let attempt = 0; attempt < 2 && !published; attempt++) {
+    // Tentative 1 : course complète (logo rastérisé si besoin). Tentative 2 :
+    // SANS logo — si c'est lui que le serveur refuse (422), la course part
+    // quand même ; un échec transitoire (réseau, cold start) est absorbé au
+    // passage. L'ancien repli silencieux vers #s= donnait « la carte aux
+    // bonnes couleurs mais sans le parcours » — le pire des partages.
+    const safeLogo = await logoForPublish(raceState.logo)
+    const race = raceState.name || raceState.waypoints.length
+      ? {
+          name: raceState.name,
+          logo: null, // le logo voyage dans SON champ validé, jamais ici
+          waypoints: raceState.waypoints.map(({ km, name, alt, pictos, cutoff }) => ({ km, name, alt, pictos, cutoff })),
+          transports: { removed: [...raceState.transports.removed] },
+        }
+      : null
+    for (const withLogo of [true, false]) {
+      if (published) break
       try {
         const res = await fetch(RACE_ENDPOINT, {
           method: 'POST',
@@ -3086,15 +3121,8 @@ async function shareCurrentView() {
             gpx: trackToGpx(gpxLayer.track),
             state,
             raceName: raceState.name || gpxLayer.raceName || '',
-            race: raceState.name || raceState.waypoints.length
-              ? {
-                  name: raceState.name,
-                  logo: null, // le logo voyage dans SON champ validé, jamais ici
-                  waypoints: raceState.waypoints.map(({ km, name, alt, pictos, cutoff }) => ({ km, name, alt, pictos, cutoff })),
-                  transports: { removed: [...raceState.transports.removed] },
-                }
-              : null,
-            logo: raceState.logo || null,
+            race,
+            logo: withLogo ? safeLogo : null,
           }),
         })
         const j = res.ok ? await res.json() : null
@@ -3105,17 +3133,21 @@ async function shareCurrentView() {
           url = `${location.origin}/r/${j.id}`
           published = true
         } else if (!res.ok) {
-          console.warn(`race publish failed (HTTP ${res.status}), attempt ${attempt + 1}`)
+          let msg = ''
+          try { msg = JSON.parse(await res.text())?.error || '' } catch {}
+          failDetail = `HTTP ${res.status}${msg ? ` — ${msg}` : ''}`
+          console.warn(`race publish failed (${failDetail}), withLogo=${withLogo}`)
         }
       } catch (err) {
-        console.warn(`race publish failed (${err?.message}), attempt ${attempt + 1}`)
+        failDetail = err?.message || 'réseau'
+        console.warn(`race publish failed (${failDetail}), withLogo=${withLogo}`)
       }
     }
   }
   // ÉCHEC DUR (Adrien) : une course chargée + publication impossible ⇒ ON NE
-  // COPIE RIEN. L'ancien repli silencieux vers #s= donnait un lien « aux
-  // bonnes couleurs mais sans le parcours » — le pire des partages.
-  if (hasTrack && !published) return { ok: false, publishFailed: true }
+  // COPIE RIEN. Le détail (statut HTTP/erreur serveur) remonte dans le toast
+  // pour qu'un échec persistant soit diagnosticable, pas juste « réessayez ».
+  if (hasTrack && !published) return { ok: false, publishFailed: true, failDetail }
   if (!url) url = `${location.origin}${location.pathname}#s=${encodeShareState(state)}`
   const note = hasTrack && !published ? ' — your GPX track isn’t included' : ''
 
