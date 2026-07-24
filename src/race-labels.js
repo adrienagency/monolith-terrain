@@ -33,7 +33,7 @@ const CART_H = 26 // hauteur fixe d'un cartouche (px) — pas de mesure DOM
 const CHIP_H = 18
 const LEAD = 16 // longueur de la ligne de rappel
 
-export function buildRaceLabels({ container, camera, getItems, params, onRemove, getExtent }) {
+export function buildRaceLabels({ container, camera, getItems, params, onRemove, getTrackWorlds }) {
   const root = document.createElement('div')
   root.className = 'rl-root'
   container.appendChild(root)
@@ -49,11 +49,16 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
     const cart = document.createElement('div')
     cart.className = isChip ? 'rl-chip' : item.kind === 'start' ? 'rl-cart rl-start' : 'rl-cart'
     if (item.kind === 'start') {
-      // l'étiquette la PLUS importante (Adrien) : gros logo, km totaux,
-      // jusqu'à 8 pictos — toujours visible, jamais fenêtrée par la lecture
+      // l'étiquette la PLUS importante (Adrien) : fond INVERSÉ (encre), logo
+      // passé en blanc, km dans un GROS encadré couleur, START / FINISH en
+      // gros, pictos (≤8) en dessous — toujours visible, jamais fenêtrée
       const logo = item.logo ? `<img class="rl-start-logo" src="${item.logo}" alt="">` : ''
       const pictos = (item.pictos || []).slice(0, 8).map((p) => PICTOS[p] || '').join('')
-      cart.innerHTML = `${logo}<span class="rl-start-main"><b>${item.name || 'DÉPART'}</b><i>${item.totalKm} KM${pictos ? `<span class="rl-picto">${pictos}</span>` : ''}</i></span>`
+      cart.innerHTML = `${logo}<span class="rl-start-main">
+        ${item.name ? `<b class="rl-start-name">${item.name}</b>` : ''}
+        <span class="rl-start-word">${item.word || 'START'}</span>
+        ${pictos ? `<span class="rl-picto">${pictos}</span>` : ''}
+      </span><span class="rl-start-km">${item.totalKm} KM</span>`
     } else if (isChip) {
       cart.innerHTML = `${PICTOS[item.pictos?.[0]] || PICTOS.bus}<span>${item.name}</span><span class="rl-x" title="Retirer">✕</span>`
       cart.querySelector('.rl-x').addEventListener('click', (e) => { e.stopPropagation(); onRemove?.(item.id) })
@@ -114,36 +119,42 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
       n.ay = (-v.y * 0.5 + 0.5) * h
       // la sous-ligne (altitude/barrière) déborde de ~14px sous le cartouche
       const hasSub = n.item.kind !== 'transport' && (n.item.alt != null || n.item.cutoff)
-      n.hh = n.item.kind === 'start' ? 46 : n.item.kind === 'transport' ? CHIP_H : CART_H + (hasSub ? 14 : 0)
+      n.hh = n.item.kind === 'start' ? (n.item.pictos?.length ? 66 : 52) : n.item.kind === 'transport' ? CHIP_H : CART_H + (hasSub ? 14 : 0)
       n.fw = n.cart.offsetWidth
       vis.push(n)
     }
     if (!vis.length) return
-    // 1b. bornes de placement = l'emprise PROJETÉE des blocs chargés (avec
-    // marge), intersectée avec le viewport — une étiquette ne sort JAMAIS de
-    // la carte (Adrien) et reste au plus près de son point
-    let bx0 = 4
-    let by0 = 4
-    let bx1 = w - 4
-    let by1 = h - 4
-    const ext = getExtent?.()
-    if (ext) {
-      let px0 = Infinity
-      let py0 = Infinity
-      let px1 = -Infinity
-      let py1 = -Infinity
-      for (const [X, Z] of [[ext.minX, ext.minZ], [ext.minX, ext.maxZ], [ext.maxX, ext.minZ], [ext.maxX, ext.maxZ]]) {
-        v.set(X, 0, Z).project(camera)
-        px0 = Math.min(px0, (v.x * 0.5 + 0.5) * w)
-        px1 = Math.max(px1, (v.x * 0.5 + 0.5) * w)
-        py0 = Math.min(py0, (-v.y * 0.5 + 0.5) * h)
-        py1 = Math.max(py1, (-v.y * 0.5 + 0.5) * h)
+    // 1b. bornes = le VIEWPORT entier (Adrien : les étiquettes occupent tout
+    // l'espace disponible) — les seuls interdits sont l'UI, les ancres des
+    // points de passage et le TRACÉ lui-même, gérés par hitsObs ci-dessous.
+    const bx0 = 4
+    const by0 = 4
+    const bx1 = w - 4
+    const by1 = h - 4
+    // obstacles écran : le tracé échantillonné + toutes les ancres + l'UI
+    const obs = []
+    for (const pW of getTrackWorlds?.() || []) {
+      v.copy(pW).project(camera)
+      if (v.z <= 1 && v.x >= -1.05 && v.x <= 1.05 && v.y >= -1.05 && v.y <= 1.05) {
+        obs.push({ x: (v.x * 0.5 + 0.5) * w, y: (-v.y * 0.5 + 0.5) * h })
       }
-      bx0 = Math.max(bx0, px0 - 10)
-      by0 = Math.max(by0, py0 - 10)
-      bx1 = Math.min(bx1, px1 + 10)
-      by1 = Math.min(by1, py1 + 10)
-      if (bx1 - bx0 < 120 || by1 - by0 < 80) { bx0 = 4; by0 = 4; bx1 = w - 4; by1 = h - 4 } // bloc minuscule à l'écran : viewport
+    }
+    for (const n of vis) obs.push({ x: n.ax, y: n.ay })
+    const uiRects = []
+    {
+      const cref = container.getBoundingClientRect()
+      for (const selUI of ['.gpx-profile:not(.hidden)', '.ce-bottombar']) {
+        const elUI = document.querySelector(selUI)
+        if (!elUI) continue
+        const r = elUI.getBoundingClientRect()
+        if (!r.width) continue
+        uiRects.push({ x0: r.left - cref.left - 6, y0: r.top - cref.top - 6, x1: r.right - cref.left + 6, y1: r.bottom - cref.top + 6 })
+      }
+    }
+    const hitsObs = (x, y, ww, hh2) => {
+      for (const o of obs) if (o.x > x - 6 && o.x < x + ww + 6 && o.y > y - 6 && o.y < y + hh2 + 6) return true
+      for (const r of uiRects) if (x < r.x1 && r.x0 < x + ww && y < r.y1 && r.y0 < y + hh2) return true
+      return false
     }
     // 2. placement « autour de la boucle » (Adrien) : chaque étiquette reste
     // AU PLUS PRÈS de son point, et le côté est dicté par la géométrie du
@@ -177,13 +188,14 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
     // s'ecarte par pas dans SA direction (bas vers le bas, haut vers le
     // ciel). Deterministe = cibles stables = le glissement converge.
     const hits = (x, y, ww, hh2) => placed.some((m) => x < m.fx + m.fw + 12 && m.fx < x + ww + 12 && y < m.fy + m.hh + 12 && m.fy < y + hh2 + 12)
+    const hitsAll = (x, y, ww, hh2) => hits(x, y, ww, hh2) || hitsObs(x, y, ww, hh2)
     for (const key of ['right', 'left']) {
       const group = groups[key]
       if (!group.length) continue
       group.sort((a, b) => a.ay - b.ay)
       const ys = layoutCartouches(
         group.map((n) => ({ y: n.ay - n.hh / 2, h: n.hh })),
-        { avoid, gap: 8, minY: by0, maxY: by1 }
+        { avoid, gap: 14, minY: by0, maxY: by1 }
       )
       group.forEach((n, i) => {
         n.side = key
@@ -195,6 +207,15 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
         }
         n.fx = fx
         n.fy = ys[i]
+        // ne JAMAIS recouvrir tracé/ancre/UI : on s'écarte vers l'extérieur
+        if (avoid) {
+          let k = 0
+          while (k < 12 && hitsObs(n.fx, n.fy, n.fw, n.hh)) {
+            n.fx += n.side === 'right' ? 26 : -26
+            k++
+          }
+          n.fx = Math.min(Math.max(n.fx, bx0), bx1 - n.fw)
+        }
         placed.push(n)
       })
     }
@@ -202,7 +223,7 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
       const group = groups[key]
       if (!group.length) continue
       group.sort((a, b) => a.ax - b.ax)
-      const rowH = Math.max(...group.map((n) => n.hh)) + 10
+      const rowH = Math.max(...group.map((n) => n.hh)) + 16
       for (const n of group) {
         n.side = key
         n.fx = Math.min(Math.max(n.ax - n.fw / 2, bx0), bx1 - n.fw)
@@ -210,7 +231,7 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
         let r = 0
         n.fy = fy0
         if (avoid) {
-          while (r < 14 && hits(n.fx, n.fy, n.fw, n.hh)) {
+          while (r < 14 && hitsAll(n.fx, n.fy, n.fw, n.hh)) {
             r++
             n.fy = key === 'top' ? Math.max(fy0 - r * rowH, skyY0) : Math.min(fy0 + r * rowH, by1 - n.hh)
           }
@@ -218,24 +239,6 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
         placed.push(n)
       }
     }
-    // 4b. zones interdites : l'UI (profil de course, barre du bas) ne doit
-    // JAMAIS recouvrir un cartouche — on le pousse juste au-dessus
-    const cref = container.getBoundingClientRect()
-    for (const selUI of ['.gpx-profile:not(.hidden)', '.ce-bottombar']) {
-      const elUI = document.querySelector(selUI)
-      if (!elUI) continue
-      const r = elUI.getBoundingClientRect()
-      if (!r.width) continue
-      const ox0 = r.left - cref.left - 6
-      const oy0 = r.top - cref.top - 6
-      const ox1 = r.right - cref.left + 6
-      for (const n of placed) {
-        if (n.fx + n.fw > ox0 && n.fx < ox1 && n.fy + n.hh > oy0) {
-          n.fy = Math.max(4, oy0 - n.hh)
-        }
-      }
-    }
-
     // 5. application DOM — le cartouche GLISSE vers sa place (lissage
     // exponentiel ≈ ease-in-out, demande Adrien) ; la ligne de rappel vise
     // son bord côté ancre (pointillés neutres, jamais la couleur du tracé)

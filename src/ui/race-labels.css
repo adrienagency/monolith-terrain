@@ -47,11 +47,13 @@
   border: 1.5px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
   will-change: transform;
 }
-/* ligne de rappel : POINTILLÉS neutres, jamais la couleur du tracé (Adrien) */
+/* ligne de rappel : POINTILLÉS en mode de fusion INVERSANT (difference) —
+   toujours visibles quel que soit le fond, jamais la couleur du tracé */
 .rl-leader {
   position: absolute; top: 0; left: 0; height: 0;
-  border-top: 1.5px dashed rgba(23, 25, 27, 0.45);
-  background: none; opacity: 0.9;
+  border-top: 1.5px dashed rgba(255, 255, 255, 0.85);
+  mix-blend-mode: difference;
+  background: none;
   transform-origin: 0 50%;
   will-change: transform, width;
 }
@@ -91,18 +93,30 @@ body.studio-mode .rl-chip .rl-x { display: inline; }
 .rl-faded { opacity: 0 !important; pointer-events: none !important; }
 .rl-hidden { display: none !important; }
 
-/* ---- étiquette DÉPART — la plus importante, toujours visible ---- */
+/* ---- étiquette DÉPART / ARRIVÉE — la plus importante, toujours visible.
+   Fond INVERSÉ (encre), texte blanc (jamais de texte en couleur), logo passé
+   en blanc, la distance dans un GROS encadré couleur, START / FINISH en
+   gros et les pictos EN DESSOUS (Adrien). ---- */
 .rl-start {
-  height: 46px; padding: 0 12px;
-  border-left-width: 4px;
-  box-shadow: 0 4px 18px rgba(23, 25, 27, 0.28);
+  height: auto; min-height: 52px; padding: 8px 12px;
+  background: var(--rl-ink, #17191b);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.25);
+  border-left: 4px solid var(--rl-accent, #ff4d00);
+  box-shadow: 0 6px 22px rgba(23, 25, 27, 0.4);
+  gap: 10px;
 }
 .rl-start .rl-start-logo {
-  height: 34px; max-width: 64px; object-fit: contain; display: block;
+  height: 38px; max-width: 70px; object-fit: contain; display: block;
+  filter: brightness(0) invert(1); /* logo lisible sur l'encre, quoi qu'il arrive */
 }
-.rl-start .rl-start-main { display: flex; flex-direction: column; gap: 1px; line-height: 1.15; }
-.rl-start .rl-start-main b { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
-.rl-start .rl-start-main i {
-  font-style: normal; display: inline-flex; align-items: center; gap: 6px;
-  font-size: 13px; font-weight: 800; color: var(--rl-accent, #ff4d00);
+.rl-start .rl-start-main { display: flex; flex-direction: column; gap: 2px; line-height: 1.15; }
+.rl-start .rl-start-name { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.8; font-weight: 600; }
+.rl-start .rl-start-word { font-size: 16px; font-weight: 800; letter-spacing: 0.12em; }
+.rl-start .rl-picto { color: #fff; opacity: 0.9; }
+.rl-start .rl-start-km {
+  align-self: center;
+  background: var(--rl-accent, #ff4d00); color: #fff;
+  font-size: 15px; font-weight: 800; letter-spacing: 0.04em;
+  padding: 8px 12px; border-radius: 9px; white-space: nowrap;
 }

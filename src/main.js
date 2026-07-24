@@ -2282,6 +2282,7 @@ const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: (
 // projettent chaque frame (taille constante, anti-chevauchement débrayable).
 const raceState = { name: '', logo: null, waypoints: [], transports: { cats: [], removed: [], pois: [] } }
 let _wasPlaying = false // détection de FIN de lecture (finale iso)
+const _headSpeed = { km: 0, t: 0, v: 0 } // vitesse tête lissée (km/s) — fenêtre d'apparition
 const raceLabels = buildRaceLabels({
   container,
   camera,
@@ -2299,9 +2300,17 @@ const raceLabels = buildRaceLabels({
     const totKm = track.cumKm[track.cumKm.length - 1]
     const playing = gpxLayer.isPlaying?.()
     const headKm = playing ? (gpxLayer.headT ?? 1) * totKm : Infinity
-    // fenêtre SIMPLE (Adrien) : l'étiquette apparaît 2 km avant le passage
-    // de la tête et s'efface 10 km après
-    const kmLead = 2
+    // fenêtre (Adrien) : apparaît AVANT le passage de la tête QUOI QU'IL
+    // ARRIVE — 2 km mini, élargie à 4 s de course si la lecture va vite
+    // (le fondu de 1,8 s est toujours terminé avant l'arrivée de la tête)
+    const nowMs = performance.now()
+    if (playing) {
+      const dts = Math.max(1e-3, (nowMs - (_headSpeed.t || nowMs)) / 1000)
+      if (_headSpeed.t) _headSpeed.v = _headSpeed.v * 0.85 + (Math.max(0, headKm - _headSpeed.km) / dts) * 0.15
+      _headSpeed.km = headKm
+      _headSpeed.t = nowMs
+    } else { _headSpeed.t = 0; _headSpeed.v = 0 }
+    const kmLead = Math.max(2, _headSpeed.v * 4)
     const kmTail = 10
     // règle du damier (Adrien) : ce qui sort des blocs chargés (5×5 max) est
     // COUPÉ — un point au-delà de l'emprise réelle ne s'affiche pas
@@ -2314,16 +2323,33 @@ const raceLabels = buildRaceLabels({
     // pictos du point de départ, 8 max) ; TOUJOURS visible, jamais fenêtrée
     if ((raceState.name || raceState.logo) && track.world[0] && covered(track.world[0])) {
       const startWp = raceState.waypoints.find((w) => w.km < 0.5)
+      const last = track.world[track.world.length - 1]
+      const isLoop = track.world[0].distanceTo(last) < TERRAIN_SIZE * 0.02 // ~boucle : départ ≈ arrivée
       items.push({
         id: 'race_start',
         kind: 'start',
         world: track.world[0],
+        word: isLoop ? 'START / FINISH' : 'START',
         name: raceState.name,
         logo: raceState.logo,
         totalKm: Math.round(totKm),
         pictos: (startWp?.pictos || []).slice(0, 8),
         faded: false,
       })
+      if (!isLoop && covered(last)) {
+        const endWp = raceState.waypoints.find((w) => w.km > totKm - 0.5)
+        items.push({
+          id: 'race_finish',
+          kind: 'start',
+          world: last,
+          word: 'FINISH',
+          name: raceState.name,
+          logo: raceState.logo,
+          totalKm: Math.round(totKm),
+          pictos: (endWp?.pictos || []).slice(0, 8),
+          faded: false,
+        })
+      }
     }
     {
       for (const w of raceState.waypoints) {
@@ -2354,6 +2380,15 @@ const raceLabels = buildRaceLabels({
   onRemove: (id) => {
     raceState.transports.removed.push(id)
     raceLabels.setDirty()
+  },
+  // le tracé échantillonné (~240 pts) : les étiquettes ne le recouvrent jamais
+  getTrackWorlds: () => {
+    const t = gpxLayer.activeLayer?.gpx?.track
+    if (!t?.world?.length) return []
+    const step = Math.max(1, Math.floor(t.world.length / 240))
+    const out = []
+    for (let i = 0; i < t.world.length; i += step) out.push(t.world[i])
+    return out
   },
   // emprise monde des blocs chargés (damier compris) — les étiquettes se
   // claquent dans sa projection écran pour ne jamais sortir de la carte
