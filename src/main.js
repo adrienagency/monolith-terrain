@@ -68,6 +68,7 @@ import { refreshAll } from './ui/kit.js'
 import { showNotice } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickBar, initUiLevel } from './ui/bars.js'
+import { buildMiniRoute } from './ui/mini-route.js'
 import { TEMPLATES } from './templates.js'
 import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
 import { buildChangelogOverlay } from './ui/changelog-overlay.js'
@@ -3524,6 +3525,15 @@ const routePanel = buildRoutePanel({
   refreshRaceLabels: () => raceLabels.setDirty(),
 })
 
+// mini panneau Parcours du mode simple (gestion des blocs + Lecture) —
+// construit APRÈS le panneau complet pour chaîner ses hooks onChange
+const miniRoute = buildMiniRoute({
+  gpx: gpxLayer,
+  startFollow: engageGpxFollow,
+  stopFollow: disengageGpxFollow,
+})
+void miniRoute
+
 // the exclusive per-column accordion now lives in the Panel shell (setCollapsed
 // folds dock neighbours), so expanding any panel collapses the others in its
 // column. Start with only Create/Explore open (Templates docks above Create
@@ -4023,6 +4033,10 @@ const studio = buildStudio({
     // loadGpxText (et pas addLayer nu) : recadre le terrain sur la trace,
     // reconstruit le monde, drape — sinon altitudes/ancres restent vides
     if (bundle.gpxText) await loadGpxText(bundle.gpxText)
+    // le calque porte le NOM DE LA COURSE, pas le <name> brut du GPX —
+    // c'est ce que listent le mini panneau Parcours et « Mes courses »,
+    // et la clé du brouillon (draftKey) suit le même nom
+    if (bundle.race?.name && gpxLayer.activeLayer) gpxLayer.setName(gpxLayer.activeLayer.id, bundle.race.name)
     if (bundle.look && Object.keys(bundle.look).length) applyUserTemplate({ look: bundle.look })
     refreshAll()
   },

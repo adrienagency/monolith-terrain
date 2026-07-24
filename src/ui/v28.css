@@ -961,6 +961,88 @@ body:has(.gpx-profile:not(.hidden)) .ce-quickbar {
   display: none !important;
 }
 
+/* mini panneau « Parcours » (mode simple) — gestion des blocs + Lecture */
+.ce-miniroute {
+  position: fixed;
+  top: 64px;
+  left: 14px;
+  z-index: 60;
+  width: 224px;
+  padding: 12px;
+  border-radius: 16px;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+}
+body.ce-simple .ce-miniroute.has {
+  display: flex;
+}
+body.ce-noui .ce-miniroute,
+body.ce-embed .ce-miniroute,
+body.store-mode .ce-miniroute,
+body.studio-mode .ce-miniroute,
+body.atelier-mode .ce-miniroute {
+  display: none !important;
+}
+.ce-miniroute-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ce-muted, var(--ce-ink));
+  opacity: 0.75;
+}
+.ce-miniroute-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ce-miniroute-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  cursor: pointer;
+  background: var(--ce-hover);
+}
+.ce-miniroute-row.active {
+  outline: 1.5px solid var(--ce-accent);
+}
+.ce-miniroute-name {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ce-miniroute-x {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--ce-ink);
+  opacity: 0.55;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+.ce-miniroute-x:hover {
+  opacity: 1;
+  color: var(--ce-accent);
+}
+.ce-miniroute-actions {
+  display: flex;
+  gap: 6px;
+}
+.ce-miniroute-actions .ce-pillbtn {
+  flex: 1;
+  justify-content: center;
+  height: 32px;
+}
+.ce-miniroute-actions .ce-pillbtn:last-child {
+  flex: 0 0 40px;
+}
+
 /* --------------------------------------------------- hide-UI master switch */
 /* body.store-mode = boutique in-app (src/ui/store.js) : même masquage total */
 body.ce-noui .ce-topbar,
