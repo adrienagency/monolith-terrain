@@ -2500,7 +2500,10 @@ body.ce-noui .ce-rec {
 }
 .ce-mat-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* minmax(0,1fr) + min-width:0 : sans eux, les noms nowrap gonflent la
+     min-content des cellules → colonnes inégales → vignettes carrées de
+     hauteurs différentes (bug « colonne centrale », Adrien) */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
 }
 .ce-mat-vig {
@@ -2514,6 +2517,7 @@ body.ce-noui .ce-rec {
   cursor: pointer;
   font: inherit;
   text-align: center;
+  min-width: 0;
 }
 .ce-mat-vig-img {
   display: block;

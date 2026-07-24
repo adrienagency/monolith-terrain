@@ -257,10 +257,17 @@ export class Plinth {
       m.metalness = 0
       m.roughness = Math.min(0.06 + diff * 0.34, 0.42) // capped — no chunky mip blur
       m.transmission = p.transmission
-      m.ior = p.ior
-      m.thickness = p.thickness
+      // Réfraction DOMPTÉE (Adrien : « la surface est répétée 2 fois ») —
+      // l'offset de réfraction de three est ∝ thickness × (ior-1) : avec les
+      // épaisseurs presets (4-7 unités monde) le buffer de transmission
+      // affichait une copie fantôme décalée du relief. On écrase la thickness
+      // de réfraction et on adoucit l'ior, en PRÉSERVANT la teinte
+      // Beer-Lambert (le ratio thickness/attenuationDistance est conservé).
+      const REFRACT_THICK = 1.2
+      m.ior = 1 + (p.ior - 1) * 0.35
+      m.thickness = REFRACT_THICK
       m.attenuationColor.set(p.color)
-      m.attenuationDistance = p.attenuation
+      m.attenuationDistance = p.attenuation * (REFRACT_THICK / p.thickness)
       m.clearcoat = 0
       m.anisotropy = 0
       m.specularIntensity = 1
