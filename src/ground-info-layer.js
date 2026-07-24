@@ -211,6 +211,16 @@ export class GroundInfoLayer {
         }
       }
       img.src = r.logo
+    } else {
+      // logo optionnel (Adrien) : SANS logo client, le socle porte la marque
+      // ShibuMap — discrète (plus petite qu'un vrai logo, encre atténuée).
+      // Les AUTRES occurrences du logo (cartouches, tête) restent vides.
+      const tc = textCanvas(['ShibuMap.'], { family: TITLE_FONT, weight: 400, px: 80, align: 'left', color: inkRGBA(ink, 0.55), track: 0.02 })
+      const h = wallH * 0.28
+      const w = (tc.w / tc.h) * h
+      for (const side of ['south', 'north']) {
+        this._addWallPlane(tc.canvas, 0, baseY + wallH * 0.5, w, h, { side, list: this.raceMeshes })
+      }
     }
   }
 

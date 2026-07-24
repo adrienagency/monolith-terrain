@@ -1,9 +1,10 @@
-// Race Studio — wizard 5 étapes pour les organisateurs de courses (Adrien) :
-// ① Identité (nom, logo, GPX, D+/D-) ② Points de passage (km, nom, alt,
-// pictos, barrière) ③ Carte & transports ④ Style du tracé ⑤ Exporter &
-// partager. Miroir de la boutique : colonne à GAUCHE, 3D à DROITE (morph
-// partagé panel-morph.js). Brouillon autosauvé en localStorage ; « Envoyer
-// vers la carte » = la création RESTE (pas de restauration du snapshot).
+// Race Studio — wizard 6 étapes pour les organisateurs de courses (Adrien) :
+// ① Identité (nom, logo optionnel) ② Trace (GPX / projet / démo / guide /
+// dessiner-bientôt) ③ Points de passage (km, nom, alt, pictos, barrière)
+// ④ Carte & transports ⑤ Style du tracé ⑥ Exporter & partager. Miroir de la
+// boutique : colonne à GAUCHE, 3D à DROITE (morph partagé panel-morph.js).
+// Brouillon autosauvé en localStorage ; « Envoyer vers la carte » = la
+// création RESTE (pas de restauration du snapshot).
 import './studio.css'
 import { makeMorph } from './panel-morph.js'
 import { PICTOS, PICTO_KEYS } from '../race-labels.js'
@@ -12,7 +13,7 @@ import { TRANSPORT_CATS } from '../transports.js'
 
 const DRAFT_KEY = 'shibumap-race-draft' // héritage (une seule course)
 const DRAFTS_KEY = 'shibumap-race-drafts' // un brouillon PAR course (clé = nom du calque)
-const STEPS = ['Identité', 'Points', 'Carte', 'Style', 'Exporter']
+const STEPS = ['Identité', 'Trace', 'Points', 'Carte', 'Style', 'Exporter']
 
 export function buildStudio(deps) {
   let open = false
@@ -110,9 +111,10 @@ export function buildStudio(deps) {
   }
 
   // ---- étapes -------------------------------------------------------------
+  // ① Identité : nom + logo, RIEN d'autre — une page, un job (Adrien).
   function stepIdentity() {
     body.innerHTML = `<h3>Votre événement</h3>
-      <p class="hint">Le nom et le logo habillent le bloc et la tête de parcours.</p>`
+      <p class="hint">Le nom et le logo habillent le bloc et la tête de parcours. Sans logo, le socle porte la marque ShibuMap — sobre.</p>`
     // plusieurs courses chargées → on choisit d'abord CELLE qu'on modifie
     const races = deps.listRaces?.() || []
     if (races.length > 1) {
@@ -155,10 +157,17 @@ export function buildStudio(deps) {
       rm.addEventListener('click', () => { draft.race.logo = null; saveDraft(); render() })
       lg.append(rm)
     }
-    body.append(field('Logo', lg))
-    // entrée de trace : UNE seule zone (anti-doublon, Adrien) — avec une
-    // trace chargée : rangée compacte « Charger un autre / Ouvrir un
-    // projet » ; sans trace : les PORTES ci-dessous sont les seuls accès
+    body.append(field('Logo (optionnel)', lg))
+  }
+
+  // ② Trace : hiérarchie validée (Adrien) — 1 charger son GPX (accent),
+  // 2 ouvrir un projet ShibuMap complet, 3 « Pas encore de trace ? »
+  // (démo + guide d'export légal), 4 dessiner (bientôt). Trace chargée →
+  // récap D+/D− + rangée compacte remplacer/ouvrir, on ne remontre pas
+  // les portes à qui a déjà sa trace.
+  function stepTrace() {
+    body.innerHTML = `<h3>Votre trace</h3>
+      <p class="hint">La colonne vertébrale de la carte — altitudes, points de passage et profil se remplissent autour.</p>`
     const pf = document.createElement('input')
     pf.type = 'file'
     pf.accept = '.json,application/json'
@@ -174,20 +183,6 @@ export function buildStudio(deps) {
       render()
     })
     body.append(pf)
-    if (deps.hasTrack()) {
-      const row = document.createElement('div')
-      row.className = 'studio-row'
-      const load = document.createElement('button')
-      load.className = 'studio-btn ghost'
-      load.textContent = 'Charger un autre GPX…'
-      load.addEventListener('click', () => deps.loadGpx())
-      const openP = document.createElement('button')
-      openP.className = 'studio-btn ghost'
-      openP.textContent = 'Ouvrir un projet…'
-      openP.addEventListener('click', () => pf.click())
-      row.append(load, openP)
-      body.append(row)
-    }
     const st = deps.trackStats()
     if (st) {
       const s = document.createElement('div')
@@ -196,54 +191,65 @@ export function buildStudio(deps) {
         <div><b>D+ ${st.dplus} m</b><span>Dénivelé +</span></div>
         <div><b>D− ${st.dminus} m</b><span>Dénivelé −</span></div>`
       body.append(s)
-    } else {
-      // « Pas encore de trace ? » — le mode Parcours n'est JAMAIS un
-      // cul-de-sac (UX P0, Adrien) : démo 1-clic, traceur badgé « bientôt »,
-      // guide d'export légal (l'utilisateur exporte SON fichier depuis SON
-      // compte — aucune connexion, aucune API).
-      const empty = document.createElement('div')
-      empty.className = 'studio-empty'
-      empty.innerHTML = `<h4>Pas encore de trace ?</h4>
-        <p class="hint">Trois façons de démarrer votre carte de course.</p>`
-      const door = (title, sub, { accent = false, soon = false } = {}) => {
-        const d = document.createElement('button')
-        d.type = 'button'
-        d.className = 'studio-door' + (accent ? ' accent' : '') + (soon ? ' soon' : '')
-        d.disabled = soon
-        d.innerHTML = `<span class="d-main"><b>${title}</b><i>${sub}</i></span>${soon ? '<span class="studio-soon">bientôt</span>' : ''}`
-        return d
-      }
-      const dLoad = door('Charger mon fichier GPX', 'Votre trace, depuis votre ordinateur — tout le reste se remplit autour.', { accent: true })
-      dLoad.addEventListener('click', () => deps.loadGpx())
-      const dDemo = door('Essayer avec une course de démo', 'La Grande Traversée · 220 km, prête à jouer — remplacez-la par la vôtre ensuite.')
-      dDemo.addEventListener('click', async () => {
-        dDemo.disabled = true
-        dDemo.querySelector('i').textContent = 'Chargement de la démo…'
-        try {
-          const bundle = parseRace(await (await fetch('/demo/grande-traversee.shibumap-race.json')).text())
-          if (bundle) await importProject(bundle)
-        } catch {}
-        render()
-      })
-      const dDraw = door('Dessiner le parcours sur la carte', 'Cliquez les passages clés, la trace suit le terrain.', { soon: true })
-      const dGuide = door('Récupérer un GPX existant', 'Depuis votre compte Strava, Komoot ou OpenRunner — vos données, votre fichier.')
-      const guide = document.createElement('div')
-      guide.className = 'studio-guide'
-      guide.hidden = true
-      guide.innerHTML = `
-        <p><b>Strava</b> — Mes activités → ouvrez l'activité → ⋯ → « Exporter GPX ».</p>
-        <p><b>Komoot</b> — ouvrez votre Tour → « Exporter » → fichier GPX.</p>
-        <p><b>OpenRunner</b> — votre parcours → « Exporter » → GPX.</p>
-        <p class="hint">Vous exportez votre propre fichier depuis votre propre compte — rien n'est connecté. Sinon : demandez le GPX à votre traceur ou chronométreur.</p>`
-      dGuide.addEventListener('click', () => { guide.hidden = !guide.hidden })
-      const openLine = document.createElement('button')
-      openLine.type = 'button'
-      openLine.className = 'studio-btn ghost'
-      openLine.textContent = 'Ouvrir un projet .shibumap-race…'
-      openLine.addEventListener('click', () => pf.click())
-      empty.append(dLoad, dDemo, dDraw, dGuide, guide, openLine)
-      body.append(empty)
+      const row = document.createElement('div')
+      row.className = 'studio-row'
+      const load = document.createElement('button')
+      load.className = 'studio-btn ghost'
+      load.textContent = 'Remplacer la trace (GPX)…'
+      load.addEventListener('click', () => deps.loadGpx())
+      const openP = document.createElement('button')
+      openP.className = 'studio-btn ghost'
+      openP.textContent = 'Ouvrir un autre projet…'
+      openP.addEventListener('click', () => pf.click())
+      row.append(load, openP)
+      body.append(row)
+      return
     }
+    const door = (title, sub, { accent = false, soon = false } = {}) => {
+      const d = document.createElement('button')
+      d.type = 'button'
+      d.className = 'studio-door' + (accent ? ' accent' : '') + (soon ? ' soon' : '')
+      d.disabled = soon
+      d.innerHTML = `<span class="d-main"><b>${title}</b><i>${sub}</i></span>${soon ? '<span class="studio-soon">bientôt</span>' : ''}`
+      return d
+    }
+    // 1 — le cas le plus fréquent : l'organisateur a son fichier
+    const dLoad = door('Charger ma course (fichier GPX)', 'Votre trace, depuis votre ordinateur — tout le reste se remplit autour.', { accent: true })
+    dLoad.addEventListener('click', () => deps.loadGpx())
+    // 2 — reprendre un projet complet (trace + points + style)
+    const dOpen = door('Ouvrir un projet ShibuMap complet', 'Un fichier .shibumap-race — trace, points de passage et style, tout revient.')
+    dOpen.addEventListener('click', () => pf.click())
+    body.append(dLoad, dOpen)
+    // 3 — pas encore de trace : démo + guide d'export légal (l'utilisateur
+    // exporte SON fichier depuis SON compte — aucune connexion, aucune API)
+    const empty = document.createElement('div')
+    empty.className = 'studio-empty'
+    empty.innerHTML = '<h4>Pas encore de trace ?</h4>'
+    const dDemo = door('Essayer avec une course de démo', 'La Grande Traversée · 220 km, prête à jouer — remplacez-la par la vôtre ensuite.')
+    dDemo.addEventListener('click', async () => {
+      dDemo.disabled = true
+      dDemo.querySelector('i').textContent = 'Chargement de la démo…'
+      try {
+        const bundle = parseRace(await (await fetch('/demo/grande-traversee.shibumap-race.json')).text())
+        if (bundle) await importProject(bundle)
+      } catch {}
+      render()
+    })
+    const dGuide = door('Récupérer un GPX depuis un compte', 'Strava, Komoot, OpenRunner — vos données, votre fichier.')
+    const guide = document.createElement('div')
+    guide.className = 'studio-guide'
+    guide.hidden = true
+    guide.innerHTML = `
+      <p><b>Strava</b> — Mes activités → ouvrez l'activité → ⋯ → « Exporter GPX ».</p>
+      <p><b>Komoot</b> — ouvrez votre Tour → « Exporter » → fichier GPX.</p>
+      <p><b>OpenRunner</b> — votre parcours → « Exporter » → GPX.</p>
+      <p class="hint">Vous exportez votre propre fichier depuis votre propre compte — rien n'est connecté. Sinon : demandez le GPX à votre traceur ou chronométreur.</p>`
+    dGuide.addEventListener('click', () => { guide.hidden = !guide.hidden })
+    empty.append(dDemo, dGuide, guide)
+    // 4 — dessiner : pas encore construit → badge « bientôt » (règle Adrien)
+    const dDraw = door('Dessiner le parcours sur la carte', 'Cliquez les passages clés, la trace suit le terrain.', { soon: true })
+    empty.append(dDraw)
+    body.append(empty)
   }
 
   function wpRow(w, i) {
@@ -387,7 +393,7 @@ export function buildStudio(deps) {
     body.append(row)
   }
 
-  const RENDER = [stepIdentity, stepWaypoints, stepMap, stepStyle, stepExport]
+  const RENDER = [stepIdentity, stepTrace, stepWaypoints, stepMap, stepStyle, stepExport]
   function render() {
     ;[...rail.children].forEach((b, i) => {
       b.classList.toggle('on', i === draft.step)
@@ -431,7 +437,9 @@ export function buildStudio(deps) {
   // bonne clé, synchronise les cartouches — studio ouvert ou non
   async function importProject(bundle) {
     await deps.importRace(bundle) // recadre + drape la trace, applique le look
-    draft = { ...freshDraft(), race: bundle.race }
+    // studio ouvert : on RESTE sur l'étape courante (ex. ② Trace → récap
+    // sous les yeux) — pas de téléportation vers ① Identité
+    draft = { ...freshDraft(), race: bundle.race, step: open ? draft.step : 0 }
     saveDraft() // la trace existe → km/altitudes résolus du premier coup
     if (open) render()
   }
