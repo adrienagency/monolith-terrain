@@ -54,6 +54,7 @@ uniform sampler2D uTex;
 uniform sampler2D uRamp;
 uniform vec3 uSunDir;
 uniform vec3 uInk;
+uniform vec3 uShadowColor;
 uniform float uContourInterval;
 uniform float uContourOpacity;
 uniform float uGraticuleOpacity;
@@ -128,8 +129,16 @@ void main() {
   float diff = max(dot(normalize(vNormalW), uSunDir), 0.0);
   col *= 0.74 + 0.30 * diff;
 
+  // terminateur jour/nuit (demande Adrien, façon Google Earth) : la face à
+  // l'ombre FOND VERS LA COULEUR DU FOND (uShadowColor — poussée par
+  // applyBackground, elle suit donc le fond ET le cycle jour/nuit) — la
+  // planète s'éteint dans son propre décor, pas dans un noir générique.
+  // Bande de crépuscule douce, 10 % de carte résiduelle en pleine nuit.
+  float day = smoothstep(-0.22, 0.16, dot(normalize(vNormalW), uSunDir));
+  col = mix(uShadowColor, col, 0.10 + 0.90 * day);
+
   // faint paper grain
-  col += (hash12(vUv * 941.7 + vLatLon) - 0.5) * 0.02;
+  col += (hash12(vUv * 941.7 + vLatLon) - 0.5) * 0.02 * (0.2 + 0.8 * day);
 
   gl_FragColor = vec4(col, 1.0);
 }
@@ -204,6 +213,7 @@ export class Globe {
 
     this.uniforms = {
       uSunDir: { value: new THREE.Vector3(0.5, 0.6, 0.5).normalize() },
+      uShadowColor: { value: new THREE.Color(params.bgColorA ?? '#dfe3ea') },
       uInk: { value: new THREE.Color(params.contourColor ?? '#000000') },
       uContourInterval: { value: 500 },
       uContourOpacity: { value: 0.55 },
@@ -271,6 +281,12 @@ export class Globe {
     this.clouds?.setSunDir(v)
   }
 
+  // la couleur vers laquelle la face nuit s'éteint — le FOND courant, atténué
+  // par le multiplicateur jour/nuit du décor (bgDayMul) pour rester accordé
+  setShadowColor(hex, mul = 1) {
+    this.uniforms.uShadowColor.value.set(hex).multiplyScalar(mul)
+  }
+
   setInk(color) {
     this.uniforms.uInk.value.set(color)
   }
@@ -288,7 +304,32 @@ export class Globe {
         north ? 0 : Math.PI - THREE.MathUtils.degToRad(90 - MERCATOR_MAX_LAT),
         THREE.MathUtils.degToRad(90 - MERCATOR_MAX_LAT)
       )
-      const mat = new THREE.MeshBasicMaterial({ color: north ? '#dfe7ea' : '#f4f1ec' })
+      // les calottes suivent le même terminateur que les tuiles — un pôle
+      // blanc qui brille en pleine nuit casserait toute l'illusion
+      const mat = new THREE.ShaderMaterial({
+        uniforms: {
+          uSunDir: this.uniforms.uSunDir,
+          uShadowColor: this.uniforms.uShadowColor,
+          uCol: { value: new THREE.Color(north ? '#dfe7ea' : '#f4f1ec') },
+        },
+        vertexShader: /* glsl */ `
+          varying vec3 vN;
+          void main() {
+            vN = normalize(mat3(modelMatrix) * normal);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }`,
+        fragmentShader: /* glsl */ `
+          varying vec3 vN;
+          uniform vec3 uSunDir;
+          uniform vec3 uShadowColor;
+          uniform vec3 uCol;
+          void main() {
+            float diff = max(dot(normalize(vN), uSunDir), 0.0);
+            vec3 col = uCol * (0.74 + 0.30 * diff);
+            float day = smoothstep(-0.22, 0.16, dot(normalize(vN), uSunDir));
+            gl_FragColor = vec4(mix(uShadowColor, col, 0.10 + 0.90 * day), 1.0);
+          }`,
+      })
       const cap = new THREE.Mesh(geo, mat)
       cap.name = north ? 'cap-n' : 'cap-s'
       this.group.add(cap)

@@ -47,7 +47,10 @@ export function stepZoom(zoom, dir, fine = 12) {
   return Math.max(zoom - 2, 5)
 }
 const DIVE_ALT_M = DIVE_TIERS[0].altM
-const MAX_ALT_M = 16000000 // ~2.5 earth radii — whole planet in frame
+// ~9,4 rayons terrestres — la planète devient un petit objet dans le noir,
+// façon Google Earth (Adrien : « laisse la possibilité de reculer plus ») ;
+// l'ancien plafond (16 000 km, planète pleine trame) était trop court.
+const MAX_ALT_M = 60000000
 const MSG_MS = 3600
 
 // surface zoom is a CUSTOM inertial dolly (OrbitControls zoom is off): each

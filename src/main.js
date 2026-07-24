@@ -532,9 +532,19 @@ function bgDayMul() {
   // at true night so the map pops against a near-black backdrop, full by day.
   return 0.04 + 0.96 * dl
 }
+// l'ombre du globe (terminateur jour/nuit, demande Adrien façon Google Earth)
+// SUIT LE FOND : la face nuit s'éteint vers la couleur du décor courant,
+// atténuée par le même facteur jour/nuit que lui. HDRI : bleu-noir neutre.
+function syncGlobeShadow(mul) {
+  const hex = params.bgEnv
+    ? '#10131a'
+    : (!params.bgMode || params.bgMode === 'solid' ? params.bgColorA : (params.bgColorB || params.bgColorA))
+  globe?.setShadowColor(hex, mul)
+}
 function applyBackground() {
   const mul = bgDayMul()
   _lastBgMul = mul
+  syncGlobeShadow(mul)
   // an HDRI sky, when chosen, takes over the whole backdrop + lighting. Its
   // brightness follows the cycle via scene.backgroundIntensity, and an opaque
   // floor keeps a ground under the socle (the shadow base would show sky).
@@ -1481,6 +1491,7 @@ function regenerateTerrain() {
 // ------------------------------------------------------------------ orbital globe + modes
 
 globe = new Globe(params)
+syncGlobeShadow(bgDayMul()) // l'ombre du terminateur part accordée au fond
 globe.setVisible(false)
 scene.add(globe.group)
 globe.setSunDir(sun.position)
