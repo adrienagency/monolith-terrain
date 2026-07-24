@@ -27,6 +27,8 @@ const I = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="6" width="19" height="13" rx="2"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M6 13.5h.01M9.5 13.5h.01M13 13.5h.01M16.5 13.5h.01M8 16.5h8" stroke-linecap="round"/></svg>',
   sliders:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h9M17 8h3M4 16h3M11 16h9"/><circle cx="15" cy="8" r="2.2"/><circle cx="9" cy="16" r="2.2"/></svg>',
+  gear:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3.2"/><path d="M19.2 12a7.2 7.2 0 0 0-.1-1.1l2-1.5-2-3.4-2.3 1a7.3 7.3 0 0 0-1.9-1.1L14.5 3h-5l-.4 2.9a7.3 7.3 0 0 0-1.9 1.1l-2.3-1-2 3.4 2 1.5a7.2 7.2 0 0 0 0 2.2l-2 1.5 2 3.4 2.3-1a7.3 7.3 0 0 0 1.9 1.1l.4 2.9h5l.4-2.9a7.3 7.3 0 0 0 1.9-1.1l2.3 1 2-3.4-2-1.5c.06-.36.1-.73.1-1.1Z"/></svg>',
   brush:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15.5 4.5 19.5 8.5 9 19c-1.5 1.5-4 1.5-5-.5s.5-3.5 2-5L15.5 4.5z"/><path d="M13.5 6.5l4 4"/></svg>',
   flag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/></svg>',
@@ -224,8 +226,12 @@ export function buildTopBar(ctx) {
   // final order (Adrien): wordmark · globe DARK │ share help shortcuts hide │
   // EXPORT far right. appendChild MOVES the already-built nodes, so this just
   // reorders them; only the two discrete vertical separators are new.
+  // roue crantée — paramètres globaux (Performance…), TOUJOURS visible
+  const gearBtn = iconButton(I.gear, '', () => ctx.openSettings?.())
+  gearBtn.setAttribute('data-tip', 'Paramètres — réglages globaux de l’application (performance…).')
+
   const sep = () => el('span', 'ce-topbar-sep')
-  bar.append(globeBtn, dark, sep(), helpBtn, shortcutsBtn, hideBtn, advBtn, sep(), exportBtn)
+  bar.append(globeBtn, dark, sep(), helpBtn, shortcutsBtn, hideBtn, advBtn, gearBtn, sep(), exportBtn)
 
   document.body.append(bar, eye)
   return { root: bar, syncDark }

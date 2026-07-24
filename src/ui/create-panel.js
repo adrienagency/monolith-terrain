@@ -1,38 +1,28 @@
-// CREATE panel — everything that makes the map, in one place (right dock).
-// Sections are exclusive accordions. Camera lives in its own sibling panel.
+// Ex-panneau « Création/Couleurs » — éclaté par la réorg Adrien en trois
+// contributions, le fichier garde le code à sa place historique :
+//  - buildFondsPanel(ctx)        → panneau « Fonds » (rail gauche, mode Studio)
+//  - contributeTerrainSections() → sections Relief & détail / Ombrage / Socle
+//                                  montées dans le panneau TERRAIN (ex-Matières)
+//  - buildPaletteCreation(ctx,host) → le contenu « Créer une palette » de la
+//                                  Bibliothèque (rampe, océans, encre, grille)
+// Le générateur aléatoire (palette + look) est RETIRÉ (demande explicite).
 
 import { el, slider, color, swatch, toggle, select, segmented, button, section, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
-import { generatePalette, generateEarthPalette, generateStyle, generateGridContour } from '../palette.js'
 import { PBR_PRESETS, GLASS_PRESETS, GLASS_BY_ID, PBR_BY_ID } from '../material-presets.js'
 
-const ICON =
-  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h10M18 8h2M4 16h2M10 16h10"/><circle cx="16" cy="8" r="2.2"/><circle cx="8" cy="16" r="2.2"/></svg>'
+const ICON_BG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M3.5 15.5 9 10l5 5 3-3 3.5 3.5"/><circle cx="9.5" cy="7.5" r="1.4"/></svg>'
 
-// Panneau « Couleurs » (ex-Création, plan table lumineuse) : rampe du relief,
-// fond & ciel, ombrage. Les sections Terrain/Socle emménagent dans le panneau
-// Matières (ctx.materialsPanel — construit AVANT par main.js).
-export function buildCreatePanel(ctx) {
+// ------------------------------------------------- Bibliothèque › Créer une palette
+export function buildPaletteCreation(ctx, host) {
   const { params } = ctx
-  const panel = new Panel({
-    title: 'Couleurs',
-    icon: ICON,
-    side: 'right',
-    width: 268,
-    tip: 'La rampe du relief, les océans, le fond et le ciel.',
-  })
-
-  const addTo = (sec) => panel.addSection(sec)
-
-  // --------------------------------------------------------------- Colors
-  const mode = () => (params.darkMode ? 'dark' : 'light')
-  const sCol = addTo(section('Couleurs', { open: true }))
-  sCol.body.append(el('div', 'ce-label', 'Rampe d’altitude, du bas vers le haut'))
+  host.append(el('div', 'ce-label', 'Rampe d’altitude, du bas vers le haut'))
   const ramp = el('div', 'ce-ramp')
   params.rampStops.forEach((stop, i) => {
     ramp.append(
       swatch({
-        title: `Tint ${i + 1}`,
+        title: `Teinte ${i + 1}`,
         get: () => stop.c,
         set: (v) => {
           stop.c = v
@@ -41,35 +31,34 @@ export function buildCreatePanel(ctx) {
       })
     )
   })
-  sCol.body.append(ramp)
-  sCol.body.append(
+  host.append(ramp)
+  host.append(
     color({ label: 'Océan peu profond', get: () => params.oceanShallow, set: (v) => { params.oceanShallow = v; ctx.terrain.mapUniforms.uOceanShallow.value.set(v); ctx.globe.rebuildRamp(params) } }),
     color({ label: 'Océan moyen', get: () => params.oceanMid, set: (v) => { params.oceanMid = v; ctx.terrain.mapUniforms.uOceanMid.value.set(v); ctx.globe.rebuildRamp(params) } }),
     color({ label: 'Océan profond', get: () => params.oceanDeep, set: (v) => { params.oceanDeep = v; ctx.terrain.mapUniforms.uOceanDeep.value.set(v); ctx.globe.rebuildRamp(params) } }),
     color({ label: 'Encre (courbes)', get: () => params.contourColor, set: (v) => { params.contourColor = v; ctx.terrain.mapUniforms.uContourColor.value.set(v); ctx.globe.setInk(v) } }),
     color({ label: 'Grille', get: () => params.gridColor, set: (v) => { params.gridColor = v; ctx.terrain.mapUniforms.uGridColor.value.set(v) } })
   )
-  // Générateur « poline-style » (Adrien) : rampe relief + rampe océan en un
-  // clic, ancres de teinte par biome terrestre — puis Save VALIDE la palette
-  // courante dans la rangée Palettes du panneau Templates (défilable).
-  let lastGenName = null
-  const genRow = el('div', 'ce-btn-row')
-  genRow.append(
-    button('Générer une palette', () => { const p = generateEarthPalette(); lastGenName = p.name; ctx.applyPalette(p); refreshAll() }, { accent: true }),
-    button('Enregistrer la palette', () => { ctx.saveCurrentPalette?.(lastGenName); lastGenName = null }, { ghost: true })
+  const saveRow = el('div', 'ce-btn-row')
+  saveRow.append(
+    button('Enregistrer la palette', () => { ctx.saveCurrentPalette?.(null) }, { accent: true })
   )
-  sCol.body.append(genRow)
-  // (« Shuffle palette » supprimé — doublon du générateur ci-dessus)
-  const shuffleRow = el('div', 'ce-btn-row')
-  shuffleRow.append(
-    button('Look aléatoire', () => { ctx.applyStyle(generateStyle()); ctx.applyGridContour(generateGridContour(Math.random, mode())); refreshAll() })
-  )
-  sCol.body.append(shuffleRow)
+  host.append(saveRow)
+}
 
-  // ------------------------------------------------------------ Background
-  // The scene backdrop behind the block. Changing it moves the fog to the same
-  // colour, so the relief always fades into its own background.
-  const sBg = addTo(section('Fond & ciel'))
+// ------------------------------------------------------------ panneau Fonds
+// The scene backdrop behind the block. Changing it moves the fog to the same
+// colour, so the relief always fades into its own background.
+export function buildFondsPanel(ctx) {
+  const { params } = ctx
+  const panel = new Panel({
+    title: 'Fonds',
+    icon: ICON_BG,
+    side: 'left',
+    width: 268,
+    tip: 'Le décor derrière le bloc : couleur, dégradé ou ciel (HDRI).',
+  })
+  const sBg = panel.addSection(section('Fond & ciel', { open: true }))
   // --- Environnement (HDRI sky) — a vignette picker; selecting a sky takes over
   // the backdrop + lighting, clearing it returns to the solid/gradient below ---
   sBg.body.append(el('div', 'ce-fx-head', 'Ciel (HDRI)'))
@@ -88,7 +77,7 @@ export function buildCreatePanel(ctx) {
       return b
     }
     const none = el('span', 'ce-mat-vig-img ce-mat-vig-none')
-    grid.append(tile('', 'None', none))
+    grid.append(tile('', 'Aucun', none))
     for (const e of ctx.environments) {
       const img = el('img', 'ce-mat-vig-img'); img.src = e.thumb; img.alt = e.label; img.loading = 'lazy'
       grid.append(tile(e.id, e.label, img))
@@ -124,9 +113,16 @@ export function buildCreatePanel(ctx) {
     bgWrap.append(r)
   }
   renderBg()
+  return panel
+}
 
-  // ------------------------------------------------------------ Map style
-  const sMap = addTo(section('Ombrage'))
+// --------------------------------------- panneau Terrain : sections apportées
+export function contributeTerrainSections(ctx) {
+  const { params } = ctx
+  const matPanel = ctx.materialsPanel
+
+  // ------------------------------------------------------------ Ombrage
+  const sMap = matPanel.addSection(section('Ombrage'))
   const u = () => ctx.terrain.mapUniforms
   sMap.body.append(
     slider({ label: 'Teinte hypsométrique', min: 0, max: 1, step: 0.02, get: () => params.mapTint, set: (v) => { params.mapTint = v; u().uTint.value = v } }),
@@ -135,11 +131,8 @@ export function buildCreatePanel(ctx) {
     slider({ label: 'Ombrage des pentes', min: 0, max: 1, step: 0.02, get: () => params.slopeTint, set: (v) => { params.slopeTint = v; u().uSlopeTint.value = v } })
   )
 
-  // -------------------------------------------------------------- Terrain
-  // Terrain + Socle vivent dans le panneau MATIÈRES (construit avant nous —
-  // main.js passe ctx.materialsPanel) ; repli sur ce panneau si absent.
-  const matPanel = ctx.materialsPanel || panel
-  const sTer = matPanel.addSection(section('Terrain'))
+  // ------------------------------------------------------ Relief & détail
+  const sTer = matPanel.addSection(section('Relief & détail'))
   const exag = slider({
     label: 'Échelle verticale',
     min: 0.5,
@@ -196,10 +189,7 @@ export function buildCreatePanel(ctx) {
   isolate.setAttribute('data-tip', 'Découpe la carte au pays ou à la région sous la vue — sans base carrée.')
   sTer.body.append(isolate)
 
-  // --------------------------------------------------------------- Clouds
-  // Water moved to the Effects panel ("Sea" section) — one home for every
-  // effect, and the wave engine is now the shared ocean-waves spectrum.
-
+  // --------------------------------------------------------------- Socle
   const sBlk = matPanel.addSection(section('Socle'))
   sBlk.body.append(
     toggle({ label: 'Afficher le socle', get: () => params.plinth, set: (v) => { params.plinth = v; ctx.plinth.setVisible(v && ctx.modes.mode === 'surface') } }),
@@ -242,9 +232,8 @@ export function buildCreatePanel(ctx) {
   sBlk.body.append(
     toggle({ label: 'Cartouche au sol', get: () => params.groundInfo, set: (v) => { params.groundInfo = v; ctx.setGroundInfo(v) } })
   )
-  // Terrain + Socle en TÊTE de Matières (avant Matière du relief / shaders)
-  if (ctx.materialsPanel) matPanel.body.prepend(sTer.root, sBlk.root)
 
-  // -------------------------------------------------------------- Effects
-  return panel
+  // ordre de lecture du panneau Terrain : Relief & détail, Ombrage, Socle
+  // EN TÊTE (avant Matière du relief / Effets de surface)
+  matPanel.body.prepend(sTer.root, sMap.root, sBlk.root)
 }

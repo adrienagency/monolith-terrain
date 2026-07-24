@@ -70,7 +70,7 @@ import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickBar, buildShibuChrome, initUiLevel } from './ui/bars.js'
 import { buildMiniRoute } from './ui/mini-route.js'
 import { buildSettingsSearch } from './ui/settings-search.js'
-import { buildLightPanel } from './ui/light-panel.js'
+import { perfSection } from './ui/camera-panel.js'
 import { buildElemBar } from './ui/elembar.js'
 import { initRails } from './ui/shell.js'
 import { TEMPLATES } from './templates.js'
@@ -79,7 +79,7 @@ import { buildChangelogOverlay } from './ui/changelog-overlay.js'
 import { APP_STAGE } from './changelog.js'
 import { BlockGrid } from './block-grid.js'
 import { buildTemplatesPanel } from './ui/templates-panel.js'
-import { buildCreatePanel } from './ui/create-panel.js'
+import { buildFondsPanel, contributeTerrainSections, buildPaletteCreation } from './ui/create-panel.js'
 import { buildStore } from './ui/store.js'
 import { buildStudio } from './ui/studio.js'
 import { buildAtelier } from './ui/atelier.js'
@@ -3215,6 +3215,7 @@ const topBar = buildTopBar({
   // menu Publier (P4) — closures paresseuses : studio/gpxLayer lus au clic
   hasCourse: () => !!gpxLayer.activeLayer?.gpx?.track,
   openStudioExport: () => studio.enterExport(),
+  openSettings: () => panelCtx.openSettings?.(), // roue crantée (paramètres globaux)
 })
 
 const bottomBar = buildBottomBar({
@@ -3445,14 +3446,12 @@ const panelCtx = {
   resetAll, // Templates panel's "Reset map" button
 }
 
-// Rail droit (plan « table lumineuse ») : Bibliothèque → Couleurs → Matières
-// → Éléments → Image. Matières (shaders-panel) est CONSTRUIT avant Couleurs
-// (create-panel y emménage ses sections Terrain/Socle via
-// panelCtx.materialsPanel) ; l'ordre visuel du dock est RÉORDONNÉ après
-// construction — voir le re-append plus bas.
-const templatesPanel = buildTemplatesPanel(panelCtx)
-
-let shadersRefreshFn = () => {} // re-renders the Matières panel controls on exclusivity changes
+// Réorg Adrien (mode Studio) : rail DROIT = Bibliothèque seule ; rail GAUCHE
+// = Terrain → Fonds → Éléments → Effets. Le panneau Terrain (shaders-panel)
+// est construit d'abord — create-panel y apporte Relief & détail / Ombrage /
+// Socle — puis Fonds, puis la Bibliothèque (qui reçoit « Créer une palette »
+// via panelCtx.paletteCreation). Ordre visuel des docks fixé plus bas.
+let shadersRefreshFn = () => {} // re-renders the Terrain panel controls on exclusivity changes
 const shadersPanel = buildShadersPanel({
   registerRefresh: (fn) => { shadersRefreshFn = fn },
   getLiquidMetal: () => params.liquidMetal,
@@ -3552,21 +3551,16 @@ const shadersPanel = buildShadersPanel({
     terrain.applyTerrainGlass(params)
   },
 })
-panelCtx.materialsPanel = shadersPanel // Terrain + Socle (create-panel) y emménagent
-const coloursPanel = buildCreatePanel(panelCtx)
+panelCtx.materialsPanel = shadersPanel // Relief & détail / Ombrage / Socle y emménagent
+contributeTerrainSections(panelCtx)
 
-// Lumière — le chapitre manquant de la recette (heure maîtresse + manuel)
-const lightPanel = buildLightPanel({
-  params,
-  applyTimeOfDay,
-  placeSun,
-  syncHour: () => hourPill?.refresh?.(),
-  setEnvLight: (v) => { scene.environmentIntensity = v },
-  setShadowSoftness: (v) => {
-    sun.shadow.radius = v
-    if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
-  },
-})
+// Fonds — le décor derrière le bloc (rail gauche, mode Studio)
+const fondsPanel = buildFondsPanel(panelCtx)
+
+// Bibliothèque — seule habitante du rail droit ; « Créer une palette » lui
+// est fourni par create-panel via cette closure
+panelCtx.paletteCreation = (host) => buildPaletteCreation(panelCtx, host)
+const templatesPanel = buildTemplatesPanel(panelCtx)
 
 const { elementsPanel, imagePanel } = buildEffectsPanel({
   params,
@@ -3576,17 +3570,20 @@ const { elementsPanel, imagePanel } = buildEffectsPanel({
   ssao, bloom, aoPass, bloomPass,
   realWater, waterRebuild,
   terrain, globe,
-  // le Scanner (effet d'image) et la Performance (rendu) vivent dans Image
+  // le Scanner (effet d'image) vit dans Effets ; la Lumière ouvre Éléments
   scanCtx: { runScan: (typeId) => scan.trigger(typeId, { x: controls.target.x, z: controls.target.z }, params.scanDuration) },
-  perfCtx: { params, renderer, composer, applyShadowMode, setShadowRes: panelCtx.setShadowRes },
+  lightCtx: {
+    params,
+    applyTimeOfDay,
+    placeSun,
+    syncHour: () => hourPill?.refresh?.(),
+    setEnvLight: (v) => { scene.environmentIntensity = v },
+    setShadowSoftness: (v) => {
+      sun.shadow.radius = v
+      if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
+    },
+  },
 })
-
-// ordre visuel du rail droit = la recette (les panneaux ont été construits
-// dans l'ordre des dépendances, pas de l'affichage) — append DÉPLACE les nœuds
-{
-  const dock = templatesPanel.root.parentElement
-  for (const p of [templatesPanel, coloursPanel, shadersPanel, lightPanel, elementsPanel, imagePanel]) dock.append(p.root)
-}
 
 // the 24h slider lives top-right as a pill now — the Create panel's Light
 // section is gone entirely (this was its only control)
@@ -3684,17 +3681,15 @@ if (!IS_EMBED) {
   })
 }
 
-// barre de travail flottante (validée Adrien, réf. vidéo barre Figma) :
-// le sélecteur des 3 MODES — Explorer / Studio / Parcours, icône + nom —
-// reste toujours dans la barre ; choisir un mode CHARGE les panneaux
-// appropriés (les autres disparaissent) et le RESTE de la barre change :
-// Studio = les 4 outils éléments (surmenus scrubbables), Parcours =
-// Lecture/Stop, Explorer = barre sobre. Mode avancé seulement.
+// barre de travail flottante (réorg Adrien) : SEULEMENT le sélecteur des
+// 3 MODES — Explorer / Studio / Parcours, icône + nom. Choisir un mode
+// charge ses panneaux et fait disparaître les autres ; les outils
+// contextuels ont été retirés (« ça n'est pas logique pour l'instant »).
 if (!IS_EMBED) {
   const WORKMODE_KEY = 'shibumap-workmode'
   const WORKMODE_PANELS = {
     explorer: () => [explorePanel, mapPanel, cameraPanel],
-    studio: () => [templatesPanel, coloursPanel, shadersPanel, lightPanel, elementsPanel, imagePanel],
+    studio: () => [templatesPanel, shadersPanel, fondsPanel, elementsPanel, imagePanel],
     parcours: () => [routePanel],
   }
   const allWorkPanels = () => Object.values(WORKMODE_PANELS).flatMap((f) => f())
@@ -3703,10 +3698,13 @@ if (!IS_EMBED) {
     for (const p of allWorkPanels()) p.root.classList.toggle('wm-off', !keep.has(p.root))
     try { localStorage.setItem(WORKMODE_KEY, id) } catch {}
   }
-  const sl = (label, min, max, step, get, set) => ({ type: 'scrub', label, min, max, step, get, set })
-  const tg = (label, get, set) => ({ type: 'toggle', label, get, set })
-  const cloudBaked = (label, key, min, max, step) =>
-    sl(label, min, max, step, () => params[key], (v) => { params[key] = v; clouds.build(params) })
+  // ordre visuel du rail gauche en mode Studio : Terrain → Fonds → Éléments
+  // → Effets, APRÈS les panneaux Explorer/Parcours (masqués hors mode) —
+  // append DÉPLACE les nœuds
+  {
+    const dock = explorePanel.root.parentElement
+    for (const p of [explorePanel, mapPanel, cameraPanel, routePanel, shadersPanel, fondsPanel, elementsPanel, imagePanel]) dock.append(p.root)
+  }
   const initialMode = (() => { try { return localStorage.getItem(WORKMODE_KEY) } catch { return null } })() || 'explorer'
   buildElemBar({
     modes: [
@@ -3716,64 +3714,30 @@ if (!IS_EMBED) {
     ],
     initial: initialMode,
     onMode: applyWorkMode,
-    toolsByMode: {
-      explorer: {},
-      studio: {
-        groups: [
-          {
-            key: 'lum', icon: 'sun', label: 'Lumière',
-            controls: [
-              sl('Heure', 0, 24, 0.1, () => params.timeOfDay ?? 10, (v) => { applyTimeOfDay(v); hourPill?.refresh?.() }),
-              sl('Azimut', 0, 360, 1, () => params.sunAzimuth, (v) => { params.sunAzimuth = v; placeSun() }),
-              sl('Élévation', 2, 90, 1, () => params.sunElevation, (v) => { params.sunElevation = v; placeSun() }),
-              sl('Intensité', 0, 10, 0.1, () => params.sunIntensity, (v) => { params.sunIntensity = v; placeSun() }),
-            ],
-          },
-          {
-            key: 'cld', icon: 'cloud', label: 'Nuages',
-            controls: [
-              tg('Nuages volumétriques', () => params.cloudsEnabled, (v) => { params.cloudsEnabled = v; clouds.build(params) }),
-              sl('Densité', 0.05, 1.5, 0.05, () => params.cloudOpacity, (v) => { params.cloudOpacity = v }),
-              cloudBaked('Échelle', 'cloudScale', 0.5, 5, 0.1),
-              cloudBaked('Altitude', 'cloudAltitude', 0, 16, 0.5),
-            ],
-          },
-          {
-            key: 'fog', icon: 'fog', label: 'Brume',
-            controls: [
-              tg('Brume', () => params.fogEnabled, (v) => { params.fogEnabled = v; panelCtx.setFogEnabled(v) }),
-              sl('Début', 5, 60, 0.5, () => params.fogNear, (v) => { params.fogNear = v; fogRef.near = v }),
-              sl('Fin', 15, 90, 0.5, () => params.fogFar, (v) => { params.fogFar = v; fogRef.far = v }),
-            ],
-          },
-          {
-            key: 'sea', icon: 'sea', label: 'Mer',
-            controls: [
-              tg('Mer animée', () => params.waterReal, (v) => { params.waterReal = v; waterRebuild() }),
-              sl('Hauteur des vagues', 0, 2, 0.05, () => params.seaWaveH, (v) => { params.seaWaveH = v; realWater?.setWaves({ height: v }) }),
-              sl('Clapot', 0, 1, 0.05, () => params.seaChop, (v) => { params.seaChop = v; realWater?.setWaves({ choppiness: v }) }),
-              sl('Vitesse', 0, 2, 0.05, () => params.seaSpeed, (v) => { params.seaSpeed = v; realWater?.setWaves({ speed: v }) }),
-            ],
-          },
-        ],
-      },
-      parcours: {
-        buttons: [
-          {
-            icon: 'parcours', label: 'Lecture', accent: true,
-            onClick: () => {
-              if (!gpxLayer.track) return
-              if (gpxLayer.isPlaying()) { gpxLayer.pause(); disengageGpxFollow() }
-              else { gpxLayer.play(); engageGpxFollow() }
-            },
-            sync: (btn) => { btn.querySelector('span').textContent = gpxLayer.isPlaying?.() ? 'Pause' : 'Lecture' },
-          },
-          { label: 'Stop', onClick: () => { gpxLayer.stop(); disengageGpxFollow() } },
-        ],
-      },
-    },
+    toolsByMode: { explorer: {}, studio: {}, parcours: {} },
   })
   applyWorkMode(initialMode)
+}
+
+// roue crantée — PARAMÈTRES GLOBAUX (réorg Adrien) : toujours visible dans
+// la topbar, ouvre un panneau par-dessus la carte. Pour l'instant :
+// Performance (échelle de rendu, ombres) — sortie du panneau Effets.
+if (!IS_EMBED) {
+  const veil = document.createElement('div')
+  veil.className = 'ce-settings-veil'
+  const box = document.createElement('div')
+  box.className = 'ce-settings ce-glassbox'
+  box.innerHTML = '<div class="ce-settings-head"><b>Paramètres</b><button class="ce-settings-x" type="button">✕</button></div>'
+  const perf = perfSection({ params, renderer, composer, applyShadowMode, setShadowRes: panelCtx.setShadowRes })
+  perf.root.classList.add('open')
+  box.append(perf.root)
+  veil.append(box)
+  document.body.append(veil)
+  const closeSettings = () => veil.classList.remove('open')
+  box.querySelector('.ce-settings-x').addEventListener('click', closeSettings)
+  veil.addEventListener('click', (e) => { if (e.target === veil) closeSettings() })
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSettings() })
+  panelCtx.openSettings = () => veil.classList.toggle('open')
 }
 
 // mini panneau Parcours du mode simple (gestion des blocs + Lecture) —
@@ -3789,9 +3753,8 @@ void miniRoute
 // folds dock neighbours), so expanding any panel collapses the others in its
 // column. Start with only Create/Explore open (Templates docks above Create
 // but stays collapsed until clicked, same as Shaders/Map).
-templatesPanel.setCollapsed(true)
 shadersPanel.setCollapsed(true)
-lightPanel.setCollapsed(true)
+fondsPanel.setCollapsed(true)
 elementsPanel.setCollapsed(true)
 imagePanel.setCollapsed(true)
 cameraPanel.setCollapsed(true)

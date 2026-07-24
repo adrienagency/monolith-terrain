@@ -207,6 +207,53 @@ body.dark {
   outline: none;
 }
 
+/* roue crantée — panneau Paramètres globaux par-dessus la carte */
+.ce-settings-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 235;
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  background: color-mix(in srgb, #000 22%, transparent);
+}
+.ce-settings-veil.open {
+  display: flex;
+}
+.ce-settings {
+  width: min(420px, calc(100vw - 40px));
+  border-radius: 16px;
+  padding: 14px 16px 16px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.ce-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.ce-settings-head b {
+  font: 700 14px var(--ce-font);
+  color: var(--ce-ink);
+}
+.ce-settings-x {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--ce-ink);
+  opacity: 0.6;
+  font-size: 15px;
+}
+.ce-settings-x:hover {
+  opacity: 1;
+}
+/* la section Performance montée seule : toujours dépliée, en-tête discret */
+.ce-settings .ce-section {
+  border: 0;
+}
+
 /* barre flottante « éléments » (test Figma, Adrien) + surmenu au survol */
 .ce-elemwrap {
   position: fixed;

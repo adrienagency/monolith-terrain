@@ -33,20 +33,25 @@ function vigTile({ id, cur, label, media, showName, onPick }) {
 
 export function buildShadersPanel(ctx) {
   const panel = new Panel({
-    title: 'Matières',
+    title: 'Terrain',
     icon: ICON,
-    side: 'right',
-    width: 268, // match Create/Camera so the right dock aligns cleanly
-    tip: 'De quoi la carte est faite : terrain, socle, matière du relief, shaders.',
+    side: 'left',
+    width: 268,
+    tip: 'Le relief lui-même : échelle, ombrage, socle, matière, effets de surface.',
   })
 
-  // --- 1. Shaders: animated procedural treatments painted onto the relief ---
+  // --- 1. Shaders: animated procedural treatments painted onto the relief.
+  // Le MÉTAL LIQUIDE est une tuile de CE picker (réorg Adrien : « un simple
+  // effet de surface comme les autres ») — même comportement de shader
+  // qu'avant (setLiquidMetal, exclusif avec la matière du relief), juste
+  // rangé ici ; l'ancienne section Labo disparaît. ---
   const sFx = panel.addSection(section('Effets de surface (shaders)', { open: false }))
   const fxPick = el('div', 'ce-mat-pick')
   sFx.body.append(fxPick)
   const appear = el('div', 'ce-fx-controls') // Appearance: opacity + blend
   const fxCtl = el('div', 'ce-fx-controls') // per-effect options
-  sFx.body.append(appear, fxCtl)
+  const lmCtl = el('div', 'ce-fx-controls') // métal liquide (tuile spéciale)
+  sFx.body.append(appear, fxCtl, lmCtl)
 
   function renderFxPicker() {
     fxPick.replaceChildren()
@@ -61,6 +66,20 @@ export function buildShadersPanel(ctx) {
       requestFxThumb(id, (url) => { media.src = url })
       grid.append(vigTile({ id, cur, label, media, showName: false, onPick: () => { ctx.setSurfaceFx(id); renderFx() } }))
     }
+    // tuile Métal liquide — un TOGGLE (indépendant de la sélection d'effet) :
+    // il transforme la matière du relief, il ne peint pas par-dessus
+    const lmTile = el('button', `ce-mat-vig${ctx.getLiquidMetal() ? ' on' : ''}`)
+    lmTile.type = 'button'
+    lmTile.setAttribute('data-tip', 'Tout le relief coule en métal liquide — exclusif avec une matière du relief.')
+    const lmSwatch = el('span', 'ce-mat-vig-img')
+    lmSwatch.style.background = 'linear-gradient(120deg, #d8dbe0, #7d838d 45%, #eef1f5 70%, #9aa0ab)'
+    lmTile.append(lmSwatch, el('span', 'ce-mat-vig-name', 'Métal liquide'))
+    lmTile.addEventListener('click', () => {
+      ctx.setLiquidMetal(!ctx.getLiquidMetal())
+      renderFxPicker()
+      renderLm()
+    })
+    grid.append(lmTile)
     fxPick.append(grid)
   }
 
@@ -137,17 +156,11 @@ export function buildShadersPanel(ctx) {
     }
   }
 
-  // --- 3. Fancy: the liquid-metal treatment (its own controls appear when
-  // it's on) — same peer level as Shaders and Relief material ---
-  const sFancy = panel.addSection(section('Labo', { open: false }))
-  sFancy.body.append(
-    toggle({ label: 'Métal liquide', get: () => ctx.getLiquidMetal(), set: (v) => { ctx.setLiquidMetal(v); renderLm() } })
-  )
-  const lmCtl = el('div', 'ce-fx-controls')
-  sFancy.body.append(lmCtl)
+  // --- réglages du métal liquide : sous le picker, visibles quand il coule ---
   function renderLm() {
     lmCtl.replaceChildren()
     if (!ctx.getLiquidMetal()) return
+    lmCtl.append(el('div', 'ce-fx-head', 'Métal liquide'))
     for (const c of ctx.lmControls) {
       lmCtl.append(slider({ label: c.label, min: c.min, max: c.max, step: 0.01, get: () => ctx.getLmParam(c.k), set: (v) => ctx.setLmParam(c.k, v) }))
     }

@@ -9,7 +9,7 @@ import { Panel } from './shell.js'
 import { FLAGS } from '../flags.js'
 import { SEABEDS } from '../ocean.js'
 import { scanSection } from './scan-panel.js'
-import { perfSection } from './camera-panel.js'
+import { lightSection } from './light-panel.js'
 
 // vignette procédurale d'un fond marin : dégradé du preset + grain + glaçure
 // d'eau — même gabarit que les vignettes matériaux/HDRI (ce-mat-vig-img)
@@ -38,14 +38,16 @@ function seabedThumb(p) {
 const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>'
 const ICON_ELEM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 17a4 4 0 1 1 .6-7.95A5 5 0 0 1 17 8a4 4 0 0 1 0 8H7Z"/><path d="M4 21c2-1.2 4-1.2 6 0s4 1.2 6 0"/></svg>'
 
-// Deux panneaux du rail droit (plan « table lumineuse ») :
-// « Éléments » = l'air et l'eau (nuages, brume, mer) ; « Image » = le rendu
-// final (SSAO/bloom, objectif, scanner, performance). Retourne les deux —
-// main.js fixe l'ordre visuel du dock.
+// Deux panneaux du rail GAUCHE en mode Studio (réorg Adrien) :
+// « Éléments » = Lumière / Nuages / Brume / Mer ; « Effets » = le rendu
+// final (SSAO/bloom, objectif, scanner — la Performance vit dans la roue
+// crantée des paramètres globaux). Retourne les deux — main.js fixe l'ordre.
 export function buildEffectsPanel(ctx) {
   const { params } = ctx
-  const elementsPanel = new Panel({ title: 'Éléments', icon: ICON_ELEM, side: 'right', width: 268, tip: 'L’air et l’eau : nuages, brume, mer.' })
-  const panel = new Panel({ title: 'Image', icon: ICON, side: 'right', width: 268, tip: 'Le rendu final : SSAO et bloom, objectif, scanner, performance.' })
+  const elementsPanel = new Panel({ title: 'Éléments', icon: ICON_ELEM, side: 'left', width: 268, tip: 'La lumière, l’air et l’eau : soleil, nuages, brume, mer.' })
+  const panel = new Panel({ title: 'Effets', icon: ICON, side: 'left', width: 268, tip: 'Le rendu final : SSAO et bloom, objectif, scanner.' })
+  // Lumière en TÊTE d'Éléments (l'ordre de lecture : Lumière, Nuages, Brume, Mer)
+  if (ctx.lightCtx) elementsPanel.addSection(lightSection(ctx.lightCtx))
 
   // ---- render (the 2026-07-20 upgrades) ----
   const sRen = panel.addSection(section('Rendu', { open: true }))
@@ -82,7 +84,7 @@ export function buildEffectsPanel(ctx) {
   for (const row of fogRows) visibleWhen(row, () => params.fogEnabled)
 
   // ---- clouds (moved from Create, controls unchanged) ----
-  const sCld = elementsPanel.addSection(section('Nuages', { open: true }))
+  const sCld = elementsPanel.addSection(section('Nuages'))
   const rebuildClouds = () => ctx.clouds.build(params)
   const cloudLive = (label, key, min, max, step) =>
     slider({ label, min, max, step, get: () => params[key], set: (v) => { params[key] = v } })
@@ -109,7 +111,7 @@ export function buildEffectsPanel(ctx) {
   ]
   sCld.body.append(...cloudRows)
   for (const row of cloudRows) visibleWhen(row, () => params.cloudsEnabled)
-  elementsPanel.body.prepend(sCld.root) // ordre de lecture : Nuages, Brume, Mer
+  elementsPanel.body.insertBefore(sCld.root, sFog.root) // ordre : Lumière, Nuages, Brume, Mer
 
   // ---- sea (ocean-waves random spectrum — moved here from Create's old
   // Water section: one home for every effect) ----
@@ -172,9 +174,9 @@ export function buildEffectsPanel(ctx) {
     for (const row of seaRows) visibleWhen(row, () => params.waterReal)
   }
 
-  // ---- scanner + performance — les deux dernières sections d'Image ----
+  // ---- scanner — dernière section d'Effets (la Performance est partie
+  // dans la roue crantée des paramètres globaux) ----
   if (ctx.scanCtx) panel.addSection(scanSection(ctx.scanCtx))
-  if (ctx.perfCtx) panel.addSection(perfSection(ctx.perfCtx))
 
   return { elementsPanel, imagePanel: panel }
 }
