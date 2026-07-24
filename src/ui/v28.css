@@ -175,6 +175,58 @@ body.dark {
   height: 30px;
   margin: 0 2px;
 }
+/* menu « Publier » (UX P4) — les trois sorties consolidées sous la topbar */
+.ce-pubmenu {
+  position: fixed;
+  top: 58px;
+  right: 14px;
+  z-index: 120;
+  width: 300px;
+  padding: 6px;
+  border-radius: 16px;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+}
+.ce-pubmenu.open {
+  display: flex;
+}
+.ce-pubitem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 11px;
+  color: var(--ce-ink);
+  font-family: var(--ce-font);
+}
+.ce-pubitem:hover {
+  background: var(--ce-hover);
+}
+.ce-pubitem svg {
+  width: 17px;
+  height: 17px;
+  flex: none;
+}
+.ce-pubitem .pi-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ce-pubitem .pi-main b {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.ce-pubitem .pi-main i {
+  font-style: normal;
+  font-size: 11px;
+  opacity: 0.65;
+}
+
 /* discrete vertical separators between top-bar groups */
 .ce-topbar-sep {
   align-self: center;

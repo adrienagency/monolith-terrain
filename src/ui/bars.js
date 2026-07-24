@@ -70,29 +70,46 @@ export function buildTopBar(ctx) {
   // export earns a labelled pill — it is a primary action, not tucked-away chrome.
   // openExport is async (the export stack is lazy-loaded on first click): the
   // button goes busy until the modal is up, so a slow network can't double-open.
-  const exportBtn = el('button', 'ce-pillbtn accent')
+  // « Publier » (UX P4) — UNE seule sortie consolidée : export image/vidéo,
+  // lien de partage, projet course. Remplace le pill Export + l'icône share.
+  const exportBtn = el('button', 'ce-pillbtn accent ce-pubbtn')
   exportBtn.type = 'button'
-  exportBtn.innerHTML = `${I.export}<span>Export</span>`
-  exportBtn.setAttribute('data-tip', 'Save what you see as an image, or record a video.')
-  exportBtn.addEventListener('click', async () => {
-    if (exportBtn.disabled) return
-    exportBtn.disabled = true
-    try {
-      await ctx.openExport()
-    } catch (err) {
-      console.error('Export failed to open:', err)
-    } finally {
-      exportBtn.disabled = false
-    }
+  exportBtn.innerHTML = `${I.export}<span>Publier</span>`
+  exportBtn.setAttribute('data-tip', 'Tout ce qui sort de ShibuMap : image, vidéo, lien de la vue, projet course.')
+  const pubMenu = el('div', 'ce-pubmenu ce-glassbox')
+  const closeMenu = () => pubMenu.classList.remove('open')
+  const menuItem = (icon, label, sub, onClick) => {
+    const b = el('button', 'ce-pubitem')
+    b.type = 'button'
+    b.innerHTML = `${icon}<span class="pi-main"><b>${label}</b><i>${sub}</i></span>`
+    b.addEventListener('click', async () => { closeMenu(); await onClick() })
+    return b
+  }
+  // openExport est async (pile d'export lazy-loadée au premier clic)
+  const miExport = menuItem(I.export, 'Exporter une image ou une vidéo', 'Ce que vous voyez, en haute qualité.', async () => {
+    try { await ctx.openExport() } catch (err) { console.error('Export failed to open:', err) }
   })
-  bar.append(exportBtn)
+  const miShare = menuItem(I.share, 'Copier le lien de la vue', 'Look, lieu et caméra — la même carte chez eux.', () => doShare())
+  // projet course → Race Studio étape Exporter (aucune logique dupliquée) ;
+  // visible seulement quand une course est chargée
+  const miRace = menuItem(I.route, 'Projet course (.shibumap-race)', 'Enregistrer ou partager votre carte de course.', () => ctx.openStudioExport?.())
+  pubMenu.append(miExport, miShare, miRace)
+  exportBtn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    miRace.style.display = ctx.hasCourse?.() ? '' : 'none'
+    pubMenu.classList.toggle('open')
+  })
+  document.addEventListener('click', (e) => { if (!pubMenu.contains(e.target) && e.target !== exportBtn) closeMenu() })
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu() })
+  document.body.append(pubMenu)
 
   // one click copies a link that reproduces this exact look + location +
   // camera (navigator.share on mobile hands it to the OS share sheet
   // instead — "facilitate sharing", per the brief)
-  const shareBtn = iconButton(I.share, '', async () => {
-    if (shareBtn.disabled) return
-    shareBtn.disabled = true
+  let sharing = false
+  async function doShare() {
+    if (sharing) return
+    sharing = true
     try {
       const res = await ctx.share()
       if (res?.cancelled) {
@@ -100,20 +117,18 @@ export function buildTopBar(ctx) {
       } else if (res?.ok) {
         // three honest cases: track published in the link / publish failed so
         // the link is look-only / no track loaded at all (nothing to say)
-        const trackNote = res.hasTrack ? (res.published ? ' — course included' : ' — course couldn’t be published') : ''
-        showToast((res.copied ? 'Link copied' : 'Shared') + trackNote)
+        const trackNote = res.hasTrack ? (res.published ? ' — course incluse' : ' — la course n’a pas pu être publiée') : ''
+        showToast((res.copied ? 'Lien copié' : 'Partagé') + trackNote)
       } else {
-        showToast('Could not create the link')
+        showToast('Impossible de créer le lien')
       }
     } catch (err) {
       console.error('Share failed:', err)
-      showToast('Could not create the link')
+      showToast('Impossible de créer le lien')
     } finally {
-      shareBtn.disabled = false
+      sharing = false
     }
-  })
-  shareBtn.setAttribute('data-tip', 'Copy a link to this exact view — look, location and camera. GPX tracks are never included.')
-  bar.append(shareBtn)
+  }
 
   const dark = iconButton(I.moon, '', () => {
     ctx.setDarkMode(!ctx.params.darkMode)
@@ -169,7 +184,7 @@ export function buildTopBar(ctx) {
   // EXPORT far right. appendChild MOVES the already-built nodes, so this just
   // reorders them; only the two discrete vertical separators are new.
   const sep = () => el('span', 'ce-topbar-sep')
-  bar.append(globeBtn, dark, sep(), shareBtn, helpBtn, shortcutsBtn, hideBtn, advBtn, sep(), exportBtn)
+  bar.append(globeBtn, dark, sep(), helpBtn, shortcutsBtn, hideBtn, advBtn, sep(), exportBtn)
 
   document.body.append(bar, eye)
   return { root: bar, syncDark }

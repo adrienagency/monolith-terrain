@@ -444,5 +444,12 @@ export function buildStudio(deps) {
     if (open) render()
   }
 
-  return { enter, exit, isOpen: () => open, importProject }
+  // entrée directe sur l'étape Exporter — le menu « Publier » (topbar, UX P4)
+  // route « projet course » ici plutôt que de dupliquer serialize/partage
+  async function enterExport() {
+    await enter()
+    go(STEPS.length - 1)
+  }
+
+  return { enter, exit, isOpen: () => open, importProject, enterExport }
 }

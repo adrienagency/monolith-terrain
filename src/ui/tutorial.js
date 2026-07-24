@@ -48,8 +48,8 @@ function buildSteps() {
       text: 'One click here frames the isometric view — block, plate and cartouche.',
     },
     {
-      target: () => document.querySelector('.ce-topbar .ce-pillbtn'),
-      text: 'Export what you see as an image, or record a video of your map.',
+      target: () => document.querySelector('.ce-topbar .ce-pubbtn'),
+      text: 'Publier — exporter une image ou une vidéo, copier le lien de la vue, ou enregistrer votre projet course.',
     },
     {
       target: () => topIcons[0] ?? document.querySelector('.ce-topbar'),

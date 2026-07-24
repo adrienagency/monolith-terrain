@@ -3099,6 +3099,9 @@ const topBar = buildTopBar({
   appStage: APP_STAGE,
   toggleChangelog: () => changelogOverlay.toggle(),
   share: shareCurrentView,
+  // menu Publier (P4) — closures paresseuses : studio/gpxLayer lus au clic
+  hasCourse: () => !!gpxLayer.activeLayer?.gpx?.track,
+  openStudioExport: () => studio.enterExport(),
 })
 
 const bottomBar = buildBottomBar({
