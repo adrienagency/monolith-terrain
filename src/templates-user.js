@@ -61,6 +61,8 @@ export const TEMPLATE_KEYS = [
   // more so they're ignored on load (harmless) rather than breaking.
   'gpxWidth', 'gpxColor', 'gpxGradient', 'gpxGradientMode', 'gpxGlow',
   'gpxMarkers', 'gpxKm', 'gpxAltReadout', 'gpxSlopeReadout',
+  // Race Studio : cartouches espace-écran + anti-chevauchement (débrayable)
+  'gpxCartouches', 'gpxLabelAvoid',
 ]
 
 const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)))

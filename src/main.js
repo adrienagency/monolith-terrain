@@ -27,6 +27,7 @@ import { Modes, stepZoom } from './modes.js'
 import { createGoto } from './goto.js'
 import { frameTrack } from './gpx.js'
 import { GpxLayerManager } from './gpx-layers.js'
+import { buildRaceLabels } from './race-labels.js'
 import { SPORTS, DEFAULT_SPORT, sanitizeSvgMarkup, isValidIconDataUrl, rasterizeToCanvas } from './ui/sport-icons.js'
 import { worldToLatLon } from './geo.js'
 import { TERRAIN_SIZE } from './terrain.js'
@@ -267,6 +268,8 @@ const params = {
   gpxKm: true,
   gpxAltReadout: true,
   gpxSlopeReadout: false,
+  gpxCartouches: true, // Race Studio : cartouches espace-écran (taille constante)
+  gpxLabelAvoid: true, // anti-chevauchement des cartouches — débrayable (Adrien)
   // drone-follow during playback: ON by default (task 24 — "par défaut on
   // active le drone follow"), the playback IS the product so the cinematic
   // chase should be what an organiser sees without having to find the
@@ -2269,6 +2272,44 @@ const blockGrid = new BlockGrid({ scene, params, getMainDem: () => dem, getMainT
 
 const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: () => dem, getGrid: () => blockGrid })
 
+// ---- Race Studio : état de la course + cartouches espace-écran ------------
+// raceState est rempli par le studio (src/ui/studio.js) ; les cartouches se
+// projettent chaque frame (taille constante, anti-chevauchement débrayable).
+const raceState = { name: '', logo: null, waypoints: [], transports: { cats: [], removed: [], pois: [] } }
+const raceLabels = buildRaceLabels({
+  container,
+  camera,
+  params,
+  getItems: () => {
+    const items = []
+    const track = gpxLayer.activeLayer?.gpx?.track
+    if (track?.world) {
+      for (const w of raceState.waypoints) {
+        if (w.idx == null || !track.world[w.idx]) continue
+        items.push({
+          id: `wp_${w.idx}`,
+          kind: 'waypoint',
+          world: track.world[w.idx],
+          km: w.km,
+          name: w.name,
+          alt: w.alt ?? track.points?.[w.idx]?.ele ?? null,
+          pictos: w.pictos,
+          cutoff: w.cutoff,
+        })
+      }
+    }
+    for (const p of raceState.transports.pois) {
+      if (!p.world || raceState.transports.removed.includes(p.id)) continue
+      items.push({ id: p.id, kind: 'transport', world: p.world, name: p.name, pictos: [p.cat] })
+    }
+    return items
+  },
+  onRemove: (id) => {
+    raceState.transports.removed.push(id)
+    raceLabels.setDirty()
+  },
+})
+
 const allGpxPoints = () => gpxLayer.layers.flatMap((l) => l.gpx.track?.points ?? [])
 // un voisin vient de finir de charger → re-draper les traces + peindre sa photo
 // aérienne si la couche est active (même finition que le bloc central)
@@ -2773,6 +2814,7 @@ function stepScene(t, dt) {
     traffic.update(dt)
   }
   camera.updateMatrixWorld()
+  raceLabels.update() // cartouches Race Studio — projection écran chaque frame
 }
 
 initTips()
@@ -3569,6 +3611,7 @@ function tick() {
   // refresh camera matrices NOW so DOM projections match this frame's render
   // (otherwise labels are projected with last frame's matrices and lag behind)
   camera.updateMatrixWorld()
+  raceLabels.update() // cartouches Race Studio — même règle de fraîcheur
 
   if (!params.paused && modes.mode === 'surface') {
     hud3.update(dt, t, params)
