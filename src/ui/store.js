@@ -5,6 +5,7 @@
 // Le rethémage (une palette recolore toute la boutique), le hover des bandes
 // et le design des cartes sont repris de l'ancienne landing /templates.
 import './store.css'
+import { makeMorph } from './panel-morph.js'
 import { paletteRecordFromShop, styleTemplateText, mergeShopPalettes, notOwnedStyles } from '../store-catalog.js'
 
 const STORE_COMMERCE = false // futur paiement — aucun prix tant que false
@@ -293,32 +294,15 @@ export function buildStore(deps) {
   }
 
   // ---- morph -------------------------------------------------------------
-  let settleT = 0
-  function settleMorph() {
-    clearTimeout(settleT)
-    document.body.classList.remove('store-anim')
-    window.dispatchEvent(new Event('resize')) // renderer/composer → nouvelle box
-  }
-  function onMorphEnd(e) {
-    if (e.target.id !== 'app') return
-    settleMorph()
-  }
-  // écoute unique (PAS dans enter() — sinon les listeners s'empilent).
-  // Fallback timeout : transitionend peut ne jamais venir (onglet caché →
-  // zéro frame → transitions gelées) — le morph se « pose » quoi qu'il arrive.
-  document.getElementById('app').addEventListener('transitionend', onMorphEnd)
-  function armSettle() {
-    clearTimeout(settleT)
-    settleT = setTimeout(settleMorph, 750) // .6s de transition + marge
-  }
+  // chorégraphie partagée avec le Race Studio — voir panel-morph.js
+  const morph = makeMorph({ modeClass: 'store-mode', onSettle: () => window.dispatchEvent(new Event('resize')) })
 
   async function enter() {
     if (open) return
     open = true
     snap = deps.captureState()
     if (!col.isConnected) document.body.append(col, caption, veil)
-    document.body.classList.add('store-anim', 'store-mode')
-    armSettle()
+    morph.enter()
     deps.setLocked(true)
     deps.gotoShowcase().catch(() => {}) // vole vers la zone vitrine pendant le morph
     if (!catalog) {
@@ -336,9 +320,7 @@ export function buildStore(deps) {
     activeSlug = null
     col.querySelectorAll('.picked, .live').forEach((c) => c.classList.remove('picked', 'live'))
     veil.classList.remove('on')
-    document.body.classList.add('store-anim')
-    document.body.classList.remove('store-mode')
-    armSettle()
+    morph.exit()
     deps.setLocked(false)
     try { await deps.restoreState(snap) } catch {}
     snap = null

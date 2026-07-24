@@ -1,7 +1,7 @@
 /* Boutique in-app (« store mode ») — le canvas 3D glisse dans un cadre
    vitrine qui prend TOUT l'espace à gauche de la colonne, la colonne
    boutique arrive de la droite. Chorégraphie : body.store-mode /
-   body.store-anim posées par store.js.
+   body.morph-anim posées par store.js.
 
    THÈME : tout dérive de 4 variables (--st-bg, --st-bg-deep, --st-ink,
    --st-accent) que store.js réécrit quand une palette est appliquée —
@@ -31,7 +31,7 @@
 /* baseline explicite pour que la transition FLIP ait des valeurs de départ */
 body.store-ready #app { position: fixed; inset: 0; z-index: 0; }
 
-body.store-anim #app {
+body.morph-anim #app {
   transition: top .6s cubic-bezier(.22, .9, .26, 1), left .6s cubic-bezier(.22, .9, .26, 1),
     right .6s cubic-bezier(.22, .9, .26, 1), bottom .6s cubic-bezier(.22, .9, .26, 1),
     border-radius .6s cubic-bezier(.22, .9, .26, 1), box-shadow .6s ease;
@@ -48,7 +48,7 @@ body.store-mode #app {
 }
 /* pendant le morph le canvas garde sa taille px : recadrage centré, pas de
    distorsion ; store.js resize le renderer aux transitionend */
-body.store-mode #app canvas, body.store-anim #app canvas {
+body.store-mode #app canvas, body.morph-anim #app canvas {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
 }
 /* les gouttières autour du cadre suivent le thème de la palette */
@@ -66,7 +66,7 @@ body.store-mode, .store-col, .store-caption, .store-card, .store-chip,
     border-color .7s ease, box-shadow .7s ease;
 }
 @media (prefers-reduced-motion: reduce) {
-  .store-col, .store-card, body.store-anim #app { transition: none !important; }
+  .store-col, .store-card, body.morph-anim #app { transition: none !important; }
 }
 
 /* le toggle iso + la caméra auto restent dans la boutique, calés au coin
