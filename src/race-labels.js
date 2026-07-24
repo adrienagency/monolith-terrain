@@ -1,12 +1,16 @@
 // Race Studio — cartouches HTML en espace écran, ancrées aux points 3D.
-// Contrat (Adrien) : taille CONSTANTE quelle que soit la perspective, tout
-// reste lisible, pas de chevauchement (résolu par layoutCartouches — et
-// DÉBRAYABLE via params.gpxLabelAvoid). Les POI transport passent par le même
-// pipeline en style « chip ». Pure DOM + projection : aucun objet three dans
-// la scène, donc zéro coût GPU et un rendu net à toutes les tailles.
+// Règles (Adrien, v6 finale) :
+//   · taille CONSTANTE quelle que soit la perspective, toujours face caméra ;
+//   · chaque étiquette est COLLÉE à son point : centrée dessus (jeu ≤ 1vw),
+//     seul le Y coulisse (≤ 2vh) pour s'éviter — anti-collision glouton par
+//     priorité (Départ, puis km croissants, transports), DÉBRAYABLE via
+//     params.gpxLabelAvoid ; pas de place → masquée (réapparaît au zoom) ;
+//   · l'étiquette Départ/Arrivée est épinglée en haut de page ;
+//   · lecture : fondu 1,8 s (.rl-faded), fenêtre gérée par main.js ;
+//   · window.__rlSnap (tests) : pose instantanée sans lissage.
+// Pure DOM + projection : aucun objet three dans la scène.
 import * as THREE from 'three'
 import './ui/race-labels.css'
-import { layoutCartouches } from './race-model.js'
 
 // pictos 14×14 monochromes (currentColor) — langage ShibuMap, inspirés des
 // composants Transju (ravito/services) + besoins transport d'Adrien
@@ -31,9 +35,8 @@ export const PICTO_KEYS = ['ravito', 'eau', 'repas', 'dodo', 'wc', 'vue', 'col',
 
 const CART_H = 26 // hauteur fixe d'un cartouche (px) — pas de mesure DOM
 const CHIP_H = 18
-const LEAD = 16 // longueur de la ligne de rappel
 
-export function buildRaceLabels({ container, camera, getItems, params, onRemove, getTrackWorlds }) {
+export function buildRaceLabels({ container, camera, getItems, params, onRemove }) {
   const root = document.createElement('div')
   root.className = 'rl-root'
   container.appendChild(root)

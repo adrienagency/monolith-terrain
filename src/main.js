@@ -1023,6 +1023,10 @@ document.documentElement.style.setProperty('--hud-bg-alpha', params.uiBgOpacity)
 // planet spin for a moment (the spin must never compose with a held drag)
 let lastUserInput = 0
 let controlsHeld = false
+// liberté caméra en lecture (Adrien) : dès que l'utilisateur a pivoté/zoomé
+// pendant le suivi, le rail ne reprend PLUS la main — la caméra reste où il
+// l'a mise et ne fait que VISER la tête. Réarmé à chaque nouveau Play.
+let followManual = false
 controls.addEventListener('start', () => {
   tween.active = false
   tour.active = false
@@ -1036,6 +1040,7 @@ controls.addEventListener('start', () => {
   cameraAuto.stop() // …and any looping camera automation
   camera.up.set(0, 1, 0)
   controlsHeld = true
+  if (drone.active && params.gpxFollow) followManual = true
   lastUserInput = performance.now()
 })
 controls.addEventListener('end', () => {
@@ -1560,7 +1565,15 @@ modes = new Modes({
     // drone (consommé → l'escalier de zoom ne voit pas l'événement)
     followWheel: (deltaY) => {
       if (!(drone.active && params.gpxFollow && gpxLayer.isPlaying())) return false
-      drone.zoomBy(deltaY > 0 ? 1.13 : 1 / 1.13)
+      if (followManual) {
+        // mode libre : la molette dolly autour de la tête, sans limite de rail
+        const f = deltaY > 0 ? 1.13 : 1 / 1.13
+        camera.position.sub(controls.target).multiplyScalar(f).add(controls.target)
+        controls.update()
+        drone.syncToCamera()
+      } else {
+        drone.zoomBy(deltaY > 0 ? 1.13 : 1 / 1.13)
+      }
       return true
     },
     // world point under a screen NDC (for zoom-toward-cursor) — marches the
@@ -2381,35 +2394,6 @@ const raceLabels = buildRaceLabels({
     raceState.transports.removed.push(id)
     raceLabels.setDirty()
   },
-  // le tracé échantillonné (~240 pts) : les étiquettes ne le recouvrent jamais
-  getTrackWorlds: () => {
-    const t = gpxLayer.activeLayer?.gpx?.track
-    if (!t?.world?.length) return []
-    const step = Math.max(1, Math.floor(t.world.length / 240))
-    const out = []
-    for (let i = 0; i < t.world.length; i += step) out.push(t.world[i])
-    return out
-  },
-  // emprise monde des blocs chargés (damier compris) — les étiquettes se
-  // claquent dans sa projection écran pour ne jamais sortir de la carte
-  getExtent: () => {
-    let minI = 0
-    let maxI = 0
-    let minJ = 0
-    let maxJ = 0
-    for (const cell of blockGrid?.cells?.values() ?? []) {
-      minI = Math.min(minI, cell.i)
-      maxI = Math.max(maxI, cell.i)
-      minJ = Math.min(minJ, cell.j)
-      maxJ = Math.max(maxJ, cell.j)
-    }
-    return {
-      minX: (minI - 0.5) * TERRAIN_SIZE,
-      maxX: (maxI + 0.5) * TERRAIN_SIZE,
-      minZ: (minJ - 0.5) * TERRAIN_SIZE,
-      maxZ: (maxJ + 0.5) * TERRAIN_SIZE,
-    }
-  },
 })
 
 // grave l'identité de la course sur les flancs du bloc (logo centré + infos
@@ -2671,6 +2655,7 @@ function flyTrack() {
 // updateCameraMotion() below, reusing DroneCam wholesale — no new camera rig.
 function engageGpxFollow() {
   if (!params.gpxFollow || !gpxLayer.isPlaying() || modes.mode !== 'surface') return
+  followManual = false // nouveau Play → le rail reprend (jusqu'au 1er geste)
   const w = gpxLayer.track?.world
   if (!w || w.length < 2) return
   tour.active = false
@@ -3696,7 +3681,8 @@ function updateCameraMotion(dt) {
     // the drone's own framing under its existing rate caps/damping — never
     // a snap. drone.active/gpxFollow are never touched here, so this is a
     // suspend, not a stop (see the controls 'start' handler above).
-    if (controlsHeld) {
+    if (controlsHeld || followManual) {
+      // mode LIBRE : position caméra = l'utilisateur ; cible = la tête
       drone.followPivot(gpxLayer.headT)
       controls.update()
       drone.syncToCamera()
@@ -3844,11 +3830,18 @@ function tick() {
   // pointer autofocus: focus where the ray from the camera through the cursor
   // meets the terrain; on a miss (sky / off-map) hold the last valid focus
   if (params.autoFocus && modes.mode === 'surface') {
-    focusRay.setFromCamera(mouse, camera)
-    const hit = focusRayHit(focusRay.ray.origin, focusRay.ray.direction, terrain.sample, {
-      halfExtent: TERRAIN_SIZE / 2,
-    })
-    if (hit != null) params.focusDistance += (hit - params.focusDistance) * Math.min(1, dt * 8)
+    // lecture GPX : le bokeh se focalise EN PERMANENCE sur la tête de course
+    const headW = gpxLayer.isPlaying?.() ? gpxLayer.headWorld : null
+    if (headW) {
+      const d = camera.position.distanceTo(headW)
+      params.focusDistance += (d - params.focusDistance) * Math.min(1, dt * 8)
+    } else {
+      focusRay.setFromCamera(mouse, camera)
+      const hit = focusRayHit(focusRay.ray.origin, focusRay.ray.direction, terrain.sample, {
+        halfExtent: TERRAIN_SIZE / 2,
+      })
+      if (hit != null) params.focusDistance += (hit - params.focusDistance) * Math.min(1, dt * 8)
+    }
   }
   // `dof` is null until bokeh is first switched on (lazy build — see
   // ensureDof). params.focusDistance keeps tracking either way, and
