@@ -83,7 +83,6 @@ import { buildHub } from './ui/hub.js'
 import { buildCameraPanel } from './ui/camera-panel.js'
 import { buildRoutePanel } from './ui/route-panel.js'
 import { buildExplorePanel } from './ui/explore-panel.js'
-import { buildScanPanel } from './ui/scan-panel.js'
 import { buildShadersPanel } from './ui/shaders-panel.js'
 import { buildMapPanel } from './ui/map-panel.js'
 import { buildEffectsPanel } from './ui/effects-panel.js'
@@ -3425,14 +3424,14 @@ const panelCtx = {
   resetAll, // Templates panel's "Reset map" button
 }
 
-// Templates panel docks ABOVE Create in the right dock — built first so it
-// lands first in the DOM (dock columns stack panels in append order).
+// Rail droit (plan « table lumineuse ») : Bibliothèque → Couleurs → Matières
+// → Éléments → Image. Matières (shaders-panel) est CONSTRUIT avant Couleurs
+// (create-panel y emménage ses sections Terrain/Socle via
+// panelCtx.materialsPanel) ; l'ordre visuel du dock est RÉORDONNÉ après
+// construction — voir le re-append plus bas.
 const templatesPanel = buildTemplatesPanel(panelCtx)
-buildCreatePanel(panelCtx) // montés pour leurs effets de bord (dock DOM)
 
-// Shaders panel — right dock, between Create and Map (created here so it
-// docks between them). Holds the surface-shader treatments split out of Scan.
-let shadersRefreshFn = () => {} // re-renders the Shaders panel controls on exclusivity changes
+let shadersRefreshFn = () => {} // re-renders the Matières panel controls on exclusivity changes
 const shadersPanel = buildShadersPanel({
   registerRefresh: (fn) => { shadersRefreshFn = fn },
   getLiquidMetal: () => params.liquidMetal,
@@ -3447,10 +3446,10 @@ const shadersPanel = buildShadersPanel({
     refreshAll()
   },
   lmControls: [
-    { k: 'lmMetalness', label: 'Metalness', min: 0, max: 1 },
-    { k: 'lmRoughness', label: 'Polish', min: 0.02, max: 0.6 },
-    { k: 'lmReflection', label: 'Reflection', min: 0, max: 3 },
-    { k: 'lmSpeed', label: 'Flow speed', min: 0, max: 1.5 },
+    { k: 'lmMetalness', label: 'Métal', min: 0, max: 1 },
+    { k: 'lmRoughness', label: 'Poli', min: 0.02, max: 0.6 },
+    { k: 'lmReflection', label: 'Reflet', min: 0, max: 3 },
+    { k: 'lmSpeed', label: 'Vitesse du flux', min: 0, max: 1.5 },
   ],
   getLmParam: (k) => params[k],
   setLmParam: (k, v) => {
@@ -3516,10 +3515,10 @@ const shadersPanel = buildShadersPanel({
   },
   // live glass knobs (only shown when the relief material is Glass)
   glassControls: [
-    { k: 'terrainGlassFrost', label: 'Frost', min: 0, max: 1 },
-    { k: 'terrainGlassThickness', label: 'Thickness', min: 1, max: 20 },
-    { k: 'terrainGlassClarity', label: 'Clarity', min: 2, max: 60 },
-    { k: 'terrainGlassReflection', label: 'Reflection', min: 0, max: 3 },
+    { k: 'terrainGlassFrost', label: 'Givre', min: 0, max: 1 },
+    { k: 'terrainGlassThickness', label: 'Épaisseur', min: 1, max: 20 },
+    { k: 'terrainGlassClarity', label: 'Clarté', min: 2, max: 60 },
+    { k: 'terrainGlassReflection', label: 'Reflet', min: 0, max: 3 },
   ],
   getGlassParam: (k) => params[k],
   setGlassParam: (k, v) => {
@@ -3532,8 +3531,10 @@ const shadersPanel = buildShadersPanel({
     terrain.applyTerrainGlass(params)
   },
 })
+panelCtx.materialsPanel = shadersPanel // Terrain + Socle (create-panel) y emménagent
+const coloursPanel = buildCreatePanel(panelCtx)
 
-buildEffectsPanel({
+const { elementsPanel, imagePanel } = buildEffectsPanel({
   params,
   exposureFx, contrastFx, hueSat, vignette, grain,
   fogRef, setFogEnabled: panelCtx.setFogEnabled, applyBackground,
@@ -3541,7 +3542,17 @@ buildEffectsPanel({
   ssao, bloom, aoPass, bloomPass,
   realWater, waterRebuild,
   terrain, globe,
+  // le Scanner (effet d'image) et la Performance (rendu) vivent dans Image
+  scanCtx: { runScan: (typeId) => scan.trigger(typeId, { x: controls.target.x, z: controls.target.z }, params.scanDuration) },
+  perfCtx: { params, renderer, composer, applyShadowMode, setShadowRes: panelCtx.setShadowRes },
 })
+
+// ordre visuel du rail droit = la recette (les panneaux ont été construits
+// dans l'ordre des dépendances, pas de l'affichage) — append DÉPLACE les nœuds
+{
+  const dock = templatesPanel.root.parentElement
+  for (const p of [templatesPanel, coloursPanel, shadersPanel, elementsPanel, imagePanel]) dock.append(p.root)
+}
 
 // the 24h slider lives top-right as a pill now — the Create panel's Light
 // section is gone entirely (this was its only control)
@@ -3570,11 +3581,9 @@ const mapPanel = buildMapPanel({
   setLabelsVisible: (v) => (labels.visible = v && modes.mode === 'surface'),
 })
 
-const scanPanel = buildScanPanel({
-  runScan: (typeId) => scan.trigger(typeId, { x: controls.target.x, z: controls.target.z }, params.scanDuration),
-})
+// (panneau Scanner supprimé — sa section vit dans Image, voir buildEffectsPanel)
 
-// Camera panel — left dock, docked directly below Scan (Explore, Scan, Camera).
+// Camera panel — left dock (Explorer, Carte, Caméra, Parcours).
 const cameraPanel = buildCameraPanel({
   params,
   camera,
@@ -3642,9 +3651,10 @@ void miniRoute
 // but stays collapsed until clicked, same as Shaders/Map).
 templatesPanel.setCollapsed(true)
 shadersPanel.setCollapsed(true)
+elementsPanel.setCollapsed(true)
+imagePanel.setCollapsed(true)
 cameraPanel.setCollapsed(true)
 mapPanel.setCollapsed(true)
-scanPanel.setCollapsed(true)
 routePanel.setCollapsed(true)
 
 // adaptive quality — built once the composer, panels and mode machine exist

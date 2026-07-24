@@ -14,11 +14,11 @@ const ICON =
 
 export function buildTemplatesPanel(ctx) {
   const panel = new Panel({
-    title: 'Templates',
+    title: 'Bibliothèque',
     icon: ICON,
     side: 'right',
     width: 268,
-    tip: 'Built-in and saved looks — one click restyles the whole map.',
+    tip: 'Templates et palettes — un clic restyle toute la carte.',
   })
 
   // ------------------------------------------------------------- Boutique
@@ -27,7 +27,7 @@ export function buildTemplatesPanel(ctx) {
   // Palettes / templates user ci-dessous.
   const storeWrap = el('div', 'ce-btn-row')
   const storeBtn = button('Boutique de templates', () => ctx.openStore?.(), { accent: true })
-  storeBtn.setAttribute('data-tip', 'Browse Styles & Couleurs, try them live, bring back what you like.')
+  storeBtn.setAttribute('data-tip', 'Parcourez styles et couleurs, essayez en direct, ramenez ce qui vous plaît.')
   storeWrap.append(storeBtn)
   panel.body.append(storeWrap)
 
@@ -37,7 +37,7 @@ export function buildTemplatesPanel(ctx) {
   // back to defaults, without ever moving the camera or the location.
   const resetWrap = el('div', 'ce-btn-row')
   const resetBtn = button(
-    'Reset map',
+    'Réinitialiser la carte',
     () => {
       if (ctx.resetAll) {
         ctx.resetAll()
@@ -47,7 +47,7 @@ export function buildTemplatesPanel(ctx) {
     },
     { ghost: true }
   )
-  resetBtn.setAttribute('data-tip', 'Reset every look setting to its default (keeps your location).')
+  resetBtn.setAttribute('data-tip', 'Remet chaque réglage de look à sa valeur d’origine (le lieu ne bouge pas).')
   resetWrap.append(resetBtn)
   panel.body.append(resetWrap)
 
@@ -56,7 +56,7 @@ export function buildTemplatesPanel(ctx) {
   // défilable vers la droite : bande relief + bande océan, clic = appliquer.
   const sPal = panel.addSection(section('Palettes', { open: true }))
   const palRow = el('div', 'ce-pal-row')
-  const palEmpty = el('div', 'ce-gpx-layers-empty', 'Generate a palette in Create › Colours, then Save it — it lands here.')
+  const palEmpty = el('div', 'ce-gpx-layers-empty', 'Générez une palette dans Couleurs, puis Enregistrez-la — elle arrive ici.')
   function renderPalettes() {
     const list = ctx.userPalettes?.() || []
     palRow.replaceChildren()
@@ -169,7 +169,7 @@ export function buildTemplatesPanel(ctx) {
   // contexts (a likely cause of "save doesn't work") and is off-brand
   const nameInput = el('input', 'ce-tpl-name')
   nameInput.type = 'text'
-  nameInput.placeholder = 'Name this look…'
+  nameInput.placeholder = 'Nommer ce look…'
   nameInput.maxLength = 40
   const doSave = () => {
     if (!nameInput.value.trim()) { nameInput.focus(); return } // name required
@@ -178,15 +178,15 @@ export function buildTemplatesPanel(ctx) {
     renderUserTemplates()
   }
   nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doSave() } })
-  tplRow.append(nameInput, button('Save', doSave, { accent: true }), button('Load…', () => fileInput.click(), { ghost: true }))
+  tplRow.append(nameInput, button('Enregistrer', doSave, { accent: true }), button('Charger…', () => fileInput.click(), { ghost: true }))
   sTpl.body.append(tplRow, fileInput)
 
   // Dark mode toggle lives ONLY in the top bar (bars.js moon button) now — this
   // was a second control on the exact same param, easy to leave out of sync.
   const monoRow = el('div', 'ce-btn-row')
   monoRow.append(
-    button('Mono white', () => { ctx.applyMonochrome('white'); refreshAll(); ctx.syncDark?.() }),
-    button('Mono dark', () => { ctx.applyMonochrome('dark'); refreshAll(); ctx.syncDark?.() })
+    button('Mono clair', () => { ctx.applyMonochrome('white'); refreshAll(); ctx.syncDark?.() }),
+    button('Mono sombre', () => { ctx.applyMonochrome('dark'); refreshAll(); ctx.syncDark?.() })
   )
   const resetRow = el('div', 'ce-btn-row')
   // (« Reset look » supprimé — sous-ensemble de « Réinitialiser la carte » en tête de panneau)

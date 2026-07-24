@@ -28,20 +28,20 @@ function buildSteps() {
       text: 'Scroll to zoom. Pull back and the map becomes an isometric 3D museum piece — the whole block on its display plate, cartouche included. Dive in for ever finer terrain.',
     },
     {
-      target: () => findPanel('explore'),
-      text: 'Explore — fly to hand-picked landmarks on every continent.',
+      target: () => findPanel('explorer'),
+      text: 'Explorer — volez vers des lieux choisis sur chaque continent.',
     },
     {
-      target: () => findPanel('scan'),
-      text: 'Scan — sweep radar and elevation effects across the relief.',
+      target: () => findPanel('bibliothèque'),
+      text: 'Bibliothèque — templates et palettes : un clic restyle toute la carte.',
     },
     {
-      target: () => findPanel('create'),
-      text: 'Create — templates, colors, clouds, water and light: the entire look of your map.',
+      target: () => findPanel('couleurs'),
+      text: 'Couleurs — la rampe du relief, les océans, le fond et le ciel.',
     },
     {
-      target: () => findPanel('camera'),
-      text: 'Camera — lens, focus and motion, plus performance settings.',
+      target: () => findPanel('caméra'),
+      text: 'Caméra — objectif, mise au point et mouvements automatiques.',
     },
     {
       target: () => document.querySelector('.ce-isobtn'),

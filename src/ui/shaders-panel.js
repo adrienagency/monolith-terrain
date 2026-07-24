@@ -33,15 +33,15 @@ function vigTile({ id, cur, label, media, showName, onPick }) {
 
 export function buildShadersPanel(ctx) {
   const panel = new Panel({
-    title: 'Shaders',
+    title: 'Matières',
     icon: ICON,
     side: 'right',
     width: 268, // match Create/Camera so the right dock aligns cleanly
-    tip: 'Animated shader treatments painted onto the relief surface.',
+    tip: 'De quoi la carte est faite : terrain, socle, matière du relief, shaders.',
   })
 
   // --- 1. Shaders: animated procedural treatments painted onto the relief ---
-  const sFx = panel.addSection(section('Shaders', { open: false }))
+  const sFx = panel.addSection(section('Effets de surface (shaders)', { open: false }))
   const fxPick = el('div', 'ce-mat-pick')
   sFx.body.append(fxPick)
   const appear = el('div', 'ce-fx-controls') // Appearance: opacity + blend
@@ -53,7 +53,7 @@ export function buildShadersPanel(ctx) {
     const cur = ctx.getSurfaceFx() ? Number(ctx.getSurfaceFx()) : 0
     const grid = el('div', 'ce-mat-grid')
     const none = el('span', 'ce-mat-vig-img ce-mat-vig-none')
-    grid.append(vigTile({ id: 0, cur, label: 'None', media: none, showName: true, onPick: () => { ctx.setSurfaceFx(0); renderFx() } }))
+    grid.append(vigTile({ id: 0, cur, label: 'Aucun', media: none, showName: true, onPick: () => { ctx.setSurfaceFx(0); renderFx() } }))
     for (const { value, label } of ctx.surfaceFxList) {
       const id = parseInt(value, 10)
       const media = el('img', 'ce-mat-vig-img')
@@ -71,10 +71,10 @@ export function buildShadersPanel(ctx) {
     const meta = id && ctx.fxMeta[id]
     if (!meta) return
     // Appearance — how the shader sits over the map (like Figma's Appearance)
-    appear.append(el('div', 'ce-fx-head', 'Appearance'))
+    appear.append(el('div', 'ce-fx-head', 'Apparence'))
     appear.append(
-      slider({ label: 'Opacity', min: 0, max: 1, step: 0.01, get: () => ctx.getFxParam(id, 'opacity'), set: (v) => ctx.setFxParam(id, 'opacity', v) }),
-      select({ label: 'Blend', options: BLEND_MODES.map((label, i) => ({ value: String(i), label })), get: () => String(ctx.getFxParam(id, 'blend') || 0), set: (v) => ctx.setFxParam(id, 'blend', parseInt(v, 10)) })
+      slider({ label: 'Opacité', min: 0, max: 1, step: 0.01, get: () => ctx.getFxParam(id, 'opacity'), set: (v) => ctx.setFxParam(id, 'opacity', v) }),
+      select({ label: 'Fusion', options: BLEND_MODES.map((label, i) => ({ value: String(i), label })), get: () => String(ctx.getFxParam(id, 'blend') || 0), set: (v) => ctx.setFxParam(id, 'blend', parseInt(v, 10)) })
     )
     // Per-effect knobs
     for (const c of meta.c) {
@@ -86,7 +86,7 @@ export function buildShadersPanel(ctx) {
   // --- 2. Relief material: turn the WHOLE relief into a real PBR material
   // (glass, rock, sand, marble, …). A vignette picker grouped by category so
   // you choose by look, not by a word — a full material swap ---
-  const sMat = panel.addSection(section('Relief material', { open: false }))
+  const sMat = panel.addSection(section('Matière du relief', { open: false }))
   const matPick = el('div', 'ce-mat-pick')
   sMat.body.append(matPick)
   const matCtl = el('div', 'ce-fx-controls')
@@ -101,7 +101,7 @@ export function buildShadersPanel(ctx) {
     // None / topographic
     const none = el('span', 'ce-mat-vig-img ce-mat-vig-none')
     const noneGrid = el('div', 'ce-mat-grid')
-    noneGrid.append(tile('', 'None', none, true))
+    noneGrid.append(tile('', 'Aucune', none, true))
     matPick.append(noneGrid)
     // categories
     for (const cat of materialsByCategory()) {
@@ -122,26 +122,26 @@ export function buildShadersPanel(ctx) {
     const id = ctx.getSurfaceMat()
     if (!id) return
     if (id === 'glass') {
-      matCtl.append(color({ label: 'Glass tint', get: () => ctx.getGlassTint(), set: (v) => ctx.setGlassTint(v) }))
+      matCtl.append(color({ label: 'Teinte du verre', get: () => ctx.getGlassTint(), set: (v) => ctx.setGlassTint(v) }))
       for (const c of ctx.glassControls) {
         matCtl.append(slider({ label: c.label, min: c.min, max: c.max, step: c.k === 'terrainGlassThickness' || c.k === 'terrainGlassClarity' ? 0.5 : 0.01, get: () => ctx.getGlassParam(c.k), set: (v) => ctx.setGlassParam(c.k, v) }))
       }
     } else {
       matCtl.append(
-        slider({ label: 'Scale (tiling)', min: 0.3, max: 4, step: 0.05, get: () => ctx.getMatScale(), set: (v) => ctx.setMatScale(v) }),
-        slider({ label: 'Bump', min: 0, max: 3, step: 0.05, get: () => ctx.getSurfaceMatBump(), set: (v) => ctx.setSurfaceMatBump(v) }),
-        slider({ label: 'Roughness', min: 0, max: 1, step: 0.01, get: () => ctx.getMatRoughness(), set: (v) => ctx.setMatRoughness(v) }),
-        slider({ label: 'Noise (reveals base)', min: 0, max: 1, step: 0.01, get: () => ctx.getMatNoise(), set: (v) => ctx.setMatNoise(v) }),
-        toggle({ label: 'Above zero level', get: () => ctx.getMatAboveZero(), set: (v) => ctx.setMatAboveZero(v) })
+        slider({ label: 'Échelle (tuilage)', min: 0.3, max: 4, step: 0.05, get: () => ctx.getMatScale(), set: (v) => ctx.setMatScale(v) }),
+        slider({ label: 'Relief de la matière', min: 0, max: 3, step: 0.05, get: () => ctx.getSurfaceMatBump(), set: (v) => ctx.setSurfaceMatBump(v) }),
+        slider({ label: 'Rugosité', min: 0, max: 1, step: 0.01, get: () => ctx.getMatRoughness(), set: (v) => ctx.setMatRoughness(v) }),
+        slider({ label: 'Bruit (révèle la base)', min: 0, max: 1, step: 0.01, get: () => ctx.getMatNoise(), set: (v) => ctx.setMatNoise(v) }),
+        toggle({ label: 'Au-dessus du niveau zéro', get: () => ctx.getMatAboveZero(), set: (v) => ctx.setMatAboveZero(v) })
       )
     }
   }
 
   // --- 3. Fancy: the liquid-metal treatment (its own controls appear when
   // it's on) — same peer level as Shaders and Relief material ---
-  const sFancy = panel.addSection(section('Fancy', { open: false }))
+  const sFancy = panel.addSection(section('Labo', { open: false }))
   sFancy.body.append(
-    toggle({ label: 'Liquid metal', get: () => ctx.getLiquidMetal(), set: (v) => { ctx.setLiquidMetal(v); renderLm() } })
+    toggle({ label: 'Métal liquide', get: () => ctx.getLiquidMetal(), set: (v) => { ctx.setLiquidMetal(v); renderLm() } })
   )
   const lmCtl = el('div', 'ce-fx-controls')
   sFancy.body.append(lmCtl)
@@ -152,6 +152,10 @@ export function buildShadersPanel(ctx) {
       lmCtl.append(slider({ label: c.label, min: c.min, max: c.max, step: 0.01, get: () => ctx.getLmParam(c.k), set: (v) => ctx.setLmParam(c.k, v) }))
     }
   }
+
+  // ordre de lecture : Matière du relief (le choix le plus courant) AVANT les
+  // effets de surface ; Terrain/Socle (create-panel) seront prépendus devant
+  panel.body.insertBefore(sMat.root, sFx.root)
 
   renderLm()
   renderFxPicker()

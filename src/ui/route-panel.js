@@ -23,7 +23,7 @@ export function buildRoutePanel(ctx) {
     icon: ICON,
     side: 'left',
     width: 268,
-    tip: 'Load a GPX track and style the line draped over the relief.',
+    tip: 'Votre trace GPX drapée sur le relief : style, courses, lecture.',
   })
 
   // Play / Stop live at the TOP of the panel, ALWAYS visible the moment "GPX
@@ -308,7 +308,7 @@ export function buildRoutePanel(ctx) {
   // Playback OPTIONS section — the Play/Stop buttons themselves now live at the
   // TOP of the panel (always visible). This section keeps the follow + readout
   // toggles and the follow-speed slider.
-  const sPlay = panel.addSection(section('Playback options', { open: false }))
+  const sPlay = panel.addSection(section('Lecture', { open: false }))
   const followSpeedRow = slider({
     label: 'Follow speed',
     min: 0.5,

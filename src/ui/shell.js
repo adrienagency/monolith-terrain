@@ -1,6 +1,8 @@
-// Panel shell v2 — glass cards stacked in left/right dock columns, the same
+// Panel shell v3 — glass cards stacked in left/right dock columns, the same
 // visual grammar as the top and bottom bars. A panel collapses to its header
-// pill; dragging its header moves it between docks with hard magnetic snap.
+// pill. Les rails sont FIXES (plan « table lumineuse ») : le drag entre docks
+// a été retiré — l'ordre des panneaux EST la recette, aucun outil de
+// référence (Figma, Lightroom) ne laisse déplacer ses panneaux.
 
 import { el } from './kit.js'
 
@@ -37,7 +39,11 @@ export class Panel {
       e.stopPropagation()
       this.setCollapsed(!this.collapsed)
     })
-    this._initDrag()
+    // l'en-tête entier replie/déplie (il ne sert plus au drag) — geste Lightroom
+    this.head.addEventListener('click', (e) => {
+      if (e.target === this.collapseBtn) return
+      this.setCollapsed(!this.collapsed)
+    })
     dockColumn(side).append(this.root)
     dockPanels[side].push(this)
   }
@@ -70,46 +76,4 @@ export class Panel {
     this.body.append(...nodes)
   }
 
-  // hard magnetic docking: the card follows the pointer while dragged, then
-  // lands in the dock column of whichever half of the screen it's over
-  _initDrag() {
-    let sx = 0
-    let sy = 0
-    let dragging = false
-    const onMove = (e) => {
-      if (!dragging) return
-      this.root.style.transform = `translate(${e.clientX - sx}px, ${e.clientY - sy}px)`
-    }
-    const finish = (e, commit) => {
-      if (!dragging) return
-      dragging = false
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('pointercancel', onCancel)
-      this.root.classList.remove('dragging')
-      this.root.style.transform = ''
-      if (!commit) return // cancelled gesture: snap home, change nothing
-      const side = e.clientX < window.innerWidth / 2 ? 'left' : 'right'
-      if (side !== this.side) {
-        const arr = dockPanels[this.side]
-        const i = arr.indexOf(this)
-        if (i >= 0) arr.splice(i, 1)
-        this.side = side
-        dockPanels[side].push(this)
-        dockColumn(side).append(this.root)
-      }
-    }
-    const onUp = (e) => finish(e, true)
-    const onCancel = (e) => finish(e, false)
-    this.head.addEventListener('pointerdown', (e) => {
-      if (e.target === this.collapseBtn) return
-      dragging = true
-      sx = e.clientX
-      sy = e.clientY
-      this.root.classList.add('dragging')
-      window.addEventListener('pointermove', onMove)
-      window.addEventListener('pointerup', onUp)
-      window.addEventListener('pointercancel', onCancel)
-    })
-  }
 }
