@@ -935,11 +935,18 @@ body.ce-noui .altimeter,
 body.ce-noui .ce-credits,
 body.ce-noui .gpx-profile,
 body.store-mode .ce-topbar,
+body.studio-mode .ce-topbar,
 body.store-mode .ce-bottombar,
+body.studio-mode .ce-bottombar,
 body.store-mode .ce-panel,
+body.studio-mode .ce-panel,
 body.store-mode .hud,
+body.studio-mode .hud,
 body.store-mode .altimeter,
+body.studio-mode .altimeter,
 body.store-mode .ce-credits,
+body.studio-mode .ce-credits,
+body.studio-mode .gpx-profile,
 body.store-mode .gpx-profile {
   display: none !important;
 }
@@ -966,9 +973,13 @@ body.ce-embed .ce-hourpill,
 body.ce-embed .zoom-stepper,
 body.ce-embed .ce-changelog-btn,
 body.store-mode .ce-eye,
+body.studio-mode .ce-eye,
 body.store-mode .ce-hourpill,
+body.studio-mode .ce-hourpill,
 body.store-mode .zoom-stepper,
-body.store-mode .ce-changelog-btn {
+body.studio-mode .zoom-stepper,
+body.store-mode .ce-changelog-btn,
+body.studio-mode .ce-changelog-btn {
   display: none !important;
 }
 .ce-eye svg {
@@ -1126,7 +1137,8 @@ body.ce-noui .ce-isobtn {
 @keyframes ce-mapshuffle { to { transform: rotate(180deg); } }
 .ce-mapbtn.off,
 body.ce-noui .ce-mapbtn,
-body.store-mode .ce-mapbtn {
+body.store-mode .ce-mapbtn,
+body.studio-mode .ce-mapbtn {
   display: none;
 }
 

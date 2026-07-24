@@ -76,6 +76,7 @@ import { BlockGrid } from './block-grid.js'
 import { buildTemplatesPanel } from './ui/templates-panel.js'
 import { buildCreatePanel } from './ui/create-panel.js'
 import { buildStore } from './ui/store.js'
+import { buildStudio } from './ui/studio.js'
 import { buildCameraPanel } from './ui/camera-panel.js'
 import { buildRoutePanel } from './ui/route-panel.js'
 import { buildExplorePanel } from './ui/explore-panel.js'
@@ -439,6 +440,8 @@ if (location.hash.startsWith('#s=')) {
 const IS_EMBED = new URLSearchParams(location.search).has('embed')
 // /templates redirige ici : l'app s'ouvre directement en mode boutique
 const IS_STORE_BOOT = new URLSearchParams(location.search).has('store')
+// lien direct organisateurs : l'app s'ouvre dans le Race Studio
+const IS_STUDIO_BOOT = new URLSearchParams(location.search).has('studio')
 // Nā Pali (Kauai, Hawaï), z12 : falaises cannelées plongeant dans une vraie
 // bathymétrie (-2300 m à Honopu) — choisi sur scoring DEM (falaises creusées
 // + profondeur d'eau, Adrien). Le zoom z12 est le niveau « bord de côte ».
@@ -3790,12 +3793,69 @@ const store = buildStore({
 })
 panelCtx.openStore = () => store.enter() // le bouton lit ctx.openStore au clic, pas au build
 
+// ---- Race Studio (wizard organisateurs — voir src/ui/studio.js) ----------
+const studio = buildStudio({
+  params,
+  refreshAll,
+  captureState: () => ({
+    look: captureLook(params),
+    cam: { pos: camera.position.clone(), target: controls.target.clone() },
+  }),
+  restoreState: async (s) => {
+    if (!s) return
+    applyUserTemplate({ look: s.look })
+    camera.position.copy(s.cam.pos)
+    controls.target.copy(s.cam.target)
+    controls.update()
+    refreshAll()
+  },
+  hasTrack: () => !!gpxLayer.activeLayer?.gpx?.track,
+  loadGpx: () => panelCtx.loadGpx?.(),
+  trackStats: () => {
+    const t = gpxLayer.activeLayer?.gpx?.track
+    if (!t) return null
+    const eles = t.points.map((p) => p.ele || 0)
+    return { km: t.cumKm[t.cumKm.length - 1], ...ascentStats(eles) }
+  },
+  altAtKm: (km) => {
+    const t = gpxLayer.activeLayer?.gpx?.track
+    if (!t) return null
+    return Math.round(t.points[snapToKm(t.cumKm, km)]?.ele ?? 0)
+  },
+  // pousse le brouillon du studio dans raceState : km → index de trace,
+  // altitudes résolues, cartouches + flancs du bloc rafraîchis
+  syncRace: (race) => {
+    const t = gpxLayer.activeLayer?.gpx?.track
+    raceState.name = race.name
+    raceState.logo = race.logo
+    raceState.waypoints = (race.waypoints || []).map((w) => {
+      const idx = t ? snapToKm(t.cumKm, w.km) : null
+      return { ...w, idx, alt: w.alt ?? (t ? Math.round(t.points[idx]?.ele ?? 0) : null) }
+    })
+    raceState.transports.removed = [...(race.transports?.removed || [])]
+    raceLabels.setDirty()
+    applyRaceToBlock()
+  },
+  setTransportCats,
+  setGpxStyle: (kv) => { applyUserTemplate({ look: kv }); refreshAll() },
+  captureLook: () => captureLook(params),
+  currentGpxText: () => gpxLayer.activeLayer?.sourceText || '',
+  importRace: (bundle) => {
+    if (bundle.gpxText) gpxLayer.addLayer(bundle.gpxText)
+    if (bundle.look && Object.keys(bundle.look).length) applyUserTemplate({ look: bundle.look })
+    refreshAll()
+  },
+  share: () => shareCurrentView(),
+})
+panelCtx.openStudio = () => studio.enter()
+
 // first visit only: the guided tour introduces the UI once the boot view has
 // had a moment to settle (replayable anytime from the "?" in the top bar).
 // Jamais en mode embed — la vitrine /templates doit rester nue.
 setTimeout(async () => {
   if (EMBED) return
   if (IS_STORE_BOOT) { store.enter(); return } // /templates → boutique directe, jamais le tour
+  if (IS_STUDIO_BOOT) { studio.enter(); return } // ?studio=1 → Race Studio direct
   try {
     const { maybeStartTutorial } = await import('./ui/tutorial.js')
     maybeStartTutorial()

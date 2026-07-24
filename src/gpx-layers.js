@@ -150,7 +150,8 @@ export class GpxLayerManager {
     const gpx = new GpxLayer({ scene: this.scene, camera: this.camera, terrain: this.terrain, params: this.params, getDem: this.getDem, getGrid: this.getGrid })
     gpx.onCleared = () => this.onTrackCleared?.(this) // ✕ du profil → main.js resynchronise le damier
     gpx.setTrack(points, name)
-    const entry = { id: nextId(), gpx, sport: sport || getSport(null).key, name, visible: true }
+    // sourceText : le XML d'origine, conservé pour l'export projet Race Studio
+    const entry = { id: nextId(), gpx, sport: sport || getSport(null).key, name, visible: true, sourceText: text }
     this.layers.push(entry)
     this._applyDepths()
     this.focus(entry.id)

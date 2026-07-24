@@ -70,7 +70,10 @@ export function buildRoutePanel(ctx) {
   // Width/Colour are the controls a user reaches for right after loading a
   // file, so they shouldn't require expanding anything.
   const sTrack = panel.addSection(section('Track', { open: true }))
-  sTrack.body.append(button('Load GPX…', () => ctx.loadGpx(), { accent: true }))
+  // Race Studio — la sous-app organisateurs (logo, points de passage, pictos,
+  // transports, export projet) : voir src/ui/studio.js
+  sTrack.body.append(button('Race Studio', () => ctx.openStudio?.(), { accent: true }))
+  sTrack.body.append(button('Load GPX…', () => ctx.loadGpx(), { ghost: true }))
   const colorRow = color({
     label: 'Colour',
     get: () => params.gpxColor || params.hudAccent,

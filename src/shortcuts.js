@@ -81,7 +81,7 @@ export function matchShortcut(e) {
 export function bindShortcuts(ctx) {
   window.addEventListener('keydown', (e) => {
     // boutique in-app ouverte : clavier app off (Échap est géré par store.js)
-    if (document.body.classList.contains('store-mode')) return
+    if (document.body.classList.contains('store-mode') || document.body.classList.contains('studio-mode')) return
     const t = document.activeElement
     const tag = t && t.tagName
     const isTextField = !!t && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable)
