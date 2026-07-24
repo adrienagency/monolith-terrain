@@ -72,7 +72,6 @@ import { buildMiniRoute } from './ui/mini-route.js'
 import { buildSettingsSearch } from './ui/settings-search.js'
 import { buildLightPanel } from './ui/light-panel.js'
 import { buildElemBar } from './ui/elembar.js'
-import { slider as kitSlider, toggle as kitToggle } from './ui/kit.js'
 import { initRails } from './ui/shell.js'
 import { TEMPLATES } from './templates.js'
 import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
@@ -3685,51 +3684,50 @@ if (!IS_EMBED) {
   })
 }
 
-// barre flottante « éléments » (TEST barre Figma, Adrien) : Lumière / Nuages /
-// Brume / Mer en bottom-center avec surmenu au survol — mode avancé seulement.
-// Les contrôles sont les MÊMES tirettes kit que les rails : registre
-// refreshAll partagé, les deux surfaces restent synchronisées.
+// barre flottante « éléments » (validée Adrien, réf. barre Figma) : Lumière /
+// Nuages / Brume / Mer en bottom-center, surmenu au survol, lignes
+// SCRUBBABLES (glisser = régler, clic sec = grande tirette, double-clic =
+// saisir). Mode avancé seulement ; commits → refreshAll (rails synchronisés).
 if (!IS_EMBED) {
-  const _cloudBaked = (label, key, min, max, step) => {
-    const s = kitSlider({ label, min, max, step, get: () => params[key], set: (v) => { params[key] = v } })
-    s.querySelector('input').addEventListener('change', () => clouds.build(params))
-    return s
-  }
+  const sl = (label, min, max, step, get, set) => ({ type: 'scrub', label, min, max, step, get, set })
+  const tg = (label, get, set) => ({ type: 'toggle', label, get, set })
+  const cloudBaked = (label, key, min, max, step) =>
+    sl(label, min, max, step, () => params[key], (v) => { params[key] = v; clouds.build(params) })
   buildElemBar([
     {
       key: 'lum', icon: 'sun', label: 'Lumière',
-      build: (m) => m.append(
-        kitSlider({ label: 'Heure', min: 0, max: 24, step: 0.1, get: () => params.timeOfDay ?? 10, set: (v) => { applyTimeOfDay(v); hourPill?.refresh?.() } }),
-        kitSlider({ label: 'Azimut', min: 0, max: 360, step: 1, get: () => params.sunAzimuth, set: (v) => { params.sunAzimuth = v; placeSun() } }),
-        kitSlider({ label: 'Élévation', min: 2, max: 90, step: 1, get: () => params.sunElevation, set: (v) => { params.sunElevation = v; placeSun() } }),
-        kitSlider({ label: 'Intensité', min: 0, max: 10, step: 0.1, get: () => params.sunIntensity, set: (v) => { params.sunIntensity = v; placeSun() } })
-      ),
+      controls: [
+        sl('Heure', 0, 24, 0.1, () => params.timeOfDay ?? 10, (v) => { applyTimeOfDay(v); hourPill?.refresh?.() }),
+        sl('Azimut', 0, 360, 1, () => params.sunAzimuth, (v) => { params.sunAzimuth = v; placeSun() }),
+        sl('Élévation', 2, 90, 1, () => params.sunElevation, (v) => { params.sunElevation = v; placeSun() }),
+        sl('Intensité', 0, 10, 0.1, () => params.sunIntensity, (v) => { params.sunIntensity = v; placeSun() }),
+      ],
     },
     {
       key: 'cld', icon: 'cloud', label: 'Nuages',
-      build: (m) => m.append(
-        kitToggle({ label: 'Nuages volumétriques', get: () => params.cloudsEnabled, set: (v) => { params.cloudsEnabled = v; clouds.build(params); refreshAll() } }),
-        kitSlider({ label: 'Densité', min: 0.05, max: 1.5, step: 0.05, get: () => params.cloudOpacity, set: (v) => { params.cloudOpacity = v } }),
-        _cloudBaked('Échelle', 'cloudScale', 0.5, 5, 0.1),
-        _cloudBaked('Altitude', 'cloudAltitude', 0, 16, 0.5)
-      ),
+      controls: [
+        tg('Nuages volumétriques', () => params.cloudsEnabled, (v) => { params.cloudsEnabled = v; clouds.build(params) }),
+        sl('Densité', 0.05, 1.5, 0.05, () => params.cloudOpacity, (v) => { params.cloudOpacity = v }),
+        cloudBaked('Échelle', 'cloudScale', 0.5, 5, 0.1),
+        cloudBaked('Altitude', 'cloudAltitude', 0, 16, 0.5),
+      ],
     },
     {
       key: 'fog', icon: 'fog', label: 'Brume',
-      build: (m) => m.append(
-        kitToggle({ label: 'Brume', get: () => params.fogEnabled, set: (v) => { params.fogEnabled = v; panelCtx.setFogEnabled(v); refreshAll() } }),
-        kitSlider({ label: 'Début', min: 5, max: 60, step: 0.5, get: () => params.fogNear, set: (v) => { params.fogNear = v; fogRef.near = v } }),
-        kitSlider({ label: 'Fin', min: 15, max: 90, step: 0.5, get: () => params.fogFar, set: (v) => { params.fogFar = v; fogRef.far = v } })
-      ),
+      controls: [
+        tg('Brume', () => params.fogEnabled, (v) => { params.fogEnabled = v; panelCtx.setFogEnabled(v) }),
+        sl('Début', 5, 60, 0.5, () => params.fogNear, (v) => { params.fogNear = v; fogRef.near = v }),
+        sl('Fin', 15, 90, 0.5, () => params.fogFar, (v) => { params.fogFar = v; fogRef.far = v }),
+      ],
     },
     {
       key: 'sea', icon: 'sea', label: 'Mer',
-      build: (m) => m.append(
-        kitToggle({ label: 'Mer animée', get: () => params.waterReal, set: (v) => { params.waterReal = v; waterRebuild(); refreshAll() } }),
-        kitSlider({ label: 'Hauteur des vagues', min: 0, max: 2, step: 0.05, get: () => params.seaWaveH, set: (v) => { params.seaWaveH = v; realWater?.setWaves({ height: v }) } }),
-        kitSlider({ label: 'Clapot', min: 0, max: 1, step: 0.05, get: () => params.seaChop, set: (v) => { params.seaChop = v; realWater?.setWaves({ choppiness: v }) } }),
-        kitSlider({ label: 'Vitesse', min: 0, max: 2, step: 0.05, get: () => params.seaSpeed, set: (v) => { params.seaSpeed = v; realWater?.setWaves({ speed: v }) } })
-      ),
+      controls: [
+        tg('Mer animée', () => params.waterReal, (v) => { params.waterReal = v; waterRebuild() }),
+        sl('Hauteur des vagues', 0, 2, 0.05, () => params.seaWaveH, (v) => { params.seaWaveH = v; realWater?.setWaves({ height: v }) }),
+        sl('Clapot', 0, 1, 0.05, () => params.seaChop, (v) => { params.seaChop = v; realWater?.setWaves({ choppiness: v }) }),
+        sl('Vitesse', 0, 2, 0.05, () => params.seaSpeed, (v) => { params.seaSpeed = v; realWater?.setWaves({ speed: v }) }),
+      ],
     },
   ])
 }

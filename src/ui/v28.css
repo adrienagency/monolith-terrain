@@ -280,6 +280,111 @@ body:has(.gpx-profile:not(.hidden)) .ce-elemwrap {
   margin: 2px 0 8px;
 }
 
+/* lignes scrubbables — label + valeur mono + filet, glisser = régler */
+.ce-scrub {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 9px 9px;
+  border-radius: 8px;
+  cursor: ew-resize;
+  user-select: none;
+  touch-action: none;
+}
+.ce-scrub:hover {
+  background: var(--ce-hover);
+}
+.ce-scrub .sc-lab {
+  font: 500 12px var(--ce-font);
+  color: var(--ce-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ce-scrub .sc-val {
+  font: 600 11.5px var(--ce-mono, ui-monospace, monospace);
+  color: var(--ce-ink);
+  opacity: 0.85;
+  flex: none;
+}
+.ce-scrub::after {
+  content: '';
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  bottom: 3px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ce-border);
+  pointer-events: none;
+}
+.ce-scrub .sc-fill {
+  position: absolute;
+  left: 9px;
+  bottom: 3px;
+  height: 2px;
+  max-width: calc(100% - 18px);
+  border-radius: 2px;
+  background: var(--ce-accent);
+  pointer-events: none;
+  z-index: 1;
+}
+.ce-scrub .sc-edit {
+  width: 64px;
+  font: 600 11.5px var(--ce-mono, ui-monospace, monospace);
+  color: var(--ce-ink);
+  background: var(--ce-hover);
+  border: 1px solid var(--ce-border);
+  border-radius: 6px;
+  padding: 2px 6px;
+  outline: none;
+}
+
+/* bonus : la barre devient UNE grande tirette (clic sec sur une ligne) */
+.ce-elembar .ce-elemfocus {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px 4px 4px;
+}
+.ce-elembar.focus .ce-elemtools {
+  display: none;
+}
+.ce-elembar.focus .ce-elemfocus {
+  display: flex;
+}
+.ce-elemtools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.ce-elemback {
+  border: 0;
+  background: var(--ce-hover);
+  cursor: pointer;
+  color: var(--ce-ink);
+  font-size: 16px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+}
+.ce-elemfocus-lab {
+  font: 600 12px var(--ce-font);
+  color: var(--ce-ink);
+  white-space: nowrap;
+}
+.ce-elemfocus-range {
+  width: 300px;
+}
+.ce-elemfocus-val {
+  font: 600 12px var(--ce-mono, ui-monospace, monospace);
+  color: var(--ce-accent);
+  min-width: 40px;
+  text-align: right;
+}
+
 /* palette « K » — recherche de réglages (table lumineuse, lot 4) */
 .ce-ksearch-veil {
   position: fixed;

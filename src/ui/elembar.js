@@ -1,13 +1,13 @@
-// Barre flottante « éléments » (TEST validé Adrien, réf. vidéo barre Figma) :
-// quatre outils bottom-center — Lumière ☀ Nuages ☁ Brume 🌫 Mer 🌊 — à la
-// place des stylos Figma ; le SURVOL ouvre un surmenu au-dessus avec les
-// réglages clés de la famille. Mode avancé uniquement ; si le test convainc,
-// ces familles quittent le rail droit (c'est l'objectif : le libérer).
-// Les contrôles RÉUTILISENT kit.js : mêmes tirettes, mêmes registres
-// refreshAll — un réglage bougé ici se resynchronise dans le rail, et vice
-// versa. Fermeture au départ du pointeur avec 260 ms de grâce (voyage
-// bouton → surmenu sans trou).
-import { el } from './kit.js'
+// Barre flottante « éléments » (validée Adrien, réf. barre Figma) : quatre
+// outils bottom-center, surmenu au survol. v2 « scrubbable » (validée) :
+// - chaque réglage est une LIGNE compacte label + valeur mono + filet de
+//   progression ; GLISSER horizontalement n'importe où sur la ligne change
+//   la valeur (pattern After Effects/Blender), double-clic = saisir un chiffre
+// - BONUS : un clic sec sur la ligne transforme la barre en UNE grande
+//   tirette pleine largeur (pattern Lightroom Mobile) — ‹ pour revenir
+// Toggles : interrupteurs kit classiques. Un commit (fin de scrub, grande
+// tirette relâchée) appelle refreshAll : les rails restent synchronisés.
+import { el, toggle as kitToggle, refreshAll } from './kit.js'
 
 const I = {
   sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3L7 7M17 17l1.7 1.7M18.7 5.3L17 7M7 17l-1.7 1.7"/></svg>',
@@ -16,27 +16,136 @@ const I = {
   sea: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 9c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 15c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/></svg>',
 }
 
+const fmt = (c, v) => (c.step >= 1 ? String(Math.round(v)) : (+v).toFixed(c.step >= 0.1 ? 1 : 2))
+const clampStep = (c, v) => Math.min(c.max, Math.max(c.min, Math.round(v / c.step) * c.step))
+
 export function buildElemBar(groups) {
   const bar = el('div', 'ce-elembar ce-glassbox')
+  const tools = el('div', 'ce-elemtools')
+  const focusRow = el('div', 'ce-elemfocus')
+  bar.append(tools, focusRow)
   const menu = el('div', 'ce-elemmenu ce-glassbox')
   let closeT = 0
   let openKey = null
+
+  // ---- bonus : la grande tirette pleine largeur (clic sec sur une ligne)
+  function enterFocus(c) {
+    menu.classList.remove('open')
+    bar.classList.add('focus')
+    focusRow.replaceChildren()
+    const back = el('button', 'ce-elemback')
+    back.type = 'button'
+    back.textContent = '‹'
+    back.title = 'Retour aux outils'
+    back.addEventListener('click', exitFocus)
+    const lab = el('span', 'ce-elemfocus-lab', c.label)
+    const range = el('input', 'ce-elemfocus-range')
+    range.type = 'range'
+    range.min = c.min
+    range.max = c.max
+    range.step = c.step
+    range.value = c.get()
+    const val = el('span', 'ce-elemfocus-val', fmt(c, c.get()))
+    range.addEventListener('input', () => { c.set(+range.value); val.textContent = fmt(c, +range.value) })
+    range.addEventListener('change', () => refreshAll())
+    focusRow.append(back, lab, range, val)
+  }
+  function exitFocus() {
+    bar.classList.remove('focus')
+    focusRow.replaceChildren()
+  }
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && bar.classList.contains('focus')) exitFocus() })
+
+  // ---- ligne scrubbable : label + valeur + filet, glisser = régler
+  function scrubRow(c) {
+    const row = el('div', 'ce-scrub')
+    const lab = el('span', 'sc-lab', c.label)
+    const val = el('span', 'sc-val')
+    const fill = el('i', 'sc-fill')
+    row.append(lab, val, fill)
+    const sync = () => {
+      const v = c.get()
+      val.textContent = fmt(c, v)
+      fill.style.width = (100 * (v - c.min) / (c.max - c.min)).toFixed(1) + '%'
+    }
+    sync()
+    let sx = 0
+    let sv = 0
+    let dragging = false
+    let moved = false
+    row.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return
+      dragging = true
+      moved = false
+      sx = e.clientX
+      sv = c.get()
+      try { row.setPointerCapture(e.pointerId) } catch {}
+    })
+    row.addEventListener('pointermove', (e) => {
+      if (!dragging) return
+      const dx = e.clientX - sx
+      if (!moved && Math.abs(dx) < 3) return
+      moved = true
+      // 220 px de glisse = toute la plage — assez doux pour être précis,
+      // assez court pour traverser la plage sans lever le poignet
+      c.set(clampStep(c, sv + (dx / 220) * (c.max - c.min)))
+      sync()
+    })
+    row.addEventListener('pointerup', (e) => {
+      if (!dragging) return
+      dragging = false
+      try { row.releasePointerCapture(e.pointerId) } catch {}
+      if (moved) refreshAll()
+      else enterFocus(c) // clic sec = grande tirette (bonus Lightroom Mobile)
+    })
+    row.addEventListener('pointercancel', () => { dragging = false })
+    // double-clic : saisir la valeur au clavier
+    row.addEventListener('dblclick', () => {
+      const inp = el('input', 'sc-edit')
+      inp.type = 'number'
+      inp.min = c.min
+      inp.max = c.max
+      inp.step = c.step
+      inp.value = c.get()
+      val.replaceWith(inp)
+      inp.focus()
+      inp.select()
+      const commit = () => {
+        const v = clampStep(c, +inp.value || c.get())
+        c.set(v)
+        inp.replaceWith(val)
+        sync()
+        refreshAll()
+      }
+      inp.addEventListener('blur', commit)
+      inp.addEventListener('keydown', (e) => {
+        e.stopPropagation()
+        if (e.key === 'Enter') inp.blur()
+        if (e.key === 'Escape') { inp.value = c.get(); inp.blur() }
+      })
+    })
+    return row
+  }
 
   const open = (g, btn) => {
     clearTimeout(closeT)
     if (openKey === g.key) return
     openKey = g.key
+    exitFocus()
     menu.replaceChildren(el('div', 'ce-elemmenu-title', g.label))
-    g.build(menu)
+    for (const c of g.controls) {
+      if (c.type === 'toggle') menu.append(kitToggle({ label: c.label, get: c.get, set: (v) => { c.set(v); refreshAll() } }))
+      else menu.append(scrubRow(c))
+    }
     menu.classList.add('open')
-    bar.querySelectorAll('.ce-elembar-btn').forEach((b) => b.classList.toggle('on', b === btn))
+    tools.querySelectorAll('.ce-elembar-btn').forEach((b) => b.classList.toggle('on', b === btn))
   }
   const scheduleClose = () => {
     clearTimeout(closeT)
     closeT = setTimeout(() => {
       openKey = null
       menu.classList.remove('open')
-      bar.querySelectorAll('.ce-elembar-btn').forEach((b) => b.classList.remove('on'))
+      tools.querySelectorAll('.ce-elembar-btn').forEach((b) => b.classList.remove('on'))
     }, 260)
   }
 
@@ -46,7 +155,7 @@ export function buildElemBar(groups) {
     btn.innerHTML = `${I[g.icon] || ''}<span>${g.label}</span>`
     btn.addEventListener('pointerenter', () => open(g, btn))
     btn.addEventListener('click', () => open(g, btn)) // tactile : pas de survol
-    bar.append(btn)
+    tools.append(btn)
   }
   bar.addEventListener('pointerleave', scheduleClose)
   menu.addEventListener('pointerenter', () => clearTimeout(closeT))
