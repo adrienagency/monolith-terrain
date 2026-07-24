@@ -92,7 +92,7 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
     const w = container.clientWidth
     const h = container.clientHeight
     // 1. projeter chaque ancre
-    const sides = { left: [], right: [] } // cartouche placé à droite/gauche de l'ancre
+    const vis = []
     for (const n of nodes.values()) {
       v.copy(n.item.world).project(camera)
       const off = v.z > 1 || v.x < -1.15 || v.x > 1.15 || v.y < -1.15 || v.y > 1.15
@@ -101,29 +101,92 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
       n.cart.classList.remove('rl-hidden'); n.anchor.classList.remove('rl-hidden'); n.leader.classList.remove('rl-hidden')
       n.ax = (v.x * 0.5 + 0.5) * w
       n.ay = (-v.y * 0.5 + 0.5) * h
-      n.hh = n.item.kind === 'transport' ? CHIP_H : CART_H
-      ;(n.ax < w * 0.5 ? sides.right : sides.left).push(n)
+      // la sous-ligne (altitude/barrière) déborde de ~14px sous le cartouche
+      const hasSub = n.item.kind !== 'transport' && (n.item.alt != null || n.item.cutoff)
+      n.hh = n.item.kind === 'transport' ? CHIP_H : CART_H + (hasSub ? 14 : 0)
+      n.fw = n.cart.offsetWidth
+      vis.push(n)
     }
-    // 2. anti-chevauchement par côté (débrayable — params.gpxLabelAvoid)
+    if (!vis.length) return
+    // 2. répartition en 4 DIRECTIONS autour du parcours (Adrien) : le centre
+    // écran des ancres fait office de centre du GPX — un point au sud du
+    // tracé pousse son cartouche vers le bas, à l'ouest vers la gauche, etc.
+    let cx = 0
+    let cy = 0
+    for (const n of vis) { cx += n.ax; cy += n.ay }
+    cx /= vis.length
+    cy /= vis.length
+    const groups = { left: [], right: [], top: [], bottom: [] }
+    for (const n of vis) {
+      const dx = n.ax - cx
+      const dy = n.ay - cy
+      const key = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'right' : 'left') : (dy >= 0 ? 'bottom' : 'top')
+      groups[key].push(n)
+    }
+    // 3. anti-chevauchement PAR DIRECTION (débrayable — params.gpxLabelAvoid) :
+    // gauche/droite s'empilent verticalement, haut/bas se répartissent
+    // horizontalement (layoutCartouches est 1D, on le réutilise sur x)
+    const avoid = params.gpxLabelAvoid !== false
+    const placed = []
     for (const key of ['right', 'left']) {
-      const group = sides[key]
+      const group = groups[key]
       if (!group.length) continue
       const ys = layoutCartouches(
         group.map((n) => ({ y: n.ay - n.hh / 2, h: n.hh })),
-        { avoid: params.gpxLabelAvoid !== false, gap: 8, minY: 4, maxY: h - 4 }
+        { avoid, gap: 8, minY: 4, maxY: h - 4 }
       )
       group.forEach((n, i) => {
-        const y = ys[i]
-        const x = key === 'right' ? n.ax + LEAD : n.ax - LEAD - n.cart.offsetWidth
-        n.cart.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`
-        n.anchor.style.transform = `translate(${Math.round(n.ax - 3.5)}px, ${Math.round(n.ay - 3.5)}px)`
-        // ligne de rappel : de l'ancre au bord du cartouche côté ancre
-        const tx = key === 'right' ? n.ax + LEAD : n.ax - LEAD
-        const ty = y + n.hh / 2
-        const ang = Math.atan2(ty - n.ay, tx - n.ax)
-        n.leader.style.width = `${Math.round(Math.hypot(tx - n.ax, ty - n.ay))}px`
-        n.leader.style.transform = `translate(${Math.round(n.ax)}px, ${Math.round(n.ay)}px) rotate(${ang.toFixed(4)}rad)`
+        n.side = key
+        n.fx = key === 'right' ? n.ax + LEAD : n.ax - LEAD - n.fw
+        n.fy = ys[i]
+        placed.push(n)
       })
+    }
+    for (const key of ['top', 'bottom']) {
+      const group = groups[key]
+      if (!group.length) continue
+      const xs = layoutCartouches(
+        group.map((n) => ({ y: n.ax - n.fw / 2, h: n.fw })),
+        { avoid, gap: 10, minY: 4, maxY: w - 4 }
+      )
+      group.forEach((n, i) => {
+        n.side = key
+        n.fx = xs[i]
+        n.fy = key === 'top' ? n.ay - LEAD - n.hh : n.ay + LEAD
+        placed.push(n)
+      })
+    }
+    // 2b. passe corrective INTER-côtés : deux cartouches de groupes opposés
+    // peuvent encore se croiser quand leurs x se recouvrent — on pousse le
+    // plus bas sous l'autre uniquement en cas d'intersection réelle
+    if (avoid && placed.length > 1) {
+      placed.sort((a, b) => a.fy - b.fy)
+      for (let i = 1; i < placed.length; i++) {
+        for (let j = 0; j < i; j++) {
+          const a = placed[j]
+          const b = placed[i]
+          const xHit = a.fx < b.fx + b.fw && b.fx < a.fx + a.fw
+          const yHit = b.fy < a.fy + a.hh + 4
+          if (xHit && yHit && b.fy + b.hh > a.fy) b.fy = Math.min(a.fy + a.hh + 8, h - b.hh - 4)
+        }
+      }
+    }
+    // 5. application DOM — la ligne de rappel vise le bord du cartouche
+    // côté ancre (pointillés neutres, jamais la couleur du tracé — Adrien)
+    for (const n of placed) {
+      n.cart.style.transform = `translate(${Math.round(n.fx)}px, ${Math.round(n.fy)}px)`
+      n.anchor.style.transform = `translate(${Math.round(n.ax - 3.5)}px, ${Math.round(n.ay - 3.5)}px)`
+      let tx
+      let ty
+      if (n.side === 'right') { tx = n.fx; ty = n.fy + n.hh / 2 }
+      else if (n.side === 'left') { tx = n.fx + n.fw; ty = n.fy + n.hh / 2 }
+      else {
+        tx = Math.min(Math.max(n.ax, n.fx + 8), n.fx + n.fw - 8)
+        ty = n.side === 'top' ? n.fy + n.hh : n.fy
+      }
+      const ang = Math.atan2(ty - n.ay, tx - n.ax)
+      n.leader.style.width = `${Math.round(Math.hypot(tx - n.ax, ty - n.ay))}px`
+      n.leader.style.transform = `translate(${Math.round(n.ax)}px, ${Math.round(n.ay)}px) rotate(${ang.toFixed(4)}rad)`
     }
   }
 
