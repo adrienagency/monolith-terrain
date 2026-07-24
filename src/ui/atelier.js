@@ -5,14 +5,22 @@
 // les changements persistent. « Boutique » et « Quitter » sont les sorties.
 import './atelier.css'
 import { makeMorph } from './panel-morph.js'
-import { TEMPLATES } from '../templates.js'
 
 const CATALOG_URL = '/templates/data.json'
+// Templates PAR DÉFAUT = de vrais fichiers .shibumap-template (look COMPLET +
+// vignette), pas des rampes de couleurs — distinction importante (Adrien) :
+// palette = couleurs seules, template = tout le look. Fichiers dans
+// public/templates/defaults/, chargés au premier passage sur l'onglet.
+const DEFAULT_TPL_URLS = [
+  'the-main-stuff', 'isolated', 'light', 'realistic',
+  'bronze', 'white-valley', 'yellow-glass', 'carbon',
+].map((n) => `/templates/defaults/${n}.json`)
 
 export function buildAtelier(deps) {
   let open = false
   let section = 'palettes'
   let shop = null // aperçu boutique (8 palettes), chargé au premier enter
+  let defTpls = null // templates par défaut (fichiers complets), chargés à la demande
 
   const morph = makeMorph({ modeClass: 'atelier-mode', onSettle: () => window.dispatchEvent(new Event('resize')) })
 
@@ -86,35 +94,57 @@ export function buildAtelier(deps) {
     }
   }
 
+  // carte template : vignette image si disponible, sinon bande de couleurs.
+  // La vignette vient du fichier (dataURL user-supplied) → DOM APIs, pas innerHTML.
+  function tplCard(t) {
+    const c = document.createElement('button')
+    c.type = 'button'
+    c.className = 'at-card at-tpl'
+    if (t.thumb) {
+      // pas de loading=lazy : la vignette est une dataURL déjà en mémoire
+      const img = document.createElement('img')
+      img.src = t.thumb
+      img.alt = ''
+      c.append(img)
+    } else {
+      c.insertAdjacentHTML('afterbegin', strip((t.strip || []).filter((x) => /^#/.test(x))))
+    }
+    const nm = document.createElement('span')
+    nm.className = 'at-nm'
+    nm.textContent = t.name || 'Look'
+    c.append(nm)
+    c.addEventListener('click', () => deps.applyUserTemplate(t))
+    return c
+  }
+
+  async function loadDefaultTemplates() {
+    const all = await Promise.all(DEFAULT_TPL_URLS.map(async (u) => {
+      try {
+        const t = await (await fetch(u)).json()
+        return t?.format === 'shibumap-template' && t.look ? t : null
+      } catch { return null }
+    }))
+    defTpls = all.filter(Boolean)
+  }
+
   function secTemplates() {
     body.innerHTML = `<h3>Templates</h3>
-      <p class="hint">Un clic restyle toute la carte — vos looks enregistrés se rangent ici.</p>`
+      <p class="hint">Un template applique un look complet (couleurs, lumière, matières, ciel…) — vos looks enregistrés se rangent ici.</p>`
+    if (!defTpls) {
+      body.insertAdjacentHTML('beforeend', '<p class="hint">Chargement…</p>')
+      loadDefaultTemplates().then(() => { if (open && section === 'templates') render() })
+      return
+    }
     const g = document.createElement('div')
     g.className = 'at-grid'
-    for (const key of Object.keys(TEMPLATES)) {
-      const t = TEMPLATES[key]
-      const c = document.createElement('button')
-      c.type = 'button'
-      c.className = 'at-card'
-      const stops = t.palette?.rampStops?.map((s) => s.c) ?? []
-      c.innerHTML = `${strip(stops)}<span class="at-nm">${(t.label ?? key).replace(/-/g, ' ')}</span>`
-      c.addEventListener('click', () => deps.applyTemplate(t))
-      g.append(c)
-    }
+    for (const t of defTpls) g.append(tplCard(t))
     body.append(g)
     const mine = deps.getUserTemplates() || []
     if (mine.length) {
       body.insertAdjacentHTML('beforeend', '<div class="at-cat">Vos templates</div>')
       const g2 = document.createElement('div')
       g2.className = 'at-grid'
-      for (const t of mine) {
-        const c = document.createElement('button')
-        c.type = 'button'
-        c.className = 'at-card'
-        c.innerHTML = `${strip((t.strip || []).filter((x) => /^#/.test(x)))}<span class="at-nm">${t.name || 'Look'}</span>`
-        c.addEventListener('click', () => deps.applyUserTemplate(t))
-        g2.append(c)
-      }
+      for (const t of mine) g2.append(tplCard(t))
       body.append(g2)
     }
   }

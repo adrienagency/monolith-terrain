@@ -4030,7 +4030,6 @@ const atelier = buildAtelier({
   generatePalette: generateEarthPalette,
   saveCurrentPalette: (name) => panelCtx.saveCurrentPalette(name),
   userPalettes: () => userPalettes,
-  applyTemplate: (t) => { applyTemplate(t); refreshAll() },
   getUserTemplates: () => userTemplates,
   applyUserTemplate: (t) => { applyUserTemplate(t); refreshAll() },
   environments: ENVIRONMENTS,
