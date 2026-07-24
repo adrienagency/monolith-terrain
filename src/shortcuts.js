@@ -80,8 +80,8 @@ export function matchShortcut(e) {
 // simply letting it reach matchShortcut like any other key.
 export function bindShortcuts(ctx) {
   window.addEventListener('keydown', (e) => {
-    // boutique in-app ouverte : clavier app off (Échap est géré par store.js)
-    if (document.body.classList.contains('store-mode') || document.body.classList.contains('studio-mode')) return
+    // boutique / studios ouverts : clavier app off (Échap géré par chaque mode)
+    if (document.body.classList.contains('store-mode') || document.body.classList.contains('studio-mode') || document.body.classList.contains('atelier-mode')) return
     const t = document.activeElement
     const tag = t && t.tagName
     const isTextField = !!t && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable)

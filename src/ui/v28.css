@@ -936,17 +936,24 @@ body.ce-noui .ce-credits,
 body.ce-noui .gpx-profile,
 body.store-mode .ce-topbar,
 body.studio-mode .ce-topbar,
+body.atelier-mode .ce-topbar,
 body.store-mode .ce-bottombar,
 body.studio-mode .ce-bottombar,
+body.atelier-mode .ce-bottombar,
 body.store-mode .ce-panel,
 body.studio-mode .ce-panel,
+body.atelier-mode .ce-panel,
 body.store-mode .hud,
 body.studio-mode .hud,
+body.atelier-mode .hud,
 body.store-mode .altimeter,
 body.studio-mode .altimeter,
+body.atelier-mode .altimeter,
 body.store-mode .ce-credits,
 body.studio-mode .ce-credits,
+body.atelier-mode .ce-credits,
 body.studio-mode .gpx-profile,
+body.atelier-mode .gpx-profile,
 body.store-mode .gpx-profile {
   display: none !important;
 }
@@ -974,12 +981,16 @@ body.ce-embed .zoom-stepper,
 body.ce-embed .ce-changelog-btn,
 body.store-mode .ce-eye,
 body.studio-mode .ce-eye,
+body.atelier-mode .ce-eye,
 body.store-mode .ce-hourpill,
 body.studio-mode .ce-hourpill,
+body.atelier-mode .ce-hourpill,
 body.store-mode .zoom-stepper,
 body.studio-mode .zoom-stepper,
+body.atelier-mode .zoom-stepper,
 body.store-mode .ce-changelog-btn,
-body.studio-mode .ce-changelog-btn {
+body.studio-mode .ce-changelog-btn,
+body.atelier-mode .ce-changelog-btn {
   display: none !important;
 }
 .ce-eye svg {
@@ -1138,7 +1149,8 @@ body.ce-noui .ce-isobtn {
 .ce-mapbtn.off,
 body.ce-noui .ce-mapbtn,
 body.store-mode .ce-mapbtn,
-body.studio-mode .ce-mapbtn {
+body.studio-mode .ce-mapbtn,
+body.atelier-mode .ce-mapbtn {
   display: none;
 }
 

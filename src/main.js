@@ -34,7 +34,7 @@ import { worldToLatLon, latLonToWorld } from './geo.js'
 import { fetchTransports } from './transports.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
-import { monochromeLook } from './palette.js'
+import { monochromeLook, generateEarthPalette } from './palette.js'
 import { peakVantage } from './camera-poses.js'
 import { focusRayHit } from './autofocus.js'
 import { GroundInfoLayer } from './ground-info-layer.js'
@@ -77,6 +77,7 @@ import { buildTemplatesPanel } from './ui/templates-panel.js'
 import { buildCreatePanel } from './ui/create-panel.js'
 import { buildStore } from './ui/store.js'
 import { buildStudio } from './ui/studio.js'
+import { buildAtelier } from './ui/atelier.js'
 import { buildHub } from './ui/hub.js'
 import { buildCameraPanel } from './ui/camera-panel.js'
 import { buildRoutePanel } from './ui/route-panel.js'
@@ -4021,10 +4022,27 @@ const studio = buildStudio({
 })
 panelCtx.openStudio = () => studio.enter()
 
+// ---- Studio unifié (UX P2 — src/ui/atelier.js) ---------------------------
+// L'espace création : Palettes / Templates / Ciel sur SA carte, sans snapshot
+// (les changements persistent). La boutique reste l'espace d'achat séparé.
+const atelier = buildAtelier({
+  applyPalette: (p) => { applyPaletteWithBg(p); refreshAll() },
+  generatePalette: generateEarthPalette,
+  saveCurrentPalette: (name) => panelCtx.saveCurrentPalette(name),
+  userPalettes: () => userPalettes,
+  applyTemplate: (t) => { applyTemplate(t); refreshAll() },
+  getUserTemplates: () => userTemplates,
+  applyUserTemplate: (t) => { applyUserTemplate(t); refreshAll() },
+  environments: ENVIRONMENTS,
+  getBgEnv: () => params.bgEnv || '',
+  setBgEnv: (id) => { params.bgEnv = id || ''; applyBackground() },
+  openStore: () => store.enter(),
+})
+
 // ---- HUB d'accueil (UX P1) — le popup des trois portes ---------------------
 const hub = buildHub({
   onExplore: () => {},
-  onStudio: () => store.enter(), // en attendant l'espace Studio unifié (P2)
+  onStudio: () => atelier.enter(),
   onParcours: () => studio.enter(),
   focusSearch: () => document.querySelector('.ce-search input')?.focus(),
 })
