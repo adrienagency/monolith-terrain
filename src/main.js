@@ -2281,6 +2281,8 @@ const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: (
 // raceState est rempli par le studio (src/ui/studio.js) ; les cartouches se
 // projettent chaque frame (taille constante, anti-chevauchement débrayable).
 const raceState = { name: '', logo: null, waypoints: [], transports: { cats: [], removed: [], pois: [] } }
+const _headSpeed = { km: 0, t: 0, v: 0 } // vitesse estimée de la tête (km/s), lissée
+let _wasPlaying = false // détection de FIN de lecture (finale iso)
 const raceLabels = buildRaceLabels({
   container,
   camera,
@@ -2292,9 +2294,21 @@ const raceLabels = buildRaceLabels({
     // « quand je quitte la course, les étiquettes disparaissent » — pas de
     // trace = rien ; œil fermé ou infos course désactivées = rien non plus
     if (!track?.world || lay.visible === false || lay.showRaceInfo === false) return items
-    // en lecture, un cartouche n'apparaît que quand la tête l'a atteint
+    // en lecture, un cartouche n'apparaît que ~1,5 s AVANT le passage de la
+    // tête et s'efface ~4 s après (Adrien) — fenêtre en km via la vitesse
+    // estimée de la tête ; hors lecture, tout est visible
     const totKm = track.cumKm[track.cumKm.length - 1]
-    const headKm = gpxLayer.isPlaying?.() ? (gpxLayer.headT ?? 1) * totKm : Infinity
+    const playing = gpxLayer.isPlaying?.()
+    const headKm = playing ? (gpxLayer.headT ?? 1) * totKm : Infinity
+    const now = performance.now()
+    if (playing) {
+      const dts = Math.max(1e-3, (now - (_headSpeed.t || now)) / 1000)
+      if (_headSpeed.t) _headSpeed.v = _headSpeed.v * 0.9 + (Math.max(0, headKm - _headSpeed.km) / dts) * 0.1
+      _headSpeed.km = headKm
+      _headSpeed.t = now
+    } else { _headSpeed.t = 0; _headSpeed.v = 0 }
+    const kmLead = playing ? Math.max(0.05, _headSpeed.v * 1.5) : Infinity
+    const kmTail = playing ? Math.max(0.15, _headSpeed.v * 4) : Infinity
     // règle du damier (Adrien) : ce qui sort des blocs chargés (5×5 max) est
     // COUPÉ — un point au-delà de l'emprise réelle ne s'affiche pas
     const covered = (p) => {
@@ -2304,7 +2318,7 @@ const raceLabels = buildRaceLabels({
     }
     {
       for (const w of raceState.waypoints) {
-        if (w.km > headKm) continue
+        if (playing && (w.km > headKm + kmLead || w.km < headKm - kmTail)) continue
         if (w.idx == null || !track.world[w.idx]) continue
         if (!covered(track.world[w.idx])) continue
         items.push({
@@ -2450,6 +2464,9 @@ gpxLayer.onChange = (layers) => {
 }
 
 async function loadGpxText(text) {
+  // mode GPX : les noms de sommets sont coupés par défaut (Adrien) — la
+  // course est le sujet, pas la toponymie ; réactivables dans le panneau
+  if (params.peaksEnabled) { params.peaksEnabled = false; peaksLayer.setEnabled(false) }
   try {
     const entry = gpxLayer.addLayer(text)
     if (!entry) {
@@ -3722,6 +3739,21 @@ function tick() {
   // (otherwise labels are projected with last frame's matrices and lag behind)
   camera.updateMatrixWorld()
   raceLabels.update() // cartouches Race Studio — même règle de fraîcheur
+  // FINALE (Adrien) : quand la lecture atteint la fin, la caméra prend du
+  // recul en vue isométrique 1 — parcours entier, tous les cartouches, et
+  // les flancs du bloc (nom, logo, D+/D-, distance) face caméra
+  {
+    const playingNow = gpxLayer.isPlaying?.()
+    if (playingNow) _wasPlaying = true
+    else if (_wasPlaying) {
+      _wasPlaying = false
+      if ((gpxLayer.headT ?? 0) >= 0.999 && raceState.waypoints.length) {
+        params.gpxFollow = false
+        drone.stop()
+        applyIsoView(0)
+      }
+    }
+  }
 
   if (!params.paused && modes.mode === 'surface') {
     hud3.update(dt, t, params)

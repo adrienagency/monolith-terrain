@@ -87,7 +87,7 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
   function update() {
     if (!params.gpxCartouches) { root.classList.add('rl-hidden'); return }
     root.classList.remove('rl-hidden')
-    if (dirty) sync()
+    sync() // toujours — un zoom reconstruit les blocs et leurs Vector3
     if (!nodes.size) return
     const w = container.clientWidth
     const h = container.clientHeight
@@ -143,12 +143,19 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
     cx /= vis.length
     cy /= vis.length
     const groups = { left: [], right: [], top: [], bottom: [] }
+    // vue rasante (caméra basse : l'emprise s'aplatit à l'écran) → deux
+    // RANGÉES seulement, et les points lointains montent dans le CIEL au
+    // lieu de s'entasser en bas (Adrien)
+    const flat = by1 - by0 < h * 0.42
     for (const n of vis) {
       const dx = n.ax - cx
       const dy = n.ay - cy
-      const key = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'right' : 'left') : (dy >= 0 ? 'bottom' : 'top')
+      const key = flat
+        ? (dy < 0 ? 'top' : 'bottom')
+        : Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'right' : 'left') : (dy >= 0 ? 'bottom' : 'top')
       groups[key].push(n)
     }
+    const skyY0 = 4 // la rangée du haut peut sortir de l'emprise, vers le ciel
     // 3. anti-chevauchement PAR DIRECTION (débrayable — params.gpxLabelAvoid) :
     // gauche/droite s'empilent verticalement, haut/bas se répartissent
     // horizontalement (layoutCartouches est 1D, on le réutilise sur x)
@@ -180,7 +187,8 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
       group.forEach((n, i) => {
         n.side = key
         n.fx = xs[i]
-        n.fy = Math.min(Math.max(key === 'top' ? n.ay - LEAD - n.hh : n.ay + LEAD, by0), by1 - n.hh)
+        const yMin = key === 'top' ? skyY0 : by0
+        n.fy = Math.min(Math.max(key === 'top' ? n.ay - LEAD - n.hh : n.ay + LEAD, yMin), by1 - n.hh)
         placed.push(n)
       })
     }
@@ -199,6 +207,24 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
         }
       }
     }
+    // 4b. zones interdites : l'UI (profil de course, barre du bas) ne doit
+    // JAMAIS recouvrir un cartouche — on le pousse juste au-dessus
+    const cref = container.getBoundingClientRect()
+    for (const selUI of ['.gpx-profile:not(.hidden)', '.ce-bottombar']) {
+      const elUI = document.querySelector(selUI)
+      if (!elUI) continue
+      const r = elUI.getBoundingClientRect()
+      if (!r.width) continue
+      const ox0 = r.left - cref.left - 6
+      const oy0 = r.top - cref.top - 6
+      const ox1 = r.right - cref.left + 6
+      for (const n of placed) {
+        if (n.fx + n.fw > ox0 && n.fx < ox1 && n.fy + n.hh > oy0) {
+          n.fy = Math.max(4, oy0 - n.hh)
+        }
+      }
+    }
+
     // 5. application DOM — le cartouche GLISSE vers sa place (lissage
     // exponentiel ≈ ease-in-out, demande Adrien) ; la ligne de rappel vise
     // son bord côté ancre (pointillés neutres, jamais la couleur du tracé)
