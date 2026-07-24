@@ -141,7 +141,7 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
     const uiRects = []
     {
       const cref = container.getBoundingClientRect()
-      for (const selUI of ['.gpx-profile:not(.hidden)', '.ce-bottombar']) {
+      for (const selUI of ['.gpx-profile:not(.hidden)', '.ce-bottombar', '.ce-topbar', '.ce-hourpill', '.zoom-stepper']) {
         const elUI = document.querySelector(selUI)
         if (!elUI) continue
         const r = elUI.getBoundingClientRect()
@@ -161,9 +161,25 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
     for (const n of vis) {
       n.declutter = false
       if (n.item.kind === 'start') {
-        // épinglée en HAUT de page, centrée, au-dessus de tout
-        n.fx = Math.min(Math.max((w - n.fw) / 2, 2), w - n.fw - 2)
-        n.fy = 8
+        // la plus haute possible SANS passer derrière l'UI : on descend par
+        // pas depuis le haut jusqu'à la première place libre ; si rien ne
+        // rentre en pleine largeur, version COMPACTE (mot + km seulement)
+        const tryPlace = () => {
+          const fx = Math.min(Math.max((w - n.fw) / 2, 2), w - n.fw - 2)
+          for (let y = 8; y < h * 0.5; y += 24) {
+            if (free(fx, y, n.fw, n.hh)) { n.fx = fx; n.fy = y; return true }
+          }
+          return false
+        }
+        let ok2 = tryPlace()
+        if (!ok2) {
+          n.cart.classList.add('rl-mini') // masque logo + nom → mot + km
+          n.fw = n.cart.offsetWidth
+          ok2 = tryPlace()
+        } else {
+          n.cart.classList.remove('rl-mini')
+        }
+        if (!ok2) { n.fx = Math.min(Math.max((w - n.fw) / 2, 2), w - n.fw - 2); n.fy = 8 }
         n.side = 'top'
         placed.push(n)
         continue

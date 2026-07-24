@@ -1027,6 +1027,7 @@ let controlsHeld = false
 // pendant le suivi, le rail ne reprend PLUS la main — la caméra reste où il
 // l'a mise et ne fait que VISER la tête. Réarmé à chaque nouveau Play.
 let followManual = false
+let followZoomVel = 0 // élan de zoom molette en suivi (log-échelle / s)
 controls.addEventListener('start', () => {
   tween.active = false
   tour.active = false
@@ -1565,15 +1566,10 @@ modes = new Modes({
     // drone (consommé → l'escalier de zoom ne voit pas l'événement)
     followWheel: (deltaY) => {
       if (!(drone.active && params.gpxFollow && gpxLayer.isPlaying())) return false
-      if (followManual) {
-        // mode libre : la molette dolly autour de la tête, sans limite de rail
-        const f = deltaY > 0 ? 1.13 : 1 / 1.13
-        camera.position.sub(controls.target).multiplyScalar(f).add(controls.target)
-        controls.update()
-        drone.syncToCamera()
-      } else {
-        drone.zoomBy(deltaY > 0 ? 1.13 : 1 / 1.13)
-      }
+      // zoom INERTIEL (Adrien) : chaque cran ajoute de l'élan, le glissé se
+      // fait au frame dans updateCameraMotion — aucun à-coup, ~20 crans de
+      // course avec décélération douce, comme la molette de la carte
+      followZoomVel = Math.min(2.4, Math.max(-2.4, followZoomVel + Math.sign(deltaY) * 0.32))
       return true
     },
     // world point under a screen NDC (for zoom-toward-cursor) — marches the
@@ -2656,6 +2652,7 @@ function flyTrack() {
 function engageGpxFollow() {
   if (!params.gpxFollow || !gpxLayer.isPlaying() || modes.mode !== 'surface') return
   followManual = false // nouveau Play → le rail reprend (jusqu'au 1er geste)
+  followZoomVel = 0
   const w = gpxLayer.track?.world
   if (!w || w.length < 2) return
   tour.active = false
@@ -3681,6 +3678,17 @@ function updateCameraMotion(dt) {
     // the drone's own framing under its existing rate caps/damping — never
     // a snap. drone.active/gpxFollow are never touched here, so this is a
     // suspend, not a stop (see the controls 'start' handler above).
+    // élan de zoom molette : appliqué au frame, décéléré exponentiellement
+    if (followZoomVel) {
+      const f = Math.exp(followZoomVel * dt * 1.35)
+      if (controlsHeld || followManual) {
+        camera.position.sub(controls.target).multiplyScalar(f).add(controls.target)
+      } else {
+        drone.dist = Math.min(60, Math.max(3, drone.dist * f))
+      }
+      followZoomVel *= Math.exp(-dt * 2.1)
+      if (Math.abs(followZoomVel) < 0.01) followZoomVel = 0
+    }
     if (controlsHeld || followManual) {
       // mode LIBRE : position caméra = l'utilisateur ; cible = la tête
       drone.followPivot(gpxLayer.headT)
@@ -3798,8 +3806,24 @@ function tick() {
       _wasPlaying = false
       if ((gpxLayer.headT ?? 0) >= 0.999 && raceState.waypoints.length) {
         params.gpxFollow = false
+        followManual = false
+        followZoomVel = 0
         drone.stop()
-        applyIsoView(0)
+        // cadrage FINAL : toute la course visible, toutes les étapes — la
+        // caméra se place en biais élevé à la distance qui englobe la bbox
+        // du tracé (marge 1.35), quel que soit le parcours
+        const track = gpxLayer.activeLayer?.gpx?.track
+        if (track?.world?.length) {
+          const box = new THREE.Box3()
+          for (const pw of track.world) box.expandByPoint(pw)
+          const ctr = box.getCenter(new THREE.Vector3())
+          const sph = box.getBoundingSphere(new THREE.Sphere())
+          const dist = (sph.radius * 1.35) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
+          const dir = new THREE.Vector3(0.5, 0.85, 0.6).normalize()
+          flyTo(ctr.clone().addScaledVector(dir, dist), ctr)
+        } else {
+          applyIsoView(0)
+        }
       }
     }
   }

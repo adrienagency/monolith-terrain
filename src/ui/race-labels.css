@@ -118,6 +118,7 @@ body.studio-mode .rl-chip .rl-x { display: inline; }
   position: absolute; top: 100%; left: 12px; margin-top: 2px;
   background: rgba(23, 25, 27, 0.85); border-radius: 3px; padding: 1px 4px;
 }
+.rl-start.rl-mini .rl-start-logo, .rl-start.rl-mini .rl-start-name, .rl-start.rl-mini .rl-picto { display: none; }
 .rl-start .rl-start-km {
   background: var(--rl-accent, #ff4d00); color: #fff;
   font-size: 10.5px; font-weight: 800; letter-spacing: 0.04em;
