@@ -69,6 +69,7 @@ import { showNotice } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickBar, buildShibuChrome, initUiLevel } from './ui/bars.js'
 import { buildMiniRoute } from './ui/mini-route.js'
+import { buildSettingsSearch } from './ui/settings-search.js'
 import { TEMPLATES } from './templates.js'
 import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
 import { buildChangelogOverlay } from './ui/changelog-overlay.js'
@@ -3635,6 +3636,20 @@ const routePanel = buildRoutePanel({
   openStudio: () => studio.enter(),
   refreshRaceLabels: () => raceLabels.setDirty(),
 })
+
+// palette « K » — recherche de réglages + actions (table lumineuse, lot 4).
+// L'index scanne le DOM des panneaux à l'ouverture ; jamais en embed/shibu.
+if (!IS_EMBED) {
+  buildSettingsSearch({
+    actions: [
+      { label: 'Ouvrir le Studio (habiller ma carte)', run: () => panelCtx.openAtelier?.() },
+      { label: 'Ouvrir le Race Studio (ma course)', run: () => panelCtx.openStudio?.() },
+      { label: 'Boutique de templates', run: () => panelCtx.openStore?.() },
+      { label: 'Exporter une image ou une vidéo', run: () => openExportUI() },
+      { label: 'Réinitialiser la carte', run: () => { resetAll(); refreshAll() } },
+    ],
+  })
+}
 
 // mini panneau Parcours du mode simple (gestion des blocs + Lecture) —
 // construit APRÈS le panneau complet pour chaîner ses hooks onChange

@@ -207,6 +207,82 @@ body.dark {
   outline: none;
 }
 
+/* palette « K » — recherche de réglages (table lumineuse, lot 4) */
+.ce-ksearch-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 230;
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14vh;
+  background: color-mix(in srgb, #000 22%, transparent);
+}
+.ce-ksearch-veil.open {
+  display: flex;
+}
+.ce-ksearch {
+  width: min(560px, calc(100vw - 40px));
+  border-radius: 16px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ce-ksearch-input {
+  width: 100%;
+  font: 500 14px var(--ce-font);
+  color: var(--ce-ink);
+  background: var(--ce-hover);
+  border: 1px solid var(--ce-border);
+  border-radius: 10px;
+  padding: 11px 14px;
+  outline: none;
+}
+.ce-ksearch-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.ce-ksearch-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  padding: 9px 12px;
+  border-radius: 9px;
+  color: var(--ce-ink);
+  font-family: var(--ce-font);
+}
+.ce-ksearch-row.sel,
+.ce-ksearch-row:hover {
+  background: var(--ce-hover);
+}
+.ce-ksearch-row b {
+  font-size: 13px;
+  font-weight: 600;
+}
+.ce-ksearch-row i {
+  font-style: normal;
+  font-size: 11px;
+  opacity: 0.55;
+  margin-left: auto;
+  white-space: nowrap;
+}
+@keyframes ce-kpulse {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  30% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ce-accent) 55%, transparent); }
+  60% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ce-accent) 35%, transparent); }
+}
+.ce-kpulse {
+  animation: ce-kpulse 1.5s ease;
+  border-radius: 8px;
+}
+
 /* menu « Publier » (UX P4) — les trois sorties consolidées sous la topbar */
 .ce-pubmenu {
   position: fixed;
