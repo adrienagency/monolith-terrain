@@ -71,6 +71,8 @@ import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCred
 import { buildMiniRoute } from './ui/mini-route.js'
 import { buildSettingsSearch } from './ui/settings-search.js'
 import { buildLightPanel } from './ui/light-panel.js'
+import { buildElemBar } from './ui/elembar.js'
+import { slider as kitSlider, toggle as kitToggle } from './ui/kit.js'
 import { initRails } from './ui/shell.js'
 import { TEMPLATES } from './templates.js'
 import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
@@ -3681,6 +3683,55 @@ if (!IS_EMBED) {
       { label: 'Réinitialiser la carte', run: () => { resetAll(); refreshAll() } },
     ],
   })
+}
+
+// barre flottante « éléments » (TEST barre Figma, Adrien) : Lumière / Nuages /
+// Brume / Mer en bottom-center avec surmenu au survol — mode avancé seulement.
+// Les contrôles sont les MÊMES tirettes kit que les rails : registre
+// refreshAll partagé, les deux surfaces restent synchronisées.
+if (!IS_EMBED) {
+  const _cloudBaked = (label, key, min, max, step) => {
+    const s = kitSlider({ label, min, max, step, get: () => params[key], set: (v) => { params[key] = v } })
+    s.querySelector('input').addEventListener('change', () => clouds.build(params))
+    return s
+  }
+  buildElemBar([
+    {
+      key: 'lum', icon: 'sun', label: 'Lumière',
+      build: (m) => m.append(
+        kitSlider({ label: 'Heure', min: 0, max: 24, step: 0.1, get: () => params.timeOfDay ?? 10, set: (v) => { applyTimeOfDay(v); hourPill?.refresh?.() } }),
+        kitSlider({ label: 'Azimut', min: 0, max: 360, step: 1, get: () => params.sunAzimuth, set: (v) => { params.sunAzimuth = v; placeSun() } }),
+        kitSlider({ label: 'Élévation', min: 2, max: 90, step: 1, get: () => params.sunElevation, set: (v) => { params.sunElevation = v; placeSun() } }),
+        kitSlider({ label: 'Intensité', min: 0, max: 10, step: 0.1, get: () => params.sunIntensity, set: (v) => { params.sunIntensity = v; placeSun() } })
+      ),
+    },
+    {
+      key: 'cld', icon: 'cloud', label: 'Nuages',
+      build: (m) => m.append(
+        kitToggle({ label: 'Nuages volumétriques', get: () => params.cloudsEnabled, set: (v) => { params.cloudsEnabled = v; clouds.build(params); refreshAll() } }),
+        kitSlider({ label: 'Densité', min: 0.05, max: 1.5, step: 0.05, get: () => params.cloudOpacity, set: (v) => { params.cloudOpacity = v } }),
+        _cloudBaked('Échelle', 'cloudScale', 0.5, 5, 0.1),
+        _cloudBaked('Altitude', 'cloudAltitude', 0, 16, 0.5)
+      ),
+    },
+    {
+      key: 'fog', icon: 'fog', label: 'Brume',
+      build: (m) => m.append(
+        kitToggle({ label: 'Brume', get: () => params.fogEnabled, set: (v) => { params.fogEnabled = v; panelCtx.setFogEnabled(v); refreshAll() } }),
+        kitSlider({ label: 'Début', min: 5, max: 60, step: 0.5, get: () => params.fogNear, set: (v) => { params.fogNear = v; fogRef.near = v } }),
+        kitSlider({ label: 'Fin', min: 15, max: 90, step: 0.5, get: () => params.fogFar, set: (v) => { params.fogFar = v; fogRef.far = v } })
+      ),
+    },
+    {
+      key: 'sea', icon: 'sea', label: 'Mer',
+      build: (m) => m.append(
+        kitToggle({ label: 'Mer animée', get: () => params.waterReal, set: (v) => { params.waterReal = v; waterRebuild(); refreshAll() } }),
+        kitSlider({ label: 'Hauteur des vagues', min: 0, max: 2, step: 0.05, get: () => params.seaWaveH, set: (v) => { params.seaWaveH = v; realWater?.setWaves({ height: v }) } }),
+        kitSlider({ label: 'Clapot', min: 0, max: 1, step: 0.05, get: () => params.seaChop, set: (v) => { params.seaChop = v; realWater?.setWaves({ choppiness: v }) } }),
+        kitSlider({ label: 'Vitesse', min: 0, max: 2, step: 0.05, get: () => params.seaSpeed, set: (v) => { params.seaSpeed = v; realWater?.setWaves({ speed: v }) } })
+      ),
+    },
+  ])
 }
 
 // mini panneau Parcours du mode simple (gestion des blocs + Lecture) —

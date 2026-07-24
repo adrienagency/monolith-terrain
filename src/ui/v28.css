@@ -207,6 +207,79 @@ body.dark {
   outline: none;
 }
 
+/* barre flottante « éléments » (test Figma, Adrien) + surmenu au survol */
+.ce-elemwrap {
+  position: fixed;
+  bottom: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 62;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+body:not(.ce-simple) .ce-elemwrap {
+  display: flex;
+}
+body.ce-noui .ce-elemwrap,
+body.ce-embed .ce-elemwrap,
+body.store-mode .ce-elemwrap,
+body.studio-mode .ce-elemwrap,
+body.atelier-mode .ce-elemwrap,
+body.shibu-view .ce-elemwrap,
+/* le profil GPX occupe le même emplacement : il a priorité */
+body:has(.gpx-profile:not(.hidden)) .ce-elemwrap {
+  display: none !important;
+}
+.ce-elembar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px;
+  border-radius: 999px;
+}
+.ce-elembar-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--ce-ink);
+  font: 600 12px var(--ce-font);
+  padding: 8px 13px;
+  border-radius: 999px;
+}
+.ce-elembar-btn svg {
+  width: 16px;
+  height: 16px;
+}
+.ce-elembar-btn:hover,
+.ce-elembar-btn.on {
+  background: var(--ce-hover);
+}
+.ce-elembar-btn.on {
+  color: var(--ce-accent);
+}
+.ce-elemmenu {
+  width: 264px;
+  border-radius: 14px;
+  padding: 10px 12px 12px;
+  display: none;
+}
+.ce-elemmenu.open {
+  display: block;
+}
+.ce-elemmenu-title {
+  font: 700 10.5px/1 var(--ce-font);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ce-ink);
+  opacity: 0.6;
+  margin: 2px 0 8px;
+}
+
 /* palette « K » — recherche de réglages (table lumineuse, lot 4) */
 .ce-ksearch-veil {
   position: fixed;
