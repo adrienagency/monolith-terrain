@@ -336,12 +336,23 @@ export class Globe {
     }
   }
 
+  // Atmosphère « magnifique » (refs Adrien : photos ISS) — approximation de
+  // diffusion en UNE coquille BackSide additive, quatre ingrédients :
+  //  1. liseré serré cyan-blanc qui épouse le limbe (la stratosphère)
+  //  2. halo bleu large qui s'évanouit dans l'espace
+  //  3. anneau CRÉPUSCULAIRE chaud, concentré pile au terminateur — c'est lui
+  //     qui « s'illumine quand le soleil est juste à l'horizon »
+  //  4. éclat avant : le soleil qui perce derrière le limbe quand la caméra
+  //     le regarde à travers l'atmosphère (le sunrise de l'ISS)
+  // Côté nuit, il reste un fin liseré bleu profond — jamais noir sec.
   _buildAtmosphere() {
-    const geo = new THREE.SphereGeometry(R_GLOBE * 1.018, 96, 64)
+    const geo = new THREE.SphereGeometry(R_GLOBE * 1.04, 128, 96)
     const mat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
+      blending: THREE.AdditiveBlending,
       side: THREE.BackSide,
+      uniforms: { uSunDir: this.uniforms.uSunDir },
       vertexShader: /* glsl */ `
         varying vec3 vN;
         varying vec3 vV;
@@ -354,9 +365,26 @@ export class Globe {
       fragmentShader: /* glsl */ `
         varying vec3 vN;
         varying vec3 vV;
+        uniform vec3 uSunDir;
         void main() {
-          float rim = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.4);
-          gl_FragColor = vec4(vec3(0.62, 0.72, 0.78), rim * 0.55);
+          vec3 N = normalize(vN);
+          vec3 V = normalize(vV);
+          float ndv = abs(dot(N, V));
+          float band = pow(1.0 - ndv, 6.0); // liseré stratosphère
+          float halo = pow(1.0 - ndv, 2.2); // halo large
+          float sunN = dot(N, uSunDir);
+          float day = smoothstep(-0.30, 0.25, sunN);
+          // ciel : bleu profond la nuit, bleu lumineux au jour
+          vec3 sky = mix(vec3(0.05, 0.10, 0.26), vec3(0.34, 0.60, 1.0), day);
+          // anneau crépusculaire : or-orangé, gaussienne étroite sur le terminateur
+          float dusk = exp(-pow(sunN / 0.16, 2.0));
+          vec3 col = mix(sky, vec3(1.0, 0.50, 0.20), dusk * 0.75);
+          // éclat du soleil derrière le limbe (sunrise ISS)
+          float fwd = pow(max(dot(-V, uSunDir), 0.0), 42.0);
+          col += vec3(1.0, 0.88, 0.62) * fwd * halo * 2.6;
+          float a = band * (0.50 + 0.75 * day + 0.90 * dusk)
+                  + halo * (0.05 + 0.26 * day + 0.34 * dusk);
+          gl_FragColor = vec4(col * a, 1.0); // additif : l'alpha est dans col
         }`,
     })
     this.group.add(new THREE.Mesh(geo, mat))

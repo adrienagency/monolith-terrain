@@ -1495,6 +1495,9 @@ syncGlobeShadow(bgDayMul()) // l'ombre du terminateur part accordée au fond
 globe.setVisible(false)
 scene.add(globe.group)
 globe.setSunDir(sun.position)
+// soleil orbital lié à la caméra (voir tick) — scratch vectors hors boucle
+const _orbSun = new THREE.Vector3()
+const _upY = new THREE.Vector3(0, 1, 0)
 
 modes = new Modes({
   camera,
@@ -3952,7 +3955,16 @@ function tick() {
   // which is why six rewrites changed nothing on screen.
   if (!(drone.active && params.gpxFollow && gpxLayer.isPlaying())) modes.update(dt)
   zoomStepper.update()
-  if (modes.mode === 'orbital') globe.update(camera, dt)
+  if (modes.mode === 'orbital') {
+    globe.update(camera, dt)
+    // En orbite le soleil SUIT LA CAMÉRA (validé avec Adrien : un soleil fixe
+    // à la scène n'éclairait qu'un hémisphère — la moitié des continents
+    // restait à jamais dans la nuit). Décalé de ~42° pour que la face visible
+    // soit éclairée MAIS garde son terminateur et l'anneau crépusculaire au
+    // limbe — le drame de Google Earth sans sa frustration.
+    _orbSun.copy(camera.position).normalize().applyAxisAngle(_upY, -0.73)
+    globe.setSunDir(_orbSun)
+  }
 
   // fog respects the Effects sliders at normal viewing (so it actually shows —
   // the old code scaled near*9/far*10.4 at every distance and hid it), and only
