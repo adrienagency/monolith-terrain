@@ -1,15 +1,19 @@
-// Barre flottante « éléments » (validée Adrien, réf. barre Figma) : quatre
-// outils bottom-center, surmenu au survol. v2 « scrubbable » (validée) :
-// - chaque réglage est une LIGNE compacte label + valeur mono + filet de
-//   progression ; GLISSER horizontalement n'importe où sur la ligne change
-//   la valeur (pattern After Effects/Blender), double-clic = saisir un chiffre
-// - BONUS : un clic sec sur la ligne transforme la barre en UNE grande
-//   tirette pleine largeur (pattern Lightroom Mobile) — ‹ pour revenir
-// Toggles : interrupteurs kit classiques. Un commit (fin de scrub, grande
-// tirette relâchée) appelle refreshAll : les rails restent synchronisés.
+// Barre de travail flottante (validée Adrien, réf. vidéo barre Figma) :
+// à GAUCHE le sélecteur de MODE — Explorer / Studio / Parcours, icône + nom,
+// toujours présent (les 3 modes du hub, le modèle mental unique du site) —
+// puis un séparateur et LE RESTE QUI CHANGE selon le mode :
+//   Explorer  → (rien : la barre reste sobre, les panneaux monde suffisent)
+//   Studio    → les 4 outils éléments (Lumière/Nuages/Brume/Mer) + surmenus
+//   Parcours  → Lecture / Stop
+// Choisir un mode CHARGE les panneaux appropriés et fait disparaître les
+// autres (main.js applyWorkMode). Surmenus : lignes SCRUBBABLES (glisser =
+// régler, clic sec = grande tirette, double-clic = saisir) — voir v2.
 import { el, toggle as kitToggle, refreshAll } from './kit.js'
 
 const I = {
+  explore: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 2.6 4 5.7 4 9s-1.2 6.4-4 9c-2.8-2.6-4-5.7-4-9s1.2-6.4 4-9z"/></svg>',
+  studio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15.5 4.5 19.5 8.5 9 19c-1.5 1.5-4 1.5-5-.5s.5-3.5 2-5L15.5 4.5z"/><path d="M13.5 6.5l4 4"/></svg>',
+  parcours: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/></svg>',
   sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3L7 7M17 17l1.7 1.7M18.7 5.3L17 7M7 17l-1.7 1.7"/></svg>',
   cloud: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 17a4 4 0 1 1 .6-7.95A5 5 0 0 1 17 8a4 4 0 0 1 0 8H7Z"/></svg>',
   fog: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9h16M6 13h12M8 17h8"/></svg>',
@@ -19,14 +23,17 @@ const I = {
 const fmt = (c, v) => (c.step >= 1 ? String(Math.round(v)) : (+v).toFixed(c.step >= 0.1 ? 1 : 2))
 const clampStep = (c, v) => Math.min(c.max, Math.max(c.min, Math.round(v / c.step) * c.step))
 
-export function buildElemBar(groups) {
+export function buildElemBar({ modes, initial, onMode, toolsByMode }) {
   const bar = el('div', 'ce-elembar ce-glassbox')
+  const modeSeg = el('div', 'ce-wmseg')
+  const sep = el('span', 'ce-elembar-sep')
   const tools = el('div', 'ce-elemtools')
   const focusRow = el('div', 'ce-elemfocus')
-  bar.append(tools, focusRow)
+  bar.append(modeSeg, sep, tools, focusRow)
   const menu = el('div', 'ce-elemmenu ce-glassbox')
   let closeT = 0
   let openKey = null
+  let curMode = null
 
   // ---- bonus : la grande tirette pleine largeur (clic sec sur une ligne)
   function enterFocus(c) {
@@ -86,8 +93,7 @@ export function buildElemBar(groups) {
       const dx = e.clientX - sx
       if (!moved && Math.abs(dx) < 3) return
       moved = true
-      // 220 px de glisse = toute la plage — assez doux pour être précis,
-      // assez court pour traverser la plage sans lever le poignet
+      // 220 px de glisse = toute la plage — précis sans lever le poignet
       c.set(clampStep(c, sv + (dx / 220) * (c.max - c.min)))
       sync()
     })
@@ -127,7 +133,7 @@ export function buildElemBar(groups) {
     return row
   }
 
-  const open = (g, btn) => {
+  const openGroup = (g, btn) => {
     clearTimeout(closeT)
     if (openKey === g.key) return
     openKey = g.key
@@ -149,14 +155,52 @@ export function buildElemBar(groups) {
     }, 260)
   }
 
-  for (const g of groups) {
-    const btn = el('button', 'ce-elembar-btn')
-    btn.type = 'button'
-    btn.innerHTML = `${I[g.icon] || ''}<span>${g.label}</span>`
-    btn.addEventListener('pointerenter', () => open(g, btn))
-    btn.addEventListener('click', () => open(g, btn)) // tactile : pas de survol
-    tools.append(btn)
+  // ---- zone contextuelle : groupes à surmenu + boutons d'action directs
+  const syncFns = []
+  function renderTools(modeId) {
+    tools.replaceChildren()
+    syncFns.length = 0
+    menu.classList.remove('open')
+    openKey = null
+    exitFocus()
+    const t = toolsByMode[modeId] || {}
+    for (const g of t.groups || []) {
+      const btn = el('button', 'ce-elembar-btn')
+      btn.type = 'button'
+      btn.innerHTML = `${I[g.icon] || ''}<span>${g.label}</span>`
+      btn.addEventListener('pointerenter', () => openGroup(g, btn))
+      btn.addEventListener('click', () => openGroup(g, btn)) // tactile : pas de survol
+      tools.append(btn)
+    }
+    for (const a of t.buttons || []) {
+      const btn = el('button', 'ce-elembar-btn' + (a.accent ? ' accent' : ''))
+      btn.type = 'button'
+      btn.innerHTML = `${I[a.icon] || ''}<span>${a.label}</span>`
+      btn.addEventListener('click', () => { a.onClick(); a.sync?.(btn) })
+      if (a.sync) syncFns.push(() => a.sync(btn))
+      tools.append(btn)
+    }
+    sep.style.display = tools.children.length ? '' : 'none'
   }
+  setInterval(() => syncFns.forEach((f) => f()), 300)
+
+  // ---- sélecteur de MODE — toujours présent, icône + nom
+  function setMode(id, { silent = false } = {}) {
+    if (curMode === id) return
+    curMode = id
+    modeSeg.querySelectorAll('.ce-wm-btn').forEach((b) => b.classList.toggle('on', b.dataset.mode === id))
+    renderTools(id)
+    if (!silent) onMode(id)
+  }
+  for (const m of modes) {
+    const b = el('button', 'ce-wm-btn')
+    b.type = 'button'
+    b.dataset.mode = m.id
+    b.innerHTML = `${I[m.icon] || ''}<span>${m.label}</span>`
+    b.addEventListener('click', () => setMode(m.id))
+    modeSeg.append(b)
+  }
+
   bar.addEventListener('pointerleave', scheduleClose)
   menu.addEventListener('pointerenter', () => clearTimeout(closeT))
   menu.addEventListener('pointerleave', scheduleClose)
@@ -164,5 +208,6 @@ export function buildElemBar(groups) {
   const wrap = el('div', 'ce-elemwrap')
   wrap.append(menu, bar)
   document.body.append(wrap)
-  return { root: wrap }
+  setMode(initial, { silent: true })
+  return { root: wrap, setMode }
 }

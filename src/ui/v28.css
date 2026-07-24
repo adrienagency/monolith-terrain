@@ -239,6 +239,57 @@ body:has(.gpx-profile:not(.hidden)) .ce-elemwrap {
   padding: 5px;
   border-radius: 999px;
 }
+/* sélecteur des 3 modes — icône + nom, toujours présent dans la barre */
+.ce-wmseg {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.ce-wm-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--ce-ink);
+  font: 600 12px var(--ce-font);
+  padding: 8px 13px;
+  border-radius: 999px;
+  opacity: 0.75;
+}
+.ce-wm-btn svg {
+  width: 16px;
+  height: 16px;
+}
+.ce-wm-btn:hover {
+  background: var(--ce-hover);
+  opacity: 1;
+}
+.ce-wm-btn.on {
+  background: var(--ce-ink);
+  color: var(--ce-bg, #fff);
+  opacity: 1;
+}
+.ce-elembar-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 5px;
+  background: var(--ce-border);
+  flex: none;
+}
+.ce-elembar-btn.accent {
+  background: var(--ce-accent);
+  color: #fff;
+}
+.ce-elembar-btn.accent:hover {
+  background: var(--ce-accent);
+  filter: brightness(1.07);
+}
+/* panneaux hors du mode de travail courant */
+.ce-panel.wm-off {
+  display: none !important;
+}
 .ce-elembar-btn {
   display: flex;
   align-items: center;

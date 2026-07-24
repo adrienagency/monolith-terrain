@@ -3592,7 +3592,7 @@ const { elementsPanel, imagePanel } = buildEffectsPanel({
 // section is gone entirely (this was its only control)
 const hourPill = buildHourPill({ params, applyTimeOfDay })
 
-buildExplorePanel({
+const explorePanel = buildExplorePanel({
   flyTo: (lat, lon, zoom) => modes.flyTo(lat, lon, zoom),
 })
 
@@ -3684,52 +3684,96 @@ if (!IS_EMBED) {
   })
 }
 
-// barre flottante « éléments » (validée Adrien, réf. barre Figma) : Lumière /
-// Nuages / Brume / Mer en bottom-center, surmenu au survol, lignes
-// SCRUBBABLES (glisser = régler, clic sec = grande tirette, double-clic =
-// saisir). Mode avancé seulement ; commits → refreshAll (rails synchronisés).
+// barre de travail flottante (validée Adrien, réf. vidéo barre Figma) :
+// le sélecteur des 3 MODES — Explorer / Studio / Parcours, icône + nom —
+// reste toujours dans la barre ; choisir un mode CHARGE les panneaux
+// appropriés (les autres disparaissent) et le RESTE de la barre change :
+// Studio = les 4 outils éléments (surmenus scrubbables), Parcours =
+// Lecture/Stop, Explorer = barre sobre. Mode avancé seulement.
 if (!IS_EMBED) {
+  const WORKMODE_KEY = 'shibumap-workmode'
+  const WORKMODE_PANELS = {
+    explorer: () => [explorePanel, mapPanel, cameraPanel],
+    studio: () => [templatesPanel, coloursPanel, shadersPanel, lightPanel, elementsPanel, imagePanel],
+    parcours: () => [routePanel],
+  }
+  const allWorkPanels = () => Object.values(WORKMODE_PANELS).flatMap((f) => f())
+  function applyWorkMode(id) {
+    const keep = new Set(WORKMODE_PANELS[id]().map((p) => p.root))
+    for (const p of allWorkPanels()) p.root.classList.toggle('wm-off', !keep.has(p.root))
+    try { localStorage.setItem(WORKMODE_KEY, id) } catch {}
+  }
   const sl = (label, min, max, step, get, set) => ({ type: 'scrub', label, min, max, step, get, set })
   const tg = (label, get, set) => ({ type: 'toggle', label, get, set })
   const cloudBaked = (label, key, min, max, step) =>
     sl(label, min, max, step, () => params[key], (v) => { params[key] = v; clouds.build(params) })
-  buildElemBar([
-    {
-      key: 'lum', icon: 'sun', label: 'Lumière',
-      controls: [
-        sl('Heure', 0, 24, 0.1, () => params.timeOfDay ?? 10, (v) => { applyTimeOfDay(v); hourPill?.refresh?.() }),
-        sl('Azimut', 0, 360, 1, () => params.sunAzimuth, (v) => { params.sunAzimuth = v; placeSun() }),
-        sl('Élévation', 2, 90, 1, () => params.sunElevation, (v) => { params.sunElevation = v; placeSun() }),
-        sl('Intensité', 0, 10, 0.1, () => params.sunIntensity, (v) => { params.sunIntensity = v; placeSun() }),
-      ],
+  const initialMode = (() => { try { return localStorage.getItem(WORKMODE_KEY) } catch { return null } })() || 'explorer'
+  buildElemBar({
+    modes: [
+      { id: 'explorer', icon: 'explore', label: 'Explorer' },
+      { id: 'studio', icon: 'studio', label: 'Studio' },
+      { id: 'parcours', icon: 'parcours', label: 'Parcours' },
+    ],
+    initial: initialMode,
+    onMode: applyWorkMode,
+    toolsByMode: {
+      explorer: {},
+      studio: {
+        groups: [
+          {
+            key: 'lum', icon: 'sun', label: 'Lumière',
+            controls: [
+              sl('Heure', 0, 24, 0.1, () => params.timeOfDay ?? 10, (v) => { applyTimeOfDay(v); hourPill?.refresh?.() }),
+              sl('Azimut', 0, 360, 1, () => params.sunAzimuth, (v) => { params.sunAzimuth = v; placeSun() }),
+              sl('Élévation', 2, 90, 1, () => params.sunElevation, (v) => { params.sunElevation = v; placeSun() }),
+              sl('Intensité', 0, 10, 0.1, () => params.sunIntensity, (v) => { params.sunIntensity = v; placeSun() }),
+            ],
+          },
+          {
+            key: 'cld', icon: 'cloud', label: 'Nuages',
+            controls: [
+              tg('Nuages volumétriques', () => params.cloudsEnabled, (v) => { params.cloudsEnabled = v; clouds.build(params) }),
+              sl('Densité', 0.05, 1.5, 0.05, () => params.cloudOpacity, (v) => { params.cloudOpacity = v }),
+              cloudBaked('Échelle', 'cloudScale', 0.5, 5, 0.1),
+              cloudBaked('Altitude', 'cloudAltitude', 0, 16, 0.5),
+            ],
+          },
+          {
+            key: 'fog', icon: 'fog', label: 'Brume',
+            controls: [
+              tg('Brume', () => params.fogEnabled, (v) => { params.fogEnabled = v; panelCtx.setFogEnabled(v) }),
+              sl('Début', 5, 60, 0.5, () => params.fogNear, (v) => { params.fogNear = v; fogRef.near = v }),
+              sl('Fin', 15, 90, 0.5, () => params.fogFar, (v) => { params.fogFar = v; fogRef.far = v }),
+            ],
+          },
+          {
+            key: 'sea', icon: 'sea', label: 'Mer',
+            controls: [
+              tg('Mer animée', () => params.waterReal, (v) => { params.waterReal = v; waterRebuild() }),
+              sl('Hauteur des vagues', 0, 2, 0.05, () => params.seaWaveH, (v) => { params.seaWaveH = v; realWater?.setWaves({ height: v }) }),
+              sl('Clapot', 0, 1, 0.05, () => params.seaChop, (v) => { params.seaChop = v; realWater?.setWaves({ choppiness: v }) }),
+              sl('Vitesse', 0, 2, 0.05, () => params.seaSpeed, (v) => { params.seaSpeed = v; realWater?.setWaves({ speed: v }) }),
+            ],
+          },
+        ],
+      },
+      parcours: {
+        buttons: [
+          {
+            icon: 'parcours', label: 'Lecture', accent: true,
+            onClick: () => {
+              if (!gpxLayer.track) return
+              if (gpxLayer.isPlaying()) { gpxLayer.pause(); disengageGpxFollow() }
+              else { gpxLayer.play(); engageGpxFollow() }
+            },
+            sync: (btn) => { btn.querySelector('span').textContent = gpxLayer.isPlaying?.() ? 'Pause' : 'Lecture' },
+          },
+          { label: 'Stop', onClick: () => { gpxLayer.stop(); disengageGpxFollow() } },
+        ],
+      },
     },
-    {
-      key: 'cld', icon: 'cloud', label: 'Nuages',
-      controls: [
-        tg('Nuages volumétriques', () => params.cloudsEnabled, (v) => { params.cloudsEnabled = v; clouds.build(params) }),
-        sl('Densité', 0.05, 1.5, 0.05, () => params.cloudOpacity, (v) => { params.cloudOpacity = v }),
-        cloudBaked('Échelle', 'cloudScale', 0.5, 5, 0.1),
-        cloudBaked('Altitude', 'cloudAltitude', 0, 16, 0.5),
-      ],
-    },
-    {
-      key: 'fog', icon: 'fog', label: 'Brume',
-      controls: [
-        tg('Brume', () => params.fogEnabled, (v) => { params.fogEnabled = v; panelCtx.setFogEnabled(v) }),
-        sl('Début', 5, 60, 0.5, () => params.fogNear, (v) => { params.fogNear = v; fogRef.near = v }),
-        sl('Fin', 15, 90, 0.5, () => params.fogFar, (v) => { params.fogFar = v; fogRef.far = v }),
-      ],
-    },
-    {
-      key: 'sea', icon: 'sea', label: 'Mer',
-      controls: [
-        tg('Mer animée', () => params.waterReal, (v) => { params.waterReal = v; waterRebuild() }),
-        sl('Hauteur des vagues', 0, 2, 0.05, () => params.seaWaveH, (v) => { params.seaWaveH = v; realWater?.setWaves({ height: v }) }),
-        sl('Clapot', 0, 1, 0.05, () => params.seaChop, (v) => { params.seaChop = v; realWater?.setWaves({ choppiness: v }) }),
-        sl('Vitesse', 0, 2, 0.05, () => params.seaSpeed, (v) => { params.seaSpeed = v; realWater?.setWaves({ speed: v }) }),
-      ],
-    },
-  ])
+  })
+  applyWorkMode(initialMode)
 }
 
 // mini panneau Parcours du mode simple (gestion des blocs + Lecture) —
