@@ -70,6 +70,8 @@ import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickBar, buildShibuChrome, initUiLevel } from './ui/bars.js'
 import { buildMiniRoute } from './ui/mini-route.js'
 import { buildSettingsSearch } from './ui/settings-search.js'
+import { buildLightPanel } from './ui/light-panel.js'
+import { initRails } from './ui/shell.js'
 import { TEMPLATES } from './templates.js'
 import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
 import { buildChangelogOverlay } from './ui/changelog-overlay.js'
@@ -3208,7 +3210,10 @@ const bottomBar = buildBottomBar({
 // mode simple par défaut (UX P3) : docks masqués, quickbar bottom-center.
 // Jamais en embed — la vitrine reste nue quoi qu'il arrive. (IS_EMBED, pas
 // EMBED : ce dernier n'est déclaré que plus bas — TDZ.)
-if (!IS_EMBED) initUiLevel()
+if (!IS_EMBED) {
+  initUiLevel()
+  initRails() // chevrons de repli par rail (mode avancé), état persisté
+}
 // viewer shibu (lien partagé) : marque en bas + CTA — le reste du chrome
 // est masqué en CSS (body.shibu-view, voir v28.css)
 if (IS_SHIBU) buildShibuChrome()
@@ -3535,6 +3540,19 @@ const shadersPanel = buildShadersPanel({
 panelCtx.materialsPanel = shadersPanel // Terrain + Socle (create-panel) y emménagent
 const coloursPanel = buildCreatePanel(panelCtx)
 
+// Lumière — le chapitre manquant de la recette (heure maîtresse + manuel)
+const lightPanel = buildLightPanel({
+  params,
+  applyTimeOfDay,
+  placeSun,
+  syncHour: () => hourPill?.refresh?.(),
+  setEnvLight: (v) => { scene.environmentIntensity = v },
+  setShadowSoftness: (v) => {
+    sun.shadow.radius = v
+    if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
+  },
+})
+
 const { elementsPanel, imagePanel } = buildEffectsPanel({
   params,
   exposureFx, contrastFx, hueSat, vignette, grain,
@@ -3552,7 +3570,7 @@ const { elementsPanel, imagePanel } = buildEffectsPanel({
 // dans l'ordre des dépendances, pas de l'affichage) — append DÉPLACE les nœuds
 {
   const dock = templatesPanel.root.parentElement
-  for (const p of [templatesPanel, coloursPanel, shadersPanel, elementsPanel, imagePanel]) dock.append(p.root)
+  for (const p of [templatesPanel, coloursPanel, shadersPanel, lightPanel, elementsPanel, imagePanel]) dock.append(p.root)
 }
 
 // the 24h slider lives top-right as a pill now — the Create panel's Light
@@ -3666,6 +3684,7 @@ void miniRoute
 // but stays collapsed until clicked, same as Shaders/Map).
 templatesPanel.setCollapsed(true)
 shadersPanel.setCollapsed(true)
+lightPanel.setCollapsed(true)
 elementsPanel.setCollapsed(true)
 imagePanel.setCollapsed(true)
 cameraPanel.setCollapsed(true)

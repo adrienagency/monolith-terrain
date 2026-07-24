@@ -17,6 +17,32 @@ function dockColumn(side) {
   return docks[side]
 }
 
+// Chevrons de repli PAR RAIL (table lumineuse, esprit Procreate : le chrome
+// s'efface, la carte reste). État persisté par côté ; les classes body
+// ce-railL-off / ce-railR-off masquent le dock correspondant (v28.css).
+const RAIL_KEYS = { left: 'shibumap-rail-left', right: 'shibumap-rail-right' }
+export function initRails() {
+  for (const side of ['left', 'right']) {
+    const btn = el('button', `ce-railtoggle ce-railtoggle-${side} ce-glassbox`)
+    btn.type = 'button'
+    btn.setAttribute('data-tip', side === 'left' ? 'Replier / afficher les panneaux de gauche' : 'Replier / afficher les panneaux de droite')
+    const cls = side === 'left' ? 'ce-railL-off' : 'ce-railR-off'
+    let off = false
+    try { off = localStorage.getItem(RAIL_KEYS[side]) === 'off' } catch {}
+    const apply = () => {
+      document.body.classList.toggle(cls, off)
+      btn.classList.toggle('off', off)
+    }
+    apply()
+    btn.addEventListener('click', () => {
+      off = !off
+      apply()
+      try { localStorage.setItem(RAIL_KEYS[side], off ? 'off' : 'on') } catch {}
+    })
+    document.body.append(btn)
+  }
+}
+
 export class Panel {
   constructor({ title, icon = '', side = 'left', width = 264, tip = '' }) {
     this.side = side

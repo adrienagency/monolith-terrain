@@ -415,11 +415,69 @@ body.dark {
   align-items: center;
   justify-content: space-between;
   padding: 10px 10px 10px 14px;
-  cursor: grab;
+  cursor: pointer; /* l'en-tête replie/déplie — le drag n'existe plus */
   flex: none;
 }
-.ce-panel-head:active {
-  cursor: grabbing;
+
+/* chevrons de repli par rail (table lumineuse) */
+.ce-railtoggle {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 56;
+  width: 20px;
+  height: 46px;
+  padding: 0;
+  border: 1px solid var(--ce-border);
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+body:not(.ce-simple) .ce-railtoggle {
+  display: flex;
+}
+body.ce-noui .ce-railtoggle,
+body.ce-embed .ce-railtoggle,
+body.store-mode .ce-railtoggle,
+body.studio-mode .ce-railtoggle,
+body.atelier-mode .ce-railtoggle,
+body.shibu-view .ce-railtoggle {
+  display: none !important;
+}
+.ce-railtoggle::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-left: 1.5px solid var(--ce-ink);
+  border-bottom: 1.5px solid var(--ce-ink);
+  opacity: 0.7;
+}
+.ce-railtoggle-left {
+  left: 0;
+  border-left: 0;
+  border-radius: 0 10px 10px 0;
+}
+.ce-railtoggle-left::before {
+  transform: rotate(45deg) translate(1px, -1px);
+}
+.ce-railtoggle-left.off::before {
+  transform: rotate(225deg) translate(1px, -1px);
+}
+.ce-railtoggle-right {
+  right: 0;
+  border-right: 0;
+  border-radius: 10px 0 0 10px;
+}
+.ce-railtoggle-right::before {
+  transform: rotate(225deg) translate(1px, -1px);
+}
+.ce-railtoggle-right.off::before {
+  transform: rotate(45deg) translate(1px, -1px);
+}
+body.ce-railL-off .ce-dock-left,
+body.ce-railR-off .ce-dock-right {
+  display: none;
 }
 .ce-panel-title {
   display: flex;
