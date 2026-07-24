@@ -52,14 +52,14 @@ export function buildCreatePanel(ctx) {
   let lastGenName = null
   const genRow = el('div', 'ce-btn-row')
   genRow.append(
-    button('Generate palette', () => { const p = generateEarthPalette(); lastGenName = p.name; ctx.applyPalette(p); refreshAll() }, { accent: true }),
-    button('Save palette', () => { ctx.saveCurrentPalette?.(lastGenName); lastGenName = null }, { ghost: true })
+    button('Générer une palette', () => { const p = generateEarthPalette(); lastGenName = p.name; ctx.applyPalette(p); refreshAll() }, { accent: true }),
+    button('Enregistrer la palette', () => { ctx.saveCurrentPalette?.(lastGenName); lastGenName = null }, { ghost: true })
   )
   sCol.body.append(genRow)
+  // (« Shuffle palette » supprimé — doublon du générateur ci-dessus)
   const shuffleRow = el('div', 'ce-btn-row')
   shuffleRow.append(
-    button('Shuffle palette', () => { ctx.applyPalette(generatePalette(Math.random, mode())); refreshAll() }),
-    button('Shuffle look', () => { ctx.applyStyle(generateStyle()); ctx.applyGridContour(generateGridContour(Math.random, mode())); refreshAll() })
+    button('Look aléatoire', () => { ctx.applyStyle(generateStyle()); ctx.applyGridContour(generateGridContour(Math.random, mode())); refreshAll() })
   )
   sCol.body.append(shuffleRow)
 

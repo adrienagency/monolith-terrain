@@ -189,7 +189,7 @@ export function buildTemplatesPanel(ctx) {
     button('Mono dark', () => { ctx.applyMonochrome('dark'); refreshAll(); ctx.syncDark?.() })
   )
   const resetRow = el('div', 'ce-btn-row')
-  resetRow.append(button('Reset look', () => { ctx.resetLook(); tplButtons.forEach((b) => b.classList.remove('on')); refreshAll(); ctx.syncDark?.() }, { ghost: true }))
+  // (« Reset look » supprimé — sous-ensemble de « Réinitialiser la carte » en tête de panneau)
   sTpl.body.append(monoRow, resetRow)
 
   return panel

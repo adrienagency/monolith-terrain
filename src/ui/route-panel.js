@@ -108,10 +108,11 @@ export function buildRoutePanel(ctx) {
   const sLayers = panel.addSection(section('Mes courses', { open: true }))
   const listEl = el('div', 'ce-gpx-layers')
   const emptyEl = el('div', 'ce-gpx-layers-empty', 'Aucune course chargée — « Charger un GPX… » ci-dessus pour la première.')
+  // (« + Ajouter une course » supprimé — doublon exact de « Charger un
+  // GPX… » juste au-dessus ; le compteur reste)
   const addRow = el('div', 'ce-btn-row')
-  const addBtn = button('+ Ajouter une course', () => ctx.loadGpx(), { ghost: true })
   const capLabel = el('span', 'ce-gpx-cap')
-  addRow.append(addBtn, capLabel)
+  addRow.append(capLabel)
   sLayers.body.append(listEl, emptyEl, addRow)
 
   let openPickerId = null // which row's icon picker is expanded (one at a time)
@@ -128,7 +129,6 @@ export function buildRoutePanel(ctx) {
   function renderLayers(layers) {
     listEl.replaceChildren()
     emptyEl.classList.toggle('hidden', layers.length > 0)
-    addBtn.disabled = layers.length >= MAX_LAYERS
     capLabel.textContent = `${layers.length}/${MAX_LAYERS}`
 
     layers.forEach((l, idx) => {

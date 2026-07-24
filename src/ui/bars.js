@@ -194,24 +194,19 @@ export function buildMapCorner(ctx) {
     document.body.append(b)
     return b
   }
-  const aerial = mk(MC.aerial, 'Aerial photography — click to toggle (where imagery is available).', 'ce-mapbtn-aerial')
+  // dédoublonnage (Adrien) : seul le toggle AÉRIEN reste — « base » et
+  // « shuffle » doublonnaient « Réinitialiser la carte » (Templates) et
+  // « Look aléatoire » (Création)
+  const aerial = mk(MC.aerial, 'Photo aérienne — cliquer pour basculer (là où l’imagerie existe).', 'ce-mapbtn-aerial')
   const check = el('span', 'ce-mapbtn-check')
   check.innerHTML = MC.check
   aerial.append(check)
-  const base = mk(MC.base, 'Back to the base cartography (Ctrl+Z also steps back).', 'ce-mapbtn-base')
-  const shuffle = mk(MC.shuffle, 'Shuffle — rebats every look option at once. Different each click.', 'ce-mapbtn-shuffle')
 
   aerial.addEventListener('click', () => ctx.toggleAerial())
-  base.addEventListener('click', () => ctx.resetBase())
-  shuffle.addEventListener('click', () => {
-    shuffle.classList.add('spin')
-    setTimeout(() => shuffle.classList.remove('spin'), 500)
-    ctx.shuffle()
-  })
 
   return {
     setAerialActive: (v) => aerial.classList.toggle('on', !!v),
-    setVisible: (v) => { for (const b of [aerial, base, shuffle]) b.classList.toggle('off', !v) },
+    setVisible: (v) => { aerial.classList.toggle('off', !v) },
   }
 }
 

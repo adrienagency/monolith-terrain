@@ -77,6 +77,7 @@ import { buildTemplatesPanel } from './ui/templates-panel.js'
 import { buildCreatePanel } from './ui/create-panel.js'
 import { buildStore } from './ui/store.js'
 import { buildStudio } from './ui/studio.js'
+import { buildHub } from './ui/hub.js'
 import { buildCameraPanel } from './ui/camera-panel.js'
 import { buildRoutePanel } from './ui/route-panel.js'
 import { buildExplorePanel } from './ui/explore-panel.js'
@@ -4019,20 +4020,32 @@ const studio = buildStudio({
   focusRace: (id) => gpxLayer.focus(id),
 })
 panelCtx.openStudio = () => studio.enter()
+
+// ---- HUB d'accueil (UX P1) — le popup des trois portes ---------------------
+const hub = buildHub({
+  onExplore: () => {},
+  onStudio: () => store.enter(), // en attendant l'espace Studio unifié (P2)
+  onParcours: () => studio.enter(),
+  focusSearch: () => document.querySelector('.ce-search input')?.focus(),
+})
+// le logo de la topbar rouvre le hub à tout moment
+{
+  const mark = document.querySelector('.ce-wordmark')
+  if (mark) { mark.style.cursor = 'pointer'; mark.addEventListener('click', () => hub.show()) }
+}
 panelCtx.refreshRaceLabels = () => raceLabels.setDirty() // toggle infos course par calque
 
 // first visit only: the guided tour introduces the UI once the boot view has
 // had a moment to settle (replayable anytime from the "?" in the top bar).
 // Jamais en mode embed — la vitrine /templates doit rester nue.
-setTimeout(async () => {
+setTimeout(() => {
   if (EMBED) return
-  if (IS_STORE_BOOT) { store.enter(); return } // /templates → boutique directe, jamais le tour
+  if (IS_STORE_BOOT) { store.enter(); return } // /templates → boutique directe
   if (IS_STUDIO_BOOT) { studio.enter(); return } // ?studio=1 → Race Studio direct
-  try {
-    const { maybeStartTutorial } = await import('./ui/tutorial.js')
-    maybeStartTutorial()
-  } catch {}
-}, 4500)
+  // le HUB remplace l'ancien tutoriel auto — le « ? » de la topbar garde
+  // le tour guidé pour qui le veut
+  hub.show()
+}, 2500)
 
 window.addEventListener('resize', () => {
   if (loopPaused) return // an offline export owns the renderer size right now

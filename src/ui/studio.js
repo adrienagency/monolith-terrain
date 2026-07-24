@@ -112,7 +112,7 @@ export function buildStudio(deps) {
   // ---- étapes -------------------------------------------------------------
   function stepIdentity() {
     body.innerHTML = `<h3>Votre événement</h3>
-      <p class="hint">Le nom et le logo habillent le bloc (les deux flancs) et la tête de parcours. Chargez votre trace GPX si ce n'est pas déjà fait.</p>`
+      <p class="hint">Le nom et le logo habillent le bloc et la tête de parcours.</p>`
     // plusieurs courses chargées → on choisit d'abord CELLE qu'on modifie
     const races = deps.listRaces?.() || []
     if (races.length > 1) {
@@ -156,16 +156,9 @@ export function buildStudio(deps) {
       lg.append(rm)
     }
     body.append(field('Logo', lg))
-    // GPX + stats
-    const row = document.createElement('div')
-    row.className = 'studio-row'
-    const load = document.createElement('button')
-    load.className = 'studio-btn'
-    load.textContent = deps.hasTrack() ? 'Charger un autre GPX…' : 'Charger un GPX…'
-    load.addEventListener('click', () => deps.loadGpx())
-    const openP = document.createElement('button')
-    openP.className = 'studio-btn ghost'
-    openP.textContent = 'Ouvrir un projet…'
+    // entrée de trace : UNE seule zone (anti-doublon, Adrien) — avec une
+    // trace chargée : rangée compacte « Charger un autre / Ouvrir un
+    // projet » ; sans trace : les PORTES ci-dessous sont les seuls accès
     const pf = document.createElement('input')
     pf.type = 'file'
     pf.accept = '.json,application/json'
@@ -180,9 +173,21 @@ export function buildStudio(deps) {
       deps.importRace(bundle)
       render()
     })
-    openP.addEventListener('click', () => pf.click())
-    row.append(load, openP, pf)
-    body.append(row)
+    body.append(pf)
+    if (deps.hasTrack()) {
+      const row = document.createElement('div')
+      row.className = 'studio-row'
+      const load = document.createElement('button')
+      load.className = 'studio-btn ghost'
+      load.textContent = 'Charger un autre GPX…'
+      load.addEventListener('click', () => deps.loadGpx())
+      const openP = document.createElement('button')
+      openP.className = 'studio-btn ghost'
+      openP.textContent = 'Ouvrir un projet…'
+      openP.addEventListener('click', () => pf.click())
+      row.append(load, openP)
+      body.append(row)
+    }
     const st = deps.trackStats()
     if (st) {
       const s = document.createElement('div')
@@ -208,7 +213,9 @@ export function buildStudio(deps) {
         d.innerHTML = `<span class="d-main"><b>${title}</b><i>${sub}</i></span>${soon ? '<span class="studio-soon">bientôt</span>' : ''}`
         return d
       }
-      const dDemo = door('Essayer avec une course de démo', 'La Grande Traversée · 220 km, prête à jouer — remplacez-la par la vôtre ensuite.', { accent: true })
+      const dLoad = door('Charger mon fichier GPX', 'Votre trace, depuis votre ordinateur — tout le reste se remplit autour.', { accent: true })
+      dLoad.addEventListener('click', () => deps.loadGpx())
+      const dDemo = door('Essayer avec une course de démo', 'La Grande Traversée · 220 km, prête à jouer — remplacez-la par la vôtre ensuite.')
       dDemo.addEventListener('click', async () => {
         dDemo.disabled = true
         dDemo.querySelector('i').textContent = 'Chargement de la démo…'
@@ -229,7 +236,12 @@ export function buildStudio(deps) {
         <p><b>OpenRunner</b> — votre parcours → « Exporter » → GPX.</p>
         <p class="hint">Vous exportez votre propre fichier depuis votre propre compte — rien n'est connecté. Sinon : demandez le GPX à votre traceur ou chronométreur.</p>`
       dGuide.addEventListener('click', () => { guide.hidden = !guide.hidden })
-      empty.append(dDemo, dDraw, dGuide, guide)
+      const openLine = document.createElement('button')
+      openLine.type = 'button'
+      openLine.className = 'studio-btn ghost'
+      openLine.textContent = 'Ouvrir un projet .shibumap-race…'
+      openLine.addEventListener('click', () => pf.click())
+      empty.append(dLoad, dDemo, dDraw, dGuide, guide, openLine)
       body.append(empty)
     }
   }
