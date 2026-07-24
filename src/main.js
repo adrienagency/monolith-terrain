@@ -2329,6 +2329,26 @@ const raceLabels = buildRaceLabels({
     raceState.transports.removed.push(id)
     raceLabels.setDirty()
   },
+  // emprise monde des blocs chargés (damier compris) — les étiquettes se
+  // claquent dans sa projection écran pour ne jamais sortir de la carte
+  getExtent: () => {
+    let minI = 0
+    let maxI = 0
+    let minJ = 0
+    let maxJ = 0
+    for (const cell of blockGrid?.cells?.values() ?? []) {
+      minI = Math.min(minI, cell.i)
+      maxI = Math.max(maxI, cell.i)
+      minJ = Math.min(minJ, cell.j)
+      maxJ = Math.max(maxJ, cell.j)
+    }
+    return {
+      minX: (minI - 0.5) * TERRAIN_SIZE,
+      maxX: (maxI + 0.5) * TERRAIN_SIZE,
+      minZ: (minJ - 0.5) * TERRAIN_SIZE,
+      maxZ: (maxJ + 0.5) * TERRAIN_SIZE,
+    }
+  },
 })
 
 // grave l'identité de la course sur les flancs du bloc (logo centré + infos
@@ -3866,6 +3886,9 @@ const studio = buildStudio({
       return { ...w, idx, alt: w.alt ?? (t ? Math.round(t.points[idx]?.ele ?? 0) : null) }
     })
     raceState.transports.removed = [...(race.transports?.removed || [])]
+    // traits verticaux des points de passage sur le profil (gpx.js)
+    const g = gpxLayer.activeLayer?.gpx
+    if (g) { g.raceTicks = raceState.waypoints.map((w) => ({ km: w.km })); g._drawProfile?.() }
     raceLabels.setDirty()
     applyRaceToBlock()
   },
@@ -3879,6 +3902,10 @@ const studio = buildStudio({
     refreshAll()
   },
   share: () => shareCurrentView(),
+  // sélecteur de courses (plusieurs GPX chargés) + brouillon par course
+  activeRaceName: () => gpxLayer.activeLayer?.name || null,
+  listRaces: () => gpxLayer.layers.map((l) => ({ id: l.id, name: l.name, active: l === gpxLayer.activeLayer })),
+  focusRace: (id) => gpxLayer.focus(id),
 })
 panelCtx.openStudio = () => studio.enter()
 panelCtx.refreshRaceLabels = () => raceLabels.setDirty() // toggle infos course par calque

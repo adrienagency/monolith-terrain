@@ -523,6 +523,7 @@ export class GpxLayer {
     this.playing = false
     this.headT = 0
     this._revealT = 1
+    this.raceTicks = null // Race Studio : [{km}] — traits verticaux sur le profil
     this._segCount = 0
     this._dispAlt = null
     this._dispSlope = null
@@ -1091,6 +1092,28 @@ export class GpxLayer {
     ctx.lineWidth = 1.4
     ctx.stroke()
 
+    // Race Studio : un trait vertical par point de passage DÉJÀ franchi par
+    // la tête de course (en lecture) — tous visibles hors lecture (Adrien)
+    if (this.raceTicks?.length) {
+      const headKm = this.isPlaying() ? this.headT * totKm : Infinity
+      ctx.strokeStyle = accent
+      ctx.lineWidth = 1
+      for (const t of this.raceTicks) {
+        if (t.km > headKm) continue
+        const x = pad + (Math.min(t.km, totKm) / totKm) * (W - pad * 2)
+        ctx.globalAlpha = 0.55
+        ctx.beginPath()
+        ctx.moveTo(x, pad)
+        ctx.lineTo(x, H - pad)
+        ctx.stroke()
+        ctx.globalAlpha = 1
+        ctx.beginPath()
+        ctx.arc(x, pad + 2, 2, 0, Math.PI * 2)
+        ctx.fillStyle = accent
+        ctx.fill()
+      }
+    }
+
     // hover crosshair
     if (this.hoverIdx >= 0) {
       const i = this.hoverIdx
@@ -1534,6 +1557,7 @@ export class GpxLayer {
     this.playing = false
     this.headT = 0
     this._revealT = 1
+    this.raceTicks = null // Race Studio : [{km}] — traits verticaux sur le profil
     this._dispAlt = null
     this._dispSlope = null
     this.headLabel?.classList.add('hidden')

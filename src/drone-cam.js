@@ -189,18 +189,22 @@ export class DroneCam {
     this.topDown = false // view 5
     // départ par défaut (retour Adrien) : deux fois plus loin qu'avant et un
     // peu plus vertical — la molette zoome/dézoome librement pendant le suivi
-    this.dist = 22 // standoff, world units (avant 11)
+    this.dist = 22 // standoff CIBLE, world units — lissé au runtime (_distS)
+    this._distS = 22 // standoff réellement appliqué (damped, anti zoom sec)
     this.tiltDeg = 42 // hauteur au-dessus de la tête (avant 24)
 
     // ---- runtime tuning ----
     // BEAUCOUP plus réactif (retour Adrien) : la position rattrape vite la tête
     // (l'ease vient de ce damping court, pas de l'aim). L'AIM lui est verrouillé
     // sur la tête, sans latence — la tête est TOUJOURS pile au centre.
-    this.posHalfLife = 0.12 // s — latence de suivi horizontale (avant 0.3)
-    this.posHalfLifeY = 0.18 // (avant 0.4)
+    // ADOUCI (retour Adrien 2026-07-24 : « moins d'à-coups, plus souple ») —
+    // on revient vers des demi-vies longues ; la verticale est la plus
+    // amortie (c'est elle qui encaisse le relief et créait les secousses)
+    this.posHalfLife = 0.32 // s — latence de suivi horizontale
+    this.posHalfLifeY = 0.6 // la bosse se lisse au lieu de secouer
     this.maxYawRateDeg = 120 // conservés pour compat API (plus utilisés par _aim)
     this.maxPitchRateDeg = 160
-    this.rotHalfLife = 0.09
+    this.rotHalfLife = 0.2 // aim adouci lui aussi
     this._headWorld = null // vraie position monde de la tête (passée par main.js)
 
     this._q = new THREE.Quaternion()
@@ -260,15 +264,15 @@ export class DroneCam {
   _desiredFor(s, out) {
     this.curve.getPointAt(s, _subj)
     if (this.topDown) {
-      out.set(_subj.x, _subj.y + this.dist * 1.4, _subj.z + 0.001)
+      out.set(_subj.x, _subj.y + this._distS * 1.4, _subj.z + 0.001)
       return
     }
     const az = (this.viewBearingDeg * Math.PI) / 180
     const tilt = (this.tiltDeg * Math.PI) / 180
-    const horiz = this.dist * Math.cos(tilt)
+    const horiz = this._distS * Math.cos(tilt)
     out.set(
       _subj.x + Math.sin(az) * horiz,
-      _subj.y + this.dist * Math.sin(tilt),
+      _subj.y + this._distS * Math.sin(tilt),
       _subj.z + Math.cos(az) * horiz
     )
   }
@@ -341,6 +345,8 @@ export class DroneCam {
   }
 
   _applyPose(dt, s, arrived) {
+    // la distance glisse vers sa cible (molette / retargets) — jamais de saut
+    this._distS = damp(this._distS, this.dist, 0.35, dt)
     this._head(s, _headPt)
     this._desiredFor(s, _desired)
 

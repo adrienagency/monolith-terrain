@@ -33,7 +33,7 @@ const CART_H = 26 // hauteur fixe d'un cartouche (px) — pas de mesure DOM
 const CHIP_H = 18
 const LEAD = 16 // longueur de la ligne de rappel
 
-export function buildRaceLabels({ container, camera, getItems, params, onRemove }) {
+export function buildRaceLabels({ container, camera, getItems, params, onRemove, getExtent }) {
   const root = document.createElement('div')
   root.className = 'rl-root'
   container.appendChild(root)
@@ -108,6 +108,32 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
       vis.push(n)
     }
     if (!vis.length) return
+    // 1b. bornes de placement = l'emprise PROJETÉE des blocs chargés (avec
+    // marge), intersectée avec le viewport — une étiquette ne sort JAMAIS de
+    // la carte (Adrien) et reste au plus près de son point
+    let bx0 = 4
+    let by0 = 4
+    let bx1 = w - 4
+    let by1 = h - 4
+    const ext = getExtent?.()
+    if (ext) {
+      let px0 = Infinity
+      let py0 = Infinity
+      let px1 = -Infinity
+      let py1 = -Infinity
+      for (const [X, Z] of [[ext.minX, ext.minZ], [ext.minX, ext.maxZ], [ext.maxX, ext.minZ], [ext.maxX, ext.maxZ]]) {
+        v.set(X, 0, Z).project(camera)
+        px0 = Math.min(px0, (v.x * 0.5 + 0.5) * w)
+        px1 = Math.max(px1, (v.x * 0.5 + 0.5) * w)
+        py0 = Math.min(py0, (-v.y * 0.5 + 0.5) * h)
+        py1 = Math.max(py1, (-v.y * 0.5 + 0.5) * h)
+      }
+      bx0 = Math.max(bx0, px0 - 10)
+      by0 = Math.max(by0, py0 - 10)
+      bx1 = Math.min(bx1, px1 + 10)
+      by1 = Math.min(by1, py1 + 10)
+      if (bx1 - bx0 < 120 || by1 - by0 < 80) { bx0 = 4; by0 = 4; bx1 = w - 4; by1 = h - 4 } // bloc minuscule à l'écran : viewport
+    }
     // 2. répartition en 4 DIRECTIONS autour du parcours (Adrien) : le centre
     // écran des ancres fait office de centre du GPX — un point au sud du
     // tracé pousse son cartouche vers le bas, à l'ouest vers la gauche, etc.
@@ -128,28 +154,17 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
     // horizontalement (layoutCartouches est 1D, on le réutilise sur x)
     const avoid = params.gpxLabelAvoid !== false
     const placed = []
-    // occupation de TOUT l'espace (Adrien) : si une pile déborde de 55 % de
-    // la dimension disponible, on JUSTIFIE le groupe sur toute la hauteur
-    // (ou largeur) au lieu de tasser près des ancres
-    const spread = (group, sizes, span) => {
-      const total = sizes.reduce((a, s) => a + s, 0) + (group.length - 1) * 8
-      if (!avoid || total < span * 0.55) return null
-      const gap = Math.max(8, (span - 8 - total + (group.length - 1) * 8) / Math.max(1, group.length - 1))
-      let pos = 4
-      return group.map((_, i) => { const p = pos; pos += sizes[i] + gap; return p })
-    }
     for (const key of ['right', 'left']) {
       const group = groups[key]
       if (!group.length) continue
       group.sort((a, b) => a.ay - b.ay)
-      const even = spread(group, group.map((n) => n.hh), h)
-      const ys = even || layoutCartouches(
+      const ys = layoutCartouches(
         group.map((n) => ({ y: n.ay - n.hh / 2, h: n.hh })),
-        { avoid, gap: 8, minY: 4, maxY: h - 4 }
+        { avoid, gap: 8, minY: by0, maxY: by1 }
       )
       group.forEach((n, i) => {
         n.side = key
-        n.fx = key === 'right' ? n.ax + LEAD : n.ax - LEAD - n.fw
+        n.fx = Math.min(Math.max(key === 'right' ? n.ax + LEAD : n.ax - LEAD - n.fw, bx0), bx1 - n.fw)
         n.fy = ys[i]
         placed.push(n)
       })
@@ -158,15 +173,14 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
       const group = groups[key]
       if (!group.length) continue
       group.sort((a, b) => a.ax - b.ax)
-      const even = spread(group, group.map((n) => n.fw), w)
-      const xs = even || layoutCartouches(
+      const xs = layoutCartouches(
         group.map((n) => ({ y: n.ax - n.fw / 2, h: n.fw })),
-        { avoid, gap: 10, minY: 4, maxY: w - 4 }
+        { avoid, gap: 10, minY: bx0, maxY: bx1 }
       )
       group.forEach((n, i) => {
         n.side = key
         n.fx = xs[i]
-        n.fy = key === 'top' ? n.ay - LEAD - n.hh : n.ay + LEAD
+        n.fy = Math.min(Math.max(key === 'top' ? n.ay - LEAD - n.hh : n.ay + LEAD, by0), by1 - n.hh)
         placed.push(n)
       })
     }
@@ -190,7 +204,7 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
     // son bord côté ancre (pointillés neutres, jamais la couleur du tracé)
     for (const n of placed) {
       if (n.sx == null) { n.sx = n.fx; n.sy = n.fy } // première pose : direct
-      else { n.sx += (n.fx - n.sx) * 0.16; n.sy += (n.fy - n.sy) * 0.16 }
+      else { n.sx += (n.fx - n.sx) * 0.05; n.sy += (n.fy - n.sy) * 0.05 } // très doux (Adrien)
       n.cart.style.transform = `translate(${Math.round(n.sx)}px, ${Math.round(n.sy)}px)`
       n.anchor.style.transform = `translate(${Math.round(n.ax - 3.5)}px, ${Math.round(n.ay - 3.5)}px)`
       let tx

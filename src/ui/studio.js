@@ -10,25 +10,44 @@ import { PICTOS, PICTO_KEYS } from '../race-labels.js'
 import { serializeRace, parseRace } from '../race-model.js'
 import { TRANSPORT_CATS } from '../transports.js'
 
-const DRAFT_KEY = 'shibumap-race-draft'
+const DRAFT_KEY = 'shibumap-race-draft' // héritage (une seule course)
+const DRAFTS_KEY = 'shibumap-race-drafts' // un brouillon PAR course (clé = nom du calque)
 const STEPS = ['Identité', 'Points', 'Carte', 'Style', 'Exporter']
 
 export function buildStudio(deps) {
   let open = false
   let snap = null
   let validated = false
-  let draft = loadDraft()
 
-  function loadDraft() {
-    try {
-      const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null')
-      if (d?.race) return d
-    } catch {}
-    return { step: 0, race: { name: '', logo: null, waypoints: [], transports: { cats: [], removed: [] } } }
+  const freshDraft = () => ({ step: 0, race: { name: '', logo: null, waypoints: [], transports: { cats: [], removed: [] } } })
+  const draftKey = () => deps.activeRaceName?.() || '_default'
+  function readDrafts() {
+    try { return JSON.parse(localStorage.getItem(DRAFTS_KEY) || '{}') || {} } catch { return {} }
   }
+  function loadDraft() {
+    const map = readDrafts()
+    if (map[draftKey()]?.race) return map[draftKey()]
+    try {
+      const legacy = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null')
+      if (legacy?.race) return legacy
+    } catch {}
+    return freshDraft()
+  }
+  let draft = loadDraft()
   function saveDraft() {
-    try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)) } catch {}
+    try {
+      const map = readDrafts()
+      map[draftKey()] = draft
+      localStorage.setItem(DRAFTS_KEY, JSON.stringify(map))
+    } catch {}
     deps.syncRace(draft.race)
+  }
+  // changer de course (sélecteur étape ①) : focus du calque + SON brouillon
+  function switchRace(id) {
+    deps.focusRace?.(id)
+    draft = loadDraft()
+    deps.syncRace(draft.race)
+    render()
   }
 
   const morph = makeMorph({ modeClass: 'studio-mode', onSettle: () => window.dispatchEvent(new Event('resize')) })
@@ -94,6 +113,20 @@ export function buildStudio(deps) {
   function stepIdentity() {
     body.innerHTML = `<h3>Votre événement</h3>
       <p class="hint">Le nom et le logo habillent le bloc (les deux flancs) et la tête de parcours. Chargez votre trace GPX si ce n'est pas déjà fait.</p>`
+    // plusieurs courses chargées → on choisit d'abord CELLE qu'on modifie
+    const races = deps.listRaces?.() || []
+    if (races.length > 1) {
+      const sel = document.createElement('div')
+      sel.className = 'studio-row'
+      for (const r of races) {
+        const b = document.createElement('button')
+        b.className = 'studio-btn ' + (r.active ? '' : 'ghost')
+        b.textContent = r.name || 'Course sans nom'
+        b.addEventListener('click', () => switchRace(r.id))
+        sel.append(b)
+      }
+      body.append(field('Course à modifier', sel))
+    }
     body.append(field('Nom de la course', txt(draft.race.name, (v) => { draft.race.name = v }, 'ex : 90km du Mont-Blanc')))
     // logo
     const lg = document.createElement('div')
@@ -322,6 +355,7 @@ export function buildStudio(deps) {
     snap = deps.captureState()
     if (!col.isConnected) document.body.append(col, caption)
     morph.enter()
+    draft = loadDraft() // la course active a pu changer depuis la dernière fois
     deps.syncRace(draft.race)
     render()
   }
