@@ -3983,7 +3983,9 @@ const studio = buildStudio({
     refreshAll()
   },
   hasTrack: () => !!gpxLayer.activeLayer?.gpx?.track,
-  loadGpx: () => panelCtx.loadGpx?.(),
+  // gpxFileInput DIRECT : panelCtx.loadGpx n'existe pas (loadGpx ne vit que
+  // dans le ctx du panneau Parcours) — le ?. rendait le bouton muet
+  loadGpx: () => gpxFileInput.click(),
   trackStats: () => {
     const t = gpxLayer.activeLayer?.gpx?.track
     if (!t) return null
