@@ -4,7 +4,7 @@
 // Each surface shader carries an "Appearance" block (opacity + Figma-style blend
 // mode) plus its own per-effect controls.
 
-import { el, section, toggle, select, color, slider } from './kit.js'
+import { el, section, toggle, select, color, slider, onRefresh } from './kit.js'
 import { Panel } from './shell.js'
 import { BLEND_MODES } from '../fx-meta.js'
 import { materialsByCategory } from '../material-catalog.js'
@@ -169,6 +169,21 @@ export function buildShadersPanel(ctx) {
   // ordre de lecture : Matière du relief (le choix le plus courant) AVANT les
   // effets de surface ; Terrain/Socle (create-panel) seront prépendus devant
   panel.body.insertBefore(sMat.root, sFx.root)
+
+  // sections repliées QUI PARLENT : l'état courant dans l'en-tête
+  const matNameById = {}
+  for (const cat of materialsByCategory()) for (const m of cat.items) matNameById[m.id] = { label: m.label, swatch: m.swatch }
+  onRefresh(() => {
+    const id = ctx.getSurfaceMat()
+    const m = id ? matNameById[id] : null
+    sMat.setMeta(id ? (m?.label ?? id) : 'Topographique', m?.swatch || null)
+  }, sMat.head)
+  onRefresh(() => {
+    if (ctx.getLiquidMetal()) { sFx.setMeta('Métal liquide', 'linear-gradient(120deg,#d8dbe0,#7d838d,#eef1f5)'); return }
+    const id = ctx.getSurfaceFx() | 0
+    const fx = id ? ctx.surfaceFxList.find((f) => +f.value === id) : null
+    sFx.setMeta(fx ? fx.label : 'Aucun')
+  }, sFx.head)
 
   renderLm()
   renderFxPicker()

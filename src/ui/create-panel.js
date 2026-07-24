@@ -7,7 +7,7 @@
 //                                  Bibliothèque (rampe, océans, encre, grille)
 // Le générateur aléatoire (palette + look) est RETIRÉ (demande explicite).
 
-import { el, slider, color, swatch, toggle, select, segmented, button, section, refreshAll } from './kit.js'
+import { el, slider, color, swatch, toggle, select, segmented, button, section, refreshAll, onRefresh } from './kit.js'
 import { Panel } from './shell.js'
 import { PBR_PRESETS, GLASS_PRESETS, GLASS_BY_ID, PBR_BY_ID } from '../material-presets.js'
 
@@ -122,9 +122,82 @@ export function buildFondsPanel(ctx) {
 }
 
 // --------------------------------------- panneau Terrain : sections apportées
+// Terrain v2 (validé Adrien) : Relief en tête avec PRESETS d'exagération en
+// chips (le réglage star traité en star), la mécanique (zoom/maillage/détail)
+// reléguée au fond dans « Qualité » avec ses presets Rapide/Équilibré/Fin, le
+// Socle en GRILLE DE VIGNETTES (50 matériaux exposés, plus de menu déroulant),
+// et des sections repliées QUI PARLENT (setMeta — état courant dans l'en-tête).
+const EXAG_PRESETS = [
+  { v: 1, label: '×1 Réel' },
+  { v: 2, label: '×2 Carte' },
+  { v: 4, label: '×4 Relief' },
+  { v: 8, label: '×8 Drame' },
+]
+const QUALITY_PRESETS = [
+  { id: 'rapide', label: 'Rapide', resolution: 384, detail: 0.15, detailScale: 2 },
+  { id: 'equilibre', label: 'Équilibré', resolution: 768, detail: 0.35, detailScale: 2.5 },
+  { id: 'fin', label: 'Fin', resolution: 1024, detail: 0.55, detailScale: 3 },
+]
+
+// vignette procédurale d'un matériau de socle — dégradé éclairé depuis sa
+// couleur ; les métaux polis gagnent une bande de reflet, les verres une clarté
+function presetSwatch(p, glass) {
+  if (glass) return `linear-gradient(135deg, color-mix(in srgb, ${p.color} 25%, white), color-mix(in srgb, ${p.color} 65%, white) 40%, ${p.color})`
+  const base = `linear-gradient(135deg, color-mix(in srgb, ${p.color} 55%, white), ${p.color} 45%, color-mix(in srgb, ${p.color} 68%, black))`
+  return p.metalness >= 0.5 && p.roughness < 0.5
+    ? `linear-gradient(115deg, transparent 38%, rgba(255,255,255,.45) 46%, transparent 55%), ${base}`
+    : base
+}
+
 export function contributeTerrainSections(ctx) {
   const { params } = ctx
   const matPanel = ctx.materialsPanel
+
+  // ------------------------------------------------------------- Relief
+  // le réglage STAR : presets en un clic + curseur fin + Isoler la zone
+  const sRel = matPanel.addSection(section('Relief'))
+  const chipRow = el('div', 'ce-chiprow')
+  const commitExag = () => {
+    ctx.saveZoomExag(params.demZoom, params.demExaggeration)
+    if (params.source === 'real') ctx.regenerateTerrain()
+    refreshAll()
+  }
+  const chips = EXAG_PRESETS.map((p) => {
+    const b = el('button', 'ce-chip', p.label)
+    b.type = 'button'
+    b.addEventListener('click', () => {
+      params.demExaggeration = p.v
+      commitExag()
+    })
+    chipRow.append(b)
+    return b
+  })
+  onRefresh(() => {
+    for (let i = 0; i < chips.length; i++) chips[i].classList.toggle('on', Math.abs(params.demExaggeration - EXAG_PRESETS[i].v) < 0.03)
+  }, chipRow)
+  const exag = slider({
+    label: 'Échelle fine',
+    min: 0.5,
+    max: 40,
+    step: 0.05,
+    get: () => params.demExaggeration,
+    set: (v) => { params.demExaggeration = v },
+  })
+  // regenerate only on release: change commits + saves for this zoom
+  exag.querySelector('input').addEventListener('change', commitExag)
+  const isolate = toggle({
+    label: 'Isoler la zone',
+    get: () => params.regionMode ?? false,
+    set: (v) => {
+      params.regionMode = v
+      ctx.setRegionMode(v)
+    },
+  })
+  isolate.setAttribute('data-tip', 'Découpe la carte au pays ou à la région sous la vue — sans base carrée.')
+  const zoomResetRow = el('div', 'ce-btn-row')
+  zoomResetRow.append(button('Réinitialiser l’échelle de ce zoom', () => { ctx.resetZoomExag(); refreshAll() }, { ghost: true }))
+  sRel.body.append(chipRow, exag, isolate, zoomResetRow)
+  onRefresh(() => sRel.setMeta(`×${(+params.demExaggeration).toFixed(params.demExaggeration % 1 ? 1 : 0)}${params.regionMode ? ' · zone isolée' : ''}`), sRel.head)
 
   // ------------------------------------------------------------ Ombrage
   const sMap = matPanel.addSection(section('Ombrage'))
@@ -135,64 +208,7 @@ export function contributeTerrainSections(ctx) {
     slider({ label: 'Pivot d’altitude', min: 0, max: 1, step: 0.01, get: () => params.heightPivot, set: (v) => { params.heightPivot = v; u().uHeightPivot.value = v } }),
     slider({ label: 'Ombrage des pentes', min: 0, max: 1, step: 0.02, get: () => params.slopeTint, set: (v) => { params.slopeTint = v; u().uSlopeTint.value = v } })
   )
-
-  // ------------------------------------------------------ Relief & détail
-  const sTer = matPanel.addSection(section('Relief & détail'))
-  const exag = slider({
-    label: 'Échelle verticale',
-    min: 0.5,
-    max: 40,
-    step: 0.05,
-    get: () => params.demExaggeration,
-    set: (v) => { params.demExaggeration = v },
-  })
-  // regenerate only on release: pointerup commits + saves for this zoom
-  exag.querySelector('input').addEventListener('change', () => {
-    ctx.saveZoomExag(params.demZoom, params.demExaggeration)
-    if (params.source === 'real') ctx.regenerateTerrain()
-  })
-  sTer.body.append(
-    select({ label: 'Détail (zoom)', options: ['5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'], get: () => String(params.demZoom), set: (v) => { params.demZoom = +v; ctx.onZoomPicked(+v); rebuildRes() } }),
-    exag,
-    el('div', 'ce-btn-row'),
-    slider({ label: 'Détail fin', min: 0, max: 0.8, step: 0.01, get: () => params.detail, set: (v) => { params.detail = v; ctx.saveZoomDetail?.(params.demZoom, v) } }),
-    slider({ label: 'Échelle du détail', min: 0.5, max: 6, step: 0.1, get: () => params.detailScale, set: (v) => { params.detailScale = v } })
-  )
-
-  // Mesh resolution — 2048 is now offered at EVERY zoom (explicit request:
-  // 'laisse la possibilité de passer à 2048 de mesh sur tous les zooms'). At
-  // coarse zooms the DEM carries less detail than the mesh can express, so
-  // 2048 buys smoothness of the interpolated surface, not new information —
-  // the warning still says what it costs.
-  const resWrap = el('div')
-  sTer.body.append(resWrap)
-  function rebuildRes() {
-    if (params.resolution > 2048) params.resolution = 2048 // hard ceiling
-    const opts = ['256', '384', '512', '768', '1024', '2048']
-    resWrap.replaceChildren(
-      select({ label: 'Résolution du maillage', options: opts, get: () => String(params.resolution), set: (v) => { params.resolution = +v; ctx.regenerateTerrain() } })
-    )
-    if (params.resolution >= 2048) resWrap.append(el('div', 'ce-note ce-warn', '⚠ 2048 est très lourd — l’onglet peut fortement ralentir.'))
-  }
-  rebuildRes()
-  // detail sliders regenerate on release
-  for (const inp of sTer.body.querySelectorAll('.ce-slider')) {
-    if (inp === exag.querySelector('input')) continue
-    inp.addEventListener('change', () => ctx.regenerateTerrain())
-  }
-  sTer.body.querySelector('.ce-btn-row').append(
-    button('Réinitialiser l’échelle de ce zoom', () => { ctx.resetZoomExag(); refreshAll() }, { ghost: true })
-  )
-  const isolate = toggle({
-    label: 'Isoler la zone',
-    get: () => params.regionMode ?? false,
-    set: (v) => {
-      params.regionMode = v
-      ctx.setRegionMode(v)
-    },
-  })
-  isolate.setAttribute('data-tip', 'Découpe la carte au pays ou à la région sous la vue — sans base carrée.')
-  sTer.body.append(isolate)
+  onRefresh(() => sMap.setMeta(`contraste ×${(+params.heightContrast).toFixed(1)}`), sMap.head)
 
   // --------------------------------------------------------------- Socle
   const sBlk = matPanel.addSection(section('Socle'))
@@ -203,42 +219,127 @@ export function contributeTerrainSections(ctx) {
   )
   sBlk.body.children[1].querySelector('input').addEventListener('change', () => ctx.plinth.rebuild(ctx.terrain, params))
 
-  // Socle material — give the block a real finish: 25 PBR solids (metals, stone,
-  // ceramics) OR 25 physical glasses. Glass adds a Diffusion (frost) knob and a
-  // Ground glow that pools the glass colour onto the table below.
-  const matWrap = el('div')
-  sBlk.body.append(matWrap)
-  function rebuildMat() {
+  // le catalogue EXPOSÉ : 25 solides + 25 verres en grille de vignettes (même
+  // langage que Matière du relief) — le menu déroulant cachait la marchandise
+  const matPick = el('div', 'ce-mat-pick')
+  const matKnobs = el('div', 'ce-fx-controls')
+  sBlk.body.append(matPick, matKnobs)
+  function renderPlinthPicker() {
+    matPick.replaceChildren()
     const glass = params.plinthFinish === 'glass'
-    const list = glass ? GLASS_PRESETS : PBR_PRESETS
-    const kids = [
-      segmented({ label: 'Finition', options: [{ value: 'solid', label: 'Solide' }, { value: 'glass', label: 'Verre' }], get: () => params.plinthFinish, set: (v) => { params.plinthFinish = v; ctx.applyPlinthMaterial(); rebuildMat() } }),
-      select({ label: glass ? 'Verre' : 'Matériau (PBR)', options: list.map((p) => ({ value: p.id, label: p.name })), get: () => (glass ? params.plinthGlass : params.plinthPbr), set: (v) => {
-        if (glass) { params.plinthGlass = v; params.plinthGlassDiffusion = GLASS_BY_ID[v].diffusion } else params.plinthPbr = v
-        ctx.applyPlinthMaterial(); rebuildMat()
-      } }),
-    ]
-    if (glass) {
-      kids.push(
+    const curId = glass ? params.plinthGlass : params.plinthPbr
+    const group = (title, list, isGlass) => {
+      matPick.append(el('div', 'ce-mat-cat', title))
+      const grid = el('div', 'ce-mat-grid')
+      for (const p of list) {
+        const b = el('button', `ce-mat-vig${(isGlass === glass && p.id === curId) ? ' on' : ''}`)
+        b.type = 'button'
+        b.setAttribute('data-tip', p.name)
+        const media = el('span', 'ce-mat-vig-img')
+        media.style.background = presetSwatch(p, isGlass)
+        b.append(media, el('span', 'ce-mat-vig-name', p.name))
+        b.addEventListener('click', () => {
+          params.plinthFinish = isGlass ? 'glass' : 'solid'
+          if (isGlass) { params.plinthGlass = p.id; params.plinthGlassDiffusion = GLASS_BY_ID[p.id].diffusion } else params.plinthPbr = p.id
+          ctx.applyPlinthMaterial()
+          renderPlinthPicker()
+          renderPlinthKnobs()
+          refreshAll()
+        })
+        grid.append(b)
+      }
+      matPick.append(grid)
+    }
+    group('Solides', PBR_PRESETS, false)
+    group('Verres', GLASS_PRESETS, true)
+  }
+  function renderPlinthKnobs() {
+    matKnobs.replaceChildren()
+    if (params.plinthFinish === 'glass') {
+      matKnobs.append(
         slider({ label: 'Diffusion (givre)', min: 0, max: 1, step: 0.01, get: () => params.plinthGlassDiffusion, set: (v) => { params.plinthGlassDiffusion = v; ctx.applyPlinthMaterial() } }),
         slider({ label: 'Relief', min: 0, max: 2, step: 0.02, get: () => params.plinthGlassBump, set: (v) => { params.plinthGlassBump = v; ctx.applyPlinthMaterial() } }),
         slider({ label: 'Halo au sol', min: 0, max: 1, step: 0.01, get: () => params.plinthGlassProjection, set: (v) => { params.plinthGlassProjection = v; ctx.applyPlinthMaterial() } })
       )
     } else if (PBR_BY_ID[params.plinthPbr]?.tex) {
       // textured PBR (carbon, wood): exaggerated relief with a live bump slider
-      kids.push(
+      matKnobs.append(
         slider({ label: 'Relief', min: 0, max: 3, step: 0.05, get: () => params.plinthBump, set: (v) => { params.plinthBump = v; ctx.applyPlinthMaterial() } })
       )
     }
-    matWrap.replaceChildren(...kids)
   }
-  rebuildMat()
+  renderPlinthPicker()
+  renderPlinthKnobs()
+  // un template/reset peut changer le matériau sous nos pieds — meta ET
+  // picker resynchronisés (re-render seulement quand la sélection change)
+  let lastPlinthKey = ''
+  onRefresh(() => {
+    const glass = params.plinthFinish === 'glass'
+    const cur = glass ? GLASS_BY_ID[params.plinthGlass] : PBR_BY_ID[params.plinthPbr]
+    sBlk.setMeta(params.plinth ? (cur?.name ?? '') : 'Masqué', params.plinth && cur ? presetSwatch(cur, glass) : null)
+    const key = `${params.plinthFinish}/${glass ? params.plinthGlass : params.plinthPbr}`
+    if (key !== lastPlinthKey) {
+      lastPlinthKey = key
+      renderPlinthPicker()
+      renderPlinthKnobs()
+    }
+  }, sBlk.head)
 
   sBlk.body.append(
     toggle({ label: 'Cartouche au sol', get: () => params.groundInfo, set: (v) => { params.groundInfo = v; ctx.setGroundInfo(v) } })
   )
 
-  // ordre de lecture du panneau Terrain : Relief & détail, Ombrage, Socle
-  // EN TÊTE (avant Matière du relief / Effets de surface)
-  matPanel.body.prepend(sTer.root, sMap.root, sBlk.root)
+  // ------------------------------------------------------------- Qualité
+  // la mécanique, AU FOND : un preset règle maillage + détail d'un coup
+  // (pattern qualité des jeux vidéo) ; les curseurs experts restent dessous.
+  // « Détail (zoom) » change la ZONE de données — jamais touché par les presets.
+  const sQual = matPanel.addSection(section('Qualité'))
+  const qualityOf = () => {
+    const q = QUALITY_PRESETS.find((q) => q.resolution === params.resolution && Math.abs(q.detail - params.detail) < 0.01 && Math.abs(q.detailScale - params.detailScale) < 0.05)
+    return q ? q.id : 'perso'
+  }
+  sQual.body.append(
+    segmented({
+      options: [...QUALITY_PRESETS.map((q) => ({ value: q.id, label: q.label })), { value: 'perso', label: 'Perso' }],
+      get: qualityOf,
+      set: (v) => {
+        const q = QUALITY_PRESETS.find((q) => q.id === v)
+        if (!q) return // « Perso » n'est pas un état qu'on choisit, c'est un constat
+        params.resolution = q.resolution
+        params.detail = q.detail
+        params.detailScale = q.detailScale
+        ctx.saveZoomDetail?.(params.demZoom, q.detail)
+        ctx.regenerateTerrain()
+        refreshAll()
+      },
+    })
+  )
+  const zoomSel = select({ label: 'Détail (zoom)', options: ['5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'], get: () => String(params.demZoom), set: (v) => { params.demZoom = +v; ctx.onZoomPicked(+v); rebuildRes() } })
+  const fineDetail = slider({ label: 'Détail fin', min: 0, max: 0.8, step: 0.01, get: () => params.detail, set: (v) => { params.detail = v; ctx.saveZoomDetail?.(params.demZoom, v) } })
+  const detailScale = slider({ label: 'Échelle du détail', min: 0.5, max: 6, step: 0.1, get: () => params.detailScale, set: (v) => { params.detailScale = v } })
+  sQual.body.append(zoomSel, fineDetail, detailScale)
+  // Mesh resolution — 2048 offert à tous les zooms (demande explicite), avec
+  // l'avertissement de coût ; plafond dur.
+  const resWrap = el('div')
+  sQual.body.append(resWrap)
+  function rebuildRes() {
+    if (params.resolution > 2048) params.resolution = 2048 // hard ceiling
+    const opts = ['256', '384', '512', '768', '1024', '2048']
+    resWrap.replaceChildren(
+      select({ label: 'Résolution du maillage', options: opts, get: () => String(params.resolution), set: (v) => { params.resolution = +v; ctx.regenerateTerrain(); refreshAll() } })
+    )
+    if (params.resolution >= 2048) resWrap.append(el('div', 'ce-note ce-warn', '⚠ 2048 est très lourd — l’onglet peut fortement ralentir.'))
+  }
+  rebuildRes()
+  // les curseurs de détail régénèrent au relâchement
+  for (const row of [fineDetail, detailScale]) row.querySelector('input').addEventListener('change', () => { ctx.regenerateTerrain(); refreshAll() })
+  onRefresh(() => {
+    const q = QUALITY_PRESETS.find((q) => q.id === qualityOf())
+    sQual.setMeta(q ? q.label : `Perso · ${params.resolution}`)
+  }, sQual.head)
+
+  // ordre de lecture du panneau Terrain : Relief, Ombrage EN TÊTE (avant
+  // Matière du relief / Effets de surface), puis Socle et Qualité AU FOND
+  matPanel.body.prepend(sRel.root, sMap.root)
+  matPanel.body.append(sBlk.root, sQual.root)
 }

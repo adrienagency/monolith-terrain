@@ -28,6 +28,12 @@ function track(fn, el) {
   refreshables.add({ fn, el, mounted: false })
   return fn
 }
+// registre public : les metas de section (et autres affichages passifs) se
+// resynchronisent à chaque refreshAll, comme les contrôles
+export function onRefresh(fn, el) {
+  track(fn, el)
+  fn()
+}
 
 const fmt = (v, step) => (step >= 1 ? Math.round(v) : +v.toFixed(step >= 0.1 ? 1 : 2))
 
@@ -46,12 +52,62 @@ export function slider({ label, min, max, step = 0.01, get, set }) {
     const t = ((get() - min) / (max - min)) * 100
     input.style.setProperty('--fill', `${t}%`)
   }, input)
-  input.addEventListener('input', () => {
-    set(parseFloat(input.value))
+  const commitUi = () => {
     val.textContent = fmt(get(), step)
     input.style.setProperty('--fill', `${((get() - min) / (max - min)) * 100}%`)
+  }
+  input.addEventListener('input', () => {
+    set(parseFloat(input.value))
+    commitUi()
   })
   refresh()
+  // RÈGLE CONSTANTE (Adrien) : double-clic sur le curseur = retour à la
+  // valeur de construction (le défaut au boot — supprime la peur de toucher).
+  // 'change' déclenché pour les contrôles qui commitent au relâchement.
+  const def = get()
+  input.addEventListener('dblclick', () => {
+    set(def)
+    input.value = def
+    commitUi()
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  // RÈGLE CONSTANTE : clic sur la VALEUR = saisie clavier (Entrée valide,
+  // Échap abandonne) — même geste que les lignes scrubbables de la barre.
+  val.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const inp = el('input', 'ce-val-edit')
+    inp.type = 'number'
+    inp.min = min
+    inp.max = max
+    inp.step = step
+    inp.value = get()
+    val.replaceWith(inp)
+    inp.focus()
+    inp.select()
+    // commit DIRECT et idempotent — ne jamais dépendre de blur() (sans focus
+    // réel il ne tire pas, et Enter+blur le doublerait)
+    let done = false
+    const commit = (cancel) => {
+      if (done) return
+      done = true
+      if (!cancel) {
+        const v = Math.min(max, Math.max(min, parseFloat(inp.value)))
+        if (Number.isFinite(v)) {
+          set(v)
+          input.value = v
+          input.dispatchEvent(new Event('change', { bubbles: true }))
+        }
+      }
+      inp.replaceWith(val)
+      commitUi()
+    }
+    inp.addEventListener('blur', () => commit(false))
+    inp.addEventListener('keydown', (ev) => {
+      ev.stopPropagation()
+      if (ev.key === 'Enter') commit(false)
+      if (ev.key === 'Escape') commit(true)
+    })
+  })
   lab.append(val)
   root.append(lab, input)
   return root
@@ -160,14 +216,27 @@ export function iconButton(svg, title, onClick) {
   return b
 }
 
-// accordion section — panels keep exactly one open (managed by the panel)
+// accordion section — panels keep exactly one open (managed by the panel).
+// setMeta(text, swatch?) : les sections REPLIÉES parlent (pattern Lightroom,
+// règle Adrien) — l'en-tête affiche l'état courant (« Marbre blanc », « ×4 »)
+// avec une micro-pastille optionnelle (couleur ou gradient CSS).
 export function section(title, { open = false } = {}) {
   const root = el('div', 'ce-section')
   const head = el('button', 'ce-section-head')
   head.type = 'button'
-  head.append(el('span', 'ce-section-title', title), el('span', 'ce-chev'))
+  const meta = el('span', 'ce-section-meta')
+  head.append(el('span', 'ce-section-title', title), meta, el('span', 'ce-chev'))
   const body = el('div', 'ce-section-body')
   root.append(head, body)
   root.classList.toggle('open', open)
-  return { root, head, body, get open() { return root.classList.contains('open') }, setOpen: (v) => root.classList.toggle('open', v) }
+  const setMeta = (text, swatch) => {
+    meta.replaceChildren()
+    if (swatch) {
+      const dot = el('i', 'ce-section-swatch')
+      dot.style.background = swatch
+      meta.append(dot)
+    }
+    if (text) meta.append(document.createTextNode(text))
+  }
+  return { root, head, body, setMeta, get open() { return root.classList.contains('open') }, setOpen: (v) => root.classList.toggle('open', v) }
 }
