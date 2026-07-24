@@ -374,5 +374,15 @@ export function buildStudio(deps) {
   col.querySelector('.studio-close').addEventListener('click', exit)
   window.addEventListener('keydown', (e) => { if (open && e.key === 'Escape') exit() })
 
-  return { enter, exit, isOpen: () => open }
+  // import d'un projet .shibumap-race depuis N'IMPORTE OÙ (bouton Load GPX…,
+  // drag & drop) : pose le calque + le look, range le brouillon sous la
+  // bonne clé, synchronise les cartouches — studio ouvert ou non
+  async function importProject(bundle) {
+    await deps.importRace(bundle) // recadre + drape la trace, applique le look
+    draft = { ...freshDraft(), race: bundle.race }
+    saveDraft() // la trace existe → km/altitudes résolus du premier coup
+    if (open) render()
+  }
+
+  return { enter, exit, isOpen: () => open, importProject }
 }

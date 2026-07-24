@@ -42,7 +42,8 @@ export function layoutCartouches(items, { avoid = true, gap = 6, minY = 0, maxY 
   return out
 }
 
-const num = (v, d = null) => (Number.isFinite(+v) ? +v : d)
+// garde : +null vaut 0 en JS — null/'' doivent rester d, jamais devenir 0
+const num = (v, d = null) => (v == null || v === '' ? d : Number.isFinite(+v) ? +v : d)
 
 export function serializeRace({ race, look, gpxText }) {
   return JSON.stringify({ format: 'shibumap-race', version: 1, race, look, gpx: gpxText })

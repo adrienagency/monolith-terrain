@@ -2502,18 +2502,30 @@ makeDraggable(modes.altEl)
 window.addEventListener('dragover', (e) => e.preventDefault())
 window.addEventListener('drop', (e) => {
   e.preventDefault()
-  const f = [...(e.dataTransfer?.files || [])].find((f) => /\.gpx$/i.test(f.name))
-  if (f) f.text().then(loadGpxText)
+  const f = [...(e.dataTransfer?.files || [])].find((f) => /\.(gpx|json)$/i.test(f.name))
+  if (f) openTrackFile(f)
 })
 
 const gpxFileInput = document.createElement('input')
 gpxFileInput.type = 'file'
-gpxFileInput.accept = '.gpx'
+// accepte aussi les projets .shibumap-race.json exportés par le Race Studio
+// (Adrien : « Load GPX doit accepter les json qu'on exporte depuis shibumap »)
+gpxFileInput.accept = '.gpx,.json,application/json'
 gpxFileInput.style.display = 'none'
 document.body.appendChild(gpxFileInput)
+async function openTrackFile(f) {
+  const text = await f.text()
+  if (/\.json$/i.test(f.name) || text.trimStart().startsWith('{')) {
+    const bundle = parseRace(text)
+    if (bundle) { studio.importProject(bundle); return }
+    alert(`« ${f.name} » n'est ni un GPX ni un projet ShibuMap.`)
+    return
+  }
+  loadGpxText(text)
+}
 gpxFileInput.addEventListener('change', () => {
   const f = gpxFileInput.files?.[0]
-  if (f) f.text().then(loadGpxText)
+  if (f) openTrackFile(f)
   gpxFileInput.value = ''
 })
 
@@ -3476,6 +3488,10 @@ const routePanel = buildRoutePanel({
   startFollow: engageGpxFollow,
   stopFollow: disengageGpxFollow,
   uploadIcon: requestIconUpload,
+  // Race Studio — closures paresseuses : `studio`/`raceLabels` sont définis
+  // plus bas dans le module, mais lus au CLIC, jamais au build du panneau
+  openStudio: () => studio.enter(),
+  refreshRaceLabels: () => raceLabels.setDirty(),
 })
 
 // the exclusive per-column accordion now lives in the Panel shell (setCollapsed
@@ -3922,7 +3938,8 @@ const studio = buildStudio({
     raceState.logo = race.logo
     raceState.waypoints = (race.waypoints || []).map((w) => {
       const idx = t ? snapToKm(t.cumKm, w.km) : null
-      return { ...w, idx, alt: w.alt ?? (t ? Math.round(t.points[idx]?.ele ?? 0) : null) }
+      const ele = t?.points?.[idx]?.ele
+      return { ...w, idx, alt: w.alt ?? (Number.isFinite(ele) ? Math.round(ele) : null) }
     })
     raceState.transports.removed = [...(race.transports?.removed || [])]
     // traits verticaux des points de passage sur le profil (gpx.js)
@@ -3935,8 +3952,10 @@ const studio = buildStudio({
   setGpxStyle: (kv) => { applyUserTemplate({ look: kv }); refreshAll() },
   captureLook: () => captureLook(params),
   currentGpxText: () => gpxLayer.activeLayer?.sourceText || '',
-  importRace: (bundle) => {
-    if (bundle.gpxText) gpxLayer.addLayer(bundle.gpxText)
+  importRace: async (bundle) => {
+    // loadGpxText (et pas addLayer nu) : recadre le terrain sur la trace,
+    // reconstruit le monde, drape — sinon altitudes/ancres restent vides
+    if (bundle.gpxText) await loadGpxText(bundle.gpxText)
     if (bundle.look && Object.keys(bundle.look).length) applyUserTemplate({ look: bundle.look })
     refreshAll()
   },
