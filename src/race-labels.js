@@ -42,10 +42,15 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
   container.appendChild(root)
 
   const v = new THREE.Vector3()
-  let dirty = true
-  const nodes = new Map() // id → {cart, anchor, leader, item}
+  const nodes = new Map() // id → {cart, anchor, leader, item, sig, fw…}
+  let frame = 0
+  let remeasure = true // re-mesurer les largeurs (fontes tardives, contenu changé)
+  let uiCache = { rects: [], cref: null }
 
-  const setDirty = () => { dirty = true }
+  const setDirty = () => { remeasure = true }
+  // signature LÉGÈRE d'un item (remplace un JSON.stringify par frame) — le
+  // logo (dataURL volumineux) est comparé par sa longueur, pas son contenu
+  const sig = (it) => `${it.kind}|${it.name}|${it.km ?? ''}|${it.alt ?? ''}|${it.cutoff ?? ''}|${(it.pictos || []).join(',')}|${it.word ?? ''}|${it.totalKm ?? ''}|${it.logo ? it.logo.length : 0}`
 
   function buildNode(item) {
     const isChip = item.kind === 'transport'
@@ -87,15 +92,22 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
     const seen = new Set()
     for (const it of items) {
       seen.add(it.id)
+      const g = sig(it)
       const n = nodes.get(it.id)
-      if (!n) nodes.set(it.id, buildNode(it))
-      else if (JSON.stringify({ ...n.item, world: 0, faded: 0 }) !== JSON.stringify({ ...it, world: 0, faded: 0 })) {
+      if (!n) {
+        const nn = buildNode(it)
+        nn.sig = g
+        nodes.set(it.id, nn)
+        remeasure = true
+      } else if (n.sig !== g) {
         n.cart.remove(); n.anchor.remove(); n.leader.remove()
-        nodes.set(it.id, buildNode(it))
-      } else n.item = it // rafraîchit la référence world
+        const nn = buildNode(it)
+        nn.sig = g
+        nodes.set(it.id, nn)
+        remeasure = true
+      } else n.item = it // rafraîchit la référence world (rebuild de blocs)
     }
     for (const [id, n] of nodes) if (!seen.has(id)) { n.cart.remove(); n.anchor.remove(); n.leader.remove(); nodes.delete(id) }
-    dirty = false
   }
 
   function update() {
@@ -123,9 +135,11 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
       // la sous-ligne (altitude/barrière) déborde de ~14px sous le cartouche
       const hasSub = n.item.kind !== 'transport' && (n.item.alt != null || n.item.cutoff)
       n.hh = n.item.kind === 'start' ? CART_H + (n.item.pictos?.length ? 14 : 0) : n.item.kind === 'transport' ? CHIP_H : CART_H + (hasSub ? 14 : 0)
-      n.fw = n.cart.offsetWidth
+      if (remeasure || !n.fw || frame % 30 === 0 && frame < 200) n.fw = n.cart.offsetWidth
       vis.push(n)
     }
+    remeasure = false
+    frame++
     if (!vis.length) return
     // 2. placement « panneau planté » (Adrien) : l'étiquette est COLLÉE à
     // son point — en x/z elle ne s'écarte pas de plus de 1vw (donc centrée
@@ -138,17 +152,19 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
     const vwLim = w / 100 // 1vw
     const vhLim = (2 * h) / 100 // 2vh
     const placed = []
-    const uiRects = []
-    {
+    if (frame % 15 === 0 || !uiCache.cref) {
       const cref = container.getBoundingClientRect()
+      const rects = []
       for (const selUI of ['.gpx-profile:not(.hidden)', '.ce-bottombar', '.ce-topbar', '.ce-hourpill', '.zoom-stepper']) {
         const elUI = document.querySelector(selUI)
         if (!elUI) continue
         const r = elUI.getBoundingClientRect()
         if (!r.width) continue
-        uiRects.push({ x0: r.left - cref.left - 6, y0: r.top - cref.top - 6, x1: r.right - cref.left + 6, y1: r.bottom - cref.top + 6 })
+        rects.push({ x0: r.left - cref.left - 6, y0: r.top - cref.top - 6, x1: r.right - cref.left + 6, y1: r.bottom - cref.top + 6 })
       }
+      uiCache = { rects, cref }
     }
+    const uiRects = uiCache.rects
     const free = (x, y, ww, hh2) => {
       if (x < 2 || y < 2 || x + ww > w - 2 || y + hh2 > h - 2) return false
       for (const r of uiRects) if (x < r.x1 && r.x0 < x + ww && y < r.y1 && r.y0 < y + hh2) return false
