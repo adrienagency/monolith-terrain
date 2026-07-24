@@ -32,6 +32,7 @@
 // — this file never touches the network itself.
 
 import { TEMPLATE_KEYS, captureLook } from './templates-user.js'
+import { parseRace } from './race-model.js'
 
 const FORMAT = 'shibumap-share'
 const VERSION = 1
@@ -236,11 +237,13 @@ export function trackToGpx(track) {
 const LOGO_DATA_URL_RE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/
 
 // Untrusted decoded response from GET RACE_ENDPOINT?id=… → a safe
-// { gpx, logo, state } or null. `state`, if present, is re-validated through
-// parseShareState (same `base` contract) — a stored payload is exactly as
-// untrusted as a pasted #s= fragment (anyone can POST to the publish
-// endpoint), so it gets the same scrutiny before touching app state. Never
-// throws.
+// { gpx, logo, state, race } or null. `state`, if present, is re-validated
+// through parseShareState (same `base` contract) ; `race` (points de passage,
+// transports — la course complète, sans quoi une shibu reçue n'a aucun
+// cartouche) repasse par LE MÊME validateur que les fichiers .shibumap-race
+// (race-model.parseRace) — a stored payload is exactly as untrusted as a
+// pasted #s= fragment (anyone can POST to the publish endpoint), so it gets
+// the same scrutiny before touching app state. Never throws.
 export function parseRacePayload(raw, base) {
   if (!raw || typeof raw !== 'object') return null
   if (typeof raw.gpx !== 'string' || !raw.gpx || raw.gpx.length > RACE_GPX_MAX_CHARS) return null
@@ -253,5 +256,11 @@ export function parseRacePayload(raw, base) {
 
   const state = raw.state && typeof raw.state === 'object' ? parseShareState(raw.state, base) : null
 
-  return { gpx: raw.gpx, logo, state }
+  let race = null
+  if (raw.race && typeof raw.race === 'object') {
+    const bundle = parseRace(JSON.stringify({ format: 'shibumap-race', version: 1, race: raw.race }))
+    if (bundle) race = bundle.race
+  }
+
+  return { gpx: raw.gpx, logo, state, race }
 }

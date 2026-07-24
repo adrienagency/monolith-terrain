@@ -2392,6 +2392,27 @@ const raceLabels = buildRaceLabels({
 
 // grave l'identité de la course sur les flancs du bloc (logo centré + infos
 // haut-droite, disposition « Hawaii ») — appelé à chaque mutation du studio
+// pousse une course (brouillon studio OU payload d'un lien partagé) dans
+// raceState : km → index de trace, altitudes résolues, cartouches + flancs
+// du bloc rafraîchis. Partagé entre deps.syncRace (studio) et bootInitialView
+// (lien /r/ — sans quoi une shibu reçue n'a AUCUN cartouche).
+function syncRaceState(race) {
+  const t = gpxLayer.activeLayer?.gpx?.track
+  raceState.name = race.name
+  raceState.logo = race.logo
+  raceState.waypoints = (race.waypoints || []).map((w) => {
+    const idx = t ? snapToKm(t.cumKm, w.km) : null
+    const ele = t?.points?.[idx]?.ele
+    return { ...w, idx, alt: w.alt ?? (Number.isFinite(ele) ? Math.round(ele) : null) }
+  })
+  raceState.transports.removed = [...(race.transports?.removed || [])]
+  // traits verticaux des points de passage sur le profil (gpx.js)
+  const g = gpxLayer.activeLayer?.gpx
+  if (g) { g.raceTicks = raceState.waypoints.map((w) => ({ km: w.km })); g._drawProfile?.() }
+  raceLabels.setDirty()
+  applyRaceToBlock()
+}
+
 function applyRaceToBlock() {
   if (!raceState.name && !raceState.logo) { groundInfo.setRace(null); return }
   const track = gpxLayer.activeLayer?.gpx?.track
@@ -3058,7 +3079,23 @@ async function shareCurrentView() {
           // raceName rides along so the link can carry a real preview card —
           // a fragment (#r=) never reaches a crawler, so the /r/<id> route is
           // the only thing that can name the course on WhatsApp or Instagram.
-          body: JSON.stringify({ gpx: trackToGpx(gpxLayer.track), state, raceName: gpxLayer.raceName || '' }),
+          // `race` + `logo` : la COURSE COMPLÈTE (points de passage,
+          // transports retirés, logo) — sans eux la shibu reçue n'avait que
+          // la ligne nue, aucun cartouche (« le parcours ne s'affiche pas »).
+          body: JSON.stringify({
+            gpx: trackToGpx(gpxLayer.track),
+            state,
+            raceName: raceState.name || gpxLayer.raceName || '',
+            race: raceState.name || raceState.waypoints.length
+              ? {
+                  name: raceState.name,
+                  logo: null, // le logo voyage dans SON champ validé, jamais ici
+                  waypoints: raceState.waypoints.map(({ km, name, alt, pictos, cutoff }) => ({ km, name, alt, pictos, cutoff })),
+                  transports: { removed: [...raceState.transports.removed] },
+                }
+              : null,
+            logo: raceState.logo || null,
+          }),
         })
         const j = res.ok ? await res.json() : null
         if (j?.ok && typeof j.id === 'string' && /^[A-Za-z0-9_-]{4,64}$/.test(j.id)) {
@@ -3075,6 +3112,10 @@ async function shareCurrentView() {
       }
     }
   }
+  // ÉCHEC DUR (Adrien) : une course chargée + publication impossible ⇒ ON NE
+  // COPIE RIEN. L'ancien repli silencieux vers #s= donnait un lien « aux
+  // bonnes couleurs mais sans le parcours » — le pire des partages.
+  if (hasTrack && !published) return { ok: false, publishFailed: true }
   if (!url) url = `${location.origin}${location.pathname}#s=${encodeShareState(state)}`
   const note = hasTrack && !published ? ' — your GPX track isn’t included' : ''
 
@@ -3672,10 +3713,15 @@ async function bootInitialView() {
     params.demLocation = 'Custom'
     if (race.state.cam) pendingShareCam = race.state.cam
   }
-  // race.logo is stored/validated but not consumed yet — the race-info panel
-  // (layers lot) will surface it. loadGpxText frames the track, loads terrain,
-  // and applies the pending camera once the view exists.
+  // loadGpxText frames the track, loads terrain, and applies the pending
+  // camera once the view exists.
   await loadGpxText(race.gpx)
+  // la course complète du payload → cartouches, flancs du bloc, ticks du
+  // profil, nom du calque (mini panneau) — la shibu reçue est ENTIÈRE
+  if (race.race) {
+    if (race.race.name && gpxLayer.activeLayer) gpxLayer.setName(gpxLayer.activeLayer.id, race.race.name)
+    syncRaceState({ ...race.race, logo: race.race.logo ?? race.logo })
+  }
   if (pendingShareCam) {
     camera.position.set(pendingShareCam.px, pendingShareCam.py, pendingShareCam.pz)
     controls.target.set(pendingShareCam.tx, pendingShareCam.ty, pendingShareCam.tz)
@@ -4029,24 +4075,8 @@ const studio = buildStudio({
     if (!t) return null
     return Math.round(t.points[snapToKm(t.cumKm, km)]?.ele ?? 0)
   },
-  // pousse le brouillon du studio dans raceState : km → index de trace,
-  // altitudes résolues, cartouches + flancs du bloc rafraîchis
-  syncRace: (race) => {
-    const t = gpxLayer.activeLayer?.gpx?.track
-    raceState.name = race.name
-    raceState.logo = race.logo
-    raceState.waypoints = (race.waypoints || []).map((w) => {
-      const idx = t ? snapToKm(t.cumKm, w.km) : null
-      const ele = t?.points?.[idx]?.ele
-      return { ...w, idx, alt: w.alt ?? (Number.isFinite(ele) ? Math.round(ele) : null) }
-    })
-    raceState.transports.removed = [...(race.transports?.removed || [])]
-    // traits verticaux des points de passage sur le profil (gpx.js)
-    const g = gpxLayer.activeLayer?.gpx
-    if (g) { g.raceTicks = raceState.waypoints.map((w) => ({ km: w.km })); g._drawProfile?.() }
-    raceLabels.setDirty()
-    applyRaceToBlock()
-  },
+  // brouillon studio → raceState (helper partagé avec bootInitialView)
+  syncRace: syncRaceState,
   setTransportCats,
   setGpxStyle: (kv) => { applyUserTemplate({ look: kv }); refreshAll() },
   captureLook: () => captureLook(params),
