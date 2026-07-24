@@ -77,6 +77,15 @@
 body.studio-mode .rl-chip { pointer-events: auto; }
 body.studio-mode .rl-chip .rl-x { display: inline; }
 
-/* apparition/disparition en fondu (le déplacement, lui, est lissé en JS) */
-.rl-cart, .rl-chip, .rl-anchor, .rl-leader { transition: opacity .3s ease; }
+/* apparition/disparition en fondu (le déplacement, lui, est lissé en JS) —
+   et une NAISSANCE douce : chaque cartouche fond depuis la transparence en
+   grossissant légèrement (mode lecture : rien n'apparaît « d'un coup ») */
+.rl-cart, .rl-chip, .rl-anchor, .rl-leader {
+  transition: opacity .3s ease;
+  animation: rl-in .5s ease-out;
+}
+@keyframes rl-in {
+  from { opacity: 0; filter: blur(2px); }
+  to { opacity: 1; filter: blur(0); }
+}
 .rl-hidden { opacity: 0 !important; pointer-events: none !important; }

@@ -2281,7 +2281,6 @@ const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: (
 // raceState est rempli par le studio (src/ui/studio.js) ; les cartouches se
 // projettent chaque frame (taille constante, anti-chevauchement débrayable).
 const raceState = { name: '', logo: null, waypoints: [], transports: { cats: [], removed: [], pois: [] } }
-const _headSpeed = { km: 0, t: 0, v: 0 } // vitesse estimée de la tête (km/s), lissée
 let _wasPlaying = false // détection de FIN de lecture (finale iso)
 const raceLabels = buildRaceLabels({
   container,
@@ -2300,15 +2299,10 @@ const raceLabels = buildRaceLabels({
     const totKm = track.cumKm[track.cumKm.length - 1]
     const playing = gpxLayer.isPlaying?.()
     const headKm = playing ? (gpxLayer.headT ?? 1) * totKm : Infinity
-    const now = performance.now()
-    if (playing) {
-      const dts = Math.max(1e-3, (now - (_headSpeed.t || now)) / 1000)
-      if (_headSpeed.t) _headSpeed.v = _headSpeed.v * 0.9 + (Math.max(0, headKm - _headSpeed.km) / dts) * 0.1
-      _headSpeed.km = headKm
-      _headSpeed.t = now
-    } else { _headSpeed.t = 0; _headSpeed.v = 0 }
-    const kmLead = playing ? Math.max(0.05, _headSpeed.v * 1.5) : Infinity
-    const kmTail = playing ? Math.max(0.15, _headSpeed.v * 4) : Infinity
+    // fenêtre SIMPLE (Adrien) : l'étiquette apparaît 2 km avant le passage
+    // de la tête et s'efface 10 km après
+    const kmLead = 2
+    const kmTail = 10
     // règle du damier (Adrien) : ce qui sort des blocs chargés (5×5 max) est
     // COUPÉ — un point au-delà de l'emprise réelle ne s'affiche pas
     const covered = (p) => {

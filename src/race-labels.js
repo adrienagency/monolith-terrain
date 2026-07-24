@@ -134,61 +134,55 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
       by1 = Math.min(by1, py1 + 10)
       if (bx1 - bx0 < 120 || by1 - by0 < 80) { bx0 = 4; by0 = 4; bx1 = w - 4; by1 = h - 4 } // bloc minuscule à l'écran : viewport
     }
-    // 2. répartition en 4 DIRECTIONS autour du parcours (Adrien) : le centre
-    // écran des ancres fait office de centre du GPX — un point au sud du
-    // tracé pousse son cartouche vers le bas, à l'ouest vers la gauche, etc.
-    let cx = 0
-    let cy = 0
-    for (const n of vis) { cx += n.ax; cy += n.ay }
-    cx /= vis.length
-    cy /= vis.length
-    const groups = { left: [], right: [], top: [], bottom: [] }
-    // vue rasante (caméra basse : l'emprise s'aplatit à l'écran) → deux
-    // RANGÉES seulement, et les points lointains montent dans le CIEL au
-    // lieu de s'entasser en bas (Adrien)
-    const flat = by1 - by0 < h * 0.42
-    for (const n of vis) {
-      const dx = n.ax - cx
-      const dy = n.ay - cy
-      const key = flat
-        ? (dy < 0 ? 'top' : 'bottom')
-        : Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'right' : 'left') : (dy >= 0 ? 'bottom' : 'top')
-      groups[key].push(n)
-    }
-    const skyY0 = 4 // la rangée du haut peut sortir de l'emprise, vers le ciel
+    // 2. parti pris (Adrien) : les infos de course se notent AU-DESSUS de la
+    // carte, dans la zone aérienne vide — tous les points de passage vont en
+    // rangée(s) au-dessus de leur ancre (le ciel est autorisé), les
+    // transports (secondaires) en dessous.
+    const groups = { top: [], bottom: [] }
+    for (const n of vis) (n.item.kind === 'transport' ? groups.bottom : groups.top).push(n)
+    const skyY0 = 4 // la rangée du haut sort librement de l'emprise, vers le ciel
     // 3. anti-chevauchement PAR DIRECTION (débrayable — params.gpxLabelAvoid) :
     // gauche/droite s'empilent verticalement, haut/bas se répartissent
     // horizontalement (layoutCartouches est 1D, on le réutilise sur x)
     const avoid = params.gpxLabelAvoid !== false
     const placed = []
-    for (const key of ['right', 'left']) {
-      const group = groups[key]
-      if (!group.length) continue
-      group.sort((a, b) => a.ay - b.ay)
-      const ys = layoutCartouches(
-        group.map((n) => ({ y: n.ay - n.hh / 2, h: n.hh })),
-        { avoid, gap: 8, minY: by0, maxY: by1 }
-      )
-      group.forEach((n, i) => {
-        n.side = key
-        n.fx = Math.min(Math.max(key === 'right' ? n.ax + LEAD : n.ax - LEAD - n.fw, bx0), bx1 - n.fw)
-        n.fy = ys[i]
+    // points de passage : rangées EMPILÉES VERS LE CIEL — on remplit de
+    // gauche à droite au plus près de chaque ancre ; quand une rangée est
+    // occupée à cet endroit, le cartouche monte d'un étage (jamais sur la map)
+    {
+      const group = groups.top
+      group.sort((a, b) => a.ax - b.ax)
+      // les rangées sont de VRAIES lignes horizontales, empilées depuis
+      // l'ancre la plus haute vers le ciel — les lignes de rappel descendent
+      // en pointillés vers chaque point (style affiche de course)
+      const rowH = Math.max(...group.map((n) => n.hh), 26) + 12
+      const baseY = Math.min(...group.map((n) => n.ay)) - LEAD
+      const rows = [] // endX occupé par rangée (0 = la plus basse)
+      for (const n of group) {
+        n.side = 'top'
+        const want = Math.min(Math.max(n.ax - n.fw / 2, bx0), bx1 - n.fw)
+        let r = 0
+        if (avoid) {
+          while (r < rows.length && want < rows[r] + 10) r++
+          n.fx = r < rows.length ? Math.max(want, rows[r] + 10) : want
+          rows[r] = n.fx + n.fw
+        } else n.fx = want
+        n.fy = Math.max(baseY - n.hh - r * rowH, skyY0)
         placed.push(n)
-      })
+      }
     }
-    for (const key of ['top', 'bottom']) {
-      const group = groups[key]
-      if (!group.length) continue
+    // transports : une rangée discrète SOUS l'ancre
+    {
+      const group = groups.bottom
       group.sort((a, b) => a.ax - b.ax)
       const xs = layoutCartouches(
         group.map((n) => ({ y: n.ax - n.fw / 2, h: n.fw })),
         { avoid, gap: 10, minY: bx0, maxY: bx1 }
       )
       group.forEach((n, i) => {
-        n.side = key
+        n.side = 'bottom'
         n.fx = xs[i]
-        const yMin = key === 'top' ? skyY0 : by0
-        n.fy = Math.min(Math.max(key === 'top' ? n.ay - LEAD - n.hh : n.ay + LEAD, yMin), by1 - n.hh)
+        n.fy = Math.min(Math.max(n.ay + LEAD, by0), by1 - n.hh)
         placed.push(n)
       })
     }
@@ -237,9 +231,16 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
       const tox = n.fx - n.ax
       const toy = n.fy - n.ay
       if (n.ox == null) { n.ox = tox; n.oy = toy } // première pose : direct
-      else if (Math.hypot(tox - n.ox, toy - n.oy) > 22) {
-        n.ox += (tox - n.ox) * 0.02
-        n.oy += (toy - n.oy) * 0.02
+      else {
+        const d = Math.hypot(tox - n.ox, toy - n.oy)
+        // zone morte 22 px pour DÉCLENCHER un mouvement — mais une fois
+        // engagé, il glisse JUSQU'AU BOUT (sinon il fige entre deux rangées)
+        if (d > 22) n.moving = true
+        if (n.moving) {
+          n.ox += (tox - n.ox) * 0.04
+          n.oy += (toy - n.oy) * 0.04
+          if (d < 1) { n.ox = tox; n.oy = toy; n.moving = false }
+        }
       }
       n.sx = n.ax + n.ox
       n.sy = n.ay + n.oy
