@@ -3119,9 +3119,14 @@ async function shareCurrentView() {
   if (!url) url = `${location.origin}${location.pathname}#s=${encodeShareState(state)}`
   const note = hasTrack && !published ? ' — your GPX track isn’t included' : ''
 
-  if (navigator.share) {
+  // Feuille de partage OS : MOBILE UNIQUEMENT. Sur desktop Windows/macOS,
+  // navigator.share existe aussi — le bouton « Copier le lien » ouvrait la
+  // feuille Windows au lieu de copier, et la fermer ne copiait RIEN (bug
+  // Adrien « ça ne copie rien »). Desktop = presse-papier direct.
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+  if (isMobile && navigator.share) {
     try {
-      await navigator.share({ title: 'ShibuMap', text: `A view I made with ShibuMap${note}`, url })
+      await navigator.share({ title: 'ShibuMap', text: `Ma carte ShibuMap${note}`, url })
       return { ok: true, shared: true, hasTrack, published }
     } catch (err) {
       if (err?.name === 'AbortError') return { ok: false, cancelled: true } // user dismissed the OS share sheet
@@ -3132,7 +3137,9 @@ async function shareCurrentView() {
     await navigator.clipboard.writeText(url)
     return { ok: true, copied: true, hasTrack, published }
   } catch {
-    return { ok: false, url, hasTrack, published } // clipboard blocked — nothing more we can do automatically
+    // presse-papier refusé (document plus focus, permission…) — on REND le
+    // lien : bars.js ouvre alors une petite boîte avec le lien sélectionnable
+    return { ok: false, url, hasTrack, published }
   }
 }
 

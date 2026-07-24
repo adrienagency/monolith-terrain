@@ -175,6 +175,38 @@ body.dark {
   height: 30px;
   margin: 0 2px;
 }
+/* boîte de secours « Votre lien est prêt » — presse-papier refusé */
+.ce-linkbox-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 240;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, #000 25%, transparent);
+}
+.ce-linkbox {
+  width: min(480px, calc(100vw - 40px));
+  padding: 18px;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-family: var(--ce-font);
+}
+.ce-linkbox b {
+  font-size: 14px;
+}
+.ce-linkbox-input {
+  width: 100%;
+  font: 500 12px var(--ce-font);
+  color: var(--ce-ink);
+  background: var(--ce-hover);
+  border: 1px solid var(--ce-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  outline: none;
+}
+
 /* menu « Publier » (UX P4) — les trois sorties consolidées sous la topbar */
 .ce-pubmenu {
   position: fixed;

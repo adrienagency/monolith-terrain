@@ -106,6 +106,40 @@ export function buildTopBar(ctx) {
   // one click copies a link that reproduces this exact look + location +
   // camera (navigator.share on mobile hands it to the OS share sheet
   // instead — "facilitate sharing", per the brief)
+  // presse-papier refusé (document plus focus après l'attente réseau de la
+  // publication, permission…) : petite boîte avec le lien sélectionnable —
+  // le clic « Copier » est un GESTE FRAIS, writeText repasse à coup sûr
+  function showLinkBox(url) {
+    document.querySelector('.ce-linkbox-veil')?.remove()
+    const veil = el('div', 'ce-linkbox-veil')
+    const box = el('div', 'ce-linkbox ce-glassbox')
+    box.innerHTML = '<b>Votre lien est prêt</b>'
+    const input = el('input', 'ce-linkbox-input')
+    input.type = 'text'
+    input.readOnly = true
+    input.value = url
+    input.addEventListener('focus', () => input.select())
+    const row = el('div', 'ce-btn-row')
+    const copyBtn = el('button', 'ce-pillbtn accent')
+    copyBtn.type = 'button'
+    copyBtn.textContent = 'Copier'
+    copyBtn.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(url) } catch { input.select(); document.execCommand('copy') }
+      showToast('Lien copié')
+      veil.remove()
+    })
+    const closeBtn = el('button', 'ce-pillbtn')
+    closeBtn.type = 'button'
+    closeBtn.textContent = 'Fermer'
+    closeBtn.addEventListener('click', () => veil.remove())
+    row.append(copyBtn, closeBtn)
+    box.append(input, row)
+    veil.append(box)
+    veil.addEventListener('click', (e) => { if (e.target === veil) veil.remove() })
+    document.body.append(veil)
+    input.focus()
+  }
+
   let sharing = false
   async function doShare() {
     if (sharing) return
@@ -122,6 +156,8 @@ export function buildTopBar(ctx) {
         // the link is look-only / no track loaded at all (nothing to say)
         const trackNote = res.hasTrack ? (res.published ? ' — course incluse' : ' — la course n’a pas pu être publiée') : ''
         showToast((res.copied ? 'Lien copié' : 'Partagé') + trackNote)
+      } else if (res?.url) {
+        showLinkBox(res.url) // le lien existe, seul le presse-papier a échoué
       } else {
         showToast('Impossible de créer le lien')
       }
