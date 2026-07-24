@@ -203,8 +203,20 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
     // exponentiel ≈ ease-in-out, demande Adrien) ; la ligne de rappel vise
     // son bord côté ancre (pointillés neutres, jamais la couleur du tracé)
     for (const n of placed) {
-      if (n.sx == null) { n.sx = n.fx; n.sy = n.fy } // première pose : direct
-      else { n.sx += (n.fx - n.sx) * 0.05; n.sy += (n.fy - n.sy) * 0.05 } // très doux (Adrien)
+      // ANTI mal de cœur (Adrien) : le cartouche est RIGIDE avec la carte —
+      // c'est son OFFSET par rapport à l'ancre qui est collant : zone morte
+      // de 22 px (il ne bouge pas du tout pour les petits reshuffles), puis
+      // glissement TRÈS lent vers le nouvel emplacement. L'ancre, elle, suit
+      // la carte sans latence, donc rien ne « flotte ».
+      const tox = n.fx - n.ax
+      const toy = n.fy - n.ay
+      if (n.ox == null) { n.ox = tox; n.oy = toy } // première pose : direct
+      else if (Math.hypot(tox - n.ox, toy - n.oy) > 22) {
+        n.ox += (tox - n.ox) * 0.02
+        n.oy += (toy - n.oy) * 0.02
+      }
+      n.sx = n.ax + n.ox
+      n.sy = n.ay + n.oy
       n.cart.style.transform = `translate(${Math.round(n.sx)}px, ${Math.round(n.sy)}px)`
       n.anchor.style.transform = `translate(${Math.round(n.ax - 3.5)}px, ${Math.round(n.ay - 3.5)}px)`
       let tx

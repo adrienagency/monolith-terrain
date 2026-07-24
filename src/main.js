@@ -2382,22 +2382,29 @@ async function setTransportCats(cats) {
   }
   try {
     const pois = await fetchTransports(bounds, cats)
-    // proximité DIRECTE du parcours (Adrien) : on ne garde que les POI à
-    // moins de ~2,5 km de la trace (échantillonnée), sauf aéroports (rares
-    // et structurants → 15 km). Sans trace, on garde tout.
+    // zone utile (Adrien) : un transport n'est gardé qu'à moins de 2 km d'un
+    // POINT DE PASSAGE (c'est là que les coureurs/accompagnants en ont
+    // besoin) — aéroports à 15 km. Sans points de passage, repli sur la
+    // proximité de la trace (2,5 km).
     const track = gpxLayer.activeLayer?.gpx?.track
-    const nearTrack = (p) => {
-      if (!track?.points?.length) return true
-      const maxKm = p.cat === 'aeroport' ? 15 : 2.5
+    const wpPts = raceState.waypoints
+      .map((w) => (w.idx != null ? track?.points?.[w.idx] : null))
+      .filter(Boolean)
+    const nearKm = (p, pts, maxKm, step = 1) => {
       const cosLat = Math.cos((p.lat * Math.PI) / 180)
-      const step = Math.max(1, Math.floor(track.points.length / 400))
-      for (let i = 0; i < track.points.length; i += step) {
-        const t = track.points[i]
+      for (let i = 0; i < pts.length; i += step) {
+        const t = pts[i]
         const dx = (p.lon - t.lon) * 111.32 * cosLat
         const dy = (p.lat - t.lat) * 110.57
         if (dx * dx + dy * dy < maxKm * maxKm) return true
       }
       return false
+    }
+    const nearTrack = (p) => {
+      const maxKm = p.cat === 'aeroport' ? 15 : 2
+      if (wpPts.length) return nearKm(p, wpPts, maxKm)
+      if (!track?.points?.length) return true
+      return nearKm(p, track.points, p.cat === 'aeroport' ? 15 : 2.5, Math.max(1, Math.floor(track.points.length / 400)))
     }
     raceState.transports.pois = pois
       .filter((p) => cats.includes(p.cat) && nearTrack(p))
