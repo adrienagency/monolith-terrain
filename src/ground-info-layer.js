@@ -140,7 +140,9 @@ export class GroundInfoLayer {
 
   // an UPRIGHT plane standing on the slab's south wall (faces +z), for the
   // engraved block label. Centre at (cx, cy), just proud of the wall face.
-  _addWallPlane(canvas, cx, cy, worldW, worldH) {
+  // `side` : 'south' (défaut) ou 'north' — Race Studio grave les DEUX flancs.
+  // `list` : réceptacle (les plans course vivent dans raceMeshes, pas meshes).
+  _addWallPlane(canvas, cx, cy, worldW, worldH, { side = 'south', list = this.meshes } = {}) {
     const tex = new THREE.CanvasTexture(canvas)
     tex.colorSpace = THREE.SRGBColorSpace
     tex.anisotropy = 4
@@ -148,10 +150,67 @@ export class GroundInfoLayer {
       new THREE.PlaneGeometry(worldW, worldH),
       new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })
     )
-    mesh.position.set(cx, cy, HALF + 0.06) // just outside the south wall
+    if (side === 'north') {
+      mesh.position.set(-cx, cy, -HALF - 0.06)
+      mesh.rotation.y = Math.PI
+    } else {
+      mesh.position.set(cx, cy, HALF + 0.06) // just outside the south wall
+    }
     mesh.renderOrder = 6
     this.group.add(mesh)
-    this.meshes.push(mesh)
+    list.push(mesh)
+  }
+
+  // ---- Race Studio : logo centré + cartouche d'infos en haut à droite de
+  // chaque flanc (disposition « Hawaii » validée par Adrien). setRace(null)
+  // efface. Ré-appliqué après chaque load() — le rebuild jette tout.
+  setRace(race) {
+    this.race = race || null
+    this._applyRace()
+  }
+  _applyRace() {
+    for (const m of this.raceMeshes || []) {
+      m.geometry.dispose()
+      m.material.map?.dispose()
+      m.material.dispose()
+      this.group.remove(m)
+    }
+    this.raceMeshes = []
+    const r = this.race
+    if (!r) return
+    const ink = this.getWallInk?.() || this.getInk?.() || '#222'
+    const baseY = this.getBaseY?.() ?? -8
+    const wallH = Math.abs(baseY)
+    // cartouche d'infos — haut à droite du flanc, aligné à droite
+    const lines = []
+    if (r.name) lines.push(String(r.name).toUpperCase())
+    if (r.dplus != null) lines.push(`D+ ${r.dplus} M · D− ${r.dminus} M`)
+    if (r.start || r.finish) lines.push(`${(r.start || 'DÉPART').toUpperCase()} → ${(r.finish || 'ARRIVÉE').toUpperCase()}`)
+    if (lines.length) {
+      const tc = textCanvas(lines, { family: BODY_FONT, weight: 600, px: 44, align: 'right', color: inkRGBA(ink, 0.9), track: 0.08 })
+      const h = wallH * 0.3
+      const w = (tc.w / tc.h) * h
+      for (const side of ['south', 'north']) {
+        this._addWallPlane(tc.canvas, HALF - 6 - w / 2, baseY + wallH * 0.78, w, h, { side, list: this.raceMeshes })
+      }
+    }
+    // logo — centré sur le flanc, ratio préservé, ~55 % de la hauteur du mur
+    if (r.logo) {
+      const img = new Image()
+      img.onload = () => {
+        if (this.race !== r) return // une autre course est passée entre temps
+        const c = document.createElement('canvas')
+        c.width = img.naturalWidth
+        c.height = img.naturalHeight
+        c.getContext('2d').drawImage(img, 0, 0)
+        const h = wallH * 0.55
+        const w = (img.naturalWidth / Math.max(1, img.naturalHeight)) * h
+        for (const side of ['south', 'north']) {
+          this._addWallPlane(c, 0, baseY + wallH * 0.5, w, h, { side, list: this.raceMeshes })
+        }
+      }
+      img.src = r.logo
+    }
   }
 
   // engrave the place name + coordinates on the block's vertical south face,
@@ -356,6 +415,7 @@ export class GroundInfoLayer {
       const info = await gatherGroundInfo({ lat, lon, dem })
       if (id !== this.reqId) return // superseded
       this.render(info)
+      this._applyRace() // le rebuild a jeté les plans course — les regraver
     } catch {
       /* gatherGroundInfo never throws, but stay defensive */
     }

@@ -28,6 +28,7 @@ import { createGoto } from './goto.js'
 import { frameTrack } from './gpx.js'
 import { GpxLayerManager } from './gpx-layers.js'
 import { buildRaceLabels } from './race-labels.js'
+import { snapToKm, ascentStats, serializeRace, parseRace } from './race-model.js'
 import { SPORTS, DEFAULT_SPORT, sanitizeSvgMarkup, isValidIconDataUrl, rasterizeToCanvas } from './ui/sport-icons.js'
 import { worldToLatLon, latLonToWorld } from './geo.js'
 import { fetchTransports, TRANSPORT_CATS } from './transports.js'
@@ -2310,6 +2311,23 @@ const raceLabels = buildRaceLabels({
     raceLabels.setDirty()
   },
 })
+
+// grave l'identité de la course sur les flancs du bloc (logo centré + infos
+// haut-droite, disposition « Hawaii ») — appelé à chaque mutation du studio
+function applyRaceToBlock() {
+  if (!raceState.name && !raceState.logo) { groundInfo.setRace(null); return }
+  const track = gpxLayer.activeLayer?.gpx?.track
+  const stats = track ? ascentStats(track.points.map((p) => p.ele || 0)) : {}
+  const wps = raceState.waypoints
+  groundInfo.setRace({
+    logo: raceState.logo,
+    name: raceState.name,
+    dplus: stats.dplus,
+    dminus: stats.dminus,
+    start: wps[0]?.name || '',
+    finish: wps[wps.length - 1]?.name || '',
+  })
+}
 
 // active les catégories de transport (studio étape ③) : fetch Overpass sur le
 // bloc courant, résout les positions monde, alimente les chips des cartouches
