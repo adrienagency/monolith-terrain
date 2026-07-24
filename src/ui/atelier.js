@@ -94,6 +94,34 @@ export function buildAtelier(deps) {
     }
   }
 
+  // Loader discret au centre de la carte pendant qu'un template s'applique :
+  // le double rAF laisse le spinner se peindre AVANT le gros travail synchrone
+  // (rebuild matériaux/rampe), puis 500 ms de grâce pour les textures async
+  // (PBR, HDRI) avant de s'effacer.
+  const loader = document.createElement('div')
+  loader.className = 'at-loading'
+  loader.innerHTML = '<i></i>'
+  let loaderT = 0
+  // rAF peut ne JAMAIS venir (onglet caché → zéro frame, cf. panel-morph) :
+  // fallback timeout pour que l'application du template parte quoi qu'il arrive
+  const nextFrame = (cb) => {
+    let done = false
+    const go = () => { if (!done) { done = true; cb() } }
+    requestAnimationFrame(go)
+    setTimeout(go, 80)
+  }
+  function applyWithLoader(fn) {
+    const app = document.getElementById('app')
+    if (!app.contains(loader)) app.append(loader)
+    loader.classList.add('on')
+    clearTimeout(loaderT)
+    nextFrame(() => nextFrame(() => {
+      Promise.resolve().then(fn).finally(() => {
+        loaderT = setTimeout(() => loader.classList.remove('on'), 500)
+      })
+    }))
+  }
+
   // carte template : vignette image si disponible, sinon bande de couleurs.
   // La vignette vient du fichier (dataURL user-supplied) → DOM APIs, pas innerHTML.
   function tplCard(t) {
@@ -113,7 +141,7 @@ export function buildAtelier(deps) {
     nm.className = 'at-nm'
     nm.textContent = t.name || 'Look'
     c.append(nm)
-    c.addEventListener('click', () => deps.applyUserTemplate(t))
+    c.addEventListener('click', () => applyWithLoader(() => deps.applyUserTemplate(t)))
     return c
   }
 

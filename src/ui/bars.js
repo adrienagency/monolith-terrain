@@ -25,6 +25,23 @@ const I = {
   help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.6 2.6 0 115 .8c-.5 1.4-2.1 1.7-2.1 3.2"/><circle cx="12" cy="16.8" r="0.4" fill="currentColor"/></svg>',
   keyboard:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="6" width="19" height="13" rx="2"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M6 13.5h.01M9.5 13.5h.01M13 13.5h.01M16.5 13.5h.01M8 16.5h8" stroke-linecap="round"/></svg>',
+  sliders:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h9M17 8h3M4 16h3M11 16h9"/><circle cx="15" cy="8" r="2.2"/><circle cx="9" cy="16" r="2.2"/></svg>',
+  brush:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15.5 4.5 19.5 8.5 9 19c-1.5 1.5-4 1.5-5-.5s.5-3.5 2-5L15.5 4.5z"/><path d="M13.5 6.5l4 4"/></svg>',
+  flag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/></svg>',
+}
+
+// ---- Mode simple / avancé (UX P3) ----------------------------------------
+// Par défaut la carte est PURE : les deux docks de panneaux sont masqués
+// (body.ce-simple), la création passe par les espaces Studio / Race Studio.
+// « Avancé » (topbar) ré-affiche tous les panneaux — choix persisté.
+const ADV_KEY = 'shibumap-ui-advanced'
+function isAdvanced() {
+  try { return localStorage.getItem(ADV_KEY) === '1' } catch { return true }
+}
+export function initUiLevel() {
+  document.body.classList.toggle('ce-simple', !isAdvanced())
 }
 
 export function buildTopBar(ctx) {
@@ -123,6 +140,20 @@ export function buildTopBar(ctx) {
   hideBtn.setAttribute('data-tip', 'Hide every panel — only a small eye button stays.')
   bar.append(hideBtn)
 
+  // interrupteur Mode avancé (UX P3) — ré-affiche les docks de panneaux
+  const advBtn = el('button', 'ce-pillbtn ce-advbtn')
+  advBtn.type = 'button'
+  advBtn.innerHTML = `${I.sliders}<span>Avancé</span>`
+  advBtn.setAttribute('data-tip', 'Mode avancé — tous les panneaux de réglage (création, carte, effets, caméra…).')
+  const syncAdv = () => advBtn.classList.toggle('on', isAdvanced())
+  advBtn.addEventListener('click', () => {
+    const adv = !isAdvanced()
+    try { localStorage.setItem(ADV_KEY, adv ? '1' : '0') } catch {}
+    initUiLevel()
+    syncAdv()
+  })
+  syncAdv()
+
   // the single button that survives no-UI mode
   const eye = el('button', 'ce-eye ce-glassbox')
   eye.type = 'button'
@@ -138,7 +169,7 @@ export function buildTopBar(ctx) {
   // EXPORT far right. appendChild MOVES the already-built nodes, so this just
   // reorders them; only the two discrete vertical separators are new.
   const sep = () => el('span', 'ce-topbar-sep')
-  bar.append(globeBtn, dark, sep(), shareBtn, helpBtn, shortcutsBtn, hideBtn, sep(), exportBtn)
+  bar.append(globeBtn, dark, sep(), shareBtn, helpBtn, shortcutsBtn, hideBtn, advBtn, sep(), exportBtn)
 
   document.body.append(bar, eye)
   return { root: bar, syncDark }
@@ -208,6 +239,27 @@ export function buildMapCorner(ctx) {
     setAerialActive: (v) => aerial.classList.toggle('on', !!v),
     setVisible: (v) => { aerial.classList.toggle('off', !v) },
   }
+}
+
+// Barre contextuelle flottante (UX P3) — les deux portes de création, toujours
+// à portée sur la carte nue. Visible UNIQUEMENT en mode simple ; les modes
+// morphés (store/studio/atelier), noui et embed la masquent en CSS.
+export function buildQuickBar(ctx) {
+  const bar = el('div', 'ce-quickbar ce-glassbox')
+  const mk = (icon, label, tip, onClick, accent) => {
+    const b = el('button', 'ce-pillbtn' + (accent ? ' accent' : ''))
+    b.type = 'button'
+    b.innerHTML = `${icon}<span>${label}</span>`
+    b.setAttribute('data-tip', tip)
+    b.addEventListener('click', onClick)
+    return b
+  }
+  bar.append(
+    mk(I.brush, 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur votre carte.', () => ctx.openAtelier(), true),
+    mk(I.flag, 'Ma course', 'Race Studio — votre parcours GPX en carte de course (points de passage, transports, partage).', () => ctx.openStudio())
+  )
+  document.body.append(bar)
+  return { root: bar }
 }
 
 export function buildBottomBar(ctx) {

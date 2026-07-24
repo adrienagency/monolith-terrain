@@ -925,6 +925,42 @@ body.dark {
   transition: width 0.15s linear;
 }
 
+/* ------------------------------------------- mode simple / avancé (UX P3) */
+/* body.ce-simple = défaut : carte pure, AUCUN dock de panneaux. La création
+   passe par les espaces (quickbar ci-dessous) ; « Avancé » (topbar) ré-affiche
+   tout. */
+body.ce-simple .ce-dock {
+  display: none !important;
+}
+.ce-advbtn.on {
+  background: var(--ce-ink);
+  color: var(--ce-bg, #fff);
+}
+.ce-quickbar {
+  position: fixed;
+  bottom: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 999px;
+}
+body.ce-simple .ce-quickbar {
+  display: flex;
+}
+body.ce-noui .ce-quickbar,
+body.ce-embed .ce-quickbar,
+body.store-mode .ce-quickbar,
+body.studio-mode .ce-quickbar,
+body.atelier-mode .ce-quickbar,
+/* le profil GPX occupe le même emplacement bottom-center : il a priorité */
+body:has(.gpx-profile:not(.hidden)) .ce-quickbar {
+  display: none !important;
+}
+
 /* --------------------------------------------------- hide-UI master switch */
 /* body.store-mode = boutique in-app (src/ui/store.js) : même masquage total */
 body.ce-noui .ce-topbar,

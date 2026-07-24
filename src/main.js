@@ -67,7 +67,7 @@ import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
 import { showNotice } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
-import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner } from './ui/bars.js'
+import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickBar, initUiLevel } from './ui/bars.js'
 import { TEMPLATES } from './templates.js'
 import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
 import { buildChangelogOverlay } from './ui/changelog-overlay.js'
@@ -3105,6 +3105,16 @@ const bottomBar = buildBottomBar({
   openGpx: () => gpxFileInput.click(),
 })
 
+// mode simple par défaut (UX P3) : docks masqués, quickbar bottom-center.
+// Jamais en embed — la vitrine reste nue quoi qu'il arrive. (IS_EMBED, pas
+// EMBED : ce dernier n'est déclaré que plus bas — TDZ.)
+if (!IS_EMBED) initUiLevel()
+const quickBar = buildQuickBar({
+  openAtelier: () => panelCtx.openAtelier?.(),
+  openStudio: () => panelCtx.openStudio?.(),
+})
+void quickBar
+
 // the GPX profile strip docks at the same bottom-centre spot as the search
 // bar — measure the bar's REAL rendered rect (its height changes across the
 // pointer:coarse/touch breakpoint, see v28.css) and push the profile's
@@ -4037,6 +4047,7 @@ const atelier = buildAtelier({
   setBgEnv: (id) => { params.bgEnv = id || ''; applyBackground() },
   openStore: () => store.enter(),
 })
+panelCtx.openAtelier = () => atelier.enter() // quickbar (lit au clic, pas au build)
 
 // ---- HUB d'accueil (UX P1) — le popup des trois portes ---------------------
 const hub = buildHub({
