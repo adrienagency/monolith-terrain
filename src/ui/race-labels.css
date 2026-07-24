@@ -98,25 +98,28 @@ body.studio-mode .rl-chip .rl-x { display: inline; }
    en blanc, la distance dans un GROS encadré couleur, START / FINISH en
    gros et les pictos EN DESSOUS (Adrien). ---- */
 .rl-start {
-  height: auto; min-height: 52px; padding: 8px 12px;
+  height: 26px; padding: 0 9px;
   background: var(--rl-ink, #17191b);
   color: #fff;
   border-color: rgba(255, 255, 255, 0.25);
-  border-left: 4px solid var(--rl-accent, #ff4d00);
-  box-shadow: 0 6px 22px rgba(23, 25, 27, 0.4);
-  gap: 10px;
+  border-left: 3px solid var(--rl-accent, #ff4d00);
+  box-shadow: 0 3px 12px rgba(23, 25, 27, 0.35);
+  gap: 7px;
 }
 .rl-start .rl-start-logo {
-  height: 38px; max-width: 70px; object-fit: contain; display: block;
+  height: 18px; max-width: 40px; object-fit: contain; display: block;
   filter: brightness(0) invert(1); /* logo lisible sur l'encre, quoi qu'il arrive */
 }
-.rl-start .rl-start-main { display: flex; flex-direction: column; gap: 2px; line-height: 1.15; }
-.rl-start .rl-start-name { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.8; font-weight: 600; }
-.rl-start .rl-start-word { font-size: 16px; font-weight: 800; letter-spacing: 0.12em; }
-.rl-start .rl-picto { color: #fff; opacity: 0.9; }
+.rl-start .rl-start-main { display: inline-flex; align-items: baseline; gap: 6px; line-height: 1; }
+.rl-start .rl-start-name { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; font-weight: 600; }
+.rl-start .rl-start-word { font-size: 11px; font-weight: 800; letter-spacing: 0.1em; }
+.rl-start .rl-picto {
+  color: #fff; opacity: 0.9;
+  position: absolute; top: 100%; left: 12px; margin-top: 2px;
+  background: rgba(23, 25, 27, 0.85); border-radius: 3px; padding: 1px 4px;
+}
 .rl-start .rl-start-km {
-  align-self: center;
   background: var(--rl-accent, #ff4d00); color: #fff;
-  font-size: 15px; font-weight: 800; letter-spacing: 0.04em;
-  padding: 8px 12px; border-radius: 9px; white-space: nowrap;
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.04em;
+  padding: 3px 7px; border-radius: 5px; white-space: nowrap;
 }

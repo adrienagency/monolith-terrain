@@ -119,28 +119,49 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
       n.ay = (-v.y * 0.5 + 0.5) * h
       // la sous-ligne (altitude/barrière) déborde de ~14px sous le cartouche
       const hasSub = n.item.kind !== 'transport' && (n.item.alt != null || n.item.cutoff)
-      n.hh = n.item.kind === 'start' ? (n.item.pictos?.length ? 66 : 52) : n.item.kind === 'transport' ? CHIP_H : CART_H + (hasSub ? 14 : 0)
+      n.hh = n.item.kind === 'start' ? CART_H + (n.item.pictos?.length ? 14 : 0) : n.item.kind === 'transport' ? CHIP_H : CART_H + (hasSub ? 14 : 0)
       n.fw = n.cart.offsetWidth
       vis.push(n)
     }
     if (!vis.length) return
-    // 1b. bornes = le VIEWPORT entier (Adrien : les étiquettes occupent tout
-    // l'espace disponible) — les seuls interdits sont l'UI, les ancres des
-    // points de passage et le TRACÉ lui-même, gérés par hitsObs ci-dessous.
-    const bx0 = 4
-    const by0 = 4
-    const bx1 = w - 4
-    const by1 = h - 4
-    // obstacles écran : le tracé échantillonné + toutes les ancres + l'UI
-    const obs = []
+    // 2. L'ANNEAU (Adrien) : les étiquettes se posent sur un anneau qui
+    // entoure le parcours projeté, chacune à l'ANGLE de son point vu du
+    // centre — l'ordre autour de la boucle est donc préservé par
+    // construction (le km 120 ne s'intercale jamais entre le km 12 et le
+    // km 32), les lignes de rappel ne se croisent pas, et chaque étiquette
+    // reste au plus près de son point. L'anti-chevauchement devient un
+    // problème 1D le long du périmètre (layoutCartouches, coupé au plus
+    // grand trou angulaire). L'anneau est tenu HORS du tracé (bbox tracé +
+    // marge) et au-dessus de l'UI — il n'écrase plus rien au ras du sol :
+    // il entoure la bande et distribue haut/bas/côtés naturellement.
+    const avoid = params.gpxLabelAvoid !== false
+    // bbox écran du tracé (échantillonné) + des ancres
+    let tx0 = Infinity
+    let ty0 = Infinity
+    let tx1 = -Infinity
+    let ty1 = -Infinity
     for (const pW of getTrackWorlds?.() || []) {
       v.copy(pW).project(camera)
-      if (v.z <= 1 && v.x >= -1.05 && v.x <= 1.05 && v.y >= -1.05 && v.y <= 1.05) {
-        obs.push({ x: (v.x * 0.5 + 0.5) * w, y: (-v.y * 0.5 + 0.5) * h })
-      }
+      if (v.z > 1) continue
+      const px = (v.x * 0.5 + 0.5) * w
+      const py = (-v.y * 0.5 + 0.5) * h
+      tx0 = Math.min(tx0, px)
+      tx1 = Math.max(tx1, px)
+      ty0 = Math.min(ty0, py)
+      ty1 = Math.max(ty1, py)
     }
-    for (const n of vis) obs.push({ x: n.ax, y: n.ay })
-    const uiRects = []
+    for (const n of vis) {
+      tx0 = Math.min(tx0, n.ax)
+      tx1 = Math.max(tx1, n.ax)
+      ty0 = Math.min(ty0, n.ay)
+      ty1 = Math.max(ty1, n.ay)
+    }
+    // anneau = bbox gonflée, clampée au viewport et AU-DESSUS de l'UI
+    const G = LEAD + 10
+    let rx0 = Math.max(4, tx0 - G)
+    let ry0 = Math.max(4, ty0 - G)
+    let rx1 = Math.min(w - 4, tx1 + G)
+    let ry1 = Math.min(h - 4, ty1 + G)
     {
       const cref = container.getBoundingClientRect()
       for (const selUI of ['.gpx-profile:not(.hidden)', '.ce-bottombar']) {
@@ -148,97 +169,109 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
         if (!elUI) continue
         const r = elUI.getBoundingClientRect()
         if (!r.width) continue
-        uiRects.push({ x0: r.left - cref.left - 6, y0: r.top - cref.top - 6, x1: r.right - cref.left + 6, y1: r.bottom - cref.top + 6 })
+        const uiTop = r.top - cref.top - 8
+        if (ry1 > uiTop && uiTop > ry0 + 60) ry1 = uiTop
       }
     }
-    const hitsObs = (x, y, ww, hh2) => {
-      for (const o of obs) if (o.x > x - 6 && o.x < x + ww + 6 && o.y > y - 6 && o.y < y + hh2 + 6) return true
-      for (const r of uiRects) if (x < r.x1 && r.x0 < x + ww && y < r.y1 && r.y0 < y + hh2) return true
-      return false
+    let cx = (rx0 + rx1) / 2
+    let cy = (ry0 + ry1) / 2
+    let W2 = rx1 - rx0
+    let H2 = ry1 - ry0
+    let P = 2 * (W2 + H2) // périmètre déroulé, t=0 au coin haut-gauche, horaire
+    const rederive = () => { cx = (rx0 + rx1) / 2; cy = (ry0 + ry1) / 2; W2 = rx1 - rx0; H2 = ry1 - ry0; P = 2 * (W2 + H2) }
+    // point de l'anneau + arête pour un t donné
+    const ringAt = (t) => {
+      t = ((t % P) + P) % P
+      if (t < W2) return { x: rx0 + t, y: ry0, edge: 'top' }
+      t -= W2
+      if (t < H2) return { x: rx1, y: ry0 + t, edge: 'right' }
+      t -= H2
+      if (t < W2) return { x: rx1 - t, y: ry1, edge: 'bottom' }
+      t -= W2
+      return { x: rx0, y: ry1 - t, edge: 'left' }
     }
-    // 2. placement « autour de la boucle » (Adrien) : chaque étiquette reste
-    // AU PLUS PRÈS de son point, et le côté est dicté par la géométrie du
-    // tracé vue caméra — le barycentre écran des ancres approxime le centre
-    // de la boucle :
-    //   partie PROCHE de la caméra (bas écran)  → étiquette EN DESSOUS
-    //   partie LOINTAINE (haut écran)           → AU-DESSUS, dans l'air, proche
-    //   partie GAUCHE → à gauche (à droite en repli si la place manque)
-    //   partie DROITE → miroir
-    // Les transports (secondaires) vont toujours en dessous de leur ancre.
-    // L'étiquette DÉPART (kind 'start') suit la même géométrie mais reste
-    // toujours visible (jamais fenêtrée par la lecture).
-    let cx = 0
-    let cy = 0
-    for (const n of vis) { cx += n.ax; cy += n.ay }
-    cx /= vis.length
-    cy /= vis.length
-    const groups = { left: [], right: [], top: [], bottom: [] }
-    for (const n of vis) {
-      if (n.item.kind === 'transport') { groups.bottom.push(n); continue }
-      const dx = n.ax - cx
-      const dy = n.ay - cy
-      const key = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'right' : 'left') : (dy >= 0 ? 'bottom' : 'top')
-      groups[key].push(n)
+    // t idéal = intersection du rayon centre→ancre avec l'anneau
+    const idealT = (ax, ay) => {
+      const dx = ax - cx
+      const dy = ay - cy
+      const kx = dx > 0 ? (rx1 - cx) / dx : dx < 0 ? (rx0 - cx) / dx : Infinity
+      const ky = dy > 0 ? (ry1 - cy) / dy : dy < 0 ? (ry0 - cy) / dy : Infinity
+      const k = Math.min(kx, ky)
+      const px = Math.min(Math.max(cx + dx * k, rx0), rx1)
+      const py = Math.min(Math.max(cy + dy * k, ry0), ry1)
+      // convertir (px,py) en t
+      if (Math.abs(py - ry0) < 0.5) return px - rx0
+      if (Math.abs(px - rx1) < 0.5) return W2 + (py - ry0)
+      if (Math.abs(py - ry1) < 0.5) return W2 + H2 + (rx1 - px)
+      return 2 * W2 + H2 + (ry1 - py)
     }
-    const skyY0 = 4 // au-dessus, l'air libre est permis (mais on reste proche)
-    const avoid = params.gpxLabelAvoid !== false
     const placed = []
-    // placement DETERMINISTE : on pose gauche/droite (piles), puis bas,
-    // puis haut — chaque etiquette teste les rectangles DEJA poses et
-    // s'ecarte par pas dans SA direction (bas vers le bas, haut vers le
-    // ciel). Deterministe = cibles stables = le glissement converge.
-    const hits = (x, y, ww, hh2) => placed.some((m) => x < m.fx + m.fw + 12 && m.fx < x + ww + 12 && y < m.fy + m.hh + 12 && m.fy < y + hh2 + 12)
-    const hitsAll = (x, y, ww, hh2) => hits(x, y, ww, hh2) || hitsObs(x, y, ww, hh2)
-    for (const key of ['right', 'left']) {
-      const group = groups[key]
-      if (!group.length) continue
-      group.sort((a, b) => a.ay - b.ay)
-      const ys = layoutCartouches(
-        group.map((n) => ({ y: n.ay - n.hh / 2, h: n.hh })),
-        { avoid, gap: 14, minY: by0, maxY: by1 }
-      )
-      group.forEach((n, i) => {
-        n.side = key
-        let fx = key === 'right' ? n.ax + LEAD : n.ax - LEAD - n.fw
-        if (fx < bx0 || fx + n.fw > bx1) {
-          const flip = key === 'right' ? n.ax - LEAD - n.fw : n.ax + LEAD
-          if (flip >= bx0 && flip + n.fw <= bx1) { fx = flip; n.side = key === 'right' ? 'left' : 'right' }
-          else fx = Math.min(Math.max(fx, bx0), bx1 - n.fw)
-        }
-        n.fx = fx
-        n.fy = ys[i]
-        // ne JAMAIS recouvrir tracé/ancre/UI : on s'écarte vers l'extérieur
-        if (avoid) {
-          let k = 0
-          while (k < 12 && hitsObs(n.fx, n.fy, n.fw, n.hh)) {
-            n.fx += n.side === 'right' ? 26 : -26
-            k++
-          }
-          n.fx = Math.min(Math.max(n.fx, bx0), bx1 - n.fw)
-        }
-        placed.push(n)
-      })
-    }
-    for (const key of ['bottom', 'top']) {
-      const group = groups[key]
-      if (!group.length) continue
-      group.sort((a, b) => a.ax - b.ax)
-      const rowH = Math.max(...group.map((n) => n.hh)) + 16
-      for (const n of group) {
-        n.side = key
-        n.fx = Math.min(Math.max(n.ax - n.fw / 2, bx0), bx1 - n.fw)
-        const fy0 = key === 'top' ? n.ay - LEAD - n.hh : n.ay + LEAD
-        let r = 0
-        n.fy = fy0
-        if (avoid) {
-          while (r < 14 && hitsAll(n.fx, n.fy, n.fw, n.hh)) {
-            r++
-            n.fy = key === 'top' ? Math.max(fy0 - r * rowH, skyY0) : Math.min(fy0 + r * rowH, by1 - n.hh)
-          }
-        }
-        placed.push(n)
+    const respan = () => {
+      for (const n of placed) {
+        n.t = idealT(n.ax, n.ay)
+        const e = ringAt(n.t).edge
+        n.span = (e === 'top' || e === 'bottom' ? n.fw : n.hh) + 14
       }
     }
+    for (const n of vis) placed.push(n)
+    respan()
+    // si la somme des encombrements dépasse le périmètre, l'anneau SE GONFLE
+    // vers le viewport juste ce qu'il faut (sinon le solveur entasse au bout)
+    {
+      const need = placed.reduce((s2, n) => s2 + n.span + 10, 0)
+      if (need > P * 0.9) {
+        const Pvp = 2 * ((w - 8) + (h - 8))
+        const f = Math.min(1, Math.max(0, (need / 0.9 - P) / Math.max(1, Pvp - P)))
+        rx0 += (4 - rx0) * f
+        ry0 += (4 - ry0) * f
+        rx1 += (w - 4 - rx1) * f
+        ry1 += (h - 4 - ry1) * f
+        rederive()
+        respan()
+      }
+    }
+    const solveRing = () => {
+      // couper le cercle au PLUS GRAND trou angulaire → problème linéaire,
+      // résolu par le solveur 1D existant (ordre angulaire préservé)
+      placed.sort((a2, b2) => a2.t - b2.t)
+      let cut = 0
+      let best = -1
+      for (let i = 0; i < placed.length; i++) {
+        const a2 = placed[i]
+        const b2 = placed[(i + 1) % placed.length]
+        const gap = ((b2.t - a2.t) + P) % P || P
+        if (gap > best) { best = gap; cut = (i + 1) % placed.length }
+      }
+      const order = placed.slice(cut).concat(placed.slice(0, cut))
+      const t0 = order[0].t
+      const unrolled = order.map((n) => ({ y: ((n.t - t0) + P) % P, h: n.span }))
+      const ts = layoutCartouches(unrolled, { avoid: true, gap: 10, minY: 0, maxY: P })
+      order.forEach((n, i) => { n.t = t0 + ts[i] })
+    }
+    if (avoid && placed.length > 1) {
+      // DEUX passes : le solveur peut déplacer une étiquette sur une AUTRE
+      // arête (où son encombrement le long de l'anneau change — largeur en
+      // haut/bas, hauteur sur les côtés) → on recalcule les spans sur les
+      // arêtes FINALES et on re-résout une fois
+      solveRing()
+      for (const n of placed) {
+        const e = ringAt(n.t + n.span / 2).edge
+        n.span = (e === 'top' || e === 'bottom' ? n.fw : n.hh) + 14
+      }
+      solveRing()
+    }
+    // t → boîte de l'étiquette, posée à L'EXTÉRIEUR de l'anneau
+    for (const n of placed) {
+      const pt = ringAt(n.t + n.span / 2) // centre du segment occupé
+      n.side = pt.edge
+      if (pt.edge === 'top') { n.fx = pt.x - n.fw / 2; n.fy = ry0 - n.hh - 2 }
+      else if (pt.edge === 'bottom') { n.fx = pt.x - n.fw / 2; n.fy = ry1 + 2 }
+      else if (pt.edge === 'right') { n.fx = rx1 + 2; n.fy = pt.y - n.hh / 2 }
+      else { n.fx = rx0 - n.fw - 2; n.fy = pt.y - n.hh / 2 }
+      n.fx = Math.min(Math.max(n.fx, 2), w - n.fw - 2)
+      n.fy = Math.min(Math.max(n.fy, 2), h - n.hh - 2)
+    }
+
     // 5. application DOM — le cartouche GLISSE vers sa place (lissage
     // exponentiel ≈ ease-in-out, demande Adrien) ; la ligne de rappel vise
     // son bord côté ancre (pointillés neutres, jamais la couleur du tracé)
@@ -250,7 +283,7 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
       // la carte sans latence, donc rien ne « flotte ».
       const tox = n.fx - n.ax
       const toy = n.fy - n.ay
-      if (n.ox == null) { n.ox = tox; n.oy = toy } // première pose : direct
+      if (n.ox == null || window.__rlSnap) { n.ox = tox; n.oy = toy } // première pose : direct (__rlSnap : tests)
       else {
         const d = Math.hypot(tox - n.ox, toy - n.oy)
         // zone morte 8 px pour DÉCLENCHER un mouvement (SOUS les marges de
@@ -283,5 +316,5 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
 
   function dispose() { root.remove(); nodes.clear() }
 
-  return { update, setDirty, dispose }
+  return { update, setDirty, dispose, _nodes: nodes } // _nodes : sonde de debug (harmless)
 }
