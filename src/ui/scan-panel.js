@@ -18,7 +18,7 @@ const TIPS = {
 
 export function buildScanPanel(ctx) {
   const panel = new Panel({
-    title: 'Scan',
+    title: 'Scanner',
     icon: ICON,
     side: 'left',
     width: 268,

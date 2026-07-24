@@ -191,6 +191,46 @@ export function buildStudio(deps) {
         <div><b>D+ ${st.dplus} m</b><span>Dénivelé +</span></div>
         <div><b>D− ${st.dminus} m</b><span>Dénivelé −</span></div>`
       body.append(s)
+    } else {
+      // « Pas encore de trace ? » — le mode Parcours n'est JAMAIS un
+      // cul-de-sac (UX P0, Adrien) : démo 1-clic, traceur badgé « bientôt »,
+      // guide d'export légal (l'utilisateur exporte SON fichier depuis SON
+      // compte — aucune connexion, aucune API).
+      const empty = document.createElement('div')
+      empty.className = 'studio-empty'
+      empty.innerHTML = `<h4>Pas encore de trace ?</h4>
+        <p class="hint">Trois façons de démarrer votre carte de course.</p>`
+      const door = (title, sub, { accent = false, soon = false } = {}) => {
+        const d = document.createElement('button')
+        d.type = 'button'
+        d.className = 'studio-door' + (accent ? ' accent' : '') + (soon ? ' soon' : '')
+        d.disabled = soon
+        d.innerHTML = `<span class="d-main"><b>${title}</b><i>${sub}</i></span>${soon ? '<span class="studio-soon">bientôt</span>' : ''}`
+        return d
+      }
+      const dDemo = door('Essayer avec une course de démo', 'La Grande Traversée · 220 km, prête à jouer — remplacez-la par la vôtre ensuite.', { accent: true })
+      dDemo.addEventListener('click', async () => {
+        dDemo.disabled = true
+        dDemo.querySelector('i').textContent = 'Chargement de la démo…'
+        try {
+          const bundle = parseRace(await (await fetch('/demo/grande-traversee.shibumap-race.json')).text())
+          if (bundle) await importProject(bundle)
+        } catch {}
+        render()
+      })
+      const dDraw = door('Dessiner le parcours sur la carte', 'Cliquez les passages clés, la trace suit le terrain.', { soon: true })
+      const dGuide = door('Récupérer un GPX existant', 'Depuis votre compte Strava, Komoot ou OpenRunner — vos données, votre fichier.')
+      const guide = document.createElement('div')
+      guide.className = 'studio-guide'
+      guide.hidden = true
+      guide.innerHTML = `
+        <p><b>Strava</b> — Mes activités → ouvrez l'activité → ⋯ → « Exporter GPX ».</p>
+        <p><b>Komoot</b> — ouvrez votre Tour → « Exporter » → fichier GPX.</p>
+        <p><b>OpenRunner</b> — votre parcours → « Exporter » → GPX.</p>
+        <p class="hint">Vous exportez votre propre fichier depuis votre propre compte — rien n'est connecté. Sinon : demandez le GPX à votre traceur ou chronométreur.</p>`
+      dGuide.addEventListener('click', () => { guide.hidden = !guide.hidden })
+      empty.append(dDemo, dDraw, dGuide, guide)
+      body.append(empty)
     }
   }
 

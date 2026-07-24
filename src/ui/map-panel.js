@@ -5,7 +5,7 @@ const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-
 
 export function buildMapPanel(ctx) {
   const { params, u } = ctx // u() → terrain.mapUniforms
-  const panel = new Panel({ title: 'Map', icon: ICON, side: 'left', width: 268, tip: 'Cartographic layers draped on the relief.' })
+  const panel = new Panel({ title: 'Carte', icon: ICON, side: 'left', width: 268, tip: 'Cartographic layers draped on the relief.' })
 
   const sLayers = panel.addSection(section('Layers', { open: true }))
   const roadsToggle = toggle({ label: 'Roads', get: () => params.roadsEnabled, set: (v) => { params.roadsEnabled = v; ctx.rebuildMapLayers(); refreshAll() } })

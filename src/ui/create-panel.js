@@ -12,7 +12,7 @@ const ICON =
 export function buildCreatePanel(ctx) {
   const { params } = ctx
   const panel = new Panel({
-    title: 'Create',
+    title: 'Création',
     icon: ICON,
     side: 'right',
     width: 268,
@@ -23,7 +23,7 @@ export function buildCreatePanel(ctx) {
 
   // --------------------------------------------------------------- Colors
   const mode = () => (params.darkMode ? 'dark' : 'light')
-  const sCol = addTo(section('Colours'))
+  const sCol = addTo(section('Couleurs'))
   sCol.body.append(el('div', 'ce-label', 'Elevation ramp, low to high'))
   const ramp = el('div', 'ce-ramp')
   params.rampStops.forEach((stop, i) => {
@@ -66,10 +66,10 @@ export function buildCreatePanel(ctx) {
   // ------------------------------------------------------------ Background
   // The scene backdrop behind the block. Changing it moves the fog to the same
   // colour, so the relief always fades into its own background.
-  const sBg = addTo(section('Background'))
+  const sBg = addTo(section('Fond'))
   // --- Environnement (HDRI sky) — a vignette picker; selecting a sky takes over
   // the backdrop + lighting, clearing it returns to the solid/gradient below ---
-  sBg.body.append(el('div', 'ce-fx-head', 'Environment (HDRI)'))
+  sBg.body.append(el('div', 'ce-fx-head', 'Ciel (HDRI)'))
   const envPick = el('div', 'ce-mat-pick')
   sBg.body.append(envPick)
   function renderEnvPicker() {

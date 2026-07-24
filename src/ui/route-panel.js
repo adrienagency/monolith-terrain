@@ -19,7 +19,7 @@ const UPLOAD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 export function buildRoutePanel(ctx) {
   const { params } = ctx
   const panel = new Panel({
-    title: 'GPX path',
+    title: 'Parcours',
     icon: ICON,
     side: 'left',
     width: 268,
@@ -31,7 +31,7 @@ export function buildRoutePanel(ctx) {
   // buried in a collapsed Playback section. The follow/readout options stay in
   // the Playback section below. `syncPlayBtn` is defined here and reused there.
   const playRow = el('div', 'ce-btn-row')
-  const playBtn = button('▶ Play', () => {
+  const playBtn = button('▶ Lecture', () => {
     if (!ctx.gpx.track) return
     if (ctx.gpx.isPlaying()) {
       ctx.gpx.pause()
@@ -47,7 +47,7 @@ export function buildRoutePanel(ctx) {
     ctx.stopFollow?.()
     syncPlayBtn()
   }, { ghost: true })
-  const exitFollowBtn = button('✕ Exit follow', () => {
+  const exitFollowBtn = button('✕ Quitter le suivi', () => {
     params.gpxFollow = false
     ctx.stopFollow?.()
     refreshAll()
@@ -57,7 +57,7 @@ export function buildRoutePanel(ctx) {
   exitFollowBtn.title = 'Return to manual camera control'
   function syncPlayBtn() {
     const playing = !!ctx.gpx.isPlaying?.()
-    playBtn.textContent = playing ? '⏸ Pause' : '▶ Play'
+    playBtn.textContent = playing ? '⏸ Pause' : '▶ Lecture'
     playBtn.classList.toggle('on', playing)
     exitFollowBtn.style.display = playing && params.gpxFollow ? '' : 'none'
   }
@@ -69,13 +69,13 @@ export function buildRoutePanel(ctx) {
   // Track section stays FIRST and open by default (see the task-13 report) —
   // Width/Colour are the controls a user reaches for right after loading a
   // file, so they shouldn't require expanding anything.
-  const sTrack = panel.addSection(section('Track', { open: true }))
+  const sTrack = panel.addSection(section('Trace', { open: true }))
   // Race Studio — la sous-app organisateurs (logo, points de passage, pictos,
   // transports, export projet) : voir src/ui/studio.js
   sTrack.body.append(button('Race Studio', () => ctx.openStudio?.(), { accent: true }))
-  sTrack.body.append(button('Load GPX…', () => ctx.loadGpx(), { ghost: true }))
+  sTrack.body.append(button('Charger un GPX…', () => ctx.loadGpx(), { ghost: true }))
   const colorRow = color({
-    label: 'Colour',
+    label: 'Couleur',
     get: () => params.gpxColor || params.hudAccent,
     set: (v) => { params.gpxColor = v; ctx.gpx.setColor(v) },
   })
@@ -87,7 +87,7 @@ export function buildRoutePanel(ctx) {
   visibleWhen(colorRow, () => !params.gpxGradient)
   sTrack.body.append(
     slider({
-      label: 'Width',
+      label: 'Épaisseur',
       min: 1,
       max: 8,
       step: 0.5,
@@ -105,11 +105,11 @@ export function buildRoutePanel(ctx) {
   // (Width/Colour/Gradient/Glow/Markers/Km, above and below) stays GLOBAL —
   // see gpx-layers.js's own file header for why — so this section is the
   // only place per-layer identity lives.
-  const sLayers = panel.addSection(section('My races', { open: true }))
+  const sLayers = panel.addSection(section('Mes courses', { open: true }))
   const listEl = el('div', 'ce-gpx-layers')
-  const emptyEl = el('div', 'ce-gpx-layers-empty', 'No tracks loaded yet — Load GPX above to add the first one.')
+  const emptyEl = el('div', 'ce-gpx-layers-empty', 'Aucune course chargée — « Charger un GPX… » ci-dessus pour la première.')
   const addRow = el('div', 'ce-btn-row')
-  const addBtn = button('+ Add layer', () => ctx.loadGpx(), { ghost: true })
+  const addBtn = button('+ Ajouter une course', () => ctx.loadGpx(), { ghost: true })
   const capLabel = el('span', 'ce-gpx-cap')
   addRow.append(addBtn, capLabel)
   sLayers.body.append(listEl, emptyEl, addRow)

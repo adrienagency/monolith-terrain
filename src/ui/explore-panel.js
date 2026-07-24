@@ -13,7 +13,7 @@ const ICON =
 
 export function buildExplorePanel(ctx) {
   const panel = new Panel({
-    title: 'Explore',
+    title: 'Explorer',
     icon: ICON,
     side: 'left',
     width: 268,

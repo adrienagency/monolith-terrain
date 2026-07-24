@@ -26,7 +26,7 @@ export function buildTemplatesPanel(ctx) {
   // essais live sur Yakushima verrouillée, intégration vers les rangées
   // Palettes / templates user ci-dessous.
   const storeWrap = el('div', 'ce-btn-row')
-  const storeBtn = button('View templates', () => ctx.openStore?.(), { accent: true })
+  const storeBtn = button('Boutique de templates', () => ctx.openStore?.(), { accent: true })
   storeBtn.setAttribute('data-tip', 'Browse Styles & Couleurs, try them live, bring back what you like.')
   storeWrap.append(storeBtn)
   panel.body.append(storeWrap)
