@@ -17,9 +17,14 @@ function ensureGoo() {
   gooDefs = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
   gooDefs.setAttribute('class', 'lq-defs')
   gooDefs.setAttribute('aria-hidden', 'true')
+  // flou 7 + seuil alpha 20a-9 (bord à 0.45) : à 6px d'écart, l'alpha au
+  // milieu ≈ 0.62 → pont de liquide FRANC entre deux bulles (à 5/24-11 le
+  // pont culminait à ~0.48 pour un seuil 0.458 : invisible — vu par Adrien).
+  // Région élargie : le débord vertical par défaut (10 %) rognait le flou.
   gooDefs.innerHTML =
-    '<defs><filter id="ce-goo"><feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b"/>' +
-    '<feColorMatrix in="b" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 24 -11" result="g"/>' +
+    '<defs><filter id="ce-goo" x="-30%" y="-60%" width="160%" height="220%">' +
+    '<feGaussianBlur in="SourceGraphic" stdDeviation="7" result="b"/>' +
+    '<feColorMatrix in="b" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -9" result="g"/>' +
     '<feComposite in="SourceGraphic" in2="g" operator="atop"/></filter></defs>'
   document.body.append(gooDefs)
 }
@@ -77,6 +82,11 @@ export function liquidize(cluster, { items, inflate = 4 } = {}) {
   new ResizeObserver(ask).observe(cluster)
   window.addEventListener('resize', ask)
   document.fonts?.ready?.then(ask)
+  // filet : un déplacement piloté par la FEUILLE DE STYLE seule (HMR CSS,
+  // media query, thème) ne mute ni le DOM ni la taille du cluster — aucun
+  // observer ne le voit. Un poll doux rattrape ces dérives (2-5 bulles, coût
+  // négligeable ; les écritures identiques sont filtrées côté observer).
+  setInterval(ask, 600)
   ask()
   return { refresh: ask }
 }

@@ -470,7 +470,7 @@ body.dark {
    du goo (gap 7px ≈ la portée du flou) — le liquide EST le séparateur */
 .ce-lq-adv {
   position: absolute;
-  left: calc(100% + 7px);
+  left: calc(100% + 5px);
   /* MÊME niveau et MÊME hauteur que la capsule : la bulle Avancé s'étire sur
      toute la rangée → pincement liquide symétrique (l'haltère de la réf) */
   top: 0;
