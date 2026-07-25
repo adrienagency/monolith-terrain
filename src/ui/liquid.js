@@ -58,7 +58,13 @@ export function liquidize(cluster, { items, inflate = 4, bumpFor } = {}) {
     raf = 0
     const base = cluster.getBoundingClientRect()
     if (!base.width) return // cluster masqué (display:none) — rien à dessiner
-    const live = (items ? items() : [...cluster.children]).filter((n) => n !== goo && n.offsetParent !== null)
+    // un item peut être { key, el } : la bulle est alors keyée sur `key`, pas
+    // sur l'élément — quand `el` CHANGE (switch simple ⇄ avancé), la MÊME
+    // bulle transitionne vers la nouvelle géométrie : le fond se MORPHE
+    const raw = items ? items() : [...cluster.children]
+    const live = raw
+      .map((n) => (n && n.el !== undefined ? n : { key: n, el: n }))
+      .filter((n) => n.el && n.el !== goo && n.el.offsetParent !== null)
     const seen = new Set()
     if (!live.length) {
       // mode focus (grande tirette) : les boutons sont cachés, une seule
@@ -69,12 +75,14 @@ export function liquidize(cluster, { items, inflate = 4, bumpFor } = {}) {
       b.classList.remove('dark', 'accent')
     }
     for (const it of live) {
-      const b = blobFor(it)
-      seen.add(it)
-      const r = it.getBoundingClientRect()
+      const b = blobFor(it.key)
+      seen.add(it.key)
+      const r = it.el.getBoundingClientRect()
       place(b, r.left - base.left - inflate, r.top - base.top - inflate, r.width + inflate * 2, r.height + inflate * 2)
-      b.classList.toggle('dark', it.classList.contains('on'))
-      b.classList.toggle('accent', it.classList.contains('accent'))
+      // sombre/accent en OPT-IN (lq-dark / lq-accent) — rectif Adrien : la
+      // bulle Avancé reste blanche, l'état actif parle par le mot/l'icône
+      b.classList.toggle('dark', it.el.classList.contains('lq-dark'))
+      b.classList.toggle('accent', it.el.classList.contains('lq-accent'))
     }
     // la bosse du bouton actif — un rond qui dépasse du bord haut et que le
     // goo fond dans la capsule

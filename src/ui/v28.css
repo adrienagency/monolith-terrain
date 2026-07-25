@@ -498,8 +498,9 @@ body.dark .lq-blob { background: #17191d; }
   white-space: nowrap;
   z-index: 1;
 }
-/* la bulle est le fond du bouton détaché — lui reste transparent, et son
-   état .on colore la BULLE (liquid.js lit la classe) */
+/* la bulle Avancé reste BLANCHE dans les deux états (rectif Adrien) —
+   c'est le MOT qui parle : grisé en mode simple, encre en avancé (transition
+   d'opacité), et l'icône prend la couleur d'appel quand c'est actif */
 .ce-lq-adv .ce-elembar-btn,
 .ce-lq-adv .ce-pillbtn,
 .ce-lq-adv .ce-pillbtn:hover,
@@ -507,25 +508,45 @@ body.dark .lq-blob { background: #17191d; }
   background: none;
   box-shadow: none;
 }
-.ce-lq-adv .ce-advbtn.on { color: var(--ce-bg, #fff); }
 .ce-lq-adv .ce-advbtn {
   padding: 0 16px;
   height: 100%;
+  color: var(--ce-muted);
+  transition: color 0.25s;
 }
+.ce-lq-adv .ce-advbtn.on { color: var(--ce-ink); }
+.ce-lq-adv .ce-advbtn.on svg { color: var(--ce-accent); }
 
+/* l'elemwrap est désormais LA barre unique des deux niveaux : la capsule
+   avancée (3 modes) et le cœur simple (2 portes) vivent dans la même rangée
+   liquide — au switch, la bulle de fond MORPHE d'une géométrie à l'autre
+   (même bulle '__core', transitions à travers le goo) et les contenus se
+   fondent en opacité */
 .ce-elemwrap {
   position: fixed;
   bottom: 74px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 62;
-  display: none;
+  display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
 }
-body:not(.ce-simple) .ce-elemwrap {
-  display: flex;
+.ce-lqrow > .ce-elembar,
+.ce-lqrow > .ce-qb-core {
+  transition: opacity 0.24s 0.05s;
+}
+body.ce-simple .ce-lqrow > .ce-elembar,
+body:not(.ce-simple) .ce-lqrow > .ce-qb-core {
+  /* le niveau caché sort du flux (la rangée garde la largeur du niveau
+     VISIBLE → centrage juste) et se fond — pointer-events coupés */
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
 }
 body.ce-noui .ce-elemwrap,
 body.ce-embed .ce-elemwrap,
@@ -551,6 +572,9 @@ body:has(.gpx-profile:not(.hidden)) .ce-elemwrap {
   align-items: center;
   gap: 2px;
 }
+/* modes (rectif Adrien) : PAS de pill sombre ni de lift — le MOT fonce quand
+   il est choisi, l'icône prend la couleur d'appel, et la coche liquide du
+   goo (bumpFor) voyage au-dessus de lui */
 .ce-wm-btn {
   display: flex;
   align-items: center;
@@ -562,27 +586,24 @@ body:has(.gpx-profile:not(.hidden)) .ce-elemwrap {
   font: 600 12px var(--ce-font);
   padding: 8px 13px;
   border-radius: 999px;
-  opacity: 0.75;
+  opacity: 0.5;
+  transition: opacity 0.25s, background 0.2s;
 }
 .ce-wm-btn svg {
   width: 16px;
   height: 16px;
+  transition: color 0.25s;
 }
 .ce-wm-btn:hover {
   background: var(--ce-hover);
-  opacity: 1;
+  opacity: 0.85;
 }
 .ce-wm-btn.on {
-  background: var(--ce-ink);
-  color: var(--ce-bg, #fff);
+  background: none;
+  color: var(--ce-ink);
   opacity: 1;
-  /* le pill actif SORT légèrement de la capsule — la bosse liquide du goo
-     (liquid.js bumpFor) déforme le bord au-dessus de lui, réf. vidéo Adrien */
-  transform: translateY(-3px);
 }
-.ce-wm-btn {
-  transition: transform 0.28s cubic-bezier(0.5, 0, 0.3, 1.3), background 0.2s, opacity 0.15s;
-}
+.ce-wm-btn.on svg { color: var(--ce-accent); }
 .ce-elembar-sep {
   width: 1px;
   height: 18px;
@@ -1774,45 +1795,17 @@ body.shibu-view .ce-miniroute.has {
 }
 
 /* ------------------------------------------- mode simple / avancé (UX P3) */
-/* body.ce-simple = défaut : carte pure, AUCUN dock de panneaux. La création
-   passe par les espaces (quickbar ci-dessous) ; « Avancé » (topbar) ré-affiche
-   tout. */
+/* body.ce-simple = défaut : carte pure, AUCUN dock de panneaux. Le cœur
+   simple (Habiller / Ma course) vit DANS la rangée liquide de l'elembar —
+   plus de barre quickbar autonome, le fond morphe au switch. */
 body.ce-simple .ce-dock {
   display: none !important;
-}
-.ce-advbtn.on {
-  background: var(--ce-ink);
-  color: var(--ce-bg, #fff);
-}
-.ce-quickbar {
-  /* wrapper liquide : la LARGEUR = le cœur (Habiller + Ma course) → le cœur
-     est centré écran, « Avancé » (absolu, .ce-lq-adv) décentré à droite.
-     bottom = CELUI de l'elembar (74px) : plus de saut vertical au switch
-     simple ⇄ avancé (vu par Adrien) */
-  position: fixed;
-  bottom: 74px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 60;
-  display: none;
-}
-body.ce-simple .ce-quickbar {
-  display: block;
 }
 .ce-qb-core {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 4px;
-}
-body.ce-noui .ce-quickbar,
-body.ce-embed .ce-quickbar,
-body.store-mode .ce-quickbar,
-body.studio-mode .ce-quickbar,
-body.atelier-mode .ce-quickbar,
-/* le profil GPX occupe le même emplacement bottom-center : il a priorité */
-body:has(.gpx-profile:not(.hidden)) .ce-quickbar {
-  display: none !important;
 }
 
 /* ---- panneau Parcours v2 : portes d'entrée + carte Organisateur ---------- */

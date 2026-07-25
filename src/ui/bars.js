@@ -5,7 +5,6 @@
 import { el, iconButton, refreshAll } from './kit.js'
 import { parseLatLon } from '../geo.js'
 import { showToast } from './toast.js'
-import { liquidize } from './liquid.js'
 
 const I = {
   globe:
@@ -331,14 +330,10 @@ export function buildMapCorner(ctx) {
   }
 }
 
-// Barre contextuelle flottante (UX P3) — les deux portes de création, toujours
-// à portée sur la carte nue. Visible UNIQUEMENT en mode simple ; les modes
-// morphés (store/studio/atelier), noui et embed la masquent en CSS.
-export function buildQuickBar(ctx) {
-  // barre LIQUIDE (réf. Enroll validée Adrien) : le cœur [Habiller ma carte +
-  // Ma course] est une silhouette de bulles fusionnées, CENTRÉE écran ;
-  // « Avancé » vit détaché à droite, décentré — même grammaire que l'elembar
-  const bar = el('div', 'ce-quickbar ce-lqrow ce-liquid')
+// Cœur du MODE SIMPLE — les deux portes de création. Plus de barre autonome :
+// il est HÉBERGÉ dans la rangée liquide de l'elembar (buildElemBar
+// simpleCore), pour que le fond morphe d'un niveau à l'autre au switch.
+export function buildQuickCore(ctx) {
   const core = el('div', 'ce-qb-core')
   const mk = (icon, label, tip, onClick, kind) => {
     const b = el('button', 'ce-pillbtn' + (kind ? ` ${kind}` : ''))
@@ -349,21 +344,12 @@ export function buildQuickBar(ctx) {
     return b
   }
   // hiérarchie de couleur (rectif Adrien) : l'accent orange est RÉSERVÉ à
-  // Publier (un accent par écran) — la porte principale est un pill ENCRE,
-  // le même langage que le mode actif de l'elembar
+  // Publier (un accent par écran) — la porte principale est un pill ENCRE
   core.append(
     mk(I.brush, 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur votre carte.', () => ctx.openAtelier(), 'primary'),
     mk(I.flag, 'Ma course', 'Race Studio — votre parcours GPX en carte de course (points de passage, transports, partage).', () => ctx.openStudio())
   )
-  // « Avancé » habite ici (sorti de la topbar) : le switch vit à côté des
-  // portes qu'il remplace — SA bulle, reliée à la capsule par le goo
-  const advSlot = el('div', 'ce-lq-adv')
-  const advBtn = buildAdvToggle('ce-pillbtn')
-  advSlot.append(advBtn)
-  bar.append(core, advSlot)
-  liquidize(bar, { items: () => [core, advBtn], inflate: 0 })
-  document.body.append(bar)
-  return { root: bar }
+  return core
 }
 
 export function buildBottomBar(ctx) {

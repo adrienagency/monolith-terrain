@@ -67,7 +67,7 @@ import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
 import { showNotice } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
-import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickBar, buildShibuChrome, initUiLevel, buildAdvToggle } from './ui/bars.js'
+import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickCore, buildShibuChrome, initUiLevel, buildAdvToggle } from './ui/bars.js'
 import { buildMiniRoute } from './ui/mini-route.js'
 import { buildSettingsSearch } from './ui/settings-search.js'
 import { perfSection } from './ui/camera-panel.js'
@@ -3320,11 +3320,12 @@ if (!IS_EMBED) {
 // viewer shibu (lien partagé) : marque en bas + CTA — le reste du chrome
 // est masqué en CSS (body.shibu-view, voir v28.css)
 if (IS_SHIBU) buildShibuChrome()
-const quickBar = buildQuickBar({
+// cœur du mode simple — monté dans la rangée liquide de l'elembar plus bas
+// (buildElemBar simpleCore) pour le morph de fond au switch Avancé
+const quickCore = IS_EMBED ? null : buildQuickCore({
   openAtelier: () => panelCtx.openAtelier?.(),
   openStudio: () => panelCtx.openStudio?.(),
 })
-void quickBar
 
 // the GPX profile strip docks at the same bottom-centre spot as the search
 // bar — measure the bar's REAL rendered rect (its height changes across the
@@ -3813,6 +3814,7 @@ if (!IS_EMBED) {
     initial: initialMode,
     onMode: applyWorkMode,
     toolsByMode: { explorer: {}, studio: {}, parcours: {} },
+    simpleCore: quickCore,
   })
   applyWorkMode(initialMode)
   // « Avancé » vit dans les barres de modes (sorti de la topbar) : ici sa

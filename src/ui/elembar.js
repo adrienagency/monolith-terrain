@@ -24,7 +24,10 @@ const I = {
 const fmt = (c, v) => (c.step >= 1 ? String(Math.round(v)) : (+v).toFixed(c.step >= 0.1 ? 1 : 2))
 const clampStep = (c, v) => Math.min(c.max, Math.max(c.min, Math.round(v / c.step) * c.step))
 
-export function buildElemBar({ modes, initial, onMode, toolsByMode }) {
+// simpleCore (optionnel) : le cœur du MODE SIMPLE (Habiller ma carte / Ma
+// course, construit par bars.js) — hébergé dans la même rangée liquide pour
+// que le fond MORPHE d'un niveau à l'autre au switch Avancé
+export function buildElemBar({ modes, initial, onMode, toolsByMode, simpleCore }) {
   // barre LIQUIDE (réf. Enroll, précisé par Adrien) : Explorer/Studio/Parcours
   // vivent dans UNE MÊME bulle (la capsule) ; « Avancé » a SA bulle, reliée à
   // la capsule par la taille concave du goo — le liquide est le séparateur
@@ -215,12 +218,19 @@ export function buildElemBar({ modes, initial, onMode, toolsByMode }) {
   // le MutationObserver de liquidize le voit arriver tout seul)
   const row = el('div', 'ce-lqrow ce-liquid')
   const advSlot = el('div', 'ce-lq-adv')
-  row.append(bar, advSlot)
+  row.append(bar, ...(simpleCore ? [simpleCore] : []), advSlot)
+  const isSimple = () => document.body.classList.contains('ce-simple')
   liquidize(row, {
-    items: () => [bar, advSlot.firstElementChild].filter(Boolean),
+    // bulle '__core' STABLE : elle pointe vers le niveau visible (capsule
+    // avancée OU cœur simple) — au switch, la même bulle transitionne vers
+    // la nouvelle géométrie à travers le goo = morph liquide du fond
+    items: () => [
+      { key: '__core', el: isSimple() && simpleCore ? simpleCore : bar },
+      { key: '__adv', el: advSlot.firstElementChild },
+    ].filter((e) => e.el),
     inflate: 0,
-    // la bosse liquide chevauche le mode ACTIF et voyage au changement
-    bumpFor: () => modeSeg.querySelector('.ce-wm-btn.on'),
+    // la coche liquide chevauche le mode ACTIF (avancé seulement) et voyage
+    bumpFor: () => (isSimple() ? null : modeSeg.querySelector('.ce-wm-btn.on')),
   })
   const wrap = el('div', 'ce-elemwrap')
   wrap.append(menu, row)
