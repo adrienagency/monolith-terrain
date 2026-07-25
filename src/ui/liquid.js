@@ -17,13 +17,13 @@ function ensureGoo() {
   gooDefs = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
   gooDefs.setAttribute('class', 'lq-defs')
   gooDefs.setAttribute('aria-hidden', 'true')
-  // flou 7 + seuil alpha 20a-9 (bord à 0.45) : à 6px d'écart, l'alpha au
-  // milieu ≈ 0.62 → pont de liquide FRANC entre deux bulles (à 5/24-11 le
-  // pont culminait à ~0.48 pour un seuil 0.458 : invisible — vu par Adrien).
-  // Région élargie : le débord vertical par défaut (10 %) rognait le flou.
+  // Flou 8 + seuil alpha 20a-9 (bord à 0.45) sur des bulles OPAQUES (la
+  // translucidité vit sur le calque, après le filtre) : à 4px d'écart,
+  // l'alpha au milieu ≈ 0.8 → pincement large, la proportion de la réf
+  // Enroll. Région élargie : le débord par défaut (10 %) rognait le flou.
   gooDefs.innerHTML =
     '<defs><filter id="ce-goo" x="-30%" y="-60%" width="160%" height="220%">' +
-    '<feGaussianBlur in="SourceGraphic" stdDeviation="7" result="b"/>' +
+    '<feGaussianBlur in="SourceGraphic" stdDeviation="8" result="b"/>' +
     '<feColorMatrix in="b" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -9" result="g"/>' +
     '<feComposite in="SourceGraphic" in2="g" operator="atop"/></filter></defs>'
   document.body.append(gooDefs)

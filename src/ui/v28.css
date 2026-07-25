@@ -444,17 +444,22 @@ body.dark {
   pointer-events: none;
   z-index: 0;
   filter: url(#ce-goo) drop-shadow(0 10px 30px rgba(20, 24, 35, 0.16));
+  /* la translucidité du verre s'applique APRÈS le filtre : les bulles
+     elles-mêmes doivent être OPAQUES, sinon le seuil du goo (qui lit
+     l'alpha) affame le pont — c'était le « toujours pas suffisant » */
+  opacity: 0.94;
 }
 .lq-blob {
   position: absolute;
   border-radius: 999px;
   translate: 12px 12px; /* compense l'inset -12px du calque */
-  background: var(--ce-glass-strong);
+  background: #fbfbfc;
   transition:
     left 0.32s cubic-bezier(0.6, 0, 0.3, 1.3),
     width 0.32s cubic-bezier(0.6, 0, 0.3, 1.3),
     top 0.2s, height 0.2s, background 0.28s;
 }
+body.dark .lq-blob { background: #17191d; }
 .lq-blob.dark { background: var(--ce-ink); }
 .lq-blob.accent { background: var(--ce-accent); }
 .ce-liquid { position: relative; }
@@ -470,7 +475,7 @@ body.dark {
    du goo (gap 7px ≈ la portée du flou) — le liquide EST le séparateur */
 .ce-lq-adv {
   position: absolute;
-  left: calc(100% + 5px);
+  left: calc(100% + 4px);
   /* MÊME niveau et MÊME hauteur que la capsule : la bulle Avancé s'étire sur
      toute la rangée → pincement liquide symétrique (l'haltère de la réf) */
   top: 0;
