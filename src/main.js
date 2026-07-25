@@ -60,7 +60,7 @@ import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, stripFrom
 import { loadUserPalettes, saveUserPalettes, paletteFromParams } from './user-palettes.js'
 import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT } from './share-link.js'
 import { DroneCam } from './drone-cam.js'
-import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, deriveMetalTints, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
+import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, deriveMetalTints, deriveAoColor, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
 import { N8AOPostPass } from 'n8ao'
 import { History } from './history.js'
@@ -90,7 +90,7 @@ import { buildRoutePanel } from './ui/route-panel.js'
 import { buildExplorePanel } from './ui/explore-panel.js'
 import { buildShadersPanel } from './ui/shaders-panel.js'
 import { buildMapPanel } from './ui/map-panel.js'
-import { buildEffectsPanel } from './ui/effects-panel.js'
+import { buildEffectsPanel, BASE_GRADE } from './ui/effects-panel.js'
 import { buildHourPill } from './ui/hour-pill.js'
 import { buildZoomStepper } from './ui/zoom-stepper.js'
 import { initTips } from './ui/tips.js'
@@ -195,8 +195,9 @@ const params = {
   scanDispHeight: 1.16,
   scanDispFalloff: 1.2,
 
-  // look
-  exposure: 0.96,
+  // look — exposition/contraste/saturation viennent de BASE_GRADE : ce trio
+  // est FIXE (Adrien), il ne bouge ni au lancement ni au shuffle
+  exposure: BASE_GRADE.exposure,
   // render upgrades (2026-07-20 plan): both ON by default — the adaptive
   // quality governor sheds them on machines that can't hold 60 fps, so a
   // forked "high mode" is deliberately NOT a thing (see the plan doc).
@@ -205,8 +206,8 @@ const params = {
   bloomEnabled: false,
   bloomIntensity: 0.55,
   bloomThreshold: 0.85,
-  contrast: 0.07,
-  saturation: -0.35,
+  contrast: BASE_GRADE.contrast,
+  saturation: BASE_GRADE.saturation,
   vignette: 0.6,
   grain: 0, // off by default — opt in via Look → grain
   fogNear: 35.5,
@@ -560,12 +561,19 @@ function syncGlobeShadow(mul) {
     : (!params.bgMode || params.bgMode === 'solid' ? params.bgColorA : (params.bgColorB || params.bgColorA))
   globe?.setShadowColor(hex, mul)
 }
+// ⚠️ `var`, et c'est délibéré : applyBackground peut tourner AVANT la création
+// d'aoPass, et un const/let lèverait à la lecture (zone morte temporelle — le
+// piège déjà vécu entre placeSun et terrain). Hoisté, il vaut undefined d'ici là.
+var _aoReady = false
 function applyBackground() {
   // le liseré métal de la barre liquide suit la PALETTE de la carte —
   // applyBackground passe sur tout changement de look, c'est le bon péage
   const mt = deriveMetalTints(params)
   document.documentElement.style.setProperty('--lq-m1', mt.bright)
   document.documentElement.style.setProperty('--lq-m2', mt.tint)
+  // l'OMBRE AMBIANTE suit elle aussi la palette : les creux tombent dans la
+  // teinte dominante assombrie, jamais dans un gris neutre (Adrien)
+  syncAoColor()
   // v2 : normaliser stops/points D'ABORD et tenir le miroir A/B/C (premier /
   // médian / dernier stop) à jour — l'ombre du globe et la brume lisent A/B
   if (params.bgMode && params.bgMode !== 'solid') {
@@ -1218,6 +1226,16 @@ const ssao = {
   get intensity() { return aoPass.configuration.intensity },
   set intensity(v) { aoPass.configuration.intensity = v },
 }
+// L'OMBRE AMBIANTE PREND LA COULEUR DE LA CARTE (Adrien) : N8AO peint l'AO
+// avec `configuration.color` (noir par défaut, d'où le gris sale universel).
+// On y met la teinte dominante de la palette poussée dans ses ombres, donc
+// des creux qui appartiennent à la carte au lieu de la salir.
+function syncAoColor() {
+  if (!_aoReady) return
+  aoPass.configuration.color.set(deriveAoColor(params))
+}
+_aoReady = true
+syncAoColor()
 
 // BLOOM — pre-tonemap, on the HDR buffer: sun glints on water, dusk warmth,
 // moonlight at night. mipmapBlur is the modern soft falloff, cheap.
@@ -1762,7 +1780,7 @@ const STARTUP_LOOK = {
   gridStep: 9.629517641116472, gridOpacity: 0.7738736844361597, gridColor: '#262321', hudInk: '#17191b', hudAccent: '#ff4d00', labels: true,
   sunIntensity: 1.860630412038343, sunAzimuth: 73.7292616914192, sunElevation: 12.374021473780667, hemiIntensity: 0.49677173533972385, envLight: 0.2319213023766564, shadowSoftness: 9, timeOfDay: 6.1, shadowMode: 'dynamic',
   color: '#e7e2d6', roughness: 1, roughnessVariation: 0.22, roughnessScale: 10, bumpScale: 1.1, envMapIntensity: 0.16,
-  exposure: 1.24, contrast: 0.06, saturation: -0.24, vignette: 0.06, grain: 0.17,
+  ...BASE_GRADE, vignette: 0.06, grain: 0.17,
   ssaoEnabled: true, ssaoIntensity: 1.15, bloomEnabled: false, bloomIntensity: 0.16, bloomThreshold: 0.6, fogNear: 32, fogFar: 59, fogColor: '#ffffff', fogEnabled: false,
   bgMode: 'solid', bgColorA: '#fcfbfb', bgColorB: '#faf9f9', bgColorC: '#f5f4f4', bgAngle: 263, bgEnv: '',
   fov: 33, autoFocus: true, focusDistance: 147.68, focusRange: 20, bokehEnabled: true, bokehScale: 0,
@@ -1881,6 +1899,10 @@ function applyPalette(p) {
     terrain.mapUniforms.uContourColor.value.set(p.ink)
     globe.setInk(p.ink)
   }
+  // c'est ICI que la teinte dominante change : l'ombre ambiante doit suivre.
+  // applyBackground ne passe pas sur ce chemin (le dé change la palette sans
+  // toucher au fond), d'où le rappel explicite.
+  syncAoColor()
   refreshAll()
 }
 
@@ -1976,6 +1998,13 @@ function applySurface(s) {
   terrain.rebuildRoughness(params)
   if (params.liquidMetal) terrain.setLiquidMetal(true, params) // keep the chrome over template swaps
 }
+// Repose le développement maison. Seul resetLook s'en sert — les templates et
+// le dé n'ont pas le droit d'y toucher (voir applyLook).
+function applyGrade(g = BASE_GRADE) {
+  exposureFx.uniforms.get('exposure').value = params.exposure = g.exposure
+  contrastFx.uniforms.get('contrast').value = params.contrast = g.contrast
+  hueSat.saturation = params.saturation = g.saturation
+}
 function applyLook(k) {
   if (k.fogColor != null) {
     params.fogColor = k.fogColor
@@ -1983,9 +2012,10 @@ function applyLook(k) {
     applyBackground()
     modes.whiteEl.style.background = k.fogColor
   }
-  if (k.exposure != null) exposureFx.uniforms.get('exposure').value = params.exposure = k.exposure
-  if (k.contrast != null) contrastFx.uniforms.get('contrast').value = params.contrast = k.contrast
-  if (k.saturation != null) hueSat.saturation = params.saturation = k.saturation
+  // ⚠️ exposition / contraste / saturation VOLONTAIREMENT IGNORÉS ici : ce trio
+  // est le développement maison (BASE_GRADE), et applyLook est le chemin des
+  // TEMPLATES et du dé. Seules les chips Développement et leurs tirettes y
+  // touchent, via applyGrade ou directement depuis le panneau.
   if (k.vignette != null) vignette.darkness = params.vignette = k.vignette
   if (k.grain != null) grain.blendMode.opacity.value = params.grain = k.grain
   // render upgrades (2026-07-20): a template may carry the AO/bloom look
@@ -2172,6 +2202,7 @@ function resetLook() {
   applyLight({ ...DEFAULT_LIGHT })
   applySurface({ ...DEFAULT_SURFACE })
   applyLook({ ...DEFAULT_FX })
+  applyGrade() // le développement maison fait partie du « neutre »
   // elevation is per-zoom (persisted), not part of the look — left untouched
 }
 

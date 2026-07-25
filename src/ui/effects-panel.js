@@ -92,9 +92,16 @@ const seaPresetOf = (params) =>
     near(params.seaSpeed, p.v.seaSpeed, 0.06))
 
 // ---- looks photo SOBRES du Développement (pas de random, trois recettes) ----
+// LE DÉVELOPPEMENT DE BASE (Adrien) : exposition, contraste et saturation sont
+// le rendu maison. Ni le lancement, ni un template, ni le dé ne les bougent —
+// seules les chips ci-dessous et leurs tirettes y touchent. C'est aussi la
+// recette exacte de la chip « Naturel ». Source unique : main.js importe cette
+// constante pour ses valeurs d'usine et pour le look de démarrage.
+export const BASE_GRADE = { exposure: 0.92, contrast: -0.03, saturation: -0.1 }
+
 // « Naturel » = les valeurs d'usine — la chip dit aussi « revenir au neutre ».
 const LOOK_PRESETS = [
-  { id: 'naturel', label: 'Naturel', v: { exposure: 0.96, contrast: 0.07, saturation: -0.35, vignette: 0.6, grain: 0 } },
+  { id: 'naturel', label: 'Naturel', v: { ...BASE_GRADE, vignette: 0.6, grain: 0 } },
   { id: 'doux', label: 'Doux', v: { exposure: 1.06, contrast: -0.02, saturation: -0.5, vignette: 0.35, grain: 0.06 } },
   { id: 'contraste', label: 'Contrasté', v: { exposure: 0.94, contrast: 0.2, saturation: -0.22, vignette: 0.7, grain: 0 } },
 ]
@@ -103,13 +110,14 @@ const LOOK_TIPS = {
   doux: 'Voile clair, couleurs feutrées, grain fin.',
   contraste: 'Noirs denses, vignettage marqué.',
 }
+// La chip active se reconnaît au TRIO seul — vignettage et grain dérivent avec
+// les templates et le dé, et les inclure éteignait les trois chips en
+// permanence alors que le développement, lui, n'avait pas bougé.
 const lookPresetOf = (params) =>
   LOOK_PRESETS.find((p) =>
     near(params.exposure, p.v.exposure, 0.03) &&
     near(params.contrast, p.v.contrast, 0.02) &&
-    near(params.saturation, p.v.saturation, 0.04) &&
-    near(params.vignette, p.v.vignette, 0.04) &&
-    near(params.grain, p.v.grain, 0.02))
+    near(params.saturation, p.v.saturation, 0.04))
 
 // rangée de chips générique : presets → set(params) ; l'état actif se déduit
 // par proximité à chaque refreshAll (règle constante — pas d'état séparé)

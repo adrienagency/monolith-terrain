@@ -252,6 +252,23 @@ export function deriveMetalTints(params = {}) {
   }
 }
 
+// Couleur de l'OMBRE AMBIANTE (SSAO). Adrien : « l'ombrage doit prendre la
+// teinte principale de la map, mais qui tombe dans les ombres de la couleur
+// dominante ». Une ombre n'est pas grise : c'est la teinte dominante, plus
+// SATURÉE et très sombre — la règle du peintre. On lit le même stop médian de
+// la rampe que le liseré métal : c'est la « couleur de la carte » maison.
+// ⚠️ N8AO compose en MULTIPLIANT : pixel_ombré = couleur × pixel_scène. Une
+// couleur quasi noire (L 0.1) rend donc un creux noir où la teinte ne se lit
+// plus — c'est le gris sale qu'on veut justement éviter. La clarté reste
+// franchement basse (c'est une ombre) mais assez haute pour que la dominante
+// survive à la multiplication.
+export function deriveAoColor(params = {}) {
+  const stops = Array.isArray(params.rampStops) ? params.rampStops : []
+  const mid = stops[Math.floor((stops.length - 1) / 2)]?.c
+  const { h, s } = hexToHsl(isHex(mid) ? mid : '#b9c4d2')
+  return hslToHex(h, clampF(Math.max(0.22, Math.min(0.6, s * 1.15))), 0.3)
+}
+
 // palette → full v2 model (stops + points), used by « Couleurs auto »
 export function deriveBgModel(params = {}) {
   const { a, b, c } = deriveBgColors(params)
