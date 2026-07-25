@@ -94,7 +94,10 @@ export function createLabels(sample, seed, { real = false, toFeet, ink } = {}) {
     })
   }
 
-  // spot elevations: real feet when a DEM drives the terrain
+  // COTES D'ALTITUDE, EN MÈTRES. Elles étaient en PIEDS et sans unité : sur le
+  // lac d'Annecy (447 m) la carte affichait « 1480 », un chiffre juste en
+  // pieds mais que tout lecteur lit en mètres — et faux d'un facteur 3,28.
+  // Le reste de l'app est en mètres (« 2 750 M »), les cotes le sont aussi.
   const spotCount = real ? 14 : 9
   const minDist = real ? 3 : BASIN_BLEND + 1
   for (let i = 0; i < spotCount; i++) {
@@ -104,7 +107,8 @@ export function createLabels(sample, seed, { real = false, toFeet, ink } = {}) {
     const z = Math.sin(angle) * dist
     const h = sample(x, z)
     const feet = toFeet ? toFeet(h) : Math.round(4800 + h * 420 + rng() * 40)
-    const mesh = makeLabelMesh(`· ${feet}`, { size: 78, italic: false, spacing: 0.06, opacity: 0.85, color: ink ?? '#2a241c' }, 1.5)
+    const metres = Math.round(feet / 3.28084)
+    const mesh = makeLabelMesh(`· ${metres.toLocaleString('fr-FR')} m`, { size: 78, italic: false, spacing: 0.06, opacity: 0.85, color: ink ?? '#2a241c' }, 1.5)
     mesh.rotation.x = -Math.PI / 2
     mesh.position.set(x, h + 0.12, z)
     group.add(mesh)

@@ -26,7 +26,7 @@ import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
 import { sunLook } from 'ocean-waves' // palette jour/nuit partagée (ocean-lab)
 import { bakeCloudVolume } from './clouds.js'
-import { normalizeBgStops } from './background.js'
+import { normalizeBgStops, deriveAoColor } from './background.js'
 import { createSky, stepSky, resizeSky, cloudDensity, cloudScale, cloudCountForTier, CLOUD_HARD_MAX } from './clouds-sim.js'
 
 // plafond dur du buffer ; le peuplement réel est adaptatif. Doit couvrir
@@ -37,6 +37,7 @@ const SHADOW_N = 96 // résolution du bake d'ombre au sol
 const SHADOW_EVERY = 0.25 // s — un système météo n'a pas besoin de 60 Hz
 
 const _moonTint = new THREE.Color()
+const _shadowTint = new THREE.Color()
 const _m = new THREE.Matrix4()
 const _v = new THREE.Vector3()
 
@@ -124,6 +125,10 @@ const FRAG = /* glsl */ `
   uniform vec2 uMapSize;
   uniform float uTerrainMin;
   uniform float uTerrainRange;
+  // NIVEAU DE L'EAU en unites monde (uSeaY du terrain, -9999 = pas de mer) :
+  // un nuage ne peut pas vivre SOUS l'eau (Adrien). Le plancher de la marche
+  // est donc le plus HAUT du relief et de la surface de l'eau.
+  uniform float uWaterY;
 
   float sat(float v) { return clamp(v, 0.0, 1.0); }
 
@@ -145,6 +150,12 @@ const FRAG = /* glsl */ `
   float terrainH(vec2 xz) {
     vec2 uv = (xz - uMapMin) / uMapSize;
     return uTerrainMin + texture(uTerrainTex, clamp(uv, 0.0, 1.0)).r * uTerrainRange;
+  }
+
+  // plancher opaque sous lequel plus rien ne se dessine : le relief, ou la
+  // surface de l'eau la ou elle recouvre le relief
+  float floorY(vec2 xz) {
+    return max(terrainH(xz), uWaterY);
   }
 
   vec2 boxSpan(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax) {
@@ -389,7 +400,7 @@ const FRAG = /* glsl */ `
     // boîte cache tout ce qu'il y a derrière
     for (int i = 1; i <= 8; i++) {
       vec3 wp = ro + rd * (span.x * float(i) / 8.0);
-      if (wp.y < terrainH(wp.xz)) discard;
+      if (wp.y < floorY(wp.xz)) discard;
     }
 
     // l'empreinte de CE nuage, une seule fois pour tout le rayon ; le
@@ -426,7 +437,7 @@ const FRAG = /* glsl */ `
     for (int i = 0; i < MARCH_STEPS; i++) {
       if (i >= steps) break;
       vec3 wp = ro + rd * (span.x + (float(i) + jitter) * dt);
-      if (wp.y < terrainH(wp.xz)) break; // le rayon plonge dans la montagne
+      if (wp.y < floorY(wp.xz)) break; // le rayon plonge dans le relief ou sous l'eau
       float d = densityAt(wp, F, detailOn, false);
       if (d <= 0.002) continue;
       float depth = sunDepth(wp, toSun, bmin, bmax, F);
@@ -581,6 +592,7 @@ export class Clouds2 {
         uMapSize: { value: new THREE.Vector2(TERRAIN_SIZE, TERRAIN_SIZE) },
         uTerrainMin: { value: hf.min },
         uTerrainRange: { value: hf.range },
+        uWaterY: { value: -9999 },
       },
     })
 
@@ -678,7 +690,7 @@ export class Clouds2 {
           if (d >= 1) continue
           // bord adouci : une ombre de nuage n'a pas de contour net
           const f = (1 - d * d) * (1 - d * d)
-          const v = px[j * N + i] + f * dens * 255
+          const v = px[j * N + i] + f * dens * 205
           px[j * N + i] = v > 255 ? 255 : v
         }
       }
@@ -725,6 +737,9 @@ export class Clouds2 {
 
     this._writeInstances(camera)
     u.uTime.value = this.sky.t
+    // le niveau de l'eau bouge avec la carte (et vaut -9999 sans mer) : on le
+    // relit du terrain a chaque image plutot que de le figer au build
+    u.uWaterY.value = this.terrain?.mapUniforms?.uSeaY?.value ?? -9999
     // même vent que la sim, en vecteur : cisaillement de base + advection
     u.uWind.value.set(Math.cos(dir), Math.sin(dir)).multiplyScalar(Math.min(1.5, params?.windSpeed ?? 0.6))
     if (params) {
@@ -777,10 +792,16 @@ export class Clouds2 {
     const mu = this.terrain?.mapUniforms
     if (!mu?.uCloudShadowK) return
     const up = Math.max(0, -this.sunDir.y)
-    // Adrien (2 fois) : l'ombre au sol doit être FRANCHEMENT visible. Plancher
-    // relevé + pente + plafond haussés — soleil bas = ombres longues et
-    // décalées, jamais absentes ; midi = taches bien marquées.
-    mu.uCloudShadowK.value = this.group.visible ? Math.min(0.8, 0.3 + up * 0.6) : 0
+    // Dosage : l'ombre doit se voir sans écraser la carte. Elle a été montée
+    // (« je ne vois pas d'ombre »), puis redescendue (« baisse l'opacité ») —
+    // ce niveau-ci va de pair avec la TEINTE : une ombre colorée se lit bien
+    // plus qu'un voile noir, donc elle a besoin de moins de force.
+    mu.uCloudShadowK.value = this.group.visible ? Math.min(0.46, 0.14 + up * 0.4) : 0
+    // teinte d'ombre = celle de la carte (même recette que le SSAO)
+    if (mu.uCloudShadowTint) {
+      _shadowTint.set(deriveAoColor(this._params ?? {}))
+      mu.uCloudShadowTint.value.set(_shadowTint.r, _shadowTint.g, _shadowTint.b)
+    }
     if (mu.uCloudShadowOff) {
       // décalage de l'ombre le long de la pente du soleil : plus il rase, plus
       // l'ombre s'éloigne du nuage

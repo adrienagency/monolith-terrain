@@ -18,6 +18,9 @@ export function buildExplorePanel(ctx) {
     side: 'left',
     width: 268,
     tip: 'Fly to a curated list of the most beautiful places on Earth.',
+    // repéré par le CSS : c'est le SEUL panneau que le mode simple accepte de
+    // montrer, quand on clique « Explorer » dans la barre du bas
+    cls: 'ce-panel-explore',
   })
 
   // one collapsible entry (header + body). Opening it closes only its direct

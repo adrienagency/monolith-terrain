@@ -1,5 +1,7 @@
 // CAMERA panel — viewpoint, focus, cinematic automation and performance.
-// Docked in the left dock, directly below Scan.
+// Ne vit PLUS dans le dock de gauche (demande d'Adrien) : il est monté dans un
+// menu de la barre du haut, entre le thème et l'œil barré, avec la même UX que
+// le menu « Aide ». D'où dock:false — bars.js s'occupe de l'accrocher.
 
 import { el, slider, toggle, select, button, section, visibleWhen, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
@@ -15,6 +17,8 @@ export function buildCameraPanel(ctx) {
     side: 'left',
     width: 268,
     tip: 'Point de vue, mise au point et mouvements automatiques.',
+    dock: false,
+    cls: 'ce-panel-inmenu',
   })
 
   const sCam = panel.addSection(section('Objectif & mise au point', { open: false }))

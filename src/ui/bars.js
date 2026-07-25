@@ -7,6 +7,10 @@ import { parseLatLon } from '../geo.js'
 import { showToast } from './toast.js'
 
 const I = {
+  // objectif photo — la même icône que le panneau Caméra, pour qu'on la
+  // reconnaisse d'un mode à l'autre
+  aperture:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.4"/><path d="M12 3v5.6M21 12h-5.6M12 21v-5.6M3 12h5.6"/></svg>',
   globe:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 2.6 4 5.7 4 9s-1.2 6.4-4 9c-2.8-2.6-4-5.7-4-9s1.2-6.4 4-9z"/></svg>',
   export:
@@ -112,7 +116,10 @@ export function buildTopBar(ctx) {
   const pubMenu = el('div', 'ce-pubmenu ce-glassbox')
   // menu Aide (le « ? ») — visite guidée + raccourcis + nouveautés en UN bouton
   const helpMenu = el('div', 'ce-pubmenu ce-helpmenu ce-glassbox')
-  const closeMenu = () => { pubMenu.classList.remove('open'); helpMenu.classList.remove('open') }
+  // menu CAMÉRA — même mécanique que « Aide », mais il héberge un vrai panneau
+  // de réglages (objectif, mise au point, mouvements) au lieu d'une liste
+  const camMenu = el('div', 'ce-pubmenu ce-cammenu ce-glassbox')
+  const closeMenu = () => { pubMenu.classList.remove('open'); helpMenu.classList.remove('open'); camMenu.classList.remove('open') }
   const menuItem = (menu) => (icon, label, sub, onClick) => {
     const b = el('button', 'ce-pubitem')
     b.type = 'button'
@@ -139,10 +146,10 @@ export function buildTopBar(ctx) {
     pubMenu.classList.toggle('open', !wasOpen)
   })
   document.addEventListener('click', (e) => {
-    if (!pubMenu.contains(e.target) && !helpMenu.contains(e.target)) closeMenu()
+    if (!pubMenu.contains(e.target) && !helpMenu.contains(e.target) && !camMenu.contains(e.target)) closeMenu()
   })
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu() })
-  document.body.append(pubMenu, helpMenu)
+  document.body.append(pubMenu, helpMenu, camMenu)
 
   // one click copies a link that reproduces this exact look + location +
   // camera (navigator.share on mobile hands it to the OS share sheet
@@ -224,6 +231,24 @@ export function buildTopBar(ctx) {
   }
   syncDark()
 
+  // CAMÉRA — le panneau est construit plus tard dans main.js : on le réclame
+  // au PREMIER clic, ce qui évite tout ordre d'initialisation fragile
+  const camBtn = iconButton(I.aperture, '', () => {})
+  camBtn.setAttribute('data-tip', 'Caméra — champ de vision, mise au point, flou de profondeur et mouvements.')
+  camBtn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const wasOpen = camMenu.classList.contains('open')
+    closeMenu()
+    if (!camMenu.firstChild) {
+      const root = ctx.cameraPanel?.()
+      if (root) camMenu.append(root)
+    }
+    // les panneaux naissent REPLIÉS, et ici l'en-tête qui sert à les déplier
+    // est masqué (le bouton de la barre en tient lieu) : on ouvre nous-mêmes
+    camMenu.firstChild?.classList.remove('collapsed')
+    camMenu.classList.toggle('open', !wasOpen)
+  })
+
   const hideBtn = iconButton(I.eyeOff, '', () => setNoUi(true))
   hideBtn.setAttribute('data-tip', 'Masquer toute l’interface — seul un petit œil reste.')
 
@@ -258,7 +283,7 @@ export function buildTopBar(ctx) {
   // ordre du pill droit : réglages de VUE (sombre, œil) · aide · paramètres,
   // puis la seule sortie — « Publier » — isolée à l'extrême droite (accent).
   const sep = () => el('span', 'ce-topbar-sep')
-  barRight.append(dark, hideBtn, helpBtn, gearBtn, sep(), exportBtn)
+  barRight.append(dark, camBtn, hideBtn, helpBtn, gearBtn, sep(), exportBtn)
 
   document.body.append(bar, barRight, eye)
   return { root: bar, rootRight: barRight, syncDark }
@@ -349,11 +374,16 @@ export function buildQuickCore(ctx) {
     b.addEventListener('click', () => { setActive(b); onClick?.() })
     return b
   }
-  const home = mk(explore, 'Explorer', 'La carte, simplement — naviguer, chercher un lieu.', null)
+  // Explorer n'était qu'un état de repos sans effet : il DÉPLIE maintenant le
+  // panneau Explorer en haut à gauche (le seul dock autorisé en mode simple).
+  // Recliquer le referme — c'est un interrupteur, comme les autres modes.
+  const home = mk(explore, 'Explorer', 'Les lieux à visiter — continents, sites remarquables, recherche.', () => {
+    document.body.classList.toggle('ce-explore', !document.body.classList.contains('ce-explore'))
+  })
   core.append(
     home,
-    mk(I.brush, 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur votre carte.', () => ctx.openAtelier()),
-    mk(I.flag, 'Ma course', 'Race Studio — votre parcours GPX en carte de course (points de passage, transports, partage).', () => ctx.openStudio())
+    mk(I.brush, 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur votre carte.', () => { document.body.classList.remove('ce-explore'); ctx.openAtelier() }),
+    mk(I.flag, 'Ma course', 'Race Studio — votre parcours GPX en carte de course (points de passage, transports, partage).', () => { document.body.classList.remove('ce-explore'); ctx.openStudio() })
   )
   home.classList.add('on') // l'état de repos du mode simple : on explore
   return core

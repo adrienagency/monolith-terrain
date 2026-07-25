@@ -1881,6 +1881,32 @@ body.shibu-view .gpx-profile {
 body.ce-simple .ce-dock {
   display: none !important;
 }
+/* … SAUF quand on clique « Explorer » : le panneau Explorer, et lui seul,
+   revient en haut à gauche. C'est le seul dock autorisé en mode simple. */
+body.ce-simple.ce-explore .ce-dock-left {
+  display: flex !important;
+}
+body.ce-simple.ce-explore .ce-dock-left > .ce-panel:not(.ce-panel-explore) {
+  display: none;
+}
+
+/* Le panneau Caméra vit dans un menu de la topbar : il perd son propre fond
+   (le menu en verre le porte déjà) et prend toute la largeur du menu. */
+.ce-cammenu {
+  right: 12px;
+  width: 288px;
+  padding: 6px;
+}
+.ce-cammenu .ce-panel-inmenu {
+  width: 100% !important;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.ce-cammenu .ce-panel-inmenu > .ce-panel-head {
+  display: none; /* le bouton de la barre EST le titre */
+}
 /* même capsule que le mode avancé : gap/padding identiques à .ce-elembar */
 .ce-qb-core {
   display: flex;

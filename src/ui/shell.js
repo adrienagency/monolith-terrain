@@ -44,9 +44,9 @@ export function initRails() {
 }
 
 export class Panel {
-  constructor({ title, icon = '', side = 'left', width = 264, tip = '' }) {
+  constructor({ title, icon = '', side = 'left', width = 264, tip = '', dock = true, cls = '' }) {
     this.side = side
-    this.root = el('aside', 'ce-panel ce-glassbox')
+    this.root = el('aside', `ce-panel ce-glassbox${cls ? ' ' + cls : ''}`)
     this.root.style.width = width + 'px'
 
     this.head = el('header', 'ce-panel-head')
@@ -70,8 +70,12 @@ export class Panel {
       if (e.target === this.collapseBtn) return
       this.setCollapsed(!this.collapsed)
     })
-    dockColumn(side).append(this.root)
-    dockPanels[side].push(this)
+    // dock=false : le panneau ne rejoint AUCUNE colonne — l'appelant le monte
+    // où il veut (la Caméra vit maintenant dans un menu de la topbar)
+    if (dock) {
+      dockColumn(side).append(this.root)
+      dockPanels[side].push(this)
+    }
   }
 
   get collapsed() {

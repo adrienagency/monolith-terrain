@@ -3342,6 +3342,10 @@ const topBar = buildTopBar({
   },
   // the Globe button always shows the WHOLE planet, spinning slowly
   enterOrbit: () => { cameraAuto.stop(); modes.enterOrbit(16000000) },
+  // le panneau Caméra est monté dans le menu de la topbar, au PREMIER clic :
+  // il est construit bien plus bas dans ce fichier, cette closure ne le lit
+  // donc qu'une fois la page vivante
+  cameraPanel: () => cameraPanel.root,
   // the "?" button replays the guided tour (lazy-loaded, tiny)
   startTutorial: async () => {
     const { startTutorial } = await import('./ui/tutorial.js')

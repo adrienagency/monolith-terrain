@@ -158,6 +158,9 @@ export class Terrain {
       uCloudShadow: { value: blackTexture() },
       uCloudShadowOff: { value: new THREE.Vector2() },
       uCloudShadowK: { value: 0 },
+      // teinte d'ombre de la carte (meme recette que le SSAO) — 0,0,0 = noir
+      // pur, l'ancien comportement
+      uCloudShadowTint: { value: new THREE.Vector3(0.3, 0.3, 0.34) },
       // superellipse exponent for the corner: 2 = circular arc, higher = squircle
       // (iOS-style continuous corner). Shared with the plinth ring, see plinth.js
       uSlabCornerN: { value: 2 }, // cercle, comme le clip de la mer (v42)
@@ -307,6 +310,7 @@ uniform vec2 uAerialOffset;
 uniform vec2 uAerialScale;
 uniform float uAerialCoastFade;
 uniform float uCloudShadowK;
+uniform vec3 uCloudShadowTint;
 uniform float uScanT;
 uniform vec3 uScanColor;
 uniform float uScanWidth;
@@ -551,7 +555,12 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   if (uCloudShadowK > 0.001) {
     vec2 suv = (vWorldPos.xz - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
     float cloudShade = texture2D(uCloudShadow, fract(suv + uCloudShadowOff)).r;
-    diffuseColor.rgb *= 1.0 - cloudShade * uCloudShadowK;
+    // L'ombre n'écrase plus vers le NOIR (elle était violente et sale) : elle
+    // multiplie par la TEINTE D'OMBRE DE LA CARTE, la même recette que le SSAO.
+    // Un nuage assombrit donc la carte dans sa propre couleur, comme une ombre
+    // portée réelle — jamais comme un voile gris.
+    vec3 shaded = diffuseColor.rgb * uCloudShadowTint;
+    diffuseColor.rgb = mix(diffuseColor.rgb, shaded, cloudShade * uCloudShadowK);
   }
 
   // --- contour lines: minor every interval, heavy line every 5th
