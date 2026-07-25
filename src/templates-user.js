@@ -53,7 +53,9 @@ export const TEMPLATE_KEYS = [
   'liquidMetal', 'lmMetalness', 'lmRoughness', 'lmReflection', 'lmSpeed',
   // surface shader
   'surfaceFx', 'fx',
-  // clouds
+  // clouds — cloudsV2 choisit le moteur (entités instanciées vs champ global),
+  // windDir/windSpeed poussent le ciel (et l'orographie en phase 2)
+  'cloudsV2', 'windDir', 'windSpeed',
   'cloudsEnabled', 'cloudOpacity', 'cloudAltitude', 'cloudDrift', 'cloudScale', 'cloudCoverage',
   'cloudBillow', 'cloudBrightness', 'cloudAltSpread', 'cloudDriftVar', 'cloudContrast', 'cloudSSS',
   // Route (GPX) styling — not the track itself, see note above. A template

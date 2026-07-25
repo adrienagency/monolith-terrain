@@ -40,6 +40,7 @@ import { focusRayHit } from './autofocus.js'
 import { GroundInfoLayer } from './ground-info-layer.js'
 import { PeaksLayer } from './peaks.js'
 import { Clouds } from './clouds.js'
+import { Clouds2 } from './clouds2.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
@@ -341,6 +342,14 @@ const params = {
   cloudDriftVar: 0.5, // per-cloud speed variation: 0 = uniform drift, 1 = very uneven
   cloudContrast: 1, // density contrast: <1 fluffier/softer, >1 harder-edged
   cloudSSS: 0.8, // cloud translucency: thin wisps light up as the sun shines through
+  // Nuages v2 (clouds2.js) : des ENTITÉS instanciées, une boîte raymarchée par
+  // nuage, avec naissance/dérive/dissipation. false = ancien système (le champ
+  // de bruit global de clouds.js, conservé en repli).
+  cloudsV2: true,
+  // VENT — pousse les nuages ; pilotera l'orographie en phase 2 (les nuages
+  // butent contre les versants au vent). Réglable dans Éléments.
+  windDir: 45, // degrés, 0 = vers l'est
+  windSpeed: 0.6, // unités monde/s
   // terrain glass: 0 = opaque rock. Keep 0 while the water glass is on — three
   // excludes transmissive objects from the refraction buffer, so a transmissive
   // terrain becomes invisible through the water.
@@ -895,7 +904,11 @@ const groundInfo = new GroundInfoLayer({
 })
 cartoucheRef = groundInfo
 
-clouds = new Clouds(scene, terrain, params)
+// Nuages : v2 (entités instanciées, clouds2.js) par défaut, ancien champ de
+// bruit global en repli. Les deux exposent la MÊME interface
+// (build/update/setVisible/setSunDir/reroll) — le reste du fichier ne sait pas
+// lequel tourne.
+clouds = params.cloudsV2 ? new Clouds2(scene, terrain, params) : new Clouds(scene, terrain, params)
 clouds.setSunDir(sun.position)
 
 // ambient airliners + SpaceX pad watcher (models fetched, see public/models)
@@ -4208,6 +4221,9 @@ function tick() {
 
   if (!params.paused && modes.mode === 'surface') {
     hud3.update(dt, t, params)
+    // le peuplement du ciel suit la puissance de la machine (Adrien) : le
+    // palier du gouverneur de perf pilote le nombre de nuages instanciés
+    clouds.setTier?.(aq?.tier ?? 0)
     clouds.update(dt, params, camera)
     traffic.update(dt)
     terrain.tickSurfaceFx(dt, params.fx[params.surfaceFx]?.speed ?? 0) // animate at the effect's speed

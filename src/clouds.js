@@ -23,6 +23,11 @@ const _moonTint = new THREE.Color()
 const VOL = 64
 let sharedVolume = null // { tex, data } — baked once, reused by every rebuild
 
+// exporté sous un nom parlant : clouds2.js (nuages v2, entités instanciées)
+// réutilise EXACTEMENT ce volume — un seul bake pour les deux systèmes
+export function bakeCloudVolume() {
+  return bakeVolume()
+}
 function bakeVolume() {
   if (sharedVolume) return sharedVolume
   const perlin = new ImprovedNoise()

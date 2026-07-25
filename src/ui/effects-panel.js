@@ -189,6 +189,30 @@ export function buildEffectsPanel(ctx) {
     sCld.setMeta(`${name} · ${drift}`)
   }, sCld.head)
 
+  // ---- vent — élément à part entière : il pousse le ciel aujourd'hui, il
+  // fera buter les nuages contre les versants au vent en phase 2 (orographie)
+  const sWind = elementsPanel.addSection(section('Vent'))
+  const windRows = [
+    slider({ label: 'Direction', min: 0, max: 359, step: 1, get: () => params.windDir ?? 45, set: (v) => { params.windDir = v } }),
+    slider({ label: 'Force', min: 0, max: 3, step: 0.05, get: () => params.windSpeed ?? 0.6, set: (v) => { params.windSpeed = v } }),
+  ]
+  sWind.body.append(...windRows)
+  // le vent ne se règle que si quelque chose vole
+  for (const row of windRows) visibleWhen(row, () => params.cloudsEnabled)
+  const windNote = el('div', 'ce-bg-note on', 'Le vent agit sur les nuages — activez-les pour le sentir.')
+  sWind.body.append(windNote)
+  visibleWhen(windNote, () => !params.cloudsEnabled)
+  // rose des vents parlante : d'où vient le vent, en points cardinaux
+  const CARD = ['est', 'nord-est', 'nord', 'nord-ouest', 'ouest', 'sud-ouest', 'sud', 'sud-est']
+  onRefresh(() => {
+    if (!params.cloudsEnabled) { sWind.setMeta('—'); return }
+    const s = params.windSpeed ?? 0.6
+    if (s < 0.05) { sWind.setMeta('Calme'); return }
+    const dir = CARD[Math.round((((params.windDir ?? 45) % 360) / 45)) % 8]
+    const force = s < 0.5 ? 'brise' : s < 1.4 ? 'vent soutenu' : 'grand vent'
+    sWind.setMeta(`${force} · vers le ${dir}`)
+  }, sWind.head)
+
   // ---- brume — dans Éléments (c'est de l'air, pas de l'objectif) ----
   const sFog = elementsPanel.addSection(section('Brume'))
   sFog.body.append(
