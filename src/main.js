@@ -1345,6 +1345,10 @@ let demBusy = false
 // still the active one — the cache is the sole owner of coast-mask lifecycles.
 const COAST_CACHE_MAX = 16
 const coastMaskCache = new Map()
+// ImageData du masque côtier ACTIF (une seule à la fois) — la vérité terre/mer
+// côté CPU pour la simulation d'eau, le garde-fou sea-mask et le clip de zone.
+// null tant que le fetch du patch n'a pas abouti (ou hors bande z4–z15).
+let coastMaskImage = null
 // the finest zoom the USER chose — dives and the staircase overwrite
 // params.demZoom freely, but refining always climbs back to this. Default to the
 // finest tiles available (z15) so zooming all the way in actually reaches full
@@ -1449,6 +1453,7 @@ async function fetchAndBuildDem() {
     }
     terrain.setCoastMask(null) // fallback until this patch's mask resolves
     realWater?.setCoastMask(null, false)
+    coastMaskImage = null
     job
       .then((res) => {
         if (!res) return
@@ -1456,12 +1461,27 @@ async function fetchAndBuildDem() {
         const stillHere = `${params.demZoom}:${params.demLat.toFixed(3)},${params.demLon.toFixed(3)}` === key
         // the SEA reads the SAME OSM mask so its waves stop at the real shore,
         // not the elevation contour (flat polders below sea level are land)
-        if (stillHere) { terrain.setCoastMask(res.maskTexture); realWater?.setCoastMask(res.maskTexture, true) }
+        if (stillHere) {
+          // ImageData extraite UNE fois du canvas du masque, puis partagée par
+          // tous les consommateurs CPU (champ de simulation mer, garde-fou
+          // sea-mask du terrain, clip de zone) — pas de getImageData multiples
+          const img = res.maskCanvas
+            ? res.maskCanvas.getContext('2d').getImageData(0, 0, res.maskCanvas.width, res.maskCanvas.height)
+            : null
+          coastMaskImage = img
+          terrain.setCoastMask(res.maskTexture, img)
+          realWater?.setCoastMask(res.maskTexture, true, img)
+          // la découpe de zone a pu être rasterisée AVANT l'arrivée du masque
+          // (fetchs concurrents) : la refaire pour rendre leurs polders aux
+          // Pays-Bas — Nominatim est caché, seul le raster est recalculé
+          if (params.regionMode) applyRegionMode()
+        }
       })
       .catch(() => {})
   } else {
     terrain.setCoastMask(null)
     realWater?.setCoastMask(null, false)
+    coastMaskImage = null
   }
   traffic.setZone(dem) // SpaceX pad watcher (Starbase / LC-39A in view?)
   terrain.refreshMatTiling(params) // relief material tiling tracks the new zoom
@@ -2985,7 +3005,9 @@ async function applyRegionMode() {
   if (regionBusy) return
   regionBusy = true
   try {
-    const r = await fetchRegionMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem })
+    // coastMaskImage : les polders sous 0 restent dans la découpe (le clip
+    // altitude seul les prenait pour la mer) ; null → comportement v1
+    const r = await fetchRegionMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem, coastImage: coastMaskImage })
     if (!params.regionMode) return // user toggled off while fetching
     terrain.setRegionMask(r ? r.maskTexture : null)
     plinth.setVisible(false)

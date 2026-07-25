@@ -14,8 +14,12 @@
 import * as THREE from 'three'
 
 export const COAST_ZOOM_MIN = 4
-export const COAST_ZOOM_MAX = 12
-// z4–z8 use the bundled Natural Earth 10m land (Phase 1). z9–z12 switch to the
+// z15 = les tuiles DEM les plus fines de l'app : le masque couvre TOUTE la
+// plage des zooms (les polders sous 0 doivent rester terre aussi en vue
+// rapprochée). Coût réseau contenu : les tuiles côte restent en grille z6
+// (gridCache mémoïse), un patch z13-15 n'en touche qu'une ou deux.
+export const COAST_ZOOM_MAX = 15
+// z4–z8 use the bundled Natural Earth 10m land (Phase 1). z9–z15 switch to the
 // finer OSM-derived land grid (Phase 2) — real shoreline for bays/estuaries.
 export const COAST_NE_MAX = 8
 export const GRID_ZOOM = 6 // the OSM land grid is cut into slippy z6 tiles
@@ -145,7 +149,11 @@ function rasterize(ringGroups, dem, size) {
   tex.generateMipmaps = false
   tex.colorSpace = THREE.NoColorSpace
   tex.needsUpdate = true
-  return tex
+  // le canvas ressort AUSSI (pattern region-mask.js) : les consommateurs CPU
+  // (champ de simulation mer, garde-fou sea-mask, clip de zone) lisent la même
+  // vérité terre/mer que le GPU. Pas de rétention en plus : CanvasTexture
+  // garde déjà le canvas comme image source.
+  return { texture: tex, canvas }
 }
 
 // ---- data (lazy, memoised) ----
@@ -162,7 +170,7 @@ function loadLand() {
   return landPromise
 }
 
-// z9–z12: the finer OSM-derived land grid, cut into slippy z6 tiles at
+// z9–z15: the finer OSM-derived land grid, cut into slippy z6 tiles at
 // data/coast-z6/{x}/{y}.json. Ocean tiles are omitted (404 = no land), and
 // each fetched tile's features are memoised (adjacent patches reuse them).
 const gridCache = new Map() // "x/y" → Promise<Feature[]>
@@ -187,8 +195,8 @@ async function loadGridFeatures(bbox) {
 
 // ---- public API ----
 // Build the land/sea mask for the current patch, or null when out of the
-// coast band (z4–z12) or on any failure — the caller then keeps the current
-// elevation-based rendering (repli). z4–z8 use Natural Earth 10m; z9–z12 use
+// coast band (z4–z15) or on any failure — the caller then keeps the current
+// elevation-based rendering (repli). z4–z8 use Natural Earth 10m; z9–z15 use
 // the finer OSM z6 land grid.
 export async function fetchCoastMask({ lat, lon, zoom, dem }) {
   if (!dem || zoom < COAST_ZOOM_MIN || zoom > COAST_ZOOM_MAX) return null
@@ -198,8 +206,8 @@ export async function fetchCoastMask({ lat, lon, zoom, dem }) {
     const rings = landPolygonsInBBox(features, bbox)
     // no land in view (open ocean) is legitimate — still return a mask so the
     // shader paints all-sea rather than falling back to the noisy 0-isoline
-    const tex = rasterize(rings, dem, MASK_SIZE)
-    return { maskTexture: tex, source: zoom <= COAST_NE_MAX ? 'ne' : 'osm' }
+    const { texture, canvas } = rasterize(rings, dem, MASK_SIZE)
+    return { maskTexture: texture, maskCanvas: canvas, source: zoom <= COAST_NE_MAX ? 'ne' : 'osm' }
   } catch (err) {
     console.warn('coast mask failed:', err)
     return null

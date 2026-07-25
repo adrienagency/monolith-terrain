@@ -369,7 +369,7 @@ function extLink(href, text, cls) {
 
 // bottom-left: ONE line, ONE corner, ONE size — the studio credit plus every
 // legally-required attribution. Adrien Agency + OpenStreetMap (ODbL, the
-// fine-zoom z9–z12 coastline) are static; GeoNames (CC BY 4.0, gated to when
+// fine-zoom z9–z15 coastline) are static; GeoNames (CC BY 4.0, gated to when
 // place labels are actually showing) and the OSM loading status are appended
 // live by main.js via setExtra() so nothing duplicates a second corner/size.
 // Deliberately understated so it never competes with the relief, and clear of

@@ -144,6 +144,10 @@ void main() {
   float shoreD = texture2D(uMask, m).g;
 #else
   float shoreD = max((uWaterY - f.r) * 2.0, f.g);
+  // masque côtier : sur la vraie terre (polders sous 0 compris) houle, ressac
+  // et lift meurent — le fragment y discarde le plan, laisser des vagues au
+  // bord dessinerait des artefacts de silhouette le long du trait de côte
+  if (uCoastMaskOn > 0.5) shoreD *= 1.0 - texture2D(uCoastMask, uvF).r;
 #endif
   // v45 : les vagues vivent JUSQU'À la côte — le déclin v40 (0.35) aplatissait
   // toute la frange côtière : plus aucune interaction mer/îles. Le niveau
@@ -210,6 +214,8 @@ uniform float uTransp; // user slider: 0 = milky, 1 = crystal
 uniform float uSunFx;  // user slider: sun on the water, above AND below (glint + caustics)
 uniform float uDayLight; // 0 nuit -> 1 jour (sunLook.dayLight) : la mer s'éteint la nuit
 uniform sampler2D uField;
+uniform sampler2D uCoastMask; // trait de côte vectoriel (R : 1 terre, 0 mer) — la vérité terre/mer
+uniform float uCoastMaskOn;   // 1 quand le masque du patch est chargé (sinon : règle altitude seule)
 uniform float uHalf;     // rounded-square clip: half extent…
 uniform float uCornerR;  // …and corner radius (sea only; lakes use the mask)
 #ifdef IS_LAKE
@@ -273,6 +279,16 @@ void main() {
   // where the sea floor is a flat 0 m plain (fine zooms)
   float depth = max(uWaterY - f.r, f.g * 1.6);
   if (uWaterY - f.r < -0.005) discard; // land
+  // masque côtier vectoriel : la TERRE ne porte JAMAIS la mer animée, même
+  // sous le niveau 0 (polders NL, Camargue, Caspienne — la règle altitude
+  // seule les inondait). Gros de la terre : discard (perf, pas d'overdraw) ;
+  // bord (masque blurré 1.5px) : fondu d'alpha autour de 0.5 (voir plus bas).
+  // CONTRAT : masque absent (uCoastMaskOn = 0) → comportement inchangé.
+  float coastLand = 0.0;
+  if (uCoastMaskOn > 0.5) {
+    coastLand = texture2D(uCoastMask, uvF).r;
+    if (coastLand > 0.8) discard;
+  }
   float shoreAA = smoothstep(0.0, 0.02, depth);
 #endif
   float d01 = clamp(depth / uDepthMax, 0.0, 1.0);
@@ -351,6 +367,11 @@ void main() {
   // liseré de ressac : blanc franc au contact exact, bord cassé par le bruit
   float swash = (1.0 - smoothstep(0.0, 0.02, vFade)) * smoothstep(0.25, 0.6, foamNoise + 0.2) * uViewCalm * uSurfCalm;
   float foam = clamp(crestFoam + shoreFoam * 1.8 + swash * 1.1, 0.0, 1.0);
+#ifndef IS_LAKE
+  // anti-aliasing du trait de côte : le masque est déjà blurré 1.5px, on fond
+  // l'eau (couleur ET écume) autour de l'iso 0.5 au lieu d'un bord crénelé
+  foam *= 1.0 - smoothstep(0.35, 0.65, coastLand);
+#endif
 
   // v43 : COMPOSITE REFRACTE (grab pass). Le fond deja rendu est
   // echantillonne avec un decalage de Snell : la pente de la surface devie
@@ -376,6 +397,9 @@ void main() {
   col += uSunColor * spec * uSunFx * (0.35 + 0.85 * patchy);
   col = mix(col, vec3(0.96) * mix(0.14, 1.0, uDayLight), foam);
   float alpha = max(shoreAA, foam * 0.85);
+#ifndef IS_LAKE
+  alpha *= 1.0 - smoothstep(0.35, 0.65, coastLand); // la lame d'eau meurt en douceur sur la terre du masque
+#endif
 
   gl_FragColor = vec4(col, alpha);
   #include <fog_fragment>
@@ -399,6 +423,8 @@ uniform float uBottomY;
 uniform float uViewCalm;
 uniform float uSurfCalm;
 uniform sampler2D uField;
+uniform sampler2D uCoastMask; // même masque côtier que la surface (R : 1 terre)
+uniform float uCoastMaskOn;
 ${GERSTNER_GLSL}
 ${SHORE_SURF_GLSL}
 varying vec3 vWorld;
@@ -411,6 +437,9 @@ void main() {
   vec2 uvF = p.xz / ${TERRAIN_SIZE.toFixed(1)} + 0.5;
   vec2 f = texture2D(uField, uvF).rg;
   float shoreD = max((uWaterY - f.r) * 2.0, f.g);
+  // même règle que la surface : les vagues du haut de jupe meurent sur la
+  // terre du masque (le fragment discarde ces colonnes, pas de houle au bord)
+  if (uCoastMaskOn > 0.5) shoreD *= 1.0 - texture2D(uCoastMask, uvF).r;
   float fade = smoothstep(0.0, 0.10, shoreD); // v45 : même déclin serré que la surface
   float fadeLift = smoothstep(0.0, 0.55, shoreD);
   float y = uBottomY;
@@ -440,6 +469,8 @@ uniform float uDayLight;
 uniform float uWaterY;
 uniform float uBottomY;
 uniform sampler2D uField;
+uniform sampler2D uCoastMask; // même masque côtier que la surface (R : 1 terre)
+uniform float uCoastMaskOn;
 varying vec3 vWorld;
 varying float vV;
 #include <fog_pars_fragment>
@@ -458,6 +489,10 @@ void main() {
   vec2 uvF = vWorld.xz / ${TERRAIN_SIZE.toFixed(1)} + 0.5;
   float ground = texture2D(uField, uvF).r;
   if (uWaterY - ground < -0.005) discard;
+  // masque côtier : pas de rideau d'eau devant un polder sous le niveau 0 —
+  // la règle altitude ci-dessus ne sait pas qu'il est terre (contrat : masque
+  // absent → comportement inchangé)
+  if (uCoastMaskOn > 0.5 && texture2D(uCoastMask, uvF).r > 0.5) discard;
 
   float g = clamp((uWaterY - vWorld.y) / max(uWaterY - uBottomY, 1e-3), 0.0, 1.0);
   vec3 col = uDeep * mix(1.05, 0.45, g); // s'assombrit vers le fond
@@ -624,13 +659,27 @@ export class RealWater {
     const n = FIELD_RES
     const data = new Float32Array(n * n * 2)
     const water = new Uint8Array(n * n)
+    // terre selon le masque côtier (si reçu) : un polder sous le niveau 0 est
+    // TERRE — ni cellule « eau », ni exclu du champ de distance-rivage (le
+    // ressac s'enroule alors autour du VRAI trait de côte). Le canvas du
+    // masque et le slab couvrent le même footprint : monde → pixel direct
+    // (ligne 0 du canvas = nord = z monde -T/2, même convention que uField).
+    // CONTRAT : sans masque (cd null) le champ est identique à avant.
+    const cd = this._coastImage
+    const landAt = cd
+      ? (x, z) => {
+          const px = Math.max(0, Math.min(cd.width - 1, Math.round((x / TERRAIN_SIZE + 0.5) * (cd.width - 1))))
+          const py = Math.max(0, Math.min(cd.height - 1, Math.round((z / TERRAIN_SIZE + 0.5) * (cd.height - 1))))
+          return cd.data[(py * cd.width + px) * 4] > 127
+        }
+      : null
     for (let j = 0; j < n; j++) {
       const z = (j / (n - 1) - 0.5) * TERRAIN_SIZE
       for (let i = 0; i < n; i++) {
         const x = (i / (n - 1) - 0.5) * TERRAIN_SIZE
         const h = terrain.sample ? terrain.sample(x, z) : 0
         data[(j * n + i) * 2] = h
-        water[j * n + i] = h < seaY ? 1 : 0
+        water[j * n + i] = h < seaY && !(landAt && landAt(x, z)) ? 1 : 0
       }
     }
     // two-pass chamfer distance to the nearest land cell, in world units
@@ -747,6 +796,8 @@ export class RealWater {
     this.materials = []
     this._textures = []
     this._seaMesh = null
+    this._fieldTex = null
+    this._bakeCtx = null
   }
 
   // (Re)build for the current zone. Cheap no-op when the option is off.
@@ -757,6 +808,10 @@ export class RealWater {
     const seaY = terrain.mapUniforms.uSeaY.value
     const fieldTex = this._bakeField(terrain, seaY > -9000 ? seaY : -1e9)
     this._textures.push(fieldTex)
+    // mémorisés pour _rebakeField : le masque côtier arrive en async, souvent
+    // APRÈS ce build — il faudra recuire le champ sans reconstruire les meshes
+    this._fieldTex = fieldTex
+    this._bakeCtx = { terrain, seaY: seaY > -9000 ? seaY : -1e9 }
 
     const demScale = (TERRAIN_SIZE / terrain.dem.extentMeters) * params.demExaggeration
     // wave amplitude follows the VIEW SCALE: at a 20 km bay the swell reads,
@@ -860,6 +915,10 @@ export class RealWater {
               uWaterY: { value: this._seaBase },
               uBottomY: { value: this._seaBase - drop },
               uField: { value: null },
+              // masque côtier : affecté APRÈS création (règle du clone) par
+              // _pushCoastMask, qui couvre tout matériau portant uCoastMask
+              uCoastMask: { value: null },
+              uCoastMaskOn: { value: 0 },
               uDeep: { value: waterColors(params).deep },
               uSky: { value: new THREE.Color('#cfe3f2') },
               uFrost: { value: params.seaEdgeFrost ?? 0.5 },
@@ -943,10 +1002,34 @@ export class RealWater {
   // OSM coast mask (same texture the terrain uses) — gates the sea so waves stop
   // at the REAL shoreline, not the elevation contour (flat polders below sea
   // level are land, not sea). Stored so a rebuild re-applies it (see _applySea).
-  setCoastMask(tex, on) {
+  // coastImage : ImageData du canvas du masque (extraite UNE fois par main.js)
+  // — nourrit le champ de simulation uField via _bakeField. Le fetch du masque
+  // étant async, s'il arrive APRÈS le build le champ est recuit sur place.
+  setCoastMask(tex, on, coastImage) {
     this._coastMask = tex || null
     this._coastMaskOn = on ? 1 : 0
+    const img = tex && on ? coastImage || null : null
+    const changed = img !== this._coastImage
+    this._coastImage = img
     this._pushCoastMask()
+    if (changed) this._rebakeField()
+  }
+
+  // Recuit du champ uField (hauteur + distance-rivage) avec la connaissance
+  // terre/mer du masque côtier, SANS reconstruire les meshes : la nouvelle
+  // texture remplace l'ancienne partout (surface, jupe, lacs) puis l'ancienne
+  // est disposée — _textures reste cohérent pour _clear().
+  _rebakeField() {
+    if (!this._bakeCtx || !this.materials.length) return
+    const { terrain, seaY } = this._bakeCtx
+    const tex = this._bakeField(terrain, seaY)
+    const old = this._fieldTex
+    for (const mat of this.materials) if (mat.uniforms.uField) mat.uniforms.uField.value = tex
+    const i = this._textures.indexOf(old)
+    if (i >= 0) this._textures[i] = tex
+    else this._textures.push(tex)
+    old?.dispose?.()
+    this._fieldTex = tex
   }
   _pushCoastMask() {
     for (const mat of this.materials) {

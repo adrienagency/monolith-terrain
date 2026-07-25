@@ -19,6 +19,7 @@ import { Terrain, TERRAIN_SIZE } from './terrain.js'
 import { loadDem } from './dem.js'
 import { latLonToWorld } from './geo.js'
 import { buildSlabWalls } from './plinth.js'
+import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
 
 export const GRID_R = 2 // rayon du damier : 2 → 5×5 max, centre exclu
 const NEIGHBOUR_RES = 384 // maillage des voisins : contexte, pas héros
@@ -171,6 +172,22 @@ export class BlockGrid {
     }
     // dès la naissance, la cellule porte le matériau/shader de la dalle centrale
     this._applyLook(cell, this.params)
+    // masque côtier de LA cellule : chaque voisin a SON dem/footprint, le
+    // masque du bloc central ne le couvre pas — sans le sien, ses polders
+    // sous le niveau 0 seraient peints en mer par la règle altitude. Async,
+    // non bloquant ; échec/hors bande → repli altitude comme avant. La
+    // texture appartient à la cellule (disposée avec elle, cf. _disposeCell).
+    if (dem.zoom >= COAST_ZOOM_MIN && dem.zoom <= COAST_ZOOM_MAX) {
+      fetchCoastMask({ lat: 0, lon: 0, zoom: dem.zoom, dem })
+        .then((res) => {
+          if (!res) return
+          if (cell.disposed) { res.maskTexture.dispose(); return } // cellule retirée pendant le fetch
+          const cv = res.maskCanvas
+          const img = cv ? cv.getContext('2d').getImageData(0, 0, cv.width, cv.height) : null
+          terrain.setCoastMask(res.maskTexture, img) // relance aussi son sea mask (polders)
+        })
+        .catch(() => {})
+    }
     return cell
   }
 
@@ -226,6 +243,7 @@ export class BlockGrid {
   }
 
   _disposeCell(cell) {
+    cell.disposed = true // gèle les fetchs async encore en vol (masque côtier)
     cell.aerial?.dispose?.() // AerialLayer dédié de la cellule (posé par main.js)
     if (cell.walls) {
       this.scene.remove(cell.walls)
@@ -241,6 +259,10 @@ export class BlockGrid {
       const tex = t.mapUniforms?.[u]?.value
       tex?.dispose?.()
     }
+    // placeholders 1px par instance : plus la valeur courante quand un vrai
+    // masque les a remplacés — les disposer aussi (double dispose inoffensif)
+    t._coastPlaceholder?.dispose?.()
+    t._seaPlaceholder?.dispose?.()
     t.material?.roughnessMap?.dispose?.()
     t.material?.bumpMap?.dispose?.()
   }
