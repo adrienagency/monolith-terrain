@@ -26,6 +26,7 @@ import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
 import { sunLook } from 'ocean-waves' // palette jour/nuit partagée (ocean-lab)
 import { bakeCloudVolume } from './clouds.js'
+import { normalizeBgStops } from './background.js'
 import { createSky, stepSky, resizeSky, cloudDensity, cloudScale, cloudCountForTier } from './clouds-sim.js'
 
 const MAX_INSTANCES = 32 // plafond dur du buffer ; le peuplement réel est adaptatif
@@ -88,6 +89,10 @@ const FRAG = /* glsl */ `
   // vent en unité monde (direction unitaire × force) : cisaille la base des
   // nuages et fait dériver le dessin interne de l'empreinte (phase 2)
   uniform vec2 uWind;
+  // teintes du ciel tirées des couleurs de fond (bgStops) : haut du dégradé
+  // pour les sommets, bas (horizon) pour les bases — phase 3
+  uniform vec3 uSkyHi;
+  uniform vec3 uSkyLo;
   // relief : sert à l'occlusion (le rayon s'arrête dans la montagne)
   uniform sampler2D uTerrainTex;
   uniform vec2 uMapMin;
@@ -246,18 +251,37 @@ const FRAG = /* glsl */ `
     return (1.0 - g2) / (4.0 * PI * pow(1.0 + g2 - 2.0 * g * cosA, 1.5));
   }
 
+  // phase de Draine : HG corrige d'un terme en cos² — pic avant plus juste
+  // pour les gouttelettes d'eau que le double-HG bricole
+  float draine(float g, float a, float cosA) {
+    float g2 = g * g;
+    return ((1.0 - g2) * (1.0 + a * cosA * cosA)) /
+      (4.0 * PI * (1.0 + a * (1.0 + 2.0 * g2) / 3.0) * pow(1.0 + g2 - 2.0 * g * cosA, 1.5));
+  }
+
+  // melange HG + Draine, constantes Jendersie–d'Eon pour gouttelettes ~5 um,
+  // copiees du source Takram (MIT). k replie le pic vers l'isotrope pour les
+  // octaves de multiple scattering.
+  float phaseHGD(float cosA, float k) {
+    float hg = henyeyGreenstein(0.9881 * k, cosA);
+    float dr = draine(0.5556 * k, 21.9955, cosA);
+    // pic avant BORNE : a 26 pas sans accumulation temporelle, le pic complet
+    // (~10^3 pile face au soleil) ferait des lucioles — 6.0 garde un lisere
+    // argente franc sans pixels aveuglants
+    return min(mix(hg, dr, 0.4819), 6.0);
+  }
+
   // approximation multi-octave du multiple scattering (Wrenninge, SIGGRAPH
   // 2015) : on ré-évalue la même profondeur avec des coefficients atténués
   // plutôt que de tracer des chemins supplémentaires
   float scatter(float depth, float cosA) {
-    float lum = 0.0, a = 1.0, b = 1.0, g = 0.45;
+    float lum = 0.0, a = 1.0, b = 1.0, k = 1.0;
     for (int o = 0; o < 3; o++) {
-      // plancher isotrope ABAISSÉ (0.24 → 0.11) : trop haut, il noyait la
-      // direction du soleil et le nuage sortait blanc uniforme quel que soit
-      // le côté — l'« éclairage inversé » vu par Adrien
-      float phase = mix(henyeyGreenstein(g, cosA), henyeyGreenstein(-g * 0.5, cosA), 0.4) + 0.11;
+      // plancher isotrope 0.11 conservé (plus bas, l'« éclairage inversé »
+      // revenait) ; la partie directionnelle passe au HG+Draine de Takram
+      float phase = phaseHGD(cosA, k) + 0.11;
       lum += b * phase * beer(depth * a);
-      a *= 0.45; b *= 0.55; g *= 0.85;
+      a *= 0.45; b *= 0.55; k *= 0.7;
     }
     return lum;
   }
@@ -353,7 +377,13 @@ const FRAG = /* glsl */ `
       // épais s'assombrit d'elle-même, celle d'une galette mince reste claire.
       // Remplace l'ancien dégradé vertical arbitraire (retour Adrien).
       float above = depthAbove(wp, bmax, F);
-      vec3 skyLight = uAmbColor * (0.16 + 0.84 * exp(-above * 1.7));
+      // IRRADIANCE CIEL DÉGRADÉE (Takram mix(minSky, maxSky, h)) : l'ambiante
+      // n'est pas une couleur unique — sombre et teintée horizon dessous, ton
+      // du haut du ciel dessus. Les deux teintes viennent de NOS couleurs de
+      // fond (bgStops) : le nuage baigne dans la palette de la carte.
+      float hfs = sat(((wp.y - vCenter.y) / vHalf.y * BOX_PAD) * 0.5 + 0.5);
+      vec3 skyTint = mix(uSkyLo, uSkyHi, hfs);
+      vec3 skyLight = uAmbColor * skyTint * mix(1.0, 1.9, hfs) * (0.16 + 0.84 * exp(-above * 1.7));
       vec3 col = sun + sss + skyLight;
       // LA NUIT (Adrien : « tes nuages deviennent lumineux ») : un nuage ne
       // produit aucune lumière — sans lune ni ville, c'est une MASSE PLUS
@@ -362,7 +392,10 @@ const FRAG = /* glsl */ `
       // interne (ratios sun/sss/skyLight) reste intact, seul le niveau chute.
       col = mix(col, col * vec3(0.10, 0.12, 0.16) + vec3(0.006, 0.008, 0.013), uNight);
       float stepTrans = exp(-d * dt * 1.2);
-      light += col * (1.0 - stepTrans) * transmittance;
+      // ALBÉDO < 1 (Takram : extinction = scattering + absorption) : la
+      // matière bloque un peu plus qu'elle ne réémet — les cœurs très épais
+      // virent au gris réaliste au lieu du blanc saturé
+      light += col * (1.0 - stepTrans) * transmittance * 0.97;
       transmittance *= stepTrans;
       if (transmittance < 0.02) break;
     }
@@ -405,6 +438,7 @@ export class Clouds2 {
 
   build(params) {
     this._params = params
+    this._bgKey = '' // le matériau renaît avec ses teintes par défaut — reparse
     this._dispose()
     const vol = bakeCloudVolume()
     const hf = this._bakeHeightfield()
@@ -458,6 +492,8 @@ export class Clouds2 {
         uNight: { value: 0 },
         uTime: { value: 0 },
         uWind: { value: new THREE.Vector2(0.42, 0.42) },
+        uSkyHi: { value: new THREE.Color(1, 1, 1) },
+        uSkyLo: { value: new THREE.Color(0.82, 0.85, 0.9) },
         uTerrainTex: { value: hf.tex },
         uMapMin: { value: new THREE.Vector2(-half, -half) },
         uMapSize: { value: new THREE.Vector2(TERRAIN_SIZE, TERRAIN_SIZE) },
@@ -609,6 +645,16 @@ export class Clouds2 {
       u.uNight.value = look.night ?? 0
       u.uAmbColor.value.setRGB(0.5 + 0.1 * warmth, 0.56 - 0.06 * warmth, 0.66 - 0.14 * warmth)
       u.uAmbColor.value.multiplyScalar((0.28 - 0.1 * warmth) * (0.12 + 0.88 * look.dayLight))
+      // teintes du ciel depuis les couleurs de fond : premier stop = haut du
+      // dégradé (sommets), dernier = horizon (bases). Parsées seulement quand
+      // le fond change — pas de conversion hex par frame.
+      const stops = normalizeBgStops(params)
+      const bgKey = stops[0].c + stops[stops.length - 1].c
+      if (bgKey !== this._bgKey) {
+        this._bgKey = bgKey
+        u.uSkyHi.value.set(stops[0].c)
+        u.uSkyLo.value.set(stops[stops.length - 1].c)
+      }
     }
     // l'ombre au sol se rafraîchit à la cadence du système météo, pas à celle
     // du rendu : les nuages naissent et meurent, un bake figé mentirait
