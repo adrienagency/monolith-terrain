@@ -5,6 +5,7 @@
 import { el, iconButton, refreshAll } from './kit.js'
 import { parseLatLon } from '../geo.js'
 import { showToast } from './toast.js'
+import { liquidize } from './liquid.js'
 
 const I = {
   globe:
@@ -334,7 +335,11 @@ export function buildMapCorner(ctx) {
 // à portée sur la carte nue. Visible UNIQUEMENT en mode simple ; les modes
 // morphés (store/studio/atelier), noui et embed la masquent en CSS.
 export function buildQuickBar(ctx) {
-  const bar = el('div', 'ce-quickbar ce-glassbox')
+  // barre LIQUIDE (réf. Enroll validée Adrien) : le cœur [Habiller ma carte +
+  // Ma course] est une silhouette de bulles fusionnées, CENTRÉE écran ;
+  // « Avancé » vit détaché à droite, décentré — même grammaire que l'elembar
+  const bar = el('div', 'ce-quickbar ce-lqrow')
+  const core = el('div', 'ce-qb-core ce-liquid')
   const mk = (icon, label, tip, onClick, accent) => {
     const b = el('button', 'ce-pillbtn' + (accent ? ' accent' : ''))
     b.type = 'button'
@@ -343,14 +348,16 @@ export function buildQuickBar(ctx) {
     b.addEventListener('click', onClick)
     return b
   }
-  bar.append(
+  core.append(
     mk(I.brush, 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur votre carte.', () => ctx.openAtelier(), true),
-    mk(I.flag, 'Ma course', 'Race Studio — votre parcours GPX en carte de course (points de passage, transports, partage).', () => ctx.openStudio()),
-    // « Avancé » habite ici (sorti de la topbar) : le switch vit à côté des
-    // portes qu'il remplace — basculer fait apparaître les docks + l'elembar
-    el('span', 'ce-topbar-sep'),
-    buildAdvToggle('ce-pillbtn')
+    mk(I.flag, 'Ma course', 'Race Studio — votre parcours GPX en carte de course (points de passage, transports, partage).', () => ctx.openStudio())
   )
+  liquidize(core, {})
+  // « Avancé » habite ici (sorti de la topbar) : le switch vit à côté des
+  // portes qu'il remplace — basculer fait apparaître les docks + l'elembar
+  const advSlot = el('div', 'ce-lq-adv')
+  advSlot.append(buildAdvToggle('ce-pillbtn'))
+  bar.append(core, advSlot)
   document.body.append(bar)
   return { root: bar }
 }

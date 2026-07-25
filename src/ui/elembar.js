@@ -9,6 +9,7 @@
 // autres (main.js applyWorkMode). Surmenus : lignes SCRUBBABLES (glisser =
 // régler, clic sec = grande tirette, double-clic = saisir) — voir v2.
 import { el, toggle as kitToggle, refreshAll } from './kit.js'
+import { liquidize } from './liquid.js'
 
 const I = {
   explore: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 2.6 4 5.7 4 9s-1.2 6.4-4 9c-2.8-2.6-4-5.7-4-9s1.2-6.4 4-9z"/></svg>',
@@ -24,12 +25,17 @@ const fmt = (c, v) => (c.step >= 1 ? String(Math.round(v)) : (+v).toFixed(c.step
 const clampStep = (c, v) => Math.min(c.max, Math.max(c.min, Math.round(v / c.step) * c.step))
 
 export function buildElemBar({ modes, initial, onMode, toolsByMode }) {
-  const bar = el('div', 'ce-elembar ce-glassbox')
+  // barre LIQUIDE (réf. Enroll validée Adrien) : plus de pill de verre unique —
+  // le cœur (Explorer/Studio/Parcours + outils) est une silhouette de bulles
+  // fusionnées, centrée écran ; « Avancé » vit détaché à droite (advSlot)
+  const bar = el('div', 'ce-elembar ce-liquid')
   const modeSeg = el('div', 'ce-wmseg')
   const sep = el('span', 'ce-elembar-sep')
+  sep.style.display = 'none' // les tailles concaves du goo séparent déjà
   const tools = el('div', 'ce-elemtools')
   const focusRow = el('div', 'ce-elemfocus')
   bar.append(modeSeg, sep, tools, focusRow)
+  liquidize(bar, { items: () => [...modeSeg.children, ...tools.children] })
   const menu = el('div', 'ce-elemmenu ce-glassbox')
   let closeT = 0
   let openKey = null
@@ -180,7 +186,6 @@ export function buildElemBar({ modes, initial, onMode, toolsByMode }) {
       if (a.sync) syncFns.push(() => a.sync(btn))
       tools.append(btn)
     }
-    sep.style.display = tools.children.length ? '' : 'none'
   }
   setInterval(() => syncFns.forEach((f) => f()), 300)
 
@@ -205,9 +210,14 @@ export function buildElemBar({ modes, initial, onMode, toolsByMode }) {
   menu.addEventListener('pointerenter', () => clearTimeout(closeT))
   menu.addEventListener('pointerleave', scheduleClose)
 
+  // le cœur reste centré (la rangée fait la largeur du cœur) ; « Avancé »
+  // est ancré à droite du cœur, décentré — les familles se séparent à l'œil
+  const row = el('div', 'ce-lqrow')
+  const advSlot = el('div', 'ce-lq-adv')
+  row.append(bar, advSlot)
   const wrap = el('div', 'ce-elemwrap')
-  wrap.append(menu, bar)
+  wrap.append(menu, row)
   document.body.append(wrap)
   setMode(initial, { silent: true })
-  return { root: wrap, setMode }
+  return { root: wrap, setMode, advSlot }
 }

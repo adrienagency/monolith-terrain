@@ -3816,12 +3816,8 @@ if (!IS_EMBED) {
   })
   applyWorkMode(initialMode)
   // « Avancé » vit dans les barres de modes (sorti de la topbar) : ici sa
-  // version elembar — allumé, il ramène au mode simple (quickbar)
-  {
-    const sepEl = document.createElement('span')
-    sepEl.className = 'ce-elembar-sep'
-    elemBar.root.querySelector('.ce-elembar')?.append(sepEl, buildAdvToggle('ce-elembar-btn'))
-  }
+  // version elembar — détachée à droite du cœur liquide (advSlot), décentrée
+  elemBar.advSlot?.append(buildAdvToggle('ce-elembar-btn'))
 }
 
 // roue crantée — PARAMÈTRES GLOBAUX (réorg Adrien) : toujours visible dans
