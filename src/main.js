@@ -2307,12 +2307,14 @@ function shuffleLook() {
     terrain.applyFxParams(fp)
   }
 
-  // 4) animated sea — usually on, with a NEW seed so the swell differs each time
+  // 4) animated sea — usually on, with a NEW seed so the swell differs each
+  //    time. ⚠️ plages bornées à l'état « Agitée » des chips Mer (plafond F3,
+  //    règle Adrien) — l'aléatoire ne doit pas dépasser ce que l'UI permet
   params.waterReal = chance(0.75)
   params.seaSeed = Math.floor(rnd(1, 9999))
-  params.seaWaveH = +rnd(0.3, 1.6).toFixed(2)
+  params.seaWaveH = +rnd(0.3, 1.5).toFixed(2)
   params.seaChop = +rnd(0.3, 0.95).toFixed(2)
-  params.seaSpeed = +rnd(0.6, 1.6).toFixed(2)
+  params.seaSpeed = +rnd(0.6, 1.35).toFixed(2)
   params.seaBed = pick(['map', 'sand', 'lagoon', 'abyss', 'seagrass', 'ink'])
   waterRebuild()
   realWater?.setWaves?.({ height: params.seaWaveH, choppiness: params.seaChop, speed: params.seaSpeed })
@@ -2355,6 +2357,9 @@ function shuffleLook() {
   params.bgStops = null // re-dérivés des nouveaux A/B/C par applyBackground
   params.bgPoints = null
   applyBackground()
+  // un schéma sombre doit basculer le dark mode (sinon cartouche noir sur
+  // noir — même garde-fou que l'édition manuelle du fond)
+  autoDarkFromBg()
   bgRefreshFn() // resync des sélecteurs du panneau Background
   // socle : finition unie (stone → plinthColor visible) dans la couleur du schéma
   params.plinthFinish = 'solid'

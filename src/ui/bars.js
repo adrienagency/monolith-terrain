@@ -314,19 +314,21 @@ export function buildMapCorner(ctx) {
     document.body.append(b)
     return b
   }
-  // dédoublonnage (Adrien) : seul le toggle AÉRIEN reste — « base » et
-  // « shuffle » doublonnaient « Réinitialiser la carte » (Templates) et
-  // « Look aléatoire » (Création)
   const aerial = mk(MC.aerial, 'Photo aérienne — cliquer pour basculer (là où l’imagerie existe).', 'ce-mapbtn-aerial')
   const check = el('span', 'ce-mapbtn-check')
   check.innerHTML = MC.check
   aerial.append(check)
-
   aerial.addEventListener('click', () => ctx.toggleAerial())
+
+  // le générateur ALÉATOIRE rebranché à côté de l'aérien (demande Adrien) :
+  // un shuffle complet du look — template de base, heure, shader, mer, fond,
+  // socle, brume de couches — en UNE étape d'annulation (shuffleLook, main.js)
+  const dice = mk(MC.shuffle, 'Carte aléatoire — rebat tout le look d’un coup (annulable).', 'ce-mapbtn-shuffle')
+  dice.addEventListener('click', () => ctx.shuffle?.())
 
   return {
     setAerialActive: (v) => aerial.classList.toggle('on', !!v),
-    setVisible: (v) => { aerial.classList.toggle('off', !v) },
+    setVisible: (v) => { aerial.classList.toggle('off', !v); dice.classList.toggle('off', !v) },
   }
 }
 
