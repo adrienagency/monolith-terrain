@@ -1,9 +1,16 @@
-﻿// ROUTE panel — the GPX track as a first-class layer: load a file, style the
-// line (width/colour, gradient/glow). Later Parcours tasks extend this same
-// panel with points and playback.
-// Docked in the left column, after Camera (Explore, Scan, Camera, Route).
+// PARCOURS panel — LA porte grand public pour « mettre une course sur la
+// carte » (passe UX : le panneau et le Race Studio ne se marchent plus
+// dessus). Deux états exclusifs :
+//   VIDE   → les 4 portes du wizard léger validé (Charger ma course /
+//            Ouvrir un projet / Essayer la démo / Dessiner — bientôt) ;
+//   CHARGÉ → Lecture en tête (sans lecture la carte ne sert à rien),
+//            puis 3 sections repliées PARLANTES : Mes courses / Style du
+//            tracé (chips) / Options de lecture.
+// Le Race Studio garde sa vie propre : il n'apparaît ici QUE comme la carte
+// « Organisateur de course ? » en pied de panneau (plus de bouton accent
+// noyé dans une section). Zéro moteur touché — mêmes appels gpx qu'avant.
 
-import { slider, color, toggle, visibleWhen, button, section, el, refreshAll } from './kit.js'
+import { slider, color, toggle, visibleWhen, button, section, el, refreshAll, onRefresh } from './kit.js'
 import { Panel } from './shell.js'
 import { SPORTS, getSport } from './sport-icons.js'
 import { MAX_LAYERS } from '../gpx-layers.js'
@@ -15,6 +22,16 @@ const DRAG_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" c
 const EYE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.8-7 10-7 10 7 10 7-3.8 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>'
 const EYE_OFF_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3l18 18M10.6 5.2A10.9 10.9 0 0 1 12 5c6.2 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4M6.5 6.7C3.4 8.8 2 12 2 12s3.8 7 10 7c1.5 0 2.9-.4 4.1-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>'
 const UPLOAD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4M7 8l5-5 5 5M4 18v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1"/></svg>'
+const FLAG_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/></svg>'
+
+// presets d'épaisseur du tracé — le réglage STAR en chips (règle constante) ;
+// détection par proximité de la valeur courante, jamais d'état stocké
+const WIDTH_PRESETS = [
+  { id: 'fine', label: 'Fine', v: 1.5, tip: 'Un trait discret — la carte d’abord.' },
+  { id: 'classique', label: 'Classique', v: 3, tip: 'L’équilibre par défaut.' },
+  { id: 'epaisse', label: 'Épaisse', v: 5, tip: 'La trace en vedette, lisible de loin.' },
+]
+const widthPresetOf = (params) => WIDTH_PRESETS.find((p) => Math.abs((params.gpxWidth ?? 3) - p.v) <= 0.3)
 
 export function buildRoutePanel(ctx) {
   const { params } = ctx
@@ -23,13 +40,12 @@ export function buildRoutePanel(ctx) {
     icon: ICON,
     side: 'left',
     width: 268,
-    tip: 'Votre trace GPX drapée sur le relief : style, courses, lecture.',
+    tip: 'Votre course sur le relief : chargez une trace, la lecture fait le reste.',
   })
 
-  // Play / Stop live at the TOP of the panel, ALWAYS visible the moment "GPX
-  // path" is open (Adrien) — peers of the Track / GPX layers sections, not
-  // buried in a collapsed Playback section. The follow/readout options stay in
-  // the Playback section below. `syncPlayBtn` is defined here and reused there.
+  // ---- Lecture — en tête, TOUJOURS visible dès qu'une course est chargée
+  // (Adrien : « sans la lecture, la carte ne sert à rien »). Les options de
+  // suivi vivent dans la section « Options de lecture » plus bas.
   const playRow = el('div', 'ce-btn-row')
   const playBtn = button('▶ Lecture', () => {
     if (!ctx.gpx.track) return
@@ -54,7 +70,7 @@ export function buildRoutePanel(ctx) {
     syncPlayBtn()
   }, { ghost: true })
   exitFollowBtn.classList.add('ce-exit-follow')
-  exitFollowBtn.title = 'Return to manual camera control'
+  exitFollowBtn.title = 'Reprendre la caméra à la main'
   function syncPlayBtn() {
     const playing = !!ctx.gpx.isPlaying?.()
     playBtn.textContent = playing ? '⏸ Pause' : '▶ Lecture'
@@ -66,54 +82,44 @@ export function buildRoutePanel(ctx) {
   playRow.append(playBtn, stopBtn, exitFollowBtn)
   panel.add(playRow)
 
-  // Track section stays FIRST and open by default (see the task-13 report) —
-  // Width/Colour are the controls a user reaches for right after loading a
-  // file, so they shouldn't require expanding anything.
-  const sTrack = panel.addSection(section('Trace'))
-  // Race Studio — la sous-app organisateurs (logo, points de passage, pictos,
-  // transports, export projet) : voir src/ui/studio.js
-  sTrack.body.append(button('Race Studio', () => ctx.openStudio?.(), { accent: true }))
-  sTrack.body.append(button('Charger un GPX…', () => ctx.loadGpx(), { ghost: true }))
-  const colorRow = color({
-    label: 'Couleur',
-    get: () => params.gpxColor || params.hudAccent,
-    set: (v) => { params.gpxColor = v; ctx.gpx.setColor(v) },
+  // ---- Les PORTES (état vide) — la hiérarchie wizard léger validée :
+  // ① charger son GPX (accent — le cas le plus fréquent) ② rouvrir un
+  // projet ③ pas de trace ? la démo ④ dessiner (badge « bientôt »).
+  const doors = el('div', 'ce-route-doors')
+  const door = (title, sub, { accent = false, soon = false } = {}) => {
+    const d = el('button', 'ce-door' + (accent ? ' accent' : '') + (soon ? ' soon' : ''))
+    d.type = 'button'
+    d.disabled = soon
+    d.innerHTML = `<span class="ce-door-main"><b>${title}</b><i>${sub}</i></span>${soon ? '<span class="ce-door-badge">bientôt</span>' : ''}`
+    return d
+  }
+  const dLoad = door('Charger ma course (GPX)', 'Votre trace, depuis votre ordinateur — le relief se cadre tout seul.', { accent: true })
+  dLoad.addEventListener('click', () => ctx.loadGpx())
+  const dOpen = door('Ouvrir un projet ShibuMap', 'Un fichier .shibumap-race — trace, points de passage et style, tout revient.')
+  dOpen.addEventListener('click', () => ctx.loadGpx())
+  const dDemo = door('Pas encore de trace ? La démo', 'La Grande Traversée · 220 km, prête à jouer — remplacez-la ensuite.')
+  dDemo.addEventListener('click', async () => {
+    dDemo.disabled = true
+    dDemo.querySelector('i').textContent = 'Chargement de la démo…'
+    try { await ctx.loadDemo?.() } catch {}
+    dDemo.disabled = false
+    dDemo.querySelector('i').textContent = 'La Grande Traversée · 220 km, prête à jouer — remplacez-la ensuite.'
   })
-  // Honesty fix: when the gradient ramp is on, gpx.js rebuild() forces the
-  // line material's base colour to white and drives it from per-vertex
-  // gradient colours instead (see its comment) — the Colour swatch would
-  // silently do nothing while that's active. Rather than ship a control that
-  // lies about having an effect, only surface it while Gradient is off.
-  visibleWhen(colorRow, () => !params.gpxGradient)
-  sTrack.body.append(
-    slider({
-      label: 'Épaisseur',
-      min: 1,
-      max: 8,
-      step: 0.5,
-      get: () => params.gpxWidth,
-      set: (v) => { params.gpxWidth = v; ctx.gpx.setWidth(v) },
-    }),
-    colorRow
-  )
+  const dDraw = door('Dessiner sur la carte', 'Cliquez les passages clés, la trace suit le terrain.', { soon: true })
+  doors.append(dLoad, dOpen, dDemo, dDraw)
+  panel.add(doors)
 
-  // ---------------------------------------------------------------- Layers
-  // task 22 §1/2: "tu vas ranger les traces GPX sous forme de calques...
-  // comme dans Figma" — the stack Load-GPX/drag-and-drop feed (ctx.gpx is a
-  // GpxLayerManager, see gpx-layers.js). Drag/drop reorder, per-layer sport
-  // icon (+ custom upload), visibility, remove, up to MAX_LAYERS. Style
-  // (Width/Colour/Gradient/Glow/Markers/Km, above and below) stays GLOBAL —
-  // see gpx-layers.js's own file header for why — so this section is the
-  // only place per-layer identity lives.
+  // ------------------------------------------------------------ Mes courses
+  // task 22 §1/2 : les traces GPX en calques « comme dans Figma » — réordonner
+  // par glisser, icône sport par course, œil, infos course, retirer. Le style
+  // reste GLOBAL (voir gpx-layers.js) : ici ne vit que l'identité par course.
   const sLayers = panel.addSection(section('Mes courses'))
   const listEl = el('div', 'ce-gpx-layers')
-  const emptyEl = el('div', 'ce-gpx-layers-empty', 'Aucune course chargée — « Charger un GPX… » ci-dessus pour la première.')
-  // (« + Ajouter une course » supprimé — doublon exact de « Charger un
-  // GPX… » juste au-dessus ; le compteur reste)
-  const addRow = el('div', 'ce-btn-row')
-  const capLabel = el('span', 'ce-gpx-cap')
-  addRow.append(capLabel)
-  sLayers.body.append(listEl, emptyEl, addRow)
+  const addCard = el('button', 'ce-lib-add')
+  addCard.type = 'button'
+  addCard.innerHTML = '<span>＋</span>Ajouter une course'
+  addCard.addEventListener('click', () => ctx.loadGpx())
+  sLayers.body.append(listEl, addCard)
 
   let openPickerId = null // which row's icon picker is expanded (one at a time)
   let dragFromIndex = null
@@ -128,8 +134,12 @@ export function buildRoutePanel(ctx) {
 
   function renderLayers(layers) {
     listEl.replaceChildren()
-    emptyEl.classList.toggle('hidden', layers.length > 0)
-    capLabel.textContent = `${layers.length}/${MAX_LAYERS}`
+    // section repliée PARLANTE : le nom de la course, ou combien il y en a
+    const first = layers[0]?.name || 'Course'
+    sLayers.setMeta(layers.length === 0 ? '' : layers.length === 1 ? (first.length > 20 ? first.slice(0, 19) + '…' : first) : `${layers.length} courses`)
+    const full = layers.length >= MAX_LAYERS
+    addCard.disabled = full
+    addCard.innerHTML = full ? `<span>＋</span>Maximum atteint (${MAX_LAYERS})` : '<span>＋</span>Ajouter une course'
 
     layers.forEach((l, idx) => {
       const row = el('div', 'ce-gpx-layer' + (idx === ctx.gpx.activeIndex ? ' active' : ''))
@@ -138,11 +148,11 @@ export function buildRoutePanel(ctx) {
 
       const dragHandle = el('span', 'ce-gpx-drag')
       dragHandle.innerHTML = DRAG_ICON
-      dragHandle.title = 'Drag to reorder'
+      dragHandle.title = 'Glisser pour réordonner'
 
       const iconBtn = el('button', 'ce-gpx-icon-btn')
       iconBtn.type = 'button'
-      iconBtn.title = 'Change icon'
+      iconBtn.title = 'Changer l’icône'
       iconBtn.innerHTML = iconMarkupFor(l)
       iconBtn.addEventListener('click', (e) => {
         e.stopPropagation()
@@ -163,7 +173,7 @@ export function buildRoutePanel(ctx) {
 
       const eyeBtn = el('button', 'ce-icon-btn ce-gpx-eye')
       eyeBtn.type = 'button'
-      eyeBtn.title = l.visible ? 'Hide layer' : 'Show layer'
+      eyeBtn.title = l.visible ? 'Masquer cette course' : 'Afficher cette course'
       eyeBtn.innerHTML = l.visible ? EYE_ICON : EYE_OFF_ICON
       eyeBtn.addEventListener('click', (e) => {
         e.stopPropagation()
@@ -185,7 +195,7 @@ export function buildRoutePanel(ctx) {
 
       const removeBtn = el('button', 'ce-icon-btn ce-gpx-remove')
       removeBtn.type = 'button'
-      removeBtn.title = 'Remove layer'
+      removeBtn.title = 'Retirer cette course'
       removeBtn.textContent = '✕'
       removeBtn.addEventListener('click', (e) => {
         e.stopPropagation()
@@ -241,7 +251,7 @@ export function buildRoutePanel(ctx) {
         }
         const upBtn = el('button', 'ce-gpx-iconopt ce-gpx-iconupload')
         upBtn.type = 'button'
-        upBtn.title = 'Upload a custom icon (SVG or image)'
+        upBtn.title = 'Importer une icône (SVG ou image)'
         upBtn.innerHTML = UPLOAD_ICON
         upBtn.addEventListener('click', (e) => {
           e.stopPropagation()
@@ -255,16 +265,15 @@ export function buildRoutePanel(ctx) {
     })
   }
 
-  // race name (task 22 §7) — the FOCUSED layer's own editorial title, shown
-  // above ITS profile strip (gpx.js's .gpx-race-name). Each layer keeps its
-  // own name, so the field re-syncs whenever focus moves — including the
-  // automatic focus change sequenced playback drives (see onFocusChange below).
+  // nom éditorial de la course FOCALISÉE (task 22 §7) — affiché au-dessus de
+  // SON profil (gpx.js .gpx-race-name). Re-synchronisé à chaque changement de
+  // focus, y compris ceux que la lecture séquencée déclenche toute seule.
   const raceNameRow = el('div', 'ce-row')
-  raceNameRow.append(el('label', 'ce-label', 'Race name — focused layer'))
+  raceNameRow.append(el('label', 'ce-label', 'Nom de la course'))
   const raceNameInput = el('input', 'ce-tpl-name')
   raceNameInput.type = 'text'
   raceNameInput.maxLength = 60
-  raceNameInput.placeholder = 'e.g. UTMB — CHAMONIX 2026'
+  raceNameInput.placeholder = 'ex : UTMB — CHAMONIX 2026'
   const commitRaceName = () => ctx.gpx.setRaceName(raceNameInput.value)
   raceNameInput.addEventListener('blur', commitRaceName)
   raceNameInput.addEventListener('keydown', (e) => {
@@ -279,38 +288,65 @@ export function buildRoutePanel(ctx) {
     if (document.activeElement !== raceNameInput) raceNameInput.value = ctx.gpx.raceName || ''
   }
 
-  renderLayers(ctx.gpx.layers)
-  syncRaceName()
+  // -------------------------------------------------------- Style du tracé
+  // Le réglage star (épaisseur) en CHIPS, le curseur fin dessous, la couleur
+  // ensuite. Dégradé/halo/points de passage restent au Race Studio (étape
+  // Style) — décision Adrien conservée, on ne re-duplique pas.
+  const sStyle = panel.addSection(section('Style du tracé'))
+  const chipRow = el('div', 'ce-chiprow')
+  const chips = WIDTH_PRESETS.map((p) => {
+    const b = el('button', 'ce-chip', p.label)
+    b.type = 'button'
+    b.setAttribute('data-tip', p.tip)
+    b.addEventListener('click', () => {
+      params.gpxWidth = p.v
+      ctx.gpx.setWidth(p.v)
+      refreshAll()
+    })
+    chipRow.append(b)
+    return b
+  })
+  onRefresh(() => {
+    const cur = widthPresetOf(params)
+    WIDTH_PRESETS.forEach((p, i) => chips[i].classList.toggle('on', cur === p))
+  }, chipRow)
+  const colorRow = color({
+    label: 'Couleur',
+    get: () => params.gpxColor || params.hudAccent,
+    set: (v) => { params.gpxColor = v; ctx.gpx.setColor(v) },
+  })
+  // Honesty fix: when the gradient ramp is on, gpx.js rebuild() forces the
+  // line material's base colour to white and drives it from per-vertex
+  // gradient colours instead (see its comment) — the Colour swatch would
+  // silently do nothing while that's active. Rather than ship a control that
+  // lies about having an effect, only surface it while Gradient is off.
+  visibleWhen(colorRow, () => !params.gpxGradient)
+  sStyle.body.append(
+    chipRow,
+    colorRow,
+    // réglage fin — la mécanique au fond, sous les chips (règle constante)
+    slider({
+      label: 'Épaisseur',
+      min: 1,
+      max: 8,
+      step: 0.5,
+      get: () => params.gpxWidth,
+      set: (v) => { params.gpxWidth = v; ctx.gpx.setWidth(v) },
+    })
+  )
+  onRefresh(() => {
+    const cur = widthPresetOf(params)
+    const w = cur ? cur.label : `${params.gpxWidth} px`
+    const swatch = params.gpxGradient ? 'linear-gradient(90deg,#2e7d32,#e53935)' : (params.gpxColor || params.hudAccent)
+    sStyle.setMeta(params.gpxGradient ? `Dégradé · ${w}` : w, swatch)
+  }, sStyle.root)
 
-  // gpx-layers.js's onChange/onFocusChange are single-slot hooks — main.js
-  // already claimed onChange (per-layer draggable profile wiring, see its
-  // own comment) before this panel is built, so CHAIN rather than
-  // overwrite: both run, in the order they were registered.
-  const prevOnChange = ctx.gpx.onChange
-  ctx.gpx.onChange = (layers) => {
-    prevOnChange?.(layers)
-    renderLayers(layers)
-    syncRaceName()
-  }
-  const prevOnFocusChange = ctx.gpx.onFocusChange
-  ctx.gpx.onFocusChange = (layer, idx) => {
-    prevOnFocusChange?.(layer, idx)
-    renderLayers(ctx.gpx.layers)
-    syncRaceName()
-  }
-
-  // « Line effects » et « Points & markers » retirés (Adrien) : le style du
-  // tracé vit dans le Race Studio (étape ④), les points de passage aussi (②).
-
-  // Playback — progressive reveal: a head travels the track, the line draws
-  // up to it, and animated altitude/slope readouts float at the tip (Space
-  // plays/pauses, Esc stops — see the shortcuts ctx in main.js).
-  // Playback OPTIONS section — the Play/Stop buttons themselves now live at the
-  // TOP of the panel (always visible). This section keeps the follow + readout
-  // toggles and the follow-speed slider.
-  const sPlay = panel.addSection(section('Lecture', { open: false }))
+  // ------------------------------------------------------ Options de lecture
+  // La lecture elle-même vit en tête de panneau ; ici seulement le suivi
+  // caméra et les affichages en direct (altitude/pente à la tête de lecture).
+  const sPlay = panel.addSection(section('Options de lecture', { open: false }))
   const followSpeedRow = slider({
-    label: 'Follow speed',
+    label: 'Vitesse du suivi',
     min: 0.5,
     max: 3,
     step: 0.25,
@@ -320,12 +356,12 @@ export function buildRoutePanel(ctx) {
   visibleWhen(followSpeedRow, () => params.gpxFollow)
   sPlay.body.append(
     toggle({
-      label: 'Altitude readout',
+      label: 'Altitude en direct',
       get: () => params.gpxAltReadout,
       set: (v) => ctx.gpx.setAltReadout(v),
     }),
     toggle({
-      label: 'Slope readout',
+      label: 'Pente en direct',
       get: () => params.gpxSlopeReadout,
       set: (v) => ctx.gpx.setSlopeReadout(v),
     }),
@@ -333,9 +369,8 @@ export function buildRoutePanel(ctx) {
       // drone-cam chase, not a flat top-down follow — trails the reveal
       // head with the same smooth easing as "Fly the GPX track" (Camera
       // panel), just synced frame-for-frame to playback instead of timed.
-      // Label is "Follow", not "Drone follow" (task 24 — the user struck
-      // through "Drone" on their annotated screenshot).
-      label: 'Follow',
+      // Libellé « Suivi » tout court (task 24 — « Drone » barré par Adrien).
+      label: 'Suivi',
       get: () => params.gpxFollow,
       set: (v) => {
         params.gpxFollow = v
@@ -346,6 +381,51 @@ export function buildRoutePanel(ctx) {
     }),
     followSpeedRow
   )
+  onRefresh(() => {
+    const parts = [params.gpxFollow ? `Suivi ×${params.gpxFollowSpeed}` : 'Caméra libre']
+    if (params.gpxAltReadout) parts.push('altitude')
+    if (params.gpxSlopeReadout) parts.push('pente')
+    sPlay.setMeta(parts.join(' · '))
+  }, sPlay.root)
+
+  // ---- « Organisateur de course ? » — LA porte claire vers le Race Studio
+  // (points de passage, transports, partage). Toujours visible, en pied de
+  // panneau — le wizard garde sa vie propre (?studio=1 continue de marcher).
+  const orga = el('button', 'ce-orga')
+  orga.type = 'button'
+  orga.innerHTML = `${FLAG_ICON}<span class="ce-door-main"><b>Organisateur de course ?</b><i>Points de passage, transports, partage — ouvrez le Race Studio.</i></span><span class="ce-orga-arrow">→</span>`
+  orga.addEventListener('click', () => ctx.openStudio?.())
+  panel.add(orga)
+
+  // ---- deux états exclusifs : portes (vide) ↔ lecture + sections (chargé)
+  function syncState() {
+    const has = ctx.gpx.layers.length > 0
+    doors.style.display = has ? 'none' : ''
+    playRow.style.display = has ? '' : 'none'
+    for (const s of [sLayers, sStyle, sPlay]) s.root.style.display = has ? '' : 'none'
+  }
+
+  renderLayers(ctx.gpx.layers)
+  syncRaceName()
+  syncState()
+
+  // gpx-layers.js's onChange/onFocusChange are single-slot hooks — main.js
+  // already claimed onChange (per-layer draggable profile wiring, see its
+  // own comment) before this panel is built, so CHAIN rather than
+  // overwrite: both run, in the order they were registered.
+  const prevOnChange = ctx.gpx.onChange
+  ctx.gpx.onChange = (layers) => {
+    prevOnChange?.(layers)
+    renderLayers(layers)
+    syncRaceName()
+    syncState()
+  }
+  const prevOnFocusChange = ctx.gpx.onFocusChange
+  ctx.gpx.onFocusChange = (layer, idx) => {
+    prevOnFocusChange?.(layer, idx)
+    renderLayers(ctx.gpx.layers)
+    syncRaceName()
+  }
 
   return panel
 }

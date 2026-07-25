@@ -2,7 +2,7 @@
 // Templates panel (explicit request — the hour is a mood you reach for, not a
 // setting you dig for). Glyph follows the sky: sun by day, moon at night.
 
-import { el } from './kit.js'
+import { el, refreshAll } from './kit.js'
 
 export function buildHourPill({ params, applyTimeOfDay }) {
   const pill = el('div', 'ce-hourpill')
@@ -77,6 +77,9 @@ export function buildHourPill({ params, applyTimeOfDay }) {
     sync()
     if (playing) setPlaying(false) // une saisie manuelle stoppe le cycle
   })
+  // au relâchement seulement (pas à chaque frame de drag) : resynchronise les
+  // contrôles et les metas de section (la chip d'ambiance de Lumière suit)
+  range.addEventListener('change', () => refreshAll())
 
   sync()
   pill.append(playBtn, glyph, range, label, speed)

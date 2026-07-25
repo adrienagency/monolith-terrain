@@ -59,7 +59,7 @@ import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, stripFrom
 import { loadUserPalettes, saveUserPalettes, paletteFromParams } from './user-palettes.js'
 import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT } from './share-link.js'
 import { DroneCam } from './drone-cam.js'
-import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
+import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, deriveMetalTints, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
 import { N8AOPostPass } from 'n8ao'
 import { History } from './history.js'
@@ -67,7 +67,7 @@ import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
 import { showNotice } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
-import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickBar, buildShibuChrome, initUiLevel } from './ui/bars.js'
+import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickCore, buildShibuChrome, initUiLevel, buildAdvToggle } from './ui/bars.js'
 import { buildMiniRoute } from './ui/mini-route.js'
 import { buildSettingsSearch } from './ui/settings-search.js'
 import { perfSection } from './ui/camera-panel.js'
@@ -551,6 +551,11 @@ function syncGlobeShadow(mul) {
   globe?.setShadowColor(hex, mul)
 }
 function applyBackground() {
+  // le liseré métal de la barre liquide suit la PALETTE de la carte —
+  // applyBackground passe sur tout changement de look, c'est le bon péage
+  const mt = deriveMetalTints(params)
+  document.documentElement.style.setProperty('--lq-m1', mt.bright)
+  document.documentElement.style.setProperty('--lq-m2', mt.tint)
   // v2 : normaliser stops/points D'ABORD et tenir le miroir A/B/C (premier /
   // médian / dernier stop) à jour — l'ombre du globe et la brume lisent A/B
   if (params.bgMode && params.bgMode !== 'solid') {
@@ -2302,12 +2307,14 @@ function shuffleLook() {
     terrain.applyFxParams(fp)
   }
 
-  // 4) animated sea — usually on, with a NEW seed so the swell differs each time
+  // 4) animated sea — usually on, with a NEW seed so the swell differs each
+  //    time. ⚠️ plages bornées à l'état « Agitée » des chips Mer (plafond F3,
+  //    règle Adrien) — l'aléatoire ne doit pas dépasser ce que l'UI permet
   params.waterReal = chance(0.75)
   params.seaSeed = Math.floor(rnd(1, 9999))
-  params.seaWaveH = +rnd(0.3, 1.6).toFixed(2)
+  params.seaWaveH = +rnd(0.3, 1.5).toFixed(2)
   params.seaChop = +rnd(0.3, 0.95).toFixed(2)
-  params.seaSpeed = +rnd(0.6, 1.6).toFixed(2)
+  params.seaSpeed = +rnd(0.6, 1.35).toFixed(2)
   params.seaBed = pick(['map', 'sand', 'lagoon', 'abyss', 'seagrass', 'ink'])
   waterRebuild()
   realWater?.setWaves?.({ height: params.seaWaveH, choppiness: params.seaChop, speed: params.seaSpeed })
@@ -2350,6 +2357,9 @@ function shuffleLook() {
   params.bgStops = null // re-dérivés des nouveaux A/B/C par applyBackground
   params.bgPoints = null
   applyBackground()
+  // un schéma sombre doit basculer le dark mode (sinon cartouche noir sur
+  // noir — même garde-fou que l'édition manuelle du fond)
+  autoDarkFromBg()
   bgRefreshFn() // resync des sélecteurs du panneau Background
   // socle : finition unie (stone → plinthColor visible) dans la couleur du schéma
   params.plinthFinish = 'solid'
@@ -2668,6 +2678,14 @@ gpxFileInput.addEventListener('change', () => {
   if (f) openTrackFile(f)
   gpxFileInput.value = ''
 })
+
+// la course de DÉMO (La Grande Traversée) — même bundle et même chemin
+// d'import que la porte démo du Race Studio (étape Trace) : une seule
+// mécanique, deux portes. `studio` est déclaré plus bas mais lu au CLIC.
+async function loadDemoRace() {
+  const bundle = parseRace(await (await fetch('/demo/grande-traversee.shibumap-race.json')).text())
+  if (bundle) await studio.importProject(bundle)
+}
 
 // ---- GPX sport-icon head billboard (task 22 §3/4) --------------------------
 // One CanvasTexture per built-in sport, rasterized once from sport-icons.js's
@@ -3312,11 +3330,12 @@ if (!IS_EMBED) {
 // viewer shibu (lien partagé) : marque en bas + CTA — le reste du chrome
 // est masqué en CSS (body.shibu-view, voir v28.css)
 if (IS_SHIBU) buildShibuChrome()
-const quickBar = buildQuickBar({
+// cœur du mode simple — monté dans la rangée liquide de l'elembar plus bas
+// (buildElemBar simpleCore) pour le morph de fond au switch Avancé
+const quickCore = IS_EMBED ? null : buildQuickCore({
   openAtelier: () => panelCtx.openAtelier?.(),
   openStudio: () => panelCtx.openStudio?.(),
 })
-void quickBar
 
 // the GPX profile strip docks at the same bottom-centre spot as the search
 // bar — measure the bar's REAL rendered rect (its height changes across the
@@ -3325,6 +3344,16 @@ void quickBar
 // (a z-index bump alone would leave them stacked, not "remonté")
 function syncGpxProfilePosition() {
   const r = bottomBar.root.getBoundingClientRect()
+  // barre masquée (viewer shibu, noui, boutique…) : son rect est tout à zéro
+  // — publier ces mesures donnerait un profil de largeur 0 « posé » au-dessus
+  // de l'écran. On efface plutôt les variables : les fallbacks CSS de
+  // .gpx-profile (bottom 82px, width min(520px, 100vw − 32px)) reprennent la
+  // main, et le viewer shibu mobile les ajuste lui-même (v28.css).
+  if (!r.width) {
+    document.documentElement.style.removeProperty('--gpx-profile-bottom')
+    document.documentElement.style.removeProperty('--gpx-profile-width')
+    return
+  }
   const gap = 14
   const bottomPx = Math.round(window.innerHeight - r.top + gap)
   document.documentElement.style.setProperty('--gpx-profile-bottom', `${bottomPx}px`)
@@ -3744,6 +3773,7 @@ const routePanel = buildRoutePanel({
   params,
   gpx: gpxLayer,
   loadGpx: () => gpxFileInput.click(),
+  loadDemo: () => loadDemoRace(),
   startFollow: engageGpxFollow,
   stopFollow: disengageGpxFollow,
   uploadIcon: requestIconUpload,
@@ -3782,6 +3812,9 @@ if (!IS_EMBED) {
   function applyWorkMode(id) {
     const keep = new Set(WORKMODE_PANELS[id]().map((p) => p.root))
     for (const p of allWorkPanels()) p.root.classList.toggle('wm-off', !keep.has(p.root))
+    // Parcours = un seul panneau, LA porte du mode : arriver sur un pill
+    // replié casserait l'évidence — il s'ouvre tout seul (portes ou Lecture)
+    if (id === 'parcours') routePanel.setCollapsed(false)
     try { localStorage.setItem(WORKMODE_KEY, id) } catch {}
   }
   // ordre visuel du rail gauche en mode Studio : Terrain → Fonds → Éléments
@@ -3792,7 +3825,7 @@ if (!IS_EMBED) {
     for (const p of [explorePanel, mapPanel, cameraPanel, routePanel, shadersPanel, fondsPanel, elementsPanel, imagePanel]) dock.append(p.root)
   }
   const initialMode = (() => { try { return localStorage.getItem(WORKMODE_KEY) } catch { return null } })() || 'explorer'
-  buildElemBar({
+  const elemBar = buildElemBar({
     modes: [
       { id: 'explorer', icon: 'explore', label: 'Explorer' },
       { id: 'studio', icon: 'studio', label: 'Studio' },
@@ -3801,8 +3834,12 @@ if (!IS_EMBED) {
     initial: initialMode,
     onMode: applyWorkMode,
     toolsByMode: { explorer: {}, studio: {}, parcours: {} },
+    simpleCore: quickCore,
   })
   applyWorkMode(initialMode)
+  // « Avancé » vit dans les barres de modes (sorti de la topbar) : ici sa
+  // version elembar — détachée à droite du cœur liquide (advSlot), décentrée
+  elemBar.advSlot?.append(buildAdvToggle('ce-elembar-btn'))
 }
 
 // roue crantée — PARAMÈTRES GLOBAUX (réorg Adrien) : toujours visible dans
@@ -3845,7 +3882,9 @@ elementsPanel.setCollapsed(true)
 imagePanel.setCollapsed(true)
 cameraPanel.setCollapsed(true)
 mapPanel.setCollapsed(true)
-routePanel.setCollapsed(true)
+// Parcours reste OUVERT si on boote déjà dans ce mode (applyWorkMode l'a
+// déplié : c'est la porte du mode, un pill replié casserait l'évidence)
+if ((() => { try { return localStorage.getItem('shibumap-workmode') } catch { return null } })() !== 'parcours') routePanel.setCollapsed(true)
 
 // adaptive quality — built once the composer, panels and mode machine exist
 // so tier changes can announce, re-sync the Camera panel and stay quiet in

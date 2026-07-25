@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- viewport-fit=cover : nécessaire pour que env(safe-area-inset-*) soit
+         non nul sur les téléphones à encoche — le viewer shibu ancre son
+         footer/CTA en bas de l'écran (v28.css). Sans effet ailleurs. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>ShibuMap — quiet, living topographic maps</title>
     <meta
       name="description"

@@ -771,35 +771,38 @@ body.dark .hud-row span {
    voir ui/follow-pad.js) */
 
 /* ------------------------------------------------- hour pill (day/night) */
-/* Same glass family and same column as the right-dock panels — a quiet
-   instrument above Templates, not a floating gadget. Neutral thumb: the hour
-   is ambience, not an accent-coloured call to action. */
+/* Centrée en HAUT de l'écran (réorg topbar) : le centre est la zone du
+   CONTEXTE — l'heure du ciel y dessine son arc, comme le soleil. Toujours en
+   « pure float » : l'heure est une ambiance, pas un réglage à encadrer. */
 .ce-hourpill {
   position: fixed;
-  top: 14px;
-  right: 14px;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 55;
-  width: 270px; /* exact match with the right-dock cards */
+  width: 270px; /* même largeur que les cartes des docks */
   box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 9px 14px;
-  border-radius: 12px;
+  border-radius: 999px;
   color: var(--ce-ink);
   font-family: var(--ce-font);
-  /* treated like the SURFACE readout: no outline, no background — pure float */
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
+  /* fini le « pure float » : posée nue sur la carte, l'encre du THÈME devenait
+     invisible dès que le fond ne suivait pas (dark mode sur carte claire —
+     bug vu par Adrien). Un léger verre thémé garantit le contraste partout. */
+  background: var(--ce-glass, rgba(252, 252, 253, 0.62));
+  border: 1px solid var(--ce-border, rgba(255, 255, 255, 0.55));
+  box-shadow: var(--ce-shadow, 0 10px 40px rgba(28, 25, 23, 0.12));
+  -webkit-backdrop-filter: blur(9px) saturate(1.35);
+  backdrop-filter: blur(9px) saturate(1.35);
 }
 .ce-hp-glyph { font-size: 12px; opacity: 0.55; }
 .ce-hourpill input[type='range'] {
   flex: 1;
   height: 2px;
-  accent-color: #8d887c;
+  accent-color: var(--ce-ink, #8d887c); /* le curseur suit le thème */
 }
 .ce-hp-label {
   font-family: 'SF Mono', ui-monospace, monospace;
@@ -849,6 +852,18 @@ body.dark .hud-row span {
   -moz-appearance: textfield;
 }
 .ce-hp-speed:focus { outline: none; opacity: 1; }
+/* « masquer l'UI » tient sa promesse : seul l'œil reste — la tirette aussi
+   s'efface (elle est désormais au centre, en pleine vue) */
+body.ce-noui .ce-hourpill { display: none; }
+/* écrans moyens : la tirette se resserre, le champ de vitesse s'efface ;
+   en dessous, elle s'efface (l'heure reste dans Éléments → Lumière) */
+@media (max-width: 900px) {
+  .ce-hourpill { width: 200px; }
+  .ce-hp-speed { display: none; }
+}
+@media (max-width: 780px) {
+  .ce-hourpill { display: none; }
+}
 .ce-hp-speed::-webkit-outer-spin-button,
 .ce-hp-speed::-webkit-inner-spin-button {
   -webkit-appearance: none;
@@ -859,19 +874,21 @@ body.dark .hud-row span {
 .zoom-stepper {
   position: fixed;
   left: 50%;
-  top: 54px; /* glued right under the top bar, centred (Adrien) */
+  top: 54px; /* sous la tirette d'heure, au centre — la colonne du contexte */
   transform: translateX(-50%);
   display: flex;
   flex-direction: row; /* horizontal */
   align-items: center;
   gap: 2px;
   padding: 1px 7px;
-  /* discrete: outline + translucent fill kept, but rounded ONLY at the bottom
-     so it reads as hanging from the bar above (Adrien) */
-  border-radius: 0 0 15px 15px;
-  background: rgba(150, 160, 180, 0.1);
+  /* la topbar centrée a disparu (pills de coin) : le stepper devient un
+     petit pill autonome, arrondi des quatre côtés */
+  border-radius: 15px;
+  /* verre THÉMÉ (flippe avec body.dark) — l'ancien rgba(150,160,180,.1) était
+     quasi transparent : en dark mode sur carte claire, glyphes clairs sur
+     pilule blanchâtre = stepper invisible (bug vu par Adrien) */
+  background: var(--ce-glass, rgba(252, 252, 253, 0.62));
   border: 1px solid var(--ce-border, rgba(255, 255, 255, 0.55));
-  border-top: 0;
   -webkit-backdrop-filter: blur(9px) saturate(1.35);
   backdrop-filter: blur(9px) saturate(1.35);
   box-shadow: var(--ce-shadow, 0 10px 40px rgba(20, 24, 35, 0.12));

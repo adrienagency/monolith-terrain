@@ -16,6 +16,8 @@ const TIPS = {
 export function scanSection(ctx) {
   const s = section('Scanner', { open: false })
   let scanType = SCAN_TYPES[0].id
+  // meta parlante repliée : le balayage choisi (règle constante Adrien)
+  const syncMeta = () => s.setMeta(SCAN_TYPES.find((t) => t.id === scanType)?.label ?? '')
   const grid = el('div', 'ce-scan-grid')
   const typeButtons = SCAN_TYPES.map((t) => {
     const b = el('button', `ce-card${t.id === scanType ? ' on' : ''}`)
@@ -26,10 +28,12 @@ export function scanSection(ctx) {
       scanType = t.id
       typeButtons.forEach((x) => x.classList.remove('on'))
       b.classList.add('on')
+      syncMeta()
     })
     grid.append(b)
     return b
   })
+  syncMeta()
   s.body.append(grid)
   const trig = el('div', 'ce-btn-row')
   const run = button('Lancer le scan', () => ctx.runScan(scanType), { accent: true })

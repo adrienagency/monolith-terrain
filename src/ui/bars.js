@@ -1,5 +1,6 @@
-// Top bar (wordmark, globe, export, theme, hide-UI) and bottom bar
-// (place search + GPX import) — the two fixed chrome pieces of the v28 UI.
+// Chrome fixe du v28 : la topbar (éclatée en DEUX pills de coin — identité &
+// navigation à gauche, réglages & sorties à droite, grammaire Figma/Canva),
+// et la barre du bas (recherche de lieu + import GPX).
 
 import { el, iconButton, refreshAll } from './kit.js'
 import { parseLatLon } from '../geo.js'
@@ -32,6 +33,9 @@ const I = {
   brush:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15.5 4.5 19.5 8.5 9 19c-1.5 1.5-4 1.5-5-.5s.5-3.5 2-5L15.5 4.5z"/><path d="M13.5 6.5l4 4"/></svg>',
   flag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/></svg>',
+  news: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 12.5h8M8 16h5"/></svg>',
+  compass:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2.2 5-5 2.2 2.2-5 5-2.2z"/></svg>',
 }
 
 // ---- Mode simple / avancé (UX P3) ----------------------------------------
@@ -46,11 +50,37 @@ export function initUiLevel() {
   document.body.classList.toggle('ce-simple', !isAdvanced())
 }
 
+// L'interrupteur « Avancé » vit DANS les barres de modes (quickbar en mode
+// simple, elembar en mode avancé) — le switch habite là où vit sa conséquence,
+// plus dans la topbar. Plusieurs instances restent synchronisées.
+const advToggles = new Set()
+function syncAdvAll() {
+  for (const b of advToggles) b.classList.toggle('on', isAdvanced())
+}
+export function buildAdvToggle(baseCls = 'ce-pillbtn') {
+  const b = el('button', `${baseCls} ce-advbtn`)
+  b.type = 'button'
+  b.innerHTML = `${I.sliders}<span>Avancé</span>`
+  b.setAttribute('data-tip', 'Mode avancé — tous les panneaux de réglage (création, carte, effets, caméra…).')
+  b.addEventListener('click', () => {
+    const adv = !isAdvanced()
+    try { localStorage.setItem(ADV_KEY, adv ? '1' : '0') } catch {}
+    initUiLevel()
+    syncAdvAll()
+  })
+  advToggles.add(b)
+  b.classList.toggle('on', isAdvanced())
+  return b
+}
+
 export function buildTopBar(ctx) {
-  const bar = el('div', 'ce-topbar ce-glassbox')
+  // pill GAUCHE — identité & navigation : marque, stade (→ nouveautés), Globe
+  const bar = el('div', 'ce-topbar ce-topbar-left ce-glassbox')
+  // pill DROITE — réglages & sorties : sombre, œil, aide, paramètres │ Publier
+  const barRight = el('div', 'ce-topbar ce-topbar-right ce-glassbox')
 
   const mark = el('span', 'ce-wordmark')
-  mark.innerHTML = '<i>◍</i>ShibuMap'
+  mark.innerHTML = '<i>◍</i><span class="ce-wm-name">ShibuMap</span>'
   bar.append(mark)
 
   // stage chip — states the product stage AND opens the changelog: the stage
@@ -60,13 +90,14 @@ export function buildTopBar(ctx) {
     alphaChip = el('button', 'ce-alpha')
     alphaChip.type = 'button'
     alphaChip.textContent = ctx.appStage.toUpperCase()
-    alphaChip.setAttribute('data-tip', "ShibuMap is in alpha — click to see what's new.")
+    alphaChip.setAttribute('data-tip', 'ShibuMap est en alpha — cliquer pour voir les nouveautés.')
     alphaChip.addEventListener('click', () => ctx.toggleChangelog?.())
     bar.append(alphaChip)
   }
 
   const globeBtn = iconButton(I.globe, '', () => ctx.enterOrbit())
-  globeBtn.setAttribute('data-tip', 'Pull all the way out and watch the planet slowly turn.')
+  globeBtn.classList.add('ce-globebtn') // ciblé par la visite guidée
+  globeBtn.setAttribute('data-tip', 'Reculer jusqu’à la planète entière, qui tourne lentement.')
   bar.append(globeBtn)
 
   // export earns a labelled pill — it is a primary action, not tucked-away chrome.
@@ -79,31 +110,39 @@ export function buildTopBar(ctx) {
   exportBtn.innerHTML = `${I.export}<span>Publier</span>`
   exportBtn.setAttribute('data-tip', 'Tout ce qui sort de ShibuMap : image, vidéo, lien de la vue, projet course.')
   const pubMenu = el('div', 'ce-pubmenu ce-glassbox')
-  const closeMenu = () => pubMenu.classList.remove('open')
-  const menuItem = (icon, label, sub, onClick) => {
+  // menu Aide (le « ? ») — visite guidée + raccourcis + nouveautés en UN bouton
+  const helpMenu = el('div', 'ce-pubmenu ce-helpmenu ce-glassbox')
+  const closeMenu = () => { pubMenu.classList.remove('open'); helpMenu.classList.remove('open') }
+  const menuItem = (menu) => (icon, label, sub, onClick) => {
     const b = el('button', 'ce-pubitem')
     b.type = 'button'
     b.innerHTML = `${icon}<span class="pi-main"><b>${label}</b><i>${sub}</i></span>`
     b.addEventListener('click', async () => { closeMenu(); await onClick() })
+    menu.append(b)
     return b
   }
+  const pubItem = menuItem(pubMenu)
+  const helpItem = menuItem(helpMenu)
   // openExport est async (pile d'export lazy-loadée au premier clic)
-  const miExport = menuItem(I.export, 'Exporter une image ou une vidéo', 'Ce que vous voyez, en haute qualité.', async () => {
+  pubItem(I.export, 'Exporter une image ou une vidéo', 'Ce que vous voyez, en haute qualité.', async () => {
     try { await ctx.openExport() } catch (err) { console.error('Export failed to open:', err) }
   })
-  const miShare = menuItem(I.share, 'Copier le lien de la vue', 'Look, lieu et caméra — la même carte chez eux.', () => doShare())
+  pubItem(I.share, 'Copier le lien de la vue', 'Look, lieu et caméra — la même carte chez eux.', () => doShare())
   // projet course → Race Studio étape Exporter (aucune logique dupliquée) ;
   // visible seulement quand une course est chargée
-  const miRace = menuItem(I.route, 'Projet course (.shibumap-race)', 'Enregistrer ou partager votre carte de course.', () => ctx.openStudioExport?.())
-  pubMenu.append(miExport, miShare, miRace)
+  const miRace = pubItem(I.route, 'Projet course (.shibumap-race)', 'Enregistrer ou partager votre carte de course.', () => ctx.openStudioExport?.())
   exportBtn.addEventListener('click', (e) => {
     e.stopPropagation()
+    const wasOpen = pubMenu.classList.contains('open')
+    closeMenu()
     miRace.style.display = ctx.hasCourse?.() ? '' : 'none'
-    pubMenu.classList.toggle('open')
+    pubMenu.classList.toggle('open', !wasOpen)
   })
-  document.addEventListener('click', (e) => { if (!pubMenu.contains(e.target) && e.target !== exportBtn) closeMenu() })
+  document.addEventListener('click', (e) => {
+    if (!pubMenu.contains(e.target) && !helpMenu.contains(e.target)) closeMenu()
+  })
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu() })
-  document.body.append(pubMenu)
+  document.body.append(pubMenu, helpMenu)
 
   // one click copies a link that reproduces this exact look + location +
   // camera (navigator.share on mobile hands it to the OS share sheet
@@ -178,44 +217,33 @@ export function buildTopBar(ctx) {
     syncDark()
     refreshAll() // resyncs dark-mode-gated controls (e.g. Map → Contour weight)
   })
-  dark.setAttribute('data-tip', "Switch the map's look between light and dark — palette, contours, seas, fog.")
+  dark.setAttribute('data-tip', 'Carte claire / sombre — palette, contours, mers, brume.')
   const syncDark = () => {
     dark.innerHTML = ctx.params.darkMode ? I.sun : I.moon
     dark.classList.toggle('on', !!ctx.params.darkMode)
   }
   syncDark()
-  bar.append(dark)
-
-  const helpBtn = iconButton(I.help, '', () => ctx.startTutorial?.())
-  helpBtn.setAttribute('data-tip', 'A one-minute tour of everything on this screen.')
-  bar.append(helpBtn)
-
-  const shortcutsBtn = iconButton(I.keyboard, '', () => ctx.toggleShortcuts?.())
-  shortcutsBtn.setAttribute('data-tip', 'Keyboard shortcuts — camera, layers, undo/redo.')
-  bar.append(shortcutsBtn)
 
   const hideBtn = iconButton(I.eyeOff, '', () => setNoUi(true))
-  hideBtn.setAttribute('data-tip', 'Hide every panel — only a small eye button stays.')
-  bar.append(hideBtn)
+  hideBtn.setAttribute('data-tip', 'Masquer toute l’interface — seul un petit œil reste.')
 
-  // interrupteur Mode avancé (UX P3) — ré-affiche les docks de panneaux
-  const advBtn = el('button', 'ce-pillbtn ce-advbtn')
-  advBtn.type = 'button'
-  advBtn.innerHTML = `${I.sliders}<span>Avancé</span>`
-  advBtn.setAttribute('data-tip', 'Mode avancé — tous les panneaux de réglage (création, carte, effets, caméra…).')
-  const syncAdv = () => advBtn.classList.toggle('on', isAdvanced())
-  advBtn.addEventListener('click', () => {
-    const adv = !isAdvanced()
-    try { localStorage.setItem(ADV_KEY, adv ? '1' : '0') } catch {}
-    initUiLevel()
-    syncAdv()
+  // « ? » — l'aide en UN bouton : visite guidée, raccourcis, nouveautés
+  const helpBtn = iconButton(I.help, '', () => {})
+  helpBtn.setAttribute('data-tip', 'Aide — visite guidée, raccourcis clavier, nouveautés.')
+  helpItem(I.compass, 'Visite guidée', 'L’écran expliqué en une minute.', () => ctx.startTutorial?.())
+  helpItem(I.keyboard, 'Raccourcis clavier', 'Caméra, calques, annuler / rétablir.', () => ctx.toggleShortcuts?.())
+  helpItem(I.news, 'Nouveautés', 'Tout ce qui a bougé, daté.', () => ctx.toggleChangelog?.())
+  helpBtn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const wasOpen = helpMenu.classList.contains('open')
+    closeMenu()
+    helpMenu.classList.toggle('open', !wasOpen)
   })
-  syncAdv()
 
   // the single button that survives no-UI mode
   const eye = el('button', 'ce-eye ce-glassbox')
   eye.type = 'button'
-  eye.title = 'Show interface'
+  eye.title = 'Afficher l’interface'
   eye.innerHTML = I.eye
   eye.addEventListener('click', () => setNoUi(false))
 
@@ -223,18 +251,17 @@ export function buildTopBar(ctx) {
     document.body.classList.toggle('ce-noui', v)
   }
 
-  // final order (Adrien): wordmark · globe DARK │ share help shortcuts hide │
-  // EXPORT far right. appendChild MOVES the already-built nodes, so this just
-  // reorders them; only the two discrete vertical separators are new.
   // roue crantée — paramètres globaux (Performance…), TOUJOURS visible
   const gearBtn = iconButton(I.gear, '', () => ctx.openSettings?.())
   gearBtn.setAttribute('data-tip', 'Paramètres — réglages globaux de l’application (performance…).')
 
+  // ordre du pill droit : réglages de VUE (sombre, œil) · aide · paramètres,
+  // puis la seule sortie — « Publier » — isolée à l'extrême droite (accent).
   const sep = () => el('span', 'ce-topbar-sep')
-  bar.append(globeBtn, dark, sep(), helpBtn, shortcutsBtn, hideBtn, advBtn, gearBtn, sep(), exportBtn)
+  barRight.append(dark, hideBtn, helpBtn, gearBtn, sep(), exportBtn)
 
-  document.body.append(bar, eye)
-  return { root: bar, syncDark }
+  document.body.append(bar, barRight, eye)
+  return { root: bar, rootRight: barRight, syncDark }
 }
 
 // fixed bottom-right: one click to the isometric museum view — the whole
@@ -247,7 +274,7 @@ export function buildIsoButton(ctx) {
   const badge = el('span', 'ce-iso-badge')
   badge.style.display = 'none'
   btn.append(badge)
-  btn.setAttribute('data-tip', 'Isometric view — click to cycle: four angles, top-down (north), ground level.')
+  btn.setAttribute('data-tip', 'Vue isométrique — cliquer pour tourner : quatre angles, vue du dessus (nord), raz du sol.')
   btn.addEventListener('click', () => ctx.flyIso())
   document.body.append(btn)
   return {
@@ -263,7 +290,7 @@ export function buildCineButton(ctx) {
   const btn = el('button', 'ce-isobtn ce-cinebtn ce-glassbox')
   btn.type = 'button'
   btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="7" width="12" height="10" rx="2"/><path d="M15 10.5 21 8v8l-6-2.5"/></svg>'
-  btn.setAttribute('data-tip', 'Cinematic view — random camera moves around the block. Click again to stop.')
+  btn.setAttribute('data-tip', 'Vue cinématique — la caméra se promène autour du bloc. Recliquer pour arrêter.')
   btn.addEventListener('click', () => btn.classList.toggle('on', !!ctx.toggle()))
   document.body.append(btn)
   return { root: btn, setVisible: (v) => btn.classList.toggle('off', !v) }
@@ -287,41 +314,49 @@ export function buildMapCorner(ctx) {
     document.body.append(b)
     return b
   }
-  // dédoublonnage (Adrien) : seul le toggle AÉRIEN reste — « base » et
-  // « shuffle » doublonnaient « Réinitialiser la carte » (Templates) et
-  // « Look aléatoire » (Création)
   const aerial = mk(MC.aerial, 'Photo aérienne — cliquer pour basculer (là où l’imagerie existe).', 'ce-mapbtn-aerial')
   const check = el('span', 'ce-mapbtn-check')
   check.innerHTML = MC.check
   aerial.append(check)
-
   aerial.addEventListener('click', () => ctx.toggleAerial())
+
+  // le générateur ALÉATOIRE rebranché à côté de l'aérien (demande Adrien) :
+  // un shuffle complet du look — template de base, heure, shader, mer, fond,
+  // socle, brume de couches — en UNE étape d'annulation (shuffleLook, main.js)
+  const dice = mk(MC.shuffle, 'Carte aléatoire — rebat tout le look d’un coup (annulable).', 'ce-mapbtn-shuffle')
+  dice.addEventListener('click', () => ctx.shuffle?.())
 
   return {
     setAerialActive: (v) => aerial.classList.toggle('on', !!v),
-    setVisible: (v) => { aerial.classList.toggle('off', !v) },
+    setVisible: (v) => { aerial.classList.toggle('off', !v); dice.classList.toggle('off', !v) },
   }
 }
 
-// Barre contextuelle flottante (UX P3) — les deux portes de création, toujours
-// à portée sur la carte nue. Visible UNIQUEMENT en mode simple ; les modes
-// morphés (store/studio/atelier), noui et embed la masquent en CSS.
-export function buildQuickBar(ctx) {
-  const bar = el('div', 'ce-quickbar ce-glassbox')
-  const mk = (icon, label, tip, onClick, accent) => {
-    const b = el('button', 'ce-pillbtn' + (accent ? ' accent' : ''))
+// Cœur du MODE SIMPLE — même grammaire de nav que le mode avancé (rectif
+// Adrien) : trois .ce-wm-btn (Explorer / Habiller ma carte / Ma course), le
+// mot choisi fonce + icône orange + coche liquide, AUCUN fond de pill.
+// Hébergé dans la rangée liquide de l'elembar (buildElemBar simpleCore).
+export function buildQuickCore(ctx) {
+  const core = el('div', 'ce-qb-core')
+  const explore =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 2.6 4 5.7 4 9s-1.2 6.4-4 9c-2.8-2.6-4-5.7-4-9s1.2-6.4 4-9z"/></svg>'
+  const setActive = (btn) => core.querySelectorAll('.ce-wm-btn').forEach((b) => b.classList.toggle('on', b === btn))
+  const mk = (icon, label, tip, onClick) => {
+    const b = el('button', 'ce-wm-btn')
     b.type = 'button'
     b.innerHTML = `${icon}<span>${label}</span>`
     b.setAttribute('data-tip', tip)
-    b.addEventListener('click', onClick)
+    b.addEventListener('click', () => { setActive(b); onClick?.() })
     return b
   }
-  bar.append(
-    mk(I.brush, 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur votre carte.', () => ctx.openAtelier(), true),
+  const home = mk(explore, 'Explorer', 'La carte, simplement — naviguer, chercher un lieu.', null)
+  core.append(
+    home,
+    mk(I.brush, 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur votre carte.', () => ctx.openAtelier()),
     mk(I.flag, 'Ma course', 'Race Studio — votre parcours GPX en carte de course (points de passage, transports, partage).', () => ctx.openStudio())
   )
-  document.body.append(bar)
-  return { root: bar }
+  home.classList.add('on') // l'état de repos du mode simple : on explore
+  return core
 }
 
 export function buildBottomBar(ctx) {
@@ -331,7 +366,7 @@ export function buildBottomBar(ctx) {
   search.innerHTML = I.search
   const input = el('input')
   input.type = 'text'
-  input.placeholder = 'Search a place, or paste “lat, lon”'
+  input.placeholder = 'Chercher un lieu, ou coller « lat, lon »'
   input.spellcheck = false
   search.append(input)
 
@@ -350,7 +385,7 @@ export function buildBottomBar(ctx) {
   const gpx = el('button', 'ce-pillbtn')
   gpx.type = 'button'
   gpx.innerHTML = `${I.route}<span>GPX</span>`
-  gpx.setAttribute('data-tip', 'Import a GPX track and drape it on the relief.')
+  gpx.setAttribute('data-tip', 'Importer une trace GPX et la draper sur le relief.')
   gpx.addEventListener('click', () => ctx.openGpx())
 
   bar.append(search, gpx)

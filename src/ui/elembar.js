@@ -9,6 +9,7 @@
 // autres (main.js applyWorkMode). Surmenus : lignes SCRUBBABLES (glisser =
 // régler, clic sec = grande tirette, double-clic = saisir) — voir v2.
 import { el, toggle as kitToggle, refreshAll } from './kit.js'
+import { liquidize } from './liquid.js'
 
 const I = {
   explore: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 2.6 4 5.7 4 9s-1.2 6.4-4 9c-2.8-2.6-4-5.7-4-9s1.2-6.4 4-9z"/></svg>',
@@ -23,10 +24,17 @@ const I = {
 const fmt = (c, v) => (c.step >= 1 ? String(Math.round(v)) : (+v).toFixed(c.step >= 0.1 ? 1 : 2))
 const clampStep = (c, v) => Math.min(c.max, Math.max(c.min, Math.round(v / c.step) * c.step))
 
-export function buildElemBar({ modes, initial, onMode, toolsByMode }) {
-  const bar = el('div', 'ce-elembar ce-glassbox')
+// simpleCore (optionnel) : le cœur du MODE SIMPLE (Habiller ma carte / Ma
+// course, construit par bars.js) — hébergé dans la même rangée liquide pour
+// que le fond MORPHE d'un niveau à l'autre au switch Avancé
+export function buildElemBar({ modes, initial, onMode, toolsByMode, simpleCore }) {
+  // barre LIQUIDE (réf. Enroll, précisé par Adrien) : Explorer/Studio/Parcours
+  // vivent dans UNE MÊME bulle (la capsule) ; « Avancé » a SA bulle, reliée à
+  // la capsule par la taille concave du goo — le liquide est le séparateur
+  const bar = el('div', 'ce-elembar')
   const modeSeg = el('div', 'ce-wmseg')
   const sep = el('span', 'ce-elembar-sep')
+  sep.style.display = 'none' // la ponctuation, c'est la taille liquide
   const tools = el('div', 'ce-elemtools')
   const focusRow = el('div', 'ce-elemfocus')
   bar.append(modeSeg, sep, tools, focusRow)
@@ -180,7 +188,6 @@ export function buildElemBar({ modes, initial, onMode, toolsByMode }) {
       if (a.sync) syncFns.push(() => a.sync(btn))
       tools.append(btn)
     }
-    sep.style.display = tools.children.length ? '' : 'none'
   }
   setInterval(() => syncFns.forEach((f) => f()), 300)
 
@@ -205,9 +212,32 @@ export function buildElemBar({ modes, initial, onMode, toolsByMode }) {
   menu.addEventListener('pointerenter', () => clearTimeout(closeT))
   menu.addEventListener('pointerleave', scheduleClose)
 
+  // le cœur reste centré (la rangée fait la largeur de la capsule) ;
+  // « Avancé » est ancré à droite, décentré. Deux bulles dans le même goo :
+  // la capsule entière + le bouton Avancé (rempli plus tard par main.js —
+  // le MutationObserver de liquidize le voit arriver tout seul)
+  const row = el('div', 'ce-lqrow ce-liquid')
+  const advSlot = el('div', 'ce-lq-adv')
+  row.append(bar, ...(simpleCore ? [simpleCore] : []), advSlot)
+  const isSimple = () => document.body.classList.contains('ce-simple')
+  liquidize(row, {
+    // bulle '__core' STABLE : elle pointe vers le niveau visible (capsule
+    // avancée OU cœur simple) — au switch, la même bulle transitionne vers
+    // la nouvelle géométrie à travers le goo = morph liquide du fond
+    items: () => [
+      { key: '__core', el: isSimple() && simpleCore ? simpleCore : bar },
+      // la bulle mesure le SLOT (pleine hauteur), pas le bouton — le bouton
+      // garde une pastille de survol EN RETRAIT comme les autres (Adrien)
+      { key: '__adv', el: advSlot },
+    ],
+    inflate: 0,
+    // la coche liquide chevauche le choix ACTIF des DEUX niveaux et voyage
+    bumpFor: () => (isSimple() && simpleCore ? simpleCore : modeSeg).querySelector('.ce-wm-btn.on'),
+    rim: true, // liseré métal liquide sur le pourtour (adapté à la palette)
+  })
   const wrap = el('div', 'ce-elemwrap')
-  wrap.append(menu, bar)
+  wrap.append(menu, row)
   document.body.append(wrap)
   setMode(initial, { silent: true })
-  return { root: wrap, setMode }
+  return { root: wrap, setMode, advSlot }
 }

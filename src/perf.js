@@ -11,7 +11,8 @@
 //
 // Trigger: rolling 60-frame FPS average < 30 sustained ~2.5 s → one tier down.
 // Recovery: average > 55 sustained 12 s → one tier up, never above the START
-// tier (coarse-pointer devices boot at T1, desktops at T0). Hysteresis: at
+// tier (phones boot at T3 — they only ever run the shared-shibu viewer —
+// tablets at T1, desktops at T0). Hysteresis: at
 // least 20 s between any two automatic changes, and the FPS window is ignored
 // for 5 s after boot and 2 s after any tier change / tab-visibility change,
 // so load spikes and background throttling can never cause a step.
@@ -66,7 +67,14 @@ export function createAdaptiveQuality({
   // (a pixelRatio change would resize the canvas and abort the encoder)
   canStep = () => true,
 } = {}) {
-  const startTier = matchMedia('(pointer: coarse)').matches ? 1 : 0
+  // Boot tier by device class. Phones (coarse pointer + short side < 600, the
+  // same test as boot.js's gate) only ever reach the app as the shared-shibu
+  // VIEWER — no editing, no need for the max — so they start at T3 ESSENTIAL
+  // (pixelRatio 0.85, shadows/DoF/grain off) and stay there: recovery never
+  // climbs above startTier. Tablets keep T1, desktops T0, as before.
+  const coarse = matchMedia('(pointer: coarse)').matches
+  const phone = coarse && Math.min(screen.width, screen.height) < 600
+  const startTier = phone ? 3 : coarse ? 1 : 0
   let tier = 0
 
   // the user's own settings — what T0 restores. Tracked live until the first
@@ -242,8 +250,8 @@ export function createAdaptiveQuality({
     else if (above >= UP_SUSTAIN && tier > startTier) setTier(tier - 1)
   }
 
-  // coarse-pointer devices (tablets) boot straight into BALANCED — silently,
-  // and before the first frame, so there is no visible quality pop
+  // touch devices boot straight into their tier (T1 tablets, T3 phones) —
+  // silently, and before the first frame, so there is no visible quality pop
   if (startTier > 0) {
     tier = startTier
     applyTier(startTier)
