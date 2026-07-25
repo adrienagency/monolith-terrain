@@ -158,7 +158,7 @@ const FRAG = /* glsl */ `
       // repousse ailleurs) — le nuage crée des protubérances à différents
       // endroits au fil du temps au lieu d'être figé dans sa graine
       float ph = h.y * 6.28318;
-      float breathe = 1.0 + 0.22 * sin(uTime * (0.05 + h.z * 0.06) + ph);
+      float breathe = 1.0 + 0.34 * sin(uTime * (0.04 + h.z * 0.05) + ph);
       lobes[i] = vec4(xz.x, y / squash, xz.y, r * breathe);
       stretch[i].y *= squash;
     }
@@ -226,10 +226,13 @@ const FRAG = /* glsl */ `
     // base FRANCHE pour un cumulus (coupé net au niveau de condensation) mais
     // molle pour un voile, qui n'a pas de base du tout
     env *= smoothstep(-0.60, mix(-0.42, -0.10, wisp), p.y);
-    // CEINTURE anti-carré : quoi qu'aient fait les lobes et le bruit, la
-    // densité s'éteint AVANT la paroi de la boîte — aucune tranche possible
-    float wall = max(abs(p.x), max(abs(p.y), abs(p.z)));
-    env *= 1.0 - smoothstep(0.88, 1.06, wall);
+    // CEINTURE anti-carré, version CIRCULAIRE : la première ceinture fondait
+    // sur max(|x|,|z|) — une distance de Tchebychev, dont l'iso-ligne est un
+    // CARRÉ. Dès qu'un gros nuage l'atteignait, son bord épousait la ceinture
+    // carrée (le bug persistant vu de dessus par Adrien). En norme euclidienne
+    // le bord de secours est un cercle, invisible dans une silhouette de lobes.
+    env *= 1.0 - smoothstep(0.80, 1.02, length(p.xz));
+    env *= 1.0 - smoothstep(0.86, 1.06, abs(p.y));
 
     // OPACITÉ PAR ÉPAISSEUR (Adrien) : très opaque au cœur, presque rien sur
     // les bords fins — la non-linéarité creuse l'écart au lieu de tout lisser
@@ -253,7 +256,10 @@ const FRAG = /* glsl */ `
   float scatter(float depth, float cosA) {
     float lum = 0.0, a = 1.0, b = 1.0, g = 0.45;
     for (int o = 0; o < 3; o++) {
-      float phase = mix(henyeyGreenstein(g, cosA), henyeyGreenstein(-g * 0.5, cosA), 0.4) + 0.24;
+      // plancher isotrope ABAISSÉ (0.24 → 0.11) : trop haut, il noyait la
+      // direction du soleil et le nuage sortait blanc uniforme quel que soit
+      // le côté — l'« éclairage inversé » vu par Adrien
+      float phase = mix(henyeyGreenstein(g, cosA), henyeyGreenstein(-g * 0.5, cosA), 0.4) + 0.11;
       lum += b * phase * beer(depth * a);
       a *= 0.45; b *= 0.55; g *= 0.85;
     }
@@ -271,8 +277,8 @@ const FRAG = /* glsl */ `
     for (int j = 1; j <= SUN_STEPS; j++) {
       vec3 s = wp + toSun * (step * float(j));
       if (any(lessThan(s, bmin)) || any(greaterThan(s, bmax))) break;
-      d += densityAt(s, lobes, stretch) * step;
-      if (d >= 2.2) break;
+      d += densityAt(s, lobes, stretch) * step * 1.7;
+      if (d >= 2.4) break;
     }
     return d;
   }

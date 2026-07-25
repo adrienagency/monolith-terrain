@@ -133,7 +133,7 @@ function spawnCloud(rng, opts) {
     age: ageAtBirth,
     // durée de vie en secondes — un ciel où tout meurt en même temps est faux
     span: 45 + rng() * 75,
-    speed: 0.75 + rng() * 0.5, // chaque nuage prend le vent un peu différemment
+    speed: 0.55 + rng() * 0.95, // écart FRANC : certains filent, d'autres traînent
     density: lerp(rng, k.dens),
   }
 }
@@ -236,6 +236,34 @@ export function stepSky(sky, dt, { wind = { dir: 0, speed: 0.6 } } = {}) {
       big.rTarget = Math.min(maxR, Math.hypot(big.r, small.r)) // ~volume combiné
       small.age = Math.max(small.age, 0.72) // le petit se dissout dans le gros
       small.merging = true
+    }
+  }
+  // DIVISIONS (Adrien) : l'inverse de la fusion — un gros nuage mûr peut se
+  // scinder en deux. Le parent maigrit, un enfant plus jeune naît à son flanc
+  // et part vivre sa vie (vitesse propre, un peu plus déchiqueté).
+  if (sky.clouds.length < CLOUD_COUNT_MAX) {
+    for (const c of sky.clouds) {
+      if (c.merging || c.r < opts.sizeMax * 1.02) continue
+      if (c.age < 0.25 || c.age > 0.6) continue
+      if (rng() > dt * 0.05) continue // ~1 division / 20 s de nuage éligible
+      const ang = rng() * Math.PI * 2
+      sky.clouds.push({
+        ...c,
+        r: c.r * 0.62,
+        h: c.h * 0.8,
+        seed: rng() * 1000,
+        x: c.x + Math.cos(ang) * c.r * 0.9,
+        z: c.z + Math.sin(ang) * c.r * 0.9,
+        age: 0.16, // naissant : il grossit en s'éloignant
+        span: 40 + rng() * 60,
+        rTarget: 0,
+        speed: c.speed * (0.85 + rng() * 0.3),
+        wisp: Math.min(1, (c.wisp ?? 0) + rng() * 0.2),
+        merging: false,
+      })
+      c.r *= 0.75
+      c.rTarget = 0
+      break // une division par pas de temps suffit
     }
   }
   return sky

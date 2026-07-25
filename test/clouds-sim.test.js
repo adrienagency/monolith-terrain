@@ -109,7 +109,9 @@ test('parallaxe : un nuage haut file plus vite qu un nuage bas', () => {
 test('stepSky : le ciel s enroule, le peuplement ne fuit jamais', () => {
   const sky = createSky({ count: 6, seed: 11 })
   for (let i = 0; i < 400; i++) stepSky(sky, 0.5, { wind: { dir: 0.7, speed: 3 } })
-  assert.equal(sky.clouds.length, 6)
+  // les DIVISIONS peuvent faire croître le peuplement (c'est le rendu qui
+  // retaille via resizeSky) — l'invariant est une borne, plus une égalité
+  assert.ok(sky.clouds.length >= 6 && sky.clouds.length <= CLOUD_COUNT_MAX, `peuplement ${sky.clouds.length}`)
   const lim = SKY_DEFAULTS.half * 1.15 + 1e-6
   for (const c of sky.clouds) {
     assert.ok(Math.abs(c.x) <= lim && Math.abs(c.z) <= lim, `nuage échappé : ${c.x},${c.z}`)
@@ -121,8 +123,8 @@ test('stepSky remplace les nuages morts (le ciel ne se vide pas)', () => {
   const ids = sky.clouds.map((c) => c.seed)
   // bien au-delà de la plus longue durée de vie
   for (let i = 0; i < 60; i++) stepSky(sky, 5)
-  assert.equal(sky.clouds.length, 5, 'peuplement constant')
-  const renewed = sky.clouds.filter((c, i) => c.seed !== ids[i]).length
+  assert.ok(sky.clouds.length >= 5 && sky.clouds.length <= CLOUD_COUNT_MAX, `peuplement ${sky.clouds.length}`)
+  const renewed = sky.clouds.slice(0, 5).filter((c, i) => c.seed !== ids[i]).length
   assert.ok(renewed >= 4, `le ciel devrait s être renouvelé : ${renewed}/5`)
   for (const c of sky.clouds) assert.ok(c.age >= 0 && c.age < 1, 'âge toujours valide')
 })
@@ -181,6 +183,30 @@ test('collision : le gros absorbe, le petit part en dissipation', () => {
   const r0 = a.r
   stepSky(sky, 0.5, { wind: { dir: 0, speed: 0 } })
   assert.ok(a.r > r0 && a.r < a.rTarget + 1e-9, `croissance douce : ${r0} → ${a.r} (cible ${a.rTarget})`)
+})
+
+test('division : un gros nuage mûr se scinde en deux, près de lui', () => {
+  const sky = createSky({ count: 2, seed: 6, grouping: { mode: 'disperse', centers: null } })
+  const parent = sky.clouds[0]
+  parent.x = 0; parent.z = 0
+  parent.r = SKY_DEFAULTS.sizeMax * 1.3 // éligible
+  parent.age = 0.4
+  parent.merging = false
+  sky.clouds[1].x = 50; sky.clouds[1].z = 50; sky.clouds[1].r = 1 // hors jeu
+  const r0 = parent.r
+  // la division est probabiliste (~1/20 s) : on laisse le temps passer
+  let split = false
+  for (let i = 0; i < 400 && !split; i++) {
+    stepSky(sky, 0.25, { wind: { dir: 0, speed: 0 } })
+    split = sky.clouds.length > 2
+    parent.age = Math.min(parent.age, 0.5) // rester dans la fenêtre d'éligibilité
+    parent.r = Math.max(parent.r, SKY_DEFAULTS.sizeMax * 1.1)
+  }
+  assert.ok(split, 'le nuage aurait dû se diviser')
+  const child = sky.clouds[sky.clouds.length - 1]
+  assert.ok(child.age < 0.2, 'l enfant naît jeune')
+  assert.ok(Math.hypot(child.x - parent.x, child.z - parent.z) < r0 * 2.2, 'l enfant naît au flanc du parent')
+  assert.ok(parent.r < r0, 'le parent a maigri')
 })
 
 test('makeRng : déterministe et dans [0,1)', () => {
