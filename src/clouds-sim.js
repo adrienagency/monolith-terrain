@@ -17,13 +17,15 @@
 
 // Bornes du peuplement. Au-delà de MAX les nuages se recouvrent et
 // l'individualité — tout l'intérêt de cette refonte — se perd.
-export const CLOUD_COUNT_MIN = 4
-export const CLOUD_COUNT_MAX = 28
+export const CLOUD_COUNT_MIN = 3
+export const CLOUD_COUNT_MAX = 12
 
 // Nombre de nuages selon la puissance de la machine (palier de perf.js :
 // 0 = desktop, 1 = tablette, 2/3 = délestage, 3 = téléphone). Adrien : « peut-
 // être modifier ce chiffre en fonction de la puissance de calcul ».
-const COUNT_BY_TIER = [24, 16, 10, 6]
+// Adrien : « tu peux afficher jusqu'à 12 nuages, ça suffit — moins de nuages
+// et plus qualitatif ». Le budget économisé part dans la forme et l'éclairage.
+const COUNT_BY_TIER = [12, 9, 6, 4]
 export function cloudCountForTier(tier = 0, density = 1) {
   const base = COUNT_BY_TIER[Math.max(0, Math.min(3, tier | 0))]
   return Math.round(clamp(base * density, CLOUD_COUNT_MIN, CLOUD_COUNT_MAX))
@@ -136,10 +138,17 @@ export function stepSky(sky, dt, { wind = { dir: 0, speed: 0.6 } } = {}) {
   const wz = Math.sin(wind.dir) * wind.speed
   const lim = opts.half * 1.15 // marge de sortie : on laisse le nuage quitter le champ
   sky.t += dt
+  const { baseY, topY } = opts
+  const band = Math.max(1e-3, topY - baseY)
   for (let i = 0; i < sky.clouds.length; i++) {
     const c = sky.clouds[i]
-    c.x += wx * c.speed * dt
-    c.z += wz * c.speed * dt
+    // PARALLAXE (Adrien) : le vent est plus fort en altitude, donc un nuage
+    // haut file plus vite qu'un nuage bas. C'est ce décalage qui donne la
+    // profondeur — sans lui la couche glisse d'un bloc, comme un décor peint.
+    const alt = clamp((c.y - baseY) / band, 0, 1)
+    const par = 0.6 + alt * 0.9
+    c.x += wx * c.speed * par * dt
+    c.z += wz * c.speed * par * dt
     // le ciel s'enroule : sorti d'un bord, le nuage rentre par l'autre — le
     // peuplement reste constant sans avoir à tuer/faire naître au passage
     if (c.x > lim) c.x -= 2 * lim

@@ -61,8 +61,10 @@ const FRAG = /* glsl */ `
   precision highp float;
   precision highp sampler3D;
   #define PI 3.14159265359
-  #define MARCH_STEPS 28
-  #define SUN_STEPS 4
+  #define MARCH_STEPS 26
+  #define SUN_STEPS 3
+  #define UP_STEPS 3
+  #define LOBES 5
   // marge de la boîte autour de la silhouette — DOIT valoir la même chose que
   // le facteur de mise à l'échelle des instances (_writeInstances)
   #define BOX_PAD 1.15
@@ -92,6 +94,49 @@ const FRAG = /* glsl */ `
 
   float sat(float v) { return clamp(v, 0.0, 1.0); }
 
+  vec3 hash31(float p) {
+    vec3 q = fract(vec3(p) * vec3(0.1031, 0.1030, 0.0973));
+    q += dot(q, q.yxz + 33.33);
+    return fract((q.xxy + q.yzz) * q.zyx);
+  }
+
+  // union LISSE de deux distances (metaball) : c'est elle qui soude les lobes
+  // en une seule masse au lieu de laisser des boules collées
+  float smin(float a, float b, float k) {
+    float h = sat(0.5 + 0.5 * (b - a) / k);
+    return mix(b, a, h) - k * h * (1.0 - h);
+  }
+
+  // Les LOBES d'un nuage, tirés de sa graine — construits UNE fois par
+  // fragment (pas par pas de marche : ce serait 26× plus cher).
+  //
+  // C'est LA correction du retour d'Adrien : « ils ont tous la même forme
+  // ronde, seule la taille change ». Un cumulus n'est pas un ellipsoïde, c'est
+  // un amas de bourgeons. Chaque nuage tire son propre nombre effectif de
+  // lobes, son étalement, sa verticalité — deux nuages n'ont jamais la même
+  // silhouette, même à taille égale.
+  void buildLobes(float seed, out vec4 lobes[LOBES]) {
+    vec3 c = hash31(seed * 0.717 + 3.1);
+    float spread = 0.30 + c.x * 0.55;   // largeur de l'amas
+    float rise = 0.10 + c.y * 0.55;     // tendance à bourgeonner vers le haut
+    float squat = 0.55 + c.z * 0.75;    // galette large ou tour compacte
+    for (int i = 0; i < LOBES; i++) {
+      vec3 h = hash31(seed + float(i) * 17.31 + 0.5);
+      if (i == 0) {
+        // le corps principal, posé bas : c'est lui qui porte la base plate
+        lobes[0] = vec4(0.0, -0.16, 0.0, 0.44 + c.z * 0.14);
+        continue;
+      }
+      float a = h.x * 6.28318 + float(i) * 1.7;
+      float ring = spread * (0.35 + h.y * 0.85);
+      // certains lobes sont franchement petits (h.z bas) : c'est ce qui crée
+      // les épaules et les bosses irrégulières plutôt qu'une couronne régulière
+      float r = 0.13 + h.z * h.z * 0.34;
+      float y = -0.22 + h.y * rise + (r * 0.5);
+      lobes[i] = vec4(cos(a) * ring, y, sin(a) * ring * squat, r);
+    }
+  }
+
   float terrainH(vec2 xz) {
     vec2 uv = (xz - uMapMin) / uMapSize;
     return uTerrainMin + texture(uTerrainTex, clamp(uv, 0.0, 1.0)).r * uTerrainRange;
@@ -109,35 +154,43 @@ const FRAG = /* glsl */ `
   // ellipsoïde à base plate et sommet bombé — que le bruit vient éroder. C'est
   // l'enveloppe qui donne la silhouette de cumulus ; le bruit ne fait que la
   // ronger, il ne la définit pas (l'erreur de l'ancien système).
-  float densityAt(vec3 wp) {
+  float densityAt(vec3 wp, vec4 lobes[LOBES]) {
     // ⚠️ la BOÎTE est plus large que le nuage (BOX_PAD, pour que l'enveloppe
     // s'éteigne avant le bord) : sans ce facteur, l'enveloppe se calcule sur la
     // boîte, le profil vertical ne s'applique jamais et le nuage redevient un
-    // pavé aux angles rongés — c'est exactement ce qu'on voyait.
+    // pavé aux angles rongés.
     vec3 p = (wp - vCenter) / vHalf * BOX_PAD;
-    float ph = sat(p.y * 0.5 + 0.5);          // 0 = dessous, 1 = dessus
 
-    // silhouette : disque horizontal adouci, aplati vers le haut
-    float radial = length(p.xz);
-    float body = 1.0 - smoothstep(0.45, 1.0, radial);
-    // base FRANCHE (l'underside plat du cumulus) et couronne arrondie
-    float base = smoothstep(0.0, 0.16, ph);
-    float crown = 1.0 - smoothstep(0.55, 1.0, ph);
-    // le sommet se rétrécit : sans ça le nuage est un pavé aux angles ronds
-    float taper = 1.0 - smoothstep(0.35, 1.0, ph) * 0.55;
-    float env = body * base * crown * taper;
+    // silhouette = union lisse des lobes (SDF metaball). C'est ce qui donne des
+    // épaules, des bosses, des creux — une forme PROPRE à chaque nuage.
+    float d = 1e9;
+    for (int i = 0; i < LOBES; i++) {
+      d = smin(d, length(p - lobes[i].xyz) - lobes[i].w, 0.22);
+    }
+    // sortie franche dès qu'on est loin de la masse : inutile de payer le bruit
+    if (d > 0.42) return 0.0;
+
+    // Le bruit DÉPLACE la surface au lieu de la gommer. C'est la différence
+    // entre un chou-fleur et un ballon flou : en soustrayant le bruit à la
+    // distance signée, chaque bosse du bruit devient un vrai bourgeon de la
+    // silhouette. Deux octaves — la grosse structure, puis le grain de bord.
+    vec3 coord = (wp * uScale + vInfo.x) * 0.055;
+    float n1 = texture(uVolume, fract(coord)).r;
+    float n2 = texture(uVolume, fract(coord * 3.1 + 0.37)).r;
+    d += (0.5 - n1) * 0.30 + (0.5 - n2) * 0.11;
+
+    // seuil SERRÉ : c'est le bruit qui doit dessiner le bord, pas un
+    // dégradé de 2 unités monde qui transforme tout en coton
+    float env = 1.0 - smoothstep(-0.05, 0.09, d);
     if (env <= 0.002) return 0.0;
+    // base FRANCHE : un cumulus est coupé net dessous, au niveau de
+    // condensation — c'est sa signature, aucun lobe ne doit dépasser dessous
+    env *= smoothstep(-0.60, -0.42, p.y);
 
-    // érosion : le bruit est échantillonné en espace MONDE (le nuage garde son
-    // grain en dérivant) décalé par la graine de l'entité — deux nuages voisins
-    // n'ont jamais le même dessin
-    vec3 coord = (wp * uScale + vInfo.x) * 0.06;
-    float billow = texture(uVolume, fract(coord)).r;
-    float d = sat(billow - (1.0 - env));
-    d = pow(d, uContrast);
+    float dens = pow(env, uContrast);
     // jamais de nuage collé à l'objectif
-    d *= smoothstep(1.5, 4.0, distance(wp, cameraPosition));
-    return d * uDensity * vInfo.y;
+    dens *= smoothstep(1.5, 4.0, distance(wp, cameraPosition));
+    return dens * uDensity * vInfo.y;
   }
 
   float beer(float d) { return exp(-d); }
@@ -160,16 +213,35 @@ const FRAG = /* glsl */ `
     return lum;
   }
 
-  float sunDepth(vec3 wp, vec3 toSun, vec3 bmin, vec3 bmax) {
-    // la marche soleil reste DANS le nuage : un impostor ne s'ombre que
-    // lui-même (les voisins ne se projettent pas dessus — compromis assumé)
-    float step = min(vHalf.x, vHalf.y) * 0.55;
+  // Épaisseur de matière entre l'échantillon et le soleil — c'est elle qui fait
+  // que les PROTUBÉRANCES projettent leur ombre sur la masse en dessous
+  // (demande d'Adrien) : un bourgeon éclairé se détache d'un creux à l'ombre.
+  float sunDepth(vec3 wp, vec3 toSun, vec3 bmin, vec3 bmax, vec4 lobes[LOBES]) {
+    // pas COURT devant la taille du nuage : un pas long ressort du nuage dès le
+    // premier échantillon, tout paraît mince et le nuage vire au blanc plat
+    float step = min(vHalf.x, vHalf.y) * 0.26;
     float d = 0.0;
     for (int j = 1; j <= SUN_STEPS; j++) {
       vec3 s = wp + toSun * (step * float(j));
       if (any(lessThan(s, bmin)) || any(greaterThan(s, bmax))) break;
-      d += densityAt(s);
-      if (d >= 1.6) break;
+      d += densityAt(s, lobes) * step;
+      if (d >= 2.2) break;
+    }
+    return d;
+  }
+
+  // Épaisseur de matière AU-DESSUS de l'échantillon. La lumière du ciel tombe
+  // du haut : plus il y a de nuage au-dessus, moins elle atteint le point —
+  // c'est ce qui assombrit naturellement la base des nuages ÉPAIS et laisse
+  // claires les galettes minces (demande explicite d'Adrien, à la place de
+  // l'ancien dégradé vertical arbitraire).
+  float depthAbove(vec3 wp, vec3 bmax, vec4 lobes[LOBES]) {
+    float step = vHalf.y * 0.3;
+    float d = 0.0;
+    for (int j = 1; j <= UP_STEPS; j++) {
+      vec3 s = wp + vec3(0.0, step * float(j), 0.0);
+      if (s.y > bmax.y) break;
+      d += densityAt(s, lobes) * step;
     }
     return d;
   }
@@ -190,9 +262,13 @@ const FRAG = /* glsl */ `
       if (wp.y < terrainH(wp.xz)) discard;
     }
 
+    // les lobes de CE nuage, une seule fois pour tout le rayon
+    vec4 lobes[LOBES];
+    buildLobes(vInfo.x, lobes);
+
     vec3 toSun = -normalize(uSunDir);
     float cosA = dot(rd, -toSun);
-    // dither du départ : sans lui, 28 pas font des anneaux
+    // dither du départ : sans lui, les pas de marche font des anneaux
     vec3 h = fract(vec3(gl_FragCoord.xyx) * 0.1031);
     h += dot(h, h.yzx + 33.33);
     float jitter = fract((h.x + h.y) * h.z);
@@ -204,21 +280,22 @@ const FRAG = /* glsl */ `
     for (int i = 0; i < MARCH_STEPS; i++) {
       vec3 wp = ro + rd * (span.x + (float(i) + jitter) * dt);
       if (wp.y < terrainH(wp.xz)) break; // le rayon plonge dans la montagne
-      float d = densityAt(wp);
+      float d = densityAt(wp, lobes);
       if (d <= 0.002) continue;
-      float depth = sunDepth(wp, toSun, bmin, bmax);
-      // BEER-POWDER (Schneider 2015) — l'effet poudreux qui manquait : les
-      // bords épais vus vers le soleil s'assombrissent au lieu de blanchir
+      float depth = sunDepth(wp, toSun, bmin, bmax, lobes);
+      // BEER-POWDER (Schneider 2015) : les bords épais vus vers le soleil
+      // s'assombrissent au lieu de blanchir
       float powder = 1.0 - exp(-depth * 2.0);
       vec3 sun = uSunColor * uBrightness * scatter(depth, cosA) * mix(1.0, powder, 0.35 * sat(cosA));
       // translucence : là où la marche soleil n'a rien trouvé, la lumière passe
       float thin = exp(-depth * 2.0);
       vec3 sss = uSunColor * uSSS * thin * (0.35 + 0.65 * sat(cosA));
-      // le ventre du nuage est dans l'ombre de sa propre masse — mesuré sur la
-      // SILHOUETTE (même espace que l'enveloppe), pas sur la boîte élargie
-      float hLocal = sat(((wp.y - vCenter.y) / vHalf.y * BOX_PAD) * 0.5 + 0.5);
-      float belly = mix(0.34, 1.05, smoothstep(0.08, 0.62, hLocal));
-      vec3 col = (sun + sss + uAmbColor) * belly;
+      // LUMIÈRE DU CIEL atténuée par la matière AU-DESSUS : la base d'un nuage
+      // épais s'assombrit d'elle-même, celle d'une galette mince reste claire.
+      // Remplace l'ancien dégradé vertical arbitraire (retour Adrien).
+      float above = depthAbove(wp, bmax, lobes);
+      vec3 skyLight = uAmbColor * (0.16 + 0.84 * exp(-above * 1.7));
+      vec3 col = sun + sss + skyLight;
       float stepTrans = exp(-d * dt * 1.2);
       light += col * (1.0 - stepTrans) * transmittance;
       transmittance *= stepTrans;
@@ -302,7 +379,7 @@ export class Clouds2 {
         uScale: { value: params?.cloudScale ?? 3 },
         uContrast: { value: params?.cloudContrast ?? 1 },
         uSSS: { value: params?.cloudSSS ?? 0.8 },
-        uBrightness: { value: params?.cloudBrightness ?? 2.5 },
+        uBrightness: { value: (params?.cloudBrightness ?? 2.9) * 0.42 },
         uSunDir: { value: this.sunDir.clone() },
         uSunColor: { value: new THREE.Color(1, 1, 1) },
         uAmbColor: { value: new THREE.Color(0.32, 0.35, 0.4) },
@@ -317,7 +394,11 @@ export class Clouds2 {
 
     const mesh = new THREE.InstancedMesh(geo, mat, MAX_INSTANCES)
     mesh.frustumCulled = false // les boîtes bougent chaque frame, l'AABB du mesh mentirait
-    mesh.renderOrder = 12
+    // APRÈS la mer (18) : la mer est transparente et n'écrit pas la
+    // profondeur, donc en dessinant les nuages avant elle, elle repassait
+    // par-dessus — « on voit toujours l'eau à travers les nuages » (Adrien).
+    // Les nuages sont physiquement au-dessus : ils se peignent en dernier.
+    mesh.renderOrder = 19
     mesh.count = sky.clouds.length
     this.mesh = mesh
     this.group.add(mesh)
@@ -432,7 +513,10 @@ export class Clouds2 {
       u.uDensity.value = params.cloudOpacity ?? 1
       u.uScale.value = params.cloudScale ?? 3
       u.uContrast.value = params.cloudContrast ?? 1
-      u.uBrightness.value = params.cloudBrightness ?? 2.5
+      // le curseur est partagé avec l'ancien moteur, dont l'accumulation de
+      // densité était plus faible : à valeur égale, v2 saturerait au blanc pur
+      // (nuages « découpés dans du papier »). On le ramène à son échelle.
+      u.uBrightness.value = (params.cloudBrightness ?? 2.9) * 0.42
       u.uSSS.value = params.cloudSSS ?? 0.8
       // Couleur du soleil selon SON ÉLÉVATION — même recette que l'ancien
       // système (palette sunLook partagée avec la mer et le terrain) : lumière
@@ -460,10 +544,43 @@ export class Clouds2 {
   _syncShadowStrength(params) {
     const mu = this.terrain?.mapUniforms
     if (!mu?.uCloudShadowK) return
-    // pas d'ombre portée quand le soleil rase l'horizon
     const up = Math.max(0, -this.sunDir.y)
-    mu.uCloudShadowK.value = this.group.visible ? up * 0.42 : 0
-    if (mu.uCloudShadowOff) mu.uCloudShadowOff.value.set(0, 0)
+    // Adrien : « je ne vois pas d'ombre au sol ». L'ancienne loi (up × 0.42)
+    // tombait à 0.10 dès que le soleil descendait — invisible. Un plancher
+    // garde l'ombre lisible à toute heure : soleil bas = ombres LONGUES et
+    // décalées, pas absentes.
+    mu.uCloudShadowK.value = this.group.visible ? Math.min(0.55, 0.16 + up * 0.5) : 0
+    if (mu.uCloudShadowOff) {
+      // décalage de l'ombre le long de la pente du soleil : plus il rase, plus
+      // l'ombre s'éloigne du nuage
+      const slant = Math.min(2.5, 0.35 / Math.max(0.14, up))
+      const drop = (this._params?.cloudAltitude ?? 4.5) * slant
+      const len = Math.hypot(this.sunDir.x, this.sunDir.z) || 1
+      mu.uCloudShadowOff.value.set(
+        (this.sunDir.x / len) * drop / TERRAIN_SIZE,
+        (this.sunDir.z / len) * drop / TERRAIN_SIZE
+      )
+    }
+    // la mer reçoit la MÊME ombre que le relief : « projeter sur l'élément
+    // affiché le plus élevé de toutes les couches du sol » (Adrien)
+    this._pushShadowToSea()
+  }
+
+  // La mer a son propre matériau : on lui pousse la texture d'ombre et les
+  // mêmes réglages, sinon un nuage survolant le lac ne projette rien.
+  _pushShadowToSea() {
+    const mu = this.terrain?.mapUniforms
+    const sea = this._seaUniforms
+    if (!sea || !mu) return
+    if (sea.uCloudShadow) sea.uCloudShadow.value = this.shadowTex
+    if (sea.uCloudShadowK) sea.uCloudShadowK.value = mu.uCloudShadowK.value
+    if (sea.uCloudShadowOff) sea.uCloudShadowOff.value.copy(mu.uCloudShadowOff.value)
+  }
+
+  // main.js branche ici les uniforms du matériau de mer quand elle existe
+  attachSea(uniforms) {
+    this._seaUniforms = uniforms || null
+    this._pushShadowToSea()
   }
 
   setVisible(v) {

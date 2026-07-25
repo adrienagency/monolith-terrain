@@ -94,6 +94,18 @@ test('stepSky pousse les nuages dans la direction du vent', () => {
   })
 })
 
+test('parallaxe : un nuage haut file plus vite qu un nuage bas', () => {
+  const sky = createSky({ count: 2, seed: 5 })
+  const [bas, haut] = sky.clouds
+  bas.y = SKY_DEFAULTS.baseY // plancher de la couche
+  haut.y = SKY_DEFAULTS.topY // plafond
+  bas.x = 0; haut.x = 0
+  bas.speed = 1; haut.speed = 1 // on neutralise l aléa propre à chaque nuage
+  stepSky(sky, 1, { wind: { dir: 0, speed: 2 } })
+  assert.ok(haut.x > bas.x, `le haut devrait devancer le bas : ${bas.x} / ${haut.x}`)
+  assert.ok(bas.x > 0, 'le bas avance quand même')
+})
+
 test('stepSky : le ciel s enroule, le peuplement ne fuit jamais', () => {
   const sky = createSky({ count: 6, seed: 11 })
   for (let i = 0; i < 400; i++) stepSky(sky, 0.5, { wind: { dir: 0.7, speed: 3 } })
