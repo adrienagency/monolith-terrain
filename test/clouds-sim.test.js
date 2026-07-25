@@ -149,6 +149,40 @@ test('resizeSky ajuste le peuplement sans rejouer le ciel', () => {
   for (const c of sky.clouds) assert.ok(c.r > 0 && c.span > 0, 'les nouveaux sont valides')
 })
 
+// ------------------------------------------------- regroupements & fusions
+test('humeur du ciel : un front regroupe, un ciel dispersé éparpille', () => {
+  const meanDist = (sky) => {
+    let s = 0, n = 0
+    for (let i = 0; i < sky.clouds.length; i++)
+      for (let j = i + 1; j < sky.clouds.length; j++) {
+        s += Math.hypot(sky.clouds[i].x - sky.clouds[j].x, sky.clouds[i].z - sky.clouds[j].z)
+        n++
+      }
+    return s / n
+  }
+  const half = SKY_DEFAULTS.half
+  const front = createSky({ count: 10, seed: 21, grouping: { mode: 'front', centers: [{ x: 4, z: -3 }] } })
+  const libre = createSky({ count: 10, seed: 21, grouping: { mode: 'disperse', centers: null } })
+  assert.ok(meanDist(front) < meanDist(libre) * 0.75,
+    `front ${meanDist(front).toFixed(1)} devrait être bien plus serré que dispersé ${meanDist(libre).toFixed(1)}`)
+  for (const c of front.clouds) assert.ok(Math.abs(c.x) <= half && Math.abs(c.z) <= half)
+})
+
+test('collision : le gros absorbe, le petit part en dissipation', () => {
+  const sky = createSky({ count: 2, seed: 8, grouping: { mode: 'disperse', centers: null } })
+  const [a, b] = sky.clouds
+  // deux nuages mûrs posés l'un sur l'autre
+  a.x = 0; a.z = 0; a.r = 5; a.age = 0.4
+  b.x = 2; b.z = 0; b.r = 3; b.age = 0.4
+  stepSky(sky, 0.1, { wind: { dir: 0, speed: 0 } })
+  assert.ok(a.rTarget > a.r, 'le gros vise un rayon combiné')
+  assert.ok(b.age >= 0.72 && b.merging, 'le petit bascule en dissipation')
+  // la croissance est PROGRESSIVE, pas un saut
+  const r0 = a.r
+  stepSky(sky, 0.5, { wind: { dir: 0, speed: 0 } })
+  assert.ok(a.r > r0 && a.r < a.rTarget + 1e-9, `croissance douce : ${r0} → ${a.r} (cible ${a.rTarget})`)
+})
+
 test('makeRng : déterministe et dans [0,1)', () => {
   const a = makeRng(123), b = makeRng(123)
   for (let i = 0; i < 50; i++) {

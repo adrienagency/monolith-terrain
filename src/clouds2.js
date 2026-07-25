@@ -84,6 +84,7 @@ const FRAG = /* glsl */ `
   uniform vec3 uSunDir;       // direction que suit la lumière (soleil → scène)
   uniform vec3 uSunColor;
   uniform vec3 uAmbColor;
+  uniform float uNight; // 0 = jour, 1 = nuit noire
   uniform float uTime;
   // relief : sert à l'occlusion (le rayon s'arrête dans la montagne)
   uniform sampler2D uTerrainTex;
@@ -146,7 +147,19 @@ const FRAG = /* glsl */ `
       // aplatissent : un voile n'a pas de bourgeons, il a des lambeaux
       // (« flat » est un mot RÉSERVÉ en GLSL 3 — qualificateur d interpolation)
       float squash = 1.0 + wisp * 1.1;
-      lobes[i] = vec4(cos(a) * ring * (1.0 + wisp * 0.5) + lean.x, y / squash, sin(a) * ring * (1.0 + wisp * 0.5) + lean.y, r);
+      vec2 xz = vec2(cos(a), sin(a)) * ring * (1.0 + wisp * 0.5) + lean;
+      // ⚠️ ANTI-CARRÉ : un lobe qui sort de la boîte de calcul se fait TRANCHER
+      // par elle — c'était les « nuages carrés » d'Adrien. Le centre est borné
+      // pour que centre + rayon + bruit restent toujours dans la boîte.
+      float lim = 0.70 - r;
+      float l = length(xz);
+      if (l > lim) xz *= lim / l;
+      // ÉVOLUTION : chaque lobe respire à son rythme (croît, se résorbe,
+      // repousse ailleurs) — le nuage crée des protubérances à différents
+      // endroits au fil du temps au lieu d'être figé dans sa graine
+      float ph = h.y * 6.28318;
+      float breathe = 1.0 + 0.22 * sin(uTime * (0.05 + h.z * 0.06) + ph);
+      lobes[i] = vec4(xz.x, y / squash, xz.y, r * breathe);
       stretch[i].y *= squash;
     }
   }
@@ -213,8 +226,15 @@ const FRAG = /* glsl */ `
     // base FRANCHE pour un cumulus (coupé net au niveau de condensation) mais
     // molle pour un voile, qui n'a pas de base du tout
     env *= smoothstep(-0.60, mix(-0.42, -0.10, wisp), p.y);
+    // CEINTURE anti-carré : quoi qu'aient fait les lobes et le bruit, la
+    // densité s'éteint AVANT la paroi de la boîte — aucune tranche possible
+    float wall = max(abs(p.x), max(abs(p.y), abs(p.z)));
+    env *= 1.0 - smoothstep(0.88, 1.06, wall);
 
+    // OPACITÉ PAR ÉPAISSEUR (Adrien) : très opaque au cœur, presque rien sur
+    // les bords fins — la non-linéarité creuse l'écart au lieu de tout lisser
     float dens = pow(env, uContrast);
+    dens *= mix(0.30, 1.55, smoothstep(0.12, 0.8, env));
     // jamais de nuage collé à l'objectif
     dens *= smoothstep(1.5, 4.0, distance(wp, cameraPosition));
     return dens * uDensity * vInfo.y;
@@ -333,6 +353,12 @@ const FRAG = /* glsl */ `
       float above = depthAbove(wp, bmax, lobes, stretch);
       vec3 skyLight = uAmbColor * (0.16 + 0.84 * exp(-above * 1.7));
       vec3 col = sun + sss + skyLight;
+      // LA NUIT (Adrien : « tes nuages deviennent lumineux ») : un nuage ne
+      // produit aucune lumière — sans lune ni ville, c'est une MASSE PLUS
+      // SOMBRE QUE LE CIEL, au mieux argentée d'un soupçon de lune froide.
+      // On écrase la luminance vers un gris-bleu très sombre ; l'ombrage
+      // interne (ratios sun/sss/skyLight) reste intact, seul le niveau chute.
+      col = mix(col, col * vec3(0.10, 0.12, 0.16) + vec3(0.006, 0.008, 0.013), uNight);
       float stepTrans = exp(-d * dt * 1.2);
       light += col * (1.0 - stepTrans) * transmittance;
       transmittance *= stepTrans;
@@ -427,6 +453,7 @@ export class Clouds2 {
         uSunDir: { value: this.sunDir.clone() },
         uSunColor: { value: new THREE.Color(1, 1, 1) },
         uAmbColor: { value: new THREE.Color(0.32, 0.35, 0.4) },
+        uNight: { value: 0 },
         uTime: { value: 0 },
         uTerrainTex: { value: hf.tex },
         uMapMin: { value: new THREE.Vector2(-half, -half) },
@@ -574,6 +601,7 @@ export class Clouds2 {
       u.uSunColor.value.setRGB(1, 1 - 0.45 * warmth, 1 - 0.68 * warmth)
       _moonTint.setRGB(0.45, 0.55, 0.78)
       u.uSunColor.value.lerp(_moonTint, look.night * 0.85).multiplyScalar(dayF)
+      u.uNight.value = look.night ?? 0
       u.uAmbColor.value.setRGB(0.5 + 0.1 * warmth, 0.56 - 0.06 * warmth, 0.66 - 0.14 * warmth)
       u.uAmbColor.value.multiplyScalar((0.28 - 0.1 * warmth) * (0.12 + 0.88 * look.dayLight))
     }

@@ -85,16 +85,45 @@ function pickKind(rng) {
 }
 const lerp = (rng, [a, b]) => a + rng() * (b - a)
 
+// RÉPARTITION du ciel (Adrien : « parfois tous au même endroit, d'autres fois
+// éparpillés ») : chaque ciel tire son humeur — dispersé, en bancs (2-3
+// grappes), ou massé en un seul front. Les naissances suivent l'humeur.
+export function drawGrouping(rng, half) {
+  const t = rng()
+  if (t < 0.4) return { mode: 'disperse', centers: null }
+  const n = t < 0.8 ? 2 + Math.round(rng()) : 1
+  const centers = []
+  for (let i = 0; i < n; i++) {
+    centers.push({ x: (rng() * 2 - 1) * half * 0.7, z: (rng() * 2 - 1) * half * 0.7 })
+  }
+  return { mode: n === 1 ? 'front' : 'bancs', centers }
+}
+
+function drawPosition(rng, opts) {
+  const { half, grouping } = opts
+  if (!grouping?.centers) {
+    return { x: (rng() * 2 - 1) * half, z: (rng() * 2 - 1) * half }
+  }
+  const c = grouping.centers[Math.floor(rng() * grouping.centers.length)]
+  // étalement gaussien-ish autour du centre de la grappe (somme de 2 tirages)
+  const s = half * (grouping.mode === 'front' ? 0.34 : 0.26)
+  return {
+    x: clamp(c.x + (rng() + rng() - 1) * s, -half, half),
+    z: clamp(c.z + (rng() + rng() - 1) * s, -half, half),
+  }
+}
+
 function spawnCloud(rng, opts) {
-  const { half, baseY, topY, sizeMin, sizeMax, ageAtBirth = 0 } = opts
+  const { baseY, topY, sizeMin, sizeMax, ageAtBirth = 0 } = opts
   const k = pickKind(rng)
   // les voiles sont plus étalés, les tours plus étroites — la taille au sol
   // dépend du genre, sinon toutes les silhouettes se ressemblent en largeur
   const spanMul = k.id === 'voile' ? 1.35 : k.id === 'tour' ? 0.72 : 1
   const r = (sizeMin + rng() * (sizeMax - sizeMin)) * spanMul
+  const pos = drawPosition(rng, opts)
   return {
-    x: (rng() * 2 - 1) * half,
-    z: (rng() * 2 - 1) * half,
+    x: pos.x,
+    z: pos.z,
     y: baseY + rng() * Math.max(0, topY - baseY),
     r, // demi-largeur au sol
     h: r * lerp(rng, k.ratio), // hauteur propre : galettes, bourgeons, tours
@@ -140,9 +169,12 @@ export const SKY_DEFAULTS = {
 
 // Crée un ciel peuplé. Les âges sont répartis d'entrée pour que le ciel soit
 // « déjà vivant » à la première image.
-export function createSky({ count = 16, seed = 1, ...opts } = {}) {
+export function createSky({ count = 16, seed = 1, grouping = null, ...opts } = {}) {
   const o = { ...SKY_DEFAULTS, ...opts }
   const rng = makeRng(seed)
+  // l'humeur du ciel (dispersé / bancs / front) se tire une fois et gouverne
+  // toutes les naissances, y compris les respawns — un ciel garde son humeur
+  o.grouping = grouping || drawGrouping(rng, o.half)
   const clouds = []
   for (let i = 0; i < count; i++) {
     clouds.push(spawnSpaced(rng, { ...o, ageAtBirth: rng() }, clouds))
@@ -179,10 +211,31 @@ export function stepSky(sky, dt, { wind = { dir: 0, speed: 0.6 } } = {}) {
     else if (c.x < -lim) c.x += 2 * lim
     if (c.z > lim) c.z -= 2 * lim
     else if (c.z < -lim) c.z += 2 * lim
+    // croissance douce vers la cible de fusion (voir collisions ci-dessous)
+    if (c.rTarget && c.rTarget > c.r) c.r += (c.rTarget - c.r) * Math.min(1, dt * 0.5)
     c.age += dt / c.span
     if (c.age >= 1) {
       // mort : une nouvelle entité prend la place, ailleurs et différente
       sky.clouds[i] = spawnSpaced(rng, opts, sky.clouds)
+    }
+  }
+  // COLLISIONS (Adrien) : deux nuages mûrs qui se recouvrent fusionnent — le
+  // plus gros ABSORBE (il enfle vers le volume combiné, en douceur), le petit
+  // bascule en dissipation. Vu de loin : deux masses qui se rejoignent en une.
+  const maxR = opts.sizeMax * 1.7
+  for (let i = 0; i < sky.clouds.length; i++) {
+    for (let j = i + 1; j < sky.clouds.length; j++) {
+      const a = sky.clouds[i], b = sky.clouds[j]
+      if (!a || !b || a.merging || b.merging) continue
+      // seuls des nuages installés fusionnent (ni naissants ni mourants)
+      if (a.age < 0.12 || a.age > 0.68 || b.age < 0.12 || b.age > 0.68) continue
+      const d = Math.hypot(a.x - b.x, a.z - b.z)
+      if (d >= (a.r + b.r) * 0.55) continue
+      const big = a.r >= b.r ? a : b
+      const small = big === a ? b : a
+      big.rTarget = Math.min(maxR, Math.hypot(big.r, small.r)) // ~volume combiné
+      small.age = Math.max(small.age, 0.72) // le petit se dissout dans le gros
+      small.merging = true
     }
   }
   return sky
