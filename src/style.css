@@ -771,15 +771,16 @@ body.dark .hud-row span {
    voir ui/follow-pad.js) */
 
 /* ------------------------------------------------- hour pill (day/night) */
-/* Same glass family and same column as the right-dock panels — a quiet
-   instrument above Templates, not a floating gadget. Neutral thumb: the hour
-   is ambience, not an accent-coloured call to action. */
+/* Centrée en HAUT de l'écran (réorg topbar) : le centre est la zone du
+   CONTEXTE — l'heure du ciel y dessine son arc, comme le soleil. Toujours en
+   « pure float » : l'heure est une ambiance, pas un réglage à encadrer. */
 .ce-hourpill {
   position: fixed;
-  top: 14px;
-  right: 14px;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 55;
-  width: 270px; /* exact match with the right-dock cards */
+  width: 270px; /* même largeur que les cartes des docks */
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -849,6 +850,18 @@ body.dark .hud-row span {
   -moz-appearance: textfield;
 }
 .ce-hp-speed:focus { outline: none; opacity: 1; }
+/* « masquer l'UI » tient sa promesse : seul l'œil reste — la tirette aussi
+   s'efface (elle est désormais au centre, en pleine vue) */
+body.ce-noui .ce-hourpill { display: none; }
+/* écrans moyens : la tirette se resserre, le champ de vitesse s'efface ;
+   en dessous, elle s'efface (l'heure reste dans Éléments → Lumière) */
+@media (max-width: 900px) {
+  .ce-hourpill { width: 200px; }
+  .ce-hp-speed { display: none; }
+}
+@media (max-width: 780px) {
+  .ce-hourpill { display: none; }
+}
 .ce-hp-speed::-webkit-outer-spin-button,
 .ce-hp-speed::-webkit-inner-spin-button {
   -webkit-appearance: none;
@@ -859,19 +872,18 @@ body.dark .hud-row span {
 .zoom-stepper {
   position: fixed;
   left: 50%;
-  top: 54px; /* glued right under the top bar, centred (Adrien) */
+  top: 54px; /* sous la tirette d'heure, au centre — la colonne du contexte */
   transform: translateX(-50%);
   display: flex;
   flex-direction: row; /* horizontal */
   align-items: center;
   gap: 2px;
   padding: 1px 7px;
-  /* discrete: outline + translucent fill kept, but rounded ONLY at the bottom
-     so it reads as hanging from the bar above (Adrien) */
-  border-radius: 0 0 15px 15px;
+  /* la topbar centrée a disparu (pills de coin) : le stepper devient un
+     petit pill autonome, arrondi des quatre côtés */
+  border-radius: 15px;
   background: rgba(150, 160, 180, 0.1);
   border: 1px solid var(--ce-border, rgba(255, 255, 255, 0.55));
-  border-top: 0;
   -webkit-backdrop-filter: blur(9px) saturate(1.35);
   backdrop-filter: blur(9px) saturate(1.35);
   box-shadow: var(--ce-shadow, 0 10px 40px rgba(20, 24, 35, 0.12));
