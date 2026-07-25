@@ -67,21 +67,45 @@ const smooth = (x) => {
 // Un nuage neuf, posé au hasard dans les bornes. `ageAtBirth` désamorce l'effet
 // « tout le ciel naît en même temps » au premier build : à l'initialisation on
 // répartit les âges, ensuite les nouveaux naissent bien à 0.
+// GENRES de nuages (Adrien : « varier au maximum — certains extrêmement fins
+// et diffus, d'autres plus épais »). Le genre décide de l'aplatissement, de la
+// densité et du côté déchiqueté ; à l'intérieur d'un genre tout varie encore.
+//   ratio = hauteur / demi-largeur · dens = opacité · wisp = 0 net … 1 filandreux
+export const CLOUD_KINDS = [
+  { id: 'bourgeon', ratio: [0.75, 1.15], dens: [0.85, 1.25], wisp: [0.0, 0.25], w: 3 },
+  { id: 'galette', ratio: [0.26, 0.46], dens: [0.6, 0.95], wisp: [0.2, 0.5], w: 3 },
+  { id: 'voile', ratio: [0.1, 0.24], dens: [0.16, 0.36], wisp: [0.7, 1.0], w: 2 }, // très fin et diffus
+  { id: 'tour', ratio: [1.35, 2.0], dens: [0.95, 1.35], wisp: [0.0, 0.2], w: 1 },
+]
+const KIND_TOTAL = CLOUD_KINDS.reduce((s, k) => s + k.w, 0)
+function pickKind(rng) {
+  let t = rng() * KIND_TOTAL
+  for (const k of CLOUD_KINDS) { t -= k.w; if (t <= 0) return k }
+  return CLOUD_KINDS[0]
+}
+const lerp = (rng, [a, b]) => a + rng() * (b - a)
+
 function spawnCloud(rng, opts) {
   const { half, baseY, topY, sizeMin, sizeMax, ageAtBirth = 0 } = opts
-  const r = sizeMin + rng() * (sizeMax - sizeMin)
+  const k = pickKind(rng)
+  // les voiles sont plus étalés, les tours plus étroites — la taille au sol
+  // dépend du genre, sinon toutes les silhouettes se ressemblent en largeur
+  const spanMul = k.id === 'voile' ? 1.35 : k.id === 'tour' ? 0.72 : 1
+  const r = (sizeMin + rng() * (sizeMax - sizeMin)) * spanMul
   return {
     x: (rng() * 2 - 1) * half,
     z: (rng() * 2 - 1) * half,
     y: baseY + rng() * Math.max(0, topY - baseY),
     r, // demi-largeur au sol
-    h: r * (0.55 + rng() * 0.6), // hauteur propre : des galettes et des tours
+    h: r * lerp(rng, k.ratio), // hauteur propre : galettes, bourgeons, tours
+    kind: k.id,
+    wisp: lerp(rng, k.wisp), // 0 = bord net, 1 = déchiqueté et translucide
     seed: rng() * 1000,
     age: ageAtBirth,
     // durée de vie en secondes — un ciel où tout meurt en même temps est faux
     span: 45 + rng() * 75,
     speed: 0.75 + rng() * 0.5, // chaque nuage prend le vent un peu différemment
-    density: 0.7 + rng() * 0.6,
+    density: lerp(rng, k.dens),
   }
 }
 

@@ -41,9 +41,9 @@ const VERT = /* glsl */ `
   out vec3 vWorldPos;
   flat out vec3 vCenter;
   flat out vec3 vHalf;
-  flat out vec2 vInfo;   // x = graine, y = densité (enveloppe de vie incluse)
+  flat out vec3 vInfo;   // x = graine, y = densité (vie incluse), z = filandreux
 
-  in vec2 iInfo;
+  in vec3 iInfo;
 
   void main() {
     // les bornes du nuage se DÉRIVENT de la matrice d'instance (translation +
@@ -63,8 +63,8 @@ const FRAG = /* glsl */ `
   #define PI 3.14159265359
   #define MARCH_STEPS 26
   #define SUN_STEPS 3
-  #define UP_STEPS 3
-  #define LOBES 5
+  #define UP_STEPS 2
+  #define LOBES 7
   // marge de la boîte autour de la silhouette — DOIT valoir la même chose que
   // le facteur de mise à l'échelle des instances (_writeInstances)
   #define BOX_PAD 1.15
@@ -72,7 +72,7 @@ const FRAG = /* glsl */ `
   in vec3 vWorldPos;
   flat in vec3 vCenter;
   flat in vec3 vHalf;
-  flat in vec2 vInfo;
+  flat in vec3 vInfo;
   out vec4 outColor;
 
   uniform sampler3D uVolume;
@@ -115,25 +115,39 @@ const FRAG = /* glsl */ `
   // un amas de bourgeons. Chaque nuage tire son propre nombre effectif de
   // lobes, son étalement, sa verticalité — deux nuages n'ont jamais la même
   // silhouette, même à taille égale.
-  void buildLobes(float seed, out vec4 lobes[LOBES]) {
+  void buildLobes(float seed, float wisp, out vec4 lobes[LOBES], out vec3 stretch[LOBES]) {
     vec3 c = hash31(seed * 0.717 + 3.1);
-    float spread = 0.30 + c.x * 0.55;   // largeur de l'amas
-    float rise = 0.10 + c.y * 0.55;     // tendance à bourgeonner vers le haut
-    float squat = 0.55 + c.z * 0.75;    // galette large ou tour compacte
+    float spread = 0.34 + c.x * 0.62;   // largeur de l'amas
+    float rise = 0.10 + c.y * 0.60;     // tendance à bourgeonner vers le haut
+    // asymétrie franche : le nuage penche d'un côté, comme sous le vent —
+    // c'est ce qui casse le plus efficacement l'impression de boule
+    float leanA = c.z * 6.28318;
+    vec2 lean = vec2(cos(leanA), sin(leanA)) * (0.10 + c.x * 0.26);
     for (int i = 0; i < LOBES; i++) {
       vec3 h = hash31(seed + float(i) * 17.31 + 0.5);
+      vec3 g = hash31(seed * 1.37 + float(i) * 5.11);
+      // chaque lobe est une PRIMITIVE DIFFÉRENTE (sphère, galette, fuseau) :
+      // c'est la « fusion de plusieurs formes » demandée — des ellipsoïdes
+      // étirés au hasard soudés ensemble ne peuvent pas lire comme une boule
+      stretch[i] = vec3(0.75 + g.x * 0.7, 0.9 + g.y * 1.1, 0.75 + g.z * 0.7);
       if (i == 0) {
         // le corps principal, posé bas : c'est lui qui porte la base plate
-        lobes[0] = vec4(0.0, -0.16, 0.0, 0.44 + c.z * 0.14);
+        lobes[0] = vec4(0.0, -0.16, 0.0, 0.42 + c.z * 0.15);
+        stretch[0] = vec3(1.0, 1.05 + c.y * 0.5, 1.0);
         continue;
       }
       float a = h.x * 6.28318 + float(i) * 1.7;
-      float ring = spread * (0.35 + h.y * 0.85);
+      float ring = spread * (0.30 + h.y * 0.95);
       // certains lobes sont franchement petits (h.z bas) : c'est ce qui crée
       // les épaules et les bosses irrégulières plutôt qu'une couronne régulière
-      float r = 0.13 + h.z * h.z * 0.34;
-      float y = -0.22 + h.y * rise + (r * 0.5);
-      lobes[i] = vec4(cos(a) * ring, y, sin(a) * ring * squat, r);
+      float r = 0.11 + h.z * h.z * 0.32;
+      float y = -0.24 + h.y * rise + r * 0.5;
+      // les nuages filandreux étalent leurs lobes à l'horizontale et les
+      // aplatissent : un voile n'a pas de bourgeons, il a des lambeaux
+      // (« flat » est un mot RÉSERVÉ en GLSL 3 — qualificateur d interpolation)
+      float squash = 1.0 + wisp * 1.1;
+      lobes[i] = vec4(cos(a) * ring * (1.0 + wisp * 0.5) + lean.x, y / squash, sin(a) * ring * (1.0 + wisp * 0.5) + lean.y, r);
+      stretch[i].y *= squash;
     }
   }
 
@@ -154,7 +168,7 @@ const FRAG = /* glsl */ `
   // ellipsoïde à base plate et sommet bombé — que le bruit vient éroder. C'est
   // l'enveloppe qui donne la silhouette de cumulus ; le bruit ne fait que la
   // ronger, il ne la définit pas (l'erreur de l'ancien système).
-  float densityAt(vec3 wp, vec4 lobes[LOBES]) {
+  float densityAt(vec3 wp, vec4 lobes[LOBES], vec3 stretch[LOBES]) {
     // ⚠️ la BOÎTE est plus large que le nuage (BOX_PAD, pour que l'enveloppe
     // s'éteigne avant le bord) : sans ce facteur, l'enveloppe se calcule sur la
     // boîte, le profil vertical ne s'applique jamais et le nuage redevient un
@@ -163,29 +177,42 @@ const FRAG = /* glsl */ `
 
     // silhouette = union lisse des lobes (SDF metaball). C'est ce qui donne des
     // épaules, des bosses, des creux — une forme PROPRE à chaque nuage.
+    float wisp = vInfo.z;
     float d = 1e9;
     for (int i = 0; i < LOBES; i++) {
-      d = smin(d, length(p - lobes[i].xyz) - lobes[i].w, 0.22);
+      // ellipsoïde : l'étirement par lobe fait des primitives toutes
+      // différentes, l'union lisse les soude en une seule masse.
+      // ⚠️ la division par le plus grand facteur est OBLIGATOIRE : sans elle un
+      // lobe très étiré rend une « distance » plusieurs fois trop grande, le
+      // seuil de sortie coupe tout et le nuage disparaît purement et
+      // simplement (c'est ce qui a vidé le ciel au premier essai).
+      vec3 s = stretch[i];
+      vec3 q = (p - lobes[i].xyz) * s;
+      float dl = (length(q) - lobes[i].w) / max(s.x, max(s.y, s.z));
+      d = smin(d, dl, 0.20 + wisp * 0.14);
     }
     // sortie franche dès qu'on est loin de la masse : inutile de payer le bruit
-    if (d > 0.42) return 0.0;
+    if (d > 0.45) return 0.0;
 
     // Le bruit DÉPLACE la surface au lieu de la gommer. C'est la différence
     // entre un chou-fleur et un ballon flou : en soustrayant le bruit à la
     // distance signée, chaque bosse du bruit devient un vrai bourgeon de la
-    // silhouette. Deux octaves — la grosse structure, puis le grain de bord.
+    // silhouette. Trois octaves ; les nuages filandreux se font DÉCHIQUETER
+    // bien plus fort (amplitude ×2.4) — c'est ce qui donne les lambeaux.
     vec3 coord = (wp * uScale + vInfo.x) * 0.055;
     float n1 = texture(uVolume, fract(coord)).r;
     float n2 = texture(uVolume, fract(coord * 3.1 + 0.37)).r;
-    d += (0.5 - n1) * 0.30 + (0.5 - n2) * 0.11;
+    float n3 = texture(uVolume, fract(coord * 7.7 + 0.81)).r;
+    float amp = 1.0 + wisp * 1.4;
+    d += ((0.5 - n1) * 0.30 + (0.5 - n2) * 0.12 + (0.5 - n3) * 0.05) * amp;
 
     // seuil SERRÉ : c'est le bruit qui doit dessiner le bord, pas un
     // dégradé de 2 unités monde qui transforme tout en coton
-    float env = 1.0 - smoothstep(-0.05, 0.09, d);
+    float env = 1.0 - smoothstep(-0.05, 0.09 + wisp * 0.10, d);
     if (env <= 0.002) return 0.0;
-    // base FRANCHE : un cumulus est coupé net dessous, au niveau de
-    // condensation — c'est sa signature, aucun lobe ne doit dépasser dessous
-    env *= smoothstep(-0.60, -0.42, p.y);
+    // base FRANCHE pour un cumulus (coupé net au niveau de condensation) mais
+    // molle pour un voile, qui n'a pas de base du tout
+    env *= smoothstep(-0.60, mix(-0.42, -0.10, wisp), p.y);
 
     float dens = pow(env, uContrast);
     // jamais de nuage collé à l'objectif
@@ -216,7 +243,7 @@ const FRAG = /* glsl */ `
   // Épaisseur de matière entre l'échantillon et le soleil — c'est elle qui fait
   // que les PROTUBÉRANCES projettent leur ombre sur la masse en dessous
   // (demande d'Adrien) : un bourgeon éclairé se détache d'un creux à l'ombre.
-  float sunDepth(vec3 wp, vec3 toSun, vec3 bmin, vec3 bmax, vec4 lobes[LOBES]) {
+  float sunDepth(vec3 wp, vec3 toSun, vec3 bmin, vec3 bmax, vec4 lobes[LOBES], vec3 stretch[LOBES]) {
     // pas COURT devant la taille du nuage : un pas long ressort du nuage dès le
     // premier échantillon, tout paraît mince et le nuage vire au blanc plat
     float step = min(vHalf.x, vHalf.y) * 0.26;
@@ -224,7 +251,7 @@ const FRAG = /* glsl */ `
     for (int j = 1; j <= SUN_STEPS; j++) {
       vec3 s = wp + toSun * (step * float(j));
       if (any(lessThan(s, bmin)) || any(greaterThan(s, bmax))) break;
-      d += densityAt(s, lobes) * step;
+      d += densityAt(s, lobes, stretch) * step;
       if (d >= 2.2) break;
     }
     return d;
@@ -235,13 +262,13 @@ const FRAG = /* glsl */ `
   // c'est ce qui assombrit naturellement la base des nuages ÉPAIS et laisse
   // claires les galettes minces (demande explicite d'Adrien, à la place de
   // l'ancien dégradé vertical arbitraire).
-  float depthAbove(vec3 wp, vec3 bmax, vec4 lobes[LOBES]) {
+  float depthAbove(vec3 wp, vec3 bmax, vec4 lobes[LOBES], vec3 stretch[LOBES]) {
     float step = vHalf.y * 0.3;
     float d = 0.0;
     for (int j = 1; j <= UP_STEPS; j++) {
       vec3 s = wp + vec3(0.0, step * float(j), 0.0);
       if (s.y > bmax.y) break;
-      d += densityAt(s, lobes) * step;
+      d += densityAt(s, lobes, stretch) * step;
     }
     return d;
   }
@@ -264,7 +291,8 @@ const FRAG = /* glsl */ `
 
     // les lobes de CE nuage, une seule fois pour tout le rayon
     vec4 lobes[LOBES];
-    buildLobes(vInfo.x, lobes);
+    vec3 stretch[LOBES];
+    buildLobes(vInfo.x, vInfo.z, lobes, stretch);
 
     vec3 toSun = -normalize(uSunDir);
     float cosA = dot(rd, -toSun);
@@ -273,16 +301,25 @@ const FRAG = /* glsl */ `
     h += dot(h, h.yzx + 33.33);
     float jitter = fract((h.x + h.y) * h.z);
 
-    float dt = (span.y - span.x) / float(MARCH_STEPS);
+    // GARDE-FOU DE REMPLISSAGE : de près, la boîte d'un nuage couvre tout
+    // l'écran et chaque pixel paie la marche complète (+ marches soleil et
+    // verticale) — la page se fige. On raccourcit la marche quand la caméra
+    // est dans ou contre le nuage : à cette distance le détail ne se voit pas
+    // de toute façon, la densité étant déjà éteinte autour de l'objectif.
+    float camDist = distance(cameraPosition, vCenter);
+    int steps = camDist < max(vHalf.x, vHalf.y) * 2.5 ? 12 : MARCH_STEPS;
+
+    float dt = (span.y - span.x) / float(steps);
     float transmittance = 1.0;
     vec3 light = vec3(0.0);
 
     for (int i = 0; i < MARCH_STEPS; i++) {
+      if (i >= steps) break;
       vec3 wp = ro + rd * (span.x + (float(i) + jitter) * dt);
       if (wp.y < terrainH(wp.xz)) break; // le rayon plonge dans la montagne
-      float d = densityAt(wp, lobes);
+      float d = densityAt(wp, lobes, stretch);
       if (d <= 0.002) continue;
-      float depth = sunDepth(wp, toSun, bmin, bmax, lobes);
+      float depth = sunDepth(wp, toSun, bmin, bmax, lobes, stretch);
       // BEER-POWDER (Schneider 2015) : les bords épais vus vers le soleil
       // s'assombrissent au lieu de blanchir
       float powder = 1.0 - exp(-depth * 2.0);
@@ -293,7 +330,7 @@ const FRAG = /* glsl */ `
       // LUMIÈRE DU CIEL atténuée par la matière AU-DESSUS : la base d'un nuage
       // épais s'assombrit d'elle-même, celle d'une galette mince reste claire.
       // Remplace l'ancien dégradé vertical arbitraire (retour Adrien).
-      float above = depthAbove(wp, bmax, lobes);
+      float above = depthAbove(wp, bmax, lobes, stretch);
       vec3 skyLight = uAmbColor * (0.16 + 0.84 * exp(-above * 1.7));
       vec3 col = sun + sss + skyLight;
       float stepTrans = exp(-d * dt * 1.2);
@@ -360,8 +397,8 @@ export class Clouds2 {
     this.sky = sky
 
     const geo = new THREE.BoxGeometry(1, 1, 1)
-    const info = new Float32Array(MAX_INSTANCES * 2)
-    geo.setAttribute('iInfo', new THREE.InstancedBufferAttribute(info, 2))
+    const info = new Float32Array(MAX_INSTANCES * 3)
+    geo.setAttribute('iInfo', new THREE.InstancedBufferAttribute(info, 3))
     this._info = geo.getAttribute('iInfo')
 
     const mat = new THREE.ShaderMaterial({
@@ -370,6 +407,13 @@ export class Clouds2 {
       fragmentShader: FRAG,
       transparent: true,
       depthWrite: false,
+      // ⚠️ PAS de test de profondeur : le fragment porte la profondeur de la
+      // FACE ARRIÈRE de la boîte, qui ne dit rien de l'endroit où se trouve
+      // vraiment la matière nuageuse. Avec le test activé, une crête située
+      // devant cette face arrière — mais DERRIÈRE le nuage — rejetait le
+      // fragment : « certains bouts de montagne passent au travers » (Adrien).
+      // C'est la marche elle-même qui gère l'occlusion, via terrainH().
+      depthTest: false,
       // BackSide : la caméra peut entrer dans la boîte d'un nuage sans que la
       // face avant disparaisse et n'éteigne le rayon
       side: THREE.BackSide,
@@ -394,11 +438,12 @@ export class Clouds2 {
 
     const mesh = new THREE.InstancedMesh(geo, mat, MAX_INSTANCES)
     mesh.frustumCulled = false // les boîtes bougent chaque frame, l'AABB du mesh mentirait
-    // APRÈS la mer (18) : la mer est transparente et n'écrit pas la
-    // profondeur, donc en dessinant les nuages avant elle, elle repassait
-    // par-dessus — « on voit toujours l'eau à travers les nuages » (Adrien).
-    // Les nuages sont physiquement au-dessus : ils se peignent en dernier.
-    mesh.renderOrder = 19
+    // APRÈS TOUTES les couches drapées de la carte. Le premier correctif (19)
+    // ne passait que la mer animée (18) et laissait encore l'eau OSM drapée
+    // (LAKE_RENDER_ORDER = 26, water-layer.js) repasser par-dessus : « l'eau et
+    // la mer passent à travers les nuages comme s'ils n'existaient pas ».
+    // 30 = au-dessus de tout ce qui est posé sur le relief.
+    mesh.renderOrder = 30
     mesh.count = sky.clouds.length
     this.mesh = mesh
     this.group.add(mesh)
@@ -432,8 +477,9 @@ export class Clouds2 {
       _m.makeScale(c.r * pad * s, c.h * pad * s, c.r * pad * s)
       _m.setPosition(c.x, c.y, c.z)
       mesh.setMatrixAt(n, _m)
-      info.array[n * 2] = c.seed
-      info.array[n * 2 + 1] = dens
+      info.array[n * 3] = c.seed
+      info.array[n * 3 + 1] = dens
+      info.array[n * 3 + 2] = c.wisp ?? 0 // 0 = bord net, 1 = voile déchiqueté
       n++
       if (n >= MAX_INSTANCES) break
     }
