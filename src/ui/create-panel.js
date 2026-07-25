@@ -102,11 +102,24 @@ export function buildFondsPanel(ctx) {
   // ------------------------------------------------------------ section Fond
   const sFond = panel.addSection(section('Fond'))
   const skyNote = el('div', 'ce-bg-note', 'Le ciel remplace le fond — choisir « Aucun » dans Ciel pour le retrouver.')
+  // « Couleurs auto » est un TOGGLE en tête (Adrien) : ON = le fond et la
+  // couleur du socle suivent la palette de la carte ; une édition manuelle du
+  // fond le coupe (manualEdit) pour ne pas se faire écraser au prochain
+  // changement de palette
+  const autoTgl = toggle({
+    label: 'Couleurs auto depuis la carte',
+    get: () => params.bgAuto !== false,
+    set: (v) => { params.bgAuto = v; if (v) { ctx.autoBgColours(); renderAll() } },
+  })
   const typeWrap = el('div', 'ce-mat-pick')
   const editWrap = el('div')
-  const autoRow = el('div', 'ce-btn-row')
-  autoRow.append(button('Couleurs auto depuis la carte', () => { ctx.autoBgColours(); renderAll() }, { ghost: true }))
-  sFond.body.append(skyNote, typeWrap, editWrap, autoRow)
+  sFond.body.append(autoTgl, skyNote, typeWrap, editWrap)
+  // une retouche manuelle du fond coupe le suivi auto et re-vérifie le
+  // contraste (fond sombre → dark mode automatique, textes du socle lisibles)
+  const manualEdit = () => {
+    if (params.bgAuto !== false) { params.bgAuto = false; refreshAll() }
+    ctx.autoDarkFromBg?.()
+  }
 
   function renderTypes() {
     typeWrap.replaceChildren()
@@ -126,6 +139,7 @@ export function buildFondsPanel(ctx) {
         // de la palette ; des stops déjà personnalisés sont CONSERVÉS
         if (t.v !== 'solid' && wasSolid && !params.bgStops) ctx.autoBgColours()
         else ctx.applyBackground()
+        ctx.autoDarkFromBg?.() // le nouveau type peut changer la luminance
         renderAll()
       })
       grid.append(b)
@@ -154,6 +168,7 @@ export function buildFondsPanel(ctx) {
       const st = readStops()
       if (st.length >= 2) params.bgStops = st
       applyLive()
+      manualEdit()
       renderList()
       refreshAll()
     })
@@ -197,7 +212,7 @@ export function buildFondsPanel(ctx) {
       host.append(slider({ label: 'Angle', min: 0, max: 360, step: 1, get: () => params.bgAngle, set: (v) => { params.bgAngle = v; ctx.applyBackground(); renderTypes() } }))
     }
     const r = el('div', 'ce-btn-row')
-    r.append(button('⇆ Inverser', () => { params.bgStops = flipStops(params.bgStops); ctx.applyBackground(); renderAll() }, { ghost: true }))
+    r.append(button('⇆ Inverser', () => { params.bgStops = flipStops(params.bgStops); ctx.applyBackground(); manualEdit(); renderAll() }, { ghost: true }))
     host.append(r)
   }
 
@@ -213,7 +228,7 @@ export function buildFondsPanel(ctx) {
     // applyBackground re-normalise params.bgPoints en COPIES — `pts` reste la
     // source de vérité de l'éditeur, donc on le réaffirme avant chaque
     // application (sinon drag/retrait mutent un tableau orphelin)
-    const applyNow = () => { params.bgPoints = pts; ctx.applyBackground() }
+    const applyNow = () => { params.bgPoints = pts; ctx.applyBackground(); manualEdit() }
     let raf = 0
     const applyLive = () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; applyNow(); renderTypes() }) }
     const paint = () => {
@@ -286,7 +301,7 @@ export function buildFondsPanel(ctx) {
     editWrap.replaceChildren()
     const m = modeOf()
     if (m === 'solid') {
-      editWrap.append(color({ label: 'Couleur', get: () => params.bgColorA, set: (v) => { params.bgColorA = v; ctx.applyBackground(); renderTypes() } }))
+      editWrap.append(color({ label: 'Couleur', get: () => params.bgColorA, set: (v) => { params.bgColorA = v; ctx.applyBackground(); manualEdit(); renderTypes() } }))
     } else if (m === 'mesh') {
       buildPointsEditor(editWrap)
     } else {
@@ -307,7 +322,7 @@ export function buildFondsPanel(ctx) {
       b.type = 'button'
       b.setAttribute('data-tip', label)
       b.append(media, el('span', 'ce-mat-vig-name', label))
-      b.addEventListener('click', () => { ctx.setBgEnv(id); renderAll() })
+      b.addEventListener('click', () => { ctx.setBgEnv(id); ctx.autoDarkFromBg?.(); renderAll() })
       return b
     }
     const none = el('span', 'ce-mat-vig-img ce-mat-vig-none')
@@ -323,7 +338,7 @@ export function buildFondsPanel(ctx) {
   // est dit, pas subi
   function syncSky() {
     const sky = !!ctx.getBgEnv()
-    for (const n of [typeWrap, editWrap, autoRow]) n.classList.toggle('ce-dim', sky)
+    for (const n of [autoTgl, typeWrap, editWrap]) n.classList.toggle('ce-dim', sky)
     skyNote.classList.toggle('on', sky)
   }
   function renderAll() {

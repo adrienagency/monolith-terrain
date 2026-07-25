@@ -38,7 +38,7 @@ export const TEMPLATE_KEYS = [
   'ssaoEnabled', 'ssaoIntensity', 'bloomEnabled', 'bloomIntensity', 'bloomThreshold', 'fogNear', 'fogFar', 'fogColor', 'fogEnabled',
   // background (solid / gradient / HDRI sky) — bgStops/bgPoints = Fonds v2
   // (stops arbitraires + dégradé de points) ; A/B/C restent pour la compat
-  'bgMode', 'bgColorA', 'bgColorB', 'bgColorC', 'bgAngle', 'bgEnv', 'bgStops', 'bgPoints',
+  'bgMode', 'bgColorA', 'bgColorB', 'bgColorC', 'bgAngle', 'bgEnv', 'bgStops', 'bgPoints', 'bgAuto',
   // camera lens / depth-of-field (NOT position/location) — shadowMode lives in
   // the light group above; listed once there, not duplicated here
   'fov', 'autoFocus', 'focusDistance', 'focusRange', 'bokehEnabled', 'bokehScale',

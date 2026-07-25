@@ -59,7 +59,7 @@ import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, stripFrom
 import { loadUserPalettes, saveUserPalettes, paletteFromParams } from './user-palettes.js'
 import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT } from './share-link.js'
 import { DroneCam } from './drone-cam.js'
-import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
+import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
 import { N8AOPostPass } from 'n8ao'
 import { History } from './history.js'
@@ -225,6 +225,9 @@ const params = {
   // libres [{x,y,r,c} 0..1] (dégradé de points). null = dérivés de A/B/C.
   bgStops: null,
   bgPoints: null,
+  // le fond (et la couleur du socle) SUIVENT la palette de la carte ; une
+  // édition manuelle du fond coupe le suivi
+  bgAuto: true,
   // camera automations (looping cinematic moves)
   camMove: 'orbit',
   camSpeed: 1,
@@ -642,6 +645,26 @@ function autoBgColours() {
   params.fogColor = m.b
   fogRef?.color.set(m.b)
   applyBackground()
+  autoDarkFromBg()
+  // le socle suit aussi — COULEUR seulement, jamais la matière (Adrien) ;
+  // après autoDarkFromBg : setDarkMode a pu écraser plinthColor avec la teinte
+  // standard du mode, la dérivation harmonisée doit avoir le dernier mot
+  params.plinthColor = derivePlinthColor(m, bgLuminance(params))
+  plinth.setColors(params)
+}
+// bascule AUTO clair/sombre par contraste : un fond sombre rendait les textes
+// du cartouche noir sur noir. Hystérésis dans autoDarkTarget (0.32..0.45 =
+// zone morte) pour ne pas clignoter ; jamais sous un ciel HDRI (image, pas de
+// luminance simple). setDarkMode rappelle applyBackground mais pas nous → pas
+// de récursion.
+function autoDarkFromBg() {
+  if (params.bgEnv) return
+  const target = autoDarkTarget(bgLuminance(params))
+  if (target != null && target !== params.darkMode) {
+    setDarkMode(target)
+    refreshAll()
+    topBar?.syncDark?.()
+  }
 }
 // Changer une palette adapte AUSSI le fond de la carte (Adrien : « sinon c'est
 // bizarre ») : on dérive des arrêts de fond harmonieux de la rampe, on garde le
@@ -650,13 +673,10 @@ function autoBgColours() {
 // l'application d'un template complet, qui porte son propre fond.
 function applyPaletteWithBg(p) {
   applyPalette(p)
-  const m = deriveBgModel(params)
-  params.bgColorA = m.a
-  params.bgColorB = m.b
-  params.bgColorC = m.c
-  params.bgStops = m.stops
-  params.bgPoints = m.points
-  applyBackground()
+  // suivi désactivé (toggle « Couleurs auto » OFF) : la palette ne touche
+  // plus le fond ni le socle
+  if (params.bgAuto === false) { bgRefreshFn?.(); return }
+  autoBgColours()
   bgRefreshFn?.()
 }
 scene.background = new THREE.Color(params.fogColor)
@@ -1771,6 +1791,7 @@ const DEFAULT_BG = Object.freeze({
   bgAngle: params.bgAngle,
   bgStops: params.bgStops ? JSON.parse(JSON.stringify(params.bgStops)) : null,
   bgPoints: params.bgPoints ? JSON.parse(JSON.stringify(params.bgPoints)) : null,
+  bgAuto: params.bgAuto,
 })
 const DEFAULT_PLINTH = Object.freeze({
   plinthDepth: params.plinthDepth,
@@ -3451,6 +3472,7 @@ const panelCtx = {
   getFineZoom: () => userFineZoom, // finest scale reached — gates the 2048/4096 mesh tiers
   applyBackground, // solid / gradient scene background
   autoBgColours, // derive gradient stops from the map palette
+  autoDarkFromBg, // bascule clair/sombre par contraste après une édition du fond
   bgModes: BG_MODES,
   environments: ENVIRONMENTS, // HDRI sky list for the Background picker
   getBgEnv: () => params.bgEnv || '',

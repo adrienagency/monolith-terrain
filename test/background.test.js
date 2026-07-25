@@ -4,6 +4,7 @@ import {
   normalizeBgStops, flipStops, stopsToCss,
   normalizeBgPoints, pointsBase, pointsToCss,
   deriveBgModel, BG_MODES, MAX_STOPS, MAX_POINTS,
+  bgLuminance, autoDarkTarget, derivePlinthColor,
 } from '../src/background.js'
 
 // ------------------------------------------------------------------- stops
@@ -79,6 +80,43 @@ test('deriveBgModel returns matching a/b/c mirror, 3 stops and 4 points', () => 
   assert.equal(m.stops[0].c, m.a)
   assert.equal(m.stops[2].c, m.c)
   assert.equal(m.points.length, 4)
+})
+
+// -------------------------------------------------- auto-dark par contraste
+test('bgLuminance: solid black ~0, solid white ~1, gradient weighted by span', () => {
+  assert.ok(bgLuminance({ bgMode: 'solid', bgColorA: '#000000' }) < 0.01)
+  assert.ok(bgLuminance({ bgMode: 'solid', bgColorA: '#ffffff' }) > 0.99)
+  // 90 % du dégradé est noir (0..90), 10 % monte vers blanc → luminance basse
+  const dark = bgLuminance({ bgMode: 'linear', bgStops: [
+    { p: 0, c: '#000000' }, { p: 90, c: '#000000' }, { p: 100, c: '#ffffff' },
+  ] })
+  assert.ok(dark < 0.15, `attendu sombre, obtenu ${dark}`)
+})
+
+test('bgLuminance mesh uses the blended base of the points', () => {
+  const lum = bgLuminance({ bgMode: 'mesh', bgPoints: [
+    { x: 0.2, y: 0.2, r: 0.5, c: '#000000' },
+    { x: 0.8, y: 0.8, r: 0.5, c: '#ffffff' },
+  ] })
+  assert.ok(lum > 0.1 && lum < 0.5) // gris moyen (moyenne sRGB #808080)
+})
+
+test('autoDarkTarget has a dead zone (hysteresis) between 0.32 and 0.45', () => {
+  assert.equal(autoDarkTarget(0.1), true)
+  assert.equal(autoDarkTarget(0.7), false)
+  assert.equal(autoDarkTarget(0.38), null)
+  assert.equal(autoDarkTarget(null), null)
+})
+
+test('derivePlinthColor follows the background luminance, never the matter', () => {
+  const darkP = derivePlinthColor({ b: '#345678' }, 0.05)
+  const lightP = derivePlinthColor({ b: '#345678' }, 0.9)
+  const l = (hex) => {
+    const v = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+    return (Math.max(...v) + Math.min(...v)) / 510
+  }
+  assert.ok(l(darkP) < 0.35, `socle sombre attendu, ${darkP}`)
+  assert.ok(l(lightP) > 0.6, `socle clair attendu, ${lightP}`)
 })
 
 test('BG_MODES are the four French labels', () => {

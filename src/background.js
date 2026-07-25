@@ -170,6 +170,68 @@ export function deriveBgColors(params = {}) {
   }
 }
 
+// ---- luminance du fond & bascule auto clair/sombre -------------------------
+// Un fond sombre rend le cartouche noir sur noir : on mesure la luminance
+// RELATIVE (WCAG, sRGB linéarisé) du fond effectif et on bascule le dark mode
+// avec HYSTÉRÉSIS (zone morte 0.32..0.45) pour ne pas clignoter autour du seuil.
+const lumOf = (hex) => {
+  const [r, g, b] = hexRgb(hex).map((v) => {
+    const x = v / 255
+    return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+export function bgLuminance(params = {}) {
+  const m = params.bgMode || 'solid'
+  if (m === 'solid') return lumOf(isHex(params.bgColorA) ? params.bgColorA : '#e9eef4')
+  if (m === 'mesh') return lumOf(pointsBase(normalizeBgPoints(params)))
+  // dégradé : moyenne pondérée par la longueur des segments (stops virtuels
+  // aux extrémités — le premier/dernier stop peint aussi jusqu'au bord)
+  const st = normalizeBgStops(params)
+  const ext = [{ p: 0, c: st[0].c }, ...st, { p: 100, c: st[st.length - 1].c }]
+  let acc = 0
+  for (let i = 0; i < ext.length - 1; i++) {
+    acc += ((ext[i + 1].p - ext[i].p) / 100) * (lumOf(ext[i].c) + lumOf(ext[i + 1].c)) / 2
+  }
+  return acc
+}
+// cible du mode : true = passer sombre, false = passer clair, null = garder
+export function autoDarkTarget(lum) {
+  if (lum == null) return null
+  if (lum < 0.32) return true
+  if (lum > 0.45) return false
+  return null
+}
+
+// Couleur de socle harmonisée au fond — teinte du milieu de gamme, saturation
+// contenue (un socle reste un meuble, pas un aplat), clarté qui SUIT la
+// luminance du fond (fond sombre → socle sombre). Ne touche jamais la matière.
+// HSL à la main en sRGB — THREE.Color (color management) travaille en linéaire
+// et décalerait la clarté à la conversion.
+export function derivePlinthColor(model, lum = 0.7) {
+  const [r, g, b] = hexRgb(model.b).map((v) => v / 255)
+  const max = Math.max(r, g, b), min = Math.min(r, g, b)
+  const l0 = (max + min) / 2
+  const d = max - min
+  let h = 0
+  const s0 = d === 0 ? 0 : d / (1 - Math.abs(2 * l0 - 1))
+  if (d > 0) {
+    if (max === r) h = ((g - b) / d + 6) % 6
+    else if (max === g) h = (b - r) / d + 2
+    else h = (r - g) / d + 4
+    h *= 60
+  }
+  const s = Math.min(0.35, s0 * 0.5)
+  const l = clampF(0.22 + lum * 0.6)
+  const c = (1 - Math.abs(2 * l - 1)) * s
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
+  const m = l - c / 2
+  const [r1, g1, b1] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x]
+    : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x]
+  const hx = (v) => Math.round((v + m) * 255).toString(16).padStart(2, '0')
+  return `#${hx(r1)}${hx(g1)}${hx(b1)}`
+}
+
 // palette → full v2 model (stops + points), used by « Couleurs auto »
 export function deriveBgModel(params = {}) {
   const { a, b, c } = deriveBgColors(params)
