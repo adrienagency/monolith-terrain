@@ -342,6 +342,7 @@ const params = {
   cloudDriftVar: 0.5, // per-cloud speed variation: 0 = uniform drift, 1 = very uneven
   cloudContrast: 1, // density contrast: <1 fluffier/softer, >1 harder-edged
   cloudSSS: 0.8, // cloud translucency: thin wisps light up as the sun shines through
+  cloudTexMix: 0.35, // texture blend: 0 = crisp v3 remap-chain, 1 = soft cottony legacy look
   // Nuages v2 (clouds2.js) : des ENTITÉS instanciées, une boîte raymarchée par
   // nuage, avec naissance/dérive/dissipation. false = ancien système (le champ
   // de bruit global de clouds.js, conservé en repli).

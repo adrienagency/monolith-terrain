@@ -144,8 +144,10 @@ export function buildEffectsPanel(ctx) {
   // ---- clouds — le star est le CARACTÈRE du ciel (chips), le technique au fond
   const sCld = elementsPanel.addSection(section('Nuages'))
   const rebuildClouds = () => { ctx.clouds.build(params); ctx.syncCloudsVisible?.() }
-  const cloudLive = (label, key, min, max, step) =>
-    slider({ label, min, max, step, get: () => params[key], set: (v) => { params[key] = v } })
+  // dflt : un look sauvegardé AVANT l'ajout d'un réglage ne le contient pas —
+  // sans repli, le slider crashe au boot (toFixed sur undefined, vécu)
+  const cloudLive = (label, key, min, max, step, dflt = 0) =>
+    slider({ label, min, max, step, get: () => params[key] ?? dflt, set: (v) => { params[key] = v } })
   const cloudBaked = (label, key, min, max, step) => {
     const s = cloudLive(label, key, min, max, step)
     s.querySelector('input').addEventListener('change', rebuildClouds)
@@ -167,7 +169,9 @@ export function buildEffectsPanel(ctx) {
   )
   sCld.body.append(cloudChips)
   const cloudRows = [
-    cloudLive('Densité', 'cloudOpacity', 0.05, 1.5, 0.05),
+    cloudLive('Densité', 'cloudOpacity', 0.05, 2.5, 0.05),
+    // 0 = bourgeons nets (rendu actuel), 1 = coton doux (ancien rendu)
+    cloudLive('Texture cotonneuse', 'cloudTexMix', 0, 1, 0.05, 0.35),
     el('div', 'ce-fx-head', 'Réglages fins'),
     cloudBaked('Échelle', 'cloudScale', 0.5, 5, 0.1),
     cloudBaked('Trouées', 'cloudCoverage', 0, 0.8, 0.01),

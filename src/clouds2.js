@@ -93,6 +93,9 @@ const FRAG = /* glsl */ `
   // pour les sommets, bas (horizon) pour les bases — phase 3
   uniform vec3 uSkyHi;
   uniform vec3 uSkyLo;
+  // tirette de TEXTURE (Adrien) : 0 = bourgeons nets v3 (érosion-remap),
+  // 1 = coton doux de l'ancien moteur (le bruit module au lieu de ronger)
+  uniform float uTexMix;
   // relief : sert à l'occlusion (le rayon s'arrête dans la montagne)
   uniform sampler2D uTerrainTex;
   uniform vec2 uMapMin;
@@ -214,10 +217,13 @@ const FRAG = /* glsl */ `
     if (env <= 0.004) return 0.0;
 
     // erosion par REMAP (Nubis) : le bruit de forme RONGE l'enveloppe — des
-    // bourgeons francs, pas du coton soustrait
+    // bourgeons francs. La TIRETTE uTexMix re-mélange avec le traitement de
+    // l'ancien moteur (modulation douce = coton), au choix de l'utilisateur.
     vec3 sp = wp * uScale * 0.055 + vInfo.x;
     float shape = texture(uVolume, fract(sp)).r;
-    env = remapC(env, (1.0 - shape) * F.shapeAmt, 1.0);
+    float net = remapC(env, (1.0 - shape) * F.shapeAmt, 1.0);
+    float coton = sat(env * (0.40 + shape * 1.05));
+    env = mix(net, coton, uTexMix);
     if (env <= 0.004) return 0.0;
 
     // detail NEAR-FIELD seulement (gate distance — gratuit de loin) :
@@ -225,7 +231,8 @@ const FRAG = /* glsl */ `
     if (detailOn > 0.5) {
       float detail = texture(uVolume, fract(sp * 3.1 + 0.37)).r;
       float modif = mix(pow(detail, 6.0), 1.0 - detail, remapC(hf, 0.2, 0.4));
-      env = remapC(env * 2.0, modif * 0.5 * F.dtlAmt, 1.0);
+      // le détail net s'efface à mesure qu'on glisse vers le coton
+      env = remapC(env * 2.0, modif * 0.5 * F.dtlAmt * (1.0 - 0.7 * uTexMix), 1.0);
       if (env <= 0.004) return 0.0;
     }
 
@@ -239,6 +246,10 @@ const FRAG = /* glsl */ `
     // base tenue et vaporeuse, sommet dense — le x0.85 recale l'ensemble un
     // cran plus leger (Adrien : « trop denses »)
     float dens = env * (0.25 + 0.75 * hf) * 0.85;
+    // CARTE D'ÉPAISSEUR intra-nuage (Adrien) : le MÊME nuage est massif ici,
+    // évanescent là — champ de couverture lu à grande échelle sur l'empreinte
+    float thick = texture(uVolume, vec3(fract(q * 0.16 + F.wOff * 1.9), 0.47)).g;
+    dens *= mix(0.10, 1.5, smoothstep(0.12, 0.85, thick));
     // jamais de nuage colle a l'objectif
     dens *= smoothstep(1.5, 4.0, distance(wp, cameraPosition));
     return dens * uDensity * vInfo.y;
@@ -494,6 +505,7 @@ export class Clouds2 {
         uWind: { value: new THREE.Vector2(0.42, 0.42) },
         uSkyHi: { value: new THREE.Color(1, 1, 1) },
         uSkyLo: { value: new THREE.Color(0.82, 0.85, 0.9) },
+        uTexMix: { value: params?.cloudTexMix ?? 0.35 },
         uTerrainTex: { value: hf.tex },
         uMapMin: { value: new THREE.Vector2(-half, -half) },
         uMapSize: { value: new THREE.Vector2(TERRAIN_SIZE, TERRAIN_SIZE) },
@@ -578,7 +590,7 @@ export class Clouds2 {
           if (d >= 1) continue
           // bord adouci : une ombre de nuage n'a pas de contour net
           const f = (1 - d * d) * (1 - d * d)
-          const v = px[j * N + i] + f * dens * 210
+          const v = px[j * N + i] + f * dens * 255
           px[j * N + i] = v > 255 ? 255 : v
         }
       }
@@ -632,6 +644,7 @@ export class Clouds2 {
       // (nuages « découpés dans du papier »). On le ramène à son échelle.
       u.uBrightness.value = (params.cloudBrightness ?? 2.9) * 0.42
       u.uSSS.value = params.cloudSSS ?? 0.8
+      u.uTexMix.value = params.cloudTexMix ?? 0.35
       // Couleur du soleil selon SON ÉLÉVATION — même recette que l'ancien
       // système (palette sunLook partagée avec la mer et le terrain) : lumière
       // chaude quand le soleil rase, ambiante froide et sourde la nuit.
@@ -670,11 +683,10 @@ export class Clouds2 {
     const mu = this.terrain?.mapUniforms
     if (!mu?.uCloudShadowK) return
     const up = Math.max(0, -this.sunDir.y)
-    // Adrien : « je ne vois pas d'ombre au sol ». L'ancienne loi (up × 0.42)
-    // tombait à 0.10 dès que le soleil descendait — invisible. Un plancher
-    // garde l'ombre lisible à toute heure : soleil bas = ombres LONGUES et
-    // décalées, pas absentes.
-    mu.uCloudShadowK.value = this.group.visible ? Math.min(0.55, 0.16 + up * 0.5) : 0
+    // Adrien (2 fois) : l'ombre au sol doit être FRANCHEMENT visible. Plancher
+    // relevé + pente + plafond haussés — soleil bas = ombres longues et
+    // décalées, jamais absentes ; midi = taches bien marquées.
+    mu.uCloudShadowK.value = this.group.visible ? Math.min(0.8, 0.3 + up * 0.6) : 0
     if (mu.uCloudShadowOff) {
       // décalage de l'ombre le long de la pente du soleil : plus il rase, plus
       // l'ombre s'éloigne du nuage
