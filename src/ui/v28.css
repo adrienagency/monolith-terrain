@@ -46,18 +46,35 @@ body.dark {
 }
 
 /* ------------------------------------------------------------- top bar */
+/* Deux pills de COIN (grammaire Figma/Canva) : identité & navigation à
+   gauche, réglages & sorties à droite. Le centre reste au contexte (tirette
+   d'heure + niveau de zoom). */
 .ce-topbar {
   position: fixed;
   top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
   z-index: 60;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 8px 6px 16px;
+  padding: 6px 8px;
   border-radius: 999px;
   user-select: none;
+}
+.ce-topbar-left {
+  left: 14px;
+  padding-left: 16px;
+}
+.ce-topbar-right {
+  right: 14px;
+}
+/* très petits écrans : la marque se replie sur son glyphe */
+@media (max-width: 760px) {
+  .ce-wm-name {
+    display: none;
+  }
+  .ce-wordmark {
+    margin-right: 2px;
+  }
 }
 .ce-wordmark {
   font-weight: 650;
@@ -731,6 +748,10 @@ body:has(.gpx-profile:not(.hidden)) .ce-elemwrap {
 }
 .ce-pubmenu.open {
   display: flex;
+}
+/* menu Aide — même famille que Publier, plus étroit */
+.ce-helpmenu {
+  width: 250px;
 }
 .ce-pubitem {
   display: flex;

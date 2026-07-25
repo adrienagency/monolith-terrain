@@ -67,7 +67,7 @@ import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
 import { showNotice } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
-import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickBar, buildShibuChrome, initUiLevel } from './ui/bars.js'
+import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickBar, buildShibuChrome, initUiLevel, buildAdvToggle } from './ui/bars.js'
 import { buildMiniRoute } from './ui/mini-route.js'
 import { buildSettingsSearch } from './ui/settings-search.js'
 import { perfSection } from './ui/camera-panel.js'
@@ -3804,7 +3804,7 @@ if (!IS_EMBED) {
     for (const p of [explorePanel, mapPanel, cameraPanel, routePanel, shadersPanel, fondsPanel, elementsPanel, imagePanel]) dock.append(p.root)
   }
   const initialMode = (() => { try { return localStorage.getItem(WORKMODE_KEY) } catch { return null } })() || 'explorer'
-  buildElemBar({
+  const elemBar = buildElemBar({
     modes: [
       { id: 'explorer', icon: 'explore', label: 'Explorer' },
       { id: 'studio', icon: 'studio', label: 'Studio' },
@@ -3815,6 +3815,13 @@ if (!IS_EMBED) {
     toolsByMode: { explorer: {}, studio: {}, parcours: {} },
   })
   applyWorkMode(initialMode)
+  // « Avancé » vit dans les barres de modes (sorti de la topbar) : ici sa
+  // version elembar — allumé, il ramène au mode simple (quickbar)
+  {
+    const sepEl = document.createElement('span')
+    sepEl.className = 'ce-elembar-sep'
+    elemBar.root.querySelector('.ce-elembar')?.append(sepEl, buildAdvToggle('ce-elembar-btn'))
+  }
 }
 
 // roue crantée — PARAMÈTRES GLOBAUX (réorg Adrien) : toujours visible dans

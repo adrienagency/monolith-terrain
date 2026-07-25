@@ -155,7 +155,7 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
     if (frame % 15 === 0 || !uiCache.cref) {
       const cref = container.getBoundingClientRect()
       const rects = []
-      for (const selUI of ['.gpx-profile:not(.hidden)', '.ce-bottombar', '.ce-topbar', '.ce-hourpill', '.zoom-stepper']) {
+      for (const selUI of ['.gpx-profile:not(.hidden)', '.ce-bottombar', '.ce-topbar-left', '.ce-topbar-right', '.ce-hourpill', '.zoom-stepper']) {
         const elUI = document.querySelector(selUI)
         if (!elUI) continue
         const r = elUI.getBoundingClientRect()
