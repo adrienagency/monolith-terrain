@@ -216,7 +216,12 @@ export function buildElemBar({ modes, initial, onMode, toolsByMode }) {
   const row = el('div', 'ce-lqrow ce-liquid')
   const advSlot = el('div', 'ce-lq-adv')
   row.append(bar, advSlot)
-  liquidize(row, { items: () => [bar, advSlot.firstElementChild].filter(Boolean), inflate: 0 })
+  liquidize(row, {
+    items: () => [bar, advSlot.firstElementChild].filter(Boolean),
+    inflate: 0,
+    // la bosse liquide chevauche le mode ACTIF et voyage au changement
+    bumpFor: () => modeSeg.querySelector('.ce-wm-btn.on'),
+  })
   const wrap = el('div', 'ce-elemwrap')
   wrap.append(menu, row)
   document.body.append(wrap)

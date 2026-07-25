@@ -33,7 +33,11 @@ function ensureGoo() {
 // se fasse pas rogner au bord — les bulles compensent via translate (CSS).
 export const LQ_PAD = 12
 
-export function liquidize(cluster, { items, inflate = 4 } = {}) {
+// bumpFor() (optionnel) : renvoie le bouton ACTIF — une petite bulle ronde
+// vient chevaucher le bord haut de la capsule à son aplomb et le déforme en
+// bosse (tension de liquide, réf. vidéo Adrien / Liquid Glass Apple) ; la
+// transition CSS de la bulle fait VOYAGER la bosse d'un bouton à l'autre.
+export function liquidize(cluster, { items, inflate = 4, bumpFor } = {}) {
   ensureGoo()
   const goo = el('div', 'lq-goo')
   cluster.prepend(goo)
@@ -72,9 +76,27 @@ export function liquidize(cluster, { items, inflate = 4 } = {}) {
       b.classList.toggle('dark', it.classList.contains('on'))
       b.classList.toggle('accent', it.classList.contains('accent'))
     }
+    // la bosse du bouton actif — un rond qui dépasse du bord haut et que le
+    // goo fond dans la capsule
+    const target = bumpFor?.()
+    if (target && target.offsetParent !== null) {
+      const b = blobFor('__bump')
+      seen.add('__bump')
+      const r = target.getBoundingClientRect()
+      const d = Math.round(r.height * 0.72)
+      place(b, r.left - base.left + (r.width - d) / 2, -d * 0.36, d, d)
+      b.classList.remove('dark', 'accent')
+    }
     for (const [k, b] of blobs) if (!seen.has(k)) { b.remove(); blobs.delete(k) }
   }
-  const ask = () => { if (!raf) raf = requestAnimationFrame(sync) }
+  // rAF est SUSPENDU onglet caché (piège connu du projet) — fallback timeout
+  // pour que les bulles suivent aussi quand la page tourne en arrière-plan
+  const ask = () => {
+    if (raf) return
+    raf = 1
+    if (document.hidden) setTimeout(() => { raf = 0; sync() }, 16)
+    else requestAnimationFrame(() => { raf = 0; sync() })
+  }
   // ⚠️ sync écrit les styles des bulles → ignorer les mutations du calque goo
   // lui-même, sinon boucle rAF infinie observer→sync→observer
   new MutationObserver((recs) => { if (recs.some((r) => !goo.contains(r.target))) ask() })

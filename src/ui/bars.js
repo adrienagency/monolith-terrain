@@ -340,16 +340,19 @@ export function buildQuickBar(ctx) {
   // « Avancé » vit détaché à droite, décentré — même grammaire que l'elembar
   const bar = el('div', 'ce-quickbar ce-lqrow ce-liquid')
   const core = el('div', 'ce-qb-core')
-  const mk = (icon, label, tip, onClick, accent) => {
-    const b = el('button', 'ce-pillbtn' + (accent ? ' accent' : ''))
+  const mk = (icon, label, tip, onClick, kind) => {
+    const b = el('button', 'ce-pillbtn' + (kind ? ` ${kind}` : ''))
     b.type = 'button'
     b.innerHTML = `${icon}<span>${label}</span>`
     b.setAttribute('data-tip', tip)
     b.addEventListener('click', onClick)
     return b
   }
+  // hiérarchie de couleur (rectif Adrien) : l'accent orange est RÉSERVÉ à
+  // Publier (un accent par écran) — la porte principale est un pill ENCRE,
+  // le même langage que le mode actif de l'elembar
   core.append(
-    mk(I.brush, 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur votre carte.', () => ctx.openAtelier(), true),
+    mk(I.brush, 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur votre carte.', () => ctx.openAtelier(), 'primary'),
     mk(I.flag, 'Ma course', 'Race Studio — votre parcours GPX en carte de course (points de passage, transports, partage).', () => ctx.openStudio())
   )
   // « Avancé » habite ici (sorti de la topbar) : le switch vit à côté des

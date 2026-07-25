@@ -4,16 +4,19 @@
 :root {
   --ce-font: 'Bricolage Grotesque', system-ui, sans-serif;
   --ce-mono: 'SF Mono', ui-monospace, Consolas, monospace;
-  --ce-ink: #1c1e22;
-  --ce-muted: rgba(28, 30, 34, 0.55);
-  --ce-accent: #e8622c;
+  /* palette recalée sur Tailwind (rectif Adrien) : neutres STONE (chauds,
+     assortis au papier) + accent orange-600 — hiérarchie : encre = état/porte
+     principale, accent = LA sortie (Publier), muted = secondaire */
+  --ce-ink: #1c1917; /* stone-900 */
+  --ce-muted: rgba(28, 25, 23, 0.55);
+  --ce-accent: #ea580c; /* orange-600 */
   --ce-glass: rgba(252, 252, 253, 0.62);
   --ce-glass-strong: rgba(252, 252, 253, 0.8);
   --ce-border: rgba(255, 255, 255, 0.55);
-  --ce-hairline: rgba(28, 30, 34, 0.08);
-  --ce-shadow: 0 10px 40px rgba(20, 24, 35, 0.12);
-  --ce-track: rgba(28, 30, 34, 0.14);
-  --ce-hover: rgba(28, 30, 34, 0.05);
+  --ce-hairline: rgba(28, 25, 23, 0.08);
+  --ce-shadow: 0 10px 40px rgba(28, 25, 23, 0.12);
+  --ce-track: rgba(28, 25, 23, 0.14);
+  --ce-hover: rgba(28, 25, 23, 0.05);
   --ce-radius: 16px;
 
   /* spacing scale — one token per relationship, used everywhere that
@@ -23,15 +26,15 @@
   --ce-gap-tight: 6px; /* between a heading/label and the content it introduces */
 }
 body.dark {
-  --ce-ink: #e8e9ec;
-  --ce-muted: rgba(232, 233, 236, 0.55);
-  --ce-glass: rgba(22, 24, 28, 0.6);
-  --ce-glass-strong: rgba(22, 24, 28, 0.82);
+  --ce-ink: #e7e5e4; /* stone-200 */
+  --ce-muted: rgba(231, 229, 228, 0.55);
+  --ce-glass: rgba(24, 22, 21, 0.6);
+  --ce-glass-strong: rgba(24, 22, 21, 0.82);
   --ce-border: rgba(255, 255, 255, 0.09);
-  --ce-hairline: rgba(232, 233, 236, 0.08);
+  --ce-hairline: rgba(231, 229, 228, 0.08);
   --ce-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-  --ce-track: rgba(232, 233, 236, 0.16);
-  --ce-hover: rgba(232, 233, 236, 0.06);
+  --ce-track: rgba(231, 229, 228, 0.16);
+  --ce-hover: rgba(231, 229, 228, 0.06);
 }
 
 .ce-glassbox {
@@ -187,6 +190,16 @@ body.dark {
 .ce-pillbtn.accent:hover {
   filter: brightness(1.07);
   background: var(--ce-accent);
+}
+/* porte PRINCIPALE (quickbar) : pill encre — même langage que le mode actif
+   de l'elembar ; l'accent orange reste l'exclusivité de Publier */
+.ce-pillbtn.primary {
+  background: var(--ce-ink);
+  color: var(--ce-bg, #fff);
+}
+.ce-pillbtn.primary:hover {
+  background: var(--ce-ink);
+  filter: brightness(1.15);
 }
 .ce-topbar .ce-pillbtn {
   height: 30px;
@@ -563,6 +576,12 @@ body:has(.gpx-profile:not(.hidden)) .ce-elemwrap {
   background: var(--ce-ink);
   color: var(--ce-bg, #fff);
   opacity: 1;
+  /* le pill actif SORT légèrement de la capsule — la bosse liquide du goo
+     (liquid.js bumpFor) déforme le bord au-dessus de lui, réf. vidéo Adrien */
+  transform: translateY(-3px);
+}
+.ce-wm-btn {
+  transition: transform 0.28s cubic-bezier(0.5, 0, 0.3, 1.3), background 0.2s, opacity 0.15s;
 }
 .ce-elembar-sep {
   width: 1px;
@@ -1767,9 +1786,11 @@ body.ce-simple .ce-dock {
 }
 .ce-quickbar {
   /* wrapper liquide : la LARGEUR = le cœur (Habiller + Ma course) → le cœur
-     est centré écran, « Avancé » (absolu, .ce-lq-adv) décentré à droite */
+     est centré écran, « Avancé » (absolu, .ce-lq-adv) décentré à droite.
+     bottom = CELUI de l'elembar (74px) : plus de saut vertical au switch
+     simple ⇄ avancé (vu par Adrien) */
   position: fixed;
-  bottom: 72px;
+  bottom: 74px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 60;
