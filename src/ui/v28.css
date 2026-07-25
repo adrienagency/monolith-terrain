@@ -458,7 +458,10 @@ body.dark {
 .lq-blob.dark { background: var(--ce-ink); }
 .lq-blob.accent { background: var(--ce-accent); }
 .ce-liquid { position: relative; }
-.ce-liquid > *:not(.lq-goo) {
+/* :not(.ce-lq-adv) : ce sélecteur (spécificité 0,2,0) écrasait le
+   position:absolute du slot Avancé → il dérivait verticalement (bug vu par
+   Adrien). Le slot garde son absolu, les autres passent au-dessus du goo. */
+.ce-liquid > *:not(.lq-goo):not(.ce-lq-adv) {
   position: relative;
   z-index: 1;
 }
@@ -468,9 +471,14 @@ body.dark {
 .ce-lq-adv {
   position: absolute;
   left: calc(100% + 7px);
-  top: 50%;
-  transform: translateY(-50%);
+  /* MÊME niveau et MÊME hauteur que la capsule : la bulle Avancé s'étire sur
+     toute la rangée → pincement liquide symétrique (l'haltère de la réf) */
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: stretch;
   white-space: nowrap;
+  z-index: 1;
 }
 /* la bulle est le fond du bouton détaché — lui reste transparent, et son
    état .on colore la BULLE (liquid.js lit la classe) */
@@ -482,7 +490,10 @@ body.dark {
   box-shadow: none;
 }
 .ce-lq-adv .ce-advbtn.on { color: var(--ce-bg, #fff); }
-.ce-lq-adv .ce-advbtn { padding: 10px 15px; }
+.ce-lq-adv .ce-advbtn {
+  padding: 0 16px;
+  height: 100%;
+}
 
 .ce-elemwrap {
   position: fixed;
