@@ -1451,6 +1451,10 @@ async function fetchAndBuildDem() {
           coastMaskImage = img
           terrain.setCoastMask(res.maskTexture, img)
           realWater?.setCoastMask(res.maskTexture, true, img)
+          // la découpe de zone a pu être rasterisée AVANT l'arrivée du masque
+          // (fetchs concurrents) : la refaire pour rendre leurs polders aux
+          // Pays-Bas — Nominatim est caché, seul le raster est recalculé
+          if (params.regionMode) applyRegionMode()
         }
       })
       .catch(() => {})
@@ -2980,7 +2984,9 @@ async function applyRegionMode() {
   if (regionBusy) return
   regionBusy = true
   try {
-    const r = await fetchRegionMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem })
+    // coastMaskImage : les polders sous 0 restent dans la découpe (le clip
+    // altitude seul les prenait pour la mer) ; null → comportement v1
+    const r = await fetchRegionMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem, coastImage: coastMaskImage })
     if (!params.regionMode) return // user toggled off while fetching
     terrain.setRegionMask(r ? r.maskTexture : null)
     plinth.setVisible(false)

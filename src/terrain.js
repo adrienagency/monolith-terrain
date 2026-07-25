@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { Simplex2, mulberry32, fbm, ridged, smoothstep, lerp } from './noise.js'
 import { sampleDem } from './dem.js'
 import { rampColorStops } from './palette.js'
-import { buildSeaMask, blurMask } from './sea-mask.js'
+import { buildSeaMask, blurMask, landMaskFromImage } from './sea-mask.js'
 import { TEXTURE_BUILDERS } from './material-textures.js'
 import { MATERIALS } from './material-catalog.js'
 import { FX_GLSL } from './fx-glsl.js' // shared with src/ui/fx-thumbs.js — see that file's header
@@ -742,7 +742,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     }
   }
 
-  setCoastMask(texture) {
+  setCoastMask(texture, coastImage) {
     // coast masks are owned by main.js's LRU cache — NEVER dispose here: the
     // previously active texture is usually still cached, and disposing it on a
     // swap would kill a live cache entry. The cache disposes on eviction only.
@@ -753,6 +753,17 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       this._coastPlaceholder ??= whiteTexture()
       this.mapUniforms.uCoastMask.value = this._coastPlaceholder
       this.mapUniforms.uCoastMaskOn.value = 0
+    }
+    // coastImage (ImageData du masque, extraite une fois par l'appelant) :
+    // corrige le garde-fou topologique sea-mask — un polder sous 0 m déclaré
+    // TERRE par le trait de côte ne doit plus être flood-fillé en mer. Le
+    // fetch du masque est async : à sa réception on RE-construit le sea mask.
+    // CONTRAT : sans image, _buildSeaMask retombe bit-à-bit sur l'existant.
+    const img = texture ? coastImage || null : null
+    if (img !== this._coastImage) {
+      this._coastImage = img
+      this._coastLand = null // cache landMask (dépend de dem.size) — invalidé
+      if (this.dem?.data) this._buildSeaMask()
     }
   }
 
@@ -972,7 +983,15 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       this.mapUniforms.uSeaMaskOn.value = 0
       return
     }
-    const { mask, size } = blurMask(buildSeaMask(dem), 1)
+    // landMask depuis le masque côtier (si reçu) : rééchantillonné à la grille
+    // du DEM et mis en cache — recalculé seulement si l'image ou dem.size change
+    let landMask = null
+    if (this._coastImage) {
+      if (!this._coastLand || this._coastLand.img !== this._coastImage || this._coastLand.size !== dem.size)
+        this._coastLand = { img: this._coastImage, size: dem.size, mask: landMaskFromImage(this._coastImage, dem.size) }
+      landMask = this._coastLand.mask
+    }
+    const { mask, size } = blurMask(buildSeaMask(dem, { landMask }), 1)
     // one red channel; flipY off so texel row r ↔ world +z (matches the sampler)
     const tex = new THREE.DataTexture(mask, size, size, THREE.RedFormat)
     tex.flipY = false
