@@ -19,6 +19,10 @@
 // l'individualité — tout l'intérêt de cette refonte — se perd.
 export const CLOUD_COUNT_MIN = 3
 export const CLOUD_COUNT_MAX = 12
+// Plafond DUR, transitoire : une division ou un effilochage fait dépasser la
+// cible le temps que les morceaux vivent leur vie. Les lambeaux d'un nuage qui
+// éclate comptent pour ce nuage — la CIBLE reste « jusqu'à 12 » (Adrien).
+export const CLOUD_HARD_MAX = 18
 
 // Nombre de nuages selon la puissance de la machine (palier de perf.js :
 // 0 = desktop, 1 = tablette, 2/3 = délestage, 3 = téléphone). Adrien : « peut-
@@ -71,11 +75,15 @@ const smooth = (x) => {
 // et diffus, d'autres plus épais »). Le genre décide de l'aplatissement, de la
 // densité et du côté déchiqueté ; à l'intérieur d'un genre tout varie encore.
 //   ratio = hauteur / demi-largeur · dens = opacité · wisp = 0 net … 1 filandreux
+// ⚠️ ratios VOLONTAIREMENT bas (Adrien : « beaucoup trop verticaux ») : un
+// cumulus vu depuis un diorama est plus large que haut. Même la tour, le genre
+// le plus dressé, reste sous 1.0 — c'est le BOURGEONNEMENT qui donne le relief
+// vertical, pas l'étirement de la boîte.
 export const CLOUD_KINDS = [
-  { id: 'bourgeon', ratio: [0.75, 1.15], dens: [0.85, 1.25], wisp: [0.0, 0.25], w: 3 },
-  { id: 'galette', ratio: [0.26, 0.46], dens: [0.6, 0.95], wisp: [0.2, 0.5], w: 3 },
-  { id: 'voile', ratio: [0.1, 0.24], dens: [0.16, 0.36], wisp: [0.7, 1.0], w: 2 }, // très fin et diffus
-  { id: 'tour', ratio: [1.35, 2.0], dens: [0.95, 1.35], wisp: [0.0, 0.2], w: 1 },
+  { id: 'bourgeon', ratio: [0.5, 0.72], dens: [0.85, 1.25], wisp: [0.0, 0.25], w: 3 },
+  { id: 'galette', ratio: [0.2, 0.34], dens: [0.6, 0.95], wisp: [0.2, 0.5], w: 3 },
+  { id: 'voile', ratio: [0.08, 0.17], dens: [0.16, 0.36], wisp: [0.7, 1.0], w: 2 }, // très fin et diffus
+  { id: 'tour', ratio: [0.78, 1.0], dens: [0.95, 1.35], wisp: [0.0, 0.2], w: 1 },
 ]
 const KIND_TOTAL = CLOUD_KINDS.reduce((s, k) => s + k.w, 0)
 function pickKind(rng) {
@@ -113,6 +121,31 @@ function drawPosition(rng, opts) {
   }
 }
 
+// ALLONGEMENT de la base (Adrien : « jusqu'à un ratio de 5 ou 6 pour 1 »).
+// Tiré au CUBE : la plupart des nuages restent ronds, les vrais radeaux sont
+// rares — c'est ce qui les rend remarquables quand ils passent.
+export const ELONG_MAX = 6
+function drawElong(rng, kindId) {
+  const eMax = kindId === 'tour' ? 1.5 : kindId === 'bourgeon' ? 2.2 : ELONG_MAX
+  const t = rng()
+  return 1 + (eMax - 1) * t * t * t
+}
+
+// NIVEAUX DE VOL (Adrien : « plein de niveaux d'altitude différents, du sol à
+// l'altitude max — au sommet des montagnes pour certains, au fond des vallées
+// pour d'autres »). Un tirage uniforme donne une purée ; des paliers jittés
+// donnent des COUCHES lisibles, comme un vrai ciel.
+const LEVELS = 4
+function drawAltitude(rng, baseY, topY) {
+  const band = Math.max(0, topY - baseY)
+  // tirage BIAISÉ VERS LE HAUT : un tirage plat enterrait la moitié du ciel
+  // dans les montagnes (vérifié à l'écran, diorama vide). ~40 % à l'étage du
+  // haut, ~8 % au ras du sol — le nuage de vallée reste un événement.
+  const u = Math.pow(rng(), 0.55)
+  const lv = Math.min(LEVELS - 1, Math.floor(u * LEVELS))
+  return baseY + band * clamp01((lv + 0.5) / LEVELS + (rng() - 0.5) * 0.24)
+}
+
 function spawnCloud(rng, opts) {
   const { baseY, topY, sizeMin, sizeMax, ageAtBirth = 0 } = opts
   const k = pickKind(rng)
@@ -121,12 +154,16 @@ function spawnCloud(rng, opts) {
   const spanMul = k.id === 'voile' ? 1.35 : k.id === 'tour' ? 0.72 : 1
   const r = (sizeMin + rng() * (sizeMax - sizeMin)) * spanMul
   const pos = drawPosition(rng, opts)
+  const elong = drawElong(rng, k.id)
   return {
     x: pos.x,
     z: pos.z,
-    y: baseY + rng() * Math.max(0, topY - baseY),
-    r, // demi-largeur au sol
-    h: r * lerp(rng, k.ratio), // hauteur propre : galettes, bourgeons, tours
+    y: drawAltitude(rng, baseY, topY),
+    r, // demi-largeur au sol (rayon MOYEN : l'ellipse garde la même aire)
+    elong, // 1 = rond, 6 = radeau très allongé
+    // un radeau très allongé doit rester PLAT, sinon c'est une crête : la
+    // hauteur s'amortit quand la base s'étire
+    h: r * lerp(rng, k.ratio) * Math.pow(elong, -0.25),
     kind: k.id,
     wisp: lerp(rng, k.wisp), // 0 = bord net, 1 = déchiqueté et translucide
     seed: rng() * 1000,
@@ -143,6 +180,23 @@ function spawnCloud(rng, opts) {
 // essais suffisent — au-delà on accepte, mieux vaut un nuage un peu proche
 // qu'un ciel qui se dépeuple.
 function spawnSpaced(rng, opts, others, tries = 12) {
+  // NAISSANCE DANS LE CORPS D'UN AUTRE (Adrien : « plusieurs nuages peuvent
+  // naître dans le corps d'un même nuage ») : une part des naissances se fait
+  // À L'INTÉRIEUR d'une masse installée, en plus petit. C'est ainsi qu'une
+  // grosse masse se met à bourgeonner de vrais nuages distincts.
+  const hosts = others.filter((o) => o && o.age > 0.15 && o.age < 0.7)
+  if (hosts.length && rng() < 0.3) {
+    const host = hosts[Math.floor(rng() * hosts.length)]
+    const c = spawnCloud(rng, opts)
+    const ang = rng() * Math.PI * 2
+    const d = host.r * 0.55 * rng()
+    c.x = host.x + Math.cos(ang) * d
+    c.z = host.z + Math.sin(ang) * d
+    c.y = host.y + (rng() - 0.5) * host.h * 1.1
+    c.r = Math.min(c.r, host.r * (0.3 + rng() * 0.4))
+    c.h = c.r * (0.35 + rng() * 0.5) * Math.pow(c.elong, -0.25)
+    return c
+  }
   let best = null
   let bestGap = -Infinity
   for (let i = 0; i < tries; i++) {
@@ -179,7 +233,11 @@ export function createSky({ count = 16, seed = 1, grouping = null, ...opts } = {
   for (let i = 0; i < count; i++) {
     clouds.push(spawnSpaced(rng, { ...o, ageAtBirth: rng() }, clouds))
   }
-  return { clouds, rng, opts: o, t: 0 }
+  // `target` = peuplement VOULU. Les divisions et l'effilochage font monter le
+  // compte au-dessus de la cible ; les morts le ramènent en douceur. Sans cette
+  // cible, l'appelant remettait le compte à niveau chaque frame et supprimait
+  // l'enfant qui venait de naître — les nuages ne se divisaient JAMAIS.
+  return { clouds, rng, opts: o, t: 0, target: count }
 }
 
 // Avance le ciel de dt secondes : advection par le vent, vieillissement,
@@ -215,8 +273,15 @@ export function stepSky(sky, dt, { wind = { dir: 0, speed: 0.6 } } = {}) {
     if (c.rTarget && c.rTarget > c.r) c.r += (c.rTarget - c.r) * Math.min(1, dt * 0.5)
     c.age += dt / c.span
     if (c.age >= 1) {
-      // mort : une nouvelle entité prend la place, ailleurs et différente
-      sky.clouds[i] = spawnSpaced(rng, opts, sky.clouds)
+      // mort. Si le ciel est EN SURNOMBRE (une division ou un effilochage vient
+      // de peupler), on ne remplace pas : c'est ainsi que le compte redescend
+      // vers la cible sans jamais couper un nuage vivant en plein vol.
+      if (sky.clouds.length > (sky.target ?? sky.clouds.length)) {
+        sky.clouds.splice(i, 1)
+        i--
+      } else {
+        sky.clouds[i] = spawnSpaced(rng, opts, sky.clouds)
+      }
     }
   }
   // COLLISIONS (Adrien) : deux nuages mûrs qui se recouvrent fusionnent — le
@@ -241,29 +306,73 @@ export function stepSky(sky, dt, { wind = { dir: 0, speed: 0.6 } } = {}) {
   // DIVISIONS (Adrien) : l'inverse de la fusion — un gros nuage mûr peut se
   // scinder en deux. Le parent maigrit, un enfant plus jeune naît à son flanc
   // et part vivre sa vie (vitesse propre, un peu plus déchiqueté).
-  if (sky.clouds.length < CLOUD_COUNT_MAX) {
+  if (sky.clouds.length < CLOUD_HARD_MAX) {
     for (const c of sky.clouds) {
-      if (c.merging || c.r < opts.sizeMax * 1.02) continue
+      if (c.merging || c.shattered || c.r < opts.sizeMax * 0.8) continue
       if (c.age < 0.25 || c.age > 0.6) continue
       if (rng() > dt * 0.05) continue // ~1 division / 20 s de nuage éligible
-      const ang = rng() * Math.PI * 2
-      sky.clouds.push({
-        ...c,
-        r: c.r * 0.62,
-        h: c.h * 0.8,
-        seed: rng() * 1000,
-        x: c.x + Math.cos(ang) * c.r * 0.9,
-        z: c.z + Math.sin(ang) * c.r * 0.9,
-        age: 0.16, // naissant : il grossit en s'éloignant
-        span: 40 + rng() * 60,
-        rTarget: 0,
-        speed: c.speed * (0.85 + rng() * 0.3),
-        wisp: Math.min(1, (c.wisp ?? 0) + rng() * 0.2),
-        merging: false,
-      })
+      // un OU DEUX enfants, nés À CHEVAL sur le corps du parent (0.5·r) plutôt
+      // qu'à côté : on voit la masse se dédoubler, pas un nuage apparaître
+      const kids = rng() < 0.35 ? 2 : 1
+      for (let f = 0; f < kids && sky.clouds.length < CLOUD_HARD_MAX; f++) {
+        const ang = rng() * Math.PI * 2
+        sky.clouds.push({
+          ...c,
+          r: c.r * (0.5 + rng() * 0.18),
+          h: c.h * (0.7 + rng() * 0.2),
+          elong: drawElong(rng, c.kind),
+          seed: rng() * 1000,
+          x: c.x + Math.cos(ang) * c.r * 0.5,
+          z: c.z + Math.sin(ang) * c.r * 0.5,
+          age: 0.16, // naissant : il grossit en s'éloignant
+          span: 40 + rng() * 60,
+          rTarget: 0,
+          speed: c.speed * (0.85 + rng() * 0.3),
+          wisp: Math.min(1, (c.wisp ?? 0) + rng() * 0.2),
+          merging: false,
+          shattered: false,
+        })
+      }
       c.r *= 0.75
       c.rTarget = 0
       break // une division par pas de temps suffit
+    }
+  }
+  // EFFILOCHAGE (Adrien : « ou s'effilocher en plein de petits bouts ») :
+  // plutôt que de fondre sur place, un nuage en fin de vie peut ÉCLATER en
+  // lambeaux qui partent chacun de leur côté et s'éteignent vite. C'est la
+  // dissipation vue de près — l'inverse exact de la fusion.
+  if (sky.clouds.length + 3 <= CLOUD_HARD_MAX) {
+    for (const c of sky.clouds) {
+      if (c.merging || c.shattered) continue
+      if (c.age < 0.6 || c.age > 0.86 || c.r < opts.sizeMin * 0.9) continue
+      if (rng() > dt * 0.09) continue
+      const n = 3 + Math.floor(rng() * 3) // 3 à 5 lambeaux
+      for (let f = 0; f < n && sky.clouds.length < CLOUD_HARD_MAX; f++) {
+        const ang = (f / n) * Math.PI * 2 + rng() * 0.8
+        const d = c.r * (0.25 + rng() * 0.6)
+        sky.clouds.push({
+          ...c,
+          r: c.r * (0.18 + rng() * 0.2),
+          h: c.h * (0.25 + rng() * 0.35),
+          elong: drawElong(rng, 'voile'), // les lambeaux s'étirent
+          seed: rng() * 1000,
+          x: c.x + Math.cos(ang) * d,
+          z: c.z + Math.sin(ang) * d,
+          y: c.y + (rng() - 0.5) * c.h,
+          age: 0.42, // déjà mûr : il ne fera que se déliter
+          span: 16 + rng() * 20,
+          rTarget: 0,
+          density: c.density * (0.45 + rng() * 0.35),
+          speed: c.speed * (0.9 + rng() * 0.5),
+          wisp: Math.min(1, (c.wisp ?? 0) + 0.3 + rng() * 0.3),
+          merging: false,
+          shattered: true,
+        })
+      }
+      c.age = 0.93 // le parent s'éteint, ses lambeaux lui survivent
+      c.shattered = true
+      break
     }
   }
   return sky
@@ -275,6 +384,9 @@ export function stepSky(sky, dt, { wind = { dir: 0, speed: 0.6 } } = {}) {
 export function resizeSky(sky, count) {
   const n = Math.max(0, count | 0)
   if (!sky) return sky
+  sky.target = n
+  // on ne COUPE que le surplus dû à la nouvelle cible ; les morceaux d'une
+  // division en cours (au-dessus de la cible) partent en dernier
   while (sky.clouds.length > n) sky.clouds.pop()
   while (sky.clouds.length < n) sky.clouds.push(spawnSpaced(sky.rng, sky.opts, sky.clouds))
   return sky

@@ -38,13 +38,19 @@ const _m = new THREE.Matrix4()
 const _v = new THREE.Vector3()
 
 // ------------------------------------------------------------------ shader
+// Axe d'allongement d'un nuage, déduit de sa seule graine. La MÊME formule
+// tourne côté JS (_writeInstances, pour dimensionner la boîte englobante) —
+// deux lignes triviales valent mieux qu'un attribut de plus à synchroniser.
+const elongAngle = (seed) => ((seed * 0.017) % 1) * Math.PI
+
 const VERT = /* glsl */ `
   out vec3 vWorldPos;
   flat out vec3 vCenter;
   flat out vec3 vHalf;
-  flat out vec3 vInfo;   // x = graine, y = densité (vie incluse), z = filandreux
+  flat out vec4 vInfo;   // x = graine, y = densité (vie incluse), z = filandreux, w = allongement
+  flat out vec3 vAxes;   // demi-axes RÉELS de l'empreinte : x = long, y = court, z = angle
 
-  in vec3 iInfo;
+  in vec4 iInfo;
 
   void main() {
     // les bornes du nuage se DÉRIVENT de la matrice d'instance (translation +
@@ -52,6 +58,14 @@ const VERT = /* glsl */ `
     vCenter = instanceMatrix[3].xyz;
     vHalf = vec3(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz), length(instanceMatrix[2].xyz)) * 0.5;
     vInfo = iInfo;
+    // La boîte est AXÉE SUR LE MONDE mais l'empreinte est une ellipse TOURNÉE
+    // (jusqu'à 6:1, Adrien) : on retrouve ses demi-axes depuis la boîte
+    // englobante — Rx² = b²(e²cos²θ + sin²θ), donc b = Rx / √(…).
+    float e = max(1.0, iInfo.w);
+    float th = fract(iInfo.x * 0.017) * 3.14159265;
+    float c = cos(th), s = sin(th);
+    float b = vHalf.x / sqrt(e * e * c * c + s * s);
+    vAxes = vec3(e * b, b, th);
     vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);
     vWorldPos = wp.xyz;
     gl_Position = projectionMatrix * viewMatrix * wp;
@@ -72,7 +86,8 @@ const FRAG = /* glsl */ `
   in vec3 vWorldPos;
   flat in vec3 vCenter;
   flat in vec3 vHalf;
-  flat in vec3 vInfo;
+  flat in vec4 vInfo;
+  flat in vec3 vAxes; // demi-axe long, demi-axe court, angle de l'allongement
   out vec4 outColor;
 
   uniform sampler3D uVolume;
@@ -96,6 +111,10 @@ const FRAG = /* glsl */ `
   // tirette de TEXTURE (Adrien) : 0 = bourgeons nets v3 (érosion-remap),
   // 1 = coton doux de l'ancien moteur (le bruit module au lieu de ronger)
   uniform float uTexMix;
+  // « Gonflement vertical » et « Trouées » du panneau : ces deux tirettes
+  // existaient depuis l'ancien moteur mais n'étaient RELIÉES À RIEN en v2/v3.
+  uniform float uBillow;   // force du bourgeonnement en chou-fleur
+  uniform float uCoverage; // 0 = masses pleines, 0.8 = dentelle trouée
   // relief : sert à l'occlusion (le rayon s'arrête dans la montagne)
   uniform sampler2D uTerrainTex;
   uniform vec2 uMapMin;
@@ -144,8 +163,6 @@ const FRAG = /* glsl */ `
   // Parametres d'empreinte par ENTITE, tires de la graine + du filandreux.
   struct Foot {
     vec2 lean;      // decentrage de l'empreinte (asymetrie sous le vent)
-    vec2 ani;       // anisotropie : empreintes allongees, pas des disques
-    float rot;      // orientation de l'allongement
     float covr;     // couverture : plein (bourgeon) -> troue (voile)
     float wExp;     // exposant meteo : mord plus ou moins dans le bruit
     float bias;     // ou gonfle le ventre du profil demi-cercle
@@ -160,9 +177,9 @@ const FRAG = /* glsl */ `
     Foot F;
     float leanA = c.z * 6.28318;
     F.lean = vec2(cos(leanA), sin(leanA)) * (0.05 + c.x * 0.22);
-    F.ani = vec2(1.0, 0.55 + g.y * 0.55); // allonge sur un axe
-    F.rot = g.x * 6.28318;
-    F.covr = mix(0.92, 0.58, wisp) - c.y * 0.12;
+    // l'allongement de l'empreinte n'est plus ici : il est GÉOMÉTRIQUE
+    // (ellipse tournée, jusqu'a 6:1) et arrive par vAxes
+    F.covr = mix(0.92, 0.58, wisp) - c.y * 0.12 + (0.45 - uCoverage) * 0.55;
     F.wExp = mix(0.8, 2.4, wisp);
     F.bias = mix(0.42, 0.22, wisp); // voile = ventre bas et plat
     F.shapeAmt = mix(0.5, 0.85, wisp);
@@ -174,10 +191,16 @@ const FRAG = /* glsl */ `
   #define COV_FILTER 0.4
 
   float densityAt(const vec3 wp, const Foot F, const float detailOn) {
-    // la BOITE est plus large que le nuage (BOX_PAD) : p est normalise a
-    // la SILHOUETTE (plus ou moins 1), la paroi est a 1.15 — jamais atteinte
-    vec3 p = (wp - vCenter) / vHalf * BOX_PAD;
-    float hf = sat(p.y * 0.5 + 0.5); // 0 = base, 1 = sommet
+    // la BOITE est plus large que le nuage (BOX_PAD) : les coordonnees sont
+    // normalisees a la SILHOUETTE (plus ou moins 1), la paroi est a 1.15
+    vec3 rel = wp - vCenter;
+    float py = rel.y / vHalf.y * BOX_PAD;
+    float hf = sat(py * 0.5 + 0.5); // 0 = base, 1 = sommet
+
+    // EMPREINTE ELLIPTIQUE TOURNEE (Adrien : « la base peut etre tres allongee,
+    // jusqu'a 5 ou 6 pour 1 ») : la boite reste axee sur le monde, c'est le
+    // POINT qu'on ramene dans le repere du nuage puis sur le disque unite.
+    vec2 q = (rot2(-vAxes.z) * rel.xz) / vAxes.xy * BOX_PAD;
 
     // CISAILLEMENT (Takram : turbulence en deplacement de domaine, ponderee a
     // la BASE, remap(h, 0.3 -> 0.0)) : la base est trainee par le vent et
@@ -186,7 +209,7 @@ const FRAG = /* glsl */ `
     float baseW = 1.0 - remapC(hf, 0.0, 0.3);
     if (baseW > 0.001) {
       vec2 tn = texture(uVolume, fract(wp * uScale * 0.021 + vInfo.x)).rg - 0.5;
-      p.xz += (uWind * 0.30 + tn * (0.30 + 0.35 * length(uWind))) * baseW;
+      q += (uWind * 0.30 + tn * (0.30 + 0.35 * length(uWind))) * baseW;
     }
 
     // profil demi-cercle biaise (Takram shapeAlteringFunction) : nul a la
@@ -196,9 +219,9 @@ const FRAG = /* glsl */ `
     float heightScale = 1.0 - x * x;
     if (heightScale <= 0.003) return 0.0;
 
-    // EMPREINTE : retombee radiale anisotrope + meteo bruitee a domaine
-    // deforme — le contour est dessine par le bruit, jamais par la geometrie
-    vec2 q = rot2(F.rot) * (p.xz - F.lean) * F.ani;
+    // retombee radiale sur le disque unite + meteo bruitee a domaine deforme :
+    // le contour est dessine par le bruit, jamais par la geometrie
+    q -= F.lean;
     float radial = 1.0 - smoothstep(0.30, 1.0, length(q));
     if (radial <= 0.003) return 0.0;
     // l'empreinte EVOLUE : derive lente du dessin interne (protuberances qui
@@ -226,6 +249,18 @@ const FRAG = /* glsl */ `
     env = mix(net, coton, uTexMix);
     if (env <= 0.004) return 0.0;
 
+    // BOURGEONNEMENT (Adrien : « augmente le bourgeonnement comme a la session
+    // precedente ») : seconde echelle de bruit, plus fine et cabossee, qui
+    // creuse des BOSSES DE CHOU-FLEUR — d'autant plus marquees qu'on monte
+    // (un cumulus bourgeonne par le haut, sa base reste lisse). C'est ce que
+    // faisaient les lobes qui grossissaient, sans leurs patates.
+    float budAmt = uBillow * (0.18 + 0.82 * hf) * (1.0 - 0.6 * uTexMix);
+    if (budAmt > 0.004) {
+      float bump = texture(uVolume, fract(sp * 2.35 + 0.61)).r;
+      env = remapC(env, (1.0 - bump) * budAmt, 1.0);
+      if (env <= 0.004) return 0.0;
+    }
+
     // detail NEAR-FIELD seulement (gate distance — gratuit de loin) :
     // "fluffy at the top, whippy at the bottom" (Takram, verbatim)
     if (detailOn > 0.5) {
@@ -237,10 +272,10 @@ const FRAG = /* glsl */ `
     }
 
     env = pow(env, uContrast);
-    // ceintures de secours euclidiennes (invisibles : l'empreinte s'eteint
+    // ceintures de secours elliptiques (invisibles : l'empreinte s'eteint
     // bien avant), au cas ou
-    env *= 1.0 - smoothstep(0.86, 1.05, length(p.xz));
-    env *= 1.0 - smoothstep(0.90, 1.08, abs(p.y));
+    env *= 1.0 - smoothstep(0.86, 1.05, length(q));
+    env *= 1.0 - smoothstep(0.90, 1.08, abs(py));
 
     // densite CROISSANTE avec la hauteur (profil 0.25 + 0.75*h de Takram) :
     // base tenue et vaporeuse, sommet dense — le x0.85 recale l'ensemble un
@@ -402,7 +437,12 @@ const FRAG = /* glsl */ `
       // On écrase la luminance vers un gris-bleu très sombre ; l'ombrage
       // interne (ratios sun/sss/skyLight) reste intact, seul le niveau chute.
       col = mix(col, col * vec3(0.10, 0.12, 0.16) + vec3(0.006, 0.008, 0.013), uNight);
-      float stepTrans = exp(-d * dt * 1.2);
+      // EXTINCTION (Adrien : « à travers un nuage, il ne faut pas voir le
+      // nuage derrière ») : le coefficient était trop bas — la transmittance
+      // ne tombait jamais à zéro, même au cœur, et deux nuages superposés se
+      // lisaient l'un dans l'autre. Les BORDS restent vaporeux (leur densité
+      // est faible), seul le corps devient franchement opaque.
+      float stepTrans = exp(-d * dt * 3.0);
       // ALBÉDO < 1 (Takram : extinction = scattering + absorption) : la
       // matière bloque un peu plus qu'elle ne réémet — les cœurs très épais
       // virent au gris réaliste au lieu du blanc saturé
@@ -455,23 +495,26 @@ export class Clouds2 {
     const hf = this._bakeHeightfield()
     const half = TERRAIN_SIZE / 2
 
-    // le ciel vit au-dessus des sommets mais assez bas pour que les crêtes le
-    // percent — c'est la rencontre relief/nuages, cœur de la phase 2
-    const baseY = (params?.cloudAltitude ?? 4.5)
+    // PLAGE VERTICALE (Adrien) : « du sol au 100 % de l'altitude actuelle —
+    // certains vivent au sommet des montagnes, d'autres au fond des vallées ».
+    // La tirette Altitude est donc le PLAFOND, et « Étalement en altitude »
+    // dit quelle part de la colonne est peuplée (1 = jusqu'au sol).
+    const ceilY = params?.cloudAltitude ?? 4.5
+    const spread = Math.max(0, Math.min(1, params?.cloudAltSpread ?? 0.85))
     const sky = createSky({
       count: this._targetCount(params),
       seed: (params?.seaSeed ?? 1) | 0 || 1,
       half: half * 0.92,
-      baseY,
-      topY: baseY + 4,
+      baseY: ceilY * (1 - spread),
+      topY: ceilY,
       sizeMin: 2.2,
       sizeMax: 6.0,
     })
     this.sky = sky
 
     const geo = new THREE.BoxGeometry(1, 1, 1)
-    const info = new Float32Array(MAX_INSTANCES * 3)
-    geo.setAttribute('iInfo', new THREE.InstancedBufferAttribute(info, 3))
+    const info = new Float32Array(MAX_INSTANCES * 4)
+    geo.setAttribute('iInfo', new THREE.InstancedBufferAttribute(info, 4))
     this._info = geo.getAttribute('iInfo')
 
     const mat = new THREE.ShaderMaterial({
@@ -506,6 +549,8 @@ export class Clouds2 {
         uSkyHi: { value: new THREE.Color(1, 1, 1) },
         uSkyLo: { value: new THREE.Color(0.82, 0.85, 0.9) },
         uTexMix: { value: params?.cloudTexMix ?? 0.35 },
+        uBillow: { value: params?.cloudBillow ?? 0.55 },
+        uCoverage: { value: params?.cloudCoverage ?? 0.45 },
         uTerrainTex: { value: hf.tex },
         uMapMin: { value: new THREE.Vector2(-half, -half) },
         uMapSize: { value: new THREE.Vector2(TERRAIN_SIZE, TERRAIN_SIZE) },
@@ -552,12 +597,23 @@ export class Clouds2 {
       // shader — les deux valeurs DOIVENT rester d'accord) : l'enveloppe
       // s'éteint avant le bord, donc aucun nuage n'est coupé net
       const pad = 2 * 1.15
-      _m.makeScale(c.r * pad * s, c.h * pad * s, c.r * pad * s)
+      // BOÎTE ENGLOBANTE d'une ellipse TOURNÉE : les demi-axes conservent
+      // l'aire (a·b = r²), la boîte reste axée sur le monde et le shader
+      // retrouve a et b depuis elle — voir vAxes dans VERT.
+      const e = Math.max(1, c.elong ?? 1)
+      const th = elongAngle(c.seed)
+      const ct = Math.cos(th), st = Math.sin(th)
+      const se = Math.sqrt(e)
+      const a = c.r * se, b = c.r / se
+      const rx = Math.hypot(a * ct, b * st)
+      const rz = Math.hypot(a * st, b * ct)
+      _m.makeScale(rx * pad * s, c.h * pad * s, rz * pad * s)
       _m.setPosition(c.x, c.y, c.z)
       mesh.setMatrixAt(n, _m)
-      info.array[n * 3] = c.seed
-      info.array[n * 3 + 1] = dens
-      info.array[n * 3 + 2] = c.wisp ?? 0 // 0 = bord net, 1 = voile déchiqueté
+      info.array[n * 4] = c.seed
+      info.array[n * 4 + 1] = dens
+      info.array[n * 4 + 2] = c.wisp ?? 0 // 0 = bord net, 1 = voile déchiqueté
+      info.array[n * 4 + 3] = e
       n++
       if (n >= MAX_INSTANCES) break
     }
@@ -578,15 +634,22 @@ export class Clouds2 {
       const dens = cloudDensity(c)
       if (dens <= 0.02) continue
       const r = c.r * cloudScale(c)
-      // empreinte en cellules
+      // empreinte en cellules — ELLIPSE tournée, la même que celle du shader :
+      // un radeau 6:1 doit projeter une ombre en radeau, pas un disque
       const cx = ((c.x + half) / TERRAIN_SIZE) * N
       const cz = ((c.z + half) / TERRAIN_SIZE) * N
-      const rp = (r / TERRAIN_SIZE) * N
-      const i0 = Math.max(0, Math.floor(cx - rp)), i1 = Math.min(N - 1, Math.ceil(cx + rp))
-      const j0 = Math.max(0, Math.floor(cz - rp)), j1 = Math.min(N - 1, Math.ceil(cz + rp))
+      const se = Math.sqrt(Math.max(1, c.elong ?? 1))
+      const th = elongAngle(c.seed)
+      const ct = Math.cos(th), st = Math.sin(th)
+      const ap = Math.max(((r * se) / TERRAIN_SIZE) * N, 1e-3)
+      const bp = Math.max(((r / se) / TERRAIN_SIZE) * N, 1e-3)
+      const ext = Math.max(ap, bp)
+      const i0 = Math.max(0, Math.floor(cx - ext)), i1 = Math.min(N - 1, Math.ceil(cx + ext))
+      const j0 = Math.max(0, Math.floor(cz - ext)), j1 = Math.min(N - 1, Math.ceil(cz + ext))
       for (let j = j0; j <= j1; j++) {
         for (let i = i0; i <= i1; i++) {
-          const d = Math.hypot(i + 0.5 - cx, j + 0.5 - cz) / Math.max(rp, 1e-3)
+          const dx = i + 0.5 - cx, dz = j + 0.5 - cz
+          const d = Math.hypot((dx * ct + dz * st) / ap, (-dx * st + dz * ct) / bp)
           if (d >= 1) continue
           // bord adouci : une ombre de nuage n'a pas de contour net
           const f = (1 - d * d) * (1 - d * d)
@@ -627,9 +690,13 @@ export class Clouds2 {
     const speed = (params?.windSpeed ?? 0.6) * (params?.cloudDrift ?? 1) * 0.35
     stepSky(this.sky, Math.min(dt, 0.1), { wind: { dir, speed } })
 
-    // le peuplement suit le curseur de densité et le palier de perf
+    // Le peuplement suit le curseur de densité et le palier de perf — mais on
+    // ne remet le compte à niveau QUE si la cible a changé. Le remettre à
+    // chaque image supprimait l'enfant qu'une division venait de créer : les
+    // nuages ne se divisaient jamais à l'écran. Le surplus se résorbe tout
+    // seul, à la mort des morceaux (voir stepSky).
     const want = this._targetCount(params)
-    if (this.sky.clouds.length !== want) resizeSky(this.sky, want)
+    if (this.sky.target !== want) resizeSky(this.sky, want)
 
     this._writeInstances(camera)
     u.uTime.value = this.sky.t
@@ -645,6 +712,8 @@ export class Clouds2 {
       u.uBrightness.value = (params.cloudBrightness ?? 2.9) * 0.42
       u.uSSS.value = params.cloudSSS ?? 0.8
       u.uTexMix.value = params.cloudTexMix ?? 0.35
+      u.uBillow.value = params.cloudBillow ?? 0.55
+      u.uCoverage.value = params.cloudCoverage ?? 0.45
       // Couleur du soleil selon SON ÉLÉVATION — même recette que l'ancien
       // système (palette sunLook partagée avec la mer et le terrain) : lumière
       // chaude quand le soleil rase, ambiante froide et sourde la nuit.

@@ -55,9 +55,9 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol
 // « Dégagé » n'est pas un réglage : c'est cloudsEnabled=false — la présence
 // fait partie du caractère, une seule rangée de chips décide de tout.
 const CLOUD_PRESETS = [
-  { id: 'epars', label: 'Épars', v: { cloudCoverage: 0.68, cloudBillow: 0.5, cloudContrast: 1.2, cloudOpacity: 1.0 } },
-  { id: 'couvert', label: 'Couvert', v: { cloudCoverage: 0.22, cloudBillow: 0.15, cloudContrast: 0.7, cloudOpacity: 1.1 } },
-  { id: 'drama', label: 'Dramatique', v: { cloudCoverage: 0.45, cloudBillow: 0.95, cloudContrast: 1.8, cloudOpacity: 1.5 } },
+  { id: 'epars', label: 'Épars', v: { cloudCoverage: 0.68, cloudBillow: 0.6, cloudContrast: 1.2, cloudOpacity: 1.0 } },
+  { id: 'couvert', label: 'Couvert', v: { cloudCoverage: 0.22, cloudBillow: 0.35, cloudContrast: 0.7, cloudOpacity: 1.1 } },
+  { id: 'drama', label: 'Dramatique', v: { cloudCoverage: 0.45, cloudBillow: 1.0, cloudContrast: 1.8, cloudOpacity: 1.5 } },
 ]
 const CLOUD_TIPS = {
   degage: 'Ciel dégagé — pas de nuages.',
@@ -174,8 +174,10 @@ export function buildEffectsPanel(ctx) {
     cloudLive('Texture cotonneuse', 'cloudTexMix', 0, 1, 0.05, 0.35),
     el('div', 'ce-fx-head', 'Réglages fins'),
     cloudBaked('Échelle', 'cloudScale', 0.5, 5, 0.1),
-    cloudBaked('Trouées', 'cloudCoverage', 0, 0.8, 0.01),
-    cloudBaked('Gonflement vertical', 'cloudBillow', 0, 1, 0.05),
+    // Trouées et Bourgeonnement pilotent des uniformes : plus besoin de
+    // reconstruire tout le ciel (l'ancien moteur les cuisait dans son volume)
+    cloudLive('Trouées', 'cloudCoverage', 0, 0.8, 0.01, 0.45),
+    cloudLive('Bourgeonnement', 'cloudBillow', 0, 1.2, 0.05, 0.6),
     cloudLive('Luminosité', 'cloudBrightness', 0.5, 5, 0.1),
     cloudLive('Contraste', 'cloudContrast', 0.4, 2.5, 0.05),
     cloudLive('Translucidité', 'cloudSSS', 0, 2, 0.05),
