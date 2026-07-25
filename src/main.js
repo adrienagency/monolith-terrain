@@ -4070,6 +4070,18 @@ function tick() {
 
   updateCameraMotion(dt)
 
+  // BRUME relative au zoom : Début/Fin (params.fogNear/fogFar) sont exprimés
+  // pour un cadrage de référence (~40 unités) mais la caméra bouge — en
+  // absolu, zoomé de près TOUT passait sous « Début » (aucune brume) et
+  // reculé au-delà de « Fin » la carte entière disparaissait dans le blanc
+  // (le « souvent elle ne fonctionne pas » d'Adrien). Renormalisés chaque
+  // frame sur la distance caméra→cible, le rendu est le même à tous les zooms.
+  if (scene.fog) {
+    const dRef = camera.position.distanceTo(controls.target) / 40
+    scene.fog.near = params.fogNear * dRef
+    scene.fog.far = params.fogFar * dRef
+  }
+
   // Post passes are OWNED here, one place, every frame. The AO pass reads the
   // normal+depth of the CURRENT camera state — during dives/orbital/terrain
   // swaps that state is mid-flight and a broken AO multiplies the whole frame
