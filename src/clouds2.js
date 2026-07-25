@@ -85,6 +85,9 @@ const FRAG = /* glsl */ `
   uniform vec3 uAmbColor;
   uniform float uNight; // 0 = jour, 1 = nuit noire
   uniform float uTime;
+  // vent en unité monde (direction unitaire × force) : cisaille la base des
+  // nuages et fait dériver le dessin interne de l'empreinte (phase 2)
+  uniform vec2 uWind;
   // relief : sert à l'occlusion (le rayon s'arrête dans la montagne)
   uniform sampler2D uTerrainTex;
   uniform vec2 uMapMin;
@@ -168,6 +171,16 @@ const FRAG = /* glsl */ `
     vec3 p = (wp - vCenter) / vHalf * BOX_PAD;
     float hf = sat(p.y * 0.5 + 0.5); // 0 = base, 1 = sommet
 
+    // CISAILLEMENT (Takram : turbulence en deplacement de domaine, ponderee a
+    // la BASE, remap(h, 0.3 -> 0.0)) : la base est trainee par le vent et
+    // fouettee par la turbulence, le sommet reste net. Une seule lecture de
+    // volume, payee uniquement dans le tiers bas du nuage.
+    float baseW = 1.0 - remapC(hf, 0.0, 0.3);
+    if (baseW > 0.001) {
+      vec2 tn = texture(uVolume, fract(wp * uScale * 0.021 + vInfo.x)).rg - 0.5;
+      p.xz += (uWind * 0.30 + tn * (0.30 + 0.35 * length(uWind))) * baseW;
+    }
+
     // profil demi-cercle biaise (Takram shapeAlteringFunction) : nul a la
     // base ET au sommet, ventre place par le bias — le profil de cumulus
     float hb = pow(hf, F.bias);
@@ -182,7 +195,9 @@ const FRAG = /* glsl */ `
     if (radial <= 0.003) return 0.0;
     // l'empreinte EVOLUE : derive lente du dessin interne (protuberances qui
     // migrent) — remplace la respiration des lobes
-    vec2 wuv = q * 0.33 + F.wOff + vec2(uTime * 0.004, 0.0);
+    // ADVECTION : le dessin interne derive AVEC le vent (offset meteo Takram),
+    // plus un souffle residuel pour que le calme plat ne fige pas le nuage
+    vec2 wuv = q * 0.33 + F.wOff + uWind * uTime * 0.006 + vec2(uTime * 0.0015, 0.0);
     float warp = texture(uVolume, vec3(fract(wuv * 0.61 + 0.13), 0.62)).g;
     float wthr = texture(uVolume, vec3(fract(wuv + (warp - 0.5) * 0.5), 0.29)).g;
     float weather = pow(wthr, F.wExp) * radial;
@@ -216,8 +231,9 @@ const FRAG = /* glsl */ `
     env *= 1.0 - smoothstep(0.90, 1.08, abs(p.y));
 
     // densite CROISSANTE avec la hauteur (profil 0.25 + 0.75*h de Takram) :
-    // base tenue et vaporeuse, sommet dense — regle le "trop dense"
-    float dens = env * (0.25 + 0.75 * hf);
+    // base tenue et vaporeuse, sommet dense — le x0.85 recale l'ensemble un
+    // cran plus leger (Adrien : « trop denses »)
+    float dens = env * (0.25 + 0.75 * hf) * 0.85;
     // jamais de nuage colle a l'objectif
     dens *= smoothstep(1.5, 4.0, distance(wp, cameraPosition));
     return dens * uDensity * vInfo.y;
@@ -441,6 +457,7 @@ export class Clouds2 {
         uAmbColor: { value: new THREE.Color(0.32, 0.35, 0.4) },
         uNight: { value: 0 },
         uTime: { value: 0 },
+        uWind: { value: new THREE.Vector2(0.42, 0.42) },
         uTerrainTex: { value: hf.tex },
         uMapMin: { value: new THREE.Vector2(-half, -half) },
         uMapSize: { value: new THREE.Vector2(TERRAIN_SIZE, TERRAIN_SIZE) },
@@ -568,6 +585,8 @@ export class Clouds2 {
 
     this._writeInstances(camera)
     u.uTime.value = this.sky.t
+    // même vent que la sim, en vecteur : cisaillement de base + advection
+    u.uWind.value.set(Math.cos(dir), Math.sin(dir)).multiplyScalar(Math.min(1.5, params?.windSpeed ?? 0.6))
     if (params) {
       u.uDensity.value = params.cloudOpacity ?? 1
       u.uScale.value = params.cloudScale ?? 3
