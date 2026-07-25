@@ -226,11 +226,13 @@ export function buildElemBar({ modes, initial, onMode, toolsByMode, simpleCore }
     // la nouvelle géométrie à travers le goo = morph liquide du fond
     items: () => [
       { key: '__core', el: isSimple() && simpleCore ? simpleCore : bar },
-      { key: '__adv', el: advSlot.firstElementChild },
-    ].filter((e) => e.el),
+      // la bulle mesure le SLOT (pleine hauteur), pas le bouton — le bouton
+      // garde une pastille de survol EN RETRAIT comme les autres (Adrien)
+      { key: '__adv', el: advSlot },
+    ],
     inflate: 0,
-    // la coche liquide chevauche le mode ACTIF (avancé seulement) et voyage
-    bumpFor: () => (isSimple() ? null : modeSeg.querySelector('.ce-wm-btn.on')),
+    // la coche liquide chevauche le choix ACTIF des DEUX niveaux et voyage
+    bumpFor: () => (isSimple() && simpleCore ? simpleCore : modeSeg).querySelector('.ce-wm-btn.on'),
   })
   const wrap = el('div', 'ce-elemwrap')
   wrap.append(menu, row)

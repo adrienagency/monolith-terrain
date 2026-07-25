@@ -191,16 +191,6 @@ body.dark {
   filter: brightness(1.07);
   background: var(--ce-accent);
 }
-/* porte PRINCIPALE (quickbar) : pill encre — même langage que le mode actif
-   de l'elembar ; l'accent orange reste l'exclusivité de Publier */
-.ce-pillbtn.primary {
-  background: var(--ce-ink);
-  color: var(--ce-bg, #fff);
-}
-.ce-pillbtn.primary:hover {
-  background: var(--ce-ink);
-  filter: brightness(1.15);
-}
 .ce-topbar .ce-pillbtn {
   height: 30px;
   margin: 0 2px;
@@ -489,32 +479,34 @@ body.dark .lq-blob { background: #17191d; }
 .ce-lq-adv {
   position: absolute;
   left: calc(100% + 4px);
-  /* MÊME niveau et MÊME hauteur que la capsule : la bulle Avancé s'étire sur
-     toute la rangée → pincement liquide symétrique (l'haltère de la réf) */
+  /* MÊME niveau et MÊME hauteur que la capsule : la BULLE mesure le slot
+     (pleine rangée) → pincement symétrique ; le bouton, lui, est centré et
+     en retrait (padding) pour une pastille de survol avec marge */
   top: 0;
   bottom: 0;
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  padding: 0 5px;
   white-space: nowrap;
   z-index: 1;
 }
 /* la bulle Avancé reste BLANCHE dans les deux états (rectif Adrien) —
    c'est le MOT qui parle : grisé en mode simple, encre en avancé (transition
    d'opacité), et l'icône prend la couleur d'appel quand c'est actif */
-.ce-lq-adv .ce-elembar-btn,
-.ce-lq-adv .ce-pillbtn,
-.ce-lq-adv .ce-pillbtn:hover,
-.ce-lq-adv .ce-advbtn.on {
+.ce-lq-adv .ce-advbtn {
   background: none;
   box-shadow: none;
-}
-.ce-lq-adv .ce-advbtn {
-  padding: 0 16px;
-  height: 100%;
+  height: auto;
+  padding: 8px 13px;
+  border-radius: 999px;
   color: var(--ce-muted);
-  transition: color 0.25s;
+  transition: color 0.25s, background 0.2s;
 }
-.ce-lq-adv .ce-advbtn.on { color: var(--ce-ink); }
+/* la pastille de survol reste EN RETRAIT dans la bulle (marge via le padding
+   du slot), comme les autres boutons — rectif Adrien */
+.ce-lq-adv .ce-advbtn:hover { background: var(--ce-hover); }
+.ce-lq-adv .ce-advbtn.on { color: var(--ce-ink); background: none; }
+.ce-lq-adv .ce-advbtn.on:hover { background: var(--ce-hover); }
 .ce-lq-adv .ce-advbtn.on svg { color: var(--ce-accent); }
 
 /* l'elemwrap est désormais LA barre unique des deux niveaux : la capsule
@@ -1801,11 +1793,12 @@ body.shibu-view .ce-miniroute.has {
 body.ce-simple .ce-dock {
   display: none !important;
 }
+/* même capsule que le mode avancé : gap/padding identiques à .ce-elembar */
 .ce-qb-core {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px;
+  gap: 2px;
+  padding: 5px;
 }
 
 /* ---- panneau Parcours v2 : portes d'entrée + carte Organisateur ---------- */

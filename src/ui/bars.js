@@ -330,25 +330,30 @@ export function buildMapCorner(ctx) {
   }
 }
 
-// Cœur du MODE SIMPLE — les deux portes de création. Plus de barre autonome :
-// il est HÉBERGÉ dans la rangée liquide de l'elembar (buildElemBar
-// simpleCore), pour que le fond morphe d'un niveau à l'autre au switch.
+// Cœur du MODE SIMPLE — même grammaire de nav que le mode avancé (rectif
+// Adrien) : trois .ce-wm-btn (Explorer / Habiller ma carte / Ma course), le
+// mot choisi fonce + icône orange + coche liquide, AUCUN fond de pill.
+// Hébergé dans la rangée liquide de l'elembar (buildElemBar simpleCore).
 export function buildQuickCore(ctx) {
   const core = el('div', 'ce-qb-core')
-  const mk = (icon, label, tip, onClick, kind) => {
-    const b = el('button', 'ce-pillbtn' + (kind ? ` ${kind}` : ''))
+  const explore =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 2.6 4 5.7 4 9s-1.2 6.4-4 9c-2.8-2.6-4-5.7-4-9s1.2-6.4 4-9z"/></svg>'
+  const setActive = (btn) => core.querySelectorAll('.ce-wm-btn').forEach((b) => b.classList.toggle('on', b === btn))
+  const mk = (icon, label, tip, onClick) => {
+    const b = el('button', 'ce-wm-btn')
     b.type = 'button'
     b.innerHTML = `${icon}<span>${label}</span>`
     b.setAttribute('data-tip', tip)
-    b.addEventListener('click', onClick)
+    b.addEventListener('click', () => { setActive(b); onClick?.() })
     return b
   }
-  // hiérarchie de couleur (rectif Adrien) : l'accent orange est RÉSERVÉ à
-  // Publier (un accent par écran) — la porte principale est un pill ENCRE
+  const home = mk(explore, 'Explorer', 'La carte, simplement — naviguer, chercher un lieu.', null)
   core.append(
-    mk(I.brush, 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur votre carte.', () => ctx.openAtelier(), 'primary'),
+    home,
+    mk(I.brush, 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur votre carte.', () => ctx.openAtelier()),
     mk(I.flag, 'Ma course', 'Race Studio — votre parcours GPX en carte de course (points de passage, transports, partage).', () => ctx.openStudio())
   )
+  home.classList.add('on') // l'état de repos du mode simple : on explore
   return core
 }
 
