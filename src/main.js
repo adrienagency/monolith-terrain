@@ -2669,6 +2669,14 @@ gpxFileInput.addEventListener('change', () => {
   gpxFileInput.value = ''
 })
 
+// la course de DÉMO (La Grande Traversée) — même bundle et même chemin
+// d'import que la porte démo du Race Studio (étape Trace) : une seule
+// mécanique, deux portes. `studio` est déclaré plus bas mais lu au CLIC.
+async function loadDemoRace() {
+  const bundle = parseRace(await (await fetch('/demo/grande-traversee.shibumap-race.json')).text())
+  if (bundle) await studio.importProject(bundle)
+}
+
 // ---- GPX sport-icon head billboard (task 22 §3/4) --------------------------
 // One CanvasTexture per built-in sport, rasterized once from sport-icons.js's
 // inline SVG table (rasterizeToCanvas is async — an Image decode — so build
@@ -3744,6 +3752,7 @@ const routePanel = buildRoutePanel({
   params,
   gpx: gpxLayer,
   loadGpx: () => gpxFileInput.click(),
+  loadDemo: () => loadDemoRace(),
   startFollow: engageGpxFollow,
   stopFollow: disengageGpxFollow,
   uploadIcon: requestIconUpload,
@@ -3782,6 +3791,9 @@ if (!IS_EMBED) {
   function applyWorkMode(id) {
     const keep = new Set(WORKMODE_PANELS[id]().map((p) => p.root))
     for (const p of allWorkPanels()) p.root.classList.toggle('wm-off', !keep.has(p.root))
+    // Parcours = un seul panneau, LA porte du mode : arriver sur un pill
+    // replié casserait l'évidence — il s'ouvre tout seul (portes ou Lecture)
+    if (id === 'parcours') routePanel.setCollapsed(false)
     try { localStorage.setItem(WORKMODE_KEY, id) } catch {}
   }
   // ordre visuel du rail gauche en mode Studio : Terrain → Fonds → Éléments
@@ -3845,7 +3857,9 @@ elementsPanel.setCollapsed(true)
 imagePanel.setCollapsed(true)
 cameraPanel.setCollapsed(true)
 mapPanel.setCollapsed(true)
-routePanel.setCollapsed(true)
+// Parcours reste OUVERT si on boote déjà dans ce mode (applyWorkMode l'a
+// déplié : c'est la porte du mode, un pill replié casserait l'évidence)
+if ((() => { try { return localStorage.getItem('shibumap-workmode') } catch { return null } })() !== 'parcours') routePanel.setCollapsed(true)
 
 // adaptive quality — built once the composer, panels and mode machine exist
 // so tier changes can announce, re-sync the Camera panel and stay quiet in
