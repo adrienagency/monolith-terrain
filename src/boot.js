@@ -6,7 +6,7 @@
 // The decision itself lives in boot-gate.js (pure, tested); this file only
 // observes the environment and paints the result.
 
-import { gateFor, looksInApp, detectWebGL2 } from './boot-gate.js'
+import { gateFor, looksInApp, looksSharedLink, detectWebGL2 } from './boot-gate.js'
 
 const coarse = matchMedia('(pointer: coarse)').matches
 const shortSide = Math.min(screen.width, screen.height)
@@ -15,6 +15,7 @@ const gate = gateFor({
   isPhone: coarse && shortSide < 600, // tablets (iPad mini 744+) pass
   hasWebGL2: detectWebGL2(),
   inAppBrowser: looksInApp(navigator.userAgent),
+  sharedView: looksSharedLink(location.hash), // une shibu reçue se consomme sur téléphone
 })
 
 if (gate) {

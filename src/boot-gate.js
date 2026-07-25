@@ -15,13 +15,19 @@
 export const GATE_PHONE = 'phone'
 export const GATE_WEBGL = 'webgl'
 
-// `caps` is what we could observe: { isPhone, hasWebGL2, inAppBrowser }.
+// `caps` is what we could observe: { isPhone, hasWebGL2, inAppBrowser, sharedView }.
 // Returns null when the app should boot, else { reason, title, body, hint }.
-export function gateFor({ isPhone = false, hasWebGL2 = true, inAppBrowser = false } = {}) {
+export function gateFor({ isPhone = false, hasWebGL2 = true, inAppBrowser = false, sharedView = false } = {}) {
   // Screen size first: on a phone the WebGL story is irrelevant — we wouldn't
   // run there even with a perfect GPU, so telling someone to switch browsers
   // would send them to a second dead end.
-  if (isPhone) {
+  //
+  // EXCEPTION — a shared shibu (#s=/#r= link): that link is precisely the
+  // thing people receive ON their phone, and the read-only viewer (body
+  // .shibu-view, no editing chrome) works there. So a shared link boots on
+  // phones; only the naked editor keeps the "room to breathe" card. WebGL2
+  // still gates below — a viewer without a renderer is a blank page.
+  if (isPhone && !sharedView) {
     return {
       reason: GATE_PHONE,
       title: 'ShibuMap',
@@ -45,6 +51,15 @@ export function gateFor({ isPhone = false, hasWebGL2 = true, inAppBrowser = fals
   }
 
   return null
+}
+
+// Is this URL a SHARED shibu? Exactly the two triggers main.js's IS_SHIBU
+// reads (hash `#s=<state>` inline, `#r=<id>` published) — kept in lockstep:
+// if this said yes but main.js booted the full editor, a phone would get the
+// editor; if this said no, a phone would get the refusal card over a link
+// that works. Pure (takes the hash string) so it's testable without a DOM.
+export function looksSharedLink(hash = '') {
+  return hash.startsWith('#s=') || hash.startsWith('#r=')
 }
 
 // Does this look like an in-app WebView? Deliberately narrow: only the ones
