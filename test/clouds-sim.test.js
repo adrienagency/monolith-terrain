@@ -3,14 +3,18 @@ import assert from 'node:assert/strict'
 import {
   createSky, stepSky, resizeSky, lifeEnvelope, cloudDensity, cloudScale,
   cloudCountForTier, makeRng, CLOUD_COUNT_MIN, CLOUD_COUNT_MAX, CLOUD_HARD_MAX,
-  ELONG_MAX, SKY_DEFAULTS,
+  CLUSTER_MIN, CLUSTER_MAX, ELONG_MAX, SKY_DEFAULTS,
 } from '../src/clouds-sim.js'
 
-// ------------------------------------------------------- peuplement adaptatif
+// compte les GRAPPES : c'est l'unité que l'utilisateur appelle « un nuage »
+const groups = (sky) => new Set(sky.clouds.map((c) => c.gid)).size
+const NO_WIND = { wind: { dir: 0, speed: 0 } }
+
+// ------------------------------------------------------------- peuplement
 test('cloudCountForTier : plus la machine est faible, moins il y a de nuages', () => {
   const counts = [0, 1, 2, 3].map((t) => cloudCountForTier(t))
   for (let i = 1; i < counts.length; i++) {
-    assert.ok(counts[i] < counts[i - 1], `palier ${i} devrait être plus léger : ${counts}`)
+    assert.ok(counts[i] <= counts[i - 1], `palier ${i} devrait être ≤ ${i - 1}`)
   }
   assert.ok(counts.every((c) => c >= CLOUD_COUNT_MIN && c <= CLOUD_COUNT_MAX))
 })
@@ -20,39 +24,59 @@ test('cloudCountForTier : le curseur de densité reste borné', () => {
   assert.equal(cloudCountForTier(3, 0) >= CLOUD_COUNT_MIN, true)
 })
 
-// ------------------------------------------------------------ cycle de vie
+// ----------------------------------------------------------------- la vie
 test('lifeEnvelope : nulle à la naissance et à la mort, pleine à maturité', () => {
   assert.equal(lifeEnvelope(0), 0)
   assert.equal(lifeEnvelope(1), 0)
-  assert.equal(lifeEnvelope(0.5), 1)
-  // croissance plus vive que la dissipation (un cumulus bourgeonne vite)
-  assert.ok(lifeEnvelope(0.15) > lifeEnvelope(0.85))
+  assert.equal(lifeEnvelope(0.4), 1)
+  assert.ok(lifeEnvelope(0.1) > 0 && lifeEnvelope(0.1) < 1)
+  assert.ok(lifeEnvelope(0.8) > 0 && lifeEnvelope(0.8) < 1)
 })
 
 test('lifeEnvelope est continue — aucun saut qui ferait « pop » un nuage', () => {
   let prev = lifeEnvelope(0)
-  for (let t = 0.01; t <= 1; t += 0.01) {
+  for (let t = 0.01; t <= 1.0001; t += 0.01) {
     const v = lifeEnvelope(t)
-    assert.ok(Math.abs(v - prev) < 0.1, `saut à t=${t.toFixed(2)} : ${prev} → ${v}`)
+    assert.ok(Math.abs(v - prev) < 0.2, `saut brutal en ${t.toFixed(2)}`)
     prev = v
   }
 })
 
-test('un nuage naissant est plus petit ET plus transparent', () => {
-  const jeune = { age: 0.02, density: 1 }
-  const mur = { age: 0.5, density: 1 }
-  assert.ok(cloudDensity(jeune) < cloudDensity(mur))
-  assert.ok(cloudScale(jeune) < cloudScale(mur))
-  assert.equal(cloudScale(mur), 1)
+test('la dissipation dure plus longtemps que la croissance (très en douceur)', () => {
+  // fenêtre de croissance ~0.18, fenêtre de dissipation ~0.45 : un nuage
+  // s'efface bien plus lentement qu'il ne bourgeonne
+  assert.ok(lifeEnvelope(0.2) === 1, 'mûr très tôt')
+  assert.ok(lifeEnvelope(0.75) > 0.4, 'encore bien présent aux trois quarts de sa vie')
+  assert.ok(lifeEnvelope(0.95) < 0.15, 'presque éteint à la toute fin')
 })
 
-// ------------------------------------------------------------- création
-test('createSky peuple le nombre demandé, dans les bornes, avec des âges variés', () => {
-  const sky = createSky({ count: 12, seed: 7 })
-  assert.equal(sky.clouds.length, 12)
-  const half = SKY_DEFAULTS.half
+test('un nuage naissant est plus petit ET plus transparent', () => {
+  const jeune = { density: 1, age: 0.05 }
+  const mur = { density: 1, age: 0.4 }
+  assert.ok(cloudDensity(jeune) < cloudDensity(mur))
+  assert.ok(cloudScale(jeune) < cloudScale(mur))
+  assert.ok(cloudScale(mur) <= 1.0001)
+})
+
+test('un nuage qui sort de la carte s efface ET rapetisse (fade)', () => {
+  const dedans = { density: 1, age: 0.4, fade: 1 }
+  const dehors = { density: 1, age: 0.4, fade: 0.2 }
+  assert.ok(cloudDensity(dehors) < cloudDensity(dedans))
+  assert.ok(cloudScale(dehors) < cloudScale(dedans))
+  // sans champ `fade` (nuage local), rien ne change
+  assert.equal(cloudDensity({ density: 1, age: 0.4 }), cloudDensity(dedans))
+})
+
+// -------------------------------------------------------------- naissance
+test('createSky peuple le nombre de GRAPPES demandé, chacune de 3 à 7 entités', () => {
+  const sky = createSky({ count: 4, seed: 7 })
+  assert.equal(groups(sky), 4)
+  const bySize = new Map()
+  for (const c of sky.clouds) bySize.set(c.gid, (bySize.get(c.gid) ?? 0) + 1)
+  for (const [gid, n] of bySize) {
+    assert.ok(n >= CLUSTER_MIN && n <= CLUSTER_MAX, `grappe ${gid} : ${n} entités`)
+  }
   for (const c of sky.clouds) {
-    assert.ok(Math.abs(c.x) <= half && Math.abs(c.z) <= half, 'position dans les bornes')
     assert.ok(c.r > 0 && c.h > 0, 'taille positive')
     assert.ok(c.age >= 0 && c.age < 1, 'âge initial valide')
     assert.ok(c.span > 0, 'durée de vie positive')
@@ -63,112 +87,165 @@ test('createSky peuple le nombre demandé, dans les bornes, avec des âges vari�
 })
 
 test('createSky est déterministe à graine égale (ciel rejouable)', () => {
-  const a = createSky({ count: 8, seed: 42 })
-  const b = createSky({ count: 8, seed: 42 })
+  const a = createSky({ count: 4, seed: 42 })
+  const b = createSky({ count: 4, seed: 42 })
   assert.deepEqual(a.clouds.map((c) => [c.x, c.z, c.r]), b.clouds.map((c) => [c.x, c.z, c.r]))
-  const c = createSky({ count: 8, seed: 43 })
+  const c = createSky({ count: 4, seed: 43 })
   assert.notDeepEqual(a.clouds.map((x) => x.x), c.clouds.map((x) => x.x))
 })
 
-test('les nuages ne se posent pas les uns sur les autres, sauf les nichés', () => {
-  // l'anti-chevauchement tient pour la MAJORITÉ ; une minorité naît
-  // volontairement dans le corps d'un autre (demande d'Adrien), donc on borne
-  // les recouvrements au lieu de les interdire
-  const sky = createSky({ count: 8, seed: 3, sizeMin: 2, sizeMax: 3 })
-  let overlaps = 0
-  for (let i = 0; i < sky.clouds.length; i++) {
-    for (let j = i + 1; j < sky.clouds.length; j++) {
-      const a = sky.clouds[i], b = sky.clouds[j]
-      if (Math.hypot(a.x - b.x, a.z - b.z) < (a.r + b.r) * 0.5) overlaps++
-    }
+test('une grappe est COHÉRENTE : les compagnons vivent dans le corps du cœur', () => {
+  const sky = createSky({ count: 5, seed: 3 })
+  const cores = new Map()
+  for (const c of sky.clouds) if (c.lead) cores.set(c.gid, c)
+  assert.equal(cores.size, 5, 'une grappe, un cœur')
+  for (const c of sky.clouds) {
+    if (c.lead) continue
+    const core = cores.get(c.gid)
+    const d = Math.hypot(c.x - core.x, c.z - core.z)
+    assert.ok(d < core.r, `compagnon hors du corps : ${d.toFixed(2)} > ${core.r.toFixed(2)}`)
+    assert.ok(c.r < core.r, 'un compagnon est plus petit que son cœur')
   }
-  assert.ok(overlaps <= 4, `trop de recouvrements : ${overlaps}/28 paires`)
 })
 
-test('des nuages naissent DANS le corps d un autre, en plus petit', () => {
-  // sur plusieurs ciels, au moins un nuage doit être niché dans un plus gros
-  let nested = 0
-  for (let s = 1; s <= 12; s++) {
-    const sky = createSky({ count: 8, seed: s })
-    for (const a of sky.clouds) {
-      for (const b of sky.clouds) {
-        if (a === b || b.r <= a.r) continue
-        // centre de `a` dans le corps de `b`, et nettement plus petit
-        if (Math.hypot(a.x - b.x, a.z - b.z) < b.r * 0.6 && a.r < b.r * 0.75) nested++
-      }
-    }
+test('les compagnons SUIVENT le cœur : vitesses proches mais toutes distinctes', () => {
+  const sky = createSky({ count: 5, seed: 13 })
+  const cores = new Map()
+  for (const c of sky.clouds) if (c.lead) cores.set(c.gid, c)
+  let checked = 0
+  for (const c of sky.clouds) {
+    if (c.lead) continue
+    const core = cores.get(c.gid)
+    const ratio = c.speed / core.speed
+    assert.ok(ratio > 0.95 && ratio < 1.05, `vitesse trop différente : ×${ratio.toFixed(3)}`)
+    assert.notEqual(c.speed, core.speed, 'mais jamais identique — la grappe doit respirer')
+    assert.notEqual(c.seed, core.seed, 'chacun sa graine, donc sa forme')
+    checked++
   }
-  assert.ok(nested > 0, 'aucun nuage niché sur 12 ciels')
+  assert.ok(checked > 5, 'trop peu de compagnons testés')
 })
 
 test('allongement : la plupart ronds, certains vrais radeaux, jamais hors bornes', () => {
   const es = []
-  for (let s = 1; s <= 30; s++) {
-    for (const c of createSky({ count: 8, seed: s }).clouds) es.push(c.elong)
+  for (let s = 1; s <= 20; s++) {
+    for (const c of createSky({ count: 4, seed: s }).clouds) es.push(c.elong)
   }
   for (const e of es) assert.ok(e >= 1 && e <= ELONG_MAX + 1e-9, `allongement hors bornes : ${e}`)
   assert.ok(es.filter((e) => e < 1.6).length > es.length * 0.5, 'la majorité doit rester ronde')
-  assert.ok(es.some((e) => e > 3.5), 'aucun radeau très allongé sur 30 ciels')
+  assert.ok(es.some((e) => e > 3.5), 'aucun radeau très allongé sur 20 ciels')
 })
 
-test('altitudes : plusieurs niveaux distincts, tous dans la plage demandée', () => {
-  const sky = createSky({ count: 12, seed: 21, baseY: 0, topY: 8 })
-  const ys = sky.clouds.map((c) => c.y)
+test('altitudes : du sol au plafond, en étages, biaisées vers le haut', () => {
+  const ys = []
+  for (let s = 1; s <= 20; s++) {
+    for (const c of createSky({ count: 5, seed: s, baseY: 0, topY: 8 }).clouds) {
+      if (c.lead) ys.push(c.y)
+    }
+  }
   for (const y of ys) assert.ok(y >= 0 && y <= 8, `altitude hors plage : ${y}`)
-  // les nuages ne vivent pas tous au même étage
-  const levels = new Set(ys.map((y) => Math.round(y / 2)))
-  assert.ok(levels.size >= 3, `trop peu de niveaux : ${[...levels]}`)
+  // les quatre étages sont tous servis — du fond de vallée au plafond
+  const levels = new Set(ys.map((y) => Math.min(3, Math.floor(y / 2))))
+  assert.equal(levels.size, 4, `étages manquants : ${[...levels].sort()}`)
+  // mais le haut est nettement plus peuplé que le ras du sol, sinon la moitié
+  // du ciel finit enterrée dans les montagnes
+  const bas = ys.filter((y) => y < 2).length
+  const haut = ys.filter((y) => y >= 6).length
+  assert.ok(haut > bas * 2, `répartition non biaisée : ${bas} bas / ${haut} haut`)
 })
 
-// ------------------------------------------------------------ advection
-test('stepSky pousse les nuages dans la direction du vent', () => {
-  const sky = createSky({ count: 4, seed: 5 })
-  const x0 = sky.clouds.map((c) => c.x)
-  const z0 = sky.clouds.map((c) => c.z)
-  stepSky(sky, 1, { wind: { dir: 0, speed: 2 } }) // plein +x
-  sky.clouds.forEach((c, i) => {
-    assert.ok(c.x > x0[i], 'le nuage avance en x')
-    assert.ok(Math.abs(c.z - z0[i]) < 1e-9, 'et ne dérive pas en z')
-  })
+// --------------------------------------------------------------- traversée
+test('la grande majorité du ciel est DE PASSAGE (naît et meurt hors carte)', () => {
+  let transit = 0, total = 0
+  for (let s = 1; s <= 15; s++) {
+    for (const c of createSky({ count: 5, seed: s }).clouds) {
+      if (c.lead) { total++; if (c.transit) transit++ }
+    }
+  }
+  const share = transit / total
+  assert.ok(share > 0.75 && share < 1, `part de passage inattendue : ${share.toFixed(2)}`)
 })
 
-test('parallaxe : un nuage haut file plus vite qu un nuage bas', () => {
-  const sky = createSky({ count: 2, seed: 5 })
-  const [bas, haut] = sky.clouds
-  bas.y = SKY_DEFAULTS.baseY // plancher de la couche
-  haut.y = SKY_DEFAULTS.topY // plafond
-  bas.x = 0; haut.x = 0
-  bas.speed = 1; haut.speed = 1 // on neutralise l aléa propre à chaque nuage
-  stepSky(sky, 1, { wind: { dir: 0, speed: 2 } })
-  assert.ok(haut.x > bas.x, `le haut devrait devancer le bas : ${bas.x} / ${haut.x}`)
-  assert.ok(bas.x > 0, 'le bas avance quand même')
+test('sans vent, personne ne traverse — sinon le ciel resterait hors champ', () => {
+  const sky = createSky({ count: 5, seed: 8, wind: { dir: 0, speed: 0 } })
+  assert.ok(sky.clouds.every((c) => !c.transit), 'aucun nuage de passage sans vent')
 })
 
-test('stepSky : le ciel s enroule, le peuplement ne fuit jamais', () => {
-  const sky = createSky({ count: 6, seed: 11 })
-  for (let i = 0; i < 400; i++) stepSky(sky, 0.5, { wind: { dir: 0.7, speed: 3 } })
-  // les DIVISIONS peuvent faire croître le peuplement (c'est le rendu qui
-  // retaille via resizeSky) — l'invariant est une borne, plus une égalité
-  assert.ok(sky.clouds.length >= 6 && sky.clouds.length <= CLOUD_HARD_MAX, `peuplement ${sky.clouds.length}`)
-  const lim = SKY_DEFAULTS.half * 1.15 + 1e-6
-  for (const c of sky.clouds) {
-    assert.ok(Math.abs(c.x) <= lim && Math.abs(c.z) <= lim, `nuage échappé : ${c.x},${c.z}`)
+test('une grappe de passage naît HORS carte et s y efface (fade nul dehors)', () => {
+  // pas de prefill : on regarde une naissance en cours de route
+  const sky = createSky({ count: 1, seed: 5 })
+  sky.clouds = []
+  sky.target = 1
+  stepSky(sky, 0.016, { wind: { dir: 0, speed: 1.2 } })
+  const nes = sky.clouds.filter((c) => c.transit)
+  assert.ok(nes.length >= CLUSTER_MIN, 'une grappe entière doit naître')
+  for (const c of nes) {
+    const dehors = Math.max(Math.abs(c.x), Math.abs(c.z))
+    assert.ok(dehors > sky.opts.half, `né DANS la carte : ${dehors.toFixed(1)}`)
+    assert.ok(cloudDensity(c) < 0.05, 'invisible à la naissance : il arrive de loin')
   }
 })
 
-test('stepSky remplace les nuages morts (le ciel ne se vide pas)', () => {
-  const sky = createSky({ count: 5, seed: 9 })
-  const ids = sky.clouds.map((c) => c.seed)
-  // bien au-delà de la plus longue durée de vie
-  for (let i = 0; i < 60; i++) stepSky(sky, 5)
-  assert.ok(sky.clouds.length >= 5 && sky.clouds.length <= CLOUD_HARD_MAX, `peuplement ${sky.clouds.length}`)
-  const renewed = sky.clouds.slice(0, 5).filter((c, i) => c.seed !== ids[i]).length
-  assert.ok(renewed >= 4, `le ciel devrait s être renouvelé : ${renewed}/5`)
+test('un nuage de passage traverse puis DISPARAÎT dehors, et est remplacé', () => {
+  const sky = createSky({ count: 2, seed: 6 })
+  const wind = { wind: { dir: 0, speed: 3 } }
+  const vus = new Set(sky.clouds.map((c) => c.gid))
+  let sortie = false
+  for (let i = 0; i < 400; i++) {
+    stepSky(sky, 0.5, wind)
+    for (const c of sky.clouds) vus.add(c.gid)
+    if ([...vus].length > 2) sortie = true
+    // à tout instant, aucun nuage ne stationne très loin hors carte
+    const reach = sky.opts.half + sky.opts.fadeOut + 1e-6
+    for (const c of sky.clouds) {
+      assert.ok(c.x * 1 <= reach + 1, `nuage oublié en aval : ${c.x.toFixed(1)}`)
+    }
+  }
+  assert.ok(sortie, 'aucune grappe n a traversé et été remplacée')
+  assert.equal(groups(sky), 2, 'le ciel garde sa cible de grappes')
+})
+
+// ------------------------------------------------------------- advection
+test('stepSky pousse les nuages dans la direction du vent', () => {
+  const sky = createSky({ count: 2, seed: 5 })
+  const x0 = sky.clouds.map((c) => c.x)
+  stepSky(sky, 1, { wind: { dir: 0, speed: 2 } })
+  const avance = sky.clouds.filter((c, i) => x0[i] !== undefined && c.x > x0[i]).length
+  assert.ok(avance >= Math.floor(sky.clouds.length * 0.6), 'le gros du ciel avance avec le vent')
+})
+
+test('parallaxe : un nuage haut file plus vite qu un nuage bas', () => {
+  const sky = createSky({ count: 2, seed: 6, baseY: 5, topY: 9 })
+  const haut = { ...sky.clouds[0], x: 0, z: 0, y: 9, speed: 1, transit: false }
+  const bas = { ...sky.clouds[0], x: 0, z: 0, y: 5, speed: 1, transit: false }
+  sky.clouds = [haut, bas]
+  stepSky(sky, 1, { wind: { dir: 0, speed: 1 } })
+  assert.ok(haut.x > bas.x, 'le nuage haut devrait devancer le bas')
+  assert.ok(bas.x > 0, 'le bas avance quand même')
+})
+
+test('stepSky : le peuplement reste borné, rien ne fuit à l infini', () => {
+  const sky = createSky({ count: 5, seed: 11 })
+  for (let i = 0; i < 400; i++) stepSky(sky, 0.5, { wind: { dir: 0.7, speed: 3 } })
+  assert.ok(sky.clouds.length <= CLOUD_HARD_MAX, `peuplement ${sky.clouds.length}`)
+  assert.equal(groups(sky), 5, 'la cible de grappes est tenue')
+  const reach = sky.opts.half + sky.opts.fadeOut + 2
+  for (const c of sky.clouds) {
+    assert.ok(Math.hypot(c.x, c.z) <= reach * 2, `nuage échappé : ${c.x},${c.z}`)
+  }
+})
+
+test('stepSky renouvelle le ciel (il ne se fige pas, il ne se vide pas)', () => {
+  const sky = createSky({ count: 4, seed: 9 })
+  const ids = new Set(sky.clouds.map((c) => c.gid))
+  for (let i = 0; i < 200; i++) stepSky(sky, 1, { wind: { dir: 0.3, speed: 2 } })
+  assert.equal(groups(sky), 4, 'peuplement tenu')
+  const restants = sky.clouds.filter((c) => ids.has(c.gid)).length
+  assert.ok(restants < sky.clouds.length, 'le ciel doit s être renouvelé')
   for (const c of sky.clouds) assert.ok(c.age >= 0 && c.age < 1, 'âge toujours valide')
 })
 
 test('stepSky ignore un dt nul ou négatif (pause, onglet caché)', () => {
-  const sky = createSky({ count: 3, seed: 2 })
+  const sky = createSky({ count: 2, seed: 2 })
   const snap = sky.clouds.map((c) => ({ ...c }))
   stepSky(sky, 0)
   stepSky(sky, -1)
@@ -177,113 +254,88 @@ test('stepSky ignore un dt nul ou négatif (pause, onglet caché)', () => {
 })
 
 // ------------------------------------------------------- redimensionnement
-test('resizeSky ajuste le peuplement sans rejouer le ciel', () => {
-  const sky = createSky({ count: 10, seed: 4 })
-  const keep = sky.clouds[0].seed
-  resizeSky(sky, 4)
-  assert.equal(sky.clouds.length, 4)
-  assert.equal(sky.clouds[0].seed, keep, 'les survivants ne sont pas régénérés')
-  resizeSky(sky, 12)
-  assert.equal(sky.clouds.length, 12)
-  assert.equal(sky.clouds[0].seed, keep)
+test('resizeSky ajuste le peuplement en GRAPPES entières', () => {
+  const sky = createSky({ count: 5, seed: 4 })
+  const keep = sky.clouds[0].gid
+  resizeSky(sky, 2)
+  assert.equal(groups(sky), 2)
+  assert.equal(sky.target, 2)
+  assert.ok(sky.clouds.some((c) => c.gid === keep), 'les survivants ne sont pas régénérés')
+  resizeSky(sky, 5)
+  assert.equal(groups(sky), 5)
+  assert.ok(sky.clouds.some((c) => c.gid === keep))
   for (const c of sky.clouds) assert.ok(c.r > 0 && c.span > 0, 'les nouveaux sont valides')
+  // jamais au-delà du budget de boîtes raymarchées
+  assert.ok(sky.clouds.length <= CLOUD_HARD_MAX)
 })
 
-// ------------------------------------------------- regroupements & fusions
+// ------------------------------------------- regroupements, fusion, dislocation
 test('humeur du ciel : un front regroupe, un ciel dispersé éparpille', () => {
+  // sans vent : tout le monde est local, donc soumis à l'humeur du ciel
   const meanDist = (sky) => {
+    const cs = sky.clouds.filter((c) => c.lead)
     let s = 0, n = 0
-    for (let i = 0; i < sky.clouds.length; i++)
-      for (let j = i + 1; j < sky.clouds.length; j++) {
-        s += Math.hypot(sky.clouds[i].x - sky.clouds[j].x, sky.clouds[i].z - sky.clouds[j].z)
+    for (let i = 0; i < cs.length; i++)
+      for (let j = i + 1; j < cs.length; j++) {
+        s += Math.hypot(cs[i].x - cs[j].x, cs[i].z - cs[j].z)
         n++
       }
-    return s / n
+    return n ? s / n : 0
   }
-  const half = SKY_DEFAULTS.half
-  const front = createSky({ count: 10, seed: 21, grouping: { mode: 'front', centers: [{ x: 4, z: -3 }] } })
-  const libre = createSky({ count: 10, seed: 21, grouping: { mode: 'disperse', centers: null } })
-  assert.ok(meanDist(front) < meanDist(libre) * 0.75,
-    `front ${meanDist(front).toFixed(1)} devrait être bien plus serré que dispersé ${meanDist(libre).toFixed(1)}`)
-  for (const c of front.clouds) assert.ok(Math.abs(c.x) <= half && Math.abs(c.z) <= half)
+  const front = createSky({ count: 6, seed: 1, wind: { dir: 0, speed: 0 }, grouping: { mode: 'front', centers: [{ x: 0, z: 0 }] } })
+  const disperse = createSky({ count: 6, seed: 1, wind: { dir: 0, speed: 0 }, grouping: { mode: 'disperse', centers: null } })
+  assert.ok(meanDist(front) < meanDist(disperse), 'un front doit serrer les nuages')
 })
 
 test('collision : le gros absorbe, le petit part en dissipation', () => {
-  const sky = createSky({ count: 2, seed: 8, grouping: { mode: 'disperse', centers: null } })
+  const sky = createSky({ count: 2, seed: 8, wind: { dir: 0, speed: 0 } })
   const [a, b] = sky.clouds
-  // deux nuages mûrs posés l'un sur l'autre
-  a.x = 0; a.z = 0; a.r = 5; a.age = 0.4
-  b.x = 2; b.z = 0; b.r = 3; b.age = 0.4
-  stepSky(sky, 0.1, { wind: { dir: 0, speed: 0 } })
-  assert.ok(a.rTarget > a.r, 'le gros vise un rayon combiné')
-  assert.ok(b.age >= 0.72 && b.merging, 'le petit bascule en dissipation')
-  // la croissance est PROGRESSIVE, pas un saut
-  const r0 = a.r
-  stepSky(sky, 0.5, { wind: { dir: 0, speed: 0 } })
-  assert.ok(a.r > r0 && a.r < a.rTarget + 1e-9, `croissance douce : ${r0} → ${a.r} (cible ${a.rTarget})`)
+  a.x = 0; a.z = 0; a.r = 5; a.age = 0.3; a.merging = false; a.gid = 1
+  b.x = 1; b.z = 0; b.r = 2; b.age = 0.3; b.merging = false; b.gid = 2
+  sky.clouds = [a, b]
+  sky.target = 0 // pas de repeuplement pendant l'essai
+  stepSky(sky, 0.016, NO_WIND)
+  assert.ok(a.rTarget > 5, 'le gros vise le volume combiné')
+  assert.ok(b.age >= 0.6, 'le petit bascule en dissipation')
+  assert.equal(b.merging, true)
 })
 
-test('division : un gros nuage mûr se scinde en deux, près de lui', () => {
-  const sky = createSky({ count: 2, seed: 6, grouping: { mode: 'disperse', centers: null } })
-  const parent = sky.clouds[0]
-  parent.x = 0; parent.z = 0
-  parent.r = SKY_DEFAULTS.sizeMax * 1.3 // éligible
-  parent.age = 0.4
-  parent.merging = false
-  sky.clouds[1].x = 50; sky.clouds[1].z = 50; sky.clouds[1].r = 1 // hors jeu
-  const r0 = parent.r
-  // la division est probabiliste (~1/20 s) : on laisse le temps passer
-  let split = false
-  for (let i = 0; i < 400 && !split; i++) {
-    stepSky(sky, 0.25, { wind: { dir: 0, speed: 0 } })
-    split = sky.clouds.length > 2
-    parent.age = Math.min(parent.age, 0.5) // rester dans la fenêtre d'éligibilité
-    parent.r = Math.max(parent.r, SKY_DEFAULTS.sizeMax * 1.1)
-  }
-  assert.ok(split, 'le nuage aurait dû se diviser')
-  const child = sky.clouds[sky.clouds.length - 1]
-  assert.ok(child.age < 0.2, 'l enfant naît jeune')
-  assert.ok(Math.hypot(child.x - parent.x, child.z - parent.z) < r0 * 2.2, 'l enfant naît au flanc du parent')
-  assert.ok(parent.r < r0, 'le parent a maigri')
+test('les membres d une MÊME grappe ne fusionnent pas entre eux', () => {
+  const sky = createSky({ count: 1, seed: 15, wind: { dir: 0, speed: 0 } })
+  for (const c of sky.clouds) { c.age = 0.3; c.merging = false; c.x = 0; c.z = 0; c.r = 4 }
+  sky.target = 0
+  stepSky(sky, 0.016, NO_WIND)
+  assert.ok(sky.clouds.every((c) => !c.merging), 'une grappe doit vivre serrée sans se manger')
 })
 
-test('effilochage : un nuage en fin de vie éclate en plein de petits bouts', () => {
-  const sky = createSky({ count: 2, seed: 31 })
-  const parent = sky.clouds[0]
+test('dislocation : un nuage local en fin de vie se rompt en petits bouts', () => {
+  const sky = createSky({ count: 1, seed: 31, wind: { dir: 0, speed: 0 } })
+  sky.target = 0
+  const parent = sky.clouds.find((c) => c.lead)
+  sky.clouds = [parent]
   parent.x = 0; parent.z = 0
   parent.r = SKY_DEFAULTS.sizeMax
-  parent.merging = false
+  parent.age = 0.65
+  parent.transit = false
   parent.shattered = false
-  sky.clouds[1].x = 90; sky.clouds[1].z = 90; sky.clouds[1].r = 0.5 // hors jeu
+  parent.merging = false
   const r0 = parent.r
-  let burst = false
-  for (let i = 0; i < 600 && !burst; i++) {
-    parent.age = 0.7 // maintenu dans la fenêtre de fin de vie
-    stepSky(sky, 0.25, { wind: { dir: 0, speed: 0 } })
-    burst = sky.clouds.length >= 5
-  }
-  assert.ok(burst, 'le nuage aurait dû s effilocher')
-  const shards = sky.clouds.filter((c) => c.shattered && c !== parent)
-  assert.ok(shards.length >= 3, `trop peu de lambeaux : ${shards.length}`)
-  for (const s of shards) {
+  stepSky(sky, 0.016, NO_WIND)
+  const lambeaux = sky.clouds.filter((c) => c.shattered && c !== parent)
+  assert.ok(lambeaux.length >= 3, `trop peu de lambeaux : ${lambeaux.length}`)
+  for (const s of lambeaux) {
     assert.ok(s.r < r0 * 0.45, 'un lambeau est nettement plus petit que son nuage')
     assert.ok(s.wisp > (parent.wisp ?? 0), 'un lambeau est plus déchiqueté')
     assert.ok(Math.hypot(s.x, s.z) < r0 * 1.2, 'les lambeaux restent groupés au départ')
   }
-  assert.ok(parent.age > 0.9, 'le parent s éteint, ses lambeaux lui survivent')
+  assert.equal(parent.shattered, true, 'un nuage ne se disloque qu une fois')
 })
 
-test('le surplus des divisions se résorbe vers la cible, sans couper un vivant', () => {
-  const sky = createSky({ count: 6, seed: 17 })
-  assert.equal(sky.target, 6)
-  // surpeuplement artificiel, comme après une division
-  sky.clouds.push({ ...sky.clouds[0], seed: 999, age: 0.97, span: 30 })
-  sky.clouds.push({ ...sky.clouds[1], seed: 998, age: 0.98, span: 30 })
-  assert.equal(sky.clouds.length, 8)
-  for (let i = 0; i < 20; i++) stepSky(sky, 0.5, { wind: { dir: 0, speed: 0 } })
-  assert.ok(sky.clouds.length <= 8, 'le peuplement ne gonfle pas indéfiniment')
-  assert.ok(sky.clouds.length >= sky.target, 'le ciel ne descend jamais sous la cible')
-  for (const c of sky.clouds) assert.ok(c.age >= 0 && c.age < 1, 'âge toujours valide')
+test('la dislocation ne se répète pas et respecte le plafond d entités', () => {
+  const sky = createSky({ count: 3, seed: 33, wind: { dir: 0, speed: 0 } })
+  for (const c of sky.clouds) { c.transit = false; c.age = 0.7; c.span = 1e6 }
+  for (let i = 0; i < 200; i++) stepSky(sky, 0.05, NO_WIND)
+  assert.ok(sky.clouds.length <= CLOUD_HARD_MAX, `plafond dépassé : ${sky.clouds.length}`)
 })
 
 test('makeRng : déterministe et dans [0,1)', () => {

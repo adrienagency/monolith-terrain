@@ -335,8 +335,8 @@ const params = {
   cloudAltitude: 4.5, // deck base height in world units — 0 puts the clouds at ground level
   cloudDrift: 3,
   cloudScale: 5, // noise tiling across the deck (higher = smaller cloud cells)
-  cloudCoverage: 0.45, // 0 = continuous sheet, higher = broken cumulus with gaps
-  cloudBillow: 0.6, // cauliflower budding: 0 = smooth mass, 1.2 = knobbly turrets
+  cloudCoverage: 0.9, // holes: 0.8 = solid masses, 2.6 = lacework
+  cloudBillow: 0.8, // cauliflower budding: 0 = smooth mass, 3 = knobbly turrets
   cloudBrightness: 2.9, // sunlight brightness inside the deck
   cloudAltSpread: 0.85, // share of the column below cloudAltitude that gets populated: 1 = down to the ground
   cloudDriftVar: 0.5, // per-cloud speed variation: 0 = uniform drift, 1 = very uneven

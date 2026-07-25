@@ -27,9 +27,12 @@ import { TERRAIN_SIZE } from './terrain.js'
 import { sunLook } from 'ocean-waves' // palette jour/nuit partagée (ocean-lab)
 import { bakeCloudVolume } from './clouds.js'
 import { normalizeBgStops } from './background.js'
-import { createSky, stepSky, resizeSky, cloudDensity, cloudScale, cloudCountForTier } from './clouds-sim.js'
+import { createSky, stepSky, resizeSky, cloudDensity, cloudScale, cloudCountForTier, CLOUD_HARD_MAX } from './clouds-sim.js'
 
-const MAX_INSTANCES = 32 // plafond dur du buffer ; le peuplement réel est adaptatif
+// plafond dur du buffer ; le peuplement réel est adaptatif. Doit couvrir
+// CLOUD_HARD_MAX : une grappe pèse jusqu'à 7 entités, et les dislocations en
+// ajoutent le temps que les lambeaux s'éteignent.
+const MAX_INSTANCES = CLOUD_HARD_MAX
 const SHADOW_N = 96 // résolution du bake d'ombre au sol
 const SHADOW_EVERY = 0.25 // s — un système météo n'a pas besoin de 60 Hz
 
@@ -179,7 +182,10 @@ const FRAG = /* glsl */ `
     F.lean = vec2(cos(leanA), sin(leanA)) * (0.05 + c.x * 0.22);
     // l'allongement de l'empreinte n'est plus ici : il est GÉOMÉTRIQUE
     // (ellipse tournée, jusqu'a 6:1) et arrive par vAxes
-    F.covr = mix(0.92, 0.58, wisp) - c.y * 0.12 + (0.45 - uCoverage) * 0.55;
+    // uCoverage part de 0.8 (Adrien) : au minimum de la tirette les masses
+    // sont pleines, au maximum c'est de la dentelle. Borné : sans le clamp,
+    // une couverture forte rendait covr négatif et éteignait tout le ciel.
+    F.covr = clamp(mix(0.92, 0.58, wisp) - c.y * 0.12 - (uCoverage - 0.8) * 0.34, 0.06, 1.05);
     F.wExp = mix(0.8, 2.4, wisp);
     F.bias = mix(0.42, 0.22, wisp); // voile = ventre bas et plat
     F.shapeAmt = mix(0.5, 0.85, wisp);
@@ -190,7 +196,12 @@ const FRAG = /* glsl */ `
 
   #define COV_FILTER 0.4
 
-  float densityAt(const vec3 wp, const Foot F, const float detailOn) {
+  // cheap = version allégée pour les marches SECONDAIRES (soleil, ciel).
+  // ⚠️ jamais de backtick dans un commentaire GLSL : il termine le template
+  // literal JS qui porte le shader (piège déjà rencontré sur ce projet).
+  // Elles n'ont besoin que d'une épaisseur approchée — payer le cisaillement
+  // de base sur chacune multipliait le coût par 5 sans rien changer à l'œil.
+  float densityAt(const vec3 wp, const Foot F, const float detailOn, const bool cheap) {
     // la BOITE est plus large que le nuage (BOX_PAD) : les coordonnees sont
     // normalisees a la SILHOUETTE (plus ou moins 1), la paroi est a 1.15
     vec3 rel = wp - vCenter;
@@ -206,7 +217,7 @@ const FRAG = /* glsl */ `
     // la BASE, remap(h, 0.3 -> 0.0)) : la base est trainee par le vent et
     // fouettee par la turbulence, le sommet reste net. Une seule lecture de
     // volume, payee uniquement dans le tiers bas du nuage.
-    float baseW = 1.0 - remapC(hf, 0.0, 0.3);
+    float baseW = cheap ? 0.0 : 1.0 - remapC(hf, 0.0, 0.3);
     if (baseW > 0.001) {
       vec2 tn = texture(uVolume, fract(wp * uScale * 0.021 + vInfo.x)).rg - 0.5;
       q += (uWind * 0.30 + tn * (0.30 + 0.35 * length(uWind))) * baseW;
@@ -343,7 +354,7 @@ const FRAG = /* glsl */ `
     for (int j = 1; j <= SUN_STEPS; j++) {
       vec3 s = wp + toSun * (step * float(j));
       if (any(lessThan(s, bmin)) || any(greaterThan(s, bmax))) break;
-      d += densityAt(s, F, 0.0) * step * 1.7;
+      d += densityAt(s, F, 0.0, true) * step * 1.7;
       if (d >= 2.4) break;
     }
     return d;
@@ -360,7 +371,7 @@ const FRAG = /* glsl */ `
     for (int j = 1; j <= UP_STEPS; j++) {
       vec3 s = wp + vec3(0.0, step * float(j), 0.0);
       if (s.y > bmax.y) break;
-      d += densityAt(s, F, 0.0) * step;
+      d += densityAt(s, F, 0.0, true) * step;
     }
     return d;
   }
@@ -399,9 +410,16 @@ const FRAG = /* glsl */ `
     // est dans ou contre le nuage : à cette distance le détail ne se voit pas
     // de toute façon, la densité étant déjà éteinte autour de l'objectif.
     float camDist = distance(cameraPosition, vCenter);
-    int steps = camDist < max(vHalf.x, vHalf.y) * 2.5 ? 12 : MARCH_STEPS;
+    // PAS ADAPTATIF À LA TAILLE DE LA BOÎTE. Une grappe, c'est 3 à 7 boîtes qui
+    // se recouvrent : marcher chacune en 26 pas quelle que soit sa taille
+    // multipliait le remplissage jusqu'à écrouler la fréquence d'images (2 fps
+    // mesurés). Un compagnon fait le tiers du cœur — il lui faut le tiers des
+    // pas pour le même pas en unités monde, donc la même finesse à l'écran.
+    float world = max(span.y - span.x, 1e-3);
+    int steps = int(clamp(world / 0.42, 8.0, float(MARCH_STEPS)));
+    if (camDist < max(vHalf.x, vHalf.y) * 2.5) steps = min(steps, 12);
 
-    float dt = (span.y - span.x) / float(steps);
+    float dt = world / float(steps);
     float transmittance = 1.0;
     vec3 light = vec3(0.0);
 
@@ -409,7 +427,7 @@ const FRAG = /* glsl */ `
       if (i >= steps) break;
       vec3 wp = ro + rd * (span.x + (float(i) + jitter) * dt);
       if (wp.y < terrainH(wp.xz)) break; // le rayon plonge dans la montagne
-      float d = densityAt(wp, F, detailOn);
+      float d = densityAt(wp, F, detailOn, false);
       if (d <= 0.002) continue;
       float depth = sunDepth(wp, toSun, bmin, bmax, F);
       // BEER-POWDER (Schneider 2015) : les bords épais vus vers le soleil
@@ -509,6 +527,13 @@ export class Clouds2 {
       topY: ceilY,
       sizeMin: 2.2,
       sizeMax: 6.0,
+      // bande d'apparition/disparition HORS carte : les grappes de passage
+      // naissent et meurent là, jamais sous les yeux (Adrien)
+      fadeOut: half * 0.55,
+      wind: {
+        dir: ((params?.windDir ?? 45) * Math.PI) / 180,
+        speed: (params?.windSpeed ?? 0.6) * (params?.cloudDrift ?? 1) * 0.35,
+      },
     })
     this.sky = sky
 
@@ -549,8 +574,8 @@ export class Clouds2 {
         uSkyHi: { value: new THREE.Color(1, 1, 1) },
         uSkyLo: { value: new THREE.Color(0.82, 0.85, 0.9) },
         uTexMix: { value: params?.cloudTexMix ?? 0.35 },
-        uBillow: { value: params?.cloudBillow ?? 0.55 },
-        uCoverage: { value: params?.cloudCoverage ?? 0.45 },
+        uBillow: { value: params?.cloudBillow ?? 0.8 },
+        uCoverage: { value: params?.cloudCoverage ?? 0.9 },
         uTerrainTex: { value: hf.tex },
         uMapMin: { value: new THREE.Vector2(-half, -half) },
         uMapSize: { value: new THREE.Vector2(TERRAIN_SIZE, TERRAIN_SIZE) },
@@ -712,8 +737,8 @@ export class Clouds2 {
       u.uBrightness.value = (params.cloudBrightness ?? 2.9) * 0.42
       u.uSSS.value = params.cloudSSS ?? 0.8
       u.uTexMix.value = params.cloudTexMix ?? 0.35
-      u.uBillow.value = params.cloudBillow ?? 0.55
-      u.uCoverage.value = params.cloudCoverage ?? 0.45
+      u.uBillow.value = params.cloudBillow ?? 0.8
+      u.uCoverage.value = params.cloudCoverage ?? 0.9
       // Couleur du soleil selon SON ÉLÉVATION — même recette que l'ancien
       // système (palette sunLook partagée avec la mer et le terrain) : lumière
       // chaude quand le soleil rase, ambiante froide et sourde la nuit.
