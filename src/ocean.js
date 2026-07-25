@@ -659,13 +659,27 @@ export class RealWater {
     const n = FIELD_RES
     const data = new Float32Array(n * n * 2)
     const water = new Uint8Array(n * n)
+    // terre selon le masque côtier (si reçu) : un polder sous le niveau 0 est
+    // TERRE — ni cellule « eau », ni exclu du champ de distance-rivage (le
+    // ressac s'enroule alors autour du VRAI trait de côte). Le canvas du
+    // masque et le slab couvrent le même footprint : monde → pixel direct
+    // (ligne 0 du canvas = nord = z monde -T/2, même convention que uField).
+    // CONTRAT : sans masque (cd null) le champ est identique à avant.
+    const cd = this._coastImage
+    const landAt = cd
+      ? (x, z) => {
+          const px = Math.max(0, Math.min(cd.width - 1, Math.round((x / TERRAIN_SIZE + 0.5) * (cd.width - 1))))
+          const py = Math.max(0, Math.min(cd.height - 1, Math.round((z / TERRAIN_SIZE + 0.5) * (cd.height - 1))))
+          return cd.data[(py * cd.width + px) * 4] > 127
+        }
+      : null
     for (let j = 0; j < n; j++) {
       const z = (j / (n - 1) - 0.5) * TERRAIN_SIZE
       for (let i = 0; i < n; i++) {
         const x = (i / (n - 1) - 0.5) * TERRAIN_SIZE
         const h = terrain.sample ? terrain.sample(x, z) : 0
         data[(j * n + i) * 2] = h
-        water[j * n + i] = h < seaY ? 1 : 0
+        water[j * n + i] = h < seaY && !(landAt && landAt(x, z)) ? 1 : 0
       }
     }
     // two-pass chamfer distance to the nearest land cell, in world units
@@ -782,6 +796,8 @@ export class RealWater {
     this.materials = []
     this._textures = []
     this._seaMesh = null
+    this._fieldTex = null
+    this._bakeCtx = null
   }
 
   // (Re)build for the current zone. Cheap no-op when the option is off.
@@ -792,6 +808,10 @@ export class RealWater {
     const seaY = terrain.mapUniforms.uSeaY.value
     const fieldTex = this._bakeField(terrain, seaY > -9000 ? seaY : -1e9)
     this._textures.push(fieldTex)
+    // mémorisés pour _rebakeField : le masque côtier arrive en async, souvent
+    // APRÈS ce build — il faudra recuire le champ sans reconstruire les meshes
+    this._fieldTex = fieldTex
+    this._bakeCtx = { terrain, seaY: seaY > -9000 ? seaY : -1e9 }
 
     const demScale = (TERRAIN_SIZE / terrain.dem.extentMeters) * params.demExaggeration
     // wave amplitude follows the VIEW SCALE: at a 20 km bay the swell reads,
@@ -982,10 +1002,34 @@ export class RealWater {
   // OSM coast mask (same texture the terrain uses) — gates the sea so waves stop
   // at the REAL shoreline, not the elevation contour (flat polders below sea
   // level are land, not sea). Stored so a rebuild re-applies it (see _applySea).
-  setCoastMask(tex, on) {
+  // coastImage : ImageData du canvas du masque (extraite UNE fois par main.js)
+  // — nourrit le champ de simulation uField via _bakeField. Le fetch du masque
+  // étant async, s'il arrive APRÈS le build le champ est recuit sur place.
+  setCoastMask(tex, on, coastImage) {
     this._coastMask = tex || null
     this._coastMaskOn = on ? 1 : 0
+    const img = tex && on ? coastImage || null : null
+    const changed = img !== this._coastImage
+    this._coastImage = img
     this._pushCoastMask()
+    if (changed) this._rebakeField()
+  }
+
+  // Recuit du champ uField (hauteur + distance-rivage) avec la connaissance
+  // terre/mer du masque côtier, SANS reconstruire les meshes : la nouvelle
+  // texture remplace l'ancienne partout (surface, jupe, lacs) puis l'ancienne
+  // est disposée — _textures reste cohérent pour _clear().
+  _rebakeField() {
+    if (!this._bakeCtx || !this.materials.length) return
+    const { terrain, seaY } = this._bakeCtx
+    const tex = this._bakeField(terrain, seaY)
+    const old = this._fieldTex
+    for (const mat of this.materials) if (mat.uniforms.uField) mat.uniforms.uField.value = tex
+    const i = this._textures.indexOf(old)
+    if (i >= 0) this._textures[i] = tex
+    else this._textures.push(tex)
+    old?.dispose?.()
+    this._fieldTex = tex
   }
   _pushCoastMask() {
     for (const mat of this.materials) {

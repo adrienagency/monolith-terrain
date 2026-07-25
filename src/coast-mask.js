@@ -149,7 +149,11 @@ function rasterize(ringGroups, dem, size) {
   tex.generateMipmaps = false
   tex.colorSpace = THREE.NoColorSpace
   tex.needsUpdate = true
-  return tex
+  // le canvas ressort AUSSI (pattern region-mask.js) : les consommateurs CPU
+  // (champ de simulation mer, garde-fou sea-mask, clip de zone) lisent la même
+  // vérité terre/mer que le GPU. Pas de rétention en plus : CanvasTexture
+  // garde déjà le canvas comme image source.
+  return { texture: tex, canvas }
 }
 
 // ---- data (lazy, memoised) ----
@@ -202,8 +206,8 @@ export async function fetchCoastMask({ lat, lon, zoom, dem }) {
     const rings = landPolygonsInBBox(features, bbox)
     // no land in view (open ocean) is legitimate — still return a mask so the
     // shader paints all-sea rather than falling back to the noisy 0-isoline
-    const tex = rasterize(rings, dem, MASK_SIZE)
-    return { maskTexture: tex, source: zoom <= COAST_NE_MAX ? 'ne' : 'osm' }
+    const { texture, canvas } = rasterize(rings, dem, MASK_SIZE)
+    return { maskTexture: texture, maskCanvas: canvas, source: zoom <= COAST_NE_MAX ? 'ne' : 'osm' }
   } catch (err) {
     console.warn('coast mask failed:', err)
     return null
