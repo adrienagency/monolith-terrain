@@ -17,15 +17,18 @@ function findPanel(title) {
 
 // steps resolve their targets lazily — panels may not exist at module load
 function buildSteps() {
-  const topIcons = document.querySelectorAll('.ce-topbar .ce-iconbtn, .ce-topbar button')
   return [
     {
       target: () => document.querySelector('.ce-bottombar'),
-      text: 'Search any place on Earth — or paste “lat, lon” — and watch it rise as a relief model.',
+      text: 'Cherchez n’importe quel lieu sur Terre — ou collez « lat, lon » — et regardez-le surgir en relief.',
     },
     {
       target: () => null, // a concept, not a widget: plain centered card
-      text: 'Scroll to zoom. Pull back and the map becomes an isometric 3D museum piece — the whole block on its display plate, cartouche included. Dive in for ever finer terrain.',
+      text: 'Molette pour zoomer. Reculez et la carte devient une pièce de musée isométrique — le bloc entier sur son socle, cartouche comprise. Plongez pour un terrain toujours plus fin.',
+    },
+    {
+      target: () => document.querySelector('.ce-hourpill'),
+      text: 'L’heure du ciel — faites glisser pour passer de l’aube à la nuit, ou lancez le cycle automatique.',
     },
     {
       target: () => findPanel('explorer'),
@@ -45,15 +48,15 @@ function buildSteps() {
     },
     {
       target: () => document.querySelector('.ce-isobtn'),
-      text: 'One click here frames the isometric view — block, plate and cartouche.',
+      text: 'Un clic ici cadre la vue isométrique — bloc, socle et cartouche.',
     },
     {
       target: () => document.querySelector('.ce-topbar .ce-pubbtn'),
       text: 'Publier — exporter une image ou une vidéo, copier le lien de la vue, ou enregistrer votre projet course.',
     },
     {
-      target: () => topIcons[0] ?? document.querySelector('.ce-topbar'),
-      text: 'Globe — pull all the way out and watch the living planet slowly turn.',
+      target: () => document.querySelector('.ce-globebtn') ?? document.querySelector('.ce-topbar'),
+      text: 'Globe — reculez jusqu’à la planète entière, qui tourne lentement.',
     },
   ]
 }
@@ -73,7 +76,7 @@ export function startTutorial() {
   const dots = el('div', 'ce-tour-dots')
   const skip = el('button', 'ce-tour-skip')
   skip.type = 'button'
-  skip.textContent = 'Skip'
+  skip.textContent = 'Passer'
   const next = el('button', 'ce-tour-next')
   next.type = 'button'
   foot.append(skip, dots, next)
@@ -119,7 +122,7 @@ export function startTutorial() {
     }
     text.textContent = step.text
     dots.innerHTML = steps.map((_, k) => `<i class="${k === i ? 'on' : ''}"></i>`).join('')
-    next.innerHTML = i === steps.length - 1 ? 'Done' : '&rarr;'
+    next.innerHTML = i === steps.length - 1 ? 'Terminé' : '&rarr;'
 
     // card near the spotlight, clamped on screen; centered when conceptual
     const cw = 340
