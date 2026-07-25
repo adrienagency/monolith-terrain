@@ -338,8 +338,8 @@ export function buildQuickBar(ctx) {
   // barre LIQUIDE (réf. Enroll validée Adrien) : le cœur [Habiller ma carte +
   // Ma course] est une silhouette de bulles fusionnées, CENTRÉE écran ;
   // « Avancé » vit détaché à droite, décentré — même grammaire que l'elembar
-  const bar = el('div', 'ce-quickbar ce-lqrow')
-  const core = el('div', 'ce-qb-core ce-liquid')
+  const bar = el('div', 'ce-quickbar ce-lqrow ce-liquid')
+  const core = el('div', 'ce-qb-core')
   const mk = (icon, label, tip, onClick, accent) => {
     const b = el('button', 'ce-pillbtn' + (accent ? ' accent' : ''))
     b.type = 'button'
@@ -352,12 +352,13 @@ export function buildQuickBar(ctx) {
     mk(I.brush, 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur votre carte.', () => ctx.openAtelier(), true),
     mk(I.flag, 'Ma course', 'Race Studio — votre parcours GPX en carte de course (points de passage, transports, partage).', () => ctx.openStudio())
   )
-  liquidize(core, {})
   // « Avancé » habite ici (sorti de la topbar) : le switch vit à côté des
-  // portes qu'il remplace — basculer fait apparaître les docks + l'elembar
+  // portes qu'il remplace — SA bulle, reliée à la capsule par le goo
   const advSlot = el('div', 'ce-lq-adv')
-  advSlot.append(buildAdvToggle('ce-pillbtn'))
+  const advBtn = buildAdvToggle('ce-pillbtn')
+  advSlot.append(advBtn)
   bar.append(core, advSlot)
+  liquidize(bar, { items: () => [core, advBtn], inflate: 0 })
   document.body.append(bar)
   return { root: bar }
 }

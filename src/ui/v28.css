@@ -462,35 +462,27 @@ body.dark {
   position: relative;
   z-index: 1;
 }
-/* dans un groupe liquide, les boutons n'ont PLUS de fond propre : la bulle
-   est leur fond (l'état .on/.accent est porté par la bulle) */
-.ce-liquid .ce-wm-btn.on,
-.ce-liquid .ce-elembar-btn.accent,
-.ce-liquid .ce-pillbtn,
-.ce-liquid .ce-pillbtn.accent,
-.ce-liquid .ce-pillbtn:hover {
-  background: none;
-}
-.ce-liquid .ce-pillbtn.accent { color: #fff; }
 .ce-lqrow { position: relative; }
+/* « Avancé » : SA bulle, reliée à la capsule des modes par la taille concave
+   du goo (gap 7px ≈ la portée du flou) — le liquide EST le séparateur */
 .ce-lq-adv {
   position: absolute;
-  left: calc(100% + 14px);
+  left: calc(100% + 7px);
   top: 50%;
   transform: translateY(-50%);
   white-space: nowrap;
 }
-/* le pill détaché « Avancé » garde SON fond (il n'est pas dans le goo) */
+/* la bulle est le fond du bouton détaché — lui reste transparent, et son
+   état .on colore la BULLE (liquid.js lit la classe) */
 .ce-lq-adv .ce-elembar-btn,
-.ce-lq-adv .ce-pillbtn {
-  background: var(--ce-glass-strong);
-  border-radius: 999px;
-  box-shadow: 0 10px 30px rgba(20, 24, 35, 0.16);
-}
+.ce-lq-adv .ce-pillbtn,
+.ce-lq-adv .ce-pillbtn:hover,
 .ce-lq-adv .ce-advbtn.on {
-  background: var(--ce-ink);
-  color: var(--ce-bg, #fff);
+  background: none;
+  box-shadow: none;
 }
+.ce-lq-adv .ce-advbtn.on { color: var(--ce-bg, #fff); }
+.ce-lq-adv .ce-advbtn { padding: 10px 15px; }
 
 .ce-elemwrap {
   position: fixed;
@@ -519,16 +511,16 @@ body:has(.gpx-profile:not(.hidden)) .ce-elemwrap {
 .ce-elembar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 2px;
   padding: 5px;
   border-radius: 999px;
 }
-/* sélecteur des 3 modes — icône + nom, toujours présent dans la barre.
-   gap 10 + inflate 4 des bulles ⇒ ~2px entre bulles = la taille concave */
+/* sélecteur des 3 modes — icône + nom, TOUS dans la même bulle (la capsule) ;
+   seul « Avancé » est séparé, par la taille liquide (Adrien) */
 .ce-wmseg {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 2px;
 }
 .ce-wm-btn {
   display: flex;
@@ -1773,7 +1765,7 @@ body.ce-simple .ce-quickbar {
 .ce-qb-core {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   padding: 4px;
 }
 body.ce-noui .ce-quickbar,

@@ -25,17 +25,16 @@ const fmt = (c, v) => (c.step >= 1 ? String(Math.round(v)) : (+v).toFixed(c.step
 const clampStep = (c, v) => Math.min(c.max, Math.max(c.min, Math.round(v / c.step) * c.step))
 
 export function buildElemBar({ modes, initial, onMode, toolsByMode }) {
-  // barre LIQUIDE (réf. Enroll validée Adrien) : plus de pill de verre unique —
-  // le cœur (Explorer/Studio/Parcours + outils) est une silhouette de bulles
-  // fusionnées, centrée écran ; « Avancé » vit détaché à droite (advSlot)
-  const bar = el('div', 'ce-elembar ce-liquid')
+  // barre LIQUIDE (réf. Enroll, précisé par Adrien) : Explorer/Studio/Parcours
+  // vivent dans UNE MÊME bulle (la capsule) ; « Avancé » a SA bulle, reliée à
+  // la capsule par la taille concave du goo — le liquide est le séparateur
+  const bar = el('div', 'ce-elembar')
   const modeSeg = el('div', 'ce-wmseg')
   const sep = el('span', 'ce-elembar-sep')
-  sep.style.display = 'none' // les tailles concaves du goo séparent déjà
+  sep.style.display = 'none' // la ponctuation, c'est la taille liquide
   const tools = el('div', 'ce-elemtools')
   const focusRow = el('div', 'ce-elemfocus')
   bar.append(modeSeg, sep, tools, focusRow)
-  liquidize(bar, { items: () => [...modeSeg.children, ...tools.children] })
   const menu = el('div', 'ce-elemmenu ce-glassbox')
   let closeT = 0
   let openKey = null
@@ -210,11 +209,14 @@ export function buildElemBar({ modes, initial, onMode, toolsByMode }) {
   menu.addEventListener('pointerenter', () => clearTimeout(closeT))
   menu.addEventListener('pointerleave', scheduleClose)
 
-  // le cœur reste centré (la rangée fait la largeur du cœur) ; « Avancé »
-  // est ancré à droite du cœur, décentré — les familles se séparent à l'œil
-  const row = el('div', 'ce-lqrow')
+  // le cœur reste centré (la rangée fait la largeur de la capsule) ;
+  // « Avancé » est ancré à droite, décentré. Deux bulles dans le même goo :
+  // la capsule entière + le bouton Avancé (rempli plus tard par main.js —
+  // le MutationObserver de liquidize le voit arriver tout seul)
+  const row = el('div', 'ce-lqrow ce-liquid')
   const advSlot = el('div', 'ce-lq-adv')
   row.append(bar, advSlot)
+  liquidize(row, { items: () => [bar, advSlot.firstElementChild].filter(Boolean), inflate: 0 })
   const wrap = el('div', 'ce-elemwrap')
   wrap.append(menu, row)
   document.body.append(wrap)
