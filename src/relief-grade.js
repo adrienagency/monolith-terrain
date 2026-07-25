@@ -45,12 +45,13 @@ const CONTRAST_MAX = 12
 const PIVOT_MIN = 0.06
 const PIVOT_MAX = 0.94
 // bornes calées sur les valeurs des planches d'Adrien (templates.js) : la
-// teinte descend au plus bas à 0.68 (= ICELAND, le plus sculpté), l'ombrage de
-// pente plafonne à 0.45 — au-delà les versants alpins virent au brun boueux.
+// teinte descend au plus bas à 0.68 (= ICELAND, le plus sculpté) et l'ombrage
+// de pente plafonne à 0.55 (= FALLOUT WASTELANDS, le plus mordant) — au-delà
+// les versants virent au brun boueux.
 const TINT_MIN = 0.68
 const TINT_MAX = 0.95
 const SLOPE_MIN = 0.08
-const SLOPE_MAX = 0.45
+const SLOPE_MAX = 0.55
 
 // Emprise horizontale par défaut si l'appelant ne la fournit pas : un bloc de
 // 3 tuiles au zoom 11 sous nos latitudes ≈ 20 km.

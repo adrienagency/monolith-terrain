@@ -448,15 +448,39 @@ export function contributeTerrainSections(ctx) {
   onRefresh(() => sRel.setMeta(`×${(+params.demExaggeration).toFixed(params.demExaggeration % 1 ? 1 : 0)}${params.regionMode ? ' · zone isolée' : ''}`), sRel.head)
 
   // ------------------------------------------------------------ Ombrage
+  // Les 4 réglages sont DÉRIVÉS du relief chargé (src/relief-grade.js) : une
+  // carte des Alpes et un delta plat ne peuvent pas partager le même contraste
+  // ni le même pivot. Toucher un curseur FIGE ce réglage-là (les trois autres
+  // continuent de suivre le relief) ; le toggle en tête rend la main à l'auto.
   const sMap = matPanel.addSection(section('Ombrage'))
   const u = () => ctx.terrain.mapUniforms
+  // un curseur d'Ombrage : pousse l'uniforme ET signale la reprise en main
+  const shadeSlider = (label, key, uni, min, max, step) =>
+    slider({
+      label, min, max, step,
+      get: () => params[key],
+      set: (v) => { params[key] = v; u()[uni].value = v; ctx.markShadeDirty?.(key) },
+    })
+  const autoToggle = toggle({
+    label: 'Ombrage auto',
+    get: () => params.shadeAuto !== false,
+    set: (v) => { params.shadeAuto = v; ctx.setShadeAuto?.(v); refreshAll() },
+  })
+  autoToggle.setAttribute('data-tip', 'Calcule les réglages d’après l’altitude réelle de la carte affichée. Bouger un curseur le fige ; rallumer rend la main.')
   sMap.body.append(
-    slider({ label: 'Teinte hypsométrique', min: 0, max: 1, step: 0.02, get: () => params.mapTint, set: (v) => { params.mapTint = v; u().uTint.value = v } }),
-    slider({ label: 'Contraste d’altitude', min: 0.5, max: 20, step: 0.1, get: () => params.heightContrast, set: (v) => { params.heightContrast = v; u().uHeightContrast.value = v } }),
-    slider({ label: 'Pivot d’altitude', min: 0, max: 1, step: 0.01, get: () => params.heightPivot, set: (v) => { params.heightPivot = v; u().uHeightPivot.value = v } }),
-    slider({ label: 'Ombrage des pentes', min: 0, max: 1, step: 0.02, get: () => params.slopeTint, set: (v) => { params.slopeTint = v; u().uSlopeTint.value = v } })
+    autoToggle,
+    shadeSlider('Teinte hypsométrique', 'mapTint', 'uTint', 0, 1, 0.02),
+    shadeSlider('Contraste d’altitude', 'heightContrast', 'uHeightContrast', 0.5, 20, 0.1),
+    shadeSlider('Pivot d’altitude', 'heightPivot', 'uHeightPivot', 0, 1, 0.01),
+    shadeSlider('Ombrage des pentes', 'slopeTint', 'uSlopeTint', 0, 1, 0.02)
   )
-  onRefresh(() => sMap.setMeta(`contraste ×${(+params.heightContrast).toFixed(1)}`), sMap.head)
+  // meta parlante (section repliée) : l'état de l'auto d'abord, le contraste
+  // ensuite — « auto » / « auto · 2 repris » / « manuel »
+  onRefresh(() => {
+    const frozen = ctx.shadeFrozenCount?.() ?? 0
+    const state = params.shadeAuto === false ? 'manuel' : frozen ? `auto · ${frozen} repris` : 'auto'
+    sMap.setMeta(`${state} · ×${(+params.heightContrast).toFixed(1)}`)
+  }, sMap.head)
 
   // --------------------------------------------------------------- Socle
   const sBlk = matPanel.addSection(section('Socle'))
