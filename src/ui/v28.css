@@ -2554,3 +2554,125 @@ body.ce-noui .ce-rec {
   font-weight: 600;
 }
 
+/* ------------------------------------------------------------- Fonds v2 --
+   éditeurs de dégradés : barre de stops (grapick restylé au thème) + liste
+   façon Figma, et plan de points draggables façon Illustrator */
+.ce-bg-note {
+  display: none;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--ce-muted);
+  margin: 2px 0 6px;
+}
+.ce-bg-note.on { display: block; }
+.ce-dim { opacity: 0.4; pointer-events: none; }
+
+.ce-grad-bar {
+  position: relative;
+  /* marge haute pour les croix de suppression grapick (au-dessus des stops),
+     latérale pour les poignées aux extrémités */
+  margin: 20px 8px 8px;
+}
+.ce-grad-bar .grp-wrapper {
+  border-radius: 6px;
+  border: 1.5px solid var(--ce-hairline);
+}
+.ce-grad-bar .grp-preview { border-radius: 5px; }
+.ce-grad-bar .grp-handler-drag {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(28, 30, 34, 0.45);
+  border-radius: 2px;
+  width: 6px;
+  margin-left: -1px;
+}
+.ce-grad-bar .grp-handler-selected .grp-handler-drag {
+  background: var(--ce-accent);
+  border-color: var(--ce-accent);
+}
+.ce-grad-bar .grp-handler-cp-wrap {
+  border-radius: 4px;
+  border-width: 2px;
+}
+.ce-grad-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--ce-gap-tight);
+}
+.ce-grad-add {
+  border: 0;
+  background: var(--ce-hover);
+  color: var(--ce-ink);
+  border-radius: 6px;
+  width: 22px;
+  height: 20px;
+  line-height: 1;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+.ce-grad-add:hover { background: var(--ce-track); }
+.ce-grad-add:disabled { opacity: 0.35; cursor: default; }
+.ce-grad-stops {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.ce-grad-stoprow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ce-grad-pos {
+  width: 46px;
+  border: 1px solid var(--ce-hairline);
+  border-radius: 6px;
+  background: var(--ce-hover);
+  color: var(--ce-ink);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 4px;
+  text-align: right;
+}
+.ce-grad-pct {
+  font-size: 10px;
+  color: var(--ce-muted);
+  margin-right: auto;
+}
+.ce-grad-del {
+  border: 0;
+  background: none;
+  color: var(--ce-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.ce-grad-del:hover { background: var(--ce-hover); color: var(--ce-ink); }
+.ce-grad-del:disabled { opacity: 0.3; cursor: default; }
+
+.ce-pts-plane {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  border-radius: 8px;
+  border: 1.5px solid var(--ce-hairline);
+  cursor: crosshair;
+  margin: 2px 0 4px;
+}
+.ce-pts-dot {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(28, 30, 34, 0.45), 0 1px 4px rgba(0, 0, 0, 0.3);
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  touch-action: none;
+}
+.ce-pts-dot.on { box-shadow: 0 0 0 2px var(--ce-accent), 0 1px 4px rgba(0, 0, 0, 0.3); }
+.ce-pts-dot:active { cursor: grabbing; }
+

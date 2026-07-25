@@ -59,7 +59,7 @@ import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, stripFrom
 import { loadUserPalettes, saveUserPalettes, paletteFromParams } from './user-palettes.js'
 import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT } from './share-link.js'
 import { DroneCam } from './drone-cam.js'
-import { makeGradientTexture, deriveBgColors, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
+import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
 import { N8AOPostPass } from 'n8ao'
 import { History } from './history.js'
@@ -221,6 +221,10 @@ const params = {
   bgColorB: '#dfe6ef',
   bgColorC: '#c7d2df',
   bgAngle: 135,
+  // Fonds v2 : stops arbitraires [{p 0..100, c}] (linéaire/radial) et points
+  // libres [{x,y,r,c} 0..1] (dégradé de points). null = dérivés de A/B/C.
+  bgStops: null,
+  bgPoints: null,
   // camera automations (looping cinematic moves)
   camMove: 'orbit',
   camSpeed: 1,
@@ -544,6 +548,16 @@ function syncGlobeShadow(mul) {
   globe?.setShadowColor(hex, mul)
 }
 function applyBackground() {
+  // v2 : normaliser stops/points D'ABORD et tenir le miroir A/B/C (premier /
+  // médian / dernier stop) à jour — l'ombre du globe et la brume lisent A/B
+  if (params.bgMode && params.bgMode !== 'solid') {
+    const stops = normalizeBgStops(params)
+    params.bgStops = stops
+    params.bgColorA = stops[0].c
+    params.bgColorB = stops[Math.floor((stops.length - 1) / 2)].c
+    params.bgColorC = stops[stops.length - 1].c
+    if (params.bgMode === 'mesh') params.bgPoints = normalizeBgPoints(params)
+  }
   const mul = bgDayMul()
   _lastBgMul = mul
   syncGlobeShadow(mul)
@@ -564,7 +578,9 @@ function applyBackground() {
     // background through its transparency) darkens with it too.
     scene.background = new THREE.Color(dim(params.bgColorA))
   } else {
-    _bgTex = makeGradientTexture({ mode: params.bgMode, a: dim(params.bgColorA), b: dim(params.bgColorB), c: dim(params.bgColorC), angle: params.bgAngle })
+    _bgTex = params.bgMode === 'mesh'
+      ? makeGradientTexture({ mode: 'mesh', points: params.bgPoints.map((p) => ({ ...p, c: dim(p.c) })) })
+      : makeGradientTexture({ mode: params.bgMode, stops: params.bgStops.map((s) => ({ p: s.p, c: dim(s.c) })), angle: params.bgAngle })
     scene.background = _bgTex
   }
 }
@@ -615,14 +631,16 @@ function applyEnvironment() {
 }
 // pull a harmonious gradient out of the current map palette (colour theory)
 function autoBgColours() {
-  const { a, b, c } = deriveBgColors(params)
-  params.bgColorA = a // gradient top (airy)
-  params.bgColorB = b
-  params.bgColorC = c
+  const m = deriveBgModel(params)
+  params.bgColorA = m.a // gradient top (airy)
+  params.bgColorB = m.b
+  params.bgColorC = m.c
+  params.bgStops = m.stops
+  params.bgPoints = m.points
   // the fog fades the relief to a MID haze (b), distinct from the light top, so
   // depth fog stays clearly visible in front of the gradient
-  params.fogColor = b
-  fogRef?.color.set(b)
+  params.fogColor = m.b
+  fogRef?.color.set(m.b)
   applyBackground()
 }
 // Changer une palette adapte AUSSI le fond de la carte (Adrien : « sinon c'est
@@ -632,10 +650,12 @@ function autoBgColours() {
 // l'application d'un template complet, qui porte son propre fond.
 function applyPaletteWithBg(p) {
   applyPalette(p)
-  const { a, b, c } = deriveBgColors(params)
-  params.bgColorA = a
-  params.bgColorB = b
-  params.bgColorC = c
+  const m = deriveBgModel(params)
+  params.bgColorA = m.a
+  params.bgColorB = m.b
+  params.bgColorC = m.c
+  params.bgStops = m.stops
+  params.bgPoints = m.points
   applyBackground()
   bgRefreshFn?.()
 }
@@ -1749,6 +1769,8 @@ const DEFAULT_BG = Object.freeze({
   bgColorB: params.bgColorB,
   bgColorC: params.bgColorC,
   bgAngle: params.bgAngle,
+  bgStops: params.bgStops ? JSON.parse(JSON.stringify(params.bgStops)) : null,
+  bgPoints: params.bgPoints ? JSON.parse(JSON.stringify(params.bgPoints)) : null,
 })
 const DEFAULT_PLINTH = Object.freeze({
   plinthDepth: params.plinthDepth,
@@ -1950,6 +1972,10 @@ let userTplRefreshFn = () => {} // re-rend la rangée des templates user (boutiq
 function applyUserTemplate(tmpl) {
   const L = tmpl.look || {}
   for (const k of TEMPLATE_KEYS) if (k in L) params[k] = L[k] == null ? L[k] : JSON.parse(JSON.stringify(L[k]))
+  // un template d'avant Fonds v2 (sans stops/points) ne doit pas hériter de
+  // ceux de la session : retomber sur SES bgColorA/B/C
+  if (!('bgStops' in L)) params.bgStops = null
+  if (!('bgPoints' in L)) params.bgPoints = null
   setDarkMode(params.darkMode ?? false)
   applyPalette({ rampStops: params.rampStops, oceanShallow: params.oceanShallow, oceanMid: params.oceanMid, oceanDeep: params.oceanDeep, ink: params.contourColor })
   applyStyle({ mapTint: params.mapTint, heightContrast: params.heightContrast, heightPivot: params.heightPivot, slopeTint: params.slopeTint })
@@ -2280,6 +2306,8 @@ function shuffleLook() {
   params.bgColorB = sch.b
   params.bgColorC = sch.c
   params.bgAngle = sch.angle
+  params.bgStops = null // re-dérivés des nouveaux A/B/C par applyBackground
+  params.bgPoints = null
   applyBackground()
   bgRefreshFn() // resync des sélecteurs du panneau Background
   // socle : finition unie (stone → plinthColor visible) dans la couleur du schéma

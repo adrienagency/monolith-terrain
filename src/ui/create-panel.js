@@ -7,9 +7,12 @@
 //                                  Bibliothèque (rampe, océans, encre, grille)
 // Le générateur aléatoire (palette + look) est RETIRÉ (demande explicite).
 
+import Grapick from 'grapick'
+import 'grapick/dist/grapick.min.css'
 import { el, slider, color, swatch, toggle, select, segmented, button, section, refreshAll, onRefresh } from './kit.js'
 import { Panel } from './shell.js'
 import { PBR_PRESETS, GLASS_PRESETS, GLASS_BY_ID, PBR_BY_ID } from '../material-presets.js'
+import { stopsToCss, pointsToCss, pointsBase, flipStops, normalizeBgStops, normalizeBgPoints, MAX_STOPS, MAX_POINTS } from '../background.js'
 
 const ICON_BG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M3.5 15.5 9 10l5 5 3-3 3.5 3.5"/><circle cx="9.5" cy="7.5" r="1.4"/></svg>'
@@ -52,8 +55,25 @@ export function buildPaletteCreation(ctx, host, { onClose } = {}) {
 }
 
 // ------------------------------------------------------------ panneau Fonds
-// The scene backdrop behind the block. Changing it moves the fog to the same
-// colour, so the relief always fades into its own background.
+// Fonds v2 — deux sections d'égale dignité : « Fond » (uni / dégradés, avec de
+// VRAIS éditeurs : barre de stops grapick façon Figma + plan de points façon
+// Illustrator) et « Ciel (HDRI) ». Mêmes vignettes .ce-mat-grid partout ; le
+// conflit ciel↔fond est rendu explicite (le ciel estompe la section Fond).
+const rgbaToHex = (c) => {
+  if (/^#[0-9a-fA-F]{6}$/.test(c)) return c
+  const m = String(c).match(/(\d+)[,\s]+(\d+)[,\s]+(\d+)/)
+  return m ? '#' + [1, 2, 3].map((i) => (+m[i]).toString(16).padStart(2, '0')).join('') : '#888888'
+}
+const mixHex = (a, b) => '#' + [1, 3, 5].map((i) =>
+  Math.round((parseInt(a.slice(i, i + 2), 16) + parseInt(b.slice(i, i + 2), 16)) / 2).toString(16).padStart(2, '0')).join('')
+
+const BG_TYPES = [
+  { v: 'solid', label: 'Uni', full: 'Fond uni' },
+  { v: 'linear', label: 'Linéaire', full: 'Dégradé linéaire' },
+  { v: 'radial', label: 'Radial', full: 'Dégradé radial' },
+  { v: 'mesh', label: 'Points', full: 'Dégradé de points' },
+]
+
 export function buildFondsPanel(ctx) {
   const { params } = ctx
   const panel = new Panel({
@@ -61,14 +81,223 @@ export function buildFondsPanel(ctx) {
     icon: ICON_BG,
     side: 'left',
     width: 268,
-    tip: 'Le décor derrière le bloc : couleur, dégradé ou ciel (HDRI).',
+    tip: 'Le décor derrière le bloc : couleur, dégradés ou ciel (HDRI).',
   })
-  const sBg = panel.addSection(section('Fond & ciel'))
-  // --- Environnement (HDRI sky) — a vignette picker; selecting a sky takes over
-  // the backdrop + lighting, clearing it returns to the solid/gradient below ---
-  sBg.body.append(el('div', 'ce-fx-head', 'Ciel (HDRI)'))
+  const modeOf = () => params.bgMode || 'solid'
+  const typeMeta = () => BG_TYPES.find((t) => t.v === modeOf()) || BG_TYPES[0]
+  // aperçu CSS du fond courant pour un type donné — vignettes VIVANTES : elles
+  // suivent les couleurs pendant l'édition
+  const previewFor = (v, node) => {
+    node.style.backgroundImage = ''
+    if (v === 'solid') { node.style.background = params.bgColorA; return }
+    if (v === 'mesh') {
+      const pts = normalizeBgPoints(params)
+      node.style.backgroundColor = pointsBase(pts)
+      node.style.backgroundImage = pointsToCss(pts)
+      return
+    }
+    node.style.background = stopsToCss(normalizeBgStops(params), v, params.bgAngle)
+  }
+
+  // ------------------------------------------------------------ section Fond
+  const sFond = panel.addSection(section('Fond'))
+  const skyNote = el('div', 'ce-bg-note', 'Le ciel remplace le fond — choisir « Aucun » dans Ciel pour le retrouver.')
+  const typeWrap = el('div', 'ce-mat-pick')
+  const editWrap = el('div')
+  const autoRow = el('div', 'ce-btn-row')
+  autoRow.append(button('Couleurs auto depuis la carte', () => { ctx.autoBgColours(); renderAll() }, { ghost: true }))
+  sFond.body.append(skyNote, typeWrap, editWrap, autoRow)
+
+  function renderTypes() {
+    typeWrap.replaceChildren()
+    const grid = el('div', 'ce-mat-grid')
+    for (const t of BG_TYPES) {
+      const b = el('button', `ce-mat-vig${modeOf() === t.v ? ' on' : ''}`)
+      b.type = 'button'
+      b.setAttribute('data-tip', t.full)
+      const media = el('span', 'ce-mat-vig-img')
+      previewFor(t.v, media)
+      b.append(media, el('span', 'ce-mat-vig-name', t.label))
+      b.addEventListener('click', () => {
+        if (modeOf() === t.v) return
+        const wasSolid = modeOf() === 'solid'
+        params.bgMode = t.v
+        // première activation d'un dégradé : dérive des couleurs harmonieuses
+        // de la palette ; des stops déjà personnalisés sont CONSERVÉS
+        if (t.v !== 'solid' && wasSolid && !params.bgStops) ctx.autoBgColours()
+        else ctx.applyBackground()
+        renderAll()
+      })
+      grid.append(b)
+    }
+    typeWrap.append(grid)
+  }
+
+  // -------------------------------------------------- éditeur : barre de stops
+  // (grapick, MIT — la barre cliquable façon Figma : glisser un stop le
+  // déplace, cliquer la barre en ajoute un, la croix au-dessus le retire)
+  function buildStopsEditor(host, mode) {
+    params.bgStops = normalizeBgStops(params)
+    const bar = el('div', 'ce-grad-bar')
+    host.append(bar)
+    const gp = new Grapick({ el: bar, direction: 'right', height: '22px', emptyColor: '#9aa4b0' })
+    let mute = true
+    for (const s of params.bgStops) gp.addHandler(s.p, s.c)
+    mute = false
+    const readStops = () => gp.getHandlers()
+      .map((h) => ({ p: Math.round(h.position), c: rgbaToHex(h.getColor()) }))
+      .sort((a, b) => a.p - b.p)
+    let raf = 0
+    const applyLive = () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; ctx.applyBackground(); renderTypes() }) }
+    gp.on('change', () => {
+      if (mute) return
+      const st = readStops()
+      if (st.length >= 2) params.bgStops = st
+      applyLive()
+      renderList()
+      refreshAll()
+    })
+    // liste des stops (position % / couleur / retirer) + « ＋ » d'ajout
+    const head = el('div', 'ce-grad-head')
+    head.append(el('span', 'ce-fx-head', 'Stops'))
+    const add = el('button', 'ce-grad-add', '＋')
+    add.type = 'button'
+    add.title = 'Ajouter un stop (au milieu du plus grand écart)'
+    add.addEventListener('click', () => {
+      const st = params.bgStops
+      if (st.length >= MAX_STOPS) return
+      let gi = 0, g = -1
+      for (let i = 0; i < st.length - 1; i++) { const d = st[i + 1].p - st[i].p; if (d > g) { g = d; gi = i } }
+      gp.addHandler(Math.round((st[gi].p + st[gi + 1].p) / 2), mixHex(st[gi].c, st[gi + 1].c))
+    })
+    head.append(add)
+    const list = el('div', 'ce-grad-stops')
+    host.append(head, list)
+    function renderList() {
+      list.replaceChildren()
+      const handlers = [...gp.getHandlers()].sort((a, b) => a.position - b.position)
+      for (const h of handlers) {
+        const row = el('div', 'ce-grad-stoprow')
+        const pos = el('input', 'ce-grad-pos')
+        pos.type = 'number'; pos.min = 0; pos.max = 100; pos.value = Math.round(h.position)
+        pos.addEventListener('change', () => h.setPosition(Math.max(0, Math.min(100, +pos.value || 0))))
+        const sw = swatch({ title: 'Couleur du stop', get: () => rgbaToHex(h.getColor()), set: (v) => h.setColor(v) })
+        const del = el('button', 'ce-grad-del', '—')
+        del.type = 'button'
+        del.title = 'Retirer ce stop'
+        del.disabled = handlers.length <= 2
+        del.addEventListener('click', () => h.remove())
+        row.append(pos, el('span', 'ce-grad-pct', '%'), sw, del)
+        list.append(row)
+      }
+      add.disabled = handlers.length >= MAX_STOPS
+    }
+    renderList()
+    if (mode === 'linear') {
+      host.append(slider({ label: 'Angle', min: 0, max: 360, step: 1, get: () => params.bgAngle, set: (v) => { params.bgAngle = v; ctx.applyBackground(); renderTypes() } }))
+    }
+    const r = el('div', 'ce-btn-row')
+    r.append(button('⇆ Inverser', () => { params.bgStops = flipStops(params.bgStops); ctx.applyBackground(); renderAll() }, { ghost: true }))
+    host.append(r)
+  }
+
+  // ----------------------------------------- éditeur : plan de points (morph)
+  // façon dégradé de forme libre d'Illustrator : des points colorés qu'on
+  // déplace sur un plan, chacun diffuse sa couleur en halo doux
+  function buildPointsEditor(host) {
+    const pts = (params.bgPoints = normalizeBgPoints(params))
+    let sel = 0
+    const plane = el('div', 'ce-pts-plane')
+    const knobs = el('div')
+    host.append(plane, el('div', 'ce-bg-note on', 'Glisser un point le déplace — cliquer le plan en ajoute un.'), knobs)
+    // applyBackground re-normalise params.bgPoints en COPIES — `pts` reste la
+    // source de vérité de l'éditeur, donc on le réaffirme avant chaque
+    // application (sinon drag/retrait mutent un tableau orphelin)
+    const applyNow = () => { params.bgPoints = pts; ctx.applyBackground() }
+    let raf = 0
+    const applyLive = () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; applyNow(); renderTypes() }) }
+    const paint = () => {
+      plane.style.backgroundColor = pointsBase(pts)
+      plane.style.backgroundImage = pointsToCss(pts)
+    }
+    function renderHandles() {
+      ;[...plane.querySelectorAll('.ce-pts-dot')].forEach((n) => n.remove())
+      pts.forEach((p, i) => {
+        const d = el('button', `ce-pts-dot${i === sel ? ' on' : ''}`)
+        d.type = 'button'
+        d.style.left = p.x * 100 + '%'
+        d.style.top = p.y * 100 + '%'
+        d.style.background = p.c
+        d.addEventListener('pointerdown', (e) => {
+          e.preventDefault()
+          if (sel !== i) { sel = i; renderHandles(); renderKnobs() }
+          try { d.setPointerCapture(e.pointerId) } catch {}
+          const move = (ev) => {
+            const r = plane.getBoundingClientRect()
+            p.x = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width))
+            p.y = Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height))
+            d.style.left = p.x * 100 + '%'
+            d.style.top = p.y * 100 + '%'
+            paint()
+            applyLive()
+          }
+          const up = () => {
+            d.removeEventListener('pointermove', move)
+            d.removeEventListener('pointerup', up)
+            applyNow()
+            renderTypes()
+            refreshAll()
+          }
+          d.addEventListener('pointermove', move)
+          d.addEventListener('pointerup', up)
+        })
+        plane.append(d)
+      })
+    }
+    plane.addEventListener('click', (e) => {
+      if (e.target !== plane || pts.length >= MAX_POINTS) return
+      const r = plane.getBoundingClientRect()
+      pts.push({ x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height, r: 0.5, c: pointsBase(pts) })
+      sel = pts.length - 1
+      paint(); renderHandles(); renderKnobs(); applyNow(); renderTypes(); refreshAll()
+    })
+    function renderKnobs() {
+      knobs.replaceChildren()
+      const p = pts[sel]
+      if (!p) return
+      knobs.append(
+        color({ label: 'Couleur du point', get: () => p.c, set: (v) => { p.c = v; paint(); renderHandles(); applyLive() } }),
+        slider({ label: 'Rayon', min: 0.05, max: 1, step: 0.01, get: () => p.r, set: (v) => { p.r = v; paint(); applyLive() } })
+      )
+      if (pts.length > 1) {
+        const r = el('div', 'ce-btn-row')
+        r.append(button('Retirer ce point', () => {
+          pts.splice(sel, 1)
+          sel = Math.max(0, sel - 1)
+          paint(); renderHandles(); renderKnobs(); applyNow(); renderTypes(); refreshAll()
+        }, { ghost: true }))
+        knobs.append(r)
+      }
+    }
+    paint(); renderHandles(); renderKnobs()
+  }
+
+  function renderEditor() {
+    editWrap.replaceChildren()
+    const m = modeOf()
+    if (m === 'solid') {
+      editWrap.append(color({ label: 'Couleur', get: () => params.bgColorA, set: (v) => { params.bgColorA = v; ctx.applyBackground(); renderTypes() } }))
+    } else if (m === 'mesh') {
+      buildPointsEditor(editWrap)
+    } else {
+      buildStopsEditor(editWrap, m)
+    }
+  }
+
+  // ------------------------------------------------------ section Ciel (HDRI)
+  const sCiel = panel.addSection(section('Ciel (HDRI)'))
   const envPick = el('div', 'ce-mat-pick')
-  sBg.body.append(envPick)
+  sCiel.body.append(envPick)
   function renderEnvPicker() {
     envPick.replaceChildren()
     const cur = ctx.getBgEnv()
@@ -78,7 +307,7 @@ export function buildFondsPanel(ctx) {
       b.type = 'button'
       b.setAttribute('data-tip', label)
       b.append(media, el('span', 'ce-mat-vig-name', label))
-      b.addEventListener('click', () => { ctx.setBgEnv(id); renderEnvPicker() })
+      b.addEventListener('click', () => { ctx.setBgEnv(id); renderAll() })
       return b
     }
     const none = el('span', 'ce-mat-vig-img ce-mat-vig-none')
@@ -89,35 +318,39 @@ export function buildFondsPanel(ctx) {
     }
     envPick.append(grid)
   }
-  renderEnvPicker()
-  ctx.registerBgRefresh?.(renderEnvPicker) // let a template/reset resync the sky highlight
-  sBg.body.append(
-    select({ label: 'Type', options: ctx.bgModes, get: () => params.bgMode, set: (v) => {
-      const wasSolid = params.bgMode === 'solid' || !params.bgMode
-      params.bgMode = v
-      // activating a gradient auto-derives harmonious stops from the map palette
-      if (v !== 'solid' && wasSolid) ctx.autoBgColours(); else ctx.applyBackground()
-      renderBg(); refreshAll()
-    } }),
-    color({ label: 'Couleur A (haut)', get: () => params.bgColorA, set: (v) => { params.bgColorA = v; ctx.applyBackground() } })
-  )
-  const bgWrap = el('div')
-  sBg.body.append(bgWrap)
-  function renderBg() {
-    bgWrap.replaceChildren()
-    if (params.bgMode === 'solid' || !params.bgMode) return
-    bgWrap.append(
-      color({ label: 'Couleur B', get: () => params.bgColorB, set: (v) => { params.bgColorB = v; ctx.applyBackground() } }),
-      color({ label: 'Couleur C', get: () => params.bgColorC, set: (v) => { params.bgColorC = v; ctx.applyBackground() } })
-    )
-    if (params.bgMode === 'linear') {
-      bgWrap.append(slider({ label: 'Angle', min: 0, max: 360, step: 1, get: () => params.bgAngle, set: (v) => { params.bgAngle = v; ctx.applyBackground() } }))
-    }
-    const r = el('div', 'ce-btn-row')
-    r.append(button('Couleurs auto depuis la carte', () => { ctx.autoBgColours(); refreshAll() }, { ghost: true }))
-    bgWrap.append(r)
+
+  // le ciel actif ESTOMPE la section Fond (le HDRI remplace le décor) — l'état
+  // est dit, pas subi
+  function syncSky() {
+    const sky = !!ctx.getBgEnv()
+    for (const n of [typeWrap, editWrap, autoRow]) n.classList.toggle('ce-dim', sky)
+    skyNote.classList.toggle('on', sky)
   }
-  renderBg()
+  function renderAll() {
+    renderTypes()
+    renderEditor()
+    renderEnvPicker()
+    syncSky()
+    refreshAll()
+  }
+  renderTypes(); renderEditor(); renderEnvPicker(); syncSky()
+  ctx.registerBgRefresh?.(renderAll) // template/reset/shuffle → tout resynchroniser
+
+  // metas parlantes — la pastille du Fond montre le VRAI dégradé courant
+  onRefresh(() => {
+    const sky = !!ctx.getBgEnv()
+    if (sky) { sFond.setMeta('remplacé par le ciel'); return }
+    const m = modeOf()
+    const sw = m === 'solid' ? params.bgColorA
+      : m === 'mesh' ? `${pointsToCss(normalizeBgPoints(params))} ${pointsBase(normalizeBgPoints(params))}`
+      : stopsToCss(normalizeBgStops(params), m, params.bgAngle)
+    sFond.setMeta(typeMeta().full, sw)
+  }, sFond.root)
+  onRefresh(() => {
+    const e = ctx.environments.find((x) => x.id === ctx.getBgEnv())
+    sCiel.setMeta(e ? e.label : 'Aucun')
+  }, sCiel.root)
+
   return panel
 }
 
