@@ -203,26 +203,24 @@ export function autoDarkTarget(lum) {
   return null
 }
 
-// Couleur de socle harmonisée au fond — teinte du milieu de gamme, saturation
-// contenue (un socle reste un meuble, pas un aplat), clarté qui SUIT la
-// luminance du fond (fond sombre → socle sombre). Ne touche jamais la matière.
-// HSL à la main en sRGB — THREE.Color (color management) travaille en linéaire
-// et décalerait la clarté à la conversion.
-export function derivePlinthColor(model, lum = 0.7) {
-  const [r, g, b] = hexRgb(model.b).map((v) => v / 255)
+// HSL à la main en sRGB — THREE.Color (color management) travaille en
+// linéaire et décalerait clartés/moyennes à la conversion.
+function hexToHsl(hex) {
+  const [r, g, b] = hexRgb(hex).map((v) => v / 255)
   const max = Math.max(r, g, b), min = Math.min(r, g, b)
-  const l0 = (max + min) / 2
+  const l = (max + min) / 2
   const d = max - min
   let h = 0
-  const s0 = d === 0 ? 0 : d / (1 - Math.abs(2 * l0 - 1))
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1))
   if (d > 0) {
     if (max === r) h = ((g - b) / d + 6) % 6
     else if (max === g) h = (b - r) / d + 2
     else h = (r - g) / d + 4
     h *= 60
   }
-  const s = Math.min(0.35, s0 * 0.5)
-  const l = clampF(0.22 + lum * 0.6)
+  return { h, s, l }
+}
+function hslToHex(h, s, l) {
   const c = (1 - Math.abs(2 * l - 1)) * s
   const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
   const m = l - c / 2
@@ -230,6 +228,28 @@ export function derivePlinthColor(model, lum = 0.7) {
     : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x]
   const hx = (v) => Math.round((v + m) * 255).toString(16).padStart(2, '0')
   return `#${hx(r1)}${hx(g1)}${hx(b1)}`
+}
+
+// Couleur de socle harmonisée au fond — teinte du milieu de gamme, saturation
+// contenue (un socle reste un meuble, pas un aplat), clarté qui SUIT la
+// luminance du fond (fond sombre → socle sombre). Ne touche jamais la matière.
+export function derivePlinthColor(model, lum = 0.7) {
+  const { h, s } = hexToHsl(model.b)
+  return hslToHex(h, Math.min(0.35, s * 0.5), clampF(0.22 + lum * 0.6))
+}
+
+// Teintes du LISERÉ MÉTAL de la barre liquide (recette adrienagency.com :
+// conic ivoire vif / accent / ivoire doux qui tourne) — dérivées de la
+// PALETTE de la carte pour que le métal change avec elle : reflet clair
+// presque blanc teinté du milieu de gamme, reflet coloré plus soutenu.
+export function deriveMetalTints(params = {}) {
+  const stops = Array.isArray(params.rampStops) ? params.rampStops : []
+  const mid = stops[Math.floor((stops.length - 1) / 2)]?.c
+  const { h, s } = hexToHsl(/^#[0-9a-fA-F]{6}$/.test(mid || '') ? mid : '#b9c4d2')
+  return {
+    bright: hslToHex(h, Math.min(0.3, s * 0.45), 0.93), // l'« ivoire » teinté
+    tint: hslToHex(h, Math.max(0.25, Math.min(0.7, s * 1.1)), 0.55), // le reflet coloré
+  }
 }
 
 // palette → full v2 model (stops + points), used by « Couleurs auto »

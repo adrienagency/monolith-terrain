@@ -233,6 +233,7 @@ export function buildElemBar({ modes, initial, onMode, toolsByMode, simpleCore }
     inflate: 0,
     // la coche liquide chevauche le choix ACTIF des DEUX niveaux et voyage
     bumpFor: () => (isSimple() && simpleCore ? simpleCore : modeSeg).querySelector('.ce-wm-btn.on'),
+    rim: true, // liseré métal liquide sur le pourtour (adapté à la palette)
   })
   const wrap = el('div', 'ce-elemwrap')
   wrap.append(menu, row)

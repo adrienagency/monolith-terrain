@@ -4,8 +4,21 @@ import {
   normalizeBgStops, flipStops, stopsToCss,
   normalizeBgPoints, pointsBase, pointsToCss,
   deriveBgModel, BG_MODES, MAX_STOPS, MAX_POINTS,
-  bgLuminance, autoDarkTarget, derivePlinthColor,
+  bgLuminance, autoDarkTarget, derivePlinthColor, deriveMetalTints,
 } from '../src/background.js'
+
+test('deriveMetalTints : reflet clair très lumineux, reflet coloré qui garde la teinte', () => {
+  const m = deriveMetalTints({ rampStops: [{ c: '#224422' }, { c: '#3a7a3a' }, { c: '#eeeecc' }] })
+  const l = (hex) => {
+    const v = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+    return (Math.max(...v) + Math.min(...v)) / 510
+  }
+  assert.ok(l(m.bright) > 0.85, `bright clair attendu, ${m.bright}`)
+  assert.ok(l(m.tint) > 0.35 && l(m.tint) < 0.75, `tint médian attendu, ${m.tint}`)
+  // la teinte verte du milieu de gamme survit dans le reflet coloré
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(m.tint.slice(i, i + 2), 16))
+  assert.ok(g > r && g > b, `teinte verte attendue, ${m.tint}`)
+})
 
 // ------------------------------------------------------------------- stops
 test('normalizeBgStops falls back to legacy A/B/C when bgStops is absent', () => {

@@ -59,7 +59,7 @@ import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, stripFrom
 import { loadUserPalettes, saveUserPalettes, paletteFromParams } from './user-palettes.js'
 import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT } from './share-link.js'
 import { DroneCam } from './drone-cam.js'
-import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
+import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, deriveMetalTints, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
 import { N8AOPostPass } from 'n8ao'
 import { History } from './history.js'
@@ -551,6 +551,11 @@ function syncGlobeShadow(mul) {
   globe?.setShadowColor(hex, mul)
 }
 function applyBackground() {
+  // le liseré métal de la barre liquide suit la PALETTE de la carte —
+  // applyBackground passe sur tout changement de look, c'est le bon péage
+  const mt = deriveMetalTints(params)
+  document.documentElement.style.setProperty('--lq-m1', mt.bright)
+  document.documentElement.style.setProperty('--lq-m2', mt.tint)
   // v2 : normaliser stops/points D'ABORD et tenir le miroir A/B/C (premier /
   // médian / dernier stop) à jour — l'ombre du globe et la brume lisent A/B
   if (params.bgMode && params.bgMode !== 'solid') {

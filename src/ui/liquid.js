@@ -14,6 +14,10 @@ import { el } from './kit.js'
 let gooDefs = null
 function ensureGoo() {
   if (gooDefs) return
+  // ⚠️ le @property de v28.css ne prend pas toujours (tooling/HMR) — sans
+  // enregistrement typé, --lq-angle s'anime en DISCRET (saut 0→360 à 50 %)
+  // et le liseré semble immobile. L'enregistrement JS garantit l'interpolation.
+  try { CSS.registerProperty?.({ name: '--lq-angle', syntax: '<angle>', inherits: true, initialValue: '0deg' }) } catch {}
   gooDefs = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
   gooDefs.setAttribute('class', 'lq-defs')
   gooDefs.setAttribute('aria-hidden', 'true')
@@ -37,10 +41,26 @@ export const LQ_PAD = 12
 // vient chevaucher le bord haut de la capsule à son aplomb et le déforme en
 // bosse (tension de liquide, réf. vidéo Adrien / Liquid Glass Apple) ; la
 // transition CSS de la bulle fait VOYAGER la bosse d'un bouton à l'autre.
-export function liquidize(cluster, { items, inflate = 4, bumpFor } = {}) {
+// rim: true (optionnel) — LISERÉ MÉTAL LIQUIDE sur le pourtour (recette du
+// bouton adrienagency.com) : un second calque goo derrière, bulles gonflées
+// de +1.6px, peintes d'un conic-gradient qui TOURNE autour du centre de la
+// barre (teintes --lq-m1/--lq-m2 dérivées de la palette de la carte). Pas de
+// sheen par-dessus les boutons — juste la rotation sur le pourtour (Adrien).
+const RIM = 1.6
+export function liquidize(cluster, { items, inflate = 4, bumpFor, rim = false } = {}) {
   ensureGoo()
   const goo = el('div', 'lq-goo')
   cluster.prepend(goo)
+  // le liseré s'insère AVANT le goo dans le DOM → il peint derrière, seul
+  // son débord de +1.6px reste visible sur le pourtour
+  const rimLayer = rim ? el('div', 'lq-goo lq-rim') : null
+  if (rimLayer) cluster.prepend(rimLayer)
+  const rims = new Map()
+  const rimFor = (key) => {
+    let b = rims.get(key)
+    if (!b) { b = el('i', 'lq-blob lq-rimblob'); rimLayer.append(b); rims.set(key, b) }
+    return b
+  }
   const blobs = new Map() // bouton → bulle
   let raf = 0
   const place = (blob, x, y, w, h) => {
@@ -48,6 +68,16 @@ export function liquidize(cluster, { items, inflate = 4, bumpFor } = {}) {
     blob.style.top = y + 'px'
     blob.style.width = w + 'px'
     blob.style.height = h + 'px'
+  }
+  // pose la bulle-liseré jumelle (+RIM px) et cale le CENTRE de son conic sur
+  // le centre de la RANGÉE — toutes les bulles partagent ainsi une seule
+  // rotation cohérente autour de la barre
+  const placeRim = (key, x, y, w, h, base) => {
+    if (!rimLayer) return
+    const b = rimFor(key)
+    place(b, x - RIM, y - RIM, w + RIM * 2, h + RIM * 2)
+    b.style.setProperty('--lq-cx', (base.width / 2 - (x - RIM)).toFixed(1) + 'px')
+    b.style.setProperty('--lq-cy', (base.height / 2 - (y - RIM)).toFixed(1) + 'px')
   }
   const blobFor = (key) => {
     let b = blobs.get(key)
@@ -72,13 +102,19 @@ export function liquidize(cluster, { items, inflate = 4, bumpFor } = {}) {
       const b = blobFor(cluster)
       seen.add(cluster)
       place(b, 0, 0, base.width, base.height)
+      placeRim(cluster, 0, 0, base.width, base.height, base)
       b.classList.remove('dark', 'accent')
     }
     for (const it of live) {
       const b = blobFor(it.key)
       seen.add(it.key)
       const r = it.el.getBoundingClientRect()
-      place(b, r.left - base.left - inflate, r.top - base.top - inflate, r.width + inflate * 2, r.height + inflate * 2)
+      const x = r.left - base.left - inflate
+      const y = r.top - base.top - inflate
+      const w = r.width + inflate * 2
+      const h = r.height + inflate * 2
+      place(b, x, y, w, h)
+      placeRim(it.key, x, y, w, h, base)
       // sombre/accent en OPT-IN (lq-dark / lq-accent) — rectif Adrien : la
       // bulle Avancé reste blanche, l'état actif parle par le mot/l'icône
       b.classList.toggle('dark', it.el.classList.contains('lq-dark'))
@@ -92,10 +128,14 @@ export function liquidize(cluster, { items, inflate = 4, bumpFor } = {}) {
       seen.add('__bump')
       const r = target.getBoundingClientRect()
       const d = Math.round(r.height * 0.72)
-      place(b, r.left - base.left + (r.width - d) / 2, -d * 0.36, d, d)
+      const bx = r.left - base.left + (r.width - d) / 2
+      const by = -d * 0.36
+      place(b, bx, by, d, d)
+      placeRim('__bump', bx, by, d, d, base)
       b.classList.remove('dark', 'accent')
     }
     for (const [k, b] of blobs) if (!seen.has(k)) { b.remove(); blobs.delete(k) }
+    for (const [k, b] of rims) if (!seen.has(k)) { b.remove(); rims.delete(k) }
   }
   // rAF est SUSPENDU onglet caché (piège connu du projet) — fallback timeout
   // pour que les bulles suivent aussi quand la page tourne en arrière-plan
@@ -105,10 +145,11 @@ export function liquidize(cluster, { items, inflate = 4, bumpFor } = {}) {
     if (document.hidden) setTimeout(() => { raf = 0; sync() }, 16)
     else requestAnimationFrame(() => { raf = 0; sync() })
   }
-  // ⚠️ sync écrit les styles des bulles → ignorer les mutations du calque goo
-  // lui-même, sinon boucle rAF infinie observer→sync→observer
-  new MutationObserver((recs) => { if (recs.some((r) => !goo.contains(r.target))) ask() })
-    .observe(cluster, { attributes: true, childList: true, subtree: true })
+  // ⚠️ sync écrit les styles des bulles → ignorer les mutations des calques
+  // goo/liseré eux-mêmes, sinon boucle rAF infinie observer→sync→observer
+  new MutationObserver((recs) => {
+    if (recs.some((r) => !goo.contains(r.target) && !(rimLayer && rimLayer.contains(r.target)))) ask()
+  }).observe(cluster, { attributes: true, childList: true, subtree: true })
   new ResizeObserver(ask).observe(cluster)
   window.addEventListener('resize', ask)
   document.fonts?.ready?.then(ask)

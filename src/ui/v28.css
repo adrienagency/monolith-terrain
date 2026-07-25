@@ -465,6 +465,39 @@ body.dark {
 body.dark .lq-blob { background: #17191d; }
 .lq-blob.dark { background: var(--ce-ink); }
 .lq-blob.accent { background: var(--ce-accent); }
+/* ---- liseré MÉTAL LIQUIDE du pourtour (recette bouton adrienagency.com,
+   SANS le sheen) : calque jumeau derrière la silhouette, bulles +1.6px,
+   conic-gradient qui TOURNE autour du centre de la barre. Les teintes
+   --lq-m1/--lq-m2 sont dérivées de la palette de la carte (main.js). */
+@property --lq-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: true;
+}
+.lq-rim {
+  opacity: 1;
+  animation: lq-rim-spin 7s linear infinite;
+}
+@keyframes lq-rim-spin {
+  to { --lq-angle: 360deg; }
+}
+.lq-rimblob {
+  transition: none; /* le liseré suit sa bulle sans retard ni ressort */
+  /* stops en couleurs PLEINES : le seuil d'alpha du goo écrase toute
+     semi-transparence — les fondus vers transparent dessinent les arcs */
+  background: conic-gradient(
+    from var(--lq-angle) at var(--lq-cx, 50%) var(--lq-cy, 50%),
+    transparent 0deg,
+    var(--lq-m1, #fafaf7) 38deg,
+    var(--lq-m2, #d97757) 75deg,
+    transparent 130deg,
+    var(--lq-m1, #fafaf7) 215deg,
+    transparent 290deg
+  );
+}
+@media (prefers-reduced-motion: reduce) {
+  .lq-rim { animation: none; }
+}
 .ce-liquid { position: relative; }
 /* :not(.ce-lq-adv) : ce sélecteur (spécificité 0,2,0) écrasait le
    position:absolute du slot Avancé → il dérivait verticalement (bug vu par
