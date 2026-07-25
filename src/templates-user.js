@@ -19,8 +19,10 @@ const VERSION = 1
 export const TEMPLATE_KEYS = [
   // colours / ramp / oceans / theme
   'rampStops', 'oceanShallow', 'oceanMid', 'oceanDeep', 'darkMode',
-  // map style
-  'mapTint', 'heightContrast', 'heightPivot', 'slopeTint',
+  // map style — shadeAuto dit si l'Ombrage est DÉRIVÉ du relief chargé
+  // (relief-grade.js) ou figé aux valeurs ci-dessous ; un look sauvé avec un
+  // ombrage réglé à la main doit le retrouver tel quel au rechargement
+  'shadeAuto', 'mapTint', 'heightContrast', 'heightPivot', 'slopeTint',
   'roadsEnabled', 'roadsOpacity', 'roadsDetail', 'roadColor', 'waterEnabled', 'waterOpacity', 'waterFill', 'coastLine', 'aerialEnabled', 'aerialOpacity', 'aerialCoastFade', 'placesEnabled', 'placesDensity', 'placesSize', 'placesHalo',
   // animated sea (ocean-waves spectrum) — lakeColor is the shared water tint
   'waterReal', 'waterTransparency', 'waterSunFx', 'lakeColor',
@@ -55,7 +57,7 @@ export const TEMPLATE_KEYS = [
   'surfaceFx', 'fx',
   // clouds — cloudsV2 choisit le moteur (entités instanciées vs champ global),
   // windDir/windSpeed poussent le ciel (et l'orographie en phase 2)
-  'cloudsV2', 'windDir', 'windSpeed',
+  'windDir', 'windSpeed',
   'cloudsEnabled', 'cloudOpacity', 'cloudAltitude', 'cloudDrift', 'cloudScale', 'cloudCoverage',
   'cloudBillow', 'cloudBrightness', 'cloudAltSpread', 'cloudDriftVar', 'cloudContrast', 'cloudSSS',
   // Route (GPX) styling — not the track itself, see note above. A template

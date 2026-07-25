@@ -25,7 +25,7 @@
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
 import { sunLook } from 'ocean-waves' // palette jour/nuit partagée (ocean-lab)
-import { bakeCloudVolume } from './clouds.js'
+import { bakeCloudVolume } from './cloud-volume.js'
 import { normalizeBgStops, deriveAoColor } from './background.js'
 import { createSky, stepSky, resizeSky, cloudDensity, cloudScale, cloudCountForTier, CLOUD_HARD_MAX } from './clouds-sim.js'
 
@@ -545,6 +545,11 @@ export class Clouds2 {
         dir: ((params?.windDir ?? 45) * Math.PI) / 180,
         speed: (params?.windSpeed ?? 0.6) * (params?.cloudDrift ?? 1) * 0.35,
       },
+      // OROGRAPHIE : la sim reste pure, on lui PRÊTE le relief. C'est le même
+      // échantillonneur CPU que le bake du champ de hauteur, donc la butée que
+      // calcule la sim et l'occlusion que fait le shader parlent du même sol.
+      terrainAt: this.terrain?.sample ? (x, z) => this.terrain.sample(x, z) : null,
+      waterY: this.terrain?.mapUniforms?.uSeaY?.value ?? -Infinity,
     })
     this.sky = sky
 
@@ -740,6 +745,8 @@ export class Clouds2 {
     // le niveau de l'eau bouge avec la carte (et vaut -9999 sans mer) : on le
     // relit du terrain a chaque image plutot que de le figer au build
     u.uWaterY.value = this.terrain?.mapUniforms?.uSeaY?.value ?? -9999
+    // la sim a besoin du même plancher que le shader (sortie de mer, template)
+    this.sky.opts.waterY = this.terrain?.mapUniforms?.uSeaY?.value ?? -Infinity
     // même vent que la sim, en vecteur : cisaillement de base + advection
     u.uWind.value.set(Math.cos(dir), Math.sin(dir)).multiplyScalar(Math.min(1.5, params?.windSpeed ?? 0.6))
     if (params) {

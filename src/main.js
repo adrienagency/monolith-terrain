@@ -35,11 +35,12 @@ import { fetchTransports } from './transports.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
 import { monochromeLook, generateEarthPalette } from './palette.js'
+import { gradeForDem, elevationHistogram } from './relief-grade.js'
+import { buildPalettePool, pickShufflePalette } from './shuffle-pool.js'
 import { peakVantage } from './camera-poses.js'
 import { focusRayHit } from './autofocus.js'
 import { GroundInfoLayer } from './ground-info-layer.js'
 import { PeaksLayer } from './peaks.js'
-import { Clouds } from './clouds.js'
 import { Clouds2 } from './clouds2.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
@@ -153,6 +154,12 @@ const params = {
   bokehScale: 3.7,
 
   // map overlay
+  // Ombrage AUTO (relief-grade.js) : les 4 réglages de la section « Ombrage »
+  // sont recalculés à chaque chargement de terrain d'après le relief réel. Un
+  // curseur repris à la main se fige (drapeaux shadeDirty) ; le toggle rend
+  // la main à l'auto. Les valeurs ci-dessous ne servent plus que de repli
+  // (terrain procédural, DEM illisible).
+  shadeAuto: true,
   mapTint: 1.0,
   heightContrast: 5.1,
   heightPivot: 0.53,
@@ -344,12 +351,8 @@ const params = {
   cloudContrast: 1, // density contrast: <1 fluffier/softer, >1 harder-edged
   cloudSSS: 0.8, // cloud translucency: thin wisps light up as the sun shines through
   cloudTexMix: 0.35, // texture blend: 0 = crisp v3 remap-chain, 1 = soft cottony legacy look
-  // Nuages v2 (clouds2.js) : des ENTITÉS instanciées, une boîte raymarchée par
-  // nuage, avec naissance/dérive/dissipation. false = ancien système (le champ
-  // de bruit global de clouds.js, conservé en repli).
-  cloudsV2: true,
-  // VENT — pousse les nuages ; pilotera l'orographie en phase 2 (les nuages
-  // butent contre les versants au vent). Réglable dans Éléments.
+  // VENT — pousse les nuages ET les fait buter contre les versants au vent
+  // (orographie, clouds-sim.js). Réglable dans Éléments.
   windDir: 45, // degrés, 0 = vers l'est
   windSpeed: 0.6, // unités monde/s
   // terrain glass: 0 = opaque rock. Keep 0 while the water glass is on — three
@@ -917,7 +920,7 @@ cartoucheRef = groundInfo
 // bruit global en repli. Les deux exposent la MÊME interface
 // (build/update/setVisible/setSunDir/reroll) — le reste du fichier ne sait pas
 // lequel tourne.
-clouds = params.cloudsV2 ? new Clouds2(scene, terrain, params) : new Clouds(scene, terrain, params)
+clouds = new Clouds2(scene, terrain, params)
 clouds.setSunDir(sun.position)
 
 // ambient airliners + SpaceX pad watcher (models fetched, see public/models)
@@ -1528,6 +1531,11 @@ async function fetchAndBuildDem() {
   // never again so the user's own edits are never stomped.
   const fromLink = location.hash.startsWith('#s=') || location.hash.startsWith('#r=')
   if (!_startupLookApplied && !fromLink && !IS_EMBED) { _startupLookApplied = true; applyUserTemplate({ look: STARTUP_LOOK }) }
+  // OMBRAGE AUTO — en DERNIER : le look d'ouverture (ou celui d'un lien
+  // partagé) vient d'écrire ses constantes d'ombrage, or elles ont été
+  // réglées sur un AUTRE relief. On les recalcule pour celui qu'on vient de
+  // charger, sauf les curseurs que l'utilisateur a repris à la main.
+  applyAutoShade()
 }
 
 async function loadRealTerrain() {
@@ -1915,6 +1923,45 @@ function applyStyle(s) {
   refreshAll()
 }
 
+// ---------------------------------------------------------- OMBRAGE AUTO
+// Les 4 réglages de la section « Ombrage » sont DÉRIVÉS du relief chargé
+// (src/relief-grade.js) : une carte des Alpes et un delta plat ne peuvent pas
+// partager le même contraste ni le même pivot. Pattern des drapeaux « dirty »
+// de perf.js : un réglage que l'utilisateur a repris à la main n'est PLUS
+// jamais réécrit par l'auto ; le toggle « Ombrage auto » rend la main.
+const SHADE_KEYS = ['mapTint', 'heightContrast', 'heightPivot', 'slopeTint']
+const shadeDirty = { mapTint: false, heightContrast: false, heightPivot: false, slopeTint: false }
+
+// note de l'ombrage courant, pour la meta de section et les sondes navigateur
+let shadeGrade = null
+
+function currentReliefGrade() {
+  if (params.source !== 'real' || !dem) return null
+  // l'histogramme coûte une passe sur ~590 k pixels : calculé UNE fois par DEM
+  if (!dem._elevHist) dem._elevHist = elevationHistogram(dem.data, dem.minM, dem.maxM)
+  return gradeForDem({ minM: dem.minM, maxM: dem.maxM, meanM: dem.meanM, histogram: dem._elevHist, extentM: dem.extentMeters })
+}
+
+// `force` : le toggle qu'on rallume — tout redevient auto, y compris les
+// curseurs que l'utilisateur avait figés.
+function applyAutoShade({ force = false } = {}) {
+  if (force) for (const k of SHADE_KEYS) shadeDirty[k] = false
+  if (!params.shadeAuto) return null
+  const g = currentReliefGrade()
+  if (!g) return null
+  shadeGrade = g
+  const next = {}
+  for (const k of SHADE_KEYS) next[k] = shadeDirty[k] ? params[k] : g[k]
+  applyStyle(next)
+  return g
+}
+
+// un curseur d'Ombrage bougé à la main gèle CE réglage-là (les trois autres
+// continuent de suivre le relief) — appelé par les setters du panneau Terrain
+function markShadeDirty(key) {
+  if (params.shadeAuto && SHADE_KEYS.includes(key)) shadeDirty[key] = true
+}
+
 function applyGridContour(g) {
   Object.assign(params, g)
   terrain.mapUniforms.uContourInterval.value = g.contourInterval
@@ -2054,6 +2101,23 @@ function applyTemplate(t) {
 let userTemplates = loadUserTemplates()
 // palettes VALIDÉES (Create › Save palette) — rangée défilable du panneau Templates
 let userPalettes = loadUserPalettes()
+
+// ---- réserve de palettes du mode aléatoire (shuffle-pool.js) --------------
+// Le catalogue de la boutique (136 palettes) est le gros de la réserve : il
+// est chargé UNE fois, en tâche de fond, dès que le moteur est posé. Un échec
+// réseau laisse simplement la réserve sans la boutique (procédural + palettes
+// utilisateur + templates installés) — jamais d'erreur visible, jamais de
+// shuffle bloqué. Le catalogue est le MÊME fichier que la boutique in-app.
+let shopPalettes = []
+let shuffleLastPalette = null // dernière palette tirée (meta + sondes)
+fetch('/templates/data.json')
+  .then((r) => (r.ok ? r.json() : null))
+  .then((j) => { if (Array.isArray(j?.palettes)) shopPalettes = j.palettes })
+  .catch(() => {})
+// rebâtie à chaque tirage : l'utilisateur a pu valider une palette ou
+// installer un style entre deux clics (le coût est de l'ordre de 150 rampes)
+const currentPalettePool = () =>
+  buildPalettePool({ shop: shopPalettes, userPalettes, userTemplates, builtins: Object.values(TEMPLATES) })
 let paletteRefreshFn = () => {}
 let userTplRefreshFn = () => {} // re-rend la rangée des templates user (boutique → intégration)
 
@@ -2320,16 +2384,26 @@ function shuffleLook() {
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
   const chance = (p) => Math.random() < p
 
-  // 1) coherent base — a random built-in template, applied inline (no interim
-  //    history.record(), unlike applyTemplate, so the shuffle stays ONE step)
+  // 1) base cohérente — un look intégré au hasard, appliqué EN LIGNE (pas de
+  //    history.record() intermédiaire comme applyTemplate : le shuffle reste
+  //    UNE étape). Il ne donne plus que la STRUCTURE (lumière, matière,
+  //    grille, post-look) : la couleur, elle, vient de la vraie réserve.
   const tpl = pick(Object.values(TEMPLATES))
   setDarkMode(tpl.darkMode ?? false)
-  if (tpl.palette) applyPalette(tpl.palette)
-  if (tpl.style) applyStyle(tpl.style)
   if (tpl.grid) applyGridContour(tpl.grid)
   if (tpl.light) applyLight(tpl.light)
   if (tpl.surface) applySurface(tpl.surface)
   if (tpl.look) applyLook(tpl.look)
+
+  // 1b) PALETTE — la VRAIE réserve (Adrien : « des centaines de palettes en
+  //     réserve dans l'appli ») : catalogue boutique, palettes validées,
+  //     templates installés, générateurs procéduraux de palette.js. Le filtre
+  //     d'élégance de shuffle-pool.js écarte les aplats et les mers qui
+  //     s'éclaircissent en profondeur — jamais de tirage moche.
+  //     applyPalette APRÈS applyGridContour : l'encre de la palette gagne.
+  const palette = pickShufflePalette(Math.random, currentPalettePool())
+  applyPalette(palette)
+  shuffleLastPalette = palette
 
   // 2) random hour of day (daylight-ish band so it rarely lands pitch black)
   params.timeOfDay = +rnd(5.5, 19.5).toFixed(1)
@@ -2371,7 +2445,25 @@ function shuffleLook() {
   params.contourOpacity = chance(0.5) ? +rnd(0.15, 0.6).toFixed(2) : 0
   params.gridOpacity = chance(0.3) ? +rnd(0.1, 0.4).toFixed(2) : 0
   applyGridContour({ contourInterval: params.contourInterval, contourOpacity: params.contourOpacity, contourColor: params.contourColor, contourWeight: params.contourWeight, gridStep: params.gridStep, gridOpacity: params.gridOpacity, gridColor: params.gridColor })
+  // CIEL — on REDESSINE tous les réglages de nuages au lieu de garder ceux
+  // que le template vient de poser. Les templates ont été écrits à l'époque
+  // de l'ancien moteur : leurs valeurs vivaient sur d'autres échelles
+  // (couverture 0–0.8, gonflement 0–1) et un shuffle « régressait » sur une
+  // vieille tête de nuages. Un tirage neuf, dans les plages ACTUELLES, ferme
+  // le sujet — et le vent change aussi, sinon toutes les cartes ont le même.
   params.cloudsEnabled = chance(0.4)
+  Object.assign(params, {
+    cloudCoverage: +rnd(0.85, 2.2).toFixed(2),
+    cloudBillow: +rnd(0.4, 2.6).toFixed(2),
+    cloudTexMix: +rnd(0.15, 0.7).toFixed(2),
+    cloudOpacity: +rnd(0.8, 1.8).toFixed(2),
+    cloudContrast: +rnd(0.7, 1.6).toFixed(2),
+    cloudAltitude: +rnd(3.5, 7).toFixed(1),
+    cloudAltSpread: +rnd(0.6, 1).toFixed(2),
+    cloudScale: +rnd(3, 5).toFixed(1),
+    windDir: Math.round(rnd(0, 359)),
+    windSpeed: +rnd(0.3, 1.6).toFixed(2),
+  })
   if (clouds) { if (params.cloudsEnabled) clouds.build(params); clouds.setVisible(params.cloudsEnabled && modes.mode === 'surface') }
   params.aerialEnabled = chance(0.3)
   refreshAerial()
@@ -2412,6 +2504,14 @@ function shuffleLook() {
   params.plinthColor = sch.plinth
   applyPlinthMaterial()
   plinth.setColors(params)
+
+  // 7) OMBRAGE accordé au relief RÉELLEMENT chargé (relief-grade.js). Le look
+  //    de base a posé en 1) des constantes réglées sur une AUTRE carte ; on
+  //    les remplace par le calcul sur le DEM courant. Un shuffle est un
+  //    tirage complet, donc il rend la main à l'auto (force) même si des
+  //    curseurs avaient été figés à la main.
+  params.shadeAuto = true
+  applyAutoShade({ force: true })
 
   refreshAll()
   history?.record() // one undo step for the whole shuffle
@@ -3539,6 +3639,10 @@ const panelCtx = {
   importTemplateText,
   applyPalette: applyPaletteWithBg, // changer une palette adapte aussi le fond (Adrien)
   applyStyle,
+  // --- Ombrage auto (section Ombrage du panneau Terrain)
+  markShadeDirty, // un curseur repris à la main → ce réglage ne suivra plus
+  setShadeAuto: (v) => { params.shadeAuto = v; if (v) applyAutoShade({ force: true }) },
+  shadeFrozenCount: () => SHADE_KEYS.filter((k) => shadeDirty[k]).length,
   applyGridContour,
   applyMonochrome,
   resetLook,
@@ -4017,7 +4121,16 @@ history.record()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { raceLabels, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history }
+window.__exp = { raceLabels, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,
+  // mode aléatoire + ombrage auto : de quoi sonder l'état depuis la console
+  shuffleLook,
+  get dem() { return dem },
+  get shufflePool() { return currentPalettePool() },
+  get lastShufflePalette() { return shuffleLastPalette },
+  get reliefGrade() { return currentReliefGrade() },
+  get shadeDirty() { return { ...shadeDirty } },
+  applyAutoShade,
+}
 
 applyTimeOfDay(params.timeOfDay ?? 10) // seed the sun/disc/lake for the opening view
 

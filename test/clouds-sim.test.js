@@ -346,3 +346,53 @@ test('makeRng : déterministe et dans [0,1)', () => {
     assert.ok(v >= 0 && v < 1)
   }
 })
+
+// ------------------------------------------------------------- orographie
+// Le relief est INJECTÉ (terrainAt) : le module reste pur, ces tests le
+// prouvent en lui donnant des montagnes de papier.
+test('orographie : un nuage ne traverse jamais le relief', () => {
+  // sol plat à 0, sauf une muraille à x > 0 qui monte à 6
+  const terrainAt = (x) => (x > 0 ? 6 : 0)
+  const sky = createSky({ count: 1, seed: 44, baseY: 0, topY: 4, terrainAt, wind: { dir: 0, speed: 1 } })
+  sky.target = 0
+  const c = sky.clouds.find((e) => e.lead)
+  sky.clouds = [c]
+  c.x = -3; c.z = 0; c.y = 1.2; c.h = 1; c.transit = true
+  for (let i = 0; i < 300; i++) stepSky(sky, 0.1, { wind: { dir: 0, speed: 1 } })
+  if (c.x > 0) {
+    assert.ok(c.y >= 6, `nuage DANS la montagne : y=${c.y.toFixed(2)} sol=6`)
+  }
+})
+
+test('orographie : le versant au vent SOULÈVE le nuage', () => {
+  const terrainAt = (x) => Math.max(0, x) // rampe qui monte vers l'est
+  const sky = createSky({ count: 1, seed: 45, baseY: 0, topY: 10, terrainAt, wind: { dir: 0, speed: 1 } })
+  sky.target = 0
+  const c = sky.clouds.find((e) => e.lead)
+  sky.clouds = [c]
+  c.x = 0; c.z = 0; c.y = 5; c.h = 1; c.r = 2; c.transit = true
+  const y0 = c.y
+  for (let i = 0; i < 60; i++) stepSky(sky, 0.1, { wind: { dir: 0, speed: 1 } })
+  assert.ok(c.y > y0, `le nuage aurait dû monter : ${y0} → ${c.y.toFixed(2)}`)
+})
+
+test('orographie : sans relief injecté, rien ne change (module pur)', () => {
+  const a = createSky({ count: 2, seed: 46 })
+  const b = createSky({ count: 2, seed: 46, terrainAt: null })
+  for (let i = 0; i < 30; i++) {
+    stepSky(a, 0.1, { wind: { dir: 0.5, speed: 1 } })
+    stepSky(b, 0.1, { wind: { dir: 0.5, speed: 1 } })
+  }
+  assert.deepEqual(a.clouds.map((c) => [c.x, c.y]), b.clouds.map((c) => [c.x, c.y]))
+})
+
+test('orographie : le nuage ne descend pas sous la surface de l eau', () => {
+  const terrainAt = () => -4 // fond marin
+  const sky = createSky({ count: 1, seed: 47, baseY: 0, topY: 6, terrainAt, waterY: 0, wind: { dir: 0, speed: 0.5 } })
+  sky.target = 0
+  const c = sky.clouds.find((e) => e.lead)
+  sky.clouds = [c]
+  c.x = 0; c.z = 0; c.y = -2; c.h = 1; c.transit = true
+  for (let i = 0; i < 100; i++) stepSky(sky, 0.1, { wind: { dir: 0, speed: 0.5 } })
+  assert.ok(c.y > 0, `nuage sous l eau : y=${c.y.toFixed(2)}`)
+})

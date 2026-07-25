@@ -47,6 +47,22 @@ export function cloudCountForTier(tier = 0, density = 1) {
 // Le reste vit et se disloque sur place (Adrien : « 90 % »).
 export const TRANSIT_SHARE = 0.9
 
+// OROGRAPHIE — le relief agit sur le ciel (phase 2 du plan nuages).
+// Le module reste PUR : le rendu INJECTE un échantillonneur de terrain
+// `terrainAt(x, z) -> hauteur monde` dans les options du ciel. Sans lui, rien
+// ne change — c'est ce qui garde clouds-sim.js testable en node.
+//   · SOULÈVEMENT : un versant qui monte face au vent pousse le nuage vers le
+//     haut et le fait grossir — c'est ainsi que naissent les nuages de crête ;
+//   · SUBSIDENCE : au vent arrière le sol redescend, le nuage plonge et maigrit
+//     (l'ombre pluviométrique, en plus discret) ;
+//   · BUTÉE : la base d'un nuage n'entre JAMAIS dans la roche. C'est le point
+//     qu'Adrien voit en premier — un nuage qui traverse un sommet trahit tout.
+const OROG_LIFT = 0.55 // vitesse de montée au vent, en hauteurs de nuage/s
+const OROG_SINK = 0.3 // descente sous le vent, plus molle que la montée
+const OROG_GROW = 0.25 // gonflement au vent (et amaigrissement sous le vent)
+const OROG_DRAG = 0.5 // freinage max en montant un versant (0 = pas de frein)
+const OROG_CLEAR = 0.55 // dégagement minimum sous la base, en hauteurs de nuage
+
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
 const clamp01 = (v) => clamp(v, 0, 1)
 
@@ -304,6 +320,9 @@ export const SKY_DEFAULTS = {
   sizeMin: 2.5,
   sizeMax: 6.5,
   fadeOut: 14, // largeur de la bande d'apparition/disparition, HORS carte
+  // injectés par le rendu (absents = pas d'orographie, le module reste pur)
+  terrainAt: null, // (x, z) -> hauteur du sol en unités monde
+  waterY: -Infinity, // surface de l'eau : un nuage ne descend pas dessous
   wind: { dir: 0.8, speed: 0.6 },
 }
 
@@ -387,6 +406,36 @@ export function stepSky(sky, dt, { wind = { dir: 0, speed: 0.6 } } = {}) {
     c.z += wz * c.speed * par * dt
     // croissance douce vers la cible de fusion (voir collisions ci-dessous)
     if (c.rTarget && c.rTarget > c.r) c.r += (c.rTarget - c.r) * Math.min(1, dt * 0.5)
+
+    // ---- OROGRAPHIE : le relief soulève, freine et bloque
+    if (opts.terrainAt) {
+      const here = opts.terrainAt(c.x, c.z)
+      // on sonde DEVANT, à la mesure du nuage : un gros nuage sent la montagne
+      // de plus loin qu'un lambeau
+      const probe = Math.max(1.5, c.r * 1.4)
+      const ahead = opts.terrainAt(c.x + fr.ux * probe, c.z + fr.uz * probe)
+      const rise = ahead - here
+      const push = Math.min(1, wind.speed * 0.8) * dt
+      if (rise > 0) {
+        c.y += Math.min(rise, c.h * 2) * OROG_LIFT * push
+        c.r += c.r * OROG_GROW * push * Math.min(1, rise / Math.max(c.h, 1e-3))
+        // il FREINE en escaladant : le ciel s'entasse au vent des crêtes
+        const slow = 1 - Math.min(OROG_DRAG, rise / Math.max(probe, 1e-3))
+        c.x -= wx * c.speed * par * dt * (1 - slow)
+        c.z -= wz * c.speed * par * dt * (1 - slow)
+      } else if (rise < 0) {
+        c.y += Math.max(rise, -c.h * 2) * OROG_SINK * push
+        c.r -= c.r * OROG_GROW * 0.6 * push * Math.min(1, -rise / Math.max(c.h, 1e-3))
+      }
+      // BUTÉE : la base reste au-dessus du sol (et de l'eau, si on la connaît)
+      const ground = Math.max(here, opts.waterY ?? -Infinity)
+      const floor = ground + c.h * OROG_CLEAR
+      if (c.y < floor) c.y += (floor - c.y) * Math.min(1, dt * 4)
+      // et il ne monte pas au ciel non plus
+      const ceil = topY + (topY - baseY) * 0.6
+      if (c.y > ceil) c.y = ceil
+      c.r = clamp(c.r, opts.sizeMin * 0.35, opts.sizeMax * 1.7)
+    }
 
     if (c.transit) {
       // DE PASSAGE : pas d'enroulement, pas de mort de vieillesse. Il entre
