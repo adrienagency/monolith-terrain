@@ -3695,6 +3695,9 @@ const { elementsPanel, imagePanel } = buildEffectsPanel({
   exposureFx, contrastFx, hueSat, vignette, grain,
   fogRef, setFogEnabled: panelCtx.setFogEnabled, applyBackground,
   clouds,
+  // la chip « Épars/Couvert/… » doit aussi rétablir la visibilité : resetLook
+  // masque le groupe au chargement d'une carte, build() seul ne le remontre pas
+  syncCloudsVisible: () => clouds.setVisible(params.cloudsEnabled && modes.mode === 'surface'),
   ssao, bloom, aoPass, bloomPass,
   realWater, waterRebuild,
   terrain, globe,

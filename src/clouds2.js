@@ -64,7 +64,6 @@ const FRAG = /* glsl */ `
   #define MARCH_STEPS 26
   #define SUN_STEPS 3
   #define UP_STEPS 2
-  #define LOBES 7
   // marge de la boîte autour de la silhouette — DOIT valoir la même chose que
   // le facteur de mise à l'échelle des instances (_writeInstances)
   #define BOX_PAD 1.15
@@ -101,67 +100,13 @@ const FRAG = /* glsl */ `
     return fract((q.xxy + q.yzz) * q.zyx);
   }
 
-  // union LISSE de deux distances (metaball) : c'est elle qui soude les lobes
-  // en une seule masse au lieu de laisser des boules collées
-  float smin(float a, float b, float k) {
-    float h = sat(0.5 + 0.5 * (b - a) / k);
-    return mix(b, a, h) - k * h * (1.0 - h);
+  float remapC(const float x, const float a, const float b) {
+    return sat((x - a) / max(b - a, 1e-5));
   }
 
-  // Les LOBES d'un nuage, tirés de sa graine — construits UNE fois par
-  // fragment (pas par pas de marche : ce serait 26× plus cher).
-  //
-  // C'est LA correction du retour d'Adrien : « ils ont tous la même forme
-  // ronde, seule la taille change ». Un cumulus n'est pas un ellipsoïde, c'est
-  // un amas de bourgeons. Chaque nuage tire son propre nombre effectif de
-  // lobes, son étalement, sa verticalité — deux nuages n'ont jamais la même
-  // silhouette, même à taille égale.
-  void buildLobes(float seed, float wisp, out vec4 lobes[LOBES], out vec3 stretch[LOBES]) {
-    vec3 c = hash31(seed * 0.717 + 3.1);
-    float spread = 0.34 + c.x * 0.62;   // largeur de l'amas
-    float rise = 0.10 + c.y * 0.60;     // tendance à bourgeonner vers le haut
-    // asymétrie franche : le nuage penche d'un côté, comme sous le vent —
-    // c'est ce qui casse le plus efficacement l'impression de boule
-    float leanA = c.z * 6.28318;
-    vec2 lean = vec2(cos(leanA), sin(leanA)) * (0.10 + c.x * 0.26);
-    for (int i = 0; i < LOBES; i++) {
-      vec3 h = hash31(seed + float(i) * 17.31 + 0.5);
-      vec3 g = hash31(seed * 1.37 + float(i) * 5.11);
-      // chaque lobe est une PRIMITIVE DIFFÉRENTE (sphère, galette, fuseau) :
-      // c'est la « fusion de plusieurs formes » demandée — des ellipsoïdes
-      // étirés au hasard soudés ensemble ne peuvent pas lire comme une boule
-      stretch[i] = vec3(0.75 + g.x * 0.7, 0.9 + g.y * 1.1, 0.75 + g.z * 0.7);
-      if (i == 0) {
-        // le corps principal, posé bas : c'est lui qui porte la base plate
-        lobes[0] = vec4(0.0, -0.16, 0.0, 0.42 + c.z * 0.15);
-        stretch[0] = vec3(1.0, 1.05 + c.y * 0.5, 1.0);
-        continue;
-      }
-      float a = h.x * 6.28318 + float(i) * 1.7;
-      float ring = spread * (0.30 + h.y * 0.95);
-      // certains lobes sont franchement petits (h.z bas) : c'est ce qui crée
-      // les épaules et les bosses irrégulières plutôt qu'une couronne régulière
-      float r = 0.11 + h.z * h.z * 0.32;
-      float y = -0.24 + h.y * rise + r * 0.5;
-      // les nuages filandreux étalent leurs lobes à l'horizontale et les
-      // aplatissent : un voile n'a pas de bourgeons, il a des lambeaux
-      // (« flat » est un mot RÉSERVÉ en GLSL 3 — qualificateur d interpolation)
-      float squash = 1.0 + wisp * 1.1;
-      vec2 xz = vec2(cos(a), sin(a)) * ring * (1.0 + wisp * 0.5) + lean;
-      // ⚠️ ANTI-CARRÉ : un lobe qui sort de la boîte de calcul se fait TRANCHER
-      // par elle — c'était les « nuages carrés » d'Adrien. Le centre est borné
-      // pour que centre + rayon + bruit restent toujours dans la boîte.
-      float lim = 0.70 - r;
-      float l = length(xz);
-      if (l > lim) xz *= lim / l;
-      // ÉVOLUTION : chaque lobe respire à son rythme (croît, se résorbe,
-      // repousse ailleurs) — le nuage crée des protubérances à différents
-      // endroits au fil du temps au lieu d'être figé dans sa graine
-      float ph = h.y * 6.28318;
-      float breathe = 1.0 + 0.34 * sin(uTime * (0.04 + h.z * 0.05) + ph);
-      lobes[i] = vec4(xz.x, y / squash, xz.y, r * breathe);
-      stretch[i].y *= squash;
-    }
+  mat2 rot2(const float a) {
+    float c = cos(a), sn = sin(a);
+    return mat2(c, -sn, sn, c);
   }
 
   float terrainH(vec2 xz) {
@@ -177,68 +122,103 @@ const FRAG = /* glsl */ `
     return vec2(max(max(ts.x, ts.y), ts.z), min(min(tb.x, tb.y), tb.z));
   }
 
-  // Densité DANS un nuage. Modèle enveloppe (Nubis) : une macro-forme lisse —
-  // ellipsoïde à base plate et sommet bombé — que le bruit vient éroder. C'est
-  // l'enveloppe qui donne la silhouette de cumulus ; le bruit ne fait que la
-  // ronger, il ne la définit pas (l'erreur de l'ancien système).
-  float densityAt(vec3 wp, vec4 lobes[LOBES], vec3 stretch[LOBES]) {
-    // ⚠️ la BOÎTE est plus large que le nuage (BOX_PAD, pour que l'enveloppe
-    // s'éteigne avant le bord) : sans ce facteur, l'enveloppe se calcule sur la
-    // boîte, le profil vertical ne s'applique jamais et le nuage redevient un
-    // pavé aux angles rongés.
+  // ---- Nuages v3 : la silhouette nait d'une CHAINE DE REMAPS (recette
+  // Takram/Nubis, dissequee depuis clouds.glsl, MIT) — plus aucune primitive,
+  // plus aucun seuil sec, donc ni carres ni boules :
+  //   empreinte 2D x profil de hauteur -> enveloppe
+  //   enveloppe (-)remap bruit de forme -> chou-fleur
+  //   (-)remap bruit de detail (de pres seulement) -> bords fins
+  //   x densite croissante avec la hauteur -> base tenue, sommet dense
+
+  // Parametres d'empreinte par ENTITE, tires de la graine + du filandreux.
+  struct Foot {
+    vec2 lean;      // decentrage de l'empreinte (asymetrie sous le vent)
+    vec2 ani;       // anisotropie : empreintes allongees, pas des disques
+    float rot;      // orientation de l'allongement
+    float covr;     // couverture : plein (bourgeon) -> troue (voile)
+    float wExp;     // exposant meteo : mord plus ou moins dans le bruit
+    float bias;     // ou gonfle le ventre du profil demi-cercle
+    float shapeAmt; // force de l'erosion par le bruit de forme
+    float dtlAmt;   // force du detail near-field
+    vec2 wOff;      // offset meteo propre (deux nuages = deux dessins)
+  };
+
+  Foot footprintOf(const float seed, const float wisp) {
+    vec3 c = hash31(seed * 0.717 + 3.1);
+    vec3 g = hash31(seed * 1.37 + 5.11);
+    Foot F;
+    float leanA = c.z * 6.28318;
+    F.lean = vec2(cos(leanA), sin(leanA)) * (0.05 + c.x * 0.22);
+    F.ani = vec2(1.0, 0.55 + g.y * 0.55); // allonge sur un axe
+    F.rot = g.x * 6.28318;
+    F.covr = mix(0.92, 0.58, wisp) - c.y * 0.12;
+    F.wExp = mix(0.8, 2.4, wisp);
+    F.bias = mix(0.42, 0.22, wisp); // voile = ventre bas et plat
+    F.shapeAmt = mix(0.5, 0.85, wisp);
+    F.dtlAmt = mix(0.55, 0.95, wisp);
+    F.wOff = vec2(c.x * 7.31 + seed * 0.011, c.y * 5.17);
+    return F;
+  }
+
+  #define COV_FILTER 0.4
+
+  float densityAt(const vec3 wp, const Foot F, const float detailOn) {
+    // la BOITE est plus large que le nuage (BOX_PAD) : p est normalise a
+    // la SILHOUETTE (plus ou moins 1), la paroi est a 1.15 — jamais atteinte
     vec3 p = (wp - vCenter) / vHalf * BOX_PAD;
+    float hf = sat(p.y * 0.5 + 0.5); // 0 = base, 1 = sommet
 
-    // silhouette = union lisse des lobes (SDF metaball). C'est ce qui donne des
-    // épaules, des bosses, des creux — une forme PROPRE à chaque nuage.
-    float wisp = vInfo.z;
-    float d = 1e9;
-    for (int i = 0; i < LOBES; i++) {
-      // ellipsoïde : l'étirement par lobe fait des primitives toutes
-      // différentes, l'union lisse les soude en une seule masse.
-      // ⚠️ la division par le plus grand facteur est OBLIGATOIRE : sans elle un
-      // lobe très étiré rend une « distance » plusieurs fois trop grande, le
-      // seuil de sortie coupe tout et le nuage disparaît purement et
-      // simplement (c'est ce qui a vidé le ciel au premier essai).
-      vec3 s = stretch[i];
-      vec3 q = (p - lobes[i].xyz) * s;
-      float dl = (length(q) - lobes[i].w) / max(s.x, max(s.y, s.z));
-      d = smin(d, dl, 0.20 + wisp * 0.14);
+    // profil demi-cercle biaise (Takram shapeAlteringFunction) : nul a la
+    // base ET au sommet, ventre place par le bias — le profil de cumulus
+    float hb = pow(hf, F.bias);
+    float x = clamp(hb * 2.0 - 1.0, -1.0, 1.0);
+    float heightScale = 1.0 - x * x;
+    if (heightScale <= 0.003) return 0.0;
+
+    // EMPREINTE : retombee radiale anisotrope + meteo bruitee a domaine
+    // deforme — le contour est dessine par le bruit, jamais par la geometrie
+    vec2 q = rot2(F.rot) * (p.xz - F.lean) * F.ani;
+    float radial = 1.0 - smoothstep(0.30, 1.0, length(q));
+    if (radial <= 0.003) return 0.0;
+    // l'empreinte EVOLUE : derive lente du dessin interne (protuberances qui
+    // migrent) — remplace la respiration des lobes
+    vec2 wuv = q * 0.33 + F.wOff + vec2(uTime * 0.004, 0.0);
+    float warp = texture(uVolume, vec3(fract(wuv * 0.61 + 0.13), 0.62)).g;
+    float wthr = texture(uVolume, vec3(fract(wuv + (warp - 0.5) * 0.5), 0.29)).g;
+    float weather = pow(wthr, F.wExp) * radial;
+
+    // enveloppe par couverture remappee (Takram, ref. Skybolt) : le seuil est
+    // un remap DOUX pilote par le profil de hauteur
+    float factor = 1.0 - F.covr * heightScale;
+    float env = remapC(mix(weather, 1.0, COV_FILTER), factor, factor + COV_FILTER);
+    if (env <= 0.004) return 0.0;
+
+    // erosion par REMAP (Nubis) : le bruit de forme RONGE l'enveloppe — des
+    // bourgeons francs, pas du coton soustrait
+    vec3 sp = wp * uScale * 0.055 + vInfo.x;
+    float shape = texture(uVolume, fract(sp)).r;
+    env = remapC(env, (1.0 - shape) * F.shapeAmt, 1.0);
+    if (env <= 0.004) return 0.0;
+
+    // detail NEAR-FIELD seulement (gate distance — gratuit de loin) :
+    // "fluffy at the top, whippy at the bottom" (Takram, verbatim)
+    if (detailOn > 0.5) {
+      float detail = texture(uVolume, fract(sp * 3.1 + 0.37)).r;
+      float modif = mix(pow(detail, 6.0), 1.0 - detail, remapC(hf, 0.2, 0.4));
+      env = remapC(env * 2.0, modif * 0.5 * F.dtlAmt, 1.0);
+      if (env <= 0.004) return 0.0;
     }
-    // sortie franche dès qu'on est loin de la masse : inutile de payer le bruit
-    if (d > 0.45) return 0.0;
 
-    // Le bruit DÉPLACE la surface au lieu de la gommer. C'est la différence
-    // entre un chou-fleur et un ballon flou : en soustrayant le bruit à la
-    // distance signée, chaque bosse du bruit devient un vrai bourgeon de la
-    // silhouette. Trois octaves ; les nuages filandreux se font DÉCHIQUETER
-    // bien plus fort (amplitude ×2.4) — c'est ce qui donne les lambeaux.
-    vec3 coord = (wp * uScale + vInfo.x) * 0.055;
-    float n1 = texture(uVolume, fract(coord)).r;
-    float n2 = texture(uVolume, fract(coord * 3.1 + 0.37)).r;
-    float n3 = texture(uVolume, fract(coord * 7.7 + 0.81)).r;
-    float amp = 1.0 + wisp * 1.4;
-    d += ((0.5 - n1) * 0.30 + (0.5 - n2) * 0.12 + (0.5 - n3) * 0.05) * amp;
+    env = pow(env, uContrast);
+    // ceintures de secours euclidiennes (invisibles : l'empreinte s'eteint
+    // bien avant), au cas ou
+    env *= 1.0 - smoothstep(0.86, 1.05, length(p.xz));
+    env *= 1.0 - smoothstep(0.90, 1.08, abs(p.y));
 
-    // seuil SERRÉ : c'est le bruit qui doit dessiner le bord, pas un
-    // dégradé de 2 unités monde qui transforme tout en coton
-    float env = 1.0 - smoothstep(-0.05, 0.09 + wisp * 0.10, d);
-    if (env <= 0.002) return 0.0;
-    // base FRANCHE pour un cumulus (coupé net au niveau de condensation) mais
-    // molle pour un voile, qui n'a pas de base du tout
-    env *= smoothstep(-0.60, mix(-0.42, -0.10, wisp), p.y);
-    // CEINTURE anti-carré, version CIRCULAIRE : la première ceinture fondait
-    // sur max(|x|,|z|) — une distance de Tchebychev, dont l'iso-ligne est un
-    // CARRÉ. Dès qu'un gros nuage l'atteignait, son bord épousait la ceinture
-    // carrée (le bug persistant vu de dessus par Adrien). En norme euclidienne
-    // le bord de secours est un cercle, invisible dans une silhouette de lobes.
-    env *= 1.0 - smoothstep(0.80, 1.02, length(p.xz));
-    env *= 1.0 - smoothstep(0.86, 1.06, abs(p.y));
-
-    // OPACITÉ PAR ÉPAISSEUR (Adrien) : très opaque au cœur, presque rien sur
-    // les bords fins — la non-linéarité creuse l'écart au lieu de tout lisser
-    float dens = pow(env, uContrast);
-    dens *= mix(0.30, 1.55, smoothstep(0.12, 0.8, env));
-    // jamais de nuage collé à l'objectif
+    // densite CROISSANTE avec la hauteur (profil 0.25 + 0.75*h de Takram) :
+    // base tenue et vaporeuse, sommet dense — regle le "trop dense"
+    float dens = env * (0.25 + 0.75 * hf);
+    // jamais de nuage colle a l'objectif
     dens *= smoothstep(1.5, 4.0, distance(wp, cameraPosition));
     return dens * uDensity * vInfo.y;
   }
@@ -269,7 +249,7 @@ const FRAG = /* glsl */ `
   // Épaisseur de matière entre l'échantillon et le soleil — c'est elle qui fait
   // que les PROTUBÉRANCES projettent leur ombre sur la masse en dessous
   // (demande d'Adrien) : un bourgeon éclairé se détache d'un creux à l'ombre.
-  float sunDepth(vec3 wp, vec3 toSun, vec3 bmin, vec3 bmax, vec4 lobes[LOBES], vec3 stretch[LOBES]) {
+  float sunDepth(vec3 wp, vec3 toSun, vec3 bmin, vec3 bmax, const Foot F) {
     // pas COURT devant la taille du nuage : un pas long ressort du nuage dès le
     // premier échantillon, tout paraît mince et le nuage vire au blanc plat
     float step = min(vHalf.x, vHalf.y) * 0.26;
@@ -277,7 +257,7 @@ const FRAG = /* glsl */ `
     for (int j = 1; j <= SUN_STEPS; j++) {
       vec3 s = wp + toSun * (step * float(j));
       if (any(lessThan(s, bmin)) || any(greaterThan(s, bmax))) break;
-      d += densityAt(s, lobes, stretch) * step * 1.7;
+      d += densityAt(s, F, 0.0) * step * 1.7;
       if (d >= 2.4) break;
     }
     return d;
@@ -288,13 +268,13 @@ const FRAG = /* glsl */ `
   // c'est ce qui assombrit naturellement la base des nuages ÉPAIS et laisse
   // claires les galettes minces (demande explicite d'Adrien, à la place de
   // l'ancien dégradé vertical arbitraire).
-  float depthAbove(vec3 wp, vec3 bmax, vec4 lobes[LOBES], vec3 stretch[LOBES]) {
+  float depthAbove(vec3 wp, vec3 bmax, const Foot F) {
     float step = vHalf.y * 0.3;
     float d = 0.0;
     for (int j = 1; j <= UP_STEPS; j++) {
       vec3 s = wp + vec3(0.0, step * float(j), 0.0);
       if (s.y > bmax.y) break;
-      d += densityAt(s, lobes, stretch) * step;
+      d += densityAt(s, F, 0.0) * step;
     }
     return d;
   }
@@ -315,10 +295,10 @@ const FRAG = /* glsl */ `
       if (wp.y < terrainH(wp.xz)) discard;
     }
 
-    // les lobes de CE nuage, une seule fois pour tout le rayon
-    vec4 lobes[LOBES];
-    vec3 stretch[LOBES];
-    buildLobes(vInfo.x, vInfo.z, lobes, stretch);
+    // l'empreinte de CE nuage, une seule fois pour tout le rayon ; le
+    // detail fin ne se paie que de pres (il ne se voit pas de loin)
+    Foot F = footprintOf(vInfo.x, vInfo.z);
+    float detailOn = distance(cameraPosition, vCenter) < max(vHalf.x, vHalf.y) * 7.0 ? 1.0 : 0.0;
 
     vec3 toSun = -normalize(uSunDir);
     float cosA = dot(rd, -toSun);
@@ -343,9 +323,9 @@ const FRAG = /* glsl */ `
       if (i >= steps) break;
       vec3 wp = ro + rd * (span.x + (float(i) + jitter) * dt);
       if (wp.y < terrainH(wp.xz)) break; // le rayon plonge dans la montagne
-      float d = densityAt(wp, lobes, stretch);
+      float d = densityAt(wp, F, detailOn);
       if (d <= 0.002) continue;
-      float depth = sunDepth(wp, toSun, bmin, bmax, lobes, stretch);
+      float depth = sunDepth(wp, toSun, bmin, bmax, F);
       // BEER-POWDER (Schneider 2015) : les bords épais vus vers le soleil
       // s'assombrissent au lieu de blanchir
       float powder = 1.0 - exp(-depth * 2.0);
@@ -356,7 +336,7 @@ const FRAG = /* glsl */ `
       // LUMIÈRE DU CIEL atténuée par la matière AU-DESSUS : la base d'un nuage
       // épais s'assombrit d'elle-même, celle d'une galette mince reste claire.
       // Remplace l'ancien dégradé vertical arbitraire (retour Adrien).
-      float above = depthAbove(wp, bmax, lobes, stretch);
+      float above = depthAbove(wp, bmax, F);
       vec3 skyLight = uAmbColor * (0.16 + 0.84 * exp(-above * 1.7));
       vec3 col = sun + sss + skyLight;
       // LA NUIT (Adrien : « tes nuages deviennent lumineux ») : un nuage ne

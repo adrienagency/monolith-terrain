@@ -143,7 +143,7 @@ export function buildEffectsPanel(ctx) {
 
   // ---- clouds — le star est le CARACTÈRE du ciel (chips), le technique au fond
   const sCld = elementsPanel.addSection(section('Nuages'))
-  const rebuildClouds = () => ctx.clouds.build(params)
+  const rebuildClouds = () => { ctx.clouds.build(params); ctx.syncCloudsVisible?.() }
   const cloudLive = (label, key, min, max, step) =>
     slider({ label, min, max, step, get: () => params[key], set: (v) => { params[key] = v } })
   const cloudBaked = (label, key, min, max, step) => {
