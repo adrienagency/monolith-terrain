@@ -1818,6 +1818,61 @@ body.shibu-view .ce-miniroute.has {
   color: var(--ce-ink);
   opacity: 0.55;
 }
+/* le profil GPX d'une shibu reçue : la barre de recherche qui sert de repère
+   runtime (syncGpxProfilePosition) est masquée ici, donc on le pose nous-mêmes,
+   au-dessus du CTA (64px + ~44px de pilule + 14px d'air) */
+body.shibu-view .gpx-profile {
+  bottom: calc(122px + env(safe-area-inset-bottom, 0px));
+}
+
+/* ---------------------- viewer shibu sur TÉLÉPHONE (< 600px, lien reçu) */
+/* Le lien d'une course se consomme sur téléphone : boot.js laisse passer les
+   #s=/#r= (voir boot-gate.js). Ici : pile marque + CTA au pouce, cibles
+   tactiles ≥ 44px, iso/ciné en colonne au-dessus du CTA, safe-area env()
+   pour l'encoche (viewport-fit=cover, index.html). */
+@media (max-width: 600px) {
+  body.shibu-view .shibu-footer {
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    width: calc(100vw - 24px);
+  }
+  body.shibu-view .shibu-cta {
+    bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+    font-size: 13px;
+    padding: 13px 18px;
+    white-space: nowrap;
+  }
+  /* iso + ciné : colonne à droite, au-dessus de la rangée CTA/footer,
+     44px = cible tactile confortable */
+  body.shibu-view .ce-isobtn {
+    width: 44px;
+    height: 44px;
+    right: 10px;
+    bottom: calc(118px + env(safe-area-inset-bottom, 0px));
+  }
+  body.shibu-view .ce-cinebtn {
+    right: 10px;
+    bottom: calc(172px + env(safe-area-inset-bottom, 0px));
+  }
+  /* mini panneau lecture : plein pouce — lignes 44px, boutons 44px, jamais
+     plus large que l'écran */
+  body.shibu-view .ce-miniroute {
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    left: 10px;
+    width: min(248px, calc(100vw - 20px));
+  }
+  body.shibu-view .ce-miniroute-row {
+    min-height: 44px;
+    padding: 8px 10px;
+  }
+  body.shibu-view .ce-miniroute-actions .ce-pillbtn {
+    height: 44px;
+  }
+  /* le profil GPX prend toute la largeur utile, toujours au-dessus du CTA */
+  body.shibu-view .gpx-profile {
+    width: calc(100vw - 20px);
+    bottom: calc(118px + env(safe-area-inset-bottom, 0px));
+  }
+}
 
 /* ------------------------------------------- mode simple / avancé (UX P3) */
 /* body.ce-simple = défaut : carte pure, AUCUN dock de panneaux. Le cœur

@@ -3344,6 +3344,16 @@ const quickCore = IS_EMBED ? null : buildQuickCore({
 // (a z-index bump alone would leave them stacked, not "remonté")
 function syncGpxProfilePosition() {
   const r = bottomBar.root.getBoundingClientRect()
+  // barre masquée (viewer shibu, noui, boutique…) : son rect est tout à zéro
+  // — publier ces mesures donnerait un profil de largeur 0 « posé » au-dessus
+  // de l'écran. On efface plutôt les variables : les fallbacks CSS de
+  // .gpx-profile (bottom 82px, width min(520px, 100vw − 32px)) reprennent la
+  // main, et le viewer shibu mobile les ajuste lui-même (v28.css).
+  if (!r.width) {
+    document.documentElement.style.removeProperty('--gpx-profile-bottom')
+    document.documentElement.style.removeProperty('--gpx-profile-width')
+    return
+  }
   const gap = 14
   const bottomPx = Math.round(window.innerHeight - r.top + gap)
   document.documentElement.style.setProperty('--gpx-profile-bottom', `${bottomPx}px`)
