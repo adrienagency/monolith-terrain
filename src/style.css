@@ -113,6 +113,26 @@ body {
   opacity: 0;
 }
 
+/* FOND DE CHARGEMENT — le gris nu de la page avant que la toile WebGL ne
+   peigne était la première chose que voyait un visiteur (Adrien). On y pose un
+   relief, en cohérence avec ce que le site fabrique.
+   Le voile suit le loader : il est son FRÈRE ADJACENT dans le DOM, d'où le
+   sélecteur `+` ci-dessous — inutile de toucher aux quatre endroits de main.js
+   qui posent et retirent `.hidden`.
+   La couleur de repli est la teinte moyenne de l'image : si elle tarde ou
+   échoue, on garde une page dans le ton, jamais le gris d'origine. */
+#loading-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1; /* derrière la carte du loader, devant le fond de page */
+  background: #cfcac0 url('/loading-bg.webp') center / cover no-repeat;
+  transition: opacity 0.6s ease;
+  pointer-events: none;
+}
+#loading.hidden + #loading-bg {
+  opacity: 0;
+}
+
 /* transient toast (Share button feedback) — bottom-centre, matches the
    loader card's glass treatment so it reads as the same visual family */
 .ce-toast {
