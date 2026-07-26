@@ -64,6 +64,11 @@ export class PlacesLayer {
     this._entries = []
   }
   setCamera(camera) { this.camera = camera }
+  // ZONE ISOLÉE : un prédicat (x, z) → booléen qui dit si un point du monde est
+  // DANS le territoire découpé. Sans lui, les noms des villes voisines
+  // restaient affichés au-dessus du vide une fois le relief clippé — « ça fait
+  // tache » (Adrien). null = aucun filtre, comportement d'origine.
+  setRegionTest(fn) { this.regionTest = typeof fn === 'function' ? fn : null }
   _clear() {
     for (const m of this.meshes) {
       this.group.remove(m)
@@ -109,7 +114,12 @@ export class PlacesLayer {
     // by this change.
     const maxN = Math.round((zoom >= 13 ? 90 : zoom >= 11 ? 60 : zoom >= 9 ? 40 : zoom >= 7 ? 24 : 12) * density)
     const minDist = TERRAIN_SIZE * (zoom >= 12 ? 0.02 : zoom >= 10 ? 0.03 : zoom >= 9 ? 0.04 : 0.06)
-    const picks = pickPlaces(rows, { zoom, toWorld: (lat, lon) => latLonToWorld(dem, lat, lon), halfLimit: HALF * 0.96, maxN, minDist })
+    let picks = pickPlaces(rows, { zoom, toWorld: (lat, lon) => latLonToWorld(dem, lat, lon), halfLimit: HALF * 0.96, maxN, minDist })
+    // zone isolée : on jette les villes hors du territoire découpé. Filtré ICI,
+    // après la sélection, et pas en amont : les caps (maxN, minDist) doivent
+    // continuer de raisonner sur la densité RÉELLE de la région, sinon une
+    // découpe étroite ferait remonter des villages sans importance.
+    if (this.regionTest) picks = picks.filter((p) => this.regionTest(p.w.x, p.w.z))
     if (!picks.length) return
 
     const sizeMul = params.placesSize ?? 1

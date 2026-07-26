@@ -3333,6 +3333,32 @@ function regionFrameScale(parts) {
   return Math.min(1, half / (TERRAIN_SIZE / 2))
 }
 
+// Un point du monde est-il DANS la zone découpée ? Le masque est déjà rasterisé
+// sur l'emprise exacte du bloc (region-mask.js), donc la lecture est un simple
+// changement d'échelle — même correspondance que le shader du relief.
+let regionMaskData = null
+function insideRegion(x, z) {
+  if (!regionMaskData) return true
+  const { data, size } = regionMaskData
+  const px = Math.round((x / TERRAIN_SIZE + 0.5) * size - 0.5)
+  const py = Math.round((z / TERRAIN_SIZE + 0.5) * size - 0.5)
+  if (px < 0 || py < 0 || px >= size || py >= size) return false
+  return data[(py * size + px) * 4] >= 127
+}
+// (re)lit le masque courant et pousse le filtre sur la couche des lieux
+function syncRegionPlaceFilter() {
+  regionMaskData = null
+  if (params.regionMode && regionMaskCanvas) {
+    try {
+      const size = regionMaskCanvas.width
+      const data = regionMaskCanvas.getContext('2d').getImageData(0, 0, size, size).data
+      regionMaskData = { data, size }
+    } catch {}
+  }
+  mapLayers?.places?.setRegionTest(regionMaskData ? insideRegion : null)
+  rebuildMapLayers()
+}
+
 function regionBaseY() {
   const y = terrain.mapUniforms?.uSeaY?.value
   return Number.isFinite(y) && y > -9000 ? y : plinth.baseY + plinth.depth
@@ -3380,6 +3406,7 @@ async function applyRegionMode() {
     plinth.setSlabOnly(false) // le bloc carré revient
     plinth.rebuild(terrain, params) // et la dalle redescend : setSlabOnly l'avait remontée au zéro
     groundInfo.setFrameScale(1) // et le cartouche retrouve les bords du bloc
+    syncRegionPlaceFilter() // toutes les villes reviennent
     plinth.setVisible(params.plinth && modes.mode === 'surface')
     waterRebuild() // restore the open-sea surface once the region clip is gone
     // RETOUR À LA VUE D'ORIGINE — recharge le relief là où l'utilisateur était
@@ -3443,6 +3470,7 @@ async function applyRegionMode() {
     rebuildRegionSkirt()
     // le cartouche vient épouser l'île au lieu de rester aux bords du bloc
     groundInfo.setFrameScale(regionFrameScale(r?.parts))
+    syncRegionPlaceFilter() // les villes hors du territoire disparaissent
     if (r) modes.announce(`ZONE — ${String(r.name).toUpperCase()}`)
     else modes.announce('ZONE — NO BOUNDARY AT THIS SCALE')
   } catch (err) {

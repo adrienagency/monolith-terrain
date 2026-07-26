@@ -138,10 +138,17 @@ export function buildRegionSkirt({ maskCanvas, sample, material, depth = 5, grid
     if (ya < minTop) minTop = ya
     if (yb < minTop) minTop = yb
   }
-  // Une base imposée reste un PLANCHER : si la côte plonge sous le zéro (la
-  // frontière administrative descend dans l'eau), on suit le terrain plutôt que
-  // de laisser le relief percer sous le mur.
-  const baseY = Number.isFinite(forcedBaseY) ? Math.min(forcedBaseY, minTop) : minTop - depth
+  // Une base imposée est SUIVIE À LA LETTRE : c'est le zéro absolu, le niveau
+  // de la mer.
+  //
+  // Elle était d'abord bornée par Math.min(base, minTop) « pour que le relief
+  // ne perce pas sous le mur ». Ce garde-fou se retournait contre nous : il
+  // suffisait d'UN point intérieur profond — un fond sous-marin resté dans le
+  // masque sur une petite île — pour tirer toute la base vers le bas et
+  // rependre l'épaisseur qu'on venait de retirer (Port-Cros, capture Adrien).
+  // Ce qui passe sous le zéro est sous l'eau : il n'y a rien à montrer, et le
+  // cacher vaut mieux que suspendre l'île au-dessus du vide.
+  const baseY = Number.isFinite(forcedBaseY) ? forcedBaseY : minTop - depth
 
   const positions = []
   const normals = []

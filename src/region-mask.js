@@ -11,9 +11,9 @@
 //    DEM patch footprint (same mercator georeferencing as the terrain, via
 //    geo.js latLonToWorld) so the shader samples it with world XZ:
 //    uv = worldPos.xz / TERRAIN_SIZE + 0.5  — see terrain.js uRegionMask
-//  · far-flung parts of the same entity (DOM-TOM, Hawaii…) are dropped: any
-//    disjoint polygon part whose centroid lies further than ~1.5× the patch
-//    radius from the patch center is excluded (islands near the zone stay)
+//  · far-flung parts of the same entity (DOM-TOM, Hawaii…) are dropped: a part
+//    survives if it is ON SCREEN, or within NEAR_ISLAND_KM of a part that is
+//    (Corsica off France stays, Réunion does not) — see filterFarParts
 //
 // Nominatim usage policy: one request per view change, responses cached
 // in-module by level + rounded lat/lon, absolute max 1 req/s enforced.
@@ -42,10 +42,34 @@ export function levelForDemZoom(zoom) {
 }
 
 // ---------------------------------------------------------------- far parts
-// Distance beyond which a disjoint polygon part is considered "another zone"
-// (French Guiana on a metropolitan France view…), in world units from the
-// patch center. Patch radius = TERRAIN_SIZE / 2.
-export const FAR_PART_MAX_DIST = 1.5 * (TERRAIN_SIZE / 2)
+
+// Les îles d'une nation situées à moins de 300 km du territoire principal
+// restent visibles ; au-delà, c'est un autre bout du monde (Adrien). La règle
+// se mesure en KILOMÈTRES au territoire, pas en unités monde au centre de la
+// vue : la Corse appartient au dessin de la France, la Réunion non, et cela ne
+// dépend pas du zoom auquel on regarde.
+export const NEAR_ISLAND_KM = 300
+
+// bbox lon/lat d'un anneau extérieur
+function ringBox(ring) {
+  let lo0 = Infinity, lo1 = -Infinity, la0 = Infinity, la1 = -Infinity
+  for (const [lon, lat] of ring) {
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue
+    if (lon < lo0) lo0 = lon
+    if (lon > lo1) lo1 = lon
+    if (lat < la0) la0 = lat
+    if (lat > la1) la1 = lat
+  }
+  return { lo0, lo1, la0, la1 }
+}
+
+// écart en km entre deux emprises lon/lat (0 si elles se touchent)
+function boxGapKm(a, b) {
+  const dLat = Math.max(0, a.la0 - b.la1, b.la0 - a.la1)
+  const dLon = Math.max(0, a.lo0 - b.lo1, b.lo0 - a.lo1)
+  const lat = (a.la0 + a.la1 + b.la0 + b.la1) / 4
+  return Math.hypot(dLat * 110.54, dLon * 111.32 * Math.cos((lat * Math.PI) / 180))
+}
 
 const clampLat = (lat) => Math.min(85.05, Math.max(-85.05, lat))
 
@@ -61,29 +85,40 @@ function ringCentroid(ring) {
 }
 
 // Filter MultiPolygon coordinates (GeoJSON [[[[lon,lat],…]…]…]) down to the
-// parts that are relevant to this patch. A part is kept when EITHER:
-//   · its outer ring's bounding box overlaps the patch footprint — it covers
-//     what we are looking at, so it is relevant whatever its centroid says
-//   · or its centroid lies within maxDist world units of the patch center —
-//     the original rule, which keeps nearby islands (Corsica off France)
-// Pure — unit tested. Never returns empty: if every part fails both tests
-// (degenerate geocode), the nearest one is kept so the terrain never vanishes.
+// parts relevant to this patch, in two steps :
+//   1. tout morceau dont l'emprise croise celle du bloc — ce qu'on a sous les
+//      yeux est pertinent par construction
+//   2. tout morceau à moins de maxKm d'un morceau de l'étape 1 — les îles de la
+//      même nation près du territoire visible (Corse au large de la France)
+// Pure — unit tested. Never returns empty : si rien n'est à l'écran (géocodage
+// bancal), le morceau le plus proche est gardé pour que le bloc ne se vide pas.
 //
-// ⚠️ Le test du centroïde SEUL se retournait contre nous dès que le bloc était
-// PLUS PETIT que la région. À La Réunion en z12 le bloc couvre 27 km pour une
-// île de 64 : le centroïde de l'île tombait hors du rayon, seuls trois cailloux
-// périphériques passaient, et le repli « jamais vide » ne jouait pas puisque la
-// liste n'était pas vide. Le masque sortait entièrement noir et « isoler la
-// zone » effaçait le relief — alors que la frontière était bien récupérée.
-export function filterFarParts(coordinates, dem, maxDist = FAR_PART_MAX_DIST) {
+// ⚠️ DEUX RÈGLES ONT DÉJÀ ÉCHOUÉ ICI, dans les deux sens :
+//   · le CENTROÏDE seul se retournait dès que le bloc était plus petit que la
+//     région (La Réunion en z12 : bloc de 27 km, île de 64 ; le centroïde
+//     tombait hors du rayon, seuls trois cailloux passaient, et le repli
+//     « jamais vide » ne jouait pas puisque la liste n'était pas vide — masque
+//     entièrement noir, relief effacé) ;
+//   · mesurer les km au plus GRAND morceau se retournait aussi : une vue sur la
+//     Corse aurait pris la métropole pour référence, une vue sur la Guyane
+//     aurait ramené la métropole à 7 000 km. La référence doit être ce qui est
+//     À L'ÉCRAN, pas ce qui est gros.
+export function filterFarParts(coordinates, dem, maxKm = NEAR_ISLAND_KM) {
   const center = latLonToWorld(dem, dem.lat, dem.lon)
   const half = TERRAIN_SIZE / 2
+
+  // ÉTAPE 1 — le territoire qu'on a SOUS LES YEUX : tout morceau dont
+  // l'emprise croise celle du bloc. C'est la graine, et c'est à elle que se
+  // mesurent les 300 km : mesurés au plus GRAND morceau, une vue sur la Corse
+  // aurait pris la France métropolitaine pour référence, et une vue sur la
+  // Guyane aurait gardé la métropole à 7 000 km.
+  const parts = []
   let best = null
   let bestD = Infinity
-  const kept = []
   for (const rings of coordinates) {
     if (!rings.length || !rings[0].length) continue
-    // emprise du morceau en unités monde (le patch occupe [-half, half]²)
+    const box = ringBox(rings[0])
+    if (!Number.isFinite(box.lo0)) continue
     let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity
     for (const [lon, lat] of rings[0]) {
       const p = latLonToWorld(dem, clampLat(lat), lon)
@@ -92,18 +127,26 @@ export function filterFarParts(coordinates, dem, maxDist = FAR_PART_MAX_DIST) {
       if (p.z < z0) z0 = p.z
       if (p.z > z1) z1 = p.z
     }
-    const recouvre = x1 >= -half && x0 <= half && z1 >= -half && z0 <= half
+    const vu = x1 >= -half && x0 <= half && z1 >= -half && z0 <= half
+    parts.push({ rings, box, vu })
 
     const [cLon, cLat] = ringCentroid(rings[0])
     const w = latLonToWorld(dem, clampLat(cLat), cLon)
     const d = Math.hypot(w.x - center.x, w.z - center.z)
-    if (recouvre || d <= maxDist) kept.push(rings)
     if (d < bestD) {
       bestD = d
       best = rings
     }
   }
-  return kept.length ? kept : best ? [best] : []
+  const graines = parts.filter((p) => p.vu)
+  // rien à l'écran (géocodage bancal) : on garde le plus proche, le bloc ne
+  // doit jamais se vider
+  if (!graines.length) return best ? [best] : []
+
+  // ÉTAPE 2 — les îles de la même nation à moins de maxKm du territoire vu
+  return parts
+    .filter((p) => p.vu || graines.some((g) => boxGapKm(p.box, g.box) <= maxKm))
+    .map((p) => p.rings)
 }
 
 // ---------------------------------------------------------------- geometry utils

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { filterFarParts, levelForDemZoom, frameRegion, FAR_PART_MAX_DIST, LEVEL_TABLE } from '../src/region-mask.js'
+import { filterFarParts, levelForDemZoom, frameRegion, LEVEL_TABLE } from '../src/region-mask.js'
 import { latLonToTile } from '../src/geo.js'
 
 // synthetic DEM patch centered on lat/lon, mirroring dem.js georeferencing
@@ -65,21 +65,35 @@ test('never returns empty: nearest part survives even when all are far', () => {
   assert.equal(out[0], lessFar)
 })
 
-// Le rayon ne peut se tester que sur un morceau HORS de l'emprise du bloc :
-// dès qu'un morceau recouvre le bloc il est gardé quoi qu'il arrive, et c'est
-// voulu — on n'efface pas un morceau qu'on a sous les yeux. Ce test utilisait
-// la Corse, qui à ce zoom tombe À L'INTÉRIEUR du bloc ; il vérifiait donc le
-// rayon sur un cas où le rayon n'a pas le dernier mot.
-test('custom max distance is honoured for parts outside the patch', () => {
-  const dem = makeDem(46.5, 2.5, 6) // le bloc s'arrête vers lon 11,4°
-  const mainland = square(2.5, 46.5, 4) // recouvre le bloc → gardé quel que soit le rayon
-  const voisine = square(14, 46.5, 0.3) // hors emprise, à ~37 unités monde du centre
+// LE SEUIL DES 300 KM. Il ne se teste que sur un morceau HORS du bloc : dès
+// qu'un morceau est à l'écran il est gardé quoi qu'il arrive, et c'est voulu —
+// on n'efface pas ce qu'on a sous les yeux. Le seuil se mesure en KILOMÈTRES au
+// territoire visible, pas en unités monde au centre de la vue : la Corse tient
+// au dessin de la France, la Réunion non, et cela ne doit pas dépendre du zoom.
+test('islands within the km threshold of the visible territory are kept', () => {
+  const dem = makeDem(46.5, 2.5, 10) // petit bloc, ~27 km
+  const territoire = square(2.5, 46.5, 0.3) // à l'écran → graine
+  const proche = square(4.0, 46.5, 0.05) // ~90 km à l'est, hors du bloc
+  const lointaine = square(8.0, 46.5, 0.05) // ~400 km, hors du bloc
 
-  const large = filterFarParts([mainland, voisine], dem)
-  assert.equal(large.length, 2, 'au rayon par défaut (42) la voisine passe')
+  const out = filterFarParts([territoire, proche, lointaine], dem)
+  assert.ok(out.includes(territoire), 'le territoire visible reste')
+  assert.ok(out.includes(proche), 'l’île à ~90 km reste')
+  assert.ok(!out.includes(lointaine), 'celle à ~400 km tombe')
 
-  const serre = filterFarParts([mainland, voisine], dem, FAR_PART_MAX_DIST * 0.2)
-  assert.deepEqual(serre, [mainland], 'au rayon resserré elle tombe, le recouvrant reste')
+  // seuil resserré : même l'île proche sort
+  const serre = filterFarParts([territoire, proche, lointaine], dem, 50)
+  assert.deepEqual(serre, [territoire])
+})
+
+test('the km threshold is measured from what is ON SCREEN, not from the biggest part', () => {
+  // vue sur une petite île ; un continent énorme existe à 5 000 km. Mesuré au
+  // plus GRAND morceau, il aurait servi de référence et tout aurait basculé.
+  const dem = makeDem(-21.1, 55.5, 10)
+  const ile = square(55.5, -21.1, 0.3) // à l'écran
+  const continent = square(2.5, 46.5, 6) // énorme, à l'autre bout du monde
+  const out = filterFarParts([ile, continent], dem)
+  assert.deepEqual(out, [ile], 'le continent lointain ne doit pas entrer')
 })
 
 test('polar rings (Antarctica-style, lat -90) do not blow up the projection', () => {
