@@ -307,13 +307,6 @@ export function buildEffectsPanel(ctx) {
       slider({ label: 'Clapot', min: 0, max: 1, step: 0.05, get: () => params.seaChop, set: (v) => { params.seaChop = v; ctx.realWater?.setWaves({ choppiness: v }) } }),
       slider({ label: 'Vitesse', min: 0, max: 2, step: 0.05, get: () => params.seaSpeed, set: (v) => { params.seaSpeed = v; ctx.realWater?.setWaves({ speed: v }) } }),
       slider({ label: 'Réfraction', min: 0, max: 1, step: 0.02, get: () => params.seaRefract ?? 0.6, set: (v) => { params.seaRefract = v; ctx.realWater?.setLook(params) } }),
-      // gratuit et inutile, donc allumé : rien à reconstruire, le shader sort
-      // immédiatement quand l'amplitude retombe à zéro
-      (() => {
-        const t = toggle({ label: 'Sillage au curseur', get: () => params.seaBow ?? true, set: (v) => { params.seaBow = v; refreshAll() } })
-        t.setAttribute('data-tip', 'La souris creuse l’eau comme la proue d’un bateau — le sillage interfère avec la houle.')
-        return t
-      })(),
       toggle({ label: 'Tranche de verre', get: () => params.seaEdge ?? true, set: (v) => { params.seaEdge = v; ctx.waterRebuild(); refreshAll() } }),
       slider({ label: 'Givre de tranche', min: 0, max: 1, step: 0.01, get: () => params.seaEdgeFrost ?? 0.5, set: (v) => { params.seaEdgeFrost = v; ctx.realWater?.setLook(params) } }),
       reseed

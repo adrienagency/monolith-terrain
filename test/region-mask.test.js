@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { filterFarParts, levelForDemZoom, FAR_PART_MAX_DIST, LEVEL_TABLE } from '../src/region-mask.js'
+import { filterFarParts, levelForDemZoom, frameRegion, FAR_PART_MAX_DIST, LEVEL_TABLE } from '../src/region-mask.js'
 import { latLonToTile } from '../src/geo.js'
 
 // synthetic DEM patch centered on lat/lon, mirroring dem.js georeferencing
@@ -124,4 +124,53 @@ test('a part that merely surrounds the patch without touching it is still droppe
   const proche = square(2.5, 46.5, 0.05)
   const out = filterFarParts([loin, proche], dem)
   assert.deepEqual(out, [proche])
+})
+
+// ---- cadrage automatique de la zone isolée --------------------------------
+// « Une île perdue au milieu de rien, ça fait bizarre » (Adrien) : le bloc se
+// recentre sur la zone et descend au zoom le plus serré qui la contienne.
+const boite = (lonMin, latMin, lonMax, latMax) => [[[
+  [lonMin, latMin], [lonMax, latMin], [lonMax, latMax], [lonMin, latMax], [lonMin, latMin],
+]]]
+
+test('frameRegion centres on the zone', () => {
+  const f = frameRegion(boite(55.216, -21.39, 55.837, -20.872))
+  assert.ok(Math.abs(f.lon - 55.5265) < 1e-3, `lon ${f.lon}`)
+  assert.ok(Math.abs(f.lat - -21.131) < 1e-3, `lat ${f.lat}`)
+})
+
+test('the tighter the zone, the deeper the zoom', () => {
+  const grande = frameRegion(boite(0, 45, 4, 49)) // ~440 km
+  const moyenne = frameRegion(boite(0, 45, 0.5, 45.5)) // ~55 km
+  const petite = frameRegion(boite(0, 45, 0.05, 45.05)) // ~5,5 km
+  assert.ok(petite.zoom > moyenne.zoom, `${petite.zoom} doit dépasser ${moyenne.zoom}`)
+  assert.ok(moyenne.zoom > grande.zoom, `${moyenne.zoom} doit dépasser ${grande.zoom}`)
+})
+
+// LE contrat du schéma d'Adrien : c'est le PLUS GRAND côté qui décide, donc
+// allonger l'un OU l'autre doit reculer le zoom. Une égalité stricte entre une
+// zone large et une zone haute serait un mauvais test : un degré de longitude à
+// 45° ne vaut pas un degré de latitude, et l'arrondi du zoom tomberait d'un
+// côté ou de l'autre selon la troisième décimale du jeu d'essai.
+test('the LARGEST side decides the zoom — either axis can be the one', () => {
+  const carre = frameRegion(boite(0, 45, 0.1, 45.1))
+  const etiree_est_ouest = frameRegion(boite(0, 45, 2, 45.1))
+  const etiree_nord_sud = frameRegion(boite(0, 45, 0.1, 47))
+  assert.ok(etiree_est_ouest.zoom < carre.zoom, 'étirer en longitude doit reculer le zoom')
+  assert.ok(etiree_nord_sud.zoom < carre.zoom, 'étirer en latitude aussi')
+})
+
+test('frameRegion never asks for a zoom the app cannot serve', () => {
+  const minuscule = frameRegion(boite(0, 45, 0.00001, 45.00001))
+  assert.ok(minuscule.zoom <= 15, `plafond dépassé : ${minuscule.zoom}`)
+  const enorme = frameRegion(boite(-170, -80, 170, 80))
+  assert.ok(enorme.zoom >= 4, `plancher franchi : ${enorme.zoom}`)
+})
+
+test('frameRegion returns null on degenerate input instead of NaN', () => {
+  assert.equal(frameRegion([]), null)
+  assert.equal(frameRegion(null), null)
+  assert.equal(frameRegion([[[]]]), null)
+  const f = frameRegion([[[[NaN, 45], [1, 46], [2, 47]]]])
+  assert.ok(Number.isFinite(f.lat) && Number.isFinite(f.lon) && Number.isFinite(f.zoom))
 })

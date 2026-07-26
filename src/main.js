@@ -54,7 +54,7 @@ import { SunDisc } from './sun-disc.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
-import { fetchRegionMask } from './region-mask.js'
+import { fetchRegionMask, frameRegion } from './region-mask.js'
 import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
 import { buildRegionSkirt } from './region-skirt.js'
 import { makeSocleEnvMap } from './socle-env.js'
@@ -62,7 +62,6 @@ import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
 import { TEMPLATE_KEYS, captureLook, captureView, serializeTemplate, parseTemplate, stripFromLook, loadUserTemplates, saveUserTemplates } from './templates-user.js'
 import { loadUserPalettes, saveUserPalettes, paletteFromParams } from './user-palettes.js'
 import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT } from './share-link.js'
-import { stepWake, wakeLength, WAKE_ZERO } from './bow-wave.js'
 import { DroneCam } from './drone-cam.js'
 import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, deriveMetalTints, deriveAoColor, deriveHazeColor, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
@@ -408,9 +407,6 @@ const params = {
   seaEdge: true, // jupe de verre au bord du socle (comble le vide surface/fond)
   seaEdgeFrost: 0.5, // 0 = verre clair, 1 = verre depoli
   seaRefract: 0.6, // intensite de la refraction (deformation du fond vu a travers)
-  // le curseur creuse l'eau comme une etrave (bow-wave.js). Cosmetique et
-  // gratuit : le shader sort immediatement quand l'amplitude est nulle.
-  seaBow: true,
 
   // SP1 map overlay layers (roads/water/places), draped on the relief
   roadsEnabled: false,
@@ -1445,28 +1441,6 @@ window.addEventListener('pointermove', (e) => {
   mouse.set(nx, ny)
   if (modes && modes.mode === 'surface') gpxLayer.pointerMove(mouse, e.clientX, e.clientY)
 })
-
-// ---- sillage d'étrave (bow-wave.js) ---------------------------------------
-// Où le curseur touche l'eau. On perce le PLAN de la mer, pas le relief : sur
-// un fond creusé à −4 000 m, un raycast sur le terrain rendrait un point très
-// loin du curseur apparent, et le sillage partirait à l'autre bout du bloc.
-let wake = WAKE_ZERO
-const _bowPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
-const _bowHit = new THREE.Vector3()
-function bowTarget() {
-  if (modes.mode !== 'surface' || !realWater) return null
-  const y = realWater.seaY
-  if (!Number.isFinite(y)) return null
-  _bowPlane.constant = -y
-  focusRay.setFromCamera(mouse, camera)
-  if (!focusRay.ray.intersectPlane(_bowPlane, _bowHit)) return null
-  const half = TERRAIN_SIZE / 2
-  if (Math.abs(_bowHit.x) > half || Math.abs(_bowHit.z) > half) return null
-  // au-dessus de la TERRE il n'y a rien à creuser : le sillage s'y éteint
-  const sol = terrain.sample?.(_bowHit.x, _bowHit.z)
-  if (sol != null && sol > y) return null
-  return { x: _bowHit.x, z: _bowHit.z }
-}
 
 // click-to-dive: a plain click on the map (NOT an orbit drag) plunges one level
 // onto the point under the cursor — march the height field for the hit, convert
@@ -3362,6 +3336,16 @@ function rebuildRegionSkirt() {
     scene.add(s.mesh)
   }
 }
+// La vue d'AVANT l'isolation, pour la rendre intacte au décochage (Adrien :
+// « le bloc doit revenir à son format d'origine »). Le recadrage change
+// demLat/demLon/demZoom ; sans cette mémoire, décocher laisserait l'utilisateur
+// sur le cadrage de la zone au lieu de celui qu'il avait choisi.
+let regionReturn = null
+// une seule tentative de recadrage par activation : après le rechargement,
+// applyRegionMode se rappelle (fetchAndBuildDem le fait quand regionMode est
+// vrai), et recalculer le cadre à chaque passage pourrait osciller
+let regionFramed = false
+
 async function applyRegionMode() {
   if (!params.regionMode || params.source !== 'real' || !dem) {
     terrain.setRegionMask(null)
@@ -3371,6 +3355,18 @@ async function applyRegionMode() {
     plinth.rebuild(terrain, params) // et la dalle redescend : setSlabOnly l'avait remontée au zéro
     plinth.setVisible(params.plinth && modes.mode === 'surface')
     waterRebuild() // restore the open-sea surface once the region clip is gone
+    // RETOUR À LA VUE D'ORIGINE — recharge le relief là où l'utilisateur était
+    // avant d'isoler, pour que décocher revienne exactement sur ses pas.
+    const back = regionReturn
+    regionReturn = null
+    regionFramed = false
+    if (back && (params.demLat !== back.lat || params.demLon !== back.lon || params.demZoom !== back.zoom)) {
+      params.demLat = back.lat
+      params.demLon = back.lon
+      params.demZoom = back.zoom
+      params.demLocation = back.location
+      await loadRealTerrain()
+    }
     return
   }
   if (regionBusy) return
@@ -3380,6 +3376,34 @@ async function applyRegionMode() {
     // altitude seul les prenait pour la mer) ; null → comportement v1
     const r = await fetchRegionMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem, coastImage: coastMaskImage })
     if (!params.regionMode) return // user toggled off while fetching
+
+    // RECADRAGE SUR LA ZONE — « une île perdue au milieu de rien, ça fait
+    // bizarre » (Adrien). On centre le bloc sur la zone et on descend au zoom
+    // le plus SERRÉ qui la contienne encore, sur son plus grand côté : c'est
+    // exactement le schéma d'Adrien — nord/sud aux bords si la zone est plus
+    // haute que large, est/ouest sinon.
+    //
+    // ⚠️ Le zoom des tuiles est ENTIER. La zone remplit donc le bloc entre 50 %
+    // et 100 % selon qu'on tombe juste ou non après l'arrondi ; elle ne peut
+    // pas TOUCHER les bords au pixel près. Aller plus loin demanderait une
+    // mise à l'échelle d'affichage par-dessus, qui entraînerait avec elle les
+    // étiquettes, l'échelle graphique et les ombres — un autre chantier.
+    // frameTrack n'est pas réutilisé ici : sa marge de 35 %, faite pour qu'une
+    // trace GPX respire dans le bloc, laisserait justement la zone flotter.
+    if (r?.parts?.length && !regionFramed) {
+      regionFramed = true
+      const f = frameRegion(r.parts)
+      if (f && (Math.abs(f.lat - params.demLat) > 1e-4 || Math.abs(f.lon - params.demLon) > 1e-4 || f.zoom !== params.demZoom)) {
+        regionReturn ??= { lat: params.demLat, lon: params.demLon, zoom: params.demZoom, location: params.demLocation }
+        params.demLat = f.lat
+        params.demLon = f.lon
+        params.demZoom = f.zoom
+        params.demLocation = r.name || params.demLocation
+        regionBusy = false // le rechargement rappellera applyRegionMode
+        await loadRealTerrain()
+        return
+      }
+    }
     terrain.setRegionMask(r ? r.maskTexture : null)
     // les flancs disparaissent, la DALLE reste — et remonte au zéro absolu pour
     // recevoir l'ombre portée de la découpe posée dessus
@@ -3392,7 +3416,13 @@ async function applyRegionMode() {
     rebuildRegionSkirt()
     if (r) modes.announce(`ZONE — ${String(r.name).toUpperCase()}`)
     else modes.announce('ZONE — NO BOUNDARY AT THIS SCALE')
-  } catch {
+  } catch (err) {
+    // Ce catch était MUET. Il a avalé un frameRegion non importé : la zone
+    // isolée ne faisait plus rien du tout, sans un mot dans la console, et le
+    // symptôme (rien ne se passe) ne désignait aucune cause. Un échec réseau
+    // reste tolérable — c'est pour ça qu'on ne relance pas — mais il doit se
+    // dire, sinon la prochaine faute de frappe coûtera la même demi-heure.
+    console.warn('isoler la zone : échec', err)
     terrain.setRegionMask(null)
     disposeRegionSkirt()
     regionMaskCanvas = null
@@ -4713,14 +4743,6 @@ function tick() {
   // does not exist.
   if (dof) dof.cocMaterial.worldFocusDistance = params.focusDistance
 
-  // SILLAGE D'ÉTRAVE — le curseur creuse l'eau comme la proue d'un bateau.
-  // La cible est l'intersection du rayon caméra→curseur avec le PLAN de la
-  // mer, pas avec le relief : au-dessus d'un fond très creusé, un raycast sur
-  // le terrain donnerait un point à des kilomètres du curseur apparent.
-  if (realWater) {
-    wake = stepWake(wake, params.seaBow ? bowTarget() : null, dt)
-    realWater.setBow(params.seaBow ? wake : null, wakeLength(TERRAIN_SIZE))
-  }
   realWater?.update(dt, sun) // water simulation: waves, caustics, sun glint
   // temps des caustiques de fond (terrain + blocs voisins du damier)
   terrain.mapUniforms.uCausT.value += dt

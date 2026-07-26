@@ -334,9 +334,49 @@ export async function fetchRegionMask({ lat, lon, zoom, dem, coastImage = null }
       maskCanvas: raster.canvas,
       name: boundary.name,
       level: levelRow.level,
+      // les morceaux RETENUS, en lon/lat — de quoi recadrer le bloc sur la zone
+      // (main.js les passe à frameTrack, le même cadreur que les traces GPX)
+      parts: near,
     }
   } catch (err) {
     console.warn('region mask failed:', err)
     return null
   }
+}
+
+// ---------------------------------------------------------------- cadrage
+// Le centre + le zoom qui SERRENT la zone dans le bloc : on prend son plus
+// grand côté (nord-sud ou est-ouest) et on descend au zoom le plus fin qui le
+// contienne encore. C'est le schéma d'Adrien : les extrêmes nord et sud
+// touchent les bords si la zone est plus haute que large, est et ouest sinon.
+//
+// ⚠️ Le zoom des tuiles est ENTIER : la zone remplit donc le bloc entre 50 %
+// et 100 % selon l'arrondi, elle ne peut pas toucher les bords au pixel près.
+// `margin` laisse un filet pour que le trait de côte ne soit pas coupé net.
+//
+// Pur (aucun DOM, aucun réseau) : `parts` est une liste de polygones GeoJSON
+// [[[lon,lat],…],…], la même que celle que rend fetchRegionMask.
+export function frameRegion(parts, { margin = 1.06, min = 4, max = 15, tilePx = 768 } = {}) {
+  let latMin = 90, latMax = -90, lonMin = Infinity, lonMax = -Infinity
+  for (const rings of parts || []) {
+    for (const [lon, lat] of rings?.[0] || []) {
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue
+      if (lat < latMin) latMin = lat
+      if (lat > latMax) latMax = lat
+      if (lon < lonMin) lonMin = lon
+      if (lon > lonMax) lonMax = lon
+    }
+  }
+  if (!(lonMax >= lonMin) || !(latMax >= latMin)) return null
+  const lat = (latMin + latMax) / 2
+  const lon = (lonMin + lonMax) / 2
+  // le plus grand côté décide du zoom — l'autre tiendra forcément
+  const spanM = Math.max(
+    (lonMax - lonMin) * 111320 * Math.cos((lat * Math.PI) / 180),
+    (latMax - latMin) * 110540,
+    200 // une zone minuscule ne doit pas demander un zoom infini
+  )
+  const extentTop = 156543.03392 * Math.cos((lat * Math.PI) / 180) * tilePx
+  const zoom = Math.max(min, Math.min(max, Math.floor(Math.log2(extentTop / (spanM * margin)))))
+  return { lat, lon, zoom }
 }
