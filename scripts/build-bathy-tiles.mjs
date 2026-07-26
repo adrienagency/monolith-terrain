@@ -254,6 +254,10 @@ function encodeTerrarium(mRaw) {
 // Rend faux seulement si le tamis ne voit QUE de l'abysse : dans ce cas la
 // tuile n'a ni côte ni plateau, l'ancien relief suffit.
 const PROBE = 32
+// --all : cuire TOUTES les tuiles, sans pré-tri. Sert aux niveaux GROSSIERS,
+// qui servent de plancher de repli au chargeur (BATHY_ZMIN dans dem.js) : un
+// plancher troué laisse des rectangles plats dans la mer.
+const BAKE_ALL = process.argv.includes('--all')
 function probeWorthIt(src, z, tx, ty) {
   for (let j = 0; j < PROBE; j++) {
     const lat = y2lat(ty + (j + 0.5) / PROBE, z)
@@ -313,7 +317,7 @@ function main() {
         // On garde la tuile si elle voit du plateau OU de la TERRE : une côte
         // implique forcément de l'eau peu profonde, même si le plateau est trop
         // étroit pour tomber sous le tamis (côtes escarpées type Chili).
-        if (!probeWorthIt(src, z, tx, ty)) {
+        if (!BAKE_ALL && !probeWorthIt(src, z, tx, ty)) {
           skipped++
           continue
         }

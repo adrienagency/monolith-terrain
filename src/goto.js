@@ -24,16 +24,44 @@ export async function geocode(query) {
 // feature centred on the block (Adrien : « je veux voir la France, toute la
 // France tient sur le block »). Null if the bbox is missing/degenerate, so the
 // caller can fall back to its default landing zoom.
-export function frameFromBBox(bbox, { min = 4, max = 15 } = {}) {
+// Une emprise dont la longitude couvre plus que ça n'encercle pas un territoire
+// d'un seul tenant : c'est une nation à possessions lointaines, et Nominatim
+// l'étire jusqu'à l'antiméridien.
+const BBOX_LON_MAX = 90
+// Et une emprise dont le centre s'éloigne autant du point représentatif ne
+// décrit plus le même endroit.
+const BBOX_DRIFT_KM = 500
+
+export function frameFromBBox(bbox, { min = 4, max = 15, at = null } = {}) {
   if (!Array.isArray(bbox) || bbox.length < 4) return null
   const [s, n, w, e] = bbox.map(Number)
   if ([s, n, w, e].some((v) => !Number.isFinite(v))) return null
-  const latC = (s + n) / 2
-  const lonC = (w + e) / 2
+
+  // LE CENTRE VIENT DU POINT REPRÉSENTATIF, JAMAIS DE L'EMPRISE.
+  //
+  // Nominatim étire l'emprise d'un pays jusqu'à ses territoires les plus
+  // lointains : celle de la France couvre 350° de longitude (Wallis-et-Futuna
+  // à −178,4°, Matthew et Hunter à +172,3°). Son centroïde tombait dans le
+  // golfe de Guinée, à 300 km au sud du Ghana — d'où un bloc peuplé de
+  // Casablanca, Lagos et Kinshasa sur une recherche « France », et un cartouche
+  // « UNCHARTED SECTOR » faute de savoir géocoder l'océan. Le lat/lon renvoyé
+  // juste à côté, lui, était bon : 46,60 / 1,89, plein centre de la métropole.
+  const latC = Number.isFinite(at?.lat) ? at.lat : (s + n) / 2
+  const lonC = Number.isFinite(at?.lon) ? at.lon : (w + e) / 2
+
   const nsKm = Math.abs(n - s) * 111.32
   const ewKm = Math.abs(e - w) * 111.32 * Math.cos((latC * Math.PI) / 180)
   const spanKm = Math.max(nsKm, ewKm)
   if (!(spanKm > 0)) return null
+
+  // L'emprise ne décide du ZOOM que si elle est crédible. Sinon on ne rend
+  // aucun cadre : l'appelant retombe sur son zoom d'atterrissage, ce qui vaut
+  // mieux qu'un plancher à z4 hérité d'un span de 39 000 km.
+  const driftKm = at
+    ? Math.hypot(((s + n) / 2 - latC) * 111.32, ((w + e) / 2 - lonC) * 111.32 * Math.cos((latC * Math.PI) / 180))
+    : 0
+  if (Math.abs(e - w) > BBOX_LON_MAX || driftKm > BBOX_DRIFT_KM) return null
+
   return { lat: latC, lon: lonC, zoom: zoomForSpanKm(spanKm, latC, { min, max }) }
 }
 
@@ -82,7 +110,9 @@ export function createGoto({ modes, announce, getFineZoom }) {
         // frame the WHOLE feature from its bounding box (country/city fills the
         // block) ; fall back to the point + default landing zoom if there's no bbox
         const fine = getFineZoom ? getFineZoom() : 15
-        const framed = frameFromBBox(hit.bbox, { min: 4, max: fine })
+        // `at` : le point représentatif de Nominatim. Il porte le centre, et
+        // sert d'arbitre pour savoir si l'emprise est crédible.
+        const framed = frameFromBBox(hit.bbox, { min: 4, max: fine, at: hit })
         const lat = framed?.lat ?? hit.lat
         const lon = framed?.lon ?? hit.lon
         const zoom = framed?.zoom ?? landingZoom(getFineZoom)

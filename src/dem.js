@@ -28,6 +28,18 @@ export { demTilePx }
 // permet de déployer le code avant les données.
 const BATHY_URL = (z, x, y) => `data/bathy/${z}/${x}/${y}.png`
 const BATHY_ZMAX = 8
+// PLANCHER DU JEU — le niveau le plus grossier, cuit INTÉGRALEMENT (256 tuiles
+// pour le monde entier). C'est lui qui garantit qu'une tuile fine manquante
+// trouve toujours un ancêtre à lire.
+//
+// Sans ce repli, une tuile absente laissait sa case à PLAT au niveau zéro,
+// juste à côté d'une case voisine qui, elle, portait la vraie profondeur : la
+// mer se couvrait de RECTANGLES nets de la taille d'une tuile (captures Adrien
+// sur l'Atlantique et l'Australie). La couverture cuite est partielle par
+// construction — 0 % à z4, 50 % à z5, 21 % à z8 — parce que le pré-tri de la
+// cuisson saute les tuiles « sans intérêt ». C'est le REPLI qui manquait, pas
+// les tuiles.
+const BATHY_ZMIN = 4
 // ⚠️ NOS tuiles bathy font 256 px, quelle que soit la taille des tuiles
 // d'altitude. Le rectangle SOURCE du drawImage se mesure donc en pixels de
 // tuile bathy, le rectangle DESTINATION en pixels de tuile d'altitude — les
@@ -335,27 +347,33 @@ async function loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx }) {
       const tx = (cx + dx + n) % n
       const ty = cy + dy
       if (ty < 0 || ty >= n) continue
-      const t = overzoomTile(zoom, tx, ty, BATHY_ZMAX)
-      const url = BATHY_URL(t.z, t.x, t.y)
-      if (bathyMisses.has(url)) continue
       const ox = (dx + half) * tilePx
       const oy = (dy + half) * tilePx
+      // On descend de la tuile la plus fine disponible vers le plancher : la
+      // première qui répond gagne. Une absence reste le cas NORMAL à un niveau
+      // donné, mais elle ne doit plus laisser la case à plat.
       jobs.push(
-        fetch(url)
-          .then((r) => (r.ok ? r.blob() : Promise.reject(new Error('miss'))))
-          .then(createImageBitmap)
-          .then((img) => {
-            // surzoom : on n'agrandit qu'une SOUS-FENÊTRE de l'ancêtre — la
-            // sous-fenêtre se mesure sur la tuile BATHY (256 px), la case de
-            // destination sur la tuile d'altitude (256 ou 512 px)
-            const s = BATHY_TILE_PX / t.scale
-            ctx.drawImage(img, t.ox * BATHY_TILE_PX, t.oy * BATHY_TILE_PX, s, s, ox, oy, tilePx, tilePx)
-            painted++
-          })
-          .catch(() => {
-            // absence = cas normal (tuile sans mer, ou jeu pas encore cuit)
-            bathyMisses.add(url)
-          })
+        (async () => {
+          for (let zt = Math.min(zoom, BATHY_ZMAX); zt >= BATHY_ZMIN; zt--) {
+            const t = overzoomTile(zoom, tx, ty, zt)
+            const url = BATHY_URL(t.z, t.x, t.y)
+            if (bathyMisses.has(url)) continue
+            try {
+              const r = await fetch(url)
+              if (!r.ok) throw new Error('miss')
+              const img = await createImageBitmap(await r.blob())
+              // surzoom : on n'agrandit qu'une SOUS-FENÊTRE de l'ancêtre — la
+              // sous-fenêtre se mesure sur la tuile BATHY (256 px), la case de
+              // destination sur la tuile d'altitude (256 ou 512 px)
+              const s = BATHY_TILE_PX / t.scale
+              ctx.drawImage(img, t.ox * BATHY_TILE_PX, t.oy * BATHY_TILE_PX, s, s, ox, oy, tilePx, tilePx)
+              painted++
+              return
+            } catch {
+              bathyMisses.add(url)
+            }
+          }
+        })()
       )
     }
   }
