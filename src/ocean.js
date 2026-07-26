@@ -156,18 +156,26 @@ float bowWake(vec2 xz, float t) {
   float along = dot(q, uBowDir);                       // > 0 devant l'etrave
   float across = dot(q, vec2(-uBowDir.y, uBowDir.x));  // lateral signe
 
-  // bourrelet d'etrave : une bosse serree autour du point, qui respire
-  float bow = exp(-(along * along + across * across) * 2.2)
-            * (0.55 + 0.45 * cos(along * 3.0 - t * 3.0));
+  // ETRAVE : un croissant SERRE, ecrase dans l'axe de marche. Une gaussienne
+  // large soulevait une bonne partie de la mer sans jamais ressembler a un
+  // sillage (Adrien) : ce qui fait lire un sillage, ce sont des LIGNES fines,
+  // pas une bosse. Les largeurs ci-dessous restent au-dessus du pas du maillage
+  // de l'eau (~0,22 unite monde) — plus fin alias au lieu de dessiner.
+  float rb = length(vec2(along * 2.4 - 0.10, across));
+  float bow = exp(-rb * rb * 70.0);
 
-  // bras du V, uniquement en arriere
+  // BRAS DE KELVIN : deux lignes fines a 19,47 degres, en arriere seulement
   float s = max(-along, 0.0);
-  float d = abs(abs(across) - s * 0.3536);             // tan(19,47 degres)
-  float w = 0.22 + s * 0.10;                           // les bras s'epaississent en s'eloignant
-  float arms = exp(-d * d / (w * w)) * exp(-s * 0.45)  // et s'eteignent
-             * (0.55 + 0.45 * cos(s * 7.0 - t * 5.0)); // rides transversales
+  float bord = s * 0.3536;                             // tan(19,47 degres)
+  float d = abs(abs(across) - bord);
+  float w = 0.030 + s * 0.030;                         // fin, epaissi doucement
+  float arms = exp(-d * d / (w * w)) * exp(-s * 1.5);
 
-  return uBowAmp * (bow + arms * 0.8);
+  // RIDES TRANSVERSALES, a l'interieur du V uniquement
+  float dansLeV = exp(-max(abs(across) - bord, 0.0) * 26.0);
+  float rides = cos(s * 40.0 - t * 7.0) * dansLeV * exp(-s * 2.4);
+
+  return uBowAmp * (bow * 0.5 + arms * 0.9 + rides * 0.25);
 }
 
 void main() {
@@ -220,14 +228,13 @@ void main() {
   // le total a 0,78 fois la profondeur) l'ecrasait en plateau — visible nulle
   // part, alors que le calcul, lui, tournait.
   //
-  // FACTEUR VOLONTAIREMENT FORT (Adrien : « force fort sur son effet »). Un
-  // sillage a la meme hauteur que la houle se noie dedans : c'est le CONTRASTE
-  // avec la mer environnante qui le rend lisible, pas sa hauteur absolue. Le
-  // critere de deferlement le borne de toute facon en eau basse, donc pousser
-  // ici ne peut pas percer le fond pres du rivage.
+  // Le facteur etait monte a 7 pour rendre le sillage visible ; il l'etait, mais
+  // en SOULEVANT la mer (Adrien). La lisibilite ne venait pas de la hauteur : le
+  // motif etait trop mou. Depuis que bowWake trace des lignes fines, 2,6 suffit
+  // et la mer autour reste a son niveau.
   float wake = bowWake(xz, uTime);
   if (wake != 0.0) {
-    disp.y += wake * uWaveH * uLenScale * uViewCalm * 7.0;
+    disp.y += wake * uWaveH * uLenScale * uViewCalm * 2.6;
     float e = max(uBowLen, 1e-4) * 0.08;
     nAcc.x += (bowWake(xz + vec2(e, 0.0), uTime) - wake) / e * 0.3;
     nAcc.z += (bowWake(xz + vec2(0.0, e), uTime) - wake) / e * 0.3;

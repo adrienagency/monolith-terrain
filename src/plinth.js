@@ -385,8 +385,26 @@ export class Plinth {
 
   setVisible(v) {
     this.group.visible = v
-    this.glassPool.visible = v && this.isGlass && (this._poolStrength ?? 0) > 0.001
-    this.liner.visible = v && this.isGlass
+    this.walls.visible = v && !this._slabOnly
+    this.glassPool.visible = v && !this._slabOnly && this.isGlass && (this._poolStrength ?? 0) > 0.001
+    this.liner.visible = v && !this._slabOnly && this.isGlass
+  }
+
+  // ZONE ISOLÉE : plus de bloc, mais la DALLE reste — c'est elle qui reçoit
+  // l'ombre portée de la découpe (Adrien : « le mode isolé doit projeter ses
+  // ombres sur la dalle du dessous »). Auparavant setVisible(false) emportait
+  // tout, y compris le plan qui capte l'ombre : la zone isolée flottait sans
+  // rien sous elle. On la remonte au zéro absolu du relief, le même plan que
+  // les textes du cartouche et que le pied de la découpe.
+  setSlabOnly(on, baseY = null) {
+    this._slabOnly = !!on
+    if (on && Number.isFinite(baseY)) {
+      this.baseY = baseY
+      this.base.position.y = baseY
+      this.ground.position.y = baseY - 0.02
+    }
+    this.group.visible = true
+    this.setVisible(true)
   }
 
   // opaque floor: on with an HDRI (keeps a ground under the socle), off with a

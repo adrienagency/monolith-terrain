@@ -113,16 +113,22 @@ export function traceSkirt({ maskCanvas, sample, grid = 300, threshold = 127 }) 
 }
 
 // Build the skirt mesh. `material` is shared (the plinth wall material) so the
-// socle finish carries over. `depth` seats the base below the lowest terrain.
-//   buildRegionSkirt({ maskCanvas, sample, material, depth }) → { mesh } | null
-export function buildRegionSkirt({ maskCanvas, sample, material, depth = 5, grid = 300 }) {
+// socle finish carries over.
+//
+// `baseY` FIXE le pied du mur à une altitude donnée — le zéro absolu du relief,
+// c'est-à-dire le niveau de la mer — pour que la zone isolée se pose toujours
+// au même plan que les textes du cartouche et que la dalle qui reçoit son ombre
+// (Adrien). Sans lui, le pied suivait le point le plus bas de la zone : la
+// découpe flottait à une hauteur qui changeait d'une région à l'autre, et rien
+// n'était jamais aligné sur la dalle. `depth` n'est plus qu'un repli quand
+// aucune base n'est imposée.
+//   buildRegionSkirt({ maskCanvas, sample, material, baseY }) → { mesh } | null
+export function buildRegionSkirt({ maskCanvas, sample, material, depth = 5, grid = 300, baseY: forcedBaseY = null }) {
   if (!maskCanvas || !sample) return null
   const { segs, interiorMin } = traceSkirt({ maskCanvas, sample, grid })
   if (!segs.length) return null
 
-  // top height at each boundary point = the terrain surface there; the wall foot
-  // drops to a base below the lowest terrain anywhere in the zone so nothing
-  // pokes out beneath it.
+  // top height at each boundary point = the terrain surface there
   let minTop = interiorMin
   for (const s of segs) {
     const ya = sample(s.ax, s.az)
@@ -132,7 +138,10 @@ export function buildRegionSkirt({ maskCanvas, sample, material, depth = 5, grid
     if (ya < minTop) minTop = ya
     if (yb < minTop) minTop = yb
   }
-  const baseY = minTop - depth
+  // Une base imposée reste un PLANCHER : si la côte plonge sous le zéro (la
+  // frontière administrative descend dans l'eau), on suit le terrain plutôt que
+  // de laisser le relief percer sous le mur.
+  const baseY = Number.isFinite(forcedBaseY) ? Math.min(forcedBaseY, minTop) : minTop - depth
 
   const positions = []
   const normals = []

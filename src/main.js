@@ -1009,8 +1009,10 @@ plinth.setVisible(params.plinth)
 const groundInfo = new GroundInfoLayer({
   scene,
   // socle désactivé (Adrien) : la carte se POSE AU SOL — les textes du
-  // cartouche remontent au pied du relief (baseY + profondeur du socle)
-  getBaseY: () => (params.plinth ? plinth.baseY : plinth.baseY + plinth.depth),
+  // cartouche remontent au pied du relief (baseY + profondeur du socle).
+  // ZONE ISOLÉE : le zéro est le niveau de la mer, et les textes s'y calent —
+  // c'est le plan unique que partagent la découpe, la dalle et le cartouche.
+  getBaseY: () => (params.regionMode ? regionBaseY() : params.plinth ? plinth.baseY : plinth.baseY + plinth.depth),
   getInk: () => (params.darkMode ? '#e8e4da' : params.hudInk),
   getWallInk: () => socleWallInk(), // engraved name flips to contrast the socle material
   // sans socle il n'y a plus de flanc : les textes muraux (nom gravé, logo,
@@ -3326,6 +3328,16 @@ function disposeRegionSkirt() {
   // material is shared with the plinth — do NOT dispose it here
   regionSkirt = null
 }
+// LE ZÉRO de la zone isolée : l'altitude 0 m du relief chargé, en unités monde
+// (uSeaY, posé par terrain.js d'après l'échelle du DEM). Un seul plan pour trois
+// choses qui doivent coïncider — le pied de la découpe, les textes du cartouche
+// et la dalle qui reçoit l'ombre. Sur un terrain procédural uSeaY vaut -9999
+// (pas de mer) : on retombe alors sur le pied du socle.
+function regionBaseY() {
+  const y = terrain.mapUniforms?.uSeaY?.value
+  return Number.isFinite(y) && y > -9000 ? y : plinth.baseY + plinth.depth
+}
+
 // (re)build the vertical curtain around the isolated zone from the current mask
 // + terrain heightfield. Shares the plinth wall material so the socle finish
 // (PBR / glass) carries onto the cut.
@@ -3336,13 +3348,13 @@ function rebuildRegionSkirt() {
     maskCanvas: regionMaskCanvas,
     sample: terrain.sample,
     material: plinth.wallMat,
-    // AUCUNE épaisseur ajoutée : la zone isolée se pose à même le sol (Adrien).
-    // Le mur descendait de plinthDepth SOUS le point le plus bas de la zone,
-    // ce qui pendait une jupe de sept unités monde sous une île qui n'a rien
-    // à porter — le socle carré n'existe plus, justement. À zéro, le mur ne
-    // fait plus que fermer la coupe entre la surface et le point le plus bas :
-    // il disparaît là où la côte est déjà au niveau zéro.
-    depth: 0,
+    // ZÉRO ABSOLU (Adrien) : le pied de la coupe se cale au niveau de la mer,
+    // pas au point le plus bas de la zone. Le mur descendait auparavant de
+    // plinthDepth SOUS ce point, pendant sept unités monde de socle sous une
+    // île qui n'a rien à porter ; puis, calé sur le minimum local, il flottait
+    // à une hauteur qui changeait d'une région à l'autre. Au zéro, la découpe
+    // se pose toujours sur le même plan — celui des textes et de la dalle.
+    baseY: regionBaseY(),
   })
   if (s) {
     regionSkirt = s
@@ -3355,6 +3367,8 @@ async function applyRegionMode() {
     terrain.setRegionMask(null)
     disposeRegionSkirt()
     regionMaskCanvas = null
+    plinth.setSlabOnly(false) // le bloc carré revient
+    plinth.rebuild(terrain, params) // et la dalle redescend : setSlabOnly l'avait remontée au zéro
     plinth.setVisible(params.plinth && modes.mode === 'surface')
     waterRebuild() // restore the open-sea surface once the region clip is gone
     return
@@ -3367,7 +3381,9 @@ async function applyRegionMode() {
     const r = await fetchRegionMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem, coastImage: coastMaskImage })
     if (!params.regionMode) return // user toggled off while fetching
     terrain.setRegionMask(r ? r.maskTexture : null)
-    plinth.setVisible(false)
+    // les flancs disparaissent, la DALLE reste — et remonte au zéro absolu pour
+    // recevoir l'ombre portée de la découpe posée dessus
+    plinth.setSlabOnly(true, regionBaseY())
     waterRebuild() // regionMode is on — the sim drops its sea (it would spill past the boundary) but keeps the lakes
     // Isolate-the-zone drops the flat slab, but a vertical curtain still closes
     // the cut so a boundary over a summit or a trench never shows the map's
