@@ -65,14 +65,21 @@ test('never returns empty: nearest part survives even when all are far', () => {
   assert.equal(out[0], lessFar)
 })
 
-test('custom max distance is honoured', () => {
-  const dem = makeDem(46.5, 2.5, 6)
-  const mainland = square(2.5, 46.5, 4)
-  const corsica = square(9.1, 42.2, 0.4)
-  // shrink the radius until Corsica falls out but the mainland stays
-  const out = filterFarParts([mainland, corsica], dem, FAR_PART_MAX_DIST * 0.2)
-  assert.equal(out.length, 1)
-  assert.equal(out[0], mainland)
+// Le rayon ne peut se tester que sur un morceau HORS de l'emprise du bloc :
+// dès qu'un morceau recouvre le bloc il est gardé quoi qu'il arrive, et c'est
+// voulu — on n'efface pas un morceau qu'on a sous les yeux. Ce test utilisait
+// la Corse, qui à ce zoom tombe À L'INTÉRIEUR du bloc ; il vérifiait donc le
+// rayon sur un cas où le rayon n'a pas le dernier mot.
+test('custom max distance is honoured for parts outside the patch', () => {
+  const dem = makeDem(46.5, 2.5, 6) // le bloc s'arrête vers lon 11,4°
+  const mainland = square(2.5, 46.5, 4) // recouvre le bloc → gardé quel que soit le rayon
+  const voisine = square(14, 46.5, 0.3) // hors emprise, à ~37 unités monde du centre
+
+  const large = filterFarParts([mainland, voisine], dem)
+  assert.equal(large.length, 2, 'au rayon par défaut (42) la voisine passe')
+
+  const serre = filterFarParts([mainland, voisine], dem, FAR_PART_MAX_DIST * 0.2)
+  assert.deepEqual(serre, [mainland], 'au rayon resserré elle tombe, le recouvrant reste')
 })
 
 test('polar rings (Antarctica-style, lat -90) do not blow up the projection', () => {
@@ -88,4 +95,33 @@ test('polar rings (Antarctica-style, lat -90) do not blow up the projection', ()
   ]
   const out = filterFarParts([polar], dem)
   assert.equal(out.length, 1) // clamped to mercator range, kept as nearest
+})
+
+// RÉGRESSION — « isoler la zone » ne montrait plus rien sur une île.
+//
+// Le tri se faisait au CENTROÏDE seul. Il a été écrit pour le cas inverse
+// (vue France métropolitaine, écarter la Guyane), et il se retourne dès que le
+// bloc est PLUS PETIT que la région : à La Réunion en z12 le bloc couvre 27 km
+// pour une île de 64, le centroïde de l'île tombe hors du rayon, et seuls
+// trois cailloux périphériques survivaient — le repli « jamais vide » ne
+// jouait pas puisque la liste n'était pas vide. Résultat : masque entièrement
+// noir, relief effacé, alors que la frontière était correctement récupérée.
+//
+// Un morceau qui RECOUVRE le bloc est pertinent par construction, où que soit
+// son centroïde.
+test('a part that covers the patch is kept even when its centroid is far outside', () => {
+  const dem = makeDem(-21.26, 55.74, 12) // vue serrée dans une grande île
+  const ile = square(55.53, -21.13, 0.31) // recouvre largement le bloc
+  const caillou = square(55.745, -21.255, 0.004) // un îlot pile sous la vue
+  const out = filterFarParts([ile, caillou], dem)
+  assert.ok(out.includes(ile), 'l’île qui recouvre le bloc doit être gardée')
+  assert.equal(out.length, 2, 'et l’îlot proche reste, lui aussi')
+})
+
+test('a part that merely surrounds the patch without touching it is still dropped', () => {
+  const dem = makeDem(46.5, 2.5, 12)
+  const loin = square(-53.0, 4.0, 1.5) // Guyane : ni proche, ni recouvrante
+  const proche = square(2.5, 46.5, 0.05)
+  const out = filterFarParts([loin, proche], dem)
+  assert.deepEqual(out, [proche])
 })

@@ -434,19 +434,10 @@ export function contributeTerrainSections(ctx) {
   })
   // regenerate only on release: change commits + saves for this zoom
   exag.querySelector('input').addEventListener('change', commitExag)
-  const isolate = toggle({
-    label: 'Isoler la zone',
-    get: () => params.regionMode ?? false,
-    set: (v) => {
-      params.regionMode = v
-      ctx.setRegionMode(v)
-    },
-  })
-  isolate.setAttribute('data-tip', 'Découpe la carte au pays ou à la région sous la vue — sans base carrée.')
   const zoomResetRow = el('div', 'ce-btn-row')
   zoomResetRow.append(button('Réinitialiser l’échelle de ce zoom', () => { ctx.resetZoomExag(); refreshAll() }, { ghost: true }))
-  sRel.body.append(chipRow, exag, isolate, zoomResetRow)
-  onRefresh(() => sRel.setMeta(`×${(+params.demExaggeration).toFixed(params.demExaggeration % 1 ? 1 : 0)}${params.regionMode ? ' · zone isolée' : ''}`), sRel.head)
+  sRel.body.append(chipRow, exag, zoomResetRow)
+  onRefresh(() => sRel.setMeta(`×${(+params.demExaggeration).toFixed(params.demExaggeration % 1 ? 1 : 0)}`), sRel.head)
 
   // ------------------------------------------------------------ Ombrage
   // Les 4 réglages sont DÉRIVÉS du relief chargé (src/relief-grade.js) : une
@@ -564,10 +555,24 @@ export function contributeTerrainSections(ctx) {
 
   // --------------------------------------------------------------- Socle
   const sBlk = matPanel.addSection(section('Socle'))
+  // « Isoler la zone » vit ICI et non dans Relief (Adrien) : la question qu'elle
+  // pose est celle de la BASE — bloc carré ou découpe au trait de côte —, pas
+  // celle de l'échelle verticale. Elle est le prolongement direct du toggle
+  // juste au-dessus, dont elle prend la main quand elle est active.
+  const isolate = toggle({
+    label: 'Isoler la zone',
+    get: () => params.regionMode ?? false,
+    set: (v) => {
+      params.regionMode = v
+      ctx.setRegionMode(v)
+    },
+  })
+  isolate.setAttribute('data-tip', 'Découpe la carte au trait de côte de la zone sous la vue — sans base carrée, sans mer.')
   sBlk.body.append(
     // le toggle recale AUSSI le cartouche (textes au pied du relief) et les
     // gravures murales (elles disparaissent sans socle) — ctx.onPlinthToggled
     toggle({ label: 'Afficher le socle', get: () => params.plinth, set: (v) => { params.plinth = v; ctx.plinth.setVisible(v && ctx.modes.mode === 'surface'); ctx.onPlinthToggled?.() } }),
+    isolate,
     // (tirette Épaisseur retirée — « ne sert à rien », Adrien)
     color({ label: 'Couleur de la tranche', get: () => params.plinthColor, set: (v) => { params.plinthColor = v; ctx.plinth.setColors(params) } })
   )
@@ -630,7 +635,10 @@ export function contributeTerrainSections(ctx) {
   onRefresh(() => {
     const glass = params.plinthFinish === 'glass'
     const cur = glass ? GLASS_BY_ID[params.plinthGlass] : PBR_BY_ID[params.plinthPbr]
-    sBlk.setMeta(params.plinth ? (cur?.name ?? '') : 'Masqué', params.plinth && cur ? presetSwatch(cur, glass) : null)
+    // zone isolée : le socle carré n'existe plus, le dire prime sur le nom du
+    // matériau (qui continue d'habiller la jupe verticale de la découpe)
+    const etat = params.regionMode ? 'Zone isolée' : params.plinth ? (cur?.name ?? '') : 'Masqué'
+    sBlk.setMeta(etat, params.plinth && cur && !params.regionMode ? presetSwatch(cur, glass) : null)
     const key = `${params.plinthFinish}/${glass ? params.plinthGlass : params.plinthPbr}`
     if (key !== lastPlinthKey) {
       lastPlinthKey = key

@@ -61,20 +61,43 @@ function ringCentroid(ring) {
 }
 
 // Filter MultiPolygon coordinates (GeoJSON [[[[lon,lat],…]…]…]) down to the
-// parts whose outer-ring centroid lies within maxDist world units of the DEM
-// patch center. Pure — unit tested. Never returns empty: if every part is far
+// parts that are relevant to this patch. A part is kept when EITHER:
+//   · its outer ring's bounding box overlaps the patch footprint — it covers
+//     what we are looking at, so it is relevant whatever its centroid says
+//   · or its centroid lies within maxDist world units of the patch center —
+//     the original rule, which keeps nearby islands (Corsica off France)
+// Pure — unit tested. Never returns empty: if every part fails both tests
 // (degenerate geocode), the nearest one is kept so the terrain never vanishes.
+//
+// ⚠️ Le test du centroïde SEUL se retournait contre nous dès que le bloc était
+// PLUS PETIT que la région. À La Réunion en z12 le bloc couvre 27 km pour une
+// île de 64 : le centroïde de l'île tombait hors du rayon, seuls trois cailloux
+// périphériques passaient, et le repli « jamais vide » ne jouait pas puisque la
+// liste n'était pas vide. Le masque sortait entièrement noir et « isoler la
+// zone » effaçait le relief — alors que la frontière était bien récupérée.
 export function filterFarParts(coordinates, dem, maxDist = FAR_PART_MAX_DIST) {
   const center = latLonToWorld(dem, dem.lat, dem.lon)
+  const half = TERRAIN_SIZE / 2
   let best = null
   let bestD = Infinity
   const kept = []
   for (const rings of coordinates) {
     if (!rings.length || !rings[0].length) continue
+    // emprise du morceau en unités monde (le patch occupe [-half, half]²)
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity
+    for (const [lon, lat] of rings[0]) {
+      const p = latLonToWorld(dem, clampLat(lat), lon)
+      if (p.x < x0) x0 = p.x
+      if (p.x > x1) x1 = p.x
+      if (p.z < z0) z0 = p.z
+      if (p.z > z1) z1 = p.z
+    }
+    const recouvre = x1 >= -half && x0 <= half && z1 >= -half && z0 <= half
+
     const [cLon, cLat] = ringCentroid(rings[0])
     const w = latLonToWorld(dem, clampLat(cLat), cLon)
     const d = Math.hypot(w.x - center.x, w.z - center.z)
-    if (d <= maxDist) kept.push(rings)
+    if (recouvre || d <= maxDist) kept.push(rings)
     if (d < bestD) {
       bestD = d
       best = rings

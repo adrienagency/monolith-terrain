@@ -11,7 +11,7 @@ const FORMAT = 'shibumap-template'
 const VERSION = 1
 
 // The look whitelist — every param a template restores. Deliberately EXCLUDES
-// demLat/demLon/demZoom/demLocation/source (location), camera pose, regionMode,
+// demLat/demLon/demZoom/demLocation/source (location),
 // the loaded GPX track itself (path/visibility/altitude), and per-zoom
 // exaggeration, so a template never moves or reshapes the view. GPX *styling*
 // (width/colour/casing/gradient/glow/…) is a look param like roadColor and
