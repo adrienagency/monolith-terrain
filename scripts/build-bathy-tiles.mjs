@@ -98,13 +98,43 @@ function encodePng(rgb, w, h) {
 }
 
 // --------------------------------------------------------------- source
-function openSource(dir) {
-  const metaPath = path.join(dir, 'meta.json')
-  if (!fs.existsSync(metaPath)) {
-    console.error(`\n✖ Source introuvable : ${metaPath}`)
-    console.error('  Fabriquez-la d\'abord :  python scripts/gebco-to-raw.py <geotiff> ' + dir + '\n')
+// UNE source = un dossier pivot. GEBCO livre son monde en PLUSIEURS GeoTIFF
+// regionaux : plutot que d'assembler une mosaique de 7,5 Go sur disque, on
+// ouvre chaque pivot et on interroge le premier qui couvre le point. C'est
+// aussi ce qui permettra d'empiler une source cotiere fine PAR-DESSUS une
+// source mondiale — l'ordre des dossiers fait la priorite.
+function openSources(spec) {
+  const dirs = spec.split(',').map((d) => d.trim()).filter(Boolean)
+  const found = []
+  for (const d of dirs) {
+    if (fs.existsSync(path.join(d, 'meta.json'))) { found.push(d); continue }
+    if (fs.existsSync(d)) {
+      for (const sub of fs.readdirSync(d).sort()) {
+        if (fs.existsSync(path.join(d, sub, 'meta.json'))) found.push(path.join(d, sub))
+      }
+    }
+  }
+  if (!found.length) {
+    console.error(`\n✖ Aucun pivot trouvé dans : ${spec}`)
+    console.error('  Fabriquez-le avant :  python scripts/gebco-to-raw.py <geotiff|dossier> data/gebco\n')
     process.exit(1)
   }
+  console.log(`  ${found.length} pivot(s) : ${found.map((f) => path.basename(f)).join(', ')}`)
+  const opened = found.map(openOne)
+  return {
+    sample: (lon, lat) => {
+      for (const o of opened) {
+        const v = o.sample(lon, lat)
+        if (v != null) return v
+      }
+      return null
+    },
+    close: () => opened.forEach((o) => o.close()),
+  }
+}
+
+function openOne(dir) {
+  const metaPath = path.join(dir, 'meta.json')
   const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'))
   const fd = fs.openSync(path.join(dir, 'grid.bin'), 'r')
   const bytes = meta.dtype === 'int16' ? 2 : 4
@@ -168,7 +198,7 @@ function main() {
     return
   }
 
-  const src = openSource(SRC)
+  const src = openSources(SRC)
   let written = 0
   let skipped = 0
   const t0 = Date.now()

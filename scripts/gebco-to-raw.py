@@ -20,6 +20,7 @@ faut le passer a la main (les grilles GEBCO couvrent le monde entier, donc
 """
 import json
 import os
+import re
 import sys
 
 try:
@@ -37,10 +38,25 @@ TAG_TIEPOINT = 33922
 TAG_PIXELSCALE = 33550
 
 
+def bbox_from_name(name):
+    """GEBCO encode l'emprise DANS le nom du fichier, et c'est plus fiable que
+    les tags : gebco_2026_n0.0_s-90.0_w0.0_e90.0_geotiff.tif"""
+    m = re.search(r"_n(-?[\d.]+)_s(-?[\d.]+)_w(-?[\d.]+)_e(-?[\d.]+)", name)
+    if not m:
+        return None
+    n, s_, w, e = (float(g) for g in m.groups())
+    return w, e, s_, n
+
+
 def georef(img, argv):
     """Georeferencement : d'abord les tags, sinon les arguments, sinon le monde."""
     def opt(name, dflt):
         return float(argv[argv.index(f"--{name}") + 1]) if f"--{name}" in argv else dflt
+
+    named = bbox_from_name(os.path.basename(getattr(img, "filename", "") or ""))
+    if named:
+        print("  emprise lue dans le NOM du fichier (methode GEBCO)")
+        return named
 
     tags = getattr(img, "tag_v2", {}) or {}
     if TAG_TIEPOINT in tags and TAG_PIXELSCALE in tags:
@@ -64,7 +80,30 @@ def main():
     src, out_dir = pos[0], pos[1]
     if not os.path.exists(src):
         sys.exit(f"Introuvable : {src}")
+
+    # DOSSIER : GEBCO livre huit GeoTIFF de 90x90 degres. On fabrique un pivot
+    # par fichier ; le tuileur les interroge tous (voir openSources).
+    if os.path.isdir(src):
+        tifs = sorted(f for f in os.listdir(src) if f.lower().endswith((".tif", ".tiff")))
+        if not tifs:
+            sys.exit(f"Aucun GeoTIFF dans {src}")
+        print(f"\n{len(tifs)} GeoTIFF a convertir\n")
+        for k, t in enumerate(tifs, 1):
+            sub = os.path.join(out_dir, os.path.splitext(t)[0])
+            if os.path.exists(os.path.join(sub, "meta.json")):
+                print(f"[{k}/{len(tifs)}] {t} — deja fait, ignore")
+                continue
+            print(f"[{k}/{len(tifs)}] {t}")
+            os.makedirs(sub, exist_ok=True)
+            convert(os.path.join(src, t), sub, argv)
+        print("\nTermine. Ensuite :  node scripts/build-bathy-tiles.mjs --src " + out_dir + " --dry\n")
+        return
+
     os.makedirs(out_dir, exist_ok=True)
+    convert(src, out_dir, argv)
+
+
+def convert(src, out_dir, argv):
 
     print(f"\nLecture de {src} …")
     img = Image.open(src)
