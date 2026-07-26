@@ -3466,7 +3466,11 @@ function setRegionTarget(t) {
 async function resolveRegionMask() {
   if (regionTarget && !regionTarget.parts) {
     try {
-      const hit = await geocode(regionTarget.name)
+      // Les entrées d'Explorer portent une précision entre parenthèses —
+      // « Tenerife (Teide) », « Corsica (whole island) ». Elle aide à LIRE la
+      // liste, mais aucun géocodeur ne la connaît : envoyée telle quelle, elle
+      // ne rend rien et le lieu retombe silencieusement sur la déduction.
+      const hit = await geocode(regionTarget.name.replace(/\s*\([^)]*\)/g, '').trim())
       const parts = hit && mainParts(hit.geojson, hit.lat, hit.lon)
       if (parts?.length) regionTarget.parts = parts
     } catch (err) {
