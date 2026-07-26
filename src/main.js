@@ -59,7 +59,7 @@ import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
 import { buildRegionSkirt } from './region-skirt.js'
 import { makeSocleEnvMap } from './socle-env.js'
 import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
-import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, stripFromLook, loadUserTemplates, saveUserTemplates } from './templates-user.js'
+import { TEMPLATE_KEYS, captureLook, captureView, serializeTemplate, parseTemplate, stripFromLook, loadUserTemplates, saveUserTemplates } from './templates-user.js'
 import { loadUserPalettes, saveUserPalettes, paletteFromParams } from './user-palettes.js'
 import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT } from './share-link.js'
 import { DroneCam } from './drone-cam.js'
@@ -1655,7 +1655,15 @@ async function fetchAndBuildDem() {
   // first terrain build (so rampStops/material have a mesh to land on), then
   // never again so the user's own edits are never stomped.
   const fromLink = location.hash.startsWith('#s=') || location.hash.startsWith('#r=')
-  if (!_startupLookApplied && !fromLink && !IS_EMBED) { _startupLookApplied = true; applyUserTemplate({ look: STARTUP_LOOK }) }
+  if (!_startupLookApplied && !fromLink && !IS_EMBED) {
+    _startupLookApplied = true
+    // `view` du fichier s'il en porte une ; sinon la VUE ISOMÉTRIQUE 1, qui
+    // est le cadrage d'ouverture voulu (Adrien). applyIsoView refuse tant que
+    // la scène n'est pas en mode surface au repos, d'où le rendez-vous après
+    // la construction du relief plutôt qu'au tout début du démarrage.
+    applyUserTemplate({ look: STARTUP_LOOK, view: SHIBU_START.view || null })
+    if (!SHIBU_START.view) applyIsoView(0)
+  }
   // OMBRAGE AUTO — en DERNIER : le look d'ouverture (ou celui d'un lien
   // partagé) vient d'écrire ses constantes d'ombrage, or elles ont été
   // réglées sur un AUTRE relief. On les recalcule pour celui qu'on vient de
@@ -1897,33 +1905,14 @@ const peaksLayer = new PeaksLayer({
 // invisible until a user found and flipped that switch by hand.
 peaksLayer.setEnabled(params.peaksEnabled)
 
-// Adrien's saved "isolated" look — applied ONCE at boot as the opening view
-// (imported from his exported .shibumap-template.json). It carries the whole
-// style : the white→clay→ink relief ramp, the Caribbean-lagoon ocean, the
-// animated sea, marble socle, warm morning light, film grain, etc.
-const STARTUP_LOOK = {
-  rampStops: [
-    { c: '#fafafa', p: 0 }, { c: '#dbd3b8', p: 0.14 }, { c: '#908e89', p: 0.28 }, { c: '#d7c3a8', p: 0.42 },
-    { c: '#dab38b', p: 0.56 }, { c: '#6a4c3e', p: 0.7 }, { c: '#271402', p: 0.84 }, { c: '#fafaff', p: 1 },
-  ],
-  oceanShallow: '#c8f2e4', oceanMid: '#62cfc1', oceanDeep: '#136e7d', darkMode: false,
-  mapTint: 0.8, heightContrast: 1.5, heightPivot: 0.47, slopeTint: 0.88,
-  roadsEnabled: false, roadsOpacity: 0.9, roadsDetail: 1, roadColor: '', waterEnabled: true, waterOpacity: 0.9, waterFill: true, coastLine: false,
-  aerialEnabled: false, aerialOpacity: 1, aerialCoastFade: 0.1, placesEnabled: true, placesDensity: 1, placesSize: 1, placesHalo: true,
-  waterReal: true, waterTransparency: 0.3, waterSunFx: 0.72, lakeColor: '#8fc6e8',
-  seaWaveH: 1.45, seaChop: 0.9, seaSpeed: 1.38, seaSeed: 3929, seaBed: 'lagoon', seaEdge: true, seaEdgeFrost: 0, seaRefract: 1,
-  contourInterval: 0.1303719091589592, contourOpacity: 0.7247180059533789, contourWeight: 0.85, contourColor: '#30271f',
-  gridStep: 9.629517641116472, gridOpacity: 0.7738736844361597, gridColor: '#262321', hudInk: '#17191b', hudAccent: '#ff4d00', labels: true,
-  sunIntensity: 1.860630412038343, sunAzimuth: 73.7292616914192, sunElevation: 12.374021473780667, hemiIntensity: 0.49677173533972385, envLight: 0.2319213023766564, shadowSoftness: 9, timeOfDay: 6.1, shadowMode: 'dynamic',
-  color: '#e7e2d6', roughness: 1, roughnessVariation: 0.22, roughnessScale: 10, bumpScale: 1.1, envMapIntensity: 0.16,
-  ...BASE_GRADE, vignette: 0.06, grain: 0.17,
-  ssaoEnabled: true, ssaoIntensity: 1.15, bloomEnabled: false, bloomIntensity: 0.16, bloomThreshold: 0.6, fogNear: 32, fogFar: 59, fogColor: '#ffffff', fogEnabled: false,
-  bgMode: 'solid', bgColorA: '#fcfbfb', bgColorB: '#faf9f9', bgColorC: '#f5f4f4', bgAngle: 263, bgEnv: '',
-  fov: 33, autoFocus: true, focusDistance: 147.68, focusRange: 20, bokehEnabled: true, bokehScale: 0,
-  plinth: true, plinthDepth: 7, plinthColor: '#d8d4cc', plinthFinish: 'solid', plinthPbr: 'wmarble', slabCorner: 0.04, slabCornerSmoothing: 0.6, groundInfo: true,
-  terrainSurfaceMat: '', terrainMatRoughness: 0.75, surfaceFx: 0, liquidMetal: false,
-  cloudsEnabled: false,
-}
+// LE look d'ouverture, appliqué UNE fois après le premier relief : c'est le
+// template « shibuStart » d'Adrien, la même source que le pré-remplissage de
+// `params` à la ligne ~531. Ces deux chemins portaient AUTREFOIS deux looks
+// différents — shibuStart posé au démarrage puis écrasé ici par un ancien look
+// codé en dur — si bien que le template de départ n'était jamais celui qui
+// s'affichait (Adrien : « reprends ce qui est en cours »). Une seule source
+// désormais : public/templates/defaults/shibustart.json.
+const STARTUP_LOOK = SHIBU_START.look
 let _startupLookApplied = false
 
 // the shipped survey look — what ⟲ RESET LOOK restores. Templates can now
@@ -2273,6 +2262,12 @@ let userTplRefreshFn = () => {} // re-rend la rangée des templates user (boutiq
 function applyUserTemplate(tmpl) {
   const L = tmpl.look || {}
   for (const k of TEMPLATE_KEYS) if (k in L) params[k] = L[k] == null ? L[k] : JSON.parse(JSON.stringify(L[k]))
+  // L'EXAGÉRATION est un cas à part : syncExagToZoom() la relit du magasin
+  // par zoom à chaque chargement de relief, donc la poser dans params seul
+  // la ferait écraser au prochain DEM — le template semblerait la sauver sans
+  // la sauver. On l'écrit dans le magasin du zoom courant, exactement ce que
+  // fait la tirette de l'utilisateur (saveZoomExag).
+  if (Number.isFinite(L.demExaggeration)) saveZoomExag(params.demZoom, L.demExaggeration)
   // un template d'avant Fonds v2 (sans stops/points) ne doit pas hériter de
   // ceux de la session : retomber sur SES bgColorA/B/C
   if (!('bgStops' in L)) params.bgStops = null
@@ -2316,6 +2311,17 @@ function applyUserTemplate(tmpl) {
   rebuildMapLayers() // re-derive roads/water/places for the current location under the restored look
   blockGrid?.restyle(params) // les dalles voisines du damier suivent la principale
   gpxLayer.rebuildAll() // re-drape every loaded track with the restored line width/colour/casing
+  // LA POSE DE CAMÉRA, si le fichier en porte une. Direction normalisée +
+  // facteur relatif à maxDistance : le cadrage se reproduit à l'identique sur
+  // un bloc de n'importe quelle échelle (même arithmétique que applyIsoView).
+  // Un template d'avant ce chantier n'a pas de bloc `view` — la caméra ne
+  // bouge donc pas, exactement comme avant.
+  const V = tmpl.view
+  if (V && modes.mode === 'surface' && !modes.busy) {
+    const target = new THREE.Vector3(...V.target)
+    const dir = new THREE.Vector3(...V.dir).normalize()
+    flyTo(target.clone().addScaledVector(dir, controls.maxDistance * V.k), target, { orbit: true })
+  }
   // A history.record() taken right here re-captures EXACTLY what was just
   // applied (captureLook(params) after the assignment above), so it dedups
   // cleanly against the snapshot undo()/redo() just pushed through this same
@@ -2366,7 +2372,7 @@ function saveCurrentTemplate(name) {
   const clean = String(name || '').trim().slice(0, 40) || 'My look'
   const look = captureLook(params)
   const { strip, shaders } = stripFromLook(look)
-  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: clean, thumb: captureThumbnail(), strip, shaders, look }
+  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: clean, thumb: captureThumbnail(), strip, shaders, view: captureView(camera, controls), look }
   userTemplates.push(t)
   persistUserTemplates()
   return t
@@ -2389,7 +2395,7 @@ function exportUserTemplate(id) {
 function importTemplateText(text) {
   const parsed = parseTemplate(text)
   if (!parsed) return null
-  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: parsed.name, thumb: parsed.thumb, strip: parsed.strip, shaders: parsed.shaders, look: parsed.look }
+  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: parsed.name, thumb: parsed.thumb, strip: parsed.strip, shaders: parsed.shaders, view: parsed.view, look: parsed.look }
   userTemplates.push(t)
   persistUserTemplates()
   return t
@@ -3497,15 +3503,25 @@ async function shareCurrentView() {
   const state = captureShareState(params, cam, BASE_TEMPLATE_LOOK)
   const hasTrack = !!gpxLayer.track
 
-  // With a track loaded, publish it (Netlify Blobs via netlify/functions/race.mjs)
-  // and hand out the short #r= link — the whole point of sharing a race is that
-  // the recipient sees the course. Publish failure degrades HONESTLY to the
-  // inline #s= link with `published: false`, so the toast can say the track
-  // didn't make it — a link that silently drops the course would be worse.
+  // On PUBLIE TOUJOURS (Netlify Blobs via netlify/functions/race.mjs) pour
+  // rendre un lien /r/<id> court — avec ou sans course.
+  //
+  // Seule une carte AVEC trace publiait ; les autres tombaient sur le lien
+  // #s=, qui encode tout l'état dans le fragment et pèse ~2 900 caractères.
+  // Un tel lien se fait couper par la plupart des messageries, se casse quand
+  // un client mail le replie sur deux lignes, donne un QR code illisible, et
+  // — parce qu'un fragment n'est JAMAIS envoyé au serveur — n'affiche aucun
+  // aperçu là où on le colle. D'où « je n'ai aucun moyen de la partager »
+  // (Adrien) alors que l'entrée de menu existait : elle rendait un lien
+  // techniquement valide et pratiquement inutilisable.
+  //
+  // Un échec de publication dégrade HONNÊTEMENT vers #s= : long, mais il
+  // marche. Avec une course chargée en revanche, l'échec reste dur (plus bas)
+  // — un lien qui perdrait le parcours serait pire que pas de lien.
   let url = null
   let published = false
   let failDetail = ''
-  if (hasTrack) {
+  {
     // Tentative 1 : course complète (logo rastérisé si besoin). Tentative 2 :
     // SANS logo — si c'est lui que le serveur refuse (422), la course part
     // quand même ; un échec transitoire (réseau, cold start) est absorbé au
@@ -3533,9 +3549,12 @@ async function shareCurrentView() {
           // transports retirés, logo) — sans eux la shibu reçue n'avait que
           // la ligne nue, aucun cartouche (« le parcours ne s'affiche pas »).
           body: JSON.stringify({
-            gpx: trackToGpx(gpxLayer.track),
+            // null quand il n'y a pas de course : le serveur accepte une
+            // carte nue, il n'exige un GPX valide que s'il y en a un
+            gpx: hasTrack ? trackToGpx(gpxLayer.track) : null,
             state,
-            raceName: raceState.name || gpxLayer.raceName || '',
+            // sans course, c'est le LIEU qui nomme l'aperçu du lien
+            raceName: raceState.name || gpxLayer.raceName || (hasTrack ? '' : params.demLocation || ''),
             race,
             logo: withLogo ? safeLogo : null,
           }),
@@ -4382,8 +4401,10 @@ async function bootInitialView() {
     if (race.state.cam) pendingShareCam = race.state.cam
   }
   // loadGpxText frames the track, loads terrain, and applies the pending
-  // camera once the view exists.
-  await loadGpxText(race.gpx)
+  // camera once the view exists. SANS course (une carte nue publiée), il n'y
+  // a rien à cadrer : on charge simplement le relief du lieu restauré.
+  if (race.gpx) await loadGpxText(race.gpx)
+  else if (params.source === 'real') await loadRealTerrain()
   // la course complète du payload → cartouches, flancs du bloc, ticks du
   // profil, nom du calque (mini panneau) — la shibu reçue est ENTIÈRE
   if (race.race) {

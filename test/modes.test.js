@@ -29,26 +29,33 @@ test('pickDiveTier lands each altitude on the matching scale', () => {
   assert.equal(pickDiveTier(16000000), null) // globe territory above the z4 block
 })
 
-test('the surface staircase widens through z5 to the z4 continental block', () => {
-  assert.equal(stepZoom(12, -1), 10)
-  assert.equal(stepZoom(10, -1), 8)
-  assert.equal(stepZoom(8, -1), 6)
+test('the surface staircase widens one zoom level at a time down to z4', () => {
+  assert.equal(stepZoom(12, -1), 11)
+  assert.equal(stepZoom(10, -1), 9)
+  assert.equal(stepZoom(8, -1), 7)
   assert.equal(stepZoom(6, -1), 5)
-  assert.equal(stepZoom(5, -1), 4) // z5 -> z4 (one final step to the continental block)
+  assert.equal(stepZoom(5, -1), 4)
   assert.equal(stepZoom(4, -1), 4) // continental floor
-  // refining (zoom-in against the stop) unchanged: 2 steps at a time
-  assert.equal(stepZoom(5, 1), 7)
-  assert.equal(stepZoom(8, 1), 10)
-  assert.equal(stepZoom(10, 1), 12)
-  assert.equal(stepZoom(11, 1), 12) // caps at the fine scale (default 12)
-  assert.equal(stepZoom(12, 1, 14), 14) // user picked a finer detail zoom
 })
 
-test('the staircase climbs to a z15 fine cap (deeper zoom)', () => {
-  // a user on detail z15 who widened to z8 can refine all the way back
-  assert.equal(stepZoom(8, 1, 15), 10)
-  assert.equal(stepZoom(10, 1, 15), 12)
-  assert.equal(stepZoom(12, 1, 15), 14)
+test('the staircase refines one zoom level at a time, capped at the fine scale', () => {
+  assert.equal(stepZoom(5, 1), 6)
+  assert.equal(stepZoom(8, 1), 9)
+  assert.equal(stepZoom(10, 1), 11)
+  assert.equal(stepZoom(11, 1), 12)
+  assert.equal(stepZoom(12, 1), 12) // caps at the fine scale (default 12)
+  assert.equal(stepZoom(12, 1, 14), 13) // user picked a finer detail zoom
   assert.equal(stepZoom(14, 1, 15), 15) // last step is capped at the fine scale
-  assert.equal(stepZoom(15, -1), 13) // and widening steps back down normally
+  assert.equal(stepZoom(15, 1, 15), 15)
+})
+
+// Un cran à l'aller DOIT valoir un cran au retour : avec l'ancien pas de 2,
+// zoomer puis dézoomer ramenait DEUX crans en arrière — on ne pouvait pas
+// revenir au cadrage qu'on venait de quitter.
+test('refining then widening returns to the exact starting zoom', () => {
+  for (const fine of [12, 15, 17]) {
+    for (let z = 4; z < fine; z++) {
+      assert.equal(stepZoom(stepZoom(z, 1, fine), -1), z, `aller-retour depuis z${z} (fin ${fine})`)
+    }
+  }
 })

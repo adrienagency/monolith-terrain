@@ -11,14 +11,20 @@
 //
 // PUBLIC AND UNAUTHENTICATED BY DESIGN — the product is "paste a link", so
 // there's no account to gate writes behind. That means anyone can POST here,
-// which is the real abuse surface (see the task report for the tradeoffs
-// this leaves open — no rate limiting is implemented yet). What IS enforced,
-// on every request, no exceptions:
+// which is the real abuse surface. What IS enforced, on every request, no
+// exceptions:
+//   - a PER-IP RATE LIMIT (see takeToken below). It became necessary the day
+//     a plain map — no GPX — became publishable too: until then only someone
+//     who had loaded a real track could write here, which was a de facto
+//     brake. Now any visitor can, so the brake has to be explicit.
 //   - hard size ceilings on every field (checked on the DECODED string
 //     length, not a trustable client-sent header)
-//   - the GPX text must look like GPX (bounded regex scan below — the
-//     Functions runtime has no DOMParser, so this can't reuse gpx.js's real
-//     parser; see looksLikeGpx())
+//   - the GPX text, WHEN PRESENT, must look like GPX (bounded regex scan
+//     below — the Functions runtime has no DOMParser, so this can't reuse
+//     gpx.js's real parser; see looksLikeGpx()). It is optional: a map
+//     without a course is a legitimate thing to share, and refusing it was
+//     what forced those shares onto a 3 000-character #s= URL that messaging
+//     apps mangle and crawlers never see.
 //   - a logo, if present, must be a data: URL with an image mime type on the
 //     allowlist
 //   - every response is forced text/plain + nosniff, JSON-wrapped — this
@@ -93,6 +99,51 @@ export function isValidLogoDataUrl(dataUrl) {
   return typeof dataUrl === 'string' && dataUrl.length > 0 && dataUrl.length <= MAX_LOGO_DATA_URL_CHARS && LOGO_DATA_URL_RE.test(dataUrl)
 }
 
+// ---- limitation de débit par IP -------------------------------------------
+// Seau à jetons dans Blobs. Volontairement grossier : deux requêtes vraiment
+// simultanées de la MÊME adresse peuvent lire le même seau et passer toutes
+// les deux (lecture-modification-écriture non atomique). C'est acceptable —
+// on cherche à arrêter un script qui écrit en boucle, pas à compter juste. Un
+// vrai verrou coûterait un service de plus pour un produit qui n'a pas encore
+// un seul client payant.
+const RATE_CAP = 12 // publications d'affilée
+const RATE_WINDOW_MS = 10 * 60 * 1000 // le seau se remplit entièrement en 10 min
+
+export function refillBucket(bucket, now, cap = RATE_CAP, windowMs = RATE_WINDOW_MS) {
+  const tokens = Number.isFinite(bucket?.tokens) ? bucket.tokens : cap
+  const at = Number.isFinite(bucket?.at) ? bucket.at : now
+  // remplissage continu : pas de bord de fenêtre où tout se réarme d'un coup
+  const gained = Math.max(0, now - at) * (cap / windowMs)
+  return { tokens: Math.min(cap, tokens + gained), at: now }
+}
+
+async function takeToken(store, ip, now = Date.now()) {
+  if (!ip) return true // pas d'IP lisible : on ne bloque pas un vrai visiteur
+  const key = `rl_${ip.replace(/[^a-zA-Z0-9:._-]/g, '')}`.slice(0, 96)
+  let bucket = null
+  try {
+    bucket = await store.get(key, { type: 'json' })
+  } catch {
+    return true // le magasin est en panne : on laisse passer plutôt que de fermer le site
+  }
+  const next = refillBucket(bucket, now)
+  if (next.tokens < 1) return false
+  next.tokens -= 1
+  try {
+    await store.setJSON(key, next)
+  } catch {}
+  return true
+}
+
+// Netlify place l'IP du client dans x-nf-client-connection-ip ; x-forwarded-for
+// est un repli et sa PREMIÈRE entrée est celle du client.
+export function clientIp(headers) {
+  const direct = headers.get('x-nf-client-connection-ip')
+  if (direct) return direct.trim()
+  const fwd = headers.get('x-forwarded-for')
+  return fwd ? fwd.split(',')[0].trim() : ''
+}
+
 export default async (req) => {
   if (req.method === 'OPTIONS') return jsonResponse({ ok: true }, 204)
 
@@ -115,6 +166,11 @@ export default async (req) => {
 
   if (req.method !== 'POST') return jsonResponse({ error: 'method not allowed' }, 405)
 
+  // AVANT de lire le corps : inutile d'ingérer 4 Mo pour les jeter ensuite
+  if (!(await takeToken(store, clientIp(req.headers)))) {
+    return jsonResponse({ error: 'trop de publications, réessayez dans quelques minutes' }, 429)
+  }
+
   let raw
   try {
     raw = await req.text()
@@ -131,8 +187,14 @@ export default async (req) => {
   }
   if (!body || typeof body !== 'object') return jsonResponse({ error: 'bad payload' }, 400)
 
-  if (!looksLikeGpx(body.gpx)) return jsonResponse({ error: 'invalid gpx' }, 422)
-  const gpx = body.gpx
+  // La trace est FACULTATIVE : une carte sans course se partage aussi. Quand
+  // elle est là, elle doit être valide — un GPX présent mais illisible reste
+  // une erreur, on ne le laisse pas silencieusement tomber.
+  let gpx = null
+  if (body.gpx != null) {
+    if (!looksLikeGpx(body.gpx)) return jsonResponse({ error: 'invalid gpx' }, 422)
+    gpx = body.gpx
+  }
 
   let logo = null
   if (body.logo != null) {

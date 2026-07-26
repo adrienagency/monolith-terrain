@@ -246,7 +246,17 @@ const LOGO_DATA_URL_RE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+
 // the same scrutiny before touching app state. Never throws.
 export function parseRacePayload(raw, base) {
   if (!raw || typeof raw !== 'object') return null
-  if (typeof raw.gpx !== 'string' || !raw.gpx || raw.gpx.length > RACE_GPX_MAX_CHARS) return null
+  // La trace est FACULTATIVE : une carte sans course se publie aussi, et son
+  // lien /r/<id> est le seul partage court et prévisualisable qui existe.
+  // Présente, elle doit rester une chaîne bornée. Un payload SANS gpx ni state
+  // n'a en revanche rien à restaurer — on le refuse plutôt que de rendre un
+  // objet vide qui ferait croire à un lien valide.
+  let gpx = null
+  if (raw.gpx != null) {
+    if (typeof raw.gpx !== 'string' || !raw.gpx || raw.gpx.length > RACE_GPX_MAX_CHARS) return null
+    gpx = raw.gpx
+  }
+  if (!gpx && !(raw.state && typeof raw.state === 'object')) return null
 
   let logo = null
   const dataUrl = typeof raw.logo === 'string' ? raw.logo : raw.logo?.dataUrl
@@ -262,5 +272,5 @@ export function parseRacePayload(raw, base) {
     if (bundle) race = bundle.race
   }
 
-  return { gpx: raw.gpx, logo, state, race }
+  return { gpx, logo, state, race }
 }

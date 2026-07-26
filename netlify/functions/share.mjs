@@ -58,12 +58,15 @@ export function cleanRaceName(name) {
     .slice(0, MAX_NAME_CHARS)
 }
 
-export function sharePageHtml({ id, raceName, origin = SITE }) {
+// `hasCourse` distingue une carte de course d'une carte nue : depuis qu'une
+// carte sans GPX se publie aussi, parler de « course » dans l'aperçu d'un
+// simple relief serait faux. Sans course, `raceName` porte le LIEU.
+export function sharePageHtml({ id, raceName, origin = SITE, hasCourse = true }) {
   const name = cleanRaceName(raceName)
-  const title = name ? `${name} — ShibuMap` : 'A race on ShibuMap'
-  const desc = name
-    ? `See the course of ${name} as a 3D relief map.`
-    : 'See this course as a 3D relief map.'
+  const title = name ? `${name} — ShibuMap` : hasCourse ? 'A race on ShibuMap' : 'A map on ShibuMap'
+  const desc = hasCourse
+    ? (name ? `See the course of ${name} as a 3D relief map.` : 'See this course as a 3D relief map.')
+    : (name ? `${name}, as a 3D relief map.` : 'See this place as a 3D relief map.')
   const url = `${origin}/r/${id}`
   const target = `${origin}/#r=${id}`
 
@@ -139,6 +142,6 @@ export default async (req, context) => {
     // and the visitor still reaches the app.
   }
 
-  const html = sharePageHtml({ id, raceName: payload?.raceName ?? '', origin: SITE })
+  const html = sharePageHtml({ id, raceName: payload?.raceName ?? '', origin: SITE, hasCourse: typeof payload?.gpx === 'string' && !!payload.gpx })
   return htmlResponse(html, payload ? 200 : 404)
 }

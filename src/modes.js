@@ -35,16 +35,23 @@ export function pickDiveTier(altM) {
   return DIVE_TIERS.find((t) => altM < t.altM) ?? null
 }
 
-// the surface staircase arithmetic: two zoom steps at a time, fine-capped
-// going down; widening past the z5 continental block takes one final step to
-// the z4 continental block (~7 500 km), then floors there — past that the
-// orbit gate takes over
+// L'escalier de surface : UN palier à la fois, plafonné au zoom fin en
+// montant, plancher au bloc continental z4 (~7 500 km) en descendant — au-delà
+// c'est la porte orbitale qui prend le relais.
+//
+// Il avançait de DEUX paliers à la fois. C'était défendable tant que le relief
+// fin s'arrêtait à z12 : un cran sur deux n'apportait rien de visible et chaque
+// palier coûte un rechargement de DEM. Depuis Mapterhorn, chaque niveau porte
+// de la vraie donnée, donc sauter un cran sur deux jetait la moitié du détail
+// disponible (Adrien : « le zoom saute des étapes, il passe de 11 à 13 »).
+//
+// Et surtout, le pas de 2 n'était PAS symétrique : le retour se faisait aussi
+// par 2 mais la montée était plafonnée au zoom fin, si bien qu'un aller-retour
+// depuis un palier impair atterrissait un cran plus bas que le point de départ
+// — on ne pouvait pas revenir au cadrage qu'on venait de quitter.
 export function stepZoom(zoom, dir, fine = 12) {
-  if (dir > 0) return Math.min(zoom + 2, Math.max(fine, 12))
-  // widen 2 steps at a time down to z5, then a single step to the z4
-  // continental block before the orbit gate; floored at z4
-  if (zoom <= 5) return Math.max(zoom - 1, 4)
-  return Math.max(zoom - 2, 5)
+  if (dir > 0) return Math.min(zoom + 1, Math.max(fine, 12))
+  return Math.max(zoom - 1, 4)
 }
 const DIVE_ALT_M = DIVE_TIERS[0].altM
 // ~9,4 rayons terrestres — la planète devient un petit objet dans le noir,

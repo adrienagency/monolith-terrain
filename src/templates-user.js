@@ -73,7 +73,49 @@ export const TEMPLATE_KEYS = [
   'gpxMarkers', 'gpxKm', 'gpxAltReadout', 'gpxSlopeReadout',
   // Race Studio : cartouches espace-écran + anti-chevauchement (débrayable)
   'gpxCartouches', 'gpxLabelAvoid',
+  // lecture du parcours (drone-follow) — c'est du comportement de rendu, pas
+  // la trace elle-même, donc ça voyage avec le look
+  'gpxFollow', 'gpxFollowSpeed',
+  // ---------------------------------------------------------------- OUBLIS
+  // Tout ce bloc MANQUAIT alors que chaque clé pilote quelque chose de
+  // visible : un look exporté puis réimporté ne rendait pas comme l'écran
+  // qu'on venait de quitter (Adrien : « tous les paramètres n'étaient pas
+  // pris en compte »). Les voisines immédiates de chacune étaient déjà là —
+  // tous les cloud* sauf cloudTexMix, tout le style GPX sauf gpxArchColor :
+  // ce sont des oublis, pas des exclusions. (hazeColor, elle, reste dehors :
+  // elle est DÉRIVÉE de bgColorA et recalculée à chaque application, la
+  // sauver donnerait une clé qui ne survit pas à sa propre relecture.)
+  'peaksEnabled', 'cloudTexMix', 'gpxArchColor', 'transmission',
+  // relief vertical + découpe à la frontière administrative : les deux
+  // réglages qui changent le plus la silhouette du bloc
+  'demExaggeration', 'regionMode',
+  // vitesse du cycle jour/nuit (la tirette du soleil)
+  'dayCycleSpeed',
+  // teinte de l'interface dérivée de la palette + verre du chrome
+  'uiTint', 'uiBlur', 'uiBgOpacity',
+  // balayage « scan »
+  'sweepSpeed', 'scanColor', 'scanDuration', 'scanWidth', 'scanBlur',
+  'scanDispHeight', 'scanDispFalloff',
+  // automatismes de caméra (le mouvement, PAS la pose — celle-ci vit dans le
+  // bloc `view` du fichier, voir captureView plus bas)
+  'camMove', 'camSpeed', 'surveyLines',
+  // look de la vue orbitale
+  'globeExaggeration', 'globeContourInterval', 'globeContourOpacity', 'globeGraticule',
 ]
+
+// Ce qui reste DÉLIBÉRÉMENT dehors, et pourquoi :
+//   source/demLat/demLon/demZoom/demLocation — la LOCALISATION. Un template
+//     restyle la carte courante, il ne téléporte pas. La vue de départ de
+//     l'application est posée séparément (START_VIEW dans main.js).
+//   seed/scale/octaves/lacunarity/gain/amplitude/warp/detail/detailScale/
+//     resolution — terrain PROCÉDURAL, sans objet sur du relief réel.
+//   pixelRatio/shadowRes — réglages de PERFORMANCE, propres à la machine.
+//     Les faire voyager ferait ramer un portable avec le template d'une
+//     grosse machine : c'est le seul groupe qu'il serait nuisible d'ajouter.
+//   gpxVisible/gpxAltitude — la trace elle-même, pas son style.
+//   paused — état transitoire.
+//   ringSpeed/flyDuration/flyEasing — aucune interface ne les expose, ils
+//     valent donc toujours leur défaut ; les sauver n'apporterait rien.
 
 const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)))
 
@@ -88,8 +130,45 @@ export function captureLook(params) {
 // A template carries a colour STRIP (vignette) — an array of hex swatches from
 // its palette — instead of a screenshot thumbnail. `shaders` flags whether it
 // uses a surface shader / liquid metal, which sorts it into a category.
+// ---- la POSE de caméra ----------------------------------------------------
+// Le fichier ne portait AUCUNE information de caméra : un template rendait le
+// même bloc sous un angle quelconque, donc jamais tout à fait l'image qu'on
+// avait exportée (Adrien : « l'angle de caméra doit être pris en compte »).
+//
+// On ne stocke ni la position absolue ni la distance en unités monde : elles
+// dépendent de la taille du bloc, qui change avec le zoom. On stocke la même
+// chose que les vues iso de main.js — une DIRECTION normalisée, un facteur k
+// relatif à controls.maxDistance, et la cible. Le cadrage se reproduit donc à
+// l'identique sur un bloc de n'importe quelle échelle.
+export function captureView(camera, controls) {
+  const t = controls.target
+  const dx = camera.position.x - t.x
+  const dy = camera.position.y - t.y
+  const dz = camera.position.z - t.z
+  const len = Math.hypot(dx, dy, dz)
+  if (!(len > 0) || !(controls.maxDistance > 0)) return null
+  return {
+    dir: [dx / len, dy / len, dz / len],
+    k: len / controls.maxDistance,
+    target: [t.x, t.y, t.z],
+  }
+}
+
+// un .json importé n'est pas de confiance : on n'accepte que des nombres finis
+const vec3 = (v) => (Array.isArray(v) && v.length === 3 && v.every((n) => Number.isFinite(n)) ? v.map(Number) : null)
+export function parseView(v) {
+  if (!v || typeof v !== 'object') return null
+  const dir = vec3(v.dir)
+  const target = vec3(v.target)
+  const k = Number(v.k)
+  if (!dir || !target || !Number.isFinite(k) || k <= 0) return null
+  // une direction nulle ne définit aucun angle — refus plutôt que division par 0
+  if (!Math.hypot(...dir)) return null
+  return { dir, k, target }
+}
+
 export function serializeTemplate(t) {
-  return JSON.stringify({ format: FORMAT, version: VERSION, name: t.name, thumb: t.thumb, strip: t.strip, shaders: t.shaders, look: t.look }, null, 0)
+  return JSON.stringify({ format: FORMAT, version: VERSION, name: t.name, thumb: t.thumb, strip: t.strip, shaders: t.shaders, view: t.view || null, look: t.look }, null, 0)
 }
 const HEX_RE = /^#[0-9a-fA-F]{3,8}$/
 // only accept an image data URL for the thumbnail — an imported .json is
@@ -104,7 +183,7 @@ export function parseTemplate(text) {
   // file's flags (a hand-edited/older export could mis-sort itself)
   const derived = stripFromLook(o.look)
   const strip = Array.isArray(o.strip) ? o.strip.filter((c) => typeof c === 'string' && HEX_RE.test(c)).slice(0, 8) : []
-  return { name: String(o.name || 'Imported').slice(0, 40), thumb, strip: strip.length ? strip : derived.strip, shaders: derived.shaders, look: o.look }
+  return { name: String(o.name || 'Imported').slice(0, 40), thumb, strip: strip.length ? strip : derived.strip, shaders: derived.shaders, view: parseView(o.view), look: o.look }
 }
 
 // derive the vignette strip + shader category from a captured look
