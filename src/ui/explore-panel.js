@@ -49,7 +49,9 @@ export function buildExplorePanel(ctx) {
     row.type = 'button'
     row.style.paddingLeft = `${8 + indent}px`
     row.innerHTML = `<span>${p.name}</span>`
-    row.addEventListener('click', () => ctx.flyTo(p.lat, p.lon, p.zoom))
+    // Le NOM part avec le vol : c'est lui qui permettra au mode isolé de
+    // découper CE lieu, et non ce qui se trouve sous le centre du bloc.
+    row.addEventListener('click', () => ctx.flyTo(p.lat, p.lon, p.zoom, p.name))
     return row
   }
 

@@ -25,7 +25,7 @@ import { loadDem, getDemMaxZoom } from './dem.js'
 import { activeDemSource, isFallbackActive } from './dem-source.js'
 import { Globe } from './globe.js'
 import { Modes, stepZoom } from './modes.js'
-import { createGoto } from './goto.js'
+import { createGoto, geocode, mainParts } from './goto.js'
 import { frameTrack } from './gpx.js'
 import { GpxLayerManager } from './gpx-layers.js'
 import { buildRaceLabels } from './race-labels.js'
@@ -54,7 +54,7 @@ import { SunDisc } from './sun-disc.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
-import { fetchRegionMask, frameRegion } from './region-mask.js'
+import { fetchRegionMask, regionMaskFromParts, frameRegion } from './region-mask.js'
 import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
 import { buildRegionSkirt } from './region-skirt.js'
 import { makeSocleEnvMap } from './socle-env.js'
@@ -1879,7 +1879,12 @@ modes = new Modes({
   },
 })
 
-const gotoCtl = createGoto({ modes, announce: (m) => modes.announce(m), getFineZoom: () => userFineZoom })
+const gotoCtl = createGoto({
+  modes,
+  announce: (m) => modes.announce(m),
+  getFineZoom: () => userFineZoom,
+  onTarget: (t) => setRegionTarget(t),
+})
 
 // vertical zoom stepper (left edge) — discrete alternative to the wheel; reads
 // live staircase/orbit state each frame, only triggers modes.stepFiner/Wider
@@ -3437,6 +3442,59 @@ let regionFramed = false
 // aucune frontière du tout.
 let regionLevel = null
 
+// CE QUE L'UTILISATEUR A DEMANDÉ — `{ name, parts? }`.
+//
+// C'est la correction de fond du mode isolé. Il ne savait pas ce qu'on lui
+// demandait : il géocodait à l'envers le CENTRE du bloc, à un niveau
+// administratif déduit du ZOOM (LEVEL_TABLE, region-mask.js). Chercher Toulon
+// et recevoir le Var n'était donc pas un accident, c'était le fonctionnement —
+// aucune quantité de données n'aurait pu le corriger.
+let regionTarget = null
+function setRegionTarget(t) {
+  regionTarget = t && t.name ? { name: t.name, parts: t.parts || null } : null
+  // La cible change : le niveau retenu au passage précédent ne la concerne plus.
+  regionLevel = null
+}
+
+// La géométrie de la cible prime toujours sur la déduction. Trois cas, du plus
+// sûr au plus flou :
+//   1. l'entité a été cherchée, sa géométrie est déjà là → on découpe celle-là
+//   2. on n'a que son nom (clic sur un lieu remarquable) → on la géocode UNE
+//      fois, à la demande : inutile de payer ce coût tant que personne n'isole
+//   3. rien de demandé (arrivée par coordonnées, panoramique libre) → repli sur
+//      l'ancien comportement, deviner d'après le centre et le zoom
+async function resolveRegionMask() {
+  if (regionTarget && !regionTarget.parts) {
+    try {
+      const hit = await geocode(regionTarget.name)
+      const parts = hit && mainParts(hit.geojson, hit.lat, hit.lon)
+      if (parts?.length) regionTarget.parts = parts
+    } catch (err) {
+      console.warn('cible isolée : géocodage impossible', err)
+    }
+  }
+  if (regionTarget?.parts?.length) {
+    const r = regionMaskFromParts({
+      parts: regionTarget.parts,
+      dem,
+      coastImage: coastMaskImage,
+      name: regionTarget.name,
+    })
+    if (r) return r
+    // Plus rien de la cible ne touche le bloc : l'utilisateur a navigué
+    // ailleurs depuis. On l'oublie plutôt que de découper dans le vide.
+    regionTarget = null
+  }
+  return fetchRegionMask({
+    lat: params.demLat,
+    lon: params.demLon,
+    zoom: params.demZoom,
+    dem,
+    coastImage: coastMaskImage,
+    level: regionLevel,
+  })
+}
+
 async function applyRegionMode() {
   if (!params.regionMode || params.source !== 'real' || !dem) {
     terrain.setRegionMask(null)
@@ -3467,7 +3525,7 @@ async function applyRegionMode() {
   try {
     // coastMaskImage : les polders sous 0 restent dans la découpe (le clip
     // altitude seul les prenait pour la mer) ; null → comportement v1
-    const r = await fetchRegionMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem, coastImage: coastMaskImage, level: regionLevel })
+    const r = await resolveRegionMask()
     regionLevel ??= r?.levelRow ?? null // le niveau du PREMIER passage fait foi
     if (!params.regionMode) return // user toggled off while fetching
 
@@ -4258,7 +4316,13 @@ const { elementsPanel, imagePanel } = buildEffectsPanel({
 const hourPill = buildHourPill({ params, applyTimeOfDay })
 
 const explorePanel = buildExplorePanel({
-  flyTo: (lat, lon, zoom) => modes.flyTo(lat, lon, zoom),
+  // `nom` : le lieu remarquable cliqué dans Explorer désigne une ENTITÉ, tout
+  // comme une recherche. On le retient pour que l'isolement le découpe lui,
+  // sans le géocoder tant que personne ne demande à isoler.
+  flyTo: (lat, lon, zoom, nom = null) => {
+    setRegionTarget(nom ? { name: nom } : null)
+    return modes.flyTo(lat, lon, zoom)
+  },
 })
 
 // Map panel — LEFT dock, wedged between Explore and Scan (Explore, Map, Scan,

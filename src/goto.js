@@ -5,6 +5,7 @@ import { parseLatLon } from './geo.js'
 import { stepZoom } from './modes.js'
 import { zoomForSpanKm } from './landmarks.js'
 import { frameRegion, NEAR_ISLAND_KM } from './region-mask.js'
+import { searchFR, contourFR, normalizeFR, dropArticleFR } from './geo-fr.js'
 
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search'
 
@@ -113,7 +114,40 @@ function landingZoom(getFineZoom) {
   return stepZoom(getFineZoom(), -1)
 }
 
-export function createGoto({ modes, announce, getFineZoom }) {
+// LA FRANCE D'ABORD, ET SEULEMENT SUR CORRESPONDANCE EXACTE.
+//
+// Pour une commune, un département ou une région française, geo-fr.js rend le
+// tracé OFFICIEL (IGN, via l'API de l'État) là où Nominatim rend une frontière
+// approchée — et surtout classe mal : « Toulon » lui vaut Toulonjac en tête.
+//
+// Le garde-fou est la CORRESPONDANCE EXACTE du nom normalisé. Sans lui, une
+// recherche mondiale un peu vague accrocherait un hameau français homonyme et
+// on partirait dans le Cantal au lieu de l'Ontario. Un nom qui ne tombe pas
+// pile passe son tour et repart sur Nominatim.
+async function frenchHit(query) {
+  try {
+    const clef = normalizeFR(query)
+    if (!clef) return null
+    const nu = dropArticleFR(clef)
+    const candidats = await searchFR(query)
+    const top = candidats.find((c) => {
+      const k = normalizeFR(c.nom)
+      return k === clef || dropArticleFR(k) === nu
+    })
+    if (!top) return null
+    const parts = await contourFR(top)
+    if (!parts?.length) return null
+    return { name: top.nom, parts, centre: top.centre }
+  } catch {
+    return null // la France est un raccourci, jamais un point de panne
+  }
+}
+
+// `onTarget` reçoit CE QUE L'UTILISATEUR A DEMANDÉ — nom et géométrie — pour
+// que le mode isolé découpe cette entité-là plutôt que d'essayer de la deviner
+// en géocodant le centre du bloc. Une paire de coordonnées ne désigne aucune
+// entité : elle efface la cible au lieu d'en poser une fausse.
+export function createGoto({ modes, announce, getFineZoom, onTarget = null }) {
   return {
     async go(text) {
       const c = parseLatLon(text)
@@ -121,6 +155,7 @@ export function createGoto({ modes, announce, getFineZoom }) {
         announce('UNREADABLE COORDINATES — TRY “45.8326, 6.8652”')
         return false
       }
+      onTarget?.(null)
       if (!(await modes.flyTo(c.lat, c.lon, landingZoom(getFineZoom)))) {
         announce('NAVIGATION BUSY — TRY AGAIN IN A MOMENT')
         return false
@@ -133,6 +168,22 @@ export function createGoto({ modes, announce, getFineZoom }) {
       if (!query || !query.trim()) return false
       announce(`SEARCHING — ${query.toUpperCase()}`)
       try {
+        const fine0 = getFineZoom ? getFineZoom() : 15
+        const fr = await frenchHit(query.trim())
+        if (fr) {
+          onTarget?.({ name: fr.name, parts: fr.parts })
+          const cadre = frameRegion(fr.parts, { min: 4, max: fine0 })
+          const lat = cadre?.lat ?? fr.centre?.[1]
+          const lon = cadre?.lon ?? fr.centre?.[0]
+          if (Number.isFinite(lat) && Number.isFinite(lon)) {
+            if (!(await modes.flyTo(lat, lon, cadre?.zoom ?? landingZoom(getFineZoom)))) {
+              announce('NAVIGATION BUSY — TRY AGAIN IN A MOMENT')
+              return false
+            }
+            announce(`TARGET — ${fr.name.toUpperCase()}`)
+            return true
+          }
+        }
         const hit = await geocode(query.trim())
         if (!hit) {
           announce('NO MATCH FOUND')
@@ -154,6 +205,11 @@ export function createGoto({ modes, announce, getFineZoom }) {
         const framed =
           (parts && frameRegion(parts, { min: 4, max: fine })) ||
           frameFromBBox(hit.bbox, { min: 4, max: fine, at: hit })
+        // La géométrie est déjà là — on ne la jette pas. C'est elle que le mode
+        // isolé découpera, au lieu de redemander « quelle frontière passe par
+        // ce point, au niveau que suggère le zoom ? » et de rendre le Var pour
+        // une demande de Toulon.
+        onTarget?.(parts?.length ? { name: hit.label.split(',')[0].trim(), parts } : { name: query.trim() })
         const lat = framed?.lat ?? hit.lat
         const lon = framed?.lon ?? hit.lon
         const zoom = framed?.zoom ?? landingZoom(getFineZoom)

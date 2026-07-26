@@ -149,6 +149,33 @@ export function filterFarParts(coordinates, dem, maxKm = NEAR_ISLAND_KM) {
     .map((p) => p.rings)
 }
 
+// Un seul morceau de cette géométrie touche-t-il le bloc ?
+//
+// filterFarParts ci-dessus garde volontairement le morceau le PLUS PROCHE quand
+// rien n'est à l'écran : c'est la bonne réponse quand on DEVINE la frontière à
+// partir du centre, où un géocodage un peu à côté ne doit pas vider le bloc.
+// C'est la mauvaise quand on découpe une entité DEMANDÉE : si l'utilisateur a
+// navigué ailleurs depuis, il faut abandonner la cible, pas la forcer dans le
+// cadre. D'où ce test explicite, que regionMaskFromParts consulte.
+export function partsVisible(coordinates, dem) {
+  if (!coordinates?.length || !dem) return false
+  const half = TERRAIN_SIZE / 2
+  for (const rings of coordinates) {
+    const ring = rings?.[0]
+    if (!ring?.length) continue
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity
+    for (const [lon, lat] of ring) {
+      const p = latLonToWorld(dem, clampLat(lat), lon)
+      if (p.x < x0) x0 = p.x
+      if (p.x > x1) x1 = p.x
+      if (p.z < z0) z0 = p.z
+      if (p.z > z1) z1 = p.z
+    }
+    if (x1 >= -half && x0 <= half && z1 >= -half && z0 <= half) return true
+  }
+  return false
+}
+
 // ---------------------------------------------------------------- geometry utils
 
 // normalize a GeoJSON geometry to MultiPolygon coordinates, or null
@@ -376,24 +403,49 @@ export async function fetchRegionMask({ lat, lon, zoom, dem, coastImage = null, 
         ? await continentBoundary(lat, lon)
         : await nominatimBoundary(lat, lon, levelRow)
     if (!boundary || !boundary.coordinates.length) return null
-    const near = filterFarParts(boundary.coordinates, dem)
-    if (!near.length) return null
-    const raster = rasterizeMask(near, dem, MASK_SIZE, coastImage)
-    return {
-      maskTexture: raster.texture,
-      maskCanvas: raster.canvas,
+    return regionMaskFromParts({
+      parts: boundary.coordinates,
+      dem,
+      coastImage,
       name: boundary.name,
-      level: levelRow.level,
-      // la LIGNE complète, pour que l'appelant puisse la réimposer au passage
-      // suivant après un recadrage (voir `level` ci-dessus)
       levelRow,
-      // les morceaux RETENUS, en lon/lat — de quoi recadrer le bloc sur la zone
-      // (main.js les passe à frameTrack, le même cadreur que les traces GPX)
-      parts: near,
-    }
+    })
   } catch (err) {
     console.warn('region mask failed:', err)
     return null
+  }
+}
+
+// LA MÊME SORTIE, MAIS À PARTIR D'UNE GÉOMÉTRIE DÉJÀ CONNUE.
+//
+// fetchRegionMask ci-dessus DEVINE ce qu'il faut découper : il géocode le
+// centre du bloc à un niveau administratif déduit du zoom. C'est le seul choix
+// possible quand on ne sait pas ce que l'utilisateur voulait — mais quand il
+// l'a dit, en tapant « Toulon » ou en cliquant un lieu, deviner est absurde et
+// se trompe : le niveau venant du zoom, demander Toulon pouvait rendre le Var.
+//
+// Cette porte-là prend la géométrie de l'entité DEMANDÉE et se contente de la
+// filtrer puis de la rasteriser. `levelRow` n'a alors plus de rôle de décision,
+// il n'est transporté que pour l'appelant.
+export function regionMaskFromParts({ parts, dem, coastImage = null, name = '', levelRow = null }) {
+  if (!parts?.length || !dem) return null
+  // Rien de la cible sous les yeux → on renonce, et l'appelant retombe sur la
+  // déduction. Voir partsVisible : filterFarParts, lui, garderait le morceau le
+  // plus proche et découperait la Nouvelle-Zélande au milieu de la France.
+  if (!partsVisible(parts, dem)) return null
+  const near = filterFarParts(parts, dem)
+  if (!near.length) return null
+  const raster = rasterizeMask(near, dem, MASK_SIZE, coastImage)
+  return {
+    maskTexture: raster.texture,
+    maskCanvas: raster.canvas,
+    name,
+    level: levelRow?.level ?? 'demandé',
+    // la LIGNE complète, pour que l'appelant puisse la réimposer au passage
+    // suivant après un recadrage (voir `level` ci-dessus)
+    levelRow,
+    // les morceaux RETENUS, en lon/lat — de quoi recadrer le bloc sur la zone
+    parts: near,
   }
 }
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { filterFarParts, levelForDemZoom, frameRegion, LEVEL_TABLE } from '../src/region-mask.js'
+import { filterFarParts, levelForDemZoom, frameRegion, regionMaskFromParts, LEVEL_TABLE } from '../src/region-mask.js'
 import { latLonToTile } from '../src/geo.js'
 
 // synthetic DEM patch centered on lat/lon, mirroring dem.js georeferencing
@@ -187,4 +187,26 @@ test('frameRegion returns null on degenerate input instead of NaN', () => {
   assert.equal(frameRegion([[[]]]), null)
   const f = frameRegion([[[[NaN, 45], [1, 46], [2, 47]]]])
   assert.ok(Number.isFinite(f.lat) && Number.isFinite(f.lon) && Number.isFinite(f.zoom))
+})
+
+// ------------------------------------------------- la porte « géométrie connue »
+// fetchRegionMask DEVINE ce qu'il faut découper en géocodant le centre du bloc
+// à un niveau déduit du zoom. regionMaskFromParts, elle, découpe la géométrie
+// DEMANDÉE. On ne peut pas la mener jusqu'au bout ici — la rasterisation a
+// besoin d'un canvas — mais ses garde-fous sont exactement ce qui décide du
+// repli, et c'est là que se joue la justesse du mode isolé.
+
+test('a known geometry with nothing to cut refuses rather than cuts empty', () => {
+  const dem = makeDem(46.5, 2.5, 10) // bloc de ~27 km au centre de la France
+  // la cible est à l'autre bout du monde : plus rien d'elle ne touche le bloc,
+  // l'utilisateur a navigué ailleurs depuis. Il faut rendre null pour que
+  // l'appelant retombe sur la déduction, pas découper du vide.
+  assert.equal(regionMaskFromParts({ parts: [square(174, -41)], dem }), null)
+})
+
+test('it refuses degenerate input instead of throwing at the canvas', () => {
+  const dem = makeDem(46.5, 2.5, 10)
+  assert.equal(regionMaskFromParts({ parts: null, dem }), null)
+  assert.equal(regionMaskFromParts({ parts: [], dem }), null)
+  assert.equal(regionMaskFromParts({ parts: [square(2.5, 46.5)], dem: null }), null)
 })
