@@ -360,8 +360,15 @@ export function rasterizeMask(coordinates, dem, size = MASK_SIZE, coastImage = n
 // region-plate.js buildRegionPlate to fit the plate. Returns null when the
 // view is whole-earth (z<5), when no polygon exists, or on any network
 // failure — the caller keeps the square slab in that case.
-export async function fetchRegionMask({ lat, lon, zoom, dem, coastImage = null }) {
-  const levelRow = levelForDemZoom(zoom)
+// `level` (optionnel) IMPOSE le niveau administratif au lieu de le déduire du
+// zoom. Indispensable après un recadrage : celui-ci dézoome pour faire tenir la
+// zone dans le bloc, et le second passage relisait alors un niveau PLUS
+// GROSSIER — demander la Savoie rendait la région, demander l'Inde rendait
+// l'Asie, et demander le Brésil ne rendait plus AUCUNE frontière (bloc carré,
+// « NO BOUNDARY AT THIS SCALE »). C'est le niveau DEMANDÉ qui fait foi, pas
+// celui du cadrage qu'on vient de choisir pour l'afficher.
+export async function fetchRegionMask({ lat, lon, zoom, dem, coastImage = null, level = null }) {
+  const levelRow = level || levelForDemZoom(zoom)
   if (!levelRow || !dem) return null
   try {
     const boundary =
@@ -377,6 +384,9 @@ export async function fetchRegionMask({ lat, lon, zoom, dem, coastImage = null }
       maskCanvas: raster.canvas,
       name: boundary.name,
       level: levelRow.level,
+      // la LIGNE complète, pour que l'appelant puisse la réimposer au passage
+      // suivant après un recadrage (voir `level` ci-dessus)
+      levelRow,
       // les morceaux RETENUS, en lon/lat — de quoi recadrer le bloc sur la zone
       // (main.js les passe à frameTrack, le même cadreur que les traces GPX)
       parts: near,

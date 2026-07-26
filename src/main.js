@@ -3397,6 +3397,11 @@ let regionReturn = null
 // applyRegionMode se rappelle (fetchAndBuildDem le fait quand regionMode est
 // vrai), et recalculer le cadre à chaque passage pourrait osciller
 let regionFramed = false
+// Le NIVEAU administratif demandé au premier passage. Le recadrage dézoome, et
+// sans cette mémoire le second passage relit un niveau plus grossier : la
+// Savoie devenait une région, l'Inde devenait l'Asie, le Brésil n'avait plus
+// aucune frontière du tout.
+let regionLevel = null
 
 async function applyRegionMode() {
   if (!params.regionMode || params.source !== 'real' || !dem) {
@@ -3428,7 +3433,8 @@ async function applyRegionMode() {
   try {
     // coastMaskImage : les polders sous 0 restent dans la découpe (le clip
     // altitude seul les prenait pour la mer) ; null → comportement v1
-    const r = await fetchRegionMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem, coastImage: coastMaskImage })
+    const r = await fetchRegionMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem, coastImage: coastMaskImage, level: regionLevel })
+    regionLevel ??= r?.levelRow ?? null // le niveau du PREMIER passage fait foi
     if (!params.regionMode) return // user toggled off while fetching
 
     // RECADRAGE SUR LA ZONE — « une île perdue au milieu de rien, ça fait
