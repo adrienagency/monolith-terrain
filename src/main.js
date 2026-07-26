@@ -62,6 +62,7 @@ import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
 import { TEMPLATE_KEYS, captureLook, captureView, serializeTemplate, parseTemplate, stripFromLook, loadUserTemplates, saveUserTemplates } from './templates-user.js'
 import { loadUserPalettes, saveUserPalettes, paletteFromParams } from './user-palettes.js'
 import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT } from './share-link.js'
+import { Boats } from './boats.js'
 import { DroneCam } from './drone-cam.js'
 import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, deriveMetalTints, deriveAoColor, deriveHazeColor, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
@@ -1031,6 +1032,9 @@ const traffic = new Traffic(scene, terrain, params)
 // the sea as a colour-tintable, environment-reflecting glass block
 // water simulation is behind FLAGS.water (v37, disabled in prod); null when off
 const realWater = FLAGS.water ? new RealWater(scene) : null
+// ÉVÉNEMENTS — les éléments 3D rapportés qui vivent sur la carte. Les bateaux
+// sont le premier ; la catégorie est prévue pour en accueillir d'autres.
+const boats = new Boats(scene)
 const mapLayers = new MapLayers(scene, camera) // roads/water/places overlays, populated per zone
 
 const labelOpts = () => ({
@@ -1672,6 +1676,9 @@ async function fetchAndBuildDem() {
   // réglées sur un AUTRE relief. On les recalcule pour celui qu'on vient de
   // charger, sauf les curseurs que l'utilisateur a repris à la main.
   applyAutoShade()
+  // FLOTTE — après le relief ET la mer : elle a besoin de l'un pour savoir où
+  // est l'eau, de l'autre pour partager les uniformes de houle.
+  syncBoats()
 }
 
 async function loadRealTerrain() {
@@ -3333,6 +3340,33 @@ function regionFrameScale(parts) {
   return Math.min(1, half / (TERRAIN_SIZE / 2))
 }
 
+// FLOTTE — (re)sème les bateaux pour le bloc courant. Appelée après chaque
+// construction de relief : le zoom, l'emprise et le trait d'eau changent, donc
+// la densité et l'échelle des bateaux aussi.
+//
+// force: true dans cette version MINIMALE — sans ça il faudrait recharger une
+// dizaine de fois pour en voir un, et on ne peut pas juger l'échelle ni le
+// mouvement comme ça. La règle du 1 sur 10 revient dès que le rendu est validé.
+function syncBoats() {
+  if (params.source !== 'real' || !dem || !realWater) { boats.boats = []; return }
+  const seaMat = realWater.materials?.find((m) => m.uniforms?.uWaveA)
+  if (!seaMat) { boats.boats = []; return }
+  boats.setSea(seaMat)
+  const seaY = realWater.seaY
+  boats.build({
+    zoom: params.demZoom,
+    half: TERRAIN_SIZE / 2,
+    // la graine suit le LIEU : revenir au même endroit rend la même flotte
+    seed: Math.round((params.demLat + 90) * 1000) * 100003 + Math.round((params.demLon + 180) * 1000),
+    // navigable = sous le niveau de la mer. Sans ce test les bateaux
+    // traverseraient les montagnes.
+    isSea: (x, z) => Number.isFinite(seaY) && (terrain.sample?.(x, z) ?? 0) < seaY - 0.05,
+    extentMeters: dem.extentMeters,
+    terrainSize: TERRAIN_SIZE,
+    force: true,
+  })
+}
+
 // Un point du monde est-il DANS la zone découpée ? Le masque est déjà rasterisé
 // sur l'emprise exacte du bloc (region-mask.js), donc la lecture est un simple
 // changement d'échelle — même correspondance que le shader du relief.
@@ -4499,7 +4533,7 @@ history.record()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { raceLabels, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo,
+window.__exp = { boats, raceLabels, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo,
   // INTERRUPTEUR de la teinte d'interface : __exp.setUiTint(false) rend
   // l'interface neutre de v28.css, true la raccorde à la palette.
   setUiTint: (v) => { params.uiTint = v !== false; syncUiTheme() }, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,
@@ -4806,6 +4840,7 @@ function tick() {
   // does not exist.
   if (dof) dof.cocMaterial.worldFocusDistance = params.focusDistance
 
+  boats.update(dt, TERRAIN_SIZE / 2)
   realWater?.update(dt, sun) // water simulation: waves, caustics, sun glint
   // temps des caustiques de fond (terrain + blocs voisins du damier)
   terrain.mapUniforms.uCausT.value += dt

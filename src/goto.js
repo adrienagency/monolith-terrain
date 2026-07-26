@@ -4,6 +4,7 @@
 import { parseLatLon } from './geo.js'
 import { stepZoom } from './modes.js'
 import { zoomForSpanKm } from './landmarks.js'
+import { frameRegion, NEAR_ISLAND_KM } from './region-mask.js'
 
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search'
 
@@ -11,19 +12,49 @@ const NOMINATIM = 'https://nominatim.openstreetmap.org/search'
 // bbox is Nominatim's [south, north, west, east] — used to FRAME the whole
 // feature on the socle (a country fits the block, not a tight zoom in the middle).
 export async function geocode(query) {
-  const url = `${NOMINATIM}?format=json&limit=1&q=${encodeURIComponent(query)}`
+  // polygon_geojson : la VRAIE géométrie, pas seulement l'emprise. C'est elle
+  // qui permet de cadrer sur la France métropolitaine plutôt que sur une boîte
+  // étirée jusqu'à Wallis-et-Futuna. Le seuil de simplification garde la
+  // réponse légère (quelques dizaines de Ko pour un pays).
+  const url = `${NOMINATIM}?format=json&limit=1&polygon_geojson=1&polygon_threshold=0.02&q=${encodeURIComponent(query)}`
   const r = await fetch(url, { headers: { Accept: 'application/json' } })
   if (!r.ok) throw new Error(`geocoding → HTTP ${r.status}`)
   const results = await r.json()
   if (!results.length) return null
   const hit = results[0]
-  return { lat: parseFloat(hit.lat), lon: parseFloat(hit.lon), label: hit.display_name, bbox: hit.boundingbox }
+  return { lat: parseFloat(hit.lat), lon: parseFloat(hit.lon), label: hit.display_name, bbox: hit.boundingbox, geojson: hit.geojson }
 }
 
 // From Nominatim's boundingbox → { lat, lon, zoom } that frames the WHOLE
 // feature centred on the block (Adrien : « je veux voir la France, toute la
 // France tient sur le block »). Null if the bbox is missing/degenerate, so the
 // caller can fall back to its default landing zoom.
+// Les morceaux du polygone qui décrivent LE territoire demandé : celui qui
+// contient le point représentatif, plus ceux à moins de NEAR_ISLAND_KM (la
+// Corse tient au dessin de la France, la Réunion non). Même règle que la
+// découpe de zone, appliquée ici sans DEM — on est avant tout chargement.
+export function mainParts(geojson, lat, lon, maxKm = NEAR_ISLAND_KM) {
+  const coords = geojson?.type === 'Polygon' ? [geojson.coordinates] : geojson?.type === 'MultiPolygon' ? geojson.coordinates : null
+  if (!coords?.length) return null
+  const box = (ring) => {
+    let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity
+    for (const [x, y] of ring) { if (x < a) a = x; if (x > b) b = x; if (y < c) c = y; if (y > d) d = y }
+    return { a, b, c, d }
+  }
+  const gap = (p, q) => {
+    const dLon = Math.max(0, p.a - q.b, q.a - p.b)
+    const dLat = Math.max(0, p.c - q.d, q.c - p.d)
+    return Math.hypot(dLat * 110.54, dLon * 111.32 * Math.cos((lat * Math.PI) / 180))
+  }
+  const parts = coords.filter((r) => r?.[0]?.length).map((rings) => ({ rings, box: box(rings[0]) }))
+  if (!parts.length) return null
+  // la graine : le morceau dont l'emprise contient le point représentatif ;
+  // à défaut, le plus proche de lui
+  let graine = parts.find((p) => lon >= p.box.a && lon <= p.box.b && lat >= p.box.c && lat <= p.box.d)
+  if (!graine) graine = parts.reduce((m, p) => (gap(p.box, { a: lon, b: lon, c: lat, d: lat }) < gap(m.box, { a: lon, b: lon, c: lat, d: lat }) ? p : m))
+  return parts.filter((p) => p === graine || gap(p.box, graine.box) <= maxKm).map((p) => p.rings)
+}
+
 // Une emprise dont la longitude couvre plus que ça n'encercle pas un territoire
 // d'un seul tenant : c'est une nation à possessions lointaines, et Nominatim
 // l'étire jusqu'à l'antiméridien.
@@ -110,9 +141,19 @@ export function createGoto({ modes, announce, getFineZoom }) {
         // frame the WHOLE feature from its bounding box (country/city fills the
         // block) ; fall back to the point + default landing zoom if there's no bbox
         const fine = getFineZoom ? getFineZoom() : 15
-        // `at` : le point représentatif de Nominatim. Il porte le centre, et
-        // sert d'arbitre pour savoir si l'emprise est crédible.
-        const framed = frameFromBBox(hit.bbox, { min: 4, max: fine, at: hit })
+        // RÈGLE DE BASE (Adrien) : la recherche doit montrer la ZONE ENTIÈRE,
+        // jamais un zoom en son milieu. Le cadre vient donc de la GÉOMÉTRIE
+        // réelle, débarrassée des territoires lointains.
+        //
+        // ⚠️ Première tentative ratée : refuser l'emprise aberrante pour
+        // retomber sur le zoom d'atterrissage. Ça corrigeait bien le centre
+        // (la France ne partait plus dans le golfe de Guinée) mais violait la
+        // règle de plein fouet — on atterrissait serré au milieu du pays.
+        // `at` reste l'arbitre du repli quand aucune géométrie n'est fournie.
+        const parts = mainParts(hit.geojson, hit.lat, hit.lon)
+        const framed =
+          (parts && frameRegion(parts, { min: 4, max: fine })) ||
+          frameFromBBox(hit.bbox, { min: 4, max: fine, at: hit })
         const lat = framed?.lat ?? hit.lat
         const lon = framed?.lon ?? hit.lon
         const zoom = framed?.zoom ?? landingZoom(getFineZoom)

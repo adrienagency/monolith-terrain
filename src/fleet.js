@@ -48,7 +48,11 @@ const DT_MAX = 0.1
 // bloc, puis on l'exagère d'un facteur constant pour qu'elle reste lisible de
 // loin. À zoom fin le bloc couvre peu de terrain, donc le bateau y occupe
 // naturellement plus de place — c'est la « taille logique » voulue.
-export function boatScale(terrainSize, extentMeters, exaggeration = 3.2) {
+// ×10 : une coque de 55 m dans un bloc de 27 km fait 0,2 % de sa largeur —
+// à peine trois pixels à l'écran. L'exagération est ASSUMÉE (Adrien : « leur
+// échelle peut être exagérée pour qu'ils restent visibles »), mais elle reste
+// ancrée sur une taille réelle, donc le bateau grandit quand on zoome.
+export function boatScale(terrainSize, extentMeters, exaggeration = 10) {
   if (!(extentMeters > 0) || !(terrainSize > 0)) return 0
   return (HULL_M / extentMeters) * terrainSize * exaggeration
 }
