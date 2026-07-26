@@ -439,4 +439,20 @@ export class GroundInfoLayer {
   setVisible(v) {
     this.group.visible = v
   }
+
+  // RESSERRER LE CARTOUCHE SUR LA ZONE (Adrien) — en mode isolé, l'île occupe
+  // une fraction du bloc et les textes restaient plaqués aux bords de ce bloc
+  // devenu invisible : l'île avait l'air abandonnée au milieu de rien.
+  //
+  // Toute la mise en page pend d'un HALF unique (le demi-bloc), donc il suffit
+  // de mettre le GROUPE à l'échelle : les textes se rapprochent ET rapetissent
+  // du même geste, exactement dans les proportions du cadre plus serré. Y reste
+  // à 1 — les plans sont couchés dans le plan XZ, une échelle sur X et Z les
+  // met à l'échelle dans leur propre plan sans les décoller du sol.
+  //
+  // `1` remet tout en place : décocher l'isolation n'a rien d'autre à défaire.
+  setFrameScale(k) {
+    const s = Number.isFinite(k) && k > 0 ? Math.min(1, Math.max(0.15, k)) : 1
+    this.group.scale.set(s, 1, s)
+  }
 }

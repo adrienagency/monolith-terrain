@@ -1013,7 +1013,8 @@ const groundInfo = new GroundInfoLayer({
   getWallInk: () => socleWallInk(), // engraved name flips to contrast the socle material
   // sans socle il n'y a plus de flanc : les textes muraux (nom gravé, logo,
   // infos course) disparaissent
-  wallsVisible: () => !!params.plinth,
+  // zone isolée : plus de flancs de bloc, donc plus de gravure murale à porter
+  wallsVisible: () => !!params.plinth && !params.regionMode,
 })
 cartoucheRef = groundInfo
 
@@ -3307,6 +3308,31 @@ function disposeRegionSkirt() {
 // choses qui doivent coïncider — le pied de la découpe, les textes du cartouche
 // et la dalle qui reçoit l'ombre. Sur un terrain procédural uSeaY vaut -9999
 // (pas de mer) : on retombe alors sur le pied du socle.
+// Le demi-côté de la zone isolée, en unités monde, rapporté au demi-bloc : le
+// facteur dont le cartouche doit se resserrer pour venir épouser l'île au lieu
+// de rester plaqué aux bords d'un bloc devenu invisible (Adrien). On prend le
+// PLUS GRAND des deux demi-côtés : les textes épousent le long axe et gardent
+// un peu d'air sur l'autre, plutôt que de mordre sur la côte.
+function regionFrameScale(parts) {
+  if (!parts?.length || !dem) return 1
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity
+  for (const rings of parts) {
+    for (const [lon, lat] of rings?.[0] || []) {
+      const p = latLonToWorld(dem, Math.min(85.05, Math.max(-85.05, lat)), lon)
+      if (p.x < x0) x0 = p.x
+      if (p.x > x1) x1 = p.x
+      if (p.z < z0) z0 = p.z
+      if (p.z > z1) z1 = p.z
+    }
+  }
+  if (!(x1 > x0) || !(z1 > z0)) return 1
+  // Le DEMI-CÔTÉ de l'emprise, pas la distance au centre du bloc : mesurée
+  // depuis l'origine, un îlot excentré gonflait le rayon et le cartouche ne se
+  // resserrait presque pas (0,88 au lieu de 0,58 sur La Réunion).
+  const half = Math.max((x1 - x0) / 2, (z1 - z0) / 2)
+  return Math.min(1, half / (TERRAIN_SIZE / 2))
+}
+
 function regionBaseY() {
   const y = terrain.mapUniforms?.uSeaY?.value
   return Number.isFinite(y) && y > -9000 ? y : plinth.baseY + plinth.depth
@@ -3353,6 +3379,7 @@ async function applyRegionMode() {
     regionMaskCanvas = null
     plinth.setSlabOnly(false) // le bloc carré revient
     plinth.rebuild(terrain, params) // et la dalle redescend : setSlabOnly l'avait remontée au zéro
+    groundInfo.setFrameScale(1) // et le cartouche retrouve les bords du bloc
     plinth.setVisible(params.plinth && modes.mode === 'surface')
     waterRebuild() // restore the open-sea surface once the region clip is gone
     // RETOUR À LA VUE D'ORIGINE — recharge le relief là où l'utilisateur était
@@ -3414,6 +3441,8 @@ async function applyRegionMode() {
     // underside. It welds to the terrain height and shares the socle material.
     regionMaskCanvas = r ? r.maskCanvas : null
     rebuildRegionSkirt()
+    // le cartouche vient épouser l'île au lieu de rester aux bords du bloc
+    groundInfo.setFrameScale(regionFrameScale(r?.parts))
     if (r) modes.announce(`ZONE — ${String(r.name).toUpperCase()}`)
     else modes.announce('ZONE — NO BOUNDARY AT THIS SCALE')
   } catch (err) {
