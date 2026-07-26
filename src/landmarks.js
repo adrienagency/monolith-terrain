@@ -4,20 +4,82 @@
 // volcanic cone like Stromboli wants z13. Data only (pure, testable); the
 // panel lives in landmarks-panel.js.
 
+// Géométrie du bloc, tenue en un seul endroit et alignée sur dem.js : le socle
+// charge `tilesAcross = 3` dalles de côté, et sa résolution est celle de Web
+// Mercator, 156543·cos(lat)/2^z par pixel de tuile « 256 ».
+// ⚠️ 768 est une ÉTENDUE AU SOL (3 tuiles, convention « pixel de tuile 256 »),
+// pas un nombre de pixels du DEM : elle ne bouge pas quand la source passe en
+// tuiles 512 px (même emprise, deux fois plus de pixels).
+const EQUATOR_M_PER_PX = 156543.03392
+const TILE_GROUND_PX = 256
+export const BLOCK_TILES = 3
+const BLOCK_GROUND_PX = TILE_GROUND_PX * BLOCK_TILES // 768
+const R_EARTH = 6378137
+
+// L'emprise du bloc telle que le moteur la calcule : c'est mot pour mot le
+// `dem.extentMeters` de dem.js. Cadrage et chargement ne peuvent donc pas
+// diverger — si cette formule change là-bas, elle change ici.
+export function blockExtentMeters(zoom, lat) {
+  return (EQUATOR_M_PER_PX * Math.cos((lat * Math.PI) / 180) * BLOCK_GROUND_PX) / 2 ** zoom
+}
+
+// La plus PETITE dimension au sol que le bloc offre réellement.
+//
+// `extentMeters` est mesuré au CENTRE du bloc, mais le bloc est un carré en
+// Mercator, pas au sol : en montant vers le pôle sa largeur est-ouest rétrécit
+// (−1,8 % au bord nord du bloc de Jan Mayen, à 71°). Une île qui tient tout
+// juste dans `extentMeters` peut donc déborder par le haut. On cadre sur cette
+// dimension-là, la seule qui garantisse « rien ne dépasse ».
+export function blockFitMeters(zoom, lat) {
+  const world = 2 ** zoom // le monde fait 2^z tuiles de côté
+  // aux zooms très grossiers le bloc réclamerait plus que le monde entier ;
+  // dem.js refuse déjà ces dalles-là (ty < 0 || ty >= n)
+  const tiles = Math.min(BLOCK_TILES, world)
+  const dy = (tiles / world) * 2 * Math.PI // hauteur du bloc, en y de Mercator
+  const yc = Math.asinh(Math.tan((lat * Math.PI) / 180))
+  const bord = (y) => Math.atan(Math.sinh(Math.max(-Math.PI, Math.min(Math.PI, y))))
+  const north = bord(yc + dy / 2)
+  const south = bord(yc - dy / 2)
+  const ns = R_EARTH * (north - south) // vraie hauteur au sol : R·Δφ
+  // largeur est-ouest mesurée au bord le PLUS POLAIRE, donc le plus étroit
+  const poleward = Math.max(Math.abs(north), Math.abs(south))
+  const ew =
+    tiles >= world
+      ? Infinity // le bloc fait le tour du monde : plus rien à contraindre en longitude
+      : (EQUATOR_M_PER_PX * Math.cos(poleward) * TILE_GROUND_PX * tiles) / 2 ** zoom
+  return Math.min(ns, ew)
+}
+
 // DEM zoom that frames a feature of `spanKm` (its long axis) so the WHOLE thing
 // sits on the block, filling the socle without cropping (Adrien : « toute l'île
-// en entier, pas un gros zoom au milieu »). The block shows
-// 156543·cos(lat)/2^z × 768 px of real world ; we take
-// the largest zoom whose extent still contains the span.
-// ⚠️ 768 est ici une ÉTENDUE AU SOL (3 tuiles, dans la convention « pixel de
-// tuile 256 »), pas un nombre de pixels du DEM : elle ne bouge pas quand la
-// source passe en tuiles 512 px (même emprise, deux fois plus de pixels). Pure math (no imports)
-// so this file stays testable — shared by the island list AND the search box.
+// en entier, pas un gros zoom au milieu »). We take the largest zoom whose
+// extent still contains the span. Pure math (no imports) so this file stays
+// testable — shared by the island list AND the search box.
+//
+// RÈGLE DE BASE (Adrien, « à ne pas contourner ») : la zone tient ENTIÈREMENT
+// dans le bloc, toujours. Le zoom des tuiles étant ENTIER, elle le remplira
+// entre ~50 % et 100 % — c'est admis ; déborder, jamais.
+//
+// ⚠️ LE BUG CORRIGÉ ÉTAIT DANS LE CLAMP, PAS DANS L'ARRONDI. `Math.floor`
+// garantissait déjà l'inclusion ; c'est `Math.max(min, …)` qui la cassait.
+// `min` est le zoom le plus GROSSIER souhaité (9 pour les îles) : le respecter
+// veut dire zoomer PLUS FIN que nécessaire, donc rétrécir le bloc sous la
+// taille de la zone. Mesuré : les Féroé (span 110 km) réclamaient z8, le
+// plancher les remontait à z9 — un bloc de 108 km, l'archipel coupé. Kerguelen
+// (150 km dans 151 km) passait à 0,7 % près.
+//   `max` (le plus FIN autorisé) ne pose pas ce problème : il ne fait que
+// dézoomer, il n'a jamais coupé quoi que ce soit.
+// Le clamp reste un SOUHAIT de cadrage ; la boucle ci-dessous est la garantie.
 export function zoomForSpanKm(spanKm, lat, { margin = 1.05, min = 4, max = 15 } = {}) {
-  const km = Math.max(0.2, spanKm || 1)
-  const extentTop = 156543.03392 * Math.cos((lat * Math.PI) / 180) * 768
-  const z = Math.floor(Math.log2(extentTop / (km * 1000 * margin)))
-  return Math.max(min, Math.min(max, z))
+  const need = Math.max(0.2, spanKm || 1) * 1000 * margin
+  // estimation directe, au centre du bloc…
+  let z = Math.floor(Math.log2(blockExtentMeters(0, lat) / need))
+  z = Math.max(min, Math.min(max, z))
+  // …puis on DÉZOOME tant que la zone ne tient pas entièrement, sur la vraie
+  // géométrie. Chaque cran double le bloc : la boucle converge en un ou deux
+  // tours et ne peut pas descendre sous le monde entier.
+  while (z > 0 && blockFitMeters(z, lat) < need) z--
+  return z
 }
 
 // The world's most beautiful HIGH-RELIEF islands — volcanoes, calderas, peaks
