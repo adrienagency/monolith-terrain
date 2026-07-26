@@ -5,7 +5,10 @@ const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-
 
 export function buildMapPanel(ctx) {
   const { params, u } = ctx // u() → terrain.mapUniforms
-  const panel = new Panel({ title: 'Carte', icon: ICON, side: 'left', width: 268, tip: 'Les calques cartographiques drapés sur le relief.' })
+  // `ce-panel-map` est repéré par le CSS : avec Explorer, c'est le second
+  // panneau que le mode simple accepte de montrer quand on clique « Explorer »
+  // dans la barre du bas (les calques de la carte appartiennent à ce mode).
+  const panel = new Panel({ title: 'Carte', icon: ICON, side: 'left', width: 268, tip: 'Les calques cartographiques drapés sur le relief.', cls: 'ce-panel-map' })
 
   const sLayers = panel.addSection(section('Calques'))
   const roadsToggle = toggle({ label: 'Routes', get: () => params.roadsEnabled, set: (v) => { params.roadsEnabled = v; ctx.rebuildMapLayers(); refreshAll() } })

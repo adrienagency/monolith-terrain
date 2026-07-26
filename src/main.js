@@ -3830,6 +3830,11 @@ if (IS_SHIBU) buildShibuChrome()
 const quickCore = IS_EMBED ? null : buildQuickCore({
   openAtelier: () => panelCtx.openAtelier?.(),
   openStudio: () => panelCtx.openStudio?.(),
+  // « Explorer » du mode simple choisit AUSSI le mode de travail : sans cela,
+  // une session quittée en Studio laissait les panneaux Explorer et Carte
+  // éteints (wm-off) — le dock s'ouvrait sur du vide. elemBar est construit
+  // plus bas ; l'appel, lui, n'a lieu qu'au clic.
+  setWorkMode: (id) => elemBar?.setMode(id),
 })
 
 // the GPX profile strip docks at the same bottom-centre spot as the search

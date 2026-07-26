@@ -2309,12 +2309,13 @@ body.shibu-view .gpx-profile {
 body.ce-simple .ce-dock {
   display: none !important;
 }
-/* … SAUF quand on clique « Explorer » : le panneau Explorer, et lui seul,
-   revient en haut à gauche. C'est le seul dock autorisé en mode simple. */
+/* … SAUF quand on clique « Explorer » : les panneaux du mode Explorer —
+   Explorer et Carte — reviennent en haut à gauche. C'est le seul dock
+   autorisé en mode simple, et il montre le mode ENTIER, pas la moitié. */
 body.ce-simple.ce-explore .ce-dock-left {
   display: flex !important;
 }
-body.ce-simple.ce-explore .ce-dock-left > .ce-panel:not(.ce-panel-explore) {
+body.ce-simple.ce-explore .ce-dock-left > .ce-panel:not(.ce-panel-explore):not(.ce-panel-map) {
   display: none;
 }
 
