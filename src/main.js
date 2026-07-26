@@ -4756,6 +4756,10 @@ const studio = buildStudio({
   // gpxFileInput DIRECT : panelCtx.loadGpx n'existe pas (loadGpx ne vit que
   // dans le ctx du panneau Parcours) — le ?. rendait le bouton muet
   loadGpx: () => gpxFileInput.click(),
+  // glisser-déposer de l'étape « Trace » : openTrackFile trie déjà GPX vs
+  // projet .shibumap-race, donc le drop accepte exactement ce que le
+  // sélecteur de fichiers accepte — une seule règle, pas deux
+  openTrackFile: (f) => openTrackFile(f),
   trackStats: () => {
     const t = gpxLayer.activeLayer?.gpx?.track
     if (!t) return null

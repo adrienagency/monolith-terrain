@@ -162,12 +162,14 @@ export function buildStudio(deps) {
 
   // ② Trace : hiérarchie validée (Adrien) — 1 charger son GPX (accent),
   // 2 ouvrir un projet ShibuMap complet, 3 « Pas encore de trace ? »
-  // (démo + guide d'export légal), 4 dessiner (bientôt). Trace chargée →
-  // récap D+/D− + rangée compacte remplacer/ouvrir, on ne remontre pas
-  // les portes à qui a déjà sa trace.
+  // (démo + guide d'export légal). Trace chargée → récap D+/D− + rangée
+  // compacte remplacer/ouvrir, on ne remontre pas les portes à qui a déjà
+  // sa trace. PAS de porte « dessiner sur la carte » : une porte désactivée
+  // occupe un rang dans la hiérarchie pour quelque chose qu'on ne peut pas
+  // faire — elle sera ajoutée quand la fonction existera (Adrien).
   function stepTrace() {
     body.innerHTML = `<h3>Votre trace</h3>
-      <p class="hint">La colonne vertébrale de la carte — altitudes, points de passage et profil se remplissent autour.</p>`
+      <p class="hint">Tout le reste de la carte se remplit autour.</p>`
     const pf = document.createElement('input')
     pf.type = 'file'
     pf.accept = '.json,application/json'
@@ -205,51 +207,94 @@ export function buildStudio(deps) {
       body.append(row)
       return
     }
-    const door = (title, sub, { accent = false, soon = false } = {}) => {
-      const d = document.createElement('button')
-      d.type = 'button'
-      d.className = 'studio-door' + (accent ? ' accent' : '') + (soon ? ' soon' : '')
-      d.disabled = soon
-      d.innerHTML = `<span class="d-main"><b>${title}</b><i>${sub}</i></span>${soon ? '<span class="studio-soon">bientôt</span>' : ''}`
-      return d
+    // ---- PAS DE TRACE : une seule cible, le reste en retrait --------------
+    // La bande de promesse répond à « dans quoi je m'embarque » — les pastilles
+    // du haut NOMMENT les étapes, elles ne rassurent pas sur l'effort. C'est la
+    // seule information que l'organisateur non graphiste réclame vraiment.
+    const promise = document.createElement('div')
+    promise.className = 'trace-promise'
+    promise.innerHTML = `
+      <span class="tp-step on"><b>Votre trace</b><i>maintenant</i></span>
+      <span class="tp-sep" aria-hidden="true"></span>
+      <span class="tp-step"><b>Vos points</b><i>2 min</i></span>
+      <span class="tp-sep" aria-hidden="true"></span>
+      <span class="tp-step"><b>Votre carte</b><i>prête</i></span>`
+    body.append(promise)
+
+    // La zone de dépôt accepte le GLISSER-DÉPOSER autant que le clic :
+    // l'organisateur a son fichier sous les yeux dans son explorateur, le geste
+    // naturel est de le faire glisser. Le clic reste, on ne perd personne.
+    const drop = document.createElement('button')
+    drop.type = 'button'
+    drop.className = 'trace-drop'
+    drop.innerHTML = `
+      <svg class="td-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3m0 0L8 7m4-4 4 4"/><path d="M3 15v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4"/></svg>
+      <b>Déposez votre fichier GPX ici</b>
+      <i>ou <u>parcourez votre ordinateur</u></i>`
+    drop.addEventListener('click', () => deps.loadGpx())
+    body.append(drop)
+
+    // dragover DOIT être annulé, sinon le navigateur refuse le drop et, pire,
+    // QUITTE la page pour afficher le fichier lâché. On écoute aussi sur le
+    // corps de l'étape : viser la zone exactement est une exigence de trop.
+    const over = (e) => { e.preventDefault(); drop.classList.add('over') }
+    const out = () => drop.classList.remove('over')
+    for (const el of [drop, body]) {
+      el.addEventListener('dragover', over)
+      el.addEventListener('dragleave', out)
+      el.addEventListener('drop', (e) => {
+        e.preventDefault()
+        out()
+        const f = e.dataTransfer?.files?.[0]
+        if (f) deps.openTrackFile(f)
+      })
     }
-    // 1 — le cas le plus fréquent : l'organisateur a son fichier
-    const dLoad = door('Charger ma course (fichier GPX)', 'Votre trace, depuis votre ordinateur — tout le reste se remplit autour.', { accent: true })
-    dLoad.addEventListener('click', () => deps.loadGpx())
-    // 2 — reprendre un projet complet (trace + points + style)
-    const dOpen = door('Ouvrir un projet ShibuMap complet', 'Un fichier .shibumap-race — trace, points de passage et style, tout revient.')
-    dOpen.addEventListener('click', () => pf.click())
-    body.append(dLoad, dOpen)
-    // 3 — pas encore de trace : démo + guide d'export légal (l'utilisateur
-    // exporte SON fichier depuis SON compte — aucune connexion, aucune API)
-    const empty = document.createElement('div')
-    empty.className = 'studio-empty'
-    empty.innerHTML = '<h4>Pas encore de trace ?</h4>'
-    const dDemo = door('Essayer avec une course de démo', 'La Grande Traversée · 220 km, prête à jouer — remplacez-la par la vôtre ensuite.')
-    dDemo.addEventListener('click', async () => {
-      dDemo.disabled = true
-      dDemo.querySelector('i').textContent = 'Chargement de la démo…'
+
+    // La VRAIE question de l'organisateur n'est pas « quelle porte » mais
+    // « c'est quoi un GPX ». On la pose avec ses mots, à l'endroit du doute,
+    // au lieu de nommer une solution qu'il ne connaît pas encore.
+    const help = document.createElement('button')
+    help.type = 'button'
+    help.className = 'trace-help'
+    help.innerHTML = '<span>?</span>C’est quoi un GPX, et où le trouver ?'
+    const guide = document.createElement('div')
+    guide.className = 'studio-guide'
+    guide.hidden = true
+    guide.innerHTML = `
+      <p>Le GPX est le fichier de votre tracé — celui que produit n'importe quel outil de parcours.</p>
+      <p><b>Strava</b> — Mes activités → ouvrez l'activité → ⋯ → « Exporter GPX ».</p>
+      <p><b>Komoot</b> — ouvrez votre Tour → « Exporter » → fichier GPX.</p>
+      <p><b>OpenRunner</b> — votre parcours → « Exporter » → GPX.</p>
+      <p class="hint">Vous exportez votre propre fichier depuis votre propre compte — rien n'est connecté. Sinon : demandez le GPX à votre traceur ou à votre chronométreur.</p>`
+    help.addEventListener('click', () => {
+      guide.hidden = !guide.hidden
+      help.classList.toggle('on', !guide.hidden)
+    })
+    body.append(help, guide)
+
+    // Les deux replis : toujours accessibles, mais ils ne se battent plus avec
+    // la cible principale. Sous un filet, en une ligne chacun.
+    const alt = document.createElement('div')
+    alt.className = 'trace-alt'
+    const altLink = (label, action, prefix = '') => {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'trace-link'
+      b.innerHTML = `${prefix}<u>${label}</u>`
+      b.addEventListener('click', action)
+      return b
+    }
+    const lDemo = altLink('Essayer une course de démo', async () => {
+      lDemo.disabled = true
+      lDemo.innerHTML = 'Chargement de la démo…'
       try {
         const bundle = parseRace(await (await fetch('/demo/grande-traversee.shibumap-race.json')).text())
         if (bundle) await importProject(bundle)
       } catch {}
       render()
-    })
-    const dGuide = door('Récupérer un GPX depuis un compte', 'Strava, Komoot, OpenRunner — vos données, votre fichier.')
-    const guide = document.createElement('div')
-    guide.className = 'studio-guide'
-    guide.hidden = true
-    guide.innerHTML = `
-      <p><b>Strava</b> — Mes activités → ouvrez l'activité → ⋯ → « Exporter GPX ».</p>
-      <p><b>Komoot</b> — ouvrez votre Tour → « Exporter » → fichier GPX.</p>
-      <p><b>OpenRunner</b> — votre parcours → « Exporter » → GPX.</p>
-      <p class="hint">Vous exportez votre propre fichier depuis votre propre compte — rien n'est connecté. Sinon : demandez le GPX à votre traceur ou chronométreur.</p>`
-    dGuide.addEventListener('click', () => { guide.hidden = !guide.hidden })
-    empty.append(dDemo, dGuide, guide)
-    // 4 — dessiner : pas encore construit → badge « bientôt » (règle Adrien)
-    const dDraw = door('Dessiner le parcours sur la carte', 'Cliquez les passages clés, la trace suit le terrain.', { soon: true })
-    empty.append(dDraw)
-    body.append(empty)
+    }, 'Pas de fichier sous la main ? ')
+    alt.append(lDemo, altLink('Reprendre un projet ShibuMap', () => pf.click()))
+    body.append(alt)
   }
 
   function wpRow(w, i) {

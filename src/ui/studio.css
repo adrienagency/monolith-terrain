@@ -114,14 +114,65 @@ body.studio-mode .studio-col { transform: translateX(0); }
   font-family: var(--st-sans);
 }
 .studio-door.accent { border: 2px solid var(--st-accent); }
-.studio-door.soon { opacity: .6; cursor: default; }
 .studio-door .d-main { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .studio-door .d-main b { font-size: 13px; font-weight: 600; }
 .studio-door .d-main i { font-style: normal; font-size: 11.5px; color: var(--st-muted); }
-.studio-soon {
-  background: color-mix(in srgb, var(--st-ink) 8%, transparent);
-  color: var(--st-muted); font-size: 10px; border-radius: 999px; padding: 3px 9px;
+/* ---- étape TRACE : une seule cible, le reste en retrait ------------------
+   Cinq portes de poids égal forçaient à tout lire pour choisir. Ici la zone
+   de dépôt est le seul élément accentué de l'écran ; démo et reprise de
+   projet passent en liens sous un filet — accessibles, plus concurrents. */
+.trace-promise {
+  display: flex; align-items: center; gap: 4px;
+  background: var(--st-card); border: 1px solid var(--st-card-border);
+  border-radius: 10px; padding: 9px 8px; margin: 0 0 13px;
 }
+.tp-step { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; opacity: .45; }
+.tp-step.on { opacity: 1; }
+.tp-step b { font-size: 10.5px; font-weight: 600; }
+.tp-step i { font-style: normal; font-size: 9.5px; color: var(--st-muted); }
+/* chevron en pur CSS — pas d'icône à charger pour deux séparateurs */
+.tp-sep {
+  width: 6px; height: 6px; flex: none;
+  border-top: 1.5px solid var(--st-card-border); border-right: 1.5px solid var(--st-card-border);
+  transform: rotate(45deg);
+}
+.trace-drop {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  width: 100%; cursor: pointer; margin: 0 0 9px;
+  padding: 24px 14px; border-radius: 12px;
+  border: 1.5px dashed var(--st-accent);
+  background: color-mix(in srgb, var(--st-accent) 5%, transparent);
+  color: var(--st-ink); font-family: var(--st-sans);
+  transition: background .15s ease, border-color .15s ease;
+}
+.trace-drop:hover, .trace-drop.over { background: color-mix(in srgb, var(--st-accent) 11%, transparent); }
+.trace-drop.over { border-style: solid; }
+.trace-drop .td-ico { width: 26px; height: 26px; color: var(--st-accent); }
+.trace-drop b { font-size: 13px; font-weight: 600; }
+.trace-drop i { font-style: normal; font-size: 11px; color: var(--st-muted); }
+.trace-help {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; margin: 0 0 4px; padding: 7px 0; cursor: pointer;
+  background: none; border: 0; font-family: var(--st-sans);
+  font-size: 11.5px; color: var(--st-muted);
+}
+.trace-help:hover, .trace-help.on { color: var(--st-ink); }
+.trace-help span {
+  display: grid; place-items: center; width: 15px; height: 15px; flex: none;
+  border: 1px solid currentColor; border-radius: 50%; font-size: 10px;
+}
+.trace-alt {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 9px;
+  border-top: 1px solid var(--st-hairline); margin-top: 11px; padding-top: 13px;
+}
+.trace-link {
+  background: none; border: 0; padding: 0; cursor: pointer; text-align: left;
+  font-family: var(--st-sans); font-size: 11.5px; color: var(--st-muted);
+}
+.trace-link u { color: var(--st-ink); text-underline-offset: 2px; }
+.trace-link:hover u { color: var(--st-accent); }
+.trace-link:disabled { cursor: default; opacity: .6; }
+
 .studio-guide { padding: 4px 6px 10px; }
 .studio-guide p { font-size: 12px; margin: 0 0 7px; }
 .studio-guide .hint { color: var(--st-muted); }
