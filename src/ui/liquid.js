@@ -91,10 +91,16 @@ export function liquidize(cluster, { items, inflate = 4, bumpFor, rim = false } 
     // un item peut être { key, el } : la bulle est alors keyée sur `key`, pas
     // sur l'élément — quand `el` CHANGE (switch simple ⇄ avancé), la MÊME
     // bulle transitionne vers la nouvelle géométrie : le fond se MORPHE
+    // un item peut aussi être { key, box: {x,y,w,h} } : une bulle PUREMENT
+    // ANALYTIQUE, sans élément à mesurer. C'est ce qui porte le pont liquide
+    // et le cartouche du bas : leur géométrie est CALCULÉE (à partir de ce
+    // qui ne bouge pas), donc la bulle reçoit sa cible d'un coup et sa propre
+    // transition CSS fait le voyage — au lieu de courir après un rect en
+    // cours d'animation, avec un tour de retard.
     const raw = items ? items() : [...cluster.children]
     const live = raw
-      .map((n) => (n && n.el !== undefined ? n : { key: n, el: n }))
-      .filter((n) => n.el && n.el !== goo && n.el.offsetParent !== null)
+      .map((n) => (n && (n.el !== undefined || n.box !== undefined) ? n : { key: n, el: n }))
+      .filter((n) => (n.box ? n.box.w > 0 : n.el && n.el !== goo && n.el.offsetParent !== null))
     const seen = new Set()
     if (!live.length) {
       // mode focus (grande tirette) : les boutons sont cachés, une seule
@@ -108,17 +114,28 @@ export function liquidize(cluster, { items, inflate = 4, bumpFor, rim = false } 
     for (const it of live) {
       const b = blobFor(it.key)
       seen.add(it.key)
-      const r = it.el.getBoundingClientRect()
-      const x = r.left - base.left - inflate
-      const y = r.top - base.top - inflate
-      const w = r.width + inflate * 2
-      const h = r.height + inflate * 2
+      let x
+      let y
+      let w
+      let h
+      if (it.box) {
+        x = it.box.x
+        y = it.box.y
+        w = it.box.w
+        h = it.box.h
+      } else {
+        const r = it.el.getBoundingClientRect()
+        x = r.left - base.left - inflate
+        y = r.top - base.top - inflate
+        w = r.width + inflate * 2
+        h = r.height + inflate * 2
+      }
       place(b, x, y, w, h)
       placeRim(it.key, x, y, w, h, base)
       // sombre/accent en OPT-IN (lq-dark / lq-accent) — rectif Adrien : la
       // bulle Avancé reste blanche, l'état actif parle par le mot/l'icône
-      b.classList.toggle('dark', it.el.classList.contains('lq-dark'))
-      b.classList.toggle('accent', it.el.classList.contains('lq-accent'))
+      b.classList.toggle('dark', !!(it.el?.classList.contains('lq-dark')))
+      b.classList.toggle('accent', !!(it.el?.classList.contains('lq-accent')))
     }
     // la bosse du bouton actif — un rond qui dépasse du bord haut et que le
     // goo fond dans la capsule
@@ -127,7 +144,11 @@ export function liquidize(cluster, { items, inflate = 4, bumpFor, rim = false } 
       const b = blobFor('__bump')
       seen.add('__bump')
       const r = target.getBoundingClientRect()
-      const d = Math.round(r.height * 0.72)
+      // PLAFOND 46 : la coche est une petite bosse de tension, pas une bulle
+      // proportionnelle. Sans lui, une porte de l'accueil (≈110px de haut, mise
+      // en colonne) donnerait un rond de 79px qui crèverait le haut de la
+      // capsule. 46 laisse les deux hauteurs de barre intactes (30 / 44 tactile).
+      const d = Math.round(Math.min(r.height, 46) * 0.72)
       const bx = r.left - base.left + (r.width - d) / 2
       const by = -d * 0.36
       place(b, bx, by, d, d)
@@ -159,5 +180,8 @@ export function liquidize(cluster, { items, inflate = 4, bumpFor, rim = false } 
   // négligeable ; les écritures identiques sont filtrées côté observer).
   setInterval(ask, 600)
   ask()
-  return { refresh: ask }
+  // `sync` est le sync IMMÉDIAT (pas de rAF intercalé) : pendant un voyage
+  // piloté frame par frame (barre d'accueil ⇄ barre du bas), passer par ask()
+  // ajouterait une frame de retard entre le contenu et son fond.
+  return { refresh: ask, sync }
 }

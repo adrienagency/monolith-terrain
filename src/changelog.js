@@ -10,6 +10,44 @@ export const APP_STAGE = 'alpha'
 
 export const CHANGELOG = [
   {
+    date: '2026-07-26',
+    title: 'One bar, all the way down',
+    items: [
+      'The welcome screen is gone — or rather, it became the bar itself. The three doors now sit in the menu bar, large and centred; pick one and the bar flows down to its place at the bottom of the screen and opens what you asked for.',
+      'The mode bar and the search bar are no longer two objects: one column of liquid joins them under whichever mode is active, and travels with it.',
+      'Pick Parcours and the search folds away — you do not look up a place to build a race — leaving GPX alone, centred under its own bridge.',
+      'The interface now takes its colours from the map. Change the palette and the whole chrome follows, with the contrast checked on every palette so nothing ever becomes hard to read.',
+    ],
+  },
+  {
+    date: '2026-07-26',
+    title: 'Atlas',
+    items: [
+      'A second way to colour the relief, next to the height ramp. Ridges get the combed texture of a printed shaded-relief map, hollows that collect water turn greener than the dry spurs beside them at the same altitude, and low ground veils into the distance.',
+      'Two points at the same height stop receiving the same colour — which is what made the old ramp read as stacked layers.',
+      'The sea sits at its true level again. Waves used to lift the whole surface so their troughs would never touch the bottom; now they carve down instead, and shoal and break as the water shallows, the way real swell does.',
+    ],
+  },
+  {
+    date: '2026-07-26',
+    title: 'Sharper ground',
+    items: [
+      'Elevation now comes from Mapterhorn, which stitches national surveys together — IGN RGE ALTI in France, swissALTI3D in Switzerland — instead of a worldwide model frozen in 2017.',
+      'Four times more elevation samples per tile, so ridges, gullies and terraces read as themselves instead of as smoothed averages.',
+      'How far the fine data reaches depends on where you are: z17 in Switzerland, z16 in France, z12 elsewhere. Past that the block keeps its footprint and simply stops getting sharper.',
+      'Elevation: © Mapterhorn — https://mapterhorn.com/attribution. The older AWS Terrain Tiles (Mapzen / Tilezen) stay in reserve and take over on their own if Mapterhorn is unreachable.',
+    ],
+  },
+  {
+    date: '2026-07-26',
+    title: 'The sea floor, for real',
+    items: [
+      'Coasts and sea beds now use GEBCO_2026 bathymetry — roughly four times finer than what the terrain tiles carried before, so shelves, canyons and seamounts show up instead of a smooth basin.',
+      'Dry land is untouched: the finer data may only deepen the sea, never move a coastline by a single pixel.',
+      'Bathymetry: GEBCO Compilation Group, GEBCO_2026 Grid (public domain). NOT FOR NAVIGATION — these maps are made to be looked at, not to be sailed by.',
+    ],
+  },
+  {
     date: '2026-07-22',
     title: 'Moving around',
     items: [

@@ -1,44 +1,95 @@
-// HUB d'accueil (UX P1, Adrien) — le popup plein écran qui pose LA question :
-// « Que voulez-vous faire ? ». Trois portes (Explorer / Studio / Parcours),
-// mêmes pour tous les profils. La carte vivante reste visible derrière le
-// voile. Échap ou clic dehors = Explorer. Le logo de la topbar le rouvre.
-import './hub.css'
+// ACCUEIL — l'état « grand » de LA barre (idée Adrien, remplace le popup des
+// trois portes). Ce n'est plus un composant à part : c'est la barre du bas,
+// posée au centre de l'écran, avec ses trois portes en colonne (picto, titre,
+// sous-titre) et le cartouche de recherche dessous. Cliquer une porte la fait
+// COULER jusqu'à sa place en bas, puis ouvre la demande du visiteur.
+//
+// Ce module n'ajoute donc AUCUN bouton : il pose le voile, les mots qui
+// entourent la barre (marque, question, indices), et bascule l'état. Les
+// actions sont celles de la barre elle-même — un seul câblage, pas deux.
 
-const IC = {
-  globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3z"/></svg>',
-  palette: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3a9 9 0 1 0 0 18h1.5a2.5 2.5 0 0 0 0-5H12a2 2 0 0 1 0-4h5a4 4 0 0 0 4-4c0-3-4-5-9-5z"/><circle cx="7.5" cy="11" r="1" fill="currentColor"/><circle cx="9.5" cy="7" r="1" fill="currentColor"/><circle cx="14" cy="6.5" r="1" fill="currentColor"/></svg>',
-  flag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/></svg>',
-}
+import { el } from './kit.js'
 
-export function buildHub({ onExplore, onStudio, onParcours, focusSearch }) {
-  const veil = document.createElement('div')
-  veil.className = 'hub-veil hub-hidden'
-  veil.innerHTML = `
-    <div class="hub">
-      <div class="hub-mark">ShibuMap<span>.</span></div>
-      <div class="hub-q">Que voulez-vous faire ?</div>
-      <div class="hub-doors">
-        <button type="button" class="hub-door ce-glassbox" data-k="explore">${IC.globe}<b>Explorer</b><i>La Terre en relief</i></button>
-        <button type="button" class="hub-door ce-glassbox" data-k="studio">${IC.palette}<b>Studio</b><i>Habiller ma carte</i></button>
-        <button type="button" class="hub-door ce-glassbox accent" data-k="parcours"><span class="hub-badge">Organisateurs</span>${IC.flag}<b>Parcours</b><i>Ma carte de course</i></button>
-      </div>
-      <button type="button" class="hub-search ce-glassbox">Rechercher un lieu…</button>
-      <div class="hub-drop">ou déposez un fichier GPX n'importe où — pas de fichier ? La démo vous attend dans Parcours.</div>
-      <button type="button" class="hub-esc">Échap — explorer librement</button>
-    </div>`
-  document.body.appendChild(veil)
+// contextes où l'accueil ne doit JAMAIS apparaître : interface masquée,
+// vitrine embarquée, boutique, Race Studio, Studio, viewer d'une shibu reçue.
+const BLOCKED = ['ce-noui', 'ce-embed', 'store-mode', 'studio-mode', 'atelier-mode', 'shibu-view']
+const blocked = () => BLOCKED.some((c) => document.body.classList.contains(c))
 
-  const hide = () => veil.classList.add('hub-hidden')
-  const show = () => veil.classList.remove('hub-hidden')
-  const isOpen = () => !veil.classList.contains('hub-hidden')
+export function buildHub({ bar, bottomBar, onExplore }) {
+  // pas de barre (mode embed) : un accueil sans son objet n'a pas de sens
+  if (!bar?.root) return { show() {}, hide() {}, toggle() {}, isOpen: () => false }
 
-  veil.querySelector('[data-k="explore"]').addEventListener('click', () => { hide(); onExplore?.() })
-  veil.querySelector('[data-k="studio"]').addEventListener('click', () => { hide(); onStudio?.() })
-  veil.querySelector('[data-k="parcours"]').addEventListener('click', () => { hide(); onParcours?.() })
-  veil.querySelector('.hub-search').addEventListener('click', () => { hide(); focusSearch?.() })
-  veil.querySelector('.hub-esc').addEventListener('click', () => { hide(); onExplore?.() })
-  veil.addEventListener('click', (e) => { if (e.target === veil) { hide(); onExplore?.() } })
-  window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isOpen()) { hide(); onExplore?.() } })
+  // le voile vit SOUS les barres (z-index 56 < topbar 60) : la topbar reste
+  // nette et cliquable — c'est son logo qui fait remonter la barre au centre.
+  const veil = el('div', 'ce-hubveil')
+  document.body.append(veil)
 
-  return { show, hide, isOpen }
+  // les mots vivent DANS le wrap de la barre : ils voyagent avec elle et se
+  // replient (max-height) quand elle redescend — jamais display:none.
+  const head = el('div', 'ce-hubhead')
+  const mark = el('div', 'ce-hubmark')
+  mark.innerHTML = 'ShibuMap<span>.</span>'
+  head.append(mark, el('div', 'ce-hubq', 'Que voulez-vous faire ?'))
+
+  const foot = el('div', 'ce-hubfoot')
+  const drop = el('div', 'ce-hubdrop', 'ou déposez un fichier GPX n’importe où — pas de fichier ? La démo vous attend dans Parcours.')
+  const esc = el('button', 'ce-hubesc', 'Échap — explorer librement')
+  esc.type = 'button'
+  foot.append(drop, esc)
+
+  bar.root.prepend(head)
+  bar.root.append(foot)
+
+  const core = bar.root.querySelector('.ce-qb-core')
+  const input = bottomBar?.input || null
+  const askPlaceholder = 'Rechercher un lieu…'
+  const barPlaceholder = input?.placeholder || ''
+
+  const isOpen = () => document.body.classList.contains('ce-hub')
+
+  function show() {
+    if (blocked() || isOpen()) return
+    if (input) input.placeholder = askPlaceholder
+    bar.setHome(true)
+  }
+  function hide() {
+    if (!isOpen()) return
+    if (input) input.placeholder = barPlaceholder
+    bar.setHome(false)
+  }
+
+  // Une porte cliquée : la barre DESCEND d'abord, l'action part ensuite. Le
+  // clic est intercepté en CAPTURE puis rejoué à l'arrivée sur le même bouton —
+  // aucune action n'est réécrite ici, c'est le câblage de la barre qui sert.
+  // (Sans ce délai, Studio et Parcours passent en plein écran et masquent la
+  // barre avant qu'on l'ait vue couler.)
+  let replay = 0
+  core?.addEventListener('click', (e) => {
+    if (!isOpen()) return
+    const btn = e.target.closest?.('.ce-wm-btn')
+    if (!btn) return
+    e.preventDefault()
+    e.stopPropagation()
+    // la porte choisie devient active TOUT DE SUITE : le pont de liquide et la
+    // coche voyagent sous elle pendant la descente
+    core.querySelectorAll('.ce-wm-btn').forEach((b) => b.classList.toggle('on', b === btn))
+    hide()
+    // « Explorer » est un interrupteur dans la barre ; depuis l'accueil, il ne
+    // peut que OUVRIR le panneau — le rejouer alors qu'il est déjà déplié le
+    // refermerait, ce qui n'a aucun sens comme réponse à la question posée.
+    if (btn.dataset.mode === 'explorer' && document.body.classList.contains('ce-explore')) return
+    clearTimeout(replay)
+    replay = setTimeout(() => btn.click(), 340)
+  }, true)
+
+  // le champ de recherche est le VRAI champ : y entrer fait redescendre la
+  // barre sans lui voler le focus
+  input?.addEventListener('focus', () => hide())
+
+  const escape = () => { hide(); onExplore?.() }
+  esc.addEventListener('click', escape)
+  veil.addEventListener('click', escape)
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isOpen()) escape() })
+
+  return { show, hide, isOpen, toggle: () => (isOpen() ? escape() : show()) }
 }

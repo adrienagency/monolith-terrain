@@ -55,6 +55,7 @@ const _v2 = new THREE.Vector2()
 // Retour Adrien : la mer spectre seule lisait comme « deux trains qui se
 // croisent », sans aucune interaction avec les terres.
 // Renvoie vec3(dy, pente·x, pente·z) ; crestS ressort pour le déferlement.
+
 const SHORE_SURF_GLSL = /* glsl */ `
 vec3 shoreSurf(vec2 uvF, sampler2D field, float t, float waveH, float chop, float speedMul, float lenScale, float viewCalm, out float crestS) {
   float dShore = texture2D(field, uvF).g; // 0..1 sur ~15 unités monde
@@ -171,12 +172,56 @@ void main() {
   nAcc.x += surf.y * uSurfCalm;
   nAcc.z += surf.z * uSurfCalm;
   crest = max(crest, crestS * uSurfCalm);
+#ifndef IS_LAKE
+  // ---- CRITÈRE DE DÉFERLEMENT : une vague ne dépasse pas sa profondeur ------
+  // Sans relèvement du niveau moyen, plus rien n'empêchait un creux de traverser
+  // le fond dans la frange côtière — et il le traversait : le fondu de côte
+  // atteint 1 dès ~2 m de profondeur, alors que l'amplitude sommée vaut des
+  // dizaines de mètres. (Aucun accent grave dans ces commentaires : ils vivent
+  // dans un template literal JS, un backtick y termine le module.)
+  // Le relief sous-marin ressortait alors entre les vagues, en peignes et en
+  // lames (captures Adrien à Ibiza et Toulon).
+  //
+  // Le relèvement n'était qu'un pansement. La règle physique, elle, est connue :
+  // une houle qui entre par petits fonds gonfle puis DÉFERLE, sa hauteur étant
+  // bornée à ~0,78 fois la profondeur. On applique donc cette borne — la mer
+  // reste à son vrai niveau, et les vagues s'apaisent en approchant du rivage
+  // au lieu de le percer.
+  //
+  // Limite DOUCE (pas un clamp) : cap·(1−e^(−|d|/cap)) vaut |d| en eau profonde
+  // et tend vers cap en eau basse, sans créer de crêtes rabotées à plat.
+  float prof = max(uWaterY - f.r, 0.0);
+  float cap = 0.78 * prof;
+  float amp = abs(disp.y);
+  disp.y = sign(disp.y) * cap * (1.0 - exp(-amp / max(cap, 1e-5)));
+#endif
   float edgeHold = 1.0 - smoothstep(uHalf - 2.0, uHalf - 0.15, max(abs(p.x), abs(p.z)));
   p.xz += disp.xz * edgeHold;
-  // niveau moyen : zéro exactement à la ligne de côte, remonté au large de
-  // l'amplitude sommée pour que les creux ne percent jamais la plaine marine.
-  // La MER ne dépasse ainsi jamais le trait de côte (retour Adrien v39).
+  // NIVEAU MOYEN : PLUS AUCUN RELÈVEMENT EN MER (décision d'Adrien).
+  //
+  // Le niveau moyen était remonté au large de toute l'amplitude sommée, pour
+  // que les creux ne percent jamais le fond. Cette précaution datait d'un temps
+  // où le fond marin était une PLAINE PLATE au niveau zéro : les tuiles
+  // terrarium n'ont aucune bathymétrie aux zooms fins (mesuré : 100 % de zéros
+  // au large de Toulon à z12). Depuis la fusion GEBCO le fond est réellement à
+  // −400 ou −4 800 m, et le relèvement ne faisait plus que gonfler la mer.
+  //
+  // La houle oscille donc maintenant AUTOUR du vrai niveau : les crêtes montent,
+  // et les creux CREUSENT le bloc d'eau au lieu de le soulever.
+  //
+  // Le rivage reste protégé sans rien de spécial : fade (smoothstep 0 à 0,10
+  // sur la distance à la côte) éteint déjà l'amplitude AVANT le trait d'eau,
+  // donc il n'y a pas de creux là où le fond affleure.
+  // (Pas d'accent grave ici : ce commentaire vit dans un template literal JS,
+  // un backtick le terminerait et casserait le module.)
+  //
+  // Les LACS gardent leur garde : ils sont peu profonds par nature, et leur fond
+  // ne vient pas de la bathymétrie marine.
+#ifdef IS_LAKE
   p.y += disp.y + uLift * fadeLift;
+#else
+  p.y += disp.y;
+#endif
   vCrest = crest;
   vNorm = normalize(vec3(-nAcc.x, 1.0 - nAcc.y, -nAcc.z));
   vWorld = vec3(p.x, uWaterY + p.y, p.z);
@@ -449,7 +494,15 @@ void main() {
     vec3 disp = oceanGerstner(p.xz, uTime, uWaveH * uViewCalm, uChop, uSpeedMul, uLenScale, fade, nAcc, crest);
     float crestS;
     vec3 surf = shoreSurf(uvF, uField, uTime, uWaveH, uChop, uSpeedMul, uLenScale, uViewCalm, crestS);
-    y = uWaterY + disp.y + surf.x * uSurfCalm + uLift * fadeLift + 0.025; // leger recouvrement : jamais de jour entre jupe et surface
+    // MÊME niveau que la surface, DÉFERLEMENT COMPRIS. Aucun relèvement, et la
+    // hauteur bornée par la profondeur exactement comme au-dessus : si les deux
+    // divergeaient d'un millimètre, un jour s'ouvrirait entre la jupe de verre
+    // et la mer sur tout le périmètre du bloc.
+    float dy = disp.y + surf.x * uSurfCalm;
+    float prof = max(uWaterY - f.r, 0.0);
+    float cap = 0.78 * prof;
+    dy = sign(dy) * cap * (1.0 - exp(-abs(dy) / max(cap, 1e-5)));
+    y = uWaterY + dy + 0.025; // leger recouvrement
   }
   vWorld = vec3(p.x, y, p.z);
   vec4 mv = modelViewMatrix * vec4(vWorld, 1.0);
@@ -827,15 +880,18 @@ export class RealWater {
 
     // --- open sea (skip in region mode: the plate replaces the ocean there)
     if (seaY > -9000 && !params.regionMode) {
-      // the surface rides ~2 m above the coastline plus the CURRENT swell
-      // amplitude, so a trough can never dip through the flat marine plain
-      // (the v37 "fresnel continents" were mostly this poke-through) — yet
-      // the lift stays metres in real terms: a fixed scene-unit lift flooded
-      // tens of metres of lowland at continental zooms (Baltic screenshot)
-      // v39: la surface repose AU NIVEAU ZERO (la mer ne depasse jamais le
-      // trait de cote) ; le niveau moyen remonte au large via uLift * fade
-      // dans le vertex — il meurt exactement a zero a la ligne de cote.
-      this._seaBase = seaY + Math.max(2 * demScale, 0.003)
+      // LE PLAN D'EAU REPOSE AU NIVEAU DE LA MER, POINT.
+      //
+      // Il flottait auparavant ~2 m au-dessus du trait de côte, en plus du
+      // relèvement du niveau moyen dans le vertex — deux précautions contre la
+      // même chose : un creux qui perce la « plaine marine ». Cette plaine était
+      // bien réelle tant que les tuiles de relief n'avaient aucune bathymétrie
+      // (mesuré : 100 % de zéros au large de Toulon à z12) ; depuis la fusion
+      // GEBCO, le fond est à sa vraie profondeur et les deux n'ont plus d'objet.
+      //
+      // Il ne reste que l'epsilon de coplanarité : sans lui la surface et le
+      // trait de côte se disputent le même plan et scintillent (z-fighting).
+      this._seaBase = seaY + 0.003
       const mat = waterMaterial({ isLake: false, params, fieldTex })
       mat.uniforms.uWaterY.value = this._seaBase
       // plancher d'echelle : sous ~0.55 la mer du vent passe sous la maille

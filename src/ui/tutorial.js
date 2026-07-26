@@ -43,7 +43,9 @@ function buildSteps() {
       text: 'Couleurs — la rampe du relief, les océans, le fond et le ciel.',
     },
     {
-      target: () => findPanel('caméra'),
+      // le panneau Caméra vit dans un menu replié : on éclaire le bouton de la
+      // topbar qui l'ouvre, sinon la loupe tomberait sur un rectangle vide
+      target: () => document.querySelector('.ce-cambtn'),
       text: 'Caméra — objectif, mise au point et mouvements automatiques.',
     },
     {

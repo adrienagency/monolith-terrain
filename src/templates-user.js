@@ -23,6 +23,11 @@ export const TEMPLATE_KEYS = [
   // (relief-grade.js) ou figé aux valeurs ci-dessous ; un look sauvé avec un
   // ombrage réglé à la main doit le retrouver tel quel au rechargement
   'shadeAuto', 'mapTint', 'heightContrast', 'heightPivot', 'slopeTint',
+  // colorisation du relief (terrain-analysis.js) — absent d'un template
+  // ancien ⇒ params garde ses valeurs d'usine, c'est-à-dire le mode Classique
+  // et des amplitudes nulles : le rendu d'avant, à l'identique
+  'colorMode', 'rampOklab', 'rampDry', 'rampWet', 'texShade', 'wetK', 'expoK',
+  'treeLine', 'hazeAmt', 'hazeAlt', 'hazeDist',
   'roadsEnabled', 'roadsOpacity', 'roadsDetail', 'roadColor', 'waterEnabled', 'waterOpacity', 'waterFill', 'coastLine', 'aerialEnabled', 'aerialOpacity', 'aerialCoastFade', 'placesEnabled', 'placesDensity', 'placesSize', 'placesHalo',
   // animated sea (ocean-waves spectrum) — lakeColor is the shared water tint
   'waterReal', 'waterTransparency', 'waterSunFx', 'lakeColor',

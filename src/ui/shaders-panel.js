@@ -17,7 +17,9 @@ const ICON =
 // panel (Shaders, Relief material). A tile with real image media carries no
 // label (the picture IS the name); only the textless fallback (e.g. "None")
 // keeps its caption.
-function vigTile({ id, cur, label, media, showName, onPick }) {
+// exporté : le picker de colorisation (section Ombrage, create-panel.js) doit
+// parler le MÊME langage visuel que les autres pickers du panneau Terrain
+export function vigTile({ id, cur, label, media, showName, onPick }) {
   const b = el('button', `ce-mat-vig${cur === id ? ' on' : ''}`)
   b.type = 'button'
   b.setAttribute('data-tip', label)

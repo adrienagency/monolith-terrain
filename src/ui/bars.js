@@ -231,21 +231,20 @@ export function buildTopBar(ctx) {
   }
   syncDark()
 
-  // CAMÉRA — le panneau est construit plus tard dans main.js : on le réclame
-  // au PREMIER clic, ce qui évite tout ordre d'initialisation fragile
+  // CAMÉRA — le panneau est construit plus tard dans main.js, qui l'accroche
+  // ici via mountCamera(). Il rejoint le menu UNE fois pour toutes, dès la
+  // construction : un montage paresseux au premier clic le laisserait détaché
+  // du document, donc invisible pour la palette « K » et la visite guidée.
   const camBtn = iconButton(I.aperture, '', () => {})
+  camBtn.classList.add('ce-cambtn') // ciblé par la visite guidée
   camBtn.setAttribute('data-tip', 'Caméra — champ de vision, mise au point, flou de profondeur et mouvements.')
   camBtn.addEventListener('click', (e) => {
     e.stopPropagation()
     const wasOpen = camMenu.classList.contains('open')
     closeMenu()
-    if (!camMenu.firstChild) {
-      const root = ctx.cameraPanel?.()
-      if (root) camMenu.append(root)
-    }
     // les panneaux naissent REPLIÉS, et ici l'en-tête qui sert à les déplier
     // est masqué (le bouton de la barre en tient lieu) : on ouvre nous-mêmes
-    camMenu.firstChild?.classList.remove('collapsed')
+    camMenu.firstElementChild?.classList.remove('collapsed')
     camMenu.classList.toggle('open', !wasOpen)
   })
 
@@ -286,7 +285,13 @@ export function buildTopBar(ctx) {
   barRight.append(dark, camBtn, hideBtn, helpBtn, gearBtn, sep(), exportBtn)
 
   document.body.append(bar, barRight, eye)
-  return { root: bar, rootRight: barRight, syncDark }
+  return {
+    root: bar,
+    rootRight: barRight,
+    syncDark,
+    // le panneau Caméra n'existe pas encore quand la barre se construit
+    mountCamera: (root) => camMenu.append(root),
+  }
 }
 
 // fixed bottom-right: one click to the isometric museum view — the whole
@@ -366,10 +371,25 @@ export function buildQuickCore(ctx) {
   const explore =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 2.6 4 5.7 4 9s-1.2 6.4-4 9c-2.8-2.6-4-5.7-4-9s1.2-6.4 4-9z"/></svg>'
   const setActive = (btn) => core.querySelectorAll('.ce-wm-btn').forEach((b) => b.classList.toggle('on', b === btn))
-  const mk = (icon, label, tip, onClick) => {
+  // data-mode : le MÊME vocabulaire que la capsule avancée — c'est lui qui dit
+  // à la rangée liquide où poser le pont et si le cartouche du bas doit se
+  // resserrer (mode « parcours » : on ne cherche pas un lieu pour bâtir une
+  // course, le champ se replie et GPX devient l'action du mode).
+  // Chaque porte porte DEUX titres et un sous-titre, parce que c'est le MÊME
+  // bouton dans les deux états de la barre (accueil au centre / barre du bas) :
+  //   .wm-t   — le titre de la BARRE, explicite (« Habiller ma carte »)
+  //   .wm-h   — le titre de l'ACCUEIL, court (« Studio ») ; absent = .wm-t sert
+  //             dans les deux états (« Explorer »)
+  //   .wm-sub — le sous-titre, visible seulement en accueil
+  // Ils se replient par max-width/max-height, JAMAIS display:none : liquidize
+  // supprimerait la bulle d'un coup, sans transition.
+  const mk = (mode, icon, label, hubLabel, sub, tip, onClick) => {
     const b = el('button', 'ce-wm-btn')
     b.type = 'button'
-    b.innerHTML = `${icon}<span>${label}</span>`
+    b.dataset.mode = mode
+    const alt = hubLabel ? ' alt' : ''
+    const hub = hubLabel ? `<span class="wm-h">${hubLabel}</span>` : ''
+    b.innerHTML = `${icon}<span class="wm-t${alt}">${label}</span>${hub}<i class="wm-sub">${sub}</i>`
     b.setAttribute('data-tip', tip)
     b.addEventListener('click', () => { setActive(b); onClick?.() })
     return b
@@ -377,20 +397,44 @@ export function buildQuickCore(ctx) {
   // Explorer n'était qu'un état de repos sans effet : il DÉPLIE maintenant le
   // panneau Explorer en haut à gauche (le seul dock autorisé en mode simple).
   // Recliquer le referme — c'est un interrupteur, comme les autres modes.
-  const home = mk(explore, 'Explorer', 'Les lieux à visiter — continents, sites remarquables, recherche.', () => {
+  const home = mk('explorer', explore, 'Explorer', null, 'La Terre en relief', 'Les lieux à visiter — continents, sites remarquables, recherche.', () => {
     document.body.classList.toggle('ce-explore', !document.body.classList.contains('ce-explore'))
   })
+  const race = mk('parcours', I.flag, 'Ma course', 'Parcours', 'Ma carte de course', 'Race Studio — votre parcours GPX en carte de course (points de passage, transports, partage).', () => { document.body.classList.remove('ce-explore'); ctx.openStudio() })
+  // le badge de l'ancien hub, conservé : il dit à qui s'adresse cette porte.
+  // position:absolute → il ne compte pas dans la boîte mesurée par liquidize.
+  const badge = el('b', 'ce-wm-badge', 'Organisateurs')
+  race.append(badge)
   core.append(
     home,
-    mk(I.brush, 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur votre carte.', () => { document.body.classList.remove('ce-explore'); ctx.openAtelier() }),
-    mk(I.flag, 'Ma course', 'Race Studio — votre parcours GPX en carte de course (points de passage, transports, partage).', () => { document.body.classList.remove('ce-explore'); ctx.openStudio() })
+    mk('studio', I.brush, 'Habiller ma carte', 'Studio', 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur votre carte.', () => { document.body.classList.remove('ce-explore'); ctx.openAtelier() }),
+    race
   )
   home.classList.add('on') // l'état de repos du mode simple : on explore
   return core
 }
 
+// Le champ de recherche, mémorisé au build : le raccourci « / », le hub et la
+// palette d'actions passaient chacun par leur propre câblage (trois chemins,
+// trois comportements possibles). Un seul point d'entrée maintenant.
+let searchInput = null
+export function focusSearch() {
+  const inp = searchInput?.isConnected ? searchInput : document.querySelector('.ce-search input')
+  if (!inp) return false
+  // en mode Parcours le champ est REPLIÉ (largeur 0) : le focus le rouvre
+  // (elembar.js écoute focus/blur et rend sa largeur à la barre)
+  inp.focus()
+  inp.select?.()
+  return true
+}
+
 export function buildBottomBar(ctx) {
-  const bar = el('div', 'ce-bottombar ce-glassbox')
+  // `ce-bb-loose` = la barre n'a pas (encore) été adoptée par la rangée
+  // liquide : elle garde alors son ancrage fixe et son verre. buildElemBar la
+  // récupère et retire ces deux classes — le fond devient la bulle du goo
+  // (porcelaine OPAQUE, validé Adrien : le seuil d'alpha du filtre affame le
+  // pont dès qu'une bulle est translucide).
+  const bar = el('div', 'ce-bottombar ce-glassbox ce-bb-loose')
 
   const search = el('div', 'ce-search')
   search.innerHTML = I.search
@@ -399,6 +443,7 @@ export function buildBottomBar(ctx) {
   input.placeholder = 'Chercher un lieu, ou coller « lat, lon »'
   input.spellcheck = false
   search.append(input)
+  searchInput = input
 
   const go = async () => {
     const text = input.value.trim()
@@ -412,7 +457,7 @@ export function buildBottomBar(ctx) {
     e.stopPropagation() // keep app-level shortcuts out of the field
   })
 
-  const gpx = el('button', 'ce-pillbtn')
+  const gpx = el('button', 'ce-pillbtn ce-gpxbtn')
   gpx.type = 'button'
   gpx.innerHTML = `${I.route}<span>GPX</span>`
   gpx.setAttribute('data-tip', 'Importer une trace GPX et la draper sur le relief.')
@@ -420,7 +465,7 @@ export function buildBottomBar(ctx) {
 
   bar.append(search, gpx)
   document.body.append(bar)
-  return { root: bar, input }
+  return { root: bar, input, search, gpx }
 }
 
 function extLink(href, text, cls) {
@@ -457,7 +502,8 @@ export function buildShibuChrome() {
   brand.target = '_blank'
   brand.rel = 'noopener'
   brand.innerHTML = 'ShibuMap<i>.</i> — créé par Adrien Agency'
-  const rights = el('div', 'sf-rights', '© Adrien Agency · © OpenStreetMap contributors')
+  // le viewer public porte les mêmes obligations d'attribution que l'app
+  const rights = el('div', 'sf-rights', '© Adrien Agency · © OpenStreetMap contributors · © Mapterhorn · Bathymétrie GEBCO_2026')
   foot.append(brand, rights)
 
   document.body.append(cta, foot)
@@ -469,7 +515,18 @@ export function buildCredits() {
   wrap.append(
     extLink('https://adrienagency.com', '© Adrien Agency', 'ce-credit-link'),
     el('span', 'ce-credit-dot', '·'),
-    extLink('https://www.openstreetmap.org/copyright', '© OpenStreetMap contributors', 'ce-credit-link')
+    extLink('https://www.openstreetmap.org/copyright', '© OpenStreetMap contributors', 'ce-credit-link'),
+    el('span', 'ce-credit-dot', '·'),
+    // Mapterhorn agrège les jeux nationaux d'altimétrie — RGE ALTI de l'IGN sous
+    // Licence Ouverte 2.0, swissALTI3D, et une trentaine d'autres. Le crédit est
+    // la contrepartie exigée par toutes ces licences.
+    extLink('https://mapterhorn.com/attribution', '© Mapterhorn', 'ce-credit-link'),
+    el('span', 'ce-credit-dot', '·'),
+    // GEBCO — la bathymétrie mondiale. Le grid est dans le domaine public et
+    // autorise explicitement l'usage commercial, mais ses conditions exigent de
+    // citer la source ET de ne jamais laisser croire à un usage nautique :
+    // l'avertissement complet vit dans l'Aide (voir tutorial/changelog).
+    extLink('https://www.gebco.net', 'Bathymétrie GEBCO_2026', 'ce-credit-link')
   )
   const extraDot = el('span', 'ce-credit-dot', '·')
   extraDot.style.display = 'none'

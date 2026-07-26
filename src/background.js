@@ -269,6 +269,22 @@ export function deriveAoColor(params = {}) {
   return hslToHex(h, clampF(Math.max(0.22, Math.min(0.6, s * 1.15))), 0.3)
 }
 
+// Couleur de la BRUME (perspective aérienne du mode Naturel). Même modèle que
+// deriveAoColor, mais l'autre bout de la chaîne : là où l'ombre plonge la
+// dominante vers le noir, la brume la fait FUIR VERS LE FOND. Elle part donc de
+// la couleur de fond — c'est vers elle que le lointain doit tendre pour que le
+// relief se fonde dans la scène au lieu de flotter devant — poussée d'un cran
+// vers le bleu, parce que c'est ce que fait la diffusion de Rayleigh dans l'air.
+// Clarté relevée : une brume plus sombre que le fond lit comme de la salissure.
+export function deriveHazeColor(params = {}) {
+  const base = isHex(params.bgColorA) ? params.bgColorA : '#e8eef5'
+  const { h, s, l } = hexToHsl(base)
+  // vers 215° (le bleu du ciel) par l'arc court, à 55 % du chemin
+  const d = ((215 - h + 540) % 360) - 180
+  const hue = (((h + d * 0.55) % 360) + 360) % 360 // hslToHex veut [0,360)
+  return hslToHex(hue, clampF(Math.max(0.08, Math.min(0.34, s * 0.8 + 0.06))), clampF(Math.min(0.93, l * 0.72 + 0.24)))
+}
+
 // palette → full v2 model (stops + points), used by « Couleurs auto »
 export function deriveBgModel(params = {}) {
   const { a, b, c } = deriveBgColors(params)

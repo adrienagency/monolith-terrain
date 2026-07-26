@@ -4,6 +4,7 @@
 
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
+import { demTilePx } from './dem-source.js'
 
 export const EARTH_RADIUS_M = 6371000
 export const MERCATOR_MAX_LAT = 85.05112878 // Web-Mercator tile coverage limit
@@ -50,8 +51,10 @@ export function latLonToWorld(dem, lat, lon) {
   // (dem.js wraps tile x when fetching, this must mirror it)
   let dtx = t.x - dem.originTileX
   dtx -= Math.round(dtx / n) * n
-  const px = dtx * 256
-  const py = (t.y - dem.originTileY) * 256
+  // ⚠️ pixels de TUILE, pas 256 en dur : Mapterhorn sert du 512, AWS du 256
+  const tpx = demTilePx(dem)
+  const px = dtx * tpx
+  const py = (t.y - dem.originTileY) * tpx
   return {
     x: (px / dem.size - 0.5) * TERRAIN_SIZE,
     z: (py / dem.size - 0.5) * TERRAIN_SIZE,
@@ -63,8 +66,9 @@ export function worldToLatLon(dem, x, z) {
   const py = (z / TERRAIN_SIZE + 0.5) * dem.size
   const n = 2 ** dem.zoom
   // originTileX can sit outside [0, n) for patches straddling ±180° — wrap
-  const tx = ((((dem.originTileX + px / 256) % n) + n) % n)
-  return tileToLatLon(tx, dem.originTileY + py / 256, dem.zoom)
+  const tpx = demTilePx(dem)
+  const tx = ((((dem.originTileX + px / tpx) % n) + n) % n)
+  return tileToLatLon(tx, dem.originTileY + py / tpx, dem.zoom)
 }
 
 // true (unexaggerated) meters per scene unit for the loaded DEM patch

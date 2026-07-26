@@ -21,7 +21,8 @@ import {
 import { Terrain } from './terrain.js'
 import { createLabels, disposeLabels } from './labels.js'
 import { createHud3D, findPois } from './hud3d.js'
-import { loadDem } from './dem.js'
+import { loadDem, getDemMaxZoom } from './dem.js'
+import { activeDemSource, isFallbackActive } from './dem-source.js'
 import { Globe } from './globe.js'
 import { Modes, stepZoom } from './modes.js'
 import { createGoto } from './goto.js'
@@ -34,7 +35,8 @@ import { worldToLatLon, latLonToWorld } from './geo.js'
 import { fetchTransports } from './transports.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
-import { monochromeLook, generateEarthPalette } from './palette.js'
+import { monochromeLook, generateEarthPalette, NATURAL_COLOR_PRESET, rampColorStops } from './palette.js'
+import { deriveUiTokens, UI_TOKEN_VARS } from './ui-theme.js'
 import { gradeForDem, elevationHistogram } from './relief-grade.js'
 import { buildPalettePool, pickShufflePalette } from './shuffle-pool.js'
 import { peakVantage } from './camera-poses.js'
@@ -61,7 +63,7 @@ import { TEMPLATE_KEYS, captureLook, serializeTemplate, parseTemplate, stripFrom
 import { loadUserPalettes, saveUserPalettes, paletteFromParams } from './user-palettes.js'
 import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT } from './share-link.js'
 import { DroneCam } from './drone-cam.js'
-import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, deriveMetalTints, deriveAoColor, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
+import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, deriveMetalTints, deriveAoColor, deriveHazeColor, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
 import { N8AOPostPass } from 'n8ao'
 import { History } from './history.js'
@@ -69,7 +71,7 @@ import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
 import { showNotice } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
-import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickCore, buildShibuChrome, initUiLevel, buildAdvToggle } from './ui/bars.js'
+import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickCore, buildShibuChrome, initUiLevel, buildAdvToggle, focusSearch } from './ui/bars.js'
 import { buildMiniRoute } from './ui/mini-route.js'
 import { buildSettingsSearch } from './ui/settings-search.js'
 import { perfSection } from './ui/camera-panel.js'
@@ -178,6 +180,25 @@ const params = {
     { c: '#fafaff', p: 1.0 },
   ],
   slopeTint: 0.5,
+  // ------------------------------------------------ COLORISATION DU RELIEF
+  // « Classique » = le rendu historique, au pixel près : rampe 1D indexée par
+  // l'altitude. « Naturel » (src/terrain-analysis.js) ajoute le rendu peigné
+  // des crêtes, un second axe d'humidité sur la rampe et la perspective
+  // aérienne. VALEURS D'USINE VOLONTAIREMENT NEUTRES : mode classique et
+  // amplitudes à 0, de sorte qu'un template ou une palette d'avant ce chantier
+  // rend exactement ce qu'il rendait. C'est la tuile « Naturel » du picker qui
+  // pose le préréglage (NATURAL_COLOR_PRESET dans palette.js).
+  colorMode: 'classic',
+  rampOklab: false, // interpolation perceptuelle des arrêts de rampe
+  rampDry: 0, // amplitude de la ligne SÈCHE du LUT 2D
+  rampWet: 0, // amplitude de la ligne HUMIDE
+  texShade: 0, // intensité du peigné (texture shading)
+  wetK: 0, // poids de l'humidité topographique
+  expoK: 0, // poids de l'exposition (adret / ubac)
+  treeLine: 0.62, // altitude normalisée où végétation et humidité s'éteignent
+  hazeAmt: 0, // perspective aérienne — force globale
+  hazeAlt: 0.5, // altitude où le voile d'altitude s'éteint
+  hazeDist: 0.5, // part de la composante DISTANCE dans le voile
   contourInterval: 0.11,
   contourOpacity: 0.5, // finer, more discreet engraving by default
   contourWeight: 0.7,
@@ -192,6 +213,14 @@ const params = {
   // (--hud-blur/--hud-bg-alpha/--hud-accent/--hud-ink) used across the chrome.
   uiBlur: 9,
   uiBgOpacity: 0.4,
+  // TEINTE DE L'INTERFACE (src/ui-theme.js) : les jetons de v28.css dérivés de
+  // la PALETTE de la carte. Vrai par défaut — c'est la fonctionnalité elle-même,
+  // et un interrupteur à faux par défaut ne se serait jamais vu ; la garantie de
+  // contraste est vérifiée sur les 136 palettes du catalogue dans les deux
+  // thèmes, donc l'allumer n'expose à aucune palette illisible. À faux,
+  // syncUiTheme EFFACE ses valeurs en ligne et v28.css reprend la main, à
+  // l'identique de ce que l'interface rendait avant ce chantier.
+  uiTint: true,
   hudAccent: '#ff4d00',
   hudInk: '#17191b',
   sweepSpeed: 2.5,
@@ -564,19 +593,63 @@ function syncGlobeShadow(mul) {
     : (!params.bgMode || params.bgMode === 'solid' ? params.bgColorA : (params.bgColorB || params.bgColorA))
   globe?.setShadowColor(hex, mul)
 }
+// L'INTERFACE SUIT LA PALETTE (src/ui-theme.js). Même patron que syncAoColor /
+// syncHazeColor : un module pur calcule, main.js pousse — ici sur des variables
+// CSS, puisque toute la chrome de v28.css tourne déjà sur des jetons.
+//
+// ⚠️ SUR document.body, PAS sur documentElement, et ce n'est pas un détail :
+// v28.css redéclare tous les jetons sous `body.dark`. Une valeur en ligne posée
+// sur <html> n'est qu'HÉRITÉE par <body>, donc la déclaration du sélecteur
+// `body.dark` la bat à plate couture — la teinte aurait marché de jour et
+// disparu de nuit. Sur <body>, le style en ligne l'emporte dans les deux modes.
+// (--lq-m1/--lq-m2 s'en moquent : personne ne les redéclare.)
+//
+// ⚠️ uiTint à faux ne pose PAS de valeurs neutres : il EFFACE. C'est v28.css qui
+// redevient la source, à l'octet près — le repli sûr n'est pas une imitation.
+let _uiThemeKey = ''
+function syncUiTheme() {
+  const stops = rampColorStops(params)
+  // mémo façon _lastBgMul : applyBackground repasse ici à chaque palier du
+  // cycle jour/nuit, et réécrire douze propriétés perso sur <body> force un
+  // recalcul de style de tout l'arbre. Rien n'a bougé ⇒ on ne touche à rien.
+  const key = params.uiTint === false ? 'off' : `${params.darkMode ? 'd' : 'l'}|${stops.map((s) => s.c).join()}`
+  if (key === _uiThemeKey) return
+  _uiThemeKey = key
+  const st = document.body.style
+  if (params.uiTint === false) {
+    for (const v of Object.values(UI_TOKEN_VARS)) st.removeProperty(v)
+    st.removeProperty('--ce-goo-shadow')
+    return
+  }
+  const tokens = deriveUiTokens(stops, { dark: !!params.darkMode })
+  for (const [k, v] of Object.entries(UI_TOKEN_VARS)) st.setProperty(v, tokens[k])
+  // l'ombre du calque goo garde sa recette CLAIRE jour et nuit (v28.css) : on
+  // la teinte donc toujours depuis la base claire, sinon la barre liquide
+  // prendrait un noir à 50 % la nuit — un changement que personne n'a demandé.
+  st.setProperty('--ce-goo-shadow', deriveUiTokens(stops, { dark: false }).shadowColor)
+}
+syncUiTheme() // au démarrage : la palette d'usine habille déjà l'interface
+
 // ⚠️ `var`, et c'est délibéré : applyBackground peut tourner AVANT la création
 // d'aoPass, et un const/let lèverait à la lecture (zone morte temporelle — le
 // piège déjà vécu entre placeSun et terrain). Hoisté, il vaut undefined d'ici là.
 var _aoReady = false
+// même garde, pour la couleur de brume : `terrain` et `blockGrid` naissent bien
+// après applyBackground, et les lire avant lèverait (TDZ)
+var _colorReady = false
 function applyBackground() {
   // le liseré métal de la barre liquide suit la PALETTE de la carte —
   // applyBackground passe sur tout changement de look, c'est le bon péage
   const mt = deriveMetalTints(params)
   document.documentElement.style.setProperty('--lq-m1', mt.bright)
   document.documentElement.style.setProperty('--lq-m2', mt.tint)
+  // ...et les JETONS de l'interface avec lui : setDarkMode passe par ici, donc
+  // la bascule clair/sombre recalcule les jetons dans le bon thème.
+  syncUiTheme()
   // l'OMBRE AMBIANTE suit elle aussi la palette : les creux tombent dans la
   // teinte dominante assombrie, jamais dans un gris neutre (Adrien)
   syncAoColor()
+  syncHazeColor()
   // v2 : normaliser stops/points D'ABORD et tenir le miroir A/B/C (premier /
   // médian / dernier stop) à jour — l'ombre du globe et la brume lisent A/B
   if (params.bgMode && params.bgMode !== 'solid') {
@@ -1393,7 +1466,30 @@ let coastMaskImage = null
 // params.demZoom freely, but refining always climbs back to this. Default to the
 // finest tiles available (z15) so zooming all the way in actually reaches full
 // detail; picking a coarser "Detail (zoom)" lowers it again.
-let userFineZoom = Math.max(params.demZoom, 15)
+//
+// PLAFOND z17 depuis Mapterhorn : la Suisse (swissALTI3D) sert du z17, la France
+// (IGN RGE ALTI) du z16. Le DÉFAUT reste z15 — le zoom fixe l'EMPRISE du bloc
+// (3 tuiles de large : ~4,6 km à z15, 2,3 km à z16, 1,1 km à z17), pas seulement
+// la finesse, et z15 en tuiles 512 px porte déjà deux fois plus de détail que
+// z15 en 256 px. Monter DEFAULT_FINE_ZOOM change la taille du bloc, pas sa netteté.
+const MAX_FINE_ZOOM = 17
+const DEFAULT_FINE_ZOOM = 15
+let userFineZoom = Math.min(MAX_FINE_ZOOM, Math.max(params.demZoom, DEFAULT_FINE_ZOOM))
+// ⚠️ LE PLAFOND DOIT SUIVRE LA ZONE, pas rester sur une constante.
+// Retour d'Adrien : « z16 et z17 ne sont pas accessibles en Suisse, ni au zoom
+// ni au clic ». Le chargement, lui, marchait déjà — vérifié à Zermatt, z17 rend
+// 0,41 m/px. Ce qui bloquait, c'est que la plongée au clic s'arrête à
+// `userFineZoom` (voir stepZoom plus haut), figé à 15 au démarrage.
+//
+// On ne fait que MONTER le plafond : quelqu'un qui a demandé du fin garde son
+// choix en survolant une zone moins couverte, et redescendre sous son dos serait
+// une surprise désagréable.
+function liftFineZoomToRegion() {
+  const max = getDemMaxZoom()
+  if (!max) return
+  const cible = Math.min(MAX_FINE_ZOOM, Math.max(max, DEFAULT_FINE_ZOOM))
+  if (cible > userFineZoom) userFineZoom = cible
+}
 
 // --- per-zoom vertical exaggeration ------------------------------------------
 // ONE elevation model shared by every look (templates never touch it). Each zoom
@@ -1460,6 +1556,9 @@ async function fetchAndBuildDem() {
   loadingStatus.textContent = 'fetching elevation tiles…'
   loadingEl.classList.remove('hidden')
   dem = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom })
+  // le sondage de couverture vient d'aboutir pour cette zone : si elle est
+  // servie plus finement que le défaut, la plongée au clic doit pouvoir y aller
+  liftFineZoomToRegion()
   terrain.setDem(dem)
   params.source = 'real'
   try {
@@ -1684,6 +1783,9 @@ modes = new Modes({
     // around it) before the zoom-out staircase / orbit gate engages
     surfaceMaxDistance: () => 150,
     getFineZoom: () => userFineZoom,
+    // zoom max SERVI par la source sur la zone courante (informatif — le zoom
+    // fixe l'emprise du bloc, on ne bride donc pas la navigation dessus)
+    getDemMaxZoom,
     // task 30 Fix A: terrain-clearance guard for the dive/refine arrival pose
     // (see modes.js's _arrivalPose()) — the local relief height right under
     // the landing target, so the arrival camera can never come to rest below
@@ -1911,7 +2013,26 @@ function applyPalette(p) {
   // applyBackground ne passe pas sur ce chemin (le dé change la palette sans
   // toucher au fond), d'où le rappel explicite.
   syncAoColor()
+  // ...et l'INTERFACE aussi, pour la même raison. applyPalette est le péage
+  // unique de toutes les routes qui changent la palette : template, template
+  // utilisateur, shuffle, monochrome, reset, lien de partage et message embed
+  // y passent tous. Une seule ligne couvre donc les six.
+  syncUiTheme()
   refreshAll()
+}
+
+// La BRUME de la perspective aérienne suit le FOND : le lointain doit tendre
+// vers la couleur de la scène pour s'y fondre au lieu de flotter devant.
+// Même patron que syncAoColor — hoistée et gardée, parce qu'applyBackground
+// peut tourner avant que le terrain existe (zone morte temporelle).
+function syncHazeColor() {
+  params.hazeColor = deriveHazeColor(params)
+  // ⚠️ `terrain` et `blockGrid` sont des const déclarés plus bas : les LIRE
+  // avant leur ligne lève (zone morte temporelle — `typeof` n'y échappe pas non
+  // plus). D'où le drapeau `var` hoisté, exactement comme _aoReady au-dessus.
+  if (!_colorReady) return
+  terrain.mapUniforms.uHazeColor.value.set(params.hazeColor)
+  blockGrid?.restyle(params)
 }
 
 function applyStyle(s) {
@@ -2154,6 +2275,11 @@ function applyUserTemplate(tmpl) {
   terrain.setLiquidMetal(!!params.liquidMetal, params)
   terrain.setSurfaceFx(params.surfaceFx | 0)
   if ((params.surfaceFx | 0) > 0 && params.fx?.[params.surfaceFx]) terrain.applyFxParams(params.fx[params.surfaceFx])
+  // COLORISATION DU RELIEF — un template d'avant ce chantier n'a pas la clé :
+  // params garde alors sa valeur d'usine ('classic'), donc le rendu d'avant.
+  // Le mode borne aussi le bruit de détail (géométrie) : régénérer s'il change.
+  params.hazeColor = deriveHazeColor(params)
+  if (terrain.setColorMode(params.colorMode || 'classic', params) && params.source === 'real') regenerateTerrain()
   if (clouds) {
     if (params.cloudsEnabled) clouds.build(params)
     clouds.setVisible(params.cloudsEnabled && modes.mode === 'surface')
@@ -2530,6 +2656,10 @@ function shuffleLook() {
 // central aux zooms fins, des blocs de même taille/apparence portent la suite
 // du tracé ; ils disparaissent au dézoom. Fondation du futur système 5×5.
 const blockGrid = new BlockGrid({ scene, params, getMainDem: () => dem, getMainTerrain: () => terrain, getPlinth: () => plinth })
+// à partir d'ici terrain ET blockGrid existent : la couleur de brume peut être
+// poussée (voir syncHazeColor et le drapeau _colorReady)
+_colorReady = true
+syncHazeColor()
 
 const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: () => dem, getGrid: () => blockGrid })
 
@@ -3442,10 +3572,6 @@ const topBar = buildTopBar({
   },
   // the Globe button always shows the WHOLE planet, spinning slowly
   enterOrbit: () => { cameraAuto.stop(); modes.enterOrbit(16000000) },
-  // le panneau Caméra est monté dans le menu de la topbar, au PREMIER clic :
-  // il est construit bien plus bas dans ce fichier, cette closure ne le lit
-  // donc qu'une fois la page vivante
-  cameraPanel: () => cameraPanel.root,
   // the "?" button replays the guided tour (lazy-loaded, tiny)
   startTutorial: async () => {
     const { startTutorial } = await import('./ui/tutorial.js')
@@ -3491,8 +3617,14 @@ const quickCore = IS_EMBED ? null : buildQuickCore({
 // pointer:coarse/touch breakpoint, see v28.css) and push the profile's
 // `bottom` up above it with a fixed gap, so the two can never overlap
 // (a z-index bump alone would leave them stacked, not "remonté")
+// ⚠️ la mesure est RÉANCRÉE sur la rangée liquide (.ce-lqrow) depuis la fusion
+// des deux barres : elle englobe la capsule des modes ET le cartouche du bas.
+// Mesurer la seule barre de recherche poserait le profil sur la capsule.
+// La rangée n'existe pas encore au premier appel (elembar se construit plus
+// bas) — repli sur la barre seule, puis rappel après la construction.
 function syncGpxProfilePosition() {
-  const r = bottomBar.root.getBoundingClientRect()
+  const host = document.querySelector('.ce-lqrow') || bottomBar.root
+  const r = host.getBoundingClientRect()
   // barre masquée (viewer shibu, noui, boutique…) : son rect est tout à zéro
   // — publier ces mesures donnerait un profil de largeur 0 « posé » au-dessus
   // de l'écran. On efface plutôt les variables : les fallbacks CSS de
@@ -3639,6 +3771,35 @@ const panelCtx = {
   importTemplateText,
   applyPalette: applyPaletteWithBg, // changer une palette adapte aussi le fond (Adrien)
   applyStyle,
+  // --- Colorisation du relief (picker Classique / Naturel, section Ombrage)
+  getColorMode: () => params.colorMode || 'classic',
+  setColorMode: (mode) => {
+    // la tuile « Naturel » POSE son préréglage tant que les curseurs sont
+    // restés à leur valeur d'usine (toutes nulles, pour que le rendu d'avant ce
+    // chantier soit reproduit à l'identique) : sans ça le mode s'allumerait
+    // sans rien changer à l'écran et passerait pour cassé. Test SANS ÉTAT : dès
+    // que l'utilisateur (ou un template) a réglé quoi que ce soit, on ne
+    // réécrit plus rien — un aller-retour Classique ↔ Naturel garde ses réglages.
+    const vierge = !params.texShade && !params.wetK && !params.expoK && !params.rampDry && !params.rampWet && !params.hazeAmt
+    if (mode === 'natural' && vierge) Object.assign(params, NATURAL_COLOR_PRESET)
+    params.colorMode = mode
+    params.hazeColor = deriveHazeColor(params)
+    // le mode borne le bruit de détail (géométrie) → régénération obligatoire ;
+    // setColorMode le dit en renvoyant true quand le mode a bougé
+    const changed = terrain.setColorMode(mode, params)
+    blockGrid?.restyle(params)
+    if (changed && params.source === 'real') regenerateTerrain()
+    refreshAll()
+  },
+  // un curseur du mode Naturel : uniformes seulement, aucun recalcul de DEM
+  setColorParam: (k, v) => {
+    params[k] = v
+    terrain.applyColorParams(params)
+    // les deux amplitudes du LUT recuisent la rampe, les autres non
+    if (k === 'rampDry' || k === 'rampWet') terrain.rebuildRamp(params)
+    blockGrid?.restyle(params)
+  },
+  getColorParam: (k) => params[k],
   // --- Ombrage auto (section Ombrage du panneau Terrain)
   markShadeDirty, // un curseur repris à la main → ce réglage ne suivra plus
   setShadeAuto: (v) => { params.shadeAuto = v; if (v) applyAutoShade({ force: true }) },
@@ -3656,6 +3817,10 @@ const panelCtx = {
   rebuildRamp: () => {
     terrain.rebuildRamp(params)
     globe.rebuildRamp(params)
+    // le nuancier du panneau Créer écrit dans params.rampStops SANS passer par
+    // applyPalette : la teinte de l'interface doit suivre le pinceau, sinon
+    // l'accord se défait dès qu'Adrien retouche un arrêt à la main.
+    syncUiTheme()
   },
   peaksLayer,
   setLabelsVisible: (v) => (labels.visible = v && modes.mode === 'surface'),
@@ -3670,10 +3835,17 @@ const panelCtx = {
     if (params.source === 'real') regenerateTerrain()
   },
   onZoomPicked: (v) => {
-    if (v >= 12) userFineZoom = v // remember the user's chosen fine scale
+    if (v >= 12) userFineZoom = Math.min(v, MAX_FINE_ZOOM) // remember the user's chosen fine scale
     if (params.source === 'real') loadRealTerrain()
   },
   getFineZoom: () => userFineZoom, // finest scale reached — gates the 2048/4096 mesh tiers
+  maxFineZoom: MAX_FINE_ZOOM, // plafond du sélecteur « Détail (zoom) »
+  // Zoom le plus fin que la SOURCE sert réellement sur la zone courante (z16 en
+  // France, z17 en Suisse, z12 sur l'Everest). Au-delà, le bloc garde son emprise
+  // mais la donnée est surzoomée : c'est ce qu'il faut dire à l'écran
+  // (« zoom maximum atteint »), pas interdire.
+  getDemMaxZoom,
+  getDemSource: () => ({ ...activeDemSource(), fallback: isFallbackActive() }),
   applyBackground, // solid / gradient scene background
   autoBgColours, // derive gradient stops from the map palette
   autoDarkFromBg, // bascule clair/sombre par contraste après une édition du fond
@@ -3885,7 +4057,8 @@ const mapPanel = buildMapPanel({
 
 // (panneau Scanner supprimé — sa section vit dans Image, voir buildEffectsPanel)
 
-// Camera panel — left dock (Explorer, Carte, Caméra, Parcours).
+// Camera panel — il ne vit PLUS dans le dock de gauche mais dans le menu
+// « objectif » de la topbar (voir mountCamera plus bas).
 const cameraPanel = buildCameraPanel({
   params,
   camera,
@@ -3922,6 +4095,8 @@ const cameraPanel = buildCameraPanel({
     camera.up.set(0, 1, 0)
   },
 })
+// il vit dans le menu « objectif » de la topbar, jamais dans un dock
+topBar.mountCamera(cameraPanel.root)
 
 // Route panel — left dock, docked directly below Camera (Explore, Scan,
 // Camera, Route). Exposes the loaded GPX track: load button + line styling.
@@ -3957,10 +4132,16 @@ if (!IS_EMBED) {
 // 3 MODES — Explorer / Studio / Parcours, icône + nom. Choisir un mode
 // charge ses panneaux et fait disparaître les autres ; les outils
 // contextuels ont été retirés (« ça n'est pas logique pour l'instant »).
+// la rangée liquide, remontée hors du bloc : c'est elle qui porte l'ACCUEIL
+// (son état « grand », au centre de l'écran) — voir buildHub plus bas.
+let elemBar = null
 if (!IS_EMBED) {
   const WORKMODE_KEY = 'shibumap-workmode'
   const WORKMODE_PANELS = {
-    explorer: () => [explorePanel, mapPanel, cameraPanel],
+    // la Caméra n'est plus listée ici : elle a quitté le dock pour le menu de
+    // la topbar, et wm-off (display:none) l'aurait éteinte hors mode Explorer —
+    // le menu se serait ouvert VIDE
+    explorer: () => [explorePanel, mapPanel],
     studio: () => [templatesPanel, shadersPanel, fondsPanel, elementsPanel, imagePanel],
     parcours: () => [routePanel],
   }
@@ -3978,10 +4159,10 @@ if (!IS_EMBED) {
   // append DÉPLACE les nœuds
   {
     const dock = explorePanel.root.parentElement
-    for (const p of [explorePanel, mapPanel, cameraPanel, routePanel, shadersPanel, fondsPanel, elementsPanel, imagePanel]) dock.append(p.root)
+    for (const p of [explorePanel, mapPanel, routePanel, shadersPanel, fondsPanel, elementsPanel, imagePanel]) dock.append(p.root)
   }
   const initialMode = (() => { try { return localStorage.getItem(WORKMODE_KEY) } catch { return null } })() || 'explorer'
-  const elemBar = buildElemBar({
+  elemBar = buildElemBar({
     modes: [
       { id: 'explorer', icon: 'explore', label: 'Explorer' },
       { id: 'studio', icon: 'studio', label: 'Studio' },
@@ -3991,11 +4172,17 @@ if (!IS_EMBED) {
     onMode: applyWorkMode,
     toolsByMode: { explorer: {}, studio: {}, parcours: {} },
     simpleCore: quickCore,
+    // le cartouche du bas est ADOPTÉ par la rangée liquide : les deux barres
+    // deviennent un seul objet, relié par un pont de goo
+    bottomBar,
   })
   applyWorkMode(initialMode)
   // « Avancé » vit dans les barres de modes (sorti de la topbar) : ici sa
   // version elembar — détachée à droite du cœur liquide (advSlot), décentrée
   elemBar.advSlot?.append(buildAdvToggle('ce-elembar-btn'))
+  // la barre du bas vient de changer d'ancrage : le profil GPX se mesure
+  // maintenant sur la rangée entière (voir syncGpxProfilePosition)
+  syncGpxProfilePosition()
 }
 
 // roue crantée — PARAMÈTRES GLOBAUX (réorg Adrien) : toujours visible dans
@@ -4081,7 +4268,9 @@ const shortcutsCtx = {
   },
   reframe: () => cameraPreset('home'),
   toggleShortcuts: () => shortcutsOverlay.toggle(),
-  focusSearch: () => bottomBar.input?.focus(),
+  // un SEUL câblage pour les trois entrées (« / », hub, palette) : bars.js
+  // détient le champ et sait le rouvrir quand il est replié (mode Parcours)
+  focusSearch,
   openExport: () => openExportUI(),
   toggleLayer,
   toggleRegion,
@@ -4111,8 +4300,11 @@ function debounce(fn, ms) {
   return wrapped
 }
 const recordHistoryDebounced = debounce(() => history.record(), 400)
-document.addEventListener('change', (e) => { if (e.target?.closest?.('.ce-dock')) recordHistoryDebounced() }, true)
-document.addEventListener('pointerup', (e) => { if (e.target?.closest?.('.ce-dock')) recordHistoryDebounced() }, true)
+// .ce-cammenu autant que .ce-dock : le panneau Caméra a quitté le rail pour un
+// menu de la topbar, et fov/bokeh font partie du look annulable
+const UNDOABLE_UI = '.ce-dock, .ce-cammenu'
+document.addEventListener('change', (e) => { if (e.target?.closest?.(UNDOABLE_UI)) recordHistoryDebounced() }, true)
+document.addEventListener('pointerup', (e) => { if (e.target?.closest?.(UNDOABLE_UI)) recordHistoryDebounced() }, true)
 
 // seed the first undo step so the FIRST committed edit has a state to undo
 // back to (record() dedups, so this is free even if nothing changes first)
@@ -4121,10 +4313,17 @@ history.record()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { raceLabels, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,
+window.__exp = { raceLabels, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo,
+  // INTERRUPTEUR de la teinte d'interface : __exp.setUiTint(false) rend
+  // l'interface neutre de v28.css, true la raccorde à la palette.
+  setUiTint: (v) => { params.uiTint = v !== false; syncUiTheme() }, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,
   // mode aléatoire + ombrage auto : de quoi sonder l'état depuis la console
   shuffleLook,
   get dem() { return dem },
+  // source d'altimétrie : quelle source sert le bloc, jusqu'à quel zoom, et
+  // le repli AWS s'est-il déclenché ?
+  getDemMaxZoom,
+  get demSource() { return { ...activeDemSource(), fallback: isFallbackActive() } },
   get shufflePool() { return currentPalettePool() },
   get lastShufflePalette() { return shuffleLastPalette },
   get reliefGrade() { return currentReliefGrade() },
@@ -4584,17 +4783,16 @@ const atelier = buildAtelier({
 })
 panelCtx.openAtelier = () => atelier.enter() // quickbar (lit au clic, pas au build)
 
-// ---- HUB d'accueil (UX P1) — le popup des trois portes ---------------------
-const hub = buildHub({
-  onExplore: () => {},
-  onStudio: () => atelier.enter(),
-  onParcours: () => studio.enter(),
-  focusSearch: () => document.querySelector('.ce-search input')?.focus(),
-})
-// le logo de la topbar rouvre le hub à tout moment
+// ---- ACCUEIL (UX P1) — LA barre, en grand, au centre -----------------------
+// Plus de popup à trois portes : les trois portes déclenchaient EXACTEMENT les
+// trois actions du cœur simple de la barre. C'est donc le même objet, dessiné
+// une seule fois : buildHub ne pose que le voile et les mots autour, la barre
+// fait le reste (elembar.setHome).
+const hub = buildHub({ bar: elemBar, bottomBar, onExplore: () => {} })
+// le logo de la topbar fait remonter la barre au centre (et la repose)
 {
   const mark = document.querySelector('.ce-wordmark')
-  if (mark) { mark.style.cursor = 'pointer'; mark.addEventListener('click', () => hub.show()) }
+  if (mark) { mark.style.cursor = 'pointer'; mark.addEventListener('click', () => hub.toggle()) }
 }
 panelCtx.refreshRaceLabels = () => raceLabels.setDirty() // toggle infos course par calque
 
@@ -4606,10 +4804,17 @@ setTimeout(() => {
   if (IS_SHIBU) return // une shibu reçue : viewer épuré, jamais d'onboarding
   if (IS_STORE_BOOT) { store.enter(); return } // /templates → boutique directe
   if (IS_STUDIO_BOOT) { studio.enter(); return } // ?studio=1 → Race Studio direct
-  // le HUB remplace l'ancien tutoriel auto — le « ? » de la topbar garde
-  // le tour guidé pour qui le veut
-  hub.show()
 }, 2500)
+
+// l'ACCUEIL, lui, arrive VITE : la barre est déjà à l'écran, elle ne fait que
+// s'élever au centre. Attendre 2,5 s laisserait le temps de la lire en bas et
+// le mouvement perdrait son sens — on verrait deux objets au lieu d'un.
+// Mêmes gardes que ci-dessus (à 900 ms, store-mode/studio-mode ne sont pas
+// encore posées : c'est le drapeau de boot qu'il faut interroger, pas la classe).
+setTimeout(() => {
+  if (EMBED || IS_SHIBU || IS_STORE_BOOT || IS_STUDIO_BOOT) return
+  hub.show()
+}, 900)
 
 window.addEventListener('resize', () => {
   if (loopPaused) return // an offline export owns the renderer size right now

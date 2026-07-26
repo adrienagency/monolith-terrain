@@ -25,8 +25,55 @@ function restoreState({ renderer, composer, camera }, saved) {
   camera.updateProjectionMatrix()
 }
 
+// ATTRIBUTION DES EXPORTS — la contrepartie des licences des données.
+//
+// Le bandeau de crédits en bas d'écran est du DOM : il ne part PAS dans le
+// canevas WebGL, donc une image exportée n'en portait aucune trace. Or les
+// licences qui nous coûtent quelque chose s'appliquent d'abord aux images
+// diffusées ou VENDUES : ODbL pour OpenStreetMap, Licence Ouverte 2.0 pour
+// l'IGN RGE ALTI (via Mapterhorn), les conditions GEBCO pour la bathymétrie.
+// D'où cette ligne, incrustée après coup sur un canevas 2D.
+//
+// Discrète par construction : hauteur proportionnelle à l'image (0,9 %), en bas
+// à droite, blanc translucide sur ombre portée pour rester lisible sur un fond
+// clair comme sur un fond sombre.
+export const EXPORT_CREDIT = '© Adrien Agency · © OpenStreetMap contributors · © Mapterhorn · GEBCO_2026'
+
+async function stampCredit(blob, width, height, format, quality, text) {
+  const bmp = await createImageBitmap(blob)
+  const c = document.createElement('canvas')
+  c.width = width
+  c.height = height
+  const g = c.getContext('2d')
+  g.drawImage(bmp, 0, 0, width, height)
+  bmp.close?.()
+  const px = Math.max(11, Math.round(height * 0.009))
+  const pad = Math.round(px * 1.6)
+  g.font = `${px}px system-ui, -apple-system, "Segoe UI", sans-serif`
+  g.textAlign = 'right'
+  g.textBaseline = 'bottom'
+  g.shadowColor = 'rgba(0,0,0,0.55)'
+  g.shadowBlur = px * 0.6
+  g.fillStyle = 'rgba(255,255,255,0.72)'
+  g.fillText(text, width - pad, height - pad)
+  return new Promise((resolve, reject) =>
+    c.toBlob((b) => (b ? resolve(b) : reject(new Error('Canvas capture failed'))), format, quality)
+  )
+}
+
 // Render one frame at width x height and return it as an image Blob.
-export async function exportImage({ renderer, composer, camera, width, height, format = 'image/png', quality = 0.95 }) {
+// `credit` : texte d'attribution incrusté en bas à droite. Passer `null` le
+// retire — à ne faire que pour un usage où l'attribution est portée ailleurs.
+export async function exportImage({
+  renderer,
+  composer,
+  camera,
+  width,
+  height,
+  format = 'image/png',
+  quality = 0.95,
+  credit = EXPORT_CREDIT,
+}) {
   const ctx = { renderer, composer, camera }
   const saved = saveState(renderer, camera)
   let pending
@@ -45,7 +92,14 @@ export async function exportImage({ renderer, composer, camera, width, height, f
   } finally {
     restoreState(ctx, saved)
   }
-  return pending
+  const blob = await pending
+  if (!credit) return blob
+  // une incrustation ratée ne doit jamais faire perdre l'export à l'utilisateur
+  try {
+    return await stampCredit(blob, width, height, format, quality, credit)
+  } catch {
+    return blob
+  }
 }
 
 // Frame-by-frame MP4 recorder. The caller drives the scene clock and calls

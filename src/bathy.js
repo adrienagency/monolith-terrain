@@ -30,6 +30,10 @@ export const BLEND_DEPTH = 25
 // Un pixel de mer reste de la mer : on ne le laisse jamais remonter à 0.
 const SEA_EPS = 0.05
 
+// Un demi-pas de quantification terrarium (1/256 m). En deçà, une altitude est
+// tenue pour une ABSENCE de mesure et non pour un terrain à l'altitude zéro.
+const NODATA_EPS = 1 / 512
+
 /**
  * Fusionne deux champs d'altitude de MÊME taille, en mètres.
  *
@@ -48,8 +52,22 @@ export function fuseBathymetry(land, sea, opts = {}) {
   const out = new Float32Array(land.length)
   for (let i = 0; i < land.length; i++) {
     const l = land[i]
+    // ⚠️ UN ZÉRO EXACT DANS LE RELIEF DE RÉFÉRENCE N'EST PAS DE LA TERRE PLATE,
+    // C'EST UNE ABSENCE DE DONNÉE — et c'est le cas le plus fréquent en mer.
+    // Mesuré au large de Toulon à z12 : la tuile terrarium est à 100 % à zéro
+    // exact, 0 % de valeurs négatives. À Santorin, 73 % de zéros et 12 m de
+    // profondeur maximale. La raison : à ces zooms les tuiles AWS viennent de
+    // l'EU-DEM, qui ne décrit QUE la terre ; la mer y est un remplissage.
+    //
+    // Les traiter comme de la terre revenait à interdire à GEBCO d'y toucher —
+    // d'où des fonds parfaitement plats à zéro dès qu'on approchait, alors que
+    // tout allait bien de loin (là, les tuiles portent encore de l'ETOPO1).
+    //
+    // Le seuil vaut un demi-pas de quantification terrarium (1/256 m) : un
+    // relief réel ne rend quasiment jamais 0,000 pile, un remplissage si.
+    const noData = l > -NODATA_EPS && l < NODATA_EPS
     // TERRE — intouchable, et c'est elle qui définit le rivage
-    if (l >= level) {
+    if (l >= level && !noData) {
       out[i] = l
       continue
     }
@@ -58,13 +76,108 @@ export function fuseBathymetry(land, sea, opts = {}) {
       out[i] = l
       continue
     }
+    // ⚠️ UN ÉCHANTILLON ÉMERGÉ N'EST PAS UN FOND À ZÉRO — c'est une ABSENCE.
+    // Le tuileur aplatit délibérément la terre à 0 (le canal G y coûtait 62 Ko
+    // par tuile pour une information que cette fonction n'utilise jamais). Ce 0
+    // ne mesure donc rien.
+    //
+    // Sans ce test, `Math.min(s, level - SEA_EPS)` le ramenait à −0,05 m et
+    // ÉCRASAIT la mer à zéro. Invisible au large, catastrophique près des côtes :
+    // au-delà de z8 on surzoome, et à z14 la tuile entière est reconstruite
+    // depuis 4×4 pixels de l'ancêtre — près d'un rivage, presque tous émergés.
+    // C'est le fond plat à zéro vu sur Santorin et Toulon, alors que les tuiles
+    // portaient bien −2 408 m et −2 432 m.
+    if (s >= level) {
+      out[i] = l
+      continue
+    }
     // MER — la source fine ne peut que creuser sous le niveau, jamais émerger
     const deep = Math.min(s, level - SEA_EPS)
-    // fondu : 0 au rivage (on garde le relief de référence), 1 au large
-    const t = smooth((level - l) / blend)
-    out[i] = l + (deep - l) * t
+    // FONDU — il mesure la DISTANCE AU RIVAGE, et il change de pilote seulement
+    // là où le relief de référence n'a rien à dire.
+    //
+    // Quand la référence porte une vraie bathymétrie, sa propre profondeur est
+    // le bon indicateur : on garde le comportement d'origine, au pixel près.
+    // Quand elle est muette (remplissage à zéro), il ne reste que la source
+    // fine — et c'est un indicateur légitime, GEBCO étant elle aussi peu
+    // profonde près des côtes.
+    //
+    // ⚠️ Ne PAS prendre le maximum des deux : au large la source fine dit
+    // −2 000 m partout, le fondu saturerait à 1 jusque sur le rivage et le
+    // trait de côte sauterait. Mesuré : un pixel de bord passait à −400 m.
+    const base = noData ? level : l
+    const t = smooth((level - (noData ? deep : l)) / blend)
+    out[i] = base + (deep - base) * t
   }
   return out
+}
+
+/**
+ * LISSE LE FOND MARIN à l'échelle des facettes du surzoom.
+ *
+ * POURQUOI. Nos tuiles bathymétriques s'arrêtent à z8 — c'est la résolution
+ * native de GEBCO, il n'y a rien de plus fin à avoir. Au-delà, `overzoomTile`
+ * reconstruit la dalle depuis une sous-fenêtre de l'ancêtre : à z12 la tuile
+ * entière vient de 4×4 pixels, à z14 de 2×2. L'agrandissement bilinéaire en
+ * fait de grandes facettes plates aux arêtes franches — l'« effet creusement
+ * par cube » signalé par Adrien. La quantification en profondeur du tuileur
+ * (pas de 4 m puis 8 m) ajoute ses propres terrasses par-dessus.
+ *
+ * Lisser à la TAILLE DE LA FACETTE ne détruit aucune information réelle : sous
+ * 463 m au sol, il n'y en a plus. Ça n'efface que l'artefact.
+ *
+ * DEUX PRÉCAUTIONS, et elles ne sont pas facultatives :
+ *   · le flou n'additionne QUE des pixels de mer — mélanger la terre ferait
+ *     remonter le fond près des côtes et redescendre le rivage ;
+ *   · il s'éteint au voisinage du rivage, où le relief de référence fait
+ *     autorité et où le trait de côte ne doit pas bouger d'un pixel.
+ *
+ * @param {Float32Array} data - altitudes en mètres, modifiées SUR PLACE
+ * @param {number} size - côté de la grille carrée
+ * @param {{radius?: number, seaLevel?: number, fadeDepth?: number}} [opts]
+ * @returns {Float32Array} `data`
+ */
+export function smoothSeaFloor(data, size, opts = {}) {
+  const r = Math.floor(opts.radius ?? 0)
+  if (!data || r < 1 || size < 3) return data
+  const level = opts.seaLevel ?? 0
+  // au-dessus de cette profondeur le lissage s'éteint : c'est la zone où le
+  // rivage se joue, et elle doit rester nette
+  const fade = Math.max(1e-3, opts.fadeDepth ?? 40)
+  const n = size * size
+  const val = new Float32Array(n)
+  const wgt = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    const v = data[i]
+    if (v < level) { val[i] = v; wgt[i] = 1 }
+  }
+  // flou par boîte séparable, en sommes glissantes : O(1) par pixel quel que
+  // soit le rayon, sinon un rayon de 32 coûterait 65 fois le prix
+  const boxPass = (src, horizontal) => {
+    const dst = new Float32Array(n)
+    const w = 2 * r + 1
+    for (let a = 0; a < size; a++) {
+      let acc = 0
+      const at = (b) => (horizontal ? a * size + b : b * size + a)
+      for (let b = -r; b <= r; b++) acc += src[at(Math.min(size - 1, Math.max(0, b)))]
+      for (let b = 0; b < size; b++) {
+        dst[at(b)] = acc / w
+        acc += src[at(Math.min(size - 1, b + r + 1))] - src[at(Math.max(0, b - r))]
+      }
+    }
+    return dst
+  }
+  const vB = boxPass(boxPass(val, true), false)
+  const wB = boxPass(boxPass(wgt, true), false)
+  for (let i = 0; i < n; i++) {
+    const v = data[i]
+    if (v >= level || wB[i] < 1e-4) continue
+    const moyenne = vB[i] / wB[i]
+    // plein effet au large, nul au rivage
+    const k = smooth((level - v) / fade)
+    data[i] = v + (moyenne - v) * k
+  }
+  return data
 }
 
 /**

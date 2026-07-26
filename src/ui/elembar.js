@@ -27,7 +27,11 @@ const clampStep = (c, v) => Math.min(c.max, Math.max(c.min, Math.round(v / c.ste
 // simpleCore (optionnel) : le cœur du MODE SIMPLE (Habiller ma carte / Ma
 // course, construit par bars.js) — hébergé dans la même rangée liquide pour
 // que le fond MORPHE d'un niveau à l'autre au switch Avancé
-export function buildElemBar({ modes, initial, onMode, toolsByMode, simpleCore }) {
+// bottomBar (optionnel) : le cartouche du bas (recherche de lieu + GPX,
+// construit par bars.js). Il est ADOPTÉ dans la même rangée liquide — le goo
+// ne fusionne que des bulles d'un même calque, donc c'est la seule façon de
+// tendre un pont entre les deux barres.
+export function buildElemBar({ modes, initial, onMode, toolsByMode, simpleCore, bottomBar }) {
   // barre LIQUIDE (réf. Enroll, précisé par Adrien) : Explorer/Studio/Parcours
   // vivent dans UNE MÊME bulle (la capsule) ; « Avancé » a SA bulle, reliée à
   // la capsule par la taille concave du goo — le liquide est le séparateur
@@ -212,32 +216,176 @@ export function buildElemBar({ modes, initial, onMode, toolsByMode, simpleCore }
   menu.addEventListener('pointerenter', () => clearTimeout(closeT))
   menu.addEventListener('pointerleave', scheduleClose)
 
-  // le cœur reste centré (la rangée fait la largeur de la capsule) ;
-  // « Avancé » est ancré à droite, décentré. Deux bulles dans le même goo :
-  // la capsule entière + le bouton Avancé (rempli plus tard par main.js —
-  // le MutationObserver de liquidize le voit arriver tout seul)
+  // ---- UNE SEULE barre : capsule + « Avancé » en haut, cartouche du bas,
+  // et un PONT de liquide qui relie les deux à l'aplomb du mode actif et
+  // voyage avec lui (maquette validée Adrien).
+  // La rangée est alignée en HAUT À GAUCHE : son origine est donc celle de
+  // l'ensemble capsule + Avancé — toute la géométrie se calcule à partir de
+  // là, sans dépendre de la largeur courante de la rangée. C'est aussi ce qui
+  // recentre l'ensemble (avant, seule la capsule était centrée et « Avancé »
+  // débordait de 105 px sans être compté : la masse penchait à droite).
   const row = el('div', 'ce-lqrow ce-liquid')
+  const top = el('div', 'ce-lqtop')
   const advSlot = el('div', 'ce-lq-adv')
-  row.append(bar, ...(simpleCore ? [simpleCore] : []), advSlot)
-  const isSimple = () => document.body.classList.contains('ce-simple')
-  liquidize(row, {
+  top.append(bar, ...(simpleCore ? [simpleCore] : []), advSlot)
+  row.append(top)
+  const bb = bottomBar?.root || null
+  if (bb) {
+    // adoptée : elle perd son verre (la bulle du goo DEVIENT son fond —
+    // porcelaine opaque, imposé par le seuil d'alpha du filtre) et son
+    // ancrage fixe (la rangée la place désormais)
+    bb.classList.remove('ce-glassbox', 'ce-bb-loose')
+    row.append(bb)
+  }
+  // ACCUEIL (body.ce-hub) : la MÊME barre, en grand au centre de l'écran. Elle
+  // montre alors toujours le CŒUR SIMPLE — l'accueil pose une question, il
+  // n'expose pas un niveau d'outillage ; la préférence « Avancé » n'est pas
+  // touchée, elle reprend la main dès que la barre est redescendue.
+  const isHome = () => document.body.classList.contains('ce-hub')
+  const isSimple = () => isHome() || document.body.classList.contains('ce-simple')
+  // en accueil, aucun mode n'a encore été choisi : le pont se pose sous la
+  // porte SURVOLÉE (et sous « Explorer », l'état de repos, quand rien ne l'est)
+  let hoverBtn = null
+  const activeBtn = () => {
+    if (isHome() && hoverBtn?.offsetParent) return hoverBtn
+    return (isSimple() && simpleCore ? simpleCore : modeSeg).querySelector('.ce-wm-btn.on')
+  }
+
+  // --- géométrie ANALYTIQUE du pont et du cartouche du bas ------------------
+  // BITE : le pont MORD de 10 px dans chacune des deux barres. Sans ce
+  // recouvrement, le seuil d'alpha du goo coupe la jonction et le pont se
+  // détache en deux moignons (enseignement de la maquette).
+  // Tout est CALCULÉ à partir de ce qui ne bouge pas (la capsule, le bouton du
+  // mode actif, la largeur du bouton GPX) : jamais d'un rect relu pendant une
+  // transition, sinon les bulles suivent avec un tour de retard.
+  const BITE = 10
+  const BRIDGE_W = 26
+  const vars = Object.create(null)
+  // n'écrire une variable que si elle CHANGE : liquidize observe les attributs
+  // de la rangée — réécrire le même style à chaque sync bouclerait à l'infini
+  // (observer → sync → observer).
+  const setVar = (n, v) => { if (vars[n] !== v) { vars[n] = v; row.style.setProperty(n, v) } }
+
+  let gapPx = 14
+  function geometry() {
+    // bb masquée par un contexte (viewer shibu, boutique…) : pas de pont, la
+    // capsule se retrouve seule — exactement comme avant la fusion
+    if (!bb || !bb.offsetParent) return null
+    const base = row.getBoundingClientRect()
+    if (!base.width) return null // rangée masquée — rien à dessiner
+    const t = top.getBoundingClientRect()
+    const tw = t.width
+    const th = t.height
+    if (!tw || !th) return null
+    const g = parseFloat(getComputedStyle(row).rowGap)
+    if (Number.isFinite(g) && g > 0) gapPx = g
+    const btn = activeBtn()
+    const cx = btn && btn.offsetParent
+      ? btn.getBoundingClientRect().left - base.left + btn.offsetWidth / 2
+      : tw / 2
+    // En Parcours le champ se replie : on ne cherche pas un lieu pour bâtir
+    // une course. Il se rouvre dès qu'il prend le focus (raccourci « / »).
+    // JAMAIS display:none — liquidize élimine les items dont offsetParent est
+    // nul et supprime leur bulle d'un coup, sans transition.
+    // en accueil le champ reste GRAND OUVERT quoi qu'on survole : « Rechercher
+    // un lieu… » est une des propositions de la page, pas l'accessoire d'un mode
+    const narrow = !isHome() && !row.classList.contains('bb-open') && btn?.dataset.mode === 'parcours'
+    bb.classList.toggle('narrow', narrow)
+    const cs = getComputedStyle(bb)
+    const pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0)
+    const gpxW = bottomBar?.gpx?.offsetWidth || 0
+    // largeur du cartouche du bas = celle de l'ENSEMBLE capsule + Avancé,
+    // resserrée sur GPX seul en Parcours (largeur CALCULÉE, pas relue)
+    const full = Math.min(tw, window.innerWidth - 24)
+    const bw = Math.round(narrow && gpxW ? pad + gpxW : full)
+    const bh = bb.offsetHeight || th
+    const bx = Math.round(narrow ? Math.max(0, Math.min(tw - bw, cx - bw / 2)) : (tw - bw) / 2)
+    setVar('--ce-bb-w', bw + 'px')
+    setVar('--ce-bb-x', bx + 'px')
+    return {
+      bottom: { x: bx, y: Math.round(th + gapPx), w: bw, h: Math.round(bh) },
+      bridge: {
+        x: Math.round(cx - BRIDGE_W / 2),
+        y: Math.round(th - BITE),
+        w: BRIDGE_W,
+        h: Math.round(gapPx + BITE * 2),
+      },
+    }
+  }
+
+  const lq = liquidize(row, {
     // bulle '__core' STABLE : elle pointe vers le niveau visible (capsule
     // avancée OU cœur simple) — au switch, la même bulle transitionne vers
-    // la nouvelle géométrie à travers le goo = morph liquide du fond
-    items: () => [
-      { key: '__core', el: isSimple() && simpleCore ? simpleCore : bar },
-      // la bulle mesure le SLOT (pleine hauteur), pas le bouton — le bouton
-      // garde une pastille de survol EN RETRAIT comme les autres (Adrien)
-      { key: '__adv', el: advSlot },
-    ],
+    // la nouvelle géométrie à travers le goo = morph liquide du fond.
+    // '__bridge' et '__bottom' sont des clés tout aussi STABLES du MÊME
+    // calque : elles morphent, elles ne sont jamais recréées.
+    items: () => {
+      const g = geometry()
+      return [
+        { key: '__core', el: isSimple() && simpleCore ? simpleCore : bar },
+        // la bulle mesure le SLOT (pleine hauteur), pas le bouton — le bouton
+        // garde une pastille de survol EN RETRAIT comme les autres (Adrien)
+        { key: '__adv', el: advSlot },
+        ...(g ? [{ key: '__bridge', box: g.bridge }, { key: '__bottom', box: g.bottom }] : []),
+      ]
+    },
     inflate: 0,
     // la coche liquide chevauche le choix ACTIF des DEUX niveaux et voyage
-    bumpFor: () => (isSimple() && simpleCore ? simpleCore : modeSeg).querySelector('.ce-wm-btn.on'),
+    bumpFor: activeBtn,
     rim: true, // liseré métal liquide sur le pourtour (adapté à la palette)
   })
   const wrap = el('div', 'ce-elemwrap')
   wrap.append(menu, row)
   document.body.append(wrap)
+  if (bottomBar?.input) {
+    bottomBar.input.addEventListener('focus', () => { row.classList.add('bb-open'); lq.refresh() })
+    bottomBar.input.addEventListener('blur', () => { row.classList.remove('bb-open'); lq.refresh() })
+  }
+  // le pont suit le doigt en accueil — hors accueil, activeBtn ignore hoverBtn
+  if (simpleCore) {
+    simpleCore.addEventListener('pointerover', (e) => {
+      const b = e.target.closest?.('.ce-wm-btn')
+      if (b === hoverBtn) return
+      hoverBtn = b || null
+      if (isHome()) lq.refresh()
+    })
+    simpleCore.addEventListener('pointerleave', () => {
+      if (!hoverBtn) return
+      hoverBtn = null
+      if (isHome()) lq.refresh()
+    })
+  }
+
+  // --- le VOYAGE entre les deux états ---------------------------------------
+  // Pendant le trajet, les bulles COLLENT à leur contenu : leur transition est
+  // coupée (.lq-travel) et on les repose à chaque frame. Toute la courbe est
+  // donc portée par les éléments HTML — une seule courbe, littéralement le même
+  // mouvement, le fond ne peut pas décoller du texte. (Les laisser transitionner
+  // pendant que le layout bouge les ferait courir après avec un tour de retard.)
+  const TRAVEL_MS = 420 // 340 de courbe + une marge pour la dernière frame
+  let travelRaf = 0
+  let travelEnd = 0
+  function travel() {
+    travelEnd = performance.now() + TRAVEL_MS
+    if (travelRaf) return
+    row.classList.add('lq-travel')
+    const step = () => {
+      lq.sync()
+      if (performance.now() < travelEnd) { travelRaf = requestAnimationFrame(step); return }
+      travelRaf = 0
+      row.classList.remove('lq-travel')
+      lq.refresh()
+    }
+    travelRaf = requestAnimationFrame(step)
+  }
+  function setHome(on) {
+    const next = !!on
+    if (document.body.classList.contains('ce-hub') === next) return
+    document.body.classList.toggle('ce-hub', next)
+    if (!next) hoverBtn = null
+    travel()
+  }
+
   setMode(initial, { silent: true })
-  return { root: wrap, setMode, advSlot }
+  return { root: wrap, row, setMode, advSlot, refresh: lq.refresh, setHome, isHome }
 }

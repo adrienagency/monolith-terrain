@@ -63,6 +63,8 @@ export function frameTrack(points) {
     800
   )
   let zoom = 14
+  // 768 = l'ÉTENDUE AU SOL d'un patch de 3 tuiles dans la convention « pixel de
+  // tuile 256 » — invariante quand la source sert du 512 px (même emprise)
   while (zoom > 10 && metersPerPixel(lat, zoom) * 768 < widthM * 1.35) zoom--
   return { lat, lon, zoom }
 }

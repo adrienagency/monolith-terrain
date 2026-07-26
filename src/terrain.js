@@ -1,7 +1,8 @@
 import * as THREE from 'three'
 import { Simplex2, mulberry32, fbm, ridged, smoothstep, lerp } from './noise.js'
 import { sampleDem } from './dem.js'
-import { rampColorStops } from './palette.js'
+import { buildRamp2D } from './palette.js'
+import { analyzeDem } from './terrain-analysis.js'
 import { buildSeaMask, blurMask, landMaskFromImage } from './sea-mask.js'
 import { TEXTURE_BUILDERS } from './material-textures.js'
 import { MATERIALS } from './material-catalog.js'
@@ -57,6 +58,21 @@ function whiteTexture() {
   tex.needsUpdate = true
   return tex
 }
+
+// 1×1 RGBA « tout neutre » — placeholder du sampler d'analyse du relief. 128 est
+// le zéro de nos quatre canaux (courbure nulle, ni creux ni bosse, aucune
+// exposition) : tant qu'aucune analyse n'est cuite, la lire ne change RIEN.
+function neutralTexture() {
+  const tex = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat)
+  tex.colorSpace = THREE.NoColorSpace
+  tex.needsUpdate = true
+  return tex
+}
+
+// Plafond du détail FBM en mode Naturel — voir _makeDemSampler.
+const NATURAL_DETAIL_MAX = 0.15
+// Le bump procédural, ramené à ce facteur en mode Naturel — voir _bumpScale.
+const NATURAL_BUMP_K = 0.3
 
 export const BASIN_RADIUS = 6.6 // flat excavation floor
 export const BASIN_BLEND = 9.0 // where flat floor blends back into mountains
@@ -199,6 +215,30 @@ export class Terrain {
       // "Au-dessus du niveau zéro": when on, the relief material paints only
       // above sea level; below uSeaY the surface shows the hypsometric map colour.
       uMatAboveZero: { value: 0 },
+
+      // ---------------------------------------------- COLORISATION NATURELLE
+      // Ce que la rampe 1D ne peut PAS faire : elle donne forcément une couleur
+      // constante le long de chaque courbe de niveau. Le mode Naturel lit
+      // l'analyse du relief (src/terrain-analysis.js) et ajoute un second axe
+      // (l'humidité), le rendu peigné des crêtes, et la perspective aérienne.
+      //
+      // uColorMode est un int lu en CHAÎNE if/else, pas un #define : le projet a
+      // déjà ce patron deux fois (uScanType, uSurfaceFx), et un #define
+      // forcerait une recompilation de shader de 100-300 ms à chaque bascule.
+      uColorMode: { value: params.colorMode === 'natural' ? 1 : 0 }, // 0 = Classique (rendu historique)
+      uAnalysis: { value: (this._analysisPlaceholder = neutralTexture()) },
+      uAnalysisOn: { value: 0 },
+      uTexShade: { value: params.texShade ?? 0 }, // intensité du peigné
+      uWetK: { value: params.wetK ?? 0 }, // poids de l'humidité sur l'axe Y du LUT
+      uExpoK: { value: params.expoK ?? 0 }, // poids de l'exposition (adret/ubac)
+      uHemi: { value: 1 }, // +1 hémisphère nord, −1 sud : l'ubac change de côté
+      uTreeLine: { value: params.treeLine ?? 0.62 }, // en hNorm : au-dessus, plus de végétation
+      // perspective aérienne (Imhof) : DEUX composantes indépendantes, la
+      // distance ET l'altitude — voir le fragment
+      uHazeAmt: { value: params.hazeAmt ?? 0 },
+      uHazeAlt: { value: params.hazeAlt ?? 0.5 },
+      uHazeDist: { value: params.hazeDist ?? 0.5 },
+      uHazeColor: { value: new THREE.Color(params.hazeColor ?? '#b9c6d6') },
     }
     this.rebuildRamp(params)
     this.material.onBeforeCompile = (shader) => {
@@ -275,6 +315,21 @@ uniform sampler2D uSeaMask;
 uniform float uSeaMaskOn;
 uniform sampler2D uCoastMask;
 uniform float uCoastMaskOn;
+// analyse du relief empaquetée (terrain-analysis.js) :
+//   R = texture shading (peigné, 0.5 = plat)   G = ombrage classique
+//   B = humidité topographique (0.5 = neutre)  A = exposition (1 = plein nord)
+uniform sampler2D uAnalysis;
+uniform float uAnalysisOn;
+uniform int uColorMode;
+uniform float uTexShade;
+uniform float uWetK;
+uniform float uExpoK;
+uniform float uHemi;
+uniform float uTreeLine;
+uniform float uHazeAmt;
+uniform float uHazeAlt;
+uniform float uHazeDist;
+uniform vec3 uHazeColor;
 uniform float uSeaCausK;
 uniform float uCausT;
 // caustique fond marin — phase itérée (Hoskins), projetée sur le RELIEF
@@ -476,8 +531,86 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
       : 0.0;
     float pivot = max(uHeightPivot, pivotFloor);
     float rampT = clamp(0.5 + (hNorm - pivot) * uHeightContrast, 0.0, 1.0);
-    mapCol = texture2D(uRampTex, vec2(rampT, 0.5)).rgb;
-    mapCol = mix(mapCol, vec3(0.42, 0.31, 0.21), smoothstep(0.3, 0.8, slope) * uSlopeTint);
+    // --- SECOND AXE DU LUT : l'humidité. X reste l'altitude, Y devient
+    // l'humidité topographique — deux points à la MÊME altitude, l'un au fond
+    // d'un vallon, l'autre sur une croupe, cessent de recevoir la même couleur.
+    // En Classique, wetY reste à 0.5 : le LUT y est constant en Y et rend
+    // exactement la rampe historique.
+    float wetY = 0.5;
+    vec4 anl = vec4(0.5);
+    if (uColorMode == 1) {
+      if (uAnalysisOn > 0.5) {
+        // même UV monde que uSeaMask : rien à inventer côté échantillonnage
+        vec2 anUv = (vWorldPos.xz - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
+        anl = texture2D(uAnalysis, anUv);
+      }
+      // au-dessus de la limite des arbres il n'y a plus de végétation à
+      // différencier : humidité et exposition s'éteignent, sinon les pierriers
+      // et les névés prendraient des verts de prairie
+      float veg = 1.0 - smoothstep(uTreeLine, uTreeLine + 0.18, hNorm);
+      float wet = (anl.b - 0.5) * 2.0;  // > 0 = creux qui collecte l'eau
+      float expo = (anl.a - 0.5) * 2.0; // > 0 = versant tourné au nord
+      // uHemi : au NORD de l'équateur l'ubac (face nord) est la face à l'ombre,
+      // donc la fraîche et l'humide. Au sud tout s'inverse.
+      // GAIN 1.62, et ce n'est pas une constante de confort. Les canaux B et A
+      // sortent d'encodeTextureShade, dont le soft-clip place le 95e centile à
+      // 0.808 — soit 0.616 une fois ramené en ±1. Le facteur 0.5 qui se trouvait
+      // ici rabotait encore de moitié : au réglage 1 on ne balayait que 31 % du
+      // LUT. Mesuré sur une carte réelle, la couleur ne bougeait alors que de
+      // 3 unités de RVB sur 255 — les tirettes semblaient mortes. 1/0.616 fait
+      // qu'au réglage 1 une anomalie au 95e centile atteint le bord de la rampe.
+      // ×3 SUR DEMANDE D'ADRIEN, par-dessus la compensation de 1.62 : à 1.62 le
+      // réglage 1 amenait tout juste le 95e centile au bord du LUT, ce qui est
+      // « juste » au sens statistique mais trop sage à l'écran. 4.86 fait mordre
+      // les tirettes dès le milieu de leur course ; les extrêmes saturent, et
+      // c'est assumé — un fond de vallon doit être franchement plus vert.
+      wetY = clamp(0.5 + 4.86 * veg * (wet * uWetK + expo * uHemi * uExpoK), 0.0, 1.0);
+    }
+    mapCol = texture2D(uRampTex, vec2(rampT, wetY)).rgb;
+    if (uColorMode == 1) {
+      if (uAnalysisOn > 0.5 && uTexShade > 0.001) {
+        // SOFT LIGHT, jamais une multiplication : multiplier (ou mixer vers le
+        // blanc) tire la couleur vers le gris et DÉSATURE — on gagne du modelé
+        // et on perd la palette. Le soft light du W3C éclaircit/assombrit en
+        // gardant la chroma. fxBlend(b, s, 10) EST ce soft light, déjà défini
+        // plus haut pour les shaders de surface : on le réutilise tel quel.
+        // ×3 sur le PEIGNÉ, lui aussi (demande d'Adrien). On ne peut pas monter
+        // le mix au-delà de 1 : on écarte donc le signal de son neutre AVANT le
+        // soft light. C'est le contraste du peigné qui triple, pas son dosage —
+        // la palette reste intacte, seule l'amplitude du modelé change.
+        float comb = clamp(0.5 + (anl.r - 0.5) * 3.0, 0.0, 1.0);
+        mapCol = mix(mapCol, fxBlend(mapCol, vec3(comb), 10), uTexShade);
+        // l'ombrage classique par-dessus, au tiers : au dézoom les bandes fines
+        // du peigné tombent sous la taille du pixel et se moyennent en gris,
+        // c'est lui qui garde alors le massif lisible
+        float hs = clamp(0.5 + (anl.g - 0.5) * 3.0, 0.0, 1.0);
+        mapCol = mix(mapCol, fxBlend(mapCol, vec3(hs), 10), uTexShade * 0.35);
+      }
+      // --- PERSPECTIVE AÉRIENNE (Imhof) — entièrement en fragment, zéro tap.
+      if (uHazeAmt > 0.001) {
+        // 1. DISTANCE : le lointain se voile.
+        float fd = clamp(length(vWorldPos.xz - uBlockOffset) / max(uSlabHalf, 1e-3), 0.0, 1.0);
+        // 2. ALTITUDE (Hoehenmodulation) : les basses terres se voilent MÊME
+        // proches. C'est cette composante-là, pas la distance, qui donne le
+        // bleu-gris des plaines sur les planches de référence — l'air épais du
+        // fond de vallée est devant elles quelle que soit la distance.
+        float fa = 1.0 - smoothstep(0.0, max(uHazeAlt, 1e-3), hNorm);
+        float veil = clamp(uHazeAmt * (0.6 * fa + uHazeDist * fd), 0.0, 0.9);
+        // DÉSATURER D'ABORD, virer vers la brume ensuite : l'air diffuse la
+        // lumière, il ne repeint pas le sol en bleu. Un mix direct vers
+        // uHazeColor donne une carte teintée, pas une carte lointaine.
+        float lum = dot(mapCol, vec3(0.2126, 0.7152, 0.0722));
+        mapCol = mix(mapCol, vec3(lum), veil * 0.65);
+        mapCol = mix(mapCol, uHazeColor, veil);
+        // CONTREPARTIE INDISSOCIABLE : sans elle le voile aplatit toute la
+        // carte. On remonte le contraste là où le voile est nul — donc sur les
+        // sommets, qui reprennent le mordant que les plaines viennent de perdre.
+        float lift = (1.0 - veil) * uHazeAmt * 0.35;
+        mapCol = clamp((mapCol - 0.5) * (1.0 + lift) + 0.5, 0.0, 1.0);
+      }
+    } else {
+      mapCol = mix(mapCol, vec3(0.42, 0.31, 0.21), smoothstep(0.3, 0.8, slope) * uSlopeTint);
+    }
   }
   float fxShade = clamp(luma * 2.4, 0.2, 1.4);
   // material noise reveal: where the noise is below the (soft) cut, push the tint
@@ -834,7 +967,13 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
 
     const sDetail = new Simplex2(mulberry32(params.seed))
     const { size } = dem
-    const { detail, detailScale } = params
+    const { detailScale } = params
+    // ⚠️ En mode Naturel le texture shading PORTE déjà la micro-texture, et une
+    // VRAIE (elle sort du DEM). Le bruit FBM de détail viendrait en superposer
+    // une inventée, décorrélée du relief : les deux se brouillent et le peigné
+    // s'éteint. On bride donc le détail sans toucher à params — le curseur garde
+    // la valeur de l'utilisateur, qui la retrouve en repassant en Classique.
+    const detail = this.mapUniforms.uColorMode.value === 1 ? Math.min(params.detail, NATURAL_DETAIL_MAX) : params.detail
 
     return (x, z) => {
       const px = (x / TERRAIN_SIZE + 0.5) * (size - 1)
@@ -975,9 +1114,11 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       this.mapUniforms.uSeaY.value = (0 - this.dem.meanM) * demScale + seaEps
       this.mapUniforms.uSeaRange.value = Math.max((0 - this.dem.minM) * demScale, 1e-3)
       this._buildSeaMask()
+      this._buildAnalysis()
     } else {
       this.mapUniforms.uSeaY.value = -9999
       this.mapUniforms.uSeaMaskOn.value = 0
+      this.mapUniforms.uAnalysisOn.value = 0
     }
 
     this.mesh.geometry.dispose()
@@ -1012,20 +1153,111 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     this.mapUniforms.uSeaMaskOn.value = 1
   }
 
-  // Bake the elevation gradient (up to 8 stops) into a 1D ramp texture.
+  // ANALYSE DU RELIEF (src/terrain-analysis.js) cuite dans une RGBA à la
+  // résolution du DEM — même mécanique que _buildSeaMask, même UV monde côté
+  // shader. Ne tourne qu'en mode Naturel : c'est une passe de ~10 flous sur
+  // 590 k pixels, inutile de la payer quand personne ne la lit.
+  _buildAnalysis() {
+    const dem = this.dem
+    if (!dem?.data || this.mapUniforms.uColorMode.value !== 1) {
+      this.mapUniforms.uAnalysisOn.value = 0
+      return
+    }
+    // L'analyse ne dépend QUE des altitudes brutes : ni de l'exagération, ni de
+    // la résolution du maillage, ni de la palette. On la mémorise donc sur
+    // l'identité du DEM — sans ça, allumer le mode puis régénérer la recalcule
+    // deux fois de suite, et c'est la passe la plus chère du chargement.
+    if (this._analysisFor === dem && this.mapUniforms.uAnalysisOn.value) return
+    const { rgba, size } = analyzeDem(dem)
+    this._analysisFor = dem
+    const tex = new THREE.DataTexture(rgba, size, size, THREE.RGBAFormat)
+    tex.flipY = false // texel row r ↔ world +z, comme le sea mask
+    // ⚠️ NoColorSpace : ce sont des DONNÉES (courbure, humidité, exposition),
+    // pas des couleurs. Les faire passer par la conversion sRGB tordrait toutes
+    // les valeurs autour de 0,5 et le « neutre » cesserait d'être neutre.
+    tex.colorSpace = THREE.NoColorSpace
+    tex.magFilter = THREE.LinearFilter
+    // ⚠️ Mipmaps OBLIGATOIRES : au dézoom un pixel écran couvre des dizaines de
+    // texels, et un échantillonnage ponctuel d'un champ à haute fréquence
+    // SCINTILLE dès que la caméra bouge. C'est le même piège que sur n'importe
+    // quelle carte de détail — sauf qu'ici le champ est fait de bandes fines.
+    tex.minFilter = THREE.LinearMipmapLinearFilter
+    tex.generateMipmaps = true
+    tex.anisotropy = 4 // les vues rasantes sont la règle sur ce produit
+    tex.needsUpdate = true
+    const prev = this.mapUniforms.uAnalysis.value
+    if (prev && prev !== this._analysisPlaceholder) prev.dispose()
+    this.mapUniforms.uAnalysis.value = tex
+    this.mapUniforms.uAnalysisOn.value = 1
+  }
+
+  // Bascule Classique ↔ Naturel. Renvoie true si le mode a CHANGÉ : l'appelant
+  // doit alors régénérer le terrain, parce que le mode borne aussi le bruit de
+  // détail (géométrie, voir _makeDemSampler).
+  setColorMode(mode, params = {}) {
+    const on = mode === 'natural' ? 1 : 0
+    const changed = this.mapUniforms.uColorMode.value !== on
+    this.mapUniforms.uColorMode.value = on
+    this.applyColorParams(params)
+    this.rebuildRamp(params) // le LUT change d'amplitude en Y avec le mode
+    // l'analyse coûte une dizaine de flous sur tout le DEM : on ne la refait
+    // que quand elle manque, pas à chaque passage de restyle du damier
+    if (on) { if (changed || !this.mapUniforms.uAnalysisOn.value) this._buildAnalysis() }
+    else this.mapUniforms.uAnalysisOn.value = 0
+    // mapTint fait partie du préréglage Atlas (la rampe doit reprendre la main),
+    // or applyColorParams ne le pousse pas : sans cette ligne il restait dans
+    // params sans jamais atteindre le shader. On respecte les deux exclusions
+    // qui possèdent uTint — une matière de relief l'éteint (0), le métal liquide
+    // le rabat à 0.1 — et on ne touche à rien dans ces cas.
+    if (!this.materialMode && !this.mapUniforms.uLmOn.value) {
+      this.mapUniforms.uTint.value = params.mapTint ?? this.mapUniforms.uTint.value
+    }
+    if (!this.materialMode || this.materialMode === 'glass') this.material.bumpScale = this._bumpScale(params)
+    return changed
+  }
+
+  // Les réglages du mode Naturel, poussés aux uniformes (sans rien recalculer).
+  applyColorParams(params = {}) {
+    const u = this.mapUniforms
+    u.uTexShade.value = params.texShade ?? 0
+    u.uWetK.value = params.wetK ?? 0
+    u.uExpoK.value = params.expoK ?? 0
+    u.uTreeLine.value = params.treeLine ?? 0.62
+    u.uHazeAmt.value = params.hazeAmt ?? 0
+    u.uHazeAlt.value = params.hazeAlt ?? 0.5
+    u.uHazeDist.value = params.hazeDist ?? 0.5
+    if (params.hazeColor) u.uHazeColor.value.set(params.hazeColor)
+    // c'est la LATITUDE qui décide de quel côté se trouve la face à l'ombre
+    const lat = this.dem?.lat ?? params.demLat
+    if (Number.isFinite(lat)) u.uHemi.value = lat >= 0 ? 1 : -1
+  }
+
+  // ⚠️ Le bump procédural COMBAT le peigné : il pose une micro-texture inventée
+  // par-dessus une micro-texture réelle, et les deux se brouillent. Même raison
+  // que pour params.detail (voir _makeDemSampler) — on l'atténue, sans écrire
+  // dans params, pour que le curseur de l'utilisateur reste le sien.
+  _bumpScale(params) {
+    const k = this.mapUniforms.uColorMode.value === 1 ? NATURAL_BUMP_K : 1
+    return (params.bumpScale ?? 1) * k
+  }
+
+  // Cuit la rampe d'altitude en LUT 2D : X = altitude, Y = humidité (voir
+  // buildRamp2D dans palette.js). En Classique on force dry = wet = 0 — le LUT
+  // est alors CONSTANT en Y et sa ligne médiane reproduit la rampe historique,
+  // donc aucune palette du catalogue n'a besoin d'être ré-éditée.
   rebuildRamp(params) {
-    const c = document.createElement('canvas')
-    c.width = 256
-    c.height = 1
-    const ctx = c.getContext('2d')
-    const grad = ctx.createLinearGradient(0, 0, 256, 0)
-    const stops = rampColorStops(params)
-    for (const s of stops) grad.addColorStop(s.p, s.c)
-    ctx.fillStyle = grad
-    ctx.fillRect(0, 0, 256, 1)
-    const tex = new THREE.CanvasTexture(c)
+    const natural = this.mapUniforms.uColorMode.value === 1
+    const { data, width, height } = buildRamp2D(params, {
+      dry: natural ? (params.rampDry ?? 0) : 0,
+      wet: natural ? (params.rampWet ?? 0) : 0,
+      oklab: natural && params.rampOklab !== false,
+    })
+    const tex = new THREE.DataTexture(data, width, height, THREE.RGBAFormat)
     tex.colorSpace = THREE.SRGBColorSpace
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping
+    tex.magFilter = THREE.LinearFilter
+    tex.minFilter = THREE.LinearFilter
+    tex.flipY = false // ligne 0 = le pôle SEC, en bas du LUT (v = 0)
     tex.needsUpdate = true
     this.mapUniforms.uRampTex.value?.dispose()
     this.mapUniforms.uRampTex.value = tex
@@ -1072,14 +1304,14 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     }
     this.material.roughnessMap = tex
     this.material.bumpMap = bumpTex
-    this.material.bumpScale = params.bumpScale
+    this.material.bumpScale = this._bumpScale(params)
     this.material.needsUpdate = true
   }
 
   updateMaterial(params) {
     this.material.color.set(params.color)
     this.material.envMapIntensity = params.envMapIntensity
-    this.material.bumpScale = params.bumpScale
+    this.material.bumpScale = this._bumpScale(params)
     this.material.transmission = params.transmission ?? 0
   }
 

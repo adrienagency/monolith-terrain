@@ -1,13 +1,18 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { fuseBathymetry, decodeTerrarium, encodeTerrarium, overzoomTile, BLEND_DEPTH } from '../src/bathy.js'
+import { fuseBathymetry, decodeTerrarium, encodeTerrarium, overzoomTile, smoothSeaFloor, BLEND_DEPTH } from '../src/bathy.js'
 
 const F = (arr) => Float32Array.from(arr)
 
 // ------------------------------------------------------------------ fusion
 test('la TERRE n est jamais touchée — le trait de côte ne bouge pas', () => {
-  // le relief de référence dit « terre » ; la source fine dit n'importe quoi
-  const land = F([0, 5, 120, 2000])
+  // le relief de référence dit « terre » ; la source fine dit n'importe quoi.
+  // ⚠️ On ne met plus 0 dans cet échantillon : depuis la mesure faite sur
+  // Toulon et Santorin (100 % et 73 % de zéros EXACTS en mer sur les tuiles
+  // AWS de zoom fin, qui viennent de l'EU-DEM, un modèle terrestre), un zéro
+  // exact est traité comme une ABSENCE de donnée. La plus petite altitude
+  // positive, elle, reste intouchable — c'est l'objet du test suivant.
+  const land = F([0.01, 5, 120, 2000])
   const sea = F([-50, -900, -12, 40])
   const out = fuseBathymetry(land, sea)
   assert.deepEqual([...out], [...land], 'aucun pixel émergé ne doit bouger')
@@ -168,4 +173,100 @@ test('bout en bout : une zone sans tuile ne creuse pas la mer', () => {
   const out = fuseBathymetry(land, sea)
   assert.equal(out[0], -1000, 'sans donnée, on garde le relief de référence')
   assert.ok(Math.abs(out[1] - -3000) < 1, 'avec donnée, la profondeur fine gagne')
+})
+
+// --- RÉGRESSION Santorin / Toulon (2026-07-26) -----------------------------
+// Le tuileur aplatit la terre à 0 : ce 0 est une ABSENCE de mesure, pas un
+// fond. Il écrasait la mer à zéro dès qu'on surzoomait près d'une côte.
+test('un échantillon marin ÉMERGÉ est ignoré, il ne rabote pas la mer à zéro', () => {
+  const land = new Float32Array([-800, -800, -800])
+  // la source fine dit : terre aplatie (0), vrai fond (-2400), et +12 m
+  const sea = new Float32Array([0, -2400, 12])
+  const out = fuseBathymetry(land, sea)
+  assert.equal(out[0], -800, 'un 0 de terre doit laisser le relief de référence')
+  assert.ok(out[1] < -2000, 'un vrai fond doit bien creuser')
+  assert.equal(out[2], -800, 'une altitude positive doit être ignorée')
+})
+
+test('le cas Santorin : une mer profonde survit à un patch entièrement émergé', () => {
+  const n = 64
+  const land = new Float32Array(n).fill(-350)
+  const sea = new Float32Array(n).fill(0) // surzoom qui n a attrapé que de la terre
+  const out = fuseBathymetry(land, sea)
+  for (let i = 0; i < n; i++) assert.equal(out[i], -350, `pixel ${i} rabote à zéro`)
+})
+
+// --- RÉGRESSION Toulon / Santorin z12 (2026-07-26, second tour) -------------
+// Aux zooms fins les tuiles AWS viennent de l'EU-DEM, qui ne décrit que la
+// terre : la mer y est un remplissage à ZÉRO EXACT. Mesuré : 100 % de zéros au
+// large de Toulon. Les tenir pour de la terre interdisait à GEBCO d'y toucher.
+test('une mer remplie à zéro exact est bien creusée par la source fine', () => {
+  const land = new Float32Array([0, 0, 0])
+  const sea = new Float32Array([-2000, -300, -40])
+  const out = fuseBathymetry(land, sea)
+  assert.ok(out[0] < -1900, `au large on prend la source fine, reçu ${out[0]}`)
+  assert.ok(out[1] < -280, `sur le talus aussi, reçu ${out[1]}`)
+  assert.ok(out[2] < -25, `sur le plateau aussi, reçu ${out[2]}`)
+})
+
+test('une terre à altitude POSITIVE reste intouchable, même à 1 mm', () => {
+  const land = new Float32Array([0.004, 2, 900])
+  const sea = new Float32Array([-2000, -2000, -2000])
+  const out = fuseBathymetry(land, sea)
+  assert.equal(out[0], land[0])
+  assert.equal(out[1], 2)
+  assert.equal(out[2], 900)
+})
+
+test('un polder NÉGATIF ne se fait pas noyer par une source fine muette', () => {
+  const land = new Float32Array([-4, -6])
+  const sea = new Float32Array([0, 0]) // terre aplatie côté source fine
+  const out = fuseBathymetry(land, sea)
+  assert.equal(out[0], -4)
+  assert.equal(out[1], -6)
+})
+
+test('au rivage le fondu reste nul : le trait de côte ne bouge pas', () => {
+  const land = new Float32Array([0])
+  const sea = new Float32Array([-0.01]) // la source fine dit « à peine immergé »
+  const out = fuseBathymetry(land, sea)
+  assert.ok(Math.abs(out[0]) < 0.05, `le rivage a bougé de ${out[0]} m`)
+})
+
+// --- lissage du fond marin -------------------------------------------------
+test('le lissage efface une marche du surzoom sans toucher la terre', () => {
+  const n = 64
+  const d = new Float32Array(n * n)
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    // une falaise artificielle : deux plateaux de mer separes par une marche,
+    // plus une bande de terre en haut
+    d[y * n + x] = y < 8 ? 120 : x < n / 2 ? -400 : -600
+  }
+  const avant = d.slice()
+  smoothSeaFloor(d, n, { radius: 6, fadeDepth: 20 })
+  // la terre n a pas bouge
+  for (let x = 0; x < n; x++) assert.equal(d[2 * n + x], 120, 'terre deplacee')
+  // la marche s est adoucie : au bord, la valeur n est plus l un des deux paliers
+  const iBord = 40 * n + n / 2
+  assert.ok(d[iBord] > -600 && d[iBord] < -400, `marche non lissee : ${d[iBord]}`)
+  // loin de la marche, le fond garde sa profondeur
+  assert.ok(Math.abs(d[40 * n + 4] - avant[40 * n + 4]) < 5, 'fond du large deforme')
+})
+
+test('un rayon nul ou absent ne change rien', () => {
+  const d = Float32Array.from([-100, -200, -300])
+  const copie = d.slice()
+  smoothSeaFloor(d, 1, {})
+  assert.deepEqual([...d], [...copie])
+})
+
+test('le lissage laisse le rivage tranquille', () => {
+  const n = 32
+  const d = new Float32Array(n * n)
+  for (let i = 0; i < n * n; i++) d[i] = -2 // mer TRES peu profonde
+  const avant = d.slice()
+  smoothSeaFloor(d, n, { radius: 5, fadeDepth: 40 })
+  for (let i = 0; i < n * n; i++) {
+    assert.ok(Math.abs(d[i] - avant[i]) < 0.2, `rivage bouge de ${d[i] - avant[i]}`)
+  }
 })

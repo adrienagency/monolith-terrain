@@ -48,6 +48,37 @@ test('world round-trip on a synthetic dem', () => {
   close(back.lon, 7.6585, 1e-9)
 })
 
+// Mapterhorn sert des tuiles de 512 px : un DEM de 3 tuiles fait 1536 px pour
+// la MÊME emprise au sol. Le géoréférencement doit être identique au pixel de
+// tuile près — sinon les tracés GPX, les sommets et le damier de blocs voisins
+// se décalent (la couture visible entre blocs).
+test('world round-trip sur un DEM en tuiles 512 px', () => {
+  const t = latLonToTile(45.9766, 7.6585, 12)
+  const dem = {
+    zoom: 12,
+    size: 1536,
+    tilePx: 512,
+    originTileX: Math.floor(t.x) - 1,
+    originTileY: Math.floor(t.y) - 1,
+  }
+  const w = latLonToWorld(dem, 45.9766, 7.6585)
+  assert.ok(Math.abs(w.x) < 28 && Math.abs(w.z) < 28, 'inside patch')
+  const back = worldToLatLon(dem, w.x, w.z)
+  close(back.lat, 45.9766, 1e-9)
+  close(back.lon, 7.6585, 1e-9)
+})
+
+test('256 px et 512 px placent un même point au MÊME endroit du monde', () => {
+  const t = latLonToTile(45.9766, 7.6585, 12)
+  const base = { zoom: 12, originTileX: Math.floor(t.x) - 1, originTileY: Math.floor(t.y) - 1 }
+  for (const [lat, lon] of [[45.99, 7.62], [45.95, 7.70], [46.01, 7.68]]) {
+    const a = latLonToWorld({ ...base, size: 768 }, lat, lon) // AWS, 3×256
+    const b = latLonToWorld({ ...base, size: 1536, tilePx: 512 }, lat, lon) // Mapterhorn, 3×512
+    close(a.x, b.x, 1e-9)
+    close(a.z, b.z, 1e-9)
+  }
+})
+
 test('sphere round-trip', () => {
   for (const [lat, lon] of [
     [0, 0],

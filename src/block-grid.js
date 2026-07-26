@@ -16,14 +16,21 @@
 
 import * as THREE from 'three'
 import { Terrain, TERRAIN_SIZE } from './terrain.js'
-import { loadDem } from './dem.js'
+import { loadDem, demTilePx } from './dem.js'
 import { latLonToWorld } from './geo.js'
 import { buildSlabWalls } from './plinth.js'
 import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
 
 export const GRID_R = 2 // rayon du damier : 2 → 5×5 max, centre exclu
 const NEIGHBOUR_RES = 384 // maillage des voisins : contexte, pas héros
-const DEM_CACHE_MAX = 12 // LRU des DEM voisins (clé zoom:tileX,tileY)
+// LRU des DEM voisins (clé zoom:tileX,tileY). ⚠️ CE CACHE PÈSE : un DEM en
+// tuiles 256 px fait 768² flottants (2,3 Mo), le même en tuiles 512 px en fait
+// 1536² (9,4 Mo). Garder 12 entrées coûtait 28 Mo, il en coûterait 113 — pour
+// des blocs qui ne sont même plus affichés. On borne donc le cache en MÉMOIRE,
+// pas en nombre d'entrées.
+const DEM_CACHE_BYTES = 32 * 1024 * 1024
+const demCacheMaxFor = (tilePx, tilesAcross) =>
+  Math.max(4, Math.floor(DEM_CACHE_BYTES / ((tilesAcross * tilePx) ** 2 * 4)))
 
 export class BlockGrid {
   // getMainDem() → DEM central ; getMainTerrain() → Terrain central (teinte
@@ -86,7 +93,11 @@ export class BlockGrid {
     if (changed) this.onGridChanged?.()
     if (!dem) return
     // charger le manquant
-    const tilesAcross = Math.round(dem.size / 256)
+    // ⚠️ le damier ALIGNE les voisins sur la grille de tuiles du bloc central
+    // (originTileX ± tilesAcross) : compter les tuiles avec 256 en dur pendant
+    // que le DEM en sert des 512 doublait le pas et ouvrait une couture d'un
+    // bloc entier entre le centre et ses voisins.
+    const tilesAcross = Math.round(dem.size / demTilePx(dem))
     for (const key of need) {
       if (this.cells.has(key)) {
         // zone/zoom du centre a changé ? re-seat la cellule
@@ -97,7 +108,7 @@ export class BlockGrid {
       }
       const [i, j] = key.split(',').map(Number)
       const origin = { x: dem.originTileX + i * tilesAcross, y: dem.originTileY + j * tilesAcross }
-      this._loadCellDem(dem.zoom, origin, tilesAcross)
+      this._loadCellDem(dem.zoom, origin, tilesAcross, demTilePx(dem))
         .then((nDem) => {
           if (syncId !== this._syncId || this.cells.has(key)) return // synchro périmée
           const cell = this._buildCell(i, j, nDem)
@@ -114,7 +125,7 @@ export class BlockGrid {
     return `${dem.zoom}:${dem.originTileX},${dem.originTileY}`
   }
 
-  _loadCellDem(zoom, origin, tilesAcross) {
+  _loadCellDem(zoom, origin, tilesAcross, tilePx = 256) {
     const key = `${zoom}:${origin.x},${origin.y}`
     if (this._demCache.has(key)) {
       const p = this._demCache.get(key)
@@ -124,7 +135,8 @@ export class BlockGrid {
     }
     const p = loadDem({ lat: 0, lon: 0, zoom, tilesAcross, originTile: origin })
     this._demCache.set(key, p)
-    while (this._demCache.size > DEM_CACHE_MAX) {
+    const max = demCacheMaxFor(tilePx, tilesAcross)
+    while (this._demCache.size > max) {
       const oldest = this._demCache.keys().next().value
       this._demCache.delete(oldest)
     }
@@ -223,7 +235,11 @@ export class BlockGrid {
     const t = cell.terrain
     if (!t) return
     const p = { ...params, resolution: Math.min(params.resolution ?? NEIGHBOUR_RES, NEIGHBOUR_RES) }
-    t.rebuildRamp?.(p)
+    // COLORISATION : le mode (Classique / Naturel) et ses réglages DOIVENT
+    // passer ici, sinon la couture au bord du bloc central saute aux yeux — un
+    // voisin resté en rampe 1D à côté d'un centre peigné et voilé. setColorMode
+    // recuit aussi le LUT de la rampe, il remplace donc rebuildRamp.
+    t.setColorMode?.(p.colorMode, p)
     t.updateMaterial?.(p)
     t.setMaterialMode?.(p.terrainSurfaceMat || '', p)
     t.setLiquidMetal?.(!!p.liquidMetal, p)
@@ -254,8 +270,11 @@ export class BlockGrid {
     this.scene.remove(t.mesh)
     t.mesh.geometry?.dispose()
     t.material?.dispose()
-    // textures créées PAR instance (le damier churn au fil des zooms)
-    for (const u of ['uRampTex', 'uSeaMask', 'uRegionMask', 'uCoastMask']) {
+    // textures créées PAR instance (le damier churn au fil des zooms) —
+    // uAnalysis en fait partie : une RGBA à la taille du DEM (2,3 Mo avec ses
+    // mipmaps en tuiles 256 px, ~12 Mo en tuiles 512 px — Mapterhorn), l'oublier
+    // ici serait de loin la plus grosse fuite VRAM du lot
+    for (const u of ['uRampTex', 'uSeaMask', 'uRegionMask', 'uCoastMask', 'uAnalysis']) {
       const tex = t.mapUniforms?.[u]?.value
       tex?.dispose?.()
     }
@@ -263,6 +282,7 @@ export class BlockGrid {
     // masque les a remplacés — les disposer aussi (double dispose inoffensif)
     t._coastPlaceholder?.dispose?.()
     t._seaPlaceholder?.dispose?.()
+    t._analysisPlaceholder?.dispose?.()
     t.material?.roughnessMap?.dispose?.()
     t.material?.bumpMap?.dispose?.()
   }

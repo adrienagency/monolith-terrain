@@ -155,7 +155,10 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
     if (frame % 15 === 0 || !uiCache.cref) {
       const cref = container.getBoundingClientRect()
       const rects = []
-      for (const selUI of ['.gpx-profile:not(.hidden)', '.ce-bottombar', '.ce-topbar-left', '.ce-topbar-right', '.ce-hourpill', '.zoom-stepper']) {
+      // .ce-elemwrap : la barre liquide (capsule des modes + cartouche du bas,
+      // un seul bloc depuis la fusion). Elle manquait à cette liste — les
+      // cartouches de course pouvaient passer dessous.
+      for (const selUI of ['.gpx-profile:not(.hidden)', '.ce-elemwrap', '.ce-bottombar', '.ce-topbar-left', '.ce-topbar-right', '.ce-hourpill', '.zoom-stepper']) {
         const elUI = document.querySelector(selUI)
         if (!elUI) continue
         const r = elUI.getBoundingClientRect()

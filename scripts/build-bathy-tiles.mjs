@@ -43,6 +43,37 @@ const DRY = flag('dry')
 const BBOX = (arg('bbox') || '-180,-90,180,90').split(',').map(Number)
 const TILE = 256
 
+// ─────────────────────────────────────────────────── LE PLATEAU, ET RIEN QUE LUI
+// Arbitrage d'Adrien : on ne cuit QUE la frange côtière, jusqu'à l'isobathe des
+// 500 m. Une tuile qui n'a que de l'abysse n'est pas écrite.
+//
+// Ce n'est pas une économie de bout de chandelle, c'est le contraire d'une perte :
+// mesuré au banc, les tuiles LES PLUS LOURDES sont les plaines abyssales (72 Ko)
+// — un fond « plat » à 5 000 m est couvert de bruit de sondage qui ne se compresse
+// pas — et ce sont aussi celles où GEBCO n'apporte rien de visible, puisque nos
+// tuiles terrarium décrivent déjà correctement une plaine. Recensé : 19 657 tuiles
+// z6-z8 au lieu de 55 535, soit ~576 Mo au lieu de 1,6 Go.
+//
+// Les tuiles écartées gardent silencieusement l'ancien relief (src/dem.js traite
+// l'absence comme un non-événement), donc rien ne casse au large.
+const SHELF = +arg('shelf', -500)
+
+// ─────────────────────────────────────────────────────────── QUANTIFICATION
+// Le canal G du terrarium porte l'octet de poids faible de l'altitude : sur un
+// fond marin il change à CHAQUE pixel et ne se compresse pas. Coder la
+// profondeur par pas de N mètres rend G multiple de N et fait tomber l'entropie
+// de log2(N) bits. Mesuré : -35 % de poids avec le barème ci-dessous.
+//
+// Le pas suit la profondeur, parce qu'un mètre n'a pas le même prix partout :
+// dans un lagon à 8 m il fait toute la lecture, à 4 000 m il est invisible.
+const QUANT = !flag('no-quant')
+const quantStep = (d) => (d > -60 ? 1 : d > -400 ? 4 : 8)
+const quantize = (d) => {
+  if (!QUANT) return d
+  const s = quantStep(d)
+  return s <= 1 ? Math.round(d) : Math.round(d / s) * s
+}
+
 // ------------------------------------------------------------- géographie
 const lon2x = (lon, z) => ((lon + 180) / 360) * 2 ** z
 const lat2y = (lat, z) => {
@@ -83,11 +114,19 @@ function encodePng(rgb, w, h) {
   ihdr.writeUInt32BE(h, 4)
   ihdr[8] = 8 // profondeur
   ihdr[9] = 2 // couleur RVB
-  // chaque ligne est préfixée de son octet de filtre (0 = aucun)
-  const raw = Buffer.alloc(h * (1 + w * 3))
+  // FILTRE « Up » (type 2) : chaque ligne est encodée comme sa différence avec
+  // la précédente. Sur un fond marin, deux lignes voisines se ressemblent
+  // énormément — mesuré : 1,4× de gain contre l'absence de filtre, gratuitement.
+  const stride = w * 3
+  const raw = Buffer.alloc(h * (1 + stride))
   for (let y = 0; y < h; y++) {
-    raw[y * (1 + w * 3)] = 0
-    rgb.copy(raw, y * (1 + w * 3) + 1, y * w * 3, (y + 1) * w * 3)
+    const o = y * (1 + stride)
+    raw[o] = 2
+    for (let i = 0; i < stride; i++) {
+      const cur = rgb[y * stride + i]
+      const up = y === 0 ? 0 : rgb[(y - 1) * stride + i]
+      raw[o + 1 + i] = (cur - up) & 0xff
+    }
   }
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
@@ -150,27 +189,83 @@ function openOne(dir) {
     }
     return row
   }
-  const sample = (lon, lat) => {
-    if (lon < meta.west || lon > meta.east || lat < meta.south || lat > meta.north) return null
-    const fx = ((lon - meta.west) / (meta.east - meta.west)) * meta.width
-    const fy = ((meta.north - lat) / (meta.north - meta.south)) * meta.height
-    const i = Math.min(meta.width - 1, Math.max(0, Math.floor(fx)))
-    const j = Math.min(meta.height - 1, Math.max(0, Math.floor(fy)))
+  const at = (i, j) => {
     const buf = readRow(j)
     const v = bytes === 2 ? buf.readInt16LE(i * 2) : buf.readFloatLE(i * 4)
     return v === meta.noData || !Number.isFinite(v) ? null : v
+  }
+  // MOYENNE SUR LA CELLULE DE SORTIE, pas plus proche voisin. Quand un pixel de
+  // tuile est plus large qu'une cellule source — c'est le cas dès z7, où le
+  // pixel fait 1 223 m contre 464 m pour GEBCO — prendre un seul échantillon
+  // ALIASE : on tire au hasard dans un champ plus fin. Résultat mesuré : des
+  // tuiles z7 six fois plus lourdes que z8 (63 Ko contre 8,6), parce que le
+  // bruit d'échantillonnage ne se compresse pas. Le moyennage corrige les deux
+  // à la fois — l'image ET le poids.
+  //
+  // `halfLon`/`halfLat` = demi-taille du pixel de sortie, en degrés.
+  const sample = (lon, lat, halfLon = 0, halfLat = 0) => {
+    if (lon < meta.west || lon > meta.east || lat < meta.south || lat > meta.north) return null
+    const sx = meta.width / (meta.east - meta.west)
+    const sy = meta.height / (meta.north - meta.south)
+    const cx = (lon - meta.west) * sx
+    const cy = (meta.north - lat) * sy
+    const rx = Math.floor(halfLon * sx)
+    const ry = Math.floor(halfLat * sy)
+    const i0 = Math.min(meta.width - 1, Math.max(0, Math.floor(cx - rx)))
+    const i1 = Math.min(meta.width - 1, Math.max(0, Math.floor(cx + rx)))
+    const j0 = Math.min(meta.height - 1, Math.max(0, Math.floor(cy - ry)))
+    const j1 = Math.min(meta.height - 1, Math.max(0, Math.floor(cy + ry)))
+    if (i0 === i1 && j0 === j1) return at(i0, j0)
+    let sum = 0
+    let n = 0
+    // pas d'échantillonnage borné : au-delà de 8×8 lectures par pixel le coût
+    // dépasse le gain, et la moyenne est déjà stable
+    const stepI = Math.max(1, Math.ceil((i1 - i0 + 1) / 8))
+    const stepJ = Math.max(1, Math.ceil((j1 - j0 + 1) / 8))
+    for (let j = j0; j <= j1; j += stepJ) {
+      for (let i = i0; i <= i1; i += stepI) {
+        const v = at(i, j)
+        if (v != null) { sum += v; n++ }
+      }
+    }
+    return n ? sum / n : null
   }
   return { meta, sample, close: () => fs.closeSync(fd) }
 }
 
 // -------------------------------------------------------------- encodage m
-function encodeTerrarium(m) {
+// ⚠️ ARRONDI AU MÈTRE, et ce n'est pas un détail de confort. GEBCO est en
+// mètres ENTIERS ; le moyennage anti-aliasing produit des fractions, et le
+// canal B du terrarium code justement le 1/256 de mètre. Sans arrondi, B
+// devient du bruit pur sur chaque pixel et le PNG explose — mesuré : 76 Ko par
+// tuile avec fractions contre 8,6 Ko sans. Un fond marin donné à 464 m de
+// résolution n'a de toute façon rien à dire sous le mètre.
+function encodeTerrarium(mRaw) {
+  const m = Math.round(mRaw)
   const v = Math.min(32767.99, Math.max(-32768, m)) + 32768
   const r = Math.floor(v / 256)
   const g = Math.floor(v - r * 256)
   const b = Math.round((v - r * 256 - g) * 256)
   if (b === 256) return g === 255 ? [r + 1, 0, 0] : [r, g + 1, 0]
   return [r, g, b]
+}
+
+// ------------------------------------------------------------------ pré-passe
+// Rend faux seulement si le tamis ne voit QUE de l'abysse : dans ce cas la
+// tuile n'a ni côte ni plateau, l'ancien relief suffit.
+const PROBE = 32
+function probeWorthIt(src, z, tx, ty) {
+  for (let j = 0; j < PROBE; j++) {
+    const lat = y2lat(ty + (j + 0.5) / PROBE, z)
+    for (let i = 0; i < PROBE; i++) {
+      const lon = x2lon(tx + (i + 0.5) / PROBE, z)
+      const m = src.sample(lon, lat)
+      if (m == null) continue
+      if (m >= 0) return true      // de la terre ⇒ une côte ⇒ de l'eau peu profonde
+      if (m > SHELF) return true   // du plateau
+    }
+  }
+  return false
 }
 
 // ------------------------------------------------------------------ cuisson
@@ -186,6 +281,8 @@ function tileRange(z) {
 
 function main() {
   console.log(`\nTuileur bathymétrique — z${ZMIN}..${ZMAX}, bbox ${BBOX.join(',')}`)
+  console.log(`  plateau : on n'écrit qu'une tuile touchant l'eau plus haute que ${SHELF} m`)
+  console.log(`  profondeur : ${QUANT ? 'quantifiée 1 m / 4 m / 8 m selon le fond' : 'au mètre partout (--no-quant)'}`)
   let total = 0
   for (let z = ZMIN; z <= ZMAX; z++) {
     const r = tileRange(z)
@@ -201,24 +298,53 @@ function main() {
   const src = openSources(SRC)
   let written = 0
   let skipped = 0
+  let bytes = 0 // cumulé au fil de l'eau : rescanner le dossier serait quadratique
   const t0 = Date.now()
 
   for (let z = ZMIN; z <= ZMAX; z++) {
     const r = tileRange(z)
     for (let ty = r.y0; ty <= r.y1; ty++) {
       for (let tx = r.x0; tx <= r.x1; tx++) {
+        // PRÉ-PASSE — la tuile mérite-t-elle qu'on l'échantillonne en entier ?
+        // Sans elle on lit 65 536 points pour finir par jeter la tuile, ce qui
+        // est le cas de ~70 % d'entre elles. Un tamis de 32×32 (un point tous
+        // les ~3,5 km à z8) coûte 256 fois moins cher.
+        //
+        // On garde la tuile si elle voit du plateau OU de la TERRE : une côte
+        // implique forcément de l'eau peu profonde, même si le plateau est trop
+        // étroit pour tomber sous le tamis (côtes escarpées type Chili).
+        if (!probeWorthIt(src, z, tx, ty)) {
+          skipped++
+          continue
+        }
         const rgb = Buffer.alloc(TILE * TILE * 3)
         let anySea = false
+        // la tuile ne sera gardée que si elle touche le plateau (voir SHELF)
+        let anyShelf = false
+        // demi-largeur d'un pixel de sortie, en degrés — c'est elle qui dit au
+        // sampler sur quelle surface moyenner (voir openOne/sample)
+        const halfLon = 360 / 2 ** z / TILE / 2
         for (let py = 0; py < TILE; py++) {
           const lat = y2lat(ty + (py + 0.5) / TILE, z)
+          // en Mercator la hauteur d'un pixel VARIE avec la latitude : on la
+          // mesure sur place plutôt que de la supposer carrée
+          const halfLat = Math.abs(y2lat(ty + py / TILE, z) - y2lat(ty + (py + 1) / TILE, z)) / 2
           for (let px = 0; px < TILE; px++) {
             const lon = x2lon(tx + (px + 0.5) / TILE, z)
-            const m = src.sample(lon, lat)
-            // ⚠️ on n'écrit QUE la mer. Sur terre, la valeur n'a aucune valeur
-            // ajoutée (le terrarium est bien plus fin) et le module de fusion
-            // l'ignore de toute façon — autant ne pas alourdir les PNG.
-            const v = m == null ? 0 : m
-            if (v < 0) anySea = true
+            const m = src.sample(lon, lat, halfLon, halfLat)
+            // ⚠️ ON N'ÉCRIT QUE LA MER — et il faut le faire vraiment, pas
+            // seulement le dire. La fusion (src/bathy.js) ignore TOUT pixel
+            // émergé : y écrire la vraie altitude ne sert à personne et coûte
+            // très cher. Mesuré sur une tuile de la mer Égée : le canal G, qui
+            // porte l'octet de poids faible de l'altitude, prenait 62 Ko des
+            // 83 Ko de la tuile — uniquement à cause des montagnes turques.
+            // Aplatir la terre à zéro la rend constante, donc gratuite.
+            const raw = m == null || m >= 0 ? 0 : m
+            if (raw < 0) {
+              anySea = true
+              if (raw > SHELF) anyShelf = true
+            }
+            const v = raw < 0 ? quantize(raw) : 0
             const [R, G, B] = encodeTerrarium(v)
             const o = (py * TILE + px) * 3
             rgb[o] = R
@@ -226,24 +352,31 @@ function main() {
             rgb[o + 2] = B
           }
         }
-        if (!anySea) {
+        if (!anySea || !anyShelf) {
           skipped++
-          continue // tuile entièrement à terre : inutile de l'écrire
+          // entièrement à terre, OU entièrement plus profonde que l'isobathe
+          // retenue : dans les deux cas l'ancien relief fait déjà l'affaire
+          continue
         }
         const dir = path.join(OUT, String(z), String(tx))
         fs.mkdirSync(dir, { recursive: true })
-        fs.writeFileSync(path.join(dir, `${ty}.png`), encodePng(rgb, TILE, TILE))
+        const png = encodePng(rgb, TILE, TILE)
+        fs.writeFileSync(path.join(dir, `${ty}.png`), png)
+        bytes += png.length
         written++
         if (written % 250 === 0) {
           const s = (Date.now() - t0) / 1000
-          console.log(`  z${z} · ${written.toLocaleString('fr-FR')} écrites · ${skipped.toLocaleString('fr-FR')} à terre · ${(written / s).toFixed(0)}/s`)
+          const mo = bytes / 1024 / 1024
+          console.log(`  z${z} · ${written.toLocaleString('fr-FR')} écrites · ${skipped.toLocaleString('fr-FR')} écartées · ${(written / s).toFixed(0)}/s · ${mo.toFixed(0)} Mo (${((bytes / written) / 1024).toFixed(1)} Ko/tuile)`)
         }
       }
     }
   }
   src.close()
   const s = (Date.now() - t0) / 1000
-  console.log(`\n✓ ${written.toLocaleString('fr-FR')} tuiles écrites, ${skipped.toLocaleString('fr-FR')} écartées (aucune mer) en ${s.toFixed(0)} s`)
+  const mo = bytes / 1024 / 1024
+  console.log(`\n✓ ${written.toLocaleString('fr-FR')} tuiles écrites, ${skipped.toLocaleString('fr-FR')} écartées en ${s.toFixed(0)} s`)
+  console.log(`  ${mo.toFixed(0)} Mo au total, ${((bytes / Math.max(written, 1)) / 1024).toFixed(1)} Ko par tuile`)
   console.log(`  → ${OUT}\n`)
 }
 

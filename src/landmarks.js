@@ -7,8 +7,11 @@
 // DEM zoom that frames a feature of `spanKm` (its long axis) so the WHOLE thing
 // sits on the block, filling the socle without cropping (Adrien : « toute l'île
 // en entier, pas un gros zoom au milieu »). The block shows
-// 156543·cos(lat)/2^z × 768 px of real world (dem.js : 3×256-px tiles) ; we take
-// the largest zoom whose extent still contains the span. Pure math (no imports)
+// 156543·cos(lat)/2^z × 768 px of real world ; we take
+// the largest zoom whose extent still contains the span.
+// ⚠️ 768 est ici une ÉTENDUE AU SOL (3 tuiles, dans la convention « pixel de
+// tuile 256 »), pas un nombre de pixels du DEM : elle ne bouge pas quand la
+// source passe en tuiles 512 px (même emprise, deux fois plus de pixels). Pure math (no imports)
 // so this file stays testable — shared by the island list AND the search box.
 export function zoomForSpanKm(spanKm, lat, { margin = 1.05, min = 4, max = 15 } = {}) {
   const km = Math.max(0.2, spanKm || 1)

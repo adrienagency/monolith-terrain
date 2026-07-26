@@ -252,6 +252,203 @@ export function generateGridContour(rng = Math.random, mode = 'light') {
   }
 }
 
+// ------------------------------------------------------------------- Oklab
+// POURQUOI un espace perceptuel ici. La rampe hypsométrique est cuite par
+// `ctx.createLinearGradient`, qui interpole les arrêts en sRGB GAMMA-ENCODÉ,
+// canal par canal. Entre deux couleurs voisines ça ne se voit pas ; entre un
+// vert olive et un tan, le chemin passe par un kaki mort, et entre un ocre et
+// un blanc de neige par un rose crayeux — deux teintes que PERSONNE n'a
+// choisies et qui trahissent chaque palette du catalogue au milieu de sa course.
+// Oklab (Björn Ottosson, 2020) est construit pour que la distance euclidienne
+// approche la distance PERÇUE : y interpoler donne le dégradé que l'œil attend.
+// On y ajoute la lecture polaire LCh, seule capable de faire tourner la TEINTE
+// le long d'un arc au lieu de traverser le gris central.
+//
+// Coefficients standards d'Ottosson — ne pas « arrondir pour faire propre » :
+// ce sont les colonnes de la matrice LMS calibrée, à cette précision.
+const srgbToLinear = (v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
+const linearToSrgb = (v) => (v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055)
+
+function hexToRgb01(hex) {
+  const s = String(hex).trim()
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(s)
+  if (!m) return [0, 0, 0]
+  const n = parseInt(m[1], 16)
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]
+}
+const to255 = (v) => Math.round(clamp01(v) * 255)
+const rgb01ToHex = (r, g, b) => `#${[r, g, b].map((v) => to255(v).toString(16).padStart(2, '0')).join('')}`
+
+// #rrggbb → {L, a, b}. L est perceptuel (0 = noir, ~1 = blanc), a/b les axes
+// vert↔rouge et bleu↔jaune.
+export function srgbToOklab(hex) {
+  const [R, G, B] = hexToRgb01(hex)
+  const r = srgbToLinear(R)
+  const g = srgbToLinear(G)
+  const b = srgbToLinear(B)
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+  return {
+    L: 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    a: 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    b: 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  }
+}
+
+// {L, a, b} → #rrggbb. Une couleur Oklab peut tomber HORS du gamut sRGB (le
+// cube ne couvre pas l'espace) : on clampe par canal. C'est brutal mais
+// prévisible, et nos décalages de chroma restent trop petits pour en sortir
+// autrement qu'aux extrêmes déjà saturés.
+export function oklabToSrgb({ L, a, b }) {
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b
+  const s_ = L - 0.0894841775 * a - 1.291485548 * b
+  const l = l_ * l_ * l_
+  const m = m_ * m_ * m_
+  const s = s_ * s_ * s_
+  return rgb01ToHex(
+    linearToSrgb(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+    linearToSrgb(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+    linearToSrgb(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s)
+  )
+}
+
+// Lecture polaire : chroma = distance au gris, teinte = angle en degrés.
+export function oklabToLch({ L, a, b }) {
+  return { L, C: Math.hypot(a, b), h: (((Math.atan2(b, a) * 180) / Math.PI) % 360 + 360) % 360 }
+}
+export function lchToOklab({ L, C, h }) {
+  const r = (h * Math.PI) / 180
+  return { L, a: C * Math.cos(r), b: C * Math.sin(r) }
+}
+
+// Deux couleurs interpolées en LCh, teinte par l'ARC LE PLUS COURT — même règle
+// que mixHue plus haut, pour la même raison : orange→bleu ne doit pas faire le
+// tour par le vert. Un gris (C≈0) n'a pas de teinte définie : il emprunte celle
+// de l'autre extrémité, sinon le dégradé partirait dans une direction arbitraire.
+export function mixOklch(a, b, t) {
+  const A = oklabToLch(srgbToOklab(a))
+  const B = oklabToLch(srgbToOklab(b))
+  const hA = A.C < 1e-4 ? B.h : A.h
+  const hB = B.C < 1e-4 ? A.h : B.h
+  const d = ((hB - hA + 540) % 360) - 180
+  return oklabToSrgb(lchToOklab({ L: A.L + (B.L - A.L) * t, C: A.C + (B.C - A.C) * t, h: hA + d * t }))
+}
+
+// ------------------------------------------------------- LUT 2D de la rampe
+// Le LUT que le shader échantillonne : X = l'altitude (inchangé), Y = l'HUMIDITÉ.
+//
+// C'est le cœur du chantier. Un LUT 1D donne nécessairement une couleur
+// constante le long de chaque courbe de niveau — c'est la définition de
+// « colorié par couche ». Le second axe casse ça : deux points à la même
+// altitude, l'un au fond d'un vallon, l'autre sur une croupe, reçoivent deux
+// couleurs différentes. Le coût GPU ne bouge pas d'un cycle : un texture2D
+// reste un texture2D, seule la coordonnée V cesse d'être une constante.
+//
+// CONTRAT DE DÉPLOIEMENT : à dry = wet = 0, TOUTES les lignes valent la ligne
+// médiane, et la ligne médiane reproduit la rampe actuelle. Aucune palette du
+// catalogue n'a donc besoin d'être ré-éditée, et le mode Classique rend
+// exactement ce qu'il rendait avant.
+export const RAMP2D_W = 512
+export const RAMP2D_H = 64
+
+// Les deux extrêmes, en Oklab. Les valeurs viennent de l'observation : un
+// versant sec est plus clair, moins coloré et vire à l'ambre (herbe grillée,
+// roche nue, poussière) ; un fond humide est plus sombre, plus saturé et vire
+// au vert (végétation dense, sol gorgé, mousse).
+const DRY = { chroma: 0.85, hue: 8, lum: 1.04 }
+const WET = { chroma: 1.15, hue: -22, lum: 0.92 }
+
+// Réglages du mode « Atlas » — ce que la tuile du picker applique. Les valeurs
+// d'usine des params restent à 0 / 'classic' pour que rien ne bouge tant que
+// personne n'a cliqué.
+export const NATURAL_COLOR_PRESET = Object.freeze({
+  colorMode: 'natural',
+  // ⚠️ LA PEINTURE DOIT REPRENDRE LA MAIN. mapTint dose le mélange entre la
+  // matière du relief et la peinture hypsométrique ; les templates descendent
+  // volontiers à 0,38, ce qui convenait à une rampe 1D décorative. En Atlas la
+  // rampe EST le sujet : à 0,38, tout le travail d'humidité et d'exposition
+  // arrivait dilué par 2,6 et devenait invisible à l'écran.
+  mapTint: 0.85,
+  rampOklab: true,
+  rampDry: 0.75,
+  rampWet: 0.85,
+  texShade: 0.6,
+  wetK: 0.55,
+  expoK: 0.35,
+  treeLine: 0.62,
+  hazeAmt: 0.45,
+  hazeAlt: 0.5,
+  hazeDist: 0.5,
+})
+
+// Échantillonne la liste d'arrêts en x ∈ [0,1].
+//   oklab = false → interpolation canal par canal en sRGB 8 bits, c'est-à-dire
+//     EXACTEMENT ce que fait ctx.createLinearGradient : la fidélité au rendu
+//     actuel prime sur la justesse perceptuelle tant qu'on est en Classique.
+//   oklab = true  → interpolation LCh (voir mixOklch).
+export function sampleRampStops(stops, x, oklab = false) {
+  if (!stops.length) return '#000000'
+  if (x <= stops[0].p) return stops[0].c
+  const last = stops[stops.length - 1]
+  if (x >= last.p) return last.c
+  for (let i = 0; i < stops.length - 1; i++) {
+    const s0 = stops[i]
+    const s1 = stops[i + 1]
+    if (x > s1.p) continue
+    const t = s1.p === s0.p ? 0 : (x - s0.p) / (s1.p - s0.p)
+    return oklab ? mixOklch(s0.c, s1.c, t) : lerpHex(s0.c, s1.c, t)
+  }
+  return last.c
+}
+
+// Décale une couleur vers le pôle sec ou humide, d'une amplitude `amt` (0..1).
+function shiftWet(hex, pole, amt) {
+  if (!(amt > 0)) return hex
+  const { L, C, h } = oklabToLch(srgbToOklab(hex))
+  return oklabToSrgb(
+    lchToOklab({
+      L: L * (1 + (pole.lum - 1) * amt),
+      C: C * (1 + (pole.chroma - 1) * amt),
+      h: h + pole.hue * amt,
+    })
+  )
+}
+
+/**
+ * Cuit le LUT 2D. Renvoie une RGBA prête pour une DataTexture (pas de canvas :
+ * le module reste pur et testable en node).
+ *
+ * @param {object} params - au minimum rampStops / grad* (voir rampColorStops)
+ * @param {{width?, height?, dry?, wet?, oklab?}} opts
+ *   dry/wet : amplitude 0..1 des lignes extrêmes. 0 = LUT constant en Y.
+ */
+export function buildRamp2D(params, { width = RAMP2D_W, height = RAMP2D_H, dry = 0, wet = 0, oklab = false } = {}) {
+  const stops = rampColorStops(params)
+  const data = new Uint8Array(width * height * 4)
+  // une seule ligne médiane calculée, puis déclinée : l'échantillonnage des
+  // arrêts (et son cbrt par pixel en mode Oklab) ne se refait pas 64 fois
+  const base = new Array(width)
+  for (let x = 0; x < width; x++) base[x] = sampleRampStops(stops, (x + 0.5) / width, oklab)
+  for (let y = 0; y < height; y++) {
+    // v va de 0 (sec) à 1 (humide) ; 0,5 = la ligne médiane, intouchée
+    const v = height > 1 ? y / (height - 1) : 0.5
+    const amt = v < 0.5 ? ((0.5 - v) / 0.5) * dry : ((v - 0.5) / 0.5) * wet
+    const pole = v < 0.5 ? DRY : WET
+    const row = y * width * 4
+    for (let x = 0; x < width; x++) {
+      const [r, g, b] = hexToRgb01(amt > 0 ? shiftWet(base[x], pole, amt) : base[x])
+      const i = row + x * 4
+      data[i] = to255(r)
+      data[i + 1] = to255(g)
+      data[i + 2] = to255(b)
+      data[i + 3] = 255
+    }
+  }
+  return { data, width, height }
+}
+
 // ---------------------------------------------------------------- earth palettes
 // Générateur « poline-style » (meodai.github.io/poline) : des ANCRES de teinte
 // en HSL (basse / moyenne / haute altitude) interpolées par arcs de teinte

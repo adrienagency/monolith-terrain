@@ -9,7 +9,8 @@
 
 import Grapick from 'grapick'
 import 'grapick/dist/grapick.min.css'
-import { el, slider, color, swatch, toggle, select, segmented, button, section, refreshAll, onRefresh } from './kit.js'
+import { el, slider, color, swatch, toggle, select, segmented, button, section, visibleWhen, refreshAll, onRefresh } from './kit.js'
+import { vigTile } from './shaders-panel.js'
 import { Panel } from './shell.js'
 import { PBR_PRESETS, GLASS_PRESETS, GLASS_BY_ID, PBR_BY_ID } from '../material-presets.js'
 import { stopsToCss, pointsToCss, pointsBase, flipStops, normalizeBgStops, normalizeBgPoints, MAX_STOPS, MAX_POINTS } from '../background.js'
@@ -467,19 +468,98 @@ export function contributeTerrainSections(ctx) {
     set: (v) => { params.shadeAuto = v; ctx.setShadeAuto?.(v); refreshAll() },
   })
   autoToggle.setAttribute('data-tip', 'Calcule les réglages d’après l’altitude réelle de la carte affichée. Bouger un curseur le fige ; rallumer rend la main.')
+
+  // --- COLORISATION : le choix EN TÊTE de la section, parce qu'il commande
+  // tout le reste. « Classique » = la rampe d'altitude historique, une couleur
+  // par courbe de niveau. « Naturel » (src/terrain-analysis.js) ajoute le rendu
+  // peigné des crêtes, un second axe d'humidité et la perspective aérienne.
+  // Un picker de VIGNETTES et non un menu : le choix est visuel, il se montre.
+  const colorPick = el('div', 'ce-mat-pick')
+  const rampCss = () =>
+    `linear-gradient(0deg, ${(params.rampStops || []).map((s) => `${s.c} ${Math.round(s.p * 100)}%`).join(', ')})`
+  const COLOR_MODES = [
+    {
+      id: 'classic',
+      label: 'Classique',
+      tip: 'La rampe d’altitude seule : une couleur par courbe de niveau.',
+      css: rampCss,
+    },
+    {
+      id: 'naturel',
+      // « Atlas » et non « Naturel » : la chip Exposition/Contraste/Saturation
+      // du panneau Développement porte déjà ce nom, et les deux sections se
+      // lisaient « Ombrage · Naturel » et « Développement · Naturel ».
+      label: 'Atlas',
+      tip: 'Crêtes peignées, vallons plus verts, plaines noyées de brume — la couleur suit le terrain, plus seulement l’altitude.',
+      // la vignette RACONTE le mode : le peigné des crêtes par-dessus la rampe,
+      // et le voile bleuté qui monte du bas comme sur la carte
+      css: () =>
+        `repeating-linear-gradient(74deg, rgba(255,255,255,.34) 0 1px, rgba(0,0,0,.24) 1px 2.5px), linear-gradient(0deg, rgba(150,175,205,.62), rgba(150,175,205,0) 58%), ${rampCss()}`,
+    },
+  ]
+  const colorGrid = el('div', 'ce-mat-grid')
+  const colorTiles = COLOR_MODES.map((m) => {
+    const media = el('span', 'ce-mat-vig-img')
+    // 'naturel' côté UI, 'natural' côté moteur (params.colorMode) — la bascule
+    // se fait ici et nulle part ailleurs
+    const id = m.id === 'naturel' ? 'natural' : 'classic'
+    const b = vigTile({
+      id,
+      cur: params.colorMode || 'classic',
+      label: m.tip,
+      media,
+      showName: true,
+      onPick: () => ctx.setColorMode?.(id),
+    })
+    b.querySelector('.ce-mat-vig-name').textContent = m.label
+    colorGrid.append(b)
+    return { id, m, b, media }
+  })
+  colorPick.append(colorGrid)
+  // vignettes VIVANTES : elles suivent la palette courante, et la sélection se
+  // resynchronise après un template (qui peut changer le mode sous nos pieds)
+  onRefresh(() => {
+    const cur = params.colorMode || 'classic'
+    for (const t of colorTiles) {
+      t.b.classList.toggle('on', t.id === cur)
+      t.media.style.background = t.m.css()
+    }
+  }, colorPick)
+
+  const isNatural = () => (params.colorMode || 'classic') === 'natural'
+  // un curseur du mode Naturel : pousse l'uniforme, ne recalcule aucun DEM
+  const natSlider = (label, key, min, max, step, tip) => {
+    const row = slider({ label, min, max, step, get: () => ctx.getColorParam?.(key) ?? 0, set: (v) => ctx.setColorParam?.(key, v) })
+    if (tip) row.setAttribute('data-tip', tip)
+    visibleWhen(row, isNatural)
+    return row
+  }
+  const slopeRow = shadeSlider('Ombrage des pentes', 'slopeTint', 'uSlopeTint', 0, 1, 0.02)
+  // sans objet en Naturel : le peigné sculpte les versants bien mieux que ce
+  // brunissage à plat, et les deux ensemble empâtent la carte
+  visibleWhen(slopeRow, () => !isNatural())
+
   sMap.body.append(
+    colorPick,
     autoToggle,
     shadeSlider('Teinte hypsométrique', 'mapTint', 'uTint', 0, 1, 0.02),
     shadeSlider('Contraste d’altitude', 'heightContrast', 'uHeightContrast', 0.5, 20, 0.1),
     shadeSlider('Pivot d’altitude', 'heightPivot', 'uHeightPivot', 0, 1, 0.01),
-    shadeSlider('Ombrage des pentes', 'slopeTint', 'uSlopeTint', 0, 1, 0.02)
+    slopeRow,
+    natSlider('Texture des crêtes', 'texShade', 0, 1, 0.02, 'Le « peigné » de Tibor Nagy : les croupes s’éclairent, les ravins se creusent, à altitude égale.'),
+    natSlider('Humidité des vallons', 'wetK', 0, 1, 0.02, 'Les creux collectent l’eau : ils prennent des verts plus soutenus, les croupes restent sèches.'),
+    natSlider('Exposition (adret / ubac)', 'expoK', 0, 1, 0.02, 'Le versant à l’ombre est plus frais et plus vert que celui qui prend le soleil.'),
+    natSlider('Limite des arbres', 'treeLine', 0.2, 1, 0.01, 'Au-dessus, plus de végétation : humidité et exposition s’éteignent et la roche reprend la main.'),
+    natSlider('Perspective aérienne', 'hazeAmt', 0, 1, 0.02, 'La brume d’Imhof : les basses terres se voilent de bleu-gris, les sommets gagnent en mordant.'),
+    natSlider('Couleurs sèches', 'rampDry', 0, 1, 0.02, 'Amplitude du pôle sec de la rampe : plus clair, plus ambré, moins coloré.'),
+    natSlider('Couleurs humides', 'rampWet', 0, 1, 0.02, 'Amplitude du pôle humide : plus sombre, plus vert, plus saturé.')
   )
-  // meta parlante (section repliée) : l'état de l'auto d'abord, le contraste
-  // ensuite — « auto » / « auto · 2 repris » / « manuel »
+  // meta parlante (section repliée) : le mode d'abord — c'est lui qui commande
+  // — puis l'état de l'auto et le contraste
   onRefresh(() => {
     const frozen = ctx.shadeFrozenCount?.() ?? 0
     const state = params.shadeAuto === false ? 'manuel' : frozen ? `auto · ${frozen} repris` : 'auto'
-    sMap.setMeta(`${state} · ×${(+params.heightContrast).toFixed(1)}`)
+    sMap.setMeta(`${isNatural() ? 'Atlas' : 'Classique'} · ${state} · ×${(+params.heightContrast).toFixed(1)}`)
   }, sMap.head)
 
   // --------------------------------------------------------------- Socle
@@ -588,7 +668,19 @@ export function contributeTerrainSections(ctx) {
       },
     })
   )
-  const zoomSel = select({ label: 'Détail (zoom)', options: ['5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15'], get: () => String(params.demZoom), set: (v) => { params.demZoom = +v; ctx.onZoomPicked(+v); rebuildRes() } })
+  // z16 et z17 : ouverts depuis le passage à Mapterhorn, qui sert du RGE ALTI en
+  // France et du swissALTI3D en Suisse. Ailleurs le sondage plafonne plus bas et
+  // le chargeur retombe sur l'ancêtre — d'où la mention du maximum réellement
+  // disponible dans l'étiquette, plutôt qu'un choix qui ne donnerait rien.
+  const zoomSel = select({ label: 'Détail (zoom)', options: ['5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17'], get: () => String(params.demZoom), set: (v) => { params.demZoom = +v; ctx.onZoomPicked(+v); rebuildRes() } })
+  onRefresh(() => {
+    const max = ctx.getDemMaxZoom?.()
+    const lab = zoomSel.querySelector?.('.ce-label')
+    if (!lab) return
+    lab.textContent = max && params.demZoom >= max
+      ? `Détail (zoom) — maximum atteint pour cette zone (z${max})`
+      : 'Détail (zoom)'
+  }, zoomSel)
   const fineDetail = slider({ label: 'Détail fin', min: 0, max: 0.8, step: 0.01, get: () => params.detail, set: (v) => { params.detail = v; ctx.saveZoomDetail?.(params.demZoom, v) } })
   const detailScale = slider({ label: 'Échelle du détail', min: 0.5, max: 6, step: 0.1, get: () => params.detailScale, set: (v) => { params.detailScale = v } })
   sQual.body.append(zoomSel, fineDetail, detailScale)

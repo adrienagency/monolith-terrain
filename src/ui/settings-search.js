@@ -52,9 +52,12 @@ export function buildSettingsSearch({ actions = [] } = {}) {
       document.querySelector('.ce-advbtn')?.classList.add('on')
     }
     // ouvrir le panneau (accordéon exclusif : replier les voisins du dock)
-    const dock = entry.p.parentElement
-    for (const sib of dock.querySelectorAll('.ce-panel')) sib.classList.add('collapsed')
+    const host = entry.p.parentElement
+    for (const sib of host.querySelectorAll('.ce-panel')) sib.classList.add('collapsed')
     entry.p.classList.remove('collapsed')
+    // la Caméra n'habite pas un dock mais un menu de la topbar : le déplier ne
+    // montrerait rien tant que le menu qui le porte reste fermé
+    if (host.classList.contains('ce-pubmenu')) host.classList.add('open')
     // ouvrir la section (exclusif dans le panneau)
     for (const s of entry.p.querySelectorAll('.ce-section')) s.classList.remove('open')
     entry.sec.classList.add('open')

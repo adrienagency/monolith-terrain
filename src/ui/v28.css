@@ -14,9 +14,18 @@
   --ce-glass-strong: rgba(252, 252, 253, 0.8);
   --ce-border: rgba(255, 255, 255, 0.55);
   --ce-hairline: rgba(28, 25, 23, 0.08);
-  --ce-shadow: 0 10px 40px rgba(28, 25, 23, 0.12);
+  --ce-shadow-color: rgba(28, 25, 23, 0.12);
+  --ce-shadow: 0 10px 40px var(--ce-shadow-color);
   --ce-track: rgba(28, 25, 23, 0.14);
   --ce-hover: rgba(28, 25, 23, 0.05);
+  /* la PORCELAINE : le fond OPAQUE des bulles de la barre liquide (.lq-blob) et
+     donc du cartouche du bas. Jeton à part parce qu'elle ne peut pas être du
+     verre (le seuil d'alpha du filtre goo affame le pont) : il lui faut sa
+     propre couleur, qui doit suivre la teinte comme le reste. */
+  --ce-porcelain: #fbfbfc;
+  /* ombre du calque goo de la barre liquide — même famille que --ce-shadow-color
+     mais SANS bascule sombre : la barre garde sa recette claire jour et nuit. */
+  --ce-goo-shadow: rgba(28, 25, 23, 0.12);
   --ce-radius: 16px;
 
   /* spacing scale — one token per relationship, used everywhere that
@@ -32,9 +41,15 @@ body.dark {
   --ce-glass-strong: rgba(24, 22, 21, 0.82);
   --ce-border: rgba(255, 255, 255, 0.09);
   --ce-hairline: rgba(231, 229, 228, 0.08);
-  --ce-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  --ce-shadow-color: rgba(0, 0, 0, 0.5);
+  /* redéclaré et pas hérité : une var() dans une propriété perso est
+     substituée sur l'élément QUI LA CALCULE. --ce-shadow calculé sur :root a
+     déjà avalé la couleur claire ; il faut le recalculer ici pour que
+     --ce-shadow-color du mode sombre soit celle qui compte. */
+  --ce-shadow: 0 10px 40px var(--ce-shadow-color);
   --ce-track: rgba(231, 229, 228, 0.16);
   --ce-hover: rgba(231, 229, 228, 0.06);
+  --ce-porcelain: #17191d;
 }
 
 .ce-glassbox {
@@ -120,25 +135,81 @@ body.dark {
 }
 
 /* ------------------------------------------------------------ bottom bar */
+/* Le cartouche du bas n'est plus un flottant autonome : il est ADOPTÉ par la
+   rangée liquide (elembar.js) et devient la moitié basse d'un seul objet, le
+   pont de goo reliant les deux. Son fond est donc la BULLE — porcelaine
+   OPAQUE, validé Adrien : le seuil d'alpha du filtre affame le pont dès
+   qu'une bulle est translucide, plus de backdrop-filter possible ici.
+   Sa largeur/son décalage sont publiés par elembar.js (--ce-bb-w / --ce-bb-x)
+   et transitionnent sur LA MÊME courbe que les bulles. */
 .ce-bottombar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  padding: 5px; /* 5 (et non 6) : hauteur 42 des deux côtés */
+  border-radius: 999px;
+  box-sizing: border-box;
+  color: var(--ce-ink);
+  font-family: var(--ce-font);
+  width: var(--ce-bb-w, 408px);
+  transform: translateX(var(--ce-bb-x, 0px));
+  transition:
+    width 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    transform 0.34s cubic-bezier(0.6, 0, 0.3, 1.3);
+}
+/* filet : tant que la rangée liquide ne l'a pas adoptée (mode embed, où elle
+   est de toute façon masquée par .ce-noui), elle garde son ancrage et son
+   verre d'origine */
+.ce-bottombar.ce-bb-loose {
   position: fixed;
   bottom: 18px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 60;
-  display: flex;
-  align-items: center;
   gap: 6px;
-  padding: 6px;
-  border-radius: 999px;
   width: min(520px, calc(100vw - 32px));
 }
+/* flex:1 + min-width:0 : le champ SUIT la largeur de la barre. C'est la barre
+   qui s'anime (--ce-bb-w) ; le champ se laisse comprimer jusqu'à zéro — donc
+   une seule courbe pilote tout, rien ne peut désynchroniser.
+   (max-width n'aurait pas marché : `none` n'est pas interpolable, la
+   transition n'aurait rien animé.) */
 .ce-search {
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 6px 0 12px;
+  padding: 0 8px 0 12px;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  transition:
+    padding 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    opacity 0.2s;
+}
+/* mode Parcours : le champ se REPLIE (jamais display:none — liquidize élimine
+   les items dont offsetParent est nul et supprimerait leur bulle d'un coup,
+   sans transition) */
+.ce-bottombar.narrow .ce-search {
+  padding-left: 0;
+  padding-right: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.ce-bottombar > .ce-pillbtn {
+  flex: none;
+  height: 32px; /* même compte que le champ : 32 + 2×5 = 42 */
+  transition: background 0.28s, color 0.28s;
+}
+/* GPX devient l'ACTION du mode Parcours : il passe en accent */
+.ce-bottombar.narrow > .ce-pillbtn {
+  background: var(--ce-accent);
+  color: #fff;
+}
+.ce-bottombar.narrow > .ce-pillbtn:hover {
+  background: var(--ce-accent);
+  filter: brightness(1.07);
 }
 .ce-search svg {
   width: 15px;
@@ -154,7 +225,7 @@ body.dark {
   color: var(--ce-ink);
   font-family: var(--ce-font);
   font-size: 13px;
-  height: 34px;
+  height: 32px; /* 32 + 2×5 de padding = 42, la hauteur de la capsule */
   min-width: 0;
 }
 .ce-search input::placeholder {
@@ -446,7 +517,14 @@ body.dark {
   inset: -12px; /* = LQ_PAD : marge pour que le flou du filtre ne rogne pas */
   pointer-events: none;
   z-index: 0;
-  filter: url(#ce-goo) drop-shadow(0 10px 30px rgba(20, 24, 35, 0.16));
+  /* ombre STONE CHAUDE : la précédente (rgba(20,24,35,.16)) était bleue au
+     milieu d'une palette entièrement stone — elle refroidissait la barre.
+     Jeton à part de --ce-shadow-color : celui-ci passe au NOIR à 50 % en mode
+     sombre, alors que l'ombre du goo garde sa recette claire jour et nuit.
+     Elle se teinte quand même (main.js la calcule sur la base claire).
+     ⚠️ le défaut vit dans :root, PAS ici : une déclaration portée par
+     l'élément lui-même battrait la valeur héritée que main.js écrit. */
+  filter: url(#ce-goo) drop-shadow(0 10px 30px var(--ce-goo-shadow));
   /* la translucidité du verre s'applique APRÈS le filtre : les bulles
      elles-mêmes doivent être OPAQUES, sinon le seuil du goo (qui lit
      l'alpha) affame le pont — c'était le « toujours pas suffisant » */
@@ -454,15 +532,28 @@ body.dark {
 }
 .lq-blob {
   position: absolute;
-  border-radius: 999px;
+  /* ⚠️ PAS 999px EN DUR. Un rayon « pill » se rabote à la MOITIÉ du plus petit
+     côté : sur le cartouche du bas (44 px de haut) il vaut donc 22, mais sur la
+     capsule de l'accueil (124 px) il vaut 62 — un arc trois fois plus gros, qui
+     ne ressemble plus au reste (retour Adrien). Le moteur liquide reste
+     générique : 999px est son défaut, chaque cluster impose le sien. */
+  border-radius: var(--lq-radius, 999px);
   translate: 12px 12px; /* compense l'inset -12px du calque */
-  background: #fbfbfc;
+  background: var(--ce-porcelain);
+  /* UNE SEULE courbe pour tout — bulles ET éléments HTML (cartouche du bas,
+     repli du champ). Si les durées divergent, le fond décolle du texte
+     pendant le voyage (enseignement de la maquette). */
   transition:
-    left 0.32s cubic-bezier(0.6, 0, 0.3, 1.3),
-    width 0.32s cubic-bezier(0.6, 0, 0.3, 1.3),
-    top 0.2s, height 0.2s, background 0.28s;
+    left 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    top 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    width 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    height 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    background 0.28s;
 }
-body.dark .lq-blob { background: #17191d; }
+/* redite VOULUE : `body.dark .lq-blob` (0,2,1) l'emporte sur `.lq-blob.dark`
+   (0,2,0) juste dessous, et c'est le comportement en place. Passer le jeton
+   sans garder la règle inverserait cette bataille de spécificité. */
+body.dark .lq-blob { background: var(--ce-porcelain); }
 .lq-blob.dark { background: var(--ce-ink); }
 .lq-blob.accent { background: var(--ce-accent); }
 /* ---- liseré MÉTAL LIQUIDE du pourtour (recette bouton adrienagency.com,
@@ -499,28 +590,54 @@ body.dark .lq-blob { background: #17191d; }
   .lq-rim { animation: none; }
 }
 .ce-liquid { position: relative; }
-/* :not(.ce-lq-adv) : ce sélecteur (spécificité 0,2,0) écrasait le
-   position:absolute du slot Avancé → il dérivait verticalement (bug vu par
-   Adrien). Le slot garde son absolu, les autres passent au-dessus du goo. */
-.ce-liquid > *:not(.lq-goo):not(.ce-lq-adv) {
+.ce-liquid > *:not(.lq-goo) {
   position: relative;
   z-index: 1;
 }
-.ce-lqrow { position: relative; }
+/* LA rangée unique : ligne du haut (capsule + Avancé), puis le cartouche du
+   bas. align-items:flex-start — l'origine de la rangée EST celle de
+   l'ensemble capsule + Avancé, ce qui rend la géométrie du pont calculable
+   sans dépendre de la largeur courante ; le cartouche du bas se place par
+   translation (--ce-bb-x publié par elembar.js).
+   row-gap : le vide que franchit le pont. elembar.js le RELIT (getComputedStyle)
+   — le changer ici suffit, la géométrie suit. */
+.ce-lqrow {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  /* 22 et non 14 (retour Adrien : « limiter l'effet collant »). Mesuré sur la
+     recette réelle du filtre — flou 8 puis seuil 20a−9 — la soudure du goo se
+     rompt dès 12 px : ce n'était donc PAS lui qui reliait les deux barres sur
+     toute leur largeur, mais le HALO DE L'OMBRE PORTÉE, qui comble un vide
+     étroit. À 22 px l'intervalle se lit, et le pont — qui mord 10 px dans
+     chacune — redevient la SEULE connexion, à l'aplomb du mode actif. */
+  gap: 22px;
+  /* UN SEUL arrondi pour toute la silhouette liquide, celui du cartouche du bas.
+     Sa hauteur de 44 px rabotait déjà son rayon « pill » à 22 : on le fixe donc
+     ici, et la capsule de l'accueil cesse d'exhiber un arc de 62. Les petites
+     bulles ne perdent rien — le CSS rabote de toute façon à la moitié du plus
+     petit côté, la bosse reste donc parfaitement ronde. */
+  --lq-radius: 22px;
+}
+/* la ligne du haut : capsule des modes + « Avancé », côte à côte. C'est elle
+   qui donne sa largeur à la rangée — donc au cartouche du bas. */
+.ce-lqtop {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
 /* « Avancé » : SA bulle, reliée à la capsule des modes par la taille concave
-   du goo (gap 7px ≈ la portée du flou) — le liquide EST le séparateur */
+   du goo (gap 4px ≈ la portée du flou) — le liquide EST le séparateur.
+   Il RESTE : c'est lui qui ouvre les panneaux avancés. */
 .ce-lq-adv {
-  position: absolute;
-  left: calc(100% + 4px);
-  /* MÊME niveau et MÊME hauteur que la capsule : la BULLE mesure le slot
-     (pleine rangée) → pincement symétrique ; le bouton, lui, est centré et
-     en retrait (padding) pour une pastille de survol avec marge */
-  top: 0;
-  bottom: 0;
+  position: relative;
   display: flex;
   align-items: center;
   padding: 0 5px;
   white-space: nowrap;
+  flex: none;
   z-index: 1;
 }
 /* la bulle Avancé reste BLANCHE dans les deux états (rectif Adrien) —
@@ -549,21 +666,32 @@ body.dark .lq-blob { background: #17191d; }
    fondent en opacité */
 .ce-elemwrap {
   position: fixed;
-  bottom: 74px;
+  /* la barre de recherche vit maintenant DEDANS : l'ancrage descend à sa
+     place (18px), la ligne du haut retombe exactement là où elle était
+     (18 + 42 + 14 = 74) */
+  bottom: 18px;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, 0);
   z-index: 62;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
+  /* le voyage vers l'ACCUEIL (barre en grand, au centre) — LA courbe unique.
+     C'est une TRANSLATION, jamais un scale : la géométrie des bulles se calcule
+     à partir des boîtes mesurées, un scale décorrélerait le fond du contenu. */
+  transition:
+    bottom 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    transform 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    gap 0.34s cubic-bezier(0.6, 0, 0.3, 1.3);
 }
-.ce-lqrow > .ce-elembar,
-.ce-lqrow > .ce-qb-core {
+.ce-lqtop > .ce-elembar,
+.ce-lqtop > .ce-qb-core {
+  flex: none;
   transition: opacity 0.24s 0.05s;
 }
-body.ce-simple .ce-lqrow > .ce-elembar,
-body:not(.ce-simple) .ce-lqrow > .ce-qb-core {
+body.ce-simple .ce-lqtop > .ce-elembar,
+body:not(.ce-simple) .ce-lqtop > .ce-qb-core {
   /* le niveau caché sort du flux (la rangée garde la largeur du niveau
      VISIBLE → centrage juste) et se fond — pointer-events coupés */
   opacity: 0;
@@ -578,11 +706,235 @@ body.ce-embed .ce-elemwrap,
 body.store-mode .ce-elemwrap,
 body.studio-mode .ce-elemwrap,
 body.atelier-mode .ce-elemwrap,
-body.shibu-view .ce-elemwrap,
-/* le profil GPX occupe le même emplacement : il a priorité */
-body:has(.gpx-profile:not(.hidden)) .ce-elemwrap {
+body.shibu-view .ce-elemwrap {
   display: none !important;
 }
+
+/* ======================================================================
+   ACCUEIL (body.ce-hub) — LA barre, en grand, au centre de l'écran.
+   Un seul objet, deux états : rien n'est recréé ici, tout est la MÊME
+   rangée liquide (mêmes bulles keyées) avec d'autres tailles. On anime des
+   VRAIES tailles (padding, gap, font-size, max-width/height) que liquidize
+   relit — jamais transform: scale, qui décorrélerait le fond du contenu.
+   ====================================================================== */
+
+/* l'accueil montre TOUJOURS le cœur simple, même pour qui était en mode
+   avancé : il pose une question, il n'expose pas un niveau d'outillage. La
+   préférence « Avancé » n'est pas touchée — elle reprend la main à l'arrivée
+   en bas. Ces deux règles doivent rester APRÈS la bascule simple/avancé
+   ci-dessus : spécificité égale, c'est l'ordre qui tranche. */
+body.ce-hub .ce-lqtop > .ce-qb-core {
+  opacity: 1;
+  pointer-events: auto;
+  position: relative;
+  left: auto;
+  top: auto;
+  transform: none;
+}
+body.ce-hub .ce-lqtop > .ce-elembar {
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* la barre quitte son ancrage bas pour le centre — une TRANSLATION */
+body.ce-hub .ce-elemwrap {
+  bottom: 50%;
+  transform: translate(-50%, 50%);
+  gap: 20px;
+}
+
+/* voile SOUS les barres (topbar z 60, rangée z 62) : la topbar reste nette et
+   son logo continue de faire remonter la barre. Plus léger que l'ancien hub —
+   la carte doit rester vivante derrière. */
+.ce-hubveil {
+  position: fixed;
+  inset: 0;
+  z-index: 56;
+  background: rgba(246, 244, 239, 0.42);
+  -webkit-backdrop-filter: blur(5px) saturate(1.1);
+  backdrop-filter: blur(5px) saturate(1.1);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.34s cubic-bezier(0.6, 0, 0.3, 1.3);
+}
+body.dark .ce-hubveil {
+  background: rgba(14, 15, 18, 0.5);
+}
+body.ce-hub .ce-hubveil {
+  opacity: 1;
+  pointer-events: auto;
+}
+body.ce-noui .ce-hubveil,
+body.ce-embed .ce-hubveil,
+body.store-mode .ce-hubveil,
+body.studio-mode .ce-hubveil,
+body.atelier-mode .ce-hubveil,
+body.shibu-view .ce-hubveil {
+  display: none !important;
+}
+/* les coins s'effacent le temps de la question — ils reviennent avec la
+   descente. pointer-events coupés : rien ne doit distraire de la réponse. */
+body.ce-hub .ce-isobtn,
+body.ce-hub .ce-mapbtn,
+body.ce-hub .ce-credits {
+  opacity: 0.18;
+  pointer-events: none;
+  transition: opacity 0.34s cubic-bezier(0.6, 0, 0.3, 1.3);
+}
+
+/* les mots autour de la barre — ils vivent DANS le wrap, donc ils voyagent
+   avec elle. Repliés par max-height, JAMAIS display:none. */
+.ce-hubhead,
+.ce-hubfoot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  gap: 0;
+  pointer-events: none;
+  font-family: var(--ce-font);
+  transition:
+    max-height 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    gap 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    opacity 0.24s;
+}
+body.ce-hub .ce-hubhead {
+  max-height: 92px;
+  opacity: 1;
+  gap: 6px;
+}
+body.ce-hub .ce-hubfoot {
+  max-height: 76px;
+  opacity: 1;
+  gap: 6px;
+  pointer-events: auto;
+}
+.ce-hubmark {
+  font-family: 'Rosarivo', Georgia, serif;
+  font-size: 34px;
+  line-height: 1.1;
+  color: var(--ce-ink);
+}
+.ce-hubmark span {
+  color: var(--ce-accent);
+}
+.ce-hubq {
+  font-size: 15px;
+  color: var(--ce-muted);
+}
+.ce-hubdrop {
+  font-size: 12px;
+  color: var(--ce-muted);
+  max-width: 520px;
+}
+.ce-hubesc {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: 400 11px var(--ce-font);
+  color: var(--ce-muted);
+  opacity: 0.7;
+}
+.ce-hubesc:hover {
+  opacity: 1;
+}
+
+/* le cœur simple en grand : trois portes en COLONNE — picto, titre,
+   sous-titre. La direction bascule d'un coup (flex-direction n'est pas
+   interpolable) ; tout le reste — paddings, tailles, mots — est animé sur la
+   courbe unique, et les bulles collent au contenu pendant le voyage. */
+body.ce-hub .ce-qb-core {
+  gap: 8px;
+  padding: 8px;
+}
+body.ce-hub .ce-qb-core .ce-wm-btn {
+  flex-direction: column;
+  gap: 7px;
+  padding: 18px 18px 15px;
+  min-width: 138px;
+  opacity: 1;
+  /* même arrondi que la silhouette liquide : à 101 px de haut, le rayon « pill »
+     du mode barre se raboterait à 50 et la pastille de survol deviendrait un
+     stade géant, en désaccord avec la capsule qui la porte */
+  border-radius: 18px;
+}
+body.ce-hub .ce-qb-core .ce-wm-btn svg {
+  width: 26px;
+  height: 26px;
+}
+body.ce-hub .ce-qb-core .ce-wm-btn:hover {
+  background: var(--ce-hover);
+}
+
+/* « Avancé » n'a rien à faire dans une question : le slot se referme sur
+   lui-même (largeur nulle → bulle nulle). min-width:0 est OBLIGATOIRE — sans
+   lui, min-width:auto d'un flex item rend max-width:0 sans effet. */
+.ce-lq-adv {
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  transition:
+    max-width 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    padding 0.34s cubic-bezier(0.6, 0, 0.3, 1.3);
+}
+body.ce-hub .ce-lq-adv {
+  max-width: 0;
+  padding: 0;
+}
+
+/* pendant le voyage, les bulles COLLENT à leur contenu : elembar.js les repose
+   à chaque frame, leur propre transition les ferait courir avec un tour de
+   retard. Même raison pour le cartouche du bas, dont la largeur est publiée
+   frame par frame. */
+.ce-lqrow.lq-travel .lq-blob,
+.ce-lqrow.lq-travel .ce-bottombar {
+  transition: none !important;
+}
+
+/* téléphone : trois colonnes côte à côte ne rentrent pas — la pile de portes
+   passe à la verticale, chaque porte gardant sa mise en colonne. */
+@media (max-width: 620px) {
+  body.ce-hub .ce-qb-core {
+    flex-direction: column;
+    align-items: stretch;
+    width: min(340px, calc(100vw - 32px));
+  }
+  body.ce-hub .ce-qb-core .ce-wm-btn {
+    min-width: 0;
+    padding: 12px 14px 11px;
+    gap: 4px;
+  }
+  body.ce-hub .ce-qb-core .ce-wm-btn svg {
+    width: 22px;
+    height: 22px;
+  }
+  /* le badge sortirait sur la porte du dessus : il se range à droite */
+  body.ce-hub .ce-wm-badge {
+    top: 10px;
+    left: auto;
+    right: 12px;
+    transform: none;
+  }
+  .ce-hubmark {
+    font-size: 26px;
+  }
+  body.ce-hub .ce-hubhead {
+    max-height: 76px;
+  }
+}
+/* ⚠️ l'ancienne règle « body:has(.gpx-profile:not(.hidden)) .ce-elemwrap →
+   display:none » a été RETIRÉE : la recherche de lieu vit désormais dans le
+   même bloc, et l'éteindre dès qu'une trace est chargée aurait supprimé le
+   champ ET le sélecteur de modes précisément en mode Parcours. Le profil GPX
+   se pose maintenant AU-DESSUS du bloc entier — syncGpxProfilePosition()
+   (main.js) mesure la rangée liquide et non plus la seule barre de recherche. */
 .ce-elembar {
   display: flex;
   align-items: center;
@@ -601,8 +953,10 @@ body:has(.gpx-profile:not(.hidden)) .ce-elemwrap {
    il est choisi, l'icône prend la couleur d'appel, et la coche liquide du
    goo (bumpFor) voyage au-dessus de lui */
 .ce-wm-btn {
+  position: relative; /* le badge « Organisateurs » de l'accueil s'y accroche */
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 7px;
   border: 0;
   background: none;
@@ -612,12 +966,85 @@ body:has(.gpx-profile:not(.hidden)) .ce-elemwrap {
   padding: 8px 13px;
   border-radius: 999px;
   opacity: 0.5;
-  transition: opacity 0.25s, background 0.2s;
+  /* padding/gap/min-width sont animés sur LA courbe unique : c'est ainsi que la
+     porte grandit vers l'accueil sans qu'aucun scale n'entre en jeu */
+  transition:
+    opacity 0.25s,
+    background 0.2s,
+    gap 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    padding 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    min-width 0.34s cubic-bezier(0.6, 0, 0.3, 1.3);
 }
 .ce-wm-btn svg {
+  flex: none;
   width: 16px;
   height: 16px;
-  transition: color 0.25s;
+  transition:
+    color 0.25s,
+    width 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    height 0.34s cubic-bezier(0.6, 0, 0.3, 1.3);
+}
+/* Les deux titres et le sous-titre d'une porte. Un seul jeu de propriétés
+   (max-width ET max-height) pour que le repli marche dans les deux directions
+   de flex — la porte est en ligne dans la barre, en colonne dans l'accueil.
+   min-width/min-height:0 sont indispensables : min-width:auto (défaut d'un
+   flex item) l'emporterait sur max-width:0 et rien ne se replierait. */
+.ce-wm-btn .wm-t,
+.ce-wm-btn .wm-h,
+.ce-wm-btn .wm-sub {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+  max-width: 260px;
+  max-height: 30px;
+  transition:
+    max-width 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    max-height 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    opacity 0.2s;
+}
+.ce-wm-btn .wm-sub {
+  font: 400 11.5px var(--ce-font);
+  color: var(--ce-muted);
+}
+/* dans la barre : seul le titre long parle */
+.ce-wm-btn .wm-h,
+.ce-wm-btn .wm-sub {
+  max-width: 0;
+  max-height: 0;
+  opacity: 0;
+}
+/* dans l'accueil : le titre court prend le dessus (quand il existe : « .alt »)
+   et le sous-titre s'ouvre dessous */
+body.ce-hub .ce-wm-btn .wm-t.alt {
+  max-width: 0;
+  max-height: 0;
+  opacity: 0;
+}
+body.ce-hub .ce-wm-btn .wm-h,
+body.ce-hub .ce-wm-btn .wm-sub {
+  max-width: 260px;
+  max-height: 30px;
+  opacity: 1;
+}
+.ce-wm-badge {
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ce-accent);
+  color: #fff;
+  font: 600 10px var(--ce-font);
+  border-radius: 999px;
+  padding: 2px 10px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.24s;
+}
+body.ce-hub .ce-wm-badge {
+  opacity: 1;
 }
 .ce-wm-btn:hover {
   background: var(--ce-hover);
@@ -1908,11 +2335,23 @@ body.ce-simple.ce-explore .ce-dock-left > .ce-panel:not(.ce-panel-explore) {
   display: none; /* le bouton de la barre EST le titre */
 }
 /* même capsule que le mode avancé : gap/padding identiques à .ce-elembar */
+/* min-width:0 est CANTONNÉ au cœur simple : il rend `min-width` interpolable
+   (auto ne l'est pas) pour l'ouverture des portes vers l'accueil, sans toucher
+   au comportement de la capsule avancée. */
+.ce-qb-core .ce-wm-btn {
+  min-width: 0;
+}
 .ce-qb-core {
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 5px;
+  /* la même courbe que les portes qu'elle contient : la boîte mesurée par
+     liquidize grandit vers l'accueil sans jamais décoller de son fond */
+  transition:
+    gap 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    padding 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
+    width 0.34s cubic-bezier(0.6, 0, 0.3, 1.3);
 }
 
 /* ---- panneau Parcours v2 : portes d'entrée + carte Organisateur ---------- */
@@ -2535,9 +2974,25 @@ body.ce-noui .ce-rec {
     padding: 7px;
   }
   .ce-bottombar .ce-search input,
-  .ce-bottombar .ce-pillbtn {
+  .ce-bottombar .ce-pillbtn,
+  .ce-bottombar > .ce-pillbtn {
     height: 44px;
     font-size: 14px;
+  }
+  /* la barre du bas et la capsule sont un SEUL objet : elles doivent grandir
+     ENSEMBLE, sinon le pont relie deux cartouches de hauteurs différentes et
+     les cibles tactiles de 44px disparaissent côté modes.
+     7 + 44 + 7 = 58 des deux côtés. elembar.js mesure les hauteurs au lieu de
+     les supposer : la géométrie du pont suit toute seule. */
+  .ce-elembar,
+  .ce-qb-core {
+    padding: 7px;
+  }
+  .ce-wm-btn,
+  .ce-elembar-btn,
+  .ce-lq-adv .ce-advbtn {
+    min-height: 44px;
+    box-sizing: border-box;
   }
   .ce-eye {
     width: 44px;
@@ -2558,7 +3013,13 @@ body.ce-noui .ce-rec {
   z-index: 40;
   display: flex;
   align-items: center;
-  gap: 7px;
+  /* la ligne courait sur toute la largeur et passait DERRIÈRE la barre du bas,
+     qui la coupait en deux. Elle s'arrête maintenant net avant le bloc central
+     (demi-largeur 204 + 22 de marge) et se replie sur une seconde ligne plutôt
+     que de disparaître — ce sont des attributions obligatoires. */
+  max-width: max(180px, calc(50vw - 226px));
+  flex-wrap: wrap;
+  gap: 2px 7px;
   font-family: var(--ce-font);
   font-size: 11.5px;
   letter-spacing: 0.01em;

@@ -5,6 +5,7 @@ import {
   ringBBox,
   landPolygonsInBBox,
   projectPatchPx,
+  patchLatLonBBox,
   lonLatToGridTile,
   gridTileRange,
 } from '../src/coast-mask.js'
@@ -61,6 +62,20 @@ test('projectPatchPx maps north to the top of the canvas', () => {
   const yNorth = projectPatchPx(dem, 6, 60, 1024)[1]
   const ySouth = projectPatchPx(dem, 6, 40, 1024)[1]
   assert.ok(ySouth > yNorth, 'lower latitude maps further down the canvas (larger py)')
+})
+
+// Le masque côtier compte les TUILES du patch (dem.size / tuile) : compter en
+// 256 sur un DEM Mapterhorn 512 doublait l'emprise déclarée et rasterisait la
+// côte à la mauvaise échelle.
+test('l emprise et la projection sont identiques en 256 px et en 512 px', () => {
+  const a = { zoom: 5, originTileX: 15, originTileY: 8, size: 768 }
+  const b = { zoom: 5, originTileX: 15, originTileY: 8, size: 1536, tilePx: 512 }
+  assert.deepEqual(patchLatLonBBox(b), patchLatLonBBox(a))
+  for (const [lon, lat] of [[6, 45], [-20, 60], [12, 41]]) {
+    const [ax, ay] = projectPatchPx(a, lon, lat, 1024)
+    const [bx, by] = projectPatchPx(b, lon, lat, 1024)
+    assert.ok(Math.abs(ax - bx) < 1e-9 && Math.abs(ay - by) < 1e-9, `${lon},${lat}`)
+  }
 })
 
 test('lonLatToGridTile: slippy z6 tile of a lon/lat, clamped in range', () => {

@@ -12,6 +12,7 @@
 // region-mask.js) so the working "isolate the zone" path is left untouched.
 
 import * as THREE from 'three'
+import { demTilePx } from './dem-source.js'
 
 export const COAST_ZOOM_MIN = 4
 // z15 = les tuiles DEM les plus fines de l'app : le masque couvre TOUTE la
@@ -86,7 +87,7 @@ export function patchLatLonBBox(dem) {
     const m = Math.PI * (1 - 2 * (ty / n))
     return (180 / Math.PI) * Math.atan(Math.sinh(m))
   }
-  const tilesAcross = dem.size / 256
+  const tilesAcross = dem.size / demTilePx(dem)
   const west = tileToLon(dem.originTileX)
   const east = tileToLon(dem.originTileX + tilesAcross)
   const north = tileToLat(dem.originTileY) // north edge = smaller ty
@@ -111,9 +112,10 @@ export function projectPatchPx(dem, lon, lat, size) {
   const la = clampLat(lat) * (Math.PI / 180)
   const tx = ((lon + 180) / 360) * n
   const ty = ((1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2) * n
+  const tpx = demTilePx(dem)
   return [
-    (((tx - dem.originTileX) * 256) / dem.size) * size,
-    (((ty - dem.originTileY) * 256) / dem.size) * size,
+    (((tx - dem.originTileX) * tpx) / dem.size) * size,
+    (((ty - dem.originTileY) * tpx) / dem.size) * size,
   ]
 }
 
