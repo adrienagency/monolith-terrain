@@ -11,7 +11,11 @@ const CATALOG_URL = '/templates/data.json'
 // vignette), pas des rampes de couleurs — distinction importante (Adrien) :
 // palette = couleurs seules, template = tout le look. Fichiers dans
 // public/templates/defaults/, chargés au premier passage sur l'onglet.
+// shibuStart EN TÊTE : c'est le look sur lequel l'application s'ouvre (voir
+// START_VIEW dans main.js), donc le premier de la bibliothèque — il faut pouvoir
+// y revenir d'un clic après avoir bricolé.
 const DEFAULT_TPL_URLS = [
+  'shibustart',
   'the-main-stuff', 'isolated', 'light', 'realistic',
   'bronze', 'white-valley', 'yellow-glass', 'carbon',
 ].map((n) => `/templates/defaults/${n}.json`)

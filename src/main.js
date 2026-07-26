@@ -88,6 +88,10 @@ import { buildStore } from './ui/store.js'
 import { buildStudio } from './ui/studio.js'
 import { buildAtelier } from './ui/atelier.js'
 import { buildHub } from './ui/hub.js'
+// Le template de la vue de départ, importé donc EMBARQUÉ dans le bundle : le
+// look doit être posé avant le premier rendu, sans requête ni clignotement.
+// Le même fichier reste servi en statique pour la bibliothèque (atelier.js).
+import SHIBU_START from '../public/templates/defaults/shibustart.json'
 import { buildCameraPanel } from './ui/camera-panel.js'
 import { buildRoutePanel } from './ui/route-panel.js'
 import { buildExplorePanel } from './ui/explore-panel.js'
@@ -503,6 +507,28 @@ if (IS_EMBED && !location.hash.startsWith('#s=') && !location.hash.startsWith('#
   params.demLon = EMBED_SHOWCASE.lon
   params.demZoom = EMBED_SHOWCASE.zoom
   params.demLocation = EMBED_SHOWCASE.name
+}
+
+// ---- VUE DE DÉPART « shibuStart » -----------------------------------------
+// Le Grand Brûlé, à La Réunion : le Piton de la Fournaise culmine à 2 626 m et
+// le fond de l'océan descend à −2 199 m DANS LE MÊME BLOC — près de 4 800 m
+// d'amplitude sur 27 km, un tiers de mer. Cadrage choisi au relevé DEM parmi
+// huit candidats de l'île : c'est le seul qui montre à la fois le relief fin
+// (Mapterhorn) et la bathymétrie (GEBCO), donc tout ce que le produit sait faire.
+//
+// ⚠️ APPLIQUÉ ICI, PAS DANS LES VALEURS D'USINE. `BASE_TEMPLATE_LOOK` est capturé
+// quelques lignes plus haut et sert de RÉFÉRENCE aux liens de partage, qui ne
+// transportent que la différence : toucher aux défauts changerait l'apparence de
+// tous les liens déjà émis. Même précaution que EMBED_SHOWCASE juste au-dessus.
+const START_VIEW = { lat: -21.26, lon: 55.74, zoom: 12, name: 'La Réunion' }
+if (!IS_EMBED && !IS_SHIBU && !IS_STORE_BOOT && !IS_STUDIO_BOOT) {
+  params.demLat = START_VIEW.lat
+  params.demLon = START_VIEW.lon
+  params.demZoom = START_VIEW.zoom
+  params.demLocation = START_VIEW.name
+  // le look complet du template (158 clés) — toutes sont des TEMPLATE_KEYS,
+  // exactement comme le chemin des liens de partage juste au-dessus
+  Object.assign(params, SHIBU_START.look)
 }
 
 // #r=<id> — a PUBLISHED race link (Netlify Blobs, see netlify/functions/race.mjs

@@ -1393,9 +1393,10 @@ body.ce-hub .ce-wm-badge {
 .ce-dock {
   position: fixed;
   /* proximité (Adrien, capture 4) : ce qui va ensemble se touche presque —
-     8px ENTRE panneaux du même dock, mais 28px sous le pill d'identité pour
-     que les deux familles ne se confondent pas */
-  top: 86px;
+     8px ENTRE panneaux du même dock, et les docks commencent 14 px SOUS le
+     stepper de zoom, qui finit à 106. À 86 ils démarraient AU-DESSUS de lui :
+     les trois familles du haut se chevauchaient au lieu de se succéder. */
+  top: 120px;
   bottom: 92px;
   z-index: 55;
   display: flex;
@@ -2733,9 +2734,14 @@ body.ce-noui .ce-isobtn {
   border-color: var(--ce-accent);
   color: var(--ce-accent);
 }
+/* ⚠️ LE TROU DU COIN GAUCHE. Il y avait trois boutons à un pas de 50 px
+   (42 de large + 8 d'écart) ; celui du milieu (« base ») a été retiré du code
+   mais les deux autres ont gardé leur position absolue — d'où 58 px d'écart à
+   gauche contre 8 à droite, ce qu'Adrien a vu tout de suite. Les deux boutons
+   restants reprennent le pas, et le coin gauche est de nouveau le miroir exact
+   du coin droit. Un futur troisième bouton ira à 114. */
 .ce-mapbtn-aerial { left: 14px; }
-.ce-mapbtn-base { left: 64px; }
-.ce-mapbtn-shuffle { left: 114px; }
+.ce-mapbtn-shuffle { left: 64px; }
 /* green tick, top-right of the aerial button, only while the layer is active */
 .ce-mapbtn-check {
   position: absolute;

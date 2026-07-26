@@ -776,11 +776,23 @@ body.dark .hud-row span {
    « pure float » : l'heure est une ambiance, pas un réglage à encadrer. */
 .ce-hourpill {
   position: fixed;
-  top: 12px;
+  /* ⚠️ 14 et non 12, et une hauteur imposée : les deux topbars sont à top 14
+     pour 46 px de haut, cette barre était à 12 pour 38 — six pixels d'écart
+     entre les CENTRES, ce qui se voit immédiatement sur une rangée de trois
+     (retour Adrien). Les trois partagent maintenant le même bord et la même
+     hauteur, donc la même ligne. */
+  top: 14px;
+  min-height: 46px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 55;
-  width: 270px; /* même largeur que les cartes des docks */
+  /* ⚠️ PLUS DE LARGEUR FIGÉE. À 270 px le contenu en réclamait 297 : le champ
+     de vitesse débordait de 18 px et se faisait couper en deux — le « 1 »
+     tronqué de la capture. La barre se dimensionne sur son contenu ; c'est
+     l'étiquette d'heure qui est stabilisée (voir .ce-hp-label) pour que la
+     largeur ne tressaute pas entre « 9h00 » et « 15h06 ». */
+  width: max-content;
+  max-width: calc(100vw - 28px);
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -858,7 +870,9 @@ body.ce-noui .ce-hourpill { display: none; }
 /* écrans moyens : la tirette se resserre, le champ de vitesse s'efface ;
    en dessous, elle s'efface (l'heure reste dans Éléments → Lumière) */
 @media (max-width: 900px) {
-  .ce-hourpill { width: 200px; }
+  /* la tirette se resserre au lieu de contraindre toute la barre : contraindre
+     la barre était précisément ce qui coupait le champ de vitesse */
+  .ce-hourpill input[type='range'] { width: 90px; }
   .ce-hp-speed { display: none; }
 }
 @media (max-width: 780px) {
@@ -874,7 +888,14 @@ body.ce-noui .ce-hourpill { display: none; }
 .zoom-stepper {
   position: fixed;
   left: 50%;
-  top: 54px; /* sous la tirette d'heure, au centre — la colonne du contexte */
+  /* RYTHME VERTICAL DU HAUT, en trois familles nettes (retour Adrien) :
+       14 → 60   les trois barres de chrome (gauche, soleil, droite), même
+                 bord haut et même hauteur, donc une seule ligne
+       68 → 106  le zoom, collé dessous à 8 px : il appartient au contexte,
+                 pas au chrome
+       120       les docks latéraux, écartés de 14 px : autre famille
+     À 54, le stepper mordait de 6 px dans la rangée du dessus. */
+  top: 68px;
   transform: translateX(-50%);
   display: flex;
   flex-direction: row; /* horizontal */
