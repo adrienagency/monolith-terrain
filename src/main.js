@@ -339,18 +339,18 @@ const params = {
   // clouds — thick and low, clinging to the summits
   // volumetric cloud deck — user-tuned base settings, active on every template
   cloudsEnabled: false,
-  cloudOpacity: 1.5, // density scale of the volumetric deck
-  cloudAltitude: 4.5, // deck base height in world units — 0 puts the clouds at ground level
-  cloudDrift: 3,
-  cloudScale: 5, // noise tiling across the deck (higher = smaller cloud cells)
-  cloudCoverage: 0.9, // holes: 0.8 = solid masses, 2.6 = lacework
-  cloudBillow: 0.8, // cauliflower budding: 0 = smooth mass, 3 = knobbly turrets
-  cloudBrightness: 2.9, // sunlight brightness inside the deck
-  cloudAltSpread: 0.85, // share of the column below cloudAltitude that gets populated: 1 = down to the ground
-  cloudDriftVar: 0.5, // per-cloud speed variation: 0 = uniform drift, 1 = very uneven
-  cloudContrast: 1, // density contrast: <1 fluffier/softer, >1 harder-edged
-  cloudSSS: 0.8, // cloud translucency: thin wisps light up as the sun shines through
-  cloudTexMix: 0.35, // texture blend: 0 = crisp v3 remap-chain, 1 = soft cottony legacy look
+  cloudOpacity: 2.25, // densité — réglages par défaut fournis par Adrien (captures)
+  cloudAltitude: 1, // PLAFOND de la colonne de nuages, en unités monde
+  cloudDrift: 1.6,
+  cloudScale: 5, // finesse du grain interne
+  cloudCoverage: 1.12, // trouées : 0.8 = masses pleines, 2.6 = dentelle
+  cloudBillow: 3, // bourgeonnement en chou-fleur, à fond
+  cloudBrightness: 2.8, // luminosité du soleil dans la masse
+  cloudAltSpread: 1, // part de la colonne peuplée : 1 = jusqu'au sol
+  cloudDriftVar: 1, // variation de vitesse d'un nuage à l'autre
+  cloudContrast: 2.5, // contraste de densité
+  cloudSSS: 2, // translucidité : les voiles s'allument à contre-jour
+  cloudTexMix: 0.4, // 0 = bourgeons nets, 1 = coton
   // VENT — pousse les nuages ET les fait buter contre les versants au vent
   // (orographie, clouds-sim.js). Réglable dans Éléments.
   windDir: 45, // degrés, 0 = vers l'est

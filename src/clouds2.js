@@ -42,10 +42,11 @@ const _m = new THREE.Matrix4()
 const _v = new THREE.Vector3()
 
 // ------------------------------------------------------------------ shader
-// Axe d'allongement d'un nuage, déduit de sa seule graine. La MÊME formule
-// tourne côté JS (_writeInstances, pour dimensionner la boîte englobante) —
-// deux lignes triviales valent mieux qu'un attribut de plus à synchroniser.
-const elongAngle = (seed) => ((seed * 0.017) % 1) * Math.PI
+// Axe d'allongement : LA DIRECTION DU VENT, pour tout le ciel (Adrien — « les
+// nuages s'étirent en longueur dans la direction du vent uniquement »). C'était
+// un angle tiré de la graine, donc des radeaux orientés n'importe comment.
+// La MÊME valeur sert côté JS (boîte englobante) et côté GLSL (uElongAngle).
+const elongAngle = (params) => ((params?.windDir ?? 45) * Math.PI) / 180
 
 const VERT = /* glsl */ `
   out vec3 vWorldPos;
@@ -55,6 +56,7 @@ const VERT = /* glsl */ `
   flat out vec3 vAxes;   // demi-axes RÉELS de l'empreinte : x = long, y = court, z = angle
 
   in vec4 iInfo;
+  uniform float uElongAngle; // direction du vent, en radians
 
   void main() {
     // les bornes du nuage se DÉRIVENT de la matrice d'instance (translation +
@@ -66,7 +68,7 @@ const VERT = /* glsl */ `
     // (jusqu'à 6:1, Adrien) : on retrouve ses demi-axes depuis la boîte
     // englobante — Rx² = b²(e²cos²θ + sin²θ), donc b = Rx / √(…).
     float e = max(1.0, iInfo.w);
-    float th = fract(iInfo.x * 0.017) * 3.14159265;
+    float th = uElongAngle; // le vent, partagé par tout le ciel
     float c = cos(th), s = sin(th);
     float b = vHalf.x / sqrt(e * e * c * c + s * s);
     vAxes = vec3(e * b, b, th);
@@ -428,7 +430,15 @@ const FRAG = /* glsl */ `
     // pas pour le même pas en unités monde, donc la même finesse à l'écran.
     float world = max(span.y - span.x, 1e-3);
     int steps = int(clamp(world / 0.42, 8.0, float(MARCH_STEPS)));
-    if (camDist < max(vHalf.x, vHalf.y) * 2.5) steps = min(steps, 12);
+    // GARDE-FOU DE REMPLISSAGE, version dure. Quand la couche de nuages
+    // descend à hauteur d'œil (Altitude basse), la caméra se retrouve DANS le
+    // ciel : chaque boîte couvre alors presque tout l'écran et 17 nuages
+    // suffisent à écrouler la fréquence d'images (2 fps mesurés). Plus la
+    // boîte est proche, moins on marche — et de si près, le détail fin ne se
+    // voit pas de toute façon.
+    float near = max(vHalf.x, vHalf.y);
+    if (camDist < near * 3.0) steps = min(steps, 10);
+    if (camDist < near * 1.5) steps = min(steps, 6);
 
     float dt = world / float(steps);
     float transmittance = 1.0;
@@ -440,7 +450,10 @@ const FRAG = /* glsl */ `
       if (wp.y < floorY(wp.xz)) break; // le rayon plonge dans le relief ou sous l'eau
       float d = densityAt(wp, F, detailOn, false);
       if (d <= 0.002) continue;
-      float depth = sunDepth(wp, toSun, bmin, bmax, F);
+      // la marche SOLEIL coûte trois fois la marche principale : de très près
+      // (on est dans le nuage), on lui substitue une épaisseur constante —
+      // invisible à l'œil, décisif pour la fréquence d'images
+      float depth = camDist < near * 1.5 ? d * 1.6 : sunDepth(wp, toSun, bmin, bmax, F);
       // BEER-POWDER (Schneider 2015) : les bords épais vus vers le soleil
       // s'assombrissent au lieu de blanchir
       float powder = 1.0 - exp(-depth * 2.0);
@@ -451,7 +464,7 @@ const FRAG = /* glsl */ `
       // LUMIÈRE DU CIEL atténuée par la matière AU-DESSUS : la base d'un nuage
       // épais s'assombrit d'elle-même, celle d'une galette mince reste claire.
       // Remplace l'ancien dégradé vertical arbitraire (retour Adrien).
-      float above = depthAbove(wp, bmax, F);
+      float above = camDist < near * 1.5 ? d * 0.8 : depthAbove(wp, bmax, F);
       // IRRADIANCE CIEL DÉGRADÉE (Takram mix(minSky, maxSky, h)) : l'ambiante
       // n'est pas une couleur unique — sombre et teintée horizon dessous, ton
       // du haut du ciel dessus. Les deux teintes viennent de NOS couleurs de
@@ -510,9 +523,11 @@ export class Clouds2 {
   }
 
   _targetCount(params = this._params) {
-    // le curseur « Densité » du panneau module aussi le PEUPLEMENT, pas
-    // seulement l'opacité : plus dense = plus de nuages, ce que l'œil attend
-    const density = params?.cloudOpacity != null ? 0.5 + params.cloudOpacity * 0.6 : 1
+    // Le curseur « Densité » module AUSSI le peuplement, mais doucement : la
+    // formule datait d'une tirette bornée à 1.5 et, montée à 2.5, elle collait
+    // le ciel au plafond d'entités en permanence — 48 boîtes raymarchées qui se
+    // recouvrent, soit 3 fps mesurés. La densité est d'abord une OPACITÉ.
+    const density = params?.cloudOpacity != null ? 0.65 + params.cloudOpacity * 0.18 : 1
     return Math.min(MAX_INSTANCES, cloudCountForTier(this._tier, density))
   }
 
@@ -587,6 +602,7 @@ export class Clouds2 {
         uNight: { value: 0 },
         uTime: { value: 0 },
         uWind: { value: new THREE.Vector2(0.42, 0.42) },
+        uElongAngle: { value: elongAngle(params) },
         uSkyHi: { value: new THREE.Color(1, 1, 1) },
         uSkyLo: { value: new THREE.Color(0.82, 0.85, 0.9) },
         uTexMix: { value: params?.cloudTexMix ?? 0.35 },
@@ -643,7 +659,7 @@ export class Clouds2 {
       // l'aire (a·b = r²), la boîte reste axée sur le monde et le shader
       // retrouve a et b depuis elle — voir vAxes dans VERT.
       const e = Math.max(1, c.elong ?? 1)
-      const th = elongAngle(c.seed)
+      const th = elongAngle(this._params)
       const ct = Math.cos(th), st = Math.sin(th)
       const se = Math.sqrt(e)
       const a = c.r * se, b = c.r / se
@@ -681,7 +697,7 @@ export class Clouds2 {
       const cx = ((c.x + half) / TERRAIN_SIZE) * N
       const cz = ((c.z + half) / TERRAIN_SIZE) * N
       const se = Math.sqrt(Math.max(1, c.elong ?? 1))
-      const th = elongAngle(c.seed)
+      const th = elongAngle(this._params)
       const ct = Math.cos(th), st = Math.sin(th)
       const ap = Math.max(((r * se) / TERRAIN_SIZE) * N, 1e-3)
       const bp = Math.max(((r / se) / TERRAIN_SIZE) * N, 1e-3)
@@ -749,6 +765,7 @@ export class Clouds2 {
     this.sky.opts.waterY = this.terrain?.mapUniforms?.uSeaY?.value ?? -Infinity
     // même vent que la sim, en vecteur : cisaillement de base + advection
     u.uWind.value.set(Math.cos(dir), Math.sin(dir)).multiplyScalar(Math.min(1.5, params?.windSpeed ?? 0.6))
+    u.uElongAngle.value = dir // l'étirement suit le vent, en direct
     if (params) {
       u.uDensity.value = params.cloudOpacity ?? 1
       u.uScale.value = params.cloudScale ?? 3

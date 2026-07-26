@@ -23,7 +23,7 @@
 // l'utilisateur les compte). Au-delà les grappes se recouvrent et
 // l'individualité — tout l'intérêt de cette refonte — se perd.
 export const CLOUD_COUNT_MIN = 2
-export const CLOUD_COUNT_MAX = 6
+export const CLOUD_COUNT_MAX = 5
 
 // Taille d'une grappe : un cœur + 2 à 6 compagnons (Adrien : « chaque nuage
 // naît avec au moins deux nuages, max six, dans le même corps »).
@@ -33,11 +33,14 @@ export const CLUSTER_MAX = 7
 // Plafond DUR sur les ENTITÉS : divisions, dislocations et grappes pleines
 // font monter le compte transitoirement. C'est aussi le budget de boîtes
 // raymarchées — il ne doit jamais dépasser MAX_INSTANCES côté rendu.
-export const CLOUD_HARD_MAX = 48
+// 4 grappes pleines (4 × 7 = 28) + de quoi disloquer sans étouffer le
+// repeuplement. C'est un BUDGET DE BOÎTES RAYMARCHÉES avant d'être un nombre :
+// au-delà, les recouvrements écroulent la fréquence d'images (48 → 3 fps).
+export const CLOUD_HARD_MAX = 34
 
 // Nombre de GRAPPES selon la puissance de la machine (palier de perf.js :
 // 0 = desktop, 1 = tablette, 2/3 = délestage, 3 = téléphone).
-const COUNT_BY_TIER = [5, 4, 3, 2]
+const COUNT_BY_TIER = [4, 3, 2, 2]
 export function cloudCountForTier(tier = 0, density = 1) {
   const base = COUNT_BY_TIER[Math.max(0, Math.min(3, tier | 0))]
   return Math.round(clamp(base * density, CLOUD_COUNT_MIN, CLOUD_COUNT_MAX))
@@ -124,26 +127,67 @@ const lerp = (rng, [a, b]) => a + rng() * (b - a)
 // ALLONGEMENT de la base (Adrien : « jusqu'à un ratio de 5 ou 6 pour 1 »).
 // Tiré au CUBE : la plupart des nuages restent ronds, les vrais radeaux sont
 // rares — c'est ce qui les rend remarquables quand ils passent.
-export const ELONG_MAX = 6
+// L'allongement est modéré et son AXE n'est plus tiré au sort : un nuage
+// s'étire dans la direction du VENT, comme dans le ciel (Adrien). L'angle vit
+// donc côté rendu (il vient de uWind) ; ici on ne décide que du rapport.
+export const ELONG_MAX = 3
 function drawElong(rng, kindId) {
-  const eMax = kindId === 'tour' ? 1.5 : kindId === 'bourgeon' ? 2.2 : ELONG_MAX
+  const eMax = kindId === 'tour' ? 1.3 : kindId === 'bourgeon' ? 1.8 : ELONG_MAX
   const t = rng()
   return 1 + (eMax - 1) * t * t * t
 }
+
+// UN GROS NUAGE N'EST JAMAIS UNE FEUILLE DE PAPIER (Adrien). Le genre décide
+// de l'aplatissement, mais plus la masse est large, plus elle doit avoir du
+// ventre — un voile de 6 unités de large et 0,5 d'épais ne ressemble à rien.
+function minAspectFor(r, sizeMin, sizeMax) {
+  const big = clamp((r - sizeMin) / Math.max(sizeMax - sizeMin, 1e-3), 0, 1)
+  return 0.12 + 0.3 * big * big
+}
+
+// ⚠️ le plancher doit s'appliquer PARTOUT où une hauteur est décidée : à la
+// naissance ET pour les compagnons d'une grappe, qui recalculent la leur de
+// leur côté. Un seul point de passage, sinon un gros compagnon repasse à plat.
+function thickEnough(r, h, opts) {
+  return Math.max(h, r * minAspectFor(r, opts.sizeMin, opts.sizeMax))
+}
+
+// Un nuage « volumineux » au sens de la règle de grappe ci-dessous.
+const VOLUMINOUS = 0.42
 
 // NIVEAUX DE VOL (Adrien : « plein de niveaux d'altitude différents, du sol à
 // l'altitude max — au sommet des montagnes pour certains, au fond des vallées
 // pour d'autres »). Un tirage uniforme donne une purée ; des paliers jittés
 // donnent des COUCHES lisibles, comme un vrai ciel.
-const LEVELS = 4
-function drawAltitude(rng, baseY, topY) {
+// ZONES D'ALTITUDE — Adrien : « j'ai l'impression que tous les nuages partent
+// de la même hauteur ; qu'est-ce que ça donnerait avec plusieurs zones de
+// départ aléatoires ? ». Il avait raison sur le diagnostic : les paliers
+// étaient FIXES (quatre étages régulièrement espacés), donc à plage étroite
+// tout le monde se retrouvait au même endroit. Chaque ciel tire maintenant ses
+// PROPRES zones — deux à quatre bandes, à des hauteurs et des épaisseurs
+// tirées au sort — exactement comme il tire déjà son humeur horizontale.
+export function drawAltZones(rng) {
+  const n = 2 + Math.floor(rng() * 3) // 2 à 4 zones
+  const zones = []
+  for (let i = 0; i < n; i++) {
+    // centre biaisé vers le haut (un tirage plat enterre la moitié du ciel
+    // dans les montagnes — vérifié à l'écran, diorama vide)
+    const c = Math.pow(rng(), 0.6)
+    zones.push({ c, w: 0.06 + rng() * 0.22, weight: 0.4 + rng() })
+  }
+  return zones
+}
+
+function drawAltitude(rng, baseY, topY, zones) {
   const band = Math.max(0, topY - baseY)
-  // tirage BIAISÉ VERS LE HAUT : un tirage plat enterrait la moitié du ciel
-  // dans les montagnes (vérifié à l'écran, diorama vide). ~40 % à l'étage du
-  // haut, ~8 % au ras du sol — le nuage de vallée reste un événement.
-  const u = Math.pow(rng(), 0.55)
-  const lv = Math.min(LEVELS - 1, Math.floor(u * LEVELS))
-  return baseY + band * clamp01((lv + 0.5) / LEVELS + (rng() - 0.5) * 0.24)
+  if (!zones?.length) return baseY + band * clamp01(Math.pow(rng(), 0.6))
+  // tirage pondéré : certaines bandes sont plus peuplées que d'autres
+  let total = 0
+  for (const z of zones) total += z.weight
+  let t = rng() * total
+  let zone = zones[zones.length - 1]
+  for (const z of zones) { t -= z.weight; if (t <= 0) { zone = z; break } }
+  return baseY + band * clamp01(zone.c + (rng() - 0.5) * zone.w)
 }
 
 // RÉPARTITION du ciel (Adrien : « parfois tous au même endroit, d'autres fois
@@ -186,12 +230,12 @@ function spawnCloud(rng, opts) {
   return {
     x: pos.x,
     z: pos.z,
-    y: drawAltitude(rng, baseY, topY),
+    y: drawAltitude(rng, baseY, topY, opts.altZones),
     r, // demi-largeur au sol (rayon MOYEN : l'ellipse garde la même aire)
     elong, // 1 = rond, 6 = radeau très allongé
     // un radeau très allongé doit rester PLAT, sinon c'est une crête : la
     // hauteur s'amortit quand la base s'étire
-    h: r * lerp(rng, k.ratio) * Math.pow(elong, -0.25),
+    h: thickEnough(r, r * lerp(rng, k.ratio) * Math.pow(elong, -0.25), opts),
     kind: k.id,
     wisp: lerp(rng, k.wisp), // 0 = bord net, 1 = déchiqueté et translucide
     seed: rng() * 1000,
@@ -233,7 +277,7 @@ function buildCluster(rng, opts, core) {
       y: core.y + (rng() - 0.5) * core.h * 1.3,
       r,
       elong,
-      h: r * (0.3 + rng() * 0.5) * Math.pow(elong, -0.25),
+      h: thickEnough(r, r * (0.3 + rng() * 0.5) * Math.pow(elong, -0.25), opts),
       // chacun évolue à son propre rythme, en partant d'un âge voisin
       age: clamp01(core.age + (rng() - 0.5) * 0.14),
       span: core.span * (0.8 + rng() * 0.4),
@@ -246,6 +290,15 @@ function buildCluster(rng, opts, core) {
       shattered: false,
       rTarget: 0,
     })
+  }
+  // RÈGLE DE GRAPPE (Adrien) : « si un nuage est plat, au moins un autre doit
+  // être plus volumineux ». Une grappe entièrement plate lit comme une flaque ;
+  // il lui faut au moins une masse qui monte pour donner l'échelle. On promeut
+  // le plus large, c'est celui qui portera le mieux du volume.
+  if (!out.some((c) => c.h / c.r >= VOLUMINOUS)) {
+    let big = out[0]
+    for (const c of out) if (c.r > big.r) big = c
+    big.h = big.r * (VOLUMINOUS + rng() * 0.25)
   }
   return out
 }
@@ -334,6 +387,8 @@ export function createSky({ count = 4, seed = 1, grouping = null, ...opts } = {}
   // l'humeur du ciel (dispersé / bancs / front) se tire une fois et gouverne
   // toutes les naissances locales — un ciel garde son humeur
   o.grouping = grouping || drawGrouping(rng, o.half)
+  // les ZONES d'altitude aussi : un ciel garde ses étages tout du long
+  o.altZones = o.altZones || drawAltZones(rng)
   const clouds = []
   for (let i = 0; i < count; i++) clouds.push(...spawnCluster(rng, o, { prefill: true }))
   // `target` = nombre de GRAPPES voulu. Divisions et dislocations font monter

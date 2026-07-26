@@ -125,14 +125,51 @@ test('les compagnons SUIVENT le cœur : vitesses proches mais toutes distinctes'
   assert.ok(checked > 5, 'trop peu de compagnons testés')
 })
 
-test('allongement : la plupart ronds, certains vrais radeaux, jamais hors bornes', () => {
+test('allongement : modéré, borné à 3:1, la plupart des nuages restent ronds', () => {
   const es = []
   for (let s = 1; s <= 20; s++) {
     for (const c of createSky({ count: 4, seed: s }).clouds) es.push(c.elong)
   }
   for (const e of es) assert.ok(e >= 1 && e <= ELONG_MAX + 1e-9, `allongement hors bornes : ${e}`)
-  assert.ok(es.filter((e) => e < 1.6).length > es.length * 0.5, 'la majorité doit rester ronde')
-  assert.ok(es.some((e) => e > 3.5), 'aucun radeau très allongé sur 20 ciels')
+  assert.equal(ELONG_MAX, 3, 'le plafond demandé est 3:1')
+  assert.ok(es.filter((e) => e < 1.5).length > es.length * 0.5, 'la majorité doit rester ronde')
+  assert.ok(es.some((e) => e > 2), 'aucun nuage nettement étiré sur 20 ciels')
+})
+
+test('un gros nuage n est jamais tout plat', () => {
+  for (let s = 1; s <= 25; s++) {
+    const sky = createSky({ count: 5, seed: s, sizeMin: 2, sizeMax: 7 })
+    for (const c of sky.clouds) {
+      const aspect = c.h / c.r
+      // plus la masse est large, plus le plancher d'épaisseur est haut
+      const big = Math.max(0, Math.min(1, (c.r - 2) / 5))
+      const floor = 0.12 + 0.3 * big * big
+      assert.ok(aspect >= floor - 1e-9, `nuage r=${c.r.toFixed(1)} trop plat : ${aspect.toFixed(3)} < ${floor.toFixed(3)}`)
+    }
+  }
+})
+
+test('dans une grappe, au moins un nuage a du volume', () => {
+  for (let s = 1; s <= 25; s++) {
+    const sky = createSky({ count: 4, seed: s })
+    const byGid = new Map()
+    for (const c of sky.clouds) {
+      if (!byGid.has(c.gid)) byGid.set(c.gid, [])
+      byGid.get(c.gid).push(c)
+    }
+    for (const [gid, membres] of byGid) {
+      assert.ok(membres.some((c) => c.h / c.r >= 0.42), `grappe ${gid} entièrement plate (ciel ${s})`)
+    }
+  }
+})
+
+test('zones d altitude : tirées au sort par ciel, pas des paliers figés', () => {
+  const zonesDe = (seed) => createSky({ count: 4, seed }).opts.altZones.map((z) => +z.c.toFixed(3))
+  const a = zonesDe(101), b = zonesDe(202)
+  assert.ok(a.length >= 2 && a.length <= 4, `2 à 4 zones attendues, vu ${a.length}`)
+  assert.notDeepEqual(a, b, 'deux ciels doivent avoir des étages différents')
+  assert.deepEqual(zonesDe(101), a, 'mais un même ciel garde les siens (déterminisme)')
+  for (const z of a) assert.ok(z >= 0 && z <= 1, `zone hors [0,1] : ${z}`)
 })
 
 test('altitudes : du sol au plafond, en étages, biaisées vers le haut', () => {
@@ -224,10 +261,12 @@ test('parallaxe : un nuage haut file plus vite qu un nuage bas', () => {
 })
 
 test('stepSky : le peuplement reste borné, rien ne fuit à l infini', () => {
-  const sky = createSky({ count: 5, seed: 11 })
+  // 4 grappes : c'est la cible du palier 0, et le budget d'entités (CLOUD_HARD_MAX)
+  // est calibré pour la tenir avec de la place pour les dislocations
+  const sky = createSky({ count: 4, seed: 11 })
   for (let i = 0; i < 400; i++) stepSky(sky, 0.5, { wind: { dir: 0.7, speed: 3 } })
   assert.ok(sky.clouds.length <= CLOUD_HARD_MAX, `peuplement ${sky.clouds.length}`)
-  assert.equal(groups(sky), 5, 'la cible de grappes est tenue')
+  assert.equal(groups(sky), 4, 'la cible de grappes est tenue')
   const reach = sky.opts.half + sky.opts.fadeOut + 2
   for (const c of sky.clouds) {
     assert.ok(Math.hypot(c.x, c.z) <= reach * 2, `nuage échappé : ${c.x},${c.z}`)
