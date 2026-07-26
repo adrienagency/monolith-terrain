@@ -76,6 +76,13 @@ export class Boats {
 
     this._dispose()
     const scale = boatScale(terrainSize, extentMeters)
+    // L'ORIGINE DU MODÈLE EST AU CENTRE DE SA BOÎTE, pas à la flottaison :
+    // la prendre pour le trait d'eau noyait le bateau à moitié avant même
+    // d'appliquer SINK. On ancre donc sur la QUILLE (bbox.min.y) et on
+    // enfonce de SINK de la hauteur — ce que dit la constante.
+    src.geometry.computeBoundingBox()
+    const bb = src.geometry.boundingBox
+    this._sink = bb.min.y * scale + SINK * (bb.max.y - bb.min.y) * scale
     const mat = this._makeMaterial(src.material)
     const mesh = new THREE.InstancedMesh(src.geometry, mat, MAX_BOATS)
     mesh.name = 'boats-instanced'
@@ -88,7 +95,6 @@ export class Boats {
     )
     this.mesh = mesh
     this._scale = scale
-    this._sink = scale * SINK
     this.group.add(mesh)
     this._writeMatrices()
   }
@@ -112,6 +118,14 @@ export class Boats {
           '#include <common>',
           `#include <common>
 ${GERSTNER_GLSL}
+// GERSTNER_GLSL ne déclare QUE le spectre (uWaveA/uWaveB) ; les quatre
+// réglages passés en arguments à oceanGerstner() sont à la charge de l'hôte.
+// Les oublier ici ne casse rien de visible côté JS : le shader ne compile
+// simplement pas, et l'InstancedMesh disparaît en silence.
+uniform float uWaveH;
+uniform float uChop;
+uniform float uSpeedMul;
+uniform float uLenScale;
 uniform float uBoatTime;
 uniform float uWaterY;
 uniform float uSink;
