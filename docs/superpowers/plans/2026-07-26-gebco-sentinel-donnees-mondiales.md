@@ -55,10 +55,40 @@ routes, qui attend lui aussi un arbitrage.
 **P1 — Fabrication (une fois, hors ligne).** Télécharger `gebco_2026_geotiff`
 (4 Go zippé, 7,2 Go décompressé), découper en tuiles terrarium-compatibles
 (même encodage `R*256 + G + B/256`, donc AUCUN changement dans le décodeur du
-terrain), zoom 0 à 7 — au-delà, la donnée ne dit plus rien de neuf à 463 m.
-Sortie estimée : quelques centaines de Mo en PNG, à ranger comme
-`public/data/gebco-z{0..7}` avec la même discipline de gitignore que
-`coast-z6` (315 Mo, déjà hors dépôt et présent dans les deploys).
+terrain), à ranger comme `public/data/gebco-z{n}` avec la même discipline de
+gitignore que `coast-z6` (315 Mo, déjà hors dépôt et présent dans les deploys).
+
+**Jusqu'à quel zoom ?** La bonne unité n'est pas un niveau mais **464 m par
+pixel** (15″ à l'équateur). Traduit en Web Mercator, tuiles de 256 px :
+
+| zoom | m/pixel | tuiles monde | ce que ça vaut |
+|---|---|---|---|
+| 6 | 2 446 | 4 096 | l'ETOPO1 des tuiles AWS (1 800 m) est **déjà plus fin** |
+| 7 | 1 223 | 16 384 | GEBCO commence à gagner, mais on jette 2,6× son détail |
+| **8** | **611** | **65 536** | **quasi natif — le bon compromis** |
+| 9 | 306 | 262 144 | natif atteint, plus rien à gagner au-delà |
+| 10+ | ≤ 153 | ≥ 1 M | sur-échantillonnage pur |
+
+Deux conséquences que je n'avais pas vues dans la première version de ce plan :
+
+1. **En dessous de z7, GEBCO n'apporte RIEN** : l'ETOPO1 déjà présent dans les
+   tuiles AWS est plus fin que le pixel. Inutile de fabriquer z0-z6.
+2. **z0-7 était une erreur** : à 1 223 m/pixel on gaspille les deux tiers de la
+   donnée. Il faut monter à **z8**, et z9 est le vrai plafond utile.
+
+Poids (seules les tuiles à l'eau comptent, ~65 % après déformation Mercator ;
+le fond abyssal est lisse donc les PNG compressent bien) :
+
+| couverture | tuiles à l'eau | poids estimé |
+|---|---|---|
+| jusqu'à z8 | ~57 000 | **0,4 à 0,8 Go** |
+| jusqu'à z9 | ~227 000 | 1,8 à 3,3 Go |
+
+**Recommandation : z7-z8, et z9 réservé aux plateaux continentaux.** Au-delà de
+z8 le relief intéressant est côtier ; les plaines abyssales n'ont rien de plus
+à montrer et représentent l'essentiel du volume. Au-dessus de la dernière
+tuile disponible, le loader interpole — ce qui est honnête, un fond marin à
+464 m est lisse par nature.
 
 **P2 — Fusion avec le terrarium.** Là où le terrarium donne un pixel sous 0 m,
 préférer GEBCO. Le fondu doit se faire dans le loader de tuiles, pas dans le
@@ -113,8 +143,10 @@ Trois issues, par ordre de rapport valeur/effort :
 1. **On lance GEBCO ?** Le feu est vert juridiquement et le gain est réel sur
    les côtes et les reliefs sous-marins. Le prix est quelques centaines de Mo
    de tuiles à fabriquer et à héberger.
-2. **Zoom 0-7 suffit-il**, ou veut-on descendre plus bas quitte à sur-échantillonner
-   une donnée qui n'a que 463 m à dire ?
+2. **z8 partout (0,4-0,8 Go) ou z9 sur les côtes en plus ?** z8 est le
+   compromis honnête ; z9 quadruple le poids pour un gain visible uniquement
+   près des plateaux continentaux. Ma recommandation : z8 d'abord, z9 côtier
+   plus tard si le fond paraît mou en zoom rapproché.
 3. **WorldCover : feature ou pas ?** Colorer le relief par occupation réelle du
    sol est une idée forte et libre de droits — mais c'est un autre projet que
    « remplacer la photo aérienne ».
