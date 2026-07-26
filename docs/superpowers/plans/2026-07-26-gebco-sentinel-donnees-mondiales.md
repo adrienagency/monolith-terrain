@@ -105,6 +105,100 @@ l'Aide. Relever le DOI exact du millésime 2026 avant mise en ligne.
 `build:watertiles`), P2 est une trentaine de lignes dans le loader, P3 est du
 texte. Le vrai coût est le POIDS des tuiles et le temps de fabrication.
 
+## 3 bis. Le littoral : GEBCO ne suffit pas, et il le dit lui-même
+
+À 464 m, une côte est illisible. Pire : près du rivage, une grande part de la
+grille GEBCO n'est pas mesurée mais **prédite par gravimétrie satellitaire**,
+ce qui produit en 3D éclairée une « peau d'orange » caractéristique.
+
+**GEBCO fournit la carte de ses propres mensonges** : la grille **TID** (Type
+IDentifier) donne, cellule par cellule, l'origine de la donnée — 10-17 =
+mesuré, 40-46 = prédit/interpolé, 70-72 = inconnu.
+<https://www.gebco.net/gebco-tid-grid> · GeoTIFF :
+`https://dap.ceda.ac.uk/bodc/gebco/global/gebco_2026/type_identifier_grid/geotiff/gebco_2026_tid_geotiff.zip`
+
+**À faire dans tous les cas** : bâtir un masque `TID ∈ [40,46]` et y ATTÉNUER le
+relief. C'est gratuit, ça supprime les artefacts, et ça dit honnêtement où le
+fond marin qu'on affiche est une prédiction.
+
+### Les sources côtières libres, par ordre d'intérêt
+
+| Source | Couverture | Résolution | Licence | Export vendable |
+|---|---|---|---|---|
+| **NOAA BlueTopo** | Côtes US (Golfe, Atlantique, Caraïbes US) | métrique | **CC0** | oui, sans réserve |
+| **NOAA CUDEM 1/9″** | US + territoires | **≈ 3 m** | domaine public US | oui, sans réserve |
+| **EMODnet DTM 2024** | Toutes mers européennes | **≈ 115 m** | **CC BY 4.0** | oui + attribution |
+| **Allen Coral Atlas** | Récifs tropicaux mondiaux < 15 m | **10 m** | CC BY 4.0 (bathy) | oui, **bathy SEULE** |
+| **AusBathyTopo** | Australie | 30-250 m | CC BY 4.0 | oui + attribution |
+| **GMRT v4.5** | 12,4 % de l'océan levé | 100 m | CC BY 4.0 | oui (hauturier, pas côtier) |
+
+Accès notables : BlueTopo est sur un **bucket S3 ouvert sans authentification**
+(`https://noaa-ocs-nationalbathymetry-pds.s3.amazonaws.com/`, registre
+<https://registry.opendata.aws/noaa-bathymetry/>) ; EMODnet expose un **WMTS
+déjà en Web Mercator** (`https://tiles.emodnet-bathymetry.eu/wmts/1.0.0/WMTSCapabilities.xml`)
+donc testable en une après-midi avant tout re-tuilage, et des GeoTIFF sur
+<https://downloads.emodnet-bathymetry.eu/>.
+
+**Pièges relevés, à ne pas manquer** :
+- **Allen Coral Atlas mélange deux licences** : la bathymétrie est CC BY 4.0,
+  mais l'imagerie Planet livrée dans le même paquet est CC BY-**NC**-SA. Un
+  pipeline qui aspire tout importe une clause non commerciale dans un produit
+  vendu. Ne prendre que la couche bathymétrie.
+- **EMODnet est référencé au LAT** (zéro hydrographique), pas au niveau moyen :
+  décalage à corriger avant fusion.
+- **UKHO** : licence « similaire à l'OGL » mais dont le texte n'est pas public
+  — donc NON-GO tant qu'on ne l'a pas lue. Sans importance : EMODnet couvre
+  déjà les eaux britanniques en CC BY 4.0.
+- **NIWA (Nouvelle-Zélande)** est en CC BY-**NC** : éliminatoire, comme EOX.
+- **SRTM15+** n'affiche **aucune licence** : à éviter, et sans gain (même
+  résolution que GEBCO).
+
+### Ce que ça pèse — et ce que le visiteur télécharge vraiment
+
+Deux coûts qu'il ne faut pas confondre.
+
+**Ce que le VISITEUR télécharge : rien de plus qu'aujourd'hui.** Les tuiles
+sont servies à la demande, exactement comme les tuiles terrarium actuelles :
+le navigateur ne prend que le patch de la vue courante. Un patch 3×3 de tuiles
+bathymétriques pèse **72 à 180 Ko**, et seulement quand on déplace la carte.
+C'est le poids d'une photo de téléphone. **Le site ne devient ni lourd ni
+lent** — il n'y a pas de « chargement de la bathymétrie mondiale ».
+
+**Ce que ça pèse à L'HÉBERGEMENT**, en revanche, se compte en centaines de Mo,
+et c'est là qu'il faut être discipliné. Poids estimés à 10 Ko par tuile PNG,
+avec correction de latitude (une tuile Mercator rétrécit vers les pôles) :
+
+| source | zoom retenu | tuiles | poids |
+|---|---|---|---|
+| GEBCO — océan mondial | z8 | 15 000 à 43 000 | **145 à 415 Mo** |
+| EMODnet — mers européennes | z10 | ~12 000 | ~115 Mo |
+| BlueTopo/CUDEM — côtes US | z13 | ~59 000 | **~580 Mo** |
+| Allen Coral — récifs | z13 | ~11 000 | ~110 Mo |
+| **total** | | | **~0,9 à 1,2 Go** |
+
+Pour comparaison, **on sert déjà 315 Mo de masque côtier** (`coast-z6`) dans
+les deploys Netlify sans que personne s'en plaigne — parce que, là encore,
+seules les tuiles regardées sont téléchargées.
+
+**Trois garde-fous à retenir** :
+1. **Ne jamais tuiler à la résolution native de BlueTopo/CUDEM.** À 5 m, z15,
+   la côte américaine seule ferait **6,4 Go**. z13 (~19 m) suffit largement
+   pour un diorama et coûte dix fois moins.
+2. **GMRT est à écarter du tuilage** : 45 M km² levés à 100 m, ce serait 1,1 Go
+   pour du relief hauturier qu'on ne regarde presque jamais de près. À servir
+   en direct par son WMS si on le veut, pas à embarquer.
+3. **Une source à la fois.** GEBCO seul (≈150-400 Mo) apporte déjà l'essentiel
+   du gain visuel. Les sources côtières sont un raffinement régional, à
+   ajouter si et quand on constate qu'une côte précise le mérite.
+
+### Ce qui restera un trou, quoi qu'on fasse
+
+Après GEBCO + US + Europe + récifs + Australie, restent en GEBCO interpolé :
+**toute l'Afrique, toute l'Amérique du Sud, l'Asie du Sud-Est et de l'Est hors
+récifs, l'Inde et le Moyen-Orient**. Ce ne sont pas des lacunes de licence mais
+**de levé** : personne ne les a. C'est structurel, et c'est exactement ce que
+la grille TID permettra d'afficher honnêtement.
+
 ## 4. Sentinel-2 : ce que je propose
 
 **Ne pas intégrer EOX.** Le NonCommercial est rédhibitoire pour un produit qui
