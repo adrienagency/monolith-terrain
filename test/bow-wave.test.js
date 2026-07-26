@@ -9,8 +9,11 @@ const run = (steps, target, dt = 1 / 60, state = WAKE_ZERO) => {
   return s
 }
 
+// 5 s d'immobilité : l'extinction est DÉLIBÉRÉMENT lente (le sillage doit
+// s'effacer, pas disparaître d'un coup), donc mesurer à 2 s ne prouvait que la
+// lenteur, pas l'extinction.
 test('a still pointer makes no wake', () => {
-  const s = run(120, { x: 3, z: 4 })
+  const s = run(300, { x: 3, z: 4 })
   assert.ok(s.amp < 0.02, `au repos la puissance doit tomber, obtenu ${s.amp}`)
   // la position, elle, a bien rattrapé la cible
   assert.ok(Math.hypot(s.x - 3, s.z - 4) < 0.01)

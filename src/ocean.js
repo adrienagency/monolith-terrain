@@ -219,9 +219,15 @@ void main() {
   // trois fois plus haut que la houle, et le critere de deferlement (qui borne
   // le total a 0,78 fois la profondeur) l'ecrasait en plateau — visible nulle
   // part, alors que le calcul, lui, tournait.
+  //
+  // FACTEUR VOLONTAIREMENT FORT (Adrien : « force fort sur son effet »). Un
+  // sillage a la meme hauteur que la houle se noie dedans : c'est le CONTRASTE
+  // avec la mer environnante qui le rend lisible, pas sa hauteur absolue. Le
+  // critere de deferlement le borne de toute facon en eau basse, donc pousser
+  // ici ne peut pas percer le fond pres du rivage.
   float wake = bowWake(xz, uTime);
   if (wake != 0.0) {
-    disp.y += wake * uWaveH * uLenScale * uViewCalm * 1.6;
+    disp.y += wake * uWaveH * uLenScale * uViewCalm * 7.0;
     float e = max(uBowLen, 1e-4) * 0.08;
     nAcc.x += (bowWake(xz + vec2(e, 0.0), uTime) - wake) / e * 0.3;
     nAcc.z += (bowWake(xz + vec2(0.0, e), uTime) - wake) / e * 0.3;

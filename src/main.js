@@ -3336,7 +3336,13 @@ function rebuildRegionSkirt() {
     maskCanvas: regionMaskCanvas,
     sample: terrain.sample,
     material: plinth.wallMat,
-    depth: params.plinthDepth ?? 6,
+    // AUCUNE épaisseur ajoutée : la zone isolée se pose à même le sol (Adrien).
+    // Le mur descendait de plinthDepth SOUS le point le plus bas de la zone,
+    // ce qui pendait une jupe de sept unités monde sous une île qui n'a rien
+    // à porter — le socle carré n'existe plus, justement. À zéro, le mur ne
+    // fait plus que fermer la coupe entre la surface et le point le plus bas :
+    // il disparaît là où la côte est déjà au niveau zéro.
+    depth: 0,
   })
   if (s) {
     regionSkirt = s

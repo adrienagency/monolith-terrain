@@ -15,8 +15,11 @@
 
 export const WAKE_DEFAULTS = {
   follow: 9, // rattrapage de la position, en 1/s
-  decay: 2.2, // extinction de la puissance au repos, en 1/s
-  speedFull: 14, // unités monde/s pour une étrave à pleine puissance
+  decay: 1.4, // extinction de la puissance au repos, en 1/s
+  // Un déplacement de souris ordinaire doit suffire à saturer l'étrave : à 14
+  // il fallait balayer l'écran pour obtenir quoi que ce soit, et l'effet
+  // passait inaperçu (Adrien : « on ne voit absolument pas le sillage »).
+  speedFull: 5, // unités monde/s pour une étrave à pleine puissance
   turn: 7, // lissage du cap, en 1/s
 }
 
@@ -75,6 +78,10 @@ export function stepWake(state, target, dt, opts = {}) {
 // Le sillage doit garder la même allure quelle que soit l'échelle du bloc :
 // une étrave de 3 unités monde sur une vue de ville n'est pas la même chose
 // que sur une vue continentale. On l'indexe donc sur l'emprise du terrain.
+// 0,18 du bloc — mesuré, pas devine. À 0,035 puis 0,07 le sillage occupait un
+// timbre-poste au milieu d'un bloc de 56 unités : il ne manquait pas de force
+// (son déplacement valait déjà quatre fois la houle), il manquait de TAILLE,
+// et un motif trop petit se lit comme du bruit de vagues.
 export function wakeLength(terrainSize, viewScale = 1) {
-  return Math.max(0.05, terrainSize * 0.035 * viewScale)
+  return Math.max(0.05, terrainSize * 0.18 * viewScale)
 }
