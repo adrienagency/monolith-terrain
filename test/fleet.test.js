@@ -12,11 +12,24 @@ test('nothing is placed below the 3D-element zoom floor', () => {
   assert.ok(slotsForZoom(MIN_ZOOM) > 0)
 })
 
+// La densité croissante reste la règle des éléments 3D rapportés EN GÉNÉRAL —
+// elle vit dans slotsForZoom, qui prend son nombre de places en paramètre.
+// Les BATEAUX, eux, n'en ont plus qu'une seule (voir le test suivant).
 test('the deeper the zoom, the more slots — density follows the scale', () => {
-  const suite = [11, 12, 13, 14, 15].map((z) => slotsForZoom(z))
+  const suite = [11, 12, 13, 14, 15].map((z) => slotsForZoom(z, 6))
   for (let i = 1; i < suite.length; i++) assert.ok(suite[i] >= suite[i - 1], `z${i + 11} recule`)
-  assert.ok(suite.at(-1) > suite[0], 'la flotte doit s’étoffer en zoomant')
-  assert.ok(suite.every((n) => n <= FLEET_SLOTS))
+  assert.ok(suite.at(-1) > suite[0], 'la densité doit s’étoffer en zoomant')
+  assert.ok(suite.every((n) => n <= 6))
+})
+
+// « Un seul bateau du même type par bloc » (Adrien). Deux vapeurs identiques
+// à l'écran font décor de jeu vidéo ; un seul se lit comme un événement.
+test('a block never carries more than one boat', () => {
+  assert.equal(FLEET_SLOTS, 1)
+  for (const z of [11, 12, 13, 14, 15]) {
+    assert.equal(slotsForZoom(z), 1, `z${z} doit tenir exactement un bateau`)
+    assert.ok(seedFleet({ zoom: z, half: HALF, seed: 3, force: true }).length <= 1)
+  }
 })
 
 // « Une chance sur dix de les voir » porte sur la présence d'AU MOINS UN
@@ -101,6 +114,64 @@ test('fleetAsleep says when the renderer can go quiet entirely', () => {
 
 // La coque garde une taille réelle plausible rapportée à l'emprise du bloc :
 // un bloc qui couvre peu de terrain montre donc un bateau plus grand à l'écran.
+// ------------------------------------------------------- évitement des terres
+// « Les bateaux ne rentrent jamais en collision avec la terre » (Adrien).
+// Semer sur l'eau ne suffit pas : le bateau AVANCE, et sans veille il finit
+// dans la falaise. Le test de navigabilité doit donc vivre aussi dans le pas.
+
+// mer à l'ouest, terre à l'est — une côte franche en x = 0
+const cote = (x) => x < 0
+
+test('a boat heading for the shore turns instead of running aground', () => {
+  // cap +x, droit sur la côte, démarré tout près d'elle
+  let b = { x: -1, z: 0, cap: Math.PI / 2, opacite: 1, dormant: false }
+  const capDepart = b.cap
+  for (let i = 0; i < 120; i++) b = stepBoat(b, 1 / 60, HALF, cote)
+  assert.ok(cote(b.x), `échoué à terre en x=${b.x}`)
+  assert.notEqual(b.cap, capDepart, 'il aurait dû infléchir sa route')
+})
+
+test('no step ever leaves the boat on land, whatever the coastline', () => {
+  // une côte tordue : golfes, caps, un îlot au milieu
+  const terre = (x, z) => Math.sin(x * 0.4) * 6 + Math.cos(z * 0.3) * 5 > 2 || Math.hypot(x - 6, z + 4) < 3
+  const navigable = (x, z) => !terre(x, z)
+  for (let s = 1; s <= 40; s++) {
+    const [b0] = seedFleet({ zoom: 15, half: HALF, seed: s, isSea: navigable, force: true })
+    if (!b0) continue
+    let b = b0
+    for (let i = 0; i < 400; i++) {
+      b = stepBoat(b, 1 / 30, HALF, navigable)
+      if (b.dormant) break
+      assert.ok(navigable(b.x, b.z), `graine ${s}, pas ${i} : à terre en ${b.x.toFixed(2)},${b.z.toFixed(2)}`)
+    }
+  }
+})
+
+test('open water leaves the heading alone — no needless zigzag', () => {
+  let b = { x: -20, z: 0, cap: 0, opacite: 1, dormant: false }
+  for (let i = 0; i < 60; i++) b = stepBoat(b, 1 / 60, HALF, () => true)
+  assert.equal(b.cap, 0, 'aucune raison de tourner en pleine mer')
+})
+
+// Un bateau cerné (mer qui se retire, terrain rechargé plus fin) ne doit pas
+// tourner sur lui-même indéfiniment : il s'endort, et le rendu se tait.
+test('a boat with nowhere to go falls asleep instead of spinning forever', () => {
+  let b = { x: 0, z: 0, cap: 0, opacite: 1, dormant: false }
+  for (let i = 0; i < 200 && !b.dormant; i++) b = stepBoat(b, 1 / 30, HALF, () => false)
+  assert.equal(b.dormant, true, 'aucune issue → sommeil')
+})
+
+test('seeding retries rather than losing the only boat to a bad draw', () => {
+  // une mer étroite : un tirage uniforme y tombe rarement du premier coup
+  const chenal = (x) => Math.abs(x) < HALF * 0.06
+  let vus = 0
+  for (let s = 1; s <= 60; s++) {
+    const f = seedFleet({ zoom: 15, half: HALF, seed: s, isSea: chenal, force: true })
+    if (f.length) { vus++; assert.ok(chenal(f[0].x)) }
+  }
+  assert.ok(vus > 40, `seulement ${vus}/60 blocs peuplés — les tirages ratés ne sont pas repris`)
+})
+
 test('hull size tracks the block footprint, exaggerated but anchored', () => {
   const large = boatScale(56, 100000) // bloc de 100 km
   const serre = boatScale(56, 10000) // bloc de 10 km

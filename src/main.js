@@ -3344,9 +3344,9 @@ function regionFrameScale(parts) {
 // construction de relief : le zoom, l'emprise et le trait d'eau changent, donc
 // la densité et l'échelle des bateaux aussi.
 //
-// force: true dans cette version MINIMALE — sans ça il faudrait recharger une
-// dizaine de fois pour en voir un, et on ne peut pas juger l'échelle ni le
-// mouvement comme ça. La règle du 1 sur 10 revient dès que le rendu est validé.
+// Le rendu ayant été validé, la règle du 1 SUR 10 est rétablie : `force` n'a
+// servi que le temps de juger l'échelle et le mouvement. Croiser un bateau doit
+// rester un événement, pas un décor.
 function syncBoats() {
   if (params.source !== 'real' || !dem || !realWater) { boats.boats = []; return }
   const seaMat = realWater.materials?.find((m) => m.uniforms?.uWaveA)
@@ -3358,12 +3358,12 @@ function syncBoats() {
     half: TERRAIN_SIZE / 2,
     // la graine suit le LIEU : revenir au même endroit rend la même flotte
     seed: Math.round((params.demLat + 90) * 1000) * 100003 + Math.round((params.demLon + 180) * 1000),
-    // navigable = sous le niveau de la mer. Sans ce test les bateaux
-    // traverseraient les montagnes.
+    // Navigable = sous le niveau de la mer. Ce test sert DEUX fois : au semis,
+    // et à chaque image pour la veille devant l'étrave (fleet.js) — sans le
+    // second, le bateau traverse la côte au lieu de la longer.
     isSea: (x, z) => Number.isFinite(seaY) && (terrain.sample?.(x, z) ?? 0) < seaY - 0.05,
     extentMeters: dem.extentMeters,
     terrainSize: TERRAIN_SIZE,
-    force: true,
   })
 }
 

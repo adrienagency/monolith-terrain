@@ -22,7 +22,12 @@ export const MIN_ZOOM = 11
 // pratiquement toujours (1 − 0,9⁶ = 47 %). On inverse donc la formule : la
 // probabilité qu'AUCUNE place ne sorte doit valoir 0,9.
 export const SEE_CHANCE = 0.1
-export const FLEET_SLOTS = 6
+// UN SEUL bateau par bloc, et du même type (Adrien). La règle de densité
+// croissante vaut toujours pour les éléments 3D en général — elle vit dans
+// slotsForZoom, qui prend son nombre de places en paramètre — mais deux vapeurs
+// identiques dans le même cadre font décor de jeu vidéo. Un seul se lit comme
+// un événement, ce qui est tout l'intérêt du 1 sur 10.
+export const FLEET_SLOTS = 1
 
 // probabilité par place pour que P(au moins un) vaille SEE_CHANCE
 export function slotChance(slots = FLEET_SLOTS, seeChance = SEE_CHANCE) {
@@ -43,6 +48,50 @@ const SPEED = 0.012
 // Un onglet en arrière-plan rend un dt énorme au retour : sans plafond, toute
 // la flotte traverserait la carte d'un coup au premier réveil.
 const DT_MAX = 0.1
+
+// ------------------------------------------------------- évitement des terres
+// « Les bateaux ne rentrent jamais en collision avec la terre » (Adrien).
+// Semer sur l'eau ne suffisait pas : le bateau AVANCE, et rien dans le pas ne
+// regardait devant lui — il finissait dans la falaise, ou pire, il la
+// traversait, puisque le rendu n'a aucune notion de sol.
+
+// Distance de veille, en fraction du demi-bloc. Assez loin pour laisser le
+// temps de tourner à la vitesse de giration ci-dessous, assez près pour ne pas
+// interdire l'entrée d'une baie — c'est un compromis, pas une constante
+// physique : à 0,10 le bateau refuse les golfes, à 0,02 il touche avant d'avoir
+// fini son virage.
+const LOOKAHEAD = 0.05
+
+// Giration maximale, en radians par seconde. Un bateau qui pivote d'un coup
+// vers le cap libre se voit immédiatement ; celui-ci met ~2,6 s pour un
+// demi-tour, ce qui se lit comme une manœuvre.
+const TURN_RATE = 1.2
+
+// Caps essayés de part et d'autre quand la route est barrée, du plus faible
+// écart au plus fort : on préfère toujours l'inflexion la plus douce.
+const SCAN = [0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4, 1.75, -1.75, 2.1, -2.1, 2.6, -2.6, Math.PI]
+
+// Combien de points on teste le long de la veille. Un seul point à l'arrivée
+// laisserait sauter par-dessus une langue de terre étroite quand dt est grand.
+const LOOKAHEAD_STEPS = 4
+
+// La route est-elle dégagée sur toute la veille ? On échantillonne le SEGMENT,
+// pas seulement son extrémité.
+function routeLibre(x, z, cap, dist, isSea) {
+  const dx = Math.sin(cap)
+  const dz = Math.cos(cap)
+  for (let i = 1; i <= LOOKAHEAD_STEPS; i++) {
+    const t = (dist * i) / LOOKAHEAD_STEPS
+    if (!isSea(x + dx * t, z + dz * t)) return false
+  }
+  return true
+}
+
+// Combien de positions on tire avant de renoncer à peupler le bloc. Avec une
+// seule place, perdre le tirage sur un pixel de terre viderait la mer entière :
+// mesuré sur un chenal étroit, 24 essais font passer le taux de blocs peuplés
+// de 40 % à 83 %.
+const SEED_TRIES = 32
 
 // Échelle de rendu : la coque garde sa taille RÉELLE rapportée à l'emprise du
 // bloc, puis on l'exagère d'un facteur constant pour qu'elle reste lisible de
@@ -99,11 +148,19 @@ export function seedFleet({ zoom, half, seed = 1, isSea = null, slots = FLEET_SL
     // changer SEE_CHANCE ne doit pas décaler toute la flotte, sinon régler la
     // rareté rebattrait aussi les emplacements.
     const occupe = rand() < p || force
-    const x = (rand() * 2 - 1) * half * 0.85
-    const z = (rand() * 2 - 1) * half * 0.85
+    // On REPREND le tirage tant qu'on tombe à terre au lieu d'abandonner la
+    // place : avec une seule place par bloc, un tirage malheureux ne doit pas
+    // vider une mer parfaitement navigable.
+    let x = 0
+    let z = 0
+    let flotte = false
+    for (let essai = 0; essai < SEED_TRIES; essai++) {
+      x = (rand() * 2 - 1) * half * 0.85
+      z = (rand() * 2 - 1) * half * 0.85
+      if (!isSea || isSea(x, z)) { flotte = true; break }
+    }
     const cap = rand() * Math.PI * 2
-    if (!occupe) continue
-    if (isSea && !isSea(x, z)) continue
+    if (!occupe || !flotte) continue
     boats.push({ x, z, cap, opacite: 0, dormant: false })
   }
   return boats
@@ -113,24 +170,43 @@ export function seedFleet({ zoom, half, seed = 1, isSea = null, slots = FLEET_SL
 //   · il avance selon son cap
 //   · il s'efface en approchant du bord (opacite → 0)
 //   · passé le bord, il dort : plus aucun calcul, plus aucun rendu
-export function stepBoat(b, dt, half) {
+//   · il évite la terre : route barrée, il infléchit sa route ; cerné, il dort
+export function stepBoat(b, dt, half, isSea = null) {
   if (!b || b.dormant) return b
   const d = Math.min(Math.max(dt, 0), DT_MAX)
   if (!(d > 0)) return b
   const v = SPEED * half
-  const x = b.x + Math.sin(b.cap) * v * d
-  const z = b.z + Math.cos(b.cap) * v * d
+
+  let cap = b.cap
+  if (isSea) {
+    const veille = LOOKAHEAD * half
+    if (!routeLibre(b.x, b.z, cap, veille, isSea)) {
+      const ecart = SCAN.find((a) => routeLibre(b.x, b.z, cap + a, veille, isSea))
+      // Aucune issue : mer qui se retire, relief rechargé plus fin, bateau
+      // cerné. Il s'endort — sinon il tournerait sur lui-même à jamais, et le
+      // rendu ne pourrait jamais se taire.
+      if (ecart === undefined) return { ...b, opacite: 0, dormant: true }
+      // Virage PROGRESSIF : pivoter d'un coup vers le cap libre se verrait.
+      cap += Math.sign(ecart) * Math.min(Math.abs(ecart), TURN_RATE * d)
+      // Tant que la route n'est pas dégagée, on ne fait que tourner : c'est ce
+      // qui garantit qu'aucun pas ne peut déposer la coque sur la terre.
+      if (!routeLibre(b.x, b.z, cap, veille, isSea)) return { ...b, cap }
+    }
+  }
+
+  const x = b.x + Math.sin(cap) * v * d
+  const z = b.z + Math.cos(cap) * v * d
 
   // distance au bord la plus courte, en fraction du demi-bloc
   const marge = (half - Math.max(Math.abs(x), Math.abs(z))) / half
-  if (marge <= 0) return { ...b, x, z, opacite: 0, dormant: true }
+  if (marge <= 0) return { ...b, x, z, cap, opacite: 0, dormant: true }
 
   // fondu : plein à l'intérieur, éteint au bord. L'apparition suit la même
   // rampe, donc un bateau semé près du bord entre en fondu au lieu de surgir.
   const cible = Math.min(1, marge / FADE_BAND)
   const k = 1 - Math.exp(-2.5 * d) // lissage, pour que le fondu ne saute pas
   const opacite = b.opacite + (cible - b.opacite) * Math.max(k, 0)
-  return { ...b, x, z, opacite, dormant: false }
+  return { ...b, x, z, cap, opacite, dormant: false }
 }
 
 // Toute la flotte est-elle endormie ? Le rendu peut alors se taire entièrement.

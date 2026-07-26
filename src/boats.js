@@ -19,9 +19,12 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GERSTNER_GLSL } from 'ocean-waves'
 import MODEL_URL from './assets/steamer.glb?url'
-import { seedFleet, stepBoat, fleetAsleep, boatScale, MIN_ZOOM } from './fleet.js'
+import { seedFleet, stepBoat, fleetAsleep, boatScale, MIN_ZOOM, FLEET_SLOTS } from './fleet.js'
 
-const MAX_BOATS = 8
+// Le nombre d'instances SUIT le modèle : un seul bateau par bloc (Adrien).
+// Le dimensionner à part invitait la dérive — huit places réservées ici pour
+// une flotte qui n'en remplit qu'une.
+const MAX_BOATS = FLEET_SLOTS
 
 // Part de la hauteur de coque qui passe SOUS la flottaison. Un bateau ne se
 // pose pas sur l'eau, il s'y enfonce (Adrien) — sans ça il a l'air d'un jouet
@@ -69,6 +72,9 @@ export class Boats {
   }
 
   async build({ zoom, half, seed, isSea, extentMeters, terrainSize, force = false }) {
+    // GARDÉ pour le pas : le bateau doit consulter la terre à chaque image, pas
+    // seulement au moment d'être semé. Sans ça il traverse la côte.
+    this._isSea = isSea || null
     this.boats = seedFleet({ zoom, half, seed, isSea, slots: MAX_BOATS, force })
     if (!this.boats.length) { this._dispose(); return }
     const src = await this.load()
@@ -194,7 +200,7 @@ varying float vFade;`
   update(dt, half) {
     if (!this.mesh || !this.boats.length) return
     if (fleetAsleep(this.boats)) { this.group.visible = false; return }
-    for (let i = 0; i < this.boats.length; i++) this.boats[i] = stepBoat(this.boats[i], dt, half)
+    for (let i = 0; i < this.boats.length; i++) this.boats[i] = stepBoat(this.boats[i], dt, half, this._isSea)
     this._writeMatrices()
   }
 
