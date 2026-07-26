@@ -121,6 +121,11 @@ ${SHORE_SURF_GLSL}
 uniform sampler2D uField;   // R ground Y, G shore distance (slab-wide)
 uniform sampler2D uCoastMask; // OSM land/sea (R : 1 land, 0 sea) — the REAL shore
 uniform float uCoastMaskOn;   // 1 when the coast mask is loaded for this patch
+// sillage d'etrave : mer ET lacs, donc HORS du bloc reserve aux lacs
+uniform vec2 uBowPos;  // curseur, en XZ monde
+uniform vec2 uBowDir;  // cap, normalise
+uniform float uBowAmp; // 0 = pas d'etrave (interrupteur ET extinction au repos)
+uniform float uBowLen; // echelle du sillage, en unites monde
 #ifdef IS_LAKE
 uniform sampler2D uMask;    // A coverage, G shore distance (lake bbox)
 uniform vec2 uMaskMin;
@@ -131,6 +136,39 @@ varying vec3 vNorm;
 varying float vCrest;
 varying float vFade;
 #include <fog_pars_vertex>
+
+// ---- SILLAGE D'ETRAVE (curseur) ------------------------------------------
+// Sillage de Kelvin approche : un bourrelet a l'etrave, deux bras a 19,47
+// degres vers l'arriere, des rides transversales dans le V.
+//
+// Il s'AJOUTE au deplacement vertical de la houle AVANT le critere de
+// deferlement. Deux consequences voulues : il interfere reellement avec les
+// vagues (les cretes s'additionnent, les creux s'annulent) au lieu d'etre
+// dessine par-dessus, et il ne peut pas percer le fond en eau basse puisqu'il
+// passe par la meme borne de profondeur.
+//
+// (Aucun accent grave dans ces commentaires : ils vivent dans un template
+// literal JS, un backtick y terminerait le module.)
+float bowWake(vec2 xz, float t) {
+  if (uBowAmp <= 0.001) return 0.0; // interrupteur : cout nul quand c'est eteint
+  float L = max(uBowLen, 1e-4);
+  vec2 q = (xz - uBowPos) / L;
+  float along = dot(q, uBowDir);                       // > 0 devant l'etrave
+  float across = dot(q, vec2(-uBowDir.y, uBowDir.x));  // lateral signe
+
+  // bourrelet d'etrave : une bosse serree autour du point, qui respire
+  float bow = exp(-(along * along + across * across) * 2.2)
+            * (0.55 + 0.45 * cos(along * 3.0 - t * 3.0));
+
+  // bras du V, uniquement en arriere
+  float s = max(-along, 0.0);
+  float d = abs(abs(across) - s * 0.3536);             // tan(19,47 degres)
+  float w = 0.22 + s * 0.10;                           // les bras s'epaississent en s'eloignant
+  float arms = exp(-d * d / (w * w)) * exp(-s * 0.45)  // et s'eteignent
+             * (0.55 + 0.45 * cos(s * 7.0 - t * 5.0)); // rides transversales
+
+  return uBowAmp * (bow + arms * 0.8);
+}
 
 void main() {
   vec3 p = position; // geometry is authored in world XZ, y = 0
@@ -172,6 +210,22 @@ void main() {
   nAcc.x += surf.y * uSurfCalm;
   nAcc.z += surf.z * uSurfCalm;
   crest = max(crest, crestS * uSurfCalm);
+  // sillage du curseur — AVANT le critere de deferlement, pour interferer avec
+  // la houle plutot que d'etre pose dessus. La normale suit par difference
+  // finie, sans quoi le sillage serait une bosse plate qui n'accroche pas la
+  // lumiere. Les trois appels sont derriere l'interrupteur de bowWake.
+  // uWaveH est en METRES DE SPECTRE : il faut le passer en unites monde via
+  // uLenScale, comme le fait oceanGerstner. Sans ce facteur le sillage sortait
+  // trois fois plus haut que la houle, et le critere de deferlement (qui borne
+  // le total a 0,78 fois la profondeur) l'ecrasait en plateau — visible nulle
+  // part, alors que le calcul, lui, tournait.
+  float wake = bowWake(xz, uTime);
+  if (wake != 0.0) {
+    disp.y += wake * uWaveH * uLenScale * uViewCalm * 1.6;
+    float e = max(uBowLen, 1e-4) * 0.08;
+    nAcc.x += (bowWake(xz + vec2(e, 0.0), uTime) - wake) / e * 0.3;
+    nAcc.z += (bowWake(xz + vec2(0.0, e), uTime) - wake) / e * 0.3;
+  }
 #ifndef IS_LAKE
   // ---- CRITÈRE DE DÉFERLEMENT : une vague ne dépasse pas sa profondeur ------
   // Sans relèvement du niveau moyen, plus rien n'empêchait un creux de traverser
@@ -688,6 +742,13 @@ function waterMaterial({ isLake, params, fieldTex }) {
         uSunFx: { value: params.waterSunFx ?? 1 },
         uHalf: { value: TERRAIN_SIZE / 2 },
         uCornerR: { value: 0.5 },
+        // sillage d'étrave suivant le curseur (bow-wave.js → setBow). uBowAmp
+        // à 0 = éteint, et le shader sort immédiatement : coût nul quand
+        // l'option est décochée dans Mer.
+        uBowPos: { value: new THREE.Vector2() },
+        uBowDir: { value: new THREE.Vector2(1, 0) },
+        uBowAmp: { value: 0 },
+        uBowLen: { value: 2 },
       },
     ]),
   })
@@ -1176,6 +1237,28 @@ export class RealWater {
     for (const mat of this.materials) {
       if (mat.uniforms.uViewCalm) mat.uniforms.uViewCalm.value = 0.08 + 0.92 * calm
       if (mat.uniforms.uSurfCalm) mat.uniforms.uSurfCalm.value = surfCalm
+    }
+  }
+
+  // Le Y de la surface de mer courante, ou null tant qu'aucune mer n'est
+  // construite — c'est le plan que le pointeur doit percer pour savoir OÙ
+  // poser le sillage.
+  get seaY() {
+    return this.meshes.length ? this._seaBase : null
+  }
+
+  // Pousse l'état du sillage (bow-wave.js) sur la surface. `amp` à 0 éteint
+  // l'effet côté GPU sans rien reconstruire, donc le décocher dans Mer ne
+  // coûte rien de plus qu'un uniforme à zéro.
+  setBow(w, len) {
+    for (const mat of this.materials) {
+      const u = mat.uniforms
+      if (!u.uBowAmp) continue // la jupe (SKIRT_VERT) n'a pas de sillage
+      u.uBowAmp.value = w?.amp ?? 0
+      if (!w) continue
+      u.uBowPos.value.set(w.x, w.z)
+      u.uBowDir.value.set(w.dx, w.dz)
+      u.uBowLen.value = len
     }
   }
 

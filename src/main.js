@@ -62,6 +62,7 @@ import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
 import { TEMPLATE_KEYS, captureLook, captureView, serializeTemplate, parseTemplate, stripFromLook, loadUserTemplates, saveUserTemplates } from './templates-user.js'
 import { loadUserPalettes, saveUserPalettes, paletteFromParams } from './user-palettes.js'
 import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT } from './share-link.js'
+import { stepWake, wakeLength, WAKE_ZERO } from './bow-wave.js'
 import { DroneCam } from './drone-cam.js'
 import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, deriveMetalTints, deriveAoColor, deriveHazeColor, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
@@ -407,6 +408,9 @@ const params = {
   seaEdge: true, // jupe de verre au bord du socle (comble le vide surface/fond)
   seaEdgeFrost: 0.5, // 0 = verre clair, 1 = verre depoli
   seaRefract: 0.6, // intensite de la refraction (deformation du fond vu a travers)
+  // le curseur creuse l'eau comme une etrave (bow-wave.js). Cosmetique et
+  // gratuit : le shader sort immediatement quand l'amplitude est nulle.
+  seaBow: true,
 
   // SP1 map overlay layers (roads/water/places), draped on the relief
   roadsEnabled: false,
@@ -1439,6 +1443,28 @@ window.addEventListener('pointermove', (e) => {
   mouse.set(nx, ny)
   if (modes && modes.mode === 'surface') gpxLayer.pointerMove(mouse, e.clientX, e.clientY)
 })
+
+// ---- sillage d'étrave (bow-wave.js) ---------------------------------------
+// Où le curseur touche l'eau. On perce le PLAN de la mer, pas le relief : sur
+// un fond creusé à −4 000 m, un raycast sur le terrain rendrait un point très
+// loin du curseur apparent, et le sillage partirait à l'autre bout du bloc.
+let wake = WAKE_ZERO
+const _bowPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+const _bowHit = new THREE.Vector3()
+function bowTarget() {
+  if (modes.mode !== 'surface' || !realWater) return null
+  const y = realWater.seaY
+  if (!Number.isFinite(y)) return null
+  _bowPlane.constant = -y
+  focusRay.setFromCamera(mouse, camera)
+  if (!focusRay.ray.intersectPlane(_bowPlane, _bowHit)) return null
+  const half = TERRAIN_SIZE / 2
+  if (Math.abs(_bowHit.x) > half || Math.abs(_bowHit.z) > half) return null
+  // au-dessus de la TERRE il n'y a rien à creuser : le sillage s'y éteint
+  const sol = terrain.sample?.(_bowHit.x, _bowHit.z)
+  if (sol != null && sol > y) return null
+  return { x: _bowHit.x, z: _bowHit.z }
+}
 
 // click-to-dive: a plain click on the map (NOT an orbit drag) plunges one level
 // onto the point under the cursor — march the height field for the hit, convert
@@ -4665,6 +4691,14 @@ function tick() {
   // does not exist.
   if (dof) dof.cocMaterial.worldFocusDistance = params.focusDistance
 
+  // SILLAGE D'ÉTRAVE — le curseur creuse l'eau comme la proue d'un bateau.
+  // La cible est l'intersection du rayon caméra→curseur avec le PLAN de la
+  // mer, pas avec le relief : au-dessus d'un fond très creusé, un raycast sur
+  // le terrain donnerait un point à des kilomètres du curseur apparent.
+  if (realWater) {
+    wake = stepWake(wake, params.seaBow ? bowTarget() : null, dt)
+    realWater.setBow(params.seaBow ? wake : null, wakeLength(TERRAIN_SIZE))
+  }
   realWater?.update(dt, sun) // water simulation: waves, caustics, sun glint
   // temps des caustiques de fond (terrain + blocs voisins du damier)
   terrain.mapUniforms.uCausT.value += dt
