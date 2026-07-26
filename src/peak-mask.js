@@ -571,9 +571,13 @@ export async function findPeak(
   const n = String(name || '').trim()
   if (!n) return null
   const askOverpass = async (opts) => {
+    // PAS d'en-tete Content-Type : avec « application/x-www-form-urlencoded »
+    // explicite, Overpass repond un document d'ERREUR XML, `.json()` leve, et
+    // findPeak rendait null sur une requete pourtant juste — « Mont Blanc »
+    // retombait alors sur la Haute-Savoie. Sans l'en-tete, la meme requete rend
+    // le bon sommet en 5 s. C'est la convention deja eprouvee par transports.js.
     const r = await fetchImpl(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: `data=${encodeURIComponent(overpassPeakQuery(n, { limit, ...opts }))}`,
     })
     if (!r.ok) throw new Error(`overpass → HTTP ${r.status}`)

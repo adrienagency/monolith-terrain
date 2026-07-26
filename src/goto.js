@@ -202,14 +202,20 @@ export function createGoto({ modes, announce, getFineZoom, onTarget = null }) {
         // règle de plein fouet — on atterrissait serré au milieu du pays.
         // `at` reste l'arbitre du repli quand aucune géométrie n'est fournie.
         const parts = mainParts(hit.geojson, hit.lat, hit.lon)
+
+        // La géométrie est déjà là quand elle existe — on ne la jette pas.
+        // Quand elle n'existe pas (un sommet est un POINT dans OSM, pas une
+        // surface), on ne retient que le NOM : identifier la montagne demande
+        // une requête Overpass de plusieurs dizaines de secondes, et la faire
+        // ici la mettrait sur le chemin de CHAQUE recherche. Elle attendra
+        // qu'on demande à isoler — mesuré, c'est 42 s de moins sur la barre.
+        onTarget?.(
+          parts?.length ? { name: hit.label.split(',')[0].trim(), parts } : { name: query.trim() }
+        )
+
         const framed =
           (parts && frameRegion(parts, { min: 4, max: fine })) ||
           frameFromBBox(hit.bbox, { min: 4, max: fine, at: hit })
-        // La géométrie est déjà là — on ne la jette pas. C'est elle que le mode
-        // isolé découpera, au lieu de redemander « quelle frontière passe par
-        // ce point, au niveau que suggère le zoom ? » et de rendre le Var pour
-        // une demande de Toulon.
-        onTarget?.(parts?.length ? { name: hit.label.split(',')[0].trim(), parts } : { name: query.trim() })
         const lat = framed?.lat ?? hit.lat
         const lon = framed?.lon ?? hit.lon
         const zoom = framed?.zoom ?? landingZoom(getFineZoom)

@@ -55,6 +55,7 @@ import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
 import { fetchRegionMask, regionMaskFromParts, frameRegion } from './region-mask.js'
+import { peakMask, findPeak } from './peak-mask.js'
 import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
 import { buildRegionSkirt } from './region-skirt.js'
 import { makeSocleEnvMap } from './socle-env.js'
@@ -3451,30 +3452,59 @@ let regionLevel = null
 // aucune quantité de données n'aurait pu le corriger.
 let regionTarget = null
 function setRegionTarget(t) {
-  regionTarget = t && t.name ? { name: t.name, parts: t.parts || null } : null
+  regionTarget = t && t.name ? { name: t.name, parts: t.parts || null, peak: t.peak || null } : null
   // La cible change : le niveau retenu au passage précédent ne la concerne plus.
   regionLevel = null
 }
 
-// La géométrie de la cible prime toujours sur la déduction. Trois cas, du plus
+// La géométrie de la cible prime toujours sur la déduction. Quatre cas, du plus
 // sûr au plus flou :
 //   1. l'entité a été cherchée, sa géométrie est déjà là → on découpe celle-là
-//   2. on n'a que son nom (clic sur un lieu remarquable) → on la géocode UNE
-//      fois, à la demande : inutile de payer ce coût tant que personne n'isole
-//   3. rien de demandé (arrivée par coordonnées, panoramique libre) → repli sur
+//   2. on n'a que son nom (clic sur un lieu remarquable, recherche sans
+//      polygone) → on la géocode UNE fois, ICI et pas plus tôt : rien de tout
+//      ça ne doit peser sur le chemin d'une recherche ordinaire
+//   3. le nom ne désigne aucune surface → c'est peut-être un sommet, on le
+//      cherche et sa forme se taillera dans le relief
+//   4. rien de demandé (arrivée par coordonnées, panoramique libre) → repli sur
 //      l'ancien comportement, deviner d'après le centre et le zoom
 async function resolveRegionMask() {
-  if (regionTarget && !regionTarget.parts) {
+  if (regionTarget && !regionTarget.parts && !regionTarget.peak) {
     try {
       // Les entrées d'Explorer portent une précision entre parenthèses —
       // « Tenerife (Teide) », « Corsica (whole island) ». Elle aide à LIRE la
       // liste, mais aucun géocodeur ne la connaît : envoyée telle quelle, elle
       // ne rend rien et le lieu retombe silencieusement sur la déduction.
-      const hit = await geocode(regionTarget.name.replace(/\s*\([^)]*\)/g, '').trim())
+      const propre = regionTarget.name.replace(/\s*\([^)]*\)/g, '').trim()
+      const hit = await geocode(propre)
       const parts = hit && mainParts(hit.geojson, hit.lat, hit.lon)
       if (parts?.length) regionTarget.parts = parts
+      // Aucune surface derrière ce nom. Un sommet, très probablement : ils sont
+      // des POINTS dans OSM, jamais des contours. Identifier le bon coûte une
+      // requête Overpass lente (mesuré : plusieurs dizaines de secondes, d'où
+      // sa place ici et nulle part ailleurs), mais elle n'est payée qu'une fois
+      // et seulement par qui demande à isoler une montagne.
+      else regionTarget.peak = await findPeak(propre).catch(() => null)
     } catch (err) {
-      console.warn('cible isolée : géocodage impossible', err)
+      console.warn('cible isolée : identification impossible', err)
+    }
+  }
+
+  // UN SOMMET N'A PAS DE CONTOUR — nulle part. Sa forme se taille dans le
+  // relief : on trace la courbe de niveau qui l'entoure et on ne garde que la
+  // boucle qui le contient.
+  //
+  // Volontairement RECALCULÉE à chaque passage, jamais mémorisée : la découpe
+  // dépend de la dalle chargée, et le recadrage en charge justement une autre.
+  // La figer donnerait la calotte de l'ancienne dalle sur le nouveau cadre.
+  if (regionTarget?.peak && dem) {
+    const m = peakMask(dem, regionTarget.peak)
+    if (m?.parts?.length) {
+      return regionMaskFromParts({
+        parts: m.parts,
+        dem,
+        coastImage: coastMaskImage,
+        name: regionTarget.name,
+      })
     }
   }
   if (regionTarget?.parts?.length) {
