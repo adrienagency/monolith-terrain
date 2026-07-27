@@ -579,6 +579,12 @@ function hideLoading() {
   setTimeout(() => {
     loadingDismissedOnce = true
     loadingEl.classList.add('hidden')
+    // Le même drapeau sert la CSS : à partir d'ici on charge « à chaud », donc
+    // le relief de fond ne doit plus jamais revenir — il effacerait la carte
+    // que le visiteur regarde. `ld-warm` l'éteint et fait flouter la vue à la
+    // place (voir style.css). Posée APRÈS `.hidden`, dans la même tâche : le
+    // navigateur ne calcule qu'un seul style, donc aucun flou n'apparaît ici.
+    document.body.classList.add('ld-warm')
   }, wait)
 }
 

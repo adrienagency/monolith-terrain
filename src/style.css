@@ -139,6 +139,36 @@ body {
   opacity: 0;
 }
 
+/* CHARGEMENT À CHAUD — `body.ld-warm`, posée par main.js à la PREMIÈRE
+   disparition du loader (voir hideLoading).
+   Le relief de fond n'a de sens qu'une fois : c'est la première image du site.
+   Aux chargements suivants (changement de lieu, zoom, recherche), le remettre
+   effaçait d'un coup la carte que le visiteur était en train de regarder. Il
+   reste donc éteint, et c'est cette carte qui se floute le temps du calcul.
+   On l'ÉTEINT, on ne le déplace pas : son z-index reste 59 — relire
+   l'avertissement ci-dessus avant d'y toucher. */
+body.ld-warm #loading-bg {
+  opacity: 0;
+}
+/* La transition vit sur #app en permanence : c'est elle qui porte le fondu
+   dans les DEUX sens, entrée du flou comme sortie.
+   Le `scale` accompagne le flou parce que `blur()` échantillonne au-delà des
+   bords de l'élément : sans lui, les quatre côtés se dégradent vers le gris de
+   la page et dessinent un cadre. 4 % suffisent à pousser cette frange dehors.
+   POURQUOI un filtre CSS et pas une passe de post-traitement : la chaîne n'a
+   qu'un flou de PROFONDEUR de champ (DepthOfFieldEffect, six cibles = 136 Mo,
+   construit à la demande), qui floute selon la distance et non uniformément.
+   Surtout, la reconstruction du terrain BLOQUE le thread principal — une passe
+   WebGL ne pourrait pas animer son fondu pendant ce temps, alors que le
+   compositeur, lui, continue de flouter la dernière image déjà livrée. */
+body.ld-warm #app {
+  transition: filter 0.45s ease, transform 0.45s ease;
+}
+body.ld-warm:has(#loading:not(.hidden)) #app {
+  filter: blur(16px);
+  transform: scale(1.04);
+}
+
 /* transient toast (Share button feedback) — bottom-centre, matches the
    loader card's glass treatment so it reads as the same visual family */
 .ce-toast {
