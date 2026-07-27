@@ -298,8 +298,7 @@ body.dark .ce-notice {
   letter-spacing: 0.3em;
   margin-bottom: 4px;
 }
-.hud-kicker .sq,
-.hud-panel-head .sq {
+.hud-kicker .sq {
   width: 7px;
   height: 7px;
   background: var(--hud-accent);
@@ -308,15 +307,6 @@ body.dark .ce-notice {
 .hud-dim { opacity: 0.6; }
 .hud-strong { font-weight: 700; letter-spacing: 0.22em; }
 .hud-rule { height: 1px; background: var(--hud-ink); opacity: 0.35; margin: 6px 0; }
-
-.hud-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 18px;
-}
-.hud-row span { opacity: 0.55; }
-.hud-row b { font-weight: 600; }
-.hud-row .accent { color: var(--hud-accent); }
 
 /* cone tracking reticle */
 .hud-reticle {
@@ -361,63 +351,13 @@ body.dark .ce-notice {
 .hud-ret-name i { color: var(--hud-accent); font-style: normal; }
 .hud-ret-sub { opacity: 0.6; font-size: 9px; }
 
-/* POI markers */
-.hud-poi {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 0;
-  height: 0;
-  pointer-events: auto;
-  cursor: pointer;
-  transition: opacity 0.2s;
-  will-change: transform;
-}
-.hud-poi .tag {
-  position: absolute;
-  left: 12px;
-  top: 0;
-  transform: translateY(-50%);
-  font-size: 9.5px;
-  letter-spacing: 0.14em;
-  white-space: nowrap;
-  padding: 3px 7px;
-  background: var(--hud-paper);
-  border: 1px solid rgba(20, 22, 24, 0.35);
-  backdrop-filter: blur(var(--hud-blur));
-}
-.hud-poi .tag b { font-weight: 700; }
-.hud-poi .tag i { font-style: normal; opacity: 0.6; display: none; margin-left: 6px; }
-.hud-poi:hover .tag i,
-.hud-poi.active .tag i { display: inline; }
-.hud-poi.active .tag { border-color: var(--hud-accent); box-shadow: inset 2px 0 0 var(--hud-accent); }
+/* Les repères de sommet et leur fiche étaient ici (.hud-poi, .hud-panel) : le
+   FUI de fiction de v1, seul src/peaks.js les construisait. Il a été rhabillé
+   à la facture des cartouches de course, voir .peak-marker / .peak-card plus
+   bas dans ce fichier. */
 
-/* selection panel — positioned next to its marker from JS */
-.hud-panel {
-  position: absolute;
-  left: 0;
-  top: 0;
-  min-width: 230px;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  background: var(--hud-paper);
-  border: 1px solid rgba(20, 22, 24, 0.4);
-  backdrop-filter: blur(var(--hud-blur));
-  padding: 10px 14px;
-  pointer-events: auto;
-  line-height: 1.8;
-  will-change: transform;
-}
-.hud-panel-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 700;
-  letter-spacing: 0.25em;
-  margin-bottom: 5px;
-}
-.hud-panel-head b { flex: 1; }
+/* la croix reste : src/drag.js s'en sert pour ne pas déclencher un glissé
+   quand on ferme un panneau */
 .hud-x {
   all: unset;
   cursor: pointer;
@@ -856,8 +796,7 @@ body.dark .ce-notice {
 
 /* dark mode: lift every dim label so the menus stay readable (the exact
    complaint — secondary text vanished on the dark sheet) */
-body.dark .hud-dim,
-body.dark .hud-row span {
+body.dark .hud-dim {
   opacity: 0.92;
   color: var(--hud-ink);
 }
