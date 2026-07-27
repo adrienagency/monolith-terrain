@@ -9,6 +9,7 @@
 // actions sont celles de la barre elle-même — un seul câblage, pas deux.
 
 import { el } from './kit.js'
+import { setUiAdvanced } from './bars.js'
 
 // contextes où l'accueil ne doit JAMAIS apparaître : interface masquée,
 // vitrine embarquée, boutique, Race Studio, Studio, viewer d'une shibu reçue.
@@ -73,6 +74,14 @@ export function buildHub({ bar, bottomBar, onExplore }) {
     // la porte choisie devient active TOUT DE SUITE : le pont de liquide et la
     // coche voyagent sous elle pendant la descente
     core.querySelectorAll('.ce-wm-btn').forEach((b) => b.classList.toggle('on', b === btn))
+    // Franchir une porte de l'accueil ramène TOUJOURS au mode simple (Adrien).
+    // L'accueil montre déjà le cœur simple — mais seulement parce que
+    // `body.ce-hub` le force (elembar) : la préférence « Avancé » d'une visite
+    // précédente reprenait la main dès que la barre redescendait, et on
+    // répondait à « Que voulez-vous faire ? » par tous les panneaux ouverts.
+    // C'est fait AVANT hide(), pour que la bulle de liquide n'ait pas à morpher
+    // vers la capsule avancée pour revenir aussitôt.
+    setUiAdvanced(false)
     hide()
     // « Explorer » est un interrupteur dans la barre ; depuis l'accueil, il ne
     // peut que OUVRIR le panneau — le rejouer alors qu'il est déjà déplié le

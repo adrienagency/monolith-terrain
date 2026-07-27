@@ -61,17 +61,22 @@ const advToggles = new Set()
 function syncAdvAll() {
   for (const b of advToggles) b.classList.toggle('on', isAdvanced())
 }
+// La SEULE porte pour changer de niveau : elle persiste le choix, l'applique au
+// body et resynchronise tous les interrupteurs. L'accueil s'en sert aussi
+// (hub.js) — sans cette porte partagée, il aurait fallu réécrire les trois
+// gestes à côté, avec le risque qu'un pill « Avancé » reste allumé sur une
+// interface devenue simple.
+export function setUiAdvanced(adv) {
+  try { localStorage.setItem(ADV_KEY, adv ? '1' : '0') } catch {}
+  initUiLevel()
+  syncAdvAll()
+}
 export function buildAdvToggle(baseCls = 'ce-pillbtn') {
   const b = el('button', `${baseCls} ce-advbtn`)
   b.type = 'button'
   b.innerHTML = `${I.sliders}<span>Avancé</span>`
   b.setAttribute('data-tip', 'Mode avancé — tous les panneaux de réglage (création, carte, effets, caméra…).')
-  b.addEventListener('click', () => {
-    const adv = !isAdvanced()
-    try { localStorage.setItem(ADV_KEY, adv ? '1' : '0') } catch {}
-    initUiLevel()
-    syncAdvAll()
-  })
+  b.addEventListener('click', () => setUiAdvanced(!isAdvanced()))
   advToggles.add(b)
   b.classList.toggle('on', isAdvanced())
   return b
