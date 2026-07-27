@@ -247,6 +247,15 @@ export function pickKmInterval(totalKm) {
   return best
 }
 
+// Texte de la barre-titre du profil (bandeau du bas). Le nom du calque prime
+// sur le <name> du GPX : un fichier exporté par une montre ou un traceur
+// s'appelle « idee itinerante. 2026-23216768 », l'organisateur, lui, a
+// nommé sa course. La coupe à 28 signes est la largeur tenable de la barre
+// (monospace) — au-delà le titre pousse les stats hors du cartouche.
+export function profileTitle(displayName, trackName) {
+  return (displayName || trackName || 'TRACK').toUpperCase().slice(0, 28)
+}
+
 // ---------------------------------------------------------------- villages
 
 // Along-track village "announcements" (task 16 §3): pick real places (rows
@@ -510,6 +519,8 @@ export class GpxLayer {
     this.params = params
     this.getDem = getDem
     this.track = null // { points, name, cumKm[], world[] }
+    this.displayName = '' // titre du bandeau si le calque a été renommé — voir setDisplayName()
+    this._raceNameCustom = false // le nom éditorial vient-il de l'organisateur ou du GPX ? voir setRaceName()
     this.group = new THREE.Group()
     this.group.name = 'gpx'
     scene.add(this.group)
@@ -659,11 +670,17 @@ export class GpxLayer {
     // pointNames: optional index -> custom label map, set via setPointName();
     // a fresh track always starts with no custom names
     this.track = { points, name, cumKm, world: null, pointNames: {} }
+    // trace neuve = titre neuf : ni le renommage du calque précédent ni le nom
+    // de course de la trace précédente ne survivent (voir setDisplayName)
+    this.displayName = ''
+    this._raceNameCustom = false
     // race-name default = the GPX's own <name> (task 22 §7 spec: "nommer sa
     // course" — an organiser who never touches the field still sees a name,
     // not blank chrome); setRaceName() is the same call the panel's editable
     // field makes later, so overriding it just re-runs this one path.
-    this.setRaceName(name)
+    // `custom: false` : c'est une valeur PAR DÉFAUT, pas un choix
+    // d'organisateur — un renommage du calque a donc le droit de la remplacer.
+    this.setRaceName(name, { custom: false })
   }
 
   // (Re)drape the loaded track onto the current terrain patch — called after
@@ -838,7 +855,7 @@ export class GpxLayer {
     }
 
     this.cursor.material.color.set(this.params.hudAccent)
-    this.profileEl.querySelector('.gpx-name').textContent = this.track.name.toUpperCase().slice(0, 28)
+    this._syncProfileTitle()
     const totKm = this.track.cumKm[this.track.cumKm.length - 1]
     const gain = eles.reduce((g, e, i) => (i && e > eles[i - 1] ? g + e - eles[i - 1] : g), 0)
     this.profileEl.querySelector('.gpx-stats').textContent =
@@ -1472,13 +1489,40 @@ export class GpxLayer {
   // instance (not just painted to the DOM) so the Route panel's race-name
   // field can read back the current value when focus moves between layers
   // — see GpxLayerManager.raceName / setRaceName().
-  setRaceName(name) {
+  // `custom` distingue le nom SAISI par l'organisateur (champ « Nom de la
+  // course » du panneau) de la simple recopie du <name> du GPX posée par
+  // setTrack : seul le second est remplaçable par un renommage de calque.
+  setRaceName(name, { custom = true } = {}) {
     const trimmed = (name || '').trim()
     this.raceName = trimmed
+    if (custom) this._raceNameCustom = true
     if (this.raceNameEl) {
       this.raceNameEl.textContent = trimmed
       this.raceNameEl.classList.toggle('hidden', !trimmed)
     }
+  }
+
+  // Nom du CALQUE (donc le nom de la course) affiché dans le cartouche du
+  // profil. Piège qui a produit le bug : le calque est renommé APRÈS le
+  // chargement de la trace — importRace() dans main.js appelle loadGpxText()
+  // puis setName() —, donc un titre posé une fois pour toutes au setTrack
+  // reste bloqué sur le <name> brut du GPX (« idee itinerante. 2026-… »)
+  // pendant que le panneau Parcours, lui, affiche le vrai nom. Le titre passe
+  // donc par _syncProfileTitle(), rejoué à chaque rebuild() (le relief se
+  // reconstruit souvent) et à chaque renommage.
+  setDisplayName(name) {
+    const trimmed = (name || '').trim()
+    // le nom éditorial au-dessus du profil est périmé pour la même raison
+    // tant qu'il n'est que la recopie du <name> : on le fait suivre. Dès que
+    // l'organisateur a écrit le sien, il est à lui, on n'y touche plus.
+    if (trimmed && !this._raceNameCustom) this.setRaceName(trimmed, { custom: false })
+    this.displayName = trimmed
+    this._syncProfileTitle()
+  }
+
+  _syncProfileTitle() {
+    const el = this.profileEl?.querySelector('.gpx-name')
+    if (el) el.textContent = profileTitle(this.displayName, this.track?.name)
   }
 
   // stores (or clears, when name is empty) a custom label for a track-point
