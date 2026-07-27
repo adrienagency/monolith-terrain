@@ -1757,9 +1757,21 @@ function regenerateTerrain() {
       if (clouds) clouds.build(params) // deck re-floats above the new relief
       if (peaksLayer.enabled) peaksLayer.refresh()
       if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
-      rebuildPending = false
-      hideLoading()
-      resolve()
+      // LE VOILE ATTEND LES CHAMPS DÉPORTÉS (masque de mer + analyse de relief,
+      // ~470 ms sur MNT 1536², voir terrain-jobs.js). On ne gagne donc RIEN sur
+      // la durée d'attente au premier chargement — on gagne que l'onglet reste
+      // VIVANT pendant ce temps : la caméra tourne, l'interface répond.
+      // ⚠️ Retirer le voile plus tôt ferait apparaître le peigné des crêtes d'un
+      // coup sur une vue déjà affichée. C'est un claquement, et la carte doit
+      // rester calme. Si on veut un jour le gain perçu, c'est un fondu de
+      // uAnalysisOn — un fondu de peinture, pas de géométrie.
+      // ⚠️ `catch` obligatoire : une promesse perdue laisserait `rebuildPending`
+      // à true pour toujours et l'application voilée — pire que le gel supprimé.
+      ;(terrain.fieldsReady || Promise.resolve()).catch(() => null).then(() => {
+        rebuildPending = false
+        hideLoading()
+        resolve()
+      })
     }, 50)
   )
 }

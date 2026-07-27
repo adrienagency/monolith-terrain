@@ -618,6 +618,11 @@ export class BlockGrid {
     // la prochaine recuisson.
     const emprunte = !!t._shareSrc
     t.stopSharing?.()
+    // ⚠️ AVANT de disposer : un masque de mer ou une analyse encore en vol dans
+    // le Worker (terrain-jobs.js) se poserait sur une dalle morte en créant une
+    // DataTexture que plus personne ne disposerait. Le damier churn à chaque
+    // zoom — ce serait une fuite VRAM par dalle détruite.
+    t.cancelFields?.()
     // textures créées PAR instance (le damier churn au fil des zooms) —
     // uAnalysis en fait partie : une RGBA à la taille du DEM (2,3 Mo avec ses
     // mipmaps en tuiles 256 px, ~12 Mo en tuiles 512 px — Mapterhorn), l'oublier
