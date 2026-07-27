@@ -6,11 +6,16 @@
 // 2026-07-27, Chrome piloté en CDP, Mapterhorn en tuiles 512 px (MNT 1536²),
 // mode Naturel, bloc central maillé à 1024.
 //
-// LA CAUSE, et personne n'a mal réglé quoi que ce soit : les textures sont
-// dimensionnées pour le bloc CENTRAL (18,3 sommets par unité-monde) et les
-// voisines en héritent avec un maillage 2,7 fois plus grossier. Chaque dalle de
-// contexte portait donc des champs 4 à 5 fois plus fins que le relief qui les
-// porte. Relevé par dalle voisine (79 Mo, dont 55 Mo dans le tas JS) :
+// LA CAUSE, et personne n'a mal réglé quoi que ce soit : les textures étaient
+// dimensionnées pour le bloc CENTRAL (1024 à l'époque, soit 18,3 sommets par
+// unité-monde) et les voisines en héritaient avec un maillage 2,7 fois plus
+// grossier (384, soit 6,88 sommets/u). Chaque dalle de contexte portait donc
+// des champs 4 à 5 fois plus fins que le relief qui les portait.
+// ⚠️ TOUT CE PARAGRAPHE EST AU PASSÉ, et ses densités sont celles du relevé,
+// pas des constantes d'aujourd'hui : le centre est maillé à 768 (13,7 sommets/u)
+// et les voisines à 256 (4,59 sommets/u) — ce sont ces valeurs-là que les tests
+// plus bas vérifient. Relevé par dalle voisine (79 Mo, dont 55 Mo dans le tas
+// JS) :
 //
 //   masque côtier 2048²      16,0 Mo de texture + 16,0 Mo d'ImageData
 //   analyse 1536² + mips     12,0 Mo
