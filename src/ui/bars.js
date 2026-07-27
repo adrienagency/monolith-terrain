@@ -518,7 +518,11 @@ export function buildShibuChrome() {
 export function buildCredits() {
   const wrap = el('div', 'ce-credits')
   wrap.append(
-    extLink('https://adrienagency.com', '© Adrien Agency', 'ce-credit-link'),
+    // « made by » plutôt que « © » : les crédits qui suivent (OSM, Mapterhorn,
+    // GEBCO, GeoNames) sont des obligations de licence, celui-ci est une
+    // signature. La distinction se voit mieux ainsi, et l'arobase renvoie au
+    // compte plutôt qu'à une entité juridique.
+    extLink('https://adrienagency.com', 'made by @AdrienAgency', 'ce-credit-link'),
     el('span', 'ce-credit-dot', '·'),
     extLink('https://www.openstreetmap.org/copyright', '© OpenStreetMap contributors', 'ce-credit-link'),
     el('span', 'ce-credit-dot', '·'),
