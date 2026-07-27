@@ -3574,8 +3574,8 @@ function rebuildRegionSkirt() {
 // suffit de lui donner celui de la cellule au lieu de celui du bloc central.
 //
 // Moitié de la définition du bloc central : ce sont des dalles de CONTEXTE,
-// maillées à 384 (block-grid.js NEIGHBOUR_RES). Un masque de 2048 par dalle
-// coûterait 4 Mo de VRAM chacune pour un liseré que personne ne regarde de près.
+// maillées à 256 (block-grid.js NEIGHBOUR_RES). Un masque de 2048 par dalle
+// coûterait 16 Mo chacune pour un liseré que personne ne regarde de près.
 const CELL_MASK_SIZE = 1024
 function paintCellRegion(cell) {
   const t = cell?.terrain

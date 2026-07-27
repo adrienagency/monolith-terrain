@@ -26,7 +26,7 @@ export const GRID_R = 2 // rayon du damier : 2 → 5×5 max, centre exclu
 // LES VOISINES SE DIMENSIONNENT SUR ELLES-MÊMES, PAS SUR LE BLOC CENTRAL.
 //
 // C'est le correctif de mémoire du damier, et sa cause était invisible parce que
-// chaque valeur était juste SÉPARÉMENT. Le bloc central est maillé à 1024 sur
+// chaque valeur était juste SÉPARÉMENT. Le bloc central est maillé à 768 sur
 // 56 unités-monde (18,3 sommets par unité) et ses champs sont taillés pour lui :
 // masque côtier 2048² (36,6 px/u), analyse à la taille du MNT, 1536² (27,4 px/u).
 // Les voisines héritaient de ces tailles avec un maillage 2,7 fois plus grossier
