@@ -677,7 +677,24 @@ export class Globe {
     const camDir = camPos.clone().normalize()
     this._drawn = 0
 
-    for (const t of this.tiles.values()) if (t.mesh) t.mesh.visible = false
+    // CRÉDIT DE CRÉATION de la frame. Un raffinement fait naître quatre tuiles ;
+    // n'en lancer que ce qu'on pourra garder, sinon elles s'évincent l'une
+    // l'autre avant d'être au complet et la frame suivante recommence (mesuré
+    // caméra immobile, cache saturé : ~100 requêtes par frame, sans fin).
+    // Le crédit compte la place LIBRE **plus la place RÉCUPÉRABLE** — et ce
+    // second terme est indispensable : l'éviction ramenant le cache à
+    // exactement CACHE_MAX, un crédit fondé sur la seule place libre resterait
+    // nul à jamais et GÈLERAIT le globe (faire tourner la planète ne
+    // chargerait plus rien). Est récupérable ce que le rang 1 de l'éviction
+    // sait rendre : une tuile prête qui n'a porté ni dessiné à la frame d'avant.
+    const prev = this.frame - 1
+    let marge = 0
+    for (const t of this.tiles.values()) {
+      if (t.mesh) t.mesh.visible = false
+      if (t.z > ROOT_Z && t.state === 'ready' && t.coverFrame !== prev && t.lastUsed !== prev) marge++
+    }
+    this._credit = CACHE_MAX - this.tiles.size + marge
+
     for (const root of this.roots) this._traverse(root, camPos, camDir)
 
     if (this.tiles.size > CACHE_MAX) this._evict()
@@ -690,12 +707,27 @@ export class Globe {
     if (toTile.dot(camDir) < -0.35 && t.z > ROOT_Z) return
 
     t.lastUsed = this.frame
+    // PORTEUSE de la couverture courante. `lastUsed` ne suffit pas à distinguer
+    // les deux populations que ce parcours touche : les tuiles qu'il TRAVERSE
+    // (celle-ci — dessinée, ou ancêtre raffiné dont les enfants dessinent) et
+    // les enfants simplement PRÉPARÉS plus bas, qui ne portent encore rien.
+    // Les premières seront reparcourues à la frame suivante ; les évincer,
+    // c'est les redemander au réseau immédiatement. `coverFrame` les marque.
+    t.coverFrame = this.frame
     const dist = Math.max(camPos.distanceTo(t.center) - t.chord * 0.5, 1)
     // hysteresis: a tile that already refined only coarsens once the ratio
     // falls well below the split point, so hovering at the threshold no
     // longer flickers between parent and children every few frames
     const ratio = t.chord / dist
-    const wantSplit = t.z < MAX_Z && ratio > (t.refined ? MERGE_RATIO : SPLIT_RATIO)
+    let wantSplit = t.z < MAX_Z && ratio > (t.refined ? MERGE_RATIO : SPLIT_RATIO)
+
+    // ADMISSION : on ne commence un raffinement que si le crédit de la frame
+    // peut payer les quatre enfants qu'il fait naître. Quand ils sont déjà là,
+    // descendre ne coûte rien — ni crédit ni réseau : on passe sans débiter.
+    if (wantSplit && !this._enfantsPresents(t)) {
+      if (this._credit < 4) wantSplit = false
+      else this._credit -= 4
+    }
 
     if (wantSplit) {
       const kids = this._children(t)
@@ -719,6 +751,20 @@ export class Globe {
     }
   }
 
+  // les quatre enfants sont-ils DÉJÀ dans le cache ? (sans les créer — c'est
+  // toute la différence avec `_children`, qui les fait naître)
+  _enfantsPresents(t) {
+    const z = t.z + 1
+    const x = t.x * 2
+    const y = t.y * 2
+    return (
+      this.tiles.has(tileKey(z, x, y)) &&
+      this.tiles.has(tileKey(z, x + 1, y)) &&
+      this.tiles.has(tileKey(z, x, y + 1)) &&
+      this.tiles.has(tileKey(z, x + 1, y + 1))
+    )
+  }
+
   _children(t) {
     return [
       this._ensureTile(t.z + 1, t.x * 2, t.y * 2),
@@ -729,14 +775,42 @@ export class Globe {
   }
 
   _evict() {
-    // hard budget: least-recently-used first, sparing only tiles drawn this
-    // frame — sustained exploration must not grow the cache without bound
-    const candidates = [...this.tiles.values()]
-      .filter((t) => t.z > ROOT_Z && t.state === 'ready' && !(t.mesh && t.mesh.visible))
-      .sort((a, b) => a.lastUsed - b.lastUsed)
-    const excess = this.tiles.size - CACHE_MAX
-    for (let i = 0; i < Math.min(excess, candidates.length); i++) {
-      const t = candidates[i]
+    this._evictJusqua(CACHE_MAX)
+  }
+
+  // Budget DUR, mais des victimes CHOISIES. Le tri d'origine était le seul
+  // `a.lastUsed - b.lastUsed`, et il se retournait contre le globe : `_traverse`
+  // marque toutes les tuiles qu'il parcourt, ancêtres raffinés compris, or ces
+  // ancêtres ont `mesh.visible === false` (seules les feuilles sont allumées).
+  // Ils rejoignaient donc les candidats avec `lastUsed === this.frame`, dans un
+  // groupe d'ex æquo énorme que le tri stable départageait par ordre de
+  // création — c'est-à-dire les z3/z4, les plus anciennes de la Map. Le globe
+  // évinçait le chemin de descente qu'il allait reparcourir à la frame d'après,
+  // et n'atteignait plus les zooms profonds du tout.
+  //
+  // Deux rangs, donc, et le budget reste tenu parce que le second existe :
+  //   1. ce qui ne porte pas la couverture courante — du plus ancien au plus
+  //      récent, puis à ancienneté égale du PLUS PROFOND au moins profond : une
+  //      z9 périmée ne couvre qu'un timbre-poste déjà survolé, une z4 périmée
+  //      reste sur le chemin de toutes les descentes à venir.
+  //   2. les porteuses elles-mêmes, de la plus profonde à la moins profonde, et
+  //      seulement si le rang 1 n'a pas suffi. Sacrifier une porteuse profonde
+  //      ne fait pas de trou : la règle sans-trou de `_traverse` fait remonter
+  //      le parent, qui couvre le quad entier.
+  _evictJusqua(max) {
+    const excess = this.tiles.size - max
+    if (excess <= 0) return
+    const porte = (t) => t.coverFrame === this.frame
+    const parProfondeur = (a, b) => b.z - a.z
+    const candidates = [...this.tiles.values()].filter(
+      (t) => t.z > ROOT_Z && t.state === 'ready' && !(t.mesh && t.mesh.visible)
+    )
+    const victimes = [
+      ...candidates.filter((t) => !porte(t)).sort((a, b) => a.lastUsed - b.lastUsed || parProfondeur(a, b)),
+      ...candidates.filter(porte).sort((a, b) => parProfondeur(a, b) || a.lastUsed - b.lastUsed),
+    ]
+    for (let i = 0; i < Math.min(excess, victimes.length); i++) {
+      const t = victimes[i]
       if (t.mesh) {
         this.group.remove(t.mesh)
         t.mesh.geometry.dispose()
