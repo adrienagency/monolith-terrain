@@ -51,16 +51,22 @@ const bathyMisses = new Set()
 
 // ─────────────────────────── NE PAS REDEMANDER CE QU'ON A DÉJÀ ───────────────
 //
-// Mesuré sur le damier du Var à z12 : 6 405 requêtes pour 260 URL uniques, dont
-// UNE SEULE tuile bathy demandée 2 070 fois. Deux mémoires, et elles n'ont pas
-// la même durée de vie — parce que la contrainte qui prime n'est pas la vitesse
-// mais le tas JS, mesuré à 1,76 Go sur un damier plein.
+// Mesuré sur le damier du Var à z12 (campagne de référence, cf.
+// docs/superpowers/plans/2026-07-27-damier-optimisation.md) : 6 405 requêtes
+// pour 260 URL uniques, dont UNE SEULE tuile bathy demandée 2 070 fois. Deux
+// mémoires, et elles n'ont pas la même durée de vie — parce que la contrainte
+// qui prime n'est pas la vitesse mais le tas JS, mesuré à 1,76 Go sur un damier
+// plein.
 //
-// · LES TUILES D'ALTITUDE ne se retiennent QUE LE TEMPS DU VOL. Elles ne se
-//   partagent pas entre dalles (le damier aligne des grilles de tuiles
-//   disjointes) : la seule redondance est temporelle — la même dalle relancée
-//   avant que la première demande ne soit revenue. Les garder après coup, ce
-//   serait un cache d'images de 1 Mo pièce pour rien.
+// · LES TUILES D'ALTITUDE ne se retiennent QUE LE TEMPS DU VOL. Elles se
+//   partagent peu entre dalles — le damier aligne des grilles de tuiles
+//   disjointes — SAUF EN SURZOOM : au-delà du maxZoom de la source, deux dalles
+//   voisines remontent au même ancêtre, donc à la même URL (overzoomTile).
+//   C'est sans danger, et même profitable : la mémoire en vol dédoublonne ce
+//   partage-là comme le reste. La redondance qui coûtait, elle, était
+//   temporelle — la même dalle relancée avant que sa première demande ne soit
+//   revenue. Les garder APRÈS coup serait un cache d'images de 1 Mo pièce, pour
+//   un partage marginal et sur un tas déjà à 1,76 Go.
 // · LES TUILES BATHY, elles, se partagent MASSIVEMENT : nos tuiles s'arrêtent à
 //   z8, donc les 9 cases d'un MNT z12 lisent le MÊME ancêtre, et les 25 dalles
 //   du damier aussi. Une poignée de fichiers de 256² : les mémoriser coûte
