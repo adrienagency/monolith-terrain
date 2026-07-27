@@ -124,7 +124,13 @@ body {
 #loading-bg {
   position: fixed;
   inset: 0;
-  z-index: -1; /* derrière la carte du loader, devant le fond de page */
+  /* Juste SOUS la carte du loader (z-index 60), au-dessus de tout le reste.
+     ⚠️ JAMAIS de z-index négatif ici : il rangeait ce fond DERRIÈRE
+     l'arrière-plan du body (#9d9d9d), qui le recouvrait entièrement. Le
+     visiteur voyait le gris de la page, jamais le relief — ni même la couleur
+     de repli ci-dessous, ce qui était l'indice : une image manquante aurait
+     laissé du #cfcac0, pas du gris. */
+  z-index: 59;
   background: #cfcac0 url('/loading-bg.webp') center / cover no-repeat;
   transition: opacity 0.6s ease;
   pointer-events: none;
