@@ -403,13 +403,13 @@ export function buildQuickCore(ctx) {
     b.addEventListener('click', () => { setActive(b); onClick?.() })
     return b
   }
-  // Explorer n'était qu'un état de repos sans effet : il DÉPLIE maintenant les
-  // panneaux du mode Explorer en haut à gauche (le seul dock autorisé en mode
-  // simple). Recliquer les referme — c'est un interrupteur, comme les autres.
+  // Explorer n'était qu'un état de repos sans effet : il DÉPLIE maintenant le
+  // panneau du mode Explorer en haut à gauche (le seul dock autorisé en mode
+  // simple). Recliquer le referme — c'est un interrupteur, comme les autres.
   // Le mode de travail est CHOISI au passage : les deux niveaux partagent le
   // même vocabulaire (data-mode), donc la même conséquence. Sans cela, un
-  // niveau avancé quitté en Studio ou en Parcours laissait les panneaux
-  // Explorer / Carte éteints (wm-off) et le dock s'ouvrait sur du vide.
+  // niveau avancé quitté en Studio ou en Parcours laissait le panneau
+  // Explorer éteint (wm-off) et le dock s'ouvrait sur du vide.
   const home = mk('explorer', explore, 'Explorer', null, 'La Terre en relief', 'Les lieux à visiter — continents, sites remarquables, recherche.', () => {
     ctx.setWorkMode?.('explorer')
     document.body.classList.toggle('ce-explore', !document.body.classList.contains('ce-explore'))

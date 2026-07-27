@@ -5,9 +5,12 @@ const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-
 
 export function buildMapPanel(ctx) {
   const { params, u } = ctx // u() → terrain.mapUniforms
-  // `ce-panel-map` est repéré par le CSS : avec Explorer, c'est le second
-  // panneau que le mode simple accepte de montrer quand on clique « Explorer »
-  // dans la barre du bas (les calques de la carte appartiennent à ce mode).
+  // Ce panneau ouvre le rail gauche du STUDIO (au-dessus de Terrain) : ses
+  // calques habillent la carte, ils ne servent pas à s'y déplacer. Il a
+  // longtemps vécu dans Explorer, et `ce-panel-map` lui servait à s'échapper
+  // du filtre du mode simple (v28.css) — ce n'est plus le cas : le dock
+  // « Explorer » ne montre QUE le panneau Explorer. La classe reste le seul
+  // nom stable du panneau dans le DOM (le titre, lui, est du texte affiché).
   const panel = new Panel({ title: 'Carte', icon: ICON, side: 'left', width: 268, tip: 'Les calques cartographiques drapés sur le relief.', cls: 'ce-panel-map' })
 
   const sLayers = panel.addSection(section('Calques'))
