@@ -138,14 +138,81 @@ export function cellsForParts(parts, dem, r = GRID_R) {
   }
   return need
 }
-// LRU des DEM voisins (clé zoom:tileX,tileY). ⚠️ CE CACHE PÈSE : un DEM en
-// tuiles 256 px fait 768² flottants (2,3 Mo), le même en tuiles 512 px en fait
-// 1536² (9,4 Mo). Garder 12 entrées coûtait 28 Mo, il en coûterait 113 — pour
-// des blocs qui ne sont même plus affichés. On borne donc le cache en MÉMOIRE,
-// pas en nombre d'entrées.
+// LE CACHE DE MNT DU DAMIER — et pourquoi il ne grossit PAS.
+//
+// ⚠️ CE CACHE PÈSE : un DEM en tuiles 256 px fait 768² flottants (2,3 Mo), le
+// même en tuiles 512 px en fait 1536² (9,4 Mo). Un damier plein tient déjà
+// 24 MNT VIVANTS, soit 207 Mo, sur un tas JS mesuré à 1,76 Go pour une limite
+// pratique de 2 à 4 Go dans Chrome. Le dimensionner « sur le damier »
+// (25 entrées) y ajouterait 235 Mo : le geste évident est ici le piège.
+//
+// D'OÙ VIENNENT LES CHIFFRES DE CE FICHIER. Une seule campagne fait foi, celle
+// du rapport docs/superpowers/plans/2026-07-27-damier-optimisation.md (« Le
+// Var » isolé, z11 → z12, Mapterhorn en tuiles 512 px, MNT 1536², 24 dalles) :
+// 6 405 requêtes pour 260 URL distinctes, 101 s, 1 762 Mo de tas JS. Toute
+// autre mesure citée ici est une mesure de BANC — le damier bouchonné de
+// test/damier-reseau.test.js, AWS en tuiles 256 px — et le dit explicitement.
+//
+// Trois étages, du moins cher au plus cher. L'invariant qui tient la mémoire
+// n'est pas une élégance, et il se dit AU NIVEAU DE LA CLÉ : UNE DALLE N'EST
+// JAMAIS DÉTENUE PAR DEUX ÉTAGES À LA FOIS.
+//
+// ⚠️ Le dire « objet par objet » (aucun MNT dans deux étages) est plus faible,
+// et ça s'est payé une fois : le dessaisissement de l'étage 3 vidait le cache
+// un tour de microtâche AVANT que la cellule ne naisse, donc aucun MNT n'était
+// jamais en double — et pourtant, la clé n'étant retenue par personne pendant
+// cet intervalle, un SECOND MNT partait sur le réseau pour la même dalle.
+// L'invariant d'objet restait vrai, celui de clé était rompu, et il coûtait
+// 117 requêtes (cf. l'étage 1 et test/damier-reseau.test.js).
+//
+//   1. LES CHARGEMENTS EN VOL — une promesse par dalle, JAMAIS évincée tant
+//      qu'elle n'a pas rendu la main. C'est la correction qui compte : main.js
+//      resynchronise le damier à chaque arrivée de dalle (onReady →
+//      gpxLayer.rebuildAll → sync), le cache borné évinçait des promesses non
+//      RÉSOLUES, et chaque resynchro relançait le chargement des vingt autres.
+//      Mesuré (campagne de référence) : 322 appels de loadDem pour 23 dalles.
+//      ⚠️ Cet étage inscrit TOUTE promesse rendue à sync, réseau ou pas — y
+//      compris celle, déjà résolue, dont l'étage 3 vient de se dessaisir. Il
+//      est la mémoire UNIQUE de la clé entre l'instant où un étage la lâche et
+//      celui où la cellule la reprend ; l'en dispenser, c'est rouvrir la
+//      fenêtre de course décrite ci-dessus.
+//   2. LES CELLULES VIVANTES — elles détiennent déjà leur MNT. Le relire coûte
+//      un parcours de 24 entrées ; en garder une copie coûterait 235 Mo.
+//   3. LES MNT DÉTACHÉS — ceux des cellules qu'on vient de détruire, les seuls
+//      à mériter une place en propre (dézoom qui va et vient, mode isolé qui
+//      rase puis rebâtit). Budget INCHANGÉ : 32 Mo, comme avant ce correctif.
+//      ⚠️ Cet étage REND ET SE DESSAISIT (cf. _loadCellDem) : le MNT qui repart
+//      dans une cellule quitte le cache — en passant la main à l'étage 1, qui
+//      tient la clé jusqu'à la naissance de la cellule — et celui qu'on jette
+//      y revient (_keepDetachedDem). Sans ce dessaisissement,
+//      l'étage 3 se remplissait de MNT que des cellules
+//      VIVANTES détenaient déjà — gratuits à garder, puisque partagés — et
+//      évinçait à leur place les détachés, les seuls pour qui il existe.
 const DEM_CACHE_BYTES = 32 * 1024 * 1024
-const demCacheMaxFor = (tilePx, tilesAcross) =>
-  Math.max(4, Math.floor(DEM_CACHE_BYTES / ((tilesAcross * tilePx) ** 2 * 4)))
+
+// LA QUATRIÈME MÉMOIRE : LES ÉCHECS. Elle ne garde pas d'octets, elle garde des
+// clés — et sans elle, la tempête de requêtes que ce fichier vient de supprimer
+// revient par la porte d'à côté.
+//
+// loadDem LÈVE quand aucune tuile n'a été peinte (404 de couverture, créneau
+// `ty` hors bornes près des pôles, panne réseau) — le cas NORMAL d'un damier à
+// cheval sur un bord de jeu national. Or l'étage 1 se purge à l'atterrissage et
+// l'étage 3 n'accueille que des MNT résolus : un échec n'était retenu nulle
+// part, donc chaque arrivée de dalle voisine (→ onReady → sync) réémettait les
+// chargements morts. Mesuré au BANC (damier de 24 dalles dont la colonne i=+2
+// est hors couverture) : 90 requêtes d'altitude pour 45 URL mortes. Et le banc
+// est OPTIMISTE — ses arrivées se bousculent dans le même tour de boucle, donc
+// la mémoire des tuiles en vol (dem.js) absorbe une partie des relances. Sur le
+// terrain, où les dalles arrivent à ~4 s d'intervalle, plus rien ne se recouvre
+// et le facteur monte d'autant.
+//
+// Le TTL plutôt qu'un Set définitif, et c'est un choix : un 404 de couverture
+// est permanent, mais une coupure réseau ne l'est pas, et le damier n'a aucun
+// autre moment pour retenter — main.js ne le resynchronise que sur événement.
+// Une minute borne la tempête à un essai par dalle et par minute (au lieu d'un
+// par arrivée de voisin) tout en laissant le relief apparaître si le réseau
+// revient pendant que l'utilisateur regarde la carte.
+const DEM_FAIL_TTL_MS = 60_000
 
 export class BlockGrid {
   // getMainDem() → DEM central ; getMainTerrain() → Terrain central (teinte
@@ -158,8 +225,10 @@ export class BlockGrid {
     this.getMainTerrain = getMainTerrain
     this.getPlinth = getPlinth
     this.cells = new Map() // "i,j" → { terrain, dem, key }
-    this._demCache = new Map() // LRU zoom:tx,ty → Promise<dem>
-    this._syncId = 0 // invalide les chargements d'une synchro périmée
+    this._demPending = new Map() // zoom:tx,ty → Promise<dem> EN VOL (jamais évincée)
+    this._demCache = new Map() // LRU zoom:tx,ty → dem DÉTACHÉ (borné en octets)
+    this._demFailed = new Map() // zoom:tx,ty → date de l'échec (cf. DEM_FAIL_TTL_MS)
+    this._need = new Set() // dalles réclamées par la DERNIÈRE synchro (cf. sync)
     // Contour de la zone ISOLÉE, s'il y en a une. C'est un ÉTAT du damier et
     // pas un argument de sync() pour une raison précise : sync est rappelée de
     // partout (re-drapage GPX, arrivée d'un voisin, fermeture d'un parcours), et
@@ -218,7 +287,20 @@ export class BlockGrid {
   sync(points) {
     const dem = this.getMainDem()
     const need = dem ? this.cellsNeeded(points) : new Set()
-    const syncId = ++this._syncId
+    // ⚠️ CE QU'UNE ARRIVÉE DOIT VÉRIFIER, C'EST LE BESOIN, PAS LE NUMÉRO DE
+    // SYNCHRO. Un compteur incrémenté à chaque sync() périmait les chargements
+    // ENCORE JUSTES : main.js resynchronise à chaque arrivée de dalle, donc un
+    // MNT qui revenait entre deux arrivées était jeté, et rechargé au passage
+    // suivant. Mesuré au BANC en rejouant ce compteur sur le code d'aujourd'hui
+    // (test/damier-reseau.test.js) : 243 requêtes d'altitude pour 216 tuiles.
+    // Les deux seules vraies raisons de jeter un MNT qui arrive sont : la dalle
+    // n'est plus réclamée, ou le bloc central a bougé sous elle. On teste
+    // exactement ça — la GÉORÉFÉRENCE du centre, et rien de plus : ni un
+    // compteur (trop large, il périme des MNT justes), ni l'identité de l'objet
+    // DEM (trop étroite, le centre est remplacé même quand il revient au même
+    // endroit). Les deux tests « le centre… » verrouillent ces deux bords.
+    this._need = need
+    const centerKey = dem ? this._centerKey(dem) : null
     // retirer l'inutile
     let changed = false
     for (const [key, cell] of this.cells) {
@@ -246,11 +328,27 @@ export class BlockGrid {
       }
       const [i, j] = key.split(',').map(Number)
       const origin = { x: dem.originTileX + i * tilesAcross, y: dem.originTileY + j * tilesAcross }
-      this._loadCellDem(dem.zoom, origin, tilesAcross, demTilePx(dem))
+      const demKey = `${dem.zoom}:${origin.x},${origin.y}`
+      this._loadCellDem(dem.zoom, origin, tilesAcross)
         .then((nDem) => {
-          if (syncId !== this._syncId || this.cells.has(key)) return // synchro périmée
+          // Les trois raisons de ne PAS bâtir. Dans chacune, le MNT qui arrive
+          // se retrouve sans porteur — et l'étage 3 s'en est dessaisi en le
+          // rendant : on le lui redonne, sinon il faudrait le retélécharger.
+          // (_keepDetachedDem refuse de son côté ce qu'une cellule détient.)
+          if (this.cells.has(key)) { this._keepDetachedDem(demKey, nDem); return } // déjà bâtie par une autre arrivée
+          if (!this._need.has(key)) { this._keepDetachedDem(demKey, nDem); return } // la dalle n'est plus réclamée
+          const cur = this.getMainDem()
+          if (!cur || this._centerKey(cur) !== centerKey) { // le centre a bougé
+            this._keepDetachedDem(demKey, nDem)
+            return
+          }
           const cell = this._buildCell(i, j, nDem)
-          cell.centerKey = this._centerKey(dem)
+          cell.centerKey = centerKey
+          // la cellule DEVIENT le cache de son propre MNT (voir _loadCellDem) —
+          // demRaw est le MNT d'origine, cell.dem en est une copie de surface
+          // dont le meanM est aligné sur le bloc central
+          cell.demKey = demKey
+          cell.demRaw = nDem
           this.cells.set(key, cell)
           this.onReady?.(cell)
           this.onGridChanged?.()
@@ -263,22 +361,82 @@ export class BlockGrid {
     return `${dem.zoom}:${dem.originTileX},${dem.originTileY}`
   }
 
-  _loadCellDem(zoom, origin, tilesAcross, tilePx = 256) {
+  // Les trois étages décrits en tête de fichier, du moins cher au plus cher,
+  // précédés de la mémoire des échecs (DEM_FAIL_TTL_MS).
+  _loadCellDem(zoom, origin, tilesAcross) {
     const key = `${zoom}:${origin.x},${origin.y}`
-    if (this._demCache.has(key)) {
-      const p = this._demCache.get(key)
-      this._demCache.delete(key)
-      this._demCache.set(key, p) // ré-insertion = most-recently-used
-      return p
+    // 0. cette dalle a échoué il y a peu → on ne relance rien. Le rejet est
+    // immédiat et de même forme que celui de loadDem : l'appelant (sync) le
+    // traite déjà comme une dalle qui ne naîtra pas.
+    const echec = this._demFailed.get(key)
+    if (echec != null) {
+      if (Date.now() - echec < DEM_FAIL_TTL_MS) {
+        return Promise.reject(new Error(`dalle ${key} en échec récent — pas de relance avant ${DEM_FAIL_TTL_MS} ms`))
+      }
+      this._demFailed.delete(key)
     }
-    const p = loadDem({ lat: 0, lon: 0, zoom, tilesAcross, originTile: origin })
-    this._demCache.set(key, p)
-    const max = demCacheMaxFor(tilePx, tilesAcross)
-    while (this._demCache.size > max) {
-      const oldest = this._demCache.keys().next().value
-      this._demCache.delete(oldest)
+    // 1. déjà en vol → LA MÊME promesse. Vingt resynchros n'émettent qu'un
+    // chargement, et il n'est jamais évincé sous les pieds de l'appelant.
+    const vol = this._demPending.get(key)
+    if (vol) return vol
+    // 2. une cellule vivante le détient déjà : coût mémoire nul. (`disposed`
+    // exclu : sa cellule est en train de mourir et son MNT part au cache — le
+    // rendre ici le placerait dans deux étages à la fois.)
+    for (const cell of this.cells.values()) {
+      if (!cell.disposed && cell.demKey === key && cell.demRaw) return Promise.resolve(cell.demRaw)
     }
+    // 3. détaché, encore dans le budget. Le cache le REND et S'EN DESSAISIT :
+    // le MNT s'en va habiter la cellule qui naîtra de lui (étage 2), et si
+    // cette cellule ne naît pas, sync() le lui rend (_keepDetachedDem). Un
+    // `delete` + `set` — le simple MRU d'avant — laissait l'entrée en place et
+    // vidait l'étage 3 de son sens : il ne contenait plus que des MNT vivants.
+    //
+    // ⚠️ ET LE MNT RENDU PASSE PAR L'ÉTAGE 1, exactement comme un chargement
+    // réseau. Sans cette ligne, le dessaisissement ouvrait une FENÊTRE DE
+    // COURSE : l'étage 3 se vidait tout de suite, la cellule ne naissait qu'au
+    // tour de microtâche suivant, et main.js resynchronise entre les deux
+    // (onReady → rebuildAll → sync). Pendant cet intervalle la clé n'était
+    // retenue par AUCUN étage et un chargement réseau repartait. Mesuré au BANC
+    // sur la phase « retour » du cycle détacher/rattacher — le scénario même
+    // pour lequel l'étage 3 existe : 162 requêtes d'altitude (18 dalles) au
+    // lieu de 45 (5 dalles), soit 13 des 14 MNT rendus par le cache
+    // re-téléchargés. Et transitoirement 13 MNT en double en mémoire.
+    const garde = this._demCache.get(key)
+    const p = garde
+      ? (this._demCache.delete(key), Promise.resolve(garde))
+      : loadDem({ lat: 0, lon: 0, zoom, tilesAcross, originTile: origin })
+    this._demPending.set(key, p)
+    // then(f, f) et non finally : le rejet est absorbé ici. L'échec, lui, se
+    // MÉMORISE — c'est la seule chose qui empêche la resynchro suivante de
+    // relancer une dalle qu'on sait morte.
+    const fini = (rate) => {
+      if (this._demPending.get(key) === p) this._demPending.delete(key)
+      if (!rate) return
+      for (const [k, t] of this._demFailed) if (Date.now() - t >= DEM_FAIL_TTL_MS) this._demFailed.delete(k)
+      this._demFailed.set(key, Date.now())
+    }
+    p.then(() => fini(false), () => fini(true))
     return p
+  }
+
+  // Un MNT vient de perdre sa cellule — ou de ne pas en trouver : c'est le SEUL
+  // moment où le cache mérite d'en garder une référence en propre. Tant que la
+  // dalle vit, elle EST le cache (étage 2) ; dupliquer ce qu'elle détient déjà,
+  // c'est 235 Mo pour rien. D'où le refus net quand un porteur existe.
+  _keepDetachedDem(key, dem) {
+    if (!key || !dem?.data) return
+    for (const cell of this.cells.values()) {
+      if (!cell.disposed && cell.demKey === key && cell.demRaw) return // déjà porté : étage 2
+    }
+    this._demCache.delete(key)
+    this._demCache.set(key, dem)
+    let octets = 0
+    for (const d of this._demCache.values()) octets += d.data.byteLength
+    while (this._demCache.size > 1 && octets > DEM_CACHE_BYTES) {
+      const vieux = this._demCache.keys().next().value
+      octets -= this._demCache.get(vieux).data.byteLength
+      this._demCache.delete(vieux)
+    }
   }
 
   _buildCell(i, j, nDem) {
@@ -391,7 +549,14 @@ export class BlockGrid {
   }
 
   clear() {
-    this._syncId++
+    // Plus rien n'est réclamé : les chargements ENCORE EN VOL atterriront sans
+    // bâtir personne (leur MNT ira au cache des détachés). Ce n'est pas une
+    // annulation et il ne faut pas l'écrire comme telle : un sync() ultérieur
+    // qui réarme la même dalle peut très bien laisser atterrir un vol antérieur
+    // — le MNT est alors juste, pas étranger, et la garde `centerKey` couvre le
+    // seul cas où il ne le serait pas. Sans conséquence en pratique : clear()
+    // n'est appelé nulle part en production, main.js ne passe que par sync().
+    this._need = new Set()
     const had = this.cells.size
     for (const cell of this.cells.values()) this._disposeCell(cell)
     this.cells.clear()
@@ -400,6 +565,8 @@ export class BlockGrid {
 
   _disposeCell(cell) {
     cell.disposed = true // gèle les fetchs async encore en vol (masque côtier)
+    // son MNT n'a plus de porteur : il passe au cache des DÉTACHÉS, borné
+    this._keepDetachedDem(cell.demKey, cell.demRaw)
     cell.aerial?.dispose?.() // AerialLayer dédié de la cellule (posé par main.js)
     if (cell.walls) {
       this.scene.remove(cell.walls)

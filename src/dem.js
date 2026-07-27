@@ -49,6 +49,78 @@ const BATHY_TILE_PX = 256
 // on mémorise les absences pour ne pas les redemander à chaque déplacement
 const bathyMisses = new Set()
 
+// ─────────────────────────── NE PAS REDEMANDER CE QU'ON A DÉJÀ ───────────────
+//
+// Mesuré sur le damier du Var à z12 (campagne de référence, cf.
+// docs/superpowers/plans/2026-07-27-damier-optimisation.md) : 6 405 requêtes
+// pour 260 URL uniques, dont UNE SEULE tuile bathy demandée 2 070 fois. Deux
+// mémoires, et elles n'ont pas la même durée de vie — parce que la contrainte
+// qui prime n'est pas la vitesse mais le tas JS, mesuré à 1,76 Go sur un damier
+// plein.
+//
+// · LES TUILES D'ALTITUDE ne se retiennent QUE LE TEMPS DU VOL. Elles se
+//   partagent peu entre dalles — le damier aligne des grilles de tuiles
+//   disjointes — SAUF EN SURZOOM : au-delà du maxZoom de la source, deux dalles
+//   voisines remontent au même ancêtre, donc à la même URL (overzoomTile).
+//   C'est sans danger, et même profitable : la mémoire en vol dédoublonne ce
+//   partage-là comme le reste. La redondance qui coûtait, elle, était
+//   temporelle — la même dalle relancée avant que sa première demande ne soit
+//   revenue. Les garder APRÈS coup serait un cache d'images de 1 Mo pièce, pour
+//   un partage marginal et sur un tas déjà à 1,76 Go.
+// · LES TUILES BATHY, elles, se partagent MASSIVEMENT : nos tuiles s'arrêtent à
+//   z8, donc les 9 cases d'un MNT z12 lisent le MÊME ancêtre, et les 25 dalles
+//   du damier aussi. Une poignée de fichiers de 256² : les mémoriser coûte
+//   quelques centaines de Ko et supprime des milliers de requêtes.
+const tilesEnVol = new Map() // url → Promise<ImageBitmap|null>, purgée à l'atterrissage
+
+function enUnSeulExemplaire(url, charger) {
+  const vol = tilesEnVol.get(url)
+  if (vol) return vol
+  const p = charger()
+  tilesEnVol.set(url, p)
+  // ⚠️ `p.then(fini, fini)` et pas `p.finally()` : on veut ABSORBER le rejet de
+  // cette branche de surveillance, sinon chaque tuile en panne lèverait un
+  // unhandledrejection à côté de l'appelant qui, lui, l'a bien traité.
+  const fini = () => {
+    if (tilesEnVol.get(url) === p) tilesEnVol.delete(url)
+  }
+  p.then(fini, fini)
+  return p
+}
+
+// LRU des tuiles bathy TROUVÉES. 32 entrées de 256²·4 o = 8 Mo au pire absolu ;
+// en pratique un damier n'en touche qu'une poignée.
+const BATHY_MEMO_MAX = 32
+const bathyHits = new Map() // url → Promise<ImageBitmap>
+
+function loadBathyTile(url) {
+  const memo = bathyHits.get(url)
+  if (memo) {
+    bathyHits.delete(url)
+    bathyHits.set(url, memo) // ré-insertion = most-recently-used
+    return memo
+  }
+  const p = (async () => {
+    const r = await fetch(url)
+    if (!r.ok) throw new Error('miss')
+    return createImageBitmap(await r.blob())
+  })()
+  bathyHits.set(url, p)
+  // une absence n'a rien à faire ici : c'est bathyMisses qui la retient
+  p.then(null, () => {
+    if (bathyHits.get(url) === p) bathyHits.delete(url)
+  })
+  while (bathyHits.size > BATHY_MEMO_MAX) bathyHits.delete(bathyHits.keys().next().value)
+  return p
+}
+
+/** Remise à zéro des mémoires de tuiles — tests uniquement. */
+export function _resetTileCaches() {
+  tilesEnVol.clear()
+  bathyHits.clear()
+  bathyMisses.clear()
+}
+
 // Zoom max réellement servi pour la dernière zone chargée — l'UI s'en sert pour
 // dire « zoom maximum atteint ». null tant qu'aucun DEM n'a été chargé.
 let lastMaxZoom = null
@@ -279,20 +351,22 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
 // Une tuile d'altitude → ImageBitmap, `null` si elle n'existe pas (404), et
 // DemSourceError si c'est la SOURCE qui a un problème (réseau, 5xx, DNS, image
 // indécodable — un navigateur sans WebP, par exemple).
-async function fetchTerrainTile(source, t) {
-  let res
-  try {
-    res = await fetch(source.url(t.z, t.x, t.y))
-  } catch (err) {
-    throw new DemSourceError(`${source.id} ${t.z}/${t.x}/${t.y} → ${err?.message || err}`)
-  }
-  if (res.status === 404) return null
-  if (!res.ok) throw new DemSourceError(`${source.id} ${t.z}/${t.x}/${t.y} → HTTP ${res.status}`)
-  try {
-    return await createImageBitmap(await res.blob())
-  } catch (err) {
-    throw new DemSourceError(`${source.id} ${t.z}/${t.x}/${t.y} illisible → ${err?.message || err}`)
-  }
+function fetchTerrainTile(source, t) {
+  return enUnSeulExemplaire(source.url(t.z, t.x, t.y), async () => {
+    let res
+    try {
+      res = await fetch(source.url(t.z, t.x, t.y))
+    } catch (err) {
+      throw new DemSourceError(`${source.id} ${t.z}/${t.x}/${t.y} → ${err?.message || err}`)
+    }
+    if (res.status === 404) return null
+    if (!res.ok) throw new DemSourceError(`${source.id} ${t.z}/${t.x}/${t.y} → HTTP ${res.status}`)
+    try {
+      return await createImageBitmap(await res.blob())
+    } catch (err) {
+      throw new DemSourceError(`${source.id} ${t.z}/${t.x}/${t.y} illisible → ${err?.message || err}`)
+    }
+  })
 }
 
 // bilinear sample of the height grid at fractional pixel coords
@@ -359,9 +433,10 @@ async function loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx }) {
             const url = BATHY_URL(t.z, t.x, t.y)
             if (bathyMisses.has(url)) continue
             try {
-              const r = await fetch(url)
-              if (!r.ok) throw new Error('miss')
-              const img = await createImageBitmap(await r.blob())
+              // TROUVÉE ⇒ MÉMORISÉE. Les 9 cases de ce damier lisent le même
+              // ancêtre z8, et les 25 dalles du damier de blocs aussi : sans
+              // cette mémoire, une seule tuile partait 2 070 fois.
+              const img = await loadBathyTile(url)
               // surzoom : on n'agrandit qu'une SOUS-FENÊTRE de l'ancêtre — la
               // sous-fenêtre se mesure sur la tuile BATHY (256 px), la case de
               // destination sur la tuile d'altitude (256 ou 512 px)
