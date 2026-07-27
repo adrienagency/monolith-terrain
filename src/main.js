@@ -3929,7 +3929,9 @@ async function openExportUI() {
     import('./ui/export-modal.js'),
     import('./export-recorder.js'),
   ])
-  if (!recorder) recorder = new Recorder({ renderer })
+  // composer + camera : l'enregistreur en a besoin pour la taille forcée (2K,
+  // 4K…), qui redimensionne la chaîne de rendu le temps de la capture
+  if (!recorder) recorder = new Recorder({ renderer, composer, camera })
   openExportModal({
     renderer,
     composer,
@@ -4150,8 +4152,8 @@ const quickCore = IS_EMBED ? null : buildQuickCore({
   openAtelier: () => panelCtx.openAtelier?.(),
   openStudio: () => panelCtx.openStudio?.(),
   // « Explorer » du mode simple choisit AUSSI le mode de travail : sans cela,
-  // une session quittée en Studio laissait les panneaux Explorer et Carte
-  // éteints (wm-off) — le dock s'ouvrait sur du vide. elemBar est construit
+  // une session quittée en Studio laissait le panneau Explorer éteint
+  // (wm-off) — le dock s'ouvrait sur du vide. elemBar est construit
   // plus bas ; l'appel, lui, n'a lieu qu'au clic.
   setWorkMode: (id) => elemBar?.setMode(id),
 })
@@ -4586,11 +4588,11 @@ const explorePanel = buildExplorePanel({
   },
 })
 
-// Map panel — LEFT dock, wedged between Explore and Scan (Explore, Map, Scan,
-// Camera, Route) per Adrien. Built HERE, after Explore and before Scan, because
-// panels dock in construction order within a column (see shell.js Panel).
-// Holds the cartographic layers (roads/water/places) plus the contour/grid/
-// marker controls relocated out of Create's old "Map style" section.
+// Panneau Carte — rail GAUCHE, en TÊTE du mode Studio (au-dessus de Terrain).
+// Il porte les calques cartographiques (routes, eau, lieux) et les réglages
+// courbes / grille / repères : de l'habillage, pas de la navigation — d'où le
+// Studio et non Explorer. L'ordre de construction ne décide de rien ici, c'est
+// le ré-append explicite du dock plus bas qui pose la pile.
 const mapPanel = buildMapPanel({
   params,
   u: () => terrain.mapUniforms,
@@ -4691,8 +4693,11 @@ if (!IS_EMBED) {
     // la Caméra n'est plus listée ici : elle a quitté le dock pour le menu de
     // la topbar, et wm-off (display:none) l'aurait éteinte hors mode Explorer —
     // le menu se serait ouvert VIDE
-    explorer: () => [explorePanel, mapPanel],
-    studio: () => [templatesPanel, shadersPanel, fondsPanel, elementsPanel, imagePanel],
+    // Carte appartient au STUDIO, pas à Explorer (retour d'usage Adrien) : ses
+    // calques — routes, eau, lieux, contours, repères — servent à HABILLER la
+    // carte, jamais à se déplacer dedans. Explorer garde son seul panneau.
+    explorer: () => [explorePanel],
+    studio: () => [mapPanel, templatesPanel, shadersPanel, fondsPanel, elementsPanel, imagePanel],
     parcours: () => [routePanel],
   }
   const allWorkPanels = () => Object.values(WORKMODE_PANELS).flatMap((f) => f())
@@ -4704,12 +4709,14 @@ if (!IS_EMBED) {
     if (id === 'parcours') routePanel.setCollapsed(false)
     try { localStorage.setItem(WORKMODE_KEY, id) } catch {}
   }
-  // ordre visuel du rail gauche en mode Studio : Terrain → Fonds → Éléments
-  // → Effets, APRÈS les panneaux Explorer/Parcours (masqués hors mode) —
-  // append DÉPLACE les nœuds
+  // ordre visuel du rail gauche en mode Studio : Carte → Terrain → Fonds →
+  // Éléments → Effets. Carte passe DEVANT tout le monde (demande Adrien : au
+  // dessus de Terrain) ; l'ordre du DOM est le seul ordre — le rail ne trie
+  // rien et le repli d'un panneau ne le rebat pas (shell.js). Explorer et
+  // Parcours suivent, masqués hors de leur mode. append DÉPLACE les nœuds.
   {
     const dock = explorePanel.root.parentElement
-    for (const p of [explorePanel, mapPanel, routePanel, shadersPanel, fondsPanel, elementsPanel, imagePanel]) dock.append(p.root)
+    for (const p of [mapPanel, shadersPanel, fondsPanel, elementsPanel, imagePanel, explorePanel, routePanel]) dock.append(p.root)
   }
   const initialMode = (() => { try { return localStorage.getItem(WORKMODE_KEY) } catch { return null } })() || 'explorer'
   elemBar = buildElemBar({
