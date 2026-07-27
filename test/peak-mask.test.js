@@ -526,6 +526,50 @@ test('findPeak ne lance pas de seconde requête si la première suffit', async (
   assert.equal(p.ele, 4808)
 })
 
+// LE REPLI DOIT SURVIVRE À LA PANNE DE L'ÉTAGE QU'IL REMPLACE. Overpass rend
+// régulièrement 429/504 (mesuré le même jour sur quatre miroirs, dont un 504
+// après 31 s sur la requête « Mont Blanc » qui avait rendu 14 éléments en 1,3 s
+// une minute plus tôt). Tant que l'échec de l'étage 1 sortait de la fonction, il
+// emportait l'étage 2 avec lui — celui-là même qui existe pour ça : « Mont
+// Blanc » rendait null en 8,9 s et retombait sur la Haute-Savoie, alors que
+// Nominatim + regex bornée le résolvent en 3,4 s (« Mont Blanc / Monte
+// Bianco », 4807,3 m — mesuré). « Ventoux » masquait la panne : son étage 1
+// répond 200 avec zéro correspondance, donc sans jamais jeter.
+test('un hoquet d’Overpass à l’étage 1 n’emporte pas le repli', async () => {
+  const vues = []
+  const fakeFetch = async (url, init) => {
+    vues.push(String(url))
+    if (String(url).includes('nominatim')) return { ok: true, json: async () => [{ lat: '45.8327', lon: '6.8652' }] }
+    // 1ʳᵉ requête Overpass : la panne. Overpass sert alors une page d'erreur
+    // XML, que `.json()` ne sait pas lire — d'où le json() qui jette aussi.
+    if (vues.filter((u) => !u.includes('nominatim')).length === 1) {
+      return { ok: false, status: 504, json: async () => { throw new Error('Unexpected token <') } }
+    }
+    return {
+      ok: true,
+      json: async () => ({
+        elements: [
+          { type: 'node', id: 1, lat: 45.8326, lon: 6.8652, tags: { natural: 'peak', name: 'Mont Blanc / Monte Bianco', 'name:fr': 'Mont Blanc', ele: '4807.3' } },
+        ],
+      }),
+    }
+  }
+  const p = await findPeak('Mont Blanc', { fetchImpl: fakeFetch })
+  assert.ok(p, 'l’étage 2 doit rattraper la panne de l’étage 1')
+  assert.equal(p.ele, 4807.3)
+  assert.equal(vues.length, 3, `overpass en panne, nominatim, overpass borné — vu : ${vues.length}`)
+  assert.ok(vues[1].includes('nominatim'), `2ᵉ appel : ${vues[1]}`)
+})
+
+// La panne de Nominatim ne doit pas davantage jeter : sans emprise, il n'y a
+// simplement plus rien à tenter (la regex globale expire, voir l'entête).
+test('findPeak rend null, sans jeter, quand les deux étages tombent', async () => {
+  const ko = async (url) => (String(url).includes('nominatim')
+    ? { ok: false, status: 429, json: async () => ({}) }
+    : { ok: false, status: 504, json: async () => ({}) })
+  assert.equal(await findPeak('Mont Blanc', { fetchImpl: ko }), null)
+})
+
 test('findPeak rend null au lieu de jeter quand Overpass tombe', async () => {
   const ko = async () => ({ ok: false, status: 504, json: async () => ({}) })
   assert.equal(await findPeak('Mont Blanc', { fetchImpl: ko }), null)

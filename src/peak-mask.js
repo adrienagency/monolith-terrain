@@ -564,6 +564,17 @@ export function rankPeakCandidates(elements, name) {
 //      rendues cherche le sommet sur place — « Ventoux » → Mont Ventoux 1910 m,
 //      « Grand Ballon » → 1424 m (mesurés). Un nom qu'aucun des deux ne
 //      rapproche du bon endroit rend null : c'est assumé, pas masqué.
+//
+// ⚠️ CHAQUE ÉTAGE TOMBE SEUL, et c'est LOAD-BEARING. Un seul `try` autour des
+// deux faisait sortir la fonction au premier hoquet d'Overpass, donc SANS
+// jamais lancer le repli — celui-là même qui existe pour ça. Mesuré sur la
+// requête « Mont Blanc » : 14 éléments en 1,3 s, puis 504 après 31 s sur le
+// même serveur une minute plus tard ; corps de requête identique bit à bit,
+// classement rendant bien « Mont Blanc / Monte Bianco » 4807,3 m en tête sur
+// trois miroirs indépendants. Le sommet était donc introuvable par intermittence
+// alors que l'étage 2 le résout en 3,4 s (Nominatim 0,3 s + regex bornée 3,1 s).
+// « Ventoux » masquait la panne : son étage 1 répond 200 avec zéro
+// correspondance — il ne jette pas, donc le repli s'exécutait toujours.
 export async function findPeak(
   name,
   { fetchImpl = fetch, endpoint = OVERPASS, nominatim = NOMINATIM, limit = 60, nearDeg = NEAR_DEG } = {}
@@ -583,28 +594,39 @@ export async function findPeak(
     if (!r.ok) throw new Error(`overpass → HTTP ${r.status}`)
     return rankPeakCandidates((await r.json()).elements, n)
   }
-  try {
-    const exact = await askOverpass({ exact: true })
-    if (exact.length) return exact[0]
+  // Le filet est posé étage par étage, jamais autour des deux : voir l'entête.
+  // Un étage en panne rend null et laisse le suivant tenter sa chance ; un
+  // étage qui répond « rien » rend une liste vide. Les deux mènent au repli,
+  // mais seul le second est une réponse.
+  const tenter = async (quoi, fn) => {
+    try {
+      return await fn()
+    } catch (err) {
+      console.warn(`findPeak (${quoi}) :`, err.message)
+      return null
+    }
+  }
 
-    // ÉTAGE 2 — localiser d'abord, qualifier ensuite.
+  const exact = await tenter('nom exact', () => askOverpass({ exact: true }))
+  if (exact?.length) return exact[0]
+
+  // ÉTAGE 2 — localiser d'abord, qualifier ensuite.
+  const hits = await tenter('nominatim', async () => {
     const r = await fetchImpl(`${nominatim}?format=jsonv2&limit=3&q=${encodeURIComponent(n)}`, {
       headers: { Accept: 'application/json' },
     })
     if (!r.ok) throw new Error(`nominatim → HTTP ${r.status}`)
-    const bboxes = []
-    for (const h of (await r.json()) || []) {
-      const la = parseFloat(h.lat)
-      const lo = parseFloat(h.lon)
-      if (!Number.isFinite(la) || !Number.isFinite(lo)) continue
-      bboxes.push({ s: la - nearDeg, w: lo - nearDeg, n: la + nearDeg, e: lo + nearDeg })
-    }
-    // sans emprise, pas de regex : elle expirerait (voir l'entête)
-    if (!bboxes.length) return null
-    const large = await askOverpass({ exact: false, bboxes })
-    return large[0] || null
-  } catch (err) {
-    console.warn('findPeak:', err.message)
-    return null
+    return await r.json()
+  })
+  const bboxes = []
+  for (const h of hits || []) {
+    const la = parseFloat(h.lat)
+    const lo = parseFloat(h.lon)
+    if (!Number.isFinite(la) || !Number.isFinite(lo)) continue
+    bboxes.push({ s: la - nearDeg, w: lo - nearDeg, n: la + nearDeg, e: lo + nearDeg })
   }
+  // sans emprise, pas de regex : elle expirerait (voir l'entête)
+  if (!bboxes.length) return null
+  const large = await tenter('regex bornée', () => askOverpass({ exact: false, bboxes }))
+  return large?.[0] || null
 }
