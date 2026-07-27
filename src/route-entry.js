@@ -83,6 +83,134 @@ function scan(content, depth) {
   return false
 }
 
+// --------------------------------------------------- points de passage
+//
+// Deuxième question posée au même contenu, et pour la même raison : les points
+// de passage d'un parcours ne doivent JAMAIS survivre au chargement du suivant.
+// Le bug ne se voyait qu'au DEUXIÈME chargement — on rechargeait par-dessus une
+// course dont les repères étaient restés là, accrochés à la nouvelle trace.
+//
+// Trois réponses, et la nuance entre les deux dernières est tout l'enjeu :
+//   [...]  ce parcours porte ces points-là
+//   []     parcours neuf SANS point : remise à zéro
+//   null   aucun parcours ici (un gabarit, une palette) : ON NE TOUCHE À RIEN
+// Confondre [] et null effacerait les repères d'une course en cours à chaque
+// changement de palette.
+
+// <wpt> = un repère posé sur la carte. Même lecture à la main que PT_TAG_RE
+// (voir plus haut) : la décision doit tourner dans node, et un GPX de course
+// pèse plusieurs Mo. Le contenu de la balise est capturé pour y pêcher le
+// <name>/<ele> ; la forme auto-fermée (<wpt ... />) n'en a pas.
+const WPT_RE = /<wpt\b([^>]*?)(\/>|>([\s\S]*?)<\/wpt\s*>)/gi
+const TAG_TEXT = (body, tag) => new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}\\s*>`, 'i').exec(body || '')?.[1]
+
+// forme commune aux deux provenances (un <wpt> géoréférencé, une ligne de
+// projet déjà exprimée en km) : c'est resolveWaypointKm() qui les réconcilie
+const wp = (o) => ({
+  km: Number.isFinite(o.km) ? o.km : null,
+  lat: isLat(o.lat) ? o.lat : null,
+  lon: isLon(o.lon) ? o.lon : null,
+  name: String(o.name ?? '').trim(),
+  alt: Number.isFinite(o.alt) ? o.alt : null,
+  pictos: Array.isArray(o.pictos) ? o.pictos.map(String) : [],
+  cutoff: String(o.cutoff ?? ''),
+})
+
+function gpxWpts(text) {
+  const out = []
+  WPT_RE.lastIndex = 0 // regex globale partagée — voir gpxPointCount()
+  let m
+  while ((m = WPT_RE.exec(text))) {
+    const attrs = m[1] || ''
+    const body = m[3] || ''
+    const la = LAT_RE.exec(attrs)
+    const lo = LON_RE.exec(attrs)
+    if (!la || !lo) continue
+    const lat = Number(la[1])
+    const lon = Number(lo[1])
+    if (!isLat(lat) || !isLon(lon)) continue
+    out.push(wp({ lat, lon, name: TAG_TEXT(body, 'name'), alt: Number(TAG_TEXT(body, 'ele')) }))
+  }
+  return out
+}
+
+function incomingFromText(text) {
+  if (typeof text !== 'string' || !text.trim()) return null
+  if (looksJson(text)) {
+    let parsed
+    try { parsed = JSON.parse(text) } catch { parsed = null }
+    if (parsed != null) return incomingWaypoints(parsed, 1)
+  }
+  // Une trace <trkpt>/<rtept> : les <wpt> qui l'accompagnent sont des repères.
+  if (gpxPointCount(text) >= MIN_POINTS) return gpxWpts(text)
+  // Pas de trace : parseGpx() retombe sur les <wpt> pour DESSINER la ligne (voir
+  // gpx.js) — les reprendre ici doublerait chaque borne d'un road-book, une fois
+  // en tracé, une fois en cartouche. C'est bien un parcours neuf : [], pas null.
+  if (gpxWpts(text).length >= MIN_POINTS) return []
+  return null
+}
+
+export function incomingWaypoints(content, depth = 0) {
+  if (content == null || depth > 3) return null
+  try {
+    if (typeof content === 'string') return incomingFromText(content)
+    if (typeof content !== 'object' || Array.isArray(content)) return null
+
+    // La trace d'abord : sans elle, rien n'est arrivé — un projet à la trace
+    // vide ne remet rien à zéro, exactement comme un gabarit.
+    let fromTrack = null
+    for (const k of TRACK_KEYS) {
+      if (typeof content[k] !== 'string') continue
+      const r = incomingWaypoints(content[k], depth + 1)
+      if (r !== null) { fromTrack = r; break }
+    }
+    if (fromTrack === null && pointsCount(content.points) >= MIN_POINTS) fromTrack = []
+    if (fromTrack === null) return null
+
+    // Le projet fait foi sur le GPX qu'il embarque : l'organisateur a réglé ses
+    // points dans le studio (noms, pictos, barrières horaires), la montre non.
+    const own = content.race?.waypoints ?? content.waypoints
+    if (Array.isArray(own) && own.length) return own.map((w) => wp(w || {}))
+    return fromTrack
+  } catch { return null }
+}
+
+// Un repère à 40 km de la trace n'appartient pas à ce parcours : l'accrocher au
+// point le plus proche poserait un cartouche mensonger au bord du tracé. 2 km
+// laisse passer un parking ou une gare volontairement décalés du chemin.
+const SNAP_MAX_KM = 2
+
+// équirectangulaire : sur 2 km l'écart à la haversine est sous le mètre, et on
+// compare des distances entre elles, jamais à une mesure réelle
+function km2(a, b) {
+  const dx = (a.lon - b.lon) * 111.32 * Math.cos((a.lat * Math.PI) / 180)
+  const dy = (a.lat - b.lat) * 110.57
+  return dx * dx + dy * dy
+}
+
+// Résout le km de chaque point de passage contre la trace qui vient d'arriver,
+// et rend la liste triée, prête pour raceState. Pure : `track` est simplement
+// { points:[{lat,lon,ele}], cumKm:[] } — la forme que gpx.js construit déjà.
+export function resolveWaypointKm(list, track, { maxKm = SNAP_MAX_KM } = {}) {
+  if (!Array.isArray(list)) return []
+  const pts = track?.points
+  const cumKm = track?.cumKm
+  const out = []
+  for (const w of list) {
+    if (Number.isFinite(w?.km)) { out.push({ ...w }); continue }
+    if (!isLat(w?.lat) || !isLon(w?.lon) || !pts?.length || !cumKm?.length) continue
+    let best = -1
+    let bestD = Infinity
+    for (let i = 0; i < pts.length; i++) {
+      const d = km2(w, pts[i])
+      if (d < bestD) { bestD = d; best = i }
+    }
+    if (best < 0 || bestD > maxKm * maxKm) continue
+    out.push({ ...w, km: cumKm[best] ?? 0, alt: w.alt ?? (Number.isFinite(pts[best].ele) ? pts[best].ele : null) })
+  }
+  return out.sort((a, b) => a.km - b.km)
+}
+
 // Ce contenu porte-t-il un parcours ? Accepte tout ce qui entre dans l'app :
 // texte GPX, texte JSON, bundle .shibumap-race analysé, payload de lien publié,
 // gabarit, trace déjà en mémoire. Ne lève jamais.
