@@ -35,17 +35,58 @@ export const GRID_R = 2 // rayon du damier : 2 → 5×5 max, centre exclu
 // 1 824 Mo de tas JS pour 23 voisines, contre 2 à 4 Go de limite pratique dans
 // Chrome. C'est le risque le plus sérieux du damier, devant la vitesse.
 //
-// La règle qui remplace l'héritage : aucun champ ne dépasse quatre fois la
-// densité du maillage qui le porte (test/damier-memoire.test.js le verrouille).
+// La règle qui remplace l'héritage : aucune TEXTURE ne dépasse quatre fois la
+// densité du maillage qui la porte (test/damier-memoire.test.js le verrouille,
+// champ par champ et nommément — il ne l'a pas toujours fait, cf. plus bas).
 //
 // ⚠️ Le MNT, lui, N'EST PAS RÉDUIT et ce n'est pas un oubli : il est lu par le
 // PROCESSEUR (veille devant l'étrave des bateaux, tracé de la jupe de découpe,
 // orographie des nuages), pas seulement par la carte graphique. Le diviser
 // échangerait de la mémoire contre de la QUALITÉ, notamment sur la précision du
-// contour de découpe aux jointures — décision d'Adrien, pas du code.
-const NEIGHBOUR_RES = 256 // maillage des voisins : contexte, pas héros (4,6 sommets/u)
+// contour de découpe aux jointures — décision d'Adrien, pas du code. C'est la
+// SEULE exception, elle est délibérée, et le test la verrouille comme telle
+// pour qu'elle reste une exception et ne devienne pas une dérive.
+//
+// ⚠️ LE MASQUE DE MER A MANQUÉ CE CHANTIER, et la règle ci-dessus s'annonçait
+// donc plus large qu'elle n'était tenue : `computeTerrainJob` le calculait sur
+// le MNT PLEIN, soit 1536² sur une voisine maillée à 256 — **6,00×**, 2,25 Mo
+// par dalle et 54 Mo sur un damier plein. Un commentaire juste sur trois champs
+// et faux sur le quatrième coûte plus cher qu'un commentaire absent.
+//
+// ⚠️ ET LE PLAFOND N'ÉTAIT PAS EXACT. `analyzeDem` ne savait diviser que par un
+// ENTIER : demander 1024 à un MNT de 1536 prenait le facteur 2 et rendait 768 —
+// le même octet pour octet qu'un plafond de 768. Remonter la constante sans
+// toucher au rééchantillonnage aurait donc été un correctif qui ne corrige rien,
+// tout en se relisant comme appliqué. C'est `resampleField` qui rend la valeur
+// exacte, et le test le dit nommément.
+//
+// LES TROIS DENSITÉS, dans la même unité, pour qu'un écart saute aux yeux — le
+// maillage voisin porte 257 sommets sur 56 unités-monde, soit 4,59 sommets/u :
+//   masque côtier 1024² → 18,29 px/u → 3,99× le maillage
+//   analyse       1024² → 18,29 px/u → 3,99×
+//   masque de mer 1024² → 18,29 px/u → 3,99×
+// L'analyse à 1024 ne « casse » donc PAS la règle des 4× : elle se pose PILE au
+// niveau du masque côtier, qui y était déjà.
+//
+// CE QUE ÇA REND, ET CE QUE ÇA COÛTE — mesuré sur MNT réel 1536² (Alpes
+// valaisannes 45,95/7,30 à z11, Chrome piloté en CDP, ramassage FORCÉ). Perte
+// de signal = écart-type de ce que la reconstruction bilinéaire ne restitue pas,
+// rapporté à l'écart-type du champ pleine résolution :
+//
+//   canal R — le peigné des crêtes, que le shader multiplie par trois
+//                                  36,2 %  →  23,1 %
+//   canal G — l'ombrage            26,0 %  →  19,4 %
+//   canal B — l'humidité            4,3 %  →   4,1 %
+//
+// Et le SOLDE, tous plafonds confondus, sur un damier de 24 dalles peuplé par
+// sync() : 719,3 Mo de tas JS avant, 701,3 Mo après — **−18,0 Mo**, reproduit à
+// 0,1 Mo près sur trois bascules alternées. L'analyse coûte +1,8 Mo par dalle,
+// le masque de mer et sa landMask en rendent 2,6 : le peigné est gratuit, et il
+// reste de la monnaie.
+const NEIGHBOUR_RES = 256 // maillage des voisins : contexte, pas héros (4,59 sommets/u)
 export const NEIGHBOUR_COAST_SIZE = 1024 // masque côtier (18,3 px/u) — 2048² au centre
-export const NEIGHBOUR_ANALYSIS_SIZE = 768 // analyse de relief (13,7 px/u) — MNT au centre
+export const NEIGHBOUR_ANALYSIS_SIZE = 1024 // analyse de relief (18,3 px/u) — MNT au centre
+export const NEIGHBOUR_SEA_SIZE = 1024 // masque de mer (18,3 px/u) — MNT au centre
 export { NEIGHBOUR_RES }
 
 const clampLat = (lat) => Math.min(85.05, Math.max(-85.05, lat))
@@ -477,6 +518,7 @@ export class BlockGrid {
     const terrain = new Terrain(p, {
       offset: { x: i * TERRAIN_SIZE, z: j * TERRAIN_SIZE },
       analysisMax: NEIGHBOUR_ANALYSIS_SIZE,
+      seaMax: NEIGHBOUR_SEA_SIZE,
       shareFrom: this.getMainTerrain?.() || null,
     })
     terrain.setDem(dem)

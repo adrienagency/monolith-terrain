@@ -8,7 +8,7 @@ import { landMaskFromImage } from './sea-mask.js'
 // L'analyse de relief et le masque de mer ne sont plus calcules ici : ils
 // partent dans un Worker (terrain-jobs.js). ~470 ms de fil principal fige par
 // reconstruction, sur MNT 1536². Le calcul est identique octet pour octet.
-import { scheduleTerrainJob, jobStillValid } from './terrain-jobs.js'
+import { scheduleTerrainJob, jobStillValid, jobCouvertParEnVol } from './terrain-jobs.js'
 import { TEXTURE_BUILDERS } from './material-textures.js'
 import { MATERIALS } from './material-catalog.js'
 import { FX_GLSL } from './fx-glsl.js' // shared with src/ui/fx-thumbs.js — see that file's header
@@ -91,12 +91,17 @@ export class Terrain {
   // locales au bloc. Le bloc principal garde (0,0) : comportement identique.
   // opts.analysisMax : plafond du côté de l'analyse de relief (voir _buildFields).
   // 0 = aucun plafond, c'est le bloc central, le héros.
+  // opts.seaMax : le MÊME plafond, pour le masque de mer. Séparé parce que les
+  // deux champs n'ont ni le même poids par pixel (RGBA + mipmaps contre R8) ni
+  // la même raison d'être fin — les confondre un jour coûterait de la mer
+  // crénelée pour économiser sur le peigné, ou l'inverse.
   // opts.shareFrom : le Terrain dont ce bloc EMPRUNTE rampe, rugosité et bump
   // (voir shareTexturesFrom). Posé AVANT rebuildRamp/rebuildRoughness, sinon la
   // construction cuit les deux textures pour les jeter à la ligne suivante.
   constructor(params, opts = {}) {
     this.blockOffset = { x: opts.offset?.x ?? 0, z: opts.offset?.z ?? 0 }
     this.analysisMax = opts.analysisMax ?? 0
+    this.seaMax = opts.seaMax ?? 0
     if (opts.shareFrom) this.shareTexturesFrom(opts.shareFrom)
     // Physical material so the relief can turn to GLASS: `transmission` is real
     // PBR refraction (three renders the scene behind into a buffer), giving the
@@ -1258,15 +1263,31 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     this.mesh.geometry = geo
   }
 
+  // Le côté du masque de mer de CE bloc : le MNT au centre, le plafond sur une
+  // dalle voisine (voir seaMax). Une seule source de vérité, parce que deux
+  // consommateurs doivent tomber d'accord au pixel près — la landMask ci-dessous
+  // et le travail posté au Worker.
+  _seaSize(dem) {
+    const max = this.seaMax | 0
+    return max > 0 && dem.size > max ? max : dem.size
+  }
+
   // landMask depuis le masque côtier (si reçu) : rééchantillonné à la grille
-  // du DEM et mis en cache — recalculé seulement si l'image ou dem.size change.
+  // du MASQUE DE MER et mis en cache — recalculé seulement si l'image ou cette
+  // taille change.
   // ⚠️ L'IDENTITÉ de ce tableau sert de clé de péremption (voir _buildFields) :
   // le remplacer par un tableau neuf au même contenu périmerait pour rien un
   // calcul encore juste.
+  // ⚠️ ET LA TAILLE EST CELLE DU MASQUE DE MER, PAS CELLE DU MNT. buildSeaMask
+  // indexe la landMask cellule pour cellule : la caler sur le MNT pendant que le
+  // masque est plafonné rendrait des polders décalés — un défaut MUET, pas une
+  // erreur. (landMaskFromImage rééchantillonne depuis le masque côtier 1024²,
+  // il ne perd donc rien à cuire directement à la bonne taille.)
   _landMaskFor(dem) {
     if (!this._coastImage) return null
-    if (!this._coastLand || this._coastLand.img !== this._coastImage || this._coastLand.size !== dem.size)
-      this._coastLand = { img: this._coastImage, size: dem.size, mask: landMaskFromImage(this._coastImage, dem.size) }
+    const taille = this._seaSize(dem)
+    if (!this._coastLand || this._coastLand.img !== this._coastImage || this._coastLand.size !== taille)
+      this._coastLand = { img: this._coastImage, size: taille, mask: landMaskFromImage(this._coastImage, taille) }
     return this._coastLand.mask
   }
 
@@ -1290,10 +1311,10 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // visible (zoom, exagération, template) l'utilisateur ne voit jamais l'état
   // intermédiaire. Il voit le voile, puis la carte finie — comme avant.
   //
-  // ⚠️ PÉREMPTION : la clé ne porte QUE le MNT, la landMask et le plafond
-  // d'analyse — les trois seules entrées du calcul. Une invalidation plus large
-  // (un compteur bumpé à chaque rebuild) jetterait des résultats encore justes
-  // à chaque coup de curseur d'exagération. Voir jobStillValid.
+  // ⚠️ PÉREMPTION : la clé ne porte QUE le MNT, la landMask et les deux plafonds
+  // — les seules entrées du calcul. Une invalidation plus large (un compteur
+  // bumpé à chaque rebuild) jetterait des résultats encore justes à chaque coup
+  // de curseur d'exagération. Voir jobStillValid.
   _buildFields({ withAnalysis = true } = {}) {
     const dem = this.dem
     // ⚠️ Un terrain abandonné ne recuit PLUS RIEN, jamais. Sans ce garde-fou,
@@ -1305,6 +1326,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       this.mapUniforms.uSeaMaskOn.value = 0
       this.mapUniforms.uAnalysisOn.value = 0
       this._fieldKey = null
+      this._fieldsEnVol = null
       return (this.fieldsReady = Promise.resolve(null))
     }
     const landMask = this._landMaskFor(dem)
@@ -1315,11 +1337,20 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const naturel = this.mapUniforms.uColorMode.value === 1
     if (!naturel) this.mapUniforms.uAnalysisOn.value = 0
     const analyse = withAnalysis && naturel && !(this._analysisFor === dem && this.mapUniforms.uAnalysisOn.value)
-    // analysisMax : une dalle VOISINE n'a pas le maillage qui justifierait une
-    // analyse à la taille du MNT (voir block-grid.js). Le shader lit ce champ en
-    // UV MONDE, la taille lui est donc indifférente.
+    // analysisMax / seaMax : une dalle VOISINE n'a pas le maillage qui
+    // justifierait des champs à la taille du MNT (voir block-grid.js). Le shader
+    // lit les deux en UV MONDE, leur taille lui est donc indifférente.
     const maxSize = this.analysisMax | 0
-    this._fieldKey = { dem, landMask, maxSize }
+    const seaMax = this.seaMax | 0
+    // ⚠️ LE MÊME TRAVAIL EST DEMANDÉ DEUX FOIS À LA NAISSANCE D'UNE DALLE :
+    // rebuild() lance les champs, puis setColorMode les relance parce que
+    // uAnalysisOn vaut encore 0 — l'uniforme ne monte qu'à l'ARRIVÉE. On rend
+    // alors la promesse EN COURS au lieu de reposter (voir jobCouvertParEnVol,
+    // qui garde ouverte la porte du recalcul légitime).
+    const demande = { dem, landMask, maxSize, seaMax, analyse }
+    if (jobCouvertParEnVol(this._fieldsEnVol, demande)) return this.fieldsReady
+    this._fieldsEnVol = demande
+    this._fieldKey = { dem, landMask, maxSize, seaMax }
     // ⚠️ DEUX CLÉS, PAS UNE — et c'est un bug vu à l'écran, pas une précaution.
     // Le masque de mer dépend de la landMask ; l'analyse de relief n'en dépend
     // PAS (elle ne lit que les altitudes). Sur une dalle voisine, le trait de
@@ -1327,16 +1358,23 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // avec une clé commune, l'arrivée du trait de côte périmait une analyse
     // parfaitement juste et la dalle restait sans peigné à côté d'un centre
     // peigné. L'invalidation trop large coûte aussi cher que la trop laxiste.
-    const cleMer = { dem, landMask }
+    const cleMer = { dem, landMask, seaMax }
     const cleAnalyse = { dem, maxSize }
     return (this.fieldsReady = scheduleTerrainJob({
       key: { dem }, // le MNT périme TOUT ; le reste se juge champ par champ
-      job: { data: dem.data, size: dem.size, metersPerPixel: dem.metersPerPixel, maxSize, landMask, withAnalysis: analyse },
+      job: { data: dem.data, size: dem.size, metersPerPixel: dem.metersPerPixel, maxSize, seaMax, landMask, withAnalysis: analyse },
       current: () => this._fieldKey,
       apply: (r, actuel) => {
         if (jobStillValid(cleMer, actuel)) this._applySeaMask(r.sea, r.seaSize)
         if (r.analysis && jobStillValid(cleAnalyse, actuel)) this._applyAnalysis(r.analysis, r.analysisSize, dem)
       },
+    }).then((r) => {
+      // ⚠️ LE VOL SE TERMINE ICI, ET SEULEMENT S'IL EST TOUJOURS LE NÔTRE : un
+      // travail plus récent a pu prendre la place pendant celui-ci (arrivée du
+      // trait de côte, changement de zoom). L'effacer sans regarder rouvrirait
+      // le doublon sur le travail suivant.
+      if (this._fieldsEnVol === demande) this._fieldsEnVol = null
+      return r
     }))
   }
 
@@ -1352,6 +1390,10 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   cancelFields() {
     this._fieldKey = null
     this._fieldsOff = true
+    // ⚠️ et on lâche la trace du travail en vol : elle RETIENT le MNT et la
+    // landMask de la dalle qu'on détruit (9 Mo pour le premier). Le damier
+    // churn à chaque zoom — ce serait une fuite de tas par dalle détruite.
+    this._fieldsEnVol = null
   }
 
   // Le masque de mer, posé en texture (sea-mask.js). Échantillonné en XZ monde,

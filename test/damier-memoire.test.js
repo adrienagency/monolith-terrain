@@ -34,10 +34,11 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { coarsenField, analyzeDem } from '../src/terrain-analysis.js'
+import { coarsenField, resampleField, analyzeDem } from '../src/terrain-analysis.js'
+import { computeTerrainJob } from '../src/terrain-jobs.js'
 import { maskUniformity } from '../src/region-mask.js'
 import { traceSkirt } from '../src/region-skirt.js'
-import { NEIGHBOUR_RES, NEIGHBOUR_COAST_SIZE, NEIGHBOUR_ANALYSIS_SIZE } from '../src/block-grid.js'
+import { NEIGHBOUR_RES, NEIGHBOUR_COAST_SIZE, NEIGHBOUR_ANALYSIS_SIZE, NEIGHBOUR_SEA_SIZE } from '../src/block-grid.js'
 import { TERRAIN_SIZE } from '../src/terrain.js'
 
 // ------------------------------------------------- geste 1 · l'analyse de relief
@@ -92,6 +93,55 @@ test('analyzeDem ne grossit JAMAIS un champ déjà sous le plafond', () => {
   const data = new Float32Array(size * size)
   const r = analyzeDem({ data, size, metersPerPixel: 26 }, { maxSize: 768 })
   assert.equal(r.size, 16)
+})
+
+// ⚠️ LE PLAFOND EST EXACT, et il ne l'a pas toujours été. `coarsenField` ne sait
+// diviser que par un ENTIER : demander « au plus 1024 » à un MNT de 1536 prenait
+// le facteur 2 et rendait 768 — le MÊME résultat, octet pour octet, qu'un
+// plafond de 768. Le MNT de production fait exactement 1536² (Mapterhorn en
+// tuiles 512 px), donc remonter la constante sans toucher au rééchantillonnage
+// aurait été un correctif qui ne corrige rien tout en se relisant comme
+// appliqué. C'est le test qui l'aurait attrapé, et il est ici pour ça.
+test('le plafond d’analyse rend la taille DEMANDÉE, même à rapport non entier', () => {
+  const size = 1536 // la taille de production, pas un cas d'école
+  const data = new Float32Array(size * size)
+  for (let i = 0; i < data.length; i++) data[i] = ((i * 37) % 911) * 0.7
+  const r = analyzeDem({ data, size, metersPerPixel: 17.8 }, { maxSize: 1024 })
+  assert.equal(r.size, 1024, '1536 plafonné à 1024 doit rendre 1024, pas 768')
+  assert.notEqual(r.size, analyzeDem({ data, size, metersPerPixel: 17.8 }, { maxSize: 768 }).size)
+})
+
+test('resampleField retombe BIT À BIT sur coarsenField quand le rapport est entier', () => {
+  const size = 24
+  const src = new Float32Array(size * size)
+  for (let i = 0; i < src.length; i++) src[i] = Math.sin(i * 0.37) * 900
+  for (const [cible, facteur] of [[12, 2], [8, 3], [6, 4]]) {
+    const a = resampleField(src, size, cible)
+    const b = coarsenField(src, size, facteur)
+    assert.equal(a.size, b.size)
+    for (let i = 0; i < b.data.length; i++) assert.equal(a.data[i], b.data[i], `cible ${cible}, cellule ${i}`)
+  }
+})
+
+test('resampleField ne grossit jamais : cible nulle ou trop grande → la source telle quelle', () => {
+  const src = Float32Array.from([1, 2, 3, 4])
+  assert.equal(resampleField(src, 2, 0).data, src)
+  assert.equal(resampleField(src, 2, 2).data, src)
+  assert.equal(resampleField(src, 2, 8).data, src)
+})
+
+test('resampleField à rapport 3/2 moyenne bien les recouvrements partiels', () => {
+  // 3×3 → 2×2, f = 1,5 : la cellule (0,0) couvre [0;1,5)² — quatre sources avec
+  // les poids 1, 0,5, 0,5 et 0,25, soit une somme de poids de 2,25.
+  const src = Float32Array.from([
+    4, 8, 100,
+    12, 20, 100,
+    100, 100, 100,
+  ])
+  const r = resampleField(src, 3, 2)
+  assert.equal(r.size, 2)
+  const attendu = (4 * 1 + 8 * 0.5 + 12 * 0.5 + 20 * 0.25) / 2.25
+  assert.ok(Math.abs(r.data[0] - attendu) < 1e-4, `${r.data[0]} ≠ ${attendu}`)
 })
 
 // --------------------------------------- geste 2 · le masque de découpe uniforme
@@ -157,16 +207,64 @@ test('traceSkirt d’une dalle pleine échantillonne le relief sur toute la dall
 
 // ------------------------------------------- gestes 1 et 4 · les tailles voisines
 
+// ⚠️ CE TEST ÉTAIT PLUS ÉTROIT QUE LE COMMENTAIRE QU'IL VERROUILLAIT.
+// block-grid.js proclamait « aucun champ ne dépasse quatre fois la densité du
+// maillage qui le porte (test/damier-memoire.test.js le verrouille) » — or le
+// test ne connaissait que deux champs sur quatre. Le masque de mer, calculé sur
+// le MNT plein, était à 6,00× ; le MNT, lui, est une exception ASSUMÉE mais
+// rien ne le disait. Un commentaire juste sur la moitié de ce qu'il annonce est
+// pire qu'un commentaire absent : le prochain lecteur ne rouvre pas le dossier.
 test('les dalles voisines sont dimensionnées SUR ELLES-MÊMES, pas sur le bloc central', () => {
-  // Une voisine couvre 56 unités-monde. Densités visées, toutes exprimées dans
-  // la même unité pour qu'un écart saute aux yeux :
+  // Une voisine couvre 56 unités-monde et porte NEIGHBOUR_RES + 1 sommets sur
+  // ce côté. Densités toutes exprimées dans la même unité pour qu'un écart
+  // saute aux yeux :
   const parUnite = (n) => n / TERRAIN_SIZE
-  const maillage = parUnite(NEIGHBOUR_RES) // sommets par unité
+  const maillage = parUnite(NEIGHBOUR_RES + 1) // 4,59 sommets par unité
   assert.equal(NEIGHBOUR_RES, 256)
   assert.equal(NEIGHBOUR_COAST_SIZE, 1024)
-  assert.equal(NEIGHBOUR_ANALYSIS_SIZE, 768)
-  // aucun champ ne doit dépasser 4 fois la densité du maillage qui le porte —
-  // c'était 5,3 fois pour le masque côtier et 4,0 fois pour l'analyse
-  assert.ok(parUnite(NEIGHBOUR_COAST_SIZE) / maillage <= 4.01, 'masque côtier trop fin pour son maillage')
-  assert.ok(parUnite(NEIGHBOUR_ANALYSIS_SIZE) / maillage <= 3.01, 'analyse trop fine pour son maillage')
+  assert.equal(NEIGHBOUR_ANALYSIS_SIZE, 1024)
+  assert.equal(NEIGHBOUR_SEA_SIZE, 1024)
+  // TOUTES les textures de la dalle, nommément — pas seulement celles dont on
+  // se souvenait. 1024²/56 = 18,29 px/u contre 4,59 sommets/u : 3,99×, donc
+  // l'analyse à 1024 ne « casse » rien, elle se pose PILE au niveau du masque
+  // côtier, qui y était déjà.
+  for (const [nom, taille] of [
+    ['masque côtier', NEIGHBOUR_COAST_SIZE],
+    ['analyse de relief', NEIGHBOUR_ANALYSIS_SIZE],
+    ['masque de mer', NEIGHBOUR_SEA_SIZE],
+  ]) {
+    const rapport = parUnite(taille) / maillage
+    assert.ok(rapport <= 4, `${nom} trop fin pour son maillage : ${rapport.toFixed(2)}×`)
+  }
+})
+
+// ⚠️ LE MNT EST LA SEULE EXCEPTION, ET ELLE EST DÉLIBÉRÉE. Il est lu par le
+// PROCESSEUR (veille devant l'étrave des bateaux, tracé de la jupe de découpe,
+// orographie des nuages), pas seulement par la carte graphique : le réduire
+// échangerait de la mémoire contre de la QUALITÉ. Le test l'écrit pour que ça
+// reste une exception nommée et non une dérive qu'on redécouvre.
+test('le MNT, lui, n’est PAS réduit — exception assumée, pas oubli', () => {
+  const size = 96
+  const dem = { data: new Float32Array(size * size), size, metersPerPixel: 20 }
+  for (let i = 0; i < dem.data.length; i++) dem.data[i] = ((i * 13) % 401) - 50
+  const got = computeTerrainJob({ ...dem, maxSize: 32, seaMax: 32 })
+  // les champs plafonnent…
+  assert.equal(got.analysisSize, 32)
+  assert.equal(got.seaSize, 32)
+  // …et le MNT qu'on lui a donné n'a pas été touché : c'est TOUJOURS le tableau
+  // d'origine, à sa taille d'origine, que le fil principal continue de lire.
+  assert.equal(dem.data.length, size * size)
+  assert.equal(dem.size, 96)
+})
+
+// Le masque de mer PLAFONNE VRAIMENT côté travail déporté — la constante ne
+// suffit pas, c'est computeTerrainJob qui décide.
+test('le masque de mer d’une voisine sort à NEIGHBOUR_SEA_SIZE, pas à la taille du MNT', () => {
+  const size = 1536
+  const data = new Float32Array(size * size)
+  for (let i = 0; i < data.length; i++) data[i] = ((i * 7) % 233) - 30
+  const got = computeTerrainJob({ data, size, metersPerPixel: 17.8, seaMax: NEIGHBOUR_SEA_SIZE, withAnalysis: false })
+  assert.equal(got.seaSize, NEIGHBOUR_SEA_SIZE)
+  // 2,25 Mo → 1,00 Mo par dalle, soit 30 Mo rendus sur un damier plein
+  assert.equal(got.sea.length, NEIGHBOUR_SEA_SIZE ** 2)
 })
