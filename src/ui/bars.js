@@ -50,6 +50,10 @@ const ADV_KEY = 'shibumap-ui-advanced'
 function isAdvanced() {
   try { return localStorage.getItem(ADV_KEY) === '1' } catch { return true }
 }
+// La PRÉFÉRENCE, pas l'affichage : `body.ce-simple` ment pendant l'accueil, qui
+// force le cœur simple sans toucher au choix de l'utilisateur (elembar.isSimple).
+// Qui doit décider « avancé ou pas » lit ceci, jamais la classe du body.
+export const isUiAdvanced = () => isAdvanced()
 export function initUiLevel() {
   document.body.classList.toggle('ce-simple', !isAdvanced())
 }

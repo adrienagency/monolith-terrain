@@ -73,7 +73,8 @@ import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
 import { showNotice } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
-import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickCore, buildShibuChrome, initUiLevel, buildAdvToggle, focusSearch } from './ui/bars.js'
+import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickCore, buildShibuChrome, initUiLevel, buildAdvToggle, focusSearch, isUiAdvanced } from './ui/bars.js'
+import { routeEntryFor } from './route-entry.js'
 import { buildMiniRoute } from './ui/mini-route.js'
 import { buildSettingsSearch } from './ui/settings-search.js'
 import { perfSection } from './ui/camera-panel.js'
@@ -2425,6 +2426,12 @@ function importTemplateText(text) {
   const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: parsed.name, thumb: parsed.thumb, strip: parsed.strip, shaders: parsed.shaders, view: parsed.view, look: parsed.look }
   userTemplates.push(t)
   persistUserTemplates()
+  // un gabarit passe par LA MÊME porte que les autres imports : c'est le
+  // contenu qui décide. Aujourd'hui aucun n'embarque de trace (TEMPLATE_KEYS
+  // exclut la trace, seul son STYLE voyage) — donc rien ne bascule, et c'est
+  // le comportement attendu. Le jour où un fichier en portera une, il sera
+  // traité comme un GPX sans qu'on ait à y repenser.
+  enterRouteSpace(parsed)
   return t
 }
 
@@ -2970,6 +2977,15 @@ gpxLayer.onChange = (layers) => {
   }
 }
 
+// ---- « ce contenu porte un parcours » → l'espace qui va bien --------------
+// LE point de bascule, un seul pour toutes les portes d'entrée (import GPX du
+// cartouche du bas, glisser-déposer, projet .shibumap-race, gabarit, démo).
+// Six appels dispersés auraient divergé ; la règle elle-même est PURE et vit
+// dans route-entry.js — elle lit le CONTENU, jamais l'extension du fichier ni
+// le bouton cliqué. Posé plus bas (une fois `studio` et `hub` construits) :
+// loadGpxText est défini bien avant eux, un `let` évite la zone morte.
+let enterRouteSpace = () => {}
+
 async function loadGpxText(text) {
   // mode GPX : les noms de sommets sont coupés par défaut (Adrien) — la
   // course est le sujet, pas la toponymie ; réactivables dans le panneau
@@ -2996,6 +3012,12 @@ async function loadGpxText(text) {
     // au chargement d'un GPX, on démarre en vue isométrique (Adrien) — comme un
     // clic sur le bouton iso ; la vue est cadrée sur le bloc + son socle
     applyIsoView(0)
+    // …et on arrive dans l'espace du parcours. À la FIN, pas au début : le Race
+    // Studio photographie la carte en entrant et lit la trace pour ses récaps
+    // (km, D+/D−) — ouvert trop tôt, il s'ouvrirait sur du vide.
+    // On passe la trace ANALYSÉE, pas le texte : c'est elle qui fait foi, et un
+    // fichier de deux repères sans tracé n'aurait rien fait basculer.
+    enterRouteSpace(track)
   } catch (err) {
     modes.announce(`GPX ERROR — ${String(err.message).toUpperCase()}`)
   }
@@ -5296,6 +5318,31 @@ const hub = buildHub({ bar: elemBar, bottomBar, onExplore: () => {} })
   if (mark) { mark.style.cursor = 'pointer'; mark.addEventListener('click', () => hub.toggle()) }
 }
 panelCtx.refreshRaceLabels = () => raceLabels.setDirty() // toggle infos course par calque
+
+// ---- la BASCULE « on vient de charger un parcours » -----------------------
+// Déclarée en haut (`let enterRouteSpace`), posée ICI : elle a besoin de la
+// barre, du Race Studio et de l'accueil, tous construits plus haut.
+// Ce qu'elle ne fait PAS : changer le niveau Simple/Avancé. Le niveau est le
+// choix de l'utilisateur — on l'oriente vers le bon espace DANS son niveau.
+enterRouteSpace = (content) => {
+  // le viewer d'une shibu reçue (#s=/#r=) et la vitrine embarquée n'ont ni
+  // barre de modes ni Race Studio : il n'y a nulle part où envoyer qui que ce
+  // soit, et forcer un espace y casserait le chrome nu.
+  if (IS_EMBED || IS_SHIBU) return
+  // le NIVEAU se lit dans la préférence, pas dans body.ce-simple : l'accueil
+  // force le cœur simple à l'écran sans que le choix ait bougé.
+  const target = routeEntryFor(content, { advanced: isUiAdvanced() })
+  if (!target) return
+  hub.hide() // l'accueil et son voile resteraient par-dessus l'espace ouvert
+  document.body.classList.remove('ce-explore') // idem pour le dock Explorer du mode simple
+  // Le mode de travail est posé dans les DEUX niveaux, même quand c'est le Race
+  // Studio qui s'ouvre : sinon un passage ultérieur en Avancé rouvrait le dock
+  // sur le mode d'avant — panneaux éteints (wm-off), dock vide. Déjà vu.
+  elemBar?.setMode('parcours')
+  for (const b of quickCore?.querySelectorAll('.ce-wm-btn') || []) b.classList.toggle('on', b.dataset.mode === 'parcours')
+  elemBar?.refresh?.() // la coche liquide et le pont voyagent sous le mode actif
+  if (target === 'race-studio') studio.enter()
+}
 
 // first visit only: the guided tour introduces the UI once the boot view has
 // had a moment to settle (replayable anytime from the "?" in the top bar).
