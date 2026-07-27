@@ -89,8 +89,10 @@ function routeLibre(x, z, cap, dist, isSea) {
 
 // Combien de positions on tire avant de renoncer à peupler le bloc. Avec une
 // seule place, perdre le tirage sur un pixel de terre viderait la mer entière :
-// mesuré sur un chenal étroit, trente-deux essais font passer le taux de blocs
-// peuplés de 40 % à 90 %.
+// mesuré sur un chenal étroit, passer d'un seul essai à trente-deux fait monter
+// le taux de blocs peuplés de 12 % à 90 %.
+// (Le message de 636e2f4 annonce 40 % : c'était le taux de l'ancien semis à SIX
+// places, pas celui d'un seul essai — ce commit changeait les deux à la fois.)
 const SEED_TRIES = 32
 
 // Échelle de rendu : la coque garde sa taille RÉELLE rapportée à l'emprise du
