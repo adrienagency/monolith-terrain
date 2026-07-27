@@ -213,10 +213,16 @@ export class GpxLayerManager {
     })
   }
 
+  // Renomme un calque — et RETITRE son bandeau de profil au passage. Les deux
+  // vont ensemble : le nom du calque est celui que listent « Mes courses » et
+  // le mini panneau, un bandeau resté sur le <name> brut du GPX les contredit
+  // à l'écran (cas vécu à l'ouverture d'un projet .shibumap-race, où le
+  // renommage arrive après le chargement de la trace).
   setName(id, name) {
     const l = this.layers.find((x) => x.id === id)
     if (!l) return
     l.name = (name || '').trim().slice(0, 40) || l.gpx.track?.name || 'Track'
+    l.gpx.setDisplayName(l.name)
     this.onChange?.(this.layers)
   }
 

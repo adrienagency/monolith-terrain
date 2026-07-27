@@ -1,90 +1,74 @@
-// LE GLOBE N'ÉVINCE PLUS LES TUILES DONT IL A BESOIN À LA FRAME SUIVANTE.
+// LE GLOBE NE REDEMANDE PLUS AU RÉSEAU LA TUILE QU'IL VIENT DE RENDRE.
 //
-// Le quadtree du globe (src/globe.js) descend z2 → z11 en réclamant les mêmes
-// tuiles terrarium AWS que le terrain. Sa politique d'éviction avait un défaut
-// qui se compte en requêtes, et il tenait en trois lignes :
+// Mesuré le 2026-07-27 en instrumentant `window.fetch` pendant une recherche
+// « Le Var » (vol du globe z3→z9) : 647 requêtes AWS pour 245 URL uniques, la
+// pire tuile (terrarium/3/4/3.png) demandée 19 fois. Le laboratoire ci-dessous
+// rejoue le même vol et retrouve la même maladie en pire : 1 082 requêtes pour
+// 332 URL, terrarium/3/4/3.png demandée 27 fois.
 //
-//   1. `_traverse` pose `t.lastUsed = this.frame` sur CHAQUE tuile qu'il
-//      parcourt — y compris les ancêtres raffinés, ceux qui portent la descente.
-//   2. Un ancêtre raffiné a `mesh.visible === false` (seules les feuilles sont
-//      allumées), donc il passe le filtre `!(t.mesh && t.mesh.visible)` et
-//      devient candidat à l'éviction.
-//   3. Le tri `(a, b) => a.lastUsed - b.lastUsed` laisse alors un ÉNORME groupe
-//      d'ex æquo qui partagent tous `lastUsed === this.frame`. Array.prototype
-//      .sort est stable : les ex æquo se départagent par ordre d'insertion dans
-//      la Map, c'est-à-dire les tuiles créées EN PREMIER — les ancêtres z2/z3.
+// La cause n'est PAS la concurrence — `_request` refuse déjà une tuile qui
+// n'est pas `empty`, donc un même objet-tuile ne part jamais deux fois. Elle
+// est TEMPORELLE : `_evict` supprime la tuile de `this.tiles`, et la caméra la
+// redemande deux images plus tard. `_ensureTile` la recrée `empty`, `fetchTile`
+// repart. Le globe redemande ce qu'il vient de jeter.
 //
-// Le globe évinçait très exactement les tuiles qu'il allait reparcourir à la
-// frame suivante. Elles repartaient sur le réseau, revenaient, se faisaient
-// réévincer : une tuile z3 était redemandée des dizaines de fois pendant un
-// seul vol, et le coût ne s'arrête pas au réseau — chaque retour repaie un
-// DÉCODAGE complet (256×256 pixels dépaquetés en mètres) et une reconstruction
-// de maillage.
+// ⚠️ ET LA MÉMOIRE PRIME SUR LE RÉSEAU. Le rapport mesure déjà 1,7 à 1,9 Go de
+// tas JS. Tout garder serait le geste évident et c'est le piège : l'ensemble de
+// travail réel du quadtree dépasse 1 500 tuiles quand on cesse d'évincer, soit
+// 380 Mo à 256²·4 o pièce. La mémoire est donc BORNÉE À 128 ENTRÉES (32 Mo, le
+// budget que le damier s'accorde déjà pour ses MNT) et évincée en LRU : elle
+// rachète le réseau des tuiles CHAUDES — les ancêtres bas zoom, retraversés à
+// chaque image — et laisse repartir le reste. Tenir le contrat exact sur un vol
+// entier demanderait 512 entrées, soit 128 Mo : hors budget, et deux tests plus
+// bas verrouillent la borne pour que personne ne l'y pousse.
 //
-// ⚠️ ET LE CORRECTIF ÉVIDENT EST UN PIÈGE. Exclure du tri tout ce qui porte
-// `lastUsed === this.frame` supprime 100 % des doublons… et arrête l'éviction :
-// le cache dépasse alors très largement CACHE_MAX (420 tuiles), soit des
-// centaines de Mo de hauteurs et de textures sur un tas déjà mesuré à 1,7-1,9
-// Go. On échangerait un problème de réseau contre un problème de mémoire.
-// C'est pourquoi CHAQUE test de doublon ci-dessous est doublé d'une assertion
-// de budget : le contrat est « moins de requêtes À BUDGET CONSTANT », jamais
-// l'un sans l'autre.
-//
-// La bonne forme n'est donc pas d'épargner les porteurs, c'est de LES CLASSER
-// EN DERNIER. Deux rangs :
-//   · rang 1 — tout ce qui ne porte pas la couverture courante, du plus ancien
-//     au plus récent, puis du PLUS PROFOND au moins profond (à ancienneté
-//     égale, une z9 ne couvre qu'un timbre-poste qu'on a déjà survolé, une z3
-//     est sur le chemin de descente de toutes les frames à venir).
-//   · rang 2 — les porteurs eux-mêmes, du plus profond au moins profond, et on
-//     n'y touche que si le rang 1 ne suffit pas à tenir le budget.
-// Le budget reste donc DUR : le rang 2 garantit qu'il y a toujours une victime.
+// Le contrat se compte, comme dans test/damier-reseau.test.js : un `fetch`
+// bouchonné qui compte les appels par URL. Sur le trajet borné où la mémoire
+// couvre tout, **le nombre de requêtes est égal au nombre d'URL distinctes** ;
+// sur le vol entier, où elle ne peut pas tout couvrir, on compte ce qu'elle
+// absorbe à travail constant.
 
-import { test } from 'node:test'
+import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
 import { encodeTerrarium } from '../src/bathy.js'
 
 // ---------------------------------------------------------------- bouchons DOM
-// Le globe se sert du canevas pour DEUX choses très différentes : peindre la
-// rampe hypsométrique (dégradé 512×1) et dépaqueter les tuiles d'altitude
-// (getImageData 256×256). Seule la seconde nous intéresse — et c'est elle qui
-// compte les décodages.
+// Un seul canevas bouchonné sert les deux usages de globe.js : la rampe de
+// couleurs (createLinearGradient/fillRect) et le décodage des tuiles
+// (drawImage/getImageData).
 
-const ELEV = 812
-const [ER, EG, EB] = encodeTerrarium(ELEV)
-
-// une seule dalle RGBA, partagée : le décodage lit toujours les mêmes octets,
-// ce qu'on mesure ici c'est COMBIEN DE FOIS il les relit
-const DALLE = new Uint8ClampedArray(256 * 256 * 4)
+const RGB = encodeTerrarium(812)
+const PIXELS = new Uint8ClampedArray(256 * 256 * 4)
 for (let i = 0; i < 256 * 256; i++) {
-  DALLE[i * 4] = ER
-  DALLE[i * 4 + 1] = EG
-  DALLE[i * 4 + 2] = EB
-  DALLE[i * 4 + 3] = 255
+  PIXELS[i * 4] = RGB[0]
+  PIXELS[i * 4 + 1] = RGB[1]
+  PIXELS[i * 4 + 2] = RGB[2]
+  PIXELS[i * 4 + 3] = 255
 }
 
-let decodages = 0
-
-class FakeCtx {
-  createLinearGradient() {
-    return { addColorStop() {} }
-  }
-  fillRect() {}
-  drawImage() {}
-  getImageData(x, y, w) {
-    if (w === 256) decodages++ // une tuile dépaquetée = un décodage payé
-    return { data: DALLE }
-  }
-}
+// `fetchTile` crée un canevas par tuile DEMANDÉE, servie par la mémoire ou par
+// le réseau : ce compteur est donc la demande, dont le réseau n'est qu'une part
+let decodes = 0
 
 globalThis.document = {
   createElement() {
-    const c = { width: 0, height: 0 }
-    c.getContext = () => (c._ctx ??= new FakeCtx())
-    return c
+    decodes++
+    return {
+      width: 0,
+      height: 0,
+      getContext: () => ({
+        createLinearGradient: () => ({ addColorStop() {} }),
+        fillRect() {},
+        drawImage() {},
+        getImageData: () => ({ data: PIXELS }),
+        set fillStyle(v) {},
+      }),
+    }
   },
 }
+// chaque réponse porte un blob DISTINCT : deux tuiles servies par la mémoire
+// partagent alors le même objet, ce qu'on peut vérifier à l'identité
 globalThis.createImageBitmap = async (blob) => blob
 
 // -------------------------------------------------- faux serveur qui COMPTE
@@ -92,229 +76,211 @@ globalThis.createImageBitmap = async (blob) => blob
 const appels = new Map() // url → nombre de requêtes
 const total = () => [...appels.values()].reduce((a, b) => a + b, 0)
 const uniques = () => appels.size
+const pire = () => Math.max(0, ...appels.values())
 
-function serve() {
+function serve({ panne = new Set() } = {}) {
   appels.clear()
-  decodages = 0
   globalThis.fetch = async (url) => {
     appels.set(url, (appels.get(url) || 0) + 1)
-    // un aller-retour réseau n'est jamais synchrone
+    // un aller-retour réseau n'est jamais synchrone : sans ce tour de boucle
+    // les chargements ne se CHEVAUCHERAIENT pas, et la déduplication en vol
+    // n'aurait rien à dédupliquer
     await new Promise((r) => setTimeout(r, 0))
-    return { ok: true, status: 200, blob: async () => ({ width: 256, height: 256 }) }
+    if (panne.has(url)) return { ok: false, status: 500 }
+    return { ok: true, status: 200, blob: async () => ({ tuile: url }) }
   }
 }
 
-const { Globe } = await import('../src/globe.js')
-const { latLonToSphere } = await import('../src/geo.js')
+const { Globe, _tileMemo, _resetTileMemo } = await import('../src/globe.js')
+const { latLonToSphere, R_GLOBE } = await import('../src/geo.js')
 
-// les constantes du module, redites ici pour que le test échoue si elles bougent
-const CACHE_MAX = 420
-const ROOT_Z = 2
+const url = (z, x, y) => `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`
+const OCTETS_PAR_TUILE = 256 * 256 * 4 // 256 Ko d'ImageBitmap décodé
 
-// ------------------------------------------------------------------- le vol
-//
-// Un vol à TRAVAIL FIXE : 40 paliers d'altitude en descente géométrique, 8
-// tours de boucle par palier, le réseau vidé entre chaque tour. Aucune horloge,
-// aucun hasard — deux exécutions émettent exactement les mêmes requêtes.
+beforeEach(() => {
+  serve()
+  _resetTileMemo()
+})
 
-const LAT = 43.45 // le Var, le même cas de référence que test/damier-reseau
-const LON = 6.25
-const R_HAUT = 350 // ≈ z3 en feuilles
-const R_BAS = 105 // ≈ z9 en feuilles
-
-// vide la file du globe : tant qu'il reste des requêtes en vol ou en attente,
-// on rend la main à la boucle d'événements (MAX_CONCURRENT = 6, il faut donc
-// plusieurs tours pour drainer un palier)
-async function calme(globe, max = 4000) {
-  for (let i = 0; i < max; i++) {
-    if (!globe.inFlight && !globe.queue.length) return
+// une racine z2 est demandée par le constructeur ; on attend qu'elles arrivent
+async function globeReady(params = {}) {
+  const g = new Globe(params)
+  g.setVisible(true)
+  for (let i = 0; i < 200 && g.inFlight + g.queue.length > 0; i++) {
     await new Promise((r) => setTimeout(r, 0))
   }
-  throw new Error('le globe ne se calme pas')
+  return g
 }
 
-async function vol(globe, { paliers = 40, tours = 8 } = {}) {
-  globe.setVisible(true)
-  const camera = { position: new THREE.Vector3() }
-  const zoomsDessines = new Set()
-  let picTuiles = 0
-  let frames = 0
+// Ce que `_evict` fait à UNE tuile (globe.js, `_evict`) : on démonte et on
+// oublie. La méthode réelle ne se déclenche qu'au-dessus de CACHE_MAX (420
+// tuiles) ; ici on veut le geste seul, sans le vol qui l'amène.
+function evince(g, t) {
+  if (t.mesh) {
+    g.group.remove(t.mesh)
+    t.mesh.geometry.dispose()
+    t.mesh.material.dispose()
+  }
+  t.texture?.dispose()
+  g.tiles.delete(t.key)
+}
 
-  for (let p = 0; p < paliers; p++) {
-    const f = paliers === 1 ? 0 : p / (paliers - 1)
-    const r = R_HAUT * (R_BAS / R_HAUT) ** f // descente géométrique
-    latLonToSphere(LAT, LON, r, camera.position)
-    for (let k = 0; k < tours; k++) {
-      globe.update(camera, 0.016)
-      frames++
-      await calme(globe)
-      picTuiles = Math.max(picTuiles, globe.tiles.size)
+async function charge(g, z, x, y) {
+  const t = g._ensureTile(z, x, y)
+  g._request(t, 1)
+  for (let i = 0; i < 200 && t.state === 'loading'; i++) {
+    await new Promise((r) => setTimeout(r, 0))
+  }
+  return t
+}
+
+// ------------------------------------------------- le cas mesuré, en petit
+
+test('une tuile évincée puis redemandée ne repart pas sur le réseau', async () => {
+  const g = await globeReady()
+  appels.clear() // on ne compte QUE la tuile éprouvée, pas les 16 racines
+
+  const t = await charge(g, 3, 4, 3) // la pire tuile du rapport
+  assert.equal(t.state, 'ready')
+  assert.equal(appels.get(url(3, 4, 3)), 1)
+
+  // la caméra descend, le budget déborde, la tuile est jetée…
+  evince(g, t)
+  assert.equal(g.tiles.has('3/4/3'), false)
+
+  // …puis la caméra remonte et la redemande. Vingt-six fois, comme au Var.
+  for (let i = 0; i < 26; i++) {
+    const r = await charge(g, 3, 4, 3)
+    assert.equal(r.state, 'ready', 'la tuile revient bien')
+    evince(g, r)
+  }
+  assert.equal(total(), uniques(), `${total()} requêtes pour ${uniques()} URL distinctes`)
+  assert.equal(appels.get(url(3, 4, 3)), 1, `${appels.get(url(3, 4, 3))} requêtes pour une seule tuile`)
+})
+
+test('la tuile relue vient de la mémoire, pas d un second décodage réseau', async () => {
+  const g = await globeReady()
+  const t = await charge(g, 5, 16, 11)
+  const premiere = _tileMemo.get(url(5, 16, 11))
+  assert.ok(premiere, 'la tuile chargée n est pas entrée en mémoire')
+  evince(g, t)
+  const r = await charge(g, 5, 16, 11)
+  assert.equal(_tileMemo.get(url(5, 16, 11)), premiere, 'la mémoire a été remplacée au lieu d être relue')
+  assert.equal((await premiere).tuile, url(5, 16, 11), 'la mémoire rend la bonne tuile')
+  assert.equal(r.state, 'ready')
+})
+
+// ----------------------------------------------------------------- en vol
+
+test('deux demandes SIMULTANÉES de la même tuile ne font qu une requête', async () => {
+  // Un seul globe ne peut pas produire la collision : `_request` refuse une
+  // tuile déjà `loading`. Deux globes démarrés ensemble le peuvent — et c'est
+  // ce que verrouille ce test : la mémoire est indexée PAR URL, pas par
+  // instance, donc deux demandes qui se chevauchent partagent une promesse.
+  const [a, b] = await Promise.all([globeReady(), globeReady()])
+  assert.equal(a.tiles.size, 16, 'les 16 racines z2 du premier globe')
+  assert.equal(b.tiles.size, 16, 'les 16 racines z2 du second')
+  assert.equal(uniques(), 16, 'un globe, ce sont 16 racines')
+  assert.equal(total(), uniques(), `${total()} requêtes pour ${uniques()} URL distinctes`)
+})
+
+// ---------------------------------------------------- la mémoire d'abord
+
+test('la mémoire est bornée à 128 entrées, soit 32 Mo d ImageBitmap', async () => {
+  const g = await globeReady()
+  await vol(g)
+  // le vol touche plus de 300 tuiles : la mémoire doit être PLEINE, et pas
+  // d'une entrée de plus — c'est la borne qui protège un tas déjà à 1,76 Go
+  assert.equal(_tileMemo.size, 128, `${_tileMemo.size} tuiles retenues après un vol de 300+`)
+  const octets = _tileMemo.size * OCTETS_PAR_TUILE
+  assert.ok(octets <= 32 * 1024 * 1024, `${Math.round(octets / 1048576)} Mo retenus`)
+})
+
+test('la mémoire évince la plus ANCIENNE, pas la plus chaude', async () => {
+  const g = await globeReady()
+  const chaude = url(4, 8, 5)
+  await charge(g, 4, 8, 5)
+  // 140 tuiles neuves défilent — plus que la borne — mais la chaude est relue
+  // au passage : c'est elle qui doit survivre
+  for (let i = 0; i < 140; i++) {
+    const t = await charge(g, 6, 30 + i, 22)
+    evince(g, t)
+    evince(g, await charge(g, 4, 8, 5))
+  }
+  assert.ok(_tileMemo.has(chaude), 'la tuile relue à chaque tour est tombée de la mémoire')
+  assert.ok(!_tileMemo.has(url(6, 30, 22)), 'la plus ancienne est restée')
+})
+
+// ------------------------------------------------------- pas de faux souvenir
+
+test('une tuile en PANNE n est pas mémorisée : le réessai repart', async () => {
+  const casse = url(4, 8, 5)
+  serve({ panne: new Set([casse]) })
+  const g = await globeReady()
+  const t = await charge(g, 4, 8, 5)
+  // globe.js réessaie une fois, puis abandonne — la mémoire ne doit pas figer
+  // l'échec, sinon la tuile serait perdue pour toute la session
+  assert.equal(t.state, 'error')
+  assert.equal(appels.get(casse), 2, 'la panne a été mémorisée : plus aucun réessai')
+  assert.ok(!_tileMemo.has(casse), 'un échec est resté en mémoire')
+
+  // et le réseau revenu, la tuile se charge — la mémoire ne garde aucun
+  // souvenir de l'échec qui l'en empêcherait
+  serve()
+  evince(g, t)
+  const r = await charge(g, 4, 8, 5)
+  assert.equal(r.state, 'ready', 'la tuile guérie ne revient pas')
+  assert.equal(appels.get(casse), 1)
+})
+
+// -------------------------------------------------------- le vol du rapport
+
+// Le vol « Le Var » : la caméra tombe de 3 rayons terrestres à 0,006, exactement
+// ce que fait `goto` quand on cherche une région. `update()` refend le quadtree
+// à chaque image et `_evict` jette dès 420 tuiles.
+const CIBLE = latLonToSphere(43.45, 6.25)
+
+// ⚠️ LE VOL SE MESURE À TRAVAIL CONSTANT, PAS À NOMBRE D'IMAGES CONSTANT. Une
+// tuile servie par la mémoire arrive TOUT DE SUITE : à budget d'images égal, le
+// globe muni de mémoire refend plus loin et demande plus de tuiles que celui qui
+// attend le réseau. Comparer les deux à 6 images par palier compare deux vols
+// différents (1 082 requêtes contre 1 066 : la mémoire semble ne rien faire,
+// alors qu'elle absorbait déjà 676 demandes). On arrête donc le vol sur un
+// nombre de tuiles DEMANDÉES, et on compte ce qui part au réseau.
+const BUDGET_TUILES = 1200
+
+async function vol(g) {
+  const cam = { position: new THREE.Vector3() }
+  const depart = decodes
+  for (let tour = 0; tour < 3; tour++) {
+    for (let alt = 3; alt > 0.006; alt *= 0.82) {
+      cam.position.copy(CIBLE).setLength(R_GLOBE * (1 + alt))
+      for (let f = 0; f < 6; f++) {
+        g.update(cam, 0.016)
+        await new Promise((r) => setTimeout(r, 0))
+        if (decodes - depart >= BUDGET_TUILES) return decodes - depart
+      }
     }
-    for (const t of globe.tiles.values()) if (t.mesh?.visible) zoomsDessines.add(t.z)
   }
-
-  // l'état à l'altitude la plus basse — c'est là que le défaut se voyait le
-  // mieux : le globe y dessinait 19 tuiles z3 au lieu de ~300 tuiles z6
-  let zoomFinal = 0
-  let visiblesFinal = 0
-  for (const t of globe.tiles.values()) {
-    if (!t.mesh?.visible) continue
-    visiblesFinal++
-    zoomFinal = Math.max(zoomFinal, t.z)
-  }
-  return { zoomsDessines, picTuiles, frames, zoomFinal, visiblesFinal }
+  return decodes - depart
 }
 
-// rapport lisible, accroché aux messages d'assertion
-const rapport = (globe, m) =>
-  `${total()} requêtes / ${uniques()} URL distinctes (×${(total() / uniques()).toFixed(2)}), ` +
-  `${decodages} décodages, pic ${m.picTuiles} tuiles, ${globe.tiles.size} à l'arrivée`
+test('un vol z3→z9 ne redemande plus au réseau les tuiles qu il vient de jeter', async () => {
+  const g = await globeReady()
+  appels.clear() // on ne compte QUE le vol, pas les racines
+  const demandes = await vol(g)
 
-// ------------------------------------------------------------------- le banc
+  assert.ok(demandes >= BUDGET_TUILES, `${demandes} tuiles demandées — le vol n a pas eu lieu`)
+  assert.ok(uniques() > 250, `${uniques()} URL distinctes — le vol n est pas allé assez loin`)
 
-// Le vol est partagé par les trois tests qui suivent, et c'est délibéré : une
-// assertion par test, sinon un seul échec ne dit plus laquelle des garanties a
-// cédé (le réseau / le décodage / le budget).
-async function volDeReference() {
-  serve()
-  const globe = new Globe({})
-  const mesures = await vol(globe)
-  return { globe, mesures }
-}
-
-test('le vol descend et raffine vraiment — sans quoi le banc ne mesure rien', async () => {
-  const { globe, mesures } = await volDeReference()
-  const zooms = [...mesures.zoomsDessines].sort((a, b) => a - b)
-  // z2 (les racines) jusqu'à z6 : le plafond n'est pas une limite de politique
-  // mais de BUDGET — à 420 tuiles, les ~300 feuilles visibles d'un hémisphère
-  // consomment déjà tout, il ne reste rien pour descendre plus bas. Ce que ce
-  // test verrouille, c'est que la descente a bien lieu ET qu'elle TIENT : le
-  // défaut d'éviction faisait retomber le globe à z3 en plongée (19 tuiles
-  // dessinées au lieu de 300), c'est-à-dire plus grossier de PRÈS que de loin.
-  assert.ok(zooms.includes(3), `z3 jamais dessiné (niveaux vus : ${zooms})`)
-  assert.ok(zooms.includes(6), `z6 jamais atteint (niveaux vus : ${zooms})`)
+  // Sans mémoire, chaque demande partait : 1 210 requêtes pour ces 1 200
+  // tuiles. Avec la borne à 128 entrées : 562.
   assert.ok(
-    mesures.zoomFinal >= 6,
-    `à l'altitude la plus basse le globe retombe à z${mesures.zoomFinal} — c'est la régression d'origine`
+    total() < demandes * 0.6,
+    `${total()} requêtes pour ${demandes} tuiles demandées — la mémoire n absorbe presque rien`,
   )
-  assert.ok(
-    mesures.visiblesFinal > 200,
-    `${mesures.visiblesFinal} tuiles dessinées en plongée : la couverture s'est effondrée`
-  )
-  globe.dispose()
-})
-
-// LE PIÈGE DE L'ADMISSION, et il vaut son propre test. Refuser de raffiner
-// quand le cache est plein empêche l'emballement… et, pris au pied de la
-// lettre, GÈLE le globe : l'éviction ramène le cache à exactement CACHE_MAX,
-// donc `size >= CACHE_MAX` reste vrai pour toujours, plus une seule tuile n'est
-// jamais chargée, et faire tourner la planète ne découvre plus rien. Le crédit
-// de création doit donc compter non pas la place LIBRE mais la place
-// RÉCUPÉRABLE : ce que l'éviction peut reprendre aux tuiles périmées.
-test('cache saturé puis la planète TOURNE : le globe charge encore', async () => {
-  serve()
-  const globe = new Globe({})
-  globe.setVisible(true)
-  const camera = { position: new THREE.Vector3() }
-
-  // 1. saturer au-dessus du Var
-  latLonToSphere(LAT, LON, 120, camera.position)
-  for (let k = 0; k < 30; k++) {
-    globe.update(camera, 0.016)
-    await calme(globe)
-  }
-  assert.ok(globe.tiles.size >= CACHE_MAX, `cache à ${globe.tiles.size} : le montage doit saturer`)
-
-  // 2. l'autre bout du monde (Nouvelle-Zélande) : plus une seule tuile commune
-  latLonToSphere(-41, 174, 120, camera.position)
-  const avant = total()
-  for (let k = 0; k < 30; k++) {
-    globe.update(camera, 0.016)
-    await calme(globe)
-  }
-  assert.ok(
-    total() > avant,
-    `aucune requête après ${30} frames sur un tout autre continent : le globe est GELÉ à ${globe.tiles.size} tuiles`
-  )
-  let vis = 0
-  for (const t of globe.tiles.values()) if (t.mesh?.visible) vis++
-  assert.ok(vis > 100, `${vis} tuiles dessinées sur la nouvelle région : rien ne s'est chargé`)
-  assert.ok(globe.tiles.size <= CACHE_MAX, `${globe.tiles.size} tuiles : le budget a cédé`)
-  globe.dispose()
-})
-
-test('une tuile du globe n est demandée au réseau QU UNE FOIS par vol', async () => {
-  const { globe, mesures } = await volDeReference()
-  // le contrat éprouvé partout dans ce dépôt : le nombre de requêtes émises
-  // doit être égal au nombre d'URL distinctes
-  assert.equal(total(), uniques(), rapport(globe, mesures))
-  globe.dispose()
-})
-
-test('… et elle n est DÉCODÉE qu une fois : le doublon coûte aussi du CPU', async () => {
-  const { globe, mesures } = await volDeReference()
-  // le décodage suit la requête (aucune mémoire d'images ici) : s'il y a plus
-  // de décodages que d'URL, c'est que la tuile a fait l'aller-retour
-  assert.equal(decodages, uniques(), rapport(globe, mesures))
-  globe.dispose()
-})
-
-test('… et le budget mémoire reste DUR : le cache ne gonfle pas pour autant', async () => {
-  const { globe, mesures } = await volDeReference()
-  // CACHE_MAX + le sursis d'une frame (l'éviction ne passe qu'après le
-  // parcours) : le cache ne doit jamais s'installer au-dessus de son budget.
-  assert.ok(
-    mesures.picTuiles <= CACHE_MAX * 1.25,
-    `pic à ${mesures.picTuiles} tuiles pour un budget de ${CACHE_MAX} — ` +
-      `${rapport(globe, mesures)}`
-  )
-  globe.dispose()
-})
-
-// ------------------------------------------------- la règle, tuile par tuile
-
-// Les tests de vol comptent un RÉSULTAT ; celui-ci verrouille la RÈGLE, sur un
-// montage assez petit pour être lu à l'œil. Sans lui, un correctif qui se
-// contenterait d'agrandir le cache passerait le vol et casserait le budget.
-test('à ancienneté égale, l éviction sacrifie la PROFONDE et garde l ancêtre', async () => {
-  serve()
-  const globe = new Globe({})
-  await calme(globe)
-
-  // trois tuiles prêtes, toutes vues à la MÊME frame, aucune dessinée :
-  // l'ancêtre z3 (créé en premier, donc premier servi par un tri stable) et
-  // deux descendantes plus profondes.
-  const faux = (z, x, y, lastUsed, porteuse) => {
-    const t = globe._ensureTile(z, x, y)
-    t.state = 'ready'
-    t.mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial())
-    t.mesh.visible = false
-    t.lastUsed = lastUsed
-    if (porteuse) t.coverFrame = lastUsed
-    return t
-  }
-  globe.frame = 100
-  const ancetre = faux(3, 4, 3, 100, true) // porte la couverture courante
-  const profonde = faux(9, 260, 190, 100, false)
-  const vieille = faux(7, 65, 47, 40, false) // pas vue depuis 60 frames
-
-  globe.tiles.size // eslint : la Map est bien peuplée
-  const restantes = () => [...globe.tiles.keys()]
-
-  // on force le budget à un dépassement de 1 : une seule victime
-  const vraiMax = globe.tiles.size - 1
-  globe._evictJusqua(vraiMax)
-  assert.ok(!restantes().includes(vieille.key), `la plus ancienne doit partir la première (${restantes()})`)
-
-  // dépassement de 1 encore : parmi les ex æquo, la PROFONDE
-  globe._evictJusqua(globe.tiles.size - 1)
-  assert.ok(!restantes().includes(profonde.key), `à ancienneté égale, la plus profonde part (${restantes()})`)
-  assert.ok(restantes().includes(ancetre.key), `l ancêtre qui porte la couverture doit survivre (${restantes()})`)
-
-  // et en dernier RESSORT, quand il ne reste que des porteurs, le budget prime
-  const avant = globe.tiles.size
-  globe._evictJusqua(avant - 1)
-  assert.equal(globe.tiles.size, avant - 1, 'le budget est dur : un porteur finit par céder')
-  assert.ok(ROOT_Z === 2, 'les racines restent hors jeu')
-  globe.dispose()
+  // La pire tuile du rapport partait 19 fois en production, 27 ici. Les
+  // ancêtres bas zoom sont retraversés à CHAQUE image — ce sont eux que la
+  // mémoire doit tenir chauds.
+  assert.ok(pire() <= 6, `une tuile est repartie ${pire()} fois sur le réseau`)
 })

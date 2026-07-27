@@ -51,6 +51,7 @@ let frameTrack
 let revealVertexIndex
 let stepHeadFollow
 let pickKmInterval
+let profileTitle
 let pickVillagesAlongTrack
 let villageLeadKm
 let villageOpacity
@@ -72,6 +73,7 @@ before(async () => {
     revealVertexIndex,
     stepHeadFollow,
     pickKmInterval,
+    profileTitle,
     pickVillagesAlongTrack,
     villageLeadKm,
     villageOpacity,
@@ -222,6 +224,25 @@ test('pickKmInterval keeps the label count in a sane band across lengths', () =>
     const count = Math.floor(totalKm / stride)
     assert.ok(count >= 1 && count <= 9, `${totalKm}km @ every ${stride}km -> ${count} labels`)
   }
+})
+
+// ---- titre du bandeau de profil ------------------------------------------
+
+test('profileTitle : le nom du calque prime sur le <name> brut du GPX', () => {
+  assert.equal(profileTitle('La Grande Traversée', 'idee itinerante. 2026-23216768'), 'LA GRANDE TRAVERSÉE')
+})
+
+test('profileTitle : sans renommage, le <name> du GPX reste le titre', () => {
+  assert.equal(profileTitle('', 'Montenvers'), 'MONTENVERS')
+  assert.equal(profileTitle(null, 'Montenvers'), 'MONTENVERS')
+})
+
+test('profileTitle : sans trace ni renommage, un titre neutre plutôt qu\'une barre vide', () => {
+  assert.equal(profileTitle('', undefined), 'TRACK')
+})
+
+test('profileTitle : coupe à la largeur tenable de la barre (28 signes)', () => {
+  assert.equal(profileTitle('a'.repeat(40), null).length, 28)
 })
 
 // ---- villages along the route (task 16 §3) -------------------------------

@@ -150,11 +150,82 @@ function tileKey(z, x, y) {
   return `${z}/${x}/${y}`
 }
 
+// LE GLOBE REDEMANDAIT AU RÉSEAU LA TUILE QU'IL VENAIT DE JETER.
+//
+// Mesuré pendant une recherche « Le Var » (vol z3→z9) : 647 requêtes AWS pour
+// 245 URL uniques, terrarium/3/4/3.png demandée 19 fois. La concurrence n'y est
+// pour rien — `_request` refuse déjà une tuile qui n'est pas `empty`. La
+// redondance est TEMPORELLE : `_evict` supprime la tuile de `this.tiles` dès
+// 420 tuiles, la caméra la retraverse deux images plus tard, `_ensureTile` la
+// recrée `empty` et tout repart. Les coupables sont les ANCÊTRES BAS ZOOM :
+// retraversés à chaque image (ils portent la descente jusqu'à ce que leurs
+// quatre enfants sachent dessiner), mais jamais visibles une fois refendus,
+// donc éligibles à l'éviction à chaque tour.
+//
+// ⚠️ LA BORNE N'EST PAS NÉGOCIABLE, ET C'EST LA MÉMOIRE QUI LA DICTE. Le tas JS
+// est déjà mesuré à 1,7–1,9 Go pour 2 à 4 Go de limite pratique. Tout retenir
+// serait le geste évident et c'est le piège : l'ensemble de travail du quadtree
+// dépasse 1 500 tuiles quand on cesse d'évincer, soit 380 Mo — c'est
+// précisément pour ça que CACHE_MAX existe.
+//
+// La taille est MESURÉE, pas devinée. À travail constant (1 200 tuiles
+// demandées sur le vol du Var), le réseau en fonction de la borne :
+//
+//     sans mémoire  1 210 requêtes, pire tuile 27 fois
+//      64 (16 Mo)     784                        8
+//     128 (32 Mo)     562                        4   ← le coude
+//     256 (64 Mo)     502                        2
+//     512 (128 Mo)    418 = le nombre d'URL      1   ← +7 % de tas, non
+//
+// On s'arrête au coude : passer de 64 à 128 rachète 222 requêtes pour 16 Mo,
+// de 128 à 256 seulement 60 pour 32 Mo de plus. 32 Mo, c'est exactement le
+// budget que le damier s'accorde déjà pour ses MNT (src/dem.js) — 1,7 % du tas
+// mesuré. Le contrat « une requête par URL » coûterait, lui, 128 Mo : hors de
+// question sur ce tas-là.
+const TILE_MEMO_MAX = 128 // 128 × 256² × 4 o = 32 Mo d'ImageBitmap décodé
+
+/** url → Promise<ImageBitmap>, LRU bornée. Exportée pour les tests. */
+export const _tileMemo = new Map()
+
+/** Remise à zéro de la mémoire de tuiles — tests uniquement. */
+export function _resetTileMemo() {
+  _tileMemo.clear()
+}
+
+// Une SEULE entrée par URL, promesse comprise : deux demandes qui se
+// chevauchent partagent la requête au lieu d'en lancer deux.
+function tileBitmap(url) {
+  const memo = _tileMemo.get(url)
+  if (memo) {
+    _tileMemo.delete(url)
+    _tileMemo.set(url, memo) // ré-insertion = most-recently-used
+    return memo
+  }
+  const p = (async () => {
+    const r = await fetch(url)
+    if (!r.ok) throw new Error(`tile ${url} → HTTP ${r.status}`)
+    return createImageBitmap(await r.blob())
+  })()
+  _tileMemo.set(url, p)
+  // Un ÉCHEC ne se mémorise pas : `_pump` réessaie une fois, et une panne figée
+  // priverait la session de la tuile pour de bon.
+  // ⚠️ `p.then(null, …)` et pas `p.catch(…)` en tête de chaîne : cette branche
+  // de surveillance ABSORBE le rejet, sinon chaque tuile en panne lèverait un
+  // unhandledrejection à côté de `_pump` qui, lui, l'a bien traité.
+  p.then(null, () => {
+    if (_tileMemo.get(url) === p) _tileMemo.delete(url)
+  })
+  // les entrées EN VOL viennent d'être insérées, elles sont donc en tête de
+  // fraîcheur : la purge par la queue ne peut pas casser la déduplication
+  while (_tileMemo.size > TILE_MEMO_MAX) _tileMemo.delete(_tileMemo.keys().next().value)
+  return p
+}
+
 // terrarium PNG → { texture, heights Float32Array(256*256) }
-async function fetchTile(z, x, y, signal) {
-  const r = await fetch(TILE_URL(z, x, y), { signal })
-  if (!r.ok) throw new Error(`tile ${z}/${x}/${y} → HTTP ${r.status}`)
-  const img = await createImageBitmap(await r.blob())
+// (pas de `signal` : la promesse est partagée entre tous les demandeurs de la
+// même URL, l'abandon de l'un annulerait la tuile des autres)
+async function fetchTile(z, x, y) {
+  const img = await tileBitmap(TILE_URL(z, x, y))
   const c = document.createElement('canvas')
   c.width = c.height = 256
   const ctx = c.getContext('2d', { willReadFrequently: true })
