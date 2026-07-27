@@ -315,7 +315,36 @@ export const LAND_MIN_ELEV_M = 0.3
 // trait de côte vectoriel la dit MER ; sans masque, comportement v1 (le DEM
 // seul ne sait pas distinguer un polder de la mer, caveat historique).
 // Returns { texture, canvas } — the canvas backs the texture (do not mutate).
-export function rasterizeMask(coordinates, dem, size = MASK_SIZE, coastImage = null) {
+/**
+ * LE MASQUE EST-IL UN SEUL BIT DÉGUISÉ EN IMAGE ?
+ *
+ * Sur un damier isolé, des dalles entières tombent au MILIEU de la zone : leur
+ * masque est uniformément blanc. Mesuré sur Le Var à z12, c'est 4 dalles sur 23
+ * — et chacune paie douze mégaoctets (texture, canevas, ImageData) pour dire
+ * « oui ». Un booléen suffit ; l'appelant pose alors le placeholder 1×1.
+ *
+ * ⚠️ LE TEST EST STRICT — exactement 0 ou exactement 255 partout — et il doit le
+ * rester. Une grille d'échantillonnage grossière annonce « couverte à 100 % »
+ * des dalles qui ont un lac ou une mer intérieure retirés par le clip
+ * d'altitude : les prendre pour pleines rendrait leur eau à la terre ferme.
+ *
+ * ⚠️ Et il se lit AVANT le flou : celui-ci pose des valeurs intermédiaires sur
+ * les contours, donc plus aucun masque ne serait jamais uniforme après lui.
+ *
+ * @param {Uint8ClampedArray} px - RGBA ; seul le canal rouge est lu
+ * @returns {'full'|'empty'|null}
+ */
+export function maskUniformity(px) {
+  if (!px || !px.length) return null
+  const v = px[0]
+  if (v !== 0 && v !== 255) return null
+  for (let i = 4; i < px.length; i += 4) if (px[i] !== v) return null
+  return v === 255 ? 'full' : 'empty'
+}
+
+// `uniformShortcut` : un masque uniforme rend { texture: null, canvas: null,
+// uniform: 'full'|'empty' } — ni flou, ni texture, ni second canevas.
+export function rasterizeMask(coordinates, dem, size = MASK_SIZE, coastImage = null, { uniformShortcut = false } = {}) {
   const sharp = document.createElement('canvas')
   sharp.width = sharp.height = size
   const ctx = sharp.getContext('2d')
@@ -360,6 +389,13 @@ export function rasterizeMask(coordinates, dem, size = MASK_SIZE, coastImage = n
       }
     }
     ctx.putImageData(id, 0, 0)
+    if (uniformShortcut) {
+      const u = maskUniformity(px)
+      if (u) return { texture: null, canvas: null, uniform: u }
+    }
+  } else if (uniformShortcut) {
+    const u = maskUniformity(ctx.getImageData(0, 0, size, size).data)
+    if (u) return { texture: null, canvas: null, uniform: u }
   }
 
   const canvas = document.createElement('canvas')
@@ -378,7 +414,7 @@ export function rasterizeMask(coordinates, dem, size = MASK_SIZE, coastImage = n
   tex.generateMipmaps = false
   tex.colorSpace = THREE.NoColorSpace
   tex.needsUpdate = true
-  return { texture: tex, canvas }
+  return { texture: tex, canvas, uniform: null }
 }
 
 // ---------------------------------------------------------------- public API

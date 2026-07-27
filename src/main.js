@@ -3460,13 +3460,23 @@ function rebuildRegionSkirt() {
   if (!params.regionMode || !regionMaskCanvas || !terrain.sample) return
   const dalles = [{ canvas: regionMaskCanvas, sample: terrain.sample, x: 0, z: 0, centre: true }]
   for (const cell of blockGrid.cells.values()) {
-    if (cell.regionCanvas && cell.terrain?.sample) {
-      dalles.push({ canvas: cell.regionCanvas, sample: cell.terrain.sample, x: cell.i * TERRAIN_SIZE, z: cell.j * TERRAIN_SIZE })
+    // une dalle PLEINE n'a pas de canevas (son masque était un seul bit) : elle
+    // reste de la partie par `uniform`, et il le faut — son minimum intérieur
+    // entre dans le plancher COMMUN de la découpe, et ses quatre bords doivent
+    // être murés comme le faisait son masque tout blanc
+    if ((cell.regionCanvas || cell.regionUniform) && cell.terrain?.sample) {
+      dalles.push({
+        canvas: cell.regionCanvas,
+        uniform: cell.regionUniform || null,
+        sample: cell.terrain.sample,
+        x: cell.i * TERRAIN_SIZE,
+        z: cell.j * TERRAIN_SIZE,
+      })
     }
   }
   let plancher = Infinity
   for (const d of dalles) {
-    d.traced = traceSkirt({ maskCanvas: d.canvas, sample: d.sample, grid: SKIRT_GRID })
+    d.traced = traceSkirt({ maskCanvas: d.canvas, uniform: d.uniform, sample: d.sample, grid: SKIRT_GRID })
     const f = skirtFloor(d.traced, d.sample)
     if (Number.isFinite(f) && f < plancher) plancher = f
   }
@@ -3475,6 +3485,7 @@ function rebuildRegionSkirt() {
   for (const d of dalles) {
     const s = buildRegionSkirt({
       maskCanvas: d.canvas,
+      uniform: d.uniform,
       sample: d.sample,
       material: plinth.wallMat,
       grid: SKIRT_GRID,
@@ -3515,14 +3526,23 @@ function paintCellRegion(cell) {
   if (!isolée || !cell.dem) {
     t.setRegionMask(null)
     cell.regionCanvas = null
+    cell.regionUniform = null
     return
   }
   try {
     // le trait de côte de LA cellule, s'il est déjà arrivé : sans lui les
     // polders sous le niveau 0 seraient retirés de la découpe (caveat v1)
-    const raster = rasterizeMask(parts, cell.dem, CELL_MASK_SIZE, cell.coastImage || null)
-    t.setRegionMask(raster.texture)
+    //
+    // uniformShortcut : une dalle qui tombe au MILIEU de la zone a un masque
+    // uniformément blanc — 4 sur 23 sur le Var à z12. Elle n'en garde alors
+    // RIEN : ni texture, ni canevas, ni ImageData, soit douze mégaoctets pour
+    // un seul bit. `cell.regionUniform` prend le relais partout où le canevas
+    // servait (la jupe — voir rebuildRegionSkirt).
+    const raster = rasterizeMask(parts, cell.dem, CELL_MASK_SIZE, cell.coastImage || null, { uniformShortcut: true })
+    cell.regionUniform = raster.uniform || null
     cell.regionCanvas = raster.canvas
+    if (raster.uniform) t.setRegionUniform(raster.uniform === 'full')
+    else t.setRegionMask(raster.texture)
   } catch (err) {
     console.warn('découpe de zone sur une dalle du damier :', err)
   }
