@@ -74,7 +74,7 @@ import { refreshAll } from './ui/kit.js'
 import { showNotice } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickCore, buildShibuChrome, initUiLevel, buildAdvToggle, focusSearch, isUiAdvanced } from './ui/bars.js'
-import { routeEntryFor } from './route-entry.js'
+import { routeEntryFor, incomingWaypoints, resolveWaypointKm } from './route-entry.js'
 import { buildMiniRoute } from './ui/mini-route.js'
 import { buildSettingsSearch } from './ui/settings-search.js'
 import { perfSection } from './ui/camera-panel.js'
@@ -2892,6 +2892,32 @@ function syncRaceState(race) {
   applyRaceToBlock()
 }
 
+// Une trace neuve arrive : elle prend SES points de passage (les <wpt> du GPX,
+// les lignes d'un projet), et à défaut aucun. Voir le gros commentaire au point
+// d'appel dans loadGpxText() — c'est le seul endroit où ça se joue.
+// Les POI transports partent aussi : leurs positions MONDE ont été calculées
+// contre le bloc précédent, elles ne veulent plus rien dire ici. Le studio les
+// re-cherche (setTransportCats) à l'étape ④.
+// Posé plus bas, une fois `studio` construit — même raison et même forme que
+// enterRouteSpace : loadGpxText est déclaré bien avant lui.
+let adoptRaceDraft = null
+
+function adoptRaceWaypoints(text, track) {
+  raceState.transports.pois = []
+  const race = {
+    name: '',
+    logo: null,
+    waypoints: resolveWaypointKm(incomingWaypoints(text) || [], track),
+    transports: { cats: [], removed: [] },
+  }
+  // On passe par le BROUILLON du studio, pas par raceState seul : c'est lui qui
+  // fait foi dès que le studio s'ouvre, et lui seul écrit dans les deux. Sinon
+  // entrer dans le studio repousse l'ancien brouillon par-dessus les repères que
+  // le fichier vient d'apporter — mesuré, c'est ce qui arrivait.
+  if (adoptRaceDraft) adoptRaceDraft(race)
+  else syncRaceState(race)
+}
+
 function applyRaceToBlock() {
   if (!raceState.name && !raceState.logo) { groundInfo.setRace(null); return }
   const track = gpxLayer.activeLayer?.gpx?.track
@@ -3031,6 +3057,18 @@ async function loadGpxText(text) {
       return
     }
     const track = entry.gpx.track
+    // LE point de remise à zéro des points de passage — un seul, ici, sur
+    // l'entonnoir que traversent toutes les portes d'entrée (import, glisser-
+    // déposer, projet .shibumap-race, démo, lien #r=). Les nettoyer porte par
+    // porte garantissait d'en oublier une : les repères de la course
+    // précédente restaient accrochés à la trace suivante, et ça ne se voyait
+    // qu'au DEUXIÈME chargement. Un gabarit, lui, ne passe jamais par ici : il
+    // ne porte pas de trace, donc changer de palette n'efface rien.
+    // Le nom et le logo partent avec : ils habillent les mêmes cartouches
+    // (départ/arrivée) et les flancs du bloc. Les porteurs d'une VRAIE course
+    // (studio, payload d'un lien) rappellent syncRaceState juste après, avec
+    // la leur — voir importRace() et bootInitialView().
+    adoptRaceWaypoints(text, track)
     const f = frameTrack(track.points)
     params.demLat = f.lat
     params.demLon = f.lon
@@ -5329,11 +5367,20 @@ const studio = buildStudio({
   focusRace: (id) => gpxLayer.focus(id),
 })
 panelCtx.openStudio = () => studio.enter()
+adoptRaceDraft = (race) => studio.adoptRace(race)
 
 // ---- Studio unifié (UX P2 — src/ui/atelier.js) ---------------------------
-// L'espace création : Palettes / Templates / Ciel sur SA carte, sans snapshot
-// (les changements persistent). La boutique reste l'espace d'achat séparé.
+// L'assistant du MODE SIMPLE : ① Template ② Palette ③ Ciel ④ Calques ⑤ Météo.
+// Il tient un SNAPSHOT du look d'arrivée — c'est ce qui donne un sens à son
+// bouton « Terminer » (Annuler repose le look, Terminer le garde ; sans
+// snapshot les deux boutons auraient fait la même chose, d'où l'absence
+// historique de validation). Un LOOK suffit, pas l'état complet de la
+// boutique : habiller ne déplace jamais la carte, il n'y a rien d'autre à
+// reposer. La boutique reste l'espace d'achat séparé.
 const atelier = buildAtelier({
+  params,
+  captureLook: () => captureLook(params),
+  applyLook: (snap) => applyAllParams(snap),
   applyPalette: (p) => { applyPaletteWithBg(p); refreshAll() },
   generatePalette: generateEarthPalette,
   saveCurrentPalette: (name) => panelCtx.saveCurrentPalette(name),
@@ -5343,6 +5390,14 @@ const atelier = buildAtelier({
   environments: ENVIRONMENTS,
   getBgEnv: () => params.bgEnv || '',
   setBgEnv: (id) => { params.bgEnv = id || ''; applyBackground() },
+  // ④ Calques — exactement les leviers du panneau Carte (mode avancé), qui est
+  // devenu inatteignable en simple quand il a rejoint le Studio avancé
+  rebuildMapLayers,
+  refreshAerial,
+  refreshAll,
+  // ⑤ Météo — exactement les leviers du panneau Éléments
+  rebuildClouds: () => { clouds.build(params); clouds.setVisible(params.cloudsEnabled && modes.mode === 'surface') },
+  setWaves: (w) => realWater?.setWaves?.(w),
   openStore: () => store.enter(),
 })
 panelCtx.openAtelier = () => atelier.enter() // quickbar (lit au clic, pas au build)

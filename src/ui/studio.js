@@ -482,9 +482,20 @@ export function buildStudio(deps) {
   // bonne clé, synchronise les cartouches — studio ouvert ou non
   async function importProject(bundle) {
     await deps.importRace(bundle) // recadre + drape la trace, applique le look
-    // studio ouvert : on RESTE sur l'étape courante (ex. ② Trace → récap
-    // sous les yeux) — pas de téléportation vers ① Identité
-    draft = { ...freshDraft(), race: bundle.race, step: open ? draft.step : 0 }
+    adoptRace(bundle.race)
+  }
+
+  // Une course ARRIVE de l'extérieur (projet importé, ou simplement les <wpt>
+  // du GPX qu'on vient de charger — voir adoptRaceWaypoints dans main.js) :
+  // elle DEVIENT le brouillon. Le passage par ici n'est pas décoratif — le
+  // brouillon est la source des points de passage dès que le studio s'ouvre :
+  // ne remplir que raceState laisserait enter() repousser l'ancien brouillon
+  // par-dessus, et la première retouche de l'étape ③ effacerait les repères
+  // que le fichier venait d'apporter.
+  // studio ouvert : on RESTE sur l'étape courante (ex. ② Trace → récap sous
+  // les yeux) — pas de téléportation vers ① Identité.
+  function adoptRace(race) {
+    draft = { ...freshDraft(), race: { ...freshDraft().race, ...race }, step: open ? draft.step : 0 }
     saveDraft() // la trace existe → km/altitudes résolus du premier coup
     if (open) render()
   }
@@ -496,5 +507,5 @@ export function buildStudio(deps) {
     go(STEPS.length - 1)
   }
 
-  return { enter, exit, isOpen: () => open, importProject, enterExport }
+  return { enter, exit, isOpen: () => open, importProject, adoptRace, enterExport }
 }
