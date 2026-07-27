@@ -2,6 +2,8 @@ import * as THREE from 'three'
 import { Simplex2, mulberry32, fbm, ridged, smoothstep, lerp } from './noise.js'
 import { sampleDem } from './dem.js'
 import { buildRamp2D } from './palette.js'
+import { gridTemplate } from './grid-template.js'
+import { detailField } from './detail-noise.js'
 import { analyzeDem } from './terrain-analysis.js'
 import { buildSeaMask, blurMask, landMaskFromImage } from './sea-mask.js'
 import { TEXTURE_BUILDERS } from './material-textures.js'
@@ -1065,6 +1067,42 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     }
   }
 
+  // ÉCHANTILLONNEUR DE GRILLE — la même formule que _makeDemSampler, mais qui
+  // LIT le grain FBM dans un champ pré-cuit au lieu de le recalculer. 175 ms sur
+  // les 194 ms d'échantillonnage à res 1024 : 5 octaves de simplex par sommet,
+  // pour un déplacement de 0,19 px CSS en moyenne au réglage par défaut.
+  //
+  // ⚠️ Il ne remplace PAS `this.sample` : celui-là doit rester interrogeable en
+  // TOUT point (socle, bateaux, drapage GPX, étiquettes), pas seulement sur les
+  // sommets de la grille. Les deux formules sont identiques au bit près — c'est
+  // seulement le chemin du grain qui change, et test/detail-noise.test.js le
+  // verrouille sur six combinaisons d'exagération, de zoom et de finesse.
+  //
+  // ⚠️ NE PAS « SIMPLIFIER » l'expression finale : `detail·(a + 0,35·b)` n'est
+  // pas bit-identique à `detail·a + detail·0,35·b` (48 % des sommets diffèrent).
+  // Rend null quand il n'y a rien à mémoriser (relief procédural, ou grain nul).
+  _makeGridSampler(params, res) {
+    if (params.source !== 'real' || !this.dem) return null
+    const dem = this.dem
+    const scale = (TERRAIN_SIZE / dem.extentMeters) * params.demExaggeration
+    const meanM = dem.meanM
+    const { size } = dem
+    const detail = this.mapUniforms.uColorMode.value === 1 ? Math.min(params.detail, NATURAL_DETAIL_MAX) : params.detail
+    if (!(detail > 0)) {
+      // grain éteint (zooms continentaux, curseur à zéro) : aucun champ à cuire.
+      // `landFactor · (0·a + 0·0,35·b)` vaut 0 tout rond, on peut le sauter.
+      return (i, x, z) => (sampleDem(dem, (x / TERRAIN_SIZE + 0.5) * (size - 1), (z / TERRAIN_SIZE + 0.5) * (size - 1)) - meanM) * scale
+    }
+    const grain = detailField(params.seed, params.detailScale, res, TERRAIN_SIZE)
+    return (i, x, z) => {
+      const raw = sampleDem(dem, (x / TERRAIN_SIZE + 0.5) * (size - 1), (z / TERRAIN_SIZE + 0.5) * (size - 1))
+      const h = (raw - meanM) * scale
+      const landFactor = smoothstep(0, 90, raw)
+      const fine = landFactor * (detail * grain[i * 2] + detail * 0.35 * grain[i * 2 + 1])
+      return h + fine
+    }
+  }
+
   // Height field sampler for the current seed — kept so other objects can query it.
   _makeSampler(params) {
     if (params.source === 'real' && this.dem) return this._makeDemSampler(params)
@@ -1129,11 +1167,29 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
 
   rebuild(params) {
     const res = params.resolution
-    const geo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, res, res)
-    geo.rotateX(-Math.PI / 2)
+    // GABARIT MÉMORISÉ au lieu de `new THREE.PlaneGeometry` : celui-ci mettait
+    // 194 ms et jetait 262 Mo de tas JS à res 1024 (106 ms et 104 Mo à res 768)
+    // pour fabriquer un plan PLAT que les lignes suivantes réécrivent
+    // intégralement (Y, normales, couleurs). Sur une reconstruction complète du
+    // bloc, mesurée en navigateur au Mont-Blanc à res 1024 : 853 → 770 ms.
+    // Bit-identique, verrouillé par test/grid-template.test.js.
+    // ⚠️ `position` est COPIÉ (on va y écrire les Y, et le gabarit est partagé
+    // entre blocs) ; `uv` et `index` sont branchés TELS QUELS parce que personne
+    // ne les écrit — voir l'avertissement en tête de grid-template.js.
+    const tpl = gridTemplate(res, TERRAIN_SIZE)
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(tpl.position), 3))
+    geo.setAttribute('uv', new THREE.BufferAttribute(tpl.uv, 2))
+    geo.setIndex(new THREE.BufferAttribute(tpl.index, 1))
 
     const sample = this._makeSampler(params)
     this.sample = sample
+    // le grain FBM est pré-cuit sur la grille (detail-noise.js) — mesuré en
+    // navigateur au Mont-Blanc à res 1024 : 770 → 600 ms de reconstruction, et
+    // il survit à un changement de zoom,
+    // à un coup de curseur d'exagération et à une bascule de palette. Repli sur
+    // `sample` quand il n'y a rien à mémoriser (relief procédural).
+    const gridSample = this._makeGridSampler(params, res)
 
     const pos = geo.attributes.position
     const count = pos.count
@@ -1143,7 +1199,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     for (let i = 0; i < count; i++) {
       const x = arr[i * 3]
       const z = arr[i * 3 + 2]
-      const h = sample(x, z)
+      const h = gridSample ? gridSample(i, x, z) : sample(x, z)
       arr[i * 3 + 1] = h
       if (h < minH) minH = h
       if (h > maxH) maxH = h
