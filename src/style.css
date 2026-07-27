@@ -698,39 +698,117 @@ body.dark .ce-notice {
   padding-bottom: 6px;
 }
 
-/* peak markers: hud-poi family, but altitude always visible below the name */
+/* ---- repères de sommet ------------------------------------------------
+   Ils appartenaient encore à la famille .hud-poi (le FUI de fiction de v1) :
+   filet orange à gauche, cadre plein, capitales très chassées. Plus rien
+   dans l'application ne ressemble à ça — ils reprennent ici la facture des
+   cartouches de course (src/ui/race-labels.css), la génération vivante :
+   porcelaine, filet fin, ombre courte, mono v28.
+   Une différence assumée avec la course : PAS de liseré d'accent. L'orange
+   signale ce qui appelle une action (Publier, un point de passage) ; un
+   sommet est du décor de fond et ne doit jamais concurrencer le relief.
+   Jetons --ce-* et non --hud-* : ce sont eux qui basculent avec body.dark
+   (les --hud-* sont pilotés par les réglages d'ambiance de l'utilisateur et
+   dérivaient donc de l'interface). */
 .peak-marker {
-  position: fixed;
-  pointer-events: none;
+  position: fixed; /* le JS projette contre window.innerWidth/Height */
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none; /* seul le cartouche est cliquable, voir plus bas */
   z-index: 26;
+  transition: opacity 0.2s;
+  will-change: transform;
+  font-family: var(--ce-mono, 'SF Mono', ui-monospace, monospace);
 }
 
-.peak-marker .tag {
+/* le point EST la cote : il reste planté sur le sommet, le cartouche flotte
+   juste au-dessus — même grammaire que .rl-anchor / .rl-cart */
+.peak-marker .peak-dot {
+  position: absolute;
+  left: -3.5px;
+  top: -3.5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ce-ink, #1c1917);
+  border: 1.5px solid var(--ce-porcelain, #fbfbfc);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+}
+
+.peak-marker .peak-cart {
+  position: absolute;
+  left: 50%;
+  bottom: 11px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 6px;
+  background: var(--ce-porcelain, #fbfbfc);
+  color: var(--ce-ink, #1c1917);
+  border: 1px solid var(--ce-hairline, rgba(28, 25, 23, 0.08));
+  box-shadow: 0 2px 10px var(--ce-shadow-color, rgba(28, 25, 23, 0.12));
+  white-space: nowrap;
   pointer-events: auto;
   cursor: pointer;
-  border-left: 3px solid var(--hud-accent);
 }
 
-.peak-marker .tag b {
-  display: block;
+.peak-marker .peak-name {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  /* capitale posée EN CSS et non dans le DOM (comme .rl-name) : le nom OSM
+     reste intact dans le document, et la fiche de survol le réaffiche dans sa
+     casse d'origine — « Aiguille Verte », pas « AIGUILLE VERTE ». */
+  text-transform: uppercase;
+  line-height: 24px;
 }
 
-.peak-marker .tag i {
-  display: block;
-  margin-left: 0;
-  color: var(--hud-accent);
-  opacity: 0.9;
+.peak-marker .peak-alt {
+  font-style: normal;
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--ce-muted, rgba(28, 25, 23, 0.55));
+  font-variant-numeric: tabular-nums;
 }
 
-/* peak hover card (CLASS/ELEV/GRID/STATUS) — reuses .hud-panel/.hud-row/
-   .accent (see peaks.js's buildHoverCard()); position:fixed matches the
-   .peak-marker transform math above (both project against window w/h, not
-   scrolled document coordinates), and it sits one z-index above the marker
-   it's describing. */
-.peak-hud-panel {
+/* fiche de survol — l'ancienne était un panneau FUI (CLASS / ELEV / GRID /
+   STATUS: NAMED) hérité de hud2d.js. Les deux lignes de costume sont
+   tombées ; restent l'altitude dans les deux unités et les coordonnées,
+   posées dans le verre v28 comme n'importe quel panneau de l'application.
+   Sélecteur doublé (.ce-glassbox.peak-card) exprès : les deux fichiers de
+   style ne sont pas chargés dans le même ordre en dev (balise <link> pour
+   style.css) et en build (bundle), et à spécificité égale c'est l'ordre qui
+   tranche — le rayon serait revenu à celui du verre une fois sur deux. */
+.ce-glassbox.peak-card {
   position: fixed;
+  left: 0;
+  top: 0;
   z-index: 27;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 1.55;
   transition: opacity 0.12s;
+  will-change: transform;
+}
+
+.peak-card b {
+  display: block;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none; /* .hud-panel mettait tout en capitales */
+}
+
+.peak-card span {
+  display: block;
+  color: var(--ce-muted, rgba(28, 25, 23, 0.55));
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------------------------------------------------------------- v3: drag + dark */

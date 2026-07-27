@@ -440,12 +440,19 @@ const params = {
   // letterform instead, so the ink glyph stays crisp and there's no reason to
   // ship it off.
   placesHalo: true,
-  // Summit markers (Map panel "Markers" section): ON by default — the v1
-  // experience always showed the top-N named peaks on a real-terrain patch;
-  // this key simply never existed in params before (see peaksLayer.setEnabled
-  // below, near its construction), so the toggle silently stayed off no
-  // matter what map-panel.js's `?? false` fallback read.
-  peaksEnabled: true,
+  // Repères de sommet (panneau Carte → Repères) : ÉTEINTS par défaut
+  // (Adrien). Ils étaient allumés depuis qu'on a réparé le fait que la clé
+  // n'existait pas dans params ; la carte s'ouvrait donc sur cinq étiquettes
+  // plantées dans le relief avant même qu'on ait regardé le relief. La
+  // toponymie est une COUCHE, comme la photo aérienne ou le trait de côte :
+  // on la demande.
+  // La clé reste dans TEMPLATE_KEYS (templates-user.js) — un template ou un
+  // lien de partage qui les allume les rallume bien au chargement, via le
+  // setEnabled(params.peaksEnabled) posé plus bas.
+  // Effet de bord assumé : un vieux lien #s= fabriqué quand le défaut était
+  // « allumé » n'embarquait pas la clé (le diff ne garde que les écarts au
+  // défaut) — il rouvrira donc sans les sommets.
+  peaksEnabled: false,
 
   // light
   sunIntensity: 7.6,
@@ -1924,13 +1931,14 @@ const peaksLayer = new PeaksLayer({
     focusOnPeak(world.x, world.y, world.z)
   },
 })
-// boot-time default (params.peaksEnabled, above): setEnabled(true) here is a
-// safe no-op until a real DEM exists (refresh() bails on !dem) — the actual
-// population happens the first time regenerateTerrain() runs after dem loads
-// (see its own `if (peaksLayer.enabled) peaksLayer.refresh()` call). Without
-// this line the layer was NEVER enabled anywhere at boot — the Map panel
-// toggle was the only thing that ever called setEnabled — so summits stayed
-// invisible until a user found and flipped that switch by hand.
+// Le défaut est désormais « éteint » (params.peaksEnabled, plus haut), mais
+// cette ligne compte toujours : `params` a déjà pu être écrasé par la
+// restauration d'un lien de partage ou d'un template au-dessus. C'est le
+// SEUL endroit du démarrage qui met la couche en cohérence avec params ;
+// sans elle, un lien qui allume les sommets s'ouvrait sans eux.
+// Appel sûr avant qu'un DEM existe (refresh() sort sur !dem) : le
+// peuplement réel a lieu au premier regenerateTerrain(), qui rappelle
+// refresh() de lui-même si la couche est active.
 peaksLayer.setEnabled(params.peaksEnabled)
 
 // LE look d'ouverture, appliqué UNE fois après le premier relief : c'est le

@@ -1,7 +1,10 @@
 // Top-5 named peaks of the current patch, via the Overpass API (OSM
-// natural=peak nodes, no key). Markers are DOM elements in the hud-poi
-// family, projected every frame; each shows the peak name with its real
-// altitude underneath.
+// natural=peak nodes, no key). Markers are DOM elements projected every
+// frame; each shows the peak name and its real altitude.
+// Habillage : voir la section « repères de sommet » de style.css — ils
+// suivent la facture des cartouches de course, pas l'ancien FUI .hud-poi.
+// ÉTEINTS par défaut (params.peaksEnabled dans main.js) : la toponymie est
+// une option, pas le sujet.
 
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
@@ -37,51 +40,34 @@ export async function fetchTopPeaks(dem, count = 5) {
     .slice(0, count)
 }
 
-// v1 had a hover info card (CLASS/ELEV/GRID/STATUS) on every summit marker —
-// it regressed when hud2d.js (the fictional-terrain FUI layer that originally
-// owned this markup) was deleted as unreachable dead code (params.hud never
-// had a UI control), taking the only "selection panel" markup in the app down
-// with it even though PeaksLayer's own markers (real-terrain, Overpass-named)
-// never depended on that module. Restored here as PeaksLayer's own card,
-// reusing the SAME .hud-panel/.hud-row/.accent CSS classes hud2d.js used
-// (still in style.css, unconsumed since that deletion) rather than inventing
-// new markup — one card shared by all markers, shown on pointerenter, hidden
-// on pointerleave, `pointer-events: none` so it can never itself intercept
-// the hover it's reacting to (no flicker fighting the marker's own hover).
+// Séparateur de milliers À LA MAIN. `toLocaleString('fr-FR')` pose une
+// ESPACE FINE INSÉCABLE (U+202F) que Bricolage Grotesque n'a pas dans sa
+// casse : la fiche de survol affichait « 13520 ft » là où le cartouche, en
+// mono, montrait bien « 13 520 ». L'insécable normale, elle, est partout.
+const milliers = (n) => Math.round(n).toLocaleString('fr-FR').replace(/[\u202F\u2009]/g, '\u00A0')
+
+// Fiche de survol, une seule pour tous les marqueurs, montrée au
+// pointerenter et cachée au pointerleave. `pointer-events: none` : elle ne
+// peut jamais intercepter le survol auquel elle réagit (sinon elle
+// clignoterait en se disputant le pointeur avec le marqueur).
+// Elle portait les classes .hud-panel/.hud-row/.accent de hud2d.js — le FUI
+// de fiction de v1 — avec quatre lignes CLASS / ELEV / GRID / STATUS dont
+// deux ne disaient rien (CLASS valait toujours « PEAK », STATUS toujours
+// « NAMED » : du costume, pas de l'information). Il ne reste que ce qui
+// n'est pas déjà sur le cartouche, dans le verre v28 (.ce-glassbox).
 function buildHoverCard() {
   const card = document.createElement('div')
-  card.className = 'hud-panel peak-hud-panel'
+  card.className = 'ce-glassbox peak-card'
   card.style.display = 'none'
   card.style.pointerEvents = 'none'
 
-  const head = document.createElement('div')
-  head.className = 'hud-panel-head'
-  const sq = document.createElement('span')
-  sq.className = 'sq'
   const nameEl = document.createElement('b')
-  head.append(sq, nameEl)
-
-  const row = (label) => {
-    const r = document.createElement('div')
-    r.className = 'hud-row'
-    const s = document.createElement('span')
-    s.textContent = label
-    const b = document.createElement('b')
-    r.append(s, b)
-    card.append(r)
-    return b
-  }
-
-  card.append(head)
-  const classEl = row('CLASS')
-  const elevEl = row('ELEV')
-  const gridEl = row('GRID')
-  const statusEl = row('STATUS')
-  statusEl.className = 'accent'
-  statusEl.textContent = 'NAMED'
+  const elevEl = document.createElement('span')
+  const gridEl = document.createElement('span')
+  card.append(nameEl, elevEl, gridEl)
 
   document.body.appendChild(card)
-  return { card, nameEl, classEl, elevEl, gridEl }
+  return { card, nameEl, elevEl, gridEl }
 }
 
 export class PeaksLayer {
@@ -106,10 +92,8 @@ export class PeaksLayer {
 
   _showCard(m) {
     this._hovered = m
-    this._hc.nameEl.textContent = m.name.toUpperCase()
-    this._hc.classEl.textContent = 'PEAK'
-    const ft = Math.round(m.ele * 3.28084)
-    this._hc.elevEl.textContent = `${Math.round(m.ele).toLocaleString()} M · ${ft.toLocaleString()} FT`
+    this._hc.nameEl.textContent = m.name
+    this._hc.elevEl.textContent = `${milliers(m.ele)} m · ${milliers(m.ele * 3.28084)} ft`
     this._hc.gridEl.textContent = `${m.lat.toFixed(4)}°, ${m.lon.toFixed(4)}°`
     this._hc.card.style.display = 'block'
   }
@@ -138,23 +122,27 @@ export class PeaksLayer {
         const y = this.terrain.sample(w.x, w.z) + 0.5
         const ele = p.ele ?? Math.round(this.terrain.heightToFeet(y - 0.5) / 3.28084)
         const el = document.createElement('div')
-        el.className = 'hud-poi peak-marker'
-        // OSM names are untrusted — build the tag with textContent, never HTML
+        el.className = 'peak-marker'
+        const dot = document.createElement('i')
+        dot.className = 'peak-dot'
         const tag = document.createElement('span')
-        tag.className = 'tag'
+        tag.className = 'peak-cart'
+        // les noms OSM ne sont pas de confiance — textContent, jamais de HTML
         const nameEl = document.createElement('b')
-        nameEl.textContent = p.name.toUpperCase()
+        nameEl.className = 'peak-name'
+        // la capitale est posée en CSS (text-transform) et non ici : la fiche
+        // de survol réaffiche le MÊME nom en casse d'origine
+        nameEl.textContent = p.name
         const eleEl = document.createElement('i')
-        eleEl.textContent = `${Math.round(ele).toLocaleString()} M`
+        eleEl.className = 'peak-alt'
+        eleEl.textContent = `${milliers(ele)} m`
         tag.append(nameEl, eleEl)
-        el.appendChild(tag)
+        el.append(dot, tag)
         document.body.appendChild(el)
         const world = new THREE.Vector3(w.x, y, w.z)
-        el.style.cursor = 'pointer'
         el.addEventListener('click', () => this.onFocus?.(world, p.name))
         const marker = { el, tag, world, name: p.name, ele, lat: p.lat, lon: p.lon }
-        // hover info card (CLASS/ELEV/GRID/STATUS) — see buildHoverCard()'s
-        // comment for why this restores v1 behaviour rather than adding new UI
+        // fiche de survol (altitude m/ft + coordonnées) — voir buildHoverCard()
         el.addEventListener('pointerenter', () => this._showCard(marker))
         el.addEventListener('pointerleave', () => this._hideCard())
         this.markers.push(marker)
@@ -183,13 +171,14 @@ export class PeaksLayer {
       if (m === this._hovered) {
         hoveredOn = on
         if (on) {
-          // anchor the card just right-of/below the marker, clamped so it
-          // never runs off the viewport — same offset/clamp shape hud2d.js
-          // used for its own selection panel
+          // la fiche se pose en bas à droite du point, bornée pour ne jamais
+          // sortir du cadre. Les marges (200/90) suivent la taille de la
+          // fiche : elles valaient 250/130 du temps du panneau FUI à quatre
+          // lignes et laissaient désormais un trou au bord droit.
           const sx = (this._v.x * 0.5 + 0.5) * w
           const sy = (-this._v.y * 0.5 + 0.5) * h
-          const px = Math.min(Math.max(sx + 14, 10), w - 250)
-          const py = Math.min(sy + 8, h - 130)
+          const px = Math.min(Math.max(sx + 14, 10), w - 200)
+          const py = Math.min(sy + 8, h - 90)
           this._hc.card.style.transform = `translate(${px.toFixed(1)}px, ${py.toFixed(1)}px)`
         }
       }
