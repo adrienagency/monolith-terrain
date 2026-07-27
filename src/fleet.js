@@ -89,8 +89,8 @@ function routeLibre(x, z, cap, dist, isSea) {
 
 // Combien de positions on tire avant de renoncer à peupler le bloc. Avec une
 // seule place, perdre le tirage sur un pixel de terre viderait la mer entière :
-// mesuré sur un chenal étroit, 24 essais font passer le taux de blocs peuplés
-// de 40 % à 83 %.
+// mesuré sur un chenal étroit, trente-deux essais font passer le taux de blocs
+// peuplés de 40 % à 90 %.
 const SEED_TRIES = 32
 
 // Échelle de rendu : la coque garde sa taille RÉELLE rapportée à l'emprise du
