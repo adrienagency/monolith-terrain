@@ -134,7 +134,20 @@ const params = {
   warp: 1.3,
   detail: 0.02,
   detailScale: 0.8,
-  resolution: 1024,
+  // MAILLAGE DU BLOC CENTRAL. 768 depuis le 2026-07-27 (décision d'Adrien,
+  // prise en connaissance du coût) : sur le Mont-Blanc, le pas 1024 → 768 écarte
+  // la silhouette de 0,02 px CSS en moyenne et 1,67 px au pire — soit exactement
+  // ce que 1024 perd DÉJÀ en n'étant pas 2048 (1,64 px). Rend 30 Mo de géométrie
+  // et ~200 ms de gel par reconstruction.
+  // ⚠️ EN DESCENDRE ENCORE ? Alors il faut faire descendre `detailScale` avec.
+  // Mesuré (scratchpad/bloc/nyquist.mjs, grille de vérité 3072) : le maillage
+  // perd 11,9 % du grain FBM à 1024, 18,3 % à 768, 30 % à 512 et 40 % à 384, où
+  // la corrélation entre sommets voisins tombe à 0,53 — le grain n'est plus une
+  // texture, c'est du poivre et sel, et il scintillera au moindre mouvement de
+  // caméra. Le couplage n'est PAS automatique : il est verrouillé par un test
+  // (test/detail-noise.test.js, grainSamplesPerCycle) qui casse si l'un des deux
+  // bouge sans l'autre, et qui dit quoi corriger.
+  resolution: 768,
 
   // surface material
   color: '#dddcd5',
