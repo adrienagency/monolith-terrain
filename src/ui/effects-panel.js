@@ -54,18 +54,18 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol
 // ---- presets de CARACTÈRE des nuages (coverage/billow/contrast/opacity) ----
 // « Dégagé » n'est pas un réglage : c'est cloudsEnabled=false — la présence
 // fait partie du caractère, une seule rangée de chips décide de tout.
-const CLOUD_PRESETS = [
+export const CLOUD_PRESETS = [
   { id: 'epars', label: 'Épars', v: { cloudCoverage: 1.7, cloudBillow: 1.2, cloudContrast: 1.2, cloudOpacity: 1.0 } },
   { id: 'couvert', label: 'Couvert', v: { cloudCoverage: 0.85, cloudBillow: 0.7, cloudContrast: 0.7, cloudOpacity: 1.1 } },
   { id: 'drama', label: 'Dramatique', v: { cloudCoverage: 1.25, cloudBillow: 2.2, cloudContrast: 1.8, cloudOpacity: 1.5 } },
 ]
-const CLOUD_TIPS = {
+export const CLOUD_TIPS = {
   degage: 'Ciel dégagé — pas de nuages.',
   epars: 'Cumulus épars, beaucoup de ciel entre eux.',
   couvert: 'Voile continu, lumière diffuse.',
   drama: 'Masses hautes et contrastées, ciel de grain.',
 }
-const cloudPresetOf = (params) =>
+export const cloudPresetOf = (params) =>
   CLOUD_PRESETS.find((p) =>
     near(params.cloudCoverage, p.v.cloudCoverage, 0.03) &&
     near(params.cloudBillow, p.v.cloudBillow, 0.06) &&
@@ -75,17 +75,17 @@ const cloudPresetOf = (params) =>
 // ---- presets d'ÉTAT DE MER (hauteur/clapot/vitesse) --------------------------
 // ⚠️ Beaufort plafonné F3 : les valeurs restent DANS les plages actuelles des
 // sliders (waveH 0..2, chop 0..1, speed 0..2) — jamais au-delà.
-const SEA_PRESETS = [
+export const SEA_PRESETS = [
   { id: 'calme', label: 'Calme', v: { seaWaveH: 0.2, seaChop: 0.1, seaSpeed: 0.6 } },
   { id: 'brise', label: 'Brise', v: { seaWaveH: 0.8, seaChop: 0.7, seaSpeed: 1 } },
   { id: 'agitee', label: 'Agitée', v: { seaWaveH: 1.5, seaChop: 0.95, seaSpeed: 1.35 } },
 ]
-const SEA_TIPS = {
+export const SEA_TIPS = {
   calme: 'Mer d’huile — houle à peine perceptible.',
   brise: 'Petites vagues et premiers moutons.',
   agitee: 'Mer formée, crêtes déferlantes (plafond F3).',
 }
-const seaPresetOf = (params) =>
+export const seaPresetOf = (params) =>
   SEA_PRESETS.find((p) =>
     near(params.seaWaveH, p.v.seaWaveH, 0.06) &&
     near(params.seaChop, p.v.seaChop, 0.05) &&
