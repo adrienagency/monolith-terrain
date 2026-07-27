@@ -46,8 +46,15 @@ function maskSampler(maskCanvas) {
 // lattice spanning the DEM footprint. Returns [{ax,az,bx,bz}]. Winding is moot —
 // each segment is extruded into a DoubleSide quad. Also returns the interior
 // min terrain height so the caller can seat the base below every point.
-export function traceSkirt({ maskCanvas, sample, grid = 300, threshold = 127 }) {
-  const mask = maskSampler(maskCanvas)
+// `uniform` ('full' | 'empty') remplace le masque quand il n'y a plus de masque
+// à lire : une dalle du damier entièrement DANS la zone n'en garde pas (voir
+// maskUniformity dans region-mask.js — douze mégaoctets pour un seul bit). Le
+// tracé rend alors exactement ce que rendait le canevas tout blanc : aucune
+// ligne de coupe à l'intérieur, les quatre bords murés — sans quoi la dalle
+// s'ouvrirait en tranche de papier au bord du damier — et son minimum
+// intérieur, qui entre dans le pied COMMUN de la découpe.
+export function traceSkirt({ maskCanvas, sample, grid = 300, threshold = 127, uniform = null }) {
+  const mask = uniform ? () => (uniform === 'full' ? 255 : 0) : maskSampler(maskCanvas)
   const step = TERRAIN_SIZE / grid
   const segs = []
   const lerp = (a, b, va, vb) => a + (b - a) * ((threshold - va) / (vb - va || 1))
@@ -181,9 +188,10 @@ export function regionBaseLevel(seaY, floorY) {
 // construire une seule. Sans ce passe-plat, chaque dalle paierait deux fois son
 // marching-squares et ses appels à terrain.sample.
 //   buildRegionSkirt({ maskCanvas, sample, material, baseY, traced? }) → { mesh } | null
-export function buildRegionSkirt({ maskCanvas, sample, material, depth = 5, grid = 300, baseY: forcedBaseY = null, traced = null }) {
-  if (!maskCanvas || !sample) return null
-  const { segs, interiorMin } = traced || traceSkirt({ maskCanvas, sample, grid })
+export function buildRegionSkirt({ maskCanvas, sample, material, depth = 5, grid = 300, baseY: forcedBaseY = null, traced = null, uniform = null }) {
+  // `uniform` tient lieu de masque pour une dalle sans canevas (voir traceSkirt)
+  if ((!maskCanvas && !uniform) || !sample) return null
+  const { segs, interiorMin } = traced || traceSkirt({ maskCanvas, sample, grid, uniform })
   if (!segs.length) return null
 
   // top height at each boundary point = the terrain surface there

@@ -200,7 +200,12 @@ async function loadGridFeatures(bbox) {
 // coast band (z4–z15) or on any failure — the caller then keeps the current
 // elevation-based rendering (repli). z4–z8 use Natural Earth 10m; z9–z15 use
 // the finer OSM z6 land grid.
-export async function fetchCoastMask({ lat, lon, zoom, dem }) {
+// `size` : côté du masque. MASK_SIZE (2048) pour le bloc central ; les dalles
+// VOISINES du damier en demandent la moitié (block-grid.js) — leur maillage est
+// quatre fois plus grossier, et le masque leur coûtait 16 Mo de texture PLUS
+// 16 Mo d'ImageData (celle qu'elles gardent pour leurs polders), soit le poste
+// le plus lourd du damier.
+export async function fetchCoastMask({ lat, lon, zoom, dem, size = MASK_SIZE }) {
   if (!dem || zoom < COAST_ZOOM_MIN || zoom > COAST_ZOOM_MAX) return null
   try {
     const bbox = patchLatLonBBox(dem)
@@ -208,7 +213,7 @@ export async function fetchCoastMask({ lat, lon, zoom, dem }) {
     const rings = landPolygonsInBBox(features, bbox)
     // no land in view (open ocean) is legitimate — still return a mask so the
     // shader paints all-sea rather than falling back to the noisy 0-isoline
-    const { texture, canvas } = rasterize(rings, dem, MASK_SIZE)
+    const { texture, canvas } = rasterize(rings, dem, size)
     return { maskTexture: texture, maskCanvas: canvas, source: zoom <= COAST_NE_MAX ? 'ne' : 'osm' }
   } catch (err) {
     console.warn('coast mask failed:', err)

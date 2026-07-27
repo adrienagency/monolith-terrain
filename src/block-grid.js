@@ -22,7 +22,31 @@ import { buildSlabWalls } from './plinth.js'
 import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
 
 export const GRID_R = 2 // rayon du damier : 2 → 5×5 max, centre exclu
-const NEIGHBOUR_RES = 384 // maillage des voisins : contexte, pas héros
+
+// LES VOISINES SE DIMENSIONNENT SUR ELLES-MÊMES, PAS SUR LE BLOC CENTRAL.
+//
+// C'est le correctif de mémoire du damier, et sa cause était invisible parce que
+// chaque valeur était juste SÉPARÉMENT. Le bloc central est maillé à 1024 sur
+// 56 unités-monde (18,3 sommets par unité) et ses champs sont taillés pour lui :
+// masque côtier 2048² (36,6 px/u), analyse à la taille du MNT, 1536² (27,4 px/u).
+// Les voisines héritaient de ces tailles avec un maillage 2,7 fois plus grossier
+// — elles portaient donc des textures 4 à 5 fois plus fines que le relief
+// capable de les montrer. Mesuré sur Le Var isolé à z12 : **79 Mo par dalle**,
+// 1 824 Mo de tas JS pour 23 voisines, contre 2 à 4 Go de limite pratique dans
+// Chrome. C'est le risque le plus sérieux du damier, devant la vitesse.
+//
+// La règle qui remplace l'héritage : aucun champ ne dépasse quatre fois la
+// densité du maillage qui le porte (test/damier-memoire.test.js le verrouille).
+//
+// ⚠️ Le MNT, lui, N'EST PAS RÉDUIT et ce n'est pas un oubli : il est lu par le
+// PROCESSEUR (veille devant l'étrave des bateaux, tracé de la jupe de découpe,
+// orographie des nuages), pas seulement par la carte graphique. Le diviser
+// échangerait de la mémoire contre de la QUALITÉ, notamment sur la précision du
+// contour de découpe aux jointures — décision d'Adrien, pas du code.
+const NEIGHBOUR_RES = 256 // maillage des voisins : contexte, pas héros (4,6 sommets/u)
+export const NEIGHBOUR_COAST_SIZE = 1024 // masque côtier (18,3 px/u) — 2048² au centre
+export const NEIGHBOUR_ANALYSIS_SIZE = 768 // analyse de relief (13,7 px/u) — MNT au centre
+export { NEIGHBOUR_RES }
 
 const clampLat = (lat) => Math.min(85.05, Math.max(-85.05, lat))
 
@@ -448,7 +472,13 @@ export class BlockGrid {
     // même échelle, rien d'autre à harmoniser.)
     const main = this.getMainDem()
     const dem = main ? { ...nDem, meanM: main.meanM } : nDem
-    const terrain = new Terrain(p, { offset: { x: i * TERRAIN_SIZE, z: j * TERRAIN_SIZE } })
+    // rampe, rugosité et bump viennent du bloc central : elles sont identiques
+    // octet pour octet d'une dalle à l'autre (voir shareTexturesFrom)
+    const terrain = new Terrain(p, {
+      offset: { x: i * TERRAIN_SIZE, z: j * TERRAIN_SIZE },
+      analysisMax: NEIGHBOUR_ANALYSIS_SIZE,
+      shareFrom: this.getMainTerrain?.() || null,
+    })
     terrain.setDem(dem)
     terrain.rebuild(p)
     // CONTINUITÉ DE TEINTE : la rampe hypsométrique se normalise par bloc —
@@ -486,7 +516,7 @@ export class BlockGrid {
     // non bloquant ; échec/hors bande → repli altitude comme avant. La
     // texture appartient à la cellule (disposée avec elle, cf. _disposeCell).
     if (dem.zoom >= COAST_ZOOM_MIN && dem.zoom <= COAST_ZOOM_MAX) {
-      fetchCoastMask({ lat: 0, lon: 0, zoom: dem.zoom, dem })
+      fetchCoastMask({ lat: 0, lon: 0, zoom: dem.zoom, dem, size: NEIGHBOUR_COAST_SIZE })
         .then((res) => {
           if (!res) return
           if (cell.disposed) { res.maskTexture.dispose(); return } // cellule retirée pendant le fetch
@@ -533,6 +563,10 @@ export class BlockGrid {
     const t = cell.terrain
     if (!t) return
     const p = { ...params, resolution: Math.min(params.resolution ?? NEIGHBOUR_RES, NEIGHBOUR_RES) }
+    // l'emprunt des textures communes se réarme ici : une dalle née avant le
+    // bloc central (ou après son remplacement) doit se raccrocher, sinon elle
+    // recuirait sa propre rampe à chaque restyle
+    if (mt) t.shareTexturesFrom?.(mt)
     // COLORISATION : le mode (Classique / Naturel) et ses réglages DOIVENT
     // passer ici, sinon la couture au bord du bloc central saute aux yeux — un
     // voisin resté en rampe 1D à côté d'un centre peigné et voilé. setColorMode
@@ -577,11 +611,21 @@ export class BlockGrid {
     this.scene.remove(t.mesh)
     t.mesh.geometry?.dispose()
     t.material?.dispose()
+    // ⚠️ D'ABORD SE DÉSABONNER. Les textures partagées (rampe, rugosité, bump)
+    // appartiennent au bloc CENTRAL : les disposer avec la cellule tuerait le
+    // relief principal et toutes les autres dalles d'un coup. Et rester inscrit
+    // dans son ensemble d'emprunteurs après la mort ferait repointer un mort à
+    // la prochaine recuisson.
+    const emprunte = !!t._shareSrc
+    t.stopSharing?.()
     // textures créées PAR instance (le damier churn au fil des zooms) —
     // uAnalysis en fait partie : une RGBA à la taille du DEM (2,3 Mo avec ses
     // mipmaps en tuiles 256 px, ~12 Mo en tuiles 512 px — Mapterhorn), l'oublier
     // ici serait de loin la plus grosse fuite VRAM du lot
-    for (const u of ['uRampTex', 'uSeaMask', 'uRegionMask', 'uCoastMask', 'uAnalysis']) {
+    const propres = emprunte
+      ? ['uSeaMask', 'uRegionMask', 'uCoastMask', 'uAnalysis'] // uRampTex est au centre
+      : ['uRampTex', 'uSeaMask', 'uRegionMask', 'uCoastMask', 'uAnalysis']
+    for (const u of propres) {
       const tex = t.mapUniforms?.[u]?.value
       tex?.dispose?.()
     }
@@ -590,7 +634,11 @@ export class BlockGrid {
     t._coastPlaceholder?.dispose?.()
     t._seaPlaceholder?.dispose?.()
     t._analysisPlaceholder?.dispose?.()
-    t.material?.roughnessMap?.dispose?.()
-    t.material?.bumpMap?.dispose?.()
+    t._regionPlaceholder?.dispose?.()
+    t._regionEmpty?.dispose?.()
+    if (!emprunte) {
+      t.material?.roughnessMap?.dispose?.()
+      t.material?.bumpMap?.dispose?.()
+    }
   }
 }

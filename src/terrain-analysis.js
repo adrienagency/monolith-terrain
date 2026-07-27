@@ -341,15 +341,68 @@ export function packAnalysis({ texShade = null, hillshade: hs = null, wetness: w
 }
 
 /**
+ * SOUS-ÉCHANTILLONNAGE PAR MOYENNE DE BLOCS.
+ *
+ * ⚠️ MOYENNE ET NON PLUS-PROCHE-VOISIN, et ce n'est pas un raffinement : les
+ * quatre champs de ce module sont des DÉRIVÉES du relief. Décimer en piquant un
+ * pixel sur deux garderait le bruit haute fréquence du MNT et le replierait sur
+ * les basses fréquences (aliasing) — le peigné des crêtes se mettrait à
+ * moucheter au lieu de s'adoucir. La moyenne est le filtre passe-bas minimal
+ * qui rend l'opération honnête.
+ *
+ * Le dernier bloc est TRONQUÉ quand le côté n'est pas divisible : on moyenne ce
+ * qui existe plutôt que de lire hors du tableau.
+ *
+ * @returns {{data: Float32Array, size: number}}
+ */
+export function coarsenField(src, size, factor) {
+  const f = Math.max(1, factor | 0)
+  if (f === 1) return { data: src, size }
+  const out = Math.ceil(size / f)
+  const dst = new Float32Array(out * out)
+  for (let y = 0; y < out; y++) {
+    const y0 = y * f
+    const y1 = Math.min(size, y0 + f)
+    for (let x = 0; x < out; x++) {
+      const x0 = x * f
+      const x1 = Math.min(size, x0 + f)
+      let somme = 0
+      let n = 0
+      for (let yy = y0; yy < y1; yy++) {
+        const row = yy * size
+        for (let xx = x0; xx < x1; xx++) {
+          const v = src[row + xx]
+          if (Number.isFinite(v)) { somme += v; n++ }
+        }
+      }
+      dst[y * out + x] = n ? somme / n : 0
+    }
+  }
+  return { data: dst, size: out }
+}
+
+/**
  * La chaîne complète, telle que terrain.js la consomme : un DEM en mètres →
  * la RGBA empaquetée. Regroupée ici (et non dans terrain.js) pour que le
  * pipeline entier reste testable sans navigateur.
  *
+ * `maxSize` PLAFONNE le côté de l'analyse. Il existe pour les dalles VOISINES du
+ * damier : elles héritaient d'une analyse à la taille du MNT (1536²) alors que
+ * leur maillage est quatre fois plus grossier — 12 Mo de texture (mipmaps
+ * comprises) et ~390 ms de flous par dalle pour un détail que la géométrie ne
+ * peut pas restituer. Le bloc central, lui, ne passe JAMAIS de plafond : c'est
+ * le héros, il porte le maillage qui justifie la finesse.
+ *
  * @param {{data: Float32Array, size: number, metersPerPixel?: number}} dem
  */
-export function analyzeDem(dem, { alpha = 0.5, octaves = 6, k = 1.6 } = {}) {
-  const { data, size } = dem
-  const mpp = dem.metersPerPixel
+export function analyzeDem(dem, { alpha = 0.5, octaves = 6, k = 1.6, maxSize = 0 } = {}) {
+  // ⚠️ metersPerPixel SUIT le sous-échantillonnage. Les rayons de flou de
+  // wetness (~1 km) et aspectSmooth (~500 m) sont exprimés en MÈTRES puis
+  // convertis en pixels : oublier de le corriger doublerait leur portée
+  // terrain et étalerait l'humidité sur deux kilomètres.
+  const facteur = maxSize > 0 && dem.size > maxSize ? Math.ceil(dem.size / maxSize) : 1
+  const { data, size } = coarsenField(dem.data, dem.size, facteur)
+  const mpp = Number.isFinite(dem.metersPerPixel) ? dem.metersPerPixel * facteur : dem.metersPerPixel
   const T = textureShade(data, size, { alpha, octaves })
   const rgba = packAnalysis(
     {

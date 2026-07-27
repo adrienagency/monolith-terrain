@@ -84,8 +84,15 @@ export class Terrain {
   // opts.offset {x,z} : bloc VOISIN du damier (block-grid.js) — le mesh est
   // décalé dans le monde et uBlockOffset ramène clip + masques en coordonnées
   // locales au bloc. Le bloc principal garde (0,0) : comportement identique.
+  // opts.analysisMax : plafond du côté de l'analyse de relief (_buildAnalysis).
+  // 0 = aucun plafond, c'est le bloc central, le héros.
+  // opts.shareFrom : le Terrain dont ce bloc EMPRUNTE rampe, rugosité et bump
+  // (voir shareTexturesFrom). Posé AVANT rebuildRamp/rebuildRoughness, sinon la
+  // construction cuit les deux textures pour les jeter à la ligne suivante.
   constructor(params, opts = {}) {
     this.blockOffset = { x: opts.offset?.x ?? 0, z: opts.offset?.z ?? 0 }
+    this.analysisMax = opts.analysisMax ?? 0
+    if (opts.shareFrom) this.shareTexturesFrom(opts.shareFrom)
     // Physical material so the relief can turn to GLASS: `transmission` is real
     // PBR refraction (three renders the scene behind into a buffer), giving the
     // translucent-slab look — dial it with the "transmission (glass)" slider.
@@ -834,15 +841,58 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     this.dem = dem
   }
 
+  // PARTAGE DES TEXTURES QUI SONT LES MÊMES PARTOUT — rampe hypsométrique,
+  // rugosité et bump. Sur un damier plein, les 24 dalles cuisaient 24 copies
+  // OCTET POUR OCTET identiques : le seed de rugosité est `params.seed + 777`,
+  // commun à tous les blocs, et la rampe ne dépend que de la palette. 2,13 Mo
+  // et 80 ms de calcul par dalle, pour rien.
+  //
+  // ⚠️ L'EMPRUNT DOIT SE RÉPARER TOUT SEUL, et c'est là que ça se joue : la
+  // source DISPOSE son ancienne texture à chaque recuisson (changement de
+  // palette, régénération du relief). Un emprunteur qui garderait la référence
+  // pointerait sur une texture morte — relief noir. D'où l'ensemble
+  // `_shareTo` : c'est la SOURCE qui repousse la nouvelle texture à ses
+  // emprunteurs, au lieu de compter sur l'appelant pour resynchroniser. Deux
+  // chemins de main.js (régénération du relief, nuancier du panneau Créer)
+  // recuisaient d'ailleurs sans prévenir le damier.
+  shareTexturesFrom(src) {
+    if (!src || src === this || this._shareSrc === src) return
+    this.stopSharing()
+    this._shareSrc = src
+    ;(src._shareTo ??= new Set()).add(this)
+    this._adoptShared()
+  }
+  stopSharing() {
+    this._shareSrc?._shareTo?.delete(this)
+    this._shareSrc = null
+  }
+  _adoptShared() {
+    const src = this._shareSrc
+    if (!src || !this.mapUniforms) return // appelé depuis le constructeur, trop tôt
+    this.mapUniforms.uRampTex.value = src.mapUniforms.uRampTex.value
+    // un matériau de relief opaque (bois, marbre…) POSSÈDE sa rugosité, et elle
+    // vient d'un cache partagé : on ne la lui reprend pas
+    if (!this.materialMode || this.materialMode === 'glass') {
+      this.material.roughnessMap = src.material.roughnessMap
+      this.material.bumpMap = src.material.bumpMap
+      this.material.needsUpdate = true
+    }
+  }
+  _pushShared() {
+    if (this._shareTo?.size) for (const t of this._shareTo) t._adoptShared()
+  }
+
   // Region cutout ("individualiser la zone"): pass the mask texture built by
   // region-mask.js fetchRegionMask() to clip the relief to an admin boundary,
   // or null to restore the full square slab. The previous mask is disposed.
   setRegionMask(texture) {
     const prev = this.mapUniforms.uRegionMask.value
+    const garde = (t) => t && t !== this._regionPlaceholder && t !== this._regionEmpty
+    this._regionUniform = null
     if (texture) {
       if (prev !== texture) {
         this.mapUniforms.uRegionMask.value = texture
-        if (prev && prev !== this._regionPlaceholder) prev.dispose()
+        if (garde(prev)) prev.dispose()
       }
       this.mapUniforms.uRegionOn.value = 1
       // capture CPU pixels so overlay lines can be clipped to the region silhouette
@@ -855,14 +905,35 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     } else {
       this._regionPlaceholder ??= whiteTexture()
       this.mapUniforms.uRegionMask.value = this._regionPlaceholder
-      if (prev && prev !== this._regionPlaceholder) prev.dispose()
+      if (garde(prev)) prev.dispose()
       this.mapUniforms.uRegionOn.value = 0
       this._regionImage = null
     }
   }
 
+  // LA DALLE EST TOUT ENTIÈRE DANS LA ZONE (ou tout entière dehors) — voir
+  // maskUniformity dans region-mask.js. Le placeholder 1×1 dit la même chose que
+  // le 1024² uniforme qu'il remplace, et coûte 12 Mo de moins (texture, canevas,
+  // ImageData).
+  //
+  // ⚠️ uRegionOn RESTE À 1. C'est lui, et pas la texture, qui éteint l'arrondi de
+  // socle (uSlabCorner) et qui dit aux calques qu'on est en découpe : le mettre à
+  // 0 rendrait ses coins ronds à une dalle qui doit rester carrée au milieu de la
+  // zone, et rouvrirait une couture visible contre sa voisine.
+  setRegionUniform(dedans) {
+    const prev = this.mapUniforms.uRegionMask.value
+    this._regionPlaceholder ??= whiteTexture()
+    this._regionEmpty ??= blackTexture()
+    this.mapUniforms.uRegionMask.value = dedans ? this._regionPlaceholder : this._regionEmpty
+    if (prev && prev !== this._regionPlaceholder && prev !== this._regionEmpty) prev.dispose?.()
+    this.mapUniforms.uRegionOn.value = 1
+    this._regionImage = null
+    this._regionUniform = dedans ? 1 : 0 // ce que regionSample doit répondre partout
+  }
+
   // world XZ → region-mask coverage in [0,1] (1 = inside / no mask). uv = xz/T + 0.5
   regionSample(x, z) {
+    if (this._regionUniform != null) return this._regionUniform // dalle pleine ou vide
     const img = this._regionImage
     if (!img) return 1
     const u = x / TERRAIN_SIZE + 0.5, v = z / TERRAIN_SIZE + 0.5
@@ -1168,7 +1239,10 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // l'identité du DEM — sans ça, allumer le mode puis régénérer la recalcule
     // deux fois de suite, et c'est la passe la plus chère du chargement.
     if (this._analysisFor === dem && this.mapUniforms.uAnalysisOn.value) return
-    const { rgba, size } = analyzeDem(dem)
+    // analysisMax : une dalle VOISINE n'a pas le maillage qui justifierait une
+    // analyse à la taille du MNT (voir block-grid.js). Le shader lit ce champ en
+    // UV MONDE, la taille lui est donc indifférente.
+    const { rgba, size } = analyzeDem(dem, { maxSize: this.analysisMax })
     this._analysisFor = dem
     const tex = new THREE.DataTexture(rgba, size, size, THREE.RGBAFormat)
     tex.flipY = false // texel row r ↔ world +z, comme le sea mask
@@ -1246,6 +1320,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // est alors CONSTANT en Y et sa ligne médiane reproduit la rampe historique,
   // donc aucune palette du catalogue n'a besoin d'être ré-éditée.
   rebuildRamp(params) {
+    if (this._shareSrc) { this._adoptShared(); return } // dalle voisine : la rampe du centre fait foi
     const natural = this.mapUniforms.uColorMode.value === 1
     const { data, width, height } = buildRamp2D(params, {
       dry: natural ? (params.rampDry ?? 0) : 0,
@@ -1261,6 +1336,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     tex.needsUpdate = true
     this.mapUniforms.uRampTex.value?.dispose()
     this.mapUniforms.uRampTex.value = tex
+    this._pushShared() // l'ancienne vient d'être disposée : les emprunteurs suivent
   }
 
   // Noise-driven roughness map (green channel is what three.js reads) + bump map
@@ -1270,6 +1346,13 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // for wood/fabric it's a shared cached texture. Never dispose/overwrite it on
     // a terrain regen, or the material breaks and the cached texture is destroyed.
     if (this.materialMode && this.materialMode !== 'glass') return
+    if (this._shareSrc) {
+      // dalle voisine : même seed, donc même bruit — on prend celui du centre
+      this._adoptShared()
+      this.material.bumpScale = this._bumpScale(params)
+      this.material.needsUpdate = true
+      return
+    }
     const size = 512
     const rng = mulberry32(params.seed + 777)
     const s = new Simplex2(rng)
@@ -1306,6 +1389,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     this.material.bumpMap = bumpTex
     this.material.bumpScale = this._bumpScale(params)
     this.material.needsUpdate = true
+    this._pushShared() // les anciennes viennent d'être disposées
   }
 
   updateMaterial(params) {
