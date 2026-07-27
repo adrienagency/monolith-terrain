@@ -1,5 +1,6 @@
 // GABARIT DE GRILLE — la partie d'un PlaneGeometry qui ne dépend QUE de la
-// résolution, mémorisée une fois pour toutes.
+// résolution, mémorisée. Deux résolutions à la fois, pas plus : la borne et sa
+// raison d'être sont au-dessus de `MAX_ENTREES`, plus bas.
 //
 // `new THREE.PlaneGeometry(56, 56, res, res)` + `rotateX` coûte, mesuré au
 // `--expose-gc` : **194 ms et 262 Mo de tas JS jetés à res 1024**, 106 ms et
@@ -44,7 +45,29 @@
 //     (un `applyMatrix4` sur les uv, un `toNonIndexed`), il faudra copier —
 //     et le bug se verrait sur tous les blocs à la fois.
 
-const cache = new Map()
+// ⚠️ CE CACHE EST BORNÉ, et il ne l'a pas toujours été. Le sélecteur
+// « Résolution du maillage » (ui/create-panel.js) offre 256, 384, 512, 768,
+// 1024 et 2048. Mesuré, Chrome piloté en CDP avec ramassage FORCÉ : balayer le
+// sélecteur une fois puis revenir à l'état de croisière du damier retenait
+// **+307,9 Mo à vie** ; borné à deux entrées, le même geste en retient **42,8**
+// — le héros et ses voisines, les seuls dont quelque chose se sert. **265,1 Mo
+// rendus** pour un balayage de sélecteur. (2 048 pèse à lui seul 176 Mo : 48 Mo
+// de position + 32 Mo d'uv + 96 Mo d'index Uint32.)
+//
+// ⚠️ DEUX ENTRÉES, PAS UNE, exactement comme detail-noise.js — et pour la même
+// raison, qui est le damier : le bloc central se reconstruit à sa résolution
+// pendant que ses voisines se bâtissent à 256 (block-grid.js). Avec une entrée
+// unique, chacun chasserait l'autre à chaque dalle et le gabarit du héros
+// serait recuit à chaque extension du damier — 194 ms et 262 Mo jetés à
+// res 1024, soit tout le bénéfice du module rendu à l'envers.
+// test/grid-template.test.js le prouve en alternant les deux résolutions.
+//
+// ⚠️ ÉVINCER NE LIBÈRE RIEN TOUT DE SUITE, et c'est voulu : `uv` et `index`
+// sont branchés TELS QUELS dans les géométries vivantes (voir plus haut), qui
+// les retiennent. L'éviction ne fait que rendre la PROCHAINE cuisson à cette
+// résolution payante ; elle ne peut pas laisser une géométrie sans tableaux.
+const MAX_ENTREES = 2
+const cache = new Map() // clé → gabarit, en ordre d'insertion (LRU simple)
 
 /**
  * Grille plate mémorisée, bit-identique à `new PlaneGeometry(size, size, res, res)`
@@ -54,7 +77,11 @@ const cache = new Map()
 export function gridTemplate(res, size) {
   const cle = `${res}|${size}`
   const memo = cache.get(cle)
-  if (memo) return memo
+  if (memo) {
+    cache.delete(cle) // remis en queue : c'est lui le plus récemment servi
+    cache.set(cle, memo)
+    return memo
+  }
   const n = res + 1
   const count = n * n
   const position = new Float32Array(count * 3)
@@ -89,6 +116,7 @@ export function gridTemplate(res, size) {
   }
   const tpl = { position, uv, index, count }
   cache.set(cle, tpl)
+  while (cache.size > MAX_ENTREES) cache.delete(cache.keys().next().value)
   return tpl
 }
 

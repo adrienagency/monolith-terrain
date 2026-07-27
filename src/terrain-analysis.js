@@ -382,16 +382,72 @@ export function coarsenField(src, size, factor) {
 }
 
 /**
+ * SOUS-ÉCHANTILLONNAGE À UNE CIBLE EXACTE (moyenne pondérée par les aires).
+ *
+ * ⚠️ POURQUOI DEUX FONCTIONS, ET POURQUOI CELLE-CI EST NÉE. `coarsenField` ne
+ * sait diviser QUE par un entier : demander « au plus 1024 » à un MNT de 1536
+ * lui fait prendre le facteur 2 et rendre 768. Un plafond de 1024 et un plafond
+ * de 768 donnaient donc, sur le MNT de production (Mapterhorn en tuiles 512 px),
+ * un résultat IDENTIQUE OCTET POUR OCTET — un réglage qui ne réglait rien, et
+ * qui se serait relu comme un correctif appliqué. C'est le piège que
+ * test/damier-memoire.test.js verrouille maintenant nommément.
+ *
+ * La moyenne pondérée par le recouvrement généralise exactement la moyenne de
+ * blocs : quand le rapport EST entier, on RETOMBE sur `coarsenField`, qui reste
+ * donc le chemin normal (et le moins cher). Le poids fractionnaire ne sert qu'au
+ * seul cas qui l'exige, 1536 → 1024. Elle reste le filtre passe-bas minimal qui
+ * rend l'opération honnête — voir coarsenField pour le POURQUOI de la moyenne.
+ *
+ * @returns {{data: Float32Array, size: number}} la source TELLE QUELLE si la
+ *   cible est nulle ou plus grande que la source : on ne grossit jamais un champ.
+ */
+export function resampleField(src, size, cible) {
+  const c = cible | 0
+  if (c <= 0 || c >= size) return { data: src, size }
+  if (size % c === 0) return coarsenField(src, size, size / c)
+  const dst = new Float32Array(c * c)
+  const f = size / c
+  for (let y = 0; y < c; y++) {
+    const sy0 = y * f
+    const sy1 = sy0 + f
+    const iy0 = Math.floor(sy0)
+    const iy1 = Math.min(size, Math.ceil(sy1))
+    for (let x = 0; x < c; x++) {
+      const sx0 = x * f
+      const sx1 = sx0 + f
+      const ix0 = Math.floor(sx0)
+      const ix1 = Math.min(size, Math.ceil(sx1))
+      let somme = 0
+      let poids = 0
+      for (let yy = iy0; yy < iy1; yy++) {
+        const wy = Math.min(sy1, yy + 1) - Math.max(sy0, yy)
+        const row = yy * size
+        for (let xx = ix0; xx < ix1; xx++) {
+          const v = src[row + xx]
+          if (!Number.isFinite(v)) continue
+          const w = wy * (Math.min(sx1, xx + 1) - Math.max(sx0, xx))
+          somme += v * w
+          poids += w
+        }
+      }
+      dst[y * c + x] = poids ? somme / poids : 0
+    }
+  }
+  return { data: dst, size: c }
+}
+
+/**
  * La chaîne complète, telle que terrain.js la consomme : un DEM en mètres →
  * la RGBA empaquetée. Regroupée ici (et non dans terrain.js) pour que le
  * pipeline entier reste testable sans navigateur.
  *
- * `maxSize` PLAFONNE le côté de l'analyse. Il existe pour les dalles VOISINES du
- * damier : elles héritaient d'une analyse à la taille du MNT (1536²) alors que
- * leur maillage est quatre fois plus grossier — 12 Mo de texture (mipmaps
- * comprises) et ~390 ms de flous par dalle pour un détail que la géométrie ne
- * peut pas restituer. Le bloc central, lui, ne passe JAMAIS de plafond : c'est
- * le héros, il porte le maillage qui justifie la finesse.
+ * `maxSize` PLAFONNE le côté de l'analyse, à la valeur EXACTE demandée (voir
+ * resampleField). Il existe pour les dalles VOISINES du damier : elles
+ * héritaient d'une analyse à la taille du MNT (1536²) alors que leur maillage
+ * est quatre fois plus grossier — 12 Mo de texture (mipmaps comprises) et
+ * ~390 ms de flous par dalle pour un détail que la géométrie ne peut pas
+ * restituer. Le bloc central, lui, ne passe JAMAIS de plafond : c'est le héros,
+ * il porte le maillage qui justifie la finesse.
  *
  * @param {{data: Float32Array, size: number, metersPerPixel?: number}} dem
  */
@@ -399,10 +455,11 @@ export function analyzeDem(dem, { alpha = 0.5, octaves = 6, k = 1.6, maxSize = 0
   // ⚠️ metersPerPixel SUIT le sous-échantillonnage. Les rayons de flou de
   // wetness (~1 km) et aspectSmooth (~500 m) sont exprimés en MÈTRES puis
   // convertis en pixels : oublier de le corriger doublerait leur portée
-  // terrain et étalerait l'humidité sur deux kilomètres.
-  const facteur = maxSize > 0 && dem.size > maxSize ? Math.ceil(dem.size / maxSize) : 1
-  const { data, size } = coarsenField(dem.data, dem.size, facteur)
-  const mpp = Number.isFinite(dem.metersPerPixel) ? dem.metersPerPixel * facteur : dem.metersPerPixel
+  // terrain et étalerait l'humidité sur deux kilomètres. Le facteur se relit
+  // de la taille OBTENUE, pas de la taille demandée : elles diffèrent dès que
+  // le plafond dépasse la source (on ne grossit pas).
+  const { data, size } = resampleField(dem.data, dem.size, maxSize)
+  const mpp = Number.isFinite(dem.metersPerPixel) ? (dem.metersPerPixel * dem.size) / size : dem.metersPerPixel
   const T = textureShade(data, size, { alpha, octaves })
   const rgba = packAnalysis(
     {

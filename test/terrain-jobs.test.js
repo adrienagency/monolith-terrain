@@ -16,9 +16,9 @@
 // justement le point — le calcul est un module pur, le transport est ailleurs.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { analyzeDem } from '../src/terrain-analysis.js'
+import { analyzeDem, resampleField } from '../src/terrain-analysis.js'
 import { buildSeaMask, blurMask } from '../src/sea-mask.js'
-import { computeTerrainJob, jobStillValid, scheduleTerrainJob, runTerrainJob, cancelTerrainJobs, resetTerrainTransport } from '../src/terrain-jobs.js'
+import { computeTerrainJob, jobStillValid, jobCouvertParEnVol, scheduleTerrainJob, runTerrainJob, cancelTerrainJobs, resetTerrainTransport } from '../src/terrain-jobs.js'
 
 // ---------------------------------------------------------------------------
 // Plusieurs MODÈLES D'ÉLÉVATION, pas un seul : le rapport de référence a mesuré
@@ -91,6 +91,47 @@ test('computeTerrainJob transporte la landMask — le polder reste de la terre',
   const ref = blurMask(buildSeaMask(dem, { landMask }), 1)
   for (let i = 0; i < ref.mask.length; i++) assert.equal(got.sea[i], ref.mask[i], `octet ${i}`)
   assert.ok(got.sea.every((v) => v === 0), 'une landMask pleine ne laisse aucune mer')
+})
+
+// --------------------------------------------- le plafond du MASQUE DE MER
+//
+// Il est arrivé après celui de l'analyse, parce qu'on l'avait oublié : le
+// masque de mer se calculait sur le MNT PLEIN quoi qu'il arrive, soit 1536² sur
+// une dalle voisine maillée à 256 — 6,00× la densité du maillage, là où
+// block-grid.js annonçait 4× au plus, et 2,25 Mo par dalle.
+
+test('computeTerrainJob plafonne AUSSI le masque de mer', () => {
+  const dem = MODELES.cote()
+  const got = computeTerrainJob({ data: dem.data, size: dem.size, metersPerPixel: dem.metersPerPixel, seaMax: 32, landMask: null })
+  assert.equal(got.seaSize, 32)
+  assert.equal(got.sea.length, 32 * 32)
+  const reduit = resampleField(dem.data, dem.size, 32)
+  const ref = blurMask(buildSeaMask({ data: reduit.data, size: reduit.size }, { landMask: null }), 1)
+  for (let i = 0; i < ref.mask.length; i++) assert.equal(got.sea[i], ref.mask[i], `octet ${i}`)
+})
+
+// ⚠️ Le contrat qui protège le bloc CENTRAL : lui n'a pas de plafond, et son
+// masque de mer ne doit pas avoir bougé d'un octet en gagnant ce paramètre.
+test('sans seaMax, le masque de mer est INCHANGÉ octet pour octet', () => {
+  for (const faire of Object.values(MODELES)) {
+    const dem = faire()
+    const got = computeTerrainJob({ data: dem.data, size: dem.size, metersPerPixel: dem.metersPerPixel })
+    const ref = blurMask(buildSeaMask(dem, { landMask: null }), 1)
+    assert.equal(got.seaSize, dem.size)
+    for (let i = 0; i < ref.mask.length; i++) assert.equal(got.sea[i], ref.mask[i], `octet ${i}`)
+  }
+})
+
+// ⚠️ LE PIÈGE MUET de ce plafond : buildSeaMask indexe la landMask cellule pour
+// cellule. Elle arrive donc à la taille du MASQUE, pas à celle du MNT — c'est
+// terrain.js (_landMaskFor) qui applique le même plafond. Une landMask à la
+// mauvaise taille ne lève rien : elle rend des polders décalés.
+test('la landMask du masque plafonné est lue à la taille du MASQUE', () => {
+  const dem = MODELES.cote()
+  const landMask = new Uint8Array(32 * 32).fill(255) // tout est terre, à la taille du masque
+  const got = computeTerrainJob({ data: dem.data, size: dem.size, metersPerPixel: dem.metersPerPixel, seaMax: 32, landMask })
+  assert.equal(got.seaSize, 32)
+  assert.ok(got.sea.every((v) => v === 0), 'une landMask pleine ne laisse aucune mer, plafond ou pas')
 })
 
 test("withAnalysis: false ne cuit QUE le masque de mer", () => {
@@ -176,6 +217,52 @@ test('mais un changement de MNT périme les DEUX', () => {
   const apres = { dem: dem2, landMask: null, maxSize: 0 }
   assert.equal(jobStillValid({ dem: dem1, maxSize: 0 }, apres), false)
   assert.equal(jobStillValid({ dem: dem1, landMask: null }, apres), false)
+})
+
+test('périmé : un changement de plafond de MER invalide le masque de mer', () => {
+  assert.equal(jobStillValid({ dem: dem1, landMask: null, seaMax: 0 }, { dem: dem1, landMask: null, seaMax: 1024 }), false)
+})
+
+// ---------------------------------------------------------------------------
+// DÉDOUBLONNAGE — chaque dalle voisine payait son analyse DEUX FOIS.
+//
+// À la naissance d'une dalle, `terrain.rebuild()` lance les champs puis
+// `_applyLook` → `setColorMode` les relance, parce que `uAnalysisOn` ne monte
+// qu'à l'ARRIVÉE du premier travail. Mesuré sur 8 dalles : 24 travaux postés au
+// Worker dont 16 avec analyse, pour 226 Mo de MNT recopiés par postMessage.
+//
+// Les DEUX bords comptent, et le second plus que le premier : supprimer le
+// doublon ne doit jamais supprimer un recalcul LÉGITIME.
+
+const cle = (o = {}) => ({ dem: dem1, landMask: null, maxSize: 0, seaMax: 0, analyse: true, ...o })
+
+test('doublon : la même demande, relancée pendant le vol, est COUVERTE', () => {
+  assert.equal(jobCouvertParEnVol(cle(), cle()), true)
+})
+
+test('légitime : un MNT neuf (zoom, autre lieu) n’est PAS couvert', () => {
+  assert.equal(jobCouvertParEnVol(cle(), cle({ dem: dem2 })), false)
+})
+
+test('légitime : l’arrivée du trait de côte (landMask neuve) n’est PAS couverte', () => {
+  assert.equal(jobCouvertParEnVol(cle(), cle({ landMask: new Uint8Array(4) })), false)
+})
+
+test('légitime : un plafond qui change n’est PAS couvert', () => {
+  assert.equal(jobCouvertParEnVol(cle(), cle({ maxSize: 1024 })), false)
+  assert.equal(jobCouvertParEnVol(cle(), cle({ seaMax: 1024 })), false)
+})
+
+// ⚠️ L'ASYMÉTRIE, et c'est elle qui empêche la dalle de rester sans peigné : un
+// travail « mer seule » en vol (relance du trait de côte) ne couvre PAS une
+// demande qui réclame l'analyse. L'inverse, oui.
+test('asymétrie : la mer seule ne couvre pas l’analyse ; l’analyse couvre la mer seule', () => {
+  assert.equal(jobCouvertParEnVol(cle({ analyse: false }), cle({ analyse: true })), false)
+  assert.equal(jobCouvertParEnVol(cle({ analyse: true }), cle({ analyse: false })), true)
+})
+
+test('rien en vol : rien n’est couvert', () => {
+  assert.equal(jobCouvertParEnVol(null, cle()), false)
 })
 
 // scheduleTerrainJob : la même règle, mais câblée — la clé courante est relue

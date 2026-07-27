@@ -12,7 +12,7 @@
 // verrouille l'égalité OCTET POUR OCTET sur quatre familles de relief. Un seul
 // flottant qui diverge est un bug, pas un arrondi : ces champs peignent les
 // crêtes du bloc central.
-import { analyzeDem } from './terrain-analysis.js'
+import { analyzeDem, resampleField } from './terrain-analysis.js'
 import { buildSeaMask, blurMask } from './sea-mask.js'
 
 /**
@@ -23,11 +23,31 @@ import { buildSeaMask, blurMask } from './sea-mask.js'
  * trait de côte vectoriel arrive après coup (`setCoastMask`) : la landMask ne
  * change QUE la mer, recuire les ~10 flous de l'analyse coûterait 387 ms pour
  * un résultat identique.
+ *
+ * ⚠️ `seaMax` PLAFONNE le masque de mer, et il est arrivé APRÈS `maxSize` parce
+ * qu'on l'avait oublié : block-grid.js proclamait « aucun champ ne dépasse
+ * quatre fois la densité du maillage qui le porte » alors que le masque de mer
+ * se calculait toujours sur le MNT PLEIN — 1536² sur une voisine maillée à 256,
+ * soit 6,00×, et 2,25 Mo par dalle (54 Mo sur un damier plein). Le shader lit ce
+ * champ en UV MONDE : sa taille lui est indifférente, exactement comme
+ * l'analyse.
+ *
+ * ⚠️ ET LA landMask DOIT ARRIVER À LA TAILLE DU MASQUE, pas à celle du MNT :
+ * `buildSeaMask` l'indexe cellule pour cellule. C'est terrain.js qui la
+ * rasterise (`_landMaskFor`), donc c'est lui qui applique le même plafond —
+ * un tableau à la mauvaise taille rendrait des polders au hasard, pas une
+ * erreur bruyante.
+ *
+ * CONTRAT : sans `seaMax`, résultat bit-à-bit identique à avant.
  */
-export function computeTerrainJob({ data, size, metersPerPixel, maxSize = 0, landMask = null, withAnalysis = true }) {
+export function computeTerrainJob({ data, size, metersPerPixel, maxSize = 0, seaMax = 0, landMask = null, withAnalysis = true }) {
   const dem = { data, size, metersPerPixel }
   const a = withAnalysis ? analyzeDem(dem, { maxSize }) : null
-  const m = blurMask(buildSeaMask(dem, { landMask }), 1)
+  // (buildSeaMask est topologique : il ne lit ni metersPerPixel ni aucune
+  // longueur en mètres — son seuil est en mètres d'ALTITUDE et son critère de
+  // bassin est une FRACTION de la dalle. Le plafond ne dérègle donc rien.)
+  const mer = resampleField(data, size, seaMax)
+  const m = blurMask(buildSeaMask({ data: mer.data, size: mer.size }, { landMask }), 1)
   return { analysis: a ? a.rgba : null, analysisSize: a ? a.size : 0, sea: m.mask, seaSize: m.size }
 }
 
@@ -55,16 +75,53 @@ export function computeTerrainJob({ data, size, metersPerPixel, maxSize = 0, lan
 // du résultat est jugé sur SA clé.
 
 /**
- * @param {{dem?:object, landMask?:object|null, maxSize?:number}|null} lance
+ * @param {{dem?:object, landMask?:object|null, maxSize?:number, seaMax?:number}|null} lance
  *   clé au lancement — les champs ABSENTS ne sont pas comparés.
  * @param {typeof lance} actuel clé au moment de l'arrivée.
  */
 export function jobStillValid(lance, actuel) {
   if (!lance || !actuel) return false
-  for (const champ of ['dem', 'landMask', 'maxSize']) {
+  for (const champ of ['dem', 'landMask', 'maxSize', 'seaMax']) {
     if (champ in lance && lance[champ] !== actuel[champ]) return false
   }
   return true
+}
+
+// ------------------------------------------------------------ dédoublonnage
+//
+// LE MÊME CALCUL, POSTÉ DEUX FOIS, À TROIS LIGNES D'INTERVALLE.
+//
+// La naissance d'une dalle voisine enchaîne `terrain.rebuild()` — qui lance les
+// champs — puis `_applyLook` → `setColorMode`, qui les relance parce qu'il
+// regarde `uAnalysisOn` : l'uniforme ne passera à 1 qu'à l'ARRIVÉE du premier
+// travail, donc il vaut encore 0 et le test « l'analyse manque » dit vrai alors
+// qu'elle est en route. Mesuré sur 8 dalles : 24 travaux postés au Worker dont
+// 16 avec analyse, 226,5 Mo de MNT recopiés par postMessage. Après : 16 travaux
+// dont 8 avec analyse, 151,3 Mo — 8 analyses complètes de trop en moins
+// (~390 ms chacune) et 75 Mo de copies épargnées. Sur un damier plein, 24
+// analyses inutiles et ~9 s de travailleur.
+//
+// ⚠️ CE PRÉDICAT NE DOIT PAS ÊTRE UNE ÉGALITÉ DE CLÉS, et c'est tout son sel :
+// un travail « mer seule » EN VOL ne couvre PAS une demande qui réclame
+// l'analyse (le trait de côte arrive pendant la construction, et sa relance
+// n'emporte que la mer). L'inverse, oui : un travail complet couvre une demande
+// de mer seule. D'où la comparaison asymétrique sur `analyse`.
+//
+// ⚠️ Et rien ici ne doit empêcher un RECALCUL LÉGITIME : dès qu'une des entrées
+// change — le MNT (zoom, autre lieu), la landMask, un plafond — la clé diffère
+// et le travail repart. Les deux bords sont testés.
+
+/**
+ * Le travail encore EN VOL rend-il inutile celui qu'on s'apprête à poster ?
+ * @param {{dem:object, landMask:object|null, maxSize:number, seaMax:number, analyse:boolean}|null} enVol
+ * @param {typeof enVol} neuf
+ */
+export function jobCouvertParEnVol(enVol, neuf) {
+  if (!enVol || !neuf) return false
+  for (const champ of ['dem', 'landMask', 'maxSize', 'seaMax']) {
+    if (enVol[champ] !== neuf[champ]) return false
+  }
+  return !neuf.analyse || !!enVol.analyse
 }
 
 /**
