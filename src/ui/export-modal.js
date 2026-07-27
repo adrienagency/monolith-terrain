@@ -1,17 +1,24 @@
 // Export modal — still image (PNG/JPEG) or live MP4 recording of the scene.
 // deps = { renderer, composer, camera, recorder }
 // `recorder` is a Recorder instance (src/export-recorder.js); MP4 export is
-// start/stop live capture at screen size — the modal closes on start and a
-// REC pill (top-center) shows elapsed time with a Stop button.
+// start/stop live capture — the modal closes on start and a REC pill
+// (top-center) shows elapsed time with a Stop button.
 // pauseLoop/resumeLoop/step are still accepted for backward compat but are
 // no longer used (the old fixed-duration offline render path is gone).
+//
+// Les crans de taille (dont le 2K) vivent dans export-presets.js : ils servent
+// aux DEUX voies, image fixe et vidéo, et une table recopiée ici finirait par
+// diverger de l'autre.
 
 import { el, segmented, select, button } from './kit.js'
 import { exportImage, downloadBlob } from '../export.js'
+import { EXPORT_SIZES, EXPORT_RATIOS, DEFAULT_SIZE, DEFAULT_RATIO, exportDims } from '../export-presets.js'
 
-const RATIOS = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1, '4:5': 4 / 5 }
-const SIZES = ['1280', '1920', '2560', '3840']
-const even = (n) => Math.max(2, 2 * Math.round(n / 2))
+// La vidéo garde un cran de plus que l'image : « écran », l'ancien comportement
+// (on enregistre le canevas tel quel). C'est le défaut, parce que forcer une
+// taille fait rendre CHAQUE frame à cette taille — un choix, pas une valeur par
+// défaut à imposer aux machines modestes.
+const NATIVE = 'native'
 
 const fmtElapsed = (sec) => {
   const s = Math.max(0, Math.floor(sec))
@@ -19,7 +26,7 @@ const fmtElapsed = (sec) => {
 }
 
 export function openExportModal(deps) {
-  const state = { format: 'png', ratio: '16:9', size: '1920' }
+  const state = { format: 'png', ratio: DEFAULT_RATIO, size: DEFAULT_SIZE, videoSize: NATIVE }
   let exporting = false
 
   const veil = el('div', 'ce-modal-veil')
@@ -28,13 +35,8 @@ export function openExportModal(deps) {
 
   const dims = () => {
     const canvas = deps.renderer.domElement
-    const aspect = state.ratio === 'Screen'
-      ? (canvas.clientWidth || canvas.width) / (canvas.clientHeight || canvas.height)
-      : RATIOS[state.ratio]
-    const edge = parseInt(state.size, 10)
-    return aspect >= 1
-      ? { width: even(edge), height: even(edge / aspect) }
-      : { width: even(edge * aspect), height: even(edge) }
+    const aspect = (canvas.clientWidth || canvas.width) / (canvas.clientHeight || canvas.height)
+    return exportDims(state.ratio, state.size, aspect)
   }
 
   const formatRow = segmented({
@@ -52,15 +54,26 @@ export function openExportModal(deps) {
   })
   const ratioRow = segmented({
     label: 'Ratio',
-    options: ['16:9', '9:16', '1:1', '4:5', 'Screen'],
+    options: [...Object.keys(EXPORT_RATIOS), 'Screen'],
     get: () => state.ratio,
     set: (v) => (state.ratio = v),
   })
   const sizeRow = select({
     label: 'Size',
-    options: SIZES.map((s) => ({ label: `${s} px`, value: s })),
+    options: EXPORT_SIZES,
     get: () => state.size,
     set: (v) => (state.size = v),
+  })
+  // Menu SÉPARÉ pour la vidéo : son défaut (« écran ») n'existe pas côté image,
+  // et un état partagé imposerait une taille forcée dès qu'on a exporté un PNG.
+  const videoSizeRow = select({
+    label: 'Size',
+    options: [{ label: 'Screen (as displayed)', value: NATIVE }, ...EXPORT_SIZES],
+    get: () => state.videoSize,
+    set: (v) => {
+      state.videoSize = v
+      syncRows()
+    },
   })
   const recNote = el('div', 'ce-rec-note', 'Records the live view until you stop.')
 
@@ -68,7 +81,13 @@ export function openExportModal(deps) {
     const video = state.format === 'mp4'
     ratioRow.style.display = video ? 'none' : ''
     sizeRow.style.display = video ? 'none' : ''
+    videoSizeRow.style.display = video ? '' : 'none'
     recNote.style.display = video ? '' : 'none'
+    // La vidéo n'a pas de choix de ratio : le cadrage est celui de l'écran, on
+    // ne fait que changer le nombre de pixels rendus dedans.
+    recNote.textContent = state.videoSize === NATIVE
+      ? 'Records the live view until you stop.'
+      : 'Records the live view at that size — the framing stays the one on screen.'
     exportBtn.textContent = video ? 'Start recording' : 'Export'
   }
 
@@ -85,7 +104,7 @@ export function openExportModal(deps) {
   actions.append(cancelBtn, exportBtn)
   syncRows()
 
-  card.append(formatRow, ratioRow, sizeRow, recNote, status, progress, actions)
+  card.append(formatRow, ratioRow, sizeRow, videoSizeRow, recNote, status, progress, actions)
   veil.append(card)
   document.body.append(veil)
 
@@ -122,7 +141,7 @@ export function openExportModal(deps) {
       setBusy(true)
       status.textContent = 'Starting…'
       try {
-        await deps.recorder.start()
+        await deps.recorder.start({ longEdge: state.videoSize === NATIVE ? 0 : state.videoSize })
       } catch (err) {
         console.error('Recording failed to start:', err)
         setBusy(false)
@@ -158,6 +177,14 @@ export function openExportModal(deps) {
   }
 }
 
+// Le nom porte les dimensions ENCODÉES, comme pour une image : c'est la seule
+// façon de distinguer une prise en 2K d'une prise à la taille de l'écran une
+// fois les fichiers rangés dans le dossier de téléchargements.
+const recName = (recorder) => {
+  const { width, height } = recorder.size
+  return width && height ? `shibumap-recording-${width}x${height}.mp4` : 'shibumap-recording.mp4'
+}
+
 // Discreet REC pill — fixed top-center under the top bar while a live
 // recording runs. Deliberately NOT hidden by the no-UI mode (see v28.css):
 // users hide the UI while recording precisely to get a clean capture.
@@ -187,7 +214,7 @@ function showRecPill(recorder) {
     teardown()
     try {
       const blob = await recorder.stop()
-      downloadBlob(blob, 'shibumap-recording.mp4')
+      downloadBlob(blob, recName(recorder))
       pill.remove()
     } catch (err) {
       console.warn('Recording failed:', err)

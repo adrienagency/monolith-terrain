@@ -7,12 +7,16 @@ import * as THREE from 'three'
 import { Output, Mp4OutputFormat, BufferTarget, CanvasSource, QUALITY_HIGH } from 'mediabunny'
 import { safeAspect } from './viewport.js'
 
-function saveState(renderer, camera) {
+// Ces trois-là sont exportées pour l'enregistreur vidéo (export-recorder.js),
+// qui force lui aussi la taille du canevas le temps d'une capture. Deux copies
+// de cette danse — dont une seule connaîtrait le piège de l'aspect NaN
+// ci-dessous — était le vrai risque.
+export function saveState(renderer, camera) {
   const size = renderer.getSize(new THREE.Vector2())
   return { width: size.x, height: size.y, pixelRatio: renderer.getPixelRatio(), aspect: camera.aspect }
 }
 
-function applySize({ renderer, composer, camera }, width, height) {
+export function applySize({ renderer, composer, camera }, width, height) {
   renderer.setPixelRatio(1)
   composer.setSize(width, height, false)
   // Ici on ne peut pas renoncer comme le fait le resize (l'appelant attend une
@@ -24,7 +28,7 @@ function applySize({ renderer, composer, camera }, width, height) {
   camera.updateProjectionMatrix()
 }
 
-function restoreState({ renderer, composer, camera }, saved) {
+export function restoreState({ renderer, composer, camera }, saved) {
   renderer.setPixelRatio(saved.pixelRatio)
   composer.setSize(saved.width, saved.height, false)
   camera.aspect = saved.aspect
