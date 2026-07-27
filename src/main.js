@@ -54,10 +54,10 @@ import { SunDisc } from './sun-disc.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
-import { fetchRegionMask, regionMaskFromParts, frameRegion } from './region-mask.js'
+import { fetchRegionMask, regionMaskFromParts, frameRegion, rasterizeMask } from './region-mask.js'
 import { peakMask, findPeak } from './peak-mask.js'
 import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
-import { buildRegionSkirt } from './region-skirt.js'
+import { buildRegionSkirt, traceSkirt, skirtFloor, regionBaseLevel } from './region-skirt.js'
 import { makeSocleEnvMap } from './socle-env.js'
 import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
 import { TEMPLATE_KEYS, captureLook, captureView, serializeTemplate, parseTemplate, stripFromLook, loadUserTemplates, saveUserTemplates } from './templates-user.js'
@@ -83,7 +83,7 @@ import { TEMPLATES } from './templates.js'
 import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
 import { buildChangelogOverlay } from './ui/changelog-overlay.js'
 import { APP_STAGE } from './changelog.js'
-import { BlockGrid } from './block-grid.js'
+import { BlockGrid, GRID_R } from './block-grid.js'
 import { buildTemplatesPanel } from './ui/templates-panel.js'
 import { buildFondsPanel, contributeTerrainSections, buildPaletteCreation } from './ui/create-panel.js'
 import { buildStore } from './ui/store.js'
@@ -1090,6 +1090,11 @@ function slerpDir(a, b, t, out) {
 let scan = null // ScanController — instantiated once the terrain exists
 let regionSkirt = null // vertical curtain welding the cut edge down to a base
 let regionMaskCanvas = null // current zone mask, kept so the skirt can rebuild on terrain regen
+let regionCellSkirts = [] // les mêmes rideaux, sur les dalles du damier
+// Le PLANCHER de la zone découpée, en unités monde : le point le plus bas du
+// relief SOUS le masque, toutes dalles du damier confondues. Recalculé par
+// rebuildRegionSkirt, lu par regionBaseY. Voir region-skirt.js regionBaseLevel.
+let regionFloorY = null
 
 const poiFeet = (h) => terrain.heightToFeet(h)
 // night-survey ink set — the single source for every dark-mode surface
@@ -2910,7 +2915,30 @@ async function setTransportCats(cats) {
 const allGpxPoints = () => gpxLayer.layers.flatMap((l) => l.gpx.track?.points ?? [])
 // un voisin vient de finir de charger → re-draper les traces + peindre sa photo
 // aérienne si la couche est active (même finition que le bloc central)
-blockGrid.onReady = (cell) => { gpxLayer.rebuildAll(); paintCellAerial(cell) }
+// Une dalle arrive TOUJOURS en retard (son DEM se télécharge) : au moment où
+// applyRegionMode a peint le damier, elle n'existait pas. Elle réclame donc sa
+// part du masque en naissant, sinon elle s'afficherait en carré plein à côté
+// d'une découpe.
+//
+// ⚠️ LA JUPE, ELLE, ATTEND. Le plancher de la zone est COMMUN à toutes les
+// dalles : une nouvelle venue oblige à retracer tout le damier. Le faire à
+// chaque arrivée coûte le carré du nombre de dalles — sur un damier plein
+// (24 voisines), 300 marching-squares de 300×300, mesuré comme l'étranglement
+// du chargement. On coalesce donc les arrivées en un seul retracé.
+blockGrid.onReady = (cell) => {
+  gpxLayer.rebuildAll()
+  paintCellAerial(cell)
+  if (params.regionMode && blockGrid.regionParts) {
+    paintCellRegion(cell)
+    rebuildRegionSkirtSoon()
+  }
+}
+// son trait de côte arrive plus tard encore : on refait SA découpe (et elle
+// seule) pour lui rendre ses polders, comme le bloc central le fait déjà
+blockGrid.onCoastReady = (cell) => {
+  if (!params.regionMode || !blockGrid.regionParts) return
+  paintCellRegion(cell)
+}
 // le damier a gagné/perdu une dalle → le trafic aérien étend sa zone de vol
 // pour qu'un avion passe d'une dalle à la suivante sans coupure
 blockGrid.onGridChanged = () => traffic.setSpan(blockGrid.spanRadius())
@@ -3310,11 +3338,17 @@ const rebuildMapLayers = () => { const p = mapLayers.rebuild({ dem, terrain, par
 // straight on the ground: no plinth, no square ocean slab.
 let regionBusy = false
 function disposeRegionSkirt() {
-  if (!regionSkirt) return
-  scene.remove(regionSkirt.mesh)
-  regionSkirt.mesh.geometry.dispose()
   // material is shared with the plinth — do NOT dispose it here
-  regionSkirt = null
+  if (regionSkirt) {
+    scene.remove(regionSkirt.mesh)
+    regionSkirt.mesh.geometry.dispose()
+    regionSkirt = null
+  }
+  for (const mesh of regionCellSkirts) {
+    scene.remove(mesh)
+    mesh.geometry.dispose()
+  }
+  regionCellSkirts = []
 }
 // LE ZÉRO de la zone isolée : l'altitude 0 m du relief chargé, en unités monde
 // (uSeaY, posé par terrain.js d'après l'échelle du DEM). Un seul plan pour trois
@@ -3399,34 +3433,122 @@ function syncRegionPlaceFilter() {
   rebuildMapLayers()
 }
 
+// LE PLAN SUR LEQUEL LA ZONE ISOLÉE SE POSE — pied de la découpe, dalle qui
+// reçoit son ombre et textes du cartouche doivent coïncider, d'où ce point
+// unique. La règle elle-même vit dans region-skirt.js (regionBaseLevel) : le
+// niveau de la mer pour une île, le plancher de la zone quand elle est en
+// altitude. `regionFloorY` est null tant que rebuildRegionSkirt n'a pas mesuré
+// ce plancher — on retombe alors sur le zéro absolu, l'ancien comportement.
 function regionBaseY() {
-  const y = terrain.mapUniforms?.uSeaY?.value
-  return Number.isFinite(y) && y > -9000 ? y : plinth.baseY + plinth.depth
+  const y = regionBaseLevel(terrain.mapUniforms?.uSeaY?.value, regionFloorY)
+  return Number.isFinite(y) ? y : plinth.baseY + plinth.depth
 }
+
+const SKIRT_GRID = 300
 
 // (re)build the vertical curtain around the isolated zone from the current mask
 // + terrain heightfield. Shares the plinth wall material so the socle finish
 // (PBR / glass) carries onto the cut.
+//
+// TRACER D'ABORD, CONSTRUIRE ENSUITE — l'ordre n'est pas cosmétique. Le pied de
+// la coupe est COMMUN à toutes les dalles du damier : il faut donc les avoir
+// toutes tracées pour connaître le plancher avant d'en bâtir une seule. Un
+// plancher par dalle marquerait une marche à chaque jointure.
 function rebuildRegionSkirt() {
   disposeRegionSkirt()
+  regionFloorY = null
   if (!params.regionMode || !regionMaskCanvas || !terrain.sample) return
-  const s = buildRegionSkirt({
-    maskCanvas: regionMaskCanvas,
-    sample: terrain.sample,
-    material: plinth.wallMat,
-    // ZÉRO ABSOLU (Adrien) : le pied de la coupe se cale au niveau de la mer,
-    // pas au point le plus bas de la zone. Le mur descendait auparavant de
-    // plinthDepth SOUS ce point, pendant sept unités monde de socle sous une
-    // île qui n'a rien à porter ; puis, calé sur le minimum local, il flottait
-    // à une hauteur qui changeait d'une région à l'autre. Au zéro, la découpe
-    // se pose toujours sur le même plan — celui des textes et de la dalle.
-    baseY: regionBaseY(),
-  })
-  if (s) {
-    regionSkirt = s
+  const dalles = [{ canvas: regionMaskCanvas, sample: terrain.sample, x: 0, z: 0, centre: true }]
+  for (const cell of blockGrid.cells.values()) {
+    if (cell.regionCanvas && cell.terrain?.sample) {
+      dalles.push({ canvas: cell.regionCanvas, sample: cell.terrain.sample, x: cell.i * TERRAIN_SIZE, z: cell.j * TERRAIN_SIZE })
+    }
+  }
+  let plancher = Infinity
+  for (const d of dalles) {
+    d.traced = traceSkirt({ maskCanvas: d.canvas, sample: d.sample, grid: SKIRT_GRID })
+    const f = skirtFloor(d.traced, d.sample)
+    if (Number.isFinite(f) && f < plancher) plancher = f
+  }
+  regionFloorY = Number.isFinite(plancher) ? plancher : null
+  const baseY = regionBaseY()
+  for (const d of dalles) {
+    const s = buildRegionSkirt({
+      maskCanvas: d.canvas,
+      sample: d.sample,
+      material: plinth.wallMat,
+      grid: SKIRT_GRID,
+      traced: d.traced, // déjà tracée ci-dessus, hauteurs comprises
+      baseY,
+    })
+    if (!s) continue
+    s.mesh.position.set(d.x, 0, d.z)
     s.mesh.visible = modes.mode === 'surface'
     scene.add(s.mesh)
+    if (d.centre) regionSkirt = s
+    else regionCellSkirts.push(s.mesh)
   }
+}
+
+// ---------------------------------------------------------------- damier isolé
+// LE DÉCOUPAGE NE S'ARRÊTE PLUS AU BLOC CENTRAL (demande Adrien) : « si j'isole
+// un lieu que j'ai nommé, ex : Le Var, quand je zoom, des tuiles nouvelles se
+// créent pour contenir tout le Var, dans la limite de 5×5 ». Ce sont exactement
+// les règles du damier GPX (block-grid.js) — même grille, même plafond, mêmes
+// dalles de contexte — appliquées à un contour au lieu d'une trace.
+//
+// Rien de nouveau à calculer : rasterizeMask prend DÉJÀ le DEM en argument, il
+// suffit de lui donner celui de la cellule au lieu de celui du bloc central.
+//
+// Moitié de la définition du bloc central : ce sont des dalles de CONTEXTE,
+// maillées à 384 (block-grid.js NEIGHBOUR_RES). Un masque de 2048 par dalle
+// coûterait 4 Mo de VRAM chacune pour un liseré que personne ne regarde de près.
+const CELL_MASK_SIZE = 1024
+function paintCellRegion(cell) {
+  const t = cell?.terrain
+  if (!t) return
+  const parts = blockGrid.regionParts
+  const isolée = !!(params.regionMode && parts?.length)
+  // les flancs du damier disparaissent avec ceux du bloc central
+  // (plinth.setSlabOnly) — sinon la découpe flotterait entre des carrés pleins
+  if (cell.walls) cell.walls.visible = !isolée
+  if (!isolée || !cell.dem) {
+    t.setRegionMask(null)
+    cell.regionCanvas = null
+    return
+  }
+  try {
+    // le trait de côte de LA cellule, s'il est déjà arrivé : sans lui les
+    // polders sous le niveau 0 seraient retirés de la découpe (caveat v1)
+    const raster = rasterizeMask(parts, cell.dem, CELL_MASK_SIZE, cell.coastImage || null)
+    t.setRegionMask(raster.texture)
+    cell.regionCanvas = raster.canvas
+  } catch (err) {
+    console.warn('découpe de zone sur une dalle du damier :', err)
+  }
+}
+
+// Le retracé DIFFÉRÉ de la jupe, quand les dalles arrivent en rafale (voir
+// blockGrid.onReady). La dalle se recale dans la foulée : le plancher a pu
+// descendre en même temps que le damier s'est étendu.
+let regionSkirtTimer = null
+function rebuildRegionSkirtSoon() {
+  clearTimeout(regionSkirtTimer)
+  regionSkirtTimer = setTimeout(() => {
+    regionSkirtTimer = null
+    if (!params.regionMode || !regionMaskCanvas) return
+    rebuildRegionSkirt()
+    plinth.setSlabOnly(true, regionBaseY())
+  }, 400)
+}
+
+// Le damier suit la zone : on lui donne le contour, il fait naître les dalles
+// qui le portent (ou les retire toutes quand on passe null), puis chacune
+// rasterise SA part du masque.
+function syncRegionGrid(parts) {
+  blockGrid.setRegionParts(parts || null)
+  blockGrid.sync(allGpxPoints())
+  for (const cell of blockGrid.cells.values()) paintCellRegion(cell)
 }
 // La vue d'AVANT l'isolation, pour la rendre intacte au décochage (Adrien :
 // « le bloc doit revenir à son format d'origine »). Le recadrage change
@@ -3534,6 +3656,11 @@ async function applyRegionMode() {
     terrain.setRegionMask(null)
     disposeRegionSkirt()
     regionMaskCanvas = null
+    regionFloorY = null
+    // le damier lâche la zone AVANT le retour de vue : les dalles nées pour la
+    // porter s'en vont, celles d'un tracé GPX restent, et celles qui restent
+    // reperdent leur masque (sinon elles garderaient la découpe précédente)
+    syncRegionGrid(null)
     plinth.setSlabOnly(false) // le bloc carré revient
     plinth.rebuild(terrain, params) // et la dalle redescend : setSlabOnly l'avait remontée au zéro
     groundInfo.setFrameScale(1) // et le cartouche retrouve les bords du bloc
@@ -3578,7 +3705,16 @@ async function applyRegionMode() {
     // trace GPX respire dans le bloc, laisserait justement la zone flotter.
     if (r?.parts?.length && !regionFramed) {
       regionFramed = true
-      const f = frameRegion(r.parts)
+      // LE CADRE VISE LE DAMIER, PLUS UN SEUL BLOC (demande Adrien). Cinq dalles
+      // de côté valent 2,32 crans de zoom : la zone est vue 4 à 5 fois plus
+      // grande qu'avant, sans qu'un pouce en dépasse.
+      //
+      // ⚠️ SAUF POUR UN SOMMET. Sa forme n'a pas de contour au monde : elle se
+      // taille dans le MNT de la dalle chargée (peak-mask.js), et seulement de
+      // celle-là. Zoomer de trois crans sur un sommet ne ferait pas grandir sa
+      // découpe, elle serait tranchée net au bord du bloc central.
+      const dalles = regionTarget?.peak ? 1 : GRID_R * 2 + 1
+      const f = frameRegion(r.parts, { spanBlocks: dalles })
       if (f && (Math.abs(f.lat - params.demLat) > 1e-4 || Math.abs(f.lon - params.demLon) > 1e-4 || f.zoom !== params.demZoom)) {
         regionReturn ??= { lat: params.demLat, lon: params.demLon, zoom: params.demZoom, location: params.demLocation }
         params.demLat = f.lat
@@ -3591,15 +3727,22 @@ async function applyRegionMode() {
       }
     }
     terrain.setRegionMask(r ? r.maskTexture : null)
-    // les flancs disparaissent, la DALLE reste — et remonte au zéro absolu pour
-    // recevoir l'ombre portée de la découpe posée dessus
-    plinth.setSlabOnly(true, regionBaseY())
-    waterRebuild() // regionMode is on — the sim drops its sea (it would spill past the boundary) but keeps the lakes
     // Isolate-the-zone drops the flat slab, but a vertical curtain still closes
     // the cut so a boundary over a summit or a trench never shows the map's
     // underside. It welds to the terrain height and shares the socle material.
     regionMaskCanvas = r ? r.maskCanvas : null
+    // LE DAMIER PORTE LA SUITE DU DÉCOUPAGE, comme il porte déjà la suite d'un
+    // tracé GPX — sauf pour un sommet, dont la forme ne vient que du MNT de la
+    // dalle centrale (voir le recadrage plus haut).
+    syncRegionGrid(regionTarget?.peak ? null : r?.parts)
+    // ⚠️ LA JUPE AVANT LA DALLE : c'est elle qui mesure le plancher de la zone
+    // (regionFloorY), et c'est ce plancher que la dalle doit venir toucher —
+    // sans quoi elle resterait au niveau de la mer sous une zone d'altitude.
     rebuildRegionSkirt()
+    // les flancs disparaissent, la DALLE reste — et remonte au plan de pose de
+    // la découpe pour recevoir son ombre portée
+    plinth.setSlabOnly(true, regionBaseY())
+    waterRebuild() // regionMode is on — the sim drops its sea (it would spill past the boundary) but keeps the lakes
     // le cartouche vient épouser l'île au lieu de rester aux bords du bloc
     groundInfo.setFrameScale(regionFrameScale(r?.parts))
     syncRegionPlaceFilter() // les villes hors du territoire disparaissent
@@ -3615,6 +3758,8 @@ async function applyRegionMode() {
     terrain.setRegionMask(null)
     disposeRegionSkirt()
     regionMaskCanvas = null
+    regionFloorY = null
+    syncRegionGrid(null) // le damier ne garde pas une découpe orpheline
   } finally {
     regionBusy = false
   }

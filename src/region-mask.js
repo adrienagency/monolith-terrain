@@ -73,6 +73,12 @@ function boxGapKm(a, b) {
 
 const clampLat = (lat) => Math.min(85.05, Math.max(-85.05, lat))
 
+// Mercator normalisé, la projection de geo.js ramenée au monde entier :
+// y ∈ [0,1] du pôle nord au pôle sud. Sert au cadrage (frameRegion), qui doit
+// mesurer la zone dans l'espace où le bloc est un carré.
+const mercY = (lat) => (1 - Math.asinh(Math.tan((clampLat(lat) * Math.PI) / 180)) / Math.PI) / 2
+const mercLat = (y) => (Math.atan(Math.sinh((1 - 2 * y) * Math.PI)) * 180) / Math.PI
+
 // vertex-average centroid of a ring — plenty for a keep/drop distance test
 function ringCentroid(ring) {
   let sx = 0
@@ -459,9 +465,21 @@ export function regionMaskFromParts({ parts, dem, coastImage = null, name = '', 
 // et 100 % selon l'arrondi, elle ne peut pas toucher les bords au pixel près.
 // `margin` laisse un filet pour que le trait de côte ne soit pas coupé net.
 //
+// `spanBlocks` — DE COMBIEN DE DALLES DISPOSE-T-ON pour la faire tenir ? 1 par
+// défaut (le bloc seul : GPX, lieux remarquables, recherche), 5 en mode isolé
+// depuis que le damier (block-grid.js) porte la suite du découpage comme il
+// porte déjà la suite d'un tracé. Cinq dalles valent 2,32 crans de zoom : le
+// cadre gagne donc 2 ou 3 crans, jamais plus, et la règle d'Adrien ne bouge
+// pas d'un pouce — la zone tient ENTIÈREMENT dans ce qui est affiché, c'est
+// « ce qui est affiché » qui a grandi.
+//
+// ⚠️ spanBlocks ne peut que DÉZOOMER le cadre. Rien ici ne doit jamais forcer
+// un zoom plus fin que celui qui fait tenir la zone : c'était le bug du
+// plancher de zoom, verrouillé dans test/landmark-frame.test.js.
+//
 // Pur (aucun DOM, aucun réseau) : `parts` est une liste de polygones GeoJSON
 // [[[lon,lat],…],…], la même que celle que rend fetchRegionMask.
-export function frameRegion(parts, { margin = 1.06, min = 4, max = 15, tilePx = 768 } = {}) {
+export function frameRegion(parts, { margin = 1.06, min = 4, max = 15, tilePx = 768, spanBlocks = 1 } = {}) {
   let latMin = 90, latMax = -90, lonMin = Infinity, lonMax = -Infinity
   for (const rings of parts || []) {
     for (const [lon, lat] of rings?.[0] || []) {
@@ -473,15 +491,26 @@ export function frameRegion(parts, { margin = 1.06, min = 4, max = 15, tilePx = 
     }
   }
   if (!(lonMax >= lonMin) || !(latMax >= latMin)) return null
-  const lat = (latMin + latMax) / 2
-  const lon = (lonMin + lonMax) / 2
+  // ON MESURE DANS LA PROJECTION DU MOTEUR, PAS EN MÈTRES AU SOL.
+  //
+  // Le bloc est un carré en MERCATOR ; c'est donc en Mercator que se joue « ça
+  // tient ou ça déborde ». Convertir la zone en mètres au centre du cadre, comme
+  // on le faisait, marche tant que la zone est petite et loin des pôles — et
+  // ment ailleurs : une zone de 25° de haut vers −67° passait le calcul en
+  // mètres puis débordait du damier une fois projetée. Ici, les deux côtés sont
+  // exprimés en FRACTION DU MONDE, l'unité même de la grille de tuiles, et la
+  // comparaison est exacte à toute latitude.
+  const yN = mercY(latMax) // nord → y petit
+  const yS = mercY(latMin)
+  const lat = mercLat((yN + yS) / 2) // le milieu se prend en Mercator, sinon la
+  const lon = (lonMin + lonMax) / 2 // zone n'est pas centrée dans son cadre
   // le plus grand côté décide du zoom — l'autre tiendra forcément
-  const spanM = Math.max(
-    (lonMax - lonMin) * 111320 * Math.cos((lat * Math.PI) / 180),
-    (latMax - latMin) * 110540,
-    200 // une zone minuscule ne doit pas demander un zoom infini
-  )
-  const extentTop = 156543.03392 * Math.cos((lat * Math.PI) / 180) * tilePx
-  const zoom = Math.max(min, Math.min(max, Math.floor(Math.log2(extentTop / (spanM * margin)))))
+  const uni = Math.max((lonMax - lonMin) / 360, yS - yN, 1e-9)
+  // spanBlocks bancal (0, négatif, NaN) → une dalle : jamais moins, sinon le
+  // cadre se resserrerait sous la taille de la zone
+  const dalles = Number.isFinite(spanBlocks) && spanBlocks > 1 ? spanBlocks : 1
+  // le monde fait 2^z tuiles ; le cadre en couvre (tilePx/256) par dalle
+  const tuiles = (dalles * tilePx) / 256
+  const zoom = Math.max(min, Math.min(max, Math.floor(Math.log2(tuiles / (uni * margin)))))
   return { lat, lon, zoom }
 }
