@@ -109,37 +109,93 @@ export function traceSkirt({ maskCanvas, sample, grid = 300, threshold = 127 }) 
     if (insideAt(mid, -HALF + 1e-3)) segs.push({ ax: a, az: -HALF, bx: b, bz: -HALF })
   }
 
-  return { segs, interiorMin: interiorMin === Infinity ? 0 : interiorMin }
+  // interiorMin reste Infinity quand rien d'intérieur n'a été échantillonné
+  // (zone plus fine que le pas de 1 sur 16) : c'est une ABSENCE de mesure, pas
+  // un zéro. La rendre à 0 mentait — et depuis que le pied de la coupe se cale
+  // sur le point le plus bas de la zone (skirtFloor), ce zéro-là rouvrait le
+  // grand bloc jusqu'au niveau de la mer qu'on cherche justement à supprimer.
+  return { segs, interiorMin }
+}
+
+// LE PLANCHER DE LA ZONE — le point le plus bas du relief SOUS le masque, bord
+// de coupe compris. C'est lui qui vient toucher la dalle quand la zone est en
+// altitude (Adrien : « si les zones découpées sont en altitude, le point le plus
+// bas de la zone découpée sera utilisé pour être le niveau zéro qui touchera la
+// dalle du sol »).
+//
+// ⚠️ Le minimum se prend DANS le masque, jamais sur la dalle entière : une
+// vallée voisine restée hors zone ramènerait le pied de coupe trop bas et on
+// n'aurait rien réglé. Avec le damier, il se prend aussi sur TOUTES les
+// cellules — un plancher par dalle marquerait une marche aux jointures.
+//
+// Effet de bord assumé : les hauteurs des extrémités de segment sont mémorisées
+// dans `traced` (s.ya / s.yb), et buildRegionSkirt les réutilise telles quelles.
+// terrain.sample est l'appel coûteux du lot, il ne doit être payé qu'une fois.
+export function skirtFloor(traced, sample) {
+  if (!traced?.segs?.length || !sample) return null
+  let min = Number.isFinite(traced.interiorMin) ? traced.interiorMin : Infinity
+  for (const s of traced.segs) {
+    if (!Number.isFinite(s.ya)) s.ya = sample(s.ax, s.az)
+    if (!Number.isFinite(s.yb)) s.yb = sample(s.bx, s.bz)
+    if (s.ya < min) min = s.ya
+    if (s.yb < min) min = s.yb
+  }
+  return Number.isFinite(min) ? min : null
+}
+
+// LA BASE DE LA DÉCOUPE, en une expression qui réconcilie deux règles opposées.
+//
+// Le pied de la coupe était d'abord le minimum local, puis on l'a fixé au ZÉRO
+// ABSOLU (niveau de la mer) parce que le minimum faisait flotter la découpe à
+// une hauteur qui changeait d'une région à l'autre, désalignée de la dalle et
+// des textes du cartouche.
+//
+// Ce zéro absolu reste JUSTE POUR UNE ÎLE — son plancher vaut déjà le niveau de
+// la mer, et c'est ce rendu-là qu'Adrien a validé. Il n'est faux qu'en
+// ALTITUDE : aux Deux Alpes, la découpe flottait au-dessus d'une jupe qui
+// descendait jusqu'à la mer alors que le fond de vallée est à 1 000 m, et
+// l'objet perdait toute crédibilité.
+//   île        → plancher ≈ 0 ≈ mer → inchangé
+//   Deux Alpes → plancher ≈ 1 000 m → c'est lui qui touche la dalle
+export function regionBaseLevel(seaY, floorY) {
+  const mer = Number.isFinite(seaY) && seaY > -9000 ? seaY : null
+  const sol = Number.isFinite(floorY) ? floorY : null
+  if (mer === null) return sol
+  if (sol === null) return mer
+  return Math.max(mer, sol)
 }
 
 // Build the skirt mesh. `material` is shared (the plinth wall material) so the
 // socle finish carries over.
 //
-// `baseY` FIXE le pied du mur à une altitude donnée — le zéro absolu du relief,
-// c'est-à-dire le niveau de la mer — pour que la zone isolée se pose toujours
-// au même plan que les textes du cartouche et que la dalle qui reçoit son ombre
-// (Adrien). Sans lui, le pied suivait le point le plus bas de la zone : la
-// découpe flottait à une hauteur qui changeait d'une région à l'autre, et rien
-// n'était jamais aligné sur la dalle. `depth` n'est plus qu'un repli quand
-// aucune base n'est imposée.
-//   buildRegionSkirt({ maskCanvas, sample, material, baseY }) → { mesh } | null
-export function buildRegionSkirt({ maskCanvas, sample, material, depth = 5, grid = 300, baseY: forcedBaseY = null }) {
+// `baseY` FIXE le pied du mur à une altitude donnée — voir regionBaseLevel
+// ci-dessus : le niveau de la mer pour une île, le plancher de la zone quand
+// elle est en altitude. Sans lui, le pied suivait le point le plus bas de la
+// DALLE, hors zone comprise, et la découpe flottait à une hauteur qui changeait
+// d'une région à l'autre. `depth` n'est plus qu'un repli quand aucune base
+// n'est imposée.
+//
+// `traced` — la sortie de traceSkirt, quand l'appelant l'a déjà calculée pour
+// en tirer le plancher (skirtFloor). Le damier en a besoin : le pied de coupe
+// est COMMUN à toutes les dalles, il faut donc les tracer toutes avant d'en
+// construire une seule. Sans ce passe-plat, chaque dalle paierait deux fois son
+// marching-squares et ses appels à terrain.sample.
+//   buildRegionSkirt({ maskCanvas, sample, material, baseY, traced? }) → { mesh } | null
+export function buildRegionSkirt({ maskCanvas, sample, material, depth = 5, grid = 300, baseY: forcedBaseY = null, traced = null }) {
   if (!maskCanvas || !sample) return null
-  const { segs, interiorMin } = traceSkirt({ maskCanvas, sample, grid })
+  const { segs, interiorMin } = traced || traceSkirt({ maskCanvas, sample, grid })
   if (!segs.length) return null
 
   // top height at each boundary point = the terrain surface there
-  let minTop = interiorMin
+  let minTop = Number.isFinite(interiorMin) ? interiorMin : Infinity
   for (const s of segs) {
-    const ya = sample(s.ax, s.az)
-    const yb = sample(s.bx, s.bz)
-    s.ya = ya
-    s.yb = yb
-    if (ya < minTop) minTop = ya
-    if (yb < minTop) minTop = yb
+    if (!Number.isFinite(s.ya)) s.ya = sample(s.ax, s.az)
+    if (!Number.isFinite(s.yb)) s.yb = sample(s.bx, s.bz)
+    if (s.ya < minTop) minTop = s.ya
+    if (s.yb < minTop) minTop = s.yb
   }
-  // Une base imposée est SUIVIE À LA LETTRE : c'est le zéro absolu, le niveau
-  // de la mer.
+  if (!Number.isFinite(minTop)) minTop = 0
+  // Une base imposée est SUIVIE À LA LETTRE.
   //
   // Elle était d'abord bornée par Math.min(base, minTop) « pour que le relief
   // ne perce pas sous le mur ». Ce garde-fou se retournait contre nous : il
