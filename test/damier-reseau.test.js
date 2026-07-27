@@ -260,7 +260,25 @@ test('détacher puis rattacher : un MNT rendu par le cache le QUITTE', async () 
   await jusquA(() => grid.cells.size >= 24)
   assert.equal(grid.cells.size, 24, 'le damier est revenu au complet')
 
-  // 3. l'invariant : un MNT est SOIT dans une cellule, SOIT dans le cache.
+  // 3. ET LE RETOUR SE COMPTE EN REQUÊTES. C'est l'assertion qui manquait, et
+  // c'est très exactement le trou par lequel une régression est passée : le
+  // dessaisissement de l'étage 3 (étape 4 ci-dessous) a un jour vidé le cache
+  // AVANT que la cellule ne naisse, sans rien inscrire dans _demPending — donc
+  // pendant un tour de microtâche la clé n'était retenue par aucun étage, et la
+  // resynchro de main.js (onReady → sync) relançait le réseau. La mémoire et la
+  // taille du cache restaient impeccables : seul le réseau le voyait.
+  // 19 dalles à rebâtir, `detaches` rendues par le cache, le reste au réseau.
+  const aRebatir = 24 - garde.size
+  const attendu = (aRebatir - detaches) * 9 // 9 tuiles d'altitude par MNT
+  assert.equal(
+    pour('elevation-tiles-prod'),
+    attendu,
+    `${pour('elevation-tiles-prod')} requêtes d altitude au retour pour ${attendu} attendues : ` +
+      `${detaches} MNT étaient au cache, ${(pour('elevation-tiles-prod') - attendu) / 9} d entre eux sont repartis sur le réseau`
+  )
+  assert.equal(total(), uniques(), `${total()} requêtes pour ${uniques()} URL distinctes`)
+
+  // 4. l'invariant : un MNT est SOIT dans une cellule, SOIT dans le cache.
   const vivants = new Set([...grid.cells.values()].map((c) => c.demRaw))
   const doubles = [...grid._demCache.values()].filter((d) => vivants.has(d))
   assert.equal(doubles.length, 0, `${doubles.length} MNT du cache sont déjà détenus par une cellule vivante`)
@@ -301,7 +319,10 @@ test('un MNT déjà détenu par une cellule vivante ne repart PAS sur le réseau
 // DEM (le centre est rechargé, donc remplacé, même quand il revient au même
 // endroit). Les deux tests qui suivent sont les deux faces de cette garde.
 
-test('le centre a bougé pendant le vol : la dalle NE se pose PAS', async () => {
+// Le montage est partagé par les deux tests qui suivent, et c'est délibéré :
+// une assertion par test, sinon un seul échec ne dit plus laquelle des deux
+// garanties a cédé (la dalle ne se pose pas / le travail n'est pas jeté).
+async function centreQuiBouge() {
   serve({ bathy: false })
   const avant = await loadDem({ lat: LAT, lon: LON, zoom: ZOOM, bathy: false })
   // un centre franchement ailleurs (≈ 2° à l'est) : autre origine de tuiles
@@ -315,9 +336,16 @@ test('le centre a bougé pendant le vol : la dalle NE se pose PAS', async () => 
   grid.sync(points) // les 24 chargements partent, alignés sur `avant`
   centre = apres // …et le bloc central change SOUS eux, avant tout atterrissage
   await jusquA(() => grid._demPending.size === 0, { stable: 5 })
+  return grid
+}
 
+test('le centre a bougé pendant le vol : la dalle NE se pose PAS', async () => {
+  const grid = await centreQuiBouge()
   assert.equal(grid.cells.size, 0, `${grid.cells.size} dalles posées sous un centre qui n'est plus le leur`)
-  // et le travail n'est pas perdu pour autant : les MNT orphelins sont au cache
+})
+
+test('le centre a bougé pendant le vol : le MNT orphelin n est pas JETÉ', async () => {
+  const grid = await centreQuiBouge()
   assert.ok(grid._demCache.size > 0, 'les MNT arrivés sans porteur doivent rejoindre le cache des détachés')
 })
 

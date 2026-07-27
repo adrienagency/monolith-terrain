@@ -154,7 +154,16 @@ export function cellsForParts(parts, dem, r = GRID_R) {
 // test/damier-reseau.test.js, AWS en tuiles 256 px — et le dit explicitement.
 //
 // Trois étages, du moins cher au plus cher. L'invariant qui tient la mémoire
-// n'est pas une élégance : UN MNT N'EST JAMAIS DANS DEUX ÉTAGES À LA FOIS.
+// n'est pas une élégance, et il se dit AU NIVEAU DE LA CLÉ : UNE DALLE N'EST
+// JAMAIS DÉTENUE PAR DEUX ÉTAGES À LA FOIS.
+//
+// ⚠️ Le dire « objet par objet » (aucun MNT dans deux étages) est plus faible,
+// et ça s'est payé une fois : le dessaisissement de l'étage 3 vidait le cache
+// un tour de microtâche AVANT que la cellule ne naisse, donc aucun MNT n'était
+// jamais en double — et pourtant, la clé n'étant retenue par personne pendant
+// cet intervalle, un SECOND MNT partait sur le réseau pour la même dalle.
+// L'invariant d'objet restait vrai, celui de clé était rompu, et il coûtait
+// 117 requêtes (cf. l'étage 1 et test/damier-reseau.test.js).
 //
 //   1. LES CHARGEMENTS EN VOL — une promesse par dalle, JAMAIS évincée tant
 //      qu'elle n'a pas rendu la main. C'est la correction qui compte : main.js
@@ -162,14 +171,21 @@ export function cellsForParts(parts, dem, r = GRID_R) {
 //      gpxLayer.rebuildAll → sync), le cache borné évinçait des promesses non
 //      RÉSOLUES, et chaque resynchro relançait le chargement des vingt autres.
 //      Mesuré (campagne de référence) : 322 appels de loadDem pour 23 dalles.
+//      ⚠️ Cet étage inscrit TOUTE promesse rendue à sync, réseau ou pas — y
+//      compris celle, déjà résolue, dont l'étage 3 vient de se dessaisir. Il
+//      est la mémoire UNIQUE de la clé entre l'instant où un étage la lâche et
+//      celui où la cellule la reprend ; l'en dispenser, c'est rouvrir la
+//      fenêtre de course décrite ci-dessus.
 //   2. LES CELLULES VIVANTES — elles détiennent déjà leur MNT. Le relire coûte
 //      un parcours de 24 entrées ; en garder une copie coûterait 235 Mo.
 //   3. LES MNT DÉTACHÉS — ceux des cellules qu'on vient de détruire, les seuls
 //      à mériter une place en propre (dézoom qui va et vient, mode isolé qui
 //      rase puis rebâtit). Budget INCHANGÉ : 32 Mo, comme avant ce correctif.
 //      ⚠️ Cet étage REND ET SE DESSAISIT (cf. _loadCellDem) : le MNT qui repart
-//      dans une cellule quitte le cache, celui qu'on jette y revient. Sans ce
-//      dessaisissement, l'étage 3 se remplissait de MNT que des cellules
+//      dans une cellule quitte le cache — en passant la main à l'étage 1, qui
+//      tient la clé jusqu'à la naissance de la cellule — et celui qu'on jette
+//      y revient (_keepDetachedDem). Sans ce dessaisissement,
+//      l'étage 3 se remplissait de MNT que des cellules
 //      VIVANTES détenaient déjà — gratuits à garder, puisque partagés — et
 //      évinçait à leur place les détachés, les seuls pour qui il existe.
 const DEM_CACHE_BYTES = 32 * 1024 * 1024
@@ -374,12 +390,21 @@ export class BlockGrid {
     // cette cellule ne naît pas, sync() le lui rend (_keepDetachedDem). Un
     // `delete` + `set` — le simple MRU d'avant — laissait l'entrée en place et
     // vidait l'étage 3 de son sens : il ne contenait plus que des MNT vivants.
+    //
+    // ⚠️ ET LE MNT RENDU PASSE PAR L'ÉTAGE 1, exactement comme un chargement
+    // réseau. Sans cette ligne, le dessaisissement ouvrait une FENÊTRE DE
+    // COURSE : l'étage 3 se vidait tout de suite, la cellule ne naissait qu'au
+    // tour de microtâche suivant, et main.js resynchronise entre les deux
+    // (onReady → rebuildAll → sync). Pendant cet intervalle la clé n'était
+    // retenue par AUCUN étage et un chargement réseau repartait. Mesuré au BANC
+    // sur la phase « retour » du cycle détacher/rattacher — le scénario même
+    // pour lequel l'étage 3 existe : 162 requêtes d'altitude (18 dalles) au
+    // lieu de 45 (5 dalles), soit 13 des 14 MNT rendus par le cache
+    // re-téléchargés. Et transitoirement 13 MNT en double en mémoire.
     const garde = this._demCache.get(key)
-    if (garde) {
-      this._demCache.delete(key)
-      return Promise.resolve(garde)
-    }
-    const p = loadDem({ lat: 0, lon: 0, zoom, tilesAcross, originTile: origin })
+    const p = garde
+      ? (this._demCache.delete(key), Promise.resolve(garde))
+      : loadDem({ lat: 0, lon: 0, zoom, tilesAcross, originTile: origin })
     this._demPending.set(key, p)
     // then(f, f) et non finally : le rejet est absorbé ici. L'échec, lui, se
     // MÉMORISE — c'est la seule chose qui empêche la resynchro suivante de
