@@ -5,6 +5,7 @@
 
 import * as THREE from 'three'
 import { Output, Mp4OutputFormat, BufferTarget, CanvasSource, QUALITY_HIGH } from 'mediabunny'
+import { safeAspect } from './viewport.js'
 
 function saveState(renderer, camera) {
   const size = renderer.getSize(new THREE.Vector2())
@@ -14,7 +15,12 @@ function saveState(renderer, camera) {
 function applySize({ renderer, composer, camera }, width, height) {
   renderer.setPixelRatio(1)
   composer.setSize(width, height, false)
-  camera.aspect = width / height
+  // Ici on ne peut pas renoncer comme le fait le resize (l'appelant attend une
+  // image), donc on borne à 1 px au lieu de risquer `0 / 0`. Un export vidéo
+  // enchaîne des centaines de frames sur cette même caméra : un aspect NaN posé
+  // une fois y resterait jusqu'à la fin, muet, et ressortirait ensuite par
+  // restoreState dans la vue interactive. Voir viewport.js.
+  camera.aspect = safeAspect(width, height)
   camera.updateProjectionMatrix()
 }
 

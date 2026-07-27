@@ -106,6 +106,7 @@ import { buildZoomStepper } from './ui/zoom-stepper.js'
 import { initTips } from './ui/tips.js'
 import { createAdaptiveQuality } from './perf.js'
 import { detailForZoom } from './zoom-detail.js'
+import { isRenderableSize } from './viewport.js'
 import './ui/v28.css'
 // the export stack (modal + Recorder + mediabunny encoder) is heavy and only
 // needed on demand — it is dynamic-import()ed on the first Export click, so
@@ -5400,6 +5401,14 @@ setTimeout(() => {
 window.addEventListener('resize', () => {
   if (loopPaused) return // an offline export owns the renderer size right now
   const [rw, rh] = evenSize() // box du container (= window hors boutique)
+  // Conteneur à 0×0 (onglet caché, panneau replié, iframe pas encore posée) :
+  // on ne touche à RIEN. Écrire `0 / 0` ici poserait un aspect NaN que rien ne
+  // répare ensuite — même une fois le canevas revenu à 1280×720 — et toutes les
+  // projections écran en x seraient perdues sans une ligne en console. Le
+  // dernier aspect connu est toujours meilleur qu'un NaN ; voir viewport.js.
+  // Attention : evenSize() arrondit à l'entier pair inférieur, donc 1 px donne
+  // bien 0 — c'est la valeur arrondie qu'il faut tester, pas la box brute.
+  if (!isRenderableSize(rw, rh)) return
   camera.aspect = rw / rh
   camera.updateProjectionMatrix()
   renderer.setSize(rw, rh) // same even dimensions as the composer — see evenSize()
