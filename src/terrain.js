@@ -2,8 +2,13 @@ import * as THREE from 'three'
 import { Simplex2, mulberry32, fbm, ridged, smoothstep, lerp } from './noise.js'
 import { sampleDem } from './dem.js'
 import { buildRamp2D } from './palette.js'
-import { analyzeDem } from './terrain-analysis.js'
-import { buildSeaMask, blurMask, landMaskFromImage } from './sea-mask.js'
+import { gridTemplate } from './grid-template.js'
+import { detailField } from './detail-noise.js'
+import { landMaskFromImage } from './sea-mask.js'
+// L'analyse de relief et le masque de mer ne sont plus calcules ici : ils
+// partent dans un Worker (terrain-jobs.js). ~470 ms de fil principal fige par
+// reconstruction, sur MNT 1536². Le calcul est identique octet pour octet.
+import { scheduleTerrainJob, jobStillValid } from './terrain-jobs.js'
 import { TEXTURE_BUILDERS } from './material-textures.js'
 import { MATERIALS } from './material-catalog.js'
 import { FX_GLSL } from './fx-glsl.js' // shared with src/ui/fx-thumbs.js — see that file's header
@@ -84,7 +89,7 @@ export class Terrain {
   // opts.offset {x,z} : bloc VOISIN du damier (block-grid.js) — le mesh est
   // décalé dans le monde et uBlockOffset ramène clip + masques en coordonnées
   // locales au bloc. Le bloc principal garde (0,0) : comportement identique.
-  // opts.analysisMax : plafond du côté de l'analyse de relief (_buildAnalysis).
+  // opts.analysisMax : plafond du côté de l'analyse de relief (voir _buildFields).
   // 0 = aucun plafond, c'est le bloc central, le héros.
   // opts.shareFrom : le Terrain dont ce bloc EMPRUNTE rampe, rugosité et bump
   // (voir shareTexturesFrom). Posé AVANT rebuildRamp/rebuildRoughness, sinon la
@@ -971,12 +976,14 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // corrige le garde-fou topologique sea-mask — un polder sous 0 m déclaré
     // TERRE par le trait de côte ne doit plus être flood-fillé en mer. Le
     // fetch du masque est async : à sa réception on RE-construit le sea mask.
-    // CONTRAT : sans image, _buildSeaMask retombe bit-à-bit sur l'existant.
+    // CONTRAT : sans image, le masque de mer retombe bit-à-bit sur l'existant.
     const img = texture ? coastImage || null : null
     if (img !== this._coastImage) {
       this._coastImage = img
       this._coastLand = null // cache landMask (dépend de dem.size) — invalidé
-      if (this.dem?.data) this._buildSeaMask()
+      // ⚠️ withAnalysis: false — la landMask ne change QUE la mer. Recuire les
+      // ~10 flous de l'analyse ici coûterait 387 ms pour un résultat identique.
+      if (this.dem?.data) this._buildFields({ withAnalysis: false })
     }
   }
 
@@ -1065,6 +1072,42 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     }
   }
 
+  // ÉCHANTILLONNEUR DE GRILLE — la même formule que _makeDemSampler, mais qui
+  // LIT le grain FBM dans un champ pré-cuit au lieu de le recalculer. 175 ms sur
+  // les 194 ms d'échantillonnage à res 1024 : 5 octaves de simplex par sommet,
+  // pour un déplacement de 0,19 px CSS en moyenne au réglage par défaut.
+  //
+  // ⚠️ Il ne remplace PAS `this.sample` : celui-là doit rester interrogeable en
+  // TOUT point (socle, bateaux, drapage GPX, étiquettes), pas seulement sur les
+  // sommets de la grille. Les deux formules sont identiques au bit près — c'est
+  // seulement le chemin du grain qui change, et test/detail-noise.test.js le
+  // verrouille sur six combinaisons d'exagération, de zoom et de finesse.
+  //
+  // ⚠️ NE PAS « SIMPLIFIER » l'expression finale : `detail·(a + 0,35·b)` n'est
+  // pas bit-identique à `detail·a + detail·0,35·b` (48 % des sommets diffèrent).
+  // Rend null quand il n'y a rien à mémoriser (relief procédural, ou grain nul).
+  _makeGridSampler(params, res) {
+    if (params.source !== 'real' || !this.dem) return null
+    const dem = this.dem
+    const scale = (TERRAIN_SIZE / dem.extentMeters) * params.demExaggeration
+    const meanM = dem.meanM
+    const { size } = dem
+    const detail = this.mapUniforms.uColorMode.value === 1 ? Math.min(params.detail, NATURAL_DETAIL_MAX) : params.detail
+    if (!(detail > 0)) {
+      // grain éteint (zooms continentaux, curseur à zéro) : aucun champ à cuire.
+      // `landFactor · (0·a + 0·0,35·b)` vaut 0 tout rond, on peut le sauter.
+      return (i, x, z) => (sampleDem(dem, (x / TERRAIN_SIZE + 0.5) * (size - 1), (z / TERRAIN_SIZE + 0.5) * (size - 1)) - meanM) * scale
+    }
+    const grain = detailField(params.seed, params.detailScale, res, TERRAIN_SIZE)
+    return (i, x, z) => {
+      const raw = sampleDem(dem, (x / TERRAIN_SIZE + 0.5) * (size - 1), (z / TERRAIN_SIZE + 0.5) * (size - 1))
+      const h = (raw - meanM) * scale
+      const landFactor = smoothstep(0, 90, raw)
+      const fine = landFactor * (detail * grain[i * 2] + detail * 0.35 * grain[i * 2 + 1])
+      return h + fine
+    }
+  }
+
   // Height field sampler for the current seed — kept so other objects can query it.
   _makeSampler(params) {
     if (params.source === 'real' && this.dem) return this._makeDemSampler(params)
@@ -1129,11 +1172,29 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
 
   rebuild(params) {
     const res = params.resolution
-    const geo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, res, res)
-    geo.rotateX(-Math.PI / 2)
+    // GABARIT MÉMORISÉ au lieu de `new THREE.PlaneGeometry` : celui-ci mettait
+    // 194 ms et jetait 262 Mo de tas JS à res 1024 (106 ms et 104 Mo à res 768)
+    // pour fabriquer un plan PLAT que les lignes suivantes réécrivent
+    // intégralement (Y, normales, couleurs). Sur une reconstruction complète du
+    // bloc, mesurée en navigateur au Mont-Blanc à res 1024 : 853 → 770 ms.
+    // Bit-identique, verrouillé par test/grid-template.test.js.
+    // ⚠️ `position` est COPIÉ (on va y écrire les Y, et le gabarit est partagé
+    // entre blocs) ; `uv` et `index` sont branchés TELS QUELS parce que personne
+    // ne les écrit — voir l'avertissement en tête de grid-template.js.
+    const tpl = gridTemplate(res, TERRAIN_SIZE)
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(tpl.position), 3))
+    geo.setAttribute('uv', new THREE.BufferAttribute(tpl.uv, 2))
+    geo.setIndex(new THREE.BufferAttribute(tpl.index, 1))
 
     const sample = this._makeSampler(params)
     this.sample = sample
+    // le grain FBM est pré-cuit sur la grille (detail-noise.js) — mesuré en
+    // navigateur au Mont-Blanc à res 1024 : 770 → 600 ms de reconstruction, et
+    // il survit à un changement de zoom,
+    // à un coup de curseur d'exagération et à une bascule de palette. Repli sur
+    // `sample` quand il n'y a rien à mémoriser (relief procédural).
+    const gridSample = this._makeGridSampler(params, res)
 
     const pos = geo.attributes.position
     const count = pos.count
@@ -1143,7 +1204,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     for (let i = 0; i < count; i++) {
       const x = arr[i * 3]
       const z = arr[i * 3 + 2]
-      const h = sample(x, z)
+      const h = gridSample ? gridSample(i, x, z) : sample(x, z)
       arr[i * 3 + 1] = h
       if (h < minH) minH = h
       if (h > maxH) maxH = h
@@ -1184,35 +1245,118 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       const seaEps = Math.max(0.6 * demScale, 0.004)
       this.mapUniforms.uSeaY.value = (0 - this.dem.meanM) * demScale + seaEps
       this.mapUniforms.uSeaRange.value = Math.max((0 - this.dem.minM) * demScale, 1e-3)
-      this._buildSeaMask()
-      this._buildAnalysis()
+      this._buildFields()
     } else {
       this.mapUniforms.uSeaY.value = -9999
       this.mapUniforms.uSeaMaskOn.value = 0
       this.mapUniforms.uAnalysisOn.value = 0
+      this._fieldKey = null
+      this.fieldsReady = Promise.resolve(null)
     }
 
     this.mesh.geometry.dispose()
     this.mesh.geometry = geo
   }
 
-  // Flood-fill the real ocean from the DEM and upload it as a mask texture
-  // (see sea-mask.js). Sampled in world XZ, same footprint as the region mask.
-  _buildSeaMask() {
+  // landMask depuis le masque côtier (si reçu) : rééchantillonné à la grille
+  // du DEM et mis en cache — recalculé seulement si l'image ou dem.size change.
+  // ⚠️ L'IDENTITÉ de ce tableau sert de clé de péremption (voir _buildFields) :
+  // le remplacer par un tableau neuf au même contenu périmerait pour rien un
+  // calcul encore juste.
+  _landMaskFor(dem) {
+    if (!this._coastImage) return null
+    if (!this._coastLand || this._coastLand.img !== this._coastImage || this._coastLand.size !== dem.size)
+      this._coastLand = { img: this._coastImage, size: dem.size, mask: landMaskFromImage(this._coastImage, dem.size) }
+    return this._coastLand.mask
+  }
+
+  // ------------------------------------------------------- CHAMPS DÉPORTÉS
+  //
+  // MASQUE DE MER (flood fill + flou, sea-mask.js) et ANALYSE DU RELIEF (~10
+  // flous, terrain-analysis.js), calculés HORS DU FIL PRINCIPAL.
+  //
+  // Mesuré sur MNT réel 1536² : 387 ms d'analyse + 81 ms de masque. Ces ~470 ms
+  // ne raccourcissent pas en migrant dans un Worker — elles cessent de FIGER
+  // l'onglet. Ce n'est pas la durée totale qui gêne l'utilisateur, c'est le gel.
+  //
+  // ⚠️ CE QUE MONTRE LE RELIEF PENDANT L'ATTENTE : l'ÉTAT ANTÉRIEUR, intact.
+  // Rien n'est effacé au lancement — ni la texture, ni son uniforme `…On`.
+  // Effacer puis reposer ferait clignoter le peigné des crêtes et le trait de
+  // côte, et la carte doit rester calme. Au tout premier chargement il n'y a
+  // pas d'antérieur : ce sont les placeholders NEUTRES par construction qui
+  // tiennent (uAnalysisOn = 0, uSeaMaskOn = 0), c'est-à-dire exactement ce que
+  // montrait déjà l'application avant que le calcul ne se termine.
+  // Et le voile de chargement de main.js attend `fieldsReady` : sur le chemin
+  // visible (zoom, exagération, template) l'utilisateur ne voit jamais l'état
+  // intermédiaire. Il voit le voile, puis la carte finie — comme avant.
+  //
+  // ⚠️ PÉREMPTION : la clé ne porte QUE le MNT, la landMask et le plafond
+  // d'analyse — les trois seules entrées du calcul. Une invalidation plus large
+  // (un compteur bumpé à chaque rebuild) jetterait des résultats encore justes
+  // à chaque coup de curseur d'exagération. Voir jobStillValid.
+  _buildFields({ withAnalysis = true } = {}) {
     const dem = this.dem
-    if (!dem || !dem.data) {
+    // ⚠️ Un terrain abandonné ne recuit PLUS RIEN, jamais. Sans ce garde-fou,
+    // le masque côtier d'une dalle détruite — il arrive du réseau, bien après —
+    // rappelait _buildFields et RESSUSCITAIT la dalle : une DataTexture posée
+    // sur un mesh déjà disposé, que plus personne ne disposerait.
+    if (this._fieldsOff) return (this.fieldsReady = Promise.resolve(null))
+    if (!dem?.data) {
       this.mapUniforms.uSeaMaskOn.value = 0
-      return
+      this.mapUniforms.uAnalysisOn.value = 0
+      this._fieldKey = null
+      return (this.fieldsReady = Promise.resolve(null))
     }
-    // landMask depuis le masque côtier (si reçu) : rééchantillonné à la grille
-    // du DEM et mis en cache — recalculé seulement si l'image ou dem.size change
-    let landMask = null
-    if (this._coastImage) {
-      if (!this._coastLand || this._coastLand.img !== this._coastImage || this._coastLand.size !== dem.size)
-        this._coastLand = { img: this._coastImage, size: dem.size, mask: landMaskFromImage(this._coastImage, dem.size) }
-      landMask = this._coastLand.mask
-    }
-    const { mask, size } = blurMask(buildSeaMask(dem, { landMask }), 1)
+    const landMask = this._landMaskFor(dem)
+    // L'analyse ne dépend QUE des altitudes brutes : ni de l'exagération, ni de
+    // la résolution du maillage, ni de la palette. On la mémorise donc sur
+    // l'identité du DEM — sans ça, allumer le mode puis régénérer la recalcule
+    // deux fois de suite, et c'est la passe la plus chère du chargement.
+    const naturel = this.mapUniforms.uColorMode.value === 1
+    if (!naturel) this.mapUniforms.uAnalysisOn.value = 0
+    const analyse = withAnalysis && naturel && !(this._analysisFor === dem && this.mapUniforms.uAnalysisOn.value)
+    // analysisMax : une dalle VOISINE n'a pas le maillage qui justifierait une
+    // analyse à la taille du MNT (voir block-grid.js). Le shader lit ce champ en
+    // UV MONDE, la taille lui est donc indifférente.
+    const maxSize = this.analysisMax | 0
+    this._fieldKey = { dem, landMask, maxSize }
+    // ⚠️ DEUX CLÉS, PAS UNE — et c'est un bug vu à l'écran, pas une précaution.
+    // Le masque de mer dépend de la landMask ; l'analyse de relief n'en dépend
+    // PAS (elle ne lit que les altitudes). Sur une dalle voisine, le trait de
+    // côte arrive ~300 ms après le lancement, donc AVANT la fin de l'analyse :
+    // avec une clé commune, l'arrivée du trait de côte périmait une analyse
+    // parfaitement juste et la dalle restait sans peigné à côté d'un centre
+    // peigné. L'invalidation trop large coûte aussi cher que la trop laxiste.
+    const cleMer = { dem, landMask }
+    const cleAnalyse = { dem, maxSize }
+    return (this.fieldsReady = scheduleTerrainJob({
+      key: { dem }, // le MNT périme TOUT ; le reste se juge champ par champ
+      job: { data: dem.data, size: dem.size, metersPerPixel: dem.metersPerPixel, maxSize, landMask, withAnalysis: analyse },
+      current: () => this._fieldKey,
+      apply: (r, actuel) => {
+        if (jobStillValid(cleMer, actuel)) this._applySeaMask(r.sea, r.seaSize)
+        if (r.analysis && jobStillValid(cleAnalyse, actuel)) this._applyAnalysis(r.analysis, r.analysisSize, dem)
+      },
+    }))
+  }
+
+  /**
+   * Abandonne les champs en vol — appelé à la destruction d'une dalle du damier.
+   *
+   * ⚠️ DÉFINITIF, et c'est voulu : `jobStillValid` refuse une clé nulle, donc
+   * un résultat qui arrive après le dispose ne crée plus de DataTexture sur un
+   * terrain mort (fuite VRAM que personne ne disposerait). `_fieldsOff` ferme
+   * en plus la porte de derrière — le masque côtier revient du réseau bien
+   * après et rappelait `_buildFields`, ce qui relançait tout.
+   */
+  cancelFields() {
+    this._fieldKey = null
+    this._fieldsOff = true
+  }
+
+  // Le masque de mer, posé en texture (sea-mask.js). Échantillonné en XZ monde,
+  // même emprise que le masque de zone.
+  _applySeaMask(mask, size) {
     // one red channel; flipY off so texel row r ↔ world +z (matches the sampler)
     const tex = new THREE.DataTexture(mask, size, size, THREE.RedFormat)
     tex.flipY = false
@@ -1225,24 +1369,14 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   }
 
   // ANALYSE DU RELIEF (src/terrain-analysis.js) cuite dans une RGBA à la
-  // résolution du DEM — même mécanique que _buildSeaMask, même UV monde côté
+  // résolution du DEM — même mécanique que le masque de mer, même UV monde côté
   // shader. Ne tourne qu'en mode Naturel : c'est une passe de ~10 flous sur
   // 590 k pixels, inutile de la payer quand personne ne la lit.
-  _buildAnalysis() {
-    const dem = this.dem
-    if (!dem?.data || this.mapUniforms.uColorMode.value !== 1) {
-      this.mapUniforms.uAnalysisOn.value = 0
-      return
-    }
-    // L'analyse ne dépend QUE des altitudes brutes : ni de l'exagération, ni de
-    // la résolution du maillage, ni de la palette. On la mémorise donc sur
-    // l'identité du DEM — sans ça, allumer le mode puis régénérer la recalcule
-    // deux fois de suite, et c'est la passe la plus chère du chargement.
-    if (this._analysisFor === dem && this.mapUniforms.uAnalysisOn.value) return
-    // analysisMax : une dalle VOISINE n'a pas le maillage qui justifierait une
-    // analyse à la taille du MNT (voir block-grid.js). Le shader lit ce champ en
-    // UV MONDE, la taille lui est donc indifférente.
-    const { rgba, size } = analyzeDem(dem, { maxSize: this.analysisMax })
+  _applyAnalysis(rgba, size, dem) {
+    // ⚠️ La mémoïsation n'est marquée qu'ICI, à la POSE. La marquer au
+    // lancement ferait passer pour cuite une analyse qu'un zoom aurait périmée
+    // en vol, et le relief resterait sans peigné jusqu'au prochain changement
+    // de MNT.
     this._analysisFor = dem
     const tex = new THREE.DataTexture(rgba, size, size, THREE.RGBAFormat)
     tex.flipY = false // texel row r ↔ world +z, comme le sea mask
@@ -1276,7 +1410,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     this.rebuildRamp(params) // le LUT change d'amplitude en Y avec le mode
     // l'analyse coûte une dizaine de flous sur tout le DEM : on ne la refait
     // que quand elle manque, pas à chaque passage de restyle du damier
-    if (on) { if (changed || !this.mapUniforms.uAnalysisOn.value) this._buildAnalysis() }
+    if (on) { if (changed || !this.mapUniforms.uAnalysisOn.value) this._buildFields() }
     else this.mapUniforms.uAnalysisOn.value = 0
     // mapTint fait partie du préréglage Atlas (la rampe doit reprendre la main),
     // or applyColorParams ne le pousse pas : sans cette ligne il restait dans
