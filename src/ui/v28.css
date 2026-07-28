@@ -2929,6 +2929,22 @@ body.ce-noui .ce-rec {
    panels widen a touch, the bottom bar inputs reach 44px, and the hover
    tooltips — meaningless without a pointer to hover — are gone. */
 @media (pointer: coarse) {
+  /* Le canevas porte déjà `touch-action: none`, donc la carte est à l'abri du
+     zoom et du défilement du navigateur. Le CHROME, lui, était resté en `auto` :
+     un double-appui sur la barre du haut ou dans un panneau déclenchait le zoom
+     natif du navigateur, qui recadre toute la page et dont on ne ressort qu'en
+     dézoomant à la main. `manipulation` supprime ce double-appui-zoom SANS
+     interdire le défilement d'un panneau trop long — c'est exactement le
+     compromis qu'on veut ici. */
+  .ce-topbar,
+  .ce-dock,
+  .ce-bottombar,
+  .ce-panel,
+  .ce-pubmenu,
+  .ce-quickbar,
+  .ce-elembar {
+    touch-action: manipulation;
+  }
   .ce-panel {
     width: 292px !important; /* Panel() sets an inline width — override it */
   }
@@ -2982,12 +2998,16 @@ body.ce-noui .ce-rec {
   .ce-seg-btn {
     min-height: 30px;
   }
+  /* 44 px, pas 38 : c'est la cible minimale que visent Apple et Google, et
+     l'écart n'est pas cosmétique — mesuré sur tablette émulée, 26 boutons de
+     l'interface passaient sous ce seuil, dont Annuler et Rétablir qu'on vient
+     d'ajouter. En dessous, on rate le bouton voisin une fois sur trois. */
   .ce-icon-btn {
-    width: 38px;
-    height: 38px;
+    width: 44px;
+    height: 44px;
   }
   .ce-topbar .ce-pillbtn {
-    height: 38px;
+    height: 44px;
   }
   .ce-bottombar {
     padding: 7px;
