@@ -10,6 +10,7 @@
 
 import { el } from './kit.js'
 import { setUiAdvanced } from './bars.js'
+import { creerSas } from './hub-sas.js'
 
 // contextes où l'accueil ne doit JAMAIS apparaître : interface masquée,
 // vitrine embarquée, boutique, Race Studio, Studio, viewer d'une shibu reçue.
@@ -48,12 +49,50 @@ export function buildHub({ bar, bottomBar, onExplore }) {
 
   const isOpen = () => document.body.classList.contains('ce-hub')
 
-  function show() {
+  // LA PLACE DU CENTRE EST PARTAGÉE avec la carte de chargement (#loading, posée
+  // en dur dans index.html). Les deux visent le milieu de la fenêtre, et leurs
+  // horloges n'ont rien en commun : l'accueil monte 900 ms après main.js, la
+  // carte s'efface quand le relief est prêt. Sur une machine lente le second
+  // délai double, et le visiteur reçoit les DEUX en même temps — deux
+  // « ShibuMap », deux sous-titres, du texte fantôme derrière les trois portes.
+  // C'est le tout premier écran du site ; le sas fait attendre l'accueil.
+  // (La règle vit dans hub-sas.js, pure et testée ; ici, juste le câblage.)
+  //
+  // Le loader est cherché DANS LE DOM plutôt que passé en paramètre : il est
+  // inline dans index.html, il existe avant tout module, et main.js n'a rien à
+  // savoir de cette entente — c'est aussi ce que fait ui/loading-hints.js.
+  const chargement = document.getElementById('loading')
+  const chargementVisible = () => !!chargement && !chargement.classList.contains('hidden')
+
+  const sas = creerSas({ montrer: lever, occupe: chargementVisible() })
+
+  // ⚠️ on écoute la CLASSE, jamais `transitionend` : dans un onglet non
+  // composité le navigateur gèle les transitions et l'événement n'arrive
+  // jamais — l'accueil ne monterait plus du tout. Même motif que le fondu des
+  // phrases de chargement, et même raison.
+  if (chargement) {
+    new MutationObserver(() => (chargementVisible() ? sas.occuper() : sas.liberer()))
+      .observe(chargement, { attributes: true, attributeFilter: ['class'] })
+  }
+
+  // la montée elle-même — appelée par le sas, jamais directement. Les gardes
+  // sont ici et pas dans show() : entre la demande et la montée, il peut s'être
+  // écoulé plusieurs secondes, et la boutique ou le Studio ont pu s'ouvrir.
+  function lever() {
     if (blocked() || isOpen()) return
     if (input) input.placeholder = askPlaceholder
     bar.setHome(true)
   }
+
+  function show() {
+    if (blocked() || isOpen()) return
+    sas.demander()
+  }
   function hide() {
+    // même si l'accueil n'est pas encore monté : une demande en attente le
+    // ferait surgir plus tard, par-dessus l'espace que le visiteur vient
+    // d'ouvrir.
+    sas.annuler()
     if (!isOpen()) return
     if (input) input.placeholder = barPlaceholder
     bar.setHome(false)
