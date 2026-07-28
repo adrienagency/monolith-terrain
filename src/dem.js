@@ -8,7 +8,7 @@
 // Attribution : « © Mapterhorn » + https://mapterhorn.com/attribution dès que
 // la source active est Mapterhorn (crédits ET exports).
 
-import { fuseBathymetry, decodeTerrarium, overzoomTile, smoothSeaFloor } from './bathy.js'
+import { fuseBathymetry, decodeTerrarium, overzoomTile, resampleCatmullRom } from './bathy.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -39,11 +39,33 @@ const BATHY_ZMAX = 8
 // construction — 0 % à z4, 50 % à z5, 21 % à z8 — parce que le pré-tri de la
 // cuisson saute les tuiles « sans intérêt ». C'est le REPLI qui manquait, pas
 // les tuiles.
-const BATHY_ZMIN = 4
+//
+// 🔴 POURQUOI 7 ET PLUS 4. Un repli trop profond ÉCRASE DE LA DONNÉE MEILLEURE
+// QUE LUI. `fuseBathymetry` fait qu'au-delà de 25 m de fond la sortie vaut
+// EXACTEMENT la source fine (le fondu sature, `out = s`) : un ancêtre grossier
+// remplace donc purement et simplement le terrarium. Or les tuiles terrarium
+// d'AWS portent de l'ETOPO1 à 1 852 m, tandis que nos niveaux de repli valent,
+// à 35,5°N : z7 = 996 m, z6 = 1 992 m, z5 = 3 984 m, z4 = 7 968 m.
+//
+// Recensement mondial (rapport du 2026-07-28) : 13 891 tuiles z8 présentes,
+// 8 946 coutures avec une voisine absente, dont 2 758 retombent à z6 ou pire —
+// et sur 796 d'entre elles le repli à z4/z5 DÉGRADE ACTIVEMENT l'ETOPO1 déjà là.
+// On abîmait la carte au nom de l'améliorer.
+//
+// z7 (996 m) reste deux fois meilleur qu'ETOPO1 : c'est le dernier niveau qui
+// mérite encore d'écraser le socle. En dessous, ne rien peindre est le bon
+// choix — le pixel garde le terrarium, qui est plus fin.
+//
+// ⚠️ CE PLANCHER NE VAUT QUE POUR LE SURZOOM. `modes.js` charge des blocs
+// CONTINENTAUX à z4 et z5 : là, une tuile bathy z4 est la résolution NATIVE de
+// l'affichage, pas un repli dégradé, et l'interdire supprimerait la
+// bathymétrie de toutes les vues d'ensemble. Le plancher effectif est donc
+// `min(BATHY_ZMIN, zoom)` : on ne descend jamais SOUS le zoom demandé.
+const BATHY_ZMIN = 7
 // ⚠️ NOS tuiles bathy font 256 px, quelle que soit la taille des tuiles
-// d'altitude. Le rectangle SOURCE du drawImage se mesure donc en pixels de
-// tuile bathy, le rectangle DESTINATION en pixels de tuile d'altitude — les
-// confondre, depuis le passage au 512, ne lisait plus qu'un quart de la tuile.
+// d'altitude. La sous-fenêtre SOURCE se mesure donc en pixels de tuile bathy,
+// le rectangle DESTINATION en pixels de tuile d'altitude — les confondre,
+// depuis le passage au 512, ne lisait plus qu'un quart de la tuile.
 const BATHY_TILE_PX = 256
 // une tuile manquante est le cas NORMAL (on n'écrit pas les tuiles sans mer) :
 // on mémorise les absences pour ne pas les redemander à chaque déplacement
@@ -88,10 +110,31 @@ function enUnSeulExemplaire(url, charger) {
   return p
 }
 
-// LRU des tuiles bathy TROUVÉES. 32 entrées de 256²·4 o = 8 Mo au pire absolu ;
+// LRU des GRILLES bathy décodées. 32 entrées de 256²·4 o = 8 Mo au pire absolu ;
 // en pratique un damier n'en touche qu'une poignée.
+//
+// ⚠️ ON MÉMORISE LA GRILLE EN MÈTRES, PLUS L'IMAGE. C'est le pivot du correctif
+// « fond marin lisse » : tant qu'on gardait un ImageBitmap, le seul moyen de
+// l'agrandir était `drawImage`, donc du BILINÉAIRE — dont la pente casse à
+// chaque bord de cellule et dessine la grille de carrés de 464 m. Une fois la
+// tuile décodée en Float32, l'agrandissement devient de l'arithmétique, et on
+// peut la faire en Catmull-Rom (src/bathy.js). Bonus : les 9 cases d'un damier
+// qui partagent le même ancêtre ne le décodent plus qu'UNE fois.
 const BATHY_MEMO_MAX = 32
-const bathyHits = new Map() // url → Promise<ImageBitmap>
+const bathyHits = new Map() // url → Promise<{w, h, m: Float32Array}>
+
+// Décode une tuile bathy À SA RÉSOLUTION NATIVE, sans la moindre mise à
+// l'échelle : le drawImage est ici strictement 1:1, il n'interpole rien.
+function grilleBathy(img) {
+  const w = img.width || BATHY_TILE_PX
+  const h = img.height || BATHY_TILE_PX
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  ctx.drawImage(img, 0, 0)
+  return { w, h, m: decodeTerrarium(ctx.getImageData(0, 0, w, h).data) }
+}
 
 function loadBathyTile(url) {
   const memo = bathyHits.get(url)
@@ -103,7 +146,7 @@ function loadBathyTile(url) {
   const p = (async () => {
     const r = await fetch(url)
     if (!r.ok) throw new Error('miss')
-    return createImageBitmap(await r.blob())
+    return grilleBathy(await createImageBitmap(await r.blob()))
   })()
   bathyHits.set(url, p)
   // une absence n'a rien à faire ici : c'est bathyMisses qui la retient
@@ -296,20 +339,35 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
   // La fusion ne peut que CREUSER la mer : la terre et le trait de côte
   // restent ceux du terrarium (voir src/bathy.js, et la session polders).
   const fused = seaData ? fuseBathymetry(data, seaData) : data
-  // LISSAGE DU FOND, À L'ÉCHELLE DES FACETTES DU SURZOOM (retour Adrien :
-  // « l'effet creusement par cube »). Nos tuiles bathy s'arrêtent à z8 — la
-  // résolution native de GEBCO, il n'y a rien de plus fin à avoir. Au-delà, une
-  // dalle est reconstruite depuis une poignée de pixels de l'ancêtre, et
-  // l'agrandissement en fait de grandes facettes plates à arêtes franches.
+  // ⚠️ PLUS DE `smoothSeaFloor` ICI, ET C'EST UN CHOIX MESURÉ, PAS UN OUBLI.
   //
-  // Le rayon suit donc la taille de CETTE facette, pas une constante : une
-  // facette fait `2^(zoom−8)` pixels de source, chacun étalé sur `TILE_PX/256`
-  // pixels de sortie. Lisser à la moitié de sa taille efface l'artefact sans
-  // toucher à de l'information réelle — sous 463 m au sol, il n'y en a plus.
-  if (seaData) {
-    const facette = 2 ** Math.max(0, zoom - BATHY_ZMAX) * (TILE_PX / 256)
-    smoothSeaFloor(fused, sizePx, { radius: Math.min(24, Math.round(facette / 2)) })
-  }
+  // Ce flou existait pour cacher les facettes de l'agrandissement BILINÉAIRE
+  // (« l'effet creusement par cube » signalé par Adrien). Il traitait le
+  // symptôme en aval ; le Catmull-Rom traite la cause en amont. Mesuré sur une
+  // dalle z12 de la baie de Tokyo, en CASSURE D'INCLINAISON entre facettes
+  // voisines — c'est exactement ce que `computeVertexNormals` révèle à l'œil :
+  //
+  //                                   baie 0-40 m      large > 200 m
+  //   bilinéaire seul                  max 4,66°         max 31,71°
+  //   bilinéaire + lissage             max 3,22°         max  2,13°
+  //   Catmull-Rom seul                 max 0,82°         max  4,43°
+  //   Catmull-Rom + lissage            max 0,69°         max  2,43°
+  //
+  // Trois raisons de le retirer :
+  //  · DANS LA BAIE, IL NE SERVAIT DÉJÀ PRESQUE À RIEN — il s'atténue sous 40 m
+  //    de fond pour ne pas bouger le rivage, or 91 % de la baie de Tokyo fait
+  //    moins de 40 m (force moyenne du lissage : 47 %, et 4 % sur la tranche
+  //    0-10 m). Le Catmull-Rom seul y fait déjà 4× mieux que le lissage.
+  //  · AU LARGE, il rendait un chiffre flatteur en floutant du RELIEF RÉEL : les
+  //    4,43° du Catmull-Rom sont une courbure douce et distribuée, pas une arête
+  //    sur une ligne de grille (le saut de pente aux bords de cellule tombe de
+  //    3,825 à 0,006 m/cellule).
+  //  · IL COÛTAIT 84 ms PAR BLOC (1536², rayon 16), contre 14 ms pour tout
+  //    l'agrandissement Catmull-Rom. Sur un damier de 25 blocs, 2 s de fil
+  //    principal rendues à la carte.
+  //
+  // `smoothSeaFloor` reste exporté et testé : le jour où une source côtière
+  // fine arrivera avec ses propres coutures, il sera là.
   if (fused !== data) {
     minM = Infinity; maxM = -Infinity; sum = 0
     for (let i = 0; i < fused.length; i++) {
@@ -407,13 +465,20 @@ function slotIsBlank(rgba, sizePx, ox, oy, tilePx) {
   return true
 }
 
-// Peint le damier de tuiles BATHYMÉTRIQUES dans un canevas et le décode.
+// Assemble le damier de tuiles BATHYMÉTRIQUES, en mètres, case par case.
 // Rend `null` dès que rien d'utile n'a été trouvé — l'appelant continue alors
 // avec le seul terrarium, sans le savoir.
+//
+// ⚠️ PLUS AUCUN CANEVAS À LA TAILLE DU BLOC, ET PLUS AUCUN `drawImage`
+// AGRANDISSANT. C'est LE correctif : agrandir une tuile z8 par drawImage se
+// faisait en bilinéaire, dont la pente casse à chaque bord de cellule — mesuré
+// 3,825 m/cellule dans la baie de Tokyo, soit 0,67° de cassure d'inclinaison à
+// l'exagération 2,8, que `computeVertexNormals` révèle en grille de carrés de
+// 464 m. En Catmull-Rom : 0,006 m/cellule, 615 fois moins (src/bathy.js).
 async function loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx }) {
-  const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = sizePx
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  // NaN = case non peinte, que `fuseBathymetry` ignore comme n'importe quelle
+  // valeur non finie (c'est ce que faisait l'alpha nul du canevas d'avant)
+  const patch = new Float32Array(sizePx * sizePx).fill(NaN)
   let painted = 0
   const jobs = []
   for (let dy = -half; dy <= half; dy++) {
@@ -428,7 +493,8 @@ async function loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx }) {
       // donné, mais elle ne doit plus laisser la case à plat.
       jobs.push(
         (async () => {
-          for (let zt = Math.min(zoom, BATHY_ZMAX); zt >= BATHY_ZMIN; zt--) {
+          const plancher = Math.min(BATHY_ZMIN, zoom)
+          for (let zt = Math.min(zoom, BATHY_ZMAX); zt >= plancher; zt--) {
             const t = overzoomTile(zoom, tx, ty, zt)
             const url = BATHY_URL(t.z, t.x, t.y)
             if (bathyMisses.has(url)) continue
@@ -436,12 +502,19 @@ async function loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx }) {
               // TROUVÉE ⇒ MÉMORISÉE. Les 9 cases de ce damier lisent le même
               // ancêtre z8, et les 25 dalles du damier de blocs aussi : sans
               // cette mémoire, une seule tuile partait 2 070 fois.
-              const img = await loadBathyTile(url)
-              // surzoom : on n'agrandit qu'une SOUS-FENÊTRE de l'ancêtre — la
-              // sous-fenêtre se mesure sur la tuile BATHY (256 px), la case de
-              // destination sur la tuile d'altitude (256 ou 512 px)
-              const s = BATHY_TILE_PX / t.scale
-              ctx.drawImage(img, t.ox * BATHY_TILE_PX, t.oy * BATHY_TILE_PX, s, s, ox, oy, tilePx, tilePx)
+              const g = await loadBathyTile(url)
+              // surzoom : on n'agrandit qu'une SOUS-FENÊTRE de l'ancêtre — elle
+              // se mesure sur la tuile BATHY (256 px), la case de destination
+              // sur la tuile d'altitude (256 ou 512 px).
+              //
+              // La sous-fenêtre borne ce qu'on AGRANDIT, pas ce qu'on LIT : les
+              // voisins hors fenêtre restent de la vraie donnée, donc deux cases
+              // servies par le même ancêtre se raccordent sans couture.
+              resampleCatmullRom({
+                src: g.m, srcW: g.w, srcH: g.h,
+                sx: t.ox * g.w, sy: t.oy * g.h, sw: g.w / t.scale, sh: g.h / t.scale,
+                dst: patch, dstStride: sizePx, dx: ox, dy: oy, dw: tilePx, dh: tilePx,
+              })
               painted++
               return
             } catch {
@@ -453,6 +526,5 @@ async function loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx }) {
     }
   }
   await Promise.all(jobs)
-  if (!painted) return null
-  return decodeTerrarium(ctx.getImageData(0, 0, sizePx, sizePx).data)
+  return painted ? patch : null
 }
