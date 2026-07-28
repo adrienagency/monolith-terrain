@@ -49,6 +49,28 @@ export function restoreState({ renderer, composer, camera }, saved) {
 // clair comme sur un fond sombre.
 export const EXPORT_CREDIT = '© Adrien Agency · © OpenStreetMap contributors · © Mapterhorn · GEBCO_2026'
 
+// ⚠️ LA BATHYMÉTRIE FINE N'EST PAS DANS LA LIGNE CI-DESSUS, ET C'EST DÉLIBÉRÉ.
+// Depuis le 2026-07-28, une zone peut être creusée par une source régionale
+// (EMODnet sur la France, plus tard BlueTopo ou Copernicus) dont l'attribution
+// est OBLIGATOIRE et dont la formulation est IMPOSÉE MOT POUR MOT par la
+// licence — « This data product was created by EMODnet… » ne se paraphrase pas.
+//
+// Or elle dépend de l'emprise : citer EMODnet sur une carte du Japon serait
+// faux, et l'omettre sur une carte de Brest serait une violation. La liste
+// exacte se calcule donc à l'export, par `creditsForBounds(index, bounds)`
+// (src/bathy-sources.js), qui rend aussi la mention « not to be used for
+// navigation » exigée par les quatre sources.
+//
+// 🔴 TANT QUE `creditFor()` N'EST PAS APPELÉ À L'EXPORT, ne cuire aucune tuile
+// d'une source à attribution imposée pour une zone que le public peut exporter.
+// La France EMODnet est livrée AVEC ce câblage, jamais avant.
+export function creditFor(bathyIndex, bounds, creditsForBounds) {
+  const sup = creditsForBounds(bathyIndex, bounds) || []
+  // GEBCO est déjà nommé dans la ligne de base : on ne le répète pas.
+  const neufs = sup.filter((c) => !EXPORT_CREDIT.includes('GEBCO') || !c.startsWith('GEBCO'))
+  return [EXPORT_CREDIT, ...neufs].join(' · ')
+}
+
 async function stampCredit(blob, width, height, format, quality, text) {
   const bmp = await createImageBitmap(blob)
   const c = document.createElement('canvas')

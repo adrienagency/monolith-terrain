@@ -21,7 +21,11 @@ import {
 import { Terrain } from './terrain.js'
 import { createLabels, disposeLabels } from './labels.js'
 import { createHud3D, findPois } from './hud3d.js'
-import { loadDem, getDemMaxZoom } from './dem.js'
+import { loadDem, getDemMaxZoom, bathySourceIndex } from './dem.js'
+// L'attribution des sources bathymétriques fines est une OBLIGATION DE
+// LICENCE, et elle dépend de l'emprise exportée — voir export.js.
+import { creditFor } from './export.js'
+import { creditsForBounds } from './bathy-sources.js'
 import { warmupPrograms } from './warmup.js'
 import { activeDemSource, isFallbackActive } from './dem-source.js'
 import { Globe } from './globe.js'
@@ -4277,6 +4281,18 @@ async function openExportUI() {
     composer,
     camera,
     recorder,
+    // LA LIGNE DE CRÉDITS DE CET EXPORT-CI. Elle dépend de l'emprise, parce que
+    // les sources bathymétriques fines imposent leur attribution mot pour mot
+    // là où elles ont creusé, et nulle part ailleurs. Voir export.js.
+    creditLine: () => {
+      try {
+        // blockBounds, jamais patchBounds : c'est l'emprise VRAIE du bloc
+        // exporté (voir son commentaire dans map/aerial-layer.js).
+        return creditFor(bathySourceIndex(), blockBounds(terrain.dem), creditsForBounds)
+      } catch {
+        return null // jamais bloquer un export sur un crédit : export.js a sa ligne de repli
+      }
+    },
     pauseLoop: () => {
       loopPaused = true
       // kill the already-scheduled frame too, or a synchronous export

@@ -9,6 +9,7 @@
 // la source active est Mapterhorn (crédits ET exports).
 
 import { fuseBathymetry, decodeTerrarium, overzoomTile, resampleCatmullRom } from './bathy.js'
+import { normalizeIndex, tileMaxZoom } from './bathy-sources.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -23,11 +24,39 @@ import {
 export { demTilePx }
 
 // BATHYMÉTRIE FINE — nos propres tuiles, au MÊME encodage terrarium, servies
-// depuis le site. Le jeu s'arrête à BATHY_ZMAX : au-delà, on relit l'ancêtre
-// (voir overzoomTile). Absent ⇒ tout continue exactement comme avant, ce qui
-// permet de déployer le code avant les données.
+// depuis le site. Le jeu s'arrête au plafond de la zone (voir juste en dessous) :
+// au-delà, on relit l'ancêtre (voir overzoomTile). Absent ⇒ tout continue
+// exactement comme avant, ce qui permet de déployer le code avant les données.
 const BATHY_URL = (z, x, y) => `data/bathy/${z}/${x}/${y}.png`
-const BATHY_ZMAX = 8
+
+// PLAFOND PAR ZONE — depuis le 2026-07-28, le jeu ne s'arrête plus au même
+// niveau partout. Là où une source régionale plus fine que GEBCO a été cuite
+// (EMODnet à 115 m sur la France, pour commencer), on peut descendre plus bas ;
+// ailleurs on reste à z8, qui est la résolution native de GEBCO.
+//
+// La règle d'Adrien, mot pour mot : « à chaque fois qu'on a une map mieux
+// définie, on l'utilise, à défaut on laisse la map GEBCO en soutien ».
+//
+// ⚠️ L'INDEX EST FACULTATIF, et c'est la propriété qui compte : absent, illisible
+// ou 404, `normalizeIndex(null)` rend z8 partout — exactement le comportement
+// d'avant. On peut donc déployer ce code sans les données, et les données sans
+// redéployer le code. La promesse est mémorisée : un seul aller-retour réseau
+// pour toute la session, et un échec ne se retente pas en boucle.
+let _bathyIndex = null
+// L'index déjà résolu, ou null s'il n'est pas encore arrivé. Sert à l'export,
+// qui doit nommer les sources ayant creusé l'emprise et ne peut pas attendre.
+let _bathyIndexResolu = null
+export const bathySourceIndex = () => _bathyIndexResolu
+const bathyIndex = () => {
+  if (!_bathyIndex) {
+    _bathyIndex = fetch('data/bathy/index.json')
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null)
+      .then(normalizeIndex)
+      .then((idx) => { _bathyIndexResolu = idx; return idx })
+  }
+  return _bathyIndex
+}
 // PLANCHER DU JEU — le niveau le plus grossier, cuit INTÉGRALEMENT (256 tuiles
 // pour le monde entier). C'est lui qui garantit qu'une tuile fine manquante
 // trouve toujours un ancêtre à lire.
@@ -481,6 +510,9 @@ async function loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx }) {
   const patch = new Float32Array(sizePx * sizePx).fill(NaN)
   let painted = 0
   const jobs = []
+  // Un seul aller-retour pour tout le damier : l'index est mémorisé, et les 25
+  // dalles du damier de blocs attendent la MÊME promesse.
+  const index = await bathyIndex()
   for (let dy = -half; dy <= half; dy++) {
     for (let dx = -half; dx <= half; dx++) {
       const tx = (cx + dx + n) % n
@@ -494,7 +526,10 @@ async function loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx }) {
       jobs.push(
         (async () => {
           const plancher = Math.min(BATHY_ZMIN, zoom)
-          for (let zt = Math.min(zoom, BATHY_ZMAX); zt >= plancher; zt--) {
+          // Le plafond se lit AU CENTRE DE CETTE TUILE, pas au centre du bloc :
+          // un bloc peut chevaucher la limite d'une source fine, et chaque case
+          // du damier doit alors chercher au niveau qui la concerne.
+          for (let zt = Math.min(zoom, tileMaxZoom(index, zoom, tx, ty)); zt >= plancher; zt--) {
             const t = overzoomTile(zoom, tx, ty, zt)
             const url = BATHY_URL(t.z, t.x, t.y)
             if (bathyMisses.has(url)) continue
