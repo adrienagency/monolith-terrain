@@ -10,7 +10,7 @@
 // dessous, et la mécanique (azimut/élévation/intensités) reléguée en bas.
 // Meta parlante repliée : « Heure dorée · 17h30 » + pastille couleur du soleil.
 
-import { slider, section, el, onRefresh, refreshAll } from './kit.js'
+import { slider, section, el, color, onRefresh, refreshAll } from './kit.js'
 import { lightingFor, sunPosition, solarHourToDate } from '../daycycle.js'
 
 // heure formatée façon tirette (17h30, 19h) — pas de zéro de tête ni de
@@ -60,6 +60,16 @@ export function lightSection(ctx) {
     ctx.applyTimeOfDay(h)
     ctx.syncHour?.()
   }
+  // Les trois intensités sont des GAINS, pas des valeurs absolues : elles
+  // multiplient la lumière que le cycle calcule pour l'heure et le lieu, au
+  // lieu de la remplacer. On repasse donc par applyTimeOfDay (et pas par
+  // placeSun) — c'est lui qui recompose heure × gain. Avant, ces curseurs
+  // écrivaient dans params.sunIntensity/hemiIntensity/envLight, les mêmes clés
+  // qu'applyTimeOfDay réécrit : le réglage sautait au déplacement suivant.
+  const setGain = (key, v) => {
+    params[key] = v
+    ctx.applyTimeOfDay(params.timeOfDay ?? 10)
+  }
 
   // ---- le star : chips d'ambiance + curseur d'heure fin ----
   const chipRow = el('div', 'ce-chiprow')
@@ -87,17 +97,25 @@ export function lightSection(ctx) {
   s.body.append(
     chipRow,
     slider({ label: 'Heure', min: 0, max: 24, step: 0.1, get: () => params.timeOfDay ?? 10, set: (v) => setHour(v) }),
-    el('div', 'ce-note', 'L’heure place le vrai soleil du lieu — les réglages fins reprennent la main.'),
+    el('div', 'ce-note', 'L’heure place le vrai soleil du lieu ; les réglages ci-dessous s’appliquent par-dessus et ne se perdent plus quand tu déplaces la carte.'),
 
     // ---- la mécanique, au fond : soleil manuel puis ambiance ----
     el('div', 'ce-fx-head', 'Soleil manuel'),
     slider({ label: 'Azimut', min: 0, max: 360, step: 1, get: () => params.sunAzimuth, set: (v) => { params.sunAzimuth = v; ctx.placeSun() } }),
     slider({ label: 'Élévation', min: 2, max: 90, step: 1, get: () => params.sunElevation, set: (v) => { params.sunElevation = v; ctx.placeSun() } }),
-    slider({ label: 'Intensité du soleil', min: 0, max: 10, step: 0.1, get: () => params.sunIntensity, set: (v) => { params.sunIntensity = v; ctx.placeSun() } }),
+    slider({ label: 'Intensité du soleil', min: 0, max: 3, step: 0.02, get: () => params.sunGain ?? 1, set: (v) => setGain('sunGain', v) }),
     el('div', 'ce-fx-head', 'Ambiance'),
-    slider({ label: 'Lumière ambiante', min: 0, max: 2, step: 0.02, get: () => params.hemiIntensity, set: (v) => { params.hemiIntensity = v; ctx.placeSun() } }),
-    slider({ label: 'Éclairage d’environnement', min: 0, max: 1.5, step: 0.02, get: () => params.envLight, set: (v) => { params.envLight = v; ctx.setEnvLight(v) } }),
-    slider({ label: 'Douceur des ombres', min: 0, max: 20, step: 0.5, get: () => params.shadowSoftness, set: (v) => { params.shadowSoftness = v; ctx.setShadowSoftness(v) } })
+    slider({ label: 'Lumière ambiante', min: 0, max: 3, step: 0.02, get: () => params.hemiGain ?? 1, set: (v) => setGain('hemiGain', v) }),
+    slider({ label: 'Éclairage d’environnement', min: 0, max: 3, step: 0.02, get: () => params.envGain ?? 1, set: (v) => setGain('envGain', v) }),
+    slider({ label: 'Douceur des ombres', min: 0, max: 20, step: 0.5, get: () => params.shadowSoftness, set: (v) => { params.shadowSoftness = v; ctx.setShadowSoftness(v) } }),
+
+    // ---- l'appoint : la lumière que l'heure ne pilote pas ----
+    el('div', 'ce-fx-head', 'Appoint'),
+    el('div', 'ce-note', 'Une seconde lumière, sans ombre, pour rouvrir un flanc bouché. Sa direction est relative au soleil : elle le suit sans jamais être écrasée.'),
+    slider({ label: 'Intensité', min: 0, max: 3, step: 0.02, get: () => params.fillIntensity ?? 0, set: (v) => { params.fillIntensity = v; ctx.placeSun() } }),
+    slider({ label: 'Écart au soleil', min: 0, max: 360, step: 1, get: () => params.fillAzimuthOffset ?? 150, set: (v) => { params.fillAzimuthOffset = v; ctx.placeSun() } }),
+    slider({ label: 'Hauteur', min: -10, max: 90, step: 1, get: () => params.fillElevation ?? 20, set: (v) => { params.fillElevation = v; ctx.placeSun() } }),
+    color({ label: 'Couleur', get: () => params.fillColor ?? '#ffcf9a', set: (v) => { params.fillColor = v; ctx.placeSun() } })
   )
 
   // meta parlante : le moment (chip active, sinon Jour/Crépuscule/Nuit) +
