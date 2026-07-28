@@ -346,14 +346,14 @@ export class WaterLayer {
       lakeParts = await this._neParts('lakes', bounds, zoom)
     }
 
-    // Coastline OUTLINE — off by default (params.coastLine). It comes from the
-    // same Natural Earth 1:10m source whose coarseness got the NE lakes layer
-    // replaced: drawn over a coast, its straight chords visibly cut corners the
-    // terrain and bathymetry underneath already render correctly, so the map
-    // reads better with no outline at all than with a wrong one. Kept behind
-    // the flag rather than deleted — the rings are still fetched only when it's
-    // on, so leaving it off costs nothing.
-    const coastRings = params.coastLine ? await this._neRings('coastline', bounds, zoom) : []
+    // Le liseré de côte a été RETIRÉ du site (Adrien). Il venait de la même
+    // source Natural Earth 1:10m dont la grossièreté avait déjà fait remplacer
+    // la couche des lacs : sur une côte, ses cordes droites coupaient
+    // visiblement les caps que le relief et la bathymétrie rendent
+    // correctement juste en dessous. La carte se lit mieux nue que mal
+    // soulignée — d'où la suppression plutôt qu'un drapeau de plus.
+    // ⚠️ AUCUN rapport avec le masque terre-mer (coast-mask.js / uCoastMask) :
+    // celui-là ne passe pas par cette couche, et il reste indispensable.
     if (id !== this._buildId || dem !== terrain.dem) return
     // Overture's base/water theme is derived from OSM (ODbL) same as the
     // Overpass paths, so rendering tile-sourced water — Alps rich-water tiles
@@ -390,7 +390,6 @@ export class WaterLayer {
       ...[...riverBuckets.entries()].map(([widthPx, rings]) => ({ runs: clipAll(rings), widthPx, color: ink, order: 18 })),
       // lake outline: on top of everything, vivid blue — matches the lake fill below
       { runs: clipAll(lakeLines), widthPx: 1.4, color: lakeInk, order: LAKE_RENDER_ORDER },
-      { runs: clipAll(coastRings), widthPx: 1.2, color: ink, order: 18 },
     ]
     for (const g of groups) {
       if (!g.runs.length) continue

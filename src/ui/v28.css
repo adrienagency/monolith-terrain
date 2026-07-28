@@ -2598,7 +2598,12 @@ body.studio-mode .ce-eye,
 body.atelier-mode .ce-eye,
 body.store-mode .ce-hourpill,
 body.studio-mode .ce-hourpill,
-body.atelier-mode .ce-hourpill,
+/* ⑥ PLUS de body.atelier-mode pour .ce-hourpill : la tirette de l'heure REVIENT
+   pendant l'habillage (Adrien). L'heure fait partie de l'habillage — c'est elle
+   qui décide de la lumière sous laquelle on juge une palette, la masquer
+   revenait à faire choisir des couleurs à midi fixe. Elle est recentrée sur le
+   cadre de la carte dans atelier.css. Le zoom-stepper ci-dessous reste masqué,
+   lui : le zoom est justement verrouillé le temps de l'habillage. */
 body.store-mode .zoom-stepper,
 body.studio-mode .zoom-stepper,
 body.atelier-mode .zoom-stepper,

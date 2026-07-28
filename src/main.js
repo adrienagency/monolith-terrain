@@ -31,7 +31,7 @@ import { GpxLayerManager } from './gpx-layers.js'
 import { buildRaceLabels } from './race-labels.js'
 import { snapToKm, ascentStats, parseRace } from './race-model.js'
 import { SPORTS, DEFAULT_SPORT, sanitizeSvgMarkup, isValidIconDataUrl, rasterizeToCanvas } from './ui/sport-icons.js'
-import { worldToLatLon, latLonToWorld } from './geo.js'
+import { worldToLatLon, latLonToWorld, parseLatLon } from './geo.js'
 import { fetchTransports } from './transports.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
@@ -416,6 +416,10 @@ const params = {
   waterReal: false,
   waterTransparency: 0.4, // 0 = milky veil, 1 = crystal — above and below the surface
   waterSunFx: 1, // sun on the water: glint above + caustic rays below (0..2)
+  // La mer se débraye entièrement (Adrien, Studio → Météo). ALLUMÉE par défaut :
+  // c'est l'état de toutes les cartes d'avant l'interrupteur, et une clé
+  // absente doit continuer de vouloir dire « mer ». Voir setSeaEnabled().
+  seaEnabled: true,
   seaWaveH: 0.8, // wave height, in spectrum metres — visible resting sea (cool > realistic)
   seaChop: 0.7, // crest sharpening 0..1 — breaking whitecaps appear past ~0.6
   seaSpeed: 1, // time multiplier over the deep-water dispersion
@@ -433,11 +437,15 @@ const params = {
   waterEnabled: true, // lakes on by default — the world lake layer is cheap (fetch-on-view)
   waterOpacity: 0.9,
   waterFill: true,
-  // Coastline outline — OFF. Natural Earth 1:10m is too coarse to trace a real
-  // coast: its straight chords cut corners the terrain + bathymetry underneath
-  // already draw correctly, so the map reads better bare than outlined. Kept as
-  // an option rather than removed. See water-layer.js's coastRings.
-  coastLine: false,
+  // PLUS de coastLine. Le liseré Natural Earth 1:10m a été RETIRÉ du site
+  // (Adrien) : gardé « en option » depuis des mois, il n'a jamais tracé une
+  // vraie côte — ses cordes droites coupaient les caps que le relief et la
+  // bathymétrie dessinaient déjà juste en dessous. Une option qui ment n'est
+  // pas une option.
+  // ⚠️ Le MASQUE terre-mer (coast-mask.js, uCoastMask, coastImage) n'a AUCUN
+  // rapport et reste en place : c'est lui qui tient les polders sous le niveau
+  // zéro et qui sert à la découpe de zone. Ne pas confondre non plus avec
+  // aerialCoastFade, qui appartient à la photo aérienne.
   // Aerial photo skin — OFF. First narrow test: IGN orthophotos, Annecy only.
   // The product's identity is the quiet editorial relief; photography is a tool
   // the organiser reaches for, never the default look. See map/aerial-layer.js.
@@ -1519,6 +1527,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 
 let dem = null
 let demBusy = false
+
 // patch key → Promise<{maskTexture}|null>. Memoises the in-flight fetch (dedupes
 // A→B→A within one fetch) and is LRU-bounded (Map keeps insertion order; a hit
 // re-inserts to mark it most-recently-used). Evicted masks are disposed unless
@@ -1827,7 +1836,7 @@ modes = new Modes({
       if (regionSkirt) regionSkirt.mesh.visible = v
       groundInfo.setVisible(v && params.groundInfo)
       traffic.setVisible(v)
-      realWater?.setVisible(v)
+      realWater?.setVisible(v && params.seaEnabled !== false) // cf. setSeaEnabled
       mapLayers.setSurfaceVisible(v)
       isoBtn?.setVisible(v) // the isometric shortcut only makes sense over the block
       cineBtn?.setVisible(v)
@@ -2057,7 +2066,6 @@ const DEFAULT_MAPLAYERS = Object.freeze({
   waterEnabled: params.waterEnabled,
   waterOpacity: params.waterOpacity,
   waterFill: params.waterFill,
-  coastLine: false, // stays off through a Reset map — see the param's own note
   placesEnabled: params.placesEnabled,
   placesDensity: params.placesDensity,
   placesSize: params.placesSize,
@@ -2370,6 +2378,7 @@ function applyUserTemplate(tmpl) {
   shadersRefreshFn() // rebuild the relief-material sub-controls (Scale/Bump/Roughness/Noise) for the applied look
   bgRefreshFn() // resync the Background HDRI-sky highlight to the applied look
   refreshAll()
+  setSeaEnabled(params.seaEnabled) // un template peut livrer une carte SANS mer
   rebuildMapLayers() // re-derive roads/water/places for the current location under the restored look
   blockGrid?.restyle(params) // les dalles voisines du damier suivent la principale
   gpxLayer.rebuildAll() // re-drape every loaded track with the restored line width/colour/casing
@@ -3302,6 +3311,21 @@ const waterRebuild = () => {
   realWater?.rebuild({ terrain, params })
   // caustiques AU FOND (shader terrain) : on/off avec la mer animée
   terrain.mapUniforms.uSeaCausK.value = params.waterReal ? 1 : 0
+  setSeaEnabled(params.seaEnabled) // rebuild repose group.visible : on rappelle la règle
+}
+
+// ⑪ LA MER SE DÉBRAYE (Adrien). Un seul endroit sait répondre à « la mer
+// est-elle visible ? » : elle l'est si la scène est en surface ET si
+// l'interrupteur est allumé. Tout le reste (modes.setSurfaceVisible,
+// waterRebuild, application d'un template) repasse par ici plutôt que
+// d'écrire realWater.setVisible en direct — c'est ce qui empêche un rebuild
+// de rallumer une mer qu'on venait d'éteindre.
+// On masque au lieu de disposer : rallumer ne doit rien reconstruire.
+// `!== false` et non `=== true` : les looks d'avant l'interrupteur n'ont pas
+// la clé, et ils avaient bien une mer.
+function setSeaEnabled(v) {
+  params.seaEnabled = v !== false
+  realWater?.setVisible(params.seaEnabled && modes.mode === 'surface')
 }
 
 // OSM attribution + loading status for the Map layers (ODbL requires the credit).
@@ -5398,7 +5422,24 @@ const atelier = buildAtelier({
   // ⑤ Météo — exactement les leviers du panneau Éléments
   rebuildClouds: () => { clouds.build(params); clouds.setVisible(params.cloudsEnabled && modes.mode === 'surface') },
   setWaves: (w) => realWater?.setWaves?.(w),
+  setSeaEnabled: (v) => setSeaEnabled(v),
   openStore: () => store.enter(),
+  // ---- ⓪ Zone + verrou de zoom --------------------------------------------
+  // La zone ne fait PAS partie du look (un template ne porte pas la
+  // localisation, cf. templates-user.js) : elle a donc ses propres deps, et
+  // « Annuler » ne la repose pas — il n'a jamais promis de le faire.
+  getZone: () => ({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, name: params.demLocation }),
+  // « A-t-il déjà navigué ? » : START_VIEW est la carte sur laquelle
+  // l'application s'ouvre, personne ne l'a choisie. Dès qu'on cherche un lieu
+  // ou qu'on vole quelque part, demLocation cesse de valoir son nom. Pas de
+  // clé de stockage à inventer : l'état courant dit déjà la vérité.
+  hasZone: () => params.demLocation !== START_VIEW.name,
+  searchZone: (q) => (parseLatLon(q) ? gotoCtl.go(q) : gotoCtl.search(q)),
+  flyTo: (lat, lon, zoom, name = null) => { setRegionTarget(name ? { name } : null); return modes.flyTo(lat, lon, zoom) },
+  // ⑧ Le zoom se fige pendant l'habillage — même levier que la boutique
+  // (store.js). modes.locked neutralise la molette et l'escalier de niveaux ;
+  // flyTo passe toujours, sinon l'étape ⓪ ne pourrait plus déménager la carte.
+  setLocked: (v) => { modes.locked = v },
 })
 panelCtx.openAtelier = () => atelier.enter() // quickbar (lit au clic, pas au build)
 

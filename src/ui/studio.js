@@ -7,6 +7,7 @@
 // création RESTE (pas de restauration du snapshot).
 import './studio.css'
 import { makeMorph } from './panel-morph.js'
+import { keepScroll } from './kit.js'
 import { PICTOS, PICTO_KEYS } from '../race-labels.js'
 import { serializeRace, parseRace } from '../race-model.js'
 import { TRANSPORT_CATS } from '../transports.js'
@@ -91,7 +92,7 @@ export function buildStudio(deps) {
   function go(i) {
     draft.step = Math.max(0, Math.min(STEPS.length - 1, i))
     saveDraft()
-    render()
+    render({ top: true }) // changer d'étape est un changement de sujet : ici, remonter est juste
   }
 
   const field = (label, input) => {
@@ -439,7 +440,11 @@ export function buildStudio(deps) {
   }
 
   const RENDER = [stepIdentity, stepTrace, stepWaypoints, stepMap, stepStyle, stepExport]
-  function render() {
+  // Même correction que dans le Studio simple : render() se rappelle à chaque
+  // choix de logo, changement de course ou pictogramme, pas seulement en
+  // changeant d'étape — et il reconstruit tout le corps. Sans keepScroll, on
+  // remontait en haut après chaque clic. `top` n'est vrai que depuis go().
+  function render({ top = false } = {}) {
     ;[...rail.children].forEach((b, i) => {
       b.classList.toggle('on', i === draft.step)
       b.classList.toggle('done', i < draft.step)
@@ -447,7 +452,7 @@ export function buildStudio(deps) {
     prevBtn.disabled = draft.step === 0
     nextBtn.hidden = draft.step === STEPS.length - 1
     sendBtn.hidden = draft.step !== STEPS.length - 1
-    RENDER[draft.step]()
+    if (top) { body.scrollTop = 0; RENDER[draft.step]() } else keepScroll(body, () => RENDER[draft.step]())
   }
 
   // ---- entrée / sortie ----------------------------------------------------
@@ -460,7 +465,7 @@ export function buildStudio(deps) {
     morph.enter()
     draft = loadDraft() // la course active a pu changer depuis la dernière fois
     deps.syncRace(draft.race)
-    render()
+    render({ top: true })
   }
   async function exit() {
     if (!open) return

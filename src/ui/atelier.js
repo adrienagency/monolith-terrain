@@ -23,15 +23,31 @@
 //    pour ça qu'il n'y avait pas de bouton de validation. Maintenant :
 //    Annuler REPOSE le look d'entrée, Terminer le GARDE. Échap garde aussi :
 //    une touche réflexe ne doit pas détruire un quart d'heure d'habillage.
+//
+// 4. La ZONE (étape ⓪) est le seul vrai préalable. On peut habiller une carte
+//    qu'on n'a pas choisie — et le premier visiteur le faisait, sur une zone
+//    qui n'était pas la sienne. Mais proposer d'en choisir une à quelqu'un qui
+//    vient d'en travailler une serait la lui reprendre : entryStep() ouvre sur
+//    l'étape ⓪ SEULEMENT quand il n'y a rien à reprendre. Pendant l'habillage
+//    le zoom est verrouillé (modes.locked, même levier que la boutique) : on
+//    habille la zone qu'on a cadrée, on ne la recadre pas en cours de route.
 import './atelier.css'
 import { makeMorph } from './panel-morph.js'
+import { keepScroll } from './kit.js'
 import { CLOUD_PRESETS, CLOUD_TIPS, cloudPresetOf, SEA_PRESETS, SEA_TIPS, seaPresetOf } from './effects-panel.js'
+import { LANDMARKS, ISLANDS } from '../landmarks.js'
 import {
   ATELIER_STEPS,
   LAYERS,
+  capList,
   clampStep,
   changedKeys,
+  discardSummary,
+  entryStep,
+  frJoin,
+  indexOfStep,
   stepSummary,
+  zoneSummary,
 } from './atelier-steps.js'
 
 const CATALOG_URL = '/templates/data.json'
@@ -59,6 +75,16 @@ export function buildAtelier(deps) {
   // est un point de départ comme un autre), et se recale à chaque template.
   let baseLook = null
   let baseName = ''
+  // Quelles listes ont été dépliées par « voir plus », par clé de liste. Remis
+  // à zéro à chaque entrée : un dépliage est une intention du moment.
+  let expanded = {}
+  let searching = false // une recherche de lieu est en vol (étape ⓪)
+  // Ce que l'utilisateur a DEMANDÉ à l'étape ⓪. On ne peut pas le relire de
+  // params.demLocation : le moteur y écrit « Custom » dès qu'on vole sans nom
+  // de lieu, et il l'écrit APRÈS le rechargement du relief — l'étape se
+  // redessinerait sur l'ancienne valeur. Le mot de l'utilisateur, lui, est
+  // connu tout de suite et reste le bon.
+  let zoneAsked = ''
 
   const morph = makeMorph({ modeClass: 'atelier-mode', onSettle: () => window.dispatchEvent(new Event('resize')) })
 
@@ -75,13 +101,25 @@ export function buildAtelier(deps) {
       <button class="studio-btn ghost at-cancel">Annuler</button>
       <span class="spacer"></span>
       <button class="studio-btn ghost at-prev" title="Étape précédente" aria-label="Étape précédente">←</button>
-      <button class="studio-btn ghost at-next">Suivant →</button>
-      <button class="studio-btn accent at-done">Terminer</button>
+      <button class="studio-btn soft at-next">Suivant →</button>
+      <button class="studio-btn accent at-done" hidden>Envoyer à ma map</button>
     </div>`
   const rail = col.querySelector('.at-rail')
   const body = col.querySelector('.at-body')
   const prevBtn = col.querySelector('.at-prev')
   const nextBtn = col.querySelector('.at-next')
+  // ⑩ La validation vit aussi DANS la colonne, à côté de la flèche de retour
+  // (Adrien) — mais seulement à la dernière étape : partout ailleurs elle
+  // ferait doublon avec celle posée sur la carte et concurrencerait « Suivant ».
+  const doneBtn = col.querySelector('.at-done')
+
+  // ⑤ La validation principale est posée SUR la carte, en haut à droite : ce
+  // qu'on valide, c'est la carte, pas le formulaire. Elle est visible à toutes
+  // les étapes — le chemin reste non bloquant, on sort quand on a fini.
+  const sendBtn = document.createElement('button')
+  sendBtn.type = 'button'
+  sendBtn.className = 'at-send'
+  sendBtn.textContent = 'Envoyer à ma map'
 
   const caption = document.createElement('div')
   caption.className = 'studio-caption at-caption'
@@ -97,9 +135,11 @@ export function buildAtelier(deps) {
     rail.append(b)
   })
 
+  // Changer d'étape est un changement de SUJET : c'est le seul cas où remonter
+  // en haut est ce qu'on attend (cf. render).
   function go(i) {
     step = clampStep(i)
-    render()
+    render({ top: true })
   }
 
   // ---- petites briques, empruntées au Race Studio --------------------------
@@ -195,6 +235,109 @@ export function buildAtelier(deps) {
     body.append(band)
   }
 
+  // ---- ⓪ ZONE --------------------------------------------------------------
+  // Le seul préalable qui en soit vraiment un : on ne peut pas habiller une
+  // carte qu'on n'a pas. Mais l'étape ne REPREND jamais la zone de quelqu'un —
+  // elle affiche la sienne et propose d'en changer. Voir entryStep() : elle ne
+  // s'impose comme porte d'entrée qu'au visiteur qui n'a rien cadré.
+  //
+  // POURQUOI un champ de recherche à nous plutôt que celui du bas : la
+  // .ce-bottombar et le panneau Explorer sont masqués en atelier-mode
+  // (v28.css) — la colonne est la seule surface qui reste.
+  // Un échantillon COURT et contrasté (une île, un massif, un désert, un
+  // fjord…) : la liste curée du panneau Explorer fait plusieurs centaines
+  // d'entrées, elle noierait l'étape. Les huit premières suffisent à montrer
+  // ce que la carte sait faire, le reste se cherche.
+  const ZONE_PICKS = [
+    ...ISLANDS.slice(0, 5),
+    ...(LANDMARKS.Europe || []).slice(0, 4),
+    ...(LANDMARKS['North America'] || []).slice(0, 3),
+    ...(LANDMARKS.Asia || []).slice(0, 2),
+    ...(LANDMARKS.Africa || []).slice(0, 2),
+  ]
+
+  // Poser une zone recharge le MNT : c'est le travail le plus lourd de
+  // l'assistant, il mérite le même voile que l'application d'un template.
+  async function goZone(run, asked) {
+    if (searching) return
+    searching = true
+    render()
+    let ok = false
+    try { ok = (await run()) !== false } catch {}
+    if (ok && asked) zoneAsked = asked
+    searching = false
+    render()
+  }
+
+  function stepZone() {
+    head('La zone de votre carte', 'Le morceau de monde que vous allez habiller. Tout ce qui suit s’applique à lui — et le zoom reste figé le temps de l’habillage, pour que le cadre ne bouge plus sous les couleurs.')
+
+    const zone = deps.getZone?.() || null
+    // « connue » = choisie ici à l'instant, OU déjà cadrée en arrivant.
+    const known = !!zoneAsked || !!deps.hasZone?.()
+    const band = document.createElement('div')
+    band.className = 'at-posed' + (known ? '' : ' edited')
+    const lab = document.createElement('span')
+    lab.className = 'at-posed-lab'
+    lab.textContent = known ? 'Votre zone' : 'À choisir'
+    const val = document.createElement('b')
+    val.textContent = known ? (zoneAsked || zoneSummary(zone)) : 'Aucune zone choisie'
+    band.append(lab, val)
+    body.append(band)
+
+    // recherche : même vocabulaire que la barre du bas, y compris « lat, lon »
+    const row = document.createElement('div')
+    row.className = 'studio-row at-zonerow'
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.className = 'at-zonefield'
+    input.placeholder = 'Chercher un lieu, ou coller « lat, lon »'
+    input.disabled = searching
+    const submit = () => {
+      const q = input.value.trim()
+      if (!q || !deps.searchZone) return
+      goZone(() => deps.searchZone(q), q)
+    }
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit() } })
+    const goBtn = btn(searching ? 'Recherche…' : 'Aller', '', submit)
+    goBtn.disabled = searching
+    row.append(input, goBtn)
+    body.append(row)
+    // un premier visiteur n'a rien d'autre à faire ici : le curseur l'attend
+    if (!known && !searching) setTimeout(() => input.focus(), 0)
+
+    // quelques zones toutes prêtes, pour qui ne sait pas quoi chercher
+    body.insertAdjacentHTML('beforeend', '<div class="at-cat">Ou partez d’ici</div>')
+    const { shown, hidden, more } = capList(ZONE_PICKS, expanded.zone)
+    const g = document.createElement('div')
+    g.className = 'at-grid'
+    for (const p of shown) {
+      const c = document.createElement('button')
+      c.type = 'button'
+      c.className = 'at-card at-place' + ((zoneAsked || zone?.name) === p.name ? ' on' : '')
+      c.disabled = searching
+      const nm = document.createElement('span')
+      nm.className = 'at-nm'
+      nm.textContent = p.name
+      c.append(nm)
+      c.addEventListener('click', () => goZone(() => deps.flyTo(p.lat, p.lon, p.zoom, p.name), p.name))
+      g.append(c)
+    }
+    body.append(g)
+    if (more) body.append(moreBtn('zone', hidden, 'zone'))
+  }
+
+  // « voir plus » : une liste coupée doit dire ce qu'elle cache, sinon la coupe
+  // ressemble à un bug. `kind` sert au libellé, `key` au souvenir du dépliage.
+  function moreBtn(key, hidden, kind, onMore = null) {
+    const b = btn(`Voir ${hidden} ${kind}${hidden > 1 ? 's' : ''} de plus`, 'ghost tiny at-more', () => {
+      if (onMore) return onMore()
+      expanded[key] = true
+      render()
+    })
+    return b
+  }
+
   // ---- ① TEMPLATE ----------------------------------------------------------
   // Loader discret au centre de la carte pendant qu'un template s'applique :
   // le double rAF laisse le spinner se peindre AVANT le gros travail synchrone
@@ -273,20 +416,32 @@ export function buildAtelier(deps) {
     head('Votre point de départ', 'Un template pose tout d’un coup : les couleurs, le ciel, les calques et la météo. Les quatre étapes suivantes affinent ce qu’il a posé — rien à refaire de zéro.')
     if (!defTpls) {
       body.insertAdjacentHTML('beforeend', '<p class="hint">Chargement des looks…</p>')
-      loadDefaultTemplates().then(() => { if (open && step === 0) render() })
+      // ⚠️ indexOfStep, JAMAIS un chiffre en dur : l'arrivée de l'étape ⓪ a
+      // décalé tout le monde d'un cran, et un « step === 0 » resté là laissait
+      // la grille de templates sur « Chargement… » pour toujours.
+      loadDefaultTemplates().then(() => { if (open && step === indexOfStep('template')) render() })
       return
     }
+    // ② La bibliothèque est coupée à huit et se déplie sur place. Sans la
+    // coupe, elle poussait « Vos templates » hors de l'écran : ce qu'on a
+    // fabriqué soi-même devenait plus dur à retrouver que ce qu'on n'a pas
+    // choisi. Déplier plutôt qu'envoyer ailleurs — on est en train de choisir,
+    // un aller-retour vers un autre espace ferait perdre le fil.
+    const lib = capList(defTpls, expanded.tpl)
     const g = document.createElement('div')
     g.className = 'at-grid'
-    for (const t of defTpls) g.append(tplCard(t))
+    for (const t of lib.shown) g.append(tplCard(t))
     body.append(g)
+    if (lib.more) body.append(moreBtn('tpl', lib.hidden, 'template'))
     const mine = deps.getUserTemplates() || []
     if (mine.length) {
       body.insertAdjacentHTML('beforeend', '<div class="at-cat">Vos templates</div>')
+      const own = capList(mine, expanded.mine)
       const g2 = document.createElement('div')
       g2.className = 'at-grid'
-      for (const t of mine) g2.append(tplCard(t))
+      for (const t of own.shown) g2.append(tplCard(t))
       body.append(g2)
+      if (own.more) body.append(moreBtn('mine', own.hidden, 'template'))
     }
     // Sauter l'étape est une réponse légitime : on vient parfois retoucher une
     // carte qu'on aime déjà. La porte est discrète, pas cachée.
@@ -296,7 +451,7 @@ export function buildAtelier(deps) {
     keep.type = 'button'
     keep.className = 'at-link'
     keep.innerHTML = 'Ma carte me va déjà — <u>passer à la palette</u>'
-    keep.addEventListener('click', () => go(1))
+    keep.addEventListener('click', () => go(indexOfStep('palette')))
     const shopBtn = document.createElement('button')
     shopBtn.type = 'button'
     shopBtn.className = 'at-link'
@@ -379,7 +534,6 @@ export function buildAtelier(deps) {
     roadsEnabled: (v) => { deps.params.roadsEnabled = v; deps.rebuildMapLayers() },
     waterEnabled: (v) => { deps.params.waterEnabled = v; deps.rebuildMapLayers() },
     placesEnabled: (v) => { deps.params.placesEnabled = v; deps.rebuildMapLayers() },
-    coastLine: (v) => { deps.params.coastLine = v; deps.rebuildMapLayers() },
     aerialEnabled: (v) => { deps.params.aerialEnabled = v; deps.refreshAerial() },
   }
 
@@ -432,17 +586,39 @@ export function buildAtelier(deps) {
       body.insertAdjacentHTML('beforeend', '<p class="hint">Le vent pousse les nuages — allumez-les pour le sentir.</p>')
     }
 
+    // ⑪ La mer se débraye entièrement (Adrien) : toutes les cartes ne sont pas
+    // au bord de l'eau, et une île posée sur rien est un parti pris. Éteinte,
+    // l'état de mer n'a plus rien à décrire — on retire les chips plutôt que
+    // de laisser trois boutons sans effet, exactement comme le vent sans nuages.
     body.insertAdjacentHTML('beforeend', '<div class="at-cat">Mer</div>')
-    body.append(chipRow(
-      SEA_PRESETS, SEA_TIPS,
-      (s) => seaPresetOf(p) === s,
-      (s) => { Object.assign(p, s.v); deps.setWaves({ height: s.v.seaWaveH, choppiness: s.v.seaChop, speed: s.v.seaSpeed }) }
-    ))
+    body.append(layerRow('Afficher la mer', 'La nappe d’eau animée autour du relief.',
+      () => p.seaEnabled !== false,
+      (v) => { p.seaEnabled = v; deps.setSeaEnabled?.(v) }))
+    if (p.seaEnabled !== false) {
+      body.append(chipRow(
+        SEA_PRESETS, SEA_TIPS,
+        (s) => seaPresetOf(p) === s,
+        (s) => { Object.assign(p, s.v); deps.setWaves({ height: s.v.seaWaveH, choppiness: s.v.seaChop, speed: s.v.seaSpeed }) }
+      ))
+    }
   }
 
   // ---- rendu ---------------------------------------------------------------
-  const RENDER = [stepTemplate, stepPalette, stepCiel, stepCalques, stepMeteo]
-  function render() {
+  // ⚠️ RENDER doit rester aligné par INDEX sur ATELIER_STEPS.
+  const RENDER = [stepZone, stepTemplate, stepPalette, stepCiel, stepCalques, stepMeteo]
+
+  // ⑦ LE BUG DE DÉFILEMENT, et sa vraie cause. render() se rappelle à chaque
+  // clic (choisir une palette, cocher un calque, revenir au template…), pas
+  // seulement en changeant d'étape — et il reconstruit tout le corps. Remettre
+  // le défilement à zéro était donc juste dans UN cas sur neuf : le changement
+  // d'étape, qui est un changement de sujet. Partout ailleurs on gardait sa
+  // place… sauf qu'on la perdait, et on remontait en haut de la liste après
+  // avoir cliqué la palette du bas.
+  // D'où le paramètre : `top` n'est vrai que depuis go(). Le reste passe par
+  // keepScroll (kit.js), qui repose la position APRÈS le layout — la hauteur du
+  // corps change d'un rendu à l'autre (bande « posé par », vignettes en
+  // lazy-load), une restauration synchrone se ferait clamper.
+  function render({ top = false } = {}) {
     const look = deps.captureLook()
     ;[...rail.children].forEach((b, i) => {
       b.classList.toggle('on', i === step)
@@ -451,28 +627,84 @@ export function buildAtelier(deps) {
       // barre la route nulle part.
       b.classList.toggle('done', i !== step && changedKeys(ATELIER_STEPS[i].id, look, baseLook).length > 0)
     })
+    // ⑫ Six pastilles ne tiennent plus sur une colonne étroite : le rail défile
+    // latéralement (atelier.css) et amène l'étape courante à lui. `nearest`
+    // pour ne pas recentrer sans raison quand elle est déjà en vue.
+    rail.children[step]?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
     prevBtn.disabled = step === 0
-    nextBtn.hidden = step === ATELIER_STEPS.length - 1
-    body.scrollTop = 0
-    RENDER[step]()
+    const last = step === ATELIER_STEPS.length - 1
+    nextBtn.hidden = last
+    // ⑩ La validation rejoint la colonne à la dernière étape, à côté de la
+    // flèche de retour. Avant, elle ferait doublon avec celle de la carte et
+    // volerait l'attention de « Suivant ».
+    doneBtn.hidden = !last
+    if (top) { body.scrollTop = 0; RENDER[step]() } else keepScroll(body, () => RENDER[step]())
+  }
+
+  // ---- ③ la confirmation d'Annuler -----------------------------------------
+  // « Voulez-vous confirmer ? » fait répéter le geste sans aider à décider. Ce
+  // qui aide, c'est de NOMMER la perte : les étapes réellement touchées, tirées
+  // du diff avec le look d'arrivée. Et quand rien n'a bougé, on ne demande
+  // rien du tout — une confirmation qui protège le vide apprend à cliquer sans
+  // lire, ce qui la rend inutile le jour où elle compte.
+  //
+  // Le panneau vit DANS la colonne, pas en modale plein écran : la carte
+  // derrière montre justement ce qu'on s'apprête à perdre.
+  const sheet = document.createElement('div')
+  sheet.className = 'at-sheet'
+  let sheetOn = false
+  function askCancel() {
+    const lost = discardSummary(deps.captureLook(), entryLook)
+    if (!lost.length) return cancel()
+    sheet.innerHTML = `
+      <div class="at-sheet-card" role="alertdialog" aria-modal="true" aria-labelledby="at-sheet-t">
+        <h3 id="at-sheet-t">Revenir à la carte d’avant ?</h3>
+        <p>Votre travail sur ${frJoin(lost)} sera perdu. La carte retrouvera l’aspect qu’elle avait en entrant dans le Studio.</p>
+        <div class="at-sheet-acts">
+          <button type="button" class="studio-btn ghost at-keep">Continuer l’habillage</button>
+          <button type="button" class="studio-btn danger at-drop">Perdre les changements</button>
+        </div>
+      </div>`
+    sheet.querySelector('.at-keep').addEventListener('click', closeSheet)
+    sheet.querySelector('.at-drop').addEventListener('click', () => { closeSheet(); cancel() })
+    if (!sheet.isConnected) col.append(sheet)
+    sheetOn = true
+    sheet.classList.add('on')
+    // le refus est le défaut : la touche réflexe (Entrée) garde le travail
+    setTimeout(() => sheet.querySelector('.at-keep')?.focus(), 0)
+  }
+  function closeSheet() {
+    sheetOn = false
+    sheet.classList.remove('on')
   }
 
   // ---- entrée / sortie -----------------------------------------------------
   async function enter() {
     if (open) return
     open = true
-    step = 0
+    expanded = {}
+    searching = false
+    zoneAsked = ''
+    closeSheet()
+    // ① On ne propose de choisir une zone qu'à qui n'en a pas : celui qui a
+    // navigué retrouve la sienne, déjà cadrée, et entre directement au Template.
+    step = clampStep(entryStep(!!deps.hasZone?.()))
     entryLook = deps.captureLook()
     // pas encore de template choisi : la référence, c'est la carte telle
     // qu'elle est arrivée — on peut affiner à partir de là, sans rien poser.
     baseLook = entryLook
     baseName = ''
     if (!col.isConnected) document.body.append(col, caption)
+    if (!sendBtn.isConnected) document.body.append(sendBtn)
+    // ⑧ Le zoom se fige le temps de l'habillage (même levier que la boutique) :
+    // on garde SA zone, mais on ne la recadre pas sous les couleurs. flyTo n'est
+    // pas bridé — l'étape ⓪ continue de pouvoir déménager la carte.
+    deps.setLocked?.(true)
     morph.enter()
     if (!shop) {
       try { shop = await (await fetch(CATALOG_URL)).json() } catch { shop = { palettes: [] } }
     }
-    render()
+    render({ top: true })
   }
 
   // Terminer : l'assistant se referme et la carte GARDE tout. C'est la sortie
@@ -481,27 +713,40 @@ export function buildAtelier(deps) {
     if (!open) return
     open = false
     entryLook = null
+    closeSheet()
+    deps.setLocked?.(false)
     morph.exit()
   }
   // Annuler : on repose le look d'arrivée. C'est ce qui donne un sens à
-  // « Terminer » — deux boutons qui feraient la même chose n'en font qu'un.
+  // « Envoyer à ma map » — deux boutons qui feraient la même chose n'en font
+  // qu'un. Passe TOUJOURS par askCancel côté UI : cancel() est la destruction
+  // elle-même, elle ne demande rien.
   function cancel() {
     if (!open) return
     const snap = entryLook
     open = false
     entryLook = null
+    closeSheet()
+    deps.setLocked?.(false)
     morph.exit()
     if (snap) { try { deps.applyLook(snap) } catch {} }
   }
 
   prevBtn.addEventListener('click', () => go(step - 1))
   nextBtn.addEventListener('click', () => go(step + 1))
-  col.querySelector('.at-done').addEventListener('click', finish)
-  col.querySelector('.at-cancel').addEventListener('click', cancel)
+  doneBtn.addEventListener('click', finish)
+  sendBtn.addEventListener('click', finish)
+  col.querySelector('.at-cancel').addEventListener('click', askCancel)
   // la croix est une SORTIE, pas une annulation : elle garde, comme Terminer.
   // Seul « Annuler », nommé, détruit — on ne perd pas son travail par réflexe.
   col.querySelector('.studio-close').addEventListener('click', finish)
-  window.addEventListener('keydown', (e) => { if (open && e.key === 'Escape') finish() })
+  window.addEventListener('keydown', (e) => {
+    if (!open || e.key !== 'Escape') return
+    // Échap sur la confirmation ferme la CONFIRMATION, pas le Studio : sinon
+    // une touche destinée à annuler une question ferait sortir de la séance.
+    if (sheetOn) return closeSheet()
+    finish() // et Échap garde toujours, comme la croix
+  })
 
   return { enter, exit: finish, isOpen: () => open }
 }

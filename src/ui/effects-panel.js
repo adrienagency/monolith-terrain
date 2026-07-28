@@ -12,7 +12,7 @@
 //    fin dessous ; la mécanique part en « Réglages fins » au fond ;
 //  - les presets ne font que SETTER des params existants — zéro moteur.
 
-import { el, section, toggle, slider, color, visibleWhen, refreshAll, onRefresh } from './kit.js'
+import { el, section, toggle, slider, color, visibleWhen, refreshAll, onRefresh, keepScroll } from './kit.js'
 import { Panel } from './shell.js'
 import { FLAGS } from '../flags.js'
 import { SEABEDS } from '../ocean.js'
@@ -271,7 +271,8 @@ export function buildEffectsPanel(ctx) {
     // ---- fond marin : picker à vignettes (même UX que matériaux/HDRI) ----
     const bedHead = el('div', 'ce-fx-head', 'Fond marin')
     const bedPick = el('div', 'ce-mat-pick')
-    function renderBedPicker() {
+    const renderBedPicker = () => keepScroll(bedPick, renderBedPickerInner)
+    function renderBedPickerInner() {
       bedPick.replaceChildren()
       const grid = el('div', 'ce-mat-grid')
       for (const p of SEABEDS) {

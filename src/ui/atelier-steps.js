@@ -15,6 +15,7 @@
 // cette propriété — si quelqu'un ajoute un réglage hors template, il tombe.
 
 export const ATELIER_STEPS = [
+  { id: 'zone', label: 'Zone' },
   { id: 'template', label: 'Template' },
   { id: 'palette', label: 'Palette' },
   { id: 'ciel', label: 'Ciel' },
@@ -22,15 +23,48 @@ export const ATELIER_STEPS = [
   { id: 'meteo', label: 'Météo' },
 ]
 
+// ---- ⓪ la zone : le seul préalable qui en soit vraiment un ----------------
+// POURQUOI cette étape existe : on peut habiller une carte qu'on n'a pas
+// encore choisie, et le premier visiteur arrivait dans l'assistant devant une
+// zone qui n'était pas la sienne. Habiller une carte qui n'est pas la vôtre,
+// c'est perdre son temps deux fois.
+//
+// Le PIÈGE qu'on évite : proposer de choisir une zone à quelqu'un qui vient
+// justement d'en travailler une. Reprendre sa zone est le contraire de la lui
+// reprendre — d'où entryStep() : sans zone on ouvre SUR l'étape ⓪ (il faut
+// bien choisir), avec zone on ouvre sur le template et l'étape ⓪ reste
+// atteignable par le rail. Le chemin ne bloque toujours personne.
+export const entryStep = (hasZone) => (hasZone ? indexOfStep('template') : 0)
+
+// PIÈGE : « Custom » n'est pas un nom de zone, c'est le mot que le moteur
+// écrit dans demLocation dès qu'on a volé quelque part sans nom de lieu. Le
+// montrer tel quel donnerait « Votre zone : Custom », qui n'apprend rien. Les
+// coordonnées, elles, disent au moins où l'on est.
+export function zoneSummary(zone) {
+  const n = typeof zone === 'string' ? zone : zone?.name
+  if (n && n !== 'Custom') return String(n)
+  const lat = Number(zone?.lat)
+  const lon = Number(zone?.lon)
+  if (Number.isFinite(lat) && Number.isFinite(lon)) return `${lat.toFixed(3)}, ${lon.toFixed(3)}`
+  return 'Aucune zone choisie'
+}
+
 // Les calques d'HABILLAGE, dans l'ordre du panneau Carte. Ce panneau est passé
 // dans le Studio avancé et est devenu inatteignable en mode simple : cette
 // liste est ce qui répare ça. Volontairement SANS les courbes de niveau ni la
 // grille (voir SIMPLE_EXCLUDED) — ce sont des outils de lecture, pas d'habillage.
+//
+// PLUS DE « Trait de côte » (Adrien, retiré partout) : le liseré venait de
+// Natural Earth 1:10m, trop grossier pour tenir à côté d'un relief au mètre —
+// il coupait les caps et débordait les baies. Un calque qui ment sur la
+// géographie vaut moins que pas de calque du tout.
+// ⚠️ À NE PAS CONFONDRE avec le MASQUE terre-mer (coast-mask.js / uCoastMask) :
+// lui reste, c'est la vérité terre-mer du shader, il tient les polders sous le
+// niveau zéro et sert à la découpe de zone.
 export const LAYERS = [
   { key: 'roadsEnabled', label: 'Routes', short: 'Routes', hint: 'Le réseau routier drapé sur le relief.' },
   { key: 'waterEnabled', label: 'Rivières & eau', short: 'Eau', hint: 'Cours d’eau, lacs et mers.' },
   { key: 'placesEnabled', label: 'Villes & lieux', short: 'Lieux', hint: 'Les noms des villes et des sites.' },
-  { key: 'coastLine', label: 'Trait de côte', short: 'Côtes', hint: 'Le liseré qui souligne le rivage.' },
   { key: 'aerialEnabled', label: 'Photo aérienne', short: 'Photo', hint: 'L’imagerie réelle là où elle existe (France, Suisse).' },
 ]
 
@@ -47,8 +81,25 @@ export const STEP_KEYS = {
   meteo: [
     'cloudsEnabled', 'cloudCoverage', 'cloudBillow', 'cloudContrast', 'cloudOpacity',
     'windDir', 'windSpeed',
-    'seaWaveH', 'seaChop', 'seaSpeed',
+    // seaEnabled AVANT les réglages de houle : c'est l'interrupteur qui décide
+    // si les trois suivants produisent quoi que ce soit (cf. seaSummary).
+    'seaEnabled', 'seaWaveH', 'seaChop', 'seaSpeed',
   ],
+}
+
+// Combien d'éléments une liste montre avant de proposer « voir plus ». Huit
+// tient sur une hauteur de colonne sans repousser hors écran ce qui suit —
+// c'est ce qui rendait « Vos templates » invisible sous la bibliothèque.
+export const LIST_CAP = 8
+
+// Une liste qui déborde ne se coupe pas en silence : elle dit combien elle
+// cache. `more` est ce qui décide d'afficher le bouton — il reste faux quand
+// la liste tient tout entière, sinon on offrirait de déplier zéro élément.
+export function capList(items, expanded = false, cap = LIST_CAP) {
+  const all = Array.isArray(items) ? items : []
+  const n = Math.max(1, Math.trunc(Number(cap)) || LIST_CAP)
+  if (expanded || all.length <= n) return { shown: all, hidden: 0, more: false }
+  return { shown: all.slice(0, n), hidden: all.length - n, more: true }
 }
 
 // Écartés du mode simple, explicitement (Adrien) : shaders et effets, matières
@@ -128,7 +179,13 @@ export function windSummary(params) {
 // Seuils repris des chips d'état de mer du panneau Éléments (Calme / Brise /
 // Agitée). C'est une DESCRIPTION de l'état courant, pas le nom d'un preset :
 // une houle réglée à la main doit quand même se raconter.
+// La mer se débraye (Adrien) : certaines cartes sont des îles qu'on veut voir
+// posées sur rien. Absente, elle ne se décrit pas par sa houle — un « mer
+// d'huile » sous une mer éteinte serait un mensonge poli.
+// `seaEnabled` absent vaut ALLUMÉE : tous les looks d'avant l'interrupteur
+// n'ont pas la clé, et ils avaient bien une mer.
 export function seaSummary(params) {
+  if (params?.seaEnabled === false) return 'sans mer'
   const h = Number(params?.seaWaveH) || 0
   if (h < 0.5) return 'mer d’huile'
   if (h < 1.2) return 'petites vagues'
@@ -143,6 +200,27 @@ export function weatherSummary(params) {
 // L'étape ① reste muette : son résumé, c'est la vignette du template choisi,
 // pas une phrase — et un « 8 teintes » sous « Template » laisserait croire
 // qu'elle ne pose que ça.
+// ---- ce qu'« Annuler » emporte -------------------------------------------
+// Une confirmation qui demande « êtes-vous sûr ? » ne dit rien : elle fait
+// répéter le geste, elle n'aide pas à décider. Celle qui NOMME ce qu'on perd,
+// si. D'où cette liste, comparée au look d'ARRIVÉE (pas au template) : c'est
+// bien la séance entière qu'Annuler jette.
+// L'étape ⓪ n'y figure jamais — la zone ne vit pas dans le look, et Annuler ne
+// la remet pas en place. Dire le contraire serait promettre un retour qui
+// n'aura pas lieu.
+export function discardSummary(look, entry) {
+  if (!look || !entry) return []
+  return ATELIER_STEPS.filter((s) => STEP_KEYS[s.id] && changedKeys(s.id, look, entry).length).map((s) => s.label)
+}
+
+// « Palette, Ciel et Météo » — l'énumération française veut « et » au dernier
+// cran, pas une virgule de plus.
+export function frJoin(items) {
+  const a = (items || []).filter(Boolean)
+  if (a.length < 2) return a[0] || ''
+  return `${a.slice(0, -1).join(', ')} et ${a[a.length - 1]}`
+}
+
 export function stepSummary(id, params, environments = []) {
   if (id === 'palette') return paletteSummary(params)
   if (id === 'ciel') return skySummary(params, environments)
