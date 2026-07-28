@@ -160,6 +160,50 @@ export function lightingFor(hour, latDeg, lonDeg, date = new Date()) {
   }
 }
 
+// ---- ce que l'utilisateur possède, PAR-DESSUS le cycle -----------------------
+//
+// ⚠️ LE PIÈGE QUE TROIS ENQUÊTES ONT DÛ REDÉCOUVRIR, chacune de son côté :
+// lightingFor ci-dessus produit sunIntensity/hemiIntensity/envIntensity, et
+// applyTimeOfDay (main.js) les recopiait TELLES QUELLES dans
+// params.sunIntensity / hemiIntensity / envLight — les trois clés dans
+// lesquelles les curseurs du panneau Lumière écrivaient aussi. Deux écrivains,
+// une seule valeur, et le cycle gagnait toujours : il est rappelé à CHAQUE
+// déplacement de carte (loadRealTerrain) et à chaque dixième d'heure. Remonter
+// l'ambiante de 0,34 à 1,40 puis bouger l'heure d'un cheveu la rejetait à 0,14,
+// plus bas qu'avant d'y toucher. Ce n'était pas une limite de rendu, c'était
+// une collision de propriété.
+//
+// La sortie n'est pas un verrou mais un GAIN. Un verrou casserait le cycle
+// (l'heure ne pourrait plus assombrir) ; un gain le DÉCALE. Le cycle garde la
+// FORME de la courbe — c'est sa qualité, c'est la vraie astronomie du lieu, et
+// 18 h en décembre à 60° N doit rester la nuit — l'utilisateur garde le NIVEAU.
+// Coût GPU : trois multiplications en JavaScript, soit rien.
+//
+// Pur, sans effet de bord : renvoie un NOUVEL objet.
+const gainClamp = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(4, v)) : 1)
+
+export function applyGains(look, gains) {
+  const g = gains || {}
+  return {
+    ...look,
+    sunIntensity: look.sunIntensity * gainClamp(g.sun),
+    hemiIntensity: look.hemiIntensity * gainClamp(g.hemi),
+    envIntensity: look.envIntensity * gainClamp(g.env),
+  }
+}
+
+// La direction de l'APPOINT, exprimée RELATIVEMENT au soleil. C'est ce qui lui
+// permet de suivre l'heure — le soleil tourne, l'appoint tourne avec lui, un
+// contre-jour reste un contre-jour — sans jamais être une valeur que
+// applyTimeOfDay réécrit. Même raison que les gains : ce que l'utilisateur
+// possède ne partage aucune clé avec ce que le cycle calcule.
+export function fillDirection(sunAzimuthDeg, offsetDeg, elevationDeg) {
+  const sum = (Number.isFinite(sunAzimuthDeg) ? sunAzimuthDeg : 0) + (Number.isFinite(offsetDeg) ? offsetDeg : 0)
+  const az = ((sum % 360) + 360) % 360
+  const el = Math.max(-10, Math.min(90, Number.isFinite(elevationDeg) ? elevationDeg : 0))
+  return { azimuth: az, elevation: el }
+}
+
 // Should the UI be in dark mode at this solar elevation?
 //
 // A SCHMITT TRIGGER, not a threshold: `currentlyDark` widens whichever way we

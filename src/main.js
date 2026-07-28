@@ -49,7 +49,7 @@ import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
 import { MapLayers } from './map/layer-manager.js'
 import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
-import { lightingFor, darkModeFor } from './daycycle.js'
+import { lightingFor, darkModeFor, applyGains, fillDirection } from './daycycle.js'
 import { SunDisc } from './sun-disc.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
@@ -487,6 +487,23 @@ const params = {
   shadowSoftness: 5,
   timeOfDay: 10, // 24 h sun-cycle slider (0..24) — drives sun az/el/intensity/colour
   dayCycleSpeed: 1, // auto-cycle speed 1..100 : 1 = a full 24 h in 1 min
+
+  // Les GAINS : ce que l'utilisateur possède, appliqué APRÈS le cycle horaire
+  // (daycycle.applyGains). 1 = neutre, donc le cycle nu. Les trois clés
+  // au-dessus (sunIntensity/hemiIntensity/envLight) sont désormais DÉRIVÉES —
+  // heure × gain — et plus jamais réglées à la main : c'est ce partage-là qui
+  // faisait perdre tout réglage au déplacement suivant.
+  sunGain: 1,
+  hemiGain: 1,
+  envGain: 1,
+
+  // L'APPOINT : une seconde directionnelle, sans ombre, que l'heure ne pilote
+  // pas. Sa direction est RELATIVE au soleil (elle le suit sans être écrasée).
+  // Éteinte par défaut : aucune carte existante ne change d'aspect.
+  fillIntensity: 0,
+  fillAzimuthOffset: 150, // degrés PAR RAPPORT au soleil — contre-jour doux
+  fillElevation: 20,
+  fillColor: '#ffcf9a', // chaud : c'est la chaleur méditerranéenne qu'on cherchait
 }
 
 // ------------------------------------------------------------------ share-link restore
@@ -920,6 +937,31 @@ scene.add(sun)
 const hemi = new THREE.HemisphereLight(0xdadada, 0x5c5c5c, params.hemiIntensity)
 scene.add(hemi)
 
+// APPOINT DÉCOUPLÉ — la seule lumière que le cycle horaire ne pilote PAS.
+//
+// castShadow reste FALSE, et ce n'est pas une économie timide : une seconde
+// lumière à ombres ferait retraverser toute la scène une fois de plus par
+// frame. Sans ombre, le coût est d'une itération de boucle par fragment
+// éclairé — mesuré sous le plancher de bruit (voir le rapport §4.3).
+//
+// ⚠️ Créée AU BOOT et jamais retirée, MÊME à intensité 0 : three recompile TOUS
+// les matériaux quand le NOMBRE de lumières change, y compris le programme du
+// terrain. La créer à la demande figerait la page au premier mouvement du
+// curseur. À 0 elle ne contribue rien : aucune carte existante ne change.
+const fillLight = new THREE.DirectionalLight(new THREE.Color(params.fillColor), 0)
+fillLight.castShadow = false
+scene.add(fillLight)
+
+function placeFill() {
+  const d = fillDirection(params.sunAzimuth, params.fillAzimuthOffset ?? 150, params.fillElevation ?? 20)
+  const az = THREE.MathUtils.degToRad(d.azimuth)
+  const el = THREE.MathUtils.degToRad(d.elevation)
+  const r = 34
+  fillLight.position.set(Math.cos(az) * Math.cos(el) * r, Math.sin(el) * r, Math.sin(az) * Math.cos(el) * r)
+  fillLight.intensity = Math.max(0, Math.min(4, params.fillIntensity ?? 0))
+  fillLight.color.set(params.fillColor ?? '#ffcf9a')
+}
+
 // the sun you can SEE — aimed by the same vector that aims the light, so the
 // disc and the shading can never disagree (see sun-disc.js)
 const sunDisc = new SunDisc(scene)
@@ -932,12 +974,23 @@ const sunDisc = new SunDisc(scene)
 // after every move.
 let skyState = null // last lightingFor() result — see applyTimeOfDay
 function applyTimeOfDay(hour) {
-  const s = lightingFor(hour, params.demLat, params.demLon)
+  // ⚠️ Les GAINS s'appliquent ICI, entre le cycle et params, et c'est tout le
+  // correctif. Les trois lignes marquées plus bas ÉCRASENT params.sunIntensity /
+  // hemiIntensity / envLight ; les curseurs du panneau Lumière écrivaient dans
+  // ces mêmes clés, et cette fonction est rappelée à chaque déplacement de carte
+  // (loadRealTerrain) et à chaque dixième d'heure — le réglage manuel ne
+  // survivait donc jamais au mouvement suivant. Les curseurs pilotent
+  // maintenant params.*Gain, que rien ici ne réécrit : le cycle continue de
+  // calculer la lumière physique de l'heure, l'utilisateur la décale.
+  // Voir daycycle.applyGains pour le POURQUOI d'un gain plutôt qu'un verrou.
+  const s = applyGains(lightingFor(hour, params.demLat, params.demLon), {
+    sun: params.sunGain, hemi: params.hemiGain, env: params.envGain,
+  })
   params.sunAzimuth = s.azimuth
   params.sunElevation = s.elevation
-  params.sunIntensity = s.sunIntensity
-  params.hemiIntensity = s.hemiIntensity
-  params.envLight = s.envIntensity
+  params.sunIntensity = s.sunIntensity // ← dérivée : heure × sunGain
+  params.hemiIntensity = s.hemiIntensity // ← dérivée : heure × hemiGain
+  params.envLight = s.envIntensity // ← dérivée : heure × envGain
   sun.color.set(s.sunColor)
   skyState = s // the disc and the lake surface both read the current hour from here
   hemi.color.set(s.hemiSky)
@@ -985,6 +1038,7 @@ function placeSun() {
   if (globe) globe.setSunDir(sun.position)
   if (clouds) clouds.setSunDir(sun.position)
   sunDisc.update(sun.position, skyState?.sunColor ?? '#fff4ea', skyState?.elevation ?? params.sunElevation)
+  placeFill() // l'appoint est relatif au soleil : il se replace avec lui
 }
 placeSun()
 
@@ -2033,6 +2087,15 @@ const DEFAULT_LOOK = Object.freeze({
   gridOpacity: params.gridOpacity,
   gridColor: params.gridColor,
 })
+// Le NEUTRE de ce que l'utilisateur possède sur la lumière : gains à 1 (le
+// cycle nu) et appoint éteint. Sert deux fois — au RESET LOOK, et surtout à
+// applyUserTemplate, où un gabarit enregistré AVANT ces réglages doit rendre le
+// cycle nu et non hériter de ceux de la session : sans ça, réimporter un vieux
+// look ne redonnerait pas l'image qu'on avait exportée.
+const NEUTRAL_LIGHT_USER = Object.freeze({
+  sunGain: 1, hemiGain: 1, envGain: 1,
+  fillIntensity: 0, fillAzimuthOffset: 150, fillElevation: 20, fillColor: '#ffcf9a',
+})
 // the rest of the shipped scene, so a template never leaves a stuck light /
 // material / post-FX / toggle behind after RESET LOOK
 const DEFAULT_LIGHT = Object.freeze({
@@ -2042,6 +2105,7 @@ const DEFAULT_LIGHT = Object.freeze({
   hemiIntensity: params.hemiIntensity,
   envLight: params.envLight,
   shadowSoftness: params.shadowSoftness,
+  ...NEUTRAL_LIGHT_USER,
 })
 const DEFAULT_SURFACE = Object.freeze({
   color: params.color,
@@ -2370,6 +2434,11 @@ function applyUserTemplate(tmpl) {
   // ceux de la session : retomber sur SES bgColorA/B/C
   if (!('bgStops' in L)) params.bgStops = null
   if (!('bgPoints' in L)) params.bgPoints = null
+  // même règle pour les gains de lumière et l'appoint : un gabarit d'AVANT eux
+  // (Interlaken, UnderIce…) doit retrouver le cycle nu, pas le réglage que la
+  // session traînait — sinon l'aller-retour export/import ne rend plus la même
+  // image. Voir NEUTRAL_LIGHT_USER.
+  for (const k of Object.keys(NEUTRAL_LIGHT_USER)) if (!(k in L)) params[k] = NEUTRAL_LIGHT_USER[k]
   setDarkMode(params.darkMode ?? false)
   applyPalette({ rampStops: params.rampStops, oceanShallow: params.oceanShallow, oceanMid: params.oceanMid, oceanDeep: params.oceanDeep, ink: params.contourColor })
   applyStyle({ mapTint: params.mapTint, heightContrast: params.heightContrast, heightPivot: params.heightPivot, slopeTint: params.slopeTint })
@@ -4679,7 +4748,9 @@ const { elementsPanel, imagePanel } = buildEffectsPanel({
     applyTimeOfDay,
     placeSun,
     syncHour: () => hourPill?.refresh?.(),
-    setEnvLight: (v) => { scene.environmentIntensity = v },
+    // PLUS de setEnvLight : écrire scene.environmentIntensity à la main était
+    // précisément le piège — applyTimeOfDay le réécrit au déplacement suivant.
+    // L'éclairage d'environnement passe par params.envGain.
     setShadowSoftness: (v) => {
       sun.shadow.radius = v
       if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
@@ -5003,6 +5074,11 @@ window.__exp = { boats, raceLabels, scene, camera, controls, params, terrain, lo
   get reliefGrade() { return currentReliefGrade() },
   get shadeDirty() { return { ...shadeDirty } },
   applyAutoShade,
+  // pousser un look complet depuis la console ou un script de vérif : c'est le
+  // seul moyen de rejouer l'aller-retour export/import d'un gabarit sans passer
+  // par le sélecteur de fichier (l'appoint et les gains de lumière ont un
+  // NEUTRE quand le gabarit est plus vieux qu'eux — voir NEUTRAL_LIGHT_USER)
+  applyUserTemplate,
 }
 
 applyTimeOfDay(params.timeOfDay ?? 10) // seed the sun/disc/lake for the opening view

@@ -43,8 +43,16 @@ export const TEMPLATE_KEYS = [
   'contourInterval', 'contourOpacity', 'contourWeight', 'contourColor',
   'gridStep', 'gridOpacity', 'gridColor', 'hudInk', 'hudAccent', 'labels',
   // light
+  // ⚠️ sunIntensity/sunElevation/sunAzimuth/hemiIntensity/envLight sont DÉRIVÉES
+  // du cycle horaire : applyTimeOfDay les recalcule pour timeOfDay au lieu
+  // courant, donc ce qu'un gabarit en sauve n'est qu'une trace. Ce que
+  // l'utilisateur possède vraiment, ce sont les *Gain et l'appoint ci-dessous.
+  // Un gabarit qui ne les porte pas est d'AVANT eux : applyUserTemplate les
+  // remet au neutre plutôt que de lui refiler ceux de la session en cours.
   'sunIntensity', 'sunAzimuth', 'sunElevation', 'hemiIntensity', 'envLight',
   'shadowSoftness', 'timeOfDay', 'shadowMode',
+  'sunGain', 'hemiGain', 'envGain',
+  'fillIntensity', 'fillAzimuthOffset', 'fillElevation', 'fillColor',
   // surface material scalars
   'color', 'roughness', 'roughnessVariation', 'roughnessScale', 'bumpScale', 'envMapIntensity',
   // post FX + fog
