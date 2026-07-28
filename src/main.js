@@ -271,10 +271,18 @@ const params = {
   // look — exposition/contraste/saturation viennent de BASE_GRADE : ce trio
   // est FIXE (Adrien), il ne bouge ni au lancement ni au shuffle
   exposure: BASE_GRADE.exposure,
-  // render upgrades (2026-07-20 plan): both ON by default — the adaptive
-  // quality governor sheds them on machines that can't hold 60 fps, so a
-  // forked "high mode" is deliberately NOT a thing (see the plan doc).
-  ssaoEnabled: false,
+  // render upgrades (2026-07-20 plan): the adaptive quality governor sheds
+  // them on machines that can't hold 60 fps, so a forked "high mode" is
+  // deliberately NOT a thing (see the plan doc).
+  //
+  // L'OCCLUSION AMBIANTE VIENT DU PALIER, plus d'une constante. La ligne disait
+  // `false` en dur alors que le tableau des paliers annonçait `ssao: true` aux
+  // paliers 0 et 1 : le champ était MORT, personne ne le lisait, et le vrai
+  // interrupteur de départ était ailleurs (le look d'ouverture shibustart.json,
+  // qui l'allumait). Deux sources contradictoires pour un même réglage, dont
+  // aucune n'était celle qu'on croyait lire. Une seule désormais — et elle vaut
+  // false sur les quatre paliers depuis le 28/07 (demande d'Adrien).
+  ssaoEnabled: MACHINE.ssao,
   ssaoIntensity: 6, // nudged up: half-res AO reads ~16% softer than full-res (measured)
   bloomEnabled: false,
   bloomIntensity: 0.55,
