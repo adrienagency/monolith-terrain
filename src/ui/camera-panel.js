@@ -5,6 +5,7 @@
 
 import { el, slider, toggle, select, button, section, visibleWhen, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
+import { applyRenderSize } from '../viewport.js'
 
 const ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.4"/><path d="M12 3v5.6M21 12h-5.6M12 21v-5.6M3 12h5.6"/></svg>'
@@ -61,7 +62,13 @@ export function perfSection(ctx) {
   const { params } = ctx
   const s = section('Performance')
   s.body.append(
-    slider({ label: 'Échelle de rendu', min: 0.5, max: 2, step: 0.05, get: () => params.pixelRatio, set: (v) => { params.pixelRatio = v; ctx.renderer.setPixelRatio(v); ctx.composer.setSize(window.innerWidth, window.innerHeight) } }),
+    // Même règle que le gouverneur (perf.js) : la taille de rendu se lit sur le
+    // CONTENEUR du canevas, jamais sur la fenêtre — en boutique / Studio, `#app`
+    // n'est qu'un cadre. L'ancien appel, qui passait la largeur de la fenêtre
+    // au compositeur, poussait le canevas hors de ce cadre (image écrasée
+    // puis rognée par l'`overflow: hidden` du cadre) et, en
+    // prime, sautait l'arrondi pair qui évite le carré noir. Voir viewport.js.
+    slider({ label: 'Échelle de rendu', min: 0.5, max: 2, step: 0.05, get: () => params.pixelRatio, set: (v) => { params.pixelRatio = v; ctx.renderer.setPixelRatio(v); applyRenderSize({ renderer: ctx.renderer, composer: ctx.composer, camera: ctx.camera }) } }),
     select({ label: 'Ombres', options: ['dynamic', 'static', 'off'], get: () => params.shadowMode, set: (v) => { params.shadowMode = v; ctx.applyShadowMode() } }),
     select({ label: 'Résolution des ombres', options: ['1024', '2048', '4096'], get: () => String(params.shadowRes), set: (v) => { params.shadowRes = +v; ctx.setShadowRes(+v) } })
   )
