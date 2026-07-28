@@ -104,6 +104,7 @@ import { buildEffectsPanel, BASE_GRADE } from './ui/effects-panel.js'
 import { buildHourPill } from './ui/hour-pill.js'
 import { buildZoomStepper } from './ui/zoom-stepper.js'
 import { initTips } from './ui/tips.js'
+import { initLoadingHints } from './ui/loading-hints.js'
 import { createAdaptiveQuality } from './perf.js'
 import { detailForZoom } from './zoom-detail.js'
 import { isRenderableSize } from './viewport.js'
@@ -1527,6 +1528,16 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 
 let dem = null
 let demBusy = false
+
+// Les petites phrases d'info du chargement. UN SEUL point d'accroche : le
+// module observe lui-même la classe `.hidden` du loader, donc les six endroits
+// qui le montrent ou le cachent n'ont rien à savoir de lui.
+// On relit `dem` À CHAQUE TIRAGE, jamais une copie : pendant un rechargement,
+// demLat/demLon pointent déjà la nouvelle zone alors que `dem` tient encore
+// l'ancienne — c'est ce que hints.js compare pour refuser de citer l'altitude
+// du bloc précédent. Posé ICI, après la déclaration de `dem`, pour que le tout
+// premier tirage (le boot, loader déjà à l'écran) ne tombe pas dans sa TDZ.
+initLoadingHints(loadingEl, () => ({ lat: params.demLat, lon: params.demLon, dem }))
 
 // patch key → Promise<{maskTexture}|null>. Memoises the in-flight fetch (dedupes
 // A→B→A within one fetch) and is LRU-bounded (Map keeps insertion order; a hit

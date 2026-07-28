@@ -140,13 +140,13 @@ export function buildTopBar(ctx) {
   const pubItem = menuItem(pubMenu)
   const helpItem = menuItem(helpMenu)
   // openExport est async (pile d'export lazy-loadée au premier clic)
-  pubItem(I.export, 'Exporter une image ou une vidéo', 'Ce que vous voyez, en haute qualité.', async () => {
+  pubItem(I.export, 'Exporter une image ou une vidéo', 'Ce que tu vois, en haute qualité.', async () => {
     try { await ctx.openExport() } catch (err) { console.error('Export failed to open:', err) }
   })
   pubItem(I.share, 'Copier le lien de la vue', 'Look, lieu et caméra — la même carte chez eux.', () => doShare())
   // projet course → Race Studio étape Exporter (aucune logique dupliquée) ;
   // visible seulement quand une course est chargée
-  const miRace = pubItem(I.route, 'Projet course (.shibumap-race)', 'Enregistrer ou partager votre carte de course.', () => ctx.openStudioExport?.())
+  const miRace = pubItem(I.route, 'Projet course (.shibumap-race)', 'Enregistrer ou partager ta carte de course.', () => ctx.openStudioExport?.())
   exportBtn.addEventListener('click', (e) => {
     e.stopPropagation()
     const wasOpen = pubMenu.classList.contains('open')
@@ -170,7 +170,7 @@ export function buildTopBar(ctx) {
     document.querySelector('.ce-linkbox-veil')?.remove()
     const veil = el('div', 'ce-linkbox-veil')
     const box = el('div', 'ce-linkbox ce-glassbox')
-    box.innerHTML = '<b>Votre lien est prêt</b>'
+    box.innerHTML = '<b>Ton lien est prêt</b>'
     const input = el('input', 'ce-linkbox-input')
     input.type = 'text'
     input.readOnly = true
@@ -209,7 +209,7 @@ export function buildTopBar(ctx) {
         // échec dur : rien n'a été copié — un lien sans la course serait pire.
         // Le détail technique reste visible pour diagnostiquer un échec durable.
         const detail = res.failDetail ? ` (${res.failDetail})` : ''
-        showToast(`La course n’a pas pu être publiée — aucun lien copié. Réessayez dans un instant.${detail}`)
+        showToast(`La course n’a pas pu être publiée — aucun lien copié. Réessaie dans un instant.${detail}`)
       } else if (res?.ok) {
         // three honest cases: track published in the link / publish failed so
         // the link is look-only / no track loaded at all (nothing to say)
@@ -414,14 +414,14 @@ export function buildQuickCore(ctx) {
     ctx.setWorkMode?.('explorer')
     document.body.classList.toggle('ce-explore', !document.body.classList.contains('ce-explore'))
   })
-  const race = mk('parcours', I.flag, 'Ma course', 'Parcours', 'Ma carte de course', 'Race Studio — votre parcours GPX en carte de course (points de passage, transports, partage).', () => { document.body.classList.remove('ce-explore'); ctx.openStudio() })
+  const race = mk('parcours', I.flag, 'Ma course', 'Parcours', 'Ma carte de course', 'Race Studio — ton parcours GPX en carte de course (points de passage, transports, partage).', () => { document.body.classList.remove('ce-explore'); ctx.openStudio() })
   // le badge de l'ancien hub, conservé : il dit à qui s'adresse cette porte.
   // position:absolute → il ne compte pas dans la boîte mesurée par liquidize.
   const badge = el('b', 'ce-wm-badge', 'Organisateurs')
   race.append(badge)
   core.append(
     home,
-    mk('studio', I.brush, 'Habiller ma carte', 'Studio', 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur votre carte.', () => { document.body.classList.remove('ce-explore'); ctx.openAtelier() }),
+    mk('studio', I.brush, 'Habiller ma carte', 'Studio', 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur ta carte.', () => { document.body.classList.remove('ce-explore'); ctx.openAtelier() }),
     race
   )
   home.classList.add('on') // l'état de repos du mode simple : on explore

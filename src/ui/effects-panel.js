@@ -213,7 +213,7 @@ export function buildEffectsPanel(ctx) {
   sWind.body.append(...windRows)
   // le vent ne se règle que si quelque chose vole
   for (const row of windRows) visibleWhen(row, () => params.cloudsEnabled)
-  const windNote = el('div', 'ce-bg-note on', 'Le vent agit sur les nuages — activez-les pour le sentir.')
+  const windNote = el('div', 'ce-bg-note on', 'Le vent agit sur les nuages — allume-les pour le sentir.')
   sWind.body.append(windNote)
   visibleWhen(windNote, () => !params.cloudsEnabled)
   // rose des vents parlante : d'où vient le vent, en points cardinaux

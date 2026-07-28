@@ -114,7 +114,7 @@ export function buildStore(deps) {
   col.innerHTML = `
     <div class="store-head">
       <h2>ShibuMap<span class="dot">.</span> <em>Templates</em></h2>
-      <span class="store-sub">testez en live, cochez, intégrez</span>
+      <span class="store-sub">essaie en direct, coche, intègre</span>
       <button class="store-close" title="Fermer">✕</button>
     </div>
     <div class="store-body"></div>
@@ -271,7 +271,7 @@ export function buildStore(deps) {
     veil.innerHTML = `
       <div class="store-modal">
         <h3>Intégrer à ShibuMap</h3>
-        <p class="hint">Vos sélections rejoignent vos palettes et vos templates, prêtes à l'emploi.</p>
+        <p class="hint">Tes sélections rejoignent tes palettes et tes templates, prêtes à l'emploi.</p>
         <ul>${names.map((n) => `<li>${n}</li>`).join('')}</ul>
         <div class="row"><button class="ghost">Annuler</button><button class="go">Intégrer</button></div>
       </div>`

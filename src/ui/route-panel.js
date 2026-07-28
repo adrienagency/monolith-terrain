@@ -40,7 +40,7 @@ export function buildRoutePanel(ctx) {
     icon: ICON,
     side: 'left',
     width: 268,
-    tip: 'Votre course sur le relief : chargez une trace, la lecture fait le reste.',
+    tip: 'Ta course sur le relief : charge une trace, la lecture fait le reste.',
   })
 
   // ---- Lecture — en tête, TOUJOURS visible dès qu'une course est chargée
@@ -93,19 +93,19 @@ export function buildRoutePanel(ctx) {
     d.innerHTML = `<span class="ce-door-main"><b>${title}</b><i>${sub}</i></span>${soon ? '<span class="ce-door-badge">bientôt</span>' : ''}`
     return d
   }
-  const dLoad = door('Charger ma course (GPX)', 'Votre trace, depuis votre ordinateur — le relief se cadre tout seul.', { accent: true })
+  const dLoad = door('Charger ma course (GPX)', 'Ta trace, depuis ton ordinateur — le relief se cadre tout seul.', { accent: true })
   dLoad.addEventListener('click', () => ctx.loadGpx())
   const dOpen = door('Ouvrir un projet ShibuMap', 'Un fichier .shibumap-race — trace, points de passage et style, tout revient.')
   dOpen.addEventListener('click', () => ctx.loadGpx())
-  const dDemo = door('Pas encore de trace ? La démo', 'La Grande Traversée · 220 km, prête à jouer — remplacez-la ensuite.')
+  const dDemo = door('Pas encore de trace ? La démo', 'La Grande Traversée · 220 km, prête à jouer — remplace-la ensuite.')
   dDemo.addEventListener('click', async () => {
     dDemo.disabled = true
     dDemo.querySelector('i').textContent = 'Chargement de la démo…'
     try { await ctx.loadDemo?.() } catch {}
     dDemo.disabled = false
-    dDemo.querySelector('i').textContent = 'La Grande Traversée · 220 km, prête à jouer — remplacez-la ensuite.'
+    dDemo.querySelector('i').textContent = 'La Grande Traversée · 220 km, prête à jouer — remplace-la ensuite.'
   })
-  const dDraw = door('Dessiner sur la carte', 'Cliquez les passages clés, la trace suit le terrain.', { soon: true })
+  const dDraw = door('Dessiner sur la carte', 'Clique les passages clés, la trace suit le terrain.', { soon: true })
   doors.append(dLoad, dOpen, dDemo, dDraw)
   panel.add(doors)
 
@@ -393,7 +393,7 @@ export function buildRoutePanel(ctx) {
   // panneau — le wizard garde sa vie propre (?studio=1 continue de marcher).
   const orga = el('button', 'ce-orga')
   orga.type = 'button'
-  orga.innerHTML = `${FLAG_ICON}<span class="ce-door-main"><b>Organisateur de course ?</b><i>Points de passage, transports, partage — ouvrez le Race Studio.</i></span><span class="ce-orga-arrow">→</span>`
+  orga.innerHTML = `${FLAG_ICON}<span class="ce-door-main"><b>Organisateur de course ?</b><i>Points de passage, transports, partage — ouvre le Race Studio.</i></span><span class="ce-orga-arrow">→</span>`
   orga.addEventListener('click', () => ctx.openStudio?.())
   panel.add(orga)
 

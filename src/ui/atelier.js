@@ -123,7 +123,7 @@ export function buildAtelier(deps) {
 
   const caption = document.createElement('div')
   caption.className = 'studio-caption at-caption'
-  caption.textContent = 'Aperçu en direct — votre carte'
+  caption.textContent = 'Aperçu en direct — ta carte'
 
   // Le rail EST la navigation : on saute où on veut, dans les deux sens. Les
   // étapes n'ont aucune dépendance entre elles, l'ordre n'est qu'un conseil.
@@ -215,7 +215,7 @@ export function buildAtelier(deps) {
     const keys = changedKeys(id, deps.captureLook(), baseLook)
     const band = document.createElement('div')
     band.className = 'at-posed' + (keys.length ? ' edited' : '')
-    const src = baseName ? `« ${baseName} »` : 'votre carte de départ'
+    const src = baseName ? `« ${baseName} »` : 'ta carte de départ'
     const lab = document.createElement('span')
     lab.className = 'at-posed-lab'
     lab.textContent = keys.length ? `Affiné depuis ${src}` : `Posé par ${src}`
@@ -270,7 +270,7 @@ export function buildAtelier(deps) {
   }
 
   function stepZone() {
-    head('La zone de votre carte', 'Le morceau de monde que vous allez habiller. Tout ce qui suit s’applique à lui — et le zoom reste figé le temps de l’habillage, pour que le cadre ne bouge plus sous les couleurs.')
+    head('La zone de ta carte', 'Le morceau de monde que vous allez habiller. Tout ce qui suit s’applique à lui — et le zoom reste figé le temps de l’habillage, pour que le cadre ne bouge plus sous les couleurs.')
 
     const zone = deps.getZone?.() || null
     // « connue » = choisie ici à l'instant, OU déjà cadrée en arrivant.
@@ -279,7 +279,7 @@ export function buildAtelier(deps) {
     band.className = 'at-posed' + (known ? '' : ' edited')
     const lab = document.createElement('span')
     lab.className = 'at-posed-lab'
-    lab.textContent = known ? 'Votre zone' : 'À choisir'
+    lab.textContent = known ? 'Ta zone' : 'À choisir'
     const val = document.createElement('b')
     val.textContent = known ? (zoneAsked || zoneSummary(zone)) : 'Aucune zone choisie'
     band.append(lab, val)
@@ -307,7 +307,7 @@ export function buildAtelier(deps) {
     if (!known && !searching) setTimeout(() => input.focus(), 0)
 
     // quelques zones toutes prêtes, pour qui ne sait pas quoi chercher
-    body.insertAdjacentHTML('beforeend', '<div class="at-cat">Ou partez d’ici</div>')
+    body.insertAdjacentHTML('beforeend', '<div class="at-cat">Ou pars d’ici</div>')
     const { shown, hidden, more } = capList(ZONE_PICKS, expanded.zone)
     const g = document.createElement('div')
     g.className = 'at-grid'
@@ -413,7 +413,7 @@ export function buildAtelier(deps) {
   }
 
   function stepTemplate() {
-    head('Votre point de départ', 'Un template pose tout d’un coup : les couleurs, le ciel, les calques et la météo. Les quatre étapes suivantes affinent ce qu’il a posé — rien à refaire de zéro.')
+    head('Ton point de départ', 'Un template pose tout d’un coup : les couleurs, le ciel, les calques et la météo. Les quatre étapes suivantes affinent ce qu’il a posé — rien à refaire de zéro.')
     if (!defTpls) {
       body.insertAdjacentHTML('beforeend', '<p class="hint">Chargement des looks…</p>')
       // ⚠️ indexOfStep, JAMAIS un chiffre en dur : l'arrivée de l'étape ⓪ a
@@ -423,7 +423,7 @@ export function buildAtelier(deps) {
       return
     }
     // ② La bibliothèque est coupée à huit et se déplie sur place. Sans la
-    // coupe, elle poussait « Vos templates » hors de l'écran : ce qu'on a
+    // coupe, elle poussait « Tes templates » hors de l'écran : ce qu'on a
     // fabriqué soi-même devenait plus dur à retrouver que ce qu'on n'a pas
     // choisi. Déplier plutôt qu'envoyer ailleurs — on est en train de choisir,
     // un aller-retour vers un autre espace ferait perdre le fil.
@@ -435,7 +435,7 @@ export function buildAtelier(deps) {
     if (lib.more) body.append(moreBtn('tpl', lib.hidden, 'template'))
     const mine = deps.getUserTemplates() || []
     if (mine.length) {
-      body.insertAdjacentHTML('beforeend', '<div class="at-cat">Vos templates</div>')
+      body.insertAdjacentHTML('beforeend', '<div class="at-cat">Tes templates</div>')
       const own = capList(mine, expanded.mine)
       const g2 = document.createElement('div')
       g2.className = 'at-grid'
@@ -489,7 +489,7 @@ export function buildAtelier(deps) {
     body.append(row)
     const mine = deps.userPalettes() || []
     if (mine.length) {
-      body.insertAdjacentHTML('beforeend', '<div class="at-cat">Vos palettes</div>')
+      body.insertAdjacentHTML('beforeend', '<div class="at-cat">Tes palettes</div>')
       const g = document.createElement('div')
       g.className = 'at-grid'
       for (const p of mine) g.append(palCard(p))
@@ -538,7 +538,7 @@ export function buildAtelier(deps) {
   }
 
   function stepCalques() {
-    head('Ce qui se pose sur le relief', 'Les calques cartographiques drapés sur la carte. Allumez ce que votre image raconte, éteignez le reste.')
+    head('Ce qui se pose sur le relief', 'Les calques cartographiques drapés sur la carte. Allume ce que ton image raconte, éteignez le reste.')
     posedBand('calques')
     for (const l of LAYERS) {
       body.append(layerRow(l.label, l.hint, () => deps.params[l.key], (v) => { LAYER_SET[l.key](v); deps.refreshAll() }))

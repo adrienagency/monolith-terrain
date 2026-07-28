@@ -30,10 +30,10 @@ export function buildHub({ bar, bottomBar, onExplore }) {
   const head = el('div', 'ce-hubhead')
   const mark = el('div', 'ce-hubmark')
   mark.innerHTML = 'ShibuMap<span>.</span>'
-  head.append(mark, el('div', 'ce-hubq', 'Que voulez-vous faire ?'))
+  head.append(mark, el('div', 'ce-hubq', 'Que veux-tu faire ?'))
 
   const foot = el('div', 'ce-hubfoot')
-  const drop = el('div', 'ce-hubdrop', 'ou déposez un fichier GPX n’importe où — pas de fichier ? La démo vous attend dans Parcours.')
+  const drop = el('div', 'ce-hubdrop', 'ou dépose un fichier GPX n’importe où — pas de fichier ? La démo t’attend dans Parcours.')
   const esc = el('button', 'ce-hubesc', 'Échap — explorer librement')
   esc.type = 'button'
   foot.append(drop, esc)
@@ -78,7 +78,7 @@ export function buildHub({ bar, bottomBar, onExplore }) {
     // L'accueil montre déjà le cœur simple — mais seulement parce que
     // `body.ce-hub` le force (elembar) : la préférence « Avancé » d'une visite
     // précédente reprenait la main dès que la barre redescendait, et on
-    // répondait à « Que voulez-vous faire ? » par tous les panneaux ouverts.
+    // répondait à « Que veux-tu faire ? » par tous les panneaux ouverts.
     // C'est fait AVANT hide(), pour que la bulle de liquide n'ait pas à morpher
     // vers la capsule avancée pour revenir aussitôt.
     setUiAdvanced(false)

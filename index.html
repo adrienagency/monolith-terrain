@@ -97,6 +97,12 @@
         </g>
       </svg>
       <div class="ld-status">generating terrain&hellip;</div>
+      <!-- La petite phrase d'info (ui/loading-hints.js la remplit dès que le
+           bundle est arrivé). Vide et pourtant présente ici pour que sa
+           hauteur soit réservée dans la carte dès le premier octet : si elle
+           apparaissait avec le JS, tout le loader sauterait sous les yeux du
+           visiteur au moment précis où il commence à le lire. -->
+      <div class="ld-hint"></div>
     </div>
     <!-- Fond du chargement. FRÈRE ADJACENT du loader dans le DOM : c'est ce qui
          permet à `#loading.hidden + #loading-bg` (style.css) de l'effacer en

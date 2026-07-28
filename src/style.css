@@ -109,6 +109,33 @@ body {
   text-transform: lowercase;
 }
 
+/* LA PETITE PHRASE D'INFO — ui/loading-hints.js.
+   Sa hauteur est réservée en dur : le texte arrive avec le bundle, longtemps
+   après que la carte a peint, et un loader qui grandit sous les yeux du
+   visiteur au moment où il commence à lire est pire que pas de phrase du tout.
+   La largeur est bornée pour que la carte ne s'étire pas sur une phrase longue.
+   Discrète par construction : elle informe, elle n'annonce rien. */
+#loading .ld-hint {
+  font-family: 'Bricolage Grotesque', system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1.45;
+  max-width: 36ch;
+  /* trois lignes réservées : c'est la hauteur de la phrase médiane. En dessous,
+     la carte de chargement grandissait au moment où le texte arrivait ; au
+     dessus, elle réservait un trou visible sur les phrases courtes. */
+  min-height: 4.35em;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(35, 32, 26, 0.1);
+  color: rgba(35, 32, 26, 0.7);
+  text-wrap: balance;
+  opacity: 0;
+  transition: opacity 0.45s ease;
+}
+#loading .ld-hint.on {
+  opacity: 1;
+}
+
 #loading.hidden {
   opacity: 0;
 }
