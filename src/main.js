@@ -51,6 +51,7 @@ import { FLAGS } from './flags.js'
 import { MapLayers } from './map/layer-manager.js'
 import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
 import { lightingFor, darkModeFor, applyGains, fillDirection, fillLightIntensity, fillEnabledInLook, sunOn, sunShadowOn } from './daycycle.js'
+import { signatureCarteOmbre } from './carte-ombre.js'
 import { SunDisc } from './sun-disc.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
@@ -1153,8 +1154,17 @@ placeSun()
 function applyShadowMode() {
   const wantShadow = sunShadowOn(params.sunEnabled, params.shadowMode)
   sun.castShadow = wantShadow
-  renderer.shadowMap.autoUpdate = wantShadow && params.shadowMode === 'dynamic'
-  if (wantShadow && params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
+  // ⚠️ autoUpdate reste FAUX dans les DEUX modes, et c'est le correctif du
+  // 28/07/2026 : « dynamic » redessinait la carte 2048² à chaque image alors
+  // qu'aucun projeteur ne bouge dans cette application (relief, murs du socle,
+  // murs des dalles voisines, jupe de région — quatre décors immobiles ; les
+  // bateaux ont castShadow = false, nuages et voitures n'en projettent aucune).
+  // Mesuré en production : 0,55 ms et 1 188 328 triangles PAR IMAGE, soit 26 %
+  // du temps GPU et 47 % des triangles, pour redessiner à l'identique. C'est
+  // majCarteOmbre() qui décide maintenant, sur l'état réel de la scène — et
+  // l'image rendue est rigoureusement la même (voir src/carte-ombre.js).
+  renderer.shadowMap.autoUpdate = false
+  if (wantShadow) { sigCarteOmbre = null; renderer.shadowMap.needsUpdate = true }
   // ⚠️ three ne rend PAS la carte d'ombre tout seul quand castShadow retombe à
   // false : la texture 2048×2048 reste allouée sur le GPU pour rien. C'est le
   // vrai poste coûteux du soleil, donc on la relâche à la main. La remettre à
@@ -1165,6 +1175,39 @@ function applyShadowMode() {
     sun.shadow.map.dispose()
     sun.shadow.map = null
   }
+}
+
+// LA CARTE D'OMBRE, REDESSINÉE SEULEMENT QUAND ELLE CHANGERAIT.
+//
+// Appelé juste avant chaque dessin. Le POURQUOI et les chiffres sont dans
+// src/carte-ombre.js ; ici il n'y a que la lecture de l'état réel de la scène.
+//
+// ⚠️ On lit la visibilité EFFECTIVE (en remontant les parents) : cacher un
+// groupe entier — le socle, une dalle voisine — doit emporter l'ombre de tout
+// ce qu'il contient. `o.visible` seul aurait gardé l'ombre d'un objet éteint
+// par son parent, et une ombre orpheline ne se lit pas comme un réglage.
+//
+// ⚠️ Les matrices lues ici datent de l'image PRÉCÉDENTE (three met le monde à
+// jour à l'intérieur de son propre rendu). Un projeteur qui bougerait verrait
+// donc son ombre suivre avec une image de retard — invisible, et de toute
+// façon aucun projeteur ne bouge. Le soleil, lui, est écrit par placeSun avant
+// le dessin : la tirette des 24 h n'a aucun retard.
+let sigCarteOmbre = null
+function majCarteOmbre() {
+  if (!renderer.shadowMap.enabled || !sun.castShadow) return
+  const casters = []
+  scene.traverse((o) => {
+    if (!o.castShadow) return
+    let vu = o.visible
+    for (let p = o.parent; vu && p; p = p.parent) vu = p.visible
+    const g = o.geometry
+    const pos = g?.attributes?.position
+    casters.push({ id: o.id, geo: g?.id ?? 0, pv: pos?.version ?? 0, count: pos?.count ?? 0, visible: vu, m: o.matrixWorld.elements })
+  })
+  const sig = signatureCarteOmbre({ soleil: sun.position, res: params.shadowRes, flou: sun.shadow.radius, casters })
+  if (sig === sigCarteOmbre) return
+  sigCarteOmbre = sig
+  renderer.shadowMap.needsUpdate = true
 }
 
 // L'interrupteur du soleil : l'intensité (placeSun) ET l'ombre (applyShadowMode)
@@ -2081,8 +2124,10 @@ modes = new Modes({
       // le globe éteint les effets ; l'interrupteur du soleil est un SECOND
       // motif de coupure, il ne doit pas être perdu au retour sur le bloc
       sun.castShadow = v && sunShadowOn(params.sunEnabled, params.shadowMode)
-      renderer.shadowMap.autoUpdate = sun.castShadow && params.shadowMode === 'dynamic'
-      if (sun.castShadow && params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
+      // même règle qu'applyShadowMode : jamais de redessin à chaque image, un
+      // redessin quand l'état change (ici, le retour du globe vers le bloc)
+      renderer.shadowMap.autoUpdate = false
+      if (sun.castShadow) { sigCarteOmbre = null; renderer.shadowMap.needsUpdate = true }
       // the restore above reads raw params — re-assert the active quality
       // tier on top so a globe round-trip can't silently undo degraded mode
       if (v) aq?.reassert()
@@ -2717,6 +2762,7 @@ function persistUserTemplates() {
   return true
 }
 function saveCurrentTemplate(name) {
+  majCarteOmbre() // la vignette doit porter l'ombre du look qu'on enregistre
   composer.render() // fresh frame so the thumbnail matches the screen
   const clean = String(name || '').trim().slice(0, 40) || 'My look'
   const look = captureLook(params)
@@ -5609,6 +5655,7 @@ function tick() {
   // fantaisiste et ferait grimper le palier de qualité sur des images vides.
   if (!programmesPrets) return
   aq.update(dtBrut) // adaptive quality : le temps RÉEL, jamais le dt de simulation (voir plus haut)
+  majCarteOmbre() // la carte d'ombre n'est redessinée que si elle changerait
   composer.render(dt)
   if (recorder?.recording) recorder.captureFrame() // null until first export
 }
