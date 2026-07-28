@@ -659,7 +659,7 @@ export function buildAtelier(deps) {
     sheet.innerHTML = `
       <div class="at-sheet-card" role="alertdialog" aria-modal="true" aria-labelledby="at-sheet-t">
         <h3 id="at-sheet-t">Revenir à la carte d’avant ?</h3>
-        <p>Votre travail sur ${frJoin(lost)} sera perdu. La carte retrouvera l’aspect qu’elle avait en entrant dans le Studio.</p>
+        <p>Ton travail sur ${frJoin(lost)} sera perdu. La carte retrouvera l’aspect qu’elle avait en entrant dans le Studio.</p>
         <div class="at-sheet-acts">
           <button type="button" class="studio-btn ghost at-keep">Continuer l’habillage</button>
           <button type="button" class="studio-btn danger at-drop">Perdre les changements</button>
