@@ -20,19 +20,19 @@ function buildSteps() {
   return [
     {
       target: () => document.querySelector('.ce-bottombar'),
-      text: 'Cherchez n’importe quel lieu sur Terre — ou collez « lat, lon » — et regardez-le surgir en relief.',
+      text: 'Cherche n’importe quel lieu sur Terre — ou colle « lat, lon » — et regarde-le surgir en relief.',
     },
     {
       target: () => null, // a concept, not a widget: plain centered card
-      text: 'Molette pour zoomer. Reculez et la carte devient une pièce de musée isométrique — le bloc entier sur son socle, cartouche comprise. Plongez pour un terrain toujours plus fin.',
+      text: 'Molette pour zoomer. Recule et la carte devient une pièce de musée isométrique — le bloc entier sur son socle, cartouche comprise. Plonge pour un terrain toujours plus fin.',
     },
     {
       target: () => document.querySelector('.ce-hourpill'),
-      text: 'L’heure du ciel — faites glisser pour passer de l’aube à la nuit, ou lancez le cycle automatique.',
+      text: 'L’heure du ciel — fais glisser pour passer de l’aube à la nuit, ou lance le cycle automatique.',
     },
     {
       target: () => findPanel('explorer'),
-      text: 'Explorer — volez vers des lieux choisis sur chaque continent.',
+      text: 'Explorer — vole vers des lieux choisis sur chaque continent.',
     },
     {
       target: () => findPanel('bibliothèque'),
@@ -54,11 +54,11 @@ function buildSteps() {
     },
     {
       target: () => document.querySelector('.ce-topbar .ce-pubbtn'),
-      text: 'Publier — exporter une image ou une vidéo, copier le lien de la vue, ou enregistrer votre projet course.',
+      text: 'Publier — exporter une image ou une vidéo, copier le lien de la vue, ou enregistrer ton projet course.',
     },
     {
       target: () => document.querySelector('.ce-globebtn') ?? document.querySelector('.ce-topbar'),
-      text: 'Globe — reculez jusqu’à la planète entière, qui tourne lentement.',
+      text: 'Globe — recule jusqu’à la planète entière, qui tourne lentement.',
     },
   ]
 }

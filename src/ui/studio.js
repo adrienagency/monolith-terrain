@@ -78,7 +78,7 @@ export function buildStudio(deps) {
 
   const caption = document.createElement('div')
   caption.className = 'studio-caption'
-  caption.textContent = 'Aperçu en direct — votre parcours'
+  caption.textContent = 'Aperçu en direct — ton parcours'
 
   STEPS.forEach((label, i) => {
     const b = document.createElement('button')
@@ -113,7 +113,7 @@ export function buildStudio(deps) {
   // ---- étapes -------------------------------------------------------------
   // ① Identité : nom + logo, RIEN d'autre — une page, un job (Adrien).
   function stepIdentity() {
-    body.innerHTML = `<h3>Votre événement</h3>
+    body.innerHTML = `<h3>Ton événement</h3>
       <p class="hint">Le nom et le logo habillent le bloc et la tête de parcours. Sans logo, le socle porte la marque ShibuMap — sobre.</p>`
     // plusieurs courses chargées → on choisit d'abord CELLE qu'on modifie
     const races = deps.listRaces?.() || []
@@ -168,7 +168,7 @@ export function buildStudio(deps) {
   // occupe un rang dans la hiérarchie pour quelque chose qu'on ne peut pas
   // faire — elle sera ajoutée quand la fonction existera (Adrien).
   function stepTrace() {
-    body.innerHTML = `<h3>Votre trace</h3>
+    body.innerHTML = `<h3>Ta trace</h3>
       <p class="hint">Tout le reste de la carte se remplit autour.</p>`
     const pf = document.createElement('input')
     pf.type = 'file'
@@ -214,11 +214,11 @@ export function buildStudio(deps) {
     const promise = document.createElement('div')
     promise.className = 'trace-promise'
     promise.innerHTML = `
-      <span class="tp-step on"><b>Votre trace</b><i>maintenant</i></span>
+      <span class="tp-step on"><b>Ta trace</b><i>maintenant</i></span>
       <span class="tp-sep" aria-hidden="true"></span>
-      <span class="tp-step"><b>Vos points</b><i>2 min</i></span>
+      <span class="tp-step"><b>Tes points</b><i>2 min</i></span>
       <span class="tp-sep" aria-hidden="true"></span>
-      <span class="tp-step"><b>Votre carte</b><i>prête</i></span>`
+      <span class="tp-step"><b>Ta carte</b><i>prête</i></span>`
     body.append(promise)
 
     // La zone de dépôt accepte le GLISSER-DÉPOSER autant que le clic :
@@ -229,8 +229,8 @@ export function buildStudio(deps) {
     drop.className = 'trace-drop'
     drop.innerHTML = `
       <svg class="td-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3m0 0L8 7m4-4 4 4"/><path d="M3 15v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4"/></svg>
-      <b>Déposez votre fichier GPX ici</b>
-      <i>ou <u>parcourez votre ordinateur</u></i>`
+      <b>Dépose ton fichier GPX ici</b>
+      <i>ou <u>parcours ton ordinateur</u></i>`
     drop.addEventListener('click', () => deps.loadGpx())
     body.append(drop)
 
@@ -261,11 +261,11 @@ export function buildStudio(deps) {
     guide.className = 'studio-guide'
     guide.hidden = true
     guide.innerHTML = `
-      <p>Le GPX est le fichier de votre tracé — celui que produit n'importe quel outil de parcours.</p>
-      <p><b>Strava</b> — Mes activités → ouvrez l'activité → ⋯ → « Exporter GPX ».</p>
-      <p><b>Komoot</b> — ouvrez votre Tour → « Exporter » → fichier GPX.</p>
-      <p><b>OpenRunner</b> — votre parcours → « Exporter » → GPX.</p>
-      <p class="hint">Vous exportez votre propre fichier depuis votre propre compte — rien n'est connecté. Sinon : demandez le GPX à votre traceur ou à votre chronométreur.</p>`
+      <p>Le GPX est le fichier de ton tracé — celui que produit n'importe quel outil de parcours.</p>
+      <p><b>Strava</b> — Mes activités → ouvre l'activité → ⋯ → « Exporter GPX ».</p>
+      <p><b>Komoot</b> — ouvre ton Tour → « Exporter » → fichier GPX.</p>
+      <p><b>OpenRunner</b> — ton parcours → « Exporter » → GPX.</p>
+      <p class="hint">Tu exportes ton propre fichier depuis ton propre compte — rien n'est connecté. Sinon : demande le GPX à ton traceur ou à ton chronométreur.</p>`
     help.addEventListener('click', () => {
       guide.hidden = !guide.hidden
       help.classList.toggle('on', !guide.hidden)
@@ -378,7 +378,7 @@ export function buildStudio(deps) {
 
   function stepMap() {
     body.innerHTML = `<h3>Carte & transports</h3>
-      <p class="hint">Ce que vos coureurs voient autour du tracé. Retirez un transport précis d'un ✕ directement sur la carte.</p>`
+      <p class="hint">Ce que tes coureurs voient autour du tracé. Retire un transport précis d'un ✕ directement sur la carte.</p>`
     body.append(toggle('Villes principales', () => deps.params.placesEnabled, (v) => { deps.params.placesEnabled = v; deps.refreshAll() }))
     for (const c of TRANSPORT_CATS) {
       body.append(toggle(c.label, () => draft.race.transports.cats.includes(c.key), (v) => {
@@ -394,7 +394,7 @@ export function buildStudio(deps) {
 
   function stepStyle() {
     body.innerHTML = `<h3>Style du tracé</h3>
-      <p class="hint">La trace aux couleurs de votre événement — tout s'applique en direct sur l'aperçu.</p>`
+      <p class="hint">La trace aux couleurs de ton événement — tout s'applique en direct sur l'aperçu.</p>`
     const colr = document.createElement('input')
     colr.type = 'color'
     colr.value = deps.params.gpxColor || '#ff4d00'
@@ -416,7 +416,7 @@ export function buildStudio(deps) {
 
   function stepExport() {
     body.innerHTML = `<h3>Exporter & partager</h3>
-      <p class="hint">Enregistrez le projet pour y revenir, partagez le lien, puis envoyez votre création vers la carte.</p>`
+      <p class="hint">Enregistre le projet pour y revenir, partage le lien, puis envoie ta création vers la carte.</p>`
     const save = document.createElement('button')
     save.className = 'studio-btn'
     save.textContent = 'Enregistrer le projet (.shibumap-race.json)'

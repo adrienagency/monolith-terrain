@@ -23,13 +23,13 @@ export function buildTemplatesPanel(ctx) {
     icon: ICON,
     side: 'right',
     width: 268,
-    tip: 'Vos palettes et templates — et la boutique pour en ramener d’autres.',
+    tip: 'Tes palettes et templates — et la boutique pour en ramener d’autres.',
   })
 
   // ---------------------------------------------- 1. la Boutique, en pleine lumière
   const storeWrap = el('div', 'ce-btn-row')
   const storeBtn = button('Boutique de templates', () => ctx.openStore?.(), { accent: true })
-  storeBtn.setAttribute('data-tip', 'Parcourez styles et couleurs, essayez en direct, ramenez ce qui vous plaît.')
+  storeBtn.setAttribute('data-tip', 'Parcours styles et couleurs, essaie en direct, ramène ce qui te plaît.')
   storeWrap.append(storeBtn)
   panel.body.append(storeWrap)
 
