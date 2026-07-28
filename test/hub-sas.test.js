@@ -1,166 +1,156 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { creerSas } from '../src/ui/hub-sas.js'
+import { creerSas, FONDU_MS } from '../src/ui/hub-sas.js'
 
-// LE SAS, PRIORITÉ INVERSÉE (28/07, Adrien). La première version faisait
-// attendre l'accueil tant que la carte de chargement occupait le centre.
-// Adrien a retourné la règle le jour même : l'ACCUEIL PRIME — dès que la barre
-// commence à monter, c'est la carte de chargement qui s'efface, en fondu
-// rapide. Le visiteur voit l'interface arriver au lieu d'attendre.
-// Ces tests décrivent donc la règle inversée ; l'ancienne (l'accueil attend)
-// est dans l'historique de ce fichier si un jour il faut la relire.
+// LE SAS, RENDU À SA RÈGLE D'ORIGINE (28/07, Adrien) : « la barre de menu ne
+// commence à bouger que dès que le loader a terminé de s'exécuter ».
 //
-// Plus aucun minuteur ici : personne n'attend plus personne. La montée est
-// immédiate, l'effacement est un ordre (le fondu lui-même est en CSS, et on
-// n'écoute jamais `transitionend` — voir hub-sas.js).
+// Ce fichier a décrit la règle inverse pendant quelques heures — l'accueil
+// primait, la carte de chargement s'effaçait sous lui. Elle a échoué en
+// production, et la raison mérite d'être ici plutôt que dans l'historique :
+// elle ne supprimait pas le recouvrement, elle le RACCOURCISSAIT. Fondu de la
+// carte 0,18 s contre montée des mots 0,24 s — les deux étaient lisibles
+// ensemble par construction. Le test « jamais deux au centre » ci-dessous est
+// donc le test cardinal de ce fichier : il ne porte pas sur des durées, il
+// porte sur l'ordre de passage.
 
-// petit atelier : un sas + des compteurs pour chaque effet de bord.
-// `ouvert` reflète l'état réel de l'accueil, comme isOpen() dans hub.js :
-// il devient vrai à la montée, faux quand le test « referme » l'accueil.
+// petit atelier : un sas, des compteurs, et un minuteur qu'on déclenche à la
+// main pour ne pas faire attendre la suite de tests.
 function atelier({ occupe = false } = {}) {
   let montees = 0
-  let effacements = 0
-  let retours = 0
-  let ouvert = false
+  let arme = null
+  let delai = 0
   const sas = creerSas({
-    montrer: () => { montees++; ouvert = true },
-    effacer: () => effacements++,
-    retablir: () => retours++,
-    ouvert: () => ouvert,
+    montrer: () => { montees++ },
     occupe,
+    poser: (fn, ms) => { arme = fn; delai = ms; return 1 },
+    retirer: () => { arme = null; delai = 0 },
   })
   return {
     sas,
-    fermer: () => { ouvert = false; sas.annuler() }, // Échap / focus recherche
     montees: () => montees,
-    effacements: () => effacements,
-    retours: () => retours,
+    delai: () => delai,
+    arme: () => !!arme,
+    // le minuteur arrive à terme
+    ecouler: () => { const f = arme; arme = null; if (f) f() },
   }
 }
 
-// ------------------------------------------------------- la place est libre
-test('place libre : l’accueil monte tout de suite, rien à effacer', () => {
+test('place libre : l’accueil monte tout de suite, sans délai inventé', () => {
   const a = atelier()
   a.sas.demander()
   assert.equal(a.montees(), 1)
-  assert.equal(a.effacements(), 0)
+  assert.equal(a.arme(), false, 'aucun minuteur quand la place est libre')
 })
 
-// -------------------------------------- LE RENVERSEMENT : l'accueil prime
-test('carte de chargement à l’écran : l’accueil monte ET la carte s’efface', () => {
+test('carte de chargement au centre : l’accueil ATTEND, il ne monte pas', () => {
   const a = atelier({ occupe: true })
   a.sas.demander()
-  assert.equal(a.montees(), 1, 'la montée n’attend plus la carte')
-  assert.equal(a.effacements(), 1, 'la carte reçoit l’ordre de céder')
+  assert.equal(a.montees(), 0, 'la barre ne doit pas bouger pendant le chargement')
+  assert.equal(a.sas.enAttente(), true)
 })
 
-test('deux demandes pendant le chargement : un seul effacement', () => {
-  // le réveil automatique (900 ms) et un clic sur le logo peuvent tomber tous
-  // les deux pendant le même chargement — la carte ne cède qu'une fois.
+test('le chargement fini, l’accueil monte — après le fondu de la carte', () => {
   const a = atelier({ occupe: true })
   a.sas.demander()
-  a.sas.demander()
-  assert.equal(a.effacements(), 1)
-})
-
-test('la carte ne cède pas si le chargement est déjà fini', () => {
-  const a = atelier({ occupe: true })
-  a.sas.liberer() // le relief est prêt, la carte est partie d'elle-même
-  a.sas.demander()
+  a.sas.liberer()
+  assert.equal(a.montees(), 0, 'pas avant que le fondu soit consommé')
+  assert.equal(a.delai(), FONDU_MS)
+  a.ecouler()
   assert.equal(a.montees(), 1)
-  assert.equal(a.effacements(), 0, 'rien à effacer : la place était libre')
 })
 
-// ------------------------------- le chargement finit sans interaction
-test('personne n’a rien demandé : la fin du chargement ne montre rien', () => {
+test('JAMAIS deux au centre — le cas qui a échoué en production', () => {
   const a = atelier({ occupe: true })
+  // la barre veut monter pendant tout le chargement, plusieurs fois
+  a.sas.demander()
+  a.sas.demander()
+  a.sas.demander()
+  assert.equal(a.montees(), 0, 'la carte occupe encore : rien ne monte')
+  // le chargement finit ; tant que le fondu court, toujours rien
   a.sas.liberer()
   assert.equal(a.montees(), 0)
-  assert.equal(a.effacements(), 0)
-  assert.equal(a.retours(), 0)
+  // et seulement là
+  a.ecouler()
+  assert.equal(a.montees(), 1, 'une seule montée, une fois la place vraiment vide')
 })
 
-// ---------------------------------------------------- Échap / annulation
-test('Échap pendant le chargement : l’accueil part, la carte REVIENT', () => {
-  // la carte avait cédé pour l'accueil ; l'accueil parti, le chargement court
-  // toujours — sans elle le visiteur fixerait une image figée sans un mot.
+test('la demande ne se dédouble pas', () => {
   const a = atelier({ occupe: true })
   a.sas.demander()
-  a.fermer()
-  assert.equal(a.retours(), 1, 'la carte reprend le centre')
+  a.sas.demander()
+  a.sas.liberer()
+  a.ecouler()
+  assert.equal(a.montees(), 1)
 })
 
-test('Échap après la fin du chargement : la carte ne revient pas', () => {
+test('chargement à chaud : la carte revient, la montée programmée est annulée', () => {
   const a = atelier({ occupe: true })
   a.sas.demander()
-  a.sas.liberer() // le relief est prêt, la carte s'est effacée pour de bon
-  a.fermer()
-  assert.equal(a.retours(), 0)
+  a.sas.liberer() // le premier chargement finit, le fondu court
+  assert.equal(a.arme(), true)
+  a.sas.occuper() // un second chargement démarre avant la fin du fondu
+  assert.equal(a.arme(), false, 'le minuteur est oublié')
+  a.ecouler() // même s’il partait quand même, rien ne doit monter
+  assert.equal(a.montees(), 0)
+  // et c’est bien la fin du SECOND chargement qui fait monter l’accueil
+  a.sas.liberer()
+  a.ecouler()
+  assert.equal(a.montees(), 1)
 })
 
-test('Échap sans chargement en cours : rien à rétablir', () => {
-  const a = atelier()
-  a.sas.demander()
-  a.fermer()
-  assert.equal(a.retours(), 0)
-})
-
-test('après un Échap, une nouvelle montée refait céder la carte', () => {
+test('Échap pendant le chargement : la demande est oubliée pour de bon', () => {
   const a = atelier({ occupe: true })
   a.sas.demander()
-  a.fermer()
-  a.sas.demander() // le visiteur re-clique le logo, le chargement court encore
-  assert.equal(a.montees(), 2)
-  assert.equal(a.effacements(), 2)
+  a.sas.annuler()
+  assert.equal(a.sas.enAttente(), false)
+  a.sas.liberer()
+  a.ecouler()
+  assert.equal(a.montees(), 0, 'une demande annulée ne remonte JAMAIS plus tard')
 })
 
-// --------------------------- un chargement démarre SOUS l'accueil ouvert
-test('une carte qui apparaît sous l’accueil ouvert cède immédiatement', () => {
-  // chargement à chaud (recherche, zoom…) pendant que l'accueil est au
-  // centre : la laisser monter remettrait deux titres l'un sur l'autre —
-  // exactement le bug d'origine, dans l'autre sens.
-  const a = atelier()
-  a.sas.demander() // accueil ouvert, place libre
-  a.sas.occuper() // un chargement démarre
-  assert.equal(a.effacements(), 1)
-})
-
-test('une carte qui apparaît accueil fermé reste à l’écran', () => {
-  const a = atelier()
-  a.sas.occuper()
-  assert.equal(a.effacements(), 0)
-})
-
-test('un doublon d’occupation sous l’accueil ouvert n’efface qu’une fois', () => {
-  const a = atelier()
-  a.sas.demander()
-  a.sas.occuper()
-  a.sas.occuper() // le loader repasse par la même classe
-  assert.equal(a.effacements(), 1)
-})
-
-// ---------------------------------------------------- cycles successifs
-test('chaque nouveau chargement repart d’une carte pleine', () => {
-  // premier chargement : la carte cède pour l'accueil, puis finit (liberer).
-  // Second chargement accueil fermé : la carte doit vivre sa vie normale.
+test('Échap pendant le fondu : le minuteur est retiré, rien ne monte', () => {
   const a = atelier({ occupe: true })
   a.sas.demander()
   a.sas.liberer()
-  a.fermer()
-  a.sas.occuper() // second chargement, accueil fermé
-  assert.equal(a.effacements(), 1, 'la carte du second chargement ne cède pas')
-  a.sas.liberer()
-  assert.equal(a.retours(), 0)
+  a.sas.annuler()
+  assert.equal(a.arme(), false)
+  a.ecouler()
+  assert.equal(a.montees(), 0)
 })
 
-// ------------------------------------------------------------ états lus
-test('le sas dit si la place est prise et si la carte a cédé', () => {
+test('un chargement sans aucune demande ne fait rien monter', () => {
   const a = atelier({ occupe: true })
-  assert.equal(a.sas.placePrise(), true)
-  assert.equal(a.sas.aCede(), false)
-  a.sas.demander()
-  assert.equal(a.sas.aCede(), true)
+  a.sas.liberer()
+  assert.equal(a.arme(), false, 'pas de minuteur si personne n’attend')
+  assert.equal(a.montees(), 0)
+})
+
+test('la place se libère puis se reprend avant la demande', () => {
+  const a = atelier({ occupe: true })
   a.sas.liberer()
   assert.equal(a.sas.placePrise(), false)
-  assert.equal(a.sas.aCede(), false, 'la fin du chargement remet les compteurs à zéro')
+  a.sas.occuper()
+  assert.equal(a.sas.placePrise(), true)
+  a.sas.demander()
+  assert.equal(a.montees(), 0, 'la carte est de nouveau là : on attend')
+})
+
+test('rien ne monte deux fois si le minuteur part après une montée', () => {
+  const a = atelier({ occupe: true })
+  a.sas.demander()
+  a.sas.liberer()
+  a.ecouler()
+  assert.equal(a.montees(), 1)
+  a.ecouler() // un minuteur fantôme
+  assert.equal(a.montees(), 1, 'la demande a été consommée')
+})
+
+test('sans carte au départ, un chargement plus tard fait bien attendre', () => {
+  const a = atelier() // place libre
+  a.sas.demander()
+  assert.equal(a.montees(), 1)
+  a.sas.occuper() // chargement à chaud, l’accueil est déjà au centre
+  a.sas.demander() // il ne redemande rien d’utile
+  assert.equal(a.montees(), 1, 'pas de seconde montée')
 })

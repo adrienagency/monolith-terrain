@@ -55,10 +55,13 @@ export function buildHub({ bar, bottomBar, onExplore }) {
   // carte s'efface quand le relief est prêt. Sans arbitre, sur machine lente,
   // le visiteur recevait les DEUX en même temps — deux « ShibuMap », deux
   // sous-titres, du texte fantôme derrière les trois portes.
-  // L'ARBITRAGE A CHANGÉ DE SENS le 28/07 (Adrien) : l'accueil ne fait plus
-  // la queue, c'est la carte qui CÈDE, en fondu rapide (`#loading.cede`,
-  // style.css). Le fond de relief reste, lui : il ne part qu'avec `.hidden`.
-  // (La règle vit dans hub-sas.js, pure et testée ; ici, juste le câblage.)
+  // L'ARBITRAGE A CHANGÉ DE SENS DEUX FOIS le 28/07, et c'est la règle
+  // d'origine qui a gagné (Adrien) : « la barre de menu ne commence à bouger
+  // que dès que le loader a terminé de s'exécuter ». L'inversion intermédiaire
+  // — la carte s'effaçait sous l'accueil qui montait — ne supprimait pas le
+  // recouvrement, elle le raccourcissait : deux fondus qui se croisent restent
+  // lisibles ensemble, et une capture d'Adrien l'a montré. Le POURQUOI complet
+  // est dans hub-sas.js ; la règle y vit, pure et testée. Ici, juste le câblage.
   //
   // Le loader est cherché DANS LE DOM plutôt que passé en paramètre : il est
   // inline dans index.html, il existe avant tout module, et main.js n'a rien à
@@ -68,9 +71,6 @@ export function buildHub({ bar, bottomBar, onExplore }) {
 
   const sas = creerSas({
     montrer: lever,
-    effacer: () => chargement?.classList.add('cede'),
-    retablir: () => chargement?.classList.remove('cede'),
-    ouvert: isOpen,
     occupe: chargementVisible(),
   })
 
@@ -79,22 +79,13 @@ export function buildHub({ bar, bottomBar, onExplore }) {
   // jamais — le sas ne saurait plus qui occupe le centre. Même motif que le
   // fondu des phrases de chargement, et même raison.
   if (chargement) {
-    new MutationObserver((muts) => {
-      const visible = chargementVisible()
-      // la carte revient pour un chargement à chaud (main.js retire `.hidden`) :
-      // un `cede` resté d'une montée passée la laisserait invisible. On le
-      // retire AVANT d'annoncer l'occupation — occuper() le repose aussitôt si
-      // l'accueil est encore au centre. Le critère « .hidden vient de partir »
-      // (oldValue) évite de retirer le `cede` qu'on vient soi-même de poser.
-      if (visible && muts.some((m) => /\bhidden\b/.test(m.oldValue || ''))) {
-        chargement.classList.remove('cede')
-      }
-      visible ? sas.occuper() : sas.liberer()
-    }).observe(chargement, { attributes: true, attributeFilter: ['class'], attributeOldValue: true })
+    new MutationObserver(() => {
+      chargementVisible() ? sas.occuper() : sas.liberer()
+    }).observe(chargement, { attributes: true, attributeFilter: ['class'] })
   }
 
-  // la montée elle-même — appelée par le sas, jamais directement. La montée
-  // est immédiate désormais, mais les gardes restent doublées (show ET ici) :
+  // la montée elle-même — appelée par le sas, jamais directement, car c'est lui
+  // qui sait si la place est libre. Les gardes restent doublées (show ET ici) :
   // le sas doit pouvoir appeler montrer() sans connaître nos contextes bloqués.
   function lever() {
     if (blocked() || isOpen()) return
@@ -107,9 +98,9 @@ export function buildHub({ bar, bottomBar, onExplore }) {
     sas.demander()
   }
   function hide() {
-    // si la carte de chargement avait cédé le centre à l'accueil et que son
-    // chargement court toujours, elle le reprend — sans elle le visiteur
-    // fixerait le relief de fond figé, sans un mot.
+    // ⚠️ l'annulation vaut aussi quand l'accueil n'est PAS encore monté : une
+    // demande en attente derrière un chargement remonterait sinon toute seule,
+    // longtemps après qu'Adrien a appuyé sur Échap pour explorer librement.
     sas.annuler()
     if (!isOpen()) return
     if (input) input.placeholder = barPlaceholder
@@ -155,7 +146,16 @@ export function buildHub({ bar, bottomBar, onExplore }) {
   const escape = () => { hide(); onExplore?.() }
   esc.addEventListener('click', escape)
   veil.addEventListener('click', escape)
-  window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isOpen()) escape() })
+  // ⚠️ « ou en attente », et ce n'est pas un détail : depuis que l'accueil
+  // attend la fin du chargement, il n'est PAS ouvert pendant que la carte de
+  // chargement est à l'écran — or c'est exactement là qu'elle promet « Echap —
+  // explorer librement ». Sans ce second cas, on appuyait sur Échap, il ne se
+  // passait rien, et l'accueil montait quand même deux secondes plus tard.
+  // Mesuré en navigateur avant correction : montée à 3 681 ms malgré un Échap
+  // à 1 240 ms.
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && (isOpen() || sas.enAttente())) escape()
+  })
 
   return { show, hide, isOpen, toggle: () => (isOpen() ? escape() : show()) }
 }
