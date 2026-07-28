@@ -5358,7 +5358,18 @@ function tick() {
   // rAF normally; timeout fallback keeps rendering when the tab is hidden
   if (document.hidden) tickTimer = setTimeout(tick, 40)
   else rafId = requestAnimationFrame(tick)
-  const dt = Math.min(clock.getDelta(), 0.05)
+  // DEUX DELTAS, ET C'EST DÉLIBÉRÉ.
+  // `dtBrut` est le temps réellement écoulé. `dt` est celui de la SIMULATION,
+  // borné à 0,05 s parce qu'une image à 2 s téléporterait les bateaux, ferait
+  // sauter la houle et avancerait les caustiques d'un bloc.
+  // ⚠️ Le gouverneur de performance (perf.js) doit recevoir le BRUT. Il a reçu
+  // le borné pendant des mois : sa moyenne ne pouvait alors pas descendre sous
+  // 20 fps, donc une machine à 3 fps et une machine à 20 fps lui rendaient le
+  // même chiffre et la même décision — un seul palier, quand la première en
+  // réclamait trois. C'est la moitié du « l'ordi souffle à fond, 3 images par
+  // seconde » de l'iMac 2015 du 28/07/2026. Voir l'en-tête de perf.js.
+  const dtBrut = clock.getDelta()
+  const dt = Math.min(dtBrut, 0.05)
   const t = clock.elapsedTime
 
   updateCameraMotion(dt)
@@ -5532,7 +5543,7 @@ function tick() {
   // ⚠️ La qualité adaptative attend aussi : sans dessin, la cadence mesurée est
   // fantaisiste et ferait grimper le palier de qualité sur des images vides.
   if (!programmesPrets) return
-  aq.update(dt) // adaptive quality: sample FPS, step tiers when sustained
+  aq.update(dtBrut) // adaptive quality : le temps RÉEL, jamais le dt de simulation (voir plus haut)
   composer.render(dt)
   if (recorder?.recording) recorder.captureFrame() // null until first export
 }
