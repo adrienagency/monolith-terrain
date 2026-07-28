@@ -110,6 +110,7 @@ import { initLoadingHints } from './ui/loading-hints.js'
 import { createAdaptiveQuality } from './perf.js'
 import { detailForZoom } from './zoom-detail.js'
 import { applyRenderSize, screenPixelRatio } from './viewport.js'
+import { sonderMachine } from './palier-machine.js'
 import './ui/v28.css'
 // the export stack (modal + Recorder + mediabunny encoder) is heavy and only
 // needed on demand — it is dynamic-import()ed on the first Export click, so
@@ -117,6 +118,18 @@ import './ui/v28.css'
 
 // ------------------------------------------------------------------ params
 
+// LE PALIER DE LA MACHINE, DÉJÀ RENDU. boot.js a sondé la carte graphique, ses
+// limites, l'écran et sa densité avant même de télécharger ce fichier ; ici on
+// ne fait que RELIRE le verdict mémorisé (aucun second contexte WebGL n'est
+// créé). Voir src/palier-machine.js pour le tableau croisé et ses raisons.
+//
+// ⚠️ CE QUI SUIT NE POSE QUE DES VALEURS DE DÉPART. Dès que le visiteur touche
+// « Échelle de rendu », « Ombres » ou « Résolution des ombres » dans les
+// Paramètres, les drapeaux `dirty` de perf.js relâchent définitivement le
+// levier concerné : un réglage manuel gagne TOUJOURS contre la détection.
+// Rien de tout ça n'est persisté ni ne voyage dans un gabarit — ce sont des
+// valeurs propres à la machine (voir TEMPLATE_KEYS dans templates-user.js).
+const MACHINE = sonderMachine()
 
 const params = {
   // terrain source — boots directly over Annecy and its surroundings (the lake,
@@ -321,9 +334,30 @@ const params = {
   // quadratique) — voir MAX_PIXEL_RATIO dans viewport.js.
   // Le gouverneur de performance peut encore faire descendre cette valeur sous
   // charge soutenue ; c'est la tirette « Échelle de rendu » qui la remonte.
-  pixelRatio: screenPixelRatio(window.devicePixelRatio),
-  shadowMode: 'dynamic',
-  shadowRes: 2048,
+  //
+  // ⚠️ CE N'EST PLUS LA DENSITÉ DE L'ÉCRAN, C'EST CELLE QUE LA MACHINE TIENT.
+  // Lire `devicePixelRatio` réparait le sens de la valeur ; ça ne réparait pas
+  // son AMPLEUR. Sur l'iMac 27" 2015 (Retina 5K, Iris Pro), la densité honnête
+  // est 2 — et 2 × 2560×1440 fait 14,7 millions de pixels par image sur un
+  // circuit intégré de 2015. C'était le premier rendu, avant même que le
+  // gouverneur n'ait vu une seule image. palier-machine.js borne donc cette
+  // densité par un BUDGET DE PIXELS propre au palier : 0,93 sur cet iMac, soit
+  // 4,6 fois moins de pixels — et exactement `screenPixelRatio(dpr)`, sans un
+  // pixel de moins, sur toute machine que le budget ne serre pas (une carte
+  // dédiée en 1080p, un MacBook Retina récent : rien ne change pour elles).
+  pixelRatio: Math.min(screenPixelRatio(window.devicePixelRatio), MACHINE.densite),
+  shadowMode: 'dynamic', // le MODE reste au gouverneur (perf.js tierShadows) — voir plus bas
+  // La RÉSOLUTION de la carte d'ombres, elle, n'appartient à personne d'autre :
+  // perf.js ne la gère pas, et c'est une texture 2048² (16 Mo en VSM) allouée
+  // au tout premier rendu. Sur un palier bas elle tombe à 1024² une fois pour
+  // toutes — un changement à chaud rebâtirait la carte d'ombres sous les yeux
+  // du visiteur, et « la carte reste calme ».
+  shadowRes: MACHINE.ombresRes,
+  // Plafond du côté de l'analyse de relief (terrain.js → analyzeDem). 0 =
+  // pleine taille du MNT. C'est ~390 ms de fil principal GELÉ en 1536², à
+  // chaque reconstruction : sur une machine lente c'est une seconde de page
+  // figée que le visiteur lit comme « ça a planté ».
+  analysisMax: MACHINE.analyseMax,
 
   // globe (orbital view)
   globeExaggeration: 18,
@@ -948,7 +982,12 @@ let clouds = null // assigned in the world section
 
 const sun = new THREE.DirectionalLight(0xffffff, params.sunIntensity)
 sun.castShadow = true
-sun.shadow.mapSize.set(2048, 2048)
+// La taille vient de params, pas d'un 2048 en dur : sur un palier bas la carte
+// d'ombres naît en 1024² au lieu d'être allouée en 2048² puis rebâtie. Une
+// texture VSM 2048² coûte 16 Mo et son remplissage est le premier gel visible
+// du démarrage. (Le SÉLECTEUR « Résolution des ombres » écrase cette valeur dès
+// que le visiteur y touche — voir setShadowRes.)
+sun.shadow.mapSize.set(params.shadowRes, params.shadowRes)
 // wide enough to catch the slab's cast shadow spilling onto the base
 sun.shadow.camera.left = -42
 sun.shadow.camera.right = 42
@@ -1903,6 +1942,14 @@ async function fetchAndBuildDem() {
   // réglées sur un AUTRE relief. On les recalcule pour celui qu'on vient de
   // charger, sauf les curseurs que l'utilisateur a repris à la main.
   applyAutoShade()
+  // LE RENDEZ-VOUS DU PALIER AVEC LE LOOK D'OUVERTURE. Le look qui vient
+  // d'être posé porte `shadowMode` et `grain` : sur une machine estimée faible,
+  // il vient de réinstaller des ombres dynamiques par-dessus le palier, et le
+  // gouverneur s'apprête à croire que c'est l'utilisateur qui a fait ça (il
+  // relâcherait alors le levier pour toujours). `rebase` recapture la
+  // référence et ré-applique le palier — une fois, au premier relief, et plus
+  // jamais ensuite. Voir le commentaire de rebase() dans perf.js.
+  aq?.rebase()
   // FLOTTE — après le relief ET la mer : elle a besoin de l'un pour savoir où
   // est l'eau, de l'autre pour partager les uniformes de houle.
   syncBoats()
@@ -5112,7 +5159,25 @@ aq = createAdaptiveQuality({
   announce: (m) => modes.announce(m),
   refreshAll,
   canStep: () => modes.mode === 'surface' && !modes.busy && !recorder?.recording,
+  // LE GOUVERNEUR NE PART PLUS DU MAXIMUM. Il part de ce que la sonde a estimé
+  // avant le premier rendu, et ne fait plus qu'AFFINER : il descend si la
+  // machine souffre quand même, il regagne au plus un cran si elle tient.
+  // C'est le correctif des 47 secondes mesurées le 28/07/2026.
+  palierMachine: MACHINE.palier,
 })
+
+// LE VERDICT, LISIBLE DEPUIS LA CONSOLE — et une ligne au démarrage quand la
+// machine n'est PAS en pleine qualité. Un système qui dégrade en silence est
+// indébogable à distance : c'est précisément le silence qui a laissé le mode
+// dégradé dormir pendant des mois (voir l'en-tête de perf.js).
+window.__palierMachine = MACHINE
+if (MACHINE.palier > 0) {
+  // eslint-disable-next-line no-console
+  console.info(
+    `[ShibuMap] palier ${MACHINE.palier} — ${MACHINE.nom} (sonde en ${MACHINE.ms} ms)\n  `
+    + MACHINE.raisons.join('\n  ')
+  )
+}
 
 // ------------------------------------------------------------------ keyboard shortcuts + undo/redo
 
