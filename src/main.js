@@ -5158,7 +5158,31 @@ aq = createAdaptiveQuality({
   applyShadowMode,
   announce: (m) => modes.announce(m),
   refreshAll,
-  canStep: () => modes.mode === 'surface' && !modes.busy && !recorder?.recording,
+  // ⚠️ `!demBusy` — LE RELIEF EN CONSTRUCTION N'EST PAS UNE MESURE DE MACHINE.
+  //
+  // Signalé par Adrien le 28/07/2026 : « ça ne laggait pas du tout hier ».
+  // Bissecté jusqu'à 2613877, le commit qui a réparé la surdité du gouverneur.
+  // En lui donnant enfin le delta RÉEL, on lui a aussi donné les images de
+  // `fetchAndBuildDem` — décompression des tuiles, fabrication de la géométrie.
+  // Elles sont longues ET consécutives, donc `echantillonRetenu` les garde (à
+  // raison : c'est ce qui sauve une machine réellement lente). Le gouverneur
+  // lit « 6,7 images/s » et `palierVise` l'envoie de T0 à T3 d'un seul bond.
+  //
+  // Le palier 3 est le SEUL qui coupe les ombres, donc le seul qui fasse
+  // basculer `sun.castShadow` : three recompile alors TOUS les programmes de la
+  // scène — 1 936 ms chronométrées sur cette page (voir applyShadowMode). Puis
+  // la machine, chargée et redevenue fluide, remonte et repasse la frontière en
+  // sens inverse. Mesuré sur le vrai contrôleur, machine JAMAIS lente :
+  //   hier (02ebd89 et 31ea718) : 0 changement de palier,  0 recompilation
+  //   2613877 → main            : 4 changements de palier, 2 RECOMPILATIONS
+  //     8,9 s → T3   28,9 s → T2   48,9 s → T1   68,9 s → T0 (retour au départ)
+  // Deux gels de ~2 s pour revenir exactement au palier de départ : c'est ça,
+  // le lag. Le guichet fermé pendant la construction les supprime tous les deux.
+  //
+  // Ça ne re-casse PAS l'iMac 2015 : une machine vraiment à 3 fps l'est ENCORE
+  // une fois le relief chargé — elle atteint le palier plancher à 14,3 s au lieu
+  // de 9,0 s, toujours sous les 15 s qu'exige test/perf-gouverneur.test.js.
+  canStep: () => modes.mode === 'surface' && !modes.busy && !recorder?.recording && !demBusy,
   // LE GOUVERNEUR NE PART PLUS DU MAXIMUM. Il part de ce que la sonde a estimé
   // avant le premier rendu, et ne fait plus qu'AFFINER : il descend si la
   // machine souffre quand même, il regagne au plus un cran si elle tient.
