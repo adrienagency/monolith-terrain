@@ -10,7 +10,7 @@ import { LineGeometry } from 'three/addons/lines/LineGeometry.js'
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { latLonToWorld, metersPerPixel, surfaceMetersPerUnit, EARTH_RADIUS_M } from './geo.js'
-import { loadLayer } from './map/geo-data.js'
+import { loadLayerForBounds, patchBounds } from './map/geo-data.js'
 import { makeLabelTexture, labelPlate, labelPlateInk, labelFontReady } from './map/text-label.js'
 import { computeArchSpecs, buildArchMesh, disposeArchGroup } from './arch.js'
 
@@ -887,7 +887,7 @@ export class GpxLayer {
   async _buildVillages(buildId, dem, world, totKm) {
     if (!dem) return
     try {
-      const [rows] = await Promise.all([loadLayer('places'), labelFontReady()])
+      const [rows] = await Promise.all([loadLayerForBounds('places', patchBounds(dem)), labelFontReady()])
       if (buildId !== this._villageBuildId || !this.track || !Array.isArray(rows)) return
       const radiusWorld = VILLAGE_RADIUS_M / surfaceMetersPerUnit(dem)
       this._villageHits = pickVillagesAlongTrack(rows, {

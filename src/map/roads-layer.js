@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { latLonToWorld } from '../geo.js'
-import { loadLayer, patchBounds, clipToPatch, filterByZoom } from './geo-data.js'
+import { loadLayerForBounds, patchBounds, clipToPatch, filterByZoom } from './geo-data.js'
 import { latlonToWorldPts } from './draped-line.js'
 import { buildLineSegments } from './line-segments.js'
 import { fetchOverpassLines } from './overpass.js'
@@ -124,7 +124,7 @@ export class RoadsLayer {
       if (feats) { rings = feats.map((f) => ({ coords: f.coords, rank: roadRank(f.kind) })); osmOk = true }
     }
     if (!rings) { // Natural Earth tier (or tiles/OSM unavailable → fallback), unchanged
-      const fc = await loadLayer('roads')
+      const fc = await loadLayerForBounds('roads', bounds)
       if (id !== this._buildId || dem !== terrain.dem || !fc) return
       rings = []
       for (const f of filterByZoom(clipToPatch(fc.features, bounds), zoom)) {
