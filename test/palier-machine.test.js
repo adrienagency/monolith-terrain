@@ -15,6 +15,7 @@ import {
   lireSignaux,
   sonderMachine,
 } from '../src/palier-machine.js'
+import { PLAFOND_MPX } from '../src/viewport.js'
 
 // ---------------------------------------------------------------------------
 // LES MACHINES RÉELLES — celles qui ont souffert, nommées, avec leurs chiffres
@@ -281,12 +282,38 @@ test('RTX 3070 en 1080p → palier HAUT, et RIEN ne change pour elle', () => {
   assert.equal(r.analyseMax, 0, '0 = analyse à pleine taille du MNT')
 })
 
-test('MacBook Pro M1 : Retina + puissant garde sa densité 2', () => {
+test('MacBook Pro M1 : reconnu FORT, mais borné par la barre haute de 2K', () => {
   // Le piège symétrique de l'iMac : un écran dense n'est PAS un signal de
-  // faiblesse. Punir la densité seule aurait flouté tous les Mac récents.
+  // faiblesse. Punir la densité seule aurait flouté tous les Mac récents — et
+  // c'est bien ce que dit le PALIER : 0, pleine qualité, tous les effets.
   const r = reglagesServis(MBP_M1)
   assert.equal(r.palier, 0)
-  assert.equal(r.densite, 2)
+  assert.equal(r.ssao, true, 'le palier est intact : ce n’est pas une dégradation')
+  assert.equal(r.dof, true)
+  // Sa densité, elle, tombe sous 2 — non pas parce qu'on le juge faible, mais
+  // parce qu'Adrien a posé une barre haute commune le 28/07 : « réso 2K max ».
+  // Elle s'applique à TOUT LE MONDE, y compris à la machine la plus forte.
+  assert.ok(r.densite < 2, 'la barre haute mord même sur un M1')
+  assert.ok(r.mpxServis <= PLAFOND_MPX + 0.01, `${r.mpxServis} Mpx doit tenir sous la barre`)
+})
+
+test('la barre haute de 2K vaut pour TOUTES les machines, palier 0 compris', () => {
+  // LE TEST CARDINAL du plafond : quelle que soit la carte, quel que soit
+  // l'écran, l'image temps réel ne dépasse jamais 2560×1440. Sans lui, le
+  // palier 0 promettait 16 Mpx ici pendant qu'applyRenderSize en servait 3,69.
+  for (const machine of [RTX_1080P, MBP_M1, IMAC_2015, PORTABLE_2012, SWIFTSHADER]) {
+    const r = reglagesServis(machine)
+    assert.ok(
+      r.mpxServis <= PLAFOND_MPX + 0.01,
+      `${r.nom} sert ${r.mpxServis} Mpx, au-dessus de la barre de ${PLAFOND_MPX}`,
+    )
+  }
+})
+
+test('un écran ordinaire ne sent PAS la barre haute passer', () => {
+  // Non-régression la plus importante du plafond : il ne doit rien coûter à la
+  // majorité du trafic. Un 1080p à densité 1 fait 2,07 Mpx, largement dessous.
+  assert.equal(reglagesServis(RTX_1080P).densite, 1, 'densité inchangée')
 })
 
 test('vieux portable Windows (HD 4000, 1366×768) → palier ALLÉGÉ malgré un petit écran', () => {

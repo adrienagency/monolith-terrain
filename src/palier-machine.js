@@ -68,6 +68,12 @@
 //   • LA CARTE RESTE CALME. Ces valeurs sont posées AVANT le premier rendu.
 //     Rien ne bascule sous les yeux du visiteur ; les changements à chaud
 //     restent l'affaire du gouverneur, avec ses 20 s d'hystérésis.
+// La barre haute de pixels vit dans viewport.js, avec le reste de ce qui
+// décide de la taille du tampon de dessin. On l'importe plutôt que de la
+// recopier : deux plafonds qui divergent, c'est le genre d'écart qu'on ne
+// découvre que sur la machine d'un visiteur.
+import { PLAFOND_MPX } from './viewport.js'
+
 export const PALIERS = [
   {
     // 0 — PLEINE QUALITÉ. Cartes dédiées et Apple Silicon sur un écran normal.
@@ -359,11 +365,21 @@ export function reglagesServis(signaux = {}) {
   const [lw, lh] = s.ecran
   const mpxBase = (lw * lh) / 1e6 // l'écran à densité 1
 
-  const parBudget = mpxBase > 0 ? Math.sqrt(p.budgetMpx / mpxBase) : p.densiteMax
+  // LA BARRE HAUTE COMMUNE (PLAFOND_MPX, viewport.js) passe avant le budget du
+  // palier : elle vaut pour tout le monde, y compris la machine la plus forte.
+  // Sans elle, le palier 0 promettait 16 Mpx ici pendant qu'applyRenderSize en
+  // servait 3,69 — deux chiffres pour la même image, et `mpxServis` mentait.
+  const budget = Math.min(p.budgetMpx, PLAFOND_MPX)
+  const parBudget = mpxBase > 0 ? Math.sqrt(budget / mpxBase) : p.densiteMax
   let densite = Math.min(p.densiteMax, e.densiteEcran, parBudget)
-  densite = Math.max(PLANCHER_DENSITE, Math.round(densite * 100) / 100)
+  // ⚠️ ON ARRONDIT VERS LE BAS, pas au plus proche. Un plafond qui arrondit
+  // vers le haut n'est pas un plafond : mesuré sur le MacBook M1, la densité
+  // juste valait 1,575 et l'arrondi au centième la remontait à 1,58 — soit
+  // 3,71 Mpx servis pour une barre à 3,69. Deux centièmes de densité ne se
+  // voient pas ; une barre qu'on peut franchir ne sert à rien.
+  densite = Math.max(PLANCHER_DENSITE, Math.floor(densite * 100) / 100)
   if (parBudget < Math.min(p.densiteMax, e.densiteEcran) - 1e-6) {
-    e.raisons.push(`budget de ${p.budgetMpx} Mpx : densité ramenée à ${densite}`)
+    e.raisons.push(`budget de ${budget} Mpx : densité ramenée à ${densite}`)
   }
 
   return {

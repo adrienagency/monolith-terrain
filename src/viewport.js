@@ -110,6 +110,52 @@ export const MAX_PIXEL_RATIO = 2
 export const screenPixelRatio = (dpr, cap = MAX_PIXEL_RATIO) =>
   Math.min(cap, typeof dpr === 'number' && dpr > 0 ? dpr : 1)
 
+// ---------------------------------------------------------------------------
+// LA BARRE HAUTE DE PIXELS — « réso 2K max » (Adrien, 28/07)
+//
+// MAX_PIXEL_RATIO borne un FACTEUR, pas un total : densité 2 coûte 8 Mpx sur un
+// portable et 14,7 sur un iMac 5K. Ce plafond-ci borne le TOTAL, et c'est lui
+// qui tient la promesse « il vaut mieux de la fluidité que de la qualité ».
+//
+// POURQUOI 2560×1440 exactement. « 2K » est ambigu — le cinéma appelle ainsi le
+// DCI 2048×1080, le grand public le QHD 2560×1440. On prend le QHD, pour la
+// même raison qu'export-presets.js l'a déjà tranché de ce côté : c'est le cran
+// que le menu d'export nomme « 2K ». Deux définitions du même mot dans le même
+// produit, c'est une explication de plus à donner et une incohérence de plus à
+// découvrir.
+//
+// CE QU'IL FAIT, EN CLAIR. Sur tout écran 16:9 il sert exactement 2560×1440 :
+//   • 1080p à densité 1 → 2,07 Mpx, INTACT (le plafond ne mord pas)
+//   • iMac 5K (2560×1440 CSS à densité 2) → densité 1, soit 14,7 → 3,69 Mpx
+//   • portable Retina (1440×900 CSS à densité 2) → densité 1,69 au lieu de 2
+//   • moniteur 4K à densité 1 → densité 0,67
+//
+// ⚠️ IL S'APPLIQUE AUSSI À LA TIRETTE « Échelle de rendu ». C'est la seule
+// entorse à la règle « le réglage manuel gagne toujours », et elle est
+// délibérée : un 5K poussé à la main est précisément le cas qui fait souffler
+// le ventilateur. La tirette garde tout son effet SOUS le plafond.
+//
+// ⚠️ L'EXPORT N'EST PAS CONCERNÉ : il force sa taille par son propre chemin
+// (export-recorder.js → applySize), jamais par applyRenderSize. Un export 4K
+// reste un vrai 4K — c'est l'affichage temps réel qu'on borne, pas le rendu
+// qu'on livre. Un test le verrouille.
+export const PLAFOND_MPX = (2560 * 1440) / 1e6 // 3,6864
+
+// La densité que le plafond autorise pour un cadre donné. On recule la DENSITÉ,
+// jamais une dimension : rogner un côté déforme l'image, reculer la densité
+// multiplie les deux côtés par le même facteur. Même règle que fitDrawingBuffer.
+export function densiteSousPlafond(w, h, ratio, budgetMpx = PLAFOND_MPX) {
+  const r = typeof ratio === 'number' && ratio > 0 && ratio < Infinity ? ratio : 1
+  const mpx = (w * h) / 1e6
+  // un cadre non mesurable ou un budget absurde ne doit rien dégrader : sans
+  // chiffre fiable on rend ce qu'on nous demande, comme partout dans ce fichier
+  if (!(mpx > 0) || !(budgetMpx > 0) || !Number.isFinite(budgetMpx)) return r
+  // arrondi vers le BAS au millième : un plafond qui arrondit vers le haut
+  // n'est pas un plafond, et une densité à quinze décimales rend illisible
+  // l'avertissement de rabotage matériel juste en dessous.
+  return Math.min(r, Math.floor(Math.sqrt(budgetMpx / mpx) * 1000) / 1000)
+}
+
 // La contrainte la plus basse que la carte impose. On interroge les DEUX
 // paramètres : les cibles du compositeur sont des textures, mais le tampon de
 // dessin lui-même est un renderbuffer, et rien ne garantit qu'ils montent aussi
@@ -238,9 +284,14 @@ export function applyRenderSize({ renderer, composer, camera, pixelRatio } = {})
   const win = typeof window === 'undefined' ? {} : window
   const [w, h] = frameSize(box?.clientWidth, box?.clientHeight, win.innerWidth, win.innerHeight)
   if (!isRenderableSize(w, h)) return null
-  const voulu = typeof pixelRatio === 'number' && pixelRatio > 0
+  const demande = typeof pixelRatio === 'number' && pixelRatio > 0
     ? pixelRatio
     : (renderer.getPixelRatio?.() ?? 1)
+  // LA BARRE HAUTE D'ABORD, la limite matérielle ensuite (voir PLAFOND_MPX).
+  // L'ordre compte : le plafond raisonne en pixels totaux, le rabotage
+  // matériel en longueur de côté. Passer le second en premier laisserait un
+  // 5K sous la limite de texture franchir tranquillement les 14 Mpx.
+  const voulu = densiteSousPlafond(w, h, demande)
   // un contexte perdu ne doit pas empêcher un redimensionnement : sans limite
   // lisible on sert la densité voulue, exactement comme avant ce garde-fou
   let limite = 0

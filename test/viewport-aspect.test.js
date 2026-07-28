@@ -6,6 +6,7 @@ import { PerspectiveCamera, Vector3 } from 'three'
 import {
   isRenderableSize, safeAspect, frameSize, applyRenderSize,
   screenPixelRatio, glSizeLimit, fitDrawingBuffer, MAX_PIXEL_RATIO,
+  densiteSousPlafond, PLAFOND_MPX,
 } from '../src/viewport.js'
 
 const ROOT = path.join(import.meta.dirname, '..')
@@ -433,10 +434,13 @@ const avecWarn = (fn) => {
 }
 
 test('applyRenderSize : machine normale — rien ne change, et rien ne s’affiche en console', () => {
-  const f = fauxGl(1366, 768, 16384)
-  const dits = avecWarn(() => assert.deepEqual(applyRenderSize({ ...f, pixelRatio: 2 }), [1366, 768]))
-  assert.deepEqual(f.vus.renderer, [1366, 768], 'la taille CSS ne bouge pas d’un pixel')
-  assert.deepEqual(f.vus.composer, [1366, 768])
+  // ⚠️ le cadre est délibérément PETIT (1120×630 × densité 2 = 2,82 Mpx) : il
+  // doit tenir sous la barre haute de 2K, sinon ce test ne mesurerait plus le
+  // rabotage matériel mais le plafond de pixels — deux garde-fous distincts.
+  const f = fauxGl(1120, 630, 16384)
+  const dits = avecWarn(() => assert.deepEqual(applyRenderSize({ ...f, pixelRatio: 2 }), [1120, 630]))
+  assert.deepEqual(f.vus.renderer, [1120, 630], 'la taille CSS ne bouge pas d’un pixel')
+  assert.deepEqual(f.vus.composer, [1120, 630])
   assert.equal(f.vus.ratio, 2, 'la densité demandée est servie telle quelle')
   assert.equal(dits.length, 0, 'aucun avertissement sur une machine capable')
 })
@@ -462,7 +466,12 @@ test('applyRenderSize : le rabotage se DIT, avec les chiffres — le silence est
   const dits = avecWarn(() => applyRenderSize({ ...f, pixelRatio: 2 }))
   assert.equal(dits.length, 1, 'un avertissement, et un seul')
   const txt = dits[0]
-  for (const n of ['2732', '2048', '1366']) {
+  // Le tampon DEMANDÉ à la carte, c'est celui d'après la barre haute de 2K :
+  // sur ce cadre elle a déjà ramené la densité de 2 à ~1,87, et c'est bien ce
+  // chiffre-là que le pilote a refusé. On le recalcule plutôt que de le figer,
+  // pour que le test dise la règle et pas une valeur magique.
+  const large = Math.floor(1366 * densiteSousPlafond(1366, 768, 2))
+  for (const n of [String(large), '2048', '1366']) {
     assert.ok(txt.includes(n), `l’avertissement doit porter ${n} : « ${txt} »`)
   }
 })
@@ -528,4 +537,103 @@ test('main.js : le resize passe par applyRenderSize, pas par son propre setSize'
   const body = src.slice(at, at + 1600)
   assert.match(body, /applyRenderSize/, 'le resize doit servir la taille par la fonction unique')
   assert.doesNotMatch(body, /composer\.setSize\(/, 'plus de seconde source de vérité dans le resize')
+})
+
+// ---------------------------------------------------------------------------
+// LA BARRE HAUTE DE PIXELS — « réso 2K max » (Adrien, 28/07/2026)
+// ---------------------------------------------------------------------------
+// MAX_PIXEL_RATIO borne un FACTEUR ; celle-ci borne le TOTAL. Sans elle, un
+// iMac 5K poussait 14,7 Mpx par image en pleine qualité — trois images par
+// seconde, ventilateur à fond, et aucune tirette pour s'en apercevoir. Ces
+// tests décrivent la barre par ses effets sur des machines nommées.
+
+// même faux trio, mais celui-ci retient la DENSITÉ servie : c'est elle que le
+// plafond change, jamais les dimensions du cadre.
+const fauxDense = (cw, ch) => {
+  const vus = { ratio: null, renderer: null }
+  return {
+    vus,
+    renderer: {
+      domElement: { parentElement: { clientWidth: cw, clientHeight: ch } },
+      setSize: (w, h) => { vus.renderer = [w, h] },
+      setPixelRatio: (r) => { vus.ratio = r },
+    },
+    camera: { aspect: 1, updateProjectionMatrix() {} },
+  }
+}
+// les pixels réellement poussés à chaque image
+const mpxServis = (f) => (f.vus.renderer[0] * f.vus.renderer[1] * f.vus.ratio ** 2) / 1e6
+
+test('densiteSousPlafond : 1080p à densité 1 passe INTACT', () => {
+  // La non-régression la plus importante : la majorité du trafic ne doit rien
+  // sentir. 1920×1080 = 2,07 Mpx, largement sous la barre de 3,69.
+  assert.equal(densiteSousPlafond(1920, 1080, 1), 1)
+})
+
+test('densiteSousPlafond : tout écran 16:9 se retrouve servi en 2560×1440', () => {
+  // La barre est un PLAFOND : on passe dessous, jamais dessus. L'arrondi au
+  // millième vers le bas coûte quelques pixels sur les très grands écrans —
+  // d'où la marge basse, qui vérifie qu'on reste tout de même au ras.
+  for (const [w, h, r] of [[2560, 1440, 2], [3840, 2160, 1], [1920, 1080, 2]]) {
+    const d = densiteSousPlafond(w, h, r)
+    const servis = (w * h * d * d) / 1e6
+    assert.ok(servis <= PLAFOND_MPX, `${w}×${h} sert ${servis} Mpx, AU-DESSUS de la barre`)
+    assert.ok(servis > PLAFOND_MPX * 0.99, `${w}×${h} sert ${servis} Mpx, on gaspille de la finesse`)
+    assert.ok(Math.abs(w * d - 2560) < 5, `${w}×${h} → ${Math.round(w * d)} px de large au lieu de 2560`)
+  }
+})
+
+test('densiteSousPlafond : un cadre non mesurable ne dégrade RIEN', () => {
+  // même règle que partout dans ce fichier : sans chiffre fiable on sert ce
+  // qu'on nous demande. Brider à l'aveugle serait pire que le mal.
+  assert.equal(densiteSousPlafond(0, 0, 2), 2)
+  assert.equal(densiteSousPlafond(1920, 1080, 2, 0), 2)
+  assert.equal(densiteSousPlafond(1920, 1080, 2, Infinity), 2)
+})
+
+test('applyRenderSize : l’iMac 5K tombe à densité 1 — 14,7 Mpx deviennent 3,69', () => {
+  // macOS rapporte 2560×1440 CSS à densité 2. C'est LA machine du 28/07.
+  const f = fauxDense(2560, 1440)
+  applyRenderSize({ ...f, pixelRatio: 2 })
+  assert.equal(f.vus.ratio, 1)
+  assert.deepEqual(f.vus.renderer, [2560, 1440], 'le CADRE ne bouge pas : seule la densité recule')
+  assert.ok(mpxServis(f) <= PLAFOND_MPX + 0.01)
+})
+
+test('applyRenderSize : un 1080p ordinaire garde exactement sa densité', () => {
+  const f = fauxDense(1920, 1080)
+  applyRenderSize({ ...f, pixelRatio: 1 })
+  assert.equal(f.vus.ratio, 1, 'la barre ne mord pas ici')
+})
+
+test('applyRenderSize : la tirette « Échelle de rendu » est bornée elle aussi', () => {
+  // C'est la seule entorse à « le réglage manuel gagne toujours », et elle est
+  // délibérée : un 5K poussé à la main est exactement le cas qui fait souffler
+  // le ventilateur. Sous la barre, la tirette garde tout son effet — le second
+  // cas le prouve.
+  const fort = fauxDense(2560, 1440)
+  applyRenderSize({ ...fort, pixelRatio: 2 })
+  assert.ok(mpxServis(fort) <= PLAFOND_MPX + 0.01, 'même demandée à la main, la barre tient')
+
+  const doux = fauxDense(1280, 720)
+  applyRenderSize({ ...doux, pixelRatio: 1.5 })
+  assert.equal(doux.vus.ratio, 1.5, 'sous la barre, la tirette fait exactement ce qu’elle dit')
+})
+
+test('la barre haute vaut 2560×1440, le même « 2K » que le menu d’export', () => {
+  // Deux définitions du mot « 2K » dans le même produit, c'est une incohérence
+  // à découvrir un jour. export-presets.js a tranché pour le QHD ; on suit.
+  assert.equal(PLAFOND_MPX, (2560 * 1440) / 1e6)
+  const src = fs.readFileSync(path.join(ROOT, 'src/export-presets.js'), 'utf8')
+  assert.match(src, /2560/, 'le cran « 2K » de l’export doit rester le même nombre')
+})
+
+test('L’EXPORT N’EST PAS BORNÉ : il ne passe pas par applyRenderSize', () => {
+  // Le plafond borne l'AFFICHAGE temps réel, jamais le rendu qu'on livre. Un
+  // export 4K doit rester un vrai 4K. Ce test épingle la séparation des deux
+  // chemins : si un jour l'enregistreur se met à appeler applyRenderSize, les
+  // exports se retrouveraient silencieusement rabotés à 2K.
+  const src = fs.readFileSync(path.join(ROOT, 'src/export-recorder.js'), 'utf8')
+  assert.doesNotMatch(src, /applyRenderSize/,
+    'l’enregistreur force sa taille par applySize (export.js), et doit continuer')
 })
