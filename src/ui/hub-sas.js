@@ -1,94 +1,92 @@
 // LE SAS DE L'ACCUEIL — qui a le droit d'occuper le centre de l'écran.
 //
-// LE BUG QU'IL CORRIGE (capture Adrien, vieux portable). L'accueil et la carte
-// de chargement visent EXACTEMENT le même point : le milieu de la fenêtre. Or
-// ils sont pilotés par deux horloges qui n'ont jamais été mises d'accord :
+// LE CONFLIT QU'IL ARBITRE (capture Adrien, vieux portable). L'accueil et la
+// carte de chargement visent EXACTEMENT le même point : le milieu de la
+// fenêtre. Or ils sont pilotés par deux horloges qui n'ont jamais été mises
+// d'accord :
 //   • l'accueil monte 900 ms après que main.js a fini de s'évaluer ;
 //   • la carte de chargement s'efface quand le relief est prêt (2 s au plus
 //     tôt, bien davantage si les tuiles ou le calcul traînent).
-// Sur un poste rapide les deux tombent à ~2,4 s et personne ne voit rien. Sur
-// une machine lente, l'écart s'ouvre : la carte de chargement reste 6 s pendant
-// que l'accueil, lui, est monté à 4,5 s. Résultat mesuré ici en le rejouant
-// processeur saturé : DEUX « ShibuMap » à l'écran, la baseline anglaise du
-// chargement collée sous « Que veux-tu faire ? », et la phrase d'info en
-// fantôme derrière la carte des trois portes. C'est le tout premier écran d'un
-// visiteur, et c'est ce qu'il voit d'autant plus longtemps que sa machine est
-// modeste.
+// Sans arbitre, sur une machine lente, le visiteur recevait les DEUX
+// superposés : deux « ShibuMap », la baseline anglaise du chargement collée
+// sous « Que veux-tu faire ? », la phrase d'info en fantôme derrière les
+// trois portes. C'est le tout premier écran du site.
 //
-// LE PRINCIPE. On n'accélère rien et on ne retarde rien arbitrairement : on
-// pose une règle d'occupation. L'accueil DEMANDE le centre ; il ne l'obtient
-// que lorsque la carte de chargement l'a rendu, fondu compris.
+// ⚠️ LA PRIORITÉ A ÉTÉ INVERSÉE LE JOUR MÊME (28/07, décision Adrien). La
+// première version de ce sas faisait ATTENDRE l'accueil : il demandait le
+// centre et ne l'obtenait qu'une fois la carte partie, fondu compris. Adrien a
+// retourné la règle une heure plus tard : « dès que la barre de menu commence
+// à monter, le loader disparaît en fondu très rapide ». C'est un meilleur
+// choix produit — le visiteur voit l'interface arriver au lieu d'attendre un
+// chargement qui ne le concerne plus. Si tu lis l'ancienne règle dans
+// l'historique (commit « L accueil attend que la carte de chargement ait
+// quitte le centre ») : elle n'a pas été empilée, elle a été REMPLACÉE. Deux
+// arbitres du même conflit, c'est le retour du bug sous une autre forme.
 //
-// ⚠️ POURQUOI PAS `transitionend`. Le piège maison, déjà payé deux fois : dans
+// LA RÈGLE, donc : l'accueil PRIME. Quand il monte alors que la carte occupe
+// le centre, la carte CÈDE (fondu rapide, en CSS — `#loading.cede`). Le fond
+// de relief, lui, reste : à froid il n'y a encore rien d'autre à montrer
+// derrière. Et si l'accueil repart (Échap) alors que le chargement court
+// toujours, la carte REPREND le centre — sans elle le visiteur fixerait une
+// image figée sans un mot d'explication.
+//
+// ⚠️ POURQUOI ON N'ÉCOUTE JAMAIS `transitionend` (piège payé deux fois) : dans
 // un onglet non composité (arrière-plan, machine à genoux) le navigateur gèle
-// les transitions et l'événement n'arrive JAMAIS — le nettoyage qui l'attend
-// reste en plan. Ici on n'écoute donc que la CLASSE `.hidden`, écrite par du
-// JS, et le fondu se compte au minuteur. Un minuteur en arrière-plan est
-// bridé, jamais annulé : au pire l'accueil monte un peu plus tard, il ne
-// disparaît pas.
+// les transitions et l'événement n'arrive JAMAIS — tout nettoyage qui l'attend
+// reste en plan. Ici plus personne n'attend personne : la montée est
+// immédiate, l'effacement est un ORDRE (une classe posée par hub.js), et le
+// fondu n'est qu'un habillage CSS dont rien ne dépend.
 //
 // Aucune référence au DOM dans ce fichier : la règle est pure, donc testable
 // (test/hub-sas.test.js). Le câblage vit dans hub.js.
 
-// Le temps qu'on laisse à la carte de chargement pour s'effacer avant de faire
-// monter l'accueil. Son fondu dure 0,3 s (`#loading` dans style.css) ; 340 ms
-// couvre la frame de retard, et c'est aussi la durée du voyage de la barre —
-// le même tempo, donc, d'un bout à l'autre de l'ouverture.
-export const FONDU_MS = 340
+// `montrer`  : la montée de l'accueil — toujours immédiate désormais.
+// `effacer`  : ordonne à la carte de chargement de céder le centre.
+// `retablir` : lui rend le centre (l'accueil est reparti, le chargement court).
+// `ouvert`   : l'accueil est-il actuellement au centre ? (isOpen dans hub.js)
+// `occupe`   : la carte est-elle DÉJÀ à l'écran à la construction ?
+export function creerSas({ montrer, effacer = () => {}, retablir = () => {}, ouvert = () => false, occupe = false } = {}) {
+  let prise = !!occupe // la carte de chargement occupe le centre
+  let cede = false // ... mais s'est effacée pour laisser passer l'accueil
 
-// `montrer` : ce qu'on appelle quand l'accueil a enfin la place.
-// `occupe`  : la carte de chargement est-elle DÉJÀ à l'écran à la construction ?
-// `poser` / `retirer` : injectables pour les tests (minuteur factice).
-export function creerSas({ montrer, occupe = false, poser = setTimeout, retirer = clearTimeout } = {}) {
-  let demande = false
-  let prise = !!occupe
-  let t = 0
-
-  // annule le minuteur en cours, quel qu'il soit. `t = 0` derrière : sans ça un
-  // `retirer` ultérieur porterait sur un identifiant déjà consommé — inoffensif
-  // avec clearTimeout, trompeur à la lecture.
-  function oublier() {
-    if (t) retirer(t)
-    t = 0
-  }
-
-  // la montée elle-même. Consomme la demande dans TOUS les cas où elle
-  // aboutit : une demande qui traîne referait monter l'accueil au prochain
-  // chargement, longtemps après que le visiteur est passé à autre chose.
-  function lever() {
-    t = 0
-    if (!demande || prise) return
-    demande = false
-    montrer()
+  // la carte cède — une seule fois par chargement : le réveil automatique et
+  // un clic sur le logo peuvent tomber pendant la même occupation.
+  function ecarter() {
+    if (!prise || cede) return
+    cede = true
+    effacer()
   }
 
   return {
-    // l'accueil veut le centre
+    // l'accueil veut le centre : il l'obtient TOUT DE SUITE, et c'est la
+    // carte de chargement qui s'écarte s'il y en a une.
     demander() {
-      if (demande) return
-      demande = true
-      if (prise) return // on attend que la place se libère
-      lever() // libre : tout de suite, sans délai inventé
+      ecarter()
+      montrer()
     },
-    // la carte de chargement vient d'apparaître
+    // la carte de chargement vient d'apparaître. Si l'accueil est déjà au
+    // centre (chargement à chaud sous l'accueil ouvert), elle cède aussitôt :
+    // la laisser monter remettrait deux titres l'un sur l'autre — le bug
+    // d'origine, dans l'autre sens.
     occuper() {
       prise = true
-      oublier() // une montée programmée n'a plus lieu d'être
+      if (ouvert()) ecarter()
     },
-    // la carte de chargement vient de recevoir `.hidden` : elle s'efface
+    // la carte vient de recevoir `.hidden` : le chargement est fini, elle est
+    // partie d'elle-même. Plus rien à céder ni à rétablir pour ce cycle.
     liberer() {
       prise = false
-      if (!demande) return
-      oublier()
-      t = poser(lever, FONDU_MS)
+      cede = false
     },
-    // Échap, focus dans la recherche, ouverture d'un espace… : l'accueil n'a
-    // plus rien à demander, et surtout plus rien à faire monter plus tard.
+    // Échap, focus dans la recherche, ouverture d'un espace… : l'accueil
+    // quitte le centre. Si la carte avait cédé et que son chargement court
+    // toujours, elle le reprend.
     annuler() {
-      demande = false
-      oublier()
+      if (!cede) return
+      cede = false
+      if (prise) retablir()
     },
-    enAttente: () => demande,
     placePrise: () => prise,
+    aCede: () => cede,
   }
 }

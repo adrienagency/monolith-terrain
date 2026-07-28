@@ -140,6 +140,31 @@ body {
   opacity: 0;
 }
 
+/* L'ACCUEIL PRIME — `cede`, posée par ui/hub.js dès que la barre commence à
+   monter au centre. Le sas du 28/07 a été INVERSÉ le jour même (Adrien) :
+   avant, l'accueil attendait que cette carte soit partie ; maintenant c'est
+   elle qui s'écarte, en un fondu bien plus vif que son fondu normal (0.3 s
+   ci-dessus) — elle doit être partie avant que les mots de l'accueil soient
+   lisibles (ils montent en 0.24 s). `cede` n'est PAS `hidden` : le chargement
+   continue, main.js posera `.hidden` quand le relief sera prêt, et c'est
+   hub.js qui retire `cede` si l'accueil repart (Échap) ou quand la carte
+   revient pour un chargement suivant. */
+#loading.cede {
+  opacity: 0;
+  transition-duration: 0.18s;
+}
+/* Le FOND, lui, RESTE quand la carte cède : à froid le relief n'est pas encore
+   calculé — sans lui, l'accueil poserait ses mots sur le gris nu de la page
+   (le voile de l'accueil est SOUS ce fond : z 56 < 59, il ne peut pas aider).
+   Il ne s'efface qu'avec `.hidden`, comme avant. On lui donne en attendant le
+   même traitement que ce voile (flou léger) pour que les mots restent
+   lisibles ; le `scale` pousse la frange grise du blur hors de l'écran —
+   même astuce que `body.ld-warm #app` plus bas. */
+#loading.cede + #loading-bg {
+  filter: blur(5px) saturate(1.1);
+  transform: scale(1.04);
+}
+
 /* FOND DE CHARGEMENT — le gris nu de la page avant que la toile WebGL ne
    peigne était la première chose que voyait un visiteur (Adrien). On y pose un
    relief, en cohérence avec ce que le site fabrique.
@@ -159,7 +184,10 @@ body {
      laissé du #cfcac0, pas du gris. */
   z-index: 59;
   background: #cfcac0 url('/loading-bg.webp') center / cover no-repeat;
-  transition: opacity 0.6s ease;
+  /* filter/transform : l'entrée en douceur du flou quand la carte cède le
+     centre à l'accueil (`#loading.cede + &` ci-dessous) — même tempo que le
+     voile de l'accueil (0.34 s). */
+  transition: opacity 0.6s ease, filter 0.34s ease, transform 0.34s ease;
   pointer-events: none;
 }
 #loading.hidden + #loading-bg {
