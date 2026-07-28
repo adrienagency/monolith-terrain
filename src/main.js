@@ -69,6 +69,7 @@ import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
 import { N8AOPostPass } from 'n8ao'
 import { History } from './history.js'
+import { isTap } from './gestes.js'
 import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
 import { showNotice } from './ui/toast.js'
@@ -616,6 +617,15 @@ function hideLoading() {
     // place (voir style.css). Posée APRÈS `.hidden`, dans la même tâche : le
     // navigateur ne calcule qu'un seul style, donc aucun flou n'apparaît ici.
     document.body.classList.add('ld-warm')
+    // La vue d'ouverture est enfin à l'écran : c'est ELLE le sol de
+    // l'historique. Le boot enregistre plusieurs fois (gabarit, relief chargé,
+    // lien partagé) et loadRealTerrain part sans être attendu — impossible de
+    // poser ce sol depuis bootInitialView. Ici, c'est le seul instant qui dit
+    // « ce que le visiteur regarde maintenant, il ne l'a pas fait ». Sans ça,
+    // « Annuler » naissait allumé et son premier clic ne faisait rien de
+    // visible. Ce qu'on aurait réglé PENDANT le chargement serait perdu — les
+    // panneaux sont derrière le carton, on ne règle rien à ce moment-là.
+    history.reset()
   }, wait)
 }
 
@@ -1495,10 +1505,15 @@ window.addEventListener('pointermove', (e) => {
 // to lat/lon, dive there keeping the view axis (see modes.diveTo). A drag past a
 // few px, a long press, or a click on any DOM overlay (panels/markers, which sit
 // above the canvas) never reaches here.
-let _clickDownX = 0, _clickDownY = 0, _clickDownT = 0, _clickArmed = false
+let _clickDownX = 0, _clickDownY = 0, _clickDownT = 0, _clickArmed = false, _clickMulti = false
 const _clickNdc = new THREE.Vector2()
 renderer.domElement.addEventListener('pointerdown', (e) => {
-  _clickArmed = e.button === 0 && e.isPrimary
+  // Un second doigt qui se pose DÉSARME l'appui en cours : c'est un pincement
+  // ou un déplacement à deux doigts, pas une désignation. Sans ça, relâcher un
+  // pincement faisait plonger la carte sur le point du premier doigt.
+  if (!e.isPrimary) { _clickMulti = true; return }
+  _clickArmed = e.button === 0
+  _clickMulti = false
   _clickDownX = e.clientX
   _clickDownY = e.clientY
   _clickDownT = performance.now()
@@ -1507,7 +1522,9 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   if (!_clickArmed || e.button !== 0) return
   _clickArmed = false
   const moved = Math.hypot(e.clientX - _clickDownX, e.clientY - _clickDownY)
-  if (moved > 6 || performance.now() - _clickDownT > 400) return // it was an orbit drag / long press
+  // le seuil de dérive dépend de CE QUI a touché l'écran (voir gestes.js) :
+  // 6 px pour une souris, 14 pour un doigt, qui roule en s'écrasant
+  if (!isTap({ moved, elapsedMs: performance.now() - _clickDownT, pointerType: e.pointerType, multiTouch: _clickMulti })) return
   if (!modes || modes.mode !== 'surface' || modes.busy || modes.travel) return
   if (params.source !== 'real' || !dem || params.demZoom >= userFineZoom) return // already at finest detail
   _clickNdc.set((e.clientX / window.innerWidth) * 2 - 1, -((e.clientY / window.innerHeight) * 2 - 1))
@@ -2420,7 +2437,20 @@ function applyAllParams(snap) {
 
 // bounded undo/redo stack over the look surface (palette/style/grid/light/
 // surface/look/background/plinth/material/liquid-metal/surfaceFx/map layers)
-const history = new History(() => captureLook(params), (snap) => applyAllParams(snap))
+// Qui écoute les bascules « annulable / rétablissable ». La barre du haut, qui
+// grise ses deux boutons avec, ne naît que ~1700 lignes plus bas : ce relais
+// évite de déplacer l'historique, dont applyAllParams dépend ici.
+let onHistoryChange = null
+const history = new History(() => captureLook(params), (snap) => applyAllParams(snap), {
+  onChange: (s) => onHistoryChange?.(s),
+})
+
+// UNE seule porte pour annuler / rétablir, partagée par le clavier ET les deux
+// boutons de la barre. Le flush n'est pas décoratif : un réglage fait il y a
+// moins de 400 ms n'est pas encore dans la pile, et sans lui annuler saute le
+// pas d'AVANT — ce qui se lit comme « l'annulation est cassée ».
+const undoNow = () => { recordHistoryDebounced.flush?.(); return history.undo() }
+const redoNow = () => { recordHistoryDebounced.flush?.(); return history.redo() }
 
 // grab a small thumbnail of the live render for the template card
 function captureThumbnail(w = 200, h = 120) {
@@ -4202,7 +4232,17 @@ const topBar = buildTopBar({
   hasCourse: () => !!gpxLayer.activeLayer?.gpx?.track,
   openStudioExport: () => studio.enterExport(),
   openSettings: () => panelCtx.openSettings?.(), // roue crantée (paramètres globaux)
+  // annuler / rétablir au clic — mêmes portes que Ctrl+Z, flush compris
+  undo: undoNow,
+  redo: redoNow,
 })
+
+// les deux boutons d'historique suivent la pile. On les cale AUSSI tout de
+// suite : History a déjà notifié son état de naissance quand la barre n'existait
+// pas encore, et sans ce rattrapage ils resteraient éteints jusqu'à la première
+// bascule — donc allumés trop tard après un lien partagé qui a déjà tout posé.
+onHistoryChange = (s) => topBar.setHistoryState(s)
+onHistoryChange({ canUndo: history.canUndo(), canRedo: history.canRedo() })
 
 const bottomBar = buildBottomBar({
   goto: gotoCtl,
@@ -4887,8 +4927,8 @@ const shortcutsCtx = {
   // flush any pending debounced snapshot FIRST, so an edit made <400ms ago is
   // committed before we step back — otherwise a quick Ctrl+Z after a change
   // reverts the WRONG step (or no-ops), which read as "undo is broken" (Adrien)
-  undo: () => { recordHistoryDebounced.flush?.(); return history.undo() },
-  redo: () => { recordHistoryDebounced.flush?.(); return history.redo() },
+  undo: undoNow,
+  redo: redoNow,
   toggleUI: () => document.body.classList.toggle('ce-noui'),
   toggleDark: () => {
     setDarkMode(!params.darkMode)
@@ -4936,9 +4976,13 @@ const UNDOABLE_UI = '.ce-dock, .ce-cammenu'
 document.addEventListener('change', (e) => { if (e.target?.closest?.(UNDOABLE_UI)) recordHistoryDebounced() }, true)
 document.addEventListener('pointerup', (e) => { if (e.target?.closest?.(UNDOABLE_UI)) recordHistoryDebounced() }, true)
 
-// seed the first undo step so the FIRST committed edit has a state to undo
-// back to (record() dedups, so this is free even if nothing changes first)
-history.record()
+// Le look d'ouverture est le SOL de l'historique, pas un pas qu'on peut
+// défaire. reset() plutôt que record() parce que le boot a déjà enregistré
+// (le gabarit d'ouverture) : le dédoublonnage de record() ne rattrapait rien,
+// le soleil ayant tourné de quelques millièmes entre les deux prises. Résultat
+// mesuré avant correction : « Annuler » s'allumait tout seul au chargement et
+// le premier clic reculait le soleil de 0,4° — un clic dans le vide.
+history.reset()
 
 // ------------------------------------------------------------------ loop
 
