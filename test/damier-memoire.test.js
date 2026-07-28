@@ -34,6 +34,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { coarsenField, resampleField, analyzeDem } from '../src/terrain-analysis.js'
 import { computeTerrainJob } from '../src/terrain-jobs.js'
 import { maskUniformity } from '../src/region-mask.js'
@@ -267,4 +268,38 @@ test('le masque de mer d’une voisine sort à NEIGHBOUR_SEA_SIZE, pas à la tai
   assert.equal(got.seaSize, NEIGHBOUR_SEA_SIZE)
   // 2,25 Mo → 1,00 Mo par dalle, soit 30 Mo rendus sur un damier plein
   assert.equal(got.sea.length, NEIGHBOUR_SEA_SIZE ** 2)
+})
+
+// ---------------------------------------------------------------------------
+// L'AUTRE BUDGET D'UNE VOISINE : LES TRIANGLES PAR IMAGE
+// ---------------------------------------------------------------------------
+// Ce fichier compte des mégaoctets ; celui-ci compte des triangles, et c'est le
+// même sujet — ce qu'une dalle de contexte a le droit de coûter.
+//
+// MESURÉ le 28/07/2026 (1920×1080, La Réunion, damier 3×3, 8 voisines) : la
+// passe d'ombre passait de 1 188 328 à 2 260 040 triangles par image à cause
+// des seules voisines, soit l'image entière à 4 527 467 au lieu de 3 455 755
+// (−23,7 % une fois corrigé). Elles rendaient tout ça pour une bande de 14
+// unités-monde : la caméra d'ombre couvre ±42, une voisine occupe 28 à 84.
+//
+// ⚠️ POURQUOI CE TEST LIT LE FICHIER SOURCE. Le piège qu'il garde n'est pas
+// dans un calcul, il est dans DEUX LIGNES qu'on peut « réparer » de bonne foi.
+// Le rendu est en VSM, et three écrit, dans WebGLShadowMap.renderObject :
+//     object.castShadow || (object.receiveShadow && type === VSMShadowMap)
+// — sous VSM, un objet qui REÇOIT une ombre est aussi dessiné dans la carte
+// d'ombre. Remettre `receiveShadow = true` sur une voisine (ça paraît plus
+// juste, et ça ne change rien à l'écran) réinjecte 1,07 million de triangles
+// par image en silence. Aucun autre test de ce dépôt ne le verrait.
+test('une dalle voisine n’entre PAS dans la passe d’ombre (les deux drapeaux)', async () => {
+  const src = await readFile(new URL('../src/block-grid.js', import.meta.url), 'utf8')
+  for (const ligne of [
+    'terrain.mesh.castShadow = false',
+    'terrain.mesh.receiveShadow = false',
+    'walls.castShadow = false',
+    'walls.receiveShadow = false',
+  ]) {
+    assert.ok(src.includes(ligne), `block-grid.js doit contenir « ${ligne} » — voir le commentaire VSM au-dessus`)
+  }
+  // et le corollaire : aucune ligne ne doit REMETTRE l'un des deux à true
+  assert.ok(!/(terrain\.mesh|walls)\.(cast|receive)Shadow\s*=\s*true/.test(src), 'une voisine ne rallume ni cast ni receive')
 })
