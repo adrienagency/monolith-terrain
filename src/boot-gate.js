@@ -70,15 +70,26 @@ export function looksInApp(ua = '') {
   return /\b(FBAN|FBAV|FB_IAB|Instagram|Line|TikTok)\b/i.test(ua)
 }
 
-// WebGL2 support, as observed rather than assumed. Wrapped in try/catch
-// because a browser with WebGL disabled entirely can THROW here rather than
-// return null, and an exception at boot would produce the very blank screen
-// this whole module exists to prevent.
-export function detectWebGL2(doc = document) {
+// LE contexte WebGL2 du démarrage, ou null. Il est RENDU plutôt que jeté parce
+// qu'il répond à deux questions, pas une :
+//   1. « cette machine peut-elle rendre ? »  → la carte de refus ci-dessus ;
+//   2. « jusqu'où peut-elle rendre ? »       → le palier de départ, que
+//      src/palier-machine.js lit dessus (nom de la carte, limites de texture).
+// En créer un second pour la deuxième question, ce serait payer deux fois le
+// seul coût réel de toute cette détection.
+//
+// Enveloppé dans un try/catch parce qu'un navigateur dont WebGL est désactivé
+// peut LEVER au lieu de renvoyer null, et qu'une exception au démarrage produit
+// exactement l'écran blanc que ce module existe pour empêcher.
+export function contexteWebGL2(doc = document) {
   try {
-    const canvas = doc.createElement('canvas')
-    return !!canvas.getContext('webgl2')
+    return doc.createElement('canvas').getContext('webgl2') || null
   } catch {
-    return false
+    return null
   }
+}
+
+// WebGL2 support, as observed rather than assumed.
+export function detectWebGL2(doc = document) {
+  return !!contexteWebGL2(doc)
 }

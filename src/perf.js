@@ -54,6 +54,7 @@
 // Nothing is persisted.
 
 import { applyRenderSize } from './viewport.js'
+import { palierDeDepart, plafondDeRemontee } from './palier-machine.js'
 
 const TIER_NAMES = ['FULL QUALITY', 'BALANCED MODE', 'LIGHT MODE', 'ESSENTIAL MODE']
 
@@ -151,15 +152,31 @@ export function createAdaptiveQuality({
   // view (FX are already stripped there) and during a live MP4 recording
   // (a pixelRatio change would resize the canvas and abort the encoder)
   canStep = () => true,
+  // Le palier ESTIMÉ avant le premier rendu (src/palier-machine.js, sondé par
+  // boot.js). null = pas de détection, et alors ce fichier se comporte
+  // exactement comme avant elle.
+  palierMachine = null,
 } = {}) {
   // Boot tier by device class. Phones (coarse pointer + short side < 600, the
   // same test as boot.js's gate) only ever reach the app as the shared-shibu
   // VIEWER — no editing, no need for the max — so they start at T3 ESSENTIAL
-  // (pixelRatio 0.85, shadows/DoF/grain off) and stay there: recovery never
-  // climbs above startTier. Tablets keep T1, desktops T0, as before.
+  // (pixelRatio 0.85, shadows/DoF/grain off) and stay there. Tablets keep T1,
+  // desktops T0.
+  //
+  // ⚠️ CE GOUVERNEUR NE DÉMARRE PLUS SYSTÉMATIQUEMENT AU MAXIMUM. C'était le
+  // défaut mesuré le 28/07/2026 : une machine à 5,5 images par seconde partait
+  // au palier 0 et mettait 47 secondes à redescendre. `palierMachine` porte
+  // l'ESTIMATION faite avant le premier rendu ; elle ne peut que renforcer la
+  // sévérité des règles d'appareil ci-dessus, jamais l'alléger (un Adreno 750
+  // est une carte « forte », et pourtant un téléphone reste au plancher).
+  // L'arbitrage vit dans palier-machine.js, où il est testé sans DOM.
   const coarse = matchMedia('(pointer: coarse)').matches
   const phone = coarse && Math.min(screen.width, screen.height) < 600
-  const startTier = phone ? 3 : coarse ? 1 : 0
+  const startTier = palierDeDepart(palierMachine, { phone, coarse })
+  // Jusqu'où la remontée a le droit d'aller. La détection ESTIME, elle ne
+  // mesure pas : on lui laisse se tromper d'un cran, pas de deux. Sur tactile,
+  // aucune remontée — la règle d'appareil prime.
+  const plafondHaut = plafondDeRemontee(startTier, { phone, coarse })
   let tier = 0
 
   // the user's own settings — what T0 restores. Tracked live until the first
@@ -305,6 +322,42 @@ export function createAdaptiveQuality({
     if (everChanged || tier !== 0) applyTier(tier)
   }
 
+  // ⚠️ LE RENDEZ-VOUS AVEC LE LOOK D'OUVERTURE — une fois, et une seule.
+  //
+  // Ce contrôleur naît AVANT que le look d'ouverture (STARTUP_LOOK, ou celui
+  // d'un lien partagé) ne soit appliqué : ce look attend la première
+  // construction du relief, donc plusieurs secondes de plus. Or il porte
+  // `shadowMode` et `grain` (ils sont dans TEMPLATE_KEYS — ce sont des choix
+  // de LOOK, pas de machine). Tant que le palier de départ valait 0, personne
+  // ne s'en apercevait. Depuis que la machine est estimée avant le premier
+  // rendu, un ordinateur classé faible démarre à 2 ou 3, et deux défauts se
+  // déclenchent ensemble à l'arrivée du look :
+  //
+  //   1. `watchDirty` voit shadowMode repasser de 'static' à 'dynamic', croit
+  //      que l'UTILISATEUR a bougé le sélecteur, et relâche le levier POUR
+  //      TOUJOURS — sur la machine qui en avait justement besoin.
+  //   2. La référence `base` a été figée à la construction, quand grain valait
+  //      encore 0. Ré-appliquer le palier sans rien faire d'autre effacerait
+  //      donc le grain du look d'ouverture.
+  //
+  // D'où : on RECAPTURE la référence sur les deux valeurs que le look apporte,
+  // puis on ré-applique le palier par-dessus. Vérifié le 28/07/2026 sur un
+  // iMac 2015 simulé : sans ce rendez-vous, les ombres repassaient en
+  // 'dynamic' au palier ALLÉGÉ.
+  //
+  // `base.pixelRatio` n'en fait PAS partie, et c'est délibéré : l'échelle de
+  // rendu ne voyage dans aucun gabarit (voir TEMPLATE_KEYS), donc rien ne l'a
+  // touchée — la recapturer ne ferait que verrouiller la valeur déjà rabotée
+  // et interdire à la remontée de la rendre.
+  let rebased = false
+  function rebase() {
+    if (rebased || everChanged) return
+    rebased = true
+    base.shadowMode = params.shadowMode
+    base.grain = params.grain
+    if (tier !== 0) applyTier(tier)
+  }
+
   function update(dt) {
     const t = now()
 
@@ -363,7 +416,7 @@ export function createAdaptiveQuality({
     // MIN_GAP reste respecté — c'est le nombre de crans qui change, pas le
     // rythme des changements.
     if (below >= DOWN_SUSTAIN && tier < 3) setTier(palierVise(avg, tier))
-    else if (above >= UP_SUSTAIN && tier > startTier) setTier(tier - 1)
+    else if (above >= UP_SUSTAIN && tier > plafondHaut) setTier(tier - 1)
   }
 
   // touch devices boot straight into their tier (T1 tablets, T3 phones) —
@@ -377,11 +430,15 @@ export function createAdaptiveQuality({
     update,
     setTier,
     reassert,
+    rebase,
     get tier() {
       return tier
     },
     get startTier() {
       return startTier
+    },
+    get plafondHaut() {
+      return plafondHaut
     },
     get dirty() {
       return { ...dirty }
