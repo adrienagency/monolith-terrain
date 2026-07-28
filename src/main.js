@@ -107,7 +107,7 @@ import { initTips } from './ui/tips.js'
 import { initLoadingHints } from './ui/loading-hints.js'
 import { createAdaptiveQuality } from './perf.js'
 import { detailForZoom } from './zoom-detail.js'
-import { isRenderableSize } from './viewport.js'
+import { applyRenderSize, screenPixelRatio } from './viewport.js'
 import './ui/v28.css'
 // the export stack (modal + Recorder + mediabunny encoder) is heavy and only
 // needed on demand — it is dynamic-import()ed on the first Export click, so
@@ -304,7 +304,22 @@ const params = {
   paused: false,
 
   // performance
-  pixelRatio: 2, // render scale defaults to 2 by request (the perf governor may still step it down under sustained load)
+  // LA DENSITÉ DE L'ÉCRAN, LUE — et non plus un 2 en dur.
+  //
+  // Ce 2 était le déclencheur du « zoom à fond » du 28/07/2026 : sur une
+  // machine dont MAX_TEXTURE_SIZE vaut 2048 ou 4096 (circuit graphique intégré
+  // ancien), un écran large ×2 franchit la limite, et Chrome rabote le tampon
+  // de dessin UNE DIMENSION À LA FOIS, sans un mot — l'image se déforme en
+  // silence. Le plafond proportionnel vit maintenant dans applyRenderSize ;
+  // ici on répare l'autre moitié du problème, la valeur elle-même.
+  //
+  // Lire la vraie densité corrige les DEUX sens : à 100 % on payait quatre fois
+  // trop de pixels, et à 250 % on rendait PLUS FLOU que l'écran ne demande tout
+  // en payant plein pot. Le plafond de 2 reste (au-delà, gain nul, coût
+  // quadratique) — voir MAX_PIXEL_RATIO dans viewport.js.
+  // Le gouverneur de performance peut encore faire descendre cette valeur sous
+  // charge soutenue ; c'est la tirette « Échelle de rendu » qui la remonte.
+  pixelRatio: screenPixelRatio(window.devicePixelRatio),
   shadowMode: 'dynamic',
   shadowRes: 2048,
 
@@ -617,15 +632,19 @@ const renderer = new THREE.WebGLRenderer({
   stencil: false,
   depth: false,
 })
-renderer.setPixelRatio(params.pixelRatio)
-renderer.setSize(window.innerWidth, window.innerHeight)
+// Le canevas est posé dans son conteneur AVANT d'être dimensionné : c'est ce
+// conteneur qu'applyRenderSize mesure (en boutique / Studio, `#app` n'est qu'un
+// cadre — la fenêtre mentirait), et c'est là que le tampon de dessin est borné
+// à ce que la carte accepte. Le faire dès le premier dimensionnement compte :
+// le rabotage muet de Chrome frappe d'abord au démarrage, sur le plein écran.
+container.appendChild(renderer.domElement)
+applyRenderSize({ renderer, pixelRatio: params.pixelRatio })
 renderer.shadowMap.enabled = true
 // VSM so the shadow blur radius is a real, adjustable softness control
 renderer.shadowMap.type = THREE.VSMShadowMap
 // tone mapping happens in the post chain (three skips renderer tone mapping
 // when drawing into the composer's HDR buffer, which is why exposure felt dead)
 renderer.toneMapping = THREE.NoToneMapping
-container.appendChild(renderer.domElement)
 
 const scene = new THREE.Scene()
 // background can be a flat colour or a gradient texture (disposed on change)
@@ -5474,19 +5493,20 @@ setTimeout(() => {
 
 window.addEventListener('resize', () => {
   if (loopPaused) return // an offline export owns the renderer size right now
-  const [rw, rh] = evenSize() // box du container (= window hors boutique)
-  // Conteneur à 0×0 (onglet caché, panneau replié, iframe pas encore posée) :
-  // on ne touche à RIEN. Écrire `0 / 0` ici poserait un aspect NaN que rien ne
-  // répare ensuite — même une fois le canevas revenu à 1280×720 — et toutes les
-  // projections écran en x seraient perdues sans une ligne en console. Le
-  // dernier aspect connu est toujours meilleur qu'un NaN ; voir viewport.js.
-  // Attention : evenSize() arrondit à l'entier pair inférieur, donc 1 px donne
-  // bien 0 — c'est la valeur arrondie qu'il faut tester, pas la box brute.
-  if (!isRenderableSize(rw, rh)) return
-  camera.aspect = rw / rh
-  camera.updateProjectionMatrix()
-  renderer.setSize(rw, rh) // same even dimensions as the composer — see evenSize()
-  composer.setSize(rw, rh)
+  // TOUT passe par applyRenderSize, et rien d'autre. Cette fonction mesure le
+  // conteneur (en boutique / Studio, `#app` n'est qu'un cadre — la fenêtre
+  // mentirait), arrondit à l'entier pair (carré noir), pose l'aspect de la
+  // caméra, et depuis le 28/07/2026 borne le tampon de dessin à ce que la carte
+  // graphique accepte — proportionnellement, sinon c'est Chrome qui rabote une
+  // seule dimension, en silence.
+  // Elle renvoie null quand le conteneur fait 0×0 (onglet caché, panneau
+  // replié, iframe pas encore posée) : on ne touche alors à RIEN, surtout pas à
+  // l'aspect — un `0 / 0` y poserait un NaN que même un retour à 1280×720 ne
+  // répare pas, et toutes les projections écran en x seraient perdues sans une
+  // ligne en console. Voir viewport.js.
+  const taille = applyRenderSize({ renderer, composer, camera, pixelRatio: params.pixelRatio })
+  if (!taille) return
+  const [rw, rh] = taille
   gpxLayer.onResize(rw, rh)
   mapLayers.onResize(rw, rh)
   syncGpxProfilePosition()

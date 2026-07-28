@@ -110,7 +110,11 @@ export function createAdaptiveQuality({
       const pr = tierPixelRatio(n)
       if (params.pixelRatio !== pr) {
         params.pixelRatio = pr
-        renderer.setPixelRatio(pr)
+        // ⚠️ La densité se PASSE à applyRenderSize, elle ne se pose plus ici :
+        // c'est cette fonction qui la borne à ce que la carte graphique
+        // accepte. Un `renderer.setPixelRatio(pr)` direct court-circuiterait ce
+        // plafond, et Chrome raboterait le tampon de dessin lui-même — une
+        // dimension à la fois, sans un mot en console. Voir viewport.js.
         // La taille de rendu vient du CONTENEUR du canevas, jamais de la
         // fenêtre : en boutique / Studio, `#app` n'est qu'un cadre de ~58 % de
         // large. `composer.setSize` réécrit la taille CSS du canevas (il
@@ -120,7 +124,7 @@ export function createAdaptiveQuality({
         // rognée — le « se déforme, zoom à fond » du 28/07/2026. Et comme le
         // gouverneur ne bouge que sous 30 fps, cela ne se voyait QUE sur une
         // machine lente. Arrondi pair inclus (carré noir). Voir viewport.js.
-        applyRenderSize({ renderer, composer })
+        applyRenderSize({ renderer, composer, pixelRatio: pr })
       }
     }
     // Render-upgrade levers. AO costs a whole extra scene pass, so it is shed
