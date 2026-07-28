@@ -34,6 +34,85 @@ const SEA_EPS = 0.05
 // tenue pour une ABSENCE de mesure et non pour un terrain à l'altitude zéro.
 const NODATA_EPS = 1 / 512
 
+// ══════════ LES APLATS DE REMPLISSAGE — le remplissage ne vaut pas zéro ══════
+//
+// 🔴 LE PIÈGE QUI A COÛTÉ LES « PLATEAUX RECTANGULAIRES » DE LA CIOTAT.
+//
+// `NODATA_EPS` suppose qu'un relief de référence qui n'a rien à dire sur la mer
+// y écrit ZÉRO PILE. C'était vrai des tuiles AWS/EU-DEM. Ce ne l'est PAS de
+// Mapterhorn, qui cale sa mer sur une constante propre à chaque dalle — mesuré
+// au décodage du bloc, en part des pixels immergés :
+//
+//   Nice z14            −0,344 m sur 99,3 %
+//   rade de Brest z14   −2,781 m sur 86,8 %
+//   La Ciotat z14       −0,094 m sur 34,3 %  ET  −0,406 m sur 26,4 %
+//
+// Ces valeurs passent sous le radar de `NODATA_EPS`. La fusion les prend alors
+// pour une bathymétrie réelle : elle pilote son fondu dessus, et à −0,34 m le
+// fondu vaut 0,08 % — la source fine est MUSELÉE à 99,92 %. Le pixel garde donc
+// le remplissage, et comme un remplissage est constant, on obtient un aplat
+// parfaitement plat à ras de l'eau, borné par le rectangle de la dalle. Mesuré
+// à Nice : 833 054 pixels rendus à −0,34 m là où la source fine donnait −25,2 m.
+//
+// LA SIGNATURE N'EST PAS LA VALEUR, C'EST LA PART. Un remplissage occupe une
+// fraction énorme du champ immergé sur UNE SEULE valeur, au 1/256 de mètre près.
+// Une vraie bathymétrie ne se concentre jamais ainsi — contre-épreuve sur des
+// blocs où la référence porte de l'ETOPO1 :
+//
+//   baie de Tokyo z12  1,9 %   ·  Manche z11  1,1 %
+//   large de Toulon z10, mer Égée z10, Atlantique z8   0,0 %
+//
+// Douze fois d'écart entre le plus petit aplat (26,4 %) et la plus forte
+// concentration légitime (1,9 %) : le seuil tient au milieu du gouffre.
+export const FILL_SHARE = 0.1
+
+// Pas d'échantillonnage. On ne compte qu'un pixel sur 17 : un aplat qui porte
+// 10 % du champ ressort de n'importe quel échantillon (le bloc le plus pauvre
+// en mer des huit mesurés, la rade de Brest, donne encore 8 000 sondes), et
+// l'histogramme coûte alors une poignée de millisecondes au lieu d'en coûter
+// des dizaines sur 2,4 M de pixels. 17 est premier avec toutes nos largeurs de
+// dalle (256, 512, 768, 1536) : l'échantillon ne peut pas se coincer sur une
+// colonne.
+const FILL_STEP = 17
+
+// En deçà, « 10 % du champ » ne veut plus rien dire — deux pixels identiques
+// feraient un faux aplat. Le module s'abstient plutôt que de deviner.
+const FILL_MIN_SONDES = 64
+
+/**
+ * LES VALEURS DE REMPLISSAGE d'un relief de référence, constatées et non
+ * supposées. Voir le bloc ci-dessus pour le pourquoi et les chiffres.
+ *
+ * ⚠️ ON NE REGARDE QUE LE CÔTÉ IMMERGÉ. Un aplat POSITIF — une plaine
+ * littorale rigoureusement plate, un lac aplani — est de la TERRE, et la terre
+ * ne bouge jamais. Le déclarer muet autoriserait la source marine à la creuser,
+ * c'est-à-dire à déplacer un trait de côte : exactement ce que ce module
+ * interdit depuis la session polders.
+ *
+ * @param {Float32Array} land - relief de référence, en mètres
+ * @param {{seaLevel?: number, fillShare?: number}} [opts]
+ * @returns {Set<number>} les altitudes tenues pour du remplissage (vide si on
+ *   ne peut pas conclure)
+ */
+export function detectFillLevels(land, opts = {}) {
+  const out = new Set()
+  if (!land) return out
+  const level = opts.seaLevel ?? 0
+  const part = opts.fillShare ?? FILL_SHARE
+  const compte = new Map()
+  let sondes = 0
+  for (let i = 0; i < land.length; i += FILL_STEP) {
+    const l = land[i]
+    if (!(l < level)) continue
+    sondes++
+    compte.set(l, (compte.get(l) ?? 0) + 1)
+  }
+  if (sondes < FILL_MIN_SONDES) return out
+  const seuil = sondes * part
+  for (const [v, c] of compte) if (c >= seuil) out.add(v)
+  return out
+}
+
 /**
  * Fusionne deux champs d'altitude de MÊME taille, en mètres.
  *
@@ -41,7 +120,8 @@ const NODATA_EPS = 1 / 512
  *   sur le trait de côte et sur toute la terre émergée.
  * @param {Float32Array|null} sea - bathymétrie fine, alignée pixel à pixel.
  *   `null` ou taille différente ⇒ on rend `land` inchangé (repli sûr).
- * @param {{blendDepth?: number, seaLevel?: number}} [opts]
+ * @param {{blendDepth?: number, seaLevel?: number, fillShare?: number}} [opts]
+ *   `fillShare` règle la détection des aplats de remplissage (detectFillLevels).
  * @returns {Float32Array} un NOUVEAU tableau (les entrées ne sont pas mutées)
  */
 export function fuseBathymetry(land, sea, opts = {}) {
@@ -49,6 +129,18 @@ export function fuseBathymetry(land, sea, opts = {}) {
   if (!sea || sea.length !== land.length) return land.slice()
   const blend = Math.max(1e-3, opts.blendDepth ?? BLEND_DEPTH)
   const level = opts.seaLevel ?? 0
+  // Les aplats de remplissage de CE bloc, constatés une fois pour toutes.
+  //
+  // Le plus PROFOND d'entre eux fait PLANCHER DE CRÉDIBILITÉ : au-dessus de
+  // lui, le relief de référence n'a aucune résolution en mer — ce qu'on y
+  // trouve n'est que le bord anti-aliasé du remplissage. Mesuré à La Ciotat :
+  // une fois les deux aplats traités (−0,094 et −0,406 m), il restait un
+  // LISERÉ à −0,02 … −0,37 m tout autour de chaque dalle, encore visible à
+  // l'œil comme un rectangle en relief posé sur le fond.
+  const aplats = detectFillLevels(land, opts)
+  // NaN quand aucun aplat n'a été constaté : toutes les comparaisons ci-dessous
+  // rendent alors `false`, et le module se comporte exactement comme avant.
+  const plancher = aplats.size ? Math.min(...aplats) : NaN
   const out = new Float32Array(land.length)
   for (let i = 0; i < land.length; i++) {
     const l = land[i]
@@ -65,7 +157,19 @@ export function fuseBathymetry(land, sea, opts = {}) {
     //
     // Le seuil vaut un demi-pas de quantification terrarium (1/256 m) : un
     // relief réel ne rend quasiment jamais 0,000 pile, un remplissage si.
-    const noData = l > -NODATA_EPS && l < NODATA_EPS
+    //
+    // ⚠️ ET LE REMPLISSAGE NE VAUT PAS TOUJOURS ZÉRO : Mapterhorn cale sa mer
+    // sur une constante par dalle (−0,094 / −0,344 / −0,406 / −2,781 m selon la
+    // dalle mesurée). `aplats` les a constatés sur le champ ; ils valent
+    // exactement la même chose qu'un zéro — une ABSENCE. Voir detectFillLevels.
+    //
+    // ⚠️ LE `l < level` N'EST PAS DÉCORATIF. Sans lui, un pixel de TERRE à
+    // +5 m serait « au-dessus du plancher » donc déclaré muet, et il sortirait
+    // du test de terre pour tomber dans la branche marine. Le trait de côte
+    // serait remis entre les mains de la source fine — la faute que ce module
+    // interdit depuis la session polders. Un remplissage est TOUJOURS immergé.
+    const remplissage = l < level && l >= plancher
+    const noData = (l > -NODATA_EPS && l < NODATA_EPS) || remplissage
     // TERRE — intouchable, et c'est elle qui définit le rivage
     if (l >= level && !noData) {
       out[i] = l

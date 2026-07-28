@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   fuseBathymetry,
+  detectFillLevels,
   decodeTerrarium,
   encodeTerrarium,
   overzoomTile,
@@ -240,6 +241,120 @@ test('au rivage le fondu reste nul : le trait de côte ne bouge pas', () => {
   const sea = new Float32Array([-0.01]) // la source fine dit « à peine immergé »
   const out = fuseBathymetry(land, sea)
   assert.ok(Math.abs(out[0]) < 0.05, `le rivage a bougé de ${out[0]} m`)
+})
+
+// --- RÉGRESSION La Ciotat / Nice / Brest z14 (2026-07-28) -------------------
+// LES PLATEAUX RECTANGULAIRES À RAS DE L'EAU. Le remplissage de mer du relief
+// de référence ne vaut PAS toujours zéro pile : mesuré sur Mapterhorn, il vaut
+// −0,094 m sur une dalle, −0,406 m sur sa voisine, −0,344 m sur Nice, −2,781 m
+// sur la rade de Brest. `NODATA_EPS` (1/512 m) ne les voit pas ; la fusion les
+// prend pour une bathymétrie réelle, éteint son fondu (t = 0,08 %) et MUSELLE
+// la source fine — d'où un aplat parfaitement plat, borné par le rectangle de
+// la dalle. Mesuré à Nice : 833 054 pixels rendus à −0,34 m alors que la source
+// fine y donnait −25,2 m en moyenne.
+//
+// La signature d'un remplissage n'est pas sa VALEUR, c'est sa PART :
+//   remplissage   Nice 99,3 %  ·  Brest 86,8 %  ·  La Ciotat 34,3 % et 26,4 %
+//   vraie mer     Tokyo 1,9 %  ·  Manche 1,1 %  ·  Toulon/Égée/Atlantique 0,0 %
+// Douze fois d'écart : le seuil est posé à 10 %, au milieu du gouffre.
+const champMer = (n, remplir) => {
+  const a = new Float32Array(n)
+  for (let i = 0; i < n; i++) a[i] = remplir(i)
+  return a
+}
+
+test('un remplissage de mer NON NUL est reconnu comme une absence de mesure', () => {
+  // 4 096 pixels : 60 % à −0,40625 m (l aplat Mapterhorn), le reste en relief
+  const n = 4096
+  const land = champMer(n, (i) => (i % 5 < 3 ? -0.40625 : -30 - (i % 700)))
+  const sea = champMer(n, () => -80)
+  const out = fuseBathymetry(land, sea)
+  for (let i = 0; i < n; i++) {
+    if (i % 5 < 3) assert.ok(out[i] < -70, `l aplat n a pas été creusé en ${i} : ${out[i]}`)
+  }
+})
+
+test('le remplissage détecté ne fait JAMAIS émerger ni immerger un pixel', () => {
+  // la règle absolue du module, vérifiée sur un champ qui porte un aplat
+  const n = 4096
+  const land = champMer(n, (i) => (i % 3 === 0 ? -2.78125 : i % 3 === 1 ? 12 + i % 50 : -140 - (i % 900)))
+  const sea = champMer(n, (i) => (i % 7 === 0 ? 25 : -600))
+  const out = fuseBathymetry(land, sea)
+  let bascules = 0
+  for (let i = 0; i < n; i++) if (land[i] >= 0 !== out[i] >= 0) bascules++
+  assert.equal(bascules, 0, 'aucun pixel ne doit changer de statut terre/mer')
+})
+
+test('le LISERÉ du remplissage suit le remplissage : le plancher de crédibilité', () => {
+  // Après le premier correctif, il restait à La Ciotat un rectangle en relief
+  // sur le pourtour de chaque dalle : les valeurs de bord (−0,02 … −0,37 m),
+  // trop dispersées pour être des aplats à elles seules, gardaient la main.
+  // Au-dessus du plus profond des aplats, la référence n a plus de résolution.
+  const n = 4096
+  const land = champMer(n, (i) => (i % 4 ? -0.40625 : -0.02 - (i % 37) / 100))
+  const sea = champMer(n, () => -70)
+  const out = fuseBathymetry(land, sea)
+  for (let i = 0; i < n; i++) assert.ok(out[i] < -60, `liseré resté en surface en ${i} : ${out[i]}`)
+})
+
+test('⚠️ un plancher détecté ne doit JAMAIS relâcher la TERRE', () => {
+  // Le piège : +5 m est bien « au-dessus du plancher » (−0,406 m). Sans le
+  // test d immersion, ce pixel de terre passerait dans la branche marine et le
+  // trait de côte deviendrait celui de la source fine.
+  const n = 4096
+  const land = champMer(n, (i) => (i % 4 ? -0.40625 : 5 + (i % 300)))
+  const sea = champMer(n, () => -900)
+  const out = fuseBathymetry(land, sea)
+  for (let i = 0; i < n; i += 4) assert.equal(out[i], land[i], `la terre a bougé en ${i}`)
+})
+
+test('un aplat POSITIF reste de la terre : on ne regarde que le côté immergé', () => {
+  // une plaine littorale rigoureusement plate à +0,25 m, c est de la TERRE
+  const n = 4096
+  const land = champMer(n, (i) => (i % 2 ? 0.25 : -500))
+  const sea = champMer(n, () => -900)
+  const out = fuseBathymetry(land, sea)
+  for (let i = 1; i < n; i += 2) assert.equal(out[i], 0.25, `la terre a bougé en ${i}`)
+})
+
+test('une VRAIE bathymétrie n est pas prise pour un remplissage', () => {
+  // Mesuré : la valeur la plus portée d un vrai fond plafonne à 1,9 % (baie de
+  // Tokyo). Ici 1/64 des pixels partagent la même profondeur, et elle doit
+  // continuer à piloter le fondu — donc à retenir la source fine au rivage.
+  const n = 4096
+  const land = champMer(n, (i) => (i % 64 === 0 ? -0.5 : -0.5 - (i % 4000) / 100))
+  const sea = champMer(n, () => -900)
+  const out = fuseBathymetry(land, sea)
+  assert.ok(out[0] > -20, `le rivage a sauté à ${out[0]} : la vraie mer a été prise pour un aplat`)
+})
+
+test('deux dalles, deux remplissages : les DEUX sont reconnus', () => {
+  // c est le cas de La Ciotat — une dalle à −0,094 m, sa voisine à −0,406 m
+  const n = 4096
+  const land = champMer(n, (i) => (i < n / 2 ? -0.09375 : -0.40625))
+  const sea = champMer(n, () => -60)
+  const out = fuseBathymetry(land, sea)
+  assert.ok(out[10] < -50, `première dalle non creusée : ${out[10]}`)
+  assert.ok(out[n - 10] < -50, `seconde dalle non creusée : ${out[n - 10]}`)
+})
+
+test('detectFillLevels : la part se mesure sur le champ IMMERGÉ, pas sur tout', () => {
+  // 1/16 du champ est en mer, et 3/4 de cette mer est un aplat : 75 % du champ
+  // immergé, mais moins de 5 % du bloc. Compté sur le bloc entier, il passerait
+  // sous le seuil et on retomberait dans les plateaux de La Ciotat.
+  const n = 65536
+  const land = champMer(n, (i) => (i % 16 ? 40 : i % 64 ? -0.34375 : -80 - (i % 5000) / 10))
+  assert.ok(detectFillLevels(land).has(-0.34375), 'un aplat noyé dans la terre reste un aplat')
+})
+
+test('detectFillLevels : trop peu de mer pour conclure, on ne conclut pas', () => {
+  // sur une poignée de pixels, « 10 % du champ » ne veut rien dire : deux
+  // pixels identiques feraient un faux aplat. Le module s abstient.
+  assert.equal(detectFillLevels(Float32Array.from([-0.2, -0.2, -0.2, -0.2])).size, 0)
+})
+
+test('detectFillLevels : un champ sans mer ne rend aucun aplat', () => {
+  assert.equal(detectFillLevels(champMer(4096, () => 12)).size, 0)
 })
 
 // --- lissage du fond marin -------------------------------------------------
