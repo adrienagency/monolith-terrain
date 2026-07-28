@@ -52,7 +52,38 @@ export class Traffic {
     this.pad = null // { obj, rocket, baseY, state, t }
     this.starshipProto = null
     this.towerProto = null
+    // CHARGEMENT DIFFÉRÉ — un seul téléchargement par session, même si la
+    // demande arrive de deux endroits. Voir _demanderAvion / _demanderPasDeTir.
+    this._avionDemande = false
+    this._padDemande = false
+    this._zoneDem = null // la dernière zone vue, pour rebâtir le pas de tir à l'arrivée des modèles
+  }
 
+  // ---------------------------------------------------------------------------
+  // LES MODÈLES NE SE TÉLÉCHARGENT PLUS AU DÉMARRAGE
+  // ---------------------------------------------------------------------------
+  // Mesuré le 28/07/2026 : ces trois `load()` étaient dans le CONSTRUCTEUR, donc
+  // sur le chemin critique de la toute première image, inconditionnellement.
+  //   • models/plane.glb = 573 Ko à CHAQUE ouverture de la page — pour un avion
+  //     qui n'apparaît que si un dé lancé toutes les 14 s tombe sur 1/9, puis
+  //     ressort avion dans 35 % des cas. La grande majorité des visites payait
+  //     573 Ko pour ne jamais voir l'objet.
+  //   • models/starship.glb et models/tower.glb ne sont PAS livrés dans le dépôt
+  //     (voir public/models/MODELS.md) : ces deux requêtes partaient donc pour
+  //     ramener deux 404 — 7 Ko de page HTML chacune en développement — à chaque
+  //     démarrage, sur une planète (Boca Chica, LC-39A) que la carte affichée ne
+  //     contient presque jamais.
+  // On charge donc au moment où l'objet est RÉELLEMENT nécessaire, une seule
+  // fois, sans jamais bloquer : si le modèle n'est pas encore là, la scène se
+  // débrouille (un autre aéronef prend le tour, le pas de tir attend son GLB).
+
+  // Demandé au premier tirage GAGNANT du trafic aérien : à cet instant on sait
+  // que cette session verra vraiment passer des aéronefs. Le premier d'entre eux
+  // sera un planeur ou un ballon (planeProto est encore vide, _spawnCraft
+  // enchaîne alors sur le tirage suivant) ; l'avion est là pour les suivants.
+  _demanderAvion() {
+    if (this._avionDemande) return
+    this._avionDemande = true
     // the airliner (Apache-2.0 Cesium sample model), normalised to ~1.7 units
     this.loader.load(
       'models/plane.glb',
@@ -67,9 +98,18 @@ export class Traffic {
       undefined,
       () => {} // missing model — planes simply never spawn
     )
-    // optional user-supplied Starship + tower
-    this.loader.load('models/starship.glb', (g) => (this.starshipProto = g.scene), undefined, () => {})
-    this.loader.load('models/tower.glb', (g) => (this.towerProto = g.scene), undefined, () => {})
+  }
+
+  // Demandé UNIQUEMENT quand la zone chargée contient vraiment un pas de tir.
+  // À l'arrivée des modèles (optionnels, fournis par l'utilisateur) on rejoue
+  // setZone sur la dernière zone vue : sans ça, le pas n'apparaîtrait qu'au
+  // chargement de zone SUIVANT, c'est-à-dire jamais si le visiteur reste là.
+  _demanderPasDeTir() {
+    if (this._padDemande) return
+    this._padDemande = true
+    const rejouer = () => this.setZone(this._zoneDem)
+    this.loader.load('models/starship.glb', (g) => { this.starshipProto = g.scene; rejouer() }, undefined, () => {})
+    this.loader.load('models/tower.glb', (g) => { this.towerProto = g.scene; rejouer() }, undefined, () => {})
   }
 
   // dominant template colour: a strong mid-high ramp tint (falls back to ink)
@@ -204,10 +244,17 @@ export class Traffic {
       this.group.remove(this.pad.obj)
       this.pad = null
     }
-    if (!dem || !this.starshipProto) return
+    this._zoneDem = dem || null
+    if (!dem) return
     for (const pad of SPACEX_PADS) {
       const w = latLonToWorld(dem, pad.lat, pad.lon)
       if (Math.abs(w.x) > HALF * 0.95 || Math.abs(w.z) > HALF * 0.95) continue
+      // ON EST SUR UN PAS DE TIR — et c'est le SEUL endroit qui déclenche le
+      // téléchargement des deux GLB. Le test de position passe AVANT la
+      // vérification du modèle (l'inverse renvoyait tout le monde à la porte,
+      // et faisait payer les deux requêtes à tout le monde).
+      this._demanderPasDeTir()
+      if (!this.starshipProto) return // pas encore là : _demanderPasDeTir rejouera
       const root = new THREE.Group()
       // launch tower (Mechazilla) if supplied — normalised to ~3.2 units tall
       if (this.towerProto) {
@@ -240,7 +287,12 @@ export class Traffic {
     this.sinceRoll += dt
     if (!this.craft && this.sinceRoll >= SPAWN_CHECK_S) {
       this.sinceRoll = 0
-      if (Math.random() < SPAWN_CHANCE) this._spawnCraft()
+      if (Math.random() < SPAWN_CHANCE) {
+        // le ciel de cette session est vivant : c'est ICI que l'avion vaut ses
+        // 573 Ko, et pas une image plus tôt (voir _demanderAvion)
+        this._demanderAvion()
+        this._spawnCraft()
+      }
     }
     if (this.craft) {
       const p = this.craft
