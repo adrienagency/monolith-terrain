@@ -3,7 +3,10 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { PerspectiveCamera, Vector3 } from 'three'
-import { isRenderableSize, safeAspect, frameSize, applyRenderSize } from '../src/viewport.js'
+import {
+  isRenderableSize, safeAspect, frameSize, applyRenderSize,
+  screenPixelRatio, glSizeLimit, fitDrawingBuffer, MAX_PIXEL_RATIO,
+} from '../src/viewport.js'
 
 const ROOT = path.join(import.meta.dirname, '..')
 
@@ -89,15 +92,18 @@ test('une frame à 0×0 suivie d’un retour à 1280×720 ne laisse jamais l’a
 // garde-fou — c’est exactement ce qu’on veut savoir, parce que rien d’autre,
 // ni test ni console, ne le signalerait.
 
-test('main.js : le resize teste la taille AVANT d’écrire camera.aspect', () => {
+// Le resize écrivait `camera.aspect` lui-même, derrière un isRenderableSize.
+// Il ne l'écrit plus DU TOUT : applyRenderSize porte le garde-fou (et depuis
+// le 28/07/2026 le plafond matériel), le resize n'a plus qu'à le laisser
+// renoncer. Ce test garde donc l'intention d'origine par l'autre bout : plus
+// personne ne pose l'aspect à la main dans ce gestionnaire.
+test('main.js : le resize n’écrit plus camera.aspect lui-même', () => {
   const src = fs.readFileSync(path.join(ROOT, 'src/main.js'), 'utf8')
   const at = src.indexOf("window.addEventListener('resize'")
   assert.ok(at > 0, 'gestionnaire de redimensionnement introuvable dans main.js')
-  const body = src.slice(at, at + 1200)
-  const garde = body.indexOf('isRenderableSize')
-  const ecriture = body.indexOf('camera.aspect =')
-  assert.ok(garde > 0, 'le resize doit filtrer la taille par isRenderableSize (voir viewport.js)')
-  assert.ok(ecriture > 0 && garde < ecriture, 'le filtre doit précéder l’écriture de camera.aspect')
+  const body = src.slice(at, at + 1600)
+  assert.doesNotMatch(body, /camera\.aspect\s*=/,
+    'l’aspect se pose dans applyRenderSize, une seule fois, avec son garde-fou (voir viewport.js)')
 })
 
 test('export.js : applySize borne l’aspect au lieu de diviser la taille brute', () => {
@@ -225,3 +231,301 @@ for (const fichier of ['src/perf.js', 'src/ui/camera-panel.js']) {
     assert.match(src, /applyRenderSize/, 'la taille de rendu doit venir de viewport.js')
   })
 }
+
+// ---------------------------------------------------------------------------
+// LE PLAFOND MATÉRIEL — le rabotage muet de Chrome
+// ---------------------------------------------------------------------------
+// Signalé le 28/07/2026, même vieux portable : « zoom à fond », image déformée.
+// Quand le tampon de dessin demandé dépasse ce que la carte accepte, Chrome ne
+// lève RIEN — ni exception, ni avertissement — et rabote DIMENSION PAR
+// DIMENSION, pas proportionnellement. Mesuré : 16384×800 demandés donnent
+// 8192×800 (aspect 20,5 → 10,2) ; 24576×8192 donnent 5760×5760 (aspect 3 → 1).
+// La caméra, elle, garde l'aspect du conteneur : l'image est écrasée.
+//
+// Le déclencheur était `pixelRatio: 2` EN DUR : sur une machine dont
+// MAX_TEXTURE_SIZE vaut 2048 ou 4096 (circuit graphique intégré ancien), un
+// écran large ×2 franchit la limite. D'où ces tests : le calcul « taille
+// demandée + limite matérielle → taille retenue » est pur, donc c'est lui qui
+// porte la couverture.
+
+test('screenPixelRatio : la densité RÉELLE de l’écran, bornée — dans les deux sens', () => {
+  assert.equal(screenPixelRatio(1), 1)
+  assert.equal(screenPixelRatio(2), 2)
+  // Windows à 125 % : on rendait 2 (60 % de pixels payés pour rien)
+  assert.equal(screenPixelRatio(1.25), 1.25)
+  // écran à 250 % : on rendait 2, donc PLUS FLOU que ce que l’écran demande
+  // tout en payant plein pot. Le plafond reste 2 — au-delà le gain est nul et
+  // le coût quadratique — mais la lecture corrige le sens « trop peu ».
+  assert.equal(screenPixelRatio(2.5), MAX_PIXEL_RATIO)
+  assert.equal(screenPixelRatio(3), 2)
+  // rien de non numérique ne doit sortir d’ici : 1 est le repli sûr
+  for (const v of [undefined, null, 0, -1, 0 / 0, 'deux']) assert.equal(screenPixelRatio(v), 1, `screenPixelRatio(${v})`)
+  assert.equal(screenPixelRatio(1 / 0), MAX_PIXEL_RATIO)
+  assert.equal(screenPixelRatio(3, 1), 1, 'le plafond est paramétrable (export offline)')
+})
+
+test('glSizeLimit : on retient la contrainte la PLUS BASSE des deux', () => {
+  const gl = (tex, rb) => ({
+    MAX_TEXTURE_SIZE: 0x0d33,
+    MAX_RENDERBUFFER_SIZE: 0x84e8,
+    getParameter: (c) => (c === 0x0d33 ? tex : rb),
+  })
+  assert.equal(glSizeLimit(gl(16384, 16384)), 16384)
+  // une cible du compositeur est un renderbuffer : si LUI est plus bas, c’est
+  // lui qui décide, même quand les textures montent plus haut
+  assert.equal(glSizeLimit(gl(8192, 4096)), 4096)
+  assert.equal(glSizeLimit(gl(2048, 16384)), 2048)
+  // pas de contexte / valeurs absurdes : 0 = « aucune limite connue », et
+  // fitDrawingBuffer ne rabote alors rien du tout (ne jamais brider à l’aveugle)
+  assert.equal(glSizeLimit(null), 0)
+  assert.equal(glSizeLimit({}), 0)
+  assert.equal(glSizeLimit(gl(0, 0)), 0)
+  assert.equal(glSizeLimit(gl(0 / 0, undefined)), 0)
+})
+
+test('fitDrawingBuffer : sous la limite, on ne touche à RIEN', () => {
+  const f = fitDrawingBuffer(1366, 768, 2, 16384)
+  assert.equal(f.clamped, false)
+  assert.equal(f.ratio, 2)
+  assert.deepEqual([f.width, f.height], [2732, 1536])
+})
+
+test('fitDrawingBuffer : UNE SEULE dimension qui dépasse — le cas exact qui déforme', () => {
+  // 8192×400 CSS à la densité 2 = 16384×800 demandés. Chrome rend 8192×800 :
+  // l’aspect passe de 20,48 à 10,24, l’image est écrasée d’un facteur deux.
+  const limite = 8192
+  const f = fitDrawingBuffer(8192, 400, 2, limite)
+  assert.equal(f.clamped, true)
+  assert.ok(Math.max(f.width, f.height) <= limite, `${f.width}×${f.height} doit tenir sous ${limite}`)
+  // LES DEUX côtés ont reculé du même facteur : c’est toute la correction
+  assert.deepEqual([f.width, f.height], [8192, 400])
+  const attendu = 8192 / 400
+  assert.ok(Math.abs(f.width / f.height - attendu) / attendu < 0.002,
+    `aspect retenu ${f.width / f.height} au lieu de ${attendu}`)
+})
+
+test('fitDrawingBuffer : le second cas mesuré — 24576×8192 raboté en carré par Chrome', () => {
+  // 12288×4096 CSS à la densité 2. Chrome renvoyait 5760×5760 : aspect 3 → 1.
+  const f = fitDrawingBuffer(12288, 4096, 2, 5760)
+  assert.equal(f.clamped, true)
+  assert.deepEqual([f.width, f.height], [5760, 1920])
+  assert.equal(f.width / f.height, 3, 'l’aspect 3:1 doit survivre au rabotage')
+})
+
+test('fitDrawingBuffer : le vieux portable — 1366×768 à la densité 2 sur une carte à 2048', () => {
+  const f = fitDrawingBuffer(1366, 768, 2, 2048)
+  assert.equal(f.clamped, true)
+  assert.ok(f.ratio < 2 && f.ratio > 1, `densité retenue ${f.ratio}`)
+  assert.ok(Math.max(f.width, f.height) <= 2048)
+  const attendu = 1366 / 768
+  assert.ok(Math.abs(f.width / f.height - attendu) / attendu < 0.002,
+    `l’aspect doit tenir : ${f.width / f.height} contre ${attendu}`)
+  // 2042×1148, et pas 2048×1151 : quelques pixels rendus pour que les DEUX
+  // côtés soient pairs. Mesuré en direct le 28/07/2026 — à 1151, l'AO en
+  // demi-résolution repart en 575,5 et on rachète le carré noir. Le prix est
+  // de 0,006 % d'aspect et de trois pixels de finesse.
+  assert.deepEqual([f.width, f.height], [2042, 1148])
+  assert.equal(1148 / 2, 574, 'la demi-résolution doit être un ENTIER')
+})
+
+test('fitDrawingBuffer : un tampon raboté a TOUJOURS deux côtés pairs (demi-résolutions entières)', () => {
+  // le compositeur taille ses cibles sur le TAMPON, pas sur le CSS : une
+  // densité fractionnaire redonne un tampon impair, donc des demi-résolutions
+  // en .5 — le carré noir. Voir densitePaire dans viewport.js.
+  for (const [w, h, r, lim] of [
+    [1366, 768, 2, 2048], [1920, 1080, 2, 2048], [2560, 1080, 1.5, 1024],
+    [1366, 768, 1.5, 1024], [3840, 2160, 2, 4096], [1600, 900, 2, 2048],
+  ]) {
+    const f = fitDrawingBuffer(w, h, r, lim)
+    assert.equal(f.clamped, true, `${w}×${h}@${r}/${lim} devrait être raboté`)
+    assert.equal(f.width % 2, 0, `largeur impaire : ${f.width}×${f.height}`)
+    assert.equal(f.height % 2, 0, `hauteur impaire : ${f.width}×${f.height}`)
+  }
+})
+
+test('fitDrawingBuffer : la taille CSS seule peut déjà dépasser — la densité passe sous 1', () => {
+  // écran 4K dans un cadre plein, carte à 2048 : même à la densité 1 ça ne tient
+  // pas. Mieux vaut une image moins fine qu’une image écrasée.
+  const f = fitDrawingBuffer(3840, 2160, 1, 2048)
+  assert.ok(f.ratio < 1, `densité retenue ${f.ratio}`)
+  assert.deepEqual([f.width, f.height], [2048, 1152])
+  assert.ok(Math.abs(f.width / f.height - 3840 / 2160) < 0.002)
+})
+
+test('fitDrawingBuffer : sans limite connue, aucun rabotage (ne jamais brider à l’aveugle)', () => {
+  for (const limite of [0, -1, undefined, null, 0 / 0, 1 / 0]) {
+    const f = fitDrawingBuffer(4096, 4096, 2, limite)
+    assert.equal(f.clamped, false, `limite=${limite}`)
+    assert.equal(f.ratio, 2)
+  }
+})
+
+test('fitDrawingBuffer : une densité absurde retombe sur 1, jamais sur NaN', () => {
+  for (const r of [0, -2, 0 / 0, undefined, null, 1 / 0]) {
+    const f = fitDrawingBuffer(1280, 720, r, 16384)
+    assert.ok(Number.isFinite(f.ratio) && f.ratio > 0, `ratio=${r} → ${f.ratio}`)
+    assert.ok(Number.isFinite(f.width) && Number.isFinite(f.height))
+  }
+})
+
+test('fitDrawingBuffer : pile SUR la limite, on ne rabote pas (pas de perte gratuite)', () => {
+  const f = fitDrawingBuffer(1024, 512, 2, 2048)
+  assert.equal(f.clamped, false)
+  assert.equal(f.ratio, 2)
+  assert.deepEqual([f.width, f.height], [2048, 1024])
+})
+
+test('fitDrawingBuffer : balayage — jamais au-dessus de la limite, et l’aspect tient toujours', () => {
+  const limites = [1024, 2048, 4096, 8192, 16384]
+  const tailles = [[320, 240], [1366, 768], [1920, 1080], [2560, 1080], [3840, 2160], [7680, 800], [800, 7680]]
+  for (const limite of limites) {
+    for (const [w, h] of tailles) {
+      for (const r of [0.5, 0.85, 1, 1.25, 1.5, 2]) {
+        const f = fitDrawingBuffer(w, h, r, limite)
+        assert.ok(Math.max(f.width, f.height) <= limite,
+          `${w}×${h}@${r} sur ${limite} → ${f.width}×${f.height} dépasse`)
+        assert.ok(f.width >= 1 && f.height >= 1, `${w}×${h}@${r} sur ${limite} → tampon vide`)
+        if (f.clamped) {
+          assert.equal((f.width | f.height) % 2, 0,
+            `${w}×${h}@${r} sur ${limite} → ${f.width}×${f.height} : côté impair = demi-résolution en .5`)
+        }
+        const attendu = w / h
+        const ecart = Math.abs(f.width / f.height - attendu) / attendu
+        // un pixel de rognage sur le petit côté, pas un facteur deux
+        assert.ok(ecart < 0.01, `${w}×${h}@${r} sur ${limite} : aspect ${f.width / f.height} contre ${attendu}`)
+      }
+    }
+  }
+})
+
+// --- applyRenderSize, maintenant qu'il porte le plafond -------------------
+
+// Le même faux trio, plus le contexte WebGL et la densité. `limite` à 0 = la
+// carte ne dit rien (comme les tests d'origine ci-dessus, qui n'ont donc pas
+// bougé d'une ligne).
+const fauxGl = (cw, ch, limite = 0) => {
+  const vus = { renderer: null, composer: null, ratio: null }
+  return {
+    vus,
+    renderer: {
+      domElement: { parentElement: { clientWidth: cw, clientHeight: ch } },
+      setSize: (w, h) => { vus.renderer = [w, h] },
+      setPixelRatio: (r) => { vus.ratio = r },
+      getPixelRatio: () => vus.ratio ?? 1,
+      getContext: () => ({
+        MAX_TEXTURE_SIZE: 0x0d33,
+        MAX_RENDERBUFFER_SIZE: 0x84e8,
+        getParameter: () => limite,
+      }),
+    },
+    composer: { setSize: (w, h) => { vus.composer = [w, h] } },
+    camera: { aspect: 4 / 3, updateProjectionMatrix() { this.maj = (this.maj || 0) + 1 } },
+  }
+}
+
+// capture de console.warn le temps d'un appel
+const avecWarn = (fn) => {
+  const vrai = console.warn
+  const dits = []
+  console.warn = (...a) => dits.push(a.join(' '))
+  try { fn() } finally { console.warn = vrai }
+  return dits
+}
+
+test('applyRenderSize : machine normale — rien ne change, et rien ne s’affiche en console', () => {
+  const f = fauxGl(1366, 768, 16384)
+  const dits = avecWarn(() => assert.deepEqual(applyRenderSize({ ...f, pixelRatio: 2 }), [1366, 768]))
+  assert.deepEqual(f.vus.renderer, [1366, 768], 'la taille CSS ne bouge pas d’un pixel')
+  assert.deepEqual(f.vus.composer, [1366, 768])
+  assert.equal(f.vus.ratio, 2, 'la densité demandée est servie telle quelle')
+  assert.equal(dits.length, 0, 'aucun avertissement sur une machine capable')
+})
+
+// ⚠️ chaque test ci-dessous prend une taille de cadre DIFFÉRENTE, et ce n'est
+// pas cosmétique : l'avertissement est mémorisé (une console noyée ne se lit
+// pas), donc deux tests sur le même couple taille/densité ne verraient qu'un
+// seul message — le second passerait pour muet.
+test('applyRenderSize : carte à 2048 — la densité recule, l’aspect NE BOUGE PAS', () => {
+  const f = fauxGl(1600, 900, 2048)
+  avecWarn(() => applyRenderSize({ ...f, pixelRatio: 2 }))
+  assert.deepEqual(f.vus.renderer, [1600, 900], 'la taille CSS reste celle du cadre')
+  assert.equal(f.camera.aspect, 1600 / 900, 'la caméra suit le CADRE, jamais le tampon raboté')
+  assert.ok(f.vus.ratio < 2, `la densité doit avoir reculé (${f.vus.ratio})`)
+  const buf = [Math.floor(1600 * f.vus.ratio), Math.floor(900 * f.vus.ratio)]
+  assert.ok(Math.max(...buf) <= 2048, `tampon ${buf} au-dessus de 2048`)
+  assert.ok(Math.abs(buf[0] / buf[1] - f.camera.aspect) / f.camera.aspect < 0.002,
+    `aspect du tampon ${buf[0] / buf[1]} contre caméra ${f.camera.aspect}`)
+})
+
+test('applyRenderSize : le rabotage se DIT, avec les chiffres — le silence est le vrai défaut', () => {
+  const f = fauxGl(1366, 768, 2048)
+  const dits = avecWarn(() => applyRenderSize({ ...f, pixelRatio: 2 }))
+  assert.equal(dits.length, 1, 'un avertissement, et un seul')
+  const txt = dits[0]
+  for (const n of ['2732', '2048', '1366']) {
+    assert.ok(txt.includes(n), `l’avertissement doit porter ${n} : « ${txt} »`)
+  }
+})
+
+test('applyRenderSize : on n’inonde pas la console — même situation, un seul message', () => {
+  const f = fauxGl(1280, 720, 2048)
+  const dits = avecWarn(() => {
+    applyRenderSize({ ...f, pixelRatio: 2 })
+    applyRenderSize({ ...f, pixelRatio: 2 })
+    applyRenderSize({ ...f, pixelRatio: 2 })
+  })
+  assert.equal(dits.length, 1)
+})
+
+test('applyRenderSize : sans densité passée, on relit celle du renderer', () => {
+  const f = fauxGl(910, 512, 16384)
+  f.vus.ratio = 1.5
+  applyRenderSize({ renderer: f.renderer, composer: f.composer })
+  assert.equal(f.vus.ratio, 1.5)
+  assert.deepEqual(f.vus.renderer, [910, 512])
+})
+
+test('applyRenderSize : un contexte WebGL absent (canevas perdu) ne casse rien', () => {
+  const f = fauxGl(1280, 720, 16384)
+  f.renderer.getContext = () => { throw new Error('contexte perdu') }
+  assert.deepEqual(applyRenderSize({ ...f, pixelRatio: 2 }), [1280, 720])
+  assert.equal(f.vus.ratio, 2)
+})
+
+// ---------------------------------------------------------------------------
+// LES SOURCES, VERROUILLÉES
+// ---------------------------------------------------------------------------
+// Le plafond ne vaut que s'il est SUR LE CHEMIN. Trois endroits posaient la
+// densité à la main juste avant d'appeler applyRenderSize : ils la
+// contournaient donc entièrement.
+
+// Les lignes de code (commentaires exclus) qui contiennent un motif. On teste
+// la LISTE, pas la source entière : un assert.doesNotMatch sur main.js recrache
+// 260 ko dans le rapport d'échec, ce qui rend la panne illisible.
+const lignes = (fichier, motif) =>
+  fs.readFileSync(path.join(ROOT, fichier), 'utf8')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => !l.startsWith('//') && motif.test(l))
+
+test('main.js : la densité vient de l’écran, plus jamais d’un 2 en dur', () => {
+  assert.deepEqual(lignes('src/main.js', /pixelRatio:\s*2\s*,/), [],
+    'pixelRatio codé à 2 : c’est le déclencheur du rabotage (voir viewport.js)')
+  assert.equal(lignes('src/main.js', /screenPixelRatio\(\s*window\.devicePixelRatio/).length, 1,
+    'la densité réelle de l’écran doit être lue, puis bornée par screenPixelRatio')
+})
+
+for (const fichier of ['src/perf.js', 'src/ui/camera-panel.js', 'src/main.js']) {
+  test(`${fichier} : personne ne pose la densité à la main — elle passe par applyRenderSize`, () => {
+    assert.deepEqual(lignes(fichier, /renderer\.setPixelRatio\(/), [],
+      'setPixelRatio direct = plafond matériel contourné : passer pixelRatio à applyRenderSize')
+  })
+}
+
+test('main.js : le resize passe par applyRenderSize, pas par son propre setSize', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'src/main.js'), 'utf8')
+  const at = src.indexOf("window.addEventListener('resize'")
+  const body = src.slice(at, at + 1600)
+  assert.match(body, /applyRenderSize/, 'le resize doit servir la taille par la fonction unique')
+  assert.doesNotMatch(body, /composer\.setSize\(/, 'plus de seconde source de vérité dans le resize')
+})

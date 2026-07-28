@@ -68,7 +68,15 @@ export function perfSection(ctx) {
     // au compositeur, poussait le canevas hors de ce cadre (image écrasée
     // puis rognée par l'`overflow: hidden` du cadre) et, en
     // prime, sautait l'arrondi pair qui évite le carré noir. Voir viewport.js.
-    slider({ label: 'Échelle de rendu', min: 0.5, max: 2, step: 0.05, get: () => params.pixelRatio, set: (v) => { params.pixelRatio = v; ctx.renderer.setPixelRatio(v); applyRenderSize({ renderer: ctx.renderer, composer: ctx.composer, camera: ctx.camera }) } }),
+    // ⚠️ La densité VOULUE se PASSE à applyRenderSize, on ne la pose plus
+    // soi-même : c'est là qu'elle est bornée à ce que la carte graphique
+    // accepte. Sans ce passage, un curseur à 2 sur un vieux portable fait
+    // franchir MAX_TEXTURE_SIZE au tampon de dessin, et Chrome le rabote UNE
+    // DIMENSION À LA FOIS, sans un mot — image écrasée. params garde le
+    // SOUHAIT (ce que montre le curseur), applyRenderSize sert le RÉEL : on
+    // n'écrit rien en retour, sinon la valeur ne remonterait jamais quand la
+    // fenêtre rétrécit.
+    slider({ label: 'Échelle de rendu', min: 0.5, max: 2, step: 0.05, get: () => params.pixelRatio, set: (v) => { params.pixelRatio = v; applyRenderSize({ renderer: ctx.renderer, composer: ctx.composer, camera: ctx.camera, pixelRatio: v }) } }),
     select({ label: 'Ombres', options: ['dynamic', 'static', 'off'], get: () => params.shadowMode, set: (v) => { params.shadowMode = v; ctx.applyShadowMode() } }),
     select({ label: 'Résolution des ombres', options: ['1024', '2048', '4096'], get: () => String(params.shadowRes), set: (v) => { params.shadowRes = +v; ctx.setShadowRes(+v) } })
   )
