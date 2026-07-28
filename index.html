@@ -71,7 +71,10 @@
          swap in and long before the JS bundle (Three.js + the app) has even
          been fetched. main.js only ever ADDS the .hidden class once the real
          terrain is built (see loadingStatus/loadingEl in main.js) and never
-         before a 2s-minimum has elapsed, so this can't flash. -->
+         before a 2s-minimum has elapsed, so this can't flash.
+         (ui/hub.js, lui, pose/retire `cede` : la carte s'écarte en fondu
+         rapide quand l'accueil monte au centre — le chargement, et donc le
+         cycle `.hidden` ci-dessus, continuent exactement pareil.) -->
     <div id="loading">
       <div class="ld-name">ShibuMap</div>
       <div class="ld-base">Any place on Earth, as a quiet relief map</div>

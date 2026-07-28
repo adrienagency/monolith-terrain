@@ -52,10 +52,12 @@ export function buildHub({ bar, bottomBar, onExplore }) {
   // LA PLACE DU CENTRE EST PARTAGÉE avec la carte de chargement (#loading, posée
   // en dur dans index.html). Les deux visent le milieu de la fenêtre, et leurs
   // horloges n'ont rien en commun : l'accueil monte 900 ms après main.js, la
-  // carte s'efface quand le relief est prêt. Sur une machine lente le second
-  // délai double, et le visiteur reçoit les DEUX en même temps — deux
-  // « ShibuMap », deux sous-titres, du texte fantôme derrière les trois portes.
-  // C'est le tout premier écran du site ; le sas fait attendre l'accueil.
+  // carte s'efface quand le relief est prêt. Sans arbitre, sur machine lente,
+  // le visiteur recevait les DEUX en même temps — deux « ShibuMap », deux
+  // sous-titres, du texte fantôme derrière les trois portes.
+  // L'ARBITRAGE A CHANGÉ DE SENS le 28/07 (Adrien) : l'accueil ne fait plus
+  // la queue, c'est la carte qui CÈDE, en fondu rapide (`#loading.cede`,
+  // style.css). Le fond de relief reste, lui : il ne part qu'avec `.hidden`.
   // (La règle vit dans hub-sas.js, pure et testée ; ici, juste le câblage.)
   //
   // Le loader est cherché DANS LE DOM plutôt que passé en paramètre : il est
@@ -64,20 +66,36 @@ export function buildHub({ bar, bottomBar, onExplore }) {
   const chargement = document.getElementById('loading')
   const chargementVisible = () => !!chargement && !chargement.classList.contains('hidden')
 
-  const sas = creerSas({ montrer: lever, occupe: chargementVisible() })
+  const sas = creerSas({
+    montrer: lever,
+    effacer: () => chargement?.classList.add('cede'),
+    retablir: () => chargement?.classList.remove('cede'),
+    ouvert: isOpen,
+    occupe: chargementVisible(),
+  })
 
   // ⚠️ on écoute la CLASSE, jamais `transitionend` : dans un onglet non
   // composité le navigateur gèle les transitions et l'événement n'arrive
-  // jamais — l'accueil ne monterait plus du tout. Même motif que le fondu des
-  // phrases de chargement, et même raison.
+  // jamais — le sas ne saurait plus qui occupe le centre. Même motif que le
+  // fondu des phrases de chargement, et même raison.
   if (chargement) {
-    new MutationObserver(() => (chargementVisible() ? sas.occuper() : sas.liberer()))
-      .observe(chargement, { attributes: true, attributeFilter: ['class'] })
+    new MutationObserver((muts) => {
+      const visible = chargementVisible()
+      // la carte revient pour un chargement à chaud (main.js retire `.hidden`) :
+      // un `cede` resté d'une montée passée la laisserait invisible. On le
+      // retire AVANT d'annoncer l'occupation — occuper() le repose aussitôt si
+      // l'accueil est encore au centre. Le critère « .hidden vient de partir »
+      // (oldValue) évite de retirer le `cede` qu'on vient soi-même de poser.
+      if (visible && muts.some((m) => /\bhidden\b/.test(m.oldValue || ''))) {
+        chargement.classList.remove('cede')
+      }
+      visible ? sas.occuper() : sas.liberer()
+    }).observe(chargement, { attributes: true, attributeFilter: ['class'], attributeOldValue: true })
   }
 
-  // la montée elle-même — appelée par le sas, jamais directement. Les gardes
-  // sont ici et pas dans show() : entre la demande et la montée, il peut s'être
-  // écoulé plusieurs secondes, et la boutique ou le Studio ont pu s'ouvrir.
+  // la montée elle-même — appelée par le sas, jamais directement. La montée
+  // est immédiate désormais, mais les gardes restent doublées (show ET ici) :
+  // le sas doit pouvoir appeler montrer() sans connaître nos contextes bloqués.
   function lever() {
     if (blocked() || isOpen()) return
     if (input) input.placeholder = askPlaceholder
@@ -89,9 +107,9 @@ export function buildHub({ bar, bottomBar, onExplore }) {
     sas.demander()
   }
   function hide() {
-    // même si l'accueil n'est pas encore monté : une demande en attente le
-    // ferait surgir plus tard, par-dessus l'espace que le visiteur vient
-    // d'ouvrir.
+    // si la carte de chargement avait cédé le centre à l'accueil et que son
+    // chargement court toujours, elle le reprend — sans elle le visiteur
+    // fixerait le relief de fond figé, sans un mot.
     sas.annuler()
     if (!isOpen()) return
     if (input) input.placeholder = barPlaceholder
