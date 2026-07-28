@@ -128,6 +128,16 @@ body.dark {
   background: var(--ce-hover);
   color: var(--ce-accent);
 }
+/* Rien à annuler / à rétablir : le bouton reste EN PLACE, éteint. Le masquer
+   ferait sauter la barre d'un cran au premier réglage — on préfère un bouton
+   visiblement inerte à une barre qui bouge sous le doigt. */
+.ce-icon-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.ce-icon-btn:disabled:hover {
+  background: transparent;
+}
 .ce-icon-btn svg {
   width: 16px;
   height: 16px;

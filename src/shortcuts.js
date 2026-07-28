@@ -8,6 +8,16 @@
 // `ctrl`/`shift` booleans (default false = "must NOT be held"). `ctrl` is
 // satisfied by either ctrlKey or metaKey, so Cmd works on macOS too.
 //
+// `key` (le CARACTÈRE imprimé) double `code` (la PLACE physique) partout où le
+// raccourci est un moyen mnémotechnique : Z pour annuler, W pour water. C'est
+// nécessaire, pas décoratif — `code` décrit la position en QWERTY, et sur un
+// AZERTY Z et W sont permutés : la touche marquée Z envoie code 'KeyW'. Sans
+// `key`, Ctrl+Z ne faisait RIEN chez un utilisateur français (le navigateur
+// récupérait la combinaison et faisait son propre annuler, invisible ici) et
+// c'est Ctrl+W qui annulait, à côté. Le pavé numérique et Espace/Échap gardent
+// `code` seul : là, c'est bien la place qui porte le sens (Num 8 = nord parce
+// qu'il est EN HAUT du pavé, quel que soit le chiffre imprimé dessus).
+//
 // `run(ctx)` calls into a handlers object built by main.js — every handler
 // there is null-safe, so a shortcut firing before a feature is ready is
 // always a harmless no-op.
@@ -32,40 +42,68 @@ export const SHORTCUTS = [
   { id: 'play-stop', keys: ['Esc'], label: 'Stop', category: 'Playback', code: 'Escape', run: (ctx) => ctx.stopPlay() },
 
   // ---- History (undo/redo) ----
-  { id: 'undo', keys: ['Ctrl', 'Z'], label: 'Undo', category: 'History', code: 'KeyZ', ctrl: true, run: (ctx) => ctx.undo() },
-  { id: 'redo', keys: ['Ctrl', 'Shift', 'Z'], label: 'Redo', category: 'History', code: 'KeyZ', ctrl: true, shift: true, run: (ctx) => ctx.redo() },
-  { id: 'redo-y', keys: ['Ctrl', 'Y'], label: 'Redo', category: 'History', code: 'KeyY', ctrl: true, run: (ctx) => ctx.redo() },
+  { id: 'undo', keys: ['Ctrl', 'Z'], label: 'Undo', category: 'History', code: 'KeyZ', key: 'z', ctrl: true, run: (ctx) => ctx.undo() },
+  { id: 'redo', keys: ['Ctrl', 'Shift', 'Z'], label: 'Redo', category: 'History', code: 'KeyZ', key: 'z', ctrl: true, shift: true, run: (ctx) => ctx.redo() },
+  { id: 'redo-y', keys: ['Ctrl', 'Y'], label: 'Redo', category: 'History', code: 'KeyY', key: 'y', ctrl: true, run: (ctx) => ctx.redo() },
 
   // ---- View / UI ----
-  { id: 'toggle-ui', keys: ['H'], label: 'Hide / show UI', category: 'View', code: 'KeyH', run: (ctx) => ctx.toggleUI() },
-  { id: 'toggle-dark', keys: ['D'], label: 'Dark mode', category: 'View', code: 'KeyD', run: (ctx) => ctx.toggleDark() },
-  { id: 'reframe', keys: ['F'], label: 'Reframe / home', category: 'View', code: 'KeyF', run: (ctx) => ctx.reframe() },
-  { id: 'toggle-shortcuts', keys: ['Shift', '?'], label: 'Shortcuts help', category: 'View', code: 'Slash', shift: true, run: (ctx) => ctx.toggleShortcuts() },
+  { id: 'toggle-ui', keys: ['H'], label: 'Hide / show UI', category: 'View', code: 'KeyH', key: 'h', run: (ctx) => ctx.toggleUI() },
+  { id: 'toggle-dark', keys: ['D'], label: 'Dark mode', category: 'View', code: 'KeyD', key: 'd', run: (ctx) => ctx.toggleDark() },
+  { id: 'reframe', keys: ['F'], label: 'Reframe / home', category: 'View', code: 'KeyF', key: 'f', run: (ctx) => ctx.reframe() },
+  { id: 'toggle-shortcuts', keys: ['Shift', '?'], label: 'Shortcuts help', category: 'View', code: 'Slash', key: '?', shift: true, run: (ctx) => ctx.toggleShortcuts() },
 
   // ---- General ----
-  { id: 'focus-search', keys: ['/'], label: 'Focus search', category: 'General', code: 'Slash', run: (ctx) => ctx.focusSearch() },
-  { id: 'open-export', keys: ['E'], label: 'Export', category: 'General', code: 'KeyE', run: (ctx) => ctx.openExport() },
+  { id: 'focus-search', keys: ['/'], label: 'Focus search', category: 'General', code: 'Slash', key: '/', run: (ctx) => ctx.focusSearch() },
+  { id: 'open-export', keys: ['E'], label: 'Export', category: 'General', code: 'KeyE', key: 'e', run: (ctx) => ctx.openExport() },
 
   // ---- Layers (power-user toggles) ----
-  { id: 'layer-roads', keys: ['R'], label: 'Toggle roads', category: 'Layers', code: 'KeyR', run: (ctx) => ctx.toggleLayer('roads') },
-  { id: 'layer-water', keys: ['W'], label: 'Toggle water', category: 'Layers', code: 'KeyW', run: (ctx) => ctx.toggleLayer('water') },
-  { id: 'layer-places', keys: ['P'], label: 'Toggle places', category: 'Layers', code: 'KeyP', run: (ctx) => ctx.toggleLayer('places') },
-  { id: 'layer-contours', keys: ['C'], label: 'Toggle contours', category: 'Layers', code: 'KeyC', run: (ctx) => ctx.toggleLayer('contours') },
-  { id: 'layer-grid', keys: ['G'], label: 'Toggle grid', category: 'Layers', code: 'KeyG', run: (ctx) => ctx.toggleLayer('grid') },
-  { id: 'layer-region', keys: ['I'], label: 'Isolate the zone', category: 'Layers', code: 'KeyI', run: (ctx) => ctx.toggleRegion() },
+  { id: 'layer-roads', keys: ['R'], label: 'Toggle roads', category: 'Layers', code: 'KeyR', key: 'r', run: (ctx) => ctx.toggleLayer('roads') },
+  { id: 'layer-water', keys: ['W'], label: 'Toggle water', category: 'Layers', code: 'KeyW', key: 'w', run: (ctx) => ctx.toggleLayer('water') },
+  { id: 'layer-places', keys: ['P'], label: 'Toggle places', category: 'Layers', code: 'KeyP', key: 'p', run: (ctx) => ctx.toggleLayer('places') },
+  { id: 'layer-contours', keys: ['C'], label: 'Toggle contours', category: 'Layers', code: 'KeyC', key: 'c', run: (ctx) => ctx.toggleLayer('contours') },
+  { id: 'layer-grid', keys: ['G'], label: 'Toggle grid', category: 'Layers', code: 'KeyG', key: 'g', run: (ctx) => ctx.toggleLayer('grid') },
+  { id: 'layer-region', keys: ['I'], label: 'Isolate the zone', category: 'Layers', code: 'KeyI', key: 'i', run: (ctx) => ctx.toggleRegion() },
 ]
 
-// Pure — matches a KeyboardEvent-like { code, ctrlKey, metaKey, shiftKey } to
-// its SHORTCUTS entry (or null). `code` must match exactly; the ctrl
-// requirement (default false) is satisfied by EITHER ctrlKey or metaKey, so
-// Ctrl and Cmd combos are equivalent; the shift requirement (default false)
-// must match exactly, so a plain letter key never fires under Shift+letter
-// unless a Shift entry explicitly claims that code.
+// Pure — matches a KeyboardEvent-like { key, code, ctrlKey, metaKey, shiftKey }
+// to its SHORTCUTS entry (or null). Deux passes, dans cet ordre :
+//
+//  1. par CARACTÈRE (`e.key`) sur les entrées qui déclarent `key`. C'est la
+//     passe qui rend le registre indépendant de la disposition du clavier.
+//     Une lettre se compare sans casse (Verr.Maj ne doit rien casser) et
+//     vérifie shift ; un caractère de ponctuation ('/', '?') IGNORE shift,
+//     parce qu'il porte déjà en lui la façon dont on l'a produit — « / » se
+//     tape sans shift en QWERTY, avec en AZERTY, et c'est le même raccourci.
+//  2. par POSITION (`e.code`), pour le pavé numérique, Espace et Échap.
+//
+// Quand l'événement porte un `key` exploitable, la passe 2 ignore délibérément
+// les entrées à `key` : sinon la touche marquée Z d'un AZERTY (code 'KeyW')
+// retomberait sur « basculer l'eau ». Les événements synthétiques sans `key`
+// (tests, scripts) gardent l'ancien comportement positionnel intégral.
+//
+// Le ctrl requis (défaut false) est satisfait par ctrlKey OU metaKey, donc Ctrl
+// et Cmd sont équivalents.
 export function matchShortcut(e) {
-  if (!e || !e.code) return null
+  if (!e) return null
   const ctrl = !!(e.ctrlKey || e.metaKey)
   const shift = !!e.shiftKey
+  const typed = typeof e.key === 'string' && e.key ? e.key : null
+
+  if (typed) {
+    for (const s of SHORTCUTS) {
+      if (!s.key) continue
+      if (isLetter(s.key)) {
+        if (typed.toLowerCase() !== s.key) continue
+        if (!!s.shift !== shift) continue
+      } else if (typed !== s.key) continue
+      if (!!s.ctrl !== ctrl) continue
+      return s
+    }
+  }
+
+  if (!e.code) return null
   for (const s of SHORTCUTS) {
+    if (s.key && typed) continue // déjà jugée par le caractère, ci-dessus
     if (s.code !== e.code) continue
     if (!!s.ctrl !== ctrl) continue
     if (!!s.shift !== shift) continue
@@ -73,6 +111,8 @@ export function matchShortcut(e) {
   }
   return null
 }
+
+const isLetter = (k) => k.length === 1 && k >= 'a' && k <= 'z'
 
 // Attaches ONE keydown listener on window. Inert while focus is inside a
 // text input/textarea/select/contenteditable — except Escape always gets

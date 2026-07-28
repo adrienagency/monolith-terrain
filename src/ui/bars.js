@@ -40,6 +40,8 @@ const I = {
   news: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 12.5h8M8 16h5"/></svg>',
   compass:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2.2 5-5 2.2 2.2-5 5-2.2z"/></svg>',
+  undo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h10a5 5 0 010 10h-6"/><path d="M7.5 4.5L4 8l3.5 3.5"/></svg>',
+  redo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 8H10a5 5 0 000 10h6"/><path d="M16.5 4.5L20 8l-3.5 3.5"/></svg>',
 }
 
 // ---- Mode simple / avancé (UX P3) ----------------------------------------
@@ -112,6 +114,23 @@ export function buildTopBar(ctx) {
   globeBtn.classList.add('ce-globebtn') // ciblé par la visite guidée
   globeBtn.setAttribute('data-tip', 'Reculer jusqu’à la planète entière, qui tourne lentement.')
   bar.append(globeBtn)
+
+  // Annuler / rétablir — À GAUCHE, avec la navigation, comme dans Figma et
+  // Canva dont ce chrome emprunte la grammaire. Ils existaient déjà en
+  // raccourci seul, ce qui les rendait invisibles pour qui ne les connaît pas
+  // (et injoignables au doigt : un écran tactile n'a pas de Ctrl).
+  // Ils naissent ÉTEINTS et le restent tant que l'historique n'a rien —
+  // setHistoryState est la seule porte qui les rallume (main.js la branche sur
+  // History.onChange), pour qu'on ne clique jamais dans le vide.
+  const undoBtn = iconButton(I.undo, '', () => ctx.undo?.())
+  undoBtn.classList.add('ce-undobtn')
+  undoBtn.disabled = true
+  undoBtn.setAttribute('data-tip', 'Annuler le dernier réglage (Ctrl+Z).')
+  const redoBtn = iconButton(I.redo, '', () => ctx.redo?.())
+  redoBtn.classList.add('ce-redobtn')
+  redoBtn.disabled = true
+  redoBtn.setAttribute('data-tip', 'Rétablir ce qui vient d’être annulé (Ctrl+Maj+Z).')
+  bar.append(el('span', 'ce-topbar-sep'), undoBtn, redoBtn)
 
   // export earns a labelled pill — it is a primary action, not tucked-away chrome.
   // openExport is async (the export stack is lazy-loaded on first click): the
@@ -298,6 +317,11 @@ export function buildTopBar(ctx) {
     root: bar,
     rootRight: barRight,
     syncDark,
+    // allume / éteint les deux boutons d'historique — cf. History.onChange
+    setHistoryState: ({ canUndo, canRedo }) => {
+      undoBtn.disabled = !canUndo
+      redoBtn.disabled = !canRedo
+    },
     // le panneau Caméra n'existe pas encore quand la barre se construit
     mountCamera: (root) => camMenu.append(root),
   }
