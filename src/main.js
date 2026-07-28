@@ -21,7 +21,11 @@ import {
 import { Terrain } from './terrain.js'
 import { createLabels, disposeLabels } from './labels.js'
 import { createHud3D, findPois } from './hud3d.js'
-import { loadDem, getDemMaxZoom } from './dem.js'
+import { loadDem, getDemMaxZoom, bathySourceIndex } from './dem.js'
+// L'attribution des sources bathymétriques fines est une OBLIGATION DE
+// LICENCE, et elle dépend de l'emprise exportée — voir export.js.
+import { creditFor } from './export.js'
+import { creditsForBounds } from './bathy-sources.js'
 import { warmupPrograms } from './warmup.js'
 import { activeDemSource, isFallbackActive } from './dem-source.js'
 import { Globe } from './globe.js'
@@ -51,6 +55,7 @@ import { FLAGS } from './flags.js'
 import { MapLayers } from './map/layer-manager.js'
 import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
 import { lightingFor, darkModeFor, applyGains, fillDirection, fillLightIntensity, fillEnabledInLook, sunOn, sunShadowOn } from './daycycle.js'
+import { signatureCarteOmbre } from './carte-ombre.js'
 import { SunDisc } from './sun-disc.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
@@ -1153,8 +1158,17 @@ placeSun()
 function applyShadowMode() {
   const wantShadow = sunShadowOn(params.sunEnabled, params.shadowMode)
   sun.castShadow = wantShadow
-  renderer.shadowMap.autoUpdate = wantShadow && params.shadowMode === 'dynamic'
-  if (wantShadow && params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
+  // ⚠️ autoUpdate reste FAUX dans les DEUX modes, et c'est le correctif du
+  // 28/07/2026 : « dynamic » redessinait la carte 2048² à chaque image alors
+  // qu'aucun projeteur ne bouge dans cette application (relief, murs du socle,
+  // murs des dalles voisines, jupe de région — quatre décors immobiles ; les
+  // bateaux ont castShadow = false, nuages et voitures n'en projettent aucune).
+  // Mesuré en production : 0,55 ms et 1 188 328 triangles PAR IMAGE, soit 26 %
+  // du temps GPU et 47 % des triangles, pour redessiner à l'identique. C'est
+  // majCarteOmbre() qui décide maintenant, sur l'état réel de la scène — et
+  // l'image rendue est rigoureusement la même (voir src/carte-ombre.js).
+  renderer.shadowMap.autoUpdate = false
+  if (wantShadow) { sigCarteOmbre = null; renderer.shadowMap.needsUpdate = true }
   // ⚠️ three ne rend PAS la carte d'ombre tout seul quand castShadow retombe à
   // false : la texture 2048×2048 reste allouée sur le GPU pour rien. C'est le
   // vrai poste coûteux du soleil, donc on la relâche à la main. La remettre à
@@ -1165,6 +1179,39 @@ function applyShadowMode() {
     sun.shadow.map.dispose()
     sun.shadow.map = null
   }
+}
+
+// LA CARTE D'OMBRE, REDESSINÉE SEULEMENT QUAND ELLE CHANGERAIT.
+//
+// Appelé juste avant chaque dessin. Le POURQUOI et les chiffres sont dans
+// src/carte-ombre.js ; ici il n'y a que la lecture de l'état réel de la scène.
+//
+// ⚠️ On lit la visibilité EFFECTIVE (en remontant les parents) : cacher un
+// groupe entier — le socle, une dalle voisine — doit emporter l'ombre de tout
+// ce qu'il contient. `o.visible` seul aurait gardé l'ombre d'un objet éteint
+// par son parent, et une ombre orpheline ne se lit pas comme un réglage.
+//
+// ⚠️ Les matrices lues ici datent de l'image PRÉCÉDENTE (three met le monde à
+// jour à l'intérieur de son propre rendu). Un projeteur qui bougerait verrait
+// donc son ombre suivre avec une image de retard — invisible, et de toute
+// façon aucun projeteur ne bouge. Le soleil, lui, est écrit par placeSun avant
+// le dessin : la tirette des 24 h n'a aucun retard.
+let sigCarteOmbre = null
+function majCarteOmbre() {
+  if (!renderer.shadowMap.enabled || !sun.castShadow) return
+  const casters = []
+  scene.traverse((o) => {
+    if (!o.castShadow) return
+    let vu = o.visible
+    for (let p = o.parent; vu && p; p = p.parent) vu = p.visible
+    const g = o.geometry
+    const pos = g?.attributes?.position
+    casters.push({ id: o.id, geo: g?.id ?? 0, pv: pos?.version ?? 0, count: pos?.count ?? 0, visible: vu, m: o.matrixWorld.elements })
+  })
+  const sig = signatureCarteOmbre({ soleil: sun.position, res: params.shadowRes, flou: sun.shadow.radius, casters })
+  if (sig === sigCarteOmbre) return
+  sigCarteOmbre = sig
+  renderer.shadowMap.needsUpdate = true
 }
 
 // L'interrupteur du soleil : l'intensité (placeSun) ET l'ombre (applyShadowMode)
@@ -2081,8 +2128,10 @@ modes = new Modes({
       // le globe éteint les effets ; l'interrupteur du soleil est un SECOND
       // motif de coupure, il ne doit pas être perdu au retour sur le bloc
       sun.castShadow = v && sunShadowOn(params.sunEnabled, params.shadowMode)
-      renderer.shadowMap.autoUpdate = sun.castShadow && params.shadowMode === 'dynamic'
-      if (sun.castShadow && params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
+      // même règle qu'applyShadowMode : jamais de redessin à chaque image, un
+      // redessin quand l'état change (ici, le retour du globe vers le bloc)
+      renderer.shadowMap.autoUpdate = false
+      if (sun.castShadow) { sigCarteOmbre = null; renderer.shadowMap.needsUpdate = true }
       // the restore above reads raw params — re-assert the active quality
       // tier on top so a globe round-trip can't silently undo degraded mode
       if (v) aq?.reassert()
@@ -2717,6 +2766,7 @@ function persistUserTemplates() {
   return true
 }
 function saveCurrentTemplate(name) {
+  majCarteOmbre() // la vignette doit porter l'ombre du look qu'on enregistre
   composer.render() // fresh frame so the thumbnail matches the screen
   const clean = String(name || '').trim().slice(0, 40) || 'My look'
   const look = captureLook(params)
@@ -4277,6 +4327,18 @@ async function openExportUI() {
     composer,
     camera,
     recorder,
+    // LA LIGNE DE CRÉDITS DE CET EXPORT-CI. Elle dépend de l'emprise, parce que
+    // les sources bathymétriques fines imposent leur attribution mot pour mot
+    // là où elles ont creusé, et nulle part ailleurs. Voir export.js.
+    creditLine: () => {
+      try {
+        // blockBounds, jamais patchBounds : c'est l'emprise VRAIE du bloc
+        // exporté (voir son commentaire dans map/aerial-layer.js).
+        return creditFor(bathySourceIndex(), blockBounds(terrain.dem), creditsForBounds)
+      } catch {
+        return null // jamais bloquer un export sur un crédit : export.js a sa ligne de repli
+      }
+    },
     pauseLoop: () => {
       loopPaused = true
       // kill the already-scheduled frame too, or a synchronous export
@@ -5158,7 +5220,31 @@ aq = createAdaptiveQuality({
   applyShadowMode,
   announce: (m) => modes.announce(m),
   refreshAll,
-  canStep: () => modes.mode === 'surface' && !modes.busy && !recorder?.recording,
+  // ⚠️ `!demBusy` — LE RELIEF EN CONSTRUCTION N'EST PAS UNE MESURE DE MACHINE.
+  //
+  // Signalé par Adrien le 28/07/2026 : « ça ne laggait pas du tout hier ».
+  // Bissecté jusqu'à 2613877, le commit qui a réparé la surdité du gouverneur.
+  // En lui donnant enfin le delta RÉEL, on lui a aussi donné les images de
+  // `fetchAndBuildDem` — décompression des tuiles, fabrication de la géométrie.
+  // Elles sont longues ET consécutives, donc `echantillonRetenu` les garde (à
+  // raison : c'est ce qui sauve une machine réellement lente). Le gouverneur
+  // lit « 6,7 images/s » et `palierVise` l'envoie de T0 à T3 d'un seul bond.
+  //
+  // Le palier 3 est le SEUL qui coupe les ombres, donc le seul qui fasse
+  // basculer `sun.castShadow` : three recompile alors TOUS les programmes de la
+  // scène — 1 936 ms chronométrées sur cette page (voir applyShadowMode). Puis
+  // la machine, chargée et redevenue fluide, remonte et repasse la frontière en
+  // sens inverse. Mesuré sur le vrai contrôleur, machine JAMAIS lente :
+  //   hier (02ebd89 et 31ea718) : 0 changement de palier,  0 recompilation
+  //   2613877 → main            : 4 changements de palier, 2 RECOMPILATIONS
+  //     8,9 s → T3   28,9 s → T2   48,9 s → T1   68,9 s → T0 (retour au départ)
+  // Deux gels de ~2 s pour revenir exactement au palier de départ : c'est ça,
+  // le lag. Le guichet fermé pendant la construction les supprime tous les deux.
+  //
+  // Ça ne re-casse PAS l'iMac 2015 : une machine vraiment à 3 fps l'est ENCORE
+  // une fois le relief chargé — elle atteint le palier plancher à 14,3 s au lieu
+  // de 9,0 s, toujours sous les 15 s qu'exige test/perf-gouverneur.test.js.
+  canStep: () => modes.mode === 'surface' && !modes.busy && !recorder?.recording && !demBusy,
   // LE GOUVERNEUR NE PART PLUS DU MAXIMUM. Il part de ce que la sonde a estimé
   // avant le premier rendu, et ne fait plus qu'AFFINER : il descend si la
   // machine souffre quand même, il regagne au plus un cran si elle tient.
@@ -5609,6 +5695,7 @@ function tick() {
   // fantaisiste et ferait grimper le palier de qualité sur des images vides.
   if (!programmesPrets) return
   aq.update(dtBrut) // adaptive quality : le temps RÉEL, jamais le dt de simulation (voir plus haut)
+  majCarteOmbre() // la carte d'ombre n'est redessinée que si elle changerait
   composer.render(dt)
   if (recorder?.recording) recorder.captureFrame() // null until first export
 }

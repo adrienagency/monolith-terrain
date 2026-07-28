@@ -1,15 +1,80 @@
 import { worldToLatLon } from '../geo.js'
 import { TERRAIN_SIZE } from '../terrain.js'
+import { CELL_SIZES, cellsForBounds, cellPath, mergeCells, emptyPayload, hasCell } from './geo-cells.js'
 
 const HALF = TERRAIN_SIZE / 2
 const _cache = new Map()
 
 // fetch + cache a trimmed layer file (never throws — empty collection on failure)
+//
+// ⚠️ Chemin HISTORIQUE : ce fichier couvre le MONDE ENTIER (places.json = 2,67 Mo
+// servis, 158 474 entrées). Il ne sert plus que de filet de repli quand le
+// manifeste de cellules manque. Le chemin normal est loadLayerForBounds().
 export function loadLayer(name) {
   if (!_cache.has(name)) {
     _cache.set(name, fetch(`data/map/${name}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null))
   }
   return _cache.get(name)
+}
+
+// ------------------------------------------------------ chargement par emprise
+//
+// POURQUOI — mesuré en prod le 2026-07-28 : le démarrage à froid tirait
+// places.json (2,67 Mo) + lakes.json (935 Ko) EN ENTIER pour n'afficher que les
+// quelques dizaines d'entités du bloc courant (~27 km). Le site est statique
+// (Netlify, ni serveur ni base) : on ne peut pas demander « juste les noms
+// voulus » à une API, donc on pré-découpe en cellules à la construction
+// (scripts/build-map-cells.mjs) et on ne tire ici que les 1 à 4 cellules qui
+// recouvrent l'emprise. Annecy : 27 Ko au lieu de 2 688 Ko pour places, 2 Ko au
+// lieu de 958 Ko pour lakes.
+
+// Plafond du cache de cellules. Une vue en consomme 1 à 4 ; 96 laisse une
+// vingtaine de déplacements en mémoire sans laisser un long survol du globe
+// accumuler tout places.json cellule par cellule. Éviction FIFO : une promesse
+// évincée reste valide pour qui l'attend déjà.
+const MAX_CACHED_CELLS = 96
+const _cells = new Map()
+let _manifest = null
+
+function loadManifest() {
+  if (!_manifest) {
+    _manifest = fetch('data/map/cells/index.json').then((r) => (r.ok ? r.json() : null)).catch(() => null)
+  }
+  return _manifest
+}
+
+function loadCell(name, key) {
+  const id = `${name}/${key}`
+  if (!_cells.has(id)) {
+    _cells.set(id, fetch(cellPath(name, key)).then((r) => (r.ok ? r.json() : null)).catch(() => null))
+    if (_cells.size > MAX_CACHED_CELLS) _cells.delete(_cells.keys().next().value)
+  }
+  return _cells.get(id)
+}
+
+// Charge une couche restreinte à `bounds` (typiquement patchBounds(dem)).
+//
+// CONTRAT — ne lève JAMAIS. Rend toujours une collection du bon type : un
+// tableau pour `places`, une FeatureCollection pour les autres. Une cellule
+// absente (404) est simplement ignorée : la carte ne casse pas, il manque au
+// pire une portion de calque.
+//
+// REPLI — si le manifeste est introuvable (déploiement sans cellules, réseau
+// coupé) ou si l'emprise dépasse le garde-fou MAX_CELLS, on retombe sur le
+// fichier monolithe : la bascule est réversible sans redéployer le code.
+export async function loadLayerForBounds(name, bounds) {
+  try {
+    const size = CELL_SIZES[name]
+    if (!size) return (await loadLayer(name)) ?? emptyPayload(name)
+    const manifest = await loadManifest()
+    const keys = manifest ? cellsForBounds(bounds, size) : null
+    if (!keys) return (await loadLayer(name)) ?? emptyPayload(name)
+    const wanted = keys.filter((k) => hasCell(manifest, name, k))
+    const chunks = await Promise.all(wanted.map((k) => loadCell(name, k)))
+    return mergeCells(name, chunks)
+  } catch {
+    return emptyPayload(name)
+  }
 }
 
 // lat/lon bbox of the loaded DEM patch, sampled at the 4 corners + edge mids

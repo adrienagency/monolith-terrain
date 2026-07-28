@@ -58,6 +58,11 @@ function serve(plan) {
   globalThis.fetch = async (url, opts) => {
     if (url.startsWith('data/bathy/')) {
       if (!plan.bathy) return { ok: false, status: 404 }
+      // `bathyZooms` : les seuls niveaux réellement cuits. Sert à éprouver le
+      // PLANCHER DE REPLI — un repli trop profond écrase de l'ETOPO1 à 1 852 m
+      // par du GEBCO ré-échantillonné à 4 ou 8 km (796 coutures mondiales).
+      const zb = +url.split('/')[2]
+      if (plan.bathyZooms && !plan.bathyZooms.includes(zb)) return { ok: false, status: 404 }
       // ⚠️ NOS tuiles bathy font 256 px quelle que soit la source d'altitude.
       // Chaque QUART de la tuile porte une profondeur différente : lire la
       // mauvaise sous-fenêtre au surzoom se voit immédiatement.
@@ -86,7 +91,7 @@ function serve(plan) {
   }
 }
 
-const { loadDem } = await import('../src/dem.js')
+const { loadDem, _resetTileCaches } = await import('../src/dem.js')
 const { _resetDemSource, activeDemSource } = await import('../src/dem-source.js')
 
 beforeEach(() => _resetDemSource())
@@ -214,6 +219,55 @@ test('la sous-fenêtre bathy se mesure sur la tuile BATHY (256 px), pas sur cell
     Math.abs(dem.data[mid] - attendu) < 1,
     `quart bathy lu à côté : ${dem.data[mid]} au lieu de ${attendu}`
   )
+})
+
+test('le repli bathy s ARRÊTE à z7 : on n écrase plus de l ETOPO1 par du 8 km', async () => {
+  // ⚠️ `fuseBathymetry` fait qu au-delà de 25 m de fond la sortie vaut EXACTEMENT
+  // la source fine. Un ancêtre z4 (7 968 m au sol à 35°N) remplaçait donc
+  // purement et simplement l ETOPO1 du terrarium, qui vaut 1 852 m. Recensé sur
+  // 796 coutures mondiales : on dégradait la carte au nom de l améliorer.
+  const commun = { zmax: 12, bathy: true, landElev: -1500 } // socle ETOPO1 au large
+  const cible = { lat: 43.0, lon: 5.9, zoom: 12, bathy: true }
+
+  serve({ ...commun, bathyZooms: [8] })
+  const fin = await loadDem(cible)
+  const mid = (fin.size / 2) * fin.size + fin.size / 2
+  assert.ok(fin.data[mid] < -900, `la vraie tuile z8 doit parler : ${fin.data[mid]}`)
+
+  _resetTileCaches()
+  serve({ ...commun, bathyZooms: [6, 5, 4] }) // il ne reste QUE du repli grossier
+  const grossier = await loadDem(cible)
+  assert.equal(
+    grossier.data[mid],
+    -1500,
+    `un repli sous z7 doit être refusé et laisser le terrarium : ${grossier.data[mid]}`
+  )
+
+  _resetTileCaches()
+  serve({ ...commun, bathyZooms: [7] }) // z7 = 996 m, encore 2× mieux qu ETOPO1
+  const limite = await loadDem(cible)
+  assert.ok(limite.data[mid] < -900, `z7 reste légitime : ${limite.data[mid]}`)
+})
+
+test('à z5, une tuile bathy z5 est la résolution NATIVE, pas un repli dégradé', async () => {
+  // ⚠️ `modes.js` charge des blocs CONTINENTAUX à z4 et z5. Un plancher absolu
+  // à 7 y aurait supprimé toute bathymétrie — le plancher est donc relatif au
+  // zoom demandé : on ne descend jamais SOUS lui, on ne lui interdit pas.
+  serve({ zmax: 12, bathy: true, landElev: -1500, bathyZooms: [5] })
+  const dem = await loadDem({ lat: 43.0, lon: 5.9, zoom: 5, bathy: true })
+  const mid = (dem.size / 2) * dem.size + dem.size / 2
+  assert.ok(dem.data[mid] < -900, `la bathy continentale a disparu : ${dem.data[mid]}`)
+})
+
+test('bout en bout : l agrandissement Catmull-Rom ne déplace PAS le trait de côte', async () => {
+  // ⚠️ LA RÈGLE DU MODULE, éprouvée sur le chemin complet. Catmull-Rom dépasse
+  // par construction ; ce dépassement ne doit jamais faire bouger un rivage.
+  // La terre est ici à +240 m et la source marine hurle −4 000 m sous elle.
+  serve({ zmax: 12, bathy: true, landElev: 240 })
+  const dem = await loadDem({ lat: 43.0, lon: 5.9, zoom: 13, bathy: true })
+  for (let i = 0; i < dem.data.length; i++) {
+    assert.ok(Math.abs(dem.data[i] - 240) < 1e-3, `pixel ${i} : la terre a bougé à ${dem.data[i]}`)
+  }
 })
 
 // ---------------------------------------------------------------- le surzoom

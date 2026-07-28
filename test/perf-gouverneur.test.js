@@ -266,3 +266,86 @@ test('main.js ne passe plus au gouverneur le delta borné de la simulation', () 
   )
   assert.match(src, /aq\.update\(dtBrut\)/, 'le gouverneur mesure le temps réel écoulé')
 })
+
+// ---------------------------------------------------------------------------
+// « L'APPLICATION CHARGE » N'EST PAS « LA MACHINE EST LENTE »
+// ---------------------------------------------------------------------------
+// Signalé par Adrien le 28/07/2026 : « hier le site laggait beaucoup moins que
+// ça, ça ne laggait pas du tout hier ». Bissecté jusqu'au commit 2613877 —
+// celui-là même qui a réparé la surdité du gouverneur.
+//
+// LE MÉCANISME. Réparer la surdité a fait entrer dans la fenêtre des images
+// que le plafond à 0,05 s en écartait par accident : celles de la CONSTRUCTION
+// DU RELIEF (décompression des tuiles, fabrication de la géométrie). Elles sont
+// longues et CONSÉCUTIVES, donc `echantillonRetenu` les garde — à raison, c'est
+// ce qui sauve la machine à 3 fps. Le gouverneur lit alors « 6,7 images par
+// seconde », et `palierVise` l'envoie du palier 0 au palier 3 d'un seul bond.
+//
+// CE QUE ÇA COÛTE, ET C'EST ÇA LE « LAG ». Le palier 3 est le SEUL qui coupe
+// les ombres, donc le seul qui fasse basculer `sun.castShadow` — c'est-à-dire
+// les defines NUM_DIR_LIGHT_SHADOWS, c'est-à-dire une RECOMPILATION DE TOUS
+// LES PROGRAMMES de la scène. L'auteur de l'interrupteur de lumière l'a
+// chronométrée sur cette page : 1 936 ms. Puis la machine, redevenue fluide
+// une fois chargée, remonte — et repasse la même frontière en sens inverse.
+//
+// Mesuré sur le vrai contrôleur, trace « 5 s fluides + 5 s de chargement à
+// 6,7 fps + 60 fps ensuite », machine JAMAIS lente :
+//   02ebd89 (hier soir)  : 0 changement de palier,  0 recompilation
+//   31ea718              : 0 changement de palier,  0 recompilation
+//   2613877 → main       : 4 changements de palier, 2 RECOMPILATIONS
+//     8,9 s → T3 [recompilation]   28,9 s → T2 [recompilation]
+//    48,9 s → T1                   68,9 s → T0  (retour au point de départ)
+// Deux gels de ~2 s, une image qui devient floue puis nette, pour finir
+// exactement au palier de départ : le voyage entier n'aura servi à rien.
+//
+// LE CORRECTIF : le gouverneur ne juge pas la machine pendant que
+// l'application se construit. `canStep` existait déjà pour ce rôle (vue
+// orbitale, enregistrement vidéo) ; le chargement du relief le rejoint.
+// Vérifié : le correctif ne re-casse PAS l'iMac 2015 — une machine RÉELLEMENT
+// à 3 fps l'est encore une fois chargée, et atteint le palier plancher à
+// 14,3 s au lieu de 9,0 s. Toujours sous les 15 s exigées plus haut.
+
+test('un CHARGEMENT de relief ne doit pas dégrader une machine saine', () => {
+  const m = machineSimulee()
+  try {
+    const params = { pixelRatio: 2, shadowMode: 'dynamic', grain: 0.26, bokehEnabled: true, bokehScale: 1 }
+    const annonces = []
+    let enChargement = false
+    const aq = createAdaptiveQuality({
+      params,
+      renderer: { setPixelRatio() {}, setSize() {}, getPixelRatio: () => 1, domElement: {}, getContext: () => null },
+      composer: { setSize() {} },
+      applyShadowMode() {},
+      announce: (msg) => annonces.push(msg),
+      lake: null,
+      // ce que main.js câble : le relief en construction ferme le guichet
+      canStep: () => !enChargement,
+    })
+    const pas = (dt) => { m.avance(dt); aq.update(dt) }
+
+    for (let i = 0; i < 300; i++) pas(1 / 60) // 5 s fluides
+    enChargement = true
+    for (let i = 0; i < 33; i++) pas(0.15) // 5 s de construction, 6,7 images/s
+    enChargement = false
+    for (let i = 0; i < 60 * 130; i++) pas(1 / 60) // la machine est fluide, et le reste
+
+    assert.equal(aq.tier, 0, 'la machine n’a jamais été lente : rien ne doit bouger')
+    assert.deepEqual(annonces, [], 'aucune bascule de palier, donc aucune recompilation de shaders')
+    assert.equal(params.shadowMode, 'dynamic', 'les ombres ne doivent pas avoir été coupées puis remises')
+    assert.equal(params.pixelRatio, 2, 'l’échelle de rendu ne doit pas avoir plongé puis remonté')
+  } finally { m.rendre() }
+})
+
+test('main.js ferme le guichet du gouverneur pendant la construction du relief', () => {
+  // Test de source, comme celui du delta plus haut, et pour la même raison :
+  // perf.js et main.js avaient l'air justes CHACUN de leur côté. La faute
+  // n'était visible que dans le câblage entre les deux.
+  const src = fs.readFileSync(path.join(ROOT, 'src/main.js'), 'utf8')
+  const appel = src.match(/canStep:\s*\(\)\s*=>([^\n]*)/)
+  assert.ok(appel, 'canStep doit toujours être câblé au gouverneur')
+  assert.match(
+    appel[1], /!demBusy/,
+    'le gouverneur ne doit pas mesurer la machine pendant que le relief se charge : '
+    + 'ces images-là sont le coût de la CONSTRUCTION, pas la vitesse de la carte graphique'
+  )
+})
