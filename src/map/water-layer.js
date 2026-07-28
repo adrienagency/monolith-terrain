@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { latLonToWorld } from '../geo.js'
 import { TERRAIN_SIZE } from '../terrain.js'
-import { loadLayer, patchBounds, clipToPatch, filterByZoom } from './geo-data.js'
+import { loadLayerForBounds, patchBounds, clipToPatch, filterByZoom } from './geo-data.js'
 import { latlonToWorldPts } from './draped-line.js'
 import { buildLineSegments } from './line-segments.js'
 import { fetchOverpassLines, fetchOverpassAreas } from './overpass.js'
@@ -214,7 +214,7 @@ export class WaterLayer {
   // Natural Earth line rings for a static layer (lakes/coastline) — flat,
   // outline-only (see flatRingsOf).
   async _neRings(name, bounds, zoom) {
-    const fc = await loadLayer(name)
+    const fc = await loadLayerForBounds(name, bounds)
     if (!fc) return []
     const out = []
     for (const f of filterByZoom(clipToPatch(fc.features, bounds), zoom)) for (const r of flatRingsOf(f.geometry)) if (r.length >= 2) out.push(r)
@@ -223,7 +223,7 @@ export class WaterLayer {
   // Natural Earth polygon parts for a static layer, preserving holes — for
   // fill rendering only (see polygonPartsOf).
   async _neParts(name, bounds, zoom) {
-    const fc = await loadLayer(name)
+    const fc = await loadLayerForBounds(name, bounds)
     if (!fc) return []
     const out = []
     for (const f of filterByZoom(clipToPatch(fc.features, bounds), zoom)) for (const part of polygonPartsOf(f.geometry)) out.push(part)
@@ -232,7 +232,7 @@ export class WaterLayer {
   // Natural Earth river rings, each tagged with its source feature's
   // strokeweight so the caller can bucket runs by on-screen width.
   async _neRiverRings(bounds, zoom) {
-    const fc = await loadLayer('rivers')
+    const fc = await loadLayerForBounds('rivers', bounds)
     if (!fc) return []
     const out = []
     for (const f of filterByZoom(clipToPatch(fc.features, bounds), zoom)) {

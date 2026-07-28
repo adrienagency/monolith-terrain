@@ -34,4 +34,14 @@ data/
 # lake-only coverage, present on disk for Netlify deploy, regenerate locally
 # rather than bloating git, see build-world-lake-tiles.mjs / task-19 report)
 public/data/lake-tiles/
+
+# découpage géographique des couches Natural Earth en cellules (généré par
+# `npm run build:mapcells`, cf. scripts/build-map-cells.mjs). Même raisonnement
+# que lake-tiles/road-tiles ci-dessus : 5 852 fichiers, 54 Mo sur disque,
+# entièrement dérivés des monolithes public/data/map/*.json qui, eux, RESTENT
+# versionnés — ils sont à la fois la source du découpage et le filet de repli
+# du chargeur (src/map/geo-data.js) si le manifeste de cellules manque.
+# À régénérer avant chaque déploiement : voir l'en-tête du script.
+public/data/map/cells/
+
 _staging/
