@@ -38,7 +38,7 @@ export const entryStep = (hasZone) => (hasZone ? indexOfStep('template') : 0)
 
 // PIÈGE : « Custom » n'est pas un nom de zone, c'est le mot que le moteur
 // écrit dans demLocation dès qu'on a volé quelque part sans nom de lieu. Le
-// montrer tel quel donnerait « Votre zone : Custom », qui n'apprend rien. Les
+// montrer tel quel donnerait « Ta zone : Custom », qui n'apprend rien. Les
 // coordonnées, elles, disent au moins où l'on est.
 export function zoneSummary(zone) {
   const n = typeof zone === 'string' ? zone : zone?.name

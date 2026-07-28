@@ -270,7 +270,7 @@ export function buildAtelier(deps) {
   }
 
   function stepZone() {
-    head('La zone de ta carte', 'Le morceau de monde que vous allez habiller. Tout ce qui suit s’applique à lui — et le zoom reste figé le temps de l’habillage, pour que le cadre ne bouge plus sous les couleurs.')
+    head('La zone de ta carte', 'Le morceau de monde que tu vas habiller. Tout ce qui suit s’applique à lui — et le zoom reste figé le temps de l’habillage, pour que le cadre ne bouge plus sous les couleurs.')
 
     const zone = deps.getZone?.() || null
     // « connue » = choisie ici à l'instant, OU déjà cadrée en arrivant.
