@@ -49,7 +49,7 @@ import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
 import { MapLayers } from './map/layer-manager.js'
 import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
-import { lightingFor, darkModeFor, applyGains, fillDirection } from './daycycle.js'
+import { lightingFor, darkModeFor, applyGains, fillDirection, fillLightIntensity, fillEnabledInLook, sunOn, sunShadowOn } from './daycycle.js'
 import { SunDisc } from './sun-disc.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
@@ -487,10 +487,18 @@ const params = {
   sunGain: 1,
   hemiGain: 1,
   envGain: 1,
+  // L'interrupteur du SOLEIL. Allumé par défaut — c'est la lumière principale.
+  // Éteint, il ne quitte PAS la scène (voir applySunSwitch) : il tombe à 0 et
+  // rend sa carte d'ombre 2048×2048, qui est son vrai poste coûteux.
+  sunEnabled: true,
 
   // L'APPOINT : une seconde directionnelle, sans ombre, que l'heure ne pilote
   // pas. Sa direction est RELATIVE au soleil (elle le suit sans être écrasée).
   // Éteinte par défaut : aucune carte existante ne change d'aspect.
+  // L'interrupteur ne CRÉE ni ne RETIRE la lampe — elle existe depuis le boot à
+  // intensité 0 — il ne fait que monter son intensité. Le pourquoi (une mesure
+  // à 1 923 ms) est au-dessus de `const fillLight`.
+  fillEnabled: false,
   fillIntensity: 0,
   fillAzimuthOffset: 150, // degrés PAR RAPPORT au soleil — contre-jour doux
   fillElevation: 20,
@@ -926,10 +934,26 @@ scene.add(hemi)
 // frame. Sans ombre, le coût est d'une itération de boucle par fragment
 // éclairé — mesuré sous le plancher de bruit (voir le rapport §4.3).
 //
-// ⚠️ Créée AU BOOT et jamais retirée, MÊME à intensité 0 : three recompile TOUS
-// les matériaux quand le NOMBRE de lumières change, y compris le programme du
-// terrain. La créer à la demande figerait la page au premier mouvement du
-// curseur. À 0 elle ne contribue rien : aucune carte existante ne change.
+// ⚠️ CRÉÉE AU BOOT ET JAMAIS RETIRÉE, MÊME ÉTEINTE. C'est délibéré, ça a été
+// remis en cause, MESURÉ, et la mesure a tranché — lis-la avant d'y toucher.
+//
+// three.js recompile TOUS les programmes de la scène quand le NOMBRE de
+// lumières change : pas seulement les matériaux qu'éclaire la nouvelle lampe,
+// tous. Une création à la demande (à la première activation de l'interrupteur)
+// a donc été écrite et chronométrée sur cette page, La Réunion, bloc seul,
+// damier vide : **1 923 ms** de gel sur le clic, pour 34 → 39 programmes.
+// Presque deux secondes, et c'est le cas FAVORABLE — le damier peuplé ajoute
+// 24 dalles à recompiler. Les bascules suivantes, elles, coûtaient 1,0-1,5 ms,
+// soit le plancher de bruit d'une frame : c'est bien le CHANGEMENT DE NOMBRE
+// de lumières qui coûte, une seule fois, et rien d'autre.
+//
+// Le gain qu'on achèterait avec ce gel : ne pas construire un objet JavaScript
+// au démarrage. Quelques microsecondes. Le marché est mauvais dans les deux
+// sens, donc la lampe naît ici, à intensité 0, et l'interrupteur ne fait que
+// monter et descendre son intensité — le compte de lumières ne bouge JAMAIS.
+//
+// Corollaire à ne pas défaire : il ne doit apparaître ni `scene.remove(fillLight)`
+// ni `new THREE.DirectionalLight` ailleurs que sur la ligne ci-dessous.
 const fillLight = new THREE.DirectionalLight(new THREE.Color(params.fillColor), 0)
 fillLight.castShadow = false
 scene.add(fillLight)
@@ -940,7 +964,8 @@ function placeFill() {
   const el = THREE.MathUtils.degToRad(d.elevation)
   const r = 34
   fillLight.position.set(Math.cos(az) * Math.cos(el) * r, Math.sin(el) * r, Math.sin(az) * Math.cos(el) * r)
-  fillLight.intensity = Math.max(0, Math.min(4, params.fillIntensity ?? 0))
+  // l'interrupteur ne retire pas la lampe, il la met à 0 — voir ci-dessus
+  fillLight.intensity = fillLightIntensity(params.fillEnabled === true, params.fillIntensity ?? 0)
   fillLight.color.set(params.fillColor ?? '#ffcf9a')
 }
 
@@ -1014,20 +1039,77 @@ function placeSun() {
   // normalised so the default elevation (16°) keeps its exact tuned look and
   // higher suns are never brightened (min 1) — only LOW suns get dimmer.
   const atten = (e) => 0.35 + 0.65 * Math.pow(Math.max(Math.sin(e), 0), 0.7)
-  sun.intensity = params.sunIntensity * Math.min(1, atten(el) / atten(THREE.MathUtils.degToRad(16)))
+  // ⚠️ Le soleil ÉTEINT tombe à 0, il ne quitte pas la scène : le retirer
+  // rejouerait le piège de recompilation décrit plus haut, et lui coûterait
+  // bien plus cher (il porte le programme d'ombre de tous les matériaux).
+  const on = sunOn(params.sunEnabled)
+  sun.intensity = on ? params.sunIntensity * Math.min(1, atten(el) / atten(THREE.MathUtils.degToRad(16))) : 0
   hemi.intensity = params.hemiIntensity
   if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
   if (globe) globe.setSunDir(sun.position)
   if (clouds) clouds.setSunDir(sun.position)
   sunDisc.update(sun.position, skyState?.sunColor ?? '#fff4ea', skyState?.elevation ?? params.sunElevation)
+  // le disque qu'on VOIT ne doit jamais contredire l'ombrage (voir sun-disc.js) :
+  // soleil coupé, plus de disque dans le ciel.
+  if (!on) sunDisc.setVisible(false)
   placeFill() // l'appoint est relatif au soleil : il se replace avec lui
 }
 placeSun()
 
+// Le SEUL endroit qui décide si le soleil coule une ombre — et donc le seul qui
+// libère sa carte. L'interrupteur du soleil passe volontairement par ici plutôt
+// que d'inventer son propre chemin : params.shadowMode 'off' faisait déjà
+// exactement ce travail, il suffisait de lui adjoindre un second motif de
+// coupure (voir daycycle.sunShadowOn).
+//
+// ⚠️ CE QUE COÛTE LA PREMIÈRE COUPURE, et ce n'est pas nous : basculer
+// castShadow change les defines du shader (NUM_DIR_LIGHT_SHADOWS), donc three
+// recompile toute la scène. Chronométré sur cette page (La Réunion, z12) :
+//   • code d'AVANT, `sun.castShadow = false` à la main : 1 893 ms ;
+//   • cet interrupteur : 1 936 ms.
+// Le même chiffre, au bruit près — c'est le comportement de three, pas un coût
+// que l'interrupteur ajoute. Ensuite les deux variantes de programmes sont en
+// cache et les bascules retombent à 1,3-2,0 ms, soit une frame. Si tu veux
+// supprimer ce gel un jour, ce n'est PAS ici qu'il faut chercher : il faudrait
+// précompiler les deux variantes au boot (renderer.compile), ce qui coûterait
+// au démarrage exactement ce qu'on essaie d'y économiser.
 function applyShadowMode() {
-  sun.castShadow = params.shadowMode !== 'off'
-  renderer.shadowMap.autoUpdate = params.shadowMode === 'dynamic'
-  if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
+  const wantShadow = sunShadowOn(params.sunEnabled, params.shadowMode)
+  sun.castShadow = wantShadow
+  renderer.shadowMap.autoUpdate = wantShadow && params.shadowMode === 'dynamic'
+  if (wantShadow && params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
+  // ⚠️ three ne rend PAS la carte d'ombre tout seul quand castShadow retombe à
+  // false : la texture 2048×2048 reste allouée sur le GPU pour rien. C'est le
+  // vrai poste coûteux du soleil, donc on la relâche à la main. La remettre à
+  // null suffit à la rallumer : WebGLShadowMap réalloue à la première frame qui
+  // en a besoin (c'est aussi pour ça qu'on ne dispose QUE sur le front
+  // descendant — sinon on la relâcherait et la réallouerait à chaque frame).
+  if (!wantShadow && sun.shadow.map) {
+    sun.shadow.map.dispose()
+    sun.shadow.map = null
+  }
+}
+
+// L'interrupteur du soleil : l'intensité (placeSun) ET l'ombre (applyShadowMode)
+// d'un seul geste, pour que l'UI n'ait pas à connaître les deux.
+function applySunSwitch() {
+  placeSun()
+  applyShadowMode()
+}
+
+// Les DEUX interrupteurs, définis une seule fois : le panneau Lumière et
+// window.__exp (sondes console / scripts de vérif) tirent sur les mêmes.
+function setSunEnabled(v) {
+  params.sunEnabled = v !== false
+  applySunSwitch()
+}
+function setFillEnabled(v) {
+  params.fillEnabled = v === true
+  // fillIntensity vaut 0 par défaut — héritage de l'époque où le curseur
+  // FAISAIT l'interrupteur. Allumer et ne rien voir passerait pour une panne :
+  // on pose une valeur visible au premier allumage seulement.
+  if (params.fillEnabled && !(params.fillIntensity > 0)) params.fillIntensity = 0.6
+  placeFill()
 }
 
 // ------------------------------------------------------------------ world
@@ -1904,9 +1986,11 @@ modes = new Modes({
     setEffectsEnabled(v) {
       setDofEnabled(v && params.bokehEnabled && params.bokehScale > 0)
       grain.blendMode.opacity.value = v ? params.grain : 0
-      sun.castShadow = v && params.shadowMode !== 'off'
-      renderer.shadowMap.autoUpdate = v && params.shadowMode === 'dynamic'
-      if (v && params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
+      // le globe éteint les effets ; l'interrupteur du soleil est un SECOND
+      // motif de coupure, il ne doit pas être perdu au retour sur le bloc
+      sun.castShadow = v && sunShadowOn(params.sunEnabled, params.shadowMode)
+      renderer.shadowMap.autoUpdate = sun.castShadow && params.shadowMode === 'dynamic'
+      if (sun.castShadow && params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
       // the restore above reads raw params — re-assert the active quality
       // tier on top so a globe round-trip can't silently undo degraded mode
       if (v) aq?.reassert()
@@ -2070,6 +2154,10 @@ const DEFAULT_LOOK = Object.freeze({
 const NEUTRAL_LIGHT_USER = Object.freeze({
   sunGain: 1, hemiGain: 1, envGain: 1,
   fillIntensity: 0, fillAzimuthOffset: 150, fillElevation: 20, fillColor: '#ffcf9a',
+  // Les deux interrupteurs entrent ICI, et c'est ce qui rend un gabarit d'HIER
+  // pixel-identique : sans ces deux lignes, un vieux look importé hériterait de
+  // l'appoint allumé ou du soleil coupé de la session en cours.
+  sunEnabled: true, fillEnabled: false,
 })
 // the rest of the shipped scene, so a template never leaves a stuck light /
 // material / post-FX / toggle behind after RESET LOOK
@@ -2312,6 +2400,11 @@ function applyLight(l) {
   // still load harmlessly — they're simply re-derived over.
   applyTimeOfDay(params.timeOfDay ?? 10)
   sun.shadow.radius = params.shadowSoftness
+  // applyTimeOfDay a déjà repassé par placeSun (l'intensité suit donc
+  // l'interrupteur), mais l'OMBRE ne se décide qu'ici : sans cette ligne, un
+  // gabarit « soleil éteint » importé garderait la carte 2048² allouée, et un
+  // RESET LOOK ne rallumerait jamais l'ombre.
+  applyShadowMode()
 }
 function applySurface(s) {
   Object.assign(params, s)
@@ -2415,6 +2508,14 @@ function applyUserTemplate(tmpl) {
   // session traînait — sinon l'aller-retour export/import ne rend plus la même
   // image. Voir NEUTRAL_LIGHT_USER.
   for (const k of Object.keys(NEUTRAL_LIGHT_USER)) if (!(k in L)) params[k] = NEUTRAL_LIGHT_USER[k]
+  // ⚠️ EXCEPTION à la règle du dessus, et elle est indispensable. Avant les
+  // interrupteurs, c'est le CURSEUR d'intensité qui faisait l'interrupteur :
+  // fillIntensity > 0 signifiait « appoint allumé ». Un gabarit d'hier qui
+  // porte fillIntensity: 1.2 a donc été exporté AVEC son appoint ; le remettre
+  // au neutre (éteint) lui ferait rendre une autre image que celle qu'on a
+  // enregistrée. L'interrupteur absent se DÉDUIT donc de l'intensité, et non du
+  // neutre. (Le soleil n'a pas ce problème : absent = allumé = ce qu'il était.)
+  params.fillEnabled = fillEnabledInLook(L, params.fillIntensity)
   setDarkMode(params.darkMode ?? false)
   applyPalette({ rampStops: params.rampStops, oceanShallow: params.oceanShallow, oceanMid: params.oceanMid, oceanDeep: params.oceanDeep, ink: params.contourColor })
   applyStyle({ mapTint: params.mapTint, heightContrast: params.heightContrast, heightPivot: params.heightPivot, slopeTint: params.slopeTint })
@@ -4692,6 +4793,10 @@ const { elementsPanel, imagePanel } = buildEffectsPanel({
       sun.shadow.radius = v
       if (params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
     },
+    // Les deux interrupteurs. Le panneau n'a pas à savoir que l'un libère au
+    // passage une carte d'ombre de 16 Mo : il dit ON/OFF.
+    setSunEnabled,
+    setFillEnabled,
   },
 })
 
@@ -5012,6 +5117,14 @@ window.__exp = { boats, raceLabels, scene, camera, controls, params, terrain, lo
   // par le sélecteur de fichier (l'appoint et les gains de lumière ont un
   // NEUTRE quand le gabarit est plus vieux qu'eux — voir NEUTRAL_LIGHT_USER)
   applyUserTemplate,
+  // les deux interrupteurs de lumière, et de quoi vérifier ce qu'ils NE font
+  // pas : renderer.info.programs.length doit rester rigoureusement constant
+  // d'une bascule à l'autre (le compte de lumières ne bouge jamais — voir le
+  // commentaire au-dessus de `const fillLight`).
+  setSunEnabled,
+  setFillEnabled,
+  sun,
+  fillLight,
 }
 
 applyTimeOfDay(params.timeOfDay ?? 10) // seed the sun/disc/lake for the opening view

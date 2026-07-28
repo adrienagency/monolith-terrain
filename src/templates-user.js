@@ -46,6 +46,10 @@ export const TEMPLATE_KEYS = [
   'shadowSoftness', 'timeOfDay', 'shadowMode',
   'sunGain', 'hemiGain', 'envGain',
   'fillIntensity', 'fillAzimuthOffset', 'fillElevation', 'fillColor',
+  // les deux INTERRUPTEURS. Même règle que les gains : un gabarit qui ne les
+  // porte pas est d'AVANT eux, et applyUserTemplate lui rend le neutre
+  // (soleil allumé, appoint éteint) — c'est-à-dire l'image qu'il rendait hier.
+  'sunEnabled', 'fillEnabled',
   // surface material scalars
   'color', 'roughness', 'roughnessVariation', 'roughnessScale', 'bumpScale', 'envMapIntensity',
   // post FX + fog

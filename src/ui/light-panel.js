@@ -10,7 +10,7 @@
 // dessous, et la mécanique (azimut/élévation/intensités) reléguée en bas.
 // Meta parlante repliée : « Heure dorée · 17h30 » + pastille couleur du soleil.
 
-import { slider, section, el, color, onRefresh, refreshAll } from './kit.js'
+import { slider, section, el, color, toggle, onRefresh, refreshAll } from './kit.js'
 import { lightingFor, sunPosition, solarHourToDate } from '../daycycle.js'
 
 // heure formatée façon tirette (17h30, 19h) — pas de zéro de tête ni de
@@ -101,6 +101,12 @@ export function lightSection(ctx) {
 
     // ---- la mécanique, au fond : soleil manuel puis ambiance ----
     el('div', 'ce-fx-head', 'Soleil manuel'),
+    // ALLUMÉ par défaut : c'est la lumière principale. Éteint, il tombe à 0 et
+    // rend sa carte d'ombre 2048² — il ne quitte pas la scène (voir main.js).
+    // ⚠️ La PREMIÈRE extinction fige ~1,9 s : couper les ombres fait recompiler
+    // les shaders, et c'est le comportement de three, pas de nous (mesuré
+    // identique sur le code d'avant). Les bascules suivantes sont instantanées.
+    toggle({ label: 'Soleil', get: () => params.sunEnabled !== false, set: (v) => { ctx.setSunEnabled(v); refreshAll() } }),
     slider({ label: 'Azimut', min: 0, max: 360, step: 1, get: () => params.sunAzimuth, set: (v) => { params.sunAzimuth = v; ctx.placeSun() } }),
     slider({ label: 'Élévation', min: 2, max: 90, step: 1, get: () => params.sunElevation, set: (v) => { params.sunElevation = v; ctx.placeSun() } }),
     slider({ label: 'Intensité du soleil', min: 0, max: 3, step: 0.02, get: () => params.sunGain ?? 1, set: (v) => setGain('sunGain', v) }),
@@ -112,6 +118,10 @@ export function lightSection(ctx) {
     // ---- l'appoint : la lumière que l'heure ne pilote pas ----
     el('div', 'ce-fx-head', 'Appoint'),
     el('div', 'ce-note', 'Une seconde lumière, sans ombre, pour rouvrir un flanc bouché. Sa direction est relative au soleil : elle le suit sans jamais être écrasée.'),
+    // ÉTEINT par défaut. Contrairement au soleil, celui-ci est gratuit dans les
+    // deux sens (1,3 ms mesuré) : la lampe existe depuis le boot à intensité 0,
+    // l'interrupteur ne fait que monter son intensité, donc rien ne recompile.
+    toggle({ label: 'Appoint', get: () => params.fillEnabled === true, set: (v) => { ctx.setFillEnabled(v); refreshAll() } }),
     slider({ label: 'Intensité', min: 0, max: 3, step: 0.02, get: () => params.fillIntensity ?? 0, set: (v) => { params.fillIntensity = v; ctx.placeSun() } }),
     slider({ label: 'Écart au soleil', min: 0, max: 360, step: 1, get: () => params.fillAzimuthOffset ?? 150, set: (v) => { params.fillAzimuthOffset = v; ctx.placeSun() } }),
     slider({ label: 'Hauteur', min: -10, max: 90, step: 1, get: () => params.fillElevation ?? 20, set: (v) => { params.fillElevation = v; ctx.placeSun() } }),

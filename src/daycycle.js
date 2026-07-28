@@ -204,6 +204,59 @@ export function fillDirection(sunAzimuthDeg, offsetDeg, elevationDeg) {
   return { azimuth: az, elevation: el }
 }
 
+// ---- les deux INTERRUPTEURS ---------------------------------------------------
+//
+// ⚠️ CE QUE CES DEUX INTERRUPTEURS NE FONT PAS : ajouter ou retirer une lumière
+// de la scène. three.js recompile TOUS les programmes quand le NOMBRE de
+// lumières change — pas les matériaux concernés, tous, le bloc ET les dalles du
+// damier. La variante « créer la lampe d'appoint à la première activation » a
+// été écrite et chronométrée : **1 923 ms** de gel sur le clic, bloc seul,
+// damier vide ; les bascules suivantes, à compte de lumières constant, 1,0-1,5 ms.
+// Les deux lampes existent donc depuis le boot et y restent ; éteindre, ici,
+// veut dire « intensité 0 ».
+//
+// L'intensité qui part réellement dans la lampe d'appoint. Éteint = 0
+// EXACTEMENT (et pas « la valeur d'avant ») : c'est ce qui permet de garder la
+// lampe dans la scène sans qu'elle contribue quoi que ce soit.
+export function fillLightIntensity(enabled, intensity) {
+  if (enabled !== true) return 0
+  const v = Number.isFinite(intensity) ? intensity : 0
+  return Math.max(0, Math.min(4, v))
+}
+
+// Le soleil, lui, existe depuis le boot et y reste : il est allumé par défaut,
+// et le retirer rejouerait le même piège de recompilation. L'éteindre, c'est
+// intensité 0 + plus d'ombre.
+//
+// ⚠️ ABSENT VAUT ALLUMÉ, et ce n'est pas de la coquetterie : un gabarit
+// enregistré AVANT cet interrupteur ne porte pas la clé, et il doit rendre
+// exactement l'image qu'il rendait hier. `!enabled` aurait éteint le soleil de
+// tous les anciens gabarits.
+export function sunOn(enabled) {
+  return enabled !== false
+}
+
+// L'interrupteur d'appoint que porte un gabarit — ou, à défaut, celui qu'il
+// IMPLIQUE.
+//
+// ⚠️ Avant les interrupteurs, c'est le CURSEUR d'intensité qui faisait office
+// d'interrupteur : fillIntensity > 0 voulait dire « appoint allumé ». Un
+// gabarit d'hier qui porte fillIntensity: 1.2 a donc été exporté AVEC son
+// appoint, et le remettre au neutre (éteint) lui ferait rendre une AUTRE image
+// que celle qu'on avait enregistrée. D'où la déduction ci-dessous, qui est la
+// seule exception à la règle « clé absente → neutre » de NEUTRAL_LIGHT_USER.
+export function fillEnabledInLook(look, fillIntensity) {
+  if (look && 'fillEnabled' in look) return look.fillEnabled === true
+  return (Number.isFinite(fillIntensity) ? fillIntensity : 0) > 0
+}
+
+// L'ombre suit l'interrupteur, par le MÊME chemin que params.shadowMode 'off' —
+// c'est voulu : main.js n'a ainsi qu'un seul endroit (applyShadowMode) qui
+// décide, et donc qu'un seul endroit qui libère la carte 2048×2048.
+export function sunShadowOn(enabled, shadowMode) {
+  return sunOn(enabled) && shadowMode !== 'off'
+}
+
 // Should the UI be in dark mode at this solar elevation?
 //
 // A SCHMITT TRIGGER, not a threshold: `currentlyDark` widens whichever way we
