@@ -1,0 +1,147 @@
+#!/usr/bin/env node
+// INDEX DE COUVERTURE BATHYMÉTRIQUE — quelle source couvre quoi, jusqu'à quel
+// zoom. C'est le fichier qui fait vivre la règle d'Adrien : « à chaque fois
+// qu'on a une map mieux définie, on l'utilise ; à défaut, on laisse la map
+// GEBCO en soutien. »
+//
+// POURQUOI UN INDEX PLUTÔT QU'UN ESSAI À L'AVEUGLE. Le client pourrait très
+// bien demander z10 partout et encaisser les 404 — la boucle de repli de
+// `loadBathyPatch` les absorbe déjà. Mais ça ferait deux requêtes perdues par
+// case de damier sur les 99 % du monde qui n'ont pas de source fine, sur un
+// site où la bande passante Netlify se paie à la requête. Un index de quelques
+// centaines d'octets, lu une fois, supprime tout ça.
+//
+// MÊME MOTIF que le manifeste de `scripts/build-map-cells.mjs` et de
+// `src/map/geo-cells.js` : un petit fichier qui dit ce qui existe, des données
+// par zone, et un repli sur le monde entier quand il ne dit rien.
+//
+// LE PRINCIPE : on ne DÉCLARE pas une couverture, on la CONSTATE. Le fichier
+// `scripts/bathy-zones.json` dit ce qu'on a l'intention de servir ; ce script
+// va compter les tuiles réellement présentes sur le disque et n'écrit que les
+// zones qui en ont. Une zone déclarée mais jamais cuite est donc sans effet —
+// on ne peut pas promettre au client une résolution qu'on n'a pas déployée.
+//
+// USAGE
+//   node scripts/build-bathy-index.mjs
+//   node scripts/build-bathy-index.mjs --tiles public/data/bathy --zones scripts/bathy-zones.json
+//
+// SORTIE : public/data/bathy/index.json, lu par src/bathy-sources.js.
+// Absent ⇒ z8 partout, c'est-à-dire exactement le comportement d'avant.
+
+import fs from 'node:fs'
+import path from 'node:path'
+
+const argv = process.argv.slice(2)
+const arg = (name, dflt) => {
+  const i = argv.indexOf(`--${name}`)
+  return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : dflt
+}
+const TILES = arg('tiles', 'public/data/bathy')
+const ZONES = arg('zones', 'scripts/bathy-zones.json')
+const OUT = arg('out', path.join(TILES, 'index.json'))
+
+const x2lon = (x, z) => (x / 2 ** z) * 360 - 180
+const y2lat = (y, z) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / 2 ** z))) * 180) / Math.PI
+
+// Toutes les tuiles présentes à un niveau donné, avec leur poids. On lit le
+// disque plutôt que de refaire tourner le tuileur : c'est instantané, et ça
+// mesure ce qui sera VRAIMENT déployé — y compris une cuisson interrompue.
+function scanLevel(root, z) {
+  const dir = path.join(root, String(z))
+  if (!fs.existsSync(dir)) return []
+  const out = []
+  for (const xs of fs.readdirSync(dir)) {
+    const x = Number(xs)
+    if (!Number.isInteger(x)) continue
+    const sub = path.join(dir, xs)
+    let files
+    try {
+      files = fs.readdirSync(sub)
+    } catch {
+      continue
+    }
+    for (const f of files) {
+      if (!f.endsWith('.png')) continue
+      const y = Number(f.slice(0, -4))
+      if (!Number.isInteger(y)) continue
+      out.push({ x, y, bytes: fs.statSync(path.join(sub, f)).size })
+    }
+  }
+  return out
+}
+
+// Une tuile appartient-elle à la zone ? On teste son CENTRE, comme le fera
+// `tileMaxZoom` côté client — les deux doivent trancher pareil, sinon une tuile
+// de bord serait comptée ici et jamais demandée là-bas.
+//
+// ⚠️ ANTIMÉRIDIEN : une zone peut s'écrire ouest > est (les Fidji vont de 176°E
+// à 178°O). Lue naïvement, elle serait vide.
+const inSpan = (lon, w, e) => (w <= e ? lon >= w && lon <= e : lon >= w || lon <= e)
+
+function main() {
+  const decl = JSON.parse(fs.readFileSync(ZONES, 'utf8'))
+  const base = decl.base ?? { source: 'gebco', zmax: 8 }
+  const zmin = decl.zmin ?? 4
+
+  console.log(`\nIndex de couverture bathymétrique`)
+  console.log(`  socle    ${base.source} jusqu'à z${base.zmax}, plancher de repli z${zmin}`)
+  console.log(`  tuiles   ${TILES}`)
+
+  // Cache par niveau : deux zones peuvent viser le même z, on ne relit pas.
+  const levels = new Map()
+  const at = (z) => {
+    if (!levels.has(z)) levels.set(z, scanLevel(TILES, z))
+    return levels.get(z)
+  }
+
+  const zones = []
+  let totalTuiles = 0
+  let totalOctets = 0
+  for (const d of decl.zones ?? []) {
+    const [w, s, e, n] = d.bbox
+    // Compte SUR TOUS les niveaux au-dessus du socle : une zone annoncée à z10
+    // dont seul z9 a été cuit doit être publiée à z9, pas à z10.
+    let zmaxReel = base.zmax
+    let tuiles = 0
+    let octets = 0
+    const detail = []
+    for (let z = base.zmax + 1; z <= d.zmax; z++) {
+      const dedans = at(z).filter(
+        (t) =>
+          y2lat(t.y + 0.5, z) >= s &&
+          y2lat(t.y + 0.5, z) <= n &&
+          inSpan(x2lon(t.x + 0.5, z), w, e)
+      )
+      if (!dedans.length) break // un niveau vide arrête la montée : on ne saute pas un cran
+      zmaxReel = z
+      tuiles += dedans.length
+      const b = dedans.reduce((a, t) => a + t.bytes, 0)
+      octets += b
+      detail.push(`z${z} ${dedans.length} tuiles ${(b / 1024 / 1024).toFixed(1)} Mo`)
+    }
+    if (zmaxReel <= base.zmax) {
+      console.log(`  ✖ ${d.id.padEnd(10)} déclarée à z${d.zmax} mais AUCUNE tuile fine cuite → ignorée`)
+      continue
+    }
+    totalTuiles += tuiles
+    totalOctets += octets
+    console.log(
+      `  ✓ ${d.id.padEnd(10)} ${d.source.padEnd(11)} z${zmaxReel}${zmaxReel < d.zmax ? ` (déclarée z${d.zmax})` : ''}  ${detail.join(' · ')}`
+    )
+    zones.push({ id: d.id, source: d.source, zmax: zmaxReel, bbox: d.bbox })
+  }
+
+  const index = { version: 1, base, zmin, zones }
+  fs.mkdirSync(path.dirname(OUT), { recursive: true })
+  fs.writeFileSync(OUT, JSON.stringify(index) + '\n')
+  const taille = fs.statSync(OUT).size
+
+  console.log(`\n✓ ${zones.length} zone(s) fine(s) · ${totalTuiles.toLocaleString('fr-FR')} tuiles au-dessus du socle · ${(totalOctets / 1024 / 1024).toFixed(1)} Mo`)
+  console.log(`  index de ${taille} octets → ${OUT}`)
+  if (!zones.length) {
+    console.log(`  (index vide : le client se comportera exactement comme avant, z${base.zmax} partout)`)
+  }
+  console.log()
+}
+
+main()
