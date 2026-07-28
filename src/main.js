@@ -68,6 +68,7 @@ import { Boats } from './boats.js'
 import { DroneCam } from './drone-cam.js'
 import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, deriveMetalTints, deriveAoColor, deriveHazeColor, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
+import { CameraShotPlayer, TOP_DOWN_DIR } from './camera-shots.js'
 import { N8AOPostPass } from 'n8ao'
 import { History } from './history.js'
 import { isTap } from './gestes.js'
@@ -1359,6 +1360,7 @@ scene.add(hud3.group)
 
 function flyTo(pos, target, opts = {}) {
   cameraAuto.stop() // any programmatic move cancels a looping automation
+  shots.cancel() // …et interrompt le plan en cours (le cran reste sélectionné)
   tween.p0.copy(camera.position)
   tween.t0.copy(controls.target)
   tween.p1.copy(pos)
@@ -1481,6 +1483,10 @@ controls.addEventListener('start', () => {
   const gpxFollowing = params.gpxFollow && gpxLayer.isPlaying() && drone.active
   if (!gpxFollowing) drone.stop()
   cameraAuto.stop() // …and any looping camera automation
+  // Attraper la caméra coupe le plan en cours — même règle que pour tout le
+  // reste. Le cran reste sélectionné : le clic suivant enchaîne sur le plan
+  // d'après au lieu de tout reprendre au début.
+  shots.cancel()
   camera.up.set(0, 1, 0)
   controlsHeld = true
   if (drone.active && params.gpxFollow) followManual = true
@@ -3492,6 +3498,21 @@ function requestIconUpload(layerId) {
 const drone = new DroneCam({ camera, controls, sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0 })
 // looping cinematic camera moves (orbit / fly-over / crane…) for the Camera panel
 const cameraAuto = new CameraAutomation({ camera, controls })
+// PLANS DE CAMÉRA du bouton cinéma (voir camera-shots.js). À ne pas confondre
+// avec cameraAuto ci-dessus, qui reste au service du panneau Caméra : celui-là
+// fait osciller la caméra autour d'un point, celui-ci COMPOSE UN PLAN sur le
+// relief réel (couloir de vallée, sommet comme sujet, accélération, fin tenable).
+const shots = new CameraShotPlayer({
+  camera,
+  controls,
+  sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0,
+  half: TERRAIN_SIZE / 2,
+  baseFov: params.fov,
+  onState: () => {
+    cineBtn?.setActive(shots.active)
+    cineBtn?.setBadge(shots.badge)
+  },
+})
 
 function flyTrack() {
   const w = gpxLayer.track?.world
@@ -4250,7 +4271,7 @@ function toggleRegion() {
 // fixed timestep so the video is deterministic whatever the encode speed
 let loopPaused = false
 function stepScene(t, dt) {
-  if (cameraAuto.active || drone.active || tour.active || tween.active || (params.gpxFollow && gpxLayer.isPlaying())) updateCameraMotion(dt)
+  if (shots.active || cameraAuto.active || drone.active || tour.active || tween.active || (params.gpxFollow && gpxLayer.isPlaying())) updateCameraMotion(dt)
   if (!params.paused) {
     clouds.update(dt, params, camera)
     traffic.update(dt)
@@ -4558,7 +4579,13 @@ const ISO_VIEWS = [
   { name: '2', dir: new THREE.Vector3(-62, 52, 62), k: 0.97, target: ISO_TARGET },
   { name: '3', dir: new THREE.Vector3(-62, 52, -62), k: 0.97, target: ISO_TARGET },
   { name: '4', dir: new THREE.Vector3(62, 52, -62), k: 0.97, target: ISO_TARGET },
-  { name: '5', dir: new THREE.Vector3(0, 100, -0.6), k: 0.92, target: ISO_TARGET }, // top-down, nord en haut
+  // Vue du dessus TOUJOURS ORIENTÉE NORD (nouvelle règle d'Adrien). Le biais
+  // porté par TOP_DOWN_DIR est la règle elle-même : mesuré, l'ancien (0,100,-0.6)
+  // cadrait le SUD en haut — 180° d'erreur, malgré le commentaire d'origine.
+  // Voir camera-shots.js pour le pourquoi du signe et pourquoi on ne touche pas
+  // à `up`. Le cadrage ne dépend que de la pose d'arrivée, donc il est le même
+  // depuis les six autres vues.
+  { name: '5', dir: new THREE.Vector3(TOP_DOWN_DIR.x, TOP_DOWN_DIR.y, TOP_DOWN_DIR.z), k: 0.92, target: ISO_TARGET },
   { name: '6', dir: new THREE.Vector3(0.28, 0.17, 1), k: 0.52, target: new THREE.Vector3(0, 1.4, 0) }, // au raz du sol
 ]
 let isoIndex = -1
@@ -4573,26 +4600,19 @@ function applyIsoView(i) {
   flyTo(pos, v.target.clone(), { orbit: true })
   isoBtn?.setBadge(v.name)
 }
-// cinematic button — same family as the iso shortcut, one step to its left:
-// each press starts a RANDOM looping camera move around the socle (the
-// existing Camera-panel automations), and while it runs the move re-rolls
-// every ~18 s so the show never settles. Press again to stop.
-let cineTimer = 0
+// Bouton cinéma — MÊME MÉCANIQUE QUE LE BOUTON ISO (Adrien) : chaque clic passe
+// au plan suivant, et un petit numéro apparaît au-dessus.
+//
+// Il remplace l'ancien interrupteur, qui tirait un mouvement au hasard parmi les
+// six oscillations de camera-automation.js et le relançait toutes les 18 s.
+// Adrien : « je veux de VRAIS mouvements de caméra […] pas des mouvements
+// basiques comme on a jusqu'à présent ». Les sept crans (poursuite au ras du
+// sol, travelling, dolly zoom, survol, contre-plongée, orbite sur sommet, série
+// aléatoire) vivent dans camera-shots.js ; le huitième clic arrête tout.
 cineBtn = buildCineButton({
-  toggle: () => {
-    if (cameraAuto.active) {
-      cameraAuto.stop()
-      clearInterval(cineTimer)
-      return false
-    }
-    const roll = () => {
-      const m = CAMERA_MOVES[Math.floor(Math.random() * CAMERA_MOVES.length)]
-      cameraAuto.start(m.id, 0.7 + Math.random() * 0.9)
-    }
-    roll()
-    clearInterval(cineTimer)
-    cineTimer = setInterval(() => { if (cameraAuto.active) roll(); else clearInterval(cineTimer) }, 18000)
-    return true
+  next: () => {
+    if (modes.mode !== 'surface' || modes.busy) return
+    shots.next()
   },
 })
 
@@ -5248,7 +5268,7 @@ history.reset()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { boats, raceLabels, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo,
+window.__exp = { boats, raceLabels, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, shots, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo,
   // INTERRUPTEUR de la teinte d'interface : __exp.setUiTint(false) rend
   // l'interface neutre de v28.css, true la raccorde à la palette.
   setUiTint: (v) => { params.uiTint = v !== false; syncUiTheme() }, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,
@@ -5328,6 +5348,12 @@ let placesRefreshAcc = 0 // throttles the places-layer screen-space declutter re
 
 // camera motion for one frame — shared by the live loop and offline export
 function updateCameraMotion(dt) {
+  // PLAN DE CAMÉRA en cours (bouton cinéma) — en tête, car un plan composé prime
+  // sur toute autre automation ; les deux ne tournent jamais ensemble.
+  if (shots.active) {
+    shots.update(dt)
+    return
+  }
   // looping cinematic camera automation (Camera panel) — checked here so BOTH
   // the live tick() and the offline export step drive it
   if (cameraAuto.active) {

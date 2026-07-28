@@ -347,16 +347,27 @@ export function buildIsoButton(ctx) {
   }
 }
 
-// Cinematic shortcut — the iso button's twin, one slot left: random looping
-// camera moves around the socle. Lit (accent) while running.
+// Cinematic shortcut — the iso button's twin, one slot left. MÊME MÉCANIQUE QUE
+// LE BOUTON ISO (Adrien) : chaque clic passe au plan suivant et un petit numéro
+// apparaît au-dessus. Le badge réutilise tel quel la classe `.ce-iso-badge`,
+// puisque `.ce-cinebtn` porte aussi `.ce-isobtn` sur qui elle se positionne.
+// Allumé (accent) tant qu'un plan tourne ; le cran d'arrêt éteint tout.
 export function buildCineButton(ctx) {
   const btn = el('button', 'ce-isobtn ce-cinebtn ce-glassbox')
   btn.type = 'button'
   btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="7" width="12" height="10" rx="2"/><path d="M15 10.5 21 8v8l-6-2.5"/></svg>'
-  btn.setAttribute('data-tip', 'Vue cinématique — la caméra se promène autour du bloc. Recliquer pour arrêter.')
-  btn.addEventListener('click', () => btn.classList.toggle('on', !!ctx.toggle()))
+  const badge = el('span', 'ce-iso-badge')
+  badge.style.display = 'none'
+  btn.append(badge)
+  btn.setAttribute('data-tip', 'Plans de caméra — cliquer pour enchaîner : poursuite au sol, travelling, dolly zoom, survol, contre-plongée, orbite sur sommet, série. Un clic de plus arrête.')
+  btn.addEventListener('click', () => ctx.next())
   document.body.append(btn)
-  return { root: btn, setVisible: (v) => btn.classList.toggle('off', !v) }
+  return {
+    root: btn,
+    setVisible: (v) => btn.classList.toggle('off', !v),
+    setBadge: (t) => { badge.textContent = t ?? ''; badge.style.display = t ? '' : 'none' },
+    setActive: (v) => btn.classList.toggle('on', !!v),
+  }
 }
 
 // bottom-LEFT twin of the iso/cine corner (Adrien) : three cartography
