@@ -22,6 +22,7 @@ import { Terrain } from './terrain.js'
 import { createLabels, disposeLabels } from './labels.js'
 import { createHud3D, findPois } from './hud3d.js'
 import { loadDem, getDemMaxZoom } from './dem.js'
+import { warmupPrograms } from './warmup.js'
 import { activeDemSource, isFallbackActive } from './dem-source.js'
 import { Globe } from './globe.js'
 import { Modes, stepZoom } from './modes.js'
@@ -5319,6 +5320,11 @@ function updateCameraMotion(dt) {
 
 let rafId = 0
 let tickTimer = 0
+// Les programmes GLSL sont-ils compilés ? Déclaré ICI, avant `tick`, et pas à
+// côté de son appel : le repli `visibilitychange` ci-dessous peut appeler tick()
+// et une variable encore dans sa zone morte lèverait une ReferenceError au pire
+// endroit possible. Voir le rendez-vous de préchauffage en bas du fichier.
+let programmesPrets = false
 // a pending rAF never fires once the tab goes hidden — swap the chain onto
 // the timeout fallback at that exact moment so rendering never stalls
 document.addEventListener('visibilitychange', () => {
@@ -5495,10 +5501,41 @@ function tick() {
     cell.terrain.mapUniforms.uFxTime.value = terrain.mapUniforms.uFxTime.value
   }
   realWater?.setView(camera.position.y, controls.getDistance?.() ?? camera.position.distanceTo(controls.target)) // accalmie altitude + taille des remous de côte selon la distance d'affichage
+  // PRÉCHAUFFAGE DES SHADERS — voir warmup.js et le rendez-vous en bas de tick.
+  // Tant que les programmes ne sont pas compilés on fait tourner TOUTE la
+  // logique de l'image (caméra, tweens, nuages, mer, dalles voisines) mais on
+  // ne DESSINE pas : c'est le premier dessin qui bloquait le fil principal.
+  // ⚠️ Ne pas remonter ce test plus haut. Une première version coupait `tick()`
+  // en entier ; la vue isométrique d'ouverture ne s'appliquait alors plus
+  // (applyIsoView passe par un tween, et un tween que personne n'avance ne part
+  // jamais) et l'ombrage auto lisait un relief qui n'avait pas fini d'arriver.
+  // La carte démarrait plus vite ET fausse. Seul le DESSIN doit attendre.
+  // ⚠️ La qualité adaptative attend aussi : sans dessin, la cadence mesurée est
+  // fantaisiste et ferait grimper le palier de qualité sur des images vides.
+  if (!programmesPrets) return
   aq.update(dt) // adaptive quality: sample FPS, step tiers when sustained
   composer.render(dt)
   if (recorder?.recording) recorder.captureFrame() // null until first export
 }
+
+// LE RENDEZ-VOUS AVEC LE PILOTE GRAPHIQUE — pourquoi il existe, en une phrase :
+// MESURÉ (cache froid, build de prod, RTX 3080) le tout premier dessin bloquait
+// le fil principal 1 845 ms d'affilée — pas UNE image produite pendant ce
+// temps, la planète de l'écran de chargement à l'arrêt. Ce n'était ni le
+// réseau ni le JavaScript : c'était le pilote qui compilait les shaders, que
+// three réclame au pire moment (getUniforms → getProgramInfoLog, qui attend).
+// Le préchauffage laisse le pilote compiler sur ses propres fils pendant que le
+// fil principal reste libre — les tuiles d'altitude arrivent et le relief se
+// construit pendant ce temps. La toile est cachée sous l'écran de chargement :
+// il n'y a rigoureusement rien à voir à repousser de quelques images.
+// ⚠️ Pas de `.catch` ici, et c'est voulu : warmupPrograms ne rejette JAMAIS et
+// s'abandonne d'elle-même au bout de 6 s. C'est ce contrat — et ses tests — qui
+// rend cette ligne sûre. Ne pas l'affaiblir sans les relire.
+// `target` = le tampon HDR dans lequel la chaine de post-traitement rend
+// vraiment. Compiler contre le canevas a la place produisait NEUF programmes
+// inutilises (les cles de programme de three portent l espace colorimetrique
+// de sortie). Avec la cible : trois. Meme fluidite, cinq fois moins de gachis.
+warmupPrograms({ renderer, scene, camera, target: composer.inputBuffer }).then(() => { programmesPrets = true })
 tick()
 
 // ---- mode EMBED (shibumap.com/templates) ------------------------------------
