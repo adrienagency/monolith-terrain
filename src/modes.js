@@ -10,6 +10,13 @@
 
 import * as THREE from 'three'
 import { R_GLOBE, ORBITAL_M_PER_UNIT, sphereToLatLon, latLonToSphere } from './geo.js'
+import { PinchTracker } from './gestes.js'
+
+// Le pincement fabrique un faux événement de molette. _zoomGesture appelle
+// preventDefault() sur plusieurs branches ; côté tactile, le vrai événement a
+// déjà été traité au-dessus (c'est le pincement reconnu qui décide), donc ces
+// branches n'ont plus rien à annuler.
+const NOOP = () => {}
 
 // ordered fine → coarse; zoom null = the user's fine zoom (≥ 12).
 // Nine tiers so every stop on the way down lands on a matching real-terrain
@@ -124,71 +131,96 @@ export class Modes {
 
     // orbital zoom is proportional to altitude (Google-Earth feel) — we take
     // over the wheel entirely while in orbit
+    domElement.addEventListener('wheel', (e) => this._zoomGesture(e), { passive: false })
+
+    // LE DOIGT emprunte le MÊME escalier que la molette. Un pincement n'est pas
+    // traduit en dolly : gestes.js le convertit en crans de molette, et ils entrent
+    // par _zoomGesture — donc mêmes paliers de relief, mêmes butées, même élan.
+    // Rendre son pincement natif à OrbitControls (enableZoom) aurait fait
+    // l'inverse : la caméra s'approche d'une géométrie qui reste grossière,
+    // parce que rien ne serait jamais passé par _refine().
+    this._pinch = new PinchTracker()
+    const pts = (e) => [...e.touches].map((t) => ({ id: t.identifier, x: t.clientX, y: t.clientY }))
+    domElement.addEventListener('touchstart', (e) => { if (e.touches.length >= 2) this._pinch.start(pts(e)) }, { passive: true })
     domElement.addEventListener(
-      'wheel',
+      'touchmove',
       (e) => {
-        // boutique/embed « zone de test » (Adrien) : le visiteur zoome et
-        // dézoome LIBREMENT dans 100 % du budget de zoom du niveau (le glissé
-        // inertiel se clampe tout seul, voir _applyZoom) — mais ne peut JAMAIS
-        // franchir un niveau ni changer de zone : les branches refine/coarsen/
-        // orbit sont neutralisées plus bas. flyTo n'est pas bridé (c'est lui
-        // qui pose la zone et les vues iso).
-        if (this.locked && this.mode !== 'surface') { e.preventDefault(); return }
-        if (this.mode === 'surface') {
-          // pendant le suivi de tête GPX, la molette pilote le STANDOFF de la
-          // caméra de suivi (zoom/dézoom autour de la tête) — pas l'escalier
-          if (this.hooks.followWheel?.(e.deltaY)) { e.preventDefault(); return }
-          if (this._diveTween || this.busy) return
-          e.preventDefault()
-          const now = performance.now()
-          const fresh = now - this._lastWheelT > WHEEL_GAP_MS // a new gesture, not a continuous scroll
-          this._lastWheelT = now
-          const dist = this.controls.getDistance()
-          const inward = e.deltaY < 0
-          // "at the zone limit" = the level's zoom budget is spent (or the
-          // physical near stop / far stop is reached anyway)
-          const atInLimit = this._levelZoom <= -STEP_IN + 0.03 || dist <= this.controls.minDistance * 1.02 || this.hooks.nearGround?.()
-          const atOutLimit = this._levelZoom >= STEP_OUT - 0.03 || dist >= this.controls.maxDistance * 0.98
-          // GUARD-RAIL (Adrien): the glide stops at the zone limit; a FRESH
-          // re-scroll while already pinned there is what steps to the next level.
-          if (fresh && inward && atInLimit) {
-            if (this.locked) return // zone de test : on butte au plancher, pas de plongée
-            this._resetZoom()
-            this._refine()
-            return
-          }
-          if (fresh && !inward && atOutLimit) {
-            if (this.locked) return // zone de test : on butte au plafond, ni recul ni orbite
-            this._resetZoom()
-            if (this.hooks.getCoarsenTarget()) this._coarsen()
-            else this.enterOrbit()
-            return
-          }
-          // otherwise just feed the inertial glide — it clamps at the limit and
-          // never crosses a level on its own (see _applyZoom).
-          this._zoomVel = THREE.MathUtils.clamp(
-            this._zoomVel + Math.sign(-e.deltaY) * ZOOM_IMPULSE,
-            -ZOOM_VEL_MAX,
-            ZOOM_VEL_MAX
-          )
-          this._zoomNdc.set((e.clientX / window.innerWidth) * 2 - 1, -((e.clientY / window.innerHeight) * 2 - 1))
-          const p = this.hooks.pointUnder?.(this._zoomNdc.x, this._zoomNdc.y)
-          if (p) this._zoomPivot = p // fixed pivot for the whole coast (zoom toward cursor)
-          return
-        }
-        e.preventDefault()
-        if (this.busy || this.travel) return
-        if (e.deltaY < 0) this._diveArmed = true // inward intent arms the dive
-        const f = Math.exp(e.deltaY * 0.0011)
-        this.orbAltTarget = THREE.MathUtils.clamp(
-          this.orbAltTarget * f,
-          (DIVE_ALT_M * 0.9) / ORBITAL_M_PER_UNIT,
-          MAX_ALT_M / ORBITAL_M_PER_UNIT
-        )
+        const m = this._pinch.move(pts(e))
+        if (!m) return
+        // reconnu comme pincement : on empêche le navigateur d'en faire son
+        // propre zoom. On ne touche à RIEN d'autre — le déplacement à deux
+        // doigts appartient à OrbitControls, sur ce même élément.
+        if (e.cancelable) e.preventDefault()
+        this._zoomGesture({ deltaY: m.deltaY, clientX: m.clientX, clientY: m.clientY, preventDefault: NOOP })
       },
       { passive: false }
     )
+    const finDuGeste = (e) => { if (e.touches.length < 2) this._pinch.end() }
+    domElement.addEventListener('touchend', finDuGeste, { passive: true })
+    domElement.addEventListener('touchcancel', finDuGeste, { passive: true })
+  }
 
+  // UN cran de zoom, d'où qu'il vienne — molette ou pincement. `e` doit porter
+  // deltaY, clientX, clientY et preventDefault().
+  _zoomGesture(e) {
+    // boutique/embed « zone de test » (Adrien) : le visiteur zoome et
+    // dézoome LIBREMENT dans 100 % du budget de zoom du niveau (le glissé
+    // inertiel se clampe tout seul, voir _applyZoom) — mais ne peut JAMAIS
+    // franchir un niveau ni changer de zone : les branches refine/coarsen/
+    // orbit sont neutralisées plus bas. flyTo n'est pas bridé (c'est lui
+    // qui pose la zone et les vues iso).
+    if (this.locked && this.mode !== 'surface') { e.preventDefault(); return }
+    if (this.mode === 'surface') {
+      // pendant le suivi de tête GPX, la molette pilote le STANDOFF de la
+      // caméra de suivi (zoom/dézoom autour de la tête) — pas l'escalier
+      if (this.hooks.followWheel?.(e.deltaY)) { e.preventDefault(); return }
+      if (this._diveTween || this.busy) return
+      e.preventDefault()
+      const now = performance.now()
+      const fresh = now - this._lastWheelT > WHEEL_GAP_MS // a new gesture, not a continuous scroll
+      this._lastWheelT = now
+      const dist = this.controls.getDistance()
+      const inward = e.deltaY < 0
+      // "at the zone limit" = the level's zoom budget is spent (or the
+      // physical near stop / far stop is reached anyway)
+      const atInLimit = this._levelZoom <= -STEP_IN + 0.03 || dist <= this.controls.minDistance * 1.02 || this.hooks.nearGround?.()
+      const atOutLimit = this._levelZoom >= STEP_OUT - 0.03 || dist >= this.controls.maxDistance * 0.98
+      // GUARD-RAIL (Adrien): the glide stops at the zone limit; a FRESH
+      // re-scroll while already pinned there is what steps to the next level.
+      if (fresh && inward && atInLimit) {
+        if (this.locked) return // zone de test : on butte au plancher, pas de plongée
+        this._resetZoom()
+        this._refine()
+        return
+      }
+      if (fresh && !inward && atOutLimit) {
+        if (this.locked) return // zone de test : on butte au plafond, ni recul ni orbite
+        this._resetZoom()
+        if (this.hooks.getCoarsenTarget()) this._coarsen()
+        else this.enterOrbit()
+        return
+      }
+      // otherwise just feed the inertial glide — it clamps at the limit and
+      // never crosses a level on its own (see _applyZoom).
+      this._zoomVel = THREE.MathUtils.clamp(
+        this._zoomVel + Math.sign(-e.deltaY) * ZOOM_IMPULSE,
+        -ZOOM_VEL_MAX,
+        ZOOM_VEL_MAX
+      )
+      this._zoomNdc.set((e.clientX / window.innerWidth) * 2 - 1, -((e.clientY / window.innerHeight) * 2 - 1))
+      const p = this.hooks.pointUnder?.(this._zoomNdc.x, this._zoomNdc.y)
+      if (p) this._zoomPivot = p // fixed pivot for the whole coast (zoom toward cursor)
+      return
+    }
+    e.preventDefault()
+    if (this.busy || this.travel) return
+    if (e.deltaY < 0) this._diveArmed = true // inward intent arms the dive
+    const f = Math.exp(e.deltaY * 0.0011)
+    this.orbAltTarget = THREE.MathUtils.clamp(
+      this.orbAltTarget * f,
+      (DIVE_ALT_M * 0.9) / ORBITAL_M_PER_UNIT,
+      MAX_ALT_M / ORBITAL_M_PER_UNIT
+    )
   }
 
   // ---------------------------------------------------------------- DOM
