@@ -25,6 +25,8 @@
 //
 // Nothing is persisted.
 
+import { applyRenderSize } from './viewport.js'
+
 const TIER_NAMES = ['FULL QUALITY', 'BALANCED MODE', 'LIGHT MODE', 'ESSENTIAL MODE']
 
 const WINDOW = 60 // frames in the rolling FPS average
@@ -109,7 +111,16 @@ export function createAdaptiveQuality({
       if (params.pixelRatio !== pr) {
         params.pixelRatio = pr
         renderer.setPixelRatio(pr)
-        composer.setSize(window.innerWidth & ~1, window.innerHeight & ~1) // even only — fractional half-res targets are the black-rectangle bug
+        // La taille de rendu vient du CONTENEUR du canevas, jamais de la
+        // fenêtre : en boutique / Studio, `#app` n'est qu'un cadre de ~58 % de
+        // large. `composer.setSize` réécrit la taille CSS du canevas (il
+        // rappelle renderer.setSize avec updateStyle=true), donc lui passer
+        // window.innerWidth faisait déborder le canevas de son cadre pendant
+        // que camera.aspect gardait le rapport du cadre : image écrasée et
+        // rognée — le « se déforme, zoom à fond » du 28/07/2026. Et comme le
+        // gouverneur ne bouge que sous 30 fps, cela ne se voyait QUE sur une
+        // machine lente. Arrondi pair inclus (carré noir). Voir viewport.js.
+        applyRenderSize({ renderer, composer })
       }
     }
     // Render-upgrade levers. AO costs a whole extra scene pass, so it is shed
