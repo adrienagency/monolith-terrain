@@ -9,13 +9,41 @@
 //   T3 ESSENTIAL — pixelRatio 0.85, shadows off, film grain off. The cloud
 //                  deck is NEVER touched — it is the identity of the scene.
 //
-// Trigger: rolling 60-frame FPS average < 30 sustained ~2.5 s → one tier down.
-// Recovery: average > 55 sustained 12 s → one tier up, never above the START
-// tier (phones boot at T3 — they only ever run the shared-shibu viewer —
-// tablets at T1, desktops at T0). Hysteresis: at
-// least 20 s between any two automatic changes, and the FPS window is ignored
-// for 5 s after boot and 2 s after any tier change / tab-visibility change,
-// so load spikes and background throttling can never cause a step.
+// Trigger: rolling FPS average < 30 sustained ~2.5 s → down to the tier the
+// MEASURE warrants (see palierVise — 3 fps goes straight to T3, not one crumb
+// at a time). Recovery: average > 55 sustained 12 s → one tier up, never above
+// the START tier (phones boot at T3 — they only ever run the shared-shibu
+// viewer — tablets at T1, desktops at T0). Hysteresis: at least 20 s between
+// any two automatic changes, and the FPS window is ignored for 5 s after boot
+// and 2 s after any tier change / tab-visibility change, so load spikes and
+// background throttling can never cause a step.
+//
+// ---------------------------------------------------------------------------
+// ⚠️ CE GOUVERNEUR A ÉTÉ SOURD PENDANT DES MOIS, ET DEUX FOIS PLUTÔT QU'UNE
+// ---------------------------------------------------------------------------
+// Signalé le 28/07/2026 sur un iMac 27" de 2015 (Retina 5K, Chrome, macOS) :
+// « l'ordi souffle à fond, environ 3 images par seconde ». Le mode dégradé
+// existe exactement pour ce cas. Il n'a rien fait. Deux causes, indépendantes :
+//
+//   1. LE DELTA ARRIVAIT DÉJÀ BORNÉ. main.js calculait
+//      `Math.min(clock.getDelta(), 0.05)` — plafond légitime pour la
+//      SIMULATION, sans quoi une image à 2 s téléporte les bateaux — et passait
+//      CE MÊME nombre ici. La moyenne mesurée ne pouvait donc pas descendre
+//      sous 20 fps : 3 fps et 20 fps rendaient le même chiffre, donc la même
+//      décision. Le garde-fou `dt > 0.5` plus bas, lui, était purement mort :
+//      il ne pouvait jamais se déclencher. main.js passe désormais `dtBrut`.
+//
+//   2. LA FENÊTRE SE COMPTAIT EN IMAGES. 60 images avant tout verdict : 1 s à
+//      60 fps, mais VINGT SECONDES à 3 fps. Avec les 5 s de boot, les 2,5 s
+//      sous le seuil et les 20 s entre deux paliers, le premier palier tombait
+//      à 27,5 s, le deuxième à 47,5 s, le troisième à 67,5 s. Ce sont les
+//      47 secondes mesurées la veille sur portable, à la seconde près.
+//
+// La règle qui en sort, et qu'il faut garder en tête avant de toucher à ce
+// fichier : PLUS LA MACHINE EST LENTE, PLUS LE GOUVERNEUR DOIT ÊTRE RAPIDE.
+// C'est exactement l'inverse que faisait le code. Le nouveau chemin donne son
+// premier verdict vers 9-10 s sur une machine à 3 fps, et il atterrit
+// directement au palier plancher au lieu de descendre un cran par 20 s.
 //
 // Respecting the user: once the controller has changed tiers, each lever
 // (render scale / shadows / DoF / grain) is watched with a dirty flag. If the
@@ -29,14 +57,69 @@ import { applyRenderSize } from './viewport.js'
 
 const TIER_NAMES = ['FULL QUALITY', 'BALANCED MODE', 'LIGHT MODE', 'ESSENTIAL MODE']
 
-const WINDOW = 60 // frames in the rolling FPS average
+// LA FENÊTRE EST UNE DURÉE, PAS UN COMPTE D'IMAGES. Une machine à 3 fps met
+// 20 s à produire 60 images ; elle mettait donc 20 s à obtenir un verdict alors
+// qu'elle est précisément celle qui en a besoin tout de suite. Deux conditions,
+// et il faut les DEUX : assez de secondes (le signal est stable) et assez
+// d'images (deux à-coups collés ne font pas une mesure).
+export const FENETRE_S = 1.5 // s de signal minimum avant tout verdict
+export const FENETRE_FRAMES = 6 // images minimum — à 3 fps, ~2 s
+const WINDOW = 180 // taille de l'anneau : 1,5 s à 120 fps, jamais atteint plus bas
 const BOOT_IGNORE = 5 // s of samples dropped after boot
 const SETTLE_IGNORE = 2 // s dropped after a tier change / visibility change
-const DOWN_FPS = 30
+export const DOWN_FPS = 30
 const DOWN_SUSTAIN = 2.5 // s below DOWN_FPS before stepping down
 const UP_FPS = 55
 const UP_SUSTAIN = 12 // s above UP_FPS before stepping back up
 const MIN_GAP = 20 // s minimum between two automatic tier changes
+
+// Au-delà, une image n'est plus une mesure de vitesse : c'est un FIGEMENT du
+// fil principal (décompression d'une tuile, construction d'une géométrie,
+// onglet qui revient d'arrière-plan). 0,5 s = 2 fps.
+const ACOUP_S = 0.5
+
+// ---------------------------------------------------------------------------
+// LES TROIS DÉCISIONS, EXTRAITES ET PURES — pour être testées sans GPU ni DOM
+// ---------------------------------------------------------------------------
+
+// Faut-il compter cette image dans la moyenne ?
+//
+// ⚠️ LE PIÈGE, ET IL A COÛTÉ LE SYMPTÔME ENTIER. L'ancienne règle écartait
+// TOUTE image de plus de 0,5 s, sans mémoire. Or une machine sous 2 fps ne
+// produit QUE des images de plus de 0,5 s : elle n'alimentait donc jamais la
+// fenêtre, et le gouverneur restait muet — d'autant plus muet qu'elle souffrait.
+// La mémoire d'UNE image suffit à séparer les deux cas : un figement est
+// isolé (encadré d'images normales), une machine lente enchaîne.
+// `precedentLong` = la précédente image dépassait déjà ACOUP_S.
+export function echantillonRetenu(dt, precedentLong) {
+  if (!(dt > 0) || !Number.isFinite(dt)) return { garde: false, long: false }
+  if (dt > 5) return { garde: false, long: false } // onglet réveillé : aucune valeur
+  const long = dt > ACOUP_S
+  return { garde: !long || !!precedentLong, long }
+}
+
+// La fenêtre est-elle assez fournie pour se prononcer ?
+export const fenetreMure = (dtSum, dtCount) => dtSum >= FENETRE_S && dtCount >= FENETRE_FRAMES
+
+// À quel palier cette mesure oblige-t-elle ? On ne descend PAS d'un cran :
+// on descend de la hauteur de la chute. Un cran toutes les 20 s mettait 67,5 s
+// à atteindre T3, ce qui, à 3 fps, est une éternité de ventilateur.
+//
+// Les seuils ne sont pas des réglages de confort : 30 fps est la limite du
+// fluide, 20 fps celle où le déplacement à la souris commence à saccader,
+// 12 fps celle où l'application ne répond plus vraiment. En dessous, tout
+// palier intermédiaire est du temps perdu.
+//
+// La fonction ne REMONTE jamais : la remontée a ses propres règles (UP_SUSTAIN,
+// startTier). Sinon une mesure basse suivie d'une mesure moins basse ferait
+// osciller la qualité à l'écran — ce qui se voit bien plus qu'un palier de trop.
+export function palierVise(fps, tierActuel) {
+  const cible = fps >= DOWN_FPS ? tierActuel
+    : fps >= 20 ? tierActuel + 1
+      : fps >= 12 ? tierActuel + 2
+        : 3
+  return Math.max(tierActuel, Math.min(3, cible))
+}
 
 // water glass: taps are baked into the shader as a #define (see
 // vendor/MeshTransmissionMaterial.js). Rewriting the count and flagging
@@ -182,6 +265,7 @@ export function createAdaptiveQuality({
   let dtHead = 0
   let below = 0 // s spent under DOWN_FPS
   let above = 0 // s spent over UP_FPS
+  let precedentLong = false // l'image précédente dépassait ACOUP_S
   const now = () => performance.now() / 1000
   const bootAt = now()
   let quietUntil = bootAt + BOOT_IGNORE
@@ -193,6 +277,7 @@ export function createAdaptiveQuality({
     dtHead = 0
     below = 0
     above = 0
+    precedentLong = false
   }
 
   document.addEventListener('visibilitychange', () => {
@@ -238,15 +323,27 @@ export function createAdaptiveQuality({
       return
     }
     if (t < quietUntil) return
-    if (!(dt > 0) || dt > 0.5) return // stall / resume spike — not signal
+    // ⚠️ `dt` doit être le delta RÉEL, pas celui que main.js borne à 0,05 s
+    // pour la simulation — relire l'en-tête de ce fichier avant d'y toucher.
+    const ech = echantillonRetenu(dt, precedentLong)
+    precedentLong = ech.long
+    if (!ech.garde) return
 
-    // rolling average over the last WINDOW frames
+    // moyenne glissante sur une DURÉE (voir FENETRE_S) : l'anneau ne sert plus
+    // qu'à borner la mémoire, ce n'est plus lui qui décide du moment du verdict
     if (dtCount === WINDOW) dtSum -= dts[dtHead]
     else dtCount++
     dts[dtHead] = dt
     dtSum += dt
     dtHead = (dtHead + 1) % WINDOW
-    if (dtCount < WINDOW) return // need a full window before judging
+    // on purge la queue de fenêtre au-delà de ce qui est utile : sans ça, à
+    // 3 fps, l'anneau garderait une minute de passé et la moyenne mettrait
+    // autant de temps à réagir à une amélioration qu'à une dégradation
+    while (dtCount > FENETRE_FRAMES && dtSum - dts[(dtHead - dtCount + WINDOW) % WINDOW] >= FENETRE_S) {
+      dtSum -= dts[(dtHead - dtCount + WINDOW) % WINDOW]
+      dtCount--
+    }
+    if (!fenetreMure(dtSum, dtCount)) return // pas encore de quoi juger
     const avg = dtCount / dtSum
 
     if (avg < DOWN_FPS) {
@@ -261,7 +358,11 @@ export function createAdaptiveQuality({
     }
 
     if (t - lastChangeAt < MIN_GAP) return
-    if (below >= DOWN_SUSTAIN && tier < 3) setTier(tier + 1)
+    // LA PROFONDEUR DE LA CHUTE DÉCIDE, pas un cran fixe : une machine à 3 fps
+    // atterrit directement au plancher. `setTier` ne change qu'une fois, donc
+    // MIN_GAP reste respecté — c'est le nombre de crans qui change, pas le
+    // rythme des changements.
+    if (below >= DOWN_SUSTAIN && tier < 3) setTier(palierVise(avg, tier))
     else if (above >= UP_SUSTAIN && tier > startTier) setTier(tier - 1)
   }
 
