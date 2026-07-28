@@ -28,10 +28,17 @@ export const TEMPLATE_KEYS = [
   // et des amplitudes nulles : le rendu d'avant, à l'identique
   'colorMode', 'rampOklab', 'rampDry', 'rampWet', 'texShade', 'wetK', 'expoK',
   'treeLine', 'hazeAmt', 'hazeAlt', 'hazeDist',
-  'roadsEnabled', 'roadsOpacity', 'roadsDetail', 'roadColor', 'waterEnabled', 'waterOpacity', 'waterFill', 'coastLine', 'aerialEnabled', 'aerialOpacity', 'aerialCoastFade', 'placesEnabled', 'placesDensity', 'placesSize', 'placesHalo',
+  // PLUS de 'coastLine' : le liseré Natural Earth a quitté le site (trop
+  // grossier). La clé traîne encore dans de vieux templates enregistrés —
+  // applyUserTemplate filtre sur cette liste, elle est donc simplement ignorée,
+  // aucune migration à écrire. Ne pas la confondre avec aerialCoastFade
+  // (ci-dessous, photo aérienne) ni avec le masque terre-mer.
+  'roadsEnabled', 'roadsOpacity', 'roadsDetail', 'roadColor', 'waterEnabled', 'waterOpacity', 'waterFill', 'aerialEnabled', 'aerialOpacity', 'aerialCoastFade', 'placesEnabled', 'placesDensity', 'placesSize', 'placesHalo',
   // animated sea (ocean-waves spectrum) — lakeColor is the shared water tint
+  // seaEnabled : la mer se débraye entièrement (Adrien). Elle appartient au
+  // look, donc un template peut livrer une carte SANS mer.
   'waterReal', 'waterTransparency', 'waterSunFx', 'lakeColor',
-  'seaWaveH', 'seaChop', 'seaSpeed', 'seaSeed', 'seaBed', 'seaEdge', 'seaEdgeFrost', 'seaRefract',
+  'seaEnabled', 'seaWaveH', 'seaChop', 'seaSpeed', 'seaSeed', 'seaBed', 'seaEdge', 'seaEdgeFrost', 'seaRefract',
   // grid / contour / ink
   'contourInterval', 'contourOpacity', 'contourWeight', 'contourColor',
   'gridStep', 'gridOpacity', 'gridColor', 'hudInk', 'hudAccent', 'labels',

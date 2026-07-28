@@ -21,9 +21,9 @@ export function buildMapPanel(ctx) {
   const waterToggle = toggle({ label: 'Rivières & eau', get: () => params.waterEnabled, set: (v) => { params.waterEnabled = v; ctx.rebuildMapLayers(); refreshAll() } })
   const waterOpacity = slider({ label: 'Opacité de l’eau', min: 0, max: 1, step: 0.02, get: () => params.waterOpacity, set: (v) => { params.waterOpacity = v; ctx.mapLayers.setOpacity('water', v) } })
   const waterFill = toggle({ label: 'Remplir lacs & mers', get: () => params.waterFill, set: (v) => { params.waterFill = v; ctx.rebuildMapLayers() } })
-  // off by default — Natural Earth's 1:10m coast is too coarse to trace a real
-  // shoreline; kept as an option rather than deleted. See water-layer.js.
-  const coastLine = toggle({ label: 'Trait de côte', get: () => params.coastLine, set: (v) => { params.coastLine = v; ctx.rebuildMapLayers() } })
+  // PLUS de « Trait de côte » ici : le liseré Natural Earth a quitté le site
+  // (voir water-layer.js). Le « Fondu à la côte » plus bas appartient à la
+  // photo aérienne — même mot, autre sujet.
   // Aerial photo — IGN (France) and swisstopo (Switzerland), off by default.
   // Outside covered ground the layer says so in the middle of the screen and
   // switches itself back off (see main.js refreshAerial).
@@ -37,12 +37,12 @@ export function buildMapPanel(ctx) {
   const placesHalo = toggle({ label: 'Halo du texte', get: () => params.placesHalo, set: (v) => { params.placesHalo = v; ctx.rebuildMapLayers() } })
   sLayers.body.append(
     roadsToggle, roadsOpacity, roadsDetail, roadsColour,
-    waterToggle, waterOpacity, waterFill, coastLine,
+    waterToggle, waterOpacity, waterFill,
     aerialToggle, aerialOpacity, aerialCoastFade,
     placesToggle, placesDensity, placesSize, placesHalo
   )
   for (const row of [roadsOpacity, roadsDetail, roadsColour]) visibleWhen(row, () => params.roadsEnabled)
-  for (const row of [waterOpacity, waterFill, coastLine]) visibleWhen(row, () => params.waterEnabled)
+  for (const row of [waterOpacity, waterFill]) visibleWhen(row, () => params.waterEnabled)
   for (const row of [aerialOpacity, aerialCoastFade]) visibleWhen(row, () => params.aerialEnabled)
   for (const row of [placesDensity, placesSize, placesHalo]) visibleWhen(row, () => params.placesEnabled)
 

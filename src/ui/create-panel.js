@@ -9,7 +9,7 @@
 
 import Grapick from 'grapick'
 import 'grapick/dist/grapick.min.css'
-import { el, slider, color, swatch, toggle, select, segmented, button, section, visibleWhen, refreshAll, onRefresh } from './kit.js'
+import { el, slider, color, swatch, toggle, select, segmented, button, section, visibleWhen, refreshAll, onRefresh, keepScroll } from './kit.js'
 import { vigTile } from './shaders-panel.js'
 import { Panel } from './shell.js'
 import { PBR_PRESETS, GLASS_PRESETS, GLASS_BY_ID, PBR_BY_ID } from '../material-presets.js'
@@ -314,7 +314,8 @@ export function buildFondsPanel(ctx) {
   const sCiel = panel.addSection(section('Ciel (HDRI)'))
   const envPick = el('div', 'ce-mat-pick')
   sCiel.body.append(envPick)
-  function renderEnvPicker() {
+  const renderEnvPicker = () => keepScroll(envPick, renderEnvPickerInner)
+  function renderEnvPickerInner() {
     envPick.replaceChildren()
     const cur = ctx.getBgEnv()
     const grid = el('div', 'ce-mat-grid')
@@ -582,7 +583,11 @@ export function contributeTerrainSections(ctx) {
   const matPick = el('div', 'ce-mat-pick')
   const matKnobs = el('div', 'ce-fx-controls')
   sBlk.body.append(matPick, matKnobs)
-  function renderPlinthPicker() {
+  // Cinquante vignettes (25 solides + 25 verres) dans 320 px de haut : on
+  // descend jusqu'aux verres, on clique, et sans keepScroll on remonte aux
+  // solides. C'est le même bug que celui des palettes du Studio simple.
+  const renderPlinthPicker = () => keepScroll(matPick, renderPlinthPickerInner)
+  function renderPlinthPickerInner() {
     matPick.replaceChildren()
     const glass = params.plinthFinish === 'glass'
     const curId = glass ? params.plinthGlass : params.plinthPbr

@@ -33,12 +33,25 @@ body.atelier-mode .ce-cinebtn { right: 86px; }
 body.atelier-mode .atelier-col { transform: translateX(0); }
 body.atelier-mode .at-caption { opacity: 1; }
 
-/* Rail des cinq étapes : c'est LE rail du Race Studio (studio.css), on ne le
+/* Rail des étapes : c'est LE rail du Race Studio (studio.css), on ne le
    redessine pas. Une seule correction : « 1 · TEMPLATE » est plus long que
    « 1 · IDENTITÉ » et se coupait en deux lignes sur une colonne étroite (la
    colonne fait 42vw, donc 426 px sur un écran de 1014). nowrap + un cran de
-   corps en moins tiennent les cinq pastilles sur une ligne chacune. */
-.at-rail button { white-space: nowrap; font-size: 8.5px; letter-spacing: .04em; padding: 7px 1px; }
+   corps en moins tiennent les pastilles sur une ligne chacune.
+
+   ⑫ DÉFILEMENT LATÉRAL. À six étapes, six pastilles ne tiennent plus dans 426
+   px : `flex: 1` les compressait jusqu'à l'illisible au lieu de déborder. Elles
+   gardent donc leur largeur (`flex: 0 0 auto`) et le rail défile — render()
+   amène l'étape courante à lui (scrollIntoView). Barre de défilement masquée :
+   un rail de six pastilles avec son ascenseur ferait panneau de contrôle, et le
+   rail reste avant tout une frise. */
+.at-rail { overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+.at-rail::-webkit-scrollbar { display: none; }
+.at-rail button {
+  flex: 0 0 auto; min-width: 62px;
+  white-space: nowrap; font-size: 8.5px; letter-spacing: .04em; padding: 7px 8px;
+  scroll-margin: 0 12px;
+}
 
 /* Barre basse : « Annuler » à gauche (sortie destructrice, isolée), puis le
    voyage et sa conclusion à droite. « Précédent » n'est qu'une flèche — c'est
@@ -48,6 +61,94 @@ body.atelier-mode .at-caption { opacity: 1; }
 .atelier-col .studio-bar .studio-btn { font-size: 12.5px; }
 .atelier-col .studio-bar .studio-btn.ghost { padding: 8px 13px; }
 .atelier-col .at-prev { padding: 8px 12px; font-size: 15px; line-height: 1; }
+
+/* ④ LE TROISIÈME NIVEAU. Il n'y avait que deux poids de bouton : le contour
+   (Annuler, Précédent) et l'accent (la validation). « Suivant » portait
+   l'invitation du chemin avec le poids d'une sortie — il disparaissait.
+   `soft` est ce cran manquant : une masse pleine, mais en encre diluée. Assez
+   pour être le geste évident de la barre, pas assez pour disputer l'accent. */
+.studio-btn.soft {
+  background: color-mix(in srgb, var(--st-ink) 10%, transparent);
+  color: var(--st-ink); border: 1px solid transparent; padding: 9px 16px;
+}
+.studio-btn.soft:hover { background: color-mix(in srgb, var(--st-ink) 17%, transparent); }
+
+/* ⑤ La validation est posée SUR la carte, en haut à droite du cadre #app
+   (lui-même à 22 px des bords en atelier-mode) : ce qu'on valide, c'est la
+   carte, pas le formulaire. */
+.at-send {
+  position: fixed; top: 38px; right: 38px; z-index: 45;
+  border: 0; border-radius: 10px; cursor: pointer;
+  font: 600 12.5px var(--st-sans);
+  background: var(--st-accent); color: var(--st-bg);
+  padding: 10px 17px;
+  box-shadow: 0 6px 22px color-mix(in srgb, var(--st-ink) 24%, transparent);
+  opacity: 0; pointer-events: none; transform: translateY(-6px);
+  transition: opacity .4s ease .3s, transform .4s cubic-bezier(.22, .9, .26, 1) .3s;
+}
+body.atelier-mode .at-send { opacity: 1; pointer-events: auto; transform: none; }
+
+/* ⑥ La tirette de l'heure revient sur la carte, en haut au centre (Adrien).
+   Elle est dé-masquée dans v28.css ; ici on la recentre sur le CADRE de la
+   carte et non sur la fenêtre — sinon elle flotterait à cheval sur la colonne.
+   left + right + margin auto : le centrage d'une boîte fixe dans un sous-cadre. */
+body.atelier-mode .ce-hourpill {
+  top: 34px;
+  left: calc(min(42vw, 560px) + 22px);
+  right: 22px;
+  transform: none;
+  margin-inline: auto;
+  z-index: 44;
+}
+
+/* ③ La confirmation d'Annuler — un voile DANS la colonne, pas une modale
+   plein écran : la carte derrière est exactement ce qu'on s'apprête à perdre,
+   la masquer serait retirer l'élément qui aide à décider. */
+.at-sheet {
+  position: absolute; inset: 0; z-index: 5;
+  display: grid; place-items: center; padding: 26px;
+  background: color-mix(in srgb, var(--st-bg) 72%, transparent);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  opacity: 0; pointer-events: none; transition: opacity .22s ease;
+}
+.at-sheet.on { opacity: 1; pointer-events: auto; }
+.at-sheet-card {
+  background: var(--st-card); border: 1px solid var(--st-card-border);
+  border-radius: 16px; padding: 22px 24px; max-width: 40ch;
+  box-shadow: var(--st-card-shadow);
+}
+.at-sheet-card h3 { font-family: var(--st-serif); font-weight: 400; font-size: 19px; margin: 0 0 8px; }
+.at-sheet-card p { font-size: 12.5px; line-height: 1.55; color: var(--st-muted); margin: 0 0 18px; }
+.at-sheet-acts { display: flex; gap: 9px; flex-wrap: wrap; }
+/* Le geste qui GARDE est le plein, celui qui DÉTRUIT n'est qu'un contour : la
+   main qui clique sans lire tombe sur celui qui ne coûte rien. C'est l'inverse
+   de la hiérarchie habituelle, et c'est voulu — ici l'action « primaire » est
+   de ne rien faire. */
+.at-sheet-acts .at-keep { background: var(--st-ink); color: var(--st-bg); border-color: var(--st-ink); }
+.studio-btn.danger {
+  background: none; padding: 9px 16px;
+  border: 1px solid color-mix(in srgb, var(--st-danger, #a8442f) 45%, transparent);
+  color: var(--st-danger, #a8442f);
+}
+.studio-btn.danger:hover {
+  border-color: var(--st-danger, #a8442f);
+  background: color-mix(in srgb, var(--st-danger, #a8442f) 8%, transparent);
+}
+
+/* ⓪ l'étape Zone : un champ de recherche et des départs tout prêts */
+.at-zonerow { flex-wrap: nowrap; align-items: stretch; }
+.at-zonefield {
+  flex: 1; min-width: 0;
+  font: 500 13px var(--st-sans); color: var(--st-ink);
+  background: var(--st-card); border: 1px solid var(--st-card-border);
+  border-radius: 10px; padding: 9px 11px; outline: none;
+}
+.at-zonefield:focus-visible { border-color: var(--st-accent); }
+.at-zonefield::placeholder { color: var(--st-faint); }
+.at-place { padding: 11px 12px; }
+/* « voir plus » est une CONTINUATION de la liste, pas une action de la barre :
+   pleine largeur, sous la grille, discret. */
+.at-more { display: block; width: 100%; margin: 9px 0 2px; }
 
 /* ---- la bande « posé par le template » ----------------------------------
    La pièce qui fait lire l'étape « affiner » et non « recommencer » : elle dit

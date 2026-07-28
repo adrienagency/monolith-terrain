@@ -35,6 +35,35 @@ export function onRefresh(fn, el) {
   fn()
 }
 
+// ---- garder sa place dans une liste qu'on reconstruit ---------------------
+// LE BUG, dans sa forme générale (Adrien : « c'est aussi un bug courant du
+// site en général ») : un panneau qui se redessine en vidant son conteneur
+// remet le défilement à zéro. On clique une palette en bas de liste, la liste
+// se reconstruit pour marquer la sélection, et on se retrouve en haut.
+//
+// Les panneaux bien écrits (map-panel, light-panel, camera-panel) ne tombent
+// jamais dedans : ils construisent leur DOM UNE fois et se resynchronisent par
+// refreshAll. Ceux qui reconstruisent ont besoin de ceci.
+//
+// POURQUOI deux restaurations et pas une : quand la hauteur du contenu change
+// (une bande qui apparaît, des vignettes en lazy-load qui arrivent après),
+// écrire scrollTop tout de suite se fait CLAMPER par un conteneur encore trop
+// court. On repose donc la valeur une seconde fois après le layout. Le
+// timeout double le rAF : onglet caché = zéro frame, et la restauration ne
+// viendrait jamais.
+export function keepScroll(node, rebuild) {
+  if (!node) return rebuild?.()
+  const top = node.scrollTop
+  const out = rebuild?.()
+  const put = () => { if (node.isConnected && node.scrollTop !== top) node.scrollTop = top }
+  put()
+  let done = false
+  const once = () => { if (!done) { done = true; put() } }
+  requestAnimationFrame(() => requestAnimationFrame(once))
+  setTimeout(once, 120)
+  return out
+}
+
 const fmt = (v, step) => (step >= 1 ? Math.round(v) : +v.toFixed(step >= 0.1 ? 1 : 2))
 
 export function slider({ label, min, max, step = 0.01, get, set }) {

@@ -4,7 +4,7 @@
 // Each surface shader carries an "Appearance" block (opacity + Figma-style blend
 // mode) plus its own per-effect controls.
 
-import { el, section, toggle, select, color, slider, onRefresh } from './kit.js'
+import { el, section, toggle, select, color, slider, onRefresh, keepScroll } from './kit.js'
 import { Panel } from './shell.js'
 import { BLEND_MODES } from '../fx-meta.js'
 import { materialsByCategory } from '../material-catalog.js'
@@ -55,7 +55,10 @@ export function buildShadersPanel(ctx) {
   const lmCtl = el('div', 'ce-fx-controls') // métal liquide (tuile spéciale)
   sFx.body.append(appear, fxCtl, lmCtl)
 
-  function renderFxPicker() {
+  // même liste défilable que le picker de matières, même oubli : cliquer une
+  // vignette d'effet remontait la liste en haut
+  const renderFxPicker = () => keepScroll(fxPick, renderFxPickerInner)
+  function renderFxPickerInner() {
     fxPick.replaceChildren()
     const cur = ctx.getSurfaceFx() ? Number(ctx.getSurfaceFx()) : 0
     const grid = el('div', 'ce-mat-grid')
@@ -114,8 +117,11 @@ export function buildShadersPanel(ctx) {
   sMat.body.append(matCtl)
 
   // build the vignette grid: a "None" tile + one titled group per category
-  function renderPicker() {
-    const st = matPick.scrollTop
+  // Ce picker était le SEUL du dépôt à penser à garder sa place. Sa
+  // capture/restauration écrite à la main est devenue keepScroll (kit.js), et
+  // les quatre pickers qui l'avaient oubliée y passent aussi.
+  const renderPicker = () => keepScroll(matPick, renderPickerInner)
+  function renderPickerInner() {
     matPick.replaceChildren()
     const cur = ctx.getSurfaceMat() || ''
     const tile = (id, label, media, showName) => vigTile({ id, cur, label, media, showName, onPick: () => { ctx.setSurfaceMat(id); renderMat() } })
@@ -136,7 +142,6 @@ export function buildShadersPanel(ctx) {
       }
       matPick.append(grid)
     }
-    matPick.scrollTop = st
   }
   function renderMat() {
     matCtl.replaceChildren()
