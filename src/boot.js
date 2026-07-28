@@ -6,14 +6,20 @@
 // The decision itself lives in boot-gate.js (pure, tested); this file only
 // observes the environment and paints the result.
 
-import { gateFor, looksInApp, looksSharedLink, detectWebGL2 } from './boot-gate.js'
+import { gateFor, looksInApp, looksSharedLink, contexteWebGL2 } from './boot-gate.js'
+import { sonderMachine } from './palier-machine.js'
 
 const coarse = matchMedia('(pointer: coarse)').matches
 const shortSide = Math.min(screen.width, screen.height)
 
+// UN SEUL contexte WebGL2 pour les deux questions du démarrage : « cette
+// machine peut-elle rendre ? » (la carte de refus) et « jusqu'où peut-elle
+// rendre ? » (le palier de départ). Voir boot-gate.js.
+const gl = contexteWebGL2()
+
 const gate = gateFor({
   isPhone: coarse && shortSide < 600, // tablets (iPad mini 744+) pass
-  hasWebGL2: detectWebGL2(),
+  hasWebGL2: !!gl,
   inAppBrowser: looksInApp(navigator.userAgent),
   sharedView: looksSharedLink(location.hash), // une shibu reçue se consomme sur téléphone
 })
@@ -21,6 +27,17 @@ const gate = gateFor({
 if (gate) {
   showGate(gate)
 } else {
+  // LA SONDE MACHINE, ICI ET PAS AILLEURS — « dans les millisecondes de
+  // l'ouverture » (Adrien). boot.js est le premier module du site à
+  // s'exécuter : le verdict est rendu et mémorisé AVANT même que main.js ne
+  // commence à être téléchargé, donc très loin devant le premier rendu.
+  // main.js relit le résultat mémorisé et pose ses params dessus — il ne
+  // resonde pas, et le contexte ci-dessus ne sert qu'une fois pour la session.
+  //
+  // Enveloppée : un défaut de la sonde ne doit JAMAIS empêcher la carte de
+  // s'ouvrir. Sans verdict, main.js retombe sur le comportement d'avant elle.
+  try { sonderMachine({ gl }) } catch { /* palier 0 par défaut : l'état d'avant */ }
+
   // A .catch is not optional here: an exception during main.js's module
   // evaluation otherwise leaves the loader spinning forever with nothing in
   // the console — the exact silent hang this whole gate exists to prevent.

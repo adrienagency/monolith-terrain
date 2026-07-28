@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Sonde palier — machine simulée</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <script>
+      // SONDE DE PALIER — faire tourner ShibuMap comme s'il était sur une AUTRE
+      // machine, pour vérifier ce que src/palier-machine.js sert au tout premier
+      // rendu. À ouvrir en développement :
+      //     http://localhost:<port>/scripts/sonde-palier.html?machine=imac2015
+      //     …?machine=swiftshader   …?machine=vieuxpc   …?machine=rtx
+      // puis lire `window.__palierMachine` dans la console.
+      //
+      // POURQUOI UNE PAGE, ET PAS UNE COMMANDE DANS LA CONSOLE. Le verdict est
+      // rendu par boot.js, c'est-à-dire par le tout premier module du site. Une
+      // commande tapée dans la console arrive des secondes trop tard : elle ne
+      // peut plus changer ni la densité du premier rendu, ni la taille de la
+      // carte d'ombres, ni le plafond d'analyse de relief. Les leurres doivent
+      // donc être posés AVANT le script de démarrage — d'où ce document.
+      //
+      // Ce qu'on truque, et pourquoi ces trois-là : le nom de la carte
+      // (WEBGL_debug_renderer_info), sa limite de texture, et le couple
+      // écran × densité. Ce sont exactement les trois entrées du tableau
+      // croisé ; tout le reste en découle.
+      //
+      // ⚠️ Cette page N'ENTRE PAS dans la construction : vite ne prend que
+      // index.html comme point d'entrée. Elle n'existe qu'en développement.
+      const QUI = new URLSearchParams(location.search).get('machine') || 'rtx'
+      const MACHINES = {
+        imac2015: { carte: 'Intel(R) Iris(TM) Pro Graphics 6200', maxTexture: 16384, ecran: [2560, 1440], dpr: 2 },
+        swiftshader: { carte: 'Google SwiftShader', maxTexture: 8192, ecran: [1920, 1080], dpr: 1 },
+        vieuxpc: { carte: 'ANGLE (Intel(R) HD Graphics 4000 Direct3D11 vs_5_0 ps_5_0)', maxTexture: 4096, ecran: [1366, 768], dpr: 1 },
+        rtx: null, // aucun leurre : la machine réelle
+      }
+      const M = MACHINES[QUI]
+      if (M) {
+        const vrai = HTMLCanvasElement.prototype.getContext
+        HTMLCanvasElement.prototype.getContext = function (type, ...r) {
+          const gl = vrai.call(this, type, ...r)
+          if (gl && String(type).startsWith('webgl')) {
+            const gp = gl.getParameter.bind(gl)
+            const ge = gl.getExtension.bind(gl)
+            gl.getExtension = (n) => (n === 'WEBGL_debug_renderer_info' ? { UNMASKED_RENDERER_WEBGL: 37446, UNMASKED_VENDOR_WEBGL: 37445 } : ge(n))
+            gl.getParameter = (c) => {
+              if (c === 37446) return M.carte
+              if (c === gl.RENDERER) return M.carte
+              if (c === gl.MAX_TEXTURE_SIZE || c === gl.MAX_RENDERBUFFER_SIZE) return M.maxTexture
+              return gp(c)
+            }
+          }
+          return gl
+        }
+        const dfn = (o, k, v) => Object.defineProperty(o, k, { get: () => v, configurable: true })
+        dfn(window, 'devicePixelRatio', M.dpr)
+        dfn(screen, 'width', M.ecran[0])
+        dfn(screen, 'height', M.ecran[1])
+      }
+      window.__ldStart = performance.now()
+      window.__machineSimulee = QUI
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="loading">
+      <div class="ld-name">ShibuMap</div>
+      <div class="ld-status">generating terrain&hellip;</div>
+      <div class="ld-hint"></div>
+    </div>
+    <div id="loading-bg"></div>
+    <script type="module" src="/src/boot.js"></script>
+  </body>
+</html>
