@@ -276,6 +276,32 @@ body.dark {
   height: 30px;
   margin: 0 2px;
 }
+/* LE BOUTON DE LA BARRE DE RECHERCHE A DEUX VISAGES (Adrien) : « Aller » à
+   l'accueil — on part vers le lieu tapé —, « GPX » dans la barre du bas. Un
+   seul bouton, donc une seule largeur pour la rangée liquide, qui mesure
+   précisément celui-ci pour resserrer le cartouche en mode Parcours. Les faces
+   sont des ENFANTS du bouton : liquidize mesure le bouton, jamais son contenu,
+   donc `display:none` n'y coûte aucune bulle. */
+.ce-gpxbtn .gpx-face {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* la face « Aller » s'allume de DEUX façons, et il en faut deux :
+   — `body.ce-hub` : l'accueil n'émet aucun événement auquel du JS pourrait
+     s'accrocher, c'est donc le CSS qui le voit ;
+   — `.go` (posé par bars.js) : la recherche est éveillée — champ focalisé ou
+     rempli — alors même que l'accueil est déjà redescendu, ce qui arrive dès
+     qu'on entre dans le champ. */
+.ce-gpxbtn .gpx-f-go,
+body.ce-hub .ce-gpxbtn .gpx-f-gpx,
+.ce-gpxbtn.go .gpx-f-gpx {
+  display: none;
+}
+body.ce-hub .ce-gpxbtn .gpx-f-go,
+.ce-gpxbtn.go .gpx-f-go {
+  display: inline-flex;
+}
 /* boîte de secours « Votre lien est prêt » — presse-papier refusé */
 .ce-linkbox-veil {
   position: fixed;
@@ -815,10 +841,24 @@ body.ce-hub .ce-credits {
     gap 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
     opacity 0.24s;
 }
+/* 92 px suffisaient à une marque de 34 px et une question de 15. Le titre seul
+   en demande ~58 : le plafond suit. C'est un PLAFOND de dépliage, pas une
+   hauteur — il doit rester légèrement au-dessus du contenu réel (≈108 px sur
+   grand écran) sans l'être tellement que le dépliage paraisse fini avant la
+   fin de la courbe. */
 body.ce-hub .ce-hubhead {
-  max-height: 92px;
+  max-height: 136px;
   opacity: 1;
-  gap: 6px;
+  gap: 16px;
+  /* ⚠️ SANS CETTE LARGEUR, LE TITRE SE CASSE EN DEUX. Le wrap est un flex
+     colonne qui se dimensionne sur son plus large enfant : c'était jusqu'ici le
+     pied (« ou dépose un fichier GPX… », 520 px), et le titre héritait donc de
+     520 px pour une phrase qui en demande 795 — il passait à deux lignes, dont
+     la seconde était rabotée par le plafond de dépliage. Le titre reprend la
+     main sur la largeur, et tout reste centré (align-items: center du wrap).
+     Posée SEULEMENT en accueil : hors accueil, la barre n'a aucune raison
+     d'élargir sa boîte fixe au-dessus de la carte. */
+  width: min(94vw, 960px);
 }
 body.ce-hub .ce-hubfoot {
   max-height: 76px;
@@ -826,18 +866,47 @@ body.ce-hub .ce-hubfoot {
   gap: 6px;
   pointer-events: auto;
 }
+/* ⚠️ LA HIÉRARCHIE DU CENTRE A ÉTÉ INVERSÉE le 29/07 (Adrien, réf. landing
+   Framer : petite pastille en haut, titre énorme, sous-titre discret). Avant,
+   la MARQUE faisait 34 px et la promesse 15 px — le visiteur lisait d'abord un
+   nom qu'il ne connaît pas, et devait chercher ce que le site fait. Les deux
+   classes n'ont pas changé de nom, elles ont échangé leur poids : c'est le
+   même DOM, donc la même montée liquide. */
+
+/* la MARQUE, réduite au rang de pastille : elle SITUE, elle ne proclame plus.
+   Le contour de cheveu et le verre lui donnent un bord — sans lui, un nom de
+   12 px posé nu au-dessus d'un titre de 54 px ressemble à une coquille. */
 .ce-hubmark {
+  display: inline-flex;
+  align-items: baseline;
+  padding: 6px 14px 7px;
+  border: 1px solid var(--ce-border, rgba(255, 255, 255, 0.55));
+  border-radius: 999px;
+  background: var(--ce-glass, rgba(252, 252, 253, 0.62));
   font-family: 'Rosarivo', Georgia, serif;
-  font-size: 34px;
-  line-height: 1.1;
+  font-size: 12.5px;
+  line-height: 1;
+  letter-spacing: 0.03em;
   color: var(--ce-ink);
 }
 .ce-hubmark span {
   color: var(--ce-accent);
 }
+/* LE TITRE — la promesse, en <h1> : c'est le seul vrai titre de la page.
+   `clamp` plutôt qu'une taille figée : la phrase doit tenir sur UNE ligne du
+   grand écran au portable, et c'est sa longueur qui commande, pas un palier de
+   media query. `text-wrap: balance` répartit proprement les deux lignes quand
+   elle finit par céder. */
 .ce-hubq {
-  font-size: 15px;
-  color: var(--ce-muted);
+  margin: 0;
+  font-family: 'Rosarivo', Georgia, serif;
+  font-weight: 400;
+  font-size: clamp(29px, 4.4vw, 54px);
+  line-height: 1.06;
+  letter-spacing: -0.015em;
+  color: var(--ce-ink);
+  max-width: min(94vw, 940px);
+  text-wrap: balance;
 }
 .ce-hubdrop {
   font-size: 12px;
@@ -881,6 +950,23 @@ body.ce-hub .ce-qb-core .ce-wm-btn svg {
 }
 body.ce-hub .ce-qb-core .ce-wm-btn:hover {
   background: var(--ce-hover);
+}
+
+/* EXPLORER NE FAIT PAS PARTIE DE L'ACCUEIL (Adrien : « il y a déjà la barre de
+   recherche juste en dessous »). La classe est posée par le JS — accueil.js
+   décide, cette règle obéit —, ce qui rend la décision testable au lieu de la
+   cacher dans une feuille de style. La porte REVIENT dès que la barre
+   redescend : c'est le même bouton, rien n'est recréé.
+   ⚠️ `display:none` est ici la SEULE exception au « jamais display:none » de ce
+   fichier, et elle est sûre : une porte n'est pas une bulle du goo (les bulles
+   sont le cœur, « Avancé », le pont, le cartouche du bas). elembar.js sait déjà
+   l'ignorer — `activeBtn` et `bumpFor` testent `offsetParent` : le pont se
+   recentre alors sous la rangée et la coche s'éteint, ce qui est exactement
+   juste, puisqu'à l'accueil aucun mode n'a encore été choisi. Un repli par
+   max-width aurait, lui, laissé un ancrage large de zéro au bord gauche, et le
+   pont serait allé s'y coller. */
+body.ce-hub .ce-qb-core .ce-wm-btn.hub-off {
+  display: none;
 }
 
 /* « Avancé » n'a rien à faire dans une question : le slot se referme sur
@@ -932,11 +1018,17 @@ body.ce-hub .ce-lq-adv {
     right: 12px;
     transform: none;
   }
+  /* la pastille ne rétrécit plus (elle est déjà minuscule) ; c'est le TITRE qui
+     cède, et il passe alors sur deux lignes — d'où un plafond plus HAUT qu'en
+     grand écran, à rebours de l'ancienne règle où c'était la marque qui
+     occupait la place. */
   .ce-hubmark {
-    font-size: 26px;
+    font-size: 12px;
+    padding: 5px 12px 6px;
   }
   body.ce-hub .ce-hubhead {
-    max-height: 76px;
+    max-height: 190px;
+    gap: 12px;
   }
 }
 /* ⚠️ l'ancienne règle « body:has(.gpx-profile:not(.hidden)) .ce-elemwrap →
