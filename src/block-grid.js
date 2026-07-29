@@ -527,6 +527,43 @@ export class BlockGrid {
     // aligner la plage de hauteurs sur celle du bloc central
     const mt = this.getMainTerrain?.()
     if (mt) terrain.mapUniforms.uHeightRange.value.copy(mt.mapUniforms.uHeightRange.value)
+    // ---------------------------------------------------------------------
+    // UNE DALLE VOISINE SORT ENTIÈREMENT DE LA PASSE D'OMBRE (28/07/2026)
+    // ---------------------------------------------------------------------
+    // ⚠️ IL FAUT COUPER LES DEUX DRAPEAUX, ET `receiveShadow` EST LE VRAI.
+    // Ce n'est pas une ceinture-et-bretelles : le rendu est en VSM
+    // (`renderer.shadowMap.type = THREE.VSMShadowMap`, main.js), et three écrit
+    // noir sur blanc, dans WebGLShadowMap.renderObject :
+    //     object.castShadow || (object.receiveShadow && type === VSMShadowMap)
+    // Autrement dit, sous VSM, un objet qui REÇOIT une ombre est aussi dessiné
+    // dans la carte d'ombre. Passer le seul `castShadow` à false ne retire donc
+    // RIEN : mesuré, la passe d'ombre restait à 2 260 040 triangles, au
+    // triangle près. C'est le piège de ce fichier — quiconque « rétablit »
+    // receiveShadow ici pour faire joli remet 1,07 million de triangles par
+    // image sans qu'aucun test ne bronche.
+    //
+    // POURQUOI ON A LE DROIT DE LES COUPER : la caméra d'ombre du soleil couvre
+    // ±42 unités monde (main.js) quand une dalle en fait 56 de côté. Une
+    // voisine commence donc à 28 et SORT DU CADRE À 42 — elle n'était ombrée
+    // que sur une bande de 14 unités, puis pleinement éclairée sur les 42
+    // suivantes. La coupure était déjà à l'écran avant qu'on y touche. Vérifié
+    // en capture, damier 3×3, soleil à 5,8° d'élévation (le cas extrême, celui
+    // des ombres les plus longues) : les voisines sont indiscernables d'avant,
+    // et le bloc central — qui garde ses deux drapeaux — ne bouge pas d'un
+    // pixel. La voisine reste un CONTEXTE (256² au lieu de 768², cf.
+    // NEIGHBOUR_RES) : son relief se lit par son ombrage diffus et son bump.
+    //
+    // CE QUE ÇA COÛTAIT — mesuré le 28/07/2026 (1920×1080, La Réunion, damier
+    // 3×3, 8 voisines) :
+    //   passe d'ombre : 2 260 040 → 1 188 328 triangles, 21 → 5 appels ;
+    //   image entière : 4 527 467 → 3 455 755 triangles, soit −23,7 %.
+    // Le damier monte à 5×5 au palier 0 (damierMax 24) : c'était jusqu'à trois
+    // millions de triangles par image pour un liseré. Ce qui RESTE dans la
+    // passe, c'est le relief du bloc central (1 179 648 triangles, 99,3 % du
+    // total) — et lui doit y rester : c'est le relief qui s'ombre lui-même,
+    // l'image entière tient dessus.
+    terrain.mesh.castShadow = false
+    terrain.mesh.receiveShadow = false
     this.scene.add(terrain.mesh)
 
     const cell = { i, j, terrain, dem }
@@ -544,8 +581,11 @@ export class BlockGrid {
         baseYFloor: plinth.baseY,
       })
       const walls = new THREE.Mesh(geo, plinth.wallMat)
-      walls.castShadow = true
-      walls.receiveShadow = true
+      // même raison, et même piège VSM, que le relief de la voisine ci-dessus :
+      // ces murs n'ont rien sous eux à ombrer et sortent du cadre de la caméra
+      // d'ombre avec le reste de la dalle. Les DEUX drapeaux, donc.
+      walls.castShadow = false
+      walls.receiveShadow = false
       walls.position.set(i * TERRAIN_SIZE, 0, j * TERRAIN_SIZE)
       this.scene.add(walls)
       cell.walls = walls
