@@ -369,6 +369,45 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
   // fusionne. Tout échec est silencieux et sans conséquence — la carte reste
   // celle d'avant.
   const seaData = bathy === false ? null : await loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx: TILE_PX })
+  // ⚠️ FLOAT32, ET PAS INT16 — LA MESURE, POUR QUE PERSONNE NE LA REFASSE.
+  //
+  // 1536² × 4 octets = 9,44 Mo par bloc. Le passer en Int16 rendrait 4,72 Mo et
+  // ~9 % du temps de lecture. C'est tentant, et c'est un piège dès qu'on choisit
+  // une unité ABSOLUE : quantifier le relief ajoute du bruit exactement à la
+  // fréquence de Nyquist du maillage, et src/grid-normals.js vient de prouver
+  // que c'est précisément ce que les normales révèlent à l'œil.
+  //
+  // Mesuré sur MNT réel (banc `.banc/f3-int16.mjs`), écart angulaire des
+  // normales contre le Float32 actuel, res 768, La Réunion z13 et Chamonix z12 :
+  //
+  //   quantification            | pas    | écart moyen     | pire
+  //   mètre entier (±32767 m)   | 1 m    | 0,57° à 1,09°   | 5,1° à 7,4°
+  //   demi-mètre   (±16383 m)   | 0,5 m  | 0,29° à 0,54°   | 2,3° à 3,6°
+  //   AFFINE PAR BLOC           | 4–6 cm | 0,035° à 0,044° | 0,30°
+  //   (le terrarium natif)      | 3,9 mm | 0,005° à 0,006° | 0,03°
+  //
+  // Une unité absolue réinjecte donc entre un tiers et deux tiers de l'erreur de
+  // normales qu'on venait justement de supprimer (3,2° à La Réunion). Elle est
+  // exclue — et le demi-mètre est le maximum qui couvre encore la Terre entière
+  // (Everest 8 849 m, Challenger Deep −10 935 m), donc il n'y a pas de réglage
+  // absolu plus fin disponible.
+  //
+  // La SEULE voie tenable est AFFINE PAR BLOC : stocker `(h − minM) × 65534 /
+  // (maxM − minM)` et porter `minM` et le facteur à côté du tableau. Le pas
+  // devient 4 à 6 cm sur un bloc alpin, millimétrique sur un bloc plat — et le
+  // bruit tombe à 0,04°, sept fois le plancher d'arrondi Float32 mais
+  // soixante-dix fois moins que la version « mètre ». ⚠️ Deux réserves à lever
+  // avant de l'écrire :
+  //   — le ZÉRO n'est plus exactement représentable, et les seuils terre/mer se
+  //     jouent au décimètre (seaLevelM 0,5 ; LAND_MIN_ELEV_M 0,3) : il faut
+  //     vérifier que la topologie du flood-fill de sea-mask.js ne bouge pas ;
+  //   — `fuseBathymetry` ne doit CREUSER QUE LA MER (« la terre ne bouge
+  //     jamais », src/bathy.js) : la fusion doit se faire AVANT la
+  //     quantification, jamais après.
+  //
+  // Non fait ici parce que la fenêtre continue 3×3 remplace les neuf reliefs par
+  // UN SEUL : l'offset et le facteur devront alors porter sur l'emprise entière,
+  // exactement comme `uHeightRange`. Le faire maintenant serait à refaire.
   const data = new Float32Array(sizePx * sizePx)
   let minM = Infinity
   let maxM = -Infinity
