@@ -530,8 +530,9 @@ export function buildAtelier(deps) {
   // exactement ce qui répare ça. Volontairement SANS les courbes de niveau ni
   // la grille : ce sont des outils de lecture, pas d'habillage (ils restent en
   // Avancé, panneau Carte → « Courbes & grille »).
+  // PLUS de `roadsEnabled` : le calque Routes a quitté le site. Cette table est
+  // indexée par LAYERS (atelier-steps.js), qui ne le liste plus.
   const LAYER_SET = {
-    roadsEnabled: (v) => { deps.params.roadsEnabled = v; deps.rebuildMapLayers() },
     waterEnabled: (v) => { deps.params.waterEnabled = v; deps.rebuildMapLayers() },
     placesEnabled: (v) => { deps.params.placesEnabled = v; deps.rebuildMapLayers() },
     aerialEnabled: (v) => { deps.params.aerialEnabled = v; deps.refreshAerial() },

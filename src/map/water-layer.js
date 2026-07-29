@@ -6,20 +6,38 @@ import { latlonToWorldPts } from './draped-line.js'
 import { buildLineSegments } from './line-segments.js'
 import { fetchOverpassLines, fetchOverpassAreas } from './overpass.js'
 import { makeInsideBlock, clipPolylineToBlock, blockOutline, triangulateAndClip } from './block-clip.js'
-import { OSM_MIN_ZOOM } from './roads-layer.js'
 import { riverWidthPx } from './river-width.js'
 import { makeLakeMaterial } from './lake-material.js'
 import { WATER_REGION, LAKE_LOD_LEVELS, inRegion, lodForZoom, tileZoomForLod } from './tile-index.js'
 import { loadWaterTiles, loadWaterTileManifest, loadLakeTiles, loadLakeTileManifest, hasTilesForLod } from './tile-loader.js'
+
+// À partir de ce demZoom, l'eau vient d'Overpass en pleine finesse ; en
+// dessous, des tuiles Overture ou du Natural Earth.
+//
+// Cette constante VIVAIT dans roads-layer.js, qui n'existe plus (le calque
+// Routes a quitté le site) : les deux calques partageaient un seul seuil,
+// l'eau en est désormais la seule propriétaire. Le chiffre, lui, ne bouge
+// pas — il a été mesuré contre l'API Overpass publique sur une vraie bbox de
+// patch, et c'est la géographie qui l'impose, pas le calque :
+//   demZoom 10 (91 km) : Chamonix 234 594 ways / 286 Mo — inutilisable
+//   demZoom 11 (46 km) : Chamonix  48 707 ways /  62 Mo — encore trop lourd
+//   demZoom 12 (24 km) : Chamonix  10 752 ways /  15 Mo — raisonnable
+// 12 est le plus petit zoom dont la charge tient debout dans le cas courant
+// (hors ville dense). Ce n'est PAS raisonnable partout : la même bbox z12 sur
+// Paris intra-muros mesurait 351 414 ways / 238 Mo. Risque assumé et non
+// régression : fetchOverpassLines retombe sur le palier Natural Earth au
+// moindre échec (jamais de blanc), et OVERPASS_MAXSIZE (overpass.js) fait
+// échouer la requête AVANT que le navigateur n'avale la charge.
+export const OSM_MIN_ZOOM = 12
 
 // Client-side waterway-kind filter for the zoomed Overpass waterway LINES
 // (fetchOverpassLines(bounds, 'water') below). The Overpass query itself
 // stays the bare `way["waterway"]` tag test on purpose — DO NOT turn this
 // into a `["waterway"~"^(river|riverbank)$"]` regex predicate. Regex
 // predicates make Overpass scan every way in the bbox instead of hitting the
-// tag index (the exact failure mode documented for roads in overpass.js's
-// comment on roadHighwayFilter: a filtered predicate measured a 504 against
-// the live public API on a dense bbox, while the bare tag returned in <1s).
+// tag index. Mesuré à l'époque sur le calque Routes (parti depuis) : un
+// prédicat filtré prenait 6,5 s et revenait en 504 sur une bbox dense, là où
+// le test de tag nu répondait en moins d'une seconde.
 // So filtering happens here instead, client-side, after parseOverpass has
 // already run — cheap, and it can't take the whole layer down with a 504.
 //
@@ -37,11 +55,12 @@ export function filterRiverwayLines(feats) {
   return feats.filter((f) => RIVER_WATERWAY_KINDS.has(f.kind))
 }
 
-// Lakes render above every other DRAPED MAP LAYER (roads, rivers, contours,
+// Lakes render above every other DRAPED MAP LAYER (rivers, contours,
 // the general water fill), in a distinctly more saturated blue than the
 // general water ink — an explicit user request ("je tiens vraiment à ce que
 // les lacs apparaissent au dessus de tout le reste, en bleu assez visible").
-// renderOrder 26 clears roads (20) and the general water fill (17), and
+// renderOrder 26 clears every draped layer below (the general water fill sits
+// at 17 ; le 20 laissé libre était celui des routes, parties du site), and
 // polygonOffset (in _fillMaterial / line-segments.js) breaks ties among
 // draped layers sitting at nearly the same world height. depthTest stays ON
 // (true) for lakes exactly like every other layer, though: the terrain mesh

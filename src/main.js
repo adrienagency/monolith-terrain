@@ -495,11 +495,13 @@ const params = {
   seaEdgeFrost: 0.5, // 0 = verre clair, 1 = verre depoli
   seaRefract: 0.6, // intensite de la refraction (deformation du fond vu a travers)
 
-  // SP1 map overlay layers (roads/water/places), draped on the relief
-  roadsEnabled: false,
-  roadsOpacity: 0.9,
-  roadsDetail: 1,
-  roadColor: '',
+  // SP1 map overlay layers (water/places), draped on the relief
+  // PLUS de roadsEnabled/roadsOpacity/roadsDetail/roadColor. Le calque Routes a
+  // quitté le site (Adrien : « très lourd, très mauvais ») — 12,6 Mo de
+  // Natural Earth versionnés pour un réseau qui, de toute façon, n'existait en
+  // version tuilée que sur les Alpes. Ces quatre clés traînent encore dans de
+  // vieux gabarits enregistrés : applyUserTemplate filtre sur TEMPLATE_KEYS,
+  // elles sont donc simplement ignorées, aucune migration à écrire.
   waterEnabled: true, // lakes on by default — the world lake layer is cheap (fetch-on-view)
   waterOpacity: 0.9,
   waterFill: true,
@@ -1345,7 +1347,7 @@ const realWater = FLAGS.water ? new RealWater(scene) : null
 // ÉVÉNEMENTS — les éléments 3D rapportés qui vivent sur la carte. Les bateaux
 // sont le premier ; la catégorie est prévue pour en accueillir d'autres.
 const boats = new Boats(scene)
-const mapLayers = new MapLayers(scene, camera) // roads/water/places overlays, populated per zone
+const mapLayers = new MapLayers(scene, camera) // water/places overlays, populated per zone
 
 const labelOpts = () => ({
   real: params.source === 'real',
@@ -2084,7 +2086,7 @@ function regenerateTerrain() {
       plinth.rebuild(terrain, params) // walls hug the new relief border (also re-welds the region skirt in region mode — see the plinth.rebuild wrapper)
       terrain.refreshMatTiling(params) // re-tile the relief material to the new zoom scale
       realWater?.rebuild({ terrain, params }) // water simulation follows the new relief
-      const _mlp = mapLayers.rebuild({ dem: terrain.dem, terrain, params }) // roads/water/places re-drape on the new relief
+      const _mlp = mapLayers.rebuild({ dem: terrain.dem, terrain, params }) // water/places re-drape on the new relief
       // The aerial skin has to re-derive here too. This calls mapLayers.rebuild
       // DIRECTLY rather than through the rebuildMapLayers wrapper, and that
       // wrapper was the only thing refreshing the photo — so a zoom change
@@ -2406,10 +2408,6 @@ const DEFAULT_PLINTH = Object.freeze({
   plinthBump: params.plinthBump,
 })
 const DEFAULT_MAPLAYERS = Object.freeze({
-  roadsEnabled: params.roadsEnabled,
-  roadsOpacity: params.roadsOpacity,
-  roadsDetail: params.roadsDetail,
-  roadColor: '',
   waterEnabled: params.waterEnabled,
   waterOpacity: params.waterOpacity,
   waterFill: params.waterFill,
@@ -2744,7 +2742,7 @@ function applyUserTemplate(tmpl) {
   bgRefreshFn() // resync the Background HDRI-sky highlight to the applied look
   refreshAll()
   setSeaEnabled(params.seaEnabled) // un template peut livrer une carte SANS mer
-  rebuildMapLayers() // re-derive roads/water/places for the current location under the restored look
+  rebuildMapLayers() // re-derive water/places for the current location under the restored look
   blockGrid?.restyle(params) // les dalles voisines du damier suivent la principale
   gpxLayer.rebuildAll() // re-drape every loaded track with the restored line width/colour/casing
   // LA POSE DE CAMÉRA, si le fichier en porte une. Direction normalisée +
@@ -2887,7 +2885,7 @@ function resetLook() {
 // RESET MAP (Templates panel) — extends RESET LOOK to also clear everything
 // else a template or a panel can leave dangling: background, socle material,
 // the whole-relief material / liquid metal / surface shader, clouds, fog and
-// the map overlay layers (roads/water/places). Location/zoom are never
+// the map overlay layers (water/places). Location/zoom are never
 // touched — this is a look reset, not a "start over" — and any function it
 // calls is declared further down in this file; that's fine, resetAll is only
 // ever invoked from a UI click, long after the whole module has finished
@@ -2921,7 +2919,7 @@ function resetAll() {
   // depth of field off
   params.bokehEnabled = false
   setDofEnabled(false)
-  // map overlay layers (roads/water/places)
+  // map overlay layers (water/places)
   Object.assign(params, DEFAULT_MAPLAYERS)
   rebuildMapLayers()
   blockGrid?.restyle(params) // les dalles voisines retombent aussi sur la base
@@ -3739,7 +3737,7 @@ function refreshOsmCredit() {
   credits.setExtra(parts.join(' · '))
 }
 
-// rebuild all map layers (roads/water/places) for the current zone — used by
+// rebuild all map layers (water/places) for the current zone — used by
 // the Map panel toggles (Task 12)
 // Aerial photo skin — a narrow first test: IGN orthophotos, Annecy only, off by
 // default (see src/map/aerial-layer.js for why it's scoped to one area, and for
@@ -4311,11 +4309,10 @@ let storedContourOpacity = null
 let storedGridOpacity = null
 function toggleLayer(id) {
   if (!terrain?.mapUniforms) return
+  // PLUS de case 'roads' : le calque a quitté le site, et son raccourci R avec
+  // lui (shortcuts.js). Le `default: return` plus bas absorbe silencieusement
+  // un identifiant inconnu, donc rien ne casse si un vieil appel traîne.
   switch (id) {
-    case 'roads':
-      params.roadsEnabled = !params.roadsEnabled
-      rebuildMapLayers()
-      break
     case 'water':
       params.waterEnabled = !params.waterEnabled
       rebuildMapLayers()
@@ -4348,7 +4345,7 @@ function toggleLayer(id) {
       return
   }
   refreshAll()
-  // roads/water/places/contourOpacity/gridOpacity are all TEMPLATE_KEYS —
+  // water/places/contourOpacity/gridOpacity are all TEMPLATE_KEYS —
   // a keyboard toggle never touches a `.ce-dock` control, so it would be
   // invisible to the debounced dock listener below without this explicit
   // record (history?. — this can fire before `history` exists only if a key

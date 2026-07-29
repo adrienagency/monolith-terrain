@@ -103,3 +103,39 @@ test('captureLook deep-copies so a saved look cannot be mutated later', () => {
   assert.equal(look.rampStops[0].c, '#fff')
   assert.equal(look.demExaggeration, 2.8)
 })
+
+// ------------------------------------------- le calque ROUTES a quitté le site
+// Adrien : « très lourd, très mauvais, tu peux le supprimer. » Le calque part
+// avec ses quatre clés de gabarit — mais des gabarits enregistrés chez des
+// visiteurs, et des .shibumap-template.json exportés avant aujourd'hui, les
+// portent encore. Même précédent que 'coastLine' : on retire les clés de la
+// liste, applyUserTemplate filtre dessus, elles sont ignorées. Aucune
+// migration, aucun numéro de version à changer. Ces tests ferment la porte.
+const CLES_ROUTES = ['roadsEnabled', 'roadsOpacity', 'roadsDetail', 'roadColor']
+
+test('plus aucune clé de routes ne voyage dans un gabarit', () => {
+  for (const k of CLES_ROUTES) assert.ok(!TEMPLATE_KEYS.includes(k), `${k} ne doit plus voyager`)
+  // et captureLook ne peut plus en émettre, même si params en traînait une
+  const look = captureLook({ fov: 30, roadsEnabled: true, roadColor: '#ff0000' })
+  for (const k of CLES_ROUTES) assert.ok(!(k in look), `captureLook émet encore ${k}`)
+})
+
+test('un vieux gabarit qui porte encore les clés de routes se charge, sans erreur et sans effet', () => {
+  // un fichier tel qu'il a pu être exporté HIER, routes allumées et colorées
+  const vieux = JSON.stringify({
+    format: 'shibumap-template', version: 1, name: 'Avant',
+    look: { fov: 45, darkMode: true, roadsEnabled: true, roadsOpacity: 0.42, roadsDetail: 3, roadColor: '#ff0000' },
+  })
+  const t = parseTemplate(vieux)
+  assert.ok(t, 'le fichier doit rester lisible — pas de refus, pas de throw')
+  assert.equal(t.name, 'Avant')
+
+  // …et il n'a AUCUN effet : on rejoue ici la seule ligne de filtrage de
+  // applyUserTemplate (main.js), qui n'est pas importable depuis Node.
+  const params = { fov: 30, darkMode: false, roadsEnabled: false, roadColor: '' }
+  for (const k of TEMPLATE_KEYS) if (k in t.look) params[k] = t.look[k]
+  assert.equal(params.fov, 45, 'ce que le gabarit possède encore doit bien s’appliquer')
+  assert.equal(params.darkMode, true)
+  assert.equal(params.roadsEnabled, false, 'la clé morte ne doit rien rallumer')
+  assert.equal(params.roadColor, '', 'la clé morte ne doit rien repeindre')
+})

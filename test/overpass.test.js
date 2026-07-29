@@ -1,63 +1,55 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildQuery, parseOverpass, bboxKey, roadHighwayFilter, buildAreaQuery, parseOverpassAreas, assertSaneSize, OVERPASS_MAXSIZE } from '../src/map/overpass.js'
+import { buildQuery, parseOverpass, bboxKey, WAY_TAG, buildAreaQuery, parseOverpassAreas, assertSaneSize, OVERPASS_MAXSIZE } from '../src/map/overpass.js'
 
 const bbox = { minLat: 45.8, minLon: 6.1, maxLat: 45.95, maxLon: 6.3 }
 
-test('buildQuery: roads uses highway + south,west,north,east bbox', () => {
-  const q = buildQuery(bbox, 'roads', 3)
-  assert.match(q, /way\["highway"\]\(45\.8,6\.1,45\.95,6\.3\);/)
+test('buildQuery: water uses waterway + south,west,north,east bbox', () => {
+  const q = buildQuery(bbox, 'water')
+  assert.match(q, /way\["waterway"\]\(45\.8,6\.1,45\.95,6\.3\);/)
   assert.match(q, /out geom;/)
 })
 
-test('roadHighwayFilter: every notch uses the bare tag test — a regex predicate 504s on Overpass', () => {
-  // Regression guard. A `["highway"~"^(motorway|…)$"]` predicate makes Overpass
-  // scan every way rather than use the tag index: measured live on a Chamonix
-  // z13 bbox it took 6.5 s and returned 504, while `way["highway"]` returned
-  // 4570 ways in 927 ms. The 504 → null → Natural Earth fallback (empty at that
-  // zoom) is exactly why notches 1 and 2 rendered nothing and notch 3 worked.
-  for (const detail of [1, 2, 3, undefined]) {
-    assert.equal(roadHighwayFilter(detail), '["highway"]')
-    assert.equal(/~/.test(roadHighwayFilter(detail)), false, 'no regex predicate')
-  }
+// ---- le calque ROUTES a quitté le site -------------------------------------
+// Il était le seul autre client de ce module. Sa disparition emporte
+// `roadHighwayFilter()` et le cran de « détail » qui lui servait de variante de
+// cache. Ce qui RESTE vrai, et qui vaut désormais pour l'eau : jamais de
+// prédicat regex (mesuré sur les routes : 6,5 s et un 504, contre 927 ms pour
+// le test de tag nu).
+
+test('plus aucun `kind` routier dans ce module', () => {
+  assert.equal(WAY_TAG.roads, undefined)
+  assert.deepEqual(Object.keys(WAY_TAG), ['water'])
 })
 
-test('roadHighwayFilter: all notches share one filter, so relative tiering does the filtering client-side', () => {
-  // detail 1 and 2 must fetch the SAME broad set — relative tiering (road-tier.js)
-  // decides client-side which classes actually render at each notch, so an
-  // absolute server-side filter (the old bug) would starve it of data.
-  assert.equal(roadHighwayFilter(1), roadHighwayFilter(2))
-  assert.equal(roadHighwayFilter(2), roadHighwayFilter(3))
-})
-
-test('buildQuery: water uses waterway', () => {
-  assert.match(buildQuery(bbox, 'water'), /way\["waterway"\]/)
+test('la requête reste un test de TAG NU — un prédicat regex 504 sur Overpass', () => {
+  const q = buildQuery(bbox, 'water')
+  assert.equal(/~/.test(q), false, 'aucun prédicat regex dans la requête')
+  assert.match(q, /way\["waterway"\]/)
 })
 
 test('parseOverpass keeps ALL vertices, maps tags', () => {
   const json = { elements: [
-    { type: 'way', tags: { highway: 'primary', name: 'D1' }, geometry: [ { lat: 1, lon: 2 }, { lat: 3, lon: 4 }, { lat: 5, lon: 6 } ] },
-    { type: 'way', tags: { highway: 'residential' }, geometry: [ { lat: 0, lon: 0 } ] }, // <2 pts dropped
+    { type: 'way', tags: { waterway: 'river', name: 'L’Arve' }, geometry: [ { lat: 1, lon: 2 }, { lat: 3, lon: 4 }, { lat: 5, lon: 6 } ] },
+    { type: 'way', tags: { waterway: 'stream' }, geometry: [ { lat: 0, lon: 0 } ] }, // <2 pts dropped
     { type: 'node', lat: 9, lon: 9 }, // non-way ignored
   ] }
-  const feats = parseOverpass(json, 'roads')
+  const feats = parseOverpass(json, 'water')
   assert.equal(feats.length, 1)
   assert.deepEqual(feats[0].coords, [ [2, 1], [4, 3], [6, 5] ]) // [lon,lat], all 3 kept
-  assert.equal(feats[0].kind, 'primary')
-  assert.equal(feats[0].name, 'D1')
+  assert.equal(feats[0].kind, 'river')
+  assert.equal(feats[0].name, 'L’Arve')
 })
 
 test('bboxKey rounds to 3 decimals', () => {
-  assert.equal(bboxKey({ minLat: 45.80001, minLon: 6.1, maxLat: 45.95, maxLon: 6.3 }, 'roads'), 'roads:45.8,6.1,45.95,6.3')
+  assert.equal(bboxKey({ minLat: 45.80001, minLon: 6.1, maxLat: 45.95, maxLon: 6.3 }, 'water'), 'water:45.8,6.1,45.95,6.3')
 })
 
-test('bboxKey: roads cache key derives from the filter, so every notch reuses one cached fetch', () => {
-  // All three notches now share a filter, so moving the slider re-filters the
-  // cached ways client-side instead of re-hitting rate-limited public Overpass.
-  const keyFor = (detail) => bboxKey(bbox, 'roads', roadHighwayFilter(detail))
-  assert.equal(keyFor(1), keyFor(2))
-  assert.equal(keyFor(2), keyFor(3))
-  assert.notEqual(bboxKey(bbox, 'roads', '["highway"]'), bboxKey(bbox, 'water', undefined))
+test('bboxKey : une entrée de cache par zone+kind, sans troisième argument', () => {
+  // La « variante » n'existait que pour distinguer les crans de détail des
+  // routes. Un appel qui en traîne encore un ne doit pas fabriquer une clé
+  // différente — sinon un même patch se refetcherait pour rien.
+  assert.equal(bboxKey(bbox, 'water', 'residu'), bboxKey(bbox, 'water'))
 })
 
 test('buildAreaQuery: well-formed water-area query with south,west,north,east bbox', () => {
@@ -106,8 +98,8 @@ test('buildQuery: every query carries the maxsize memory ceiling', () => {
   // collapses to `[`, which builds a character CLASS — that assertion matches
   // almost any string and silently tests nothing.
   const needle = `[maxsize:${OVERPASS_MAXSIZE}]`
-  for (const kind of ['roads', 'water']) {
-    assert.ok(buildQuery(bbox, kind, 1).includes(needle), `${kind} query missing ${needle}`)
+  for (const kind of Object.keys(WAY_TAG)) {
+    assert.ok(buildQuery(bbox, kind).includes(needle), `${kind} query missing ${needle}`)
   }
   assert.ok(buildAreaQuery(bbox).includes(needle), `area query missing ${needle}`)
 })

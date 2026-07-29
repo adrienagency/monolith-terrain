@@ -10,7 +10,7 @@ function fakeParams(overrides = {}) {
     rampStops: [{ c: '#ffffff', p: 0 }, { c: '#ffa861', p: 1 }],
     oceanShallow: '#dce8ec', oceanMid: '#7fa8b8', oceanDeep: '#31576b', darkMode: false,
     mapTint: 1, heightContrast: 5.1, heightPivot: 0.53, slopeTint: 0.5,
-    roadsEnabled: true, roadsOpacity: 1, roadsDetail: 1, roadColor: '', waterEnabled: true, waterOpacity: 1, waterFill: false,
+    waterEnabled: true, waterOpacity: 1, waterFill: false, lakeColor: '#5b8fb0',
     placesEnabled: true, placesDensity: 1, placesSize: 1, placesHalo: true,
     contourInterval: 0.11, contourOpacity: 0.5, contourWeight: 0.7, contourColor: '#000000',
     gridStep: 5, gridOpacity: 0.4, gridColor: '#242220', hudInk: '#17191b', hudAccent: '#ff4d00', labels: true,
@@ -136,7 +136,7 @@ test('encoded URL length for a realistic customized state stays well under 2000 
   const base = captureLook(fakeParams())
   const params = fakeParams({
     darkMode: true, contourColor: '#112233', gridColor: '#334455', gridStep: 8,
-    mapTint: 1.2, heightContrast: 6, roadColor: '#ff0000', hudAccent: '#00ff00',
+    mapTint: 1.2, heightContrast: 6, lakeColor: '#ff0000', hudAccent: '#00ff00',
     plinthColor: '#123456', fogColor: '#abcdef', bgColorA: '#111111', bgColorB: '#222222', bgColorC: '#333333',
     rampStops: [
       { c: '#000000', p: 0 }, { c: '#111111', p: 0.14 }, { c: '#222222', p: 0.28 }, { c: '#333333', p: 0.42 },

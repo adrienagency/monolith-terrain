@@ -1,17 +1,17 @@
-// Fetch the tiles of a tiled Overture layer (water, roads, …) covering a
+// Fetch the tiles of a tiled Overture layer (water, lakes, …) covering a
 // patch, in parallel, and merge into one FeatureCollection. Mirrors
 // loadLayer's cache+never-throw contract in geo-data.js: a missing tile
 // (404, or any fetch failure) is treated as an empty tile, never an error.
 // Features are deduped by `properties.id` because the build scripts
-// (build-water-tiles.mjs, build-road-tiles.mjs) duplicate a feature into
-// every tile its bbox intersects rather than clipping geometry at tile
+// (build-water-tiles.mjs, build-world-lake-tiles.mjs) duplicate a feature
+// into every tile its bbox intersects rather than clipping geometry at tile
 // borders.
 //
 // `makeTileSource(kind)` is the one implementation shared by every tiled
-// layer — `kind` is the `public/data/<kind>/` folder name. Water and roads
-// each get their own cache (a `z/x/y` key from one tile-set says nothing
-// about the other's data at that same key), but otherwise share every byte
-// of fetch/cache/dedupe/manifest logic.
+// layer — `kind` is the `public/data/<kind>/` folder name. Each kind gets its
+// own cache (a `z/x/y` key from one tile-set says nothing about another's
+// data at that same key), but otherwise they share every byte of
+// fetch/cache/dedupe/manifest logic.
 import { tilesForBBox } from './tile-index.js'
 
 function makeTileSource(kind) {
@@ -77,16 +77,16 @@ const _water = makeTileSource('water-tiles')
 export const loadWaterTiles = _water.loadTiles
 export const loadWaterTileManifest = _water.loadManifest
 
-const _road = makeTileSource('road-tiles')
-export const loadRoadTiles = _road.loadTiles
-export const loadRoadTileManifest = _road.loadManifest
+// PLUS de `road-tiles` : le calque Routes a quitté le site, sa source tuilée
+// n'a plus d'appelant. Aucune tuile routière n'a jamais été versionnée ici, il
+// n'y a donc rien à nettoyer côté données.
 
 // World lake layer (task 19): lake-only, global coverage, no region gate —
-// unlike water/road tiles this kind is fetched everywhere on Earth, not just
+// unlike water tiles this kind is fetched everywhere on Earth, not just
 // inside WATER_REGION. Same fetch/cache/dedupe contract, own cache under
-// public/data/lake-tiles/ so a z/x/y key never collides with water's or
-// road's tile at the same coordinates (different tileZoom scheme entirely,
-// see LAKE_LOD_LEVELS in tile-index.js).
+// public/data/lake-tiles/ so a z/x/y key never collides with water's tile at
+// the same coordinates (different tileZoom scheme entirely, see
+// LAKE_LOD_LEVELS in tile-index.js).
 const _lake = makeTileSource('lake-tiles')
 export const loadLakeTiles = _lake.loadTiles
 export const loadLakeTileManifest = _lake.loadManifest
@@ -102,4 +102,4 @@ export function hasTilesForLod(manifest, lod) {
 }
 
 // exposed for tests
-export const _clearCache = () => { _water.clearCache(); _road.clearCache(); _lake.clearCache() }
+export const _clearCache = () => { _water.clearCache(); _lake.clearCache() }

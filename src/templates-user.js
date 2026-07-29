@@ -14,7 +14,7 @@ const VERSION = 1
 // demLat/demLon/demZoom/demLocation/source (location),
 // the loaded GPX track itself (path/visibility/altitude), and per-zoom
 // exaggeration, so a template never moves or reshapes the view. GPX *styling*
-// (width/colour/casing/gradient/glow/…) is a look param like roadColor and
+// (width/colour/casing/gradient/glow/…) is a look param like lakeColor and
 // IS included, so a template restyles whatever track happens to be loaded.
 export const TEMPLATE_KEYS = [
   // colours / ramp / oceans / theme
@@ -33,7 +33,16 @@ export const TEMPLATE_KEYS = [
   // applyUserTemplate filtre sur cette liste, elle est donc simplement ignorée,
   // aucune migration à écrire. Ne pas la confondre avec aerialCoastFade
   // (ci-dessous, photo aérienne) ni avec le masque terre-mer.
-  'roadsEnabled', 'roadsOpacity', 'roadsDetail', 'roadColor', 'waterEnabled', 'waterOpacity', 'waterFill', 'aerialEnabled', 'aerialOpacity', 'aerialCoastFade', 'placesEnabled', 'placesDensity', 'placesSize', 'placesHalo',
+  // PLUS de 'roadsEnabled' / 'roadsOpacity' / 'roadsDetail' / 'roadColor' non
+  // plus : le calque Routes a quitté le site (Adrien : « très lourd, très
+  // mauvais »). Exactement le même cas que 'coastLine' ci-dessus — ces quatre
+  // clés traînent dans les gabarits déjà enregistrés chez les visiteurs et dans
+  // les fichiers .shibumap-template exportés avant aujourd'hui ; le filtre de
+  // applyUserTemplate les laisse tomber, elles ne rallument rien et n'écrasent
+  // rien. Aucune migration à écrire, aucun numéro de version à changer.
+  // Ne pas confondre 'roadColor' avec les réglages GPX (gpxColor & co) : la
+  // TRACE, elle, reste — c'est le RÉSEAU routier qui est parti.
+  'waterEnabled', 'waterOpacity', 'waterFill', 'aerialEnabled', 'aerialOpacity', 'aerialCoastFade', 'placesEnabled', 'placesDensity', 'placesSize', 'placesHalo',
   // animated sea (ocean-waves spectrum) — lakeColor is the shared water tint
   // seaEnabled : la mer se débraye entièrement (Adrien). Elle appartient au
   // look, donc un template peut livrer une carte SANS mer.

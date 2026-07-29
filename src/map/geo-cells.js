@@ -40,7 +40,12 @@ export const CELL_SIZES = {
   lakes: 10,
   rivers: 5,
   coastline: 5,
-  roads: 5,
+  // ⚠️ PLUS DE `roads` : le calque a quitté le site le 2026-07-29 (Adrien :
+  // « très lourd, très mauvais, tu peux le supprimer »), avec ses 12,6 Mo de
+  // monolithe. Le cuiseur itère sur CETTE table — retirer la ligne suffit à le
+  // sortir du découpage, et le chargeur ne demandera jamais une cellule qu'il
+  // ne connaît pas. Les cellules déjà cuites sur un disque de développement
+  // sont sans effet : plus personne ne les lit.
 }
 
 // Garde-fou : au-delà, on ne mitraille pas le CDN — l'appelant retombe sur le

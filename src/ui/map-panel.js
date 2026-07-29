@@ -1,4 +1,4 @@
-﻿import { section, toggle, slider, color, visibleWhen, refreshAll } from './kit.js'
+﻿import { section, toggle, slider, visibleWhen, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
 
 const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z"/><path d="M9 4v14M15 6v14"/></svg>'
@@ -14,10 +14,9 @@ export function buildMapPanel(ctx) {
   const panel = new Panel({ title: 'Carte', icon: ICON, side: 'left', width: 268, tip: 'Les calques cartographiques drapés sur le relief.', cls: 'ce-panel-map' })
 
   const sLayers = panel.addSection(section('Calques'))
-  const roadsToggle = toggle({ label: 'Routes', get: () => params.roadsEnabled, set: (v) => { params.roadsEnabled = v; ctx.rebuildMapLayers(); refreshAll() } })
-  const roadsOpacity = slider({ label: 'Opacité des routes', min: 0, max: 1, step: 0.02, get: () => params.roadsOpacity, set: (v) => { params.roadsOpacity = v; ctx.mapLayers.setOpacity('roads', v) } })
-  const roadsDetail = slider({ label: 'Détail des routes', min: 1, max: 3, step: 1, get: () => params.roadsDetail, set: (v) => { params.roadsDetail = v; ctx.rebuildMapLayers() } })
-  const roadsColour = color({ label: 'Couleur des routes', get: () => params.roadColor, set: (v) => { params.roadColor = v; ctx.rebuildMapLayers() } })
+  // PLUS de « Routes » ici (interrupteur, opacité, détail, couleur) : le calque
+  // a quitté le site (Adrien : « très lourd, très mauvais »). Quatre réglages
+  // qui ne pilotent plus rien valent moins que pas de réglage du tout.
   const waterToggle = toggle({ label: 'Rivières & eau', get: () => params.waterEnabled, set: (v) => { params.waterEnabled = v; ctx.rebuildMapLayers(); refreshAll() } })
   const waterOpacity = slider({ label: 'Opacité de l’eau', min: 0, max: 1, step: 0.02, get: () => params.waterOpacity, set: (v) => { params.waterOpacity = v; ctx.mapLayers.setOpacity('water', v) } })
   const waterFill = toggle({ label: 'Remplir lacs & mers', get: () => params.waterFill, set: (v) => { params.waterFill = v; ctx.rebuildMapLayers() } })
@@ -36,12 +35,10 @@ export function buildMapPanel(ctx) {
   const placesSize = slider({ label: 'Taille des lieux', min: 0.5, max: 2, step: 0.05, get: () => params.placesSize, set: (v) => { params.placesSize = v; ctx.rebuildMapLayers() } })
   const placesHalo = toggle({ label: 'Halo du texte', get: () => params.placesHalo, set: (v) => { params.placesHalo = v; ctx.rebuildMapLayers() } })
   sLayers.body.append(
-    roadsToggle, roadsOpacity, roadsDetail, roadsColour,
     waterToggle, waterOpacity, waterFill,
     aerialToggle, aerialOpacity, aerialCoastFade,
     placesToggle, placesDensity, placesSize, placesHalo
   )
-  for (const row of [roadsOpacity, roadsDetail, roadsColour]) visibleWhen(row, () => params.roadsEnabled)
   for (const row of [waterOpacity, waterFill]) visibleWhen(row, () => params.waterEnabled)
   for (const row of [aerialOpacity, aerialCoastFade]) visibleWhen(row, () => params.aerialEnabled)
   for (const row of [placesDensity, placesSize, placesHalo]) visibleWhen(row, () => params.placesEnabled)
