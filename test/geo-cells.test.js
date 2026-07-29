@@ -205,11 +205,21 @@ test('le manifeste binaire reste minuscule : moins de 3 Ko pour les 3351 cellule
   assert.ok(buildBits(2, keys).length < 3 * 1024, `taille ${buildBits(2, keys).length}`)
 })
 
-test('CELL_SIZES couvre les cinq couches et divise 180 et 360', () => {
-  for (const name of ['places', 'lakes', 'rivers', 'coastline', 'roads']) {
+// ⚠️ QUATRE couches, plus cinq : `roads` a quitté le site le 2026-07-29
+// (Adrien : « très lourd, très mauvais, tu peux le supprimer »). Le cuiseur
+// itère sur CETTE table — si une couche y revenait sans son fichier source, il
+// l'ignorerait avec un avertissement, mais la table doit rester le reflet
+// exact de ce qu'on découpe.
+test('CELL_SIZES couvre les quatre couches et divise 180 et 360', () => {
+  for (const name of ['places', 'lakes', 'rivers', 'coastline']) {
     const s = CELL_SIZES[name]
     assert.ok(s > 0, `${name} sans taille`)
     assert.equal(180 % s, 0, `${name} : ${s} ne divise pas 180`)
     assert.equal(360 % s, 0, `${name} : ${s} ne divise pas 360`)
   }
+})
+
+test('plus aucune couche « roads » dans le découpage', () => {
+  assert.ok(!('roads' in CELL_SIZES), 'CELL_SIZES ne doit plus connaître roads')
+  assert.deepEqual(Object.keys(CELL_SIZES).sort(), ['coastline', 'lakes', 'places', 'rivers'])
 })
