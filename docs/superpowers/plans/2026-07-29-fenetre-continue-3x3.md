@@ -800,3 +800,59 @@ Quatre scripts Node jetables, **hors dépôt**, dans le bac à sable de la sessi
 | `bench-atlas.mjs` | cuisson des champs sur l'emprise 3×3 entière, par taille d'atlas | **1 378 ms pour un atlas 2304² contre 2 767 ms pour neuf dalles à la même densité** |
 
 Et un banc navigateur (puppeteer + Chrome, GPU réel, three r172), dans `…/scratchpad/banc33/` : quatre mécanismes d'écrêtage comparés, 9 maillages contre 1, `copyTextureToTexture` par format et par taille de bande, budget textures. **Machine : RTX 3080 en mode headful, `EXT_disjoint_timer_query_webgl2` disponible.**
+
+
+---
+
+## ADDENDUM — les quatre décisions d'Adrien (2026-07-29)
+
+Réponses aux quatre questions ouvertes du rapport. **Elles sont fermées, ne les
+rediscute pas.**
+
+### 1. Le bord de course : BUTÉE ÉLASTIQUE
+
+« Pour l'instant : butée élastique (on se laisse la possibilité pour plus tard
+d'un rechargement). »
+
+Au bout de la course (±1 largeur de socle, ±21 km à z12), le terrain **résiste
+et revient** — il ne s'arrête pas net et ne recharge pas. La butée dit « il y a
+une limite » sans la faire vivre comme une panne. Le rechargement d'un nouveau
+3×3 reste une porte ouverte, à ne pas fermer par construction : le code doit
+pouvoir recentrer l'emprise plus tard sans être réécrit.
+
+### 2. Le socle plus épais : ACCEPTÉ
+
+`baseY` se cale sur le point bas de l'emprise 3×3 entière, pas de la vue. C'est
+le prix de la stabilité — un socle qui garde son épaisseur pendant qu'on
+défile.
+
+### 3. L'aérien : DU GROSSIER D'ABORD, PUIS L'AFFINAGE — le mur tombe
+
+« Chargement grossier d'abord sur des données plus lointaines, puis
+amélioration alors que la vue est déjà chargée (comme Google Earth). **On
+optimise le chargement de la zone au centre de la vue.** »
+
+⚠️ **Cette réponse invalide la conclusion « l'aérien et le mode continu sont
+exclusifs » du corps du rapport.** Le calcul de 1 296 tuiles / 135 s / 604 Mo
+supposait de charger tout le 3×3 à la résolution du centre — ce n'est plus le
+cas :
+
+- **Un seul niveau grossier couvre les 9 dalles** immédiatement (une tuile de
+  zoom z−2 couvre 16 dalles fines : le 3×3 entier tient en quelques tuiles).
+- **L'affinage est piloté par la distance au centre de la vue**, en continu,
+  après affichage. La périphérie peut rester grossière indéfiniment : elle est
+  petite à l'écran et en partie hors du socle.
+- **Le budget devient une file de priorité**, pas un total : on ne demande
+  jamais plus que ce que la connexion et la mémoire tiennent, et on demande
+  d'abord ce qui est au centre.
+
+À chiffrer au jalon correspondant : combien de tuiles pour le niveau grossier
+du 3×3, et quel est le budget d'affinage par seconde qui ne mange pas le
+budget d'image.
+
+### 4. Les routes : SUPPRIMÉES
+
+« Ce système de routes ne me convient pas, très lourd, très mauvais, tu peux le
+supprimer. » Le calque, ses données (12,6 Mo), son script de cuisson et ses
+réglages partent. La contrainte « hors des Alpes, pas de routes » disparaît
+avec eux.
