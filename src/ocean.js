@@ -1060,7 +1060,7 @@ export class RealWater {
   // OSM coast mask (same texture the terrain uses) — gates the sea so waves stop
   // at the REAL shoreline, not the elevation contour (flat polders below sea
   // level are land, not sea). Stored so a rebuild re-applies it (see _applySea).
-  // coastImage : ImageData du canvas du masque (extraite UNE fois par main.js)
+  // coastImage : champ R8 du masque (le tableau MÊME de sa DataTexture)
   // — nourrit le champ de simulation uField via _bakeField. Le fetch du masque
   // étant async, s'il arrive APRÈS le build le champ est recuit sur place.
   setCoastMask(tex, on, coastImage) {

@@ -987,7 +987,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       this.mapUniforms.uCoastMask.value = this._coastPlaceholder
       this.mapUniforms.uCoastMaskOn.value = 0
     }
-    // coastImage (ImageData du masque, extraite une fois par l'appelant) :
+    // coastImage (champ R8 du masque, le tableau MÊME de sa DataTexture) :
     // corrige le garde-fou topologique sea-mask — un polder sous 0 m déclaré
     // TERRE par le trait de côte ne doit plus être flood-fillé en mer. Le
     // fetch du masque est async : à sa réception on RE-construit le sea mask.

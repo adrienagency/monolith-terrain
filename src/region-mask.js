@@ -310,8 +310,9 @@ export const LAND_MIN_ELEV_M = 0.3
 // zeroing every white pixel whose DEM elevation sits at/below LAND_MIN_ELEV_M
 // (drops the maritime part of the polygons, keeps islands). The 1.5px blur
 // pass runs LAST so boundary and coastline both come out soft, seam-free.
-// coastImage (optionnel) : ImageData du masque côtier (coast-mask.js, même
-// footprint) — la terre basse (polders NL, Camargue) n'est retirée que si le
+// coastImage (optionnel) : champ R8 du masque côtier (coast-mask.js, même
+// footprint) — {data,width,height} À FOULÉE 1, PAS une ImageData : un octet
+// par texel. La terre basse (polders NL, Camargue) n'est retirée que si le
 // trait de côte vectoriel la dit MER ; sans masque, comportement v1 (le DEM
 // seul ne sait pas distinguer un polder de la mer, caveat historique).
 // Returns { texture, canvas } — the canvas backs the texture (do not mutate).

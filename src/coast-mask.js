@@ -148,21 +148,29 @@ function rasterize(ringGroups, dem, size) {
   // UN SEUL OCTET PAR TEXEL, ET UNE SEULE COPIE POUR TOUT LE MONDE.
   //
   // Ce masque ne porte qu'un bit d'information — terre ou mer — plus le flou de
-  // 1,5 px qui lisse l'iso-0,5. Il était rangé en RGBA, et en TROIS exemplaires
-  // du même octet : la CanvasTexture (qui retient son canevas comme image
-  // source), le canevas flouté lui-même, et l'ImageData que main.js en
-  // extrayait pour les consommateurs CPU. À 2048², cela faisait
-  // **3 × 16,78 = 50,3 Mo pour 4,19 Mo d'information** (étude 2026-07-29 §2.1).
+  // 1,5 px qui lisse l'iso-0,5. Il était rangé en RGBA, et en DEUX exemplaires
+  // retenus à vie du même octet : le canevas flouté, que la CanvasTexture garde
+  // comme image source, et l'ImageData que main.js en extrayait pour les
+  // consommateurs CPU. Plus, en VRAM, la texture RGBA elle-même.
   //
-  // Les six lectures GPU du masque sont TOUTES `.r` — terrain.js:506,
+  // Les six lectures GPU du masque sont TOUTES `.r` — terrain.js:507,
   // ocean.js:151, 334, 487, 548 — et les trois lectures CPU aussi
-  // (sea-mask.js landMaskFromImage, ocean.js _bakeField, region-mask.js). Les
+  // (sea-mask.js landMaskFromField, ocean.js _bakeField, region-mask.js). Les
   // canaux V, B et A étaient du vide payé plein tarif.
   //
   // On rend donc **un seul Uint8Array R8**, qui sert À LA FOIS de source à la
-  // DataTexture et de vérité CPU. Bilan sur le bloc central : 50,3 → 4,2 Mo,
-  // soit **−46 Mo**. Et le R8 est en plus **3,4× moins cher à téléverser** que
-  // le RGBA (0,383 ms contre 1,316 ms pour un 1024², mesuré au banc GPU).
+  // DataTexture et de vérité CPU. MESURÉ sur le bloc central (2048²), banc
+  // `f3-memoire.mjs`, La Réunion et Chamonix, tas ramassé de force :
+  //
+  //   poste                        | avant   | après  |
+  //   canevas + ImageData retenus  | 32,0 Mo | 4,2 Mo |  −27,8 Mo  (mesuré)
+  //   texture en VRAM              | 16,8 Mo | 4,2 Mo |  −12,6 Mo  (le format)
+  //   TOTAL                        | 48,8 Mo | 8,4 Mo |  **−40,4 Mo**
+  //
+  // Une dalle VOISINE porte le même masque en 1024² (block-grid.js,
+  // NEIGHBOUR_COAST_SIZE) : 12,2 → 2,1 Mo, soit −10 Mo par voisine.
+  // Et le R8 est en plus **3,4× moins cher à téléverser** que le RGBA
+  // (0,383 ms contre 1,316 ms pour un 1024², mesuré au banc GPU).
   //
   // ⚠️ DataTexture, PAS DataArrayTexture ni une Texture nue : `Texture.js:63`
   // initialise `unpackAlignment = 4`, et une texture R8 dont la largeur n'est
@@ -172,7 +180,7 @@ function rasterize(ringGroups, dem, size) {
   //
   // ⚠️ Les deux canevas meurent ici. Ils ne sont plus retenus par personne : la
   // DataTexture tient le Uint8Array, pas un canevas. C'est ce qui rend le
-  // troisième exemplaire, pas seulement le format.
+  // second exemplaire, pas seulement le format.
   const rgba = bctx.getImageData(0, 0, size, size).data
   const data = new Uint8Array(size * size)
   for (let i = 0; i < data.length; i++) data[i] = rgba[i * 4]
