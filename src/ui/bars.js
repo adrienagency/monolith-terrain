@@ -461,10 +461,13 @@ export function buildQuickCore(ctx) {
     document.body.classList.toggle('ce-explore', !document.body.classList.contains('ce-explore'))
   })
   const race = mk('parcours', I.flag, 'Ma course', 'Parcours', 'Ma carte de course', 'Race Studio — ton parcours GPX en carte de course (points de passage, transports, partage).', () => { document.body.classList.remove('ce-explore'); ctx.openStudio() })
-  // le badge de l'ancien hub, conservé : il dit à qui s'adresse cette porte.
-  // position:absolute → il ne compte pas dans la boîte mesurée par liquidize.
-  const badge = el('b', 'ce-wm-badge', 'Organisateurs')
-  race.append(badge)
+  // ⚠️ PLUS DE CARTOUCHE « Organisateurs » (Adrien, 29/07). Elle segmentait le
+  // public au moment précis où l'accueil doit rester une invitation ouverte :
+  // un visiteur qui n'organise rien lisait « ce n'est pas pour moi » avant même
+  // d'avoir vu la carte. Le sous-titre « Ma carte de course » dit déjà à qui
+  // cette porte s'adresse, sans exclure personne. La règle CSS .ce-wm-badge
+  // reste en place — rien ne s'y accroche plus, mais la géométrie du cartouche
+  // (position: relative) sert encore.
   core.append(
     home,
     mk('studio', I.brush, 'Habiller ma carte', 'Studio', 'Habiller ma carte', 'Studio — palettes, templates et ciels appliqués en direct sur ta carte.', () => { document.body.classList.remove('ce-explore'); ctx.openAtelier() }),

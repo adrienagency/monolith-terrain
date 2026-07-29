@@ -42,7 +42,7 @@ export function buildHub({ bar, bottomBar, onExplore }) {
   head.append(mark, el('h1', 'ce-hubq', TITRE_ACCUEIL))
 
   const foot = el('div', 'ce-hubfoot')
-  const drop = el('div', 'ce-hubdrop', 'ou dépose un fichier GPX n’importe où — pas de fichier ? La démo t’attend dans Parcours.')
+  const drop = el('div', 'ce-hubdrop', 'ou dépose un fichier GPX n’importe où')
   const esc = el('button', 'ce-hubesc', 'Échap — explorer librement')
   esc.type = 'button'
   foot.append(drop, esc)
