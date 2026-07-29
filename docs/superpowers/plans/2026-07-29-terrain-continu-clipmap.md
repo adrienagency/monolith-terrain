@@ -42,8 +42,24 @@ L'idée est belle et simple. On empile des grilles carrées **de taille identiqu
 
 Les deux propriétés qui comptent ici :
 
-- **La mise à jour torique.** Chaque niveau est stocké dans une texture d'altitude qu'on adresse *modulo* sa taille. Avancer d'un pas ne recopie pas la texture : on écrit **une seule bande neuve** à l'endroit que la bande la plus ancienne occupait, et on décale l'origine. Bouger de 1 sommet coûte 1 colonne, pas 255×255. C'est *le* mécanisme qui rend le déplacement continu gratuit — et c'est exactement ce qu'Adrien décrit quand il dit « du terrain qui est à gauche va se déplacer pour entrer dans le bloc ».
-- **Le morphing par sommet.** Aux frontières entre deux anneaux, l'altitude du sommet fin est mélangée vers l'altitude du sommet grossier : `α = clamp((|p − v| − offset)/w, 0, 1)`, `z' = (1−α)·z_fin + α·z_grossier`. Le passage d'un niveau à l'autre est donc **continu**, pas un saut. ⚠️ Hoppe insiste sur un point que le dépôt a déjà relevé : **les normales doivent être mélangées avec le même α**, sinon le claquement revient par l'éclairage.
+- **La mise à jour torique.** Chaque niveau est stocké dans une texture d'altitude qu'on adresse *modulo* sa taille. Le papier est explicite : *« with toroidal access, we do not need to copy the old data when shifting a level. Instead, we simply fill the newly exposed "L-shaped" region. »* Bouger d'un pas coûte une bande, pas 255×255. C'est *le* mécanisme qui rend le déplacement continu gratuit — et c'est exactement ce qu'Adrien décrit quand il dit « du terrain qui est à gauche va se déplacer pour entrer dans le bloc ».
+- **Le morphing par sommet.** Aux frontières entre deux anneaux, l'altitude du sommet fin est mélangée vers l'altitude du sommet grossier : `α = clamp((|p − v| − offset)/w, 0, 1)`, `z' = (1−α)·z_fin + α·z_grossier`, avec une largeur de transition `w = n/10` déterminée expérimentalement. Le passage d'un niveau à l'autre est donc **continu**, pas un saut. ⚠️ Hoppe insiste sur un point que le dépôt a déjà relevé : **les normales doivent être mélangées avec le même α**, sinon le claquement revient par l'éclairage.
+- **Le budget de mise à jour, et sa conséquence heureuse.** C'est le détail le plus utile pour ShibuMap et il est souvent oublié. Hoppe met à jour **du grossier vers le fin** et s'arrête net quand le nombre d'échantillons mis à jour dépasse `n²`. Les niveaux fins non servis voient leur zone active rognée jusqu'à devenir vide — le terrain proche perd son détail fin quand on va vite. Le papier en tire cette phrase, qui répond par avance à l'inquiétude du §3.2 de ce rapport : *« An interesting consequence is that rendering load actually decreases as the viewer moves faster. »* **Un clipmap ne bégaie pas quand on drague vite : il devient flou, puis se rattrape à l'arrêt.** C'est exactement le comportement de Google Earth qu'Adrien décrit.
+
+**Les chiffres du papier de 2004** : L = 11 niveaux de n = 255, **120 images/s et 59 millions de triangles/s** sur un Pentium 4 à 3 GHz avec une Radeon 9800XT, triangles de 3 pixels à l'écran. Le jeu « États-Unis entiers », 216 000 × 93 600 échantillons à 30 m, tient en **355 Mo compressés** (contre 40,4 Go bruts).
+
+**Et le chiffre qui décide de tout le §3.2 de ce rapport.** La Table 1 du papier décompose les 21 à 26 ms que coûte la mise à jour d'un niveau 255² complet, tout en CPU. Un poste écrase les autres : **le calcul de la carte de normales, 11 ms — plus de la moitié du budget.** Puis vint la version GPU (Asirvatham & Hoppe, *GPU Gems 2* ch. 2, 2005), qui déplace ce calcul dans un *pixel shader* écrivant vers la texture elle-même. Table 2-2 :
+
+| étape de la mise à jour d'un niveau 255² | CPU (2004) | **GPU (2005)** |
+|---|---:|---:|
+| ré-échantillonnage | 3 ms | **1,0 ms** |
+| synthèse | 3 ms | **0 ms** |
+| **carte de normales** | **11 ms** | **0,6 ms** |
+| décompression | 8 ms | 8 ms (reste CPU) |
+
+> **Facteur 18 sur le poste le plus lourd, simplement en le calculant dans un fragment shader vers une cible de rendu.** C'est la preuve chiffrée que la « sortie 1 » du §3.2 — passer l'analyse de relief sur GPU — n'est pas un pari : c'est le chemin que la littérature a pris il y a vingt ans, pour exactement la même raison.
+
+Débits de la version GPU, fenêtre 1024×768 sur une GeForce 6800 GT : **130 images/s, 60 M triangles/s**, avec le *vertex texture fetch* comme goulot. ⚠️ Point de compatibilité vérifié : WebGL1 ne garantissait aucune unité de texture au vertex shader ; **WebGL2 en garantit 16**. Le clipmap repose entièrement là-dessus, et ShibuMap est en WebGL2.
 
 **Quadtree de tuiles / chunked LOD** (Ulrich, 2002 ; CDLOD, Strugar, 2010 ; c'est la famille de Cesium et de Mapbox).
 
@@ -57,18 +73,76 @@ Le quadtree résout un problème que ShibuMap n'a pas : *afficher un terrain qui
 
 Le clipmap, lui, résout exactement le problème d'Adrien : **une fenêtre de dimensions fixes, centrée sur un point qui bouge, remplie de niveaux de détail concentriques.** Et la mise à jour torique est *la* réponse au « il n'y a plus de temps de chargement quand je drague ».
 
+**La critique que CDLOD adresse au clipmap, et pourquoi elle ne concerne pas ShibuMap.** Strugar (2010) la formule ainsi : le clipmap choisit son niveau de détail sur la distance **au sol en deux dimensions**, en ignorant l'altitude de la caméra — donc, quand on est très haut, le terrain juste sous soi reste inutilement fin, et inversement. CDLOD raisonne en distance **3D réelle**. La critique est juste, et elle est décisive pour un simulateur de vol. **Elle ne l'est pas pour ShibuMap** : la caméra du socle reste à une distance à peu près constante (`controls.maxDistance × 0.97`), et le rapport entre le pixel le plus proche et le plus lointain est de l'ordre de 2. Le défaut que CDLOD corrige ne se manifeste pas ici.
+
+⚠️ **Le successeur académique** (Benyoub & Dupuy, *Concurrent Binary Trees*, HPG 2024, arXiv 2407.02215 — moins de 0,2 ms sur console) **repose sur des compute shaders. WebGL2 n'en a pas** : dans three.js ils n'existent que par `WebGPURenderer`. Hors de portée de r172 sans migrer vers WebGPU. À noter et à oublier.
+
 Le point d'entente entre les deux familles : **la grille régulière gagne dans les deux cas.** Mapbox utilise 128×128 (`GRID_DIM`), MapLibre 128 (`meshSize`), NASA WorldWind 32×32, et le dépôt a mesuré (doc du 2026-07-27 §3.3) que MARTINI — la triangulation adaptative — ne rend que **1,1× à 1,8× de triangles à erreur moyenne égale**, tout en interdisant le partage d'un VBO unique. **Ne pas partir sur un TIN.**
 
-### 1.3 Ce qui existe en JavaScript, et ce qu'on peut en réutiliser
+### 1.3 Ce qui existe en JavaScript — inventaire vérifié, et une bonne surprise
 
-Ce que je peux affirmer depuis le dépôt :
+**Réutiliser vaut mieux que réécrire, et il y a plus à réutiliser que je ne le croyais.**
 
-- **CesiumJS** est le seul moteur JS complet de terrain multirésolution en production. Mais c'est **un moteur de globe entier** : il apporte sa caméra, sa scène, son système de matériaux. On ne l'insère pas dans une scène three.js — on remplace three.js par lui. Pour ShibuMap, dont *tout* le rendu (shaders de relief, mer volumétrique, nuages, socle, matériaux PBR) est écrit contre three.js, c'est un remplacement du moteur, pas une bibliothèque.
-- **MARTINI** est utilisable directement, mais §1.2 dit de ne pas y aller.
-- **three-geo** charge un patch de terrain texturé depuis Mapbox : c'est le modèle « un bloc figé », donc exactement ce que ShibuMap fait déjà, en moins bien intégré.
-- **Il n'existe pas de module clipmap three.js maintenu de référence.** Le clipmap est ~400 lignes de logique (indexation torique + assemblage des anneaux) ; le coût réel n'est pas là, il est dans tout ce que §3 recense.
+#### La bonne surprise : `3DTilesRendererJS`
 
-> ⚠️ Une recherche web parallèle sur l'état de l'art 2026 (versions, licences, dates de dernier commit, formats de tuiles servies, coût des tuiles quantized-mesh) a été lancée pendant cette étude ; **ses résultats ne sont pas intégrés ici**. Les affirmations de cette section reposent sur les sources déjà vérifiées et citées dans `docs/superpowers/plans/2026-07-27-bloc-central-optimisation.md` §3, qui a mené cette campagne code en main (Mapbox `src/terrain/terrain.ts`, MapLibre `src/render/terrain.ts:151`, WorldWind `Tessellator.js:85-119`, Cesium `QuadtreePrimitive.js`, Hoppe *GPU Gems 2* ch. 2, Strugar 2010). **Rien de neuf n'a été affirmé sans cette base.**
+| | |
+|---|---|
+| dépôt | `NASA-AMMOS/3DTilesRendererJS` — 2 405 étoiles |
+| dernier envoi | **2026-07-28 (hier)** |
+| licence | **Apache-2.0** |
+| dépendance de pair | **`three >= 0.167` — donc r172 est compatible** |
+| paquet npm | `3d-tiles-renderer` 0.5.0, avec **exports par sous-chemins** (`/core`, `/three`, `/three/plugins`) donc élagable |
+
+C'est du **three.js vanilla natif** — le mode d'emploi principal, pas un greffon React :
+
+```js
+const tilesRenderer = new TilesRenderer('./tileset.json')
+tilesRenderer.setCamera(camera)
+scene.add(tilesRenderer.group)   // …puis tilesRenderer.update() dans la boucle
+```
+
+Et il embarque un **`QuantizedMeshPlugin`** natif (lit le `layer.json`, décode les tuiles quantized-mesh, gère `skirtLength`, `smoothSkirtNormals`, `generateNormals`), plus une collection de greffons directement pertinents : `TileCompressionPlugin`, `TileFlatteningPlugin`, `UnloadTilesPlugin`, `LoadRegionPlugin`, `TilesFadePlugin`, `TextureOverlayPlugin`.
+
+**C'est la seule bibliothèque de tout l'inventaire qui combine three.js vanilla + LOD hiérarchique + streaming réseau + maintenance quotidienne.** Je m'étais avancé en écrivant qu'il n'existait rien de réutilisable : c'était faux, et c'est corrigé ici.
+⚠️ Sa contrepartie : c'est un **quadtree de tuiles**, pas un clipmap. Il donne le streaming et le LOD, pas le défilement torique. Et il lui faut une **source de tuiles quantized-mesh** — donc soit Cesium ion (payant, voir plus bas), soit une cuisson maison.
+
+#### Les briques algorithmiques pures
+
+| module | licence | poids | utilisable en vanilla ? |
+|---|---|---:|---|
+| `@mapbox/martini` | ISC | **17,9 Ko**, zéro dépendance | oui — mais §1.2 dit de ne pas y aller |
+| `delatin` (port JS de `hmm`) | ISC | 24,5 Ko | oui — alternative à MARTINI, pas successeur ; les deux ont été modernisés **le même jour** (2025-07-15) |
+| `@loaders.gl/terrain` | MIT | 402 Ko | oui, « framework-independent ». **Décode terrarium ET quantized-mesh.** |
+
+#### Ce qu'il faut écarter, et pourquoi
+
+- **CesiumJS** (Apache-2.0, 4,81 Mo minifié / 1,30 Mo gzippé) : c'est **un moteur de globe entier**. `new Cesium.Viewer(...)` crée son propre canvas et son propre contexte WebGL. Le seul patron d'intégration que Cesium documente lui-même est **deux canvas superposés à caméras synchronisées**. Pour ShibuMap, dont tout le rendu est écrit contre three.js, ce n'est pas une bibliothèque : c'est un remplacement de moteur.
+- **three-geo** (1 394 étoiles) : ⚠️ **three.js est bundlé en r138 dans son `dist`, sans dépendance de pair** → risque de double instance de `THREE` avec r172. Et surtout : **aucun LOD, aucun streaming** — la résolution est figée au chargement par un paramètre `zoom`. C'est le modèle « un bloc figé », donc exactement ce que ShibuMap fait déjà.
+- **THREE.Terrain** (884 étoiles, relancé le 2026-05-26, MIT) : c'est un **générateur procédural** (bruit, diamond-square, érosion). Pas de LOD, pas de streaming. Et son port v3 annonce r175+.
+- **three-landscape** : dépendances de pair `@react-three/fiber` et `react` → inutilisable en vanilla sans réécriture. À lire pour ses shaders de splatting, rien de plus.
+
+#### Le clipmap three.js : il n'existe pas. C'est confirmé.
+
+| dépôt | étoiles | dernier envoi | licence | nature |
+|---|---:|---|---|---|
+| `felixpalmer/lod-terrain` | 472 | **2018** | MIT | la référence historique, **abandonnée depuis 8 ans** |
+| `tschie/geo-clipmap` | 22 | 2021 | MIT | **une démo**, pas une bibliothèque (three r134, Vite 2) |
+| `J-Zeitler/geometry-clipmaps` | 23 | 2023 | MIT | expérimental, en réalité du CDLOD |
+| `@certe/atmos-clipmap-terrain` | — | 2026 | **GPL-3.0** | ⚠️ dépend d'un moteur maison, **pas three.js**. À écarter. |
+
+**Aucun paquet npm de clipmap pour three.js.** Si on va sur le scénario B, c'est du code à écrire. L'ordre de grandeur communément cité est « moins de 1 000 lignes, mais la génération du maillage est un calvaire à faire correctement » — snapper la position de chaque anneau à un multiple de sa résolution sous peine de scintillement, et snapper le maillage de couture à la résolution du niveau **extérieur**.
+
+#### Et une nouvelle qui change le coût du scénario B
+
+**three.js r172 fournit déjà la primitive de mise à jour torique :**
+
+```js
+renderer.copyTextureToTexture( src, dst, srcRegion, dstPosition, srcLevel, dstLevel )
+```
+
+Elle se résout en `texSubImage2D` avec le paramétrage `UNPACK_ROW_LENGTH` / `UNPACK_SKIP_PIXELS` / `UNPACK_SKIP_ROWS` pour extraire la sous-région source. **La bande en L d'un clipmap se met à jour en 2 à 4 appels par niveau et par image, sans jamais toucher au WebGL brut.** Exemple officiel : `webgl_materials_texture_partialupdate`.
+
+C'est important : le morceau que je pensais le plus périlleux du scénario B — l'indexation torique de textures — est **déjà outillé** dans la version de three.js qu'utilise ShibuMap.
 
 ### 1.4 Le fait le plus utile de tout l'état de l'art
 
@@ -83,7 +157,7 @@ Budgets relevés dans la littérature : geometry clipmaps de Hoppe à **≈ 460 
 
 **ShibuMap aligne 1,18 million de triangles pour un carré de 21 km de côté.**
 
-C'est le chiffre qui recadre tout le débat, et il va dans le sens d'Adrien : **un clipmap correctement dimensionné coûterait MOINS cher en géométrie que le bloc actuel, pas plus.** Un clipmap de 5 niveaux à 255² aligne ~325 000 triangles. Le bloc actuel en met 3,6 fois plus pour couvrir 32 fois moins de terrain.
+C'est le chiffre qui recadre tout le débat, et il va dans le sens d'Adrien : **un clipmap correctement dimensionné coûterait MOINS cher en géométrie que le bloc actuel, pas plus.** Le clipmap de Hoppe aligne **≈ 460 000 triangles par image pour les États-Unis entiers à 30 m** ; ShibuMap en met **2,6 fois plus** pour un carré de 21 km.
 
 ---
 
@@ -383,7 +457,10 @@ L'analyse de relief coûte **164 ns par pixel de MNT**, mesuré. Elle gelait le 
 
 **Trois sorties, et il faut en choisir une avant d'écrire la première ligne :**
 
-1. **Le passer sur GPU.** L'analyse est une pile de flous par boîte de rayons doublants — c'est structurellement une **pyramide**, donc ça se transpose sur une chaîne de mipmaps et des passes de fragment vers des cibles de rendu. ⚠️ **Ce n'est pas un portage, c'est une réécriture** : les flous CPU utilisent des sommes glissantes (O(1) par pixel quel que soit le rayon), technique qui n'existe pas telle quelle en fragment shader. Et le test `test/terrain-jobs.test.js` **verrouille l'égalité octet pour octet** de ces champs sur quatre familles de relief — une version GPU ne passera pas ce test, il faudra le remplacer par un test de tolérance. **C'est la voie propre, et c'est la plus chère.**
+1. **Le passer sur GPU. C'est la voie propre, et la littérature l'a déjà chiffrée.** L'analyse est une pile de flous par boîte de rayons doublants — c'est structurellement une **pyramide**, donc ça se transpose sur une chaîne de mipmaps et des passes de fragment vers des cibles de rendu.
+   **Le précédent exact** : Hoppe calculait sa carte de normales en CPU pour **11 ms** par niveau 255² (Table 1, 2004) ; la version GPU la calcule dans un *pixel shader* écrivant vers la texture pour **0,6 ms** (Table 2-2, *GPU Gems 2* 2005). **Facteur 18**, sur le poste qui pesait plus de la moitié du budget de mise à jour. C'est le même geste, sur le même genre de champ dérivé.
+   ⚠️ **Mais ce n'est pas un portage, c'est une réécriture** : les flous CPU utilisent des sommes glissantes (O(1) par pixel quel que soit le rayon), technique qui n'existe pas telle quelle en fragment shader — il faut passer par la pyramide de mipmaps. Et le test `test/terrain-jobs.test.js` **verrouille l'égalité octet pour octet** de ces champs sur quatre familles de relief : une version GPU ne le passera pas, il faudra le remplacer par un test de tolérance. **C'est la plus chère des trois sorties, et c'est la seule qui tienne à long terme.**
+   ⚠️ Un détail de terrain qui vaut de l'or et qu'on n'invente pas : **échantillonner la carte de normales dans le *fragment* shader, pas dans le vertex shader.** Géométrie strictement identique, détail visuel bien supérieur.
 2. **Baisser la résolution de l'analyse pendant le mouvement**, la remonter au repos. Le mécanisme existe déjà : `analyseMax` vaut 1024 au palier 2 et 768 au palier 3 (`palier-machine.js`), et `resampleField` sait rendre la taille exacte. **C'est la voie la moins chère et elle est déjà à moitié construite.**
 3. **Découper le monde en dalles d'analyse pré-calculées à marge**, mises en cache. On revient à un quadtree — donc à ce que fait Cesium, avec sa complexité.
 
@@ -433,6 +510,36 @@ Ce que Netlify sert aujourd'hui à chaque visite « fraîche » :
 
 ⚠️ **La réserve honnête** : un terrain continu fait *parcourir plus de monde* à l'utilisateur, donc plus de tuiles au total sur une longue session. Le gain net dépend du comportement, et **je ne peux pas le chiffrer sans mesurer une vraie session**. Ce que je peux affirmer : **le poste le plus gros et le plus certain (les 30 Mo de JSON monolithiques) disparaît, et le poste qui grossit (le MNT) n'est pas facturé.**
 
+#### Ce que pèse vraiment une tuile d'altitude — mesuré aujourd'hui sur le bucket AWS
+
+Le repli d'altitude de ShibuMap (`elevation-tiles-prod`) a été sondé directement pendant cette étude :
+
+| ce qui a été mesuré | valeur |
+|---|---|
+| tuile terrarium moyenne à z12 (10 tuiles consécutives) | **92 260 octets** (min 61 459, max 136 037) |
+| tuile d'océan pur à z8 | 135 885 octets — **plus lourde qu'une tuile alpine** |
+| une vue plein écran 1920×1080, **un seul niveau**, tuiles 256 px | 40 à 54 tuiles → **3,7 à 5,0 Mo** |
+| **la fraction sub-métrique (canal bleu) d'une tuile z12** | **65 762 o, soit 58 % du fichier** |
+| la même donnée ré-encodée en PNG 16 bits (précision 1 m) | **26 369 o — 4,3 fois plus léger** |
+
+> **Plus de la moitié d'une tuile terrarium est du bruit sub-métrique que PNG ne peut pas comprimer, et qui ne sert strictement à rien sur une carte stylisée.**
+
+Trois conséquences pour ShibuMap :
+
+1. **Le socle préchargé garde un avantage réel** qu'il ne faut pas balayer : un aller-retour, une décompression, zéro logique de cache. Un socle 1024² en PNG 16 bits pèserait de l'ordre de **300 à 400 Ko** — soit **dix fois moins qu'une seule vue plein écran en tuiles terrarium**. Le problème n'a jamais été le poids du bloc : c'est le **rechargement intégral à chaque zoom**.
+2. **Si un jour ShibuMap cuit son propre relief**, le PNG 16 bits divise la facture par 4,3. Ordre de grandeur vérifié pour la France métropolitaine : **z6→z12 ≈ 38 000 tuiles, ~1 Go en PNG 16 bits** (hébergeable) ; z13 ferait exploser à ~4 Go.
+3. ⚠️ **Le bucket AWS est vivant mais figé.** Sondé aujourd'hui : HTTP 200 sur `terrarium/`, `normal/`, `skadi/`, `v2/…`, avec `Access-Control-Allow-Origin: *` — utilisable sans clé ni proxy. **Mais `Last-Modified` remonte à 2017 et il n'y a aucun engagement de service.** ShibuMap ne s'en sert qu'en repli (la source primaire est Mapterhorn), donc l'exposition est limitée — mais c'est à savoir.
+   Bonus repéré au passage : le préfixe **`/normal/`** sert des **normales pré-calculées** (PNG RGBA 256², ~64 Ko/tuile). C'est la technique n° 4 du streaming — *ne rien recalculer, lire ce qui a été cuit* — disponible gratuitement. Le format quantized-mesh fait pareil (normales oct-encodées en extension, plus un masque d'eau). **Si un jour ShibuMap cuit ses propres tuiles, y cuire aussi ses champs dérivés est la sortie la moins chère du §3.2.**
+
+#### Et si on passait par Cesium ion — le chiffre qui ferme la porte
+
+| palier | prix | streaming inclus |
+|---|---|---|
+| Community | gratuit | 15 Go/mois — ⚠️ **« personal and non-commercial use »** |
+| Commercial | **149 $/mois** | 150 Go/mois |
+
+À ~4 Mo la vue plein écran, 15 Go/mois font **~3 750 vues**. Et le palier gratuit est explicitement non commercial — **incompatible avec le back-office payant en préparation** (`docs/…/2026-07-26-comptes-paiements-dons.md`). Si le scénario B passe par `3DTilesRendererJS`, **il faut cuire ses propres tuiles**, pas les acheter.
+
 ### 3.4 Les machines faibles — un clipmap coûte MOINS
 
 C'est net, et dans le bon sens :
@@ -477,7 +584,9 @@ Autoriser le damier hors mode GPX, et **recentrer la grille** quand on drague au
 
 Un vrai clipmap : anneaux emboîtés, mise à jour torique du MNT et des masques, morphing par sommet avec normales mélangées, analyse de relief sur GPU.
 
-**Effort : lourd.** Ce n'est pas la géométrie qui coûte (~400 lignes) : ce sont les cinq débranchements de A1 (obligatoires), la réécriture GPU de l'analyse (§3.2, avec le test octet-pour-octet à remplacer), le nouveau contrat de `loadDem` en écriture partielle, le clip GPU des calques, la version du format de partage, et **la remise à plat de la règle du socle.**
+**Effort : lourd.** Ce n'est pas la géométrie qui coûte (~1 000 lignes, et three.js r172 fournit déjà `copyTextureToTexture` pour la mise à jour torique — §1.3) : ce sont les cinq débranchements de A1 (obligatoires), la réécriture GPU de l'analyse (§3.2, avec le test octet-pour-octet à remplacer), le nouveau contrat de `loadDem` en écriture partielle, le clip GPU des calques, la version du format de partage, et **la remise à plat de la règle du socle.**
+
+**Et B se décline en deux.** B1 : un **clipmap maison** — c'est le seul chemin qui donne littéralement le geste qu'Adrien décrit, et il n'existe aucun paquet npm (§1.3). B2 : greffer **`3DTilesRendererJS`** (Apache-2.0, three ≥ 0.167, maintenu quotidiennement) et accepter un **quadtree de tuiles** plutôt qu'un clipmap — on gagne le streaming et le LOD écrits par d'autres, on perd le défilement torique, et il faut cuire ses propres tuiles quantized-mesh (Cesium ion étant non commercial en gratuit, §3.3). **B2 mérite d'être évalué avant B1**, ne serait-ce que pour savoir ce qu'on refuse.
 
 **Le drapeau est indispensable** — le dépôt a déjà `src/flags.js` — et il doit rester en place longtemps, parce que les deux moteurs devront **coexister à l'écran** pour être comparés.
 
@@ -528,6 +637,8 @@ Sur une copie jetable, remplacer les quatre statistiques globales par des consta
 
 Une page three.js **nue**, sans ShibuMap : un clipmap de 4 anneaux à 255², alimenté par `loadDem` importé tel quel du dépôt, avec mise à jour torique et morphing. **Pas de socle, pas de mer, pas de masques, pas de calques.** Juste le terrain qui défile.
 
+Deux points de départ pour ne pas partir de zéro : `tschie/geo-clipmap` (MIT, three r134 — une démo à relire, pas une bibliothèque) et `felixpalmer/lod-terrain` (MIT, 472 étoiles, abandonné en 2018). Et la primitive de mise à jour torique est **déjà dans r172** : `renderer.copyTextureToTexture(src, dst, srcRegion, dstPosition)` (§1.3).
+
 **Les trois chiffres qui tranchent** :
 
 | mesure | seuil de décision |
@@ -545,8 +656,8 @@ Une page three.js **nue**, sans ShibuMap : un clipmap de 4 anneaux à 255², ali
 1. **Rien n'a été mesuré dans un navigateur pendant cette étude.** Les temps de §2.4 viennent de Node 24 (même V8 que Chrome) sur les modules réels du dépôt. Les chiffres de VRAM, d'images/s et de tas JS sont **repris** des rapports du 2026-07-27.
 2. **Les MNT des bancs sont synthétiques.** Le coût des flous par sommes glissantes ne dépend pas du contenu (c'est du O(1) par pixel), donc les temps sont valides ; mais le **biais de bord** de §2.4 et les **verdicts du masque de mer** de §3.3 ont été obtenus sur des reliefs fabriqués. Ils démontrent que le mécanisme existe et donnent son ordre de grandeur — **pas la valeur exacte qu'aurait Chamonix.**
 3. **Le gain net de bande passante n'est pas chiffré** — seulement ses deux composantes (§3.3). Il faudrait enregistrer une vraie session.
-4. **La recherche web sur l'état de l'art 2026** (versions, licences, dates des dépôts JS, coût des tuiles quantized-mesh) n'est pas intégrée. §1 repose sur les sources déjà vérifiées du rapport du 2026-07-27 §3.
-5. **Le coût d'une réécriture GPU de `analyzeDem` n'est pas estimé.** Je sais qu'elle est structurellement possible (pyramide de flous doublants → mipmaps) et qu'elle casse le test octet-pour-octet. Je ne sais pas combien de jours elle coûte.
+4. **Rien de l'état de l'art de §1 n'a été exécuté.** Les chiffres de Hoppe, Strugar et Cesium sont **cités de leurs papiers et de leur code source**, pas reproduits. Les poids de tuiles AWS, les en-têtes CORS et les tarifs Cesium ion de §3.3 ont, eux, été **sondés en direct le 2026-07-29**. Restent **non vérifiés** : les tarifs MapTiler, les conditions de licence détaillées de Mapbox Terrain-DEM v1, le statut exact de `HeightmapTessellator` dans Cesium 1.143, et la compatibilité réelle de `3DTilesRendererJS` avec r172 **en pratique** — sa dépendance de pair dit `>= 0.167`, ce qui est une promesse, pas un essai.
+5. **Le coût d'une réécriture GPU de `analyzeDem` n'est pas estimé.** Je sais qu'elle est structurellement possible (pyramide de flous doublants → mipmaps), que le précédent de Hoppe donne un facteur 18 sur un champ comparable, et qu'elle casse le test octet-pour-octet. Je ne sais pas combien de jours elle coûte.
 6. **Je n'ai pas vérifié que l'ajout de champs à `loc` n'invalide pas les liens existants.** La lecture du code de validation (`share-link.js:123-158`) dit que oui ; ce n'est pas un test.
 7. **`export-recorder.js` et l'usine à vidéos n'ont été lus que superficiellement.** Je sais qu'un défilement doit être figé pendant un rendu ; je n'ai pas vérifié comment le figer.
 
