@@ -303,3 +303,128 @@ test('une dalle voisine n’entre PAS dans la passe d’ombre (les deux drapeaux
   // et le corollaire : aucune ligne ne doit REMETTRE l'un des deux à true
   assert.ok(!/(terrain\.mesh|walls)\.(cast|receive)Shadow\s*=\s*true/.test(src), 'une voisine ne rallume ni cast ni receive')
 })
+
+// ---------------------------------------------------------------------------
+// geste 5 · LA MÉMOIRE DES BLOCS D'ALTITUDE (src/dem-memo.js)
+// ---------------------------------------------------------------------------
+//
+// Ajoutée pour le retour de zoom : revenir à un zoom déjà vu recalculait
+// 609 ms à l'identique (145 ms de fil principal figé pour refaire le MNT,
+// 464 ms de travailleur pour refaire l'analyse de relief — mesuré à La Réunion,
+// Chrome piloté, séquence z13→z14→z13). Elle S'INSCRIT DONC DANS LA
+// COMPTABILITÉ CI-DESSUS, parce qu'elle RETIENT :
+//
+//   MNT Float32 1536²                                          9,4 Mo / entrée
+//   analyse RGBA, taille selon le palier machine
+//     palier haut  analysisMax 0 → 1536²                       9,4 Mo / entrée
+//     palier moyen analysisMax 1024                            4,2 Mo / entrée
+//     iMac 2015    analysisMax 768                             2,4 Mo / entrée
+//
+// À DEUX entrées : 23,6 Mo sur un iMac 2015, 37,7 Mo au pire (machine haute).
+// Contre le pic du damier plein mesuré en tête de fichier — 1 762 Mo — c'est
+// 2,1 % au pire. C'est CE RAPPORT qui rend la mémoire défendable, et c'est
+// pour ça que la borne est un chiffre fixe et non une heuristique : l'étude
+// « fenêtre continue 3×3 » raisonne sur les mêmes budgets et doit pouvoir
+// compter dessus.
+//
+// ⚠️ ET LE DAMIER N'ENTRE PAS DEDANS. block-grid.js tient déjà sa propre
+// mémoire de MNT voisins, bornée à 32 Mo : l'y faire entrer compterait ses
+// dalles DEUX FOIS et chasserait le bloc central à chaque extension. C'est
+// pourquoi la mémorisation est sur DEMANDE (`loadDem({ memo: true })`) et que
+// l'analyse d'un MNT non mémorisé n'est tout simplement pas gardée — les deux
+// derniers tests de cette section le verrouillent.
+
+import {
+  DEM_MEMO_MAX,
+  demMemoCle,
+  demMemoLire,
+  demMemoEcrire,
+  demMemoOctets,
+  demMemoVider,
+  analyseMemoLire,
+  analyseMemoEcrire,
+} from '../src/dem-memo.js'
+
+const CLE = { source: 'mapterhorn', zoom: 13, maxZoom: 16, ox: 4270, oy: 4680, tilesAcross: 3, tilePx: 512, lat: -21.115, lon: 55.536, bathy: true }
+const faussetMnt = (size, graine = 1) => {
+  const data = new Float32Array(size * size)
+  for (let i = 0; i < data.length; i++) data[i] = ((i * 37 * graine) % 911) * 0.7 - 120
+  return { data, size, metersPerPixel: 17.8 }
+}
+
+test('mémoire des blocs : la clé rend la même chaîne pour la même zone, et change dès qu’un champ bouge', () => {
+  const base = demMemoCle(CLE)
+  assert.equal(demMemoCle({ ...CLE }), base)
+  for (const champ of ['source', 'zoom', 'maxZoom', 'ox', 'oy', 'tilesAcross', 'tilePx', 'lat', 'lon']) {
+    const modifie = { ...CLE, [champ]: typeof CLE[champ] === 'number' ? CLE[champ] + 1 : 'aws' }
+    assert.notEqual(demMemoCle(modifie), base, `${champ} doit faire partie de la clé`)
+  }
+  assert.notEqual(demMemoCle({ ...CLE, bathy: false }), base, 'bathy doit faire partie de la clé')
+})
+
+test(`mémoire des blocs : bornée à ${DEM_MEMO_MAX} entrées, MNT ET analyse évincés ensemble`, () => {
+  demMemoVider()
+  const taille = 96
+  const gardes = []
+  for (let k = 0; k < DEM_MEMO_MAX; k++) {
+    const dem = faussetMnt(taille, k + 1)
+    demMemoEcrire(demMemoCle({ ...CLE, zoom: 10 + k }), dem)
+    analyseMemoEcrire(dem, 1024, new Uint8ClampedArray(1024 * 1024 * 4), 1024)
+    gardes.push(dem)
+  }
+  const attendu = DEM_MEMO_MAX * (taille * taille * 4 + 1024 * 1024 * 4)
+  assert.equal(demMemoOctets(), attendu, 'la comptabilité voit le MNT ET son analyse')
+
+  // une entrée de plus : la plus ancienne part — MNT et analyse d'un bloc
+  const deTrop = faussetMnt(taille, 99)
+  demMemoEcrire(demMemoCle({ ...CLE, zoom: 10 + DEM_MEMO_MAX }), deTrop)
+  assert.equal(demMemoLire(demMemoCle({ ...CLE, zoom: 10 })), null, 'le plus ancien MNT est parti')
+  assert.equal(analyseMemoLire(gardes[0], 1024), null, 'et son analyse avec lui — pas d’entrée fantôme')
+  assert.ok(demMemoOctets() <= attendu, 'la facture ne peut pas enfler au-delà de la borne')
+  demMemoVider()
+})
+
+// ⚠️ LE PALIER MACHINE CHANGE `analysisMax` (palier-machine.js sert 0, 1024 ou
+// 768). Une analyse cuite à 768² servie à un palier qui en veut 1536² poserait
+// un champ quatre fois trop grossier sur le relief, en silence.
+test('mémoire des blocs : l’analyse est rangée par plafond de taille, pas en vrac', () => {
+  demMemoVider()
+  const dem = faussetMnt(64)
+  demMemoEcrire(demMemoCle(CLE), dem)
+  const a768 = new Uint8ClampedArray(768 * 768 * 4)
+  analyseMemoEcrire(dem, 768, a768, 768)
+  assert.equal(analyseMemoLire(dem, 768).rgba, a768)
+  assert.equal(analyseMemoLire(dem, 1024), null, 'un autre palier ne réutilise pas cette analyse')
+  assert.equal(analyseMemoLire(dem, 0), null)
+  demMemoVider()
+})
+
+// ⚠️ CE QUI AUTORISE LA MÉMORISATION : l'analyse ne dépend QUE des altitudes,
+// et pour un même MNT elle rend le même octet. Servir la mémoire au lieu de
+// recalculer est donc STRICTEMENT sans effet sur l'image — c'est la seule
+// chose qui compte, une accélération qui change un pixel étant un échec.
+test('mémoire des blocs : la mémoire rend EXACTEMENT ce que le recalcul rendrait', () => {
+  demMemoVider()
+  const size = 64
+  const dem = faussetMnt(size)
+  const calcule = analyzeDem(dem, { maxSize: 32 })
+  demMemoEcrire(demMemoCle(CLE), dem)
+  analyseMemoEcrire(dem, 32, calcule.rgba, calcule.size)
+
+  const relu = analyseMemoLire(dem, 32)
+  const recalcule = analyzeDem(dem, { maxSize: 32 })
+  assert.equal(relu.size, recalcule.size)
+  assert.equal(relu.rgba.length, recalcule.rgba.length)
+  for (let i = 0; i < recalcule.rgba.length; i++) assert.equal(relu.rgba[i], recalcule.rgba[i], `octet ${i}`)
+  demMemoVider()
+})
+
+// La contrepartie du « le damier n'entre pas dedans » : une dalle voisine dont
+// le MNT n'est pas mémorisé ne fait rien peser ici, quoi qu'elle calcule.
+test('mémoire des blocs : l’analyse d’un MNT NON mémorisé n’est pas gardée', () => {
+  demMemoVider()
+  const voisine = faussetMnt(64, 7)
+  analyseMemoEcrire(voisine, 1024, new Uint8ClampedArray(1024 * 1024 * 4), 1024)
+  assert.equal(analyseMemoLire(voisine, 1024), null)
+  assert.equal(demMemoOctets(), 0, 'zéro octet retenu pour une dalle du damier')
+})

@@ -1,3 +1,11 @@
+// LES GRAINS FBM DE LA GRILLE, CUITS UNE FOIS ET GARDÉS.
+//
+// Deux champs, deux mémoires, une seule règle : un motif qui ne dépend que de
+// la GRILLE (graine, résolution, taille du bloc) n'a aucune raison d'être
+// recalculé à chaque reconstruction du relief. `detailField` ci-dessous porte
+// le grain de la GÉOMÉTRIE, `tintField` plus bas celui de la COULEUR.
+//
+// ─────────────────────────────────────────────────────────────────────────────
 // LE GRAIN FBM DU RELIEF, CUIT UNE FOIS PAR (seed, échelle, résolution, taille).
 //
 // Mesuré à res 1024 : l'échantillonnage du MNT met 194 ms, dont **175 ms rien
@@ -71,6 +79,73 @@ export function detailField(seed, detailScale, res, size) {
 /** Vide le cache — tests uniquement. */
 export function clearDetailField() {
   cache.clear()
+}
+
+// ---------------------------------------------------------------------------
+// LE GRAIN DE TEINTE, MÊME HISTOIRE — 65 ms par reconstruction
+// ---------------------------------------------------------------------------
+// `Terrain.rebuild` colore chaque sommet en trois termes : une valeur graduée
+// par l'altitude, un assombrissement par la pente, et un grain FBM. Les deux
+// premiers coûtent une poignée de multiplications ; le troisième est DEUX
+// OCTAVES DE SIMPLEX PAR SOMMET, et c'est lui qui pèse — mesuré à La Réunion,
+// MNT 1536², maillage 768 : 65 ms de fil principal figé sur les 168 ms de
+// `terrain.rebuild`, à chaque zoom, pour recalculer un motif identique.
+//
+// ⚠️ ET IL NE DÉPEND QUE DE (graine, résolution, taille du bloc), exactement
+// comme le gabarit de grille : ses seules entrées sont le x et le z du sommet,
+// que grid-template.js pose sur une grille régulière. Ni le MNT, ni le zoom, ni
+// l'exagération, ni la palette n'y entrent — c'est ce qui en fait un motif
+// mémorisable, et test/detail-noise.test.js le vérifie.
+//
+// ⚠️ `Math.fround` N'EST PAS UN DÉTAIL. Le code d'origine lisait x et z dans
+// l'attribut `position` de la géométrie, donc dans un Float32Array : il
+// échantillonnait le bruit en coordonnées ARRONDIES au flottant simple. Cuire
+// le champ sur les doubles `ix·seg − half` donnerait un motif très légèrement
+// différent — invisible, mais alors il n'y a plus d'identité bit à bit à
+// opposer à un doute, et c'est justement la garantie qu'on vient chercher.
+//
+// ⚠️ DOUBLE PRÉCISION, pour la même raison qu'au champ de détail. `rebuild`
+// compose `v += champ[i]·0,05` avec `v` en double, avant de ranger le tout dans
+// un Float32Array : cuire le champ en Float32 ferait un DOUBLE ARRONDI et
+// changerait le dernier bit de la couleur sur une partie des sommets. Coût
+// assumé : 8 octets par sommet, soit 4,7 Mo à res 768 et 8,4 Mo à res 1024 ;
+// deux entrées gardées, héros + voisins du damier, comme au-dessus.
+const MAX_TEINTE = 2
+const cacheTeinte = new Map()
+
+/**
+ * Le grain FBM de la teinte par sommet, cuit sur la grille du gabarit.
+ * L'appelant compose `v += champ[i] · 0,05`.
+ * @param {number} seed graine DÉJÀ décalée par l'appelant (params.seed + 101).
+ * @returns {Float64Array} de longueur (res+1)² — PARTAGÉ, en lecture seule.
+ */
+export function tintField(seed, res, size) {
+  const cle = `${seed}|${res}|${size}`
+  const memo = cacheTeinte.get(cle)
+  if (memo) {
+    cacheTeinte.delete(cle) // remis en queue : c'est lui le plus récemment servi
+    cacheTeinte.set(cle, memo)
+    return memo
+  }
+  const s = new Simplex2(mulberry32(seed))
+  const n = res + 1
+  const champ = new Float64Array(n * n)
+  const half = size / 2
+  const seg = size / res
+  for (let iy = 0; iy < n; iy++) {
+    const z = Math.fround(iy * seg - half)
+    for (let ix = 0; ix < n; ix++) {
+      champ[iy * n + ix] = fbm(s, Math.fround(ix * seg - half) * 1.7, z * 1.7, 2, 2.2, 0.5)
+    }
+  }
+  cacheTeinte.set(cle, champ)
+  while (cacheTeinte.size > MAX_TEINTE) cacheTeinte.delete(cacheTeinte.keys().next().value)
+  return champ
+}
+
+/** Vide le cache de teinte — tests uniquement. */
+export function clearTintField() {
+  cacheTeinte.clear()
 }
 
 // ---------------------------------------------------------------------------

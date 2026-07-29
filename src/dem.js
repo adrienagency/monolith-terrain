@@ -8,8 +8,14 @@
 // Attribution : « © Mapterhorn » + https://mapterhorn.com/attribution dès que
 // la source active est Mapterhorn (crédits ET exports).
 
+// ⚠️ PLUS de `smoothSeaFloor` ici : la branche de mémorisation partait d'un
+// main qui l'appelait encore (elle mesurait ses 73 ms), mais le correctif
+// Catmull-Rom l'a depuis SORTI du chemin de loadDem — il ne servait plus à
+// rien une fois l'agrandissement corrigé, et coûtait 84 ms par bloc. Il reste
+// exporté et testé pour une future source côtière (voir le corps du fichier).
 import { fuseBathymetry, decodeTerrarium, overzoomTile, resampleCatmullRom } from './bathy.js'
 import { normalizeIndex, tileMaxZoom } from './bathy-sources.js'
+import { demMemoCle, demMemoLire, demMemoEcrire, demMemoVider } from './dem-memo.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -191,6 +197,7 @@ export function _resetTileCaches() {
   tilesEnVol.clear()
   bathyHits.clear()
   bathyMisses.clear()
+  demMemoVider()
 }
 
 // Zoom max réellement servi pour la dernière zone chargée — l'UI s'en sert pour
@@ -209,7 +216,13 @@ export function knownMaxZoomAt(zoom, tileX, tileY) {
 // `originTile` (optionnel) : origine-tuile EXPLICITE {x, y} du coin haut-gauche
 // — le damier (block-grid.js) charge les blocs voisins alignés sur la grille de
 // tuiles du bloc central (originTileX ± tilesAcross) : zéro couture entre blocs.
-export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = null, bathy = true }) {
+//
+// `memo` : mémorise le bloc FINI (fusionné, lissé, statistiques faites) pour le
+// retour de zoom — 145 ms de fil principal figé et 20 ms de réseau rendus, voir
+// dem-memo.js. C'est une DEMANDE et non le défaut : le damier tient sa propre
+// mémoire de MNT voisins, l'y faire entrer doublerait la facture et chasserait
+// le bloc central à chaque extension.
+export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = null, bathy = true, memo = false }) {
   const n = 2 ** zoom
   const half = Math.floor(tilesAcross / 2)
   let cx, cy
@@ -250,6 +263,20 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
   lastMaxZoom = maxZoom
 
   const TILE_PX = source.tilePx
+  // MÉMOIRE DU BLOC — la clé se ferme ICI et pas plus tôt : `maxZoom` en fait
+  // partie (il décide du surzoom) et il vient d'être résolu. Le sondage de
+  // couverture, lui, est déjà mémorisé par dem-source.js : sur un retour de
+  // zoom l'await ci-dessus ne coûte rien.
+  const cleMemo = memo
+    ? demMemoCle({
+        source: source.id, zoom, maxZoom, ox: cx - half, oy: cy - half,
+        tilesAcross, tilePx: TILE_PX, lat, lon, bathy: bathy !== false,
+      })
+    : null
+  if (cleMemo) {
+    const dejaVu = demMemoLire(cleMemo)
+    if (dejaVu) return dejaVu
+  }
   const sizePx = tilesAcross * TILE_PX
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = sizePx
@@ -296,7 +323,7 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
   // retenue pour la session, donc l'appel récursif repart d'emblée sur AWS)
   if (hardFail && source.id !== DEM_SOURCES.aws.id) {
     fallbackToAws(hardFail)
-    return loadDem({ lat, lon, zoom, tilesAcross, originTile, bathy })
+    return loadDem({ lat, lon, zoom, tilesAcross, originTile, bathy, memo })
   }
   // plus rien du tout : c'est une panne, pas un trou — l'UI doit le dire
   if (!painted) throw hardFail ?? new Error(`aucune tuile d'altitude à ${zoom}/${cx},${cy} (${source.id})`)
@@ -414,7 +441,7 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
   // et le bloc entier se retrouvait à la mauvaise échelle (relief écrasé,
   // tracés GPX décalés, damier de blocs voisins désaligné).
   const metersPerPixel = ((156543.03392 * Math.cos(latRad)) / 2 ** zoom) * (256 / TILE_PX)
-  return {
+  const bloc = {
     data: fused,
     size: sizePx,
     tilePx: TILE_PX,
@@ -433,6 +460,7 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
     originTileX: cx - half,
     originTileY: cy - half,
   }
+  return cleMemo ? demMemoEcrire(cleMemo, bloc) : bloc
 }
 
 // Une tuile d'altitude → ImageBitmap, `null` si elle n'existe pas (404), et
