@@ -5,6 +5,7 @@
 import { el, iconButton, refreshAll } from './kit.js'
 import { parseLatLon } from '../geo.js'
 import { showToast } from './toast.js'
+import { porteEnAccueil, actionBouton, LIBELLE_ACTION } from './accueil.js'
 
 const I = {
   // objectif photo — la même icône que le panneau Caméra, pour qu'on la
@@ -40,6 +41,10 @@ const I = {
   news: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 12.5h8M8 16h5"/></svg>',
   compass:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2.2 5-5 2.2 2.2-5 5-2.2z"/></svg>',
+  // la flèche d'« Aller » — le visage d'accueil du bouton de la barre de
+  // recherche : on ne charge pas un fichier, on PART quelque part
+  arrow:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13"/><path d="M12.5 6.5 19 12l-6.5 5.5"/></svg>',
   undo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h10a5 5 0 010 10h-6"/><path d="M7.5 4.5L4 8l3.5 3.5"/></svg>',
   redo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 8H10a5 5 0 000 10h6"/><path d="M16.5 4.5L20 8l-3.5 3.5"/></svg>',
 }
@@ -431,6 +436,12 @@ export function buildQuickCore(ctx) {
     const b = el('button', 'ce-wm-btn')
     b.type = 'button'
     b.dataset.mode = mode
+    // `hub-off` : la porte existe, mais l'accueil ne la propose pas (Explorer —
+    // voir accueil.js). C'est le JS qui tranche, le CSS ne fait qu'obéir : la
+    // règle est ainsi testable, et l'accueil ne se relit pas dans une feuille
+    // de style. La porte REVIENT dès que la barre redescend, c'est le même
+    // bouton — rien n'est recréé.
+    b.classList.toggle('hub-off', !porteEnAccueil(mode))
     const alt = hubLabel ? ' alt' : ''
     const hub = hubLabel ? `<span class="wm-h">${hubLabel}</span>` : ''
     b.innerHTML = `${icon}<span class="wm-t${alt}">${label}</span>${hub}<i class="wm-sub">${sub}</i>`
@@ -500,17 +511,76 @@ export function buildBottomBar(ctx) {
     input.blur()
     const ok = parseLatLon(text) ? await ctx.goto.go(text) : await ctx.goto.search(text)
     if (ok) input.value = ''
+    // le champ vidé par le code n'émet aucun `input` : sans ce rappel, le
+    // bouton resterait « Aller » sur un champ redevenu vide.
+    majBouton()
   }
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') go()
     e.stopPropagation() // keep app-level shortcuts out of the field
   })
 
+  // UN SEUL bouton pour deux visages (Adrien) : « Aller » quand la recherche est
+  // éveillée, « GPX » quand elle dort. Deux boutons auraient été deux largeurs,
+  // or c'est CE bouton que la rangée liquide mesure pour resserrer le cartouche
+  // en mode Parcours (elembar.js, `gpxW`) — un jumeau caché aurait faussé le
+  // calcul. Les deux faces se replient par `display` : ce sont des enfants du
+  // bouton, pas des bulles du goo (liquidize mesure le bouton, jamais son
+  // contenu). La règle qui choisit la face vit dans accueil.js, et elle est
+  // testée : elle a un piège, écrit là-bas.
   const gpx = el('button', 'ce-pillbtn ce-gpxbtn')
   gpx.type = 'button'
-  gpx.innerHTML = `${I.route}<span>GPX</span>`
-  gpx.setAttribute('data-tip', 'Importer une trace GPX et la draper sur le relief.')
-  gpx.addEventListener('click', () => ctx.openGpx())
+  gpx.innerHTML =
+    `<span class="gpx-face gpx-f-gpx">${I.route}<span>${LIBELLE_ACTION.gpx}</span></span>` +
+    `<span class="gpx-face gpx-f-go">${I.arrow}<span>${LIBELLE_ACTION.aller}</span></span>`
+  const TIPS = {
+    gpx: 'Importer une trace GPX et la draper sur le relief.',
+    aller: 'Aller — la carte vole jusqu’au lieu tapé dans le champ.',
+    focus: 'Aller — tape d’abord un lieu dans le champ à gauche.',
+  }
+  const action = () =>
+    actionBouton({
+      accueil: document.body.classList.contains('ce-hub'),
+      saisie: input.value,
+      champActif: document.activeElement === input,
+    })
+  // déclarée en `function` : `go` l'appelle et est définie plus haut.
+  function majBouton() {
+    const quoi = action()
+    gpx.setAttribute('data-tip', TIPS[quoi])
+    // `go` porte les DEUX faces « Aller » ('aller' et 'focus') : le mot ne doit
+    // pas changer sous le doigt au fil de la frappe — il changerait de largeur,
+    // et la rangée liquide reposerait ses bulles à chaque lettre tapée
+    // (LIBELLE_ACTION). L'accueil, lui, est traité en CSS (body.ce-hub) : il
+    // n'émet aucun événement auquel s'accrocher.
+    gpx.classList.toggle('go', quoi !== 'gpx')
+  }
+  majBouton()
+  input.addEventListener('input', majBouton)
+  input.addEventListener('focus', majBouton)
+  input.addEventListener('blur', majBouton)
+  // au survol aussi : l'accueil n'émet aucun événement, donc le tip d'un bouton
+  // jamais touché depuis la montée de l'accueil serait resté celui de GPX.
+  // tips.js relit `data-tip` au moment d'afficher la bulle, après un délai de
+  // survol — le rafraîchir ici arrive toujours à temps.
+  gpx.addEventListener('pointerenter', majBouton)
+  // ⚠️ le clic sur un bouton commence par ARRACHER le focus du champ. Sans ce
+  // preventDefault, le bouton changeait de visage ENTRE le mousedown et le
+  // click : on cliquait « Aller » et on recevait le sélecteur de fichiers GPX.
+  gpx.addEventListener('mousedown', (e) => { if (action() !== 'gpx') e.preventDefault() })
+  gpx.addEventListener('click', () => {
+    const quoi = action()
+    // ⚠️ AUCUNE logique de navigation dupliquée ici : « Aller » rejoue
+    // EXACTEMENT la soumission du champ (`go`), donc le même parseLatLon, le
+    // même ctx.goto, le même vidage du champ en cas de succès.
+    if (quoi === 'aller') return void go()
+    // champ vide : le bouton renvoie au champ plutôt que de ne rien faire. Le
+    // focus fait aussi redescendre l'accueil (hub.js écoute `focus`) — le
+    // visiteur se retrouve donc devant la carte, curseur dans le champ, et le
+    // bouton reste « Aller » puisque la recherche est maintenant éveillée.
+    if (quoi === 'focus') return void focusSearch()
+    ctx.openGpx()
+  })
 
   bar.append(search, gpx)
   document.body.append(bar)
