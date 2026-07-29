@@ -1224,15 +1224,18 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       if (h < minH) minH = h
       if (h > maxH) maxH = h
     }
-    // NORMALES PAR DIFFÉRENCES CENTRÉES, pas par parcours de triangles.
+    // LA SOMME DES SIX FACES, ÉCRITE EN CLAIR — pas un parcours de triangles.
     // `geo.computeVertexNormals()` pesait **81 % de la fabrication d'une
-    // dalle** — 89,9 ms sur les 95 ms mesurées à res 768, 110 ms à res 1024.
-    // Sur une grille régulière la normale s'écrit en O(1) par sommet, et le
-    // banc donne **5,10 ms au lieu de 89,87 ms à res 768 : 17,6× moins cher**,
-    // pour un écart angulaire moyen de 0,008° (voir src/grid-normals.js et
-    // test/grid-normals.test.js, qui bornent l'écart au lieu de le nier).
+    // dalle** : mesuré in situ sur la géométrie affichée, 83,8 ms à Chamonix et
+    // 120,5 ms à La Réunion, contre **4,6 et 4,4 ms — 18× et 27× moins cher**.
+    // Ce n'est PAS une approximation : sur la grille régulière de gridTemplate,
+    // la somme des six normales de faces a une forme fermée, et le résultat est
+    // identique à three à l'arrondi Float32 près (< 0,05°), bords et coins
+    // compris. Voir src/grid-normals.js pour la dérivation — et pourquoi une
+    // différence centrée, qui ne voit pas le bruit de Nyquist d'un MNT, s'y
+    // trompait de 3,2° en moyenne et de 119° au pire.
     // ⚠️ La grille DOIT être celle de gridTemplate — régulière, rangée en
-    // `iy·(res+1) + ix`, pas de côté 56 : c'est l'hypothèse du schéma.
+    // `iy·(res+1) + ix`, pas de côté 56 : c'est l'hypothèse de la formule.
     geo.setAttribute('normal', new THREE.BufferAttribute(gridNormals(arr, res, TERRAIN_SIZE), 3))
 
     // vertex tint: height-graded value + slope darkening + grain jitter

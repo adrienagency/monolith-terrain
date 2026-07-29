@@ -1,58 +1,71 @@
-// NORMALES D'UNE GRILLE RÉGULIÈRE — par différences centrées, pas par
-// parcours de triangles.
+// NORMALES D'UNE GRILLE RÉGULIÈRE — la somme des six faces, écrite en clair.
 //
 // `BufferGeometry.computeVertexNormals()` est GÉNÉRIQUE : il lit l'index,
 // calcule une normale de face par produit vectoriel, l'accumule sur les trois
 // sommets de chaque triangle, puis normalise tout. Sur un maillage quelconque
 // c'est le seul moyen. Sur une grille régulière, c'est du travail perdu — et il
-// coûte cher : mesuré (étude du 2026-07-29 §2.4, banc `bench-normales.mjs`)
+// coûte cher, mesuré in situ sur la géométrie affichée (banc `f3-verif.mjs`,
+// même machine, même dalle, cinq passes, médiane) :
 //
-//   res | computeVertexNormals | différences centrées | facteur
-//   256 |              9,78 ms |              0,61 ms |  16,1×
-//   384 |             17,67 ms |              1,38 ms |  12,9×
-//   512 |             32,27 ms |              2,27 ms |  14,2×
-//   768 |             89,87 ms |              5,10 ms |  17,6×
+//   zone       | res | computeVertexNormals | gridNormals | facteur
+//   Chamonix   | 768 |              83,8 ms |      4,6 ms |   18,2×
+//   La Réunion | 768 |             120,5 ms |      4,4 ms |   27,4×
 //
 // soit **81 % du coût de fabrication d'une dalle** (89,9 ms sur 95 à res 768).
-// C'est le même facteur 18 que Hoppe a obtenu en 2005 en passant sur GPU —
-// ici en CPU pur, sans toucher un shader.
 //
-// LA FORMULE. La surface est y = h(x, z) sur une grille de pas `seg`. Ses deux
-// tangentes sont (1, ∂h/∂x, 0) et (0, ∂h/∂z, 1) ; leur produit vectoriel donne
+// ⚠️ CE N'EST PAS UNE APPROXIMATION, ET ÇA NE PEUT PAS EN ÊTRE UNE.
+// La première version calculait la normale par DIFFÉRENCES CENTRÉES :
+// n = normalize(−∂h/∂x, 1, −∂h/∂z), la tangente évaluée au sommet. Sur du
+// relief synthétique lisse elle donnait 0,008° d'écart. Sur du MNT RÉEL elle
+// donnait **1,6° en moyenne à Chamonix, 3,2° à La Réunion, et jusqu'à 119° au
+// pire**. La raison : un MNT porte du bruit à la fréquence de Nyquist du
+// maillage — une alternance d'un pixel sur deux, née de la quantification en
+// mètres et du rééchantillonnage. La différence centrée lit hW et hE et ne lit
+// JAMAIS h0 : ce bruit lui est invisible. La somme des faces, elle, le voit
+// intégralement, et c'est elle que l'œil voit à l'écran.
 //
-//     n = normalize( −∂h/∂x , 1 , −∂h/∂z )
+// LA DÉRIVATION. `gridTemplate` range les sommets en `i = iy·(res+1) + ix`,
+// avec x croissant en ix, z croissant en iy, et découpe chaque maille en deux
+// triangles (a,b,d) puis (b,c,d), où a=(ix,iy), b=(ix,iy+1), c=(ix+1,iy+1),
+// d=(ix+1,iy). three accumule sur chaque sommet la normale NON normalisée
+// `(vC−vB) × (vA−vB)` — un vecteur dont la longueur vaut deux fois l'aire du
+// triangle. Avec un pas `s` identique dans les deux directions, ces deux
+// produits vectoriels valent, pour la maille (ix,iy) :
 //
-// C'est EXACTEMENT la convention que rend `computeVertexNormals` sur
-// l'indexation de grid-template.js (triangles (a,b,d) puis (b,c,d), avec
-// a=(ix,iy), b=(ix,iy+1), c=(ix+1,iy+1), d=(ix+1,iy)) — vérifié dans
-// test/grid-normals.test.js sur cinq rampes affines, où les deux méthodes
-// coïncident au 1e-6 près parce qu'un plan est son propre plan tangent.
+//     n₁ = ( s·(h_a − h_d) , s² , s·(h_a − h_b) )
+//     n₂ = ( s·(h_b − h_c) , s² , s·(h_d − h_c) )
 //
-// ⚠️ CE N'EST PAS BIT-IDENTIQUE, et ça ne peut pas l'être. three moyenne des
-// normales de FACES pondérées par l'aire ; on évalue la tangente AU SOMMET. Sur
-// un relief courbe les deux diffèrent d'un terme du second ordre : mesuré à
-// **0,008° d'écart angulaire moyen** sur les 591 361 sommets d'une dalle res
-// 768 (pire cas 1,02°, au bord). Le test borne cet écart au lieu de le nier.
+// Un sommet intérieur appartient à quatre mailles, dans quatre rôles distincts :
+// il est `a` de la sienne (1 triangle), `d` de celle de gauche (2), `b` de celle
+// du dessus (2) et `c` de la diagonale haut-gauche (1) — six triangles en tout.
+// En sommant les six et en divisant par `s` (sans effet après normalisation) :
 //
-// ⚠️ LES BORDS. La différence centrée n'existe pas sur la première et la
-// dernière ligne/colonne : on y prend une différence DÉCENTRÉE d'un pas (ordre
-// 1 au lieu de 2). C'est là que tout l'écart se concentre, et c'est aussi là
-// que ça se verrait le plus — une normale fausse au bord marque une couture sur
-// le flanc du socle. Le test vérifie séparément l'intérieur (< 0,5°) et le bord
-// (< 4°). Ces sommets de bord sont par ailleurs ceux que le `discard` de la
-// superellipse (terrain.js) jette dans le rendu du socle.
+//     X = 2·(hW − hE) + (hWD − hD) + (hU − hEU)
+//     Y = 6·s
+//     Z = 2·(hU − hD) + (hW − hWD) + (hEU − hE)
 //
-// ⚠️ LE RELIEF ABSENT. Une mer plate, une dalle sans données, un plateau : le
-// gradient est nul et la normale doit valoir (0,1,0) FRANC. Elle le vaut par
-// construction — la composante Y du vecteur non normalisé est 1, jamais 0, donc
-// il n'y a aucun 0/0 possible et aucun cas particulier à écrire. C'est la
-// raison pour laquelle on normalise (−gx, 1, −gz) et non une forme
-// « équivalente » mise à l'échelle par le pas de grille.
+// ⚠️ LE STENCIL EST ASYMÉTRIQUE, et ce n'est pas une faute de frappe : il lit
+// la diagonale ouest-bas et la diagonale est-haut, jamais les deux autres.
+// C'est l'orientation du découpage en triangles qui le veut — la diagonale de
+// chaque maille va de b=(ix,iy+1) à d=(ix+1,iy). Symétriser ce stencil
+// « pour faire propre » reviendrait à mailler autrement que ce qu'on affiche.
+//
+// ⚠️ LE BORD FAIT PARTIE DE LA FORMULE, il n'est pas un cas dégradé. Un sommet
+// de bord touche trois faces, un coin une ou trois : le nombre de faces
+// réellement présentes est le `Y = c·s` du vecteur. Il n'y a donc AUCUNE
+// différence décentrée à inventer, aucun schéma d'ordre inférieur : le bord est
+// aussi exact que le centre, et le test l'exige explicitement.
+//
+// ⚠️ LE RELIEF ABSENT. Une mer plate, une dalle sans données, un plateau : X et
+// Z sont nuls et Y vaut c·s > 0. La normale sort (0,1,0) FRANC, sans branche et
+// sans 0/0 possible — c'est la raison pour laquelle on ne divise jamais par `s`
+// avant de normaliser.
 
 /**
  * Normales d'une grille régulière rangée en `iy · (res+1) + ix`, avec les
  * altitudes dans la composante Y de `position` (la disposition exacte de
- * `gridTemplate`).
+ * `gridTemplate`), identiques à celles de `computeVertexNormals` sur la même
+ * géométrie — à l'arrondi Float32 près.
  *
  * @param {Float32Array} position — (res+1)² × 3, X/Y/Z entrelacés
  * @param {number} res — nombre de segments par côté
@@ -64,34 +77,87 @@ export function gridNormals(position, res, size, out) {
   const n = res + 1
   const count = n * n
   const normals = out || new Float32Array(count * 3)
-  // Le pas est le même dans les deux directions (grille carrée). On divise par
-  // `2·seg` au centre et par `seg` au bord : c'est le seul endroit où les deux
-  // schémas diffèrent, et le facteur est donc porté par la distance réelle
-  // entre les deux échantillons lus, pas par un cas particulier.
   const seg = size / res
+  const y6 = 6 * seg
 
-  for (let iy = 0; iy < n; iy++) {
+  // L'INTÉRIEUR — les six faces existent, la forme fermée s'applique telle
+  // quelle. C'est 99,5 % des sommets à res 768, et six lectures par sommet :
+  // `h0` n'apparaît pas dans la formule, il n'est donc même pas lu.
+  for (let iy = 1; iy < res; iy++) {
     const rang = iy * n
-    // voisins en Z (lignes) : centré à l'intérieur, décentré sur les deux bords
-    const zAvant = iy > 0 ? rang - n : rang
-    const zApres = iy < res ? rang + n : rang
-    const dz = (iy > 0 ? 1 : 0) + (iy < res ? 1 : 0) // 2 au centre, 1 au bord
-    const invZ = 1 / (dz * seg)
-    for (let ix = 0; ix < n; ix++) {
+    for (let ix = 1; ix < res; ix++) {
       const i = rang + ix
-      const xAvant = ix > 0 ? i - 1 : i
-      const xApres = ix < res ? i + 1 : i
-      const dx = (ix > 0 ? 1 : 0) + (ix < res ? 1 : 0)
-      const gx = (position[xApres * 3 + 1] - position[xAvant * 3 + 1]) / (dx * seg)
-      const gz = (position[(zApres + ix) * 3 + 1] - position[(zAvant + ix) * 3 + 1]) * invZ
-      // (−gx, 1, −gz) normalisé. La composante Y du vecteur brut vaut 1 : la
-      // longueur ne peut donc jamais être nulle, et un terrain parfaitement
-      // plat sort exactement (0, 1, 0) sans aucune branche.
-      const inv = 1 / Math.sqrt(gx * gx + 1 + gz * gz)
-      normals[i * 3] = -gx * inv
-      normals[i * 3 + 1] = inv
-      normals[i * 3 + 2] = -gz * inv
+      const hE = position[(i + 1) * 3 + 1]
+      const hW = position[(i - 1) * 3 + 1]
+      const hD = position[(i + n) * 3 + 1]
+      const hU = position[(i - n) * 3 + 1]
+      const hWD = position[(i + n - 1) * 3 + 1]
+      const hEU = position[(i - n + 1) * 3 + 1]
+      const x = 2 * (hW - hE) + (hWD - hD) + (hU - hEU)
+      const z = 2 * (hU - hD) + (hW - hWD) + (hEU - hE)
+      const inv = 1 / Math.sqrt(x * x + y6 * y6 + z * z)
+      normals[i * 3] = x * inv
+      normals[i * 3 + 1] = y6 * inv
+      normals[i * 3 + 2] = z * inv
     }
+  }
+
+  // LE BORD — la même somme, maille par maille, en ne comptant que les mailles
+  // qui existent. C'est ~4·res sommets sur (res+1)², soit 0,5 % à res 768 : le
+  // détour par une fonction et ses quatre tests ne pèse rien.
+  const bord = (ix, iy) => {
+    const i = iy * n + ix
+    const h0 = position[i * 3 + 1]
+    const aG = ix > 0
+    const aD = ix < res
+    const aH = iy > 0
+    const aB = iy < res
+    let x = 0
+    let z = 0
+    let c = 0
+    // maille (ix, iy) — on y est le sommet `a`, présent dans le seul (a,b,d)
+    if (aD && aB) {
+      x += h0 - position[(i + 1) * 3 + 1]
+      z += h0 - position[(i + n) * 3 + 1]
+      c += 1
+    }
+    // maille (ix−1, iy) — on y est le sommet `d`, présent dans les DEUX
+    if (aG && aB) {
+      const hW = position[(i - 1) * 3 + 1]
+      const hD = position[(i + n) * 3 + 1]
+      const hWD = position[(i + n - 1) * 3 + 1]
+      x += hW - h0 + (hWD - hD)
+      z += hW - hWD + (h0 - hD)
+      c += 2
+    }
+    // maille (ix, iy−1) — on y est le sommet `b`, présent dans les DEUX
+    if (aD && aH) {
+      const hE = position[(i + 1) * 3 + 1]
+      const hU = position[(i - n) * 3 + 1]
+      const hEU = position[(i - n + 1) * 3 + 1]
+      x += hU - hEU + (h0 - hE)
+      z += hU - h0 + (hEU - hE)
+      c += 2
+    }
+    // maille (ix−1, iy−1) — on y est le sommet `c`, présent dans le seul (b,c,d)
+    if (aG && aH) {
+      x += position[(i - 1) * 3 + 1] - h0
+      z += position[(i - n) * 3 + 1] - h0
+      c += 1
+    }
+    const y = c * seg
+    const inv = 1 / Math.sqrt(x * x + y * y + z * z)
+    normals[i * 3] = x * inv
+    normals[i * 3 + 1] = y * inv
+    normals[i * 3 + 2] = z * inv
+  }
+  for (let ix = 0; ix < n; ix++) {
+    bord(ix, 0)
+    bord(ix, res)
+  }
+  for (let iy = 1; iy < res; iy++) {
+    bord(0, iy)
+    bord(res, iy)
   }
   return normals
 }

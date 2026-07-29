@@ -1,32 +1,30 @@
-// LES NORMALES D'UNE GRILLE RÉGULIÈRE S'ÉCRIVENT, ELLES NE SE DÉDUISENT PAS.
+// LES NORMALES D'UNE GRILLE RÉGULIÈRE S'ÉCRIVENT, ELLES NE S'APPROXIMENT PAS.
 //
 // `geo.computeVertexNormals()` pèse 81 % de la fabrication d'une dalle : 89,9 ms
-// sur les 95 ms mesurées à res 768 (étude du 2026-07-29, §2.4). Il est générique
-// — il parcourt les triangles indexés, fait un produit vectoriel par face,
-// accumule sur trois sommets, puis normalise tout. Sur une grille régulière
-// c'est du travail perdu : la normale s'écrit directement par DIFFÉRENCES
-// CENTRÉES sur les quatre voisins, en O(1) par sommet, sans jamais toucher
-// l'index. Mesuré : 5,10 ms au lieu de 89,87 ms — 17,6× moins cher.
+// sur les 95 ms mesurées à res 768. Il est GÉNÉRIQUE — il parcourt les triangles
+// indexés, fait un produit vectoriel par face, accumule sur trois sommets, puis
+// normalise. Sur la grille régulière de grid-template.js, cette somme de six
+// faces a une FORME FERMÉE : on peut l'écrire en O(1) par sommet sans jamais
+// toucher l'index. Mesuré in situ : 4,5 ms au lieu de 84 à 120 ms.
 //
-// Ce test verrouille les trois choses qui pourraient se casser en silence :
-//   1. LA CONVENTION D'ORIENTATION. `computeVertexNormals` de three sur
-//      l'indexation de grid-template.js — triangles (a,b,d) puis (b,c,d) —
-//      rend n = normalize(−∂h/∂x, 1, −∂h/∂z). Un signe inversé sur un seul des
-//      deux axes donne un relief éclairé à l'envers, et c'est le genre de bug
-//      qu'on ne voit qu'au coucher du soleil.
-//   2. LES BORDS. C'est là que les schémas de différences se trompent : la
-//      différence centrée n'existe pas, il faut une différence décentrée. Une
-//      normale fausse au bord se voit comme une couture sur le flanc du socle.
+// ⚠️ UNE APPROXIMATION NE SUFFIT PAS, et c'est l'histoire de ce fichier. La
+// première version calculait la normale par DIFFÉRENCES CENTRÉES — la tangente
+// évaluée au sommet. Sur du relief synthétique lisse elle donnait 0,008°
+// d'écart ; **sur du MNT réel elle donnait 1,6° en moyenne à Chamonix, 3,2° à
+// La Réunion, et jusqu'à 119° au pire** (banc `f3-verif.mjs`, 2026-07-29). La
+// raison : un MNT porte du bruit à la fréquence de Nyquist du maillage — une
+// alternance d'un pixel sur deux. La différence centrée ne le VOIT PAS (elle
+// lit hW et hE, jamais h0), là où la somme des faces le voit intégralement.
+//
+// Ce que ce fichier verrouille désormais :
+//   1. L'ÉQUIVALENCE, pas une borne. La forme fermée doit rendre EXACTEMENT ce
+//      que rend three, à l'arrondi Float32 près, y compris sur du bruit de
+//      Nyquist — le cas qui a cassé la première version.
+//   2. LES BORDS. Six faces à l'intérieur, trois ou une au coin : le compte des
+//      faces existantes fait partie de la formule. Une normale fausse au bord
+//      marque une couture sur le flanc du socle.
 //   3. LE RELIEF ABSENT. Un champ plat (mer, dalle sans données) doit rendre
-//      (0,1,0) FRANC, pas un vecteur normalisé depuis un 0/0.
-//
-// ⚠️ L'écart avec `computeVertexNormals` n'est PAS nul et ne peut pas l'être :
-// three moyenne des normales de FACES (pondérées par l'aire du produit
-// vectoriel), la différence centrée évalue la tangente au SOMMET. Sur un plan
-// et sur une rampe affine les deux coïncident exactement — c'est ce que
-// vérifient les deux premiers cas. Sur un relief courbe ils diffèrent d'un
-// terme du second ordre, mesuré à 0,008° en moyenne à res 768. Le test borne
-// cet écart au lieu de le nier.
+//      (0,1,0) FRANC, jamais un 0/0.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
@@ -36,11 +34,14 @@ import { gridNormals } from '../src/grid-normals.js'
 const SIZE = 56
 
 // Une géométrie de grille au relief `h(x, z)`, prête pour les deux méthodes.
+// ⚠️ `h` reçoit AUSSI (ix, iy) : les reliefs qui imitent le bruit d'un MNT
+// s'expriment en indices de maille, pas en unités-monde.
 function grille(res, h) {
   clearGridTemplates()
   const tpl = gridTemplate(res, SIZE)
   const pos = new Float32Array(tpl.position)
-  for (let i = 0; i < tpl.count; i++) pos[i * 3 + 1] = h(pos[i * 3], pos[i * 3 + 2])
+  const n = res + 1
+  for (let i = 0; i < tpl.count; i++) pos[i * 3 + 1] = h(pos[i * 3], pos[i * 3 + 2], i % n, (i / n) | 0)
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
   geo.setIndex(new THREE.BufferAttribute(tpl.index, 1))
@@ -53,18 +54,35 @@ function reference(res, h) {
   return geo.attributes.normal.array
 }
 
-// écart angulaire en degrés entre deux tableaux de normales
-function ecarts(a, b, count) {
-  let somme = 0
-  let pire = 0
-  for (let i = 0; i < count; i++) {
+// Écart angulaire en degrés, séparé en INTÉRIEUR et BORD : les deux populations
+// n'ont pas le même nombre de faces, et une erreur de bord ne doit pas se
+// diluer dans les 591 000 sommets de l'intérieur.
+function ecarts(a, b, res) {
+  const n = res + 1
+  const r = { moyen: 0, pire: 0, pireBord: 0, pireInterieur: 0, ouPire: -1 }
+  for (let i = 0; i < n * n; i++) {
     const d = Math.min(1, Math.max(-1, a[i * 3] * b[i * 3] + a[i * 3 + 1] * b[i * 3 + 1] + a[i * 3 + 2] * b[i * 3 + 2]))
     const ang = (Math.acos(d) * 180) / Math.PI
-    somme += ang
-    if (ang > pire) pire = ang
+    r.moyen += ang
+    if (ang > r.pire) {
+      r.pire = ang
+      r.ouPire = i
+    }
+    const ix = i % n
+    const iy = (i / n) | 0
+    if (ix === 0 || iy === 0 || ix === res || iy === res) r.pireBord = Math.max(r.pireBord, ang)
+    else r.pireInterieur = Math.max(r.pireInterieur, ang)
   }
-  return { moyen: somme / count, pire }
+  r.moyen /= n * n
+  return r
 }
+
+// ⚠️ LE SEUIL N'EST PAS ZÉRO, et il ne peut pas l'être : three range ses
+// normales en Float32, nous aussi, et `acos` est brutalement sensible près de
+// 1 — un produit scalaire à 1 − 2e-8 rend déjà 0,011°. 0,05° est donc le
+// plancher du bruit d'arrondi, pas une tolérance de modèle. Un signe inversé
+// donnerait 20° ou 180° ; la différence centrée donnait 119°.
+const ARRONDI_F32 = 0.05
 
 test('un champ plat rend (0,1,0) FRANC, pas un 0/0 normalisé', () => {
   const { pos, count } = grille(32, () => 0)
@@ -84,9 +102,11 @@ test('un champ plat NON NUL (une mer à −3) rend aussi (0,1,0)', () => {
   for (let i = 0; i < count; i++) assert.equal(n[i * 3 + 1], 1)
 })
 
-// Sur une rampe affine, la surface EST son plan tangent : les deux méthodes
-// doivent tomber sur la même normale, aux bords comme au centre. C'est le test
-// qui verrouille la CONVENTION D'ORIENTATION (les deux signes, séparément).
+// Sur une rampe affine, la surface EST son plan tangent : la normale a une
+// valeur analytique, aux bords comme au centre. C'est le test qui verrouille la
+// CONVENTION D'ORIENTATION (les deux signes, séparément) — un signe inversé sur
+// un seul axe donne un relief éclairé à l'envers, et ça ne se voit qu'au
+// coucher du soleil.
 for (const [nom, h, attendu] of [
   ['montante en X', (x) => 0.37 * x, [-0.37, 1, 0]],
   ['descendante en X', (x) => -0.21 * x, [0.21, 1, 0]],
@@ -108,95 +128,101 @@ for (const [nom, h, attendu] of [
         )
     }
   })
-
-  test(`rampe ${nom} : three.js est d'accord (la convention est la bonne)`, () => {
-    const res = 8
-    const { pos, count } = grille(res, h)
-    const n = gridNormals(pos, res, SIZE)
-    const ref = reference(res, h)
-    const { pire } = ecarts(n, ref, count)
-    // ⚠️ Le seuil n'est pas zéro : les normales de three sont stockées en
-    // Float32, et `acos` est brutalement sensible près de 1 — un produit
-    // scalaire à 1 − 2e-8 rend déjà 0,011°. Un signe inversé donnerait 20° ou
-    // 180°, pas 0,02 : le seuil sépare sans ambiguïté.
-    assert.ok(pire < 0.05, `écart maximal ${pire}° avec computeVertexNormals`)
-  })
 }
 
-// Un relief courbe et bosselé : les deux méthodes ne peuvent plus coïncider
-// exactement, mais l'écart doit rester sous le seuil de visibilité.
+// ═══ LES TROIS RELIEFS QUI SÉPARENT UNE FORME FERMÉE D'UNE APPROXIMATION ═══
+//
+// Un relief courbe et lisse : n'importe quel schéma d'ordre 2 le passe. C'est
+// exactement pour ça qu'il ne prouve rien tout seul.
 const bosses = (x, z) =>
   2.4 * Math.sin(x * 0.21) * Math.cos(z * 0.17) +
   0.9 * Math.sin(x * 0.63 + 1.1) +
   0.4 * Math.cos(z * 0.91 - 0.3) +
   0.15 * Math.sin(x * 2.7) * Math.sin(z * 3.1)
 
-// ⚠️ `bosses` est un relief VOLONTAIREMENT plus tourmenté qu'un vrai MNT : son
-// dernier terme oscille sur 2,3 unités-monde, soit 16 mailles à res 384. Les
-// écarts mesurés ici sont donc un MAJORANT confortable de ce que donne du
-// terrain réel (l'étude relève 0,008° de moyenne à res 768 sur Chamonix).
-// Ce que le test verrouille n'est pas un chiffre choisi à la main, c'est la
-// CONVERGENCE : l'écart doit se diviser par au moins 3 quand la résolution
-// double. C'est la signature d'un schéma d'ordre 2 ; un schéma faux, lui, garde
-// un écart constant ou le voit croître.
-test('relief bosselé : l\'écart converge en O(pas²) quand la résolution double', () => {
-  const mesures = []
-  // ⚠️ On part de 192, pas de 96 : sous 192 le dernier terme de `bosses`
-  // (2,3 unités de période) n'est pas encore résolu par la grille, et un
-  // schéma n'a pas d'ordre sur un signal qu'il ne voit pas. Le régime
-  // asymptotique commence à partir de ~8 mailles par oscillation.
-  for (const res of [192, 384, 768]) {
-    const { pos, count } = grille(res, bosses)
-    const n = gridNormals(pos, res, SIZE)
-    const ref = reference(res, bosses)
-    mesures.push({ res, ...ecarts(n, ref, count) })
-  }
-  for (let k = 1; k < mesures.length; k++) {
-    const r = mesures[k - 1].moyen / mesures[k].moyen
-    assert.ok(
-      r > 3,
-      `res ${mesures[k - 1].res}→${mesures[k].res} : écart moyen ${mesures[k - 1].moyen.toFixed(4)}° → ` +
-        `${mesures[k].moyen.toFixed(4)}°, rapport ${r.toFixed(2)} (attendu > 3, soit un ordre 2)`
-    )
-  }
-  const fin = mesures[mesures.length - 1]
-  assert.ok(fin.moyen < 0.2, `à res 768 l'écart moyen vaut ${fin.moyen.toFixed(4)}°`)
-  assert.ok(fin.pire < 3.5, `à res 768 le pire écart vaut ${fin.pire.toFixed(4)}°`)
+// ⚠️ LE RELIEF QUI A CASSÉ LA PREMIÈRE VERSION. Un damier d'une maille de
+// période : le signal exactement à la fréquence de Nyquist du maillage. La
+// différence centrée lit hW et hE — qui sont ÉGAUX sur un damier — et conclut à
+// un terrain plat. La somme des faces, elle, voit une surface en tôle ondulée.
+// C'est ce que porte un vrai MNT : quantification en mètres, rééchantillonnage,
+// bruit de capteur.
+const nyquist = (_x, _z, ix, iy) => (((ix + iy) & 1) === 0 ? 0.9 : -0.9)
+
+// Un MNT plausible : du relief lisse PLUS du bruit d'un pixel, comme en sort un
+// SRTM quantifié. C'est le cas de production.
+const mntBruite = (x, z, ix, iy) => {
+  let g = Math.sin(ix * 12.9898 + iy * 78.233) * 43758.5453
+  g -= Math.floor(g)
+  return bosses(x, z) + (g - 0.5) * 0.6
+}
+
+for (const [nom, h, resolutions] of [
+  ['courbe et lisse', bosses, [96, 192, 384]],
+  ['damier de Nyquist (le bruit qu\'aucune différence centrée ne voit)', nyquist, [64, 192, 385]],
+  ['MNT bruité (relief lisse + bruit d\'un pixel)', mntBruite, [96, 192, 384]],
+]) {
+  test(`relief ${nom} : IDENTIQUE à computeVertexNormals`, () => {
+    for (const res of resolutions) {
+      const { pos } = grille(res, h)
+      const n = gridNormals(pos, res, SIZE)
+      const ref = reference(res, h)
+      const e = ecarts(n, ref, res)
+      assert.ok(
+        e.pire < ARRONDI_F32,
+        `res ${res} : pire écart ${e.pire.toFixed(4)}° au sommet ${e.ouPire} ` +
+          `(moyen ${e.moyen.toFixed(5)}°, intérieur ${e.pireInterieur.toFixed(4)}°, bord ${e.pireBord.toFixed(4)}°)`
+      )
+    }
+  })
+}
+
+test('LES BORDS ne sont plus un cas dégradé : même exactitude qu\'au centre', () => {
+  // Avec les différences centrées, le bord portait un schéma d'ordre 1 et
+  // concentrait tout l'écart. Avec la forme fermée il n'y a PLUS de cas
+  // particulier : seulement moins de faces à sommer. Le test l'exige — le bord
+  // ne doit pas être plus mauvais que l'arrondi Float32, comme le centre.
+  const res = 384
+  const { pos } = grille(res, mntBruite)
+  const n = gridNormals(pos, res, SIZE)
+  const ref = reference(res, mntBruite)
+  const e = ecarts(n, ref, res)
+  assert.ok(e.pireInterieur < ARRONDI_F32, `intérieur : ${e.pireInterieur.toFixed(4)}°`)
+  assert.ok(e.pireBord < ARRONDI_F32, `bord : ${e.pireBord.toFixed(4)}°`)
 })
 
-test('LES BORDS : le pire écart y est concentré, et il y reste borné', () => {
-  // La différence décentrée du bord est un schéma d'ordre 1 là où l'intérieur
-  // est d'ordre 2 : c'est là que l'écart se concentre, et c'est là qu'une
-  // erreur se verrait — une normale fausse au bord marque une couture. On
-  // vérifie donc les deux populations SÉPARÉMENT, et qu'elles sont bien dans
-  // cet ordre-là (si le bord était meilleur que l'intérieur, c'est l'intérieur
-  // qui serait faux).
-  const res = 384
+test('LES QUATRE COINS : une face, trois faces — le compte doit être juste', () => {
+  // Le coin (0,0) ne touche qu'UNE face, les coins (res,0) et (0,res) en
+  // touchent trois, le coin (res,res) une seule. C'est le point le plus facile
+  // à écrire de travers, et le plus invisible : quatre sommets sur 591 361.
+  const res = 32
   const n1 = res + 1
-  const { pos, count } = grille(res, bosses)
+  const { pos } = grille(res, mntBruite)
   const n = gridNormals(pos, res, SIZE)
-  const ref = reference(res, bosses)
-  let pireBord = 0
-  let pireInterieur = 0
-  for (let i = 0; i < count; i++) {
-    const ix = i % n1
-    const iy = (i / n1) | 0
+  const ref = reference(res, mntBruite)
+  for (const [ix, iy] of [
+    [0, 0],
+    [res, 0],
+    [0, res],
+    [res, res],
+  ]) {
+    const i = iy * n1 + ix
     const d = Math.min(1, Math.max(-1, n[i * 3] * ref[i * 3] + n[i * 3 + 1] * ref[i * 3 + 1] + n[i * 3 + 2] * ref[i * 3 + 2]))
     const ang = (Math.acos(d) * 180) / Math.PI
-    if (ix === 0 || iy === 0 || ix === res || iy === res) pireBord = Math.max(pireBord, ang)
-    else pireInterieur = Math.max(pireInterieur, ang)
+    assert.ok(ang < ARRONDI_F32, `coin (${ix},${iy}) : ${ang.toFixed(4)}° d'écart`)
   }
-  assert.ok(pireInterieur < 2, `intérieur : ${pireInterieur.toFixed(4)}°`)
-  assert.ok(pireBord < 8, `bord : ${pireBord.toFixed(4)}°`)
-  assert.ok(pireBord > pireInterieur, `le bord (${pireBord.toFixed(3)}°) devrait porter le pire écart, pas l'intérieur (${pireInterieur.toFixed(3)}°)`)
 })
 
-test('aucune normale n\'est NaN, et toutes sont unitaires', () => {
+test('une falaise franche : identique aussi là où le gradient explose', () => {
   const res = 96
-  // un relief à falaises franches ET plateaux plats : le cas où un schéma naïf
-  // divise par zéro ou explose
-  const { pos, count } = grille(res, (x, z) => (x > 0 ? 6 : 0) + (z > 4 ? -3 : 0))
+  // marche verticale ET plateaux plats : le cas où un schéma naïf divise par
+  // zéro, et où le produit scalaire de deux normales presque horizontales perd
+  // ses chiffres significatifs.
+  const marche = (x, z) => (x > 0 ? 6 : 0) + (z > 4 ? -3 : 0)
+  const { pos, count } = grille(res, marche)
   const n = gridNormals(pos, res, SIZE)
+  const ref = reference(res, marche)
+  const e = ecarts(n, ref, res)
+  assert.ok(e.pire < ARRONDI_F32, `pire écart ${e.pire.toFixed(4)}°`)
   for (let i = 0; i < count; i++) {
     const l = Math.hypot(n[i * 3], n[i * 3 + 1], n[i * 3 + 2])
     assert.ok(Number.isFinite(l), `sommet ${i} : longueur ${l}`)
@@ -225,4 +251,14 @@ test('res impaire et segment non représentable en binaire', () => {
     assert.ok(Math.abs(n[i * 3] - -0.42 / l) < 1e-6, `sommet ${i}`)
     assert.ok(Math.abs(n[i * 3 + 1] - 1 / l) < 1e-6, `sommet ${i}`)
   }
+})
+
+test('res = 1 : quatre sommets, deux triangles, aucun intérieur', () => {
+  // Le cas limite où la boucle d'intérieur ne tourne pas une seule fois.
+  const res = 1
+  const { pos, count } = grille(res, (x, z) => 0.3 * x + 0.2 * z)
+  const n = gridNormals(pos, res, SIZE)
+  const ref = reference(res, (x, z) => 0.3 * x + 0.2 * z)
+  for (let i = 0; i < count; i++)
+    for (let k = 0; k < 3; k++) assert.ok(Math.abs(n[i * 3 + k] - ref[i * 3 + k]) < 1e-5, `sommet ${i} composante ${k}`)
 })
