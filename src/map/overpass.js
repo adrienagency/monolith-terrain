@@ -1,28 +1,20 @@
 // Full-detail OSM lines via the Overpass API — raw geometry, NO simplification.
 // Endpoint is a const so a self-hosted instance can replace the public one.
 export const OVERPASS_URL = 'https://overpass-api.de/api/interpreter'
-export const WAY_TAG = { roads: 'highway', water: 'waterway' }
-
-// Overpass highway predicate. ALWAYS the bare tag test, for every detail notch.
+// PLUS de `roads` ici. Le calque Routes a quitté le site (Adrien : « très
+// lourd, très mauvais ») et avec lui son prédicat `roadHighwayFilter()` et le
+// cran de « détail » qui lui servait de variante de cache. L'eau est le seul
+// calque qui interroge encore Overpass par ce module ; les autres appelants
+// d'Overpass du projet (peaks.js, peak-mask.js, transports.js pour le Race
+// Studio) ont chacun leur propre client et n'ont jamais dépendu d'ici.
 //
-// Do NOT reintroduce a `["highway"~"^(motorway|trunk|…)$"]` regex here. A regex
-// predicate makes Overpass scan every way in the bbox instead of hitting the tag
-// index, and on a dense patch it blows the timeout: measured against the live
-// API on a Chamonix z13 bbox, `way["highway"]` returned 4570 ways in 927 ms while
-// the regex form took 6.5 s and came back **504**. The 504 made fetchOverpassLines
-// return null, which silently fell back to Natural Earth — which carries nothing
-// at that zoom — so notches 1 and 2 rendered an EMPTY map while notch 3 (the only
-// one already using the bare tag) worked. That was the whole bug.
-//
-// Fidelity is unaffected (no simplification either way), and filtering is not
-// lost: which classes actually render at a notch is decided client-side and
-// RELATIVELY in road-tier.js, from whatever classes the patch really contains.
-// One predicate for all notches also means all three share a single cache entry,
-// so moving the slider re-filters instantly instead of re-hitting rate-limited
-// public Overpass.
-export function roadHighwayFilter() {
-  return '["highway"]'
-}
+// La LEÇON du calque disparu, elle, reste vraie et vaut pour l'eau : ne JAMAIS
+// remettre un prédicat regex du genre `["waterway"~"^(river|…)$"]`. Un regex
+// force Overpass à balayer toutes les ways de la bbox au lieu d'attaquer
+// l'index de tags — mesuré sur les routes : 6,5 s et un **504**, contre 927 ms
+// pour le test de tag nu. Le filtrage fin se fait côté client (voir
+// filterRiverwayLines dans water-layer.js).
+export const WAY_TAG = { water: 'waterway' }
 
 // Server-side memory ceiling per query, in bytes. This is a LOAD-BEARING guard,
 // not a tuning knob. Without it a dense-city patch succeeds and hands us a
@@ -35,10 +27,9 @@ export function roadHighwayFilter() {
 export const OVERPASS_MAXSIZE = 48 * 1024 * 1024
 
 // Overpass bbox order is (south,west,north,east) = (minLat,minLon,maxLat,maxLon)
-export function buildQuery(bbox, kind, detail = 1) {
+export function buildQuery(bbox, kind) {
   const b = `${bbox.minLat},${bbox.minLon},${bbox.maxLat},${bbox.maxLon}`
   const head = `[out:json][timeout:25][maxsize:${OVERPASS_MAXSIZE}]`
-  if (kind === 'roads') return `${head};way${roadHighwayFilter(detail)}(${b});out geom;`
   const tag = WAY_TAG[kind]
   return `${head};way["${tag}"](${b});out geom;`
 }
@@ -90,15 +81,12 @@ export function parseOverpassAreas(json) {
   return out
 }
 
-// `variant` is what distinguishes cache entries for the same bbox+kind — for
-// roads this is the Overpass filter STRING (not the raw detail notch), so
-// detail 1 and 2 (which now share a filter) collide onto the same cache
-// entry and toggling the notch reuses the cached response instead of
-// re-hitting rate-limited public Overpass.
-export function bboxKey(bbox, kind, variant) {
+// Une entrée de cache par zone+kind. Le troisième argument `variant` a disparu
+// avec les routes : il ne servait qu'à distinguer les crans de détail du
+// réseau routier, l'eau n'en a jamais eu qu'un.
+export function bboxKey(bbox, kind) {
   const r = (n) => Math.round(n * 1000) / 1000
-  const base = `${kind}:${r(bbox.minLat)},${r(bbox.minLon)},${r(bbox.maxLat)},${r(bbox.maxLon)}`
-  return kind === 'roads' && variant !== undefined ? `${base}:${variant}` : base
+  return `${kind}:${r(bbox.minLat)},${r(bbox.minLon)},${r(bbox.maxLat)},${r(bbox.maxLon)}`
 }
 
 // Client-side companion to OVERPASS_MAXSIZE: that caps the SERVER's memory, not
@@ -112,14 +100,13 @@ export function assertSaneSize(response, limit = OVERPASS_MAXSIZE) {
   if (Number.isFinite(len) && len > limit) throw new Error(`overpass payload ${len} > ${limit}`)
 }
 
-// cache by zone+kind(+detail), dedupe in-flight, min gap between network hits, null on fail
+// cache by zone+kind, dedupe in-flight, min gap between network hits, null on fail
 const _cache = new Map()
 let _lastAt = 0
-export async function fetchOverpassLines(bbox, kind, { detail = 1, url = OVERPASS_URL, minInterval = 1200 } = {}) {
-  const variant = kind === 'roads' ? roadHighwayFilter(detail) : detail
-  const key = bboxKey(bbox, kind, variant)
+export async function fetchOverpassLines(bbox, kind, { url = OVERPASS_URL, minInterval = 1200 } = {}) {
+  const key = bboxKey(bbox, kind)
   if (!_cache.has(key)) {
-    const body = buildQuery(bbox, kind, detail)
+    const body = buildQuery(bbox, kind)
     const job = (async () => {
       const wait = Math.max(0, _lastAt + minInterval - Date.now())
       if (wait) await new Promise((r) => setTimeout(r, wait))

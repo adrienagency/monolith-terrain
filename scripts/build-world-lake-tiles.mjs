@@ -172,7 +172,7 @@ const CONTINENTS = [
 const APPROX_KM2 = `((bbox.xmax - bbox.xmin) * (bbox.ymax - bbox.ymin) * 111.32 * 111.32 * cos(radians((bbox.ymin + bbox.ymax) / 2)))`
 
 // Quantize coordinates to 5 decimals (~1.1 m) — the SAME precision
-// build-water-tiles.mjs / build-road-tiles.mjs / build-mapdata.mjs use. No
+// build-water-tiles.mjs / build-mapdata.mjs use. No
 // Douglas-Peucker: shapes are never simplified, per the standing project
 // constraint — this only reduces float noise, not vertices.
 const round5 = (n) => Math.round(n * 1e5) / 1e5

@@ -82,7 +82,7 @@ function areaKm2(areaDeg2, centerLat) {
 }
 
 // Quantize coordinates to 5 decimals (~1.1 m) — the SAME precision
-// build-mapdata.mjs uses for its near-lossless layers (see ROADS_EPS /
+// build-mapdata.mjs uses for its near-lossless layers (see RIVERS_EPS /
 // round5 there). No Douglas-Peucker: shapes are never simplified, per the
 // standing project constraint — this only reduces float noise, not vertices.
 const round5 = (n) => Math.round(n * 1e5) / 1e5

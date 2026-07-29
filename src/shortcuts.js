@@ -57,7 +57,9 @@ export const SHORTCUTS = [
   { id: 'open-export', keys: ['E'], label: 'Export', category: 'General', code: 'KeyE', key: 'e', run: (ctx) => ctx.openExport() },
 
   // ---- Layers (power-user toggles) ----
-  { id: 'layer-roads', keys: ['R'], label: 'Toggle roads', category: 'Layers', code: 'KeyR', key: 'r', run: (ctx) => ctx.toggleLayer('roads') },
+  // PLUS de « R = Routes » : le calque Routes a quitté le site. La touche R est
+  // donc LIBRE — laissée telle quelle plutôt que réattribuée en douce, un
+  // raccourci qui change de sens sans prévenir est pire qu'un raccourci absent.
   { id: 'layer-water', keys: ['W'], label: 'Toggle water', category: 'Layers', code: 'KeyW', key: 'w', run: (ctx) => ctx.toggleLayer('water') },
   { id: 'layer-places', keys: ['P'], label: 'Toggle places', category: 'Layers', code: 'KeyP', key: 'p', run: (ctx) => ctx.toggleLayer('places') },
   { id: 'layer-contours', keys: ['C'], label: 'Toggle contours', category: 'Layers', code: 'KeyC', key: 'c', run: (ctx) => ctx.toggleLayer('contours') },

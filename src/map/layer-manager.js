@@ -1,16 +1,18 @@
-import { RoadsLayer } from './roads-layer.js'
 import { WaterLayer } from './water-layer.js'
 import { PlacesLayer } from './places-layer.js'
 
 // Orchestrates the SP1 layers. Every layer builds from the same {dem,terrain,params}
 // so a new zone/zoom (or a dark-mode/opacity change) is a single rebuild call.
 // SP2 will inject an OSM DataProvider here without touching layer code.
+//
+// PLUS de calque `roads` : il a quitté le site (Adrien, « très lourd, très
+// mauvais »). `setLayerVisible`/`setOpacity` filtrent par identifiant, donc un
+// vieil appel à 'roads' est simplement ignoré, sans erreur.
 export class MapLayers {
   constructor(scene, camera = null) {
-    this.roads = new RoadsLayer(scene)
     this.water = new WaterLayer(scene)
     this.places = new PlacesLayer(scene, camera)
-    this._layers = { roads: this.roads, water: this.water, places: this.places }
+    this._layers = { water: this.water, places: this.places }
     this._surfaceVisible = true
   }
   // null-safe: places.refresh()/declutter fall back to "show everything" until
@@ -29,7 +31,7 @@ export class MapLayers {
   isLoading() { return Object.values(this._layers).some((l) => l.loading) }
   // keep fat-line screen-space widths correct after a viewport resize
   onResize(w, h) {
-    for (const l of [this.roads, this.water]) l.group.traverse((o) => { if (o.material && o.material.isLineMaterial) o.material.resolution.set(w, h) })
+    for (const l of [this.water]) l.group.traverse((o) => { if (o.material && o.material.isLineMaterial) o.material.resolution.set(w, h) })
   }
   // hide the whole set outside surface mode (globe/export)
   setSurfaceVisible(v) {

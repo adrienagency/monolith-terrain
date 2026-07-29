@@ -61,8 +61,14 @@ export function zoneSummary(zone) {
 // ⚠️ À NE PAS CONFONDRE avec le MASQUE terre-mer (coast-mask.js / uCoastMask) :
 // lui reste, c'est la vérité terre-mer du shader, il tient les polders sous le
 // niveau zéro et sert à la découpe de zone.
+//
+// PLUS DE « Routes » non plus (Adrien : « très lourd, très mauvais »). Même
+// raison de fond que le trait de côte : les 12,6 Mo de Natural Earth ne
+// donnaient qu'un réseau grossier, et la seule version fine (tuiles Overture)
+// n'a jamais couvert que les Alpes. La clé `roadsEnabled` traîne encore dans
+// de vieux gabarits — elle n'est plus dans TEMPLATE_KEYS, donc simplement
+// ignorée, aucune migration à écrire.
 export const LAYERS = [
-  { key: 'roadsEnabled', label: 'Routes', short: 'Routes', hint: 'Le réseau routier drapé sur le relief.' },
   { key: 'waterEnabled', label: 'Rivières & eau', short: 'Eau', hint: 'Cours d’eau, lacs et mers.' },
   { key: 'placesEnabled', label: 'Villes & lieux', short: 'Lieux', hint: 'Les noms des villes et des sites.' },
   { key: 'aerialEnabled', label: 'Photo aérienne', short: 'Photo', hint: 'L’imagerie réelle là où elle existe (France, Suisse).' },

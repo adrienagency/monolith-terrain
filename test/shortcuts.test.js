@@ -27,14 +27,22 @@ test('Ctrl+Y also matches redo', () => {
   assert.equal(m.category, 'History')
 })
 
-test('plain KeyR matches the roads layer toggle', () => {
-  const m = matchShortcut({ code: 'KeyR' })
+test('plain KeyW matches the water layer toggle', () => {
+  const m = matchShortcut({ code: 'KeyW' })
   assert.ok(m)
-  assert.equal(m.id, 'layer-roads')
+  assert.equal(m.id, 'layer-water')
 })
 
-test('Ctrl+KeyR does not match — ctrl combos are reserved for history/etc', () => {
-  assert.equal(matchShortcut({ code: 'KeyR', ctrlKey: true }), null)
+test('Ctrl+KeyW does not match — ctrl combos are reserved for history/etc', () => {
+  assert.equal(matchShortcut({ code: 'KeyW', ctrlKey: true }), null)
+})
+
+test('R est LIBRE — le calque Routes a quitté le site', () => {
+  // Volontairement laissée sans emploi plutôt que réattribuée : un raccourci
+  // qui change de sens sans prévenir est pire qu'un raccourci absent.
+  assert.equal(matchShortcut({ code: 'KeyR' }), null)
+  assert.equal(matchShortcut({ code: 'KeyR', key: 'R' }), null)
+  assert.ok(!SHORTCUTS.some((s) => s.id === 'layer-roads'))
 })
 
 test('an unknown combo returns null', () => {
@@ -91,7 +99,7 @@ test('AZERTY : « / » et « ? » se reconnaissent au caractère produit', () =>
 })
 
 test('Verr.Maj ne casse pas les lettres (key majuscule sans shiftKey)', () => {
-  assert.equal(matchShortcut({ code: 'KeyR', key: 'R' }).id, 'layer-roads')
+  assert.equal(matchShortcut({ code: 'KeyW', key: 'W' }).id, 'layer-water')
 })
 
 test('le pavé numérique reste POSITIONNEL, jamais traduit en caractère', () => {

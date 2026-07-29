@@ -12,9 +12,13 @@ import { mkdir, writeFile } from 'node:fs/promises'
 const BASE = 'https://raw.githubusercontent.com/martynafford/natural-earth-geojson/master'
 const OUT = new URL('../public/data/map/', import.meta.url)
 
-// layer → [resolution, theme, NE file, keep-props builder]. lakes, coastline,
-// rivers, and roads all use 10m (fine) source for far-view precision; places
-// also uses 10m.
+// layer → [resolution, theme, NE file, keep-props builder]. lakes, coastline
+// and rivers all use 10m (fine) source for far-view precision; places also
+// uses 10m.
+//
+// PLUS de `roads` : ce script écrivait aussi public/data/map/roads.json, 12,6
+// Mo versionnés pour le calque Routes, qui a quitté le site (Adrien : « très
+// lourd, très mauvais »). Rien d'autre ne lisait ce fichier.
 const round = (n) => Math.round(n * 1e4) / 1e4
 const round5 = (n) => Math.round(n * 1e5) / 1e5
 
@@ -121,16 +125,12 @@ async function main() {
   await mkdir(OUT, { recursive: true })
 
   // lakes/coastline/rivers all use 10m (fine) source with a near-lossless
-  // Douglas-Peucker epsilon, matching the roads treatment below, so far-view
-  // water shapes stay faithful to the source geometry instead of looking
-  // blocky. This trades a larger payload for fidelity, per task 4.
+  // Douglas-Peucker epsilon, so far-view water shapes stay faithful to the
+  // source geometry instead of looking blocky. This trades a larger payload
+  // for fidelity, per task 4.
   const RIVERS_EPS = 0.0005
   const LAKES_EPS = 0.0005
   const COAST_EPS = 0.0005
-  // Roads use a near-lossless epsilon and 5-decimal (~1.1 m) quantization so
-  // far-view road shapes stay faithful to the source geometry; this trades a
-  // larger payload (~5-8 MB) for fidelity, per the fix in task 6.
-  const ROADS_EPS = 0.0005
 
   // rivers: 10m gives natural per-feature line width via `strokeweig`
   // (cartographic stroke weight, 0-9) and far more features than the 50m
@@ -162,37 +162,6 @@ async function main() {
 
   const coast = trimFeatures(await ne('10m', 'physical', 'ne_10m_coastline'), (p) => ({ name: '', min_zoom: numZoom(p), scalerank: scalerankOf(p), kind: 'coast' }), COAST_EPS, round5)
   await writeFile(new URL('coastline.json', OUT), JSON.stringify(coast))
-
-  // roads: map NE `type` to our 3 classes so the renderer styles by weight
-  const roadClass = (t = '') => (/Major Highway|Freeway|Beltway/i.test(t) ? 'motorway' : /Secondary|Road/i.test(t) ? 'secondary' : 'primary')
-  const roadsRaw = await ne('10m', 'cultural', 'ne_10m_roads')
-  // Scalerank cap relaxed from 5 to 7 (task 7 — mid-zoom band, 10-50 km, was
-  // starved: NE hit 0 roads by demZoom 11/46 km because cap 5 keeps only
-  // motorway-class). Measured against the live NE 10m source (56,601 raw
-  // features; scalerank histogram 3:10024 4:5707 5:4107 6:5771 7:8521
-  // 8:7107 9:13152 10:2212 — nothing above 10 in this source despite the
-  // schema allowing higher):
-  //   cap 5 (old):  19,838 features, 7.42 MB
-  //   cap 7 (new):  34,130 features, 13.21 MB
-  //   cap 8:        41,237 features, 16.02 MB  (over the ~15 MB ceiling)
-  //   uncapped(10): 56,601 features, 21.73 MB
-  // Cap 7 is the highest cap that still fits under the ~15 MB single-layer
-  // ceiling — it folds in scalerank 6 (secondary) and 7 (tertiary-ish),
-  // which is exactly the class Chamonix's mid-zoom band needed. Going to 8
-  // would blow the budget for +7 MB of marginal detail already covered by
-  // the OSM tier once zoomed further in. ROADS_EPS/geometry fidelity is
-  // untouched — this only changes which features are INCLUDED, never how
-  // their shapes are simplified (road geometry must never be simplified
-  // further, per the standing project constraint).
-  const ROADS_SCALERANK_CAP = 7
-  const roads = trimFeatures(
-    { type: 'FeatureCollection', features: roadsRaw.features.filter((f) => f.geometry && scalerankOf(f.properties || {}) <= ROADS_SCALERANK_CAP) },
-    (p) => ({ name: nameOf(p), min_zoom: numZoom(p), scalerank: scalerankOf(p), kind: roadClass(p.type ?? p.TYPE) }),
-    ROADS_EPS,
-    round5,
-  )
-  const roadsJson = JSON.stringify(roads)
-  await writeFile(new URL('roads.json', OUT), roadsJson)
 
   // places: compact array, sorted by population desc for greedy zoom picking
   const pp = await ne('10m', 'cultural', 'ne_10m_populated_places')

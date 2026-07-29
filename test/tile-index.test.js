@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { WATER_REGION, REGION, LOD_LEVELS, ROAD_LOD_LEVELS, LAKE_LOD_LEVELS, lodForZoom, tileZoomForLod, tilesForBBox, inRegion } from '../src/map/tile-index.js'
+import { WATER_REGION, REGION, LOD_LEVELS, LAKE_LOD_LEVELS, lodForZoom, tileZoomForLod, tilesForBBox, inRegion } from '../src/map/tile-index.js'
 
 test('lodForZoom: far/mid/close bands match the demZoomMax boundaries', () => {
   assert.equal(lodForZoom(1), 0)
@@ -67,7 +67,9 @@ test('inRegion: a patch just touching the region edge counts as overlapping', ()
   assert.equal(inRegion({ minLon: 4.5, maxLon: 5.0, minLat: 45.0, maxLat: 45.5 }, WATER_REGION), true)
 })
 
-// --- REGION alias / per-layer LOD tables (task 18: tiled Overture roads) ---
+// --- REGION alias / tables de LOD par calque ---------------------------
+// L'alias REGION et le paramètre `levels` sont nés avec les tuiles routières
+// (calque parti depuis) ; ils restent utiles, LAKE_LOD_LEVELS s'en sert.
 
 test('REGION is the exact same object as WATER_REGION — one region, one source of truth', () => {
   assert.equal(REGION, WATER_REGION)
@@ -78,37 +80,6 @@ test('lodForZoom/tileZoomForLod: default `levels` param keeps every existing (wa
   assert.equal(lodForZoom(12), 2)
   assert.equal(tileZoomForLod(0), 8)
   assert.equal(tileZoomForLod(2), 11)
-})
-
-test('lodForZoom/tileZoomForLod: an explicit `levels` table (ROAD_LOD_LEVELS) is honored instead of the default', () => {
-  assert.equal(lodForZoom(8, ROAD_LOD_LEVELS), 0)
-  assert.equal(lodForZoom(9, ROAD_LOD_LEVELS), 1) // just past LOD0's boundary
-  assert.equal(lodForZoom(11, ROAD_LOD_LEVELS), 1) // boundary — still LOD1
-  assert.equal(lodForZoom(12, ROAD_LOD_LEVELS), 2) // just past — LOD2
-  assert.equal(tileZoomForLod(0, ROAD_LOD_LEVELS), 8)
-  assert.equal(tileZoomForLod(1, ROAD_LOD_LEVELS), 11)
-  // The close-LOD literal is a MEASURED tradeoff, not a free choice. Tiling only
-  // redistributes bytes, it never shrinks them — the region's road network is
-  // ~850 MB either way, so pick by file count and fetches-per-view:
-  //   z14 -> 22,556 tiles / 1,051 MB / ~1.0 MB biggest tile / 64 fetches per view
-  //   z13 ->  5,834 tiles /   887 MB / 2.9 MB biggest tile / ~16 fetches per view
-  // Re-measure BOTH if you touch it.
-  assert.equal(tileZoomForLod(2, ROAD_LOD_LEVELS), 13)
-  // The property worth pinning, beyond the literal: roads are ~7x denser than
-  // water, so their close tiles must stay finer than water's or a single tile
-  // becomes unloadable.
-  assert.ok(
-    tileZoomForLod(2, ROAD_LOD_LEVELS) > tileZoomForLod(2),
-    'road close-LOD tiles must be finer than water close-LOD tiles'
-  )
-})
-
-test('ROAD_LOD_LEVELS and LOD_LEVELS share the same demZoom band SCHEME (far<=8, mid 9-11, close>=12), only tileZoom differs', () => {
-  assert.deepEqual(LOD_LEVELS.map((l) => l.demZoomMax), ROAD_LOD_LEVELS.map((l) => l.demZoomMax))
-  // road tiles need finer (higher) zooms than water at every LOD — denser data, smaller tiles
-  for (let i = 0; i < LOD_LEVELS.length; i++) {
-    assert.ok(ROAD_LOD_LEVELS[i].tileZoom >= LOD_LEVELS[i].tileZoom, `LOD${i}: road tileZoom should be >= water's`)
-  }
 })
 
 // --- world lake layer (task 19) ---
