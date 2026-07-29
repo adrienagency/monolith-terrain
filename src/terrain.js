@@ -3,6 +3,7 @@ import { Simplex2, mulberry32, fbm, ridged, smoothstep, lerp } from './noise.js'
 import { sampleDem } from './dem.js'
 import { buildRamp2D } from './palette.js'
 import { gridTemplate } from './grid-template.js'
+import { gridNormals } from './grid-normals.js'
 import { detailField } from './detail-noise.js'
 import { landMaskFromImage } from './sea-mask.js'
 // L'analyse de relief et le masque de mer ne sont plus calcules ici : ils
@@ -1214,7 +1215,16 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       if (h < minH) minH = h
       if (h > maxH) maxH = h
     }
-    geo.computeVertexNormals()
+    // NORMALES PAR DIFFÉRENCES CENTRÉES, pas par parcours de triangles.
+    // `geo.computeVertexNormals()` pesait **81 % de la fabrication d'une
+    // dalle** — 89,9 ms sur les 95 ms mesurées à res 768, 110 ms à res 1024.
+    // Sur une grille régulière la normale s'écrit en O(1) par sommet, et le
+    // banc donne **5,10 ms au lieu de 89,87 ms à res 768 : 17,6× moins cher**,
+    // pour un écart angulaire moyen de 0,008° (voir src/grid-normals.js et
+    // test/grid-normals.test.js, qui bornent l'écart au lieu de le nier).
+    // ⚠️ La grille DOIT être celle de gridTemplate — régulière, rangée en
+    // `iy·(res+1) + ix`, pas de côté 56 : c'est l'hypothèse du schéma.
+    geo.setAttribute('normal', new THREE.BufferAttribute(gridNormals(arr, res, TERRAIN_SIZE), 3))
 
     // vertex tint: height-graded value + slope darkening + grain jitter
     const colorRng = mulberry32(params.seed + 101)
