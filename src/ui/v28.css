@@ -276,6 +276,32 @@ body.dark {
   height: 30px;
   margin: 0 2px;
 }
+/* LE BOUTON DE LA BARRE DE RECHERCHE A DEUX VISAGES (Adrien) : « Aller » à
+   l'accueil — on part vers le lieu tapé —, « GPX » dans la barre du bas. Un
+   seul bouton, donc une seule largeur pour la rangée liquide, qui mesure
+   précisément celui-ci pour resserrer le cartouche en mode Parcours. Les faces
+   sont des ENFANTS du bouton : liquidize mesure le bouton, jamais son contenu,
+   donc `display:none` n'y coûte aucune bulle. */
+.ce-gpxbtn .gpx-face {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* la face « Aller » s'allume de DEUX façons, et il en faut deux :
+   — `body.ce-hub` : l'accueil n'émet aucun événement auquel du JS pourrait
+     s'accrocher, c'est donc le CSS qui le voit ;
+   — `.go` (posé par bars.js) : la recherche est éveillée — champ focalisé ou
+     rempli — alors même que l'accueil est déjà redescendu, ce qui arrive dès
+     qu'on entre dans le champ. */
+.ce-gpxbtn .gpx-f-go,
+body.ce-hub .ce-gpxbtn .gpx-f-gpx,
+.ce-gpxbtn.go .gpx-f-gpx {
+  display: none;
+}
+body.ce-hub .ce-gpxbtn .gpx-f-go,
+.ce-gpxbtn.go .gpx-f-go {
+  display: inline-flex;
+}
 /* boîte de secours « Votre lien est prêt » — presse-papier refusé */
 .ce-linkbox-veil {
   position: fixed;
@@ -748,6 +774,22 @@ body.ce-hub .ce-lqtop > .ce-elembar {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
+  /* ⚠️ `visibility` EN PLUS de l'opacité, et ce n'est pas une ceinture-bretelles.
+     MESURÉ : à opacité 0 cette barre restait une ENTRÉE du filtre goo, dont le
+     seuil d'alpha (feColorMatrix) rattrape les alphas quasi nuls et les rend
+     opaques — un liseré ambré, venu de l'icône accent d'« Explorer » resté
+     actif, longeait le coin de la porte Parcours. Preuve : masquer la barre
+     faisait disparaître le liseré, à pixel identique.
+     Le DÉLAI de 0,34 s est ce qui compte : la barre reste visible pendant toute
+     la morphose (donc mesurable par liquidize, qui calcule sur des boîtes
+     réelles), et ne devient invisible qu'une fois l'accueil posé. Au retour,
+     aucun délai : elle redevient visible immédiatement. Et `visibility`, à la
+     différence de `display: none`, CONSERVE la géométrie. */
+  visibility: hidden;
+  transition: opacity 0.34s cubic-bezier(0.6, 0, 0.3, 1.3), visibility 0s 0.34s;
+}
+.ce-lqtop > .ce-elembar {
+  transition: opacity 0.34s cubic-bezier(0.6, 0, 0.3, 1.3), visibility 0s 0s;
 }
 
 /* la barre quitte son ancrage bas pour le centre — une TRANSLATION */
@@ -764,9 +806,13 @@ body.ce-hub .ce-elemwrap {
   position: fixed;
   inset: 0;
   z-index: 56;
-  background: rgba(246, 244, 239, 0.42);
-  -webkit-backdrop-filter: blur(5px) saturate(1.1);
-  backdrop-filter: blur(5px) saturate(1.1);
+  /* ⚠️ FLOU RENFORCÉ (Adrien, 29/07 : « le fond est encore plus flouté »). Le
+     voile n'est pas là pour montrer la carte : il est là pour qu'on lise le
+     centre. La carte reste PRÉSENTE — on devine le socle et sa couleur — mais
+     elle ne dispute plus l'attention au titre. */
+  background: rgba(246, 244, 239, 0.52);
+  -webkit-backdrop-filter: blur(11px) saturate(1.12);
+  backdrop-filter: blur(11px) saturate(1.12);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.34s cubic-bezier(0.6, 0, 0.3, 1.3);
@@ -786,12 +832,30 @@ body.atelier-mode .ce-hubveil,
 body.shibu-view .ce-hubveil {
   display: none !important;
 }
-/* les coins s'effacent le temps de la question — ils reviennent avec la
-   descente. pointer-events coupés : rien ne doit distraire de la réponse. */
+/* ======================================================================
+   L'ACCUEIL NE MONTRE QUE SON CENTRE (Adrien, 29/07, mot pour mot :
+   « AUCUNE UI excepté ce qu'il y a au milieu »).
+   ----------------------------------------------------------------------
+   Tout ce qui n'est pas la marque, le titre, les portes, la recherche et
+   ses deux lignes passe à ZÉRO. Le premier geste du visiteur — une porte,
+   le champ, Échap — fait redescendre la barre, et tout revient en fondu.
+   ⚠️ `opacity`, JAMAIS `display: none` : ces éléments doivent réapparaître
+   en FONDU à la descente, et un élément non affiché n'a pas de transition.
+   C'est aussi ce qui garde leur géométrie mesurable — la rangée liquide
+   (elembar.js) calcule sur des boîtes réelles, pas sur des fantômes.
+   ⚠️ Ne PAS ajouter ici .ce-elemwrap ni .ce-qb-core : le centre EST la
+   barre du bas, en grand. Les éteindre éteindrait l'accueil lui-même.
+   ====================================================================== */
+body.ce-hub .ce-topbar,
+body.ce-hub .ce-hourpill,
+body.ce-hub .zoom-stepper,
+body.ce-hub .ce-changelog-btn,
+body.ce-hub .ce-eye,
 body.ce-hub .ce-isobtn,
+body.ce-hub .ce-cinebtn,
 body.ce-hub .ce-mapbtn,
 body.ce-hub .ce-credits {
-  opacity: 0.18;
+  opacity: 0;
   pointer-events: none;
   transition: opacity 0.34s cubic-bezier(0.6, 0, 0.3, 1.3);
 }
@@ -815,10 +879,26 @@ body.ce-hub .ce-credits {
     gap 0.34s cubic-bezier(0.6, 0, 0.3, 1.3),
     opacity 0.24s;
 }
+/* 92 px suffisaient à une marque de 34 px et une question de 15. Le titre seul
+   en demande ~58 : le plafond suit. C'est un PLAFOND de dépliage, pas une
+   hauteur — il doit rester légèrement au-dessus du contenu réel (≈108 px sur
+   grand écran) sans l'être tellement que le dépliage paraisse fini avant la
+   fin de la courbe. */
 body.ce-hub .ce-hubhead {
-  max-height: 92px;
+  /* le plafond suit la marque et l'interlignage : trop juste, il rogne les
+     jambages ; c'est exactement ce qui a coupé le « g » de « design ». */
+  max-height: 158px;
   opacity: 1;
-  gap: 6px;
+  gap: 16px;
+  /* ⚠️ SANS CETTE LARGEUR, LE TITRE SE CASSE EN DEUX. Le wrap est un flex
+     colonne qui se dimensionne sur son plus large enfant : c'était jusqu'ici le
+     pied (« ou dépose un fichier GPX… », 520 px), et le titre héritait donc de
+     520 px pour une phrase qui en demande 795 — il passait à deux lignes, dont
+     la seconde était rabotée par le plafond de dépliage. Le titre reprend la
+     main sur la largeur, et tout reste centré (align-items: center du wrap).
+     Posée SEULEMENT en accueil : hors accueil, la barre n'a aucune raison
+     d'élargir sa boîte fixe au-dessus de la carte. */
+  width: min(94vw, 960px);
 }
 body.ce-hub .ce-hubfoot {
   max-height: 76px;
@@ -826,18 +906,55 @@ body.ce-hub .ce-hubfoot {
   gap: 6px;
   pointer-events: auto;
 }
+/* ⚠️ LA HIÉRARCHIE DU CENTRE A ÉTÉ INVERSÉE le 29/07 (Adrien, réf. landing
+   Framer : petite pastille en haut, titre énorme, sous-titre discret). Avant,
+   la MARQUE faisait 34 px et la promesse 15 px — le visiteur lisait d'abord un
+   nom qu'il ne connaît pas, et devait chercher ce que le site fait. Les deux
+   classes n'ont pas changé de nom, elles ont échangé leur poids : c'est le
+   même DOM, donc la même montée liquide. */
+
+/* la MARQUE, réduite au rang de signature : elle SITUE, elle ne proclame plus.
+   ⚠️ PLUS DE PASTILLE DE VERRE (Adrien, 29/07). Le cartouche cerclé faisait un
+   deuxième objet flottant au-dessus du titre, et l'accueil en compte déjà deux
+   (les portes, la barre) : un troisième bord arrondi transformait le centre en
+   empilement de bulles. Le nom se pose NU sur le voile — c'est le voile qui le
+   détache, il n'a pas besoin d'un fond à lui. */
 .ce-hubmark {
+  display: inline-flex;
+  align-items: baseline;
+  padding: 0;
+  border: 0;
+  background: none;
   font-family: 'Rosarivo', Georgia, serif;
-  font-size: 34px;
-  line-height: 1.1;
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: 0.03em;
   color: var(--ce-ink);
 }
 .ce-hubmark span {
   color: var(--ce-accent);
 }
+/* LE TITRE — la promesse, en <h1> : c'est le seul vrai titre de la page.
+   `clamp` plutôt qu'une taille figée : la phrase doit tenir sur UNE ligne du
+   grand écran au portable, et c'est sa longueur qui commande, pas un palier de
+   media query. `text-wrap: balance` répartit proprement les deux lignes quand
+   elle finit par céder. */
 .ce-hubq {
-  font-size: 15px;
-  color: var(--ce-muted);
+  margin: 0;
+  font-family: 'Rosarivo', Georgia, serif;
+  font-weight: 400;
+  font-size: clamp(23px, 3.1vw, 37px);
+  /* ⚠️ 1.06 COUPAIT LES JAMBAGES — le « g » de « design » était tranché net
+     (capture Adrien). Le coupable n'est pas cette ligne seule mais son couple
+     avec `overflow: hidden` + `max-height` sur .ce-hubhead : un interlignage
+     serré fait sortir la jambe de la boîte, et le plafond la rogne. En Rosarivo
+     la descendante plonge bas — il lui faut 1.18 et une réserve dessous. */
+  line-height: 1.18;
+  padding-bottom: 0.12em;
+  letter-spacing: -0.015em;
+  color: var(--ce-ink);
+  max-width: min(94vw, 940px);
+  text-wrap: balance;
 }
 .ce-hubdrop {
   font-size: 12px;
@@ -881,6 +998,53 @@ body.ce-hub .ce-qb-core .ce-wm-btn svg {
 }
 body.ce-hub .ce-qb-core .ce-wm-btn:hover {
   background: var(--ce-hover);
+}
+/* AU SURVOL, L'ICÔNE PREND LA COULEUR DU THÈME (Adrien, 29/07). C'est le même
+   signal que la porte ACTIVE en bas (.ce-wm-btn.on svg) : survoler, c'est
+   pré-visualiser le choix. On ne teinte QUE le picto — teinter aussi les mots
+   ferait clignoter deux niveaux de lecture pour un simple passage de souris. */
+body.ce-hub .ce-qb-core .ce-wm-btn svg {
+  transition: color 0.18s ease;
+}
+body.ce-hub .ce-qb-core .ce-wm-btn:hover svg {
+  color: var(--ce-accent);
+}
+
+/* UNE SÉPARATION VERTICALE ENTRE LES DEUX PORTES (Adrien). ⚠️ En bordure sur le
+   bouton, elle décalerait sa boîte — or la rangée liquide MESURE ces boîtes
+   pour calculer le pont de goo. On la dessine donc en pseudo-élément, hors
+   flux : la géométrie ne bouge pas d'un pixel.
+   Elle ne se met QUE devant une porte précédée d'une autre : à une seule porte
+   il n'y a rien à séparer. */
+body.ce-hub .ce-qb-core .ce-wm-btn + .ce-wm-btn {
+  position: relative;
+}
+body.ce-hub .ce-qb-core .ce-wm-btn + .ce-wm-btn::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 22%;
+  bottom: 22%;
+  width: 1px;
+  background: var(--ce-border, rgba(35, 32, 26, 0.14));
+  pointer-events: none;
+}
+
+/* EXPLORER NE FAIT PAS PARTIE DE L'ACCUEIL (Adrien : « il y a déjà la barre de
+   recherche juste en dessous »). La classe est posée par le JS — accueil.js
+   décide, cette règle obéit —, ce qui rend la décision testable au lieu de la
+   cacher dans une feuille de style. La porte REVIENT dès que la barre
+   redescend : c'est le même bouton, rien n'est recréé.
+   ⚠️ `display:none` est ici la SEULE exception au « jamais display:none » de ce
+   fichier, et elle est sûre : une porte n'est pas une bulle du goo (les bulles
+   sont le cœur, « Avancé », le pont, le cartouche du bas). elembar.js sait déjà
+   l'ignorer — `activeBtn` et `bumpFor` testent `offsetParent` : le pont se
+   recentre alors sous la rangée et la coche s'éteint, ce qui est exactement
+   juste, puisqu'à l'accueil aucun mode n'a encore été choisi. Un repli par
+   max-width aurait, lui, laissé un ancrage large de zéro au bord gauche, et le
+   pont serait allé s'y coller. */
+body.ce-hub .ce-qb-core .ce-wm-btn.hub-off {
+  display: none;
 }
 
 /* « Avancé » n'a rien à faire dans une question : le slot se referme sur
@@ -932,11 +1096,17 @@ body.ce-hub .ce-lq-adv {
     right: 12px;
     transform: none;
   }
+  /* la pastille ne rétrécit plus (elle est déjà minuscule) ; c'est le TITRE qui
+     cède, et il passe alors sur deux lignes — d'où un plafond plus HAUT qu'en
+     grand écran, à rebours de l'ancienne règle où c'était la marque qui
+     occupait la place. */
   .ce-hubmark {
-    font-size: 26px;
+    font-size: 12px;
+    padding: 5px 12px 6px;
   }
   body.ce-hub .ce-hubhead {
-    max-height: 76px;
+    max-height: 190px;
+    gap: 12px;
   }
 }
 /* ⚠️ l'ancienne règle « body:has(.gpx-profile:not(.hidden)) .ce-elemwrap →

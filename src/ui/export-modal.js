@@ -161,9 +161,15 @@ export function openExportModal(deps) {
       status.textContent = 'Exporting…'
       fill.style.width = '50%'
       const png = state.format === 'png'
+      // La ligne de crédits DÉPEND DE L'EMPRISE : une carte creusée par EMODnet
+      // doit porter son attribution mot pour mot (CC BY 4.0), et une carte du
+      // Japon ne doit surtout pas la porter. `deps.creditLine` la calcule ;
+      // absente, on retombe sur la ligne fixe historique (voir export.js).
+      const credit = deps.creditLine?.()
       const blob = await exportImage({
         renderer, composer, camera, width, height,
         format: png ? 'image/png' : 'image/jpeg',
+        ...(credit ? { credit } : {}),
       })
       downloadBlob(blob, `shibumap-${width}x${height}.${png ? 'png' : 'jpg'}`)
       setBusy(false)

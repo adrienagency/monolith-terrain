@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShibuMap — La carte de ta course, en relief</title>
+<meta name="description" content="Envoie ton GPX, reçois ta course en 3D sous 48 h — gratuitement. Affiche 300 DPI, carte interactive à partager, vidéo teaser. La carte que tes coureurs vont encadrer.">
+<meta property="og:title" content="La carte de ta course, comme personne ne l'a jamais vue">
+<meta property="og:description" content="Envoie ton GPX — tu reçois ta course en 3D sous 48 h, gratuitement.">
+<meta property="og:image" content="https://shibumap.com/og.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rosarivo:ital@0;1&family=Bricolage+Grotesque:opsz,wght@12..96,200..800&display=swap" rel="stylesheet">
+<style>
+/* ---------------------------------------------------------------- racines
+   Les palettes sont les VRAIES palettes de la boutique ShibuMap (Alpage, Erg,
+   Stromboli, Fjord, Canopée) : cliquer une pastille rethème toute la page —
+   c'est la démonstration du produit PAR la page. */
+:root {
+  --paper: #f5f2ea;   /* fond — se rethème par palette */
+  --paper-2: #ece7da;
+  --ink: #23201a;
+  --ink-soft: rgba(35, 32, 26, .64);
+  --accent: #b8793a;
+  --accent-ink: #fdf6e8;
+  --card: #fbf9f4;
+  --line: rgba(35, 32, 26, .12);
+  --sea: #6fa9b5;
+  --serif: 'Rosarivo', Georgia, serif;
+  --sans: 'Bricolage Grotesque', system-ui, sans-serif;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  transition: background .8s ease, color .8s ease;
+  overflow-x: hidden;
+}
+/* le grain papier du produit, en pur CSS */
+body::after {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 999;
+  opacity: .05; mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+::selection { background: var(--accent); color: var(--accent-ink); }
+a { color: inherit; }
+img, video { max-width: 100%; display: block; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 clamp(20px, 4vw, 48px); }
+
+/* ---------------------------------------------------------------- nav */
+nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px clamp(20px, 4vw, 48px);
+  background: color-mix(in srgb, var(--paper) 82%, transparent);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--line);
+  transition: background .8s ease;
+}
+.brand { font-family: var(--serif); font-size: 21px; letter-spacing: .04em; text-decoration: none; }
+.brand em { color: var(--accent); font-style: normal; }
+.nav-cta {
+  font-size: 14px; font-weight: 600; text-decoration: none;
+  background: var(--ink); color: var(--paper);
+  padding: 10px 20px; border-radius: 999px;
+  transition: transform .2s ease, background .8s ease, color .8s ease;
+}
+.nav-cta:hover { transform: translateY(-1px); }
+.nav-cta:active { transform: scale(.98); }
+
+/* ---------------------------------------------------------------- héros */
+header {
+  min-height: 100dvh; display: grid; align-items: center;
+  padding-top: 90px; position: relative;
+}
+.hero-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: clamp(24px, 5vw, 72px); align-items: center; }
+@media (max-width: 900px) { .hero-grid { grid-template-columns: 1fr; } }
+.kicker {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 22px;
+}
+.kicker::before { content: ''; width: 26px; height: 1.5px; background: var(--accent); }
+h1 {
+  font-family: var(--serif); font-weight: 400;
+  font-size: clamp(38px, 5.4vw, 64px);
+  line-height: 1.08; letter-spacing: -.01em;
+  margin-bottom: 24px; text-wrap: balance;
+}
+h1 em { font-style: italic; color: var(--accent); }
+.lede { font-size: clamp(16px, 1.6vw, 19px); line-height: 1.65; color: var(--ink-soft); max-width: 46ch; margin-bottom: 34px; }
+.cta-row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 16px; font-weight: 600; text-decoration: none;
+  padding: 15px 28px; border-radius: 999px; border: 1.5px solid transparent;
+  transition: transform .2s ease, box-shadow .2s ease, background .8s ease;
+}
+.btn:active { transform: scale(.98); }
+.btn-primary { background: var(--accent); color: var(--accent-ink); box-shadow: 0 8px 26px color-mix(in srgb, var(--accent) 35%, transparent); }
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 12px 32px color-mix(in srgb, var(--accent) 45%, transparent); }
+.btn-ghost { border-color: var(--line); color: var(--ink); }
+.btn-ghost:hover { border-color: var(--ink); }
+.hero-note { font-size: 13.5px; color: var(--ink-soft); margin-top: 16px; }
+.hero-visual { position: relative; }
+.hero-visual .frame {
+  border-radius: 18px; overflow: hidden;
+  box-shadow: 0 30px 80px rgba(20, 24, 28, .22);
+  transform: rotate(1.2deg);
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+}
+/* hauteur BORNEE : og.png est portrait — sans ce plafond il avalait l'ecran */
+.hero-visual .frame img { width: 100%; height: min(58vh, 480px); object-fit: cover; object-position: center 62%; }
+.hero-visual figcaption {
+  position: absolute; bottom: -14px; left: 22px;
+  font-size: 12.5px; color: var(--ink-soft);
+  background: var(--card); border: 1px solid var(--line);
+  padding: 7px 14px; border-radius: 999px;
+}
+
+/* ---------------------------------------------------------------- bande de confiance */
+.trust { border-block: 1px solid var(--line); padding: 22px 0; margin-top: 8vh; }
+.trust .wrap { display: flex; gap: clamp(18px, 4vw, 54px); flex-wrap: wrap; justify-content: center; }
+.trust span { font-size: 13.5px; color: var(--ink-soft); letter-spacing: .02em; }
+.trust b { color: var(--ink); font-weight: 600; }
+
+/* ---------------------------------------------------------------- sections */
+section { padding: clamp(72px, 11vh, 130px) 0; }
+.sec-head { max-width: 640px; margin-bottom: clamp(36px, 6vh, 64px); }
+h2 { font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.6vw, 42px); line-height: 1.15; margin-bottom: 16px; text-wrap: balance; }
+.sec-head p { font-size: 17px; line-height: 1.65; color: var(--ink-soft); }
+
+/* palettes interactives */
+.palettes { background: var(--paper-2); transition: background .8s ease; }
+.chips { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 40px; }
+.chip {
+  display: flex; flex-direction: column; gap: 9px; align-items: center;
+  background: var(--card); border: 1.5px solid var(--line); border-radius: 14px;
+  padding: 14px 18px 11px; cursor: pointer; font: inherit; color: inherit;
+  transition: transform .2s ease, border-color .2s ease, background .8s ease;
+}
+.chip:hover { transform: translateY(-3px); }
+.chip[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 22%, transparent); }
+.chip .strip { display: flex; border-radius: 6px; overflow: hidden; }
+.chip .strip i { width: 17px; height: 26px; }
+.chip span { font-size: 13px; font-weight: 600; }
+.pal-stage {
+  border-radius: 18px; overflow: hidden; border: 1px solid var(--line);
+  min-height: 300px; display: grid; place-items: center; position: relative;
+  background: linear-gradient(160deg, var(--pal-a, #7d9464), var(--pal-d, #94897a) 55%, var(--pal-g, #767169));
+  transition: background 1s ease;
+}
+.pal-stage .sea-band { position: absolute; inset: auto 0 0 0; height: 34%; background: linear-gradient(to bottom, color-mix(in srgb, var(--sea) 70%, transparent), var(--sea)); transition: background 1s ease; }
+.pal-stage figcaption { position: relative; z-index: 2; font-family: var(--serif); color: #fff; font-size: clamp(20px, 2.6vw, 30px); text-shadow: 0 2px 18px rgba(0,0,0,.35); padding: 0 24px; text-align: center; }
+
+/* B2B2C — les trois livrables */
+.deliv { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+@media (max-width: 900px) { .deliv { grid-template-columns: 1fr; } }
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+  padding: 30px 28px; transition: background .8s ease, transform .25s ease;
+}
+.card:hover { transform: translateY(-4px); }
+.card .num { font-family: var(--serif); font-size: 15px; color: var(--accent); margin-bottom: 14px; }
+.card h3 { font-size: 20px; font-weight: 650; margin-bottom: 10px; }
+.card p { font-size: 15.5px; line-height: 1.6; color: var(--ink-soft); }
+.card .tag { display: inline-block; margin-top: 16px; font-size: 12.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--accent); }
+
+/* comment ça marche */
+.steps { counter-reset: s; display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(20px, 3vw, 40px); }
+@media (max-width: 900px) { .steps { grid-template-columns: 1fr; } }
+.step { position: relative; padding-top: 68px; }
+.step::before {
+  counter-increment: s; content: counter(s);
+  position: absolute; top: 0; left: 0;
+  font-family: var(--serif); font-size: 46px; color: var(--accent); opacity: .9;
+}
+.step h3 { font-size: 19px; font-weight: 650; margin-bottom: 8px; }
+.step p { font-size: 15.5px; line-height: 1.6; color: var(--ink-soft); }
+
+/* prix */
+.price-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; align-items: stretch; }
+@media (max-width: 900px) { .price-grid { grid-template-columns: 1fr; } }
+.price {
+  background: var(--card); border: 1.5px solid var(--line); border-radius: 20px;
+  padding: 34px 30px; display: flex; flex-direction: column;
+  transition: background .8s ease;
+}
+.price.hot { border-color: var(--accent); position: relative; }
+.price.hot::before {
+  content: 'Le plus choisi'; position: absolute; top: -12px; left: 28px;
+  font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  background: var(--accent); color: var(--accent-ink); padding: 4px 12px; border-radius: 999px;
+}
+.price h3 { font-size: 17px; font-weight: 650; margin-bottom: 6px; }
+.price .amount { font-family: var(--serif); font-size: 40px; margin: 8px 0 4px; }
+.price .amount small { font-size: 15px; font-family: var(--sans); color: var(--ink-soft); }
+.price ul { list-style: none; margin: 20px 0 26px; display: grid; gap: 10px; }
+.price li { font-size: 14.5px; line-height: 1.5; color: var(--ink-soft); padding-left: 22px; position: relative; }
+.price li::before { content: '·'; position: absolute; left: 6px; color: var(--accent); font-weight: 700; }
+.price .btn { margin-top: auto; justify-content: center; }
+.price-note { margin-top: 22px; font-size: 13.5px; color: var(--ink-soft); }
+
+/* CTA finale + formulaire */
+.final { background: var(--ink); color: var(--paper); transition: background .8s ease, color .8s ease; }
+.final h2 { color: inherit; }
+.final .sec-head p { color: color-mix(in srgb, var(--paper) 72%, transparent); }
+form { display: grid; gap: 14px; max-width: 520px; }
+label { font-size: 13.5px; font-weight: 600; letter-spacing: .03em; }
+input, textarea {
+  font: inherit; color: var(--ink);
+  background: var(--paper); border: 1.5px solid transparent; border-radius: 12px;
+  padding: 13px 16px; width: 100%;
+}
+input:focus-visible, textarea:focus-visible, .btn:focus-visible, .chip:focus-visible, a:focus-visible {
+  outline: 2.5px solid var(--accent); outline-offset: 2px;
+}
+form .btn { justify-content: center; border: none; cursor: pointer; font-family: var(--sans); }
+.form-note { font-size: 13px; color: color-mix(in srgb, var(--paper) 62%, transparent); }
+
+footer { padding: 34px 0 44px; border-top: 1px solid var(--line); }
+footer .wrap { display: flex; justify-content: space-between; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--ink-soft); }
+footer a { text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+
+/* révélations au scroll — inertes si mouvement réduit */
+.rv { opacity: 0; transform: translateY(26px); }
+@media (prefers-reduced-motion: reduce) {
+  .rv { opacity: 1; transform: none; }
+  html { scroll-behavior: auto; }
+}
+</style>
+</head>
+<body>
+
+<nav aria-label="Navigation principale">
+  <a class="brand" href="https://shibumap.com/">ShibuMap<em>.</em></a>
+  <a class="nav-cta" href="#demo">Voir ma course en 3D</a>
+</nav>
+
+<header>
+  <div class="wrap hero-grid">
+    <div>
+      <p class="kicker rv">Pour les organisateurs de course</p>
+      <h1 class="rv">La carte de ta course, <em>comme personne</em> ne l'a jamais vue.</h1>
+      <p class="lede rv">Relief au mètre, mer vivante, lumière du soir de ta première vague de départ. Une carte que tes coureurs partagent avant la course — et encadrent après.</p>
+      <div class="cta-row rv">
+        <a class="btn btn-primary" href="#demo">Voir ma course en 3D</a>
+        <a class="btn btn-ghost" href="https://shibumap.com/" target="_blank" rel="noopener">Explorer la carte ↗</a>
+      </div>
+      <p class="hero-note rv">Envoie ton GPX — tu reçois ta course en relief sous 48 h. <b>Gratuit, sans engagement.</b></p>
+    </div>
+    <figure class="hero-visual rv">
+      <div class="frame">
+        <!-- 🎬 remplace par ta capture/vidéo de course : garde le ratio 4/3 -->
+        <img src="/og.png" alt="Une carte ShibuMap : bloc de relief 3D aux couleurs topographiques, posé sur un fond papier" width="1200" height="900">
+      </div>
+      <figcaption>Grande Traversée · rendu ShibuMap, données IGN au mètre</figcaption>
+    </figure>
+  </div>
+  <div class="trust rv">
+    <div class="wrap">
+      <span><b>Relief au mètre</b> — IGN RGE ALTI</span>
+      <span><b>Bathymétrie marine</b> — GEBCO · EMODnet</span>
+      <span><b>100 % dans le navigateur</b> — rien à installer</span>
+      <span>Conçu à <b>Annecy</b>, au cœur du trail</span>
+    </div>
+  </div>
+</header>
+
+<section class="palettes" id="palettes">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <h2>Ta course, à tes couleurs.</h2>
+      <p>Chaque carte se décline dans les palettes ShibuMap — clique, et regarde la page entière changer d'humeur. C'est exactement ce que fait le produit avec ta carte.</p>
+    </div>
+    <div class="chips rv" role="group" aria-label="Choisir une palette">
+      <!-- pastilles générées par le script depuis les vraies palettes de la boutique -->
+    </div>
+    <figure class="pal-stage rv" aria-hidden="true">
+      <div class="sea-band"></div>
+      <figcaption>l'aperçu vit ici — ta carte prendra ces couleurs</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="livrables">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <h2>Trois livrables. Une course inoubliable.</h2>
+      <p>Tout part de ton GPX. Tout est cohérent — l'affiche, le lien, la vidéo racontent la même carte.</p>
+    </div>
+    <div class="deliv">
+      <article class="card rv">
+        <p class="num">01</p>
+        <h3>L'affiche qui arrête le regard</h3>
+        <p>Ton parcours en relief, prêt pour l'imprimeur : 300 DPI, formats A2 à A0. La carte devient l'identité visuelle de ton édition.</p>
+        <span class="tag">PDF print-ready</span>
+      </article>
+      <article class="card rv">
+        <p class="num">02</p>
+        <h3>Le lien que tes coureurs partagent</h3>
+        <p>Une carte interactive, à ton nom, permanente. Ravitos, D+, points de passage — tes coureurs la font tourner dans les groupes avant même l'ouverture des dossards.</p>
+        <span class="tag">shibumap.com/r/ta-course</span>
+      </article>
+      <article class="card rv">
+        <p class="num">03</p>
+        <h3>La vidéo qui remplit les réseaux</h3>
+        <p>Un survol cinématique du parcours, lumière rasante, mer en mouvement. Le teaser de ta course, sans tournage ni drone.</p>
+        <span class="tag">Vidéo HD verticale &amp; large</span>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="palettes" id="comment">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <h2>D'un GPX à la carte, en trois gestes.</h2>
+    </div>
+    <div class="steps">
+      <div class="step rv">
+        <h3>Envoie ton tracé</h3>
+        <p>Ton GPX, le nom de la course, c'est tout. Pas de brief, pas d'allers-retours de maquettes.</p>
+      </div>
+      <div class="step rv">
+        <h3>Reçois ta démo sous 48 h</h3>
+        <p>Ta course, en relief, dans ton navigateur. Tu la fais tourner à ton équipe — c'est gratuit, et ça le reste si ça ne te convainc pas.</p>
+      </div>
+      <div class="step rv">
+        <h3>Valide, on livre tout</h3>
+        <p>Affiche print-ready, lien permanent, vidéo teaser. Facture en bonne et due forme, licence commerciale écrite.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="prix">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <h2>Un prix à l'événement. Jamais d'abonnement.</h2>
+      <p>Une course, c'est annuel — ton prix aussi. À titre de repère : une carte de graphiste coûte plusieurs centaines à quelques milliers d'euros, et des semaines d'allers-retours.</p>
+    </div>
+    <div class="price-grid">
+      <div class="price rv">
+        <h3>Carte de course</h3>
+        <p class="amount">250 €<small> / événement</small></p>
+        <ul>
+          <li>Jusqu'à 500 coureurs</li>
+          <li>Affiche 300 DPI (A2)</li>
+          <li>Lien interactif permanent</li>
+          <li>Licence commerciale 1 an</li>
+        </ul>
+        <a class="btn btn-ghost" href="#demo">Commencer par la démo</a>
+      </div>
+      <div class="price hot rv">
+        <h3>Grande course</h3>
+        <p class="amount">400 €<small> / événement</small></p>
+        <ul>
+          <li>Coureurs illimités</li>
+          <li>Affiche 300 DPI (jusqu'à A0)</li>
+          <li>Lien interactif permanent</li>
+          <li>Vidéo teaser HD incluse</li>
+          <li>Licence commerciale 1 an</li>
+        </ul>
+        <a class="btn btn-primary" href="#demo">Commencer par la démo</a>
+      </div>
+      <div class="price rv">
+        <h3>Édition signature</h3>
+        <p class="amount">Sur devis<small> · dès 700 €</small></p>
+        <ul>
+          <li>Affiche + site + vidéos multi-formats</li>
+          <li>Palette aux couleurs de ta course</li>
+          <li>Posters souvenir pour tes finishers</li>
+          <li>Accompagnement direct</li>
+        </ul>
+        <a class="btn btn-ghost" href="#demo">En parler</a>
+      </div>
+    </div>
+    <p class="price-note rv">Tu cours, tu ne organises pas ? L'exploration et l'export 1920 px sont gratuits sur <a href="https://shibumap.com/">shibumap.com</a> — le Pass à 19 € débloque le 4K et la vidéo.</p>
+  </div>
+</section>
+
+<section class="final" id="demo">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <h2>Vois ta course avant de décider.</h2>
+      <p>On fait ta carte de démonstration, gratuitement, sous 48 h. Si elle ne te fait pas d'effet, tu n'en entendras plus parler.</p>
+    </div>
+    <form class="rv" name="demo-course" method="POST" data-netlify="true" netlify-honeypot="site">
+      <input type="hidden" name="form-name" value="demo-course">
+      <p style="display:none"><label>Ne pas remplir : <input name="site"></label></p>
+      <div>
+        <label for="f-course">Ta course</label>
+        <input id="f-course" name="course" required placeholder="Nom de la course, ville">
+      </div>
+      <div>
+        <label for="f-email">Ton email</label>
+        <input id="f-email" name="email" type="email" required placeholder="toi@ta-course.fr">
+      </div>
+      <div>
+        <label for="f-gpx">Lien vers ton tracé <span style="font-weight:400">(GPX, Strava, site — optionnel)</span></label>
+        <input id="f-gpx" name="trace" placeholder="https://…">
+      </div>
+      <button class="btn btn-primary" type="submit">Recevoir ma course en 3D — gratuit</button>
+      <p class="form-note">48 h ouvrées, un seul email, aucune liste de diffusion. Ou écris directement : <a href="mailto:adrien@adrienagency.com">adrien@adrienagency.com</a></p>
+    </form>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© Adrien Agency — ShibuMap, conçu à Annecy</span>
+    <span>
+      <a href="https://shibumap.com/">La carte</a> ·
+      <a href="https://shibumap.com/templates">Palettes</a> ·
+      <a href="mailto:adrien@adrienagency.com">Contact</a>
+    </span>
+    <span>Relief IGN · © OpenStreetMap contributors · GEBCO · EMODnet (CC BY 4.0)</span>
+  </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.7/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.7/dist/ScrollTrigger.min.js"></script>
+<script>
+/* ------------------------------------------------------------- palettes
+   Les VRAIES palettes de la boutique (public/templates/data.json). Chaque
+   entrée rethème la page : papier, encre, accent, cartes, mer. */
+const PALETTES = [
+  { name: 'Alpage',    strip: ['#7d9464','#95aa72','#b4c18e','#cfc9a2','#b7a789','#94897a','#767169','#f3f5f6'], sea: '#6fa9b5',
+    ui: { paper:'#f3f4ef', paper2:'#e7eadf', ink:'#26291f', accent:'#6c8354', accentInk:'#f3f5ec', card:'#fafbf6', sea:'#6fa9b5' } },
+  { name: 'Erg',       strip: ['#f3e3c3','#e9cf9d','#ddb377','#cf9752','#b8793a','#945c2b','#6b421e','#fdf6e8'], sea: '#66c2ae',
+    ui: { paper:'#f7f0e2', paper2:'#efe3cb', ink:'#2d2014', accent:'#b8793a', accentInk:'#fdf6e8', card:'#fcf7ec', sea:'#66c2ae' } },
+  { name: 'Stromboli', strip: ['#2a2422','#3d322e','#584238','#7c4a33','#a5502c','#d0682f','#ef9d4b','#f7e9d9'], sea: '#4a7d8c',
+    ui: { paper:'#221d1b', paper2:'#2c2523', ink:'#f2e6d8', accent:'#ef9d4b', accentInk:'#2a2422', card:'#2f2825', sea:'#4a7d8c' } },
+  { name: 'Fjord',     strip: ['#8fa79b','#a9bcae','#c2cfc4','#a2b6bd','#7f99a9','#5d7488','#3f4e62','#eef2f4'], sea: '#5f93af',
+    ui: { paper:'#eef1f1', paper2:'#e0e7e8', ink:'#22303c', accent:'#4f6e85', accentInk:'#eef2f4', card:'#f7f9f9', sea:'#5f93af' } },
+  { name: 'Canopée',   strip: ['#27492c','#396939','#528a44','#75a457','#9dbd74','#c5d39a','#e4e6c5','#f7f5ea'], sea: '#4fc3ad',
+    ui: { paper:'#f4f4e9', paper2:'#e9ead7', ink:'#1f2b1c', accent:'#3f7a3c', accentInk:'#f2f5e9', card:'#fafaf1', sea:'#4fc3ad' } },
+]
+const chips = document.querySelector('.chips')
+const stage = document.querySelector('.pal-stage')
+const R = document.documentElement.style
+function applyPalette(p, btn) {
+  R.setProperty('--paper', p.ui.paper)
+  R.setProperty('--paper-2', p.ui.paper2)
+  R.setProperty('--ink', p.ui.ink)
+  R.setProperty('--ink-soft', p.ui.ink + 'a6')
+  R.setProperty('--accent', p.ui.accent)
+  R.setProperty('--accent-ink', p.ui.accentInk)
+  R.setProperty('--card', p.ui.card)
+  R.setProperty('--sea', p.ui.sea)
+  R.setProperty('--line', p.ui.ink + '1f')
+  R.setProperty('--pal-a', p.strip[0]); R.setProperty('--pal-d', p.strip[4]); R.setProperty('--pal-g', p.strip[6])
+  chips.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', c === btn ? 'true' : 'false'))
+}
+for (const p of PALETTES) {
+  const b = document.createElement('button')
+  b.className = 'chip'; b.type = 'button'; b.setAttribute('aria-pressed', 'false')
+  b.innerHTML = `<span class="strip" aria-hidden="true">${p.strip.map((c) => `<i style="background:${c}"></i>`).join('')}</span><span>${p.name}</span>`
+  b.addEventListener('click', () => applyPalette(p, b))
+  chips.append(b)
+}
+applyPalette(PALETTES[1], chips.children[1]) // Erg, la plus proche du papier ShibuMap
+
+/* ------------------------------------------------------------- GSAP
+   Révélations sobres au scroll — la page respire, elle ne gesticule pas.
+   Tout est neutralisé si l'utilisateur préfère un mouvement réduit. */
+if (!matchMedia('(prefers-reduced-motion: reduce)').matches && window.gsap) {
+  gsap.registerPlugin(ScrollTrigger)
+  // le héros entre en cascade au chargement
+  gsap.to('header .rv', { opacity: 1, y: 0, duration: .9, ease: 'power3.out', stagger: .09, delay: .15 })
+  // le reste se révèle à l'entrée dans le cadre
+  document.querySelectorAll('section .rv, footer .rv').forEach((el) => {
+    gsap.to(el, {
+      opacity: 1, y: 0, duration: .8, ease: 'power3.out',
+      scrollTrigger: { trigger: el, start: 'top 86%' },
+    })
+  })
+  // l'image du héros se redresse doucement en scrollant — un seul effet, tenu
+  gsap.to('.hero-visual .frame', {
+    rotate: 0, ease: 'none',
+    scrollTrigger: { trigger: 'header', start: 'top top', end: 'bottom 40%', scrub: true },
+  })
+} else {
+  document.querySelectorAll('.rv').forEach((el) => { el.style.opacity = 1; el.style.transform = 'none' })
+}
+</script>
+</body>
+</html>

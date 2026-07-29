@@ -1,0 +1,31 @@
+{
+  "_pourquoi": "Les zones bathymétriques FINES prévues, du plus fin au plus grossier. Fichier VERSIONNÉ parce que c'est un choix éditorial et budgétaire, pas un produit de cuisson : il dit ce qu'on a décidé de payer en octets. scripts/build-bathy-index.mjs le confronte aux tuiles réellement cuites et n'écrit dans public/data/bathy/index.json que ce qui existe VRAIMENT sur le disque. Une zone déclarée mais non cuite est donc sans effet — voir le dossier docs/superpowers/plans/2026-07-28-bathymetrie-cotiere.md.",
+  "_licences": "Chaque source porte une attribution IMPOSÉE mot pour mot, recopiée dans src/bathy-sources.js. Ajouter une zone sans ajouter sa source au catalogue est une faute de licence, pas un oubli de confort.",
+  "base": { "source": "gebco", "zmax": 8 },
+  "zmin": 4,
+  "zones": [
+    {
+      "id": "fr-metro",
+      "source": "emodnet",
+      "zmax": 10,
+      "bbox": [-6, 41, 10, 52],
+      "_note": "Premier jalon. 546 tuiles z10 estimées, ~4 Mo. EMODnet DTM 2024 à 115 m contre 464 m pour GEBCO : 4× en linéaire. Zone de contrôle : rade de Brest (48.35 / -4.5)."
+    }
+  ],
+  "_reserve": [
+    {
+      "id": "eu-mers",
+      "source": "emodnet",
+      "zmax": 10,
+      "bbox": [-36, 25, 43, 85],
+      "_note": "Toutes les mers européennes. 23 814 tuiles z10, 100-200 Mo. À N'OUVRIR QU'APRÈS mesure du poids réel de fr-metro : dist/ fait déjà 968 Mo dont 336 de bathymétrie, et le plan Netlify est à plafond dur."
+    },
+    {
+      "id": "us-est",
+      "source": "bluetopo",
+      "zmax": 12,
+      "bbox": [-98, 24, -66, 45],
+      "_note": "NOAA BlueTopo, CC0-1.0, 2-16 m natif. Bucket s3://noaa-ocs-nationalbathymetry-pds listable sans compte (vérifié), avec un geopackage d'index des tuiles. Le plus propre juridiquement du dossier, mais aucun visiteur français ne le verra."
+    }
+  ]
+}

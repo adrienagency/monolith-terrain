@@ -216,14 +216,43 @@ test('les paliers ne coûtent jamais plus cher en descendant', () => {
 test('les paliers reprennent EXACTEMENT les leviers de perf.js', () => {
   // Le tableau et le gouverneur doivent raconter la même histoire, sinon le
   // premier rendu et la première correction se contredisent à l'écran.
-  // perf.js : `_aoTierOk = n < 2`, `_bloomTierOk = n < 3`, DoF coupé à n >= 2,
-  // grain coupé à n >= 3, verre 6/4/2/2.
-  assert.deepEqual(PALIERS.map((p) => p.ssao), [true, true, false, false])
+  // perf.js : `_bloomTierOk = n < 3`, DoF coupé à n >= 2, grain coupé à
+  // n >= 3, verre 6/4/2/2.
+  //
+  // ⚠️ `ssao` FAIT EXCEPTION et c'est délibéré (28/07/2026, demande d'Adrien) :
+  // perf.js autorise encore l'occlusion ambiante aux paliers 0 et 1
+  // (`_aoTierOk = n < 2`), mais elle ne s'ALLUME plus toute seule nulle part.
+  // Ce champ dit désormais l'ÉTAT DE DÉPART, pas la permission — l'interrupteur
+  // « Ombrage des creux » du panneau Effets reste, lui, entièrement libre.
+  assert.deepEqual(PALIERS.map((p) => p.ssao), [false, false, false, false])
   assert.deepEqual(PALIERS.map((p) => p.bloom), [true, true, true, false])
   assert.deepEqual(PALIERS.map((p) => p.dof), [true, true, false, false])
   assert.deepEqual(PALIERS.map((p) => p.grain), [true, true, true, false])
   assert.deepEqual(PALIERS.map((p) => p.verreMer), [6, 4, 2, 2])
   assert.deepEqual(PALIERS.map((p) => p.nuages), [0, 1, 2, 3])
+})
+
+test('SSAO éteint par défaut sur TOUTES les machines, la plus forte comprise', () => {
+  // La demande d'Adrien du 28/07/2026, prise au mot : « désactiver par défaut
+  // le SSAO ». Pas « sur les machines faibles » — partout. C'est une passe de
+  // scène ENTIÈRE en plus pour un effet que la carte, vue de haut, ne montre
+  // presque pas.
+  for (const machine of [RTX_1080P, MBP_M1, IMAC_2015, PORTABLE_2012, SWIFTSHADER]) {
+    assert.equal(reglagesServis(machine).ssao, false, `${machine.carte}`)
+  }
+})
+
+test('les ombres démarrent en 1024², pas en 2048², sur tous les paliers', () => {
+  // Adrien, 28/07/2026 : « par défaut, ombres moins précises que ça ».
+  // ⚠️ CE QUE CE RÉGLAGE CHANGE, ET CE QU'IL NE CHANGE PAS. La résolution de la
+  // carte d'ombres ne retire pas UN SEUL triangle : la passe d'ombre dessine
+  // exactement les mêmes objets, seulement dans une texture quatre fois plus
+  // petite. Ce qu'elle économise est réel mais ailleurs — le remplissage, les
+  // deux passes de flou VSM (blurSamples 16) qui balayent toute la carte à
+  // chaque image en mode dynamique, et 16 Mo → 4 Mo de mémoire vidéo allouée
+  // AVANT la première image. Les triangles, eux, se comptent ailleurs (voir la
+  // note « ombresPortees » ci-dessous).
+  assert.deepEqual(PALIERS.map((p) => p.ombresRes), [1024, 1024, 1024, 1024])
 })
 
 test('classerCharge : les seuils séparent les écrans qu on voit vraiment', () => {
@@ -268,15 +297,17 @@ test('SwiftShader (rendu logiciel) → palier MINIMAL, quel que soit le reste', 
 })
 
 test('RTX 3070 en 1080p → palier HAUT, et RIEN ne change pour elle', () => {
-  // Le test de non-régression : la machine normale doit recevoir exactement ce
-  // qu'elle recevait avant ce module. Densité = celle de l'écran, ombres
-  // dynamiques 2048, tous les effets autorisés.
+  // Le test de non-régression : la machine normale garde sa densité d'écran et
+  // ses ombres DYNAMIQUES — c'est le mouvement du soleil qui fait la carte.
+  // Deux réglages ont bougé le 28/07/2026, et pour tout le monde, y compris
+  // ici : la carte d'ombres démarre en 1024² (elle naissait en 2048²) et
+  // l'occlusion ambiante est éteinte. Voir les deux tests dédiés plus haut.
   const r = reglagesServis(RTX_1080P)
   assert.equal(r.palier, 0)
   assert.equal(r.densite, 1, 'la densité de l’écran, ni plus ni moins')
   assert.equal(r.ombres, 'dynamic')
-  assert.equal(r.ombresRes, 2048)
-  assert.equal(r.ssao, true)
+  assert.equal(r.ombresRes, 1024)
+  assert.equal(r.ssao, false)
   assert.equal(r.bloom, true)
   assert.equal(r.dof, true)
   assert.equal(r.analyseMax, 0, '0 = analyse à pleine taille du MNT')
@@ -288,8 +319,8 @@ test('MacBook Pro M1 : reconnu FORT, mais borné par la barre haute de 2K', () =
   // c'est bien ce que dit le PALIER : 0, pleine qualité, tous les effets.
   const r = reglagesServis(MBP_M1)
   assert.equal(r.palier, 0)
-  assert.equal(r.ssao, true, 'le palier est intact : ce n’est pas une dégradation')
-  assert.equal(r.dof, true)
+  assert.equal(r.dof, true, 'le palier est intact : ce n’est pas une dégradation')
+  assert.equal(r.bloom, true)
   // Sa densité, elle, tombe sous 2 — non pas parce qu'on le juge faible, mais
   // parce qu'Adrien a posé une barre haute commune le 28/07 : « réso 2K max ».
   // Elle s'applique à TOUT LE MONDE, y compris à la machine la plus forte.

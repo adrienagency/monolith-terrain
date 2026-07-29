@@ -2,7 +2,8 @@
 //
 // Nothing is stored. Tiles are fetched per view straight from each country's
 // public WMTS — measured 1.1-3.4 MB for a view, 0 bytes deployed. The 887 MB
-// road-tile lesson was about data we HOST; this hosts nothing.
+// road-tile lesson (ce calque-là a fini par quitter le site) was about data we
+// HOST; this hosts nothing.
 //
 // Off by default: photography is a mode, not the identity. The product's own
 // register is the quiet editorial relief (hypsometric palettes, fine contours,

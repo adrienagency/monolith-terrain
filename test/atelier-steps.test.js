@@ -209,11 +209,11 @@ test('changedKeys compare par VALEUR — deux rampes identiques ne sont pas une 
 })
 
 test('changedKeys reste cantonné à SON étape', () => {
-  const base = { rampStops: [], bgEnv: '', roadsEnabled: true }
-  const look = { rampStops: [], bgEnv: 'dawn', roadsEnabled: false }
+  const base = { rampStops: [], bgEnv: '', waterEnabled: true }
+  const look = { rampStops: [], bgEnv: 'dawn', waterEnabled: false }
   assert.deepEqual(changedKeys('palette', look, base), [])
   assert.deepEqual(changedKeys('ciel', look, base), ['bgEnv'])
-  assert.deepEqual(changedKeys('calques', look, base), ['roadsEnabled'])
+  assert.deepEqual(changedKeys('calques', look, base), ['waterEnabled'])
   assert.equal(isStepTouched('ciel', look, base), true)
 })
 
@@ -233,13 +233,13 @@ test('l’étape Template ne peut pas être « modifiée » — elle est la réf
 // d'ARRIVÉE et non au template : c'est la séance entière qui part.
 
 test('rien de touché : Annuler n’a rien à emporter, donc rien à demander', () => {
-  const l = { rampStops: [1], bgEnv: 'dawn', roadsEnabled: true, seaWaveH: 0.8 }
+  const l = { rampStops: [1], bgEnv: 'dawn', waterEnabled: true, seaWaveH: 0.8 }
   assert.deepEqual(discardSummary(l, { ...l }), [])
 })
 
 test('discardSummary nomme les étapes touchées, dans l’ordre du rail', () => {
-  const entry = { rampStops: [1], bgEnv: '', roadsEnabled: true, cloudsEnabled: false }
-  const look = { rampStops: [1, 2], bgEnv: 'dawn', roadsEnabled: true, cloudsEnabled: true }
+  const entry = { rampStops: [1], bgEnv: '', waterEnabled: true, cloudsEnabled: false }
+  const look = { rampStops: [1, 2], bgEnv: 'dawn', waterEnabled: true, cloudsEnabled: true }
   assert.deepEqual(discardSummary(look, entry), ['Palette', 'Ciel', 'Météo'])
 })
 
@@ -283,15 +283,15 @@ test('skySummary nomme le ciel posé, ou dit qu’il n’y en a pas', () => {
 })
 
 test('layersSummary liste les calques allumés, dans l’ordre du panneau', () => {
-  assert.equal(layersSummary({ roadsEnabled: true, waterEnabled: true, placesEnabled: true }), 'Routes · Eau · Lieux')
+  assert.equal(layersSummary({ waterEnabled: true, placesEnabled: true, aerialEnabled: true }), 'Eau · Lieux · Photo')
   assert.equal(layersSummary({ waterEnabled: true }), 'Eau')
   assert.equal(layersSummary({}), 'Aucun calque')
-  assert.equal(layersSummary({ roadsEnabled: false, waterEnabled: false }), 'Aucun calque')
+  assert.equal(layersSummary({ waterEnabled: false, placesEnabled: false }), 'Aucun calque')
 })
 
 test('LAYERS ne contient que des calques d’habillage — ni courbes ni grille', () => {
   const keys = LAYERS.map((l) => l.key)
-  assert.ok(keys.includes('roadsEnabled') && keys.includes('waterEnabled') && keys.includes('placesEnabled'))
+  assert.ok(keys.includes('waterEnabled') && keys.includes('placesEnabled'))
   for (const k of keys) assert.ok(!SIMPLE_EXCLUDED.includes(k))
 })
 
@@ -304,6 +304,21 @@ test('plus aucun calque « trait de côte » à allumer', () => {
   assert.ok(!LAYERS.some((l) => l.key === 'coastLine'))
   assert.ok(!downstreamKeys().includes('coastLine'))
   assert.ok(!layersSummary({ coastLine: true }).includes('Côte'))
+})
+
+// ---- ⑩ le calque ROUTES a quitté le site ---------------------------------
+// Adrien : « très lourd, très mauvais, tu peux le supprimer. » Même forme que
+// le trait de côte ci-dessus : la clé survit dans de vieux gabarits, elle ne
+// doit plus rien allumer ni s'annoncer nulle part.
+
+test('plus aucun calque « routes » à allumer', () => {
+  assert.ok(!LAYERS.some((l) => l.key === 'roadsEnabled'))
+  for (const k of ['roadsEnabled', 'roadsOpacity', 'roadsDetail', 'roadColor']) {
+    assert.ok(!downstreamKeys().includes(k), `${k} est encore réglable depuis l’assistant`)
+  }
+  // un vieux gabarit routes-allumées ne doit rien faire dire au résumé
+  assert.equal(layersSummary({ roadsEnabled: true }), 'Aucun calque')
+  assert.deepEqual(changedKeys('calques', { roadsEnabled: true }, { roadsEnabled: false }), [])
 })
 
 test('windSummary parle en points cardinaux, et se tait quand rien ne vole', () => {
@@ -352,11 +367,11 @@ test('weatherSummary assemble ciel, vent et mer en une ligne lisible', () => {
 })
 
 test('stepSummary route vers le bon résumé et reste muet sur l’étape Template', () => {
-  const p = { rampStops: [1, 2], bgEnv: '', roadsEnabled: true, cloudsEnabled: false, windSpeed: 1, seaWaveH: 0.5 }
+  const p = { rampStops: [1, 2], bgEnv: '', waterEnabled: true, cloudsEnabled: false, windSpeed: 1, seaWaveH: 0.5 }
   assert.equal(stepSummary('template', p, []), '')
   assert.equal(stepSummary('palette', p, []), '2 teintes')
   assert.equal(stepSummary('ciel', p, []), 'Aucun ciel')
-  assert.equal(stepSummary('calques', p, []), 'Routes')
+  assert.equal(stepSummary('calques', p, []), 'Eau')
   assert.equal(stepSummary('meteo', p, []), 'Ciel dégagé · sans vent · petites vagues')
   assert.equal(stepSummary('inconnu', p, []), '')
 })

@@ -19,6 +19,12 @@ import assert from 'node:assert/strict'
 import { analyzeDem, resampleField } from '../src/terrain-analysis.js'
 import { buildSeaMask, blurMask } from '../src/sea-mask.js'
 import { computeTerrainJob, jobStillValid, jobCouvertParEnVol, scheduleTerrainJob, runTerrainJob, cancelTerrainJobs, resetTerrainTransport } from '../src/terrain-jobs.js'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { Terrain } from '../src/terrain.js'
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 // ---------------------------------------------------------------------------
 // Plusieurs MODÈLES D'ÉLÉVATION, pas un seul : le rapport de référence a mesuré
@@ -403,4 +409,92 @@ test('cancelTerrainJobs résout les travaux en vol à null au lieu de les abando
     delete globalThis.Worker
     resetTerrainTransport()
   }
+})
+
+// ---------------------------------------------------------------------------
+// TROIS TRAVAUX PAR ZOOM, DONT UN POUR RIEN
+// ---------------------------------------------------------------------------
+// Mesuré à La Réunion (Chrome piloté, pile d'appel de chaque postMessage) :
+// un changement de zoom postait TROIS travaux au travailleur.
+//   1. `terrain.rebuild` → masque de mer + analyse de relief. Légitime, c'est
+//      lui que le voile de chargement attend.
+//   2. `main.js` lâchait le trait de côte de la zone PRÉCÉDENTE APRÈS la
+//      reconstruction : masque de mer SEUL, 9 Mo de MNT recopiés, ~45 ms de
+//      travailleur — pour un résultat que le 3ᵉ écrasait 70 ms plus tard.
+//   3. l'ARRIVÉE du vrai trait de côte → masque de mer avec la landMask.
+//      Légitime aussi : c'est lui qui rend leurs polders aux Pays-Bas.
+// Le 2ᵉ est supprimé en lâchant le trait de côte AVANT la reconstruction, avec
+// `rebuildFields: false` — `rebuild` lance les champs juste après, et il les
+// lance alors dans le BON état d'attente (aucun trait de côte, plutôt que celui
+// d'une zone qu'on vient de quitter).
+test('setCoastMask : lâcher le trait de côte AVANT une reconstruction ne poste rien', () => {
+  const bloc = () => {
+    let recuites = 0
+    const t = {
+      mapUniforms: { uCoastMask: { value: null }, uCoastMaskOn: { value: 1 } },
+      _coastPlaceholder: { blanc: true }, // évite whiteTexture() (canevas DOM)
+      _coastImage: { zonePrecedente: true },
+      _coastLand: { cache: true },
+      dem: { data: new Float32Array(16) },
+      _buildFields: () => { recuites++ },
+    }
+    return { t, recuites: () => recuites }
+  }
+
+  // le comportement par défaut, INCHANGÉ : lâcher le masque recuit la mer
+  const a = bloc()
+  Terrain.prototype.setCoastMask.call(a.t, null)
+  assert.equal(a.recuites(), 1, 'sans drapeau, le masque de mer est bien recuit')
+  assert.equal(a.t._coastImage, null)
+  assert.equal(a.t._coastLand, null, 'la landMask mémorisée est invalidée dans les deux cas')
+  assert.equal(a.t.mapUniforms.uCoastMaskOn.value, 0)
+
+  // le chemin du zoom : on lâche, mais c'est `rebuild` qui lancera les champs
+  const b = bloc()
+  Terrain.prototype.setCoastMask.call(b.t, null, null, { rebuildFields: false })
+  assert.equal(b.recuites(), 0, 'aucun travail posté : la reconstruction arrive')
+  assert.equal(b.t._coastImage, null, 'le trait de côte périmé est bien lâché')
+  assert.equal(b.t._coastLand, null)
+  assert.equal(b.t.mapUniforms.uCoastMaskOn.value, 0)
+
+  // et un second appel à vide ne poste rien non plus — c'est ce qui rend
+  // inoffensifs les `setCoastMask(null)` restés en place plus bas dans main.js
+  Terrain.prototype.setCoastMask.call(b.t, null)
+  assert.equal(b.recuites(), 0, 'lâcher ce qui est déjà lâché est un non-événement')
+})
+
+// ⚠️ L'ORDRE EST LE CORRECTIF, et il ne se voit pas dans une signature : si
+// quelqu'un remonte le lâcher après `regenerateTerrain`, tout continue de
+// marcher — ça repaie juste 45 ms de travailleur et 9 Mo de copie par zoom,
+// sans qu'aucun test ne s'en aperçoive. D'où celui-ci, qui lit main.js.
+test('main.js : le trait de côte périmé est lâché AVANT la reconstruction du relief', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'src/main.js'), 'utf8')
+  const lache = src.indexOf('rebuildFields: false')
+  const rebuild = src.indexOf('await regenerateTerrain()')
+  assert.ok(lache > 0, 'le lâcher sans recuisson a disparu de main.js')
+  assert.ok(rebuild > 0)
+  assert.ok(lache < rebuild, 'lâché après la reconstruction, il repaie un travail de travailleur entier')
+})
+
+// ⚠️ LE DÉLAI DU VOILE, ET LE PIÈGE DU rAF. `regenerateTerrain` s'accorde un
+// délai pour laisser le voile de chargement se peindre avant de figer le fil
+// principal. Il était FIXE à 50 ms — donc payé aussi sur le chemin d'un zoom,
+// où le voile est peint depuis ~170 ms : 50 ms de carte d'attente offertes à
+// personne, à chaque zoom. Il ne reste que ce qui MANQUE au voile.
+// Et c'est un setTimeout, PAS un requestAnimationFrame : rAF ne se déclenche
+// jamais dans un onglet caché et la reconstruction resterait en plan — piège
+// déjà payé trois fois sur ce projet.
+test('main.js : le délai du voile est ce qui lui manque, et il reste un setTimeout', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'src/main.js'), 'utf8')
+  const debut = src.indexOf('function regenerateTerrain(')
+  assert.ok(debut > 0, 'regenerateTerrain introuvable dans main.js')
+  const fin = src.indexOf('}, delai)', debut)
+  assert.ok(fin > debut, 'le rendez-vous de regenerateTerrain ne se referme plus sur `delai`')
+  const bloc = src.slice(debut, fin)
+  assert.match(bloc, /const delai = Math\.max\(0, 50 - \(performance\.now\(\) - loadingVisibleDepuis\)\)/)
+  assert.match(bloc, /setTimeout\(/, 'le rendez-vous doit rester un setTimeout')
+  // (l'APPEL, pas la mention : le commentaire du module nomme rAF pour dire
+  // justement de ne pas s'en servir ici)
+  assert.ok(!/requestAnimationFrame\(/.test(bloc), 'rAF est gelé dans un onglet caché — jamais ici')
+  assert.ok(!/\}, 50\)/.test(bloc), 'le délai fixe de 50 ms est revenu')
 })

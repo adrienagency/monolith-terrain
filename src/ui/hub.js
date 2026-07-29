@@ -11,6 +11,7 @@
 import { el } from './kit.js'
 import { setUiAdvanced } from './bars.js'
 import { creerSas } from './hub-sas.js'
+import { TITRE_ACCUEIL } from './accueil.js'
 
 // contextes où l'accueil ne doit JAMAIS apparaître : interface masquée,
 // vitrine embarquée, boutique, Race Studio, Studio, viewer d'une shibu reçue.
@@ -28,13 +29,20 @@ export function buildHub({ bar, bottomBar, onExplore }) {
 
   // les mots vivent DANS le wrap de la barre : ils voyagent avec elle et se
   // replient (max-height) quand elle redescend — jamais display:none.
+  // LA HIÉRARCHIE EST INVERSÉE depuis le 29/07 (Adrien, réf. landing Framer) :
+  // la marque n'est plus le titre, c'est une PASTILLE ; le titre, c'est la
+  // promesse. On arrive sur un site, pas sur un questionnaire — « Que veux-tu
+  // faire ? » demandait au visiteur de trouver la réponse, « Ta carte, ton
+  // design, en 2 minutes. » la lui donne. Les deux nœuds ne changent pas de
+  // nom (.ce-hubmark / .ce-hubq) : c'est leur TAILLE qui change de rôle, et
+  // toute la mise en forme vit dans v28.css.
   const head = el('div', 'ce-hubhead')
   const mark = el('div', 'ce-hubmark')
   mark.innerHTML = 'ShibuMap<span>.</span>'
-  head.append(mark, el('div', 'ce-hubq', 'Que veux-tu faire ?'))
+  head.append(mark, el('h1', 'ce-hubq', TITRE_ACCUEIL))
 
   const foot = el('div', 'ce-hubfoot')
-  const drop = el('div', 'ce-hubdrop', 'ou dépose un fichier GPX n’importe où — pas de fichier ? La démo t’attend dans Parcours.')
+  const drop = el('div', 'ce-hubdrop', 'ou dépose un fichier GPX n’importe où')
   const esc = el('button', 'ce-hubesc', 'Échap — explorer librement')
   esc.type = 'button'
   foot.append(drop, esc)

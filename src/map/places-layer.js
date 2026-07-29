@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { latLonToWorld } from '../geo.js'
 import { TERRAIN_SIZE } from '../terrain.js'
-import { loadLayer } from './geo-data.js'
+import { loadLayerForBounds, patchBounds } from './geo-data.js'
 import { pickPlaces } from './place-pick.js'
 import { makeLabelTexture, labelInk, labelFontReady } from './text-label.js'
 import { labelScale, placeTier } from './place-scale.js'
@@ -86,7 +86,9 @@ export class PlacesLayer {
     const id = ++this._buildId
     this._clear()
     if (!params.placesEnabled || !dem || params.source !== 'real') return
-    const [rows] = await Promise.all([loadLayer('places'), labelFontReady()])
+    // emprise du bloc : on ne tire que les 1 a 4 cellules utiles, pas les
+    // 158 474 lieux du monde (cf. geo-data.js / geo-cells.js)
+    const [rows] = await Promise.all([loadLayerForBounds('places', patchBounds(dem)), labelFontReady()])
     if (id !== this._buildId || dem !== terrain.dem || !Array.isArray(rows)) return
 
     const zoom = params.demZoom ?? 8

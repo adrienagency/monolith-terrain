@@ -21,7 +21,11 @@ import {
 import { Terrain } from './terrain.js'
 import { createLabels, disposeLabels } from './labels.js'
 import { createHud3D, findPois } from './hud3d.js'
-import { loadDem, getDemMaxZoom } from './dem.js'
+import { loadDem, getDemMaxZoom, bathySourceIndex } from './dem.js'
+// L'attribution des sources bathymétriques fines est une OBLIGATION DE
+// LICENCE, et elle dépend de l'emprise exportée — voir export.js.
+import { creditFor } from './export.js'
+import { creditsForBounds } from './bathy-sources.js'
 import { warmupPrograms } from './warmup.js'
 import { activeDemSource, isFallbackActive } from './dem-source.js'
 import { Globe } from './globe.js'
@@ -51,6 +55,7 @@ import { FLAGS } from './flags.js'
 import { MapLayers } from './map/layer-manager.js'
 import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
 import { lightingFor, darkModeFor, applyGains, fillDirection, fillLightIntensity, fillEnabledInLook, sunOn, sunShadowOn } from './daycycle.js'
+import { signatureCarteOmbre } from './carte-ombre.js'
 import { SunDisc } from './sun-disc.js'
 import { Plinth } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
@@ -68,6 +73,7 @@ import { Boats } from './boats.js'
 import { DroneCam } from './drone-cam.js'
 import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, deriveMetalTints, deriveAoColor, deriveHazeColor, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
+import { CameraShotPlayer, TOP_DOWN_DIR } from './camera-shots.js'
 import { N8AOPostPass } from 'n8ao'
 import { History } from './history.js'
 import { isTap } from './gestes.js'
@@ -271,10 +277,18 @@ const params = {
   // look — exposition/contraste/saturation viennent de BASE_GRADE : ce trio
   // est FIXE (Adrien), il ne bouge ni au lancement ni au shuffle
   exposure: BASE_GRADE.exposure,
-  // render upgrades (2026-07-20 plan): both ON by default — the adaptive
-  // quality governor sheds them on machines that can't hold 60 fps, so a
-  // forked "high mode" is deliberately NOT a thing (see the plan doc).
-  ssaoEnabled: false,
+  // render upgrades (2026-07-20 plan): the adaptive quality governor sheds
+  // them on machines that can't hold 60 fps, so a forked "high mode" is
+  // deliberately NOT a thing (see the plan doc).
+  //
+  // L'OCCLUSION AMBIANTE VIENT DU PALIER, plus d'une constante. La ligne disait
+  // `false` en dur alors que le tableau des paliers annonçait `ssao: true` aux
+  // paliers 0 et 1 : le champ était MORT, personne ne le lisait, et le vrai
+  // interrupteur de départ était ailleurs (le look d'ouverture shibustart.json,
+  // qui l'allumait). Deux sources contradictoires pour un même réglage, dont
+  // aucune n'était celle qu'on croyait lire. Une seule désormais — et elle vaut
+  // false sur les quatre paliers depuis le 28/07 (demande d'Adrien).
+  ssaoEnabled: MACHINE.ssao,
   ssaoIntensity: 6, // nudged up: half-res AO reads ~16% softer than full-res (measured)
   bloomEnabled: false,
   bloomIntensity: 0.55,
@@ -481,11 +495,13 @@ const params = {
   seaEdgeFrost: 0.5, // 0 = verre clair, 1 = verre depoli
   seaRefract: 0.6, // intensite de la refraction (deformation du fond vu a travers)
 
-  // SP1 map overlay layers (roads/water/places), draped on the relief
-  roadsEnabled: false,
-  roadsOpacity: 0.9,
-  roadsDetail: 1,
-  roadColor: '',
+  // SP1 map overlay layers (water/places), draped on the relief
+  // PLUS de roadsEnabled/roadsOpacity/roadsDetail/roadColor. Le calque Routes a
+  // quitté le site (Adrien : « très lourd, très mauvais ») — 12,6 Mo de
+  // Natural Earth versionnés pour un réseau qui, de toute façon, n'existait en
+  // version tuilée que sur les Alpes. Ces quatre clés traînent encore dans de
+  // vieux gabarits enregistrés : applyUserTemplate filtre sur TEMPLATE_KEYS,
+  // elles sont donc simplement ignorées, aucune migration à écrire.
   waterEnabled: true, // lakes on by default — the world lake layer is cheap (fetch-on-view)
   waterOpacity: 0.9,
   waterFill: true,
@@ -677,6 +693,17 @@ const loadingStatus = loadingEl.querySelector('.ld-status') ?? loadingEl
 const LOADING_MIN_MS = 2000
 const loadingStart = typeof window.__ldStart === 'number' ? window.__ldStart : performance.now()
 let loadingDismissedOnce = false
+// DEPUIS QUAND LE VOILE EST-IL À L'ÉCRAN ? `regenerateTerrain` s'accorde un
+// délai pour le laisser se peindre AVANT de figer le fil principal — un délai
+// qui n'a plus lieu d'être quand le voile est déjà peint depuis longtemps (voir
+// là-bas). Part de `loadingStart`, l'instant où index.html a peint la carte en
+// ligne, bien avant que ce module ne soit chargé : au démarrage aussi, le voile
+// est là depuis des secondes.
+let loadingVisibleDepuis = loadingStart
+function showLoading() {
+  if (loadingEl.classList.contains('hidden')) loadingVisibleDepuis = performance.now()
+  loadingEl.classList.remove('hidden')
+}
 function hideLoading() {
   if (loadingDismissedOnce) {
     loadingEl.classList.add('hidden')
@@ -1153,8 +1180,17 @@ placeSun()
 function applyShadowMode() {
   const wantShadow = sunShadowOn(params.sunEnabled, params.shadowMode)
   sun.castShadow = wantShadow
-  renderer.shadowMap.autoUpdate = wantShadow && params.shadowMode === 'dynamic'
-  if (wantShadow && params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
+  // ⚠️ autoUpdate reste FAUX dans les DEUX modes, et c'est le correctif du
+  // 28/07/2026 : « dynamic » redessinait la carte 2048² à chaque image alors
+  // qu'aucun projeteur ne bouge dans cette application (relief, murs du socle,
+  // murs des dalles voisines, jupe de région — quatre décors immobiles ; les
+  // bateaux ont castShadow = false, nuages et voitures n'en projettent aucune).
+  // Mesuré en production : 0,55 ms et 1 188 328 triangles PAR IMAGE, soit 26 %
+  // du temps GPU et 47 % des triangles, pour redessiner à l'identique. C'est
+  // majCarteOmbre() qui décide maintenant, sur l'état réel de la scène — et
+  // l'image rendue est rigoureusement la même (voir src/carte-ombre.js).
+  renderer.shadowMap.autoUpdate = false
+  if (wantShadow) { sigCarteOmbre = null; renderer.shadowMap.needsUpdate = true }
   // ⚠️ three ne rend PAS la carte d'ombre tout seul quand castShadow retombe à
   // false : la texture 2048×2048 reste allouée sur le GPU pour rien. C'est le
   // vrai poste coûteux du soleil, donc on la relâche à la main. La remettre à
@@ -1165,6 +1201,39 @@ function applyShadowMode() {
     sun.shadow.map.dispose()
     sun.shadow.map = null
   }
+}
+
+// LA CARTE D'OMBRE, REDESSINÉE SEULEMENT QUAND ELLE CHANGERAIT.
+//
+// Appelé juste avant chaque dessin. Le POURQUOI et les chiffres sont dans
+// src/carte-ombre.js ; ici il n'y a que la lecture de l'état réel de la scène.
+//
+// ⚠️ On lit la visibilité EFFECTIVE (en remontant les parents) : cacher un
+// groupe entier — le socle, une dalle voisine — doit emporter l'ombre de tout
+// ce qu'il contient. `o.visible` seul aurait gardé l'ombre d'un objet éteint
+// par son parent, et une ombre orpheline ne se lit pas comme un réglage.
+//
+// ⚠️ Les matrices lues ici datent de l'image PRÉCÉDENTE (three met le monde à
+// jour à l'intérieur de son propre rendu). Un projeteur qui bougerait verrait
+// donc son ombre suivre avec une image de retard — invisible, et de toute
+// façon aucun projeteur ne bouge. Le soleil, lui, est écrit par placeSun avant
+// le dessin : la tirette des 24 h n'a aucun retard.
+let sigCarteOmbre = null
+function majCarteOmbre() {
+  if (!renderer.shadowMap.enabled || !sun.castShadow) return
+  const casters = []
+  scene.traverse((o) => {
+    if (!o.castShadow) return
+    let vu = o.visible
+    for (let p = o.parent; vu && p; p = p.parent) vu = p.visible
+    const g = o.geometry
+    const pos = g?.attributes?.position
+    casters.push({ id: o.id, geo: g?.id ?? 0, pv: pos?.version ?? 0, count: pos?.count ?? 0, visible: vu, m: o.matrixWorld.elements })
+  })
+  const sig = signatureCarteOmbre({ soleil: sun.position, res: params.shadowRes, flou: sun.shadow.radius, casters })
+  if (sig === sigCarteOmbre) return
+  sigCarteOmbre = sig
+  renderer.shadowMap.needsUpdate = true
 }
 
 // L'interrupteur du soleil : l'intensité (placeSun) ET l'ombre (applyShadowMode)
@@ -1278,7 +1347,7 @@ const realWater = FLAGS.water ? new RealWater(scene) : null
 // ÉVÉNEMENTS — les éléments 3D rapportés qui vivent sur la carte. Les bateaux
 // sont le premier ; la catégorie est prévue pour en accueillir d'autres.
 const boats = new Boats(scene)
-const mapLayers = new MapLayers(scene, camera) // roads/water/places overlays, populated per zone
+const mapLayers = new MapLayers(scene, camera) // water/places overlays, populated per zone
 
 const labelOpts = () => ({
   real: params.source === 'real',
@@ -1359,6 +1428,7 @@ scene.add(hud3.group)
 
 function flyTo(pos, target, opts = {}) {
   cameraAuto.stop() // any programmatic move cancels a looping automation
+  shots.cancel() // …et interrompt le plan en cours (le cran reste sélectionné)
   tween.p0.copy(camera.position)
   tween.t0.copy(controls.target)
   tween.p1.copy(pos)
@@ -1481,6 +1551,10 @@ controls.addEventListener('start', () => {
   const gpxFollowing = params.gpxFollow && gpxLayer.isPlaying() && drone.active
   if (!gpxFollowing) drone.stop()
   cameraAuto.stop() // …and any looping camera automation
+  // Attraper la caméra coupe le plan en cours — même règle que pour tout le
+  // reste. Le cran reste sélectionné : le clic suivant enchaîne sur le plan
+  // d'après au lieu de tout reprendre au début.
+  shots.cancel()
   camera.up.set(0, 1, 0)
   controlsHeld = true
   if (drone.active && params.gpxFollow) followManual = true
@@ -1853,12 +1927,29 @@ async function fetchAndBuildDem() {
   syncExagToZoom() // this zoom's saved (or default) vertical exaggeration
   syncDetailToZoom() // fine-detail off at continental scale (z<=6)
   loadingStatus.textContent = 'fetching elevation tiles…'
-  loadingEl.classList.remove('hidden')
-  dem = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom })
+  showLoading()
+  // `memo` : le bloc central est le seul à revenir (aller-retour de zoom), donc
+  // le seul à mémoriser — voir dem-memo.js pour la facture et pour la raison
+  // d'en tenir le damier à l'écart.
+  dem = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, memo: true })
   // le sondage de couverture vient d'aboutir pour cette zone : si elle est
   // servie plus finement que le défaut, la plongée au clic doit pouvoir y aller
   liftFineZoomToRegion()
   terrain.setDem(dem)
+  // LE TRAIT DE CÔTE DE LA ZONE PRÉCÉDENTE EST LÂCHÉ ICI, AVANT la
+  // reconstruction — il l'était après, et ça coûtait un travail de travailleur
+  // entier par zoom. Il ne décrit plus le bon endroit : le garder faisait
+  // calculer le masque de mer du nouveau bloc avec le raster côtier de
+  // l'ANCIEN, puis le refaire sans trait de côte une fois la carte affichée,
+  // puis une TROISIÈME fois à l'arrivée du bon. Trois travaux à 9 Mo de MNT
+  // recopiés, pour un résultat que seul le dernier décide. Lâché ici, le
+  // masque de mer que `rebuild` va lancer est d'emblée le bon état d'attente
+  // (aucun trait de côte) et il n'en reste que DEUX : celui-là, et l'arrivée.
+  // ⚠️ `rebuildFields: false` : c'est `regenerateTerrain` qui lance les champs
+  // quelques lignes plus bas, inutile d'en poster un pour rien (voir
+  // terrain.js). Les `setCoastMask(null)` restés plus bas deviennent, eux, de
+  // simples non-événements — le masque est déjà nul.
+  terrain.setCoastMask(null, null, { rebuildFields: false })
   params.source = 'real'
   try {
     clouds?.reroll() // a new view level deserves a fresh cloud layout
@@ -1977,9 +2068,18 @@ let rebuildPending = false
 function regenerateTerrain() {
   if (rebuildPending) return Promise.resolve()
   rebuildPending = true
-  loadingEl.classList.remove('hidden')
-  // plain timeout (not rAF — rAF never fires in a hidden tab and would stall
-  // the rebuild); 50ms still lets the indicator paint first
+  showLoading()
+  // LE DÉLAI NE SERT QU'À LAISSER LE VOILE SE PEINDRE, et il ne se paie donc
+  // qu'une fois. Sur le chemin d'un ZOOM, le voile est levé par
+  // fetchAndBuildDem et peint depuis ~170 ms quand on arrive ici : les 50 ms
+  // fixes étaient 50 ms de carte d'attente offertes à personne, à chaque zoom
+  // (mesuré à La Réunion, séquence z13→z14→z13). On ne garde donc que ce qui
+  // MANQUE au voile pour être sûr d'être peint — 50 ms depuis un panneau qui
+  // vient de le lever, 0 depuis un zoom.
+  // ⚠️ setTimeout et PAS requestAnimationFrame : rAF ne se déclenche JAMAIS
+  // dans un onglet caché et la reconstruction resterait en plan. Piège déjà
+  // payé trois fois sur ce projet — même à 0 ms, ça reste un setTimeout.
+  const delai = Math.max(0, 50 - (performance.now() - loadingVisibleDepuis))
   return new Promise((resolve) =>
     setTimeout(() => {
       terrain.rebuild(params)
@@ -1987,7 +2087,7 @@ function regenerateTerrain() {
       plinth.rebuild(terrain, params) // walls hug the new relief border (also re-welds the region skirt in region mode — see the plinth.rebuild wrapper)
       terrain.refreshMatTiling(params) // re-tile the relief material to the new zoom scale
       realWater?.rebuild({ terrain, params }) // water simulation follows the new relief
-      const _mlp = mapLayers.rebuild({ dem: terrain.dem, terrain, params }) // roads/water/places re-drape on the new relief
+      const _mlp = mapLayers.rebuild({ dem: terrain.dem, terrain, params }) // water/places re-drape on the new relief
       // The aerial skin has to re-derive here too. This calls mapLayers.rebuild
       // DIRECTLY rather than through the rebuildMapLayers wrapper, and that
       // wrapper was the only thing refreshing the photo — so a zoom change
@@ -2027,7 +2127,7 @@ function regenerateTerrain() {
         hideLoading()
         resolve()
       })
-    }, 50)
+    }, delai)
   )
 }
 
@@ -2082,8 +2182,10 @@ modes = new Modes({
       // le globe éteint les effets ; l'interrupteur du soleil est un SECOND
       // motif de coupure, il ne doit pas être perdu au retour sur le bloc
       sun.castShadow = v && sunShadowOn(params.sunEnabled, params.shadowMode)
-      renderer.shadowMap.autoUpdate = sun.castShadow && params.shadowMode === 'dynamic'
-      if (sun.castShadow && params.shadowMode === 'static') renderer.shadowMap.needsUpdate = true
+      // même règle qu'applyShadowMode : jamais de redessin à chaque image, un
+      // redessin quand l'état change (ici, le retour du globe vers le bloc)
+      renderer.shadowMap.autoUpdate = false
+      if (sun.castShadow) { sigCarteOmbre = null; renderer.shadowMap.needsUpdate = true }
       // the restore above reads raw params — re-assert the active quality
       // tier on top so a globe round-trip can't silently undo degraded mode
       if (v) aq?.reassert()
@@ -2307,10 +2409,6 @@ const DEFAULT_PLINTH = Object.freeze({
   plinthBump: params.plinthBump,
 })
 const DEFAULT_MAPLAYERS = Object.freeze({
-  roadsEnabled: params.roadsEnabled,
-  roadsOpacity: params.roadsOpacity,
-  roadsDetail: params.roadsDetail,
-  roadColor: '',
   waterEnabled: params.waterEnabled,
   waterOpacity: params.waterOpacity,
   waterFill: params.waterFill,
@@ -2645,7 +2743,7 @@ function applyUserTemplate(tmpl) {
   bgRefreshFn() // resync the Background HDRI-sky highlight to the applied look
   refreshAll()
   setSeaEnabled(params.seaEnabled) // un template peut livrer une carte SANS mer
-  rebuildMapLayers() // re-derive roads/water/places for the current location under the restored look
+  rebuildMapLayers() // re-derive water/places for the current location under the restored look
   blockGrid?.restyle(params) // les dalles voisines du damier suivent la principale
   gpxLayer.rebuildAll() // re-drape every loaded track with the restored line width/colour/casing
   // LA POSE DE CAMÉRA, si le fichier en porte une. Direction normalisée +
@@ -2718,6 +2816,7 @@ function persistUserTemplates() {
   return true
 }
 function saveCurrentTemplate(name) {
+  majCarteOmbre() // la vignette doit porter l'ombre du look qu'on enregistre
   composer.render() // fresh frame so the thumbnail matches the screen
   const clean = String(name || '').trim().slice(0, 40) || 'My look'
   const look = captureLook(params)
@@ -2787,7 +2886,7 @@ function resetLook() {
 // RESET MAP (Templates panel) — extends RESET LOOK to also clear everything
 // else a template or a panel can leave dangling: background, socle material,
 // the whole-relief material / liquid metal / surface shader, clouds, fog and
-// the map overlay layers (roads/water/places). Location/zoom are never
+// the map overlay layers (water/places). Location/zoom are never
 // touched — this is a look reset, not a "start over" — and any function it
 // calls is declared further down in this file; that's fine, resetAll is only
 // ever invoked from a UI click, long after the whole module has finished
@@ -2821,7 +2920,7 @@ function resetAll() {
   // depth of field off
   params.bokehEnabled = false
   setDofEnabled(false)
-  // map overlay layers (roads/water/places)
+  // map overlay layers (water/places)
   Object.assign(params, DEFAULT_MAPLAYERS)
   rebuildMapLayers()
   blockGrid?.restyle(params) // les dalles voisines retombent aussi sur la base
@@ -3493,6 +3592,21 @@ function requestIconUpload(layerId) {
 const drone = new DroneCam({ camera, controls, sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0 })
 // looping cinematic camera moves (orbit / fly-over / crane…) for the Camera panel
 const cameraAuto = new CameraAutomation({ camera, controls })
+// PLANS DE CAMÉRA du bouton cinéma (voir camera-shots.js). À ne pas confondre
+// avec cameraAuto ci-dessus, qui reste au service du panneau Caméra : celui-là
+// fait osciller la caméra autour d'un point, celui-ci COMPOSE UN PLAN sur le
+// relief réel (couloir de vallée, sommet comme sujet, accélération, fin tenable).
+const shots = new CameraShotPlayer({
+  camera,
+  controls,
+  sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0,
+  half: TERRAIN_SIZE / 2,
+  baseFov: params.fov,
+  onState: () => {
+    cineBtn?.setActive(shots.active)
+    cineBtn?.setBadge(shots.badge)
+  },
+})
 
 function flyTrack() {
   const w = gpxLayer.track?.world
@@ -3624,7 +3738,7 @@ function refreshOsmCredit() {
   credits.setExtra(parts.join(' · '))
 }
 
-// rebuild all map layers (roads/water/places) for the current zone — used by
+// rebuild all map layers (water/places) for the current zone — used by
 // the Map panel toggles (Task 12)
 // Aerial photo skin — a narrow first test: IGN orthophotos, Annecy only, off by
 // default (see src/map/aerial-layer.js for why it's scoped to one area, and for
@@ -4196,11 +4310,10 @@ let storedContourOpacity = null
 let storedGridOpacity = null
 function toggleLayer(id) {
   if (!terrain?.mapUniforms) return
+  // PLUS de case 'roads' : le calque a quitté le site, et son raccourci R avec
+  // lui (shortcuts.js). Le `default: return` plus bas absorbe silencieusement
+  // un identifiant inconnu, donc rien ne casse si un vieil appel traîne.
   switch (id) {
-    case 'roads':
-      params.roadsEnabled = !params.roadsEnabled
-      rebuildMapLayers()
-      break
     case 'water':
       params.waterEnabled = !params.waterEnabled
       rebuildMapLayers()
@@ -4233,7 +4346,7 @@ function toggleLayer(id) {
       return
   }
   refreshAll()
-  // roads/water/places/contourOpacity/gridOpacity are all TEMPLATE_KEYS —
+  // water/places/contourOpacity/gridOpacity are all TEMPLATE_KEYS —
   // a keyboard toggle never touches a `.ce-dock` control, so it would be
   // invisible to the debounced dock listener below without this explicit
   // record (history?. — this can fire before `history` exists only if a key
@@ -4251,7 +4364,7 @@ function toggleRegion() {
 // fixed timestep so the video is deterministic whatever the encode speed
 let loopPaused = false
 function stepScene(t, dt) {
-  if (cameraAuto.active || drone.active || tour.active || tween.active || (params.gpxFollow && gpxLayer.isPlaying())) updateCameraMotion(dt)
+  if (shots.active || cameraAuto.active || drone.active || tour.active || tween.active || (params.gpxFollow && gpxLayer.isPlaying())) updateCameraMotion(dt)
   if (!params.paused) {
     clouds.update(dt, params, camera)
     traffic.update(dt)
@@ -4278,6 +4391,18 @@ async function openExportUI() {
     composer,
     camera,
     recorder,
+    // LA LIGNE DE CRÉDITS DE CET EXPORT-CI. Elle dépend de l'emprise, parce que
+    // les sources bathymétriques fines imposent leur attribution mot pour mot
+    // là où elles ont creusé, et nulle part ailleurs. Voir export.js.
+    creditLine: () => {
+      try {
+        // blockBounds, jamais patchBounds : c'est l'emprise VRAIE du bloc
+        // exporté (voir son commentaire dans map/aerial-layer.js).
+        return creditFor(bathySourceIndex(), blockBounds(terrain.dem), creditsForBounds)
+      } catch {
+        return null // jamais bloquer un export sur un crédit : export.js a sa ligne de repli
+      }
+    },
     pauseLoop: () => {
       loopPaused = true
       // kill the already-scheduled frame too, or a synchronous export
@@ -4559,7 +4684,13 @@ const ISO_VIEWS = [
   { name: '2', dir: new THREE.Vector3(-62, 52, 62), k: 0.97, target: ISO_TARGET },
   { name: '3', dir: new THREE.Vector3(-62, 52, -62), k: 0.97, target: ISO_TARGET },
   { name: '4', dir: new THREE.Vector3(62, 52, -62), k: 0.97, target: ISO_TARGET },
-  { name: '5', dir: new THREE.Vector3(0, 100, -0.6), k: 0.92, target: ISO_TARGET }, // top-down, nord en haut
+  // Vue du dessus TOUJOURS ORIENTÉE NORD (nouvelle règle d'Adrien). Le biais
+  // porté par TOP_DOWN_DIR est la règle elle-même : mesuré, l'ancien (0,100,-0.6)
+  // cadrait le SUD en haut — 180° d'erreur, malgré le commentaire d'origine.
+  // Voir camera-shots.js pour le pourquoi du signe et pourquoi on ne touche pas
+  // à `up`. Le cadrage ne dépend que de la pose d'arrivée, donc il est le même
+  // depuis les six autres vues.
+  { name: '5', dir: new THREE.Vector3(TOP_DOWN_DIR.x, TOP_DOWN_DIR.y, TOP_DOWN_DIR.z), k: 0.92, target: ISO_TARGET },
   { name: '6', dir: new THREE.Vector3(0.28, 0.17, 1), k: 0.52, target: new THREE.Vector3(0, 1.4, 0) }, // au raz du sol
 ]
 let isoIndex = -1
@@ -4574,26 +4705,19 @@ function applyIsoView(i) {
   flyTo(pos, v.target.clone(), { orbit: true })
   isoBtn?.setBadge(v.name)
 }
-// cinematic button — same family as the iso shortcut, one step to its left:
-// each press starts a RANDOM looping camera move around the socle (the
-// existing Camera-panel automations), and while it runs the move re-rolls
-// every ~18 s so the show never settles. Press again to stop.
-let cineTimer = 0
+// Bouton cinéma — MÊME MÉCANIQUE QUE LE BOUTON ISO (Adrien) : chaque clic passe
+// au plan suivant, et un petit numéro apparaît au-dessus.
+//
+// Il remplace l'ancien interrupteur, qui tirait un mouvement au hasard parmi les
+// six oscillations de camera-automation.js et le relançait toutes les 18 s.
+// Adrien : « je veux de VRAIS mouvements de caméra […] pas des mouvements
+// basiques comme on a jusqu'à présent ». Les sept crans (poursuite au ras du
+// sol, travelling, dolly zoom, survol, contre-plongée, orbite sur sommet, série
+// aléatoire) vivent dans camera-shots.js ; le huitième clic arrête tout.
 cineBtn = buildCineButton({
-  toggle: () => {
-    if (cameraAuto.active) {
-      cameraAuto.stop()
-      clearInterval(cineTimer)
-      return false
-    }
-    const roll = () => {
-      const m = CAMERA_MOVES[Math.floor(Math.random() * CAMERA_MOVES.length)]
-      cameraAuto.start(m.id, 0.7 + Math.random() * 0.9)
-    }
-    roll()
-    clearInterval(cineTimer)
-    cineTimer = setInterval(() => { if (cameraAuto.active) roll(); else clearInterval(cineTimer) }, 18000)
-    return true
+  next: () => {
+    if (modes.mode !== 'surface' || modes.busy) return
+    shots.next()
   },
 })
 
@@ -5159,7 +5283,31 @@ aq = createAdaptiveQuality({
   applyShadowMode,
   announce: (m) => modes.announce(m),
   refreshAll,
-  canStep: () => modes.mode === 'surface' && !modes.busy && !recorder?.recording,
+  // ⚠️ `!demBusy` — LE RELIEF EN CONSTRUCTION N'EST PAS UNE MESURE DE MACHINE.
+  //
+  // Signalé par Adrien le 28/07/2026 : « ça ne laggait pas du tout hier ».
+  // Bissecté jusqu'à 2613877, le commit qui a réparé la surdité du gouverneur.
+  // En lui donnant enfin le delta RÉEL, on lui a aussi donné les images de
+  // `fetchAndBuildDem` — décompression des tuiles, fabrication de la géométrie.
+  // Elles sont longues ET consécutives, donc `echantillonRetenu` les garde (à
+  // raison : c'est ce qui sauve une machine réellement lente). Le gouverneur
+  // lit « 6,7 images/s » et `palierVise` l'envoie de T0 à T3 d'un seul bond.
+  //
+  // Le palier 3 est le SEUL qui coupe les ombres, donc le seul qui fasse
+  // basculer `sun.castShadow` : three recompile alors TOUS les programmes de la
+  // scène — 1 936 ms chronométrées sur cette page (voir applyShadowMode). Puis
+  // la machine, chargée et redevenue fluide, remonte et repasse la frontière en
+  // sens inverse. Mesuré sur le vrai contrôleur, machine JAMAIS lente :
+  //   hier (02ebd89 et 31ea718) : 0 changement de palier,  0 recompilation
+  //   2613877 → main            : 4 changements de palier, 2 RECOMPILATIONS
+  //     8,9 s → T3   28,9 s → T2   48,9 s → T1   68,9 s → T0 (retour au départ)
+  // Deux gels de ~2 s pour revenir exactement au palier de départ : c'est ça,
+  // le lag. Le guichet fermé pendant la construction les supprime tous les deux.
+  //
+  // Ça ne re-casse PAS l'iMac 2015 : une machine vraiment à 3 fps l'est ENCORE
+  // une fois le relief chargé — elle atteint le palier plancher à 14,3 s au lieu
+  // de 9,0 s, toujours sous les 15 s qu'exige test/perf-gouverneur.test.js.
+  canStep: () => modes.mode === 'surface' && !modes.busy && !recorder?.recording && !demBusy,
   // LE GOUVERNEUR NE PART PLUS DU MAXIMUM. Il part de ce que la sonde a estimé
   // avant le premier rendu, et ne fait plus qu'AFFINER : il descend si la
   // machine souffre quand même, il regagne au plus un cran si elle tient.
@@ -5249,7 +5397,7 @@ history.reset()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { boats, raceLabels, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo,
+window.__exp = { boats, raceLabels, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, shots, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo,
   // INTERRUPTEUR de la teinte d'interface : __exp.setUiTint(false) rend
   // l'interface neutre de v28.css, true la raccorde à la palette.
   setUiTint: (v) => { params.uiTint = v !== false; syncUiTheme() }, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,
@@ -5329,6 +5477,12 @@ let placesRefreshAcc = 0 // throttles the places-layer screen-space declutter re
 
 // camera motion for one frame — shared by the live loop and offline export
 function updateCameraMotion(dt) {
+  // PLAN DE CAMÉRA en cours (bouton cinéma) — en tête, car un plan composé prime
+  // sur toute autre automation ; les deux ne tournent jamais ensemble.
+  if (shots.active) {
+    shots.update(dt)
+    return
+  }
   // looping cinematic camera automation (Camera panel) — checked here so BOTH
   // the live tick() and the offline export step drive it
   if (cameraAuto.active) {
@@ -5610,6 +5764,7 @@ function tick() {
   // fantaisiste et ferait grimper le palier de qualité sur des images vides.
   if (!programmesPrets) return
   aq.update(dtBrut) // adaptive quality : le temps RÉEL, jamais le dt de simulation (voir plus haut)
+  majCarteOmbre() // la carte d'ombre n'est redessinée que si elle changerait
   composer.render(dt)
   if (recorder?.recording) recorder.captureFrame() // null until first export
 }

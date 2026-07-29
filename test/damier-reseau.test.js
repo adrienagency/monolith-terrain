@@ -155,15 +155,33 @@ test('deux chargements SIMULTANÉS du même bloc ne demandent chaque tuile qu un
 
 // ------------------------------------------------------------------ T2 · bathy
 
+// ⚠️ On compte les TUILES, pas l'index. Depuis le 2026-07-28, `loadBathyPatch`
+// demande aussi `data/bathy/index.json` — le plafond de zoom par zone, qui dit
+// où une source plus fine que GEBCO a été cuite. C'est UNE requête pour toute
+// la session (promesse mémorisée), et le test juste en dessous le verrouille ;
+// la confondre avec les tuiles ferait passer un vrai défaut pour du bruit.
+const tuilesBathy = () => pour('data/bathy/') - pour('data/bathy/index.json')
+
 test('une tuile bathy TROUVÉE est mémorisée : une requête, pas neuf par bloc', async () => {
   serve()
   await loadDem({ lat: LAT, lon: LON, zoom: ZOOM, bathy: true })
   // les 9 cases du damier partagent le MÊME ancêtre bathy z8 (z12 → z8 = 1/16)
-  assert.equal(pour('data/bathy/'), 1, `${pour('data/bathy/')} requêtes bathy pour un seul fichier`)
+  assert.equal(tuilesBathy(), 1, `${tuilesBathy()} requêtes bathy pour un seul fichier`)
 
   // et le bloc suivant la relit en mémoire, sans toucher au réseau
   await loadDem({ lat: LAT, lon: LON, zoom: ZOOM, bathy: true })
-  assert.equal(pour('data/bathy/'), 1, 'la tuile trouvée est redemandée au bloc suivant')
+  assert.equal(tuilesBathy(), 1, 'la tuile trouvée est redemandée au bloc suivant')
+})
+
+test('l index des sources fines est demandé UNE fois, jamais par bloc', async () => {
+  serve()
+  await loadDem({ lat: LAT, lon: LON, zoom: ZOOM, bathy: true })
+  await loadDem({ lat: LAT + 0.2, lon: LON + 0.2, zoom: ZOOM, bathy: true })
+  // ≤ 1 et non == 1 : la promesse est mémorisée au niveau du module, donc un
+  // test précédent de ce fichier a pu la résoudre — ce qui est exactement le
+  // comportement voulu. Ce qui compte, c'est qu'elle ne se redemande JAMAIS.
+  assert.ok(pour('data/bathy/index.json') <= 1,
+    `${pour('data/bathy/index.json')} requêtes d index — il doit y en avoir une par session`)
 })
 
 test("une tuile bathy ABSENTE reste mémorisée comme absence (pas de régression)", async () => {

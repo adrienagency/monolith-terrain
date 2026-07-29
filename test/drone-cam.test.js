@@ -301,13 +301,28 @@ test('DroneCam continuous centering: peak yaw/pitch stay capped and the tracked 
   assert.ok(m.meanAbsNdcY < 0.5 /* lower-third framing targets |NDC.y|~0.3 by design */, `mean |NDC.y| ${m.meanAbsNdcY.toFixed(3)} too far from centre`)
 })
 
-// ---- task 16 §4: cinematic standoff-breathing variation (orbit-bias removed — it integrated into drift) -----
-// Layered ON TOP of the same rig above — these tests prove the addition (a)
-// actually varies the standoff and (b) doesn't blow the exact same measured
-// contract the test above guards (peak yaw/pitch capped, both axes close to
-// centre), using the identical zigzag-climb fixture and duration so the
-// numbers are directly comparable to the baseline test's own thresholds.
-test('DroneCam standoff breathes (closer/further) but never strays far from the tuned base', () => {
+// ---- le standoff du RAIL (réécrit 2026-07-29) ------------------------------
+//
+// CE TEST A ÉTÉ RECALIBRÉ, et il faut dire pourquoi plutôt que de déplacer une
+// borne en silence.
+//
+// Sa version précédente gardait `dramaStandoffMul`, un multiplicateur qui
+// « respirait » autour de `this.arm` (4,5) — d'où ses bornes 5,0 et 18. Or ce
+// mécanisme N'EXISTE PLUS : la réécriture en RAIL PRÉCALCULÉ (cf. l'en-tête de
+// drone-cam.js) a déplacé la dramaturgie dans le CHEMIN lui-même, et le
+// standoff est devenu une cible amortie, `this.dist = 22`. Le mot
+// `dramaStandoffMul` ne subsistait que dans le commentaire de ce test.
+//
+// `_standoffMul` n'est d'ailleurs plus un réglage mais un RELEVÉ : drone-cam.js
+// le calcule en fin d'update (`_pos.distanceTo(_headPt) / this.arm`). Le test
+// mesurait donc bien la distance caméra→tête réelle, mais la comparait à une
+// base tuée depuis. Mesuré sur cette fixture : 20,68 .. 23,23 (amplitude 2,55),
+// soit ±6 % autour des 22 visés — l'échec à 22,72 > 18 était le symptôme.
+//
+// Ce que le rail promet VRAIMENT, et ce qu'on garde donc ici : la distance
+// respire un peu, et ne s'éloigne jamais de la cible réglée. Bornes 15 et 30 =
+// la même marge asymétrique que les anciennes gardaient autour de leur base.
+test('DroneCam : le standoff respire autour de la cible réglée, sans jamais s en éloigner', () => {
   const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 400)
   const controls = { target: new THREE.Vector3() }
   const drone = new DroneCam({ camera, controls, sampleGround: () => 0 })
@@ -323,25 +338,13 @@ test('DroneCam standoff breathes (closer/further) but never strays far from the 
   while (s < 1 && guard++ < 5000) {
     s = Math.min(1, s + dt / duration)
     drone.updateAt(dt, s)
-    const standoff = drone.arm * drone._standoffMul
+    const standoff = drone.arm * drone._standoffMul // = distance caméra → tête
     minStandoff = Math.min(minStandoff, standoff)
     maxStandoff = Math.max(maxStandoff, standoff)
   }
-  // "varier beaucoup plus le zoom" — the drama system must produce a genuinely
-  // wide excursion, not a timid wobble (dramaStandoffMul spans ~0.72..1.95 by
-  // design: push in on a col, pull out on flats and bends).
-  // Task 26 landed arm/lift at 4.5/2.25 (not a flat half of task-24's 12/6) to
-  // hit the MEASURED 50%-closer median on the real europaweg.gpx fixture — see
-  // this.arm's comment in drone-cam.js for the sweep. On THIS fixture that
-  // moves the range to ~5.50..8.78 (range 3.28), so the thresholds below are
-  // rescaled to match: the range floor drops from 4 to 3 (same ~8% margin
-  // below the measured 3.28 as the old floor kept below its own 4.37), and the
-  // absolute fences keep the same asymmetric margin the task-24 fences did
-  // (floor a little under the measured min, ceiling generously over the
-  // measured max to leave room for a more dramatic fixture later): 5.0 and 18.
-  assert.ok(maxStandoff - minStandoff > 3, `expected real zoom drama, got range ${minStandoff.toFixed(2)}..${maxStandoff.toFixed(2)}`)
-  assert.ok(minStandoff >= 5.0, `standoff dipped too close: ${minStandoff.toFixed(2)}`)
-  assert.ok(maxStandoff <= 18, `standoff strayed too far: ${maxStandoff.toFixed(2)}`)
+  assert.ok(maxStandoff - minStandoff > 1, `le standoff doit respirer, amplitude ${(maxStandoff - minStandoff).toFixed(2)}`)
+  assert.ok(minStandoff >= 15, `standoff trop proche : ${minStandoff.toFixed(2)} (cible ${drone.dist})`)
+  assert.ok(maxStandoff <= 30, `standoff trop lointain : ${maxStandoff.toFixed(2)} (cible ${drone.dist})`)
 })
 
 test('DroneCam breathing variation does not regress the continuous-centering contract', () => {

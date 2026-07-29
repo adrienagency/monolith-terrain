@@ -68,6 +68,32 @@
 //   • LA CARTE RESTE CALME. Ces valeurs sont posées AVANT le premier rendu.
 //     Rien ne bascule sous les yeux du visiteur ; les changements à chaud
 //     restent l'affaire du gouverneur, avec ses 20 s d'hystérésis.
+//
+// ---------------------------------------------------------------------------
+// DEUX CASES ONT CHANGÉ POUR TOUT LE MONDE LE 28/07/2026 (demande d'Adrien)
+// ---------------------------------------------------------------------------
+// Elles ne dépendent plus du palier : elles valent la même chose des quatre
+// lignes, parce que la demande était « par défaut », pas « sur les machines
+// faibles ». Les deux restent entièrement rattrapables à la main.
+//
+// L'OCCLUSION AMBIANTE — `ssao: false` partout (elle valait true aux paliers 0
+// et 1). C'est une passe de scène ENTIÈRE en plus, et sur une carte vue de
+// haut, presque à plat, elle ne noircit que le fond des vallées : cher pour ce
+// qu'elle rend. ⚠️ CE CHAMP DIT DÉSORMAIS L'ÉTAT DE DÉPART, PAS LA PERMISSION.
+// perf.js garde son propre plafond (`_aoTierOk = n < 2`) et l'interrupteur
+// « Ombrage des creux » du panneau Effets reste libre : qui l'allume le garde.
+//
+// LA CARTE D'OMBRES — `ombresRes: 1024` partout (2048 aux paliers 0 et 1).
+// ⚠️ NE PAS SE TROMPER SUR CE QUE ÇA ÉCONOMISE : la résolution de la carte
+// d'ombres ne retire PAS UN SEUL TRIANGLE. La passe d'ombre dessine exactement
+// les mêmes objets, dans une texture quatre fois plus petite. Ce qu'on gagne
+// est réel mais ailleurs : le remplissage, les deux passes de flou VSM
+// (blurSamples 16) qui balayent toute la carte à chaque image en mode
+// dynamique, et 16 Mo → 4 Mo de mémoire vidéo alloués AVANT la première image
+// (c'était le premier gel visible du démarrage). Les triangles de la passe
+// d'ombre, eux, se coupent en changeant QUI y entre — c'est ce que fait
+// block-grid.js pour les dalles voisines du damier.
+//
 // La barre haute de pixels vit dans viewport.js, avec le reste de ce qui
 // décide de la taille du tampon de dessin. On l'importe plutôt que de la
 // recopier : deux plafonds qui divergent, c'est le genre d'écart qu'on ne
@@ -83,8 +109,8 @@ export const PALIERS = [
     densiteMax: 2, // = MAX_PIXEL_RATIO (viewport.js) : au-delà, gain nul, coût quadratique
     budgetMpx: 16, // laisse passer un 5K à densité 2 (14,7) sans y toucher
     ombres: 'dynamic',
-    ombresRes: 2048,
-    ssao: true,
+    ombresRes: 1024, // 2048 avant le 28/07 — voir « LA CARTE D'OMBRES » plus haut
+    ssao: false, // true avant le 28/07 — voir « L'OCCLUSION AMBIANTE » plus haut
     bloom: true,
     dof: true,
     grain: true,
@@ -101,8 +127,8 @@ export const PALIERS = [
     densiteMax: 1.5,
     budgetMpx: 6,
     ombres: 'dynamic', // encore dynamiques : c'est le mouvement du soleil qui fait la carte
-    ombresRes: 2048,
-    ssao: true,
+    ombresRes: 1024, // idem palier 0 — voir « LA CARTE D'OMBRES » plus haut
+    ssao: false, // idem palier 0 — voir « L'OCCLUSION AMBIANTE » plus haut
     bloom: true,
     dof: true,
     grain: true,

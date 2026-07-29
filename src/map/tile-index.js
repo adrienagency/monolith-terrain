@@ -6,9 +6,9 @@
 
 // Region currently covered by tiled Overture layers: Annecy, Chamonix,
 // Léman, Bourget, Geneva (lon 5.0–8.0, lat 44.5–47.0). Widen this bbox — and
-// rerun EVERY `build:*tiles` script (water, road, …) — to cover more of the
-// world; every consumer (build scripts, tile-loader, water-layer,
-// roads-layer) keys off this one constant. `REGION` is the neutral alias new
+// rerun EVERY `build:*tiles` script (water, lake, …) — to cover more of the
+// world; every consumer (build scripts, tile-loader, water-layer) keys off
+// this one constant. `REGION` is the neutral alias new
 // (non-water) tiled layers should import; `WATER_REGION` is kept as the
 // original name so existing imports/tests are unaffected — both point at the
 // exact same object, there is only one region.
@@ -38,37 +38,23 @@ export const LOD_LEVELS = [
   { lod: 2, tileZoom: 11, demZoomMax: Infinity },
 ]
 
-// Road tiles reuse the exact same 3-level, demZoom<=8 / 9-11 / >=12 SCHEME
-// (far/mid/close) as water's LOD_LEVELS above, but need much finer slippy
-// tile zooms at every level: a road network is far denser than a water/lake
-// layer (measured: ~1.8M kept road segments region-wide vs. water's ~258k),
-// so water's tile-zoom values would blow the ~2 MB/tile ceiling by 10-20x.
-// Chosen by direct measurement (task-18 report) — for each LOD, the
-// COARSEST tileZoom whose biggest tile still lands under ~2 MB, against the
-// per-LOD class-rank gate in build-road-tiles.mjs:
-//   LOD0 z8  (far):  motorway/trunk only     -> 3.8 MB region-wide, biggest ~1.0 MB
-//   LOD1 z11 (mid):  + primary/secondary     -> 42 MB region-wide, biggest ~0.9 MB
-//   LOD2 z14 (close): everything             -> ~1 GB region-wide, biggest ~1.1 MB
-// LOD2's total is large in absolute terms, but that's the measured cost of
-// "never simplify, never drop footway/steps at the closest zoom" applied to
-// a real, densely-mapped alpine region — not a tiling inefficiency (z13
-// already blows the 2 MB ceiling at ~3.1 MB biggest tile).
-export const ROAD_LOD_LEVELS = [
-  { lod: 0, tileZoom: 8, demZoomMax: 8 },
-  { lod: 1, tileZoom: 11, demZoomMax: 11 },
-  { lod: 2, tileZoom: 13, demZoomMax: Infinity },
-]
+// PLUS de ROAD_LOD_LEVELS : le calque Routes a quitté le site (Adrien, « très
+// lourd, très mauvais »), et sa voie tuilée avec lui. Elle n'a d'ailleurs
+// jamais existé que sur les Alpes — c'est précisément ce qui condamnait toute
+// idée d'affichage continu 3×3 avec des routes. La table `levels` de
+// lodForZoom/tileZoomForLod reste paramétrable : c'est le seul reste utile de
+// ce chantier, et LAKE_LOD_LEVELS s'en sert.
 
-// World lake layer (task 19). Unlike LOD_LEVELS/ROAD_LOD_LEVELS — which only
-// ever cover REGION (the Alps box) — these tiles are written for the WHOLE
+// World lake layer (task 19). Unlike LOD_LEVELS — which only
+// ever covers REGION (the Alps box) — these tiles are written for the WHOLE
 // PLANET, so there is no `inRegion` gate on this layer at all. That changes
 // which tradeoff matters: for a region layer the binding constraint is
 // bytes-per-tile, but for a world layer it's ALSO the total tile COUNT (one
 // file per non-empty tile, worldwide), which is why the coarse LODs stay
 // coarse and lean on the area floor instead of on finer tiles.
 //
-// Same demZoom band SCHEME as water/roads (far <=8, mid 9-11, close >=12) so
-// all three layers answer "how zoomed in am I" identically — only tileZoom
+// Same demZoom band SCHEME as water (far <=8, mid 9-11, close >=12) so
+// both layers answer "how zoomed in am I" identically — only tileZoom
 // and the gate differ. Lakes are a far sparser layer than water-with-rivers
 // (measured: `lake` is 23.5% of the Alps water bytes / 2.4% of the raw
 // region's water vertices), so lake tiles can afford to be COARSER than
@@ -79,8 +65,9 @@ export const ROAD_LOD_LEVELS = [
 // build-world-lake-tiles.mjs. Re-measure both if you touch either.
 // TWO LODs, deliberately — there used to be a third (z9, lakes >= 0.5 km2) and
 // it measured **1.74 GB of the layer's 1.91 GB total** (91%) even after
-// per-LOD sub-pixel simplification. Same standard that deferred the 887 MB
-// road tiles: that does not ship. The close band reuses the z7 tiles (named
+// per-LOD sub-pixel simplification. Même critère que celui qui avait fait
+// reculer les 887 Mo de tuiles routières (calque parti depuis) : ça ne part
+// pas en production. The close band reuses the z7 tiles (named
 // lakes >= 5 km2, worldwide, 171 MB total). What's lost: sub-5 km2 lakes
 // OUTSIDE the Alps rich-water region at close zoom — an honest v1 tradeoff;
 // the z9 build path still exists in build-world-lake-tiles.mjs for a future
@@ -91,9 +78,8 @@ export const LAKE_LOD_LEVELS = [
 ]
 
 // `levels` defaults to LOD_LEVELS (water) so every existing call site is
-// unaffected; pass ROAD_LOD_LEVELS / LAKE_LOD_LEVELS (or any other per-layer
-// table) explicitly for a layer whose tile density needs a different tileZoom
-// per LOD.
+// unaffected; pass LAKE_LOD_LEVELS (or any other per-layer table) explicitly
+// for a layer whose tile density needs a different tileZoom per LOD.
 export function lodForZoom(demZoom, levels = LOD_LEVELS) {
   for (const l of levels) if (demZoom <= l.demZoomMax) return l.lod
   return levels[levels.length - 1].lod
