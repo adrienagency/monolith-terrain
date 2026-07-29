@@ -714,16 +714,18 @@ export class RealWater {
     const water = new Uint8Array(n * n)
     // terre selon le masque côtier (si reçu) : un polder sous le niveau 0 est
     // TERRE — ni cellule « eau », ni exclu du champ de distance-rivage (le
-    // ressac s'enroule alors autour du VRAI trait de côte). Le canvas du
-    // masque et le slab couvrent le même footprint : monde → pixel direct
-    // (ligne 0 du canvas = nord = z monde -T/2, même convention que uField).
+    // ressac s'enroule alors autour du VRAI trait de côte). Le champ du
+    // masque et le slab couvrent le même footprint : monde → texel direct
+    // (ligne 0 du champ = nord = z monde -T/2, même convention que uField).
     // CONTRAT : sans masque (cd null) le champ est identique à avant.
+    // ⚠️ FOULÉE DE 1 : le masque côtier est un Uint8Array R8 depuis la passe
+    // de mémoire du 2026-07-29, plus une ImageData RGBA (voir coast-mask.js).
     const cd = this._coastImage
     const landAt = cd
       ? (x, z) => {
           const px = Math.max(0, Math.min(cd.width - 1, Math.round((x / TERRAIN_SIZE + 0.5) * (cd.width - 1))))
           const py = Math.max(0, Math.min(cd.height - 1, Math.round((z / TERRAIN_SIZE + 0.5) * (cd.height - 1))))
-          return cd.data[(py * cd.width + px) * 4] > 127
+          return cd.data[py * cd.width + px] > 127
         }
       : null
     for (let j = 0; j < n; j++) {

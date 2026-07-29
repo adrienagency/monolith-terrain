@@ -5,7 +5,7 @@ import { buildRamp2D } from './palette.js'
 import { gridTemplate } from './grid-template.js'
 import { gridNormals } from './grid-normals.js'
 import { detailField } from './detail-noise.js'
-import { landMaskFromImage } from './sea-mask.js'
+import { landMaskFromField } from './sea-mask.js'
 // L'analyse de relief et le masque de mer ne sont plus calcules ici : ils
 // partent dans un Worker (terrain-jobs.js). ~470 ms de fil principal fige par
 // reconstruction, sur MNT 1536². Le calcul est identique octet pour octet.
@@ -1291,13 +1291,13 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // ⚠️ ET LA TAILLE EST CELLE DU MASQUE DE MER, PAS CELLE DU MNT. buildSeaMask
   // indexe la landMask cellule pour cellule : la caler sur le MNT pendant que le
   // masque est plafonné rendrait des polders décalés — un défaut MUET, pas une
-  // erreur. (landMaskFromImage rééchantillonne depuis le masque côtier 1024²,
+  // erreur. (landMaskFromField rééchantillonne depuis le masque côtier 1024²,
   // il ne perd donc rien à cuire directement à la bonne taille.)
   _landMaskFor(dem) {
     if (!this._coastImage) return null
     const taille = this._seaSize(dem)
     if (!this._coastLand || this._coastLand.img !== this._coastImage || this._coastLand.size !== taille)
-      this._coastLand = { img: this._coastImage, size: taille, mask: landMaskFromImage(this._coastImage, taille) }
+      this._coastLand = { img: this._coastImage, size: taille, mask: landMaskFromField(this._coastImage, taille) }
     return this._coastLand.mask
   }
 

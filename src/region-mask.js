@@ -383,7 +383,11 @@ export function rasterizeMask(coordinates, dem, size = MASK_SIZE, coastImage = n
         const i = (y * size + x) * 4
         if (px[i] > 0 && dem.data[row + Math.min(demSize - 1, (x * k) | 0)] <= LAND_MIN_ELEV_M) {
           // trait de côte : ce pixel bas est-il de la VRAIE terre ? → on le garde
-          if (coastImage && coastImage.data[(cRow + Math.min(cw - 1, ((x * cw) / size) | 0)) * 4] > 127) continue
+          // ⚠️ FOULÉE DE 1 sur `coastImage` : c'est le champ R8 de
+          // coast-mask.js (un octet par texel), pas une ImageData RGBA. `px`,
+          // lui, reste bien du RGBA — c'est le canevas de la ZONE, un autre
+          // masque, qui n'a pas changé de format.
+          if (coastImage && coastImage.data[cRow + Math.min(cw - 1, ((x * cw) / size) | 0)] > 127) continue
           px[i] = px[i + 1] = px[i + 2] = 0
         }
       }

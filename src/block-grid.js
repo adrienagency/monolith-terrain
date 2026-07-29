@@ -562,8 +562,11 @@ export class BlockGrid {
         .then((res) => {
           if (!res) return
           if (cell.disposed) { res.maskTexture.dispose(); return } // cellule retirée pendant le fetch
-          const cv = res.maskCanvas
-          const img = cv ? cv.getContext('2d').getImageData(0, 0, cv.width, cv.height) : null
+          // ⚠️ Plus de getImageData : le champ R8 sort tel quel de
+          // coast-mask.js, et c'est LE MÊME TABLEAU que la texture. Ces deux
+          // lignes coûtaient 4,19 Mo d'ImageData par dalle voisine pour
+          // recopier, au quadruple de leur taille utile, des octets déjà là.
+          const img = res.maskField
           cell.coastImage = img // la découpe de zone la relit pour garder les polders
           terrain.setCoastMask(res.maskTexture, img) // relance aussi son sea mask (polders)
           this.onCoastReady?.(cell)

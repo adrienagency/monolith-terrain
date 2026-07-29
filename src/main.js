@@ -1900,12 +1900,13 @@ async function fetchAndBuildDem() {
         // the SEA reads the SAME OSM mask so its waves stop at the real shore,
         // not the elevation contour (flat polders below sea level are land)
         if (stillHere) {
-          // ImageData extraite UNE fois du canvas du masque, puis partagée par
-          // tous les consommateurs CPU (champ de simulation mer, garde-fou
-          // sea-mask du terrain, clip de zone) — pas de getImageData multiples
-          const img = res.maskCanvas
-            ? res.maskCanvas.getContext('2d').getImageData(0, 0, res.maskCanvas.width, res.maskCanvas.height)
-            : null
+          // Le champ R8 du masque, partagé par tous les consommateurs CPU
+          // (champ de simulation mer, garde-fou sea-mask du terrain, clip de
+          // zone) — ET par la DataTexture du GPU : c'est LE MÊME Uint8Array.
+          // ⚠️ Il remplace l'ImageData que ces lignes extrayaient du canevas :
+          // 16,78 Mo à 2048², pour quatre octets par texel dont un seul portait
+          // de l'information. Sa foulée est 1, pas 4 (voir coast-mask.js).
+          const img = res.maskField || null
           coastMaskImage = img
           terrain.setCoastMask(res.maskTexture, img)
           realWater?.setCoastMask(res.maskTexture, true, img)
