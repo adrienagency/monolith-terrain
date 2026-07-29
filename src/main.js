@@ -677,6 +677,17 @@ const loadingStatus = loadingEl.querySelector('.ld-status') ?? loadingEl
 const LOADING_MIN_MS = 2000
 const loadingStart = typeof window.__ldStart === 'number' ? window.__ldStart : performance.now()
 let loadingDismissedOnce = false
+// DEPUIS QUAND LE VOILE EST-IL À L'ÉCRAN ? `regenerateTerrain` s'accorde un
+// délai pour le laisser se peindre AVANT de figer le fil principal — un délai
+// qui n'a plus lieu d'être quand le voile est déjà peint depuis longtemps (voir
+// là-bas). Part de `loadingStart`, l'instant où index.html a peint la carte en
+// ligne, bien avant que ce module ne soit chargé : au démarrage aussi, le voile
+// est là depuis des secondes.
+let loadingVisibleDepuis = loadingStart
+function showLoading() {
+  if (loadingEl.classList.contains('hidden')) loadingVisibleDepuis = performance.now()
+  loadingEl.classList.remove('hidden')
+}
 function hideLoading() {
   if (loadingDismissedOnce) {
     loadingEl.classList.add('hidden')
@@ -1853,12 +1864,29 @@ async function fetchAndBuildDem() {
   syncExagToZoom() // this zoom's saved (or default) vertical exaggeration
   syncDetailToZoom() // fine-detail off at continental scale (z<=6)
   loadingStatus.textContent = 'fetching elevation tiles…'
-  loadingEl.classList.remove('hidden')
-  dem = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom })
+  showLoading()
+  // `memo` : le bloc central est le seul à revenir (aller-retour de zoom), donc
+  // le seul à mémoriser — voir dem-memo.js pour la facture et pour la raison
+  // d'en tenir le damier à l'écart.
+  dem = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, memo: true })
   // le sondage de couverture vient d'aboutir pour cette zone : si elle est
   // servie plus finement que le défaut, la plongée au clic doit pouvoir y aller
   liftFineZoomToRegion()
   terrain.setDem(dem)
+  // LE TRAIT DE CÔTE DE LA ZONE PRÉCÉDENTE EST LÂCHÉ ICI, AVANT la
+  // reconstruction — il l'était après, et ça coûtait un travail de travailleur
+  // entier par zoom. Il ne décrit plus le bon endroit : le garder faisait
+  // calculer le masque de mer du nouveau bloc avec le raster côtier de
+  // l'ANCIEN, puis le refaire sans trait de côte une fois la carte affichée,
+  // puis une TROISIÈME fois à l'arrivée du bon. Trois travaux à 9 Mo de MNT
+  // recopiés, pour un résultat que seul le dernier décide. Lâché ici, le
+  // masque de mer que `rebuild` va lancer est d'emblée le bon état d'attente
+  // (aucun trait de côte) et il n'en reste que DEUX : celui-là, et l'arrivée.
+  // ⚠️ `rebuildFields: false` : c'est `regenerateTerrain` qui lance les champs
+  // quelques lignes plus bas, inutile d'en poster un pour rien (voir
+  // terrain.js). Les `setCoastMask(null)` restés plus bas deviennent, eux, de
+  // simples non-événements — le masque est déjà nul.
+  terrain.setCoastMask(null, null, { rebuildFields: false })
   params.source = 'real'
   try {
     clouds?.reroll() // a new view level deserves a fresh cloud layout
@@ -1976,9 +2004,18 @@ let rebuildPending = false
 function regenerateTerrain() {
   if (rebuildPending) return Promise.resolve()
   rebuildPending = true
-  loadingEl.classList.remove('hidden')
-  // plain timeout (not rAF — rAF never fires in a hidden tab and would stall
-  // the rebuild); 50ms still lets the indicator paint first
+  showLoading()
+  // LE DÉLAI NE SERT QU'À LAISSER LE VOILE SE PEINDRE, et il ne se paie donc
+  // qu'une fois. Sur le chemin d'un ZOOM, le voile est levé par
+  // fetchAndBuildDem et peint depuis ~170 ms quand on arrive ici : les 50 ms
+  // fixes étaient 50 ms de carte d'attente offertes à personne, à chaque zoom
+  // (mesuré à La Réunion, séquence z13→z14→z13). On ne garde donc que ce qui
+  // MANQUE au voile pour être sûr d'être peint — 50 ms depuis un panneau qui
+  // vient de le lever, 0 depuis un zoom.
+  // ⚠️ setTimeout et PAS requestAnimationFrame : rAF ne se déclenche JAMAIS
+  // dans un onglet caché et la reconstruction resterait en plan. Piège déjà
+  // payé trois fois sur ce projet — même à 0 ms, ça reste un setTimeout.
+  const delai = Math.max(0, 50 - (performance.now() - loadingVisibleDepuis))
   return new Promise((resolve) =>
     setTimeout(() => {
       terrain.rebuild(params)
@@ -2026,7 +2063,7 @@ function regenerateTerrain() {
         hideLoading()
         resolve()
       })
-    }, 50)
+    }, delai)
   )
 }
 

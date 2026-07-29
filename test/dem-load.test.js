@@ -229,3 +229,126 @@ test('au-delà du zoom couvert, on relit l ancêtre (overzoomTile) sans 404', as
   assert.ok(Math.abs(dem.data[0] - ELEV) < 0.01)
   assert.ok(Math.abs(dem.meanM - ELEV) < 0.01)
 })
+
+// ---------------------------------------------------- la mémoire des blocs
+//
+// LE RETOUR DE ZOOM NE RETÉLÉCHARGE RIEN, ET NE RECALCULE RIEN.
+// Mesuré à La Réunion (z13→z14→z13) : refaire le bloc coûte 145 ms de fil
+// principal figé — décodage terrarium, fusion bathy, lissage du fond marin,
+// statistiques — pour une donnée strictement identique. Voir src/dem-memo.js.
+//
+// ⚠️ CE QUI COMPTE ICI N'EST PAS LE SUCCÈS, C'EST L'INVALIDATION. Un cache
+// d'altitudes qui sert un bloc périmé ne plante pas : il peint une carte fausse,
+// en silence. Chaque champ de la clé a donc son test de miss.
+
+const { _resetTileCaches } = await import('../src/dem.js')
+const { DEM_MEMO_MAX, demMemoOctets } = await import('../src/dem-memo.js')
+
+// compte les tuiles réellement demandées au serveur (les HEAD de couverture ne
+// comptent pas : c'est dem-source.js qui les mémorise, pas nous)
+let requetes = 0
+function serveCompte(plan) {
+  serve(plan)
+  const brut = globalThis.fetch
+  requetes = 0
+  globalThis.fetch = async (url, opts) => {
+    if (opts?.method !== 'HEAD') requetes++
+    return brut(url, opts)
+  }
+}
+
+function neuf() {
+  _resetDemSource()
+  _resetTileCaches()
+}
+
+test('mémoire : le MÊME bloc revient à l’identique, sans une seule requête', async () => {
+  neuf()
+  serveCompte({ zmax: 16, bathy: true })
+  const a = await loadDem({ lat: LAT, lon: LON, zoom: 14, memo: true })
+  const apresPremier = requetes
+  assert.ok(apresPremier > 0, 'le premier chargement, lui, télécharge')
+  const b = await loadDem({ lat: LAT, lon: LON, zoom: 14, memo: true })
+  assert.equal(b, a, 'même objet : ni retéléchargé, ni refusionné, ni relissé')
+  assert.equal(requetes, apresPremier, 'zéro requête au retour')
+})
+
+test('mémoire : rien n’est gardé sans qu’on le demande — le damier reste dehors', async () => {
+  neuf()
+  serveCompte({ zmax: 16 })
+  const a = await loadDem({ lat: LAT, lon: LON, zoom: 14 })
+  const b = await loadDem({ lat: LAT, lon: LON, zoom: 14 })
+  assert.notEqual(b, a, 'sans `memo: true`, chaque appel refait son bloc')
+  assert.equal(demMemoOctets(), 0, 'et rien ne pèse en mémoire')
+})
+
+// Chaque champ de la clé, un par un. Un seul oubli suffirait à servir une carte
+// fausse sans le moindre symptôme.
+test('mémoire : le ZOOM invalide', async () => {
+  neuf()
+  serveCompte({ zmax: 16 })
+  const a = await loadDem({ lat: LAT, lon: LON, zoom: 14, memo: true })
+  assert.notEqual(await loadDem({ lat: LAT, lon: LON, zoom: 13, memo: true }), a)
+})
+
+test('mémoire : le CENTRE invalide, même à l’intérieur de la même tuile', async () => {
+  neuf()
+  serveCompte({ zmax: 16 })
+  const a = await loadDem({ lat: LAT, lon: LON, zoom: 14, memo: true })
+  // décalage minuscule : mêmes tuiles, mêmes altitudes… mais pas le même centre.
+  // Servir l'ancien recentrerait la carte au mauvais endroit (dem.lat/lon sont
+  // rendus avec le bloc).
+  const b = await loadDem({ lat: LAT + 1e-5, lon: LON, zoom: 14, memo: true })
+  assert.notEqual(b, a)
+  assert.equal(b.originTileX, a.originTileX, 'c’est bien le même bloc de tuiles')
+  assert.notEqual(b.lat, a.lat)
+})
+
+test('mémoire : la SOURCE d’altitude invalide (bascule Mapterhorn → AWS)', async () => {
+  neuf()
+  serveCompte({ zmax: 16 })
+  const mt = await loadDem({ lat: LAT, lon: LON, zoom: 14, memo: true })
+  assert.equal(mt.demSource, 'mapterhorn')
+  _resetDemSource('aws')
+  const aws = await loadDem({ lat: LAT, lon: LON, zoom: 14, memo: true })
+  assert.equal(aws.demSource, 'aws')
+  assert.notEqual(aws, mt)
+  assert.notEqual(aws.size, mt.size)
+})
+
+test('mémoire : le ZOOM MAX SERVI invalide — le surzoom ne rend pas le même relief', async () => {
+  neuf()
+  serveCompte({ zmax: 16 })
+  const natif = await loadDem({ lat: LAT, lon: LON, zoom: 14, memo: true })
+  assert.equal(natif.maxZoom, 16)
+  // même endroit, même zoom demandé, mais la source ne sert plus que z12 : le
+  // bloc est reconstruit depuis un ancêtre agrandi. La clé DOIT le voir.
+  _resetDemSource()
+  serveCompte({ zmax: 12 })
+  const surzoom = await loadDem({ lat: LAT, lon: LON, zoom: 14, memo: true })
+  assert.equal(surzoom.maxZoom, 12)
+  assert.notEqual(surzoom, natif)
+})
+
+test('mémoire : le drapeau bathy invalide — un bloc sans mer creusée n’est pas le même', async () => {
+  neuf()
+  serveCompte({ zmax: 16, bathy: true })
+  const avec = await loadDem({ lat: -21.115, lon: 55.536, zoom: 8, memo: true })
+  const sans = await loadDem({ lat: -21.115, lon: 55.536, zoom: 8, bathy: false, memo: true })
+  assert.notEqual(sans, avec)
+})
+
+// ⚠️ LA BORNE EST CE QUI REND LA MÉMOIRE DÉFENDABLE (9,4 Mo de MNT par entrée
+// sur le format de production) : sans elle, chaque zoom visité resterait à vie.
+test(`mémoire : bornée à ${DEM_MEMO_MAX} entrées, et c’est la plus ancienne qui part`, async () => {
+  neuf()
+  serveCompte({ zmax: 16 })
+  const z12 = await loadDem({ lat: LAT, lon: LON, zoom: 12, memo: true })
+  const z13 = await loadDem({ lat: LAT, lon: LON, zoom: 13, memo: true })
+  assert.equal(await loadDem({ lat: LAT, lon: LON, zoom: 13, memo: true }), z13)
+  assert.equal(await loadDem({ lat: LAT, lon: LON, zoom: 12, memo: true }), z12)
+  // troisième bloc : le plus anciennement SERVI (z13) est évincé, z12 reste
+  await loadDem({ lat: LAT, lon: LON, zoom: 14, memo: true })
+  assert.equal(await loadDem({ lat: LAT, lon: LON, zoom: 12, memo: true }), z12, 'le plus récent survit')
+  assert.notEqual(await loadDem({ lat: LAT, lon: LON, zoom: 13, memo: true }), z13, 'le plus ancien est parti')
+})

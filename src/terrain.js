@@ -3,7 +3,8 @@ import { Simplex2, mulberry32, fbm, ridged, smoothstep, lerp } from './noise.js'
 import { sampleDem } from './dem.js'
 import { buildRamp2D } from './palette.js'
 import { gridTemplate } from './grid-template.js'
-import { detailField } from './detail-noise.js'
+import { detailField, tintField } from './detail-noise.js'
+import { analyseMemoLire, analyseMemoEcrire } from './dem-memo.js'
 import { landMaskFromImage } from './sea-mask.js'
 // L'analyse de relief et le masque de mer ne sont plus calcules ici : ils
 // partent dans un Worker (terrain-jobs.js). ~470 ms de fil principal fige par
@@ -965,7 +966,15 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     }
   }
 
-  setCoastMask(texture, coastImage) {
+  // `rebuildFields: false` — LÂCHER LE TRAIT DE CÔTE SANS RECUIRE LA MER.
+  // Utile au seul appelant qui sait qu'une reconstruction complète arrive dans
+  // la foulée : main.js lâche le trait de côte de la zone PRÉCÉDENTE juste
+  // avant de rebâtir le relief sur un nouveau MNT, et c'est `rebuild` qui
+  // lancera les champs trois lignes plus loin. Sans ce drapeau, le même masque
+  // de mer partait DEUX fois au travailleur par changement de zoom — mesuré à
+  // La Réunion : 9 Mo recopiés et ~45 ms de travailleur pour un résultat que
+  // l'arrivée du vrai trait de côte écrasait 70 ms plus tard.
+  setCoastMask(texture, coastImage, { rebuildFields = true } = {}) {
     // coast masks are owned by main.js's LRU cache — NEVER dispose here: the
     // previously active texture is usually still cached, and disposing it on a
     // swap would kill a live cache entry. The cache disposes on eviction only.
@@ -988,7 +997,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       this._coastLand = null // cache landMask (dépend de dem.size) — invalidé
       // ⚠️ withAnalysis: false — la landMask ne change QUE la mer. Recuire les
       // ~10 flous de l'analyse ici coûterait 387 ms pour un résultat identique.
-      if (this.dem?.data) this._buildFields({ withAnalysis: false })
+      if (rebuildFields && this.dem?.data) this._buildFields({ withAnalysis: false })
     }
   }
 
@@ -1217,20 +1226,22 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     geo.computeVertexNormals()
 
     // vertex tint: height-graded value + slope darkening + grain jitter
-    const colorRng = mulberry32(params.seed + 101)
-    const sTint = new Simplex2(colorRng)
+    // Le grain est PRÉ-CUIT sur la grille (detail-noise.js, `tintField`) : deux
+    // octaves de simplex par sommet, 65 ms de gel par reconstruction à res 768,
+    // pour un motif qui ne dépend que de (graine, résolution) — il survit donc
+    // au changement de zoom, au curseur d'exagération et à la palette.
+    // Bit-identique, verrouillé par test/detail-noise.test.js.
+    const tint = tintField(params.seed + 101, res, TERRAIN_SIZE)
     const normals = geo.attributes.normal.array
     const colors = new Float32Array(count * 3)
     const span = Math.max(1e-5, maxH - minH)
     for (let i = 0; i < count; i++) {
-      const x = arr[i * 3]
       const h = arr[i * 3 + 1]
-      const z = arr[i * 3 + 2]
       const ny = normals[i * 3 + 1]
       const hn = (h - minH) / span
       let v = lerp(0.62, 0.95, Math.pow(hn, 0.85))
       v *= lerp(0.78, 1.0, Math.pow(Math.max(0, ny), 0.6))
-      v += fbm(sTint, x * 1.7, z * 1.7, 2, 2.2, 0.5) * 0.05
+      v += tint[i] * 0.05
       colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = v
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
@@ -1336,12 +1347,25 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // deux fois de suite, et c'est la passe la plus chère du chargement.
     const naturel = this.mapUniforms.uColorMode.value === 1
     if (!naturel) this.mapUniforms.uAnalysisOn.value = 0
-    const analyse = withAnalysis && naturel && !(this._analysisFor === dem && this.mapUniforms.uAnalysisOn.value)
+    const demandee = withAnalysis && naturel && !(this._analysisFor === dem && this.mapUniforms.uAnalysisOn.value)
     // analysisMax / seaMax : une dalle VOISINE n'a pas le maillage qui
     // justifierait des champs à la taille du MNT (voir block-grid.js). Le shader
     // lit les deux en UV MONDE, leur taille lui est donc indifférente.
     const maxSize = this.analysisMax | 0
     const seaMax = this.seaMax | 0
+    // ANALYSE DÉJÀ CUITE POUR CE MNT ? On la repose SANS RIEN DEMANDER au
+    // travailleur. Mesuré à La Réunion sur un retour de zoom : 464 ms de
+    // travailleur, et c'est le voile de chargement qui les attendait. L'analyse
+    // ne dépend que des altitudes et du plafond `maxSize` — dem-memo.js range
+    // le résultat SOUS le MNT qui l'a produit, il ne peut donc pas se poser sur
+    // d'autres altitudes que les siennes.
+    if (demandee) {
+      const cuite = analyseMemoLire(dem, maxSize)
+      if (cuite) this._applyAnalysis(cuite.rgba, cuite.size, dem)
+    }
+    // `_applyAnalysis` vient de poser `_analysisFor` et `uAnalysisOn` : la même
+    // question qu'au-dessus répond maintenant « non, plus rien à cuire ».
+    const analyse = demandee && !(this._analysisFor === dem && this.mapUniforms.uAnalysisOn.value)
     // ⚠️ LE MÊME TRAVAIL EST DEMANDÉ DEUX FOIS À LA NAISSANCE D'UNE DALLE :
     // rebuild() lance les champs, puis setColorMode les relance parce que
     // uAnalysisOn vaut encore 0 — l'uniforme ne monte qu'à l'ARRIVÉE. On rend
@@ -1366,7 +1390,13 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       current: () => this._fieldKey,
       apply: (r, actuel) => {
         if (jobStillValid(cleMer, actuel)) this._applySeaMask(r.sea, r.seaSize)
-        if (r.analysis && jobStillValid(cleAnalyse, actuel)) this._applyAnalysis(r.analysis, r.analysisSize, dem)
+        if (r.analysis && jobStillValid(cleAnalyse, actuel)) {
+          this._applyAnalysis(r.analysis, r.analysisSize, dem)
+          // ⚠️ mémorisé APRÈS le verdict de péremption, et seulement là : une
+          // analyse périmée en vol n'a rien à faire dans la mémoire. Sans effet
+          // si le MNT n'est pas lui-même mémorisé (dalles du damier).
+          analyseMemoEcrire(dem, maxSize, r.analysis, r.analysisSize)
+        }
       },
     }).then((r) => {
       // ⚠️ LE VOL SE TERMINE ICI, ET SEULEMENT S'IL EST TOUJOURS LE NÔTRE : un

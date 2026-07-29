@@ -13,12 +13,20 @@
 // fois un résultat BIT-IDENTIQUE au calcul direct.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { Simplex2, mulberry32, fbm, smoothstep } from '../src/noise.js'
+import { Simplex2, mulberry32, fbm, smoothstep, lerp } from '../src/noise.js'
 import { sampleDem } from '../src/dem.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { detailField, clearDetailField, grainSamplesPerCycle, GRAIN_MIN_SAMPLES } from '../src/detail-noise.js'
+import {
+  detailField,
+  clearDetailField,
+  tintField,
+  clearTintField,
+  grainSamplesPerCycle,
+  GRAIN_MIN_SAMPLES,
+} from '../src/detail-noise.js'
+import { gridTemplate } from '../src/grid-template.js'
 import { TERRAIN_SIZE } from '../src/terrain.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -183,6 +191,104 @@ test('main.js : la résolution du bloc central ne descend pas sous le grain', ()
       `Correctif : diviser detailScale dans le même rapport que la résolution — ` +
       `detailScale ≈ ${(ds * (res / 768)).toFixed(3)} pour res ${res}.`,
   )
+})
+
+// ---------------------------------------------------------------------------
+// LE GRAIN DE TEINTE — 65 ms par reconstruction, même démonstration
+// ---------------------------------------------------------------------------
+// `Terrain.rebuild` teintait chaque sommet avec deux octaves de simplex prises
+// en direct : 65 ms de gel à res 768, refaits à chaque zoom pour un motif
+// identique. Ce qui suit prouve les deux choses qui autorisent à le mémoriser —
+// il ne dépend que de (graine, résolution, taille), et le champ cuit rend
+// EXACTEMENT la même couleur que la formule d'origine.
+
+// ⚠️ LA RÉFÉRENCE LIT SES x ET z DANS LA GÉOMÉTRIE, comme le faisait rebuild :
+// `arr[i*3]` est un Float32Array, donc des coordonnées ARRONDIES au flottant
+// simple. C'est tout l'objet du `Math.fround` de tintField — sans lui, le champ
+// serait cuit sur les doubles et la couleur bougerait sur le dernier bit.
+function teinteDirecte(seed, res, i, arr, normals, minH, span) {
+  const s = new Simplex2(mulberry32(seed))
+  const x = arr[i * 3]
+  const h = arr[i * 3 + 1]
+  const z = arr[i * 3 + 2]
+  const ny = normals[i * 3 + 1]
+  const hn = (h - minH) / span
+  let v = lerp(0.62, 0.95, Math.pow(hn, 0.85))
+  v *= lerp(0.78, 1.0, Math.pow(Math.max(0, ny), 0.6))
+  v += fbm(s, x * 1.7, z * 1.7, 2, 2.2, 0.5) * 0.05
+  return v
+}
+
+for (const res of [16, 33]) {
+  test(`tintField ${res} : la couleur cuite est BIT-IDENTIQUE à la formule d’origine`, () => {
+    clearTintField()
+    // une vraie grille de gabarit, avec ses coordonnées en Float32 — c'est
+    // exactement ce que rebuild lit
+    const tpl = gridTemplate(res, TERRAIN_SIZE)
+    const arr = new Float32Array(tpl.position)
+    const count = tpl.count
+    // un relief et des normales quelconques mais VARIÉS : ce sont les deux
+    // autres termes de la teinte, ils doivent traverser le test intacts
+    const normals = new Float32Array(count * 3)
+    let minH = Infinity
+    let maxH = -Infinity
+    for (let i = 0; i < count; i++) {
+      const h = Math.sin(i * 0.31) * 4 + Math.cos(i * 0.07) * 2
+      arr[i * 3 + 1] = h
+      normals[i * 3 + 1] = Math.sin(i * 0.13) // traverse zéro : Math.max(0, ny) exercé
+      if (h < minH) minH = h
+      if (h > maxH) maxH = h
+    }
+    const span = Math.max(1e-5, maxH - minH)
+    const seed = 1337 + 101
+    const champ = tintField(seed, res, TERRAIN_SIZE)
+    assert.equal(champ.length, count)
+    for (let i = 0; i < count; i++) {
+      const h = arr[i * 3 + 1]
+      const ny = normals[i * 3 + 1]
+      const hn = (h - minH) / span
+      let v = lerp(0.62, 0.95, Math.pow(hn, 0.85))
+      v *= lerp(0.78, 1.0, Math.pow(Math.max(0, ny), 0.6))
+      v += champ[i] * 0.05
+      assert.equal(v, teinteDirecte(seed, res, i, arr, normals, minH, span), `sommet ${i}`)
+    }
+  })
+}
+
+// ⚠️ Même raison qu'au champ de détail : `v += champ[i]·0,05` se compose en
+// double avant d'atterrir dans un Float32Array. Un champ en Float32 ferait un
+// double arrondi, et l'identité bit à bit ci-dessus tomberait.
+test('le champ de teinte est en double précision', () => {
+  clearTintField()
+  assert.equal(tintField(101, 8, TERRAIN_SIZE).constructor, Float64Array)
+})
+
+test('tintField : même clé → MÊME tableau ; graine, résolution et taille invalident', () => {
+  clearTintField()
+  const a = tintField(101, 16, TERRAIN_SIZE)
+  assert.equal(tintField(101, 16, TERRAIN_SIZE), a, 'même clé : réutilisé, pas recuit')
+  assert.notEqual(tintField(102, 16, TERRAIN_SIZE), a)
+  assert.notEqual(tintField(101, 32, TERRAIN_SIZE), a)
+  assert.notEqual(tintField(101, 16, TERRAIN_SIZE * 2), a)
+})
+
+// ⚠️ DEUX ENTRÉES, PAS PLUS — et pas UNE non plus. Le damier reconstruit ses
+// voisines à 256 entre deux reconstructions du bloc central : avec une entrée
+// unique, chacun chasserait l'autre et le champ du héros serait recuit à chaque
+// extension du damier. Avec trois, la mémoire enflerait au balayage du sélecteur
+// de résolution (8,4 Mo l'entrée à res 1024).
+test('tintField : la mémoire est BORNÉE à deux entrées, et garde les deux plus récentes', () => {
+  clearTintField()
+  const heros = tintField(101, 24, TERRAIN_SIZE)
+  const voisin = tintField(101, 8, TERRAIN_SIZE)
+  // l'alternance héros ↔ voisins ne recuit NI l'un NI l'autre
+  assert.equal(tintField(101, 8, TERRAIN_SIZE), voisin)
+  assert.equal(tintField(101, 24, TERRAIN_SIZE), heros)
+  // une troisième résolution évince la plus ANCIENNEMENT servie — le héros
+  // vient d'être resservi, c'est donc le voisin qui part
+  tintField(101, 12, TERRAIN_SIZE)
+  assert.equal(tintField(101, 24, TERRAIN_SIZE), heros, 'le plus récemment servi reste')
+  assert.notEqual(tintField(101, 8, TERRAIN_SIZE), voisin, 'le plus ancien a bien été évincé')
 })
 
 test('grainSamplesPerCycle : le critère suit bien res / detailScale', () => {
