@@ -10,6 +10,7 @@ import { riverWidthPx } from './river-width.js'
 import { makeLakeMaterial } from './lake-material.js'
 import { WATER_REGION, LAKE_LOD_LEVELS, inRegion, lodForZoom, tileZoomForLod } from './tile-index.js'
 import { loadWaterTiles, loadWaterTileManifest, loadLakeTiles, loadLakeTileManifest, hasTilesForLod } from './tile-loader.js'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
 // À partir de ce demZoom, l'eau vient d'Overpass en pleine finesse ; en
 // dessous, des tuiles Overture ou du Natural Earth.
@@ -164,6 +165,54 @@ function _buildFilledRing(part, dem, sample, outline, fp, insideBlock, flat = fa
 // lakes). depthTest is always ON: the terrain must occlude water like any
 // other geometry (see LAKE_RENDER_ORDER above for how lakes still win
 // against other draped layers without it).
+// Pose la découpe de fenêtre sur un matériau — sans effet hors mode continu
+// (`plans` est alors null, et le matériau reste celui d'avant, variante de
+// shader comprise : three.js ne compile le code de coupe que s'il y a des plans).
+//
+// ⚠️ C'EST UNE ÉCRITURE, PAS UNE CHIRURGIE DE SHADER. `LineMaterial` déclare
+// `clipping: true` en r172, `MeshBasicMaterial` le porte depuis toujours, et le
+// matériau de lac a reçu les quatre inclusions standard. Rien à recompiler à la
+// main, rien à casser sur un pilote — c'est la raison de préférer les plans au
+// `discard` de superellipse que l'étude proposait.
+function _coupeALaFenetre(mat, plans) {
+  if (!mat || !plans) return
+  mat.clippingPlanes = plans
+  mat.clipShadows = false
+  mat.needsUpdate = true
+}
+
+// ══════════ UN SEUL MAILLAGE PAR MATÉRIAU, PAS UN PAR POLYGONE ═════════════
+//
+// MESURÉ, Chamonix z12 en mode continu, calque affiché puis caché en
+// alternance sur la même scène vivante (l'alternance et pas deux blocs : la
+// machine dérive, l'ordre ment) :
+//
+//   1 483 maillages d'eau, 3 682 appels de dessin  →  26,0 ms l'image
+//   le même calque caché                           →  16,6 ms l'image
+//
+// Soit **+9,3 ms par image** pour l'eau seule, quand le budget d'une image à
+// 60 im/s est de 16,6 ms en tout. Le mode ordinaire ne le montrait pas (186
+// maillages, coût non mesurable) : c'est l'emprise 3×3 qui multiplie par neuf
+// et fait basculer le calque du côté visible du budget.
+//
+// La cause n'est pas la géométrie — 170 083 sommets ne sont rien — c'est le
+// NOMBRE d'objets. On fusionne donc tous les polygones d'un même matériau en un
+// seul maillage : ils partagent déjà leur matériau, leur ordre de rendu et
+// leurs attributs (position, normale, index).
+//
+// ⚠️ Les géométries sources sont disposées ici. `mergeGeometries` COPIE, elle ne
+// prend pas la propriété : les laisser vivre serait une fuite de tas d'autant
+// plus grande que l'emprise est grande.
+function _meshFusionne(geos, material, renderOrder) {
+  if (!geos.length) return null
+  const geo = geos.length === 1 ? geos[0] : mergeGeometries(geos, false)
+  if (geos.length > 1) for (const g of geos) g.dispose()
+  if (!geo) return null
+  const mesh = new THREE.Mesh(geo, material)
+  mesh.renderOrder = renderOrder
+  return mesh
+}
+
 function _fillMaterial(ink, opacity) {
   return new THREE.MeshBasicMaterial({
     color: new THREE.Color(ink),
@@ -381,11 +430,31 @@ export class WaterLayer {
     // reads this flag.
     this.usingOsm = osmOk || tileOk || worldLakeOk
 
-    const fp = terrain.blockFootprint(); const insideBlock = makeInsideBlock(fp)
+    // ══════════ MODE CONTINU : ON TAILLE SUR L'EMPRISE, LE GPU COUPE ═════════
+    //
+    // Mesuré avant, Chamonix z12 : 186 objets, 16 355 sommets, TOUS dans ±28 —
+    // le socle central. L'emprise fait ±84 : huit neuvièmes des rivières et des
+    // lacs n'existaient pas. On défilait, l'eau s'en allait, rien ne venait
+    // derrière. Et la découpe CPU ne peut pas se refaire par image (étude §5.2 :
+    // 10 à 100 ms, pour un budget de 6). On construit donc sur l'emprise entière
+    // une fois, et huit plans de coupe rendent la fenêtre au GPU pour rien —
+    // ils sont CONSTANTS, le socle restant centré sur l'origine (fenetre-clip.js).
+    const fpEmprise = terrain.empriseFootprint?.() ?? null
+    const fp = fpEmprise ?? terrain.blockFootprint()
+    const plans = fpEmprise ? terrain.plansFenetre() : null
+    const insideBlock = makeInsideBlock(fp)
     // Computed once per rebuild (depends only on fp) and shared by every
     // filled-ring build below — see _buildFilledRing / triangulateAndClip.
     const outline = blockOutline(fp)
-    const sample = (x, z) => (terrain.sample ? terrain.sample(x, z) : 0)
+    // ⚠️ LE DRAPAGE SE FAIT EN COORDONNÉES DE CHAMP. `terrain.sample` répond
+    // « sous le point AFFICHÉ en x », donc il porte le décalage de fenêtre : une
+    // géométrie cuite en coordonnées de champ et drapée avec lui prendrait
+    // l'altitude d'un point situé une fenêtre plus loin. Invisible tant que la
+    // reconstruction tombe à fenêtre nulle — et faux dès qu'elle tombe pendant
+    // un défilement (curseur d'exagération, arrivée du trait de côte).
+    // Hors mode continu `fenetre` vaut (0,0) et l'expression est celle d'avant.
+    const fen = terrain.fenetre ?? { x: 0, z: 0 }
+    const sample = (x, z) => (terrain.sample ? terrain.sample(x - fen.x, z - fen.z) : 0)
     const resolution = new THREE.Vector2(window.innerWidth, window.innerHeight)
     const ink = params.darkMode ? '#7fb2d6' : '#2b7fc4'
     // Lakes get a distinctly more saturated blue than the general water ink
@@ -413,7 +482,7 @@ export class WaterLayer {
     for (const g of groups) {
       if (!g.runs.length) continue
       const obj = buildLineSegments(g.runs, sample, { color: g.color, widthPx: g.widthPx, offset: 0.07, renderOrder: g.order, resolution })
-      obj.traverse((o) => { if (o.material) o.material.opacity = params.waterOpacity ?? 0.9 })
+      obj.traverse((o) => { if (o.material) { o.material.opacity = params.waterOpacity ?? 0.9; _coupeALaFenetre(o.material, plans) } })
       this.group.add(obj)
     }
 
@@ -427,13 +496,14 @@ export class WaterLayer {
       const fillOpacity = params.waterOpacity ?? 0.9
       if (areaParts && areaParts.length) {
         const areaMaterial = _fillMaterial(ink, fillOpacity)
+        _coupeALaFenetre(areaMaterial, plans)
+        const geos = []
         for (const part of areaParts) {
           const geo = _buildFilledRing(part, dem, sample, outline, fp, insideBlock)
-          if (!geo) continue
-          const mesh = new THREE.Mesh(geo, areaMaterial)
-          mesh.renderOrder = 17
-          this.group.add(mesh)
+          if (geo) geos.push(geo)
         }
+        const mesh = _meshFusionne(geos, areaMaterial, 17)
+        if (mesh) this.group.add(mesh)
       }
       if (lakeParts.length) {
         // Lakes above everything else, in a clearly-visible blue —
@@ -452,14 +522,19 @@ export class WaterLayer {
           sunDir: this._sun?.dir,
           sunColor: this._sun?.color,
         })
+        _coupeALaFenetre(lakeMaterial, plans)
         this._lakeMats.push(lakeMaterial)
+        const geos = []
         for (const part of lakeParts) {
+          // ⚠️ `flat: true` NIVELLE CHAQUE LAC SÉPARÉMENT, et c'est pour ça que
+          // la fusion vient APRÈS : chaque part reçoit d'abord son propre niveau
+          // d'eau (waterLevelOf, la médiane de ses altitudes drapées). Fusionner
+          // avant aurait mis Annecy et le Léman au même niveau.
           const geo = _buildFilledRing(part, dem, sample, outline, fp, insideBlock, true)
-          if (!geo) continue
-          const mesh = new THREE.Mesh(geo, lakeMaterial)
-          mesh.renderOrder = LAKE_RENDER_ORDER
-          this.group.add(mesh)
+          if (geo) geos.push(geo)
         }
+        const mesh = _meshFusionne(geos, lakeMaterial, LAKE_RENDER_ORDER)
+        if (mesh) this.group.add(mesh)
       }
     }
   }

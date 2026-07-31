@@ -7,6 +7,11 @@ import { gridNormals } from './grid-normals.js'
 import { detailField, detailFieldEmprise, accordeDetailScale, tintField } from './detail-noise.js'
 import { analyseMemoLire, analyseMemoEcrire } from './dem-memo.js'
 import { landMaskFromField } from './sea-mask.js'
+// les huit demi-plans de la fenêtre, purs et testés — voir src/fenetre-clip.js
+// ⚠️ ALIASÉ : la méthode `Terrain.plansFenetre()` rend des `THREE.Plane`, la
+// fonction pure rend des descriptions. Le même nom pour les deux se lit comme
+// une récursion qui n'existe pas.
+import { plansFenetre as demiPlansFenetre } from './fenetre-clip.js'
 // L'analyse de relief et le masque de mer ne sont plus calcules ici : ils
 // partent dans un Worker (terrain-jobs.js). ~470 ms de fil principal fige par
 // reconstruction, sur MNT 1536². Le calcul est identique octet pour octet.
@@ -1006,6 +1011,58 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       regionOn,
       regionSample: regionOn ? (x, z) => this.regionSample(x, z) : null,
     }
+  }
+
+  // ══════════ CE À QUOI LES CALQUES SE TAILLENT EN MODE CONTINU ═════════════
+  //
+  // L'empreinte de CONSTRUCTION, qui couvre l'emprise entière. Les calques du
+  // sol (rivières, lacs, plans d'eau) cuisent leur géométrie une fois sur les
+  // 168 unités, et c'est le GPU qui coupe ensuite à la fenêtre — la découpe CPU
+  // ne peut pas se refaire par image (étude 3×3 §5.2 : 10 à 100 ms).
+  //
+  // ⚠️ PAS D'ARRONDI ICI. Le bord de l'emprise n'est pas un bord de socle : rien
+  // n'y est visible, c'est simplement là que le MNT s'arrête. Un arrondi y
+  // coûterait 5 760 tests de superellipse par reconstruction (blockOutline en
+  // 192 sommets) pour découper une frontière que personne ne voit.
+  //
+  // Rend `null` hors mode continu : l'appelant garde `blockFootprint()`.
+  empriseFootprint() {
+    const cote = this.dem?.empriseCote > 1 ? this.dem.empriseCote : 1
+    if (cote === 1) return null
+    const u = this.mapUniforms
+    const regionOn = u.uRegionOn.value > 0.5
+    return {
+      half: u.uSlabHalf.value * cote,
+      corner: 0,
+      cornerN: u.uSlabCornerN.value,
+      regionOn,
+      regionSample: regionOn ? (x, z) => this.regionSample(x, z) : null,
+    }
+  }
+
+  // Les plans de coupe qui rendent la fenêtre au GPU — `null` hors mode continu.
+  //
+  // ⚠️ CONSTRUITS UNE FOIS ET RÉUTILISÉS TELS QUELS. Ils ne dépendent pas du
+  // décalage : en mode continu le socle reste centré sur l'origine du monde et
+  // c'est la géométrie du calque qui défile dessous (son groupe porte −fenêtre).
+  // Voir src/fenetre-clip.js pour l'octogone et ce qu'il approxime.
+  // ⚠️ ET C'EST LE MÊME TABLEAU POUR TOUS LES MATÉRIAUX : three.js compile une
+  // variante de shader par NOMBRE de plans, pas par tableau, mais partager
+  // l'objet évite de recréer huit `Plane` par matériau à chaque reconstruction.
+  plansFenetre() {
+    const fp = this.empriseFootprint()
+    if (!fp) return null
+    const u = this.mapUniforms
+    const half = u.uSlabHalf.value
+    const corner = u.uRegionOn.value > 0.5 ? 0 : u.uSlabCorner.value
+    const cle = `${half}:${corner}`
+    if (this._plansCle !== cle) {
+      this._plansCle = cle
+      this._plans = demiPlansFenetre(half, corner).map(
+        (p) => new THREE.Plane(new THREE.Vector3(p.normal[0], p.normal[1], p.normal[2]), p.constant)
+      )
+    }
+    return this._plans
   }
 
   // `rebuildFields: false` — LÂCHER LE TRAIT DE CÔTE SANS RECUIRE LA MER.

@@ -1835,6 +1835,20 @@ function fenetreContinueActive() {
   return FLAGS.fenetreContinue
 }
 
+// ══════════ LA DÉCOUPE LOCALE, ALLUMÉE AVEC LE MODE ═══════════════════════
+//
+// Les calques du sol (rivières, lacs, plans d'eau) sont construits sur
+// l'emprise 3×3 entière et coupés à la fenêtre par huit plans de coupe
+// (src/fenetre-clip.js). Ces plans sont posés MATÉRIAU PAR MATÉRIAU, donc il
+// faut que three.js les regarde — c'est ce que dit cet interrupteur.
+//
+// ⚠️ Il n'a AUCUN effet sur un matériau sans `clippingPlanes` : three.js ne
+// génère le code de coupe qu'à partir de NUM_CLIPPING_PLANES > 0. Le terrain,
+// le socle, la mer et le ciel ne sont donc pas concernés. Il est quand même
+// posé sous condition, pour que le mode ordinaire n'ait pas à faire confiance
+// à cette phrase.
+if (fenetreContinueActive()) renderer.localClippingEnabled = true
+
 // Le décalage BRUT, celui qui mémorise le geste au-delà de la butée. L'affiché
 // vit dans `terrain.fenetre` ; ces deux-là ne sont égaux que dans la course.
 // ⚠️ Le brut est gardé à part exprès : c'est lui que lirait un futur
