@@ -60,8 +60,9 @@
 //                                            4,2 Mo (1024²) · 2,4 Mo (768²)
 // Soit à DEUX entrées : 18,9 Mo au minimum, 37,7 Mo au pire (machine haute, qui
 // analyse à pleine taille) — et 23,6 Mo sur un iMac 2015, dont le palier
-// plafonne l'analyse à 768². À comparer au pic du damier plein, 1 762 Mo
-// (test/damier-memoire.test.js) : 2,1 % au pire. C'est le rapport qui rend la
+// plafonne l'analyse à 768². Plus la FENTE DES LACS, une seule et plafonnée à
+// 8 Mo (voir plus bas). À comparer au pic du damier plein, 1 762 Mo
+// (test/damier-memoire.test.js) : 2,6 % au pire. C'est le rapport qui rend la
 // mémoire défendable, pas la valeur absolue.
 //
 // ⚠️ DEUX ENTRÉES, ET C'EST UN CHOIX, pas un défaut. Un aller-retour de zoom
@@ -69,6 +70,39 @@
 // geste qu'on optimise, et la troisième entrée ne servirait qu'à un
 // aller-retour à trois étages en coûtant +18,9 Mo. La borne est aussi ce qui
 // permet à l'étude « fenêtre continue 3×3 » de compter sur un chiffre FIXE.
+//
+// ─────────────────── LES LACS : UNE SEULE FENTE, ET C'EST ASSEZ ─────────────
+//
+// `detectLakes` (src/lake.js) ne dépend lui aussi QUE des altitudes, et
+// `ocean.rebuild` le rappelait à CHAQUE reconstruction de la mer — 359 ms de
+// fil principal figé sur une emprise 3×3 (Annecy, MNT réel 4 608²), 58 ms sur
+// un bloc ordinaire, pour un résultat identique, dès qu'on bascule « Mer
+// animée » ou « Tranche de verre », qu'on entre ou sort du mode région, qu'on
+// applique un template, qu'on tire une carte au hasard ou qu'on revient d'un
+// zoom.
+//
+// ⚠️ IL NE POUVAIT PAS SE RANGER SOUS LE MNT comme l'analyse : en mode continu,
+// le champ que voit `ocean.rebuild` est l'emprise RECOLLÉE (dem-emprise.js),
+// un objet neuf qui n'entre jamais dans le LRU ci-dessus — la mémorisation
+// n'aurait servi que le mode ordinaire, c'est-à-dire pas le cas qui coûte cher.
+//
+// D'où UNE FENTE UNIQUE, indépendante du LRU : le dernier MNT à qui on a
+// demandé ses lacs, et ses lacs. `ocean.rebuild` ne pose jamais la question que
+// pour `terrain.dem` : une fente prend donc 100 % des reconstructions répétées,
+// et une seconde n'y ajouterait rien.
+//
+// ⚠️ LE MNT EST TENU FAIBLEMENT (`WeakRef`). Une référence forte retiendrait
+// 40,5 Mo d'emprise 3×3 après un changement de zoom, jusqu'à la reconstruction
+// suivante — exactement le genre de rétention que l'étude 3×3 traque.
+//
+// 🔴 ET LEUR POIDS EST DICTÉ PAR LE RELIEF, PAS PAR LA TAILLE DU MNT — c'est ce
+// qui les distingue des deux autres postes. Relevé sur MNT réel : 0,8 Mo à
+// Annecy en bloc ordinaire, 2,5 Mo à Annecy 3×3, 4,2 Mo sur les polders de
+// Flevoland 3×3 (le pire mesuré), 0,1 Mo à La Réunion. Mais une emprise 3×3
+// entièrement plate rendrait UN lac de 21 233 664 cellules, soit 85 Mo. D'où
+// `LACS_MEMO_MAX_OCTETS` : au-delà, on ne garde rien et le détecteur repassera
+// — exactement ce que faisait le code avant cette fente. C'est ce plafond qui
+// permet à la facture de rester un chiffre FIXE.
 //
 // ⚠️ ET LE DAMIER N'ENTRE PAS ICI. block-grid.js tient déjà sa propre mémoire
 // de MNT voisins, bornée à 32 Mo (DEM_CACHE_BYTES) : ses 8 à 24 dalles
@@ -79,6 +113,14 @@
 
 /** Nombre d'entrées gardées. Voir la facture ci-dessus avant de le changer. */
 export const DEM_MEMO_MAX = 2
+
+/**
+ * Plafond de la FENTE DES LACS. Voir « LES LACS » ci-dessus : leur poids est
+ * dicté par le relief, pas par la taille du MNT, donc il se plafonne au lieu de
+ * se calculer. 8 Mo = 2 millions de cellules, le double du pire relevé réel
+ * (Flevoland 3×3, 1 046 794 cellules).
+ */
+export const LACS_MEMO_MAX_OCTETS = 8 * 1024 * 1024
 
 const cache = new Map() // clé → entrée, en ordre d'insertion (LRU simple)
 const parDem = new WeakMap() // MNT → son entrée, pour ranger l'analyse à l'arrivée
@@ -133,6 +175,52 @@ export function analyseMemoEcrire(dem, analysisMax, rgba, size) {
   e.analyses.set(analysisMax | 0, { rgba, size })
 }
 
+// ─────────────────────────── LA FENTE DES LACS ──────────────────────────────
+// Une seule, hors du LRU, le MNT tenu faiblement. Voir l'en-tête du module.
+let lacsRef = null // WeakRef<dem> | null
+let lacsListe = null
+let lacsPoids = 0
+
+// Le MNT de la fente a-t-il survécu ? Sinon on lâche AUSSI les lacs : eux sont
+// tenus fortement (jusqu'à 8 Mo), et la comptabilité doit dire vrai.
+function lacsVivants() {
+  if (lacsRef && !lacsRef.deref()) {
+    lacsRef = null
+    lacsListe = null
+    lacsPoids = 0
+  }
+  return lacsListe
+}
+
+/** Les lacs mémorisés pour CE MNT, ou `null`. */
+export function lacsMemoLire(dem) {
+  return dem && lacsVivants() && lacsRef.deref() === dem ? lacsListe : null
+}
+
+/**
+ * Pose les lacs de ce MNT dans la fente — et chasse ceux du MNT précédent.
+ *
+ * ⚠️ LE PLAFOND EST UN REFUS, PAS UNE TRONCATURE. Ne garder QUE les premiers
+ * lacs rendrait une liste incomplète qu'`ocean.rebuild` prendrait pour la
+ * vérité : des plans d'eau qui disparaissent au deuxième passage, en silence.
+ * Au-delà du plafond on ne garde donc RIEN et le détecteur repassera.
+ *
+ * ⚠️ LES CELLULES SONT PARTAGÉES EN LECTURE SEULE, comme `dem.data` et le
+ * `rgba` de l'analyse : `ocean.js` ne fait que les lire (`_bakeLakeMask`).
+ */
+export function lacsMemoEcrire(dem, lacs) {
+  lacsRef = null
+  lacsListe = null
+  lacsPoids = 0
+  if (!dem || !lacs) return
+  let o = 0
+  for (const l of lacs) o += l.cells?.byteLength ?? 0
+  if (o > LACS_MEMO_MAX_OCTETS) return
+  lacsRef = new WeakRef(dem)
+  lacsListe = lacs
+  lacsPoids = o
+}
+
 /** Octets retenus par la mémoire — comptabilité (test/damier-memoire.test.js). */
 export function demMemoOctets() {
   let o = 0
@@ -140,10 +228,13 @@ export function demMemoOctets() {
     o += e.dem?.data?.byteLength ?? 0
     for (const a of e.analyses.values()) o += a.rgba?.byteLength ?? 0
   }
-  return o
+  return o + (lacsVivants() ? lacsPoids : 0)
 }
 
-/** Vide la mémoire — tests uniquement. */
+/** Vide la mémoire, fente des lacs comprise — tests uniquement. */
 export function demMemoVider() {
   cache.clear()
+  lacsRef = null
+  lacsListe = null
+  lacsPoids = 0
 }

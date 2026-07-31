@@ -19,6 +19,7 @@
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
 import { detectLakes } from './lake.js'
+import { lacsMemoLire, lacsMemoEcrire } from './dem-memo.js'
 // LE CHAMP SUIT LE RELIEF — règles pures et testées, voir src/mer-emprise.js
 // pour la mesure d'avant/après et le pourquoi de chaque choix.
 import { resChamp, spanChamp } from './mer-emprise.js'
@@ -1144,7 +1145,21 @@ export class RealWater {
     const dem = terrain.dem
     const scale = (this._span / dem.extentMeters) * params.demExaggeration
     const cellM = dem.extentMeters / (dem.size - 1)
-    for (const lake of detectLakes(dem)) {
+    // ⚠️ LES LACS NE SE REDÉTECTENT PAS À CHAQUE RECONSTRUCTION. Cette méthode
+    // est rappelée pour « Mer animée », « Tranche de verre », un template, un
+    // tirage aléatoire, l'entrée/sortie du mode région — autant de gestes qui
+    // ne touchent pas AUX ALTITUDES. Or `detectLakes` fige le fil principal
+    // 359 ms sur une emprise 3×3 (Annecy, MNT réel 4 608²) et 58 ms sur un bloc
+    // ordinaire. Il ne dépend que du MNT : on le range donc sous le MNT
+    // (dem-memo.js), exactement comme l'analyse de relief. Sans effet sur une
+    // dalle du damier, dont le MNT n'est pas mémorisé — mais le damier ne
+    // construit pas de mer.
+    let lacs = lacsMemoLire(dem)
+    if (!lacs) {
+      lacs = detectLakes(dem)
+      lacsMemoEcrire(dem, lacs)
+    }
+    for (const lake of lacs) {
       const { tex, minX, minY, w, h } = this._bakeLakeMask(lake)
       // couche maritime réservée aux VRAIS lacs : longueur >= 3 km (demande
       // Adrien v40 — detectLakes prenait des zones plates urbaines pour des
