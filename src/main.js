@@ -54,6 +54,7 @@ import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
 import { ATLAS_COTE, EMPRISE_EN_VOL_MAX, enVolBorne, originesEmprise, recollerEmprise } from './dem-emprise.js'
 import { COURSE_ELASTIQUE, avanceFenetre, rappelElastique } from './fenetre-course.js'
+import { dansFenetre } from './fenetre-clip.js'
 import { vitesseAuLache, pasElan } from './fenetre-elan.js'
 import { MapLayers } from './map/layer-manager.js'
 import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
@@ -2046,6 +2047,10 @@ function f3CalquesSuivent() {
     if (c?.group) c.group.position.set(-f.x, 0, -f.z)
   }
   mapLayers?.places?.refresh?.()
+  // Les traces GPX : chacune porte sa propre translation (elles ont leur groupe)
+  // et masque ses étiquettes hors socle. La LIGNE, elle, est écrêtée par les
+  // plans de coupe posés à sa construction — le GPU la coupe au bord, pour rien.
+  for (const l of gpxLayer?.layers ?? []) l.gpx?.setFenetre?.(f.x, f.z)
   // ══════════ LA MER, SA JUPE ET LES LACS ═══════════════════════════════════
   //
   // La mer NE SE TRANSLATE PAS : le plan d'eau EST la fenêtre, il reste en
@@ -3500,6 +3505,10 @@ const raceLabels = buildRaceLabels({
   container,
   camera,
   params,
+  // `track.world` est en coordonnées de CHAMP : les cartouches doivent
+  // retrancher le décalage de fenêtre avant de projeter, sinon ils restent
+  // collés à l'écran pendant que leur ravitaillement s'en va.
+  getFenetre: () => terrain.fenetre,
   getItems: () => {
     const items = []
     const lay = gpxLayer.activeLayer
@@ -3527,7 +3536,17 @@ const raceLabels = buildRaceLabels({
     const kmTail = 10
     // règle du damier (Adrien) : ce qui sort des blocs chargés (5×5 max) est
     // COUPÉ — un point au-delà de l'emprise réelle ne s'affiche pas
+    //
+    // ⚠️ EN MODE CONTINU LE DAMIER N'EXISTE PAS et la règle change de nature :
+    // `p` est en coordonnées de CHAMP, la fenêtre est le socle, et ce qui compte
+    // est « ce point est-il DANS le socle affiché en ce moment ». Sans cette
+    // branche, `Math.round(p.x / 56)` renvoyait la cellule d'un damier vide et
+    // tous les cartouches au-delà du bloc central disparaissaient — alors même
+    // que leur relief, lui, est bien là.
+    const fenCourse = terrain.fenetre ?? { x: 0, z: 0 }
+    const blocCourse = dem?.empriseCote > 1 ? terrain.blockFootprint() : null
     const covered = (p) => {
+      if (blocCourse) return dansFenetre(p.x - fenCourse.x, p.z - fenCourse.z, blocCourse.half, blocCourse.corner)
       const i = Math.round(p.x / TERRAIN_SIZE)
       const j = Math.round(p.z / TERRAIN_SIZE)
       return (i === 0 && j === 0) || !!blockGrid?.cells?.has(`${i},${j}`)
