@@ -82,6 +82,76 @@ export function clearDetailField() {
 }
 
 // ---------------------------------------------------------------------------
+// LE MÊME GRAIN, MAIS SUR L'EMPRISE 3×3 — pour qu'il soit SOLIDAIRE DU TERRAIN
+// ---------------------------------------------------------------------------
+// ⚠️ LE PIÈGE DU §5.4 DE L'ÉTUDE, ET IL EST BIEN RÉEL. `detailField` cuit le
+// grain sur la grille de la GÉOMÉTRIE. En mode continu la géométrie ne bouge
+// pas — ce sont ses altitudes qui défilent — donc le grain reste COLLÉ À
+// L'ÉCRAN pendant que le relief glisse dessous. Un fin moirage immobile sur un
+// paysage en mouvement : l'œil l'attrape tout de suite.
+//
+// La sortie est celle que l'étude nomme : cuire le grain sur l'emprise ENTIÈRE
+// et l'échantillonner en coordonnées MONDE. Le champ devient alors un décor du
+// terrain, pas de l'écran.
+//
+// ⚠️ LE BLOC CENTRAL DOIT RETOMBER SUR L'EXPRESSION EXACTE DE `detailField`.
+// D'où le décalage entier `dec` et le `(jz − dec) · seg − half` : au nœud
+// jz = dec + iy, l'expression se réduit littéralement à `iy · seg − half`, le
+// calcul de `detailField` au bit près. Écrire `jz · seg − 3·half` donnerait la
+// même valeur en mathématiques et une valeur différente en flottant, et on
+// perdrait la seule chose qui permet d'affirmer qu'à décalage nul rien n'a
+// changé. Un test le vérifie nœud par nœud.
+//
+// ⚠️ FLOAT32 ICI, ALORS QUE `detailField` EST EN FLOAT64, et c'est délibéré.
+// La double précision de `detailField` sert à opposer une identité BIT À BIT au
+// doute (voir plus haut). Ici il n'y a aucune identité à défendre : on
+// INTERPOLE entre les nœuds, ce qui écarte de toute façon du fbm exact. Payer
+// 21,3 Mo au lieu de 10,6 pour une garantie qui n'existe pas serait du gaspillage
+// pur sur une machine dont le goulot est la bande passante mémoire.
+//
+// ⚠️ UNE SEULE ENTRÉE GARDÉE. 10,6 Mo, ce n'est pas un cache qu'on double « au
+// cas où » : la deuxième entrée coûterait plus cher que le recalcul qu'elle
+// évite. Le mode continu ne monte qu'une emprise à la fois.
+const cacheEmprise = new Map()
+
+/**
+ * Les deux octaves du grain sur toute l'emprise, entrelacées.
+ * Le nœud (jx, jz) porte le grain du point monde
+ * `((jx − dec)·seg − half, (jz − dec)·seg − half)`, avec `dec = res·(cote−1)/2`.
+ *
+ * @param {number} cote côté de l'emprise en blocs (3 pour un 3×3)
+ * @returns {Float32Array} de longueur 2·(cote·res+1)² — PARTAGÉ, en lecture seule.
+ */
+export function detailFieldEmprise(seed, detailScale, res, size, cote) {
+  const cle = `${seed}|${detailScale}|${res}|${size}|${cote}`
+  const memo = cacheEmprise.get(cle)
+  if (memo) return memo
+  const s = new Simplex2(mulberry32(seed))
+  const n = cote * res + 1
+  const champ = new Float32Array(n * n * 2)
+  const half = size / 2
+  const seg = size / res
+  const dec = (res * (cote - 1)) / 2
+  for (let jz = 0; jz < n; jz++) {
+    const z = (jz - dec) * seg - half
+    for (let jx = 0; jx < n; jx++) {
+      const x = (jx - dec) * seg - half
+      const k = (jz * n + jx) * 2
+      champ[k] = fbm(s, x * detailScale, z * detailScale, 3, 2.3, 0.55)
+      champ[k + 1] = fbm(s, x * detailScale * 4.1 + 31, z * detailScale * 4.1 - 17, 2, 2.2, 0.5)
+    }
+  }
+  cacheEmprise.clear()
+  cacheEmprise.set(cle, champ)
+  return champ
+}
+
+/** Vide le cache d'emprise — tests uniquement. */
+export function clearDetailFieldEmprise() {
+  cacheEmprise.clear()
+}
+
+// ---------------------------------------------------------------------------
 // LE GRAIN DE TEINTE, MÊME HISTOIRE — 65 ms par reconstruction
 // ---------------------------------------------------------------------------
 // `Terrain.rebuild` colore chaque sommet en trois termes : une valeur graduée
@@ -178,4 +248,32 @@ export const GRAIN_MIN_SAMPLES = 1.9
 export function grainSamplesPerCycle(res, detailScale, size) {
   const lambdaMin = 1 / (detailScale * 4.1 * 2.2)
   return lambdaMin / (size / res)
+}
+
+/**
+ * Le `detailScale` qui garde le grain à la MÊME finesse relative au maillage.
+ *
+ * ⚠️ CE N'EST PAS UN CONFORT, C'EST LE COUPLAGE QUE CE FICHIER RÉCLAME depuis
+ * qu'il existe : « pour descendre plus bas, diviser `detailScale` dans le même
+ * rapport que la résolution ; le produit `res / detailScale` est ce que ce
+ * critère conserve ». Le mode continu tombe à res 384 pour tenir son budget
+ * d'image, et à 384 le grain d'origine vaut **0,95 maille par longueur d'onde**
+ * contre un plancher de 1,9 : il n'est plus une texture, c'est du poivre et sel
+ * qui scintille au moindre mouvement de caméra — et en mode continu la caméra
+ * n'arrête pas de bouger. Le défaut serait donc PIRE là qu'ailleurs.
+ *
+ * Accordé, res 384 rend exactement les 1,901 maille/λ de res 768 : le grain a la
+ * même apparence, il est simplement deux fois plus large en unités monde.
+ */
+export function accordeDetailScale(detailScale, resRef, res) {
+  if (!(res > 0) || !(resRef > 0)) return detailScale
+  // ⚠️ SORTIE SÈCHE À RÉSOLUTION ÉGALE, et ce n'est pas une optimisation : c'est
+  // la garantie que le mode ORDINAIRE ne bouge pas d'un bit. `(d·res)/resRef`
+  // rend 0,8000000000000002 pour d = 0,8 — assez pour invalider la clé du cache
+  // du grain et faire recuire 175 ms de bruit sans que rien n'ait changé.
+  if (res === resRef) return detailScale
+  // ⚠️ `d · (res/resRef)` et non `(d · res)/resRef` : le rapport 384/768 vaut
+  // 0,5 exactement, donc 0,8 × 0,5 = 0,4 exactement. L'autre ordre passe par
+  // 307,2 et rend 0,4000000000000001.
+  return detailScale * (res / resRef)
 }

@@ -4,7 +4,7 @@ import { sampleDem } from './dem.js'
 import { buildRamp2D } from './palette.js'
 import { gridTemplate } from './grid-template.js'
 import { gridNormals } from './grid-normals.js'
-import { detailField, tintField } from './detail-noise.js'
+import { detailField, detailFieldEmprise, accordeDetailScale, tintField } from './detail-noise.js'
 import { analyseMemoLire, analyseMemoEcrire } from './dem-memo.js'
 import { landMaskFromField } from './sea-mask.js'
 // L'analyse de relief et le masque de mer ne sont plus calcules ici : ils
@@ -1104,6 +1104,27 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     return this.dem?.empriseCote > 1 ? Math.min(params.resolution, RES_FENETRE_CONTINUE) : params.resolution
   }
 
+  // ══════════ LE GRAIN DOIT DESCENDRE AVEC LA RÉSOLUTION ════════════════════
+  //
+  // ⚠️ SANS ÇA, LE MODE CONTINU AFFICHE DU POIVRE ET SEL. `detail-noise.js`
+  // mesure que le maillage perd 18,3 % du grain à res 768 et **39,9 % à res
+  // 384**, où la corrélation entre sommets voisins tombe à 0,53 : le grain
+  // cesse d'être une texture et devient un scintillement. Chiffré par
+  // `grainSamplesPerCycle` : **0,95 maille par longueur d'onde à res 384**,
+  // contre un plancher mesuré à 1,9.
+  //
+  // Et c'est en mode continu que ce serait le PLUS visible, parce que c'est le
+  // seul mode où l'image bouge en permanence — le scintillement d'aliasing ne
+  // se voit qu'en mouvement.
+  //
+  // Le remède est celui que `detail-noise.js` réclame en toutes lettres :
+  // conserver `res / detailScale`. À res 384 le grain revient exactement aux
+  // 1,901 maille/λ de res 768 ; il a la même apparence, il est simplement deux
+  // fois plus large en unités monde.
+  _detailScaleFenetre(params) {
+    return accordeDetailScale(params.detailScale, params.resolution, this._resFenetre(params))
+  }
+
   // Sampler over a fetched real-world DEM: world xz → bilinear meters → scene units.
   _makeDemSampler(params) {
     const dem = this.dem
@@ -1116,7 +1137,11 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
 
     const sDetail = new Simplex2(mulberry32(params.seed))
     const { size } = dem
-    const { detailScale } = params
+    // ⚠️ PAS `params.detailScale` DIRECTEMENT. En mode continu le maillage tombe
+    // à res 384 et le grain doit descendre avec, sans quoi il scintille — voir
+    // `_detailScaleFenetre`. Hors mode continu la valeur ressort inchangée, au
+    // bit près (l'accord sort sèchement à résolution égale).
+    const detailScale = this._detailScaleFenetre(params)
     // ⚠️ En mode Naturel le texture shading PORTE déjà la micro-texture, et une
     // VRAIE (elle sort du DEM). Le bruit FBM de détail viendrait en superposer
     // une inventée, décorrélée du relief : les deux se brouillent et le peigné
@@ -1134,10 +1159,20 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       // out at/below sea level (elevation 0) so the displacement can never poke
       // above the waterline and paint phantom islands / stray coastlines
       const landFactor = smoothstep(0, 90, raw)
+      // ⚠️ LE GRAIN S'ÉVALUE EN COORDONNÉES DU TERRAIN, `x + fen.x`, PAS EN
+      // COORDONNÉES DE LA GÉOMÉTRIE. En mode continu la géométrie ne bouge pas :
+      // évalué en `x` seul, le grain resterait COLLÉ À L'ÉCRAN pendant que le
+      // relief glisse dessous (étude §5.4). Et ce sampler-ci n'est pas un détail
+      // — c'est `terrain.sample`, celui que lisent le socle, les bateaux, le
+      // drapage GPX et les étiquettes : le grain doit y être au même endroit que
+      // dans la géométrie, sinon les objets posés au sol flottent.
+      // Hors mode continu `fen` vaut zéro et l'expression est celle d'avant.
+      const gx = x + fen.x
+      const gz = z + fen.z
       const fine =
         landFactor *
-        (detail * fbm(sDetail, x * detailScale, z * detailScale, 3, 2.3, 0.55) +
-          detail * 0.35 * fbm(sDetail, x * detailScale * 4.1 + 31, z * detailScale * 4.1 - 17, 2, 2.2, 0.5))
+        (detail * fbm(sDetail, gx * detailScale, gz * detailScale, 3, 2.3, 0.55) +
+          detail * 0.35 * fbm(sDetail, gx * detailScale * 4.1 + 31, gz * detailScale * 4.1 - 17, 2, 2.2, 0.5))
       // no basin carve in real-world mode — the map runs uninterrupted
       return h + fine
     }
@@ -1171,12 +1206,77 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       // `landFactor · (0·a + 0·0,35·b)` vaut 0 tout rond, on peut le sauter.
       return (i, x, z) => (sampleDem(dem, ((x + fen.x) / span + 0.5) * (size - 1), ((z + fen.z) / span + 0.5) * (size - 1)) - meanM) * scale
     }
-    // ⚠️ Le grain reste indexé sur la GRILLE (`i`), donc il est SOLIDAIRE DE
-    // L'ÉCRAN, pas du terrain : en défilant, le relief glisse sous un grain qui
-    // ne bouge pas. C'est le piège que l'architecture crée (étude §5.4) et il
-    // se règle au jalon 2 en pré-cuisant le grain sur l'emprise. Au jalon 1 le
-    // grain est éteint en mode continu (voir `tickFenetre`), donc il n'a rien à
-    // faire glisser.
+    // ══════════ MODE CONTINU : LE GRAIN EST LU EN COORDONNÉES MONDE ═════════
+    //
+    // Indexé sur la grille (`i`), le grain serait SOLIDAIRE DE L'ÉCRAN : en
+    // défilant, le relief glisserait sous un moirage immobile (étude §5.4).
+    // On lit donc dans le champ cuit sur l'EMPRISE, à l'endroit du monde où se
+    // trouve vraiment ce sommet.
+    //
+    // ⚠️ ET LES POIDS BILINÉAIRES SONT CONSTANTS SUR TOUTE LA GRILLE. C'est ce
+    // qui rend l'opération abordable : la grille est régulière et le décalage
+    // est le même pour tous les sommets, donc la partie fractionnaire du
+    // décalage se calcule UNE FOIS PAR IMAGE, pas 148 225 fois. Il ne reste par
+    // sommet que quatre lectures et quatre multiplications-additions par octave.
+    const cote = dem.empriseCote
+    if (cote > 1) {
+      const champ = detailFieldEmprise(params.seed, this._detailScaleFenetre(params), res, TERRAIN_SIZE, cote)
+      const N = cote * res + 1
+      const n1 = res + 1
+      const seg = TERRAIN_SIZE / res
+      const dec = (res * (cote - 1)) / 2
+      // Décalage de lecture, EN NŒUDS : entier + fraction.
+      const ux = dec + fen.x / seg
+      const uz = dec + fen.z / seg
+      // ⚠️ BORNÉ AU CHAMP. La butée élastique laisse déborder d'un huitième de
+      // socle au-delà de la course, soit 48 nœuds hors de l'emprise, là où
+      // `sampleDem` CLAMPE déjà le relief. Le grain doit clamper avec lui —
+      // sinon on lirait à l'index négatif et le grain deviendrait NaN sur une
+      // bande du bord, c'est-à-dire un relief NaN, c'est-à-dire un trou noir.
+      const ix0 = Math.max(0, Math.min(N - 2, Math.floor(ux)))
+      const iz0 = Math.max(0, Math.min(N - 2, Math.floor(uz)))
+      const fx = Math.max(0, Math.min(1, ux - ix0))
+      const fz = Math.max(0, Math.min(1, uz - iz0))
+      // les quatre poids, une fois pour toutes
+      const w00 = (1 - fx) * (1 - fz)
+      const w10 = fx * (1 - fz)
+      const w01 = (1 - fx) * fz
+      const w11 = fx * fz
+      // ⚠️ CE QUE COÛTE CE SAMPLER, ET CE QUI NE LE COÛTE PAS. Mesuré : un pas
+      // de fenêtre passe de 9,9 à 12,1 ms, soit **+2,2 ms** pour le grain en
+      // coordonnées monde. J'ai essayé de supprimer la division entière par
+      // sommet (compter ix et iy dans la boucle appelante plutôt que de les
+      // déduire de `i`) : **zéro gain mesurable**, 12,1 ms avant comme après,
+      // sur les deux zones. Le prix n'est pas l'arithmétique, ce sont les huit
+      // lectures dispersées dans un tableau de 10,6 Mo — exactement le goulot de
+      // bande passante que l'étude annonce pour la machine cible. On garde donc
+      // la version la plus simple : optimiser ici demanderait de changer la
+      // disposition du champ, pas de compter des index.
+      return (i, x, z) => {
+        const raw = sampleDem(dem, ((x + fen.x) / span + 0.5) * (size - 1), ((z + fen.z) / span + 0.5) * (size - 1))
+        const h = (raw - meanM) * scale
+        const landFactor = smoothstep(0, 90, raw)
+        const iy = (i / n1) | 0
+        const ix = i - iy * n1
+        // le sommet (ix, iy) de la géométrie tombe au nœud (ix + ix0, iy + iz0)
+        // du champ d'emprise ; les voisins de droite et du bas sont bornés au
+        // dernier nœud pour ne jamais sortir, exactement comme `sampleDem`.
+        const jx = ix + ix0 < N - 1 ? ix + ix0 : N - 1
+        const jz = iy + iz0 < N - 1 ? iy + iz0 : N - 1
+        const jx1 = jx + 1 < N ? jx + 1 : jx
+        const jz1 = jz + 1 < N ? jz + 1 : jz
+        const a = jz * N * 2
+        const b = jz1 * N * 2
+        const g0 = champ[a + jx * 2] * w00 + champ[a + jx1 * 2] * w10 + champ[b + jx * 2] * w01 + champ[b + jx1 * 2] * w11
+        const g1 =
+          champ[a + jx * 2 + 1] * w00 +
+          champ[a + jx1 * 2 + 1] * w10 +
+          champ[b + jx * 2 + 1] * w01 +
+          champ[b + jx1 * 2 + 1] * w11
+        const fine = landFactor * (detail * g0 + detail * 0.35 * g1)
+        return h + fine
+      }
+    }
     const grain = detailField(params.seed, params.detailScale, res, TERRAIN_SIZE)
     return (i, x, z) => {
       const raw = sampleDem(dem, ((x + fen.x) / span + 0.5) * (size - 1), ((z + fen.z) / span + 0.5) * (size - 1))
