@@ -3785,7 +3785,13 @@ async function setTransportCats(cats) {
       .filter((p) => cats.includes(p.cat) && nearTrack(p))
       .map((p) => {
         const w = latLonToWorld(dem, p.lat, p.lon)
-        const world = new THREE.Vector3(w.x, (terrain.sample?.(w.x, w.z) ?? 0) + 0.4, w.z)
+        // ⚠️ `w` est en coordonnées de CHAMP, `terrain.sample` répond en
+        // coordonnées de GÉOMÉTRIE : sans la soustraction, la gare ou le
+        // téléphérique prenait l'altitude d'un point situé une fenêtre plus
+        // loin — le cartouche flottait en l'air ou s'enterrait. Le XZ, lui, est
+        // bien du champ : c'est race-labels.js qui en retranche le décalage.
+        const fenT = terrain.fenetre ?? { x: 0, z: 0 }
+        const world = new THREE.Vector3(w.x, (terrain.sample?.(w.x - fenT.x, w.z - fenT.z) ?? 0) + 0.4, w.z)
         return { ...p, world }
       })
   } catch (err) {
