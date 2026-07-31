@@ -1276,8 +1276,11 @@ plinth.rebuild(terrain, params)
 // two feel identical). Wrap the rebuild so the slider re-welds the skirt too —
 // otherwise the skirt keeps its stale depth until the next full terrain rebuild.
 const _plinthRebuild = plinth.rebuild.bind(plinth)
-plinth.rebuild = (t, p) => {
-  _plinthRebuild(t, p)
+plinth.rebuild = (t, p, f = null) => {
+  // ⚠️ Le TROISIÈME argument (`baseYFloor`) doit traverser : sans lui, la
+  // fenêtre continue perdrait son plancher de socle à chaque appel qui passe
+  // par cette enveloppe, et le socle se remettrait à respirer en défilant.
+  _plinthRebuild(t, p, f)
   if (p.regionMode && regionMaskCanvas) rebuildRegionSkirt()
 }
 // give the socle its own punchy studio env so metals/glass/carbon reflect real
@@ -1928,13 +1931,31 @@ function f3Tick(dt) {
   _f3Sale = false
   terrain.tickFenetre(params)
   // Le socle SUIT — il ne lit que `terrain.sample`, qui porte déjà le décalage.
-  // 0,38 ms à res 768 (étude §2.6) : assez peu pour le refaire à chaque image,
-  // assez pour ne le refaire QUE quand la fenêtre a bougé.
-  // ⚠️ Le point bas est celui de l'emprise entière (décision d'Adrien) — c'est
-  // `computeSlab` qui le trouve, et il balaie le champ que `sample` lui donne,
-  // donc la fenêtre courante. Le socle change donc encore d'épaisseur en
-  // défilant : c'est le reste à faire, noté au jalon 2.
-  plinth.rebuild(terrain, params)
+  // Mesuré à 2,2 ms par image, assez peu pour le refaire à chaque pas, assez
+  // pour ne le refaire QUE quand la fenêtre a bougé.
+  plinth.rebuild(terrain, params, socleEmprise())
+}
+
+// ══════════ LE POINT BAS DU SOCLE, SUR L'EMPRISE ENTIÈRE ═══════════════════
+//
+// Décision d'Adrien : « `baseY` se cale sur le point bas de l'emprise 3×3
+// entière, pas de la vue. C'est le prix de la stabilité — un socle qui garde
+// son épaisseur pendant qu'on défile. »
+//
+// ⚠️ SANS ÇA, LE SOCLE RESPIRE. `computeSlab` cherche le point bas en balayant
+// ce que `terrain.sample` lui rend — c'est-à-dire la FENÊTRE COURANTE. On
+// glisse vers une vallée, le point bas descend, le socle s'épaissit ; on
+// remonte, il maigrit. Un socle qui pulse pendant qu'on défile, c'est exactement
+// « une dégradation qui se voit comme une panne ».
+//
+// La valeur ne dépend d'aucun décalage : c'est `dem.minM`, l'extremum de
+// l'emprise que `recollerEmprise` a déjà calculé, converti en unités monde par
+// la même échelle que le relief. Rendu `null` hors mode continu, ce qui rend à
+// `plinth.rebuild` son comportement d'origine au caractère près.
+function socleEmprise() {
+  if (!(dem?.empriseCote > 1)) return null
+  const scale = (TERRAIN_SIZE * dem.empriseCote / dem.extentMeters) * params.demExaggeration
+  return (dem.minM - dem.meanM) * scale - (params.plinthDepth ?? 7)
 }
 
 // ------------------------------------------------------------------ regeneration helpers
@@ -2251,7 +2272,7 @@ function regenerateTerrain() {
     setTimeout(() => {
       terrain.rebuild(params)
       terrain.rebuildRoughness(params)
-      plinth.rebuild(terrain, params) // walls hug the new relief border (also re-welds the region skirt in region mode — see the plinth.rebuild wrapper)
+      plinth.rebuild(terrain, params, socleEmprise()) // walls hug the new relief border (also re-welds the region skirt in region mode — see the plinth.rebuild wrapper)
       terrain.refreshMatTiling(params) // re-tile the relief material to the new zoom scale
       realWater?.rebuild({ terrain, params }) // water simulation follows the new relief
       const _mlp = mapLayers.rebuild({ dem: terrain.dem, terrain, params }) // water/places re-drape on the new relief
