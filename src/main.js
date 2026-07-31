@@ -52,8 +52,9 @@ import { Clouds2 } from './clouds2.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
-import { originesEmprise, recollerEmprise } from './dem-emprise.js'
+import { EMPRISE_EN_VOL_MAX, enVolBorne, originesEmprise, recollerEmprise } from './dem-emprise.js'
 import { COURSE_ELASTIQUE, avanceFenetre, rappelElastique } from './fenetre-course.js'
+import { vitesseAuLache, pasElan } from './fenetre-elan.js'
 import { MapLayers } from './map/layer-manager.js'
 import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
 import { lightingFor, darkModeFor, applyGains, fillDirection, fillLightIntensity, fillEnabledInLook, sunOn, sunShadowOn } from './daycycle.js'
@@ -1845,6 +1846,25 @@ let _f3Sale = true // la géométrie doit-elle être réécrite à la prochaine 
 let _f3X = 0
 let _f3Y = 0
 
+// L'ÉLAN. `_f3V` est la vitesse restante en unités monde par seconde ; elle ne
+// vit qu'entre le lâcher et l'extinction. `_f3Ech` est la trace des dernières
+// positions AFFICHÉES, celle que `vitesseAuLache` lit au relâchement.
+//
+// ⚠️ ON ÉCHANTILLONNE L'AFFICHÉ, PAS LE BRUT. Au bord, le brut continue de filer
+// avec le geste alors que l'image ne bouge plus (l'hyperbole la comprime) :
+// mesurer le brut donnerait un lancer énorme là où l'œil vient de voir le
+// terrain s'arrêter. Voir l'en-tête de fenetre-elan.js.
+const _f3V = { x: 0, z: 0 }
+const _f3Ech = []
+// Trois images de trace suffisent à `vitesseAuLache` (fenêtre de 60 ms) ; on en
+// garde huit pour couvrir un écran à 120 Hz sans jamais allouer.
+const F3_ECH_MAX = 8
+
+function f3Echantillonne(tMs) {
+  _f3Ech.push({ t: tMs / 1000, x: terrain.fenetre.x, z: terrain.fenetre.z })
+  if (_f3Ech.length > F3_ECH_MAX) _f3Ech.shift()
+}
+
 // Unités monde par pixel d'écran. Le socle fait TERRAIN_SIZE unités ; on veut
 // qu'un glissement d'un bord à l'autre de la fenêtre déplace le terrain d'un
 // socle. `innerHeight` plutôt que `innerWidth` : la vue est en trois quarts, la
@@ -1861,6 +1881,17 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   _f3Glisse = true
   _f3X = e.clientX
   _f3Y = e.clientY
+  // ⚠️ REPRENDRE LE TERRAIN ÉTEINT L'ÉLAN SUR-LE-CHAMP. Rattraper un terrain qui
+  // glisse encore est le geste réflexe ; s'il continuait ne serait-ce qu'une
+  // image sous le doigt, tout le geste suivant partirait décalé d'autant.
+  _f3V.x = 0
+  _f3V.z = 0
+  // Et le brut se recale : l'élan a pu le laisser hors course, or le geste doit
+  // repartir de ce que l'œil VOIT, pas d'une position mémorisée invisible.
+  _f3Brut.x = terrain.fenetre.x
+  _f3Brut.z = terrain.fenetre.z
+  _f3Ech.length = 0
+  f3Echantillonne(e.timeStamp)
   renderer.domElement.setPointerCapture?.(e.pointerId)
 })
 
@@ -1894,19 +1925,29 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   terrain.fenetre.x = r.x
   terrain.fenetre.z = r.z
   _f3Sale = true
+  f3Echantillonne(e.timeStamp)
 })
 
-const f3Lache = () => {
+// `lance` distingue le relâchement volontaire de l'annulation. Un
+// `pointercancel` (geste capté par le système, fenêtre perdue) n'a pas de fin de
+// geste à lire : lancer le terrain sur une trace tronquée le ferait partir tout
+// seul sans que personne n'ait rien demandé.
+const f3Lache = (e, lance) => {
   if (!_f3Glisse) return
   _f3Glisse = false
+  const v = lance ? vitesseAuLache(_f3Ech, e.timeStamp / 1000) : { x: 0, z: 0 }
+  _f3V.x = v.x
+  _f3V.z = v.z
+  _f3Ech.length = 0
   // Le brut se recale sur l'affiché : sans ça, on aurait poussé 400 unités au
   // bord, et le geste suivant devrait d'abord « rembobiner » ces 400 unités
-  // avant que le terrain ne bouge — il paraîtrait bloqué.
+  // avant que le terrain ne bouge — il paraîtrait bloqué. C'est aussi le point
+  // de départ que l'élan doit intégrer : il continue ce que l'œil a vu.
   _f3Brut.x = terrain.fenetre.x
   _f3Brut.z = terrain.fenetre.z
 }
-renderer.domElement.addEventListener('pointerup', f3Lache)
-renderer.domElement.addEventListener('pointercancel', f3Lache)
+renderer.domElement.addEventListener('pointerup', (e) => f3Lache(e, true))
+renderer.domElement.addEventListener('pointercancel', (e) => f3Lache(e, false))
 
 // Le pas par image : le rappel élastique, puis la réécriture du relief.
 // Appelé depuis `tick`, après `updateCameraMotion`.
@@ -1917,14 +1958,40 @@ function f3Tick(dt) {
   // par image parce que `modes` le remet à `true` à chaque entrée en surface.
   if (controls.enablePan && modes?.mode === 'surface') controls.enablePan = false
   if (!_f3Glisse) {
-    const ax = rappelElastique(terrain.fenetre.x, COURSE_ELASTIQUE, dt)
-    const az = rappelElastique(terrain.fenetre.z, COURSE_ELASTIQUE, dt)
-    if (ax !== terrain.fenetre.x || az !== terrain.fenetre.z) {
-      terrain.fenetre.x = ax
-      terrain.fenetre.z = az
-      _f3Brut.x = ax
-      _f3Brut.z = az
-      _f3Sale = true
+    // ⚠️ L'ÉLAN ET LE RAPPEL NE TOURNENT JAMAIS ENSEMBLE — d'où le `else`. Les
+    // faire cohabiter les mettrait en tir à la corde au bord : l'un pousse
+    // dehors, l'autre tire dedans, et la fenêtre vibrerait entre les deux. La
+    // passation est nette : l'absorption tue l'élan en ~0,15 s, le rappel prend
+    // la main à l'image d'après, depuis la position exacte où l'élan l'a laissée.
+    if (_f3V.x !== 0 || _f3V.z !== 0) {
+      const r = pasElan({ x: _f3Brut.x, z: _f3Brut.z, vx: _f3V.x, vz: _f3V.z }, dt, COURSE_ELASTIQUE)
+      _f3Brut.x = r.brutX
+      _f3Brut.z = r.brutZ
+      _f3V.x = r.vx
+      _f3V.z = r.vz
+      if (r.x !== terrain.fenetre.x || r.z !== terrain.fenetre.z) {
+        terrain.fenetre.x = r.x
+        terrain.fenetre.z = r.z
+        _f3Sale = true
+      }
+      // L'élan éteint, le brut redevient l'affiché. Sans ce recalage, un lancer
+      // absorbé aurait laissé le brut à des centaines d'unités hors course, et
+      // `rappelElastique` — qui lit l'affiché — travaillerait sur une position
+      // que plus personne ne met à jour.
+      if (!r.actif) {
+        _f3Brut.x = r.x
+        _f3Brut.z = r.z
+      }
+    } else {
+      const ax = rappelElastique(terrain.fenetre.x, COURSE_ELASTIQUE, dt)
+      const az = rappelElastique(terrain.fenetre.z, COURSE_ELASTIQUE, dt)
+      if (ax !== terrain.fenetre.x || az !== terrain.fenetre.z) {
+        terrain.fenetre.x = ax
+        terrain.fenetre.z = az
+        _f3Brut.x = ax
+        _f3Brut.z = az
+        _f3Sale = true
+      }
     }
   }
   if (!_f3Sale) return
@@ -2089,8 +2156,15 @@ async function fetchAndBuildDem() {
   //
   // ⚠️ NEUF APPELS À `tilesAcross: 3`, PAS UN À `tilesAcross: 9`. Le second
   // peindrait un canevas 4608², en lirait l'ImageData et la décoderait : un pic
-  // transitoire de ~255 Mo qui tuerait l'iMac 2015. Neuf petits appels coûtent
-  // le même total sans le pic (étude §3.3).
+  // transitoire de ~255 Mo qui tuerait l'iMac 2015 (étude §3.3).
+  //
+  // ⚠️ MAIS PAS LES NEUF EN MÊME TEMPS — `enVolBorne`, PAS `Promise.all`. Neuf
+  // petits appels ne coûtent « le même total sans le pic » QUE s'ils ne sont pas
+  // tous en vol à la fois : chacun tient au passage son ImageData (9,4 Mo), son
+  // Float32Array (9,4 Mo) et son champ fusionné pour ne rendre que 4,7 Mo
+  // d'Int16. Lancés d'un seul `Promise.all`, ils portaient le tas de 160 à
+  // 386 Mo pendant le chargement — le pic écarté par la porte rentrait par la
+  // fenêtre. Mesure et chiffres : dem-emprise.js, EMPRISE_EN_VOL_MAX.
   //
   // ⚠️ `memo: false` sur les voisins : le mémo est fait pour le bloc central,
   // le seul qui revienne sur un aller-retour de zoom. Y verser huit champs de
@@ -2100,11 +2174,9 @@ async function fetchAndBuildDem() {
       const t0 = performance.now()
       loadingStatus.textContent = 'fetching the 3×3 window…'
       const origines = originesEmprise(dem, dem.size / dem.tilePx)
-      const blocs = await Promise.all(
-        origines.map((o, k) =>
-          // le rang 4 est le centre : il est déjà là, on ne le retélécharge pas
-          k === 4 ? dem : loadDem({ zoom: params.demZoom, originTile: o, memo: false })
-        )
+      const blocs = await enVolBorne(origines, EMPRISE_EN_VOL_MAX, (o, k) =>
+        // le rang 4 est le centre : il est déjà là, on ne le retélécharge pas
+        k === 4 ? dem : loadDem({ zoom: params.demZoom, originTile: o, memo: false })
       )
       dem = recollerEmprise(blocs)
       console.info(`[f3] emprise 3×3 recollée : ${dem.size}² en ${Math.round(performance.now() - t0)} ms`)

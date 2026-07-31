@@ -69,6 +69,82 @@ export function originesEmprise(centre, tilesAcross) {
   return o
 }
 
+// Chargements de MNT en vol en même temps pendant le montage de l'emprise.
+//
+// ⚠️ CE CHIFFRE EST LE PIC, ET LE PIC EST LE SEUL POSTE QUI AIT JAMAIS DÉBORDÉ.
+//
+// L'en-tête dit qu'on refuse `tilesAcross: 9` pour éviter un pic transitoire de
+// ~255 Mo, et que « neuf appels à `tilesAcross: 3` coûtent le même total sans
+// le pic ». La deuxième moitié de cette phrase n'était vraie qu'à une condition
+// jamais écrite : que les neuf appels ne soient pas EN VOL EN MÊME TEMPS. Ils
+// l'étaient — un seul `Promise.all` sur les neuf origines (main.js) — et chaque
+// `loadDem` en vol tient au passage son `ImageData` (9,4 Mo), son
+// `Float32Array` (9,4 Mo), sa grille bathy et son champ fusionné avant de ne
+// rendre que 4,7 Mo d'Int16. Le pic écarté par la porte est rentré par la
+// fenêtre, à l'identique.
+//
+// ⚠️ ET IL SE MESURE RAMASSAGE FORCÉ, SINON ON MESURE LE DÉCHET.
+//
+// `usedJSHeapSize` lu brut pendant un chargement compte tout ce qui est MORT
+// mais pas encore ramassé. Il monte à 386 Mo (La Réunion z13) qu'on borne les
+// chargements ou non — c'est ce chiffre-là, lu par un banc dont le `window.gc()`
+// était un no-op faute de `--js-flags=--expose-gc`, qui a fait croire à 306 et
+// 453 Mo de terrain RETENU. Il n'y a rien de retenu : au repos, ramassage forcé,
+// le mode continu tient en 158 Mo — MOINS que le bloc unique d'aujourd'hui
+// (100 à 105 Mo de gros tampons contre 96), parce que sa géométrie est
+// plafonnée à res 384 quand celle du bloc court à 768.
+//
+// Le PIC VIF, lui — ramassage forcé avant chaque lecture, `.banc/f3-pic-vif.mjs` :
+//
+//   | en vol | La Réunion z13   | Chamonix z12     |
+//   |   9    | 242 Mo (+97)     | 255 Mo (+65)     |
+//   |   3    | 215 Mo (+70)     | 246 Mo (+56)     |
+//
+// Trois en vol : ~3 × 30 Mo d'intermédiaires au lieu de ~9 × 30, pour un
+// parallélisme réseau qui reste de 27 tuiles simultanées et un temps de
+// chargement inchangé (2 264 ms contre 2 336 ms, dans le bruit).
+//
+// ⚠️ Le gain est réel mais MODESTE, et plus petit qu'on ne l'attendrait de 9→3 :
+// le ramasse-miettes ne repasse pas entre deux blocs, donc une partie des
+// intermédiaires « libérés » occupe encore la place quand le suivant alloue. Ne
+// pas descendre à 1 en espérant y gagner trois fois plus — ce serait payer le
+// réseau en série pour un gain qui n'est pas là.
+export const EMPRISE_EN_VOL_MAX = 3
+
+/**
+ * Applique `charger` à chaque entrée, JAMAIS plus de `limite` à la fois.
+ *
+ * Rend les résultats DANS L'ORDRE DES ENTRÉES, et non dans celui des arrivées :
+ * `recollerEmprise` lit ses neuf blocs en ligne-major, un tableau rangé par
+ * ordre de réponse du réseau recollerait un relief faux sans lever d'erreur.
+ *
+ * Le premier échec remonte — main.js compte dessus pour retomber sur le bloc
+ * unique plutôt que d'afficher une emprise trouée.
+ *
+ * @param {Array<any>} entrees
+ * @param {number} limite - ramenée à 1 au minimum (une limite nulle rendrait une
+ *   promesse éternelle, or le voile de chargement l'attend)
+ * @param {(entree:any, rang:number) => Promise<any>} charger
+ * @returns {Promise<Array<any>>}
+ */
+export async function enVolBorne(entrees, limite, charger) {
+  const n = entrees.length
+  const out = new Array(n)
+  const max = Math.min(n, Math.max(1, Math.floor(limite) || 1))
+  let suivant = 0
+  // `max` ouvriers tirent dans la même file : dès qu'un chargement finit, son
+  // ouvrier prend l'entrée suivante. Un découpage en vagues de `max` ferait
+  // attendre les trois de la vague sur le plus lent des trois.
+  const ouvrier = async () => {
+    while (suivant < n) {
+      const k = suivant++
+      out[k] = await charger(entrees[k], k)
+    }
+  }
+  await Promise.all(Array.from({ length: max }, ouvrier))
+  return out
+}
+
 /**
  * Recolle neuf blocs de MNT en un champ unique de 3×3 blocs.
  *

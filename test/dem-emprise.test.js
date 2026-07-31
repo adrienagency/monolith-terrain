@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { EMPRISE_COTE, originesEmprise, recollerEmprise } from '../src/dem-emprise.js'
+import { EMPRISE_COTE, EMPRISE_EN_VOL_MAX, enVolBorne, originesEmprise, recollerEmprise } from '../src/dem-emprise.js'
 
 // Un faux bloc de MNT : la forme exacte que rend `loadDem` (dem.js:519), réduit
 // aux clés dont le recollage a besoin.
@@ -197,4 +197,114 @@ test('il en faut neuf, pas huit', () => {
 
 test('EMPRISE_COTE vaut 3 — le 3×3 borné qu’Adrien a fixé', () => {
   assert.equal(EMPRISE_COTE, 3)
+})
+
+// ── LE NOMBRE DE CHARGEMENTS EN VOL ──────────────────────────────────────────
+//
+// MESURÉ, sur le mode continu à Chamonix z12 et La Réunion z13 (banc
+// `.banc/f3-pic.mjs`) : les neuf `loadDem` lancés d'un seul `Promise.all`
+// portent le tas de 160 Mo à 386 Mo pendant le chargement, pour retomber à
+// 158 Mo une fois le ramassage passé. Le poste n'est PAS retenu — il est
+// TRANSITOIRE, et c'est précisément le pic que l'étude §3.3 refusait quand elle
+// écartait `tilesAcross: 9` et ses ~255 Mo. Neuf appels concurrents l'ont
+// réintroduit tel quel.
+//
+// D'où cette règle : les neuf chargements se font par vagues bornées.
+
+test('jamais plus de `limite` chargements en vol à la fois', async () => {
+  let enVol = 0
+  let pire = 0
+  const res = await enVolBorne(
+    [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    3,
+    async (v) => {
+      enVol++
+      if (enVol > pire) pire = enVol
+      await new Promise((r) => setTimeout(r, 5))
+      enVol--
+      return v * 10
+    }
+  )
+  assert.equal(pire, 3, 'trois en vol au plus — c’est tout l’objet de la règle')
+  assert.deepEqual(res, [0, 10, 20, 30, 40, 50, 60, 70, 80])
+})
+
+test('les résultats sortent dans l’ordre des entrées, pas dans l’ordre d’arrivée', async () => {
+  // `recollerEmprise` lit ses neuf blocs en LIGNE-MAJOR : un résultat rangé
+  // dans l'ordre où le réseau a répondu recollerait l'emprise en désordre —
+  // un relief faux, sans la moindre erreur levée.
+  const res = await enVolBorne([50, 5, 30, 1], 2, async (ms, k) => {
+    await new Promise((r) => setTimeout(r, ms))
+    return k
+  })
+  assert.deepEqual(res, [0, 1, 2, 3])
+})
+
+test('le rang est passé au chargeur — le centre est reconnu par son rang', async () => {
+  // main.js s'en sert pour ne PAS retélécharger le bloc central (rang 4).
+  const rangs = []
+  await enVolBorne(['a', 'b', 'c'], 2, async (v, k) => {
+    rangs.push(k)
+    return v
+  })
+  assert.deepEqual(rangs.sort(), [0, 1, 2])
+})
+
+test('chaque entrée est chargée une seule fois', async () => {
+  let n = 0
+  await enVolBorne(Array.from({ length: 9 }, (_, k) => k), 3, async () => {
+    n++
+  })
+  assert.equal(n, 9)
+})
+
+test('un échec remonte, il n’est pas avalé', async () => {
+  // Une emprise incomplète se lirait comme une plaine au milieu des Alpes :
+  // main.js compte sur le rejet pour retomber sur le bloc unique.
+  await assert.rejects(
+    () =>
+      enVolBorne([1, 2, 3, 4], 2, async (v) => {
+        if (v === 3) throw new Error('tuile absente')
+        return v
+      }),
+    /tuile absente/
+  )
+})
+
+test('une limite absurde est ramenée à un, jamais à zéro', () => {
+  // Une limite nulle ne doit pas rendre une promesse qui ne se résout jamais :
+  // le voile de chargement l'attend (main.js).
+  return Promise.all([
+    enVolBorne([1, 2], 0, async (v) => v).then((r) => assert.deepEqual(r, [1, 2])),
+    enVolBorne([1, 2], -3, async (v) => v).then((r) => assert.deepEqual(r, [1, 2])),
+    enVolBorne([1, 2], NaN, async (v) => v).then((r) => assert.deepEqual(r, [1, 2])),
+  ])
+})
+
+test('une limite plus grande que la liste ne sérialise rien', async () => {
+  let enVol = 0
+  let pire = 0
+  await enVolBorne([1, 2, 3], 9, async () => {
+    enVol++
+    if (enVol > pire) pire = enVol
+    await new Promise((r) => setTimeout(r, 5))
+    enVol--
+  })
+  assert.equal(pire, 3, 'les trois partent ensemble')
+})
+
+test('une liste vide rend une liste vide sans rien appeler', async () => {
+  let n = 0
+  assert.deepEqual(
+    await enVolBorne([], 3, async () => n++),
+    []
+  )
+  assert.equal(n, 0)
+})
+
+test('EMPRISE_EN_VOL_MAX borne le pic à trois chargements, pas neuf', () => {
+  // Le chiffre porte le budget : trois `loadDem` en vol tiennent ~3 × 30 Mo
+  // d'intermédiaires (ImageData + Float32 + champ fusionné) là où neuf en
+  // tenaient ~9 × 30. Voir le banc cité en tête de section avant de le monter.
+  assert.equal(EMPRISE_EN_VOL_MAX, 3)
 })
