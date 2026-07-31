@@ -100,26 +100,141 @@ export function assertSaneSize(response, limit = OVERPASS_MAXSIZE) {
   if (Number.isFinite(len) && len > limit) throw new Error(`overpass payload ${len} > ${limit}`)
 }
 
+// ═══ LE BUDGET D'ATTENTE, ET POURQUOI IL EST LOAD-BEARING ════════════════════
+//
+// Overpass est un ENRICHISSEMENT : le calque d'eau sait déjà se dessiner sans
+// lui (tuiles Overture locales, puis Natural Earth). Mais jusqu'au 2026-07-31
+// cet enrichissement facultatif tenait en otage la donnée garantie, parce que
+// rien ne bornait l'attente côté client.
+//
+// MESURÉ in situ le 2026-07-31 (Chrome, page servie, Chamonix z12, en mode
+// ordinaire ET en mode continu — ce n'est pas un défaut du 3×3) :
+//   - le calque finissait par produire 186 objets… à 42 SECONDES ;
+//   - quatre requêtes vers overpass-api.de mouraient en
+//     ERR_CONNECTION_TIMED_OUT, 31 à 42 s chacune ;
+//   - `curl` depuis la même machine n'établit même pas la connexion
+//     (time_connect = 0, abandon à 21,6 s) : l'API est injoignable d'ici ;
+//   - pendant ce temps les tuiles Overture, LOCALES, avaient leurs 256 entités
+//     prêtes en moins d'une seconde, derrière le `await Promise.all(...)`.
+// Autrement dit : « le calque d'eau ne produit RIEN » était en réalité « le
+// calque d'eau attend 42 s ». Un silence, pas une panne — donc invisible.
+//
+// ⚠️ Le `[timeout:25]` des requêtes ne protège de rien dans ce cas : c'est le
+// budget d'EXÉCUTION du serveur, il ne commence à courir qu'une fois la
+// connexion établie. Sans connexion, on tombait sur le délai TCP du navigateur.
+//
+// D'où les deux garde-fous ci-dessous.
+
+// ① Le temps qu'on accepte d'attendre Overpass avant de dessiner sans lui.
+// 6 s, et le chiffre n'est pas pris au hasard : la mesure de référence de ce
+// module donne 927 ms pour la requête à tag nu (voir WAY_TAG plus haut), donc
+// 6 s laisse SIX FOIS la marge à une requête saine — aucune n'est coupée — tout
+// en ramenant la fenêtre sans eau de 42 s à 6 s. Au-delà, on rend la main : la
+// requête, elle, continue dans le cache et servira au prochain rebuild.
+export const OVERPASS_ATTENTE_MS = 6000
+
+// ② Le repos après une panne d'accès. Sans lui, sur une machine qui n'atteint
+// pas Overpass, CHAQUE changement de zone repaie les 6 s. Avec lui, seul le
+// premier les paie. Une minute : assez long pour ne pas re-sonder un réseau
+// visiblement coupé, assez court pour que le retour du réseau se voie vite.
+export const OVERPASS_PANNE_MS = 60_000
+
+let _panneJusqua = 0
+export function overpassEnPanne(maintenant = Date.now()) { return maintenant < _panneJusqua }
+export function noterPanneOverpass(maintenant = Date.now()) { _panneJusqua = maintenant + OVERPASS_PANNE_MS }
+export function oublierPanneOverpass() { _panneJusqua = 0 } // tests, et retour manuel
+
+// Une erreur de REQUÊTE (statut HTTP, charge refusée) — par opposition à une
+// panne d'ACCÈS. La distinction commande le disjoncteur : un 400 sur une bbox
+// trop dense ou un 429 ponctuel ne dit rien de l'accessibilité du point
+// d'accès, et couper l'eau partout pendant une minute pour ça fabriquerait la
+// panne qu'on cherche à éviter. Seule l'absence de réponse l'ouvre.
+class ErreurRequeteOverpass extends Error {}
+
+// Ce que rend une attente arrivée à son terme. Un SYMBOLE, pas `null` : le
+// disjoncteur doit distinguer « la requête n'a pas répondu à temps » de « la
+// requête a répondu, et c'est vide ». Les deux se dessinent pareil, mais l'un
+// est une panne d'accès et l'autre pas.
+export const ABANDON = Symbol('overpass:abandon')
+
+/**
+ * Attend `job` au plus `ms`, puis rend `ABANDON` sans l'annuler.
+ *
+ * On n'annule PAS la requête : elle reste dans le cache et, si elle finit par
+ * répondre, un rebuild ultérieur sur la MÊME emprise la trouve instantanément.
+ * Abandonner l'ATTENTE coûte zéro ; abandonner la REQUÊTE jetterait un
+ * enrichissement déjà payé. Le minuteur est toujours annulé — un setTimeout par
+ * requête abandonnée retiendrait le processus (et, en test node, la suite).
+ */
+export function attendreOuAbandonner(job, ms) {
+  if (!(ms > 0)) return job
+  let minuteur = null
+  const abandon = new Promise((resolve) => { minuteur = setTimeout(() => resolve(ABANDON), ms) })
+  return Promise.race([job, abandon]).finally(() => clearTimeout(minuteur))
+}
+
 // cache by zone+kind, dedupe in-flight, min gap between network hits, null on fail
 const _cache = new Map()
 let _lastAt = 0
-export async function fetchOverpassLines(bbox, kind, { url = OVERPASS_URL, minInterval = 1200 } = {}) {
+
+// Le `fetch` du navigateur par défaut ; injectable pour les tests (ce module
+// n'a aucune autre dépendance à l'environnement).
+const _fetch = (impl) => impl ?? ((...a) => globalThis.fetch(...a))
+
+// Enregistre le job dans le cache et lui attache la comptabilité des pannes.
+// `job.catch` ici n'est PAS le rattrapage de l'appelant : c'est ce qui empêche
+// un rejet non traité, purge l'entrée pour qu'un rebuild ultérieur retente, et
+// ouvre le disjoncteur si — et seulement si — l'accès a échoué.
+function _memoriser(key, job, maintenant) {
+  _cache.set(key, job)
+  job.catch((err) => {
+    _cache.delete(key)
+    if (!(err instanceof ErreurRequeteOverpass)) noterPanneOverpass(maintenant())
+  })
+  return job
+}
+
+async function _lire(r, kind, lecteur) {
+  if (!r.ok) throw new ErreurRequeteOverpass(`overpass ${r.status}`)
+  try { assertSaneSize(r) } catch (err) { throw new ErreurRequeteOverpass(err.message) }
+  return lecteur(await r.json(), kind)
+}
+
+// L'attente commune aux deux points d'entrée. Un abandon OUVRE le disjoncteur :
+// six secondes sans réponse d'un service dont le nominal mesuré est 927 ms est
+// une preuve suffisante. Sans ça le disjoncteur n'aurait servi à rien dans le
+// cas réel — MESURÉ : la requête suspendue ne se rejette qu'au délai TCP du
+// navigateur (42 s), donc un changement de zone à 10 s repayait le budget
+// entier. Se tromper coûte au pire Natural Earth au lieu d'Overpass pendant une
+// minute, et la requête abandonnée continue de remplir le cache.
+async function _attendre(key, attenteMs, maintenant) {
+  try {
+    const r = await attendreOuAbandonner(_cache.get(key), attenteMs)
+    if (r === ABANDON) { noterPanneOverpass(maintenant()); return null }
+    return r
+  } catch { return null }
+}
+
+// ⚠️ Le CACHE est consulté AVANT le disjoncteur, et l'ordre est load-bearing :
+// le disjoncteur interdit d'ouvrir une requête NEUVE, pas de lire une réponse
+// déjà payée. Une emprise dont la requête a fini par aboutir doit rendre sa
+// donnée riche même pendant le repos — l'inverse jetterait ce qu'on vient
+// justement de ne pas annuler.
+export async function fetchOverpassLines(bbox, kind, { url = OVERPASS_URL, minInterval = 1200, attenteMs = OVERPASS_ATTENTE_MS, fetchImpl, now = Date.now } = {}) {
   const key = bboxKey(bbox, kind)
   if (!_cache.has(key)) {
+    if (overpassEnPanne(now())) return null
     const body = buildQuery(bbox, kind)
-    const job = (async () => {
+    const f = _fetch(fetchImpl)
+    _memoriser(key, (async () => {
       const wait = Math.max(0, _lastAt + minInterval - Date.now())
       if (wait) await new Promise((r) => setTimeout(r, wait))
       _lastAt = Date.now()
-      const r = await fetch(url, { method: 'POST', body, headers: { 'Content-Type': 'text/plain' } })
-      if (!r.ok) throw new Error(`overpass ${r.status}`)
-      assertSaneSize(r)
-      return parseOverpass(await r.json(), kind)
-    })()
-    _cache.set(key, job)
-    job.catch(() => _cache.delete(key))
+      const r = await f(url, { method: 'POST', body, headers: { 'Content-Type': 'text/plain' } })
+      return _lire(r, kind, parseOverpass)
+    })(), now)
   }
-  try { return await _cache.get(key) } catch { return null }
+  return _attendre(key, attenteMs, now)
 }
 
 function areaBboxKey(bbox) {
@@ -127,22 +242,23 @@ function areaBboxKey(bbox) {
   return `areas:${r(bbox.minLat)},${r(bbox.minLon)},${r(bbox.maxLat)},${r(bbox.maxLon)}`
 }
 
-// Same cache/dedupe/throttle contract as fetchOverpassLines, but for water AREAS.
-export async function fetchOverpassAreas(bbox, { url = OVERPASS_URL, minInterval = 1200 } = {}) {
+// Same cache/dedupe/throttle contract as fetchOverpassLines, but for water AREAS
+// — budget d'attente et disjoncteur inclus, pour les mêmes raisons (voir
+// OVERPASS_ATTENTE_MS). Les deux requêtes partaient ensemble dans un
+// `Promise.all` : en border une seule n'aurait rien borné du tout.
+export async function fetchOverpassAreas(bbox, { url = OVERPASS_URL, minInterval = 1200, attenteMs = OVERPASS_ATTENTE_MS, fetchImpl, now = Date.now } = {}) {
   const key = areaBboxKey(bbox)
   if (!_cache.has(key)) {
+    if (overpassEnPanne(now())) return null
     const body = buildAreaQuery(bbox)
-    const job = (async () => {
+    const f = _fetch(fetchImpl)
+    _memoriser(key, (async () => {
       const wait = Math.max(0, _lastAt + minInterval - Date.now())
       if (wait) await new Promise((r) => setTimeout(r, wait))
       _lastAt = Date.now()
-      const r = await fetch(url, { method: 'POST', body, headers: { 'Content-Type': 'text/plain' } })
-      if (!r.ok) throw new Error(`overpass ${r.status}`)
-      assertSaneSize(r)
-      return parseOverpassAreas(await r.json())
-    })()
-    _cache.set(key, job)
-    job.catch(() => _cache.delete(key))
+      const r = await f(url, { method: 'POST', body, headers: { 'Content-Type': 'text/plain' } })
+      return _lire(r, null, parseOverpassAreas)
+    })(), now)
   }
-  try { return await _cache.get(key) } catch { return null }
+  return _attendre(key, attenteMs, now)
 }
