@@ -6,7 +6,8 @@ import { gridTemplate } from './grid-template.js'
 import { gridNormals } from './grid-normals.js'
 import { detailField, detailFieldEmprise, accordeDetailScale, tintField } from './detail-noise.js'
 import { analyseMemoLire, analyseMemoEcrire } from './dem-memo.js'
-import { landMaskFromField } from './sea-mask.js'
+import { landMaskFromField, BASSIN_FRAC_DEFAUT } from './sea-mask.js'
+import { ATLAS_ANALYSE, ATLAS_MER, fracBassinEmprise } from './dem-emprise.js'
 // les huit demi-plans de la fenêtre, purs et testés — voir src/fenetre-clip.js
 // ⚠️ ALIASÉ : la méthode `Terrain.plansFenetre()` rend des `THREE.Plane`, la
 // fonction pure rend des descriptions. Le même nom pour les deux se lit comme
@@ -1656,12 +1657,34 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     this.mesh.geometry = geo
   }
 
+  // ══════════ LES DEUX PLAFONDS DE CHAMPS, EN UN SEUL ENDROIT ══════════════
+  //
+  // Trois régimes, et un seul point de décision pour chacun :
+  //   • emprise 3×3  → l'ATLAS (dem-emprise.js), cuit une fois sur 168 unités ;
+  //   • dalle voisine du damier → le plafond que block-grid.js lui impose ;
+  //   • bloc central → aucun plafond, c'est le héros.
+  //
+  // ⚠️ Ces deux fonctions rendent un PLAFOND, `_seaSize` rend la TAILLE OBTENUE.
+  // La distinction n'est pas cosmétique : `resampleField` ne grossit jamais, donc
+  // un atlas de 2 304 demandé à un MNT de 2 304 rend 2 304, et à un MNT de 1 536
+  // (emprise en tuiles 256 px, zooms grossiers) rend 1 536. La landMask est
+  // indexée CELLULE POUR CELLULE par buildSeaMask : la cuire à la taille
+  // DEMANDÉE pendant que le champ sort à la taille SOURCE rendrait des polders
+  // décalés — un défaut muet, pas une erreur.
+  _analysisMax(dem) {
+    return dem?.empriseCote > 1 ? ATLAS_ANALYSE : this.analysisMax | 0
+  }
+
+  _seaMax(dem) {
+    return dem?.empriseCote > 1 ? ATLAS_MER : this.seaMax | 0
+  }
+
   // Le côté du masque de mer de CE bloc : le MNT au centre, le plafond sur une
   // dalle voisine (voir seaMax). Une seule source de vérité, parce que deux
   // consommateurs doivent tomber d'accord au pixel près — la landMask ci-dessous
   // et le travail posté au Worker.
   _seaSize(dem) {
-    const max = this.seaMax | 0
+    const max = this._seaMax(dem)
     return max > 0 && dem.size > max ? max : dem.size
   }
 
@@ -1710,24 +1733,30 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // de curseur d'exagération. Voir jobStillValid.
   _buildFields({ withAnalysis = true } = {}) {
     const dem = this.dem
-    // ══════════ AUCUN CHAMP EN MODE CONTINU — JALON 1 ════════════════════════
-    // L'emprise 3×3 fait 4608² au lieu de 1536² : NEUF FOIS plus de pixels à
-    // analyser, pour un `analyzeDem` qui coûte 164 ns le pixel — plus de trois
-    // secondes de fil principal gelé avant la première image. Le jalon 1 s'en
-    // passe entièrement et l'assume : le terrain y est peint à la rampe
-    // d'altitude nue, exactement comme aux zooms continentaux où ces champs
-    // sont déjà éteints. L'atlas de champs est le jalon 2, et il se cuit en
-    // Worker, une seule fois.
-    // ⚠️ `fieldsReady` DOIT rester une promesse résolue : c'est elle qu'attend
-    // le voile de chargement (main.js), et `rebuildPending` resterait à `true`
-    // pour toujours si on la laissait pendante.
-    if (dem?.empriseCote > 1) {
-      this.mapUniforms.uAnalysisOn.value = 0
-      this.mapUniforms.uSeaMaskOn.value = 0
-      this._fieldKey = null
-      this.fieldsReady = Promise.resolve(null)
-      return this.fieldsReady
-    }
+    // ══════════ L'ATLAS DE CHAMPS — JALON 2 ═════════════════════════════════
+    //
+    // Le jalon 1 sautait ce calcul ENTIÈREMENT : sur l'emprise 3×3 (4 608² au
+    // lieu de 1 536²) il y a NEUF FOIS plus de pixels, et `analyzeDem` coûte
+    // 164 ns le pixel. Le terrain y était peint à la rampe d'altitude nue.
+    //
+    // Le jalon 2 le rallume, et il ne change PAS de machinerie pour ça — il
+    // change deux plafonds et deux options. C'est tout le sens de l'atlas : les
+    // champs sont cuits UNE FOIS sur les 168 unités au lieu d'être recuits à
+    // chaque bloc traversé, et le shader les lit avec le décalage de fenêtre.
+    //
+    //   • les plafonds : ATLAS_ANALYSE / ATLAS_MER (voir _analysisMax/_seaMax)
+    //   • `merMinPool` : le sous-échantillonnage du masque de mer passe de la
+    //     moyenne au MINIMUM, sans quoi un détroit d'un pixel est sectionné et
+    //     une baie réelle se peint en terre (terrain-analysis.js, minPoolField)
+    //   • `minBasinFrac` : le seuil de grand bassin est une FRACTION du champ,
+    //     donc neuf fois plus exigeant sur une emprise — converti à surface
+    //     absolue constante (dem-emprise.js, fracBassinEmprise)
+    //
+    // ⚠️ Le coût reste réel : ~1 s de cuisson au chargement. Deux atténuations,
+    // et elles sont dans l'architecture, pas dans l'espoir — le calcul est en
+    // Worker (aucun gel) et il ne se fait QU'UNE FOIS. Le voile de chargement
+    // l'attend par `fieldsReady`, comme pour un bloc ordinaire.
+    const emprise = dem?.empriseCote > 1 ? dem.empriseCote : 0
     // ⚠️ Un terrain abandonné ne recuit PLUS RIEN, jamais. Sans ce garde-fou,
     // le masque côtier d'une dalle détruite — il arrive du réseau, bien après —
     // rappelait _buildFields et RESSUSCITAIT la dalle : une DataTexture posée
@@ -1749,10 +1778,11 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     if (!naturel) this.mapUniforms.uAnalysisOn.value = 0
     const demandee = withAnalysis && naturel && !(this._analysisFor === dem && this.mapUniforms.uAnalysisOn.value)
     // analysisMax / seaMax : une dalle VOISINE n'a pas le maillage qui
-    // justifierait des champs à la taille du MNT (voir block-grid.js). Le shader
-    // lit les deux en UV MONDE, leur taille lui est donc indifférente.
-    const maxSize = this.analysisMax | 0
-    const seaMax = this.seaMax | 0
+    // justifierait des champs à la taille du MNT (voir block-grid.js), et une
+    // EMPRISE 3×3 prend la taille d'atlas. Le shader lit les deux en UV
+    // d'atlas, leur taille lui est donc indifférente.
+    const maxSize = this._analysisMax(dem)
+    const seaMax = this._seaMax(dem)
     // ANALYSE DÉJÀ CUITE POUR CE MNT ? On la repose SANS RIEN DEMANDER au
     // travailleur. Mesuré à La Réunion sur un retour de zoom : 464 ms de
     // travailleur, et c'est le voile de chargement qui les attendait. L'analyse
@@ -1786,7 +1816,20 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const cleAnalyse = { dem, maxSize }
     return (this.fieldsReady = scheduleTerrainJob({
       key: { dem }, // le MNT périme TOUT ; le reste se juge champ par champ
-      job: { data: dem.data, size: dem.size, metersPerPixel: dem.metersPerPixel, maxSize, seaMax, landMask, withAnalysis: analyse },
+      job: {
+        data: dem.data,
+        size: dem.size,
+        metersPerPixel: dem.metersPerPixel,
+        maxSize,
+        seaMax,
+        landMask,
+        withAnalysis: analyse,
+        // les deux options de l'atlas — voir l'en-tête. Hors mode continu elles
+        // valent `false` et `undefined`, et computeTerrainJob est alors
+        // bit-à-bit ce qu'il était (test/terrain-jobs.test.js le verrouille).
+        merMinPool: emprise > 0,
+        minBasinFrac: emprise > 0 ? fracBassinEmprise(BASSIN_FRAC_DEFAUT, emprise) : undefined,
+      },
       current: () => this._fieldKey,
       apply: (r, actuel) => {
         if (jobStillValid(cleMer, actuel)) this._applySeaMask(r.sea, r.seaSize)

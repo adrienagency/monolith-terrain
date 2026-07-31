@@ -52,7 +52,7 @@ import { Clouds2 } from './clouds2.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
-import { EMPRISE_EN_VOL_MAX, enVolBorne, originesEmprise, recollerEmprise } from './dem-emprise.js'
+import { ATLAS_COTE, EMPRISE_EN_VOL_MAX, enVolBorne, originesEmprise, recollerEmprise } from './dem-emprise.js'
 import { COURSE_ELASTIQUE, avanceFenetre, rappelElastique } from './fenetre-course.js'
 import { vitesseAuLache, pasElan } from './fenetre-elan.js'
 import { MapLayers } from './map/layer-manager.js'
@@ -2273,16 +2273,36 @@ async function fetchAndBuildDem() {
   if (params.groundInfo) groundInfo.load(params.demLat, params.demLon, dem)
   // real coastline (Natural Earth) at coarse zoom — async, non-blocking; the
   // shader falls back to the elevation isoline until it arrives / if it fails.
-  // ⚠️ Aucun trait de côte en mode continu au jalon 1 : `fetchCoastMask` cuit un
-  // masque à l'échelle du BLOC et le poserait sur une emprise trois fois plus
-  // grande — une côte au tiers de sa taille, plaquée au mauvais endroit. Le
-  // masque d'atlas est le jalon 2. Sans côte, le shader retombe sur l'isoligne
-  // d'altitude, ce qui est laid mais juste.
-  if (!(dem?.empriseCote > 1) && params.demZoom >= COAST_ZOOM_MIN && params.demZoom <= COAST_ZOOM_MAX) {
-    const key = `${params.demZoom}:${params.demLat.toFixed(3)},${params.demLon.toFixed(3)}`
+  // ══════════ LE TRAIT DE CÔTE SUR L'EMPRISE — JALON 2 ══════════════════════
+  //
+  // Le jalon 1 s'en passait : `fetchCoastMask` cuit son masque sur le
+  // FOOTPRINT DU MNT qu'on lui donne, et à ce jalon on lui donnait un bloc,
+  // donc une côte au tiers de sa taille plaquée au mauvais endroit. Rien à
+  // réécrire pour le réparer — il suffit de lui donner le MNT RECOLLÉ :
+  // `patchLatLonBBox` et `projectPatchPx` se déduisent de `dem.size`, de
+  // `originTileX/Y` et de `tilePx`, tous justes sur l'emprise.
+  //
+  // ⚠️ LA TAILLE, ELLE, DOIT SUIVRE — c'est le seul vrai réglage de ce poste.
+  // Le masque d'un bloc fait 2 048 sur 56 unités (36,6 texels/unité). Le même
+  // 2 048 étalé sur les 168 unités de l'emprise n'en ferait plus que 12,2, et
+  // le socle occupe ~800 pixels d'écran pour ces 56 unités : un texel vaudrait
+  // alors 1,17 pixel d'écran, au-delà du pixel.
+  //
+  // ATLAS_COTE = 2 304 tient 13,7 texels/unité, soit 1,04 pixel d'écran par
+  // texel — le plancher exact de l'étude (§2.1), et il est ATTEINT, pas
+  // approché. TRANCHÉ PAR COMPARAISON D'IMAGES, pas par ce calcul seul : voir
+  // le banc du jalon 2 et les chiffres au commit. Coût R8 : 5,3 Mo, contre
+  // 9,4 pour un 3 072 qui ne se distingue pas à l'œil.
+  const coteMasque = dem?.empriseCote > 1 ? ATLAS_COTE : undefined
+  if (params.demZoom >= COAST_ZOOM_MIN && params.demZoom <= COAST_ZOOM_MAX) {
+    // ⚠️ LA TAILLE ENTRE DANS LA CLÉ DU CACHE. Sans elle, un aller-retour entre
+    // le mode ordinaire et le mode continu sur la MÊME zone au MÊME zoom
+    // reposerait le masque de l'autre mode : le bon contenu, la mauvaise
+    // emprise — une côte au tiers de sa taille, et aucune erreur levée.
+    const key = `${params.demZoom}:${params.demLat.toFixed(3)},${params.demLon.toFixed(3)}:${coteMasque ?? 0}`
     let job = coastMaskCache.get(key)
     if (job) coastMaskCache.delete(key) // re-insert below to mark most-recently-used
-    else job = fetchCoastMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem })
+    else job = fetchCoastMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem, size: coteMasque })
     coastMaskCache.set(key, job)
     // LRU eviction: drop the oldest entries, disposing their masks (never the active one)
     while (coastMaskCache.size > COAST_CACHE_MAX) {
@@ -2303,7 +2323,12 @@ async function fetchAndBuildDem() {
       .then((res) => {
         if (!res) return
         // only apply if we're still on the same patch
-        const stillHere = `${params.demZoom}:${params.demLat.toFixed(3)},${params.demLon.toFixed(3)}` === key
+        // ⚠️ LA MÊME EXPRESSION QUE LA CLÉ, suffixe de taille compris — sinon un
+        // masque d'emprise arrivé après un retour au mode ordinaire (ou
+        // l'inverse) se croirait toujours d'actualité et se poserait.
+        const coteActuelle = dem?.empriseCote > 1 ? ATLAS_COTE : undefined
+        const stillHere =
+          `${params.demZoom}:${params.demLat.toFixed(3)},${params.demLon.toFixed(3)}:${coteActuelle ?? 0}` === key
         // the SEA reads the SAME OSM mask so its waves stop at the real shore,
         // not the elevation contour (flat polders below sea level are land)
         if (stillHere) {

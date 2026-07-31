@@ -19,7 +19,18 @@
 // (Flevoland), la topologie seule les prenait pour la mer. CONTRAT : sans
 // landMask, résultat bit-à-bit identique à avant.
 
-export function buildSeaMask(dem, { seaLevelM = 0.5, minBasinFrac = 0.02, landMask = null } = {}) {
+// Le seuil de « grand bassin », en FRACTION du champ : une poche basse non
+// connectée au bord reste mer si elle occupe au moins ça. C'est ce qui sauve la
+// Caspienne et la mer Morte, et c'est le piège Flevoland que
+// test/sea-mask.test.js verrouille.
+//
+// ⚠️ EXPORTÉ PARCE QU'IL SE CONVERTIT. Sur une emprise 3×3, le champ compte neuf
+// fois plus de cellules, donc la même fraction exige neuf fois la même surface
+// absolue : l'appelant passe alors fracBassinEmprise(BASSIN_FRAC_DEFAUT, 3)
+// (dem-emprise.js). Le DÉFAUT, lui, ne bouge pas — deux tests en dépendent.
+export const BASSIN_FRAC_DEFAUT = 0.02
+
+export function buildSeaMask(dem, { seaLevelM = 0.5, minBasinFrac = BASSIN_FRAC_DEFAUT, landMask = null } = {}) {
   const { data, size } = dem
   const n = size * size
   const isLow = new Uint8Array(n) // 1 = at/below sea level (et pas terre du masque)
