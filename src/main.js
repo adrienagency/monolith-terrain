@@ -2051,6 +2051,12 @@ function f3CalquesSuivent() {
   // et masque ses étiquettes hors socle. La LIGNE, elle, est écrêtée par les
   // plans de coupe posés à sa construction — le GPU la coupe au bord, pour rien.
   for (const l of gpxLayer?.layers ?? []) l.gpx?.setFenetre?.(f.x, f.z)
+  // ══════════ CE QUI VOLE SUIT AUSSI, MAIS N'EST PAS ÉCRÊTÉ ═════════════════
+  //
+  // Adrien : « aucun problème si la montgolfière ou l'avion est en dehors du
+  // socle, c'est le comportement attendu. » Leur groupe porte −fenêtre pour
+  // qu'ils DÉRIVENT avec le paysage ; rien ne les enferme.
+  traffic?.setFenetre?.(f.x, f.z)
   // ══════════ LA MER, SA JUPE ET LES LACS ═══════════════════════════════════
   //
   // La mer NE SE TRANSLATE PAS : le plan d'eau EST la fenêtre, il reste en
@@ -2359,6 +2365,7 @@ async function fetchAndBuildDem() {
     coastMaskImage = null
   }
   traffic.setZone(dem) // SpaceX pad watcher (Starbase / LC-39A in view?)
+  traffic.setSpan(trafficSpan()) // en mode continu le damier est vide : l'emprise commande
   terrain.refreshMatTiling(params) // relief material tiling tracks the new zoom
   if (params.regionMode) applyRegionMode() // re-cut to the new zone's boundary
   // Adrien's saved look becomes the opening view — applied ONCE, after the very
@@ -3760,7 +3767,17 @@ blockGrid.onCoastReady = (cell) => {
 }
 // le damier a gagné/perdu une dalle → le trafic aérien étend sa zone de vol
 // pour qu'un avion passe d'une dalle à la suivante sans coupure
-blockGrid.onGridChanged = () => traffic.setSpan(blockGrid.spanRadius())
+// ⚠️ EN MODE CONTINU C'EST L'EMPRISE QUI COMMANDE, PAS LE DAMIER. Le damier n'a
+// aucune cellule (le 3×3 est un seul champ), donc `spanRadius()` rendrait 0 et
+// l'aéronef mourrait au bord du bloc central — juste au moment où le relief
+// derrière lui, lui, continue. L'emprise fait 84 unités de demi-côté.
+// Déclaration de fonction (et non `const`) : elle est appelée depuis
+// `regenerateTerrain`, plus haut dans le fichier — une flèche en `const` y
+// serait dans sa zone morte si un chargement partait pendant l'évaluation.
+function trafficSpan() {
+  return dem?.empriseCote > 1 ? (TERRAIN_SIZE * dem.empriseCote) / 2 : blockGrid.spanRadius()
+}
+blockGrid.onGridChanged = () => traffic.setSpan(trafficSpan())
 // le damier se resynchronise à CHAQUE re-drapage global (zone, zoom, ajout de
 // calque) — idempotent, borné 5×5, cellules en cache LRU
 const _rebuildAllRaw = gpxLayer.rebuildAll.bind(gpxLayer)

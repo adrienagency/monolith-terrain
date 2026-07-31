@@ -461,6 +461,24 @@ uniform float uLmOn;
 uniform float uLmFlow;
 uniform float uLmFlowAmt;
 ${FX_GLSL}
+// ══════════ LA COORDONNÉE DE CHAMP D'UN FRAGMENT ═══════════════════════════
+//
+// vWorldPos.xz est la position dans la GÉOMÉTRIE. En mode continu la
+// géométrie ne bouge pas : c'est le relief qui défile dessous, par un décalage
+// de LECTURE du MNT (uFenetre). Tout ce qui est peint « sur le sol » — une
+// matière, un motif, une photo, une grille — doit donc s'indexer sur
+// champXZ(), sinon il reste COLLÉ À L'ÉCRAN pendant que le paysage s'en va.
+//
+// C'est exactement le piège du grain FBM que l'étude §5.4 annonçait et que
+// 646acd5 a corrigé côté géométrie ; ici c'est le même piège, côté fragment.
+//
+// ⚠️ CE QUI N'EST PAS PEINT SUR LE SOL NE DOIT PAS L'UTILISER : le découpage du
+// socle, le fondu vers son bord, l'ombre des nuages (le ciel est la fenêtre) et
+// les balayages de scan appartiennent à la FENÊTRE et restent en vWorldPos.
+//
+// Hors mode continu uFenetre vaut (0,0) : champXZ() EST vWorldPos.xz, au
+// bit près.
+vec2 champXZ() { return vWorldPos.xz + uFenetre; }
 // --- Appearance blend modes (Figma / W3C compositing set) — b = backdrop map,
 // s = the shader colour. Separable ops are channel-wise; the last four are the
 // non-separable HSL modes. ---
@@ -580,13 +598,14 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     // warp du domaine (casse la répétition) + deux échelles + longues bandes
     // de rayons qui balaient lentement. Même rendu jour et nuit (photos réf.).
     if (uSeaCausK > 0.001) {
-      vec2 cw = vWorldPos.xz + 0.9 * vec2(sin(vWorldPos.z * 0.11 + uCausT * 0.07), cos(vWorldPos.x * 0.13 - uCausT * 0.05));
+      vec2 cwx = champXZ(); // les mailles de lumière appartiennent au FOND, pas à l'écran
+      vec2 cw = cwx + 0.9 * vec2(sin(cwx.y * 0.11 + uCausT * 0.07), cos(cwx.x * 0.13 - uCausT * 0.05));
       float cc1 = seaCaustic(cw * 0.55 + vec2(uCausT * 0.05, 0.0), uCausT * 0.8);
       float cc2 = seaCaustic(cw * 0.23 - vec2(0.0, uCausT * 0.03), uCausT * 0.5);
       float cnet = clamp(cc1 * 1.2 + cc2 * 0.5, 0.0, 1.5);
       float cfil = smoothstep(0.5, 1.1, cnet);
       // rayons de lumière : bandes larges et lentes qui traversent le fond
-      float crays = mix(0.72, 1.0, 0.5 + 0.5 * sin(dot(vWorldPos.xz, vec2(0.33, 0.21)) + uCausT * 0.2));
+      float crays = mix(0.72, 1.0, 0.5 + 0.5 * sin(dot(cwx, vec2(0.33, 0.21)) + uCausT * 0.2));
       // v50 : les caustiques ne vivent QUE là où la lumière atteint le fond —
       // 0 au large, plein en eau peu profonde. L'ancien plancher 0.3 laissait
       // des filaments lumineux sur le fond profond qui, vus à travers l'eau,
@@ -695,7 +714,7 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   float effTint = uTint;
   float paintShade = fxShade;
   if (uMatNoiseOn > 0.5) {
-    float mn = mnNoise(vWorldPos.xz * uMatNoiseScale);
+    float mn = mnNoise(champXZ() * uMatNoiseScale); // la dissolution est une matière du SOL
     float reveal = 1.0 - smoothstep(uMatNoiseCut - uMatNoiseSoft, uMatNoiseCut + uMatNoiseSoft, mn);
     effTint = mix(uTint, 1.0, reveal);
     paintShade = mix(fxShade, 1.0, reveal);
@@ -715,7 +734,31 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   // still sits on top of the photograph rather than being buried by it. That
   // ordering is most of what keeps this from becoming a plain satellite viewer.
   if (uAerialOn > 0.5) {
-    vec2 aUv = (vWorldPos.xz - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
+    // ⚠️ champXZ(), PAS vWorldPos.xz — signalé par Adrien : « la
+    // cartographie aérienne ne suit pas le terrain ». La photo est REGISTRÉE
+    // AU SOL (elle est composée sur les deux coins exacts du bloc, voir
+    // aerial-layer.js:blockBounds) : indexée sur la géométrie, elle restait
+    // collée à l'écran et montrait les rues d'une vallée sur les crêtes de la
+    // voisine — le défaut « Vienne sur le mont Fuji » que refreshAerialCore
+    // évite déjà d'un bloc à l'autre, ici à l'intérieur d'un seul.
+    vec2 aUv = (champXZ() - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
+    // ⚠️ ET LA PHOTO S'ARRÊTE OÙ ELLE S'ARRÊTE. Elle ne couvre QUE le bloc
+    // central de l'emprise (56 unités sur 168) : au-delà, texture2D étirerait
+    // le texel de bord en longues traînées — une image qui ment. On la fond
+    // donc sur une bande étroite au bord de la dalle photographiée et on laisse
+    // reparaître la carte peinte, qui, elle, couvre toute l'emprise.
+    // La bande vaut 3 % du bloc (~1,7 unité) : assez pour qu'aucune couture ne
+    // se voie, assez peu pour ne pas manger la photo.
+    //
+    // ⚠️ ET SEULEMENT EN MODE CONTINU. Hors emprise, tout fragment du socle est
+    // par construction dans [0,1] : le fondu mangerait 3 % de la photo sur les
+    // quatre bords de CHAQUE bloc, c'est-à-dire une régression bien visible sur
+    // l'image d'aujourd'hui. uMaskSpan vaut 56 sur un bloc et 168 sur une
+    // emprise — c'est le seul témoin déjà transmis au shader qui distingue les
+    // deux, et il ne coûte rien.
+    float aCont = step(uSlabHalf * 2.0 + 1.0, uMaskSpan);
+    vec2 aEdge = smoothstep(vec2(0.0), vec2(0.03), aUv) * (1.0 - smoothstep(vec2(0.97), vec2(1.0), aUv));
+    float aIn = mix(1.0, aEdge.x * aEdge.y, aCont);
     aUv.y = 1.0 - aUv.y; // texture rows run north->south, world +Z runs south->north
     aUv = uAerialOffset + aUv * uAerialScale; // place the mosaic (see aerialUvTransform)
     vec3 aerial = texture2D(uAerial, aUv).rgb;
@@ -732,14 +775,18 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
       float band = max(uSeaRange * uAerialCoastFade, 1e-4);
       aFade = smoothstep(uSeaY - band, uSeaY, vWorldPos.y); // 1 au rivage → 0 au fond
     }
-    diffuseColor.rgb = mix(diffuseColor.rgb, aerial * (0.6 + 0.8 * shade), uAerialOpacity * aFade);
+    diffuseColor.rgb = mix(diffuseColor.rgb, aerial * (0.6 + 0.8 * shade), uAerialOpacity * aFade * aIn);
   }
 
   // Fancy surface shader paints OVER the final surface — the hypsometric map OR
   // a relief material (wood/carbon/...). Materials sit BELOW the shaders, so a
   // shader shows on top of whatever the relief is wearing. Off (0) = untouched.
   if (uSurfaceFx > 0) {
-    vec3 fxc = surfaceFx(uSurfaceFx, vWorldPos.xz * 0.15, uFxTime) * fxShade;
+    // ⚠️ champXZ() ET PAS vWorldPos.xz. La matière est peinte SUR LE SOL :
+    // indexée sur la géométrie, elle serait restée collée à l'écran pendant que
+    // le relief défile — un moirage immobile sur un paysage en mouvement, le
+    // défaut que l'œil attrape tout de suite (étude §5.4, signalé par Adrien).
+    vec3 fxc = surfaceFx(uSurfaceFx, champXZ() * 0.15, uFxTime) * fxShade;
     diffuseColor.rgb = mix(diffuseColor.rgb, fxBlend(diffuseColor.rgb, fxc, uFxBlend), uFxOpacity); // Appearance
   }
 
@@ -785,7 +832,9 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   diffuseColor.rgb = mix(diffuseColor.rgb, uContourColor, contour);
 
   // --- survey grid in world x/z
-  vec2 g = vWorldPos.xz / uGridStep;
+  // La grille de relevé est une CARTOGRAPHIE : ses lignes marquent le sol, pas
+  // l'écran. Restée en vWorldPos, elle aurait glissé sous le terrain.
+  vec2 g = champXZ() / uGridStep;
   vec2 dg = fwidth(g);
   vec2 distGrid = abs(fract(g + 0.5) - 0.5);
   float gx = 1.0 - smoothstep(0.0, dg.x * 1.4, distGrid.x);
@@ -883,7 +932,7 @@ if (uScanT >= 0.0 && (uScanType == 0 || uScanType == 3)) {
 // Liquid metal: a slow molten flow ripples the surface normal so the chrome
 // reflections drift across the relief (uLmFlowAmt 0 = a still mirror)
 if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
-  vec2 fp = vWorldPos.xz * 0.55;
+  vec2 fp = champXZ() * 0.55; // le flux du métal coule sur le RELIEF, pas sur l'écran
   float e = 0.12;
   float n0 = fxFbm(fp + uLmFlow);
   float nx = fxFbm(fp + vec2(e, 0.0) + uLmFlow);
@@ -910,7 +959,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
 
   // PARTAGE DES TEXTURES QUI SONT LES MÊMES PARTOUT — rampe hypsométrique,
   // rugosité et bump. Sur un damier plein, les 24 dalles cuisaient 24 copies
-  // OCTET POUR OCTET identiques : le seed de rugosité est `params.seed + 777`,
+  // OCTET POUR OCTET identiques : le seed de rugosité est params.seed + 777,
   // commun à tous les blocs, et la rampe ne dépend que de la palette. 2,13 Mo
   // et 80 ms de calcul par dalle, pour rien.
   //
@@ -918,7 +967,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // source DISPOSE son ancienne texture à chaque recuisson (changement de
   // palette, régénération du relief). Un emprunteur qui garderait la référence
   // pointerait sur une texture morte — relief noir. D'où l'ensemble
-  // `_shareTo` : c'est la SOURCE qui repousse la nouvelle texture à ses
+  // _shareTo : c'est la SOURCE qui repousse la nouvelle texture à ses
   // emprunteurs, au lieu de compter sur l'appelant pour resynchroniser. Deux
   // chemins de main.js (régénération du relief, nuancier du panneau Créer)
   // recuisaient d'ailleurs sans prévenir le damier.
