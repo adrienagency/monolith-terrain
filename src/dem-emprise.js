@@ -76,6 +76,17 @@ export const EMPRISE_COTE = 3
 // minimum) de blocs 2×2, le chemin entier — deux fois moins cher que le chemin
 // des poids fractionnaires, pour un résultat identique. Un 2 300 « rond » aurait
 // coûté le double sans rien apporter.
+//
+// ⚠️ CE QUE CE CRAN CHANGE À L'IMAGE, VU ET NON DÉDUIT (planche du jalon 2, La
+// Réunion z11, scène gelée) : la carte est la MÊME — même trait de côte, mêmes
+// teintes, mêmes noms — mais le PEIGNÉ DES CRÊTES est un peu plus marqué en
+// mode continu. C'est attendu et c'est structurel : `textureShade` floute à des
+// rayons de 1, 2, 4 … 32 PIXELS (terrain-analysis.js), donc à moitié de densité
+// ces rayons couvrent deux fois plus de terrain et l'amplitude monte. Ce n'est
+// pas un défaut de l'atlas, c'est la même dépendance à la résolution que
+// l'étude décrit au §4.4 — sauf qu'ici elle est CONSTANTE sur toute l'emprise,
+// au lieu de sauter d'un cran à chaque jointure du damier. Une seule échelle,
+// donc une image stable pendant tout le geste : c'est le but, pas un compromis.
 export const ATLAS_ANALYSE = 2304
 export const ATLAS_MER = 2304
 
