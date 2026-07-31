@@ -2057,6 +2057,11 @@ function f3CalquesSuivent() {
   // socle, c'est le comportement attendu. » Leur groupe porte −fenêtre pour
   // qu'ils DÉRIVENT avec le paysage ; rien ne les enferme.
   traffic?.setFenetre?.(f.x, f.z)
+  // ⚠️ LA FLOTTE, ELLE, NE TRANSLATE PAS SON GROUPE. La houle est lue dans le
+  // shader du bateau à `instanceMatrix[3].xz` : un groupe translaté lui aurait
+  // donné la vague d'un autre endroit que celle que la mer dessine sous lui.
+  // C'est l'écriture des matrices qui ramène le champ dans la géométrie.
+  boats?.setFenetre?.(f.x, f.z)
   // ══════════ LA MER, SA JUPE ET LES LACS ═══════════════════════════════════
   //
   // La mer NE SE TRANSLATE PAS : le plan d'eau EST la fenêtre, il reste en
@@ -4286,15 +4291,31 @@ function syncBoats() {
   if (!seaMat) { boats.boats = []; return }
   boats.setSea(seaMat)
   const seaY = realWater.seaY
+  const coteFlotte = dem.empriseCote > 1 ? dem.empriseCote : 1
   boats.build({
     zoom: params.demZoom,
     half: TERRAIN_SIZE / 2,
+    // ⚠️ `cote` sème sur TOUTE l'emprise, `half` reste le demi-BLOC : c'est
+    // l'échelle du bateau (sa vitesse, sa veille), pas l'étendue de sa mer.
+    cote: coteFlotte,
     // la graine suit le LIEU : revenir au même endroit rend la même flotte
     seed: Math.round((params.demLat + 90) * 1000) * 100003 + Math.round((params.demLon + 180) * 1000),
     // Navigable = sous le niveau de la mer. Ce test sert DEUX fois : au semis,
     // et à chaque image pour la veille devant l'étrave (fleet.js) — sans le
     // second, le bateau traverse la côte au lieu de la longer.
-    isSea: (x, z) => Number.isFinite(seaY) && (terrain.sample?.(x, z) ?? 0) < seaY - 0.05,
+    //
+    // ⚠️ ET IL DOIT LIRE L'EMPRISE, PAS LE BLOC CENTRAL. Les positions des
+    // bateaux sont en coordonnées de CHAMP ; `terrain.sample` parle en
+    // coordonnées de GÉOMÉTRIE et ajoute lui-même le décalage de fenêtre. Sans
+    // la soustraction, la veille consultait le relief d'un autre endroit : un
+    // bateau aurait traversé une falaise hors du bloc du milieu, ce que la
+    // règle d'Adrien (« les bateaux ne rentrent jamais en collision avec la
+    // terre ») interdit — et le semis aurait posé des coques sur la montagne.
+    isSea: (x, z) => {
+      if (!Number.isFinite(seaY)) return false
+      const f = terrain.fenetre ?? { x: 0, z: 0 }
+      return (terrain.sample?.(x - f.x, z - f.z) ?? 0) < seaY - 0.05
+    },
     extentMeters: dem.extentMeters,
     terrainSize: TERRAIN_SIZE,
   })
@@ -6118,7 +6139,10 @@ function tick() {
   // does not exist.
   if (dof) dof.cocMaterial.worldFocusDistance = params.focusDistance
 
-  boats.update(dt, TERRAIN_SIZE / 2)
+  // `half` = le demi-BLOC (l'échelle du bateau), `bord` = où l'eau s'arrête :
+  // le bloc, ou l'emprise 3×3 entière en mode continu. Les confondre aurait
+  // triplé la vitesse au sol du vapeur — voir l'en-tête de stepBoat.
+  boats.update(dt, TERRAIN_SIZE / 2, (TERRAIN_SIZE * (dem?.empriseCote > 1 ? dem.empriseCote : 1)) / 2)
   realWater?.update(dt, sun) // water simulation: waves, caustics, sun glint
   // temps des caustiques de fond (terrain + blocs voisins du damier)
   terrain.mapUniforms.uCausT.value += dt
