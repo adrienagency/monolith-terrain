@@ -2032,6 +2032,17 @@ function f3CalquesSuivent() {
     if (c?.group) c.group.position.set(-f.x, 0, -f.z)
   }
   mapLayers?.places?.refresh?.()
+  // ══════════ LA MER, SA JUPE ET LES LACS ═══════════════════════════════════
+  //
+  // La mer NE SE TRANSLATE PAS : le plan d'eau EST la fenêtre, il reste en
+  // place. Ce qui défile, c'est ce qu'il LIT sous lui — fond marin, distance au
+  // rivage, trait de côte. Deux flottants d'uniforme par matériau, rien de plus,
+  // parce que le champ a été cuit une fois pour toutes sur l'emprise entière
+  // (src/mer-emprise.js porte la mesure d'avant/après).
+  //
+  // ⚠️ Les LACS, eux, se translatent : ce sont des plans d'eau posés sur le
+  // terrain, pas des meubles du socle. `setFenetre` fait les deux à la fois.
+  realWater?.setFenetre(f.x, f.z)
 }
 
 // ══════════ LE POINT BAS DU SOCLE, SUR L'EMPRISE ENTIÈRE ═══════════════════

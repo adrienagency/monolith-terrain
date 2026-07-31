@@ -188,6 +188,20 @@ export class Terrain {
       uSlabHalf: { value: TERRAIN_SIZE / 2 },
       // décalage monde du bloc (damier) : clip + masques passent en local
       uBlockOffset: { value: new THREE.Vector2(this.blockOffset.x, this.blockOffset.z) },
+      // ══════════ MODE CONTINU : LES MASQUES DÉFILENT, LE CLIP NON ═══════════
+      //
+      // `uMaskSpan` est la largeur AU SOL des masques posés en texture, et
+      // `uFenetre` le décalage de lecture du mode continu. Hors mode continu ils
+      // valent TERRAIN_SIZE et (0,0) : l'expression d'uv redevient celle d'avant
+      // au bit près, et c'est ce que verrouille le premier test de
+      // test/mer-emprise.test.js.
+      //
+      // ⚠️ ILS NE VONT PAS SUR LE CLIP DE SOCLE. Le clip de superellipse et le
+      // fondu de bord sont la FENÊTRE (les meubles) ; les masques sont le MONDE
+      // (le paysage). Leur donner le même décalage ferait défiler le socle
+      // lui-même — c'est-à-dire disparaître le bloc.
+      uMaskSpan: { value: TERRAIN_SIZE },
+      uFenetre: { value: new THREE.Vector2(0, 0) },
       // v42: MEME arrondi que la mer (rayon clampe, cercle) - l'ecart entre
       // le coin du socle et celui de l'eau se voyait (retour Adrien)
       uSlabCorner: { value: Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE)) },
@@ -390,6 +404,8 @@ uniform vec3 uContourColor;
 uniform float uSlabHalf;
 uniform float uSlabCorner;
 uniform float uSlabCornerN;
+uniform float uMaskSpan; // largeur au sol des masques (56, ou 168 sur l'emprise 3×3)
+uniform vec2 uFenetre;   // décalage de lecture du mode continu (0 sinon)
 uniform vec2 uBlockOffset;
 uniform sampler2D uRegionMask;
 uniform float uRegionOn;
@@ -521,7 +537,14 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   // coasts AND phantom inland lakes. Off (z9+ / fetch failed) → old behaviour.
   float landness = 1.0;
   if (uCoastMaskOn > 0.5) {
-    vec2 cmUv = (vWorldPos.xz - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
+    // ⚠️ LE SEUL MASQUE ALLUMÉ EN MODE CONTINU, donc le seul qui doive défiler
+    // aujourd'hui. Le masque côtier est rastérisé sur l'emprise ENTIÈRE
+    // (coast-mask.js le projette sur le footprint du MNT, et le MNT recollé
+    // couvre les 168 unités) : lu sur 56 il était agrandi trois fois ET immobile.
+    // Le masque de mer, l'analyse de relief et l'aérien sont éteints au jalon 1
+    // (terrain.js _buildFields) — quand l'atlas de champs les rallumera, ils
+    // prendront la MÊME expression d'uv, pas une autre.
+    vec2 cmUv = (vWorldPos.xz - uBlockOffset + uFenetre) / uMaskSpan + 0.5;
     landness = texture2D(uCoastMask, cmUv).r;
   }
   // v42: le masque cotier ne peut JAMAIS declarer sous-marine une terre
@@ -1178,6 +1201,41 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     }
   }
 
+  // ÉCHANTILLONNEUR DE CHAMP — les altitudes en coordonnées ABSOLUES de
+  // l'emprise, indépendantes du décalage de fenêtre, et SANS grain FBM.
+  //
+  // C'est ce que consomme la simulation d'eau (`ocean.js`) pour cuire son champ
+  // hauteur + distance-rivage une bonne fois sur les 168 unités de l'emprise.
+  // `this.sample`, lui, ne sait répondre que « sous le point AFFICHÉ en x » : il
+  // porte le décalage, donc il rendrait un champ différent à chaque pas.
+  //
+  // ⚠️ PAS DE GRAIN, ET C'EST GRATUIT ICI. Le grain FBM est éteint sous 90 m
+  // d'altitude par `landFactor = smoothstep(0, 90, raw)` : à la ligne d'eau il
+  // vaut exactement ZÉRO, et c'est la ligne d'eau que ce champ sert à trouver.
+  // Le payer coûterait cinq octaves de simplex sur 1 152² = 1,33 million de
+  // points, soit ~175 ns le point (mesure de detail-noise.js) — 230 ms de fil
+  // principal gelé par reconstruction, pour un déplacement nul là où on regarde.
+  //
+  // Rend `null` hors relief réel : l'appelant garde alors son chemin d'avant.
+  sampleChamp(params) {
+    if (params.source !== 'real' || !this.dem) return null
+    const dem = this.dem
+    const span = this._span()
+    const scale = (span / dem.extentMeters) * params.demExaggeration
+    const meanM = dem.meanM
+    const { size } = dem
+    return (x, z) => (sampleDem(dem, (x / span + 0.5) * (size - 1), (z / span + 0.5) * (size - 1)) - meanM) * scale
+  }
+
+  // Pousse le décalage de fenêtre et l'emprise des masques dans les uniformes.
+  // Appelé à chaque pas de défilement (deux flottants) et à chaque
+  // reconstruction. Hors mode continu il écrit les valeurs neutres.
+  _pousseFenetre() {
+    const cote = this.dem?.empriseCote > 1 ? this.dem.empriseCote : 1
+    this.mapUniforms.uMaskSpan.value = TERRAIN_SIZE * cote
+    this.mapUniforms.uFenetre.value.set(this.fenetre.x, this.fenetre.z)
+  }
+
   // ÉCHANTILLONNEUR DE GRILLE — la même formule que _makeDemSampler, mais qui
   // LIT le grain FBM dans un champ pré-cuit au lieu de le recalculer. 175 ms sur
   // les 194 ms d'échantillonnage à res 1024 : 5 octaves de simplex par sommet,
@@ -1466,6 +1524,8 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     this.sample = sample
     const { minH, maxH } = this._ecrireRelief(geo, params, res, sample, this._makeGridSampler(params, res))
     this.mapUniforms.uHeightRange.value.set(minH, maxH)
+    // le masque côtier doit défiler AVEC le relief qu'il classe terre ou mer
+    this._pousseFenetre()
     // ⚠️ Pas de `geo.computeBoundingSphere()` : la sphère englobante ne sert
     // qu'au frustum culling, le maillage garde son emprise XZ, et seule sa
     // hauteur bouge. La recalculer coûterait un parcours complet de plus par
@@ -1503,6 +1563,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const { minH, maxH } = this._ecrireRelief(geo, params, res, sample, gridSample)
 
     this.mapUniforms.uHeightRange.value.set(minH, maxH)
+    this._pousseFenetre()
 
     // georeferenced sea level (elevation 0) — ALWAYS active in real mode so every
     // template gets a clear shoreline and consistent bathymetry, even where the
