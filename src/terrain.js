@@ -1752,10 +1752,37 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     //     donc neuf fois plus exigeant sur une emprise — converti à surface
     //     absolue constante (dem-emprise.js, fracBassinEmprise)
     //
-    // ⚠️ Le coût reste réel : ~1 s de cuisson au chargement. Deux atténuations,
-    // et elles sont dans l'architecture, pas dans l'espoir — le calcul est en
-    // Worker (aucun gel) et il ne se fait QU'UNE FOIS. Le voile de chargement
-    // l'attend par `fieldsReady`, comme pour un bloc ordinaire.
+    // ⚠️ CE QUE ÇA COÛTE, MESURÉ sur le MNT RÉEL de l'emprise (4 608² Int16
+    // dumpé du navigateur — un relief synthétique mentirait sur le temps, c'est
+    // la leçon des normales de cette branche). `.banc/f3-worker-cout.mjs` :
+    //
+    //   resampleField 4608→2304 (moyenne)      64 ms   tampons +20,3 Mo
+    //   minPoolField  4608→2304 (minimum)      93 ms   tampons +20,3 Mo
+    //   buildSeaMask + blurMask 2304²         113 ms   tampons +75,9 Mo
+    //   analyzeDem    4608→2304               908 ms   tampons +172,1 Mo
+    //   computeTerrainJob COMPLET           1 090 ms
+    //
+    // L'étude annonçait 1 048 ms pour cet atlas : elle tombe à 4 % près. Et son
+    // pic transitoire de « ~80 Mo » pour le masque de mer est confirmé (75,9) —
+    // mais elle avait raté le vrai poste, l'analyse de relief et ses 172 Mo.
+    // Les deux sont dans le WORKER, transitoires, et hors du fil principal.
+    //
+    // ⚠️ ET NON, L'ATLAS N'EST PAS « DEUX FOIS MOINS CHER » QUE NEUF DALLES.
+    // L'étude comparait un atlas 2 304² (5,3 M pixels) à neuf dalles 1 024²
+    // (9,4 M pixels) : c'était moins de pixels, pas un gain d'algorithme. À
+    // densité ÉGALE, mesuré ici, neuf dalles 1536→768 coûtent 1 130 ms contre
+    // 1 090 — la parité, à 4 %. Le vrai gain est ailleurs, et il est double :
+    // la cuisson se fait UNE FOIS pour toute la traversée du 3×3 au lieu de se
+    // répéter à chaque bloc, et il n'y a qu'un champ, donc qu'un `robustScale`
+    // (l'étude §4.4 : sans ça le peigné des crêtes changerait d'intensité à
+    // chaque franchissement de jointure).
+    //
+    // Sur le fil principal, aucun gel : la plus longue tâche pendant tout le
+    // chargement en mode continu vaut 220 ms à La Réunion et 180 à Chamonix
+    // (PerformanceObserver 'longtask', `.banc/f3-cuisson.mjs`) — c'est le
+    // décodage des MNT et la géométrie, pas les champs. Et le voile de
+    // chargement attend `fieldsReady`, comme pour un bloc ordinaire : il se
+    // lève sur une carte finie, jamais sur un état intermédiaire.
     const emprise = dem?.empriseCote > 1 ? dem.empriseCote : 0
     // ⚠️ Un terrain abandonné ne recuit PLUS RIEN, jamais. Sans ce garde-fou,
     // le masque côtier d'une dalle détruite — il arrive du réseau, bien après —
