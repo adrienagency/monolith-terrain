@@ -1373,6 +1373,7 @@ function regenerateLabels() {
   labels = createLabels(terrain.sample, params.seed, labelOpts())
   // a rebuild can run while in orbit (dive preload, GUI) — stay hidden there
   labels.visible = params.labels && (!modes || modes.mode === 'surface')
+  f3AncreAuSol(labels) // mode continu : les cotes s'accrochent à leur point du sol
   scene.add(labels)
 }
 
@@ -1596,6 +1597,7 @@ function regenerateHud() {
   // same orbital guard as labels — GUI color changes rebuild the HUD and the
   // fresh group must not appear over the globe
   hud3.group.visible = !modes || modes.mode === 'surface'
+  f3AncreAuSol(hud3.pois) // mode continu : les repères restent plantés dans leur crête
   scene.add(hud3.group)
   applySourceMode()
 }
@@ -2066,6 +2068,11 @@ function f3CalquesSuivent() {
   // Ce qui doit suivre, c'est le RELIEF qu'ils consultent pour savoir où ils
   // sont occlus et où est leur plancher : une écriture d'uniforme.
   clouds?.setFenetre?.(f.x, f.z)
+  // Les cotes d'altitude (labels.js) et les repères de points d'intérêt
+  // (hud3d.js) sont PLANTÉS DANS LE SOL : ils défilent, et ils se cachent hors
+  // du socle. Voir f3AncreAuSol pour la conversion de leurs coordonnées.
+  f3SuitAuSol(labels, f)
+  f3SuitAuSol(hud3?.pois, f)
   // ══════════ LA MER, SA JUPE ET LES LACS ═══════════════════════════════════
   //
   // La mer NE SE TRANSLATE PAS : le plan d'eau EST la fenêtre, il reste en
@@ -2077,6 +2084,47 @@ function f3CalquesSuivent() {
   // ⚠️ Les LACS, eux, se translatent : ce sont des plans d'eau posés sur le
   // terrain, pas des meubles du socle. `setFenetre` fait les deux à la fois.
   realWater?.setFenetre(f.x, f.z)
+}
+
+// ══════════ LES DEUX CALQUES QU'ON CONSTRUIT EN COORDONNÉES D'ÉCRAN ════════
+//
+// `labels.js` (les cotes d'altitude) et `hud3d.js` (les repères de points
+// d'intérêt) ne connaissent ni le MNT ni la géographie : ils tirent des points
+// AU HASARD autour de l'origine et demandent leur altitude à `terrain.sample`.
+// Leurs positions sont donc en coordonnées de GÉOMÉTRIE, pas de champ.
+//
+// Deux défauts en découlent en mode continu, et le second est le pire :
+//  · le repère reste collé à l'écran pendant que sa crête s'en va ;
+//  · sa COTE devient fausse — « 2 750 m » posé sur une vallée à 900.
+//
+// La conversion tient en une addition : on ajoute le décalage COURANT à chaque
+// enfant (leur position devient une coordonnée de champ) et le groupe portera
+// −fenêtre. À l'instant de la conversion, rien ne bouge à l'écran ; à partir de
+// là, ils sont accrochés à leur point du sol pour de bon.
+//
+// ⚠️ Appelé APRÈS chaque (re)construction de ces groupes, jamais deux fois sur
+// le même — une double addition les enverrait à deux fenêtres de là.
+function f3AncreAuSol(group) {
+  if (!group || !(dem?.empriseCote > 1)) return
+  const f = terrain.fenetre
+  for (const o of group.children) {
+    o.position.x += f.x
+    o.position.z += f.z
+  }
+  f3SuitAuSol(group, f)
+}
+
+// Le pas de fenêtre : une écriture de position, et un test d'octogone par
+// enfant. Ils sont semés dans un rayon de 24 unités autour du point de
+// construction ; passé un demi-socle de défilement, la moitié d'entre eux
+// flotterait au-delà du bord, au-dessus du vide.
+function f3SuitAuSol(group, f) {
+  if (!group || !(dem?.empriseCote > 1)) return
+  group.position.set(-f.x, 0, -f.z)
+  const bloc = terrain.blockFootprint()
+  for (const o of group.children) {
+    o.visible = dansFenetre(o.position.x - f.x, o.position.z - f.z, bloc.half, bloc.corner)
+  }
 }
 
 // ══════════ LE POINT BAS DU SOCLE, SUR L'EMPRISE ENTIÈRE ═══════════════════

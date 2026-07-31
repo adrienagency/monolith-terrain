@@ -204,6 +204,15 @@ export function createHud3D(seed, pois, { ink, accent }) {
   group.add(platform)
 
   // POI stems: thin vertical hairline + accent cap marker
+  //
+  // ⚠️ DANS LEUR PROPRE SOUS-GROUPE, et pas dans `group`. Ces repères sont
+  // PLANTÉS DANS LE SOL : en mode continu 3×3 ils doivent défiler avec lui,
+  // alors que le cadran, le balayage et les impulsions de scan appartiennent à
+  // la FENÊTRE et ne doivent surtout pas bouger. Un seul groupe pour les deux
+  // aurait obligé à choisir — et donc à se tromper pour l'un des deux.
+  const poiGroup = new THREE.Group()
+  poiGroup.name = 'hud3-pois'
+  group.add(poiGroup)
   const stemMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(ink), transparent: true, opacity: 0.6 })
   const capMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(accent), transparent: true, opacity: 0.95 })
   pois.forEach((p) => {
@@ -215,7 +224,7 @@ export function createHud3D(seed, pois, { ink, accent }) {
     cap.rotation.y = Math.PI / 4
     const base = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.015, 0.22), stemMat)
     base.position.set(p.x, p.h + 0.02, p.z)
-    group.add(stem, cap, base)
+    poiGroup.add(stem, cap, base)
   })
 
   // (the faint concentric survey circles that used to sweep over the terrain
@@ -232,6 +241,7 @@ export function createHud3D(seed, pois, { ink, accent }) {
     group,
     lines,
     platform,
+    pois: poiGroup, // ancré au SOL — voir f3SuitAuSol dans main.js
     pulse() {
       const p = flatPlane(pulseTex, 1, baseY + 0.05, 0.8)
       p.userData.age = 0
