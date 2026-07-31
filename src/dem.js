@@ -16,6 +16,7 @@
 import { fuseBathymetry, decodeTerrarium, overzoomTile, resampleCatmullRom } from './bathy.js'
 import { normalizeIndex, tileMaxZoom } from './bathy-sources.js'
 import { demMemoCle, demMemoLire, demMemoEcrire, demMemoVider } from './dem-memo.js'
+import { quantizeElevation, quantizeElevations } from './dem-quant.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -474,6 +475,39 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
     measured = fused.length
   }
 
+  // ══════════ LE CHAMP PASSE EN INT16, ET C'EST ICI QUE ÇA SE JOUE ══════════
+  //
+  // Après la fusion, jamais avant. `bathy.js` raisonne au 1/256 de mètre
+  // (NODATA_EPS, SEA_EPS, la détection des aplats de remplissage compte des
+  // valeurs EXACTES) : le quantifier en amont lui retirerait la finesse dont
+  // sa règle dépend. Ici, tout est décidé.
+  //
+  // 9,44 Mo → 4,72 Mo par bloc 1536², et la lecture y gagne 9,5 % (localité de
+  // cache). L'unité reste LE MÈTRE : aucun des huit consommateurs de
+  // `dem.data` n'a de facteur d'échelle à connaître, donc aucun ne peut
+  // l'oublier. Le garde-fou terre/mer et sa mesure sur MNT réel : dem-quant.js.
+  const champ = quantizeElevations(fused)
+
+  // Les EXTREMA décrivent le champ RENDU, donc ils se quantifient avec lui.
+  // `uHeightRange`, `elevationHistogram` et l'échelle de couleurs normalisent
+  // CE tableau-ci : un maximum resté à 1234,5 m pour un champ qui plafonne à
+  // 1235 laisserait un sommet DÉBORDER de l'échelle — la septième statistique
+  // globale de l'étude 3×3, en miniature.
+  //
+  // Une simple relecture des deux bornes suffit, sans reparcourir le champ :
+  // `quantizeElevation` est monotone, donc les extrema du champ quantifié sont
+  // les quantifiés des extrema.
+  //
+  // ⚠️ `meanM` N'EST PAS TOUCHÉ, ET C'EST VOLONTAIRE. Il ne normalise rien : il
+  // sert à caler verticalement les dalles voisines les unes sur les autres. Sa
+  // somme, elle, EXCLUT les pixels non mesurés (alpha nul) — une information
+  // que le champ quantifié ne porte plus, puisqu'un pixel absent y vaut 0 comme
+  // n'importe quelle plage au niveau de la mer. Le recalculer ici polluerait la
+  // moyenne avec les trous du damier ; le décalage de quantification, lui, est
+  // borné à un demi-mètre sur une valeur qui n'en demande pas tant.
+  minM = quantizeElevation(minM)
+  maxM = quantizeElevation(maxM)
+
   // ⚠️ 156543·cos(lat)/2^z est la résolution d'une tuile de 256 px. Une tuile
   // de 512 px décrit la MÊME étendue au sol avec deux fois plus de pixels : la
   // résolution est donc moitié moindre. Sans ce facteur, extentMeters doublait
@@ -481,7 +515,7 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
   // tracés GPX décalés, damier de blocs voisins désaligné).
   const metersPerPixel = ((156543.03392 * Math.cos(latRad)) / 2 ** zoom) * (256 / TILE_PX)
   const bloc = {
-    data: fused,
+    data: champ, // Int16Array, en MÈTRES (voir dem-quant.js)
     size: sizePx,
     tilePx: TILE_PX,
     demSource: source.id,

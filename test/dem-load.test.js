@@ -50,6 +50,11 @@ globalThis.createImageBitmap = async (blob) => blob
 
 const ELEV = 1234.5
 const RGB = encodeTerrarium(ELEV)
+// ⚠️ `dem.data` sort en Int16Array, EN MÈTRES ENTIERS (src/dem-quant.js) : la
+// demi-valeur d'ELEV est volontairement conservée ici pour que les assertions
+// ci-dessous EXERCENT l'arrondi au lieu de le contourner. Les demis vont vers
+// le haut — du côté de la terre, comme partout dans le dépôt.
+const ELEV_Q = Math.round(ELEV) // 1235
 // profondeurs des 4 quarts d'une tuile bathy (NO, NE, SO, SE)
 const QUAD_DEPTH = [-1000, -2000, -3000, -4000]
 
@@ -128,9 +133,13 @@ test('Mapterhorn : 3 tuiles de 512 px, même EMPRISE au sol qu en 256 px', async
 test("l'altitude décodée est la bonne, et le patch est complet", async () => {
   serve({ zmax: 16 })
   const dem = await loadDem({ lat: LAT, lon: LON, zoom: 14, bathy: false })
-  assert.ok(Math.abs(dem.data[0] - ELEV) < 0.01)
+  assert.ok(dem.data instanceof Int16Array, 'le champ est quantifié à la sortie de loadDem')
+  assert.equal(dem.data[0], ELEV_Q)
+  // les extrema DÉCRIVENT LE CHAMP RENDU, pas le Float32 d'avant quantification
+  assert.equal(dem.minM, ELEV_Q)
+  assert.equal(dem.maxM, ELEV_Q)
+  // meanM, lui, reste la moyenne des pixels MESURÉS, non quantifiée (dem.js)
   assert.ok(Math.abs(dem.meanM - ELEV) < 0.01)
-  assert.ok(Math.abs(dem.minM - ELEV) < 0.01 && Math.abs(dem.maxM - ELEV) < 0.01)
 })
 
 // ---------------------------------------------------------------- la tuile absente
@@ -153,7 +162,7 @@ test('une tuile manquante peint du VIDE et laisse vivre le reste du bloc', async
   assert.ok(dem.minM > -1000, `minM absurde : ${dem.minM}`)
   // le reste du bloc porte bien l'altitude
   const centre = (dem.size / 2) * dem.size + dem.size / 2
-  assert.ok(Math.abs(dem.data[centre] - ELEV) < 0.01)
+  assert.equal(dem.data[centre], ELEV_Q)
   // et les statistiques ignorent les pixels non mesurés
   assert.ok(Math.abs(dem.meanM - ELEV) < 0.01, `meanM pollué : ${dem.meanM}`)
 })
@@ -280,7 +289,7 @@ test('au-delà du zoom couvert, on relit l ancêtre (overzoomTile) sans 404', as
   assert.equal(dem.zoom, 15, "l'EMPRISE reste celle du zoom demandé")
   assert.equal(dem.size, 1536)
   // tout est peint : la donnée vient de l'ancêtre z12, agrandie
-  assert.ok(Math.abs(dem.data[0] - ELEV) < 0.01)
+  assert.equal(dem.data[0], ELEV_Q)
   assert.ok(Math.abs(dem.meanM - ELEV) < 0.01)
 })
 
