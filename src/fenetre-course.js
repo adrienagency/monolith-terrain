@@ -58,7 +58,11 @@ const DEBORDEMENT_MAX = COURSE_ELASTIQUE / 8
 // Constante de temps du rappel, en secondes : le temps que met le débordement à
 // tomber à 1/e. 0,12 s — assez vif pour qu'on lise « ça revient » et pas « ça
 // glisse », assez lent pour ne pas claquer.
-const TAU_RAPPEL = 0.12
+// ⚠️ EXPORTÉE parce que l'élan doit converger vers CETTE loi et pas vers une
+// autre : `fenetre-elan.js` amène sa vitesse sur celle du rappel avant de lui
+// passer la main. Deux constantes séparées se seraient désaccordées au premier
+// réglage, et le raccord redeviendrait l'à-coup qu'on vient d'enlever.
+export const TAU_RAPPEL = 0.12
 
 // En deçà de ce débordement, le rappel POSE la fenêtre sur le bord au lieu de
 // continuer à s'en approcher. Une exponentielle n'atteint jamais sa cible : sans
