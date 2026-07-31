@@ -56,6 +56,7 @@ import { ATLAS_COTE, EMPRISE_EN_VOL_MAX, enVolBorne, originesEmprise, recollerEm
 import { COURSE_ELASTIQUE, avanceFenetre, rappelElastique } from './fenetre-course.js'
 import { dansFenetre } from './fenetre-clip.js'
 import { vitesseAuLache, pasElan } from './fenetre-elan.js'
+import { forceUrl, continuActif, etatInterrupteur } from './fenetre-reglage.js'
 import { MapLayers } from './map/layer-manager.js'
 import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
 import { lightingFor, darkModeFor, applyGains, fillDirection, fillLightIntensity, fillEnabledInLook, sunOn, sunShadowOn } from './daycycle.js'
@@ -1829,13 +1830,46 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 // plongée au point cliqué (juste au-dessus). Le clic droit, lui, ne sert qu'au
 // pan d'OrbitControls, qu'on désactive ici puisque le mode continu le remplace.
 
-// `?f3=1` force le mode, `?f3=0` le coupe. Une fonction DÉCLARÉE (donc hissée) :
-// `fetchAndBuildDem` l'appelle et se trouve plus haut dans le fichier.
+// ══════════ QUI ALLUME LE MODE — l'adresse, la machine, l'interrupteur ══════
+//
+// La RÈGLE est dans `fenetre-reglage.js` (pure, testée) ; ici il n'y a que la
+// plomberie : aller chercher les trois entrées et mémoriser le verdict.
+//
+// ⚠️ LE VERDICT EST CALCULÉ UNE FOIS, PAS PAR IMAGE. La version d'avant
+// reconstruisait un `URLSearchParams` à CHAQUE appel — c'est-à-dire à chaque
+// image (`f3Tick`) et à chaque `pointermove` d'un drag. Parser une chaîne
+// d'adresse 60 fois par seconde pour relire une constante était un coût sans
+// contrepartie ; `_f3Force` et `_f3Etat` le suppriment.
+const _f3Force = forceUrl(new URLSearchParams(location.search).get('f3'))
+
+// La préférence de l'utilisateur, ou `null` s'il n'a jamais touché
+// l'interrupteur — auquel cas c'est `FLAGS.fenetreContinue` qui parle. Le
+// `null` compte : « jamais touché » et « explicitement éteint » doivent se
+// distinguer, sinon le jour où le défaut passera à `true`, il ne s'appliquerait
+// à personne ayant déjà ouvert l'application.
+const F3_PREF_KEY = 'shibumap.fenetre-continue'
+function f3Preference() {
+  try {
+    const v = localStorage.getItem(F3_PREF_KEY)
+    return v === '1' ? true : v === '0' ? false : null
+  } catch {
+    return null
+  }
+}
+
+const f3Args = () => ({ force: _f3Force, prefere: f3Preference(), defaut: FLAGS.fenetreContinue, machine: MACHINE })
+
+// Le verdict du démarrage. Il est FIGÉ pour la durée de la session parce que
+// tout en dépend au chargement : l'emprise 3×3 (neuf MNT au lieu d'un), la
+// découpe locale du renderer, l'épaisseur du socle. Changer d'avis en cours de
+// route veut dire RECHARGER la zone — c'est ce que fait l'interrupteur, en
+// réécrivant cette variable puis en rappelant `loadRealTerrain`.
+let _f3Etat = continuActif(f3Args())
+
+// Une fonction DÉCLARÉE (donc hissée) : `fetchAndBuildDem` l'appelle et se
+// trouve plus haut dans le fichier.
 function fenetreContinueActive() {
-  const q = new URLSearchParams(location.search).get('f3')
-  if (q === '1') return true
-  if (q === '0') return false
-  return FLAGS.fenetreContinue
+  return _f3Etat
 }
 
 // ══════════ LA DÉCOUPE LOCALE, ALLUMÉE AVEC LE MODE ═══════════════════════
@@ -1851,6 +1885,54 @@ function fenetreContinueActive() {
 // posé sous condition, pour que le mode ordinaire n'ait pas à faire confiance
 // à cette phrase.
 if (fenetreContinueActive()) renderer.localClippingEnabled = true
+
+// ══════════ L'INTERRUPTEUR DES PARAMÈTRES ═══════════════════════════════════
+//
+// Adrien : « je veux pouvoir basculer sans URL ». Il vit dans la roue crantée,
+// avec les réglages globaux de performance — c'est bien ce que c'est.
+//
+// ⚠️ BASCULER VEUT DIRE RECHARGER LA ZONE, et il n'y a pas de raccourci. Le
+// mode continu ne se pose pas par-dessus le mode ordinaire : il charge NEUF
+// MNT au lieu d'un, recolle une emprise, cuit un atlas de champs sur cette
+// emprise et cale le socle sur le point bas des neuf. Rien de tout ça ne
+// s'improvise sur un terrain déjà bâti. On repasse donc par `loadRealTerrain`,
+// exactement comme un changement de zoom.
+//
+// ⚠️ ET LA DÉCOUPE LOCALE NE S'ÉTEINT PAS. `localClippingEnabled` fait
+// recompiler tous les shaders quand il change ; l'allumer sur un mode ordinaire
+// ne coûte rien (aucun matériau n'y porte de `clippingPlanes`, three.js ne
+// génère alors aucun code de coupe), alors que l'éteindre puis le rallumer
+// paierait deux recompilations complètes pour un aller-retour d'interrupteur.
+// On l'allume donc pour de bon à la première activation, et on ne le reprend
+// jamais.
+function f3Applique(prefere) {
+  try {
+    localStorage.setItem(F3_PREF_KEY, prefere ? '1' : '0')
+  } catch { /* navigation privée : le réglage ne survivra pas à l'onglet, tant pis */ }
+  const avant = _f3Etat
+  _f3Etat = continuActif(f3Args())
+  if (_f3Etat === avant) return false
+  if (_f3Etat) renderer.localClippingEnabled = true
+  // ⚠️ RENDRE LE CLIC DROIT À ORBITCONTROLS — VU À L'EXÉCUTION, PAS DÉDUIT.
+  // `f3Tick` éteint `enablePan` À CHAQUE IMAGE tant que le mode continu tourne
+  // (les deux se disputeraient le clic droit). En l'éteignant depuis
+  // l'interrupteur, `f3Tick` sort désormais à sa garde et ne repasse plus
+  // jamais : `enablePan` restait à `false` POUR TOUJOURS, et le déplacement de
+  // caméra au clic droit du mode ordinaire était mort — sans rien dans la
+  // console. `modes` ne le rallume qu'en RE-ENTRANT en surface (modes.js:382),
+  // ce qu'on ne fait pas ici. C'est exactement la régression du mode ordinaire
+  // qu'Adrien a demandé de vérifier à l'exécution.
+  else if (modes?.mode === 'surface') controls.enablePan = true
+  // Le geste en cours n'a plus de sens sur un terrain qui va disparaître.
+  _f3Glisse = false
+  _f3V.x = _f3V.z = 0
+  _f3Ech.length = 0
+  _f3Brut.x = _f3Brut.z = 0
+  terrain.fenetre.x = 0
+  terrain.fenetre.z = 0
+  if (params.source === 'real') loadRealTerrain()
+  return true
+}
 
 // Le décalage BRUT, celui qui mémorise le geste au-delà de la butée. L'affiché
 // vit dans `terrain.fenetre` ; ces deux-là ne sont égaux que dans la course.
@@ -5687,7 +5769,19 @@ if (!IS_EMBED) {
   const box = document.createElement('div')
   box.className = 'ce-settings ce-glassbox'
   box.innerHTML = '<div class="ce-settings-head"><b>Paramètres</b><button class="ce-settings-x" type="button">✕</button></div>'
-  const perf = perfSection({ params, renderer, composer, applyShadowMode, setShadowRes: panelCtx.setShadowRes })
+  const perf = perfSection({
+    params,
+    renderer,
+    composer,
+    applyShadowMode,
+    setShadowRes: panelCtx.setShadowRes,
+    // la résolution du maillage a quitté le panneau Terrain (demande d'Adrien) :
+    // c'est un arbitrage qualité/vitesse, sa place est ici
+    regenerateTerrain,
+    // le mode continu 3×3 : son état affichable, et comment le basculer
+    fenetreEtat: () => etatInterrupteur(f3Args()),
+    setFenetre: f3Applique,
+  })
   perf.root.classList.add('open')
   box.append(perf.root)
   veil.append(box)

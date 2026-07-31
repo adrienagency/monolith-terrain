@@ -3,7 +3,7 @@
 // menu de la barre du haut, entre le thème et l'œil barré, avec la même UX que
 // le menu « Aide ». D'où dock:false — bars.js s'occupe de l'accrocher.
 
-import { el, slider, toggle, select, button, section, visibleWhen, refreshAll } from './kit.js'
+import { el, slider, toggle, select, button, section, visibleWhen, refreshAll, onRefresh } from './kit.js'
 import { Panel } from './shell.js'
 import { applyRenderSize } from '../viewport.js'
 
@@ -80,5 +80,48 @@ export function perfSection(ctx) {
     select({ label: 'Ombres', options: ['dynamic', 'static', 'off'], get: () => params.shadowMode, set: (v) => { params.shadowMode = v; ctx.applyShadowMode() } }),
     select({ label: 'Résolution des ombres', options: ['1024', '2048', '4096'], get: () => String(params.shadowRes), set: (v) => { params.shadowRes = +v; ctx.setShadowRes(+v) } })
   )
+  if (ctx.fenetreEtat) s.body.append(fenetreContinueRow(ctx))
   return s
+}
+
+// ══════════ LE MODE CONTINU 3×3 — UN INTERRUPTEUR QUI PEUT DIRE NON ═════════
+//
+// Adrien : « le toggle doit être HONNÊTE — il doit pouvoir se refuser sur
+// machine faible ET LE DIRE, plutôt que de s'activer et ramer. Un interrupteur
+// qui s'allume sur une machine qui ne suit pas est pire qu'un interrupteur
+// absent. »
+//
+// D'où trois états et pas deux (`etatInterrupteur`, fenetre-reglage.js) : allumé,
+// éteint, et EMPÊCHÉ — ce dernier grise le bouton et écrit la raison dessous.
+// La raison est chiffrée (« ce palier ne porte que 4 dalles voisines, un 3×3 en
+// demande 8 ») parce qu'un refus sans chiffre se lit comme un caprice.
+//
+// ⚠️ `disabled` sur un vrai `<button>` et pas une classe : le navigateur cesse
+// alors d'émettre le `click`, donc le `set` du toggle ne peut pas partir même
+// si quelqu'un ajoute plus tard un raccourci clavier ou un clic scripté. Un
+// garde-fou visuel n'est pas un garde-fou.
+function fenetreContinueRow(ctx) {
+  const wrap = el('div')
+  const row = toggle({
+    label: 'Mode continu 3×3 (glisser le terrain)',
+    get: () => ctx.fenetreEtat().coche,
+    // Le `set` reçoit la valeur souhaitée ; c'est main.js qui recalcule le
+    // verdict (la machine peut encore dire non) et recharge la zone.
+    set: (v) => { ctx.setFenetre?.(v); refreshAll() },
+  })
+  const btn = row.querySelector('.ce-toggle')
+  const note = el('div', 'ce-note')
+  wrap.append(row, note)
+  onRefresh(() => {
+    const e = ctx.fenetreEtat()
+    if (btn) {
+      btn.disabled = e.bloque
+      btn.style.opacity = e.bloque ? '0.4' : ''
+      btn.style.cursor = e.bloque ? 'not-allowed' : ''
+      btn.classList.toggle('on', e.coche)
+    }
+    note.textContent = e.note
+    note.style.display = e.note ? '' : 'none'
+  }, wrap)
+  return wrap
 }
