@@ -685,7 +685,7 @@ export function contributeTerrainSections(ctx) {
   // France et du swissALTI3D en Suisse. Ailleurs le sondage plafonne plus bas et
   // le chargeur retombe sur l'ancêtre — d'où la mention du maximum réellement
   // disponible dans l'étiquette, plutôt qu'un choix qui ne donnerait rien.
-  const zoomSel = select({ label: 'Détail (zoom)', options: ['5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17'], get: () => String(params.demZoom), set: (v) => { params.demZoom = +v; ctx.onZoomPicked(+v); rebuildRes() } })
+  const zoomSel = select({ label: 'Détail (zoom)', options: ['5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17'], get: () => String(params.demZoom), set: (v) => { params.demZoom = +v; ctx.onZoomPicked(+v) } })
   onRefresh(() => {
     const max = ctx.getDemMaxZoom?.()
     const lab = zoomSel.querySelector?.('.ce-label')
@@ -697,19 +697,12 @@ export function contributeTerrainSections(ctx) {
   const fineDetail = slider({ label: 'Détail fin', min: 0, max: 0.8, step: 0.01, get: () => params.detail, set: (v) => { params.detail = v; ctx.saveZoomDetail?.(params.demZoom, v) } })
   const detailScale = slider({ label: 'Échelle du détail', min: 0.5, max: 6, step: 0.1, get: () => params.detailScale, set: (v) => { params.detailScale = v } })
   sQual.body.append(zoomSel, fineDetail, detailScale)
-  // Mesh resolution — 2048 offert à tous les zooms (demande explicite), avec
-  // l'avertissement de coût ; plafond dur.
-  const resWrap = el('div')
-  sQual.body.append(resWrap)
-  function rebuildRes() {
-    if (params.resolution > 2048) params.resolution = 2048 // hard ceiling
-    const opts = ['256', '384', '512', '768', '1024', '2048']
-    resWrap.replaceChildren(
-      select({ label: 'Résolution du maillage', options: opts, get: () => String(params.resolution), set: (v) => { params.resolution = +v; ctx.regenerateTerrain(); refreshAll() } })
-    )
-    if (params.resolution >= 2048) resWrap.append(el('div', 'ce-note ce-warn', '⚠ 2048 est très lourd — l’onglet peut fortement ralentir.'))
-  }
-  rebuildRes()
+  // « Résolution du maillage » A DÉMÉNAGÉ dans les Paramètres (roue crantée),
+  // section Performance — demande d'Adrien : c'est un arbitrage qualité/vitesse
+  // propre à la machine, pas un réglage d'apparence. Le code vit désormais dans
+  // `resolutionRow` (ui/camera-panel.js), avec son plafond dur et son
+  // avertissement à 2048. Le preset Rapide/Équilibré/Fin ci-dessus, lui, RESTE
+  // ici : il écrit maillage ET grain d'un seul geste, c'est une recette.
   // les curseurs de détail régénèrent au relâchement
   for (const row of [fineDetail, detailScale]) row.querySelector('input').addEventListener('change', () => { ctx.regenerateTerrain(); refreshAll() })
   onRefresh(() => {
