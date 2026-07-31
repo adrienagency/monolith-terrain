@@ -52,6 +52,8 @@ import { Clouds2 } from './clouds2.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
+import { originesEmprise, recollerEmprise } from './dem-emprise.js'
+import { COURSE_ELASTIQUE, avanceFenetre, rappelElastique } from './fenetre-course.js'
 import { MapLayers } from './map/layer-manager.js'
 import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
 import { lightingFor, darkModeFor, applyGains, fillDirection, fillLightIntensity, fillEnabledInLook, sunOn, sunShadowOn } from './daycycle.js'
@@ -1808,6 +1810,133 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   modes.diveTo({ lat, lon, zoom: stepZoom(params.demZoom, 1, userFineZoom), point: new THREE.Vector3(px, py, pz) })
 })
 
+// ══════════════════════ LA FENÊTRE CONTINUE 3×3 — JALON 1 ═══════════════════
+//
+// Le plus petit drag qui marche. But unique : qu'on SENTE le déplacement. Ni
+// champs, ni calques, ni finition — la question à trancher est celle du §7 de
+// l'étude (le geste vaut-il le coup ?), et rien d'autre ne compte tant qu'elle
+// n'a pas de réponse.
+//
+// Le geste est au CLIC DROIT, et c'est un choix contraint, pas une préférence :
+// le clic gauche est DÉJÀ pris deux fois — rotation orbitale (OrbitControls) et
+// plongée au point cliqué (juste au-dessus). Le clic droit, lui, ne sert qu'au
+// pan d'OrbitControls, qu'on désactive ici puisque le mode continu le remplace.
+
+// `?f3=1` force le mode, `?f3=0` le coupe. Une fonction DÉCLARÉE (donc hissée) :
+// `fetchAndBuildDem` l'appelle et se trouve plus haut dans le fichier.
+function fenetreContinueActive() {
+  const q = new URLSearchParams(location.search).get('f3')
+  if (q === '1') return true
+  if (q === '0') return false
+  return FLAGS.fenetreContinue
+}
+
+// Le décalage BRUT, celui qui mémorise le geste au-delà de la butée. L'affiché
+// vit dans `terrain.fenetre` ; ces deux-là ne sont égaux que dans la course.
+// ⚠️ Le brut est gardé à part exprès : c'est lui que lirait un futur
+// recentrage de l'emprise pour savoir de combien on a voulu aller plus loin.
+// La porte du rechargement reste ouverte, comme Adrien l'a demandé.
+const _f3Brut = { x: 0, z: 0 }
+let _f3Glisse = false // un bouton droit est-il enfoncé ?
+let _f3Sale = true // la géométrie doit-elle être réécrite à la prochaine image ?
+let _f3X = 0
+let _f3Y = 0
+
+// Unités monde par pixel d'écran. Le socle fait TERRAIN_SIZE unités ; on veut
+// qu'un glissement d'un bord à l'autre de la fenêtre déplace le terrain d'un
+// socle. `innerHeight` plutôt que `innerWidth` : la vue est en trois quarts, la
+// dimension verticale est celle qui cadre le bloc.
+const f3ParPixel = () => TERRAIN_SIZE / Math.max(1, window.innerHeight)
+
+renderer.domElement.addEventListener('contextmenu', (e) => {
+  if (fenetreContinueActive() && modes?.mode === 'surface') e.preventDefault()
+})
+
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.button !== 2 || !fenetreContinueActive()) return
+  if (!modes || modes.mode !== 'surface' || modes.busy || modes.travel) return
+  _f3Glisse = true
+  _f3X = e.clientX
+  _f3Y = e.clientY
+  renderer.domElement.setPointerCapture?.(e.pointerId)
+})
+
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!_f3Glisse) return
+  const k = f3ParPixel()
+  // ⚠️ LE SIGNE. On déplace le CONTENU, pas la caméra : tirer vers la droite
+  // doit amener le terrain de GAUCHE, donc la fenêtre de lecture va vers la
+  // gauche. Un signe inversé ici donne un geste qui « colle » à l'envers — le
+  // défaut le plus immédiatement détestable d'une carte.
+  //
+  // ⚠️ ET LES AXES SONT CEUX DE LA CAMÉRA, PAS DU MONDE. La vue est orbitale :
+  // à 180° d'azimut, un geste vers la droite devrait toujours amener le terrain
+  // de gauche À L'ÉCRAN. On projette donc le geste sur les axes horizontaux de
+  // la caméra.
+  const dxPx = (e.clientX - _f3X) * k
+  const dyPx = (e.clientY - _f3Y) * k
+  _f3X = e.clientX
+  _f3Y = e.clientY
+  // droite de la caméra, aplatie au plan du sol et renormalisée
+  const cx = camera.matrixWorld.elements[0]
+  const cz = camera.matrixWorld.elements[2]
+  const n = Math.hypot(cx, cz) || 1
+  const rx = cx / n
+  const rz = cz / n
+  // « avant » au sol = la droite tournée d'un quart de tour
+  const geste = { x: -(dxPx * rx - dyPx * rz), z: -(dxPx * rz + dyPx * rx) }
+  const r = avanceFenetre(_f3Brut, geste, COURSE_ELASTIQUE)
+  _f3Brut.x = r.brutX
+  _f3Brut.z = r.brutZ
+  terrain.fenetre.x = r.x
+  terrain.fenetre.z = r.z
+  _f3Sale = true
+})
+
+const f3Lache = () => {
+  if (!_f3Glisse) return
+  _f3Glisse = false
+  // Le brut se recale sur l'affiché : sans ça, on aurait poussé 400 unités au
+  // bord, et le geste suivant devrait d'abord « rembobiner » ces 400 unités
+  // avant que le terrain ne bouge — il paraîtrait bloqué.
+  _f3Brut.x = terrain.fenetre.x
+  _f3Brut.z = terrain.fenetre.z
+}
+renderer.domElement.addEventListener('pointerup', f3Lache)
+renderer.domElement.addEventListener('pointercancel', f3Lache)
+
+// Le pas par image : le rappel élastique, puis la réécriture du relief.
+// Appelé depuis `tick`, après `updateCameraMotion`.
+function f3Tick(dt) {
+  if (!fenetreContinueActive() || !(dem?.empriseCote > 1)) return
+  // OrbitControls déplacerait la CAMÉRA au clic droit en même temps que nous
+  // déplaçons le contenu : les deux se cumuleraient et la vue partirait. Posé
+  // par image parce que `modes` le remet à `true` à chaque entrée en surface.
+  if (controls.enablePan && modes?.mode === 'surface') controls.enablePan = false
+  if (!_f3Glisse) {
+    const ax = rappelElastique(terrain.fenetre.x, COURSE_ELASTIQUE, dt)
+    const az = rappelElastique(terrain.fenetre.z, COURSE_ELASTIQUE, dt)
+    if (ax !== terrain.fenetre.x || az !== terrain.fenetre.z) {
+      terrain.fenetre.x = ax
+      terrain.fenetre.z = az
+      _f3Brut.x = ax
+      _f3Brut.z = az
+      _f3Sale = true
+    }
+  }
+  if (!_f3Sale) return
+  _f3Sale = false
+  terrain.tickFenetre(params)
+  // Le socle SUIT — il ne lit que `terrain.sample`, qui porte déjà le décalage.
+  // 0,38 ms à res 768 (étude §2.6) : assez peu pour le refaire à chaque image,
+  // assez pour ne le refaire QUE quand la fenêtre a bougé.
+  // ⚠️ Le point bas est celui de l'emprise entière (décision d'Adrien) — c'est
+  // `computeSlab` qui le trouve, et il balaie le champ que `sample` lui donne,
+  // donc la fenêtre courante. Le socle change donc encore d'épaisseur en
+  // défilant : c'est le reste à faire, noté au jalon 2.
+  plinth.rebuild(terrain, params)
+}
+
 // ------------------------------------------------------------------ regeneration helpers
 
 // ------------------------------------------------------------------ real-world DEM loading
@@ -1932,6 +2061,39 @@ async function fetchAndBuildDem() {
   // le seul à mémoriser — voir dem-memo.js pour la facture et pour la raison
   // d'en tenir le damier à l'écart.
   dem = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, memo: true })
+  // ══════════ MODE CONTINU : ON ÉLARGIT À L'EMPRISE 3×3 ═════════════════════
+  // Le bloc central vient d'arriver ; on lui adjoint ses huit voisins et on
+  // recolle le tout en UN champ. `terrain` ne voit ensuite qu'un `dem` de forme
+  // ordinaire, trois fois plus grand — il n'a pas à savoir d'où il vient.
+  //
+  // ⚠️ NEUF APPELS À `tilesAcross: 3`, PAS UN À `tilesAcross: 9`. Le second
+  // peindrait un canevas 4608², en lirait l'ImageData et la décoderait : un pic
+  // transitoire de ~255 Mo qui tuerait l'iMac 2015. Neuf petits appels coûtent
+  // le même total sans le pic (étude §3.3).
+  //
+  // ⚠️ `memo: false` sur les voisins : le mémo est fait pour le bloc central,
+  // le seul qui revienne sur un aller-retour de zoom. Y verser huit champs de
+  // 4,7 Mo chasserait précisément ce qu'il sert à garder (dem-memo.js).
+  if (fenetreContinueActive()) {
+    try {
+      const t0 = performance.now()
+      loadingStatus.textContent = 'fetching the 3×3 window…'
+      const origines = originesEmprise(dem, dem.size / dem.tilePx)
+      const blocs = await Promise.all(
+        origines.map((o, k) =>
+          // le rang 4 est le centre : il est déjà là, on ne le retélécharge pas
+          k === 4 ? dem : loadDem({ zoom: params.demZoom, originTile: o, memo: false })
+        )
+      )
+      dem = recollerEmprise(blocs)
+      console.info(`[f3] emprise 3×3 recollée : ${dem.size}² en ${Math.round(performance.now() - t0)} ms`)
+    } catch (err) {
+      // Une emprise incomplète se lirait comme une plaine au milieu des Alpes.
+      // On retombe sur le bloc unique : le mode continu ne s'active pas, et
+      // l'application reste EXACTEMENT celle d'aujourd'hui.
+      console.warn('[f3] emprise 3×3 abandonnée, retour au bloc unique :', err?.message || err)
+    }
+  }
   // le sondage de couverture vient d'aboutir pour cette zone : si elle est
   // servie plus finement que le défaut, la plongée au clic doit pouvoir y aller
   liftFineZoomToRegion()
@@ -1962,7 +2124,12 @@ async function fetchAndBuildDem() {
   if (params.groundInfo) groundInfo.load(params.demLat, params.demLon, dem)
   // real coastline (Natural Earth) at coarse zoom — async, non-blocking; the
   // shader falls back to the elevation isoline until it arrives / if it fails.
-  if (params.demZoom >= COAST_ZOOM_MIN && params.demZoom <= COAST_ZOOM_MAX) {
+  // ⚠️ Aucun trait de côte en mode continu au jalon 1 : `fetchCoastMask` cuit un
+  // masque à l'échelle du BLOC et le poserait sur une emprise trois fois plus
+  // grande — une côte au tiers de sa taille, plaquée au mauvais endroit. Le
+  // masque d'atlas est le jalon 2. Sans côte, le shader retombe sur l'isoligne
+  // d'altitude, ce qui est laid mais juste.
+  if (!(dem?.empriseCote > 1) && params.demZoom >= COAST_ZOOM_MIN && params.demZoom <= COAST_ZOOM_MAX) {
     const key = `${params.demZoom}:${params.demLat.toFixed(3)},${params.demLon.toFixed(3)}`
     let job = coastMaskCache.get(key)
     if (job) coastMaskCache.delete(key) // re-insert below to mark most-recently-used
@@ -5593,6 +5760,9 @@ function tick() {
   const t = clock.elapsedTime
 
   updateCameraMotion(dt)
+  // La fenêtre continue, juste après la caméra : le geste se projette sur les
+  // axes de la caméra, donc il lui faut la caméra de CETTE image.
+  f3Tick(dt)
 
   // BRUME relative au zoom : Début/Fin (params.fogNear/fogFar) sont exprimés
   // pour un cadrage de référence (~40 unités) mais la caméra bouge — en

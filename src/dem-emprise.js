@@ -84,12 +84,29 @@ export function recollerEmprise(blocs) {
   const cote = centre.size
   for (const b of blocs) {
     if (b.size !== cote) throw new Error(`emprise : taille de bloc hétérogène (${b.size} contre ${cote})`)
-    // ⚠️ Zoom ET metersPerPixel : deux blocs de même zoom mais servis par des
-    // sources différentes n'ont pas la même résolution au sol, et les recoller
-    // ferait une couture invisible en mémoire mais bien visible à l'écran.
     if (b.zoom !== centre.zoom) throw new Error(`emprise : zoom hétérogène (${b.zoom} contre ${centre.zoom})`)
-    if (b.metersPerPixel !== centre.metersPerPixel) throw new Error(`emprise : résolution au sol hétérogène`)
+    if (b.tilePx !== centre.tilePx) throw new Error(`emprise : taille de tuile hétérogène (${b.tilePx} contre ${centre.tilePx})`)
   }
+  // ⚠️ ON NE COMPARE PAS `metersPerPixel`, ET C'EST UN FAIT DE MERCATOR, PAS UN
+  // RELÂCHEMENT DE LA RÈGLE.
+  //
+  // `metersPerPixel = 156543,03 · cos(lat) / 2^zoom · (256/tilePx)` : il DÉPEND
+  // DE LA LATITUDE. Les voisins nord et sud d'une emprise ne sont donc jamais à
+  // la même résolution au sol que le centre — à Chamonix (45,9°) l'écart entre
+  // la rangée du haut et celle du bas atteint 0,6 %. Une première version
+  // exigeait l'égalité : elle a refusé les deux zones de référence, aucune
+  // emprise ne s'est jamais montée, et le drag ne bougeait pas d'un pixel.
+  //
+  // Recoller en espace TUILE est précisément ce qu'il faut faire : la grille de
+  // tuiles est uniforme en Mercator, chaque bloc occupe exactement 3×3 tuiles,
+  // et c'est déjà ainsi que le damier pose ses dalles voisines à des décalages
+  // monde fixes. L'étirement de Mercator est porté par la projection, pas par
+  // le recollage. `metersPerPixel` retenu est celui du centre : une valeur
+  // NOMINALE, comme elle l'a toujours été pour un bloc de 21 km de large.
+  //
+  // Ce qui doit être homogène, et qui l'est vérifié ci-dessus, c'est la
+  // GÉOMÉTRIE du recollage : même côté en pixels, même zoom, même taille de
+  // tuile. Là, un écart ferait vraiment une couture.
 
   const size = cote * EMPRISE_COTE
   const data = new Int16Array(size * size)

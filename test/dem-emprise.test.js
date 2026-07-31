@@ -167,7 +167,28 @@ test('des blocs de tailles différentes sont refusés', () => {
 test('des blocs de zooms différents sont refusés', () => {
   const b = neufBlocs(4)
   b[5].zoom = 11
-  assert.throws(() => recollerEmprise(b), /zoom|résolution/i)
+  assert.throws(() => recollerEmprise(b), /zoom/i)
+})
+
+test('des tailles de tuile différentes sont refusées', () => {
+  const b = neufBlocs(4)
+  b[5].tilePx = 256
+  assert.throws(() => recollerEmprise(b), /tuile/i)
+})
+
+test('⚠️ des metersPerPixel différents sont ACCEPTÉS — c’est Mercator, pas un défaut', () => {
+  // `metersPerPixel = 156543,03 · cos(lat) / 2^zoom` DÉPEND DE LA LATITUDE : les
+  // voisins nord et sud ne sont jamais à la même résolution au sol que le
+  // centre (0,6 % d'écart à Chamonix). Une première version exigeait l'égalité.
+  // Résultat mesuré : « emprise 3×3 abandonnée » sur les DEUX zones de
+  // référence, aucune emprise montée, et un drag qui ne bougeait pas d'un pixel
+  // sans qu'aucune erreur ne soit levée. Ce test est là pour que personne ne
+  // resserre la garde une seconde fois.
+  const b = neufBlocs(4)
+  b[1].metersPerPixel = 29.82
+  b[7].metersPerPixel = 30.18
+  const e = recollerEmprise(b)
+  assert.equal(e.metersPerPixel, 30, 'on retient celui du centre — une valeur NOMINALE')
 })
 
 test('il en faut neuf, pas huit', () => {

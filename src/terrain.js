@@ -49,6 +49,10 @@ function swapClone(prev, src, repeat) {
 
 export const TERRAIN_SIZE = 56
 
+// Plafond de résolution du maillage en mode fenêtre continue — voir
+// `Terrain._resFenetre` pour la mesure qui l'impose.
+export const RES_FENETRE_CONTINUE = 384
+
 // Fancy surface-shader ids match the `surfaceFx` GLSL switch below; their
 // labels, defaults and per-effect controls live in src/fx-meta.js.
 
@@ -102,6 +106,20 @@ export class Terrain {
   // construction cuit les deux textures pour les jeter à la ligne suivante.
   constructor(params, opts = {}) {
     this.blockOffset = { x: opts.offset?.x ?? 0, z: opts.offset?.z ?? 0 }
+    // ══════════ LA FENÊTRE CONTINUE ═════════════════════════════════════════
+    // Décalage, en unités monde, de ce que la géométrie LIT dans le champ. La
+    // géométrie, elle, ne bouge jamais : c'est ce qui permet de ne traiter que
+    // 148 225 sommets au lieu de 594 441 (étude 3×3 §3.3).
+    //
+    // ⚠️ À DISTINGUER de `blockOffset`, juste au-dessus, avec qui on le
+    // confondra un jour. `blockOffset` déplace le MESH dans le monde (une dalle
+    // voisine du damier). `fenetre` déplace la LECTURE dans le champ. L'un
+    // bouge l'objet, l'autre bouge son contenu.
+    //
+    // À (0,0) — et c'est l'invariant de tout le jalon — le comportement est
+    // rigoureusement celui d'avant : `empriseCote` vaut 1 sur un bloc ordinaire,
+    // donc `_span()` rend TERRAIN_SIZE et la formule redevient l'ancienne.
+    this.fenetre = { x: 0, z: 0 }
     this.analysisMax = opts.analysisMax ?? 0
     this.seaMax = opts.seaMax ?? 0
     if (opts.shareFrom) this.shareTexturesFrom(opts.shareFrom)
@@ -1050,11 +1068,49 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     return this._h2ft ? this._h2ft(h) : Math.round(4800 + h * 420)
   }
 
+  // ══════════ L'ÉTENDUE MONDE DU CHAMP ══════════════════════════════════════
+  //
+  // Un bloc ordinaire couvre TERRAIN_SIZE unités ; une emprise 3×3 en couvre
+  // trois fois plus, pour la MÊME résolution au sol (dem-emprise.js recolle, il
+  // ne rééchantillonne pas). Toutes les formules qui convertissaient `x` en
+  // pixel de champ passent par ici.
+  //
+  // ⚠️ ET L'ÉCHELLE VERTICALE NE BOUGE PAS. `scale = span / extentMeters` : le
+  // numérateur triple et le dénominateur aussi, donc le résultat est identique
+  // au bit près. C'est ce qui garantit qu'entrer en mode continu ne change pas
+  // d'un pouce la hauteur du relief — remplacer `TERRAIN_SIZE` par `_span()`
+  // sans tripler `extentMeters` écraserait le relief au tiers de sa hauteur.
+  _span() {
+    return TERRAIN_SIZE * (this.dem?.empriseCote ?? 1)
+  }
+
+  // ══════════ LA RÉSOLUTION DE LA FENÊTRE CONTINUE ══════════════════════════
+  //
+  // MESURÉ, machine de développement, emprise 3×3, La Réunion z13 et Chamonix
+  // z12, médiane sur 15 images :
+  //
+  //   res | sommets | un pas de fenêtre | budget de l'étude
+  //   768 | 591 361 |      36,0 ms      |        6 ms   ← six fois trop
+  //   384 | 148 225 |       (voir plus bas)
+  //
+  // L'étude proposait déjà « res 384 pendant le drag, res 768 au repos »
+  // (§3.4) ; à ce jalon on prend le plus simple qui marche : 384 EN PERMANENCE
+  // en mode continu. Le raffinement au repos est du jalon 4.
+  //
+  // ⚠️ Le plafond doit valoir pour `rebuild` ET pour `tickFenetre`. Deux
+  // résolutions différentes feraient sauter la géométrie au premier geste —
+  // `gridTemplate`, `tintField` et `detailField` sont tous indexés par `res`.
+  _resFenetre(params) {
+    return this.dem?.empriseCote > 1 ? Math.min(params.resolution, RES_FENETRE_CONTINUE) : params.resolution
+  }
+
   // Sampler over a fetched real-world DEM: world xz → bilinear meters → scene units.
   _makeDemSampler(params) {
     const dem = this.dem
+    const span = this._span()
+    const fen = this.fenetre // lu par référence : le drag le bouge sans refaire le sampler
     // demExaggeration is the per-zoom value chosen in the UI (coarse blocks big)
-    const scale = (TERRAIN_SIZE / dem.extentMeters) * params.demExaggeration
+    const scale = (span / dem.extentMeters) * params.demExaggeration
     const meanM = dem.meanM
     this._h2ft = (h) => Math.round((h / scale + meanM) * 3.28084)
 
@@ -1069,8 +1125,8 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const detail = this.mapUniforms.uColorMode.value === 1 ? Math.min(params.detail, NATURAL_DETAIL_MAX) : params.detail
 
     return (x, z) => {
-      const px = (x / TERRAIN_SIZE + 0.5) * (size - 1)
-      const py = (z / TERRAIN_SIZE + 0.5) * (size - 1)
+      const px = ((x + fen.x) / span + 0.5) * (size - 1)
+      const py = ((z + fen.z) / span + 0.5) * (size - 1)
       const raw = sampleDem(dem, px, py) // elevation in meters
       const h = (raw - meanM) * scale
 
@@ -1104,18 +1160,26 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   _makeGridSampler(params, res) {
     if (params.source !== 'real' || !this.dem) return null
     const dem = this.dem
-    const scale = (TERRAIN_SIZE / dem.extentMeters) * params.demExaggeration
+    const span = this._span()
+    const fen = this.fenetre
+    const scale = (span / dem.extentMeters) * params.demExaggeration
     const meanM = dem.meanM
     const { size } = dem
     const detail = this.mapUniforms.uColorMode.value === 1 ? Math.min(params.detail, NATURAL_DETAIL_MAX) : params.detail
     if (!(detail > 0)) {
       // grain éteint (zooms continentaux, curseur à zéro) : aucun champ à cuire.
       // `landFactor · (0·a + 0·0,35·b)` vaut 0 tout rond, on peut le sauter.
-      return (i, x, z) => (sampleDem(dem, (x / TERRAIN_SIZE + 0.5) * (size - 1), (z / TERRAIN_SIZE + 0.5) * (size - 1)) - meanM) * scale
+      return (i, x, z) => (sampleDem(dem, ((x + fen.x) / span + 0.5) * (size - 1), ((z + fen.z) / span + 0.5) * (size - 1)) - meanM) * scale
     }
+    // ⚠️ Le grain reste indexé sur la GRILLE (`i`), donc il est SOLIDAIRE DE
+    // L'ÉCRAN, pas du terrain : en défilant, le relief glisse sous un grain qui
+    // ne bouge pas. C'est le piège que l'architecture crée (étude §5.4) et il
+    // se règle au jalon 2 en pré-cuisant le grain sur l'emprise. Au jalon 1 le
+    // grain est éteint en mode continu (voir `tickFenetre`), donc il n'a rien à
+    // faire glisser.
     const grain = detailField(params.seed, params.detailScale, res, TERRAIN_SIZE)
     return (i, x, z) => {
-      const raw = sampleDem(dem, (x / TERRAIN_SIZE + 0.5) * (size - 1), (z / TERRAIN_SIZE + 0.5) * (size - 1))
+      const raw = sampleDem(dem, ((x + fen.x) / span + 0.5) * (size - 1), ((z + fen.z) / span + 0.5) * (size - 1))
       const h = (raw - meanM) * scale
       const landFactor = smoothstep(0, 90, raw)
       const fine = landFactor * (detail * grain[i * 2] + detail * 0.35 * grain[i * 2 + 1])
@@ -1185,8 +1249,133 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     }
   }
 
+  // ══════════ LE CORPS DU RELIEF — Y, NORMALES, COULEURS ═══════════════════
+  //
+  // Extrait de `rebuild` pour une raison précise : **la fenêtre continue doit
+  // rejouer EXACTEMENT ce code à chaque image.** Deux copies de cette boucle
+  // divergeraient au premier réglage touché, et la dégradation se lirait comme
+  // une panne — le terrain changerait de teinte ou de peigné au moment même où
+  // l'on commence à le faire glisser.
+  //
+  // Écrit EN PLACE quand les attributs existent déjà : à res 384, ré-allouer
+  // 9,6 Mo par image mettrait le ramasse-miettes dans la boucle de rendu, et
+  // c'est exactement le genre de pic qui tue l'iMac 2015 (le rapport du 27
+  // juillet : « ce sont les pics qui la tuent, pas le régime permanent »).
+  //
+  // @returns {{minH:number,maxH:number}} l'amplitude EFFECTIVEMENT écrite
+  _ecrireRelief(geo, params, res, sample, gridSample) {
+    const pos = geo.attributes.position
+    const count = pos.count
+    const arr = pos.array
+    let minH = Infinity
+    let maxH = -Infinity
+    for (let i = 0; i < count; i++) {
+      const x = arr[i * 3]
+      const z = arr[i * 3 + 2]
+      const h = gridSample ? gridSample(i, x, z) : sample(x, z)
+      arr[i * 3 + 1] = h
+      if (h < minH) minH = h
+      if (h > maxH) maxH = h
+    }
+    pos.needsUpdate = true
+
+    // ⚠️ L'AMPLITUDE EST CELLE DE L'EMPRISE, PAS DE LA FENÊTRE.
+    //
+    // C'est le piège n° 1 de l'étude, et il ne se voit qu'en défilant. `minH` et
+    // `maxH` normalisent la teinte par sommet ET `uHeightRange`, donc la rampe
+    // de couleurs. Sur une emprise 3×3, s'ils étaient recalculés sur les seuls
+    // sommets VISIBLES, la même montagne changerait de couleur selon ce qui
+    // l'accompagne à l'écran : on glisse vers un sommet plus haut, il entre dans
+    // le cadre, et toute la vallée se repeint d'un coup.
+    //
+    // « Un terrain qui change de couleur en défilant » est nommément ce que la
+    // consigne interdit. On prend donc les extrema du CHAMP ENTIER, convertis en
+    // unités monde par la même échelle — ils ne dépendent d'aucun décalage, donc
+    // la palette est rigoureusement stable pendant tout le geste.
+    if (this.dem?.empriseCote > 1 && params.source === 'real') {
+      const scale = (this._span() / this.dem.extentMeters) * params.demExaggeration
+      minH = (this.dem.minM - this.dem.meanM) * scale
+      maxH = (this.dem.maxM - this.dem.meanM) * scale
+    }
+
+    // LA SOMME DES SIX FACES, ÉCRITE EN CLAIR — pas un parcours de triangles.
+    // `geo.computeVertexNormals()` pesait **81 % de la fabrication d'une
+    // dalle** : mesuré in situ sur la géométrie affichée, 83,8 ms à Chamonix et
+    // 120,5 ms à La Réunion, contre **4,6 et 4,4 ms — 18× et 27× moins cher**.
+    // Ce n'est PAS une approximation : sur la grille régulière de gridTemplate,
+    // la somme des six normales de faces a une forme fermée, et le résultat est
+    // identique à three à l'arrondi Float32 près (< 0,05°), bords et coins
+    // compris. Voir src/grid-normals.js pour la dérivation — et pourquoi une
+    // différence centrée, qui ne voit pas le bruit de Nyquist d'un MNT, s'y
+    // trompait de 3,2° en moyenne et de 119° au pire.
+    // ⚠️ La grille DOIT être celle de gridTemplate — régulière, rangée en
+    // `iy·(res+1) + ix`, pas de côté 56 : c'est l'hypothèse de la formule.
+    // ⚠️ TERRAIN_SIZE et pas `_span()` : c'est le pas de la GÉOMÉTRIE, qui fait
+    // toujours 56 unités de côté quelle que soit la taille du champ qu'elle lit.
+    const nAtt = geo.attributes.normal
+    const normals = gridNormals(arr, res, TERRAIN_SIZE, nAtt?.array)
+    if (nAtt) nAtt.needsUpdate = true
+    else geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+
+    // vertex tint: height-graded value + slope darkening + grain jitter
+    // Le grain est PRÉ-CUIT sur la grille (detail-noise.js, `tintField`) : deux
+    // octaves de simplex par sommet, 65 ms de gel par reconstruction à res 768,
+    // pour un motif qui ne dépend que de (graine, résolution) — il survit donc
+    // au changement de zoom, au curseur d'exagération et à la palette.
+    // Bit-identique, verrouillé par test/detail-noise.test.js.
+    const tint = tintField(params.seed + 101, res, TERRAIN_SIZE)
+    const cAtt = geo.attributes.color
+    const colors = cAtt ? cAtt.array : new Float32Array(count * 3)
+    const span = Math.max(1e-5, maxH - minH)
+    for (let i = 0; i < count; i++) {
+      const h = arr[i * 3 + 1]
+      const ny = normals[i * 3 + 1]
+      const hn = (h - minH) / span
+      let v = lerp(0.62, 0.95, Math.pow(hn, 0.85))
+      v *= lerp(0.78, 1.0, Math.pow(Math.max(0, ny), 0.6))
+      v += tint[i] * 0.05
+      colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = v
+    }
+    if (cAtt) cAtt.needsUpdate = true
+    else geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+
+    return { minH, maxH }
+  }
+
+  // ══════════ UN PAS DE FENÊTRE — le travail par image du mode continu ══════
+  //
+  // La géométrie ne bouge pas, ses ALTITUDES défilent. Rien n'est ré-alloué :
+  // ni la géométrie, ni les normales, ni les couleurs, ni le gabarit.
+  //
+  // ⚠️ NE RECONSTRUIT AUCUN CHAMP. Ni analyse de relief, ni masque de mer, ni
+  // masque côtier : le budget est de 6 ms par image et `analyzeDem` coûte
+  // 164 ns par pixel, soit un carré de 191² pour tout le budget. Aucun recalcul
+  // de champ n'est possible pendant le drag, à aucune résolution utile — c'est
+  // la contrainte qui décide de toute l'architecture (étude §1.2).
+  //
+  // @returns {boolean} vrai si quelque chose a été réécrit
+  tickFenetre(params) {
+    if (!(this.dem?.empriseCote > 1) || params.source !== 'real') return false
+    const geo = this.mesh.geometry
+    if (!geo?.attributes?.position) return false
+    const res = this._resFenetre(params)
+    // Le sampler est refait à chaque pas — il capture `params` (exagération,
+    // détail, mode couleur), qui peuvent avoir changé entre deux images. Il ne
+    // capture PAS le décalage : `fenetre` est lu par référence.
+    const sample = this._makeSampler(params)
+    this.sample = sample
+    const { minH, maxH } = this._ecrireRelief(geo, params, res, sample, this._makeGridSampler(params, res))
+    this.mapUniforms.uHeightRange.value.set(minH, maxH)
+    // ⚠️ Pas de `geo.computeBoundingSphere()` : la sphère englobante ne sert
+    // qu'au frustum culling, le maillage garde son emprise XZ, et seule sa
+    // hauteur bouge. La recalculer coûterait un parcours complet de plus par
+    // image pour un test que le maillage passe de toute façon (il est sous la
+    // caméra). Si un jour un sommet disparaît en bord d'écran, c'est ici.
+    return true
+  }
+
   rebuild(params) {
-    const res = params.resolution
+    const res = this._resFenetre(params)
     // GABARIT MÉMORISÉ au lieu de `new THREE.PlaneGeometry` : celui-ci mettait
     // 194 ms et jetait 262 Mo de tas JS à res 1024 (106 ms et 104 Mo à res 768)
     // pour fabriquer un plan PLAT que les lignes suivantes réécrivent
@@ -1211,53 +1400,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // `sample` quand il n'y a rien à mémoriser (relief procédural).
     const gridSample = this._makeGridSampler(params, res)
 
-    const pos = geo.attributes.position
-    const count = pos.count
-    const arr = pos.array
-    let minH = Infinity
-    let maxH = -Infinity
-    for (let i = 0; i < count; i++) {
-      const x = arr[i * 3]
-      const z = arr[i * 3 + 2]
-      const h = gridSample ? gridSample(i, x, z) : sample(x, z)
-      arr[i * 3 + 1] = h
-      if (h < minH) minH = h
-      if (h > maxH) maxH = h
-    }
-    // LA SOMME DES SIX FACES, ÉCRITE EN CLAIR — pas un parcours de triangles.
-    // `geo.computeVertexNormals()` pesait **81 % de la fabrication d'une
-    // dalle** : mesuré in situ sur la géométrie affichée, 83,8 ms à Chamonix et
-    // 120,5 ms à La Réunion, contre **4,6 et 4,4 ms — 18× et 27× moins cher**.
-    // Ce n'est PAS une approximation : sur la grille régulière de gridTemplate,
-    // la somme des six normales de faces a une forme fermée, et le résultat est
-    // identique à three à l'arrondi Float32 près (< 0,05°), bords et coins
-    // compris. Voir src/grid-normals.js pour la dérivation — et pourquoi une
-    // différence centrée, qui ne voit pas le bruit de Nyquist d'un MNT, s'y
-    // trompait de 3,2° en moyenne et de 119° au pire.
-    // ⚠️ La grille DOIT être celle de gridTemplate — régulière, rangée en
-    // `iy·(res+1) + ix`, pas de côté 56 : c'est l'hypothèse de la formule.
-    geo.setAttribute('normal', new THREE.BufferAttribute(gridNormals(arr, res, TERRAIN_SIZE), 3))
-
-    // vertex tint: height-graded value + slope darkening + grain jitter
-    // Le grain est PRÉ-CUIT sur la grille (detail-noise.js, `tintField`) : deux
-    // octaves de simplex par sommet, 65 ms de gel par reconstruction à res 768,
-    // pour un motif qui ne dépend que de (graine, résolution) — il survit donc
-    // au changement de zoom, au curseur d'exagération et à la palette.
-    // Bit-identique, verrouillé par test/detail-noise.test.js.
-    const tint = tintField(params.seed + 101, res, TERRAIN_SIZE)
-    const normals = geo.attributes.normal.array
-    const colors = new Float32Array(count * 3)
-    const span = Math.max(1e-5, maxH - minH)
-    for (let i = 0; i < count; i++) {
-      const h = arr[i * 3 + 1]
-      const ny = normals[i * 3 + 1]
-      const hn = (h - minH) / span
-      let v = lerp(0.62, 0.95, Math.pow(hn, 0.85))
-      v *= lerp(0.78, 1.0, Math.pow(Math.max(0, ny), 0.6))
-      v += tint[i] * 0.05
-      colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = v
-    }
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    const { minH, maxH } = this._ecrireRelief(geo, params, res, sample, gridSample)
 
     this.mapUniforms.uHeightRange.value.set(minH, maxH)
 
@@ -1265,7 +1408,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // template gets a clear shoreline and consistent bathymetry, even where the
     // patch has no sub-sea data (then uSeaY simply sits below the terrain).
     if (params.source === 'real' && this.dem) {
-      const demScale = (TERRAIN_SIZE / this.dem.extentMeters) * params.demExaggeration
+      const demScale = (this._span() / this.dem.extentMeters) * params.demExaggeration
       // fine-zoom tiles carry NO bathymetry: their sea is a flat plain at
       // exactly 0 m, which lands exactly ON uSeaY and paints as LAND (the
       // "black grainy sea" the dark templates expose). Lift the waterline a
@@ -1341,6 +1484,24 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // de curseur d'exagération. Voir jobStillValid.
   _buildFields({ withAnalysis = true } = {}) {
     const dem = this.dem
+    // ══════════ AUCUN CHAMP EN MODE CONTINU — JALON 1 ════════════════════════
+    // L'emprise 3×3 fait 4608² au lieu de 1536² : NEUF FOIS plus de pixels à
+    // analyser, pour un `analyzeDem` qui coûte 164 ns le pixel — plus de trois
+    // secondes de fil principal gelé avant la première image. Le jalon 1 s'en
+    // passe entièrement et l'assume : le terrain y est peint à la rampe
+    // d'altitude nue, exactement comme aux zooms continentaux où ces champs
+    // sont déjà éteints. L'atlas de champs est le jalon 2, et il se cuit en
+    // Worker, une seule fois.
+    // ⚠️ `fieldsReady` DOIT rester une promesse résolue : c'est elle qu'attend
+    // le voile de chargement (main.js), et `rebuildPending` resterait à `true`
+    // pour toujours si on la laissait pendante.
+    if (dem?.empriseCote > 1) {
+      this.mapUniforms.uAnalysisOn.value = 0
+      this.mapUniforms.uSeaMaskOn.value = 0
+      this._fieldKey = null
+      this.fieldsReady = Promise.resolve(null)
+      return this.fieldsReady
+    }
     // ⚠️ Un terrain abandonné ne recuit PLUS RIEN, jamais. Sans ce garde-fou,
     // le masque côtier d'une dalle détruite — il arrive du réseau, bien après —
     // rappelait _buildFields et RESSUSCITAIT la dalle : une DataTexture posée
