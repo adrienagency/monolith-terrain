@@ -27,6 +27,31 @@
 // garde pour ses polders). Le rapport d'origine n'en comptait qu'un sur trois,
 // d'où l'écart entre son total (55 Mo) et le relevé (79 Mo).
 //
+// ⚠️ ET CE QU'IL COMPTE EN TROP : LE DÉCHET. `usedJSHeapSize` inclut tout ce
+// qui est MORT mais pas encore ramassé. Sans ramassage FORCÉ avant la lecture,
+// un relevé de mémoire ne mesure pas ce que la page retient, il mesure quand le
+// ramasse-miettes est passé pour la dernière fois — et il le fait sans jamais
+// se plaindre.
+//
+// Le piège s'est refermé pour de bon sur la fenêtre continue 3×3 (branche
+// `fenetre-3x3`, 2026-07-31). Son banc lançait Chrome sans
+// `--js-flags=--expose-gc`, donc `window.gc` n'existait pas, donc l'appel
+// `window.gc?.()` était un no-op SILENCIEUX — le `?.` a transformé une panne
+// d'instrument en mesure d'apparence normale. Relevés successifs du MÊME code
+// sur les MÊMES zones : 205 et 215 Mo, puis 306 et 453 Mo. Les 306/453 ont été
+// lus comme un terrain qui retenait 260 à 400 Mo de trop et ont ouvert une
+// chasse à la fuite. Ramassage forcé, le mode continu tient en 158 Mo au
+// repos — MOINS que le bloc unique. Il n'y avait rien à trouver.
+//
+// Trois règles, payées par cette chasse :
+//   · lancer Chrome avec `--js-flags=--expose-gc`, sans exception ;
+//   · appeler `window.gc()` SANS `?.`, pour que l'absence du drapeau CASSE le
+//     banc au lieu de le laisser mentir ;
+//   · lire APRÈS deux ou trois passages — les gros tampons externes
+//     (`ImageData`, `Float32Array` d'un MNT) partent en deux temps.
+// Et se méfier d'un écart entre deux exécutions identiques : c'est la signature
+// d'une mesure de déchet, jamais celle d'une fuite.
+//
 // Les quatre gestes vérifiés ici. Aucun ne touche au MNT : diviser le MNT
 // échangerait de la mémoire contre de la QUALITÉ (il est lu par le processeur
 // pour la veille des bateaux et le tracé de la jupe), c'est une décision qui
