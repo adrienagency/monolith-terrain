@@ -103,6 +103,25 @@ test('les quatre 56.0 en dur du GLSL ont disparu, et les quatre lectures sont ID
   assert.equal((src.match(/uniform vec2 uFenetre;/g) || []).length, 4)
 })
 
+test('l échelle du MNT est prise sur l EMPRISE, pas sur un socle', () => {
+  // ⚠️ LE BUG LE PLUS MUET DU CHANTIER. Sur une emprise 3×3, `extentMeters` a
+  // triplé : `TERRAIN_SIZE / extentMeters` rend une échelle TROIS FOIS TROP
+  // PETITE. Rien ne plante, rien ne s'affiche en rouge — la houle devient trois
+  // fois trop calme et surtout `bathyScene` tombe au tiers, donc la jupe de mer
+  // n'est plus assez longue pour rejoindre le fond : un rideau d'eau suspendu
+  // au-dessus du vide.
+  //
+  // Vérifié à l'exécution après correction, La Réunion z13 en 3×3 (instrument
+  // socle-mer.mjs, trois chemins concordants) : bas de jupe −32,53, point bas du
+  // relief visible jusqu'à −31,94, socle à −38,94. La jupe passe SOUS le fond
+  // marin le plus profond et reste DANS le bloc. Avec l'échelle fautive elle se
+  // serait arrêtée à −22,98, soit 8,96 unités au-dessus du fond.
+  const src = readFileSync(new URL('../src/ocean.js', import.meta.url), 'utf8')
+  assert.ok(src.includes('const demScale = (this._span / terrain.dem.extentMeters) * params.demExaggeration'))
+  assert.equal(src.includes('(TERRAIN_SIZE / terrain.dem.extentMeters)'), false)
+  assert.equal(src.includes('(TERRAIN_SIZE / dem.extentMeters)'), false)
+})
+
 test('le terrain fait défiler son masque côtier avec le même décalage', () => {
   // Le masque côtier est le SEUL masque allumé en mode continu (les autres sont
   // éteints au jalon 1) et il est rastérisé sur l'emprise entière : lu sur 56 il
