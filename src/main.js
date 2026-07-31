@@ -2001,6 +2001,37 @@ function f3Tick(dt) {
   // Mesuré à 2,2 ms par image, assez peu pour le refaire à chaque pas, assez
   // pour ne le refaire QUE quand la fenêtre a bougé.
   plinth.rebuild(terrain, params, socleEmprise())
+  f3CalquesSuivent()
+}
+
+// ══════════ LES CALQUES ANCRÉS AU SOL SUIVENT LE TERRAIN ═══════════════════
+//
+// Adrien, après le jalon 1 : « il n'y a que le relief qui bouge, et tout le
+// reste reste fixe ». Un nom de ville qui reste planté au milieu de l'écran
+// pendant que sa vallée s'en va, c'est la carte qui ment.
+//
+// LA RÈGLE TIENT EN UNE LIGNE, et c'est ce qui la rend sûre : ces calques ont
+// leur géométrie cuite en coordonnées de CHAMP (celles que rend
+// `geo.latLonToWorld`), et la fenêtre est le décalage entre le champ et la
+// géométrie. Translater le groupe de −fenêtre les remet donc EXACTEMENT sur
+// leur point du sol. Aucune géométrie n'est refaite, aucun objet réalloué :
+// deux écritures de `position` par image.
+//
+// ⚠️ ET SEULEMENT LES CALQUES DU SOL. Ce qui appartient à la FENÊTRE — le
+// socle, les étiquettes de décor du socle, le HUD, le ciel — ne doit surtout
+// pas bouger : ce sont les meubles, pas le paysage.
+//
+// ⚠️ LES NOMS HORS FENÊTRE SONT MASQUÉS PAR `_declutter`, pas ici. Les lieux
+// sont choisis sur toute l'emprise, soit neuf fois la surface visible ; sans ce
+// rejet, huit neuvièmes d'entre eux flotteraient au-delà du bord du socle,
+// au-dessus du vide.
+function f3CalquesSuivent() {
+  const f = terrain.fenetre
+  if (!f) return
+  for (const c of [mapLayers?.places, mapLayers?.water]) {
+    if (c?.group) c.group.position.set(-f.x, 0, -f.z)
+  }
+  mapLayers?.places?.refresh?.()
 }
 
 // ══════════ LE POINT BAS DU SOCLE, SUR L'EMPRISE ENTIÈRE ═══════════════════
