@@ -18,7 +18,7 @@
 
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
-import { detectLakes } from './lake.js'
+import { runLakeJob } from './terrain-jobs.js'
 import { lacsMemoLire, lacsMemoEcrire } from './dem-memo.js'
 // LE CHAMP SUIT LE RELIEF — règles pures et testées, voir src/mer-emprise.js
 // pour la mesure d'avant/après et le pourquoi de chaque choix.
@@ -767,6 +767,9 @@ export class RealWater {
     this._textures = []
     this._time = 0
     this._surfaceVisible = true
+    // GÉNÉRATION DU BÂTI DES LACS — voir `rebuild`. Toute reconstruction
+    // l'incrémente, et un retour de Worker qui ne la porte plus est jeté.
+    this._genLacs = 0
   }
 
   // Bake the slab-wide height + shore-distance field from the live sampler.
@@ -975,6 +978,12 @@ export class RealWater {
     this._seaMesh = null
     this._fieldTex = null
     this._bakeCtx = null
+    // 🔴 ET LE BÂTI DES LACS EN VOL EST PÉRIMÉ ICI, pas dans `rebuild`. Le cas
+    // qui l'exige : on éteint « Mer animée » alors qu'un travail est parti —
+    // `rebuild` fait `_clear()` puis RETOURNE, sans jamais atteindre la ligne
+    // qui périmerait. Le retour se poserait alors sur une texture détruite, et
+    // ça ne lève rien : ça peint du noir.
+    this._genLacs = (this._genLacs ?? 0) + 1
   }
 
   // (Re)build for the current zone. Cheap no-op when the option is off.
@@ -1143,22 +1152,62 @@ export class RealWater {
     // géométrie refaite, exactement la règle que main.js applique déjà aux noms
     // de lieux et au calque d'eau vectoriel.
     const dem = terrain.dem
+    // ⚠️ LES LACS NE SE REDÉTECTENT PAS À CHAQUE RECONSTRUCTION, ET NE SE
+    // DÉTECTENT PLUS SUR LE FIL. Cette méthode est rappelée pour « Mer
+    // animée », « Tranche de verre », un template, un tirage aléatoire,
+    // l'entrée/sortie du mode région — autant de gestes qui ne touchent pas AUX
+    // ALTITUDES. Deux réponses, dans cet ordre :
+    //   · la fente de dem-memo.js répond tout de suite pour le MNT courant,
+    //     donc les reconstructions répétées ne coûtent plus rien ;
+    //   · sinon le travail part au Worker (8 ms de fil principal pour envoyer
+    //     40,5 Mo, contre ~600 ms de gel à le calculer ici).
+    // Mesure, durée TOTALE de rebuild : Annecy 3×3 875 → 201 ms, Annecy z12
+    // 187 → 98 ms, La Réunion 3×3 556 → 67 ms.
+    const cuits = lacsMemoLire(dem)
+    if (cuits) this._batirLacs(cuits, { dem, params, fieldTex, cote })
+    else {
+      // ⚠️ LE GARDE-FOU EST UNE GÉNÉRATION, pas une comparaison de MNT : entre
+      // le départ et l'arrivée, `_clear()` a pu disposer `fieldTex` et le groupe
+      // des lacs. Poser un lac sur une texture détruite ne lève pas d'erreur —
+      // ça peint du noir, et personne ne saurait d'où il vient. La génération
+      // est incrémentée par `_clear()` lui-même (voir là-bas pourquoi) : ici on
+      // ne fait que retenir celle sous laquelle on part.
+      const gen = this._genLacs
+      runLakeJob({ data: dem.data, size: dem.size }).then((r) => {
+        if (!r || gen !== this._genLacs) return
+        lacsMemoEcrire(dem, r.lacs)
+        this._batirLacs(r.lacs, { dem, params, fieldTex, cote })
+      })
+    }
+    this._applySea()
+    this.setSeabed(params.seaBed ?? 'map')
+    // ⚠️ LA FENÊTRE SE RELIT SUR LE TERRAIN, elle ne se mémorise pas ici. Une
+    // reconstruction peut arriver EN PLEIN DÉFILEMENT (curseur d'exagération,
+    // arrivée du trait de côte) : repartir de zéro ferait sauter la mer d'un
+    // bloc entier sous les yeux, alors que le relief, lui, n'aurait pas bougé.
+    const f = terrain.fenetre
+    if (f) this.setFenetre(f.x, f.z)
+    this.group.visible = this._surfaceVisible
+  }
+
+  /**
+   * Les plans d'eau d'altitude, posés dans la scène.
+   *
+   * ══════════ UN LAC APPARTIENT AU MONDE, PAS À LA FENÊTRE ═══════════════════
+   * Sa géométrie est taillée sur son emprise géographique, en coordonnées de
+   * CHAMP (jusqu'à ±84 en mode continu). C'est son groupe qui porte la
+   * translation −fenêtre — deux écritures de `position` par pas, aucune
+   * géométrie refaite, exactement la règle que main.js applique déjà aux noms
+   * de lieux et au calque d'eau vectoriel.
+   *
+   * ⚠️ SÉPARÉE DE `rebuild` PARCE QU'ELLE PEUT ARRIVER APRÈS LUI (retour du
+   * Worker). Tout ce qu'elle lit est donc passé en paramètre ou relu sur
+   * `this` — rien ne doit dépendre de l'instant où elle tourne.
+   */
+  _batirLacs(lacs, { dem, params, fieldTex, cote }) {
     const scale = (this._span / dem.extentMeters) * params.demExaggeration
     const cellM = dem.extentMeters / (dem.size - 1)
-    // ⚠️ LES LACS NE SE REDÉTECTENT PAS À CHAQUE RECONSTRUCTION. Cette méthode
-    // est rappelée pour « Mer animée », « Tranche de verre », un template, un
-    // tirage aléatoire, l'entrée/sortie du mode région — autant de gestes qui
-    // ne touchent pas AUX ALTITUDES. Or `detectLakes` fige le fil principal
-    // 359 ms sur une emprise 3×3 (Annecy, MNT réel 4 608²) et 58 ms sur un bloc
-    // ordinaire. Il ne dépend que du MNT : on le range donc sous le MNT
-    // (dem-memo.js), exactement comme l'analyse de relief. Sans effet sur une
-    // dalle du damier, dont le MNT n'est pas mémorisé — mais le damier ne
-    // construit pas de mer.
-    let lacs = lacsMemoLire(dem)
-    if (!lacs) {
-      lacs = detectLakes(dem)
-      lacsMemoEcrire(dem, lacs)
-    }
+    let poses = 0
     for (const lake of lacs) {
       const { tex, minX, minY, w, h } = this._bakeLakeMask(lake)
       // couche maritime réservée aux VRAIS lacs : longueur >= 3 km (demande
@@ -1202,16 +1251,31 @@ export class RealWater {
       this._groupeLacs().add(mesh)
       this.meshes.push(mesh)
       this.materials.push(mat)
+      poses++
     }
-    this._applySea()
-    this.setSeabed(params.seaBed ?? 'map')
-    // ⚠️ LA FENÊTRE SE RELIT SUR LE TERRAIN, elle ne se mémorise pas ici. Une
-    // reconstruction peut arriver EN PLEIN DÉFILEMENT (curseur d'exagération,
-    // arrivée du trait de côte) : repartir de zéro ferait sauter la mer d'un
-    // bloc entier sous les yeux, alors que le relief, lui, n'aurait pas bougé.
-    const f = terrain.fenetre
-    if (f) this.setFenetre(f.x, f.z)
-    this.group.visible = this._surfaceVisible
+    // 🔴 ET L'ÉTAT COURANT SE REJOUE SUR LES NOUVEAUX MATÉRIAUX. Six réglages
+    // sont poussés matériau par matériau APRÈS la reconstruction (houle, soleil,
+    // trait de côte, fond marin, teintes, accalmie de vue). Un lac qui arrive
+    // 600 ms plus tard les a tous manqués : il garderait la hauteur de vague et
+    // la couleur d'avant, jusqu'au prochain coup de curseur. Ça ne lève aucune
+    // erreur — ça se voit, et seulement si on regarde le bon lac.
+    if (poses) this._rejouerEtat(params)
+  }
+
+  /**
+   * Repousse sur TOUS les matériaux l'état que les réglages externes ont
+   * déposé depuis la dernière reconstruction. Idempotent par construction :
+   * chacun de ces appels n'écrit que des uniformes.
+   *
+   * ⚠️ SI UN SEPTIÈME RÉGLAGE PAR MATÉRIAU APPARAÎT, IL SE REJOUE ICI. C'est le
+   * prix d'un bâti qui peut arriver après coup, et le seul endroit qui le sait.
+   */
+  _rejouerEtat(params) {
+    this._applySea() // houle + soleil + masque côtier
+    this.setSeabed(this._seabedId ?? params?.seaBed ?? 'map')
+    if (this._look) this.setLook(this._look)
+    if (this._ondes) this.setWaves(this._ondes)
+    if (this._vue) this.setView(this._vue.cameraY, this._vue.viewDist)
   }
 
   // push the current spectrum into every material (arrays are assigned
@@ -1278,7 +1342,9 @@ export class RealWater {
   }
 
   // live look change — colour, transparency and sun sliders, no rebuild needed
+  // ⚠️ retenu (`_look`) : un lac bâti après coup doit le rejouer, voir _rejouerEtat
   setLook(params) {
+    this._look = params
     const { shallowT, deep } = waterColors(params)
     for (const mat of this.materials) {
       mat.uniforms.uDeep.value.copy(deep)
@@ -1294,7 +1360,10 @@ export class RealWater {
   // live wave change (UI sliders) — no rebuild needed. La hauteur ne déplace
   // plus le maillage : le niveau moyen est porté par uLift * fade dans le
   // vertex (zéro à la côte, quelle que soit la hauteur des vagues).
+  // ⚠️ retenu (`_ondes`) : un lac bâti après coup doit le rejouer — sans ça il
+  // porterait la hauteur de vague de la reconstruction, pas celle du curseur.
   setWaves({ height, choppiness, speed } = {}) {
+    this._ondes = { ...(this._ondes ?? {}), ...(height !== undefined && { height }), ...(choppiness !== undefined && { choppiness }), ...(speed !== undefined && { speed }) }
     for (const mat of this.materials) {
       if (height !== undefined) {
         mat.uniforms.uWaveH.value = height
@@ -1341,7 +1410,10 @@ export class RealWater {
   // `viewDist` = distance d'affichage (rayon d'orbite, unites scene) : elle
   // pilote la TAILLE des remous de cote — pleins de pres, effaces de loin ou
   // ils lisaient grossiers (retour Adrien).
+  // ⚠️ retenu (`_vue`) : un lac bâti après coup doit le rejouer, sinon il reste
+  // à l'accalmie de la vue précédente.
   setView(cameraY, viewDist) {
+    this._vue = { cameraY, viewDist }
     if (!this._demScale) return
     const km = Math.max(0, (cameraY - (this._seaBase ?? 0)) / this._demScale / 1000)
     const calm = smooth01((25 - km) / 17)

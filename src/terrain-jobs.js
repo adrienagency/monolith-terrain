@@ -14,6 +14,7 @@
 // crêtes du bloc central.
 import { analyzeDem, resampleField, minPoolField } from './terrain-analysis.js'
 import { buildSeaMask, blurMask } from './sea-mask.js'
+import { detectLakes } from './lake.js'
 
 /**
  * Le calcul, nu. Appelé par le Worker, et directement par le fil principal en
@@ -75,6 +76,43 @@ export function computeTerrainJob({
   // c'est ce qui rend l'ajout invisible hors mode continu.
   const m = blurMask(buildSeaMask({ data: mer.data, size: mer.size }, { landMask, minBasinFrac }), 1)
   return { analysis: a ? a.rgba : null, analysisSize: a ? a.size : 0, sea: m.mask, seaSize: m.size }
+}
+
+// ─────────────────────────── LES LACS, HORS DU FIL ──────────────────────────
+//
+// Troisième module PUR du chemin de reconstruction, et le dernier gros gel du
+// fil principal après l'analyse de relief. Mesuré sur MNT réel, durée TOTALE de
+// `realWater.rebuild` avec et sans détection (Chrome piloté, emprise 3×3) :
+//
+//   Annecy 3×3, 4 608²       875 ms  →  201 ms
+//   Annecy z12, 1 536²       187 ms  →   98 ms
+//   La Réunion 3×3           556 ms  →   67 ms
+//
+// La fente de dem-memo.js a déjà supprimé les reconstructions RÉPÉTÉES ; ce
+// qui reste, c'est la PREMIÈRE détection après chaque changement d'altitudes,
+// et elle n'a rien à faire sur le fil principal.
+//
+// ⚠️ ET LE TRANSPORT NE MANGE PAS LE GAIN — c'est la question qui décidait, et
+// elle est mesurée : `postMessage` d'un MNT 3×3 (40,5 Mo) coûte 8 ms de fil
+// principal, le retour des cellules (2,5 Mo, TRANSFÉRÉES) 1,2 ms. On échange
+// donc ~600 ms de gel contre ~9 ms.
+//
+// ⚠️ LE MNT EST COPIÉ, PAS TRANSFÉRÉ — même règle qu'au-dessus : le transférer
+// le DÉTACHERAIT côté fil principal, qui en a besoin pendant tout le calcul.
+// Les CELLULES du retour, elles, sont transférées : le Worker n'en a plus
+// l'usage, et c'est ce qui rend le retour gratuit.
+
+/**
+ * Le calcul, nu. Appelé par le Worker, et directement par le fil principal en
+ * repli (navigateur sans Worker, contexte contraint, test node).
+ *
+ * Rend la MÊME chose que `detectLakes`, à ceci près que les objets ont
+ * traversé une frontière de Worker — d'où la liste `transfert`, que seul
+ * l'émetteur utilise.
+ */
+export function computeLakeJob({ data, size }) {
+  const lacs = detectLakes({ data, size })
+  return { lacs, transfert: lacs.map((l) => l.cells.buffer) }
 }
 
 // --------------------------------------------------------------- péremption
@@ -229,9 +267,9 @@ function obtenirWorker() {
     worker = null
     const restants = [...enVol.values()]
     enVol.clear()
-    for (const { resolve, job } of restants) {
+    for (const { resolve, job, calcul } of restants) {
       try {
-        resolve(computeTerrainJob(job))
+        resolve((calcul ?? computeTerrainJob)(job))
       } catch {
         resolve(null)
       }
@@ -247,6 +285,35 @@ export function runTerrainJob(job) {
   return new Promise((resolve) => {
     enVol.set(id, { resolve, job })
     w.postMessage({ id, ...job })
+  })
+}
+
+/**
+ * Les lacs, hors du fil — même Worker, même repli.
+ *
+ * ⚠️ LE REPLI REND UNE PROMESSE, PAS UN RÉSULTAT SYNCHRONE, et c'est délibéré :
+ * l'appelant (ocean.js) n'a alors qu'UN chemin à écrire et à tester. Sur un
+ * navigateur sans Worker le gel revient — il revenait de toute façon, c'est le
+ * même calcul — mais l'image, elle, est la même.
+ *
+ * ⚠️ ET LA PANNE DU WORKER EST DÉJÀ COUVERTE : `obtenirWorker().onerror` rejoue
+ * les travaux en vol sur le fil principal via `computeTerrainJob`, qui ne sait
+ * pas faire de lacs. On range donc le travail dans `enVol` avec de quoi le
+ * rejouer LUI — d'où `calcul` à côté de `job`.
+ */
+// ⚠️ MÊME FORME DES DEUX CÔTÉS : le Worker rend `{ lacs }` (la liste de
+// transfert ne traverse pas), le repli doit donc rendre `{ lacs }` aussi. Deux
+// formes pour un même appel, c'est un `undefined` silencieux le jour où le
+// Worker tombe — c'est-à-dire le jour où personne ne regarde.
+const calculLacs = (job) => ({ lacs: computeLakeJob(job).lacs })
+
+export function runLakeJob(job) {
+  const w = obtenirWorker()
+  if (!w) return Promise.resolve().then(() => calculLacs(job))
+  const id = ++sequence
+  return new Promise((resolve) => {
+    enVol.set(id, { resolve, job, calcul: calculLacs })
+    w.postMessage({ id, kind: 'lacs', ...job })
   })
 }
 
