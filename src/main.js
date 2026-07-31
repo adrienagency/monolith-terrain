@@ -2288,11 +2288,10 @@ async function fetchAndBuildDem() {
   // le socle occupe ~800 pixels d'écran pour ces 56 unités : un texel vaudrait
   // alors 1,17 pixel d'écran, au-delà du pixel.
   //
-  // ATLAS_COTE = 2 304 tient 13,7 texels/unité, soit 1,04 pixel d'écran par
-  // texel — le plancher exact de l'étude (§2.1), et il est ATTEINT, pas
-  // approché. TRANCHÉ PAR COMPARAISON D'IMAGES, pas par ce calcul seul : voir
-  // le banc du jalon 2 et les chiffres au commit. Coût R8 : 5,3 Mo, contre
-  // 9,4 pour un 3 072 qui ne se distingue pas à l'œil.
+  // ATLAS_COTE = 2 304 tient 13,7 texels/unité. Le raisonnement s'arrête là ;
+  // le CHOIX, lui, a été tranché par comparaison d'images côte à côte, et les
+  // chiffres sont au-dessus de la constante (dem-emprise.js) — avec la mesure
+  // du plancher de bruit du banc, sans laquelle ils ne voudraient rien dire.
   const coteMasque = dem?.empriseCote > 1 ? ATLAS_COTE : undefined
   if (params.demZoom >= COAST_ZOOM_MIN && params.demZoom <= COAST_ZOOM_MAX) {
     // ⚠️ LA TAILLE ENTRE DANS LA CLÉ DU CACHE. Sans elle, un aller-retour entre

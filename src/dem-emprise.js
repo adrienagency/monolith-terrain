@@ -81,12 +81,58 @@ export const ATLAS_MER = 2304
 
 // Côté du masque côtier cuit sur l'emprise, en R8.
 //
-// ⚠️ CE CHIFFRE A ÉTÉ TRANCHÉ PAR COMPARAISON D'IMAGES, PAS PAR LE RAISONNEMENT
-// GÉOMÉTRIQUE. L'étude (§2.1) proposait 768 par bloc comme « plancher
-// défendable » et 1024 comme « marge d'un cran » à partir d'un simple compte de
-// texels par pixel d'écran, en notant qu'aucune image n'avait jamais été
-// comparée. Elle l'a été (voir le journal de session du jalon 2) : les chiffres
-// et le verdict sont consignés au point d'appel, dans main.js.
+// ══════════ TRANCHÉ PAR COMPARAISON D'IMAGES, PAS PAR LE CALCUL ════════════
+//
+// L'étude (§2.1) proposait 768 par bloc comme « plancher défendable » et 1024
+// comme « marge d'un cran », à partir d'un compte de texels par pixel d'écran —
+// en disant explicitement : « ce raisonnement est géométrique, pas perceptif :
+// je n'ai pas fait de comparaison d'images côte à côte ». Elle a été faite.
+//
+// L'INSTRUMENT D'ABORD, parce qu'un premier essai n'a rien prouvé du tout :
+// deux captures du MÊME code diffèrent sur 98,5 % des pixels, d'un écart moyen
+// de 13 niveaux. La cause est le GRAIN DE PELLICULE (passe NoiseEffect du
+// composer, opacité 0,26 par défaut), tiré au hasard À CHAQUE IMAGE. Éteint —
+// avec l'heure du jour, les nuages, la mer et une caméra passée par
+// `applyIsoView(0)`, seule pose vraiment reproductible — le PLANCHER DE BRUIT
+// tombe à 0,51 % des pixels, dont 95 % à ±2 niveaux. C'est lui l'étalon.
+//
+// La mesure, La Réunion z11 (l'île ENTIÈRE et sa mer dans la fenêtre — à z13 le
+// bloc fait 13,7 km et l'île 63, aucun rivage n'y entre et le banc mesurerait
+// du bruit), cadrage d'ouverture, 12,5 px d'écran par unité monde :
+//
+//   masque   texels/unité   pixels ≠ du 2304   dont écart ≥ 9 niveaux
+//   ------   ------------   ----------------   ----------------------
+//   (bruit)          —              0,51 %                        91
+//   3072            18,3            0,285 %                      258
+//   2304            13,7             —                             —
+//   1536             9,1            0,315 %                      341
+//   1024             6,1            0,410 %                      663
+//
+// Et les pixels qui diffèrent sont TOUS sur le trait de côte, en un filet d'un
+// pixel de large (image de diff). À 43 px/unité — la vue rapprochée, quatre
+// fois le cadrage d'ouverture — les quatre tailles restent indiscernables à un
+// agrandissement ×4.
+//
+// LA RAISON, et elle explique pourquoi le raisonnement en texels était trop
+// pessimiste : le masque est PRÉ-FLOUTÉ de 1,5 px À SA PROPRE RÉSOLUTION
+// (coast-mask.js) et le shader coupe à l'iso-0,5 avec un anticrénelage en
+// `fwidth`. Sa résolution déplace donc la POSITION du contour d'au plus un
+// demi-texel — elle ne change pas sa NETTETÉ. Il n'y a pas d'escalier à voir,
+// seulement un rivage qui glisse d'un pixel.
+//
+// LE VERDICT : 3072 n'achète rien de mesurable (258 pixels sur 1,02 million,
+// tous invisibles) et coûte 9,4 Mo au lieu de 5,3. 1536 tiendrait aussi. On
+// garde 2304 pour trois raisons, dans cet ordre :
+//   1. il partage la grille de l'atlas (2304 divise 4608 exactement), donc
+//      `landMaskFromField` reste un plus-proche-voisin sans surprise de rapport ;
+//   2. il laisse un cran de marge au-dessus de 1536, où les premiers écarts
+//      apparaissent — encore sous le pixel, mais ils apparaissent ;
+//   3. 5,3 Mo en R8, contre 5,3 Mo aussi pour le masque de mer : un seul budget
+//      à retenir.
+//
+// ⚠️ CE VERDICT VAUT POUR LE TRAIT DE CÔTE VU PAR LE TERRAIN. La mer, elle, lit
+// le même masque pour son ressac (ocean.js) : si un jour le ressac paraît
+// grossier en mode continu, c'est ici qu'il faut revenir — pas dans ocean.js.
 export const ATLAS_COTE = 2304
 
 /**
