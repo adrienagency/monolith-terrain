@@ -533,7 +533,10 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   // says REAL sea (edge-connected / big basin), killing phantom coarse-zoom lakes.
   float seaMask = 1.0;
   if (uSeaMaskOn > 0.5) {
-    vec2 smUv = (vWorldPos.xz - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
+    // UV D'ATLAS (jalon 2) — voir uCoastMask ci-dessous pour le POURQUOI.
+    // Hors mode continu uFenetre vaut (0,0) et uMaskSpan vaut exactement
+    // uSlabHalf * 2 : l'expression redevient celle d'avant, au bit près.
+    vec2 smUv = (vWorldPos.xz - uBlockOffset + uFenetre) / uMaskSpan + 0.5;
     seaMask = texture2D(uSeaMask, smUv).r;
   }
   // coarse-zoom coast (z4–z8): the real Natural-Earth land/sea mask is the
@@ -542,13 +545,18 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   // coasts AND phantom inland lakes. Off (z9+ / fetch failed) → old behaviour.
   float landness = 1.0;
   if (uCoastMaskOn > 0.5) {
-    // ⚠️ LE SEUL MASQUE ALLUMÉ EN MODE CONTINU, donc le seul qui doive défiler
-    // aujourd'hui. Le masque côtier est rastérisé sur l'emprise ENTIÈRE
-    // (coast-mask.js le projette sur le footprint du MNT, et le MNT recollé
-    // couvre les 168 unités) : lu sur 56 il était agrandi trois fois ET immobile.
-    // Le masque de mer, l'analyse de relief et l'aérien sont éteints au jalon 1
-    // (terrain.js _buildFields) — quand l'atlas de champs les rallumera, ils
-    // prendront la MÊME expression d'uv, pas une autre.
+    // ⚠️ L'EXPRESSION D'UV D'ATLAS, PARTAGÉE PAR LES TROIS CHAMPS DU RELIEF —
+    // masque côtier, masque de mer, analyse. Les trois sont cuits sur l'emprise
+    // ENTIÈRE (168 unités), la géométrie n'en montre que 56, et c'est la
+    // LECTURE qui se déplace : uFenetre est le décalage du mode continu,
+    // uMaskSpan la largeur au sol du champ. Lu sur 56 sans décalage, un champ
+    // d'emprise serait agrandi trois fois ET immobile sous le relief qui glisse.
+    // Hors mode continu uFenetre = (0,0) et uMaskSpan = uSlabHalf * 2 :
+    // l'image d'aujourd'hui est inchangée au bit près.
+    // (test/atlas-champs.test.js verrouille les trois lignes sur le source :
+    // une lecture restée en UV de bloc est un défaut MUET.)
+    // ⚠️ PAS DE BACKTICK DANS CE COMMENTAIRE — le GLSL est un littéral gabarit
+    // JS : un accent grave y ferme la chaîne et casse TOUT le module.
     vec2 cmUv = (vWorldPos.xz - uBlockOffset + uFenetre) / uMaskSpan + 0.5;
     landness = texture2D(uCoastMask, cmUv).r;
   }
@@ -605,8 +613,8 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     vec4 anl = vec4(0.5);
     if (uColorMode == 1) {
       if (uAnalysisOn > 0.5) {
-        // même UV monde que uSeaMask : rien à inventer côté échantillonnage
-        vec2 anUv = (vWorldPos.xz - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
+        // même UV d'atlas que uSeaMask : rien à inventer côté échantillonnage
+        vec2 anUv = (vWorldPos.xz - uBlockOffset + uFenetre) / uMaskSpan + 0.5;
         anl = texture2D(uAnalysis, anUv);
       }
       // au-dessus de la limite des arbres il n'y a plus de végétation à

@@ -49,6 +49,70 @@
 // à jour torique) ne tient QUE parce que l'emprise est finie et petite.
 export const EMPRISE_COTE = 3
 
+// ══════════ L'ATLAS DE CHAMPS — JALON 2 ═══════════════════════════════════
+//
+// Une seule cuisson, sur l'emprise entière, au lieu d'une par bloc traversé.
+// C'est ce que le 3×3 BORNÉ offre gratuitement, et c'est la comparaison qui
+// tranche (étude §2.2, banc `bench-atlas.mjs`) :
+//
+//   neuf dalles cuites séparément (analyse 1024² chacune) : 9 × 307 = 2 767 ms
+//   un atlas 2304², à la MÊME densité que neuf dalles à 768² :      1 378 ms
+//
+// Deux fois moins cher, et il n'y a plus qu'un objet — donc plus qu'une échelle
+// de couleurs, un p95 et une topologie de mer. C'est cette dernière ligne qui
+// compte le plus : avec neuf champs, une cuvette CHANGEAIT DE COULEUR selon la
+// dalle où elle tombait (`robustScale` dépend de la RÉSOLUTION du champ, pas
+// seulement de son contenu — étude §4.4). L'atlas ne corrige pas ce défaut, il
+// SUPPRIME LA CONDITION qui le rendait possible.
+//
+// 2304 sur les 168 unités de l'emprise = 13,7 px/unité, contre 27,4 pour le
+// bloc central d'aujourd'hui et 18,3 pour une voisine du damier. Un cran plus
+// grossier, mais la règle de `test/damier-memoire.test.js` — « aucun champ ne
+// dépasse quatre fois la densité du maillage qui le porte » — est tenue avec de
+// la marge : à res 384 (6,9 sommets/unité), 13,7 px/u fait 1,99×.
+//
+// ⚠️ 2304 DIVISE EXACTEMENT 4608, le côté du MNT recollé en tuiles 512 px.
+// `resampleField` et `minPoolField` retombent alors sur la moyenne (ou le
+// minimum) de blocs 2×2, le chemin entier — deux fois moins cher que le chemin
+// des poids fractionnaires, pour un résultat identique. Un 2 300 « rond » aurait
+// coûté le double sans rien apporter.
+export const ATLAS_ANALYSE = 2304
+export const ATLAS_MER = 2304
+
+// Côté du masque côtier cuit sur l'emprise, en R8.
+//
+// ⚠️ CE CHIFFRE A ÉTÉ TRANCHÉ PAR COMPARAISON D'IMAGES, PAS PAR LE RAISONNEMENT
+// GÉOMÉTRIQUE. L'étude (§2.1) proposait 768 par bloc comme « plancher
+// défendable » et 1024 comme « marge d'un cran » à partir d'un simple compte de
+// texels par pixel d'écran, en notant qu'aucune image n'avait jamais été
+// comparée. Elle l'a été (voir le journal de session du jalon 2) : les chiffres
+// et le verdict sont consignés au point d'appel, dans main.js.
+export const ATLAS_COTE = 2304
+
+/**
+ * Le seuil de « grand bassin » d'un masque de mer, converti à l'emprise.
+ *
+ * ⚠️ SANS CETTE CONVERSION, LES MERS FERMÉES BASCULENT EN TERRE. `buildSeaMask`
+ * garde une poche basse non connectée au bord quand elle occupe au moins 2 % du
+ * champ (`minBasinFrac`) — c'est ce qui sauve la Caspienne et la mer Morte.
+ * Relire ces 2 % sur une emprise de 3×3 blocs, c'est exiger NEUF FOIS la même
+ * surface absolue : la mer Morte tomberait sous le seuil et se peindrait en
+ * terre à l'instant précis où l'on entre en mode continu.
+ *
+ * La conversion garde la SURFACE ABSOLUE, à la cellule près (le test le
+ * verrouille sur quatre côtes et trois résolutions) : `frac / côté²`, parce que
+ * le nombre de cellules du champ, lui, est multiplié par `côté²`.
+ *
+ * Rend la fraction inchangée hors mode continu — 2 % restent 2 %.
+ *
+ * @param {number} frac fraction pour UN bloc (0,02 par défaut de sea-mask.js)
+ * @param {number} cote côté de l'emprise en blocs
+ */
+export function fracBassinEmprise(frac, cote) {
+  const c = cote > 1 ? cote : 1
+  return frac / (c * c)
+}
+
 /**
  * Les neuf origines de tuile d'une emprise centrée sur un bloc.
  *

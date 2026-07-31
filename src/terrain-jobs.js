@@ -12,7 +12,7 @@
 // verrouille l'égalité OCTET POUR OCTET sur quatre familles de relief. Un seul
 // flottant qui diverge est un bug, pas un arrondi : ces champs peignent les
 // crêtes du bloc central.
-import { analyzeDem, resampleField } from './terrain-analysis.js'
+import { analyzeDem, resampleField, minPoolField } from './terrain-analysis.js'
 import { buildSeaMask, blurMask } from './sea-mask.js'
 
 /**
@@ -38,16 +38,42 @@ import { buildSeaMask, blurMask } from './sea-mask.js'
  * un tableau à la mauvaise taille rendrait des polders au hasard, pas une
  * erreur bruyante.
  *
+ * ⚠️ `merMinPool` et `minBasinFrac` sont LES DEUX RÉGLAGES DE L'ATLAS 3×3, et
+ * ils sont strictement OPT-IN. Le premier échange la moyenne contre un minimum
+ * au sous-échantillonnage du masque de mer (voir `minPoolField` : sans lui, un
+ * détroit d'un pixel est sectionné et une baie réelle se peint en terre) ; le
+ * second convertit le seuil de grand bassin, qui est une FRACTION du champ et
+ * deviendrait donc neuf fois plus exigeant sur une emprise 3×3
+ * (`fracBassinEmprise`). Passés depuis l'appelant et non changés par défaut :
+ * `test/sea-mask.test.js` verrouille le piège Flevoland à 2 %, et
+ * `test/terrain-jobs.test.js` l'égalité OCTET POUR OCTET de cette fonction.
+ *
+ * ⚠️ Et le MIN-pooling ne touche QUE la mer. L'analyse de relief garde sa
+ * moyenne : ses quatre champs sont des DÉRIVÉES du relief, un minimum y
+ * replierait le bruit du MNT au lieu de le filtrer (voir `coarsenField`).
+ *
  * CONTRAT : sans `seaMax`, résultat bit-à-bit identique à avant.
  */
-export function computeTerrainJob({ data, size, metersPerPixel, maxSize = 0, seaMax = 0, landMask = null, withAnalysis = true }) {
+export function computeTerrainJob({
+  data,
+  size,
+  metersPerPixel,
+  maxSize = 0,
+  seaMax = 0,
+  landMask = null,
+  withAnalysis = true,
+  merMinPool = false,
+  minBasinFrac = undefined,
+}) {
   const dem = { data, size, metersPerPixel }
   const a = withAnalysis ? analyzeDem(dem, { maxSize }) : null
   // (buildSeaMask est topologique : il ne lit ni metersPerPixel ni aucune
   // longueur en mètres — son seuil est en mètres d'ALTITUDE et son critère de
   // bassin est une FRACTION de la dalle. Le plafond ne dérègle donc rien.)
-  const mer = resampleField(data, size, seaMax)
-  const m = blurMask(buildSeaMask({ data: mer.data, size: mer.size }, { landMask }), 1)
+  const mer = merMinPool ? minPoolField(data, size, seaMax) : resampleField(data, size, seaMax)
+  // `minBasinFrac: undefined` laisse le DÉFAUT de buildSeaMask s'appliquer —
+  // c'est ce qui rend l'ajout invisible hors mode continu.
+  const m = blurMask(buildSeaMask({ data: mer.data, size: mer.size }, { landMask, minBasinFrac }), 1)
   return { analysis: a ? a.rgba : null, analysisSize: a ? a.size : 0, sea: m.mask, seaSize: m.size }
 }
 
