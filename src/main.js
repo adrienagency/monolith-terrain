@@ -2062,6 +2062,10 @@ function f3CalquesSuivent() {
   // donné la vague d'un autre endroit que celle que la mer dessine sous lui.
   // C'est l'écriture des matrices qui ramène le champ dans la géométrie.
   boats?.setFenetre?.(f.x, f.z)
+  // Les nuages appartiennent au CIEL — c'est la fenêtre, ils ne bougent pas.
+  // Ce qui doit suivre, c'est le RELIEF qu'ils consultent pour savoir où ils
+  // sont occlus et où est leur plancher : une écriture d'uniforme.
+  clouds?.setFenetre?.(f.x, f.z)
   // ══════════ LA MER, SA JUPE ET LES LACS ═══════════════════════════════════
   //
   // La mer NE SE TRANSLATE PAS : le plan d'eau EST la fenêtre, il reste en

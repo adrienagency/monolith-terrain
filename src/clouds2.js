@@ -609,8 +609,13 @@ export class Clouds2 {
         uBillow: { value: params?.cloudBillow ?? 0.8 },
         uCoverage: { value: params?.cloudCoverage ?? 0.9 },
         uTerrainTex: { value: hf.tex },
-        uMapMin: { value: new THREE.Vector2(-half, -half) },
-        uMapSize: { value: new THREE.Vector2(TERRAIN_SIZE, TERRAIN_SIZE) },
+        // ⚠️ LE CHAMP DE HAUTEURS EST EN COORDONNÉES DE CHAMP, LE FRAGMENT EN
+        // COORDONNÉES DE GÉOMÉTRIE : `uMapMin` porte la conversion, et c'est
+        // LUI qui défile (`setFenetre`). Le nuage, lui, appartient au CIEL —
+        // c'est la fenêtre, il ne bouge pas. Ce qui doit suivre, c'est le
+        // relief qu'il consulte pour savoir où il est occlus.
+        uMapMin: { value: new THREE.Vector2(-hf.span / 2, -hf.span / 2) },
+        uMapSize: { value: new THREE.Vector2(hf.span, hf.span) },
         uTerrainMin: { value: hf.min },
         uTerrainRange: { value: hf.range },
         uWaterY: { value: -9999 },
@@ -630,6 +635,19 @@ export class Clouds2 {
     this.group.add(mesh)
     this._writeInstances()
     this._bakeShadow()
+    // le champ vient d'être recuit : remet `uMapMin` sur la fenêtre courante,
+    // sinon une reconstruction pendant un défilement repartirait à zéro
+    this.setFenetre(this.terrain?.fenetre?.x ?? 0, this.terrain?.fenetre?.z ?? 0)
+  }
+
+  // Le décalage de fenêtre du mode continu — DEUX FLOTTANTS par pas, rien de
+  // plus. Le champ de hauteurs couvre l'emprise entière et ne se recuit jamais
+  // pendant le geste ; c'est la LECTURE qui se déplace.
+  setFenetre(x, z) {
+    const u = this.mesh?.material?.uniforms
+    if (!u?.uMapMin) return
+    const half = (u.uMapSize.value.x || TERRAIN_SIZE) / 2
+    u.uMapMin.value.set(-half - x, -half - z)
   }
 
   // Écrit les matrices d'instance, TRIÉES de l'arrière vers l'avant : un
@@ -867,17 +885,40 @@ export class Clouds2 {
 
   // même champ de hauteurs que l'ancien système : 256², quantifié 8 bits sur sa
   // propre amplitude (filtrable partout, contrairement à une texture flottante)
+  //
+  // ══════════ EN MODE CONTINU, IL COUVRE L'EMPRISE ═══════════════════════════
+  //
+  // Le relief que ce champ décrit sert à DEUX choses : l'occlusion du rayon dans
+  // le shader (un nuage ne se dessine pas dans la montagne) et le plancher sous
+  // lequel rien ne vit. Cuit sur la fenêtre, il devenait FAUX dès le premier
+  // pas de défilement — le nuage aurait été occlus par une crête qui n'est plus
+  // là. On le cuit donc une fois sur l'emprise entière, en coordonnées de
+  // CHAMP, et c'est `uMapMin` qui défile (étude §5.2, « uMapMin qui défile »).
+  //
+  // ⚠️ LA RÉSOLUTION NE TRIPLE PAS AVEC L'EMPRISE. À densité égale il faudrait
+  // 768², soit 590 000 appels à `terrain.sample` — mesuré ci-dessous, c'est le
+  // genre de gel qu'on vient de sortir du fil principal pour les lacs. 384²
+  // couvre neuf fois la surface pour 2,25 fois les points : 0,44 unité par
+  // texel contre 0,22. À cette échelle un nuage fait 2 à 6 unités de large : sa
+  // silhouette d'occlusion ne bouge pas d'un pixel.
   _bakeHeightfield() {
-    const N = 256
+    const cote = this.terrain?.dem?.empriseCote > 1 ? this.terrain.dem.empriseCote : 1
+    const N = cote > 1 ? 384 : 256
+    const span = TERRAIN_SIZE * cote
     const sample = this.terrain?.sample
-    const half = TERRAIN_SIZE / 2
+    const half = span / 2
+    // ⚠️ `terrain.sample` PARLE EN COORDONNÉES DE GÉOMÉTRIE : il ajoute lui-même
+    // le décalage. On le retranche pour que `(x, z)` soit bien une coordonnée
+    // de CHAMP — sans quoi le champ cuit ne serait pas celui de l'emprise mais
+    // celui d'une emprise décalée d'une fenêtre.
+    const fen = this.terrain?.fenetre ?? { x: 0, z: 0 }
     const heights = new Float32Array(N * N)
     let min = Infinity, max = -Infinity
     for (let j = 0; j < N; j++) {
       for (let i = 0; i < N; i++) {
-        const x = -half + ((i + 0.5) / N) * TERRAIN_SIZE
-        const z = -half + ((j + 0.5) / N) * TERRAIN_SIZE
-        const h = sample ? sample(x, z) : 0
+        const x = -half + ((i + 0.5) / N) * span
+        const z = -half + ((j + 0.5) / N) * span
+        const h = sample ? sample(x - fen.x, z - fen.z) : 0
         const v = Number.isFinite(h) ? h : 0
         heights[j * N + i] = v
         if (v < min) min = v
@@ -892,7 +933,7 @@ export class Clouds2 {
     tex.magFilter = tex.minFilter = THREE.LinearFilter
     tex.needsUpdate = true
     this._heightTex = tex
-    return { tex, min, range }
+    return { tex, min, range, span }
   }
 
   _dispose() {
