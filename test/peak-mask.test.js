@@ -176,6 +176,34 @@ test('pixel MNT ↔ lon/lat fait l’aller-retour', () => {
   }
 })
 
+// L'AVANT/APRÈS de la correction 3×3, verrouillé plutôt que raconté.
+//
+// Un MNT d'emprise 3×3 couvre 168 unités monde pour 3×size pixels. Avec
+// TERRAIN_SIZE = 56 écrit en dur, `lonLatToDemPixel` plaçait un point excentré à
+// TROIS FOIS sa distance au centre en pixels — hors grille dès le premier tiers,
+// donc un masque vide et une découpe qui « ne marche pas » sans erreur visible.
+// Le seul témoin qui ne peut pas mentir : l'aller-retour.
+test('l’aller-retour tient aussi sur une emprise 3×3', () => {
+  const size = 128
+  const dem = makeDem(new Float32Array(size * size), size)
+  // ce que dem-emprise.js produit : même metersPerPixel, size et extentMeters
+  // triplés, et l'origine reculée d'une tuile-bloc dans les deux sens
+  const emprise = {
+    ...dem,
+    size: size * 3,
+    empriseCote: 3,
+    extentMeters: dem.extentMeters * 3,
+    originTileX: dem.originTileX - 1,
+    originTileY: dem.originTileY - 1,
+  }
+  for (const [px, py] of [[0, 0], [191, 191], [383, 383], [30, 300]]) {
+    const [lon, lat] = demPixelToLonLat(emprise, px, py)
+    const back = lonLatToDemPixel(emprise, lat, lon)
+    assert.ok(Math.abs(back.x - px) < 1e-6, `x ${back.x} ≠ ${px}`)
+    assert.ok(Math.abs(back.y - py) < 1e-6, `y ${back.y} ≠ ${py}`)
+  }
+})
+
 // ---------------------------------------------------------------- peakMask
 
 test('peakMask découpe le sommet visé et LUI SEUL', () => {

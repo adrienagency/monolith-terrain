@@ -18,8 +18,7 @@
 // Module PUR : aucun DOM, aucun réseau à l'import. La recherche du sommet
 // (findPeak) accepte un `fetch` injecté.
 
-import { TERRAIN_SIZE } from './terrain.js'
-import { latLonToWorld, worldToLatLon } from './geo.js'
+import { latLonToWorld, worldToLatLon, demSpan } from './geo.js'
 
 // ---------------------------------------------------------------- réglages
 //
@@ -282,17 +281,26 @@ export function lowPercentile(field, p = BASE_PERCENTILE, maxSamples = 65536) {
 // Coordonnées de GRILLE : (0,0) = centre du premier pixel du MNT. geo.js compte
 // lui en pixels CONTINUS depuis le coin du canevas, d'où le demi-pixel.
 
+// ⚠️ `demSpan(dem)`, PAS `TERRAIN_SIZE`. Sur une emprise 3×3 le champ fait 168
+// unités monde pour `dem.size` pixels : divisé par 56, un sommet excentré
+// atterrissait à TROIS FOIS sa distance au centre en pixels de MNT — donc hors
+// grille, donc un masque vide et une découpe qui « ne marche pas » sans que rien
+// ne signale d'erreur. C'est le pendant exact de la correction de geo.js.
+// Hors mode continu `demSpan` rend 56 au bit près : tous les appels d'aujourd'hui
+// sont inchangés.
 export function lonLatToDemPixel(dem, lat, lon) {
   const w = latLonToWorld(dem, lat, lon)
+  const span = demSpan(dem)
   return {
-    x: (w.x / TERRAIN_SIZE + 0.5) * dem.size - 0.5,
-    y: (w.z / TERRAIN_SIZE + 0.5) * dem.size - 0.5,
+    x: (w.x / span + 0.5) * dem.size - 0.5,
+    y: (w.z / span + 0.5) * dem.size - 0.5,
   }
 }
 
 export function demPixelToLonLat(dem, x, y) {
-  const wx = ((x + 0.5) / dem.size - 0.5) * TERRAIN_SIZE
-  const wz = ((y + 0.5) / dem.size - 0.5) * TERRAIN_SIZE
+  const span = demSpan(dem)
+  const wx = ((x + 0.5) / dem.size - 0.5) * span
+  const wz = ((y + 0.5) / dem.size - 0.5) * span
   const { lat, lon } = worldToLatLon(dem, wx, wz)
   return [lon, lat]
 }

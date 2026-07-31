@@ -12,19 +12,48 @@
 
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
-import { worldToLatLon, latLonToWorld } from './geo.js'
+import { worldToLatLon, latLonToWorld, demSpan } from './geo.js'
+import { dansFenetre } from './fenetre-clip.js'
 
 const OVERPASS = 'https://overpass-api.de/api/interpreter'
 
+// Décalage nul, partagé : hors mode continu il n'y a rien à retrancher et on ne
+// veut pas allouer un objet par sommet et par image pour le dire.
+const ZERO = { x: 0, z: 0 }
+
+// ══════════ COMBIEN DE SOMMETS SUR UNE EMPRISE 3×3 ═════════════════════════
+//
+// Même règle que les noms de lieux (map/places-layer.js) : le nombre suit la
+// SURFACE, donc le CARRÉ du côté de l'emprise. La tripler seulement diviserait
+// par trois la densité de sommets dans la fenêtre visible — une régression sur
+// l'image de départ, celle qu'on ne veut justement pas toucher.
+//
+// ⚠️ ET LE BUDGET OVERPASS SUIT AUSSI. `out body 500` était déjà calibré « sur
+// un z8 dense (les Alpes entières), 150 laissait passer les vrais sommets avant
+// le tri client » : sur neuf fois la surface, 500 redevient ce 150 qu'on avait
+// jugé trop bas. Ce n'est pas neuf fois plus de trafic — c'est le même seuil de
+// troncature ramené à la même densité au sol.
+//
+// Hors mode continu `cote` vaut 1 et les deux nombres sont ceux d'avant, à
+// l'identique.
+export function empriseCote(dem) {
+  return dem?.empriseCote > 1 ? dem.empriseCote : 1
+}
+
 export async function fetchTopPeaks(dem, count = 5) {
-  const h = TERRAIN_SIZE / 2
+  // ⚠️ `demSpan`, pas `TERRAIN_SIZE` : sur une emprise 3×3 le champ fait 168
+  // unités. La boîte écrite en dur ne demandait à Overpass que le bloc CENTRAL —
+  // on aurait défilé vers un massif entier sans un seul sommet coté.
+  const h = demSpan(dem) / 2
+  const cote = empriseCote(dem)
   const north = worldToLatLon(dem, 0, -h).lat
   const south = worldToLatLon(dem, 0, h).lat
   const west = worldToLatLon(dem, -h, 0).lon
   const east = worldToLatLon(dem, h, 0).lon
   // 500-node budget: on a dense z8 patch (whole Alps) 150 was low enough to
   // miss the actual highest summits before the client-side sort
-  const q = `[out:json][timeout:20];node["natural"="peak"]["name"](${south},${west},${north},${east});out body 500;`
+  const budget = 500 * cote * cote
+  const q = `[out:json][timeout:20];node["natural"="peak"]["name"](${south},${west},${north},${east});out body ${budget};`
   const r = await fetch(OVERPASS, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -41,7 +70,7 @@ export async function fetchTopPeaks(dem, count = 5) {
     }))
     .filter((p) => p.name)
     .sort((a, b) => (b.ele ?? -1) - (a.ele ?? -1))
-    .slice(0, count)
+    .slice(0, count * cote * cote)
 }
 
 // Séparateur de milliers À LA MAIN. `toLocaleString('fr-FR')` pose une
@@ -218,10 +247,18 @@ export class PeaksLayer {
         this.announce('NO NAMED PEAKS IN THIS SECTOR')
         return
       }
+      const demi = demSpan(dem) / 2
       for (const p of peaks) {
         const w = latLonToWorld(dem, p.lat, p.lon)
-        if (Math.abs(w.x) > TERRAIN_SIZE / 2 || Math.abs(w.z) > TERRAIN_SIZE / 2) continue
-        const y = this.terrain.sample(w.x, w.z) + 0.5
+        if (Math.abs(w.x) > demi || Math.abs(w.z) > demi) continue
+        // ⚠️ `terrain.sample` PARLE EN COORDONNÉES DE GÉOMÉTRIE, `w` EN
+        // COORDONNÉES DE CHAMP — le sampler ajoute lui-même le décalage de
+        // fenêtre. Lui passer `w.x` tel quel le ferait lire le sol DEUX FOIS
+        // décalé : chaque sommet se poserait à l'altitude d'un autre endroit.
+        // Même correction que map/places-layer.js. Hors mode continu `fen` vaut
+        // zéro et l'appel est celui d'avant, au bit près.
+        const fen = this.terrain.fenetre ?? ZERO
+        const y = this.terrain.sample(w.x - fen.x, w.z - fen.z) + 0.5
         const ele = p.ele ?? Math.round(this.terrain.heightToFeet(y - 0.5) / 3.28084)
         const el = document.createElement('div')
         el.className = 'peak-marker'
@@ -242,7 +279,13 @@ export class PeaksLayer {
         el.append(dot, tag)
         document.body.appendChild(el)
         const world = new THREE.Vector3(w.x, y, w.z)
-        el.addEventListener('click', () => this.onFocus?.(world, p.name))
+        // La caméra se cale sur des coordonnées de GÉOMÉTRIE : on retranche le
+        // décalage AU MOMENT DU CLIC (et non ici), sinon un sommet cliqué après
+        // un défilement enverrait la caméra à l'endroit qu'il occupait avant.
+        el.addEventListener('click', () => {
+          const f = this.terrain?.fenetre ?? ZERO
+          this.onFocus?.(new THREE.Vector3(world.x - f.x, world.y, world.z - f.z), p.name)
+        })
         // tw : largeur du cartouche, mesurée paresseusement dans update() (les
         // fontes arrivent après le premier rendu) ; shownFor part plein pour
         // que la toute première pose soit immédiate — le délai de PEAK_HOLD ne
@@ -265,9 +308,27 @@ export class PeaksLayer {
     let hoveredOn = false
     const vis = [] // dans l'ordre des marqueurs, donc par altitude décroissante
     this._frame++
+    // ══════════ LES SOMMETS SUIVENT LE RELIEF ═══════════════════════════════
+    //
+    // `m.world` est en coordonnées de CHAMP (celles que rend `latLonToWorld`) ;
+    // la fenêtre est le décalage entre le champ et la géométrie affichée. Le
+    // retrancher AVANT la projection, c'est tout ce qu'il faut pour qu'un
+    // sommet reste planté sur sa crête pendant qu'on défile — au lieu de rester
+    // collé à l'écran pendant que sa montagne s'en va. Zéro géométrie, deux
+    // soustractions par sommet et par image.
+    const fen = this.terrain?.fenetre ?? ZERO
+    // ⚠️ ET LE TEST DE FENÊTRE N'EST POSÉ QU'EN MODE CONTINU. Les sommets sont
+    // choisis sur toute l'emprise, soit neuf fois la surface visible : sans ce
+    // rejet, huit neuvièmes d'entre eux flotteraient au-delà du bord du socle,
+    // au-dessus du vide. Hors mode continu ils sont déjà tous dans le bloc, et
+    // poser l'octogone quand même risquerait de couper un sommet de coin
+    // (|x|+|z| ≤ 56) qui s'affiche parfaitement aujourd'hui.
+    const clip = this.getDem?.()?.empriseCote > 1
+    const demi = TERRAIN_SIZE / 2
     for (const m of this.markers) {
-      this._v.copy(m.world).project(camera)
-      const on = visible && this._v.z < 1
+      this._v.set(m.world.x - fen.x, m.world.y, m.world.z - fen.z).project(camera)
+      const dedans = !clip || dansFenetre(m.world.x - fen.x, m.world.z - fen.z, demi)
+      const on = visible && dedans && this._v.z < 1
       m.el.style.opacity = on ? 1 : 0
       // an off-screen marker keeps its last transform (frozen), so without this
       // its tag (pointer-events:auto) stays clickable while invisible → phantom
