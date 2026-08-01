@@ -46,6 +46,7 @@ import { gradeForDem, elevationHistogram } from './relief-grade.js'
 import { buildPalettePool, pickShufflePalette } from './shuffle-pool.js'
 import { peakVantage } from './camera-poses.js'
 import { focusRayHit } from './autofocus.js'
+import { doitRafraichirCartouche } from './ground-info.js'
 import { GroundInfoLayer } from './ground-info-layer.js'
 import { PeaksLayer } from './peaks.js'
 import { Clouds2 } from './clouds2.js'
@@ -2179,6 +2180,34 @@ function f3Tick(dt) {
   // 15 ms tombaient sur l'image du PREMIER PAS du geste, celle qu'on descend en
   // résolution précisément pour la sauver. Le socle et les calques, eux, doivent
   // suivre dans les deux cas : ils repartent du `terrain.sample` tout neuf.
+  // ══════════ LA LÉGENDE SE MET D'ACCORD AVEC LE RELIEF, APRÈS LUI ═══════════
+  //
+  // ⚠️ AVANT LA SORTIE ANTICIPÉE, et c'est tout l'inverse d'un détail : le
+  // rafraîchissement se déclenche AU REPOS, or au repos `_f3Sale` est faux et
+  // la fonction sort deux lignes plus bas. Placé après, il ne serait évalué
+  // qu'aux images où le terrain bouge — c'est-à-dire jamais quand il le faut.
+  //
+  // La règle (ground-info.js) impose le repos pour deux raisons, et la première
+  // suffirait : le cartouche interroge Nominatim et Wikipédia, on ne les
+  // appelle pas pendant un geste. La seconde est de lisibilité — on voit le
+  // relief se poser, PUIS la légende le rattraper ; l'ordre inverse ferait
+  // clignoter un texte sous un terrain qui glisse.
+  //
+  // ⚠️ ET LE COMPARATEUR EST `lastFenetre`, PAS la position de chargement de la
+  // zone. Le seuil est un quart de socle CUMULÉ depuis le dernier cartouche
+  // posé, sans quoi trois glissements d'un cinquième de socle chacun — 12 km à
+  // z12 — ne déclencheraient jamais rien.
+  if (
+    params.groundInfo &&
+    doitRafraichirCartouche({
+      derniere: groundInfo.lastFenetre,
+      courante: terrain.fenetre,
+      repos: _f3Fin.fin,
+      tailleSocle: TERRAIN_SIZE,
+    })
+  ) {
+    chargeCartouche()
+  }
   if (!_f3Sale && !refait) return
   _f3Sale = false
   if (!refait) terrain.tickFenetre(params)
@@ -2289,6 +2318,26 @@ function f3PoseFenetre(fen) {
   plinth.rebuild(terrain, params, socleEmprise())
   f3CalquesSuivent()
   return true
+}
+
+// ══════════ LE CARTOUCHE PARLE DE CE QU'ON REGARDE, PAS DE CE QU'ON A CHARGÉ ═
+//
+// Trouvé à l'audit du jalon 3 : `ground-info` reste dans le socle — c'est du
+// mobilier, il ne doit pas défiler, et il ne défile pas. Mais son CONTENU ment
+// après un long défilement : nom du lieu, coordonnées et plage d'altitude sont
+// ceux du CHARGEMENT. À z12, un socle de course fait 21 km : on peut afficher
+// « CHAMONIX » au-dessus d'Annecy.
+//
+// La correction est de le charger depuis la position dans l'emprise, et pas
+// depuis `params.demLat/demLon` qui désignent le centre du bloc. `fenetre`
+// EST la coordonnée monde du centre de la dalle visible dans l'emprise (la
+// géométrie ne bouge pas, c'est la lecture qui se décale), donc
+// `worldToLatLon(dem, fen.x, fen.z)` la convertit sans autre calcul.
+function chargeCartouche() {
+  if (!dem) return
+  const fen = fenetreContinueActive() && dem.empriseCote > 1 ? terrain.fenetre : null
+  const p = fen ? worldToLatLon(dem, fen.x, fen.z) : { lat: params.demLat, lon: params.demLon }
+  groundInfo.load(p.lat, p.lon, dem, fen)
 }
 
 // ══════════ FIGER LE DÉFILEMENT AVANT UNE CAPTURE ═══════════════════════════
@@ -2598,7 +2647,7 @@ async function fetchAndBuildDem() {
   applyTimeOfDay(params.timeOfDay ?? 10) // the sun is location-true — re-aim it for the new place
   await regenerateTerrain()
   // pull the cartouche info for the new zone (async, non-blocking)
-  if (params.groundInfo) groundInfo.load(params.demLat, params.demLon, dem)
+  if (params.groundInfo) chargeCartouche()
   // real coastline (Natural Earth) at coarse zoom — async, non-blocking; the
   // shader falls back to the elevation isoline until it arrives / if it fails.
   // ══════════ LE TRAIT DE CÔTE SUR L'EMPRISE — JALON 2 ══════════════════════
@@ -5631,7 +5680,7 @@ const panelCtx = {
   setGroundInfo: (v) => {
     groundInfo.enabled = v
     groundInfo.setVisible(v && modes.mode === 'surface')
-    if (v && dem && !groundInfo.lastInfo) groundInfo.load(params.demLat, params.demLon, dem)
+    if (v && dem && !groundInfo.lastInfo) chargeCartouche()
     else if (v) groundInfo.rerender()
   },
   setShadowRes: (v) => {

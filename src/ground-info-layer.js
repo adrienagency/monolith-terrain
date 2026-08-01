@@ -6,6 +6,7 @@
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
 import { gatherGroundInfo } from './ground-info.js'
+import { rectFenetre, statsRect } from './dem-emprise.js'
 
 const HALF = TERRAIN_SIZE / 2
 const GAP = 6 // clear safety ring: no text ever touches the slab edge
@@ -119,6 +120,11 @@ export class GroundInfoLayer {
     this.meshes = []
     this.reqId = 0
     this.lastInfo = null
+    // La fenêtre pour laquelle le cartouche affiché a été calculé. C'est elle
+    // que `doitRafraichirCartouche` compare à la fenêtre courante — pas la
+    // position du dernier chargement de zone, qui ne bouge plus une fois la
+    // carte posée. Voir ground-info.js pour la règle.
+    this.lastFenetre = null
     this.enabled = true
   }
 
@@ -417,8 +423,19 @@ export class GroundInfoLayer {
 
   // fetch info for a zone and lay it out when it resolves; stale requests are
   // dropped so a fast succession of zone loads never crosses wires
-  async load(lat, lon, dem) {
+  // `fenetre` : le décalage de lecture dans l'emprise 3×3 ({x,z}), ou null hors
+  // mode continu. ⚠️ IL NE SERT PAS À DÉPLACER LE CARTOUCHE — celui-ci est du
+  // mobilier, il reste dans le socle. Il sert à savoir DE QUOI PARLER : la
+  // plage d'altitude sous la dalle visible, et non celle de l'emprise entière,
+  // qui est neuf fois plus grande et donc presque toujours plus large.
+  async load(lat, lon, dem, fenetre = null) {
     const id = ++this.reqId
+    this.lastFenetre = fenetre ? { x: fenetre.x, z: fenetre.z } : null
+    let stats = null
+    if (dem?.empriseCote > 1) {
+      const r = rectFenetre(dem, fenetre?.x || 0, fenetre?.z || 0, TERRAIN_SIZE)
+      stats = statsRect(dem, r.px0, r.py0, r.cotePx)
+    }
     try {
       // ensure the cartouche fonts are ready before drawing to canvas, else the
       // first render falls back to a system face (fonts.load is a no-op once
@@ -427,7 +444,7 @@ export class GroundInfoLayer {
         document.fonts?.load('400 40px Rosarivo'),
         document.fonts?.load('500 30px "Bricolage Grotesque"'),
       ])
-      const info = await gatherGroundInfo({ lat, lon, dem })
+      const info = await gatherGroundInfo({ lat, lon, dem, stats })
       if (id !== this.reqId) return // superseded
       this.render(info)
       this._applyRace() // le rebuild a jeté les plans course — les regraver

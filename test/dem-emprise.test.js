@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { EMPRISE_COTE, EMPRISE_EN_VOL_MAX, enVolBorne, originesEmprise, recollerEmprise } from '../src/dem-emprise.js'
+import { EMPRISE_COTE, EMPRISE_EN_VOL_MAX, enVolBorne, originesEmprise, recollerEmprise, statsRect, rectFenetre } from '../src/dem-emprise.js'
 
 // Un faux bloc de MNT : la forme exacte que rend `loadDem` (dem.js:519), réduit
 // aux clés dont le recollage a besoin.
@@ -307,4 +307,79 @@ test('EMPRISE_EN_VOL_MAX borne le pic à trois chargements, pas neuf', () => {
   // d'intermédiaires (ImageData + Float32 + champ fusionné) là où neuf en
   // tenaient ~9 × 30. Voir le banc cité en tête de section avant de le monter.
   assert.equal(EMPRISE_EN_VOL_MAX, 3)
+})
+
+// ══════════ CE QU'IL Y A SOUS LA FENÊTRE ════════════════════════════════════
+//
+// Le damier de neuf constantes est exactement le motif qu'il faut ici : chaque
+// tiers de l'emprise porte son rang, donc le rectangle visible doit rendre
+// EXACTEMENT le rang du tiers qu'on vise. Une erreur d'un facteur `empriseCote`
+// — celle qui a déjà mordu `surfaceMetersPerUnit` et la barre d'échelle — se
+// traduit alors par un chiffre franchement faux, pas par un arrondi.
+
+const SOCLE = 56 // TERRAIN_SIZE
+
+test('rectFenetre au centre vise le TIERS CENTRAL de l’emprise', () => {
+  const e = recollerEmprise(neufBlocs(30)) // size 90, un tiers = 29,67 px
+  const r = rectFenetre(e, 0, 0, SOCLE)
+  assert.equal(r.cotePx, (e.size - 1) / 3)
+  // le centre du rectangle est le centre de l'emprise
+  assert.ok(Math.abs(r.px0 + r.cotePx / 2 - (e.size - 1) / 2) < 1e-9)
+  assert.ok(Math.abs(r.py0 + r.cotePx / 2 - (e.size - 1) / 2) < 1e-9)
+  assert.deepEqual(statsRect(e, r.px0, r.py0, r.cotePx), { minM: 4, maxM: 4, meanM: 4 }, 'le bloc central est le rang 4')
+})
+
+test('un défilement d’un socle vise le bloc VOISIN, pas un mélange', () => {
+  const e = recollerEmprise(neufBlocs(30))
+  // +x d'un socle → colonne de droite (rangs 2, 5, 8) ; +z → ligne du bas
+  const droite = rectFenetre(e, SOCLE, 0, SOCLE)
+  assert.deepEqual(statsRect(e, droite.px0, droite.py0, droite.cotePx), { minM: 5, maxM: 5, meanM: 5 })
+  const bas = rectFenetre(e, 0, SOCLE, SOCLE)
+  assert.deepEqual(statsRect(e, bas.px0, bas.py0, bas.cotePx), { minM: 7, maxM: 7, meanM: 7 })
+  const coin = rectFenetre(e, -SOCLE, -SOCLE, SOCLE)
+  assert.deepEqual(statsRect(e, coin.px0, coin.py0, coin.cotePx), { minM: 0, maxM: 0, meanM: 0 })
+})
+
+test('la plage sous la fenêtre est PLUS ÉTROITE que celle de l’emprise', () => {
+  // C'est tout le défaut du cartouche : il annonçait la seconde en montrant la
+  // première. Neuf blocs de 0 à 8 → l'emprise dit 0–8, la dalle dit 4–4.
+  const e = recollerEmprise(neufBlocs(30))
+  assert.equal(e.minM, 0)
+  assert.equal(e.maxM, 8)
+  const r = rectFenetre(e, 0, 0, SOCLE)
+  const s = statsRect(e, r.px0, r.py0, r.cotePx)
+  assert.ok(s.maxM - s.minM < e.maxM - e.minM)
+})
+
+test('statsRect rend une VRAIE moyenne, pas le zéro vertical', () => {
+  // ⚠️ `meanM` de l'emprise est celui du bloc CENTRAL — un zéro de scène, pas
+  // une altitude moyenne. Confondre les deux ferait dire « mean 4 m » à une
+  // dalle qui ne contient que des 0 et des 8.
+  const e = recollerEmprise(neufBlocs(30))
+  assert.equal(e.meanM, 4)
+  const s = statsRect(e, 0, 0, e.size) // l'emprise ENTIÈRE
+  assert.equal(s.minM, 0)
+  assert.equal(s.maxM, 8)
+  assert.ok(Math.abs(s.meanM - 4) < 0.2, `moyenne réelle ${s.meanM}`)
+})
+
+test('un rectangle qui déborde est BORNÉ, il ne rend ni NaN ni Infinity', () => {
+  // La butée élastique laisse la fenêtre sortir de l'emprise de 7 unités ;
+  // `sampleDem` y clampe. Lire à l'index négatif rendrait `undefined` → NaN,
+  // c'est-à-dire un cartouche muet.
+  const e = recollerEmprise(neufBlocs(30))
+  for (const [x, z] of [[-1e6, 0], [1e6, 0], [0, -1e6], [999, 999], [-70, -70], [70, 70]]) {
+    const r = rectFenetre(e, x, z, SOCLE)
+    const s = statsRect(e, r.px0, r.py0, r.cotePx)
+    assert.ok(Number.isFinite(s.minM) && Number.isFinite(s.maxM) && Number.isFinite(s.meanM), `(${x},${z}) → ${JSON.stringify(s)}`)
+  }
+})
+
+test('hors emprise 3×3, rectFenetre rend le bloc ENTIER — le mode ordinaire est intact', () => {
+  const b = bloc({ data: new Int16Array(16).fill(3), size: 4 })
+  const r = rectFenetre(b, 0, 0, SOCLE)
+  assert.equal(r.cotePx, b.size - 1)
+  assert.equal(r.px0, 0)
+  assert.equal(r.py0, 0)
+  assert.deepEqual(statsRect(b, r.px0, r.py0, r.cotePx), { minM: 3, maxM: 3, meanM: 3 })
 })

@@ -346,3 +346,88 @@ export function recollerEmprise(blocs) {
     empriseCote: EMPRISE_COTE,
   }
 }
+
+// ══════════ CE QU'IL Y A SOUS LA FENÊTRE, ET PAS SOUS L'EMPRISE ═════════════
+//
+// ⚠️ LE CARTOUCHE AU SOL MENTAIT, ET PAS SEULEMENT APRÈS UN DÉFILEMENT. Trouvé
+// à l'audit du jalon 3, vérifié ici : `minM`/`maxM` ci-dessus portent sur
+// l'emprise ENTIÈRE — c'est ce que `uHeightRange` demande, et c'est juste pour
+// lui. Mais le cartouche les affiche comme la plage d'altitude de la dalle
+// qu'on regarde, laquelle n'en est que le NEUVIÈME. À Chamonix, il annonçait la
+// plage des 21 km alentour sous une vallée qui n'en couvre que 7.
+//
+// La correction est de lire le rectangle VISIBLE. Le passage par des pixels
+// plutôt que par des unités monde n'est pas un détail : c'est le seul repère
+// que ce module partage avec `sampleDem`, et donc le seul où une erreur d'un
+// facteur `empriseCote` ne peut pas se glisser sans se voir.
+//
+// ⚠️ ET LA MOYENNE N'EST PAS `meanM`. `meanM` est le ZÉRO VERTICAL de la scène
+// (celui du bloc central au chargement) : le confondre avec l'altitude moyenne
+// de ce qu'on regarde ferait dire au cartouche « mean 1 200 m » sur une dalle
+// qui plafonne à 400. Elle est donc recalculée ici, sur le même rectangle.
+//
+// @param {{data:Int16Array|Float32Array, size:number}} dem
+// @param {number} px0 - coin haut-gauche du rectangle, en pixels du MNT
+// @param {number} py0
+// @param {number} cotePx - côté du rectangle, en pixels
+// @returns {{minM:number, maxM:number, meanM:number}}
+export function statsRect(dem, px0, py0, cotePx) {
+  const { data, size } = dem
+  // Bornage : la butée élastique laisse la fenêtre déborder de l'emprise, et
+  // `sampleDem` y clampe déjà. Lire à l'index négatif rendrait `undefined`,
+  // donc NaN, donc une plage d'altitude vide — un cartouche muet plutôt qu'un
+  // cartouche faux, mais muet quand même.
+  //
+  // ⚠️ ET ON ARRONDIT VERS L'INTÉRIEUR, ce qui n'est pas de la coquetterie. Le
+  // rectangle visible fait `(size − 1) / empriseCote` pixels, soit 1 535,67 sur
+  // une emprise réelle : ses bords ne tombent JAMAIS sur un pixel entier. Un
+  // arrondi au plus proche déborde alors d'un pixel sur la dalle voisine — et
+  // `minM`/`maxM` sont des statistiques d'ORDRE, un seul pixel étranger suffit
+  // à décaler le maximum. Vers l'intérieur, le cartouche décrit ce qu'on voit à
+  // coup sûr, jamais un morceau de ce qu'on ne voit pas.
+  const x0 = Math.max(0, Math.min(size - 1, Math.ceil(px0)))
+  const y0 = Math.max(0, Math.min(size - 1, Math.ceil(py0)))
+  const x1 = Math.max(x0 + 1, Math.min(size, Math.floor(px0 + cotePx) + 1))
+  const y1 = Math.max(y0 + 1, Math.min(size, Math.floor(py0 + cotePx) + 1))
+  let minM = Infinity
+  let maxM = -Infinity
+  let somme = 0
+  let n = 0
+  for (let y = y0; y < y1; y++) {
+    const ligne = y * size
+    for (let x = x0; x < x1; x++) {
+      const v = data[ligne + x]
+      if (v < minM) minM = v
+      if (v > maxM) maxM = v
+      somme += v
+      n++
+    }
+  }
+  if (!n) return { minM: 0, maxM: 0, meanM: 0 }
+  return { minM, maxM, meanM: somme / n }
+}
+
+// Le rectangle VISIBLE d'une emprise, en pixels du MNT, pour un décalage de
+// fenêtre donné.
+//
+// ⚠️ LA FORMULE EST CELLE DE `_makeDemSampler`, RECOPIÉE VOLONTAIREMENT plutôt
+// qu'importée : ce module doit rester pur (terrain.js tire three.js). Elle est
+// verrouillée par test — un `size` au lieu d'un `size - 1` déplacerait le
+// cartouche d'un pixel de MNT, soit ~14 m, ce que personne ne verrait jamais et
+// qui ferait quand même diverger deux vérités.
+//
+// @param {{size:number, empriseCote?:number}} dem
+// @param {number} fenX - décalage de fenêtre, en unités monde
+// @param {number} fenZ
+// @param {number} tailleSocle - TERRAIN_SIZE, en unités monde
+// @returns {{px0:number, py0:number, cotePx:number}}
+export function rectFenetre(dem, fenX, fenZ, tailleSocle) {
+  const cote = dem.empriseCote > 1 ? dem.empriseCote : 1
+  const span = tailleSocle * cote
+  const cotePx = (dem.size - 1) / cote
+  return {
+    px0: ((fenX - tailleSocle / 2) / span + 0.5) * (dem.size - 1),
+    py0: ((fenZ - tailleSocle / 2) / span + 0.5) * (dem.size - 1),
+    cotePx,
+  }
+}
