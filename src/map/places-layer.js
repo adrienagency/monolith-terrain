@@ -7,6 +7,8 @@ import { makeLabelTexture, labelInk, labelFontReady } from './text-label.js'
 import { labelScale, placeTier } from './place-scale.js'
 
 const HALF = TERRAIN_SIZE / 2
+// Décalage nul, partagé : hors mode continu il n'y a pas de fenêtre à retirer.
+const ZERO = { x: 0, z: 0 }
 // World units the label floats above the city's OWN ground point. Anchored to
 // the city's own GPS/terrain height so the name stays visually attached to
 // its city instead of hovering absurdly high over a distant peak.
@@ -114,9 +116,26 @@ export class PlacesLayer {
     // another" decision is left entirely to the screen-space declutter pass,
     // which already measures real projected pixel rects and is unaffected
     // by this change.
-    const maxN = Math.round((zoom >= 13 ? 90 : zoom >= 11 ? 60 : zoom >= 9 ? 40 : zoom >= 7 ? 24 : 12) * density)
+    // ══════════ L'EMPRISE 3×3 : NEUF FOIS PLUS DE SOL À PEUPLER ══════════════
+    //
+    // La fenêtre continue lit un champ de 168 unités et n'en montre que 56 à la
+    // fois. Les deux plafonds doivent suivre, mais PAS de la même façon :
+    //
+    //  · `halfLimit` DOIT valoir la demi-largeur du champ. Laissé à 26,88, il
+    //    ne sélectionnerait que le bloc central : on défilerait vers une région
+    //    vide de tout nom, ce qui se lit comme des données manquantes.
+    //  · `maxN` suit la SURFACE, donc le carré du côté. Le tripler seulement
+    //    (ce que proposait l'étude) diviserait par trois la densité de noms
+    //    dans la fenêtre visible — une régression visible sur l'image de
+    //    départ, celle qu'on ne veut justement pas toucher.
+    //
+    // `minDist` NE BOUGE PAS : il est en unités monde et une unité vaut le même
+    // nombre de mètres sur une emprise (`geo.demSpan`). Sa portée géographique
+    // est donc déjà la bonne.
+    const cote = dem?.empriseCote > 1 ? dem.empriseCote : 1
+    const maxN = Math.round((zoom >= 13 ? 90 : zoom >= 11 ? 60 : zoom >= 9 ? 40 : zoom >= 7 ? 24 : 12) * density * cote * cote)
     const minDist = TERRAIN_SIZE * (zoom >= 12 ? 0.02 : zoom >= 10 ? 0.03 : zoom >= 9 ? 0.04 : 0.06)
-    let picks = pickPlaces(rows, { zoom, toWorld: (lat, lon) => latLonToWorld(dem, lat, lon), halfLimit: HALF * 0.96, maxN, minDist })
+    let picks = pickPlaces(rows, { zoom, toWorld: (lat, lon) => latLonToWorld(dem, lat, lon), halfLimit: HALF * cote * 0.96, maxN, minDist })
     // zone isolée : on jette les villes hors du territoire découpé. Filtré ICI,
     // après la sélection, et pas en amont : les caps (maxN, minDist) doivent
     // continuer de raisonner sur la densité RÉELLE de la région, sinon une
@@ -128,7 +147,15 @@ export class PlacesLayer {
     const dotGeo = new THREE.CircleGeometry(0.075, 12); dotGeo.rotateX(-Math.PI / 2)
 
     for (const p of picks) {
-      const groundY = terrain.sample ? terrain.sample(p.w.x, p.w.z) : 0
+      // ⚠️ `terrain.sample` PARLE EN COORDONNÉES DE GÉOMÉTRIE, `p.w` EN
+      // COORDONNÉES DE CHAMP. Le sampler ajoute lui-même le décalage de fenêtre
+      // (`x + fen.x`) : lui passer `p.w.x` tel quel lui ferait lire le sol
+      // DEUX FOIS décalé, et tous les noms se poseraient à l'altitude d'un
+      // autre endroit — flottant en l'air ou enterrés. On retire donc le
+      // décalage à l'aller. Hors mode continu `fen` vaut zéro et l'appel est
+      // celui d'avant, au bit près.
+      const fen = terrain.fenetre ?? ZERO
+      const groundY = terrain.sample ? terrain.sample(p.w.x - fen.x, p.w.z - fen.z) : 0
       const labelY = groundY + CLEARANCE
       const scale = labelScale(p.pop, p.cap) * sizeMul
       // shared with labelScale's tier so a place's colour darkness always
@@ -197,8 +224,25 @@ export class PlacesLayer {
     const vw = window.innerWidth, vh = window.innerHeight
     const accepted = []
     const ndc = new THREE.Vector3()
+    // ⚠️ LE GROUPE N'EST PLUS FORCÉMENT À L'ORIGINE. En mode continu il est
+    // translaté de −fenêtre à chaque image pour que les noms restent accrochés
+    // à leur point du sol ; `sprite.position` est donc une position LOCALE. La
+    // projeter telle quelle décluttrerait sur les positions d'avant le
+    // défilement — les noms se masqueraient les uns les autres au mauvais
+    // endroit, et l'effet serait pire que pas de declutter du tout.
+    const ox = this.group.position.x
+    const oz = this.group.position.z
     for (const e of this._entries) {
-      ndc.copy(e.sprite.position).project(camera)
+      const wx = e.sprite.position.x + ox
+      const wz = e.sprite.position.z + oz
+      // ⚠️ ET CE QUI EST HORS DE LA FENÊTRE NE S'AFFICHE PAS. Les lieux sont
+      // choisis sur toute l'emprise (neuf fois la surface visible) : sans ce
+      // rejet, huit neuvièmes des noms flotteraient en l'air au-delà du bord du
+      // socle, au-dessus du vide. « Plus rien ne dépasse de la fenêtre. »
+      if (Math.abs(wx) > HALF || Math.abs(wz) > HALF) {
+        e.sprite.visible = false; e.dot.visible = false; e.leader.visible = false; continue
+      }
+      ndc.set(wx, e.sprite.position.y, wz).project(camera)
       if (ndc.z > 1) { e.sprite.visible = false; e.dot.visible = false; e.leader.visible = false; continue }
       const cx = (ndc.x * 0.5 + 0.5) * vw
       const cy = (1 - (ndc.y * 0.5 + 0.5)) * vh

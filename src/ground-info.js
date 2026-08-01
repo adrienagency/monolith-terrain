@@ -57,6 +57,51 @@ export function splitBlurb(text) {
   return { description, anecdote: trimBlurb(anecdote, 170) }
 }
 
+// ══════════ QUAND LE CARTOUCHE DOIT SE RAFRAÎCHIR ═══════════════════════════
+//
+// ⚠️ CE N'EST PAS UN PROBLÈME DE SUIVI, C'EST DE LA FRAÎCHEUR. `ground-info`
+// reste dans le socle et NE DOIT PAS défiler — c'est du mobilier, pas du
+// paysage (audit du jalon 3). Mais son CONTENU parle du sol : nom du lieu,
+// coordonnées, plage d'altitude. Après un défilement d'un socle entier —
+// 21 km à z12, d'Annecy à Chamonix — il décrit un endroit où l'on n'est plus.
+//
+// Trois raisons interdisent de le refaire à chaque image :
+//  · il interroge Nominatim ET Wikipédia (deux services publics, sans clé) ;
+//  · il regrave une dizaine de canevas et autant de textures ;
+//  · un cartouche dont le texte change en continu sous le doigt est illisible.
+//
+// D'où DEUX conditions, et la seconde est celle qui compte :
+//
+//  1. AVOIR ASSEZ BOUGÉ. Un quart de socle — au-delà, la moitié de ce que
+//     décrit le cartouche est sortie du cadre. En dessous, on regraverait des
+//     textures pour un texte identique : le mémo web est déjà arrondi à 0,01°,
+//     soit ~1,1 km, donc même le nom du lieu ne bougerait pas.
+//  2. ÊTRE AU REPOS. La même notion que la finesse du maillage : on ne demande
+//     rien au réseau et on ne regrave rien pendant que l'image bouge. Le
+//     rafraîchissement arrive donc APRÈS le geste, comme le maillage fin —
+//     on voit le relief se poser, puis la légende se mettre d'accord avec lui.
+//     C'est aussi le seul ordre lisible.
+export const CARTOUCHE_SEUIL_FRAC = 0.25
+
+/**
+ * Faut-il refaire le cartouche ?
+ *
+ * @param {object} o
+ * @param {{x:number,z:number}|null} o.derniere - fenêtre du dernier cartouche posé
+ * @param {{x:number,z:number}|null} o.courante - fenêtre affichée maintenant
+ * @param {boolean} o.repos - l'image est-elle posée ? (fenetre-finesse.js)
+ * @param {number} o.tailleSocle - TERRAIN_SIZE, en unités monde
+ * @returns {boolean}
+ */
+export function doitRafraichirCartouche({ derniere, courante, repos, tailleSocle }) {
+  if (!repos || !courante || !derniere) return false
+  // ⚠️ « jamais posé » (derniere null) n'est PAS l'affaire de cette règle : elle
+  // sait dire « il a vieilli », pas « il n'existe pas ». Le premier cartouche
+  // est posé par le chargement de la zone, qui a le lieu sous la main.
+  const d = Math.hypot(courante.x - derniere.x, courante.z - derniere.z)
+  return Number.isFinite(d) && d >= tailleSocle * CARTOUCHE_SEUIL_FRAC
+}
+
 // a real scale bar label for a patch that is `extentMeters` across: a round
 // segment (1/2/5/10/25/50/100…) near a quarter of the width. Pure & tested.
 export function scaleBar(extentMeters) {
@@ -114,12 +159,23 @@ const webKey = (lat, lon) => `${lat.toFixed(2)},${lon.toFixed(2)}`
 
 // Assemble the ground-info payload for a location. Never throws — every source
 // degrades to a sane fallback so the cartouche always has something to show.
-export async function gatherGroundInfo({ lat, lon, dem, fetchAnecdote = wikipediaAnecdote }) {
+// `stats` : le min/max/moyenne DE CE QU'ON REGARDE (dem-emprise.statsRect), ou
+// null pour retomber sur les statistiques du MNT entier.
+//
+// ⚠️ ET L'ÉTENDUE EST CELLE DU BLOC VISIBLE, PAS DU MNT. En emprise 3×3,
+// `dem.extentMeters` est TRIPLÉ (dem-emprise.js le dit en toutes lettres) : la
+// barre d'échelle annonçait donc trois fois trop de kilomètres, dès le
+// chargement et sans qu'aucun défilement soit nécessaire. C'est la même erreur
+// d'un facteur `empriseCote` que `surfaceMetersPerUnit` avait déjà eue à
+// corriger dans geo.js — le troisième endroit où elle se glisse.
+export async function gatherGroundInfo({ lat, lon, dem, stats = null, fetchAnecdote = wikipediaAnecdote }) {
+  const cote = dem?.empriseCote > 1 ? dem.empriseCote : 1
+  const h = stats || dem
   const out = {
     coord: formatCoord(lat, lon),
     coordDMS: `${toDMS(lat, true)}  ${toDMS(lon, false)}`,
-    elevation: dem ? formatElevation(dem.minM, dem.maxM, dem.meanM) : '',
-    scale: dem ? scaleBar(dem.extentMeters) : '',
+    elevation: h ? formatElevation(h.minM, h.maxM, h.meanM) : '',
+    scale: dem ? scaleBar(dem.extentMeters / cote) : '',
     name: '',
     country: '',
     title: '',

@@ -3,9 +3,16 @@ import { Simplex2, mulberry32, fbm, ridged, smoothstep, lerp } from './noise.js'
 import { sampleDem } from './dem.js'
 import { buildRamp2D } from './palette.js'
 import { gridTemplate } from './grid-template.js'
-import { detailField, tintField } from './detail-noise.js'
+import { gridNormals } from './grid-normals.js'
+import { detailField, detailFieldEmprise, accordeDetailScale, tintField } from './detail-noise.js'
 import { analyseMemoLire, analyseMemoEcrire } from './dem-memo.js'
-import { landMaskFromImage } from './sea-mask.js'
+import { landMaskFromField, BASSIN_FRAC_DEFAUT } from './sea-mask.js'
+import { ATLAS_ANALYSE, ATLAS_MER, fracBassinEmprise } from './dem-emprise.js'
+// les huit demi-plans de la fenêtre, purs et testés — voir src/fenetre-clip.js
+// ⚠️ ALIASÉ : la méthode `Terrain.plansFenetre()` rend des `THREE.Plane`, la
+// fonction pure rend des descriptions. Le même nom pour les deux se lit comme
+// une récursion qui n'existe pas.
+import { plansFenetre as demiPlansFenetre } from './fenetre-clip.js'
 // L'analyse de relief et le masque de mer ne sont plus calcules ici : ils
 // partent dans un Worker (terrain-jobs.js). ~470 ms de fil principal fige par
 // reconstruction, sur MNT 1536². Le calcul est identique octet pour octet.
@@ -47,6 +54,10 @@ function swapClone(prev, src, repeat) {
 }
 
 export const TERRAIN_SIZE = 56
+
+// Plafond de résolution du maillage en mode fenêtre continue — voir
+// `Terrain._resFenetre` pour la mesure qui l'impose.
+export const RES_FENETRE_CONTINUE = 384
 
 // Fancy surface-shader ids match the `surfaceFx` GLSL switch below; their
 // labels, defaults and per-effect controls live in src/fx-meta.js.
@@ -101,6 +112,24 @@ export class Terrain {
   // construction cuit les deux textures pour les jeter à la ligne suivante.
   constructor(params, opts = {}) {
     this.blockOffset = { x: opts.offset?.x ?? 0, z: opts.offset?.z ?? 0 }
+    // ══════════ LA FENÊTRE CONTINUE ═════════════════════════════════════════
+    // Décalage, en unités monde, de ce que la géométrie LIT dans le champ. La
+    // géométrie, elle, ne bouge jamais : c'est ce qui permet de ne traiter que
+    // 148 225 sommets au lieu de 594 441 (étude 3×3 §3.3).
+    //
+    // ⚠️ À DISTINGUER de `blockOffset`, juste au-dessus, avec qui on le
+    // confondra un jour. `blockOffset` déplace le MESH dans le monde (une dalle
+    // voisine du damier). `fenetre` déplace la LECTURE dans le champ. L'un
+    // bouge l'objet, l'autre bouge son contenu.
+    //
+    // À (0,0) — et c'est l'invariant de tout le jalon — le comportement est
+    // rigoureusement celui d'avant : `empriseCote` vaut 1 sur un bloc ordinaire,
+    // donc `_span()` rend TERRAIN_SIZE et la formule redevient l'ancienne.
+    this.fenetre = { x: 0, z: 0 }
+    // La finesse du maillage en mode continu, posée par main.js une fois par
+    // image (fenetre-finesse.js). Zéro = « personne n'a d'avis », et on retombe
+    // sur le plafond permanent du jalon 3. Voir `_resFenetre`.
+    this.resFenetre = 0
     this.analysisMax = opts.analysisMax ?? 0
     this.seaMax = opts.seaMax ?? 0
     if (opts.shareFrom) this.shareTexturesFrom(opts.shareFrom)
@@ -169,6 +198,20 @@ export class Terrain {
       uSlabHalf: { value: TERRAIN_SIZE / 2 },
       // décalage monde du bloc (damier) : clip + masques passent en local
       uBlockOffset: { value: new THREE.Vector2(this.blockOffset.x, this.blockOffset.z) },
+      // ══════════ MODE CONTINU : LES MASQUES DÉFILENT, LE CLIP NON ═══════════
+      //
+      // `uMaskSpan` est la largeur AU SOL des masques posés en texture, et
+      // `uFenetre` le décalage de lecture du mode continu. Hors mode continu ils
+      // valent TERRAIN_SIZE et (0,0) : l'expression d'uv redevient celle d'avant
+      // au bit près, et c'est ce que verrouille le premier test de
+      // test/mer-emprise.test.js.
+      //
+      // ⚠️ ILS NE VONT PAS SUR LE CLIP DE SOCLE. Le clip de superellipse et le
+      // fondu de bord sont la FENÊTRE (les meubles) ; les masques sont le MONDE
+      // (le paysage). Leur donner le même décalage ferait défiler le socle
+      // lui-même — c'est-à-dire disparaître le bloc.
+      uMaskSpan: { value: TERRAIN_SIZE },
+      uFenetre: { value: new THREE.Vector2(0, 0) },
       // v42: MEME arrondi que la mer (rayon clampe, cercle) - l'ecart entre
       // le coin du socle et celui de l'eau se voyait (retour Adrien)
       uSlabCorner: { value: Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE)) },
@@ -371,6 +414,8 @@ uniform vec3 uContourColor;
 uniform float uSlabHalf;
 uniform float uSlabCorner;
 uniform float uSlabCornerN;
+uniform float uMaskSpan; // largeur au sol des masques (56, ou 168 sur l'emprise 3×3)
+uniform vec2 uFenetre;   // décalage de lecture du mode continu (0 sinon)
 uniform vec2 uBlockOffset;
 uniform sampler2D uRegionMask;
 uniform float uRegionOn;
@@ -420,6 +465,24 @@ uniform float uLmOn;
 uniform float uLmFlow;
 uniform float uLmFlowAmt;
 ${FX_GLSL}
+// ══════════ LA COORDONNÉE DE CHAMP D'UN FRAGMENT ═══════════════════════════
+//
+// vWorldPos.xz est la position dans la GÉOMÉTRIE. En mode continu la
+// géométrie ne bouge pas : c'est le relief qui défile dessous, par un décalage
+// de LECTURE du MNT (uFenetre). Tout ce qui est peint « sur le sol » — une
+// matière, un motif, une photo, une grille — doit donc s'indexer sur
+// champXZ(), sinon il reste COLLÉ À L'ÉCRAN pendant que le paysage s'en va.
+//
+// C'est exactement le piège du grain FBM que l'étude §5.4 annonçait et que
+// 646acd5 a corrigé côté géométrie ; ici c'est le même piège, côté fragment.
+//
+// ⚠️ CE QUI N'EST PAS PEINT SUR LE SOL NE DOIT PAS L'UTILISER : le découpage du
+// socle, le fondu vers son bord, l'ombre des nuages (le ciel est la fenêtre) et
+// les balayages de scan appartiennent à la FENÊTRE et restent en vWorldPos.
+//
+// Hors mode continu uFenetre vaut (0,0) : champXZ() EST vWorldPos.xz, au
+// bit près.
+vec2 champXZ() { return vWorldPos.xz + uFenetre; }
 // --- Appearance blend modes (Figma / W3C compositing set) — b = backdrop map,
 // s = the shader colour. Separable ops are channel-wise; the last four are the
 // non-separable HSL modes. ---
@@ -493,7 +556,10 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   // says REAL sea (edge-connected / big basin), killing phantom coarse-zoom lakes.
   float seaMask = 1.0;
   if (uSeaMaskOn > 0.5) {
-    vec2 smUv = (vWorldPos.xz - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
+    // UV D'ATLAS (jalon 2) — voir uCoastMask ci-dessous pour le POURQUOI.
+    // Hors mode continu uFenetre vaut (0,0) et uMaskSpan vaut exactement
+    // uSlabHalf * 2 : l'expression redevient celle d'avant, au bit près.
+    vec2 smUv = (vWorldPos.xz - uBlockOffset + uFenetre) / uMaskSpan + 0.5;
     seaMask = texture2D(uSeaMask, smUv).r;
   }
   // coarse-zoom coast (z4–z8): the real Natural-Earth land/sea mask is the
@@ -502,7 +568,19 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   // coasts AND phantom inland lakes. Off (z9+ / fetch failed) → old behaviour.
   float landness = 1.0;
   if (uCoastMaskOn > 0.5) {
-    vec2 cmUv = (vWorldPos.xz - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
+    // ⚠️ L'EXPRESSION D'UV D'ATLAS, PARTAGÉE PAR LES TROIS CHAMPS DU RELIEF —
+    // masque côtier, masque de mer, analyse. Les trois sont cuits sur l'emprise
+    // ENTIÈRE (168 unités), la géométrie n'en montre que 56, et c'est la
+    // LECTURE qui se déplace : uFenetre est le décalage du mode continu,
+    // uMaskSpan la largeur au sol du champ. Lu sur 56 sans décalage, un champ
+    // d'emprise serait agrandi trois fois ET immobile sous le relief qui glisse.
+    // Hors mode continu uFenetre = (0,0) et uMaskSpan = uSlabHalf * 2 :
+    // l'image d'aujourd'hui est inchangée au bit près.
+    // (test/atlas-champs.test.js verrouille les trois lignes sur le source :
+    // une lecture restée en UV de bloc est un défaut MUET.)
+    // ⚠️ PAS DE BACKTICK DANS CE COMMENTAIRE — le GLSL est un littéral gabarit
+    // JS : un accent grave y ferme la chaîne et casse TOUT le module.
+    vec2 cmUv = (vWorldPos.xz - uBlockOffset + uFenetre) / uMaskSpan + 0.5;
     landness = texture2D(uCoastMask, cmUv).r;
   }
   // v42: le masque cotier ne peut JAMAIS declarer sous-marine une terre
@@ -524,13 +602,14 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     // warp du domaine (casse la répétition) + deux échelles + longues bandes
     // de rayons qui balaient lentement. Même rendu jour et nuit (photos réf.).
     if (uSeaCausK > 0.001) {
-      vec2 cw = vWorldPos.xz + 0.9 * vec2(sin(vWorldPos.z * 0.11 + uCausT * 0.07), cos(vWorldPos.x * 0.13 - uCausT * 0.05));
+      vec2 cwx = champXZ(); // les mailles de lumière appartiennent au FOND, pas à l'écran
+      vec2 cw = cwx + 0.9 * vec2(sin(cwx.y * 0.11 + uCausT * 0.07), cos(cwx.x * 0.13 - uCausT * 0.05));
       float cc1 = seaCaustic(cw * 0.55 + vec2(uCausT * 0.05, 0.0), uCausT * 0.8);
       float cc2 = seaCaustic(cw * 0.23 - vec2(0.0, uCausT * 0.03), uCausT * 0.5);
       float cnet = clamp(cc1 * 1.2 + cc2 * 0.5, 0.0, 1.5);
       float cfil = smoothstep(0.5, 1.1, cnet);
       // rayons de lumière : bandes larges et lentes qui traversent le fond
-      float crays = mix(0.72, 1.0, 0.5 + 0.5 * sin(dot(vWorldPos.xz, vec2(0.33, 0.21)) + uCausT * 0.2));
+      float crays = mix(0.72, 1.0, 0.5 + 0.5 * sin(dot(cwx, vec2(0.33, 0.21)) + uCausT * 0.2));
       // v50 : les caustiques ne vivent QUE là où la lumière atteint le fond —
       // 0 au large, plein en eau peu profonde. L'ancien plancher 0.3 laissait
       // des filaments lumineux sur le fond profond qui, vus à travers l'eau,
@@ -558,8 +637,8 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     vec4 anl = vec4(0.5);
     if (uColorMode == 1) {
       if (uAnalysisOn > 0.5) {
-        // même UV monde que uSeaMask : rien à inventer côté échantillonnage
-        vec2 anUv = (vWorldPos.xz - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
+        // même UV d'atlas que uSeaMask : rien à inventer côté échantillonnage
+        vec2 anUv = (vWorldPos.xz - uBlockOffset + uFenetre) / uMaskSpan + 0.5;
         anl = texture2D(uAnalysis, anUv);
       }
       // au-dessus de la limite des arbres il n'y a plus de végétation à
@@ -639,7 +718,7 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   float effTint = uTint;
   float paintShade = fxShade;
   if (uMatNoiseOn > 0.5) {
-    float mn = mnNoise(vWorldPos.xz * uMatNoiseScale);
+    float mn = mnNoise(champXZ() * uMatNoiseScale); // la dissolution est une matière du SOL
     float reveal = 1.0 - smoothstep(uMatNoiseCut - uMatNoiseSoft, uMatNoiseCut + uMatNoiseSoft, mn);
     effTint = mix(uTint, 1.0, reveal);
     paintShade = mix(fxShade, 1.0, reveal);
@@ -659,7 +738,41 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   // still sits on top of the photograph rather than being buried by it. That
   // ordering is most of what keeps this from becoming a plain satellite viewer.
   if (uAerialOn > 0.5) {
-    vec2 aUv = (vWorldPos.xz - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
+    // ⚠️ champXZ(), PAS vWorldPos.xz — signalé par Adrien : « la
+    // cartographie aérienne ne suit pas le terrain ». La photo est REGISTRÉE
+    // AU SOL (elle est composée sur les deux coins exacts du bloc, voir
+    // aerial-layer.js:demBounds) : indexée sur la géométrie, elle restait
+    // collée à l'écran et montrait les rues d'une vallée sur les crêtes de la
+    // voisine — le défaut « Vienne sur le mont Fuji » que refreshAerialCore
+    // évite déjà d'un bloc à l'autre, ici à l'intérieur d'un seul.
+    // ⚠️ uMaskSpan ET PAS uSlabHalf * 2.0 — C'EST LA PHOTO SUR 1 CARREAU
+    // SUR 9. La mosaïque est composée sur l'emprise ENTIÈRE (aerial-layer.js,
+    // demBounds), qui fait 168 unités en mode continu. Diviser par 56 la
+    // rétrécissait au tiers de sa largeur, donc au NEUVIÈME de sa surface, et
+    // ce neuvième restait collé au socle central : c'est le défaut qu'Adrien a
+    // signalé. Les deux longueurs DOIVENT bouger ensemble, sinon la photo se
+    // retrouve étirée ×3 ou comprimée ×3 sans que rien ne paraisse cassé.
+    // uMaskSpan vaut 56 sur un bloc et 168 sur une emprise : hors mode
+    // continu l'expression est celle d'avant, au bit près.
+    vec2 aUv = (champXZ() - uBlockOffset) / uMaskSpan + 0.5;
+    // ⚠️ IL RESTE UN BORD, MAIS C'EST CELUI DE L'EMPRISE. La photo couvre
+    // maintenant tout ce qu'on peut atteindre : à course pleine (±56) le bord
+    // du socle (±28) touche EXACTEMENT le bord de l'emprise (±84). Seul le
+    // débordement élastique (7 unités de plus, 0,3 s) peut mordre au-delà, là
+    // où texture2D étirerait le texel de bord en traînées. On garde donc le
+    // fondu, mais posé sur le bon bord et à largeur constante en UNITÉS MONDE
+    // (~1,7, comme avant) : le rapporter à l'emprise le rendrait trois fois
+    // plus large et mangerait de la vraie photo.
+    //
+    // ⚠️ ET SEULEMENT EN MODE CONTINU. Hors emprise, tout fragment du socle est
+    // par construction dans [0,1] : le fondu mangerait la photo sur les quatre
+    // bords de CHAQUE bloc, c'est-à-dire une régression bien visible sur
+    // l'image d'aujourd'hui. uMaskSpan est le seul témoin déjà transmis au
+    // shader qui distingue les deux, et il ne coûte rien.
+    float aCont = step(uSlabHalf * 2.0 + 1.0, uMaskSpan);
+    float aBande = 1.7 / uMaskSpan;
+    vec2 aEdge = smoothstep(vec2(0.0), vec2(aBande), aUv) * (1.0 - smoothstep(vec2(1.0 - aBande), vec2(1.0), aUv));
+    float aIn = mix(1.0, aEdge.x * aEdge.y, aCont);
     aUv.y = 1.0 - aUv.y; // texture rows run north->south, world +Z runs south->north
     aUv = uAerialOffset + aUv * uAerialScale; // place the mosaic (see aerialUvTransform)
     vec3 aerial = texture2D(uAerial, aUv).rgb;
@@ -676,14 +789,18 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
       float band = max(uSeaRange * uAerialCoastFade, 1e-4);
       aFade = smoothstep(uSeaY - band, uSeaY, vWorldPos.y); // 1 au rivage → 0 au fond
     }
-    diffuseColor.rgb = mix(diffuseColor.rgb, aerial * (0.6 + 0.8 * shade), uAerialOpacity * aFade);
+    diffuseColor.rgb = mix(diffuseColor.rgb, aerial * (0.6 + 0.8 * shade), uAerialOpacity * aFade * aIn);
   }
 
   // Fancy surface shader paints OVER the final surface — the hypsometric map OR
   // a relief material (wood/carbon/...). Materials sit BELOW the shaders, so a
   // shader shows on top of whatever the relief is wearing. Off (0) = untouched.
   if (uSurfaceFx > 0) {
-    vec3 fxc = surfaceFx(uSurfaceFx, vWorldPos.xz * 0.15, uFxTime) * fxShade;
+    // ⚠️ champXZ() ET PAS vWorldPos.xz. La matière est peinte SUR LE SOL :
+    // indexée sur la géométrie, elle serait restée collée à l'écran pendant que
+    // le relief défile — un moirage immobile sur un paysage en mouvement, le
+    // défaut que l'œil attrape tout de suite (étude §5.4, signalé par Adrien).
+    vec3 fxc = surfaceFx(uSurfaceFx, champXZ() * 0.15, uFxTime) * fxShade;
     diffuseColor.rgb = mix(diffuseColor.rgb, fxBlend(diffuseColor.rgb, fxc, uFxBlend), uFxOpacity); // Appearance
   }
 
@@ -729,7 +846,9 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   diffuseColor.rgb = mix(diffuseColor.rgb, uContourColor, contour);
 
   // --- survey grid in world x/z
-  vec2 g = vWorldPos.xz / uGridStep;
+  // La grille de relevé est une CARTOGRAPHIE : ses lignes marquent le sol, pas
+  // l'écran. Restée en vWorldPos, elle aurait glissé sous le terrain.
+  vec2 g = champXZ() / uGridStep;
   vec2 dg = fwidth(g);
   vec2 distGrid = abs(fract(g + 0.5) - 0.5);
   float gx = 1.0 - smoothstep(0.0, dg.x * 1.4, distGrid.x);
@@ -827,7 +946,7 @@ if (uScanT >= 0.0 && (uScanType == 0 || uScanType == 3)) {
 // Liquid metal: a slow molten flow ripples the surface normal so the chrome
 // reflections drift across the relief (uLmFlowAmt 0 = a still mirror)
 if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
-  vec2 fp = vWorldPos.xz * 0.55;
+  vec2 fp = champXZ() * 0.55; // le flux du métal coule sur le RELIEF, pas sur l'écran
   float e = 0.12;
   float n0 = fxFbm(fp + uLmFlow);
   float nx = fxFbm(fp + vec2(e, 0.0) + uLmFlow);
@@ -854,7 +973,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
 
   // PARTAGE DES TEXTURES QUI SONT LES MÊMES PARTOUT — rampe hypsométrique,
   // rugosité et bump. Sur un damier plein, les 24 dalles cuisaient 24 copies
-  // OCTET POUR OCTET identiques : le seed de rugosité est `params.seed + 777`,
+  // OCTET POUR OCTET identiques : le seed de rugosité est params.seed + 777,
   // commun à tous les blocs, et la rampe ne dépend que de la palette. 2,13 Mo
   // et 80 ms de calcul par dalle, pour rien.
   //
@@ -862,7 +981,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // source DISPOSE son ancienne texture à chaque recuisson (changement de
   // palette, régénération du relief). Un emprunteur qui garderait la référence
   // pointerait sur une texture morte — relief noir. D'où l'ensemble
-  // `_shareTo` : c'est la SOURCE qui repousse la nouvelle texture à ses
+  // _shareTo : c'est la SOURCE qui repousse la nouvelle texture à ses
   // emprunteurs, au lieu de compter sur l'appelant pour resynchroniser. Deux
   // chemins de main.js (régénération du relief, nuancier du panneau Créer)
   // recuisaient d'ailleurs sans prévenir le damier.
@@ -966,6 +1085,58 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     }
   }
 
+  // ══════════ CE À QUOI LES CALQUES SE TAILLENT EN MODE CONTINU ═════════════
+  //
+  // L'empreinte de CONSTRUCTION, qui couvre l'emprise entière. Les calques du
+  // sol (rivières, lacs, plans d'eau) cuisent leur géométrie une fois sur les
+  // 168 unités, et c'est le GPU qui coupe ensuite à la fenêtre — la découpe CPU
+  // ne peut pas se refaire par image (étude 3×3 §5.2 : 10 à 100 ms).
+  //
+  // ⚠️ PAS D'ARRONDI ICI. Le bord de l'emprise n'est pas un bord de socle : rien
+  // n'y est visible, c'est simplement là que le MNT s'arrête. Un arrondi y
+  // coûterait 5 760 tests de superellipse par reconstruction (blockOutline en
+  // 192 sommets) pour découper une frontière que personne ne voit.
+  //
+  // Rend `null` hors mode continu : l'appelant garde `blockFootprint()`.
+  empriseFootprint() {
+    const cote = this.dem?.empriseCote > 1 ? this.dem.empriseCote : 1
+    if (cote === 1) return null
+    const u = this.mapUniforms
+    const regionOn = u.uRegionOn.value > 0.5
+    return {
+      half: u.uSlabHalf.value * cote,
+      corner: 0,
+      cornerN: u.uSlabCornerN.value,
+      regionOn,
+      regionSample: regionOn ? (x, z) => this.regionSample(x, z) : null,
+    }
+  }
+
+  // Les plans de coupe qui rendent la fenêtre au GPU — `null` hors mode continu.
+  //
+  // ⚠️ CONSTRUITS UNE FOIS ET RÉUTILISÉS TELS QUELS. Ils ne dépendent pas du
+  // décalage : en mode continu le socle reste centré sur l'origine du monde et
+  // c'est la géométrie du calque qui défile dessous (son groupe porte −fenêtre).
+  // Voir src/fenetre-clip.js pour l'octogone et ce qu'il approxime.
+  // ⚠️ ET C'EST LE MÊME TABLEAU POUR TOUS LES MATÉRIAUX : three.js compile une
+  // variante de shader par NOMBRE de plans, pas par tableau, mais partager
+  // l'objet évite de recréer huit `Plane` par matériau à chaque reconstruction.
+  plansFenetre() {
+    const fp = this.empriseFootprint()
+    if (!fp) return null
+    const u = this.mapUniforms
+    const half = u.uSlabHalf.value
+    const corner = u.uRegionOn.value > 0.5 ? 0 : u.uSlabCorner.value
+    const cle = `${half}:${corner}`
+    if (this._plansCle !== cle) {
+      this._plansCle = cle
+      this._plans = demiPlansFenetre(half, corner).map(
+        (p) => new THREE.Plane(new THREE.Vector3(p.normal[0], p.normal[1], p.normal[2]), p.constant)
+      )
+    }
+    return this._plans
+  }
+
   // `rebuildFields: false` — LÂCHER LE TRAIT DE CÔTE SANS RECUIRE LA MER.
   // Utile au seul appelant qui sait qu'une reconstruction complète arrive dans
   // la foulée : main.js lâche le trait de côte de la zone PRÉCÉDENTE juste
@@ -986,7 +1157,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       this.mapUniforms.uCoastMask.value = this._coastPlaceholder
       this.mapUniforms.uCoastMaskOn.value = 0
     }
-    // coastImage (ImageData du masque, extraite une fois par l'appelant) :
+    // coastImage (champ R8 du masque, le tableau MÊME de sa DataTexture) :
     // corrige le garde-fou topologique sea-mask — un polder sous 0 m déclaré
     // TERRE par le trait de côte ne doit plus être flood-fillé en mer. Le
     // fetch du masque est async : à sa réception on RE-construit le sea mask.
@@ -1049,27 +1220,189 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     return this._h2ft ? this._h2ft(h) : Math.round(4800 + h * 420)
   }
 
+  // ══════════ L'ÉTENDUE MONDE DU CHAMP ══════════════════════════════════════
+  //
+  // Un bloc ordinaire couvre TERRAIN_SIZE unités ; une emprise 3×3 en couvre
+  // trois fois plus, pour la MÊME résolution au sol (dem-emprise.js recolle, il
+  // ne rééchantillonne pas). Toutes les formules qui convertissaient `x` en
+  // pixel de champ passent par ici.
+  //
+  // ⚠️ ET L'ÉCHELLE VERTICALE NE BOUGE PAS. `scale = span / extentMeters` : le
+  // numérateur triple et le dénominateur aussi, donc le résultat est identique
+  // au bit près. C'est ce qui garantit qu'entrer en mode continu ne change pas
+  // d'un pouce la hauteur du relief — remplacer `TERRAIN_SIZE` par `_span()`
+  // sans tripler `extentMeters` écraserait le relief au tiers de sa hauteur.
+  _span() {
+    return TERRAIN_SIZE * (this.dem?.empriseCote ?? 1)
+  }
+
+  // ══════════ LA RÉSOLUTION DE LA FENÊTRE CONTINUE ══════════════════════════
+  //
+  // MESURÉ, machine de développement, emprise 3×3, La Réunion z13 et Chamonix
+  // z12, médiane sur 15 images :
+  //
+  //   res | sommets | un pas de fenêtre | budget de l'étude
+  //   768 | 591 361 |      36,0 ms      |        6 ms   ← six fois trop
+  //   384 | 148 225 |       (voir plus bas)
+  //
+  // L'étude proposait déjà « res 384 pendant le drag, res 768 au repos »
+  // (§3.4) ; à ce jalon on prend le plus simple qui marche : 384 EN PERMANENCE
+  // en mode continu. Le raffinement au repos est du jalon 4.
+  //
+  // ⚠️ Le plafond doit valoir pour `rebuild` ET pour `tickFenetre`. Deux
+  // résolutions différentes feraient sauter la géométrie au premier geste —
+  // `gridTemplate`, `tintField` et `detailField` sont tous indexés par `res`.
+  // ⚠️ `resFenetre` est POSÉ PAR main.js (fenetre-finesse.js) : 384 tant que
+  // l'image bouge, 768 après 0,4 s d'immobilité franche. Laissé à zéro, on
+  // retrouve le comportement du jalon 3 — 384 en permanence — et le mode
+  // ORDINAIRE ne passe même pas par ici.
+  //
+  // ⚠️ LE `Math.min` RESTE, il n'est pas redondant avec `resDeFinesse`. Cette
+  // méthode est aussi appelée depuis `rebuild()`, sur un chemin (changement de
+  // zone, de zoom, de palette) où main.js n'a pas encore eu son image pour
+  // remettre `resFenetre` à jour. Sans le min, un utilisateur passé à 256 dans
+  // les Paramètres se verrait servir du 384 le temps d'une reconstruction.
+  _resFenetre(params) {
+    if (!(this.dem?.empriseCote > 1)) return params.resolution
+    return Math.min(params.resolution, this.resFenetre || RES_FENETRE_CONTINUE)
+  }
+
+  // ══════════ CHANGER DE RÉSOLUTION SANS RECUIRE LES CHAMPS ═════════════════
+  //
+  // `rebuild()` refait TOUT, champs compris : analyse de relief, masque de mer,
+  // masque côtier — l'atlas de l'emprise, mesuré à 1 378 ms (étude §2.2). Or
+  // AUCUN de ces champs ne dépend de la résolution du maillage : ils sont cuits
+  // sur l'emprise en coordonnées monde, et le maillage ne fait que les LIRE. Les
+  // refaire pour changer un nombre de triangles serait payer 1,4 s pour rien.
+  //
+  // Ce qui dépend de `res`, et qu'il faut donc refaire, c'est exactement trois
+  // choses — celles que l'avertissement de `_resFenetre` nomme depuis le jalon
+  // 3 : le gabarit de grille (`gridTemplate`), le champ de grain
+  // (`detailFieldEmprise`) et le champ de teinte (`tintField`).
+  //
+  // @returns {number} millisecondes passées, pour que l'appelant puisse le dire
+  majResFenetre(params) {
+    const res = this._resFenetre(params)
+    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    const tpl = gridTemplate(res, TERRAIN_SIZE)
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(tpl.position), 3))
+    geo.setAttribute('uv', new THREE.BufferAttribute(tpl.uv, 2))
+    geo.setIndex(new THREE.BufferAttribute(tpl.index, 1))
+    const sample = this._makeSampler(params)
+    this.sample = sample
+    const { minH, maxH } = this._ecrireRelief(geo, params, res, sample, this._makeGridSampler(params, res))
+    this.mapUniforms.uHeightRange.value.set(minH, maxH)
+    this._pousseFenetre()
+    // ⚠️ L'ANCIENNE GÉOMÉTRIE EST LIBÉRÉE, et ce n'est pas facultatif ici. À la
+    // différence de `rebuild()`, qu'on appelle une fois par zone, celle-ci part
+    // à chaque pause : une géométrie de res 768 pèse 38,3 Mo de tampons GPU, et
+    // les oublier ferait monter le tas d'autant à chaque arrêt du geste.
+    this.mesh.geometry.dispose()
+    this.mesh.geometry = geo
+    return (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0
+  }
+
+  // ══════════ CUIRE LES DEUX GRAINS PENDANT QU'ON A LE DROIT D'ÊTRE LENT ═════
+  //
+  // ⚠️ SANS ÇA, LA PREMIÈRE BASCULE GÈLE 1,5 s. Mesuré sur l'instance vivante,
+  // La Réunion z12 en 3×3, `majResFenetre` chronométrée de l'extérieur :
+  //
+  //     vers 384, grain déjà cuit │    18 ms  │  à cuire │   373 ms
+  //     vers 768, grain déjà cuit │    73 ms  │  à cuire │ 1 516 ms
+  //
+  // Le gel de 1,5 s tombait 0,4 s APRÈS que la carte se soit posée, sans que
+  // personne ait rien touché — la lecture la plus naturelle en est « l'onglet a
+  // planté ». La cuisson est incompressible (285 ns le point, 5,31 M points à
+  // res 768) ; c'est son MOMENT qui est déplaçable, et sa place est sous le
+  // voile de chargement, où l'attente est annoncée.
+  //
+  // ⚠️ ON RÉSOUT LES MÊMES CLÉS QUE `_makeGridSampler`, PAS DES CLÉS
+  // RESSEMBLANTES. Une seule composante qui diffère (l'accord de `detailScale`
+  // à la résolution, surtout) et le préchauffage cuirait un champ que personne
+  // ne demandera jamais : on paierait la lenteur ET le gel. D'où le passage par
+  // `_detailScalePour`, la seule formule, partagée avec le sampler.
+  //
+  // @param {object} params
+  // @param {number[]} listeRes - les résolutions du mode continu (`resFinesses`)
+  // @returns {number} millisecondes passées — zéro quand tout était déjà en cache
+  prechauffeFinesse(params, listeRes) {
+    const cote = this.dem?.empriseCote
+    if (params.source !== 'real' || !this.dem || !(cote > 1)) return 0
+    if (!(this._detailEffectif(params) > 0)) return 0 // grain éteint : aucun champ à cuire
+    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    for (const res of listeRes) {
+      if (!(res > 0)) continue
+      detailFieldEmprise(params.seed, this._detailScalePour(params, res), res, TERRAIN_SIZE, cote)
+    }
+    return (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0
+  }
+
+  // ══════════ LE GRAIN DOIT DESCENDRE AVEC LA RÉSOLUTION ════════════════════
+  //
+  // ⚠️ SANS ÇA, LE MODE CONTINU AFFICHE DU POIVRE ET SEL. `detail-noise.js`
+  // mesure que le maillage perd 18,3 % du grain à res 768 et **39,9 % à res
+  // 384**, où la corrélation entre sommets voisins tombe à 0,53 : le grain
+  // cesse d'être une texture et devient un scintillement. Chiffré par
+  // `grainSamplesPerCycle` : **0,95 maille par longueur d'onde à res 384**,
+  // contre un plancher mesuré à 1,9.
+  //
+  // Et c'est en mode continu que ce serait le PLUS visible, parce que c'est le
+  // seul mode où l'image bouge en permanence — le scintillement d'aliasing ne
+  // se voit qu'en mouvement.
+  //
+  // Le remède est celui que `detail-noise.js` réclame en toutes lettres :
+  // conserver `res / detailScale`. À res 384 le grain revient exactement aux
+  // 1,901 maille/λ de res 768 ; il a la même apparence, il est simplement deux
+  // fois plus large en unités monde.
+  _detailScaleFenetre(params) {
+    return this._detailScalePour(params, this._resFenetre(params))
+  }
+
+  // La même chose pour une résolution NOMMÉE, et non pour celle de l'instant.
+  // ⚠️ UNE SEULE FORMULE. Elle sert de clé de cache au champ de grain
+  // (`detailFieldEmprise`) : le préchauffage et le sampler doivent en sortir le
+  // même nombre au bit près, sinon ils cuisent deux champs au lieu d'un.
+  _detailScalePour(params, res) {
+    return accordeDetailScale(params.detailScale, params.resolution, res)
+  }
+
+  // Le grain RÉELLEMENT appliqué. ⚠️ En mode Naturel le texture shading porte
+  // déjà une micro-texture, et une vraie : le FBM y est bridé (voir
+  // `_makeDemSampler`). Extrait ici parce que le préchauffage doit poser la
+  // même question que le sampler — « y a-t-il un champ à cuire ? » — et qu'à
+  // deux endroits la réponse finirait par diverger.
+  _detailEffectif(params) {
+    return this.mapUniforms.uColorMode.value === 1 ? Math.min(params.detail, NATURAL_DETAIL_MAX) : params.detail
+  }
+
   // Sampler over a fetched real-world DEM: world xz → bilinear meters → scene units.
   _makeDemSampler(params) {
     const dem = this.dem
+    const span = this._span()
+    const fen = this.fenetre // lu par référence : le drag le bouge sans refaire le sampler
     // demExaggeration is the per-zoom value chosen in the UI (coarse blocks big)
-    const scale = (TERRAIN_SIZE / dem.extentMeters) * params.demExaggeration
+    const scale = (span / dem.extentMeters) * params.demExaggeration
     const meanM = dem.meanM
     this._h2ft = (h) => Math.round((h / scale + meanM) * 3.28084)
 
     const sDetail = new Simplex2(mulberry32(params.seed))
     const { size } = dem
-    const { detailScale } = params
+    // ⚠️ PAS `params.detailScale` DIRECTEMENT. En mode continu le maillage tombe
+    // à res 384 et le grain doit descendre avec, sans quoi il scintille — voir
+    // `_detailScaleFenetre`. Hors mode continu la valeur ressort inchangée, au
+    // bit près (l'accord sort sèchement à résolution égale).
+    const detailScale = this._detailScaleFenetre(params)
     // ⚠️ En mode Naturel le texture shading PORTE déjà la micro-texture, et une
     // VRAIE (elle sort du DEM). Le bruit FBM de détail viendrait en superposer
     // une inventée, décorrélée du relief : les deux se brouillent et le peigné
     // s'éteint. On bride donc le détail sans toucher à params — le curseur garde
     // la valeur de l'utilisateur, qui la retrouve en repassant en Classique.
-    const detail = this.mapUniforms.uColorMode.value === 1 ? Math.min(params.detail, NATURAL_DETAIL_MAX) : params.detail
+    const detail = this._detailEffectif(params)
 
     return (x, z) => {
-      const px = (x / TERRAIN_SIZE + 0.5) * (size - 1)
-      const py = (z / TERRAIN_SIZE + 0.5) * (size - 1)
+      const px = ((x + fen.x) / span + 0.5) * (size - 1)
+      const py = ((z + fen.z) / span + 0.5) * (size - 1)
       const raw = sampleDem(dem, px, py) // elevation in meters
       const h = (raw - meanM) * scale
 
@@ -1077,13 +1410,58 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       // out at/below sea level (elevation 0) so the displacement can never poke
       // above the waterline and paint phantom islands / stray coastlines
       const landFactor = smoothstep(0, 90, raw)
+      // ⚠️ LE GRAIN S'ÉVALUE EN COORDONNÉES DU TERRAIN, `x + fen.x`, PAS EN
+      // COORDONNÉES DE LA GÉOMÉTRIE. En mode continu la géométrie ne bouge pas :
+      // évalué en `x` seul, le grain resterait COLLÉ À L'ÉCRAN pendant que le
+      // relief glisse dessous (étude §5.4). Et ce sampler-ci n'est pas un détail
+      // — c'est `terrain.sample`, celui que lisent le socle, les bateaux, le
+      // drapage GPX et les étiquettes : le grain doit y être au même endroit que
+      // dans la géométrie, sinon les objets posés au sol flottent.
+      // Hors mode continu `fen` vaut zéro et l'expression est celle d'avant.
+      const gx = x + fen.x
+      const gz = z + fen.z
       const fine =
         landFactor *
-        (detail * fbm(sDetail, x * detailScale, z * detailScale, 3, 2.3, 0.55) +
-          detail * 0.35 * fbm(sDetail, x * detailScale * 4.1 + 31, z * detailScale * 4.1 - 17, 2, 2.2, 0.5))
+        (detail * fbm(sDetail, gx * detailScale, gz * detailScale, 3, 2.3, 0.55) +
+          detail * 0.35 * fbm(sDetail, gx * detailScale * 4.1 + 31, gz * detailScale * 4.1 - 17, 2, 2.2, 0.5))
       // no basin carve in real-world mode — the map runs uninterrupted
       return h + fine
     }
+  }
+
+  // ÉCHANTILLONNEUR DE CHAMP — les altitudes en coordonnées ABSOLUES de
+  // l'emprise, indépendantes du décalage de fenêtre, et SANS grain FBM.
+  //
+  // C'est ce que consomme la simulation d'eau (`ocean.js`) pour cuire son champ
+  // hauteur + distance-rivage une bonne fois sur les 168 unités de l'emprise.
+  // `this.sample`, lui, ne sait répondre que « sous le point AFFICHÉ en x » : il
+  // porte le décalage, donc il rendrait un champ différent à chaque pas.
+  //
+  // ⚠️ PAS DE GRAIN, ET C'EST GRATUIT ICI. Le grain FBM est éteint sous 90 m
+  // d'altitude par `landFactor = smoothstep(0, 90, raw)` : à la ligne d'eau il
+  // vaut exactement ZÉRO, et c'est la ligne d'eau que ce champ sert à trouver.
+  // Le payer coûterait cinq octaves de simplex sur 1 152² = 1,33 million de
+  // points, soit ~175 ns le point (mesure de detail-noise.js) — 230 ms de fil
+  // principal gelé par reconstruction, pour un déplacement nul là où on regarde.
+  //
+  // Rend `null` hors relief réel : l'appelant garde alors son chemin d'avant.
+  sampleChamp(params) {
+    if (params.source !== 'real' || !this.dem) return null
+    const dem = this.dem
+    const span = this._span()
+    const scale = (span / dem.extentMeters) * params.demExaggeration
+    const meanM = dem.meanM
+    const { size } = dem
+    return (x, z) => (sampleDem(dem, (x / span + 0.5) * (size - 1), (z / span + 0.5) * (size - 1)) - meanM) * scale
+  }
+
+  // Pousse le décalage de fenêtre et l'emprise des masques dans les uniformes.
+  // Appelé à chaque pas de défilement (deux flottants) et à chaque
+  // reconstruction. Hors mode continu il écrit les valeurs neutres.
+  _pousseFenetre() {
+    const cote = this.dem?.empriseCote > 1 ? this.dem.empriseCote : 1
+    this.mapUniforms.uMaskSpan.value = TERRAIN_SIZE * cote
+    this.mapUniforms.uFenetre.value.set(this.fenetre.x, this.fenetre.z)
   }
 
   // ÉCHANTILLONNEUR DE GRILLE — la même formule que _makeDemSampler, mais qui
@@ -1103,18 +1481,91 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   _makeGridSampler(params, res) {
     if (params.source !== 'real' || !this.dem) return null
     const dem = this.dem
-    const scale = (TERRAIN_SIZE / dem.extentMeters) * params.demExaggeration
+    const span = this._span()
+    const fen = this.fenetre
+    const scale = (span / dem.extentMeters) * params.demExaggeration
     const meanM = dem.meanM
     const { size } = dem
-    const detail = this.mapUniforms.uColorMode.value === 1 ? Math.min(params.detail, NATURAL_DETAIL_MAX) : params.detail
+    const detail = this._detailEffectif(params)
     if (!(detail > 0)) {
       // grain éteint (zooms continentaux, curseur à zéro) : aucun champ à cuire.
       // `landFactor · (0·a + 0·0,35·b)` vaut 0 tout rond, on peut le sauter.
-      return (i, x, z) => (sampleDem(dem, (x / TERRAIN_SIZE + 0.5) * (size - 1), (z / TERRAIN_SIZE + 0.5) * (size - 1)) - meanM) * scale
+      return (i, x, z) => (sampleDem(dem, ((x + fen.x) / span + 0.5) * (size - 1), ((z + fen.z) / span + 0.5) * (size - 1)) - meanM) * scale
+    }
+    // ══════════ MODE CONTINU : LE GRAIN EST LU EN COORDONNÉES MONDE ═════════
+    //
+    // Indexé sur la grille (`i`), le grain serait SOLIDAIRE DE L'ÉCRAN : en
+    // défilant, le relief glisserait sous un moirage immobile (étude §5.4).
+    // On lit donc dans le champ cuit sur l'EMPRISE, à l'endroit du monde où se
+    // trouve vraiment ce sommet.
+    //
+    // ⚠️ ET LES POIDS BILINÉAIRES SONT CONSTANTS SUR TOUTE LA GRILLE. C'est ce
+    // qui rend l'opération abordable : la grille est régulière et le décalage
+    // est le même pour tous les sommets, donc la partie fractionnaire du
+    // décalage se calcule UNE FOIS PAR IMAGE, pas 148 225 fois. Il ne reste par
+    // sommet que quatre lectures et quatre multiplications-additions par octave.
+    const cote = dem.empriseCote
+    if (cote > 1) {
+      const champ = detailFieldEmprise(params.seed, this._detailScaleFenetre(params), res, TERRAIN_SIZE, cote)
+      const N = cote * res + 1
+      const n1 = res + 1
+      const seg = TERRAIN_SIZE / res
+      const dec = (res * (cote - 1)) / 2
+      // Décalage de lecture, EN NŒUDS : entier + fraction.
+      const ux = dec + fen.x / seg
+      const uz = dec + fen.z / seg
+      // ⚠️ BORNÉ AU CHAMP. La butée élastique laisse déborder d'un huitième de
+      // socle au-delà de la course, soit 48 nœuds hors de l'emprise, là où
+      // `sampleDem` CLAMPE déjà le relief. Le grain doit clamper avec lui —
+      // sinon on lirait à l'index négatif et le grain deviendrait NaN sur une
+      // bande du bord, c'est-à-dire un relief NaN, c'est-à-dire un trou noir.
+      const ix0 = Math.max(0, Math.min(N - 2, Math.floor(ux)))
+      const iz0 = Math.max(0, Math.min(N - 2, Math.floor(uz)))
+      const fx = Math.max(0, Math.min(1, ux - ix0))
+      const fz = Math.max(0, Math.min(1, uz - iz0))
+      // les quatre poids, une fois pour toutes
+      const w00 = (1 - fx) * (1 - fz)
+      const w10 = fx * (1 - fz)
+      const w01 = (1 - fx) * fz
+      const w11 = fx * fz
+      // ⚠️ CE QUE COÛTE CE SAMPLER, ET CE QUI NE LE COÛTE PAS. Mesuré : un pas
+      // de fenêtre passe de 9,9 à 12,1 ms, soit **+2,2 ms** pour le grain en
+      // coordonnées monde. J'ai essayé de supprimer la division entière par
+      // sommet (compter ix et iy dans la boucle appelante plutôt que de les
+      // déduire de `i`) : **zéro gain mesurable**, 12,1 ms avant comme après,
+      // sur les deux zones. Le prix n'est pas l'arithmétique, ce sont les huit
+      // lectures dispersées dans un tableau de 10,6 Mo — exactement le goulot de
+      // bande passante que l'étude annonce pour la machine cible. On garde donc
+      // la version la plus simple : optimiser ici demanderait de changer la
+      // disposition du champ, pas de compter des index.
+      return (i, x, z) => {
+        const raw = sampleDem(dem, ((x + fen.x) / span + 0.5) * (size - 1), ((z + fen.z) / span + 0.5) * (size - 1))
+        const h = (raw - meanM) * scale
+        const landFactor = smoothstep(0, 90, raw)
+        const iy = (i / n1) | 0
+        const ix = i - iy * n1
+        // le sommet (ix, iy) de la géométrie tombe au nœud (ix + ix0, iy + iz0)
+        // du champ d'emprise ; les voisins de droite et du bas sont bornés au
+        // dernier nœud pour ne jamais sortir, exactement comme `sampleDem`.
+        const jx = ix + ix0 < N - 1 ? ix + ix0 : N - 1
+        const jz = iy + iz0 < N - 1 ? iy + iz0 : N - 1
+        const jx1 = jx + 1 < N ? jx + 1 : jx
+        const jz1 = jz + 1 < N ? jz + 1 : jz
+        const a = jz * N * 2
+        const b = jz1 * N * 2
+        const g0 = champ[a + jx * 2] * w00 + champ[a + jx1 * 2] * w10 + champ[b + jx * 2] * w01 + champ[b + jx1 * 2] * w11
+        const g1 =
+          champ[a + jx * 2 + 1] * w00 +
+          champ[a + jx1 * 2 + 1] * w10 +
+          champ[b + jx * 2 + 1] * w01 +
+          champ[b + jx1 * 2 + 1] * w11
+        const fine = landFactor * (detail * g0 + detail * 0.35 * g1)
+        return h + fine
+      }
     }
     const grain = detailField(params.seed, params.detailScale, res, TERRAIN_SIZE)
     return (i, x, z) => {
-      const raw = sampleDem(dem, (x / TERRAIN_SIZE + 0.5) * (size - 1), (z / TERRAIN_SIZE + 0.5) * (size - 1))
+      const raw = sampleDem(dem, ((x + fen.x) / span + 0.5) * (size - 1), ((z + fen.z) / span + 0.5) * (size - 1))
       const h = (raw - meanM) * scale
       const landFactor = smoothstep(0, 90, raw)
       const fine = landFactor * (detail * grain[i * 2] + detail * 0.35 * grain[i * 2 + 1])
@@ -1184,8 +1635,135 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     }
   }
 
+  // ══════════ LE CORPS DU RELIEF — Y, NORMALES, COULEURS ═══════════════════
+  //
+  // Extrait de `rebuild` pour une raison précise : **la fenêtre continue doit
+  // rejouer EXACTEMENT ce code à chaque image.** Deux copies de cette boucle
+  // divergeraient au premier réglage touché, et la dégradation se lirait comme
+  // une panne — le terrain changerait de teinte ou de peigné au moment même où
+  // l'on commence à le faire glisser.
+  //
+  // Écrit EN PLACE quand les attributs existent déjà : à res 384, ré-allouer
+  // 9,6 Mo par image mettrait le ramasse-miettes dans la boucle de rendu, et
+  // c'est exactement le genre de pic qui tue l'iMac 2015 (le rapport du 27
+  // juillet : « ce sont les pics qui la tuent, pas le régime permanent »).
+  //
+  // @returns {{minH:number,maxH:number}} l'amplitude EFFECTIVEMENT écrite
+  _ecrireRelief(geo, params, res, sample, gridSample) {
+    const pos = geo.attributes.position
+    const count = pos.count
+    const arr = pos.array
+    let minH = Infinity
+    let maxH = -Infinity
+    for (let i = 0; i < count; i++) {
+      const x = arr[i * 3]
+      const z = arr[i * 3 + 2]
+      const h = gridSample ? gridSample(i, x, z) : sample(x, z)
+      arr[i * 3 + 1] = h
+      if (h < minH) minH = h
+      if (h > maxH) maxH = h
+    }
+    pos.needsUpdate = true
+
+    // ⚠️ L'AMPLITUDE EST CELLE DE L'EMPRISE, PAS DE LA FENÊTRE.
+    //
+    // C'est le piège n° 1 de l'étude, et il ne se voit qu'en défilant. `minH` et
+    // `maxH` normalisent la teinte par sommet ET `uHeightRange`, donc la rampe
+    // de couleurs. Sur une emprise 3×3, s'ils étaient recalculés sur les seuls
+    // sommets VISIBLES, la même montagne changerait de couleur selon ce qui
+    // l'accompagne à l'écran : on glisse vers un sommet plus haut, il entre dans
+    // le cadre, et toute la vallée se repeint d'un coup.
+    //
+    // « Un terrain qui change de couleur en défilant » est nommément ce que la
+    // consigne interdit. On prend donc les extrema du CHAMP ENTIER, convertis en
+    // unités monde par la même échelle — ils ne dépendent d'aucun décalage, donc
+    // la palette est rigoureusement stable pendant tout le geste.
+    if (this.dem?.empriseCote > 1 && params.source === 'real') {
+      const scale = (this._span() / this.dem.extentMeters) * params.demExaggeration
+      minH = (this.dem.minM - this.dem.meanM) * scale
+      maxH = (this.dem.maxM - this.dem.meanM) * scale
+    }
+
+    // LA SOMME DES SIX FACES, ÉCRITE EN CLAIR — pas un parcours de triangles.
+    // `geo.computeVertexNormals()` pesait **81 % de la fabrication d'une
+    // dalle** : mesuré in situ sur la géométrie affichée, 83,8 ms à Chamonix et
+    // 120,5 ms à La Réunion, contre **4,6 et 4,4 ms — 18× et 27× moins cher**.
+    // Ce n'est PAS une approximation : sur la grille régulière de gridTemplate,
+    // la somme des six normales de faces a une forme fermée, et le résultat est
+    // identique à three à l'arrondi Float32 près (< 0,05°), bords et coins
+    // compris. Voir src/grid-normals.js pour la dérivation — et pourquoi une
+    // différence centrée, qui ne voit pas le bruit de Nyquist d'un MNT, s'y
+    // trompait de 3,2° en moyenne et de 119° au pire.
+    // ⚠️ La grille DOIT être celle de gridTemplate — régulière, rangée en
+    // `iy·(res+1) + ix`, pas de côté 56 : c'est l'hypothèse de la formule.
+    // ⚠️ TERRAIN_SIZE et pas `_span()` : c'est le pas de la GÉOMÉTRIE, qui fait
+    // toujours 56 unités de côté quelle que soit la taille du champ qu'elle lit.
+    const nAtt = geo.attributes.normal
+    const normals = gridNormals(arr, res, TERRAIN_SIZE, nAtt?.array)
+    if (nAtt) nAtt.needsUpdate = true
+    else geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+
+    // vertex tint: height-graded value + slope darkening + grain jitter
+    // Le grain est PRÉ-CUIT sur la grille (detail-noise.js, `tintField`) : deux
+    // octaves de simplex par sommet, 65 ms de gel par reconstruction à res 768,
+    // pour un motif qui ne dépend que de (graine, résolution) — il survit donc
+    // au changement de zoom, au curseur d'exagération et à la palette.
+    // Bit-identique, verrouillé par test/detail-noise.test.js.
+    const tint = tintField(params.seed + 101, res, TERRAIN_SIZE)
+    const cAtt = geo.attributes.color
+    const colors = cAtt ? cAtt.array : new Float32Array(count * 3)
+    const span = Math.max(1e-5, maxH - minH)
+    for (let i = 0; i < count; i++) {
+      const h = arr[i * 3 + 1]
+      const ny = normals[i * 3 + 1]
+      const hn = (h - minH) / span
+      let v = lerp(0.62, 0.95, Math.pow(hn, 0.85))
+      v *= lerp(0.78, 1.0, Math.pow(Math.max(0, ny), 0.6))
+      v += tint[i] * 0.05
+      colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = v
+    }
+    if (cAtt) cAtt.needsUpdate = true
+    else geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+
+    return { minH, maxH }
+  }
+
+  // ══════════ UN PAS DE FENÊTRE — le travail par image du mode continu ══════
+  //
+  // La géométrie ne bouge pas, ses ALTITUDES défilent. Rien n'est ré-alloué :
+  // ni la géométrie, ni les normales, ni les couleurs, ni le gabarit.
+  //
+  // ⚠️ NE RECONSTRUIT AUCUN CHAMP. Ni analyse de relief, ni masque de mer, ni
+  // masque côtier : le budget est de 6 ms par image et `analyzeDem` coûte
+  // 164 ns par pixel, soit un carré de 191² pour tout le budget. Aucun recalcul
+  // de champ n'est possible pendant le drag, à aucune résolution utile — c'est
+  // la contrainte qui décide de toute l'architecture (étude §1.2).
+  //
+  // @returns {boolean} vrai si quelque chose a été réécrit
+  tickFenetre(params) {
+    if (!(this.dem?.empriseCote > 1) || params.source !== 'real') return false
+    const geo = this.mesh.geometry
+    if (!geo?.attributes?.position) return false
+    const res = this._resFenetre(params)
+    // Le sampler est refait à chaque pas — il capture `params` (exagération,
+    // détail, mode couleur), qui peuvent avoir changé entre deux images. Il ne
+    // capture PAS le décalage : `fenetre` est lu par référence.
+    const sample = this._makeSampler(params)
+    this.sample = sample
+    const { minH, maxH } = this._ecrireRelief(geo, params, res, sample, this._makeGridSampler(params, res))
+    this.mapUniforms.uHeightRange.value.set(minH, maxH)
+    // le masque côtier doit défiler AVEC le relief qu'il classe terre ou mer
+    this._pousseFenetre()
+    // ⚠️ Pas de `geo.computeBoundingSphere()` : la sphère englobante ne sert
+    // qu'au frustum culling, le maillage garde son emprise XZ, et seule sa
+    // hauteur bouge. La recalculer coûterait un parcours complet de plus par
+    // image pour un test que le maillage passe de toute façon (il est sous la
+    // caméra). Si un jour un sommet disparaît en bord d'écran, c'est ici.
+    return true
+  }
+
   rebuild(params) {
-    const res = params.resolution
+    const res = this._resFenetre(params)
     // GABARIT MÉMORISÉ au lieu de `new THREE.PlaneGeometry` : celui-ci mettait
     // 194 ms et jetait 262 Mo de tas JS à res 1024 (106 ms et 104 Mo à res 768)
     // pour fabriquer un plan PLAT que les lignes suivantes réécrivent
@@ -1210,49 +1788,16 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // `sample` quand il n'y a rien à mémoriser (relief procédural).
     const gridSample = this._makeGridSampler(params, res)
 
-    const pos = geo.attributes.position
-    const count = pos.count
-    const arr = pos.array
-    let minH = Infinity
-    let maxH = -Infinity
-    for (let i = 0; i < count; i++) {
-      const x = arr[i * 3]
-      const z = arr[i * 3 + 2]
-      const h = gridSample ? gridSample(i, x, z) : sample(x, z)
-      arr[i * 3 + 1] = h
-      if (h < minH) minH = h
-      if (h > maxH) maxH = h
-    }
-    geo.computeVertexNormals()
-
-    // vertex tint: height-graded value + slope darkening + grain jitter
-    // Le grain est PRÉ-CUIT sur la grille (detail-noise.js, `tintField`) : deux
-    // octaves de simplex par sommet, 65 ms de gel par reconstruction à res 768,
-    // pour un motif qui ne dépend que de (graine, résolution) — il survit donc
-    // au changement de zoom, au curseur d'exagération et à la palette.
-    // Bit-identique, verrouillé par test/detail-noise.test.js.
-    const tint = tintField(params.seed + 101, res, TERRAIN_SIZE)
-    const normals = geo.attributes.normal.array
-    const colors = new Float32Array(count * 3)
-    const span = Math.max(1e-5, maxH - minH)
-    for (let i = 0; i < count; i++) {
-      const h = arr[i * 3 + 1]
-      const ny = normals[i * 3 + 1]
-      const hn = (h - minH) / span
-      let v = lerp(0.62, 0.95, Math.pow(hn, 0.85))
-      v *= lerp(0.78, 1.0, Math.pow(Math.max(0, ny), 0.6))
-      v += tint[i] * 0.05
-      colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = v
-    }
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    const { minH, maxH } = this._ecrireRelief(geo, params, res, sample, gridSample)
 
     this.mapUniforms.uHeightRange.value.set(minH, maxH)
+    this._pousseFenetre()
 
     // georeferenced sea level (elevation 0) — ALWAYS active in real mode so every
     // template gets a clear shoreline and consistent bathymetry, even where the
     // patch has no sub-sea data (then uSeaY simply sits below the terrain).
     if (params.source === 'real' && this.dem) {
-      const demScale = (TERRAIN_SIZE / this.dem.extentMeters) * params.demExaggeration
+      const demScale = (this._span() / this.dem.extentMeters) * params.demExaggeration
       // fine-zoom tiles carry NO bathymetry: their sea is a flat plain at
       // exactly 0 m, which lands exactly ON uSeaY and paints as LAND (the
       // "black grainy sea" the dark templates expose). Lift the waterline a
@@ -1274,12 +1819,34 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     this.mesh.geometry = geo
   }
 
+  // ══════════ LES DEUX PLAFONDS DE CHAMPS, EN UN SEUL ENDROIT ══════════════
+  //
+  // Trois régimes, et un seul point de décision pour chacun :
+  //   • emprise 3×3  → l'ATLAS (dem-emprise.js), cuit une fois sur 168 unités ;
+  //   • dalle voisine du damier → le plafond que block-grid.js lui impose ;
+  //   • bloc central → aucun plafond, c'est le héros.
+  //
+  // ⚠️ Ces deux fonctions rendent un PLAFOND, `_seaSize` rend la TAILLE OBTENUE.
+  // La distinction n'est pas cosmétique : `resampleField` ne grossit jamais, donc
+  // un atlas de 2 304 demandé à un MNT de 2 304 rend 2 304, et à un MNT de 1 536
+  // (emprise en tuiles 256 px, zooms grossiers) rend 1 536. La landMask est
+  // indexée CELLULE POUR CELLULE par buildSeaMask : la cuire à la taille
+  // DEMANDÉE pendant que le champ sort à la taille SOURCE rendrait des polders
+  // décalés — un défaut muet, pas une erreur.
+  _analysisMax(dem) {
+    return dem?.empriseCote > 1 ? ATLAS_ANALYSE : this.analysisMax | 0
+  }
+
+  _seaMax(dem) {
+    return dem?.empriseCote > 1 ? ATLAS_MER : this.seaMax | 0
+  }
+
   // Le côté du masque de mer de CE bloc : le MNT au centre, le plafond sur une
   // dalle voisine (voir seaMax). Une seule source de vérité, parce que deux
   // consommateurs doivent tomber d'accord au pixel près — la landMask ci-dessous
   // et le travail posté au Worker.
   _seaSize(dem) {
-    const max = this.seaMax | 0
+    const max = this._seaMax(dem)
     return max > 0 && dem.size > max ? max : dem.size
   }
 
@@ -1292,13 +1859,13 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // ⚠️ ET LA TAILLE EST CELLE DU MASQUE DE MER, PAS CELLE DU MNT. buildSeaMask
   // indexe la landMask cellule pour cellule : la caler sur le MNT pendant que le
   // masque est plafonné rendrait des polders décalés — un défaut MUET, pas une
-  // erreur. (landMaskFromImage rééchantillonne depuis le masque côtier 1024²,
+  // erreur. (landMaskFromField rééchantillonne depuis le masque côtier 1024²,
   // il ne perd donc rien à cuire directement à la bonne taille.)
   _landMaskFor(dem) {
     if (!this._coastImage) return null
     const taille = this._seaSize(dem)
     if (!this._coastLand || this._coastLand.img !== this._coastImage || this._coastLand.size !== taille)
-      this._coastLand = { img: this._coastImage, size: taille, mask: landMaskFromImage(this._coastImage, taille) }
+      this._coastLand = { img: this._coastImage, size: taille, mask: landMaskFromField(this._coastImage, taille) }
     return this._coastLand.mask
   }
 
@@ -1328,6 +1895,57 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // de curseur d'exagération. Voir jobStillValid.
   _buildFields({ withAnalysis = true } = {}) {
     const dem = this.dem
+    // ══════════ L'ATLAS DE CHAMPS — JALON 2 ═════════════════════════════════
+    //
+    // Le jalon 1 sautait ce calcul ENTIÈREMENT : sur l'emprise 3×3 (4 608² au
+    // lieu de 1 536²) il y a NEUF FOIS plus de pixels, et `analyzeDem` coûte
+    // 164 ns le pixel. Le terrain y était peint à la rampe d'altitude nue.
+    //
+    // Le jalon 2 le rallume, et il ne change PAS de machinerie pour ça — il
+    // change deux plafonds et deux options. C'est tout le sens de l'atlas : les
+    // champs sont cuits UNE FOIS sur les 168 unités au lieu d'être recuits à
+    // chaque bloc traversé, et le shader les lit avec le décalage de fenêtre.
+    //
+    //   • les plafonds : ATLAS_ANALYSE / ATLAS_MER (voir _analysisMax/_seaMax)
+    //   • `merMinPool` : le sous-échantillonnage du masque de mer passe de la
+    //     moyenne au MINIMUM, sans quoi un détroit d'un pixel est sectionné et
+    //     une baie réelle se peint en terre (terrain-analysis.js, minPoolField)
+    //   • `minBasinFrac` : le seuil de grand bassin est une FRACTION du champ,
+    //     donc neuf fois plus exigeant sur une emprise — converti à surface
+    //     absolue constante (dem-emprise.js, fracBassinEmprise)
+    //
+    // ⚠️ CE QUE ÇA COÛTE, MESURÉ sur le MNT RÉEL de l'emprise (4 608² Int16
+    // dumpé du navigateur — un relief synthétique mentirait sur le temps, c'est
+    // la leçon des normales de cette branche). `.banc/f3-worker-cout.mjs` :
+    //
+    //   resampleField 4608→2304 (moyenne)      64 ms   tampons +20,3 Mo
+    //   minPoolField  4608→2304 (minimum)      93 ms   tampons +20,3 Mo
+    //   buildSeaMask + blurMask 2304²         113 ms   tampons +75,9 Mo
+    //   analyzeDem    4608→2304               908 ms   tampons +172,1 Mo
+    //   computeTerrainJob COMPLET           1 090 ms
+    //
+    // L'étude annonçait 1 048 ms pour cet atlas : elle tombe à 4 % près. Et son
+    // pic transitoire de « ~80 Mo » pour le masque de mer est confirmé (75,9) —
+    // mais elle avait raté le vrai poste, l'analyse de relief et ses 172 Mo.
+    // Les deux sont dans le WORKER, transitoires, et hors du fil principal.
+    //
+    // ⚠️ ET NON, L'ATLAS N'EST PAS « DEUX FOIS MOINS CHER » QUE NEUF DALLES.
+    // L'étude comparait un atlas 2 304² (5,3 M pixels) à neuf dalles 1 024²
+    // (9,4 M pixels) : c'était moins de pixels, pas un gain d'algorithme. À
+    // densité ÉGALE, mesuré ici, neuf dalles 1536→768 coûtent 1 130 ms contre
+    // 1 090 — la parité, à 4 %. Le vrai gain est ailleurs, et il est double :
+    // la cuisson se fait UNE FOIS pour toute la traversée du 3×3 au lieu de se
+    // répéter à chaque bloc, et il n'y a qu'un champ, donc qu'un `robustScale`
+    // (l'étude §4.4 : sans ça le peigné des crêtes changerait d'intensité à
+    // chaque franchissement de jointure).
+    //
+    // Sur le fil principal, aucun gel : la plus longue tâche pendant tout le
+    // chargement en mode continu vaut 220 ms à La Réunion et 180 à Chamonix
+    // (PerformanceObserver 'longtask', `.banc/f3-cuisson.mjs`) — c'est le
+    // décodage des MNT et la géométrie, pas les champs. Et le voile de
+    // chargement attend `fieldsReady`, comme pour un bloc ordinaire : il se
+    // lève sur une carte finie, jamais sur un état intermédiaire.
+    const emprise = dem?.empriseCote > 1 ? dem.empriseCote : 0
     // ⚠️ Un terrain abandonné ne recuit PLUS RIEN, jamais. Sans ce garde-fou,
     // le masque côtier d'une dalle détruite — il arrive du réseau, bien après —
     // rappelait _buildFields et RESSUSCITAIT la dalle : une DataTexture posée
@@ -1349,10 +1967,11 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     if (!naturel) this.mapUniforms.uAnalysisOn.value = 0
     const demandee = withAnalysis && naturel && !(this._analysisFor === dem && this.mapUniforms.uAnalysisOn.value)
     // analysisMax / seaMax : une dalle VOISINE n'a pas le maillage qui
-    // justifierait des champs à la taille du MNT (voir block-grid.js). Le shader
-    // lit les deux en UV MONDE, leur taille lui est donc indifférente.
-    const maxSize = this.analysisMax | 0
-    const seaMax = this.seaMax | 0
+    // justifierait des champs à la taille du MNT (voir block-grid.js), et une
+    // EMPRISE 3×3 prend la taille d'atlas. Le shader lit les deux en UV
+    // d'atlas, leur taille lui est donc indifférente.
+    const maxSize = this._analysisMax(dem)
+    const seaMax = this._seaMax(dem)
     // ANALYSE DÉJÀ CUITE POUR CE MNT ? On la repose SANS RIEN DEMANDER au
     // travailleur. Mesuré à La Réunion sur un retour de zoom : 464 ms de
     // travailleur, et c'est le voile de chargement qui les attendait. L'analyse
@@ -1386,7 +2005,20 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const cleAnalyse = { dem, maxSize }
     return (this.fieldsReady = scheduleTerrainJob({
       key: { dem }, // le MNT périme TOUT ; le reste se juge champ par champ
-      job: { data: dem.data, size: dem.size, metersPerPixel: dem.metersPerPixel, maxSize, seaMax, landMask, withAnalysis: analyse },
+      job: {
+        data: dem.data,
+        size: dem.size,
+        metersPerPixel: dem.metersPerPixel,
+        maxSize,
+        seaMax,
+        landMask,
+        withAnalysis: analyse,
+        // les deux options de l'atlas — voir l'en-tête. Hors mode continu elles
+        // valent `false` et `undefined`, et computeTerrainJob est alors
+        // bit-à-bit ce qu'il était (test/terrain-jobs.test.js le verrouille).
+        merMinPool: emprise > 0,
+        minBasinFrac: emprise > 0 ? fracBassinEmprise(BASSIN_FRAC_DEFAUT, emprise) : undefined,
+      },
       current: () => this._fieldKey,
       apply: (r, actuel) => {
         if (jobStillValid(cleMer, actuel)) this._applySeaMask(r.sea, r.seaSize)

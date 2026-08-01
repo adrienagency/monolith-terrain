@@ -144,18 +144,60 @@ function rasterize(ringGroups, dem, size) {
   const bctx = canvas.getContext('2d')
   bctx.filter = 'blur(1.5px)'
   bctx.drawImage(sharp, 0, 0)
-  const tex = new THREE.CanvasTexture(canvas)
+
+  // UN SEUL OCTET PAR TEXEL, ET UNE SEULE COPIE POUR TOUT LE MONDE.
+  //
+  // Ce masque ne porte qu'un bit d'information — terre ou mer — plus le flou de
+  // 1,5 px qui lisse l'iso-0,5. Il était rangé en RGBA, et en DEUX exemplaires
+  // retenus à vie du même octet : le canevas flouté, que la CanvasTexture garde
+  // comme image source, et l'ImageData que main.js en extrayait pour les
+  // consommateurs CPU. Plus, en VRAM, la texture RGBA elle-même.
+  //
+  // Les six lectures GPU du masque sont TOUTES `.r` — terrain.js:507,
+  // ocean.js:151, 334, 487, 548 — et les trois lectures CPU aussi
+  // (sea-mask.js landMaskFromField, ocean.js _bakeField, region-mask.js). Les
+  // canaux V, B et A étaient du vide payé plein tarif.
+  //
+  // On rend donc **un seul Uint8Array R8**, qui sert À LA FOIS de source à la
+  // DataTexture et de vérité CPU. MESURÉ sur le bloc central (2048²), banc
+  // `f3-memoire.mjs`, La Réunion et Chamonix, tas ramassé de force :
+  //
+  //   poste                        | avant   | après  |
+  //   canevas + ImageData retenus  | 32,0 Mo | 4,2 Mo |  −27,8 Mo  (mesuré)
+  //   texture en VRAM              | 16,8 Mo | 4,2 Mo |  −12,6 Mo  (le format)
+  //   TOTAL                        | 48,8 Mo | 8,4 Mo |  **−40,4 Mo**
+  //
+  // Une dalle VOISINE porte le même masque en 1024² (block-grid.js,
+  // NEIGHBOUR_COAST_SIZE) : 12,2 → 2,1 Mo, soit −10 Mo par voisine.
+  // Et le R8 est en plus **3,4× moins cher à téléverser** que le RGBA
+  // (0,383 ms contre 1,316 ms pour un 1024², mesuré au banc GPU).
+  //
+  // ⚠️ DataTexture, PAS DataArrayTexture ni une Texture nue : `Texture.js:63`
+  // initialise `unpackAlignment = 4`, et une texture R8 dont la largeur n'est
+  // pas multiple de 4 se lirait alors EN BIAIS — chaque ligne décalée d'un ou
+  // deux texels, un défaut muet et diagonal. `DataTexture.js:16` surcharge à 1 :
+  // passer par elle protège par construction.
+  //
+  // ⚠️ Les deux canevas meurent ici. Ils ne sont plus retenus par personne : la
+  // DataTexture tient le Uint8Array, pas un canevas. C'est ce qui rend le
+  // second exemplaire, pas seulement le format.
+  const rgba = bctx.getImageData(0, 0, size, size).data
+  const data = new Uint8Array(size * size)
+  for (let i = 0; i < data.length; i++) data[i] = rgba[i * 4]
+
+  const tex = new THREE.DataTexture(data, size, size, THREE.RedFormat, THREE.UnsignedByteType)
   tex.flipY = false
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping
   tex.minFilter = tex.magFilter = THREE.LinearFilter
   tex.generateMipmaps = false
   tex.colorSpace = THREE.NoColorSpace
   tex.needsUpdate = true
-  // le canvas ressort AUSSI (pattern region-mask.js) : les consommateurs CPU
-  // (champ de simulation mer, garde-fou sea-mask, clip de zone) lisent la même
-  // vérité terre/mer que le GPU. Pas de rétention en plus : CanvasTexture
-  // garde déjà le canvas comme image source.
-  return { texture: tex, canvas }
+  // Le champ ressort AUSSI, et c'est LE MÊME TABLEAU que la texture : les
+  // consommateurs CPU (champ de simulation mer, garde-fou sea-mask, clip de
+  // zone) lisent exactement la vérité terre/mer que le GPU échantillonne, sans
+  // qu'aucun octet soit recopié. Forme `{ data, width, height }` — la même que
+  // celle d'une ImageData, à la foulée près : un octet par texel, pas quatre.
+  return { texture: tex, field: { data, width: size, height: size } }
 }
 
 // ---- data (lazy, memoised) ----
@@ -213,8 +255,13 @@ export async function fetchCoastMask({ lat, lon, zoom, dem, size = MASK_SIZE }) 
     const rings = landPolygonsInBBox(features, bbox)
     // no land in view (open ocean) is legitimate — still return a mask so the
     // shader paints all-sea rather than falling back to the noisy 0-isoline
-    const { texture, canvas } = rasterize(rings, dem, size)
-    return { maskTexture: texture, maskCanvas: canvas, source: zoom <= COAST_NE_MAX ? 'ne' : 'osm' }
+    const { texture, field } = rasterize(rings, dem, size)
+    // ⚠️ `maskField` et non `maskCanvas` : le renommage est VOLONTAIRE. Le
+    // champ a la forme d'une ImageData mais une foulée de 1 au lieu de 4 ;
+    // un consommateur oublié qui lirait `data[i * 4]` verrait une côte au quart
+    // de sa taille, sans jamais lever d'erreur. Changer le nom force la mise à
+    // jour de chaque site d'appel.
+    return { maskTexture: texture, maskField: field, source: zoom <= COAST_NE_MAX ? 'ne' : 'osm' }
   } catch (err) {
     console.warn('coast mask failed:', err)
     return null

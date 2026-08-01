@@ -9,7 +9,8 @@ import { Line2 } from 'three/addons/lines/Line2.js'
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js'
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js'
 import { TERRAIN_SIZE } from './terrain.js'
-import { latLonToWorld, metersPerPixel, surfaceMetersPerUnit, EARTH_RADIUS_M } from './geo.js'
+import { latLonToWorld, metersPerPixel, surfaceMetersPerUnit, demSpan, EARTH_RADIUS_M } from './geo.js'
+import { dansFenetre } from './fenetre-clip.js'
 import { loadLayerForBounds, patchBounds } from './map/geo-data.js'
 import { makeLabelTexture, labelPlate, labelPlateInk, labelFontReady } from './map/text-label.js'
 import { computeArchSpecs, buildArchMesh, disposeArchGroup } from './arch.js'
@@ -498,6 +499,9 @@ const VILLAGE_MIN_POP = 5000
 // valley (a few km away) that the rider never actually passes.
 const VILLAGE_RADIUS_M = 600
 const VILLAGE_LINE_HEIGHT = 2.4 // world units — a real vertical mark, not a leader tick
+
+// Décalage nul, partagé — hors mode continu il n'y a rien à retrancher.
+const ZERO = { x: 0, z: 0 }
 const VILLAGE_LABEL_GAP = 0.35 // above the line's top
 // same BASE_H sizing convention as places-layer.js's own BASE_H (task 27 §2
 // bumped it 0.007 -> 0.010, see its big comment for the measured px) — these
@@ -524,6 +528,16 @@ export class GpxLayer {
     this.group = new THREE.Group()
     this.group.name = 'gpx'
     scene.add(this.group)
+    // ══════════ LE DÉCALAGE DE FENÊTRE (mode continu 3×3) ═══════════════════
+    //
+    // La trace est cuite en coordonnées de CHAMP (`latLonToWorld`) et le groupe
+    // porte −fenêtre : c'est ce qui la garde plantée sur son chemin pendant que
+    // le relief défile dessous. Le miroir JS du `group.position` sert à tout ce
+    // qui raisonne en monde sans passer par la scène — le rayon de survol et le
+    // test de fenêtre des objets ponctuels.
+    // Hors mode continu il reste à (0,0) et rien de tout ça ne s'allume.
+    this._fen = { x: 0, z: 0 }
+    this._ponctuels = [] // sprites ancrés au sol, masqués hors fenêtre
     this.line = null
     this.lineMat = null
     this.glowLine = null
@@ -693,16 +707,27 @@ export class GpxLayer {
     const pts = []
     const world = []
     const grid = this.getGrid?.()
+    // ⚠️ `demSpan(dem)/2`, PAS `TERRAIN_SIZE/2`. Sur une emprise 3×3 le champ
+    // fait 168 unités : le test écrit en dur ne reconnaissait comme « drapable »
+    // que le bloc CENTRAL et renvoyait tout le reste au repli à plat du damier,
+    // c'est-à-dire une trace posée à l'altitude 0 dès qu'on défilait.
+    const demiChamp = demSpan(dem) / 2
+    // ⚠️ ET `terrain.sample` PARLE EN COORDONNÉES DE GÉOMÉTRIE. Il ajoute
+    // lui-même le décalage de fenêtre : lui passer `w.x` (une coordonnée de
+    // champ) lui ferait lire le sol DEUX FOIS décalé, donc draper la trace sur
+    // le relief d'un autre endroit. Même correction que map/water-layer.js.
+    // Hors mode continu `fen` vaut (0,0) et l'expression est celle d'avant.
+    const fen = this.terrain?.fenetre ?? ZERO
     for (const p of this.track.points) {
       const w = latLonToWorld(dem, p.lat, p.lon)
-      const inside = Math.abs(w.x) < TERRAIN_SIZE / 2 && Math.abs(w.z) < TERRAIN_SIZE / 2
+      const inside = Math.abs(w.x) < demiChamp && Math.abs(w.z) < demiChamp
       // _depthOffsetY (task 22 §2): a small per-layer lift so two stacked
       // layers whose tracks coincide (e.g. the same GPX loaded twice) don't
       // z-fight — see GpxLayerManager.reorder()/setRenderDepth().
       // hors du bloc central : draper sur le bloc VOISIN du damier s'il est
       // chargé (block-grid.js) ; sinon l'ancien fallback à plat
       let y
-      if (inside) y = this.terrain.sample(w.x, w.z) + DRAPE_LIFT
+      if (inside) y = this.terrain.sample(w.x - fen.x, w.z - fen.z) + DRAPE_LIFT
       else {
         const h = grid?.heightAt(w.x, w.z)
         y = (h != null ? h : 0) + DRAPE_LIFT
@@ -742,6 +767,7 @@ export class GpxLayer {
       polygonOffsetUnits: -4,
     })
     this.lineMat.resolution.set(window.innerWidth, window.innerHeight)
+    this._coupeALaFenetre(this.lineMat)
     this.line = new Line2(geo, this.lineMat)
     this.line.computeLineDistances()
     this.line.renderOrder = 6 + ro
@@ -763,6 +789,7 @@ export class GpxLayer {
         alphaToCoverage: false,
       })
       this.glowMat.resolution.set(window.innerWidth, window.innerHeight)
+      this._coupeALaFenetre(this.glowMat)
       this.glowLine = new Line2(glowGeo, this.glowMat)
       this.glowLine.computeLineDistances()
       this.glowLine.renderOrder = 4 + ro
@@ -774,6 +801,12 @@ export class GpxLayer {
       const s = textSprite(label, this.params.hudAccent, scale, opacity, 20 + ro)
       s.position.copy(v).add(new THREE.Vector3(0, scale > 0.8 ? 1.25 : 0.85, 0))
       this.group.add(s)
+      // ⚠️ LES OBJETS PONCTUELS SE CACHENT, ILS NE SE COUPENT PAS. Les plans de
+      // coupe conviennent à la trace (une ligne coupée net au bord du socle se
+      // lit comme un bord de carte) ; sur une étiquette ils trancheraient le
+      // texte en plein milieu d'un mot. On les masque donc entiers — même règle
+      // que les noms de lieux (map/places-layer.js:_declutter).
+      this._ponctuels.push({ obj: s, x: s.position.x, z: s.position.z })
       return s
     }
 
@@ -879,6 +912,11 @@ export class GpxLayer {
     this._disposeVillages()
     const villageBuildId = ++this._villageBuildId
     this._buildVillages(villageBuildId, dem, world, totKm)
+
+    // Les étiquettes qui viennent d'être créées ne connaissent pas encore la
+    // fenêtre : sans cette passe, une reconstruction pendant un défilement les
+    // rallumerait toutes, y compris les huit neuvièmes hors socle.
+    this._ecreteFenetre()
   }
 
   // Fetches places (cached after the first call), picks the along-track
@@ -924,7 +962,9 @@ export class GpxLayer {
     const plate = labelPlate(this.params.darkMode)
     const accentColor = new THREE.Color(this.params.hudAccent)
     for (const hit of this._villageHits) {
-      const groundY = this.terrain.sample ? this.terrain.sample(hit.w.x, hit.w.z) : 0
+      // coordonnées de CHAMP → coordonnées de géométrie pour le sampler
+      const fenV = this.terrain?.fenetre ?? ZERO
+      const groundY = this.terrain.sample ? this.terrain.sample(hit.w.x - fenV.x, hit.w.z - fenV.z) : 0
       const lineGeo = new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(hit.w.x, groundY, hit.w.z),
         new THREE.Vector3(hit.w.x, groundY + VILLAGE_LINE_HEIGHT, hit.w.z),
@@ -959,7 +999,9 @@ export class GpxLayer {
     if (!this._villageMarkers.length) return
     for (const m of this._villageMarkers) {
       const op = villageOpacity(km, m.hit.km, this._villageLeadKm, this._villageFadeKm)
-      const visible = op > 0.002
+      // Le fondu de lecture ET le test de fenêtre : un village annoncé à
+      // l'instant juste ne s'affiche pas s'il est hors du socle (mode continu).
+      const visible = op > 0.002 && this._dansFenetre(m.hit.w.x, m.hit.w.z)
       m.line.visible = visible
       m.label.visible = visible
       m.line.material.opacity = op
@@ -1013,13 +1055,18 @@ export class GpxLayer {
     // ink so an untouched arch still reads correctly in both look modes.
     const archColor = this.params.gpxArchColor || (this.params.darkMode ? '#e7e9ec' : '#2b2f33')
     for (const spec of specs) {
+      // ⚠️ `sampleGround` reçoit des coordonnées de CHAMP (spec.pos vient de
+      // `world`), et `terrain.sample` répond en coordonnées de géométrie — d'où
+      // le décalage retranché, comme au drapage de la trace elle-même.
+      const fen = this.terrain?.fenetre ?? ZERO
       const group = buildArchMesh(spec, {
-        sampleGround: (x, z) => this.terrain.sample?.(x, z) ?? spec.pos.y,
+        sampleGround: (x, z) => this.terrain.sample?.(x - fen.x, z - fen.z) ?? spec.pos.y,
         ink: archColor,
         renderOrder: 22 + this._renderOffset,
       })
       this.group.add(group)
       this._archGroups.push(group)
+      this._ponctuels.push({ obj: group, x: spec.pos.x, z: spec.pos.z })
     }
     return true
   }
@@ -1166,6 +1213,14 @@ export class GpxLayer {
     if (!this.track?.world || !this.line || !this.group.visible) return
     this._ray.setFromCamera(mouseNdc, this.camera)
     const ray = this._ray.ray
+    // ⚠️ LE RAYON EST EN MONDE, `track.world` EST EN CHAMP. En mode continu le
+    // groupe porte −fenêtre : comparer les deux tels quels ferait survoler la
+    // trace à l'endroit qu'elle occupait avant le défilement. On amène donc le
+    // rayon dans le repère du champ — une addition sur son origine, plutôt que
+    // de translater chacun des milliers de points de la trace.
+    // Hors mode continu `_fen` vaut (0,0) et le rayon est celui d'avant.
+    ray.origin.x += this._fen.x
+    ray.origin.z += this._fen.z
     const camDist = this.camera.position.distanceTo(this.cursor.visible ? this.cursor.position : ray.origin)
     const tol = Math.max(0.4, camDist * 0.022)
     let best = -1
@@ -1537,6 +1592,55 @@ export class GpxLayer {
     this.rebuild()
   }
 
+  // ══════════ LA TRACE SUIT LE RELIEF (mode continu 3×3) ═════════════════════
+  //
+  // Une écriture de `group.position` et une passe de visibilité sur les objets
+  // ponctuels — appelée quand la fenêtre BOUGE, pas à chaque image.
+  //
+  // La trace elle-même, la ligne et son halo, est écrêtée par les huit plans de
+  // coupe posés à la construction : le GPU la coupe pile au bord du socle, pour
+  // rien, sans qu'on ait à refaire la moindre géométrie (fenetre-clip.js).
+  //
+  // ⚠️ SANS ÇA LE TRACÉ DÉBORDE. `gpx.js` n'a JAMAIS eu d'écrêtage : le test
+  // `inside` du drapage ne choisit que la SOURCE de l'altitude, il ne coupe
+  // rien. Sur une emprise 3×3 la trace est cuite sur 168 unités et déborderait
+  // visiblement du socle de 56 — l'étude §5.2 le signalait comme le seul calque
+  // sans découpe du tout.
+  setFenetre(x, z) {
+    this._fen.x = x
+    this._fen.z = z
+    this.group.position.set(-x, 0, -z)
+    this._ecreteFenetre()
+  }
+
+  // Pose la découpe de fenêtre sur un matériau. Sans effet hors mode continu :
+  // `plansFenetre()` rend alors `null`, et three.js ne compile même pas le code
+  // de coupe sans plans — le matériau reste celui d'avant, variante de shader
+  // comprise. Même mécanique que map/water-layer.js.
+  _coupeALaFenetre(mat) {
+    const plans = this.terrain?.plansFenetre?.()
+    if (!mat || !plans) return
+    mat.clippingPlanes = plans
+    mat.clipShadows = false
+    mat.needsUpdate = true
+  }
+
+  // Un point de CHAMP tombe-t-il dans le socle affiché ? Toujours vrai hors mode
+  // continu — là, tout ce qui existe est déjà dans le bloc, et poser l'octogone
+  // quand même risquerait de masquer une étiquette de coin qui s'affiche
+  // parfaitement aujourd'hui.
+  _dansFenetre(x, z) {
+    const fp = this.terrain?.empriseFootprint?.()
+    if (!fp) return true
+    const bloc = this.terrain.blockFootprint()
+    return dansFenetre(x - this._fen.x, z - this._fen.z, bloc.half, bloc.corner)
+  }
+
+  _ecreteFenetre() {
+    if (!this.terrain?.empriseFootprint?.()) return
+    for (const p of this._ponctuels) p.obj.visible = this._dansFenetre(p.x, p.z)
+  }
+
   setVisible(v) {
     this.group.visible = v
     if (!v) {
@@ -1549,6 +1653,7 @@ export class GpxLayer {
 
   _disposeLine() {
     this._disposeArches()
+    this._ponctuels = [] // les objets qu'il pointait viennent d'être détruits
     this._segCount = 0
     if (this.line) {
       this.group.remove(this.line)

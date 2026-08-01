@@ -18,7 +18,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { analyzeDem, resampleField } from '../src/terrain-analysis.js'
 import { buildSeaMask, blurMask } from '../src/sea-mask.js'
-import { computeTerrainJob, jobStillValid, jobCouvertParEnVol, scheduleTerrainJob, runTerrainJob, cancelTerrainJobs, resetTerrainTransport } from '../src/terrain-jobs.js'
+import { computeTerrainJob, computeLakeJob, jobStillValid, jobCouvertParEnVol, scheduleTerrainJob, runTerrainJob, runLakeJob, cancelTerrainJobs, resetTerrainTransport } from '../src/terrain-jobs.js'
+import { detectLakes } from '../src/lake.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -497,4 +498,103 @@ test('main.js : le délai du voile est ce qui lui manque, et il reste un setTime
   // justement de ne pas s'en servir ici)
   assert.ok(!/requestAnimationFrame\(/.test(bloc), 'rAF est gelé dans un onglet caché — jamais ici')
   assert.ok(!/\}, 50\)/.test(bloc), 'le délai fixe de 50 ms est revenu')
+})
+
+// ---------------------------------------------------------------------------
+// LES LACS SORTENT DU FIL À LEUR TOUR
+//
+// Mesuré sur MNT réel, durée TOTALE de `realWater.rebuild` avec et sans
+// détection (Chrome piloté sur le serveur vivant) : Annecy 3×3 875 → 201 ms,
+// Annecy z12 187 → 98 ms, La Réunion 3×3 556 → 67 ms. Et le transport ne mange
+// pas le gain : `postMessage` d'un MNT 3×3 (40,5 Mo) coûte 8 ms de fil
+// principal, le retour des cellules TRANSFÉRÉES 1,2 ms.
+//
+// Même contrat que l'analyse : le calcul déporté doit rendre EXACTEMENT ce que
+// le calcul en ligne rendait. Une cellule de différence, c'est un plan d'eau
+// qui change de forme.
+
+// un MNT avec de VRAIS lacs plantés, en Int16 comme la production (dem-quant.js)
+function demALacs(size = 96) {
+  const data = new Int16Array(size * size)
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) data[y * size + x] = 200 + ((x * 7 + y * 13) % 29) + ((x + y) % 3)
+  for (let y = 10; y < 45; y++) for (let x = 12; x < 50; x++) data[y * size + x] = 512 // blob
+  for (let y = 60; y < 68; y++) for (let x = 20; x < 85; x++) data[y * size + x] = 640 // ruban
+  return { data, size, metersPerPixel: 13.3 }
+}
+
+test('computeLakeJob rend EXACTEMENT ce que detectLakes rend, cellule pour cellule', () => {
+  const dem = demALacs()
+  const attendu = detectLakes(dem)
+  assert.ok(attendu.length >= 2, 'le témoin doit contenir au moins deux lacs')
+  const got = computeLakeJob({ data: dem.data, size: dem.size })
+  assert.equal(got.lacs.length, attendu.length)
+  for (let k = 0; k < attendu.length; k++) {
+    assert.equal(got.lacs[k].elevM, attendu[k].elevM, `lac ${k} : élévation`)
+    assert.equal(got.lacs[k].size, attendu[k].size, `lac ${k} : côté du champ`)
+    assert.deepEqual([...got.lacs[k].cells], [...attendu[k].cells], `lac ${k} : cellules`)
+  }
+})
+
+// 🔴 UN TAMPON RÉPÉTÉ DANS LA LISTE DE TRANSFERT FAIT JETER `postMessage`
+// (« ArrayBuffer at index 1 is already detached »), et l'erreur tomberait DANS
+// le Worker — donc dans un `console` que personne ne lit. C'est la contrepartie
+// du tampon partagé de lake.js : chaque lac doit avoir SON tampon.
+test('computeLakeJob rend un tampon par lac, et ils sont TOUS distincts', () => {
+  const got = computeLakeJob({ data: demALacs().data, size: 96 })
+  assert.equal(got.transfert.length, got.lacs.length)
+  assert.equal(new Set(got.transfert).size, got.transfert.length, 'deux lacs partagent un tampon')
+  for (let k = 0; k < got.lacs.length; k++) assert.equal(got.transfert[k], got.lacs[k].cells.buffer)
+})
+
+test('repli : sans Worker, runLakeJob rend la MÊME FORME que le Worker — { lacs }', async () => {
+  assert.equal(typeof Worker, 'undefined', 'node n’a pas de Worker global — c’est le chemin de repli')
+  const dem = demALacs()
+  const got = await runLakeJob({ data: dem.data, size: dem.size })
+  const attendu = detectLakes(dem)
+  assert.ok(Array.isArray(got.lacs), 'le repli doit rendre { lacs }, pas le résultat nu')
+  assert.equal(got.transfert, undefined, 'la liste de transfert ne traverse pas la frontière')
+  assert.equal(got.lacs.length, attendu.length)
+  for (let k = 0; k < attendu.length; k++) assert.deepEqual([...got.lacs[k].cells], [...attendu[k].cells])
+})
+
+// ⚠️ LA BOÎTE AUX LETTRES DOIT ROUTER, ET RETIRER SA CLÉ DE ROUTAGE. `kind`
+// laissé dans le travail arriverait dans une fonction qui déstructure ses
+// entrées : le jour où un réglage s'appellera comme ça, personne ne fera le
+// lien. Node n'a pas de Worker — on lit donc la boîte aux lettres au texte,
+// comme damier-memoire.test.js lit block-grid.js.
+test('terrain-worker.js route sur `kind` et transfère les cellules', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'src/terrain-worker.js'), 'utf8')
+  assert.match(src, /const \{ id, kind, \.\.\.job \} = e\.data/, 'kind doit être retiré du travail')
+  assert.match(src, /kind === 'lacs'/, 'la route des lacs a disparu')
+  assert.match(src, /self\.postMessage\(\{ id, lacs \}, transfert\)/, 'les cellules doivent être TRANSFÉRÉES')
+})
+
+// ⚠️ ET LA PANNE DU WORKER NE DOIT PAS REJOUER UN TRAVAIL DE LACS AVEC LE
+// CALCUL DE L'ANALYSE. `onerror` rejoue les travaux en vol sur le fil
+// principal ; sans le `calcul` rangé à côté du travail, il appellerait
+// `computeTerrainJob` sur un travail de lacs et rendrait un masque de mer là où
+// l'appelant attend des plans d'eau.
+test('panne du Worker : un travail de LACS est rejoué avec le calcul des lacs', async () => {
+  const dem = demALacs()
+  let instance = null
+  globalThis.Worker = class {
+    constructor() {
+      instance = this
+    }
+    postMessage() {
+      // le Worker meurt en vol, après avoir accepté le travail
+      setTimeout(() => instance.onerror?.(new Error('worker mort en vol')), 0)
+    }
+    terminate() {}
+  }
+  try {
+    resetTerrainTransport()
+    const got = await runLakeJob({ data: dem.data, size: dem.size })
+    assert.ok(Array.isArray(got?.lacs), 'le rejeu doit rendre des lacs, pas un masque de mer')
+    assert.equal(got.lacs.length, detectLakes(dem).length)
+  } finally {
+    delete globalThis.Worker
+    resetTerrainTransport()
+  }
 })

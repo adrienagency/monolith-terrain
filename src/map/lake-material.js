@@ -38,17 +38,29 @@ export function lakeGradient(inkHex) {
   }
 }
 
+// ⚠️ LES QUATRE INCLUSIONS DE COUPE SONT OBLIGATOIRES, et elles ne coûtent
+// rien quand personne ne pose de plans : three.js ne génère le code qu'à partir
+// de NUM_CLIPPING_PLANES > 0. Sans elles, poser `material.clippingPlanes` sur ce
+// ShaderMaterial ne ferait RIEN — en silence. C'est le mode continu qui en a
+// besoin : la géométrie des lacs y couvre l'emprise 3×3 entière et c'est le GPU
+// qui la coupe à la fenêtre (src/fenetre-clip.js).
+// ⚠️ `mvPosition` doit exister et porter ce nom : le chunk clipping_planes_vertex
+// lit cette variable-là.
 const VERT = /* glsl */ `
+  #include <clipping_planes_pars_vertex>
   varying vec3 vWorldPos;
   void main() {
     vec4 wp = modelMatrix * vec4(position, 1.0);
     vWorldPos = wp.xyz;
-    gl_Position = projectionMatrix * viewMatrix * wp;
+    vec4 mvPosition = viewMatrix * wp;
+    gl_Position = projectionMatrix * mvPosition;
+    #include <clipping_planes_vertex>
   }
 `
 
 const FRAG = /* glsl */ `
   precision highp float;
+  #include <clipping_planes_pars_fragment>
   varying vec3 vWorldPos;
 
   uniform vec3 uDeep;      // body colour, low end
@@ -71,6 +83,7 @@ const FRAG = /* glsl */ `
   }
 
   void main() {
+    #include <clipping_planes_fragment>
     // Flat normal, by design. Perturbing it with noise to smear the highlight
     // was tried and rejected on sight: at any amplitude coarse enough to widen
     // the glint it broke the surface into a chequerboard of sequins — photoreal
@@ -134,6 +147,7 @@ export function makeLakeMaterial({ ink, sky, opacity, half, sunDir, sunColor, su
     side: THREE.DoubleSide,
     polygonOffset: true,
     polygonOffsetFactor: -1,
+    clipping: true, // sans ça, material.clippingPlanes reste lettre morte
     uniforms: {
       uDeep: { value: new THREE.Color(lakeGradient(ink).deep) },
       uShallow: { value: new THREE.Color(lakeGradient(ink).shallow) },

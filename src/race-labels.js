@@ -36,7 +36,19 @@ export const PICTO_KEYS = ['ravito', 'eau', 'repas', 'dodo', 'wc', 'vue', 'col',
 const CART_H = 26 // hauteur fixe d'un cartouche (px) — pas de mesure DOM
 const CHIP_H = 18
 
-export function buildRaceLabels({ container, camera, getItems, params, onRemove }) {
+// ══════════ LES CARTOUCHES SUIVENT LE RELIEF (mode continu 3×3) ═════════════
+//
+// `item.world` vient de `gpx.track.world`, cuit en coordonnées de CHAMP
+// (`latLonToWorld`). En mode continu la fenêtre est le décalage entre le champ
+// et la géométrie affichée : la retrancher AVANT la projection est tout ce qu'il
+// faut pour qu'un cartouche reste planté sur son ravitaillement pendant qu'on
+// défile, au lieu de rester collé à l'écran.
+//
+// `getFenetre` est optionnel : sans lui (tous les appels d'aujourd'hui) le
+// décalage vaut zéro et la projection est celle d'avant, au bit près.
+const ZERO = { x: 0, z: 0 }
+
+export function buildRaceLabels({ container, camera, getItems, params, onRemove, getFenetre }) {
   const root = document.createElement('div')
   root.className = 'rl-root'
   container.appendChild(root)
@@ -119,8 +131,9 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove 
     const h = container.clientHeight
     // 1. projeter chaque ancre
     const vis = []
+    const fen = getFenetre?.() ?? ZERO
     for (const n of nodes.values()) {
-      v.copy(n.item.world).project(camera)
+      v.set(n.item.world.x - fen.x, n.item.world.y, n.item.world.z - fen.z).project(camera)
       const off = v.z > 1 || v.x < -1.15 || v.x > 1.15 || v.y < -1.15 || v.y > 1.15
       n.off = off
       if (off) { n.cart.classList.add('rl-hidden'); n.anchor.classList.add('rl-hidden'); n.leader.classList.add('rl-hidden'); continue }

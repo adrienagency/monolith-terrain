@@ -24,7 +24,12 @@ import { seedFleet, stepBoat, fleetAsleep, boatScale, MIN_ZOOM, FLEET_SLOTS } fr
 // Le nombre d'instances SUIT le modèle : un seul bateau par bloc (Adrien).
 // Le dimensionner à part invitait la dérive — huit places réservées ici pour
 // une flotte qui n'en remplit qu'une.
-const MAX_BOATS = FLEET_SLOTS
+//
+// ⚠️ SUR UNE EMPRISE 3×3, NEUF BLOCS. `seedFleet` sème `cote²` fois plus de
+// places pour que la densité DANS LA FENÊTRE ne bouge pas (voir son en-tête) :
+// l'InstancedMesh doit pouvoir toutes les porter. Neuf instances d'un vapeur,
+// c'est 9 matrices — rien, et toujours un seul appel de dessin.
+const MAX_BOATS = FLEET_SLOTS * 9
 
 // Part de la hauteur de coque qui passe SOUS la flottaison. Un bateau ne se
 // pose pas sur l'eau, il s'y enfonce (Adrien) — sans ça il a l'air d'un jouet
@@ -41,6 +46,7 @@ export class Boats {
     this.uniforms = null
     this._time = 0
     this._loading = null
+    this._fen = { x: 0, z: 0 } // décalage de fenêtre du mode continu 3×3
     this._m = new THREE.Matrix4()
     this._q = new THREE.Quaternion()
     this._v = new THREE.Vector3()
@@ -71,11 +77,14 @@ export class Boats {
     this.sea = seaMaterial?.uniforms || null
   }
 
-  async build({ zoom, half, seed, isSea, extentMeters, terrainSize, force = false }) {
+  async build({ zoom, half, seed, isSea, extentMeters, terrainSize, force = false, cote = 1 }) {
     // GARDÉ pour le pas : le bateau doit consulter la terre à chaque image, pas
     // seulement au moment d'être semé. Sans ça il traverse la côte.
     this._isSea = isSea || null
-    this.boats = seedFleet({ zoom, half, seed, isSea, slots: MAX_BOATS, force })
+    // ⚠️ `slots: FLEET_SLOTS`, PAS `MAX_BOATS`. `MAX_BOATS` est la RÉSERVE de
+    // l'InstancedMesh (neuf blocs) ; le nombre de places par bloc, lui, est
+    // toujours un. Les confondre remettrait neuf bateaux dans le bloc central.
+    this.boats = seedFleet({ zoom, half, seed, isSea, slots: FLEET_SLOTS, force, cote })
     if (!this.boats.length) { this._dispose(); return }
     const src = await this.load()
     if (!src || !this.boats.length) { this._dispose(); return }
@@ -186,7 +195,13 @@ varying float vFade;`
         continue
       }
       this._q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), b.cap)
-      this._v.set(b.x, 0, b.z)
+      // ⚠️ COORDONNÉES DE GÉOMÉTRIE, PAS DE CHAMP — et le groupe reste à
+      // l'origine. La houle est lue DANS LE SHADER à `instanceMatrix[3].xz`
+      // (voir _makeMaterial) : translater le groupe, comme on le fait pour les
+      // calques du sol, aurait donné au bateau la vague d'un autre endroit que
+      // celle que la mer dessine sous lui — un vapeur qui tangue à contretemps
+      // de son propre sillage. On retranche donc le décalage ICI.
+      this._v.set(b.x - this._fen.x, 0, b.z - this._fen.z)
       this._s.setScalar(s)
       mesh.setMatrixAt(i, this._m.compose(this._v, this._q, this._s))
       fade.array[i] = b.opacite
@@ -197,10 +212,20 @@ varying float vFade;`
     this.group.visible = !fleetAsleep(this.boats)
   }
 
-  update(dt, half) {
+  // Le décalage de fenêtre du mode continu. Les positions des bateaux sont en
+  // coordonnées de CHAMP (l'emprise 3×3 entière) ; c'est l'écriture des matrices
+  // qui les ramène dans la géométrie. Hors mode continu il reste à (0,0).
+  setFenetre(x, z) {
+    this._fen.x = x
+    this._fen.z = z
+    this._writeMatrices()
+  }
+
+  update(dt, half, bord = half) {
     if (!this.mesh || !this.boats.length) return
     if (fleetAsleep(this.boats)) { this.group.visible = false; return }
-    for (let i = 0; i < this.boats.length; i++) this.boats[i] = stepBoat(this.boats[i], dt, half, this._isSea)
+    const opts = { bord, fenX: this._fen.x, fenZ: this._fen.z }
+    for (let i = 0; i < this.boats.length; i++) this.boats[i] = stepBoat(this.boats[i], dt, half, this._isSea, opts)
     this._writeMatrices()
   }
 

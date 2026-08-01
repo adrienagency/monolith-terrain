@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildSeaMask, blurMask, landMaskFromImage } from '../src/sea-mask.js'
+import { buildSeaMask, blurMask, landMaskFromField } from '../src/sea-mask.js'
 
 // DEM synthétique : size×size, hauteur constante `fill`, retouches via set()
 function makeDem(size, fill = 10) {
@@ -9,11 +9,14 @@ function makeDem(size, fill = 10) {
 }
 const idx = (size, x, y) => y * size + x
 
-// ImageData-like (RGBA) pour landMaskFromImage — r(x,y) pilote le canal R
-function makeImage(width, height, r) {
-  const data = new Uint8ClampedArray(width * height * 4)
+// Champ côtier R8 ({data,width,height}) pour landMaskFromField : UN octet par
+// texel, pas quatre. C'est le tableau que coast-mask.js partage entre sa
+// DataTexture et les lecteurs CPU — un lecteur resté à la foulée 4 verrait une
+// côte au quart de sa taille, sans jamais lever d'erreur.
+function makeField(width, height, r) {
+  const data = new Uint8Array(width * height)
   for (let y = 0; y < height; y++)
-    for (let x = 0; x < width; x++) data[(y * width + x) * 4] = r(x, y)
+    for (let x = 0; x < width; x++) data[y * width + x] = r(x, y)
   return { data, width, height }
 }
 
@@ -82,19 +85,19 @@ test('bassin ≥ 2 % masqué terre ⇒ pas mer (le piège Flevoland)', () => {
   assert.equal(buildSeaMask(dem, { landMask: land }).mask[idx(size, 15, 15)], 0) // masqué terre : polder
 })
 
-test('landMaskFromImage : rééchantillonnage plus-proche-voisin + seuil 127', () => {
+test('landMaskFromField : rééchantillonnage plus-proche-voisin + seuil 127', () => {
   // image 4×4 : moitié ouest terre franche (255), un pixel gris (100, sous le
   // seuil), reste mer (0)
-  const img = makeImage(4, 4, (x, y) => (x < 2 ? 255 : x === 2 && y === 0 ? 100 : 0))
-  const out = landMaskFromImage(img, 8) // upsample ×2
+  const img = makeField(4, 4, (x, y) => (x < 2 ? 255 : x === 2 && y === 0 ? 100 : 0))
+  const out = landMaskFromField(img, 8) // upsample ×2
   assert.equal(out.length, 64)
   assert.equal(out[idx(8, 0, 0)], 255) // ouest → terre
   assert.equal(out[idx(8, 3, 5)], 255) // x=3 → px=1 → terre
   assert.equal(out[idx(8, 4, 0)], 0) // px=2, gris 100 ≤ 127 → mer
   assert.equal(out[idx(8, 7, 7)], 0) // est → mer
   // downsample : image 8×8 → grille 4 (px = x*8/4)
-  const img2 = makeImage(8, 8, (x) => (x >= 4 ? 255 : 0))
-  const down = landMaskFromImage(img2, 4)
+  const img2 = makeField(8, 8, (x) => (x >= 4 ? 255 : 0))
+  const down = landMaskFromField(img2, 4)
   assert.equal(down[idx(4, 1, 2)], 0)
   assert.equal(down[idx(4, 2, 2)], 255)
 })
@@ -103,8 +106,8 @@ test('chaîne complète : image → landMask → buildSeaMask', () => {
   const size = 8
   const dem = makeDem(size, -2) // tout sous le niveau 0 : sans masque, tout est mer
   assert.equal(buildSeaMask(dem).mask[idx(size, 6, 4)], 255)
-  const img = makeImage(16, 16, (x) => (x >= 8 ? 255 : 0)) // moitié est = terre
-  const { mask } = buildSeaMask(dem, { landMask: landMaskFromImage(img, size) })
+  const img = makeField(16, 16, (x) => (x >= 8 ? 255 : 0)) // moitié est = terre
+  const { mask } = buildSeaMask(dem, { landMask: landMaskFromField(img, size) })
   assert.equal(mask[idx(size, 1, 4)], 255) // ouest : mer (bord)
   assert.equal(mask[idx(size, 6, 4)], 0) // est : polder → terre
   // le blur ne réintroduit pas de mer au cœur du polder

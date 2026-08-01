@@ -310,10 +310,32 @@ test('un damier démonté ne retient que le budget d octets prévu, pas 24 MNT',
   const { grid } = await damierPlein()
   grid.sync([]) // dézoom : plus une seule dalle n'est réclamée
   assert.equal(grid.cells.size, 0)
-  // budget INCHANGÉ (32 Mo) : 14 entrées en tuiles 256 px, 3 en 512 px
-  assert.ok(grid._demCache.size < 24, `${grid._demCache.size} MNT retenus sur 24 dalles démontées`)
+  // ⚠️ CE QUI EST PLAFONNÉ, CE SONT LES OCTETS — pas le nombre d'entrées.
+  //
+  // Ce test exigeait autrefois `size < 24`, et il passait pour une raison qui
+  // n'était pas la sienne : en `Float32`, 32 Mo ne pouvaient tenir que 14 MNT.
+  // Le champ étant passé en `Int16` (src/dem-quant.js), un MNT pèse moitié
+  // moins et les 24 tiennent désormais dans le MÊME budget. Ce n'est pas une
+  // fuite, c'est le gain : à mémoire constante, le cache retient deux fois plus
+  // de dalles, donc deux fois moins de retours réseau au dézoom.
+  //
+  // L'invariant à tenir reste donc l'octet, et lui seul.
   const octets = [...grid._demCache.values()].reduce((n, d) => n + d.data.byteLength, 0)
   assert.ok(octets <= 32 * 1024 * 1024, `${Math.round(octets / 1048576)} Mo retenus`)
+  assert.ok(grid._demCache.size <= 24, `${grid._demCache.size} MNT pour 24 dalles démontées`)
+})
+
+test("l'éviction par octets mord toujours, elle, quand on crève le plafond", () => {
+  // La garde du test précédent ne mord plus (24 MNT tiennent dans 32 Mo) : il
+  // faut donc une épreuve qui prouve, à elle seule, que l'éviction existe
+  // encore. Sinon le passage à l'Int16 aurait retiré au dépôt sa SEULE preuve
+  // que le cache est borné.
+  const grid = new GrilleTest({ scene: { add() {}, remove() {} }, params: {}, getMainDem: () => null })
+  // 8 Mo pièce : au sixième, le plafond de 32 Mo est franchi.
+  for (let i = 0; i < 8; i++) grid._keepDetachedDem(`cle-${i}`, { data: new Int16Array(4 * 1024 * 1024), size: 2048 })
+  const octets = [...grid._demCache.values()].reduce((n, d) => n + d.data.byteLength, 0)
+  assert.ok(octets <= 32 * 1024 * 1024, `${Math.round(octets / 1048576)} Mo retenus sur un plafond de 32`)
+  assert.ok(grid._demCache.size < 8, `${grid._demCache.size} entrées : rien n'a été évincé`)
 })
 
 test('un MNT déjà détenu par une cellule vivante ne repart PAS sur le réseau', async () => {

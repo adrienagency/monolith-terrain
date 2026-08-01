@@ -1,5 +1,6 @@
 ﻿import { section, toggle, slider, visibleWhen, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
+import { marqueEtape } from './etape.js'
 
 const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z"/><path d="M9 4v14M15 6v14"/></svg>'
 
@@ -27,6 +28,34 @@ export function buildMapPanel(ctx) {
   // Outside covered ground the layer says so in the middle of the screen and
   // switches itself back off (see main.js refreshAerial).
   const aerialToggle = toggle({ label: 'Photo aérienne', get: () => params.aerialEnabled, set: (v) => { params.aerialEnabled = v; ctx.refreshAerial(); refreshAll() } })
+  // BÊTA — et les DEUX motifs d'origine ont changé de nature. Ce qui suit est
+  // maintenant chronométré, plus dérivé.
+  //
+  // 1. LE COÛT N'EST PLUS CELUI QU'ON ANNONÇAIT, ET IL EST PLUS BAS. L'ancien
+  //    texte multipliait par neuf le coût d'un bloc en le disant lui-même « pas
+  //    un chronomètre ». MESURÉ depuis, Chamonix z12, même machine et même
+  //    connexion, en chronométrant `AerialLayer.build()` sur les deux emprises :
+  //
+  //      le bloc central seul (l'ancien) : 156 tuiles, z14, 3072×3328, 39,0 Mo, 6 821 ms
+  //      L'EMPRISE ENTIÈRE (le nouveau)  :  81 tuiles, z12, 2304×2304, 20,3 Mo, 4 592 ms
+  //
+  //    NEUF FOIS la surface pour 48 % de tuiles en moins, 48 % de mémoire en
+  //    moins et 33 % de temps en moins. La raison est que le budget de texture
+  //    borne le CANEVAS, pas le nombre de tuiles : une emprise trois fois plus
+  //    large au même budget descend de deux crans d'imagerie, et une tuile d'un
+  //    cran plus grossier couvre quatre fois la surface (voir demBounds).
+  // 2. L'INACHÈVEMENT, qui reste le vrai motif du mot « bêta » — mais il ne
+  //    porte plus sur la COUVERTURE (les neuf dalles sont peintes), seulement
+  //    sur l'AFFINAGE. `AerialLayer.build()` fait toujours une passe unique : le
+  //    « grossier d'abord, puis amélioration alors que la vue est déjà chargée »
+  //    qu'Adrien a tranché a son premier terme, pas son second. Le cran suivant
+  //    sur l'emprise dépasse le budget de texture ; il demandera une SECONDE
+  //    texture sur la dalle regardée, mesurée à +36 Mo.
+  marqueEtape(aerialToggle, {
+    etape: 'bêta',
+    raison:
+      'Environ 80 tuiles et 5 secondes, mesurées. En mode continu 3×3 elle couvre désormais les neuf dalles, à deux crans de zoom plus grossiers : l’affinage progressif au centre de la vue reste à faire.',
+  })
   const aerialOpacity = slider({ label: 'Opacité de la photo', min: 0, max: 1, step: 0.02, get: () => params.aerialOpacity, set: (v) => { params.aerialOpacity = v; ctx.terrain.setAerialOpacity(v); ctx.blockGrid?.setAerialOpacity?.(v) } })
   // v49 : la photo ne vit qu'à la côte, puis s'estompe vers le fond marin. 0 = pleine partout.
   const aerialCoastFade = slider({ label: 'Fondu à la côte', min: 0, max: 0.4, step: 0.01, get: () => params.aerialCoastFade, set: (v) => { params.aerialCoastFade = v; ctx.terrain.setAerialCoastFade(v); ctx.blockGrid?.setAerialCoastFade?.(v) } })

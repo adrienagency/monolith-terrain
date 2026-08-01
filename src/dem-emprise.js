@@ -1,0 +1,433 @@
+// L'EMPRISE 3×3 — neuf MNT recollés en UN SEUL champ.
+//
+// Module PUR : ni DOM, ni three.js, ni fetch. Testable en node.
+//
+// ══════════ POURQUOI UN SEUL CHAMP, ET PAS NEUF DALLES ══════════════════════
+//
+// C'est la conclusion principale de l'étude 3×3 (§3.2/§3.3), et elle ne porte
+// pas d'abord sur la mémoire :
+//
+//   | | neuf dalles qui défilent | une fenêtre sur UN champ |
+//   | mémoire du terrain      |      ~430 Mo |    109 Mo |
+//   | sommets par image       |      594 441 |   148 225 |
+//   | coutures à recoudre     |            4 |    AUCUNE |
+//   | statistiques globales   | à geler une par une | par construction |
+//
+// La dernière ligne est la vraie raison. Avec neuf champs, chacun a son échelle
+// de couleurs, son p95, sa topologie de mer — et une cuvette CHANGEAIT DE
+// COULEUR selon la dalle où elle tombait. Avec un seul champ, la question
+// n'existe plus : un champ, une échelle, une topologie.
+//
+// ══════════ CE QUE CE MODULE FAIT, ET CE QU'IL NE FAIT PAS ══════════════════
+//
+// Il RECOLLE, il ne rééchantillonne pas : `metersPerPixel` est identique, seul
+// `extentMeters` triple. Le champ obtenu a exactement la forme que rend
+// `loadDem` (dem.js:519), donc `sampleDem` et tout ce qui lit un `dem` le
+// lisent sans savoir qu'il est trois fois plus grand.
+//
+// ⚠️ IL NE DEMANDE PAS `tilesAcross: 9` À `loadDem`, et c'est délibéré : celui-ci
+// peindrait un canevas 4608², en lirait l'ImageData et la décoderait — un pic
+// transitoire de ~255 Mo, inacceptable sur l'iMac 2015. Neuf appels à
+// `tilesAcross: 3` avec neuf `originTile` coûtent le même total sans le pic.
+//
+// ══════════ LES DEUX STATISTIQUES QUI NE SE TRAITENT PAS PAREIL ═════════════
+//
+// `minM`/`maxM` — SUR L'EMPRISE ENTIÈRE. C'est la septième statistique globale
+// de l'étude, celle qui manquait à la liste : `uHeightRange` normalise la rampe
+// de couleurs ET l'amplitude des sommets. Si elle restait celle du centre, une
+// voisine plus haute verrait ses sommets SATURER — un massif entier peint d'une
+// seule couleur dès qu'on défile vers lui.
+//
+// `meanM` — CELUI DU CENTRE, et surtout pas la moyenne des neuf. `meanM` ne
+// normalise rien : c'est le ZÉRO VERTICAL, ce qui cale le terrain en hauteur.
+// Le prendre sur l'emprise ferait sauter le relief de plusieurs centaines de
+// mètres à l'instant précis où l'on entre en mode continu, alors que la règle
+// est qu'à décalage nul l'image doit être IDENTIQUE à celle d'aujourd'hui.
+
+// Le 3×3 borné qu'Adrien a fixé. Ce n'est pas un réglage à faire varier : toute
+// l'architecture (une seule géométrie, tout précuit au chargement, aucune mise
+// à jour torique) ne tient QUE parce que l'emprise est finie et petite.
+export const EMPRISE_COTE = 3
+
+// ══════════ L'ATLAS DE CHAMPS — JALON 2 ═══════════════════════════════════
+//
+// Une seule cuisson, sur l'emprise entière, au lieu d'une par bloc traversé.
+// C'est ce que le 3×3 BORNÉ offre gratuitement, et c'est la comparaison qui
+// tranche (étude §2.2, banc `bench-atlas.mjs`) :
+//
+//   neuf dalles cuites séparément (analyse 1024² chacune) : 9 × 307 = 2 767 ms
+//   un atlas 2304², à la MÊME densité que neuf dalles à 768² :      1 378 ms
+//
+// Deux fois moins cher, et il n'y a plus qu'un objet — donc plus qu'une échelle
+// de couleurs, un p95 et une topologie de mer. C'est cette dernière ligne qui
+// compte le plus : avec neuf champs, une cuvette CHANGEAIT DE COULEUR selon la
+// dalle où elle tombait (`robustScale` dépend de la RÉSOLUTION du champ, pas
+// seulement de son contenu — étude §4.4). L'atlas ne corrige pas ce défaut, il
+// SUPPRIME LA CONDITION qui le rendait possible.
+//
+// 2304 sur les 168 unités de l'emprise = 13,7 px/unité, contre 27,4 pour le
+// bloc central d'aujourd'hui et 18,3 pour une voisine du damier. Un cran plus
+// grossier, mais la règle de `test/damier-memoire.test.js` — « aucun champ ne
+// dépasse quatre fois la densité du maillage qui le porte » — est tenue avec de
+// la marge : à res 384 (6,9 sommets/unité), 13,7 px/u fait 1,99×.
+//
+// ⚠️ 2304 DIVISE EXACTEMENT 4608, le côté du MNT recollé en tuiles 512 px.
+// `resampleField` et `minPoolField` retombent alors sur la moyenne (ou le
+// minimum) de blocs 2×2, le chemin entier — deux fois moins cher que le chemin
+// des poids fractionnaires, pour un résultat identique. Un 2 300 « rond » aurait
+// coûté le double sans rien apporter.
+//
+// ⚠️ CE QUE CE CRAN CHANGE À L'IMAGE, VU ET NON DÉDUIT (planche du jalon 2, La
+// Réunion z11, scène gelée) : la carte est la MÊME — même trait de côte, mêmes
+// teintes, mêmes noms — mais le PEIGNÉ DES CRÊTES est un peu plus marqué en
+// mode continu. C'est attendu et c'est structurel : `textureShade` floute à des
+// rayons de 1, 2, 4 … 32 PIXELS (terrain-analysis.js), donc à moitié de densité
+// ces rayons couvrent deux fois plus de terrain et l'amplitude monte. Ce n'est
+// pas un défaut de l'atlas, c'est la même dépendance à la résolution que
+// l'étude décrit au §4.4 — sauf qu'ici elle est CONSTANTE sur toute l'emprise,
+// au lieu de sauter d'un cran à chaque jointure du damier. Une seule échelle,
+// donc une image stable pendant tout le geste : c'est le but, pas un compromis.
+export const ATLAS_ANALYSE = 2304
+export const ATLAS_MER = 2304
+
+// Côté du masque côtier cuit sur l'emprise, en R8.
+//
+// ══════════ TRANCHÉ PAR COMPARAISON D'IMAGES, PAS PAR LE CALCUL ════════════
+//
+// L'étude (§2.1) proposait 768 par bloc comme « plancher défendable » et 1024
+// comme « marge d'un cran », à partir d'un compte de texels par pixel d'écran —
+// en disant explicitement : « ce raisonnement est géométrique, pas perceptif :
+// je n'ai pas fait de comparaison d'images côte à côte ». Elle a été faite.
+//
+// L'INSTRUMENT D'ABORD, parce qu'un premier essai n'a rien prouvé du tout :
+// deux captures du MÊME code diffèrent sur 98,5 % des pixels, d'un écart moyen
+// de 13 niveaux. La cause est le GRAIN DE PELLICULE (passe NoiseEffect du
+// composer, opacité 0,26 par défaut), tiré au hasard À CHAQUE IMAGE. Éteint —
+// avec l'heure du jour, les nuages, la mer et une caméra passée par
+// `applyIsoView(0)`, seule pose vraiment reproductible — le PLANCHER DE BRUIT
+// tombe à 0,51 % des pixels, dont 95 % à ±2 niveaux. C'est lui l'étalon.
+//
+// La mesure, La Réunion z11 (l'île ENTIÈRE et sa mer dans la fenêtre — à z13 le
+// bloc fait 13,7 km et l'île 63, aucun rivage n'y entre et le banc mesurerait
+// du bruit), cadrage d'ouverture, 12,5 px d'écran par unité monde :
+//
+//   masque   texels/unité   pixels ≠ du 2304   dont écart ≥ 9 niveaux
+//   ------   ------------   ----------------   ----------------------
+//   (bruit)          —              0,51 %                        91
+//   3072            18,3            0,285 %                      258
+//   2304            13,7             —                             —
+//   1536             9,1            0,315 %                      341
+//   1024             6,1            0,410 %                      663
+//
+// Et les pixels qui diffèrent sont TOUS sur le trait de côte, en un filet d'un
+// pixel de large (image de diff). À 43 px/unité — la vue rapprochée, quatre
+// fois le cadrage d'ouverture — les quatre tailles restent indiscernables à un
+// agrandissement ×4.
+//
+// LA RAISON, et elle explique pourquoi le raisonnement en texels était trop
+// pessimiste : le masque est PRÉ-FLOUTÉ de 1,5 px À SA PROPRE RÉSOLUTION
+// (coast-mask.js) et le shader coupe à l'iso-0,5 avec un anticrénelage en
+// `fwidth`. Sa résolution déplace donc la POSITION du contour d'au plus un
+// demi-texel — elle ne change pas sa NETTETÉ. Il n'y a pas d'escalier à voir,
+// seulement un rivage qui glisse d'un pixel.
+//
+// LE VERDICT : 3072 n'achète rien de mesurable (258 pixels sur 1,02 million,
+// tous invisibles) et coûte 9,4 Mo au lieu de 5,3. 1536 tiendrait aussi. On
+// garde 2304 pour trois raisons, dans cet ordre :
+//   1. il partage la grille de l'atlas (2304 divise 4608 exactement), donc
+//      `landMaskFromField` reste un plus-proche-voisin sans surprise de rapport ;
+//   2. il laisse un cran de marge au-dessus de 1536, où les premiers écarts
+//      apparaissent — encore sous le pixel, mais ils apparaissent ;
+//   3. 5,3 Mo en R8, contre 5,3 Mo aussi pour le masque de mer : un seul budget
+//      à retenir.
+//
+// ⚠️ CE VERDICT VAUT POUR LE TRAIT DE CÔTE VU PAR LE TERRAIN. La mer, elle, lit
+// le même masque pour son ressac (ocean.js) : si un jour le ressac paraît
+// grossier en mode continu, c'est ici qu'il faut revenir — pas dans ocean.js.
+export const ATLAS_COTE = 2304
+
+/**
+ * Le seuil de « grand bassin » d'un masque de mer, converti à l'emprise.
+ *
+ * ⚠️ SANS CETTE CONVERSION, LES MERS FERMÉES BASCULENT EN TERRE. `buildSeaMask`
+ * garde une poche basse non connectée au bord quand elle occupe au moins 2 % du
+ * champ (`minBasinFrac`) — c'est ce qui sauve la Caspienne et la mer Morte.
+ * Relire ces 2 % sur une emprise de 3×3 blocs, c'est exiger NEUF FOIS la même
+ * surface absolue : la mer Morte tomberait sous le seuil et se peindrait en
+ * terre à l'instant précis où l'on entre en mode continu.
+ *
+ * La conversion garde la SURFACE ABSOLUE, à la cellule près (le test le
+ * verrouille sur quatre côtes et trois résolutions) : `frac / côté²`, parce que
+ * le nombre de cellules du champ, lui, est multiplié par `côté²`.
+ *
+ * Rend la fraction inchangée hors mode continu — 2 % restent 2 %.
+ *
+ * @param {number} frac fraction pour UN bloc (0,02 par défaut de sea-mask.js)
+ * @param {number} cote côté de l'emprise en blocs
+ */
+export function fracBassinEmprise(frac, cote) {
+  const c = cote > 1 ? cote : 1
+  return frac / (c * c)
+}
+
+/**
+ * Les neuf origines de tuile d'une emprise centrée sur un bloc.
+ *
+ * Rendues en LIGNE-MAJOR (gauche→droite, puis haut→bas), l'ordre que
+ * `recollerEmprise` attend et celui dans lequel `block-grid.js` raisonne déjà.
+ *
+ * @param {{originTileX:number, originTileY:number}} centre - le bloc central
+ * @param {number} tilesAcross - tuiles par bloc (3 aujourd'hui)
+ * @returns {Array<{x:number,y:number}>} neuf origines
+ */
+export function originesEmprise(centre, tilesAcross) {
+  const o = []
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      o.push({ x: centre.originTileX + dx * tilesAcross, y: centre.originTileY + dy * tilesAcross })
+    }
+  }
+  return o
+}
+
+// Chargements de MNT en vol en même temps pendant le montage de l'emprise.
+//
+// ⚠️ CE CHIFFRE EST LE PIC, ET LE PIC EST LE SEUL POSTE QUI AIT JAMAIS DÉBORDÉ.
+//
+// L'en-tête dit qu'on refuse `tilesAcross: 9` pour éviter un pic transitoire de
+// ~255 Mo, et que « neuf appels à `tilesAcross: 3` coûtent le même total sans
+// le pic ». La deuxième moitié de cette phrase n'était vraie qu'à une condition
+// jamais écrite : que les neuf appels ne soient pas EN VOL EN MÊME TEMPS. Ils
+// l'étaient — un seul `Promise.all` sur les neuf origines (main.js) — et chaque
+// `loadDem` en vol tient au passage son `ImageData` (9,4 Mo), son
+// `Float32Array` (9,4 Mo), sa grille bathy et son champ fusionné avant de ne
+// rendre que 4,7 Mo d'Int16. Le pic écarté par la porte est rentré par la
+// fenêtre, à l'identique.
+//
+// ⚠️ ET IL SE MESURE RAMASSAGE FORCÉ, SINON ON MESURE LE DÉCHET.
+//
+// `usedJSHeapSize` lu brut pendant un chargement compte tout ce qui est MORT
+// mais pas encore ramassé. Il monte à 386 Mo (La Réunion z13) qu'on borne les
+// chargements ou non — c'est ce chiffre-là, lu par un banc dont le `window.gc()`
+// était un no-op faute de `--js-flags=--expose-gc`, qui a fait croire à 306 et
+// 453 Mo de terrain RETENU. Il n'y a rien de retenu : au repos, ramassage forcé,
+// le mode continu tient en 158 Mo — MOINS que le bloc unique d'aujourd'hui
+// (100 à 105 Mo de gros tampons contre 96), parce que sa géométrie est
+// plafonnée à res 384 quand celle du bloc court à 768.
+//
+// Le PIC VIF, lui — ramassage forcé avant chaque lecture, `.banc/f3-pic-vif.mjs` :
+//
+//   | en vol | La Réunion z13   | Chamonix z12     |
+//   |   9    | 242 Mo (+97)     | 255 Mo (+65)     |
+//   |   3    | 215 Mo (+70)     | 246 Mo (+56)     |
+//
+// Trois en vol : ~3 × 30 Mo d'intermédiaires au lieu de ~9 × 30, pour un
+// parallélisme réseau qui reste de 27 tuiles simultanées et un temps de
+// chargement inchangé (2 264 ms contre 2 336 ms, dans le bruit).
+//
+// ⚠️ Le gain est réel mais MODESTE, et plus petit qu'on ne l'attendrait de 9→3 :
+// le ramasse-miettes ne repasse pas entre deux blocs, donc une partie des
+// intermédiaires « libérés » occupe encore la place quand le suivant alloue. Ne
+// pas descendre à 1 en espérant y gagner trois fois plus — ce serait payer le
+// réseau en série pour un gain qui n'est pas là.
+export const EMPRISE_EN_VOL_MAX = 3
+
+/**
+ * Applique `charger` à chaque entrée, JAMAIS plus de `limite` à la fois.
+ *
+ * Rend les résultats DANS L'ORDRE DES ENTRÉES, et non dans celui des arrivées :
+ * `recollerEmprise` lit ses neuf blocs en ligne-major, un tableau rangé par
+ * ordre de réponse du réseau recollerait un relief faux sans lever d'erreur.
+ *
+ * Le premier échec remonte — main.js compte dessus pour retomber sur le bloc
+ * unique plutôt que d'afficher une emprise trouée.
+ *
+ * @param {Array<any>} entrees
+ * @param {number} limite - ramenée à 1 au minimum (une limite nulle rendrait une
+ *   promesse éternelle, or le voile de chargement l'attend)
+ * @param {(entree:any, rang:number) => Promise<any>} charger
+ * @returns {Promise<Array<any>>}
+ */
+export async function enVolBorne(entrees, limite, charger) {
+  const n = entrees.length
+  const out = new Array(n)
+  const max = Math.min(n, Math.max(1, Math.floor(limite) || 1))
+  let suivant = 0
+  // `max` ouvriers tirent dans la même file : dès qu'un chargement finit, son
+  // ouvrier prend l'entrée suivante. Un découpage en vagues de `max` ferait
+  // attendre les trois de la vague sur le plus lent des trois.
+  const ouvrier = async () => {
+    while (suivant < n) {
+      const k = suivant++
+      out[k] = await charger(entrees[k], k)
+    }
+  }
+  await Promise.all(Array.from({ length: max }, ouvrier))
+  return out
+}
+
+/**
+ * Recolle neuf blocs de MNT en un champ unique de 3×3 blocs.
+ *
+ * @param {Array<object>} blocs - neuf blocs rendus par `loadDem`, en ligne-major
+ * @returns {object} un champ de la MÊME forme qu'un bloc de `loadDem`
+ */
+export function recollerEmprise(blocs) {
+  const n = EMPRISE_COTE * EMPRISE_COTE
+  if (!Array.isArray(blocs) || blocs.length !== n) throw new Error(`emprise : il faut neuf blocs, reçu ${blocs?.length}`)
+  for (let k = 0; k < n; k++) if (!blocs[k]?.data) throw new Error(`emprise : bloc manquant au rang ${k}`)
+
+  const centre = blocs[4]
+  const cote = centre.size
+  for (const b of blocs) {
+    if (b.size !== cote) throw new Error(`emprise : taille de bloc hétérogène (${b.size} contre ${cote})`)
+    if (b.zoom !== centre.zoom) throw new Error(`emprise : zoom hétérogène (${b.zoom} contre ${centre.zoom})`)
+    if (b.tilePx !== centre.tilePx) throw new Error(`emprise : taille de tuile hétérogène (${b.tilePx} contre ${centre.tilePx})`)
+  }
+  // ⚠️ ON NE COMPARE PAS `metersPerPixel`, ET C'EST UN FAIT DE MERCATOR, PAS UN
+  // RELÂCHEMENT DE LA RÈGLE.
+  //
+  // `metersPerPixel = 156543,03 · cos(lat) / 2^zoom · (256/tilePx)` : il DÉPEND
+  // DE LA LATITUDE. Les voisins nord et sud d'une emprise ne sont donc jamais à
+  // la même résolution au sol que le centre — à Chamonix (45,9°) l'écart entre
+  // la rangée du haut et celle du bas atteint 0,6 %. Une première version
+  // exigeait l'égalité : elle a refusé les deux zones de référence, aucune
+  // emprise ne s'est jamais montée, et le drag ne bougeait pas d'un pixel.
+  //
+  // Recoller en espace TUILE est précisément ce qu'il faut faire : la grille de
+  // tuiles est uniforme en Mercator, chaque bloc occupe exactement 3×3 tuiles,
+  // et c'est déjà ainsi que le damier pose ses dalles voisines à des décalages
+  // monde fixes. L'étirement de Mercator est porté par la projection, pas par
+  // le recollage. `metersPerPixel` retenu est celui du centre : une valeur
+  // NOMINALE, comme elle l'a toujours été pour un bloc de 21 km de large.
+  //
+  // Ce qui doit être homogène, et qui l'est vérifié ci-dessus, c'est la
+  // GÉOMÉTRIE du recollage : même côté en pixels, même zoom, même taille de
+  // tuile. Là, un écart ferait vraiment une couture.
+
+  const size = cote * EMPRISE_COTE
+  const data = new Int16Array(size * size)
+  let minM = Infinity
+  let maxM = -Infinity
+  for (let k = 0; k < n; k++) {
+    const b = blocs[k]
+    const ox = (k % EMPRISE_COTE) * cote
+    const oy = ((k / EMPRISE_COTE) | 0) * cote
+    // Recopie ligne par ligne : `set` sur une sous-vue est la voie rapide
+    // (memcpy natif), et elle rend le rangement ligne-major explicite.
+    for (let y = 0; y < cote; y++) data.set(b.data.subarray(y * cote, y * cote + cote), (oy + y) * size + ox)
+    if (b.minM < minM) minM = b.minM
+    if (b.maxM > maxM) maxM = b.maxM
+  }
+
+  return {
+    data,
+    size,
+    tilePx: centre.tilePx,
+    demSource: centre.demSource,
+    maxZoom: centre.maxZoom,
+    metersPerPixel: centre.metersPerPixel,
+    // Trois blocs de large : l'étendue au sol triple, la résolution ne bouge pas.
+    extentMeters: centre.extentMeters * EMPRISE_COTE,
+    minM,
+    maxM,
+    // le ZÉRO VERTICAL, pas une normalisation — voir l'en-tête
+    meanM: centre.meanM,
+    // le centre de l'emprise EST le centre du bloc central
+    lat: centre.lat,
+    lon: centre.lon,
+    zoom: centre.zoom,
+    // ⚠️ le géoréférencement est celui du coin HAUT-GAUCHE de l'emprise, pas du
+    // centre : c'est lui que `geo.js` lit pour convertir lat/lon ↔ XZ monde.
+    originTileX: blocs[0].originTileX,
+    originTileY: blocs[0].originTileY,
+    // marqueur : les lecteurs qui doivent savoir qu'ils tiennent une emprise et
+    // non un bloc (le socle, les statistiques globales) le lisent ici.
+    empriseCote: EMPRISE_COTE,
+  }
+}
+
+// ══════════ CE QU'IL Y A SOUS LA FENÊTRE, ET PAS SOUS L'EMPRISE ═════════════
+//
+// ⚠️ LE CARTOUCHE AU SOL MENTAIT, ET PAS SEULEMENT APRÈS UN DÉFILEMENT. Trouvé
+// à l'audit du jalon 3, vérifié ici : `minM`/`maxM` ci-dessus portent sur
+// l'emprise ENTIÈRE — c'est ce que `uHeightRange` demande, et c'est juste pour
+// lui. Mais le cartouche les affiche comme la plage d'altitude de la dalle
+// qu'on regarde, laquelle n'en est que le NEUVIÈME. À Chamonix, il annonçait la
+// plage des 21 km alentour sous une vallée qui n'en couvre que 7.
+//
+// La correction est de lire le rectangle VISIBLE. Le passage par des pixels
+// plutôt que par des unités monde n'est pas un détail : c'est le seul repère
+// que ce module partage avec `sampleDem`, et donc le seul où une erreur d'un
+// facteur `empriseCote` ne peut pas se glisser sans se voir.
+//
+// ⚠️ ET LA MOYENNE N'EST PAS `meanM`. `meanM` est le ZÉRO VERTICAL de la scène
+// (celui du bloc central au chargement) : le confondre avec l'altitude moyenne
+// de ce qu'on regarde ferait dire au cartouche « mean 1 200 m » sur une dalle
+// qui plafonne à 400. Elle est donc recalculée ici, sur le même rectangle.
+//
+// @param {{data:Int16Array|Float32Array, size:number}} dem
+// @param {number} px0 - coin haut-gauche du rectangle, en pixels du MNT
+// @param {number} py0
+// @param {number} cotePx - côté du rectangle, en pixels
+// @returns {{minM:number, maxM:number, meanM:number}}
+export function statsRect(dem, px0, py0, cotePx) {
+  const { data, size } = dem
+  // Bornage : la butée élastique laisse la fenêtre déborder de l'emprise, et
+  // `sampleDem` y clampe déjà. Lire à l'index négatif rendrait `undefined`,
+  // donc NaN, donc une plage d'altitude vide — un cartouche muet plutôt qu'un
+  // cartouche faux, mais muet quand même.
+  //
+  // ⚠️ ET ON ARRONDIT VERS L'INTÉRIEUR, ce qui n'est pas de la coquetterie. Le
+  // rectangle visible fait `(size − 1) / empriseCote` pixels, soit 1 535,67 sur
+  // une emprise réelle : ses bords ne tombent JAMAIS sur un pixel entier. Un
+  // arrondi au plus proche déborde alors d'un pixel sur la dalle voisine — et
+  // `minM`/`maxM` sont des statistiques d'ORDRE, un seul pixel étranger suffit
+  // à décaler le maximum. Vers l'intérieur, le cartouche décrit ce qu'on voit à
+  // coup sûr, jamais un morceau de ce qu'on ne voit pas.
+  const x0 = Math.max(0, Math.min(size - 1, Math.ceil(px0)))
+  const y0 = Math.max(0, Math.min(size - 1, Math.ceil(py0)))
+  const x1 = Math.max(x0 + 1, Math.min(size, Math.floor(px0 + cotePx) + 1))
+  const y1 = Math.max(y0 + 1, Math.min(size, Math.floor(py0 + cotePx) + 1))
+  let minM = Infinity
+  let maxM = -Infinity
+  let somme = 0
+  let n = 0
+  for (let y = y0; y < y1; y++) {
+    const ligne = y * size
+    for (let x = x0; x < x1; x++) {
+      const v = data[ligne + x]
+      if (v < minM) minM = v
+      if (v > maxM) maxM = v
+      somme += v
+      n++
+    }
+  }
+  if (!n) return { minM: 0, maxM: 0, meanM: 0 }
+  return { minM, maxM, meanM: somme / n }
+}
+
+// Le rectangle VISIBLE d'une emprise, en pixels du MNT, pour un décalage de
+// fenêtre donné.
+//
+// ⚠️ LA FORMULE EST CELLE DE `_makeDemSampler`, RECOPIÉE VOLONTAIREMENT plutôt
+// qu'importée : ce module doit rester pur (terrain.js tire three.js). Elle est
+// verrouillée par test — un `size` au lieu d'un `size - 1` déplacerait le
+// cartouche d'un pixel de MNT, soit ~14 m, ce que personne ne verrait jamais et
+// qui ferait quand même diverger deux vérités.
+//
+// @param {{size:number, empriseCote?:number}} dem
+// @param {number} fenX - décalage de fenêtre, en unités monde
+// @param {number} fenZ
+// @param {number} tailleSocle - TERRAIN_SIZE, en unités monde
+// @returns {{px0:number, py0:number, cotePx:number}}
+export function rectFenetre(dem, fenX, fenZ, tailleSocle) {
+  const cote = dem.empriseCote > 1 ? dem.empriseCote : 1
+  const span = tailleSocle * cote
+  const cotePx = (dem.size - 1) / cote
+  return {
+    px0: ((fenX - tailleSocle / 2) / span + 0.5) * (dem.size - 1),
+    py0: ((fenZ - tailleSocle / 2) / span + 0.5) * (dem.size - 1),
+    cotePx,
+  }
+}

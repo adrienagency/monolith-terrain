@@ -139,11 +139,27 @@ function rng(seed) {
 //
 // `force` remplit toutes les places sans tirage : c'est ce qui permet de VOIR
 // la flotte pour la régler, sans relancer trente fois en attendant le 1/10.
-export function seedFleet({ zoom, half, seed = 1, isSea = null, slots = FLEET_SLOTS, force = false } = {}) {
-  const n = slotsForZoom(zoom, slots)
-  if (!n) return []
+// ══════════ L'EMPRISE 3×3 : NEUF FOIS LA MER, NEUF FOIS LES PLACES ═════════
+//
+// `cote` est le côté de l'emprise (1 sur un bloc ordinaire, 3 en mode continu).
+// Deux nombres en découlent, et ils ne se traitent PAS pareil :
+//
+//  · LE NOMBRE DE PLACES suit la SURFACE, donc le carré du côté — même règle
+//    que `maxN` des noms de lieux. Une seule place sur neuf fois la mer, c'est
+//    huit chances sur neuf que le bateau soit hors de la fenêtre : la mer
+//    paraîtrait vide alors qu'elle est peuplée.
+//  · LA CHANCE PAR PLACE reste celle d'UN BLOC. `slotChance(n)` répond « quelle
+//    probabilité par place pour que P(au moins un parmi n) vaille 0,1 » : la
+//    calculer sur les neuf places ferait tomber la probabilité d'en voir un
+//    DANS LA FENÊTRE de 1 sur 10 à 1 sur 90. « Une chance sur dix » parle de ce
+//    qu'on voit, pas de ce que le champ contient.
+export function seedFleet({ zoom, half, seed = 1, isSea = null, slots = FLEET_SLOTS, force = false, cote = 1 } = {}) {
+  const parBloc = slotsForZoom(zoom, slots)
+  if (!parBloc) return []
+  const c = cote > 1 ? Math.round(cote) : 1
+  const n = parBloc * c * c
   const rand = rng(seed)
-  const p = slotChance(n)
+  const p = slotChance(parBloc)
   const boats = []
   for (let i = 0; i < n; i++) {
     // Le tirage est consommé MÊME pour une place vide, et avant les positions :
@@ -173,7 +189,22 @@ export function seedFleet({ zoom, half, seed = 1, isSea = null, slots = FLEET_SL
 //   · il s'efface en approchant du bord (opacite → 0)
 //   · passé le bord, il dort : plus aucun calcul, plus aucun rendu
 //   · il évite la terre : route barrée, il infléchit sa route ; cerné, il dort
-export function stepBoat(b, dt, half, isSea = null) {
+// ══════════ TROIS LONGUEURS, ET IL FAUT LES TROIS ══════════════════════════
+//
+// `half`  — le demi-BLOC (28). C'est l'échelle du bateau : `SPEED` et
+//           `LOOKAHEAD` sont des fractions de cette longueur.
+//           ⚠️ LUI PASSER 84 (ce que l'étude proposait) AURAIT TRIPLÉ LA VITESSE
+//           AU SOL et la portée de la veille, sans que rien ne le signale.
+// `bord`  — où l'eau s'arrête pour de bon : le demi-bloc hors mode continu, le
+//           demi-emprise (84) dedans. Passé ce bord, le bateau DORT.
+// `fenX/fenZ` — le centre de la fenêtre. Le FONDU se mesure à elle : hors socle
+//           le bateau s'efface (il n'y a plus de mer sous lui), et il se
+//           rallume quand on défile jusqu'à lui. C'est ce qui fait qu'on le
+//           RETROUVE au lieu de le perdre.
+//
+// Hors mode continu, `bord` = `half` et la fenêtre est en (0,0) : les trois
+// longueurs se confondent et le pas est exactement celui d'avant.
+export function stepBoat(b, dt, half, isSea = null, { bord = half, fenX = 0, fenZ = 0 } = {}) {
   if (!b || b.dormant) return b
   const d = Math.min(Math.max(dt, 0), DT_MAX)
   if (!(d > 0)) return b
@@ -199,13 +230,16 @@ export function stepBoat(b, dt, half, isSea = null) {
   const x = b.x + Math.sin(cap) * v * d
   const z = b.z + Math.cos(cap) * v * d
 
-  // distance au bord la plus courte, en fraction du demi-bloc
-  const marge = (half - Math.max(Math.abs(x), Math.abs(z))) / half
-  if (marge <= 0) return { ...b, x, z, cap, opacite: 0, dormant: true }
+  // MORT : passé le bord de l'eau (le bloc, ou l'emprise en mode continu).
+  if (Math.max(Math.abs(x), Math.abs(z)) >= bord) return { ...b, x, z, cap, opacite: 0, dormant: true }
+
+  // FONDU : mesuré à la FENÊTRE, pas au champ. Distance au bord du socle
+  // affiché, en fraction du demi-bloc — négative dès qu'on en est sorti.
+  const marge = (half - Math.max(Math.abs(x - fenX), Math.abs(z - fenZ))) / half
 
   // fondu : plein à l'intérieur, éteint au bord. L'apparition suit la même
   // rampe, donc un bateau semé près du bord entre en fondu au lieu de surgir.
-  const cible = Math.min(1, marge / FADE_BAND)
+  const cible = Math.max(0, Math.min(1, marge / FADE_BAND))
   const k = 1 - Math.exp(-2.5 * d) // lissage, pour que le fondu ne saute pas
   const opacite = b.opacite + (cible - b.opacite) * Math.max(k, 0)
   return { ...b, x, z, cap, opacite, dormant: false }

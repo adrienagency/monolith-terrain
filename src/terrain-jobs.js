@@ -12,8 +12,9 @@
 // verrouille l'égalité OCTET POUR OCTET sur quatre familles de relief. Un seul
 // flottant qui diverge est un bug, pas un arrondi : ces champs peignent les
 // crêtes du bloc central.
-import { analyzeDem, resampleField } from './terrain-analysis.js'
+import { analyzeDem, resampleField, minPoolField } from './terrain-analysis.js'
 import { buildSeaMask, blurMask } from './sea-mask.js'
+import { detectLakes } from './lake.js'
 
 /**
  * Le calcul, nu. Appelé par le Worker, et directement par le fil principal en
@@ -38,17 +39,80 @@ import { buildSeaMask, blurMask } from './sea-mask.js'
  * un tableau à la mauvaise taille rendrait des polders au hasard, pas une
  * erreur bruyante.
  *
+ * ⚠️ `merMinPool` et `minBasinFrac` sont LES DEUX RÉGLAGES DE L'ATLAS 3×3, et
+ * ils sont strictement OPT-IN. Le premier échange la moyenne contre un minimum
+ * au sous-échantillonnage du masque de mer (voir `minPoolField` : sans lui, un
+ * détroit d'un pixel est sectionné et une baie réelle se peint en terre) ; le
+ * second convertit le seuil de grand bassin, qui est une FRACTION du champ et
+ * deviendrait donc neuf fois plus exigeant sur une emprise 3×3
+ * (`fracBassinEmprise`). Passés depuis l'appelant et non changés par défaut :
+ * `test/sea-mask.test.js` verrouille le piège Flevoland à 2 %, et
+ * `test/terrain-jobs.test.js` l'égalité OCTET POUR OCTET de cette fonction.
+ *
+ * ⚠️ Et le MIN-pooling ne touche QUE la mer. L'analyse de relief garde sa
+ * moyenne : ses quatre champs sont des DÉRIVÉES du relief, un minimum y
+ * replierait le bruit du MNT au lieu de le filtrer (voir `coarsenField`).
+ *
  * CONTRAT : sans `seaMax`, résultat bit-à-bit identique à avant.
  */
-export function computeTerrainJob({ data, size, metersPerPixel, maxSize = 0, seaMax = 0, landMask = null, withAnalysis = true }) {
+export function computeTerrainJob({
+  data,
+  size,
+  metersPerPixel,
+  maxSize = 0,
+  seaMax = 0,
+  landMask = null,
+  withAnalysis = true,
+  merMinPool = false,
+  minBasinFrac = undefined,
+}) {
   const dem = { data, size, metersPerPixel }
   const a = withAnalysis ? analyzeDem(dem, { maxSize }) : null
   // (buildSeaMask est topologique : il ne lit ni metersPerPixel ni aucune
   // longueur en mètres — son seuil est en mètres d'ALTITUDE et son critère de
   // bassin est une FRACTION de la dalle. Le plafond ne dérègle donc rien.)
-  const mer = resampleField(data, size, seaMax)
-  const m = blurMask(buildSeaMask({ data: mer.data, size: mer.size }, { landMask }), 1)
+  const mer = merMinPool ? minPoolField(data, size, seaMax) : resampleField(data, size, seaMax)
+  // `minBasinFrac: undefined` laisse le DÉFAUT de buildSeaMask s'appliquer —
+  // c'est ce qui rend l'ajout invisible hors mode continu.
+  const m = blurMask(buildSeaMask({ data: mer.data, size: mer.size }, { landMask, minBasinFrac }), 1)
   return { analysis: a ? a.rgba : null, analysisSize: a ? a.size : 0, sea: m.mask, seaSize: m.size }
+}
+
+// ─────────────────────────── LES LACS, HORS DU FIL ──────────────────────────
+//
+// Troisième module PUR du chemin de reconstruction, et le dernier gros gel du
+// fil principal après l'analyse de relief. Mesuré sur MNT réel, durée TOTALE de
+// `realWater.rebuild` avec et sans détection (Chrome piloté, emprise 3×3) :
+//
+//   Annecy 3×3, 4 608²       875 ms  →  201 ms
+//   Annecy z12, 1 536²       187 ms  →   98 ms
+//   La Réunion 3×3           556 ms  →   67 ms
+//
+// La fente de dem-memo.js a déjà supprimé les reconstructions RÉPÉTÉES ; ce
+// qui reste, c'est la PREMIÈRE détection après chaque changement d'altitudes,
+// et elle n'a rien à faire sur le fil principal.
+//
+// ⚠️ ET LE TRANSPORT NE MANGE PAS LE GAIN — c'est la question qui décidait, et
+// elle est mesurée : `postMessage` d'un MNT 3×3 (40,5 Mo) coûte 8 ms de fil
+// principal, le retour des cellules (2,5 Mo, TRANSFÉRÉES) 1,2 ms. On échange
+// donc ~600 ms de gel contre ~9 ms.
+//
+// ⚠️ LE MNT EST COPIÉ, PAS TRANSFÉRÉ — même règle qu'au-dessus : le transférer
+// le DÉTACHERAIT côté fil principal, qui en a besoin pendant tout le calcul.
+// Les CELLULES du retour, elles, sont transférées : le Worker n'en a plus
+// l'usage, et c'est ce qui rend le retour gratuit.
+
+/**
+ * Le calcul, nu. Appelé par le Worker, et directement par le fil principal en
+ * repli (navigateur sans Worker, contexte contraint, test node).
+ *
+ * Rend la MÊME chose que `detectLakes`, à ceci près que les objets ont
+ * traversé une frontière de Worker — d'où la liste `transfert`, que seul
+ * l'émetteur utilise.
+ */
+export function computeLakeJob({ data, size }) {
+  const lacs = detectLakes({ data, size })
+  return { lacs, transfert: lacs.map((l) => l.cells.buffer) }
 }
 
 // --------------------------------------------------------------- péremption
@@ -203,9 +267,9 @@ function obtenirWorker() {
     worker = null
     const restants = [...enVol.values()]
     enVol.clear()
-    for (const { resolve, job } of restants) {
+    for (const { resolve, job, calcul } of restants) {
       try {
-        resolve(computeTerrainJob(job))
+        resolve((calcul ?? computeTerrainJob)(job))
       } catch {
         resolve(null)
       }
@@ -221,6 +285,35 @@ export function runTerrainJob(job) {
   return new Promise((resolve) => {
     enVol.set(id, { resolve, job })
     w.postMessage({ id, ...job })
+  })
+}
+
+/**
+ * Les lacs, hors du fil — même Worker, même repli.
+ *
+ * ⚠️ LE REPLI REND UNE PROMESSE, PAS UN RÉSULTAT SYNCHRONE, et c'est délibéré :
+ * l'appelant (ocean.js) n'a alors qu'UN chemin à écrire et à tester. Sur un
+ * navigateur sans Worker le gel revient — il revenait de toute façon, c'est le
+ * même calcul — mais l'image, elle, est la même.
+ *
+ * ⚠️ ET LA PANNE DU WORKER EST DÉJÀ COUVERTE : `obtenirWorker().onerror` rejoue
+ * les travaux en vol sur le fil principal via `computeTerrainJob`, qui ne sait
+ * pas faire de lacs. On range donc le travail dans `enVol` avec de quoi le
+ * rejouer LUI — d'où `calcul` à côté de `job`.
+ */
+// ⚠️ MÊME FORME DES DEUX CÔTÉS : le Worker rend `{ lacs }` (la liste de
+// transfert ne traverse pas), le repli doit donc rendre `{ lacs }` aussi. Deux
+// formes pour un même appel, c'est un `undefined` silencieux le jour où le
+// Worker tombe — c'est-à-dire le jour où personne ne regarde.
+const calculLacs = (job) => ({ lacs: computeLakeJob(job).lacs })
+
+export function runLakeJob(job) {
+  const w = obtenirWorker()
+  if (!w) return Promise.resolve().then(() => calculLacs(job))
+  const id = ++sequence
+  return new Promise((resolve) => {
+    enVol.set(id, { resolve, job, calcul: calculLacs })
+    w.postMessage({ id, kind: 'lacs', ...job })
   })
 }
 

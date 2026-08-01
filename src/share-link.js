@@ -39,9 +39,32 @@
 
 import { TEMPLATE_KEYS, captureLook } from './templates-user.js'
 import { parseRace } from './race-model.js'
+import { COURSE_ELASTIQUE } from './fenetre-course.js'
 
 const FORMAT = 'shibumap-share'
 const VERSION = 1
+
+// ══════════ LA POSITION DANS L'EMPRISE, ET POURQUOI LA VERSION NE BOUGE PAS ══
+//
+// En mode continu 3×3, `loc` ne dit plus où l'on regarde. Il dit quel BLOC est
+// chargé ; à l'intérieur, la fenêtre se promène de ±56 unités monde, soit
+// ±21 km à z12. Un lien qui ne porte que `loc` renvoie donc le destinataire au
+// centre du bloc — jusqu'à 30 km à côté de ce que l'expéditeur avait à l'écran.
+//
+// ⚠️ ET `VERSION` RESTE À 1. C'est la contrainte non négociable de ce poste :
+// `parseShareState` refuse tout payload dont `v` ne vaut pas exactement
+// `VERSION`, donc passer à 2 ferait rendre `null` à TOUTES les cartes déjà
+// publiées sur /r/<id> — elles s'ouvriraient sur la vue par défaut d'Annecy.
+// Le décalage voyage donc comme un champ FACULTATIF : absent, il vaut (0,0),
+// c'est-à-dire exactement le comportement d'avant, par construction et non par
+// promesse.
+
+// La course, relue de fenetre-course.js pour qu'un lien ne puisse jamais
+// demander une position que le mode continu refuserait d'atteindre. ⚠️ Le
+// débordement élastique n'est PAS admis : c'est un état transitoire de geste,
+// pas un point de vue — un lien qui l'inscrirait rouvrirait sur une image que
+// le rappel corrigerait sous les yeux du destinataire.
+export const FEN_MAX = COURSE_ELASTIQUE
 
 // ---------------------------------------------------------------- capture
 
@@ -74,14 +97,22 @@ function undiffLook(diff, base) {
 // plain object that gets JSON'd and base64url'd. `base` is
 // captureLook() of the app's pristine defaults, captured once at boot —
 // see BASE_TEMPLATE_LOOK in main.js.
-export function captureShareState(params, cameraPose, base) {
-  return {
+// `fenetre` : le décalage de lecture dans l'emprise 3×3 ({x,z}), ou null hors
+// mode continu. ⚠️ IL N'EST ÉCRIT QUE S'IL EST NON NUL — un lien fabriqué en
+// mode ordinaire, ou au centre de l'emprise, doit sortir OCTET POUR OCTET
+// comme avant ce champ (test/share-link.test.js le verrouille).
+export function captureShareState(params, cameraPose, base, fenetre = null) {
+  const state = {
     format: FORMAT,
     v: VERSION,
     loc: { lat: params.demLat, lon: params.demLon, zoom: params.demZoom },
     cam: cameraPose, // { px,py,pz,tx,ty,tz } or null
     look: diffLook(captureLook(params), base),
   }
+  if (fenetre && (isNum(fenetre.x) || isNum(fenetre.z)) && (fenetre.x || fenetre.z)) {
+    state.fen = { x: fenetre.x || 0, z: fenetre.z || 0 }
+  }
+  return state
 }
 
 // ---------------------------------------------------------------- validate
@@ -161,7 +192,16 @@ export function parseShareState(raw, base) {
     if (fxActive) diff.fxActive = fxActive
   }
 
-  return { loc: { lat, lon, zoom }, cam, look: undiffLook(diff, base) }
+  // ⚠️ TOUJOURS UN OBJET, JAMAIS `null`. L'appelant écrit `state.fen.x` sans
+  // se demander de quelle époque vient le lien ; un ancien payload rend (0,0),
+  // c'est-à-dire le centre du bloc — la vue exacte qu'il ouvrait déjà.
+  const f = raw.fen
+  const fen =
+    f && isNum(f.x) && isNum(f.z)
+      ? { x: clamp(f.x, -FEN_MAX, FEN_MAX), z: clamp(f.z, -FEN_MAX, FEN_MAX) }
+      : { x: 0, z: 0 }
+
+  return { loc: { lat, lon, zoom }, cam, fen, look: undiffLook(diff, base) }
 }
 
 // ---------------------------------------------------------------- base64url

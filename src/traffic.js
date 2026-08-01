@@ -18,7 +18,7 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { TERRAIN_SIZE } from './terrain.js'
-import { latLonToWorld } from './geo.js'
+import { latLonToWorld, demSpan } from './geo.js'
 
 const HALF = TERRAIN_SIZE / 2
 const SPAWN_CHECK_S = 14 // roll the dice this often
@@ -48,6 +48,18 @@ export class Traffic {
     // continue au-dessus des dalles suivantes au lieu de disparaître au bord du
     // bloc central : il passe de la dalle 1 à la dalle 2 sans coupure (Adrien).
     this.spanExtra = 0
+    // ══════════ LE DÉCALAGE DE FENÊTRE (mode continu 3×3) ═══════════════════
+    //
+    // Adrien, textuellement : « aucun problème si la montgolfière ou l'avion est
+    // en dehors du socle, c'est le comportement attendu. » Un aéronef VOLE : il
+    // a le droit de sortir du cadre. Ce qu'il n'a pas le droit de faire, c'est
+    // de rester COLLÉ À L'ÉCRAN pendant que le paysage défile — un ballon
+    // immobile au-dessus d'une vallée qui s'en va, ce n'est plus un ballon.
+    //
+    // On ne les écrête donc PAS ; on translate leur groupe de −fenêtre, ce qui
+    // fait de leur position locale une coordonnée de CHAMP. Ils dérivent alors
+    // avec le sol, exactement comme un vrai aéronef vu d'un train qui roule.
+    this._fen = { x: 0, z: 0 }
 
     this.pad = null // { obj, rocket, baseY, state, t }
     this.starshipProto = null
@@ -227,10 +239,16 @@ export class Traffic {
     const dir = new THREE.Vector3(Math.cos(ang), 0, Math.sin(ang))
     const side = new THREE.Vector3(-dir.z, 0, dir.x)
     const offset = (Math.random() * 2 - 1) * HALF * 0.6
+    // ⚠️ ON NAÎT AU BORD DE LA FENÊTRE, PAS AU CENTRE DE L'EMPRISE. En mode
+    // continu la position locale est une coordonnée de CHAMP : sans ce recalage
+    // l'aéronef apparaîtrait toujours autour du centre de l'emprise, donc à
+    // deux blocs du regard dès qu'on a défilé — un ciel vide pour de bon.
     const start = dir
       .clone()
       .multiplyScalar(-(HALF + 8))
       .addScaledVector(side, offset)
+    start.x += this._fen.x
+    start.z += this._fen.z
     start.y = alt
     obj.position.copy(start)
     obj.lookAt(start.clone().add(dir))
@@ -246,9 +264,12 @@ export class Traffic {
     }
     this._zoneDem = dem || null
     if (!dem) return
+    // Sur une emprise 3×3 le champ fait 168 unités : le pas de tir peut tomber
+    // dans une dalle voisine, et il doit s'y planter aussi.
+    const demiChamp = (demSpan(dem) / 2) * 0.95
     for (const pad of SPACEX_PADS) {
       const w = latLonToWorld(dem, pad.lat, pad.lon)
-      if (Math.abs(w.x) > HALF * 0.95 || Math.abs(w.z) > HALF * 0.95) continue
+      if (Math.abs(w.x) > demiChamp || Math.abs(w.z) > demiChamp) continue
       // ON EST SUR UN PAS DE TIR — et c'est le SEUL endroit qui déclenche le
       // téléchargement des deux GLB. Le test de position passe AVANT la
       // vérification du modèle (l'inverse renvoyait tout le monde à la porte,
@@ -268,7 +289,9 @@ export class Traffic {
       const rb = new THREE.Box3().setFromObject(rocket)
       rocket.scale.setScalar(2.8 / Math.max(rb.getSize(new THREE.Vector3()).y, 1e-3))
       root.add(rocket)
-      const groundY = this.terrain.sample ? this.terrain.sample(w.x, w.z) : 0
+      // `terrain.sample` parle en coordonnées de GÉOMÉTRIE, `w` en coordonnées
+      // de champ : on retranche le décalage, comme partout ailleurs.
+      const groundY = this.terrain.sample ? this.terrain.sample(w.x - this._fen.x, w.z - this._fen.z) : 0
       root.position.set(w.x, groundY, w.z)
       this.group.add(root)
       this.pad = { obj: root, rocket, baseY: groundY, state: 'idle', t: 0, wait: 15 + Math.random() * 25 }
@@ -280,6 +303,14 @@ export class Traffic {
   // de vol pour que l'aéronef traverse les dalles chargées sans coupure
   setSpan(worldRadius) {
     this.spanExtra = Math.max(0, worldRadius || 0)
+  }
+
+  // Le groupe porte −fenêtre : la position locale d'un aéronef devient une
+  // coordonnée de CHAMP, donc il dérive avec le relief. Deux écritures.
+  setFenetre(x, z) {
+    this._fen.x = x
+    this._fen.z = z
+    this.group.position.set(-x, 0, -z)
   }
 
   update(dt) {
@@ -318,7 +349,13 @@ export class Traffic {
       // with the span so it isn't killed mid-crossing.
       const bound = HALF + 13 + this.spanExtra
       const lifeMax = (p.speed < 1.5 ? 130 : 60) + this.spanExtra / Math.max(p.speed, 0.5)
-      if (Math.abs(x) > bound || Math.abs(z) > bound || p.life > lifeMax) {
+      // La distance se mesure À LA FENÊTRE, pas à l'origine du champ : en mode
+      // continu la position est en coordonnées de champ, et un aéronef parti
+      // avec le regard doit rester en vie tant qu'il est dans les parages de ce
+      // qu'on voit. Hors mode continu la fenêtre est (0,0) : c'est l'ancien test.
+      const dx = x - this._fen.x
+      const dz = z - this._fen.z
+      if (Math.abs(dx) > bound || Math.abs(dz) > bound || p.life > lifeMax) {
         this.group.remove(p.obj)
         // free the craft's GPU buffers — procedural crafts build fresh
         // geometries/materials each spawn, the plane clones its materials

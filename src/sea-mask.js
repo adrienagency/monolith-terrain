@@ -19,7 +19,18 @@
 // (Flevoland), la topologie seule les prenait pour la mer. CONTRAT : sans
 // landMask, résultat bit-à-bit identique à avant.
 
-export function buildSeaMask(dem, { seaLevelM = 0.5, minBasinFrac = 0.02, landMask = null } = {}) {
+// Le seuil de « grand bassin », en FRACTION du champ : une poche basse non
+// connectée au bord reste mer si elle occupe au moins ça. C'est ce qui sauve la
+// Caspienne et la mer Morte, et c'est le piège Flevoland que
+// test/sea-mask.test.js verrouille.
+//
+// ⚠️ EXPORTÉ PARCE QU'IL SE CONVERTIT. Sur une emprise 3×3, le champ compte neuf
+// fois plus de cellules, donc la même fraction exige neuf fois la même surface
+// absolue : l'appelant passe alors fracBassinEmprise(BASSIN_FRAC_DEFAUT, 3)
+// (dem-emprise.js). Le DÉFAUT, lui, ne bouge pas — deux tests en dépendent.
+export const BASSIN_FRAC_DEFAUT = 0.02
+
+export function buildSeaMask(dem, { seaLevelM = 0.5, minBasinFrac = BASSIN_FRAC_DEFAUT, landMask = null } = {}) {
   const { data, size } = dem
   const n = size * size
   const isLow = new Uint8Array(n) // 1 = at/below sea level (et pas terre du masque)
@@ -65,21 +76,27 @@ export function buildSeaMask(dem, { seaLevelM = 0.5, minBasinFrac = 0.02, landMa
   return { mask, size }
 }
 
-// Rééchantillonne le masque côtier rasterisé (ImageData-like {data,width,
-// height}, canal R : >127 = terre) à la grille du DEM → la landMask que
-// buildSeaMask attend. Plus-proche-voisin : le masque source (2048²) est plus
-// fin que tout DEM de l'app, et la ligne 0 du canvas (nord) correspond à la
-// ligne 0 du DEM — même convention que le sampler GPU (flipY off). Pure,
-// testable en node (aucun DOM requis).
-export function landMaskFromImage(img, size) {
-  const { data, width, height } = img
+// Rééchantillonne le masque côtier rasterisé ({data,width,height}, un octet
+// par texel, >127 = terre) à la grille du DEM → la landMask que buildSeaMask
+// attend. Plus-proche-voisin : le masque source (2048²) est plus fin que tout
+// DEM de l'app, et la ligne 0 du champ (nord) correspond à la ligne 0 du DEM —
+// même convention que le sampler GPU (flipY off). Pure, testable en node
+// (aucun DOM requis).
+//
+// ⚠️ FOULÉE DE 1, PAS DE 4. Le masque côtier était une ImageData RGBA dont
+// seul le canal R portait de l'information ; il est désormais un Uint8Array R8
+// unique, partagé avec la DataTexture du GPU (voir coast-mask.js). C'est le
+// même contenu, indexé sans le facteur 4 — trois copies de 16,78 Mo devenues
+// une de 4,19 sur le bloc central.
+export function landMaskFromField(field, size) {
+  const { data, width, height } = field
   const out = new Uint8Array(size * size)
   for (let y = 0; y < size; y++) {
     const py = Math.min(height - 1, ((y * height) / size) | 0)
     const row = py * width
     for (let x = 0; x < size; x++) {
       const px = Math.min(width - 1, ((x * width) / size) | 0)
-      out[y * size + x] = data[(row + px) * 4] > 127 ? 255 : 0
+      out[y * size + x] = data[row + px] > 127 ? 255 : 0
     }
   }
   return out

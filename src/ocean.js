@@ -18,7 +18,11 @@
 
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
-import { detectLakes } from './lake.js'
+import { runLakeJob } from './terrain-jobs.js'
+import { lacsMemoLire, lacsMemoEcrire } from './dem-memo.js'
+// LE CHAMP SUIT LE RELIEF — règles pures et testées, voir src/mer-emprise.js
+// pour la mesure d'avant/après et le pourquoi de chaque choix.
+import { resChamp, spanChamp } from './mer-emprise.js'
 // wave engine shared with ocean-lab (C:\Dev\ocean-lab) — the Vite alias
 // resolves to the LIVE ocean-lab source when it's cloned next to this repo,
 // to the committed src/vendor/ocean-waves copy otherwise (npm run sync:waves)
@@ -121,6 +125,8 @@ ${SHORE_SURF_GLSL}
 uniform sampler2D uField;   // R ground Y, G shore distance (slab-wide)
 uniform sampler2D uCoastMask; // OSM land/sea (R : 1 land, 0 sea) — the REAL shore
 uniform float uCoastMaskOn;   // 1 when the coast mask is loaded for this patch
+uniform float uSpan;    // largeur au sol du champ : 56, ou 168 sur l'emprise 3×3
+uniform vec2 uFenetre;  // décalage de lecture du mode continu (0 sinon)
 #ifdef IS_LAKE
 uniform sampler2D uMask;    // A coverage, G shore distance (lake bbox)
 uniform vec2 uMaskMin;
@@ -136,9 +142,25 @@ void main() {
   vec3 p = position; // geometry is authored in world XZ, y = 0
   vec2 xz = p.xz;
 
+  // ══════════ DEUX ESPACES, ET IL FAUT LES DEUX ══════════════════════════════
+  // xzChamp : où l'on est DANS LE MONDE — c'est là qu'on lit le fond, la
+  //           distance au rivage et le masque côtier. Ça DÉFILE.
+  // xzVue   : où l'on est SUR LE SOCLE — c'est là que vivent le clip, le bord
+  //           et la soudure avec la jupe. Ça NE DÉFILE PAS.
+  // La mer et sa jupe sont taillées sur le socle : elles ajoutent la fenêtre.
+  // Un lac est taillé sur son emprise géographique et son groupe porte déjà la
+  // translation −fenêtre : il lit son champ SANS décalage (mer-emprise.js).
+#ifdef IS_LAKE
+  vec2 xzChamp = xz;
+  vec2 xzVue = xz - uFenetre;
+#else
+  vec2 xzChamp = xz + uFenetre;
+  vec2 xzVue = xz;
+#endif
+
   // waves die out on the beach: fade by the local depth so a swell can never
   // wash over the coastline polygons
-  vec2 uvF = xz / ${TERRAIN_SIZE.toFixed(1)} + 0.5;
+  vec2 uvF = xzChamp / uSpan + 0.5;
   vec2 f = texture2D(uField, uvF).rg;
 #ifdef IS_LAKE
   vec2 m = (xz - uMaskMin) / uMaskSize;
@@ -195,7 +217,11 @@ void main() {
   float amp = abs(disp.y);
   disp.y = sign(disp.y) * cap * (1.0 - exp(-amp / max(cap, 1e-5)));
 #endif
-  float edgeHold = 1.0 - smoothstep(uHalf - 2.0, uHalf - 0.15, max(abs(p.x), abs(p.z)));
+  // ⚠️ EN COORDONNÉES DE VUE : ce fondu existe pour souder la surface à la jupe
+  // au BORD DU SOCLE. Mesuré en coordonnées de champ, un lac de l'emprise voyait
+  // son déplacement horizontal annulé partout (il est à plus de 28 unités du
+  // centre du champ) — ses vagues perdaient leur choppiness sans raison.
+  float edgeHold = 1.0 - smoothstep(uHalf - 2.0, uHalf - 0.15, max(abs(xzVue.x), abs(xzVue.y)));
   p.xz += disp.xz * edgeHold;
   // NIVEAU MOYEN : PLUS AUCUN RELÈVEMENT EN MER (décision d'Adrien).
   //
@@ -261,6 +287,8 @@ uniform float uDayLight; // 0 nuit -> 1 jour (sunLook.dayLight) : la mer s'étei
 uniform sampler2D uField;
 uniform sampler2D uCoastMask; // trait de côte vectoriel (R : 1 terre, 0 mer) — la vérité terre/mer
 uniform float uCoastMaskOn;   // 1 quand le masque du patch est chargé (sinon : règle altitude seule)
+uniform float uSpan;    // largeur au sol du champ : 56, ou 168 sur l'emprise 3×3
+uniform vec2 uFenetre;  // décalage de lecture du mode continu (0 sinon)
 uniform float uHalf;     // rounded-square clip: half extent…
 uniform float uCornerR;  // …and corner radius (sea only; lakes use the mask)
 #ifdef IS_LAKE
@@ -302,15 +330,27 @@ float caustic(vec2 p, float t) {
 
 void main() {
   vec2 xz = vWorld.xz;
-
-#ifndef IS_LAKE
-  // stay inside the slab's rounded footprint
-  vec2 q = abs(xz) - vec2(uHalf - uCornerR);
-  float sd = length(max(q, 0.0)) - uCornerR;
-  if (sd > 0.0) discard;
+  // les deux espaces, comme dans le vertex — voir son commentaire
+#ifdef IS_LAKE
+  vec2 xzChamp = xz;
+  vec2 xzVue = xz - uFenetre;
+#else
+  vec2 xzChamp = xz + uFenetre;
+  vec2 xzVue = xz;
 #endif
 
-  vec2 uvF = xz / ${TERRAIN_SIZE.toFixed(1)} + 0.5;
+  // stay inside the slab's rounded footprint
+  // ⚠️ LES LACS AUSSI, DEPUIS L'EMPRISE 3×3 : ils sont détectés sur les 168
+  // unités du champ, donc huit lacs sur neuf tombent HORS de la fenêtre et
+  // flotteraient au-dessus du vide, à côté du socle. Hors mode continu leur
+  // uHalf reste a 1e6 et ce test ne peut pas se declencher : le comportement
+  // d'avant est rendu au caractere pres. (Pas d'accent grave ici : ce
+  // commentaire vit dans un template literal JS, il terminerait le module.)
+  vec2 q = abs(xzVue) - vec2(uHalf - uCornerR);
+  float sd = length(max(q, 0.0)) - uCornerR;
+  if (sd > 0.0) discard;
+
+  vec2 uvF = xzChamp / uSpan + 0.5;
   vec2 f = texture2D(uField, uvF).rg;
 
 #ifdef IS_LAKE
@@ -470,6 +510,8 @@ uniform float uSurfCalm;
 uniform sampler2D uField;
 uniform sampler2D uCoastMask; // même masque côtier que la surface (R : 1 terre)
 uniform float uCoastMaskOn;
+uniform float uSpan;    // largeur au sol du champ : 56, ou 168 sur l'emprise 3×3
+uniform vec2 uFenetre;  // décalage de lecture du mode continu (0 sinon)
 ${GERSTNER_GLSL}
 ${SHORE_SURF_GLSL}
 varying vec3 vWorld;
@@ -479,7 +521,14 @@ varying float vV;
 void main() {
   vec3 p = position; // xz = chemin du bord ; y = 0 (fond) / 1 (surface)
   vV = p.y;
-  vec2 uvF = p.xz / ${TERRAIN_SIZE.toFixed(1)} + 0.5;
+  // ══════════ LA JUPE EST TAILLÉE SUR LE SOCLE, ELLE LIT LE MONDE ════════════
+  // Le ruban ne bouge pas — c'est le pourtour du bloc. Mais ce qu'il a SOUS lui
+  // défile : le fond marin, la distance au rivage, la terre du masque côtier.
+  // Il ajoute donc la fenêtre, EXACTEMENT comme la surface de mer — et c'est
+  // cette égalité, pas un réglage, qui garantit que les deux restent soudées.
+  // Un demi-pixel d'écart entre ces deux expressions ouvrirait un jour de
+  // lumière sur tout le périmètre du bloc.
+  vec2 uvF = (p.xz + uFenetre) / uSpan + 0.5;
   vec2 f = texture2D(uField, uvF).rg;
   float shoreD = max((uWaterY - f.r) * 2.0, f.g);
   // même règle que la surface : les vagues du haut de jupe meurent sur la
@@ -524,6 +573,8 @@ uniform float uBottomY;
 uniform sampler2D uField;
 uniform sampler2D uCoastMask; // même masque côtier que la surface (R : 1 terre)
 uniform float uCoastMaskOn;
+uniform float uSpan;    // largeur au sol du champ : 56, ou 168 sur l'emprise 3×3
+uniform vec2 uFenetre;  // décalage de lecture du mode continu (0 sinon)
 varying vec3 vWorld;
 varying float vV;
 #include <fog_pars_fragment>
@@ -539,7 +590,9 @@ float vnoise(vec2 p) {
 
 void main() {
   // pas de jupe devant la terre (côte qui touche le bord du bloc)
-  vec2 uvF = vWorld.xz / ${TERRAIN_SIZE.toFixed(1)} + 0.5;
+  // MÊME expression que le vertex de la jupe et que la surface : c'est ce qui
+  // fait qu'en défilant, le rideau d'eau s'efface pile où la côte arrive au bord.
+  vec2 uvF = (vWorld.xz + uFenetre) / uSpan + 0.5;
   float ground = texture2D(uField, uvF).r;
   if (uWaterY - ground < -0.005) discard;
   // masque côtier : pas de rideau d'eau devant un polder sous le niveau 0 —
@@ -686,8 +739,17 @@ function waterMaterial({ isLake, params, fieldTex }) {
         uDayLight: { value: 1 },
         uTransp: { value: params.waterTransparency ?? 0.4 },
         uSunFx: { value: params.waterSunFx ?? 1 },
-        uHalf: { value: TERRAIN_SIZE / 2 },
+        // ⚠️ UN LAC N'EST PAS CLIPPÉ AU SOCLE HORS MODE CONTINU. 1e6 rend le
+        // test d'empreinte du fragment structurellement inatteignable : c'est le
+        // comportement d'avant, où le clip vivait dans un `#ifndef IS_LAKE`.
+        // `rebuild` redescend cette valeur à 28 quand l'emprise 3×3 est montée,
+        // parce qu'alors huit lacs sur neuf tombent hors de la fenêtre.
+        uHalf: { value: isLake ? 1e6 : TERRAIN_SIZE / 2 },
         uCornerR: { value: 0.5 },
+        // le champ couvre le socle (56) ou l'emprise 3×3 (168) ; uFenetre est le
+        // décalage de lecture du mode continu — voir src/mer-emprise.js
+        uSpan: { value: TERRAIN_SIZE },
+        uFenetre: { value: new THREE.Vector2(0, 0) },
       },
     ]),
   })
@@ -705,38 +767,72 @@ export class RealWater {
     this._textures = []
     this._time = 0
     this._surfaceVisible = true
+    // GÉNÉRATION DU BÂTI DES LACS — voir `rebuild`. Toute reconstruction
+    // l'incrémente, et un retour de Worker qui ne la porte plus est jeté.
+    this._genLacs = 0
   }
 
   // Bake the slab-wide height + shore-distance field from the live sampler.
-  _bakeField(terrain, seaY) {
-    const n = FIELD_RES
-    const data = new Float32Array(n * n * 2)
+  //
+  // ══════════ MODE CONTINU : LE CHAMP COUVRE L'EMPRISE, PAS LA FENÊTRE ═══════
+  //
+  // Cuit sur les 56 unités du socle, ce champ décrivait le fond marin d'un
+  // AUTRE endroit dès le premier pas de défilement : mesuré à La Réunion, la
+  // mer lisait un fond faux de 14,3 unités en moyenne à la butée, et ne voyait
+  // RIEN des 9,2 % de haute mer réellement dans la fenêtre (src/mer-emprise.js
+  // porte le tableau complet). Cuit sur les 168 unités de l'emprise et lu avec
+  // le décalage de fenêtre, il ne bouge plus jamais : c'est la LECTURE qui se
+  // déplace, et elle ne coûte que deux flottants d'uniforme par image.
+  //
+  // Prix : 1 152² texels RG demi-flottants = 5,3 Mo de VRAM (0,6 Mo avant), et
+  // une cuisson par reconstruction — jamais par image.
+  _bakeField(terrain, seaY, params) {
+    const cote = terrain.dem?.empriseCote > 1 ? terrain.dem.empriseCote : 1
+    const n = resChamp(cote)
+    const span = spanChamp(TERRAIN_SIZE, cote)
+    // ⚠️ `terrain.sample` NE PEUT PAS SERVIR ICI EN MODE CONTINU : il répond
+    // « sous le point AFFICHÉ en x », donc il porte le décalage et rendrait un
+    // champ neuf à chaque pas. `sampleChamp` répond « au point du MONDE » et
+    // saute le grain FBM, nul à la ligne d'eau (terrain.js dit pourquoi).
+    const echChamp = cote > 1 && params ? terrain.sampleChamp(params) : null
     const water = new Uint8Array(n * n)
+    // ⚠️ LES DEMI-FLOTTANTS SONT ÉCRITS DIRECTEMENT, sans Float32Array
+    // intermédiaire : à 1 152² celui-ci pesait 10,6 Mo de tas transitoire pour
+    // porter des valeurs qu'on convertit aussitôt. Le résultat est identique au
+    // bit près (même valeur, même conversion, seul le stockage temporaire saute).
+    const half = new Uint16Array(n * n * 2)
     // terre selon le masque côtier (si reçu) : un polder sous le niveau 0 est
     // TERRE — ni cellule « eau », ni exclu du champ de distance-rivage (le
-    // ressac s'enroule alors autour du VRAI trait de côte). Le canvas du
-    // masque et le slab couvrent le même footprint : monde → pixel direct
-    // (ligne 0 du canvas = nord = z monde -T/2, même convention que uField).
+    // ressac s'enroule alors autour du VRAI trait de côte). Le champ du
+    // masque et le slab couvrent le même footprint : monde → texel direct
+    // (ligne 0 du champ = nord = z monde -T/2, même convention que uField).
     // CONTRAT : sans masque (cd null) le champ est identique à avant.
+    // ⚠️ FOULÉE DE 1 : le masque côtier est un Uint8Array R8 depuis la passe
+    // de mémoire du 2026-07-29, plus une ImageData RGBA (voir coast-mask.js).
     const cd = this._coastImage
+    // ⚠️ `span`, PAS `TERRAIN_SIZE` : coast-mask.js rastérise le masque sur le
+    // footprint du MNT, et le MNT recollé couvre les 168 unités de l'emprise.
+    // Lu sur 56, le masque était agrandi trois fois — la terre du continent
+    // voisin se serait posée sur la baie qu'on regarde.
     const landAt = cd
       ? (x, z) => {
-          const px = Math.max(0, Math.min(cd.width - 1, Math.round((x / TERRAIN_SIZE + 0.5) * (cd.width - 1))))
-          const py = Math.max(0, Math.min(cd.height - 1, Math.round((z / TERRAIN_SIZE + 0.5) * (cd.height - 1))))
-          return cd.data[(py * cd.width + px) * 4] > 127
+          const px = Math.max(0, Math.min(cd.width - 1, Math.round((x / span + 0.5) * (cd.width - 1))))
+          const py = Math.max(0, Math.min(cd.height - 1, Math.round((z / span + 0.5) * (cd.height - 1))))
+          return cd.data[py * cd.width + px] > 127
         }
       : null
+    const ech = echChamp || (terrain.sample ? terrain.sample : null)
     for (let j = 0; j < n; j++) {
-      const z = (j / (n - 1) - 0.5) * TERRAIN_SIZE
+      const z = (j / (n - 1) - 0.5) * span
       for (let i = 0; i < n; i++) {
-        const x = (i / (n - 1) - 0.5) * TERRAIN_SIZE
-        const h = terrain.sample ? terrain.sample(x, z) : 0
-        data[(j * n + i) * 2] = h
+        const x = (i / (n - 1) - 0.5) * span
+        const h = ech ? ech(x, z) : 0
+        half[(j * n + i) * 2] = THREE.DataUtils.toHalfFloat(h)
         water[j * n + i] = h < seaY && !(landAt && landAt(x, z)) ? 1 : 0
       }
     }
     // two-pass chamfer distance to the nearest land cell, in world units
-    const cell = TERRAIN_SIZE / (n - 1)
+    const cell = span / (n - 1)
     const INF = 1e9
     const dist = new Float32Array(n * n)
     for (let k = 0; k < n * n; k++) dist[k] = water[k] ? INF : 0
@@ -754,11 +850,11 @@ export class RealWater {
         if (j < n - 1) dist[k] = Math.min(dist[k], dist[k + n] + cell)
         if (i < n - 1 && j < n - 1) dist[k] = Math.min(dist[k], dist[k + n + 1] + cell * 1.414)
       }
-    for (let k = 0; k < n * n; k++) data[k * 2 + 1] = Math.min(1, dist[k] / 15) // v41: declin cotier x6 (Adrien) - le halo peint qui interdisait un grand rayon a disparu avec les hauts-fonds
     // half float: linear filtering is core WebGL2 (full float linear is an
     // optional extension); the ±20-unit height range fits half precision fine
-    const half = new Uint16Array(n * n * 2)
-    for (let k = 0; k < half.length; k++) half[k] = THREE.DataUtils.toHalfFloat(data[k])
+    // v41: declin cotier x6 (Adrien) - le halo peint qui interdisait un grand
+    // rayon a disparu avec les hauts-fonds
+    for (let k = 0; k < n * n; k++) half[k * 2 + 1] = THREE.DataUtils.toHalfFloat(Math.min(1, dist[k] / 15))
     const tex = new THREE.DataTexture(half, n, n, THREE.RGFormat, THREE.HalfFloatType)
     tex.magFilter = THREE.LinearFilter
     tex.minFilter = THREE.LinearFilter
@@ -836,12 +932,43 @@ export class RealWater {
     return { tex, minX, minY, w, h }
   }
 
+  // Le sous-groupe des lacs — créé à la demande, il porte la translation
+  // −fenêtre du mode continu. La mer et sa jupe restent dans `this.group`, qui
+  // ne bouge JAMAIS : elles sont la fenêtre, pas le paysage.
+  _groupeLacs() {
+    if (!this._lacs) {
+      this._lacs = new THREE.Group()
+      this._lacs.name = 'real-water-lacs'
+      this.group.add(this._lacs)
+      if (this._fenetre) this._lacs.position.set(-this._fenetre.x, 0, -this._fenetre.z)
+    }
+    return this._lacs
+  }
+
+  /**
+   * Le terrain a défilé d'un pas : la mer suit.
+   *
+   * Deux écritures d'uniforme par matériau (le champ et le masque côtier se
+   * lisent ailleurs) et une translation de groupe pour les lacs. AUCUNE
+   * géométrie refaite, AUCUN champ recuit — c'est tout l'intérêt d'avoir cuit
+   * le champ sur l'emprise entière (src/mer-emprise.js).
+   *
+   * ⚠️ La surface, la jupe ET les lacs reçoivent la MÊME valeur. C'est ce qui
+   * garantit que le haut de la jupe reste soudé à la mer : les deux shaders
+   * évaluent la même houle sur le même champ, au même endroit.
+   */
+  setFenetre(x, z) {
+    this._fenetre = { x, z }
+    for (const mat of this.materials) mat.uniforms.uFenetre?.value.set(x, z)
+    if (this._lacs) this._lacs.position.set(-x, 0, -z)
+  }
+
   _clear() {
     this._refractRT?.dispose()
     this._refractRT = null
     for (const m of this.meshes) {
       m.geometry.dispose()
-      this.group.remove(m)
+      m.parent?.remove(m)
     }
     for (const mat of this.materials) mat.dispose()
     for (const t of this._textures) t.dispose()
@@ -851,6 +978,12 @@ export class RealWater {
     this._seaMesh = null
     this._fieldTex = null
     this._bakeCtx = null
+    // 🔴 ET LE BÂTI DES LACS EN VOL EST PÉRIMÉ ICI, pas dans `rebuild`. Le cas
+    // qui l'exige : on éteint « Mer animée » alors qu'un travail est parti —
+    // `rebuild` fait `_clear()` puis RETOURNE, sans jamais atteindre la ligne
+    // qui périmerait. Le retour se poserait alors sur une texture détruite, et
+    // ça ne lève rien : ça peint du noir.
+    this._genLacs = (this._genLacs ?? 0) + 1
   }
 
   // (Re)build for the current zone. Cheap no-op when the option is off.
@@ -858,15 +991,27 @@ export class RealWater {
     this._clear()
     if (!params.waterReal || params.source !== 'real' || !terrain.dem) return
 
+    // le côté de l'emprise : 1 sur un socle ordinaire, 3 en mode continu
+    const cote = terrain.dem.empriseCote > 1 ? terrain.dem.empriseCote : 1
+    this._cote = cote
+    this._span = spanChamp(TERRAIN_SIZE, cote)
+
     const seaY = terrain.mapUniforms.uSeaY.value
-    const fieldTex = this._bakeField(terrain, seaY > -9000 ? seaY : -1e9)
+    const fieldTex = this._bakeField(terrain, seaY > -9000 ? seaY : -1e9, params)
     this._textures.push(fieldTex)
     // mémorisés pour _rebakeField : le masque côtier arrive en async, souvent
     // APRÈS ce build — il faudra recuire le champ sans reconstruire les meshes
     this._fieldTex = fieldTex
-    this._bakeCtx = { terrain, seaY: seaY > -9000 ? seaY : -1e9 }
+    this._bakeCtx = { terrain, seaY: seaY > -9000 ? seaY : -1e9, params }
 
-    const demScale = (TERRAIN_SIZE / terrain.dem.extentMeters) * params.demExaggeration
+    // ⚠️ `this._span`, PAS `TERRAIN_SIZE`. Sur une emprise 3×3 `extentMeters` a
+    // TRIPLÉ (dem-emprise.js), donc `TERRAIN_SIZE / extentMeters` rendait une
+    // échelle TROIS FOIS TROP PETITE. Conséquences, toutes silencieuses : une
+    // houle trois fois trop calme, et surtout un `bathyScene` au tiers de sa
+    // valeur — la jupe de mer était alors trop courte pour rejoindre le fond,
+    // c'est-à-dire un rideau d'eau suspendu au-dessus du vide. Hors mode continu
+    // `_span` vaut TERRAIN_SIZE et l'expression est celle d'avant, au bit près.
+    const demScale = (this._span / terrain.dem.extentMeters) * params.demExaggeration
     // wave amplitude follows the VIEW SCALE: at a 20 km bay the swell reads,
     // at a 500 km continental view the same scene-unit swell would be a
     // 30 m monster — the sea (and the lakes) calm as you zoom out
@@ -910,6 +1055,8 @@ export class RealWater {
       const r = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE))
       mat.uniforms.uHalf.value = (TERRAIN_SIZE / 2) * 0.998
       mat.uniforms.uCornerR.value = r
+      // le plan d'eau EST la fenêtre : il ne bouge pas, c'est son champ qui défile
+      mat.uniforms.uSpan.value = this._span
       const seg = 256
       const geo = new THREE.PlaneGeometry(TERRAIN_SIZE * 0.998, TERRAIN_SIZE * 0.998, seg, seg)
       geo.rotateX(-Math.PI / 2)
@@ -981,6 +1128,8 @@ export class RealWater {
               uDayLight: { value: 1 },
               uViewCalm: { value: 1 },
               uSurfCalm: { value: 1 },
+              uSpan: { value: this._span },
+              uFenetre: { value: new THREE.Vector2(0, 0) },
             },
           ]),
         })
@@ -996,10 +1145,70 @@ export class RealWater {
     }
 
     // --- altitude lakes
+    // ══════════ UN LAC APPARTIENT AU MONDE, PAS À LA FENÊTRE ═══════════════════
+    // Sa géométrie est taillée sur son emprise géographique, en coordonnées de
+    // CHAMP (jusqu'à ±84 en mode continu). C'est son groupe qui porte la
+    // translation −fenêtre — deux écritures de `position` par pas, aucune
+    // géométrie refaite, exactement la règle que main.js applique déjà aux noms
+    // de lieux et au calque d'eau vectoriel.
     const dem = terrain.dem
-    const scale = (TERRAIN_SIZE / dem.extentMeters) * params.demExaggeration
+    // ⚠️ LES LACS NE SE REDÉTECTENT PAS À CHAQUE RECONSTRUCTION, ET NE SE
+    // DÉTECTENT PLUS SUR LE FIL. Cette méthode est rappelée pour « Mer
+    // animée », « Tranche de verre », un template, un tirage aléatoire,
+    // l'entrée/sortie du mode région — autant de gestes qui ne touchent pas AUX
+    // ALTITUDES. Deux réponses, dans cet ordre :
+    //   · la fente de dem-memo.js répond tout de suite pour le MNT courant,
+    //     donc les reconstructions répétées ne coûtent plus rien ;
+    //   · sinon le travail part au Worker (8 ms de fil principal pour envoyer
+    //     40,5 Mo, contre ~600 ms de gel à le calculer ici).
+    // Mesure, durée TOTALE de rebuild : Annecy 3×3 875 → 201 ms, Annecy z12
+    // 187 → 98 ms, La Réunion 3×3 556 → 67 ms.
+    const cuits = lacsMemoLire(dem)
+    if (cuits) this._batirLacs(cuits, { dem, params, fieldTex, cote })
+    else {
+      // ⚠️ LE GARDE-FOU EST UNE GÉNÉRATION, pas une comparaison de MNT : entre
+      // le départ et l'arrivée, `_clear()` a pu disposer `fieldTex` et le groupe
+      // des lacs. Poser un lac sur une texture détruite ne lève pas d'erreur —
+      // ça peint du noir, et personne ne saurait d'où il vient. La génération
+      // est incrémentée par `_clear()` lui-même (voir là-bas pourquoi) : ici on
+      // ne fait que retenir celle sous laquelle on part.
+      const gen = this._genLacs
+      runLakeJob({ data: dem.data, size: dem.size }).then((r) => {
+        if (!r || gen !== this._genLacs) return
+        lacsMemoEcrire(dem, r.lacs)
+        this._batirLacs(r.lacs, { dem, params, fieldTex, cote })
+      })
+    }
+    this._applySea()
+    this.setSeabed(params.seaBed ?? 'map')
+    // ⚠️ LA FENÊTRE SE RELIT SUR LE TERRAIN, elle ne se mémorise pas ici. Une
+    // reconstruction peut arriver EN PLEIN DÉFILEMENT (curseur d'exagération,
+    // arrivée du trait de côte) : repartir de zéro ferait sauter la mer d'un
+    // bloc entier sous les yeux, alors que le relief, lui, n'aurait pas bougé.
+    const f = terrain.fenetre
+    if (f) this.setFenetre(f.x, f.z)
+    this.group.visible = this._surfaceVisible
+  }
+
+  /**
+   * Les plans d'eau d'altitude, posés dans la scène.
+   *
+   * ══════════ UN LAC APPARTIENT AU MONDE, PAS À LA FENÊTRE ═══════════════════
+   * Sa géométrie est taillée sur son emprise géographique, en coordonnées de
+   * CHAMP (jusqu'à ±84 en mode continu). C'est son groupe qui porte la
+   * translation −fenêtre — deux écritures de `position` par pas, aucune
+   * géométrie refaite, exactement la règle que main.js applique déjà aux noms
+   * de lieux et au calque d'eau vectoriel.
+   *
+   * ⚠️ SÉPARÉE DE `rebuild` PARCE QU'ELLE PEUT ARRIVER APRÈS LUI (retour du
+   * Worker). Tout ce qu'elle lit est donc passé en paramètre ou relu sur
+   * `this` — rien ne doit dépendre de l'instant où elle tourne.
+   */
+  _batirLacs(lacs, { dem, params, fieldTex, cote }) {
+    const scale = (this._span / dem.extentMeters) * params.demExaggeration
     const cellM = dem.extentMeters / (dem.size - 1)
-    for (const lake of detectLakes(dem)) {
+    let poses = 0
+    for (const lake of lacs) {
       const { tex, minX, minY, w, h } = this._bakeLakeMask(lake)
       // couche maritime réservée aux VRAIS lacs : longueur >= 3 km (demande
       // Adrien v40 — detectLakes prenait des zones plates urbaines pour des
@@ -1007,7 +1216,7 @@ export class RealWater {
       if (Math.max(w, h) * cellM < 3000) { tex.dispose(); continue }
       this._textures.push(tex)
       const yLake = (lake.elevM - dem.meanM) * scale + 0.04 + (params.detail ?? 0) * 0.6 + 0.025
-      const toWorld = (g, n) => (g / (n - 1) - 0.5) * TERRAIN_SIZE
+      const toWorld = (g, n) => (g / (n - 1) - 0.5) * this._span
       const size = lake.size
       const x0 = toWorld(minX, size)
       const z0 = toWorld(minY, size)
@@ -1023,6 +1232,13 @@ export class RealWater {
       mat.uniforms.uMaskMin.value.set(x0, z0)
       mat.uniforms.uMaskSize.value.set(Math.max(1e-4, x1 - x0), Math.max(1e-4, z1 - z0))
       mat.uniforms.uDepthMax.value = 0.9
+      mat.uniforms.uSpan.value = this._span
+      // clip de fenêtre : un lac de l'emprise qui sort du socle flotterait
+      // au-dessus du vide. 1e6 hors mode continu = pas de clip, comme avant.
+      if (cote > 1) {
+        mat.uniforms.uHalf.value = (TERRAIN_SIZE / 2) * 0.998
+        mat.uniforms.uCornerR.value = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE))
+      }
       const segX = Math.max(12, Math.min(80, Math.round((x1 - x0) * 6)))
       const segZ = Math.max(12, Math.min(80, Math.round((z1 - z0) * 6)))
       const geo = new THREE.PlaneGeometry(x1 - x0, z1 - z0, segX, segZ)
@@ -1032,13 +1248,34 @@ export class RealWater {
       mesh.position.y = yLake
       mesh.renderOrder = 18 // same rule as the sea: over the draped OSM water
       mesh.frustumCulled = false
-      this.group.add(mesh)
+      this._groupeLacs().add(mesh)
       this.meshes.push(mesh)
       this.materials.push(mat)
+      poses++
     }
-    this._applySea()
-    this.setSeabed(params.seaBed ?? 'map')
-    this.group.visible = this._surfaceVisible
+    // 🔴 ET L'ÉTAT COURANT SE REJOUE SUR LES NOUVEAUX MATÉRIAUX. Six réglages
+    // sont poussés matériau par matériau APRÈS la reconstruction (houle, soleil,
+    // trait de côte, fond marin, teintes, accalmie de vue). Un lac qui arrive
+    // 600 ms plus tard les a tous manqués : il garderait la hauteur de vague et
+    // la couleur d'avant, jusqu'au prochain coup de curseur. Ça ne lève aucune
+    // erreur — ça se voit, et seulement si on regarde le bon lac.
+    if (poses) this._rejouerEtat(params)
+  }
+
+  /**
+   * Repousse sur TOUS les matériaux l'état que les réglages externes ont
+   * déposé depuis la dernière reconstruction. Idempotent par construction :
+   * chacun de ces appels n'écrit que des uniformes.
+   *
+   * ⚠️ SI UN SEPTIÈME RÉGLAGE PAR MATÉRIAU APPARAÎT, IL SE REJOUE ICI. C'est le
+   * prix d'un bâti qui peut arriver après coup, et le seul endroit qui le sait.
+   */
+  _rejouerEtat(params) {
+    this._applySea() // houle + soleil + masque côtier
+    this.setSeabed(this._seabedId ?? params?.seaBed ?? 'map')
+    if (this._look) this.setLook(this._look)
+    if (this._ondes) this.setWaves(this._ondes)
+    if (this._vue) this.setView(this._vue.cameraY, this._vue.viewDist)
   }
 
   // push the current spectrum into every material (arrays are assigned
@@ -1058,7 +1295,7 @@ export class RealWater {
   // OSM coast mask (same texture the terrain uses) — gates the sea so waves stop
   // at the REAL shoreline, not the elevation contour (flat polders below sea
   // level are land, not sea). Stored so a rebuild re-applies it (see _applySea).
-  // coastImage : ImageData du canvas du masque (extraite UNE fois par main.js)
+  // coastImage : champ R8 du masque (le tableau MÊME de sa DataTexture)
   // — nourrit le champ de simulation uField via _bakeField. Le fetch du masque
   // étant async, s'il arrive APRÈS le build le champ est recuit sur place.
   setCoastMask(tex, on, coastImage) {
@@ -1077,8 +1314,8 @@ export class RealWater {
   // est disposée — _textures reste cohérent pour _clear().
   _rebakeField() {
     if (!this._bakeCtx || !this.materials.length) return
-    const { terrain, seaY } = this._bakeCtx
-    const tex = this._bakeField(terrain, seaY)
+    const { terrain, seaY, params } = this._bakeCtx
+    const tex = this._bakeField(terrain, seaY, params)
     const old = this._fieldTex
     for (const mat of this.materials) if (mat.uniforms.uField) mat.uniforms.uField.value = tex
     const i = this._textures.indexOf(old)
@@ -1105,7 +1342,9 @@ export class RealWater {
   }
 
   // live look change — colour, transparency and sun sliders, no rebuild needed
+  // ⚠️ retenu (`_look`) : un lac bâti après coup doit le rejouer, voir _rejouerEtat
   setLook(params) {
+    this._look = params
     const { shallowT, deep } = waterColors(params)
     for (const mat of this.materials) {
       mat.uniforms.uDeep.value.copy(deep)
@@ -1121,7 +1360,10 @@ export class RealWater {
   // live wave change (UI sliders) — no rebuild needed. La hauteur ne déplace
   // plus le maillage : le niveau moyen est porté par uLift * fade dans le
   // vertex (zéro à la côte, quelle que soit la hauteur des vagues).
+  // ⚠️ retenu (`_ondes`) : un lac bâti après coup doit le rejouer — sans ça il
+  // porterait la hauteur de vague de la reconstruction, pas celle du curseur.
   setWaves({ height, choppiness, speed } = {}) {
+    this._ondes = { ...(this._ondes ?? {}), ...(height !== undefined && { height }), ...(choppiness !== undefined && { choppiness }), ...(speed !== undefined && { speed }) }
     for (const mat of this.materials) {
       if (height !== undefined) {
         mat.uniforms.uWaveH.value = height
@@ -1168,7 +1410,10 @@ export class RealWater {
   // `viewDist` = distance d'affichage (rayon d'orbite, unites scene) : elle
   // pilote la TAILLE des remous de cote — pleins de pres, effaces de loin ou
   // ils lisaient grossiers (retour Adrien).
+  // ⚠️ retenu (`_vue`) : un lac bâti après coup doit le rejouer, sinon il reste
+  // à l'accalmie de la vue précédente.
   setView(cameraY, viewDist) {
+    this._vue = { cameraY, viewDist }
     if (!this._demScale) return
     const km = Math.max(0, (cameraY - (this._seaBase ?? 0)) / this._demScale / 1000)
     const calm = smooth01((25 - km) / 17)

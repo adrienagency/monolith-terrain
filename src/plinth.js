@@ -349,7 +349,11 @@ export class Plinth {
 
   // rebuild the walls to hug the current relief border; call after every
   // terrain rebuild (the heightfield changed)
-  rebuild(terrain, params) {
+  // `baseYFloor` : plancher IMPOSÉ du socle, au lieu du point bas trouvé en
+  // balayant le champ. Le damier s'en sert déjà pour que ses dalles voisines
+  // partagent le socle du centre (block-grid.js). La fenêtre continue s'en sert
+  // pour la raison symétrique — voir `socleEmprise` dans main.js.
+  rebuild(terrain, params, baseYFloor = null) {
     const sample = terrain.sample
     if (!sample) return
     this.depth = params.plinthDepth ?? this.depth
@@ -360,7 +364,7 @@ export class Plinth {
     // shader clips to the SAME rounded rectangle so nothing overhangs the walls.
     // v42: meme formule que le clip de la mer (rayon clampe, cercle)
     const cornerR = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE))
-    const { geo, baseY } = buildSlabWalls(sample, { depth: this.depth, resolution: params.resolution ?? 256, cornerR, cornerExp: 2 })
+    const { geo, baseY } = buildSlabWalls(sample, { depth: this.depth, resolution: params.resolution ?? 256, cornerR, cornerExp: 2, baseYFloor })
     this.baseY = baseY
     this.base.position.y = baseY
     this.ground.position.y = baseY - 0.02 // opaque floor just under the shadow base

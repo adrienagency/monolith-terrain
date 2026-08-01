@@ -180,3 +180,62 @@ test('hull size tracks the block footprint, exaggerated but anchored', () => {
   assert.equal(boatScale(56, 0), 0, 'emprise nulle = pas de bateau')
   assert.equal(boatScale(0, 1000), 0)
 })
+
+// ══════════ LA FENÊTRE CONTINUE 3×3 ═══════════════════════════════════════
+//
+// L'emprise fait 168 unités, la fenêtre visible 56. Trois règles, et la première
+// est celle qui aurait pu passer inaperçue.
+
+// ⚠️ LA VITESSE NE DOIT PAS TRIPLER. `SPEED` et `LOOKAHEAD` sont exprimés en
+// fraction du demi-BLOC : passer 84 en `half` (ce que l'étude proposait) aurait
+// multiplié par trois la vitesse au sol du bateau et la portée de sa veille,
+// sans que rien ne le signale. Le demi-bloc reste le demi-bloc ; c'est un
+// SECOND paramètre, `bord`, qui dit où l'eau s'arrête.
+test('sur une emprise, le bateau ne va pas trois fois plus vite', () => {
+  const base = { x: 0, z: 0, cap: 0, opacite: 1, dormant: false }
+  const bloc = stepBoat(base, 1, HALF)
+  const emprise = stepBoat(base, 1, HALF, null, { bord: HALF * 3 })
+  assert.ok(Math.abs(emprise.z - bloc.z) < 1e-9, `${emprise.z} ≠ ${bloc.z} : la vitesse a changé avec l’emprise`)
+})
+
+// Le bateau ne dort qu'au bord de l'EMPRISE : hors fenêtre il est simplement
+// invisible, et il redevient visible si on défile vers lui. L'endormir au bord
+// du socle viderait la mer de tout ce qui n'est pas sous les yeux.
+test('hors fenêtre le bateau s’efface, il ne meurt qu’au bord de l’emprise', () => {
+  let b = { x: 0, z: HALF * 1.5, cap: 0, opacite: 1, dormant: false }
+  // le fondu est LISSÉ (k = 1 − e^(−2,5·dt)) : il s'éteint en une seconde et non
+  // en une image — c'est ce qui l'empêche de claquer quand on drague vite
+  for (let i = 0; i < 120; i++) b = stepBoat(b, 1 / 60, HALF, null, { bord: HALF * 3 })
+  assert.equal(b.dormant, false, 'une case plus loin n’est pas la mort')
+  assert.ok(b.opacite < 0.02, `hors socle il doit s’effacer, obtenu ${b.opacite}`)
+
+  let loin = { x: 0, z: HALF * 2.99, cap: 0, opacite: 0, dormant: false }
+  for (let i = 0; i < 600; i++) loin = stepBoat(loin, 1 / 60, HALF, null, { bord: HALF * 3 })
+  assert.equal(loin.dormant, true, 'passé le bord de l’emprise, il dort')
+})
+
+// Le fondu se mesure à la FENÊTRE, qui se déplace : un bateau à 40 unités du
+// centre du champ est invisible tant qu'on regarde le centre, et plein quand on
+// a défilé jusqu'à lui. C'est ce qui fait qu'on le RETROUVE.
+test('le fondu suit la fenêtre, donc un bateau revient quand on défile vers lui', () => {
+  const b = { x: 40, z: 0, cap: 0, opacite: 0, dormant: false }
+  const loinDeLui = stepBoat(b, 1 / 60, HALF, null, { bord: HALF * 3, fenX: 0, fenZ: 0 })
+  const sousLesYeux = stepBoat(b, 1 / 60, HALF, null, { bord: HALF * 3, fenX: 40, fenZ: 0 })
+  assert.ok(loinDeLui.opacite < 0.02, `invisible attendu, obtenu ${loinDeLui.opacite}`)
+  assert.ok(sousLesYeux.opacite > loinDeLui.opacite, 'la fenêtre posée sur lui doit le rallumer')
+})
+
+// La DENSITÉ dans la fenêtre visible ne doit pas changer. Neuf fois la surface
+// veut neuf fois les places, chacune tirée à la chance d'UN bloc — sinon « une
+// chance sur dix de voir un bateau » deviendrait une sur quatre-vingt-dix.
+test('l’emprise porte neuf fois les places, à la chance d’un seul bloc', () => {
+  let bloc = 0
+  let emprise = 0
+  for (let s = 1; s <= 400; s++) {
+    if (seedFleet({ zoom: 13, half: HALF, seed: s }).length) bloc++
+    if (seedFleet({ zoom: 13, half: HALF * 3, seed: s, cote: 3 }).length >= 1) emprise++
+  }
+  // P(au moins un dans le bloc) = 0,1 ; P(au moins un sur neuf blocs) = 1−0,9⁹ = 0,61
+  assert.ok(bloc / 400 > 0.05 && bloc / 400 < 0.16, `taux bloc ${bloc / 400}`)
+  assert.ok(emprise / 400 > 0.45, `taux emprise ${emprise / 400} — la mer se vide en mode continu`)
+})

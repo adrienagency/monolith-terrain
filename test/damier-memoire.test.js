@@ -453,3 +453,108 @@ test('mémoire des blocs : l’analyse d’un MNT NON mémorisé n’est pas gar
   assert.equal(analyseMemoLire(voisine, 1024), null)
   assert.equal(demMemoOctets(), 0, 'zéro octet retenu pour une dalle du damier')
 })
+
+// ---------------------------------------------------------------------------
+// geste 6 · LES LACS DU BLOC (src/lake.js, rangés dans src/dem-memo.js)
+// ---------------------------------------------------------------------------
+//
+// `detectLakes` figeait le fil principal 359 ms sur une emprise 3×3 (Annecy,
+// MNT réel 4 608²) et 58 ms sur un bloc ordinaire — APRÈS le gain ×2,4 de la
+// session « la file suffit ». Or `ocean.rebuild` le rappelle À CHAQUE
+// reconstruction de la mer, et la plupart ne changent pas d'altitudes : « Mer
+// animée », « Tranche de verre », l'entrée/sortie du mode région, un template,
+// un tirage aléatoire, un retour de zoom.
+//
+// ⚠️ LES LACS NE PEUVENT PAS SE RANGER SOUS LE MNT comme l'analyse, et c'est ce
+// qui leur vaut leur propre mécanique : en mode continu, le champ que voit
+// `ocean.rebuild` est l'emprise RECOLLÉE (dem-emprise.js), un objet neuf qui
+// n'entre jamais dans le LRU ci-dessus. Les y ranger n'aurait servi que le mode
+// ordinaire — c'est-à-dire pas le cas qui coûte 359 ms. D'où UNE FENTE UNIQUE,
+// hors du LRU, avec le MNT tenu FAIBLEMENT (une référence forte retiendrait
+// 40,5 Mo d'emprise après un changement de zoom).
+//
+// CE QU'ELLE RETIENT — une `Int32Array` d'indices de cellule par lac. Relevé
+// sur MNT réel, cellules cumulées de tous les lacs retenus :
+//
+//   Annecy z12, bloc ordinaire 1 536²      199 111 cellules    0,8 Mo
+//   Annecy 3×3, 4 608²                     623 238 cellules    2,5 Mo
+//   Flevoland 3×3 (polders), 4 608²      1 046 794 cellules    4,2 Mo
+//   La Réunion 3×3, 4 608²                  26 665 cellules    0,1 Mo
+//
+// ⚠️ MAIS LA FACTURE EST DICTÉE PAR LE RELIEF, pas par la taille du MNT — une
+// emprise entièrement plate rendrait un seul lac de 21 233 664 cellules, soit
+// 85 Mo. D'où le PLAFOND (`LACS_MEMO_MAX_OCTETS`) plutôt qu'une confiance dans
+// la moyenne : au-delà, on ne garde rien et on recalcule — exactement ce que
+// faisait le code avant cette fente. La borne reste donc un chiffre FIXE, comme
+// le veut l'étude 3×3 : +8 Mo au pire, ~2,5 Mo en pratique. Sur le pic du
+// damier plein (1 762 Mo), MNT + analyse + lacs reste sous 2,6 %.
+import { LACS_MEMO_MAX_OCTETS, lacsMemoLire, lacsMemoEcrire } from '../src/dem-memo.js'
+import { detectLakes } from '../src/lake.js'
+
+const fauxLacs = (n, taille) =>
+  Array.from({ length: n }, (_, k) => ({ cells: new Int32Array(taille), elevM: 100 + k, size: 512 }))
+
+test('fente des lacs : servie pour SON MNT, comptée, et pour lui seul', () => {
+  demMemoVider()
+  const dem = faussetMnt(64)
+  const autre = faussetMnt(64, 5)
+  const lacs = fauxLacs(3, 1000)
+  lacsMemoEcrire(dem, lacs)
+  assert.equal(lacsMemoLire(dem), lacs)
+  assert.equal(lacsMemoLire(autre), null, 'un autre MNT ne reçoit pas ces lacs')
+  assert.equal(demMemoOctets(), 3 * 1000 * 4, 'la comptabilité voit les lacs')
+  demMemoVider()
+})
+
+// ⚠️ UNE SEULE FENTE : le MNT suivant chasse le précédent. C'est ce qui borne
+// la facture à un chiffre fixe, et `ocean.rebuild` ne pose jamais la question
+// que pour `terrain.dem` — une seconde fente ne servirait personne.
+test('fente des lacs : le MNT suivant chasse le précédent', () => {
+  demMemoVider()
+  const a = faussetMnt(64, 1)
+  const b = faussetMnt(64, 2)
+  lacsMemoEcrire(a, fauxLacs(2, 1000))
+  lacsMemoEcrire(b, fauxLacs(1, 700))
+  assert.equal(lacsMemoLire(a), null, 'les lacs du premier sont partis')
+  assert.equal(lacsMemoLire(b).length, 1)
+  assert.equal(demMemoOctets(), 700 * 4, 'et ne pèsent plus rien')
+  demMemoVider()
+})
+
+// ⚠️ LE PLAFOND N'EST PAS DÉCORATIF : sans lui, une emprise 3×3 entièrement
+// plate (une plaine, un désert de sel) rendrait UN lac de 21 233 664 cellules,
+// soit 85 Mo dans une mémoire annoncée à deux chiffres.
+test('fente des lacs : au-delà du plafond, rien n’est gardé', () => {
+  demMemoVider()
+  const dem = faussetMnt(64)
+  const trop = LACS_MEMO_MAX_OCTETS / 4 + 1
+  lacsMemoEcrire(dem, [{ cells: new Int32Array(trop), elevM: 12, size: 4608 }])
+  assert.equal(lacsMemoLire(dem), null, 'un lac hors plafond n’entre pas')
+  assert.equal(demMemoOctets(), 0, 'et ne pèse rien')
+  demMemoVider()
+})
+
+// La contrepartie de « servir la mémoire au lieu de recalculer est sans effet
+// sur l'image » : ce que la mémoire rend doit être ce que le détecteur rendrait.
+test('fente des lacs : la mémoire rend EXACTEMENT ce que le recalcul rendrait', () => {
+  demMemoVider()
+  const size = 96
+  const data = new Int16Array(size * size)
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) data[y * size + x] = 300 + ((x * 7 + y * 11) % 23)
+  for (let y = 20; y < 60; y++) for (let x = 20; x < 70; x++) data[y * size + x] = 512
+  const dem = { data, size, metersPerPixel: 17.8 }
+  const calcules = detectLakes(dem)
+  lacsMemoEcrire(dem, calcules)
+
+  const relus = lacsMemoLire(dem)
+  const recalcules = detectLakes(dem)
+  assert.ok(recalcules.length >= 1, 'le témoin doit contenir au moins un lac')
+  assert.equal(relus.length, recalcules.length)
+  for (let k = 0; k < recalcules.length; k++) {
+    assert.equal(relus[k].elevM, recalcules[k].elevM)
+    assert.equal(relus[k].size, recalcules[k].size)
+    assert.deepEqual([...relus[k].cells], [...recalcules[k].cells], `lac ${k}`)
+  }
+  demMemoVider()
+})

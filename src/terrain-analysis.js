@@ -437,6 +437,78 @@ export function resampleField(src, size, cible) {
 }
 
 /**
+ * SOUS-ÉCHANTILLONNAGE PAR MINIMUM — le seul qui préserve la CONNECTIVITÉ.
+ *
+ * ⚠️ IL NE REMPLACE PAS `resampleField`, IL LUI EST COMPLÉMENTAIRE, et les
+ * confondre casserait l'un des deux usages.
+ *
+ * `resampleField` MOYENNE, et c'est ce qu'il faut pour les quatre champs de ce
+ * module : ce sont des dérivées du relief, décimer sans passe-bas replierait le
+ * bruit du MNT sur les basses fréquences (voir `coarsenField`).
+ *
+ * Mais le MASQUE DE MER n'est pas une dérivée : c'est une TOPOLOGIE. Il naît
+ * d'un remplissage par diffusion depuis les bords, et un remplissage ne
+ * s'intéresse qu'à une question — les cellules basses sont-elles CONNECTÉES ?
+ * Or la moyenne SECTIONNE LES CHENAUX : un détroit large d'un pixel, moyenné
+ * avec ses deux berges à +100 m, remonte au-dessus du seuil de 0,5 m. La baie
+ * qu'il alimentait cesse alors d'être reliée au large et — trop petite pour le
+ * critère de grand bassin — elle est PEINTE EN TERRE. Une baie réelle, bleue
+ * aujourd'hui, deviendrait verte à la seule faveur d'un sous-échantillonnage.
+ * C'est le piège nommé au §4.3 de l'étude 3×3, et il n'apparaît qu'en mode
+ * continu, où le MNT recollé (4 608²) doit descendre à la taille de l'atlas.
+ *
+ * > Le minimum d'un bloc est ≤ la moyenne du même bloc, TOUJOURS. Une cellule
+ * > basse ne peut donc jamais devenir haute : les zones basses ne peuvent
+ * > qu'être conservées ou ÉLARGIES, jamais rétrécies ni coupées. **La
+ * > connectivité est préservée par construction — c'est un théorème, pas un
+ * > réglage.** Et le corollaire vaut aussi dans l'autre sens : une vraie mer
+ * > qui touchait le bord le touche encore, donc elle ne peut pas devenir terre.
+ *
+ * Le prix de la garantie est une côte qui avance d'au plus un texel d'atlas
+ * (0,073 unité monde à 2 304² sur 168 unités, soit ~1 px d'écran) — et il ne se
+ * paie QUE sur le masque de mer, qui est de toute façon relu par le trait de
+ * côte vectoriel là où celui-ci existe.
+ *
+ * Même signature et mêmes bords que `resampleField` : cible ≤ 0 ou ≥ source →
+ * la source telle quelle (on ne grossit pas), dernier bloc tronqué, valeurs non
+ * finies ignorées, bloc entièrement non fini → 0.
+ *
+ * @param {Float32Array|Int16Array} src
+ * @param {number} size côté de la source
+ * @param {number} cible côté voulu
+ * @returns {{data: Float32Array|Int16Array, size: number}}
+ */
+export function minPoolField(src, size, cible) {
+  const c = cible | 0
+  if (c <= 0 || c >= size) return { data: src, size }
+  const dst = new Float32Array(c * c)
+  const f = size / c
+  for (let y = 0; y < c; y++) {
+    // ⚠️ TOUS LES BLOCS SOURCES QUI SE RECOUVRENT, pas seulement les entiers :
+    // quand le rapport est fractionnaire, une ligne source est partagée par
+    // deux destinations. Un minimum qui déborde d'un texel élargit une zone
+    // basse — c'est du côté sûr. L'inverse (ignorer la ligne partagée) pourrait
+    // couper un chenal, ce qui est précisément ce qu'on répare ici.
+    const iy0 = Math.floor(y * f)
+    const iy1 = Math.min(size, Math.ceil(y * f + f))
+    for (let x = 0; x < c; x++) {
+      const ix0 = Math.floor(x * f)
+      const ix1 = Math.min(size, Math.ceil(x * f + f))
+      let m = Infinity
+      for (let yy = iy0; yy < iy1; yy++) {
+        const row = yy * size
+        for (let xx = ix0; xx < ix1; xx++) {
+          const v = src[row + xx]
+          if (v < m && Number.isFinite(v)) m = v
+        }
+      }
+      dst[y * c + x] = m === Infinity ? 0 : m
+    }
+  }
+  return { data: dst, size: c }
+}
+
+/**
  * La chaîne complète, telle que terrain.js la consomme : un DEM en mètres →
  * la RGBA empaquetée. Regroupée ici (et non dans terrain.js) pour que le
  * pipeline entier reste testable sans navigateur.

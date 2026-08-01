@@ -38,7 +38,7 @@ import { snapToKm, ascentStats, parseRace } from './race-model.js'
 import { SPORTS, DEFAULT_SPORT, sanitizeSvgMarkup, isValidIconDataUrl, rasterizeToCanvas } from './ui/sport-icons.js'
 import { worldToLatLon, latLonToWorld, parseLatLon } from './geo.js'
 import { fetchTransports } from './transports.js'
-import { TERRAIN_SIZE } from './terrain.js'
+import { TERRAIN_SIZE, RES_FENETRE_CONTINUE } from './terrain.js'
 import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
 import { monochromeLook, generateEarthPalette, NATURAL_COLOR_PRESET, rampColorStops } from './palette.js'
 import { deriveUiTokens, UI_TOKEN_VARS } from './ui-theme.js'
@@ -46,14 +46,21 @@ import { gradeForDem, elevationHistogram } from './relief-grade.js'
 import { buildPalettePool, pickShufflePalette } from './shuffle-pool.js'
 import { peakVantage } from './camera-poses.js'
 import { focusRayHit } from './autofocus.js'
+import { doitRafraichirCartouche } from './ground-info.js'
 import { GroundInfoLayer } from './ground-info-layer.js'
 import { PeaksLayer } from './peaks.js'
 import { Clouds2 } from './clouds2.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
+import { ATLAS_COTE, EMPRISE_EN_VOL_MAX, enVolBorne, originesEmprise, recollerEmprise } from './dem-emprise.js'
+import { COURSE_ELASTIQUE, avanceFenetre, rappelElastique, poseDansLaCourse, fenetreQuiCentre } from './fenetre-course.js'
+import { dansFenetre } from './fenetre-clip.js'
+import { vitesseAuLache, pasElan } from './fenetre-elan.js'
+import { forceUrl, continuActif, etatInterrupteur } from './fenetre-reglage.js'
+import { pasFinesse, finesseInitiale, resDeFinesse, resFinesses, REPOS_S } from './fenetre-finesse.js'
 import { MapLayers } from './map/layer-manager.js'
-import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
+import { AerialLayer, demBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
 import { lightingFor, darkModeFor, applyGains, fillDirection, fillLightIntensity, fillEnabledInLook, sunOn, sunShadowOn } from './daycycle.js'
 import { signatureCarteOmbre } from './carte-ombre.js'
 import { SunDisc } from './sun-disc.js'
@@ -112,6 +119,8 @@ import { buildEffectsPanel, BASE_GRADE } from './ui/effects-panel.js'
 import { buildHourPill } from './ui/hour-pill.js'
 import { buildZoomStepper } from './ui/zoom-stepper.js'
 import { initTips } from './ui/tips.js'
+import { initAides, evalue as evalueAide, aideSection } from './ui/aides.js'
+import { boutonsSouris, versTroisJs } from './boutons-camera.js'
 import { initLoadingHints } from './ui/loading-hints.js'
 import { createAdaptiveQuality } from './perf.js'
 import { detailForZoom } from './zoom-detail.js'
@@ -592,6 +601,11 @@ const BASE_TEMPLATE_LOOK = Object.freeze(captureLook(params))
 // has to be fully synchronous: it must land before anything below reads
 // `params` for the first time, and nothing here can afford to await.
 let pendingShareCam = null // applied once `camera`/`controls` exist, below
+// La position DANS L'EMPRISE portée par le lien (share-link.js, champ `fen`).
+// Posée une fois le relief chargé — avant, il n'y a pas d'emprise où se placer.
+// Reste null pour tout lien d'avant ce champ : ceux-là rouvrent au centre du
+// bloc, c'est-à-dire exactement la vue qu'ils ont toujours ouverte.
+let pendingShareFen = null
 if (location.hash.startsWith('#s=')) {
   try {
     const decoded = decodeShareState(location.hash.slice(3))
@@ -603,6 +617,7 @@ if (location.hash.startsWith('#s=')) {
       params.demZoom = shared.loc.zoom
       params.demLocation = 'Custom'
       pendingShareCam = shared.cam
+      pendingShareFen = shared.fen
     }
   } catch (err) {
     console.warn('share link ignored:', err) // a garbled/old-format fragment just boots the default view
@@ -734,6 +749,15 @@ function hideLoading() {
     // visible. Ce qu'on aurait réglé PENDANT le chargement serait perdu — les
     // panneaux sont derrière le carton, on ne règle rien à ce moment-là.
     history.reset()
+    // LE MÊME INSTANT SERT LA PREMIÈRE BULLE D'AIDE, et pour la même raison :
+    // c'est ici, et pas avant, que le terrain est réellement visible. Un
+    // visiteur arrivé par un lien `?f3=1` n'a jamais touché l'interrupteur du
+    // mode continu — il n'y a donc aucune bascule à observer, alors qu'il a
+    // sous les doigts un geste indevinable. Posée plus tôt, la bulle naîtrait
+    // derrière le carton de chargement. Ce bloc ne s'exécute qu'UNE fois
+    // (`loadingDismissedOnce` court-circuite les rechargements de zone) :
+    // l'évaluation de démarrage est donc unique par visite.
+    evalueAide('fenetre-3x3', fenetreContinueActive())
   }, wait)
 }
 
@@ -1280,8 +1304,11 @@ plinth.rebuild(terrain, params)
 // two feel identical). Wrap the rebuild so the slider re-welds the skirt too —
 // otherwise the skirt keeps its stale depth until the next full terrain rebuild.
 const _plinthRebuild = plinth.rebuild.bind(plinth)
-plinth.rebuild = (t, p) => {
-  _plinthRebuild(t, p)
+plinth.rebuild = (t, p, f = null) => {
+  // ⚠️ Le TROISIÈME argument (`baseYFloor`) doit traverser : sans lui, la
+  // fenêtre continue perdrait son plancher de socle à chaque appel qui passe
+  // par cette enveloppe, et le socle se remettrait à respirer en défilant.
+  _plinthRebuild(t, p, f)
   if (p.regionMode && regionMaskCanvas) rebuildRegionSkirt()
 }
 // give the socle its own punchy studio env so metals/glass/carbon reflect real
@@ -1372,6 +1399,7 @@ function regenerateLabels() {
   labels = createLabels(terrain.sample, params.seed, labelOpts())
   // a rebuild can run while in orbit (dive preload, GUI) — stay hidden there
   labels.visible = params.labels && (!modes || modes.mode === 'surface')
+  f3AncreAuSol(labels) // mode continu : les cotes s'accrochent à leur point du sol
   scene.add(labels)
 }
 
@@ -1595,6 +1623,7 @@ function regenerateHud() {
   // same orbital guard as labels — GUI color changes rebuild the HUD and the
   // fresh group must not appear over the globe
   hud3.group.visible = !modes || modes.mode === 'surface'
+  f3AncreAuSol(hud3.pois) // mode continu : les repères restent plantés dans leur crête
   scene.add(hud3.group)
   applySourceMode()
 }
@@ -1814,6 +1843,697 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   modes.diveTo({ lat, lon, zoom: stepZoom(params.demZoom, 1, userFineZoom), point: new THREE.Vector3(px, py, pz) })
 })
 
+// ══════════════════════ LA FENÊTRE CONTINUE 3×3 — JALON 1 ═══════════════════
+//
+// Le plus petit drag qui marche. But unique : qu'on SENTE le déplacement. Ni
+// champs, ni calques, ni finition — la question à trancher est celle du §7 de
+// l'étude (le geste vaut-il le coup ?), et rien d'autre ne compte tant qu'elle
+// n'a pas de réponse.
+//
+// Le geste est au CLIC DROIT, et c'est un choix contraint, pas une préférence :
+// le clic gauche est DÉJÀ pris deux fois — rotation orbitale (OrbitControls) et
+// plongée au point cliqué (juste au-dessus). Le clic droit, lui, ne sert qu'au
+// pan d'OrbitControls, qu'on désactive ici puisque le mode continu le remplace.
+
+// ══════════ QUI ALLUME LE MODE — l'adresse, la machine, l'interrupteur ══════
+//
+// La RÈGLE est dans `fenetre-reglage.js` (pure, testée) ; ici il n'y a que la
+// plomberie : aller chercher les trois entrées et mémoriser le verdict.
+//
+// ⚠️ LE VERDICT EST CALCULÉ UNE FOIS, PAS PAR IMAGE. La version d'avant
+// reconstruisait un `URLSearchParams` à CHAQUE appel — c'est-à-dire à chaque
+// image (`f3Tick`) et à chaque `pointermove` d'un drag. Parser une chaîne
+// d'adresse 60 fois par seconde pour relire une constante était un coût sans
+// contrepartie ; `_f3Force` et `_f3Etat` le suppriment.
+//
+// ⚠️ `let`, ET IL EST REMIS À `null` À LA PREMIÈRE BASCULE. L'adresse pose
+// l'état INITIAL, elle ne verrouille pas : Adrien ouvre le serveur par une URL
+// qui porte `?f3=1` et se retrouvait ENFERMÉ dans le mode continu, l'interrupteur
+// des Paramètres grisé. Un banc n'a besoin que de démarrer dans le bon mode ; il
+// n'a jamais eu besoin d'interdire la sortie. L'oubli se fait dans `f3Applique`.
+let _f3Force = forceUrl(new URLSearchParams(location.search).get('f3'))
+
+// La préférence de l'utilisateur, ou `null` s'il n'a jamais touché
+// l'interrupteur — auquel cas c'est `FLAGS.fenetreContinue` qui parle. Le
+// `null` compte : « jamais touché » et « explicitement éteint » doivent se
+// distinguer, sinon le jour où le défaut passera à `true`, il ne s'appliquerait
+// à personne ayant déjà ouvert l'application.
+const F3_PREF_KEY = 'shibumap.fenetre-continue'
+function f3Preference() {
+  try {
+    const v = localStorage.getItem(F3_PREF_KEY)
+    return v === '1' ? true : v === '0' ? false : null
+  } catch {
+    return null
+  }
+}
+
+const f3Args = () => ({ force: _f3Force, prefere: f3Preference(), defaut: FLAGS.fenetreContinue, machine: MACHINE })
+
+// Le verdict du démarrage. Il est FIGÉ pour la durée de la session parce que
+// tout en dépend au chargement : l'emprise 3×3 (neuf MNT au lieu d'un), la
+// découpe locale du renderer, l'épaisseur du socle. Changer d'avis en cours de
+// route veut dire RECHARGER la zone — c'est ce que fait l'interrupteur, en
+// réécrivant cette variable puis en rappelant `loadRealTerrain`.
+let _f3Etat = continuActif(f3Args())
+
+// Une fonction DÉCLARÉE (donc hissée) : `fetchAndBuildDem` l'appelle et se
+// trouve plus haut dans le fichier.
+function fenetreContinueActive() {
+  return _f3Etat
+}
+
+// ══════════ LA DÉCOUPE LOCALE, ALLUMÉE AVEC LE MODE ═══════════════════════
+//
+// Les calques du sol (rivières, lacs, plans d'eau) sont construits sur
+// l'emprise 3×3 entière et coupés à la fenêtre par huit plans de coupe
+// (src/fenetre-clip.js). Ces plans sont posés MATÉRIAU PAR MATÉRIAU, donc il
+// faut que three.js les regarde — c'est ce que dit cet interrupteur.
+//
+// ⚠️ Il n'a AUCUN effet sur un matériau sans `clippingPlanes` : three.js ne
+// génère le code de coupe qu'à partir de NUM_CLIPPING_PLANES > 0. Le terrain,
+// le socle, la mer et le ciel ne sont donc pas concernés. Il est quand même
+// posé sous condition, pour que le mode ordinaire n'ait pas à faire confiance
+// à cette phrase.
+if (fenetreContinueActive()) renderer.localClippingEnabled = true
+
+// ══════════ L'INTERRUPTEUR DES PARAMÈTRES ═══════════════════════════════════
+//
+// Adrien : « je veux pouvoir basculer sans URL ». Il vit dans la roue crantée,
+// avec les réglages globaux de performance — c'est bien ce que c'est.
+//
+// ⚠️ BASCULER VEUT DIRE RECHARGER LA ZONE, et il n'y a pas de raccourci. Le
+// mode continu ne se pose pas par-dessus le mode ordinaire : il charge NEUF
+// MNT au lieu d'un, recolle une emprise, cuit un atlas de champs sur cette
+// emprise et cale le socle sur le point bas des neuf. Rien de tout ça ne
+// s'improvise sur un terrain déjà bâti. On repasse donc par `loadRealTerrain`,
+// exactement comme un changement de zoom.
+//
+// ⚠️ ET LA DÉCOUPE LOCALE NE S'ÉTEINT PAS. `localClippingEnabled` fait
+// recompiler tous les shaders quand il change ; l'allumer sur un mode ordinaire
+// ne coûte rien (aucun matériau n'y porte de `clippingPlanes`, three.js ne
+// génère alors aucun code de coupe), alors que l'éteindre puis le rallumer
+// paierait deux recompilations complètes pour un aller-retour d'interrupteur.
+// On l'allume donc pour de bon à la première activation, et on ne le reprend
+// jamais.
+function f3Applique(prefere) {
+  try {
+    localStorage.setItem(F3_PREF_KEY, prefere ? '1' : '0')
+  } catch { /* navigation privée : le réglage ne survivra pas à l'onglet, tant pis */ }
+  // ⚠️ L'ADRESSE EST OUBLIÉE ICI, ET C'EST TOUT LE CORRECTIF. Tant que
+  // `_f3Force` vaut autre chose que `null`, `continuActif` lui obéit et la
+  // préférence qu'on vient d'écrire ne changerait rien — l'interrupteur
+  // cliquerait dans le vide. On la lâche au premier geste : le paramètre
+  // décrivait un DÉPART, le visiteur vient de dire où il veut aller.
+  _f3Force = null
+  const avant = _f3Etat
+  _f3Etat = continuActif(f3Args())
+  if (_f3Etat === avant) return false
+  if (_f3Etat) renderer.localClippingEnabled = true
+  // ⚠️ `enablePan` N'EST PLUS JAMAIS ÉTEINT — ET C'EST LA CORRECTION.
+  // L'ancien code le coupait pour reprendre le clic droit à OrbitControls, et
+  // devait ensuite le rallumer ici à la main. Mais `enablePan` est un
+  // interrupteur GLOBAL : couper le clic droit coupait du même coup le bouton
+  // du milieu et le repli Maj+gauche, c'est-à-dire TOUT le déplacement de
+  // caméra. C'est la perte qu'Adrien a signalée. Le clic droit se reprend
+  // maintenant bouton par bouton (appliqueBoutonsSouris), il n'y a donc plus
+  // rien à rallumer : le déplacement n'a jamais été éteint.
+  // On force tout de même une passe immédiate — le remappage est fait par
+  // image, mais l'utilisateur vient de cliquer et ne doit pas attendre.
+  appliqueBoutonsSouris()
+  // Le geste en cours n'a plus de sens sur un terrain qui va disparaître.
+  _f3Glisse = false
+  _f3V.x = _f3V.z = 0
+  _f3Ech.length = 0
+  _f3Brut.x = _f3Brut.z = 0
+  terrain.fenetre.x = 0
+  terrain.fenetre.z = 0
+  if (params.source === 'real') loadRealTerrain()
+  // La bascule vient de changer quelque chose que rien à l'écran n'explique :
+  // le clic droit ne fait plus la même chose, et aucun libellé ne le dit. La
+  // bulle se pose ici (ui/aides.js décide si elle a déjà été acquittée), et
+  // s'efface d'elle-même quand on éteint — une consigne pour un mode éteint
+  // serait une consigne fausse.
+  evalueAide('fenetre-3x3', _f3Etat)
+  return true
+}
+
+// Le décalage BRUT, celui qui mémorise le geste au-delà de la butée. L'affiché
+// vit dans `terrain.fenetre` ; ces deux-là ne sont égaux que dans la course.
+// ⚠️ Le brut est gardé à part exprès : c'est lui que lirait un futur
+// recentrage de l'emprise pour savoir de combien on a voulu aller plus loin.
+// La porte du rechargement reste ouverte, comme Adrien l'a demandé.
+const _f3Brut = { x: 0, z: 0 }
+let _f3Glisse = false // un bouton droit est-il enfoncé ?
+let _f3Sale = true // la géométrie doit-elle être réécrite à la prochaine image ?
+let _f3X = 0
+let _f3Y = 0
+
+// L'ÉLAN. `_f3V` est la vitesse restante en unités monde par seconde ; elle ne
+// vit qu'entre le lâcher et l'extinction. `_f3Ech` est la trace des dernières
+// positions AFFICHÉES, celle que `vitesseAuLache` lit au relâchement.
+//
+// ⚠️ ON ÉCHANTILLONNE L'AFFICHÉ, PAS LE BRUT. Au bord, le brut continue de filer
+// avec le geste alors que l'image ne bouge plus (l'hyperbole la comprime) :
+// mesurer le brut donnerait un lancer énorme là où l'œil vient de voir le
+// terrain s'arrêter. Voir l'en-tête de fenetre-elan.js.
+const _f3V = { x: 0, z: 0 }
+const _f3Ech = []
+
+// L'état de la finesse du maillage (fenetre-finesse.js). `?f3trace=1` fait dire
+// à chaque bascule ce qu'elle a coûté — c'est la mesure d'Adrien, pas un débogage
+// oublié : sans elle on ne saurait pas si le raffinement tient dans une image.
+let _f3Fin = finesseInitiale()
+const F3_TRACE = new URLSearchParams(location.search).get('f3trace') === '1'
+// Trois images de trace suffisent à `vitesseAuLache` (fenêtre de 60 ms) ; on en
+// garde huit pour couvrir un écran à 120 Hz sans jamais allouer.
+const F3_ECH_MAX = 8
+
+function f3Echantillonne(tMs) {
+  _f3Ech.push({ t: tMs / 1000, x: terrain.fenetre.x, z: terrain.fenetre.z })
+  if (_f3Ech.length > F3_ECH_MAX) _f3Ech.shift()
+}
+
+// Unités monde par pixel d'écran. Le socle fait TERRAIN_SIZE unités ; on veut
+// qu'un glissement d'un bord à l'autre de la fenêtre déplace le terrain d'un
+// socle. `innerHeight` plutôt que `innerWidth` : la vue est en trois quarts, la
+// dimension verticale est celle qui cadre le bloc.
+const f3ParPixel = () => TERRAIN_SIZE / Math.max(1, window.innerHeight)
+
+// ══════════ QUI TIENT QUEL BOUTON — ET CE QU'ADRIEN AVAIT PERDU ═════════════
+//
+// « L'ancien déplacement par clic droit n'existe plus, je ne peux plus me
+// déplacer de cette façon. » (Adrien, après essai du mode continu.)
+//
+// La cause n'était pas le partage du clic droit, c'était la MÉTHODE. Ce tick
+// éteignait `controls.enablePan` à chaque image pour empêcher OrbitControls de
+// voler le geste — mais `enablePan` est un interrupteur GLOBAL : il gouverne le
+// clic droit, ET le bouton du milieu, ET le repli Maj+gauche. En le coupant, on
+// ne retirait pas un bouton au déplacement, on retirait le déplacement.
+//
+// On ne coupe donc plus une capacité, on rend un seul BOUTON inerte (-1, la
+// valeur qu'OrbitControls emploie lui-même pour « aucune action »). Le reste
+// survit — voir boutons-camera.js pour les deux liaisons constantes et pour la
+// preuve que le bouton du milieu était libre (enableZoom faux partout).
+//
+// Appliqué PAR IMAGE, comme l'ancien `enablePan` : `modes` retraverse ses
+// réglages à chaque entrée en surface, et une bascule de mode ne notifie
+// personne. L'assignation est gardée — trois comparaisons d'entiers.
+let _boutonsDroit = null
+function appliqueBoutonsSouris() {
+  const m = versTroisJs(
+    boutonsSouris({ continu: fenetreContinueActive(), surface: modes?.mode === 'surface' }),
+    THREE.MOUSE
+  )
+  if (m.RIGHT === _boutonsDroit) return
+  _boutonsDroit = m.RIGHT
+  controls.mouseButtons = m
+}
+appliqueBoutonsSouris()
+
+renderer.domElement.addEventListener('contextmenu', (e) => {
+  if (fenetreContinueActive() && modes?.mode === 'surface') e.preventDefault()
+})
+
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.button !== 2 || !fenetreContinueActive()) return
+  if (!modes || modes.mode !== 'surface' || modes.busy || modes.travel) return
+  _f3Glisse = true
+  _f3X = e.clientX
+  _f3Y = e.clientY
+  // ⚠️ REPRENDRE LE TERRAIN ÉTEINT L'ÉLAN SUR-LE-CHAMP. Rattraper un terrain qui
+  // glisse encore est le geste réflexe ; s'il continuait ne serait-ce qu'une
+  // image sous le doigt, tout le geste suivant partirait décalé d'autant.
+  _f3V.x = 0
+  _f3V.z = 0
+  // Et le brut se recale : l'élan a pu le laisser hors course, or le geste doit
+  // repartir de ce que l'œil VOIT, pas d'une position mémorisée invisible.
+  _f3Brut.x = terrain.fenetre.x
+  _f3Brut.z = terrain.fenetre.z
+  _f3Ech.length = 0
+  f3Echantillonne(e.timeStamp)
+  renderer.domElement.setPointerCapture?.(e.pointerId)
+})
+
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!_f3Glisse) return
+  const k = f3ParPixel()
+  // ⚠️ LE SIGNE. On déplace le CONTENU, pas la caméra : tirer vers la droite
+  // doit amener le terrain de GAUCHE, donc la fenêtre de lecture va vers la
+  // gauche. Un signe inversé ici donne un geste qui « colle » à l'envers — le
+  // défaut le plus immédiatement détestable d'une carte.
+  //
+  // ⚠️ ET LES AXES SONT CEUX DE LA CAMÉRA, PAS DU MONDE. La vue est orbitale :
+  // à 180° d'azimut, un geste vers la droite devrait toujours amener le terrain
+  // de gauche À L'ÉCRAN. On projette donc le geste sur les axes horizontaux de
+  // la caméra.
+  const dxPx = (e.clientX - _f3X) * k
+  const dyPx = (e.clientY - _f3Y) * k
+  _f3X = e.clientX
+  _f3Y = e.clientY
+  // droite de la caméra, aplatie au plan du sol et renormalisée
+  const cx = camera.matrixWorld.elements[0]
+  const cz = camera.matrixWorld.elements[2]
+  const n = Math.hypot(cx, cz) || 1
+  const rx = cx / n
+  const rz = cz / n
+  // « avant » au sol = la droite tournée d'un quart de tour
+  const geste = { x: -(dxPx * rx - dyPx * rz), z: -(dxPx * rz + dyPx * rx) }
+  const r = avanceFenetre(_f3Brut, geste, COURSE_ELASTIQUE)
+  _f3Brut.x = r.brutX
+  _f3Brut.z = r.brutZ
+  terrain.fenetre.x = r.x
+  terrain.fenetre.z = r.z
+  _f3Sale = true
+  f3Echantillonne(e.timeStamp)
+})
+
+// `lance` distingue le relâchement volontaire de l'annulation. Un
+// `pointercancel` (geste capté par le système, fenêtre perdue) n'a pas de fin de
+// geste à lire : lancer le terrain sur une trace tronquée le ferait partir tout
+// seul sans que personne n'ait rien demandé.
+const f3Lache = (e, lance) => {
+  if (!_f3Glisse) return
+  _f3Glisse = false
+  const v = lance ? vitesseAuLache(_f3Ech, e.timeStamp / 1000) : { x: 0, z: 0 }
+  _f3V.x = v.x
+  _f3V.z = v.z
+  _f3Ech.length = 0
+  // Le brut se recale sur l'affiché : sans ça, on aurait poussé 400 unités au
+  // bord, et le geste suivant devrait d'abord « rembobiner » ces 400 unités
+  // avant que le terrain ne bouge — il paraîtrait bloqué. C'est aussi le point
+  // de départ que l'élan doit intégrer : il continue ce que l'œil a vu.
+  _f3Brut.x = terrain.fenetre.x
+  _f3Brut.z = terrain.fenetre.z
+}
+renderer.domElement.addEventListener('pointerup', (e) => f3Lache(e, true))
+renderer.domElement.addEventListener('pointercancel', (e) => f3Lache(e, false))
+
+// Le pas par image : le rappel élastique, puis la réécriture du relief.
+// Appelé depuis `tick`, après `updateCameraMotion`.
+function f3Tick(dt) {
+  if (!fenetreContinueActive() || !(dem?.empriseCote > 1)) return
+  if (!_f3Glisse) {
+    // ⚠️ L'ÉLAN ET LE RAPPEL NE TOURNENT JAMAIS ENSEMBLE — d'où le `else`. Les
+    // faire cohabiter les mettrait en tir à la corde au bord : l'un pousse
+    // dehors, l'autre tire dedans, et la fenêtre vibrerait entre les deux. La
+    // passation est nette : l'absorption tue l'élan en ~0,15 s, le rappel prend
+    // la main à l'image d'après, depuis la position exacte où l'élan l'a laissée.
+    if (_f3V.x !== 0 || _f3V.z !== 0) {
+      const r = pasElan({ x: _f3Brut.x, z: _f3Brut.z, vx: _f3V.x, vz: _f3V.z }, dt, COURSE_ELASTIQUE)
+      _f3Brut.x = r.brutX
+      _f3Brut.z = r.brutZ
+      _f3V.x = r.vx
+      _f3V.z = r.vz
+      if (r.x !== terrain.fenetre.x || r.z !== terrain.fenetre.z) {
+        terrain.fenetre.x = r.x
+        terrain.fenetre.z = r.z
+        _f3Sale = true
+      }
+      // L'élan éteint, le brut redevient l'affiché. Sans ce recalage, un lancer
+      // absorbé aurait laissé le brut à des centaines d'unités hors course, et
+      // `rappelElastique` — qui lit l'affiché — travaillerait sur une position
+      // que plus personne ne met à jour.
+      if (!r.actif) {
+        _f3Brut.x = r.x
+        _f3Brut.z = r.z
+      }
+    } else {
+      const ax = rappelElastique(terrain.fenetre.x, COURSE_ELASTIQUE, dt)
+      const az = rappelElastique(terrain.fenetre.z, COURSE_ELASTIQUE, dt)
+      if (ax !== terrain.fenetre.x || az !== terrain.fenetre.z) {
+        terrain.fenetre.x = ax
+        terrain.fenetre.z = az
+        _f3Brut.x = ax
+        _f3Brut.z = az
+        _f3Sale = true
+      }
+    }
+  }
+  // ══════════ LA FINESSE : 384 EN MOUVEMENT, 768 UNE FOIS POSÉ ═════════════
+  //
+  // ⚠️ LA DÉCISION SE PREND SUR L'AFFICHÉ, PAS SUR `_f3V`. `pasElan` annule la
+  // vitesse sous V_ARRET et c'est `rappelElastique` qui finit le travail — or
+  // celui-ci n'a AUCUNE variable de vitesse, il écrit la position. Passer
+  // `_f3V` ici raffinerait en plein glissement. `pasFinesse` fait donc la
+  // dérivée de `terrain.fenetre` lui-même, et couvre du même coup les trois
+  // régimes (geste, élan, rappel). Voir l'en-tête de fenetre-finesse.js.
+  //
+  // ⚠️ ET C'EST PLACÉ APRÈS le déplacement de cette image, pas avant : décider
+  // sur la position de l'image PRÉCÉDENTE ferait tomber la première image d'un
+  // geste au grossier une image trop tard — celle-là même qu'on essaie de
+  // sauver.
+  _f3Fin = pasFinesse(_f3Fin, { glisse: _f3Glisse, x: terrain.fenetre.x, z: terrain.fenetre.z, dt })
+  let refait = false
+  if (_f3Fin.change) {
+    terrain.resFenetre = resDeFinesse(_f3Fin.fin, params.resolution, RES_FENETRE_CONTINUE)
+    const ms = terrain.majResFenetre(params)
+    refait = true
+    if (F3_TRACE) console.info(`[f3] maillage → res ${terrain.resFenetre} en ${ms.toFixed(1)} ms`)
+  }
+  // ⚠️ ON N'ÉCRIT PAS LE RELIEF DEUX FOIS DANS LA MÊME IMAGE. `majResFenetre`
+  // vient de faire, sur la géométrie neuve, EXACTEMENT le travail de
+  // `tickFenetre` (même `_ecrireRelief`, même `_pousseFenetre`, même `sample`).
+  // Enchaîner les deux ajoutait 43 ms à res 768 et 15 ms à res 384 — et les
+  // 15 ms tombaient sur l'image du PREMIER PAS du geste, celle qu'on descend en
+  // résolution précisément pour la sauver. Le socle et les calques, eux, doivent
+  // suivre dans les deux cas : ils repartent du `terrain.sample` tout neuf.
+  // ══════════ LA LÉGENDE SE MET D'ACCORD AVEC LE RELIEF, APRÈS LUI ═══════════
+  //
+  // ⚠️ AVANT LA SORTIE ANTICIPÉE, et c'est tout l'inverse d'un détail : le
+  // rafraîchissement se déclenche AU REPOS, or au repos `_f3Sale` est faux et
+  // la fonction sort deux lignes plus bas. Placé après, il ne serait évalué
+  // qu'aux images où le terrain bouge — c'est-à-dire jamais quand il le faut.
+  //
+  // La règle (ground-info.js) impose le repos pour deux raisons, et la première
+  // suffirait : le cartouche interroge Nominatim et Wikipédia, on ne les
+  // appelle pas pendant un geste. La seconde est de lisibilité — on voit le
+  // relief se poser, PUIS la légende le rattraper ; l'ordre inverse ferait
+  // clignoter un texte sous un terrain qui glisse.
+  //
+  // ⚠️ ET LE COMPARATEUR EST `lastFenetre`, PAS la position de chargement de la
+  // zone. Le seuil est un quart de socle CUMULÉ depuis le dernier cartouche
+  // posé, sans quoi trois glissements d'un cinquième de socle chacun — 12 km à
+  // z12 — ne déclencheraient jamais rien.
+  if (
+    params.groundInfo &&
+    doitRafraichirCartouche({
+      derniere: groundInfo.lastFenetre,
+      courante: terrain.fenetre,
+      repos: _f3Fin.fin,
+      tailleSocle: TERRAIN_SIZE,
+    })
+  ) {
+    chargeCartouche()
+  }
+  if (!_f3Sale && !refait) return
+  _f3Sale = false
+  if (!refait) terrain.tickFenetre(params)
+  // Le socle SUIT — il ne lit que `terrain.sample`, qui porte déjà le décalage.
+  // Mesuré à 2,2 ms par image, assez peu pour le refaire à chaque pas, assez
+  // pour ne le refaire QUE quand la fenêtre a bougé.
+  plinth.rebuild(terrain, params, socleEmprise())
+  f3CalquesSuivent()
+}
+
+// ══════════ LES CALQUES ANCRÉS AU SOL SUIVENT LE TERRAIN ═══════════════════
+//
+// Adrien, après le jalon 1 : « il n'y a que le relief qui bouge, et tout le
+// reste reste fixe ». Un nom de ville qui reste planté au milieu de l'écran
+// pendant que sa vallée s'en va, c'est la carte qui ment.
+//
+// LA RÈGLE TIENT EN UNE LIGNE, et c'est ce qui la rend sûre : ces calques ont
+// leur géométrie cuite en coordonnées de CHAMP (celles que rend
+// `geo.latLonToWorld`), et la fenêtre est le décalage entre le champ et la
+// géométrie. Translater le groupe de −fenêtre les remet donc EXACTEMENT sur
+// leur point du sol. Aucune géométrie n'est refaite, aucun objet réalloué :
+// deux écritures de `position` par image.
+//
+// ⚠️ ET SEULEMENT LES CALQUES DU SOL. Ce qui appartient à la FENÊTRE — le
+// socle, les étiquettes de décor du socle, le HUD, le ciel — ne doit surtout
+// pas bouger : ce sont les meubles, pas le paysage.
+//
+// ⚠️ LES NOMS HORS FENÊTRE SONT MASQUÉS PAR `_declutter`, pas ici. Les lieux
+// sont choisis sur toute l'emprise, soit neuf fois la surface visible ; sans ce
+// rejet, huit neuvièmes d'entre eux flotteraient au-delà du bord du socle,
+// au-dessus du vide.
+function f3CalquesSuivent() {
+  const f = terrain.fenetre
+  if (!f) return
+  for (const c of [mapLayers?.places, mapLayers?.water]) {
+    if (c?.group) c.group.position.set(-f.x, 0, -f.z)
+  }
+  mapLayers?.places?.refresh?.()
+  // Les traces GPX : chacune porte sa propre translation (elles ont leur groupe)
+  // et masque ses étiquettes hors socle. La LIGNE, elle, est écrêtée par les
+  // plans de coupe posés à sa construction — le GPU la coupe au bord, pour rien.
+  for (const l of gpxLayer?.layers ?? []) l.gpx?.setFenetre?.(f.x, f.z)
+  // ══════════ CE QUI VOLE SUIT AUSSI, MAIS N'EST PAS ÉCRÊTÉ ═════════════════
+  //
+  // Adrien : « aucun problème si la montgolfière ou l'avion est en dehors du
+  // socle, c'est le comportement attendu. » Leur groupe porte −fenêtre pour
+  // qu'ils DÉRIVENT avec le paysage ; rien ne les enferme.
+  traffic?.setFenetre?.(f.x, f.z)
+  // ⚠️ LA FLOTTE, ELLE, NE TRANSLATE PAS SON GROUPE. La houle est lue dans le
+  // shader du bateau à `instanceMatrix[3].xz` : un groupe translaté lui aurait
+  // donné la vague d'un autre endroit que celle que la mer dessine sous lui.
+  // C'est l'écriture des matrices qui ramène le champ dans la géométrie.
+  boats?.setFenetre?.(f.x, f.z)
+  // Les nuages appartiennent au CIEL — c'est la fenêtre, ils ne bougent pas.
+  // Ce qui doit suivre, c'est le RELIEF qu'ils consultent pour savoir où ils
+  // sont occlus et où est leur plancher : une écriture d'uniforme.
+  clouds?.setFenetre?.(f.x, f.z)
+  // Les cotes d'altitude (labels.js) et les repères de points d'intérêt
+  // (hud3d.js) sont PLANTÉS DANS LE SOL : ils défilent, et ils se cachent hors
+  // du socle. Voir f3AncreAuSol pour la conversion de leurs coordonnées.
+  f3SuitAuSol(labels, f)
+  f3SuitAuSol(hud3?.pois, f)
+  // ══════════ LA MER, SA JUPE ET LES LACS ═══════════════════════════════════
+  //
+  // La mer NE SE TRANSLATE PAS : le plan d'eau EST la fenêtre, il reste en
+  // place. Ce qui défile, c'est ce qu'il LIT sous lui — fond marin, distance au
+  // rivage, trait de côte. Deux flottants d'uniforme par matériau, rien de plus,
+  // parce que le champ a été cuit une fois pour toutes sur l'emprise entière
+  // (src/mer-emprise.js porte la mesure d'avant/après).
+  //
+  // ⚠️ Les LACS, eux, se translatent : ce sont des plans d'eau posés sur le
+  // terrain, pas des meubles du socle. `setFenetre` fait les deux à la fois.
+  realWater?.setFenetre(f.x, f.z)
+}
+
+// ══════════ POSER LA FENÊTRE D'AUTORITÉ — liens partagés, et rien d'autre ═══
+//
+// Un lien porte désormais la position DANS l'emprise (share-link.js, champ
+// `fen`). La poser n'est pas un geste : il n'y a ni élan à hériter, ni butée à
+// franchir — c'est un point de vue restauré, et il doit être là DÈS la première
+// image peinte, sinon le destinataire voit le terrain glisser tout seul en
+// arrivant, ce qui est exactement l'inverse de « rouvrir la même vue ».
+//
+// D'où l'écriture SYNCHRONE du relief plutôt qu'un `_f3Sale = true` : une image
+// de retard suffirait à montrer le centre du bloc avant de sauter.
+//
+// ⚠️ ET `_f3Fin` EST RECALÉ SUR LA NOUVELLE POSITION. `pasFinesse` fait la
+// dérivée de l'affiché : sans ce recalage il verrait un bond de 40 unités en
+// une image, jugerait « ça bouge », retomberait à res 384 et remonterait à 768
+// une demi-seconde plus tard — un aller-retour de maillage à 70 ms, visible, et
+// pour rien. On déplace le point de comparaison avec la fenêtre, sans toucher à
+// `fin` : aucune bascule n'a lieu de se déclencher.
+//
+// Silencieux hors mode continu : un lien fabriqué en 3×3 et ouvert sur une
+// machine qui le refuse doit donner la carte, pas une erreur.
+function f3PoseFenetre(fen) {
+  if (!fen || !fenetreContinueActive() || !(dem?.empriseCote > 1)) return false
+  f3EcritFenetre(fen)
+  terrain.tickFenetre(params)
+  plinth.rebuild(terrain, params, socleEmprise())
+  f3CalquesSuivent()
+  return true
+}
+
+// Les NOMBRES d'une pose, sans le relief — le tronc commun de `f3PoseFenetre`
+// (qui repeint dans la foulée) et du centrage de chargement (qui n'a rien à
+// repeindre : la reconstruction complète arrive juste derrière).
+function f3EcritFenetre(fen) {
+  terrain.fenetre.x = poseDansLaCourse(fen.x, COURSE_ELASTIQUE)
+  terrain.fenetre.z = poseDansLaCourse(fen.z, COURSE_ELASTIQUE)
+  _f3Brut.x = terrain.fenetre.x
+  _f3Brut.z = terrain.fenetre.z
+  _f3V.x = _f3V.z = 0
+  _f3Ech.length = 0
+  _f3Fin = { ..._f3Fin, x: terrain.fenetre.x, z: terrain.fenetre.z, repos: 0 }
+  _f3Sale = false
+}
+
+// ══════════ LE LIEU CHERCHÉ ARRIVE AU CENTRE ════════════════════════════════
+//
+// Adrien : « le point recherché doit se trouver au centre de la zone qui
+// s'affiche, aussi bien en vertical qu'en horizontal. Ce n'est pas le cas. »
+//
+// LA CAUSE est dans `loadDem` et elle est structurelle : le bloc se cale sur la
+// GRILLE DE TUILES (deux `Math.floor`, dem.js:238-241). Le lieu demandé tombe
+// donc quelque part DANS la tuile centrale, jamais en son centre. MESURÉ, en
+// unités monde sur un socle de 56 : mont St Helens z13 → 6,29 unités trop au
+// nord (11,2 % du socle) ; Chamonix z12 → 6,25 unités trop à l'est ; La Réunion
+// z13 → 7,28 unités. Le pire cas structurel est la demi-tuile, 9,33 unités,
+// soit un sixième du socle dans chaque axe.
+//
+// LA SOLUTION EXISTAIT DÉJÀ, ET C'EST LA RAISON D'ÊTRE DU MODE CONTINU :
+// l'emprise reste calée sur la grille, mais la fenêtre de LECTURE glisse
+// dedans. On la pose donc au décalage qui centre le lieu, au lieu de la laisser
+// à (0, 0). Aucun chargement de plus, aucun octet de plus : la donnée est déjà
+// là, on la regarde simplement au bon endroit.
+//
+// ⚠️ ÉCRIT AVANT `regenerateTerrain`, ET C'EST LE POINT D'OPTIMISATION. Posé
+// après, il faudrait réécrire le relief une seconde fois (`tickFenetre`, 15 à
+// 70 ms selon la finesse) pour un résultat identique. Écrit avant, la
+// reconstruction cuit d'emblée le bon relief : le centrage est GRATUIT. Seuls
+// les groupes des calques du sol restent à translater, ce que fait
+// `f3CalquesSuivent()` juste après la reconstruction.
+//
+// ⚠️ `latLonToWorld` ET PAS UN CALCUL À LA MAIN : c'est lui qui divise par
+// `demSpan(dem)`, soit 168 unités sur l'emprise et non 56. L'erreur inverse a
+// déjà été commise trois fois sur cette branche. Verrouillé par
+// test/fenetre-centrage.test.js, sur un aller-retour lat/lon → fenêtre → lat/lon.
+//
+// Silencieux et gratuit hors mode continu — le mode ordinaire ne change rien.
+function f3CentreSur(cible) {
+  if (!cible || !fenetreContinueActive() || !(dem?.empriseCote > 1)) return false
+  if (!Number.isFinite(cible.lat) || !Number.isFinite(cible.lon)) return false
+  f3EcritFenetre(fenetreQuiCentre(latLonToWorld(dem, cible.lat, cible.lon), COURSE_ELASTIQUE))
+  return true
+}
+
+// ══════════ LE CARTOUCHE PARLE DE CE QU'ON REGARDE, PAS DE CE QU'ON A CHARGÉ ═
+//
+// Trouvé à l'audit du jalon 3 : `ground-info` reste dans le socle — c'est du
+// mobilier, il ne doit pas défiler, et il ne défile pas. Mais son CONTENU ment
+// après un long défilement : nom du lieu, coordonnées et plage d'altitude sont
+// ceux du CHARGEMENT. À z12, un socle de course fait 21 km : on peut afficher
+// « CHAMONIX » au-dessus d'Annecy.
+//
+// La correction est de le charger depuis la position dans l'emprise, et pas
+// depuis `params.demLat/demLon` qui désignent le centre du bloc. `fenetre`
+// EST la coordonnée monde du centre de la dalle visible dans l'emprise (la
+// géométrie ne bouge pas, c'est la lecture qui se décale), donc
+// `worldToLatLon(dem, fen.x, fen.z)` la convertit sans autre calcul.
+function chargeCartouche() {
+  if (!dem) return
+  const fen = fenetreContinueActive() && dem.empriseCote > 1 ? terrain.fenetre : null
+  const p = fen ? worldToLatLon(dem, fen.x, fen.z) : { lat: params.demLat, lon: params.demLon }
+  groundInfo.load(p.lat, p.lon, dem, fen)
+}
+
+// Le lat/lon SOUS LA VISÉE DE LA CAMÉRA, décalage de fenêtre compris.
+//
+// `controls.target` est une coordonnée de GÉOMÉTRIE ; le champ se lit à
+// `géométrie + fenêtre`. Rendre l'un pour l'autre est l'erreur qui ramenait
+// l'escalier de zoom au centre du bloc après un défilement. Hors mode continu
+// la fenêtre est (0, 0) : la valeur rendue est celle d'avant, au bit près.
+function viseeAuSol() {
+  const fen = fenetreContinueActive() && dem?.empriseCote > 1 ? terrain.fenetre : null
+  const x = controls.target.x + (fen?.x ?? 0)
+  const z = controls.target.z + (fen?.z ?? 0)
+  return worldToLatLon(dem, x, z)
+}
+
+// ══════════ FIGER LE DÉFILEMENT AVANT UNE CAPTURE ═══════════════════════════
+//
+// Un fichier n'a pas de trame suivante pour se corriger. Trois choses doivent
+// donc être vraies AVANT qu'une image parte dans un PNG ou dans un MP4 :
+//
+//  1. PLUS D'ÉLAN. Une capture 4K prise pendant un lancer sort d'un terrain qui
+//     glisse — et si l'export est hors ligne (usine à vidéos), l'élan gèle à sa
+//     valeur de la première image et le clip entier hérite d'un décalage que
+//     personne n'a choisi.
+//  2. PLUS DE DÉBORDEMENT. La butée élastique montre jusqu'à 7 unités de bord
+//     où `sampleDem` clampe : une bande de relief étiré qui vit 0,3 s à
+//     l'écran, et POUR TOUJOURS dans le fichier. `poseDansLaCourse` est le
+//     point fixe du rappel — la fenêtre atterrit où l'élastique l'aurait mise,
+//     pas ailleurs, donc la reprise après export ne bouge rien (verrouillé par
+//     test/fenetre-course.test.js, sur la dérivée et pas sur la position).
+//  3. LE MAILLAGE FIN. Sortir un 4K du maillage de drag (res 384) serait rendre
+//     à la moitié de la finesse le tirage qu'on a demandé en pleine taille.
+//
+// ⚠️ L'USINE À VIDÉOS, ELLE, EST DÉJÀ FIGÉE PAR CONSTRUCTION : elle tue la
+// boucle rAF et fournit son propre `step`, or `f3Tick` n'est appelé QUE depuis
+// `tick()`. Ni l'élan ni la butée ne peuvent s'y inviter — ce qu'il lui manquait
+// n'était pas un gel, c'était de partir d'un état posé. D'où l'exposition sur
+// `window.__exp.figeFenetre` : le pilote de tournage l'appelle avant de couper
+// la boucle, et il n'a rien d'autre à savoir.
+//
+// Silencieux et gratuit hors mode continu.
+function f3Fige() {
+  if (!fenetreContinueActive() || !(dem?.empriseCote > 1)) return false
+  _f3Glisse = false
+  _f3V.x = _f3V.z = 0
+  _f3Ech.length = 0
+  const x = poseDansLaCourse(terrain.fenetre.x, COURSE_ELASTIQUE)
+  const z = poseDansLaCourse(terrain.fenetre.z, COURSE_ELASTIQUE)
+  const bouge = x !== terrain.fenetre.x || z !== terrain.fenetre.z
+  terrain.fenetre.x = x
+  terrain.fenetre.z = z
+  _f3Brut.x = x
+  _f3Brut.z = z
+  // Le maillage du REPOS, tout de suite — sans attendre les 0,4 s de
+  // `pasFinesse` : l'export part maintenant, pas dans une demi-seconde.
+  const resVoulue = resDeFinesse(true, params.resolution, RES_FENETRE_CONTINUE)
+  const changeRes = terrain.resFenetre !== resVoulue
+  terrain.resFenetre = resVoulue
+  // Et `_f3Fin` est mis d'accord avec ce qu'on vient de faire, sinon la boucle
+  // reprendrait en croyant devoir rebasculer.
+  _f3Fin = { ..._f3Fin, fin: true, repos: REPOS_S, x, z, amorce: true }
+  _f3Sale = false
+  if (changeRes) terrain.majResFenetre(params)
+  else if (bouge) terrain.tickFenetre(params)
+  else return true
+  plinth.rebuild(terrain, params, socleEmprise())
+  f3CalquesSuivent()
+  return true
+}
+
+// ══════════ LES DEUX CALQUES QU'ON CONSTRUIT EN COORDONNÉES D'ÉCRAN ════════
+//
+// `labels.js` (les cotes d'altitude) et `hud3d.js` (les repères de points
+// d'intérêt) ne connaissent ni le MNT ni la géographie : ils tirent des points
+// AU HASARD autour de l'origine et demandent leur altitude à `terrain.sample`.
+// Leurs positions sont donc en coordonnées de GÉOMÉTRIE, pas de champ.
+//
+// Deux défauts en découlent en mode continu, et le second est le pire :
+//  · le repère reste collé à l'écran pendant que sa crête s'en va ;
+//  · sa COTE devient fausse — « 2 750 m » posé sur une vallée à 900.
+//
+// La conversion tient en une addition : on ajoute le décalage COURANT à chaque
+// enfant (leur position devient une coordonnée de champ) et le groupe portera
+// −fenêtre. À l'instant de la conversion, rien ne bouge à l'écran ; à partir de
+// là, ils sont accrochés à leur point du sol pour de bon.
+//
+// ⚠️ Appelé APRÈS chaque (re)construction de ces groupes, jamais deux fois sur
+// le même — une double addition les enverrait à deux fenêtres de là.
+function f3AncreAuSol(group) {
+  if (!group || !(dem?.empriseCote > 1)) return
+  const f = terrain.fenetre
+  for (const o of group.children) {
+    o.position.x += f.x
+    o.position.z += f.z
+  }
+  f3SuitAuSol(group, f)
+}
+
+// Le pas de fenêtre : une écriture de position, et un test d'octogone par
+// enfant. Ils sont semés dans un rayon de 24 unités autour du point de
+// construction ; passé un demi-socle de défilement, la moitié d'entre eux
+// flotterait au-delà du bord, au-dessus du vide.
+function f3SuitAuSol(group, f) {
+  if (!group || !(dem?.empriseCote > 1)) return
+  group.position.set(-f.x, 0, -f.z)
+  const bloc = terrain.blockFootprint()
+  for (const o of group.children) {
+    o.visible = dansFenetre(o.position.x - f.x, o.position.z - f.z, bloc.half, bloc.corner)
+  }
+}
+
+// ══════════ LE POINT BAS DU SOCLE, SUR L'EMPRISE ENTIÈRE ═══════════════════
+//
+// Décision d'Adrien : « `baseY` se cale sur le point bas de l'emprise 3×3
+// entière, pas de la vue. C'est le prix de la stabilité — un socle qui garde
+// son épaisseur pendant qu'on défile. »
+//
+// ⚠️ SANS ÇA, LE SOCLE RESPIRE. `computeSlab` cherche le point bas en balayant
+// ce que `terrain.sample` lui rend — c'est-à-dire la FENÊTRE COURANTE. On
+// glisse vers une vallée, le point bas descend, le socle s'épaissit ; on
+// remonte, il maigrit. Un socle qui pulse pendant qu'on défile, c'est exactement
+// « une dégradation qui se voit comme une panne ».
+//
+// La valeur ne dépend d'aucun décalage : c'est `dem.minM`, l'extremum de
+// l'emprise que `recollerEmprise` a déjà calculé, converti en unités monde par
+// la même échelle que le relief. Rendu `null` hors mode continu, ce qui rend à
+// `plinth.rebuild` son comportement d'origine au caractère près.
+function socleEmprise() {
+  if (!(dem?.empriseCote > 1)) return null
+  const scale = (TERRAIN_SIZE * dem.empriseCote / dem.extentMeters) * params.demExaggeration
+  return (dem.minM - dem.meanM) * scale - (params.plinthDepth ?? 7)
+}
+
 // ------------------------------------------------------------------ regeneration helpers
 
 // ------------------------------------------------------------------ real-world DEM loading
@@ -1929,7 +2649,13 @@ function syncDetailToZoom() {
 
 // fetch tiles + rebuild; throws on failure so programmatic callers (orbital
 // dive) can hold orbit — loadRealTerrain wraps it with the GUI's error UX
-async function fetchAndBuildDem() {
+//
+// `centreSur` : le lieu qu'on est allé chercher, à poser AU CENTRE du socle en
+// mode continu (voir `f3CentreSur`). Absent, la fenêtre est laissée telle
+// quelle — et c'est voulu : un simple rechargement de zone (changement
+// d'exagération, retour de palette) ne doit pas ramener le visiteur au centre
+// du bloc alors qu'il a défilé pour aller ailleurs.
+async function fetchAndBuildDem({ centreSur = null } = {}) {
   syncExagToZoom() // this zoom's saved (or default) vertical exaggeration
   syncDetailToZoom() // fine-detail off at continental scale (z<=6)
   loadingStatus.textContent = 'fetching elevation tiles…'
@@ -1938,10 +2664,51 @@ async function fetchAndBuildDem() {
   // le seul à mémoriser — voir dem-memo.js pour la facture et pour la raison
   // d'en tenir le damier à l'écart.
   dem = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, memo: true })
+  // ══════════ MODE CONTINU : ON ÉLARGIT À L'EMPRISE 3×3 ═════════════════════
+  // Le bloc central vient d'arriver ; on lui adjoint ses huit voisins et on
+  // recolle le tout en UN champ. `terrain` ne voit ensuite qu'un `dem` de forme
+  // ordinaire, trois fois plus grand — il n'a pas à savoir d'où il vient.
+  //
+  // ⚠️ NEUF APPELS À `tilesAcross: 3`, PAS UN À `tilesAcross: 9`. Le second
+  // peindrait un canevas 4608², en lirait l'ImageData et la décoderait : un pic
+  // transitoire de ~255 Mo qui tuerait l'iMac 2015 (étude §3.3).
+  //
+  // ⚠️ MAIS PAS LES NEUF EN MÊME TEMPS — `enVolBorne`, PAS `Promise.all`. Neuf
+  // petits appels ne coûtent « le même total sans le pic » QUE s'ils ne sont pas
+  // tous en vol à la fois : chacun tient au passage son ImageData (9,4 Mo), son
+  // Float32Array (9,4 Mo) et son champ fusionné pour ne rendre que 4,7 Mo
+  // d'Int16. Lancés d'un seul `Promise.all`, ils portaient le tas de 160 à
+  // 386 Mo pendant le chargement — le pic écarté par la porte rentrait par la
+  // fenêtre. Mesure et chiffres : dem-emprise.js, EMPRISE_EN_VOL_MAX.
+  //
+  // ⚠️ `memo: false` sur les voisins : le mémo est fait pour le bloc central,
+  // le seul qui revienne sur un aller-retour de zoom. Y verser huit champs de
+  // 4,7 Mo chasserait précisément ce qu'il sert à garder (dem-memo.js).
+  if (fenetreContinueActive()) {
+    try {
+      const t0 = performance.now()
+      loadingStatus.textContent = 'fetching the 3×3 window…'
+      const origines = originesEmprise(dem, dem.size / dem.tilePx)
+      const blocs = await enVolBorne(origines, EMPRISE_EN_VOL_MAX, (o, k) =>
+        // le rang 4 est le centre : il est déjà là, on ne le retélécharge pas
+        k === 4 ? dem : loadDem({ zoom: params.demZoom, originTile: o, memo: false })
+      )
+      dem = recollerEmprise(blocs)
+      console.info(`[f3] emprise 3×3 recollée : ${dem.size}² en ${Math.round(performance.now() - t0)} ms`)
+    } catch (err) {
+      // Une emprise incomplète se lirait comme une plaine au milieu des Alpes.
+      // On retombe sur le bloc unique : le mode continu ne s'active pas, et
+      // l'application reste EXACTEMENT celle d'aujourd'hui.
+      console.warn('[f3] emprise 3×3 abandonnée, retour au bloc unique :', err?.message || err)
+    }
+  }
   // le sondage de couverture vient d'aboutir pour cette zone : si elle est
   // servie plus finement que le défaut, la plongée au clic doit pouvoir y aller
   liftFineZoomToRegion()
   terrain.setDem(dem)
+  // LE LIEU CHERCHÉ SE POSE ICI, avant la reconstruction : elle cuira d'emblée
+  // le bon relief, sans une seconde écriture (voir `f3CentreSur`).
+  const aCentre = f3CentreSur(centreSur)
   // LE TRAIT DE CÔTE DE LA ZONE PRÉCÉDENTE EST LÂCHÉ ICI, AVANT la
   // reconstruction — il l'était après, et ça coûtait un travail de travailleur
   // entier par zoom. Il ne décrit plus le bon endroit : le garder faisait
@@ -1964,15 +2731,44 @@ async function fetchAndBuildDem() {
   loadingStatus.textContent = 'generating terrain…'
   applyTimeOfDay(params.timeOfDay ?? 10) // the sun is location-true — re-aim it for the new place
   await regenerateTerrain()
+  // Les calques du sol sont reconstruits en coordonnées de CHAMP ; leur groupe
+  // porte −fenêtre. La reconstruction ne le sait pas — elle rebâtit la
+  // géométrie, pas la translation. Sans cette ligne, un lieu centré affichait
+  // son relief au bon endroit et ses NOMS à l'ancien.
+  if (aCentre) f3CalquesSuivent()
   // pull the cartouche info for the new zone (async, non-blocking)
-  if (params.groundInfo) groundInfo.load(params.demLat, params.demLon, dem)
+  if (params.groundInfo) chargeCartouche()
   // real coastline (Natural Earth) at coarse zoom — async, non-blocking; the
   // shader falls back to the elevation isoline until it arrives / if it fails.
+  // ══════════ LE TRAIT DE CÔTE SUR L'EMPRISE — JALON 2 ══════════════════════
+  //
+  // Le jalon 1 s'en passait : `fetchCoastMask` cuit son masque sur le
+  // FOOTPRINT DU MNT qu'on lui donne, et à ce jalon on lui donnait un bloc,
+  // donc une côte au tiers de sa taille plaquée au mauvais endroit. Rien à
+  // réécrire pour le réparer — il suffit de lui donner le MNT RECOLLÉ :
+  // `patchLatLonBBox` et `projectPatchPx` se déduisent de `dem.size`, de
+  // `originTileX/Y` et de `tilePx`, tous justes sur l'emprise.
+  //
+  // ⚠️ LA TAILLE, ELLE, DOIT SUIVRE — c'est le seul vrai réglage de ce poste.
+  // Le masque d'un bloc fait 2 048 sur 56 unités (36,6 texels/unité). Le même
+  // 2 048 étalé sur les 168 unités de l'emprise n'en ferait plus que 12,2, et
+  // le socle occupe ~800 pixels d'écran pour ces 56 unités : un texel vaudrait
+  // alors 1,17 pixel d'écran, au-delà du pixel.
+  //
+  // ATLAS_COTE = 2 304 tient 13,7 texels/unité. Le raisonnement s'arrête là ;
+  // le CHOIX, lui, a été tranché par comparaison d'images côte à côte, et les
+  // chiffres sont au-dessus de la constante (dem-emprise.js) — avec la mesure
+  // du plancher de bruit du banc, sans laquelle ils ne voudraient rien dire.
+  const coteMasque = dem?.empriseCote > 1 ? ATLAS_COTE : undefined
   if (params.demZoom >= COAST_ZOOM_MIN && params.demZoom <= COAST_ZOOM_MAX) {
-    const key = `${params.demZoom}:${params.demLat.toFixed(3)},${params.demLon.toFixed(3)}`
+    // ⚠️ LA TAILLE ENTRE DANS LA CLÉ DU CACHE. Sans elle, un aller-retour entre
+    // le mode ordinaire et le mode continu sur la MÊME zone au MÊME zoom
+    // reposerait le masque de l'autre mode : le bon contenu, la mauvaise
+    // emprise — une côte au tiers de sa taille, et aucune erreur levée.
+    const key = `${params.demZoom}:${params.demLat.toFixed(3)},${params.demLon.toFixed(3)}:${coteMasque ?? 0}`
     let job = coastMaskCache.get(key)
     if (job) coastMaskCache.delete(key) // re-insert below to mark most-recently-used
-    else job = fetchCoastMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem })
+    else job = fetchCoastMask({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, dem, size: coteMasque })
     coastMaskCache.set(key, job)
     // LRU eviction: drop the oldest entries, disposing their masks (never the active one)
     while (coastMaskCache.size > COAST_CACHE_MAX) {
@@ -1993,16 +2789,22 @@ async function fetchAndBuildDem() {
       .then((res) => {
         if (!res) return
         // only apply if we're still on the same patch
-        const stillHere = `${params.demZoom}:${params.demLat.toFixed(3)},${params.demLon.toFixed(3)}` === key
+        // ⚠️ LA MÊME EXPRESSION QUE LA CLÉ, suffixe de taille compris — sinon un
+        // masque d'emprise arrivé après un retour au mode ordinaire (ou
+        // l'inverse) se croirait toujours d'actualité et se poserait.
+        const coteActuelle = dem?.empriseCote > 1 ? ATLAS_COTE : undefined
+        const stillHere =
+          `${params.demZoom}:${params.demLat.toFixed(3)},${params.demLon.toFixed(3)}:${coteActuelle ?? 0}` === key
         // the SEA reads the SAME OSM mask so its waves stop at the real shore,
         // not the elevation contour (flat polders below sea level are land)
         if (stillHere) {
-          // ImageData extraite UNE fois du canvas du masque, puis partagée par
-          // tous les consommateurs CPU (champ de simulation mer, garde-fou
-          // sea-mask du terrain, clip de zone) — pas de getImageData multiples
-          const img = res.maskCanvas
-            ? res.maskCanvas.getContext('2d').getImageData(0, 0, res.maskCanvas.width, res.maskCanvas.height)
-            : null
+          // Le champ R8 du masque, partagé par tous les consommateurs CPU
+          // (champ de simulation mer, garde-fou sea-mask du terrain, clip de
+          // zone) — ET par la DataTexture du GPU : c'est LE MÊME Uint8Array.
+          // ⚠️ Il remplace l'ImageData que ces lignes extrayaient du canevas :
+          // 16,78 Mo à 2048², pour quatre octets par texel dont un seul portait
+          // de l'information. Sa foulée est 1, pas 4 (voir coast-mask.js).
+          const img = res.maskField || null
           coastMaskImage = img
           terrain.setCoastMask(res.maskTexture, img)
           realWater?.setCoastMask(res.maskTexture, true, img)
@@ -2019,6 +2821,7 @@ async function fetchAndBuildDem() {
     coastMaskImage = null
   }
   traffic.setZone(dem) // SpaceX pad watcher (Starbase / LC-39A in view?)
+  traffic.setSpan(trafficSpan()) // en mode continu le damier est vide : l'emprise commande
   terrain.refreshMatTiling(params) // relief material tiling tracks the new zoom
   if (params.regionMode) applyRegionMode() // re-cut to the new zone's boundary
   // Adrien's saved look becomes the opening view — applied ONCE, after the very
@@ -2052,11 +2855,11 @@ async function fetchAndBuildDem() {
   syncBoats()
 }
 
-async function loadRealTerrain() {
+async function loadRealTerrain(opts = {}) {
   if (demBusy) return
   demBusy = true
   try {
-    await fetchAndBuildDem()
+    await fetchAndBuildDem(opts)
   } catch (err) {
     console.error('DEM load failed:', err)
     loadingStatus.textContent = 'elevation fetch failed — check connection'
@@ -2088,8 +2891,29 @@ function regenerateTerrain() {
   return new Promise((resolve) =>
     setTimeout(() => {
       terrain.rebuild(params)
+      // ══════════ LE GRAIN DES DEUX FINESSES, CUIT SOUS LE VOILE ═════════════
+      //
+      // ⚠️ MESURÉ, PAS DÉDUIT : sans ce préchauffage la première bascule de
+      // finesse gèle **1 516 ms** (vers 768) et la première reprise du doigt
+      // **373 ms** (vers 384) — La Réunion z12, chronométré autour de
+      // `majResFenetre` sur l'instance vivante. Le gel arrivait 0,4 s après que
+      // la carte se soit posée, sans que l'utilisateur ait rien touché : la
+      // définition même de « une dégradation qui se voit comme une panne ».
+      //
+      // `rebuild` juste au-dessus n'a cuit que le grain de la finesse COURANTE ;
+      // l'autre reste à découvert. On les demande donc toutes les deux ici,
+      // pendant que le voile de chargement est levé et que l'attente est
+      // annoncée. Quand rien n'a changé (la plupart des appels : un curseur
+      // d'exagération, une palette), c'est une recherche dans une Map.
+      //
+      // ⚠️ ET C'EST GRATUIT HORS MODE CONTINU : `prechauffeFinesse` sort à sa
+      // première ligne si l'emprise n'est pas 3×3.
+      if (fenetreContinueActive()) {
+        const msChauffe = terrain.prechauffeFinesse(params, resFinesses(params.resolution, RES_FENETRE_CONTINUE))
+        if (F3_TRACE && msChauffe > 1) console.info(`[f3] grain préchauffé en ${msChauffe.toFixed(0)} ms`)
+      }
       terrain.rebuildRoughness(params)
-      plinth.rebuild(terrain, params) // walls hug the new relief border (also re-welds the region skirt in region mode — see the plinth.rebuild wrapper)
+      plinth.rebuild(terrain, params, socleEmprise()) // walls hug the new relief border (also re-welds the region skirt in region mode — see the plinth.rebuild wrapper)
       terrain.refreshMatTiling(params) // re-tile the relief material to the new zoom scale
       realWater?.rebuild({ terrain, params }) // water simulation follows the new relief
       const _mlp = mapLayers.rebuild({ dem: terrain.dem, terrain, params }) // water/places re-drape on the new relief
@@ -2211,7 +3035,12 @@ modes = new Modes({
         params.demLon = lon
         if (zoom) params.demZoom = zoom
         params.demLocation = 'Custom'
-        await fetchAndBuildDem()
+        // ⚠️ `centreSur` : c'est LE point d'entrée de « on va quelque part ».
+        // Les trois appelants de `loadSurface` portent tous un lieu VOULU — la
+        // plongée depuis l'orbite (une recherche), l'escalier de zoom, et le
+        // clic pour plonger. Dans les trois cas, ce lieu doit atterrir au
+        // centre du socle et pas à un sixième de côté (voir `f3CentreSur`).
+        await fetchAndBuildDem({ centreSur: { lat, lon } })
       } catch (err) {
         hideLoading()
         throw err
@@ -2256,15 +3085,25 @@ modes = new Modes({
     },
     // next finer scale under the current view — the staircase down from a
     // coarse (z8/z10) dive; null once the patch is already fine
+    //
+    // ⚠️ CE QUE VISE LA CAMÉRA EST EN COORDONNÉES DE GÉOMÉTRIE, PAS DE CHAMP —
+    // et c'est la même famille d'erreur que le défaut du centrage. `controls
+    // .target` vit dans la géométrie, qui NE BOUGE PAS en mode continu : c'est
+    // la lecture qui se décale de `terrain.fenetre`. Sans l'ajouter, un cran de
+    // zoom après un défilement rechargeait la zone du CENTRE DU BLOC — le
+    // visiteur avait glissé de 20 km et le zoom le ramenait d'où il venait,
+    // silencieusement. `chargeCartouche` fait déjà exactement cette addition
+    // (voir plus haut) ; l'escalier de zoom l'avait oubliée.
+    // Hors mode continu, `fenetre` est (0, 0) et l'expression est inchangée.
     getRefineTarget() {
       if (params.source !== 'real' || !dem || params.demZoom >= userFineZoom) return null
-      const { lat, lon } = worldToLatLon(dem, controls.target.x, controls.target.z)
+      const { lat, lon } = viseeAuSol()
       return { lat, lon, zoom: stepZoom(params.demZoom, 1, userFineZoom) }
     },
     getCoarsenTarget() {
       // widen down to the z4 continental block; past that the orbit gate opens
       if (params.source !== 'real' || !dem || params.demZoom <= 4) return null
-      const { lat, lon } = worldToLatLon(dem, controls.target.x, controls.target.z)
+      const { lat, lon } = viseeAuSol()
       return { lat, lon, zoom: stepZoom(params.demZoom, -1) }
     },
     // true when the camera is skimming the relief — refine can then fire on a
@@ -3165,6 +4004,10 @@ const raceLabels = buildRaceLabels({
   container,
   camera,
   params,
+  // `track.world` est en coordonnées de CHAMP : les cartouches doivent
+  // retrancher le décalage de fenêtre avant de projeter, sinon ils restent
+  // collés à l'écran pendant que leur ravitaillement s'en va.
+  getFenetre: () => terrain.fenetre,
   getItems: () => {
     const items = []
     const lay = gpxLayer.activeLayer
@@ -3192,7 +4035,17 @@ const raceLabels = buildRaceLabels({
     const kmTail = 10
     // règle du damier (Adrien) : ce qui sort des blocs chargés (5×5 max) est
     // COUPÉ — un point au-delà de l'emprise réelle ne s'affiche pas
+    //
+    // ⚠️ EN MODE CONTINU LE DAMIER N'EXISTE PAS et la règle change de nature :
+    // `p` est en coordonnées de CHAMP, la fenêtre est le socle, et ce qui compte
+    // est « ce point est-il DANS le socle affiché en ce moment ». Sans cette
+    // branche, `Math.round(p.x / 56)` renvoyait la cellule d'un damier vide et
+    // tous les cartouches au-delà du bloc central disparaissaient — alors même
+    // que leur relief, lui, est bien là.
+    const fenCourse = terrain.fenetre ?? { x: 0, z: 0 }
+    const blocCourse = dem?.empriseCote > 1 ? terrain.blockFootprint() : null
     const covered = (p) => {
+      if (blocCourse) return dansFenetre(p.x - fenCourse.x, p.z - fenCourse.z, blocCourse.half, blocCourse.corner)
       const i = Math.round(p.x / TERRAIN_SIZE)
       const j = Math.round(p.z / TERRAIN_SIZE)
       return (i === 0 && j === 0) || !!blockGrid?.cells?.has(`${i},${j}`)
@@ -3367,7 +4220,13 @@ async function setTransportCats(cats) {
       .filter((p) => cats.includes(p.cat) && nearTrack(p))
       .map((p) => {
         const w = latLonToWorld(dem, p.lat, p.lon)
-        const world = new THREE.Vector3(w.x, (terrain.sample?.(w.x, w.z) ?? 0) + 0.4, w.z)
+        // ⚠️ `w` est en coordonnées de CHAMP, `terrain.sample` répond en
+        // coordonnées de GÉOMÉTRIE : sans la soustraction, la gare ou le
+        // téléphérique prenait l'altitude d'un point situé une fenêtre plus
+        // loin — le cartouche flottait en l'air ou s'enterrait. Le XZ, lui, est
+        // bien du champ : c'est race-labels.js qui en retranche le décalage.
+        const fenT = terrain.fenetre ?? { x: 0, z: 0 }
+        const world = new THREE.Vector3(w.x, (terrain.sample?.(w.x - fenT.x, w.z - fenT.z) ?? 0) + 0.4, w.z)
         return { ...p, world }
       })
   } catch (err) {
@@ -3406,7 +4265,17 @@ blockGrid.onCoastReady = (cell) => {
 }
 // le damier a gagné/perdu une dalle → le trafic aérien étend sa zone de vol
 // pour qu'un avion passe d'une dalle à la suivante sans coupure
-blockGrid.onGridChanged = () => traffic.setSpan(blockGrid.spanRadius())
+// ⚠️ EN MODE CONTINU C'EST L'EMPRISE QUI COMMANDE, PAS LE DAMIER. Le damier n'a
+// aucune cellule (le 3×3 est un seul champ), donc `spanRadius()` rendrait 0 et
+// l'aéronef mourrait au bord du bloc central — juste au moment où le relief
+// derrière lui, lui, continue. L'emprise fait 84 unités de demi-côté.
+// Déclaration de fonction (et non `const`) : elle est appelée depuis
+// `regenerateTerrain`, plus haut dans le fichier — une flèche en `const` y
+// serait dans sa zone morte si un chargement partait pendant l'évaluation.
+function trafficSpan() {
+  return dem?.empriseCote > 1 ? (TERRAIN_SIZE * dem.empriseCote) / 2 : blockGrid.spanRadius()
+}
+blockGrid.onGridChanged = () => traffic.setSpan(trafficSpan())
 // le damier se resynchronise à CHAQUE re-drapage global (zone, zoom, ajout de
 // calque) — idempotent, borné 5×5, cellules en cache LRU
 const _rebuildAllRaw = gpxLayer.rebuildAll.bind(gpxLayer)
@@ -3471,8 +4340,17 @@ async function loadGpxText(text) {
     // the post-rebuild hook drapes the line once the new terrain exists;
     // pin the framed zoom or the dive would land on the fine (≥12) scale
     // and clip long tracks framed at z10/z11
+    // ⚠️ LE MÊME GESTE VAUT POUR UN GPX, ET IL VAUT MÊME PLUS. `frameTrack`
+    // choisit un zoom pour que la trace tienne dans UN bloc avec 35 % de marge
+    // — c'est-à-dire tout juste. Un décalage d'un sixième de socle (le calage
+    // sur la grille de tuiles, voir `f3CentreSur`) mange donc la moitié de
+    // cette marge et peut sortir un bout de trace du socle affiché. Le centre
+    // de la boîte englobante est exactement ce que `frameTrack` a calculé.
+    //
+    // La branche orbitale l'obtient gratuitement : `flyTo` finit par
+    // `loadSurface(lat, lon, zoom)`, qui centre déjà.
     if (modes.mode === 'orbital') await modes.flyTo(f.lat, f.lon, f.zoom)
-    else await loadRealTerrain()
+    else await loadRealTerrain({ centreSur: { lat: f.lat, lon: f.lon } })
     // au chargement d'un GPX, on démarre en vue isométrique (Adrien) — comme un
     // clic sur le bouton iso ; la vue est cadrée sur le bloc + son socle
     applyIsoView(0)
@@ -3765,7 +4643,9 @@ async function refreshAerialCore() {
     refreshOsmCredit()
     return
   }
-  const bounds = blockBounds(dem) // the TRUE block extent, never patchBounds — see blockBounds()
+  // L'emprise VRAIE du champ chargé — un bloc, ou les neuf dalles du mode
+  // continu. Jamais `patchBounds` : voir `demBounds`.
+  const bounds = demBounds(dem)
 
   // Can't deliver here? Say so in the middle of the screen and switch the layer
   // back off. Leaving the toggle on while nothing renders is the worst of both:
@@ -3842,7 +4722,7 @@ async function paintCellAerial(cell) {
   if (!cell?.terrain || !cell.dem) return
   const on = params.aerialEnabled && params.source === 'real'
   if (!on) { cell.terrain.setAerial(null); return }
-  const bounds = blockBounds(cell.dem)
+  const bounds = demBounds(cell.dem)
   if (aerialUnavailable(bounds)) { cell.terrain.setAerial(null); return }
   const prov = providerForAerial(bounds)
   if (prov?.global && params.demZoom > 8) { cell.terrain.setAerial(null); return }
@@ -3915,15 +4795,31 @@ function syncBoats() {
   if (!seaMat) { boats.boats = []; return }
   boats.setSea(seaMat)
   const seaY = realWater.seaY
+  const coteFlotte = dem.empriseCote > 1 ? dem.empriseCote : 1
   boats.build({
     zoom: params.demZoom,
     half: TERRAIN_SIZE / 2,
+    // ⚠️ `cote` sème sur TOUTE l'emprise, `half` reste le demi-BLOC : c'est
+    // l'échelle du bateau (sa vitesse, sa veille), pas l'étendue de sa mer.
+    cote: coteFlotte,
     // la graine suit le LIEU : revenir au même endroit rend la même flotte
     seed: Math.round((params.demLat + 90) * 1000) * 100003 + Math.round((params.demLon + 180) * 1000),
     // Navigable = sous le niveau de la mer. Ce test sert DEUX fois : au semis,
     // et à chaque image pour la veille devant l'étrave (fleet.js) — sans le
     // second, le bateau traverse la côte au lieu de la longer.
-    isSea: (x, z) => Number.isFinite(seaY) && (terrain.sample?.(x, z) ?? 0) < seaY - 0.05,
+    //
+    // ⚠️ ET IL DOIT LIRE L'EMPRISE, PAS LE BLOC CENTRAL. Les positions des
+    // bateaux sont en coordonnées de CHAMP ; `terrain.sample` parle en
+    // coordonnées de GÉOMÉTRIE et ajoute lui-même le décalage de fenêtre. Sans
+    // la soustraction, la veille consultait le relief d'un autre endroit : un
+    // bateau aurait traversé une falaise hors du bloc du milieu, ce que la
+    // règle d'Adrien (« les bateaux ne rentrent jamais en collision avec la
+    // terre ») interdit — et le semis aurait posé des coques sur la montagne.
+    isSea: (x, z) => {
+      if (!Number.isFinite(seaY)) return false
+      const f = terrain.fenetre ?? { x: 0, z: 0 }
+      return (terrain.sample?.(x - f.x, z - f.z) ?? 0) < seaY - 0.05
+    },
     extentMeters: dem.extentMeters,
     terrainSize: TERRAIN_SIZE,
   })
@@ -4391,6 +5287,13 @@ async function openExportUI() {
   // composer + camera : l'enregistreur en a besoin pour la taille forcée (2K,
   // 4K…), qui redimensionne la chaîne de rendu le temps de la capture
   if (!recorder) recorder = new Recorder({ renderer, composer, camera })
+  // ⚠️ LE DÉFILEMENT SE FIGE À L'OUVERTURE, pas au déclenchement. Le voile du
+  // panneau interdit déjà tout geste sur le terrain : à partir d'ici, rien ne
+  // peut plus bouger, donc ce qu'on voit derrière le panneau est EXACTEMENT ce
+  // qui partira dans le fichier — élan éteint, débordement résorbé, maillage
+  // fin. Le faire au clic sur « Export » aurait fait bouger l'image entre le
+  // moment où l'utilisateur la juge et celui où on la capture.
+  f3Fige()
   openExportModal({
     renderer,
     composer,
@@ -4401,14 +5304,20 @@ async function openExportUI() {
     // là où elles ont creusé, et nulle part ailleurs. Voir export.js.
     creditLine: () => {
       try {
-        // blockBounds, jamais patchBounds : c'est l'emprise VRAIE du bloc
-        // exporté (voir son commentaire dans map/aerial-layer.js).
-        return creditFor(bathySourceIndex(), blockBounds(terrain.dem), creditsForBounds)
+        // demBounds, jamais patchBounds : c'est l'emprise VRAIE du champ
+        // exporté (voir son commentaire dans map/aerial-layer.js). En mode
+        // continu elle couvre les neuf dalles — c'est ce qui est chargé, donc
+        // ce qui doit être crédité : jamais moins de sources que de données.
+        return creditFor(bathySourceIndex(), demBounds(terrain.dem), creditsForBounds)
       } catch {
         return null // jamais bloquer un export sur un crédit : export.js a sa ligne de repli
       }
     },
     pauseLoop: () => {
+      // Rendu HORS LIGNE : `f3Tick` ne tourne plus (il n'est appelé que depuis
+      // `tick()`), donc l'élan et la butée gèleraient tels quels pour tout le
+      // clip. On part d'un état posé plutôt que d'un instantané de geste.
+      f3Fige()
       loopPaused = true
       // kill the already-scheduled frame too, or a synchronous export
       // failure would leave two rAF chains running after resume
@@ -4467,7 +5376,12 @@ async function shareCurrentView() {
     px: camera.position.x, py: camera.position.y, pz: camera.position.z,
     tx: controls.target.x, ty: controls.target.y, tz: controls.target.z,
   }
-  const state = captureShareState(params, cam, BASE_TEMPLATE_LOOK)
+  // ⚠️ LA POSITION DANS L'EMPRISE VOYAGE AVEC. En mode continu, `loc` ne dit
+  // que quel BLOC est chargé : la fenêtre se promène de ±56 unités dedans, soit
+  // ±21 km à z12. Sans ce quatrième argument, on envoyait le destinataire au
+  // centre du bloc — jusqu'à 30 km à côté de ce qu'on avait sous les yeux.
+  // Hors mode continu on passe `null` et le payload sort inchangé.
+  const state = captureShareState(params, cam, BASE_TEMPLATE_LOOK, fenetreContinueActive() ? terrain.fenetre : null)
   const hasTrack = !!gpxLayer.track
 
   // On PUBLIE TOUJOURS (Netlify Blobs via netlify/functions/race.mjs) pour
@@ -4918,7 +5832,7 @@ const panelCtx = {
   setGroundInfo: (v) => {
     groundInfo.enabled = v
     groundInfo.setVisible(v && modes.mode === 'surface')
-    if (v && dem && !groundInfo.lastInfo) groundInfo.load(params.demLat, params.demLon, dem)
+    if (v && dem && !groundInfo.lastInfo) chargeCartouche()
     else if (v) groundInfo.rerender()
   },
   setShadowRes: (v) => {
@@ -5271,9 +6185,23 @@ if (!IS_EMBED) {
   const box = document.createElement('div')
   box.className = 'ce-settings ce-glassbox'
   box.innerHTML = '<div class="ce-settings-head"><b>Paramètres</b><button class="ce-settings-x" type="button">✕</button></div>'
-  const perf = perfSection({ params, renderer, composer, applyShadowMode, setShadowRes: panelCtx.setShadowRes })
+  const perf = perfSection({
+    params,
+    renderer,
+    composer,
+    applyShadowMode,
+    setShadowRes: panelCtx.setShadowRes,
+    // la résolution du maillage a quitté le panneau Terrain (demande d'Adrien) :
+    // c'est un arbitrage qualité/vitesse, sa place est ici
+    regenerateTerrain,
+    // le mode continu 3×3 : son état affichable, et comment le basculer
+    fenetreEtat: () => etatInterrupteur(f3Args()),
+    setFenetre: f3Applique,
+  })
   perf.root.classList.add('open')
-  box.append(perf.root)
+  const aide = aideSection()
+  aide.root.classList.add('open')
+  box.append(perf.root, aide.root)
   veil.append(box)
   document.body.append(veil)
   const closeSettings = () => veil.classList.remove('open')
@@ -5281,6 +6209,27 @@ if (!IS_EMBED) {
   veil.addEventListener('click', (e) => { if (e.target === veil) closeSettings() })
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSettings() })
   panelCtx.openSettings = () => veil.classList.toggle('open')
+  // ⚠️ LA BULLE VIT DANS `#app`, PAS DANS LE BODY — même raison que les
+  // étiquettes de course (race-labels.js) : en boutique et en Studio, `#app`
+  // n'est qu'un cadre de la page, et une bulle collée au body en sortirait.
+  // `degage` ferme CETTE modale avant l'apparition : l'interrupteur du mode
+  // continu est dedans, et son voile plein écran (z-index 235) enterrerait la
+  // bulle sous lui tout en assombrissant le terrain qu'elle désigne.
+  // `pret` : DEUX voiles plein écran peuvent couvrir le terrain, et une bulle
+  // qui le désigne n'a rien à dire tant que l'un des deux est là.
+  //   · l'écran d'accueil (`body.ce-hub`) monte APRÈS le chargement ;
+  //   · le carton de chargement revient à chaque bascule, puisque allumer le
+  //     mode continu recharge la zone — la bulle naissait pile derrière le
+  //     carton qu'elle venait de déclencher.
+  // Ni l'un ni l'autre n'émet d'événement (cf. v28.css pour l'accueil) : leur
+  // seule trace est une classe, d'où les deux nœuds passés à `surveille`.
+  initAides({
+    conteneur: container,
+    degage: closeSettings,
+    pret: () =>
+      !document.body.classList.contains('ce-hub') && !!loadingEl?.classList.contains('hidden'),
+    surveille: [document.body, loadingEl],
+  })
 }
 
 // mini panneau Parcours du mode simple (gestion des blocs + Lecture) —
@@ -5442,6 +6391,12 @@ window.__exp = { boats, raceLabels, scene, camera, controls, params, terrain, lo
   setUiTint: (v) => { params.uiTint = v !== false; syncUiTheme() }, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,
   // mode aléatoire + ombrage auto : de quoi sonder l'état depuis la console
   shuffleLook,
+  // ⚠️ À APPELER AVANT DE COUPER LA BOUCLE rAF pour un tournage hors ligne
+  // (skill shibumap-shots, usine à vidéos). Le rendu hors ligne est déjà figé
+  // par construction — `f3Tick` n'existe que dans `tick()` — mais il fige AUSSI
+  // le débordement élastique et le maillage de drag s'il en trouve un. Un
+  // appel, aucun argument, sans effet hors mode continu.
+  figeFenetre: f3Fige,
   get dem() { return dem },
   // source d'altimétrie : quelle source sert le bloc, jusqu'à quel zoom, et
   // le repli AWS s'est-il déclenché ?
@@ -5480,7 +6435,13 @@ async function bootInitialView() {
   const race = payload ? parseRacePayload(payload, BASE_TEMPLATE_LOOK) : null
   if (!race) {
     if (pendingRaceFetch) loadingStatus.textContent = 'race link unavailable — loading the default view…'
-    if (params.source === 'real') loadRealTerrain()
+    // ⚠️ ATTENDU, alors qu'il ne l'était pas : c'est ce chargement-là qui crée
+    // l'emprise 3×3 dans laquelle la fenêtre d'un lien #s= doit se poser. Rien
+    // d'autre ne change — la valeur de retour n'était pas lue, et personne
+    // n'attendait `bootInitialView` non plus.
+    if (params.source === 'real') await loadRealTerrain()
+    f3PoseFenetre(pendingShareFen)
+    pendingShareFen = null
     return
   }
   if (race.state) {
@@ -5490,12 +6451,16 @@ async function bootInitialView() {
     params.demZoom = race.state.loc.zoom
     params.demLocation = 'Custom'
     if (race.state.cam) pendingShareCam = race.state.cam
+    pendingShareFen = race.state.fen
   }
   // loadGpxText frames the track, loads terrain, and applies the pending
   // camera once the view exists. SANS course (une carte nue publiée), il n'y
   // a rien à cadrer : on charge simplement le relief du lieu restauré.
   if (race.gpx) await loadGpxText(race.gpx)
   else if (params.source === 'real') await loadRealTerrain()
+  // Le relief existe : l'emprise aussi, donc la fenêtre a où se poser.
+  f3PoseFenetre(pendingShareFen)
+  pendingShareFen = null
   // la course complète du payload → cartouches, flancs du bloc, ticks du
   // profil, nom du calque (mini panneau) — la shibu reçue est ENTIÈRE
   if (race.race) {
@@ -5632,6 +6597,13 @@ function tick() {
   const t = clock.elapsedTime
 
   updateCameraMotion(dt)
+  // La fenêtre continue, juste après la caméra : le geste se projette sur les
+  // axes de la caméra, donc il lui faut la caméra de CETTE image.
+  // ⚠️ Le remappage des boutons est HORS de f3Tick : celui-ci sort à sa garde
+  // quand le mode continu est éteint, et c'est justement l'instant où le clic
+  // droit doit redevenir un déplacement de caméra.
+  appliqueBoutonsSouris()
+  f3Tick(dt)
 
   // BRUME relative au zoom : Début/Fin (params.fogNear/fogFar) sont exprimés
   // pour un cadrage de référence (~40 unités) mais la caméra bouge — en
@@ -5778,7 +6750,10 @@ function tick() {
   // does not exist.
   if (dof) dof.cocMaterial.worldFocusDistance = params.focusDistance
 
-  boats.update(dt, TERRAIN_SIZE / 2)
+  // `half` = le demi-BLOC (l'échelle du bateau), `bord` = où l'eau s'arrête :
+  // le bloc, ou l'emprise 3×3 entière en mode continu. Les confondre aurait
+  // triplé la vitesse au sol du vapeur — voir l'en-tête de stepBoat.
+  boats.update(dt, TERRAIN_SIZE / 2, (TERRAIN_SIZE * (dem?.empriseCote > 1 ? dem.empriseCote : 1)) / 2)
   realWater?.update(dt, sun) // water simulation: waves, caustics, sun glint
   // temps des caustiques de fond (terrain + blocs voisins du damier)
   terrain.mapUniforms.uCausT.value += dt

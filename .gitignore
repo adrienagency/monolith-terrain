@@ -39,3 +39,6 @@ public/data/lake-tiles/
 public/data/map/cells/
 
 _staging/
+
+# bancs de mesure jetables (captures, dumps de normales : ~40 Mo)
+.banc/

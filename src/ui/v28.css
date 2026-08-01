@@ -3671,3 +3671,159 @@ body.ce-noui .ce-rec {
 .ce-pts-dot.on { box-shadow: 0 0 0 2px var(--ce-accent), 0 1px 4px rgba(0, 0, 0, 0.3); }
 .ce-pts-dot:active { cursor: grabbing; }
 
+
+/* ══════════ LES BULLES D'AIDE — première activation d'une option ══════════
+   Voir src/ui/aides.js (pose, accessibilité) et src/aides.js (la règle).
+
+   ══════ LA COULEUR D'APPEL, MAIS ASSOMBRIE — ET C'EST DÉMONTRABLE ══════
+
+   Demande d'Adrien : « dans la couleur d'appel ». Le piège est que
+   `--ce-accent` N'EST PAS #ea580c à l'exécution : ui-theme.js le RECALCULE
+   depuis la palette de la carte (mesuré en navigateur : rgb(193,125,0) sur la
+   vue d'ouverture). Une encre fixe choisie contre l'orange d'usine n'a donc
+   aucune garantie face à l'accent réellement servi.
+
+   Le seul contrat que ui-theme.js promet est `contrastRatio(accent, #ffffff)
+   >= 3` — il BORNE la clarté PAR LE HAUT, jamais par le bas. Deux conséquences
+   qui décident tout ce bloc :
+
+     · du BLANC directement sur l'accent plafonne à 3:1, sous le seuil AA de
+       4,5:1 exigé pour du corps de texte ;
+     · une encre SOMBRE fixe s'effondre dès qu'une palette produit un accent
+       déjà sombre — rien ne l'interdit, et on tomberait à 1,7:1.
+
+   D'où le fond : l'accent MÉLANGÉ À 68 % AVEC DU NOIR. Assombrir ne peut
+   qu'AUGMENTER le contraste contre le blanc, quel que soit l'accent — la
+   garantie devient monotone au lieu d'être un pari. Pire cas calculé (accent à
+   la clarté maximale que le contrat autorise, L 0,30) : 5,81:1 pour le corps,
+   4,74:1 pour la note à 86 %, 7,84:1 pour le libellé du bouton, et 5,81:1 pour
+   le bouton blanc contre la carte. Tous au-dessus d'AA, sur TOUTE palette.
+   Le liseré, lui, porte l'accent PUR : la couleur d'appel est littéralement sur
+   l'objet, à pleine force, là où aucun texte ne s'y appuie.
+
+   La teinte et la chroma, elles, sont celles de l'accent au pixel près : on
+   reste dans la couleur d'appel, en plus profond.
+
+   ══════ LE CALQUE NE PREND AUCUN CLIC ══════
+
+   La bulle explique un CLIC DROIT MAINTENU sur le terrain : si elle
+   interceptait le pointeur, elle volerait le geste qu'elle enseigne. Seul le
+   bouton reprend `pointer-events` (vérifié à l'exécution : elementFromPoint au
+   centre de la bulle rend bien le CANVAS). */
+.ce-aide-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 30; /* au-dessus des étiquettes de course (25), sous la chrome (60+) */
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.ce-aide {
+  position: absolute;
+  left: 50%;
+  /* BAS ET CENTRÉE, jamais au milieu : le centre de l'écran est à la fois le
+     bloc dont on parle et l'endroit d'où part naturellement un glissement.
+     Le plancher en pixels dégage la barre du bas, mesurée à 134 px de haut —
+     en pourcentage seul, la bulle la touchait sur une fenêtre courte. */
+  bottom: max(18%, 162px);
+  width: min(360px, calc(100% - 32px));
+  box-sizing: border-box;
+  padding: 14px 16px 13px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--ce-accent) 68%, #000);
+  color: #fff;
+  font-family: var(--ce-font);
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.34),
+    0 0 0 1.5px var(--ce-accent);
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 10px);
+  transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.ce-aide.on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.ce-aide-titre {
+  font: 700 13px/1.2 var(--ce-font);
+  letter-spacing: 0.01em;
+  margin-bottom: 5px;
+}
+.ce-aide-texte {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.ce-aide-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.35;
+  /* la précision secondaire s'efface — 86 % est le plancher qui garde 4,74:1
+     dans le pire cas ; à 0,78 elle retombait à 4,28:1, sous AA */
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.ce-aide-ok {
+  pointer-events: auto; /* LA seule zone du calque qui prend le pointeur */
+  margin-top: 12px;
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 16px;
+  background: #fff;
+  color: color-mix(in srgb, var(--ce-accent) 55%, #000);
+  font: 650 11.5px var(--ce-font);
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.12s;
+}
+.ce-aide-ok:hover {
+  background: #ffeede;
+}
+.ce-aide-ok:active {
+  transform: translateY(1px);
+}
+.ce-aide-ok:focus-visible {
+  /* le contour se pose sur un aplat d'accent foncé : il lui faut du blanc,
+     un contour accent y serait invisible */
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+/* Écrans étroits : la barre du bas prend plus de hauteur, la bulle remonte. */
+@media (max-width: 640px) {
+  .ce-aide {
+    bottom: max(24%, 178px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ce-aide {
+    transition: none;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* ---- pastille d'étape sur une ligne de réglage (voir src/ui/etape.js) ----
+   Même langue visuelle que la puce ALPHA de la barre du haut (.ce-alpha) :
+   pilule creuse, filet d'accent, mono, lettres espacées. Plus petite et non
+   cliquable, parce qu'elle qualifie UNE ligne et pas l'application. Deux
+   familles de pastilles se liraient comme deux systèmes de sens. */
+.ce-etape {
+  display: inline-block;
+  vertical-align: 1px;
+  border: 1px solid var(--ce-accent);
+  color: var(--ce-accent);
+  background: transparent;
+  font-family: var(--ce-mono);
+  font-size: 7.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 999px;
+  margin-left: 2px;
+  cursor: help; /* il y a quelque chose à lire au survol */
+  white-space: nowrap;
+}

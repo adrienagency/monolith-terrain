@@ -55,15 +55,37 @@ export function latLonToWorld(dem, lat, lon) {
   const tpx = demTilePx(dem)
   const px = dtx * tpx
   const py = (t.y - dem.originTileY) * tpx
+  const span = demSpan(dem)
   return {
-    x: (px / dem.size - 0.5) * TERRAIN_SIZE,
-    z: (py / dem.size - 0.5) * TERRAIN_SIZE,
+    x: (px / dem.size - 0.5) * span,
+    z: (py / dem.size - 0.5) * span,
   }
 }
 
+// LA LARGEUR MONDE DU CHAMP — et pourquoi ce n'est plus toujours 56.
+//
+// ⚠️ UNE EMPRISE 3×3 FAIT 168 UNITÉS, PAS 56. `TERRAIN_SIZE` écrit en dur dans
+// les deux conversions ci-dessus écrasait tout un 3×3 dans la largeur d'un seul
+// bloc : chaque lieu, chaque lac, chaque tracé se retrouvait à un TIERS de sa
+// distance au centre. Ce défaut ne se lit pas comme un décalage, il se lit comme
+// une carte dont toutes les villes ont glissé vers le milieu — c'est-à-dire
+// comme des données fausses.
+//
+// C'est exactement `terrain._span()`, et c'est la même règle : la GÉOMÉTRIE fait
+// toujours 56 unités, mais le CHAMP qu'elle lit fait `56 × empriseCote`. Le
+// nombre d'unités par mètre, lui, ne change pas : un champ trois fois plus large
+// couvre trois fois plus de sol.
+//
+// Hors mode continu `empriseCote` est absent et la valeur redevient 56 au bit
+// près — tous les appelants d'aujourd'hui sont donc rigoureusement inchangés.
+export function demSpan(dem) {
+  return TERRAIN_SIZE * (dem?.empriseCote > 1 ? dem.empriseCote : 1)
+}
+
 export function worldToLatLon(dem, x, z) {
-  const px = (x / TERRAIN_SIZE + 0.5) * dem.size
-  const py = (z / TERRAIN_SIZE + 0.5) * dem.size
+  const span = demSpan(dem)
+  const px = (x / span + 0.5) * dem.size
+  const py = (z / span + 0.5) * dem.size
   const n = 2 ** dem.zoom
   // originTileX can sit outside [0, n) for patches straddling ±180° — wrap
   const tpx = demTilePx(dem)
@@ -72,8 +94,12 @@ export function worldToLatLon(dem, x, z) {
 }
 
 // true (unexaggerated) meters per scene unit for the loaded DEM patch
+// ⚠️ `demSpan`, pas `TERRAIN_SIZE` : sur une emprise 3×3, `extentMeters` est déjà
+// triplé. Divisé par 56, il rendrait trois fois trop de mètres par unité — donc
+// des distances, des échelles de carte et des largeurs de rivière toutes fausses
+// d'un facteur 3, sans que rien ne paraisse cassé.
 export function surfaceMetersPerUnit(dem) {
-  return dem.extentMeters / TERRAIN_SIZE
+  return dem.extentMeters / demSpan(dem)
 }
 
 // ---------------------------------------------------------------- globe sphere

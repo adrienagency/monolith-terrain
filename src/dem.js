@@ -16,6 +16,7 @@
 import { fuseBathymetry, decodeTerrarium, overzoomTile, resampleCatmullRom } from './bathy.js'
 import { normalizeIndex, tileMaxZoom } from './bathy-sources.js'
 import { demMemoCle, demMemoLire, demMemoEcrire, demMemoVider } from './dem-memo.js'
+import { quantizeElevation, quantizeElevations } from './dem-quant.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -369,6 +370,45 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
   // fusionne. Tout échec est silencieux et sans conséquence — la carte reste
   // celle d'avant.
   const seaData = bathy === false ? null : await loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx: TILE_PX })
+  // ⚠️ FLOAT32, ET PAS INT16 — LA MESURE, POUR QUE PERSONNE NE LA REFASSE.
+  //
+  // 1536² × 4 octets = 9,44 Mo par bloc. Le passer en Int16 rendrait 4,72 Mo et
+  // ~9 % du temps de lecture. C'est tentant, et c'est un piège dès qu'on choisit
+  // une unité ABSOLUE : quantifier le relief ajoute du bruit exactement à la
+  // fréquence de Nyquist du maillage, et src/grid-normals.js vient de prouver
+  // que c'est précisément ce que les normales révèlent à l'œil.
+  //
+  // Mesuré sur MNT réel (banc `.banc/f3-int16.mjs`), écart angulaire des
+  // normales contre le Float32 actuel, res 768, La Réunion z13 et Chamonix z12 :
+  //
+  //   quantification            | pas    | écart moyen     | pire
+  //   mètre entier (±32767 m)   | 1 m    | 0,57° à 1,09°   | 5,1° à 7,4°
+  //   demi-mètre   (±16383 m)   | 0,5 m  | 0,29° à 0,54°   | 2,3° à 3,6°
+  //   AFFINE PAR BLOC           | 4–6 cm | 0,035° à 0,044° | 0,30°
+  //   (le terrarium natif)      | 3,9 mm | 0,005° à 0,006° | 0,03°
+  //
+  // Une unité absolue réinjecte donc entre un tiers et deux tiers de l'erreur de
+  // normales qu'on venait justement de supprimer (3,2° à La Réunion). Elle est
+  // exclue — et le demi-mètre est le maximum qui couvre encore la Terre entière
+  // (Everest 8 849 m, Challenger Deep −10 935 m), donc il n'y a pas de réglage
+  // absolu plus fin disponible.
+  //
+  // La SEULE voie tenable est AFFINE PAR BLOC : stocker `(h − minM) × 65534 /
+  // (maxM − minM)` et porter `minM` et le facteur à côté du tableau. Le pas
+  // devient 4 à 6 cm sur un bloc alpin, millimétrique sur un bloc plat — et le
+  // bruit tombe à 0,04°, sept fois le plancher d'arrondi Float32 mais
+  // soixante-dix fois moins que la version « mètre ». ⚠️ Deux réserves à lever
+  // avant de l'écrire :
+  //   — le ZÉRO n'est plus exactement représentable, et les seuils terre/mer se
+  //     jouent au décimètre (seaLevelM 0,5 ; LAND_MIN_ELEV_M 0,3) : il faut
+  //     vérifier que la topologie du flood-fill de sea-mask.js ne bouge pas ;
+  //   — `fuseBathymetry` ne doit CREUSER QUE LA MER (« la terre ne bouge
+  //     jamais », src/bathy.js) : la fusion doit se faire AVANT la
+  //     quantification, jamais après.
+  //
+  // Non fait ici parce que la fenêtre continue 3×3 remplace les neuf reliefs par
+  // UN SEUL : l'offset et le facteur devront alors porter sur l'emprise entière,
+  // exactement comme `uHeightRange`. Le faire maintenant serait à refaire.
   const data = new Float32Array(sizePx * sizePx)
   let minM = Infinity
   let maxM = -Infinity
@@ -435,6 +475,39 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
     measured = fused.length
   }
 
+  // ══════════ LE CHAMP PASSE EN INT16, ET C'EST ICI QUE ÇA SE JOUE ══════════
+  //
+  // Après la fusion, jamais avant. `bathy.js` raisonne au 1/256 de mètre
+  // (NODATA_EPS, SEA_EPS, la détection des aplats de remplissage compte des
+  // valeurs EXACTES) : le quantifier en amont lui retirerait la finesse dont
+  // sa règle dépend. Ici, tout est décidé.
+  //
+  // 9,44 Mo → 4,72 Mo par bloc 1536², et la lecture y gagne 9,5 % (localité de
+  // cache). L'unité reste LE MÈTRE : aucun des huit consommateurs de
+  // `dem.data` n'a de facteur d'échelle à connaître, donc aucun ne peut
+  // l'oublier. Le garde-fou terre/mer et sa mesure sur MNT réel : dem-quant.js.
+  const champ = quantizeElevations(fused)
+
+  // Les EXTREMA décrivent le champ RENDU, donc ils se quantifient avec lui.
+  // `uHeightRange`, `elevationHistogram` et l'échelle de couleurs normalisent
+  // CE tableau-ci : un maximum resté à 1234,5 m pour un champ qui plafonne à
+  // 1235 laisserait un sommet DÉBORDER de l'échelle — la septième statistique
+  // globale de l'étude 3×3, en miniature.
+  //
+  // Une simple relecture des deux bornes suffit, sans reparcourir le champ :
+  // `quantizeElevation` est monotone, donc les extrema du champ quantifié sont
+  // les quantifiés des extrema.
+  //
+  // ⚠️ `meanM` N'EST PAS TOUCHÉ, ET C'EST VOLONTAIRE. Il ne normalise rien : il
+  // sert à caler verticalement les dalles voisines les unes sur les autres. Sa
+  // somme, elle, EXCLUT les pixels non mesurés (alpha nul) — une information
+  // que le champ quantifié ne porte plus, puisqu'un pixel absent y vaut 0 comme
+  // n'importe quelle plage au niveau de la mer. Le recalculer ici polluerait la
+  // moyenne avec les trous du damier ; le décalage de quantification, lui, est
+  // borné à un demi-mètre sur une valeur qui n'en demande pas tant.
+  minM = quantizeElevation(minM)
+  maxM = quantizeElevation(maxM)
+
   // ⚠️ 156543·cos(lat)/2^z est la résolution d'une tuile de 256 px. Une tuile
   // de 512 px décrit la MÊME étendue au sol avec deux fois plus de pixels : la
   // résolution est donc moitié moindre. Sans ce facteur, extentMeters doublait
@@ -442,7 +515,7 @@ export async function loadDem({ lat, lon, zoom, tilesAcross = 3, originTile = nu
   // tracés GPX décalés, damier de blocs voisins désaligné).
   const metersPerPixel = ((156543.03392 * Math.cos(latRad)) / 2 ** zoom) * (256 / TILE_PX)
   const bloc = {
-    data: fused,
+    data: champ, // Int16Array, en MÈTRES (voir dem-quant.js)
     size: sizePx,
     tilePx: TILE_PX,
     demSource: source.id,

@@ -310,8 +310,9 @@ export const LAND_MIN_ELEV_M = 0.3
 // zeroing every white pixel whose DEM elevation sits at/below LAND_MIN_ELEV_M
 // (drops the maritime part of the polygons, keeps islands). The 1.5px blur
 // pass runs LAST so boundary and coastline both come out soft, seam-free.
-// coastImage (optionnel) : ImageData du masque côtier (coast-mask.js, même
-// footprint) — la terre basse (polders NL, Camargue) n'est retirée que si le
+// coastImage (optionnel) : champ R8 du masque côtier (coast-mask.js, même
+// footprint) — {data,width,height} À FOULÉE 1, PAS une ImageData : un octet
+// par texel. La terre basse (polders NL, Camargue) n'est retirée que si le
 // trait de côte vectoriel la dit MER ; sans masque, comportement v1 (le DEM
 // seul ne sait pas distinguer un polder de la mer, caveat historique).
 // Returns { texture, canvas } — the canvas backs the texture (do not mutate).
@@ -383,7 +384,11 @@ export function rasterizeMask(coordinates, dem, size = MASK_SIZE, coastImage = n
         const i = (y * size + x) * 4
         if (px[i] > 0 && dem.data[row + Math.min(demSize - 1, (x * k) | 0)] <= LAND_MIN_ELEV_M) {
           // trait de côte : ce pixel bas est-il de la VRAIE terre ? → on le garde
-          if (coastImage && coastImage.data[(cRow + Math.min(cw - 1, ((x * cw) / size) | 0)) * 4] > 127) continue
+          // ⚠️ FOULÉE DE 1 sur `coastImage` : c'est le champ R8 de
+          // coast-mask.js (un octet par texel), pas une ImageData RGBA. `px`,
+          // lui, reste bien du RGBA — c'est le canevas de la ZONE, un autre
+          // masque, qui n'a pas changé de format.
+          if (coastImage && coastImage.data[cRow + Math.min(cw - 1, ((x * cw) / size) | 0)] > 127) continue
           px[i] = px[i + 1] = px[i + 2] = 0
         }
       }
