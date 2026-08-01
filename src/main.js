@@ -1859,7 +1859,13 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 // image (`f3Tick`) et à chaque `pointermove` d'un drag. Parser une chaîne
 // d'adresse 60 fois par seconde pour relire une constante était un coût sans
 // contrepartie ; `_f3Force` et `_f3Etat` le suppriment.
-const _f3Force = forceUrl(new URLSearchParams(location.search).get('f3'))
+//
+// ⚠️ `let`, ET IL EST REMIS À `null` À LA PREMIÈRE BASCULE. L'adresse pose
+// l'état INITIAL, elle ne verrouille pas : Adrien ouvre le serveur par une URL
+// qui porte `?f3=1` et se retrouvait ENFERMÉ dans le mode continu, l'interrupteur
+// des Paramètres grisé. Un banc n'a besoin que de démarrer dans le bon mode ; il
+// n'a jamais eu besoin d'interdire la sortie. L'oubli se fait dans `f3Applique`.
+let _f3Force = forceUrl(new URLSearchParams(location.search).get('f3'))
 
 // La préférence de l'utilisateur, ou `null` s'il n'a jamais touché
 // l'interrupteur — auquel cas c'est `FLAGS.fenetreContinue` qui parle. Le
@@ -1928,6 +1934,12 @@ function f3Applique(prefere) {
   try {
     localStorage.setItem(F3_PREF_KEY, prefere ? '1' : '0')
   } catch { /* navigation privée : le réglage ne survivra pas à l'onglet, tant pis */ }
+  // ⚠️ L'ADRESSE EST OUBLIÉE ICI, ET C'EST TOUT LE CORRECTIF. Tant que
+  // `_f3Force` vaut autre chose que `null`, `continuActif` lui obéit et la
+  // préférence qu'on vient d'écrire ne changerait rien — l'interrupteur
+  // cliquerait dans le vide. On la lâche au premier geste : le paramètre
+  // décrivait un DÉPART, le visiteur vient de dire où il veut aller.
+  _f3Force = null
   const avant = _f3Etat
   _f3Etat = continuActif(f3Args())
   if (_f3Etat === avant) return false

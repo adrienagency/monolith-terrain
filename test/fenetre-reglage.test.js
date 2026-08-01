@@ -94,15 +94,35 @@ test('etatInterrupteur : sur machine faible il est ÉTEINT, BLOQUÉ, et il dit p
   assert.match(e.note, /ESSENTIEL/)
 })
 
-test('etatInterrupteur : quand l’adresse force, il le DIT au lieu de faire semblant', () => {
+// ══════════ L'ADRESSE POSE L'ÉTAT INITIAL, ELLE NE VERROUILLE PAS ═══════════
+//
+// Ce test-ci remplace son contraire, et le POURQUOI compte : la première
+// version bloquait l'interrupteur dès que `?f3` était présent, « parce que les
+// bancs en dépendent ». Adrien ouvre le serveur par une adresse qui porte
+// `?f3=1` — il se retrouvait ENFERMÉ dans le mode, sans porte de sortie dans
+// l'interface. Or ce dont un banc a besoin, c'est de DÉMARRER dans le bon mode,
+// pas d'interdire le changement : `continuActif` continue donc d'obéir à
+// l'adresse (test plus haut), mais l'interrupteur reste libre, et main.js
+// oublie la force dès qu'on y touche.
+test('etatInterrupteur : l’adresse pose l’état initial mais ne bloque pas le contrôle', () => {
   const on = etatInterrupteur({ force: true, prefere: false, machine: PALIERS[0] })
-  assert.equal(on.coche, true)
-  assert.equal(on.bloque, true, 'un contrôle qui ne commande plus rien doit être éteint, pas muet')
-  assert.match(on.note, /f3=1/)
+  assert.equal(on.coche, true, 'l’adresse dit ce qui est allumé')
+  assert.equal(on.bloque, false, 'et on doit pouvoir l’éteindre depuis les Paramètres')
+  assert.equal(on.note, '', 'plus de mention de verrou : il n’y a plus de verrou')
   const off = etatInterrupteur({ force: false, prefere: true, machine: PALIERS[0] })
   assert.equal(off.coche, false)
-  assert.equal(off.bloque, true)
-  assert.match(off.note, /f3=0/)
+  assert.equal(off.bloque, false)
+  assert.equal(off.note, '')
+})
+
+test('etatInterrupteur : ?f3=1 sur machine faible n’enferme pas non plus', () => {
+  // Le cas qui piégeait le plus : l'adresse passe outre le refus machine (c'est
+  // fait exprès, pour mesurer), et l'ancien code bloquait alors DEUX fois.
+  // Sortir du mode doit rester possible — sinon un banc sur machine modeste
+  // laissait l'utilisateur coincé jusqu'à ce qu'il édite l'adresse.
+  const e = etatInterrupteur({ force: true, prefere: false, machine: PALIERS[3] })
+  assert.equal(e.coche, true)
+  assert.equal(e.bloque, false)
 })
 
 test('etatInterrupteur : sur machine capable il est libre et sans note', () => {

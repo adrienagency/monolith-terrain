@@ -5,12 +5,21 @@
 //
 // ══════════ TROIS ENTRÉES, UNE SORTIE, ET UN ORDRE ══════════════════════════
 //
-//   1. L'ADRESSE (`?f3=1` / `?f3=0`) — elle FORCE, et elle passe avant tout le
-//      reste, y compris devant le refus machine. Ce n'est pas une négligence :
-//      c'est ce qui rend les bancs possibles. On mesure un mode continu sur une
-//      machine faible EXPRÈS, pour savoir de combien il n'y tient pas. Un
-//      garde-fou qu'on ne peut pas désarmer empêche de mesurer sa propre
-//      nécessité.
+//   1. L'ADRESSE (`?f3=1` / `?f3=0`) — elle pose l'ÉTAT INITIAL, et elle passe
+//      avant tout le reste, y compris devant le refus machine. Ce n'est pas une
+//      négligence : c'est ce qui rend les bancs possibles. On mesure un mode
+//      continu sur une machine faible EXPRÈS, pour savoir de combien il n'y
+//      tient pas. Un garde-fou qu'on ne peut pas désarmer empêche de mesurer sa
+//      propre nécessité.
+//
+//      ⚠️ MAIS ELLE NE VERROUILLE PAS, ET C'EST UNE CORRECTION. La première
+//      version bloquait l'interrupteur tant que `?f3` était présent. Adrien
+//      ouvre le serveur par une adresse qui porte `?f3=1` : il se retrouvait
+//      ENFERMÉ dans le mode, sans aucune porte de sortie dans l'interface. Or
+//      un banc a besoin de DÉMARRER dans le bon mode, pas d'interdire le
+//      changement — les deux besoins tiennent ensemble. C'est main.js qui
+//      OUBLIE la force à la première bascule (`_f3Force = null`), de sorte que
+//      le paramètre décrit un départ et non un état permanent.
 //
 //   2. LE REFUS MACHINE — voir plus bas. Il l'emporte sur la préférence.
 //
@@ -116,10 +125,12 @@ export function continuActif({ force = null, prefere = null, defaut = false, mac
 export function etatInterrupteur({ force = null, prefere = null, defaut = false, machine = null } = {}) {
   const m = machinePorteContinu(machine)
   if (force !== null) {
-    // L'adresse a la main : l'interrupteur ne commande plus rien, et il doit le
-    // dire plutôt que de faire semblant. Un contrôle qui ne fait rien quand on
-    // le clique est lu comme un bogue.
-    return { coche: force, bloque: true, note: `forcé par l’adresse (?f3=${force ? 1 : 0}) — l’interrupteur reprend la main sans ce paramètre` }
+    // L'adresse a posé l'état de DÉPART — elle ne le garde pas. L'interrupteur
+    // reste donc libre et muet : il montre où l'on en est, et le clic suivant
+    // le fait basculer (main.js oublie alors la force). Une note « forcé par
+    // l'adresse » serait aujourd'hui un mensonge, et un contrôle grisé une
+    // impasse.
+    return { coche: force, bloque: false, note: '' }
   }
   if (!m.porte) return { coche: false, bloque: true, note: m.raison }
   return { coche: prefere === null ? !!defaut : !!prefere, bloque: false, note: '' }
