@@ -3671,3 +3671,107 @@ body.ce-noui .ce-rec {
 .ce-pts-dot.on { box-shadow: 0 0 0 2px var(--ce-accent), 0 1px 4px rgba(0, 0, 0, 0.3); }
 .ce-pts-dot:active { cursor: grabbing; }
 
+
+/* ══════════ LES BULLES D'AIDE — première activation d'une option ══════════
+   Voir src/ui/aides.js (pose, accessibilité) et src/aides.js (la règle).
+
+   POURQUOI UN APLAT D'ACCENT ET UNE ENCRE PRESQUE NOIRE, et pas l'inverse.
+   Demande d'Adrien : « dans la couleur d'appel ». Un texte BLANC sur
+   --ce-accent (#ea580c) ne donne que 3,56:1 — sous le seuil AA de 4,5:1 pour
+   du corps de texte. L'encre #1c1206 sur le même orange donne 5,13:1. La bulle
+   est donc pleinement dans la couleur d'appel, et lisible ; c'est le sens de
+   la lecture qui s'inverse, pas la couleur.
+
+   LE CALQUE NE PREND AUCUN CLIC. La bulle explique un clic droit maintenu SUR
+   le terrain : si elle interceptait le pointeur, elle volerait le geste
+   qu'elle enseigne. Seul le bouton reprend `pointer-events`. */
+.ce-aide-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 30; /* au-dessus des étiquettes de course (25), sous la chrome (60+) */
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.ce-aide {
+  position: absolute;
+  left: 50%;
+  /* BAS ET CENTRÉE, jamais au milieu : le centre de l'écran est à la fois le
+     bloc dont on parle et l'endroit d'où part naturellement un glissement. */
+  bottom: 15%;
+  width: min(360px, calc(100% - 32px));
+  box-sizing: border-box;
+  padding: 13px 15px 12px;
+  border-radius: 14px;
+  background: var(--ce-accent);
+  color: #1c1206;
+  font-family: var(--ce-font);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28), 0 1px 0 rgba(255, 255, 255, 0.22) inset;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 10px);
+  transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.ce-aide.on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.ce-aide-titre {
+  font: 700 13px/1.2 var(--ce-font);
+  letter-spacing: 0.01em;
+  margin-bottom: 5px;
+}
+.ce-aide-texte {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.ce-aide-note {
+  margin: 7px 0 0;
+  font-size: 11px;
+  line-height: 1.35;
+  /* la précision secondaire s'efface sans descendre sous AA : 3,9:1 sur
+     l'accent, au-dessus du seuil 3:1 qui vaut pour le texte non essentiel */
+  color: rgba(28, 18, 6, 0.72);
+}
+
+.ce-aide-ok {
+  pointer-events: auto; /* LA seule zone du calque qui prend le pointeur */
+  margin-top: 11px;
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 15px;
+  background: #1c1206;
+  color: #ffe9d5;
+  font: 600 11.5px var(--ce-font);
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+.ce-aide-ok:hover {
+  background: #33210c;
+}
+.ce-aide-ok:active {
+  transform: translateY(1px);
+}
+.ce-aide-ok:focus-visible {
+  /* le contour se pose SUR l'aplat orange, il lui faut donc l'encre foncée
+     doublée d'un liseré clair — un contour accent serait invisible ici */
+  outline: 2px solid #ffe9d5;
+  outline-offset: 2px;
+}
+
+/* Écrans étroits : la bulle remonte, la barre du bas mange le pied de page. */
+@media (max-width: 640px) {
+  .ce-aide {
+    bottom: 21%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ce-aide {
+    transition: none;
+    transform: translate(-50%, 0);
+  }
+}

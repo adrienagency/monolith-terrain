@@ -118,6 +118,7 @@ import { buildEffectsPanel, BASE_GRADE } from './ui/effects-panel.js'
 import { buildHourPill } from './ui/hour-pill.js'
 import { buildZoomStepper } from './ui/zoom-stepper.js'
 import { initTips } from './ui/tips.js'
+import { initAides, evalue as evalueAide, aideSection } from './ui/aides.js'
 import { initLoadingHints } from './ui/loading-hints.js'
 import { createAdaptiveQuality } from './perf.js'
 import { detailForZoom } from './zoom-detail.js'
@@ -734,6 +735,15 @@ function hideLoading() {
     // visible. Ce qu'on aurait réglé PENDANT le chargement serait perdu — les
     // panneaux sont derrière le carton, on ne règle rien à ce moment-là.
     history.reset()
+    // LE MÊME INSTANT SERT LA PREMIÈRE BULLE D'AIDE, et pour la même raison :
+    // c'est ici, et pas avant, que le terrain est réellement visible. Un
+    // visiteur arrivé par un lien `?f3=1` n'a jamais touché l'interrupteur du
+    // mode continu — il n'y a donc aucune bascule à observer, alors qu'il a
+    // sous les doigts un geste indevinable. Posée plus tôt, la bulle naîtrait
+    // derrière le carton de chargement. Ce bloc ne s'exécute qu'UNE fois
+    // (`loadingDismissedOnce` court-circuite les rechargements de zone) :
+    // l'évaluation de démarrage est donc unique par visite.
+    evalueAide('fenetre-3x3', fenetreContinueActive())
   }, wait)
 }
 
@@ -1932,6 +1942,12 @@ function f3Applique(prefere) {
   terrain.fenetre.x = 0
   terrain.fenetre.z = 0
   if (params.source === 'real') loadRealTerrain()
+  // La bascule vient de changer quelque chose que rien à l'écran n'explique :
+  // le clic droit ne fait plus la même chose, et aucun libellé ne le dit. La
+  // bulle se pose ici (ui/aides.js décide si elle a déjà été acquittée), et
+  // s'efface d'elle-même quand on éteint — une consigne pour un mode éteint
+  // serait une consigne fausse.
+  evalueAide('fenetre-3x3', _f3Etat)
   return true
 }
 
@@ -5812,7 +5828,9 @@ if (!IS_EMBED) {
     setFenetre: f3Applique,
   })
   perf.root.classList.add('open')
-  box.append(perf.root)
+  const aide = aideSection()
+  aide.root.classList.add('open')
+  box.append(perf.root, aide.root)
   veil.append(box)
   document.body.append(veil)
   const closeSettings = () => veil.classList.remove('open')
@@ -5820,6 +5838,13 @@ if (!IS_EMBED) {
   veil.addEventListener('click', (e) => { if (e.target === veil) closeSettings() })
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSettings() })
   panelCtx.openSettings = () => veil.classList.toggle('open')
+  // ⚠️ LA BULLE VIT DANS `#app`, PAS DANS LE BODY — même raison que les
+  // étiquettes de course (race-labels.js) : en boutique et en Studio, `#app`
+  // n'est qu'un cadre de la page, et une bulle collée au body en sortirait.
+  // `degage` ferme CETTE modale avant l'apparition : l'interrupteur du mode
+  // continu est dedans, et son voile plein écran (z-index 235) enterrerait la
+  // bulle sous lui tout en assombrissant le terrain qu'elle désigne.
+  initAides({ conteneur: container, degage: closeSettings })
 }
 
 // mini panneau Parcours du mode simple (gestion des blocs + Lecture) —
