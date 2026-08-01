@@ -147,6 +147,11 @@ function ferme({ definitif, garderLaDemande = false }) {
   if (!definitif) return
   vues = acquitte(chargeVues(), id)
   ecrisAcquittement(id)
+  // La section « Aide » des Paramètres annonce un COMPTE de bulles masquées :
+  // il vient de changer. Sans ce rappel, elle affichait encore « Aucune bulle
+  // masquée » à la prochaine ouverture — le contrôle de remise à zéro aurait
+  // menti sur son propre effet, ce qui est la pire chose qu'il puisse faire.
+  refreshAll()
 }
 
 function montre(aide) {

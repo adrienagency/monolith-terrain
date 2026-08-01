@@ -1,5 +1,6 @@
 ﻿import { section, toggle, slider, visibleWhen, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
+import { marqueEtape } from './etape.js'
 
 const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z"/><path d="M9 4v14M15 6v14"/></svg>'
 
@@ -27,6 +28,24 @@ export function buildMapPanel(ctx) {
   // Outside covered ground the layer says so in the middle of the screen and
   // switches itself back off (see main.js refreshAerial).
   const aerialToggle = toggle({ label: 'Photo aérienne', get: () => params.aerialEnabled, set: (v) => { params.aerialEnabled = v; ctx.refreshAerial(); refreshAll() } })
+  // BÊTA — deux motifs, tous deux tirés du code et non d'une impression.
+  //
+  // 1. LE COÛT. `aerial-layer.js:48-51` le chiffre pour UN bloc : « 4096 at z15
+  //    is 144 tile fetches and ~15 s on a fast connection ». Le damier peint
+  //    chaque cellule avec son propre budget plein (main.js, paintCellAerial) :
+  //    un 3×3 en demande donc neuf fois autant. Le chiffre annoncé ci-dessous
+  //    est cette multiplication, PAS un chronomètre — personne n'a mesuré la
+  //    photo en damier, et la formulation ne prétend pas le contraire.
+  // 2. L'INACHÈVEMENT, qui est le vrai motif du mot « bêta ». En mode continu
+  //    la photo ne couvre QUE le bloc central de l'emprise — 56 unités sur 168
+  //    (terrain.js:749-754), soit un neuvième de la surface visible, fondu sur
+  //    3 % au bord. Le « grossier d'abord puis affinage » qu'Adrien a tranché
+  //    n'est pas écrit : `AerialLayer.build()` fait une passe unique.
+  marqueEtape(aerialToggle, {
+    etape: 'bêta',
+    raison:
+      'Une centaine de tuiles par bloc, une quinzaine de secondes. En mode continu 3×3 elle ne couvre encore que le bloc central : l’affinage progressif reste à faire.',
+  })
   const aerialOpacity = slider({ label: 'Opacité de la photo', min: 0, max: 1, step: 0.02, get: () => params.aerialOpacity, set: (v) => { params.aerialOpacity = v; ctx.terrain.setAerialOpacity(v); ctx.blockGrid?.setAerialOpacity?.(v) } })
   // v49 : la photo ne vit qu'à la côte, puis s'estompe vers le fond marin. 0 = pleine partout.
   const aerialCoastFade = slider({ label: 'Fondu à la côte', min: 0, max: 0.4, step: 0.01, get: () => params.aerialCoastFade, set: (v) => { params.aerialCoastFade = v; ctx.terrain.setAerialCoastFade(v); ctx.blockGrid?.setAerialCoastFade?.(v) } })

@@ -4,6 +4,7 @@
 // le menu « Aide ». D'où dock:false — bars.js s'occupe de l'accrocher.
 
 import { el, slider, toggle, select, button, section, visibleWhen, refreshAll, onRefresh } from './kit.js'
+import { marqueEtape } from './etape.js'
 import { Panel } from './shell.js'
 import { applyRenderSize } from '../viewport.js'
 
@@ -156,6 +157,19 @@ function fenetreContinueRow(ctx) {
     // Le `set` reçoit la valeur souhaitée ; c'est main.js qui recalcule le
     // verdict (la machine peut encore dire non) et recharge la zone.
     set: (v) => { ctx.setFenetre?.(v); refreshAll() },
+  })
+  // BÊTA, et cette raison-là n'est pas un ornement : c'est l'aveu que
+  // fenetre-reglage.js porte déjà en commentaire (« CE QUI N'A PAS ÉTÉ MESURÉ,
+  // ET QUE JE N'AFFIRME PAS »). Le seuil de refus s'appuie sur la table des
+  // paliers, PAS sur une mesure du palier 2 : le critère d'abandon de l'étude
+  // — 20 im/s pendant un glissement sur l'iMac 2015 — n'a jamais pu être
+  // vérifié, le bridage processeur ×6 de Chrome donnant 1,7 im/s AU REPOS sur
+  // la machine de développement. Un aveu qui ne vit que dans un commentaire ne
+  // protège que les développeurs ; ici il est dit à qui prend le risque.
+  marqueEtape(row, {
+    etape: 'bêta',
+    raison:
+      'En cours de mise au point : la tenue sur machine modeste n’a pas encore pu être mesurée. Compte environ 250 Mo de mémoire en plus.',
   })
   const btn = row.querySelector('.ce-toggle')
   const note = el('div', 'ce-note')
