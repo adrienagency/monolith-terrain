@@ -353,6 +353,19 @@ export class GpxLayerManager {
     this.playingIndex = -1
   }
 
+  // La tête COMMANDÉE par la poursuite hélicoptère — même routage que headT /
+  // headWorld plus haut : le calque qui joue, sinon celui qui a le focus (la
+  // poursuite peut se lancer sans lecture, depuis la pastille du pilote).
+  setHeadAt(t, dt) {
+    const l = this.playingLayer || this.activeLayer
+    l?.gpx.setHeadAt(t, dt)
+  }
+
+  releaseHead() {
+    const l = this.playingLayer || this.activeLayer
+    l?.gpx.releaseHead()
+  }
+
   // Drives whichever layer is currently playing, and detects the "just
   // finished" edge (isPlaying() true -> false after tick(), same edge
   // gpx.js's own tick() uses to auto-pause at headT>=1) to advance the

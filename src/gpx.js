@@ -550,6 +550,8 @@ export class GpxLayer {
     this.playing = false
     this.headT = 0
     this._revealT = 1
+    // vrai le temps d'UNE image quand la poursuite commande la tête (setHeadAt)
+    this._headCommande = false
     this.raceTicks = null // Race Studio : [{km}] — traits verticaux sur le profil
     this._segCount = 0
     this._dispAlt = null
@@ -1385,6 +1387,18 @@ export class GpxLayer {
   // advances the progressive-reveal head while playing — called from the
   // main render loop each frame with a real per-frame dt.
   tick(dt) {
+    // ⚠️ QUELQU'UN A LA MAIN SUR LA TÊTE — ON N'AVANCE PAS. La poursuite
+    // hélicoptère commande la tête image par image (voir setHeadAt) et son
+    // horloge n'a AUCUNE raison de coïncider avec celle de la lecture : la
+    // lecture parcourt les 47 km en 71 s, la poursuite ne couvre que le tronçon
+    // retenu, à l'allure de Tobler. Laisser les deux avancer, c'est deux
+    // positions pour une seule tête — le marqueur finirait à des kilomètres du
+    // sujet que la caméra vise. Le drapeau se CONSOMME ici : dès qu'une image
+    // passe sans commande, la lecture reprend la main toute seule.
+    if (this._headCommande) {
+      this._headCommande = false
+      return
+    }
     if (this.playing && this.track?.world?.length > 1) {
       const totalKm = this.track.cumKm[this.track.cumKm.length - 1] || 0
       const duration = Math.min(90, Math.max(8, totalKm * 1.5))
@@ -1427,6 +1441,34 @@ export class GpxLayer {
     this._applyReveal(1) // restore the full line
     this._hideVillages()
     this.headLabel?.classList.add('hidden')
+    this.setHover(-1, false)
+  }
+
+  // ---- tête COMMANDÉE de l'extérieur (poursuite hélicoptère) ---------------
+  //
+  // `t` est une fraction 0..1 d'indice de segment, exactement comme `headT` :
+  // c'est la poursuite qui la calcule (voir `fractionSurTrace` dans
+  // poursuite.js), parce qu'elle seule sait où en est son sujet. On repasse par
+  // les MÊMES deux appels que tick() — révélation de la ligne puis marqueur —
+  // pour qu'il n'existe jamais deux façons de placer cette tête (c'est
+  // exactement le bug de la tâche 16, voir `revealVertexIndex`).
+  setHeadAt(t, dt = 1 / 60) {
+    if (!this.track?.world || this.track.world.length < 2) return
+    this._headCommande = true
+    this.headT = THREE.MathUtils.clamp(t, 0, 1)
+    this._applyReveal(this.headT)
+    this._updateHead(dt)
+  }
+
+  // La poursuite rend la main. Si rien ne lit, on restaure la ligne entière :
+  // une trace amputée au milieu, avec plus rien qui bouge, se lit comme un bug.
+  releaseHead() {
+    this._headCommande = false
+    if (this.playing || !this.track) return
+    this._applyReveal(1)
+    this.headMarker.visible = false
+    this.headLabel?.classList.add('hidden')
+    this._hideVillages()
     this.setHover(-1, false)
   }
 

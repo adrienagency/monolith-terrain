@@ -52,7 +52,10 @@ import { PeaksLayer } from './peaks.js'
 import { Clouds2 } from './clouds2.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
-import { FLAGS } from './flags.js'
+import { FLAGS, suiviHelicoActif, portionPoursuite } from './flags.js'
+// `fractionSurTrace` : le pont d'indices qui remet la tête de course sous
+// l'objectif de la poursuite (voir son commentaire dans poursuite.js).
+import { fractionSurTrace } from './poursuite.js'
 import { ATLAS_COTE, EMPRISE_EN_VOL_MAX, enVolBorne, originesEmprise, recollerEmprise } from './dem-emprise.js'
 import { COURSE_ELASTIQUE, avanceFenetre, rappelElastique, poseDansLaCourse, fenetreQuiCentre } from './fenetre-course.js'
 import { dansFenetre } from './fenetre-clip.js'
@@ -81,6 +84,13 @@ import { DroneCam } from './drone-cam.js'
 import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, deriveMetalTints, deriveAoColor, deriveHazeColor, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
 import { CameraShotPlayer, TOP_DOWN_DIR } from './camera-shots.js'
+// CAMÉRA PILOTE (bouton avion, en bas à droite). À ne confondre ni avec
+// cameraAuto (oscillations du panneau Caméra) ni avec `shots` (plans de cinéma
+// composés) : celle-ci VOLE. Elle cherche un couloir de vallée, prouve sa sortie
+// avant de s'y engager, et le suit au ras du sol en s'inclinant dans les
+// virages. Tout le calcul est dans src/pilote.js, qui est pur ; src/pilote-cam.js
+// n'est que la prise three.js.
+import { PiloteCam } from './pilote-cam.js'
 import { N8AOPostPass } from 'n8ao'
 import { History } from './history.js'
 import { isTap } from './gestes.js'
@@ -88,7 +98,7 @@ import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
 import { showNotice } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
-import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickCore, buildShibuChrome, initUiLevel, buildAdvToggle, focusSearch, isUiAdvanced } from './ui/bars.js'
+import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildPiloteButton, buildCredits, buildMapCorner, buildQuickCore, buildShibuChrome, initUiLevel, buildAdvToggle, focusSearch, isUiAdvanced } from './ui/bars.js'
 import { routeEntryFor, incomingWaypoints, resolveWaypointKm } from './route-entry.js'
 import { buildMiniRoute } from './ui/mini-route.js'
 import { buildSettingsSearch } from './ui/settings-search.js'
@@ -1463,6 +1473,7 @@ scene.add(hud3.group)
 function flyTo(pos, target, opts = {}) {
   cameraAuto.stop() // any programmatic move cancels a looping automation
   shots.cancel() // …et interrompt le plan en cours (le cran reste sélectionné)
+  pilote.cancel() // …et fait atterrir la caméra pilote
   tween.p0.copy(camera.position)
   tween.t0.copy(controls.target)
   tween.p1.copy(pos)
@@ -1574,6 +1585,9 @@ let controlsHeld = false
 // l'a mise et ne fait que VISER la tête. Réarmé à chaque nouveau Play.
 let followManual = false
 let followZoomVel = 0 // élan de zoom molette en suivi (log-échelle / s)
+// vrai tant que la poursuite hélicoptère commande la tête de course : sert
+// uniquement à savoir QUAND rendre la main (voir GpxLayer.releaseHead)
+let teteCommandee = false
 controls.addEventListener('start', () => {
   tween.active = false
   tour.active = false
@@ -1589,6 +1603,11 @@ controls.addEventListener('start', () => {
   // reste. Le cran reste sélectionné : le clic suivant enchaîne sur le plan
   // d'après au lieu de tout reprendre au début.
   shots.cancel()
+  // Attraper la caméra arrête aussi le vol du pilote. Le `camera.up` remis
+  // d'aplomb juste en dessous n'est pas décoratif : le pilote incline `up` pour
+  // faire basculer l'horizon, et OrbitControls s'en sert comme pôle — un `up`
+  // laissé incliné ferait tourner toute la carte au premier glissé.
+  pilote.cancel()
   camera.up.set(0, 1, 0)
   controlsHeld = true
   if (drone.active && params.gpxFollow) followManual = true
@@ -1604,6 +1623,7 @@ let modes = null // assigned once the globe + mode machine exist (below)
 let isoBtn = null // assigned once the bars exist — referenced by the mode hooks
 let mapCorner = null // bottom-left cartography corner — assigned once bars exist
 let cineBtn = null
+let piloteBtn = null // caméra pilote — assigné une fois les barres construites
 let aq = null // adaptive quality controller (perf.js) — built after the panels
 let recorder = null // Recorder instance, lazy-loaded with the export stack
 
@@ -3001,6 +3021,7 @@ modes = new Modes({
       mapLayers.setSurfaceVisible(v)
       isoBtn?.setVisible(v) // the isometric shortcut only makes sense over the block
       cineBtn?.setVisible(v)
+      piloteBtn?.setVisible(v)
       mapCorner?.setVisible(v) // cartography corner is surface-only too
       scene.fog = v && params.fogEnabled ? fogRef : null
       refreshOsmCredit() // GeoNames credit only applies in surface mode — resync on mode change
@@ -4491,6 +4512,32 @@ const shots = new CameraShotPlayer({
   },
 })
 
+// LA CAMÉRA PILOTE. Elle partage l'échantillonneur de relief des autres
+// automatismes ; tout le reste lui est propre.
+const pilote = new PiloteCam({
+  camera,
+  controls,
+  sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0,
+  half: TERRAIN_SIZE / 2,
+  // Le cran 3 (poursuite de la tête de course) n'existe que s'il y a une course :
+  // c'est ce getter qui le fait apparaître et disparaître tout seul.
+  getTrace: () => gpxLayer?.track?.world ?? null,
+  // L'échelle du bloc : la poursuite en a besoin pour convertir les km/h de
+  // l'allure et les 50-150 m de hauteur du métier en unités monde. Sans elle,
+  // l'hélicoptère volerait à 120 unités du sol au lieu de 120 mètres.
+  getEchelle: () => ({
+    metresParUnite: dem ? dem.extentMeters / TERRAIN_SIZE : 1,
+    exagerationV: params.demExaggeration || 1,
+  }),
+  // Le tronçon couvert — 'reine' par défaut, `?troncon=tout` pour tout voir.
+  // Le pourquoi (202 °/s de balayage sur 47 km comprimés) est dans flags.js.
+  getPortion: () => portionPoursuite(),
+  onState: () => {
+    piloteBtn?.setActive(pilote.active)
+    piloteBtn?.setBadge(pilote.badge)
+  },
+})
+
 function flyTrack() {
   const w = gpxLayer.track?.world
   if (!w || w.length < 2 || modes.mode !== 'surface') return
@@ -4499,6 +4546,9 @@ function flyTrack() {
   tour.active = false
   tween.active = false
   cameraAuto.stop()
+  // ESSAI 2026-08-01 — même bascule que le suivi juste dessous : le survol du
+  // tracé passe à la poursuite hélicoptère. L'ancien reste sous le `if`.
+  if (suiviHelicoActif() && pilote.lancerPoursuite()) return
   drone.start(w, { duration })
 }
 
@@ -4525,11 +4575,22 @@ function engageGpxFollow() {
   tour.active = false
   tween.active = false
   cameraAuto.stop()
+  // ⚠️ ESSAI DU 2026-08-01 — LE SUIVI LANCE LA POURSUITE HÉLICOPTÈRE.
+  // Adrien : « lance la vue d'hélico, remplace celle actuelle de suivi tout en
+  // la laissant de côté ». L'ancien rail DroneCam est intact, juste en dessous :
+  // il reprend seul si la poursuite refuse (tracé trop court, aucun couloir).
+  // RETOUR EN ARRIÈRE EN UNE LIGNE : `suiviHelico: false` dans src/flags.js.
+  if (suiviHelicoActif() && pilote.lancerPoursuite()) return
   if (drone.start(w, { seedAt: gpxLayer.headT })) showFollowPad(drone) // resume-in-place, not a snap back to the start
 }
 function disengageGpxFollow() {
   hideFollowPad()
   if (drone.active) drone.stop()
+  // la poursuite s'arrête avec le suivi, et la tête de course revient à
+  // l'horloge de lecture (ou la ligne entière se restaure — voir releaseHead)
+  if (pilote.poursuite) pilote.cancel()
+  teteCommandee = false
+  gpxLayer.releaseHead?.()
 }
 // Sequenced-playback handover (task 22 §5) — GpxLayerManager.tick() auto-
 // advances focus + play() to the next layer on its own, so this is the ONLY
@@ -5265,7 +5326,7 @@ function toggleRegion() {
 // fixed timestep so the video is deterministic whatever the encode speed
 let loopPaused = false
 function stepScene(t, dt) {
-  if (shots.active || cameraAuto.active || drone.active || tour.active || tween.active || (params.gpxFollow && gpxLayer.isPlaying())) updateCameraMotion(dt)
+  if (pilote.active || shots.active || cameraAuto.active || drone.active || tour.active || tween.active || (params.gpxFollow && gpxLayer.isPlaying())) updateCameraMotion(dt)
   if (!params.paused) {
     clouds.update(dt, params, camera)
     traffic.update(dt)
@@ -5671,6 +5732,23 @@ cineBtn = buildCineButton({
   next: () => {
     if (modes.mode !== 'surface' || modes.busy) return
     shots.next()
+  },
+})
+
+// CAMÉRA PILOTE (Adrien) : « une vraie caméra intelligente, qui détecte les
+// vallées, passe au ras du sol, évite les collisions et se comporte comme un
+// pilote d'avion ou d'hélicoptère ». Trois crans : avion, hélicoptère, arrêt.
+// Si le bloc n'offre aucun couloir engageable, le vol ne part pas et le badge
+// reste vide — c'est un REFUS de pilote, pas une panne.
+piloteBtn = buildPiloteButton({
+  next: () => {
+    if (modes.mode !== 'surface' || modes.busy) return
+    tween.active = false
+    tour.active = false
+    drone.stop()
+    cameraAuto.stop()
+    shots.cancel()
+    pilote.next()
   },
 })
 
@@ -6385,7 +6463,7 @@ history.reset()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { boats, raceLabels, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, shots, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo,
+window.__exp = { boats, raceLabels, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, shots, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, pilote,
   // INTERRUPTEUR de la teinte d'interface : __exp.setUiTint(false) rend
   // l'interface neutre de v28.css, true la raccorde à la palette.
   setUiTint: (v) => { params.uiTint = v !== false; syncUiTheme() }, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,
@@ -6481,6 +6559,31 @@ let placesRefreshAcc = 0 // throttles the places-layer screen-space declutter re
 
 // camera motion for one frame — shared by the live loop and offline export
 function updateCameraMotion(dt) {
+  // LA POURSUITE A RENDU LA MAIN (fin du clip, geste sur la caméra, autre plan,
+  // clic sur la pastille) → la tête de course repasse à l'horloge de lecture, et
+  // la ligne entière se restaure si rien ne lit. UN SEUL point de sortie, ici,
+  // plutôt qu'un à chaque `pilote.cancel()` du fichier : ils sont cinq, et il en
+  // manquerait un.
+  if (teteCommandee && !pilote.poursuite) {
+    teteCommandee = false
+    gpxLayer.releaseHead?.()
+  }
+  // VOL DU PILOTE en cours (bouton avion) — en tête : c'est le seul automatisme
+  // qui pilote AUSSI le roulis, donc le seul qu'un autre écraserait à coup sûr.
+  if (pilote.active) {
+    pilote.update(dt)
+    // ⚠️ LA TÊTE DE COURSE SUIT LE SUJET DE LA POURSUITE, PAS L'HORLOGE DE
+    // LECTURE. Une poursuite dont le sujet est ailleurs à l'écran n'a aucun sens
+    // à l'œil — c'est LE point du mode. Les deux horloges n'ont aucune raison de
+    // coïncider (la lecture parcourt les 47 km en 71 s, la poursuite ne couvre
+    // que le tronçon retenu, à l'allure de Tobler) : celle de la poursuite
+    // gagne, et tick() se tait pour l'image (voir GpxLayer.setHeadAt).
+    if (pilote.poursuite && pilote.posePoursuite) {
+      gpxLayer.setHeadAt(fractionSurTrace(pilote.poursuite, pilote.posePoursuite.idx), dt)
+      teteCommandee = true
+    }
+    return
+  }
   // PLAN DE CAMÉRA en cours (bouton cinéma) — en tête, car un plan composé prime
   // sur toute autre automation ; les deux ne tournent jamais ensemble.
   if (shots.active) {

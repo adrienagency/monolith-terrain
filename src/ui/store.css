@@ -78,6 +78,9 @@ body.store-mode .ce-isobtn {
 body.store-mode .ce-cinebtn {
   right: calc(min(42vw, 560px) + 86px);
 }
+body.store-mode .ce-pilotebtn {
+  right: calc(min(42vw, 560px) + 136px);
+}
 
 .store-caption {
   position: fixed; left: 26px; bottom: 10px; z-index: 30;
