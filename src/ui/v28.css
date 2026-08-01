@@ -2461,6 +2461,10 @@ body.shibu-view .gpx-profile {
     right: 10px;
     bottom: calc(172px + env(safe-area-inset-bottom, 0px));
   }
+  body.shibu-view .ce-pilotebtn {
+    right: 10px;
+    bottom: calc(226px + env(safe-area-inset-bottom, 0px));
+  }
   /* mini panneau lecture : plein pouce — lignes 44px, boutons 44px, jamais
      plus large que l'écran */
   body.shibu-view .ce-miniroute {
@@ -2880,6 +2884,17 @@ body.atelier-mode .ce-changelog-btn {
   right: 64px; /* one slot left of the iso button, same bottom row */
 }
 .ce-cinebtn.on {
+  border-color: var(--ce-accent);
+  color: var(--ce-accent);
+}
+/* CAMÉRA PILOTE — troisième pastille de la rangée, même grammaire que les deux
+   autres : même taille, même badge numéroté, même accent quand ça tourne. Elle
+   porte aussi `.ce-isobtn`, dont elle hérite tout le reste (et donc aussi les
+   règles de masquage `ce-hub` / `ce-noui`, sans rien à redire ailleurs). */
+.ce-pilotebtn {
+  right: 114px;
+}
+.ce-pilotebtn.on {
   border-color: var(--ce-accent);
   color: var(--ce-accent);
 }

@@ -74,6 +74,13 @@ import { DroneCam } from './drone-cam.js'
 import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, deriveMetalTints, deriveAoColor, deriveHazeColor, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
 import { CameraShotPlayer, TOP_DOWN_DIR } from './camera-shots.js'
+// CAMÉRA PILOTE (bouton avion, en bas à droite). À ne confondre ni avec
+// cameraAuto (oscillations du panneau Caméra) ni avec `shots` (plans de cinéma
+// composés) : celle-ci VOLE. Elle cherche un couloir de vallée, prouve sa sortie
+// avant de s'y engager, et le suit au ras du sol en s'inclinant dans les
+// virages. Tout le calcul est dans src/pilote.js, qui est pur ; src/pilote-cam.js
+// n'est que la prise three.js.
+import { PiloteCam } from './pilote-cam.js'
 import { N8AOPostPass } from 'n8ao'
 import { History } from './history.js'
 import { isTap } from './gestes.js'
@@ -81,7 +88,7 @@ import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
 import { showNotice } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
-import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickCore, buildShibuChrome, initUiLevel, buildAdvToggle, focusSearch, isUiAdvanced } from './ui/bars.js'
+import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildPiloteButton, buildCredits, buildMapCorner, buildQuickCore, buildShibuChrome, initUiLevel, buildAdvToggle, focusSearch, isUiAdvanced } from './ui/bars.js'
 import { routeEntryFor, incomingWaypoints, resolveWaypointKm } from './route-entry.js'
 import { buildMiniRoute } from './ui/mini-route.js'
 import { buildSettingsSearch } from './ui/settings-search.js'
@@ -1435,6 +1442,7 @@ scene.add(hud3.group)
 function flyTo(pos, target, opts = {}) {
   cameraAuto.stop() // any programmatic move cancels a looping automation
   shots.cancel() // …et interrompt le plan en cours (le cran reste sélectionné)
+  pilote.cancel() // …et fait atterrir la caméra pilote
   tween.p0.copy(camera.position)
   tween.t0.copy(controls.target)
   tween.p1.copy(pos)
@@ -1561,6 +1569,11 @@ controls.addEventListener('start', () => {
   // reste. Le cran reste sélectionné : le clic suivant enchaîne sur le plan
   // d'après au lieu de tout reprendre au début.
   shots.cancel()
+  // Attraper la caméra arrête aussi le vol du pilote. Le `camera.up` remis
+  // d'aplomb juste en dessous n'est pas décoratif : le pilote incline `up` pour
+  // faire basculer l'horizon, et OrbitControls s'en sert comme pôle — un `up`
+  // laissé incliné ferait tourner toute la carte au premier glissé.
+  pilote.cancel()
   camera.up.set(0, 1, 0)
   controlsHeld = true
   if (drone.active && params.gpxFollow) followManual = true
@@ -1576,6 +1589,7 @@ let modes = null // assigned once the globe + mode machine exist (below)
 let isoBtn = null // assigned once the bars exist — referenced by the mode hooks
 let mapCorner = null // bottom-left cartography corner — assigned once bars exist
 let cineBtn = null
+let piloteBtn = null // caméra pilote — assigné une fois les barres construites
 let aq = null // adaptive quality controller (perf.js) — built after the panels
 let recorder = null // Recorder instance, lazy-loaded with the export stack
 
@@ -2177,6 +2191,7 @@ modes = new Modes({
       mapLayers.setSurfaceVisible(v)
       isoBtn?.setVisible(v) // the isometric shortcut only makes sense over the block
       cineBtn?.setVisible(v)
+      piloteBtn?.setVisible(v)
       mapCorner?.setVisible(v) // cartography corner is surface-only too
       scene.fog = v && params.fogEnabled ? fogRef : null
       refreshOsmCredit() // GeoNames credit only applies in surface mode — resync on mode change
@@ -3613,6 +3628,19 @@ const shots = new CameraShotPlayer({
   },
 })
 
+// LA CAMÉRA PILOTE. Elle partage l'échantillonneur de relief des autres
+// automatismes ; tout le reste lui est propre.
+const pilote = new PiloteCam({
+  camera,
+  controls,
+  sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0,
+  half: TERRAIN_SIZE / 2,
+  onState: () => {
+    piloteBtn?.setActive(pilote.active)
+    piloteBtn?.setBadge(pilote.badge)
+  },
+})
+
 function flyTrack() {
   const w = gpxLayer.track?.world
   if (!w || w.length < 2 || modes.mode !== 'surface') return
@@ -4369,7 +4397,7 @@ function toggleRegion() {
 // fixed timestep so the video is deterministic whatever the encode speed
 let loopPaused = false
 function stepScene(t, dt) {
-  if (shots.active || cameraAuto.active || drone.active || tour.active || tween.active || (params.gpxFollow && gpxLayer.isPlaying())) updateCameraMotion(dt)
+  if (pilote.active || shots.active || cameraAuto.active || drone.active || tour.active || tween.active || (params.gpxFollow && gpxLayer.isPlaying())) updateCameraMotion(dt)
   if (!params.paused) {
     clouds.update(dt, params, camera)
     traffic.update(dt)
@@ -4757,6 +4785,23 @@ cineBtn = buildCineButton({
   next: () => {
     if (modes.mode !== 'surface' || modes.busy) return
     shots.next()
+  },
+})
+
+// CAMÉRA PILOTE (Adrien) : « une vraie caméra intelligente, qui détecte les
+// vallées, passe au ras du sol, évite les collisions et se comporte comme un
+// pilote d'avion ou d'hélicoptère ». Trois crans : avion, hélicoptère, arrêt.
+// Si le bloc n'offre aucun couloir engageable, le vol ne part pas et le badge
+// reste vide — c'est un REFUS de pilote, pas une panne.
+piloteBtn = buildPiloteButton({
+  next: () => {
+    if (modes.mode !== 'surface' || modes.busy) return
+    tween.active = false
+    tour.active = false
+    drone.stop()
+    cameraAuto.stop()
+    shots.cancel()
+    pilote.next()
   },
 })
 
@@ -5436,7 +5481,7 @@ history.reset()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { boats, raceLabels, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, shots, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo,
+window.__exp = { boats, raceLabels, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, shots, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, pilote,
   // INTERRUPTEUR de la teinte d'interface : __exp.setUiTint(false) rend
   // l'interface neutre de v28.css, true la raccorde à la palette.
   setUiTint: (v) => { params.uiTint = v !== false; syncUiTheme() }, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,
@@ -5516,6 +5561,12 @@ let placesRefreshAcc = 0 // throttles the places-layer screen-space declutter re
 
 // camera motion for one frame — shared by the live loop and offline export
 function updateCameraMotion(dt) {
+  // VOL DU PILOTE en cours (bouton avion) — en tête : c'est le seul automatisme
+  // qui pilote AUSSI le roulis, donc le seul qu'un autre écraserait à coup sûr.
+  if (pilote.active) {
+    pilote.update(dt)
+    return
+  }
   // PLAN DE CAMÉRA en cours (bouton cinéma) — en tête, car un plan composé prime
   // sur toute autre automation ; les deux ne tournent jamais ensemble.
   if (shots.active) {

@@ -19,6 +19,7 @@ body.atelier-mode {
 }
 body.atelier-mode .ce-isobtn { right: 36px; bottom: 48px; }
 body.atelier-mode .ce-cinebtn { right: 86px; }
+body.atelier-mode .ce-pilotebtn { right: 136px; }
 
 .atelier-col {
   position: fixed; top: 0; left: 0; bottom: 0; z-index: 40;
