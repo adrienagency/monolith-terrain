@@ -7,6 +7,7 @@ import {
   sujetVisible, monteePourVoir, cuirePlanDeVol,
   visee, planA, SEQUENCE_DEFAUT, PLANS_POURSUITE, troncoReine,
   preparerPoursuite, poseDePoursuite, poursuiteComplete, etatInitial,
+  fractionSurTrace,
 } from '../src/poursuite.js'
 
 const HALF = 28
@@ -405,4 +406,86 @@ test('courbureA rend un signe, et il change avec le sens du virage', () => {
     gauche.push({ x: -Math.sin(a) * 10, z: Math.cos(a) * 10 })
   }
   assert.ok(Math.sign(courbureA(droite, 30, 6)) === -Math.sign(courbureA(gauche, 30, 6)))
+})
+
+// ============================ 10. LE PONT AVEC LA TÊTE DE COURSE DE SHIBUMAP
+//
+// La poursuite compte en indices sur `brut` (rééchantillonné ET coupé au
+// tronçon) ; ShibuMap place sa tête de course en fraction d'indice de sommet du
+// tracé CHARGÉ. `fractionSurTrace` est le seul pont entre les deux, et si elle
+// ment, le marqueur et l'objectif montrent deux endroits différents — ce qui
+// vide le mode de son sens.
+
+test('fractionSurTrace : le debut du troncon retombe sur le bon sommet', () => {
+  const trace = sentierEnLacets()
+  const ctx = preparerPoursuite({
+    trace, sampleGround: versant(), half: HALF,
+    metresParUnite: M_PAR_UNITE, exagerationV: EXAG,
+  })
+  const attendu = ctx.troncon[0] / (trace.length - 1)
+  assert.ok(Math.abs(fractionSurTrace(ctx, 0) - attendu) < 2e-3, `idx 0 -> ${fractionSurTrace(ctx, 0)} au lieu de ${attendu}`)
+})
+
+test('fractionSurTrace : la fraction croit avec l indice, et reste dans le troncon', () => {
+  const trace = sentierEnLacets()
+  const ctx = preparerPoursuite({
+    trace, sampleGround: versant(), half: HALF,
+    metresParUnite: M_PAR_UNITE, exagerationV: EXAG,
+  })
+  const a = ctx.troncon[0] / (trace.length - 1)
+  const b = ctx.troncon[1] / (trace.length - 1)
+  let prec = -1
+  for (let i = 0; i <= ctx.brut.length - 1; i += 5) {
+    const f = fractionSurTrace(ctx, i)
+    assert.ok(f >= prec - 1e-12, `la tete recule a l indice ${i}`)
+    assert.ok(f >= a - 2e-3 && f <= b + 2e-3, `l indice ${i} sort du troncon : ${f} hors [${a}, ${b}]`)
+    prec = f
+  }
+})
+
+test('fractionSurTrace : la tete tombe VRAIMENT sur le sujet vise', () => {
+  // Le seul test qui compte : on prend la position rendue par la pose, et on
+  // vérifie que le sommet désigné par la fraction est bien celui-là. Un écart
+  // se mesure en unités monde, pas en indices — c'est ce que l'œil voit.
+  const trace = sentierEnLacets()
+  const ctx = preparerPoursuite({
+    trace, sampleGround: versant(), half: HALF,
+    metresParUnite: M_PAR_UNITE, exagerationV: EXAG,
+  })
+  let pire = 0
+  let etat = etatInitial()
+  for (let k = 0; k <= 40; k++) {
+    const t = (ctx.duree * k) / 40
+    const p = poseDePoursuite(t, ctx, etat, 1 / 60)
+    etat = p.etat
+    const f = fractionSurTrace(ctx, p.idx)
+    // ShibuMap arrondit la fraction à un sommet entier (revealVertexIndex)
+    const sommet = trace[Math.round(f * (trace.length - 1))]
+    pire = Math.max(pire, Math.hypot(sommet.x - p.sujet.x, sommet.z - p.sujet.z))
+  }
+  // Le pas de rééchantillonnage vaut half × 0,004 = 0,112 unité : tomber à
+  // moins d'un pas du sujet, c'est tomber sur le bon sommet.
+  assert.ok(pire < ctx.pas * 1.5, `ecart maximal ${pire.toFixed(4)} unite, pas de grille ${ctx.pas.toFixed(4)}`)
+})
+
+test('fractionSurTrace : sur tout le parcours, elle balaie bien 0 a 1', () => {
+  const trace = sentierEnLacets()
+  const ctx = preparerPoursuite({
+    trace, sampleGround: versant(), half: HALF,
+    metresParUnite: M_PAR_UNITE, exagerationV: EXAG, portion: null,
+  })
+  assert.deepEqual(ctx.troncon, [0, trace.length - 1])
+  assert.ok(fractionSurTrace(ctx, 0) < 1e-6)
+  assert.ok(fractionSurTrace(ctx, ctx.brut.length - 1) > 0.99)
+})
+
+test('fractionSurTrace : un contexte vide ne leve pas, il rend 0', () => {
+  assert.equal(fractionSurTrace(null, 12), 0)
+  assert.equal(fractionSurTrace({ cumTrace: new Float64Array(1), troncon: [0, 0], pas: 1 }, 3), 0)
+})
+
+test('la pose porte l indice du sujet — sans lui, aucun pont possible', () => {
+  const ctx = contexte()
+  const p = poseDePoursuite(ctx.duree * 0.4, ctx, etatInitial(), 1 / 60)
+  assert.ok(Number.isFinite(p.idx) && p.idx >= 0 && p.idx <= ctx.brut.length - 1)
 })

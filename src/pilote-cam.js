@@ -33,13 +33,17 @@ export const VOL_POURSUITE = { id: 'poursuite', nom: '3', label: 'Poursuite de l
 export class PiloteCam {
   // `getTrace` (optionnel) rend la polyligne monde de la course, ou null. C'est
   // par elle que le cran 3 apparaît ou disparaît.
-  constructor({ camera, controls, sampleGround, half, getTrace = null, getEchelle = null, onState = () => {}, onPlan = () => {} }) {
+  // `getPortion` (optionnel) rend le tronçon à couvrir — 'reine', null (tout le
+  // parcours) ou [a, b] en fractions. Voir `portionPoursuite` dans flags.js : ce
+  // n'est pas un goût, c'est une limite d'échantillonnage.
+  constructor({ camera, controls, sampleGround, half, getTrace = null, getEchelle = null, getPortion = null, onState = () => {}, onPlan = () => {} }) {
     this.camera = camera
     this.controls = controls
     this.sampleGround = sampleGround
     this.half = half
     this.getTrace = getTrace
     this.getEchelle = getEchelle
+    this.getPortion = getPortion
     this.onState = onState
     this.onPlan = onPlan
     this.active = false
@@ -47,6 +51,10 @@ export class PiloteCam {
     this.plan = null
     this.etat = null
     this.poursuite = null // contexte de poursuite quand le cran 3 tourne
+    // la DERNIÈRE POSE de poursuite calculée. Elle porte `idx`, l'indice du
+    // sujet — c'est par elle que ShibuMap replace sa tête de course sous
+    // l'objectif au lieu de la laisser filer sur sa propre horloge de lecture.
+    this.posePoursuite = null
     this.t = 0
     this._q = new THREE.Quaternion()
     this._m = new THREE.Matrix4()
@@ -83,15 +91,32 @@ export class PiloteCam {
       half: this.half,
       metresParUnite: ech.metresParUnite,
       exagerationV: ech.exagerationV,
+      ...(this.getPortion ? { portion: this.getPortion() } : {}),
     })
     if (!ctx) return null
     this.poursuite = ctx
+    this.posePoursuite = null
     this.etatP = etatInitial()
     this.t = 0
     this.plan = null
     this.etat = null
     this.active = true
     this.onPlan(ctx)
+    return ctx
+  }
+
+  // LA PORTE D'ENTRÉE EXTÉRIEURE : le suivi de tracé (bouton Lecture du panneau
+  // Parcours) lance la poursuite sans passer par les crans du bouton. Le cran 3
+  // est quand même SÉLECTIONNÉ — le badge doit dire ce que la caméra fait, quelle
+  // que soit la porte par laquelle on est entré, sinon un clic sur la pastille
+  // repartirait au vol 1 en plein plan.
+  lancerPoursuite() {
+    const c = this.crans
+    const i = c.findIndex((v) => v.id === 'poursuite')
+    if (i < 0) return null
+    const ctx = this._lancerPoursuite()
+    this.index = ctx ? i : -1
+    this.onState()
     return ctx
   }
 
@@ -189,6 +214,7 @@ export class PiloteCam {
       this.t += dt
       const p = poseDePoursuite(this.t, this.poursuite, this.etatP, dt)
       this.etatP = p.etat
+      this.posePoursuite = p
       this._orienter(p.pos, p.target, p.roulis)
       if (this.t >= this.poursuite.duree) {
         this.active = false

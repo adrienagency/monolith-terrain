@@ -633,6 +633,46 @@ export function troncoReine(trace, { part = 0.16, exagerationV = 1 } = {}) {
   return [best, best + fen]
 }
 
+// Abscisse curviligne 3D d'une polyligne, un cumul par sommet.
+function cumul3D(pts) {
+  const c = new Float64Array(pts.length)
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1]
+    const b = pts[i]
+    c[i] = c[i - 1] + Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z)
+  }
+  return c
+}
+
+// OÙ EST LE SUJET SUR LE TRACÉ D'ORIGINE, en fraction d'indice de sommet (0..1).
+//
+// ⚠️ SANS ÇA, LE MARQUEUR DE TÊTE DE COURSE ET LA CAMÉRA MONTRENT DEUX ENDROITS
+// DIFFÉRENTS — et une poursuite dont le sujet est ailleurs à l'écran ne veut
+// plus rien dire. ShibuMap place sa tête de course avec `headT`, une fraction de
+// l'INDICE DE SOMMET du tracé chargé (voir `revealVertexIndex` dans gpx.js),
+// pendant que la poursuite raisonne en indice sur `brut` : rééchantillonné à pas
+// constant ET coupé au tronçon. Ni la même origine, ni le même pas.
+//
+// Le pont est l'ABSCISSE CURVILIGNE, seule grandeur commune : `brut` avance
+// exactement de `pas` par indice depuis le sommet `troncon[0]`, donc
+//     s = cumTrace[troncon[0]] + idx × pas
+// et il ne reste qu'à retrouver le sommet d'origine à cette abscisse.
+export function fractionSurTrace(ctx, idx) {
+  const c = ctx?.cumTrace
+  if (!c || c.length < 2) return 0
+  const s = clamp(c[ctx.troncon[0]] + idx * ctx.pas, 0, c[c.length - 1])
+  let lo = 0
+  let hi = c.length - 1
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1
+    if (c[mid] <= s) lo = mid
+    else hi = mid
+  }
+  const seg = c[hi] - c[lo]
+  const f = seg > 1e-12 ? (s - c[lo]) / seg : 0
+  return clamp((lo + f) / (c.length - 1), 0, 1)
+}
+
 // ==================================================== 7. LA PRÉPARATION
 //
 // Tout est cuit ici, une fois. `poseDePoursuite` n'est ensuite qu'une lecture.
@@ -649,6 +689,11 @@ export function preparerPoursuite({
 } = {}) {
   if (!trace || trace.length < 8) return null
   const P = resoudreProfil(profil, half, surcharge)
+  // ⚠️ L'ABSCISSE CURVILIGNE DU TRACÉ D'ORIGINE, CALCULÉE AVANT LA COUPE — après,
+  // le tronçon aurait perdu son origine et il n'y aurait plus moyen de dire où
+  // est le sujet SUR LA COURSE ENTIÈRE. C'est le seul pont entre les deux
+  // échelles d'indices du module ; voir `fractionSurTrace`.
+  const cumTrace = cumul3D(trace)
   // Le tronçon, AVANT tout le reste : c'est lui qui fixe l'accélération.
   let troncon = [0, trace.length - 1]
   if (portion === 'reine') troncon = troncoReine(trace, { exagerationV })
@@ -722,6 +767,7 @@ export function preparerPoursuite({
     hauteurM,
     metresParUnite,
     troncon,
+    cumTrace,
     ligneInfo: lv,
     rayonMin,
     vVol,
@@ -1048,6 +1094,11 @@ export function poseDePoursuite(t, ctx, etat = null, dt = 1 / 60) {
     target: cible,
     roulis: pl.id === 'fixe' ? 0 : rouliDeVol(ctx, S.idx, v, vCamKmh) * e,
     sujet,
+    // l'indice FRACTIONNAIRE du sujet sur `brut` — c'est lui, et pas la
+    // position, qui permet de replacer la tête de course sur le tracé chargé
+    // (voir `fractionSurTrace`) : chercher le sommet le plus proche d'un point
+    // rendrait le mauvais sur un lacet, où deux brins se frôlent.
+    idx: S.idx,
     plan: pl.id,
     vitesseKmh: S.vitesseKmh,
     pente: S.pente,

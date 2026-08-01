@@ -51,7 +51,10 @@ import { PeaksLayer } from './peaks.js'
 import { Clouds2 } from './clouds2.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
-import { FLAGS } from './flags.js'
+import { FLAGS, suiviHelicoActif, portionPoursuite } from './flags.js'
+// `fractionSurTrace` : le pont d'indices qui remet la tête de course sous
+// l'objectif de la poursuite (voir son commentaire dans poursuite.js).
+import { fractionSurTrace } from './poursuite.js'
 import { MapLayers } from './map/layer-manager.js'
 import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
 import { lightingFor, darkModeFor, applyGains, fillDirection, fillLightIntensity, fillEnabledInLook, sunOn, sunShadowOn } from './daycycle.js'
@@ -1554,6 +1557,9 @@ let controlsHeld = false
 // l'a mise et ne fait que VISER la tête. Réarmé à chaque nouveau Play.
 let followManual = false
 let followZoomVel = 0 // élan de zoom molette en suivi (log-échelle / s)
+// vrai tant que la poursuite hélicoptère commande la tête de course : sert
+// uniquement à savoir QUAND rendre la main (voir GpxLayer.releaseHead)
+let teteCommandee = false
 controls.addEventListener('start', () => {
   tween.active = false
   tour.active = false
@@ -3645,6 +3651,9 @@ const pilote = new PiloteCam({
     metresParUnite: dem ? dem.extentMeters / TERRAIN_SIZE : 1,
     exagerationV: params.demExaggeration || 1,
   }),
+  // Le tronçon couvert — 'reine' par défaut, `?troncon=tout` pour tout voir.
+  // Le pourquoi (202 °/s de balayage sur 47 km comprimés) est dans flags.js.
+  getPortion: () => portionPoursuite(),
   onState: () => {
     piloteBtn?.setActive(pilote.active)
     piloteBtn?.setBadge(pilote.badge)
@@ -3659,6 +3668,9 @@ function flyTrack() {
   tour.active = false
   tween.active = false
   cameraAuto.stop()
+  // ESSAI 2026-08-01 — même bascule que le suivi juste dessous : le survol du
+  // tracé passe à la poursuite hélicoptère. L'ancien reste sous le `if`.
+  if (suiviHelicoActif() && pilote.lancerPoursuite()) return
   drone.start(w, { duration })
 }
 
@@ -3685,11 +3697,22 @@ function engageGpxFollow() {
   tour.active = false
   tween.active = false
   cameraAuto.stop()
+  // ⚠️ ESSAI DU 2026-08-01 — LE SUIVI LANCE LA POURSUITE HÉLICOPTÈRE.
+  // Adrien : « lance la vue d'hélico, remplace celle actuelle de suivi tout en
+  // la laissant de côté ». L'ancien rail DroneCam est intact, juste en dessous :
+  // il reprend seul si la poursuite refuse (tracé trop court, aucun couloir).
+  // RETOUR EN ARRIÈRE EN UNE LIGNE : `suiviHelico: false` dans src/flags.js.
+  if (suiviHelicoActif() && pilote.lancerPoursuite()) return
   if (drone.start(w, { seedAt: gpxLayer.headT })) showFollowPad(drone) // resume-in-place, not a snap back to the start
 }
 function disengageGpxFollow() {
   hideFollowPad()
   if (drone.active) drone.stop()
+  // la poursuite s'arrête avec le suivi, et la tête de course revient à
+  // l'horloge de lecture (ou la ligne entière se restaure — voir releaseHead)
+  if (pilote.poursuite) pilote.cancel()
+  teteCommandee = false
+  gpxLayer.releaseHead?.()
 }
 // Sequenced-playback handover (task 22 §5) — GpxLayerManager.tick() auto-
 // advances focus + play() to the next layer on its own, so this is the ONLY
@@ -5571,10 +5594,29 @@ let placesRefreshAcc = 0 // throttles the places-layer screen-space declutter re
 
 // camera motion for one frame — shared by the live loop and offline export
 function updateCameraMotion(dt) {
+  // LA POURSUITE A RENDU LA MAIN (fin du clip, geste sur la caméra, autre plan,
+  // clic sur la pastille) → la tête de course repasse à l'horloge de lecture, et
+  // la ligne entière se restaure si rien ne lit. UN SEUL point de sortie, ici,
+  // plutôt qu'un à chaque `pilote.cancel()` du fichier : ils sont cinq, et il en
+  // manquerait un.
+  if (teteCommandee && !pilote.poursuite) {
+    teteCommandee = false
+    gpxLayer.releaseHead?.()
+  }
   // VOL DU PILOTE en cours (bouton avion) — en tête : c'est le seul automatisme
   // qui pilote AUSSI le roulis, donc le seul qu'un autre écraserait à coup sûr.
   if (pilote.active) {
     pilote.update(dt)
+    // ⚠️ LA TÊTE DE COURSE SUIT LE SUJET DE LA POURSUITE, PAS L'HORLOGE DE
+    // LECTURE. Une poursuite dont le sujet est ailleurs à l'écran n'a aucun sens
+    // à l'œil — c'est LE point du mode. Les deux horloges n'ont aucune raison de
+    // coïncider (la lecture parcourt les 47 km en 71 s, la poursuite ne couvre
+    // que le tronçon retenu, à l'allure de Tobler) : celle de la poursuite
+    // gagne, et tick() se tait pour l'image (voir GpxLayer.setHeadAt).
+    if (pilote.poursuite && pilote.posePoursuite) {
+      gpxLayer.setHeadAt(fractionSurTrace(pilote.poursuite, pilote.posePoursuite.idx), dt)
+      teteCommandee = true
+    }
     return
   }
   // PLAN DE CAMÉRA en cours (bouton cinéma) — en tête, car un plan composé prime
