@@ -78,27 +78,12 @@
     <div id="loading">
       <div class="ld-name">ShibuMap</div>
       <div class="ld-base">Any place on Earth, as a quiet relief map</div>
-      <!-- small planet, tilted on its axis (axis drawn through it), spinning
-           on itself — pure SVG/CSS, no image, no JS required to animate -->
-      <svg class="ld-globe" viewBox="0 0 64 64" aria-hidden="true">
-        <defs>
-          <radialGradient id="ldShade" cx="34%" cy="30%" r="78%">
-            <stop offset="0%" stop-color="#fdfcf9"/>
-            <stop offset="55%" stop-color="#ddd9cf"/>
-            <stop offset="100%" stop-color="#a8a496"/>
-          </radialGradient>
-        </defs>
-        <g class="ld-tilt">
-          <line class="ld-axis" x1="32" y1="3" x2="32" y2="61"/>
-          <circle class="ld-pole" cx="32" cy="4.5" r="1.1"/>
-          <circle class="ld-pole" cx="32" cy="59.5" r="1.1"/>
-          <circle class="ld-sphere" cx="32" cy="32" r="16.5" fill="url(#ldShade)"/>
-          <ellipse class="ld-equator" cx="32" cy="32" rx="16.5" ry="5.2"/>
-          <ellipse class="ld-merid ld-merid-1" cx="32" cy="32" rx="16.5" ry="16.5"/>
-          <ellipse class="ld-merid ld-merid-2" cx="32" cy="32" rx="16.5" ry="16.5"/>
-          <ellipse class="ld-merid ld-merid-3" cx="32" cy="32" rx="16.5" ry="16.5"/>
-        </g>
-      </svg>
+      <!-- L'ORBE. Sphère de points dont une tranche pivote sans arrêt, façon
+           Rubik. Le dessin est en ligne (tout en bas de ce fichier) — voir là
+           pourquoi il ne peut PAS être un module.
+           `width`/`height` en dur : la case fait 64 × 64 dès le premier octet,
+           même si le script ne tournait jamais, donc la carte ne saute pas. -->
+      <canvas class="ld-orbe" width="64" height="64" aria-hidden="true"></canvas>
       <div class="ld-status">generating terrain&hellip;</div>
       <!-- La petite phrase d'info (ui/loading-hints.js la remplit dès que le
            bundle est arrivé). Vide et pourtant présente ici pour que sa
@@ -117,6 +102,321 @@
          bundle finishes booting — main.js reads this to enforce "at least 2s
          on screen" from the true start, so a fast connection never flashes it -->
     <script>window.__ldStart = performance.now()</script>
+    <script>
+      // ORBE DE CHARGEMENT — portage vanille de l'état « solving » (taille 64)
+      // de `thinking-orbs`, © Jakub Antalík, https://orbs.jakubantalik.com,
+      // licence MIT. Le paquet original est en React ; ce fichier ne l'est pas,
+      // seule la géométrie est reprise. Attribution conservée : c'est une
+      // obligation de la licence, et c'est mérité.
+      //
+      // POURQUOI EN LIGNE ET PAS UN MODULE. Deux raisons, dans cet ordre.
+      //   1. `thinking-orbs` exige react + react-dom en pairs. Le site n'a pas
+      //      React ; l'installer pour un indicateur d'attente ajouterait ~140 Ko
+      //      à un projet qui n'en a aucun autre usage.
+      //   2. LA VRAIE. Cette carte se peint pendant l'ANALYSE du HTML, avant
+      //      qu'un seul module ne soit demandé — `window.__ldStart` juste
+      //      au-dessus date cet instant précis, et main.js s'appuie dessus pour
+      //      ses 2 s de plancher. Un paquet qu'il faut aller chercher et
+      //      exécuter rendrait le chargement PLUS LENT : ce serait payer
+      //      l'attente pour l'annoncer.
+      // Ce script est donc placé APRÈS `__ldStart` (il ne décale pas l'horloge)
+      // et il dessine sa première image SYNCHRONE : l'orbe est dans le tout
+      // premier rendu, elle n'apparaît pas après coup dans un trou.
+      // Le marqueur « ORBE » ci-dessus sert au banc de capture.
+      ;(function () {
+        var carte = document.getElementById('loading')
+        var toile = carte && carte.querySelector('.ld-orbe')
+        if (!toile || !toile.getContext) return
+        var ctx = toile.getContext('2d')
+        if (!ctx) return
+
+        // --- LES RÉGLAGES DU PRESET `solving` @ 64, DÉJÀ RÉSOLUS.
+        // La lib part de ses défauts « rubik » puis applique count = 0.35 (les
+        // densités sont multipliées par √0.35) et size = 1.05 (les rayons). On
+        // écrit le résultat au lieu de la recette : ce code est sur le chemin
+        // du premier pixel, il ne recalcule rien qu'il puisse savoir d'avance.
+        var N = 64 // taille CSS demandée par Adrien
+        var VITESSE = 1.82 // preset solving@64
+        var LAT = 9 // 15 × √0.35
+        var LON = 24 // 40 × √0.35
+        var NM = 14 // mouvements dans un cycle
+        var DUREE = 0.42 // durée d'un mouvement, en unités de temps de la lib
+        var PAUSE = 1.2 // le repos entre l'aller et le retour
+        var R_BASE = 0.63 // 0.6 × 1.05
+        var R_PROF = 1.785 // 1.7 × 1.05 — un point proche est plus gros
+        var R_VIF = 0.315 // 0.3 × 1.05 — la tranche qui bouge grossit
+        var R_MIN = 0.3 // plancher : sous ça un point disparaît
+        var E_LOIN = 0.62 // inkFar : la pâleur d'un point au dos de la sphère
+        var E_ETENDUE = 0.54 // inkSpan : de combien il se fonce en venant vers nous
+        var E_VIF = 0.14 // la lib fonce la tranche active d'autant
+        var ECH = Math.pow(N / 300, 0.6) // rsPow : l'échelle des points selon la taille
+        var RAYON = (N / 2) * 0.82
+        var POSE = 0.6 // la phase que la lib fige en mouvement réduit
+        var TAU = Math.PI * 2
+        var CENTRE = N / 2
+        var CYCLE = 2 * NM * DUREE + PAUSE
+
+        // --- la toile, en pixels de l'écran
+        var dpr = Math.min(2, window.devicePixelRatio || 1)
+        toile.width = Math.round(N * dpr)
+        toile.height = Math.round(N * dpr)
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+
+        // --- LES COULEURS. Elles ne sont PAS écrites ici : style.css les pose
+        // sur l'élément (--ld-encre, --ld-accent) et c'est lui qui décide, donc
+        // l'accent peut suivre la palette du site sans toucher à ce script.
+        // On laisse la toile normaliser la valeur : c'est le seul analyseur de
+        // couleur déjà présent dans le navigateur. Une valeur invalide laisse
+        // `fillStyle` inchangé, d'où le repli posé juste avant.
+        var ENCRE = '#23201a'
+        var ACCENT = '#ea580c'
+        // ⚠️ L'ACCENT N'EST PAS PRIS PUR, ET C'EST UNE DÉCISION DE DESSIN.
+        // À plein, les points de la tranche en mouvement se dispersent sur tout
+        // le disque (une tranche de sphère se projette des deux côtés) : on lit
+        // des confettis, pas une tranche qui tourne. Ramené vers l'encre, il
+        // redevient une braise dans le noir de plume — on voit que quelque
+        // chose bouge là, sans que la carte se mette à crier.
+        var PART_ACCENT = 0.62
+        function normalise(v, repli) {
+          ctx.fillStyle = repli
+          ctx.fillStyle = String(v).trim()
+          return ctx.fillStyle
+        }
+        function melange(a, b, t) {
+          var A = parseInt(a.slice(1), 16)
+          var B = parseInt(b.slice(1), 16)
+          var v = 0
+          for (var d = 16; d >= 0; d -= 8) {
+            v = (v << 8) | Math.round((((A >> d) & 255) * t + ((B >> d) & 255) * (1 - t)) || 0)
+          }
+          return '#' + ('000000' + v.toString(16)).slice(-6)
+        }
+        function lisCouleurs() {
+          var s = getComputedStyle(toile)
+          ENCRE = normalise(s.getPropertyValue('--ld-encre'), '#23201a')
+          // normalise() rend toujours un #rrggbb : c'est la toile qui l'écrit
+          ACCENT = melange(normalise(s.getPropertyValue('--ld-accent'), '#ea580c'), ENCRE, PART_ACCENT)
+        }
+
+        // --- LES 14 MOUVEMENTS. Tirés d'un hachage sin/fract, donc TOUJOURS les
+        // mêmes : deux chargements montrent la même chorégraphie, et le banc de
+        // capture peut comparer deux images au bit près.
+        function hache(a, b) {
+          var s = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453
+          return s - Math.floor(s)
+        }
+        var MOUV = []
+        for (var i = 0; i < NM; i++) {
+          var lo = -1 + 0.5 * Math.min(3, Math.floor(hache(i, 5.9) * 4))
+          MOUV.push({
+            axe: Math.min(2, Math.floor(hache(i, 2.3) * 3)),
+            lo: lo,
+            hi: lo + 0.5, // une tranche large d'un quart de sphère
+            ang: (hache(i, 7.7) < 0.5 ? 1 : -1) * (Math.PI / 2),
+          })
+        }
+
+        // --- LA GRILLE DE POINTS, calculée UNE FOIS. 138 points : les anneaux
+        // de latitude portent d'autant plus de points qu'ils sont larges, sinon
+        // les pôles se bouchent. Les recalculer à chaque image, c'était 276
+        // sinus par frame pour un résultat constant.
+        var bx = []
+        var by = []
+        var bz = []
+        for (var r = 0; r <= LAT; r++) {
+          var lat = -Math.PI / 2 + (r / LAT) * Math.PI
+          var cl = Math.cos(lat)
+          var sl = Math.sin(lat)
+          var n = Math.max(1, Math.round(Math.abs(cl) * LON))
+          for (var k = 0; k < n; k++) {
+            var lon = (k / n) * TAU
+            bx.push(cl * Math.cos(lon))
+            by.push(sl)
+            bz.push(cl * Math.sin(lon))
+          }
+        }
+        var NB = bx.length
+        bx = Float64Array.from(bx)
+        by = Float64Array.from(by)
+        bz = Float64Array.from(bz)
+        // tampons de sortie, alloués une fois : une animation d'attente qui
+        // ramasse des miettes à chaque image, c'est exactement le contresens
+        var px = new Float64Array(NB)
+        var py = new Float64Array(NB)
+        var pd = new Float64Array(NB)
+        var pr = new Float64Array(NB)
+        var pa = new Float64Array(NB)
+        var pv = new Uint8Array(NB)
+        var montants = new Float64Array(NM)
+        var ordre = new Array(NB)
+        for (var o = 0; o < NB; o++) ordre[o] = o
+        var parFond = function (a, b) {
+          return pd[a] - pd[b]
+        }
+
+        // --- OÙ EN EST LE CYCLE : quels mouvements sont appliqués, et lequel
+        // est en train de bouger. Aller (14 mouvements), retour (on les défait),
+        // puis un temps mort où la sphère est intacte.
+        function programme(t) {
+          montants.fill(0)
+          var actif = -1
+          var u = t % CYCLE
+          if (u < 2 * NM * DUREE) {
+            var i = Math.floor(u / DUREE)
+            var m = (u - i * DUREE) / DUREE
+            // départ franc, arrivée amortie : le mouvement finit avant sa case
+            var e = 1 - Math.pow(1 - Math.min(1, m / 0.7), 3)
+            if (i < NM) {
+              for (var a = 0; a < i; a++) montants[a] = 1
+              montants[i] = e
+              actif = i
+            } else {
+              var j = 2 * NM - 1 - i
+              for (var b = 0; b < j; b++) montants[b] = 1
+              montants[j] = 1 - e
+              actif = j
+            }
+          }
+          return actif
+        }
+
+        // --- UNE IMAGE.
+        function dessine(t) {
+          var actif = programme(t)
+          var lacet = t * 0.55
+          var tangage = 0.35 + 0.1 * Math.sin(t * 0.9)
+          var cl = Math.cos(lacet)
+          var sl = Math.sin(lacet)
+          var ct = Math.cos(tangage)
+          var st = Math.sin(tangage)
+          for (var i = 0; i < NB; i++) {
+            var x = bx[i]
+            var y = by[i]
+            var z = bz[i]
+            var vif = 0
+            // les tranches déjà tournées, puis celle en cours : un point n'est
+            // emporté que si sa coordonnée sur l'axe tombe dans la tranche
+            for (var m = 0; m < NM; m++) {
+              var q = montants[m]
+              if (q <= 0) continue
+              var mv = MOUV[m]
+              var c = mv.axe === 0 ? x : mv.axe === 1 ? y : z
+              if (c < mv.lo || c >= mv.hi) continue
+              if (m === actif) vif = 1
+              var g = mv.ang * q
+              var C = Math.cos(g)
+              var S = Math.sin(g)
+              if (mv.axe === 0) {
+                var w0 = y * C - z * S
+                z = y * S + z * C
+                y = w0
+              } else if (mv.axe === 1) {
+                var w1 = x * C + z * S
+                z = -x * S + z * C
+                x = w1
+              } else {
+                var w2 = x * C - y * S
+                y = x * S + y * C
+                x = w2
+              }
+            }
+            // projection : lacet autour de l'axe vertical, puis tangage
+            var u = x * cl + z * sl
+            var h = -x * sl + z * cl
+            var v = y * ct - h * st
+            var prof = y * st + h * ct // −1 au dos, +1 face à nous
+            var f = (prof + 1) / 2
+            px[i] = CENTRE + u * RAYON
+            py[i] = CENTRE - v * RAYON
+            pd[i] = prof
+            pr[i] = Math.max(R_MIN, (R_BASE + R_PROF * f + (vif ? R_VIF : 0)) * ECH)
+            // LA COULEUR EST UNE OPACITÉ, pas un gris. La lib peint un gris
+            // calculé pour un fond blanc ; ici la carte est translucide au-dessus
+            // du relief. Peindre du gris opaque aurait posé 138 pastilles de
+            // fausse lumière dessus. Même contraste exactement sur du papier
+            // blanc, et un comportement juste sur le verre.
+            pa[i] = Math.min(1, 1 - (E_LOIN - E_ETENDUE * f) + (vif ? E_VIF : 0))
+            pv[i] = vif
+          }
+          // du fond vers l'avant : sans ça les points du dos se peignent par
+          // dessus la face et la sphère se retourne
+          ordre.sort(parFond)
+          ctx.clearRect(0, 0, N, N)
+          var teinte = -1
+          for (var p = 0; p < NB; p++) {
+            var d = ordre[p]
+            // `globalAlpha` et PAS une chaîne rgba() : 138 chaînes construites
+            // puis analysées à chaque image, c'était le poste le plus cher du
+            // dessin, pour un résultat identique au pixel près.
+            ctx.globalAlpha = pa[d]
+            if (pv[d] !== teinte) {
+              teinte = pv[d]
+              ctx.fillStyle = teinte ? ACCENT : ENCRE
+            }
+            ctx.beginPath()
+            ctx.arc(px[d], py[d], pr[d], 0, TAU)
+            ctx.fill()
+          }
+          ctx.globalAlpha = 1
+        }
+
+        // --- LE MOUVEMENT.
+        // requestAnimationFrame, et c'est le bon choix ICI : il ne se déclenche
+        // pas dans un onglet caché, donc l'orbe s'endort toute seule pendant
+        // qu'on ne la regarde pas. Le piège de rAF dans ce dépôt concerne le
+        // code qui doit AVANCER même sans être vu (le plancher de 2 s de main.js
+        // est en setTimeout pour cette raison exacte) ; une décoration, non.
+        // Et pendant que le moteur bâtit le relief, le fil principal est bloqué :
+        // rAF ne tire aucune image, donc l'orbe ne vole rien au pire moment.
+        var doux = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null
+        var jeton = 0
+        var court = false
+        function image() {
+          dessine((performance.now() / 1000) * VITESSE)
+          jeton = requestAnimationFrame(image)
+        }
+        function marche() {
+          if (court) return
+          court = true
+          jeton = requestAnimationFrame(image)
+        }
+        function arret() {
+          court = false
+          if (jeton) cancelAnimationFrame(jeton)
+          jeton = 0
+        }
+        // MOUVEMENT RÉDUIT : une orbe FIGÉE, pas une orbe absente. On dessine la
+        // pose que la lib fige elle-même (un mouvement à mi-course, la sphère
+        // lisiblement « en train d'être résolue ») et on n'ordonnance rien.
+        function etat() {
+          var cachee = carte.classList.contains('hidden')
+          if (cachee) return arret()
+          lisCouleurs() // la palette a pu changer entre deux passages
+          if (doux && doux.matches) {
+            arret()
+            dessine(POSE)
+            return
+          }
+          marche()
+        }
+        etat() // première image SYNCHRONE : l'orbe est dans le premier rendu
+
+        // La carte réapparaît à chaque nouveau calcul (recherche, zoom…) et
+        // repart avec `.hidden`. Sans ceci, la boucle continuait de tourner pour
+        // rien sur un élément invisible, pendant toute la session. Même patron
+        // que ui/loading-hints.js, qui observe exactement la même classe.
+        if (window.MutationObserver) {
+          new MutationObserver(etat).observe(carte, { attributes: true, attributeFilter: ['class'] })
+        }
+        if (doux && doux.addEventListener) doux.addEventListener('change', etat)
+
+        // Point d'entrée public, volontairement minuscule. Il sert à mesurer et
+        // à capturer l'INSTANCE VIVANTE : sous Vite, un import('/src/…') à la
+        // main rend un autre exemplaire du module, et une orbe mesurée ailleurs
+        // n'est pas celle qui tourne à l'écran.
+        window.__ldOrbe = { dessine: dessine, points: NB, taille: N, pose: POSE }
+      })()
+    </script>
     <script type="module" src="/src/boot.js"></script>
   </body>
 </html>

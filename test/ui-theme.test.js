@@ -84,6 +84,61 @@ test('l’accent reste un composant visible : 3:1 contre le verre ET contre le b
   }
 })
 
+// ============================================================================
+// LA CARTE DE CHARGEMENT — un fond que ce module ne connaît pas.
+// L'orbe de #loading (dessin en ligne dans index.html) peint ses points à
+// l'encre de la carte et allume la tranche en mouvement avec var(--ce-accent).
+// Or cette carte est du PAPIER CLAIR EN PERMANENCE : aucune règle
+// `body.dark #loading` n'existe, parce qu'elle se peint avant que le thème ne
+// soit connu. Deux conséquences que seul un test peut tenir :
+//   1. son encre ne peut PAS être --ce-ink, qui bascule en stone-200 en mode
+//      sombre — l'orbe serait devenue blanche sur blanc ;
+//   2. le contrat d'accent du module porte sur le BLANC, et ce papier est un
+//      cheveu plus sombre : le ratio y est ~2,7 % plus bas qu'annoncé.
+// On mesure donc ce qu'on VOIT, et on fige le plancher observé.
+test('l’orbe du chargement tient sur le papier de sa carte, dans les deux thèmes', () => {
+  const css = fs.readFileSync(path.join(ROOT, 'src/style.css'), 'utf8')
+
+  // le papier, pris à la source : le fond de #loading, opaque
+  const fond = css.match(/#loading\s*\{[^}]*background:\s*rgba\((\d+),\s*(\d+),\s*(\d+)/)
+  assert.ok(fond, 'le fond de #loading a changé de forme — recaler ce banc avant de le croire')
+  const papier = '#' + fond.slice(1, 4).map((v) => (+v).toString(16).padStart(2, '0')).join('')
+
+  // l'encre de l'orbe, écrite dans la feuille et lue par le script en ligne
+  const bloc = css.match(/#loading \.ld-orbe\s*\{[^}]*\}/)?.[0] ?? ''
+  const decl = bloc.match(/--ld-encre:\s*(#[0-9a-f]{6})/i)
+  assert.ok(decl, '--ld-encre introuvable : l’orbe n’a plus de couleur déclarée')
+  assert.doesNotMatch(
+    bloc,
+    /--ld-encre:\s*var\(\s*--ce-ink/,
+    'l’encre de l’orbe ne peut pas suivre --ce-ink : la carte, elle, reste claire en mode sombre',
+  )
+  // les points sont peints à l'opacité, de 38 % (au dos) à 92 % (face à nous)
+  const proche = contrastRatio(compositeOver(decl[1], 0.92, papier), papier)
+  const loin = contrastRatio(compositeOver(decl[1], 0.38, papier), papier)
+  assert.ok(proche >= 10, `points proches trop pâles : ${proche.toFixed(2)}`)
+  assert.ok(loin >= 2, `points lointains trop pâles : ${loin.toFixed(2)}`)
+
+  // L'ACCENT. Il n'a pas à tenir 3:1 : il n'éclaire qu'une tranche DÉJÀ lisible
+  // en encre et ne porte aucune information à lui seul. Mais s'il s'effondrait,
+  // l'orbe perdrait sa seule couleur — et le jour où --ce-accent change de
+  // recette, c'est ici qu'on veut l'apprendre, pas à l'œil sur une palette.
+  let pire = Infinity
+  let coupable = ''
+  for (const dark of THEMES) {
+    for (const p of PALETTES) {
+      const r = contrastRatio(uiTokenBases(p.rampStops, { dark }).accent, papier)
+      if (r < pire) {
+        pire = r
+        coupable = `${p.slug} (${themeName(dark)})`
+      }
+    }
+  }
+  // plancher MESURÉ le 2026-08-01 sur les 136 palettes × 2 thèmes : 2,970,
+  // atteint par bora-bora en sombre. On garde une marge de 0,07.
+  assert.ok(pire >= 2.9, `accent le plus faible sur le papier : ${coupable} à ${pire.toFixed(3)}`)
+})
+
 test('aucun NaN, aucune couleur hors format, sur tout le catalogue', () => {
   const hex = /^#[0-9a-f]{6}$/
   for (const dark of THEMES) {

@@ -51,54 +51,34 @@ body {
   color: rgba(35, 32, 26, 0.62);
 }
 
-/* small tilted planet, spinning on itself. The tilt (axis drawn through the
-   sphere) is a static rotation of the whole group; the "spin" is faked with
-   three meridian ellipses that squash from the sphere's full width down to a
-   sliver and back — the classic pure-CSS globe trick, staggered so it reads
-   as continuous rotation rather than a pulse. GPU-only properties (transform,
-   opacity) throughout, so it stays smooth even while the main bundle is
-   still parsing. */
-#loading .ld-globe {
-  width: 58px;
-  height: 58px;
-  margin-top: 8px;
-  overflow: visible;
-}
-#loading .ld-tilt {
-  transform: rotate(-16deg);
-  transform-origin: 32px 32px;
-}
-#loading .ld-axis {
-  stroke: rgba(35, 32, 26, 0.4);
-  stroke-width: 1;
-  stroke-dasharray: 1.5 2.5;
-  stroke-linecap: round;
-}
-#loading .ld-pole {
-  fill: rgba(35, 32, 26, 0.5);
-}
-#loading .ld-equator {
-  fill: none;
-  stroke: rgba(35, 32, 26, 0.18);
-  stroke-width: 0.7;
-}
-#loading .ld-merid {
-  fill: none;
-  stroke: rgba(35, 32, 26, 0.32);
-  stroke-width: 0.8;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: ld-spin 3.2s ease-in-out infinite;
-}
-#loading .ld-merid-2 {
-  animation-delay: -1.0667s; /* a third out of phase — three lines, evenly spaced */
-}
-#loading .ld-merid-3 {
-  animation-delay: -2.1333s;
-}
-@keyframes ld-spin {
-  0%, 100% { transform: scaleX(1); }
-  50% { transform: scaleX(0.04); }
+/* L'ORBE — une sphère de points dont une tranche pivote sans arrêt. Le dessin
+   est en ligne dans index.html (relire là-bas POURQUOI ce n'est pas un module :
+   cette carte se peint avant qu'un seul module ne soit demandé). Ici, sa taille
+   et ses DEUX seules couleurs, que le script vient lire sur l'élément.
+
+   ⚠️ POURQUOI --ce-ink N'EST PAS ICI. Cette carte est du papier clair EN
+   PERMANENCE — aucune règle `body.dark #loading` n'existe, et c'est voulu :
+   elle se peint avant que le thème ne soit connu. Or --ce-ink bascule en
+   stone-200 sous body.dark. Une orbe qui l'aurait suivi serait devenue
+   blanche sur blanc au premier chargement à chaud en mode sombre. Son encre est
+   donc celle de la carte, écrite ici, exactement comme .ld-name plus haut.
+
+   L'ACCENT, lui, SUIT le site : ui-theme.js le recalcule à l'exécution selon la
+   palette de la carte, et son contrat est ≥ 3:1 contre le blanc. Mesuré sur les
+   136 palettes du catalogue × 2 thèmes, contre le papier RÉEL de cette carte
+   (#fcfbf8, sa couleur de base prise opaque) : 3.02 minimum en clair, 2.97 en
+   sombre — et non 3:1, parce que ce papier n'est pas tout à fait blanc. C'est
+   assumé : l'accent n'éclaire qu'une tranche DÉJÀ lisible en encre (12.4:1), il
+   ne porte aucune information à lui seul. Le plancher est tenu par un test
+   (test/ui-theme.test.js) pour qu'il ne s'effondre pas en silence.
+   Le repli #ea580c sert au tout premier rendu : v28.css arrive avec le bundle,
+   longtemps après que cette carte a peint. */
+#loading .ld-orbe {
+  width: 64px;
+  height: 64px;
+  margin-top: 4px;
+  --ld-encre: #23201a;
+  --ld-accent: var(--ce-accent, #ea580c);
 }
 
 #loading .ld-status {
