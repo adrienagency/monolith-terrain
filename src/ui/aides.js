@@ -70,6 +70,15 @@ let calqueParent = null
 let courante = null // { id, noeud } de la bulle affichée, ou null
 let surEchap = null
 let degageLaVue = null
+// La DEMANDE en cours : l'id d'une aide dont l'option est allumée et que
+// personne n'a encore écartée. Distincte de `courante` (ce qui est À L'ÉCRAN),
+// parce que les deux se séparent : une aide demandée peut attendre que la vue
+// devienne regardable, et une aide affichée peut devoir se retirer si un voile
+// remonte par-dessus. `applique()` réconcilie les deux.
+let demande = null
+let vueRegardable = null
+let aSurveiller = []
+let guetteur = null
 
 function chargeVues() {
   if (!vues) vues = vuesDepuisCles(clesStockees())
@@ -85,10 +94,18 @@ function chargeVues() {
  *        qu'un cadre de la page — une bulle collée au body en sortirait.
  * @param {() => void} [o.degage] - ferme ce qui couvre la carte (la modale
  *        Paramètres), appelé juste avant chaque apparition.
+ * @param {() => boolean} [o.pret] - la vue est-elle REGARDABLE ? Une aide qui
+ *        désigne le terrain n'a aucun sens tant qu'un plein écran le couvre.
+ * @param {Element[]} [o.surveille] - les nœuds dont un changement de classe peut
+ *        faire basculer `pret`. C'est l'APPELANT qui les nomme, parce que c'est
+ *        lui qui écrit le prédicat : ce module n'a pas à connaître le carton de
+ *        chargement ni l'écran d'accueil.
  */
-export function initAides({ conteneur, degage } = {}) {
+export function initAides({ conteneur, degage, pret, surveille } = {}) {
   calqueParent = conteneur ?? null
   degageLaVue = typeof degage === 'function' ? degage : null
+  vueRegardable = typeof pret === 'function' ? pret : null
+  aSurveiller = (surveille ?? []).filter(Boolean)
   chargeVues()
 }
 
@@ -108,7 +125,13 @@ function ouvreCalque() {
 
 // -------------------------------------------------------------- l'apparition
 
-function ferme({ definitif }) {
+function ferme({ definitif, garderLaDemande = false }) {
+  // Écarter une bulle éteint la DEMANDE, sauf quand c'est la vue qui se dérobe
+  // (un plein écran remonte) : là on la garde, pour la reposer au retour.
+  // Sans cette distinction, un Échap serait défait par le guetteur de classe
+  // à la mutation suivante — la bulle reviendrait aussitôt, ce qui lit comme
+  // un refus d'obtempérer.
+  if (!garderLaDemande) demande = null
   if (!courante) return
   const { id, noeud } = courante
   courante = null
@@ -128,6 +151,7 @@ function ferme({ definitif }) {
 
 function montre(aide) {
   degageLaVue?.()
+  const calqueNeuf = !calque
   ouvreCalque()
 
   const b = el('div', 'ce-aide')
@@ -149,14 +173,26 @@ function montre(aide) {
   }
   window.addEventListener('keydown', surEchap)
 
-  // une image d'attente : le calque doit être vivant avant l'insertion pour
-  // que la région `aria-live` annonce, et la transition CSS doit partir d'un
-  // état déjà peint pour ne pas être avalée.
-  requestAnimationFrame(() => {
+  const pose = () => {
     if (courante?.noeud !== b) return // fermée avant même d'apparaître
     calque.append(b)
-    requestAnimationFrame(() => b.classList.add('on'))
-  })
+    // Le reflux force le navigateur à peindre l'état de départ (opacité 0)
+    // avant qu'on ajoute `.on` : sans lui les deux styles sont calculés
+    // ensemble et la transition est avalée. Même geste que showToast().
+    void b.offsetWidth
+    b.classList.add('on')
+  }
+
+  // ⚠️ UNE TÂCHE, PAS UNE IMAGE. La première bulle a besoin d'un tour de boucle
+  // avant son insertion : le calque `aria-live` vient d'être créé, et un
+  // lecteur d'écran n'annonce que ce qui entre dans une région DÉJÀ
+  // enregistrée. La tentation était `requestAnimationFrame` — c'est un piège
+  // VU À L'EXÉCUTION : dans un onglet caché ou occulté, rAF ne se déclenche pas
+  // du tout, la bulle n'était jamais insérée, et `courante` restait occupée
+  // pour toute la session — l'aide était morte sans une ligne dans la console.
+  // `setTimeout` est ralenti en arrière-plan, mais il arrive.
+  if (calqueNeuf) setTimeout(pose, 0)
+  else pose()
 }
 
 /**
@@ -166,17 +202,62 @@ function montre(aide) {
  * règle pure qui tranche ; ici on ne fait qu'obéir.
  */
 export function evalue(id, actif) {
-  // L'option qu'on éteint retire sa bulle : une consigne pour un mode qui
-  // n'est plus allumé est une consigne fausse.
-  if (!actif && courante?.id === id) ferme({ definitif: false })
-  if (!doitMontrer({ id, actif, vues: chargeVues() })) return
-  if (courante) return // une seule bulle à la fois, jamais d'empilement
-  const aide = AIDES.find((a) => a.id === id)
-  if (!aide) return
-  // La cible peut ne pas exister encore (panneau replié, Studio) : dans ce cas
-  // on ne montre RIEN plutôt que de poser la bulle n'importe où. Une aide mal
-  // placée est pire qu'une aide absente — elle pointe le mauvais endroit.
-  if (!aide.cible()) return
+  if (!actif) {
+    // L'option qu'on éteint retire sa bulle ET sa demande : une consigne pour
+    // un mode qui n'est plus allumé est une consigne fausse.
+    if (demande === id || courante?.id === id) ferme({ definitif: false })
+    return
+  }
+  if (!doitMontrer({ id, actif: true, vues: chargeVues() })) return
+  demande = id
+  guette()
+  applique()
+}
+
+// ══════════ LA VUE REGARDABLE — VU À L'EXÉCUTION, PAS DÉDUIT ════════════════
+//
+// Deux voiles plein écran se mettent devant le terrain, et les DEUX ont été
+// pris en flagrant délit en navigateur, capture à l'appui :
+//
+//   1. L'ÉCRAN D'ACCUEIL monte par-dessus le terrain une fois celui-ci chargé.
+//      La bulle, posée à la fin du chargement, naissait derrière son voile
+//      flouté : elle désignait un terrain qu'on ne voyait pas, et le premier
+//      Échap — celui qui dit « explorer librement » — l'emportait sans qu'elle
+//      ait jamais été lue.
+//   2. LE CARTON DE CHARGEMENT revient à chaque bascule de l'interrupteur,
+//      parce qu'allumer le mode continu RECHARGE la zone (f3Applique). La
+//      bulle apparaissait donc pile derrière le carton qu'elle venait de
+//      déclencher — le pire moment possible.
+//
+// Aucun des deux n'émet d'événement (v28.css le dit en toutes lettres pour
+// l'accueil) : leur seule trace est une CLASSE. On les observe donc, comme les
+// petites phrases de chargement observent déjà `.hidden` sur le carton. La
+// demande est GARDÉE pendant ce temps et reposée dès que la vue se dégage.
+//
+// ⚠️ On observe les nœuds NOMMÉS par l'appelant, jamais `documentElement` en
+// sous-arbre : les classes changent des dizaines de fois par seconde dans cette
+// interface (survols, plis, transitions), et `applique()` tournerait pour rien
+// à chacune.
+function guette() {
+  if (guetteur || !vueRegardable) return
+  guetteur = new MutationObserver(applique)
+  for (const n of aSurveiller) guetteur.observe(n, { attributes: true, attributeFilter: ['class'] })
+}
+
+function applique() {
+  const regardable = vueRegardable ? vueRegardable() : true
+  if (courante && !regardable) {
+    // un plein écran vient de remonter : on se retire, sans oublier la demande
+    ferme({ definitif: false, garderLaDemande: true })
+    return
+  }
+  if (!demande || courante || !regardable) return
+  if (!doitMontrer({ id: demande, actif: true, vues: chargeVues() })) return
+  const aide = AIDES.find((a) => a.id === demande)
+  // La cible peut ne pas exister (Studio, boutique) : on ne montre RIEN plutôt
+  // que de poser la bulle n'importe où. Une aide mal placée est pire qu'une
+  // aide absente — elle pointe le mauvais endroit.
+  if (!aide?.cible()) return
   montre(aide)
 }
 

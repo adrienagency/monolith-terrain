@@ -5844,7 +5844,21 @@ if (!IS_EMBED) {
   // `degage` ferme CETTE modale avant l'apparition : l'interrupteur du mode
   // continu est dedans, et son voile plein écran (z-index 235) enterrerait la
   // bulle sous lui tout en assombrissant le terrain qu'elle désigne.
-  initAides({ conteneur: container, degage: closeSettings })
+  // `pret` : DEUX voiles plein écran peuvent couvrir le terrain, et une bulle
+  // qui le désigne n'a rien à dire tant que l'un des deux est là.
+  //   · l'écran d'accueil (`body.ce-hub`) monte APRÈS le chargement ;
+  //   · le carton de chargement revient à chaque bascule, puisque allumer le
+  //     mode continu recharge la zone — la bulle naissait pile derrière le
+  //     carton qu'elle venait de déclencher.
+  // Ni l'un ni l'autre n'émet d'événement (cf. v28.css pour l'accueil) : leur
+  // seule trace est une classe, d'où les deux nœuds passés à `surveille`.
+  initAides({
+    conteneur: container,
+    degage: closeSettings,
+    pret: () =>
+      !document.body.classList.contains('ce-hub') && !!loadingEl?.classList.contains('hidden'),
+    surveille: [document.body, loadingEl],
+  })
 }
 
 // mini panneau Parcours du mode simple (gestion des blocs + Lecture) —

@@ -3675,16 +3675,41 @@ body.ce-noui .ce-rec {
 /* ══════════ LES BULLES D'AIDE — première activation d'une option ══════════
    Voir src/ui/aides.js (pose, accessibilité) et src/aides.js (la règle).
 
-   POURQUOI UN APLAT D'ACCENT ET UNE ENCRE PRESQUE NOIRE, et pas l'inverse.
-   Demande d'Adrien : « dans la couleur d'appel ». Un texte BLANC sur
-   --ce-accent (#ea580c) ne donne que 3,56:1 — sous le seuil AA de 4,5:1 pour
-   du corps de texte. L'encre #1c1206 sur le même orange donne 5,13:1. La bulle
-   est donc pleinement dans la couleur d'appel, et lisible ; c'est le sens de
-   la lecture qui s'inverse, pas la couleur.
+   ══════ LA COULEUR D'APPEL, MAIS ASSOMBRIE — ET C'EST DÉMONTRABLE ══════
 
-   LE CALQUE NE PREND AUCUN CLIC. La bulle explique un clic droit maintenu SUR
-   le terrain : si elle interceptait le pointeur, elle volerait le geste
-   qu'elle enseigne. Seul le bouton reprend `pointer-events`. */
+   Demande d'Adrien : « dans la couleur d'appel ». Le piège est que
+   `--ce-accent` N'EST PAS #ea580c à l'exécution : ui-theme.js le RECALCULE
+   depuis la palette de la carte (mesuré en navigateur : rgb(193,125,0) sur la
+   vue d'ouverture). Une encre fixe choisie contre l'orange d'usine n'a donc
+   aucune garantie face à l'accent réellement servi.
+
+   Le seul contrat que ui-theme.js promet est `contrastRatio(accent, #ffffff)
+   >= 3` — il BORNE la clarté PAR LE HAUT, jamais par le bas. Deux conséquences
+   qui décident tout ce bloc :
+
+     · du BLANC directement sur l'accent plafonne à 3:1, sous le seuil AA de
+       4,5:1 exigé pour du corps de texte ;
+     · une encre SOMBRE fixe s'effondre dès qu'une palette produit un accent
+       déjà sombre — rien ne l'interdit, et on tomberait à 1,7:1.
+
+   D'où le fond : l'accent MÉLANGÉ À 68 % AVEC DU NOIR. Assombrir ne peut
+   qu'AUGMENTER le contraste contre le blanc, quel que soit l'accent — la
+   garantie devient monotone au lieu d'être un pari. Pire cas calculé (accent à
+   la clarté maximale que le contrat autorise, L 0,30) : 5,81:1 pour le corps,
+   4,74:1 pour la note à 86 %, 7,84:1 pour le libellé du bouton, et 5,81:1 pour
+   le bouton blanc contre la carte. Tous au-dessus d'AA, sur TOUTE palette.
+   Le liseré, lui, porte l'accent PUR : la couleur d'appel est littéralement sur
+   l'objet, à pleine force, là où aucun texte ne s'y appuie.
+
+   La teinte et la chroma, elles, sont celles de l'accent au pixel près : on
+   reste dans la couleur d'appel, en plus profond.
+
+   ══════ LE CALQUE NE PREND AUCUN CLIC ══════
+
+   La bulle explique un CLIC DROIT MAINTENU sur le terrain : si elle
+   interceptait le pointeur, elle volerait le geste qu'elle enseigne. Seul le
+   bouton reprend `pointer-events` (vérifié à l'exécution : elementFromPoint au
+   centre de la bulle rend bien le CANVAS). */
 .ce-aide-layer {
   position: absolute;
   inset: 0;
@@ -3697,16 +3722,20 @@ body.ce-noui .ce-rec {
   position: absolute;
   left: 50%;
   /* BAS ET CENTRÉE, jamais au milieu : le centre de l'écran est à la fois le
-     bloc dont on parle et l'endroit d'où part naturellement un glissement. */
-  bottom: 15%;
+     bloc dont on parle et l'endroit d'où part naturellement un glissement.
+     Le plancher en pixels dégage la barre du bas, mesurée à 134 px de haut —
+     en pourcentage seul, la bulle la touchait sur une fenêtre courte. */
+  bottom: max(18%, 162px);
   width: min(360px, calc(100% - 32px));
   box-sizing: border-box;
-  padding: 13px 15px 12px;
+  padding: 14px 16px 13px;
   border-radius: 14px;
-  background: var(--ce-accent);
-  color: #1c1206;
+  background: color-mix(in srgb, var(--ce-accent) 68%, #000);
+  color: #fff;
   font-family: var(--ce-font);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28), 0 1px 0 rgba(255, 255, 255, 0.22) inset;
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.34),
+    0 0 0 1.5px var(--ce-accent);
   pointer-events: none;
   opacity: 0;
   transform: translate(-50%, 10px);
@@ -3728,44 +3757,44 @@ body.ce-noui .ce-rec {
   line-height: 1.45;
 }
 .ce-aide-note {
-  margin: 7px 0 0;
+  margin: 8px 0 0;
   font-size: 11px;
   line-height: 1.35;
-  /* la précision secondaire s'efface sans descendre sous AA : 3,9:1 sur
-     l'accent, au-dessus du seuil 3:1 qui vaut pour le texte non essentiel */
-  color: rgba(28, 18, 6, 0.72);
+  /* la précision secondaire s'efface — 86 % est le plancher qui garde 4,74:1
+     dans le pire cas ; à 0,78 elle retombait à 4,28:1, sous AA */
+  color: rgba(255, 255, 255, 0.86);
 }
 
 .ce-aide-ok {
   pointer-events: auto; /* LA seule zone du calque qui prend le pointeur */
-  margin-top: 11px;
+  margin-top: 12px;
   border: 0;
   border-radius: 999px;
-  padding: 7px 15px;
-  background: #1c1206;
-  color: #ffe9d5;
-  font: 600 11.5px var(--ce-font);
+  padding: 7px 16px;
+  background: #fff;
+  color: color-mix(in srgb, var(--ce-accent) 55%, #000);
+  font: 650 11.5px var(--ce-font);
   letter-spacing: 0.01em;
   cursor: pointer;
-  transition: background 0.15s, transform 0.15s;
+  transition: background 0.15s, transform 0.12s;
 }
 .ce-aide-ok:hover {
-  background: #33210c;
+  background: #ffeede;
 }
 .ce-aide-ok:active {
   transform: translateY(1px);
 }
 .ce-aide-ok:focus-visible {
-  /* le contour se pose SUR l'aplat orange, il lui faut donc l'encre foncée
-     doublée d'un liseré clair — un contour accent serait invisible ici */
-  outline: 2px solid #ffe9d5;
-  outline-offset: 2px;
+  /* le contour se pose sur un aplat d'accent foncé : il lui faut du blanc,
+     un contour accent y serait invisible */
+  outline: 2px solid #fff;
+  outline-offset: 3px;
 }
 
-/* Écrans étroits : la bulle remonte, la barre du bas mange le pied de page. */
+/* Écrans étroits : la barre du bas prend plus de hauteur, la bulle remonte. */
 @media (max-width: 640px) {
   .ce-aide {
-    bottom: 21%;
+    bottom: max(24%, 178px);
   }
 }
 
