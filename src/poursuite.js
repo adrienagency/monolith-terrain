@@ -377,10 +377,25 @@ export function sujetVisible({ sampleGround, cam, sujet, peau = 0.35, pas = 0 })
 // sujet redevienne visible ? Recherche dichotomique sur l'altitude — la
 // visibilité est monotone en altitude (monter ne peut pas cacher), donc la
 // dichotomie est exacte et non un tâtonnement.
-export function monteePourVoir({ sampleGround, cam, sujet, peau = 0.35, plafond = 0, pas = 12 }) {
+// ⚠️ LE PLAFOND SE CHERCHE, IL NE SE POSTULE PAS. Première version : un plafond
+// fixe (20 unités, ou quatre fois l'écart d'altitude). Sur une crête haute la
+// dichotomie n'avait alors aucun encadrement — elle rendait le plafond lui-même,
+// donc une valeur qui NE DÉGAGEAIT PAS. Le test « à la hauteur trouvée on voit,
+// un poil en dessous on ne voit pas » l'a attrapé du premier coup : c'est
+// exactement à ça que sert un test d'encadrement plutôt qu'un test de seuil.
+// On double donc jusqu'à trouver un plafond qui dégage vraiment.
+export function monteePourVoir({ sampleGround, cam, sujet, peau = 0.35, plafond = 0, pas = 12, doublements = 8 }) {
   if (sujetVisible({ sampleGround, cam, sujet, peau })) return 0
   let bas = 0
-  let haut = plafond || Math.max(20, Math.abs(cam.y - sujet.y) * 4 + 20)
+  let haut = plafond || Math.max(4, Math.abs(cam.y - sujet.y) * 2 + 2)
+  let n = 0
+  while (n < doublements && !sujetVisible({ sampleGround, cam: { ...cam, y: cam.y + haut }, sujet, peau })) {
+    bas = haut
+    haut *= 2
+    n++
+  }
+  // toujours bouché après huit doublements : le relief est infranchissable ici,
+  // on rend le dernier plafond plutôt que de boucler.
   if (!sujetVisible({ sampleGround, cam: { ...cam, y: cam.y + haut }, sujet, peau })) return haut
   for (let i = 0; i < pas; i++) {
     const m = (bas + haut) / 2
@@ -470,7 +485,11 @@ export function cuirePlanDeVol({
     let besoin = solOk + garde
     // contrainte 2 : voir le sujet — MAINTENANT et sur toute la fenêtre à venir.
     // C'est ce « et à venir » qui fait monter AVANT la crête au lieu de subir.
-    for (let k = i; k <= Math.min(n - 1, i + fen); k += Math.max(1, Math.round(fen / 4))) {
+    // ⚠️ ON ÉCHANTILLONNE LA FENÊTRE FIN. À un point sur quatre, la cuisson
+    // ratait des instants où le sujet passait derrière une croupe entre deux
+    // relevés — même piège que l'échantillonnage du segment de fleet.js, une
+    // dimension plus loin. La cuisson n'a lieu qu'une fois : elle a les moyens.
+    for (let k = i; k <= Math.min(n - 1, i + fen); k += Math.max(1, Math.round(fen / 12))) {
       const sujet = trace[k]
       const cam = { x, y: Math.max(besoin, p.y + vert), z }
       const m = monteePourVoir({ sampleGround, cam, sujet, peau })
@@ -716,6 +735,20 @@ export function preparerPoursuite({
 // Une pose = position, cible, roulis. Même contrat que pilote.js, donc le même
 // adaptateur three.js sait l'écrire.
 
+// De combien faut-il monter, depuis un point FIXE, pour voir le sujet pendant
+// tout un intervalle de temps ? C'est ce qui permet aux plans qui s'écartent de
+// la ligne de vol (ouverture, plan posé) de payer leur propre vérification :
+// la cuisson ne couvre que la ligne de vol.
+function hauteurDeVue(ctx, cam, t0, t1, n = 9) {
+  let m = 0
+  for (let i = 0; i <= n; i++) {
+    const S = sujetA(ctx.brut, ctx.prof, t0 + ((t1 - t0) * i) / n)
+    const h = monteePourVoir({ sampleGround: ctx.sampleGround, cam, sujet: S.pos, peau: ctx.profil.garde * 0.5 })
+    if (h > m) m = h
+  }
+  return m
+}
+
 // Point de la ligne de vol pour un sujet à l'indice `i`, altitude cuite comprise.
 //
 // ⚠️ L'AVANCE EST DÉJÀ DEDANS, ET C'EST LE BUG QUI A COÛTÉ LE PLUS CHER ICI.
@@ -753,9 +786,16 @@ function volA(ctx, i) {
   const i1 = k(b)
   const i2 = k(b + 1)
   const i3 = k(b + 2)
+  // ⚠️ MAIS PAS SUR L'ALTITUDE SANS FILET. Une cubique de Catmull-Rom
+  // SOUS-DÉPASSE entre deux points de contrôle — c'est sa nature, et sur
+  // l'altitude ça veut dire passer sous le profil qu'on vient de cuire, donc
+  // sous la ligne de vue vérifiée. On borne donc par le minimum du couple
+  // encadrant : la courbe reste douce partout où elle ne fautait pas, et elle ne
+  // peut plus descendre là où la cuisson l'interdit.
+  const yLisse = catmull(A[i0], A[i1], A[i2], A[i3], u)
   return {
     x: catmull(p[i0].x, p[i1].x, p[i2].x, p[i3].x, u),
-    y: catmull(A[i0], A[i1], A[i2], A[i3], u),
+    y: Math.max(yLisse, Math.min(A[i1], A[i2])),
     z: catmull(p[i0].z, p[i1].z, p[i2].z, p[i3].z, u),
   }
 }
@@ -853,13 +893,45 @@ export function poseDePoursuite(t, ctx, etat = null, dt = 1 / 60) {
       // à 100 % la trépidation du sentier au début du plan — 283 fois
       // l'accélération d'un virage nominal, la pire pointe de tout le clip. Le
       // coureur cahote, l'hélicoptère non.
-      const ancre = ctx.lisse[clamp(Math.round(S.idx), 0, n - 1)]
-      const k = doux(pl.s)
-      cam = {
-        x: lerp(ancre.x, haut.x, k),
-        y: lerp(ancre.y + ctx.half * 1.15, haut.y, k),
-        z: lerp(ancre.z + ctx.half * 0.35, haut.z, k),
+      // ⚠️ UN PLAN DE SITUATION EST OBLIQUE, PAS VERTICAL. Première version :
+      // départ à 1,15 demi-bloc au-dessus du coureur et 0,35 en arrière — vu de
+      // là, l'axe de visée plonge à 73° et l'image est une carte, pas un plan.
+      // On recule donc AUTANT qu'on monte, le long de l'axe du tronçon : la
+      // caméra domine la course mais on voit encore le relief de profil, ce qui
+      // est le seul intérêt d'un plan d'ouverture — dire où l'on est.
+      // ⚠️ LE POINT DE DÉPART EST FIGÉ AU DÉBUT DU PLAN, PAS RECALCULÉ. Recalculé
+      // à chaque image, il glissait avec le coureur — et comme sa hauteur se
+      // cale sur le sol qui le porte, il montait et descendait avec le relief
+      // sous lui : 468 fois l'accélération d'un virage nominal, la pire pointe
+      // du clip, sur le plan qui est censé être le plus calme de tous. Une
+      // caméra d'ouverture part d'un point choisi, elle ne le renégocie pas.
+      const A = ctx.lisse[0]
+      const B = ctx.lisse[n - 1]
+      const capTroncon = capDe(B.x - A.x, B.z - A.z)
+      const recul = ctx.half * 0.95
+      const S0e = sujetA(ctx.brut, ctx.prof, pl.debut)
+      const depart0 = volA(ctx, S0e.idx)
+      const depart = {
+        x: depart0.x - Math.sin(capTroncon) * recul,
+        y: depart0.y + ctx.half * 0.62,
+        z: depart0.z - Math.cos(capTroncon) * recul,
       }
+      // ⚠️ LE POINT DE DÉPART SE VÉRIFIE AUSSI. Mesuré : en reculant d'un
+      // demi-bloc le long de l'axe du tronçon, l'ouverture passait derrière une
+      // croupe et perdait le sujet 59,6 % du temps — de loin le pire des cinq
+      // plans, alors que la poursuite et le profil étaient à zéro. La cuisson ne
+      // couvre que la ligne de vol ; un plan qui s'en écarte doit payer sa
+      // propre vérification. On monte le départ jusqu'à voir, une fois pour
+      // toutes — c'est justement ce qu'un hélicoptère sait faire.
+      // …et la levée est calculée UNE FOIS pour le plan, sur son sujet de début.
+      // Recalculée à chaque image, elle changeait de quelques centièmes par
+      // image et donnait 625 fois l'accélération nominale : le remède devenait
+      // le mal. Un plan d'ouverture se règle avant de tourner, pas pendant.
+      const solD = ctx.sampleGround(depart.x, depart.z)
+      depart.y = Math.max(depart.y, (Number.isFinite(solD) ? solD : 0) + ctx.profil.garde)
+      depart.y += hauteurDeVue(ctx, depart, pl.debut, pl.debut + pl.duree * 0.5)
+      const k = doux(pl.s)
+      cam = { x: lerp(depart.x, haut.x, k), y: lerp(depart.y, haut.y, k), z: lerp(depart.z, haut.z, k) }
       decentrage = ctx.decentrage * k // au plus haut on centre : c'est un plan de situation
       break
     }
@@ -907,6 +979,10 @@ export function poseDePoursuite(t, ctx, etat = null, dt = 1 / 60) {
       // OÙ LE PLAN COMMENCE : la même entrée donne toujours la même sortie.
       const S0 = sujetA(ctx.brut, ctx.prof, pl.debut)
       cam = volA(ctx, clamp(S0.idx + ctx.avance * 1.5, 0, n - 1))
+      // Une caméra POSÉE doit voir passer le sujet sur TOUTE la durée du plan :
+      // elle ne peut plus se rattraper en montant, puisqu'elle ne bouge plus.
+      // On la place donc assez haut d'emblée, en balayant les instants à venir.
+      cam = { ...cam, y: cam.y + hauteurDeVue(ctx, cam, pl.debut, pl.debut + pl.duree) }
       decentrage = ctx.decentrage * 0.5
       break
     }

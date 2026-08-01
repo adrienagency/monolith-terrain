@@ -30,7 +30,9 @@
 // trouvé les vrais défauts : la moyenne les noyait, alors qu'un plan à 29 % de
 // sujet caché saute aux yeux dès qu'on sépare.
 
-import { preparerPoursuite, poursuiteComplete, sujetVisible } from './poursuite.js'
+import { preparerPoursuite, poursuiteComplete, sujetVisible, poseDePoursuite, etatInitial, sujetA } from './poursuite.js'
+
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v)
 
 export function mesurerPoursuite(ctx, { dt = 1 / 60 } = {}) {
   const poses = poursuiteComplete(ctx, { dt })
@@ -127,4 +129,73 @@ export async function bancPoursuite(opts = {}) {
   })
   if (!ctx) return { erreur: 'contexte impossible' }
   return { ctx, ...mesurerPoursuite(ctx) }
+}
+
+// ============================================================ LES CAPTURES
+//
+// « Le juge est l'œil, pas le test. » Même méthode que pilote-banc.js : onglet
+// caché, la boucle rAF est gelée, donc on avance le temps à la main, on rend, et
+// on POSTe le PNG binaire vers un serveur local (le relais base64 corrompt les
+// images — leçon du skill shibumap-shots).
+import { rotAutour } from './pilote-banc.js'
+
+export async function apercuPoursuite({ images = null, prefixe = 'course', poste = null, opts = {} } = {}) {
+  const e = globalThis.window?.__exp
+  if (!e) throw new Error('window.__exp indisponible')
+  const t = e.gpxLayer?.track?.world
+  if (!t || t.length < 8) throw new Error('aucune course chargée')
+  const ctx = preparerPoursuite({
+    trace: t.map((p) => ({ x: p.x, y: p.y, z: p.z })),
+    sampleGround: (x, z) => { const v = e.terrain.sample?.(x, z); return Number.isFinite(v) ? v : 0 },
+    half: 28,
+    metresParUnite: e.dem ? e.dem.extentMeters / 56 : 1,
+    exagerationV: e.params.demExaggeration || 1,
+    ...opts,
+  })
+  if (!ctx) return { erreur: 'contexte impossible' }
+  const envoi = poste || (async (nom, blob) => { await fetch('http://localhost:5388/' + nom, { method: 'POST', body: blob }) })
+  const dt = 1 / 60
+  // Par défaut : une image au milieu de chacun des plans de la séquence — c'est
+  // le jeu de preuve minimal, un cliché par intention de mise en scène.
+  const voulues = images || (() => {
+    const out = []
+    let acc = 0
+    const total = ctx.sequence.reduce((s2, p) => s2 + p.duree, 0)
+    for (const p of ctx.sequence) {
+      const d = (p.duree / total) * ctx.duree
+      out.push(Math.round((acc + d * 0.55) / dt))
+      acc += d
+    }
+    return out
+  })()
+  const cible = new Set(voulues)
+  const max = Math.max(...voulues)
+  let etat = etatInitial()
+  const out = []
+  for (let i = 0; i <= max; i++) {
+    const p = poseDePoursuite(i * dt, ctx, etat, dt)
+    etat = p.etat
+    if (!cible.has(i)) continue
+    const d = { x: p.target.x - p.pos.x, y: p.target.y - p.pos.y, z: p.target.z - p.pos.z }
+    const l = Math.hypot(d.x, d.y, d.z) || 1
+    const axe = { x: d.x / l, y: d.y / l, z: d.z / l }
+    const up = rotAutour({ x: 0, y: 1, z: 0 }, axe, -p.roulis)
+    e.camera.position.set(p.pos.x, p.pos.y, p.pos.z)
+    e.camera.up.set(up.x, up.y, up.z)
+    e.camera.lookAt(p.target.x, p.target.y, p.target.z)
+    e.controls.target.set(p.target.x, p.target.y, p.target.z)
+    // la tête de course doit être AU BON ENDROIT sur l'image : on la pose
+    if (e.gpxLayer?.setHeadT) {
+      const s = sujetA(ctx.brut, ctx.prof, i * dt)
+      e.gpxLayer.setHeadT?.(clamp((ctx.troncon[0] + s.idx * (ctx.pas / 1)) / t.length, 0, 1))
+    }
+    e.clouds?.update?.(dt, e.params, e.camera)
+    e.camera.updateMatrixWorld()
+    e.composer.render(0.016)
+    const blob = await new Promise((r) => e.renderer.domElement.toBlob(r, 'image/png'))
+    const nom = `${prefixe}-${p.plan}-${String(i).padStart(4, '0')}.png`
+    await envoi(nom, blob)
+    out.push(`${nom} roulis=${((p.roulis * 180) / Math.PI).toFixed(1)}° v=${p.vitesseKmh.toFixed(1)}km/h pente=${(p.pente * 100).toFixed(0)}%`)
+  }
+  return { images: out, ctx }
 }
