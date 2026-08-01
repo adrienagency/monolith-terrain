@@ -120,3 +120,44 @@ export const finesseInitiale = () => ({ fin: false, repos: 0, x: 0, z: 0, amorce
 export function resDeFinesse(fin, resVoulue, resDrag) {
   return fin ? Math.min(resVoulue, RES_REPOS_MAX) : Math.min(resVoulue, resDrag)
 }
+
+// ══════════ LES DEUX FINESSES, POUR QUI DOIT LES PRÉPARER ═══════════════════
+//
+// ⚠️ CE QUI RESTAIT À TROUVER, ET QUI NE SE VOIT QUE DANS LE NAVIGATEUR. La
+// bascule est gratuite tant que le champ de grain de la résolution VISÉE est
+// déjà cuit — le cache à deux entrées de `detail-noise.js` est là pour ça. Mais
+// la PREMIÈRE bascule d'une session ne trouve rien, et elle cuit.
+//
+// Mesuré sur l'instance vivante (pas un second exemplaire rendu par un import()
+// à la main), La Réunion z12 en 3×3, `terrain.majResFenetre` chronométrée
+// autour :
+//
+//     bascule vers 384, champ déjà cuit │    18 ms
+//     bascule vers 768, champ déjà cuit │    73 ms
+//     bascule vers 384, champ À CUIRE   │   373 ms
+//     bascule vers 768, champ À CUIRE   │ 1 516 ms   ← une seconde et demie
+//
+// 1,5 s de gel arrivant 0,4 s après que la carte s'est posée, sans que
+// l'utilisateur ait touché à quoi que ce soit : c'est le cas d'école de « une
+// dégradation ne doit pas se voir comme une panne ». Et un banc synthétique ne
+// l'aurait pas vu — le module pur, lui, bascule en zéro milliseconde.
+//
+// La cuisson elle-même est incompressible ici (285 ns le point, 5,31 M points à
+// res 768). Ce qui est déplaçable, c'est le MOMENT : sous le voile de
+// chargement, où l'on attend déjà, plutôt qu'en pleine contemplation. D'où
+// cette fonction — elle nomme les deux clés que le mode va s'échanger, pour que
+// l'appelant les prépare TOUTES LES DEUX pendant qu'il a le droit d'être lent.
+//
+// ⚠️ LES DEUX, ET PAS SEULEMENT LA FINE. La reconstruction cuit celle de
+// l'instant ; l'autre reste à découvert. Après la première bascule, `resFenetre`
+// vaut 768 et c'est donc la GROSSIÈRE qui manque — celle qu'on va chercher au
+// premier appui du doigt, à l'instant précis où l'on juge si le drag est fluide.
+//
+// @param {number} resVoulue - `params.resolution`
+// @param {number} resDrag - le plafond pendant le mouvement (RES_FENETRE_CONTINUE)
+// @returns {number[]} une ou deux résolutions, sans doublon
+export function resFinesses(resVoulue, resDrag) {
+  const mouvement = resDeFinesse(false, resVoulue, resDrag)
+  const repos = resDeFinesse(true, resVoulue, resDrag)
+  return mouvement === repos ? [mouvement] : [mouvement, repos]
+}

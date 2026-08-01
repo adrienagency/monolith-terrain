@@ -1293,6 +1293,41 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     return (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0
   }
 
+  // ══════════ CUIRE LES DEUX GRAINS PENDANT QU'ON A LE DROIT D'ÊTRE LENT ═════
+  //
+  // ⚠️ SANS ÇA, LA PREMIÈRE BASCULE GÈLE 1,5 s. Mesuré sur l'instance vivante,
+  // La Réunion z12 en 3×3, `majResFenetre` chronométrée de l'extérieur :
+  //
+  //     vers 384, grain déjà cuit │    18 ms  │  à cuire │   373 ms
+  //     vers 768, grain déjà cuit │    73 ms  │  à cuire │ 1 516 ms
+  //
+  // Le gel de 1,5 s tombait 0,4 s APRÈS que la carte se soit posée, sans que
+  // personne ait rien touché — la lecture la plus naturelle en est « l'onglet a
+  // planté ». La cuisson est incompressible (285 ns le point, 5,31 M points à
+  // res 768) ; c'est son MOMENT qui est déplaçable, et sa place est sous le
+  // voile de chargement, où l'attente est annoncée.
+  //
+  // ⚠️ ON RÉSOUT LES MÊMES CLÉS QUE `_makeGridSampler`, PAS DES CLÉS
+  // RESSEMBLANTES. Une seule composante qui diffère (l'accord de `detailScale`
+  // à la résolution, surtout) et le préchauffage cuirait un champ que personne
+  // ne demandera jamais : on paierait la lenteur ET le gel. D'où le passage par
+  // `_detailScalePour`, la seule formule, partagée avec le sampler.
+  //
+  // @param {object} params
+  // @param {number[]} listeRes - les résolutions du mode continu (`resFinesses`)
+  // @returns {number} millisecondes passées — zéro quand tout était déjà en cache
+  prechauffeFinesse(params, listeRes) {
+    const cote = this.dem?.empriseCote
+    if (params.source !== 'real' || !this.dem || !(cote > 1)) return 0
+    if (!(this._detailEffectif(params) > 0)) return 0 // grain éteint : aucun champ à cuire
+    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    for (const res of listeRes) {
+      if (!(res > 0)) continue
+      detailFieldEmprise(params.seed, this._detailScalePour(params, res), res, TERRAIN_SIZE, cote)
+    }
+    return (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0
+  }
+
   // ══════════ LE GRAIN DOIT DESCENDRE AVEC LA RÉSOLUTION ════════════════════
   //
   // ⚠️ SANS ÇA, LE MODE CONTINU AFFICHE DU POIVRE ET SEL. `detail-noise.js`
@@ -1311,7 +1346,24 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // 1,901 maille/λ de res 768 ; il a la même apparence, il est simplement deux
   // fois plus large en unités monde.
   _detailScaleFenetre(params) {
-    return accordeDetailScale(params.detailScale, params.resolution, this._resFenetre(params))
+    return this._detailScalePour(params, this._resFenetre(params))
+  }
+
+  // La même chose pour une résolution NOMMÉE, et non pour celle de l'instant.
+  // ⚠️ UNE SEULE FORMULE. Elle sert de clé de cache au champ de grain
+  // (`detailFieldEmprise`) : le préchauffage et le sampler doivent en sortir le
+  // même nombre au bit près, sinon ils cuisent deux champs au lieu d'un.
+  _detailScalePour(params, res) {
+    return accordeDetailScale(params.detailScale, params.resolution, res)
+  }
+
+  // Le grain RÉELLEMENT appliqué. ⚠️ En mode Naturel le texture shading porte
+  // déjà une micro-texture, et une vraie : le FBM y est bridé (voir
+  // `_makeDemSampler`). Extrait ici parce que le préchauffage doit poser la
+  // même question que le sampler — « y a-t-il un champ à cuire ? » — et qu'à
+  // deux endroits la réponse finirait par diverger.
+  _detailEffectif(params) {
+    return this.mapUniforms.uColorMode.value === 1 ? Math.min(params.detail, NATURAL_DETAIL_MAX) : params.detail
   }
 
   // Sampler over a fetched real-world DEM: world xz → bilinear meters → scene units.
@@ -1336,7 +1388,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // une inventée, décorrélée du relief : les deux se brouillent et le peigné
     // s'éteint. On bride donc le détail sans toucher à params — le curseur garde
     // la valeur de l'utilisateur, qui la retrouve en repassant en Classique.
-    const detail = this.mapUniforms.uColorMode.value === 1 ? Math.min(params.detail, NATURAL_DETAIL_MAX) : params.detail
+    const detail = this._detailEffectif(params)
 
     return (x, z) => {
       const px = ((x + fen.x) / span + 0.5) * (size - 1)
@@ -1424,7 +1476,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const scale = (span / dem.extentMeters) * params.demExaggeration
     const meanM = dem.meanM
     const { size } = dem
-    const detail = this.mapUniforms.uColorMode.value === 1 ? Math.min(params.detail, NATURAL_DETAIL_MAX) : params.detail
+    const detail = this._detailEffectif(params)
     if (!(detail > 0)) {
       // grain éteint (zooms continentaux, curseur à zéro) : aucun champ à cuire.
       // `landFactor · (0·a + 0·0,35·b)` vaut 0 tout rond, on peut le sauter.

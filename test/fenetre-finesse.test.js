@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { COURSE_ELASTIQUE, rappelElastique } from '../src/fenetre-course.js'
 import { pasElan, V_ARRET } from '../src/fenetre-elan.js'
-import { REPOS_S, V_REPOS, RES_REPOS_MAX, pasFinesse, finesseInitiale, resDeFinesse } from '../src/fenetre-finesse.js'
+import { REPOS_S, V_REPOS, RES_REPOS_MAX, pasFinesse, finesseInitiale, resDeFinesse, resFinesses } from '../src/fenetre-finesse.js'
 
 const DT = 1 / 60
 
@@ -148,4 +148,30 @@ test('resDeFinesse : un choix PLUS BAS que le mode continu est respecté', () =>
   // Le mode continu bride une machine ; il ne la charge jamais plus que demandé.
   assert.equal(resDeFinesse(false, 256, 384), 256)
   assert.equal(resDeFinesse(true, 256, 384), 256)
+})
+
+// ══════════ LES DEUX FINESSES À PRÉPARER ════════════════════════════════════
+
+test('resFinesses nomme les DEUX résolutions de l’aller-retour, dans cet ordre', () => {
+  // L'ordre n'est pas cosmétique : celle du MOUVEMENT vient en premier parce
+  // que c'est la moins chère à cuire et la plus urgente à avoir (elle est
+  // réclamée au premier appui du doigt, pas 0,4 s après).
+  assert.deepEqual(resFinesses(768, 384), [384, 768])
+  assert.deepEqual(resFinesses(2048, 384), [384, 768], 'le repos reste plafonné à RES_REPOS_MAX')
+})
+
+test('resFinesses ne rend qu’UNE valeur quand il n’y a rien à alterner', () => {
+  // Curseur à 256 : le mode continu ne bride plus rien, il n'y a qu'un maillage
+  // et préchauffer deux fois le même champ le cuirait deux fois pour rien.
+  assert.deepEqual(resFinesses(256, 384), [256])
+  assert.deepEqual(resFinesses(384, 384), [384])
+})
+
+test('resFinesses s’accorde avec resDeFinesse — une seule règle, pas deux', () => {
+  for (const voulue of [128, 256, 384, 512, 768, 1024, 2048]) {
+    const l = resFinesses(voulue, 384)
+    assert.ok(l.includes(resDeFinesse(false, voulue, 384)), `res ${voulue} : le mouvement manque`)
+    assert.ok(l.includes(resDeFinesse(true, voulue, 384)), `res ${voulue} : le repos manque`)
+    assert.equal(new Set(l).size, l.length, `res ${voulue} : doublon`)
+  }
 })

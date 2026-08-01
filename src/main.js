@@ -57,7 +57,7 @@ import { COURSE_ELASTIQUE, avanceFenetre, rappelElastique } from './fenetre-cour
 import { dansFenetre } from './fenetre-clip.js'
 import { vitesseAuLache, pasElan } from './fenetre-elan.js'
 import { forceUrl, continuActif, etatInterrupteur } from './fenetre-reglage.js'
-import { pasFinesse, finesseInitiale, resDeFinesse } from './fenetre-finesse.js'
+import { pasFinesse, finesseInitiale, resDeFinesse, resFinesses } from './fenetre-finesse.js'
 import { MapLayers } from './map/layer-manager.js'
 import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
 import { lightingFor, darkModeFor, applyGains, fillDirection, fillLightIntensity, fillEnabledInLook, sunOn, sunShadowOn } from './daycycle.js'
@@ -2159,17 +2159,23 @@ function f3Tick(dt) {
   // geste au grossier une image trop tard — celle-là même qu'on essaie de
   // sauver.
   _f3Fin = pasFinesse(_f3Fin, { glisse: _f3Glisse, x: terrain.fenetre.x, z: terrain.fenetre.z, dt })
+  let refait = false
   if (_f3Fin.change) {
     terrain.resFenetre = resDeFinesse(_f3Fin.fin, params.resolution, RES_FENETRE_CONTINUE)
     const ms = terrain.majResFenetre(params)
-    // Le socle et les calques lisent `terrain.sample`, que la reconstruction
-    // vient de remplacer : ils doivent repartir de celui-là, pas de l'ancien.
-    _f3Sale = true
+    refait = true
     if (F3_TRACE) console.info(`[f3] maillage → res ${terrain.resFenetre} en ${ms.toFixed(1)} ms`)
   }
-  if (!_f3Sale) return
+  // ⚠️ ON N'ÉCRIT PAS LE RELIEF DEUX FOIS DANS LA MÊME IMAGE. `majResFenetre`
+  // vient de faire, sur la géométrie neuve, EXACTEMENT le travail de
+  // `tickFenetre` (même `_ecrireRelief`, même `_pousseFenetre`, même `sample`).
+  // Enchaîner les deux ajoutait 43 ms à res 768 et 15 ms à res 384 — et les
+  // 15 ms tombaient sur l'image du PREMIER PAS du geste, celle qu'on descend en
+  // résolution précisément pour la sauver. Le socle et les calques, eux, doivent
+  // suivre dans les deux cas : ils repartent du `terrain.sample` tout neuf.
+  if (!_f3Sale && !refait) return
   _f3Sale = false
-  terrain.tickFenetre(params)
+  if (!refait) terrain.tickFenetre(params)
   // Le socle SUIT — il ne lit que `terrain.sample`, qui porte déjà le décalage.
   // Mesuré à 2,2 ms par image, assez peu pour le refaire à chaque pas, assez
   // pour ne le refaire QUE quand la fenêtre a bougé.
@@ -2648,6 +2654,27 @@ function regenerateTerrain() {
   return new Promise((resolve) =>
     setTimeout(() => {
       terrain.rebuild(params)
+      // ══════════ LE GRAIN DES DEUX FINESSES, CUIT SOUS LE VOILE ═════════════
+      //
+      // ⚠️ MESURÉ, PAS DÉDUIT : sans ce préchauffage la première bascule de
+      // finesse gèle **1 516 ms** (vers 768) et la première reprise du doigt
+      // **373 ms** (vers 384) — La Réunion z12, chronométré autour de
+      // `majResFenetre` sur l'instance vivante. Le gel arrivait 0,4 s après que
+      // la carte se soit posée, sans que l'utilisateur ait rien touché : la
+      // définition même de « une dégradation qui se voit comme une panne ».
+      //
+      // `rebuild` juste au-dessus n'a cuit que le grain de la finesse COURANTE ;
+      // l'autre reste à découvert. On les demande donc toutes les deux ici,
+      // pendant que le voile de chargement est levé et que l'attente est
+      // annoncée. Quand rien n'a changé (la plupart des appels : un curseur
+      // d'exagération, une palette), c'est une recherche dans une Map.
+      //
+      // ⚠️ ET C'EST GRATUIT HORS MODE CONTINU : `prechauffeFinesse` sort à sa
+      // première ligne si l'emprise n'est pas 3×3.
+      if (fenetreContinueActive()) {
+        const msChauffe = terrain.prechauffeFinesse(params, resFinesses(params.resolution, RES_FENETRE_CONTINUE))
+        if (F3_TRACE && msChauffe > 1) console.info(`[f3] grain préchauffé en ${msChauffe.toFixed(0)} ms`)
+      }
       terrain.rebuildRoughness(params)
       plinth.rebuild(terrain, params, socleEmprise()) // walls hug the new relief border (also re-welds the region skirt in region mode — see the plinth.rebuild wrapper)
       terrain.refreshMatTiling(params) // re-tile the relief material to the new zoom scale
