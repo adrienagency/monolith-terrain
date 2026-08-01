@@ -716,18 +716,47 @@ export function preparerPoursuite({
 // Une pose = position, cible, roulis. Même contrat que pilote.js, donc le même
 // adaptateur three.js sait l'écrire.
 
-// point de la ligne de vol à l'indice fractionnaire i, altitude cuite comprise
+// Point de la ligne de vol pour un sujet à l'indice `i`, altitude cuite comprise.
+//
+// ⚠️ L'AVANCE EST DÉJÀ DEDANS, ET C'EST LE BUG QUI A COÛTÉ LE PLUS CHER ICI.
+// `cuirePlanDeVol` range dans `posXZ[i]` la position de la caméra QUAND LE SUJET
+// EST À L'INDICE i — l'avance est appliquée à la cuisson. Les plans appelaient
+// pourtant `volA(ctx, S.idx + ctx.avance)`, donc l'avance comptait DEUX FOIS :
+// la caméra volait à un endroit dont personne n'avait vérifié la visibilité.
+// Mesuré sur le tracé d'Interlaken : le sujet était caché 12,2 % du temps dans
+// le plan de poursuite lui-même, alors que c'est exactement ce que la cuisson
+// est censée rendre impossible. `i` est donc l'indice DU SUJET, point.
+// ⚠️ L'INTERPOLATION EST CUBIQUE, PAS LINÉAIRE — et c'est la dérivée seconde qui
+// l'a exigée, encore. Le plan de vol ne compte que 167 points pour 70 secondes :
+// la caméra franchit un point toutes les 0,42 s, soit toutes les 25 images. En
+// interpolant linéairement, la DIRECTION casse à chaque franchissement — la
+// position reste continue, sa dérivée aussi, mais pas la seconde. Mesuré sur le
+// tracé d'Interlaken : 491 fois l'accélération d'un virage nominal, une pointe
+// toutes les 25 images, invisible dans un test de position et parfaitement
+// visible à l'œil. Catmull-Rom (la même raison qui fait que drone-cam.js utilise
+// CatmullRomCurve3) rend la courbe C¹ et l'accélération continue.
+function catmull(p0, p1, p2, p3, t) {
+  const t2 = t * t
+  const t3 = t2 * t
+  return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3)
+}
+
 function volA(ctx, i) {
   const n = ctx.lisse.length
   const f = clamp(i, 0, n - 1)
-  const a = Math.floor(f)
-  const b = Math.min(a + 1, n - 1)
-  const u = f - a
+  const b = Math.floor(f)
+  const u = f - b
   const p = ctx.plan.posXZ
+  const A = ctx.plan.alt
+  const k = (j) => clamp(j, 0, n - 1)
+  const i0 = k(b - 1)
+  const i1 = k(b)
+  const i2 = k(b + 1)
+  const i3 = k(b + 2)
   return {
-    x: lerp(p[a].x, p[b].x, u),
-    y: lerp(ctx.plan.alt[a], ctx.plan.alt[b], u),
-    z: lerp(p[a].z, p[b].z, u),
+    x: catmull(p[i0].x, p[i1].x, p[i2].x, p[i3].x, u),
+    y: catmull(A[i0], A[i1], A[i2], A[i3], u),
+    z: catmull(p[i0].z, p[i1].z, p[i2].z, p[i3].z, u),
   }
 }
 
@@ -815,7 +844,7 @@ export function poseDePoursuite(t, ctx, etat = null, dt = 1 / 60) {
   switch (pl.id) {
     // ---- plan d'ouverture : haut, tout le parcours, puis on descend ---------
     case 'etablissement': {
-      const haut = volA(ctx, S.idx + ctx.avance)
+      const haut = volA(ctx, S.idx)
       // Le point de départ est PLEIN CIEL au-dessus du sujet, pas « deux fois
       // plus loin que la ligne de vol » : ce dernier calcul dépendait du côté
       // courant et sautait quand le côté basculait.
@@ -838,7 +867,9 @@ export function poseDePoursuite(t, ctx, etat = null, dt = 1 / 60) {
     case 'depassement': {
       // De +avance à −avance : la caméra remonte le long du parcours, dépasse le
       // coureur et le regarde revenir. C'est le plan qui dit la vitesse.
-      const a = lerp(ctx.avance * 1.2, -ctx.avance * 1.6, doux(pl.s))
+      // L'avance EFFECTIVE passe de 1,2 à −1,6 fois l'avance nominale ; comme
+      // `volA` en applique déjà une, l'écart demandé vaut (facteur − 1).
+      const a = lerp(ctx.avance * 0.2, -ctx.avance * 2.6, doux(pl.s))
       cam = volA(ctx, S.idx + a)
       // en le regardant revenir, l'espace se met DERRIÈRE lui à l'image —
       // c'est le seul plan où le lead room s'inverse, et c'est voulu
@@ -847,14 +878,21 @@ export function poseDePoursuite(t, ctx, etat = null, dt = 1 / 60) {
     }
     // ---- le profil : latéral serré, parallèle -------------------------------
     case 'profil': {
-      const p = volA(ctx, S.idx + ctx.avance * 0.25)
-      // On se rapproche (standoff à 55 %) mais on interpole vers la LIGNE LISSÉE,
-      // jamais vers le tracé brut : même raison qu'au plan d'établissement.
+      // avance effective 0,25 → écart de −0,75 avance
+      const p = volA(ctx, S.idx - ctx.avance * 0.75)
+      // ⚠️ ON SE RAPPROCHE À L'HORIZONTALE SEULEMENT, ON NE DESCEND PAS. Première
+      // version : on interpolait aussi l'altitude vers le coureur (62 %). Mesuré
+      // sur le tracé d'Interlaken, ce plan perdait le sujet 29,2 % du temps — de
+      // loin le pire des cinq — parce qu'en descendant on repasse sous les
+      // croupes que l'altitude cuite venait justement de franchir. On garde donc
+      // l'altitude du plan de vol et on ne resserre que le bras de levier
+      // horizontal : le regard plonge davantage, ce qui est le cadrage voulu, et
+      // la ligne de vue reste celle qui a été vérifiée.
       const ancre = ctx.lisse[clamp(Math.round(S.idx), 0, n - 1)]
       cam = {
-        x: lerp(ancre.x, p.x, 0.55),
-        y: Math.max(lerp(ancre.y, p.y, 0.62), ancre.y + ctx.profil.garde),
-        z: lerp(ancre.z, p.z, 0.55),
+        x: lerp(ancre.x, p.x, 0.62),
+        y: p.y,
+        z: lerp(ancre.z, p.z, 0.62),
       }
       decentrage = ctx.decentrage * 1.15
       break
@@ -868,13 +906,13 @@ export function poseDePoursuite(t, ctx, etat = null, dt = 1 / 60) {
       // obtenait un point différent. On le recalcule donc À PARTIR DE L'INSTANT
       // OÙ LE PLAN COMMENCE : la même entrée donne toujours la même sortie.
       const S0 = sujetA(ctx.brut, ctx.prof, pl.debut)
-      cam = volA(ctx, clamp(S0.idx + ctx.avance * 2.5, 0, n - 1))
+      cam = volA(ctx, clamp(S0.idx + ctx.avance * 1.5, 0, n - 1))
       decentrage = ctx.decentrage * 0.5
       break
     }
     // ---- la poursuite : le plan principal -----------------------------------
     default:
-      cam = volA(ctx, S.idx + ctx.avance)
+      cam = volA(ctx, S.idx)
       break
   }
 
@@ -910,7 +948,11 @@ export function poseDePoursuite(t, ctx, etat = null, dt = 1 / 60) {
 
   // La cible : lead room, puis lissage temporel. La tourelle gyrostabilisée est
   // douce par construction ; c'est ce filtre qui la modélise.
-  const vCamKmh = vitesseCameraKmh(E.cam, cam, dt, ctx)
+  // ⚠️ ON NE MESURE PAS UNE VITESSE À TRAVERS UNE COUPE. Au raccord, la position
+  // saute d'un plan à l'autre ; divisée par dt, ça donne une vitesse absurde, et
+  // l'hélicoptère s'inclinait à fond pendant une image — mesuré : 25° de roulis
+  // en plein plan de poursuite, là où il doit rester à plat.
+  const vCamKmh = E.plan && E.plan !== pl.id ? 0 : vitesseCameraKmh(E.cam, cam, dt, ctx)
   const brute = visee({ sujet, cam, capSujet: capVise, decentrage, fovDeg: ctx.fovDeg })
   let cible = brute
   if (E.cible) {
@@ -928,7 +970,7 @@ export function poseDePoursuite(t, ctx, etat = null, dt = 1 / 60) {
   return {
     pos: cam,
     target: cible,
-    roulis: pl.id === 'fixe' ? 0 : rouliDeVol(ctx, S.idx + ctx.avance, v, vCamKmh) * e,
+    roulis: pl.id === 'fixe' ? 0 : rouliDeVol(ctx, S.idx, v, vCamKmh) * e,
     sujet,
     plan: pl.id,
     vitesseKmh: S.vitesseKmh,

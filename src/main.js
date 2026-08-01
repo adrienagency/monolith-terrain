@@ -3635,6 +3635,16 @@ const pilote = new PiloteCam({
   controls,
   sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0,
   half: TERRAIN_SIZE / 2,
+  // Le cran 3 (poursuite de la tête de course) n'existe que s'il y a une course :
+  // c'est ce getter qui le fait apparaître et disparaître tout seul.
+  getTrace: () => gpxLayer?.track?.world ?? null,
+  // L'échelle du bloc : la poursuite en a besoin pour convertir les km/h de
+  // l'allure et les 50-150 m de hauteur du métier en unités monde. Sans elle,
+  // l'hélicoptère volerait à 120 unités du sol au lieu de 120 mètres.
+  getEchelle: () => ({
+    metresParUnite: dem ? dem.extentMeters / TERRAIN_SIZE : 1,
+    exagerationV: params.demExaggeration || 1,
+  }),
   onState: () => {
     piloteBtn?.setActive(pilote.active)
     piloteBtn?.setBadge(pilote.badge)

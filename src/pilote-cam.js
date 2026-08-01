@@ -13,36 +13,56 @@
 
 import * as THREE from 'three'
 import { planifierVol, creerVol, stepPilote, poseDe, PROFILS } from './pilote.js'
+import { preparerPoursuite, poseDePoursuite, etatInitial } from './poursuite.js'
 
-// Les crans du bouton. Deux vols, pas six : un plan de pilote n'est pas un
-// effet, c'est une TRAJECTOIRE, et le relief en fournit rarement plus d'une
-// bonne par bloc. Le troisième cran arrête. Voir le commentaire du bouton dans
-// main.js pour le pourquoi du numéro affiché.
+// Les crans du bouton. Deux vols de reconnaissance, pas six : un plan de pilote
+// n'est pas un effet, c'est une TRAJECTOIRE, et le relief en fournit rarement
+// plus d'une bonne par bloc. Voir le commentaire du bouton dans main.js pour le
+// pourquoi du numéro affiché.
 export const VOLS = [
   { id: 'avion', nom: '1', label: 'Survol de vallée — avion' },
   { id: 'helico', nom: '2', label: 'Reconnaissance basse — hélicoptère' },
 ]
 
+// TROISIÈME CRAN, CONDITIONNEL : la poursuite de la tête de course. Il n'apparaît
+// que quand un tracé est chargé — proposer un suivi de course sans course serait
+// un bouton mort, et le dépôt n'en veut pas (cf. `setVisible` des voisines, qui
+// s'effacent hors du mode surface).
+export const VOL_POURSUITE = { id: 'poursuite', nom: '3', label: 'Poursuite de la tête de course — hélicoptère' }
+
 export class PiloteCam {
-  constructor({ camera, controls, sampleGround, half, onState = () => {}, onPlan = () => {} }) {
+  // `getTrace` (optionnel) rend la polyligne monde de la course, ou null. C'est
+  // par elle que le cran 3 apparaît ou disparaît.
+  constructor({ camera, controls, sampleGround, half, getTrace = null, getEchelle = null, onState = () => {}, onPlan = () => {} }) {
     this.camera = camera
     this.controls = controls
     this.sampleGround = sampleGround
     this.half = half
+    this.getTrace = getTrace
+    this.getEchelle = getEchelle
     this.onState = onState
     this.onPlan = onPlan
     this.active = false
     this.index = -1
     this.plan = null
     this.etat = null
+    this.poursuite = null // contexte de poursuite quand le cran 3 tourne
+    this.t = 0
     this._q = new THREE.Quaternion()
     this._m = new THREE.Matrix4()
     this._up = new THREE.Vector3()
     this._axe = new THREE.Vector3()
   }
 
+  // Les crans DISPONIBLES à cet instant : deux, ou trois si une course est là.
+  get crans() {
+    const t = this.getTrace?.()
+    return t && t.length > 8 ? [...VOLS, VOL_POURSUITE] : VOLS
+  }
+
   get badge() {
-    return this.index >= 0 ? VOLS[this.index].nom : null
+    const c = this.crans
+    return this.index >= 0 && this.index < c.length ? c[this.index].nom : null
   }
 
   // Le profil courant, pour l'affichage et les tests.
@@ -52,6 +72,29 @@ export class PiloteCam {
 
   // Compose et engage un vol. Retourne le PLAN, ou null si aucun couloir du bloc
   // n'est engageable — et c'est un résultat, pas une panne : le pilote refuse.
+  // La poursuite : on prépare le contexte une fois, puis on le lit.
+  _lancerPoursuite() {
+    const trace = this.getTrace?.()
+    if (!trace || trace.length < 8) return null
+    const ech = this.getEchelle?.() || { metresParUnite: 1, exagerationV: 1 }
+    const ctx = preparerPoursuite({
+      trace: trace.map((p) => ({ x: p.x, y: p.y, z: p.z })),
+      sampleGround: this.sampleGround,
+      half: this.half,
+      metresParUnite: ech.metresParUnite,
+      exagerationV: ech.exagerationV,
+    })
+    if (!ctx) return null
+    this.poursuite = ctx
+    this.etatP = etatInitial()
+    this.t = 0
+    this.plan = null
+    this.etat = null
+    this.active = true
+    this.onPlan(ctx)
+    return ctx
+  }
+
   _lancer(id) {
     const plan = planifierVol({
       sampleGround: this.sampleGround,
@@ -74,12 +117,15 @@ export class PiloteCam {
   // Si le bloc ne propose aucun couloir engageable, on passe au cran suivant au
   // lieu de rester bloqué, et le badge le dit en s'effaçant.
   next() {
+    const c = this.crans
     const i = this.index + 1
-    if (i >= VOLS.length) { this.stop(); return null }
+    if (i >= c.length) { this.stop(); return null }
     this.index = i
-    if (!this._lancer(VOLS[i].id)) { this.onState(); return VOLS[i].nom }
+    this.poursuite = null
+    const ok = c[i].id === 'poursuite' ? this._lancerPoursuite() : this._lancer(c[i].id)
+    if (!ok) { this.onState(); return c[i].nom }
     this.onState()
-    return VOLS[i].nom
+    return c[i].nom
   }
 
   // Interrompt le vol mais GARDE le cran : attraper la caméra en plein vol ne
@@ -90,6 +136,7 @@ export class PiloteCam {
     this.active = false
     this.plan = null
     this.etat = null
+    this.poursuite = null
     this._redresser()
     this.onState()
   }
@@ -99,6 +146,7 @@ export class PiloteCam {
     this.active = false
     this.plan = null
     this.etat = null
+    this.poursuite = null
     this.index = -1
     this._redresser()
     this.onState()
@@ -136,6 +184,20 @@ export class PiloteCam {
   }
 
   update(dt) {
+    // ---- la poursuite : on lit le contexte cuit, image par image ------------
+    if (this.active && this.poursuite) {
+      this.t += dt
+      const p = poseDePoursuite(this.t, this.poursuite, this.etatP, dt)
+      this.etatP = p.etat
+      this._orienter(p.pos, p.target, p.roulis)
+      if (this.t >= this.poursuite.duree) {
+        this.active = false
+        this.poursuite = null
+        this._redresser()
+        this.onState()
+      }
+      return
+    }
     if (!this.active || !this.plan || !this.etat) return
     this.etat = stepPilote(this.etat, dt, this.plan, { sampleGround: this.sampleGround })
     const pose = poseDe(this.etat, this.plan, { sampleGround: this.sampleGround })

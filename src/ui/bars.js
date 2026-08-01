@@ -399,7 +399,7 @@ export function buildPiloteButton(ctx) {
   const badge = el('span', 'ce-iso-badge')
   badge.style.display = 'none'
   btn.append(badge)
-  btn.setAttribute('data-tip', "Caméra pilote — elle cherche une vallée, vérifie sa sortie, puis la survole au ras du sol en s’inclinant dans les virages. 1 : avion. 2 : hélicoptère. Un clic de plus arrête.")
+  btn.setAttribute('data-tip', "Caméra pilote — elle cherche une vallée, vérifie sa sortie, puis la survole au ras du sol en s’inclinant dans les virages. 1 : avion. 2 : hélicoptère. 3 (si une course est chargée) : poursuite de la tête de course. Un clic de plus arrête.")
   btn.addEventListener('click', () => ctx.next())
   document.body.append(btn)
   return {
