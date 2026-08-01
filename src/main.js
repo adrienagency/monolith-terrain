@@ -600,6 +600,11 @@ const BASE_TEMPLATE_LOOK = Object.freeze(captureLook(params))
 // has to be fully synchronous: it must land before anything below reads
 // `params` for the first time, and nothing here can afford to await.
 let pendingShareCam = null // applied once `camera`/`controls` exist, below
+// La position DANS L'EMPRISE portée par le lien (share-link.js, champ `fen`).
+// Posée une fois le relief chargé — avant, il n'y a pas d'emprise où se placer.
+// Reste null pour tout lien d'avant ce champ : ceux-là rouvrent au centre du
+// bloc, c'est-à-dire exactement la vue qu'ils ont toujours ouverte.
+let pendingShareFen = null
 if (location.hash.startsWith('#s=')) {
   try {
     const decoded = decodeShareState(location.hash.slice(3))
@@ -611,6 +616,7 @@ if (location.hash.startsWith('#s=')) {
       params.demZoom = shared.loc.zoom
       params.demLocation = 'Custom'
       pendingShareCam = shared.cam
+      pendingShareFen = shared.fen
     }
   } catch (err) {
     console.warn('share link ignored:', err) // a garbled/old-format fragment just boots the default view
@@ -2246,6 +2252,43 @@ function f3CalquesSuivent() {
   // ⚠️ Les LACS, eux, se translatent : ce sont des plans d'eau posés sur le
   // terrain, pas des meubles du socle. `setFenetre` fait les deux à la fois.
   realWater?.setFenetre(f.x, f.z)
+}
+
+// ══════════ POSER LA FENÊTRE D'AUTORITÉ — liens partagés, et rien d'autre ═══
+//
+// Un lien porte désormais la position DANS l'emprise (share-link.js, champ
+// `fen`). La poser n'est pas un geste : il n'y a ni élan à hériter, ni butée à
+// franchir — c'est un point de vue restauré, et il doit être là DÈS la première
+// image peinte, sinon le destinataire voit le terrain glisser tout seul en
+// arrivant, ce qui est exactement l'inverse de « rouvrir la même vue ».
+//
+// D'où l'écriture SYNCHRONE du relief plutôt qu'un `_f3Sale = true` : une image
+// de retard suffirait à montrer le centre du bloc avant de sauter.
+//
+// ⚠️ ET `_f3Fin` EST RECALÉ SUR LA NOUVELLE POSITION. `pasFinesse` fait la
+// dérivée de l'affiché : sans ce recalage il verrait un bond de 40 unités en
+// une image, jugerait « ça bouge », retomberait à res 384 et remonterait à 768
+// une demi-seconde plus tard — un aller-retour de maillage à 70 ms, visible, et
+// pour rien. On déplace le point de comparaison avec la fenêtre, sans toucher à
+// `fin` : aucune bascule n'a lieu de se déclencher.
+//
+// Silencieux hors mode continu : un lien fabriqué en 3×3 et ouvert sur une
+// machine qui le refuse doit donner la carte, pas une erreur.
+function f3PoseFenetre(fen) {
+  if (!fen || !fenetreContinueActive() || !(dem?.empriseCote > 1)) return false
+  const borne = (v) => Math.max(-COURSE_ELASTIQUE, Math.min(COURSE_ELASTIQUE, Number.isFinite(v) ? v : 0))
+  terrain.fenetre.x = borne(fen.x)
+  terrain.fenetre.z = borne(fen.z)
+  _f3Brut.x = terrain.fenetre.x
+  _f3Brut.z = terrain.fenetre.z
+  _f3V.x = _f3V.z = 0
+  _f3Ech.length = 0
+  _f3Fin = { ..._f3Fin, x: terrain.fenetre.x, z: terrain.fenetre.z, repos: 0 }
+  _f3Sale = false
+  terrain.tickFenetre(params)
+  plinth.rebuild(terrain, params, socleEmprise())
+  f3CalquesSuivent()
+  return true
 }
 
 // ══════════ LES DEUX CALQUES QU'ON CONSTRUIT EN COORDONNÉES D'ÉCRAN ════════
@@ -5100,7 +5143,12 @@ async function shareCurrentView() {
     px: camera.position.x, py: camera.position.y, pz: camera.position.z,
     tx: controls.target.x, ty: controls.target.y, tz: controls.target.z,
   }
-  const state = captureShareState(params, cam, BASE_TEMPLATE_LOOK)
+  // ⚠️ LA POSITION DANS L'EMPRISE VOYAGE AVEC. En mode continu, `loc` ne dit
+  // que quel BLOC est chargé : la fenêtre se promène de ±56 unités dedans, soit
+  // ±21 km à z12. Sans ce quatrième argument, on envoyait le destinataire au
+  // centre du bloc — jusqu'à 30 km à côté de ce qu'on avait sous les yeux.
+  // Hors mode continu on passe `null` et le payload sort inchangé.
+  const state = captureShareState(params, cam, BASE_TEMPLATE_LOOK, fenetreContinueActive() ? terrain.fenetre : null)
   const hasTrack = !!gpxLayer.track
 
   // On PUBLIE TOUJOURS (Netlify Blobs via netlify/functions/race.mjs) pour
@@ -6114,7 +6162,13 @@ async function bootInitialView() {
   const race = payload ? parseRacePayload(payload, BASE_TEMPLATE_LOOK) : null
   if (!race) {
     if (pendingRaceFetch) loadingStatus.textContent = 'race link unavailable — loading the default view…'
-    if (params.source === 'real') loadRealTerrain()
+    // ⚠️ ATTENDU, alors qu'il ne l'était pas : c'est ce chargement-là qui crée
+    // l'emprise 3×3 dans laquelle la fenêtre d'un lien #s= doit se poser. Rien
+    // d'autre ne change — la valeur de retour n'était pas lue, et personne
+    // n'attendait `bootInitialView` non plus.
+    if (params.source === 'real') await loadRealTerrain()
+    f3PoseFenetre(pendingShareFen)
+    pendingShareFen = null
     return
   }
   if (race.state) {
@@ -6124,12 +6178,16 @@ async function bootInitialView() {
     params.demZoom = race.state.loc.zoom
     params.demLocation = 'Custom'
     if (race.state.cam) pendingShareCam = race.state.cam
+    pendingShareFen = race.state.fen
   }
   // loadGpxText frames the track, loads terrain, and applies the pending
   // camera once the view exists. SANS course (une carte nue publiée), il n'y
   // a rien à cadrer : on charge simplement le relief du lieu restauré.
   if (race.gpx) await loadGpxText(race.gpx)
   else if (params.source === 'real') await loadRealTerrain()
+  // Le relief existe : l'emprise aussi, donc la fenêtre a où se poser.
+  f3PoseFenetre(pendingShareFen)
+  pendingShareFen = null
   // la course complète du payload → cartouches, flancs du bloc, ticks du
   // profil, nom du calque (mini panneau) — la shibu reçue est ENTIÈRE
   if (race.race) {

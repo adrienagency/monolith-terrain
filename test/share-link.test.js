@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { TEMPLATE_KEYS, captureLook } from '../src/templates-user.js'
-import { captureShareState, parseShareState, encodeShareState, decodeShareState } from '../src/share-link.js'
+import { captureShareState, parseShareState, encodeShareState, decodeShareState, FEN_MAX } from '../src/share-link.js'
+import { COURSE_ELASTIQUE } from '../src/fenetre-course.js'
 
 // a tiny stand-in for `params` — only the keys share-link.js actually reads
 function fakeParams(overrides = {}) {
@@ -147,4 +148,84 @@ test('encoded URL length for a realistic customized state stays well under 2000 
   const state = captureShareState(params, cam, base)
   const encoded = encodeShareState(state)
   assert.ok(encoded.length < 1500, `encoded payload is ${encoded.length} chars`)
+})
+
+// ══════════ LA POSITION DANS L'EMPRISE 3×3 ══════════════════════════════════
+//
+// ⚠️ LE VERROU DE COMPATIBILITÉ EST LE PREMIER TEST DU LOT, et il n'est pas
+// décoratif : les cartes déjà publiées sur /r/<id> sont des payloads figés dans
+// Netlify Blobs, écrits AVANT ce champ. Elles doivent rouvrir exactement la
+// même vue — ce que `VERSION` inchangée + un champ facultatif garantissent par
+// construction, mais qu'on ne suppose pas.
+
+test('un payload SANS `fen` (toutes les cartes déjà publiées) ouvre la même vue', () => {
+  const base = captureLook(fakeParams())
+  const cam = { px: 1, py: 18, pz: 19, tx: 0, ty: -0.3, tz: 0 }
+  // Écrit à la main dans la forme EXACTE que produisait le code d'avant :
+  // pas de clé `fen`, v: 1. C'est ce qu'un blob de production contient.
+  const ancien = {
+    format: 'shibumap-share',
+    v: 1,
+    loc: { lat: 45.9231, lon: 6.8697, zoom: 12 },
+    cam,
+    look: { darkMode: true, gridStep: 8 },
+  }
+  const out = parseShareState(ancien, base)
+  assert.ok(out, 'un ancien payload ne doit JAMAIS être rejeté')
+  assert.deepEqual(out.loc, { lat: 45.9231, lon: 6.8697, zoom: 12 })
+  assert.deepEqual(out.cam, cam)
+  assert.deepEqual(out.fen, { x: 0, z: 0 }, 'sans décalage, on rouvre au centre du bloc — la vue d’avant')
+  assert.equal(out.look.darkMode, true)
+  assert.equal(out.look.gridStep, 8)
+})
+
+test('captureShareState n’écrit PAS `fen` hors mode continu ni au centre', () => {
+  const base = captureLook(fakeParams())
+  const params = fakeParams()
+  // hors mode continu, main.js passe null : l'objet doit sortir tel qu'avant
+  assert.equal('fen' in captureShareState(params, null, base, null), false)
+  assert.equal('fen' in captureShareState(params, null, base), false)
+  // au centre de l'emprise il n'y a rien à dire — un lien plus court vaut mieux
+  assert.equal('fen' in captureShareState(params, null, base, { x: 0, z: 0 }), false)
+})
+
+test('la position dans l’emprise fait l’aller-retour au bit près', () => {
+  const base = captureLook(fakeParams())
+  const params = fakeParams()
+  const state = captureShareState(params, null, base, { x: -37.25, z: 12.5 })
+  const out = parseShareState(JSON.parse(JSON.stringify(state)), base)
+  assert.deepEqual(out.fen, { x: -37.25, z: 12.5 })
+})
+
+test('la position dans l’emprise survit à l’encodage base64url', () => {
+  const base = captureLook(fakeParams())
+  const state = captureShareState(fakeParams(), null, base, { x: 55.9, z: -0.125 })
+  const out = parseShareState(decodeShareState(encodeShareState(state)), base)
+  assert.deepEqual(out.fen, { x: 55.9, z: -0.125 })
+})
+
+test('un `fen` hors course est RAMENÉ dans la course, pas rejeté', () => {
+  // Une URL bricolée ne doit pas pouvoir demander une fenêtre que le mode
+  // continu refuserait d'atteindre : on lirait le champ hors emprise, là où
+  // `sampleDem` clampe — le relief s'étirerait en traînées au bord.
+  const base = captureLook(fakeParams())
+  const out = parseShareState({ ...captureShareState(fakeParams(), null, base), fen: { x: 9999, z: -1e9 } }, base)
+  assert.deepEqual(out.fen, { x: FEN_MAX, z: -FEN_MAX })
+  assert.equal(FEN_MAX, COURSE_ELASTIQUE, 'un second plafond à côté de la course finirait par diverger')
+})
+
+test('un `fen` malformé retombe sur le centre au lieu de fabriquer un NaN', () => {
+  const base = captureLook(fakeParams())
+  const bidons = [{ x: 'a', z: 0 }, { x: 1 }, { z: 1 }, {}, null, 3, [1, 2], { x: NaN, z: 0 }, { x: 1, z: Infinity }]
+  for (const fen of bidons) {
+    const out = parseShareState({ ...captureShareState(fakeParams(), null, base), fen }, base)
+    assert.deepEqual(out.fen, { x: 0, z: 0 }, `fen=${JSON.stringify(fen)}`)
+  }
+})
+
+test('le décalage coûte moins de 40 caractères d’URL', () => {
+  const base = captureLook(fakeParams())
+  const sans = encodeShareState(captureShareState(fakeParams(), null, base)).length
+  const avec = encodeShareState(captureShareState(fakeParams(), null, base, { x: -21.5, z: 43.25 })).length
+  assert.ok(avec - sans < 40, `le décalage ajoute ${avec - sans} caractères`)
 })
