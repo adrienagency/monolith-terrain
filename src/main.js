@@ -53,11 +53,11 @@ import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
 import { ATLAS_COTE, EMPRISE_EN_VOL_MAX, enVolBorne, originesEmprise, recollerEmprise } from './dem-emprise.js'
-import { COURSE_ELASTIQUE, avanceFenetre, rappelElastique } from './fenetre-course.js'
+import { COURSE_ELASTIQUE, avanceFenetre, rappelElastique, poseDansLaCourse } from './fenetre-course.js'
 import { dansFenetre } from './fenetre-clip.js'
 import { vitesseAuLache, pasElan } from './fenetre-elan.js'
 import { forceUrl, continuActif, etatInterrupteur } from './fenetre-reglage.js'
-import { pasFinesse, finesseInitiale, resDeFinesse, resFinesses } from './fenetre-finesse.js'
+import { pasFinesse, finesseInitiale, resDeFinesse, resFinesses, REPOS_S } from './fenetre-finesse.js'
 import { MapLayers } from './map/layer-manager.js'
 import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
 import { lightingFor, darkModeFor, applyGains, fillDirection, fillLightIntensity, fillEnabledInLook, sunOn, sunShadowOn } from './daycycle.js'
@@ -2286,6 +2286,61 @@ function f3PoseFenetre(fen) {
   _f3Fin = { ..._f3Fin, x: terrain.fenetre.x, z: terrain.fenetre.z, repos: 0 }
   _f3Sale = false
   terrain.tickFenetre(params)
+  plinth.rebuild(terrain, params, socleEmprise())
+  f3CalquesSuivent()
+  return true
+}
+
+// ══════════ FIGER LE DÉFILEMENT AVANT UNE CAPTURE ═══════════════════════════
+//
+// Un fichier n'a pas de trame suivante pour se corriger. Trois choses doivent
+// donc être vraies AVANT qu'une image parte dans un PNG ou dans un MP4 :
+//
+//  1. PLUS D'ÉLAN. Une capture 4K prise pendant un lancer sort d'un terrain qui
+//     glisse — et si l'export est hors ligne (usine à vidéos), l'élan gèle à sa
+//     valeur de la première image et le clip entier hérite d'un décalage que
+//     personne n'a choisi.
+//  2. PLUS DE DÉBORDEMENT. La butée élastique montre jusqu'à 7 unités de bord
+//     où `sampleDem` clampe : une bande de relief étiré qui vit 0,3 s à
+//     l'écran, et POUR TOUJOURS dans le fichier. `poseDansLaCourse` est le
+//     point fixe du rappel — la fenêtre atterrit où l'élastique l'aurait mise,
+//     pas ailleurs, donc la reprise après export ne bouge rien (verrouillé par
+//     test/fenetre-course.test.js, sur la dérivée et pas sur la position).
+//  3. LE MAILLAGE FIN. Sortir un 4K du maillage de drag (res 384) serait rendre
+//     à la moitié de la finesse le tirage qu'on a demandé en pleine taille.
+//
+// ⚠️ L'USINE À VIDÉOS, ELLE, EST DÉJÀ FIGÉE PAR CONSTRUCTION : elle tue la
+// boucle rAF et fournit son propre `step`, or `f3Tick` n'est appelé QUE depuis
+// `tick()`. Ni l'élan ni la butée ne peuvent s'y inviter — ce qu'il lui manquait
+// n'était pas un gel, c'était de partir d'un état posé. D'où l'exposition sur
+// `window.__exp.figeFenetre` : le pilote de tournage l'appelle avant de couper
+// la boucle, et il n'a rien d'autre à savoir.
+//
+// Silencieux et gratuit hors mode continu.
+function f3Fige() {
+  if (!fenetreContinueActive() || !(dem?.empriseCote > 1)) return false
+  _f3Glisse = false
+  _f3V.x = _f3V.z = 0
+  _f3Ech.length = 0
+  const x = poseDansLaCourse(terrain.fenetre.x, COURSE_ELASTIQUE)
+  const z = poseDansLaCourse(terrain.fenetre.z, COURSE_ELASTIQUE)
+  const bouge = x !== terrain.fenetre.x || z !== terrain.fenetre.z
+  terrain.fenetre.x = x
+  terrain.fenetre.z = z
+  _f3Brut.x = x
+  _f3Brut.z = z
+  // Le maillage du REPOS, tout de suite — sans attendre les 0,4 s de
+  // `pasFinesse` : l'export part maintenant, pas dans une demi-seconde.
+  const resVoulue = resDeFinesse(true, params.resolution, RES_FENETRE_CONTINUE)
+  const changeRes = terrain.resFenetre !== resVoulue
+  terrain.resFenetre = resVoulue
+  // Et `_f3Fin` est mis d'accord avec ce qu'on vient de faire, sinon la boucle
+  // reprendrait en croyant devoir rebasculer.
+  _f3Fin = { ..._f3Fin, fin: true, repos: REPOS_S, x, z, amorce: true }
+  _f3Sale = false
+  if (changeRes) terrain.majResFenetre(params)
+  else if (bouge) terrain.tickFenetre(params)
+  else return true
   plinth.rebuild(terrain, params, socleEmprise())
   f3CalquesSuivent()
   return true
@@ -5067,6 +5122,13 @@ async function openExportUI() {
   // composer + camera : l'enregistreur en a besoin pour la taille forcée (2K,
   // 4K…), qui redimensionne la chaîne de rendu le temps de la capture
   if (!recorder) recorder = new Recorder({ renderer, composer, camera })
+  // ⚠️ LE DÉFILEMENT SE FIGE À L'OUVERTURE, pas au déclenchement. Le voile du
+  // panneau interdit déjà tout geste sur le terrain : à partir d'ici, rien ne
+  // peut plus bouger, donc ce qu'on voit derrière le panneau est EXACTEMENT ce
+  // qui partira dans le fichier — élan éteint, débordement résorbé, maillage
+  // fin. Le faire au clic sur « Export » aurait fait bouger l'image entre le
+  // moment où l'utilisateur la juge et celui où on la capture.
+  f3Fige()
   openExportModal({
     renderer,
     composer,
@@ -5085,6 +5147,10 @@ async function openExportUI() {
       }
     },
     pauseLoop: () => {
+      // Rendu HORS LIGNE : `f3Tick` ne tourne plus (il n'est appelé que depuis
+      // `tick()`), donc l'élan et la butée gèleraient tels quels pour tout le
+      // clip. On part d'un état posé plutôt que d'un instantané de geste.
+      f3Fige()
       loopPaused = true
       // kill the already-scheduled frame too, or a synchronous export
       // failure would leave two rAF chains running after resume
@@ -6124,6 +6190,12 @@ window.__exp = { boats, raceLabels, scene, camera, controls, params, terrain, lo
   setUiTint: (v) => { params.uiTint = v !== false; syncUiTheme() }, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,
   // mode aléatoire + ombrage auto : de quoi sonder l'état depuis la console
   shuffleLook,
+  // ⚠️ À APPELER AVANT DE COUPER LA BOUCLE rAF pour un tournage hors ligne
+  // (skill shibumap-shots, usine à vidéos). Le rendu hors ligne est déjà figé
+  // par construction — `f3Tick` n'existe que dans `tick()` — mais il fige AUSSI
+  // le débordement élastique et le maillage de drag s'il en trouve un. Un
+  // appel, aucun argument, sans effet hors mode continu.
+  figeFenetre: f3Fige,
   get dem() { return dem },
   // source d'altimétrie : quelle source sert le bloc, jusqu'à quel zoom, et
   // le repli AWS s'est-il déclenché ?

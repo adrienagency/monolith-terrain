@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { COURSE_ELASTIQUE, borneElastique, rappelElastique, avanceFenetre } from '../src/fenetre-course.js'
+import { COURSE_ELASTIQUE, borneElastique, rappelElastique, avanceFenetre, poseDansLaCourse } from '../src/fenetre-course.js'
 
 // La course d'une fenêtre de 56 unités dans une emprise 3×3 de 168 est de ±56 :
 // exactement UNE largeur de socle dans chaque direction (étude §3.1).
@@ -117,4 +117,50 @@ test('COURSE_ELASTIQUE vaut la largeur du socle', () => {
   // fenêtre peut donc glisser d'exactement un socle avant de sortir de
   // l'emprise. Ce n'est pas un réglage, c'est de la géométrie.
   assert.equal(COURSE_ELASTIQUE, 56)
+})
+
+// ══════════ POSER LA FENÊTRE — ce qu'un export doit figer ═══════════════════
+
+test('poser ramène dans la course, et n’y touche pas quand on y est déjà', () => {
+  assert.equal(poseDansLaCourse(0, 56), 0)
+  assert.equal(poseDansLaCourse(31.7, 56), 31.7)
+  assert.equal(poseDansLaCourse(-56, 56), -56)
+  assert.equal(poseDansLaCourse(62, 56), 56, 'le débordement élastique ne doit pas partir dans un fichier')
+  assert.equal(poseDansLaCourse(-1e9, 56), -56)
+})
+
+test('poser rend un nombre même sur une entrée cassée', () => {
+  for (const v of [NaN, undefined, null, Infinity, 'x']) {
+    assert.ok(Number.isFinite(poseDansLaCourse(v, 56)), `v=${v}`)
+  }
+})
+
+// ⚠️ LE TEST QUI COMPTE, ET IL REGARDE LA DÉRIVÉE. Un export doit figer un état
+// STABLE : à la reprise de la boucle, rien ne doit bouger. Vérifier « la
+// position est dans la course » ne le dirait pas — c'est le déplacement de
+// l'image SUIVANTE qui doit valoir exactement zéro, à tous les pas de temps.
+// C'est la leçon payée sur la butée, qui éteignait la vitesse puis la relançait
+// 15 fois trop vite : un test de position ne voit pas un à-coup.
+test('une fenêtre posée est un POINT FIXE du rappel — dérivée nulle, tout dt', () => {
+  for (const v of [-1e6, -84, -56.000001, -56, -12, 0, 7.25, 55.999, 56, 63, 1e6]) {
+    const pose = poseDansLaCourse(v, COURSE_ELASTIQUE)
+    for (const dt of [1 / 240, 1 / 120, 1 / 60, 1 / 30, 0.5, 4]) {
+      assert.equal(
+        rappelElastique(pose, COURSE_ELASTIQUE, dt) - pose,
+        0,
+        `v=${v} dt=${dt} : la fenêtre bougerait encore après l’export`
+      )
+    }
+  }
+})
+
+test('poser et laisser le rappel finir aboutissent au MÊME endroit', () => {
+  // La pose n'invente pas une position : c'est celle que l'élastique atteignait
+  // de toute façon, en 0,3 s. On ne déplace donc pas la vue de l'utilisateur,
+  // on lui épargne l'attente.
+  for (const v of [-70, -60.5, 58, 63, 200]) {
+    let x = v
+    for (let i = 0; i < 400; i++) x = rappelElastique(x, COURSE_ELASTIQUE, 1 / 60)
+    assert.equal(x, poseDansLaCourse(v, COURSE_ELASTIQUE), `v=${v}`)
+  }
 })

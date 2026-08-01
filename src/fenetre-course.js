@@ -110,6 +110,35 @@ export function rappelElastique(v, course, dt) {
 }
 
 /**
+ * POSE la fenêtre, sans geste et sans attendre : là où le rappel élastique
+ * l'aurait laissée s'il avait eu tout le temps du monde.
+ *
+ * ══════════ POURQUOI UN EXPORT A BESOIN DE ÇA ═══════════════════════════════
+ *
+ * Le débordement élastique est un état de GESTE, pas un point de vue. Il vit
+ * 0,3 s, montre jusqu'à 7 unités de bord où `sampleDem` clampe — c'est-à-dire
+ * une bande de relief étiré — et le rappel est déjà en train de l'effacer.
+ * Une capture 4K ou une image de clip prise là-dedans FIGE cette bande dans un
+ * fichier, où plus rien ne viendra la corriger. Le défaut ne se voit pas à
+ * l'écran (il a disparu avant qu'on le regarde) et se voit très bien dans le
+ * fichier : la pire des combinaisons.
+ *
+ * ⚠️ ET C'EST EXACTEMENT LE POINT FIXE DU RAPPEL, pas « à peu près dedans ».
+ * `rappelElastique(pose(v)) === pose(v)` pour tout `v` et tout `dt` : c'est ce
+ * qui garantit qu'à la reprise de la boucle, après l'export, RIEN ne bouge —
+ * ni saut, ni glissement résiduel. Un test de position ne suffirait pas à le
+ * dire ; c'est la DÉRIVÉE qui doit être nulle, et c'est elle que le test lit.
+ *
+ * @param {number} v - position courante, débordement compris
+ * @param {number} course - la demi-course autorisée
+ * @returns {number}
+ */
+export function poseDansLaCourse(v, course) {
+  if (!Number.isFinite(v)) return 0
+  return Math.max(-course, Math.min(course, v))
+}
+
+/**
  * Avance la fenêtre d'un geste, sur les deux axes.
  *
  * ⚠️ L'ORDRE COMPTE : on additionne le geste au BRUT, puis on borne. Borner
