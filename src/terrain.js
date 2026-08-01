@@ -126,6 +126,10 @@ export class Terrain {
     // rigoureusement celui d'avant : `empriseCote` vaut 1 sur un bloc ordinaire,
     // donc `_span()` rend TERRAIN_SIZE et la formule redevient l'ancienne.
     this.fenetre = { x: 0, z: 0 }
+    // La finesse du maillage en mode continu, posée par main.js une fois par
+    // image (fenetre-finesse.js). Zéro = « personne n'a d'avis », et on retombe
+    // sur le plafond permanent du jalon 3. Voir `_resFenetre`.
+    this.resFenetre = 0
     this.analysisMax = opts.analysisMax ?? 0
     this.seaMax = opts.seaMax ?? 0
     if (opts.shareFrom) this.shareTexturesFrom(opts.shareFrom)
@@ -1238,8 +1242,55 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // ⚠️ Le plafond doit valoir pour `rebuild` ET pour `tickFenetre`. Deux
   // résolutions différentes feraient sauter la géométrie au premier geste —
   // `gridTemplate`, `tintField` et `detailField` sont tous indexés par `res`.
+  // ⚠️ `resFenetre` est POSÉ PAR main.js (fenetre-finesse.js) : 384 tant que
+  // l'image bouge, 768 après 0,4 s d'immobilité franche. Laissé à zéro, on
+  // retrouve le comportement du jalon 3 — 384 en permanence — et le mode
+  // ORDINAIRE ne passe même pas par ici.
+  //
+  // ⚠️ LE `Math.min` RESTE, il n'est pas redondant avec `resDeFinesse`. Cette
+  // méthode est aussi appelée depuis `rebuild()`, sur un chemin (changement de
+  // zone, de zoom, de palette) où main.js n'a pas encore eu son image pour
+  // remettre `resFenetre` à jour. Sans le min, un utilisateur passé à 256 dans
+  // les Paramètres se verrait servir du 384 le temps d'une reconstruction.
   _resFenetre(params) {
-    return this.dem?.empriseCote > 1 ? Math.min(params.resolution, RES_FENETRE_CONTINUE) : params.resolution
+    if (!(this.dem?.empriseCote > 1)) return params.resolution
+    return Math.min(params.resolution, this.resFenetre || RES_FENETRE_CONTINUE)
+  }
+
+  // ══════════ CHANGER DE RÉSOLUTION SANS RECUIRE LES CHAMPS ═════════════════
+  //
+  // `rebuild()` refait TOUT, champs compris : analyse de relief, masque de mer,
+  // masque côtier — l'atlas de l'emprise, mesuré à 1 378 ms (étude §2.2). Or
+  // AUCUN de ces champs ne dépend de la résolution du maillage : ils sont cuits
+  // sur l'emprise en coordonnées monde, et le maillage ne fait que les LIRE. Les
+  // refaire pour changer un nombre de triangles serait payer 1,4 s pour rien.
+  //
+  // Ce qui dépend de `res`, et qu'il faut donc refaire, c'est exactement trois
+  // choses — celles que l'avertissement de `_resFenetre` nomme depuis le jalon
+  // 3 : le gabarit de grille (`gridTemplate`), le champ de grain
+  // (`detailFieldEmprise`) et le champ de teinte (`tintField`).
+  //
+  // @returns {number} millisecondes passées, pour que l'appelant puisse le dire
+  majResFenetre(params) {
+    const res = this._resFenetre(params)
+    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    const tpl = gridTemplate(res, TERRAIN_SIZE)
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(tpl.position), 3))
+    geo.setAttribute('uv', new THREE.BufferAttribute(tpl.uv, 2))
+    geo.setIndex(new THREE.BufferAttribute(tpl.index, 1))
+    const sample = this._makeSampler(params)
+    this.sample = sample
+    const { minH, maxH } = this._ecrireRelief(geo, params, res, sample, this._makeGridSampler(params, res))
+    this.mapUniforms.uHeightRange.value.set(minH, maxH)
+    this._pousseFenetre()
+    // ⚠️ L'ANCIENNE GÉOMÉTRIE EST LIBÉRÉE, et ce n'est pas facultatif ici. À la
+    // différence de `rebuild()`, qu'on appelle une fois par zone, celle-ci part
+    // à chaque pause : une géométrie de res 768 pèse 38,3 Mo de tampons GPU, et
+    // les oublier ferait monter le tas d'autant à chaque arrêt du geste.
+    this.mesh.geometry.dispose()
+    this.mesh.geometry = geo
+    return (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0
   }
 
   // ══════════ LE GRAIN DOIT DESCENDRE AVEC LA RÉSOLUTION ════════════════════

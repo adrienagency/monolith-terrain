@@ -109,9 +109,34 @@ export function clearDetailField() {
 // 21,3 Mo au lieu de 10,6 pour une garantie qui n'existe pas serait du gaspillage
 // pur sur une machine dont le goulot est la bande passante mémoire.
 //
-// ⚠️ UNE SEULE ENTRÉE GARDÉE. 10,6 Mo, ce n'est pas un cache qu'on double « au
-// cas où » : la deuxième entrée coûterait plus cher que le recalcul qu'elle
-// évite. Le mode continu ne monte qu'une emprise à la fois.
+// ⚠️ DEUX ENTRÉES, ET LA DEUXIÈME A ÉTÉ GAGNÉE AU CHRONOMÈTRE.
+//
+// Ce cache n'en gardait qu'UNE, au motif que « le mode continu ne monte qu'une
+// emprise à la fois ». C'était vrai tant que le mode continu tenait une seule
+// résolution (384 en permanence, jalon 3). Le jalon 4 en fait alterner deux sur
+// LA MÊME emprise — 384 en mouvement, 768 au repos — et la prémisse tombe.
+//
+// MESURÉ dans le navigateur, sur l'instance VIVANTE (pas un second exemplaire
+// du module rendu par un import() à la main), Chamonix z12 en 3×3 :
+//
+//     cuisson du champ, res 384 │ 204,0 ms │ à chaud : 0 ms
+//     cuisson du champ, res 768 │ 806,5 ms │ à chaud : 0 ms
+//     écriture du maillage      │  42,9 ms (384) · 46,4 ms (768)
+//
+// Avec une seule entrée, chaque bascule chassait l'autre résolution : le
+// changement coûtait 216 ms vers le bas et **869 ms vers le haut** — une
+// seconde de gel après chaque geste, alors que l'écriture du maillage
+// elle-même n'en demande que 46. **93 % du coût était un recalcul évitable.**
+//
+// La deuxième entrée coûte le champ de res 384, soit **10,6 Mo** ((3×384+1)²
+// × 2 × 4 octets), pour supprimer 806 ms par bascule.
+//
+// ⚠️ ET ÇA RESTE DEUX, PAS TROIS. À res 768 le champ pèse 42,5 Mo ; une
+// troisième entrée (1024, que le sélecteur offre) en ajouterait 75 et ferait à
+// elle seule un tiers du budget mémoire de l'application. C'est la raison
+// d'être de `RES_REPOS_MAX` (fenetre-finesse.js) : le plafond du repos et la
+// taille de ce cache sont le même arbitrage, vu des deux bouts.
+const MAX_EMPRISE = 2
 const cacheEmprise = new Map()
 
 /**
@@ -125,7 +150,11 @@ const cacheEmprise = new Map()
 export function detailFieldEmprise(seed, detailScale, res, size, cote) {
   const cle = `${seed}|${detailScale}|${res}|${size}|${cote}`
   const memo = cacheEmprise.get(cle)
-  if (memo) return memo
+  if (memo) {
+    cacheEmprise.delete(cle) // remis en queue : c'est lui le plus récemment servi
+    cacheEmprise.set(cle, memo)
+    return memo
+  }
   const s = new Simplex2(mulberry32(seed))
   const n = cote * res + 1
   const champ = new Float32Array(n * n * 2)
@@ -141,8 +170,8 @@ export function detailFieldEmprise(seed, detailScale, res, size, cote) {
       champ[k + 1] = fbm(s, x * detailScale * 4.1 + 31, z * detailScale * 4.1 - 17, 2, 2.2, 0.5)
     }
   }
-  cacheEmprise.clear()
   cacheEmprise.set(cle, champ)
+  while (cacheEmprise.size > MAX_EMPRISE) cacheEmprise.delete(cacheEmprise.keys().next().value)
   return champ
 }
 

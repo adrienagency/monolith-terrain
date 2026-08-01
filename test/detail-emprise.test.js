@@ -122,15 +122,43 @@ test('DÉCALER LA LECTURE D’UN BLOC = REGARDER UN BLOC PLUS LOIN', () => {
   }
 })
 
-test('le champ est mémorisé, et une SEULE entrée est gardée', () => {
-  // 10,6 Mo l'unité : une deuxième entrée coûterait plus cher que le recalcul
-  // qu'elle évite, et le mode continu ne monte qu'une emprise à la fois.
+test('le champ est mémorisé, et DEUX entrées sont gardées — les deux plus récentes', () => {
+  // ⚠️ C'ÉTAIT UNE SEULE ENTRÉE JUSQU'AU JALON 4, et le changement est mesuré,
+  // pas esthétique. Le motif d'alors — « le mode continu ne monte qu'une emprise
+  // à la fois » — est tombé le jour où la résolution est devenue adaptative :
+  // 384 en mouvement, 768 au repos, sur LA MÊME emprise. Avec une seule entrée,
+  // chaque bascule chassait l'autre et repayait la cuisson entière : mesuré dans
+  // le navigateur à Chamonix z12, **806,5 ms pour recuire le champ de res 768**,
+  // contre 46,4 ms pour écrire le maillage. La deuxième entrée coûte 10,6 Mo
+  // (le champ de res 384) et supprime ces 806 ms.
   clearDetailFieldEmprise()
   const a = detailFieldEmprise(1, 0.4, 8, SIZE, 3)
   assert.equal(detailFieldEmprise(1, 0.4, 8, SIZE, 3), a, 'même clé → même objet')
   const b = detailFieldEmprise(2, 0.4, 8, SIZE, 3)
   assert.notEqual(b, a, 'graine différente → champ différent')
-  assert.notEqual(detailFieldEmprise(1, 0.4, 8, SIZE, 3), a, 'la première entrée a été chassée')
+  assert.equal(detailFieldEmprise(1, 0.4, 8, SIZE, 3), a, 'la première entrée est ENCORE là — c’est tout l’objet du jalon 4')
+
+  // …mais la mémoire reste BORNÉE : une troisième chasse la plus ancienne.
+  // À res 768 le champ pèse 42,5 Mo ; un cache non borné mangerait le budget.
+  clearDetailFieldEmprise()
+  const x = detailFieldEmprise(1, 0.4, 8, SIZE, 3)
+  detailFieldEmprise(2, 0.4, 8, SIZE, 3)
+  detailFieldEmprise(3, 0.4, 8, SIZE, 3)
+  assert.notEqual(detailFieldEmprise(1, 0.4, 8, SIZE, 3), x, 'la plus ancienne doit avoir été chassée')
+})
+
+test('l’aller-retour 384 ↔ 768 sur la MÊME emprise ne recuit jamais — le cas du jalon 4', () => {
+  // Le scénario réel : on descend au geste, on remonte au repos, on redescend au
+  // geste suivant. Aucune de ces bascules ne doit recalculer quoi que ce soit.
+  // (Le `detailScale` suit la résolution — `accordeDetailScale` — d'où les deux
+  // valeurs : c'est bien la paire du mode continu, pas deux clés inventées.)
+  clearDetailFieldEmprise()
+  const bas = detailFieldEmprise(7, 0.4, 4, SIZE, 3)
+  const haut = detailFieldEmprise(7, 0.8, 8, SIZE, 3)
+  for (let i = 0; i < 5; i++) {
+    assert.equal(detailFieldEmprise(7, 0.4, 4, SIZE, 3), bas, `aller ${i} : le champ grossier doit être servi de mémoire`)
+    assert.equal(detailFieldEmprise(7, 0.8, 8, SIZE, 3), haut, `retour ${i} : le champ fin doit être servi de mémoire`)
+  }
 })
 
 // ── L'ACCORD DU GRAIN AVEC LA RÉSOLUTION ─────────────────────────────────────

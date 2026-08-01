@@ -38,7 +38,7 @@ import { snapToKm, ascentStats, parseRace } from './race-model.js'
 import { SPORTS, DEFAULT_SPORT, sanitizeSvgMarkup, isValidIconDataUrl, rasterizeToCanvas } from './ui/sport-icons.js'
 import { worldToLatLon, latLonToWorld, parseLatLon } from './geo.js'
 import { fetchTransports } from './transports.js'
-import { TERRAIN_SIZE } from './terrain.js'
+import { TERRAIN_SIZE, RES_FENETRE_CONTINUE } from './terrain.js'
 import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
 import { monochromeLook, generateEarthPalette, NATURAL_COLOR_PRESET, rampColorStops } from './palette.js'
 import { deriveUiTokens, UI_TOKEN_VARS } from './ui-theme.js'
@@ -57,6 +57,7 @@ import { COURSE_ELASTIQUE, avanceFenetre, rappelElastique } from './fenetre-cour
 import { dansFenetre } from './fenetre-clip.js'
 import { vitesseAuLache, pasElan } from './fenetre-elan.js'
 import { forceUrl, continuActif, etatInterrupteur } from './fenetre-reglage.js'
+import { pasFinesse, finesseInitiale, resDeFinesse } from './fenetre-finesse.js'
 import { MapLayers } from './map/layer-manager.js'
 import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
 import { lightingFor, darkModeFor, applyGains, fillDirection, fillLightIntensity, fillEnabledInLook, sunOn, sunShadowOn } from './daycycle.js'
@@ -1955,6 +1956,12 @@ let _f3Y = 0
 // terrain s'arrêter. Voir l'en-tête de fenetre-elan.js.
 const _f3V = { x: 0, z: 0 }
 const _f3Ech = []
+
+// L'état de la finesse du maillage (fenetre-finesse.js). `?f3trace=1` fait dire
+// à chaque bascule ce qu'elle a coûté — c'est la mesure d'Adrien, pas un débogage
+// oublié : sans elle on ne saurait pas si le raffinement tient dans une image.
+let _f3Fin = finesseInitiale()
+const F3_TRACE = new URLSearchParams(location.search).get('f3trace') === '1'
 // Trois images de trace suffisent à `vitesseAuLache` (fenêtre de 60 ms) ; on en
 // garde huit pour couvrir un écran à 120 Hz sans jamais allouer.
 const F3_ECH_MAX = 8
@@ -2092,6 +2099,28 @@ function f3Tick(dt) {
         _f3Sale = true
       }
     }
+  }
+  // ══════════ LA FINESSE : 384 EN MOUVEMENT, 768 UNE FOIS POSÉ ═════════════
+  //
+  // ⚠️ LA DÉCISION SE PREND SUR L'AFFICHÉ, PAS SUR `_f3V`. `pasElan` annule la
+  // vitesse sous V_ARRET et c'est `rappelElastique` qui finit le travail — or
+  // celui-ci n'a AUCUNE variable de vitesse, il écrit la position. Passer
+  // `_f3V` ici raffinerait en plein glissement. `pasFinesse` fait donc la
+  // dérivée de `terrain.fenetre` lui-même, et couvre du même coup les trois
+  // régimes (geste, élan, rappel). Voir l'en-tête de fenetre-finesse.js.
+  //
+  // ⚠️ ET C'EST PLACÉ APRÈS le déplacement de cette image, pas avant : décider
+  // sur la position de l'image PRÉCÉDENTE ferait tomber la première image d'un
+  // geste au grossier une image trop tard — celle-là même qu'on essaie de
+  // sauver.
+  _f3Fin = pasFinesse(_f3Fin, { glisse: _f3Glisse, x: terrain.fenetre.x, z: terrain.fenetre.z, dt })
+  if (_f3Fin.change) {
+    terrain.resFenetre = resDeFinesse(_f3Fin.fin, params.resolution, RES_FENETRE_CONTINUE)
+    const ms = terrain.majResFenetre(params)
+    // Le socle et les calques lisent `terrain.sample`, que la reconstruction
+    // vient de remplacer : ils doivent repartir de celui-là, pas de l'ancien.
+    _f3Sale = true
+    if (F3_TRACE) console.info(`[f3] maillage → res ${terrain.resFenetre} en ${ms.toFixed(1)} ms`)
   }
   if (!_f3Sale) return
   _f3Sale = false
