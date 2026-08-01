@@ -68,7 +68,7 @@ import { makeSocleEnvMap } from './socle-env.js'
 import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
 import { TEMPLATE_KEYS, captureLook, captureView, serializeTemplate, parseTemplate, stripFromLook, loadUserTemplates, saveUserTemplates } from './templates-user.js'
 import { loadUserPalettes, saveUserPalettes, paletteFromParams } from './user-palettes.js'
-import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT } from './share-link.js'
+import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT, rememberRaceSecret, recallRaceSecret, updateRace } from './share-link.js'
 import { Boats } from './boats.js'
 import { DroneCam } from './drone-cam.js'
 import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, deriveMetalTints, deriveAoColor, deriveHazeColor, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
@@ -666,9 +666,15 @@ if (!IS_EMBED && !IS_SHIBU && !IS_STORE_BOOT && !IS_STUDIO_BOOT) {
 // screen. The payload is exactly as untrusted as a pasted #s= fragment — anyone
 // can POST to the endpoint — so it goes through parseRacePayload (garbage → null).
 let pendingRaceFetch = null
+// L'id dont cette session est partie. Gardé au-delà du bloc parce que le
+// bouton Partager s'en sert pour RÉÉCRIRE cette course-là (si ce navigateur
+// détient son jeton) au lieu d'en publier une copie sous un nouvel
+// identifiant — voir shareCurrentView.
+let restoredRaceId = null
 if (location.hash.startsWith('#r=')) {
   const raceId = location.hash.slice(3)
   if (/^[A-Za-z0-9_-]{4,64}$/.test(raceId)) {
+    restoredRaceId = raceId
     pendingRaceFetch = fetch(`${RACE_ENDPOINT}?id=${encodeURIComponent(raceId)}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => (j && j.ok && j.payload ? j.payload : null)) // GET returns { ok, payload }
@@ -4497,6 +4503,41 @@ async function shareCurrentView() {
           transports: { removed: [...raceState.transports.removed] },
         }
       : null
+    // Le corps est le même qu'on crée ou qu'on corrige — d'où cette forme
+    // partagée, montée une fois puis passée aux deux chemins.
+    const corps = (logo) => ({
+      // null quand il n'y a pas de course : le serveur accepte une
+      // carte nue, il n'exige un GPX valide que s'il y en a un
+      gpx: hasTrack ? trackToGpx(gpxLayer.track) : null,
+      state,
+      // sans course, c'est le LIEU qui nomme l'aperçu du lien
+      raceName: raceState.name || gpxLayer.raceName || (hasTrack ? '' : params.demLocation || ''),
+      race,
+      logo,
+    })
+
+    // CORRIGER PLUTÔT QUE RECOPIER. Si cette session vient d'un lien /r/<id>
+    // et que ce navigateur détient le jeton de cet id, on réécrit CE blob :
+    // le lien déjà diffusé aux inscrits montre la nouvelle version, au lieu
+    // qu'un second identifiant naisse et laisse les porteurs du premier sur
+    // l'ancien parcours (les tracés de trail bougent — le GPX de référence du
+    // projet porte « Due to Path Damage Beatenberg »).
+    //
+    // Un échec ici n'est PAS fatal : on retombe sur une publication normale,
+    // qui rend au moins un lien qui marche. L'ancien reste alors périmé, ce
+    // qui est exactement la situation d'avant.
+    const jeton = restoredRaceId ? recallRaceSecret(restoredRaceId) : null
+    if (jeton) {
+      const maj = await updateRace(restoredRaceId, jeton, corps(safeLogo))
+      if (maj.ok) {
+        url = `${location.origin}/r/${restoredRaceId}`
+        published = true
+      } else {
+        failDetail = maj.error
+        console.warn(`race update failed (${failDetail}), publishing a new id instead`)
+      }
+    }
+
     for (const withLogo of [true, false]) {
       if (published) break
       try {
@@ -4509,19 +4550,18 @@ async function shareCurrentView() {
           // `race` + `logo` : la COURSE COMPLÈTE (points de passage,
           // transports retirés, logo) — sans eux la shibu reçue n'avait que
           // la ligne nue, aucun cartouche (« le parcours ne s'affiche pas »).
-          body: JSON.stringify({
-            // null quand il n'y a pas de course : le serveur accepte une
-            // carte nue, il n'exige un GPX valide que s'il y en a un
-            gpx: hasTrack ? trackToGpx(gpxLayer.track) : null,
-            state,
-            // sans course, c'est le LIEU qui nomme l'aperçu du lien
-            raceName: raceState.name || gpxLayer.raceName || (hasTrack ? '' : params.demLocation || ''),
-            race,
-            logo: withLogo ? safeLogo : null,
-          }),
+          body: JSON.stringify(corps(withLogo ? safeLogo : null)),
         })
         const j = res.ok ? await res.json() : null
         if (j?.ok && typeof j.id === 'string' && /^[A-Za-z0-9_-]{4,64}$/.test(j.id)) {
+          // LE JETON D'ÉDITION N'EST RENDU QU'ICI, une seule fois : le serveur
+          // n'en garde qu'un sha256 et ne peut plus le redire. Non conservé,
+          // il est perdu — et avec lui la seule façon de corriger ce lien
+          // sans compte. Un stockage en panne rend false : le partage
+          // continue, seule la correction ultérieure est perdue.
+          rememberRaceSecret(j.id, j.secret)
+          // ce lien devient celui que cette session corrigera la prochaine fois
+          restoredRaceId = j.id
           // The PATH form, not #r= — see netlify/functions/share.mjs. It serves
           // the preview tags and then forwards to the app's own #r= link, so
           // nothing downstream changes except that pasted links now unfurl.

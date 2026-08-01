@@ -28,8 +28,14 @@
 // Pure/DOM-free (besides TextEncoder/TextDecoder/btoa/atob, available in
 // both the browser and Node's test runner) — same contract as
 // templates-user.js: capture, (de)serialize, validate. DOM wiring (the Share
-// button, camera-pose capture, the actual fetch/POST calls) lives in main.js
-// — this file never touches the network itself.
+// button, camera-pose capture, the publishing POST itself) lives in main.js.
+//
+// ONE exception, at the bottom of this file: updateRace() and the two
+// helpers that keep its edit secret. They live here, next to RACE_ENDPOINT
+// and the ceilings they must agree with, rather than being spelled out again
+// inside main.js's UI code — the endpoint's contract belongs in one place.
+// Both take their `fetch` and their `localStorage` as arguments (defaulting
+// to the globals), so this file stays testable in Node with neither.
 
 import { TEMPLATE_KEYS, captureLook } from './templates-user.js'
 import { parseRace } from './race-model.js'
@@ -273,4 +279,97 @@ export function parseRacePayload(raw, base) {
   }
 
   return { gpx, logo, state, race }
+}
+
+// ---------------------------------------------------------------- modifier une course publiée
+
+// Le jeton d'édition rendu UNE SEULE FOIS par le POST (voir
+// netlify/functions/race.mjs). Il voyage dans un EN-TÊTE et jamais dans
+// l'URL : une chaîne de requête finit en clair dans les journaux d'accès, dans
+// ceux des relais, et dans le Referer de la page suivante.
+export const RACE_SECRET_HEADER = 'x-shibumap-secret'
+
+// Sans compte, le navigateur qui a publié est le SEUL endroit où le jeton
+// peut se retrouver. C'est le minimum : l'envoi par courriel est prévu côté
+// produit, mais tant qu'il n'existe pas, un secret non conservé équivaut
+// exactement à un lien non modifiable.
+const RACE_SECRETS_KEY = 'shibumap.race.secrets'
+// Borné : le stockage local d'un domaine tient dans quelques mégaoctets et
+// n'est jamais purgé tout seul. Cinquante cartes publiées depuis le même
+// navigateur, c'est déjà beaucoup plus qu'un organisateur réel.
+const RACE_SECRETS_MAX = 50
+const RACE_ID_RE = /^[A-Za-z0-9_-]{4,64}$/
+const RACE_SECRET_RE = /^[A-Za-z0-9]{16,128}$/
+
+// Ne lève JAMAIS : en navigation privée Safari, avec le stockage désactivé ou
+// le quota plein, `getItem` lui-même jette. Un stockage en panne doit coûter
+// la modification ultérieure, pas la publication en cours.
+function readRaceSecrets(storage) {
+  try {
+    const raw = storage?.getItem(RACE_SECRETS_KEY)
+    if (!raw) return {}
+    const obj = JSON.parse(raw)
+    return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}
+  } catch {
+    return {}
+  }
+}
+
+// → true si le jeton est bien noté. false n'est pas une erreur fatale : le
+// lien reste partageable, il ne sera simplement pas corrigeable depuis ce
+// navigateur.
+export function rememberRaceSecret(id, secret, storage = globalThis.localStorage) {
+  if (typeof id !== 'string' || !RACE_ID_RE.test(id)) return false
+  if (typeof secret !== 'string' || !RACE_SECRET_RE.test(secret)) return false
+  const all = readRaceSecrets(storage)
+  delete all[id] // réécrire un id le remet en tête de fraîcheur
+  all[id] = secret
+  const ids = Object.keys(all)
+  for (const vieux of ids.slice(0, Math.max(0, ids.length - RACE_SECRETS_MAX))) delete all[vieux]
+  try {
+    storage.setItem(RACE_SECRETS_KEY, JSON.stringify(all))
+    return true
+  } catch {
+    return false
+  }
+}
+
+// → le jeton, ou null (jamais une exception). null veut dire « ce navigateur
+// n'est pas celui qui a publié » — pas « ce lien n'existe pas ».
+export function recallRaceSecret(id, storage = globalThis.localStorage) {
+  if (typeof id !== 'string' || !RACE_ID_RE.test(id)) return null
+  const secret = readRaceSecrets(storage)[id]
+  return typeof secret === 'string' && RACE_SECRET_RE.test(secret) ? secret : null
+}
+
+// Réécrit une course DÉJÀ publiée, sous le même id — donc sous le même lien
+// que les inscrits ont déjà reçu. C'est toute la raison d'être du jeton :
+// republier fabriquait un second identifiant et laissait les porteurs du
+// premier sur l'ancienne version.
+//
+// `body` a exactement la forme du POST ({ gpx, state, raceName, race, logo })
+// et repasse par les mêmes plafonds côté serveur. Ne lève jamais : rend
+// { ok: true, id } ou { ok: false, error } — un échec doit être DIT, jamais
+// avalé, sinon l'organisateur croit son parcours corrigé alors qu'il ne l'est
+// pas.
+export async function updateRace(id, secret, body, fetchImpl = globalThis.fetch) {
+  if (typeof id !== 'string' || !RACE_ID_RE.test(id)) return { ok: false, error: 'identifiant invalide' }
+  if (typeof secret !== 'string' || !RACE_SECRET_RE.test(secret)) return { ok: false, error: 'clé de modification absente' }
+  try {
+    const res = await fetchImpl(`${RACE_ENDPOINT}?id=${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', [RACE_SECRET_HEADER]: secret },
+      body: JSON.stringify(body ?? {}),
+    })
+    if (!res.ok) {
+      let msg = ''
+      try { msg = JSON.parse(await res.text())?.error || '' } catch {}
+      return { ok: false, error: `HTTP ${res.status}${msg ? ` — ${msg}` : ''}` }
+    }
+    const j = await res.json()
+    if (!j?.ok) return { ok: false, error: 'réponse inattendue du serveur' }
+    return { ok: true, id }
+  } catch (err) {
+    return { ok: false, error: err?.message || 'réseau' }
+  }
 }
