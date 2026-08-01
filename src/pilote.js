@@ -140,7 +140,7 @@ export const PROFILS = {
     tauxRouli: 0.90,
     garde: 0.022,
     montMax: 0.036, // il monte aussi vite qu'il avance
-    tVisee: 6.0,
+    tVisee: 3.0, // 2,4 rayons de virage — le meme rapport que l'avion
     tVeille: 3.6,
     tPoursuite: 1.7,
     cote: 0.20,
@@ -297,22 +297,53 @@ export function largeurLibre({ sampleGround, x, z, cap, y, garde, portee, pas })
 // percuter. Le suivi de terrain réel travaille sur le profil lu EN AVANT, jamais
 // sur le sol sous l'appareil — un « ras du sol » à hauteur constante est faux.
 //
-// On balaie aussi LATÉRALEMENT (un cône, pas un rayon) : en virage la trajectoire
-// s'écarte du cap courant, et une lecture strictement axiale rate le flanc vers
-// lequel on tourne.
-export function altitudeSecuritaire({ sampleGround, x, z, cap, distance, garde, pas = 5, demiAngle = 0.22 }) {
-  let h = sampleGround(x, z)
-  if (!Number.isFinite(h)) h = 0
+// ⚠️ ON REGARDE LE LONG DE L'ARC, PAS DE LA DROITE — la mesure la plus vicieuse
+// des quatre. Toutes les pointes d'accélération du vol d'essai (1 702 u/s² pour
+// un plafond de manœuvre de 10) tombaient DANS LE DEMI-TOUR, sans exception.
+// La cause : la veille scrutait une ligne droite au cap courant pendant que
+// l'appareil, lui, suivait un arc de rayon 16 — il découvrait sous lui un relief
+// que personne n'avait regardé, et le plancher le rattrapait d'un bond de 1
+// unité par image, vingt fois le taux de montée. La veille suit donc la
+// TRAJECTOIRE PRÉVUE : à la distance t, le cap vaut cap + courbure × t, où
+// courbure = ω/v (radians par unité parcourue).
+export function pointsDevant({ x, z, cap, distance, courbure = 0, pas = 6 }) {
+  const out = [{ x, z, cap }]
+  const dl = distance / pas
+  let px = x
+  let pz = z
+  let c = cap
   for (let i = 1; i <= pas; i++) {
-    const t = (distance * i) / pas
-    for (const a of [0, demiAngle, -demiAngle]) {
-      const dx = Math.sin(cap + a)
-      const dz = Math.cos(cap + a)
-      const s = sampleGround(x + dx * t, z + dz * t)
+    c += courbure * dl
+    px += Math.sin(c) * dl
+    pz += Math.cos(c) * dl
+    out.push({ x: px, z: pz, cap: c })
+  }
+  return out
+}
+
+// ⚠️ LE RUBAN, PAS LE RAYON — et c'est le bruit qui l'a imposé. Avec un simple
+// cône à trois rayons, le plancher de dernier recours s'engageait 105 fois sur
+// 2 700 pas (3,9 %) dès qu'on salissait le relief d'essai de ±1,5 unité : une
+// pointe de bruit à un mètre de l'axe n'était vue par aucun rayon, la caméra la
+// découvrait sous elle, et le plancher la rattrapait d'un saut. On balaie donc
+// un RUBAN : à chaque pas en avant, on relève aussi le relief de part et
+// d'autre, sur la largeur que l'appareil peut réellement occuper, et ce ruban
+// s'ÉVASE avec la distance — l'incertitude sur la trajectoire grandit à mesure
+// qu'on regarde loin. Un relief réel porte du bruit ; les cas d'école, non.
+export function altitudeSecuritaire({ sampleGround, x, z, cap, distance, garde, courbure = 0, pas = 6, evasement = 0.3, lateral = 0 }) {
+  const lat = lateral || garde
+  const arc = pointsDevant({ x, z, cap, distance, courbure, pas })
+  let h = -Infinity
+  for (let i = 0; i < arc.length; i++) {
+    const p = arc[i]
+    const perp = p.cap + Math.PI / 2
+    const etal = lat + (evasement * distance * i) / pas
+    for (const u of [0, lat, -lat, etal, -etal]) {
+      const s = sampleGround(p.x + Math.sin(perp) * u, p.z + Math.cos(perp) * u)
       if (Number.isFinite(s) && s > h) h = s
     }
   }
-  return h + garde
+  return (h === -Infinity ? 0 : h) + garde
 }
 
 // ====================================================== détection des couloirs
@@ -763,17 +794,23 @@ export function planifierVol({
 // l'altitude de sécurité, ailes à plat.
 export function creerVol(plan) {
   const { voie, profil } = plan
+  const sampleGround = plan.sampleGround || (() => 0)
   const a = voie[0]
   const b = voie[Math.min(3, voie.length - 1)]
   const cap = capDe(b.x - a.x, b.z - a.z)
   const y = altitudeSecuritaire({
-    sampleGround: plan.sampleGround || (() => 0),
-    x: a.x, z: a.z, cap, distance: profil.dVeille, garde: profil.garde,
+    sampleGround, x: a.x, z: a.z, cap, distance: profil.dVeille, garde: profil.garde,
   })
+  // Le regard est posé DÈS L'ÉTAT INITIAL : sans ça le premier pas rattrapait
+  // d'un coup l'écart entre la visée par défaut et la visée filtrée, et le plan
+  // s'ouvrait sur un sursaut de cadre.
+  const etat0 = { x: a.x, z: a.z, y, cap, roulis: 0, v: profil.vCroisiere * profil.half, avanceVisee: 0 }
   return {
     x: a.x, z: a.z, y,
     cap, roulis: 0, v: profil.vCroisiere * profil.half,
     s: 0, sens: 1, t: 0,
+    avanceVisee: 0,
+    visee: pointDeVisee(etat0, { profil, sampleGround }),
     phase: 'vol',
     // Compteurs de PREUVE, pas de décor : `plancher` compte les fois où le
     // garde-fou d'altitude a dû rattraper la dynamique — s'il n'est jamais
@@ -834,8 +871,55 @@ export function cumulSur(voie) {
 
 // Largeur libre en dessous de laquelle il faut faire demi-tour. Voir le
 // paragraphe « LE DEMI-TOUR » dans stepPilote pour le pourquoi des deux seuils.
-export function seuilDemiTour(profil, deboucheProuve = false) {
-  return deboucheProuve ? profil.rayon * 0.6 : 2 * profil.rayon
+// ⚠️ 2 × RAYON, MAIS DU CÔTÉ DU VIRAGE — la règle classique dit « il faut 2 × r
+// de largeur pour faire demi-tour », et elle sous-entend qu'on vole COLLÉ À UN
+// FLANC : le demi-cercle se déroule alors entièrement du côté libre. Un appareil
+// au milieu du couloir a besoin des mêmes 2 × r, mais d'un seul côté — soit 4 × r
+// de largeur totale. On mesure donc la place DU CÔTÉ où l'on tournerait,
+// `max(gauche, droite)`, jamais le total : mesuré sur l'entonnoir d'essai, le
+// total disait « il reste 9, c'est juste assez » là où le cercle de virage
+// n'avait que 4,5 devant lui et sortait dans la paroi.
+export function seuilDemiTour(profil) {
+  return 2 * profil.rayon
+}
+
+// Seuil de simple FRANCHISSABILITÉ : en deçà, le couloir ne se passe plus, même
+// tout droit. Rien à voir avec le demi-tour.
+export function seuilPassage(profil) {
+  return profil.rayon * 0.6
+}
+
+// LE CERCLE DE VIRAGE EST-IL LIBRE ?
+//
+// ⚠️ LA LARGEUR NE SUFFIT PAS, et c'est la dernière chose que la mesure a
+// apprise. Après avoir corrigé la veille en arc, le plancher de dernier recours
+// s'engageait encore 44 fois par vol — et TOUJOURS dans le demi-tour. La largeur
+// libre est une mesure HORIZONTALE : elle dit qu'il y a de la place, elle ne dit
+// pas que le sol y est plat. Le virage partait vers le côté large et grimpait
+// un flanc qui montait plus vite (pente mesurée 4 à 7) que la capacité de montée
+// (0,37) — la place était là, la performance non.
+//
+// On vérifie donc ce qu'un pilote vérifie : le DEMI-CERCLE qu'on va parcourir,
+// point par point, en comparant le relief à l'altitude ATTEIGNABLE à cet endroit
+// de l'arc (y + pente × longueur d'arc parcourue). C'est la « porte de sortie »
+// au sens propre : une manœuvre existe, ou elle n'existe pas.
+export function virageLibre({ sampleGround, x, z, y, cap, sens, rayon, garde, penteMontee, half = Infinity, pas = 12 }) {
+  // centre du cercle : à `rayon` sur le côté vers lequel on tourne
+  const cx = x + Math.sin(cap + (sens * Math.PI) / 2) * rayon
+  const cz = z + Math.cos(cap + (sens * Math.PI) / 2) * rayon
+  // angle du point courant vu du centre
+  const a0 = Math.atan2(x - cx, z - cz)
+  for (let i = 1; i <= pas; i++) {
+    const dth = (Math.PI * i) / pas // on parcourt un demi-tour
+    const a = a0 + sens * dth
+    const px = cx + Math.sin(a) * rayon
+    const pz = cz + Math.cos(a) * rayon
+    if (Math.abs(px) > half || Math.abs(pz) > half) return false
+    const s = sampleGround(px, pz)
+    // longueur d'arc parcourue = rayon × angle
+    if ((Number.isFinite(s) ? s : 0) + garde > y + penteMontee * rayon * dth) return false
+  }
+  return true
 }
 
 // Un onglet en arrière-plan rend un dt énorme au retour : sans plafond, le vol
@@ -891,12 +975,41 @@ export function routeDegagee({ sampleGround, x, z, y, cap, distance, garde, pent
 export function pointDeVisee(etat, ctx) {
   const { profil, sampleGround } = ctx
   const d = Math.max(profil.dVisee * (etat.v / profil.v), profil.rayon * 0.8)
-  // le regard précède la trajectoire : demi-anticipation du lacet en cours
-  const capVise = etat.cap + (etat.omega || 0) * profil.tVisee * 0.5
+  // Le regard précède la trajectoire : « en virage, le pilote regarde LA SORTIE
+  // du virage, pas le nez de l'appareil ». On avance donc le cap de visée d'une
+  // demi-anticipation de lacet.
+  //
+  // ⚠️ LE LACET EST DÉDUIT DU ROULIS, PAS PRIS TEL QUEL. Utiliser ω directement
+  // faisait sauter la cible : quand le garde-fou réactif change le cap de
+  // consigne, ω bascule d'un coup, le cap visé saute de 1,4 rad et la cible se
+  // déplace de 60 unités en une image — 4 529 u/s mesurées pour un appareil à 8.
+  // L'inclinaison, elle, est bornée EN VITESSE D'ÉTABLISSEMENT : en repassant
+  // par elle (ω = g·tan φ / v, la relation du virage coordonné) le regard hérite
+  // de cette continuité. C'est aussi plus juste : le pilote tourne la tête parce
+  // qu'il est incliné, pas parce qu'une consigne a changé.
+  //
+  // ⚠️ ET L'AVANCE EST FILTRÉE, avec un coefficient RÉDUIT. Mesuré : l'axe de
+  // visée balayait à 151°/s en virage, alors que le virage lui-même ne tourne
+  // qu'à 28,6°/s. La faute au terme d'avance — sa dérivée vaut tVisee/2 × dω/dt,
+  // et dω/dt monte à 0,77 rad/s² pendant l'établissement du roulis, soit cinq
+  // fois le lacet lui-même. On regarde la sortie du virage, on ne fouette pas la
+  // tête : coefficient ramené à tVisee/4, et lissé sur 2,5 s (état `avanceVisee`).
+  const omegaLisse = (profil.g * Math.tan(etat.roulis || 0)) / Math.max(etat.v, 1e-6)
+  const avance = etat.avanceVisee ?? omegaLisse * profil.tVisee * 0.25
+  const capVise = etat.cap + avance
   const x = etat.x + Math.sin(capVise) * d
   const z = etat.z + Math.cos(capVise) * d
-  const sol = sampleGround(x, z)
-  let y = (Number.isFinite(sol) ? sol : 0) + profil.garde * 0.6
+  // On regarde une TACHE de sol, pas un point : le relief réel est bruité, et
+  // une lecture ponctuelle transmet ce bruit au cadrage. La moyenne sur un petit
+  // disque est aussi ce que fait un œil — on ne fixe pas un caillou.
+  const r = profil.garde
+  let somme = 0
+  let n = 0
+  for (const [ux, uz] of [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r]]) {
+    const s = sampleGround(x + ux, z + uz)
+    if (Number.isFinite(s)) { somme += s; n++ }
+  }
+  let y = (n ? somme / n : 0) + profil.garde * 0.6
   // Borne de PENTE : sans elle, un couloir qui monte fait pointer le nez au
   // zénith et la caméra ne cadre plus que du ciel (mesuré à 53° sur Chamonix
   // par la poursuite de camera-shots.js — même piège, même remède).
@@ -947,8 +1060,28 @@ export function stepPilote(etat, dt, plan, ctx) {
     portee: Math.max(2.2 * profil.rayon, profil.half * 0.35),
   })
   const large = l.droite >= l.gauche ? 1 : -1
-  const dec = profil.cote * Math.min(l.gauche, l.droite) * large
-  const perp = e.cap + Math.PI / 2
+
+  // ⚠️ LE DÉCALAGE SE MESURE SUR L'AXE DU COULOIR, ET IL EST HYSTÉRÉTIQUE.
+  // Première version : perpendiculaire au CAP COURANT, côté recalculé à chaque
+  // image. Résultat mesuré sur l'entonnoir d'essai — la caméra n'avançait plus
+  // du tout : elle oscillait entre x = −5,8 et x = +3,4 en tournant autour de
+  // z ≈ 75, et finissait par ressortir du bloc par où elle était entrée. La
+  // boucle est évidente une fois vue : le décalage change le cap, le cap change
+  // la perpendiculaire, la perpendiculaire change le décalage.
+  // Deux corrections : la perpendiculaire est celle DU COULOIR (elle ne dépend
+  // pas de nous), et le côté choisi ne change que si l'autre est franchement
+  // meilleur (facteur 1,6) — un pilote ne change pas de côté toutes les secondes.
+  const avantCible = pointA(voie, cum, sVise + e.sens * profil.rayon)
+  const capVoie = capDe((avantCible.x - cible.x) * e.sens, (avantCible.z - cible.z) * e.sens)
+  if (e.coteVol === undefined) e.coteVol = large
+  else {
+    const dispo = e.coteVol > 0 ? l.droite : l.gauche
+    const autre = e.coteVol > 0 ? l.gauche : l.droite
+    if (autre > dispo * 1.6) e.coteVol = -e.coteVol
+  }
+  const placeCote = e.coteVol > 0 ? l.droite : l.gauche
+  const dec = profil.cote * Math.min(placeCote, profil.rayon) * e.coteVol
+  const perp = capVoie + Math.PI / 2
   // Le décalage ne doit pas pousser la visée HORS DU BLOC : mesuré, un couloir
   // qui longe le bord faisait sortir la caméra de 1 % de l'emprise, et au-delà
   // du bord il n'y a plus de relief à échantillonner — donc plus de garde au sol.
@@ -967,15 +1100,15 @@ export function stepPilote(etat, dt, plan, ctx) {
   //     QU'ON PEUT ENCORE, ici où il reste de la place. « Le demi-tour se
   //     planifie avant le fond, pas au fond. »
   //
-  // ⚠️ LE SEUIL DÉPEND DE LA SORTIE, et c'est de l'airmanship, pas un réglage.
+  // ⚠️ LE CRITÈRE DÉPEND DE LA SORTIE, et c'est de l'airmanship, pas un réglage.
   // Sans sortie prouvée, la règle est stricte : il faut garder EN PERMANENCE de
-  // quoi se retourner, soit 2 × rayon, sinon on est déjà dans le cul-de-sac.
-  // Avec une sortie prouvée et vérifiée avant l'engagement, on PASSE : c'est
-  // exactement ce que la vérification a acheté, et c'est ce qui permet à un
-  // avion de traverser une vallée trop étroite pour son demi-tour — le cas
-  // normal à l'échelle d'un bloc. Le seuil retombe alors sur la simple
-  // franchissabilité (0,6 × rayon), le même que celui de verifierCouloir.
-  const besoin = seuilDemiTour(profil, plan.debouche)
+  // quoi se retourner — 2 × rayon DU CÔTÉ DU VIRAGE (voir seuilDemiTour) —,
+  // sinon on est déjà dans le cul-de-sac. Avec une sortie prouvée et vérifiée
+  // avant l'engagement, on PASSE : c'est exactement ce que la vérification a
+  // acheté, et c'est ce qui permet à un avion de traverser une vallée trop
+  // étroite pour son demi-tour, le cas normal à l'échelle d'un bloc. Le critère
+  // retombe alors sur la simple franchissabilité.
+  const besoin = seuilDemiTour(profil)
   const devant = {
     x: e.x + Math.sin(e.cap) * profil.dVeille,
     z: e.z + Math.cos(e.cap) * profil.dVeille,
@@ -989,7 +1122,11 @@ export function stepPilote(etat, dt, plan, ctx) {
   // finissait hors du bloc (mesuré : z = 106 pour un demi-bloc de 100).
   const margeBout = profil.dPoursuite * 0.6 + 2 * profil.rayon
   const boutAtteint = (e.sens > 0 && s >= total - margeBout) || (e.sens < 0 && s <= margeBout)
-  const retrecit = lDevant.total < besoin && l.total >= besoin
+  const retrecit = plan.debouche
+    // sortie prouvée : on ne renonce que si ça ne passe carrément plus
+    ? lDevant.total < seuilPassage(profil)
+    // pas de sortie : on se retourne TANT QU'IL RESTE la place de le faire
+    : Math.max(lDevant.gauche, lDevant.droite) < besoin && Math.max(l.gauche, l.droite) >= besoin
   // PÉRIODE RÉFRACTAIRE. Un demi-tour dure π/ω (6,3 s pour l'avion) ; sans ce
   // verrou, la mesure de largeur prise EN PLEIN VIRAGE — donc en travers du
   // couloir, là où elle est forcément mauvaise — relançait un second demi-tour
@@ -1007,16 +1144,21 @@ export function stepPilote(etat, dt, plan, ctx) {
     //     l'est aussi — on ne fait rien de plus, et c'est la MONTÉE (garde-fou
     //     `force` plus bas) qui dégage. Monter est toujours possible ; se
     //     retourner, non.
-    if (l.total < 2 * profil.rayon) {
+    // Le sens du demi-tour n'est pas libre : on essaie D'ABORD le côté large —
+    // « on vole sur un côté du couloir, ça laisse le rayon disponible du côté
+    // large » — puis l'autre. Et on n'essaie pas la largeur, on essaie LE
+    // CERCLE : voir virageLibre, la place ne dit rien de la pente.
+    const penteVirage = (profil.montMax * facteurEnergie(profil.rouliMax)) / Math.max(e.v, 1e-6)
+    const essai = { sampleGround, x: e.x, z: e.z, y: e.y, cap: e.cap, rayon: profil.rayon, garde: profil.garde, penteMontee: penteVirage, half: profil.half }
+    const cote = [large, -large].find((s) => virageLibre({ ...essai, sens: s }))
+    if (cote === undefined) {
       if (boutAtteint) e.sortant = true
     } else {
       e.depuisDemiTour = 0
       e.demiTours = (e.demiTours || 0) + 1
       e.phase = 'demi-tour'
       e.sens = -e.sens
-      // Le sens du demi-tour n'est pas libre : on part DU CÔTÉ LARGE, celui qui
-      // a la place d'accueillir le rayon de virage.
-      e.sensVirage = large
+      e.sensVirage = cote
       e.tDemiTour = 0
       e.sortant = false // se retourner annule la sortie : on repart en sens inverse
     }
@@ -1078,14 +1220,24 @@ export function stepPilote(etat, dt, plan, ctx) {
   // Anticipation : le maximum du relief sur la fenêtre, jamais le sol sous soi.
   let cibleY = altitudeSecuritaire({
     sampleGround, x: e.x, z: e.z, cap: e.cap, distance: profil.dVeille, garde: profil.garde,
+    courbure: omega / Math.max(e.v, 1e-6), // la veille suit l'arc, pas la droite
   })
   if (force) cibleY += profil.garde * 2 // cerné : on prend de l'altitude franchement
   // L'ÉNERGIE : la montée disponible chute en cos φ. Quand elle vire, elle monte
   // moins. La descente, elle, n'est bornée que par le confort (pas d'énergie à
   // fournir pour descendre), d'où le facteur 1,4.
   const monte = profil.montMax * facteurEnergie(e.roulis)
-  const dY = clamp(cibleY - e.y, -monte * 1.4 * d, monte * d)
-  e.y += dY
+  // ⚠️ LA VITESSE VERTICALE EST UN ÉTAT, PAS UNE CONSIGNE — et c'est encore la
+  // dérivée seconde qui l'a exigé. Un simple `clamp(cible − y)` fait du
+  // tout-ou-rien : au moment où l'appareil passe de « monte à fond » à
+  // « descend à fond », la vitesse verticale saute de 0,05 à −0,07 par image,
+  // soit 432 u/s² d'accélération — un à-coup net, invisible en position et
+  // parfaitement visible à l'œil. Un aéronef change de taux de montée avec une
+  // inertie ; on la modélise, et l'à-coup disparaît.
+  const vyCible = clamp((cibleY - e.y) / 0.8, -monte * 1.4, monte)
+  const accVert = monte / 0.7 // taux de montée pleinement établi en 0,7 s
+  e.vy = (e.vy || 0) + clamp(vyCible - (e.vy || 0), -accVert * d, accVert * d)
+  e.y += e.vy * d
 
   // --- 6. on avance ---------------------------------------------------------
   // Vitesse : un avion ne s'arrête pas (vMin > 0) mais ralentit un peu en
@@ -1104,9 +1256,35 @@ export function stepPilote(etat, dt, plan, ctx) {
   const sol = sampleGround(e.x, e.z)
   const solY = Number.isFinite(sol) ? sol : 0
   const mini = solY + profil.garde
-  if (e.y < mini) { e.y = mini; e.plancher++ }
+  // …et on remet la vitesse verticale à zéro quand il engage : sans ça la
+  // dynamique continuerait de pousser vers le bas contre le plancher à chaque
+  // image, et le rattrapage se répéterait au lieu de se résoudre.
+  if (e.y < mini) { e.y = mini; e.vy = Math.max(e.vy || 0, 0); e.plancher++ }
   const gardeReelle = e.y - solY
   if (gardeReelle < e.gardeMin) e.gardeMin = gardeReelle
+
+  // --- 7. le regard ---------------------------------------------------------
+  // ⚠️ LE REGARD EST UN ÉTAT, LUI AUSSI. Le point de visée glisse le long du sol
+  // devant l'appareil ; sur un flanc de pente 5, une avance d'une unité par
+  // image fait bouger sa hauteur de cinq — mesuré, la cible se déplaçait à
+  // 386 u/s pour un appareil à 8, soit 8° de tangage en une image. C'est
+  // parfaitement visible, et invisible dans un test de position. Un pilote ne
+  // claque pas son regard : on filtre l.altitude visée à ~0,9 s. Le CAP de
+  // visée, lui, n'est pas filtré — il vient déjà du roulis, donc il est lisse.
+  const omegaVisee = (profil.g * Math.tan(e.roulis)) / Math.max(e.v, 1e-6)
+  const avanceCible = omegaVisee * profil.tVisee * 0.25
+  e.avanceVisee = (e.avanceVisee || 0) + (avanceCible - (e.avanceVisee || 0)) * (1 - Math.exp(-d / 2.5))
+  const brut = pointDeVisee(e, { profil, sampleGround })
+  if (!e.visee) e.visee = brut
+  else {
+    const k = 1 - Math.exp(-d / 0.9)
+    e.visee = { x: brut.x, y: e.visee.y + (brut.y - e.visee.y) * k, z: brut.z }
+  }
+  // (Pas de recalage sur le sol visé après le filtre : le remonter au relief
+  // instantané réinjecterait exactement le saut qu'on vient d'ôter — mesuré,
+  // 386 u/s à l'identique. La cible n'est qu'un point de regard, pas une
+  // position : la voir passer un dixième de seconde sous la pente ne se voit
+  // pas, alors qu'un saut de 8° de tangage, si.)
 
   return e
 }
@@ -1114,7 +1292,7 @@ export function stepPilote(etat, dt, plan, ctx) {
 // Pose de caméra pour l'état courant : position, cible de regard, roulis.
 // C'est TOUT ce que l'adaptateur consomme.
 export function poseDe(etat, plan, ctx) {
-  const t = pointDeVisee(etat, { profil: plan.profil, sampleGround: ctx.sampleGround })
+  const t = etat.visee || pointDeVisee(etat, { profil: plan.profil, sampleGround: ctx.sampleGround })
   return {
     pos: { x: etat.x, y: etat.y, z: etat.z },
     target: t,
