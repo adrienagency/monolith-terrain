@@ -139,6 +139,42 @@ export function poseDansLaCourse(v, course) {
 }
 
 /**
+ * Le décalage de fenêtre qui pose un point du CHAMP au centre du socle affiché.
+ *
+ * ══════════ POURQUOI CE N'EST QU'UN BORNAGE, ET POURQUOI IL FALLAIT L'ÉCRIRE ══
+ *
+ * La géométrie ne bouge jamais : elle lit le champ à `position + fenetre`
+ * (terrain.js, `_makeDemSampler`). Le centre du socle est la géométrie (0, 0),
+ * donc ce qu'il montre est le point de champ `fenetre`. Poser la fenêtre SUR la
+ * coordonnée de champ d'un lieu revient exactement à mettre ce lieu au milieu.
+ * D'où un corps de deux lignes — mais la règle mérite un nom parce que c'est ce
+ * nom qui porte les deux pièges ci-dessous.
+ *
+ * ⚠️ PREMIER PIÈGE — LA BORNE N'EST PAS FACULTATIVE. Un lieu proche du bord de
+ * l'emprise ne PEUT PAS être centré : le socle sortirait du champ, `sampleDem`
+ * clamperait au lieu de boucler, et on verrait des traînées de relief étiré sur
+ * tout un bord. On approche au plus près, on ne casse pas la borne. C'est la
+ * même course que le geste, pour que « posé » et « glissé » soient la même
+ * position et que le rappel élastique n'ait rien à corriger derrière
+ * (`poseDansLaCourse` est son point fixe).
+ *
+ * ⚠️ SECOND PIÈGE — LA CIBLE EST EN COORDONNÉES DE CHAMP, PAS DE GÉOMÉTRIE. Il
+ * faut donc la calculer avec `latLonToWorld`, qui divise par `demSpan(dem)` —
+ * 168 unités sur une emprise 3×3, pas 56. C'est l'erreur qui s'est déjà glissée
+ * TROIS fois sur cette branche (les lieux à un tiers de leur distance, le
+ * masque des sommets triplé, l'échelle du cartouche). `test/fenetre-centrage`
+ * la prend de face par un aller-retour lat/lon → fenêtre → lat/lon : un
+ * `TERRAIN_SIZE` à la place de `demSpan` rate le lieu et se lit en degrés.
+ *
+ * @param {{x:number,z:number}|null} cible - le point VISÉ, en coordonnées de champ
+ * @param {number} course - la demi-course autorisée (unités monde)
+ * @returns {{x:number,z:number}} le décalage à écrire dans `terrain.fenetre`
+ */
+export function fenetreQuiCentre(cible, course) {
+  return { x: poseDansLaCourse(cible?.x, course), z: poseDansLaCourse(cible?.z, course) }
+}
+
+/**
  * Avance la fenêtre d'un geste, sur les deux axes.
  *
  * ⚠️ L'ORDRE COMPTE : on additionne le geste au BRUT, puis on borne. Borner

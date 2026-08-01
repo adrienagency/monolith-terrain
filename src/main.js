@@ -54,7 +54,7 @@ import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
 import { FLAGS } from './flags.js'
 import { ATLAS_COTE, EMPRISE_EN_VOL_MAX, enVolBorne, originesEmprise, recollerEmprise } from './dem-emprise.js'
-import { COURSE_ELASTIQUE, avanceFenetre, rappelElastique, poseDansLaCourse } from './fenetre-course.js'
+import { COURSE_ELASTIQUE, avanceFenetre, rappelElastique, poseDansLaCourse, fenetreQuiCentre } from './fenetre-course.js'
 import { dansFenetre } from './fenetre-clip.js'
 import { vitesseAuLache, pasElan } from './fenetre-elan.js'
 import { forceUrl, continuActif, etatInterrupteur } from './fenetre-reglage.js'
@@ -2317,18 +2317,63 @@ function f3CalquesSuivent() {
 // machine qui le refuse doit donner la carte, pas une erreur.
 function f3PoseFenetre(fen) {
   if (!fen || !fenetreContinueActive() || !(dem?.empriseCote > 1)) return false
-  const borne = (v) => Math.max(-COURSE_ELASTIQUE, Math.min(COURSE_ELASTIQUE, Number.isFinite(v) ? v : 0))
-  terrain.fenetre.x = borne(fen.x)
-  terrain.fenetre.z = borne(fen.z)
+  f3EcritFenetre(fen)
+  terrain.tickFenetre(params)
+  plinth.rebuild(terrain, params, socleEmprise())
+  f3CalquesSuivent()
+  return true
+}
+
+// Les NOMBRES d'une pose, sans le relief — le tronc commun de `f3PoseFenetre`
+// (qui repeint dans la foulée) et du centrage de chargement (qui n'a rien à
+// repeindre : la reconstruction complète arrive juste derrière).
+function f3EcritFenetre(fen) {
+  terrain.fenetre.x = poseDansLaCourse(fen.x, COURSE_ELASTIQUE)
+  terrain.fenetre.z = poseDansLaCourse(fen.z, COURSE_ELASTIQUE)
   _f3Brut.x = terrain.fenetre.x
   _f3Brut.z = terrain.fenetre.z
   _f3V.x = _f3V.z = 0
   _f3Ech.length = 0
   _f3Fin = { ..._f3Fin, x: terrain.fenetre.x, z: terrain.fenetre.z, repos: 0 }
   _f3Sale = false
-  terrain.tickFenetre(params)
-  plinth.rebuild(terrain, params, socleEmprise())
-  f3CalquesSuivent()
+}
+
+// ══════════ LE LIEU CHERCHÉ ARRIVE AU CENTRE ════════════════════════════════
+//
+// Adrien : « le point recherché doit se trouver au centre de la zone qui
+// s'affiche, aussi bien en vertical qu'en horizontal. Ce n'est pas le cas. »
+//
+// LA CAUSE est dans `loadDem` et elle est structurelle : le bloc se cale sur la
+// GRILLE DE TUILES (deux `Math.floor`, dem.js:238-241). Le lieu demandé tombe
+// donc quelque part DANS la tuile centrale, jamais en son centre. MESURÉ, en
+// unités monde sur un socle de 56 : mont St Helens z13 → 6,29 unités trop au
+// nord (11,2 % du socle) ; Chamonix z12 → 6,25 unités trop à l'est ; La Réunion
+// z13 → 7,28 unités. Le pire cas structurel est la demi-tuile, 9,33 unités,
+// soit un sixième du socle dans chaque axe.
+//
+// LA SOLUTION EXISTAIT DÉJÀ, ET C'EST LA RAISON D'ÊTRE DU MODE CONTINU :
+// l'emprise reste calée sur la grille, mais la fenêtre de LECTURE glisse
+// dedans. On la pose donc au décalage qui centre le lieu, au lieu de la laisser
+// à (0, 0). Aucun chargement de plus, aucun octet de plus : la donnée est déjà
+// là, on la regarde simplement au bon endroit.
+//
+// ⚠️ ÉCRIT AVANT `regenerateTerrain`, ET C'EST LE POINT D'OPTIMISATION. Posé
+// après, il faudrait réécrire le relief une seconde fois (`tickFenetre`, 15 à
+// 70 ms selon la finesse) pour un résultat identique. Écrit avant, la
+// reconstruction cuit d'emblée le bon relief : le centrage est GRATUIT. Seuls
+// les groupes des calques du sol restent à translater, ce que fait
+// `f3CalquesSuivent()` juste après la reconstruction.
+//
+// ⚠️ `latLonToWorld` ET PAS UN CALCUL À LA MAIN : c'est lui qui divise par
+// `demSpan(dem)`, soit 168 unités sur l'emprise et non 56. L'erreur inverse a
+// déjà été commise trois fois sur cette branche. Verrouillé par
+// test/fenetre-centrage.test.js, sur un aller-retour lat/lon → fenêtre → lat/lon.
+//
+// Silencieux et gratuit hors mode continu — le mode ordinaire ne change rien.
+function f3CentreSur(cible) {
+  if (!cible || !fenetreContinueActive() || !(dem?.empriseCote > 1)) return false
+  if (!Number.isFinite(cible.lat) || !Number.isFinite(cible.lon)) return false
+  f3EcritFenetre(fenetreQuiCentre(latLonToWorld(dem, cible.lat, cible.lon), COURSE_ELASTIQUE))
   return true
 }
 
@@ -2350,6 +2395,19 @@ function chargeCartouche() {
   const fen = fenetreContinueActive() && dem.empriseCote > 1 ? terrain.fenetre : null
   const p = fen ? worldToLatLon(dem, fen.x, fen.z) : { lat: params.demLat, lon: params.demLon }
   groundInfo.load(p.lat, p.lon, dem, fen)
+}
+
+// Le lat/lon SOUS LA VISÉE DE LA CAMÉRA, décalage de fenêtre compris.
+//
+// `controls.target` est une coordonnée de GÉOMÉTRIE ; le champ se lit à
+// `géométrie + fenêtre`. Rendre l'un pour l'autre est l'erreur qui ramenait
+// l'escalier de zoom au centre du bloc après un défilement. Hors mode continu
+// la fenêtre est (0, 0) : la valeur rendue est celle d'avant, au bit près.
+function viseeAuSol() {
+  const fen = fenetreContinueActive() && dem?.empriseCote > 1 ? terrain.fenetre : null
+  const x = controls.target.x + (fen?.x ?? 0)
+  const z = controls.target.z + (fen?.z ?? 0)
+  return worldToLatLon(dem, x, z)
 }
 
 // ══════════ FIGER LE DÉFILEMENT AVANT UNE CAPTURE ═══════════════════════════
@@ -2585,7 +2643,13 @@ function syncDetailToZoom() {
 
 // fetch tiles + rebuild; throws on failure so programmatic callers (orbital
 // dive) can hold orbit — loadRealTerrain wraps it with the GUI's error UX
-async function fetchAndBuildDem() {
+//
+// `centreSur` : le lieu qu'on est allé chercher, à poser AU CENTRE du socle en
+// mode continu (voir `f3CentreSur`). Absent, la fenêtre est laissée telle
+// quelle — et c'est voulu : un simple rechargement de zone (changement
+// d'exagération, retour de palette) ne doit pas ramener le visiteur au centre
+// du bloc alors qu'il a défilé pour aller ailleurs.
+async function fetchAndBuildDem({ centreSur = null } = {}) {
   syncExagToZoom() // this zoom's saved (or default) vertical exaggeration
   syncDetailToZoom() // fine-detail off at continental scale (z<=6)
   loadingStatus.textContent = 'fetching elevation tiles…'
@@ -2636,6 +2700,9 @@ async function fetchAndBuildDem() {
   // servie plus finement que le défaut, la plongée au clic doit pouvoir y aller
   liftFineZoomToRegion()
   terrain.setDem(dem)
+  // LE LIEU CHERCHÉ SE POSE ICI, avant la reconstruction : elle cuira d'emblée
+  // le bon relief, sans une seconde écriture (voir `f3CentreSur`).
+  const aCentre = f3CentreSur(centreSur)
   // LE TRAIT DE CÔTE DE LA ZONE PRÉCÉDENTE EST LÂCHÉ ICI, AVANT la
   // reconstruction — il l'était après, et ça coûtait un travail de travailleur
   // entier par zoom. Il ne décrit plus le bon endroit : le garder faisait
@@ -2658,6 +2725,11 @@ async function fetchAndBuildDem() {
   loadingStatus.textContent = 'generating terrain…'
   applyTimeOfDay(params.timeOfDay ?? 10) // the sun is location-true — re-aim it for the new place
   await regenerateTerrain()
+  // Les calques du sol sont reconstruits en coordonnées de CHAMP ; leur groupe
+  // porte −fenêtre. La reconstruction ne le sait pas — elle rebâtit la
+  // géométrie, pas la translation. Sans cette ligne, un lieu centré affichait
+  // son relief au bon endroit et ses NOMS à l'ancien.
+  if (aCentre) f3CalquesSuivent()
   // pull the cartouche info for the new zone (async, non-blocking)
   if (params.groundInfo) chargeCartouche()
   // real coastline (Natural Earth) at coarse zoom — async, non-blocking; the
@@ -2777,11 +2849,11 @@ async function fetchAndBuildDem() {
   syncBoats()
 }
 
-async function loadRealTerrain() {
+async function loadRealTerrain(opts = {}) {
   if (demBusy) return
   demBusy = true
   try {
-    await fetchAndBuildDem()
+    await fetchAndBuildDem(opts)
   } catch (err) {
     console.error('DEM load failed:', err)
     loadingStatus.textContent = 'elevation fetch failed — check connection'
@@ -2957,7 +3029,12 @@ modes = new Modes({
         params.demLon = lon
         if (zoom) params.demZoom = zoom
         params.demLocation = 'Custom'
-        await fetchAndBuildDem()
+        // ⚠️ `centreSur` : c'est LE point d'entrée de « on va quelque part ».
+        // Les trois appelants de `loadSurface` portent tous un lieu VOULU — la
+        // plongée depuis l'orbite (une recherche), l'escalier de zoom, et le
+        // clic pour plonger. Dans les trois cas, ce lieu doit atterrir au
+        // centre du socle et pas à un sixième de côté (voir `f3CentreSur`).
+        await fetchAndBuildDem({ centreSur: { lat, lon } })
       } catch (err) {
         hideLoading()
         throw err
@@ -3002,15 +3079,25 @@ modes = new Modes({
     },
     // next finer scale under the current view — the staircase down from a
     // coarse (z8/z10) dive; null once the patch is already fine
+    //
+    // ⚠️ CE QUE VISE LA CAMÉRA EST EN COORDONNÉES DE GÉOMÉTRIE, PAS DE CHAMP —
+    // et c'est la même famille d'erreur que le défaut du centrage. `controls
+    // .target` vit dans la géométrie, qui NE BOUGE PAS en mode continu : c'est
+    // la lecture qui se décale de `terrain.fenetre`. Sans l'ajouter, un cran de
+    // zoom après un défilement rechargeait la zone du CENTRE DU BLOC — le
+    // visiteur avait glissé de 20 km et le zoom le ramenait d'où il venait,
+    // silencieusement. `chargeCartouche` fait déjà exactement cette addition
+    // (voir plus haut) ; l'escalier de zoom l'avait oubliée.
+    // Hors mode continu, `fenetre` est (0, 0) et l'expression est inchangée.
     getRefineTarget() {
       if (params.source !== 'real' || !dem || params.demZoom >= userFineZoom) return null
-      const { lat, lon } = worldToLatLon(dem, controls.target.x, controls.target.z)
+      const { lat, lon } = viseeAuSol()
       return { lat, lon, zoom: stepZoom(params.demZoom, 1, userFineZoom) }
     },
     getCoarsenTarget() {
       // widen down to the z4 continental block; past that the orbit gate opens
       if (params.source !== 'real' || !dem || params.demZoom <= 4) return null
-      const { lat, lon } = worldToLatLon(dem, controls.target.x, controls.target.z)
+      const { lat, lon } = viseeAuSol()
       return { lat, lon, zoom: stepZoom(params.demZoom, -1) }
     },
     // true when the camera is skimming the relief — refine can then fire on a
@@ -4247,8 +4334,17 @@ async function loadGpxText(text) {
     // the post-rebuild hook drapes the line once the new terrain exists;
     // pin the framed zoom or the dive would land on the fine (≥12) scale
     // and clip long tracks framed at z10/z11
+    // ⚠️ LE MÊME GESTE VAUT POUR UN GPX, ET IL VAUT MÊME PLUS. `frameTrack`
+    // choisit un zoom pour que la trace tienne dans UN bloc avec 35 % de marge
+    // — c'est-à-dire tout juste. Un décalage d'un sixième de socle (le calage
+    // sur la grille de tuiles, voir `f3CentreSur`) mange donc la moitié de
+    // cette marge et peut sortir un bout de trace du socle affiché. Le centre
+    // de la boîte englobante est exactement ce que `frameTrack` a calculé.
+    //
+    // La branche orbitale l'obtient gratuitement : `flyTo` finit par
+    // `loadSurface(lat, lon, zoom)`, qui centre déjà.
     if (modes.mode === 'orbital') await modes.flyTo(f.lat, f.lon, f.zoom)
-    else await loadRealTerrain()
+    else await loadRealTerrain({ centreSur: { lat: f.lat, lon: f.lon } })
     // au chargement d'un GPX, on démarre en vue isométrique (Adrien) — comme un
     // clic sur le bouton iso ; la vue est cadrée sur le bloc + son socle
     applyIsoView(0)
