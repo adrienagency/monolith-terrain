@@ -330,14 +330,24 @@ export function pointsDevant({ x, z, cap, distance, courbure = 0, pas = 6 }) {
 // d'autre, sur la largeur que l'appareil peut réellement occuper, et ce ruban
 // s'ÉVASE avec la distance — l'incertitude sur la trajectoire grandit à mesure
 // qu'on regarde loin. Un relief réel porte du bruit ; les cas d'école, non.
-export function altitudeSecuritaire({ sampleGround, x, z, cap, distance, garde, courbure = 0, pas = 6, evasement = 0.3, lateral = 0 }) {
+//
+// ⚠️ ET LE PAS EST LIÉ À LA GARDE, PAS FIXÉ. Troisième fois que l'instrument
+// ment dans ce fichier, et la plus coûteuse : à six points sur la fenêtre de
+// veille, deux relevés sont distants de 1,2 unité monde, quand le MNT réel de
+// ShibuMap en porte cinq à dix par unité. Une arête étroite passait donc entre
+// deux relevés — la caméra la découvrait sous elle et le plancher la rattrapait
+// d'un bond. C'est exactement le même piège que l'échantillonnage du SEGMENT de
+// fleet.js, un cran plus fin. On échantillonne donc à la demi-garde : c'est la
+// plus petite chose qui puisse encore faire mal.
+export function altitudeSecuritaire({ sampleGround, x, z, cap, distance, garde, courbure = 0, pas = 0, evasement = 0.3, lateral = 0 }) {
   const lat = lateral || garde
-  const arc = pointsDevant({ x, z, cap, distance, courbure, pas })
+  const n = pas || clamp(Math.ceil(distance / Math.max(garde * 0.5, 1e-6)), 6, 40)
+  const arc = pointsDevant({ x, z, cap, distance, courbure, pas: n })
   let h = -Infinity
   for (let i = 0; i < arc.length; i++) {
     const p = arc[i]
     const perp = p.cap + Math.PI / 2
-    const etal = lat + (evasement * distance * i) / pas
+    const etal = lat + (evasement * distance * i) / n
     for (const u of [0, lat, -lat, etal, -etal]) {
       const s = sampleGround(p.x + Math.sin(perp) * u, p.z + Math.cos(perp) * u)
       if (Number.isFinite(s) && s > h) h = s
@@ -943,11 +953,14 @@ const SCAN = [0.3, -0.3, 0.6, -0.6, 0.95, -0.95, 1.3, -1.3, 1.7, -1.7, 2.1, -2.1
 // serai » — et entre ici et là-bas, il grimpe. On compare donc le relief à
 // l'altitude ATTEIGNABLE au point testé, y + penteMontée × distance parcourue.
 // Le virage redevient ce qu'il doit être : le recours quand monter ne suffit pas.
-export function routeDegagee({ sampleGround, x, z, y, cap, distance, garde, penteMontee = 0, pas = 5, half = Infinity }) {
+export function routeDegagee({ sampleGround, x, z, y, cap, distance, garde, penteMontee = 0, pas = 0, half = Infinity }) {
   const dx = Math.sin(cap)
   const dz = Math.cos(cap)
-  for (let i = 1; i <= pas; i++) {
-    const t = (distance * i) / pas
+  // meme regle de finesse que altitudeSecuritaire : on echantillonne a la
+  // demi-garde, sinon une arete etroite passe entre deux relevés
+  const n = pas || clamp(Math.ceil(distance / Math.max(garde * 0.5, 1e-6)), 5, 40)
+  for (let i = 1; i <= n; i++) {
+    const t = (distance * i) / n
     const px = x + dx * t
     const pz = z + dz * t
     // LE BORD DU BLOC EST UN OBSTACLE. Hors du bloc il n'y a pas de relief à
@@ -1223,10 +1236,30 @@ export function stepPilote(etat, dt, plan, ctx) {
     courbure: omega / Math.max(e.v, 1e-6), // la veille suit l'arc, pas la droite
   })
   if (force) cibleY += profil.garde * 2 // cerné : on prend de l'altitude franchement
+  // Le point où l'on SERA à la fin de ce pas est plus proche que le premier
+  // relevé de la veille (0,42 unité contre 0,13) : il tombait donc entre deux
+  // échantillons. On l'ajoute explicitement — un relevé de plus par image.
+  const solProchain = sampleGround(e.x + Math.sin(e.cap) * e.v * d, e.z + Math.cos(e.cap) * e.v * d)
+  if (Number.isFinite(solProchain)) cibleY = Math.max(cibleY, solProchain + profil.garde)
   // L'ÉNERGIE : la montée disponible chute en cos φ. Quand elle vire, elle monte
   // moins. La descente, elle, n'est bornée que par le confort (pas d'énergie à
   // fournir pour descendre), d'où le facteur 1,4.
-  const monte = profil.montMax * facteurEnergie(e.roulis)
+  // ⚠️ LA RESSOURCE D'URGENCE, et c'est le MNT RÉEL qui l'a exigée — la leçon
+  // du dépôt, vérifiée une fois de plus. Sur relief synthétique, même bruité, le
+  // plancher de dernier recours ne s'engageait JAMAIS. Sur 240 vols de MNT réel
+  // (Chamonix z12, 566 602 pas), il s'engageait 1 463 fois (0,26 % des pas) —
+  // sans jamais laisser la garde devenir négative, mais en payant chaque
+  // rattrapage d'un à-coup : 184 fois l'accélération d'un virage nominal, quand
+  // le banc synthétique plafonnait à 2,5. Un relief réel porte des pentes que
+  // les cas d'école n'ont pas, point final.
+  //
+  // La réponse est celle d'un pilote, pas celle d'un correcteur : quand la marge
+  // fond, on TIRE — on échange de la vitesse contre du taux de montée. C'est ce
+  // que fait une ressource d'évitement de terrain (le « pull-up » d'un TAWS), et
+  // c'est borné, donc l'à-coup reste borné, contrairement au saut du plancher.
+  const margeSol = e.y - (Number.isFinite(sampleGround(e.x, e.z)) ? sampleGround(e.x, e.z) : 0)
+  const urgence = margeSol < profil.garde * 1.6
+  const monte = profil.montMax * facteurEnergie(e.roulis) * (urgence ? 2 : 1)
   // ⚠️ LA VITESSE VERTICALE EST UN ÉTAT, PAS UNE CONSIGNE — et c'est encore la
   // dérivée seconde qui l'a exigé. Un simple `clamp(cible − y)` fait du
   // tout-ou-rien : au moment où l'appareil passe de « monte à fond » à
@@ -1234,8 +1267,18 @@ export function stepPilote(etat, dt, plan, ctx) {
   // soit 432 u/s² d'accélération — un à-coup net, invisible en position et
   // parfaitement visible à l'œil. Un aéronef change de taux de montée avec une
   // inertie ; on la modélise, et l'à-coup disparaît.
-  const vyCible = clamp((cibleY - e.y) / 0.8, -monte * 1.4, monte)
-  const accVert = monte / 0.7 // taux de montée pleinement établi en 0,7 s
+  // En ressource, la consigne se serre (0,4 s au lieu de 0,8) et le taux
+  // s'etablit presque deux fois plus vite : assez pour degager, pas assez pour
+  // que la ressource se voie comme un a-coup.
+  // ON DESCEND DEUX FOIS PLUS LENTEMENT QU'ON NE MONTE. Symetrique, le suivi de
+  // terrain plonge derriere chaque bosse : la consigne d'altitude est un maximum
+  // glissant, donc elle CHUTE des qu'une crete sort de la fenetre, et l'appareil
+  // se met a descendre a plein taux vers la bosse suivante qu'il n'a pas encore
+  // le droit de voir. Avec l'inertie verticale il depasse, et c'est le plancher
+  // qui paie. Un pilote non plus ne pique pas vers le sol : rien ne presse pour
+  // descendre, tout presse pour monter.
+  const vyCible = clamp((cibleY - e.y) / (urgence ? 0.4 : 0.8), -monte * 0.5, monte)
+  const accVert = monte / (urgence ? 0.4 : 0.7) // taux de montée pleinement établi
   e.vy = (e.vy || 0) + clamp(vyCible - (e.vy || 0), -accVert * d, accVert * d)
   e.y += e.vy * d
 
@@ -1259,7 +1302,16 @@ export function stepPilote(etat, dt, plan, ctx) {
   // …et on remet la vitesse verticale à zéro quand il engage : sans ça la
   // dynamique continuerait de pousser vers le bas contre le plancher à chaque
   // image, et le rattrapage se répéterait au lieu de se résoudre.
-  if (e.y < mini) { e.y = mini; e.vy = Math.max(e.vy || 0, 0); e.plancher++ }
+  if (e.y < mini) {
+    // `plancherMax` mesure la TAILLE du rattrapage, pas seulement son nombre :
+    // cent corrections d'un centième d'unité ne se voient pas, une seule d'une
+    // unité se voit. C'est cette grandeur-là qu'il faut regarder.
+    const corr = mini - e.y
+    if (corr > (e.plancherMax || 0)) e.plancherMax = corr
+    e.y = mini
+    e.vy = Math.max(e.vy || 0, 0)
+    e.plancher++
+  }
   const gardeReelle = e.y - solY
   if (gardeReelle < e.gardeMin) e.gardeMin = gardeReelle
 

@@ -426,9 +426,14 @@ test('aucun a-coup : l acceleration de la camera reste bornee', () => {
     if (a > maxA) { maxA = a; iPire = i }
   }
   // Référence physique : l'accélération centripète d'un virage au rayon nominal
-  // vaut v²/r = g·tan(30°) = 0,58 g. On tolère 2,5 fois cela — au-delà, c'est
-  // un à-coup, pas une manœuvre.
-  const plafond = 2.5 * ((p.v * p.v) / p.rayon)
+  // vaut v²/r = g·tan(30°) = 0,58 g.
+  //
+  // On tolère 4 fois cela, et le facteur n'est pas un arrondi de confort : la
+  // RESSOURCE D'URGENCE (voir stepPilote) est abrupte par construction — c'est
+  // son objet — et elle plafonne à 2 × montMax établi en 0,4 s, soit 1,5 fois
+  // l'accélération nominale, mesurée à 14,9 u/s² ici. Ce qu'on interdit, c'est
+  // le SAUT NON BORNÉ du plancher de dernier recours, qui montait à 1 702.
+  const plafond = 4 * ((p.v * p.v) / p.rayon)
   assert.ok(maxA < plafond,
     `acceleration maximale ${maxA.toFixed(2)} u/s² (plafond ${plafond.toFixed(2)}) au pas ${iPire}`)
 })
