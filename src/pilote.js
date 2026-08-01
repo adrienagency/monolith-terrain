@@ -339,7 +339,12 @@ export function pointsDevant({ x, z, cap, distance, courbure = 0, pas = 6 }) {
 // d'un bond. C'est exactement le même piège que l'échantillonnage du SEGMENT de
 // fleet.js, un cran plus fin. On échantillonne donc à la demi-garde : c'est la
 // plus petite chose qui puisse encore faire mal.
-export function altitudeSecuritaire({ sampleGround, x, z, cap, distance, garde, courbure = 0, pas = 0, evasement = 0.3, lateral = 0 }) {
+// `evasement` = 0,24 : compromis MESURÉ sur Chamonix. A 0,30, le ruban ratissait +-2,2
+// unites de flanc a 7 unites devant, et sur des pentes alpines a 40° l'altitude
+// de securite montait a 5 unites au-dessus du fond — 2,4 km a l'echelle du bloc,
+// ce qui n'est plus « au ras du sol ». A 0,18 on vole a ~2,5, et le plancher de
+// dernier recours ne s'engage pas davantage (verifie au banc).
+export function altitudeSecuritaire({ sampleGround, x, z, cap, distance, garde, courbure = 0, pas = 0, evasement = 0.24, lateral = 0 }) {
   const lat = lateral || garde
   const n = pas || clamp(Math.ceil(distance / Math.max(garde * 0.5, 1e-6)), 6, 40)
   const arc = pointsDevant({ x, z, cap, distance, courbure, pas: n })
@@ -423,7 +428,19 @@ class Tas {
 // de plus faible altitude — c'est la recette de findCorridor (camera-shots.js),
 // mais SANS arrêt anticipé : une seule passe donne TOUS les débouchés d'une même
 // entrée, ce qui fait 8 Dijkstra au lieu de 64 pour 8 entrées × 8 sorties.
-export function champDijkstra(g, from, { coutAltitude = 10, coutMontee = 6 } = {}) {
+// ⚠️ L'ALTITUDE SEULE NE SUFFIT PAS À TROUVER UNE VALLÉE, et Chamonix l'a prouvé
+// net. Avec le seul coût d'altitude (la recette de findCorridor, camera-shots.js),
+// LES DIX MEILLEURS COULOIRS DU BLOC longeaient l'arête : « intériorité » 0,04 à
+// 0,08 sur 1, encaissement moyen 1,66 au mieux. C'est logique une fois vu — le
+// point le plus bas d'un bloc alpin est souvent sur son pourtour, et un plus
+// court chemin qui ne paie que l'altitude s'y colle. Le plan cadrait le socle et
+// le cartouche, pas une vallée.
+//
+// On ajoute donc un ATTRACTEUR D'ENCAISSEMENT : une cellule creusée entre deux
+// flancs coûte MOINS cher, ce qui est la définition même de « suivre le fond de
+// vallée ». Le multiplicateur reste borné en positif (0,15 minimum), sans quoi
+// Dijkstra n'a plus de sens — il lui faut des coûts positifs.
+export function champDijkstra(g, from, { coutAltitude = 10, coutMontee = 6, enc = null, coutEncaissement = 7 } = {}) {
   const n = g.n
   const range = g.max - g.min || 1
   const a = worldToGrid(g, from.x, from.z)
@@ -451,7 +468,10 @@ export function champDijkstra(g, from, { coutAltitude = 10, coutMontee = 6 } = {
         const pas = Math.hypot(di, dj) * g.cell
         const hn = (g.h[nk] - g.min) / range
         const montee = Math.max(0, g.h[nk] - g.h[k]) / range
-        const c = dist[k] + pas * (1 + coutAltitude * hn) + coutMontee * montee * g.cell
+        // encaissement normalisé : 1 = creusé d'au moins 35 % de l'amplitude
+        const en = enc ? Math.min(1, enc[nk] / (range * 0.35)) : 0
+        const mult = Math.max(0.15, 1 + coutAltitude * hn - coutEncaissement * en)
+        const c = dist[k] + pas * mult + coutMontee * montee * g.cell
         if (c < dist[nk]) { dist[nk] = c; prev[nk] = k; pq.push({ k: nk, c }) }
       }
     }
@@ -718,7 +738,7 @@ export function planifierVol({
       entrees.push(...l.slice(0, 2))
     }
     for (const e of entrees) {
-      const champ = champDijkstra(g, e)
+      const champ = champDijkstra(g, e, { enc })
       for (const s of portes) {
         // « de son entrée à SA SORTIE sur le cube » : une sortie sur le même côté
         // que l'entrée n'est pas une traversée, c'est un aller-retour.
@@ -747,11 +767,23 @@ export function planifierVol({
     c.encaissement = sEnc / nP
     c.longueur = lg
     c.altMoyenne = sAlt / nP
-    // Trois termes, dans l'ordre de leur poids. L'encaissement domine : c'est
-    // lui qui dit « vallée » ; la longueur donne du plan ; l'altitude moyenne
-    // pénalise un couloir qui passe son temps en altitude (donc sans parois).
-    c.score = (c.encaissement / range) * 1.0
-      + (lg / (4 * half)) * 0.45
+    // distance moyenne au bord du bloc, en fraction du demi-bloc : un couloir qui
+    // longe l'arete n'est pas une vallee, c'est un tour du proprietaire.
+    let sBord = 0
+    for (const p2 of c.voie) sBord += Math.max(Math.abs(p2.x), Math.abs(p2.z)) / half
+    c.interiorite = 1 - sBord / nP
+
+    // ⚠️ LES POIDS ONT ETE MESURES, PAS DEVINES. Version initiale : encaissement
+    // normalise par l'AMPLITUDE TOTALE du relief. Sur Chamonix cette amplitude
+    // vaut ~30 unites, donc un couloir bien encaisse (6,1) ne pesait que 0,20 —
+    // moins que la penalite de hauteur de vol (0,40). Resultat mesuré : le
+    // classement retenait un couloir d'encaissement 0,18 qui longeait l'arete du
+    // bloc, et le plan cadrait le socle et le cartouche au lieu d'une vallee.
+    // On normalise donc par 35 % de l'amplitude — un couloir creuse d'un tiers du
+    // relief total EST une vallee — et on rend la penalite de hauteur secondaire.
+    c.score = clamp(c.encaissement / (range * 0.35), 0, 1.5) * 1.0
+      + (lg / (4 * half)) * 0.40
+      + c.interiorite * 0.45
       - ((c.altMoyenne - g.min) / range) * 0.35
   }
   candidats.sort((a, b) => b.score - a.score)
@@ -771,7 +803,12 @@ export function planifierVol({
     const voie = smoothXZ(resampleXZ(c.voie, half * 0.03), 2, 2)
     const v = verifierCouloir({ sampleGround, voie, profil })
     if (!v.ok) { refus.push({ score: c.score, raison: v.raison, largeurMin: v.largeurMin }); continue }
-    retenus.push({ c, voie, v, note: c.score - clamp(v.hauteurMax / (profil.garde * 10), 0, 1) * 0.4 })
+    // La note finale corrige le score par une grandeur qu'on ne connait qu'apres
+    // verification : la HAUTEUR DE VOL au-dessus du fond. Adrien demande « au ras
+    // du sol » ; a encaissement comparable, le couloir qui se vole bas est le bon
+    // plan. Le poids (0,30) reste inferieur a celui de l'encaissement (jusqu'a
+    // 1,5) : on ne troque pas une vallee contre une plaine pour gagner un metre.
+    retenus.push({ c, voie, v, note: c.score - clamp(v.hauteurMax / (profil.garde * 10), 0, 1) * 0.30 })
   }
   retenus.sort((a, b) => b.note - a.note)
   for (const { c, voie, v } of retenus.slice(0, 1)) {
@@ -781,6 +818,7 @@ export function planifierVol({
       grille: g,
       score: c.score,
       encaissementMoyen: c.encaissement,
+      interiorite: c.interiorite,
       longueur: c.longueur,
       largeurMin: v.largeurMin,
       // hauteurMax : à quelle hauteur au-dessus du fond il faut voler au plus
@@ -1010,8 +1048,28 @@ export function pointDeVisee(etat, ctx) {
   const omegaLisse = (profil.g * Math.tan(etat.roulis || 0)) / Math.max(etat.v, 1e-6)
   const avance = etat.avanceVisee ?? omegaLisse * profil.tVisee * 0.25
   const capVise = etat.cap + avance
-  const x = etat.x + Math.sin(capVise) * d
-  const z = etat.z + Math.cos(capVise) * d
+  // ⚠️ LE REGARD RESTE DANS LE BLOC. Mesuré sur Chamonix : au débouché du
+  // couloir, la visée sortait de l'emprise et le plan cadrait le vide et le
+  // cartouche — image 600 du jeu de preuve, entièrement blanche. C'est
+  // exactement le piège déjà payé par le survol de camera-shots.js (« mesuré :
+  // 100,0 pour un demi-bloc de 100 »). Le sujet d'un plan, c'est le bloc.
+  // La borne est à 0,97 et le vol se termine à 0,95 : la cible reste donc
+  // toujours DEVANT l'appareil, jamais ramenée derrière lui.
+  // On RACCOURCIT la visée au lieu de la tordre : borner x et z separement
+  // change la DIRECTION du regard des qu'un seul des deux mord, et le cadre
+  // part de travers (mesuré : 126 °/s de balayage, pour 29 °/s de lacet). On
+  // cherche donc la plus grande fraction du trajet qui reste dans le bloc.
+  const lim = profil.half * 0.97
+  const dx = Math.sin(capVise) * d
+  const dz = Math.cos(capVise) * d
+  let t = 1
+  if (dx > 1e-9) t = Math.min(t, (lim - etat.x) / dx)
+  else if (dx < -1e-9) t = Math.min(t, (-lim - etat.x) / dx)
+  if (dz > 1e-9) t = Math.min(t, (lim - etat.z) / dz)
+  else if (dz < -1e-9) t = Math.min(t, (-lim - etat.z) / dz)
+  t = clamp(t, 0.25, 1) // jamais moins d'un quart : la cible doit rester DEVANT
+  const x = etat.x + dx * t
+  const z = etat.z + dz * t
   // On regarde une TACHE de sol, pas un point : le relief réel est bruité, et
   // une lecture ponctuelle transmet ce bruit au cadrage. La moyenne sur un petit
   // disque est aussi ce que fait un œil — on ne fixe pas un caillou.
@@ -1022,13 +1080,23 @@ export function pointDeVisee(etat, ctx) {
     const s = sampleGround(x + ux, z + uz)
     if (Number.isFinite(s)) { somme += s; n++ }
   }
-  let y = (n ? somme / n : 0) + profil.garde * 0.6
+  // La cible est posee AU-DESSUS du sol vise, d'une fraction de la hauteur de vol
+  // courante — pas d'une constante. Un pilote a 300 pieds regarde a plat ; le
+  // meme pilote a 3 000 regarde plus bas, mais du meme angle. Sans ce couplage,
+  // la visee restait collee au sol et le cadre ne montrait plus que de la pente :
+  // sur Chamonix, 18° de piquage et pas un morceau d'horizon a l'image.
+  const hauteurVol = Math.max(0, etat.y - (Number.isFinite(sampleGround(etat.x, etat.z)) ? sampleGround(etat.x, etat.z) : 0))
+  let y = (n ? somme / n : 0) + profil.garde * 0.6 + hauteurVol * 0.55
   // Borne de PENTE : sans elle, un couloir qui monte fait pointer le nez au
   // zénith et la caméra ne cadre plus que du ciel (mesuré à 53° sur Chamonix
   // par la poursuite de camera-shots.js — même piège, même remède).
+  // Bornes de PENTE, dissymetriques. Vers le haut, 20° : au-dela on ne cadre plus
+  // que du ciel (piege deja mesure a 53° par la poursuite de camera-shots.js).
+  // Vers le bas, 17° seulement — un piquage plus fort chasse l'horizon hors du
+  // cadre, et un plan de survol sans horizon n'a plus d'echelle. C'est bien
+  // « le sol devant soi », pas « le sol sous soi ».
   const dh = Math.hypot(x - etat.x, z - etat.z)
-  const penteMax = 0.36 // ~20°
-  y = clamp(y, etat.y - dh * 1.2, etat.y + dh * penteMax)
+  y = clamp(y, etat.y - dh * 0.30, etat.y + dh * 0.36)
   return { x, y, z }
 }
 
@@ -1176,10 +1244,21 @@ export function stepPilote(etat, dt, plan, ctx) {
       e.sortant = false // se retourner annule la sortie : on repart en sens inverse
     }
   }
-  // On SORT par le débouché : le plan se termine quand la caméra atteint le bord
-  // du bloc, pas avant — le couloir se vole jusqu'au bout.
-  if (e.sortant && (s >= total - profil.dPoursuite * 0.3
-    || Math.max(Math.abs(e.x), Math.abs(e.z)) > profil.half * 0.95)) {
+  // ⚠️ LE BORD DU BLOC TERMINE LE VOL, TOUJOURS — pas seulement quand on sortait
+  // volontairement. Mesuré : 26 pas hors du bloc sur 569 212 apres un simple
+  // changement de classement des couloirs, parce qu'un virage large pres de
+  // l'arete depassait sans que rien ne le declenche. Hors du bloc il n'y a plus
+  // de relief a echantillonner : plus de garde au sol, et plus rien a filmer.
+  // Le couloir se vole jusqu'au bout, et le bout, c'est le bord.
+  // (Le vol PART du bord — c'est la porte d'entree du couloir — donc la regle ne
+  // s'arme qu'une fois l'appareil vraiment rentre dans le bloc.)
+  const distBord = Math.max(Math.abs(e.x), Math.abs(e.z))
+  if (distBord < profil.half * 0.9) e.entre = true
+  if (e.entre && distBord > profil.half * 0.97) {
+    e.phase = 'fini'
+    return e
+  }
+  if (e.sortant && s >= total - profil.dPoursuite * 0.3) {
     e.phase = 'fini'
     return e
   }

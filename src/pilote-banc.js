@@ -142,6 +142,81 @@ export async function bancZone(nom, { sampleGround, half, charger = null, angles
   return r
 }
 
+// ============================================================ les captures
+//
+// « Le juge est l'œil, pas le test. » Un vol peut être irréprochable en chiffres
+// et laid à l'image — c'est arrivé deux fois pendant ce chantier (la caméra
+// volait à 5 unités du fond en ne cadrant que de la pente ; puis elle suivait un
+// couloir de bord de bloc qui cadrait le socle). On tire donc des images.
+//
+// ⚠️ POURQUOI CE N'EST PAS UN SIMPLE `screenshot`. Onglet caché, la boucle rAF
+// de l'app est gelée : rien ne se compose, la capture expire. On avance donc le
+// temps À LA MAIN — on pose la caméra, on appelle `composer.render`, on lit le
+// canvas — et on POSTE le PNG binaire vers un petit serveur local. Le relais du
+// base64 par le chat corrompt les images ; c'est une leçon des tournages
+// précédents (skill shibumap-shots), pas une préférence.
+
+// Rotation de Rodrigues — c'est ce qui incline `up` autour de l'axe de visée et
+// fait basculer l'horizon dans le cadre. Écrit à la main pour que ce fichier
+// n'importe pas three.js.
+export function rotAutour(v, k, a) {
+  const c = Math.cos(a)
+  const s = Math.sin(a)
+  const dot = k.x * v.x + k.y * v.y + k.z * v.z
+  return {
+    x: v.x * c + (k.y * v.z - k.z * v.y) * s + k.x * dot * (1 - c),
+    y: v.y * c + (k.z * v.x - k.x * v.z) * s + k.y * dot * (1 - c),
+    z: v.z * c + (k.x * v.y - k.y * v.x) * s + k.z * dot * (1 - c),
+  }
+}
+
+// Déroule un vol dans l'app et tire une image aux numéros demandés.
+// `poste(nom, blob)` reçoit chaque PNG ; par défaut on POSTe sur localhost:5388.
+export async function apercuVol({ profil = 'avion', prefixe = 'vol', images = [40, 240, 480, 720, 960, 1200], poste = null } = {}) {
+  const e = globalThis.window?.__exp
+  if (!e) throw new Error('window.__exp indisponible')
+  const envoi = poste || (async (nom, blob) => { await fetch('http://localhost:5388/' + nom, { method: 'POST', body: blob }) })
+  const sg = (x, z) => e.terrain.sample?.(x, z) ?? 0
+  const plan = planifierVol({ sampleGround: sg, half: 28, profil })
+  if (!plan) return { plan: null, raison: 'aucun couloir engageable sur ce bloc' }
+  plan.sampleGround = sg
+  let etat = creerVol(plan)
+  const voulues = new Set(images)
+  const max = Math.max(...images)
+  const out = []
+  for (let i = 1; i <= max; i++) {
+    etat = stepPilote(etat, 1 / 60, plan, { sampleGround: sg })
+    if (etat.phase === 'fini') break
+    if (!voulues.has(i)) continue
+    const po = poseDe(etat, plan, { sampleGround: sg })
+    const d = { x: po.target.x - po.pos.x, y: po.target.y - po.pos.y, z: po.target.z - po.pos.z }
+    const l = Math.hypot(d.x, d.y, d.z) || 1
+    const axe = { x: d.x / l, y: d.y / l, z: d.z / l }
+    const up = rotAutour({ x: 0, y: 1, z: 0 }, axe, -po.roulis)
+    e.camera.position.set(po.pos.x, po.pos.y, po.pos.z)
+    e.camera.up.set(up.x, up.y, up.z)
+    e.camera.lookAt(po.target.x, po.target.y, po.target.z)
+    e.controls.target.set(po.target.x, po.target.y, po.target.z)
+    e.clouds?.update?.(1 / 60, e.params, e.camera)
+    e.camera.updateMatrixWorld()
+    e.composer.render(0.016)
+    const blob = await new Promise((r) => e.renderer.domElement.toBlob(r, 'image/png'))
+    const nom = `${prefixe}-${String(i).padStart(4, '0')}.png`
+    await envoi(nom, blob)
+    out.push(`${nom} roulis=${((po.roulis * 180) / Math.PI).toFixed(1)}° garde=${(po.pos.y - sg(po.pos.x, po.pos.z)).toFixed(2)} tangage=${((Math.atan2(d.y, Math.hypot(d.x, d.z)) * 180) / Math.PI).toFixed(1)}°`)
+  }
+  return {
+    plan: {
+      encaissement: +plan.encaissementMoyen.toFixed(2),
+      interiorite: +(plan.interiorite ?? 0).toFixed(2),
+      largeurMin: +plan.largeurMin.toFixed(2),
+      hauteurMax: +plan.hauteurMax.toFixed(2),
+      debouche: plan.debouche,
+    },
+    images: out,
+  }
+}
+
 // Raccourci console : `bancShibu('Chamonix', 45.92, 6.87)` charge la zone dans
 // l'app puis mesure. Il lit `window.__exp`, donc il ne sert QUE dans l'app.
 export async function bancShibu(nom, lat, lon, zoom = 12, opts = {}) {
