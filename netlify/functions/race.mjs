@@ -132,6 +132,26 @@ function jsonResponse(obj, status) {
   })
 }
 
+// Préalable CORS. UNE 204 NE PORTE PAS DE CORPS : lui en donner un fait lever
+// le constructeur Response, et c'est très exactement ce que la production
+// rendait — 502 « Invalid response status code 204 » sur chaque OPTIONS.
+// Personne ne l'avait vu parce que l'app appelle cet endpoint sur sa propre
+// origine, et qu'une requête de même origine ne déclenche jamais de préalable.
+// Le PUT ajoute un en-tête sur mesure, qui doit être annoncé ici sans quoi un
+// appel depuis une autre origine serait refusé par le navigateur.
+function preflightResponse() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'GET, POST, PUT, OPTIONS',
+      'access-control-allow-headers': 'content-type, x-shibumap-secret',
+      'access-control-max-age': '86400',
+      'x-content-type-options': 'nosniff',
+    },
+  })
+}
+
 // Minimal, dependency-free GPX sanity check — a bounded regex scan, not a
 // real XML parser (see the file header: no DOMParser here). Goal is only to
 // reject "not GPX at all", not to validate schema. `text` is already
@@ -279,7 +299,7 @@ const SECRET_HEADER = 'x-shibumap-secret'
 // fournit juste en dessous, les tests un équivalent en mémoire. C'est ce qui
 // rend le chemin d'écriture entier (jeton compris) vérifiable sans réseau.
 export async function handleRace(req, store) {
-  if (req.method === 'OPTIONS') return jsonResponse({ ok: true }, 204)
+  if (req.method === 'OPTIONS') return preflightResponse()
 
   const url = new URL(req.url)
 

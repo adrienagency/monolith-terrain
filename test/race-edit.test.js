@@ -298,6 +298,24 @@ test('PUT is rate limited per IP, exactly like POST', async () => {
 
 // ---- les autres méthodes ---------------------------------------------------
 
+// Relevé sur la production : OPTIONS rendait 502 « Invalid response status
+// code 204 ». Une 204 veut dire PAS DE CORPS, et le constructeur Response
+// lève quand on lui en donne un — le préalable CORS tombait donc en panne
+// sèche. Personne ne l'avait vu parce que l'app appelle l'endpoint sur sa
+// propre origine, et qu'une requête de même origine ne fait jamais de
+// préalable. Aucun test n'appelait OPTIONS ; celui-ci le fait.
+test('OPTIONS answers the CORS preflight instead of throwing', async () => {
+  const store = fakeStore()
+  const res = await handleRace(req('OPTIONS'), store)
+  assert.equal(res.status, 204)
+  assert.equal(await res.text(), '', 'une 204 ne porte pas de corps')
+  assert.equal(res.headers.get('access-control-allow-origin'), '*')
+  // le PUT voyage avec un en-tête sur mesure : sans lui dans la liste, un
+  // appel depuis une autre origine serait refusé par le navigateur
+  assert.match(res.headers.get('access-control-allow-headers') || '', /x-shibumap-secret/i)
+  assert.match(res.headers.get('access-control-allow-methods') || '', /PUT/)
+})
+
 test('an unsupported method is still refused', async () => {
   const store = fakeStore()
   const res = await handleRace(req('DELETE', { id: 'abcdefghij' }), store)
