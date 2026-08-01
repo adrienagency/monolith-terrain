@@ -16,18 +16,61 @@
 
 import * as THREE from 'three'
 import { tilesForBBox } from './tile-index.js'
-import { worldToLatLon } from '../geo.js'
-import { TERRAIN_SIZE } from '../terrain.js'
+import { worldToLatLon, demSpan } from '../geo.js'
 
-// The block's EXACT lon/lat footprint, from its own two corners.
+// The loaded FIELD's exact lon/lat footprint, from its own two corners.
 //
 // This is NOT patchBounds(): that one pads by 5% + 0.01deg on purpose, to widen
 // the net when SEARCHING for features near the patch. Using it to describe the
 // block itself measured 12% oversize and a ~5 km north-west shift of the
 // imagery — a lake climbing a hillside. A photo has to be registered to the
 // ground it's painted on, so it gets the true extent, nothing padded.
-export function blockBounds(dem) {
-  const HALF = TERRAIN_SIZE / 2
+//
+// ══════════ POURQUOI `demSpan` ET PAS `TERRAIN_SIZE` — LA PHOTO SUR 1/9 ══════
+//
+// Adrien, en mode continu : « la map aérienne qu'on active ne se charge que sur
+// 1 carreau sur 9 ». La cause tenait dans la ligne ci-dessous, qui posait
+// `HALF = TERRAIN_SIZE / 2` (28 unités) alors que `worldToLatLon` divise par
+// `demSpan(dem)` — 168 sur une emprise 3×3. La bbox décrivait donc le TIERS
+// central de la largeur, donc un NEUVIÈME de la surface visible. C'est
+// exactement l'erreur qui s'est déjà glissée trois fois sur cette branche : une
+// longueur qui oublie que l'emprise triple le bloc.
+//
+// ⚠️ ET COUVRIR LES NEUF DALLES COÛTE MOINS CHER QU'AUJOURD'HUI, PAS NEUF FOIS
+// PLUS. MESURÉ, budget de texture 4096, sur les trois zones de référence (mont
+// St Helens z13, Chamonix z12, La Réunion z13 — toutes trois donnent le même
+// tableau, à la tuile près) :
+//
+//   | ce qu'on demande            | imagerie | tuiles | canevas | mémoire  |
+//   | un bloc, aujourd'hui        |   z15    |   144  | 3072²   |  36,0 Mo |
+//   | neuf blocs au même cran     |   z15    |  1296  | 9×3072² | 324,0 Mo |
+//   | L'EMPRISE, au MÊME budget   |   z13    |    81  | 2304²   |  20,3 Mo |
+//
+// La raison est que `aerialZoomFor` borne le CANEVAS, pas le nombre de tuiles :
+// une bbox trois fois plus large au même budget descend simplement de deux
+// crans d'imagerie, et une tuile d'un cran plus grossier couvre quatre fois la
+// surface. Le « chargement grossier qui couvre les neuf dalles tout de suite »
+// qu'Adrien a tranché ne se paie donc pas — il s'obtient en cessant de mentir
+// sur l'emprise. 0,56× les tuiles d'UN bloc, et 15,7 Mo de MOINS que ce qui
+// tourne aujourd'hui. Le badge « bêta » n'a pas à monter : ce poste DESCEND.
+//
+// ⚠️ LE CHIFFRE « 1 296 tuiles / 135 s / 604 Mo » DU DOSSIER EST À CORRIGER. Il
+// était présenté comme mesuré ; il était DÉRIVÉ (9 × le coût d'un bloc), et son
+// poste mémoire était faux même en tant que dérivé : 1 296 tuiles de 256² en
+// RGBA font 324 Mo, pas 604. Rien de tout cela n'a jamais été chronométré.
+//
+// ⚠️ CE QUE CE CHANGEMENT NE FAIT PAS : l'AFFINAGE. Le cran suivant sur
+// l'emprise (z14 ici) demande 324 tuiles et un canevas 4608² — au-dessus du
+// budget 4096, et très au-dessus des 2048 que WebGL2 garantit. Une seule
+// texture ne peut donc pas porter l'emprise en fin. L'affinage par priorité
+// depuis le centre demande une SECONDE texture couvrant la dalle regardée, en
+// surimpression du grossier : c'est le jalon suivant, mesuré à +36 Mo (le coût
+// exact de ce qui tourne aujourd'hui).
+//
+// Hors mode continu, `demSpan` rend 56 au bit près : le mode ordinaire est
+// rigoureusement inchangé, et le test le verrouille.
+export function demBounds(dem) {
+  const HALF = demSpan(dem) / 2
   const nw = worldToLatLon(dem, -HALF, -HALF)
   const se = worldToLatLon(dem, HALF, HALF)
   return {
@@ -373,7 +416,7 @@ export class AerialLayer {
     this._buildId = 0
   }
 
-  // `bbox` is the TRUE block extent — see blockBounds(). Do NOT pass
+  // `bbox` is the TRUE extent of the loaded field — see demBounds(). Do NOT pass
   // patchBounds(): it pads by 5% + 0.01deg to widen a data SEARCH, which
   // measured 12% oversize and ~5 km of NW shift when used as the block's own
   // footprint. Returns { texture, uv, attribution, tiles, zoom } or null when

@@ -60,7 +60,7 @@ import { vitesseAuLache, pasElan } from './fenetre-elan.js'
 import { forceUrl, continuActif, etatInterrupteur } from './fenetre-reglage.js'
 import { pasFinesse, finesseInitiale, resDeFinesse, resFinesses, REPOS_S } from './fenetre-finesse.js'
 import { MapLayers } from './map/layer-manager.js'
-import { AerialLayer, blockBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
+import { AerialLayer, demBounds, aerialUnavailable, SUPERSEDED, providerFor as providerForAerial } from './map/aerial-layer.js'
 import { lightingFor, darkModeFor, applyGains, fillDirection, fillLightIntensity, fillEnabledInLook, sunOn, sunShadowOn } from './daycycle.js'
 import { signatureCarteOmbre } from './carte-ombre.js'
 import { SunDisc } from './sun-disc.js'
@@ -4637,7 +4637,9 @@ async function refreshAerialCore() {
     refreshOsmCredit()
     return
   }
-  const bounds = blockBounds(dem) // the TRUE block extent, never patchBounds — see blockBounds()
+  // L'emprise VRAIE du champ chargé — un bloc, ou les neuf dalles du mode
+  // continu. Jamais `patchBounds` : voir `demBounds`.
+  const bounds = demBounds(dem)
 
   // Can't deliver here? Say so in the middle of the screen and switch the layer
   // back off. Leaving the toggle on while nothing renders is the worst of both:
@@ -4714,7 +4716,7 @@ async function paintCellAerial(cell) {
   if (!cell?.terrain || !cell.dem) return
   const on = params.aerialEnabled && params.source === 'real'
   if (!on) { cell.terrain.setAerial(null); return }
-  const bounds = blockBounds(cell.dem)
+  const bounds = demBounds(cell.dem)
   if (aerialUnavailable(bounds)) { cell.terrain.setAerial(null); return }
   const prov = providerForAerial(bounds)
   if (prov?.global && params.demZoom > 8) { cell.terrain.setAerial(null); return }
@@ -5296,9 +5298,11 @@ async function openExportUI() {
     // là où elles ont creusé, et nulle part ailleurs. Voir export.js.
     creditLine: () => {
       try {
-        // blockBounds, jamais patchBounds : c'est l'emprise VRAIE du bloc
-        // exporté (voir son commentaire dans map/aerial-layer.js).
-        return creditFor(bathySourceIndex(), blockBounds(terrain.dem), creditsForBounds)
+        // demBounds, jamais patchBounds : c'est l'emprise VRAIE du champ
+        // exporté (voir son commentaire dans map/aerial-layer.js). En mode
+        // continu elle couvre les neuf dalles — c'est ce qui est chargé, donc
+        // ce qui doit être crédité : jamais moins de sources que de données.
+        return creditFor(bathySourceIndex(), demBounds(terrain.dem), creditsForBounds)
       } catch {
         return null // jamais bloquer un export sur un crédit : export.js a sa ligne de repli
       }

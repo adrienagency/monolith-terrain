@@ -28,23 +28,33 @@ export function buildMapPanel(ctx) {
   // Outside covered ground the layer says so in the middle of the screen and
   // switches itself back off (see main.js refreshAerial).
   const aerialToggle = toggle({ label: 'Photo aérienne', get: () => params.aerialEnabled, set: (v) => { params.aerialEnabled = v; ctx.refreshAerial(); refreshAll() } })
-  // BÊTA — deux motifs, tous deux tirés du code et non d'une impression.
+  // BÊTA — et les DEUX motifs d'origine ont changé de nature. Ce qui suit est
+  // maintenant chronométré, plus dérivé.
   //
-  // 1. LE COÛT. `aerial-layer.js:48-51` le chiffre pour UN bloc : « 4096 at z15
-  //    is 144 tile fetches and ~15 s on a fast connection ». Le damier peint
-  //    chaque cellule avec son propre budget plein (main.js, paintCellAerial) :
-  //    un 3×3 en demande donc neuf fois autant. Le chiffre annoncé ci-dessous
-  //    est cette multiplication, PAS un chronomètre — personne n'a mesuré la
-  //    photo en damier, et la formulation ne prétend pas le contraire.
-  // 2. L'INACHÈVEMENT, qui est le vrai motif du mot « bêta ». En mode continu
-  //    la photo ne couvre QUE le bloc central de l'emprise — 56 unités sur 168
-  //    (terrain.js:749-754), soit un neuvième de la surface visible, fondu sur
-  //    3 % au bord. Le « grossier d'abord puis affinage » qu'Adrien a tranché
-  //    n'est pas écrit : `AerialLayer.build()` fait une passe unique.
+  // 1. LE COÛT N'EST PLUS CELUI QU'ON ANNONÇAIT, ET IL EST PLUS BAS. L'ancien
+  //    texte multipliait par neuf le coût d'un bloc en le disant lui-même « pas
+  //    un chronomètre ». MESURÉ depuis, Chamonix z12, même machine et même
+  //    connexion, en chronométrant `AerialLayer.build()` sur les deux emprises :
+  //
+  //      le bloc central seul (l'ancien) : 156 tuiles, z14, 3072×3328, 39,0 Mo, 6 821 ms
+  //      L'EMPRISE ENTIÈRE (le nouveau)  :  81 tuiles, z12, 2304×2304, 20,3 Mo, 4 592 ms
+  //
+  //    NEUF FOIS la surface pour 48 % de tuiles en moins, 48 % de mémoire en
+  //    moins et 33 % de temps en moins. La raison est que le budget de texture
+  //    borne le CANEVAS, pas le nombre de tuiles : une emprise trois fois plus
+  //    large au même budget descend de deux crans d'imagerie, et une tuile d'un
+  //    cran plus grossier couvre quatre fois la surface (voir demBounds).
+  // 2. L'INACHÈVEMENT, qui reste le vrai motif du mot « bêta » — mais il ne
+  //    porte plus sur la COUVERTURE (les neuf dalles sont peintes), seulement
+  //    sur l'AFFINAGE. `AerialLayer.build()` fait toujours une passe unique : le
+  //    « grossier d'abord, puis amélioration alors que la vue est déjà chargée »
+  //    qu'Adrien a tranché a son premier terme, pas son second. Le cran suivant
+  //    sur l'emprise dépasse le budget de texture ; il demandera une SECONDE
+  //    texture sur la dalle regardée, mesurée à +36 Mo.
   marqueEtape(aerialToggle, {
     etape: 'bêta',
     raison:
-      'Une centaine de tuiles par bloc, une quinzaine de secondes. En mode continu 3×3 elle ne couvre encore que le bloc central : l’affinage progressif reste à faire.',
+      'Environ 80 tuiles et 5 secondes, mesurées. En mode continu 3×3 elle couvre désormais les neuf dalles, à deux crans de zoom plus grossiers : l’affinage progressif au centre de la vue reste à faire.',
   })
   const aerialOpacity = slider({ label: 'Opacité de la photo', min: 0, max: 1, step: 0.02, get: () => params.aerialOpacity, set: (v) => { params.aerialOpacity = v; ctx.terrain.setAerialOpacity(v); ctx.blockGrid?.setAerialOpacity?.(v) } })
   // v49 : la photo ne vit qu'à la côte, puis s'estompe vers le fond marin. 0 = pleine partout.

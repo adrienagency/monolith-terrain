@@ -741,27 +741,37 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     // ⚠️ champXZ(), PAS vWorldPos.xz — signalé par Adrien : « la
     // cartographie aérienne ne suit pas le terrain ». La photo est REGISTRÉE
     // AU SOL (elle est composée sur les deux coins exacts du bloc, voir
-    // aerial-layer.js:blockBounds) : indexée sur la géométrie, elle restait
+    // aerial-layer.js:demBounds) : indexée sur la géométrie, elle restait
     // collée à l'écran et montrait les rues d'une vallée sur les crêtes de la
     // voisine — le défaut « Vienne sur le mont Fuji » que refreshAerialCore
     // évite déjà d'un bloc à l'autre, ici à l'intérieur d'un seul.
-    vec2 aUv = (champXZ() - uBlockOffset) / (uSlabHalf * 2.0) + 0.5;
-    // ⚠️ ET LA PHOTO S'ARRÊTE OÙ ELLE S'ARRÊTE. Elle ne couvre QUE le bloc
-    // central de l'emprise (56 unités sur 168) : au-delà, texture2D étirerait
-    // le texel de bord en longues traînées — une image qui ment. On la fond
-    // donc sur une bande étroite au bord de la dalle photographiée et on laisse
-    // reparaître la carte peinte, qui, elle, couvre toute l'emprise.
-    // La bande vaut 3 % du bloc (~1,7 unité) : assez pour qu'aucune couture ne
-    // se voie, assez peu pour ne pas manger la photo.
+    // ⚠️ uMaskSpan ET PAS uSlabHalf * 2.0 — C'EST LA PHOTO SUR 1 CARREAU
+    // SUR 9. La mosaïque est composée sur l'emprise ENTIÈRE (aerial-layer.js,
+    // demBounds), qui fait 168 unités en mode continu. Diviser par 56 la
+    // rétrécissait au tiers de sa largeur, donc au NEUVIÈME de sa surface, et
+    // ce neuvième restait collé au socle central : c'est le défaut qu'Adrien a
+    // signalé. Les deux longueurs DOIVENT bouger ensemble, sinon la photo se
+    // retrouve étirée ×3 ou comprimée ×3 sans que rien ne paraisse cassé.
+    // uMaskSpan vaut 56 sur un bloc et 168 sur une emprise : hors mode
+    // continu l'expression est celle d'avant, au bit près.
+    vec2 aUv = (champXZ() - uBlockOffset) / uMaskSpan + 0.5;
+    // ⚠️ IL RESTE UN BORD, MAIS C'EST CELUI DE L'EMPRISE. La photo couvre
+    // maintenant tout ce qu'on peut atteindre : à course pleine (±56) le bord
+    // du socle (±28) touche EXACTEMENT le bord de l'emprise (±84). Seul le
+    // débordement élastique (7 unités de plus, 0,3 s) peut mordre au-delà, là
+    // où texture2D étirerait le texel de bord en traînées. On garde donc le
+    // fondu, mais posé sur le bon bord et à largeur constante en UNITÉS MONDE
+    // (~1,7, comme avant) : le rapporter à l'emprise le rendrait trois fois
+    // plus large et mangerait de la vraie photo.
     //
     // ⚠️ ET SEULEMENT EN MODE CONTINU. Hors emprise, tout fragment du socle est
-    // par construction dans [0,1] : le fondu mangerait 3 % de la photo sur les
-    // quatre bords de CHAQUE bloc, c'est-à-dire une régression bien visible sur
-    // l'image d'aujourd'hui. uMaskSpan vaut 56 sur un bloc et 168 sur une
-    // emprise — c'est le seul témoin déjà transmis au shader qui distingue les
-    // deux, et il ne coûte rien.
+    // par construction dans [0,1] : le fondu mangerait la photo sur les quatre
+    // bords de CHAQUE bloc, c'est-à-dire une régression bien visible sur
+    // l'image d'aujourd'hui. uMaskSpan est le seul témoin déjà transmis au
+    // shader qui distingue les deux, et il ne coûte rien.
     float aCont = step(uSlabHalf * 2.0 + 1.0, uMaskSpan);
-    vec2 aEdge = smoothstep(vec2(0.0), vec2(0.03), aUv) * (1.0 - smoothstep(vec2(0.97), vec2(1.0), aUv));
+    float aBande = 1.7 / uMaskSpan;
+    vec2 aEdge = smoothstep(vec2(0.0), vec2(aBande), aUv) * (1.0 - smoothstep(vec2(1.0 - aBande), vec2(1.0), aUv));
     float aIn = mix(1.0, aEdge.x * aEdge.y, aCont);
     aUv.y = 1.0 - aUv.y; // texture rows run north->south, world +Z runs south->north
     aUv = uAerialOffset + aUv * uAerialScale; // place the mosaic (see aerialUvTransform)

@@ -237,3 +237,92 @@ test('providerFor: national envelopes still exclude their neighbours', () => {
     assert.equal(providerFor(at(lon, lat))?.id, 'nasa', name)
   }
 })
+
+// ══════════ LA PHOTO COUVRE CE QU'ON PEUT VOIR, PAS UN NEUVIÈME ═════════════
+//
+// Adrien, en mode continu 3×3 : « la map aérienne qu'on active ne se charge que
+// sur 1 carreau sur 9 ».
+//
+// LA CAUSE tenait en un caractère : `blockBounds` (devenu `demBounds`) posait
+// `HALF = TERRAIN_SIZE / 2`, soit 28 unités, alors que `worldToLatLon` divise
+// par `demSpan(dem)` — 168 sur une emprise. La photo décrivait donc le TIERS
+// central de la largeur, un NEUVIÈME de la surface. C'est exactement l'erreur
+// qui s'est déjà glissée trois fois sur cette branche : une longueur qui oublie
+// que l'emprise triple le bloc.
+//
+// ⚠️ ET CE N'EST PAS PLUS CHER, C'EST MOINS CHER. Le budget de texture est une
+// BORNE en pixels (`aerialZoomFor`), pas un nombre de tuiles : demander une
+// bbox trois fois plus large au même budget fait simplement descendre de deux
+// crans d'imagerie. MESURÉ sur les trois zones de référence (mont St Helens
+// z13, Chamonix z12, La Réunion z13), budget 4096 :
+//
+//   un bloc aujourd'hui        z15  144 tuiles  canevas 3072²  36,0 Mo
+//   neuf blocs au même cran    z15 1296 tuiles  9 × 3072²     324,0 Mo  (dérivé)
+//   L'EMPRISE, même budget     z13   81 tuiles  canevas 2304²  20,3 Mo
+//
+// 0,56× les tuiles d'UN bloc, et 15,7 Mo de MOINS qu'aujourd'hui. Le « niveau
+// grossier qui couvre les neuf dalles tout de suite » qu'Adrien a tranché ne se
+// paie pas : il s'obtient en cessant de mentir sur l'emprise.
+//
+// (Le chiffre « 604 Mo » du dossier était faux dans les deux sens : dérivé, et
+// calculé sur un mauvais octet par texel. 1 296 tuiles font 324 Mo en RGBA.)
+
+import { demBounds } from '../src/map/aerial-layer.js'
+import { demSpan } from '../src/geo.js'
+
+// Un MNT de la forme que rend loadDem (cote 1) ou recollerEmprise (cote 3).
+function demFictif(lat, lon, zoom, cote = 1, tilePx = 512) {
+  const n = 2 ** zoom
+  const r = (lat * Math.PI) / 180
+  const cx = Math.floor(((lon + 180) / 360) * n)
+  const cy = Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n)
+  const debord = cote > 1 ? 3 : 0
+  return {
+    size: 3 * tilePx * cote, tilePx, zoom,
+    originTileX: cx - 1 - debord, originTileY: cy - 1 - debord,
+    ...(cote > 1 ? { empriseCote: cote } : {}),
+  }
+}
+
+test('demBounds : sur une emprise 3×3, la photo couvre les NEUF dalles', () => {
+  for (const [lat, lon, z] of [[46.2, -122.19, 13], [45.92, 6.87, 12], [-21.13, 55.53, 13]]) {
+    const bloc = demFictif(lat, lon, z, 1)
+    const emprise = demFictif(lat, lon, z, 3)
+    const bb = demBounds(bloc), be = demBounds(emprise)
+    // La longitude est LINÉAIRE en mercator : le rapport se lit en degrés.
+    const largeurBloc = bb.maxLon - bb.minLon
+    const largeurEmprise = be.maxLon - be.minLon
+    assert.ok(Math.abs(largeurEmprise / largeurBloc - 3) < 1e-9, `largeur ×${largeurEmprise / largeurBloc}`)
+    // ⚠️ LA LATITUDE, ELLE, NE SE COMPARE QU'EN MERCATOR. En degrés le rapport
+    // n'est pas 3 (la projection s'étire vers les pôles) et un test naïf
+    // échouerait à Chamonix tout en passant à l'équateur — le pire des tests.
+    const hb = lonLatToMerc(0, bb.minLat).y - lonLatToMerc(0, bb.maxLat).y
+    const he = lonLatToMerc(0, be.minLat).y - lonLatToMerc(0, be.maxLat).y
+    assert.ok(Math.abs(he / hb - 3) < 1e-9, `hauteur mercator ×${he / hb}`)
+    // et l'emprise est CENTRÉE sur le bloc, pas décalée
+    assert.ok(Math.abs((be.minLon + be.maxLon) / 2 - (bb.minLon + bb.maxLon) / 2) < 1e-9)
+  }
+})
+
+test('demBounds : hors mode continu, l’emprise est celle d’aujourd’hui au bit près', () => {
+  // Le mode ordinaire ne doit RIEN changer : demSpan rend 56 sans empriseCote.
+  const bloc = demFictif(45.92, 6.87, 12, 1)
+  assert.equal(demSpan(bloc), 56)
+  const b = demBounds(bloc)
+  // trois tuiles de MNT de large, exactement — la définition d'un bloc
+  const n = 2 ** 12
+  assert.ok(Math.abs((b.maxLon - b.minLon) - (3 / n) * 360) < 1e-9)
+})
+
+test('le niveau grossier de l’emprise coûte MOINS qu’un bloc d’aujourd’hui', () => {
+  // Le témoin chiffré de l'en-tête. S'il tombe, c'est que le budget de texture
+  // a bougé et qu'il faut refaire la mesure avant de croire au reste.
+  const bloc = demBounds(demFictif(45.92, 6.87, 12, 1))
+  const emprise = demBounds(demFictif(45.92, 6.87, 12, 3))
+  const zb = aerialZoomFor(bloc, { budgetPx: 4096 })
+  const ze = aerialZoomFor(emprise, { budgetPx: 4096 })
+  assert.ok(ze < zb, `l’emprise doit descendre d’au moins un cran (${ze} contre ${zb})`)
+  const nb = tilesForBBox(bloc, zb).length
+  const ne = tilesForBBox(emprise, ze).length
+  assert.ok(ne < nb, `${ne} tuiles pour l’emprise contre ${nb} pour un bloc — ce doit être MOINS`)
+})
