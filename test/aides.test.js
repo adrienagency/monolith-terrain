@@ -208,3 +208,13 @@ test('catalogue : l’aide du mode continu existe et dit le geste', () => {
   assert.match(a.texte, /clic droit/i, 'le geste doit être nommé — c’est tout l’objet de la bulle')
   assert.equal(a.action, 'J’ai compris')
 })
+
+test('catalogue : l’aide du mode continu dit AUSSI où est passé le déplacement de caméra', () => {
+  // Adrien a essayé le mode et signalé la perte dans la minute : « l'ancien
+  // déplacement par clic droit n'existe plus ». Annoncer le geste GAGNÉ en
+  // taisant le geste DÉPLACÉ est une demi-vérité — elle laisse croire à une
+  // fonction perdue. Ce test empêche que la note disparaisse à la relecture.
+  const a = AIDES.find((x) => x.id === 'fenetre-3x3')
+  assert.match(a.note ?? '', /milieu/i, 'la note doit nommer le bouton du milieu')
+  assert.match(a.note ?? '', /maj/i, 'et le repli clavier, pour les machines sans bouton du milieu')
+})

@@ -53,13 +53,20 @@ export const AIDES = [
   //
   // Et le rappel élastique est mentionné pour une raison précise : sans lui
   // annoncé, le retour en butée se lit comme un bogue, pas comme une borne.
+  //
+  // ⚠️ LA NOTE DIT CE QUI A ÉTÉ DÉPLACÉ, ET ELLE N'EST PAS FACULTATIVE. Adrien
+  // a essayé le mode et signalé la perte immédiatement : « l'ancien
+  // déplacement par clic droit n'existe plus, je ne peux plus me déplacer de
+  // cette façon. » Une aide de première activation qui annonce le geste GAGNÉ
+  // en taisant le geste DÉPLACÉ est une demi-vérité : elle laisse croire à une
+  // fonction perdue. Un test refuse que la note cesse de nommer le repli.
   {
     id: 'fenetre-3x3',
     cible: () => document.getElementById('app'),
     pose: 'terrain-bas',
     titre: 'Glisser le terrain',
     texte: 'Maintiens le clic droit et déplace : le terrain suit. Tu peux t’écarter d’un bloc dans chaque direction, au-delà il résiste et revient.',
-    note: 'Sur un pavé tactile, le clic droit se fait à deux doigts.',
+    note: 'Le déplacement de caméra passe au bouton du milieu, ou à Maj + clic gauche.',
     action: 'J’ai compris',
   },
 ]

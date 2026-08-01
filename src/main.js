@@ -119,6 +119,7 @@ import { buildHourPill } from './ui/hour-pill.js'
 import { buildZoomStepper } from './ui/zoom-stepper.js'
 import { initTips } from './ui/tips.js'
 import { initAides, evalue as evalueAide, aideSection } from './ui/aides.js'
+import { boutonsSouris, versTroisJs } from './boutons-camera.js'
 import { initLoadingHints } from './ui/loading-hints.js'
 import { createAdaptiveQuality } from './perf.js'
 import { detailForZoom } from './zoom-detail.js'
@@ -1924,16 +1925,17 @@ function f3Applique(prefere) {
   _f3Etat = continuActif(f3Args())
   if (_f3Etat === avant) return false
   if (_f3Etat) renderer.localClippingEnabled = true
-  // ⚠️ RENDRE LE CLIC DROIT À ORBITCONTROLS — VU À L'EXÉCUTION, PAS DÉDUIT.
-  // `f3Tick` éteint `enablePan` À CHAQUE IMAGE tant que le mode continu tourne
-  // (les deux se disputeraient le clic droit). En l'éteignant depuis
-  // l'interrupteur, `f3Tick` sort désormais à sa garde et ne repasse plus
-  // jamais : `enablePan` restait à `false` POUR TOUJOURS, et le déplacement de
-  // caméra au clic droit du mode ordinaire était mort — sans rien dans la
-  // console. `modes` ne le rallume qu'en RE-ENTRANT en surface (modes.js:382),
-  // ce qu'on ne fait pas ici. C'est exactement la régression du mode ordinaire
-  // qu'Adrien a demandé de vérifier à l'exécution.
-  else if (modes?.mode === 'surface') controls.enablePan = true
+  // ⚠️ `enablePan` N'EST PLUS JAMAIS ÉTEINT — ET C'EST LA CORRECTION.
+  // L'ancien code le coupait pour reprendre le clic droit à OrbitControls, et
+  // devait ensuite le rallumer ici à la main. Mais `enablePan` est un
+  // interrupteur GLOBAL : couper le clic droit coupait du même coup le bouton
+  // du milieu et le repli Maj+gauche, c'est-à-dire TOUT le déplacement de
+  // caméra. C'est la perte qu'Adrien a signalée. Le clic droit se reprend
+  // maintenant bouton par bouton (appliqueBoutonsSouris), il n'y a donc plus
+  // rien à rallumer : le déplacement n'a jamais été éteint.
+  // On force tout de même une passe immédiate — le remappage est fait par
+  // image, mais l'utilisateur vient de cliquer et ne doit pas attendre.
+  appliqueBoutonsSouris()
   // Le geste en cours n'a plus de sens sur un terrain qui va disparaître.
   _f3Glisse = false
   _f3V.x = _f3V.z = 0
@@ -1992,6 +1994,37 @@ function f3Echantillonne(tMs) {
 // socle. `innerHeight` plutôt que `innerWidth` : la vue est en trois quarts, la
 // dimension verticale est celle qui cadre le bloc.
 const f3ParPixel = () => TERRAIN_SIZE / Math.max(1, window.innerHeight)
+
+// ══════════ QUI TIENT QUEL BOUTON — ET CE QU'ADRIEN AVAIT PERDU ═════════════
+//
+// « L'ancien déplacement par clic droit n'existe plus, je ne peux plus me
+// déplacer de cette façon. » (Adrien, après essai du mode continu.)
+//
+// La cause n'était pas le partage du clic droit, c'était la MÉTHODE. Ce tick
+// éteignait `controls.enablePan` à chaque image pour empêcher OrbitControls de
+// voler le geste — mais `enablePan` est un interrupteur GLOBAL : il gouverne le
+// clic droit, ET le bouton du milieu, ET le repli Maj+gauche. En le coupant, on
+// ne retirait pas un bouton au déplacement, on retirait le déplacement.
+//
+// On ne coupe donc plus une capacité, on rend un seul BOUTON inerte (-1, la
+// valeur qu'OrbitControls emploie lui-même pour « aucune action »). Le reste
+// survit — voir boutons-camera.js pour les deux liaisons constantes et pour la
+// preuve que le bouton du milieu était libre (enableZoom faux partout).
+//
+// Appliqué PAR IMAGE, comme l'ancien `enablePan` : `modes` retraverse ses
+// réglages à chaque entrée en surface, et une bascule de mode ne notifie
+// personne. L'assignation est gardée — trois comparaisons d'entiers.
+let _boutonsDroit = null
+function appliqueBoutonsSouris() {
+  const m = versTroisJs(
+    boutonsSouris({ continu: fenetreContinueActive(), surface: modes?.mode === 'surface' }),
+    THREE.MOUSE
+  )
+  if (m.RIGHT === _boutonsDroit) return
+  _boutonsDroit = m.RIGHT
+  controls.mouseButtons = m
+}
+appliqueBoutonsSouris()
 
 renderer.domElement.addEventListener('contextmenu', (e) => {
   if (fenetreContinueActive() && modes?.mode === 'surface') e.preventDefault()
@@ -2075,10 +2108,6 @@ renderer.domElement.addEventListener('pointercancel', (e) => f3Lache(e, false))
 // Appelé depuis `tick`, après `updateCameraMotion`.
 function f3Tick(dt) {
   if (!fenetreContinueActive() || !(dem?.empriseCote > 1)) return
-  // OrbitControls déplacerait la CAMÉRA au clic droit en même temps que nous
-  // déplaçons le contenu : les deux se cumuleraient et la vue partirait. Posé
-  // par image parce que `modes` le remet à `true` à chaque entrée en surface.
-  if (controls.enablePan && modes?.mode === 'surface') controls.enablePan = false
   if (!_f3Glisse) {
     // ⚠️ L'ÉLAN ET LE RAPPEL NE TOURNENT JAMAIS ENSEMBLE — d'où le `else`. Les
     // faire cohabiter les mettrait en tir à la corde au bord : l'un pousse
@@ -6212,6 +6241,10 @@ function tick() {
   updateCameraMotion(dt)
   // La fenêtre continue, juste après la caméra : le geste se projette sur les
   // axes de la caméra, donc il lui faut la caméra de CETTE image.
+  // ⚠️ Le remappage des boutons est HORS de f3Tick : celui-ci sort à sa garde
+  // quand le mode continu est éteint, et c'est justement l'instant où le clic
+  // droit doit redevenir un déplacement de caméra.
+  appliqueBoutonsSouris()
   f3Tick(dt)
 
   // BRUME relative au zoom : Début/Fin (params.fogNear/fogFar) sont exprimés
