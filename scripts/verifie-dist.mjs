@@ -44,7 +44,8 @@
 // Relevé du 2026-07-31, pour situer les marges :
 //   bathy 21 557 · coast-z6 2 361 · lake-tiles 2 256 · water-tiles 488 ·
 //   map/cells 5 140
-// Relevé du 2026-08-02 : sol 78 070 (dont le socle mondial z8-z9, 76 060).
+// Relevé du 2026-08-02 : sol 78 070 (dont le socle mondial z8-z9, 76 060) ·
+//   canopee 71 570 (dont le socle mondial z8-z9, 68 332).
 //
 // ═══════════════════════════════════════════════════════════════════════════
 // POURQUOI `data/sol` A REJOINT LA LISTE LE 2026-08-02
@@ -61,36 +62,59 @@
 // la donnée partout. Si `dist/` part sans les tuiles mais avec le manifeste —
 // et le manifeste, lui, ne fait que 2 Ko, il survit à tout — l'interrupteur
 // reste allumé devant une carte strictement inchangée. C'est mot pour mot la
-// panne que ce fichier existe pour empêcher, et c'est maintenant le plus gros
-// poste de `dist/` qui peut la produire.
+// panne que ce fichier existe pour empêcher, et c'est le premier poste de
+// `dist/` à avoir pu la produire à cette échelle. (La canopée l'a dépassé le
+// soir même — voir la section suivante.)
 //
 // Le plancher est volontairement bas (60 000 pour 78 070 relevés) : la
 // couverture va grandir, et ce qu'on attrape ici c'est le zéro, pas la marge.
 // ═══════════════════════════════════════════════════════════════════════════
-// ⚠️ POURQUOI `data/canopee` N'EST PAS DANS LA LISTE (2026-08-02)
+// POURQUOI `data/canopee` A REJOINT LA LISTE LE 2026-08-02, LE SOIR
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// La hauteur de canopée est cuite et livrée (3 228 tuiles, 28,5 Mo). Elle n'a
-// pourtant PAS de plancher ici, et c'est le même raisonnement, appliqué à la
-// lettre, que celui qui a fait entrer `data/sol` juste au-dessus :
+// ⚠️ CE FICHIER PORTAIT ICI, LE MATIN MÊME, LA CONSIGNE INVERSE — et elle était
+// juste. La voici, parce que c'est le basculement qui compte, pas la ligne :
 //
-//   ⚠️ CE GARDE-FOU PROTÈGE UNE PROMESSE, PAS UNE DONNÉE.
+//   « La hauteur de canopée est cuite et livrée (3 228 tuiles, 28,5 Mo). Elle
+//     n'a pourtant PAS de plancher ici […]. La canopée en est au stade d'AVANT :
+//     trois zones (Mont-Blanc, Landes, Paris). Hors d'elles, `refreshCanopee`
+//     lit le manifeste, ne trouve rien, ÉTEINT l'interrupteur et l'écrit à
+//     l'écran. Un `dist/` amputé de ces tuiles ne produit donc pas la panne
+//     silencieuse que ce fichier existe pour empêcher : il produit une couche
+//     visiblement absente, qui se dit absente.
+//     ⚠️ LE JOUR OÙ UN SOCLE MONDIAL DE CANOPÉE EST CUIT, CETTE LIGNE DEVIENT
+//     OBLIGATOIRE — et personne ne le remarquera tout seul, puisque rien ne
+//     casse. Le déclencheur n'est pas « il y a beaucoup de tuiles », c'est
+//     « le manifeste couvre une zone dont le client ne peut plus sortir ». »
 //
-// L'occupation du sol n'y était pas tant qu'elle ne couvrait que trois zones,
-// et elle y est entrée le jour du socle mondial — parce que ce jour-là toute vue
-// est tombée dans une zone cuite, donc le client a cessé de pouvoir dire non,
-// donc son interrupteur est devenu une PROMESSE tenue par des fichiers.
+// CE JOUR EST ARRIVÉ. Le socle mondial z8-z9 est cuit : la zone « Monde » couvre
+// -180,-60,180,84, c'est-à-dire toute l'emprise que l'ETH modélise. La porte de
+// sortie du client est donc FERMÉE — `zoneCanopeePour` trouve toujours une zone,
+// `refreshCanopee` n'éteint plus jamais l'interrupteur, et la couche PROMET de
+// la donnée partout.
 //
-// La canopée en est au stade d'AVANT : trois zones (Mont-Blanc, Landes, Paris).
-// Hors d'elles, `refreshCanopee` lit le manifeste, ne trouve rien, ÉTEINT
-// l'interrupteur et l'écrit à l'écran. Un `dist/` amputé de ces tuiles ne
-// produit donc pas la panne silencieuse que ce fichier existe pour empêcher : il
-// produit une couche visiblement absente, qui se dit absente.
+// ⚠️ ET LE MANIFESTE SURVIT À TOUT CE QUI TUE LES TUILES. Il fait 3 Ko et il est
+// versionné dans `public/` ; les 71 569 PNG, eux, sont hors dépôt, donc absents
+// d'un worktree neuf, donc absents de `dist/`, donc absents du site. Le résultat
+// serait exactement la panne que ce fichier existe pour empêcher : interrupteur
+// allumé, mosaïque vide, carte strictement inchangée, et l'utilisateur qui lit
+// « la donnée dit qu'il n'y a pas d'arbres ici ». Aucun test ne rougirait,
+// aucune console ne parlerait.
 //
-// ⚠️ LE JOUR OÙ UN SOCLE MONDIAL DE CANOPÉE EST CUIT, CETTE LIGNE DEVIENT
-// OBLIGATOIRE — et personne ne le remarquera tout seul, puisque rien ne casse.
-// Le déclencheur n'est pas « il y a beaucoup de tuiles », c'est « le manifeste
-// couvre une zone dont le client ne peut plus sortir ».
+// ⚠️ ET C'EST DÉSORMAIS LE PLUS GROS POSTE DE `dist/` — 885 Mo, davantage que
+// la bathymétrie (303 Mo) et l'occupation du sol (286 Mo) RÉUNIES. La canopée
+// pèse trois fois le sol pour un nombre de tuiles COMPARABLE : une hauteur est
+// un champ continu et bruité, là où une classe d'occupation forme de grandes
+// plaques identiques que deflate avale d'un coup. Ce n'est donc pas seulement
+// la couche la plus facile à perdre, c'est la plus visible à l'oeil quand elle
+// manque.
+//
+// LE PLANCHER : 55 000, pour 71 570 fichiers relevés le 2026-08-02 (le socle
+// mondial z8-z9, 68 332 tuiles, + les 3 237 tuiles fines z10-z14 des trois zones
+// déjà cuites, + le manifeste). Même marge que `data/sol` : ~77 % du relevé. La
+// couverture ne peut que grandir (z10 est chiffré à ~197 000 tuiles, les zones
+// fines se multiplient), et ce qu'on attrape ici c'est le ZÉRO et
+// l'effondrement, pas la variation normale.
 const PLANCHERS = {
   'data/bathy': 20000,
   'data/coast-z6': 2000,
@@ -98,6 +122,7 @@ const PLANCHERS = {
   'data/water-tiles': 400,
   'data/map/cells': 4000,
   'data/sol': 60000,
+  'data/canopee': 55000,
 }
 
 import { readdirSync, statSync, existsSync, lstatSync } from 'node:fs'

@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync, readFileSync } from 'node:fs'
 import {
   ARRETS_CANOPEE,
   FORCES_CANOPEE,
@@ -205,4 +206,52 @@ test('la zone la PLUS PETITE gagne, et c’est le CENTRE de l’emprise qui déc
   assert.equal(ailleurs.nom, 'monde')
   assert.equal(zoneCanopeePour(i, null), null)
   assert.equal(zoneCanopeePour(null, { minLon: 0, maxLon: 1, minLat: 0, maxLat: 1 }), null)
+})
+
+// ── La donnée réellement cuite dans ce dépôt ────────────────────────────────
+
+test('l’index cuit existe et n’annonce que des zones plausibles', () => {
+  const p = 'public/data/canopee/index.json'
+  if (!existsSync(p)) return // les tuiles vivent hors dépôt (voir shibumap-deploiement)
+  const doc = normaliseIndexCanopee(JSON.parse(readFileSync(p, 'utf-8')))
+  assert.ok(doc.zones.length > 0)
+  for (const z of doc.zones) {
+    const [w, s, e, n] = z.bbox
+    assert.ok(w < e && s < n, `${z.nom} : emprise retournée`)
+    // L'ETH ne modélise rien au-delà : une zone annoncée hors de ces latitudes
+    // promettrait des tuiles que la source ne peut pas fournir.
+    assert.ok(s >= -60 && n <= 84, `${z.nom} : l’ETH ne couvre pas ces latitudes`)
+  }
+})
+
+test('LE SOCLE MONDIAL N’ÉCRASE PAS LA FINESSE LOCALE — vérifié sur l’index cuit', () => {
+  // ⚠️ CE TEST EXISTE POUR UN DÉGÂT QUI NE FAIT ROUGIR RIEN D'AUTRE.
+  //
+  // Depuis la cuisson du socle mondial, TOUTE vue tombe dans au moins une zone.
+  // Deux fautes silencieuses deviennent alors possibles, et aucune ne lève
+  // d'erreur — elles rendent seulement des tuiles plus grossières :
+  //
+  //   · si `zoneCanopeePour` retenait la PREMIÈRE zone contenant le centre au
+  //     lieu de la PLUS PETITE, la finesse au Mont-Blanc dépendrait de l'ordre
+  //     des lignes du JSON — donc de l'ordre des cuissons ;
+  //   · si le manifeste avait laissé le plafond GLOBAL retomber sur la zone
+  //     mondiale, les trois zones fines l'auraient suivi de 14 à 9.
+  //
+  // La règle est testée plus haut sur un manifeste fabriqué ; ici on la vérifie
+  // sur CELUI QUI PART EN LIGNE, parce que c'est lui qui décide à l'écran.
+  const p = 'public/data/canopee/index.json'
+  if (!existsSync(p)) return
+  const doc = normaliseIndexCanopee(JSON.parse(readFileSync(p, 'utf-8')))
+  const monde = doc.zones.find((z) => z.bbox[0] <= -179 && z.bbox[2] >= 179)
+  if (!monde) return // pas encore de socle mondial : rien à protéger
+  // Chamonix : le centre tombe dans le socle mondial ET dans le Mont-Blanc.
+  const chamonix = { minLon: 6.85, maxLon: 6.95, minLat: 45.9, maxLat: 45.95 }
+  const zone = zoneCanopeePour(doc, chamonix)
+  assert.notEqual(zone.nom, monde.nom, 'le socle mondial a mangé une zone fine')
+  assert.ok(zone.zmax > monde.zmax, `${zone.nom} doit rester plus fine que le socle`)
+  // Et au milieu du Kansas, où seul le socle existe, on ne réclame que son
+  // plafond : demander plus rendrait une mosaïque vide sous un interrupteur allumé.
+  const kansas = zoneCanopeePour(doc, { minLon: -98, maxLon: -97, minLat: 38, maxLat: 39 })
+  assert.equal(kansas.nom, monde.nom)
+  assert.equal(kansas.zmax, monde.zmax)
 })
