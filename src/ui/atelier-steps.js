@@ -80,7 +80,12 @@ export const LAYERS = [
 export const STEP_KEYS = {
   palette: ['rampStops', 'oceanShallow', 'oceanMid', 'oceanDeep'],
   ciel: ['bgEnv', 'bgMode', 'bgStops', 'bgColorA', 'bgColorB', 'bgColorC', 'bgAngle'],
-  calques: LAYERS.map((l) => l.key).concat('waterFill'),
+  // PLUS de 'waterFill' en plus des calques : le remplissage n'est plus un
+  // réglage depuis le 2026-08-02 (Adrien : « ça doit toujours être rempli »), il
+  // ne peut donc plus être « modifié » par rapport au gabarit.
+  // ⚠️ Cette liste et TEMPLATE_KEYS doivent bouger ENSEMBLE — le test
+  // « chaque clé des étapes 2 à 5 est portée par un template » tient la règle.
+  calques: LAYERS.map((l) => l.key),
   // les chips « caractère du ciel » et « état de mer » du panneau Éléments
   // bougent PLUSIEURS clés d'un coup : elles sont toutes listées, sinon la
   // pastille « modifié » resterait éteinte après un vrai changement
@@ -115,7 +120,11 @@ export function capList(items, expanded = false, cap = LIST_CAP) {
 // (une garde qui nomme des clés fantômes ne garde rien).
 export const SIMPLE_EXCLUDED = [
   // shaders & effets
-  'surfaceFx', 'fx', 'liquidMetal', 'bloomEnabled', 'bloomIntensity', 'ssaoEnabled', 'grain', 'vignette',
+  // PLUS de 'bloomEnabled' / 'bloomIntensity' : la passe de bloom a été retirée
+  // le 2026-08-02, ces clés ne sont plus des clés de gabarit. ⚠️ Cette liste ne
+  // doit nommer QUE des clés qui existent côté template — un test le vérifie,
+  // « une garde qui nomme des clés fantômes ne garde rien ».
+  'surfaceFx', 'fx', 'liquidMetal', 'ssaoEnabled', 'grain', 'vignette',
   // matières du terrain et du socle
   'terrainSurfaceMat', 'terrainMatScale', 'terrainMatRoughness', 'plinthFinish', 'plinthPbr',
   // grilles et courbes de niveau

@@ -86,7 +86,7 @@ const LAKE_RENDER_ORDER = 26
 // `part` is `{ outer, holes }`, both GeoJSON lon/lat rings (holes may be
 // empty/omitted). `outline` is blockOutline(fp), computed once per rebuild
 // by the caller. Shared by the OSM water-area fill (rivers/lakes at OSM
-// zoom) and the Natural Earth / Overture-tile lakes fill (waterFill option)
+// zoom) and the Natural Earth / Overture-tile lakes fill (toujours actif)
 // — one triangulate/clip/drape implementation.
 // The single height a lake surface sits at: the MEDIAN of the terrain samples
 // under its vertices. Median, not mean or min: most vertices sample the water
@@ -486,13 +486,17 @@ export class WaterLayer {
       this.group.add(obj)
     }
 
-    // Lakes & seas fill option: filled draped polygons instead of outline-only.
-    // Covers both the OSM water AREAs (riverbanks/lake bodies/seas at OSM zoom,
-    // real varying width) and the Natural Earth `lakes` / Overture-tile
-    // polygons (always available, coarser off-region). Outlines above still
-    // render either way, for definition; when the option is off, water
-    // renders exactly as before (outline-only).
-    if (params.waterFill) {
+    // LACS & MERS : TOUJOURS REMPLIS. Ce fut une option (`params.waterFill`),
+    // elle ne l'est plus — Adrien, 2026-08-02 : « pas besoin, ça doit toujours
+    // être rempli ». Le remplissage est donc INCONDITIONNEL : le `if` a disparu
+    // plutôt que d'être figé sur `true`, sinon la branche « sans remplissage »
+    // resterait dans le fichier à se faire relire sans jamais s'exécuter.
+    //
+    // Couvre les AIRES d'eau OSM (rives, corps de lacs, mers au zoom OSM, à
+    // largeur réelle variable) ET les polygones Natural Earth `lakes` /
+    // tuiles Overture (toujours disponibles, plus grossiers hors zone). Les
+    // contours au-dessus continuent d'être tracés, pour la définition.
+    {
       const fillOpacity = params.waterOpacity ?? 0.9
       if (areaParts && areaParts.length) {
         const areaMaterial = _fillMaterial(ink, fillOpacity)

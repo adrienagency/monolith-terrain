@@ -9,8 +9,6 @@ import {
   VignetteEffect,
   NoiseEffect,
   SMAAEffect,
-  BloomEffect,
-  KernelSize,
   HueSaturationEffect,
   BrightnessContrastEffect,
   ToneMappingEffect,
@@ -99,7 +97,7 @@ import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
 import { showNotice } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
-import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildPiloteButton, buildCredits, buildMapCorner, buildQuickCore, buildShibuChrome, initUiLevel, buildAdvToggle, focusSearch, isUiAdvanced } from './ui/bars.js'
+import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickCore, buildShibuChrome, initUiLevel, buildAdvToggle, focusSearch, isUiAdvanced } from './ui/bars.js'
 import { routeEntryFor, incomingWaypoints, resolveWaypointKm } from './route-entry.js'
 import { buildMiniRoute } from './ui/mini-route.js'
 import { buildSettingsSearch } from './ui/settings-search.js'
@@ -327,17 +325,24 @@ const params = {
   // false sur les quatre paliers depuis le 28/07 (demande d'Adrien).
   ssaoEnabled: MACHINE.ssao,
   ssaoIntensity: 6, // nudged up: half-res AO reads ~16% softer than full-res (measured)
-  bloomEnabled: false,
-  bloomIntensity: 0.55,
-  bloomThreshold: 0.85,
+  // PLUS de bloomEnabled / bloomIntensity / bloomThreshold : la passe de bloom
+  // a été retirée le 2026-08-02 (Adrien : « inutile, on retire »). Les trois
+  // clés traînent dans les gabarits déjà enregistrés ; applyUserTemplate filtre
+  // sur TEMPLATE_KEYS, elles sont ignorées.
   contrast: BASE_GRADE.contrast,
   saturation: BASE_GRADE.saturation,
   vignette: 0.6,
   grain: 0, // off by default — opt in via Look → grain
-  fogNear: 35.5,
-  fogFar: 50,
+  // PLUS de fogNear / fogFar / fogEnabled : la brume a été retirée le
+  // 2026-08-02 (Adrien : « ça ne fonctionne jamais, on retire »), contrôles ET
+  // rendu. Les trois clés traînent dans les gabarits déjà enregistrés ;
+  // applyUserTemplate filtre sur TEMPLATE_KEYS, elles sont ignorées.
+  //
+  // ⚠️ `fogColor` RESTE, et ce n'est PAS un oubli : malgré son nom c'est la
+  // teinte de la FEUILLE DE FOND (scene.background, voile de transition du mode
+  // sombre, applyLook). La retirer effacerait le fond de scène. Voir la note en
+  // tête de la section Brume retirée dans src/ui/effects-panel.js.
   fogColor: '#ffffff',
-  fogEnabled: false, // depth fog on/off (Effects)
   // background: solid (fogColor) or a gradient (linear/radial/mesh) of A/B/C.
   // The gradient's top colour is bgColorA — SEPARATE from the fog colour, so a
   // gradient never washes out the fog.
@@ -541,7 +546,10 @@ const params = {
   // elles sont donc simplement ignorées, aucune migration à écrire.
   waterEnabled: true, // lakes on by default — the world lake layer is cheap (fetch-on-view)
   waterOpacity: 0.9,
-  waterFill: true,
+  // PLUS de waterFill. Adrien, 2026-08-02 : « pas besoin, ça doit toujours être
+  // rempli » — le remplissage est inconditionnel dans water-layer.js. La clé
+  // traîne dans les gabarits déjà enregistrés ; applyUserTemplate filtre sur
+  // TEMPLATE_KEYS, elle est donc ignorée, aucune migration à écrire.
   // PLUS de coastLine. Le liseré Natural Earth 1:10m a été RETIRÉ du site
   // (Adrien) : gardé « en option » depuis des mois, il n'a jamais tracé une
   // vraie côte — ses cordes droites coupaient les caps que le relief et la
@@ -569,15 +577,12 @@ const params = {
   nuitAssombrissement: NUIT_ASSOMBRISSEMENT_DEFAUT,
   nuitForce: NUIT_FORCE_DEFAUT,
   placesEnabled: true,
-  placesDensity: 1,
-  placesSize: 1,
-  // ON by default: the outline is what makes the names read cleanly over busy
-  // relief ("mets un contour blanc autour des lettres"). It used to default off
-  // because the old centred strokeText bled half its width INTO the glyph and
-  // made type look mushy — text-label.js now stamps a ring of fills around the
-  // letterform instead, so the ink glyph stays crisp and there's no reason to
-  // ship it off.
-  placesHalo: true,
+  // PLUS de placesDensity / placesSize / placesHalo. Adrien, 2026-08-02 : pour
+  // les deux tirettes « ça reste comme c'est au lancement par défaut » (elles
+  // valaient 1 et 1, c'est maintenant le comportement de places-layer.js) ; pour
+  // le halo, « on enlève, par défaut pas de halo » — il est retiré du rendu, pas
+  // mis à false. Même sort que waterFill pour les gabarits déjà enregistrés :
+  // les clés sont filtrées par applyUserTemplate, aucune migration à écrire.
   // Repères de sommet (panneau Carte → Repères) : ÉTEINTS par défaut
   // (Adrien). Ils étaient allumés depuis qu'on a réparé le fait que la clé
   // n'existait pas dans params ; la carte s'ouvrait donc sur cinq étiquettes
@@ -992,7 +997,6 @@ function autoBgColours() {
   // the fog fades the relief to a MID haze (b), distinct from the light top, so
   // depth fog stays clearly visible in front of the gradient
   params.fogColor = m.b
-  fogRef?.color.set(m.b)
   applyBackground()
   autoDarkFromBg()
   // le socle suit aussi — COULEUR seulement, jamais la matière (Adrien) ;
@@ -1028,14 +1032,19 @@ function applyPaletteWithBg(p) {
   autoBgColours()
   bgRefreshFn?.()
 }
+// ⚠️ `params.fogColor` N'EST PLUS LA COULEUR DE LA BRUME — c'est la TEINTE DE
+// LA FEUILLE DE FOND, et c'est cette ligne-ci qui en est le premier
+// consommateur. Le nom est resté après le retrait de la brume (2026-08-02,
+// Adrien : « ça ne fonctionne jamais, on retire ») parce que le renommer
+// obligerait à migrer treize fichiers de gabarits livrés — voir la note dans
+// src/ui/effects-panel.js. Deux autres chemins la lisent : setDarkMode() et
+// applyLook(), tous deux pour peindre le voile de transition.
 scene.background = new THREE.Color(params.fogColor)
-// linear fog: near/far give direct control over where the fade starts and
-// where the terrain is fully swallowed, hiding the mesh edge. The Fog object
-// is always created (later code reads/writes its color/near/far regardless of
-// whether fog is currently active) but only attached to the scene when the
-// param is on, so fog off at startup means no fog is applied at all.
-const fogRef = new THREE.Fog(new THREE.Color(params.fogColor), params.fogNear, params.fogFar)
-scene.fog = params.fogEnabled ? fogRef : null
+// PLUS DE `THREE.Fog` DU TOUT, et pas seulement plus de réglage. La passe est
+// retirée : `scene.fog` n'est plus jamais posé, donc les matériaux ne compilent
+// plus la variante brouillard et les deux renormalisations par image (celle du
+// zoom, celle du recul) ont disparu avec. Cacher le contrôle en laissant la
+// brume tourner aurait gardé tout le coût pour zéro bénéfice.
 
 // far plane 290 (was 220) : the studio floor/base reach ~3.4× the block, whose
 // far edge was clipped at full pull-back — « je vois le bout du socle qui coupe »
@@ -1674,7 +1683,7 @@ let modes = null // assigned once the globe + mode machine exist (below)
 let isoBtn = null // assigned once the bars exist — referenced by the mode hooks
 let mapCorner = null // bottom-left cartography corner — assigned once bars exist
 let cineBtn = null
-let piloteBtn = null // caméra pilote — assigné une fois les barres construites
+// (`piloteBtn` vivait ici — bouton retiré le 2026-08-02, voir src/ui/bars.js)
 let aq = null // adaptive quality controller (perf.js) — built after the panels
 let recorder = null // Recorder instance, lazy-loaded with the export stack
 
@@ -1774,32 +1783,32 @@ function syncAoColor() {
 _aoReady = true
 syncAoColor()
 
-// BLOOM — pre-tonemap, on the HDR buffer: sun glints on water, dusk warmth,
-// moonlight at night. mipmapBlur is the modern soft falloff, cheap.
-// mipmapBlur is OFF, and that is the black-rectangle fix (user-bisected: the
-// square disappears when bloom is off).
+// ══════════ PLUS DE BLOOM — LA PASSE ENTIÈRE EST PARTIE ════════════════════
 //
-// The mipmap chain halves the frame 8 times. On this window that reads
-// 1009 -> 505 -> 253 -> 127 -> 64 -> 32 -> 16 -> 8: every level is ROUNDED,
-// so consecutive levels are never exactly 2x apart (up to 6% off by the tiny
-// levels). The upsample pass assumes an exact 2x ratio, so it samples outside
-// the valid texels, and out-of-range reads on a float target yield NaN. NaN
-// added into the frame renders BLACK, in a hard-edged rectangle — exactly the
-// reported artefact, and exactly why it came and went with the window size.
+// Adrien, 2026-08-02 : « inutile, on retire ». C'était une `EffectPass`
+// pre-tonemap sur le tampon HDR (reflets du soleil sur l'eau, chaleur du
+// couchant, clair de lune). Elle n'est plus construite ni ajoutée au composer :
+// une passe désactivée reste une passe à tenir à jour, et celle-ci avait déjà
+// coûté un carré noir (voir plus bas) plus un garde-fou par image.
 //
-// The classic (non-mipmap) blur runs at ONE resolution: no chain, no ratio
-// error, no NaN. The falloff is slightly tighter than the mipmap version —
-// a fair trade for a bloom that cannot black out the screen.
-const bloom = new BloomEffect({
-  intensity: params.bloomIntensity,
-  luminanceThreshold: params.bloomThreshold,
-  luminanceSmoothing: 0.2,
-  mipmapBlur: false,
-  kernelSize: KernelSize.LARGE,
-})
-const bloomPass = new EffectPass(camera, bloom)
-composer.addPass(bloomPass)
-bloomPass.enabled = params.bloomEnabled
+// ⚠️ CE QUI EN DÉPENDAIT, ET QUI A ÉTÉ TRAITÉ AVEC :
+//  · `params._bloomTierOk` (perf.js) et la colonne `bloom` de la table des
+//    paliers machine (palier-machine.js) : le palier 3 « lâchait le bloom ».
+//    Sans passe, il n'y a plus rien à lâcher — les deux sont partis, et
+//    test/palier-machine.test.js dit maintenant que la colonne n'existe plus.
+//  · `src/sun-disc.js` et `src/map/lake-material.js` calaient leurs valeurs HDR
+//    JUSTE SOUS le seuil de bloom (0,85) pour ne pas l'allumer par accident.
+//    Ces valeurs restent : elles sont maintenant simplement des couleurs HDR
+//    sans halo. Le reflet du soleil sur les lacs perd sa FLEUR — c'est la seule
+//    perte visible du retrait, et elle est assumée.
+//
+// L'HISTOIRE DU CARRÉ NOIR, gardée parce qu'elle explique pourquoi on ne
+// remettra pas cette passe à la légère : `mipmapBlur` divise l'image par deux
+// huit fois, chaque niveau est ARRONDI, donc deux niveaux consécutifs ne sont
+// jamais exactement dans un rapport de 2. La passe de remontée suppose ce
+// rapport exact, lit hors des texels valides, et une lecture hors bornes sur
+// une cible flottante rend NaN — qui s'affiche en NOIR, en rectangle à bord
+// franc, apparaissant et disparaissant avec la taille de la fenêtre.
 
 // DEPTH OF FIELD — built ON FIRST USE, not at boot.
 //
@@ -3129,9 +3138,7 @@ modes = new Modes({
       mapLayers.setSurfaceVisible(v)
       isoBtn?.setVisible(v) // the isometric shortcut only makes sense over the block
       cineBtn?.setVisible(v)
-      piloteBtn?.setVisible(v)
       mapCorner?.setVisible(v) // cartography corner is surface-only too
-      scene.fog = v && params.fogEnabled ? fogRef : null
       refreshOsmCredit() // GeoNames credit only applies in surface mode — resync on mode change
     },
     setEffectsEnabled(v) {
@@ -3405,14 +3412,15 @@ const DEFAULT_PLINTH = Object.freeze({
   plinthGlassRefract: params.plinthGlassRefract,
   plinthBump: params.plinthBump,
 })
+// PLUS de waterFill / placesDensity / placesSize / placesHalo : ces quatre
+// réglages ont été retirés le 2026-08-02 (ménage d'interface d'Adrien). Leur
+// comportement est FIGÉ dans le rendu — remplissage inconditionnel dans
+// water-layer.js, densité et taille au défaut dans places-layer.js, halo
+// supprimé — donc `resetAll()` n'a plus rien à remettre en place pour eux.
 const DEFAULT_MAPLAYERS = Object.freeze({
   waterEnabled: params.waterEnabled,
   waterOpacity: params.waterOpacity,
-  waterFill: params.waterFill,
   placesEnabled: params.placesEnabled,
-  placesDensity: params.placesDensity,
-  placesSize: params.placesSize,
-  placesHalo: params.placesHalo,
 })
 
 function applyPalette(p) {
@@ -3531,7 +3539,6 @@ function setDarkMode(v) {
   document.body.classList.toggle('dark', v) // drives the FUI + lil-gui theme
   const sheet = v ? DARK.sheet : '#ffffff'
   params.fogColor = sheet
-  fogRef.color.set(sheet)
   applyBackground() // params.fogColor already = sheet; rebuilds solid/gradient bg
   modes.whiteEl.style.background = sheet // transition flash follows the sheet
   document.documentElement.style.setProperty('--hud-ink', effInk())
@@ -3609,7 +3616,6 @@ function applyGrade(g = BASE_GRADE) {
 function applyLook(k) {
   if (k.fogColor != null) {
     params.fogColor = k.fogColor
-    fogRef.color.set(k.fogColor)
     applyBackground()
     modes.whiteEl.style.background = k.fogColor
   }
@@ -3619,12 +3625,12 @@ function applyLook(k) {
   // touchent, via applyGrade ou directement depuis le panneau.
   if (k.vignette != null) vignette.darkness = params.vignette = k.vignette
   if (k.grain != null) grain.blendMode.opacity.value = params.grain = k.grain
-  // render upgrades (2026-07-20): a template may carry the AO/bloom look
+  // render upgrades (2026-07-20): a template may carry the AO look.
+  // Les trois clés de bloom d'un vieux gabarit ne sont plus lues : la passe a
+  // été retirée le 2026-08-02. Elles sont ignorées en silence, comme les clés
+  // de routes et de trait de côte avant elles.
   if (k.ssaoEnabled != null) params.ssaoEnabled = k.ssaoEnabled
   if (k.ssaoIntensity != null) ssao.intensity = params.ssaoIntensity = k.ssaoIntensity
-  if (k.bloomEnabled != null) params.bloomEnabled = k.bloomEnabled
-  if (k.bloomIntensity != null) bloom.intensity = params.bloomIntensity = k.bloomIntensity
-  if (k.bloomThreshold != null) bloom.luminanceMaterial.threshold = params.bloomThreshold = k.bloomThreshold
   if (k.clouds != null) {
     params.cloudsEnabled = k.clouds
     if (k.clouds) clouds.build(params) // no point rebuilding just to hide them
@@ -3709,10 +3715,7 @@ function applyUserTemplate(tmpl) {
   applyGridContour({ contourInterval: params.contourInterval, contourOpacity: params.contourOpacity, contourColor: params.contourColor, contourWeight: params.contourWeight, gridStep: params.gridStep, gridOpacity: params.gridOpacity, gridColor: params.gridColor })
   applyLight({ sunIntensity: params.sunIntensity, sunAzimuth: params.sunAzimuth, sunElevation: params.sunElevation, hemiIntensity: params.hemiIntensity, envLight: params.envLight, shadowSoftness: params.shadowSoftness, timeOfDay: params.timeOfDay })
   applySurface({ roughness: params.roughness, roughnessVariation: params.roughnessVariation, roughnessScale: params.roughnessScale, bumpScale: params.bumpScale, envMapIntensity: params.envMapIntensity })
-  applyLook({ fogColor: params.fogColor, exposure: params.exposure, contrast: params.contrast, saturation: params.saturation, vignette: params.vignette, grain: params.grain, clouds: params.cloudsEnabled, plinth: params.plinth, ssaoEnabled: params.ssaoEnabled, ssaoIntensity: params.ssaoIntensity, bloomEnabled: params.bloomEnabled, bloomIntensity: params.bloomIntensity, bloomThreshold: params.bloomThreshold })
-  fogRef.near = params.fogNear
-  fogRef.far = params.fogFar
-  scene.fog = params.fogEnabled && modes.mode === 'surface' ? fogRef : null
+  applyLook({ fogColor: params.fogColor, exposure: params.exposure, contrast: params.contrast, saturation: params.saturation, vignette: params.vignette, grain: params.grain, clouds: params.cloudsEnabled, plinth: params.plinth, ssaoEnabled: params.ssaoEnabled, ssaoIntensity: params.ssaoIntensity })
   applyBackground() // solid/gradient background from the captured look
   // camera lens / depth-of-field / shadow look
   if (params.fov != null) { camera.fov = params.fov; camera.updateProjectionMatrix() }
@@ -3911,9 +3914,7 @@ function resetAll() {
   // clouds off
   params.cloudsEnabled = false
   clouds.setVisible(false)
-  // fog off
-  params.fogEnabled = false
-  scene.fog = null
+  // (plus rien à éteindre pour la brume : elle a été retirée le 2026-08-02)
   // depth of field off
   params.bokehEnabled = false
   setDofEnabled(false)
@@ -4664,10 +4665,13 @@ const pilote = new PiloteCam({
   // Le tronçon couvert — 'reine' par défaut, `?troncon=tout` pour tout voir.
   // Le pourquoi (202 °/s de balayage sur 47 km comprimés) est dans flags.js.
   getPortion: () => portionPoursuite(),
-  onState: () => {
-    piloteBtn?.setActive(pilote.active)
-    piloteBtn?.setBadge(pilote.badge)
-  },
+  // ⚠️ `onState` N'A PLUS D'ABONNÉ, ET LE RAPPEL EST GARDÉ QUAND MÊME. Il
+  // servait au bouton de la caméra pilote (accent « en vol » + badge du cran),
+  // retiré le 2026-08-02. Le laisser vide plutôt que le supprimer garde le
+  // contrat de PiloteCam intact : le jour où le bouton revient — ou qu'un autre
+  // témoin d'état arrive — il n'y a qu'ici à brancher, et pilote-cam.js n'a pas
+  // à changer. Voir le mode d'emploi du réveil en tête de src/ui/bars.js.
+  onState: () => {},
 })
 
 function flyTrack() {
@@ -6221,22 +6225,17 @@ cineBtn = buildCineButton({
   },
 })
 
-// CAMÉRA PILOTE (Adrien) : « une vraie caméra intelligente, qui détecte les
-// vallées, passe au ras du sol, évite les collisions et se comporte comme un
-// pilote d'avion ou d'hélicoptère ». Trois crans : avion, hélicoptère, arrêt.
-// Si le bloc n'offre aucun couloir engageable, le vol ne part pas et le badge
-// reste vide — c'est un REFUS de pilote, pas une panne.
-piloteBtn = buildPiloteButton({
-  next: () => {
-    if (modes.mode !== 'surface' || modes.busy) return
-    tween.active = false
-    tour.active = false
-    drone.stop()
-    cameraAuto.stop()
-    shots.cancel()
-    pilote.next()
-  },
-})
+// 💤 LE BOUTON DE LA CAMÉRA PILOTE VIVAIT ICI — retiré le 2026-08-02 (Adrien :
+// « mode avion et hélicoptère, ça ne marche pas bien. On retire le bouton. On
+// garde le code de côté ! »). Le mode d'emploi complet du réveil est en tête de
+// la place laissée vacante dans src/ui/bars.js.
+//
+// ⚠️ `pilote` (PiloteCam) EST TOUJOURS CONSTRUIT ET MIS À JOUR PAR IMAGE, juste
+// au-dessus : il porte `lancerPoursuite`, `cancel`, `update`, `poursuite` et
+// `posePoursuite`, tous consommés ailleurs (flyTrack, suivi GPX, reprise en main
+// des contrôles, changement de terrain). Ce n'est pas du code mort, c'est du
+// code dont une seule porte d'entrée a été fermée. Il reste joignable par
+// `__exp.pilote.next()` dans la console et par les scripts de tournage.
 
 isoBtn = buildIsoButton({
   // chaque clic passe à la vue suivante (rotation orbitale)
@@ -6292,7 +6291,6 @@ const panelCtx = {
   hueSat,
   vignette,
   grain,
-  fogRef,
   scene,
   sun,
   placeSun,
@@ -6391,7 +6389,6 @@ const panelCtx = {
   environments: ENVIRONMENTS, // HDRI sky list for the Background picker
   getBgEnv: () => params.bgEnv || '',
   setBgEnv: (id) => { params.bgEnv = id || ''; applyBackground() },
-  setFogEnabled: (v) => { scene.fog = v && modes.mode === 'surface' ? fogRef : null },
   applyPlinthMaterial, // socle PBR / glass material picker (Block panel)
   setGroundInfo: (v) => {
     groundInfo.enabled = v
@@ -6543,12 +6540,12 @@ const templatesPanel = buildTemplatesPanel(panelCtx)
 const { elementsPanel, imagePanel } = buildEffectsPanel({
   params,
   exposureFx, contrastFx, hueSat, vignette, grain,
-  fogRef, setFogEnabled: panelCtx.setFogEnabled, applyBackground,
+  applyBackground,
   clouds,
   // la chip « Épars/Couvert/… » doit aussi rétablir la visibilité : resetLook
   // masque le groupe au chargement d'une carte, build() seul ne le remontre pas
   syncCloudsVisible: () => clouds.setVisible(params.cloudsEnabled && modes.mode === 'surface'),
-  ssao, bloom, aoPass, bloomPass,
+  ssao, aoPass,
   realWater, waterRebuild,
   terrain, globe,
   // le Scanner (effet d'image) vit dans Effets ; la Lumière ouvre Éléments
@@ -6915,7 +6912,6 @@ aq = createAdaptiveQuality({
   setDofEnabled,
   isDofEnabled: () => !!dofPass?.enabled,
   aoPass,
-  bloomPass,
   grain,
   applyShadowMode,
   announce: (m) => modes.announce(m),
@@ -7283,28 +7279,20 @@ function tick() {
   appliqueBoutonsSouris()
   f3Tick(dt)
 
-  // BRUME relative au zoom : Début/Fin (params.fogNear/fogFar) sont exprimés
-  // pour un cadrage de référence (~40 unités) mais la caméra bouge — en
-  // absolu, zoomé de près TOUT passait sous « Début » (aucune brume) et
-  // reculé au-delà de « Fin » la carte entière disparaissait dans le blanc
-  // (le « souvent elle ne fonctionne pas » d'Adrien). Renormalisés chaque
-  // frame sur la distance caméra→cible, le rendu est le même à tous les zooms.
-  if (scene.fog) {
-    const dRef = camera.position.distanceTo(controls.target) / 40
-    scene.fog.near = params.fogNear * dRef
-    scene.fog.far = params.fogFar * dRef
-  }
+  // PLUS DE RENORMALISATION DE BRUME PAR IMAGE. Elle existait parce que Début
+  // et Fin étaient exprimés pour un cadrage de référence (~40 unités) alors que
+  // la caméra bouge — en absolu, zoomé de près tout passait sous « Début » et
+  // reculé au-delà de « Fin » la carte disparaissait dans le blanc. C'est
+  // précisément le « ça ne fonctionne jamais » qui a fait retirer la brume le
+  // 2026-08-02 : le correctif n'a jamais convaincu, et l'effet est parti.
 
   // Post passes are OWNED here, one place, every frame. The AO pass reads the
   // normal+depth of the CURRENT camera state — during dives/orbital/terrain
   // swaps that state is mid-flight and a broken AO multiplies the whole frame
   // toward black (the reported intermittent black screen). Surface-and-settled
-  // only. Bloom has no depth dependency and only follows its toggle + tier.
+  // only.
   aoPass.enabled = params.ssaoEnabled && params._aoTierOk !== false && modes.mode === 'surface' && !modes.busy
-  // Bloom too: its mipmap chain SPREADS any NaN pixel to the whole frame —
-  // one bad texel during a transition (885 km orbital states, terrain swaps)
-  // and the entire image goes black. Surface-and-settled, same as AO.
-  bloomPass.enabled = params.bloomEnabled && params._bloomTierOk !== false && modes.mode === 'surface' && !modes.busy
+  // (la ligne jumelle du bloom vivait ici — passe retirée le 2026-08-02)
 
   // idle planet spin: in orbital view the Earth slowly turns under the camera
   // until the user takes the controls back
@@ -7333,16 +7321,9 @@ function tick() {
     globe.setSunDir(_orbSun)
   }
 
-  // fog respects the Effects sliders at normal viewing (so it actually shows —
-  // the old code scaled near*9/far*10.4 at every distance and hid it), and only
-  // lifts outward when the camera is pulled far back to frame the whole slab, so
-  // the relief never whites out near the orbit gate.
-  if (modes.mode === 'surface' && scene.fog) {
-    const dist = controls.getDistance()
-    const lift = THREE.MathUtils.smoothstep(dist, 55, 115)
-    fogRef.near = THREE.MathUtils.lerp(params.fogNear, dist + 45, lift)
-    fogRef.far = THREE.MathUtils.lerp(params.fogFar, dist + 130, lift)
-  }
+  // (Ici vivait le second rattrapage de brume — celui qui repoussait Début/Fin
+  // quand la caméra reculait pour cadrer la dalle entière, afin que le relief ne
+  // blanchisse pas près de la porte orbitale. Parti avec la brume le 2026-08-02.)
 
   // refresh camera matrices NOW so DOM projections match this frame's render
   // (otherwise labels are projected with last frame's matrices and lag behind)

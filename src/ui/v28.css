@@ -2493,10 +2493,7 @@ body.shibu-view .gpx-profile {
     right: 10px;
     bottom: calc(172px + env(safe-area-inset-bottom, 0px));
   }
-  body.shibu-view .ce-pilotebtn {
-    right: 10px;
-    bottom: calc(226px + env(safe-area-inset-bottom, 0px));
-  }
+  /* PLUS de .ce-pilotebtn : bouton retiré le 2026-08-02 (voir src/ui/bars.js) */
   /* mini panneau lecture : plein pouce — lignes 44px, boutons 44px, jamais
      plus large que l'écran */
   body.shibu-view .ce-miniroute {
@@ -2601,13 +2598,8 @@ body.ce-simple.ce-explore .ce-dock-left > .ce-panel:not(.ce-panel-explore) {
 .ce-door.accent {
   border: 1.5px solid var(--ce-accent);
 }
-.ce-door.soon {
-  opacity: 0.55;
-  cursor: default;
-}
-.ce-door.soon:hover {
-  background: transparent;
-}
+/* PLUS de `.ce-door.soon` : la seule porte « bientôt » (Dessiner sur la carte)
+   a été retirée le 2026-08-02 — Adrien : « on le fera pas, on retire ». */
 .ce-door-main {
   display: flex;
   flex-direction: column;
@@ -2625,17 +2617,8 @@ body.ce-simple.ce-explore .ce-dock-left > .ce-panel:not(.ce-panel-explore) {
   line-height: 1.35;
   color: var(--ce-muted, var(--ce-ink));
 }
-.ce-door-badge {
-  flex: none;
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  border: 1px solid var(--ce-hairline);
-  border-radius: 999px;
-  padding: 2px 7px;
-  color: var(--ce-muted, var(--ce-ink));
-}
+/* PLUS de `.ce-door-badge` non plus : la pastille « bientôt » n'avait qu'un
+   seul porteur, la porte « Dessiner sur la carte », partie le 2026-08-02. */
 /* la carte « Organisateur de course ? » — porte unique vers le Race Studio */
 .ce-orga {
   display: flex;
@@ -2919,17 +2902,11 @@ body.atelier-mode .ce-changelog-btn {
   border-color: var(--ce-accent);
   color: var(--ce-accent);
 }
-/* CAMÉRA PILOTE — troisième pastille de la rangée, même grammaire que les deux
-   autres : même taille, même badge numéroté, même accent quand ça tourne. Elle
-   porte aussi `.ce-isobtn`, dont elle hérite tout le reste (et donc aussi les
-   règles de masquage `ce-hub` / `ce-noui`, sans rien à redire ailleurs). */
-.ce-pilotebtn {
-  right: 114px;
-}
-.ce-pilotebtn.on {
-  border-color: var(--ce-accent);
-  color: var(--ce-accent);
-}
+/* PLUS DE CAMÉRA PILOTE ICI. La troisième pastille de la rangée (right: 114px,
+   plus son accent `.on`) a été retirée le 2026-08-02 — Adrien : « on retire le
+   bouton, on garde le code de côté ». `.ce-isobtn` et `.ce-cinebtn` ne bougent
+   pas : le pilote héritait d'elles, jamais l'inverse. Le mode d'emploi du
+   réveil est en tête de src/ui/bars.js. */
 .ce-isobtn svg {
   width: 20px;
   height: 20px;

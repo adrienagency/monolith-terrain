@@ -375,40 +375,55 @@ export function buildCineButton(ctx) {
   }
 }
 
-// CAMÉRA PILOTE — la troisième pastille de la rangée, à gauche du bouton cinéma.
+// ═══════════════════════════════════════════════════════════════════════════
+// 💤 LA CAMÉRA PILOTE DORT ICI — le bouton est parti, LE CODE EST INTACT
+// ═══════════════════════════════════════════════════════════════════════════
 //
-// MÊME GRAMMAIRE QUE SES DEUX VOISINES, délibérément : même pastille de verre,
-// même badge numéroté au coin haut-droit, même accent quand ça tourne. Ce n'est
-// pas une autre famille de fonction, c'est un troisième point de vue.
+// Adrien, 2026-08-02 : « mode avion et hélicoptère, ça ne marche pas bien. On
+// retire le bouton. **On garde le code de côté !** »
 //
-// ⚠️ POURQUOI UN NUMÉRO, ET PAS UN SIMPLE MARCHE/ARRÊT. Il y a deux vols, et ils
-// ne donnent pas du tout la même image : l'AVION (survol de vallée, entrée →
-// sortie, virages larges et inclinés) et l'HÉLICOPTÈRE (reconnaissance basse,
-// lent, capable de se retourner DANS le couloir — l'avion ne peut pas, voir la
-// note d'échelle dans pilote.js). Ce ne sont pas deux réglages du même appareil,
-// et l'utilisateur doit savoir lequel il regarde — exactement l'argument des
-// vues iso. Trois crans : 1, 2, arrêt.
+// CE QUI A ÉTÉ RETIRÉ : cette fonction `buildPiloteButton()` — la troisième
+// pastille de verre de la rangée, à gauche du bouton cinéma — son écouteur de
+// clic, et ses règles CSS `.ce-pilotebtn` (v28.css, atelier.css, studio.css,
+// store.css).
 //
-// L'icône : un avion vu de dessus, INCLINÉ en virage. C'est le seul dessin qui
-// dit d'un coup d'œil en quoi cette caméra diffère des deux autres — s'incliner
-// est justement ce qu'aucune d'elles ne fait.
-export function buildPiloteButton(ctx) {
-  const btn = el('button', 'ce-isobtn ce-pilotebtn ce-glassbox')
-  btn.type = 'button'
-  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><g transform="rotate(-25 12 12)"><path d="M12 3.4c.75 0 1.2.95 1.25 2.5l.07 3 6.28 3.4v1.7l-6.28-1.9v3.1l2.05 1.4v1.4L12 18.1l-3.37.9v-1.4l2.05-1.4v-3.1L4.4 15v-1.7l6.28-3.4.07-3C10.8 4.35 11.25 3.4 12 3.4Z"/></g></svg>'
-  const badge = el('span', 'ce-iso-badge')
-  badge.style.display = 'none'
-  btn.append(badge)
-  btn.setAttribute('data-tip', "Caméra pilote — elle cherche une vallée, vérifie sa sortie, puis la survole au ras du sol en s’inclinant dans les virages. 1 : avion. 2 : hélicoptère. 3 (si une course est chargée) : poursuite de la tête de course. Un clic de plus arrête.")
-  btn.addEventListener('click', () => ctx.next())
-  document.body.append(btn)
-  return {
-    root: btn,
-    setVisible: (v) => btn.classList.toggle('off', !v),
-    setBadge: (t) => { badge.textContent = t ?? ''; badge.style.display = t ? '' : 'none' },
-    setActive: (v) => btn.classList.toggle('on', !!v),
-  }
-}
+// CE QUI RESTE, ENTIER ET TESTÉ (73 tests) :
+//   src/pilote.js          la mécanique de vol (profils, roulis coordonné)
+//   src/poursuite.js       la poursuite de la tête de course
+//   src/pilote-cam.js      la caméra qui assemble les deux — TOUJOURS
+//                          construite par main.js, toujours mise à jour par
+//                          image, jamais mise en sommeil
+//   src/pilote-banc.js     bancs d'essai, chargés à la demande par import()
+//   src/poursuite-banc.js
+//   test/pilote.test.js, test/poursuite.test.js
+//
+// ⚠️ ET DEUX CHEMINS LA RÉVEILLENT ENCORE TOUT SEULS. Le retrait du bouton ne
+// débranche PAS le suivi de course : `flyTrack()` et le suivi GPX appellent
+// `pilote.lancerPoursuite()` dès que le drapeau `suiviHelicoActif()` de
+// flags.js est levé. Ce chemin-là n'a jamais dépendu du bouton.
+//
+// ─── COMMENT LA RÉVEILLER ───────────────────────────────────────────────────
+//
+// À LA MAIN, TOUT DE SUITE, sans rien recompiler : l'objet est exposé sur
+// `window.__exp` (voir la fin de main.js), donc dans la console du navigateur
+//
+//     __exp.pilote.next()      // 1 avion → 2 hélicoptère → 3 poursuite → arrêt
+//     __exp.pilote.cancel()
+//
+// C'est aussi par là que passent les scripts de tournage (scripts/sonde-*.js).
+//
+// POUR REMETTRE LE BOUTON : rétablir cette fonction depuis l'historique git
+// (`git log -S buildPiloteButton`), son import et son appel dans main.js — le
+// bloc `piloteBtn = buildPiloteButton({ next: … })` — les trois `piloteBtn?.`
+// de main.js (setVisible, setActive, setBadge), et les règles CSS citées plus
+// haut. Rien d'autre n'a bougé ; le câblage était déjà en appel optionnel.
+//
+// POURQUOI TROIS CRANS PLUTÔT QU'UN MARCHE/ARRÊT, si quelqu'un le refait : il y
+// a deux vols, et ils ne donnent pas la même image — l'AVION (survol de vallée,
+// entrée → sortie, virages larges et inclinés) et l'HÉLICOPTÈRE (reconnaissance
+// basse, lent, capable de se retourner DANS le couloir, ce que l'avion ne peut
+// pas ; voir la note d'échelle de pilote.js). Le troisième cran, la poursuite,
+// n'apparaissait que si une course était chargée.
 
 // bottom-LEFT twin of the iso/cine corner (Adrien) : three cartography
 // controls. Left→right: aerial-photo toggle (green tick when active), return to

@@ -541,16 +541,11 @@ export function buildAtelier(deps) {
   function stepCalques() {
     head('Ce qui se pose sur le relief', 'Les calques cartographiques drapés sur la carte. Allume ce que ton image raconte, éteignez le reste.')
     posedBand('calques')
+    // PLUS de sous-case « Remplir lacs & mers » sous « Rivières & eau ». Adrien,
+    // 2026-08-02 : « pas besoin, ça doit toujours être rempli » — le
+    // remplissage est devenu le comportement de water-layer.js, pas un réglage.
     for (const l of LAYERS) {
       body.append(layerRow(l.label, l.hint, () => deps.params[l.key], (v) => { LAYER_SET[l.key](v); deps.refreshAll() }))
-      // « Remplir lacs & mers » n'a de sens que sous l'eau allumée : hors de
-      // là, c'est une case qui ne produit rien.
-      if (l.key === 'waterEnabled' && deps.params.waterEnabled) {
-        const sub = layerRow('Remplir lacs & mers', 'Des aplats d’eau plutôt que le seul trait des rives.',
-          () => deps.params.waterFill, (v) => { deps.params.waterFill = v; deps.rebuildMapLayers(); deps.refreshAll() })
-        sub.classList.add('at-lay-sub')
-        body.append(sub)
-      }
     }
   }
 

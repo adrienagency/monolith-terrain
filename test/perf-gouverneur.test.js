@@ -189,7 +189,13 @@ test('à 3 fps le gouverneur atteint le palier plancher en moins de 15 s, pas en
     // et le plancher doit VRAIMENT avoir posé ses leviers
     assert.equal(params.pixelRatio, 0.85, 'la densité de rendu doit être retombée')
     assert.equal(params.grain, 0, 'le grain de film part au plancher')
-    assert.equal(params._bloomTierOk, false, 'le bloom aussi')
+    // `params._bloomTierOk` était vérifié ici : le palier plancher lâchait le
+    // bloom. La passe de bloom a été retirée du produit le 2026-08-02 (Adrien :
+    // « inutile, on retire »), donc le gouverneur ne pose plus ce drapeau — on
+    // vérifie qu'il ne le pose PLUS, sinon un levier fantôme survivrait.
+    assert.equal(params._bloomTierOk, undefined, 'plus de levier de bloom à poser')
+    // l'occlusion ambiante, elle, est bien tombée dès le palier 2
+    assert.equal(params._aoTierOk, false, 'l’occlusion ambiante part avant le plancher')
   } finally { m.rendre() }
 })
 

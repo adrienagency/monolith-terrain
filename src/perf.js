@@ -141,8 +141,11 @@ export function createAdaptiveQuality({
   dof, // reserved — the pass toggle is enough today, kept for future levers
   setDofEnabled = () => {}, // DoF is lazily built (see main.js ensureDof)
   isDofEnabled = () => false,
-  aoPass = null, // render-upgrade levers (2026-07-20 plan): tier 2 sheds AO,
-  bloomPass = null, // tier 3 sheds bloom — one product, adaptive, no forked mode
+  aoPass = null, // render-upgrade lever (2026-07-20 plan): tier 2 sheds AO.
+  // PLUS de `bloomPass` : le palier 3 lâchait le bloom, mais la passe de bloom
+  // a été retirée le 2026-08-02 (Adrien : « inutile, on retire »). Il n'y a
+  // plus rien à lâcher. (Le paramètre n'était de toute façon jamais
+  // déréférencé ici — seul `params._bloomTierOk` l'était, et il est parti avec.)
   lake,
   grain = null, // NoiseEffect (optional) — T3 turns film grain off
   applyShadowMode,
@@ -227,12 +230,13 @@ export function createAdaptiveQuality({
         applyRenderSize({ renderer, composer, pixelRatio: pr })
       }
     }
-    // Render-upgrade levers. AO costs a whole extra scene pass, so it is shed
-    // first; bloom holds on until the floor tier. `&& params.x` means a manual
-    // OFF stays off whatever the tier — the governor only ever restores the
-    // user's own setting on the way back up, never a blind true.
+    // Render-upgrade lever. AO costs a whole extra scene pass, so it is shed
+    // dès le palier 2. `&& params.x` means a manual OFF stays off whatever the
+    // tier — the governor only ever restores the user's own setting on the way
+    // back up, never a blind true.
+    // (`params._bloomTierOk` vivait ici : le bloom tenait jusqu'au palier
+    // plancher. La passe a été retirée le 2026-08-02, le levier avec.)
     params._aoTierOk = n < 2
-    params._bloomTierOk = n < 3
     if (!dirty.shadows) {
       const sm = tierShadows(n)
       if (params.shadowMode !== sm) {

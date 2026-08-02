@@ -145,7 +145,7 @@ function chipRowOf(presets, tips, isOn, apply) {
 export function buildEffectsPanel(ctx) {
   const { params } = ctx
   const elementsPanel = new Panel({ title: 'Éléments', icon: ICON_ELEM, side: 'left', width: 268, tip: 'La lumière, l’air et l’eau : soleil, nuages, brume, mer.' })
-  const panel = new Panel({ title: 'Effets', icon: ICON, side: 'left', width: 268, tip: 'Le rendu final : développement de l’image, SSAO et bloom, scanner.' })
+  const panel = new Panel({ title: 'Effets', icon: ICON, side: 'left', width: 268, tip: 'Le rendu final : développement de l’image, SSAO, scanner.' })
   // Lumière en TÊTE d'Éléments (l'ordre de lecture : Lumière, Nuages, Brume, Mer)
   if (ctx.lightCtx) elementsPanel.addSection(lightSection(ctx.lightCtx))
 
@@ -227,22 +227,25 @@ export function buildEffectsPanel(ctx) {
     sWind.setMeta(`${force} · vers le ${dir}`)
   }, sWind.head)
 
-  // ---- brume — dans Éléments (c'est de l'air, pas de l'objectif) ----
-  const sFog = elementsPanel.addSection(section('Brume'))
-  sFog.body.append(
-    toggle({ label: 'Brume', get: () => params.fogEnabled, set: (v) => { params.fogEnabled = v; ctx.setFogEnabled(v); refreshAll() } })
-  )
-  const fogRows = [
-    slider({ label: 'Début de la brume', min: 5, max: 60, step: 0.5, get: () => params.fogNear, set: (v) => { params.fogNear = v; ctx.fogRef.near = v } }),
-    slider({ label: 'Fin de la brume', min: 15, max: 90, step: 0.5, get: () => params.fogFar, set: (v) => { params.fogFar = v; ctx.fogRef.far = v } }),
-    color({ label: 'Couleur de la brume', get: () => params.fogColor, set: (v) => { params.fogColor = v; ctx.fogRef.color.set(v); if (params.bgMode === 'solid') ctx.applyBackground() } }),
-  ]
-  sFog.body.append(...fogRows)
-  for (const row of fogRows) visibleWhen(row, () => params.fogEnabled)
-  onRefresh(() => {
-    if (!params.fogEnabled) { sFog.setMeta('Off'); return }
-    sFog.setMeta(params.fogNear <= 20 ? 'Dense' : 'Douce', params.fogColor)
-  }, sFog.head)
+  // ---- PLUS DE SECTION « BRUME » -------------------------------------------
+  //
+  // Adrien, 2026-08-02 : « ça ne fonctionne jamais, on retire ». Les quatre
+  // contrôles (interrupteur, début, fin, couleur) sont partis, ET LE RENDU
+  // AUSSI : `scene.fog` n'est plus jamais posé, la classe THREE.Fog n'est plus
+  // instanciée, et les deux endroits de main.js qui faisaient suivre la brume
+  // au zoom ont disparu avec. Un réglage qu'on cache en laissant la passe
+  // tourner, c'est le coût sans le bénéfice.
+  //
+  // ⚠️ `params.fogColor` RESTE, ET IL NE FAUT PAS Y TOUCHER. Malgré son nom,
+  // ce n'est plus la couleur de la brume : c'est la TEINTE DE LA FEUILLE DE
+  // FOND. Trois chemins la lisent et n'ont rien à voir avec l'air —
+  // `scene.background` au démarrage, `setDarkMode()` qui la recopie dans le
+  // voile de transition, et `applyLook()` qui repeint ce voile depuis un
+  // gabarit. La retirer effacerait le fond de scène, le mode sombre et le
+  // flash de bascule, et obligerait à migrer treize fichiers de gabarits
+  // livrés. Elle reste donc dans TEMPLATE_KEYS et dans DEFAULT_FX.
+  // (Le renommer en `sheetColor` serait plus honnête — c'est une autre tâche,
+  // avec sa migration de gabarits, pas un ménage d'interface.)
 
   // ---- sea (ocean-waves random spectrum) — le star est l'ÉTAT DE MER ----
   if (FLAGS.water) {
@@ -353,20 +356,18 @@ export function buildEffectsPanel(ctx) {
     sDev.setMeta(`${base}${grain}`)
   }, sDev.head)
 
-  // ---- Rendu — la mécanique (SSAO/bloom), au fond du panneau ----
+  // ---- Rendu — la mécanique (SSAO), au fond du panneau ----
+  //
+  // PLUS de « Bloom (lueur) », ni son intensité, ni son seuil. Adrien,
+  // 2026-08-02 : « inutile, on retire ». La PASSE elle-même a été retirée de la
+  // chaîne de post-traitement (voir src/main.js), pas seulement ses contrôles :
+  // il ne reste donc rien à régler, et la section ne parle plus que du SSAO.
   const sRen = panel.addSection(section('Rendu'))
   const aoT = toggle({ label: 'Ombrage des creux (SSAO)', get: () => params.ssaoEnabled, set: (v) => { params.ssaoEnabled = v; refreshAll() } })
   const aoI = slider({ label: 'Intensité de l’ombrage', min: 0.5, max: 12, step: 0.05, get: () => params.ssaoIntensity, set: (v) => { params.ssaoIntensity = v; ctx.ssao.intensity = v } })
-  const blT = toggle({ label: 'Bloom (lueur)', get: () => params.bloomEnabled, set: (v) => { params.bloomEnabled = v; refreshAll() } })
-  const blI = slider({ label: 'Intensité du bloom', min: 0, max: 2, step: 0.02, get: () => params.bloomIntensity, set: (v) => { params.bloomIntensity = v; ctx.bloom.intensity = v } })
-  const blH = slider({ label: 'Seuil du bloom', min: 0.4, max: 1, step: 0.01, get: () => params.bloomThreshold, set: (v) => { params.bloomThreshold = v; ctx.bloom.luminanceMaterial.threshold = v } })
-  sRen.body.append(aoT, aoI, blT, blI, blH)
+  sRen.body.append(aoT, aoI)
   visibleWhen(aoI, () => params.ssaoEnabled)
-  for (const row of [blI, blH]) visibleWhen(row, () => params.bloomEnabled)
-  onRefresh(() => {
-    const on = [params.ssaoEnabled && 'SSAO', params.bloomEnabled && 'bloom'].filter(Boolean)
-    sRen.setMeta(on.length ? on.join(' · ') : 'Off')
-  }, sRen.head)
+  onRefresh(() => sRen.setMeta(params.ssaoEnabled ? 'SSAO' : 'Off'), sRen.head)
 
   // ---- scanner — dernière section d'Effets (la Performance est partie
   // dans la roue crantée des paramètres globaux) ----

@@ -184,7 +184,13 @@ test('SIMPLE_EXCLUDED nomme de vraies clés de template (sinon la garde ne garde
 
 test('les familles écartées sont bien toutes représentées', () => {
   // une par famille citée par Adrien — le test tombe si quelqu'un vide la liste
-  for (const k of ['surfaceFx', 'fx', 'terrainSurfaceMat', 'gridStep', 'contourInterval', 'bloomEnabled']) {
+  //
+  // ⚠️ 'bloomEnabled' TENAIT LA FAMILLE « effets » ET A ÉTÉ REMPLACÉ PAR
+  // 'liquidMetal' le 2026-08-02 : la passe de bloom a été retirée du produit
+  // (Adrien : « inutile, on retire »), donc la clé n'existe plus dans
+  // TEMPLATE_KEYS et le test au-dessus — « SIMPLE_EXCLUDED nomme de vraies clés
+  // de template » — la refuserait. La famille, elle, doit rester gardée.
+  for (const k of ['surfaceFx', 'fx', 'terrainSurfaceMat', 'gridStep', 'contourInterval', 'liquidMetal']) {
     assert.ok(SIMPLE_EXCLUDED.includes(k), `${k} manque à la liste des écartées`)
   }
 })

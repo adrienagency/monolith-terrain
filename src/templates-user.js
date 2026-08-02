@@ -42,7 +42,15 @@ export const TEMPLATE_KEYS = [
   // rien. Aucune migration à écrire, aucun numéro de version à changer.
   // Ne pas confondre 'roadColor' avec les réglages GPX (gpxColor & co) : la
   // TRACE, elle, reste — c'est le RÉSEAU routier qui est parti.
-  'waterEnabled', 'waterOpacity', 'waterFill', 'aerialEnabled', 'aerialOpacity', 'aerialCoastFade', 'placesEnabled', 'placesDensity', 'placesSize', 'placesHalo',
+  // PLUS de 'waterFill', 'placesDensity', 'placesSize' ni 'placesHalo' : ces
+  // quatre réglages ont été retirés de l'interface le 2026-08-02 et leur
+  // comportement est FIGÉ dans le rendu (remplissage toujours actif, densité et
+  // taille au défaut, halo supprimé). Exactement le même cas que 'coastLine' et
+  // 'roadsEnabled' ci-dessus : les clés traînent dans les gabarits déjà
+  // enregistrés et dans les .shibumap-template exportés avant aujourd'hui, le
+  // filtre de applyUserTemplate les laisse tomber, elles ne rallument rien et
+  // n'écrasent rien. Aucune migration, aucun numéro de version à changer.
+  'waterEnabled', 'waterOpacity', 'aerialEnabled', 'aerialOpacity', 'aerialCoastFade', 'placesEnabled',
   // animated sea (ocean-waves spectrum) — lakeColor is the shared water tint
   // seaEnabled : la mer se débraye entièrement (Adrien). Elle appartient au
   // look, donc un template peut livrer une carte SANS mer.
@@ -70,7 +78,16 @@ export const TEMPLATE_KEYS = [
   'color', 'roughness', 'roughnessVariation', 'roughnessScale', 'bumpScale', 'envMapIntensity',
   // post FX + fog
   'exposure', 'contrast', 'saturation', 'vignette', 'grain',
-  'ssaoEnabled', 'ssaoIntensity', 'bloomEnabled', 'bloomIntensity', 'bloomThreshold', 'fogNear', 'fogFar', 'fogColor', 'fogEnabled',
+  // PLUS de 'bloomEnabled' / 'bloomIntensity' / 'bloomThreshold' : la passe de
+  // bloom a été retirée le 2026-08-02. PLUS de 'fogNear' / 'fogFar' /
+  // 'fogEnabled' non plus : la brume aussi. Même précédent que 'coastLine' —
+  // les clés traînent dans les gabarits livrés (public/templates/…) et chez les
+  // visiteurs, applyUserTemplate les laisse tomber, aucune migration.
+  //
+  // ⚠️ 'fogColor' RESTE, et ce n'est pas un oubli : c'est la teinte de la
+  // FEUILLE DE FOND (scene.background, voile de transition du mode sombre), pas
+  // celle de la brume. La retirer viderait le fond des treize gabarits livrés.
+  'ssaoEnabled', 'ssaoIntensity', 'fogColor',
   // background (solid / gradient / HDRI sky) — bgStops/bgPoints = Fonds v2
   // (stops arbitraires + dégradé de points) ; A/B/C restent pour la compat
   'bgMode', 'bgColorA', 'bgColorB', 'bgColorC', 'bgAngle', 'bgEnv', 'bgStops', 'bgPoints', 'bgAuto',

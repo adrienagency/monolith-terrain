@@ -11,9 +11,11 @@ import { paletteRecordFromShop, styleTemplateText, mergeShopPalettes, notOwnedSt
 const STORE_COMMERCE = false // futur paiement — aucun prix tant que false
 const CATALOG_URL = '/templates/data.json'
 const ASSETS_URL = '/templates/assets/'
-// exigences de la vitrine : jamais de bokeh ni de bloom pendant les essais
+// exigences de la vitrine : jamais de bokeh pendant les essais
 // (le look INTÉGRÉ garde ses réglages d'origine — voir styleTemplateText)
-const STAGE_OVERRIDES = { bokehEnabled: false, bokehScale: 0, bloomEnabled: false }
+// `bloomEnabled: false` vivait ici aussi ; la passe de bloom a été retirée le
+// 2026-08-02, il n'y a plus rien à forcer.
+const STAGE_OVERRIDES = { bokehEnabled: false, bokehScale: 0 }
 
 // ------------------------------------------------------------ couleur utils
 // (repris de la landing — voir docs/superpowers/plans/2026-07-23-store-mode.md)

@@ -85,10 +85,14 @@
 // hors ligne dans test/garde-plans-eau.test.js — dont la MÊME eau à deux
 // finesses, parce qu'un seuil peut sembler invariant sans l'être.
 //
-// ⚠️ N'AJOUTE PAS ICI UN QUATRIÈME SEUIL D'ALTITUDE. Trois critères purement
-// géométriques ont été mesurés contre ces zones (remplissage de boîte, rebord
-// aval, largeur) : les deux premiers ÉCHOUENT à séparer une plaine d'un vrai lac
-// de barrage. Le tableau des mesures est en tête de plan-eau.js.
+// ⚠️ N'AJOUTE PAS ICI UN QUATRIÈME SEUIL D'ALTITUDE. QUATRE critères purement
+// géométriques ont maintenant été mesurés contre ces zones — remplissage de
+// boîte, rebord aval, remplissage d'ENVELOPPE CONVEXE (2026-08-02), et largeur.
+// Les TROIS PREMIERS ÉCHOUENT à séparer une plaine d'un vrai lac de barrage, et
+// la raison est la même pour les trois : **un lac de barrage EST un fleuve
+// barré**, aucune mesure de forme ne l'en distingue. Seule la LARGEUR sépare, et
+// seulement depuis qu'Adrien a décidé que les cours d'eau devaient eux aussi
+// perdre leur nappe animée. Les tableaux de mesures sont en tête de plan-eau.js.
 export function detectLakes(dem, { tolM = 0.35, minCells = null, minFill = 0.25, flatM = 0.15 } = {}) {
   if (!dem || !dem.data) return []
   const { data, size } = dem

@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+﻿import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   PALIERS,
@@ -205,7 +205,9 @@ test('les paliers ne coûtent jamais plus cher en descendant', () => {
     assert.ok(b.verreMer <= a.verreMer, `verre de mer ${n}`)
     assert.ok(b.nuages >= a.nuages, `nuages ${n} (l'indice MONTE quand la qualité baisse)`)
     assert.ok(b.damierMax <= a.damierMax, `damier ${n}`)
-    for (const k of ['ssao', 'bloom', 'dof', 'grain']) {
+    // 'bloom' était de cette liste jusqu'au 2026-08-02 : la passe a été retirée
+    // du produit, la colonne avec, et il n'y a plus de levier à surveiller.
+    for (const k of ['ssao', 'dof', 'grain']) {
       assert.ok(!(b[k] && !a[k]), `${k} ne peut pas réapparaître au palier ${n}`)
     }
   }
@@ -216,8 +218,13 @@ test('les paliers ne coûtent jamais plus cher en descendant', () => {
 test('les paliers reprennent EXACTEMENT les leviers de perf.js', () => {
   // Le tableau et le gouverneur doivent raconter la même histoire, sinon le
   // premier rendu et la première correction se contredisent à l'écran.
-  // perf.js : `_bloomTierOk = n < 3`, DoF coupé à n >= 2, grain coupé à
-  // n >= 3, verre 6/4/2/2.
+  // perf.js : DoF coupé à n >= 2, grain coupé à n >= 3, verre 6/4/2/2.
+  //
+  // ⚠️ LA COLONNE `bloom` N'EXISTE PLUS, ET C'EST TESTÉ CI-DESSOUS. Elle valait
+  // [true, true, true, false] et répondait à `_bloomTierOk = n < 3` dans
+  // perf.js. La passe de bloom a été retirée du produit le 2026-08-02 (Adrien :
+  // « inutile, on retire ») ; le levier de perf.js est parti avec, et une
+  // colonne qui décrirait une passe inexistante ferait mentir ce tableau.
   //
   // ⚠️ `ssao` FAIT EXCEPTION et c'est délibéré (28/07/2026, demande d'Adrien) :
   // perf.js autorise encore l'occlusion ambiante aux paliers 0 et 1
@@ -225,7 +232,8 @@ test('les paliers reprennent EXACTEMENT les leviers de perf.js', () => {
   // Ce champ dit désormais l'ÉTAT DE DÉPART, pas la permission — l'interrupteur
   // « Ombrage des creux » du panneau Effets reste, lui, entièrement libre.
   assert.deepEqual(PALIERS.map((p) => p.ssao), [false, false, false, false])
-  assert.deepEqual(PALIERS.map((p) => p.bloom), [true, true, true, false])
+  // plus AUCUN palier ne porte de colonne `bloom` — ni true, ni false : absente
+  assert.deepEqual(PALIERS.map((p) => Object.hasOwn(p, 'bloom')), [false, false, false, false])
   assert.deepEqual(PALIERS.map((p) => p.dof), [true, true, false, false])
   assert.deepEqual(PALIERS.map((p) => p.grain), [true, true, true, false])
   assert.deepEqual(PALIERS.map((p) => p.verreMer), [6, 4, 2, 2])
@@ -292,7 +300,7 @@ test('SwiftShader (rendu logiciel) → palier MINIMAL, quel que soit le reste', 
   assert.equal(e.palier, 3)
   const r = reglagesServis(SWIFTSHADER)
   assert.equal(r.ombres, 'off')
-  assert.equal(r.bloom, false)
+  assert.equal(r.bloom, undefined, 'la colonne bloom a été retirée du tableau des paliers')
   assert.equal(r.grain, false)
 })
 
@@ -308,7 +316,7 @@ test('RTX 3070 en 1080p → palier HAUT, et RIEN ne change pour elle', () => {
   assert.equal(r.ombres, 'dynamic')
   assert.equal(r.ombresRes, 1024)
   assert.equal(r.ssao, false)
-  assert.equal(r.bloom, true)
+  assert.equal(r.bloom, undefined, 'la colonne bloom a été retirée du tableau des paliers')
   assert.equal(r.dof, true)
   assert.equal(r.analyseMax, 0, '0 = analyse à pleine taille du MNT')
 })
@@ -320,7 +328,7 @@ test('MacBook Pro M1 : reconnu FORT, mais borné par la barre haute de 2K', () =
   const r = reglagesServis(MBP_M1)
   assert.equal(r.palier, 0)
   assert.equal(r.dof, true, 'le palier est intact : ce n’est pas une dégradation')
-  assert.equal(r.bloom, true)
+  assert.equal(r.bloom, undefined, 'la colonne bloom a été retirée du tableau des paliers')
   // Sa densité, elle, tombe sous 2 — non pas parce qu'on le juge faible, mais
   // parce qu'Adrien a posé une barre haute commune le 28/07 : « réso 2K max ».
   // Elle s'applique à TOUT LE MONDE, y compris à la machine la plus forte.
