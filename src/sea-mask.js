@@ -18,6 +18,16 @@
 // polders : sous 0 m ET connectés au bord (Pays-Bas) ou en bassin ≥2 %
 // (Flevoland), la topologie seule les prenait pour la mer. CONTRAT : sans
 // landMask, résultat bit-à-bit identique à avant.
+//
+// ⚠️ SI TU ARRIVES ICI PARCE QUE « DE L'EAU RENTRE DANS LES TERRES », REGARDE
+// D'ABORD SON ALTITUDE. Ce module ne peut mouiller QUE des cellules sous le
+// niveau de la mer : au-dessus, `underwater` est faux dans le shader
+// (terrain.js) quoi que dise ce masque. Une nappe bleue sur une plaine à 150 m
+// ne vient donc PAS d'ici — elle vient des PLANS D'EAU D'ALTITUDE (ocean.js,
+// src/lake.js), qui ont leur propre détecteur et, depuis le 2026-08-02, leur
+// propre garde-fou : voir src/plan-eau.js. La vallée du Rhône a coûté une
+// enquête entière à cette confusion, `uSeaY` y valant −1,75 pour un bloc dont
+// le point le plus bas est à +91 m.
 
 // Le seuil de « grand bassin », en FRACTION du champ : une poche basse non
 // connectée au bord reste mer si elle occupe au moins ça. C'est ce qui sauve la

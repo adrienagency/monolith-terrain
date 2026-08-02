@@ -1,0 +1,62 @@
+[
+  {
+    "nom": "rhone-valence",
+    "lat": 44.93,
+    "lon": 4.89,
+    "zoom": 12,
+    "tuiles": 3,
+    "quoi": "plaine alluviale (vallée du Rhône)",
+    "cote": 768,
+    "extentMeters": 20780.211517539643
+  },
+  {
+    "nom": "camargue",
+    "lat": 43.5,
+    "lon": 4.45,
+    "zoom": 12,
+    "tuiles": 3,
+    "quoi": "delta du Rhône",
+    "cote": 768,
+    "extentMeters": 21291.057143639104
+  },
+  {
+    "nom": "flevoland",
+    "lat": 52.45,
+    "lon": 5.55,
+    "zoom": 12,
+    "tuiles": 3,
+    "quoi": "polder sous le niveau de la mer",
+    "cote": 768,
+    "extentMeters": 17888.569572638815
+  },
+  {
+    "nom": "serre-poncon",
+    "lat": 44.51,
+    "lon": 6.33,
+    "zoom": 12,
+    "tuiles": 3,
+    "quoi": "lac de barrage",
+    "cote": 768,
+    "extentMeters": 20931.60700734759
+  },
+  {
+    "nom": "sognefjord",
+    "lat": 61.1,
+    "lon": 6.7,
+    "zoom": 11,
+    "tuiles": 3,
+    "quoi": "fjord",
+    "cote": 768,
+    "extentMeters": 28370.433943059863
+  },
+  {
+    "nom": "etretat",
+    "lat": 49.7,
+    "lon": 0.2,
+    "zoom": 12,
+    "tuiles": 3,
+    "quoi": "côte franche (falaises)",
+    "cote": 768,
+    "extentMeters": 18984.456448690344
+  }
+]
