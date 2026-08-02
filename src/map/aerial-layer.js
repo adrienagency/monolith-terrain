@@ -15,7 +15,7 @@
 // Plan: docs/superpowers/plans/2026-07-17-aerial-imagery.md.
 
 import * as THREE from 'three'
-import { tilesForBBox } from './tile-index.js'
+import { tilesForBBox, spanLon, centreLon } from './tile-index.js'
 import { worldToLatLon, demSpan } from '../geo.js'
 
 // The loaded FIELD's exact lon/lat footprint, from its own two corners.
@@ -69,12 +69,44 @@ import { worldToLatLon, demSpan } from '../geo.js'
 //
 // Hors mode continu, `demSpan` rend 56 au bit près : le mode ordinaire est
 // rigoureusement inchangé, et le test le verrouille.
+// ⚠️ PAS DE Math.min/Math.max SUR LA LONGITUDE — ET C'EST TOUT LE SUJET.
+//
+// LE DÉFAUT, tel qu'Adrien l'a vu : aux zooms lointains, la mer débordait sur
+// les terres, les rivières traversaient la carte en lignes droites, les noms
+// étaient décalés et la photo s'arrêtait avant le bord du socle en étirant ses
+// texels. QUATRE symptômes, UN seul défaut, ici.
+//
+// `worldToLatLon` ENROULE volontairement l'indice de tuile dans [0, n) — son
+// commentaire le dit, un bloc peut chevaucher ±180°. Les deux coins sont donc
+// enroulés SÉPARÉMENT : sur un bloc à cheval, le coin ouest ressort à +150° et
+// le coin est à −140°. Prendre le min et le max des deux rend alors
+// [−140, +150], soit 290° — LE COMPLÉMENT de l'emprise réelle, qui en fait 70.
+//
+// MESURÉ le 2026-08-02, bloc centré sur le Pacifique : la fonction rendait
+// minLon −180 / maxLon 112,5, soit 292,5° de large pour 55,8° de haut. Or le
+// bloc est CARRÉ en Mercator : sa hauteur vaut 0,188 du monde, donc sa largeur
+// aussi, soit 67,5°. Et 360 − 292,5 = 67,5. L'arithmétique referme le dossier.
+//
+// Tout ce qui descend de cette emprise partait donc faux : le masque de mer et
+// la plage d'altitude étaient calculés sur la moitié du Pacifique (d'où la mer
+// qui monte), les tuiles couvraient le mauvais tour du globe, et chaque objet
+// placé par lat/lon atterrissait ailleurs.
+//
+// LA CONVENTION EXISTAIT DÉJÀ, on la piétinait : `tilesForBBox` traite
+// `minLon > maxLon` comme « l'emprise s'enroule », et découpe en deux spans.
+// Il suffit donc de RENDRE LES BORDS TELS QU'ILS SONT — ouest puis est — au
+// lieu de les trier. Hors chevauchement, ouest < est et le résultat est
+// identique au bit près à l'ancien.
+//
+// ⚠️ La LATITUDE, elle, garde son min/max : elle ne s'enroule pas, et le nord
+// du bloc peut sortir de `worldToLatLon` avant ou après le sud selon
+// l'orientation de la grille.
 export function demBounds(dem) {
   const HALF = demSpan(dem) / 2
-  const nw = worldToLatLon(dem, -HALF, -HALF)
-  const se = worldToLatLon(dem, HALF, HALF)
+  const nw = worldToLatLon(dem, -HALF, -HALF) // coin ouest
+  const se = worldToLatLon(dem, HALF, HALF) // coin est
   return {
-    minLon: Math.min(nw.lon, se.lon), maxLon: Math.max(nw.lon, se.lon),
+    minLon: nw.lon, maxLon: se.lon,
     minLat: Math.min(nw.lat, se.lat), maxLat: Math.max(nw.lat, se.lat),
   }
 }
@@ -351,7 +383,10 @@ export const PROVIDERS = [
 // clips it; the user is looking at whatever sits in the middle.
 export function providerFor(bbox) {
   if (!bbox) return null
-  const lon = (bbox.minLon + bbox.maxLon) / 2
+  // `centreLon` et pas une moyenne : sur une emprise qui franchit ±180°, la
+  // moyenne tombe à l'exact opposé du globe — et on choisirait le fournisseur
+  // des antipodes sans qu'aucune erreur ne le signale.
+  const lon = centreLon(bbox.minLon, bbox.maxLon)
   const lat = (bbox.minLat + bbox.maxLat) / 2
   return PROVIDERS.find((p) => p.covers(lon, lat)) ?? null
 }

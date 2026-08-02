@@ -111,6 +111,30 @@ function lonLatToTileXY(lon, lat, z) {
 //  - antimeridian: bbox.minLon > bbox.maxLon means the bbox actually wraps
 //    through ±180°, so it's split into two spans ([minLon,180] and
 //    [-180,maxLon]) and tiled separately.
+// ══════════ LA CONVENTION D'ENROULEMENT, ET SES DEUX OUTILS ═════════════════
+//
+// Dans tout le projet, `minLon > maxLon` NE VEUT PAS DIRE « bornes inversées »
+// mais « l'emprise franchit ±180° ». `tilesForBBox` la respecte depuis
+// toujours ; `demBounds` la piétinait, et ça coûtait quatre symptômes visibles
+// (voir son commentaire dans aerial-layer.js).
+//
+// Ces deux fonctions existent pour que plus personne n'écrive `maxLon - minLon`
+// ni `(minLon + maxLon) / 2` à la main : les deux sont FAUX dès qu'une emprise
+// s'enroule, et faux SILENCIEUSEMENT — c'est exactement comme ça que le défaut
+// a survécu si longtemps.
+
+/** La largeur d'une emprise en degrés, enroulement compris. Toujours ≥ 0. */
+export function spanLon(minLon, maxLon) {
+  const d = maxLon - minLon
+  return d < 0 ? d + 360 : d
+}
+
+/** Le méridien central d'une emprise, enroulement compris, ramené dans [−180, 180]. */
+export function centreLon(minLon, maxLon) {
+  const c = minLon + spanLon(minLon, maxLon) / 2
+  return ((((c + 180) % 360) + 360) % 360) - 180
+}
+
 export function tilesForBBox(bbox, tileZoom) {
   const n = 2 ** tileZoom
   const spans =

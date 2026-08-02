@@ -144,3 +144,22 @@ test('une emprise absente ou illisible rend zéro, pas NaN', () => {
   assert.equal(largeurEmpriseKm({}), 0)
   assert.equal(largeurEmpriseKm({ minLon: NaN, maxLon: 1, minLat: 0, maxLat: 1 }), 0)
 })
+
+// ── L'antiméridien ──────────────────────────────────────────────────────────
+
+test('une emprise qui franchit ±180° garde sa VRAIE largeur, pas son complément', () => {
+  // LE DÉFAUT DU 2026-08-02, en un test. `demBounds` triait ses deux
+  // longitudes au lieu de rendre ouest puis est, et un bloc pacifique de 67,5°
+  // ressortait à 292,5° — son complément. Le masque de mer, la plage
+  // d'altitude, les tuiles et tout placement par lat/lon s'en trouvaient faux.
+  const aCheval = { minLon: 150, maxLon: -142.5, minLat: 0, maxLat: 0.001 }
+  const km = largeurEmpriseKm(aCheval)
+  // 67,5° à l'équateur ≈ 7 514 km. Le complément (292,5°) en ferait 32 561.
+  assert.ok(km > 7000 && km < 8000, `attendu ~7 514 km, obtenu ${km.toFixed(0)}`)
+})
+
+test('une emprise ordinaire n’est pas touchée par la règle d’enroulement', () => {
+  const normale = { minLon: 5, maxLon: 7, minLat: 45, maxLat: 45.001 }
+  const km = largeurEmpriseKm(normale)
+  assert.ok(km > 155 && km < 160, `attendu ~157 km, obtenu ${km.toFixed(0)}`)
+})

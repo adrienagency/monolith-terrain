@@ -505,6 +505,15 @@ vec2 champXZ() { return vWorldPos.xz + uFenetre; }
 // pour que la moindre ville se détache franchement.
 const float NUIT_FOND = 0.22;
 
+// LE GAIN DES LUMIERES. Black Marble est un produit SCIENTIFIQUE : sa dynamique
+// est calee pour qu'aucune ville ne sature le capteur, pas pour qu'une carte
+// soit lisible. Peint tel quel, meme Tokyo ne montait qu'au tiers du blanc.
+// On ouvre donc franchement — demande d'Adrien, « augmente beaucoup » — et le
+// clamp du rendu tient le haut de la courbe. La racine carree remonte SURTOUT
+// les lueurs faibles : les petites villes et les routes apparaissent, sans que
+// les metropoles ne deviennent une tache blanche sans forme.
+const float NUIT_GAIN = 3.4;
+
 // LE DRAPAGE D'UNE MOSAÏQUE SUR LE SOL — la géométrie commune à la photo
 // aérienne et aux lumières nocturnes.
 //
@@ -885,7 +894,7 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     // lum mesure la lumière PRÉSENTE : là où elle est forte, on n'assombrit
     // pas — sinon on creuserait le cœur des villes, exactement l'inverse.
     diffuseColor.rgb *= mix(1.0, mix(NUIT_FOND, 1.0, min(1.0, lum * 3.0)), force);
-    diffuseColor.rgb += lueur * force;
+    diffuseColor.rgb += sqrt(lueur) * NUIT_GAIN * force;
   }
 
   // Fancy surface shader paints OVER the final surface — the hypsometric map OR

@@ -40,6 +40,8 @@
 // Le plafond de zoom de la matrice `Level8`, qui est aussi, à peu de chose
 // près, celui du capteur. Demander z9 ne rendrait pas plus de détail : il
 // rendrait une erreur.
+import { spanLon } from './map/tile-index.js'
+
 export const NUIT_ZOOM_MAX = 8
 
 export const NUIT_ATTRIBUTION = 'NASA GIBS · VIIRS Black Marble'
@@ -128,7 +130,10 @@ export function largeurEmpriseKm(bbox) {
   if (![minLon, maxLon, minLat, maxLat].every(Number.isFinite)) return 0
   const latMoy = (minLat + maxLat) / 2
   const kmParDegLon = 111.32 * Math.cos((latMoy * Math.PI) / 180)
-  const largeur = Math.abs(maxLon - minLon) * kmParDegLon
+  // `spanLon` et pas une soustraction : une emprise qui franchit ±180° rendrait
+  // ici son COMPLÉMENT, donc une largeur cinq fois trop grande, et le garde
+  // d'échelle laisserait passer une couche qui n'a rien à montrer.
+  const largeur = spanLon(minLon, maxLon) * kmParDegLon
   const hauteur = Math.abs(maxLat - minLat) * 110.57
   // Le plus GRAND des deux côtés : c'est lui qui décide s'il y a une forme à
   // voir. Une emprise très aplatie garde donc sa couche tant qu'une dimension
