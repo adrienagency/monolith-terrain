@@ -18,6 +18,23 @@
 // polders : sous 0 m ET connectés au bord (Pays-Bas) ou en bassin ≥2 %
 // (Flevoland), la topologie seule les prenait pour la mer. CONTRAT : sans
 // landMask, résultat bit-à-bit identique à avant.
+//
+// ⚠️ SI TU ARRIVES ICI PARCE QUE « DE L'EAU RENTRE DANS LES TERRES », MESURE
+// D'ABORD LE TRAIT DE CÔTE AVANT D'ACCUSER LA MER. Fait à Brest le 2026-08-02,
+// sur le bloc vivant : le masque côtier déclare 37,78 % du bloc en mer, et de
+// ces 891 375 cellules **88 seulement (0,01 %) portent plus de 20 m de
+// relief** — il ne remonte donc PAS dans les vallées. En peignant la rampe
+// océan en magenta, la mer s'arrête exactement au goulet, à la rade et au port.
+// La part de terre déclarée par le trait de côte et peinte en eau par la mer
+// est NULLE.
+//
+// L'eau fautive venait des PLANS D'EAU D'ALTITUDE (ocean.js, src/lake.js), qui
+// ont leur propre détecteur et ne consultent ni ce masque ni le trait de côte.
+// Vérifié par extinction : masquer le groupe `real-water-lacs` fait disparaître
+// exactement les dentelles bleu pâle, et rien d'autre. Leur garde-fou est dans
+// src/plan-eau.js. Ce module-ci ne peut mouiller QUE des cellules sous le
+// niveau de la mer : au-dessus, `underwater` est faux dans terrain.js quoi
+// qu'il dise. Une nappe bleue sur un plateau à 90 m ne vient jamais d'ici.
 
 // Le seuil de « grand bassin », en FRACTION du champ : une poche basse non
 // connectée au bord reste mer si elle occupe au moins ça. C'est ce qui sauve la

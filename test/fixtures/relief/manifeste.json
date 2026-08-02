@@ -1,0 +1,112 @@
+[
+  {
+    "nom": "rhone-valence",
+    "lat": 44.93,
+    "lon": 4.89,
+    "zoom": 12,
+    "tuiles": 3,
+    "quoi": "plaine alluviale (vallée du Rhône)",
+    "cote": 768,
+    "extentMeters": 20780.211517539643
+  },
+  {
+    "nom": "rhone-fin",
+    "lat": 44.93,
+    "lon": 4.89,
+    "zoom": 13,
+    "tuiles": 7,
+    "quoi": "la même vallée au pas de la production",
+    "cote": 1792,
+    "extentMeters": 24243.580103796252
+  },
+  {
+    "nom": "brest",
+    "lat": 48.39,
+    "lon": -4.49,
+    "zoom": 13,
+    "tuiles": 5,
+    "quoi": "côte découpée (rade, abers, estuaire)",
+    "cote": 1280,
+    "extentMeters": 16242.72708114747
+  },
+  {
+    "nom": "annecy-z12",
+    "lat": 45.85,
+    "lon": 6.17,
+    "zoom": 12,
+    "tuiles": 3,
+    "quoi": "lac de montagne, vue large",
+    "cote": 768,
+    "extentMeters": 20444.692865978526
+  },
+  {
+    "nom": "annecy-z15",
+    "lat": 45.85,
+    "lon": 6.17,
+    "zoom": 15,
+    "tuiles": 3,
+    "quoi": "le MÊME lac, vue rapprochée",
+    "cote": 768,
+    "extentMeters": 2555.586608247316
+  },
+  {
+    "nom": "paris-idf",
+    "lat": 48.86,
+    "lon": 2.35,
+    "zoom": 12,
+    "tuiles": 3,
+    "quoi": "plateau urbain plat (fausse eau compacte)",
+    "cote": 768,
+    "extentMeters": 19310.59602966805
+  },
+  {
+    "nom": "camargue",
+    "lat": 43.5,
+    "lon": 4.45,
+    "zoom": 12,
+    "tuiles": 3,
+    "quoi": "delta du Rhône",
+    "cote": 768,
+    "extentMeters": 21291.057143639104
+  },
+  {
+    "nom": "flevoland",
+    "lat": 52.45,
+    "lon": 5.55,
+    "zoom": 12,
+    "tuiles": 3,
+    "quoi": "polder sous le niveau de la mer",
+    "cote": 768,
+    "extentMeters": 17888.569572638815
+  },
+  {
+    "nom": "serre-poncon",
+    "lat": 44.51,
+    "lon": 6.33,
+    "zoom": 12,
+    "tuiles": 3,
+    "quoi": "lac de barrage",
+    "cote": 768,
+    "extentMeters": 20931.60700734759
+  },
+  {
+    "nom": "sognefjord",
+    "lat": 61.1,
+    "lon": 6.7,
+    "zoom": 11,
+    "tuiles": 3,
+    "quoi": "fjord",
+    "cote": 768,
+    "extentMeters": 28370.433943059863
+  },
+  {
+    "nom": "etretat",
+    "lat": 49.7,
+    "lon": 0.2,
+    "zoom": 12,
+    "tuiles": 3,
+    "quoi": "côte franche (falaises)",
+    "cote": 768,
+    "extentMeters": 18984.456448690344
+  }
+]

@@ -20,6 +20,7 @@ import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
 import { runLakeJob } from './terrain-jobs.js'
 import { lacsMemoLire, lacsMemoEcrire } from './dem-memo.js'
+import { plansEauRetenus } from './plan-eau.js'
 // LE CHAMP SUIT LE RELIEF — règles pures et testées, voir src/mer-emprise.js
 // pour la mesure d'avant/après et le pourquoi de chaque choix.
 import { resChamp, spanChamp } from './mer-emprise.js'
@@ -1207,13 +1208,30 @@ export class RealWater {
   _batirLacs(lacs, { dem, params, fieldTex, cote }) {
     const scale = (this._span / dem.extentMeters) * params.demExaggeration
     const cellM = dem.extentMeters / (dem.size - 1)
+    // ⚠️ LA LARGEUR D'UN BLOC, PAS CELLE DE L'EMPRISE. En mode continu
+    // `extentMeters` est déjà multiplié par `empriseCote` (dem-emprise.js) :
+    // servir cette valeur au plancher de longueur le multiplierait par trois et
+    // ferait disparaître, en mode continu seulement, les lacs que ce plancher
+    // borné existe pour sauver.
+    const blocM = dem.extentMeters / (dem.empriseCote > 1 ? dem.empriseCote : 1)
     let poses = 0
-    for (const lake of lacs) {
+    // ══════════ QUI A LE DROIT À UNE SURFACE D'EAU ANIMÉE ═══════════════════
+    //
+    // Le tri vit dans src/plan-eau.js, pas ici, et il TRIE AVANT DE CUIRE : le
+    // masque par lac (`_bakeLakeMask`, une distance de chanfrein sur la boîte
+    // englobante) coûtait plein tarif pour 21 dentelles refusées sur 21 à
+    // Brest. Deux conditions, toutes deux mesurées là-bas et à Valence :
+    //   · largeur  >= 150 m — la NOUVELLE, celle qui refuse les dentelles de
+    //     contour que la quantification en mètres entiers fabrique sur toute
+    //     pente douce (« la mer qui rentre dans les côtes », 2026-08-02) ;
+    //   · longueur >= min(3 km, 80 % du bloc) — la règle d'Adrien de la v40,
+    //     BORNÉE PAR LE BLOC : telle quelle, à 3 km absolus, elle effaçait le
+    //     lac d'Annecy dès z15 puisqu'un bloc n'y fait plus que 2,6 km.
+    // test/garde-plans-eau.test.js les tient sur onze MNT réels, hors ligne —
+    // dont la MÊME eau cuite à deux finesses, parce qu'un seuil peut sembler
+    // invariant sans l'être et que c'est ce qui a coûté un revert le 2026-08-02.
+    for (const { lac: lake } of plansEauRetenus(lacs, { cellM, blocM })) {
       const { tex, minX, minY, w, h } = this._bakeLakeMask(lake)
-      // couche maritime réservée aux VRAIS lacs : longueur >= 3 km (demande
-      // Adrien v40 — detectLakes prenait des zones plates urbaines pour des
-      // plans d'eau, cf. les taches bleues d'Annecy)
-      if (Math.max(w, h) * cellM < 3000) { tex.dispose(); continue }
       this._textures.push(tex)
       const yLake = (lake.elevM - dem.meanM) * scale + 0.04 + (params.detail ?? 0) * 0.6 + 0.025
       const toWorld = (g, n) => (g / (n - 1) - 0.5) * this._span
