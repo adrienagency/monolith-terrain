@@ -230,6 +230,16 @@ export class Terrain {
       // rivage) : fraction de uSeaRange sur laquelle l'aérien passe de 1 à 0.
       // 0 = fondu désactivé (photo pleine partout, ancien comportement).
       uAerialCoastFade: { value: 0.1 },
+      // LUMIÈRES NOCTURNES (onglet « Couches », dosées par le Gardien). Même
+      // drapage que la photo — uvSolDrape — mais peintes en ADDITIF : ce sont
+      // des lumières, pas une image. uNuitIntensite porte déjà le facteur de
+      // l'heure, calculé côté JS par intensiteNuit() dans src/nuit.js ; à 0 le
+      // bloc entier est sauté plutôt que de peindre du noir sur du noir.
+      uNuit: { value: blackTexture() }, // jamais null : un échantillonneur nul ne compile pas sur certains pilotes
+      uNuitOn: { value: 0 },
+      uNuitIntensite: { value: 0 },
+      uNuitOffset: { value: new THREE.Vector2(0, 0) },
+      uNuitScale: { value: new THREE.Vector2(1, 1) },
       // drifting cloud shadows, baked by the cloud deck (clouds.js) — a black
       // placeholder keeps the sampler valid until the deck provides its map
       uCloudShadow: { value: blackTexture() },
@@ -427,6 +437,11 @@ uniform float uAerialOpacity;
 uniform vec2 uAerialOffset;
 uniform vec2 uAerialScale;
 uniform float uAerialCoastFade;
+uniform sampler2D uNuit;
+uniform float uNuitOn;
+uniform float uNuitIntensite;
+uniform vec2 uNuitOffset;
+uniform vec2 uNuitScale;
 uniform float uCloudShadowK;
 uniform vec3 uCloudShadowTint;
 uniform float uScanT;
@@ -483,6 +498,42 @@ ${FX_GLSL}
 // Hors mode continu uFenetre vaut (0,0) : champXZ() EST vWorldPos.xz, au
 // bit près.
 vec2 champXZ() { return vWorldPos.xz + uFenetre; }
+
+// LE DRAPAGE D'UNE MOSAÏQUE SUR LE SOL — la géométrie commune à la photo
+// aérienne et aux lumières nocturnes.
+//
+// ⚠️ CETTE FONCTION EXISTE PARCE QUE CE CALCUL A DÉJÀ DÉRAILLÉ DEUX FOIS, et
+// que les deux fois le défaut était invisible en console et parfaitement
+// visible à l'œil :
+//
+//   1. vWorldPos.xz au lieu de champXZ() — la mosaïque reste COLLÉE À
+//      L'ÉCRAN pendant que le paysage défile dessous. C'est « Vienne sur le
+//      mont Fuji », signalé par Adrien : « la cartographie aérienne ne suit pas
+//      le terrain ».
+//   2. uSlabHalf * 2.0 au lieu de uMaskSpan — la mosaïque se rétrécit au
+//      tiers de sa largeur, donc au NEUVIÈME de sa surface, et ce neuvième
+//      reste collé au socle central. C'est « la carte aérienne ne se charge que
+//      sur 1 carreau sur 9 ». uMaskSpan vaut 56 sur un bloc, 168 sur une
+//      emprise 3×3 : les deux longueurs doivent bouger ENSEMBLE, sinon l'image
+//      est étirée ×3 ou comprimée ×3 sans que rien ne paraisse cassé.
+//
+// Une deuxième couche drapée, c'était une deuxième occasion de rejouer les
+// deux. Le calcul vit donc désormais à UN seul endroit.
+//
+// bordIn rend l'atténuation de bord : 1 partout HORS mode continu (tout
+// fragment du socle y est par construction dans [0,1], et un fondu mangerait la
+// mosaïque sur les quatre bords de CHAQUE bloc), et un fondu étroit sur le bord
+// de l'emprise en mode continu, là où le débordement élastique peut mordre
+// au-delà et où texture2D étirerait le texel de bord en traînées.
+vec2 uvSolDrape(out float bordIn) {
+  vec2 uv = (champXZ() - uBlockOffset) / uMaskSpan + 0.5;
+  float cont = step(uSlabHalf * 2.0 + 1.0, uMaskSpan);
+  float bande = 1.7 / uMaskSpan; // largeur CONSTANTE en unités monde, pas en fraction d'emprise
+  vec2 edge = smoothstep(vec2(0.0), vec2(bande), uv) * (1.0 - smoothstep(vec2(1.0 - bande), vec2(1.0), uv));
+  bordIn = mix(1.0, edge.x * edge.y, cont);
+  uv.y = 1.0 - uv.y; // les lignes de texture vont nord→sud, le +Z du monde va sud→nord
+  return uv;
+}
 // --- Appearance blend modes (Figma / W3C compositing set) — b = backdrop map,
 // s = the shader colour. Separable ops are channel-wise; the last four are the
 // non-separable HSL modes. ---
@@ -754,7 +805,8 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     // retrouve étirée ×3 ou comprimée ×3 sans que rien ne paraisse cassé.
     // uMaskSpan vaut 56 sur un bloc et 168 sur une emprise : hors mode
     // continu l'expression est celle d'avant, au bit près.
-    vec2 aUv = (champXZ() - uBlockOffset) / uMaskSpan + 0.5;
+    float aIn;
+    vec2 aUv = uvSolDrape(aIn); // ⚠️ les deux pièges ci-dessus vivent DANS uvSolDrape, pas ici
     // ⚠️ IL RESTE UN BORD, MAIS C'EST CELUI DE L'EMPRISE. La photo couvre
     // maintenant tout ce qu'on peut atteindre : à course pleine (±56) le bord
     // du socle (±28) touche EXACTEMENT le bord de l'emprise (±84). Seul le
@@ -769,11 +821,6 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     // bords de CHAQUE bloc, c'est-à-dire une régression bien visible sur
     // l'image d'aujourd'hui. uMaskSpan est le seul témoin déjà transmis au
     // shader qui distingue les deux, et il ne coûte rien.
-    float aCont = step(uSlabHalf * 2.0 + 1.0, uMaskSpan);
-    float aBande = 1.7 / uMaskSpan;
-    vec2 aEdge = smoothstep(vec2(0.0), vec2(aBande), aUv) * (1.0 - smoothstep(vec2(1.0 - aBande), vec2(1.0), aUv));
-    float aIn = mix(1.0, aEdge.x * aEdge.y, aCont);
-    aUv.y = 1.0 - aUv.y; // texture rows run north->south, world +Z runs south->north
     aUv = uAerialOffset + aUv * uAerialScale; // place the mosaic (see aerialUvTransform)
     vec3 aerial = texture2D(uAerial, aUv).rgb;
     // Modulate by the paint's own luminance instead of replacing it: the
@@ -790,6 +837,29 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
       aFade = smoothstep(uSeaY - band, uSeaY, vWorldPos.y); // 1 au rivage → 0 au fond
     }
     diffuseColor.rgb = mix(diffuseColor.rgb, aerial * (0.6 + 0.8 * shade), uAerialOpacity * aFade * aIn);
+  }
+
+  // LUMIÈRES NOCTURNES — posées ICI, juste après la photo et AVANT les courbes
+  // de niveau, la grille et les étiquettes. C'est le même principe d'ordre que
+  // la photo : la cartographie dessinée reste au-dessus de l'imagerie, sinon on
+  // fabrique un visualiseur satellite et plus une carte.
+  //
+  // ⚠️ ADDITIF, ET PAS UN MÉLANGE. Une ville éclairée n'est pas une couleur qui
+  // REMPLACE le sol, c'est de la lumière qui S'AJOUTE. Un mix aurait éclairci
+  // les campagnes noires en même temps que les villes, et le noir de Black
+  // Marble aurait ASSOMBRI le relief là où il n'y a personne — l'inverse exact
+  // de ce qu'on veut. L'addition laisse le vide strictement transparent.
+  if (uNuitOn > 0.5 && uNuitIntensite > 0.001) {
+    float nIn;
+    vec2 nUv = uvSolDrape(nIn);
+    nUv = uNuitOffset + nUv * uNuitScale;
+    vec3 lueur = texture2D(uNuit, nUv).rgb;
+    // Le seuil doux mange le halo de fond du capteur (l'atmosphère diffuse la
+    // lumière bien au-delà des villes, et VIIRS l'enregistre). Sans lui, un
+    // voile gris se posait sur des vallées vides — on lisait un défaut de
+    // rendu, pas des lumières.
+    lueur = max(vec3(0.0), lueur - 0.06) / 0.94;
+    diffuseColor.rgb += lueur * uNuitIntensite * nIn;
   }
 
   // Fancy surface shader paints OVER the final surface — the hypsometric map OR
@@ -1198,6 +1268,27 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // 0 = photo pleine partout ; >0 = elle s'estompe sous l'eau au-delà du rivage.
   setAerialCoastFade(v) {
     this.mapUniforms.uAerialCoastFade.value = v
+  }
+  // LUMIÈRES NOCTURNES — même contrat que setAerial() : on passe l'objet rendu
+  // par NuitLayer.build(), ou null pour éteindre. La texture de remplacement
+  // reste liée quand c'est éteint (un échantillonneur nul peut refuser de
+  // compiler) ; c'est uNuitOn qui commande, jamais la texture.
+  setNuit(built) {
+    const u = this.mapUniforms
+    if (built && built.texture) {
+      u.uNuit.value = built.texture
+      u.uNuitOn.value = 1
+      u.uNuitOffset.value.set(built.uv.offset[0], built.uv.offset[1])
+      u.uNuitScale.value.set(built.uv.scale[0], built.uv.scale[1])
+    } else {
+      u.uNuitOn.value = 0
+    }
+  }
+  // L'intensité PORTE DÉJÀ l'heure : main.js la calcule par intensiteNuit()
+  // (src/nuit.js) et la multiplie par le réglage utilisateur. À 0, le shader
+  // saute le bloc entier.
+  setNuitIntensite(v) {
+    this.mapUniforms.uNuitIntensite.value = v
   }
   applyFxParams(pp) {
     const u = this.mapUniforms

@@ -3842,3 +3842,79 @@ body.ce-noui .ce-rec {
   cursor: help; /* il y a quelque chose à lire au survol */
   white-space: nowrap;
 }
+
+/* ─── L'onglet « Couches » et la jauge du Gardien ────────────────────────────
+   Le Gardien parle, il ne se contente pas de griser. Le refus a donc un poids
+   visuel volontairement FAIBLE (opacité, pas rouge) et un poids TEXTUEL fort :
+   c'est la raison qu'on veut faire lire, pas l'interdiction. */
+.ce-gardien-resume {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  opacity: 0.9;
+  margin-bottom: 6px;
+}
+.ce-gardien-barre {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  overflow: hidden;
+}
+.ce-gardien-remplissage {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.45;
+  transition: width 0.25s ease, opacity 0.25s ease;
+}
+/* « tendu » n'est pas une alarme : c'est un avis. Il gagne en présence, pas en
+   couleur — le site n'a pas de rouge, et en introduire un ici pour un budget
+   de confort serait hors sujet. */
+.ce-gardien-barre.tendu .ce-gardien-remplissage { opacity: 0.75; }
+.ce-gardien-barre.depasse .ce-gardien-remplissage { opacity: 1; }
+.ce-gardien-souffrance {
+  font-size: 11px;
+  line-height: 1.45;
+  opacity: 0.6;
+  margin-top: 7px;
+}
+.ce-couche { padding: 7px 0; border-top: 1px solid color-mix(in srgb, currentColor 8%, transparent); }
+.ce-couche:first-child { border-top: 0; }
+.ce-couche-tete { display: flex; align-items: center; gap: 8px; }
+.ce-couche-tete .ce-label { flex: 1; }
+/* Le coût, en parts. Une pastille discrète : elle doit être lisible quand on
+   la cherche, invisible quand on ne la cherche pas. Son title porte la note du
+   catalogue — d'où sort le chiffre. */
+.ce-couche-cout {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  opacity: 0.7;
+  cursor: help;
+}
+.ce-couche.bloquee .ce-couche-tete { opacity: 0.45; }
+.ce-couche-raison {
+  font-size: 11px;
+  line-height: 1.45;
+  opacity: 0.62;
+  margin: 5px 0 0;
+}
+.ce-couche-echange { margin-top: 6px; width: 100%; font-size: 11px; }
+.ce-gardien-plein { font-size: 11px; line-height: 1.45; opacity: 0.75; margin-top: 6px; }
+.ce-gardien-plein:empty { display: none; }
+/* LA RAISON SE RÉVÈLE, ELLE NE S'EMPILE PAS. Budget plein = plusieurs couches
+   refusées d'un coup ; afficher les N paragraphes en même temps fabrique un mur
+   de texte, et un mur de texte est exactement ce qui fait qu'on cesse de lire
+   les avertissements. La phrase globale au-dessus dit qu'il y a quelque chose à
+   savoir ; le détail arrive sur la couche qu'on regarde. */
+.ce-couche-raison, .ce-couche-echange { display: none; }
+.ce-couche:hover .ce-couche-raison,
+.ce-couche:focus-within .ce-couche-raison { display: block; }
+.ce-couche:hover .ce-couche-echange,
+.ce-couche:focus-within .ce-couche-echange { display: block; }
+/* Sans survol (tactile), rien ne se révélerait jamais : là, tout reste visible. */
+@media (hover: none) {
+  .ce-couche-raison, .ce-couche-echange { display: block; }
+}

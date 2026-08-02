@@ -125,6 +125,9 @@ import { buildRoutePanel } from './ui/route-panel.js'
 import { buildExplorePanel } from './ui/explore-panel.js'
 import { buildShadersPanel } from './ui/shaders-panel.js'
 import { buildMapPanel } from './ui/map-panel.js'
+import { buildCouchesPanel } from './ui/couches-panel.js'
+import { NuitLayer } from './map/nuit-layer.js'
+import { intensiteNuit, facteurEchelleNuit, largeurEmpriseKm } from './nuit.js'
 import { buildEffectsPanel, BASE_GRADE } from './ui/effects-panel.js'
 import { buildHourPill } from './ui/hour-pill.js'
 import { buildZoomStepper } from './ui/zoom-stepper.js'
@@ -1171,6 +1174,12 @@ function applyTimeOfDay(hour) {
   // the cycle too — dark at night, bright by day. Re-dim only on a meaningful
   // change so the auto-cycle never re-bakes the gradient every single frame.
   if (Math.abs(bgDayMul() - _lastBgMul) > 0.015) applyBackground()
+
+  // Les villes s'allument quand le soleil se couche. C'est un simple réglage
+  // d'uniforme — pas de reconstruction, pas de texture : la tirette d'heure
+  // peut donc être traînée sans que la couche coûte quoi que ce soit. On passe
+  // `hour`, pas params : c'est l'heure que le soleil vient d'appliquer.
+  refreshNuitIntensite(hour)
 }
 
 function placeSun() {
@@ -4697,6 +4706,54 @@ async function refreshAerial() {
   await refreshAerialCore()
   mapCorner?.setAerialActive(params.aerialEnabled && params.source === 'real')
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COUCHES — l'état, et les couches elles-mêmes
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Un simple jeu d'identifiants. C'est le panneau qui interroge le Gardien ;
+// ici on ne fait qu'allumer et éteindre ce qui a été autorisé.
+const couchesActives = new Set()
+
+const nuitLayer = new NuitLayer({ maxTexturePx: renderer.capabilities.maxTextureSize })
+
+// L'intensité porte DEUX facteurs : l'heure (les villes ne brillent pas à
+// midi) et l'allumage de la couche. On les multiplie ici plutôt que dans le
+// shader pour que `intensiteNuit` reste pure et testable sous node.
+// ⚠️ L'HEURE EST UN ARGUMENT, PAS UNE LECTURE DE `params`. `applyTimeOfDay`
+// reçoit son heure ; elle vaut presque toujours `params.timeOfDay`, mais pas
+// toujours — et quand elle en diffère, lire params fait briller les villes en
+// plein midi pendant que le soleil, lui, obéit à l'argument. Le défaut est
+// apparu au premier essai : forcer 12 h laissait la couche à pleine intensité.
+function refreshNuitIntensite(hour = params.timeOfDay ?? 10) {
+  const on = couchesActives.has('lumieres-nocturnes')
+  if (!on) { terrain.setNuitIntensite(0); return }
+  // DEUX facteurs, et le second n'est pas cosmétique : sous 20 km d'emprise, le
+  // bloc couvre trois pixels de Black Marble et la couche devient un voile gris
+  // uniforme — constaté à Tokyo z16. `facteurEchelleNuit` l'éteint alors.
+  const echelle = facteurEchelleNuit(largeurEmpriseKm(dem ? demBounds(dem) : null))
+  terrain.setNuitIntensite(intensiteNuit(hour) * echelle)
+}
+
+async function refreshNuit() {
+  if (!couchesActives.has('lumieres-nocturnes') || !dem || params.source !== 'real') {
+    terrain.setNuit(null)
+    refreshNuitIntensite()
+    return
+  }
+  // L'emprise VRAIE du champ chargé — un bloc, ou les neuf dalles du mode
+  // continu. Jamais `patchBounds` : voir `demBounds`.
+  const built = await nuitLayer.build(demBounds(dem))
+  if (built === SUPERSEDED) return // une construction plus récente a pris la main
+  terrain.setNuit(built)
+  refreshNuitIntensite()
+}
+
+function setCouche(id, on) {
+  if (on) couchesActives.add(id)
+  else couchesActives.delete(id)
+  if (id === 'lumieres-nocturnes') refreshNuit()
+}
 async function refreshAerialCore() {
   if (!params.aerialEnabled || !dem || params.source !== 'real') {
     terrain.setAerial(null)
@@ -4794,7 +4851,7 @@ async function paintCellAerial(cell) {
   cell.terrain.setAerialOpacity(params.aerialOpacity)
   cell.terrain.setAerialCoastFade(params.aerialCoastFade ?? 0.1)
 }
-const rebuildMapLayers = () => { const p = mapLayers.rebuild({ dem, terrain, params }); refreshOsmCredit(); refreshAerial(); return p.then(() => refreshOsmCredit()) }
+const rebuildMapLayers = () => { const p = mapLayers.rebuild({ dem, terrain, params }); refreshOsmCredit(); refreshAerial(); refreshNuit(); return p.then(() => refreshOsmCredit()) }
 
 // "individualiser la zone" — clip the map to the administrative boundary under
 // the view (continent/country/region/departement by zoom). The landform sits
@@ -6117,6 +6174,18 @@ const mapPanel = buildMapPanel({
   refreshAerial,
   peaksLayer,
   setLabelsVisible: (v) => (labels.visible = v && modes.mode === 'surface'),
+})
+
+// L'onglet « Couches » — la vitrine du Gardien. Il ne calcule rien : il
+// affiche ce que `etatCouches()` lui rend et exécute les échanges proposés.
+const couchesPanel = buildCouchesPanel({
+  couchesActives: () => [...couchesActives],
+  setCouche,
+  machine: MACHINE,
+  // ⚠️ Une FONCTION, pas l'objet : `aq` est créé bien plus bas dans ce fichier
+  // (le gouverneur a besoin du composer). Passer `aq` ici capturerait `undefined`
+  // pour toute la session, et le Gardien croirait la machine intacte à jamais.
+  get gouverneur() { return aq },
 })
 
 // (panneau Scanner supprimé — sa section vit dans Image, voir buildEffectsPanel)

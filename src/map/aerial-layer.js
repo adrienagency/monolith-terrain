@@ -533,7 +533,10 @@ export function lonLatToMerc(lon, lat) {
 
 // Slippy tile grid -> its normalised-mercator bounds. Tile x/y ARE those
 // coordinates scaled by 2^z, so this is just a division — no projection.
-function tileGridMerc(x0, y0, cols, rows, z) {
+// Exporté depuis la couche « lumières nocturnes » (src/map/nuit-layer.js) : elle
+// bâtit une mosaïque web-mercator par le même chemin, et dupliquer trois lignes
+// d'arithmétique de grille serait la meilleure façon de les voir diverger.
+export function tileGridMerc(x0, y0, cols, rows, z) {
   const n = 2 ** z
   return { minX: x0 / n, maxX: (x0 + cols) / n, minY: y0 / n, maxY: (y0 + rows) / n }
 }
@@ -553,7 +556,7 @@ export function aerialUvTransform(patchBBox, gridMerc) {
 
 // crossOrigin is mandatory: IGN sends Access-Control-Allow-Origin: * (verified
 // live), and without the flag the canvas is tainted and WebGL refuses it.
-function loadImage(url) {
+export function loadImage(url) {
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.crossOrigin = 'anonymous'
