@@ -108,5 +108,27 @@
     "quoi": "côte franche (falaises)",
     "cote": 768,
     "extentMeters": 18984.456448690344
+  },
+  {
+    "nom": "dijon-dole",
+    "lat": 47.2,
+    "lon": 5.3,
+    "zoom": 12,
+    "tuiles": 3,
+    "source": "mapterhorn",
+    "quoi": "la même plaine, un zoom plus près (z12)",
+    "cote": 1536,
+    "extentMeters": 19942.838088686178
+  },
+  {
+    "nom": "dijon-large",
+    "lat": 47.3,
+    "lon": 5.3,
+    "zoom": 11,
+    "tuiles": 3,
+    "source": "mapterhorn",
+    "quoi": "plaine de la Saône et du Doubs, la vue d’Adrien (z11)",
+    "cote": 1536,
+    "extentMeters": 39810.43957625002
   }
 ]
