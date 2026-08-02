@@ -578,13 +578,54 @@ export function tileGridMerc(x0, y0, cols, rows, z) {
 
 // UV transform mapping the block's own 0..1 surface coords onto the mosaic.
 // Exported and pure so it can be unit-tested without a GPU or a network.
+//
+// ══════ ⚠️ L'ORIGINE DES UV EST LE COIN SUD-OUEST, PAS LE COIN NORD-OUEST ════
+//
+// LE DÉFAUT, tel qu'Adrien l'a vu : « la map d'éclairage nocturne est toujours
+// décalée ». MESURÉ (docs/nuit-recalage/mesure-chaine.mjs rejoue la chaîne
+// entière en nombres) : écart RIGOUREUSEMENT NUL en longitude, et 4 à 131 km en
+// latitude selon le bloc — 84 km à Paris, 63 km à Nouméa, 24 km à Las Vegas.
+// Ni constant, ni proportionnel au zoom, ni croissant avec la latitude : il
+// saute d'un bloc à l'autre. Cette forme-là ne désigne qu'une seule famille de
+// cause, un décalage de GRILLE.
+//
+// Les mosaïques drapées sont des CanvasTexture, dont `flipY` vaut true (aucune
+// des deux couches ne l'éteint, contrairement à tous les autres masques du
+// projet qui posent `tex.flipY = false`). En UV, v = 0 est donc la DERNIÈRE
+// ligne du canevas, celle du SUD — et c'est pour ça que `uvSolDrape`
+// (terrain.js) finit par `uv.y = 1.0 - uv.y`.
+//
+// Or le shader enchaîne dans cet ordre :
+//     vec2 uv = uvSolDrape(...);   // le retournement est DEDANS
+//     uv = uOffset + uv * uScale;  // puis l'affine de la couche
+// et un retournement NE COMMUTE PAS avec une affine. L'offset vertical rendu
+// ici doit donc se mesurer depuis le bord SUD de la grille de tuiles — depuis
+// l'origine des UV — et non depuis son bord nord, comme le faisait l'ancienne
+// ligne `(a.y - gridMerc.minY) / gh`. L'erreur valait exactement la DIFFÉRENCE
+// des deux débords de la grille, nord moins sud.
+//
+// POURQUOI LA PHOTO AÉRIENNE, ELLE, PARAISSAIT JUSTE. Dès que le zoom
+// d'imagerie est ≥ au zoom du DEM — le cas de tous les fournisseurs nationaux —
+// les bords de la grille de tuiles coïncident avec ceux du bloc (un bord de
+// tuile z13 est aussi un bord de tuile z15). Les deux débords valent zéro, leur
+// différence aussi, et le défaut ne peut pas s'exprimer. Les lumières
+// nocturnes, plafonnées à z8 par le capteur VIIRS, sont TOUJOURS plus
+// grossières que le DEM : le bloc flotte quelque part dans une tuile de 156 km,
+// et le débord vaut ce qu'il veut. Même chemin de code, un seul l'exerçait.
+//
+// ⚠️ ET LA PHOTO ÉTAIT FAUSSE AUSSI, là où le PLANCHER MONDIAL NASA (maxZoom 8,
+// donc le même plafond) sert de fournisseur principal : en mer, et dans tout
+// pays sans fournisseur national. Le calage n'avait été vérifié que sur la
+// France, où ce défaut est structurellement muet.
 export function aerialUvTransform(patchBBox, gridMerc) {
   const a = lonLatToMerc(patchBBox.minLon, patchBBox.maxLat) // patch top-left
   const b = lonLatToMerc(patchBBox.maxLon, patchBBox.minLat) // patch bottom-right
   const gw = gridMerc.maxX - gridMerc.minX
   const gh = gridMerc.maxY - gridMerc.minY
   return {
-    offset: [(a.x - gridMerc.minX) / gw, (a.y - gridMerc.minY) / gh],
+    // x depuis l'ouest (les deux axes sont d'accord) ; y depuis le SUD, donc
+    // depuis `gridMerc.maxY`, et sur le bord SUD du bloc (`b.y`).
+    offset: [(a.x - gridMerc.minX) / gw, (gridMerc.maxY - b.y) / gh],
     scale: [(b.x - a.x) / gw, (b.y - a.y) / gh],
   }
 }

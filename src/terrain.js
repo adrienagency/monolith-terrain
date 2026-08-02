@@ -540,6 +540,19 @@ const float NUIT_GAIN = 3.4;
 // mosaïque sur les quatre bords de CHAQUE bloc), et un fondu étroit sur le bord
 // de l'emprise en mode continu, là où le débordement élastique peut mordre
 // au-delà et où texture2D étirerait le texel de bord en traînées.
+//
+// ⚠️ CETTE FONCTION REND DES UV DÉJÀ RETOURNÉS, ET L'APPELANT APPLIQUE SON
+// OFFSET/ÉCHELLE APRÈS. Un retournement et une affine NE COMMUTENT PAS : c'est
+// pour ça que aerialUvTransform (map/aerial-layer.js) mesure son offset
+// vertical depuis le bord SUD de la grille de tuiles, et pas depuis le nord.
+// Poser l'offset dans le mauvais sens décalait la mosaïque de la différence des
+// deux débords de grille — invisible sur la photo aérienne (grille alignée sur
+// le bloc), jusqu'à 131 km sur les lumières nocturnes, plafonnées à z8. Le
+// dossier complet est dans le commentaire d'aerialUvTransform ; ne changez
+// l'un des deux qu'en changeant l'autre.
+//
+// ⚠️ ET PAS D'ACCENT GRAVE DANS CE COMMENTAIRE : tout ce bloc vit DANS un
+// gabarit JS, où un accent grave referme la chaîne et casse le shader entier.
 vec2 uvSolDrape(out float bordIn) {
   vec2 uv = (champXZ() - uBlockOffset) / uMaskSpan + 0.5;
   float cont = step(uSlabHalf * 2.0 + 1.0, uMaskSpan);
