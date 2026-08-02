@@ -78,6 +78,10 @@ export function looksInApp(ua = '') {
 // En créer un second pour la deuxième question, ce serait payer deux fois le
 // seul coût réel de toute cette détection.
 //
+// EN RENDRE UN, C'EST EN CONFIER LA DURÉE DE VIE À L'APPELANT : à lui de le
+// relâcher (WEBGL_lose_context) dès la deuxième réponse obtenue, sans quoi le
+// contexte et son canvas vivent aussi longtemps que la page. boot.js le fait.
+//
 // Enveloppé dans un try/catch parce qu'un navigateur dont WebGL est désactivé
 // peut LEVER au lieu de renvoyer null, et qu'une exception au démarrage produit
 // exactement l'écran blanc que ce module existe pour empêcher.

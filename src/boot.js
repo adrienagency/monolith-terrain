@@ -14,7 +14,8 @@ const shortSide = Math.min(screen.width, screen.height)
 
 // UN SEUL contexte WebGL2 pour les deux questions du démarrage : « cette
 // machine peut-elle rendre ? » (la carte de refus) et « jusqu'où peut-elle
-// rendre ? » (le palier de départ). Voir boot-gate.js.
+// rendre ? » (le palier de départ). Voir boot-gate.js. Il est relâché juste
+// après, dès que ces deux questions ont leur réponse.
 const gl = contexteWebGL2()
 
 const gate = gateFor({
@@ -50,6 +51,30 @@ if (gate) {
     })
   })
 }
+
+// ON REND LE CONTEXTE, MAINTENANT QU'IL A TOUT DIT. Les deux questions du
+// démarrage sont répondues au-dessus — la carte de refus dans une branche, le
+// palier de départ dans l'autre — et personne ne relit `gl` ensuite : main.js
+// se contente du verdict mémorisé par la sonde, et ce verdict ne contient que
+// des nombres et des chaînes, jamais le contexte lui-même.
+//
+// Sans ce relâchement, ce `const` de portée module garderait le contexte ET son
+// canvas détaché EN VIE AUSSI LONGTEMPS QUE LA PAGE, à côté de celui du vrai
+// renderer. Avant la sonde, detectWebGL2() créait le sien à l'intérieur de la
+// fonction et n'en rendait qu'un booléen : le ramasse-miettes le reprenait
+// aussitôt. En le remontant au niveau module pour le partager, on a perdu ça
+// sans le vouloir.
+//
+// Ce que ça coûte n'est pas anodin : Chrome plafonne le nombre de contextes
+// WebGL simultanés par onglet et tue le plus ancien au-delà, et un contexte
+// retenu pour rien pèse surtout en mémoire pilote sur les circuits intégrés —
+// exactement le matériel que toute cette détection cherche à ménager.
+//
+// APRÈS la sonde, jamais avant : elle lit MAX_TEXTURE_SIZE, les unités de
+// texture, les uniformes fragment et WEBGL_debug_renderer_info sur ce contexte
+// (voir lireSignaux dans palier-machine.js). Un contexte perdu ne répond plus.
+// Dans la branche de refus aussi, où la carte n'a besoin de rien de tout ça.
+gl?.getExtension('WEBGL_lose_context')?.loseContext()
 
 // One card for every refusal: same look whatever the reason, because to the
 // visitor they're the same event — "this isn't going to run for me, and here
