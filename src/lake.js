@@ -65,28 +65,6 @@
 // Servir des vues ferait écraser le premier lac par le second, en silence, et
 // l'un des deux plans d'eau se poserait sur la forme de l'autre. Le test
 // « deux lacs ne partagent pas leurs cellules » tient cette règle.
-//
-// ══════════ 🔴 CE QUE CE DÉTECTEUR NE SAIT PLUS FAIRE (2026-08-02) ══════════
-//
-// La découverte ci-dessus — sur MNT quantifié, `watery` est vrai partout — n'est
-// pas seulement une occasion d'optimiser : c'est le constat que **la platitude
-// ne distingue plus rien**. La tolérance effective n'est plus 0,35 m mais 1 m,
-// et sur une plaine alluviale chaque mètre entier découpe une DENTELLE de
-// plusieurs kilomètres d'envergure. Mesuré vallée du Rhône z12 : 46 « plans
-// d'eau », 8,44 % du bloc peint en eau animée sur des terres agricoles.
-//
-// CE FICHIER N'A PAS ÉTÉ CHANGÉ POUR AUTANT, et c'est délibéré : ce qu'il rend
-// reste une description géométrique honnête (« voici les composantes de même
-// altitude »), et ses douze cas restent justes. C'est la DÉCISION qui manquait —
-// « celle-ci mérite-t-elle une surface d'eau ? ». Elle vit désormais dans
-// **src/plan-eau.js**, elle se prend sur la LARGEUR au sol (une bande de contour
-// n'a pas de largeur propre, une étendue d'eau si), et six MNT réels la tiennent
-// hors ligne dans test/garde-plans-eau.test.js.
-//
-// ⚠️ N'AJOUTE PAS ICI UN QUATRIÈME SEUIL D'ALTITUDE. Trois critères purement
-// géométriques ont été mesurés contre ces six zones (remplissage de boîte,
-// rebord aval, largeur) : les deux premiers ÉCHOUENT à séparer une plaine d'un
-// vrai lac de barrage. Le tableau des mesures est en tête de plan-eau.js.
 export function detectLakes(dem, { tolM = 0.35, minCells = null, minFill = 0.25, flatM = 0.15 } = {}) {
   if (!dem || !dem.data) return []
   const { data, size } = dem

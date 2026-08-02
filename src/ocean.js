@@ -20,7 +20,6 @@ import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
 import { runLakeJob } from './terrain-jobs.js'
 import { lacsMemoLire, lacsMemoEcrire } from './dem-memo.js'
-import { plansEauRetenus } from './plan-eau.js'
 // LE CHAMP SUIT LE RELIEF — règles pures et testées, voir src/mer-emprise.js
 // pour la mesure d'avant/après et le pourquoi de chaque choix.
 import { resChamp, spanChamp } from './mer-emprise.js'
@@ -1209,19 +1208,12 @@ export class RealWater {
     const scale = (this._span / dem.extentMeters) * params.demExaggeration
     const cellM = dem.extentMeters / (dem.size - 1)
     let poses = 0
-    // ══════════ QUI A LE DROIT À UNE SURFACE D'EAU ANIMÉE ═══════════════════
-    //
-    // Le tri vit dans src/plan-eau.js, pas ici, et il TRIE AVANT DE CUIRE : le
-    // masque par lac (`_bakeLakeMask`, une distance de chanfrein sur la boîte
-    // englobante) coûtait plein tarif pour 46 dentelles refusées sur 46 à
-    // Valence. Deux conditions, toutes deux justifiées et mesurées là-bas :
-    //   · longueur >= 3 km   — la règle d'Adrien de la v40, inchangée ;
-    //   · largeur  >= 150 m  — la NOUVELLE, celle qui refuse les dentelles de
-    //     contour que la quantification en mètres entiers fabrique sur les
-    //     plaines (« les mers qui rentrent dans les terres », 2026-08-02).
-    // test/garde-plans-eau.test.js les tient sur six MNT réels, hors ligne.
-    for (const { lac: lake } of plansEauRetenus(lacs, { cellM })) {
+    for (const lake of lacs) {
       const { tex, minX, minY, w, h } = this._bakeLakeMask(lake)
+      // couche maritime réservée aux VRAIS lacs : longueur >= 3 km (demande
+      // Adrien v40 — detectLakes prenait des zones plates urbaines pour des
+      // plans d'eau, cf. les taches bleues d'Annecy)
+      if (Math.max(w, h) * cellM < 3000) { tex.dispose(); continue }
       this._textures.push(tex)
       const yLake = (lake.elevM - dem.meanM) * scale + 0.04 + (params.detail ?? 0) * 0.6 + 0.025
       const toWorld = (g, n) => (g / (n - 1) - 0.5) * this._span
