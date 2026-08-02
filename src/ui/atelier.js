@@ -36,6 +36,10 @@ import { makeMorph } from './panel-morph.js'
 import { keepScroll } from './kit.js'
 import { CLOUD_PRESETS, CLOUD_TIPS, cloudPresetOf, SEA_PRESETS, SEA_TIPS, seaPresetOf } from './effects-panel.js'
 import { LANDMARKS, ISLANDS } from '../landmarks.js'
+// La bibliothèque LIVRÉE — même liste, même chargeur que la Bibliothèque du
+// mode avancé (ui/templates-panel.js). Voir src/templates-livres.js : c'est
+// la source unique, pour que les deux modes ne divergent jamais.
+import { chargeTemplatesLivres } from '../templates-livres.js'
 import {
   ATELIER_STEPS,
   LAYERS,
@@ -51,18 +55,6 @@ import {
 } from './atelier-steps.js'
 
 const CATALOG_URL = '/templates/data.json'
-// Templates PAR DÉFAUT = de vrais fichiers .shibumap-template (look COMPLET +
-// vignette), pas des rampes de couleurs — distinction importante (Adrien) :
-// palette = couleurs seules, template = tout le look. Fichiers dans
-// public/templates/defaults/, chargés au premier passage sur l'onglet.
-// shibuStart EN TÊTE : c'est le look sur lequel l'application s'ouvre (voir
-// START_VIEW dans main.js), donc le premier de la bibliothèque — il faut pouvoir
-// y revenir d'un clic après avoir bricolé.
-const DEFAULT_TPL_URLS = [
-  'shibustart',
-  'the-main-stuff', 'isolated', 'light', 'realistic',
-  'bronze', 'white-valley', 'yellow-glass', 'carbon',
-].map((n) => `/templates/defaults/${n}.json`)
 
 export function buildAtelier(deps) {
   let open = false
@@ -403,13 +395,7 @@ export function buildAtelier(deps) {
   }
 
   async function loadDefaultTemplates() {
-    const all = await Promise.all(DEFAULT_TPL_URLS.map(async (u) => {
-      try {
-        const t = await (await fetch(u)).json()
-        return t?.format === 'shibumap-template' && t.look ? t : null
-      } catch { return null }
-    }))
-    defTpls = all.filter(Boolean)
+    defTpls = await chargeTemplatesLivres()
   }
 
   function stepTemplate() {

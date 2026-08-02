@@ -13,6 +13,11 @@
 
 import { el, button, section, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
+// La bibliothèque LIVRÉE. Elle n'était visible qu'en mode SIMPLE (Studio,
+// étape ① Template) : rester en Avancé faisait disparaître les gabarits de la
+// maison, alors que c'est le mode où l'on habille le plus. Même liste, même
+// chargeur que l'atelier — src/templates-livres.js est la source unique.
+import { chargeTemplatesLivres } from '../templates-livres.js'
 
 const ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/></svg>'
@@ -144,12 +149,51 @@ export function buildTemplatesPanel(ctx) {
   tplFormRow.append(button('Fermer', () => { tplForm.hidden = true }, { ghost: true }), button('Enregistrer', doSave))
   tplForm.append(nameInput, tplFormRow)
 
+  // ---- les gabarits LIVRÉS -------------------------------------------------
+  // Carte SANS croix ni export : ce n'est pas le bien de l'utilisateur, il ne
+  // peut pas le supprimer (et le ré-exporter n'aurait aucun intérêt, le
+  // fichier est déjà servi par le site). Le clic applique, comme les autres.
+  let livres = null // chargés à la PREMIÈRE ouverture de la section, pas avant
+  let chargementLivres = false
+  function livreCard(t) {
+    const card = el('div', 'ce-utpl-card ce-utpl-default')
+    card.setAttribute('role', 'button')
+    card.tabIndex = 0
+    card.title = t.name || 'Look'
+    // la vignette est une dataURL venue d'un fichier → API DOM, jamais innerHTML
+    const media = el(t.thumb ? 'img' : 'div', 'ce-utpl-img')
+    if (t.thumb) { media.src = t.thumb; media.alt = '' }
+    else if (t.strip?.length) media.style.background = `linear-gradient(90deg, ${t.strip.filter((c) => /^#[0-9a-fA-F]{3,8}$/.test(c)).join(',')})`
+    const nm = el('span', 'ce-utpl-name')
+    nm.textContent = t.name || 'Look'
+    card.append(media, nm)
+    const apply = () => { ctx.applyUserTemplate(t); refreshAll(); ctx.syncDark?.() }
+    card.addEventListener('click', apply)
+    card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); apply() } })
+    return card
+  }
+  // Le chargement est DIFFÉRÉ à l'ouverture de la section : dix-sept fichiers
+  // de ~10 Ko (vignettes JPEG en base64 comprises) n'ont rien à faire sur le
+  // chemin du premier affichage — la passe de performance vient d'en gagner
+  // 4,2 s, on ne les redonne pas pour une grille repliée que personne n'a
+  // encore demandée.
+  function chargeLivres() {
+    if (livres || chargementLivres) return
+    chargementLivres = true
+    chargeTemplatesLivres().then((list) => {
+      livres = list
+      chargementLivres = false
+      renderTemplates()
+    }).catch(() => { chargementLivres = false })
+  }
+
   function renderTemplates() {
     tplGrid.replaceChildren()
     tplGrid.append(
       monoCard('Mono clair', 'white', 'linear-gradient(135deg, #fdfdfb, #d8d5cc)'),
       monoCard('Mono sombre', 'dark', 'linear-gradient(135deg, #3a3a3e, #121215)')
     )
+    for (const t of livres ?? []) tplGrid.append(livreCard(t))
     for (const t of ctx.getUserTemplates?.() ?? []) tplGrid.append(makeCard(t))
     const add = el('button', 'ce-lib-add')
     add.type = 'button'
@@ -160,6 +204,11 @@ export function buildTemplatesPanel(ctx) {
   renderTemplates()
   // la boutique (store.js) intègre des styles → main.js nous re-rend ici
   ctx.registerUserTplRefresh?.(renderTemplates)
+  // Déplier la section EST la demande : c'est là qu'on va chercher les
+  // gabarits livrés. addSection (shell.js) pose déjà son propre écouteur sur
+  // la même tête — le nôtre s'ajoute, il ne le remplace pas.
+  sTpl.head.addEventListener('click', chargeLivres)
+  if (sTpl.open) chargeLivres() // section déjà ouverte (état restauré) : pas de clic à attendre
   sTpl.body.append(tplForm)
 
   // ligne de navigation : importer un fichier .shibumap-template
