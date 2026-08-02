@@ -112,6 +112,36 @@
 // une cuisson lente, c'est une cuisson qui n'aboutit pas.
 //
 // ═══════════════════════════════════════════════════════════════════════════
+// CE QUE LE SOCLE MONDIAL A COÛTÉ EN VRAI — 2026-08-02
+// ═══════════════════════════════════════════════════════════════════════════
+//
+//   z8 et z9 mondiaux (-180,-60,180,84), --paralleles 32 :
+//   68 317 tuiles écrites, 9 544 écartées, 915 s — 85,1 tuiles/s, 856 Mo.
+//   2 635 dalles COG ouvertes sur 2 954 sondées, 14 519 requêtes de plage,
+//   1 104 Mo lus pour 856 Mo écrits.
+//
+// ⚠️ ET LE SONDAGE (`--echantillon`) SOUS-ESTIME LE DÉBIT D'UN FACTEUR DEUX,
+// systématiquement — il faut le savoir avant d'annoncer une durée. 400 tuiles
+// prises tous les 194 rangs tombent chacune sur une dalle différente : le
+// sondage a ouvert 512 dalles pour 400 tuiles et n'a réutilisé AUCUN bloc, d'où
+// 28 tuiles/s. La vraie cuisson parcourt la liste dans l'ordre géographique :
+// 2 635 dalles pour 68 000 tuiles, blocs voisins chauds, 85 tuiles/s. Le
+// sondage reste juste sur ce qu'on lui demande vraiment — le POIDS par tuile
+// (12,6 Ko annoncés, 12,8 mesurés) et la part de tuiles muettes (11,8 % contre
+// 12,3 %) —, mais sa durée est un plafond, pas une prévision.
+//
+// ⚠️ ET LE COMPTE N'EST PAS LE POIDS. En NOMBRE, cette cuisson est moins chère
+// que celle du sol (68 317 tuiles contre 76 060) parce que le filtre muet écarte
+// 12,3 % des tuiles terrestres contre 2,3 % là-bas. En POIDS elle est TROIS FOIS
+// plus chère (856 Mo contre 286) : une hauteur est un champ continu et bruité,
+// une classe d'occupation forme des plaques identiques. Voir le compteur de
+// tuiles uniformes dans `main` — 0 ici, 6 301 là-bas, et c'est la même cause.
+//
+// Le coût de z10, mesuré par sondage le même jour (250 tuiles, 84,8 % écrites,
+// 13,6 Ko pièce) sur les 232 546 tuiles terrestres du zoom : ~197 000 tuiles et
+// ~2,6 Go, en ~45 min au débit ci-dessus. Il n'a PAS été lancé.
+//
+// ═══════════════════════════════════════════════════════════════════════════
 // ⚠️ LE PIÈGE DU VOISIN N'EST PAS LE NÔTRE — ET C'EST CE QUI PIÈGE
 // ═══════════════════════════════════════════════════════════════════════════
 //
@@ -189,6 +219,16 @@ const TUILE = 256
 // moindre coupure réseau, mise en veille ou Ctrl-C repart de zéro. Avec lui,
 // toute tuile DÉJÀ PRÉSENTE SUR LE DISQUE est sautée sans ouvrir un octet.
 // Voir la section « LA REPRISE » plus bas pour ce que ça sous-entend.
+//
+// ⚠️ ÉPROUVÉ, PAS SUPPOSÉ, ET SOUS LE PIRE DES ARRÊTS. Le 2026-08-02, une
+// cuisson de 803 tuiles (Amazonie, z8-z12) a été TUÉE à mi-parcours par un
+// `Stop-Process -Force` — un SIGKILL, donc AUCUN gestionnaire de signal, aucun
+// manifeste d'adieu, rien des politesses que le code prévoit pour un Ctrl-C.
+// État trouvé sur le disque : 295 PNG, 0 reliquat `.tmp`, et un manifeste
+// n'annonçant que z11 alors que des tuiles z12 étaient déjà écrites — le
+// « on n'annonce qu'un zoom TERMINÉ » a tenu tout seul. La reprise a rendu
+// 803/803 tuiles IDENTIQUES OCTET POUR OCTET à la cuisson d'une traite (0
+// fichier différent, 0 manquant, 0 en trop), manifeste compris.
 const REPRENDRE = flag('reprendre')
 
 // Combien de tuiles se cuisent EN MÊME TEMPS. Une requête de plage vers
@@ -533,6 +573,21 @@ export function encodePngGris(gris, w, h) {
   // deux lignes voisines sont IDENTIQUES par grandes plaques : sans filtre, la
   // ligne entière est une suite de valeurs répétées que deflate avale d'un
   // coup. Mesuré sur le Mont-Blanc : filtre None ~1,6× plus léger que Up.
+  //
+  // ⚠️ CE CHOIX VENAIT DU CUISEUR DE SOL, ET SON ARGUMENT NE VAUT PAS ICI — il
+  // a donc fallu le REMESURER avant d'engager le monde. Le raisonnement des
+  // « plaques identiques » est celui d'une carte de CLASSES ; une hauteur de
+  // canopée est un champ continu et bruité, c'est-à-dire le cas où Up gagne
+  // d'habitude (c'est la bathymétrie). Un choix inoffensif à trois zones aurait
+  // pu coûter des centaines de mégaoctets sur le monde.
+  //
+  // Vérdict, mesuré le 2026-08-02 sur les 353 tuiles d'un sondage mondial
+  // z8-z9, en réencodant les MÊMES octets avec les cinq filtres :
+  //   None 100 % · Sub 100,1 % · Up 105,5 % · Avg 126,6 % · Paeth 101,7 %
+  //   choix adaptatif par ligne (la méthode des vrais encodeurs) : 97,4 %
+  // None reste le meilleur des filtres fixes, et l'adaptatif n'achète que 2,6 %
+  // au prix d'un encodeur cinq fois plus lent. Le poids de cette couche ne vient
+  // pas d'un mauvais filtre, il vient de l'entropie de la donnée elle-même.
   const raw = Buffer.alloc(h * (1 + w))
   for (let y = 0; y < h; y++) {
     raw[y * (1 + w)] = 0
@@ -1400,28 +1455,38 @@ async function main() {
         // ═══════════════════════════════════════════════════════════════════
         //
         // La question posée était : une tuile d'UNE SEULE hauteur mérite-t-elle
-        // d'être rangée en CONSTANTE au manifeste plutôt qu'en image ? On ne l'a
-        // pas tranchée au jugé, on l'a comptée sur la cuisson mondiale :
+        // d'être rangée en CONSTANTE au manifeste plutôt qu'en image ?
         //
-        //   6 301 tuiles uniformes sur 76 044  (8 %)
-        //   2 271 Ko à elles toutes, soit 369 OCTETS pièce
-        //   contre 286 Mo pour l'ensemble  →  0,8 % du poids total
+        // ⚠️ CE COMPTEUR PORTAIT LES CHIFFRES DU VOISIN, ET C'ÉTAIT LE PIÈGE QUE
+        // L'EN-TÊTE DE CE FICHIER DÉNONCE. Il annonçait « 6 301 tuiles uniformes
+        // sur 76 044, 286 Mo pour l'ensemble » : c'est la cuisson mondiale de
+        // l'OCCUPATION DU SOL, recopiée ici avec le reste du bloc. La cuisson
+        // mondiale de canopée, elle, a été comptée le 2026-08-02, et elle dit
+        // exactement l'inverse :
         //
-        // ⚠️ LA COMPRESSION A DÉJÀ FAIT LE TRAVAIL, et mieux qu'une constante ne
-        // le ferait. 65 536 octets identiques, filtre None, deflate 9 : il en
-        // reste 369, dont l'essentiel est l'en-tête PNG lui-même. Le gain d'une
-        // constante serait de 2,2 Mo — sur 286 — au prix d'un chemin de code
+        //   0 tuile uniforme sur 68 317  (0 %)
+        //
+        // ⚠️ ZÉRO, ET C'EST LA MÊME CAUSE QUI FAIT PESER CETTE COUCHE TROIS FOIS
+        // LE SOL. Une classe d'occupation forme de grandes plaques strictement
+        // identiques — une tuile de Sahara est un seul code répété 65 536 fois,
+        // et deflate la ramène à 369 octets. Une hauteur de canopée est un champ
+        // CONTINU et bruité : même au milieu du désert, la source rend un fond
+        // de 0-1 m qui bouge d'un pixel à l'autre. D'où 12,8 Ko par tuile ici
+        // contre 3,9 là-bas, et 856 Mo pour le monde contre 286.
+        //
+        // La question de la constante est donc CLOSE, mais par l'autre bout :
+        // il n'y a rien à ranger, aucune tuile ne se répète. Le chemin de code
         // client supplémentaire (« cette tuile est-elle une constante ? » avant
-        // chaque chargement) et d'un manifeste qui passerait de 2 Ko à plusieurs
-        // centaines. On ne l'a donc PAS fait.
+        // chaque chargement) n'achèterait rien du tout.
         //
-        // C'est bien l'économie du tuileur bathymétrique qui s'applique ici,
-        // mais à l'autre bout de la chaîne : ce qui vaut le coup, ce n'est pas
-        // de mieux ranger une tuile qui ne dit rien, c'est de NE PAS L'ÉCRIRE.
-        // Voir `MUET` — 1 816 tuiles écartées à ce titre sur cette cuisson.
+        // La seule économie qui marche sur cette donnée est en amont : NE PAS
+        // ÉCRIRE la tuile. Voir `MUET` — 9 544 tuiles écartées à ce titre sur
+        // 77 861 (12,3 %), contre 2,3 % pour le sol. Le filtre muet est cinq
+        // fois plus rentable ici EN NOMBRE ; il ne rattrape pas pour autant le
+        // poids, parce que ce qui reste est incompressible.
         //
-        // Le compteur reste : le jour où la palette change, il redira si
-        // l'arbitrage tient encore.
+        // Le compteur reste : le jour où la palette change — donc le plancher de
+        // `forceCanopee` — il redira si l'arbitrage tient encore.
         let uniforme = true
         for (let k = 1; k < gris.length; k++) if (gris[k] !== gris[0]) { uniforme = false; break }
         if (uniforme) { uniformes++; octetsUniformes += png.length }
