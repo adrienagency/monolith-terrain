@@ -91,12 +91,18 @@ export class OccupationSolLayer {
    * `tuilesVues` est ce qui permet à l'appelant de distinguer « la donnée dit
    * qu'il n'y a rien » de « la donnée n'a pas été cuite ici » — deux choses que
    * l'écran rend identiques, et dont une seule mérite d'éteindre la couche.
+   *
+   * @param {{zmax?:number}} [options] - `zmax` = le plafond de la ZONE cuite ici
+   *   (manifeste). ⚠️ Sans lui, une vue posée sur le socle mondial — cuit en
+   *   z8-z9 seulement — irait réclamer du z14 jamais écrit, et rendrait une
+   *   mosaïque vide sous un interrupteur allumé.
    */
-  async build(bbox) {
+  async build(bbox, { zmax = SOL_ZOOM_MAX } = {}) {
     const id = ++this._buildId
     if (!bbox) return null
 
-    const z = zoomSolBorne(aerialZoomFor(bbox, { budgetPx: this._budgetPx, maxZoom: SOL_ZOOM_MAX }))
+    const plafond = Math.min(SOL_ZOOM_MAX, Number.isFinite(zmax) ? zmax : SOL_ZOOM_MAX)
+    const z = zoomSolBorne(aerialZoomFor(bbox, { budgetPx: this._budgetPx, maxZoom: plafond }))
     const tuiles = tilesForBBox(bbox, z)
     if (!tuiles.length) return null
 

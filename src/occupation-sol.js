@@ -228,14 +228,31 @@ export function zoomSolBorne(voulu) {
 // contrat déjà écrit pour la photo aérienne (`aerialUnavailable` : « leaving the
 // toggle on while nothing renders is the worst of both »).
 
-/** Remet un manifeste lu sur disque dans un état où on peut s'appuyer dessus. */
+/**
+ * Remet un manifeste lu sur disque dans un état où on peut s'appuyer dessus.
+ *
+ * ⚠️ CHAQUE ZONE PORTE SON PROPRE PLAFOND DE ZOOM, et ce n'est pas un détail
+ * depuis qu'une zone MONDIALE existe. Le socle mondial n'est cuit qu'en z8-z9,
+ * là où le Mont-Blanc monte à z14 : un plafond GLOBAL vaudrait forcément 14,
+ * et une vue sur le Kansas réclamerait des tuiles z14 qui n'ont jamais été
+ * écrites. Elle obtiendrait une mosaïque vide, donc une carte inchangée, avec
+ * l'interrupteur toujours allumé — « la donnée dit qu'il n'y a rien ici », ce
+ * qui est faux. C'est précisément le défaut que main.js s'interdit ailleurs.
+ *
+ * Une zone sans `zmax` retombe sur le plafond global : les manifestes cuits
+ * avant ce champ restent lisibles tels quels.
+ */
 export function normaliseIndexSol(doc) {
+  const borne = (v, dflt) => (Number.isFinite(v) ? Math.max(0, Math.min(SOL_ZOOM_MAX, Math.floor(v))) : dflt)
+  const zmaxGlobal = borne(doc?.zmax, SOL_ZOOM_MAX)
   const zones = Array.isArray(doc?.zones)
-    ? doc.zones.filter((z) => Array.isArray(z?.bbox) && z.bbox.length === 4 && z.bbox.every(Number.isFinite))
+    ? doc.zones
+        .filter((z) => Array.isArray(z?.bbox) && z.bbox.length === 4 && z.bbox.every(Number.isFinite))
+        .map((z) => ({ ...z, zmax: borne(z?.zmax, zmaxGlobal) }))
     : []
   return {
-    zmin: Math.max(0, Math.min(SOL_ZOOM_MAX, Math.floor(doc?.zmin ?? 0))),
-    zmax: Math.max(0, Math.min(SOL_ZOOM_MAX, Math.floor(doc?.zmax ?? SOL_ZOOM_MAX))),
+    zmin: borne(doc?.zmin, 0),
+    zmax: zmaxGlobal,
     zones,
   }
 }
@@ -248,7 +265,15 @@ export function normaliseIndexSol(doc) {
  * pixels manquants serait plus brutal que le bord vide — lequel se fond déjà de
  * lui-même, puisqu'une tuile absente vaut le code 0, donc la force zéro.
  *
- * @param {{zones:{nom:string,bbox:number[]}[]}|null} index
+ * ⚠️ ET QUAND PLUSIEURS ZONES SE RECOUVRENT, C'EST LA PLUS PETITE QUI GAGNE, pas
+ * la première rencontrée. Depuis le socle mondial, TOUTE vue tombe dans au moins
+ * une zone : rendre « la première » ferait dépendre la finesse affichée au
+ * Mont-Blanc de l'ORDRE DES LIGNES DANS UN FICHIER JSON. Le jour où quelqu'un
+ * recuit le monde, sa zone repasse en tête du tableau et le Mont-Blanc retombe
+ * silencieusement de z14 à z9 — un dégât invisible en test comme en console.
+ * La plus petite emprise est la plus spécifique, donc la mieux cuite.
+ *
+ * @param {{zones:{nom:string,bbox:number[],zmax?:number}[]}|null} index
  * @param {{minLon:number,maxLon:number,minLat:number,maxLat:number}|null} bbox
  */
 export function zoneSolPour(index, bbox) {
@@ -257,9 +282,16 @@ export function zoneSolPour(index, bbox) {
   if (![minLon, maxLon, minLat, maxLat].every(Number.isFinite)) return null
   const cLon = (minLon + maxLon) / 2
   const cLat = (minLat + maxLat) / 2
+  let meilleure = null
+  let plusPetite = Infinity
   for (const z of index.zones) {
     const [w, s, e, n] = z.bbox
-    if (cLon >= w && cLon <= e && cLat >= s && cLat <= n) return z
+    if (cLon < w || cLon > e || cLat < s || cLat > n) continue
+    const aire = Math.abs((e - w) * (n - s))
+    if (aire < plusPetite) {
+      plusPetite = aire
+      meilleure = z
+    }
   }
-  return null
+  return meilleure
 }

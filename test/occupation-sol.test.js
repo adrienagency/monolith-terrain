@@ -7,7 +7,7 @@ import {
   CLASSES_SOL, CODES_SOL, familleDeClasse, forceDeClasse, couleurDeClasse,
   tableLutSol, zoneSolPour, normaliseIndexSol,
 } from '../src/occupation-sol.js'
-import { nomDalle, encodePngGris } from '../scripts/build-occupation-sol.mjs'
+import { nomDalle, encodePngGris, rasteriseTerre, tuileAvecTerre } from '../scripts/build-occupation-sol.mjs'
 
 // ── Les codes de classes ────────────────────────────────────────────────────
 
@@ -234,6 +234,140 @@ test('l’index normalisé garde ses bornes de zoom dans le domaine utile', () =
   assert.equal(n.zmax, SOL_ZOOM_MAX)
   const vide = normaliseIndexSol(null)
   assert.deepEqual(vide.zones, [])
+})
+
+// ── Le socle mondial coexiste avec les zones fines ──────────────────────────
+//
+// Depuis la cuisson mondiale z8-z9, TOUTE vue tombe dans au moins une zone. Ce
+// qui était un simple « oui/non » devient un choix entre plusieurs zones de
+// finesse différente — et se tromper de zone ne casse rien, ça affiche juste
+// moins bien, en silence. D'où ces trois tests.
+
+const INDEX_MONDE = {
+  zmin: 8, zmax: 14,
+  zones: [
+    // volontairement rangé AVANT les zones fines : c'est le piège qu'on teste
+    { nom: 'Monde', bbox: [-180, -60, 180, 84], zmax: 9 },
+    { nom: 'Chamonix', bbox: [6.7, 45.75, 7.05, 46.0], zmax: 14 },
+  ],
+}
+
+test('sur une zone fine, c’est la PLUS PETITE emprise qui gagne, pas la première', () => {
+  // Sans cette règle, la finesse affichée au Mont-Blanc dépendrait de l'ORDRE
+  // DES LIGNES d'un fichier JSON : recuire le monde remettrait sa zone en tête
+  // du tableau et ferait retomber Chamonix de z14 à z9, sans erreur nulle part.
+  const z = zoneSolPour(INDEX_MONDE, { minLon: 6.85, maxLon: 6.95, minLat: 45.9, maxLat: 45.95 })
+  assert.equal(z.nom, 'Chamonix')
+  assert.equal(z.zmax, 14)
+})
+
+test('hors zone fine, le socle mondial répond — mais en annonçant SON plafond', () => {
+  // Le Kansas est cuit, en z8-z9 seulement. Rendre `zmax: 14` ici ferait
+  // réclamer au client des tuiles jamais écrites : mosaïque vide, interrupteur
+  // allumé, et l'utilisateur lit « la donnée dit qu'il n'y a rien ici ».
+  const z = zoneSolPour(normaliseIndexSol(INDEX_MONDE), { minLon: -98, maxLon: -97, minLat: 38, maxLat: 39 })
+  assert.equal(z.nom, 'Monde')
+  assert.equal(z.zmax, 9)
+})
+
+test('une zone SANS plafond propre hérite du plafond global — les vieux manifestes restent lisibles', () => {
+  const doc = normaliseIndexSol({ zmin: 8, zmax: 14, zones: [{ nom: 'ancienne', bbox: [0, 0, 1, 1] }] })
+  assert.equal(doc.zones[0].zmax, 14)
+})
+
+test('⚠️ un zoom INCOMPLET ne doit pas être annoncé — le socle mondial reste à son dernier zoom fini', () => {
+  // Le défaut qu'a failli livrer la première cuisson mondiale. Le manifeste
+  // s'écrit au fil de l'eau ; s'il annonçait `zmax: 9` dès la première tuile z9,
+  // une cuisson arrêtée à mi-parcours ferait réclamer du z9 SUR TOUTE LA TERRE
+  // alors qu'un tiers seulement existe — mosaïque vide, interrupteur allumé.
+  // Le cuiseur n'annonce donc qu'un zoom dont TOUTES les tuiles sont traitées
+  // (voir `zoomComplet` dans build-occupation-sol.mjs) ; ce test verrouille le
+  // contrat côté lecture : le client obéit au plafond, quel qu'il soit.
+  const partiel = normaliseIndexSol({
+    zmin: 8, zmax: 14,
+    zones: [
+      { nom: 'Monde', bbox: [-180, -60, 180, 84], zmax: 8 }, // z9 en cours
+      { nom: 'Chamonix', bbox: [6.7, 45.75, 7.05, 46.0], zmax: 14 },
+    ],
+  })
+  assert.equal(zoneSolPour(partiel, { minLon: -98, maxLon: -97, minLat: 38, maxLat: 39 }).zmax, 8)
+  // et la zone fine, elle, n'est pas rabotée par la zone mondiale qui l'englobe
+  assert.equal(zoneSolPour(partiel, { minLon: 6.85, maxLon: 6.95, minLat: 45.9, maxLat: 45.95 }).zmax, 14)
+})
+
+// ── Le masque de terre : le levier qui divise le coût de la cuisson par trois ─
+
+test('le masque de terre distingue la pleine mer d’un continent', () => {
+  // Un carré de terre de 10° autour de (0,0). Tout ce qui est dedans doit
+  // sortir vrai, la haute mer autour doit sortir faux — sans quoi le masque
+  // n'écarte rien, ou écarte tout.
+  const carre = [{ geometry: { type: 'Polygon', coordinates: [[[-5, -5], [5, -5], [5, 5], [-5, 5], [-5, -5]]] } }]
+  const n = 1024
+  const g = rasteriseTerre(carre, n, { dilate: 0 })
+  const tx = (lon, z) => Math.floor(((lon + 180) / 360) * 2 ** z)
+  const ty = (lat, z) => {
+    const s = Math.sin((lat * Math.PI) / 180)
+    return Math.floor((0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * 2 ** z)
+  }
+  assert.equal(tuileAvecTerre(g, n, 8, tx(0, 8), ty(0, 8)), true, 'le centre du carré est de la terre')
+  assert.equal(tuileAvecTerre(g, n, 8, tx(0, 8), ty(0, 8)), true)
+  assert.equal(tuileAvecTerre(g, n, 8, tx(60, 8), ty(0, 8)), false, 'la haute mer est écartée')
+  assert.equal(tuileAvecTerre(g, n, 8, tx(0, 8), ty(60, 8)), false)
+})
+
+test('⚠️ une île PLUS PETITE QU’UNE CELLULE est quand même vue', () => {
+  // LE défaut que ce masque doit s'interdire. Un remplissage par balayage seul
+  // rate un polygone qui passe entre deux centres de cellule : la tuile n'est
+  // jamais cuite, jamais réclamée, et le trou ne se voit que sur la carte finie.
+  // La parade est la MARCHE DU CONTOUR, testée ici sur une île de 0,002°
+  // (~200 m) alors qu'une cellule en fait 0,35° à cette résolution.
+  const ilot = [{ geometry: { type: 'Polygon', coordinates: [[[40.000, 10.000], [40.002, 10.000], [40.002, 10.002], [40.000, 10.002], [40.000, 10.000]]] } }]
+  const n = 1024
+  const g = rasteriseTerre(ilot, n, { dilate: 0 })
+  const tx = Math.floor(((40.001 + 180) / 360) * 2 ** 9)
+  const s = Math.sin((10.001 * Math.PI) / 180)
+  const ty = Math.floor((0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * 2 ** 9)
+  assert.equal(tuileAvecTerre(g, n, 9, tx, ty), true)
+})
+
+test('les trous d’un polygone restent des trous — une mer intérieure n’est pas de la terre', () => {
+  // Règle pair-impair : l'anneau intérieur creuse. Sans elle, la mer Caspienne
+  // et les grands lacs seraient cuits comme de la terre — des milliers de tuiles
+  // de classe 80, muettes, payées plein tarif.
+  const anneau = [{
+    geometry: {
+      type: 'Polygon',
+      coordinates: [
+        [[-20, -20], [20, -20], [20, 20], [-20, 20], [-20, -20]],
+        [[-5, -5], [5, -5], [5, 5], [-5, 5], [-5, -5]],
+      ],
+    },
+  }]
+  const n = 1024
+  const g = rasteriseTerre(anneau, n, { dilate: 0 })
+  const tx = (lon, z) => Math.floor(((lon + 180) / 360) * 2 ** z)
+  const ty = (lat, z) => {
+    const s = Math.sin((lat * Math.PI) / 180)
+    return Math.floor((0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * 2 ** z)
+  }
+  assert.equal(tuileAvecTerre(g, n, 8, tx(12, 8), ty(0, 8)), true, 'la couronne est de la terre')
+  assert.equal(tuileAvecTerre(g, n, 9, tx(0, 9), ty(0, 9)), false, 'le trou ne l’est pas')
+})
+
+test('le masque prend le OU sur toute la tuile, jamais son seul centre', () => {
+  // Une tuile côtière dont le centre tombe en mer porte quand même la moitié
+  // d'un continent. Se fier au centre la jetterait — et avec elle tout le
+  // littoral, c'est-à-dire précisément ce qui se regarde.
+  const bande = [{ geometry: { type: 'Polygon', coordinates: [[[-180, 40], [180, 40], [180, 80], [-180, 80], [-180, 40]]] } }]
+  const n = 1024
+  const g = rasteriseTerre(bande, n, { dilate: 0 })
+  const lat2ty = (lat, z) => {
+    const s = Math.sin((lat * Math.PI) / 180)
+    return (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * 2 ** z
+  }
+  // la tuile z6 qui contient la latitude 40 : son centre est au SUD de la côte
+  const ty = Math.floor(lat2ty(40, 6))
+  assert.equal(tuileAvecTerre(g, n, 6, 10, ty), true)
 })
 
 // ── L’attribution, qui est une obligation de licence ────────────────────────
