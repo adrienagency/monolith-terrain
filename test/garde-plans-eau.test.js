@@ -146,6 +146,102 @@ for (const [nom, plafond] of Object.entries(PLAFONDS)) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 🔴 LE DÉFAUT OUVERT — Dijon/Dole, et le garde-fou qui ne le voyait pas
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Ces deux zones NE SONT PAS dans PLAFONDS, et ce n'est pas un oubli : le
+// défaut d'Adrien y est ENCORE PRÉSENT, personne ne sait le corriger sans
+// perdre le Rhône (voir le mur des quatre critères en tête de plan-eau.js), et
+// un plafond rouge en permanence serait un plafond qu'on finirait par retirer.
+//
+// ⚠️ CE QUI EST TENU ICI, C'EST LA FIDÉLITÉ DE LA FIXTURE, PAS LE PRODUIT. Le
+// garde-fou a été AVEUGLE à ce défaut jusqu'au 2026-08-02 : ses fixtures
+// venaient d'AWS quand la production sert mapterhorn, et le champ AWS (EU-DEM
+// 25 m surzoomé) hache les bandes de contour que le champ mapterhorn (RGE ALTI
+// 1 m moyenné) rend larges et d'un seul tenant. Au MÊME pas au sol :
+//
+//   fixture               | source     | retenues | part du bloc | largeurs
+//   ----------------------|------------|----------|--------------|----------
+//   dijon-large (25,9 m)  | AWS        |     0    |    0,00 %    | max 128 m
+//   dijon-large (25,9 m)  | mapterhorn |    14    |    4,08 %    | 150-215 m
+//   l'ÉCRAN d'Adrien, z11 | mapterhorn |    14    |    4,08 %    | 150-215 m
+//
+// La ligne mapterhorn et la ligne de l'écran sont IDENTIQUES, au chiffre près.
+// C'est ce que ces tests verrouillent : le jour où quelqu'un recuit ces
+// fixtures depuis une autre source, ou déplace le seuil de largeur, ils
+// rougissent — et le garde-fou ne pourra pas redevenir vert sur un monde qui
+// n'est pas celui de l'écran.
+//
+// ⚠️ QUAND LE DÉFAUT SERA CORRIGÉ, CES DEUX TESTS ROUGIRONT. C'est voulu :
+// c'est le signal qu'on peut les remplacer par une entrée dans PLAFONDS. Ne
+// les supprime pas sans poser le plafond à la place.
+const DEFAUT_OUVERT = [
+  { nom: 'dijon-large', retenues: 14, part: 0.0408, largeurMin: 150, largeurMax: 215 },
+  { nom: 'dijon-dole', retenues: 3, part: 0.0165, largeurMin: 153, largeurMax: 182 },
+]
+
+for (const attendu of DEFAUT_OUVERT) {
+  const z = zone(attendu.nom)
+  test(`${attendu.nom} (${z.quoi}) : la fixture reproduit EXACTEMENT l’écran d’Adrien`, () => {
+    // La source est la PREMIÈRE chose vérifiée : c'est elle qui a rendu le
+    // garde-fou aveugle, et un `source` retombé sur AWS remettrait tout le
+    // reste à zéro en donnant l'impression que le défaut a disparu.
+    assert.equal(z.source, 'mapterhorn', `${attendu.nom} : cuite depuis « ${z.source} » — la production sert mapterhorn`)
+    const { retenus, part } = eauDe(z)
+    assert.equal(retenus.length, attendu.retenues, `${attendu.nom} : ${retenus.length} étendues au lieu de ${attendu.retenues}`)
+    assert.ok(
+      Math.abs(part - attendu.part) < 0.001,
+      `${attendu.nom} : ${(part * 100).toFixed(2)} % du bloc, relevé à l'écran ${(attendu.part * 100).toFixed(2)} %`
+    )
+    const w = retenus.map((r) => r.mesure.largeurM)
+    assert.ok(
+      Math.min(...w) >= attendu.largeurMin - 2 && Math.max(...w) <= attendu.largeurMax + 2,
+      `${attendu.nom} : largeurs ${Math.min(...w).toFixed(0)}-${Math.max(...w).toFixed(0)} m, relevé ${attendu.largeurMin}-${attendu.largeurMax} m`
+    )
+  })
+}
+
+// ⚠️ ET LE SEUIL DE LARGEUR EST MUET ICI — c'est LE fait qui a coûté trois
+// tentatives. Les dentelles de Dijon ne CONTOURNENT pas la règle des 150 m,
+// elles la SATISFONT, parce qu'une bande de contour vaut 1 m ÷ pente et que la
+// plaine de la Saône descend de 5 m au kilomètre.
+//
+// CE TEST EXISTE POUR QUI ARRIVE ICI AVEC L'IDÉE DE « JUSTE REMONTER LE SEUIL ».
+// Balayage mesuré sur cette fixture, le Rhône à Valence faisant 170 m de large
+// (relevé sur l'instance vivante, z12 comme z14) :
+//
+//   seuil  | dentelles gardées à Dijon | part du bloc | le Rhône ?
+//   -------|---------------------------|--------------|------------
+//   150 m  |          14               |    4,08 %    | gardé
+//   171 m  |           7               |    2,11 %    | PERDU
+//   200 m  |           3               |    1,16 %    | PERDU
+//   215 m  |           0               |    0,00 %    | PERDU
+//
+// Il faut 215 m pour vider Dijon et le fleuve en fait 170 : les deux camps se
+// CHEVAUCHENT, il n'y a pas de seuil entre eux. Au plus haut seuil qui garde
+// encore le Rhône, la plaine reste à 2,11 % — quatre fois le plafond de 0,5 %
+// que toutes les autres plaines tiennent.
+const PLAFOND_PLAINES = 0.005
+const RHONE_VALENCE_M = 170
+
+test('aucun seuil de largeur ne vide Dijon sans effacer le Rhône', () => {
+  const z = zone('dijon-large')
+  const dem = chargeRelief(z)
+  const cellM = z.extentMeters / (dem.size - 1)
+  const lacs = detectLakes(dem)
+  // le seuil le plus exigeant qui laisse encore passer le Rhône
+  const retenus = plansEauRetenus(lacs, { cellM, blocM: z.extentMeters, largeurMinM: RHONE_VALENCE_M })
+  const part = partSurfaceEau(retenus, dem.size)
+  assert.ok(
+    part > PLAFOND_PLAINES,
+    `à ${RHONE_VALENCE_M} m — le seuil le plus haut qui garde le Rhône — Dijon ne peint plus que ` +
+      `${(part * 100).toFixed(2)} % du bloc, sous le plafond des plaines. Le mur décrit en tête de ` +
+      `plan-eau.js s'est ouvert : reprends la mesure, et si elle tient, remplace ce test par une ` +
+      `entrée dans PLAFONDS.`
+  )
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
 // LE PLANCHER — et les vrais lacs restent des lacs
 // ═══════════════════════════════════════════════════════════════════════════
 //
