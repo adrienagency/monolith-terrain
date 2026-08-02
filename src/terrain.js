@@ -240,6 +240,24 @@ export class Terrain {
       uNuitIntensite: { value: 0 },
       uNuitOffset: { value: new THREE.Vector2(0, 0) },
       uNuitScale: { value: new THREE.Vector2(1, 1) },
+      // OCCUPATION DU SOL (onglet « Couches »). Même drapage que la photo et
+      // que les lumières — uvSolDrape — mais la texture ne porte PAS une image :
+      // elle porte des CODES DE CLASSE ESA WorldCover, un par octet.
+      //
+      // ⚠️ uSol N'EST PAS UNE COULEUR, ET RIEN DANS LE TYPE NE LE DIT. C'est
+      // uSolLut, la table 256×1, qui transforme un code en teinte (RVB) et en
+      // force (alpha). Voir src/map/occupation-sol-layer.js pour les quatre
+      // réglages de texture qui rendent la lecture exacte — et qui, oubliés, ne
+      // lèvent aucune erreur.
+      uSol: { value: blackTexture() }, // code 0 partout = « pas de donnée », force nulle
+      uSolLut: { value: blackTexture() },
+      uSolOn: { value: 0 },
+      uSolOpacite: { value: 0.5 },
+      uSolOffset: { value: new THREE.Vector2(0, 0) },
+      uSolScale: { value: new THREE.Vector2(1, 1) },
+      // 1 / taille de la mosaïque en texels : c'est ce qui permet au nuanceur
+      // d'aller chercher les QUATRE voisins exacts pour son mélange par couleur.
+      uSolTexel: { value: new THREE.Vector2(1 / 2048, 1 / 2048) },
       // drifting cloud shadows, baked by the cloud deck (clouds.js) — a black
       // placeholder keeps the sampler valid until the deck provides its map
       uCloudShadow: { value: blackTexture() },
@@ -442,6 +460,13 @@ uniform float uNuitOn;
 uniform float uNuitIntensite;
 uniform vec2 uNuitOffset;
 uniform vec2 uNuitScale;
+uniform sampler2D uSol;
+uniform sampler2D uSolLut;
+uniform float uSolOn;
+uniform float uSolOpacite;
+uniform vec2 uSolOffset;
+uniform vec2 uSolScale;
+uniform vec2 uSolTexel;
 uniform float uCloudShadowK;
 uniform vec3 uCloudShadowTint;
 uniform float uScanT;
@@ -561,6 +586,71 @@ vec2 uvSolDrape(out float bordIn) {
   bordIn = mix(1.0, edge.x * edge.y, cont);
   uv.y = 1.0 - uv.y; // les lignes de texture vont nord→sud, le +Z du monde va sud→nord
   return uv;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// L'OCCUPATION DU SOL — LIRE UNE CLASSE, PAS UNE COULEUR
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ CES DEUX FONCTIONS SONT TOUT L'ENJEU DE LA COUCHE, ET CHACUNE DES QUATRE
+// PRÉCAUTIONS QU'ELLES PORTENT RÉPARE UNE FAUTE QUI NE LÈVE AUCUNE ERREUR.
+//
+// uSol ne transporte pas une image : chaque octet EST un code de classe ESA
+// WorldCover (10 arbres, 30 prairie, 80 eau…). Entre 10 et 80 il n'y a pas 45,
+// il n'y a RIEN — et pourtant tout, dans une chaîne graphique, est fait pour
+// interpoler. C'est la même famille que le défaut terrarium qui a coûté cher
+// ici : on interpolait l'ENCODAGE de l'altitude au lieu de l'altitude, et
+// +128 m sortaient là où il fallait lire −0,5 m.
+
+// La teinte et la force d'UN point de la mosaïque, en linéaire.
+vec4 solEn(vec2 p) {
+  // ⚠️ LE +0,5 AVANT LE floor N'EST PAS UNE COQUETTERIE. Sur une machine qui
+  // n'offre que du flottant medium, texture2D(...).r * 255 peut ressortir à
+  // 39,997 pour un octet valant 40 : le floor rendrait 39, qui n'est pas une
+  // classe, donc une force nulle — un trou dans la forêt, un pixel sur mille,
+  // impossible à diagnostiquer autrement qu'en le sachant.
+  float code = floor(texture2D(uSol, p).r * 255.0 + 0.5);
+  // ⚠️ ON VISE LE CENTRE DU TEXEL : (i + 0,5) / 256. Viser i / 256 tomberait
+  // pile sur la frontière entre deux entrées de la table, et le plus proche
+  // voisin y bascule d'un côté ou de l'autre au gré de l'arrondi du pilote.
+  vec4 e = texture2D(uSolLut, vec2((code + 0.5) / 256.0, 0.5));
+  // ⚠️ LA TABLE EST EN sRGB, LE NUANCEUR EN LINÉAIRE. Les couleurs des familles
+  // ont été choisies à l'œil, donc écrites en sRGB ; on ne peut pas laisser
+  // three.js les convertir pour nous, puisque la texture doit rester en
+  // NoColorSpace (sinon c'est le CODE, dans l'autre texture, qui se ferait
+  // convertir — et là ce serait la catastrophe). On convertit donc à la main.
+  // Sans ça le lavis ressort deux fois trop clair et perd toute sa teinte.
+  vec3 lin = mix(e.rgb / 12.92, pow((e.rgb + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), e.rgb));
+  return vec4(lin, e.a);
+}
+
+// LE MÉLANGE DES QUATRE VOISINS — la seule façon d'avoir un bord doux sans
+// jamais inventer de classe.
+//
+// La texture est en NearestFilter (obligatoire : un LinearFilter moyennerait
+// les CODES). Peint tel quel, le lavis montrerait donc les marches d'escalier
+// d'un texel de 30 m agrandi à l'écran — ce qui, sur une carte calme, se lit
+// comme un défaut de rendu, pas comme une donnée.
+//
+// La parade est classique et exacte : on convertit les QUATRE voisins en
+// couleur, PUIS on mélange les couleurs. À aucun moment un code ne rencontre
+// une addition.
+//
+// ⚠️ ET ON PRÉMULTIPLIE PAR LA FORCE. Sans ça, un texel d'eau (force zéro) qui
+// touche une forêt tirerait quand même la couleur du bord vers son gris, alors
+// qu'il est censé ne rien peser. Prémultiplier, mélanger, diviser : un texte
+// éteint ne teinte plus son voisin.
+vec4 lavisSol(vec2 uv) {
+  vec2 tc = uv / uSolTexel - 0.5;
+  vec2 f = fract(tc);
+  vec2 b = (floor(tc) + 0.5) * uSolTexel;
+  vec4 c00 = solEn(b);
+  vec4 c10 = solEn(b + vec2(uSolTexel.x, 0.0));
+  vec4 c01 = solEn(b + vec2(0.0, uSolTexel.y));
+  vec4 c11 = solEn(b + uSolTexel);
+  c00.rgb *= c00.a; c10.rgb *= c10.a; c01.rgb *= c01.a; c11.rgb *= c11.a;
+  vec4 s = mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+  return vec4(s.rgb / max(s.a, 1e-4), s.a);
 }
 // --- Appearance blend modes (Figma / W3C compositing set) — b = backdrop map,
 // s = the shader colour. Separable ops are channel-wise; the last four are the
@@ -811,6 +901,38 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     paintShade = mix(paintShade, 1.0, below);
   }
   diffuseColor.rgb = mix(diffuseColor.rgb, mapCol * paintShade, effTint);
+
+  // OCCUPATION DU SOL — posée ICI : au-dessus de la peinture hypsométrique,
+  // mais SOUS la photo aérienne et sous les lumières nocturnes.
+  //
+  // L'ordre n'est pas un détail de rangement. Quand la photo est allumée, elle
+  // EST l'occupation du sol, en mieux et en vrai : lui passer un lavis de
+  // classes par-dessus reviendrait à repeindre une forêt qu'on voit déjà. La
+  // couche se laisse donc recouvrir, sans qu'aucune condition n'ait à savoir
+  // que l'autre existe.
+  //
+  // ⚠️ ON MODULE LA COULEUR, ON N'EN POSE PAS UNE. C'est toute la différence
+  // entre cette couche et un atlas scolaire. blSetLum (le mode « Couleur » de
+  // la panoplie de mélange, déjà là pour les apparences) prend la TEINTE de la
+  // classe et lui impose la LUMINANCE de la carte : l'ombrage du relief, les
+  // courbes de niveau et la rampe hypsométrique continuent de se lire à travers.
+  //
+  // La luminance, elle, est tirée à 45 % vers celle de la classe. Ni 0 ni 1, et
+  // les deux bornes sont des régressions : à 0 on perdrait « la forêt est
+  // sombre, le glacier est clair », qui est justement ce que la couche apporte ;
+  // à 1 on écraserait le modelé sous un aplat, et on aurait fabriqué l'atlas.
+  if (uSolOn > 0.5 && uSolOpacite > 0.001) {
+    float sIn;
+    vec2 sUv = uvSolDrape(sIn); // ⚠️ les deux pièges « Vienne sur le mont Fuji » et « 1 carreau sur 9 » vivent DEDANS
+    sUv = uSolOffset + sUv * uSolScale;
+    vec4 lavis = lavisSol(sUv);
+    float k = lavis.a * uSolOpacite * sIn;
+    if (k > 0.001) {
+      float lumFond = blLum(diffuseColor.rgb);
+      vec3 peinte = blSetLum(lavis.rgb, mix(lumFond, blLum(lavis.rgb), 0.45));
+      diffuseColor.rgb = mix(diffuseColor.rgb, peinte, k);
+    }
+  }
 
   // Optional aerial photo, applied HERE on purpose: over the hypsometric paint
   // but UNDER the contours, grid and labels below — so the drawn cartography
@@ -1337,6 +1459,34 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // saute le bloc entier.
   setNuitIntensite(v) {
     this.mapUniforms.uNuitIntensite.value = v
+  }
+  // OCCUPATION DU SOL — même contrat que setAerial()/setNuit() : on passe
+  // l'objet rendu par OccupationSolLayer.build(), ou null pour éteindre.
+  //
+  // ⚠️ IL Y A DEUX TEXTURES ICI, ET LA SECONDE EST FACILE À OUBLIER. `uSol`
+  // porte les codes, `uSolLut` la table qui les traduit. Poser la première sans
+  // la seconde ne casse rien de visible : la table de remplacement est noire et
+  // opaque à zéro, donc la couche s'allume et ne peint RIEN. On chercherait le
+  // défaut du côté des tuiles pendant longtemps.
+  setSol(built) {
+    const u = this.mapUniforms
+    if (built && built.texture && built.lut) {
+      u.uSol.value = built.texture
+      u.uSolLut.value = built.lut
+      u.uSolOn.value = 1
+      u.uSolOffset.value.set(built.uv.offset[0], built.uv.offset[1])
+      u.uSolScale.value.set(built.uv.scale[0], built.uv.scale[1])
+      // La taille réelle de la mosaïque, pour que le mélange des quatre voisins
+      // vise les bons texels. Une valeur figée décalerait le lavis d'un demi
+      // texel dès que l'emprise change de nombre de tuiles.
+      const im = built.texture.image
+      u.uSolTexel.value.set(1 / Math.max(1, im.width), 1 / Math.max(1, im.height))
+    } else {
+      u.uSolOn.value = 0
+    }
+  }
+  setSolOpacite(v) {
+    this.mapUniforms.uSolOpacite.value = v
   }
   applyFxParams(pp) {
     const u = this.mapUniforms

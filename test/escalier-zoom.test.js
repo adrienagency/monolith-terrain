@@ -13,29 +13,30 @@ import { DIVE_TIERS, stepZoom } from '../src/modes.js'
 
 // ══════════ LE PLANCHER ═════════════════════════════════════════════════════
 
-test('les deux paliers les plus larges n’existent plus', () => {
-  // Adrien : « Z1 et Z2 ne doivent pas exister » — son Z1 est notre z4, son Z2
-  // notre z5, son Z3 notre z6. Le plancher est donc z6, et rien en dessous
-  // n'est atteignable par l'escalier.
-  assert.equal(ZOOM_PALIER_MIN, 6)
-  assert.equal(pasEscalier(7, -1), 6)
-  assert.equal(pasEscalier(6, -1), 6, 'on butte au plancher, on ne descend pas à z5')
-  assert.equal(pasEscalier(5, -1), 6, 'un vieux lien à z5 est remonté, pas conservé')
-  assert.equal(pasEscalier(4, -1), 6)
+test('les deux niveaux les plus larges n’existent plus', () => {
+  // Adrien : « Z1 et Z2 ne doivent pas exister […] j'arrive en Z3 ». Sa
+  // numérotation est celle de la pastille, c'est-à-dire le zoom slippy
+  // standard — tranché sur sa capture, qui affiche « Z4 » sur un bloc couvrant
+  // l'Inde et l'Asie du Sud-Est. Le plancher est donc z3.
+  assert.equal(ZOOM_PALIER_MIN, 3)
+  assert.equal(pasEscalier(4, -1), 3)
+  assert.equal(pasEscalier(3, -1), 3, 'on butte au plancher, on ne descend pas à z2')
+  assert.equal(pasEscalier(2, -1), 3, 'un vieux lien à z2 est remonté, pas conservé')
+  assert.equal(pasEscalier(1, -1), 3)
 })
 
 test('un cran à la fois, dans les deux sens, et l’aller-retour revient au départ', () => {
-  for (let z = 6; z < 15; z++) {
+  for (let z = 3; z < 15; z++) {
     assert.equal(pasEscalier(z, 1, 15), z + 1, `zoom depuis z${z}`)
     assert.equal(pasEscalier(pasEscalier(z, 1, 15), -1, 15), z, `aller-retour depuis z${z}`)
   }
 })
 
 test('le plafond reste le zoom fin de l’utilisateur, jamais moins de 12', () => {
-  assert.deepEqual(bornesEscalier(15), { min: 6, max: 15 })
-  assert.deepEqual(bornesEscalier(17), { min: 6, max: 17 })
-  assert.deepEqual(bornesEscalier(9), { min: 6, max: 12 }, 'un zoom fin bas ne rabaisse pas le plafond sous 12')
-  assert.deepEqual(bornesEscalier(undefined), { min: 6, max: 12 })
+  assert.deepEqual(bornesEscalier(15), { min: 3, max: 15 })
+  assert.deepEqual(bornesEscalier(17), { min: 3, max: 17 })
+  assert.deepEqual(bornesEscalier(9), { min: 3, max: 12 }, 'un zoom fin bas ne rabaisse pas le plafond sous 12')
+  assert.deepEqual(bornesEscalier(undefined), { min: 3, max: 12 })
   assert.equal(pasEscalier(15, 1, 15), 15, 'on butte au plafond')
   assert.equal(pasEscalier(17, 1, 17), 17)
 })
@@ -43,14 +44,14 @@ test('le plafond reste le zoom fin de l’utilisateur, jamais moins de 12', () =
 test('un zoom sous le plancher remonte AU plancher, pas d’un cran', () => {
   // un lien de partage fabriqué avant ce changement porte un z4 ; le premier
   // cran de zoom ne doit pas le poser sur z5, qu'on vient de supprimer
-  assert.equal(pasEscalier(4, 1, 15), 6)
-  assert.equal(pasEscalier(5, 1, 15), 6)
-  assert.equal(pasEscalier(1, 1, 15), 6)
+  assert.equal(pasEscalier(1, 1, 15), 3)
+  assert.equal(pasEscalier(2, 1, 15), 3)
+  assert.equal(pasEscalier(0, 1, 15), 3)
 })
 
 test('pasEscalier tient les entrées absurdes', () => {
-  assert.equal(pasEscalier(NaN, -1), 6)
-  assert.equal(pasEscalier(undefined, 1), 6)
+  assert.equal(pasEscalier(NaN, -1), 3)
+  assert.equal(pasEscalier(undefined, 1), 3)
   assert.equal(pasEscalier(10.4, 1, 15), 11, 'un zoom fractionnaire est arrondi avant le pas')
   // un plancher au-dessus du plafond ne doit pas rendre un intervalle vide
   assert.deepEqual(bornesEscalier(12, 20), { min: 20, max: 20 })
@@ -58,30 +59,34 @@ test('pasEscalier tient les entrées absurdes', () => {
 
 // ══════════ LES PALIERS DE PLONGÉE ══════════════════════════════════════════
 
-test('les paliers z4 et z5 sont retirés de la table de plongée', () => {
+test('les niveaux z1 et z2 sont retirés de la table de plongée', () => {
   const gardes = paliersRetenus(DIVE_TIERS)
-  assert.ok(gardes.every((p) => p.zoom == null || p.zoom >= 6))
-  assert.equal(gardes.find((p) => p.zoom === 4), undefined)
-  assert.equal(gardes.find((p) => p.zoom === 5), undefined)
+  assert.ok(gardes.every((p) => p.zoom == null || p.zoom >= 3))
+  // ⚠️ z4 ET z5 RESTENT. Le plancher est z3 : seuls z1 et z2 disparaissent.
+  // Une première version de ce test les retirait aussi — elle datait de la
+  // lecture « numérotation par paliers », que la capture d'Adrien a réfutée.
+  assert.ok(gardes.some((p) => p.zoom === 4), 'z4 est un niveau légitime')
+  assert.ok(gardes.some((p) => p.zoom === 5), 'z5 aussi')
   assert.equal(gardes[0].zoom, null, 'le palier du zoom fin n’a pas de niveau et reste toujours')
-  assert.equal(gardes[gardes.length - 1].zoom, 6, 'le plus large qui reste est z6')
+  assert.equal(gardes[gardes.length - 1].zoom, 3, 'le plus large qui reste est z3')
 })
 
 test('DIVE_TIERS est DÉJÀ amputée — modes.js ne sert plus l’ancien escalier', () => {
   // le filtre ci-dessus est la règle ; ce test vérifie qu'elle a bien été
   // APPLIQUÉE. Sans lui, `paliersRetenus` pourrait être juste et inutilisé.
   assert.deepEqual(DIVE_TIERS, paliersRetenus(DIVE_TIERS))
-  assert.equal(DIVE_TIERS.at(-1).zoom, 6)
+  assert.equal(DIVE_TIERS.at(-1).zoom, 3)
 })
 
 test('le clic depuis l’orbite haute atterrit sur le plus large palier qui reste', () => {
   // au-dessus de tous les paliers (la porte orbitale s'ouvre à 1 600 km), c'est
   // exactement le « j'arrive en Z3 » d'Adrien
-  assert.equal(palierDeClic(DIVE_TIERS, 40000000).zoom, 6)
-  assert.equal(palierDeClic(DIVE_TIERS, 1600000).zoom, 6, 'pile sur la borne : encore le palier large')
+  assert.equal(palierDeClic(DIVE_TIERS, 40000000).zoom, 3)
+  assert.equal(palierDeClic(DIVE_TIERS, 16000000).zoom, 3, 'pile sur la borne : encore le palier large')
   // plus bas, le palier de l'altitude reprend la main — le réglage à la molette
   // du globe n'est pas perdu. Un palier s'engage SOUS son `altM` : 1 599 999 m
   // est encore du z6, il faut passer sous 600 km pour toucher le z7.
+  assert.equal(palierDeClic(DIVE_TIERS, 7999999).zoom, 4)
   assert.equal(palierDeClic(DIVE_TIERS, 1599999).zoom, 6)
   assert.equal(palierDeClic(DIVE_TIERS, 599999).zoom, 7)
   assert.equal(palierDeClic(DIVE_TIERS, 150000).zoom, 8)
@@ -93,8 +98,8 @@ test('le clic depuis l’orbite haute atterrit sur le plus large palier qui rest
 test('stepZoom (modes.js) délègue bien au plancher partagé', () => {
   // stepZoom reste l'API que modes.js et main.js appellent ; elle ne doit plus
   // avoir de plancher à elle
-  assert.equal(stepZoom(6, -1), 6)
-  assert.equal(stepZoom(5, -1), 6)
+  assert.equal(stepZoom(3, -1), 3)
+  assert.equal(stepZoom(2, -1), 3)
   assert.equal(stepZoom(12, -1), 11)
   assert.equal(stepZoom(10, 1, 15), 11)
 })
@@ -181,10 +186,10 @@ test('un aller-retour d’escalier ne dérive plus : le centre est un point fixe
   let zoom = 12
   // le lieu voulu, en coordonnées monde : la visée doit le rendre inchangé
   const voulu = { x: decalageGrille.x, z: decalageGrille.z }
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 12; i++) {
     const visee = viseeArrivee(voulu, 28)
     assert.deepEqual(visee, voulu, `cran ${i} : la visée ne doit rien perdre`)
     zoom = pasEscalier(zoom, -1, 15)
   }
-  assert.equal(zoom, 6, 'huit dézooms depuis z12 s’arrêtent net au plancher')
+  assert.equal(zoom, 3, 'douze dézooms depuis z12 s’arrêtent net au plancher z3, sans le franchir')
 })

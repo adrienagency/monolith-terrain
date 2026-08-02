@@ -44,6 +44,11 @@ export const DIVE_TIERS = paliersRetenus([
   { altM: 1600000, zoom: 6 },
   { altM: 4000000, zoom: 5 },
   { altM: 8000000, zoom: 4 },
+  // ⚠️ z3 EST LE PLANCHER, il lui fallait donc sa marche. La table s'arrêtait à
+  // z4 : filtrée par un plancher plus bas, elle laissait z4 comme palier le plus
+  // large, et le clic depuis l'orbite haute n'atteignait jamais z3. Le seuil
+  // d'altitude prolonge la progression géométrique de la table (×2 par cran).
+  { altM: 16000000, zoom: 3 },
 ])
 
 // tier a settled zoom-in engages at `altM` meters — null above every tier

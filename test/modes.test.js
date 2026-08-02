@@ -20,24 +20,29 @@ test('pickDiveTier lands each altitude on the matching scale', () => {
   assert.equal(pickDiveTier(199999).zoom, 8)
   assert.equal(pickDiveTier(300000).zoom, 7)
   assert.equal(pickDiveTier(1000000).zoom, 6)
-  // ⚠️ LES DEUX PALIERS LES PLUS LARGES ONT DISPARU (Adrien : « Z1 et Z2 ne
-  // doivent pas exister », cf. escalier-zoom.js). Ce test disait avant que
-  // 3 000 km rendait z5 et 5 000 km z4 ; la porte orbitale s'ouvre désormais
-  // dès 1 600 km, et au-dessus il n'y a plus de palier — c'est le globe.
-  assert.equal(pickDiveTier(1600000), null)
-  assert.equal(pickDiveTier(3000000), null)
-  assert.equal(pickDiveTier(9000000), null)
-  assert.equal(pickDiveTier(1599999).zoom, 6, 'juste sous la porte : le plus large palier qui reste')
+  // ⚠️ SEULS z1 ET z2 ONT DISPARU. Adrien : « Z1 et Z2 ne doivent pas
+  // exister » — et sa capture du 2026-08-02 a tranché que sa numérotation est
+  // celle de la pastille, donc le zoom slippy standard. z3 est le plancher et
+  // reçoit sa marche à 16 000 km ; z4 et z5 restent des niveaux légitimes.
+  assert.equal(pickDiveTier(1600000).zoom, 5)
+  assert.equal(pickDiveTier(3000000).zoom, 5)
+  assert.equal(pickDiveTier(9000000).zoom, 3)
+  assert.equal(pickDiveTier(20000000), null, 'au-dessus de tout palier : le globe')
+  assert.equal(pickDiveTier(1599999).zoom, 6)
   assert.equal(pickDiveTier(16000000), null)
 })
 
-test('the surface staircase widens one zoom level at a time down to z6', () => {
+test('the surface staircase widens one zoom level at a time down to z3', () => {
   assert.equal(stepZoom(12, -1), 11)
   assert.equal(stepZoom(10, -1), 9)
   assert.equal(stepZoom(8, -1), 7)
   assert.equal(stepZoom(7, -1), 6)
-  assert.equal(stepZoom(6, -1), 6) // plancher régional : au-delà, le globe
-  assert.equal(stepZoom(5, -1), 6) // un vieux lien de partage est remonté au plancher
+  // ⚠️ LE PLANCHER EST z3 DEPUIS LE 2026-08-02, pas z6 : Adrien a tranché sur
+  // capture que sa numérotation est celle de la pastille, c'est-à-dire le zoom
+  // slippy standard. Seuls z1 et z2 disparaissent.
+  assert.equal(stepZoom(6, -1), 5)
+  assert.equal(stepZoom(3, -1), 3) // plancher : au-delà, le globe
+  assert.equal(stepZoom(2, -1), 3) // un vieux lien de partage est remonté au plancher
 })
 
 test('the staircase refines one zoom level at a time, capped at the fine scale', () => {

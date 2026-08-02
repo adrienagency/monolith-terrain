@@ -11,24 +11,33 @@
 
 // ══════════ 1. LE PLANCHER DE L'ESCALIER ════════════════════════════════════
 //
-// Adrien, mot pour mot : « Z1 et Z2 ne doivent pas exister. […] J'arrive en Z3. »
-// Sa capture montre le palier le plus large de l'ancien escalier : un bloc de
-// 3 tuiles à z4, soit 67° de longitude — la mer noie tout, les continents ne
-// sont plus que des taches. Un niveau qui ne dit rien.
+// Adrien, mot pour mot : « Z1 et Z2 ne doivent pas exister. […] J'arrive en Z3.
+// Puis zoom progressif unitaire Z4 > Z5 > Z6… »
 //
-// SA NUMÉROTATION EST CELLE DES PALIERS, PAS CELLE DES ZOOMS MERCATOR. L'ancien
-// escalier commençait à z4 : son Z1 est notre z4, son Z2 notre z5, son Z3 notre
-// z6, et « Z4 > Z5 > Z6… » sont z7, z8, z9. C'est la seule lecture qui rende ses
-// quatre phrases vraies ensemble — supprimer deux paliers, arriver au troisième
-// depuis l'orbite, puis avancer d'un cran à la fois.
+// SA NUMÉROTATION EST LITTÉRALEMENT CELLE DE LA PASTILLE, tranché sur sa
+// capture du 2026-08-02 : elle affiche « Z4 » sur un bloc qui couvre l'Inde,
+// la Chine du Sud et l'Asie du Sud-Est. La pastille montre donc le zoom slippy
+// standard — celui d'OpenStreetMap et de tout le web cartographique —, et
+// « les niveaux contenus entre ORB et Z4 » sont exactement z1, z2 et z3.
 //
-// ⚠️ SI CETTE LECTURE EST FAUSSE, UN SEUL NOMBRE EST À CHANGER — celui-ci. Rien
-// d'autre dans le moteur ne connaît le plancher : ni modes.js, ni main.js, ni
-// les paliers de plongée, qui se filtrent tous à partir d'ici.
+// ⚠️ UNE PREMIÈRE LECTURE A ÉTÉ ESSAYÉE ET ÉCARTÉE : celle où sa numérotation
+// aurait été celle des PALIERS (son Z1 = notre z4). Elle rendait ses phrases
+// cohérentes elle aussi, mais sa capture l'a réfutée en un coup d'œil. On la
+// note ici parce qu'elle était plausible, et qu'une image a tranché ce qu'un
+// raisonnement ne pouvait pas.
 //
-// z6 en 3 tuiles couvre ~17° de longitude, à peu près la France plus ses
-// voisins : un pays reste un pays, pas une tache.
-export const ZOOM_PALIER_MIN = 6
+// LE NOMMAGE EST DÉJÀ LE BON — Adrien : « si les nommages ne sont pas corrects
+// par rapport à ce qui est communément admis, renomme-les simplement ». Le zoom
+// slippy EST la convention admise, la pastille l'affiche tel quel : il n'y a
+// rien à renommer.
+//
+// z3 couvre ~45° de longitude en 3 tuiles : un sous-continent. En dessous, z1 et
+// z2 donnaient le planisphère de sa première capture, où la mer noie tout et où
+// les continents ne sont plus que des taches. Un niveau qui ne dit rien.
+//
+// ⚠️ RIEN D'AUTRE DANS LE MOTEUR NE CONNAÎT LE PLANCHER : ni modes.js, ni
+// main.js, ni les paliers de plongée, qui se filtrent tous à partir d'ici.
+export const ZOOM_PALIER_MIN = 3
 
 // Le plafond, lui, n'a pas bougé : c'est le zoom fin choisi par l'utilisateur,
 // jamais moins de 12 (en dessous, « fin » ne veut plus rien dire).
