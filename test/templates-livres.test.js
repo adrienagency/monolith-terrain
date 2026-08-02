@@ -122,13 +122,20 @@ test('les huit portent bien ces clés mortes — le filtre a donc du travail', (
   }
 })
 
-test('slabCornerSmoothing traverse encore la liste blanche, mais n’est lue par personne', () => {
-  // Le cas à part. Contrairement aux clés ci-dessus, celle-ci n'a jamais été
-  // retirée de TEMPLATE_KEYS : elle est donc bien recopiée dans params. Ce qui
-  // la rend inoffensive, c'est qu'AUCUN code de rendu ne la relit — elle n'est
-  // qu'une valeur par défaut posée dans main.js. Le jour où quelqu'un la
-  // rebranche, ce test tombe et il faudra décider ce que les gabarits livrés
-  // (qui portent tous 0.6 ou 0.72) doivent en faire.
+test('slabCornerSmoothing est BRANCHÉE — et les gabarits livrés y ont tous une valeur', () => {
+  // Le cas à part, TRANCHÉ le 2026-08-03. La clé n'avait jamais quitté
+  // TEMPLATE_KEYS : elle arrivait bien dans params, mais AUCUN code de rendu ne
+  // la relisait — l'exposant de superellipse restait en dur à 2 en quatre
+  // endroits (plinth.js, block-grid.js, terrain.js, ocean.js). Deux sorties
+  // possibles : la retirer, ou la brancher. On l'a BRANCHÉE, parce que
+  // l'intention d'origine était le squircle — le coin continu, celui qui
+  // distingue un coin dessiné d'un coin fabriqué — et parce que les dix-sept
+  // gabarits livrés portent tous une valeur DÉLIBÉRÉE (0,6 ou 0,72), jamais 0.
+  //
+  // Conséquence assumée : les coins verticaux de TOUS les gabarits passent de
+  // l'arc de cercle au squircle. C'est un changement visible, voulu, et le même
+  // pour le socle, le relief et la mer — les trois lisent désormais la même
+  // fonction (`exposantCoin`, src/fenetre-clip.js) au lieu de trois 2 en dur.
   assert.ok(TEMPLATE_KEYS.includes('slabCornerSmoothing'))
   const lecteurs = []
   const parcours = (dir) => {
@@ -137,19 +144,27 @@ test('slabCornerSmoothing traverse encore la liste blanche, mais n’est lue par
       if (e.isDirectory()) { parcours(p); continue }
       if (!/\.(js|glsl)$/.test(e.name)) continue
       const src = fs.readFileSync(p, 'utf8')
-      // la DÉCLARATION du défaut (main.js) et la liste blanche ne sont pas des
-      // lectures : on cherche un usage, c'est-à-dire une autre occurrence.
       for (const ligne of src.split('\n')) {
         if (!ligne.includes('slabCornerSmoothing')) continue
         if (/^\s*(\/\/|\*)/.test(ligne)) continue // un commentaire ne lit rien
         if (/slabCornerSmoothing:\s*0\.6/.test(ligne)) continue // le défaut
         if (/^\s*'slabCorner'/.test(ligne)) continue // TEMPLATE_KEYS
-        lecteurs.push(`${path.relative(RACINE, p)} : ${ligne.trim()}`)
+        lecteurs.push(path.relative(RACINE, p))
       }
     }
   }
   parcours(path.join(RACINE, 'src'))
-  assert.deepEqual(lecteurs, [], `slabCornerSmoothing a retrouvé un lecteur :\n${lecteurs.join('\n')}`)
+  // les quatre endroits qui portaient le 2 en dur, et eux seuls
+  const attendus = ['block-grid.js', 'ocean.js', 'plinth.js', 'terrain.js']
+  const vus = [...new Set(lecteurs.map((f) => path.basename(f)))].sort()
+  assert.deepEqual(vus, attendus, `lecteurs inattendus : ${vus.join(', ')}`)
+  // et la valeur portée par chaque gabarit reste dans la bande utile [0..1] :
+  // hors bornes, exposantCoin retomberait silencieusement sur le cercle
+  for (const slug of TEMPLATES_LIVRES) {
+    const v = lis(slug).look?.slabCornerSmoothing
+    if (v === undefined) continue
+    assert.ok(typeof v === 'number' && v >= 0 && v <= 1, `${slug} : lissage ${v} hors bande`)
+  }
 })
 
 // --------------------------------------- ce qui compte ENCORE, et qui reste

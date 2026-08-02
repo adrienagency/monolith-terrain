@@ -18,6 +18,7 @@
 
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
+import { exposantCoin } from './fenetre-clip.js' // le coin de l'eau suit celui du socle
 import { runLakeJob } from './terrain-jobs.js'
 import { lacsMemoLire, lacsMemoEcrire } from './dem-memo.js'
 import { plansEauRetenus } from './plan-eau.js'
@@ -292,6 +293,9 @@ uniform float uSpan;    // largeur au sol du champ : 56, ou 168 sur l'emprise 3�
 uniform vec2 uFenetre;  // décalage de lecture du mode continu (0 sinon)
 uniform float uHalf;     // rounded-square clip: half extent…
 uniform float uCornerR;  // …and corner radius (sea only; lakes use the mask)
+uniform float uCornerN;  // exposant de superellipse du coin : 2 = arc de cercle,
+// plus haut = squircle. Il DOIT suivre celui du relief et du socle : l'ecart
+// entre le coin de l'eau et celui du bloc se voit (retour d'Adrien, v42).
 #ifdef IS_LAKE
 uniform sampler2D uMask;
 uniform vec2 uMaskMin;
@@ -347,9 +351,12 @@ void main() {
   // uHalf reste a 1e6 et ce test ne peut pas se declencher : le comportement
   // d'avant est rendu au caractere pres. (Pas d'accent grave ici : ce
   // commentaire vit dans un template literal JS, il terminerait le module.)
-  vec2 q = abs(xzVue) - vec2(uHalf - uCornerR);
-  float sd = length(max(q, 0.0)) - uCornerR;
-  if (sd > 0.0) discard;
+  // superellipse |x|^n + |y|^n = r^n, la MEME que le clip du relief : a n = 2 on
+  // retrouve exactement le cercle d'avant (length()), au bit pres sur les cotes
+  // droits ou l'une des deux composantes est nulle.
+  vec2 mq = max(abs(xzVue) - vec2(uHalf - uCornerR), 0.0);
+  float pn = pow(pow(mq.x, uCornerN) + pow(mq.y, uCornerN), 1.0 / uCornerN);
+  if (pn > uCornerR) discard;
 
   vec2 uvF = xzChamp / uSpan + 0.5;
   vec2 f = texture2D(uField, uvF).rg;
@@ -747,6 +754,7 @@ function waterMaterial({ isLake, params, fieldTex }) {
         // parce qu'alors huit lacs sur neuf tombent hors de la fenêtre.
         uHalf: { value: isLake ? 1e6 : TERRAIN_SIZE / 2 },
         uCornerR: { value: 0.5 },
+        uCornerN: { value: 2 }, // recalé sur slabCornerSmoothing dans rebuild
         // le champ couvre le socle (56) ou l'emprise 3×3 (168) ; uFenetre est le
         // décalage de lecture du mode continu — voir src/mer-emprise.js
         uSpan: { value: TERRAIN_SIZE },
@@ -1056,6 +1064,7 @@ export class RealWater {
       const r = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE))
       mat.uniforms.uHalf.value = (TERRAIN_SIZE / 2) * 0.998
       mat.uniforms.uCornerR.value = r
+      mat.uniforms.uCornerN.value = exposantCoin(params.slabCornerSmoothing)
       // le plan d'eau EST la fenêtre : il ne bouge pas, c'est son champ qui défile
       mat.uniforms.uSpan.value = this._span
       const seg = 256
@@ -1256,6 +1265,7 @@ export class RealWater {
       if (cote > 1) {
         mat.uniforms.uHalf.value = (TERRAIN_SIZE / 2) * 0.998
         mat.uniforms.uCornerR.value = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE))
+        mat.uniforms.uCornerN.value = exposantCoin(params.slabCornerSmoothing)
       }
       const segX = Math.max(12, Math.min(80, Math.round((x1 - x0) * 6)))
       const segZ = Math.max(12, Math.min(80, Math.round((z1 - z0) * 6)))

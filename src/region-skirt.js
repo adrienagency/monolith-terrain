@@ -13,6 +13,7 @@
 
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
+import { contactAO, SOCLE_AO_BANDE } from './plinth.js'
 
 const HALF = TERRAIN_SIZE / 2
 
@@ -217,7 +218,19 @@ export function buildRegionSkirt({ maskCanvas, sample, material, depth = 5, grid
   const positions = []
   const normals = []
   const uvs = [] // so textured/frosted socle materials grain the skirt too
+  const couleurs = [] // occlusion de contact — voir plus bas
   const UVSCALE = 6
+  // ⚠️ OBLIGATOIRE, pas décoratif. La jupe porte le matériau du socle, et ce
+  // matériau est passé en `vertexColors` (l'occlusion de contact y voyage,
+  // `aoMap` étant hors d'atteinte faute d'`uv1`). Une géométrie sans attribut
+  // `color` recevrait la valeur générique WebGL (0,0,0,1) : la découpe entière
+  // deviendrait NOIRE. On cuit donc la même rampe qu'au pied du bloc.
+  let hautMax = -Infinity
+  for (const s of segs) {
+    if (s.ya > hautMax) hautMax = s.ya
+    if (s.yb > hautMax) hautMax = s.yb
+  }
+  const aoBande = SOCLE_AO_BANDE * Math.max(0, hautMax - baseY)
   const pushTri = (a, b, cc, ua, ub, uc) => {
     const ab = new THREE.Vector3().subVectors(b, a)
     const ac = new THREE.Vector3().subVectors(cc, a)
@@ -227,6 +240,8 @@ export function buildRegionSkirt({ maskCanvas, sample, material, depth = 5, grid
       positions.push(v.x, v.y, v.z)
       normals.push(nm.x, nm.y, nm.z)
       uvs.push(uv[0], uv[1])
+      const ao = Math.round(255 * contactAO(v.y, baseY, aoBande))
+      couleurs.push(ao, ao, ao)
     }
   }
   const EPS = 0.05 // lift the wall top a hair so it overlaps the surface (no seam)
@@ -249,6 +264,7 @@ export function buildRegionSkirt({ maskCanvas, sample, material, depth = 5, grid
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+  geo.setAttribute('color', new THREE.Uint8BufferAttribute(couleurs, 3, true))
   geo.computeBoundingSphere()
   const mesh = new THREE.Mesh(geo, material)
   mesh.name = 'region-skirt'
