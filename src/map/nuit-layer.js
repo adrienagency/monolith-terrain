@@ -22,7 +22,7 @@
 
 import * as THREE from 'three'
 import { tilesForBBox } from './tile-index.js'
-import { aerialZoomFor, aerialUvTransform, tileGridMerc, loadImage, SUPERSEDED } from './aerial-layer.js'
+import { aerialZoomFor, aerialUvTransform, tileGridMerc, grilleMosaique, loadImage, SUPERSEDED } from './aerial-layer.js'
 import { urlTuileNuit, zoomNuitBorne, NUIT_ATTRIBUTION, NUIT_ZOOM_MAX } from '../nuit.js'
 
 const TILE_PX = 256
@@ -57,13 +57,22 @@ export class NuitLayer {
     const id = ++this._buildId
     if (!bbox) return null
 
-    const z = zoomNuitBorne(aerialZoomFor(bbox, { budgetPx: this._budgetPx, maxZoom: NUIT_ZOOM_MAX }))
+    // ⚠️ LE `null` SE TESTE AVANT LA BORNE, PAS APRÈS. `zoomNuitBorne` rend son
+    // plafond sur toute entrée non finie : lui passer le `null` d'un budget
+    // dépassé transformerait un refus en « prends le zoom le plus fin », soit
+    // exactement le contraire de ce qui vient d'être décidé.
+    const voulu = aerialZoomFor(bbox, { budgetPx: this._budgetPx, maxZoom: NUIT_ZOOM_MAX })
+    if (voulu === null) return null
+    const z = zoomNuitBorne(voulu)
     const tuiles = tilesForBBox(bbox, z)
     if (!tuiles.length) return null
 
-    const xs = tuiles.map((t) => t.x), ys = tuiles.map((t) => t.y)
-    const x0 = Math.min(...xs), y0 = Math.min(...ys)
-    const cols = Math.max(...xs) - x0 + 1, rows = Math.max(...ys) - y0 + 1
+    // Une seule copie de la règle de grille, partagée avec les trois autres
+    // couches drapées — voir `grilleMosaique`. Elle recolle l'enroulement autour
+    // de ±180° et refuse un canevas au-dessus du budget de texture.
+    const grille = grilleMosaique(tuiles, z, this._budgetPx, 'lumières nocturnes')
+    if (!grille) return null
+    const { x0, y0, cols, rows } = grille
 
     const canvas = document.createElement('canvas')
     canvas.width = cols * TILE_PX
@@ -83,7 +92,7 @@ export class NuitLayer {
         try {
           const img = await loadImage(urlTuileNuit(t.z, t.x, t.y))
           if (id !== this._buildId) return
-          ctx.drawImage(img, (t.x - x0) * TILE_PX, (t.y - y0) * TILE_PX, TILE_PX, TILE_PX)
+          ctx.drawImage(img, grille.colonne(t) * TILE_PX, grille.ligne(t) * TILE_PX, TILE_PX, TILE_PX)
         } catch {}
       })
     )

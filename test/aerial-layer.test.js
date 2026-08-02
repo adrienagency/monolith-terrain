@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { aerialCovers, aerialUnavailable, aerialUvTransform, aerialZoomFor, lonLatToMerc, SUPERSEDED, providerFor, pointInPolygon, PROVIDERS } from '../src/map/aerial-layer.js'
-import { tilesForBBox } from '../src/map/tile-index.js'
+import { aerialCovers, aerialUnavailable, aerialUvTransform, aerialZoomFor, lonLatToMerc, tileGridMerc, SUPERSEDED, providerFor, pointInPolygon, PROVIDERS } from '../src/map/aerial-layer.js'
+import { tilesForBBox, grilleTuiles } from '../src/map/tile-index.js'
 
 test('aerialCovers: an Annecy patch is covered', () => {
   assert.equal(aerialCovers({ minLon: 6.05, maxLon: 6.25, minLat: 45.82, maxLat: 45.96 }), true)
@@ -325,4 +325,67 @@ test('le niveau grossier de l’emprise coûte MOINS qu’un bloc d’aujourd’
   const nb = tilesForBBox(bloc, zb).length
   const ne = tilesForBBox(emprise, ze).length
   assert.ok(ne < nb, `${ne} tuiles pour l’emprise contre ${nb} pour un bloc — ce doit être MOINS`)
+})
+
+// ══════════ L'ANTIMÉRIDIEN — LE MIROIR, ET LE CANEVAS QUI EXPLOSE ═══════════
+
+test('aerialUvTransform : une emprise à cheval sur ±180° ne rend PAS un scale négatif', () => {
+  // LE DÉFAUT MESURÉ aux Fidji : `b.x` (bord est, lon −177,9) tombe à 0,006 en
+  // mercator normalisé alors que `a.x` (bord ouest, lon +177,9) vaut 0,994.
+  // `b.x - a.x` sortait donc à −0,99 : un scale NÉGATIF, c'est-à-dire la
+  // mosaïque retournée en miroir sur le terrain.
+  const patch = { minLon: 177.861, maxLon: -177.921, minLat: -17.5, maxLat: -16.2 }
+  const tuiles = tilesForBBox(patch, 8)
+  const g = grilleTuiles(tuiles, 8)
+  const t = aerialUvTransform(patch, tileGridMerc(g.x0, g.y0, g.cols, g.rows, 8))
+  assert.ok(t.scale[0] > 0, `scale.x = ${t.scale[0]} : une mosaïque en miroir`)
+  assert.ok(t.scale[1] > 0, `scale.y = ${t.scale[1]}`)
+  // Et le bloc doit tenir DANS la mosaïque : la grille de tuiles déborde
+  // toujours un peu l'emprise, jamais l'inverse.
+  assert.ok(t.offset[0] >= -1e-9 && t.offset[0] + t.scale[0] <= 1 + 1e-9,
+    `u sort de la mosaïque : offset=${t.offset[0]} scale=${t.scale[0]}`)
+  assert.ok(t.offset[1] >= -1e-9 && t.offset[1] + t.scale[1] <= 1 + 1e-9,
+    `v sort de la mosaïque : offset=${t.offset[1]} scale=${t.scale[1]}`)
+})
+
+test('aerialUvTransform : le témoin sans enroulement garde exactement le même résultat', () => {
+  // La correction de l'enroulement ne doit RIEN changer au cas ordinaire.
+  const patch = { minLon: 6.0, maxLon: 6.5, minLat: 45.7, maxLat: 46.0 }
+  const tuiles = tilesForBBox(patch, 10)
+  const g = grilleTuiles(tuiles, 10)
+  const t = aerialUvTransform(patch, tileGridMerc(g.x0, g.y0, g.cols, g.rows, 10))
+  assert.ok(t.scale[0] > 0 && t.scale[1] > 0)
+  assert.ok(t.offset[0] >= 0 && t.offset[0] + t.scale[0] <= 1)
+})
+
+test('aerialZoomFor : au plancher z3, la borne est une VRAIE borne', () => {
+  // MESURÉ avant correction : une emprise 3×3 à z3 fait 405° de large (neuf
+  // tuiles de 45°). `aerialZoomFor` partait de `best = 6` et rendait 6 quoi
+  // qu'il arrive — canevas 16 384 × 15 104, soit 990 Mo, contre un budget de
+  // 4 096 px. « A cap you step over is not a cap » : la borne était redevenue
+  // décorative depuis que le plancher est passé à z3.
+  const large = { minLon: -180, maxLon: 180, minLat: -60, maxLat: 60 }
+  assert.equal(aerialZoomFor(large, { budgetPx: 4096, maxZoom: 19 }), null,
+    "aucun zoom ne tient dans le budget : il faut le DIRE, pas rendre 6")
+  // Et là où quelque chose tient, on rend le plus fin qui tient — inchangé.
+  const annecy = { minLon: 6.0, maxLon: 6.5, minLat: 45.7, maxLat: 46.0 }
+  const z = aerialZoomFor(annecy, { budgetPx: 4096, maxZoom: 19 })
+  assert.ok(Number.isInteger(z) && z >= 6, `zoom retenu ${z}`)
+})
+
+test('aerialZoomFor : le zoom rendu tient TOUJOURS dans le budget, sur un balayage d emprises', () => {
+  // La propriété, plutôt que les littéraux : quel que soit le cadrage, soit on
+  // rend null, soit la mosaïque du zoom rendu tient dans le budget. C'est ce
+  // que « borne » veut dire, et c'est ce qui n'était pas vrai.
+  const budgetPx = 4096
+  for (const demi of [0.05, 0.5, 5, 22.5, 45, 101.25, 135, 202.5]) {
+    for (const lat of [0, 46, -16.85]) {
+      const bbox = { minLon: -demi, maxLon: demi, minLat: lat - demi / 2, maxLat: lat + demi / 2 }
+      const z = aerialZoomFor(bbox, { budgetPx, maxZoom: 19 })
+      if (z === null) continue
+      const g = grilleTuiles(tilesForBBox(bbox, z), z)
+      assert.ok(Math.max(g.cols, g.rows) * 256 <= budgetPx,
+        `demi=${demi} lat=${lat} : z=${z} rend ${g.cols}x${g.rows} tuiles = ${Math.max(g.cols, g.rows) * 256} px > ${budgetPx}`)
+    }
+  }
 })

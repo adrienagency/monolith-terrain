@@ -53,7 +53,7 @@
 //
 // ⚠️ ET CUIRE NE VEUT PAS DIRE TÉLÉCHARGER 2 631 FICHIERS. C'est ce qui rendait
 // la voie (b) effrayante sur le papier. Un COG WorldCover pèse ~100 Mo ; les
-// 2 631 en pèsent des dizaines de gigaoctets. Mais un COG est fait pour être lu
+// 2 631 en pèsent des CENTAINES (2 631 × 100 Mo ≈ 257 Go). Mais un COG est fait pour être lu
 // PAR MORCEAUX : celui de N45E006, sondé, contient 7 images gigognes
 // (36000² à 10 m, puis 18000², 9000², 4500², 2250², 1125², 562² à 640 m),
 // toutes découpées en tuiles internes de 1024×1024 en deflate simple
@@ -570,12 +570,35 @@ class Dalle {
     for (let essai = 0; essai < 4; essai++) {
       try {
         const r = await fetch(this.url, { headers: { Range: `bytes=${a}-${b}` } })
-        if (!r.ok && r.status !== 206) throw new Error(`HTTP ${r.status}`)
+        // ⚠️ ON EXIGE 206, ET LA LONGUEUR AVEC. La clause d'avant —
+        // `!r.ok && r.status !== 206` — était MORTE : 206 satisfait déjà `r.ok`,
+        // donc le second terme n'était jamais atteint. Elle acceptait donc
+        // exactement ce qu'elle croyait refuser : un `200 OK` d'un serveur qui
+        // IGNORE l'en-tête `Range` et renvoie le fichier entier — 407 Mo poussés
+        // dans un décodeur qui en attend un mega-octet.
+        // ⚠️ 404/403 = LA DALLE N'EXISTE PAS, ET ÇA N'EST PAS UNE PANNE.
+        // C'est une réponse DÉFINITIVE du serveur : on ne réessaie pas, et on
+        // marque l'erreur pour que l'appelant la distingue d'une coupure réseau.
+        // Sans cette distinction, un hôte injoignable se lisait « pleine mer ».
+        if (r.status === 404 || r.status === 403) {
+          const abs = new Error(`HTTP ${r.status} : dalle absente`)
+          abs.absente = true
+          throw abs
+        }
+        if (r.status !== 206) throw new Error(`HTTP ${r.status} : le serveur n'honore pas l'en-tête Range`)
         const buf = Buffer.from(await r.arrayBuffer())
+        // La plage demandée est fermée des deux côtés : b - a + 1 octets, ni plus
+        // ni moins. Un corps plus court est une réponse tronquée, pas une donnée.
+        if (buf.length !== b - a + 1) {
+          throw new Error(`plage incomplète : ${buf.length} octets reçus, ${b - a + 1} demandés`)
+        }
         this.octetsLus += buf.length
         return buf
       } catch (e) {
-        if (essai === 3) throw e
+        // Une absence avérée ne se réessaie pas : trois tentatives de plus
+        // rendraient trois fois le même 404, et masqueraient le compte des
+        // vraies pannes derrière du bruit.
+        if (e?.absente || essai === 3) throw e
         await new Promise((res) => setTimeout(res, 400 * 2 ** essai))
       }
     }
@@ -686,13 +709,24 @@ class Dalle {
   /**
    * Le niveau d'aperçu dont le pixel colle le mieux au pas demandé.
    *
-   * ⚠️ ON PREND LE NIVEAU LE PLUS FIN QUI RESTE PLUS GROSSIER OU ÉGAL au pas de
-   * sortie — jamais l'inverse. Choisir un niveau plus FIN que la sortie
-   * rendrait un échantillon unique tiré au hasard dans un champ plus détaillé :
-   * c'est de l'aliasing pur, et sur des classes il n'a même pas la décence
-   * d'être flou, il invente franchement des plaques (une route de 20 m dans une
-   * forêt devient tout un pixel de 300 m « bâti »). Le niveau le plus proche
-   * PAR EN-DESSOUS, lui, a déjà été voté par l'ESA au plus proche voisin.
+   * ⚠️ ON PREND LE NIVEAU LE PLUS GROSSIER QUI RESTE PLUS FIN OU ÉGAL au pas de
+   * sortie. `pasSource` CROÎT avec `i` (le niveau 0 est l'image pleine, les
+   * suivants sont des aperçus de plus en plus gros), et la boucle retient donc
+   * le DERNIER niveau dont le pixel tient encore sous `pasDeg`.
+   *
+   * ⚠⚠ CE COMMENTAIRE DISAIT EXACTEMENT L'INVERSE, ET C'ÉTAIT UN PIÈGE ARMÉ.
+   * Il annonçait « le plus fin qui reste plus grossier ou égal », ce que le code
+   * n'a jamais fait — et ce que le code NE PEUT PAS faire : à z8, aucun aperçu
+   * n'atteint le pas demandé, si bien que `choisi` ne désignerait rien. Qui
+   * prenait le ⚠️ au sérieux et « réparait » la comparaison en `>=` faisait
+   * retomber `choisi` à 0, c'est-à-dire la lecture de l'IMAGE PLEINE 36 000² :
+   * 1 296 blocs d'un méga-octet par dalle au lieu d'un seul.
+   *
+   * C'est le CODE qui a raison, et l'argument est le sur-échantillonnage : lire
+   * un niveau plus GROSSIER que le pas de sortie étirerait un pixel source sur
+   * plusieurs pixels de tuile, et fabriquerait des plaques de classe là où la
+   * donnée est plus fine que ça. Un niveau plus fin, lui, ne coûte qu'un
+   * échantillonnage au plus proche voisin — celui que l'ESA a déjà voté.
    *
    * @param {number} pasDeg - la taille du pixel de sortie, en degrés
    */
@@ -775,6 +809,10 @@ class Dalle {
 }
 
 // ------------------------------------------------------------------ cuisson
+// Les dalles qui ont ÉCHOUÉ pour cause de PANNE, et non d'absence. Le compte
+// sert à deux choses, et les deux comptent : le dire au bilan, et interdire au
+// manifeste de déclarer un zoom « complet » qu'on n'a pas pu cuire entièrement.
+export const echecsDalles = new Map() // nom → nombre d'échecs
 const dalles = new Map() // nom → Promise<Dalle|null>
 async function dallePour(lon, lat) {
   const nom = nomDalle(lon, lat)
@@ -789,10 +827,28 @@ async function dallePour(lon, lat) {
     try {
       await d.ouvrir()
       return d
-    } catch {
-      // Pas de dalle ici = pleine mer, ou hors couverture (WorldCover s'arrête
-      // à 60° S et 84° N). Ce n'est pas une erreur : c'est « rien à dire ».
-      return null
+    } catch (e) {
+      // ⚠️ UNE ABSENCE ET UNE PANNE NE SE RESSEMBLENT QUE DANS UN `catch` VIDE.
+      //
+      // LE DÉFAUT MESURÉ : ce bloc avalait TOUT — les 4 tentatives épuisées
+      // comme le corps non-TIFF —, mémoïsait le `null` pour tout le process, et
+      // `cuisTuile` le traitait comme un trou. Cuisson lancée sur un hôte
+      // injoignable : « ✓ 0 tuiles écrites, 2 écartées », CODE DE SORTIE 0,
+      // coche verte, et un index.json annonçant la zone complète après 100 %
+      // d'échec réseau.
+      //
+      // ⚠️ ET LE CAS IRRATTRAPABLE EST CELUI-CI : une tuile chevauche 2 à 4
+      // dalles (à z8 une tuile fait ~156 km, une dalle 3° en fait ~333 : la
+      // MAJORITÉ des tuiles z8 sont à cheval). Si UNE SEULE échoue, les pixels
+      // de la dalle vivante rendent la tuile « parlante », elle est écrite
+      // VALIDE ET PARTIELLE — et `listeTuiles`, qui ne fait qu'un `existsSync`,
+      // la saute pour toujours.
+      //
+      // Une absence avérée (404/403) reste donc « rien à dire » ; tout le reste
+      // est une panne, et une panne doit REMONTER.
+      if (e?.absente) return null
+      echecsDalles.set(nom, (echecsDalles.get(nom) || 0) + 1)
+      throw e
     }
   })()
   dalles.set(nom, p)
@@ -954,8 +1010,25 @@ async function cuisTuile(z, tx, ty) {
 // processus pile pendant un `writeFileSync` de 2 Ko laisserait sinon un JSON
 // tronqué, que le client lit en `catch` — donc zéro zone, donc la même panne.
 function ecrisManifeste(nbTuiles, zmaxComplet) {
-  if (!ZONE) return null
+  // ⚠️ SANS `--zone`, AUCUN MANIFESTE N'EST ÉCRIT — ET IL FAUT LE DIRE.
+  // Les PNG partent bien sur le disque, mais le client ne connaît le monde que
+  // par ce fichier : une cuisson sans `--zone` est donc TOTALEMENT INVISIBLE.
+  // `npm run build:sol` et `build:canopee` n'ont pas de `--zone`, ce qui rend le
+  // piège très facile à tomber dedans.
+  if (!ZONE) {
+    if (!ecrisManifeste._prevenu) {
+      ecrisManifeste._prevenu = true
+      console.warn("  ⚠ pas de --zone : AUCUN manifeste ne sera écrit, et le client n'affichera donc RIEN de cette cuisson.")
+    }
+    return null
+  }
   const chemin = path.join(OUT, 'index.json')
+  // ⚠️ LE DOSSIER PEUT NE PAS EXISTER. Si aucune tuile n'a été écrite (tout a
+  // échoué), personne n'a encore appelé `mkdirSync` : l'écriture partait en ENOENT
+  // avec un message qui désignait le MANIFESTE, alors que la vraie panne est
+  // ailleurs. C'est exactement le chemin « tout a raté » qui plantait, donc
+  // celui où un message trompeur coûte le plus cher.
+  fs.mkdirSync(OUT, { recursive: true })
   let doc = { attribution: 'ESA WorldCover 2021', licence: 'CC-BY 4.0', url: 'https://esa-worldcover.org', zmin: ZMIN, zones: [] }
   try { doc = { ...doc, ...JSON.parse(fs.readFileSync(chemin, 'utf-8')) } } catch {}
 
@@ -1142,6 +1215,13 @@ async function main() {
    * descend en z8 dès qu'il dézoome.
    */
   const zoomComplet = () => {
+    // ⚠️ AUCUN ZOOM N'EST « COMPLET » S'IL RESTE UNE PANNE DE DALLE. Le compte
+    // de `faits` ne mesure que les tuiles TRAITÉES, pas les tuiles réussies : une
+    // dalle injoignable laisse des trous que rien d'autre ne signale, et le
+    // manifeste annoncerait au client une zone entièrement cuite. Un manifeste
+    // qui ment coûte plus cher qu'un manifeste en retard : les tuiles manquantes
+    // ne seront jamais redemandées.
+    if (echecsDalles.size) return 0
     let haut = 0
     for (let z = ZMIN; z <= ZMAX; z++) {
       if ((faits.get(z) || 0) < attendus.get(z)) break
@@ -1272,7 +1352,11 @@ async function main() {
   let lus = 0
   let ouvertes = 0
   for (const p of dalles.values()) {
-    const d = await p
+    // ⚠️ `catch` OBLIGATOIRE : depuis que `dallePour` fait REMONTER les pannes,
+    // ces promesses peuvent être rejetées, et un `await` nu ferait planter le
+    // BILAN lui-même — c'est-à-dire le seul endroit qui allait dire ce qui a
+    // raté. Les dalles en panne sont comptées dans `echecsDalles`, pas ici.
+    const d = await p.catch(() => null)
     if (!d) continue
     ouvertes++
     req += d.requetes
@@ -1285,6 +1369,19 @@ async function main() {
   }
   console.log(`  source : ${ouvertes} dalle(s) COG ouverte(s) sur ${dalles.size} sondée(s), ${req} requêtes de plage, ${(lus / 1024 / 1024).toFixed(1)} Mo lus`)
   console.log(`  → ${OUT}\n`)
+  // ⚠️ LES PANNES SE DISENT, ET ELLES COÛTENT LE CODE DE SORTIE.
+  //
+  // Reproduit avant correction : cuisson lancée sur un hôte injoignable →
+  // « ✓ 0 tuiles écrites, 2 écartées », CODE DE SORTIE 0, coche verte. Un échec
+  // réseau total se lisait comme une cuisson réussie sur de la pleine mer.
+  if (echecsDalles.size) {
+    const total = [...echecsDalles.values()].reduce((a, b) => a + b, 0)
+    console.error(`✖ ${echecsDalles.size} dalle(s) en PANNE (${total} échec(s)) — ce n'est PAS une absence de donnée.`)
+    console.error(`  ${[...echecsDalles.keys()].slice(0, 8).join(', ')}${echecsDalles.size > 8 ? '…' : ''}`)
+    console.error(`  Aucun zoom n'a été annoncé complet au manifeste. Relance avec --reprendre une fois le réseau rétabli.
+`)
+    process.exit(1)
+  }
   if (arrete) process.exit(130)
 }
 

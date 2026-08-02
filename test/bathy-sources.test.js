@@ -174,14 +174,39 @@ test('ANTIMERIDIEN : maxZoomForBounds absorbe une emprise enroulee (minLon > max
   assert.equal(maxZoomForBounds(idx, { minLat: -18, maxLat: -16, minLon: 179.8, maxLon: -179.9 }), 10)
 })
 
-test('ANTIMERIDIEN : une emprise de plus de 180 degres est un enroulement, pas la Terre entiere', () => {
-  // La lecture naive (-179,9 .. 179,8) ferait 359,7 degres de large et
-  // toucherait TOUTES les zones. C est le piege deja paye sur geo-cells.
+// ⚠️ CE TEST A CHANGE DE PREMISSE LE 2026-08-02.
+//
+// Il verrouillait l'heuristique « plus de 180 degres = un enroulement », qui
+// rattrapait la forme TRIEE que `patchBounds` produisait alors. Les deux sont
+// parties ensemble. Il ne restait d'ailleurs vrai que par accident : la garde de
+// LATITUDE (bounds a -18..-16, zone a 41..52) suffisait a le faire passer, et il
+// aurait continue a passer quoi qu'on fasse de la longitude.
+//
+// L'emprise enroulee s'ecrit desormais ouest > est, et c'est cette forme-la
+// qu'on verrouille.
+test('ANTIMERIDIEN : une emprise enroulee (ouest > est) ne touche pas les zones a l autre bout du globe', () => {
   const idx = normalizeIndex({
     zones: [{ id: 'fr-metro', source: 'emodnet', zmax: 10, bbox: [-6, 41, 10, 52] }],
   })
-  const enroule = { minLat: -18, maxLat: -16, minLon: -179.9, maxLon: 179.8 }
+  // Aux Fidji, a la MEME latitude que la zone francaise pour que seule la
+  // longitude puisse trancher.
+  const enroule = { minLat: 44, maxLat: 46, minLon: 179.8, maxLon: -179.9 }
   assert.equal(maxZoomForBounds(idx, enroule), BATHY_BASE_ZMAX)
+})
+
+test('UNE LARGE EMPRISE 3x3 GARDE SA BATHYMETRIE FINE — ET SON CREDIT EMODNET', () => {
+  // MESURE : une emprise 3x3 fait NEUF tuiles de large, donc 202,5 degres a z4.
+  // L'heuristique des 180 degres en prenait le COMPLEMENT et il en sortait deux
+  // degats : `maxZoomForBounds` retombait au socle GEBCO (6 au lieu de 10), et
+  // le credit EMODnet DISPARAISSAIT — ce que ce fichier qualifie lui-meme
+  // d'obligation de licence.
+  const idx = normalizeIndex({
+    zones: [{ id: 'emodnet', source: 'emodnet', zmax: 10, bbox: [-36, 25, 43, 90] }],
+  })
+  const large = { minLat: 17.9, maxLat: 64.7, minLon: -101.25, maxLon: 101.25 }
+  assert.equal(maxZoomForBounds(idx, large), 10, 'la bathymetrie fine est refusee sur une emprise 3x3')
+  const credits = creditsForBounds(idx, large)
+  assert.ok(credits.some((c) => /EMODnet/.test(c)), `credit EMODnet absent : ${JSON.stringify(credits)}`)
 })
 
 test('maxZoomForBounds : une emprise qui touche une zone fine prend son plafond', () => {

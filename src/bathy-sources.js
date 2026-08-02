@@ -1,3 +1,7 @@
+// `spanLon` vit dans map/tile-index.js, module pur sans dépendance : c'est là que
+// la convention d'enroulement est écrite une fois pour toutes.
+import { spanLon } from './map/tile-index.js'
+
 // CASCADE DE SOURCES BATHYMÉTRIQUES — quelle source décrit le fond, où, et
 // jusqu'à quel zoom.
 //
@@ -229,21 +233,39 @@ export function tileMaxZoom(index, z, x, y) {
 
 // ───────────────────────────────────────────────────────────── par emprise
 
-// Ramène une emprise à un intervalle de longitude lisible, en démêlant les deux
-// formes d'enroulement. Rend `null` si l'emprise n'est pas exploitable.
+// Ramène une emprise à un intervalle de longitude lisible. Rend `null` si
+// l'emprise n'est pas exploitable.
 //
-// ⚠️ Une étendue de PLUS de 180° n'est jamais un vrai bloc (le plus large fait
-// quelques dizaines de km) : c'est la signature d'un enroulement, et la zone
-// voulue est le COMPLÉMENT. Sans ce test, un bloc à cheval sur ±180 touchait
-// toutes les zones du monde — dont EMODnet, à 16 000 km de là.
+// ══════════ ⚠️ LE SIGNE, ET PLUS L'HEURISTIQUE DES 180° ═════════════════════
+//
+// CE QUI ÉTAIT ÉCRIT ICI : « une étendue de PLUS de 180° n'est jamais un vrai
+// bloc (le plus large fait quelques dizaines de km) : c'est la signature d'un
+// enroulement ». C'était exact tant que le plus large des blocs faisait quelques
+// dizaines de kilomètres. Ça ne l'est plus.
+//
+// MESURÉ le 2026-08-02 : une emprise 3×3 fait NEUF tuiles de large, soit 202,5°
+// à z4 et 405° à z3. Sur l'Europe en 3×3 z4, l'heuristique prenait donc le
+// COMPLÉMENT — une bande de 157,5° à l'autre bout du globe — et il en sortait
+// deux dégâts. Le premier est visible : la bathymétrie fine était refusée,
+// `maxZoomForBounds` retombant au socle GEBCO. Le second ne l'est pas, et il est
+// plus grave : le CRÉDIT EMODNET DISPARAISSAIT DE L'ÉCRAN, alors que le
+// paragraphe « OBLIGATION DE LICENCE » quarante lignes plus bas dit exactement
+// ce que ça engage.
+//
+// LA RÈGLE MAINTENANT : le SIGNE. `minLon > maxLon` veut dire « l'emprise
+// franchit ±180° » — la convention que `tilesForBBox` respecte depuis toujours,
+// et que `spanLon` porte pour tout le monde. Plus personne ne devine.
+//
+// ⚠️ CE QUI REND LE CHANGEMENT SÛR : plus aucun producteur d'emprise ne trie ses
+// longitudes. `demBounds` a été corrigé, `patchBounds` l'a été le même jour pour
+// le même défaut. Une emprise triée n'arrive donc plus jusqu'ici.
 function lonSpan(bounds) {
   if (!bounds) return null
   const { minLat, maxLat, minLon, maxLon } = bounds
   if (![minLat, maxLat, minLon, maxLon].every(Number.isFinite)) return null
-  const span = maxLon - minLon
-  if (span >= 360) return { west: -180, east: 180 }
-  if (span > 180) return { west: maxLon, east: minLon } // enroulement déplié
-  if (span < 0) return { west: minLon, east: maxLon } // déjà écrit enroulé
+  // Un tour du monde ou plus : tout est dedans, il n'y a plus d'intervalle à
+  // découper. Le plancher z3 en 3×3 tombe précisément dans ce cas (405°).
+  if (spanLon(minLon, maxLon) >= 360) return { west: -180, east: 180 }
   return { west: minLon, east: maxLon }
 }
 

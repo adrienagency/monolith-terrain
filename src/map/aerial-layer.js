@@ -15,7 +15,7 @@
 // Plan: docs/superpowers/plans/2026-07-17-aerial-imagery.md.
 
 import * as THREE from 'three'
-import { tilesForBBox, spanLon, centreLon } from './tile-index.js'
+import { tilesForBBox, spanLon, centreLon, grilleTuiles } from './tile-index.js'
 import { worldToLatLon, demSpan } from '../geo.js'
 
 // The loaded FIELD's exact lon/lat footprint, from its own two corners.
@@ -409,30 +409,79 @@ export function aerialUnavailable(bbox) {
 // Widest side of the tile mosaic, in pixels, at a given zoom. This is what
 // actually becomes the canvas, so it — not the tile COUNT — is what has to fit
 // the texture budget.
+//
+// ⚠️ `grilleTuiles` ET PAS `max(xs) − min(xs)`. Sur une emprise à cheval sur
+// ±180°, la soustraction rendait 256 colonnes pour 16 tuiles : le budget était
+// alors mesuré contre un canevas imaginaire, et le zoom choisi n'avait plus
+// aucun rapport avec ce qui allait vraiment être alloué.
 function mosaicPx(bbox, z) {
-  const tiles = tilesForBBox(bbox, z)
-  if (!tiles.length) return 0
-  const xs = tiles.map((t) => t.x), ys = tiles.map((t) => t.y)
-  const cols = Math.max(...xs) - Math.min(...xs) + 1
-  const rows = Math.max(...ys) - Math.min(...ys) + 1
-  return Math.max(cols, rows) * TILE_PX
+  const g = grilleTuiles(tilesForBBox(bbox, z), z)
+  if (!g) return 0
+  return Math.max(g.cols, g.rows) * TILE_PX
 }
 
-// The FINEST imagery zoom whose mosaic still fits the texture budget.
+// Le zoom d'imagerie LE PLUS FIN dont la mosaïque tient encore dans le budget,
+// ou `null` si AUCUN ne tient.
 //
-// It used to return the first zoom that reached the budget by tile-area, which
-// meant it returned the first zoom to BLOW PAST it: at the finest terrain scale
-// that produced a 3072 px canvas against a documented 2048 cap. A cap you step
-// over is not a cap. This walks up while it still fits and stops before it
-// doesn't, so the budget is a real bound in the only unit that matters.
+// ══════════ POURQUOI `null`, ET PAS « z6 QUOI QU'IL ARRIVE » ════════════════
+//
+// La version d'avant partait de `best = 6` et rendait donc 6 même quand z6
+// crevait le budget. Son propre commentaire disait « a cap you step over is not
+// a cap » — et c'était redevenu vrai, en silence, le jour où le plancher de
+// l'escalier de zoom est descendu à z3.
+//
+// MESURÉ, budget 4 096 px, sur une emprise 3×3 (neuf tuiles de large) :
+//   · z3 → 405° de large → canevas 16 384 × 15 104 = 990 Mo, 531 requêtes ;
+//   · z4 → 202,5°        → canevas  9 472 ×  9 472 = 359 Mo, 1 369 requêtes.
+// Et `build()` allouait tout cela sans jamais comparer au budget ni à
+// `maxTexturePx`. WebGL2 ne garantit que 2 048 px : au-delà, une texture ne
+// ralentit pas, elle ÉCHOUE.
+//
+// Rendre `null` est ce qui donne à l'appelant le droit de RENONCER. Une couche
+// absente est un état honnête ; un onglet qui fige le navigateur ne l'est pas.
 export function aerialZoomFor(bbox, { maxZoom = 19, budgetPx = TARGET_TEXTURE_PX } = {}) {
-  let best = 6
+  let best = null
   for (let z = 6; z <= maxZoom; z++) {
     const px = mosaicPx(bbox, z)
-    if (px > budgetPx) break // every finer zoom is bigger still
+    if (px === 0) continue // aucune tuile à ce zoom : rien à conclure, on monte
+    if (px > budgetPx) break // tous les zooms plus fins sont plus gros encore
     best = z
   }
   return best
+}
+
+// ══════════ LA GRILLE D'UNE MOSAÏQUE, ET LE REFUS QUAND ELLE NE TIENT PAS ═══
+//
+// Les quatre couches drapées partagent ce guichet, et c'est délibéré : elles
+// partageaient déjà la même arithmétique de grille COPIÉE QUATRE FOIS, et c'est
+// précisément ce qui a laissé passer le miroir de l'antiméridien dans les
+// quatre à la fois.
+//
+// ⚠️ LE REFUS EST LA MOITIÉ DU TRAVAIL. `aerialZoomFor` borne déjà le zoom, mais
+// un `zmax` de zone (occupation du sol, canopée) ou un plafond de fournisseur
+// peut FORCER un zoom que la borne n'a pas choisi. Sans ce second garde, `build`
+// allouait un canevas sans jamais le comparer à quoi que ce soit : 990 Mo
+// mesurés au plancher z3. Une texture au-dessus de la limite du GPU ne ralentit
+// pas, elle ÉCHOUE — et WebGL2 ne garantit que 2 048 px.
+//
+// Rendre `null` fait renoncer l'appelant, ce qui est un état honnête : la couche
+// ne s'affiche pas, et elle le dit.
+//
+// @param {{x:number,y:number}[]} tuiles
+// @param {number} z
+// @param {number} budgetPx - le plus petit du budget voulu et de `maxTexturePx`
+// @param {string} nom - pour que la console dise QUELLE couche a renoncé
+export function grilleMosaique(tuiles, z, budgetPx, nom = 'mosaïque') {
+  const g = grilleTuiles(tuiles, z)
+  if (!g) return null
+  const px = Math.max(g.cols, g.rows) * TILE_PX
+  if (px > budgetPx) {
+    // On le DIT. Une couche qui renonce en silence se lit comme une couche
+    // cassée, et c'est le développeur suivant qui paie la recherche.
+    console.warn(`${nom} : canevas ${g.cols * TILE_PX}×${g.rows * TILE_PX} px au-dessus du budget ${budgetPx} — couche non construite.`)
+    return null
+  }
+  return g
 }
 
 // Returned by build() when a newer build has taken over. Distinct from null
@@ -462,12 +511,15 @@ export class AerialLayer {
     if (!provider) return null
 
     const z = aerialZoomFor(bbox, { budgetPx: this._budgetPx, maxZoom: provider.maxZoom })
+    // `null` = aucun zoom ne tient dans le budget. On RENONCE, au lieu de bâtir
+    // le canevas de 990 Mo que le plancher z3 demandait.
+    if (z === null) return null
     const tiles = tilesForBBox(bbox, z)
     if (!tiles.length) return null
 
-    const xs = tiles.map((t) => t.x), ys = tiles.map((t) => t.y)
-    const x0 = Math.min(...xs), y0 = Math.min(...ys)
-    const cols = Math.max(...xs) - x0 + 1, rows = Math.max(...ys) - y0 + 1
+    const grille = grilleMosaique(tiles, z, this._budgetPx, 'photo aérienne')
+    if (!grille) return null
+    const { x0, y0, cols, rows } = grille
 
     const canvas = document.createElement('canvas')
     canvas.width = cols * TILE_PX
@@ -513,7 +565,10 @@ export class AerialLayer {
         try {
           const img = await loadImage(provider.url(t.z, t.x, t.y))
           if (id !== this._buildId) return // a newer patch superseded us
-          ctx.drawImage(img, (t.x - x0) * TILE_PX, (t.y - y0) * TILE_PX)
+          // `grille.colonne` et pas `t.x - x0` : sur une emprise à cheval sur
+          // ±180°, la soustraction rend un indice négatif ou géant, et la tuile
+          // se peint hors du canevas — invisible, sans la moindre erreur.
+          ctx.drawImage(img, grille.colonne(t) * TILE_PX, grille.ligne(t) * TILE_PX)
           ok++
         } catch {}
       })
@@ -620,13 +675,26 @@ export function tileGridMerc(x0, y0, cols, rows, z) {
 export function aerialUvTransform(patchBBox, gridMerc) {
   const a = lonLatToMerc(patchBBox.minLon, patchBBox.maxLat) // patch top-left
   const b = lonLatToMerc(patchBBox.maxLon, patchBBox.minLat) // patch bottom-right
+  // ══════════ ⚠️ LE MIROIR DE L'ANTIMÉRIDIEN, TROISIÈME ÉTAGE ═══════════════
+  //
+  // En mercator normalisé, x est cyclique : il retombe à 0 en franchissant
+  // +180°. Sur une emprise à cheval, le bord EST est donc NUMÉRIQUEMENT plus
+  // petit que le bord OUEST — mesuré aux Fidji : ouest 0,994, est 0,006. Le
+  // `b.x - a.x` d'origine sortait alors à −0,99, c'est-à-dire un `scale.x`
+  // NÉGATIF : la mosaïque peinte en MIROIR sur le terrain.
+  //
+  // On déroule d'un tour, exactement comme `spanLon` le fait en degrés et comme
+  // `grilleTuiles` le fait en colonnes de tuiles. `tileGridMerc` déroule déjà de
+  // son côté (son `maxX` dépasse 1 sur une grille enroulée), donc les deux
+  // repères parlent enfin de la même chose.
+  const bx = b.x < a.x ? b.x + 1 : b.x
   const gw = gridMerc.maxX - gridMerc.minX
   const gh = gridMerc.maxY - gridMerc.minY
   return {
     // x depuis l'ouest (les deux axes sont d'accord) ; y depuis le SUD, donc
     // depuis `gridMerc.maxY`, et sur le bord SUD du bloc (`b.y`).
     offset: [(a.x - gridMerc.minX) / gw, (gridMerc.maxY - b.y) / gh],
-    scale: [(b.x - a.x) / gw, (b.y - a.y) / gh],
+    scale: [(bx - a.x) / gw, (b.y - a.y) / gh],
   }
 }
 

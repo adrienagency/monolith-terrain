@@ -118,10 +118,10 @@ function lonLatToTileXY(lon, lat, z) {
 // toujours ; `demBounds` la piétinait, et ça coûtait quatre symptômes visibles
 // (voir son commentaire dans aerial-layer.js).
 //
-// Ces deux fonctions existent pour que plus personne n'écrive `maxLon - minLon`
-// ni `(minLon + maxLon) / 2` à la main : les deux sont FAUX dès qu'une emprise
-// s'enroule, et faux SILENCIEUSEMENT — c'est exactement comme ça que le défaut
-// a survécu si longtemps.
+// Ces TROIS fonctions existent pour que plus personne n'écrive `maxLon - minLon`,
+// `(minLon + maxLon) / 2` ni `Math.max(...xs) - Math.min(...xs)` à la main : les
+// trois sont FAUX dès qu'une emprise s'enroule, et faux SILENCIEUSEMENT — c'est
+// exactement comme ça que le défaut a survécu si longtemps.
 
 /** La largeur d'une emprise en degrés, enroulement compris. Toujours ≥ 0. */
 export function spanLon(minLon, maxLon) {
@@ -133,6 +133,80 @@ export function spanLon(minLon, maxLon) {
 export function centreLon(minLon, maxLon) {
   const c = minLon + spanLon(minLon, maxLon) / 2
   return ((((c + 180) % 360) + 360) % 360) - 180
+}
+
+// ══════════ LA GRILLE D'UNE MOSAÏQUE — LA TROISIÈME FORME DU MÊME PIÈGE ═════
+//
+// Les quatre couches drapées (photo aérienne, lumières nocturnes, occupation du
+// sol, hauteur de canopée) bâtissent toutes le même canevas à partir d'une liste
+// de tuiles, et toutes les quatre écrivaient la même arithmétique à la main :
+//
+//     const x0 = Math.min(...xs)
+//     const cols = Math.max(...xs) - x0 + 1
+//
+// Ces deux lignes supposent que les colonnes forment une plage CONTIGUË. C'est
+// vrai partout... sauf à cheval sur ±180°, où `tilesForBBox` rend légitimement
+// des colonnes tout en HAUT de la plage (254, 255) et tout en BAS (0, 1), sans
+// rien entre les deux — parce que c'est exactement ce que la donnée est.
+//
+// MESURÉ aux Fidji (179,97 / −16,85), un bloc z8 : 16 tuiles, et pourtant
+// `cols = 256`. Le canevas partait à 65 536 × 1 024 px, et `scale.x` sortait
+// NÉGATIF de `aerialUvTransform` — les quatre couches retournées EN MIROIR sur
+// le terrain. À z12 en 3×3, `cols` atteignait 4 096 : un canevas d'un million de
+// pixels de large, que le navigateur refuse en silence.
+//
+// ⚠️ UNE SEULE COPIE DE LA RÈGLE, ET C'EST TOUT L'ENJEU. Le défaut n'est pas né
+// d'une erreur de calcul mais d'une DUPLICATION : quatre exemplaires de la même
+// arithmétique, dont aucun ne connaissait la convention d'enroulement que
+// `tilesForBBox` respecte trois lignes plus bas. Toute nouvelle couche drapée
+// passe par ici plutôt que de réécrire ces deux lignes.
+//
+// LA MÉTHODE — LE PLUS GRAND TROU. On ne peut pas deviner le bord ouest en
+// regardant le minimum : aux Fidji, la colonne la plus à l'ouest est 254, pas 0.
+// Mais une emprise est toujours un ARC : ses colonnes occupent un intervalle
+// continu du cercle, et le reste du cercle est un seul trou. On cherche donc le
+// plus grand écart entre deux colonnes voisines (cycliquement) : la colonne qui
+// SUIT ce trou est le bord ouest, celle qui le précède est le bord est.
+//
+// @param {{x:number,y:number}[]} tuiles - la liste rendue par `tilesForBBox`
+// @param {number} z - le zoom slippy de ces tuiles (donne n = 2^z)
+// @returns {{x0:number,y0:number,cols:number,rows:number,colonne:Function,ligne:Function}|null}
+export function grilleTuiles(tuiles, z) {
+  if (!tuiles?.length) return null
+  const n = 2 ** z
+  const xs = [...new Set(tuiles.map((t) => t.x))].sort((a, b) => a - b)
+  const ys = tuiles.map((t) => t.y)
+
+  // Le bord ouest : la colonne qui suit le plus grand trou du cercle. Avec une
+  // seule colonne, il n'y a pas de trou — elle est son propre bord.
+  let x0 = xs[0]
+  let dernier = xs[xs.length - 1]
+  if (xs.length > 1) {
+    let plusGrandTrou = -1
+    for (let i = 0; i < xs.length; i++) {
+      const suivant = xs[(i + 1) % xs.length]
+      const trou = (((suivant - xs[i]) % n) + n) % n
+      if (trou > plusGrandTrou) { plusGrandTrou = trou; dernier = xs[i]; x0 = suivant }
+    }
+  }
+  // `+ 1` parce qu'on compte des colonnes, pas des intervalles ; borné à n pour
+  // qu'un tour du monde complet ne redessine pas deux fois le même méridien.
+  const cols = Math.min(n, ((((dernier - x0) % n) + n) % n) + 1)
+
+  // ⚠️ LES LIGNES NE S'ENROULENT PAS. `lonLatToTileXY` borne la latitude à
+  // ±85,05° (la couverture de Mercator) : une emprise ne peut pas franchir un
+  // pôle et ressortir de l'autre côté. Un modulo sur y serait donc du bruit —
+  // pire, il masquerait une vraie anomalie de grille le jour où il y en a une.
+  const y0 = Math.min(...ys)
+  const rows = Math.max(...ys) - y0 + 1
+
+  return {
+    x0, y0, cols, rows,
+    /** La colonne d'une tuile DANS LE CANEVAS, 0 au bord ouest. */
+    colonne: (t) => ((((t.x - x0) % n) + n) % n),
+    /** La ligne d'une tuile dans le canevas, 0 au bord nord. */
+    ligne: (t) => t.y - y0,
+  }
 }
 
 export function tilesForBBox(bbox, tileZoom) {

@@ -1,3 +1,4 @@
+import { spanLon } from './tile-index.js'
 // Découpage géographique des couches Natural Earth en cellules.
 //
 // POURQUOI. `loadLayer` téléchargeait le fichier monde entier pour n'afficher
@@ -83,13 +84,28 @@ export function cellPath(name, key) {
 // Cellules recouvrant une emprise. Rend `null` si l'emprise en demande plus
 // que MAX_CELLS (l'appelant bascule alors sur le fichier monolithe).
 //
-// ⚠️ ANTIMÉRIDIEN. worldToLatLon (src/geo.js) replie tx dans [0, n) : un bloc
-// à cheval sur ±180° ressort avec des coins aux DEUX bouts de l'axe, et
-// patchBounds en tire minLon = -179,9 / maxLon = 179,8 — soit une lecture
-// naïve de 359,7° de large, c'est-à-dire la Terre entière. Une étendue > 180°
-// n'est jamais un vrai bloc de 27 km : c'est la signature d'un enroulement, et
-// la zone voulue est le COMPLÉMENT [maxLon, minLon+360]. La forme
-// explicitement enroulée (minLon > maxLon) est traitée de la même façon.
+// ══════════ ⚠️ ANTIMÉRIDIEN : LE SIGNE, PLUS L'HEURISTIQUE DES 180° ═════════
+//
+// L'ANCIENNE RÈGLE, et pourquoi elle a cessé d'être vraie. `patchBounds` triait
+// ses longitudes, si bien qu'un bloc à cheval sur ±180° en ressortait comme
+// minLon = −179,9 / maxLon = 179,8 : 359,7° de large, la Terre entière. Faute de
+// pouvoir distinguer cette forme d'une vraie emprise, on décrétait qu'« une
+// étendue de plus de 180° n'est jamais un vrai bloc » et on prenait le
+// complément. C'était une DEVINETTE, et elle a tenu tant que les blocs étaient
+// petits.
+//
+// Elle est fausse depuis le 3×3 avec plancher z3. MESURÉ : une emprise 3×3 fait
+// NEUF tuiles de large, soit 202,5° à z4 et 405° à z3 — des étendues parfaitement
+// légitimes, que l'heuristique retournait en leur complément. Le jumeau de cette
+// ligne dans `bathy-sources.js` refusait pour cette raison la bathymétrie fine
+// sur l'Europe en 3×3 z4, et faisait DISPARAÎTRE le crédit EMODnet, que le même
+// fichier qualifie d'obligation de licence.
+//
+// LA RÈGLE MAINTENANT : le SIGNE, pas la largeur. `minLon > maxLon` veut dire
+// « l'emprise franchit ±180° » — c'est la convention que `tilesForBBox` respecte
+// depuis toujours, que `demBounds` respecte depuis sa correction, et que
+// `patchBounds` respecte depuis la sienne. Plus personne ne produit la forme
+// triée, donc plus rien à deviner.
 export function cellsForBounds(bounds, size) {
   if (!bounds || !Number.isFinite(bounds.minLat) || !Number.isFinite(bounds.maxLat)) return null
   if (!Number.isFinite(bounds.minLon) || !Number.isFinite(bounds.maxLon)) return null
@@ -99,12 +115,14 @@ export function cellsForBounds(bounds, size) {
   const rowLo = cellIndex(size, Math.min(bounds.minLat, bounds.maxLat), 0).row
   const rowHi = cellIndex(size, Math.max(bounds.minLat, bounds.maxLat), 0).row
 
-  const span = bounds.maxLon - bounds.minLon
+  // `spanLon` porte la convention : ≥ 0 toujours, et l'enroulement compris.
+  const span = spanLon(bounds.minLon, bounds.maxLon)
   let lonLo = bounds.minLon
-  let lonHi = bounds.maxLon
+  let lonHi = bounds.minLon + span
+  // Une emprise qui fait au moins le tour du monde ne demande qu'un tour : le
+  // plancher z3 en 3×3 en fait 405°, et redemander 45° deux fois ne servirait
+  // qu'à doubler la note. Le garde-fou MAX_CELLS tranchera juste après.
   if (span >= 360) { lonLo = -180; lonHi = 180 - 1e-9 }
-  else if (span > 180) { lonLo = bounds.maxLon; lonHi = bounds.minLon + 360 }
-  else if (span < 0) { lonHi = bounds.maxLon + 360 }
 
   const colStart = Math.floor((lonLo + 180) / size)
   const colEnd = Math.floor((lonHi + 180) / size)

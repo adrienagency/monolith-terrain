@@ -245,13 +245,28 @@ export function zoomSolBorne(voulu) {
 export function normaliseIndexSol(doc) {
   const borne = (v, dflt) => (Number.isFinite(v) ? Math.max(0, Math.min(SOL_ZOOM_MAX, Math.floor(v))) : dflt)
   const zmaxGlobal = borne(doc?.zmax, SOL_ZOOM_MAX)
+  // Le plancher de cuisson global, dont héritent les zones qui n'en ont pas.
+  const zminGlobal = borne(doc?.zmin, 0)
   const zones = Array.isArray(doc?.zones)
     ? doc.zones
         .filter((z) => Array.isArray(z?.bbox) && z.bbox.length === 4 && z.bbox.every(Number.isFinite))
-        .map((z) => ({ ...z, zmax: borne(z?.zmax, zmaxGlobal) }))
+        // ⚠️ LE `zmin` EST LU AUSSI, ET IL NE L'ÉTAIT PAS. Le manifeste
+        // déclare depuis toujours « la cuisson ne descend pas sous z8 », et
+        // personne ne transmettait ce nombre : à demZoom 5-6 on réclamait du
+        // z6/z7 jamais écrit, tout tombait en 404, rien n'était peint, et
+        // l'interrupteur restait allumé sur une carte inchangée.
+        //
+        // Une zone sans `zmin` propre hérite de celui de la racine — c'est ce
+        // que le manifeste du socle mondial suppose déjà. Et un `zmin` ne peut
+        // pas dépasser le `zmax` de sa zone : ce serait une zone vide, donc une
+        // couche qui ne s'allume jamais sans dire pourquoi.
+        .map((z) => {
+          const zmax = borne(z?.zmax, zmaxGlobal)
+          return { ...z, zmax, zmin: Math.min(borne(z?.zmin, zminGlobal), zmax) }
+        })
     : []
   return {
-    zmin: borne(doc?.zmin, 0),
+    zmin: zminGlobal,
     zmax: zmaxGlobal,
     zones,
   }

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { WATER_REGION, REGION, LOD_LEVELS, LAKE_LOD_LEVELS, lodForZoom, tileZoomForLod, tilesForBBox, inRegion } from '../src/map/tile-index.js'
+import { WATER_REGION, REGION, LOD_LEVELS, LAKE_LOD_LEVELS, lodForZoom, tileZoomForLod, tilesForBBox, inRegion, grilleTuiles } from '../src/map/tile-index.js'
 
 test('lodForZoom: far/mid/close bands match the demZoomMax boundaries', () => {
   assert.equal(lodForZoom(1), 0)
@@ -125,4 +125,74 @@ test('tilesForBBox at the world-lake LOD0 zoom covers a whole-planet bbox withou
   const tiles = tilesForBBox({ minLon: -180, maxLon: 180, minLat: -85, maxLat: 85 }, tileZoomForLod(0, LAKE_LOD_LEVELS))
   assert.ok(tiles.length <= 1024, `expected <=1024 tiles at z5, got ${tiles.length}`)
   for (const t of tiles) assert.ok(Number.isInteger(t.x) && Number.isInteger(t.y))
+})
+
+// ══════════ LA GRILLE D'UNE MOSAÏQUE, ENROULEMENT COMPRIS ═══════════════════
+//
+// MESURÉ aux Fidji (179,97 / −16,85) avant `grilleTuiles` : les quatre couches
+// drapées calculaient `x0 = Math.min(...xs)` et `cols = max − x0 + 1`, ce qui
+// suppose une plage de colonnes CONTIGUË. Sur une emprise à cheval sur ±180°,
+// `tilesForBBox` rend légitimement des x tout en haut (255) ET tout en bas (0)
+// de la plage : la soustraction rendait alors `cols = 256` pour 16 tuiles, un
+// canevas de 65 536 px de large, et un `scale.x` NÉGATIF — les quatre couches
+// retournées en MIROIR à l'écran.
+test('grilleTuiles recolle une plage de colonnes enroulée autour de ±180°', () => {
+  // Les colonnes réellement rendues aux Fidji à z8 : 255, 0 (et rien entre).
+  const tuiles = [
+    { z: 8, x: 255, y: 140 }, { z: 8, x: 255, y: 141 },
+    { z: 8, x: 0, y: 140 }, { z: 8, x: 0, y: 141 },
+  ]
+  const g = grilleTuiles(tuiles, 8)
+  assert.equal(g.cols, 2, 'deux colonnes voisines, pas 256')
+  assert.equal(g.rows, 2)
+  assert.equal(g.x0, 255, "l'origine est la colonne OUEST, celle d'où l'on avance vers l'est")
+  assert.equal(g.y0, 140)
+  // La position d'une tuile dans le canevas : 255 est la première, 0 la seconde.
+  assert.equal(g.colonne(tuiles[0]), 0)
+  assert.equal(g.colonne(tuiles[2]), 1)
+  assert.equal(g.ligne(tuiles[0]), 0)
+  assert.equal(g.ligne(tuiles[1]), 1)
+})
+
+test('grilleTuiles laisse intacte une plage ordinaire (aucun enroulement)', () => {
+  const tuiles = []
+  for (let x = 12; x <= 15; x++) for (let y = 30; y <= 32; y++) tuiles.push({ z: 6, x, y })
+  const g = grilleTuiles(tuiles, 6)
+  assert.equal(g.x0, 12)
+  assert.equal(g.y0, 30)
+  assert.equal(g.cols, 4)
+  assert.equal(g.rows, 3)
+  assert.equal(g.colonne({ x: 12 }), 0)
+  assert.equal(g.colonne({ x: 15 }), 3)
+})
+
+test("grilleTuiles n'invente pas de grille sur une liste vide", () => {
+  assert.equal(grilleTuiles([], 8), null)
+  assert.equal(grilleTuiles(null, 8), null)
+})
+
+test('grilleTuiles : cols ne dépasse jamais le tour du monde', () => {
+  // Une emprise qui fait le tour complet ne doit pas rendre n+1 colonnes : le
+  // canevas boucherait la mémoire pour redessiner deux fois le même méridien.
+  const tuiles = tilesForBBox({ minLon: -180, maxLon: 180, minLat: -60, maxLat: 60 }, 4)
+  const g = grilleTuiles(tuiles, 4)
+  assert.ok(g.cols <= 2 ** 4, `cols=${g.cols} dépasse les 16 colonnes du monde à z4`)
+})
+
+test("grilleTuiles rend, pour toute emprise enroulée, autant de colonnes que de x distincts quand ils sont contigus modulo n", () => {
+  // La propriété qui compte, au-delà des littéraux : la grille recollée doit
+  // être aussi SERRÉE que la liste de tuiles. Un `cols` plus grand que le
+  // nombre de colonnes distinctes est exactement le défaut mesuré aux Fidji.
+  for (const [lon, z] of [[179.97, 8], [-179.9, 6], [179.99, 12], [0, 8]]) {
+    const demi = (360 / 2 ** z) * 4.5 // une emprise 3×3 fait 9 tuiles de large
+    const bbox = {
+      minLon: ((((lon - demi + 180) % 360) + 360) % 360) - 180,
+      maxLon: ((((lon + demi + 180) % 360) + 360) % 360) - 180,
+      minLat: -17.5, maxLat: -16.2,
+    }
+    const tuiles = tilesForBBox(bbox, z)
+    const g = grilleTuiles(tuiles, z)
+    const distincts = new Set(tuiles.map((t) => t.x)).size
+    assert.equal(g.cols, distincts, `lon=${lon} z=${z} : cols=${g.cols} pour ${distincts} colonnes distinctes`)
+  }
 })

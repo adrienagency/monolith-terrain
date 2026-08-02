@@ -1,7 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
-import { featureBBox, bboxOverlap, clipToPatch, filterByZoom, loadLayer } from '../src/map/geo-data.js'
+import { featureBBox, bboxOverlap, clipToPatch, filterByZoom, loadLayer, patchBounds } from '../src/map/geo-data.js'
+import { spanLon } from '../src/map/tile-index.js'
+import { demBounds } from '../src/map/aerial-layer.js'
+import { cellsForBounds, CELL_SIZES } from '../src/map/geo-cells.js'
 
 const line = (coords, props = {}) => ({ type: 'Feature', properties: props, geometry: { type: 'LineString', coordinates: coords } })
 
@@ -74,4 +77,75 @@ test('plus une seule ligne de code ne réclame la couche « roads »', () => {
     assert.ok(!/loadLayer\(\s*['"]roads['"]\s*\)/.test(src), `${f} charge encore data/map/roads.json`)
     assert.ok(!/loadRoadTiles|loadRoadTileManifest/.test(src), `${f} réclame encore les tuiles routières`)
   }
+})
+
+// ══════════ `patchBounds` EST LE JUMEAU DE `demBounds` — MÊME CONVENTION ════
+//
+// `demBounds` a été corrigé (il ne trie plus ses longitudes) ; `patchBounds` est
+// resté sur `Math.min`/`Math.max`, et c'est exactement le même défaut, une porte
+// plus loin. `worldToLatLon` replie l'indice de tuile dans [0, n), donc sur une
+// emprise à cheval sur ±180° les neuf points d'échantillonnage ressortent aux
+// DEUX bouts de l'axe : trier rend le COMPLÉMENT de l'emprise voulue.
+//
+// MESURÉ aux Fidji (179,97 / −16,85), avant correction : `patchBounds` rendait
+// 393 à 396° de large — plus que la Terre. `cellsForBounds` renvoyait alors
+// `null` (au-dessus de MAX_CELLS) pour `places`, `rivers` et `coastline`, donc
+// REPLI SUR LE FICHIER MONOLITHE : la régression de 10,7 Mo que le découpage en
+// cellules avait tuée, revenue en silence. Pour `lakes` (cellules de 10°) il
+// demandait 36 cellules au lieu de 2.
+const demFictif = ({ lon, lat, zoom, cote = 1 }) => {
+  const n = 2 ** zoom
+  const r = (lat * Math.PI) / 180
+  const tuiles = 3 * cote // un bloc fait 3 tuiles ; une emprise 3×3 en fait 9
+  return {
+    size: tuiles * 512, tilePx: 512, zoom,
+    originTileX: ((lon + 180) / 360) * n - tuiles / 2,
+    originTileY: ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n - tuiles / 2,
+    empriseCote: cote, extentMeters: (40075016 / n) * tuiles,
+  }
+}
+
+test('patchBounds : aux Fidji, l emprise reste étroite au lieu de faire le tour du monde', () => {
+  for (const cote of [1, 3]) {
+    for (const zoom of [8, 12]) {
+      const b = patchBounds(demFictif({ lon: 179.97, lat: -16.85, zoom, cote }))
+      const largeur = spanLon(b.minLon, b.maxLon)
+      assert.ok(largeur < 20, `z${zoom} ${cote}×${cote} : ${largeur.toFixed(1)}° de large`)
+      // La convention : minLon EST le bord ouest, même quand il est numériquement
+      // plus grand que maxLon. C'est ce que `tilesForBBox` et `cellsForBounds`
+      // savent déjà lire.
+      assert.ok(b.minLon > b.maxLon, "une emprise à cheval s'écrit ouest > est")
+    }
+  }
+})
+
+test('patchBounds : aux Fidji, on ne retombe plus sur le fichier monolithe', () => {
+  const b = patchBounds(demFictif({ lon: 179.97, lat: -16.85, zoom: 12, cote: 3 }))
+  for (const [nom, size] of Object.entries(CELL_SIZES)) {
+    const keys = cellsForBounds(b, size)
+    assert.ok(keys !== null, `${nom} : repli monolithe (cellsForBounds a rendu null)`)
+    assert.ok(keys.length <= 6, `${nom} : ${keys.length} cellules demandées pour un bloc de quelques km`)
+  }
+})
+
+test('patchBounds : le témoin de Chamonix est inchangé, et reste plus large que demBounds', () => {
+  // La marge de 5 % + 0,01° existe pour RATISSER la donnée autour du bloc : elle
+  // doit survivre à la correction, sinon les noms de village disparaissent des
+  // bords. Hors enroulement, le comportement est identique à celui d'avant.
+  const dem = demFictif({ lon: 6.87, lat: 45.92, zoom: 12, cote: 3 })
+  const p = patchBounds(dem), d = demBounds(dem)
+  assert.ok(p.minLon < d.minLon && p.maxLon > d.maxLon, 'la marge en longitude a disparu')
+  assert.ok(p.minLat < d.minLat && p.maxLat > d.maxLat, 'la marge en latitude a disparu')
+  assert.ok(spanLon(p.minLon, p.maxLon) > spanLon(d.minLon, d.maxLon))
+  assert.ok(p.minLon < p.maxLon, 'sans enroulement, ouest < est comme toujours')
+})
+
+test('patchBounds : la marge est bien appliquée même sur une emprise enroulée', () => {
+  const dem = demFictif({ lon: 179.97, lat: -16.85, zoom: 12, cote: 3 })
+  const p = patchBounds(dem), d = demBounds(dem)
+  // La marge se mesure sur la LARGEUR ENROULÉE, jamais sur une soustraction nue.
+  assert.ok(spanLon(p.minLon, p.maxLon) > spanLon(d.minLon, d.maxLon),
+    'la marge doit exister aussi à cheval sur ±180°')
+  assert.ok(spanLon(p.minLon, p.maxLon) < spanLon(d.minLon, d.maxLon) * 1.5,
+    'et rester une MARGE, pas un tour du monde')
 })

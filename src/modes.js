@@ -24,16 +24,20 @@ const NOOP = () => {}
 // the globe: z7 @ 600 km, then the regional/local tiers. Corsica-sized views
 // (~150 km) still get z8.
 //
-// ⚠️ LES DEUX PALIERS LES PLUS LARGES ONT ÉTÉ RETIRÉS (Adrien : « Z1 et Z2 ne
-// doivent pas exister »). Ils portaient z4 (@ 8 000 km) et z5 (@ 4 000 km) —
-// des blocs de 7 500 et 3 760 km où la mer noie tout et où les continents ne
-// sont plus que des taches. Le filtre est appliqué ICI et sa règle vit dans
-// escalier-zoom.js : la table brute reste lisible, et changer d'avis sur le
-// plancher ne demande de toucher qu'à `ZOOM_PALIER_MIN`.
+// ⚠️ LE PLANCHER EST z3 (Adrien : « Z1 et Z2 ne doivent pas exister »). Le
+// filtre est appliqué ICI et sa règle vit dans escalier-zoom.js : la table brute
+// reste lisible, et changer d'avis sur le plancher ne demande de toucher qu'à
+// `ZOOM_PALIER_MIN`.
 //
-// ⚠️ CONSÉQUENCE À CONNAÎTRE : la porte orbitale s'ouvre désormais au-dessus de
-// 1 600 km et non plus de 8 000. `DIVE_ALT_M` (le seuil du zoom fin) ne bouge
-// pas — c'est DIVE_TIERS[0], et lui n'a jamais été concerné.
+// ⚠️ CE PARAGRAPHE A ÉTÉ FAUX. Il annonçait que z4 et z5 avaient été RETIRÉS et
+// que la porte orbitale s'ouvrait « au-dessus de 1 600 km ». Les deux ont cessé
+// d'être vrais le jour où la marche z3 a été ajoutée à la table : z4 et z5 sont
+// bel et bien là (16 lignes plus bas), et le palier le plus large est désormais
+// z3 à 16 000 km. C'est donc à 16 000 km, et non à 1 600, que plus aucun palier
+// ne correspond à l'altitude — c'est-à-dire que la porte orbitale s'ouvre.
+//
+// `DIVE_ALT_M` (le seuil du zoom fin) ne bouge pas — c'est DIVE_TIERS[0], et lui
+// n'a jamais été concerné.
 export const DIVE_TIERS = paliersRetenus([
   { altM: 8000, zoom: null },
   { altM: 25000, zoom: 11 },

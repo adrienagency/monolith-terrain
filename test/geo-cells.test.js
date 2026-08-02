@@ -77,15 +77,38 @@ test('aucun doublon quand l emprise est plus petite qu une cellule', () => {
 
 // ------------------------------------------------ le piege de l antimeridien
 
-test('ANTIMERIDIEN : patchBounds rend minLon=-179.9 maxLon=179.8 pour un bloc etroit sur +/-180 ; on ne demande PAS le monde', () => {
-  // worldToLatLon replie tx dans [0,n) : un bloc a cheval sur la ligne de
-  // changement de date ressort avec des longitudes aux deux bouts de l'axe.
-  // Une lecture naive donnerait une bande de 359.7 degres = 180 colonnes.
-  const keys = cellsForBounds(B(-17.0, -16.7, -179.9, 179.8), 2)
+// ⚠️ CE TEST A CHANGE DE PREMISSE LE 2026-08-02, ET C'EST LE FOND DU SUJET.
+//
+// Il verrouillait la forme TRIEE (minLon=-179.9, maxLon=179.8) que `patchBounds`
+// produisait avant sa correction, et l'heuristique « plus de 180 degres = un
+// enroulement » qui servait a la rattraper. Les deux sont partis ensemble :
+// `patchBounds` rend desormais l'ouest puis l'est sans trier, et une etendue de
+// plus de 180 degres est redevenue ce qu'elle dit — MESURE, une emprise 3x3 fait
+// 202,5 degres a z4 et 405 a z3, et l'heuristique les retournait en leur
+// complement.
+//
+// La PROPRIETE protegee, elle, n'a pas bouge d'un pouce : un bloc etroit a
+// cheval sur la ligne de changement de date ne doit pas demander le monde. Seule
+// l'ecriture de l'emprise a change — c'est maintenant celle de `tilesForBBox`.
+test('ANTIMERIDIEN : un bloc etroit a cheval sur +/-180 (ouest 179.8, est -179.9) ne demande PAS le monde', () => {
+  const keys = cellsForBounds(B(-17.0, -16.7, 179.8, -179.9), 2)
   assert.ok(keys.length <= 4, `attendu <= 4 cellules, recu ${keys.length}`)
   // les colonnes retenues doivent encadrer la ligne : 179 (le bout est) et 0 (le bout ouest)
   const cols = new Set(keys.map((k) => Number(k.split('_')[1])))
   assert.ok(cols.has(179) && cols.has(0), `colonnes ${[...cols]}`)
+})
+
+test('UNE LARGE EMPRISE N EST PLUS PRISE POUR UN ENROULEMENT — le 3x3 au plancher', () => {
+  // MESURE : une emprise 3x3 fait NEUF tuiles de large, donc 202,5 degres a z4.
+  // L'heuristique des 180 degres en prenait le COMPLEMENT (157,5 degres a
+  // l'oppose du globe) et rendait des cellules de l'autre bout de la Terre.
+  // On demande ici l'Europe elargie : les colonnes doivent encadrer Greenwich,
+  // pas le Pacifique.
+  const keys = cellsForBounds(B(30, 50, -101.25, 101.25), 10)
+  if (keys === null) return // plafonne par MAX_CELLS : c'est un refus honnete
+  const cols = new Set(keys.map((k) => Number(k.split('_')[1])))
+  assert.ok(cols.has(18), 'la colonne de Greenwich (lon 0) doit etre dedans')
+  assert.ok(!cols.has(0), "la colonne de -180 n'a rien a faire dans une emprise centree sur l'Europe")
 })
 
 test('ANTIMERIDIEN : la forme explicitement enroulee (minLon > maxLon) est comprise', () => {
