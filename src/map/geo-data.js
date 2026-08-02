@@ -1,3 +1,4 @@
+import { spanLon } from './tile-index.js'
 import { worldToLatLon, demSpan } from '../geo.js'
 import { CELL_SIZES, cellsForBounds, cellPath, mergeCells, emptyPayload, hasCell } from './geo-cells.js'
 
@@ -82,15 +83,63 @@ export async function loadLayerForBounds(name, bounds) {
 // du bloc CENTRAL, et on défilerait vers des vallées sans un seul nom de village
 // — ce qui se lit comme des données manquantes, pas comme une limite de cadre.
 // Mesuré à Chamonix z12 : 28 lieux récoltés à ±28 contre 172 à ±84.
+//
+// ══════════ ⚠️ PAS DE Math.min/Math.max SUR LA LONGITUDE — LE JUMEAU ═════════
+//
+// C'est RIGOUREUSEMENT le défaut qui a été corrigé dans `demBounds`
+// (aerial-layer.js), laissé en place ici une porte plus loin. `worldToLatLon`
+// replie l'indice de tuile dans [0, n) : sur une emprise à cheval sur ±180°, les
+// neuf points d'échantillonnage ressortent aux DEUX bouts de l'axe, et trier
+// rend le COMPLÉMENT de l'emprise — le tour du monde moins le bloc.
+//
+// MESURÉ aux Fidji (179,97 / −16,85) : 393 à 396° de large, c'est-à-dire PLUS
+// QUE LA TERRE. Conséquence en cascade, et elle n'était pas cosmétique :
+// `cellsForBounds` dépassait alors `MAX_CELLS` et rendait `null` pour `places`,
+// `rivers` et `coastline` — donc REPLI SUR LE FICHIER MONOLITHE, la régression
+// de 10,7 Mo que le découpage en cellules avait précisément tuée. Pour `lakes`
+// il demandait 36 cellules là où 2 suffisent.
+//
+// LA CONVENTION, une fois de plus : on RÉCOLTE les bords ouest et est plutôt
+// que de les trier. Le bord ouest est le point d'où l'on peut atteindre tous
+// les autres en allant VERS L'EST sans faire plus d'un tour ; on le trouve, ici
+// aussi, en cherchant le plus grand TROU du cercle des longitudes.
+//
+// ⚠️ ET LA MARGE SE MESURE SUR `spanLon`, jamais sur `maxLon - minLon` : sur une
+// emprise enroulée la soustraction est négative, et la marge se retrancherait au
+// lieu de s'ajouter — le bloc ratisserait MOINS large que lui-même.
 export function patchBounds(dem) {
   const half = demSpan(dem) / 2
   const pts = []
   for (const fx of [-1, 0, 1]) for (const fz of [-1, 0, 1]) pts.push(worldToLatLon(dem, fx * half, fz * half))
-  let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180
-  for (const p of pts) { minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat); minLon = Math.min(minLon, p.lon); maxLon = Math.max(maxLon, p.lon) }
+
+  let minLat = 90, maxLat = -90
+  for (const p of pts) { minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat) }
+
+  // Les bords ouest et est, enroulement compris. Même méthode que
+  // `grilleTuiles` en colonnes de tuiles : les longitudes d'une emprise
+  // occupent un ARC du cercle, le reste est un seul trou, et le bord ouest est
+  // la longitude qui SUIT ce trou.
+  const lons = [...new Set(pts.map((p) => p.lon))].sort((a, b) => a - b)
+  let ouest = lons[0], est = lons[lons.length - 1]
+  if (lons.length > 1) {
+    let plusGrandTrou = -1
+    for (let i = 0; i < lons.length; i++) {
+      const suivant = lons[(i + 1) % lons.length]
+      const trou = (((suivant - lons[i]) % 360) + 360) % 360
+      if (trou > plusGrandTrou) { plusGrandTrou = trou; est = lons[i]; ouest = suivant }
+    }
+  }
+
   const padLat = (maxLat - minLat) * 0.05 + 0.01
-  const padLon = (maxLon - minLon) * 0.05 + 0.01
-  return { minLat: minLat - padLat, maxLat: maxLat + padLat, minLon: minLon - padLon, maxLon: maxLon + padLon }
+  const padLon = spanLon(ouest, est) * 0.05 + 0.01
+  // Les longitudes élargies sont ramenées dans [−180, 180] : une marge qui
+  // pousse à 180,4° doit ressortir à −179,6°, sinon les consommateurs qui
+  // calculent une colonne de cellule sortent de la grille.
+  const replie = (lon) => ((((lon + 180) % 360) + 360) % 360) - 180
+  return {
+    minLat: minLat - padLat, maxLat: maxLat + padLat,
+    minLon: replie(ouest - padLon), maxLon: replie(est + padLon),
+  }
 }
 
 export function featureBBox(f) {

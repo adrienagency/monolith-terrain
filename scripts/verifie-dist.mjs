@@ -125,7 +125,7 @@ const PLANCHERS = {
   'data/canopee': 55000,
 }
 
-import { readdirSync, statSync, existsSync, lstatSync } from 'node:fs'
+import { readdirSync, statSync, existsSync, lstatSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 
 const dist = process.argv[2] || 'dist'
@@ -146,6 +146,24 @@ function compte(dir) {
   return n
 }
 
+// Ce que le MANIFESTE de la couche annonce, ou 0 s'il n'y en a pas.
+//
+// Une couche tuilée écrit un `index.json` qui liste ses zones avec, pour chacune,
+// le nombre de tuiles cuites. C'est la seule source qui bouge en même temps que
+// la donnée : la lire vaut mieux que toute constante recopiée à la main.
+// Silencieux par principe — les couches sans manifeste (bathy, coast-z6…)
+// gardent leur plancher, et un JSON illisible ne doit pas empêcher le contrôle
+// des autres postes.
+function attenduParManifeste(dossier) {
+  try {
+    const doc = JSON.parse(readFileSync(path.join(dossier, 'index.json'), 'utf-8'))
+    if (!Array.isArray(doc?.zones)) return 0
+    return doc.zones.reduce((t, z) => t + (Number.isFinite(z?.tuiles) ? z.tuiles : 0), 0)
+  } catch {
+    return 0
+  }
+}
+
 if (!existsSync(dist)) {
   console.error(`\n  ✗ ${dist}/ n'existe pas. Lance d'abord :  npx vite build\n`)
   process.exit(1)
@@ -162,9 +180,27 @@ for (const [rel, plancher] of Object.entries(PLANCHERS)) {
   }
   const jonction = lstatSync(p).isSymbolicLink()
   const n = compte(p)
-  const ok = n >= plancher && !jonction
-  const note = jonction ? '  ⚠ JONCTION, pas de vrais fichiers' : ''
-  console.log(`  ${ok ? '✓' : '✗'} ${rel.padEnd(18)} ${String(n).padStart(6)} fichiers  (plancher ${plancher})${note}`)
+  const attendu = attenduParManifeste(p)
+  // ⚠️ LE MANIFESTE PORTE LE COMPTE EXACT, ET ON NE LE LISAIT PAS. Les planchers
+  // en dur laissaient perdre 23 % du socle EN SILENCE (78 070 tuiles pour un
+  // plancher de 60 000 ; 71 570 pour 55 000) — c'est-à-dire précisément
+  // l'amputation partielle que ce fichier existe pour attraper.
+  //
+  // VÉRIFIÉ : `sol` annonce 76 060 et le disque en a 76 060 ; `canopee` annonce
+  // 68 332, disque 68 332. Le seuil s'auto-ajuste donc à chaque cuisson, et il
+  // n'y a plus de constante à éditer — donc plus de constante à oublier.
+  //
+  // Les 2 % de marge absorbent l'écart normal entre « tuiles annoncées par zone »
+  // et fichiers sur le disque (une tuile peut appartenir à deux zones qui se
+  // recouvrent, et le manifeste les compte séparément).
+  const seuil = attendu ? Math.max(plancher, Math.floor(attendu * 0.98)) : plancher
+  const ok = n >= seuil && !jonction
+  const note = jonction
+    ? '  ⚠ JONCTION, pas de vrais fichiers'
+    : attendu && n < attendu
+      ? `  ⚠ le manifeste en annonce ${attendu.toLocaleString('fr-FR')}`
+      : ''
+  console.log(`  ${ok ? '✓' : '✗'} ${rel.padEnd(18)} ${String(n).padStart(6)} fichiers  (seuil ${seuil})${note}`)
   if (!ok) faute++
 }
 
@@ -174,9 +210,17 @@ if (faute) {
   console.error('  où les données cuites (hors dépôt) sont absentes. Deux parades :\n')
   console.error('    · construire depuis un arbre qui les possède, ou')
   console.error('    · poser des jonctions, puis RECONSTRUIRE :\n')
+  // ⚠️ `sol` ET `canopee` MANQUAIENT À CETTE LISTE, et ce sont les DEUX PLUS
+  // GROS POSTES de `dist/`. Suivre les instructions imprimées puis reconstruire
+  // échouait donc ENCORE, sur les deux couches les plus lourdes : une consigne
+  // de réparation incomplète coûte plus cher que pas de consigne du tout.
+  // Elles ne viennent pas du même arbre que les quatre autres, d'où les deux
+  // lignes séparées.
   console.error('        foreach ($d in @("bathy","coast-z6","lake-tiles","water-tiles")) {')
   console.error('          cmd /c mklink /J "<worktree>\\public\\data\\$d" "C:\\Dev\\monolith-terrain\\public\\data\\$d"')
   console.error('        }')
+  console.error('        cmd /c mklink /J "<worktree>\\public\\data\\sol"     "C:\\Dev\\wt-cuisson\\public\\data\\sol"')
+  console.error('        cmd /c mklink /J "<worktree>\\public\\data\\canopee" "C:\\Dev\\wt-canopee\\public\\data\\canopee"')
   console.error('        npm run build:mapcells && npx vite build\n')
   console.error('  ⚠️ Déployer malgré ce refus met le site EN LIGNE AMPUTÉ, sans')
   console.error('     qu\'aucun test ni aucune console ne le signale.\n')

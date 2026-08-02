@@ -128,11 +128,11 @@ import { buildShadersPanel } from './ui/shaders-panel.js'
 import { buildMapPanel } from './ui/map-panel.js'
 import { buildCouchesPanel } from './ui/couches-panel.js'
 import { NuitLayer } from './map/nuit-layer.js'
-import { intensiteNuit, facteurEchelleNuit, largeurEmpriseKm } from './nuit.js'
+import { intensiteNuit, facteurEchelleNuit, largeurDalleKm } from './nuit.js'
 import { OccupationSolLayer } from './map/occupation-sol-layer.js'
-import { normaliseIndexSol, zoneSolPour } from './occupation-sol.js'
+import { normaliseIndexSol, zoneSolPour, SOL_LICENCE, SOL_URL_SOURCE } from './occupation-sol.js'
 import { CanopeeLayer } from './map/canopee-layer.js'
-import { normaliseIndexCanopee, zoneCanopeePour } from './canopee.js'
+import { normaliseIndexCanopee, zoneCanopeePour, CANOPEE_LICENCE, CANOPEE_URL_SOURCE } from './canopee.js'
 // Les sous-options des couches : les conversions tirette → uniforme, et la
 // règle d'allumage automatique de la couche nocturne. Module pur, testé.
 import {
@@ -2694,7 +2694,12 @@ const BASE_EXAG = 2.8 // échelle verticale par défaut au chargement (Adrien)
 // tall — the relief read like spikes (user feedback v40). Halved+ so a country
 // sits as a gentle raised-relief plate; the ocean mask now keeps the low ground
 // clean so it can stay subtle without phantom lakes appearing.
-const ZOOM_EXAG_DEFAULTS = { 4: 2.5, 5: 5, 6: 4, 7: 3.2 }
+// ⚠️ z3 MANQUAIT ICI AUSSI, et l'effet était le symétrique du précédent : sans
+// entrée, z3 retombait sur BASE_EXAG (2,8), c'est-à-dire PLUS HAUT que z4 (2,5).
+// Le niveau le plus large de tous était donc le seul à remonter, en pleine
+// courbe descendante — exactement le relief « en pics » que cette table existe
+// pour aplatir. On prolonge la descente : 2,5, comme z4.
+const ZOOM_EXAG_DEFAULTS = { 3: 2.5, 4: 2.5, 5: 5, 6: 4, 7: 3.2 }
 const ZOOM_EXAG_KEY = 'monolith.zoomExag'
 let zoomExagStore = (() => {
   try {
@@ -4810,13 +4815,25 @@ function refreshOsmCredit() {
   // tant qu'elle y est — même contrat que la Licence Ouverte de l'IGN juste
   // au-dessus. `solAttribution` retombe à null dès que la couche s'éteint ou
   // que l'emprise quitte une zone cuite.
-  if (solAttribution) parts.push(`${solAttribution} (CC BY 4.0)`)
+  // ⚠️ `SOL_LICENCE`, PAS UNE CHAÎNE RECOPIÉE. La constante existait et personne
+  // ne la lisait : la ligne affichait « CC BY 4.0 » à la main pendant que le
+  // module déclarait « CC-BY 4.0 ». Deux écritures d'une obligation de licence,
+  // dont une seule peut suivre un changement de source.
+  if (solAttribution) parts.push(`${solAttribution} (${SOL_LICENCE})`)
   // Même obligation, même source de vérité : `canopeeAttribution` ne vaut
   // quelque chose que si des tuiles ont VRAIMENT été vues. Afficher le crédit
   // ETH au-dessus d'une mosaïque vide serait au choix une mention gratuite ou un
   // mensonge sur ce qu'on regarde.
-  if (canopeeAttribution) parts.push(`${canopeeAttribution} (CC BY 4.0)`)
-  credits.setExtra(parts.join(' · '))
+  if (canopeeAttribution) parts.push(`${canopeeAttribution} (${CANOPEE_LICENCE})`)
+  // L'ADRESSE DE LA SOURCE, AU SURVOL. `SOL_URL_SOURCE` et `CANOPEE_URL_SOURCE`
+  // étaient déclarées et n'étaient AFFICHÉES NULLE PART, alors que l'en-tête de
+  // src/canopee.js écrit que « l'attribution est une OBLIGATION de licence ».
+  // Une mention sans moyen de remonter à la source n'est pas une attribution
+  // complète ; la supprimer aurait été le mauvais sens de la correction.
+  const sources = []
+  if (solAttribution) sources.push(`${solAttribution} — ${SOL_URL_SOURCE}`)
+  if (canopeeAttribution) sources.push(`${canopeeAttribution} — ${CANOPEE_URL_SOURCE}`)
+  credits.setExtra(parts.join(' · '), sources.join('\n'))
 }
 
 // rebuild all map layers (water/places) for the current zone — used by
@@ -4856,10 +4873,15 @@ const nuitLayer = new NuitLayer({ maxTexturePx: renderer.capabilities.maxTexture
 function refreshNuitIntensite(hour = params.timeOfDay ?? 10) {
   const on = couchesActives.has('lumieres-nocturnes')
   if (!on) { terrain.setNuitIntensite(0); return }
-  // DEUX facteurs, et le second n'est pas cosmétique : sous 20 km d'emprise, le
-  // bloc couvre trois pixels de Black Marble et la couche devient un voile gris
+  // DEUX facteurs, et le second n'est pas cosmétique : sous 20 km, la DALLE
+  // couvre trois pixels de Black Marble et la couche devient un voile gris
   // uniforme — constaté à Tokyo z16. `facteurEchelleNuit` l'éteint alors.
-  const echelle = facteurEchelleNuit(largeurEmpriseKm(dem ? demBounds(dem) : null))
+  //
+  // ⚠️ LA DALLE, PAS L'EMPRISE — voir `largeurDalleKm`. `demBounds` décrit les
+  // NEUF dalles en mode continu, et le garde, lui, est calibré sur UNE. Mesuré :
+  // Paris z12 en 3×3 rendait 0,949 au lieu de 0, c'est-à-dire le voile gris à
+  // pleine intensité sous un garde qui croyait l'avoir éteint.
+  const echelle = facteurEchelleNuit(largeurDalleKm(dem ? demBounds(dem) : null, dem?.empriseCote))
   terrain.setNuitIntensite(intensiteNuit(hour) * echelle)
 }
 
@@ -4932,6 +4954,31 @@ function tenteAllumageNuit({ lecture = false, nuit = false } = {}) {
   refreshAll() // l'interrupteur du panneau doit bouger, sinon il ment
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠️ LA COUCHE QUI SE RALLUME TOUTE SEULE — LE GARDE D'APRÈS-ATTENTE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// LE DÉFAUT, et il était bloquant. Les trois `refresh*` testent
+// `couchesActives.has(...)` À L'ENTRÉE, puis attendent le réseau — des SECONDES.
+// Si l'utilisateur éteint la couche pendant ce temps, le `build` en vol atterrit
+// quand même et repose `uSolOn = 1` plus l'attribution : la couche se rallume
+// toute seule, sous un interrupteur affiché éteint.
+//
+// `SUPERSEDED` ne protège pas de ce cas-là, et c'est le point subtil. Il ne
+// parle que d'une construction CHASSÉE PAR UNE AUTRE : `_buildId` n'a été
+// incrémenté qu'une fois, parce que le second appel — celui de l'extinction —
+// sort par la branche « couche éteinte » AVANT d'atteindre `build`. Rien ne le
+// signale donc à la construction en vol.
+//
+// LE COÛT RÉEL : le bouton « Éteindre X pour allumer Y » du Gardien fait tourner
+// LES DEUX couches, et le budget qu'il défend est franchi en silence.
+//
+// On revérifie aussi que le CHAMP n'a pas changé : une mosaïque bâtie sur
+// l'emprise d'avant un déplacement se peindrait sur le nouveau bloc, décalée.
+function couchePartieEnVol(id, demAuDepart) {
+  return !couchesActives.has(id) || dem !== demAuDepart || params.source !== 'real'
+}
+
 async function refreshNuit() {
   if (!couchesActives.has('lumieres-nocturnes') || !dem || params.source !== 'real') {
     terrain.setNuit(null)
@@ -4940,8 +4987,15 @@ async function refreshNuit() {
   }
   // L'emprise VRAIE du champ chargé — un bloc, ou les neuf dalles du mode
   // continu. Jamais `patchBounds` : voir `demBounds`.
+  const demAuDepart = dem
   const built = await nuitLayer.build(demBounds(dem))
   if (built === SUPERSEDED) return // une construction plus récente a pris la main
+  // ⚠️ ON RETESTE L'ÉTAT APRÈS L'ATTENTE — voir `couchePartieEnVol`. La nuit y
+  // échappait par ACCIDENT (son `refreshNuitIntensite` final remet l'intensité à
+  // zéro quand la couche est éteinte), pas par garde. Un accident n'est pas une
+  // protection : la mosaïque restait posée, et la moindre réécriture de ces deux
+  // lignes rallumait la couche.
+  if (couchePartieEnVol('lumieres-nocturnes', demAuDepart)) return
   terrain.setNuit(built)
   refreshNuitIntensite()
 }
@@ -4999,10 +5053,39 @@ async function refreshSol() {
   // cuit qu'en z8-z9 ; sans ce passage de témoin, une vue rapprochée sur le
   // Kansas demanderait du z14 jamais écrit et n'afficherait rien, interrupteur
   // allumé. Les zones fines (Mont-Blanc, Nice, Paris) gardent leur z14.
-  const built = await solLayer.build(bounds, { zmax: zone.zmax })
+  //
+  // ⚠️ ET LE PLANCHER AVEC — voir `zmin` dans occupation-sol-layer. Le manifeste
+  // le déclare depuis toujours et personne ne le lisait : à demZoom 5-6 on
+  // réclamait du z6/z7 jamais cuit, tout tombait en 404, et l'interrupteur
+  // restait allumé sur une carte strictement inchangée.
+  //
+  // ⚠️ ON EFFACE L'ANCIENNE MOSAÏQUE AVANT DE BÂTIR, comme `refreshAerialCore`.
+  // Sans ça, la mosaïque du bloc précédent reste tendue sur le nouveau bloc
+  // pendant les secondes du réseau — une forêt posée sur la mauvaise vallée.
+  const demAuDepart = dem
+  terrain.setSol(null)
+  const built = await solLayer.build(bounds, { zmax: zone.zmax, zmin: zone.zmin })
   if (built === SUPERSEDED) return // une construction plus récente a pris la main
+  // ⚠️ L'ÉTAT A PU CHANGER PENDANT L'ATTENTE — voir `couchePartieEnVol`. Sans ce
+  // test, éteindre la couche pendant son chargement la rallumait toute seule.
+  if (couchePartieEnVol('occupation-sol', demAuDepart)) return
+
+  // ⚠️ RIEN N'A ÉTÉ PEINT ⇒ ON ÉTEINT ET ON LE DIT. `tuilesVues === 0` (ou un
+  // refus net de la couche) veut dire la même chose que « hors zone cuite » :
+  // la carte est inchangée sous un interrupteur allumé, ce qui se lit comme
+  // « la donnée dit qu'il n'y a rien ici ». C'est faux, et c'est le pire des
+  // deux mondes. Le témoin existait déjà, il ne servait qu'à l'attribution.
+  if (!built?.tuilesVues) {
+    couchesActives.delete('occupation-sol')
+    terrain.setSol(null)
+    solAttribution = null
+    refreshOsmCredit()
+    showNotice("Pas d'occupation du sol à cette échelle — la donnée n'y a pas été cuite.", { duration: 3600 })
+    refreshAll() // l'interrupteur doit bouger aussi, sinon le panneau ment
+    return
+  }
   terrain.setSol(built)
-  solAttribution = built?.tuilesVues ? built.attribution : null
+  solAttribution = built.attribution
   refreshOsmCredit()
 }
 
@@ -5055,11 +5138,32 @@ async function refreshCanopee() {
 
   // ⚠️ LE PLAFOND DE LA ZONE, PAS CELUI DE LA COUCHE — même passage de témoin
   // que pour l'occupation du sol : une zone cuite en z9 à qui l'on réclame du
-  // z14 rend une mosaïque vide sous un interrupteur allumé.
-  const built = await canopeeLayer.build(bounds, { zmax: zone.zmax })
+  // z14 rend une mosaïque vide sous un interrupteur allumé. Et le PLANCHER avec
+  // (`zmin`), pour la raison symétrique : sous z8 rien n'a jamais été cuit.
+  //
+  // ⚠️ ON EFFACE L'ANCIENNE MOSAÏQUE AVANT DE BÂTIR, comme `refreshAerialCore` :
+  // sinon celle du bloc précédent reste tendue sur le nouveau pendant les
+  // secondes du réseau.
+  const demAuDepart = dem
+  terrain.setCanopee(null)
+  const built = await canopeeLayer.build(bounds, { zmax: zone.zmax, zmin: zone.zmin })
   if (built === SUPERSEDED) return // une construction plus récente a pris la main
+  // ⚠️ L'ÉTAT A PU CHANGER PENDANT L'ATTENTE — voir `couchePartieEnVol`.
+  if (couchePartieEnVol('canopee', demAuDepart)) return
+
+  // ⚠️ RIEN N'A ÉTÉ PEINT ⇒ ON ÉTEINT ET ON LE DIT — même contrat que la branche
+  // « hors zone cuite » ci-dessus, et pour exactement la même raison.
+  if (!built?.tuilesVues) {
+    couchesActives.delete('canopee')
+    terrain.setCanopee(null)
+    canopeeAttribution = null
+    refreshOsmCredit()
+    showNotice("Pas de hauteur de canopée à cette échelle — la donnée n'y a pas été cuite.", { duration: 3600 })
+    refreshAll() // l'interrupteur doit bouger aussi, sinon le panneau ment
+    return
+  }
   terrain.setCanopee(built)
-  canopeeAttribution = built?.tuilesVues ? built.attribution : null
+  canopeeAttribution = built.attribution
   refreshOsmCredit()
 }
 

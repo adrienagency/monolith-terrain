@@ -83,8 +83,13 @@
 // voie (b) effrayante sur le papier : 407 Mo par dalle de 3°. Mais un COG est
 // fait pour être lu PAR MORCEAUX — on ne lit que les blocs de 1024² qui
 // touchent la tuile de sortie, soit quelques centaines de kilo-octets, pris
-// dans l'APERÇU dont la résolution colle au zoom demandé (jamais dans l'image
-// pleine, qu'on ne touche à aucun des zooms qu'on cuit).
+// dans l'APERÇU dont la résolution colle au zoom demandé.
+//
+// ⚠️ SAUF À z14, ET C'EST VÉRIFIÉ : pasDeg y vaut 8,583e-5° quand pasSource(0)
+// vaut 8,333e-5°, donc `niveauPour` rend 0 — l'IMAGE PLEINE. Et z14 est bien un
+// zoom cuit (Mont-Blanc, Landes et Paris y montent). La phrase « on ne touche
+// jamais l'image pleine » qui figurait ici, et plus bas dans `Dalle`, était donc
+// fausse au zoom le plus fin — celui, précisément, où elle coûte le plus cher.
 //
 // ═══════════════════════════════════════════════════════════════════════════
 // LES QUATRE OPTIMISATIONS HÉRITÉES — elles viennent de la cuisson mondiale du sol
@@ -116,11 +121,11 @@
 // ═══════════════════════════════════════════════════════════════════════════
 //
 //   z8 et z9 mondiaux (-180,-60,180,84), --paralleles 32 :
-//   68 317 tuiles écrites, 9 544 écartées, 915 s — 85,1 tuiles/s, 856 Mo.
+//   68 332 tuiles écrites, 9 544 écartées, 915 s — 85,1 tuiles/s, 856 Mo.
 //   2 635 dalles COG ouvertes sur 2 954 sondées, 14 519 requêtes de plage,
 //   1 104 Mo lus pour 856 Mo écrits.
 //
-// ⚠️ ET LE SONDAGE (`--echantillon`) SOUS-ESTIME LE DÉBIT D'UN FACTEUR DEUX,
+// ⚠️ ET LE SONDAGE (`--echantillon`) SOUS-ESTIME LE DÉBIT D'UN FACTEUR TROIS,
 // systématiquement — il faut le savoir avant d'annoncer une durée. 400 tuiles
 // prises tous les 194 rangs tombent chacune sur une dalle différente : le
 // sondage a ouvert 512 dalles pour 400 tuiles et n'a réutilisé AUCUN bloc, d'où
@@ -131,7 +136,7 @@
 // 12,3 %) —, mais sa durée est un plafond, pas une prévision.
 //
 // ⚠️ ET LE COMPTE N'EST PAS LE POIDS. En NOMBRE, cette cuisson est moins chère
-// que celle du sol (68 317 tuiles contre 76 060) parce que le filtre muet écarte
+// que celle du sol (68 332 tuiles contre 76 060) parce que le filtre muet écarte
 // 12,3 % des tuiles terrestres contre 2,3 % là-bas. En POIDS elle est TROIS FOIS
 // plus chère (856 Mo contre 286) : une hauteur est un champ continu et bruité,
 // une classe d'occupation forme des plaques identiques. Voir le compteur de
@@ -265,8 +270,14 @@ const DOSSIER_COTE = arg('cote', 'public/data/coast-z6')
 // citent la plupart des billets et des dépôts, répond aujourd'hui 301 vers une
 // page de DOI : un client qui la suivrait téléchargerait du HTML et le
 // prendrait pour un TIFF. Le nombre magique est vérifié à l'ouverture (voir
-// `ouvrir`), donc l'erreur serait bruyante — mais elle serait cherchée du
-// mauvais côté.
+// `ouvrir`), donc l'erreur est bruyante — mais elle serait cherchée du mauvais
+// côté.
+//
+// ⚠️ CETTE PHRASE A ÉTÉ FAUSSE PENDANT UN TEMPS, et ça valait cher : `dallePour`
+// avalait TOUTES les exceptions dans un `catch` vide, y compris celle-là. Le
+// corps HTML était donc lu comme « pas de dalle ici », c'est-à-dire de la pleine
+// mer. Elle n'est redevenue vraie que le jour où ce `catch` a appris à
+// distinguer une absence (404/403) d'une panne.
 const SEAU = 'https://libdrive.ethz.ch/index.php/s/cO8or7iOe5dT2Rt/download'
 const PREFIXE = '%2F3deg_cogs'
 
@@ -605,13 +616,19 @@ export function encodePngGris(gris, w, h) {
 // LE LECTEUR DE COG — juste ce qu'il faut de TIFF, et rien de plus
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// Pas de geotiff.js : on lit UN format très précis, celui que l'ESA écrit, et
+// Pas de geotiff.js : on lit UN format très précis, celui que l'ETH écrit, et
 // qui a été relevé au préalable — TIFF classique petit-boutien, 8 bits, une
-// bande, tuiles 1024×1024, compression 8 (deflate), prédicteur 1 (aucun),
-// géoréférencement EPSG:4326 par ModelPixelScale + ModelTiepoint. Une
-// bibliothèque généraliste apporterait ici surtout les cas qu'on n'a pas.
+// bande, tuiles 1024×1024, compression 5 (LZW), prédicteur 2 (différence
+// horizontale), géoréférencement EPSG:4326 par ModelPixelScale + ModelTiepoint.
 //
-// Le lecteur VÉRIFIE ces hypothèses et se plaint bruyamment si l'ESA change de
+// ⚠️ CES DEUX VALEURS ÉTAIENT CELLES DU VOISIN. Il était écrit ici « compression
+// 8 (deflate), prédicteur 1 (aucun) », c'est-à-dire la recette de WorldCover, que
+// ce fichier décrit d'ailleurs correctement vingt lignes plus bas. Un lecteur qui
+// s'y fiait cherchait un décompresseur deflate dans un fichier qui n'en a pas.
+//
+// Une bibliothèque généraliste apporterait ici surtout les cas qu'on n'a pas.
+//
+// Le lecteur VÉRIFIE ces hypothèses et se plaint bruyamment si l'ETH change de
 // recette : une supposition tacite qui devient fausse en silence est bien pire
 // qu'une dépendance.
 
@@ -651,8 +668,32 @@ const TAILLE_TYPE = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 
 // N45E006, blocs des niveaux 3, 5 et 6 — 1 048 576 octets rendus à chaque fois
 // (exactement 1024×1024), en ~9 ms, avec des histogrammes de hauteurs
 // plausibles (0 à ~45 m, plus le 255 de « pas de donnée »).
-export function decompresseLzw(src, attendu) {
-  const out = Buffer.allocUnsafe(attendu)
+// ══════════ ⚠️ ET IL VÉRIFIE COMBIEN D'OCTETS IL A RENDUS ═══════════════════
+//
+// LE DÉFAUT, mesuré : la version d'avant s'arrêtait sur la fin du flux et
+// rendait `subarray(0, o)` sans jamais comparer `o` à la taille attendue. Un
+// flux coupé à 90 % rendait 7 397 octets au lieu de 8 192, SANS EXCEPTION.
+//
+// Ce qui en découlait est le vrai coût : les pixels manquants restent à 0, la
+// tuile reste « parlante », elle est donc ÉCRITE — et `--reprendre`, qui ne
+// teste que l'existence du fichier, ne la refera JAMAIS. À l'écran, une bande de
+// forêt qui disparaît au milieu d'une tuile, indiscernable d'une clairière.
+//
+// Le jumeau du sol (build-occupation-sol.mjs) est protégé GRATUITEMENT par
+// `zlib.inflateSync`, qui lève `Z_BUF_ERROR` sur un flux tronqué. Celui-ci
+// n'était protégé par rien : c'est pour ça que le garde s'écrit ici, à la main,
+// et non dans la vigilance de l'appelant.
+//
+// @param {Buffer} src - le flux LZW
+// @param {number} attendu - le nombre EXACT d'octets que le bloc doit rendre
+// @param {{strict?:boolean}} [options] - `strict:false` tolère un rendu court, et
+//   n'a qu'un seul usage légitime : le test qui colle deux flux bout à bout pour
+//   vérifier qu'un code de purge en cours de route ne casse pas le décodeur.
+export function decompresseLzw(src, attendu, { strict = true } = {}) {
+  // La marge n'est pas du luxe : une suite de dictionnaire s'écrit d'un bloc, et
+  // le dernier code d'un flux abîmé peut déborder de quelques octets avant que
+  // la boucle ne s'arrête. On alloue large, on tranche juste, on vérifie.
+  const out = Buffer.allocUnsafe(attendu + 4096)
   let o = 0
   const pref = new Int32Array(4096)
   const suff = new Uint8Array(4096)
@@ -702,6 +743,13 @@ export function decompresseLzw(src, attendu) {
     precedent = code
     // ⚠️ LE EARLY CHANGE — voir le point 1. `libre + 1`, pas `libre`.
     if (libre + 1 >= 1 << largeur && largeur < 12) largeur++
+  }
+  // ⚠️ LE COMPTE, ET C'EST TOUT LE GARDE. Un flux tronqué sort de la boucle
+  // exactement comme un flux complet : sans ce test, la seule différence entre
+  // « tuile lue » et « tuile à moitié perdue » est un nombre que personne ne
+  // regardait.
+  if (strict && o !== attendu) {
+    throw new Error(`flux LZW tronqué ou corrompu : ${o} octets rendus, ${attendu} attendus`)
   }
   return out.subarray(0, o)
 }
@@ -774,12 +822,35 @@ class Dalle {
     for (let essai = 0; essai < 4; essai++) {
       try {
         const r = await fetch(this.url, { headers: { Range: `bytes=${a}-${b}` } })
-        if (!r.ok && r.status !== 206) throw new Error(`HTTP ${r.status}`)
+        // ⚠️ ON EXIGE 206, ET LA LONGUEUR AVEC. La clause d'avant —
+        // `!r.ok && r.status !== 206` — était MORTE : 206 satisfait déjà `r.ok`,
+        // donc le second terme n'était jamais atteint. Elle acceptait donc
+        // exactement ce qu'elle croyait refuser : un `200 OK` d'un serveur qui
+        // IGNORE l'en-tête `Range` et renvoie le fichier entier — 407 Mo poussés
+        // dans un décodeur qui en attend un mega-octet.
+        // ⚠️ 404/403 = LA DALLE N'EXISTE PAS, ET ÇA N'EST PAS UNE PANNE.
+        // C'est une réponse DÉFINITIVE du serveur : on ne réessaie pas, et on
+        // marque l'erreur pour que l'appelant la distingue d'une coupure réseau.
+        // Sans cette distinction, un hôte injoignable se lisait « pleine mer ».
+        if (r.status === 404 || r.status === 403) {
+          const abs = new Error(`HTTP ${r.status} : dalle absente`)
+          abs.absente = true
+          throw abs
+        }
+        if (r.status !== 206) throw new Error(`HTTP ${r.status} : le serveur n'honore pas l'en-tête Range`)
         const buf = Buffer.from(await r.arrayBuffer())
+        // La plage demandée est fermée des deux côtés : b - a + 1 octets, ni plus
+        // ni moins. Un corps plus court est une réponse tronquée, pas une donnée.
+        if (buf.length !== b - a + 1) {
+          throw new Error(`plage incomplète : ${buf.length} octets reçus, ${b - a + 1} demandés`)
+        }
         this.octetsLus += buf.length
         return buf
       } catch (e) {
-        if (essai === 3) throw e
+        // Une absence avérée ne se réessaie pas : trois tentatives de plus
+        // rendraient trois fois le même 404, et masqueraient le compte des
+        // vraies pannes derrière du bruit.
+        if (e?.absente || essai === 3) throw e
         await new Promise((res) => setTimeout(res, 400 * 2 ** essai))
       }
     }
@@ -791,7 +862,7 @@ class Dalle {
     // leurs tableaux — voir le commentaire dans la boucle ci-dessous.
     const tete = (this.tete = await this.plage(0, 65535))
     if (tete.toString('ascii', 0, 2) !== 'II' || tete.readUInt16LE(2) !== 42) {
-      throw new Error(`${this.url} n'est pas un TIFF classique petit-boutien — l'ESA a changé de recette`)
+      throw new Error(`${this.url} n'est pas un TIFF classique petit-boutien — l'ETH a changé de recette`)
     }
     const ifds = []
     let suivant = tete.readUInt32LE(4)
@@ -815,7 +886,7 @@ class Dalle {
       // UNE requête par dalle au lieu de huit.
       //
       // La garantie n'étant pas dans la spec TIFF, le repli par plage est
-      // conservé sous le nom `differes` : si l'ESA range un jour ses tableaux
+      // conservé sous le nom `differes` : si l'ETH range un jour ses tableaux
       // ailleurs, ça ralentit, ça ne casse pas.
       const dansTete = (a, n) => a >= 0 && a + n <= this.tete.length
       const bloc = dansTete(suivant, 6) ? this.tete.subarray(suivant) : await this.plage(suivant, suivant + 8191)
@@ -896,14 +967,26 @@ class Dalle {
   /**
    * Le niveau d'aperçu dont le pixel colle le mieux au pas demandé.
    *
-   * ⚠️ ON PREND LE NIVEAU LE PLUS FIN QUI RESTE PLUS GROSSIER OU ÉGAL au pas de
-   * sortie — jamais l'inverse. Choisir un niveau plus FIN que la sortie
-   * rendrait un échantillon unique tiré au hasard dans un champ plus détaillé :
-   * c'est de l'aliasing pur : une trouée de 20 m dans un massif déciderait de
-   * la couleur de tout un pixel de 300 m. Le niveau le plus proche PAR
-   * EN-DESSOUS, lui, a déjà été agrégé par l'ETH à la construction du COG — et
-   * comme la hauteur est un champ CONTINU, cette agrégation est licite quelle
-   * qu'elle soit (relire l'en-tête : c'est là que ce cuiseur diverge du sien).
+   * ⚠️ ON PREND LE NIVEAU LE PLUS GROSSIER QUI RESTE PLUS FIN OU ÉGAL au pas de
+   * sortie. `pasSource` CROÎT avec `i` (le niveau 0 est l'image pleine, les
+   * suivants sont des aperçus de plus en plus gros), et la boucle retient donc
+   * le DERNIER niveau dont le pixel tient encore sous `pasDeg`.
+   *
+   * ⚠⚠ CE COMMENTAIRE DISAIT EXACTEMENT L'INVERSE, ET C'ÉTAIT UN PIÈGE ARMÉ.
+   * Il annonçait « le plus fin qui reste plus grossier ou égal », ce que le code
+   * n'a jamais fait — et ce que le code NE PEUT PAS faire : à z8, aucun aperçu
+   * n'atteint le pas demandé, si bien que `choisi` ne désignerait rien. Qui
+   * prenait le ⚠️ au sérieux et « réparait » la comparaison en `>=` faisait
+   * retomber `choisi` à 0, c'est-à-dire la lecture de l'IMAGE PLEINE 36 000² :
+   * 1 296 blocs d'un méga-octet par dalle au lieu d'un seul.
+   *
+   * C'est le CODE qui a raison, et l'argument est le sur-échantillonnage : lire
+   * un niveau plus GROSSIER que le pas de sortie étirerait un pixel source sur
+   * plusieurs pixels de tuile. Un niveau plus fin, lui, ne coûte qu'un
+   * échantillonnage au plus proche voisin dans un champ déjà agrégé par l'ETH à
+   * la construction du COG — et comme la hauteur est un champ CONTINU, cette
+   * agrégation est licite quelle qu'elle soit (relire l'en-tête : c'est là que
+   * ce cuiseur diverge du sien).
    *
    * @param {number} pasDeg - la taille du pixel de sortie, en degrés
    */
@@ -955,8 +1038,13 @@ class Dalle {
       // avec son voisin de gauche : l'image rendue est un champ de bruit centré
       // sur zéro, donc une carte où la canopée n'existe presque nulle part. Pas
       // d'erreur, juste une forêt qui a disparu.
+      // `brutTaille` est le nombre EXACT d'octets qu'une tuile interne doit
+      // rendre. On le passe tel quel : c'est ce qui permet au decompresseur de
+      // lever sur un flux tronque au lieu d'ecrire une tuile a moitie vide.
+      // (Avant, on lui passait `brutTaille + 4096`, c'est-a-dire la CAPACITE du
+      // tampon : il ne pouvait donc rien verifier du tout.)
       const brutTaille = ifd.tuileL * ifd.tuileH
-      return defaisPredicteur(decompresseLzw(brut, brutTaille + 4096), ifd.tuileL)
+      return defaisPredicteur(decompresseLzw(brut, brutTaille), ifd.tuileL)
     })()
     rangeBloc(cle, p)
     return p
@@ -992,6 +1080,10 @@ class Dalle {
 }
 
 // ------------------------------------------------------------------ cuisson
+// Les dalles qui ont ÉCHOUÉ pour cause de PANNE, et non d'absence. Le compte
+// sert à deux choses, et les deux comptent : le dire au bilan, et interdire au
+// manifeste de déclarer un zoom « complet » qu'on n'a pas pu cuire entièrement.
+export const echecsDalles = new Map() // nom → nombre d'échecs
 const dalles = new Map() // nom → Promise<Dalle|null>
 async function dallePour(lon, lat) {
   const nom = nomDalle(lon, lat)
@@ -1006,10 +1098,28 @@ async function dallePour(lon, lat) {
     try {
       await d.ouvrir()
       return d
-    } catch {
-      // Pas de dalle ici = pleine mer, ou hors couverture (l'ETH s'arrête
-      // à 60° S et 84° N). Ce n'est pas une erreur : c'est « rien à dire ».
-      return null
+    } catch (e) {
+      // ⚠️ UNE ABSENCE ET UNE PANNE NE SE RESSEMBLENT QUE DANS UN `catch` VIDE.
+      //
+      // LE DÉFAUT MESURÉ : ce bloc avalait TOUT — les 4 tentatives épuisées
+      // comme le corps non-TIFF —, mémoïsait le `null` pour tout le process, et
+      // `cuisTuile` le traitait comme un trou. Cuisson lancée sur un hôte
+      // injoignable : « ✓ 0 tuiles écrites, 2 écartées », CODE DE SORTIE 0,
+      // coche verte, et un index.json annonçant la zone complète jusqu'à z8
+      // après 100 % d'échec réseau.
+      //
+      // ⚠️ ET LE CAS IRRATTRAPABLE EST CELUI-CI : une tuile chevauche 2 à 4
+      // dalles (à z8 une tuile fait ~156 km, une dalle 3° en fait ~333 : la
+      // MAJORITÉ des tuiles z8 sont à cheval). Si UNE SEULE échoue, les pixels
+      // de la dalle vivante rendent la tuile « parlante », elle est écrite
+      // VALIDE ET PARTIELLE — et `listeTuiles`, qui ne fait qu'un `existsSync`,
+      // la saute pour toujours.
+      //
+      // Une absence avérée (404/403) reste donc « rien à dire » ; tout le reste
+      // est une panne, et une panne doit REMONTER.
+      if (e?.absente) return null
+      echecsDalles.set(nom, (echecsDalles.get(nom) || 0) + 1)
+      throw e
     }
   })()
   dalles.set(nom, p)
@@ -1137,7 +1247,7 @@ async function cuisTuile(z, tx, ty) {
       }
       // ⚠️ UN TROU PORTE SES BORNES, il ne se contente pas d'être `null`. Sinon
       // le test ci-dessus échoue à chaque pixel, et une tuile hors couverture
-      // ETH (au-delà de 80° N, sous 60° S, ou face à une dalle absente)
+      // ETH (au-delà de 84° N, sous 60° S, ou face à une dalle absente)
       // repayait 65 536 `await` pour se faire répondre 65 536 fois « rien ici ».
       if (d.absente) continue
       const ix = Math.min(ifd.largeur - 1, Math.floor(((lon - d.ouest) / (d.est - d.ouest)) * ifd.largeur))
@@ -1196,16 +1306,33 @@ async function cuisTuile(z, tx, ty) {
 // processus pile pendant un `writeFileSync` de 2 Ko laisserait sinon un JSON
 // tronqué, que le client lit en `catch` — donc zéro zone, donc la même panne.
 function ecrisManifeste(nbTuiles, zmaxComplet) {
-  if (!ZONE) return null
+  // ⚠️ SANS `--zone`, AUCUN MANIFESTE N'EST ÉCRIT — ET IL FAUT LE DIRE.
+  // Les PNG partent bien sur le disque, mais le client ne connaît le monde que
+  // par ce fichier : une cuisson sans `--zone` est donc TOTALEMENT INVISIBLE.
+  // `npm run build:sol` et `build:canopee` n'ont pas de `--zone`, ce qui rend le
+  // piège très facile à tomber dedans.
+  if (!ZONE) {
+    if (!ecrisManifeste._prevenu) {
+      ecrisManifeste._prevenu = true
+      console.warn("  ⚠ pas de --zone : AUCUN manifeste ne sera écrit, et le client n'affichera donc RIEN de cette cuisson.")
+    }
+    return null
+  }
   const chemin = path.join(OUT, 'index.json')
+  // ⚠️ LE DOSSIER PEUT NE PAS EXISTER. Si aucune tuile n'a été écrite (tout a
+  // échoué), personne n'a encore appelé `mkdirSync` : l'écriture partait en ENOENT
+  // avec un message qui désignait le MANIFESTE, alors que la vraie panne est
+  // ailleurs. C'est exactement le chemin « tout a raté » qui plantait, donc
+  // celui où un message trompeur coûte le plus cher.
+  fs.mkdirSync(OUT, { recursive: true })
   let doc = { attribution: 'ETH Global Canopy Height 2020', licence: 'CC-BY 4.0', url: 'https://langnico.github.io/globalcanopyheight/', zmin: ZMIN, zones: [] }
   try { doc = { ...doc, ...JSON.parse(fs.readFileSync(chemin, 'utf-8')) } } catch {}
 
   // ⚠️ ON FIXE LEUR PLAFOND AUX ZONES QUI N'EN ONT PAS, avant toute autre chose.
   //
-  // `zmax` par zone est arrivé APRÈS Mont-Blanc, Nice et Paris : ces trois-là ne
+  // `zmax` par zone est arrivé APRÈS Mont-Blanc, Landes et Paris : ces trois-là ne
   // le portent pas et vivent sur le plafond GLOBAL, que le client leur applique
-  // par défaut (normaliseIndexSol). Or le global est désormais déduit des zones.
+  // par défaut (normaliseIndexCanopee). Or le global est désormais déduit des zones.
   // Sans cette reprise, la première zone écrite les ferait toutes retomber au
   // plafond de la nouvelle — Chamonix passerait de z14 à z9 parce qu'on a cuit
   // le monde à côté, sans qu'une seule tuile ne bouge ni qu'un test ne rougisse.
@@ -1248,7 +1375,7 @@ function ecrisManifeste(nbTuiles, zmaxComplet) {
     bbox: BBOX,
     tuiles: nbTuiles,
     // ⚠️ LE PLAFOND DE ZOOM EST PAR ZONE, et c'est indispensable dès qu'une zone
-    // MONDIALE existe. Le client borne sa demande à SOL_ZOOM_MAX (14) ; sans
+    // MONDIALE existe. Le client borne sa demande à CANOPEE_ZOOM_MAX (14) ; sans
     // plafond de zone, une vue sur le Kansas — couvert seulement en z8-z9 —
     // réclamerait des tuiles z14 qui n'ont jamais été écrites, obtiendrait une
     // mosaïque vide, et laisserait l'interrupteur allumé sur rien. C'est
@@ -1384,6 +1511,13 @@ async function main() {
    * descend en z8 dès qu'il dézoome.
    */
   const zoomComplet = () => {
+    // ⚠️ AUCUN ZOOM N'EST « COMPLET » S'IL RESTE UNE PANNE DE DALLE. Le compte
+    // de `faits` ne mesure que les tuiles TRAITÉES, pas les tuiles réussies : une
+    // dalle injoignable laisse des trous que rien d'autre ne signale, et le
+    // manifeste annoncerait au client une zone entièrement cuite. Un manifeste
+    // qui ment coûte plus cher qu'un manifeste en retard : les tuiles manquantes
+    // ne seront jamais redemandées.
+    if (echecsDalles.size) return 0
     let haut = 0
     for (let z = ZMIN; z <= ZMAX; z++) {
       if ((faits.get(z) || 0) < attendus.get(z)) break
@@ -1524,7 +1658,11 @@ async function main() {
   let lus = 0
   let ouvertes = 0
   for (const p of dalles.values()) {
-    const d = await p
+    // ⚠️ `catch` OBLIGATOIRE : depuis que `dallePour` fait REMONTER les pannes,
+    // ces promesses peuvent être rejetées, et un `await` nu ferait planter le
+    // BILAN lui-même — c'est-à-dire le seul endroit qui allait dire ce qui a
+    // raté. Les dalles en panne sont comptées dans `echecsDalles`, pas ici.
+    const d = await p.catch(() => null)
     if (!d) continue
     ouvertes++
     req += d.requetes
@@ -1537,6 +1675,19 @@ async function main() {
   }
   console.log(`  source : ${ouvertes} dalle(s) COG ouverte(s) sur ${dalles.size} sondée(s), ${req} requêtes de plage, ${(lus / 1024 / 1024).toFixed(1)} Mo lus`)
   console.log(`  → ${OUT}\n`)
+  // ⚠️ LES PANNES SE DISENT, ET ELLES COÛTENT LE CODE DE SORTIE.
+  //
+  // Reproduit avant correction : cuisson lancée sur un hôte injoignable →
+  // « ✓ 0 tuiles écrites, 2 écartées », CODE DE SORTIE 0, coche verte. Un échec
+  // réseau total se lisait comme une cuisson réussie sur de la pleine mer.
+  if (echecsDalles.size) {
+    const total = [...echecsDalles.values()].reduce((a, b) => a + b, 0)
+    console.error(`✖ ${echecsDalles.size} dalle(s) en PANNE (${total} échec(s)) — ce n'est PAS une absence de donnée.`)
+    console.error(`  ${[...echecsDalles.keys()].slice(0, 8).join(', ')}${echecsDalles.size > 8 ? '…' : ''}`)
+    console.error(`  Aucun zoom n'a été annoncé complet au manifeste. Relance avec --reprendre une fois le réseau rétabli.
+`)
+    process.exit(1)
+  }
   if (arrete) process.exit(130)
 }
 

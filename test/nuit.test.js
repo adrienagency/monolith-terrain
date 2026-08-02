@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   urlTuileNuit, zoomNuitBorne, intensiteNuit,
   NUIT_ZOOM_MAX, NUIT_COUCHE_GIBS, facteurEchelleNuit, largeurEmpriseKm,
+  largeurDalleKm,
 } from '../src/nuit.js'
 
 // ── L'adresse des tuiles ────────────────────────────────────────────────────
@@ -162,4 +163,35 @@ test('une emprise ordinaire n’est pas touchée par la règle d’enroulement',
   const normale = { minLon: 5, maxLon: 7, minLat: 45, maxLat: 45.001 }
   const km = largeurEmpriseKm(normale)
   assert.ok(km > 155 && km < 160, `attendu ~157 km, obtenu ${km.toFixed(0)}`)
+})
+
+// ══════════ LE GARDE D'ÉCHELLE MESURE LA DALLE, PAS L'EMPRISE ══════════════
+//
+// LE DÉFAUT MESURÉ : `facteurEchelleNuit` est calibré sur UN bloc (60 km plein
+// feu, 20 km extinction — les chiffres viennent de Tokyo z16 sur UN bloc). Mais
+// `demBounds` décrit l'emprise ENTIÈRE, qui vaut `empriseCote` fois la dalle en
+// mode continu. Paris z12 en 3×3 : l'emprise fait 57,9 km, donc facteur 0,949,
+// alors que la dalle regardée n'en fait que 19,3 — c'est-à-dire exactement le
+// voile gris uniforme que ce garde existe pour éteindre.
+test('largeurDalleKm : en 3×3, la dalle vaut le tiers de l emprise', () => {
+  const emprise = { minLon: 2.0, maxLon: 2.79, minLat: 48.6, maxLat: 49.12 }
+  const entiere = largeurEmpriseKm(emprise)
+  assert.ok(Math.abs(largeurDalleKm(emprise, 3) - entiere / 3) < 1e-9)
+  // Hors mode continu, rien ne change : la dalle EST l'emprise.
+  assert.equal(largeurDalleKm(emprise, 1), entiere)
+  // Une valeur absente ou absurde ne doit pas diviser par zéro ni par NaN.
+  assert.equal(largeurDalleKm(emprise, undefined), entiere)
+  assert.equal(largeurDalleKm(emprise, 0), entiere)
+  assert.equal(largeurDalleKm(null, 3), 0)
+})
+
+test('Paris z12 en 3×3 : la couche nocturne reste ÉTEINTE, comme sur un bloc seul', () => {
+  // Les deux emprises décrivent la même dalle de 19,3 km ; la seule différence
+  // est le mode continu. Le garde doit rendre le MÊME verdict.
+  const dalle = { minLon: 2.31, maxLon: 2.57, minLat: 48.77, maxLat: 48.94 }
+  const emprise3x3 = { minLon: 2.05, maxLon: 2.84, minLat: 48.6, maxLat: 49.11 }
+  const seul = facteurEchelleNuit(largeurDalleKm(dalle, 1))
+  const continu = facteurEchelleNuit(largeurDalleKm(emprise3x3, 3))
+  assert.equal(seul, 0, 'un bloc de 19 km est sous le seuil, il doit rendre 0')
+  assert.equal(continu, 0, `le 3×3 a rendu ${continu} au lieu de 0 — le voile gris est de retour`)
 })

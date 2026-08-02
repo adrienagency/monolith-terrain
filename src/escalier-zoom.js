@@ -31,9 +31,12 @@
 // slippy EST la convention admise, la pastille l'affiche tel quel : il n'y a
 // rien à renommer.
 //
-// z3 couvre ~45° de longitude en 3 tuiles : un sous-continent. En dessous, z1 et
-// z2 donnaient le planisphère de sa première capture, où la mer noie tout et où
-// les continents ne sont plus que des taches. Un niveau qui ne dit rien.
+// Une TUILE z3 couvre 45° de longitude, et un bloc en fait TROIS : z3 cadre donc
+// 135°, un sous-continent large. (Il était écrit ici « z3 couvre ~45° », ce qui
+// décrivait un cadrage trois fois trop serré — pour la ligne qui JUSTIFIE le
+// plancher, c'est le chiffre qui compte.) En dessous, z1 et z2 donnaient le
+// planisphère de sa première capture, où la mer noie tout et où les continents ne
+// sont plus que des taches. Un niveau qui ne dit rien.
 //
 // ⚠️ RIEN D'AUTRE DANS LE MOTEUR NE CONNAÎT LE PLANCHER : ni modes.js, ni
 // main.js, ni les paliers de plongée, qui se filtrent tous à partir d'ici.
@@ -77,10 +80,13 @@ export function paliersRetenus(paliers, min = ZOOM_PALIER_MIN) {
 // en désigne un — celui qui a déjà été réglé au cran de molette près — et sinon
 // le PLUS LARGE QUI RESTE.
 //
-// ⚠️ CE `??` EST TOUT LE « J'ARRIVE EN Z3 ». Depuis que les deux paliers larges
-// n'existent plus, la porte orbitale s'ouvre au-dessus de 1 600 km : en orbite
-// haute, aucun palier ne correspond à l'altitude. Sans ce repli, cliquer sur le
-// globe depuis là où on le regarde vraiment ne ferait rien du tout.
+// ⚠️ CE `??` EST TOUT LE « J'ARRIVE EN Z3 ». Le palier le plus large est z3, à
+// 16 000 km (voir DIVE_TIERS) : au-dessus, aucun palier ne correspond à
+// l'altitude, et sans ce repli cliquer sur le globe depuis là où on le regarde
+// vraiment ne ferait rien du tout.
+//
+// (Il était écrit ici « au-dessus de 1 600 km », ce qui datait d'avant l'ajout de
+// la marche z3 : c'était alors z6 le palier le plus large.)
 export function palierDeClic(paliers, altM) {
   const liste = paliers ?? []
   return liste.find((p) => altM < p.altM) ?? liste[liste.length - 1] ?? null

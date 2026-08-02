@@ -141,6 +141,39 @@ export function largeurEmpriseKm(bbox) {
   return Math.max(largeur, hauteur)
 }
 
+/**
+ * La largeur de la DALLE REGARDÉE, en kilomètres.
+ *
+ * ══════════ ⚠️ CE QUE LE GARDE MESURAIT, ET CE QU'IL DEVAIT MESURER ═════════
+ *
+ * `facteurEchelleNuit` est calibré sur UN BLOC : ses deux bornes (60 km plein
+ * feu, 20 km extinction) sortent de l'essai de Tokyo z16, où un bloc de 1,5 km
+ * couvrait deux pixels et demi de Black Marble. Or `demBounds` décrit l'emprise
+ * ENTIÈRE — 168 unités, soit `empriseCote` fois la dalle en mode continu.
+ *
+ * MESURÉ : à Paris z12 en 3×3, l'emprise fait 57,9 km et le garde rendait 0,949,
+ * alors que la dalle sous les yeux n'en fait que 19,3 — sous le seuil des 20 km,
+ * donc exactement le voile gris uniforme que ce garde existe pour éteindre. Le
+ * mode continu désarmait le garde en silence, rien qu'en élargissant la mesure.
+ *
+ * ⚠️ ET LA MOSAÏQUE, ELLE, RESTE BÂTIE SUR L'EMPRISE ENTIÈRE. Ce n'est pas une
+ * incohérence : on CHARGE les neuf dalles (sinon la couche ne couvrirait qu'un
+ * carreau sur neuf — défaut déjà payé sur la photo aérienne), mais on décide de
+ * L'AFFICHER d'après ce qu'une dalle montre. Deux questions distinctes, deux
+ * longueurs distinctes.
+ *
+ * @param {{minLon:number,maxLon:number,minLat:number,maxLat:number}|null} bbox - l'emprise ENTIÈRE
+ * @param {number} empriseCote - 1 hors mode continu, 3 en 3×3
+ * @returns {number} 0 si l'emprise est illisible
+ */
+export function largeurDalleKm(bbox, empriseCote) {
+  // Une valeur absente, nulle ou absurde vaut « un seul bloc » : diviser par
+  // elle rendrait Infinity ou NaN, et `facteurEchelleNuit` allumerait la couche
+  // à plein alors qu'on cherchait précisément à l'éteindre.
+  const cote = Number.isFinite(empriseCote) && empriseCote > 1 ? empriseCote : 1
+  return largeurEmpriseKm(bbox) / cote
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // COMBIEN LA NUIT ALLUME — le couplage à la tirette d'heure
 // ═══════════════════════════════════════════════════════════════════════════

@@ -60,7 +60,7 @@ function compresseLzw(src) {
   return out
 }
 
-const rendu = (src) => Buffer.from(decompresseLzw(compresseLzw(src), src.length + 4096))
+const rendu = (src) => Buffer.from(decompresseLzw(compresseLzw(src), src.length))
 
 test('LZW : un aller-retour rend EXACTEMENT les octets de départ', () => {
   const cas = {
@@ -111,7 +111,9 @@ test('LZW : un code de purge en cours de flux remet le dictionnaire à neuf', ()
   const a = Buffer.from([5, 5, 5, 9, 9, 12])
   const b = Buffer.from([31, 31, 8])
   const fusion = Buffer.concat([compresseLzw(a).subarray(0, compresseLzw(a).length), compresseLzw(b)])
-  const sortie = Buffer.from(decompresseLzw(fusion, 64))
+  // `strict:false` : deux flux colles bout a bout produisent forcement un
+  // compte different de l'attendu — c'est le sujet meme du test.
+  const sortie = Buffer.from(decompresseLzw(fusion, 64, { strict: false }))
   // On ne vérifie que le début : le raccord binaire de deux flux alignés à
   // l'octet insère du bourrage, et ce test ne prétend qu'à « la purge ne casse
   // pas le décodeur ».
@@ -185,4 +187,40 @@ test('EST_ABSENT ne dit PAS la même chose que MUET — un buisson n’est pas u
   assert.equal(EST_ABSENT[CANOPEE_H_ABSURDE - 1], 0)
   // Le plus grand arbre du monde monte à 116 m : 40 doit rester une forêt.
   assert.equal(EST_ABSENT[40], 0)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠️ UN FLUX TRONQUÉ DOIT LEVER, PAS RENDRE UNE TUILE À MOITIÉ VIDE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// LE DÉFAUT MESURÉ : `decompresseLzw` s'arrêtait sur la fin du flux et rendait
+// `subarray(0, o)` sans jamais comparer `o` à la taille attendue. Un flux coupé
+// à 90 % rendait 7 397 octets au lieu de 8 192, SANS AUCUNE EXCEPTION.
+//
+// Ce qui suit est le vrai coût : les pixels manquants restent à 0, la tuile
+// reste « parlante », elle est donc ÉCRITE — et `--reprendre`, qui ne teste que
+// l'existence du fichier, ne la refera jamais. À l'écran, une bande de forêt qui
+// disparaît au milieu d'une tuile, indiscernable d'une clairière.
+//
+// Le jumeau du sol est protégé GRATUITEMENT par `zlib.inflateSync`, qui lève
+// `Z_BUF_ERROR` sur un flux tronqué. Celui de la canopée n'était protégé par
+// rien : c'est la seule raison pour laquelle ce garde doit être écrit à la main.
+test('LZW : un flux TRONQUÉ lève, au lieu de rendre une tuile partielle en silence', () => {
+  const src = Buffer.from(Array.from({ length: 8192 }, (_, i) => (i * 7 + (i >> 5)) & 0xff))
+  const comprime = compresseLzw(src)
+  const tronque = comprime.subarray(0, Math.floor(comprime.length * 0.9))
+  assert.throws(
+    () => decompresseLzw(tronque, src.length),
+    /tronqu|incomplet|octets/i,
+    'un flux coupé à 90 % doit lever, pas rendre 7 397 octets sur 8 192'
+  )
+})
+
+test('LZW : le flux ENTIER rend toujours exactement la taille attendue', () => {
+  // Le garde ne doit pas rougir sur le cas normal : c'est la vraie donnée ETH
+  // qui passe par là, 1 048 576 octets par bloc.
+  const src = Buffer.from(Array.from({ length: 4096 }, (_, i) => (i * 13) & 0xff))
+  const sortie = decompresseLzw(compresseLzw(src), src.length)
+  assert.equal(sortie.length, src.length)
+  assert.deepEqual(Buffer.from(sortie), src)
 })

@@ -39,7 +39,7 @@
 
 import * as THREE from 'three'
 import { tilesForBBox } from './tile-index.js'
-import { aerialZoomFor, aerialUvTransform, tileGridMerc, SUPERSEDED } from './aerial-layer.js'
+import { aerialZoomFor, aerialUvTransform, tileGridMerc, grilleMosaique, SUPERSEDED } from './aerial-layer.js'
 import { urlTuileCanopee, zoomCanopeeBorne, tableLutCanopee, CANOPEE_ATTRIBUTION, CANOPEE_ZOOM_MAX } from '../canopee.js'
 
 const TUILE_PX = 256
@@ -115,18 +115,32 @@ export class CanopeeLayer {
    *   réclamer du z14 jamais écrit, et rendrait une mosaïque vide sous un
    *   interrupteur allumé.
    */
-  async build(bbox, { zmax = CANOPEE_ZOOM_MAX } = {}) {
+  async build(bbox, { zmax = CANOPEE_ZOOM_MAX, zmin = 0 } = {}) {
     const id = ++this._buildId
     if (!bbox) return null
 
     const plafond = Math.min(CANOPEE_ZOOM_MAX, Number.isFinite(zmax) ? zmax : CANOPEE_ZOOM_MAX)
-    const z = zoomCanopeeBorne(aerialZoomFor(bbox, { budgetPx: this._budgetPx, maxZoom: plafond }))
+    // ⚠️ LE `null` SE TESTE AVANT LA BORNE, PAS APRÈS. `zoomCanopeeBorne` rend son
+    // plafond sur toute entrée non finie : lui passer le `null` d'un budget
+    // dépassé transformerait un refus en « prends le zoom le plus fin », soit
+    // exactement le contraire de ce qui vient d'être décidé.
+    const voulu = aerialZoomFor(bbox, { budgetPx: this._budgetPx, maxZoom: plafond })
+    if (voulu === null) return null
+    const z = zoomCanopeeBorne(voulu)
+    // ⚠️ ET LE PLANCHER DE CUISSON. Sous `zmin`, aucune tuile n'a jamais été
+    // écrite : on tomberait en 404 sur la totalité, on ne peindrait rien, et
+    // l'interrupteur resterait allumé sur une carte inchangée. On renonce, et
+    // l'appelant le DIT — même contrat que la branche « hors zone cuite ».
+    if (z < zmin) return null
     const tuiles = tilesForBBox(bbox, z)
     if (!tuiles.length) return null
 
-    const xs = tuiles.map((t) => t.x), ys = tuiles.map((t) => t.y)
-    const x0 = Math.min(...xs), y0 = Math.min(...ys)
-    const cols = Math.max(...xs) - x0 + 1, rows = Math.max(...ys) - y0 + 1
+    // Une seule copie de la règle de grille, partagée avec les trois autres
+    // couches drapées — voir `grilleMosaique`. Elle recolle l'enroulement autour
+    // de ±180° et refuse un canevas au-dessus du budget de texture.
+    const grille = grilleMosaique(tuiles, z, this._budgetPx, 'hauteur de canopée')
+    if (!grille) return null
+    const { x0, y0, cols, rows } = grille
 
     const canvas = document.createElement('canvas')
     canvas.width = cols * TUILE_PX
@@ -151,7 +165,7 @@ export class CanopeeLayer {
         try {
           const img = await chargeImageBrute(urlTuileCanopee(t.z, t.x, t.y))
           if (id !== this._buildId) return
-          ctx.drawImage(img, (t.x - x0) * TUILE_PX, (t.y - y0) * TUILE_PX, TUILE_PX, TUILE_PX)
+          ctx.drawImage(img, grille.colonne(t) * TUILE_PX, grille.ligne(t) * TUILE_PX, TUILE_PX, TUILE_PX)
           vues++
         } catch {
           // Une tuile absente n'est pas une erreur : le cuiseur n'écrit rien en

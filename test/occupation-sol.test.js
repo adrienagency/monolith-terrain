@@ -442,3 +442,38 @@ test('l’index cuit existe et n’annonce que des zones plausibles', () => {
     assert.ok(s >= -60 && n <= 84, `${z.nom} : WorldCover ne couvre pas ces latitudes`)
   }
 })
+
+// ══════════ SOUS z8, ON DEMANDE DES TUILES QUI N'ONT JAMAIS ÉTÉ CUITES ══════
+//
+// LE DÉFAUT : les manifestes déclarent `zmin: 8` — la cuisson ne descend pas
+// plus grossier — et PERSONNE ne le lisait. Seul `zmax` était transmis à la
+// couche. À demZoom 5-6, `aerialZoomFor` choisissait z6 ou z7 : TOUTES les
+// requêtes tombaient en 404, rien n'était peint, et l'interrupteur restait
+// allumé sur une carte strictement inchangée. C'est le symptôme exact que la
+// branche « hors zone cuite » existe pour éviter, arrivé par une autre porte.
+test('normaliseIndexSol : le zmin d une ZONE est lu et borné, pas seulement celui de la racine', () => {
+  const n = normaliseIndexSol({
+    zmin: 8, zmax: 14,
+    zones: [
+      { nom: 'monde', bbox: [-180, -60, 180, 84], zmax: 9, zmin: 8 },
+      { nom: 'sans-zmin', bbox: [0, 0, 1, 1], zmax: 14 },
+      { nom: 'absurde', bbox: [2, 2, 3, 3], zmax: 14, zmin: -5 },
+      { nom: 'trop-haut', bbox: [4, 4, 5, 5], zmax: 14, zmin: 99 },
+    ],
+  })
+  const par = (nom) => n.zones.find((z) => z.nom === nom)
+  assert.equal(par('monde').zmin, 8)
+  // Sans zmin propre, la zone hérite de celui de la racine : c'est ce que le
+  // manifeste réel du socle mondial suppose.
+  assert.equal(par('sans-zmin').zmin, 8)
+  assert.equal(par('absurde').zmin, 0, 'un zmin négatif est ramené dans la grille')
+  assert.ok(par('trop-haut').zmin <= par('trop-haut').zmax, 'un zmin ne peut pas dépasser le zmax de sa zone')
+})
+
+test('le manifeste RÉEL du sol porte un zmin, et il vaut 8', () => {
+  // Ce test lit le fichier livré : si une recuisson descend plus bas, il
+  // rougit, et le passage de témoin vers la couche doit être revérifié.
+  const doc = normaliseIndexSol(JSON.parse(readFileSync('public/data/sol/index.json', 'utf-8')))
+  assert.equal(doc.zmin, 8)
+  for (const z of doc.zones) assert.ok(z.zmin >= 8, `${z.nom} : zmin ${z.zmin}`)
+})

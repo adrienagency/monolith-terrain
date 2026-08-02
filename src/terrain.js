@@ -262,11 +262,20 @@ export class Terrain {
       uSol: { value: blackTexture() }, // code 0 partout = « pas de donnée », force nulle
       uSolLut: { value: blackTexture() },
       uSolOn: { value: 0 },
-      // ⚠️ 1 ET PLUS 0,5 — voir SOL_FORCE_DEFAUT dans src/reglages-couches.js.
+      // ⚠️ 2, LE DÉFAUT RÉEL — voir SOL_FORCE_DEFAUT dans src/reglages-couches.js.
       // À 0,5, la prairie (force 0,18 à l'époque) peignait à 9 % : Adrien ne
       // voyait « presque aucun changement sur la map ». La tirette « Force » du
-      // panneau Couches écrit ici, et elle monte jusqu'à 2.
-      uSolOpacite: { value: 1 },
+      // panneau Couches écrit ici, et sa course va de 0 à 4 (SOL_FORCE_MAX),
+      // exactement comme celle de la canopée.
+      //
+      // ⚠️ CETTE VALEUR ET CE COMMENTAIRE MENTAIENT TOUS LES DEUX depuis le
+      // doublement : il était écrit « elle monte jusqu'à 2 » (c'est 4) et la
+      // valeur initiale était 1 (le défaut est 2). L'écart ne se voyait pas à
+      // l'écran parce que `appliqueReglagesCouches` repose l'uniforme au
+      // démarrage — mais toute lecture du fichier partait faussee, et le jumeau
+      // canopée, lui, dit correctement 4 : l'écart entre les deux était ce qu'il y
+      // avait de plus trompeur.
+      uSolOpacite: { value: 2 },
       uSolOffset: { value: new THREE.Vector2(0, 0) },
       uSolScale: { value: new THREE.Vector2(1, 1) },
       // 1 / taille de la mosaïque en texels : c'est ce qui permet au nuanceur
@@ -281,8 +290,14 @@ export class Terrain {
       // 11, et 11 m est une hauteur réelle : le filtrage linéaire est licite ici
       // alors qu'il détruirait uSol (relire src/map/canopee-layer.js, dont
       // l'en-tête ne sert qu'à ça). C'est pour la même raison qu'il n'y a pas
-      // d'uCanopeeTexel : le nuanceur n'a aucun mélange de quatre voisins à
-      // faire à la main, le GPU le fait pour lui et il a le droit.
+      // besoin de mélanger quatre voisins à la main : le GPU le fait pour lui, et
+      // il en a le droit.
+      //
+      // ⚠️ IL ÉTAIT ÉCRIT ICI « il n'y a pas d'uCanopeeTexel », ET C'EST FAUX.
+      // L'uniforme est déclaré treize lignes plus bas, lu par `ombreLisiere`, et
+      // remis à jour depuis la taille réelle de la mosaïque. Le commentaire datait
+      // d'avant l'ombrage de lisière, et il désignait un uniforme VIVANT comme
+      // inexistant : un nettoyage d'uniformes morts l'aurait supprimé.
       uCanopee: { value: blackTexture() }, // 0 m partout = « pas d'arbre » = force nulle
       uCanopeeLut: { value: blackTexture() },
       uCanopeeOn: { value: 0 },
@@ -763,9 +778,18 @@ vec4 canopeeEn(vec2 p) {
 // qu'il a fallu, et il est là pour qu'on puisse le contester.
 float ombreLisiere(vec2 p) {
   float h = texture2D(uCanopee, p).r;
-  // -u = ouest, -v = nord : uvSolDrape rend déjà des UV retournés (v croît vers
-  // le SUD), donc reculer d'un texel sur les deux axes vise bien le nord-ouest.
-  float hNO = texture2D(uCanopee, p - uCanopeeTexel).r;
+  // ATTENTION AU SENS DE v, IL EST CONTRE-INTUITIF.
+  //
+  // uvSolDrape se termine par uv.y = 1.0 - uv.y. APRES ce retournement, v croit
+  // vers le NORD, et non vers le sud. Reculer d'un texel sur les deux axes
+  // visait donc le SUD-OUEST : l'ombre se deposait au NORD-EST, l'exact oppose
+  // de la lumiere du nord-ouest que toute la carte suppose.
+  //
+  // Le commentaire d'origine affirmait l'inverse (v croissant vers le sud) et
+  // le code le suivait fidelement. C'est le commentaire qui etait faux.
+  //
+  // Nord-ouest, donc : -u pour l'ouest, +v pour le nord.
+  float hNO = texture2D(uCanopee, p + vec2(-uCanopeeTexel.x, uCanopeeTexel.y)).r;
   return clamp((hNO - h) * 3.2, 0.0, 1.0);
 }
 // --- Appearance blend modes (Figma / W3C compositing set) — b = backdrop map,

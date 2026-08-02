@@ -697,8 +697,15 @@ export function buildCredits() {
 
   return {
     root: wrap,
-    setExtra(text) {
+    // `infobulle` porte les ADRESSES DES SOURCES. Les licences CC-BY exigent la
+    // mention à l'écran (c'est `text`), et les constantes `*_URL_SOURCE`
+    // existaient depuis toujours sans être affichées nulle part : le survol est
+    // le moyen le moins coûteux de les rendre atteignables sans allonger une
+    // ligne de crédit déjà dense. `textContent` interdit un vrai lien ici, et
+    // c'est volontaire — cette ligne reçoit des chaînes de fournisseurs.
+    setExtra(text, infobulle) {
       extra.textContent = text || ''
+      extra.title = infobulle || ''
       extraDot.style.display = text ? '' : 'none'
     },
   }

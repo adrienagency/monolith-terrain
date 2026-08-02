@@ -180,10 +180,11 @@ export const PART_MO = 79
 //             disjoncteur, son plafond de 48 Mo et ses 6 s d'attente), décodage,
 //             puis géométrie drapée fabriquée sur le fil principal.
 //
-// Les familles à 1 et à 4 parts n'ont plus de membre aujourd'hui (voir juste en
-// dessous). Elles restent décrites parce que ce sont les DEUX BOUTS DE L'ÉCHELLE
-// des coûts : sans elles, « 2 parts » et « 3 parts » ne se compareraient plus à
-// rien, et la prochaine couche serait chiffrée à l'estime.
+// Les familles à 1, à 3 et à 4 parts n'ont plus de membre aujourd'hui (voir juste
+// en dessous) : depuis que l'occupation du sol est retombée de 3 à 2, les TROIS
+// couches du catalogue coûtent 2. Elles restent décrites parce que ce sont les
+// REPÈRES DE L'ÉCHELLE des coûts : sans elles, « 2 parts » ne se comparerait plus
+// à rien, et la prochaine couche serait chiffrée à l'estime.
 //
 // ═══════════ LE MÉNAGE DU 2026-08-02 — QUATRE ENTRÉES RETIRÉES ══════════════
 //
