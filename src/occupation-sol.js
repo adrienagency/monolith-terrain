@@ -62,16 +62,27 @@ export const SOL_ZOOM_MAX = 14
 //   2. ON DOSE. Chaque classe porte sa propre FORCE, et c'est là que vit
 //      l'argument éditorial :
 //
-//      · LE BOISÉ ET LE GELÉ PARLENT FORT (0,85 et 0,90). Une forêt et un
+//      · LE BOISÉ ET LE GELÉ PARLENT FORT (0,90 et 0,95). Une forêt et un
 //        glacier sont des FORMES : elles ont un contour, elles racontent le
 //        versant, elles méritent de se voir. Ce sont elles qui font la couche.
 //
-//      · L'OUVERT CHUCHOTE (0,18 et 0,24). Prairies et cultures couvrent
-//        l'essentiel du monde habité : les peindre franchement reviendrait à
-//        poser un aplat sur les trois quarts de chaque carte de plaine, et à
-//        écraser la rampe hypsométrique qui, elle, dit déjà quelque chose.
-//        Le lavis reste juste assez présent pour qu'un damier de champs se
-//        devine contre un bois.
+//      · L'OUVERT PARLE PLUS BAS (0,42 et 0,50). Prairies et cultures couvrent
+//        l'essentiel du monde habité : les peindre à égalité avec la forêt
+//        reviendrait à poser un aplat sur les trois quarts de chaque carte de
+//        plaine, et à écraser la rampe hypsométrique qui, elle, dit déjà
+//        quelque chose.
+//
+//        ⚠️ MAIS PLUS BAS N'EST PAS INAUDIBLE — ET C'EST LA CORRECTION DU
+//        2026-08-02. La première version chuchotait à 0,18 et 0,24, sous une
+//        opacité globale de 0,5 : la prairie peignait donc à 9 % d'un lavis
+//        lui-même tiré à 45 % vers la couleur de la classe. Verdict d'Adrien :
+//        « ça ne fait presque aucun changement sur la map ». L'intention était
+//        juste, le NIVEAU était sous le seuil de perception — et une couche
+//        qu'on n'aperçoit pas n'est pas discrète, elle est inutile. Le plancher
+//        remonte donc, et le RAPPORT est ce qui a été préservé : le boisé reste
+//        deux fois plus fort que l'ouvert (0,90 contre 0,42), là où il l'était
+//        cinq fois. Deux voix qu'on entend valent mieux qu'une hiérarchie
+//        parfaite dont une moitié est muette.
 //
 //      · ⚠️ L'EAU EST À ZÉRO, ET C'EST LA DÉCISION LA PLUS IMPORTANTE DU LOT.
 //        ShibuMap DESSINE DÉJÀ l'eau — masque de mer, water-tiles,
@@ -82,9 +93,16 @@ export const SOL_ZOOM_MAX = 14
 //        La zone humide HERBACÉE (90), elle, n'est dessinée nulle part
 //        ailleurs : elle garde sa voix.
 //
-//      · LE BÂTI RESTE DISCRET (0,45). Un gris chaud désaturé qui pose
+//      · LE BÂTI RESTE EN RETRAIT (0,62). Un gris chaud désaturé qui pose
 //        l'emprise d'une ville sans prétendre en montrer les rues — c'est le
 //        travail de la photo aérienne, qui est une autre couche.
+//
+//      Et TOUT CE DOSAGE SE DÉPLACE D'UN BLOC sous la tirette « Force »
+//      (src/reglages-couches.js, `opaciteSol` → `uSolOpacite`). C'est
+//      délibérément une force GLOBALE et non une tirette par famille : le
+//      rapport ci-dessus EST l'argument éditorial, et l'exposer famille par
+//      famille inviterait à mettre la prairie à fond, c'est-à-dire à fabriquer
+//      l'atlas scolaire que ces vingt lignes servent à éviter.
 //
 // Les couleurs, enfin, sont toutes SOUS 45 % de saturation. Ce n'est pas un
 // goût, c'est une garde testée : le vert de la légende ESA officielle
@@ -107,17 +125,17 @@ export const FAMILLES_SOL = {
  * prétexte qu'elle a deux chiffres de plus que 90.
  */
 export const CLASSES_SOL = [
-  { code: 10, nom: 'Arbres', famille: 'boise', force: 0.85 },
-  { code: 20, nom: 'Arbustes', famille: 'boise', force: 0.55 },
-  { code: 30, nom: 'Prairie', famille: 'ouvert', force: 0.18 },
-  { code: 40, nom: 'Cultures', famille: 'ouvert', force: 0.24 },
-  { code: 50, nom: 'Bâti', famille: 'bati', force: 0.45 },
-  { code: 60, nom: 'Sol nu', famille: 'mineral', force: 0.5 },
-  { code: 70, nom: 'Neige et glace', famille: 'gele', force: 0.9 },
+  { code: 10, nom: 'Arbres', famille: 'boise', force: 0.9 },
+  { code: 20, nom: 'Arbustes', famille: 'boise', force: 0.7 },
+  { code: 30, nom: 'Prairie', famille: 'ouvert', force: 0.42 },
+  { code: 40, nom: 'Cultures', famille: 'ouvert', force: 0.5 },
+  { code: 50, nom: 'Bâti', famille: 'bati', force: 0.62 },
+  { code: 60, nom: 'Sol nu', famille: 'mineral', force: 0.66 },
+  { code: 70, nom: 'Neige et glace', famille: 'gele', force: 0.95 },
   { code: 80, nom: 'Eau', famille: 'humide', force: 0 }, // voir l'en-tête : décision, pas oubli
-  { code: 90, nom: 'Zone humide herbacée', famille: 'humide', force: 0.35 },
-  { code: 95, nom: 'Mangrove', famille: 'boise', force: 0.85 },
-  { code: 100, nom: 'Mousses et lichens', famille: 'mineral', force: 0.3 },
+  { code: 90, nom: 'Zone humide herbacée', famille: 'humide', force: 0.55 },
+  { code: 95, nom: 'Mangrove', famille: 'boise', force: 0.9 },
+  { code: 100, nom: 'Mousses et lichens', famille: 'mineral', force: 0.5 },
 ]
 
 export const CODES_SOL = CLASSES_SOL.map((c) => c.code)

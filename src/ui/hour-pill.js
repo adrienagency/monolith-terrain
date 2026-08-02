@@ -4,7 +4,13 @@
 
 import { el, refreshAll } from './kit.js'
 
-export function buildHourPill({ params, applyTimeOfDay }) {
+// `onLecture(on)` est appelé à CHAQUE bascule du bouton ▶ — c'est le premier
+// des deux déclencheurs de l'allumage automatique des lumières nocturnes
+// (« déclenche l'éclairage nocturne automatiquement dès qu'on passe en mode
+// lecture temporelle », Adrien). La pastille se contente de le SIGNALER : elle
+// n'allume rien elle-même, parce que c'est le Gardien qui décide, et il vit
+// dans main.js.
+export function buildHourPill({ params, applyTimeOfDay, onLecture = null }) {
   const pill = el('div', 'ce-hourpill')
 
   // ▶/⏸ : cycle jour/nuit automatique. La vitesse est un nombre 1..100 où
@@ -62,6 +68,10 @@ export function buildHourPill({ params, applyTimeOfDay }) {
     cancelAnimationFrame(rafId)
     lastT = 0
     if (on) rafId = requestAnimationFrame(tick)
+    // Signalé APRÈS que l'état est posé : l'abonné consulte le Gardien et peut
+    // allumer une couche, ce qui rappellera `refreshAll()` — il doit trouver la
+    // pastille déjà dans son état final.
+    onLecture?.(on)
   }
   playBtn.addEventListener('click', () => setPlaying(!playing))
 

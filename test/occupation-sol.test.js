@@ -67,16 +67,34 @@ test('l’EAU est à force ZÉRO — ShibuMap la dessine déjà, et mieux', () =
   assert.ok(forceDeClasse(90) > 0)
 })
 
-test('le boisé et le gelé parlent fort, l’ouvert chuchote', () => {
+test('le boisé et le gelé parlent fort, l’ouvert parle plus bas', () => {
   // L'argument éditorial, transformé en assertion : une carte calme ne peut pas
   // couvrir d'un aplat les prairies et les cultures, qui sont l'essentiel du
   // monde habité. La forêt et la glace, elles, sont des FORMES, et elles ont le
   // droit de se voir.
   assert.ok(forceDeClasse(10) > 0.7)
   assert.ok(forceDeClasse(70) > 0.7)
-  assert.ok(forceDeClasse(30) < 0.25)
-  assert.ok(forceDeClasse(40) < 0.25)
+  assert.ok(forceDeClasse(30) < forceDeClasse(10))
+  assert.ok(forceDeClasse(40) < forceDeClasse(10))
   assert.ok(forceDeClasse(30) < forceDeClasse(50))
+})
+
+test('⚠️ MAIS L’OUVERT RESTE AU-DESSUS DU SEUIL DE PERCEPTION', () => {
+  // Le défaut du 2026-08-02, transformé en garde. La prairie était à 0,18, sous
+  // une opacité globale de 0,5 : elle peignait à 9 %, et Adrien a écrit « ça ne
+  // fait presque aucun changement sur la map ». Une couche qu'on n'aperçoit pas
+  // n'est pas discrète, elle est inutile.
+  //
+  // 0,3 n'est pas un seuil mesuré, c'est un PLANCHER : il dit « quelqu'un a
+  // décidé que ça devait se voir », de sorte qu'un futur réglage à la baisse
+  // soit un choix explicite et pas une dérive.
+  assert.ok(forceDeClasse(30) >= 0.3, `prairie à ${forceDeClasse(30)}`)
+  assert.ok(forceDeClasse(40) >= 0.3, `cultures à ${forceDeClasse(40)}`)
+  // Le rapport est ce qui a été préservé : le boisé reste nettement au-dessus
+  // de l'ouvert, mais plus de cinq fois — deux voix qu'on entend valent mieux
+  // qu'une hiérarchie parfaite dont une moitié est muette.
+  const rapport = forceDeClasse(10) / forceDeClasse(30)
+  assert.ok(rapport > 1.5 && rapport < 3, `rapport boisé/ouvert = ${rapport.toFixed(2)}`)
 })
 
 test('aucune classe ne dépasse la force pleine', () => {

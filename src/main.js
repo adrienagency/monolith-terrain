@@ -131,6 +131,15 @@ import { NuitLayer } from './map/nuit-layer.js'
 import { intensiteNuit, facteurEchelleNuit, largeurEmpriseKm } from './nuit.js'
 import { OccupationSolLayer } from './map/occupation-sol-layer.js'
 import { normaliseIndexSol, zoneSolPour } from './occupation-sol.js'
+// Les sous-options des couches : les conversions tirette → uniforme, et la
+// règle d'allumage automatique de la couche nocturne. Module pur, testé.
+import {
+  SOL_FORCE_DEFAUT, SOL_FORCE_MAX,
+  NUIT_ASSOMBRISSEMENT_DEFAUT, NUIT_FORCE_DEFAUT, NUIT_FORCE_MAX,
+  opaciteSol, fondNuit, gainNuit,
+  allumageAutoNuit, MOTIF_LECTURE,
+} from './reglages-couches.js'
+import { evaluerCouche } from './gardien.js'
 import { buildEffectsPanel, BASE_GRADE } from './ui/effects-panel.js'
 import { buildHourPill } from './ui/hour-pill.js'
 import { buildZoomStepper } from './ui/zoom-stepper.js'
@@ -545,6 +554,16 @@ const params = {
   aerialEnabled: false,
   aerialOpacity: 1, // à l'activation, la photo couvre pleinement (retour Adrien)
   aerialCoastFade: 0.1, // v49 : la photo s'estompe sous l'eau au-delà du rivage (0 = off)
+  // ─── LES SOUS-OPTIONS DES COUCHES (onglet « Couches », dépliant sous la ligne)
+  // Les trois tirettes demandées par Adrien. ⚠️ Elles vivent dans `params` et pas
+  // dans le panneau : `refreshAll()` et les gabarits lisent params, et une valeur
+  // rangée dans une fermeture d'interface serait perdue au premier rebuild du
+  // panneau. Les défauts sont les constantes de src/reglages-couches.js, parce
+  // que le kit fait du double-clic un retour à la valeur de CONSTRUCTION : deux
+  // littéraux recopiés finiraient par diverger et le double-clic mentirait.
+  solForce: SOL_FORCE_DEFAUT,
+  nuitAssombrissement: NUIT_ASSOMBRISSEMENT_DEFAUT,
+  nuitForce: NUIT_FORCE_DEFAUT,
   placesEnabled: true,
   placesDensity: 1,
   placesSize: 1,
@@ -1130,6 +1149,12 @@ const sunDisc = new SunDisc(scene)
 // re-run whenever the hour OR the location changes — loadRealTerrain calls it
 // after every move.
 let skyState = null // last lightingFor() result — see applyTimeOfDay
+// La lecture temporelle tourne-t-elle ? Posé par la pastille d'heure (le bouton
+// ▶), lu ici : c'est le PREMIER des deux déclencheurs de l'allumage automatique
+// des lumières nocturnes. Un booléen et pas une lecture dans hour-pill, parce
+// que `applyTimeOfDay` est aussi appelée par la pastille elle-même, à chaque
+// image du cycle.
+let cycleTemporelActif = false
 function applyTimeOfDay(hour) {
   // ⚠️ Les GAINS s'appliquent ICI, entre le cycle et params, et c'est tout le
   // correctif. Les trois lignes marquées plus bas ÉCRASENT params.sunIntensity /
@@ -1183,6 +1208,16 @@ function applyTimeOfDay(hour) {
   // peut donc être traînée sans que la couche coûte quoi que ce soit. On passe
   // `hour`, pas params : c'est l'heure que le soleil vient d'appliquer.
   refreshNuitIntensite(hour)
+
+  // ET LA COUCHE S'ALLUME TOUTE SEULE QUAND LA NUIT SE LÈVE (demande d'Adrien).
+  //
+  // ⚠️ ON RÉUTILISE `wantDark`, C'EST-À-DIRE `darkModeFor` ET SON HYSTÉRÉSIS.
+  // Écrire ici un second seuil sur `s.sunElevation` fabriquerait deux nuits
+  // désaccordées : l'interface passerait en sombre à −3° et la couche
+  // s'allumerait ailleurs. Pire, un seuil NU rebattrait à chaque image quand on
+  // traîne la tirette d'heure — c'est exactement le défaut contre lequel
+  // l'hystérésis de darkModeFor a été écrite.
+  tenteAllumageNuit({ nuit: wantDark, lecture: !!cycleTemporelActif })
 }
 
 function placeSun() {
@@ -2984,10 +3019,20 @@ function regenerateTerrain() {
       // plus la bonne. C'est le même piège que le commentaire ci-dessus décrit
       // pour la photo, et il se rejoue à l'identique pour chaque nouvelle
       // couche drapée qu'on ajoute ailleurs qu'ici.
-      //
-      // (Les lumières nocturnes manquent au même endroit. On ne les ajoute pas
-      // ici : un autre poste travaille dessus en ce moment — voir le rapport.)
       refreshSol()
+      // ⚠️ ET LES LUMIÈRES NOCTURNES, TROISIÈME REJEU DU MÊME PIÈGE. Adrien :
+      // « pour l'éclairage nocturne, il ne se recalcule pas correctement quand
+      // on change d'échelle ». La cause est exactement celle décrite deux
+      // paragraphes plus haut : `refreshNuit` n'était appelé que par le
+      // wrapper `rebuildMapLayers`, que cette fonction contourne au profit de
+      // `mapLayers.rebuild` direct. La mosaïque Black Marble du bloc précédent
+      // restait donc tendue sur le nouveau — des villes qui brillent là où il
+      // n'y a personne, et rien là où il y a une ville.
+      //
+      // TROIS couches drapées, TROIS fois le même oubli : la règle à retenir
+      // est qu'une couche drapée se rafraîchit ICI **et** dans
+      // `rebuildMapLayers`, jamais dans l'un seulement.
+      refreshNuit()
       refreshOsmCredit(); _mlp.then(() => refreshOsmCredit())
       regenerateLabels()
       regenerateHud()
@@ -4800,6 +4845,72 @@ function refreshNuitIntensite(hour = params.timeOfDay ?? 10) {
   terrain.setNuitIntensite(intensiteNuit(hour) * echelle)
 }
 
+// LES SOUS-OPTIONS, POUSSÉES DANS LES UNIFORMES.
+//
+// ⚠️ UNE SEULE FONCTION POUR LES TROIS, ET ELLE EST IDEMPOTENTE. Les tirettes
+// écrivent dans `params` puis appellent ceci ; le boot l'appelle aussi, et c'est
+// ce qui garantit qu'un gabarit chargé (qui repose params en bloc, puis
+// refreshAll) rende la même image qu'un réglage fait à la main. Trois appels de
+// setter sur des uniformes : le coût est nul, on peut la rappeler sans compter.
+function appliqueReglagesCouches() {
+  terrain.setSolOpacite(opaciteSol(params.solForce))
+  terrain.setNuitFond(fondNuit(params.nuitAssombrissement))
+  terrain.setNuitGain(gainNuit(params.nuitForce))
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// L'ALLUMAGE AUTOMATIQUE DE LA COUCHE NOCTURNE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// La RÈGLE est pure et testée (`allumageAutoNuit`, src/reglages-couches.js) ;
+// ici il n'y a que les trois choses qu'un module pur ne peut pas porter : la
+// mémoire du veto, la consultation du Gardien, et la parole.
+//
+// ⚠️ LE VETO, ET QUAND IL TOMBE. `nuitEteinteAlaMain` se pose quand
+// l'utilisateur éteint la couche lui-même, et ne se lève QUE lorsqu'il la
+// rallume lui-même. Le lever au retour du jour serait tentant et faux : en
+// lecture temporelle, le crépuscule suivant arrive quelques secondes plus tard
+// et la couche se rallumerait sous son doigt — exactement ce qu'on interdit.
+let nuitEteinteAlaMain = false
+// Pour ne dire le refus du Gardien QU'UNE FOIS par épisode. Un automatisme qui
+// renonce en silence se lit comme une couche cassée ; un automatisme qui le
+// répète à chaque image de la lecture temporelle est pire.
+let refusNuitDit = false
+
+function tenteAllumageNuit({ lecture = false, nuit = false } = {}) {
+  const actives = [...couchesActives]
+  const active = couchesActives.has('lumieres-nocturnes')
+  // Le Gardien décide, comme pour un clic. On ne l'interroge que lorsqu'un
+  // déclencheur est armé : `evaluerCouche` est pur mais pas gratuit, et
+  // `applyTimeOfDay` passe ici à chaque dixième d'heure de la tirette.
+  if (active || (!lecture && !nuit)) {
+    if (!lecture && !nuit) refusNuitDit = false // le jour revient : on pourra reparler
+    return
+  }
+  const verdict = evaluerCouche({
+    id: 'lumieres-nocturnes',
+    actives,
+    machine: MACHINE,
+    gouverneur: aq,
+  }).verdict
+  const r = allumageAutoNuit({ active, eteinteAlaMain: nuitEteinteAlaMain, nuit, lecture, verdict })
+  if (r.refus && !refusNuitDit) {
+    refusNuitDit = true
+    // ON LE DIT. « Si le budget refuse, on n'allume pas — et ce n'est pas grave,
+    // mais ça ne doit pas être silencieux. »
+    showNotice(
+      r.motif === MOTIF_LECTURE
+        ? 'Lumières nocturnes non allumées : le budget du Gardien est plein. Onglet Couches pour échanger.'
+        : 'La nuit tombe, mais le budget du Gardien est plein — les lumières nocturnes restent éteintes.',
+      { duration: 4200 },
+    )
+    return
+  }
+  if (!r.allumer) return
+  setCouche('lumieres-nocturnes', true, { parMachine: true }) // ⚠️ parMachine : ceci ne doit PAS lever le veto de l'utilisateur
+  refreshAll() // l'interrupteur du panneau doit bouger, sinon il ment
+}
+
 async function refreshNuit() {
   if (!couchesActives.has('lumieres-nocturnes') || !dem || params.source !== 'real') {
     terrain.setNuit(null)
@@ -4869,10 +4980,19 @@ async function refreshSol() {
   refreshOsmCredit()
 }
 
-function setCouche(id, on) {
+// `parMachine` distingue le clic de l'utilisateur de l'allumage automatique, et
+// c'est TOUT le mécanisme du veto : seul un geste humain pose ou lève
+// `nuitEteinteAlaMain`. Le défaut est `false` parce que l'immense majorité des
+// appels viennent du panneau, c'est-à-dire d'un doigt.
+function setCouche(id, on, { parMachine = false } = {}) {
   if (on) couchesActives.add(id)
   else couchesActives.delete(id)
-  if (id === 'lumieres-nocturnes') refreshNuit()
+  if (id === 'lumieres-nocturnes') {
+    // Éteinte à la main → veto. Rallumée à la main → veto levé, et on redonne
+    // au Gardien le droit de reparler s'il refuse plus tard.
+    if (!parMachine) { nuitEteinteAlaMain = !on; refusNuitDit = false }
+    refreshNuit()
+  }
   if (id === 'occupation-sol') refreshSol()
 }
 async function refreshAerialCore() {
@@ -6266,7 +6386,20 @@ const { elementsPanel, imagePanel } = buildEffectsPanel({
 
 // the 24h slider lives top-right as a pill now — the Create panel's Light
 // section is gone entirely (this was its only control)
-const hourPill = buildHourPill({ params, applyTimeOfDay })
+const hourPill = buildHourPill({
+  params,
+  applyTimeOfDay,
+  // Le premier des deux déclencheurs de l'allumage automatique. On tente TOUT DE
+  // SUITE plutôt que d'attendre la première image du cycle : le geste doit
+  // répondre au clic, et non une fraction de seconde plus tard. ⚠️ Et on tente
+  // même en plein jour — la lecture atteindra le crépuscule dans quelques
+  // secondes, et `intensiteNuit` garde la couche invisible d'ici là. C'est ce
+  // qui fait que la mosaïque est PRÊTE quand la nuit arrive.
+  onLecture: (on) => {
+    cycleTemporelActif = on
+    if (on) tenteAllumageNuit({ lecture: true, nuit: !!params.darkMode })
+  },
+})
 
 const explorePanel = buildExplorePanel({
   // `nom` : le lieu remarquable cliqué dans Explorer désigne une ENTITÉ, tout
@@ -6302,6 +6435,53 @@ const mapPanel = buildMapPanel({
 const couchesPanel = buildCouchesPanel({
   couchesActives: () => [...couchesActives],
   setCouche,
+  // LES SOUS-OPTIONS, DÉCLARÉES ICI ET PAS DANS LE PANNEAU. Le panneau sait
+  // fabriquer une tirette ; il n'a aucune raison de savoir ce que règle celle
+  // des lumières nocturnes, ni quelle est sa course. Même partage que le reste
+  // du fichier : la vue rend, main.js branche.
+  //
+  // ⚠️ Chaque `set` écrit dans `params` PUIS pousse dans les uniformes, et
+  // jamais l'inverse : `params` est ce que lisent `refreshAll`, les gabarits et
+  // l'export. Écrire directement dans l'uniforme rendrait un réglage qui
+  // disparaît au premier chargement de gabarit, sans trace.
+  reglagesCouche: (id) => {
+    if (id === 'occupation-sol') {
+      return [{
+        label: 'Force',
+        min: 0,
+        max: SOL_FORCE_MAX,
+        step: 0.05,
+        get: () => params.solForce ?? SOL_FORCE_DEFAUT,
+        set: (v) => { params.solForce = v; appliqueReglagesCouches() },
+      }]
+    }
+    if (id === 'lumieres-nocturnes') {
+      return [
+        {
+          // « L'opacité de l'assombrissement » — mot pour mot la demande. À 0
+          // la couche n'éteint plus rien et ne fait qu'ajouter de la lueur ; à
+          // 1 tout ce qui n'est pas éclairé devient noir.
+          label: 'Assombrissement',
+          min: 0,
+          max: 1,
+          step: 0.02,
+          get: () => params.nuitAssombrissement ?? NUIT_ASSOMBRISSEMENT_DEFAUT,
+          set: (v) => { params.nuitAssombrissement = v; appliqueReglagesCouches() },
+        },
+        {
+          // « La force de l'éclairage ». 1 = le gain calibré sur la dynamique
+          // de Black Marble (voir NUIT_GAIN_BASE), 2 = deux fois plus.
+          label: 'Éclairage',
+          min: 0,
+          max: NUIT_FORCE_MAX,
+          step: 0.05,
+          get: () => params.nuitForce ?? NUIT_FORCE_DEFAUT,
+          set: (v) => { params.nuitForce = v; appliqueReglagesCouches() },
+        },
+      ]
+    }
+    return null
+  },
   machine: MACHINE,
   // ⚠️ Une FONCTION, pas l'objet : `aq` est créé bien plus bas dans ce fichier
   // (le gouverneur a besoin du composer). Passer `aq` ici capturerait `undefined`
@@ -6691,6 +6871,10 @@ window.__exp = { boats, raceLabels, scene, camera, controls, params, terrain, lo
 }
 
 applyTimeOfDay(params.timeOfDay ?? 10) // seed the sun/disc/lake for the opening view
+// Les sous-options des couches partent des mêmes valeurs que les uniformes du
+// nuanceur, mais on les pousse quand même : le jour où un défaut change d'un
+// seul côté, c'est params qui doit gagner — c'est lui que la tirette montre.
+appliqueReglagesCouches()
 
 // real world is the default source — fetch its tiles on startup. A published
 // race link (#r=, fetch fired at module scope so it ran during boot) takes

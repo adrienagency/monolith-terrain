@@ -240,6 +240,16 @@ export class Terrain {
       uNuitIntensite: { value: 0 },
       uNuitOffset: { value: new THREE.Vector2(0, 0) },
       uNuitScale: { value: new THREE.Vector2(1, 1) },
+      // LES DEUX TIRETTES DEMANDÉES PAR ADRIEN. C'étaient deux CONSTANTES du
+      // nuanceur (NUIT_FOND = 0,22 et NUIT_GAIN = 3,4) ; leurs valeurs de
+      // départ ici les reproduisent au bit près, et leurs commentaires
+      // d'origine — le POURQUOI de 0,22 et de 3,4 — ont suivi dans
+      // src/reglages-couches.js, avec la conversion tirette → uniforme.
+      // ⚠️ uNuitFond dit CE QUI RESTE du sol, la tirette dit COMBIEN ON ÉTEINT :
+      // les deux nombres sont opposés. `fondNuit` est le seul endroit où cette
+      // inversion vit.
+      uNuitFond: { value: 0.22 },
+      uNuitGain: { value: 3.4 },
       // OCCUPATION DU SOL (onglet « Couches »). Même drapage que la photo et
       // que les lumières — uvSolDrape — mais la texture ne porte PAS une image :
       // elle porte des CODES DE CLASSE ESA WorldCover, un par octet.
@@ -252,7 +262,11 @@ export class Terrain {
       uSol: { value: blackTexture() }, // code 0 partout = « pas de donnée », force nulle
       uSolLut: { value: blackTexture() },
       uSolOn: { value: 0 },
-      uSolOpacite: { value: 0.5 },
+      // ⚠️ 1 ET PLUS 0,5 — voir SOL_FORCE_DEFAUT dans src/reglages-couches.js.
+      // À 0,5, la prairie (force 0,18 à l'époque) peignait à 9 % : Adrien ne
+      // voyait « presque aucun changement sur la map ». La tirette « Force » du
+      // panneau Couches écrit ici, et elle monte jusqu'à 2.
+      uSolOpacite: { value: 1 },
       uSolOffset: { value: new THREE.Vector2(0, 0) },
       uSolScale: { value: new THREE.Vector2(1, 1) },
       // 1 / taille de la mosaïque en texels : c'est ce qui permet au nuanceur
@@ -460,6 +474,8 @@ uniform float uNuitOn;
 uniform float uNuitIntensite;
 uniform vec2 uNuitOffset;
 uniform vec2 uNuitScale;
+uniform float uNuitFond;
+uniform float uNuitGain;
 uniform sampler2D uSol;
 uniform sampler2D uSolLut;
 uniform float uSolOn;
@@ -524,20 +540,16 @@ ${FX_GLSL}
 // bit près.
 vec2 champXZ() { return vWorldPos.xz + uFenetre; }
 
-// Ce qui reste du sol là où personne n'habite, quand les lumières nocturnes
-// sont allumées. 0,22 et pas 0 : à zéro on perd le relief, et une carte dont
-// on ne lit plus la montagne n'est plus une carte. Assez bas, en revanche,
-// pour que la moindre ville se détache franchement.
-const float NUIT_FOND = 0.22;
-
-// LE GAIN DES LUMIERES. Black Marble est un produit SCIENTIFIQUE : sa dynamique
-// est calee pour qu'aucune ville ne sature le capteur, pas pour qu'une carte
-// soit lisible. Peint tel quel, meme Tokyo ne montait qu'au tiers du blanc.
-// On ouvre donc franchement — demande d'Adrien, « augmente beaucoup » — et le
-// clamp du rendu tient le haut de la courbe. La racine carree remonte SURTOUT
-// les lueurs faibles : les petites villes et les routes apparaissent, sans que
-// les metropoles ne deviennent une tache blanche sans forme.
-const float NUIT_GAIN = 3.4;
+// ⚠️ NUIT_FOND ET NUIT_GAIN ONT QUITTE CE FICHIER — ce sont desormais les deux
+// uniformes uNuitFond et uNuitGain, pilotes par les deux tirettes du panneau
+// Couches (demande d'Adrien : « l'opacite de l'assombrissement » et « la force
+// de l'eclairage »). Leurs valeurs de depart reproduisent les anciennes
+// constantes au bit pres : 0,22 et 3,4.
+//
+// Le POURQUOI de ces deux chiffres — a zero on perd le relief ; Black Marble
+// est un produit scientifique dont la dynamique est calee pour ne pas saturer
+// le capteur, pas pour qu'une carte soit lisible — vit maintenant dans
+// src/reglages-couches.js, a cote des conversions tirette → uniforme.
 
 // LE DRAPAGE D'UNE MOSAÏQUE SUR LE SOL — la géométrie commune à la photo
 // aérienne et aux lumières nocturnes.
@@ -917,19 +929,34 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   // classe et lui impose la LUMINANCE de la carte : l'ombrage du relief, les
   // courbes de niveau et la rampe hypsométrique continuent de se lire à travers.
   //
-  // La luminance, elle, est tirée à 45 % vers celle de la classe. Ni 0 ni 1, et
+  // La luminance, elle, est tirée à 55 % vers celle de la classe. Ni 0 ni 1, et
   // les deux bornes sont des régressions : à 0 on perdrait « la forêt est
   // sombre, le glacier est clair », qui est justement ce que la couche apporte ;
   // à 1 on écraserait le modelé sous un aplat, et on aurait fabriqué l'atlas.
+  //
+  // ⚠️ 0,55 ET PLUS 0,45 — c'est la moitié du correctif du 2026-08-02, l'autre
+  // moitié étant les forces de src/occupation-sol.js. Ce qu'on écrase en montant
+  // ce chiffre, ce n'est PAS l'ombrage : diffuseColor est ici un ALBEDO, et le
+  // soleil, les ombres et le SSAO le multiplient ensuite. C'est la rampe
+  // HYPSOMÉTRIQUE qui recule — et c'est précisément l'échange qu'on veut, la
+  // couche disant l'occupation là où la rampe ne dit que l'altitude. Les courbes
+  // de niveau, la grille et les étiquettes, elles, sont peintes PLUS BAS dans ce
+  // nuanceur : elles passent par-dessus, intactes, quelle que soit la force.
   if (uSolOn > 0.5 && uSolOpacite > 0.001) {
     float sIn;
     vec2 sUv = uvSolDrape(sIn); // ⚠️ les deux pièges « Vienne sur le mont Fuji » et « 1 carreau sur 9 » vivent DEDANS
     sUv = uSolOffset + sUv * uSolScale;
     vec4 lavis = lavisSol(sUv);
-    float k = lavis.a * uSolOpacite * sIn;
+    // ⚠️ LE PLAFOND À 1 N'EST PAS DÉCORATIF : la tirette « Force » monte à 2, et
+    // mix() au-delà de 1 EXTRAPOLE — il sortirait de la gamme par le haut et
+    // fabriquerait des verts fluorescents sur les forêts denses, ce qui est
+    // exactement l'atlas qu'on refuse. Au-delà de 1, pousser la tirette ne fait
+    // plus qu'amener les classes FAIBLES à saturation, ce qui est ce qu'on lui
+    // demande.
+    float k = min(1.0, lavis.a * uSolOpacite * sIn);
     if (k > 0.001) {
       float lumFond = blLum(diffuseColor.rgb);
-      vec3 peinte = blSetLum(lavis.rgb, mix(lumFond, blLum(lavis.rgb), 0.45));
+      vec3 peinte = blSetLum(lavis.rgb, mix(lumFond, blLum(lavis.rgb), 0.55));
       diffuseColor.rgb = mix(diffuseColor.rgb, peinte, k);
     }
   }
@@ -1028,8 +1055,8 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     float lum = dot(lueur, vec3(0.299, 0.587, 0.114));
     // lum mesure la lumière PRÉSENTE : là où elle est forte, on n'assombrit
     // pas — sinon on creuserait le cœur des villes, exactement l'inverse.
-    diffuseColor.rgb *= mix(1.0, mix(NUIT_FOND, 1.0, min(1.0, lum * 3.0)), force);
-    diffuseColor.rgb += sqrt(lueur) * NUIT_GAIN * force;
+    diffuseColor.rgb *= mix(1.0, mix(uNuitFond, 1.0, min(1.0, lum * 3.0)), force);
+    diffuseColor.rgb += sqrt(lueur) * uNuitGain * force;
   }
 
   // Fancy surface shader paints OVER the final surface — the hypsometric map OR
@@ -1459,6 +1486,16 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // saute le bloc entier.
   setNuitIntensite(v) {
     this.mapUniforms.uNuitIntensite.value = v
+  }
+  // Les deux tirettes de la couche nocturne. ⚠️ On reçoit ici des valeurs DÉJÀ
+  // converties (fondNuit / gainNuit, src/reglages-couches.js) : c'est là que
+  // vivent l'inversion « assombrissement → ce qui reste » et le garde-fou
+  // anti-NaN. Passer la valeur brute de la tirette assombrirait à l'envers.
+  setNuitFond(v) {
+    this.mapUniforms.uNuitFond.value = v
+  }
+  setNuitGain(v) {
+    this.mapUniforms.uNuitGain.value = v
   }
   // OCCUPATION DU SOL — même contrat que setAerial()/setNuit() : on passe
   // l'objet rendu par OccupationSolLayer.build(), ou null pour éteindre.
