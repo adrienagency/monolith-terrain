@@ -18,28 +18,30 @@ test('pickDiveTier lands each altitude on the matching scale', () => {
   assert.equal(pickDiveTier(70000).zoom, 9)
   assert.equal(pickDiveTier(150000).zoom, 8) // Corsica / Madagascar-sized
   assert.equal(pickDiveTier(199999).zoom, 8)
-  // continental blocks now load from 4 000 km down (was orbital-only)
   assert.equal(pickDiveTier(300000).zoom, 7)
   assert.equal(pickDiveTier(1000000).zoom, 6)
-  assert.equal(pickDiveTier(3000000).zoom, 5) // ~z5 block, ~3 760 km across
-  assert.equal(pickDiveTier(5000000).zoom, 4) // ~z4 continental block, ~7 500 km
-  assert.equal(pickDiveTier(9000000), null) // above z4 -> orbit gate (globe)
-  assert.equal(pickDiveTier(3999999).zoom, 5)
-  assert.equal(pickDiveTier(4000000).zoom, 4) // z5 boundary rolls into the z4 continental block
-  assert.equal(pickDiveTier(16000000), null) // globe territory above the z4 block
+  // ⚠️ LES DEUX PALIERS LES PLUS LARGES ONT DISPARU (Adrien : « Z1 et Z2 ne
+  // doivent pas exister », cf. escalier-zoom.js). Ce test disait avant que
+  // 3 000 km rendait z5 et 5 000 km z4 ; la porte orbitale s'ouvre désormais
+  // dès 1 600 km, et au-dessus il n'y a plus de palier — c'est le globe.
+  assert.equal(pickDiveTier(1600000), null)
+  assert.equal(pickDiveTier(3000000), null)
+  assert.equal(pickDiveTier(9000000), null)
+  assert.equal(pickDiveTier(1599999).zoom, 6, 'juste sous la porte : le plus large palier qui reste')
+  assert.equal(pickDiveTier(16000000), null)
 })
 
-test('the surface staircase widens one zoom level at a time down to z4', () => {
+test('the surface staircase widens one zoom level at a time down to z6', () => {
   assert.equal(stepZoom(12, -1), 11)
   assert.equal(stepZoom(10, -1), 9)
   assert.equal(stepZoom(8, -1), 7)
-  assert.equal(stepZoom(6, -1), 5)
-  assert.equal(stepZoom(5, -1), 4)
-  assert.equal(stepZoom(4, -1), 4) // continental floor
+  assert.equal(stepZoom(7, -1), 6)
+  assert.equal(stepZoom(6, -1), 6) // plancher régional : au-delà, le globe
+  assert.equal(stepZoom(5, -1), 6) // un vieux lien de partage est remonté au plancher
 })
 
 test('the staircase refines one zoom level at a time, capped at the fine scale', () => {
-  assert.equal(stepZoom(5, 1), 6)
+  assert.equal(stepZoom(6, 1), 7)
   assert.equal(stepZoom(8, 1), 9)
   assert.equal(stepZoom(10, 1), 11)
   assert.equal(stepZoom(11, 1), 12)
@@ -54,7 +56,7 @@ test('the staircase refines one zoom level at a time, capped at the fine scale',
 // revenir au cadrage qu'on venait de quitter.
 test('refining then widening returns to the exact starting zoom', () => {
   for (const fine of [12, 15, 17]) {
-    for (let z = 4; z < fine; z++) {
+    for (let z = 6; z < fine; z++) {
       assert.equal(stepZoom(stepZoom(z, 1, fine), -1), z, `aller-retour depuis z${z} (fin ${fine})`)
     }
   }
