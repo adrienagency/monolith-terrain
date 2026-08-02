@@ -26,6 +26,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
+import { pathToFileURL } from 'node:url'
 
 // ------------------------------------------------------------------ options
 const argv = process.argv.slice(2)
@@ -142,7 +143,7 @@ function encodePng(rgb, w, h) {
 // ouvre chaque pivot et on interroge le premier qui couvre le point. C'est
 // aussi ce qui permettra d'empiler une source cotiere fine PAR-DESSUS une
 // source mondiale — l'ordre des dossiers fait la priorite.
-function openSources(spec) {
+export function openSources(spec) {
   const dirs = spec.split(',').map((d) => d.trim()).filter(Boolean)
   const found = []
   for (const d of dirs) {
@@ -161,9 +162,14 @@ function openSources(spec) {
   console.log(`  ${found.length} pivot(s) : ${found.map((f) => path.basename(f)).join(', ')}`)
   const opened = found.map(openOne)
   return {
-    sample: (lon, lat) => {
+    // ⚠️ LA CASCADE DOIT PASSER LA TAILLE DU PIXEL, pas seulement le point.
+    // `halfLon`/`halfLat` disent à openOne().sample() sur quelle surface
+    // moyenner ; un wrapper à deux arguments les avale silencieusement, rx/ry
+    // tombent à 0 et tout le moyennage anti-aliasing redevient du plus proche
+    // voisin — sans qu'aucun test ni aucune erreur ne le signale.
+    sample: (lon, lat, halfLon = 0, halfLat = 0) => {
       for (const o of opened) {
-        const v = o.sample(lon, lat)
+        const v = o.sample(lon, lat, halfLon, halfLat)
         if (v != null) return v
       }
       return null
@@ -384,4 +390,8 @@ function main() {
   console.log(`  → ${OUT}\n`)
 }
 
-main()
+// Le script reste un exécutable, mais devient IMPORTABLE : sans ce garde-fou,
+// un test qui importe openSources() lancerait une cuisson mondiale.
+// (comparaison d'URL plutôt que `import.meta.main`, qui n'existe qu'à partir
+// de Node 24.2 — ce script doit rester cuisible sur la machine de quiconque)
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()

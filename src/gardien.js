@@ -12,9 +12,9 @@
 // ═══════════ CE QUE LE GARDIEN FAIT, ET CE QU'IL NE FAIT PAS ════════════════
 //
 // IL FAIT : décider si une COUCHE cartographique optionnelle (lumières
-// nocturnes, volcans, étoiles, occupation du sol, hauteur de canopée, pistes de
-// ski, sentiers…) peut s'allumer sans emmener la machine par le fond, tenir la
-// comptabilité de ce qui est déjà allumé, et dire quoi éteindre pour échanger.
+// nocturnes, occupation du sol, hauteur de canopée…) peut s'allumer sans
+// emmener la machine par le fond, tenir la comptabilité de ce qui est déjà
+// allumé, et dire quoi éteindre pour échanger.
 //
 // IL NE FAIT PAS : mesurer. Le gardien ne chronomètre aucune image, ne lit
 // aucune mémoire, n'installe aucun capteur. Tout ce qu'il sait de l'état de la
@@ -179,36 +179,51 @@ export const PART_MO = 79
 //   4 parts — un réseau vectoriel Overpass : circuit réseau (avec son
 //             disjoncteur, son plafond de 48 Mo et ses 6 s d'attente), décodage,
 //             puis géométrie drapée fabriquée sur le fil principal.
-// ⚠️ `aProduire: true` MARQUE UNE COUCHE SANS RENDU. Adrien, le 2026-08-02 :
-// « les étoiles et les volcans ne font rien pour l'instant ». C'était exact —
-// `setCouche` dans main.js ne connaissait que les lumières nocturnes et
-// l'occupation du sol : les cinq autres interrupteurs s'allumaient, consommaient
-// leur budget, et ne peignaient rien.
+//
+// Les familles à 1 et à 4 parts n'ont plus de membre aujourd'hui (voir juste en
+// dessous). Elles restent décrites parce que ce sont les DEUX BOUTS DE L'ÉCHELLE
+// des coûts : sans elles, « 2 parts » et « 3 parts » ne se compareraient plus à
+// rien, et la prochaine couche serait chiffrée à l'estime.
+//
+// ═══════════ LE MÉNAGE DU 2026-08-02 — QUATRE ENTRÉES RETIRÉES ══════════════
+//
+// Adrien : « retire les cases étoiles, volcans, pistes de ski, et sentiers ».
+// Ces quatre entrées portaient `aProduire: true` : elles ANNONÇAIENT ce qui
+// vient sans rien peindre. Un catalogue n'est pas une feuille de route ; quatre
+// lignes grisées en permanence dans un panneau de six, c'est un panneau qu'on
+// cesse de lire.
+//
+// ⚠️ LEURS CHIFFRES MESURÉS NE SONT PAS PERDUS, ET ILS NE SONT PAS DANS CE
+// DÉPÔT. Le jour où l'une de ces couches revient, son coût se relit dans les
+// maquettes : G:\My Drive\_GITHUB\shibumap-maquettes-couches\
+//   · pistes de ski — 3,1 Mo, 1 681 objets, 1,3 s ;
+//   · sentiers      — 7,3 Mo, 136 503 points, 5,8 s.
+// Ces relevés portent sur UN SEUL BLOC. En mode continu 3×3, il faut les
+// multiplier par ~9 : c'est ce facteur, et pas le poids brut, qui justifiait les
+// 4 parts de la famille Overpass.
+//
+// ═══════════ POURQUOI `aProduire` RESTE, ALORS QU'AUCUNE COUCHE NE LE PORTE ══
+//
+// ⚠️ NE SUPPRIMEZ PAS `aProduire` PARCE QU'IL N'A PLUS D'UTILISATEUR. Ce n'est
+// pas du code mort : c'est le garde-fou qui a empêché CINQ INTERRUPTEURS DE
+// MENTIR le 2026-08-01. `setCouche` dans main.js ne connaissait que les lumières
+// nocturnes et l'occupation du sol ; les cinq autres interrupteurs s'allumaient,
+// consommaient leur budget, et ne peignaient rien.
 //
 // Un interrupteur qui ment est précisément ce que ce fichier existe pour
 // interdire (« un interrupteur qui s'allume sur une machine qui ne suit pas est
-// pire qu'un interrupteur absent »). Tant que le rendu n'existe pas, la couche
-// reste au catalogue — elle annonce ce qui vient — mais elle ne s'allume pas et
-// elle dit pourquoi.
+// pire qu'un interrupteur absent »).
+//
+// Et surtout : LA PROCHAINE COUCHE NAÎTRA AVEC. On écrit toujours l'entrée du
+// catalogue avant d'écrire le rendu — c'est l'ordre naturel, puisque le coût se
+// discute avant de coder. `aProduire: true` est ce qui rend cet intervalle
+// honnête. Son test (`test/gardien.test.js`) l'éprouve donc sur un catalogue
+// FICTIF, pour qu'il tienne debout sans dépendre de l'inventaire du jour.
 //
 // ⚠️ CE DRAPEAU SE RETIRE EN MÊME TEMPS QUE LE RENDU ARRIVE, pas avant, pas
 // après. Le laisser sur une couche qui peint la rendrait inaccessible ; l'ôter
 // d'une couche qui ne peint pas remettrait le mensonge en place.
 export const COUCHES = [
-  {
-    id: 'etoiles',
-    nom: 'Étoiles',
-    cout: 1,
-    aProduire: true,
-    note: 'un champ de points dans le dôme de ciel : aucune interaction avec le relief, aucune requête. Le coût est du remplissage, et il ne grandit pas avec le damier.',
-  },
-  {
-    id: 'volcans',
-    nom: 'Volcans',
-    cout: 1,
-    aProduire: true,
-    note: 'une poignée de repères et leurs étiquettes. Le coût n’est pas la mémoire mais le désencombrement à l’écran, sur le fil principal — même famille que les repères de sommet (PEAK_CONST dans peaks.js).',
-  },
   {
     id: 'lumieres-nocturnes',
     nom: 'Lumières nocturnes',
@@ -251,31 +266,64 @@ export const COUCHES = [
     cout: 2,
     note: 'une texture drapée par dalle, plus une passe de mélange par rampe de hauteur. Même charge que les lumières nocturnes : la donnée ne remonte jamais côté processeur (c’est une couleur, pas du relief — voir l’en-tête de src/canopee.js), la table de correspondance pèse 1 Ko, et il n’y a pas de pyramide de mips.',
   },
-  {
-    id: 'pistes-ski',
-    nom: 'Pistes de ski',
-    cout: 4,
-    aProduire: true,
-    note: 'réseau vectoriel Overpass drapé sur le relief : un circuit réseau (OVERPASS_MAXSIZE 48 Mo, attente 6 s, disjoncteur 60 s), le décodage, puis la géométrie drapée fabriquée sur le fil principal.',
-  },
-  {
-    id: 'sentiers',
-    nom: 'Sentiers',
-    cout: 4,
-    aProduire: true,
-    note: 'même forme que les pistes de ski, sur la classe d’objets OSM la plus dense qui soit. C’est précisément la requête pour laquelle OVERPASS_MAXSIZE a été écrit (z12 sur Paris centre : 351 414 chemins, 238 Mo, en 200 OK).',
-  },
 ]
 
-const PAR_ID = new Map(COUCHES.map((c) => [c.id, c]))
+// ---------------------------------------------------------------------------
+// LE CATALOGUE EST UN ARGUMENT, PAS UNE CONSTANTE — et voici pourquoi
+// ---------------------------------------------------------------------------
+//
+// Toutes les fonctions de budget ci-dessous acceptent un `catalogue`, et se
+// rabattent sur `COUCHES` quand on ne leur en donne pas. Aucun appelant de
+// l'application n'en passe : main.js et couches-panel.js interrogent le vrai
+// catalogue, exactement comme avant. C'EST POUR LES TESTS, et ce n'est pas une
+// commodité — c'est une correction.
+//
+// ⚠️ CE QUI S'EST PASSÉ LE 2026-08-02. Retirer quatre couches du catalogue a
+// cassé TREIZE tests de test/gardien.test.js, alors qu'aucune règle de budget
+// n'avait bougé d'une virgule. La cause : ces tests se servaient des couches
+// réelles comme EXEMPLES DE COÛT (« une couche à 3 parts », « le plus petit
+// sacrifice », « la marge de déblocage »). Le catalogue passant de 18 à 7 parts,
+// tous les scénarios de dépassement changeaient de sens en même temps.
+//
+// Une règle de budget dont les tests rougissent parce qu'on AJOUTE ou RETIRE une
+// couche est une règle mal testée : elle éprouve un inventaire au lieu d'une
+// loi. Et ce projet retirera et ajoutera encore des couches — la canopée est
+// arrivée en juillet, quatre entrées sont parties en août.
+//
+// Le paramètre coûte deux lignes ici et rend les tests de budget définitivement
+// indépendants du contenu du panneau. Les tests qui portent VRAIMENT sur
+// l'inventaire (les trois couches qu'Adrien veut voir, l'unicité des
+// identifiants, l'existence des notes) continuent, eux, d'interroger `COUCHES` —
+// c'est leur sujet.
 
-// Le coût le plus cher du catalogue. Il sert de valeur par défaut aux
-// identifiants inconnus (voir coutCouche).
-const COUT_MAX = COUCHES.reduce((m, c) => Math.max(m, c.cout), 0)
+// L'index d'un catalogue : sa table par identifiant, son coût le plus cher, et
+// le rang de chaque entrée (qui tranche les égalités de sacrifice).
+//
+// ⚠️ IL EST MÉMORISÉ PAR TABLEAU. `evaluerCouche` est appelé à chaque battement
+// du panneau et à chaque dixième d'heure de la tirette temporelle : reconstruire
+// une Map à chaque appel transformerait un module pur en dépense. La WeakMap
+// laisse partir un catalogue de test dès que le test se termine.
+const INDEX = new WeakMap()
+
+function indexer(catalogue) {
+  const liste = Array.isArray(catalogue) ? catalogue : COUCHES
+  const connu = INDEX.get(liste)
+  if (connu) return connu
+  const idx = {
+    liste,
+    parId: new Map(liste.map((c) => [c.id, c])),
+    rang: new Map(liste.map((c, i) => [c.id, i])),
+    // Le coût le plus cher du catalogue. Il sert de valeur par défaut aux
+    // identifiants inconnus (voir coutCouche).
+    coutMax: liste.reduce((m, c) => Math.max(m, c.cout), 0),
+  }
+  INDEX.set(liste, idx)
+  return idx
+}
 
 /** L'entrée du catalogue, ou null si l'identifiant n'y est pas. */
-export function couche(id) {
-  return PAR_ID.get(id) || null
+export function couche(id, catalogue = COUCHES) {
+  return indexer(catalogue).parId.get(id) || null
 }
 
 /**
@@ -287,8 +335,9 @@ export function couche(id) {
  * voie rien. Même famille de décision que `classerCarte`, où ce qu'on ne
  * reconnaît pas tombe dans une ligne prudente plutôt que dans la plus généreuse.
  */
-export function coutCouche(id) {
-  return couche(id)?.cout ?? COUT_MAX
+export function coutCouche(id, catalogue = COUCHES) {
+  const idx = indexer(catalogue)
+  return idx.parId.get(id)?.cout ?? idx.coutMax
 }
 
 // ---------------------------------------------------------------------------
@@ -380,10 +429,10 @@ export const MARGE_TENDU = 1
 export const MARGE_DEBLOCAGE = 1
 
 /** La somme des coûts des couches allumées. Les doublons ne se paient qu'une fois. */
-export function occupationParts(actives) {
+export function occupationParts(actives, catalogue = COUCHES) {
   if (!Array.isArray(actives)) return 0
   let total = 0
-  for (const id of new Set(actives)) total += coutCouche(id)
+  for (const id of new Set(actives)) total += coutCouche(id, catalogue)
   return total
 }
 
@@ -395,9 +444,9 @@ const mot = (n) => `${n} part${n > 1 ? 's' : ''}`
  * @returns {{capacite:number, occupation:number, restant:number,
  *            depassement:number, fraction:number, tendu:boolean, resume:string}}
  */
-export function etatBudget({ actives = [], machine = null, gouverneur = null } = {}) {
+export function etatBudget({ actives = [], machine = null, gouverneur = null, catalogue = COUCHES } = {}) {
   const capacite = capaciteParts({ machine, gouverneur })
-  const occupation = occupationParts(actives)
+  const occupation = occupationParts(actives, catalogue)
   // ⚠️ LE RESTANT SE PLANCHERISE À 0 ET LE DÉPASSEMENT SORT À PART. Le cas
   // arrive vraiment : les couches sont allumées, PUIS le gouverneur descend
   // d'un cran et la capacité fond sous elles. Le gardien n'éteint rien — mais
@@ -425,11 +474,11 @@ export function etatBudget({ actives = [], machine = null, gouverneur = null } =
 // L'ordre du catalogue tranche les égalités : deux couches au même coût doivent
 // donner la même proposition d'une image à l'autre, sinon le libellé du bouton
 // change tout seul sous les yeux du visiteur.
-function choisirSacrifice(actives, deficit) {
+function choisirSacrifice(actives, deficit, catalogue = COUCHES) {
   if (deficit <= 0) return []
-  const rang = new Map(COUCHES.map((c, i) => [c.id, i]))
+  const { rang } = indexer(catalogue)
   const candidats = [...new Set(actives)]
-    .map((id) => ({ id, cout: coutCouche(id), rang: rang.get(id) ?? Number.MAX_SAFE_INTEGER }))
+    .map((id) => ({ id, cout: coutCouche(id, catalogue), rang: rang.get(id) ?? Number.MAX_SAFE_INTEGER }))
     .sort((a, b) => a.cout - b.cout || a.rang - b.rang)
 
   const seule = candidats.find((c) => c.cout >= deficit)
@@ -451,12 +500,12 @@ function choisirSacrifice(actives, deficit) {
 }
 
 /** La liste des couches à éteindre pour qu'`id` puisse s'allumer. Vide = rien à échanger. */
-export function aRetirerPour({ id, actives = [], machine = null, gouverneur = null, bloqueePrecedemment = false } = {}) {
-  const cout = coutCouche(id)
+export function aRetirerPour({ id, actives = [], machine = null, gouverneur = null, bloqueePrecedemment = false, catalogue = COUCHES } = {}) {
+  const cout = coutCouche(id, catalogue)
   const capacite = capaciteParts({ machine, gouverneur })
   const seuil = bloqueePrecedemment ? capacite - MARGE_DEBLOCAGE : capacite
   const liste = [...new Set(actives)].filter((x) => x !== id)
-  return choisirSacrifice(liste, occupationParts(liste) + cout - seuil)
+  return choisirSacrifice(liste, occupationParts(liste, catalogue) + cout - seuil, catalogue)
 }
 
 // ---------------------------------------------------------------------------
@@ -483,15 +532,17 @@ export const NON = 'non'
  * @param {{tier?:number, startTier?:number}|null} o.gouverneur - le contrôleur de perf.js
  * @param {boolean} o.bloqueePrecedemment - cette couche était-elle refusée juste avant ?
  * @param {boolean} o.desarme - `?gardien=0` : on n'oppose plus de refus
+ * @param {object[]} [o.catalogue] - le catalogue à consulter ; `COUCHES` par
+ *        défaut. Voir « LE CATALOGUE EST UN ARGUMENT » plus haut.
  * @returns {{verdict:string, raison:string, cout:number, restantApres:number,
  *            aRetirer:string[], deja:boolean, desarme:boolean}}
  */
-export function evaluerCouche({ id, actives = [], machine = null, gouverneur = null, bloqueePrecedemment = false, desarme = false } = {}) {
-  const c = couche(id)
+export function evaluerCouche({ id, actives = [], machine = null, gouverneur = null, bloqueePrecedemment = false, desarme = false, catalogue = COUCHES } = {}) {
+  const c = couche(id, catalogue)
 
   const listeAutres = [...new Set(actives)].filter((x) => x !== id)
   const capacite = capaciteParts({ machine, gouverneur })
-  const occupationAutres = occupationParts(listeAutres)
+  const occupationAutres = occupationParts(listeAutres, catalogue)
 
   // Une couche inconnue du catalogue est REFUSÉE, jamais ignorée. Sans coût
   // déclaré, le gardien ne sait rien d'elle : la laisser passer reviendrait à
@@ -501,7 +552,7 @@ export function evaluerCouche({ id, actives = [], machine = null, gouverneur = n
     return {
       verdict: NON,
       raison: `couche « ${id} » absente du catalogue du gardien — son coût est inconnu, donc elle ne peut pas être budgétée`,
-      cout: COUT_MAX,
+      cout: indexer(catalogue).coutMax,
       restantApres: Math.max(0, capacite - occupationAutres),
       aRetirer: [],
       deja: false,
@@ -512,7 +563,7 @@ export function evaluerCouche({ id, actives = [], machine = null, gouverneur = n
   // Déjà allumée : c'est toujours oui. Le gardien refuse d'ALLUMER, il n'éteint
   // jamais — même quand la capacité a fondu sous les couches en place.
   if (new Set(actives).has(id)) {
-    const b = etatBudget({ actives, machine, gouverneur })
+    const b = etatBudget({ actives, machine, gouverneur, catalogue })
     return {
       verdict: OUI,
       raison: b.depassement > 0
@@ -551,12 +602,12 @@ export function evaluerCouche({ id, actives = [], machine = null, gouverneur = n
   }
 
   // ─────────── le refus, et il ne part jamais sans son remède ───────────
-  const aRetirer = choisirSacrifice(listeAutres, apres - seuil)
+  const aRetirer = choisirSacrifice(listeAutres, apres - seuil, catalogue)
   const rappelHysteresis = bloqueePrecedemment
     ? ` Une part de marge est exigée en plus tant que la couche est refusée, pour que le panneau ne clignote pas quand le budget oscille.`
     : ''
   const raison = aRetirer.length
-    ? `« ${c.nom} » coûte ${mot(c.cout)} et il n’en reste que ${Math.max(0, capacite - occupationAutres)} sur les ${capacite} de ${machineDit}${suffixeSouffrance}. Éteignez ${aRetirer.map((x) => `« ${couche(x)?.nom ?? x} »`).join(' et ')} pour lui faire la place.${rappelHysteresis}`
+    ? `« ${c.nom} » coûte ${mot(c.cout)} et il n’en reste que ${Math.max(0, capacite - occupationAutres)} sur les ${capacite} de ${machineDit}${suffixeSouffrance}. Éteignez ${aRetirer.map((x) => `« ${couche(x, catalogue)?.nom ?? x} »`).join(' et ')} pour lui faire la place.${rappelHysteresis}`
     : `« ${c.nom} » coûte ${mot(c.cout)} à elle seule, et ${machineDit} n’en porte que ${capacite} en tout${suffixeSouffrance} : cette couche est hors de portée de cette machine, éteindre les autres n’y changerait rien.`
 
   if (desarme) {
@@ -613,11 +664,14 @@ export function desarmeUrl(brut) {
  *        (c'est ce jeu-là qui porte l'hystérésis : l'appelant garde le passé,
  *        le gardien garde la règle — l'idiome d'`echantillonRetenu`)
  * @param {boolean} o.desarme
+ * @param {object[]} [o.catalogue] - le catalogue à consulter ; `COUCHES` par
+ *        défaut. Voir « LE CATALOGUE EST UN ARGUMENT » plus haut.
  */
-export function etatCouches({ actives = [], machine = null, gouverneur = null, bloquees = [], desarme = false } = {}) {
+export function etatCouches({ actives = [], machine = null, gouverneur = null, bloquees = [], desarme = false, catalogue = COUCHES } = {}) {
   const bloq = new Set(Array.isArray(bloquees) ? bloquees : [])
-  const budget = etatBudget({ actives, machine, gouverneur })
+  const budget = etatBudget({ actives, machine, gouverneur, catalogue })
   const crans = cransPerdus(gouverneur)
+  const liste = indexer(catalogue).liste
   return {
     budget,
     desarme: !!desarme,
@@ -631,7 +685,7 @@ export function etatCouches({ actives = [], machine = null, gouverneur = null, b
         ? `Le gouverneur d’images a dû descendre de ${crans} palier${crans > 1 ? 's' : ''} depuis l’ouverture : le budget de couches est divisé par ${2 ** crans}.`
         : `Le gouverneur d’images n’a rien eu à dégrader depuis l’ouverture : le budget est entier.`,
     },
-    couches: COUCHES.map((c) => {
+    couches: liste.map((c) => {
       const v = evaluerCouche({
         id: c.id,
         actives,
@@ -639,14 +693,16 @@ export function etatCouches({ actives = [], machine = null, gouverneur = null, b
         gouverneur,
         bloqueePrecedemment: bloq.has(c.id),
         desarme,
+        catalogue,
       })
       // UNE COUCHE SANS RENDU NE S'ALLUME PAS, et ce refus est posé ICI et non
       // dans `evaluerCouche` — délibérément. `evaluerCouche` répond à une
       // question de BUDGET : « cette machine peut-elle la porter ? ». La
       // réponse reste oui, et elle resterait oui sur un ordinateur infiniment
       // puissant : le problème n'est pas la puissance, c'est qu'il n'y a rien
-      // à peindre. Mélanger les deux rendrait la règle de budget intestable —
-      // ses propres tests se servent de ces couches comme exemples de coût.
+      // à peindre. Deux questions, deux endroits : mélanger les deux
+      // empêcherait d'éprouver le budget sur une couche sans rendu, et
+      // d'éprouver `aProduire` sans monter un scénario de budget autour.
       //
       // ⚠️ ET LE DÉSARMEMENT NE LE LÈVE PAS. `?gardien=0` désarme le budget,
       // pas la réalité : forcer l'allumage d'une couche sans rendu ne

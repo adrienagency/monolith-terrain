@@ -27,13 +27,15 @@ export const GRID_R = 2 // rayon du damier : 2 → 5×5 max, centre exclu
 //
 // C'est le correctif de mémoire du damier, et sa cause était invisible parce que
 // chaque valeur était juste SÉPARÉMENT. Le bloc central est maillé à 768 sur
-// 56 unités-monde (18,3 sommets par unité) et ses champs sont taillés pour lui :
+// 56 unités-monde (13,7 sommets par unité) et ses champs sont taillés pour lui :
 // masque côtier 2048² (36,6 px/u), analyse à la taille du MNT, 1536² (27,4 px/u).
-// Les voisines héritaient de ces tailles avec un maillage 2,7 fois plus grossier
-// — elles portaient donc des textures 4 à 5 fois plus fines que le relief
-// capable de les montrer. Mesuré sur Le Var isolé à z12 : **79 Mo par dalle**,
-// 1 824 Mo de tas JS pour 23 voisines, contre 2 à 4 Go de limite pratique dans
-// Chrome. C'est le risque le plus sérieux du damier, devant la vitesse.
+// Les voisines héritaient de ces tailles avec un maillage 3 fois plus grossier
+// (4,59 sommets/u) — elles portaient donc des textures 6 à 8 fois plus fines que
+// le relief capable de les montrer. Mesuré sur Le Var isolé à z12, dans la
+// configuration d'alors (centre maillé à 1024, voisines à 384, soit un écart de
+// 4 à 5 fois) : **79 Mo par dalle**, 1 824 Mo de tas JS pour 23 voisines, contre
+// 2 à 4 Go de limite pratique dans Chrome. C'est le risque le plus sérieux du
+// damier, devant la vitesse.
 //
 // La règle qui remplace l'héritage : aucune TEXTURE ne dépasse quatre fois la
 // densité du maillage qui la porte (test/damier-memoire.test.js le verrouille,
