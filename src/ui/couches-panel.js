@@ -70,7 +70,11 @@ export function buildCouchesPanel(ctx) {
     title: 'Couches',
     icon: ICON,
     side: 'left',
-    width: 288,
+    // 268 comme TOUS les autres panneaux du rail (Carte, Terrain, Fonds,
+    // Éléments, Effets…). Elle était à 288 : vingt pixels de plus suffisaient à
+    // casser l'alignement de la colonne, et un rail dont les blocs ne sont pas
+    // à la même largeur se lit comme un défaut de montage.
+    width: 268,
     tip: 'Les couches optionnelles, et le budget que le Gardien leur accorde.',
     cls: 'ce-panel-couches',
   })
