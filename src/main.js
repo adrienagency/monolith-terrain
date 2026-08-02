@@ -90,7 +90,6 @@ import { CameraShotPlayer, TOP_DOWN_DIR } from './camera-shots.js'
 // virages. Tout le calcul est dans src/pilote.js, qui est pur ; src/pilote-cam.js
 // n'est que la prise three.js.
 import { PiloteCam } from './pilote-cam.js'
-import { N8AOPostPass } from 'n8ao'
 import { History } from './history.js'
 import { isTap } from './gestes.js'
 import { bindShortcuts } from './shortcuts.js'
@@ -152,10 +151,20 @@ import { createAdaptiveQuality } from './perf.js'
 import { detailForZoom } from './zoom-detail.js'
 import { applyRenderSize, screenPixelRatio } from './viewport.js'
 import { sonderMachine } from './palier-machine.js'
+import { lanceCuissonVolume } from './cloud-volume.js'
 import './ui/v28.css'
 // the export stack (modal + Recorder + mediabunny encoder) is heavy and only
 // needed on demand — it is dynamic-import()ed on the first Export click, so
 // it lives in its own async chunk and never delays first paint
+
+// ⚠️ LA TOUTE PREMIÈRE INSTRUCTION DU MODULE, ET C'EST VOLONTAIRE. Le volume de
+// nuages coûtait 455 ms MESURÉES sur le fil principal, vers 1 000–1 750 ms du
+// chargement — au moment précis où les tuiles d'altitude arrivent. Le Worker
+// part donc ici, à l'évaluation du module, soit ~1 200 ms avant que
+// `clouds.build()` ne réclame le volume : il a tout le temps de finir sur un
+// autre cœur. S'il n'a pas fini, `bakeCloudVolume()` cuit comme avant — ce
+// chemin ne peut pas être plus lent que l'ancien. Voir cloud-volume.js.
+lanceCuissonVolume()
 
 // ------------------------------------------------------------------ params
 
@@ -778,6 +787,17 @@ function hideLoading() {
   setTimeout(() => {
     loadingDismissedOnce = true
     loadingEl.classList.add('hidden')
+    // LA CARTE EST À L'ÉCRAN — le réseau est enfin libre pour ce qui n'est pas
+    // elle. Les 16 tuiles racines du globe (1 401 Ko) partaient jusqu'ici du
+    // constructeur de Globe, en tête de file, contre le MNT du bloc ; elles
+    // partent maintenant d'ici. Voir le long commentaire dans globe.js pour la
+    // mesure et pour le filet de `setVisible(true)`.
+    // Enveloppé : le globe est construit après ce module, et une visite qui
+    // échouerait à le bâtir ne doit pas perdre son voile de chargement.
+    try { globe?.chargeRacines() } catch { /* le filet de setVisible reste */ }
+    // …et le catalogue de palettes de la boutique, qui n'alimente que le mode
+    // aléatoire — inatteignable tant que le voile est là. Voir plus bas.
+    try { chargeCataloguePalettes() } catch { /* la réserve procédurale suffit */ }
     // Le même drapeau sert la CSS : à partir d'ici on charge « à chaud », donc
     // le relief de fond ne doit plus jamais revenir — il effacerait la carte
     // que le visiteur regarde. `ld-warm` l'éteint et fait flouter la vue à la
@@ -1733,7 +1753,58 @@ composer.addPass(new RenderPass(scene, camera))
 // wholesale rather than tuned further. N8AOPostPass is postprocessing-
 // compatible and self-contained: no NormalPass, it derives everything from
 // the depth buffer. aoRadius is in WORLD units — the block is 56 across.
-const aoPass = new N8AOPostPass(scene, camera, ...evenSize())
+// ⚠️ LA BIBLIOTHÈQUE N'EST PLUS DANS LE BUNDLE PRINCIPAL, ET VOICI POURQUOI.
+// `n8ao` pèse 154,3 Ko bruts — 8,5 % du bundle mesuré au sourcemap — et
+// `ssao: false` dans LES QUATRE paliers de palier-machine.js. Aucun template ne
+// l'allume non plus : `params.ssaoEnabled` naît de `MACHINE.ssao`, donc faux
+// partout. La seule porte d'entrée est la bascule « Ombrage des creux » du
+// panneau Effets. On payait donc 154 Ko sur le chemin critique de CHAQUE
+// visiteur pour une option que personne n'a par défaut.
+//
+// La passe est maintenant bâtie à la PREMIÈRE demande (voir `assureAoPass`).
+// Tout le reste — les réglages ci-dessous, leur raison, la place dans la
+// chaîne — est inchangé au caractère près.
+let aoPass = null
+let aoEnAttente = null // la promesse en cours, pour ne pas importer deux fois
+
+async function assureAoPass() {
+  if (aoPass) return aoPass
+  if (aoEnAttente) return aoEnAttente
+  aoEnAttente = import('n8ao')
+    .then(({ N8AOPostPass }) => {
+      if (aoPass) return aoPass // une autre demande a gagné la course
+      const p = new N8AOPostPass(scene, camera, ...evenSize())
+      configureAoPass(p)
+      // ⚠️ INDEX 1, ET PAS `addPass(p)` TOUT COURT. La passe doit rester juste
+      // derrière le RenderPass et devant tout le reste — c'était sa place quand
+      // elle était bâtie au démarrage. `addPass(p)` l'aurait posée en DERNIER,
+      // après le rendu final : l'occlusion se serait appliquée par-dessus le
+      // tone mapping et le grain, ce qui n'est pas la même image.
+      // L'index 1 ne dépend d'AUCUNE des passes suivantes : il reste juste si
+      // le bloom, la profondeur de champ ou une autre s'en vont.
+      composer.addPass(p, 1)
+      aoPass = p
+      syncAoColor()
+      // la taille courante : le composer ne redimensionne que ce qu'il connaît
+      // AU MOMENT du resize, et on arrive après.
+      p.setSize?.(...evenSize())
+      return p
+    })
+    .catch((err) => {
+      // Un échec de chargement ne doit pas emporter la carte : on retombe sur
+      // « pas d'occlusion ambiante », c'est-à-dire l'état par défaut du site.
+      console.warn('ShibuMap : occlusion ambiante indisponible', err)
+      return null
+    })
+  return aoEnAttente
+}
+
+// ⚠️ Le paramètre s'appelle `aoPass` EXPRÈS : il masque la variable de module du
+// même nom, et c'est ce qui permet de laisser le corps ci-dessous — les réglages
+// et surtout leurs raisons, durement acquises — au caractère près tel qu'il
+// était quand la passe était bâtie au démarrage. Ne pas « nettoyer » ce nom sans
+// relire les quatre paragraphes qui suivent.
+function configureAoPass(aoPass) {
 aoPass.configuration.aoRadius = 2.2
 aoPass.configuration.distanceFalloff = 1.2
 aoPass.configuration.intensity = params.ssaoIntensity
@@ -1765,19 +1836,30 @@ aoPass.configuration.accumulate = false
 // render, so the release did not hold at boot, and re-disposing every frame
 // would fight the library for a rounding error. The floor below is what the
 // library supports honestly.
-composer.addPass(aoPass)
 aoPass.enabled = params.ssaoEnabled
+}
+// Si la machine ou un lien partagé demandent l'occlusion dès le départ, on la
+// charge tout de suite — le comportement d'avant, pour ce cas-là seulement.
+if (params.ssaoEnabled) assureAoPass()
 // panel + templates talk to `ssao.intensity` — keep that surface stable
+// ⚠️ LA SOURCE DE VÉRITÉ EST `params.ssaoIntensity`, PAS LA PASSE. Les templates
+// lisent et écrivent `ssao.intensity` (main.js `applyLook`, effects-panel.js) et
+// peuvent le faire AVANT que la passe n'existe — auparavant elle était toujours
+// là, ce n'est plus le cas. On garde donc la valeur dans params et on la
+// recopie dans la passe quand elle arrive (`configureAoPass` la relit).
 const ssao = {
-  get intensity() { return aoPass.configuration.intensity },
-  set intensity(v) { aoPass.configuration.intensity = v },
+  get intensity() { return params.ssaoIntensity },
+  set intensity(v) {
+    params.ssaoIntensity = v
+    if (aoPass) aoPass.configuration.intensity = v
+  },
 }
 // L'OMBRE AMBIANTE PREND LA COULEUR DE LA CARTE (Adrien) : N8AO peint l'AO
 // avec `configuration.color` (noir par défaut, d'où le gris sale universel).
 // On y met la teinte dominante de la palette poussée dans ses ombres, donc
 // des creux qui appartiennent à la carte au lieu de la salir.
 function syncAoColor() {
-  if (!_aoReady) return
+  if (!_aoReady || !aoPass) return
   aoPass.configuration.color.set(deriveAoColor(params))
 }
 _aoReady = true
@@ -2970,6 +3052,16 @@ async function loadRealTerrain(opts = {}) {
   } catch (err) {
     console.error('DEM load failed:', err)
     loadingStatus.textContent = 'elevation fetch failed — check connection'
+    // ⚠️ ON REBÂTIT LE RELIEF PROCÉDURAL À PLEINE RÉSOLUTION AVANT DE MONTRER.
+    // Le maillage en place est celui du constructeur, désormais un BROUILLON de
+    // res 64 (voir `_resAmorce` dans terrain.js) : il n'était jamais destiné à
+    // être vu, parce que `loadRealTerrain` le remplace toujours. Ici, justement,
+    // il ne le remplace pas. Sans cette ligne, un visiteur dont le réseau lâche
+    // verrait un relief grossier là où il voyait un relief procédural fin — ça
+    // se lit comme une carte cassée, et ce serait une régression apportée par
+    // une optimisation. `_amorce` est retombé à faux, donc ce rebuild est plein.
+    // Il coûte ~370 ms, sur un chemin où le chargement a DÉJÀ échoué.
+    try { terrain.rebuild(params) } catch (e) { console.error('repli procédural impossible:', e) }
     setTimeout(() => {
       hideLoading()
       loadingStatus.textContent = 'generating terrain…'
@@ -3670,14 +3762,34 @@ let userPalettes = loadUserPalettes()
 // shuffle bloqué. Le catalogue est le MÊME fichier que la boutique in-app.
 let shopPalettes = []
 let shuffleLastPalette = null // dernière palette tirée (meta + sondes)
-fetch('/templates/data.json')
-  .then((r) => (r.ok ? r.json() : null))
-  .then((j) => { if (Array.isArray(j?.palettes)) shopPalettes = j.palettes })
-  .catch(() => {})
+// ⚠️ PLUS AU DÉMARRAGE. Ce fichier de 11,7 Ko partait pendant le chargement,
+// mesuré demandé à 3 706 ms et reçu à 3 847 ms sur le chemin critique, pour
+// alimenter la réserve du mode ALÉATOIRE — que personne n'a encore pu déclencher
+// à cet instant, puisque les panneaux sont derrière le voile. Il part maintenant
+// une fois la carte à l'écran (voir hideLoading). Une requête et 12 Ko de moins
+// devant le premier affichage ; le comportement du tirage est inchangé, et un
+// tirage qui arriverait avant la réponse retombe sur la réserve procédurale +
+// utilisateur, exactement comme quand le réseau échoue (le `.catch` d'origine).
+let catalogueDemande = false
+function chargeCataloguePalettes() {
+  if (catalogueDemande) return
+  catalogueDemande = true
+  fetch('/templates/data.json')
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j) => { if (Array.isArray(j?.palettes)) shopPalettes = j.palettes })
+    .catch(() => {})
+}
 // rebâtie à chaque tirage : l'utilisateur a pu valider une palette ou
 // installer un style entre deux clics (le coût est de l'ordre de 150 rampes)
-const currentPalettePool = () =>
-  buildPalettePool({ shop: shopPalettes, userPalettes, userTemplates, builtins: Object.values(TEMPLATES) })
+const currentPalettePool = () => {
+  // LE FILET DU CHARGEMENT DIFFÉRÉ DU CATALOGUE (même patron que les racines du
+  // globe) : toute demande de réserve s'assure que le catalogue a été réclamé.
+  // Idempotent. Le tirage en cours n'attend PAS la réponse — il tire dans ce
+  // qu'il a, comme il l'aurait fait sur un réseau lent ; c'est le suivant qui
+  // profitera des 136 palettes de la boutique.
+  chargeCataloguePalettes()
+  return buildPalettePool({ shop: shopPalettes, userPalettes, userTemplates, builtins: Object.values(TEMPLATES) })
+}
 let paletteRefreshFn = () => {}
 let userTplRefreshFn = () => {} // re-rend la rangée des templates user (boutique → intégration)
 
@@ -6545,7 +6657,10 @@ const { elementsPanel, imagePanel } = buildEffectsPanel({
   // la chip « Épars/Couvert/… » doit aussi rétablir la visibilité : resetLook
   // masque le groupe au chargement d'une carte, build() seul ne le remontre pas
   syncCloudsVisible: () => clouds.setVisible(params.cloudsEnabled && modes.mode === 'surface'),
-  ssao, aoPass,
+  // `aoPass` en accesseur : il naît à la première demande d'occlusion, donc une
+  // copie prise ici au démarrage vaudrait `null` pour toujours.
+  // (plus de `bloom` ni `bloomPass` : la passe a été retirée le 2026-08-02)
+  ssao, get aoPass() { return aoPass },
   realWater, waterRebuild,
   terrain, globe,
   // le Scanner (effet d'image) vit dans Effets ; la Lumière ouvre Éléments
@@ -6911,6 +7026,9 @@ aq = createAdaptiveQuality({
   composer,
   setDofEnabled,
   isDofEnabled: () => !!dofPass?.enabled,
+  // vaut `null` ici depuis que la passe est chargée à la demande — sans effet :
+  // perf.js ne lit jamais cet argument, il agit sur l'occlusion par
+  // `params._aoTierOk`, que le tick de main.js consulte (comme pour le bloom).
   aoPass,
   grain,
   applyShadowMode,
@@ -7291,7 +7409,14 @@ function tick() {
   // swaps that state is mid-flight and a broken AO multiplies the whole frame
   // toward black (the reported intermittent black screen). Surface-and-settled
   // only.
-  aoPass.enabled = params.ssaoEnabled && params._aoTierOk !== false && modes.mode === 'surface' && !modes.busy
+  // ⚠️ La passe d'occlusion est chargée à la demande (voir `assureAoPass`) : elle
+  // peut ne pas exister. Deux cas, et il faut les deux — si on l'a, on lui pose
+  // son état exactement comme avant ; si on ne l'a pas et que quelqu'un vient
+  // d'allumer la bascule, on la demande. `assureAoPass` est idempotent et ne
+  // relance rien tant que l'import est en vol, donc l'appeler à chaque image
+  // pendant les ~100 ms du chargement ne coûte qu'un test.
+  if (aoPass) aoPass.enabled = params.ssaoEnabled && params._aoTierOk !== false && modes.mode === 'surface' && !modes.busy
+  else if (params.ssaoEnabled) assureAoPass()
   // (la ligne jumelle du bloom vivait ici — passe retirée le 2026-08-02)
 
   // idle planet spin: in orbital view the Earth slowly turns under the camera
