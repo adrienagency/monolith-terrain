@@ -30,13 +30,14 @@ import { warmupPrograms } from './warmup.js'
 import { activeDemSource, isFallbackActive } from './dem-source.js'
 import { Globe } from './globe.js'
 import { Modes, stepZoom } from './modes.js'
+import { intersectionGlobe, viseeArrivee, ZOOM_PALIER_MIN } from './escalier-zoom.js'
 import { createGoto, geocode, mainParts } from './goto.js'
 import { frameTrack } from './gpx.js'
 import { GpxLayerManager } from './gpx-layers.js'
 import { buildRaceLabels } from './race-labels.js'
 import { snapToKm, ascentStats, parseRace } from './race-model.js'
 import { SPORTS, DEFAULT_SPORT, sanitizeSvgMarkup, isValidIconDataUrl, rasterizeToCanvas } from './ui/sport-icons.js'
-import { worldToLatLon, latLonToWorld, parseLatLon } from './geo.js'
+import { worldToLatLon, latLonToWorld, parseLatLon, sphereToLatLon, R_GLOBE } from './geo.js'
 import { fetchTransports } from './transports.js'
 import { TERRAIN_SIZE, RES_FENETRE_CONTINUE } from './terrain.js'
 import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
@@ -1840,6 +1841,7 @@ window.addEventListener('pointermove', (e) => {
 // above the canvas) never reaches here.
 let _clickDownX = 0, _clickDownY = 0, _clickDownT = 0, _clickArmed = false, _clickMulti = false
 const _clickNdc = new THREE.Vector2()
+const _globeHit = new THREE.Vector3() // point du globe sous le doigt (sphereToLatLon veut un Vector3)
 renderer.domElement.addEventListener('pointerdown', (e) => {
   // Un second doigt qui se pose DÉSARME l'appui en cours : c'est un pincement
   // ou un déplacement à deux doigts, pas une désignation. Sans ça, relâcher un
@@ -1858,9 +1860,30 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   // le seuil de dérive dépend de CE QUI a touché l'écran (voir gestes.js) :
   // 6 px pour une souris, 14 pour un doigt, qui roule en s'écrasant
   if (!isTap({ moved, elapsedMs: performance.now() - _clickDownT, pointerType: e.pointerType, multiTouch: _clickMulti })) return
-  if (!modes || modes.mode !== 'surface' || modes.busy || modes.travel) return
-  if (params.source !== 'real' || !dem || params.demZoom >= userFineZoom) return // already at finest detail
+  if (!modes || modes.busy || modes.travel) return
   _clickNdc.set((e.clientX / window.innerWidth) * 2 - 1, -((e.clientY / window.innerHeight) * 2 - 1))
+  // ══════════ EN ORBITE : LE CLIC DÉSIGNE UN LIEU SUR LA PLANÈTE ════════════
+  //
+  // Adrien : « Quand je suis en orbite, cliquer me fait zoomer sur la zone sur
+  // laquelle je clique, exactement à l'endroit où j'ai cliqué, qui sera au
+  // centre. »
+  //
+  // ⚠️ ON COUPE LA SPHÈRE, ON NE RAYCASTE PAS LE MAILLAGE DU GLOBE. Le globe est
+  // un objet à géométrie variable (dalles, nuages, orbe de chargement) dont
+  // l'altitude de surface n'est pas R_GLOBE partout ; `sphereToLatLon` attend
+  // justement un point de la sphère IDÉALE, la même que `latLonToSphere` a
+  // servi à poser la caméra. Passer par le maillage rendrait un lat/lon décalé
+  // du relief du globe, et un raycast d'un million de triangles pour rien.
+  if (modes.mode === 'orbital') {
+    focusRay.setFromCamera(_clickNdc, camera)
+    const p = intersectionGlobe(focusRay.ray.origin, focusRay.ray.direction, R_GLOBE)
+    if (!p) return // clic dans le noir, à côté du disque de la planète
+    const { lat, lon } = sphereToLatLon(_globeHit.set(p.x, p.y, p.z))
+    modes.plongeDepuisGlobe(lat, lon)
+    return
+  }
+  if (modes.mode !== 'surface') return
+  if (params.source !== 'real' || !dem || params.demZoom >= userFineZoom) return // already at finest detail
   focusRay.setFromCamera(_clickNdc, camera)
   const hitDist = focusRayHit(focusRay.ray.origin, focusRay.ray.direction, terrain.sample, { halfExtent: TERRAIN_SIZE / 2 })
   if (hitDist == null) return // clicked the sky or off-map
@@ -3085,6 +3108,28 @@ modes = new Modes({
     // zoom max SERVI par la source sur la zone courante (informatif — le zoom
     // fixe l'emprise du bloc, on ne bride donc pas la navigation dessus)
     getDemMaxZoom,
+    // OÙ LA CAMÉRA DOIT VISER POUR QUE LE LIEU DEMANDÉ SOIT AU CENTRE.
+    //
+    // La règle (et les mesures qui l'ont imposée) vit dans escalier-zoom.js sous
+    // `viseeArrivee` ; ici il n'y a que les deux conversions qu'elle ne peut pas
+    // faire toute seule, parce qu'elles ont besoin du DEM chargé :
+    //
+    //  1. `latLonToWorld` ET PAS UN CALCUL À LA MAIN — c'est lui qui divise par
+    //     `demSpan(dem)`, soit 168 unités en emprise 3×3 et non 56. L'erreur
+    //     inverse a déjà été commise trois fois sur cette branche.
+    //  2. LA FENÊTRE EST RETRANCHÉE, et c'est le miroir exact de `viseeAuSol`
+    //     qui l'ajoute. `controls.target` vit dans la GÉOMÉTRIE ; le champ se lit
+    //     à `géométrie + fenêtre`. Confondre les deux est la famille d'erreur qui
+    //     ramenait déjà l'escalier de zoom au centre du bloc après un défilement.
+    //     En mode continu `f3CentreSur` vient de poser la fenêtre SUR le lieu :
+    //     la soustraction rend (0, 0), et la visée reste au milieu du socle —
+    //     l'ancien comportement, au bit près, puisque ce mode-là centrait déjà.
+    viseeDuLieu(lat, lon) {
+      if (params.source !== 'real' || !dem || !Number.isFinite(lat) || !Number.isFinite(lon)) return null
+      const w = latLonToWorld(dem, lat, lon)
+      const fen = fenetreContinueActive() && dem.empriseCote > 1 ? terrain.fenetre : null
+      return viseeArrivee({ x: w.x - (fen?.x ?? 0), z: w.z - (fen?.z ?? 0) }, TERRAIN_SIZE / 2, 2)
+    },
     // task 30 Fix A: terrain-clearance guard for the dive/refine arrival pose
     // (see modes.js's _arrivalPose()) — the local relief height right under
     // the landing target, so the arrival camera can never come to rest below
@@ -3131,8 +3176,10 @@ modes = new Modes({
       return { lat, lon, zoom: stepZoom(params.demZoom, 1, userFineZoom) }
     },
     getCoarsenTarget() {
-      // widen down to the z4 continental block; past that the orbit gate opens
-      if (params.source !== 'real' || !dem || params.demZoom <= 4) return null
+      // on s'élargit jusqu'au bloc régional z6 ; au-delà c'est la porte orbitale
+      // qui s'ouvre — les deux paliers plus larges n'existent plus (Adrien,
+      // « Z1 et Z2 ne doivent pas exister », cf. escalier-zoom.js)
+      if (params.source !== 'real' || !dem || params.demZoom <= ZOOM_PALIER_MIN) return null
       const { lat, lon } = viseeAuSol()
       return { lat, lon, zoom: stepZoom(params.demZoom, -1) }
     },

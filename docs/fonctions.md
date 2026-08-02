@@ -27,8 +27,11 @@ et ce qui reste à faire.
 | Fonction | Statut | Flag | Fichier(s) | Note |
 |---|---|---|---|---|
 | Plongée orbite ⇄ surface + globe | 🟢 | — | `modes.js`, `globe.js` | Machine à états, whiteout |
-| Paliers de plongée z4→z11 | 🟢 | — | `modes.js` | |
-| Palier continent z4 (~7500 km) | 🟢 | — | `modes.js`, `main.js` | Ajouté Spec 1 ; globe s'ouvre au-dessus de z4 |
+| Paliers de plongée z6→z11 | 🟢 | — | `modes.js`, `escalier-zoom.js` | z4 et z5 supprimés (Adrien : « Z1 et Z2 ne doivent pas exister ») |
+| Plancher régional z6 (~1900 km) | 🟢 | — | `escalier-zoom.js` | Le globe s'ouvre au-dessus ; un seul nombre, `ZOOM_PALIER_MIN` |
+| Clic sur le globe → plongée au point exact | 🟢 | — | `escalier-zoom.js`, `main.js` | Coupe la sphère idéale, pas le maillage du globe |
+| Le centre survit à l'escalier de zoom | 🟢 | — | `escalier-zoom.js`, `modes.js` | La caméra vise le lieu demandé, pas le centre snappé du bloc |
+| Croix de sortie de l'accueil | 🟢 | — | `ui/hub.js`, `ui/v28.css` | Troisième sortie, à côté d'Échap et du clic sur le voile |
 | Fine-detail coupé au zoom lointain (z≤6) | 🟢 | — | `zoom-detail.js`, `main.js` | Ajouté Spec 1 ; override localStorage possible |
 | Exagération verticale par-zoom | 🟢 | — | `main.js` | `ZOOM_EXAG_DEFAULTS` + store |
 | Go-to lieu (Nominatim / lat,lon) | 🟢 | — | `goto.js`, `geo.js` | |

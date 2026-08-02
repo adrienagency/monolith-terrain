@@ -820,6 +820,38 @@ body.ce-hub .ce-elemwrap {
 body.dark .ce-hubveil {
   background: rgba(14, 15, 18, 0.5);
 }
+/* la croix de sortie de l'accueil — même géométrie et mêmes couleurs que la
+   croix des raccourcis (.ce-shortcuts-close), pour qu'une croix reste une
+   croix d'un bout à l'autre du site. Elle est seulement plus discrète au
+   repos : l'accueil ne montre que son centre, et une croix qui crie ferait
+   concurrence au titre. Elle vient à pleine encre au survol.
+   ⚠️ LE COIN HAUT-DROIT EST LIBRE PENDANT L'ACCUEIL : la topbar et la pastille
+   d'heure y passent à opacity 0 (règle « AUCUNE UI excepté le milieu », plus
+   bas). Sans cette vérification, la croix se serait posée sur des boutons
+   éteints mais toujours en place.
+   ⚠️ AUCUNE RÈGLE DE FLOU ICI, ET C'EST VOULU : Adrien a défendu le flou du
+   voile (« je ne veux pas le déflouter !!! »). On ajoute une sortie. */
+.ce-hubclose {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ce-muted);
+  cursor: pointer;
+  font: 400 13px var(--ce-font);
+  line-height: 1;
+  opacity: 0.55;
+  transition: background 0.15s, color 0.15s, opacity 0.15s;
+}
+.ce-hubclose:hover {
+  background: var(--ce-hover);
+  color: var(--ce-ink);
+  opacity: 1;
+}
 body.ce-hub .ce-hubveil {
   opacity: 1;
   pointer-events: auto;

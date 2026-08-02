@@ -11,6 +11,7 @@
 import * as THREE from 'three'
 import { R_GLOBE, ORBITAL_M_PER_UNIT, sphereToLatLon, latLonToSphere } from './geo.js'
 import { PinchTracker } from './gestes.js'
+import { pasEscalier, paliersRetenus, palierDeClic } from './escalier-zoom.js'
 
 // Le pincement fabrique un faux événement de molette. _zoomGesture appelle
 // preventDefault() sur plusieurs branches ; côté tactile, le vrai événement a
@@ -19,13 +20,21 @@ import { PinchTracker } from './gestes.js'
 const NOOP = () => {}
 
 // ordered fine → coarse; zoom null = the user's fine zoom (≥ 12).
-// Nine tiers so every stop on the way down lands on a matching real-terrain
-// block instead of the globe. The globe is glitchy above ~8 000 km, so we now
-// dive onto continental-scale blocks from that altitude down (a z4 patch spans
-// ~7 500 km, a z5 patch ~3 760 km): z4 @ 8 000 km, z5 @ 4 000 km, z6 @ 1 600 km,
-// z7 @ 600 km, then the regional/local tiers. Corsica-sized views (~150 km)
-// still get z8.
-export const DIVE_TIERS = [
+// Every stop on the way down lands on a matching real-terrain block instead of
+// the globe: z7 @ 600 km, then the regional/local tiers. Corsica-sized views
+// (~150 km) still get z8.
+//
+// ⚠️ LES DEUX PALIERS LES PLUS LARGES ONT ÉTÉ RETIRÉS (Adrien : « Z1 et Z2 ne
+// doivent pas exister »). Ils portaient z4 (@ 8 000 km) et z5 (@ 4 000 km) —
+// des blocs de 7 500 et 3 760 km où la mer noie tout et où les continents ne
+// sont plus que des taches. Le filtre est appliqué ICI et sa règle vit dans
+// escalier-zoom.js : la table brute reste lisible, et changer d'avis sur le
+// plancher ne demande de toucher qu'à `ZOOM_PALIER_MIN`.
+//
+// ⚠️ CONSÉQUENCE À CONNAÎTRE : la porte orbitale s'ouvre désormais au-dessus de
+// 1 600 km et non plus de 8 000. `DIVE_ALT_M` (le seuil du zoom fin) ne bouge
+// pas — c'est DIVE_TIERS[0], et lui n'a jamais été concerné.
+export const DIVE_TIERS = paliersRetenus([
   { altM: 8000, zoom: null },
   { altM: 25000, zoom: 11 },
   { altM: 50000, zoom: 10 },
@@ -34,17 +43,17 @@ export const DIVE_TIERS = [
   { altM: 600000, zoom: 7 },
   { altM: 1600000, zoom: 6 },
   { altM: 4000000, zoom: 5 },
-  { altM: 8000000, zoom: 4 }, // continental block (~7 500 km); above this the globe opens
-]
+  { altM: 8000000, zoom: 4 },
+])
 
 // tier a settled zoom-in engages at `altM` meters — null above every tier
 export function pickDiveTier(altM) {
   return DIVE_TIERS.find((t) => altM < t.altM) ?? null
 }
 
-// L'escalier de surface : UN palier à la fois, plafonné au zoom fin en
-// montant, plancher au bloc continental z4 (~7 500 km) en descendant — au-delà
-// c'est la porte orbitale qui prend le relais.
+// L'escalier de surface : UN palier à la fois, plafonné au zoom fin en montant,
+// plancher au bloc régional z6 en descendant — au-delà c'est la porte orbitale
+// qui prend le relais.
 //
 // Il avançait de DEUX paliers à la fois. C'était défendable tant que le relief
 // fin s'arrêtait à z12 : un cran sur deux n'apportait rien de visible et chaque
@@ -56,10 +65,10 @@ export function pickDiveTier(altM) {
 // par 2 mais la montée était plafonnée au zoom fin, si bien qu'un aller-retour
 // depuis un palier impair atterrissait un cran plus bas que le point de départ
 // — on ne pouvait pas revenir au cadrage qu'on venait de quitter.
-export function stepZoom(zoom, dir, fine = 12) {
-  if (dir > 0) return Math.min(zoom + 1, Math.max(fine, 12))
-  return Math.max(zoom - 1, 4)
-}
+//
+// La règle a déménagé dans escalier-zoom.js (pure, testée) ; ce nom reste parce
+// que main.js et les tests l'appellent.
+export const stepZoom = (zoom, dir, fine = 12) => pasEscalier(zoom, dir, fine)
 const DIVE_ALT_M = DIVE_TIERS[0].altM
 // ~9,4 rayons terrestres — la planète devient un petit objet dans le noir,
 // façon Google Earth (Adrien : « laisse la possibilité de reculer plus ») ;
@@ -329,9 +338,9 @@ export class Modes {
   // to land below it (+ margin) — a formality at ~94% of
   // surfaceMaxDistance() (that standoff already clears anything this app's
   // relief produces) but a real guarantee rather than an assumption.
-  _arrivalPose() {
+  _arrivalPose(lieu = null) {
     const dist = this.hooks.surfaceMaxDistance() * 0.94 // stay under the hard cap so controls.update() below doesn't immediately re-clamp it
-    const target = new THREE.Vector3(0, -0.3, 0)
+    const target = this._cibleVisee(lieu)
     const pos = _ARRIVAL_DIR.clone().multiplyScalar(dist)
     const groundY = this.hooks.sampleGroundY ? this.hooks.sampleGroundY(target.x, target.z) : -Infinity
     const minY = groundY + 3 // clearance margin, world units
@@ -339,12 +348,29 @@ export class Modes {
     return { pos, target }
   }
 
-  async _dive(tier = DIVE_TIERS[0]) {
+  // OÙ LA CAMÉRA VISE EN ARRIVANT — et c'est ce qui a supprimé la dérive du
+  // dézoome (Adrien : « je garde mon précédent point de vision central au
+  // centre du dézoome »). Le POURQUOI complet, mesures comprises, est dans
+  // escalier-zoom.js sous `viseeArrivee` : en résumé, viser le centre
+  // géométrique du bloc faisait relire au cran suivant un lat/lon SNAPPÉ sur la
+  // grille de tuiles, et l'écart s'accumulait cran après cran.
+  //
+  // Sans le hook (banc de test, source procédurale) on retombe exactement sur
+  // l'ancienne pose : le centre du socle.
+  _cibleVisee(lieu) {
+    const p = lieu && this.hooks.viseeDuLieu ? this.hooks.viseeDuLieu(lieu.lat, lieu.lon) : null
+    return new THREE.Vector3(p?.x ?? 0, -0.3, p?.z ?? 0)
+  }
+
+  // `lieu` : le lat/lon VOULU. Absent, on prend celui sous la caméra — c'est le
+  // cas de la plongée à la molette, qui vise le centre de l'écran. Le clic sur
+  // le globe, lui, en fournit un (voir plongeDepuisGlobe).
+  async _dive(tier = DIVE_TIERS[0], lieu = null) {
     if (this.mode !== 'orbital' || this.busy) return
     this.busy = true
     this._resetZoom()
     const zoom = tier.zoom ?? this.hooks.getFineZoom()
-    const { lat, lon } = sphereToLatLon(this.camera.position)
+    const { lat, lon } = lieu ?? sphereToLatLon(this.camera.position)
     this.announce(`ACQUIRING SURFACE DATA — ${lat.toFixed(4)}, ${lon.toFixed(4)} · Z${zoom}`)
     this.controls.enabled = false
     try {
@@ -371,7 +397,7 @@ export class Modes {
       this.camera.far = this._surfCam.far
       this.camera.updateProjectionMatrix()
       this.camera.up.set(0, 1, 0)
-      const arrival = this._arrivalPose()
+      const arrival = this._arrivalPose({ lat, lon })
       this.camera.position.copy(arrival.pos)
       this.controls.target.copy(arrival.target)
       this.controls.minDistance = 6
@@ -423,7 +449,7 @@ export class Modes {
       return
     }
     await this._whiteout(() => {
-      const arrival = this._arrivalPose()
+      const arrival = this._arrivalPose(next)
       this.controls.target.copy(arrival.target)
       const dist = (this.hooks.surfaceMaxDistance?.() ?? 150) * 0.97 // = distance de la vue iso 1
       const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
@@ -521,6 +547,34 @@ export class Modes {
     )
   }
 
+  // ══════════ CLIQUER SUR LE GLOBE ══════════════════════════════════════════
+  //
+  // Adrien : « Quand je suis en orbite, cliquer me fait zoomer sur la zone sur
+  // laquelle je clique, exactement à l'endroit où j'ai cliqué, qui sera au
+  // centre. J'arrive en Z3. »
+  //
+  // ⚠️ CE N'EST PAS LA PLONGÉE DE LA MOLETTE AVEC UN AUTRE DÉCLENCHEUR. Celle-ci
+  // vise `sphereToLatLon(camera.position)` — le point sous la CAMÉRA, c'est-à-dire
+  // le milieu de l'écran. Elle est juste tant que le geste est un zoom : on
+  // plonge là où on regarde. Elle est fausse pour un clic, où le geste DÉSIGNE :
+  // cliquer l'Islande au bord du disque aurait posé le bloc au centre de
+  // l'Atlantique. Le lat/lon vient donc du rayon (main.js), pas de la caméra.
+  //
+  // Le palier : celui de l'altitude, et le plus large qui reste quand on est
+  // au-dessus de tous (voir `palierDeClic`) — c'est-à-dire z6 dès qu'on regarde
+  // vraiment la planète, le « Z3 » d'Adrien.
+  plongeDepuisGlobe(lat, lon) {
+    if (this.busy || this.travel || this.mode !== 'orbital') return false
+    // embed « zone de test » : le visiteur ne franchit aucun niveau, ni à la
+    // molette ni au clic. Sans cette ligne, le clic serait devenu la porte
+    // dérobée d'un verrou que _zoomGesture tient déjà.
+    if (this.locked) return false
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false
+    this._diveArmed = false // le clic consomme l'intention ; la molette ne doit pas re-plonger derrière
+    this._dive(palierDeClic(DIVE_TIERS, this.altM) ?? DIVE_TIERS[0], { lat, lon })
+    return true
+  }
+
   // Click-to-dive, two beats (Adrien): first EASE IN toward the clicked point
   // by 30% of the remaining zoom distance (a "lean toward it"), THEN load the
   // finer level centred there. `target.point` is the clicked world position.
@@ -555,10 +609,12 @@ export class Modes {
       return
     }
     await this._whiteout(() => {
-      const tgt = new THREE.Vector3(0, -0.3, 0) // the clicked point is the new block centre
+      // le point cliqué EST ce que la caméra vise — pas le centre du bloc, qui
+      // en est décalé de tout ce que le calage sur la grille de tuiles a pris
+      const tgt = this._cibleVisee(target)
       const dist = this.hooks.surfaceMaxDistance() * 0.97 // distance de la vue iso 1 (point de présentation)
       const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
-      const pos = dir.multiplyScalar(dist)
+      const pos = tgt.clone().addScaledVector(dir, dist)
       const groundY = this.hooks.sampleGroundY ? this.hooks.sampleGroundY(tgt.x, tgt.z) : -Infinity
       if (pos.y < groundY + 3) pos.y = groundY + 3 // same clearance guard as _arrivalPose
       this.camera.position.copy(pos)

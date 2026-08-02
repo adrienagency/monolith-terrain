@@ -27,6 +27,28 @@ export function buildHub({ bar, bottomBar, onExplore }) {
   const veil = el('div', 'ce-hubveil')
   document.body.append(veil)
 
+  // LA CROIX DE SORTIE (Adrien : « ajoute une croix pour fermer le layout de
+  // voile »). Deux sorties existaient déjà — Échap, et un clic n'importe où sur
+  // le voile — mais aucune ne se VOIT : rien à l'écran ne dit qu'on peut
+  // partir, et la ligne « Échap — explorer librement » est un mot, pas une
+  // cible. La croix est la troisième porte, celle qu'on cherche du regard.
+  //
+  // ⚠️ ELLE VIT DANS LE VOILE, ET C'EST CE QUI LA REND GRATUITE. Le voile porte
+  // déjà le fondu (opacity) et la bascule `pointer-events` de `body.ce-hub` :
+  // la croix hérite des deux, donc elle apparaît, disparaît et cesse d'être
+  // cliquable exactement en même temps que ce qu'elle ferme. Posée sur le body,
+  // il aurait fallu répliquer ces trois règles — et les tenir à jour.
+  //
+  // ⚠️ ON NE TOUCHE PAS AU FLOU. Adrien l'a défendu explicitement (« c'est ce
+  // que je veux, je ne veux pas le déflouter !!! ») : on ajoute une SORTIE, pas
+  // un changement d'apparence.
+  const croix = el('button', 'ce-hubclose')
+  croix.type = 'button'
+  croix.textContent = '✕'
+  croix.setAttribute('aria-label', 'Fermer l’accueil')
+  croix.setAttribute('data-tip', 'Fermer — explorer librement')
+  veil.append(croix)
+
   // les mots vivent DANS le wrap de la barre : ils voyagent avec elle et se
   // replient (max-height) quand elle redescend — jamais display:none.
   // LA HIÉRARCHIE EST INVERSÉE depuis le 29/07 (Adrien, réf. landing Framer) :
@@ -154,6 +176,10 @@ export function buildHub({ bar, bottomBar, onExplore }) {
   const escape = () => { hide(); onExplore?.() }
   esc.addEventListener('click', escape)
   veil.addEventListener('click', escape)
+  // ⚠️ `stopPropagation` : la croix est DANS le voile, qui ferme déjà au clic.
+  // Sans ça, un clic sur la croix déclenchait `escape()` deux fois — `hide()`
+  // ressort tout seul au second passage, mais `onExplore` partait en double.
+  croix.addEventListener('click', (e) => { e.stopPropagation(); escape() })
   // ⚠️ « ou en attente », et ce n'est pas un détail : depuis que l'accueil
   // attend la fin du chargement, il n'est PAS ouvert pendant que la carte de
   // chargement est à l'écran — or c'est exactement là qu'elle promet « Echap —
