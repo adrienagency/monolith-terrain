@@ -3854,7 +3854,7 @@ body.ce-noui .ce-rec {
   margin-bottom: 6px;
 }
 .ce-gardien-barre {
-  height: 4px;
+  height: 6px;
   border-radius: 999px;
   background: color-mix(in srgb, currentColor 12%, transparent);
   overflow: hidden;
@@ -3863,15 +3863,15 @@ body.ce-noui .ce-rec {
   display: block;
   height: 100%;
   border-radius: 999px;
-  background: currentColor;
-  opacity: 0.45;
-  transition: width 0.25s ease, opacity 0.25s ease;
+  /* la couleur est posée en JS (vert -> rouge selon la charge) */
+  transition: width 0.25s ease, background 0.35s ease;
 }
 /* « tendu » n'est pas une alarme : c'est un avis. Il gagne en présence, pas en
    couleur — le site n'a pas de rouge, et en introduire un ici pour un budget
    de confort serait hors sujet. */
-.ce-gardien-barre.tendu .ce-gardien-remplissage { opacity: 0.75; }
-.ce-gardien-barre.depasse .ce-gardien-remplissage { opacity: 1; }
+/* La couleur dit deja tout ; le depassement ajoute seulement un liseré, pour
+   le cas ou la jauge est pleine et qu'on ne voit plus qu'elle deborde. */
+.ce-gardien-barre.depasse { box-shadow: inset 0 0 0 1px hsl(0 62% 48% / 0.7); }
 .ce-gardien-souffrance {
   font-size: 11px;
   line-height: 1.45;
@@ -3918,3 +3918,11 @@ body.ce-noui .ce-rec {
 @media (hover: none) {
   .ce-couche-raison, .ce-couche-echange { display: block; }
 }
+/* Le poids d'une couche, en pastilles. Quatre emplacements toujours dessinés :
+   c'est le VIDE qui rend la comparaison lisible d'une ligne à l'autre. */
+.ce-couche-cout { display: inline-flex; gap: 2px; align-items: center; background: none; padding: 0; }
+.ce-pip {
+  width: 4px; height: 4px; border-radius: 999px;
+  background: currentColor; opacity: 0.16;
+}
+.ce-pip.on { opacity: 0.55; }

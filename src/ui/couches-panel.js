@@ -79,7 +79,34 @@ export function buildCouchesPanel(ctx) {
     // le rendu SUIVANT consultera.
     bloquees = etat.couches.filter((c) => c.verdict === NON).map((c) => c.id)
 
-    resume.textContent = etat.budget.resume
+    // ═══════════════════════════════════════════════════════════════════════
+    // LA JAUGE — vert vers rouge, et PAS un compte de « parts »
+    // ═══════════════════════════════════════════════════════════════════════
+    //
+    // Adrien : « on ne va pas écrire en parts mais on va faire une tirette qui
+    // va du vert vers le rouge. Le vert : puissance ok. Le rouge : ça va
+    // lagguer. »
+    //
+    // Il a raison, et la raison est plus profonde qu'une question de goût :
+    // « 7 parts sur 12 » demande au visiteur d'apprendre une unité inventée
+    // pour lui répondre à une question qu'il n'a pas posée. Ce qu'il veut
+    // savoir tient en un mot — est-ce que ça va ramer ? Une couleur le dit
+    // sans vocabulaire, et sans mentir sur la précision du chiffre (qui est
+    // une calibration, pas une mesure).
+    //
+    // ⚠️ LA COULEUR EST UN AFFICHAGE, PAS UNE DÉCISION. Elle interpole sur
+    // `fraction`, que le Gardien fournit ; le panneau ne décide toujours de
+    // rien. Les seuils, eux, restent ceux du Gardien (`tendu`, `depassement`).
+    const f = Math.min(1, Math.max(0, etat.budget.fraction))
+    // 130° = vert, 0° = rouge. La courbe est en puissance 1,6 : le rouge doit
+    // arriver TARD, sinon la jauge crie au danger dès la deuxième couche et
+    // on cesse de la croire.
+    remplissage.style.background = `hsl(${130 * (1 - Math.pow(f, 1.6))} 62% 48%)`
+    resume.textContent = etat.budget.depassement > 0
+      ? 'Au-delà de ce que cette machine tient'
+      : etat.budget.tendu
+        ? 'Ça commence à charger'
+        : 'Marge confortable'
     // UNE phrase globale quand le budget bloque, plutôt que N paragraphes
     // presque identiques sous chaque ligne. Les raisons détaillées existent
     // toujours — elles se révèlent au survol de LA couche qu'on veut, ce qui
@@ -114,7 +141,16 @@ export function buildCouchesPanel(ctx) {
       })
 
       const nom = el('span', 'ce-label', c.nom)
-      const cout = el('span', 'ce-couche-cout', `${c.cout}`)
+      // Le coût en PASTILLES et non en chiffre : même raison que la jauge —
+      // le poids se voit, il ne se compte pas. Quatre pastilles pleines
+      // pèsent visiblement plus que deux, sans avoir à expliquer l'unité.
+      const cout = el('span', 'ce-couche-cout')
+      cout.setAttribute('aria-label', `Poids ${c.cout} sur 4`)
+      for (let i = 0; i < 4; i++) {
+        const pip = el('i', 'ce-pip')
+        pip.classList.toggle('on', i < c.cout)
+        cout.append(pip)
+      }
       cout.title = c.note
       tete.append(nom, cout, btn)
       ligne.append(tete)

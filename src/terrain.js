@@ -499,6 +499,12 @@ ${FX_GLSL}
 // bit près.
 vec2 champXZ() { return vWorldPos.xz + uFenetre; }
 
+// Ce qui reste du sol là où personne n'habite, quand les lumières nocturnes
+// sont allumées. 0,22 et pas 0 : à zéro on perd le relief, et une carte dont
+// on ne lit plus la montagne n'est plus une carte. Assez bas, en revanche,
+// pour que la moindre ville se détache franchement.
+const float NUIT_FOND = 0.22;
+
 // LE DRAPAGE D'UNE MOSAÏQUE SUR LE SOL — la géométrie commune à la photo
 // aérienne et aux lumières nocturnes.
 //
@@ -859,7 +865,27 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     // voile gris se posait sur des vallées vides — on lisait un défaut de
     // rendu, pas des lumières.
     lueur = max(vec3(0.0), lueur - 0.06) / 0.94;
-    diffuseColor.rgb += lueur * uNuitIntensite * nIn;
+    float force = uNuitIntensite * nIn;
+
+    // ON ÉTEINT AVANT D'ALLUMER — demande d'Adrien : « baisser l'éclairage des
+    // zones sans lumière pour que les zones avec lumière ressortent ».
+    //
+    // Le raisonnement est photographique, pas décoratif. Une ville ne brille
+    // pas parce qu'elle émet beaucoup : elle brille parce que TOUT LE RESTE est
+    // noir. Ajouter de la lueur sur un sol déjà clair ne fait qu'un halo pâle ;
+    // creuser le noir autour lui donne son contraste. C'est le même geste qu'un
+    // chef opérateur qui coupe l'ambiance avant de poser sa source.
+    //
+    // ⚠️ ET ON NE COMPENSE PAS. « Si je veux de la lumière, je mets de la
+    // lumière d'appoint » : la couche assombrit, point. Remonter discrètement
+    // une ambiance ici annulerait le contraste qu'on vient de fabriquer, et
+    // volerait à Adrien un réglage qu'il tient déjà (l'éclairage d'appoint du
+    // panneau Lumière).
+    float lum = dot(lueur, vec3(0.299, 0.587, 0.114));
+    // lum mesure la lumière PRÉSENTE : là où elle est forte, on n'assombrit
+    // pas — sinon on creuserait le cœur des villes, exactement l'inverse.
+    diffuseColor.rgb *= mix(1.0, mix(NUIT_FOND, 1.0, min(1.0, lum * 3.0)), force);
+    diffuseColor.rgb += lueur * force;
   }
 
   // Fancy surface shader paints OVER the final surface — the hypsometric map OR
