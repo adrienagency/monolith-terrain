@@ -117,7 +117,11 @@ test('le catalogue porte EXACTEMENT les trois couches qui peignent, et aucune au
   // à la légère (par une fusion de branche, par exemple) doit le faire rougir —
   // c'est tout son intérêt.
   assert.deepEqual(COUCHES.map((c) => c.id), ['lumieres-nocturnes', 'occupation-sol', 'canopee'])
-  assert.deepEqual(COUCHES.map((c) => c.cout), [2, 3, 2])
+  // ⚠️ 2-2-2 depuis le 2026-08-02 : l occupation du sol est passée de 3 à 2,
+  // sa note justifiant le 3 par « la pyramide de mips » que son propre calque
+  // désactive. Les trois couches sont structurellement identiques — texture
+  // drapée, table de 256 entrées, mips coupés, rien qui remonte au processeur.
+  assert.deepEqual(COUCHES.map((c) => c.cout), [2, 2, 2])
 })
 
 test('aucune couche du catalogue réel ne s’annonce sans son rendu', () => {

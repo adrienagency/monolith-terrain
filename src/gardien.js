@@ -233,8 +233,27 @@ export const COUCHES = [
   {
     id: 'occupation-sol',
     nom: 'Occupation du sol',
-    cout: 3,
-    note: 'texture drapée par dalle AVEC table de correspondance et mips : la même charge que les lumières nocturnes, plus la pyramide de mips et une recoloration par classe.',
+    // ⚠️ 3 → 2, LE 2026-08-02, POUR LA MÊME RAISON QUE LA CANOPÉE JUSTE EN
+    // DESSOUS — et cette entrée-ci avait été oubliée au passage.
+    //
+    // Sa note justifiait le 3 par « la pyramide de mips ». Or
+    // `occupation-sol-layer.js` fait `generateMipmaps = false` DEUX FOIS, et
+    // l'en-tête du même fichier déclare les mips INTERDITS : un mip est une
+    // moyenne, et moyenner deux codes de classe en fabrique un troisième qui
+    // n'existe pas. La note affirmait donc exactement ce que le code interdit.
+    //
+    // Et le second motif du 3 ne tient pas davantage : la famille à 3 parts est
+    // définie plus haut comme « une texture drapée qui, EN PLUS, est lue par le
+    // processeur ». Vérifié : aucun `getImageData` ni `readPixels` dans
+    // `occupation-sol.js` ni dans son calque — la donnée ne remonte jamais côté
+    // processeur. Cette couche est structurellement IDENTIQUE à la canopée :
+    // même table de 256 entrées, même `drawImage`, mêmes mips coupés.
+    //
+    // Le dégât était réel, et ce fichier l'écrit lui-même : une couche qui
+    // réclame plus qu'elle ne consomme fait refuser une VRAIE couche derrière
+    // elle sur les petites machines.
+    cout: 2,
+    note: 'texture drapée par dalle avec table de correspondance : la même charge que les lumières nocturnes, plus une recoloration par classe. Pas de mips — un mip est une moyenne, et moyenner deux codes de classe en invente un troisième.',
   },
   {
     id: 'canopee',
