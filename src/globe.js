@@ -312,16 +312,44 @@ export class Globe {
     this.clouds = new GlobeClouds(R_GLOBE)
     this.group.add(this.clouds.group)
 
-    // roots load immediately so entering orbit never shows a bare sphere
+    // LES 16 TUILES RACINES — DÉCLARÉES ICI, DEMANDÉES PLUS TARD.
+    //
+    // Elles pesaient 1 401 Ko (mesuré : 16 PNG terrarium z2 chez AWS) et
+    // partaient du CONSTRUCTEUR, à priorité 1e9 — c'est-à-dire en tête de file,
+    // alors que main.js appelle `globe.setVisible(false)` la ligne suivante.
+    // Elles se battaient donc pour la bande passante avec les 2 231 Ko de MNT
+    // dont la CARTE, elle, a besoin pour s'afficher.
+    //
+    // A/B mesuré (dist de production servi, Chrome avec écran, cache vidé,
+    // 3 runs, 3 Mb/s) en bloquant ces 16 tuiles au niveau réseau :
+    //   carte visible 16 156 ms → 12 426 ms, octets 4 511 Ko → 3 103 Ko.
+    //
+    // ⚠️ ON NE LES SUPPRIME PAS, ON LES DÉCALE. L'intention d'origine — « entering
+    // orbit never shows a bare sphere » — reste vraie, et par DEUX chemins :
+    //   1. main.js appelle `chargeRacines()` dès que le voile de chargement est
+    //      retiré, donc la sphère se remplit pendant que le visiteur regarde sa
+    //      carte, bien avant qu'il ne songe à dézoomer ;
+    //   2. `setVisible(true)` l'appelle AUSSI (voir plus bas). C'est le filet :
+    //      tout chemin qui montre le globe — dézoom à la molette, escalier de
+    //      zoom, lien partagé, `?f3=1` — passe par `Modes.enterOrbit`, qui passe
+    //      par `setVisible(true)`. Aucun ne peut donc trouver une sphère nue
+    //      SANS avoir déclenché le chargement au même instant.
+    // Les objets tuiles, eux, sont créés tout de suite : `this.roots` est lu
+    // ailleurs, et un tableau vide au démarrage serait un piège pour la suite.
     const n = 2 ** ROOT_Z
     this.roots = []
     for (let y = 0; y < n; y++) {
-      for (let x = 0; x < n; x++) {
-        const t = this._ensureTile(ROOT_Z, x, y)
-        this.roots.push(t)
-        this._request(t, 1e9)
-      }
+      for (let x = 0; x < n; x++) this.roots.push(this._ensureTile(ROOT_Z, x, y))
     }
+  }
+
+  /**
+   * Demande les 16 tuiles racines, à la priorité maximale qu'elles avaient
+   * dans le constructeur. Idempotent : `_request` ignore toute tuile qui n'est
+   * plus à l'état `empty`, donc on peut l'appeler autant de fois qu'on veut.
+   */
+  chargeRacines() {
+    for (const t of this.roots) this._request(t, 1e9)
   }
 
   // The globe ramp reuses the user's land gradient (the map's identity) and
@@ -822,6 +850,12 @@ export class Globe {
   }
 
   setVisible(v) {
+    // LE FILET DU CHARGEMENT DIFFÉRÉ DES RACINES (voir le constructeur). Montrer
+    // le globe, c'est le seul instant où une sphère nue serait visible : on
+    // s'assure donc que ses racines sont demandées ICI, quoi qu'il arrive en
+    // amont. Idempotent, et sans effet si main.js les a déjà lancées au retrait
+    // du voile — ce qui est le cas normal.
+    if (v) this.chargeRacines()
     this.enabled = v
     this.group.visible = v
   }

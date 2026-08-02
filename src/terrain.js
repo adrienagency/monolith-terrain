@@ -1403,7 +1403,14 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // est local), c'est la POSITION du mesh qui porte le décalage monde
     this.mesh.position.set(this.blockOffset.x, 0, this.blockOffset.z)
     this.dem = null // real-world heightfield, set via setDem()
+    // ⚠️ CE SEUL rebuild a droit au maillage de brouillon (voir `_resAmorce`) :
+    // c'est l'unique appel dont on sait qu'il sera remplacé tout de suite par
+    // `loadRealTerrain()`. Le drapeau retombe juste après, donc tous les rebuilds
+    // suivants — y compris ceux du chemin d'échec réseau — sont à pleine
+    // résolution, exactement comme avant.
+    this._amorce = true
     this.rebuild(params)
+    this._amorce = false
     this.rebuildRoughness(params)
   }
 
@@ -2290,8 +2297,55 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     return true
   }
 
-  rebuild(params) {
+  // Résolution du relief PROCÉDURAL D'AMORÇAGE — voir `_resAmorce` plus bas.
+  // 64 donne 4 225 sommets contre 1 048 576 à res 1024 : le maillage existe, il
+  // est cohérent, et il ne coûte plus rien.
+  static RES_AMORCE = 64
+
+  /**
+   * La résolution à écrire pour CE rebuild.
+   *
+   * ⚠️ LE RELIEF PROCÉDURAL DU CONSTRUCTEUR EST INTÉGRALEMENT JETÉ, ET C'EST
+   * MESURÉ. `new Terrain(params)` finit par `rebuild(params)` alors que
+   * `this.dem` vaut `null` : on écrit donc un relief de bruit à pleine
+   * résolution que `loadRealTerrain()` remplace quelques centaines de
+   * millisecondes plus tard, sans que personne ne l'ait jamais vu — il est
+   * derrière le voile de chargement.
+   * Chronométré autour de l'appel, build de production servi, 3 démarrages :
+   * **367,9 / 373,8 / 369,2 ms**. (Une première estimation par tranches de
+   * profil disait 290–340 ms ; le chronomètre dit 370.)
+   *
+   * On ne SUPPRIME pas ce rebuild — plusieurs choses en dépendent tout de
+   * suite — on lui donne juste un maillage de brouillon :
+   *   · `this.sample` est posé par `_makeSampler(params)`, qui NE DÉPEND PAS de
+   *     la résolution. `plinth.rebuild`, `createLabels` et `findPois` ne lisent
+   *     que lui : ils voient exactement les mêmes valeurs qu'avant.
+   *   · la géométrie reste NON VIDE et bien formée, avec ses bornes ;
+   *   · les uniformes (`uHeightRange`, `uSeaY`…) sont posés comme avant.
+   *
+   * ⚠️ DEUX GARDES, ET IL FAUT LES DEUX — chacune ferme un cas où ce relief
+   * de brouillon RESTERAIT à l'écran :
+   *
+   *   1. `params.source === 'real'`. En mode procédural, ce relief-là EST le
+   *      produit : il se construit à pleine résolution, exactement comme avant.
+   *
+   *   2. `this._amorce`, vrai pour le SEUL rebuild du constructeur. C'est le
+   *      seul dont on sait qu'il est immédiatement suivi de `loadRealTerrain()`
+   *      (main.js l'appelle sans condition quand la source est réelle). Tous
+   *      les autres appels à `rebuild()` sans MNT — et il y en a : le chemin
+   *      d'échec de chargement, `regenerateTerrain()` — retombent à pleine
+   *      résolution. Sans cette garde, un visiteur dont le réseau lâche voyait
+   *      un relief grossier au lieu du relief procédural fin d'avant : ça se
+   *      lit comme une carte cassée, pas comme un repli.
+   */
+  _resAmorce(params) {
     const res = this._resFenetre(params)
+    if (this.dem || params.source !== 'real' || !this._amorce) return res
+    return Math.min(res, Terrain.RES_AMORCE)
+  }
+
+  rebuild(params) {
+    const res = this._resAmorce(params)
     // GABARIT MÉMORISÉ au lieu de `new THREE.PlaneGeometry` : celui-ci mettait
     // 194 ms et jetait 262 Mo de tas JS à res 1024 (106 ms et 104 Mo à res 768)
     // pour fabriquer un plan PLAT que les lignes suivantes réécrivent
