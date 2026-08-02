@@ -179,17 +179,34 @@ export const PART_MO = 79
 //   4 parts — un réseau vectoriel Overpass : circuit réseau (avec son
 //             disjoncteur, son plafond de 48 Mo et ses 6 s d'attente), décodage,
 //             puis géométrie drapée fabriquée sur le fil principal.
+// ⚠️ `aProduire: true` MARQUE UNE COUCHE SANS RENDU. Adrien, le 2026-08-02 :
+// « les étoiles et les volcans ne font rien pour l'instant ». C'était exact —
+// `setCouche` dans main.js ne connaissait que les lumières nocturnes et
+// l'occupation du sol : les cinq autres interrupteurs s'allumaient, consommaient
+// leur budget, et ne peignaient rien.
+//
+// Un interrupteur qui ment est précisément ce que ce fichier existe pour
+// interdire (« un interrupteur qui s'allume sur une machine qui ne suit pas est
+// pire qu'un interrupteur absent »). Tant que le rendu n'existe pas, la couche
+// reste au catalogue — elle annonce ce qui vient — mais elle ne s'allume pas et
+// elle dit pourquoi.
+//
+// ⚠️ CE DRAPEAU SE RETIRE EN MÊME TEMPS QUE LE RENDU ARRIVE, pas avant, pas
+// après. Le laisser sur une couche qui peint la rendrait inaccessible ; l'ôter
+// d'une couche qui ne peint pas remettrait le mensonge en place.
 export const COUCHES = [
   {
     id: 'etoiles',
     nom: 'Étoiles',
     cout: 1,
+    aProduire: true,
     note: 'un champ de points dans le dôme de ciel : aucune interaction avec le relief, aucune requête. Le coût est du remplissage, et il ne grandit pas avec le damier.',
   },
   {
     id: 'volcans',
     nom: 'Volcans',
     cout: 1,
+    aProduire: true,
     note: 'une poignée de repères et leurs étiquettes. Le coût n’est pas la mémoire mais le désencombrement à l’écran, sur le fil principal — même famille que les repères de sommet (PEAK_CONST dans peaks.js).',
   },
   {
@@ -208,18 +225,21 @@ export const COUCHES = [
     id: 'canopee',
     nom: 'Hauteur de canopée',
     cout: 3,
+    aProduire: true,
     note: 'texture drapée par dalle, mais LUE PAR LE PROCESSEUR : elle nourrit l’analyse de relief, qui gèle déjà le fil principal ~390 ms en 1536² (voir analyseMax dans la table des paliers).',
   },
   {
     id: 'pistes-ski',
     nom: 'Pistes de ski',
     cout: 4,
+    aProduire: true,
     note: 'réseau vectoriel Overpass drapé sur le relief : un circuit réseau (OVERPASS_MAXSIZE 48 Mo, attente 6 s, disjoncteur 60 s), le décodage, puis la géométrie drapée fabriquée sur le fil principal.',
   },
   {
     id: 'sentiers',
     nom: 'Sentiers',
     cout: 4,
+    aProduire: true,
     note: 'même forme que les pistes de ski, sur la classe d’objets OSM la plus dense qui soit. C’est précisément la requête pour laquelle OVERPASS_MAXSIZE a été écrit (z12 sur Paris centre : 351 414 chemins, 238 Mo, en 200 OK).',
   },
 ]
@@ -445,6 +465,7 @@ export const NON = 'non'
  */
 export function evaluerCouche({ id, actives = [], machine = null, gouverneur = null, bloqueePrecedemment = false, desarme = false } = {}) {
   const c = couche(id)
+
   const listeAutres = [...new Set(actives)].filter((x) => x !== id)
   const capacite = capaciteParts({ machine, gouverneur })
   const occupationAutres = occupationParts(listeAutres)
@@ -596,11 +617,37 @@ export function etatCouches({ actives = [], machine = null, gouverneur = null, b
         bloqueePrecedemment: bloq.has(c.id),
         desarme,
       })
+      // UNE COUCHE SANS RENDU NE S'ALLUME PAS, et ce refus est posé ICI et non
+      // dans `evaluerCouche` — délibérément. `evaluerCouche` répond à une
+      // question de BUDGET : « cette machine peut-elle la porter ? ». La
+      // réponse reste oui, et elle resterait oui sur un ordinateur infiniment
+      // puissant : le problème n'est pas la puissance, c'est qu'il n'y a rien
+      // à peindre. Mélanger les deux rendrait la règle de budget intestable —
+      // ses propres tests se servent de ces couches comme exemples de coût.
+      //
+      // ⚠️ ET LE DÉSARMEMENT NE LE LÈVE PAS. `?gardien=0` désarme le budget,
+      // pas la réalité : forcer l'allumage d'une couche sans rendu ne
+      // montrerait rien et ferait croire à une panne.
+      if (c.aProduire) {
+        return {
+          id: c.id,
+          nom: c.nom,
+          cout: c.cout,
+          note: c.note,
+          aProduire: true,
+          active: false,
+          verdict: NON,
+          raison: `« ${c.nom} » est annoncée au catalogue, mais son rendu n’est pas encore écrit : l’allumer ne peindrait rien.`,
+          restantApres: null,
+          aRetirer: [],
+        }
+      }
       return {
         id: c.id,
         nom: c.nom,
         cout: c.cout,
         note: c.note,
+        aProduire: false,
         active: new Set(actives).has(c.id),
         verdict: v.verdict,
         raison: v.raison,

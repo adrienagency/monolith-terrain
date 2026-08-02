@@ -319,7 +319,10 @@ test('gardien désarmé : un « oui » franc reste un « oui » franc, sans aver
 // ═══════════ L'ÉTAT COMPLET POUR L'ONGLET « COUCHES » ═══════════════════════
 
 test('etatCouches rend tout le panneau d’un coup : budget, souffrance, et une ligne par couche', () => {
-  const e = etatCouches({ actives: ['etoiles'], machine: PALIERS[1], gouverneur: { tier: 2, startTier: 1 } })
+  // ⚠️ `lumieres-nocturnes` et PAS `etoiles` : depuis le 2026-08-02 les couches
+  // sans rendu portent `aProduire` et sont refusées d'office par etatCouches.
+  // Les prendre pour exemple ferait tester le refus au lieu du budget.
+  const e = etatCouches({ actives: ['lumieres-nocturnes'], machine: PALIERS[1], gouverneur: { tier: 2, startTier: 1 } })
   assert.equal(e.budget.capacite, 3) // 6 parts, un cran perdu → 3
   assert.equal(e.souffrance.crans, 1)
   assert.ok(e.souffrance.raison.length > 0)
@@ -331,7 +334,9 @@ test('etatCouches rend tout le panneau d’un coup : budget, souffrance, et une 
     assert.ok(Array.isArray(c.aRetirer))
     assert.equal(typeof c.active, 'boolean')
   }
-  assert.equal(e.couches.find((c) => c.id === 'etoiles').active, true)
+  assert.equal(e.couches.find((c) => c.id === 'lumieres-nocturnes').active, true)
+  // Une couche sans rendu n'est jamais rendue active, même listée dans actives.
+  assert.equal(e.couches.find((c) => c.id === 'etoiles').verdict, 'non')
 })
 
 test('etatCouches : le jeu de couches bloquées à l’image d’avant porte l’hystérésis', () => {
@@ -352,9 +357,10 @@ test('etatCouches : sur une machine ESSENTIEL, l’onglet reste UTILISABLE — a
 test('etatCouches : ce qui est allumé le reste, quoi qu’il arrive au budget', () => {
   // Le gouverneur s'est effondré APRÈS l'allumage : le gardien constate le
   // dépassement, il ne l'annule pas.
-  const e = etatCouches({ actives: ['sentiers', 'canopee'], machine: PALIERS[0], gouverneur: { tier: 3, startTier: 0 } })
+  // idem : deux couches qui PEIGNENT, sinon on teste `aProduire`.
+  const e = etatCouches({ actives: ['lumieres-nocturnes', 'occupation-sol'], machine: PALIERS[3], gouverneur: { tier: 3, startTier: 0 } })
   assert.ok(e.budget.depassement > 0)
-  for (const id of ['sentiers', 'canopee']) {
+  for (const id of ['lumieres-nocturnes', 'occupation-sol']) {
     assert.equal(e.couches.find((c) => c.id === id).verdict, 'oui', `${id} ne doit pas être éteinte par le gardien`)
   }
 })
