@@ -20,7 +20,10 @@ export function buildMapPanel(ctx) {
   // qui ne pilotent plus rien valent moins que pas de réglage du tout.
   const waterToggle = toggle({ label: 'Rivières & eau', get: () => params.waterEnabled, set: (v) => { params.waterEnabled = v; ctx.rebuildMapLayers(); refreshAll() } })
   const waterOpacity = slider({ label: 'Opacité de l’eau', min: 0, max: 1, step: 0.02, get: () => params.waterOpacity, set: (v) => { params.waterOpacity = v; ctx.mapLayers.setOpacity('water', v) } })
-  const waterFill = toggle({ label: 'Remplir lacs & mers', get: () => params.waterFill, set: (v) => { params.waterFill = v; ctx.rebuildMapLayers() } })
+  // PLUS de « Remplir lacs & mers » ici. Adrien, 2026-08-02 : « pas besoin, ça
+  // doit TOUJOURS être rempli ». Le remplissage n'est donc plus un réglage mais
+  // le comportement — water-layer.js remplit sans condition. Un interrupteur
+  // dont une seule position est acceptable n'est pas un réglage, c'est un piège.
   // PLUS de « Trait de côte » ici : le liseré Natural Earth a quitté le site
   // (voir water-layer.js). Le « Fondu à la côte » plus bas appartient à la
   // photo aérienne — même mot, autre sujet.
@@ -60,17 +63,23 @@ export function buildMapPanel(ctx) {
   // v49 : la photo ne vit qu'à la côte, puis s'estompe vers le fond marin. 0 = pleine partout.
   const aerialCoastFade = slider({ label: 'Fondu à la côte', min: 0, max: 0.4, step: 0.01, get: () => params.aerialCoastFade, set: (v) => { params.aerialCoastFade = v; ctx.terrain.setAerialCoastFade(v); ctx.blockGrid?.setAerialCoastFade?.(v) } })
   const placesToggle = toggle({ label: 'Villes & lieux', get: () => params.placesEnabled, set: (v) => { params.placesEnabled = v; ctx.rebuildMapLayers(); refreshAll() } })
-  const placesDensity = slider({ label: 'Densité des lieux', min: 0.4, max: 2, step: 0.1, get: () => params.placesDensity, set: (v) => { params.placesDensity = v; ctx.rebuildMapLayers() } })
-  const placesSize = slider({ label: 'Taille des lieux', min: 0.5, max: 2, step: 0.05, get: () => params.placesSize, set: (v) => { params.placesSize = v; ctx.rebuildMapLayers() } })
-  const placesHalo = toggle({ label: 'Halo du texte', get: () => params.placesHalo, set: (v) => { params.placesHalo = v; ctx.rebuildMapLayers() } })
+  // PLUS de « Densité des lieux », « Taille des lieux » ni « Halo du texte ».
+  // Adrien, 2026-08-02 : pour les deux tirettes « ça reste comme c'est au
+  // lancement par défaut » (densité 1, taille 1 — les valeurs sont maintenant
+  // écrites en dur dans places-layer.js) ; pour le halo, « on enlève, par défaut
+  // pas de halo ». Le halo est SUPPRIMÉ, pas désactivé : places-layer.js ne le
+  // demande plus du tout à makeLabelTexture.
+  //
+  // ⚠️ text-label.js garde sa mécanique de halo, et c'est volontaire : elle sert
+  // à d'autres appelants et elle est tenue par test/text-label.test.js. Ce qui a
+  // disparu, c'est la DEMANDE, pas la capacité.
   sLayers.body.append(
-    waterToggle, waterOpacity, waterFill,
+    waterToggle, waterOpacity,
     aerialToggle, aerialOpacity, aerialCoastFade,
-    placesToggle, placesDensity, placesSize, placesHalo
+    placesToggle
   )
-  for (const row of [waterOpacity, waterFill]) visibleWhen(row, () => params.waterEnabled)
+  visibleWhen(waterOpacity, () => params.waterEnabled)
   for (const row of [aerialOpacity, aerialCoastFade]) visibleWhen(row, () => params.aerialEnabled)
-  for (const row of [placesDensity, placesSize, placesHalo]) visibleWhen(row, () => params.placesEnabled)
 
   const sContour = panel.addSection(section('Courbes & grille'))
   const contourWeight = slider({ label: 'Épaisseur des courbes', min: 0.3, max: 1.6, step: 0.05, get: () => params.contourWeight, set: (v) => { params.contourWeight = v; if (!params.darkMode) u().uContourWeight.value = v } })

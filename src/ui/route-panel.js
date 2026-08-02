@@ -1,8 +1,10 @@
 // PARCOURS panel — LA porte grand public pour « mettre une course sur la
 // carte » (passe UX : le panneau et le Race Studio ne se marchent plus
 // dessus). Deux états exclusifs :
-//   VIDE   → les 4 portes du wizard léger validé (Charger ma course /
-//            Ouvrir un projet / Essayer la démo / Dessiner — bientôt) ;
+//   VIDE   → les 3 portes du wizard léger validé (Charger ma course /
+//            Ouvrir un projet / Essayer la démo). La quatrième, « Dessiner —
+//            bientôt », a été retirée le 2026-08-02 (Adrien : « on le fera
+//            pas ») ;
 //   CHARGÉ → Lecture en tête (sans lecture la carte ne sert à rien),
 //            puis 3 sections repliées PARLANTES : Mes courses / Style du
 //            tracé (chips) / Options de lecture.
@@ -84,13 +86,24 @@ export function buildRoutePanel(ctx) {
 
   // ---- Les PORTES (état vide) — la hiérarchie wizard léger validée :
   // ① charger son GPX (accent — le cas le plus fréquent) ② rouvrir un
-  // projet ③ pas de trace ? la démo ④ dessiner (badge « bientôt »).
+  // projet ③ pas de trace ? la démo.
+  //
+  // PLUS DE QUATRIÈME PORTE « Dessiner sur la carte ». Adrien, 2026-08-02 :
+  // « on le fera pas, on retire ». C'était un bloc d'ANNONCE — une porte
+  // désactivée, badge « bientôt », qui promettait une fonction dont il vient
+  // d'être décidé qu'elle n'arriverait pas. Une porte fermée qu'on ne peut pas
+  // ouvrir se compte quand même dans les choix qu'on offre au visiteur.
+  //
+  // ⚠️ L'OPTION `soon` DE `door()` EST PARTIE AVEC ELLE, ainsi que les règles
+  // CSS `.ce-door.soon` et `.ce-door-badge` de v28.css : `dDraw` en était le
+  // SEUL appelant de tout le dépôt. Un paramètre que personne ne passe plus est
+  // une porte dérobée pour la prochaine annonce, et studio.js note déjà
+  // explicitement qu'il ne veut pas de porte désactivée.
   const doors = el('div', 'ce-route-doors')
-  const door = (title, sub, { accent = false, soon = false } = {}) => {
-    const d = el('button', 'ce-door' + (accent ? ' accent' : '') + (soon ? ' soon' : ''))
+  const door = (title, sub, { accent = false } = {}) => {
+    const d = el('button', 'ce-door' + (accent ? ' accent' : ''))
     d.type = 'button'
-    d.disabled = soon
-    d.innerHTML = `<span class="ce-door-main"><b>${title}</b><i>${sub}</i></span>${soon ? '<span class="ce-door-badge">bientôt</span>' : ''}`
+    d.innerHTML = `<span class="ce-door-main"><b>${title}</b><i>${sub}</i></span>`
     return d
   }
   const dLoad = door('Charger ma course (GPX)', 'Ta trace, depuis ton ordinateur — le relief se cadre tout seul.', { accent: true })
@@ -105,8 +118,7 @@ export function buildRoutePanel(ctx) {
     dDemo.disabled = false
     dDemo.querySelector('i').textContent = 'La Grande Traversée · 220 km, prête à jouer — remplace-la ensuite.'
   })
-  const dDraw = door('Dessiner sur la carte', 'Clique les passages clés, la trace suit le terrain.', { soon: true })
-  doors.append(dLoad, dOpen, dDemo, dDraw)
+  doors.append(dLoad, dOpen, dDemo)
   panel.add(doors)
 
   // ------------------------------------------------------------ Mes courses

@@ -1,4 +1,4 @@
-// LE GARDE-FOU DES PLANS D'EAU — il compte, sur du VRAI relief, combien de
+﻿// LE GARDE-FOU DES PLANS D'EAU — il compte, sur du VRAI relief, combien de
 // terre ShibuMap peint en eau, et il REFUSE au-delà. Dans les deux sens.
 //
 // ═══════════════════════════════════════════════════════════════════════════
@@ -65,6 +65,7 @@ import {
   partSurfaceEau,
   mesurePlanEau,
   longueurMinM,
+  remplissageEnveloppe,
   LARGEUR_MIN_M,
   LONGUEUR_MIN_M,
 } from '../src/plan-eau.js'
@@ -123,6 +124,18 @@ const zone = (nom) => {
 // moindre changement légitime de détecteur — donc à le contourner, donc à le
 // perdre. On borne largement ; ce qu'on attrape c'est le retour de la nappe,
 // pas la variation d'un pixel.
+//
+// ⚠️ DIJON A REJOINT CETTE TABLE LE 2026-08-02, et c'est l'événement. Ces deux
+// zones étaient le DÉFAUT OUVERT — 14 dentelles / 4,08 % du bloc à z11, 3 /
+// 1,65 % à z12 — que personne ne savait corriger sans effacer le Rhône. Adrien
+// a tranché « l'effet sur les lacs seulement » : le fleuve doit LUI AUSSI
+// perdre sa nappe, le chevauchement des deux camps s'évanouit, et le seuil de
+// largeur passe de 150 à 250 m. Voir le balayage en tête de src/plan-eau.js.
+//
+//   zone         | avant (150 m) | après (250 m)
+//   -------------|---------------|---------------
+//   dijon-large  | 14 → 4,08 %   | 0 → 0,00 %
+//   dijon-dole   |  3 → 1,65 %   | 0 → 0,00 %
 const PLAFONDS = {
   'rhone-valence': 0.005,
   'rhone-fin': 0.005,
@@ -131,6 +144,8 @@ const PLAFONDS = {
   camargue: 0.005,
   flevoland: 0.005,
   etretat: 0.005,
+  'dijon-large': 0.005,
+  'dijon-dole': 0.005,
 }
 
 for (const [nom, plafond] of Object.entries(PLAFONDS)) {
@@ -146,15 +161,14 @@ for (const [nom, plafond] of Object.entries(PLAFONDS)) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 🔴 LE DÉFAUT OUVERT — Dijon/Dole, et le garde-fou qui ne le voyait pas
+// LA FIDÉLITÉ DES FIXTURES DE DIJON — ce que le plafond ci-dessus prouve
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// Ces deux zones NE SONT PAS dans PLAFONDS, et ce n'est pas un oubli : le
-// défaut d'Adrien y est ENCORE PRÉSENT, personne ne sait le corriger sans
-// perdre le Rhône (voir le mur des quatre critères en tête de plan-eau.js), et
-// un plafond rouge en permanence serait un plafond qu'on finirait par retirer.
+// Ces deux zones ÉTAIENT le défaut ouvert, hors de PLAFONDS parce que personne
+// ne savait les corriger sans effacer le Rhône. Elles y sont entrées le
+// 2026-08-02, quand Adrien a décidé que le fleuve aussi devait perdre sa nappe.
 //
-// ⚠️ CE QUI EST TENU ICI, C'EST LA FIDÉLITÉ DE LA FIXTURE, PAS LE PRODUIT. Le
+// ⚠️ MAIS LE PLAFOND NE PROUVE RIEN SI LA FIXTURE NE PORTE PLUS LE DÉFAUT. Le
 // garde-fou a été AVEUGLE à ce défaut jusqu'au 2026-08-02 : ses fixtures
 // venaient d'AWS quand la production sert mapterhorn, et le champ AWS (EU-DEM
 // 25 m surzoomé) hache les bandes de contour que le champ mapterhorn (RGE ALTI
@@ -167,27 +181,24 @@ for (const [nom, plafond] of Object.entries(PLAFONDS)) {
 //   l'ÉCRAN d'Adrien, z11 | mapterhorn |    14    |    4,08 %    | 150-215 m
 //
 // La ligne mapterhorn et la ligne de l'écran sont IDENTIQUES, au chiffre près.
-// C'est ce que ces tests verrouillent : le jour où quelqu'un recuit ces
-// fixtures depuis une autre source, ou déplace le seuil de largeur, ils
-// rougissent — et le garde-fou ne pourra pas redevenir vert sur un monde qui
-// n'est pas celui de l'écran.
-//
-// ⚠️ QUAND LE DÉFAUT SERA CORRIGÉ, CES DEUX TESTS ROUGIRONT. C'est voulu :
-// c'est le signal qu'on peut les remplacer par une entrée dans PLAFONDS. Ne
-// les supprime pas sans poser le plafond à la place.
-const DEFAUT_OUVERT = [
+// Ces tests rejouent donc le monde D'AVANT — seuil à 150 m, l'ancienne règle —
+// et exigent que le défaut y soit encore entier. Le jour où quelqu'un recuit
+// ces fixtures depuis une autre source, ils rougissent, et les deux plafonds
+// ci-dessus cessent d'être une victoire pour redevenir une tautologie.
+const LARGEUR_AVANT_M = 150 // l'ancien seuil, celui sous lequel le défaut se voit
+const DEFAUT_HISTORIQUE = [
   { nom: 'dijon-large', retenues: 14, part: 0.0408, largeurMin: 150, largeurMax: 215 },
   { nom: 'dijon-dole', retenues: 3, part: 0.0165, largeurMin: 153, largeurMax: 182 },
 ]
 
-for (const attendu of DEFAUT_OUVERT) {
+for (const attendu of DEFAUT_HISTORIQUE) {
   const z = zone(attendu.nom)
-  test(`${attendu.nom} (${z.quoi}) : la fixture reproduit EXACTEMENT l’écran d’Adrien`, () => {
+  test(`${attendu.nom} (${z.quoi}) : la fixture porte encore EXACTEMENT l’écran d’Adrien d’avant`, () => {
     // La source est la PREMIÈRE chose vérifiée : c'est elle qui a rendu le
     // garde-fou aveugle, et un `source` retombé sur AWS remettrait tout le
     // reste à zéro en donnant l'impression que le défaut a disparu.
     assert.equal(z.source, 'mapterhorn', `${attendu.nom} : cuite depuis « ${z.source} » — la production sert mapterhorn`)
-    const { retenus, part } = eauDe(z)
+    const { retenus, part } = eauDe(z, { largeurMinM: LARGEUR_AVANT_M })
     assert.equal(retenus.length, attendu.retenues, `${attendu.nom} : ${retenus.length} étendues au lieu de ${attendu.retenues}`)
     assert.ok(
       Math.abs(part - attendu.part) < 0.001,
@@ -198,48 +209,66 @@ for (const attendu of DEFAUT_OUVERT) {
       Math.min(...w) >= attendu.largeurMin - 2 && Math.max(...w) <= attendu.largeurMax + 2,
       `${attendu.nom} : largeurs ${Math.min(...w).toFixed(0)}-${Math.max(...w).toFixed(0)} m, relevé ${attendu.largeurMin}-${attendu.largeurMax} m`
     )
+    // …et le seuil d'AUJOURD'HUI les vide toutes. C'est l'avant/après, dans un
+    // seul test, sur la même fixture.
+    assert.equal(eauDe(z).retenus.length, 0, `${attendu.nom} : le seuil de ${LARGEUR_MIN_M} m laisse encore des dentelles`)
   })
 }
 
-// ⚠️ ET LE SEUIL DE LARGEUR EST MUET ICI — c'est LE fait qui a coûté trois
-// tentatives. Les dentelles de Dijon ne CONTOURNENT pas la règle des 150 m,
-// elles la SATISFONT, parce qu'une bande de contour vaut 1 m ÷ pente et que la
-// plaine de la Saône descend de 5 m au kilomètre.
+// ⚠️ CE QUI A DÉBLOQUÉ TROIS TENTATIVES : LA CONSIGNE, PAS LA GÉOMÉTRIE.
 //
-// CE TEST EXISTE POUR QUI ARRIVE ICI AVEC L'IDÉE DE « JUSTE REMONTER LE SEUIL ».
-// Balayage mesuré sur cette fixture, le Rhône à Valence faisant 170 m de large
-// (relevé sur l'instance vivante, z12 comme z14) :
+// L'ancien mur était écrit ici même : il faut 215 m de largeur pour vider
+// Dijon, et le Rhône à Valence en fait 170 (relevé sur l'instance vivante, z12
+// comme z14). Les deux camps se chevauchaient, donc aucun seuil ne les
+// séparait — TANT QU'IL FALLAIT GARDER LE FLEUVE.
 //
-//   seuil  | dentelles gardées à Dijon | part du bloc | le Rhône ?
-//   -------|---------------------------|--------------|------------
-//   150 m  |          14               |    4,08 %    | gardé
-//   171 m  |           7               |    2,11 %    | PERDU
-//   200 m  |           3               |    1,16 %    | PERDU
-//   215 m  |           0               |    0,00 %    | PERDU
-//
-// Il faut 215 m pour vider Dijon et le fleuve en fait 170 : les deux camps se
-// CHEVAUCHENT, il n'y a pas de seuil entre eux. Au plus haut seuil qui garde
-// encore le Rhône, la plaine reste à 2,11 % — quatre fois le plafond de 0,5 %
-// que toutes les autres plaines tiennent.
+// Adrien, 2026-08-02 : « l'effet sur les lacs seulement ». Le fleuve passe du
+// camp à garder au camp à refuser, le chevauchement s'évanouit, et le seuil
+// peut enfin monter. Ce test dit les deux moitiés de cette phrase : à 250 m
+// Dijon est vide ET le Rhône est refusé — et le second n'est plus un échec.
 const PLAFOND_PLAINES = 0.005
 const RHONE_VALENCE_M = 170
 
-test('aucun seuil de largeur ne vide Dijon sans effacer le Rhône', () => {
+test('à 250 m, Dijon est vide ET le fleuve a perdu sa nappe — les deux à la fois', () => {
   const z = zone('dijon-large')
   const dem = chargeRelief(z)
   const cellM = z.extentMeters / (dem.size - 1)
   const lacs = detectLakes(dem)
-  // le seuil le plus exigeant qui laisse encore passer le Rhône
-  const retenus = plansEauRetenus(lacs, { cellM, blocM: z.extentMeters, largeurMinM: RHONE_VALENCE_M })
-  const part = partSurfaceEau(retenus, dem.size)
+
+  // ① la plaine est vidée, très en dessous du plafond des plaines
+  const part = partSurfaceEau(plansEauRetenus(lacs, { cellM, blocM: z.extentMeters }), dem.size)
+  assert.ok(part <= PLAFOND_PLAINES, `Dijon peint encore ${(part * 100).toFixed(2)} % du bloc`)
+
+  // ② et le fleuve, lui, est refusé — c'est VOULU, pas un dommage collatéral.
+  // On le rejoue analytiquement (aucune fixture ne le porte d'un seul tenant,
+  // cf. le témoin plus bas) à sa géométrie mesurée.
   assert.ok(
-    part > PLAFOND_PLAINES,
-    `à ${RHONE_VALENCE_M} m — le seuil le plus haut qui garde le Rhône — Dijon ne peint plus que ` +
-      `${(part * 100).toFixed(2)} % du bloc, sous le plafond des plaines. Le mur décrit en tête de ` +
-      `plan-eau.js s'est ouvert : reprends la mesure, et si elle tient, remplace ce test par une ` +
-      `entrée dans PLAFONDS.`
+    RHONE_VALENCE_M < LARGEUR_MIN_M,
+    `le seuil (${LARGEUR_MIN_M} m) est retombé sous la largeur du Rhône (${RHONE_VALENCE_M} m) : ` +
+      `le fleuve retrouverait sa nappe, ce qu'Adrien a explicitement refusé`
   )
+
+  // ③ l'ancien seuil, lui, ne pouvait pas : à 215 m Dijon tombait déjà, mais
+  // c'est bien 215 qu'il fallait, et le fleuve était perdu dès 171.
+  const a171 = partSurfaceEau(plansEauRetenus(lacs, { cellM, blocM: z.extentMeters, largeurMinM: 171 }), dem.size)
+  assert.ok(a171 > PLAFOND_PLAINES, `à 171 m Dijon ne peint plus que ${(a171 * 100).toFixed(2)} % — le mur historique a bougé`)
 })
+
+// ⚠️ LE FLEUVE N'A PLUS DE NAPPE — SUR LES DEUX FIXTURES DU RHÔNE, ET À ZÉRO.
+// Le plafond de 0,5 % ci-dessus tolère un résidu ; ici on exige le vide. C'est
+// la formulation littérale de la consigne (« ne doit plus JAMAIS se poser sur
+// un cours d'eau »), et elle mérite d'être testée telle quelle.
+for (const nom of ['rhone-valence', 'rhone-fin']) {
+  const z = zone(nom)
+  test(`${nom} (${z.quoi}) : le fleuve n’a plus AUCUNE étendue animée`, () => {
+    const { retenus } = eauDe(z)
+    assert.equal(
+      retenus.length,
+      0,
+      `${nom} : ${retenus.length} étendue(s) restante(s) — ${retenus.map((r) => `${r.lac.elevM} m / ${Math.round(r.mesure.largeurM)} m`).join(', ')}`
+    )
+  })
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LE PLANCHER — et les vrais lacs restent des lacs
@@ -420,28 +449,120 @@ test('une dentelle d’un pixel de large est mesurée comme telle', () => {
   assert.equal(plansEauRetenus([{ cells: Int32Array.from(cellules), size, elevM: 300 }], { cellM: 100 }).length, 0)
 })
 
-// ⚠️ LE TÉMOIN DU FLEUVE, ET IL EST ANALYTIQUE À DESSEIN. Aucune fixture ne
-// peut le tenir : le Rhône se découpe en biefs de moins de 3 km sur du
-// terrarium brut, alors qu'il ressort d'un seul tenant sur le MNT rééchantillonné
-// de la production (mesuré au navigateur : 16,4 km de long, 170 m de large à
-// z12 et 173 m à z14, gardé aux deux). On rejoue donc SA GÉOMÉTRIE MESURÉE, à
-// deux pas au sol, et on exige qu'elle passe — pendant qu'une dentelle de la
-// même vallée (64 à 81 m) est refusée aux deux.
+// ⚠️ LE TÉMOIN DU FLEUVE, ET IL A CHANGÉ DE SIGNE LE 2026-08-02.
+//
+// Il est analytique à dessein : aucune fixture ne peut le tenir, le Rhône se
+// découpe en biefs de moins de 3 km sur du terrarium brut alors qu'il ressort
+// d'un seul tenant sur le MNT rééchantillonné de la production (mesuré au
+// navigateur : 16,4 km de long, 170 m de large à z12, 173 m à z14). On rejoue
+// donc SA GÉOMÉTRIE MESURÉE, à deux pas au sol.
+//
+// 🔴 CE TEST EXIGEAIT QUE LE FLEUVE PASSE. Il exige maintenant qu'il soit
+// REFUSÉ — « la nappe d'eau animée ne doit plus jamais se poser sur un cours
+// d'eau », Adrien. Ce n'est pas un test qu'on a affaibli pour faire passer une
+// modification : c'est la décision produit, écrite à l'endroit exact où la
+// décision inverse était écrite. Le trait bleu vectoriel de
+// src/map/water-layer.js reste, lui, et c'est la source juste pour un fleuve.
+//
+// ⚠️ SI CE TEST ROUGIT EN DISANT « le fleuve a retrouvé sa nappe », ne le
+// retouche pas : c'est LARGEUR_MIN_M qui est redescendu sous 173 m.
 for (const cellM of [13.5, 3.4]) {
-  test(`un fleuve de 170 m de large et 16 km de long reste de l’eau (pas ${cellM} m)`, () => {
+  test(`un fleuve de 170 m de large n’a plus de nappe animée (pas ${cellM} m)`, () => {
+    // ⚠️ LE RUBAN EST DÉCOLLÉ DU BORD DE GRILLE, D'UNE CELLULE SUR LES QUATRE
+    // CÔTÉS. `mesurePlanEau` ignore délibérément les bords de grille (un lac à
+    // cheval sur deux blocs ne doit pas voir sa tranche comptée comme du
+    // rivage) : un ruban posé dans le coin ne fait donc compter que DEUX de ses
+    // quatre côtés, et sa largeur mesurée sort DOUBLÉE — 347 m pour un fleuve
+    // de 170. La version d'avant ce correctif était collée au coin, et le
+    // témoin passait pour cette raison-là autant que pour la bonne.
     const ruban = (largeurM, longueurM) => {
-      const size = Math.ceil((longueurM * 1.1) / cellM)
       const w = Math.max(1, Math.round(largeurM / cellM))
       const h = Math.max(1, Math.round(longueurM / cellM))
+      const size = Math.max(w, h) + 2
       const cells = []
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) cells.push(y * size + x)
+      for (let y = 1; y <= h; y++) for (let x = 1; x <= w; x++) cells.push(y * size + x)
       return { cells: Int32Array.from(cells), size, elevM: 104 }
     }
     const opts = { cellM, blocM: 20000 }
-    assert.equal(plansEauRetenus([ruban(170, 16400)], opts).length, 1, 'le Rhône a été refusé')
+    assert.equal(plansEauRetenus([ruban(170, 16400)], opts).length, 0, 'le Rhône a gardé sa nappe')
+    assert.equal(plansEauRetenus([ruban(173, 16400)], opts).length, 0, 'le Rhône à z14 a gardé sa nappe')
     assert.equal(plansEauRetenus([ruban(70, 4000)], opts).length, 0, 'une dentelle a été acceptée')
+    // …et un vrai lac de la largeur du plus étroit qu'on protège passe toujours.
+    // Sans cette moitié, le test serait satisfait par un seuil infini.
+    assert.equal(plansEauRetenus([ruban(284, 3477)], opts).length, 1, 'le lac du Sognefjord a été refusé')
   })
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🔴 LE CRITÈRE DE FORME — MESURÉ, REFUSÉ, ET VERROUILLÉ ICI
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// « Un lac est compact, un cours d'eau ne l'est pas : écartons les composantes
+// allongées. » L'idée revient à chaque tentative, et un rapport antérieur
+// (branche `tour-2km`) annonçait la séparation — vrais lacs 0,65-0,91,
+// dentelles 0,27-0,64. Ce rapport n'avait mesuré QUE le lac d'Annecy.
+//
+// Ce test refait la mesure sur les vraies fixtures et verrouille l'échec, pour
+// que la quatrième tentative n'ait pas à le redécouvrir. La raison de fond
+// tient en une phrase : **un lac de barrage EST un fleuve barré**. Serre-Ponçon
+// a la forme d'un fleuve parce que c'en est un.
+test('le remplissage d’enveloppe ne sépare PAS les lacs des dentelles', () => {
+  const enveloppeDe = (nom, elevM) => {
+    const z = zone(nom)
+    const dem = chargeRelief(z)
+    const cellM = z.extentMeters / (dem.size - 1)
+    const lacs = detectLakes(dem)
+    const retenus = plansEauRetenus(lacs, { cellM, blocM: z.extentMeters, largeurMinM: LARGEUR_AVANT_M })
+    if (elevM == null) return retenus.map((r) => remplissageEnveloppe(r.lac))
+    const l = retenus.find((r) => Math.abs(r.lac.elevM - elevM) <= 2)
+    assert.ok(l, `${nom} : composante à ${elevM} m introuvable`)
+    return remplissageEnveloppe(l.lac)
+  }
+
+  const serrePoncon = enveloppeDe('serre-poncon', 771)
+  const annecy = enveloppeDe('annecy-z12', 444)
+  const dentelles = enveloppeDe('dijon-large', null)
+  assert.equal(dentelles.length, 14, 'la fixture de Dijon ne porte plus ses 14 dentelles')
+
+  // ① Serre-Ponçon — un VRAI lac — est moins compact que la grande majorité des
+  //    dentelles. Un seuil qui vide Dijon l'assèche d'abord.
+  const plusCompactesQueSerrePoncon = dentelles.filter((e) => e > serrePoncon).length
+  assert.ok(
+    plusCompactesQueSerrePoncon >= 12,
+    `Serre-Ponçon (${serrePoncon.toFixed(3)}) n'est dépassé que par ${plusCompactesQueSerrePoncon} dentelles sur 14 : ` +
+      `le classement a changé, refais la mesure avant de conclure quoi que ce soit`
+  )
+  // ② et la pire dentelle est AU MOINS aussi compacte que le lac d'Annecy :
+  //    les deux camps se touchent, il n'y a pas d'intervalle où poser un seuil.
+  assert.ok(
+    Math.max(...dentelles) >= annecy - 0.01,
+    `la pire dentelle (${Math.max(...dentelles).toFixed(3)}) est passée sous Annecy (${annecy.toFixed(3)})`
+  )
+})
+
+// La mesure d'enveloppe elle-même, sur des témoins analytiques : si elle se
+// casse, le test ci-dessus deviendrait vrai pour une mauvaise raison.
+test('le remplissage d’enveloppe vaut 1 sur un disque plein et s’effondre sur un ruban', () => {
+  const size = 128
+  const carre = []
+  for (let y = 20; y < 80; y++) for (let x = 20; x < 80; x++) carre.push(y * size + x)
+  assert.ok(remplissageEnveloppe({ cells: Int32Array.from(carre), size }) > 0.99, 'un carré plein remplit son enveloppe')
+
+  // un « L » : l'enveloppe convexe coupe l'angle rentrant, le remplissage tombe
+  const equerre = []
+  for (let y = 20; y < 100; y++) for (let x = 20; x < 30; x++) equerre.push(y * size + x)
+  for (let y = 90; y < 100; y++) for (let x = 30; x < 100; x++) equerre.push(y * size + x)
+  const e = remplissageEnveloppe({ cells: Int32Array.from(equerre), size })
+  assert.ok(e > 0.2 && e < 0.45, `équerre : ${e.toFixed(3)}, attendu ~0,3`)
+
+  // et jamais de division par zéro sur une composante d'une cellule de large,
+  // qui n'a pas d'enveloppe d'aire non nulle si on la mesure sur les centres
+  const trait = []
+  for (let x = 5; x < 120; x++) trait.push(60 * size + x)
+  const t = remplissageEnveloppe({ cells: Int32Array.from(trait), size })
+  assert.ok(t > 0 && t <= 1, `un trait d'une cellule : ${t} — doit rester borné`)
+  assert.equal(remplissageEnveloppe({ cells: Int32Array.from([]), size }), 0)
+})
 
 // ⚠️ LE TAMPON DE MARQUAGE EST PARTAGÉ ENTRE LACS, et il doit être rendu propre.
 // Un seul bit oublié et le lac suivant verrait un voisin fantôme : son périmètre

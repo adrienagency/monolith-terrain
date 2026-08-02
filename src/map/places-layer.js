@@ -94,7 +94,11 @@ export class PlacesLayer {
     if (id !== this._buildId || dem !== terrain.dem || !Array.isArray(rows)) return
 
     const zoom = params.demZoom ?? 8
-    const density = params.placesDensity ?? 1
+    // PLUS DE `params.placesDensity`. Adrien, 2026-08-02 : « ça reste comme
+    // c'est au lancement par défaut ». Le défaut valait 1, donc le multiplicateur
+    // a disparu des plafonds `maxN` ci-dessous plutôt que d'y rester figé à 1 :
+    // une multiplication par une constante neutre est une invitation à la
+    // remettre en réglage, et le calcul se lit mieux sans elle.
     // These caps are a coarse world-space PRE-filter that runs before the
     // precise screen-space declutter below (_declutter() / spriteScreenSize()).
     // They used to be tuned against cities5000 truncated to the top 40k by
@@ -133,7 +137,7 @@ export class PlacesLayer {
     // nombre de mètres sur une emprise (`geo.demSpan`). Sa portée géographique
     // est donc déjà la bonne.
     const cote = dem?.empriseCote > 1 ? dem.empriseCote : 1
-    const maxN = Math.round((zoom >= 13 ? 90 : zoom >= 11 ? 60 : zoom >= 9 ? 40 : zoom >= 7 ? 24 : 12) * density * cote * cote)
+    const maxN = Math.round((zoom >= 13 ? 90 : zoom >= 11 ? 60 : zoom >= 9 ? 40 : zoom >= 7 ? 24 : 12) * cote * cote)
     const minDist = TERRAIN_SIZE * (zoom >= 12 ? 0.02 : zoom >= 10 ? 0.03 : zoom >= 9 ? 0.04 : 0.06)
     let picks = pickPlaces(rows, { zoom, toWorld: (lat, lon) => latLonToWorld(dem, lat, lon), halfLimit: HALF * cote * 0.96, maxN, minDist })
     // zone isolée : on jette les villes hors du territoire découpé. Filtré ICI,
@@ -143,7 +147,8 @@ export class PlacesLayer {
     if (this.regionTest) picks = picks.filter((p) => this.regionTest(p.w.x, p.w.z))
     if (!picks.length) return
 
-    const sizeMul = params.placesSize ?? 1
+    // PLUS DE `params.placesSize` non plus, même raison et même défaut de 1 :
+    // `labelScale` seul décide de la taille d'un nom, comme au lancement.
     const dotGeo = new THREE.CircleGeometry(0.075, 12); dotGeo.rotateX(-Math.PI / 2)
 
     for (const p of picks) {
@@ -157,12 +162,24 @@ export class PlacesLayer {
       const fen = terrain.fenetre ?? ZERO
       const groundY = terrain.sample ? terrain.sample(p.w.x - fen.x, p.w.z - fen.z) : 0
       const labelY = groundY + CLEARANCE
-      const scale = labelScale(p.pop, p.cap) * sizeMul
+      const scale = labelScale(p.pop, p.cap)
       // shared with labelScale's tier so a place's colour darkness always
       // tracks the same importance ranking that picks its size
       const tier = placeTier(p.pop)
       const ink = labelInk(params.darkMode, tier)
-      const halo = params.placesHalo ? ink.halo : null
+      // PLUS DE HALO SUR LES NOMS DE LIEUX. Adrien, 2026-08-02 : « on enlève,
+      // par défaut pas de halo ». Ce n'est pas l'interrupteur qui est bloqué sur
+      // « non », c'est le halo qui est retiré du rendu.
+      //
+      // ⚠️ IL FAUT PASSER `halo: null` EXPLICITEMENT, et surtout pas omettre le
+      // champ : le défaut de `makeLabelTexture` est un anneau blanc à 95 %
+      // (text-label.js), donc ne rien passer REMETTRAIT le halo — l'inverse
+      // exact de la consigne, et en silence.
+      //
+      // `ink.halo` reste calculé par labelInk pour ses AUTRES appelants (voir
+      // gpx.js) et text-label.js garde toute sa mécanique, tenue par
+      // test/text-label.test.js. Ce qui disparaît, c'est la demande, pas la
+      // capacité.
       // NOTE: no background plate here. task 27 §2's plate was authorised
       // only for gpx.js's along-track village announcements (a name worth
       // the rider's attention right now, over a low/close camera) — it was
@@ -194,7 +211,7 @@ export class PlacesLayer {
       // screen-space scale).
       // 800/700, the top of Bricolage's real 200..800 axis — the names read too
       // thin at 600/700 and the ask was to bolden them, NOT to enlarge them.
-      const { tex, aspect } = makeLabelTexture(p.name.toUpperCase(), { color: ink.color, halo, weight: p.cap ? 800 : 700 })
+      const { tex, aspect } = makeLabelTexture(p.name.toUpperCase(), { color: ink.color, halo: null, weight: p.cap ? 800 : 700 })
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, depthWrite: false }))
       sprite.material.sizeAttenuation = false
       sprite.scale.set(BASE_H * scale * aspect, BASE_H * scale, 1)

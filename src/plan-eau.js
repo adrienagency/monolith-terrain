@@ -1,4 +1,4 @@
-// QUI A LE DROIT DE DEVENIR UNE SURFACE D'EAU ANIMÉE — et pourquoi la platitude
+﻿// QUI A LE DROIT DE DEVENIR UNE SURFACE D'EAU ANIMÉE — et pourquoi la platitude
 // ne suffit plus à le décider.
 //
 // Module PUR : ni DOM, ni three.js, ni fetch. Testable en node, et c'est la
@@ -98,17 +98,126 @@
 //   Serre-Ponçon, lac de barrage            | 369 m   | gardé
 //   Annecy, LE LAC                          | 820 m   | gardé
 //
-// Le seuil est posé à **150 m**, à peu près la moyenne géométrique des deux
-// camps (√(87 × 284) = 157) : un facteur ~2 de marge de chaque côté. C'est un
-// PLANCHER largement sous le premier vrai plan d'eau, pas une égalité — même
-// règle que scripts/verifie-dist.mjs, on attrape l'effondrement, pas le
-// frémissement.
+// Le seuil a longtemps été posé à **150 m**, à peu près la moyenne géométrique
+// des deux camps d'alors (√(87 × 284) = 157) : un facteur ~2 de marge de chaque
+// côté. C'est un PLANCHER largement sous le premier vrai plan d'eau, pas une
+// égalité — même règle que scripts/verifie-dist.mjs, on attrape l'effondrement,
+// pas le frémissement.
 //
-// CE QUE ÇA COÛTE, honnêtement : un vrai plan d'eau plus étroit que 150 m perd
-// sa surface ANIMÉE (vagues, reflet, écume). Il ne disparaît pas de la carte —
-// le calque vectoriel (src/map/water-layer.js, données OSM) continue de le
-// peindre, et c'est d'ailleurs la source JUSTE pour un cours d'eau.
-export const LARGEUR_MIN_M = 150
+// ═══════════════════════════════════════════════════════════════════════════
+// 🔴 LE 2026-08-02, ADRIEN A CHANGÉ LA QUESTION : « L'EFFET SUR LES LACS SEULEMENT »
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// « La nappe d'eau animée ne doit plus jamais se poser sur un COURS D'EAU. Les
+// fleuves et rivières gardent leur trait bleu vectoriel. »
+//
+// ⚠️ CE N'EST PAS UN RÉGLAGE DE SEUIL, C'EST LA LEVÉE DU MUR. Trois tentatives
+// avaient échoué sur une seule contrainte, écrite juste au-dessus : « il faut
+// 215 m de largeur pour vider Dijon, et le fleuve en fait 170 ». Les deux camps
+// se chevauchaient — MAIS SEULEMENT PARCE QU'IL FALLAIT GARDER LE FLEUVE. Du
+// jour où le Rhône doit lui aussi perdre sa nappe, le chevauchement disparaît :
+// il ne reste plus qu'un camp à refuser (dentelles ET cours d'eau) et un camp à
+// garder (les lacs). Aucun critère nouveau n'était nécessaire ; c'est la
+// CONSIGNE qui bloquait, pas la géométrie.
+//
+// BALAYAGE REFAIT SUR LES ONZE FIXTURES (2026-08-02, nombre d'étendues
+// retenues ; « ! » = un vrai lac a disparu) :
+//
+//   seuil  | dijon z11 | dijon z12 | annecy | serre-ponçon | sognefjord | Rhône
+//   -------|-----------|-----------|--------|--------------|------------|-------
+//   150 m  |    14     |     3     |   1    |      1       |     1      | gardé
+//   171 m  |     7     |     1     |   1    |      1       |     1      | refusé
+//   200 m  |     3     |     0     |   1    |      1       |     1      | refusé
+//   215 m  |     0     |     0     |   1    |      1       |     1      | refusé
+//   250 m  |     0     |     0     |   1    |      1       |     1      | refusé
+//   280 m  |     0     |     0     |   1    |      1       |     1      | refusé
+//
+// LES DEUX CAMPS, MESURÉS :
+//
+//   à REFUSER — la dentelle la plus large de chaque plaine
+//     Dijon z11 (la vue d'Adrien)  215 m   ← le plus large de tout le camp
+//     Dijon z12                    182 m
+//     Rhône fin (13,5 m/cellule)   108 m
+//     Rhône Valence                 81 m
+//     Paris-IdF                     87 m
+//     Camargue                      70 m
+//     Brest                         50 m
+//     et LE FLEUVE lui-même        170 m   (relevé à z12 comme à z14)
+//   ————————————————— la frontière —————————————————
+//   à GARDER — les vrais plans d'eau
+//     Sognefjord, lac à 1 060 m    284 m   ← le plus étroit du camp
+//     Serre-Ponçon                 369 m
+//     Annecy z12                   820 m
+//     Annecy z15                 1 032 m
+//
+// ⚠️ ET LES FIXTURES NE DONNENT PAS LE PIRE CAS. Vérifié à l'écran le
+// 2026-08-02, sur l'instance vivante (blocs 1 536² de production, mapterhorn),
+// en mesurant les DEUX seuils sur le même relief chargé :
+//
+//   lieu             |zoom| avant (150 m)      | après | largeurs des dentelles
+//   -----------------|----|--------------------|-------|-----------------------
+//   Dijon (la vue)   |z11 | 17 étendues 4,30 % |   0   | 154 … 201, **236**
+//   Dijon            |z12 |  6 étendues 2,64 % |   0   | 150 … 189
+//   Dijon nord       |z11 |  3 étendues        |   0   | … 168
+//
+// La dentelle la plus large de l'écran fait **236 m**, pas 215 : la fixture de
+// Dijon, cadrée autrement, ne portait pas le pire cas. Un seuil à 240 m
+// n'aurait laissé que 4 m de marge — un cadrage de plus et la dentelle
+// revenait. Les deux camps RÉELS sont donc 236 m et 284 m.
+//
+// Le seuil est posé à **250 m**. Même méthode qu'en v1, la moyenne géométrique
+// des deux camps (√(236 × 284) = 259), arrondie vers le bas comme 157 l'avait
+// été vers 150 — en cas de doute on préfère garder un plan d'eau de trop que
+// d'en assécher un. Il reste 6 % de marge au-dessus de la pire dentelle et
+// 14 % sous le plus étroit des vrais lacs.
+//
+// AVANT/APRÈS COMPLET, MESURÉ À L'ÉCRAN (part du bloc peinte en eau animée) :
+//
+//   lieu             |zoom| avant   | après   | verdict
+//   -----------------|----|---------|---------|---------------------------
+//   Dijon            |z11 |  4,30 % |  0,00 % | ✅ la plaine est vidée
+//   Dijon            |z12 |  2,64 % |  0,00 % | ✅
+//   Rhône (Valence)  |z12 |  1,12 % |  0,00 % | ✅ le fleuve perd sa nappe
+//   Rhône (Valence)  |z14 |  6,04 % |  0,00 % | ✅ idem, VOULU
+//   Annecy           |z12 |  6,47 % |  6,47 % | ✅ intact (1 037 m de large)
+//   Annecy           |z15 | 72,36 % | 72,36 % | ✅ intact (1 090 m)
+//   Léman            |z12 | 54,72 % | 54,72 % | ✅ intact (8 167 m)
+//   Léman            |z15 |100,00 % |100,00 % | ✅ intact
+//   Serre-Ponçon     |z12 |  6,07 % |  6,07 % | ✅ intact (284 et 516 m)
+//   Serre-Ponçon     |z15 | 37,32 % | 37,32 % | ✅ intact (763 m)
+//   Brest            |z12 |  0,00 % |  0,00 % | ✅ déjà propre, pas de recul
+//   Flevoland        |z12 |  0,00 % |  0,00 % | ✅ le polder reste sec
+//
+// AUCUN lac ne bouge. Les seules lignes qui changent sont les plaines et le
+// fleuve — c'est exactement, et seulement, la demande.
+//
+// ⚠️ LA LIGNE LA PLUS SERRÉE DE CE TABLEAU EST SERRE-PONÇON À z12 : son bras
+// étroit mesure 284 m contre un seuil de 250. C'est le vrai plan d'eau le plus
+// menacé du monde connu, et c'est lui qu'il faut rouvrir en premier si
+// quelqu'un veut remonter le seuil.
+//
+// ⚠️ ET LA MARGE EST MINCE, IL FAUT LE DIRE : 1,20× entre les deux camps réels
+// (236 et 284), là où la v1 en avait 3,3×. Ce n'est pas un plancher
+// confortable, c'est un couloir. Concrètement : si quelqu'un recuit les
+// fixtures à un pas au sol plus fin, les dentelles ne s'élargiront PAS (une
+// bande vaut 1 m ÷ pente, en mètres, cf. plus haut) — mais un lac de montagne
+// étroit, lui, passe sous le seuil. C'est le coût assumé, et
+// test/garde-plans-eau.test.js le surveille aux DEUX bornes, jamais à une seule.
+//
+// CE QUE ÇA COÛTE, honnêtement : tout plan d'eau plus étroit que 250 m perd sa
+// surface ANIMÉE (vagues, reflet, écume) — les fleuves et rivières de France
+// sans exception, et les petits lacs de montagne avec eux. Rien ne disparaît de
+// la carte pour autant : le calque vectoriel (src/map/water-layer.js, données
+// OSM) continue de les peindre, et c'est d'ailleurs la source JUSTE pour un
+// cours d'eau, celle qu'Adrien a désignée.
+//
+// ⚠️ CE QUE ÇA NE FAIT PAS, et personne ne doit le découvrir à l'écran : un
+// fleuve de PLUS de 250 m de large garde sa nappe. La Loire à son estuaire,
+// l'Amazone, le Danube. Aucun critère de forme ne les sépare d'un lac de
+// barrage — c'est mesuré, pas supposé, voir `remplissageEnveloppe` juste en
+// dessous : Serre-Ponçon EST un fleuve barré, il en a exactement la géométrie.
+// Sur la France, où la consigne a été donnée, le compte est bon.
+export const LARGEUR_MIN_M = 250
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ET LE PLANCHER DE LONGUEUR, QUI EFFAÇAIT LES LACS QUAND ON ZOOMAIT
@@ -220,6 +329,120 @@ export function mesurePlanEau(lac, cellM, marque) {
     // pas une division par zéro.
     largeurM: perimetre > 0 ? (2 * n * cellM) / perimetre : Infinity,
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🔴 LE REMPLISSAGE D'ENVELOPPE — MESURÉ, ET REFUSÉ. NE LE RÉESSAIE PAS.
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// L'idée est séduisante et elle revient à chaque tentative : « un lac est
+// COMPACT, un cours d'eau ne l'est pas ; écartons les composantes allongées ».
+// Un rapport antérieur (branche `tour-2km`) annonçait même la séparation :
+// vrais lacs 0,65-0,91, dentelles 0,27-0,64, Rhône 0,11.
+//
+// ⚠️ CE RAPPORT EST FAUX PARCE QU'IL EST INCOMPLET : il n'avait mesuré que le
+// lac d'Annecy. Refait ici sur les ONZE fixtures (scripts/mesure-enveloppe.mjs,
+// 2026-08-02), le classement s'effondre :
+//
+//   objet                              | enveloppe | verdict attendu
+//   -----------------------------------|-----------|----------------
+//   Annecy z15                         |   0,897   | À GARDER
+//   Annecy z12                         |   0,644   | À GARDER
+//   dentelles de Dijon (14, z11)       | 0,271-0,644 | à refuser
+//   dentelles de Dijon (3, z12)        | 0,283-0,704 | à refuser
+//   Sognefjord, lac à 1 060 m          |   0,529   | À GARDER
+//   🔴 Serre-Ponçon, lac de barrage    |   0,260   | À GARDER
+//
+// TROIS RECOUVREMENTS, chacun fatal à lui seul :
+//   · Annecy z12 (0,644) est À ÉGALITÉ avec la pire dentelle de Dijon (0,644) ;
+//   · une dentelle de Dijon z12 monte à 0,704, AU-DESSUS d'Annecy z12 ;
+//   · et Serre-Ponçon, à 0,260, est MOINS compact que 13 des 14 dentelles.
+//
+// Ce dernier point n'est pas un accident de mesure, c'est la nature de l'objet :
+// **un lac de barrage EST un fleuve barré**. Il a la forme d'un fleuve, il
+// serpente dans une vallée, il est long et fin. Aucune mesure de compacité ne
+// peut le distinguer d'un cours d'eau, parce qu'il n'en est pas distinct.
+// L'élongation (longueur/largeur) échoue pour la même raison : Serre-Ponçon
+// vaut 45, la plus allongée des dentelles de Dijon 45 aussi.
+//
+// CETTE FONCTION EST DONC GARDÉE POUR UNE SEULE RAISON : le test
+// « le remplissage d'enveloppe ne sépare pas Serre-Ponçon des dentelles »
+// de test/garde-plans-eau.test.js s'en sert pour VERROUILLER ce résultat
+// négatif. Sans lui, la quatrième tentative recommencerait le même calcul.
+// Elle n'est appelée par aucun chemin de rendu.
+//
+// ⚠️ ENVELOPPE CONVEXE, PAS BOÎTE ENGLOBANTE. Le remplissage de BOÎTE a déjà
+// été mesuré et il échoue (cf. le garde-fou en tête de lake.js) : une dentelle
+// qui serpente en diagonale remplit très bien la boîte qui la contient, parce
+// que la boîte, elle, ne serpente pas. L'enveloppe convexe épouse la forme :
+// c'est la plus petite région convexe qui contient l'étendue, et le rapport
+// aire/enveloppe dit exactement « à quel point cette tache est-elle pleine ».
+//
+// L'ENVELOPPE EST CALCULÉE SUR LES COINS DES CELLULES, pas sur leurs centres.
+// Sur les centres, une composante d'une cellule de large donne une enveloppe
+// d'aire NULLE — donc un remplissage infini, donc une dentelle acceptée. Sur
+// les coins, chaque cellule est un carré unité, l'enveloppe contient toujours
+// toutes les cellules, et le rapport reste borné par 1 par construction.
+//
+// ⚠️ SEULS LES EXTRÊMES DE CHAQUE LIGNE SONT CANDIDATS. Un sommet d'enveloppe
+// convexe est nécessairement le plus à gauche ou le plus à droite de sa ligne :
+// un point qui a des cellules des deux côtés est déjà dans le segment qui les
+// joint. On passe donc de 36 000 points (le lac d'Annecy) à deux par ligne,
+// sans changer d'un iota le résultat.
+export function remplissageEnveloppe(lac) {
+  const { cells, size } = lac
+  const n = cells.length
+  if (!n) return 0
+  let minY = size, maxY = -1
+  for (const c of cells) {
+    const y = (c / size) | 0
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+  }
+  const hauteur = maxY - minY + 1
+  const gauche = new Int32Array(hauteur).fill(size)
+  const droite = new Int32Array(hauteur).fill(-1)
+  for (const c of cells) {
+    const y = ((c / size) | 0) - minY
+    const x = c % size
+    if (x < gauche[y]) gauche[y] = x
+    if (x > droite[y]) droite[y] = x
+  }
+  const pts = []
+  for (let y = 0; y < hauteur; y++) {
+    if (droite[y] < 0) continue // ligne vide : une composante peut être en U
+    const yy = y + minY
+    pts.push([gauche[y], yy], [gauche[y], yy + 1], [droite[y] + 1, yy], [droite[y] + 1, yy + 1])
+  }
+  const aireEnv = aireEnveloppeConvexe(pts)
+  return aireEnv > 0 ? Math.min(1, n / aireEnv) : 1
+}
+
+/** Chaîne monotone d'Andrew, puis lacet de Gauss. Rien d'exotique, mais écrit
+ *  ici plutôt qu'importé : le module doit rester PUR et sans dépendance, c'est
+ *  ce qui permet au garde-fou de l'interroger hors ligne. */
+function aireEnveloppeConvexe(pts) {
+  if (pts.length < 3) return 0
+  pts.sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const croix = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+  const bas = []
+  for (const p of pts) {
+    while (bas.length >= 2 && croix(bas[bas.length - 2], bas[bas.length - 1], p) <= 0) bas.pop()
+    bas.push(p)
+  }
+  const haut = []
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i]
+    while (haut.length >= 2 && croix(haut[haut.length - 2], haut[haut.length - 1], p) <= 0) haut.pop()
+    haut.push(p)
+  }
+  bas.pop()
+  haut.pop()
+  const hull = bas.concat(haut)
+  if (hull.length < 3) return 0
+  let deux = 0
+  for (let i = 0, j = hull.length - 1; i < hull.length; j = i++) deux += hull[j][0] * hull[i][1] - hull[i][0] * hull[j][1]
+  return Math.abs(deux) / 2
 }
 
 /**

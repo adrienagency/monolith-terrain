@@ -1,4 +1,4 @@
-/* Race Studio — miroir de la boutique : colonne de travail à GAUCHE, le
+﻿/* Race Studio — miroir de la boutique : colonne de travail à GAUCHE, le
    cadre 3D prend tout l'espace à DROITE. Mêmes tokens --st-* (papier ShibuMap),
    même chorégraphie morph (body.morph-anim, voir panel-morph.js). */
 
@@ -19,7 +19,7 @@ body.studio-mode {
 /* iso + ciné suivent le cadre (décalé à droite en studio) */
 body.studio-mode .ce-isobtn { right: 36px; bottom: 48px; }
 body.studio-mode .ce-cinebtn { right: 86px; }
-body.studio-mode .ce-pilotebtn { right: 136px; }
+/* PLUS de .ce-pilotebtn : bouton de la camera pilote retire le 2026-08-02 (code garde, voir src/ui/bars.js) */
 
 .studio-col {
   position: fixed; top: 0; left: 0; bottom: 0; z-index: 40;

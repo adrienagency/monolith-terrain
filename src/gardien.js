@@ -779,7 +779,7 @@ export const PROTECTIONS = [
     identifiant: 'PALIERS',
     protege: 'la première image, avant tout rendu',
     contre: 'un démarrage au maximum sur une machine qui ne suit pas (47 s de ventilateur mesurées le 28/07/2026 sur un iMac 27" 2015)',
-    critere: 'classe de carte graphique × charge de pixels de l’écran → 4 paliers, chacun portant densité, budget de pixels, ombres, SSAO, bloom, DOF, grain, damierMax, analyseMax',
+    critere: 'classe de carte graphique × charge de pixels de l’écran → 4 paliers, chacun portant densité, budget de pixels, ombres, SSAO, DOF, grain, damierMax, analyseMax',
     pur: true,
   },
   {

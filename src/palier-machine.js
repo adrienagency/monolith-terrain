@@ -1,4 +1,4 @@
-// PALIER MACHINE — estimer ce que l'ordinateur du visiteur sait afficher,
+﻿// PALIER MACHINE — estimer ce que l'ordinateur du visiteur sait afficher,
 // AVANT le premier rendu, et lui servir le bon palier tout de suite.
 //
 // ---------------------------------------------------------------------------
@@ -111,7 +111,11 @@ export const PALIERS = [
     ombres: 'dynamic',
     ombresRes: 1024, // 2048 avant le 28/07 — voir « LA CARTE D'OMBRES » plus haut
     ssao: false, // true avant le 28/07 — voir « L'OCCLUSION AMBIANTE » plus haut
-    bloom: true,
+    // PLUS de colonne `bloom` dans AUCUN palier : la passe de bloom a été
+    // retirée du produit le 2026-08-02 (Adrien : « inutile, on retire »). Elle
+    // valait true/true/true/false — le halo tenait jusqu'au palier plancher.
+    // Une colonne qui décrit une passe qui n'existe plus est une ligne de
+    // budget fantôme, et ce tableau ne sert qu'à condition d'être exact.
     dof: true,
     grain: true,
     verreMer: 6, // taps du verre de mer (MeshTransmissionMaterial)
@@ -129,7 +133,6 @@ export const PALIERS = [
     ombres: 'dynamic', // encore dynamiques : c'est le mouvement du soleil qui fait la carte
     ombresRes: 1024, // idem palier 0 — voir « LA CARTE D'OMBRES » plus haut
     ssao: false, // idem palier 0 — voir « L'OCCLUSION AMBIANTE » plus haut
-    bloom: true,
     dof: true,
     grain: true,
     verreMer: 4,
@@ -149,7 +152,6 @@ export const PALIERS = [
     ombres: 'static',
     ombresRes: 1024,
     ssao: false,
-    bloom: true, // le halo tient jusqu'au plancher : il porte la lumière du couchant
     dof: false,
     grain: true,
     verreMer: 2,
@@ -167,7 +169,6 @@ export const PALIERS = [
     ombres: 'off',
     ombresRes: 1024,
     ssao: false,
-    bloom: false,
     dof: false,
     grain: false,
     verreMer: 2,
