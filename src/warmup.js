@@ -58,6 +58,35 @@
 // Autrement dit : le module censé supprimer le gel du démarrage ne servait plus
 // à rien, en silence. Sonder ici coûte vingt lignes et rend le cas testable.
 //
+// ⚠️⚠️ OÙ REPRODUIRE CE DÉFAUT — ET SURTOUT OÙ NE PAS LE CHERCHER.
+// C'est la partie qui coûte le plus de temps à qui reprend le sujet, parce que
+// la combinaison qui échoue est étroite et que TOUTES les autres rendent un
+// faux négatif rassurant. MESURÉ le 31/07/2026 (RTX 3080, ANGLE D3D11, Chrome
+// headless 1280×800, n=6 par cas) en servant la version pré-correctif à la
+// place de celle-ci :
+//
+//   • SERVEUR DE DEV (`npm run dev`) : ne reproduit JAMAIS. Aucune zone, aucun
+//     mode, {ok:true} à tous les coups. Tout y est plus lent et plus étalé, et
+//     la course des matériaux libérés ne se gagne pas. Chercher là est une
+//     heure perdue — il FAUT `vite build` puis servir `dist/`.
+//   • DÉMARRAGE NU (`/?f3=0`, sans lien de partage) + BUILD DE PRODUCTION :
+//     reproduit 4 fois sur 6. {ok:false, raison:'delai'}×4 contre {ok:true}×2,
+//     et premier dessin 7 607 ms — contre 3 430 ms avec la garde ci-dessous,
+//     où les 6 démarrages rendent {ok:true} et zéro TypeError.
+//   • AVEC UN LIEN `#s=` (Chamonix 45.92/6.87 z12, La Réunion −21.13/55.53
+//     z13) : ne reproduit pas, et c'est STRUCTUREL — un lien de partage boote
+//     DIRECTEMENT sur sa zone, donc sans la transition Annecy→zone qui
+//     remplace les dalles. Or ce sont ces libérations-là qui gagnent la course.
+//     Demander une repro « sur telle zone » est donc une impasse par
+//     construction, pas un manque de chance.
+//   • EN `?f3=1` : jamais vu échouer (0/6, et 0/10 sur une passe antérieure).
+//     La fenêtre 3×3 ne libère pas les mêmes matériaux au démarrage.
+//
+// Donc : build de production + démarrage nu + f3=0, et rien d'autre.
+// `node scripts/sonde-demarrage.mjs` fait cette mesure de bout en bout et rend
+// le verdict chiffré ; c'est lui qu'il faut lancer avant/après toute
+// intervention sur ce module, sur la chaîne de rendu ou sur le premier dessin.
+//
 // Module sans DOM ni three : `renderer` n'est qu'un objet portant `compile`,
 // `properties.get` et `setRenderTarget`, donc tout est testable en node.
 
