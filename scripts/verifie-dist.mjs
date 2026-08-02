@@ -44,12 +44,35 @@
 // Relevé du 2026-07-31, pour situer les marges :
 //   bathy 21 557 · coast-z6 2 361 · lake-tiles 2 256 · water-tiles 488 ·
 //   map/cells 5 140
+// Relevé du 2026-08-02 : sol 78 070 (dont le socle mondial z8-z9, 76 060).
+//
+// ═══════════════════════════════════════════════════════════════════════════
+// POURQUOI `data/sol` A REJOINT LA LISTE LE 2026-08-02
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// L'occupation du sol n'y était PAS, et c'était juste : elle ne couvrait que
+// trois zones (Mont-Blanc, Nice, Paris). Hors de ces zones le client lisait le
+// manifeste, ne trouvait rien, ÉTEIGNAIT l'interrupteur et le disait. L'absence
+// était donc gérée, et un `dist/` amputé de cette couche se voyait tout de
+// suite : la couche n'existait plus, personne ne pouvait croire le contraire.
+//
+// ⚠️ LE SOCLE MONDIAL z8-z9 A CHANGÉ CE CONTRAT. Toute vue tombe désormais dans
+// une zone cuite : le client n'éteint plus jamais l'interrupteur, il PROMET de
+// la donnée partout. Si `dist/` part sans les tuiles mais avec le manifeste —
+// et le manifeste, lui, ne fait que 2 Ko, il survit à tout — l'interrupteur
+// reste allumé devant une carte strictement inchangée. C'est mot pour mot la
+// panne que ce fichier existe pour empêcher, et c'est maintenant le plus gros
+// poste de `dist/` qui peut la produire.
+//
+// Le plancher est volontairement bas (60 000 pour 78 070 relevés) : la
+// couverture va grandir, et ce qu'on attrape ici c'est le zéro, pas la marge.
 const PLANCHERS = {
   'data/bathy': 20000,
   'data/coast-z6': 2000,
   'data/lake-tiles': 2000,
   'data/water-tiles': 400,
   'data/map/cells': 4000,
+  'data/sol': 60000,
 }
 
 import { readdirSync, statSync, existsSync, lstatSync } from 'node:fs'

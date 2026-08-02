@@ -4852,7 +4852,8 @@ async function refreshSol() {
   // déjà écrit pour la photo aérienne — « leaving the toggle on while nothing
   // renders is the worst of both ».
   const index = await chargeIndexSol()
-  if (!zoneSolPour(index, bounds)) {
+  const zone = zoneSolPour(index, bounds)
+  if (!zone) {
     couchesActives.delete('occupation-sol')
     terrain.setSol(null)
     solAttribution = null
@@ -4862,7 +4863,11 @@ async function refreshSol() {
     return
   }
 
-  const built = await solLayer.build(bounds)
+  // ⚠️ LE PLAFOND DE LA ZONE, PAS CELUI DE LA COUCHE. Le socle mondial n'est
+  // cuit qu'en z8-z9 ; sans ce passage de témoin, une vue rapprochée sur le
+  // Kansas demanderait du z14 jamais écrit et n'afficherait rien, interrupteur
+  // allumé. Les zones fines (Mont-Blanc, Nice, Paris) gardent leur z14.
+  const built = await solLayer.build(bounds, { zmax: zone.zmax })
   if (built === SUPERSEDED) return // une construction plus récente a pris la main
   terrain.setSol(built)
   solAttribution = built?.tuilesVues ? built.attribution : null
