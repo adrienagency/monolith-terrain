@@ -82,6 +82,38 @@ export function opaciteSol(v) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// HAUTEUR DE CANOPÉE — LA MÊME TIRETTE, ET C'EST VOLONTAIRE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Même nom (« Force »), même course (0 à 4), même défaut (2) que l'occupation
+// du sol. Ce n'est pas une recopie faute d'idée : les deux couches sont des
+// lavis drapés qui modulent la même chose au même endroit du nuanceur, et deux
+// courses différentes obligeraient à réapprendre le bouton en changeant de ligne
+// dans le panneau. Un réglage qui se comporte pareil doit se graduer pareil.
+//
+// ⚠️ CE QUE LA COURSE HAUTE SERT ICI N'EST PAS CE QU'ELLE SERT LÀ-BAS, et ça
+// vaut d'être su avant de retoucher les chiffres. Pour l'occupation du sol,
+// pousser la tirette amène les classes FAIBLES (la prairie) à saturation et
+// resserre la hiérarchie boisé/ouvert. Ici, elle amène les COUVERTS BAS —
+// taillis, jeunes plantations — à peser autant que la futaie. Dans les deux cas
+// monter le bouton APLATIT la lecture ; c'est le comportement attendu d'un « je
+// veux voir plus fort », et c'est pour ça que le défaut n'est pas la butée.
+//
+// Ce qu'aucune valeur de tirette ne peut faire revenir, en revanche, c'est le
+// sol nu : sous 2 m la force est nulle DANS LA TABLE (voir CANOPEE_SOL_NU dans
+// src/canopee.js), et multiplier zéro par 4 rend zéro. C'est délibéré — c'est ce
+// qui empêche la tirette de ramener le voile paille sur toutes les cultures du
+// monde, que la rampe de force a justement été écrite pour éviter.
+export const CANOPEE_FORCE_DEFAUT = 2
+export const CANOPEE_FORCE_MAX = 4
+
+/** La tirette « Force » → `uCanopeeOpacite`. */
+export function opaciteCanopee(v) {
+  if (!Number.isFinite(v)) return CANOPEE_FORCE_DEFAUT
+  return Math.max(0, Math.min(CANOPEE_FORCE_MAX, v))
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // LUMIÈRES NOCTURNES — LES DEUX TIRETTES DEMANDÉES
 // ═══════════════════════════════════════════════════════════════════════════
 //

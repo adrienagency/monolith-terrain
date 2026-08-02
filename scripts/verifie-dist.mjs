@@ -66,6 +66,31 @@
 //
 // Le plancher est volontairement bas (60 000 pour 78 070 relevés) : la
 // couverture va grandir, et ce qu'on attrape ici c'est le zéro, pas la marge.
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠️ POURQUOI `data/canopee` N'EST PAS DANS LA LISTE (2026-08-02)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// La hauteur de canopée est cuite et livrée (3 228 tuiles, 28,5 Mo). Elle n'a
+// pourtant PAS de plancher ici, et c'est le même raisonnement, appliqué à la
+// lettre, que celui qui a fait entrer `data/sol` juste au-dessus :
+//
+//   ⚠️ CE GARDE-FOU PROTÈGE UNE PROMESSE, PAS UNE DONNÉE.
+//
+// L'occupation du sol n'y était pas tant qu'elle ne couvrait que trois zones,
+// et elle y est entrée le jour du socle mondial — parce que ce jour-là toute vue
+// est tombée dans une zone cuite, donc le client a cessé de pouvoir dire non,
+// donc son interrupteur est devenu une PROMESSE tenue par des fichiers.
+//
+// La canopée en est au stade d'AVANT : trois zones (Mont-Blanc, Landes, Paris).
+// Hors d'elles, `refreshCanopee` lit le manifeste, ne trouve rien, ÉTEINT
+// l'interrupteur et l'écrit à l'écran. Un `dist/` amputé de ces tuiles ne
+// produit donc pas la panne silencieuse que ce fichier existe pour empêcher : il
+// produit une couche visiblement absente, qui se dit absente.
+//
+// ⚠️ LE JOUR OÙ UN SOCLE MONDIAL DE CANOPÉE EST CUIT, CETTE LIGNE DEVIENT
+// OBLIGATOIRE — et personne ne le remarquera tout seul, puisque rien ne casse.
+// Le déclencheur n'est pas « il y a beaucoup de tuiles », c'est « le manifeste
+// couvre une zone dont le client ne peut plus sortir ».
 const PLANCHERS = {
   'data/bathy': 20000,
   'data/coast-z6': 2000,

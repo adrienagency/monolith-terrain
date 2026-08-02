@@ -224,9 +224,32 @@ export const COUCHES = [
   {
     id: 'canopee',
     nom: 'Hauteur de canopée',
-    cout: 3,
-    aProduire: true,
-    note: 'texture drapée par dalle, mais LUE PAR LE PROCESSEUR : elle nourrit l’analyse de relief, qui gèle déjà le fil principal ~390 ms en 1536² (voir analyseMax dans la table des paliers).',
+    // ⚠️ 3 → 2, LE 2026-08-02, PARCE QUE LA COUCHE A CHANGÉ DE NATURE — et la
+    // note d'avant décrivait une couche qui n'a jamais existé.
+    //
+    // Elle annonçait « LUE PAR LE PROCESSEUR : elle nourrit l'analyse de
+    // relief ». C'était l'hypothèse d'une canopée qui aurait été du VOLUME :
+    // pour déformer la géométrie il aurait fallu ramener les hauteurs sur le fil
+    // principal et les mêler au MNT, d'où les 390 ms d'analyse invoqués.
+    //
+    // Cette hypothèse est morte, et elle est morte MESURÉE : 40 m de houppier
+    // valent 0,19 % de la largeur d'un bloc, et le maillage à z12 a un pas de
+    // 54 m au sol — une lisière tient sur UN sommet (le dossier complet est en
+    // tête de src/canopee.js). La couche est donc une COULEUR DRAPÉE, et une
+    // couleur drapée ne remonte jamais côté processeur : les octets vont du
+    // réseau au canevas au GPU sans qu'une seule hauteur soit lue en JavaScript.
+    //
+    // Son coût réel est donc EXACTEMENT celui des lumières nocturnes : une
+    // texture drapée par dalle du damier, plus une passe de mélange. La table de
+    // correspondance est une texture de 1 Ko partagée par toutes les dalles, et
+    // il n'y a PAS de pyramide de mips (coupée exprès, voir
+    // src/map/canopee-layer.js). C'est 2 parts.
+    //
+    // ⚠️ Laisser 3 n'aurait pas été « prudent » : une couche qui réclame plus
+    // qu'elle ne consomme fait refuser une VRAIE couche derrière elle sur les
+    // petites machines. Le Gardien existe pour dire juste, pas pour dire haut.
+    cout: 2,
+    note: 'une texture drapée par dalle, plus une passe de mélange par rampe de hauteur. Même charge que les lumières nocturnes : la donnée ne remonte jamais côté processeur (c’est une couleur, pas du relief — voir l’en-tête de src/canopee.js), la table de correspondance pèse 1 Ko, et il n’y a pas de pyramide de mips.',
   },
   {
     id: 'pistes-ski',

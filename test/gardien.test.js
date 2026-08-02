@@ -253,14 +253,26 @@ test('evaluerCouche : la marge de déblocage ne s’applique QU’au retour, jam
 // ═══════════ « QUE DOIS-JE ÉTEINDRE ? » ═════════════════════════════════════
 
 test('aRetirerPour propose le SACRIFICE LE PLUS PETIT qui suffise', () => {
-  // capacité 4 (ALLÉGÉ). Allumées : etoiles (1) + volcans (1) + lumières (2) = 4.
-  // On veut « canopee » (3) : il faut libérer 3 parts.
-  // Éteindre les lumières (2) ne suffit pas ; étoiles + volcans (2) non plus.
-  // La réponse minimale en NOMBRE de clics : lumières + une unité → 2 couches.
-  const r = aRetirerPour({ id: 'canopee', actives: ['etoiles', 'volcans', 'lumieres-nocturnes'], machine: PALIERS[2], gouverneur: { tier: 0, startTier: 0 } })
+  // capacité 4 (ALLÉGÉ). Allumées : etoiles (1) + volcans (1) + lumières (2) = 4,
+  // c'est-à-dire plein. Ajouter « occupation-sol » (3) demande donc de libérer
+  // 3 parts, et aucune couche allumée n'en rend 3 à elle seule.
+  //
+  // ⚠️ CE TEST INTERROGEAIT « canopee » ET SON COÛT EN DUR (3). Le 2026-08-02 la
+  // canopée est passée à 2 parts — elle s'est révélée être une couleur drapée et
+  // non du relief lu par le processeur (voir sa note au catalogue). Le test
+  // demandait alors 2 parts, ce que les lumières nocturnes rendent À ELLES
+  // SEULES : il ne testait plus « le sacrifice le plus petit quand il en faut
+  // deux », il testait le cas trivial, sans qu'une assertion ne rougisse.
+  //
+  // On vise donc la couche qui coûte VRAIMENT 3 aujourd'hui, et on lit le besoin
+  // depuis le catalogue plutôt que de le recopier : le jour où un autre coût
+  // bouge, ce test dira lequel au lieu de mentir.
+  const besoin = coutCouche('occupation-sol')
+  assert.equal(besoin, 3, 'le scénario suppose une couche à 3 parts ; sinon il ne teste plus rien')
+  const r = aRetirerPour({ id: 'occupation-sol', actives: ['etoiles', 'volcans', 'lumieres-nocturnes'], machine: PALIERS[2], gouverneur: { tier: 0, startTier: 0 } })
   assert.ok(r.length >= 1)
   const libere = r.reduce((s, id) => s + coutCouche(id), 0)
-  assert.ok(libere >= 3, `la proposition doit vraiment libérer la place (libère ${libere}, il en faut 3)`)
+  assert.ok(libere >= besoin, `la proposition doit vraiment libérer la place (libère ${libere}, il en faut ${besoin})`)
   for (const id of r) assert.ok(['etoiles', 'volcans', 'lumieres-nocturnes'].includes(id), `${id} n'est pas allumée`)
 })
 
