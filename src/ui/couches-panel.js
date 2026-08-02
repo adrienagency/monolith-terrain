@@ -1,4 +1,4 @@
-import { el, section, refreshAll } from './kit.js'
+import { el, section, slider, onRefresh, refreshAll } from './kit.js'
 import { Panel } from './shell.js'
 import { etatCouches, NON, OUI_MAIS, desarmeUrl } from '../gardien.js'
 
@@ -30,6 +30,38 @@ import { etatCouches, NON, OUI_MAIS, desarmeUrl } from '../gardien.js'
 // un interrupteur GRISÉ sans explication est pire qu'un interrupteur qui rame.
 // Chaque refus affiche donc sa raison, avec ses chiffres, et — quand l'échange
 // est possible — le bouton qui le réalise en un clic.
+//
+// ═══════════════════════════════════════════════════════════════════════════
+// LES SOUS-OPTIONS — UN DÉPLIANT, ET SEULEMENT QUAND LA COUCHE EST ALLUMÉE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Adrien veut ses tirettes « dans ses sous options ». Le panneau reste à
+// interrupteurs seuls DANS SA LIGNE : les réglages vivent SOUS elle, et
+// n'apparaissent qu'une fois la couche allumée. Trois raisons, et la troisième
+// est la vraie :
+//
+//   · une tirette qui règle une couche éteinte ne règle rien, et invite à
+//     chercher pourquoi « il ne se passe rien » ;
+//   · le panneau garde sa lecture d'un coup d'œil — une colonne
+//     d'interrupteurs — tant qu'on n'a rien allumé ;
+//   · ET LE PANNEAU NE DÉCIDE TOUJOURS RIEN. `c.active` vient d'`etatCouches`,
+//     donc du Gardien : la visibilité du dépliant SUIT l'état réel de la couche
+//     au lieu de le supposer. Une couche éteinte d'office par `refreshSol`
+//     (hors zone cuite) referme son dépliant sans qu'une ligne de ce fichier
+//     ait à savoir que ce cas existe.
+//
+// ⚠️ ET LES TIRETTES NE SE RECONSTRUISENT PAS. Deux protections, parce qu'une
+// seule ne suffisait pas :
+//   1. le DOM de chaque dépliant est FABRIQUÉ UNE FOIS et mis en cache. Un
+//      `slider()` du kit s'enregistre auprès de `refreshAll` ; le refabriquer à
+//      chaque passe empilerait des abonnés morts, et surtout reposerait la
+//      valeur au défaut si l'appelant lisait mal ses params ;
+//   2. `rendre()` ne retouche la liste QUE si l'état a changé (voir
+//      `signature`). Le battement de 3 s qui suit le gouverneur remplaçait
+//      sinon la liste entière — donc la tirette — SOUS LE DOIGT qui la traîne.
+//      Un `input[type=range]` déplacé dans le DOM en plein glissement perd sa
+//      capture de pointeur : la valeur se fige et le curseur suit la souris
+//      sans rien commander.
 
 const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3 3 7.5l9 4.5 9-4.5L12 3Z"/><path d="M3 12.5 12 17l9-4.5"/><path d="M3 17.5 12 22l9-4.5"/></svg>'
 
@@ -60,6 +92,24 @@ export function buildCouchesPanel(ctx) {
 
   // LE PASSÉ, porté ici et nulle part ailleurs (voir l'en-tête).
   let bloquees = []
+
+  // Les dépliants de sous-options, fabriqués à la demande et gardés. Voir
+  // l'en-tête : une tirette du kit ne se refabrique pas à chaque passe.
+  const depliants = new Map()
+  function depliantPour(id) {
+    if (depliants.has(id)) return depliants.get(id)
+    const reglages = ctx.reglagesCouche?.(id)
+    if (!reglages?.length) { depliants.set(id, null); return null }
+    const boite = el('div', 'ce-couche-reglages')
+    for (const r of reglages) boite.append(slider(r))
+    depliants.set(id, boite)
+    return boite
+  }
+
+  // L'état DESSINÉ au tour précédent. Tout ce qui change l'aspect d'une ligne
+  // en fait partie ; le budget, lui, est redessiné à chaque passe (il n'a pas
+  // de contrôle à préserver).
+  let signature = null
 
   // `?gardien=0` est lu comme `?f3` l'est : il pose l'état de DÉPART, il ne
   // verrouille pas. Adrien s'était retrouvé ENFERMÉ par un paramètre d'adresse
@@ -120,6 +170,12 @@ export function buildCouchesPanel(ctx) {
     barre.classList.toggle('depasse', etat.budget.depassement > 0)
     souffrance.textContent = etat.souffrance.raison
 
+    // ⚠️ LA GARDE QUI SAUVE LES TIRETTES. Sans elle, le battement de 3 s
+    // remplace la liste sous le doigt qui glisse (voir l'en-tête).
+    const sig = JSON.stringify(etat.couches.map((c) => [c.id, c.active, c.verdict, c.raison, c.aRetirer]))
+    if (sig === signature) return
+    signature = sig
+
     liste.replaceChildren()
     for (const c of etat.couches) {
       const ligne = el('div', 'ce-couche')
@@ -177,11 +233,36 @@ export function buildCouchesPanel(ctx) {
         ligne.append(ech)
       }
 
+      // LE DÉPLIANT DE SOUS-OPTIONS — voir l'en-tête. Il n'existe que pour les
+      // couches qui en déclarent, et ne se montre que si la couche est
+      // ALLUMÉE : `c.active` vient du Gardien, pas d'une supposition locale.
+      //
+      // ⚠️ ON L'ATTACHE TOUJOURS, ON LE MASQUE EN CSS. Le laisser DÉTACHÉ le
+      // ferait élaguer du registre de `refreshAll` (kit.js élague ce qui n'est
+      // plus connecté) : la tirette survivrait à l'écran mais cesserait de se
+      // resynchroniser après un chargement de gabarit ou une réinitialisation.
+      const boite = depliantPour(c.id)
+      if (boite) {
+        boite.style.display = c.active ? '' : 'none'
+        ligne.append(boite)
+      }
+
       liste.append(ligne)
     }
   }
 
-  rendre()
+  // ⚠️ LE PANNEAU S'ABONNE À `refreshAll`, ET CE N'EST PAS UN LUXE. Une couche
+  // peut changer d'état SANS QUE PERSONNE N'AIT CLIQUÉ ICI : `refreshSol`
+  // l'éteint hors zone cuite, et l'allumage automatique des lumières nocturnes
+  // l'allume à la tombée de la nuit. Ces deux appelants appellent déjà
+  // `refreshAll()` en disant « l'interrupteur doit bouger, sinon le panneau
+  // ment » — mais rien n'écoutait, et l'interrupteur ne bougeait qu'au
+  // battement suivant, jusqu'à 3 s plus tard. Mesuré : ▶ en plein jour allumait
+  // bien la couche, et le panneau continuait d'afficher « éteinte ».
+  //
+  // La garde de signature juste au-dessus rend cet abonnement gratuit quand
+  // rien n'a bougé — et surtout, elle empêche de reconstruire les tirettes.
+  onRefresh(rendre, panel.root)
   // Le gouverneur descend en cours de session : la jauge doit suivre sans
   // qu'on ait à rouvrir le panneau. 3 s suffisent — le gouverneur lui-même ne
   // bouge jamais plus d'une fois par 20 s.

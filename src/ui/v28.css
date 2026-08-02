@@ -3950,6 +3950,23 @@ body.ce-noui .ce-rec {
 @media (hover: none) {
   .ce-couche-raison, .ce-couche-echange { display: block; }
 }
+/* LE DÉPLIANT DE SOUS-OPTIONS. Il n'apparaît que sous une couche ALLUMÉE (c'est
+   le JS qui pose display:none, d'après l'état rendu par le Gardien).
+
+   ⚠️ ET IL NE SE RÉVÈLE PAS AU SURVOL, contrairement à la raison et au bouton
+   d'échange juste au-dessus. Une tirette qu'on ne voit qu'en survolant sa ligne
+   disparaîtrait dès que le pointeur descend la traîner. Le retrait à gauche et
+   le filet suffisent à dire « ceci appartient à la ligne du dessus ». */
+.ce-couche-reglages {
+  margin: 7px 0 2px;
+  padding-left: 9px;
+  border-left: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+}
+/* Les lignes du kit sont dimensionnées pour un panneau plein ; ici elles vivent
+   sous une ligne de liste et doivent rester secondaires. */
+.ce-couche-reglages .ce-row { margin-bottom: 4px; }
+.ce-couche-reglages .ce-row:last-child { margin-bottom: 0; }
+.ce-couche-reglages .ce-label { font-size: 11px; opacity: 0.72; }
 /* Le poids d'une couche, en pastilles. Quatre emplacements toujours dessinés :
    c'est le VIDE qui rend la comparaison lisible d'une ligne à l'autre. */
 .ce-couche-cout { display: inline-flex; gap: 2px; align-items: center; background: none; padding: 0; }
