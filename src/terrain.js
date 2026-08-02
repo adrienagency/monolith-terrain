@@ -12,7 +12,7 @@ import { ATLAS_ANALYSE, ATLAS_MER, fracBassinEmprise } from './dem-emprise.js'
 // ⚠️ ALIASÉ : la méthode `Terrain.plansFenetre()` rend des `THREE.Plane`, la
 // fonction pure rend des descriptions. Le même nom pour les deux se lit comme
 // une récursion qui n'existe pas.
-import { plansFenetre as demiPlansFenetre } from './fenetre-clip.js'
+import { plansFenetre as demiPlansFenetre, exposantCoin } from './fenetre-clip.js'
 // L'analyse de relief et le masque de mer ne sont plus calcules ici : ils
 // partent dans un Worker (terrain-jobs.js). ~470 ms de fil principal fige par
 // reconstruction, sur MNT 1536². Le calcul est identique octet pour octet.
@@ -321,7 +321,11 @@ export class Terrain {
       uCloudShadowTint: { value: new THREE.Vector3(0.3, 0.3, 0.34) },
       // superellipse exponent for the corner: 2 = circular arc, higher = squircle
       // (iOS-style continuous corner). Shared with the plinth ring, see plinth.js
-      uSlabCornerN: { value: 2 }, // cercle, comme le clip de la mer (v42)
+      // v43 : la valeur est ENFIN relue. `slabCornerSmoothing` était exposé,
+      // persisté dans les gabarits et jamais branché — l'exposant restait en dur
+      // à 2 ici comme dans plinth.js. Le socle, le relief ET la mer partagent
+      // maintenant `exposantCoin` : un seul coin, pas trois.
+      uSlabCornerN: { value: exposantCoin(params.slabCornerSmoothing) },
       // region cutout ("individualiser la zone"): white-inside/black-outside
       // mask rendered over the DEM footprint (region-mask.js). When uRegionOn
       // the terrain is clipped to the admin boundary and the superellipse slab

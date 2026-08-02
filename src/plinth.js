@@ -6,11 +6,59 @@
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
 import { PBR_BY_ID, GLASS_BY_ID } from './material-presets.js'
-import { TEXTURE_BUILDERS } from './material-textures.js'
+import { TEXTURE_BUILDERS, microRoughnessTextures, rugositeRecentree } from './material-textures.js'
+import { exposantCoin } from './fenetre-clip.js' // module sans dépendance : pas de cycle
 
 const HALF = TERRAIN_SIZE / 2
 const UVSCALE = 6 // world units per texture tile on the socle walls
 const INTERIOR_STEPS = 12 // coarse grid to find the global min (basin guard)
+
+// ═══════════════════ CE QUI DONNE SA MATIÈRE AU SOCLE ════════════════════════
+//
+// Le socle était « très lisse, trop parfait » — et pour quatre raisons cumulées,
+// toutes mesurées. Deux se réparent ici, dans la géométrie.
+//
+// 1. UNE SEULE NORMALE PAR FACE. `pushTri` calcule la normale au produit
+//    vectoriel et la recopie sur les trois sommets. Sur un flanc plan, tous les
+//    triangles partagent la même : N·L est constant, l'environnement est
+//    échantillonné dans une seule direction, et chaque flanc devient UNE couleur
+//    sur des milliers de pixels. D'où le chanfrein : aucune arête réelle n'a un
+//    rayon nul (sciage, ponçage, démoulage laissent toujours quelques dixièmes
+//    de millimètre), et ce rayon capte une ligne spéculaire continue que l'œil
+//    lit comme de la matière. Comme les normales sont par face, la bande reçoit
+//    la sienne : liseré NET, aucun lissage.
+//
+// 2. AUCUNE OMBRE DE CONTACT. Le SSAO est éteint aux quatre paliers machine et
+//    la table est un ShadowMaterial transparent : du côté éclairé, le mur
+//    rencontre le vide. Dans une vitrine de musée, la ligne où la maquette
+//    rejoint son socle est TOUJOURS la zone la plus sombre — l'angle rentrant ne
+//    voit qu'une fraction du ciel. On la cuit donc en couleur de sommet.
+//    ⚠️ Et c'est un contournement : `aoMap` est impossible ici, three la lit sur
+//    `uv1` et cet attribut n'existe pas dans cette géométrie. Un attribut
+//    `color` n'en a pas besoin.
+//
+// Les valeurs ci-dessous sont des garde-fous, pas des goûts :
+export const SOCLE_CHANFREIN = 0.05 // largeur ET profondeur du liseré, en unités
+// monde. ⚠️ Un chanfrein trop large bascule dans le plastique injecté. Le bloc
+// fait 56 unités et occupe ~1 000 px cadré large, soit ~18 px/unité : à 0,05 le
+// liseré reste SOUS le pixel de loin (il ne se voit pas comme une facette) et
+// devient net dès qu'on s'approche d'une arête.
+export const SOCLE_AO_BANDE = 0.12 // hauteur de la cuisson, en fraction du mur
+export const SOCLE_AO_FORCE = 0.2 // assombrissement au contact. Au-delà de ces
+// deux valeurs on ne cuit plus un contact, on peint une vignette.
+export const SOCLE_MARE_FORCE = 0.22 // occlusion ambiante de la TABLE par le
+// bloc, tout autour de lui (voir _paintContactPool). Multipliée : elle mord sur
+// une table claire et s'efface sur une table sombre.
+
+// Occlusion de contact : 1 au grand jour, 1 − force au pied du mur, chute en
+// carré (le ciel se rouvre vite quand on s'éloigne de l'angle rentrant). Pur.
+export function contactAO(y, baseY, bande, force = SOCLE_AO_FORCE) {
+  if (!(bande > 0) || !(force > 0)) return 1
+  const t = Math.max(0, Math.min(1, (y - baseY) / bande))
+  const k = 1 - t
+  return 1 - force * k * k
+}
+
 
 // Pure: sample the border ring and pick a base level. `samples` per side should
 // match the terrain mesh resolution so the wall top sits EXACTLY on the relief
@@ -87,14 +135,28 @@ export function computeSlab(sample, depth, samples = 256, cornerRadius = 0, corn
 // get the EXACT same socle). `baseYFloor` (optional) forces the base level no
 // higher than this — the damier shares the main block's baseY for a flat grid
 // bottom without ever piercing a deeper neighbour's relief.
-export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 0, cornerExp = 2, baseYFloor = null } = {}) {
+// `chanfrein` : largeur du liseré d'arête haute (0 = géométrie d'avant, exacte).
+// `aoForce` : profondeur de l'occlusion de contact cuite dans l'attribut color.
+export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 0, cornerExp = 2, baseYFloor = null, chanfrein = SOCLE_CHANFREIN, aoForce = SOCLE_AO_FORCE } = {}) {
   const slab = computeSlab(sample, depth, resolution, cornerR, cornerExp)
   const ring = slab.ring
   const baseY = baseYFloor != null ? Math.min(baseYFloor, slab.baseY) : slab.baseY
   const n = ring.length
+  // hauteur de mur de référence : le point HAUT du bord. La bande d'occlusion
+  // est constante en unités monde (un contact ne s'étire pas avec le mur qui le
+  // surplombe) — c'est cette hauteur-là qui la calibre, une fois pour toutes.
+  let topMax = -Infinity
+  for (const p of ring) if (p.y > topMax) topMax = p.y
+  const aoBande = SOCLE_AO_BANDE * Math.max(0, topMax - baseY)
+  // le pli ne descend jamais jusqu'au pied, même sur un socle écrasé
+  const ch = Math.max(0, Math.min(chanfrein, (topMax - baseY) * 0.25))
+
   const positions = []
   const normals = []
   const uvs = []
+  const couleurs = [] // occlusion de contact, en octets normalisés (3 o/sommet
+  // au lieu de 12 en float : la géométrie est reconstruite à CHAQUE déplacement
+  // de fenêtre continue, et un octet suffit largement pour une rampe de 20 %)
   const pushTri = (a, b, c, uva, uvb, uvc) => {
     const ab = new THREE.Vector3().subVectors(b, a)
     const ac = new THREE.Vector3().subVectors(c, a)
@@ -104,36 +166,83 @@ export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 
       positions.push(v.x, v.y, v.z)
       normals.push(nm.x, nm.y, nm.z)
       uvs.push(uv[0], uv[1])
+      const ao = Math.round(255 * contactAO(v.y, baseY, aoBande, aoForce))
+      couleurs.push(ao, ao, ao)
     }
   }
-  let acc = 0
+
+  // Rentrée du pli, point par point. On prend la BISSECTRICE des deux arêtes
+  // voisines, allongée de 1/cos(θ/2) : le retrait perpendiculaire vaut alors
+  // exactement `ch` sur les DEUX faces, y compris dans un angle droit. Une
+  // simple direction « vers le centre » y creuserait un cran de ch·(1−1/√2).
+  const rentre = new Array(n)
+  const nrm = (ax, az, bx, bz) => {
+    const dx = bx - ax
+    const dz = bz - az
+    const L = Math.hypot(dx, dz)
+    return L > 1e-12 ? [-dz / L, dx / L] : null // anneau horaire → intérieur
+  }
   for (let i = 0; i < n; i++) {
     const p = ring[i]
-    const q = ring[(i + 1) % n]
+    const a = nrm(ring[(i - 1 + n) % n].x, ring[(i - 1 + n) % n].z, p.x, p.z)
+    const b = nrm(p.x, p.z, ring[(i + 1) % n].x, ring[(i + 1) % n].z)
+    const na = a || b
+    const nb = b || a
+    if (!na || !nb) { rentre[i] = [0, 0]; continue }
+    let mx = na[0] + nb[0]
+    let mz = na[1] + nb[1]
+    const L = Math.hypot(mx, mz)
+    if (L < 1e-9) { rentre[i] = [0, 0]; continue }
+    mx /= L
+    mz /= L
+    const cos = Math.max(0.35, mx * na[0] + mz * na[1]) // onglet borné (replis)
+    rentre[i] = [(mx * ch) / cos, (mz * ch) / cos]
+  }
+
+  let acc = 0
+  const pli = (i) => {
+    const p = ring[i]
+    return new THREE.Vector3(p.x + rentre[i][0], p.y - ch, p.z + rentre[i][1])
+  }
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n
+    const p = ring[i]
+    const q = ring[j]
     const segLen = Math.hypot(q.x - p.x, q.z - p.z)
     const u0 = acc / UVSCALE
     const u1 = (acc + segLen) / UVSCALE
     acc += segLen
-    const vpTop = (p.y - baseY) / UVSCALE
-    const vqTop = (q.y - baseY) / UVSCALE
     const pTop = new THREE.Vector3(p.x, p.y, p.z)
     const qTop = new THREE.Vector3(q.x, q.y, q.z)
-    const pBot = new THREE.Vector3(p.x, baseY, p.z)
-    const qBot = new THREE.Vector3(q.x, baseY, q.z)
-    pushTri(pTop, pBot, qTop, [u0, vpTop], [u0, 0], [u1, vqTop])
-    pushTri(qTop, pBot, qBot, [u1, vqTop], [u0, 0], [u1, 0])
+    // le sommet du mur ne bouge PAS : il doit rester exactement sur le bord du
+    // relief, sinon on voit le jour sous la carte (le bug de « l'envers »)
+    const pHaut = ch > 0 ? pli(i) : pTop
+    const qHaut = ch > 0 ? pli(j) : qTop
+    const pBot = new THREE.Vector3(pHaut.x, baseY, pHaut.z)
+    const qBot = new THREE.Vector3(qHaut.x, baseY, qHaut.z)
+    const uv = (v) => [0, (v.y - baseY) / UVSCALE]
+    if (ch > 0) {
+      pushTri(pTop, pHaut, qTop, [u0, uv(pTop)[1]], [u0, uv(pHaut)[1]], [u1, uv(qTop)[1]])
+      pushTri(qTop, pHaut, qHaut, [u1, uv(qTop)[1]], [u0, uv(pHaut)[1]], [u1, uv(qHaut)[1]])
+    }
+    pushTri(pHaut, pBot, qHaut, [u0, uv(pHaut)[1]], [u0, 0], [u1, uv(qHaut)[1]])
+    pushTri(qHaut, pBot, qBot, [u1, uv(qHaut)[1]], [u0, 0], [u1, 0])
   }
   const cen = new THREE.Vector3(0, baseY, 0)
   const capUv = (x, z) => [x / UVSCALE, z / UVSCALE]
   for (let i = 0; i < n; i++) {
-    const p = ring[i]
-    const q = ring[(i + 1) % n]
-    pushTri(cen, new THREE.Vector3(q.x, baseY, q.z), new THREE.Vector3(p.x, baseY, p.z), capUv(0, 0), capUv(q.x, q.z), capUv(p.x, p.z))
+    const j = (i + 1) % n
+    const px = ring[i].x + rentre[i][0]
+    const pz = ring[i].z + rentre[i][1]
+    const qx = ring[j].x + rentre[j][0]
+    const qz = ring[j].z + rentre[j][1]
+    pushTri(cen, new THREE.Vector3(qx, baseY, qz), new THREE.Vector3(px, baseY, pz), capUv(0, 0), capUv(qx, qz), capUv(px, pz))
   }
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+  geo.setAttribute('color', new THREE.Uint8BufferAttribute(couleurs, 3, true))
   geo.computeBoundingSphere()
   return { geo, baseY }
 }
@@ -155,6 +264,16 @@ export class Plinth {
       roughness: 0.95,
       metalness: 0,
       side: THREE.DoubleSide,
+      // OCCLUSION DE CONTACT : elle voyage dans l'attribut `color` de la
+      // géométrie. ⚠️ `aoMap` était impossible — three la lit sur `uv1`, et cet
+      // attribut n'existe nulle part ici. ⚠️ Le drapeau est posé UNE fois, à la
+      // construction : three recompile le programme quand il change, et ce
+      // matériau est partagé par les 24 socles du damier et la jupe du mode
+      // zone isolée — un basculement en cours de route les gèlerait tous.
+      // Corollaire : TOUTE géométrie portée par ce matériau doit fournir un
+      // attribut `color`, sinon WebGL sert la valeur générique (0,0,0,1) et la
+      // pièce devient NOIRE. buildSlabWalls et buildRegionSkirt le font.
+      vertexColors: true,
     })
     this.isGlass = false
     this.walls = new THREE.Mesh(new THREE.BufferGeometry(), this.wallMat)
@@ -202,7 +321,7 @@ export class Plinth {
     // strong on a light table and fades on a dark one, exactly like real glass.
     this._poolCanvas = document.createElement('canvas')
     this._poolCanvas.width = this._poolCanvas.height = 256
-    this._paintGlassPool('#ffffff', 0)
+    this._paintContactPool(SOCLE_MARE_FORCE) // état de départ : socle opaque
     this.glassPoolTex = new THREE.CanvasTexture(this._poolCanvas)
     this.glassPoolMat = new THREE.MeshBasicMaterial({
       map: this.glassPoolTex,
@@ -214,6 +333,8 @@ export class Plinth {
     this.glassPool.rotation.x = -Math.PI / 2
     this.glassPool.renderOrder = 1
     this.glassPool.visible = false
+    this._poolStrength = SOCLE_MARE_FORCE
+    this._poolSpread(1.6) // la mare de contact déborde l'emprise ; le verre non
     this.group.add(this.glassPool)
 
     this.depth = params.plinthDepth ?? 7
@@ -242,6 +363,53 @@ export class Plinth {
     gc.fillStyle = grad
     gc.fillRect(0, 0, 256, 256)
     gc.restore()
+  }
+
+  // ─────────────── LA MARE DE CONTACT DES SOCLES OPAQUES ────────────────────
+  //
+  // POURQUOI. L'ombre portée est d'opacité RIGOUREUSEMENT fixe (ShadowMaterial,
+  // 0,26) : même avec un socle parfait, une ombre uniforme trahit la synthèse.
+  // Ce qui manque n'est pas de l'ombre de soleil, c'est l'occlusion AMBIANTE que
+  // le bloc fait subir à la table tout autour de lui — sur les quatre côtés, y
+  // compris du côté éclairé, là où le mur rencontre aujourd'hui le vide.
+  //
+  // On n'ajoute aucune lumière (three recompile TOUS les programmes de la scène
+  // quand le compte change : 1 923 ms de gel, déjà mesuré ici) et aucun rendu
+  // supplémentaire : on réutilise EXACTEMENT le mécanisme du halo de verre — un
+  // canevas multiplié sur la table — en teinte neutre. Le quad est simplement
+  // agrandi, parce que le halo du verre se lit SOUS le bloc alors que celui-ci
+  // se lit AUTOUR : sa mare doit déborder l'emprise.
+  //
+  // Multiplication : forte sur une table claire, quasi nulle sur une table
+  // sombre. C'est le comportement d'une vraie occlusion, pas d'un calque gris.
+  _paintContactPool(force) {
+    const s = Math.max(0, Math.min(1, force))
+    const gc = this._poolCanvas.getContext('2d')
+    gc.clearRect(0, 0, 256, 256)
+    gc.fillStyle = '#ffffff' // blanc = multiplication neutre → table nue
+    gc.fillRect(0, 0, 256, 256)
+    if (s <= 0.001) return
+    const v = Math.round(255 * (1 - s))
+    gc.save()
+    // ⚠️ Un dégradé RADIAL laisserait les quatre coins du bloc hors de la mare
+    // (28·√2 = 39,6 unités contre 28 au milieu d'un côté). On floute donc le
+    // rectangle de l'emprise : la mare épouse le socle, coins compris.
+    // Sans `filter` (moteur ancien) le flou est ignoré : il reste un carré net
+    // exactement sous le bloc, donc invisible — la dégradation est nulle.
+    gc.filter = 'blur(13px)'
+    gc.fillStyle = `rgb(${v},${v},${v})`
+    gc.beginPath()
+    gc.roundRect(48, 48, 160, 160, 34) // emprise du bloc sur ce quad élargi
+    gc.fill()
+    gc.restore()
+    gc.filter = 'none'
+  }
+
+  // Bascule le quad de mare entre les deux usages : le halo du verre se lit sous
+  // l'emprise (facteur 1,08), la mare de contact autour (facteur 1,6).
+  _poolSpread(k) {
+    const f = k / 1.08
+    this.glassPool.scale.set(f, f, 1)
   }
 
   // Apply a socle material. `finish` is 'solid' (PBR presets) or 'glass'
@@ -287,6 +455,7 @@ export class Plinth {
       m.transparent = true
       m.envMapIntensity = 1.4
       this._paintGlassPool(p.color, projection)
+      this._poolSpread(1.08) // le halo se lit SOUS le verre
       this.glassPoolTex.needsUpdate = true
       this._poolStrength = projection
       this.glassPool.visible = this.group.visible && projection > 0.001
@@ -321,22 +490,29 @@ export class Plinth {
         m.anisotropy = p.anisotropy ?? 0
         m.anisotropyRotation = p.anisotropyRotation ?? 0
       } else {
-        this._clearMaps()
+        // RUPTURE DE LA RUGOSITÉ, PAS DE LA COULEUR. 22 finitions sur 25 n'ont
+        // aucune carte : sans carte de rugosité, le spéculaire est
+        // mathématiquement uniforme, et c'est le signal « synthétique » numéro
+        // un. On ne touche NI l'albédo NI la normale — la sobriété est intacte,
+        // seule la micro-géométrie cesse d'être constante.
+        m.map = null
+        m.normalMap = null
+        m.roughnessMap = microRoughnessTextures().roughnessMap
+        // la carte ne sait que creuser (un octet ne code pas > 1) : on relève la
+        // rugosité de base pour que la MOYENNE retombe sur celle du préréglage
+        m.roughness = rugositeRecentree(p.roughness ?? 0.9)
         m.normalScale.set(1, 1)
         m.anisotropy = p.anisotropy ?? 0
         m.anisotropyRotation = 0
       }
-      this.glassPool.visible = false
-      this._poolStrength = 0
+      // mare de contact neutre : le socle opaque cesse de rencontrer le vide
+      this._paintContactPool(SOCLE_MARE_FORCE)
+      this._poolSpread(1.6)
+      this.glassPoolTex.needsUpdate = true
+      this._poolStrength = SOCLE_MARE_FORCE
+      this.glassPool.visible = this.group.visible && !this._slabOnly
     }
     m.needsUpdate = true
-  }
-
-  _clearMaps() {
-    const m = this.wallMat
-    m.map = null
-    m.normalMap = null
-    m.roughnessMap = null
   }
 
   // give the socle walls their own studio env map (overrides scene.environment
@@ -364,7 +540,8 @@ export class Plinth {
     // shader clips to the SAME rounded rectangle so nothing overhangs the walls.
     // v42: meme formule que le clip de la mer (rayon clampe, cercle)
     const cornerR = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE))
-    const { geo, baseY } = buildSlabWalls(sample, { depth: this.depth, resolution: params.resolution ?? 256, cornerR, cornerExp: 2, baseYFloor })
+    const cornerExp = exposantCoin(params.slabCornerSmoothing)
+    const { geo, baseY } = buildSlabWalls(sample, { depth: this.depth, resolution: params.resolution ?? 256, cornerR, cornerExp, baseYFloor })
     this.baseY = baseY
     this.base.position.y = baseY
     this.ground.position.y = baseY - 0.02 // opaque floor just under the shadow base
@@ -390,7 +567,9 @@ export class Plinth {
   setVisible(v) {
     this.group.visible = v
     this.walls.visible = v && !this._slabOnly
-    this.glassPool.visible = v && !this._slabOnly && this.isGlass && (this._poolStrength ?? 0) > 0.001
+    // la mare sert AUSSI aux socles opaques depuis qu'elle porte l'occlusion de
+    // contact de la table : ce n'est plus une affaire de verre
+    this.glassPool.visible = v && !this._slabOnly && (this._poolStrength ?? 0) > 0.001
     this.liner.visible = v && !this._slabOnly && this.isGlass
   }
 

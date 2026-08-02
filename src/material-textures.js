@@ -57,10 +57,10 @@ function sampleWrap(h, x, y) {
   const yi = (y + SIZE) % SIZE
   return h[yi * SIZE + xi]
 }
-function canvasTex(paint, { srgb = false, repeat = 3 } = {}) {
+function canvasTex(paint, { srgb = false, repeat = 3, size = SIZE } = {}) {
   const c = document.createElement('canvas')
-  c.width = c.height = SIZE
-  paint(c.getContext('2d'))
+  c.width = c.height = size
+  paint(c.getContext('2d'), size)
   const t = new THREE.CanvasTexture(c)
   t.wrapS = t.wrapT = THREE.RepeatWrapping
   t.repeat.set(repeat, repeat)
@@ -228,6 +228,73 @@ export function frostTextures() {
   nm.repeat.set(4, 4)
   _frost = { normalMap: nm, roughnessMap }
   return _frost
+}
+
+// ================================================ MICRO-RUGOSITÉ (finitions nues)
+//
+// POURQUOI. Vingt-deux des vingt-cinq finitions PBR n'ont AUCUNE carte : couleur,
+// rugosité, métal, et c'est tout. Sans carte de rugosité le spéculaire est
+// mathématiquement uniforme sur toute la face — le signal « synthétique » numéro
+// un. Ce qui sépare un granit flammé d'un granit adouci n'est pas la teinte mais
+// la micro-géométrie ; les packs d'imperfections professionnels sont d'ailleurs
+// vendus comme des cartes de rugosité, pas d'albédo. On casse donc la rugosité,
+// PAS la couleur : le socle reste exactement aussi sobre, il cesse d'être plat.
+//
+// ⚠️ CE QUE LA CARTE PEUT FAIRE. three multiplie : rugosité finale =
+// `material.roughness` × canal vert de la carte. Un octet ne code jamais plus de
+// 1,0 : la carte ne sait donc que CREUSER. On code un multiplicateur dans
+// [1 − CREUX, 1] et on relève `material.roughness` d'autant pour recentrer —
+// voir `rugositeRecentree` ci-dessous.
+export const MICRO_ROUGH_CREUX = 0.126 // ±6,3 % relatifs → ±0,06 autour de 0,95
+const MICRO_ROUGH_SIZE = 256 // 256² suffit : le motif est basse fréquence
+
+// Le CHAMP seul (sans canevas) pour qu'il soit mesurable hors navigateur.
+// Basse fréquence volontaire : deux pixels voisins se ressemblent, sinon la
+// carte scintille au loin au lieu de casser le spéculaire de près.
+export function microRoughnessField(size = MICRO_ROUGH_SIZE) {
+  const P = 4 // 4 lobes sur la tuile — de larges plages, pas du grain
+  const f = new Float32Array(size * size)
+  let min = Infinity
+  let max = -Infinity
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const v = fbm((x / size) * P, (y / size) * P, P, 3)
+      f[y * size + x] = v
+      if (v < min) min = v
+      if (v > max) max = v
+    }
+  }
+  // normalisation sur le champ RÉEL : le maximum vaut exactement 1 (aucun
+  // dépassement possible), le minimum exactement 1 − CREUX.
+  const span = max - min || 1
+  for (let i = 0; i < f.length; i++) f[i] = 1 - MICRO_ROUGH_CREUX * (1 - (f[i] - min) / span)
+  return f
+}
+
+// La rugosité de base à donner au matériau pour que la carte (qui ne creuse que)
+// retombe en MOYENNE sur la valeur voulue par le préréglage. Plafonnée à 1 :
+// au-delà de 0,937 de rugosité voulue, three écrête et la moyenne descend un peu
+// — écart invisible, et le seul prix d'une carte 8 bits.
+export const rugositeRecentree = (r) => Math.min(1, r / (1 - MICRO_ROUGH_CREUX / 2))
+
+let _micro = null
+export function microRoughnessTextures() {
+  if (_micro) return _micro
+  const f = microRoughnessField(MICRO_ROUGH_SIZE)
+  const roughnessMap = canvasTex(
+    (ctx, size) => {
+      const img = ctx.createImageData(size, size)
+      for (let i = 0; i < size * size; i++) {
+        const v = Math.max(0, Math.min(255, Math.round(f[i] * 255)))
+        img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v
+        img.data[i * 4 + 3] = 255
+      }
+      ctx.putImageData(img, 0, 0)
+    },
+    { size: MICRO_ROUGH_SIZE, repeat: 2 },
+  )
+  _micro = { roughnessMap }
+  return _micro
 }
 
 // builders keyed by id — used by the socle (a preset's `tex`) and the terrain

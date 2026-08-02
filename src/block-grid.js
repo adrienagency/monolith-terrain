@@ -19,6 +19,7 @@ import { Terrain, TERRAIN_SIZE } from './terrain.js'
 import { loadDem, demTilePx } from './dem.js'
 import { latLonToWorld } from './geo.js'
 import { buildSlabWalls } from './plinth.js'
+import { exposantCoin } from './fenetre-clip.js'
 import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
 
 export const GRID_R = 2 // rayon du damier : 2 → 5×5 max, centre exclu
@@ -579,7 +580,7 @@ export class BlockGrid {
         depth: plinth.depth ?? 7,
         resolution: p.resolution,
         cornerR,
-        cornerExp: 2,
+        cornerExp: exposantCoin(this.params.slabCornerSmoothing), // même coin que la dalle centrale
         baseYFloor: plinth.baseY,
       })
       const walls = new THREE.Mesh(geo, plinth.wallMat)
