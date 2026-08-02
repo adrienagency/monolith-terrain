@@ -272,6 +272,30 @@ export class Terrain {
       // 1 / taille de la mosaïque en texels : c'est ce qui permet au nuanceur
       // d'aller chercher les QUATRE voisins exacts pour son mélange par couleur.
       uSolTexel: { value: new THREE.Vector2(1 / 2048, 1 / 2048) },
+      // HAUTEUR DE CANOPÉE (onglet « Couches »). Même drapage que les trois
+      // couches ci-dessus — uvSolDrape — et, comme l'occupation du sol, une
+      // texture qui ne porte PAS une image.
+      //
+      // ⚠️ MAIS ELLE PORTE UN NOMBRE CONTINU, PAS UN CODE, ET TOUT EN DÉCOULE.
+      // Un octet de uCanopee EST une hauteur en MÈTRES. Entre 10 et 12 il y a
+      // 11, et 11 m est une hauteur réelle : le filtrage linéaire est licite ici
+      // alors qu'il détruirait uSol (relire src/map/canopee-layer.js, dont
+      // l'en-tête ne sert qu'à ça). C'est pour la même raison qu'il n'y a pas
+      // d'uCanopeeTexel : le nuanceur n'a aucun mélange de quatre voisins à
+      // faire à la main, le GPU le fait pour lui et il a le droit.
+      uCanopee: { value: blackTexture() }, // 0 m partout = « pas d'arbre » = force nulle
+      uCanopeeLut: { value: blackTexture() },
+      uCanopeeOn: { value: 0 },
+      // La tirette « Force » du panneau Couches écrit ici. Défaut 2, course 0-4,
+      // exactement comme l'occupation du sol — voir CANOPEE_FORCE_DEFAUT dans
+      // src/reglages-couches.js.
+      uCanopeeOpacite: { value: 2 },
+      uCanopeeOffset: { value: new THREE.Vector2(0, 0) },
+      uCanopeeScale: { value: new THREE.Vector2(1, 1) },
+      // Le pas d'échantillonnage de l'OMBRAGE DE LISIÈRE, en unités d'UV de la
+      // mosaïque. Il vaut un texel : voir `ombreLisiere` dans le nuanceur pour
+      // ce que cet ombrage prétend (peu) et ce qu'il ne prétend pas (du volume).
+      uCanopeeTexel: { value: new THREE.Vector2(1 / 2048, 1 / 2048) },
       // drifting cloud shadows, baked by the cloud deck (clouds.js) — a black
       // placeholder keeps the sampler valid until the deck provides its map
       uCloudShadow: { value: blackTexture() },
@@ -483,6 +507,13 @@ uniform float uSolOpacite;
 uniform vec2 uSolOffset;
 uniform vec2 uSolScale;
 uniform vec2 uSolTexel;
+uniform sampler2D uCanopee;
+uniform sampler2D uCanopeeLut;
+uniform float uCanopeeOn;
+uniform float uCanopeeOpacite;
+uniform vec2 uCanopeeOffset;
+uniform vec2 uCanopeeScale;
+uniform vec2 uCanopeeTexel;
 uniform float uCloudShadowK;
 uniform vec3 uCloudShadowTint;
 uniform float uScanT;
@@ -663,6 +694,79 @@ vec4 lavisSol(vec2 uv) {
   c00.rgb *= c00.a; c10.rgb *= c10.a; c01.rgb *= c01.a; c11.rgb *= c11.a;
   vec4 s = mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
   return vec4(s.rgb / max(s.a, 1e-4), s.a);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LA HAUTEUR DE CANOPÉE — LIRE UN NOMBRE, ET DONC AVOIR LE DROIT DE L'INTERPOLER
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ REGARDEZ CE QUI N'EST PAS ÉCRIT ICI. Il n'y a pas de floor(x * 255 + 0.5),
+// pas de mélange des quatre voisins, pas de prémultiplication par la force. Les
+// vingt lignes que solEn et lavisSol consacrent juste au-dessus à rendre
+// l'interpolation IMPOSSIBLE n'ont aucune raison d'être ici, et les recopier
+// serait une faute, pas une prudence :
+//
+//   · uSol porte un CODE. Entre 10 (arbres) et 80 (eau) il n'y a pas 45, il n'y
+//     a RIEN, et un 45 fabriqué par le filtrage peindrait une classe inexistante.
+//   · uCanopee porte des MÈTRES. Entre 10 m et 12 m il y a 11 m, et 11 m est une
+//     hauteur parfaitement réelle. Le GPU a le droit de la calculer, la texture
+//     est donc en LinearFilter (voir src/map/canopee-layer.js), et ce filtrage
+//     nous OFFRE la lisière douce que l'occupation du sol doit se payer à la
+//     main.
+//
+// Une seule précaution survit, et c'est la seule qui ne dépendait pas de la
+// nature de la donnée : la table est en sRGB et le nuanceur en linéaire.
+vec4 canopeeEn(vec2 p) {
+  // .r vaut déjà hauteur/255, filtré linéairement par le GPU. Pas d'arrondi :
+  // on ne cherche pas à retrouver un octet exact, on cherche une hauteur.
+  float h = texture2D(uCanopee, p).r;
+  // ⚠️ ON VISE LE CENTRE DU TEXEL DE LA TABLE : (h * 255 + 0,5) / 256. Viser
+  // h directement écraserait toute la rampe sur ses 255 premiers 256e et
+  // décalerait chaque couleur d'un demi-mètre — invisible, et faux partout.
+  vec4 e = texture2D(uCanopeeLut, vec2(h * (255.0 / 256.0) + (0.5 / 256.0), 0.5));
+  // ⚠️ LA TABLE EST EN sRGB, LE NUANCEUR EN LINÉAIRE. Les couleurs de la rampe
+  // ont été choisies à l'oeil, donc écrites en sRGB ; on ne peut pas laisser
+  // three.js les convertir pour nous, puisque la texture doit rester en
+  // NoColorSpace (sinon c'est la HAUTEUR, dans l'autre texture, qui se ferait
+  // convertir — et une forêt de 40 m deviendrait une forêt de 13 m).
+  vec3 lin = mix(e.rgb / 12.92, pow((e.rgb + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), e.rgb));
+  return vec4(lin, e.a);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠️ L'OMBRAGE DE LISIÈRE — CE QUE CE N'EST PAS
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Ce n'est PAS du relief, et il a été promis une fois ici que « les forêts
+// deviennent un volume » : c'était faux, et les chiffres qui le disent sont en
+// tête de src/canopee.js. Résumé — 40 m de houppier valent 0,19 % de la largeur
+// d'un bloc, et le maillage à z12 a un pas de 54 m au sol : une lisière tient
+// sur UN sommet. Déplacée en géométrie, elle rendrait un escalier.
+//
+// Ce qui suit est donc une OMBRE PORTÉE SUR UNE IMAGE, calculée à partir du
+// gradient de la texture et de rien d'autre : aucun sommet ne bouge, aucune
+// normale n'est touchée, la silhouette du terrain contre le ciel est exactement
+// celle d'avant. Ça ne prétend rien de plus que ce que fait un dessinateur qui
+// pose un trait gris au pied d'un massif.
+//
+// La règle : si le voisin du NORD-OUEST est plus HAUT que moi, je suis à son
+// pied, donc à son ombre. C'est la lumière conventionnelle des cartes (venue du
+// nord-ouest), et c'est délibérément la MÊME quelle que soit l'heure : elle
+// n'imite pas le soleil de la scène, elle souligne un contour. Deux
+// échantillons, pas quatre — une différence avant/arrière ferait un LISERÉ des
+// deux côtés de la lisière, c'est-à-dire un contour de dessin animé.
+//
+// ⚠️ ET SON GAIN EST UNE EXAGÉRATION ASSUMÉE. Une marche de 30 m sur un texel
+// vaut 30/255 = 0,118 en unité de texture. Sans gain, l'ombre la plus marquée du
+// monde pèserait 12 % — invisible. Le gain de 3,2 la porte à ~0,38, soit une
+// ombre franche mais qui laisse encore lire le sol dessous. C'est le chiffre
+// qu'il a fallu, et il est là pour qu'on puisse le contester.
+float ombreLisiere(vec2 p) {
+  float h = texture2D(uCanopee, p).r;
+  // -u = ouest, -v = nord : uvSolDrape rend déjà des UV retournés (v croît vers
+  // le SUD), donc reculer d'un texel sur les deux axes vise bien le nord-ouest.
+  float hNO = texture2D(uCanopee, p - uCanopeeTexel).r;
+  return clamp((hNO - h) * 3.2, 0.0, 1.0);
 }
 // --- Appearance blend modes (Figma / W3C compositing set) — b = backdrop map,
 // s = the shader colour. Separable ops are channel-wise; the last four are the
@@ -957,6 +1061,51 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     if (k > 0.001) {
       float lumFond = blLum(diffuseColor.rgb);
       vec3 peinte = blSetLum(lavis.rgb, mix(lumFond, blLum(lavis.rgb), 0.55));
+      diffuseColor.rgb = mix(diffuseColor.rgb, peinte, k);
+    }
+  }
+
+  // HAUTEUR DE CANOPÉE — posée JUSTE APRÈS l'occupation du sol, et l'ordre est
+  // un argument, pas un rangement.
+  //
+  // Les deux couches parlent du même endroit du monde, et quand les deux sont
+  // allumées c'est la canopée qui doit gagner : l'occupation du sol dit « il y a
+  // des arbres », la canopée dit « ils font 34 mètres ». La seconde contient la
+  // première et en dit plus. Elle passe donc par-dessus — sans qu'aucune
+  // condition n'ait à savoir que l'autre existe, exactement comme l'occupation
+  // du sol se laisse recouvrir par la photo aérienne juste en dessous.
+  //
+  // ⚠️ ET COMME SA VOISINE, ELLE MODULE LA COULEUR, ELLE N'EN POSE PAS UNE.
+  // blSetLum prend la TEINTE de la rampe et lui impose la LUMINANCE de la carte :
+  // l'ombrage du relief, les courbes de niveau et la rampe hypsométrique
+  // continuent de se lire à travers. C'est toute la différence entre une carte
+  // et un aplat colorié.
+  //
+  // La luminance est tirée à 0,60 vers celle de la rampe, un peu plus fort que
+  // les 0,55 de l'occupation du sol — et pour une raison précise : ici la
+  // luminance EST l'information (le plus foncé est le plus haut), alors que
+  // là-bas elle ne fait qu'accompagner une classe. La brider davantage
+  // reviendrait à jeter la moitié de ce que la couche a à dire.
+  if (uCanopeeOn > 0.5 && uCanopeeOpacite > 0.001) {
+    float cIn;
+    vec2 cUv = uvSolDrape(cIn); // ⚠️ les deux pièges « Vienne sur le mont Fuji » et « 1 carreau sur 9 » vivent DEDANS
+    cUv = uCanopeeOffset + cUv * uCanopeeScale;
+    vec4 bois = canopeeEn(cUv);
+    // ⚠️ LE PLAFOND À 1 N'EST PAS DÉCORATIF : la tirette « Force » monte à 4, et
+    // mix() au-delà de 1 EXTRAPOLE — il sortirait de la gamme par le haut et
+    // fabriquerait des verts fluorescents sur les forêts denses, c'est-à-dire
+    // exactement l'atlas scolaire qu'on refuse. Au-delà de 1, pousser la tirette
+    // ne fait plus qu'amener les couverts BAS à saturation, ce qui est ce qu'on
+    // lui demande.
+    float k = min(1.0, bois.a * uCanopeeOpacite * cIn);
+    if (k > 0.001) {
+      float lumFond = blLum(diffuseColor.rgb);
+      vec3 peinte = blSetLum(bois.rgb, mix(lumFond, blLum(bois.rgb), 0.60));
+      // L'ombre de lisière — une ombre portée sur une image, pas du volume (voir
+      // ombreLisiere). Elle s'applique DANS la couleur peinte et pas après, pour
+      // qu'elle disparaisse avec la couche quand on baisse la tirette : une
+      // ombre qui survivrait à sa forêt serait une salissure inexplicable.
+      peinte *= 1.0 - 0.45 * ombreLisiere(cUv);
       diffuseColor.rgb = mix(diffuseColor.rgb, peinte, k);
     }
   }
@@ -1524,6 +1673,35 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   }
   setSolOpacite(v) {
     this.mapUniforms.uSolOpacite.value = v
+  }
+  // HAUTEUR DE CANOPÉE — même contrat que setSol() : on passe l'objet rendu par
+  // CanopeeLayer.build(), ou null pour éteindre.
+  //
+  // ⚠️ LE MÊME PIÈGE DES DEUX TEXTURES QU'AU-DESSUS, et il ne s'annonce pas plus
+  // ici que là : poser `uCanopee` sans `uCanopeeLut` laisse la table de
+  // remplacement, qui est noire et d'alpha nul. La couche s'allume donc,
+  // l'attribution s'affiche, et rien ne se peint — on chercherait longtemps du
+  // côté des tuiles.
+  setCanopee(built) {
+    const u = this.mapUniforms
+    if (built && built.texture && built.lut) {
+      u.uCanopee.value = built.texture
+      u.uCanopeeLut.value = built.lut
+      u.uCanopeeOn.value = 1
+      u.uCanopeeOffset.value.set(built.uv.offset[0], built.uv.offset[1])
+      u.uCanopeeScale.value.set(built.uv.scale[0], built.uv.scale[1])
+      // La taille réelle de la mosaïque, pour que l'ombre de lisière vise le
+      // voisin d'UN texel et pas d'un tiers ou de trois. Une valeur figée
+      // épaissirait ou effacerait l'ombre dès que l'emprise change de nombre de
+      // tuiles — un défaut qui ne se voit qu'en comparant deux zooms.
+      const im = built.texture.image
+      u.uCanopeeTexel.value.set(1 / Math.max(1, im.width), 1 / Math.max(1, im.height))
+    } else {
+      u.uCanopeeOn.value = 0
+    }
+  }
+  setCanopeeOpacite(v) {
+    this.mapUniforms.uCanopeeOpacite.value = v
   }
   applyFxParams(pp) {
     const u = this.mapUniforms

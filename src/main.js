@@ -131,12 +131,15 @@ import { NuitLayer } from './map/nuit-layer.js'
 import { intensiteNuit, facteurEchelleNuit, largeurEmpriseKm } from './nuit.js'
 import { OccupationSolLayer } from './map/occupation-sol-layer.js'
 import { normaliseIndexSol, zoneSolPour } from './occupation-sol.js'
+import { CanopeeLayer } from './map/canopee-layer.js'
+import { normaliseIndexCanopee, zoneCanopeePour } from './canopee.js'
 // Les sous-options des couches : les conversions tirette → uniforme, et la
 // règle d'allumage automatique de la couche nocturne. Module pur, testé.
 import {
   SOL_FORCE_DEFAUT, SOL_FORCE_MAX,
+  CANOPEE_FORCE_DEFAUT, CANOPEE_FORCE_MAX,
   NUIT_ASSOMBRISSEMENT_DEFAUT, NUIT_FORCE_DEFAUT, NUIT_FORCE_MAX,
-  opaciteSol, fondNuit, gainNuit,
+  opaciteSol, opaciteCanopee, fondNuit, gainNuit,
   allumageAutoNuit, MOTIF_LECTURE,
 } from './reglages-couches.js'
 import { evaluerCouche } from './gardien.js'
@@ -555,13 +558,14 @@ const params = {
   aerialOpacity: 1, // à l'activation, la photo couvre pleinement (retour Adrien)
   aerialCoastFade: 0.1, // v49 : la photo s'estompe sous l'eau au-delà du rivage (0 = off)
   // ─── LES SOUS-OPTIONS DES COUCHES (onglet « Couches », dépliant sous la ligne)
-  // Les trois tirettes demandées par Adrien. ⚠️ Elles vivent dans `params` et pas
+  // Les tirettes des couches. ⚠️ Elles vivent dans `params` et pas
   // dans le panneau : `refreshAll()` et les gabarits lisent params, et une valeur
   // rangée dans une fermeture d'interface serait perdue au premier rebuild du
   // panneau. Les défauts sont les constantes de src/reglages-couches.js, parce
   // que le kit fait du double-clic un retour à la valeur de CONSTRUCTION : deux
   // littéraux recopiés finiraient par diverger et le double-clic mentirait.
   solForce: SOL_FORCE_DEFAUT,
+  canopeeForce: CANOPEE_FORCE_DEFAUT,
   nuitAssombrissement: NUIT_ASSOMBRISSEMENT_DEFAUT,
   nuitForce: NUIT_FORCE_DEFAUT,
   placesEnabled: true,
@@ -3020,7 +3024,16 @@ function regenerateTerrain() {
       // pour la photo, et il se rejoue à l'identique pour chaque nouvelle
       // couche drapée qu'on ajoute ailleurs qu'ici.
       refreshSol()
-      // ⚠️ ET LES LUMIÈRES NOCTURNES, TROISIÈME REJEU DU MÊME PIÈGE. Adrien :
+      // ⚠️ ET LA CANOPÉE, QUATRIÈME REJEU DU MÊME PIÈGE — branchée ICI ET PAS
+      // SEULEMENT dans `rebuildMapLayers`. C'est le trou exact que les deux
+      // paragraphes ci-dessus racontent : cette fonction appelle
+      // `mapLayers.rebuild` en direct et contourne le wrapper, donc une couche
+      // drapée qui ne serait branchée que sur le wrapper garderait, après un
+      // changement de zoom, la mosaïque du bloc PRÉCÉDENT tendue sur le nouveau.
+      // Des forêts de 40 m posées sur un désert, avec le crédit ETH sous une
+      // donnée qui n'est plus la bonne — et rien en console.
+      refreshCanopee()
+      // ⚠️ ET LES LUMIÈRES NOCTURNES, CINQUIÈME REJEU DU MÊME PIÈGE. Adrien :
       // « pour l'éclairage nocturne, il ne se recalcule pas correctement quand
       // on change d'échelle ». La cause est exactement celle décrite deux
       // paragraphes plus haut : `refreshNuit` n'était appelé que par le
@@ -4798,6 +4811,11 @@ function refreshOsmCredit() {
   // au-dessus. `solAttribution` retombe à null dès que la couche s'éteint ou
   // que l'emprise quitte une zone cuite.
   if (solAttribution) parts.push(`${solAttribution} (CC BY 4.0)`)
+  // Même obligation, même source de vérité : `canopeeAttribution` ne vaut
+  // quelque chose que si des tuiles ont VRAIMENT été vues. Afficher le crédit
+  // ETH au-dessus d'une mosaïque vide serait au choix une mention gratuite ou un
+  // mensonge sur ce qu'on regarde.
+  if (canopeeAttribution) parts.push(`${canopeeAttribution} (CC BY 4.0)`)
   credits.setExtra(parts.join(' · '))
 }
 
@@ -4847,13 +4865,16 @@ function refreshNuitIntensite(hour = params.timeOfDay ?? 10) {
 
 // LES SOUS-OPTIONS, POUSSÉES DANS LES UNIFORMES.
 //
-// ⚠️ UNE SEULE FONCTION POUR LES TROIS, ET ELLE EST IDEMPOTENTE. Les tirettes
+// ⚠️ UNE SEULE FONCTION POUR TOUTES, ET ELLE EST IDEMPOTENTE. Les tirettes
 // écrivent dans `params` puis appellent ceci ; le boot l'appelle aussi, et c'est
 // ce qui garantit qu'un gabarit chargé (qui repose params en bloc, puis
-// refreshAll) rende la même image qu'un réglage fait à la main. Trois appels de
-// setter sur des uniformes : le coût est nul, on peut la rappeler sans compter.
+// refreshAll) rende la même image qu'un réglage fait à la main. Quelques appels
+// de setter sur des uniformes : le coût est nul, on peut la rappeler sans
+// compter — et TOUTE tirette de couche ajoutée plus tard doit passer par ici,
+// sinon elle rendra une valeur qui disparaît au premier gabarit chargé.
 function appliqueReglagesCouches() {
   terrain.setSolOpacite(opaciteSol(params.solForce))
+  terrain.setCanopeeOpacite(opaciteCanopee(params.canopeeForce))
   terrain.setNuitFond(fondNuit(params.nuitAssombrissement))
   terrain.setNuitGain(gainNuit(params.nuitForce))
 }
@@ -4985,6 +5006,63 @@ async function refreshSol() {
   refreshOsmCredit()
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// LA HAUTEUR DE CANOPÉE — ETH Global Canopy Height 2020, cuite en tuiles de MÈTRES
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// La règle vit dans src/canopee.js (pur, testé), la mosaïque dans
+// src/map/canopee-layer.js. Ici il n'y a que l'enchaînement — et il est le
+// jumeau exact de celui de l'occupation du sol juste au-dessus, y compris pour
+// l'extinction hors zone cuite.
+const canopeeLayer = new CanopeeLayer({ maxTexturePx: renderer.capabilities.maxTextureSize })
+let canopeeAttribution = null
+let canopeeIndex = null
+const chargeIndexCanopee = () => {
+  if (canopeeIndex) return canopeeIndex
+  canopeeIndex = fetch('data/canopee/index.json')
+    .then((r) => (r.ok ? r.json() : null))
+    .then(normaliseIndexCanopee)
+    .catch(() => normaliseIndexCanopee(null))
+  return canopeeIndex
+}
+
+async function refreshCanopee() {
+  if (!couchesActives.has('canopee') || !dem || params.source !== 'real') {
+    terrain.setCanopee(null)
+    canopeeAttribution = null
+    refreshOsmCredit()
+    return
+  }
+  // L'emprise VRAIE du champ chargé — un bloc, ou les neuf dalles du mode
+  // continu. Jamais `patchBounds` : voir `demBounds`.
+  const bounds = demBounds(dem)
+
+  // ⚠️ HORS ZONE CUITE, ON LE DIT ET ON ÉTEINT. Une mosaïque vide rend une carte
+  // strictement inchangée, et l'interrupteur, lui, resterait allumé : on lirait
+  // « la donnée dit qu'il n'y a pas d'arbres ici », ce qui est faux. C'est le
+  // contrat déjà écrit pour la photo aérienne et pour l'occupation du sol.
+  const index = await chargeIndexCanopee()
+  const zone = zoneCanopeePour(index, bounds)
+  if (!zone) {
+    couchesActives.delete('canopee')
+    terrain.setCanopee(null)
+    canopeeAttribution = null
+    refreshOsmCredit()
+    showNotice("Pas encore de hauteur de canopée sur cette zone — la donnée n'y a pas été cuite.", { duration: 3600 })
+    refreshAll() // l'interrupteur doit bouger aussi, sinon le panneau ment
+    return
+  }
+
+  // ⚠️ LE PLAFOND DE LA ZONE, PAS CELUI DE LA COUCHE — même passage de témoin
+  // que pour l'occupation du sol : une zone cuite en z9 à qui l'on réclame du
+  // z14 rend une mosaïque vide sous un interrupteur allumé.
+  const built = await canopeeLayer.build(bounds, { zmax: zone.zmax })
+  if (built === SUPERSEDED) return // une construction plus récente a pris la main
+  terrain.setCanopee(built)
+  canopeeAttribution = built?.tuilesVues ? built.attribution : null
+  refreshOsmCredit()
+}
+
 // `parMachine` distingue le clic de l'utilisateur de l'allumage automatique, et
 // c'est TOUT le mécanisme du veto : seul un geste humain pose ou lève
 // `nuitEteinteAlaMain`. Le défaut est `false` parce que l'immense majorité des
@@ -4999,6 +5077,7 @@ function setCouche(id, on, { parMachine = false } = {}) {
     refreshNuit()
   }
   if (id === 'occupation-sol') refreshSol()
+  if (id === 'canopee') refreshCanopee()
 }
 async function refreshAerialCore() {
   if (!params.aerialEnabled || !dem || params.source !== 'real') {
@@ -5097,7 +5176,7 @@ async function paintCellAerial(cell) {
   cell.terrain.setAerialOpacity(params.aerialOpacity)
   cell.terrain.setAerialCoastFade(params.aerialCoastFade ?? 0.1)
 }
-const rebuildMapLayers = () => { const p = mapLayers.rebuild({ dem, terrain, params }); refreshOsmCredit(); refreshAerial(); refreshNuit(); refreshSol(); return p.then(() => refreshOsmCredit()) }
+const rebuildMapLayers = () => { const p = mapLayers.rebuild({ dem, terrain, params }); refreshOsmCredit(); refreshAerial(); refreshNuit(); refreshSol(); refreshCanopee(); return p.then(() => refreshOsmCredit()) }
 
 // "individualiser la zone" — clip the map to the administrative boundary under
 // the view (continent/country/region/departement by zoom). The landform sits
@@ -6458,6 +6537,19 @@ const couchesPanel = buildCouchesPanel({
         step: 0.05,
         get: () => params.solForce ?? SOL_FORCE_DEFAUT,
         set: (v) => { params.solForce = v; appliqueReglagesCouches() },
+      }]
+    }
+    if (id === 'canopee') {
+      // Même libellé et même course que l'occupation du sol, délibérément —
+      // deux lavis drapés qui se règlent pareil doivent se graduer pareil (le
+      // raisonnement est dans src/reglages-couches.js).
+      return [{
+        label: 'Force',
+        min: 0,
+        max: CANOPEE_FORCE_MAX,
+        step: 0.05,
+        get: () => params.canopeeForce ?? CANOPEE_FORCE_DEFAUT,
+        set: (v) => { params.canopeeForce = v; appliqueReglagesCouches() },
       }]
     }
     if (id === 'lumieres-nocturnes') {
