@@ -128,6 +128,8 @@ import { buildMapPanel } from './ui/map-panel.js'
 import { buildCouchesPanel } from './ui/couches-panel.js'
 import { NuitLayer } from './map/nuit-layer.js'
 import { intensiteNuit, facteurEchelleNuit, largeurEmpriseKm } from './nuit.js'
+import { OccupationSolLayer } from './map/occupation-sol-layer.js'
+import { normaliseIndexSol, zoneSolPour } from './occupation-sol.js'
 import { buildEffectsPanel, BASE_GRADE } from './ui/effects-panel.js'
 import { buildHourPill } from './ui/hour-pill.js'
 import { buildZoomStepper } from './ui/zoom-stepper.js'
@@ -2952,6 +2954,17 @@ function regenerateTerrain() {
       // re-drew the vectors but left the OLD mosaic stretched across the new
       // block: imagery that visibly ignored the terrain scale.
       refreshAerial()
+      // ⚠️ ET L'OCCUPATION DU SOL AUSSI, POUR EXACTEMENT LA MÊME RAISON — le
+      // défaut a été VU avant d'être écrit : parti de Nice en Z12, arrivé à
+      // Tokyo en Z16, la mosaïque de Nice restait tendue sur le bloc japonais,
+      // avec l'attribution ESA toujours affichée sous une donnée qui n'était
+      // plus la bonne. C'est le même piège que le commentaire ci-dessus décrit
+      // pour la photo, et il se rejoue à l'identique pour chaque nouvelle
+      // couche drapée qu'on ajoute ailleurs qu'ici.
+      //
+      // (Les lumières nocturnes manquent au même endroit. On ne les ajoute pas
+      // ici : un autre poste travaille dessus en ce moment — voir le rapport.)
+      refreshSol()
       refreshOsmCredit(); _mlp.then(() => refreshOsmCredit())
       regenerateLabels()
       regenerateHud()
@@ -4688,6 +4701,11 @@ function refreshOsmCredit() {
   // screen — and only while it is: aerialAttribution is null the moment the
   // layer is off OR the patch leaves the covered area.
   if (aerialAttribution) parts.push(aerialAttribution)
+  // CC-BY 4.0 impose la mention tant que la donnée est à l'écran, et seulement
+  // tant qu'elle y est — même contrat que la Licence Ouverte de l'IGN juste
+  // au-dessus. `solAttribution` retombe à null dès que la couche s'éteint ou
+  // que l'emprise quitte une zone cuite.
+  if (solAttribution) parts.push(`${solAttribution} (CC BY 4.0)`)
   credits.setExtra(parts.join(' · '))
 }
 
@@ -4749,10 +4767,66 @@ async function refreshNuit() {
   refreshNuitIntensite()
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// L'OCCUPATION DU SOL — ESA WorldCover 2021, cuite en tuiles de CLASSES
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// La règle vit dans src/occupation-sol.js (pur, testé), la mosaïque dans
+// src/map/occupation-sol-layer.js. Ici il n'y a que l'enchaînement.
+const solLayer = new OccupationSolLayer({ maxTexturePx: renderer.capabilities.maxTextureSize })
+let solAttribution = null
+// Le manifeste des zones cuites, chargé une seule fois. Le site est statique :
+// personne ne peut répondre « as-tu de l'occupation du sol ici ? », donc on lit
+// un fichier qui le dit — même motif que public/data/bathy/index.json.
+let solIndex = null
+const chargeIndexSol = () => {
+  if (solIndex) return solIndex
+  solIndex = fetch('data/sol/index.json')
+    .then((r) => (r.ok ? r.json() : null))
+    .then(normaliseIndexSol)
+    .catch(() => normaliseIndexSol(null))
+  return solIndex
+}
+
+async function refreshSol() {
+  if (!couchesActives.has('occupation-sol') || !dem || params.source !== 'real') {
+    terrain.setSol(null)
+    solAttribution = null
+    refreshOsmCredit()
+    return
+  }
+  // L'emprise VRAIE du champ chargé — un bloc, ou les neuf dalles du mode
+  // continu. Jamais `patchBounds` : voir `demBounds`.
+  const bounds = demBounds(dem)
+
+  // ⚠️ HORS ZONE CUITE, ON LE DIT ET ON ÉTEINT. Une mosaïque vide rend une carte
+  // strictement inchangée, et l'interrupteur, lui, resterait allumé : on lirait
+  // « la donnée dit qu'il n'y a rien ici », ce qui est faux. C'est le contrat
+  // déjà écrit pour la photo aérienne — « leaving the toggle on while nothing
+  // renders is the worst of both ».
+  const index = await chargeIndexSol()
+  if (!zoneSolPour(index, bounds)) {
+    couchesActives.delete('occupation-sol')
+    terrain.setSol(null)
+    solAttribution = null
+    refreshOsmCredit()
+    showNotice("Pas encore d'occupation du sol sur cette zone — la donnée n'y a pas été cuite.", { duration: 3600 })
+    refreshAll() // l'interrupteur doit bouger aussi, sinon le panneau ment
+    return
+  }
+
+  const built = await solLayer.build(bounds)
+  if (built === SUPERSEDED) return // une construction plus récente a pris la main
+  terrain.setSol(built)
+  solAttribution = built?.tuilesVues ? built.attribution : null
+  refreshOsmCredit()
+}
+
 function setCouche(id, on) {
   if (on) couchesActives.add(id)
   else couchesActives.delete(id)
   if (id === 'lumieres-nocturnes') refreshNuit()
+  if (id === 'occupation-sol') refreshSol()
 }
 async function refreshAerialCore() {
   if (!params.aerialEnabled || !dem || params.source !== 'real') {
@@ -4851,7 +4925,7 @@ async function paintCellAerial(cell) {
   cell.terrain.setAerialOpacity(params.aerialOpacity)
   cell.terrain.setAerialCoastFade(params.aerialCoastFade ?? 0.1)
 }
-const rebuildMapLayers = () => { const p = mapLayers.rebuild({ dem, terrain, params }); refreshOsmCredit(); refreshAerial(); refreshNuit(); return p.then(() => refreshOsmCredit()) }
+const rebuildMapLayers = () => { const p = mapLayers.rebuild({ dem, terrain, params }); refreshOsmCredit(); refreshAerial(); refreshNuit(); refreshSol(); return p.then(() => refreshOsmCredit()) }
 
 // "individualiser la zone" — clip the map to the administrative boundary under
 // the view (continent/country/region/departement by zoom). The landform sits
