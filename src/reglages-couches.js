@@ -57,12 +57,23 @@ import { NON } from './gardien.js'
 //     correctif est de remonter le plancher (fait dans occupation-sol.js) et de
 //     donner UN bouton pour en sortir dans les deux sens.
 //
-// La course va jusqu'à 2 et pas 1 : le défaut est déjà « ça se voit », donc une
-// tirette bornée à 1 n'offrirait que le recul. ⚠️ Le nuanceur PLAFONNE le
-// mélange à 1 de son côté — au-delà, `mix` extrapolerait hors gamme et
-// fabriquerait des couleurs fluorescentes.
-export const SOL_FORCE_DEFAUT = 1
-export const SOL_FORCE_MAX = 2
+// ⚠️ LA FORCE A ÉTÉ DOUBLÉE LE 2026-08-02 — Adrien : « multiplie par 2 la force
+// de la tirette d'occupation des sols (de 1 à 4) ». Le défaut passe de 1 à 2 et
+// la course de 2 à 4.
+//
+// Ce n'est pas une simple mise à l'échelle : la course haute SERT, et elle sert
+// aux classes FAIBLES. Le nuanceur plafonne le mélange à 1 de son côté (au-delà,
+// `mix` extrapolerait hors gamme et fabriquerait des couleurs fluorescentes).
+// À force 2, la prairie (0,42) peint à 0,84 et le boisé (0,90) sature déjà ;
+// à force 4 la prairie atteint enfin le plafond à son tour. Autrement dit,
+// monter la tirette resserre progressivement l'écart entre les familles — la
+// hiérarchie boisé/ouvert s'estompe à mesure qu'on pousse, ce qui est le
+// comportement attendu d'un bouton « je veux voir plus fort ».
+//
+// La course va jusqu'à 4 et pas 2 : le défaut est déjà « ça se voit », donc une
+// tirette bornée au défaut n'offrirait que le recul.
+export const SOL_FORCE_DEFAUT = 2
+export const SOL_FORCE_MAX = 4
 
 /** La tirette « Force » → `uSolOpacite`. */
 export function opaciteSol(v) {
