@@ -77,9 +77,23 @@ export default async (req) => {
     // pas de compte.
     customer_creation: 'always',
     billing_address_collection: 'required',
+    // ⚠️ MANAGED PAYMENTS EST DÉSACTIVÉ VOLONTAIREMENT, ET C'EST UNE DÉCISION,
+    // PAS QU'UN CONTOURNEMENT. Découvert en production le 2026-08-04 : le compte
+    // Stripe l'a actif par défaut (Stripe devient marchand officiel — il gère
+    // taxe, fraude et litiges à la place de ShibuMap). Séduisant sur le papier,
+    // mais il exige un `tax_code` PAR PRODUIT dans le registre fiscal de Stripe,
+    // et se tromper de code y facture la MAUVAISE TVA à un vrai client. Choisir
+    // le bon code demande une vraie recherche, pas une supposition d'agent.
+    //
+    // Le désactiver remet le système sur le modèle que le plan de monétisation
+    // d'Adrien avait déjà résolu (franchise transfrontalière, RU exclu au
+    // niveau du catalogue) — voir _paiement-catalogue.mjs. Managed Payments
+    // reste une PISTE À ÉTUDIER PLUS TARD, à tête reposée, pas à activer par un
+    // paramètre technique glissé en urgence.
+    'managed_payments[enabled]': false,
+    payment_method_types: ['card'],
     // La liste blanche des pays — le Royaume-Uni en est exclu tant que la TVA
     // britannique n'est pas réglée (voir le catalogue).
-    payment_method_types: ['card'],
     'shipping_address_collection[allowed_countries]': art.livrable === 'impression' ? PAYS_AUTORISES : undefined,
     line_items: [{
       quantity: 1,
