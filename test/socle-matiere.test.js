@@ -55,14 +55,66 @@ test('le congé porte des normales LISSES, sinon ce sont des facettes', () => {
   const vues = new Set()
   for (let v = 0; v < pos.count; v++) {
     if (pos.getY(v) > baseY + SOCLE_ARRONDI + 1e-6) continue // au-dessus du congé
-    const ny = nor.getY(v)
-    if (ny < -1e-6) vues.add(ny.toFixed(3))
+    vues.add(nor.getY(v).toFixed(3))
   }
-  // un arc à 3 segments porte 4 rangs de normales, dont 3 ont une composante
-  // verticale non nulle (le rang du haut est purement horizontal, il raccorde
-  // le mur sans couture)
-  assert.ok(vues.size >= 3, `le congé n'a que ${vues.size} direction(s) : il facette`)
-  assert.ok(Math.min(...[...vues].map(Number)) < -0.99, 'le dernier rang regarde vers le fond')
+  assert.ok(vues.size >= 4, `le congé n'a que ${vues.size} direction(s) : il facette`)
+})
+
+test('le congé se SOUDE au mur en haut et au fond en bas', () => {
+  // ══════ LE DÉFAUT D'ADRIEN : « la base du socle est traitée comme un objet
+  // séparé ». Ce n'en était pas un — c'était un SIGNE.
+  //
+  // Toutes les normales de cette géométrie sont stockées RETOURNÉES, vers
+  // l'intérieur du solide (convention de `pousse`, redressée au fragment par
+  // DoubleSide). La première version du congé n'en retournait que la moitié :
+  // l'horizontale oui, la verticale non. La bande descendait donc vers le BAS
+  // quand le fond, lui, regarde vers le HAUT — elle recevait la lumière comme si
+  // elle était tournée vers le ciel, avec une cassure nette au raccord.
+  //
+  // La propriété qui compte n'est pas « les normales varient » mais « elles
+  // coïncident AUX DEUX BOUTS ». C'est ce que ce test verrouille.
+  const { geo, baseY } = buildSlabWalls(plat, { resolution: 16 })
+  const pos = geo.attributes.position
+  const nor = geo.attributes.normal
+  // ⚠️ `|z| < 5` EN PLUS de `x ≥ 26` : sans lui on tombait dans un COIN arrondi,
+  // dont la bissectrice est diagonale — la normale y vaut (0,0,1) et non
+  // (−1,0,0), et la comparaison avec le mur du côté droit ne voulait plus rien
+  // dire. On reste au milieu de la face +x.
+  const lire = (predicat) => {
+    for (let v = 0; v < pos.count; v++) {
+      if (pos.getX(v) < 26 || Math.abs(pos.getZ(v)) > 5) continue
+      if (predicat(pos.getY(v) - baseY)) return [nor.getX(v), nor.getY(v), nor.getZ(v)]
+    }
+    return null
+  }
+  const fond = lire((h) => Math.abs(h) < 1e-9)
+  const congeBas = lire((h) => h > 1e-9 && h < SOCLE_ARRONDI * 0.2)
+  const congeHaut = lire((h) => Math.abs(h - SOCLE_ARRONDI) < 1e-6)
+  // ⚠️ LE MUR SE CHERCHE PAR TRIANGLE, PAS PAR SOMMET. Sur ce relief plat il n'a
+  // que deux rangs, 0,9 et 6,84 — et le rang 6,84 est PARTAGÉ avec le chanfrein,
+  // dont la normale est inclinée par construction. Un sommet pris à cette
+  // altitude tombait une fois sur deux dans le chanfrein, et le test croyait
+  // mesurer le mur.
+  const lireTri = (predicat) => {
+    for (let t = 0; t < pos.count; t += 3) {
+      const hs = [0, 1, 2].map((k) => pos.getY(t + k) - baseY)
+      const xs = [0, 1, 2].map((k) => pos.getX(t + k))
+      if (Math.min(...xs) < 26) continue
+      if (predicat(Math.min(...hs), Math.max(...hs))) return [nor.getX(t), nor.getY(t), nor.getZ(t)]
+    }
+    return null
+  }
+  const mur = lireTri((bas, haut) => Math.abs(bas - SOCLE_ARRONDI) < 1e-6 && haut > SOCLE_ARRONDI + 1)
+  assert.ok(fond && congeBas && congeHaut && mur, 'les quatre familles doivent exister')
+  // le fond regarde vers le HAUT (normale rentrante d'une face du dessous)
+  assert.ok(fond[1] > 0.99, `le fond ne regarde pas vers le haut : ${JSON.stringify(fond)}`)
+  // …et le bas du congé part DANS LE MÊME SENS, jamais à l'opposé
+  assert.ok(congeBas[1] > 0.5, `le bas du congé s'oppose au fond : ${JSON.stringify(congeBas)}`)
+  // en haut il est PUREMENT horizontal : c'est ce qui le soude au mur
+  assert.ok(Math.abs(congeHaut[1]) < 1e-6, `le haut du congé n'est pas plat : ${JSON.stringify(congeHaut)}`)
+  assert.ok(Math.abs(mur[1]) < 1e-6, 'le mur est vertical, donc sa normale est horizontale')
+  // et il pointe du même côté que le mur — sinon la bande s'éclaire à l'envers
+  assert.ok(congeHaut[0] * mur[0] + congeHaut[2] * mur[2] > 0.99, 'congé et mur regardent à l’opposé')
 })
 
 test("l'arête haute reste EXACTEMENT sur le bord du relief (pas de jour sous la carte)", () => {

@@ -296,12 +296,26 @@ export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 
     y,
     ring[i].z + biss[i][1] * d * onglet[i]
   )
-  // normale du congé à l'angle θ : horizontale vers l'EXTÉRIEUR × cos θ, plus
-  // une composante verticale vers le bas × sin θ. À θ=0 elle vaut exactement la
-  // normale du mur (raccord invisible), à θ=90° celle du fond.
+  // ══════ LA NORMALE DU CONGÉ, ET LE SIGNE QUI L'A DÉTACHÉ DU BLOC ═══════════
+  //
+  // ⚠️ TOUTES LES NORMALES DE CETTE GÉOMÉTRIE SONT STOCKÉES RETOURNÉES, vers
+  // l'INTÉRIEUR du solide — convention de `pousse` depuis l'origine, redressée au
+  // fragment par `side: DoubleSide` et gl_FrontFacing. Mesuré : le mur rend
+  // (−1, 0, 0) sur la face +x, et le fond (0, +1, 0).
+  //
+  // La première version ne retournait que la MOITIÉ de la normale : l'horizontale
+  // était bien inversée, la verticale non. Le congé descendait donc de
+  // « horizontale rentrante » à « tout droit vers le BAS » quand le fond, lui,
+  // regarde vers le HAUT. Résultat à l'écran : la bande du congé recevait la
+  // lumière comme si elle était tournée vers le ciel, avec une cassure nette là
+  // où elle rejoint le mur — et Adrien a lu « la base du socle est traitée comme
+  // un objet séparé ». Ce n'en était pas un : c'était un signe.
+  //
+  // À θ=0 elle vaut exactement la normale du mur (raccord invisible), à θ=90°
+  // exactement celle du fond. C'est cette double coïncidence qui soude le congé.
   const normaleArc = (i, th) => new THREE.Vector3(
     -biss[i][0] * Math.cos(th),
-    -Math.sin(th),
+    Math.sin(th),
     -biss[i][1] * Math.cos(th)
   ).normalize()
 
