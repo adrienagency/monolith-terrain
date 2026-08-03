@@ -45,6 +45,14 @@ function encode(obj, prefixe = '', sortie = new URLSearchParams()) {
   return sortie
 }
 
+// Huit lettres, pour l'étiquette de suivi Stripe (integration_identifier).
+const ALPHABET = 'abcdefghijklmnopqrstuvwxyz'
+function suffixeAleatoire() {
+  let s = ''
+  for (let i = 0; i < 8; i++) s += ALPHABET[Math.floor(Math.random() * ALPHABET.length)]
+  return s
+}
+
 const json = (corps, statut = 200) =>
   new Response(JSON.stringify(corps), { status: statut, headers: { 'content-type': 'application/json' } })
 
@@ -91,7 +99,19 @@ export default async (req) => {
     // reste une PISTE À ÉTUDIER PLUS TARD, à tête reposée, pas à activer par un
     // paramètre technique glissé en urgence.
     'managed_payments[enabled]': false,
-    payment_method_types: ['card'],
+    // ⚠️ PAS DE `payment_method_types`, ET C'EST UNE RÈGLE GÉNÉRALE, PAS
+    // SEULEMENT LIÉE AU BLOCAGE CI-DESSUS. Le guide Stripe est catégorique :
+    // ne JAMAIS l'inclure (sauf Terminal, paiement en personne). Le forcer
+    // désactive les moyens de paiement dynamiques — Stripe ne peut plus choisir
+    // ce qui convertit le mieux pour chaque acheteur, ni suivre les réglages du
+    // Dashboard. « Cartes uniquement au lancement » (le plan de monétisation
+    // d'Adrien) se règle donc côté Dashboard (Settings > Payment methods),
+    // pas ici : Adrien peut l'ajuster sans redéploiement, et ça coexiste avec
+    // Stripe qui choisit dynamiquement PARMI ce qui est activé.
+    //
+    // Un vrai besoin de restriction dans le CODE passerait par
+    // `payment_method_configurations`, pas par ce paramètre.
+    //
     // La liste blanche des pays — le Royaume-Uni en est exclu tant que la TVA
     // britannique n'est pas réglée (voir le catalogue).
     'shipping_address_collection[allowed_countries]': art.livrable === 'impression' ? PAYS_AUTORISES : undefined,
@@ -113,6 +133,10 @@ export default async (req) => {
       // l'identifiant de la commande côté ShibuMap, s'il y en a un
       retour: String(corps.retour || '').slice(0, 200),
     },
+    // Étiquette de suivi (guide Stripe, API ≥ 2026-03-25) : distingue ce
+    // parcours des autres dans le Dashboard, pour comparer les taux de
+    // conversion entre le Pass, l'affiche, les dons, etc.
+    integration_identifier: `shibumap-${suffixeAleatoire()}`,
   }
 
   // `shipping_address_collection` a une forme imbriquée : on la repasse
