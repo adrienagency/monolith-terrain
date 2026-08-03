@@ -5997,18 +5997,23 @@ initTips()
 //
 // Rend un objet qui sait tout remettre en place : la caméra de la scène ne doit
 // pas garder une trace de l'aperçu.
-function cadrerAffiche(aspect, cadrage) {
+function cadrerAffiche(aspect, cadrage, pointNet = null) {
   const c = cadrageValide(cadrage || {})
   const sauve = {
     pos: camera.position.clone(),
     aspect: camera.aspect,
     zoom: camera.zoom,
     view: camera.view ? { ...camera.view } : null,
+    autoFocus: params.autoFocus,
+    focusDistance: params.focusDistance,
   }
   const restaurer = () => {
     camera.position.copy(sauve.pos)
     camera.aspect = sauve.aspect
     camera.zoom = sauve.zoom
+    params.autoFocus = sauve.autoFocus
+    params.focusDistance = sauve.focusDistance
+    if (dof) dof.cocMaterial.worldFocusDistance = sauve.focusDistance
     if (sauve.view?.enabled) {
       const v = sauve.view
       camera.setViewOffset(v.fullWidth, v.fullHeight, v.offsetX, v.offsetY, v.width, v.height)
@@ -6074,12 +6079,56 @@ function cadrerAffiche(aspect, cadrage) {
     camera.setViewOffset(W, H, (c.x * W) / 2, (c.y * H) / 2, W, H)
   } else camera.clearViewOffset()
   camera.updateProjectionMatrix()
+
+  // ═══ LE POINT DE NETTETÉ EST UN POINT DU MONDE, PAS UNE DISTANCE ═══════════
+  //
+  // ⚠️ ET C'EST TOUT LE PIÈGE DU BOKEH SUR L'AFFICHE. `params.focusDistance`
+  // est une distance depuis la caméra ; or l'affiche DÉPLACE la caméra (elle
+  // recule pour cadrer le socle). La distance mesurée à l'écran désignerait
+  // donc un tout autre plan une fois l'affiche cadrée — le sommet net à
+  // l'écran ressortirait flou sur le tirage.
+  //
+  // On mémorise donc le POINT visé, et on recalcule sa distance depuis la
+  // caméra de l'affiche. Au passage, on coupe l'autofocus : il suit le
+  // curseur, et sur cet écran le curseur est sur le rail.
+  if (pointNet) {
+    params.autoFocus = false
+    params.focusDistance = camera.position.distanceTo(
+      new THREE.Vector3(pointNet.x, pointNet.y, pointNet.z)
+    )
+    if (dof) dof.cocMaterial.worldFocusDistance = params.focusDistance
+  }
   return { restaurer }
+}
+
+/**
+ * Où le relief est-il touché par un clic sur la feuille ?
+ *
+ * `u` et `v` sont les coordonnées normalisées de three (−1 à +1, y vers le
+ * haut) DANS LE CADRE DE L'AFFICHE — pas dans la fenêtre. On cadre donc
+ * l'affiche pour de vrai, on tire le rayon, puis on remet tout en place.
+ */
+function viserPointNet({ u, v, aspect, cadrage }) {
+  const r = cadrerAffiche(aspect, cadrage)
+  try {
+    focusRay.setFromCamera(new THREE.Vector2(u, v), camera)
+    const d = focusRayHit(focusRay.ray.origin, focusRay.ray.direction, terrain.sample, {
+      halfExtent: TERRAIN_SIZE / 2,
+    })
+    if (d == null) return null // le ciel, ou hors du bloc : on garde l'ancien point
+    const p = focusRay.ray.origin.clone().addScaledVector(focusRay.ray.direction, d)
+    return { x: p.x, y: p.y, z: p.z }
+  } finally {
+    r.restaurer()
+  }
 }
 
 async function openAfficheUI() {
   const { ouvrirAffiche } = await import('./ui/affiche.js')
   const { exportImage } = await import('./export.js')
+  // Ce qu'on devra rendre en sortant : l'affiche emprunte des réglages de carte,
+  // elle ne se les approprie pas.
+  const lieuxAvant = params.placesEnabled
   // ⚠️ MÊME GEL QUE L'EXPORT, ET POUR LA MÊME RAISON : ce que l'aperçu montre
   // doit être ce qui partira au tirage. Élan éteint, débordement résorbé.
   f3Fige()
@@ -6087,8 +6136,8 @@ async function openAfficheUI() {
     // Un VRAI rendu au ratio demandé, pas un recadrage de l'écran — c'est tout
     // l'intérêt de la passe. Sans crédit incrusté : la ligne d'attribution a sa
     // place sur l'affiche finale, pas en travers d'une vignette de choix.
-    rendreApercu: async ({ largeur, hauteur, cadrage }) => {
-      const rendu = cadrerAffiche(largeur / hauteur, cadrage)
+    rendreApercu: async ({ largeur, hauteur, cadrage, pointNet }) => {
+      const rendu = cadrerAffiche(largeur / hauteur, cadrage, pointNet)
       try {
         const blob = await exportImage({
           renderer, composer, camera,
@@ -6116,7 +6165,24 @@ async function openAfficheUI() {
       console.info('[affiche] commande demandée :', commande)
       showNotice('Le paiement arrive bientôt — le fichier n’est pas encore livrable.')
     },
-    onFermer: () => refreshAll(),
+    // Les noms de villes : l'affiche peut les couper sans couper la carte
+    // qu'Adrien avait composée. On mémorise l'état d'avant et on le rend en
+    // sortant — l'écran d'affiche propose une VARIANTE, il ne mute pas le look.
+    // Le bokeh : actif ou non, et où l'on vise. Voir viserPointNet.
+    bokehActif: () => !!(params.bokehEnabled && params.bokehScale > 0),
+    viserPointNet,
+    lieuxAffiches: () => params.placesEnabled,
+    setLieuxAffiches: (v) => {
+      params.placesEnabled = !!v
+      rebuildMapLayers()
+    },
+    onFermer: () => {
+      if (params.placesEnabled !== lieuxAvant) {
+        params.placesEnabled = lieuxAvant
+        rebuildMapLayers()
+      }
+      refreshAll()
+    },
   })
 }
 

@@ -494,3 +494,41 @@ body.dark .af-sheet {
 .af-logo[data-coin='hd'] { top: 6cqw; right: 6cqw; }
 .af-logo[data-coin='bg'] { bottom: 6cqw; left: 6cqw; }
 .af-logo[data-coin='bd'] { bottom: 6cqw; right: 6cqw; }
+
+/* ── Le viseur de netteté ────────────────────────────────────────────────── */
+.af-aide {
+  margin: var(--ce-gap-tight) 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ce-muted);
+}
+/* Le groupe monte d'un cran quand le viseur est armé : c'est la seule chose
+   qu'on attend de l'utilisateur à cet instant, elle doit se voir. */
+.af-groupe-net.actif {
+  background: color-mix(in srgb, var(--ce-accent) 8%, transparent);
+  border-radius: 12px;
+  padding: 12px 12px 14px;
+  margin: -4px -12px 18px;
+}
+.af-groupe-net.actif .af-aide { color: var(--ce-ink); }
+
+/* La feuille devient une cible : la mire dit que le clic va servir à viser, et
+   non à déplacer l'image comme le reste du temps. */
+.af-sheet.vise { cursor: crosshair; }
+.af-sheet.vise::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border: 2px solid var(--ce-accent);
+  box-shadow: inset 0 0 0 9999px rgba(234, 88, 12, 0.06);
+  pointer-events: none;
+  animation: af-vise 1.8s ease-in-out infinite;
+}
+@keyframes af-vise {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .af-sheet.vise::before { animation: none; opacity: 0.8; }
+}

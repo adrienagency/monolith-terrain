@@ -95,6 +95,10 @@ export function ouvrirAffiche(ctx) {
     // ENSUITE qu'on resserre. Voir distanceCadrage dans print-page.js.
     cadrage: { ...CADRAGE_DEFAUT },
     logo: null, // { url, coin, taille }
+    // ⚠️ UN POINT DU MONDE, PAS UNE DISTANCE — voir cadrerAffiche dans main.js :
+    // l'affiche déplace la caméra, donc une distance mesurée à l'écran
+    // désignerait un autre plan une fois l'affiche cadrée.
+    pointNet: null,
   }
 
   document.body.classList.add('af-mode')
@@ -191,7 +195,22 @@ export function ouvrirAffiche(ctx) {
   const cocheEncre = el('input')
   cocheEncre.type = 'checkbox'
   basculeEncre.append(el('span', null, 'Écrire en clair (fond sombre)'), cocheEncre)
-  gCart.append(bascule, champ, basculeEncre)
+  // ⚠️ LES NOMS DE VILLES SONT UN RÉGLAGE DE LA CARTE, PAS DU CARTOUCHE — et
+  // c'est pour ça qu'ils ne se traitent pas comme les deux cases au-dessus.
+  // Adrien : « les noms des villes sont coupés, il doit pouvoir les
+  // désactiver. » Les couper sur l'affiche ne doit PAS couper la carte qu'il
+  // avait composée : on flippe le vrai réglage pour que l'aperçu soit un vrai
+  // rendu, et on le remet en sortant (voir `partir`).
+  const basculeLieux = el('label', 'af-bascule')
+  const cocheLieux = el('input')
+  cocheLieux.type = 'checkbox'
+  cocheLieux.checked = ctx.lieuxAffiches?.() !== false
+  basculeLieux.append(el('span', null, 'Noms des villes sur la carte'), cocheLieux)
+  cocheLieux.addEventListener('change', () => {
+    ctx.setLieuxAffiches?.(cocheLieux.checked)
+    appliquer({ refaireRendu: true })
+  })
+  gCart.append(bascule, champ, basculeEncre, basculeLieux)
 
   coche.addEventListener('change', () => { etat.cartouche = coche.checked; appliquer({}) })
   cocheEncre.addEventListener('change', () => { etat.cartoucheSombre = cocheEncre.checked; appliquer({}) })
@@ -286,6 +305,31 @@ export function ouvrirAffiche(ctx) {
     appliquer({})
   })
   gLogo.append(etiqFichier, fichier, logoOutils)
+
+  // ══════ LA NETTETÉ PASSE DEVANT, QUAND IL Y A DU BOKEH ════════════════════
+  //
+  // Adrien : « l'utilisateur peut choisir le point de son bokeh dès que le
+  // visuel charge avec le bokeh activé, c'est la première chose qu'on lui
+  // propose avant même le reste ». C'est juste : sur une image à faible
+  // profondeur de champ, tout le reste — format, cadrage — se juge à travers
+  // ce qui est net. Choisir le format d'abord reviendrait à composer les yeux
+  // fermés.
+  //
+  // Le groupe n'existe QUE si le gabarit porte du bokeh : un réglage sans effet
+  // vaut mieux absent que grisé.
+  const gNet = el('div', 'af-groupe af-groupe-net')
+  if (ctx.bokehActif?.()) {
+    const enTeteNet = el('div', 'af-legende-ligne')
+    enTeteNet.append(el('p', 'af-legende', 'Point de netteté'))
+    const bViser = el('button', 'af-lien')
+    bViser.type = 'button'
+    bViser.textContent = 'Choisir'
+    enTeteNet.append(bViser)
+    const aideNet = el('p', 'af-aide', 'Clique sur l’affiche pour choisir ce qui doit être net. Le reste se fond.')
+    gNet.append(enTeteNet, aideNet)
+    bViser.addEventListener('click', () => { viseur(true) })
+    corps.append(gNet)
+  }
 
   corps.append(gFormat, gOrient, gCadre, gCart, gLogo)
 
@@ -392,6 +436,7 @@ export function ouvrirAffiche(ctx) {
         largeur: Math.max(2, Math.round(W * k)),
         hauteur: Math.max(2, Math.round(H * k)),
         cadrage: { ...etat.cadrage },
+        pointNet: etat.pointNet,
       })
       // ⚠️ Un rendu plus récent a pu partir pendant celui-ci (on clique vite sur
       // les formats). Sans ce jeton, c'est l'aperçu le plus LENT qui gagne.
@@ -414,6 +459,27 @@ export function ouvrirAffiche(ctx) {
     }
   }
 
+  // ── Le viseur de netteté ──────────────────────────────────────────────────
+  let enVisee = false
+  function viseur(on) {
+    enVisee = !!on
+    sheet.classList.toggle('vise', enVisee)
+    gNet.classList.toggle('actif', enVisee)
+  }
+  function viserIci(e) {
+    const r = sheet.getBoundingClientRect()
+    // coordonnées normalisées de three : −1 à +1, y vers le HAUT
+    const u = ((e.clientX - r.left) / r.width) * 2 - 1
+    const v = -(((e.clientY - r.top) / r.height) * 2 - 1)
+    const geo = geometriePage({ format: etat.format, orientation: etat.orientation, dpi: DPI_IMPRESSION })
+    const p = ctx.viserPointNet?.({ u, v, aspect: geo.largeurMm / geo.hauteurMm, cadrage: etat.cadrage })
+    // Un clic dans le ciel ne remet PAS le point à zéro : on garde le précédent
+    // plutôt que de rendre l'image entièrement floue sur un geste raté.
+    if (p) etat.pointNet = p
+    viseur(false)
+    appliquer({ refaireRendu: true })
+  }
+
   // ── Le geste direct : on tire l'image, on ne cherche pas un curseur ───────
   //
   // ⚠️ LE DÉPLACEMENT SE MESURE EN FRACTION DE LA FEUILLE, PAS EN PIXELS. La
@@ -423,6 +489,7 @@ export function ouvrirAffiche(ctx) {
   // souris doit balayer moins d'image, pas plus.
   let prise = null
   sheet.addEventListener('pointerdown', (e) => {
+    if (enVisee) { viserIci(e); return }
     prise = { id: e.pointerId, x: e.clientX, y: e.clientY, dep: { ...etat.cadrage } }
     sheet.setPointerCapture(e.pointerId)
     sheet.classList.add('tire')
@@ -466,6 +533,11 @@ export function ouvrirAffiche(ctx) {
     fermer.remove()
     setTimeout(() => scene.remove(), 340)
     window.removeEventListener('keydown', surTouche)
+    clearTimeout(differe)
+    // Les URL d'objet survivent au document : sans ça, chaque ouverture de
+    // l'écran laisse derrière elle le logo et le dernier aperçu.
+    if (etat.logo?.url) URL.revokeObjectURL(etat.logo.url)
+    if (img.src?.startsWith('blob:')) URL.revokeObjectURL(img.src)
     ctx.onFermer?.()
   }
   function surTouche(e) { if (e.key === 'Escape') partir() }
@@ -473,5 +545,6 @@ export function ouvrirAffiche(ctx) {
   window.addEventListener('keydown', surTouche)
 
   appliquer({ refaireRendu: true })
+  if (ctx.bokehActif?.()) viseur(true)
   return { fermer: partir }
 }
