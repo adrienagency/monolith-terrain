@@ -207,22 +207,59 @@ export function cadrageTuile(plan, tuile) {
 // Le cadrage tient donc en trois nombres, et aucun ne touche la caméra de la
 // scène : zoom (1 = tout le socle), puis deux décalages en fraction de l'image.
 export const CADRAGE_DEFAUT = { zoom: 1, x: 0, y: 0 }
-export const CADRAGE_ZOOM_MIN = 0.7
-export const CADRAGE_ZOOM_MAX = 3
+export const CADRAGE_ZOOM_MIN = 0.5
+// ⚠️ CE PLAFOND EST CELUI DU CURSEUR, PAS CELUI DU CADRAGE. Adrien, après avoir
+// vu la première version : « il faut que l'utilisateur puisse zoomer autant
+// qu'il veut, et donc que le bloc soit libre de sortir du cadre ». La molette
+// n'est donc bornée par rien ; seule la course du curseur s'arrête ici, parce
+// qu'un curseur sans fin ne se règle plus.
+export const CADRAGE_ZOOM_CURSEUR_MAX = 8
 
-/** Ramène un cadrage dans ses bornes, quoi qu'on lui passe. */
+/**
+ * Ramène un cadrage à quelque chose d'utilisable — SANS l'enfermer.
+ *
+ * ⚠️ LE DÉCALAGE N'EST PLUS BORNÉ, et c'est une correction, pas un oubli. La
+ * première version le limitait à « ce que le zoom a poussé hors cadre », une
+ * règle juste pour un RECADRAGE d'image : au-delà, on n'aurait découvert que du
+ * vide. Mais ici chaque aperçu est un VRAI RENDU — la scène existe partout, il
+ * n'y a pas de bord à ne pas dépasser. Le bloc a le droit de sortir du cadre,
+ * exactement comme Adrien l'a demandé.
+ */
 export function cadrageValide(c = {}) {
   const n = (v, d) => (Number.isFinite(v) ? v : d)
-  const zoom = Math.min(CADRAGE_ZOOM_MAX, Math.max(CADRAGE_ZOOM_MIN, n(c.zoom, 1)))
-  // ⚠️ LE DÉCALAGE EST BORNÉ PAR LE ZOOM, et pas par une constante. À zoom 1 on
-  // voit déjà tout : traîner l'image ne ferait qu'ouvrir du vide sur un bord. La
-  // marge disponible est exactement ce que le zoom a poussé hors cadre.
-  const marge = Math.max(0, 1 - 1 / zoom)
-  // `+ 0` normalise le zéro NÉGATIF que produit un clamp à marge nulle. Il vaut
-  // zéro à tous les usages, mais pas à la comparaison stricte — et c'est le
-  // genre de valeur qui traverse un enregistrement de gabarit sans prévenir.
-  const borne = (v) => Math.min(marge, Math.max(-marge, n(v, 0))) + 0
-  return { zoom, x: borne(c.x), y: borne(c.y) }
+  return {
+    zoom: Math.max(CADRAGE_ZOOM_MIN, n(c.zoom, 1)),
+    // `+ 0` normalise le zéro NÉGATIF, qui vaut zéro à tous les usages mais pas
+    // à la comparaison stricte — et qui traverse un gabarit sans prévenir.
+    x: n(c.x, 0) + 0,
+    y: n(c.y, 0) + 0,
+  }
+}
+
+/**
+ * ═══ FAUT-IL RECULER POUR MONTRER TOUT LE SOCLE ? ═══════════════════════════
+ *
+ * La règle d'Adrien, en deux temps : « si l'utilisateur n'a pas zoomé outre
+ * mesure dans son rendu, le socle doit être totalement compris dans la
+ * proposition d'affiche » — mais un gros plan délibéré doit être respecté.
+ *
+ * On compare donc sa distance à celle qui ferait tout tenir. S'il est déjà loin,
+ * ou modérément près, on se cale sur le cadrage complet : c'est ce qui fait une
+ * affiche. S'il est TRÈS près — moins de la moitié de cette distance — il a
+ * composé un gros plan, et le lui redresser serait lui reprendre son travail.
+ *
+ * @param {number} distanceActuelle - celle de la caméra de la scène
+ * @param {number} distanceComplete - celle qui fait tenir la boîte entière
+ * @returns {number} la distance à utiliser pour l'affiche
+ */
+export const SEUIL_GROS_PLAN = 0.5
+
+export function distanceAffiche(distanceActuelle, distanceComplete) {
+  const a = Number.isFinite(distanceActuelle) ? distanceActuelle : 0
+  const c = Number.isFinite(distanceComplete) ? distanceComplete : 0
+  if (!(c > 0)) return a
+  if (!(a > 0)) return c
+  return a < c * SEUIL_GROS_PLAN ? a : c
 }
 
 /**

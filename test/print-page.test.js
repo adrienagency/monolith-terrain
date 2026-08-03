@@ -22,7 +22,9 @@ import {
   formatAtteintCm,
   CADRAGE_DEFAUT,
   CADRAGE_ZOOM_MIN,
-  CADRAGE_ZOOM_MAX,
+  CADRAGE_ZOOM_CURSEUR_MAX,
+  SEUIL_GROS_PLAN,
+  distanceAffiche,
   cadrageValide,
   distanceCadrage,
 } from '../src/print-page.js'
@@ -217,24 +219,49 @@ test('le cadrage par défaut ne zoome pas et ne décale rien', () => {
   assert.deepEqual(cadrageValide({ zoom: NaN, x: undefined, y: null }), { zoom: 1, x: 0, y: 0 })
 })
 
-test('à zoom 1 le décalage est NUL : il n’y aurait que du vide à découvrir', () => {
-  // On voit déjà tout : traîner l'image n'ouvrirait qu'une marge blanche.
-  assert.deepEqual(cadrageValide({ zoom: 1, x: 0.5, y: -0.9 }), { zoom: 1, x: 0, y: 0 })
+test('le décalage n’est PLUS borné : le bloc a le droit de sortir du cadre', () => {
+  // ⚠️ CORRECTION du 2026-08-03. La première version limitait le décalage à
+  // « ce que le zoom a poussé hors cadre » — juste pour un RECADRAGE d'image,
+  // où au-delà on n'aurait découvert que du vide. Mais chaque aperçu est un
+  // VRAI RENDU : la scène existe partout, il n'y a pas de bord à ne pas
+  // dépasser. Adrien : « le bloc doit être libre de sortir du cadre ».
+  assert.deepEqual(cadrageValide({ zoom: 1, x: 0.5, y: -0.9 }), { zoom: 1, x: 0.5, y: -0.9 })
+  assert.deepEqual(cadrageValide({ zoom: 2, x: 9, y: -9 }), { zoom: 2, x: 9, y: -9 })
 })
 
-test('la marge de décalage est exactement ce que le zoom a poussé hors cadre', () => {
-  // À zoom 2, la moitié de l'image sort du cadre : on peut la ramener, pas plus.
-  const c = cadrageValide({ zoom: 2, x: 9, y: -9 })
-  assert.equal(c.x, 0.5)
-  assert.equal(c.y, -0.5)
-  // …et au zoom maximal (3), deux tiers — pas trois quarts : 4 serait borné.
-  assert.equal(cadrageValide({ zoom: CADRAGE_ZOOM_MAX, x: 9 }).x, 1 - 1 / CADRAGE_ZOOM_MAX)
-})
-
-test('le zoom reste entre ses bornes', () => {
+test('le zoom n’a plus de plafond, seul le curseur en a un', () => {
+  // La molette doit pouvoir aller aussi loin qu'on veut ; c'est la COURSE du
+  // curseur qui s'arrête, parce qu'un curseur sans fin ne se règle plus.
+  assert.equal(cadrageValide({ zoom: 40 }).zoom, 40)
   assert.equal(cadrageValide({ zoom: 0.01 }).zoom, CADRAGE_ZOOM_MIN)
-  assert.equal(cadrageValide({ zoom: 99 }).zoom, CADRAGE_ZOOM_MAX)
-  assert.ok(CADRAGE_ZOOM_MIN < 1 && CADRAGE_ZOOM_MAX > 1, 'on doit pouvoir reculer ET s’approcher')
+  assert.ok(CADRAGE_ZOOM_CURSEUR_MAX > 1)
+})
+
+// ── Reculer, ou respecter le gros plan ──────────────────────────────────────
+
+test('une vue large ou modérée se cale sur le socle ENTIER', () => {
+  // « Si l'utilisateur n'a pas zoomé outre mesure, le socle doit être
+  // totalement compris dans la proposition d'affiche. »
+  assert.equal(distanceAffiche(200, 100), 100, 'plus loin que nécessaire → on cadre')
+  assert.equal(distanceAffiche(100, 100), 100)
+  assert.equal(distanceAffiche(70, 100), 100, 'un peu plus près → on cadre quand même')
+})
+
+test('un GROS PLAN délibéré est respecté', () => {
+  // En dessous de la moitié de la distance de cadrage, c'est un choix : le
+  // redresser reviendrait à reprendre son travail à l'utilisateur.
+  assert.equal(distanceAffiche(40, 100), 40)
+  assert.equal(distanceAffiche(5, 100), 5)
+  // le seuil lui-même bascule du bon côté
+  assert.equal(distanceAffiche(100 * SEUIL_GROS_PLAN, 100), 100)
+  assert.equal(distanceAffiche(100 * SEUIL_GROS_PLAN - 0.001, 100), 100 * SEUIL_GROS_PLAN - 0.001)
+})
+
+test('une distance absurde ne rend jamais NaN', () => {
+  assert.equal(distanceAffiche(NaN, 100), 100)
+  assert.equal(distanceAffiche(50, NaN), 50)
+  assert.equal(distanceAffiche(0, 0), 0)
+  assert.equal(distanceAffiche(-5, 100), 100)
 })
 
 // ── La distance qui fait tenir le bloc ──────────────────────────────────────

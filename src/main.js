@@ -68,7 +68,7 @@ import { signatureCarteOmbre } from './carte-ombre.js'
 import { SunDisc } from './sun-disc.js'
 import { Plinth, bandeContact } from './plinth.js'
 // le cadrage de l'affiche : « tout le socle » se calcule, il ne se devine pas
-import { cadrageValide, distanceCadrage } from './print-page.js'
+import { cadrageValide, distanceCadrage, distanceAffiche } from './print-page.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
 import { fetchRegionMask, regionMaskFromParts, frameRegion, rasterizeMask } from './region-mask.js'
@@ -6051,7 +6051,14 @@ function cadrerAffiche(aspect, cadrage) {
   }
 
   camera.aspect = aspect
-  const d = distanceCadrage(coins, (camera.fov * Math.PI) / 180, aspect)
+  // ⚠️ ON NE RECULE PAS TOUJOURS. Adrien, après la première version : « si
+  // l'utilisateur n'a pas zoomé outre mesure, le socle doit être totalement
+  // compris dans la proposition » — mais un gros plan délibéré doit être
+  // respecté. distanceAffiche arbitre : au-delà de la moitié de la distance de
+  // cadrage on se cale sur le socle entier, en deçà on garde sa composition.
+  const dComplete = distanceCadrage(coins, (camera.fov * Math.PI) / 180, aspect)
+  const dActuelle = camera.position.distanceTo(cible)
+  const d = distanceAffiche(dActuelle, dComplete)
   camera.position.copy(centre).addScaledVector(dir, Math.max(1, d))
   camera.lookAt(centre)
   // ⚠️ LE ZOOM PASSE PAR camera.zoom, PAS PAR LA DISTANCE. Avancer la caméra

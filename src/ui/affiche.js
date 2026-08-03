@@ -26,7 +26,7 @@ import './affiche.css'
 import { el } from './kit.js'
 import {
   FORMATS_AFFICHE, geometriePage, DPI_IMPRESSION,
-  CADRAGE_DEFAUT, CADRAGE_ZOOM_MIN, CADRAGE_ZOOM_MAX, cadrageValide,
+  CADRAGE_DEFAUT, CADRAGE_ZOOM_MIN, CADRAGE_ZOOM_CURSEUR_MAX, cadrageValide,
 } from '../print-page.js'
 
 // Le prix de lancement. Un seul endroit, pour que l'étiquette et le bouton ne
@@ -226,11 +226,11 @@ export function ouvrirAffiche(ctx) {
     rang.append(nom, input)
     return { rang, sync: () => { input.value = String(lire()) } }
   }
-  const cZoom = curseur('Zoom', CADRAGE_ZOOM_MIN, CADRAGE_ZOOM_MAX, 0.01,
+  const cZoom = curseur('Zoom', CADRAGE_ZOOM_MIN, CADRAGE_ZOOM_CURSEUR_MAX, 0.01,
     () => etat.cadrage.zoom, (v) => { etat.cadrage.zoom = v })
-  const cX = curseur('Horizontal', -1, 1, 0.005,
+  const cX = curseur('Horizontal', -1.5, 1.5, 0.005,
     () => etat.cadrage.x, (v) => { etat.cadrage.x = v })
-  const cY = curseur('Vertical', -1, 1, 0.005,
+  const cY = curseur('Vertical', -1.5, 1.5, 0.005,
     () => etat.cadrage.y, (v) => { etat.cadrage.y = v })
   gCadre.append(cZoom.rang, cX.rang, cY.rang)
   bReset.addEventListener('click', () => {
@@ -322,10 +322,11 @@ export function ouvrirAffiche(ctx) {
     // décalages dans la nouvelle marge, sinon l'image resterait poussée dehors.
     etat.cadrage = cadrageValide(etat.cadrage)
     cZoom.sync(); cX.sync(); cY.sync()
-    const bougeable = etat.cadrage.zoom > 1.001
-    sheet.classList.toggle('bougeable', bougeable)
-    cX.rang.classList.toggle('eteint', !bougeable)
-    cY.rang.classList.toggle('eteint', !bougeable)
+    // ⚠️ ON PEUT DÉPLACER MÊME À ZOOM 1. La première version éteignait les deux
+    // décalages tant qu'on n'avait pas zoomé — logique pour un recadrage
+    // d'image, où il n'y aurait eu que du vide à découvrir. Mais chaque aperçu
+    // est un vrai rendu : décentrer le bloc est une composition, pas un bug.
+    sheet.classList.add('bougeable')
 
     // le logo
     logoImg.style.display = etat.logo ? '' : 'none'
@@ -422,7 +423,6 @@ export function ouvrirAffiche(ctx) {
   // souris doit balayer moins d'image, pas plus.
   let prise = null
   sheet.addEventListener('pointerdown', (e) => {
-    if (etat.cadrage.zoom <= 1.001) return // à zoom 1 il n'y a rien à déplacer
     prise = { id: e.pointerId, x: e.clientX, y: e.clientY, dep: { ...etat.cadrage } }
     sheet.setPointerCapture(e.pointerId)
     sheet.classList.add('tire')
