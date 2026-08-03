@@ -88,6 +88,9 @@ export const TEMPLATE_KEYS = [
   // FEUILLE DE FOND (scene.background, voile de transition du mode sombre), pas
   // celle de la brume. La retirer viderait le fond des treize gabarits livrés.
   'ssaoEnabled', 'ssaoIntensity', 'fogColor',
+  // diffusion sous-surfacique du socle : c'est un choix de MATIÈRE, pas un
+  // réglage de qualité — elle fait donc partie du look et voyage avec le gabarit
+  'sssEnabled', 'sssStrength', 'sssColor', 'sssPower',
   // background (solid / gradient / HDRI sky) — bgStops/bgPoints = Fonds v2
   // (stops arbitraires + dégradé de points) ; A/B/C restent pour la compat
   'bgMode', 'bgColorA', 'bgColorB', 'bgColorC', 'bgAngle', 'bgEnv', 'bgStops', 'bgPoints', 'bgAuto',

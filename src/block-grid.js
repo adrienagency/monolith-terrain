@@ -582,6 +582,11 @@ export class BlockGrid {
         cornerR,
         cornerExp: exposantCoin(this.params.slabCornerSmoothing), // même coin que la dalle centrale
         baseYFloor: plinth.baseY,
+        // … et MÊME bande d'occlusion de contact. Sans ce partage, chaque
+        // voisine mesurait son propre point haut : une dalle de montagne cuisait
+        // un pied sombre quatre fois plus grand que sa voisine de plaine, et
+        // deux socles accolés cessaient de se ressembler (voir bandeContact).
+        aoBande: plinth.aoBande ?? null,
       })
       const walls = new THREE.Mesh(geo, plinth.wallMat)
       // même raison, et même piège VSM, que le relief de la voisine ci-dessus :

@@ -13,7 +13,7 @@
 
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
-import { contactAO, SOCLE_AO_BANDE } from './plinth.js'
+import { contactAO, bandeContact } from './plinth.js'
 
 const HALF = TERRAIN_SIZE / 2
 
@@ -189,7 +189,7 @@ export function regionBaseLevel(seaY, floorY) {
 // construire une seule. Sans ce passe-plat, chaque dalle paierait deux fois son
 // marching-squares et ses appels à terrain.sample.
 //   buildRegionSkirt({ maskCanvas, sample, material, baseY, traced? }) → { mesh } | null
-export function buildRegionSkirt({ maskCanvas, sample, material, depth = 5, grid = 300, baseY: forcedBaseY = null, traced = null, uniform = null }) {
+export function buildRegionSkirt({ maskCanvas, sample, material, depth = 5, grid = 300, baseY: forcedBaseY = null, traced = null, uniform = null, aoBande = null }) {
   // `uniform` tient lieu de masque pour une dalle sans canevas (voir traceSkirt)
   if ((!maskCanvas && !uniform) || !sample) return null
   const { segs, interiorMin } = traced || traceSkirt({ maskCanvas, sample, grid, uniform })
@@ -225,39 +225,73 @@ export function buildRegionSkirt({ maskCanvas, sample, material, depth = 5, grid
   // `aoMap` étant hors d'atteinte faute d'`uv1`). Une géométrie sans attribut
   // `color` recevrait la valeur générique WebGL (0,0,0,1) : la découpe entière
   // deviendrait NOIRE. On cuit donc la même rampe qu'au pied du bloc.
+  //
+  // ⚠️ ET CETTE BANDE EST IMPOSÉE DE L'EXTÉRIEUR quand il y en a une. Mesurée
+  // ici, elle valait le point haut de CETTE dalle : sur le damier isolé (23
+  // jupes) celle qui coupe un sommet cuisait un pied sombre plusieurs fois plus
+  // haut que sa voisine de plaine, et Adrien lisait « les socles semblent tous
+  // différents ». Le pied de coupe est déjà commun pour la raison jumelle ; la
+  // bande de contact l'est maintenant aussi. Voir bandeContact dans plinth.js.
   let hautMax = -Infinity
   for (const s of segs) {
     if (s.ya > hautMax) hautMax = s.ya
     if (s.yb > hautMax) hautMax = s.yb
   }
-  const aoBande = SOCLE_AO_BANDE * Math.max(0, hautMax - baseY)
+  const bande = Number.isFinite(aoBande) ? Math.max(0, aoBande) : bandeContact(hautMax, baseY)
   const pushTri = (a, b, cc, ua, ub, uc) => {
     const ab = new THREE.Vector3().subVectors(b, a)
     const ac = new THREE.Vector3().subVectors(cc, a)
-    const nm = new THREE.Vector3().crossVectors(ab, ac).normalize()
+    const nm = new THREE.Vector3().crossVectors(ab, ac)
+    // ⚠️ Un triangle plat rend une normale NULLE, que `normalize` transforme en
+    // NaN — et un NaN dans l'attribut `normal` fait disparaître toute la jupe,
+    // pas seulement ce triangle. Depuis que le mur est coupé en deux, les
+    // segments plus bas que la bande produisent justement des quads plats.
+    if (nm.lengthSq() < 1e-18) return
+    nm.normalize()
     const tri = [[a, ua], [b, ub], [cc, uc]]
     for (const [v, uv] of tri) {
       positions.push(v.x, v.y, v.z)
       normals.push(nm.x, nm.y, nm.z)
       uvs.push(uv[0], uv[1])
-      const ao = Math.round(255 * contactAO(v.y, baseY, aoBande))
+      const ao = Math.round(255 * contactAO(v.y, baseY, bande))
       couleurs.push(ao, ao, ao)
     }
   }
+  // ══════ POURQUOI LA JUPE EST COUPÉE EN DEUX DANS LE SENS DE LA HAUTEUR ══════
+  //
+  // Elle ne portait que DEUX rangs de sommets, le haut et le pied. L'occlusion
+  // de contact voyageant en couleur de sommet, elle s'interpolait donc
+  // linéairement sur TOUTE la hauteur du mur : la « bande » de 12 % ne contenait
+  // aucun sommet et n'existait pas. Sur le damier isolé, une jupe qui coupe un
+  // sommet étalait son pied sombre sur 900 m quand sa voisine de plaine
+  // l'étalait sur 200. C'est le défaut qu'Adrien décrit par « en mode isolé les
+  // socles semblent tous différents » : même matière, même lumière, deux
+  // dégradés. Ce rang intermédiaire fixe la bande à une hauteur MONDE.
+  const yBande = baseY + bande
   const EPS = 0.05 // lift the wall top a hair so it overlaps the surface (no seam)
   for (const s of segs) {
     // skip degenerate slivers — near-zero-length segments render as icicle spikes
     const segLen = Math.hypot(s.bx - s.ax, s.bz - s.az)
     if (segLen < 1e-3) continue
-    const aTop = new THREE.Vector3(s.ax, s.ya + EPS, s.az)
-    const bTop = new THREE.Vector3(s.bx, s.yb + EPS, s.bz)
-    const aBot = new THREE.Vector3(s.ax, baseY, s.az)
-    const bBot = new THREE.Vector3(s.bx, baseY, s.bz)
     const u1 = segLen / UVSCALE
-    const vaT = (s.ya - baseY) / UVSCALE
-    const vbT = (s.yb - baseY) / UVSCALE
-    pushTri(aTop, aBot, bTop, [0, vaT], [0, 0], [u1, vbT])
-    pushTri(bTop, aBot, bBot, [u1, vbT], [0, 0], [u1, 0])
+    const v = (y) => (y - baseY) / UVSCALE
+    // le rang de coupe, borné par le haut de CHAQUE extrémité : sur un segment
+    // plus bas que la bande, il se confond avec le sommet et la bande du bas
+    // disparaît d'elle-même (le triangle dégénéré est écarté par pushTri)
+    const ya = s.ya + EPS
+    const yb = s.yb + EPS
+    const ma = Math.min(yBande, ya)
+    const mb = Math.min(yBande, yb)
+    const quad = (yA0, yB0, yA1, yB1) => {
+      const p0 = new THREE.Vector3(s.ax, yA0, s.az)
+      const q0 = new THREE.Vector3(s.bx, yB0, s.bz)
+      const p1 = new THREE.Vector3(s.ax, yA1, s.az)
+      const q1 = new THREE.Vector3(s.bx, yB1, s.bz)
+      pushTri(p0, p1, q0, [0, v(yA0)], [0, v(yA1)], [u1, v(yB0)])
+      pushTri(q0, p1, q1, [u1, v(yB0)], [0, v(yA1)], [u1, v(yB1)])
+    }
+    quad(ya, yb, ma, mb) // le mur, jusqu'au sommet de la bande
+    quad(ma, mb, baseY, baseY) // la bande de contact elle-même
   }
 
   const geo = new THREE.BufferGeometry()

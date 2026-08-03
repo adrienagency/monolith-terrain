@@ -66,7 +66,7 @@ import { AerialLayer, demBounds, aerialUnavailable, SUPERSEDED, providerFor as p
 import { lightingFor, darkModeFor, applyGains, fillDirection, fillLightIntensity, fillEnabledInLook, sunOn, sunShadowOn } from './daycycle.js'
 import { signatureCarteOmbre } from './carte-ombre.js'
 import { SunDisc } from './sun-disc.js'
-import { Plinth } from './plinth.js'
+import { Plinth, bandeContact } from './plinth.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
 import { fetchRegionMask, regionMaskFromParts, frameRegion, rasterizeMask } from './region-mask.js'
@@ -334,6 +334,13 @@ const params = {
   // false sur les quatre paliers depuis le 28/07 (demande d'Adrien).
   ssaoEnabled: MACHINE.ssao,
   ssaoIntensity: 6, // nudged up: half-res AO reads ~16% softer than full-res (measured)
+  // DIFFUSION SOUS-SURFACIQUE du socle — éteinte par défaut : c'est un parti pris
+  // de matière (albâtre, marbre, onyx), pas un réglage de qualité, et le socle
+  // par défaut est une pierre mate qui ne diffuse pas. Voir Plinth._brancheSSS.
+  sssEnabled: false,
+  sssStrength: 0.6,
+  sssColor: '#ff8a4c', // la teinte de ce qui ressort : le sang du marbre est chaud
+  sssPower: 4, // netteté du halo — bas = diffusion large, haut = liseré serré
   // PLUS de bloomEnabled / bloomIntensity / bloomThreshold : la passe de bloom
   // a été retirée le 2026-08-02 (Adrien : « inutile, on retire »). Les trois
   // clés traînent dans les gabarits déjà enregistrés ; applyUserTemplate filtre
@@ -1418,9 +1425,25 @@ function applyPlinthMaterial() {
     bump: params.plinthBump,
     fallbackColor: params.plinthColor,
   })
+  // La diffusion sous-surfacique se repose APRÈS le matériau : setMaterial lève
+  // needsUpdate, donc three relance onBeforeCompile — les uniformes sont
+  // relogés, mais leurs valeurs doivent être à jour au moment où il le fait.
+  applyPlinthSSS()
   // keep the engraved socle name readable whatever the material — re-render the
   // cartouche so its ink flips to contrast the new surface
   cartoucheRef?.rerender?.()
+}
+// DIFFUSION SOUS-SURFACIQUE DU SOCLE — voir Plinth._brancheSSS pour ce que ça
+// coûte et pourquoi ce n'est pas `transmission`. Sur un socle de VERRE on
+// n'allume pas : le verre a déjà sa vraie transmission, et empiler les deux
+// laiterait le bloc au lieu de l'éclairer par l'intérieur.
+function applyPlinthSSS() {
+  plinth.setSSS({
+    on: !!params.sssEnabled && params.plinthFinish !== 'glass',
+    force: params.sssStrength ?? 0.6,
+    teinte: params.sssColor ?? '#ff8a4c',
+    nettete: params.sssPower ?? 4,
+  })
 }
 // high-contrast ink for the name engraved on the socle face, chosen against the
 // current material's base tone (dark carbon/glass → light ink, and vice versa)
@@ -5563,6 +5586,19 @@ function rebuildRegionSkirt() {
   }
   regionFloorY = Number.isFinite(plancher) ? plancher : null
   const baseY = regionBaseY()
+  // LA BANDE D'OCCLUSION EST COMMUNE, comme le pied. Elle se mesure ici parce
+  // qu'ici seulement on connaît TOUTES les dalles : le point le plus haut de la
+  // découpe entière calibre l'assombrissement de pied de chacune. Mesurée dalle
+  // par dalle, elle donnait à chaque jupe une hauteur de pied sombre différente
+  // — le « les socles semblent tous différents » d'Adrien. Voir bandeContact.
+  let sommet = -Infinity
+  for (const d of dalles) {
+    for (const s of d.traced?.segs || []) {
+      if (s.ya > sommet) sommet = s.ya
+      if (s.yb > sommet) sommet = s.yb
+    }
+  }
+  const aoBande = Number.isFinite(sommet) ? bandeContact(sommet, baseY) : null
   for (const d of dalles) {
     const s = buildRegionSkirt({
       maskCanvas: d.canvas,
@@ -5572,6 +5608,7 @@ function rebuildRegionSkirt() {
       grid: SKIRT_GRID,
       traced: d.traced, // déjà tracée ci-dessus, hauteurs comprises
       baseY,
+      aoBande,
     })
     if (!s) continue
     s.mesh.position.set(d.x, 0, d.z)
@@ -6661,6 +6698,7 @@ const { elementsPanel, imagePanel } = buildEffectsPanel({
   // copie prise ici au démarrage vaudrait `null` pour toujours.
   // (plus de `bloom` ni `bloomPass` : la passe a été retirée le 2026-08-02)
   ssao, get aoPass() { return aoPass },
+  applyPlinthSSS, // diffusion sous-surfacique du socle (section Rendu)
   realWater, waterRebuild,
   terrain, globe,
   // le Scanner (effet d'image) vit dans Effets ; la Lumière ouvre Éléments

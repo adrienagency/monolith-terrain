@@ -38,11 +38,32 @@ const INTERIOR_STEPS = 12 // coarse grid to find the global min (basin guard)
 //    `color` n'en a pas besoin.
 //
 // Les valeurs ci-dessous sont des garde-fous, pas des goûts :
-export const SOCLE_CHANFREIN = 0.05 // largeur ET profondeur du liseré, en unités
+export const SOCLE_CHANFREIN = 0.16 // largeur ET profondeur du liseré, en unités
 // monde. ⚠️ Un chanfrein trop large bascule dans le plastique injecté. Le bloc
-// fait 56 unités et occupe ~1 000 px cadré large, soit ~18 px/unité : à 0,05 le
-// liseré reste SOUS le pixel de loin (il ne se voit pas comme une facette) et
-// devient net dès qu'on s'approche d'une arête.
+// fait 56 unités et occupe ~1 000 px cadré large, soit ~18 px/unité.
+// ÉLARGI DE 0,05 À 0,16 (Adrien : « rends le plus visible ») : à 0,05 le liseré
+// restait sous le pixel de loin et ne se lisait qu'en s'approchant d'une arête ;
+// à 0,16 il fait ~3 px au cadrage large, c'est-à-dire une vraie ligne, sans
+// atteindre l'épaisseur qui ferait facette.
+
+// ═══════════════ LE CONGÉ DU DESSOUS — LE GESTE DE LA RÉFÉRENCE ══════════════
+//
+// Adrien, capture d'un diorama : « il est vraiment arrondi, et c'est un vrai
+// chanfrein dessous ». L'arête basse était à 90° NET — la seule arête vive qui
+// restait après le chanfrein du haut, et la plus visible : c'est elle qui porte
+// l'ombre de contact et la ligne où le bloc touche sa table.
+//
+// ⚠️ CE N'EST PAS UN CHANFREIN, C'EST UN CONGÉ, et la différence se voit. Un
+// chanfrein (une seule facette) rend UNE ligne spéculaire ; un congé en rend une
+// qui GLISSE quand la caméra tourne, et c'est ce glissement que l'œil lit comme
+// « massif ». Il faut donc plusieurs segments ET des normales analytiques
+// lisses : trois segments à normales de face se liraient comme trois facettes,
+// soit l'inverse exact de l'intention.
+export const SOCLE_ARRONDI = 0.9 // rayon du congé bas, en unités monde
+export const SOCLE_ARRONDI_SEG = 3 // segments de l'arc. 3 suffit AVEC les
+// normales lisses : c'est la normale qui fait l'arrondi, la silhouette ne se
+// lit qu'au contre-jour. Chaque segment de plus coûte 2 triangles par point
+// d'anneau, et l'anneau en compte près de trois mille.
 export const SOCLE_AO_BANDE = 0.12 // hauteur de la cuisson, en fraction du mur
 export const SOCLE_AO_FORCE = 0.2 // assombrissement au contact. Au-delà de ces
 // deux valeurs on ne cuit plus un contact, on peint une vignette.
@@ -57,6 +78,25 @@ export function contactAO(y, baseY, bande, force = SOCLE_AO_FORCE) {
   const t = Math.max(0, Math.min(1, (y - baseY) / bande))
   const k = 1 - t
   return 1 - force * k * k
+}
+
+// ════════ LA BANDE D'OCCLUSION SE MESURE UNE FOIS, POUR TOUT LE MONDE ════════
+//
+// LE DÉFAUT D'ADRIEN, « en mode isolé les socles semblent tous différents ».
+// Chaque constructeur mesurait le point HAUT de SA propre pièce et en tirait sa
+// bande. Or le damier isolé pose 23 jupes côte à côte : celle qui coupe un
+// sommet mesurait 900 m de mur et cuisait 108 m d'assombrissement, sa voisine de
+// plaine 200 m de mur et 24 m. Deux murs qui se touchent, deux hauteurs de pied
+// sombre — les socles ne se ressemblaient plus, alors que la lumière et la
+// matière étaient rigoureusement les mêmes.
+//
+// Une occlusion de contact ne dépend PAS de la hauteur du mur qui la surplombe :
+// c'est la géométrie de l'angle rentrant qui la fixe, et cet angle est le même
+// partout. La bande est donc une longueur MONDE, calculée une fois sur la pièce
+// la plus haute de la fournée, puis servie à toutes — exactement comme `baseY`,
+// qui est déjà commun pour la raison jumelle (une marche à chaque jointure).
+export function bandeContact(hautMax, baseY) {
+  return SOCLE_AO_BANDE * Math.max(0, (hautMax ?? 0) - (baseY ?? 0))
 }
 
 
@@ -137,7 +177,11 @@ export function computeSlab(sample, depth, samples = 256, cornerRadius = 0, corn
 // bottom without ever piercing a deeper neighbour's relief.
 // `chanfrein` : largeur du liseré d'arête haute (0 = géométrie d'avant, exacte).
 // `aoForce` : profondeur de l'occlusion de contact cuite dans l'attribut color.
-export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 0, cornerExp = 2, baseYFloor = null, chanfrein = SOCLE_CHANFREIN, aoForce = SOCLE_AO_FORCE } = {}) {
+// `aoBande` : la bande d'occlusion IMPOSÉE, en unités monde (voir bandeContact).
+// Le damier s'en sert pour que ses voisines portent la même que le bloc central ;
+// sans elle, chacune mesurerait la sienne sur son propre relief.
+// `arrondi` : rayon du congé bas (0 = arête vive, la géométrie d'avant).
+export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 0, cornerExp = 2, baseYFloor = null, chanfrein = SOCLE_CHANFREIN, aoForce = SOCLE_AO_FORCE, aoBande = null, arrondi = SOCLE_ARRONDI, arrondiSeg = SOCLE_ARRONDI_SEG } = {}) {
   const slab = computeSlab(sample, depth, resolution, cornerR, cornerExp)
   const ring = slab.ring
   const baseY = baseYFloor != null ? Math.min(baseYFloor, slab.baseY) : slab.baseY
@@ -147,9 +191,13 @@ export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 
   // surplombe) — c'est cette hauteur-là qui la calibre, une fois pour toutes.
   let topMax = -Infinity
   for (const p of ring) if (p.y > topMax) topMax = p.y
-  const aoBande = SOCLE_AO_BANDE * Math.max(0, topMax - baseY)
+  const bande = Number.isFinite(aoBande) ? Math.max(0, aoBande) : bandeContact(topMax, baseY)
   // le pli ne descend jamais jusqu'au pied, même sur un socle écrasé
   const ch = Math.max(0, Math.min(chanfrein, (topMax - baseY) * 0.25))
+
+  // le congé bas ne mange jamais plus du quart du mur, comme le chanfrein
+  const rd = Math.max(0, Math.min(arrondi, (topMax - baseY) * 0.25))
+  const segArc = rd > 0 ? Math.max(1, Math.round(arrondiSeg)) : 0
 
   const positions = []
   const normals = []
@@ -157,25 +205,42 @@ export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 
   const couleurs = [] // occlusion de contact, en octets normalisés (3 o/sommet
   // au lieu de 12 en float : la géométrie est reconstruite à CHAQUE déplacement
   // de fenêtre continue, et un octet suffit largement pour une rampe de 20 %)
-  const pushTri = (a, b, c, uva, uvb, uvc) => {
-    const ab = new THREE.Vector3().subVectors(b, a)
-    const ac = new THREE.Vector3().subVectors(c, a)
-    const nm = new THREE.Vector3().crossVectors(ab, ac).normalize()
-    const tri = [[a, uva], [b, uvb], [c, uvc]]
-    for (const [v, uv] of tri) {
+  //
+  // `nm` non nul = normale IMPOSÉE (le congé, qui doit être lisse) ; nulle =
+  // normale de FACE, calculée au produit vectoriel — c'est elle qui donne au
+  // liseré d'arête sa cassure nette.
+  const pousse = (a, b, c, uva, uvb, uvc, na = null, nb = null, nc = null) => {
+    let face = null
+    if (!na || !nb || !nc) {
+      const ab = new THREE.Vector3().subVectors(b, a)
+      const ac = new THREE.Vector3().subVectors(c, a)
+      face = new THREE.Vector3().crossVectors(ab, ac)
+      if (face.lengthSq() < 1e-18) return // triangle dégénéré : rien à peindre
+      face.normalize()
+    }
+    const tri = [[a, uva, na], [b, uvb, nb], [c, uvc, nc]]
+    for (const [v, uv, nrm] of tri) {
+      const nn = nrm || face
       positions.push(v.x, v.y, v.z)
-      normals.push(nm.x, nm.y, nm.z)
+      normals.push(nn.x, nn.y, nn.z)
       uvs.push(uv[0], uv[1])
-      const ao = Math.round(255 * contactAO(v.y, baseY, aoBande, aoForce))
+      const ao = Math.round(255 * contactAO(v.y, baseY, bande, aoForce))
       couleurs.push(ao, ao, ao)
     }
   }
 
   // Rentrée du pli, point par point. On prend la BISSECTRICE des deux arêtes
   // voisines, allongée de 1/cos(θ/2) : le retrait perpendiculaire vaut alors
-  // exactement `ch` sur les DEUX faces, y compris dans un angle droit. Une
-  // simple direction « vers le centre » y creuserait un cran de ch·(1−1/√2).
-  const rentre = new Array(n)
+  // exactement la distance voulue sur les DEUX faces, y compris dans un angle
+  // droit. Une simple direction « vers le centre » y creuserait un cran de
+  // d·(1−1/√2).
+  //
+  // ⚠️ On garde la bissectrice UNITAIRE et l'onglet À PART, parce que trois
+  // profondeurs de rentrée s'en servent maintenant (chanfrein haut, mur, congé
+  // bas) et qu'elles n'ont pas la même. La NORMALE du congé, elle, prend la
+  // bissectrice SANS onglet : l'onglet corrige une distance, pas une direction.
+  const biss = new Array(n) // [x, z] unitaire, vers l'intérieur
+  const onglet = new Array(n) // 1/cos(θ/2), borné
   const nrm = (ax, az, bx, bz) => {
     const dx = bx - ax
     const dz = bz - az
@@ -188,22 +253,42 @@ export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 
     const b = nrm(p.x, p.z, ring[(i + 1) % n].x, ring[(i + 1) % n].z)
     const na = a || b
     const nb = b || a
-    if (!na || !nb) { rentre[i] = [0, 0]; continue }
+    if (!na || !nb) { biss[i] = [0, 0]; onglet[i] = 1; continue }
     let mx = na[0] + nb[0]
     let mz = na[1] + nb[1]
     const L = Math.hypot(mx, mz)
-    if (L < 1e-9) { rentre[i] = [0, 0]; continue }
-    mx /= L
-    mz /= L
-    const cos = Math.max(0.35, mx * na[0] + mz * na[1]) // onglet borné (replis)
-    rentre[i] = [(mx * ch) / cos, (mz * ch) / cos]
+    if (L < 1e-9) { biss[i] = [0, 0]; onglet[i] = 1; continue }
+    biss[i] = [mx / L, mz / L]
+    const cos = Math.max(0.35, (mx / L) * na[0] + (mz / L) * na[1]) // onglet borné (replis)
+    onglet[i] = 1 / cos
   }
+  // un point du profil : rentré de `d` à l'horizontale, posé à l'altitude `y`
+  const point = (i, d, y) => new THREE.Vector3(
+    ring[i].x + biss[i][0] * d * onglet[i],
+    y,
+    ring[i].z + biss[i][1] * d * onglet[i]
+  )
+  // normale du congé à l'angle θ : horizontale vers l'EXTÉRIEUR × cos θ, plus
+  // une composante verticale vers le bas × sin θ. À θ=0 elle vaut exactement la
+  // normale du mur (raccord invisible), à θ=90° celle du fond.
+  const normaleArc = (i, th) => new THREE.Vector3(
+    -biss[i][0] * Math.cos(th),
+    -Math.sin(th),
+    -biss[i][1] * Math.cos(th)
+  ).normalize()
 
+  // ══════════ LE PROFIL DU MUR, DU RELIEF JUSQU'AU FOND ══════════════════════
+  //
+  // ⚠️ POURQUOI IL Y A UN RANG DE SOMMETS AU MILIEU DE RIEN. Le mur n'avait que
+  // DEUX rangs : le haut et le pied. L'occlusion de contact voyageant en couleur
+  // de sommet, elle s'interpolait donc LINÉAIREMENT sur toute la hauteur — la
+  // « bande » de 12 % ne contenait aucun sommet et n'existait pas. Conséquence
+  // mesurée : sur un mur de 33 unités l'assombrissement s'étalait sur 33, sur un
+  // mur de 5 sur 5. C'est exactement le « en mode isolé les socles semblent tous
+  // différents » d'Adrien — deux murs voisins, deux dégradés de pied. Le rang
+  // `yAo` fixe la bande à une hauteur MONDE, la même pour tout le monde.
+  const yFil = baseY + rd // là où le mur s'arrête et où le congé commence
   let acc = 0
-  const pli = (i) => {
-    const p = ring[i]
-    return new THREE.Vector3(p.x + rentre[i][0], p.y - ch, p.z + rentre[i][1])
-  }
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n
     const p = ring[i]
@@ -212,31 +297,63 @@ export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 
     const u0 = acc / UVSCALE
     const u1 = (acc + segLen) / UVSCALE
     acc += segLen
-    const pTop = new THREE.Vector3(p.x, p.y, p.z)
-    const qTop = new THREE.Vector3(q.x, q.y, q.z)
-    // le sommet du mur ne bouge PAS : il doit rester exactement sur le bord du
-    // relief, sinon on voit le jour sous la carte (le bug de « l'envers »)
-    const pHaut = ch > 0 ? pli(i) : pTop
-    const qHaut = ch > 0 ? pli(j) : qTop
-    const pBot = new THREE.Vector3(pHaut.x, baseY, pHaut.z)
-    const qBot = new THREE.Vector3(qHaut.x, baseY, qHaut.z)
-    const uv = (v) => [0, (v.y - baseY) / UVSCALE]
-    if (ch > 0) {
-      pushTri(pTop, pHaut, qTop, [u0, uv(pTop)[1]], [u0, uv(pHaut)[1]], [u1, uv(qTop)[1]])
-      pushTri(qTop, pHaut, qHaut, [u1, uv(qTop)[1]], [u0, uv(pHaut)[1]], [u1, uv(qHaut)[1]])
+    // les altitudes du profil, forcées décroissantes : sur un bord très bas, le
+    // pied du chanfrein peut passer sous le départ du congé
+    const niveaux = (k) => {
+      const yT = ring[k].y
+      const yC = Math.max(ch > 0 ? yT - ch : yT, yFil)
+      const yA = Math.min(Math.max(baseY + bande, yFil), yC)
+      return { yT, yC, yA }
     }
-    pushTri(pHaut, pBot, qHaut, [u0, uv(pHaut)[1]], [u0, 0], [u1, uv(qHaut)[1]])
-    pushTri(qHaut, pBot, qBot, [u1, uv(qHaut)[1]], [u0, 0], [u1, 0])
+    const a = niveaux(i)
+    const b = niveaux(j)
+    const uv = (y) => (y - baseY) / UVSCALE
+    // une bande du mur : quatre sommets, deux triangles, normales de face
+    const bande2 = (yA0, dHaut, yB0, dBas, yA1, yB1) => {
+      const p0 = point(i, dHaut, yA0)
+      const q0 = point(j, dHaut, yB0)
+      const p1 = point(i, dBas, yA1)
+      const q1 = point(j, dBas, yB1)
+      pousse(p0, p1, q0, [u0, uv(yA0)], [u0, uv(yA1)], [u1, uv(yB0)])
+      pousse(q0, p1, q1, [u1, uv(yB0)], [u0, uv(yA1)], [u1, uv(yB1)])
+    }
+    // 1. le liseré d'arête haute — le sommet du mur ne bouge PAS, il doit rester
+    //    exactement sur le bord du relief (sinon on voit le jour sous la carte)
+    if (ch > 0) bande2(a.yT, 0, b.yT, ch, a.yC, b.yC)
+    // 2. le mur, coupé au sommet de la bande d'occlusion
+    bande2(a.yC, ch, b.yC, ch, a.yA, b.yA)
+    // 3. le bas du mur, jusqu'au départ du congé
+    bande2(a.yA, ch, b.yA, ch, yFil, yFil)
+    // 4. LE CONGÉ. Normales analytiques lisses : avec des normales de face, trois
+    //    segments se liraient comme trois facettes — l'inverse d'un arrondi.
+    for (let k = 0; k < segArc; k++) {
+      const t0 = (Math.PI / 2) * (k / segArc)
+      const t1 = (Math.PI / 2) * ((k + 1) / segArc)
+      const d0 = ch + rd - rd * Math.cos(t0)
+      const d1 = ch + rd - rd * Math.cos(t1)
+      const y0 = baseY + rd - rd * Math.sin(t0)
+      const y1 = baseY + rd - rd * Math.sin(t1)
+      const nA0 = normaleArc(i, t0)
+      const nB0 = normaleArc(j, t0)
+      const nA1 = normaleArc(i, t1)
+      const nB1 = normaleArc(j, t1)
+      const p0 = point(i, d0, y0)
+      const q0 = point(j, d0, y0)
+      const p1 = point(i, d1, y1)
+      const q1 = point(j, d1, y1)
+      pousse(p0, p1, q0, [u0, uv(y0)], [u0, uv(y1)], [u1, uv(y0)], nA0, nA1, nB0)
+      pousse(q0, p1, q1, [u1, uv(y0)], [u0, uv(y1)], [u1, uv(y1)], nB0, nA1, nB1)
+    }
   }
+  // le fond, rentré du chanfrein ET du congé
   const cen = new THREE.Vector3(0, baseY, 0)
   const capUv = (x, z) => [x / UVSCALE, z / UVSCALE]
+  const dFond = ch + rd
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n
-    const px = ring[i].x + rentre[i][0]
-    const pz = ring[i].z + rentre[i][1]
-    const qx = ring[j].x + rentre[j][0]
-    const qz = ring[j].z + rentre[j][1]
-    pushTri(cen, new THREE.Vector3(qx, baseY, qz), new THREE.Vector3(px, baseY, pz), capUv(0, 0), capUv(qx, qz), capUv(px, pz))
+    const pv = point(i, dFond, baseY)
+    const qv = point(j, dFond, baseY)
+    pousse(cen, qv, pv, capUv(0, 0), capUv(qv.x, qv.z), capUv(pv.x, pv.z))
   }
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
@@ -244,7 +361,9 @@ export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
   geo.setAttribute('color', new THREE.Uint8BufferAttribute(couleurs, 3, true))
   geo.computeBoundingSphere()
-  return { geo, baseY }
+  // `bande` sort avec la géométrie : c'est elle que le damier redonne à ses
+  // voisines pour qu'elles cuisent la MÊME hauteur d'assombrissement.
+  return { geo, baseY, bande }
 }
 
 export class Plinth {
@@ -275,6 +394,7 @@ export class Plinth {
       // pièce devient NOIRE. buildSlabWalls et buildRegionSkirt le font.
       vertexColors: true,
     })
+    this._brancheSSS()
     this.isGlass = false
     this.walls = new THREE.Mesh(new THREE.BufferGeometry(), this.wallMat)
     this.walls.castShadow = true
@@ -338,6 +458,84 @@ export class Plinth {
     this.group.add(this.glassPool)
 
     this.depth = params.plinthDepth ?? 7
+  }
+
+  // ═══════════ LA DIFFUSION SOUS-SURFACIQUE — CE QUE C'EST, ET SON PRIX ═══════
+  //
+  // Une pierre claire n'arrête pas la lumière à sa surface : elle la laisse
+  // entrer, la promène de grain en grain et la relâche quelques millimètres plus
+  // loin. C'est ce qui distingue l'albâtre, le marbre blanc, l'onyx et la résine
+  // d'un plâtre — et c'est exactement le manque qui fait qu'un socle de synthèse
+  // se lit comme du plastique mat, même parfaitement éclairé.
+  //
+  // ══════ CE QUE CE N'EST PAS, ET POURQUOI CE N'EST PAS ÇA ════════════════════
+  //
+  // Ce n'est PAS `transmission`. Three sait faire de la vraie transmission — le
+  // socle de verre s'en sert — mais elle coûte une PASSE DE RENDU ENTIÈRE : la
+  // scène est redessinée dans une cible, puis sa chaîne de mip est construite,
+  // à chaque image. Sur un socle opaque, payer ça pour un effet qui se lit sur
+  // quelques centimètres de bord serait absurde.
+  //
+  // Ce n'est PAS non plus une passe de post-traitement : la diffusion dépend de
+  // la direction de la lumière et de la normale, deux choses qu'un post-traitement
+  // n'a plus sous la main.
+  //
+  // C'est le terme de translucidité arrière classique (Frostbite) : on cherche la
+  // lumière qui traverse en regardant AUTOUR de −L, déviée par la normale. Une
+  // quinzaine d'opérations arithmétiques par pixel du socle. Aucune texture,
+  // aucune passe, aucune lumière de plus.
+  //
+  // ⚠️ ET C'EST POUR ÇA QU'IL N'Y A PAS DE #define ICI, contrairement aux couches
+  // du terrain. Un sampler coûte une UNITÉ DE TEXTURE même éteint — il faut donc
+  // le faire disparaître à la compilation. Quinze opérations, non : les garder
+  // compilées en permanence et les multiplier par zéro ne coûte rien de mesurable,
+  // et ça évite de recompiler un matériau partagé par les vingt-quatre socles du
+  // damier et la jupe de zone isolée à chaque bascule de l'interrupteur.
+  _brancheSSS() {
+    this.sssU = {
+      uSSS: { value: 0 },
+      uSSSTeinte: { value: new THREE.Color('#ff8a4c') },
+      uSSSPower: { value: 4 },
+    }
+    this.wallMat.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, this.sssU)
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+uniform float uSSS;
+uniform vec3 uSSSTeinte;
+uniform float uSSSPower;`
+        )
+        .replace(
+          '#include <lights_fragment_end>',
+          `#include <lights_fragment_end>
+#if NUM_DIR_LIGHTS > 0
+if (uSSS > 0.001) {
+  vec3 Vd = normalize(vViewPosition);
+  vec3 Nd = normalize(normal);
+  vec3 Ld = directionalLights[0].direction; // deja normalisee, en espace vue
+  // La lumiere qui traverse ne repart pas exactement a l'oppose de L : elle
+  // sort deviee par la normale. Cette distorsion est ce qui donne au bord
+  // mince son halo, et c'est elle qui distingue l'effet d'un simple ajout.
+  vec3 Hd = normalize(Ld + Nd * 0.35);
+  float trav = pow(clamp(dot(Vd, -Hd), 0.0, 1.0), uSSSPower);
+  // ... et elle ne traverse que ce qui est eclaire PAR DERRIERE. Sans ce
+  // facteur, la face deja au soleil doublerait sa lumiere et le socle
+  // deviendrait laiteux partout, ce qui est l'inverse du geste.
+  float dos = clamp(-dot(Nd, Ld) * 0.5 + 0.5, 0.0, 1.0);
+  reflectedLight.directDiffuse += directionalLights[0].color * uSSSTeinte * (trav + 0.12) * dos * uSSS;
+}
+#endif`
+        )
+    }
+  }
+
+  // Interrupteur et force, sans recompilation (voir _brancheSSS).
+  setSSS({ on = false, force = 0.6, teinte = '#ff8a4c', nettete = 4 } = {}) {
+    this.sssU.uSSS.value = on ? Math.max(0, force) : 0
+    this.sssU.uSSSTeinte.value.set(teinte)
+    this.sssU.uSSSPower.value = Math.max(1, nettete)
   }
 
   // Paint the ground-pool: a rounded-rect glow whose centre is the glass colour
@@ -541,8 +739,11 @@ export class Plinth {
     // v42: meme formule que le clip de la mer (rayon clampe, cercle)
     const cornerR = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE))
     const cornerExp = exposantCoin(params.slabCornerSmoothing)
-    const { geo, baseY } = buildSlabWalls(sample, { depth: this.depth, resolution: params.resolution ?? 256, cornerR, cornerExp, baseYFloor })
+    const { geo, baseY, bande } = buildSlabWalls(sample, { depth: this.depth, resolution: params.resolution ?? 256, cornerR, cornerExp, baseYFloor })
     this.baseY = baseY
+    // la bande de référence du bloc CENTRAL : le damier et la jupe de zone
+    // isolée la relisent ici pour ne pas en inventer une chacun de leur côté
+    this.aoBande = bande
     this.base.position.y = baseY
     this.ground.position.y = baseY - 0.02 // opaque floor just under the shadow base
     this.glassPool.position.y = baseY + 0.05 // glass colour pools just over the table

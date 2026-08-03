@@ -12,6 +12,9 @@ import {
   SOCLE_CHANFREIN,
   SOCLE_AO_BANDE,
   SOCLE_AO_FORCE,
+  bandeContact,
+  SOCLE_ARRONDI,
+  SOCLE_ARRONDI_SEG,
 } from '../src/plinth.js'
 import { exposantCoin, plansFenetre, debordementCoin, dansFenetre } from '../src/fenetre-clip.js'
 import { microRoughnessField, MICRO_ROUGH_CREUX } from '../src/material-textures.js'
@@ -23,12 +26,38 @@ const plat = () => 0
 
 // ───────────────────────────── 1. chanfrein d'arête haute ────────────────────
 
-test('le chanfrein ajoute UNE couronne : 5 triangles par segment au lieu de 3', () => {
+test('le profil du mur, couronne par couronne', () => {
+  // ⚠️ Ce relief est PLAT et la profondeur celle par défaut : la bande
+  // d'occlusion vaut 0,84 et le rayon du congé 0,9. La couronne de la bande
+  // tombe donc SOUS le congé et se dégénère — d'où les 9 et non 11 quand seul
+  // le congé est là. Sur un vrai relief le mur est vingt fois plus haut et les
+  // deux couronnes coexistent. C'est ce recouvrement que le compte documente.
   const n = 8 * 4 // resolution 8 → 4 côtés × 8 échantillons
-  const avec = buildSlabWalls(plat, { resolution: 8 })
-  const sans = buildSlabWalls(plat, { resolution: 8, chanfrein: 0 })
-  assert.equal(sans.geo.attributes.position.count, n * 3 * 3, 'sans chanfrein : 2 murs + 1 fond')
-  assert.equal(avec.geo.attributes.position.count, n * 5 * 3, 'avec : 2 chanfrein + 2 murs + 1 fond')
+  const tri = (o) => buildSlabWalls(plat, { resolution: 8, ...o }).geo.attributes.position.count / 3
+  assert.equal(tri({ chanfrein: 0, arrondi: 0 }), n * 5, 'nu : 2 murs + 2 bande + 1 fond')
+  assert.equal(tri({ arrondi: 0 }), n * 7, '+ chanfrein : 2 de plus')
+  assert.equal(tri({ chanfrein: 0 }), n * 9, '+ congé à 3 segments (la bande passe dedans)')
+  assert.equal(tri({}), n * 11, 'les deux : 2 chanfrein + 2 murs + 6 congé + 1 fond')
+  assert.equal(tri({ arrondiSeg: 1 }), n * 7, 'le congé à 1 segment retombe sur un chanfrein bas')
+})
+
+test('le congé porte des normales LISSES, sinon ce sont des facettes', () => {
+  // C'est la normale qui fait l'arrondi, pas la silhouette : trois segments à
+  // normales de face rendraient trois bandes plates, l'inverse de l'intention.
+  const { geo, baseY } = buildSlabWalls(plat, { resolution: 16 })
+  const pos = geo.attributes.position
+  const nor = geo.attributes.normal
+  const vues = new Set()
+  for (let v = 0; v < pos.count; v++) {
+    if (pos.getY(v) > baseY + SOCLE_ARRONDI + 1e-6) continue // au-dessus du congé
+    const ny = nor.getY(v)
+    if (ny < -1e-6) vues.add(ny.toFixed(3))
+  }
+  // un arc à 3 segments porte 4 rangs de normales, dont 3 ont une composante
+  // verticale non nulle (le rang du haut est purement horizontal, il raccorde
+  // le mur sans couture)
+  assert.ok(vues.size >= 3, `le congé n'a que ${vues.size} direction(s) : il facette`)
+  assert.ok(Math.min(...[...vues].map(Number)) < -0.99, 'le dernier rang regarde vers le fond')
 })
 
 test("l'arête haute reste EXACTEMENT sur le bord du relief (pas de jour sous la carte)", () => {
@@ -79,8 +108,11 @@ test('la bande porte sa PROPRE normale — c’est tout l’intérêt du liseré
     const haut = Math.max(...ys)
     const bas = Math.min(...ys)
     if (haut - bas < 1e-6) continue // le fond, tout plat
+    // ⚠️ `haut > -1` EN PLUS de `bas < -1` : sans lui, la dernière couronne
+    // retenue était celle du CONGÉ (qui vit tout en bas et dont la normale est
+    // oblique par construction), et le test croyait mesurer le mur.
     if (haut > -1e-9 && bas > -0.31) nBande = [nor[i], nor[i + 1], nor[i + 2]]
-    else if (bas < -1) nMur = [nor[i], nor[i + 1], nor[i + 2]]
+    else if (bas < -1 && haut > -1) nMur = [nor[i], nor[i + 1], nor[i + 2]]
   }
   assert.ok(nBande && nMur, 'bande et mur trouvés')
   const dot = nBande[0] * nMur[0] + nBande[1] * nMur[1] + nBande[2] * nMur[2]
@@ -89,11 +121,22 @@ test('la bande porte sa PROPRE normale — c’est tout l’intérêt du liseré
   assert.ok(Math.abs(nMur[1]) < 1e-6, 'le mur reste vertical')
 })
 
-test('le chanfrein par défaut reste un liseré, pas une facette', () => {
-  // sous le pixel en vue large : le bloc fait 56 unités, cadré large il occupe
-  // ~1000 px, soit ~18 px par unité. Un liseré doit rester sous ce pas.
-  assert.ok(SOCLE_CHANFREIN <= 1 / 18, `chanfrein ${SOCLE_CHANFREIN} trop large`)
-  assert.ok(SOCLE_CHANFREIN > 0.01, 'assez large pour survivre au MSAA')
+test('le chanfrein se VOIT, sans devenir une facette', () => {
+  // Le bloc fait 56 unités et occupe ~1 000 px cadré large, soit ~18 px/unité.
+  // La borne d'avant (1/18, « sous le pixel ») rendait le liseré invisible à
+  // distance de lecture — Adrien : « rends le plus visible ». La fenêtre utile
+  // va donc de 2 à 6 px : en dessous il disparaît, au-dessus il cesse d'être
+  // une ligne et devient une facette de plastique injecté.
+  assert.ok(SOCLE_CHANFREIN >= 2 / 18, `chanfrein ${SOCLE_CHANFREIN} invisible de loin`)
+  assert.ok(SOCLE_CHANFREIN <= 6 / 18, `chanfrein ${SOCLE_CHANFREIN} : c'est une facette`)
+})
+
+test('le congé bas reste un congé, pas un boudin', () => {
+  // Il doit se lire comme un arrondi de fabrication, pas comme un galet : au
+  // quart de la hauteur du mur, le socle perdrait sa franchise.
+  assert.ok(SOCLE_ARRONDI > SOCLE_CHANFREIN, 'le dessous est plus rond que le dessus')
+  assert.ok(SOCLE_ARRONDI <= 1.5, `congé ${SOCLE_ARRONDI} : le socle devient un galet`)
+  assert.ok(SOCLE_ARRONDI_SEG >= 2, 'un seul segment ne fait pas un arrondi')
 })
 
 // ────────────────────────── 2. occlusion de contact ──────────────────────────
@@ -266,4 +309,72 @@ test('la jupe de découpe fournit l’attribut color — sinon WebGL la peint en
   }
   assert.ok(plafond > 254 / 255, 'le haut de la jupe reste au grand jour')
   assert.ok(plancher < 1, 'le pied est bien assombri')
+})
+
+// ═════ 4. LA BANDE D'OCCLUSION EST COMMUNE À TOUTES LES DALLES ═══════════════
+//
+// LE DÉFAUT D'ADRIEN, « en mode isolé sur plusieurs socles, les socles semblent
+// tous différents ». Chaque constructeur mesurait le point HAUT de SA pièce et
+// en tirait sa bande : sur le damier isolé (jusqu'à 23 jupes) celle qui coupe un
+// sommet cuisait un pied sombre plusieurs fois plus haut que sa voisine de
+// plaine. Deux murs qui se touchent, deux hauteurs d'assombrissement.
+
+test('bandeContact rend une longueur MONDE, jamais négative ni NaN', () => {
+  assert.equal(bandeContact(10, 0), SOCLE_AO_BANDE * 10)
+  assert.equal(bandeContact(3, -7), SOCLE_AO_BANDE * 10)
+  assert.equal(bandeContact(0, 0), 0)
+  assert.equal(bandeContact(-5, 0), 0, 'un mur de hauteur négative ne cuit rien')
+  assert.equal(bandeContact(undefined, undefined), 0)
+})
+
+// Hauteur, au-dessus du pied, à laquelle l'assombrissement se REFERME : le
+// sommet le plus bas resté au grand jour. C'est la mesure qui distingue une
+// bande d'une rampe étalée sur tout le mur.
+function hauteurBandeCuite(geo, baseY) {
+  const pos = geo.attributes.position
+  const col = geo.attributes.color
+  let haut = Infinity
+  for (let v = 0; v < col.count; v++) {
+    if (col.getX(v) > 254.5 / 255) haut = Math.min(haut, pos.getY(v) - baseY)
+  }
+  return Number.isFinite(haut) ? haut : 0
+}
+
+test('deux socles de hauteurs opposées cuisent le MÊME pied sombre', () => {
+  const montagne = (x) => 20 + 6 * Math.sin(x / 5)
+  const plaine = () => 1
+  const opts = { resolution: 16, baseYFloor: -7 }
+  // TÉMOIN — sans bande imposée, chacun mesure la sienne, et elles diffèrent.
+  const mLibre = buildSlabWalls(montagne, opts)
+  const pLibre = buildSlabWalls(plaine, opts)
+  const hM = hauteurBandeCuite(mLibre.geo, mLibre.baseY)
+  const hP = hauteurBandeCuite(pLibre.geo, pLibre.baseY)
+  assert.ok(hM > hP * 1.5, `le témoin doit mordre : ${hM.toFixed(2)} vs ${hP.toFixed(2)}`)
+
+  // IMPOSÉE — les deux cuisent exactement la même hauteur.
+  const bande = bandeContact(26, -7)
+  const m = buildSlabWalls(montagne, { ...opts, aoBande: bande })
+  const p = buildSlabWalls(plaine, { ...opts, aoBande: bande })
+  assert.equal(m.baseY, p.baseY, 'même pied, sinon la comparaison ne dit rien')
+  const a = hauteurBandeCuite(m.geo, m.baseY)
+  const b = hauteurBandeCuite(p.geo, p.baseY)
+  assert.ok(Math.abs(a - b) < 1e-6, `bandes divergentes : ${a} vs ${b}`)
+  assert.ok(a > 0 && a <= bande + 1e-3, `bande hors de sa borne : ${a} pour ${bande}`)
+})
+
+test('buildSlabWalls ressort sa bande, pour que le damier la redonne', () => {
+  const { bande, baseY } = buildSlabWalls((x) => 10 + Math.sin(x), { resolution: 8 })
+  assert.ok(Number.isFinite(bande) && bande > 0)
+  assert.ok(Math.abs(bande - bandeContact(11, baseY)) < 0.2, 'mesurée sur le point haut du bord')
+})
+
+test('la jupe de découpe suit la bande imposée, pas la sienne', () => {
+  const relief = (x, z) => 3 + Math.sin(x / 9) * 2
+  const commune = 4 // unités monde, bien plus large que ce que ce relief donnerait
+  const libre = buildRegionSkirt({ uniform: 'full', sample: relief, grid: 24, depth: 5 })
+  const impose = buildRegionSkirt({ uniform: 'full', sample: relief, grid: 24, depth: 5, aoBande: commune })
+  const hLibre = hauteurBandeCuite(libre.mesh.geometry, libre.baseY)
+  const hImpose = hauteurBandeCuite(impose.mesh.geometry, impose.baseY)
+  assert.ok(hImpose > hLibre * 1.5, `la bande imposée doit primer : ${hImpose} vs ${hLibre}`)
+  assert.ok(hImpose <= commune + 1e-9)
 })

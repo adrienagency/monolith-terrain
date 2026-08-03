@@ -519,15 +519,42 @@ uniform vec2 uNuitOffset;
 uniform vec2 uNuitScale;
 uniform float uNuitFond;
 uniform float uNuitGain;
+// ═══ POURQUOI CES QUATRE-LÀ SONT DERRIÈRE UN #ifdef, ET PAS LES AUTRES ═══════
+//
+// LE DÉFAUT MESURÉ (gabarit « java », 2026-08-03) : le terrain ne linkait plus.
+//   FRAGMENT shader texture image units count exceeds MAX_TEXTURE_IMAGE_UNITS(16)
+// Le relief disparaissait purement et simplement — écran vide sous les
+// étiquettes. Le compte : 12 samplers de ce nuanceur + map, normalMap,
+// roughnessMap et bumpMap du matériau de surface + l'environnement + la carte
+// d'ombre = 18. Deux de trop, et rien dans l'interface ne le disait.
+//
+// ⚠️ UN TEST if (uSolOn > 0.5) NE COÛTE RIEN EN CALCUL MAIS COÛTE UNE UNITÉ DE
+// TEXTURE. C'est le piège : le compilateur ne peut pas éliminer un sampler dont
+// l'usage dépend d'un UNIFORM — il ne connaît sa valeur qu'à l'exécution. Une
+// couche éteinte payait donc son unité comme une couche allumée, et le budget du
+// Gardien, qui compte des mégaoctets, ne voyait rien de tout ça.
+//
+// CES DEUX FAMILLES ET PAS D'AUTRES, pour une raison de fréquence : elles ne
+// s'allument que sur un geste EXPLICITE d'Adrien dans l'onglet Couches. Gater de
+// la même façon uAerial serait une faute — il bascule tout seul au gré des
+// tuiles qui arrivent, et chaque bascule recompilerait les neuf à vingt-trois
+// programmes du damier en plein déplacement.
+//
+// (Et pas d'accent grave dans ce pavé : il vit dans un littéral gabarit JS, où
+// un seul le refermerait et casserait tout le nuanceur. Déjà payé deux fois.)
+#ifdef SHIBU_SOL
 uniform sampler2D uSol;
 uniform sampler2D uSolLut;
+#endif
 uniform float uSolOn;
 uniform float uSolOpacite;
 uniform vec2 uSolOffset;
 uniform vec2 uSolScale;
 uniform vec2 uSolTexel;
+#ifdef SHIBU_CANOPEE
 uniform sampler2D uCanopee;
 uniform sampler2D uCanopeeLut;
+#endif
 uniform float uCanopeeOn;
 uniform float uCanopeeOpacite;
 uniform vec2 uCanopeeOffset;
@@ -664,6 +691,7 @@ vec2 uvSolDrape(out float bordIn) {
 // ici : on interpolait l'ENCODAGE de l'altitude au lieu de l'altitude, et
 // +128 m sortaient là où il fallait lire −0,5 m.
 
+#ifdef SHIBU_SOL
 // La teinte et la force d'UN point de la mosaïque, en linéaire.
 vec4 solEn(vec2 p) {
   // ⚠️ LE +0,5 AVANT LE floor N'EST PAS UNE COQUETTERIE. Sur une machine qui
@@ -714,6 +742,7 @@ vec4 lavisSol(vec2 uv) {
   vec4 s = mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
   return vec4(s.rgb / max(s.a, 1e-4), s.a);
 }
+#endif // SHIBU_SOL
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LA HAUTEUR DE CANOPÉE — LIRE UN NOMBRE, ET DONC AVOIR LE DROIT DE L'INTERPOLER
@@ -735,6 +764,7 @@ vec4 lavisSol(vec2 uv) {
 //
 // Une seule précaution survit, et c'est la seule qui ne dépendait pas de la
 // nature de la donnée : la table est en sRGB et le nuanceur en linéaire.
+#ifdef SHIBU_CANOPEE
 vec4 canopeeEn(vec2 p) {
   // .r vaut déjà hauteur/255, filtré linéairement par le GPU. Pas d'arrondi :
   // on ne cherche pas à retrouver un octet exact, on cherche une hauteur.
@@ -796,6 +826,7 @@ float ombreLisiere(vec2 p) {
   float hNO = texture2D(uCanopee, p + vec2(-uCanopeeTexel.x, uCanopeeTexel.y)).r;
   return clamp((hNO - h) * 3.2, 0.0, 1.0);
 }
+#endif // SHIBU_CANOPEE
 // --- Appearance blend modes (Figma / W3C compositing set) — b = backdrop map,
 // s = the shader colour. Separable ops are channel-wise; the last four are the
 // non-separable HSL modes. ---
@@ -1074,6 +1105,7 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   // couche disant l'occupation là où la rampe ne dit que l'altitude. Les courbes
   // de niveau, la grille et les étiquettes, elles, sont peintes PLUS BAS dans ce
   // nuanceur : elles passent par-dessus, intactes, quelle que soit la force.
+#ifdef SHIBU_SOL
   if (uSolOn > 0.5 && uSolOpacite > 0.001) {
     float sIn;
     vec2 sUv = uvSolDrape(sIn); // ⚠️ les deux pièges « Vienne sur le mont Fuji » et « 1 carreau sur 9 » vivent DEDANS
@@ -1092,6 +1124,7 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
       diffuseColor.rgb = mix(diffuseColor.rgb, peinte, k);
     }
   }
+#endif
 
   // HAUTEUR DE CANOPÉE — posée JUSTE APRÈS l'occupation du sol, et l'ordre est
   // un argument, pas un rangement.
@@ -1114,6 +1147,7 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   // luminance EST l'information (le plus foncé est le plus haut), alors que
   // là-bas elle ne fait qu'accompagner une classe. La brider davantage
   // reviendrait à jeter la moitié de ce que la couche a à dire.
+#ifdef SHIBU_CANOPEE
   if (uCanopeeOn > 0.5 && uCanopeeOpacite > 0.001) {
     float cIn;
     vec2 cUv = uvSolDrape(cIn); // ⚠️ les deux pièges « Vienne sur le mont Fuji » et « 1 carreau sur 9 » vivent DEDANS
@@ -1137,6 +1171,7 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
       diffuseColor.rgb = mix(diffuseColor.rgb, peinte, k);
     }
   }
+#endif
 
   // Optional aerial photo, applied HERE on purpose: over the hypsometric paint
   // but UNDER the contours, grid and labels below — so the drawn cartography
@@ -1691,6 +1726,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // défaut du côté des tuiles pendant longtemps.
   setSol(built) {
     const u = this.mapUniforms
+    this._gateCouche('SHIBU_SOL', !!(built && built.texture && built.lut))
     if (built && built.texture && built.lut) {
       u.uSol.value = built.texture
       u.uSolLut.value = built.lut
@@ -1709,6 +1745,26 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   setSolOpacite(v) {
     this.mapUniforms.uSolOpacite.value = v
   }
+
+  // ════════ ALLUMER UNE COUCHE, C'EST RECOMPILER — ET C'EST LE PRIX JUSTE ═════
+  //
+  // Le `#define` décide si le sampler EXISTE dans le programme, donc s'il occupe
+  // une unité de texture. Le changer force three à recompiler ce matériau : une
+  // à deux centaines de millisecondes, payées sur le geste explicite qui allume
+  // la couche — et payées UNE fois, pas à chaque image.
+  //
+  // ⚠️ ON SORT TÔT SI RIEN NE CHANGE. Sans ce test, chaque rafraîchissement de
+  // mosaïque (il y en a un par déplacement) reposerait le même define et
+  // relèverait `needsUpdate` : le damier recompilerait ses vingt-trois
+  // programmes en plein déplacement, ce qui est exactement le gel qu'on refuse.
+  _gateCouche(nom, on) {
+    const d = this.material.defines || (this.material.defines = {})
+    const avant = d[nom] === 1
+    if (avant === !!on) return
+    if (on) d[nom] = 1
+    else delete d[nom]
+    this.material.needsUpdate = true
+  }
   // HAUTEUR DE CANOPÉE — même contrat que setSol() : on passe l'objet rendu par
   // CanopeeLayer.build(), ou null pour éteindre.
   //
@@ -1719,6 +1775,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // côté des tuiles.
   setCanopee(built) {
     const u = this.mapUniforms
+    this._gateCouche('SHIBU_CANOPEE', !!(built && built.texture && built.lut))
     if (built && built.texture && built.lut) {
       u.uCanopee.value = built.texture
       u.uCanopeeLut.value = built.lut
@@ -2895,6 +2952,24 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
         m.normalMap = this._surfNm || null
         m.roughnessMap = this._surfRm || null
       }
+      // ══════ UNE CARTE DE NORMALES CHASSE LA CARTE DE BOSSELAGE ═════════════
+      //
+      // Le bosselage procédural du terrain (rebuildRoughness) restait posé SOUS
+      // la matière de surface : three applique alors les deux perturbations l'une
+      // après l'autre, et un bruit répété quatre fois brouillait le grain de la
+      // toile qu'on venait de charger. Deux cartes qui décrivent le même relief
+      // de surface, dont une seule a été choisie.
+      //
+      // ⚠️ ET C'EST AUSSI UNE UNITÉ DE TEXTURE RENDUE. C'est elle qui faisait
+      // passer le gabarit « java » de 17 à 18 unités, au-dessus des 16 que la
+      // machine offre — le terrain ne linkait plus et disparaissait. Voir le
+      // pavé sur SHIBU_SOL plus haut.
+      // ⚠️ ON DÉTACHE, ON NE DISPOSE PAS. Les dalles voisines du damier
+      // RECOPIENT la référence (`this.material.bumpMap = src.material.bumpMap`,
+      // _pushShared) : la libérer ici servirait une texture morte à vingt-trois
+      // matériaux. rebuildRoughness en refera une le jour où on revient à la
+      // carte topographique.
+      if (m.normalMap) m.bumpMap = null
       const b = (params.terrainSurfaceBump ?? 1) * (preset.normalScale ?? 1)
       m.normalScale.set(b, b)
       m.metalness = preset.metalness ?? 0

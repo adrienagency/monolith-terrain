@@ -367,7 +367,27 @@ export function buildEffectsPanel(ctx) {
   const aoI = slider({ label: 'Intensité de l’ombrage', min: 0.5, max: 12, step: 0.05, get: () => params.ssaoIntensity, set: (v) => { params.ssaoIntensity = v; ctx.ssao.intensity = v } })
   sRen.body.append(aoT, aoI)
   visibleWhen(aoI, () => params.ssaoEnabled)
-  onRefresh(() => sRen.setMeta(params.ssaoEnabled ? 'SSAO' : 'Off'), sRen.head)
+
+  // ── Diffusion sous-surfacique du socle ─────────────────────────────────────
+  //
+  // Elle vit ICI et pas dans le panneau Bloc parce que c'est un effet de rendu,
+  // pas un choix de finition : elle se pose PAR-DESSUS la matière choisie, quelle
+  // qu'elle soit. Voir Plinth._brancheSSS pour ce qu'elle coûte (une quinzaine
+  // d'opérations par pixel du socle, aucune passe, aucune texture).
+  const sss = () => ctx.applyPlinthSSS?.()
+  const ssT = toggle({ label: 'Diffusion dans la matière (SSS)', get: () => params.sssEnabled, set: (v) => { params.sssEnabled = v; sss(); refreshAll() } })
+  const ssF = slider({ label: 'Force de la diffusion', min: 0, max: 2, step: 0.02, get: () => params.sssStrength, set: (v) => { params.sssStrength = v; sss() } })
+  const ssN = slider({ label: 'Netteté du halo', min: 1, max: 16, step: 0.5, get: () => params.sssPower, set: (v) => { params.sssPower = v; sss() } })
+  const ssC = color({ label: 'Teinte traversante', get: () => params.sssColor, set: (v) => { params.sssColor = v; sss() } })
+  sRen.body.append(ssT, ssF, ssN, ssC)
+  for (const c of [ssF, ssN, ssC]) visibleWhen(c, () => params.sssEnabled)
+
+  onRefresh(() => {
+    const bits = []
+    if (params.ssaoEnabled) bits.push('SSAO')
+    if (params.sssEnabled) bits.push('SSS')
+    sRen.setMeta(bits.length ? bits.join(' · ') : 'Off')
+  }, sRen.head)
 
   // ---- scanner — dernière section d'Effets (la Performance est partie
   // dans la roue crantée des paramètres globaux) ----
