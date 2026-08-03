@@ -8,6 +8,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildSlabWalls,
+  computeSlab,
   contactAO,
   SOCLE_CHANFREIN,
   SOCLE_AO_BANDE,
@@ -15,8 +16,12 @@ import {
   bandeContact,
   SOCLE_ARRONDI,
   SOCLE_ARRONDI_SEG,
+  SOCLE_MARGE_EAU,
+  rayonMurSocle,
+  rayonEauDansSocle,
+  rayonCoinEau,
 } from '../src/plinth.js'
-import { exposantCoin, plansFenetre, debordementCoin, dansFenetre } from '../src/fenetre-clip.js'
+import { exposantCoin, plansFenetre, debordementCoin, dansFenetre, pointCoin } from '../src/fenetre-clip.js'
 import { microRoughnessField, MICRO_ROUGH_CREUX } from '../src/material-textures.js'
 import { buildRegionSkirt } from '../src/region-skirt.js'
 import { TERRAIN_SIZE } from '../src/terrain.js'
@@ -377,4 +382,91 @@ test('la jupe de découpe suit la bande imposée, pas la sienne', () => {
   const hImpose = hauteurBandeCuite(impose.mesh.geometry, impose.baseY)
   assert.ok(hImpose > hLibre * 1.5, `la bande imposée doit primer : ${hImpose} vs ${hLibre}`)
   assert.ok(hImpose <= commune + 1e-9)
+})
+
+// ═══ 5. LA PEAU DU BLOC : UNE SEULE DÉFINITION POUR LE SOCLE ET POUR L'EAU ═══
+//
+// LE DÉFAUT D'ADRIEN, « on voit l'eau à travers le bloc ». Trois modules
+// décidaient chacun où finit le bloc, et s'accordaient à six millièmes d'unité
+// près — par coïncidence, pas par construction. Élargir le chanfrein a mangé
+// cette marge, et le flanc d'eau, qui court du fond de mer à la surface, s'est
+// mis à masquer le mur sur toute cette hauteur.
+
+test('le mur du socle est TOUJOURS dehors, l’eau TOUJOURS dedans', () => {
+  for (const ch of [0, 0.05, SOCLE_CHANFREIN, 0.4, 1.2]) {
+    const mur = rayonMurSocle(ch)
+    const eau = rayonEauDansSocle(ch)
+    assert.ok(eau < mur, `chanfrein ${ch} : l'eau (${eau}) déborde le mur (${mur})`)
+    assert.ok(mur - eau >= 0.05, `marge trop mince à ${ch} : ${(mur - eau).toFixed(3)}`)
+  }
+})
+
+test('le rayon du mur suit le chanfrein, pas une constante gravée', () => {
+  assert.equal(rayonMurSocle(0), HALF, 'sans chanfrein le mur est au bord du bloc')
+  assert.equal(rayonMurSocle(0.16), HALF - 0.16)
+  assert.equal(rayonMurSocle(-3), HALF, 'un chanfrein négatif ne pousse pas le mur dehors')
+})
+
+test('le coin de l’eau rentre autant que son bord — sinon il ressort dans les angles', () => {
+  // Rentrer un rectangle arrondi d'une distance d réduit son rayon de coin
+  // d'autant. Garder le rayon d'origine ferait ressortir l'eau dans les quatre
+  // angles alors qu'elle rentre sur les côtés droits.
+  const rSocle = 2.24 // slabCorner 0,04 × 56, le réglage des gabarits livrés
+  const rEau = rayonCoinEau(rSocle)
+  assert.ok(Math.abs(rEau - (rSocle - SOCLE_CHANFREIN - SOCLE_MARGE_EAU)) < 1e-9)
+  assert.ok(rayonCoinEau(0.05) > 0, 'un coin minuscule ne devient jamais négatif')
+})
+
+test('pointCoin : une seule formule pour le socle ET pour le flanc d’eau', () => {
+  // Elle était recopiée des deux côtés, et la copie du flanc était restée en
+  // CERCLE quand celle du socle est passée au squircle. Un squircle est plus
+  // PLEIN : le flanc rentrait dans les quatre angles pendant que la surface
+  // allait au bord, et un liseré de vide s'ouvrait dans chaque coin.
+  const rayon = (a, expo) => Math.hypot(...pointCoin(a, 10, expo))
+  // à exposant 2, c'est le cercle d'avant, au bit près
+  for (const a of [0, 0.3, Math.PI / 4, 1.2, Math.PI / 2]) {
+    assert.ok(Math.abs(rayon(a, 2) - 10) < 1e-9, )
+  }
+  // au-delà, il gonfle — et c'est exactement là, en diagonale, que ça se joue
+  assert.ok(rayon(Math.PI / 4, 4.4) > 10.5, 'le squircle ne gonfle pas')
+  assert.ok(rayon(Math.PI / 4, 4.4) < 10 * Math.SQRT2, 'un squircle ne dépasse jamais le carré')
+  // et il reste sur les axes, quel que soit l'exposant : le milieu des côtés ne
+  // bouge pas, sinon le raccord avec les parties droites s'ouvrirait
+  for (const expo of [2, 3, 4.4, 8]) {
+    const [x, z] = pointCoin(0, 10, expo)
+    assert.ok(Math.abs(x - 10) < 1e-9 && Math.abs(z) < 1e-9, )
+  }
+  assert.deepEqual(pointCoin(0.7, 5, 1), pointCoin(0.7, 5, 2), 'un exposant sous 2 retombe sur le cercle')
+})
+test('l’arc de coin s’échantillonne en LONGUEUR : plus de pentagone dans l’angle', () => {
+  // LE DÉFAUT D'ADRIEN, « la qualité du chanfrein paraît faible dans les
+  // angles ». L'ancienne règle (n/48) donnait CINQ segments par coin quelle que
+  // soit sa taille : un quart de cercle de 2,24 unités rendu par un pentagone,
+  // là où les côtés droits échantillonnent tous les 0,22. Tant que le liseré
+  // tenait sous le pixel ça ne se voyait pas ; à 0,16 il épouse ces facettes.
+  //
+  // ⚠️ CE N'EST PAS UN COMPTE DE TRIANGLES QU'IL FAUT MESURER : un grand coin
+  // RETIRE de la longueur droite, si bien que le total BAISSE quand le rayon
+  // monte (11 264 → 8 448 de 0 à 14). La bonne propriété est l'ESPACEMENT :
+  // aucun point de l'anneau ne doit s'éloigner de son voisin plus que le pas de
+  // la grille, coins compris.
+  const n = 256
+  const pas = TERRAIN_SIZE / n
+  for (const r of [1, 2.24, 6, 14]) {
+    const { ring } = computeSlab(plat, 7, n, r, exposantCoin(0.6))
+    let max = 0
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i]
+      const b = ring[(i + 1) % ring.length]
+      max = Math.max(max, Math.hypot(b.x - a.x, b.z - a.z))
+    }
+    assert.ok(max < pas * 1.6, `coin ${r} : un écart de ${max.toFixed(3)} pour un pas de ${pas.toFixed(3)}`)
+  }
+})
+
+test('…et le plafond de segments d’arc tient la facture sur un grand coin', () => {
+  // Sans plafond, un coin de 14 unités demanderait une centaine de segments par
+  // angle, et chaque point d'anneau coûte onze triangles.
+  const tri = (r) => buildSlabWalls(plat, { resolution: 256, cornerR: r }).geo.attributes.position.count / 3
+  assert.ok(tri(14) < tri(0), 'un coin arrondi retire de la longueur droite, il ne doit pas coûter plus')
 })

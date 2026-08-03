@@ -7,7 +7,7 @@ import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
 import { PBR_BY_ID, GLASS_BY_ID } from './material-presets.js'
 import { TEXTURE_BUILDERS, microRoughnessTextures, rugositeRecentree } from './material-textures.js'
-import { exposantCoin } from './fenetre-clip.js' // module sans dépendance : pas de cycle
+import { exposantCoin, arcCoin } from './fenetre-clip.js' // module sans dépendance : pas de cycle
 
 const HALF = TERRAIN_SIZE / 2
 const UVSCALE = 6 // world units per texture tile on the socle walls
@@ -59,6 +59,35 @@ export const SOCLE_CHANFREIN = 0.16 // largeur ET profondeur du liseré, en unit
 // « massif ». Il faut donc plusieurs segments ET des normales analytiques
 // lisses : trois segments à normales de face se liraient comme trois facettes,
 // soit l'inverse exact de l'intention.
+// ══════════ OÙ EST LA PEAU DU BLOC — UNE SEULE RÉPONSE, POUR TOUT LE MONDE ═══
+//
+// LE DÉFAUT DU 2026-08-03, « on voit l'eau à travers le bloc ». Trois modules
+// décidaient chacun de leur côté où finit le bloc :
+//   · le mur du socle, à HALF − chanfrein            → 27,950 avec l'ancien 0,05
+//   · le clip de la surface de mer, à HALF × 0,998   → 27,944
+//   · le flanc d'eau (buildRimGeometry), −0,02       → 27,924
+// Ils s'accordaient à SIX MILLIÈMES d'unité près, et cet accord n'était écrit
+// nulle part : c'était une coïncidence. Élargir le chanfrein à 0,16 a ramené le
+// mur à 27,840, donc DERRIÈRE l'eau — et le flanc d'eau, qui court du fond de
+// mer jusqu'à la surface, s'est mis à masquer tout le mur sur cette hauteur.
+//
+// Ce n'est donc pas un décalage à rattraper, c'est une définition qui manquait.
+// La voici, et les trois modules la lisent au lieu de la deviner.
+export const SOCLE_MARGE_EAU = 0.06 // de quoi l'eau reste EN DEDANS du mur
+
+/** Le rayon du mur du socle sous le chanfrein — la vraie silhouette du bloc. */
+export function rayonMurSocle(chanfrein = SOCLE_CHANFREIN) {
+  return HALF - Math.max(0, chanfrein)
+}
+/** Où l'eau doit s'arrêter pour rester dans le bloc, quoi qu'il arrive. */
+export function rayonEauDansSocle(chanfrein = SOCLE_CHANFREIN) {
+  return rayonMurSocle(chanfrein) - SOCLE_MARGE_EAU
+}
+/** Le rayon de coin correspondant : rentrer d'une distance d réduit d'autant. */
+export function rayonCoinEau(coinSocle, chanfrein = SOCLE_CHANFREIN) {
+  return Math.max(0.05, coinSocle - Math.max(0, chanfrein) - SOCLE_MARGE_EAU)
+}
+
 export const SOCLE_ARRONDI = 0.9 // rayon du congé bas, en unités monde
 export const SOCLE_ARRONDI_SEG = 3 // segments de l'arc. 3 suffit AVEC les
 // normales lisses : c'est la normale qui fait l'arrondi, la silhouette ne se
@@ -131,7 +160,13 @@ export function computeSlab(sample, depth, samples = 256, cornerRadius = 0, corn
     const inner = HALF - r
     const step = TERRAIN_SIZE / n
     const straightN = Math.max(1, Math.round((inner * 2) / step))
-    const arcN = Math.max(3, Math.round(n / 48))
+    // ⚠️ LA DENSITÉ DE L'ARC SE MESURE EN LONGUEUR, PAS EN ANGLE — et ce n'est
+    // pas la même chose sur une superellipse. L'ancienne règle (n/48) donnait
+    // CINQ segments par coin quelle que soit sa taille ; la remplacer par un
+    // compte proportionnel au rayon ne suffisait pas non plus, parce que le
+    // paramétrage angulaire se tasse près des axes (0,505 d'écart pour un pas de
+    // 0,219, mesuré). C'est ce trou que le chanfrein élargi met en évidence, et
+    // qu'Adrien lit « faible dans les angles ». Voir arcCoin.
     const line = (x0, z0, x1, z1) => {
       for (let i = 0; i < straightN; i++) {
         const t = i / straightN
@@ -142,14 +177,7 @@ export function computeSlab(sample, depth, samples = 256, cornerRadius = 0, corn
     // n=2 reduces to a circular arc; higher n bulges toward a squircle. Matches
     // the terrain shader's p-norm clip so the map edge and wall stay aligned.
     const arc = (cx, cz, a0, a1) => {
-      for (let i = 0; i < arcN; i++) {
-        const a = a0 + ((a1 - a0) * i) / arcN
-        const ca = Math.cos(a)
-        const sa = Math.sin(a)
-        const ex = Math.sign(ca) * Math.pow(Math.abs(ca), 2 / expo) * r
-        const ez = Math.sign(sa) * Math.pow(Math.abs(sa), 2 / expo) * r
-        edge(cx + ex, cz + ez)
-      }
+      for (const [ex, ez] of arcCoin(a0, a1, r, expo, step)) edge(cx + ex, cz + ez)
     }
     line(-inner, -HALF, inner, -HALF) //  top edge   (z=-HALF)
     arc(inner, -inner, -Math.PI / 2, 0) //  corner +x −z

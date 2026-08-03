@@ -91,6 +91,111 @@ const porteeCoin = (r, expo) => r * Math.pow(2, 0.5 - 1 / Math.max(2, expo))
  * @param {number} expo - exposant de superellipse du coin (2 = cercle)
  * @returns {Array<{normal:[number,number,number], constant:number}>}
  */
+// ═══════ UN POINT SUR LE COIN DU BLOC — UNE SEULE FORMULE, TROIS CLIENTS ═════
+//
+// Elle était recopiée à l'identique dans `computeSlab` (l'anneau du socle) et
+// dans `buildRimGeometry` (le flanc d'eau) — sauf que la seconde copie était
+// restée en CERCLE quand la première est passée au squircle. Un squircle étant
+// plus plein, le flanc rentrait dans les quatre angles pendant que la surface,
+// clipée par le nuanceur, allait jusqu'au bord : un liseré de vide s'ouvrait
+// dans chaque coin. Deux copies d'une même règle finissent toujours par
+// diverger ; il n'y en a plus qu'une.
+//
+// À `expo` = 2 on retrouve exactement l'arc de cercle d'avant, au bit près.
+//
+// @param {number} a - l'angle, en radians
+// @param {number} r - le rayon du coin
+// @param {number} expo - l'exposant de superellipse (voir exposantCoin)
+// @returns {[number, number]} le décalage depuis le CENTRE du coin
+export function pointCoin(a, r, expo = 2) {
+  const n = Math.max(2, expo)
+  const ca = Math.cos(a)
+  const sa = Math.sin(a)
+  return [
+    Math.sign(ca) * Math.pow(Math.abs(ca), 2 / n) * r,
+    Math.sign(sa) * Math.pow(Math.abs(sa), 2 / n) * r,
+  ]
+}
+
+// ═══ UN ARC DE COIN À PAS CONSTANT — ET POURQUOI L'ANGLE NE SUFFIT PAS ═══════
+//
+// ⚠️ LA SUPERELLIPSE N'EST PAS UNIFORME EN LONGUEUR D'ARC, et c'est contre
+// l'intuition : plus l'exposant monte, plus elle se tasse. Mesuré sur le coin
+// par défaut (rayon 1, exposant 4,4, sept segments) : le PREMIER segment après
+// l'axe fait 0,505 quand les côtés droits échantillonnent tous les 0,219. La
+// raison est dans la formule — |sin a| élevé à 0,45 décolle verticalement de
+// zéro, donc un petit pas d'angle y fait un grand pas de position.
+//
+// Multiplier les segments ne réglait rien : le saut restait au même endroit,
+// juste divisé. Il faut échantillonner en LONGUEUR. On calcule donc l'arc dense
+// une fois, puis on le rééchantillonne à pas constant.
+//
+// C'est ce défaut qu'Adrien lit comme « la qualité du chanfrein paraît faible
+// dans les angles » : le liseré épouse l'anneau, donc il épouse ses trous.
+//
+// Rend les points de a0 (inclus) à a1 (EXCLU) — la convention de l'anneau, où
+// le point suivant appartient déjà au côté droit.
+// ⚠️ ON INTERPOLE L'ANGLE, PAS LA POSITION, et la nuance a un test derrière
+// elle. Interpoler entre deux points denses coupe la corde : le point tombe
+// 5,3·10⁻⁶ EN DEDANS de la courbe (mesuré, rayon 4,48, 512 échantillons), et
+// `plinth.test.js` vérifie depuis toujours que l'anneau reste étanche, sur la
+// courbe exacte, à 10⁻⁶ près. Un anneau qui rentre, si peu que ce soit, c'est
+// du jour sous la carte. On se sert donc de l'échantillonnage dense UNIQUEMENT
+// pour inverser la longueur d'arc, puis on évalue la vraie formule.
+export function arcCoin(a0, a1, r, expo = 2, pas = 0.25) {
+  const memo = (arcCoin._memo ??= new Map())
+  const cle = `${a0}|${a1}|${r}|${expo}|${pas}`
+  const vu = memo.get(cle)
+  if (vu) return vu
+  // ⚠️ ÉCHANTILLONNAGE ADAPTATIF, PAS UNIFORME EN ANGLE — et c'est le cœur du
+  // problème. Une table uniforme de 256 pas laissait sa PREMIÈRE cellule
+  // couvrir 0,585 unité (rayon 6, exposant 4,4) : plus large que l'espacement
+  // visé. Inverser une longueur dedans par interpolation linéaire donnait 0,375
+  // au lieu de 0,214, et le trou dans l'angle restait. On subdivise donc là où
+  // la courbe est raide, jusqu'à ce qu'aucune corde ne dépasse le quart du pas.
+  const fin = Math.max(1e-4, pas / 4)
+  let angles = [a0, a1]
+  for (let tour = 0; tour < 24 && angles.length < 4096; tour++) {
+    const suiv = [angles[0]]
+    let coupe = false
+    for (let i = 1; i < angles.length; i++) {
+      const pa = pointCoin(angles[i - 1], r, expo)
+      const pb = pointCoin(angles[i], r, expo)
+      if (Math.hypot(pb[0] - pa[0], pb[1] - pa[1]) > fin) {
+        suiv.push((angles[i - 1] + angles[i]) / 2)
+        coupe = true
+      }
+      suiv.push(angles[i])
+    }
+    angles = suiv
+    if (!coupe) break
+  }
+  const bruts = angles.map((a) => pointCoin(a, r, expo))
+  const cum = [0]
+  for (let i = 1; i < bruts.length; i++) {
+    cum.push(cum[i - 1] + Math.hypot(bruts[i][0] - bruts[i - 1][0], bruts[i][1] - bruts[i - 1][1]))
+  }
+  const total = cum[cum.length - 1]
+  // Plafonné : un grand rayon multiplierait les points d'anneau, et chacun coûte
+  // onze triangles de socle.
+  const n = Math.max(2, Math.min(96, Math.ceil(total / Math.max(1e-6, pas))))
+  const out = []
+  let j = 0
+  for (let k = 0; k < n; k++) {
+    const cible = (total * k) / n
+    while (j < cum.length - 2 && cum[j + 1] < cible) j++
+    const t = (cible - cum[j]) / Math.max(1e-9, cum[j + 1] - cum[j])
+    out.push(pointCoin(angles[j] + (angles[j + 1] - angles[j]) * t, r, expo))
+  }
+  // Mémoïsé : la forme d'un coin ne dépend que du rayon, de l'exposant et du
+  // pas — trois valeurs qui changent au réglage, pas à l'image. Sans ça, la
+  // subdivision serait repayée à CHAQUE reconstruction de socle, c'est-à-dire à
+  // chaque déplacement de fenêtre continue.
+  if (memo.size > 64) memo.clear()
+  memo.set(cle, out)
+  return out
+}
+
 export function plansFenetre(half, corner = 0, expo = 2) {
   const r = Math.max(0, Math.min(corner, half))
   // distance du centre à la diagonale tangente au coin. ⚠️ Un squircle est PLUS

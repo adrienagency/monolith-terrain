@@ -18,7 +18,11 @@
 
 import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
-import { exposantCoin } from './fenetre-clip.js' // le coin de l'eau suit celui du socle
+import { exposantCoin, pointCoin, arcCoin } from './fenetre-clip.js' // le coin de l'eau suit celui du socle
+// … et son BORD aussi : c'est le socle qui dit où finit le bloc, plus chacun
+// dans son coin (voir rayonEauDansSocle — le défaut « on voit l'eau à travers
+// le bloc »). Pas de cycle : plinth.js n'importe pas ocean.js.
+import { rayonEauDansSocle, rayonCoinEau } from './plinth.js'
 import { runLakeJob } from './terrain-jobs.js'
 import { lacsMemoLire, lacsMemoEcrire } from './dem-memo.js'
 import { plansEauRetenus } from './plan-eau.js'
@@ -626,9 +630,10 @@ void main() {
 
 // chemin du périmètre arrondi du bloc (mêmes demi-côté et rayon que le clip
 // de la mer) → ruban vertical indexé, y = 0 (fond) / 1 (surface)
-function buildRimGeometry(half, corner) {
+export function buildRimGeometry(half, corner, cornerN = 2) {
   const r = Math.min(Math.max(corner, 0.02), half)
   const sSide = half - r
+  const expo = Math.max(2, cornerN)
   const pts = []
   const STEP = 0.3 // ~ meme densite que la grille de la mer : pas de trous
   const side = (x0, z0, x1, z1) => {
@@ -636,12 +641,20 @@ function buildRimGeometry(half, corner) {
     const n = Math.max(2, Math.ceil(len / STEP))
     for (let i = 1; i <= n; i++) pts.push([x0 + ((x1 - x0) * i) / n, z0 + ((z1 - z0) * i) / n])
   }
+  // ⚠️ SUPERELLIPSE, PAS CERCLE. Le clip de la surface (uCornerN) et le socle
+  // suivent tous deux un squircle depuis que slabCornerSmoothing est branche ;
+  // ce ruban, lui, tournait encore en cercle. Un squircle etant plus PLEIN, le
+  // flanc RENTRAIT dans les quatre coins pendant que la surface allait jusqu'au
+  // bord : un liseré de vide s'ouvrait dans chaque angle.
+  // ⚠️ Même arc à pas constant que l'anneau du socle, et pour la même raison :
+  // le paramétrage angulaire d'une superellipse se tasse près des axes. Ici la
+  // convention est inverse (on part APRÈS a0 et on finit SUR a1), parce que le
+  // point de départ vient d'être posé par le côté droit précédent.
   const arc = (cx, cz, a0, a1) => {
-    const n = Math.max(4, Math.ceil((Math.abs(a1 - a0) * r) / STEP))
-    for (let i = 1; i <= n; i++) {
-      const a = a0 + ((a1 - a0) * i) / n
-      pts.push([cx + Math.cos(a) * r, cz + Math.sin(a) * r])
-    }
+    const bruts = arcCoin(a0, a1, r, expo, STEP)
+    for (let i = 1; i < bruts.length; i++) pts.push([cx + bruts[i][0], cz + bruts[i][1]])
+    const [fx, fz] = pointCoin(a1, r, expo)
+    pts.push([cx + fx, cz + fz])
   }
   // parcours anti-horaire, arcs orientes correctement (le v40 tournait deux
   // coins a l'envers : le "pli" dans l'angle venait de la)
@@ -1061,8 +1074,14 @@ export class RealWater {
       // ~0.014 scene units — metres said "deep column", the render said no.
       const bathyScene = (0 - terrain.dem.minM) * demScale
       mat.uniforms.uDepthMax.value = bathyScene > 1.0 ? 2.2 : 0.75
-      const r = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE))
-      mat.uniforms.uHalf.value = (TERRAIN_SIZE / 2) * 0.998
+      // ⚠️ LA MER S'ARRÊTE OÙ LE MUR DU SOCLE COMMENCE, ET C'EST LUI QUI LE DIT.
+      // Le facteur 0,998 écrit ici était un chiffre en l'air qui tombait juste
+      // par accident tant que le chanfrein valait 0,05 (six millièmes de marge) ;
+      // à 0,16 il laissait l'eau DEHORS et le flanc masquait le socle. Voir
+      // rayonEauDansSocle.
+      const rSocle = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE))
+      const r = rayonCoinEau(rSocle)
+      mat.uniforms.uHalf.value = rayonEauDansSocle()
       mat.uniforms.uCornerR.value = r
       mat.uniforms.uCornerN.value = exposantCoin(params.slabCornerSmoothing)
       // le plan d'eau EST la fenêtre : il ne bouge pas, c'est son champ qui défile
@@ -1144,7 +1163,10 @@ export class RealWater {
           ]),
         })
         smat.uniforms.uField.value = fieldTex // post-merge (règle du clone)
-        const sgeo = buildRimGeometry((TERRAIN_SIZE / 2) * 0.998 - 0.02, r)
+        // Le flanc lit EXACTEMENT le même bord et le même coin que la surface
+        // qu'il porte : c'est leur divergence qui ouvrait un liseré dans les
+        // angles, et leur débordement commun qui masquait le socle.
+        const sgeo = buildRimGeometry(rayonEauDansSocle(), r, exposantCoin(params.slabCornerSmoothing))
         const skirt = new THREE.Mesh(sgeo, smat)
         skirt.renderOrder = 16 // sous la surface (18) : la mer se dessine par-dessus
         skirt.frustumCulled = false
@@ -1263,8 +1285,10 @@ export class RealWater {
       // clip de fenêtre : un lac de l'emprise qui sort du socle flotterait
       // au-dessus du vide. 1e6 hors mode continu = pas de clip, comme avant.
       if (cote > 1) {
-        mat.uniforms.uHalf.value = (TERRAIN_SIZE / 2) * 0.998
-        mat.uniforms.uCornerR.value = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE))
+        // Même bord que la mer : un lac qui affleure le coin du bloc doit
+        // s'arrêter là où le mur commence, pas un dixième d'unité plus loin.
+        mat.uniforms.uHalf.value = rayonEauDansSocle()
+        mat.uniforms.uCornerR.value = rayonCoinEau(Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE)))
         mat.uniforms.uCornerN.value = exposantCoin(params.slabCornerSmoothing)
       }
       const segX = Math.max(12, Math.min(80, Math.round((x1 - x0) * 6)))
