@@ -1,0 +1,384 @@
+/* L'AFFICHE — la passe où l'on voit ce qu'on va recevoir, avant de payer.
+   Reprend les jetons de v28.css ; n'en invente aucun. */
+
+/* ══════ TOUT SE TAIT, SAUF L'AFFICHE ═══════════════════════════════════════
+   ⚠️ UNE RÈGLE, PAS UNE LISTE. J'ai commencé par énumérer les classes à
+   masquer, et j'en ai oublié à chaque fournée : d'abord la barre du bas, puis
+   sa recherche, puis le segment de modes — dont les libellés continuaient de
+   courir EN TRAVERS de l'affiche, exactement là où l'oeil cherche le cartouche.
+   Une liste d'exceptions se périme au premier bouton ajouté ailleurs ; un
+   `:not()` sur les enfants directs de <body> couvre aussi ce qui n'existe pas
+   encore.
+
+   Le CANEVAS est excepté : la scène est opaque, il ne se voit pas — mais
+   l'aperçu s'y rend, et on ne touche pas à ce qui produit l'image. */
+body.af-mode > *:not(.af-scene):not(.af-fermer):not(canvas) {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── La scène ───────────────────────────────────────────────────────────────
+   Un fond calme et CHAUD, pas gris : on regarde du papier, et le gris neutre
+   fait ressortir le blanc de la feuille en bleu. */
+.af-scene {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  grid-template-columns: 1fr minmax(300px, 344px);
+  /* ⚠️ LA SCÈNE SE DÉDUIT DU RAIL, elle n'a PAS sa propre couleur. J'ai d'abord
+     écrit deux hexadécimaux en dur, un clair et un sombre — et le rail est
+     resté crème sur une scène noire, parce que le thème d'interface réécrit
+     --ce-porcelain EN LIGNE sur <body> et qu'une déclaration en ligne bat une
+     règle `body.dark`. J'ai alors forcé le rail en sombre : le texte, lui,
+     suivait toujours le jeton clair, et la colonne est devenue illisible.
+     La leçon est la même dans les deux sens — deux surfaces d'un même décor ne
+     peuvent pas avoir deux sources. Une porcelaine légèrement encrée reste
+     toujours d'un cran sous le rail, quel que soit le thème et sa teinte. */
+  background: color-mix(in srgb, var(--ce-porcelain) 84%, var(--ce-ink) 16%);
+  color: var(--ce-ink);
+  font-family: var(--ce-font);
+  opacity: 0;
+  transition: opacity 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.af-scene.open { opacity: 1; }
+
+/* ── L'estrade : l'affiche, et rien d'autre ─────────────────────────────── */
+.af-stage {
+  display: grid;
+  place-items: center;
+  padding: clamp(28px, 6vh, 76px) clamp(24px, 5vw, 72px);
+  min-width: 0;
+  min-height: 0;
+}
+.af-sheet-wrap {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+/* La feuille. L'ombre porte un DÉCALAGE et un flou franc : une feuille pose
+   sur une table, elle ne lévite pas dans un halo. */
+.af-sheet {
+  position: relative;
+  background: #fff;
+  box-shadow:
+    0 2px 6px rgba(28, 25, 23, 0.10),
+    0 22px 54px -12px rgba(28, 25, 23, 0.34);
+  overflow: hidden;
+  /* la feuille change de PROPORTION quand on change de format : c'est le geste
+     central de cet écran, il mérite d'être vu */
+  transition:
+    aspect-ratio 0.44s cubic-bezier(0.16, 1, 0.3, 1),
+    max-width 0.44s cubic-bezier(0.16, 1, 0.3, 1),
+    max-height 0.44s cubic-bezier(0.16, 1, 0.3, 1);
+}
+body.dark .af-sheet {
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.5),
+    0 22px 54px -12px rgba(0, 0, 0, 0.7);
+}
+.af-sheet img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* le rendu d'aperçu arrive de façon asynchrone : on ne fait pas clignoter la
+   feuille, on la laisse respirer */
+.af-sheet img { opacity: 0; transition: opacity 0.5s ease-out; }
+.af-sheet img.vu { opacity: 1; }
+.af-sheet.attente::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 35%, rgba(28, 25, 23, 0.05) 50%, transparent 65%);
+  background-size: 280% 100%;
+  animation: af-attente 1.5s linear infinite;
+}
+@keyframes af-attente {
+  from { background-position: 180% 0; }
+  to { background-position: -80% 0; }
+}
+
+/* Le cartouche imprimé SUR l'affiche — ce qui la fait passer de capture
+   d'écran à objet. Sa taille suit celle de la feuille (cqw), sinon il serait
+   énorme sur un A4 et minuscule sur un 61×91. */
+/* ⚠️ LE VOILE SOUS LE CARTOUCHE N'EST PAS UNE COQUETTERIE. Première fournée :
+   les coordonnées tombaient sur une zone claire et illisible, et la carte a le
+   mauvais goût de changer de valeur d'un lieu à l'autre — on ne peut pas parier
+   sur un fond. Un dégradé très doux depuis le bas rend le texte lisible partout
+   sans se voir comme un bandeau. Il fait partie de l'affiche imprimée : c'est
+   pour ça qu'il vit ici et pas dans un calque d'interface. */
+.af-cartouche::before {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: 240%;
+  background: linear-gradient(to top, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+.af-cartouche.sombre::before {
+  background: linear-gradient(to top, rgba(12, 10, 9, 0.72), rgba(12, 10, 9, 0));
+}
+.af-cartouche > * { position: relative; }
+.af-cartouche {
+  container-type: inline-size;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 5.5cqw 6cqw 6cqw;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4cqw;
+  color: #1c1917;
+  text-shadow: 0 1px 8px rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+}
+.af-cartouche.sombre { color: #fafaf9; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.5); }
+.af-cart-lieu {
+  font-size: 6.2cqw;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  margin: 0;
+}
+.af-cart-sous {
+  font-family: var(--ce-mono);
+  font-size: 2.1cqw;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.72;
+  margin-top: 1.6cqw;
+}
+.af-cart-alt {
+  font-family: var(--ce-mono);
+  font-size: 2.1cqw;
+  letter-spacing: 0.1em;
+  opacity: 0.72;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ── Le rail de décisions ───────────────────────────────────────────────── */
+.af-rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--ce-porcelain);
+  border-left: 1px solid var(--ce-hairline);
+  padding: 28px 26px 0;
+  overflow: hidden;
+}
+.af-rail-corps { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 20px; }
+.af-rail h1 {
+  font-size: 25px;
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+  margin: 0 0 8px;
+}
+.af-intro {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ce-muted);
+  margin: 0 0 26px;
+  max-width: 34ch;
+}
+.af-groupe { margin-bottom: 22px; }
+.af-legende {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ce-muted);
+  margin: 0 0 var(--ce-gap-tight);
+}
+
+/* Les formats : chaque pastille est dessinée À SA VRAIE PROPORTION. On choisit
+   une forme, pas une ligne dans une liste — et on la reconnaît avant de lire
+   son nom. */
+.af-formats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.af-fmt {
+  appearance: none;
+  border: 1px solid var(--ce-hairline);
+  background: transparent;
+  border-radius: 11px;
+  padding: 12px 6px 9px;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--ce-ink);
+  font-family: inherit;
+  transition: background 0.16s, border-color 0.16s, transform 0.16s;
+}
+.af-fmt:hover { background: var(--ce-hover); }
+.af-fmt:active { transform: translateY(1px); }
+.af-fmt:focus-visible { outline: 2px solid var(--ce-accent); outline-offset: 2px; }
+.af-fmt i {
+  display: block;
+  width: 100%;
+  max-width: 26px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  opacity: 0.42;
+  transition: opacity 0.16s, background 0.16s;
+}
+.af-fmt b {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  opacity: 0.72;
+  white-space: nowrap;
+}
+.af-fmt[aria-pressed='true'] { border-color: var(--ce-accent); background: color-mix(in srgb, var(--ce-accent) 8%, transparent); }
+.af-fmt[aria-pressed='true'] i { opacity: 1; color: var(--ce-accent); background: color-mix(in srgb, var(--ce-accent) 16%, transparent); }
+.af-fmt[aria-pressed='true'] b { opacity: 1; font-weight: 600; }
+
+/* Orientation : deux états d'une même chose, donc un segment, pas deux boutons. */
+.af-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--ce-track);
+}
+.af-seg button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 7px 0;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ce-muted);
+  cursor: pointer;
+  transition: background 0.16s, color 0.16s;
+}
+.af-seg button[aria-pressed='true'] { background: var(--ce-porcelain); color: var(--ce-ink); font-weight: 600; }
+.af-seg button:focus-visible { outline: 2px solid var(--ce-accent); outline-offset: -2px; }
+
+.af-bascule {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  font-size: 13.5px;
+}
+.af-bascule input { accent-color: var(--ce-accent); width: 16px; height: 16px; cursor: pointer; }
+
+.af-champ {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--ce-hairline);
+  background: transparent;
+  border-radius: 10px;
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--ce-ink);
+}
+.af-champ::placeholder { color: var(--ce-muted); }
+.af-champ:focus-visible { outline: 2px solid var(--ce-accent); outline-offset: -1px; border-color: transparent; }
+
+/* ── Le pied : la vérité, puis l'action ─────────────────────────────────── */
+.af-pied {
+  border-top: 1px solid var(--ce-hairline);
+  padding: 16px 0 22px;
+  background: var(--ce-porcelain);
+}
+.af-verite {
+  font-family: var(--ce-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--ce-muted);
+  margin-bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.af-cta {
+  appearance: none;
+  border: 0;
+  width: 100%;
+  border-radius: 12px;
+  padding: 14px 18px;
+  background: var(--ce-accent);
+  color: #fff;
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-shadow: 0 1px 2px rgba(28, 25, 23, 0.16), 0 8px 20px -8px rgba(234, 88, 12, 0.7);
+  transition: transform 0.14s, box-shadow 0.14s, filter 0.14s;
+}
+.af-cta:hover { filter: brightness(1.06); box-shadow: 0 1px 2px rgba(28, 25, 23, 0.18), 0 12px 26px -8px rgba(234, 88, 12, 0.8); }
+.af-cta:active { transform: translateY(1px); box-shadow: 0 1px 2px rgba(28, 25, 23, 0.2); }
+.af-cta:focus-visible { outline: 2px solid var(--ce-ink); outline-offset: 3px; }
+.af-cta[disabled] { opacity: 0.55; cursor: progress; filter: none; }
+.af-cta span:last-child { font-variant-numeric: tabular-nums; opacity: 0.9; }
+
+.af-rassure {
+  margin: 11px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ce-muted);
+  text-align: center;
+}
+.af-rassure b { font-weight: 600; color: var(--ce-ink); }
+
+/* La croix : discrète, mais toujours au même endroit que partout ailleurs. */
+.af-fermer {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  z-index: 62;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ce-hairline);
+  border-radius: 50%;
+  background: var(--ce-porcelain);
+  color: var(--ce-ink);
+  cursor: pointer;
+  transition: background 0.16s, transform 0.16s;
+}
+.af-fermer:hover { background: var(--ce-hover); }
+.af-fermer:active { transform: scale(0.94); }
+.af-fermer:focus-visible { outline: 2px solid var(--ce-accent); outline-offset: 2px; }
+
+/* ── Étroit : le rail passe dessous, l'affiche garde la vedette ─────────── */
+@media (max-width: 900px) {
+  .af-scene { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
+  .af-rail {
+    border-left: 0;
+    border-top: 1px solid var(--ce-hairline);
+    max-height: 56vh;
+    padding: 20px 18px 0;
+  }
+  .af-stage { padding: 58px 20px 12px; }
+  .af-formats { grid-template-columns: repeat(4, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .af-scene, .af-sheet, .af-sheet img { transition: none; }
+  .af-sheet.attente::after { animation: none; }
+}

@@ -446,6 +446,11 @@ export class GroundInfoLayer {
       ])
       const info = await gatherGroundInfo({ lat, lon, dem, stats })
       if (id !== this.reqId) return // superseded
+      // On GARDE l'info, on ne fait pas que la dessiner : l'écran d'affiche a
+      // besoin du MÊME nom de lieu que celui gravé sur le bloc. Le recalculer
+      // de son côté ferait deux appels au géocodeur pour un seul lieu, et les
+      // laisserait diverger le jour où l'un des deux échoue.
+      this.info = info
       this.render(info)
       this._applyRace() // le rebuild a jeté les plans course — les regraver
     } catch {

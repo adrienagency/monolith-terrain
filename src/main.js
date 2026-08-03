@@ -5979,6 +5979,50 @@ initTips()
 // first click pulls the export stack in (modal + Recorder + mediabunny) —
 // bars.js shows a busy state on the button while the chunk downloads. Named
 // so both the top-bar Export pill AND the "E" keyboard shortcut can open it.
+// ═══════════ L'AFFICHE — VOIR AVANT DE PAYER ════════════════════════════════
+//
+// Adrien : « avant tout rendu, il faut une passe pour que l'utilisateur voie le
+// poster qu'il va avoir ». L'écran vit dans ui/affiche.js ; ce qui suit lui
+// fournit les deux seules choses qu'il ne peut pas connaître seul — un rendu au
+// bon format, et le lieu qu'on regarde.
+async function openAfficheUI() {
+  const { ouvrirAffiche } = await import('./ui/affiche.js')
+  const { exportImage } = await import('./export.js')
+  // ⚠️ MÊME GEL QUE L'EXPORT, ET POUR LA MÊME RAISON : ce que l'aperçu montre
+  // doit être ce qui partira au tirage. Élan éteint, débordement résorbé.
+  f3Fige()
+  ouvrirAffiche({
+    // Un VRAI rendu au ratio demandé, pas un recadrage de l'écran — c'est tout
+    // l'intérêt de la passe. Sans crédit incrusté : la ligne d'attribution a sa
+    // place sur l'affiche finale, pas en travers d'une vignette de choix.
+    rendreApercu: async ({ largeur, hauteur }) => {
+      const blob = await exportImage({
+        renderer, composer, camera,
+        width: largeur, height: hauteur,
+        format: 'image/jpeg', quality: 0.9,
+        credit: null,
+      })
+      return URL.createObjectURL(blob)
+    },
+    // Le MÊME nom que celui gravé sur le flanc du bloc (groundInfo.info) : deux
+    // sources donneraient deux noms pour un seul lieu.
+    lieu: () => ({
+      nom: groundInfo?.info?.name || '',
+      lat: dem?.lat ?? NaN,
+      lon: dem?.lon ?? NaN,
+      altMax: Number.isFinite(dem?.maxM) ? dem.maxM : null,
+    }),
+    onCommander: (commande) => {
+      // Le paiement n'est pas encore branché — voir le plan de monétisation.
+      // On le DIT plutôt que d'afficher une fausse confirmation : promettre un
+      // fichier qui n'arrive pas coûte plus cher que d'assumer un chantier.
+      console.info('[affiche] commande demandée :', commande)
+      showNotice('Le paiement arrive bientôt — le fichier n’est pas encore livrable.')
+    },
+    onFermer: () => refreshAll(),
+  })
+}
+
 async function openExportUI() {
   const [{ openExportModal }, { Recorder }] = await Promise.all([
     import('./ui/export-modal.js'),
@@ -6238,6 +6282,7 @@ const topBar = buildTopBar({
     startTutorial()
   },
   openExport: openExportUI,
+  openAffiche: openAfficheUI,
   // "?" keyboard-shortcuts help — self-updating overlay, reads SHORTCUTS live
   toggleShortcuts: () => shortcutsOverlay.toggle(),
   // ALPHA chip → "What's new" changelog

@@ -163,6 +163,14 @@ export function buildTopBar(ctx) {
   }
   const pubItem = menuItem(pubMenu)
   const helpItem = menuItem(helpMenu)
+  // L'AFFICHE EN PREMIER, et ce n'est pas un caprice de rangement : c'est la
+  // seule sortie qui vaille quelque chose, les deux autres sont des copies de
+  // l'écran. Un menu se lit du haut, et ce qu'on met en tête est ce qu'on
+  // propose. Le libellé promet ce qui se passe VRAIMENT au clic — on voit
+  // l'affiche, on ne paie pas encore.
+  pubItem(I.export, 'Voir mon affiche', 'En vrai format, avant de commander le fichier d’impression.', async () => {
+    try { await ctx.openAffiche() } catch (err) { console.error('Affiche failed to open:', err) }
+  })
   // openExport est async (pile d'export lazy-loadée au premier clic)
   pubItem(I.export, 'Exporter une image ou une vidéo', 'Ce que tu vois, en haute qualité.', async () => {
     try { await ctx.openExport() } catch (err) { console.error('Export failed to open:', err) }
