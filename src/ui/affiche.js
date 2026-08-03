@@ -24,7 +24,10 @@
 
 import './affiche.css'
 import { el } from './kit.js'
-import { FORMATS_AFFICHE, geometriePage, DPI_IMPRESSION } from '../print-page.js'
+import {
+  FORMATS_AFFICHE, geometriePage, DPI_IMPRESSION,
+  CADRAGE_DEFAUT, CADRAGE_ZOOM_MIN, CADRAGE_ZOOM_MAX, cadrageValide,
+} from '../print-page.js'
 
 // Le prix de lancement. Un seul endroit, pour que l'étiquette et le bouton ne
 // puissent pas se contredire.
@@ -85,6 +88,13 @@ export function ouvrirAffiche(ctx) {
     cartouche: true,
     cartoucheSombre: false,
     titre: ctx.lieu?.().nom || '',
+    // ⚠️ LE CADRAGE PART DE « TOUT LE SOCLE », PAS DE LA VUE À L'ÉCRAN. Adrien :
+    // « par défaut, la totalité du socle est visible sur l'affiche ». À l'écran
+    // on tourne autour du bloc et on s'approche — ce qu'on regarde n'est presque
+    // jamais l'objet entier. L'affiche s'ouvre sur le bloc complet ; c'est
+    // ENSUITE qu'on resserre. Voir distanceCadrage dans print-page.js.
+    cadrage: { ...CADRAGE_DEFAUT },
+    logo: null, // { url, coin, taille }
   }
 
   document.body.classList.add('af-mode')
@@ -97,7 +107,7 @@ export function ouvrirAffiche(ctx) {
   const stage = el('div', 'af-stage')
   const wrap = el('div', 'af-sheet-wrap')
   const sheet = el('div', 'af-sheet attente')
-  const img = el('img')
+  const img = el('img', 'af-carte')
   img.alt = ''
   const cartouche = el('div', 'af-cartouche')
   const cartGauche = el('div')
@@ -106,7 +116,10 @@ export function ouvrirAffiche(ctx) {
   cartGauche.append(cartLieu, cartSous)
   const cartAlt = el('div', 'af-cart-alt')
   cartouche.append(cartGauche, cartAlt)
-  sheet.append(img, cartouche)
+  const logoImg = el('img', 'af-logo')
+  logoImg.alt = ''
+  logoImg.style.display = 'none'
+  sheet.append(img, logoImg, cartouche)
   wrap.append(sheet)
   stage.append(wrap)
 
@@ -184,7 +197,97 @@ export function ouvrirAffiche(ctx) {
   cocheEncre.addEventListener('change', () => { etat.cartoucheSombre = cocheEncre.checked; appliquer({}) })
   champ.addEventListener('input', () => { etat.titre = champ.value; appliquer({}) })
 
-  corps.append(gFormat, gOrient, gCart)
+  // ── Cadrage : trois curseurs, et la même chose à la main sur la feuille ────
+  //
+  // Les curseurs ET le geste direct, parce qu'ils ne servent pas au même
+  // moment : on tire l'image du pouce pour trouver le cadrage, puis on ajuste
+  // au curseur quand on sait ce qu'on cherche. Les deux écrivent le même état.
+  const gCadre = el('div', 'af-groupe')
+  const enTete = el('div', 'af-legende-ligne')
+  enTete.append(el('p', 'af-legende', 'Cadrage'))
+  const bReset = el('button', 'af-lien')
+  bReset.type = 'button'
+  bReset.textContent = 'Tout le socle'
+  enTete.append(bReset)
+  gCadre.append(enTete)
+
+  const curseur = (label, min, max, pas, lire, ecrire) => {
+    const rang = el('label', 'af-curseur')
+    const nom = el('span', null, label)
+    const input = el('input')
+    input.type = 'range'
+    input.min = min
+    input.max = max
+    input.step = pas
+    input.addEventListener('input', () => {
+      ecrire(parseFloat(input.value))
+      appliquer({ refaireRendu: 'differe' })
+    })
+    rang.append(nom, input)
+    return { rang, sync: () => { input.value = String(lire()) } }
+  }
+  const cZoom = curseur('Zoom', CADRAGE_ZOOM_MIN, CADRAGE_ZOOM_MAX, 0.01,
+    () => etat.cadrage.zoom, (v) => { etat.cadrage.zoom = v })
+  const cX = curseur('Horizontal', -1, 1, 0.005,
+    () => etat.cadrage.x, (v) => { etat.cadrage.x = v })
+  const cY = curseur('Vertical', -1, 1, 0.005,
+    () => etat.cadrage.y, (v) => { etat.cadrage.y = v })
+  gCadre.append(cZoom.rang, cX.rang, cY.rang)
+  bReset.addEventListener('click', () => {
+    etat.cadrage = { ...CADRAGE_DEFAUT }
+    appliquer({ refaireRendu: true })
+  })
+
+  // ── Logo ──────────────────────────────────────────────────────────────────
+  const gLogo = el('div', 'af-groupe')
+  gLogo.append(el('p', 'af-legende', 'Ton logo'))
+  const fichier = el('input')
+  fichier.type = 'file'
+  fichier.accept = 'image/png,image/jpeg,image/svg+xml,image/webp'
+  fichier.id = 'af-logo-fichier'
+  fichier.className = 'af-fichier'
+  const etiqFichier = el('label', 'af-depot')
+  etiqFichier.setAttribute('for', 'af-logo-fichier')
+  etiqFichier.textContent = 'Choisir une image…'
+  const logoOutils = el('div', 'af-logo-outils')
+  const segCoin = el('div', 'af-seg af-seg-4')
+  const COINS = [['hg', 'Haut g.'], ['hd', 'Haut d.'], ['bg', 'Bas g.'], ['bd', 'Bas d.']]
+  const boutonsCoin = new Map()
+  for (const [id, lab] of COINS) {
+    const b = el('button', null, lab)
+    b.type = 'button'
+    b.addEventListener('click', () => {
+      if (!etat.logo) return
+      etat.logo.coin = id
+      appliquer({})
+    })
+    boutonsCoin.set(id, b)
+    segCoin.append(b)
+  }
+  const cTaille = curseur('Taille', 4, 26, 0.5,
+    () => etat.logo?.taille ?? 12, (v) => { if (etat.logo) etat.logo.taille = v })
+  const bRetirer = el('button', 'af-lien')
+  bRetirer.type = 'button'
+  bRetirer.textContent = 'Retirer le logo'
+  bRetirer.addEventListener('click', () => {
+    if (etat.logo?.url) URL.revokeObjectURL(etat.logo.url)
+    etat.logo = null
+    fichier.value = ''
+    appliquer({})
+  })
+  logoOutils.append(segCoin, cTaille.rang, bRetirer)
+  fichier.addEventListener('change', () => {
+    const f = fichier.files?.[0]
+    if (!f) return
+    if (etat.logo?.url) URL.revokeObjectURL(etat.logo.url)
+    // ⚠️ Le fichier ne QUITTE PAS le navigateur. Rien n'est téléversé : le logo
+    // vit dans une URL d'objet locale, et ne partira qu'avec la commande.
+    etat.logo = { url: URL.createObjectURL(f), coin: 'hg', taille: 12, nom: f.name }
+    appliquer({})
+  })
+  gLogo.append(etiqFichier, fichier, logoOutils)
+
+  corps.append(gFormat, gOrient, gCadre, gCart, gLogo)
 
   // ── le pied : la vérité, puis l'action ────────────────────────────────────
   const pied = el('div', 'af-pied')
@@ -211,9 +314,30 @@ export function ouvrirAffiche(ctx) {
 
   // ── l'état, poussé dans le DOM ────────────────────────────────────────────
   let jeton = 0
+  let differe = null
   function appliquer({ refaireRendu = false } = {}) {
     const geo = geometriePage({ format: etat.format, orientation: etat.orientation, dpi: DPI_IMPRESSION })
     if (!geo) return
+    // Le cadrage se re-borne à CHAQUE passage : baisser le zoom doit ramener les
+    // décalages dans la nouvelle marge, sinon l'image resterait poussée dehors.
+    etat.cadrage = cadrageValide(etat.cadrage)
+    cZoom.sync(); cX.sync(); cY.sync()
+    const bougeable = etat.cadrage.zoom > 1.001
+    sheet.classList.toggle('bougeable', bougeable)
+    cX.rang.classList.toggle('eteint', !bougeable)
+    cY.rang.classList.toggle('eteint', !bougeable)
+
+    // le logo
+    logoImg.style.display = etat.logo ? '' : 'none'
+    logoOutils.style.display = etat.logo ? '' : 'none'
+    etiqFichier.textContent = etat.logo ? etat.logo.nom : 'Choisir une image…'
+    if (etat.logo) {
+      if (logoImg.src !== etat.logo.url) logoImg.src = etat.logo.url
+      logoImg.style.width = `${etat.logo.taille}cqw`
+      logoImg.dataset.coin = etat.logo.coin
+      for (const [id, b] of boutonsCoin) b.setAttribute('aria-pressed', String(id === etat.logo.coin))
+      cTaille.sync()
+    }
 
     for (const [id, b] of boutonsFormat) b.setAttribute('aria-pressed', String(id === etat.format))
     bPortrait.setAttribute('aria-pressed', String(etat.orientation === 'portrait'))
@@ -237,28 +361,50 @@ export function ouvrirAffiche(ctx) {
     verite.textContent = ''
     for (const bout of ligneVerite(geo)) verite.append(el('span', null, bout))
 
-    if (refaireRendu) rendre(geo)
+    if (refaireRendu === 'differe') {
+      // ⚠️ UN RENDU PAR CRAN DE CURSEUR SERAIT INJOUABLE : chaque rendu redessine
+      // la scène entière. On montre donc l'ancienne image TRANSFORMÉE pendant le
+      // geste — approximatif mais instantané — et on refait le vrai rendu à
+      // l'arrêt. C'est le même compromis que l'aperçu d'un recadrage photo.
+      apercuApproche()
+      clearTimeout(differe)
+      differe = setTimeout(() => rendre(geo), 260)
+    } else if (refaireRendu) {
+      clearTimeout(differe)
+      rendre(geo)
+    }
+  }
+
+  // La transformation CSS qui imite le cadrage, le temps du geste.
+  function apercuApproche() {
+    const { zoom, x, y } = etat.cadrage
+    img.style.transform = `scale(${zoom}) translate(${(-x * 50) / zoom}%, ${(-y * 50) / zoom}%)`
   }
 
   async function rendre(geo) {
     const mien = ++jeton
     sheet.classList.add('attente')
-    img.classList.remove('vu')
     const [W, H] = geo.finiPx
     const k = APERCU_MAX_PX / Math.max(W, H)
     try {
       const url = await ctx.rendreApercu({
         largeur: Math.max(2, Math.round(W * k)),
         hauteur: Math.max(2, Math.round(H * k)),
+        cadrage: { ...etat.cadrage },
       })
       // ⚠️ Un rendu plus récent a pu partir pendant celui-ci (on clique vite sur
       // les formats). Sans ce jeton, c'est l'aperçu le plus LENT qui gagne.
       if (mien !== jeton) return
+      const ancienne = img.src
       img.src = url
       img.decode?.().catch(() => {}).finally(() => {
         if (mien !== jeton) return
+        // le vrai rendu porte DÉJÀ le cadrage : la transformation d'attente
+        // doit disparaître au même instant, sinon on l'appliquerait deux fois
+        img.style.transform = ''
         sheet.classList.remove('attente')
         img.classList.add('vu')
+        if (ancienne?.startsWith('blob:')) URL.revokeObjectURL(ancienne)
       })
     } catch (err) {
       if (mien !== jeton) return
@@ -266,6 +412,40 @@ export function ouvrirAffiche(ctx) {
       console.warn('aperçu d’affiche :', err)
     }
   }
+
+  // ── Le geste direct : on tire l'image, on ne cherche pas un curseur ───────
+  //
+  // ⚠️ LE DÉPLACEMENT SE MESURE EN FRACTION DE LA FEUILLE, PAS EN PIXELS. La
+  // même feuille fait 900 px de large sur un portable et 1 400 sur un écran
+  // large : un pas en pixels rendrait le geste deux fois plus sensible ici que
+  // là. Et il se divise par le zoom — à fort grossissement, un centimètre de
+  // souris doit balayer moins d'image, pas plus.
+  let prise = null
+  sheet.addEventListener('pointerdown', (e) => {
+    if (etat.cadrage.zoom <= 1.001) return // à zoom 1 il n'y a rien à déplacer
+    prise = { id: e.pointerId, x: e.clientX, y: e.clientY, dep: { ...etat.cadrage } }
+    sheet.setPointerCapture(e.pointerId)
+    sheet.classList.add('tire')
+  })
+  sheet.addEventListener('pointermove', (e) => {
+    if (!prise || e.pointerId !== prise.id) return
+    const r = sheet.getBoundingClientRect()
+    etat.cadrage.x = prise.dep.x - ((e.clientX - prise.x) / r.width) * 2 * etat.cadrage.zoom
+    etat.cadrage.y = prise.dep.y - ((e.clientY - prise.y) / r.height) * 2 * etat.cadrage.zoom
+    appliquer({ refaireRendu: 'differe' })
+  })
+  const lacher = (e) => {
+    if (!prise || (e && e.pointerId !== prise.id)) return
+    prise = null
+    sheet.classList.remove('tire')
+  }
+  sheet.addEventListener('pointerup', lacher)
+  sheet.addEventListener('pointercancel', lacher)
+  sheet.addEventListener('wheel', (e) => {
+    e.preventDefault()
+    etat.cadrage.zoom *= e.deltaY < 0 ? 1.08 : 1 / 1.08
+    appliquer({ refaireRendu: 'differe' })
+  }, { passive: false })
 
   cta.addEventListener('click', () => {
     cta.disabled = true

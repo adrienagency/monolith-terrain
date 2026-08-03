@@ -64,6 +64,13 @@ body.af-mode > *:not(.af-scene):not(.af-fermer):not(canvas) {
    sur une table, elle ne lévite pas dans un halo. */
 .af-sheet {
   position: relative;
+  /* ⚠️ SANS CE CONTENEUR, LE LOGO NE S'AFFICHE PAS OÙ ON CROIT. Sa taille est en
+     `cqw` — un pourcentage de la LARGEUR DE LA FEUILLE, pour qu'il occupe la
+     même fraction sur un A4 que sur un 61 × 91. Mais `cqw` sans conteneur
+     déclaré retombe sur le viewport : le logo prenait alors une taille qui
+     n'avait aucun rapport avec l'affiche. Le cartouche, lui, déclarait déjà le
+     sien — c'est pour ça qu'il tombait juste et pas le logo. */
+  container-type: inline-size;
   background: #fff;
   box-shadow:
     0 2px 6px rgba(28, 25, 23, 0.10),
@@ -81,16 +88,21 @@ body.dark .af-sheet {
     0 2px 6px rgba(0, 0, 0, 0.5),
     0 22px 54px -12px rgba(0, 0, 0, 0.7);
 }
-.af-sheet img {
+/* ⚠️ CES RÈGLES VISENT L'APERÇU, PAS « UNE IMAGE DE LA FEUILLE ». Écrites en
+   `.af-sheet img`, elles ont attrapé le logo dès qu'il est arrivé : opacité 0
+   (il attendait une classe `.vu` qu'il ne recevrait jamais) et hauteur 100 %
+   (il s'étirait sur toute la feuille). Un sélecteur descendant se périme au
+   premier élément de même balise qu'on ajoute à côté. */
+.af-carte {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* le rendu arrive de façon asynchrone : on ne fait pas clignoter la feuille */
+  opacity: 0;
+  transition: opacity 0.5s ease-out;
 }
-/* le rendu d'aperçu arrive de façon asynchrone : on ne fait pas clignoter la
-   feuille, on la laisse respirer */
-.af-sheet img { opacity: 0; transition: opacity 0.5s ease-out; }
-.af-sheet img.vu { opacity: 1; }
+.af-carte.vu { opacity: 1; }
 .af-sheet.attente::after {
   content: '';
   position: absolute;
@@ -175,7 +187,16 @@ body.dark .af-sheet {
   padding: 28px 26px 0;
   overflow: hidden;
 }
-.af-rail-corps { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 20px; }
+.af-rail-corps {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* ⚠️ `overflow-x: hidden` EXPLICITE : `overflow-y: auto` seul rend l'axe
+     horizontal `auto` lui aussi, et une barre de défilement latérale s'ouvrait
+     sous « Ton logo » pour deux pixels de débord. */
+  overflow-x: hidden;
+  padding-bottom: 20px;
+}
 .af-rail h1 {
   font-size: 25px;
   font-weight: 500;
@@ -187,10 +208,10 @@ body.dark .af-sheet {
   font-size: 13.5px;
   line-height: 1.55;
   color: var(--ce-muted);
-  margin: 0 0 26px;
+  margin: 0 0 20px;
   max-width: 34ch;
 }
-.af-groupe { margin-bottom: 22px; }
+.af-groupe { margin-bottom: 18px; }
 .af-legende {
   font-size: 11px;
   font-weight: 600;
@@ -379,6 +400,97 @@ body.dark .af-sheet {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .af-scene, .af-sheet, .af-sheet img { transition: none; }
+  .af-scene, .af-sheet, .af-carte { transition: none; }
   .af-sheet.attente::after { animation: none; }
 }
+
+/* ── Cadrage : curseurs, et le geste sur la feuille ──────────────────────── */
+.af-legende-ligne {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.af-lien {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--ce-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+.af-lien:hover { filter: brightness(0.9); }
+.af-lien:focus-visible { outline: 2px solid var(--ce-accent); outline-offset: 2px; border-radius: 3px; }
+
+.af-curseur {
+  display: grid;
+  grid-template-columns: 74px 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 12.5px;
+  color: var(--ce-muted);
+}
+.af-curseur input {
+  width: 100%;
+  accent-color: var(--ce-accent);
+  cursor: pointer;
+}
+/* Un réglage sans effet ne disparaît pas : il s'estompe et reste là, pour qu'on
+   comprenne qu'il attend quelque chose (ici, du zoom) plutôt que de croire
+   qu'il n'existe pas. */
+.af-curseur.eteint { opacity: 0.42; }
+.af-curseur.eteint input { pointer-events: none; }
+
+.af-sheet.bougeable { cursor: grab; }
+.af-sheet.tire { cursor: grabbing; }
+/* la feuille reçoit le geste : sans ça le navigateur défile la page à la place */
+.af-sheet.bougeable { touch-action: none; }
+.af-carte { transform-origin: center; }
+.af-sheet.tire .af-carte { transition: none; }
+
+/* ── Logo ────────────────────────────────────────────────────────────────── */
+.af-fichier {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.af-depot {
+  display: block;
+  border: 1px dashed var(--ce-hairline);
+  border-radius: 10px;
+  padding: 12px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--ce-muted);
+  cursor: pointer;
+  transition: border-color 0.16s, background 0.16s, color 0.16s;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.af-depot:hover { border-color: var(--ce-accent); background: var(--ce-hover); color: var(--ce-ink); }
+.af-fichier:focus-visible + .af-depot { outline: 2px solid var(--ce-accent); outline-offset: 2px; }
+.af-logo-outils { margin-top: 10px; display: grid; gap: 8px; }
+.af-seg-4 { grid-template-columns: repeat(4, 1fr); }
+.af-seg-4 button { font-size: 11px; padding: 6px 0; }
+
+/* Le logo SUR l'affiche. Sa taille est en cqw comme le cartouche : sur un A4
+   comme sur un 61 × 91, il occupe la même fraction de la feuille. */
+.af-logo {
+  position: absolute;
+  height: auto;
+  object-fit: contain;
+  pointer-events: none;
+}
+.af-logo[data-coin='hg'] { top: 6cqw; left: 6cqw; }
+.af-logo[data-coin='hd'] { top: 6cqw; right: 6cqw; }
+.af-logo[data-coin='bg'] { bottom: 6cqw; left: 6cqw; }
+.af-logo[data-coin='bd'] { bottom: 6cqw; right: 6cqw; }

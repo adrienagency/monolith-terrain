@@ -67,6 +67,8 @@ import { lightingFor, darkModeFor, applyGains, fillDirection, fillLightIntensity
 import { signatureCarteOmbre } from './carte-ombre.js'
 import { SunDisc } from './sun-disc.js'
 import { Plinth, bandeContact } from './plinth.js'
+// le cadrage de l'affiche : « tout le socle » se calcule, il ne se devine pas
+import { cadrageValide, distanceCadrage } from './print-page.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
 import { fetchRegionMask, regionMaskFromParts, frameRegion, rasterizeMask } from './region-mask.js'
@@ -5985,6 +5987,89 @@ initTips()
 // poster qu'il va avoir ». L'écran vit dans ui/affiche.js ; ce qui suit lui
 // fournit les deux seules choses qu'il ne peut pas connaître seul — un rendu au
 // bon format, et le lieu qu'on regarde.
+// ═══════ CADRER LE SOCLE ENTIER, PUIS OBÉIR AU RÉGLAGE ══════════════════════
+//
+// Adrien : « par défaut, la totalité du socle est visible sur l'affiche ». On
+// ne réutilise donc PAS le cadrage de l'écran — on recule jusqu'à faire tenir la
+// boîte du bloc, dans le ratio de l'affiche, en gardant la DIRECTION choisie par
+// l'utilisateur. Ce qu'il a composé (l'angle, la hauteur de vue) est respecté ;
+// seule la distance change.
+//
+// Rend un objet qui sait tout remettre en place : la caméra de la scène ne doit
+// pas garder une trace de l'aperçu.
+function cadrerAffiche(aspect, cadrage) {
+  const c = cadrageValide(cadrage || {})
+  const sauve = {
+    pos: camera.position.clone(),
+    aspect: camera.aspect,
+    zoom: camera.zoom,
+    view: camera.view ? { ...camera.view } : null,
+  }
+  const restaurer = () => {
+    camera.position.copy(sauve.pos)
+    camera.aspect = sauve.aspect
+    camera.zoom = sauve.zoom
+    if (sauve.view?.enabled) {
+      const v = sauve.view
+      camera.setViewOffset(v.fullWidth, v.fullHeight, v.offsetX, v.offsetY, v.width, v.height)
+    } else camera.clearViewOffset()
+    camera.updateProjectionMatrix()
+  }
+
+  const boite = new THREE.Box3()
+  // Le SOCLE, c'est-à-dire les murs du bloc : leur boîte englobe déjà le relief,
+  // qui vit dans la même emprise et sous le même sommet.
+  if (plinth?.walls?.geometry) {
+    plinth.walls.geometry.computeBoundingBox()
+    boite.copy(plinth.walls.geometry.boundingBox).applyMatrix4(plinth.walls.matrixWorld)
+  }
+  if (boite.isEmpty()) return { restaurer }
+
+  const centre = boite.getCenter(new THREE.Vector3())
+  const cible = controls?.target ? controls.target.clone() : centre
+  // La DIRECTION d'où l'on regarde est celle de l'utilisateur ; seule la
+  // distance est recalculée.
+  const dir = camera.position.clone().sub(cible).normalize()
+  if (!Number.isFinite(dir.x) || dir.lengthSq() < 1e-9) dir.set(0.6, 0.5, 0.8).normalize()
+
+  // Les huit coins, exprimés dans le repère de la caméra visant le centre : x à
+  // droite, y en haut, z vers l'arrière. C'est ce que distanceCadrage attend.
+  const avant = dir.clone().negate() // la caméra regarde vers -z
+  const haut = new THREE.Vector3(0, 1, 0)
+  const droite = new THREE.Vector3().crossVectors(avant, haut).normalize()
+  if (droite.lengthSq() < 1e-9) droite.set(1, 0, 0)
+  const vraiHaut = new THREE.Vector3().crossVectors(droite, avant).normalize()
+  const coins = []
+  const v = new THREE.Vector3()
+  for (const x of [boite.min.x, boite.max.x]) {
+    for (const y of [boite.min.y, boite.max.y]) {
+      for (const z of [boite.min.z, boite.max.z]) {
+        v.set(x, y, z).sub(centre)
+        coins.push({ x: v.dot(droite), y: v.dot(vraiHaut), z: -v.dot(avant) })
+      }
+    }
+  }
+
+  camera.aspect = aspect
+  const d = distanceCadrage(coins, (camera.fov * Math.PI) / 180, aspect)
+  camera.position.copy(centre).addScaledVector(dir, Math.max(1, d))
+  camera.lookAt(centre)
+  // ⚠️ LE ZOOM PASSE PAR camera.zoom, PAS PAR LA DISTANCE. Avancer la caméra
+  // changerait la PERSPECTIVE — le bloc s'écraserait ou s'exagérerait selon le
+  // réglage, et l'aperçu ne dirait plus la même chose que la vue d'origine.
+  // `zoom` ne fait que resserrer le champ, ce que fait un objectif.
+  camera.zoom = c.zoom
+  // Le décalage, en fraction de l'image. setViewOffset décrit une fenêtre dans
+  // une image plus grande : ici la « grande » est la même, seul l'offset bouge.
+  if (c.x || c.y) {
+    const W = 10000
+    const H = Math.round(W / aspect)
+    camera.setViewOffset(W, H, (c.x * W) / 2, (c.y * H) / 2, W, H)
+  } else camera.clearViewOffset()
+  camera.updateProjectionMatrix()
+  return { restaurer }
+}
+
 async function openAfficheUI() {
   const { ouvrirAffiche } = await import('./ui/affiche.js')
   const { exportImage } = await import('./export.js')
@@ -5995,14 +6080,19 @@ async function openAfficheUI() {
     // Un VRAI rendu au ratio demandé, pas un recadrage de l'écran — c'est tout
     // l'intérêt de la passe. Sans crédit incrusté : la ligne d'attribution a sa
     // place sur l'affiche finale, pas en travers d'une vignette de choix.
-    rendreApercu: async ({ largeur, hauteur }) => {
-      const blob = await exportImage({
-        renderer, composer, camera,
-        width: largeur, height: hauteur,
-        format: 'image/jpeg', quality: 0.9,
-        credit: null,
-      })
-      return URL.createObjectURL(blob)
+    rendreApercu: async ({ largeur, hauteur, cadrage }) => {
+      const rendu = cadrerAffiche(largeur / hauteur, cadrage)
+      try {
+        const blob = await exportImage({
+          renderer, composer, camera,
+          width: largeur, height: hauteur,
+          format: 'image/jpeg', quality: 0.9,
+          credit: null,
+        })
+        return URL.createObjectURL(blob)
+      } finally {
+        rendu.restaurer()
+      }
     },
     // Le MÊME nom que celui gravé sur le flanc du bloc (groundInfo.info) : deux
     // sources donneraient deux noms pour un seul lieu.

@@ -196,6 +196,70 @@ export function cadrageTuile(plan, tuile) {
   return { fullWidth: W, fullHeight: H, offsetX: tuile.x, offsetY: tuile.y, width: tuile.w, height: tuile.h }
 }
 
+// ═══════════ LE CADRAGE DE L'AFFICHE — TROIS NOMBRES, ET UNE RÈGLE ══════════
+//
+// Adrien : « par défaut, la totalité du socle est visible sur l'affiche ». Ce
+// n'est pas le cadrage de l'écran : à l'écran on tourne autour du bloc, on
+// s'approche, on ressort — et ce qu'on regarde n'est presque jamais l'objet
+// entier. L'affiche, elle, s'ouvre TOUJOURS sur le bloc au complet, et c'est
+// ensuite que l'utilisateur resserre s'il veut.
+//
+// Le cadrage tient donc en trois nombres, et aucun ne touche la caméra de la
+// scène : zoom (1 = tout le socle), puis deux décalages en fraction de l'image.
+export const CADRAGE_DEFAUT = { zoom: 1, x: 0, y: 0 }
+export const CADRAGE_ZOOM_MIN = 0.7
+export const CADRAGE_ZOOM_MAX = 3
+
+/** Ramène un cadrage dans ses bornes, quoi qu'on lui passe. */
+export function cadrageValide(c = {}) {
+  const n = (v, d) => (Number.isFinite(v) ? v : d)
+  const zoom = Math.min(CADRAGE_ZOOM_MAX, Math.max(CADRAGE_ZOOM_MIN, n(c.zoom, 1)))
+  // ⚠️ LE DÉCALAGE EST BORNÉ PAR LE ZOOM, et pas par une constante. À zoom 1 on
+  // voit déjà tout : traîner l'image ne ferait qu'ouvrir du vide sur un bord. La
+  // marge disponible est exactement ce que le zoom a poussé hors cadre.
+  const marge = Math.max(0, 1 - 1 / zoom)
+  // `+ 0` normalise le zéro NÉGATIF que produit un clamp à marge nulle. Il vaut
+  // zéro à tous les usages, mais pas à la comparaison stricte — et c'est le
+  // genre de valeur qui traverse un enregistrement de gabarit sans prévenir.
+  const borne = (v) => Math.min(marge, Math.max(-marge, n(v, 0))) + 0
+  return { zoom, x: borne(c.x), y: borne(c.y) }
+}
+
+/**
+ * À quelle distance placer la caméra pour que TOUS ces points tiennent dans le
+ * cadre — la règle « on voit le socle en entier ».
+ *
+ * Les points sont donnés en espace CAMÉRA, relatifs au point visé : x à droite,
+ * y en haut, z vers l'arrière (la caméra regarde vers −z, convention three.js).
+ *
+ * ⚠️ ON NE SE CONTENTE PAS D'UNE SPHÈRE ENGLOBANTE, et la différence se voit.
+ * Un bloc de 56 × 56 × 20 a une sphère de rayon 41 : cadrer dessus laisserait
+ * une marge énorme et l'affiche paraîtrait vide. On projette donc les huit
+ * coins et on prend le pire — c'est exact, et c'est serré.
+ *
+ * ⚠️ ET LE `+ p.z` N'EST PAS UN DÉTAIL : un coin PROCHE de la caméra remplit
+ * plus de cadre qu'un coin lointain de même écart latéral. L'oublier cadre bien
+ * la face arrière du bloc et laisse la face avant déborder.
+ *
+ * @param {Array<{x:number,y:number,z:number}>} points
+ * @param {number} fovYRad - l'ouverture VERTICALE, en radians
+ * @param {number} aspect - largeur / hauteur de l'image
+ * @param {number} [marge] - respiration ajoutée, en fraction (0,06 = 6 %)
+ * @returns {number} la distance, jamais négative
+ */
+export function distanceCadrage(points, fovYRad, aspect, marge = 0.06) {
+  if (!Array.isArray(points) || !points.length) return 0
+  if (!(fovYRad > 0) || !(aspect > 0)) return 0
+  const tanY = Math.tan(fovYRad / 2)
+  const tanX = tanY * aspect
+  let d = 0
+  for (const p of points) {
+    if (!p || ![p.x, p.y, p.z].every(Number.isFinite)) continue
+    d = Math.max(d, Math.abs(p.y) / tanY + p.z, Math.abs(p.x) / tanX + p.z)
+  }
+  return Math.max(0, d * (1 + Math.max(0, marge)))
+}
+
 /**
  * Le format fini réellement atteint par une image donnée, en centimètres — de
  * quoi dire honnêtement à l'utilisateur ce qu'il peut tirer.

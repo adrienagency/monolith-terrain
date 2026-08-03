@@ -20,6 +20,11 @@ import {
   cadrageTuile,
   poidsRendu,
   formatAtteintCm,
+  CADRAGE_DEFAUT,
+  CADRAGE_ZOOM_MIN,
+  CADRAGE_ZOOM_MAX,
+  cadrageValide,
+  distanceCadrage,
 } from '../src/print-page.js'
 
 // ── Le chiffre qui justifie tout le module ──────────────────────────────────
@@ -202,4 +207,92 @@ test('le canevas de composition, lui, reste en pleine taille — et on le dit', 
 
 test('DPI_IMPRESSION reste 300 : c’est le contrat avec l’imprimeur', () => {
   assert.equal(DPI_IMPRESSION, 300)
+})
+
+// ═══════════ LE CADRAGE — « on voit le socle en entier » ════════════════════
+
+test('le cadrage par défaut ne zoome pas et ne décale rien', () => {
+  assert.deepEqual(cadrageValide(CADRAGE_DEFAUT), { zoom: 1, x: 0, y: 0 })
+  assert.deepEqual(cadrageValide({}), { zoom: 1, x: 0, y: 0 })
+  assert.deepEqual(cadrageValide({ zoom: NaN, x: undefined, y: null }), { zoom: 1, x: 0, y: 0 })
+})
+
+test('à zoom 1 le décalage est NUL : il n’y aurait que du vide à découvrir', () => {
+  // On voit déjà tout : traîner l'image n'ouvrirait qu'une marge blanche.
+  assert.deepEqual(cadrageValide({ zoom: 1, x: 0.5, y: -0.9 }), { zoom: 1, x: 0, y: 0 })
+})
+
+test('la marge de décalage est exactement ce que le zoom a poussé hors cadre', () => {
+  // À zoom 2, la moitié de l'image sort du cadre : on peut la ramener, pas plus.
+  const c = cadrageValide({ zoom: 2, x: 9, y: -9 })
+  assert.equal(c.x, 0.5)
+  assert.equal(c.y, -0.5)
+  // …et au zoom maximal (3), deux tiers — pas trois quarts : 4 serait borné.
+  assert.equal(cadrageValide({ zoom: CADRAGE_ZOOM_MAX, x: 9 }).x, 1 - 1 / CADRAGE_ZOOM_MAX)
+})
+
+test('le zoom reste entre ses bornes', () => {
+  assert.equal(cadrageValide({ zoom: 0.01 }).zoom, CADRAGE_ZOOM_MIN)
+  assert.equal(cadrageValide({ zoom: 99 }).zoom, CADRAGE_ZOOM_MAX)
+  assert.ok(CADRAGE_ZOOM_MIN < 1 && CADRAGE_ZOOM_MAX > 1, 'on doit pouvoir reculer ET s’approcher')
+})
+
+// ── La distance qui fait tenir le bloc ──────────────────────────────────────
+
+// Les huit coins d'une boîte centrée, en espace caméra.
+const coinsBoite = (dx, dy, dz) => {
+  const p = []
+  for (const x of [-dx, dx]) for (const y of [-dy, dy]) for (const z of [-dz, dz]) p.push({ x, y, z })
+  return p
+}
+
+test('tous les coins tiennent dans le cadre à la distance rendue', () => {
+  const fov = (35 * Math.PI) / 180
+  for (const aspect of [0.71, 1, 1.41, 1.5]) {
+    const coins = coinsBoite(28, 10, 28)
+    const d = distanceCadrage(coins, fov, aspect, 0)
+    const tanY = Math.tan(fov / 2)
+    const tanX = tanY * aspect
+    for (const p of coins) {
+      // profondeur du coin vu depuis la caméra placée à d sur +z
+      const prof = d - p.z
+      assert.ok(prof > 0, 'un coin passe derrière la caméra')
+      assert.ok(Math.abs(p.y) <= prof * tanY + 1e-9, `coin hors cadre en hauteur (aspect ${aspect})`)
+      assert.ok(Math.abs(p.x) <= prof * tanX + 1e-9, `coin hors cadre en largeur (aspect ${aspect})`)
+    }
+  }
+})
+
+test('le coin PROCHE commande, pas le lointain', () => {
+  // ⚠️ Le piège du terme `+ p.z`. Deux coins de même écart latéral mais de
+  // profondeurs opposées ne remplissent pas le même cadre : sans ce terme on
+  // cadre la face arrière et la face avant déborde.
+  const fov = (35 * Math.PI) / 180
+  const loin = distanceCadrage([{ x: 20, y: 0, z: -30 }], fov, 1, 0)
+  const proche = distanceCadrage([{ x: 20, y: 0, z: +30 }], fov, 1, 0)
+  assert.ok(proche > loin + 50, `le coin proche doit exiger plus de recul : ${proche} vs ${loin}`)
+})
+
+test('un cadre plus étroit fait reculer la caméra', () => {
+  const fov = (35 * Math.PI) / 180
+  const coins = coinsBoite(28, 10, 28)
+  const paysage = distanceCadrage(coins, fov, 1.4, 0)
+  const portrait = distanceCadrage(coins, fov, 0.71, 0)
+  assert.ok(portrait > paysage, 'un portrait doit reculer pour rentrer la largeur')
+})
+
+test('la marge de respiration s’ajoute proportionnellement', () => {
+  const fov = (35 * Math.PI) / 180
+  const coins = coinsBoite(28, 10, 28)
+  const sans = distanceCadrage(coins, fov, 1, 0)
+  const avec = distanceCadrage(coins, fov, 1, 0.06)
+  assert.ok(Math.abs(avec - sans * 1.06) < 1e-9)
+})
+
+test('une entrée vide ou absurde rend zéro, jamais NaN', () => {
+  assert.equal(distanceCadrage([], 1, 1), 0)
+  assert.equal(distanceCadrage(null, 1, 1), 0)
+  assert.equal(distanceCadrage([{ x: 1, y: 1, z: 1 }], 0, 1), 0)
+  assert.equal(distanceCadrage([{ x: 1, y: 1, z: 1 }], 1, 0), 0)
+  assert.ok(Number.isFinite(distanceCadrage([{ x: NaN, y: 1, z: 1 }, { x: 2, y: 2, z: 2 }], 1, 1)))
 })
