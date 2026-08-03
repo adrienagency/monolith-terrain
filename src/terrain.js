@@ -385,6 +385,18 @@ export class Terrain {
       uHazeAlt: { value: params.hazeAlt ?? 0.5 },
       uHazeDist: { value: params.hazeDist ?? 0.5 },
       uHazeColor: { value: new THREE.Color(params.hazeColor ?? '#b9c6d6') },
+      // ═══ DIFFUSION SOUS-SURFACIQUE — UNE PROPRIÉTÉ DE MATIÈRE, PAS UN EFFET ═
+      //
+      // Adrien : « on peut plutôt tester un matériau avec SSS dans la partie
+      // matière du relief ». C'est le bon endroit, et pas seulement par commodité
+      // d'interface : la translucidité n'est pas un réglage de rendu qu'on
+      // pousse sur une scène, c'est ce qui distingue l'albâtre du plâtre. Elle
+      // appartient donc au matériau, comme sa rugosité — voir le champ `sss`
+      // dans material-catalog.js. Une matière qui ne la déclare pas met
+      // simplement uMatSSS à zéro.
+      uMatSSS: { value: 0 },
+      uMatSSSTeinte: { value: new THREE.Color('#ff8a4c') },
+      uMatSSSPower: { value: 4 },
     }
     this.rebuildRamp(params)
     this.material.onBeforeCompile = (shader) => {
@@ -560,6 +572,9 @@ uniform float uCanopeeOpacite;
 uniform vec2 uCanopeeOffset;
 uniform vec2 uCanopeeScale;
 uniform vec2 uCanopeeTexel;
+uniform float uMatSSS;
+uniform vec3 uMatSSSTeinte;
+uniform float uMatSSSPower;
 uniform float uCloudShadowK;
 uniform vec3 uCloudShadowTint;
 uniform float uScanT;
@@ -1404,6 +1419,38 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     }
   }
 }`
+        )
+        .replace(
+          '#include <lights_fragment_end>',
+          `#include <lights_fragment_end>
+// ── DIFFUSION SOUS-SURFACIQUE DE LA MATIERE DU RELIEF ───────────────────────
+//
+// Le meme terme de translucidite arriere que le socle (voir Plinth._brancheSSS),
+// pose ici sur le RELIEF : c'est ce qui fait qu'une crete d'albatre s'allume par
+// la tranche quand le soleil passe derriere, au lieu de rester un plateau mat.
+//
+// ⚠️ PILOTE PAR UN UNIFORM, PAS PAR UN #define, et c'est deliberement l'inverse
+// du choix fait pour les couches Sol et Canopee juste au-dessus. Un sampler
+// coute une unite de texture meme eteint : il FAUT le faire disparaitre a la
+// compilation. Une quinzaine d'operations, non — et les faire disparaitre
+// couterait une recompilation des neuf a vingt-trois programmes du damier a
+// chaque changement de matiere, ce qui est exactement le gel qu'on refuse.
+#if NUM_DIR_LIGHTS > 0
+if (uMatSSS > 0.001) {
+  vec3 Vs = normalize(vViewPosition);
+  vec3 Ns = normalize(normal);
+  vec3 Ls = directionalLights[0].direction; // deja normalisee, en espace vue
+  // la lumiere qui traverse ressort DEVIEE par la normale : c'est cette
+  // deviation qui donne au bord mince son halo, et pas un simple ajout
+  vec3 Hs = normalize(Ls + Ns * 0.35);
+  float trav = pow(clamp(dot(Vs, -Hs), 0.0, 1.0), uMatSSSPower);
+  // ... et seulement la ou la face est eclairee PAR DERRIERE. Sans ce facteur,
+  // le versant deja au soleil doublerait sa lumiere et tout le relief
+  // deviendrait laiteux, ce qui est l'inverse du geste.
+  float dosS = clamp(-dot(Ns, Ls) * 0.5 + 0.5, 0.0, 1.0);
+  reflectedLight.directDiffuse += directionalLights[0].color * uMatSSSTeinte * (trav + 0.12) * dosS * uMatSSS;
+}
+#endif`
         )
         .replace(
           '#include <emissivemap_fragment>',
@@ -2970,6 +3017,15 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       // matériaux. rebuildRoughness en refera une le jour où on revient à la
       // carte topographique.
       if (m.normalMap) m.bumpMap = null
+      // La diffusion de CETTE matière — ou son extinction. ⚠️ Le `else` n'est pas
+      // décoratif : les uniformes survivent au changement de matière, et sans
+      // remise à zéro la roche brute héritait du halo de l'albâtre.
+      const sss = preset.sss
+      this.mapUniforms.uMatSSS.value = sss ? Math.max(0, sss.force ?? 0) : 0
+      if (sss) {
+        this.mapUniforms.uMatSSSTeinte.value.set(sss.teinte ?? '#ff9a5e')
+        this.mapUniforms.uMatSSSPower.value = Math.max(1, sss.nettete ?? 3.2)
+      }
       const b = (params.terrainSurfaceBump ?? 1) * (preset.normalScale ?? 1)
       m.normalScale.set(b, b)
       m.metalness = preset.metalness ?? 0
@@ -2984,6 +3040,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       this.setMatAboveZero(params.terrainMatAboveZero)
     } else {
       // none — restore the topographic look
+      this.mapUniforms.uMatSSS.value = 0 // la carte topographique ne diffuse pas
       m.map = null
       m.normalMap = null
       m.normalScale.set(1, 1)

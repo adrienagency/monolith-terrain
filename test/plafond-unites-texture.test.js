@@ -77,9 +77,17 @@ test('les gardes ne débordent pas : autant de #ifdef que de #endif', () => {
     const ouv = (src.match(new RegExp(`#ifdef ${garde}`, 'g')) || []).length
     assert.ok(ouv >= 3, `${garde} : ${ouv} ouverture(s), on en attend au moins 3 (uniformes, fonctions, corps)`)
   }
-  const ifdefs = (src.match(/#ifdef SHIBU_/g) || []).length
-  const endifs = (src.match(/#endif/g) || []).length
-  assert.equal(ifdefs, endifs, `${ifdefs} #ifdef pour ${endifs} #endif : un bloc n'est pas refermé`)
+  // ⚠️ ON COMPTE TOUTES LES OUVERTURES, pas seulement les nôtres. La version
+  // d'avant ne comptait que `#ifdef SHIBU_`, et le premier `#if NUM_DIR_LIGHTS`
+  // ajouté au nuanceur (la diffusion sous-surfacique de la matière) l'a fait
+  // tomber alors que rien n'était déséquilibré. Un compteur qui n'aligne pas ses
+  // deux moitiés sur la même règle finit toujours par crier à tort.
+  // …et SEULEMENT en début de ligne, comme le préprocesseur GLSL l'exige. Sans
+  // l'ancre, le pavé d'explication qui écrit « derrière un #ifdef » en toutes
+  // lettres comptait pour une ouverture, et le test criait sur de la prose.
+  const ouvertures = (src.match(/^[ \t]*#if(def|ndef)?\b/gm) || []).length
+  const endifs = (src.match(/^[ \t]*#endif/gm) || []).length
+  assert.equal(ouvertures, endifs, `${ouvertures} ouvertures pour ${endifs} #endif : un bloc n'est pas refermé`)
 })
 
 test('allumer une couche pose son define, l’éteindre le retire — et rien d’autre ne recompile', () => {

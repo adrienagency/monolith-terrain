@@ -49,6 +49,38 @@ export const MATERIALS = [
   { id: 'marble021', label: 'Marbre veiné', cat: 'marbre', kind: 'dir', dir: 'textures/marble021/', thumb: thumb('marble021'), metalness: 0.05, roughness: 0.3, normalScale: 0.7, envMapIntensity: 1.1, repeat: 4 },
   { id: 'marble006', label: 'Marbre blanc', cat: 'marbre', kind: 'dir', dir: 'textures/marble006/', thumb: thumb('marble006'), metalness: 0.05, roughness: 0.28, normalScale: 0.6, envMapIntensity: 1.15, repeat: 4 },
   { id: 'onyx002', label: 'Onyx', cat: 'marbre', kind: 'dir', dir: 'textures/onyx002/', thumb: thumb('onyx002'), metalness: 0.1, roughness: 0.32, normalScale: 0.8, envMapIntensity: 1.0, repeat: 4 },
+  // ═══════ LA PREMIÈRE MATIÈRE QUI LAISSE PASSER LA LUMIÈRE ══════════════════
+  //
+  // `sss` est un champ NOUVEAU et FACULTATIF : une matière qui ne le déclare pas
+  // laisse le terme éteint (uMatSSS à zéro, voir terrain.js). L'albâtre est le
+  // cas d'école — une pierre claire dont la crête s'allume par la tranche quand
+  // le soleil passe derrière. C'est précisément ce que le marbre poli juste
+  // au-dessus ne fait PAS : lui RENVOIE la lumière, il ne la laisse pas entrer.
+  //
+  //   force    combien de lumière ressort (0 à ~1,5)
+  //   teinte   la couleur de ce qui a traversé — TOUJOURS plus chaude que la
+  //            pierre : c'est le rouge qui se promène le plus loin dans un
+  //            milieu diffusant, la raison pour laquelle une main devant une
+  //            lampe est rouge et non grise
+  //   nettete  l'exposant du halo : bas = diffusion large, haut = liseré serré
+  //
+  // ⚠️ SA RUGOSITÉ EST PLUS HAUTE QUE CELLE DU MARBRE, à dessein. Un albâtre
+  // poli miroir renverrait tant de spéculaire que la lumière traversante
+  // passerait dessous sans se voir — les deux se disputent le même pixel.
+  //
+  // Les images viennent du jeu onyx002 (ambientCG, CC0), copiées dans leur
+  // propre dossier pour que la matière soit AUTONOME : un vrai relevé d'albâtre
+  // s'y substituera sans toucher une ligne de code.
+  //
+  // ⚠️ PAS marble006, ET C'EST UNE MESURE, PAS UN GOÛT. Sa carte de diffusion a
+  // une luminance moyenne de 25 sur 255 — c'est un marbre NOIR, malgré son
+  // étiquette « Marbre blanc » deux lignes plus haut (défaut préexistant,
+  // signalé à Adrien). Une pierre à 10 % de réflectance ne peut rien laisser
+  // passer : le relief ressortait entièrement noir, et la diffusion, seule à
+  // l'éclairer, se lisait comme un éclairage d'appoint au lieu d'une
+  // translucidité. L'onyx est à 148 sur 255, et c'est de toute façon LA pierre
+  // translucide de référence.
+  { id: 'albatre', label: 'Albâtre', cat: 'marbre', kind: 'dir', dir: 'textures/albatre/', thumb: thumb('albatre'), metalness: 0, roughness: 0.52, normalScale: 0.5, envMapIntensity: 0.9, repeat: 4, sss: { force: 0.85, teinte: '#ff9a5e', nettete: 3.2 } },
 
   // --- neige -------------------------------------------------------------
   { id: 'snow014', label: 'Neige fraîche', cat: 'neige', kind: 'dir', dir: 'textures/snow014/', thumb: thumb('snow014'), metalness: 0, roughness: 0.6, normalScale: 1.1, envMapIntensity: 0.8, repeat: 6 },
