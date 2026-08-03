@@ -1,0 +1,132 @@
+// LE WEBHOOK — la SEULE source de vérité sur « c'est payé ».
+//
+//   POST /.netlify/functions/paiement-webhook   (appelé par Stripe, pas par nous)
+//
+// ═══════════════════════════════════════════════════════════════════════════
+// POURQUOI LA PAGE DE RETOUR NE SUFFIT PAS
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Après paiement, Stripe renvoie le client sur `/?paye=<session>`. Il serait
+// tentant de livrer là. Ce serait faux pour deux raisons :
+//   · cette URL est REJOUABLE — on la copie, on la partage, on la recharge ;
+//   · le client peut fermer l'onglet avant d'y arriver, et il aura payé quand
+//     même. C'est le cas le plus injuste, et le plus fréquent sur mobile.
+// Le webhook, lui, part de Stripe vers nous, quoi que fasse le navigateur.
+//
+// ⚠️ ET ON VÉRIFIE `payment_status === 'paid'`, PAS L'EXISTENCE DE LA SESSION.
+// Une session existe dès qu'on l'a créée, avant tout paiement.
+//
+// ═══════════════════════════════════════════════════════════════════════════
+// VARIABLES D'ENVIRONNEMENT
+// ═══════════════════════════════════════════════════════════════════════════
+//
+//   STRIPE_WEBHOOK_SECRET   whsec_…   (donné par Stripe à la création du point
+//                                      de terminaison — PAS la clé secrète)
+//   RESEND_API_KEY          re_…      (facultatif : sans lui, la commande est
+//                                      journalisée et l'email est sauté)
+//   SHIBU_MAIL_EXPEDITEUR   ex. affiche@shibumap.com
+
+import { createHmac, timingSafeEqual } from 'node:crypto'
+import { getStore } from '@netlify/blobs'
+
+/**
+ * Vérifie la signature Stripe. Pure, donc testable.
+ *
+ * ⚠️ ELLE SE CALCULE SUR LE CORPS BRUT, OCTET POUR OCTET. Passer par
+ * `JSON.parse` puis `JSON.stringify` réordonne les clés et change les
+ * espaces : la signature ne correspond plus, et on passe une journée à
+ * chercher une erreur de clé qui n'existe pas.
+ *
+ * ⚠️ ET LA COMPARAISON EST À TEMPS CONSTANT. Un `===` sur une signature fuit,
+ * caractère par caractère, de quoi la reconstruire.
+ */
+export function signatureValide(brut, entete, secret, toleranceS = 300, maintenantS = Math.floor(Date.now() / 1000)) {
+  if (!brut || !entete || !secret) return false
+  const parts = Object.fromEntries(
+    String(entete).split(',').map((p) => p.split('=').map((s) => s.trim())).filter((p) => p.length === 2)
+  )
+  const t = Number(parts.t)
+  if (!Number.isFinite(t)) return false
+  // Le horodatage borne le REJEU : une requête interceptée hier ne doit pas
+  // pouvoir être renvoyée aujourd'hui.
+  if (Math.abs(maintenantS - t) > toleranceS) return false
+  const attendu = createHmac('sha256', secret).update(`${t}.${brut}`, 'utf8').digest('hex')
+  const recu = parts.v1
+  if (typeof recu !== 'string' || recu.length !== attendu.length) return false
+  return timingSafeEqual(Buffer.from(attendu, 'hex'), Buffer.from(recu, 'hex'))
+}
+
+export default async (req) => {
+  if (req.method !== 'POST') return new Response('méthode', { status: 405 })
+
+  const secret = process.env.STRIPE_WEBHOOK_SECRET
+  if (!secret) return new Response('STRIPE_WEBHOOK_SECRET absente', { status: 503 })
+
+  // Le corps BRUT d'abord — voir signatureValide.
+  const brut = await req.text()
+  if (!signatureValide(brut, req.headers.get('stripe-signature'), secret)) {
+    // Pas de détail dans la réponse : on ne renseigne pas qui sonde.
+    console.warn('[paiement] signature refusée')
+    return new Response('signature', { status: 400 })
+  }
+
+  let evt
+  try { evt = JSON.parse(brut) } catch { return new Response('corps', { status: 400 }) }
+  if (evt.type !== 'checkout.session.completed') return new Response('ignoré', { status: 200 })
+
+  const s = evt.data?.object || {}
+  if (s.payment_status !== 'paid') return new Response('non payé', { status: 200 })
+
+  const journal = getStore('paiements')
+  // ⚠️ IDEMPOTENCE : Stripe REJOUE ses webhooks jusqu'à obtenir un 2xx, et il
+  // arrive qu'il en envoie deux pour un seul événement. Sans ce garde, on
+  // enverrait deux fois le fichier — ou on commanderait deux affiches.
+  const cle = `session/${s.id}`
+  if (await journal.get(cle)) return new Response('déjà traité', { status: 200 })
+
+  const commande = {
+    session: s.id,
+    payeLe: new Date().toISOString(),
+    centimes: s.amount_total,
+    devise: s.currency,
+    email: s.customer_details?.email || '',
+    pays: s.customer_details?.address?.country || '',
+    article: s.metadata?.article || '',
+    livrable: s.metadata?.livrable || '',
+    format: s.metadata?.format || '',
+    retour: s.metadata?.retour || '',
+    livree: false,
+  }
+  // On écrit AVANT d'envoyer quoi que ce soit : si l'email échoue, la commande
+  // existe et se rattrape à la main. L'inverse perdrait la trace d'un paiement.
+  await journal.setJSON(cle, commande)
+
+  const resend = process.env.RESEND_API_KEY
+  if (resend && commande.email) {
+    try {
+      await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${resend}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          from: process.env.SHIBU_MAIL_EXPEDITEUR || 'ShibuMap <affiche@shibumap.com>',
+          to: [commande.email],
+          subject: 'Ton affiche ShibuMap',
+          text: commande.livrable === 'impression'
+            ? 'Merci — ton affiche part à l’impression. Tu recevras le suivi dès qu’elle est expédiée.'
+            : 'Merci — ton fichier d’impression est prêt. Le lien de téléchargement suit dans ce message.',
+        }),
+      })
+    } catch (err) {
+      // Un email raté ne doit PAS renvoyer une erreur à Stripe : il rejouerait
+      // l'événement, et on se retrouverait à traiter deux fois une commande
+      // dont le seul défaut est un mail non parti.
+      console.error('[paiement] email non envoyé :', err?.message)
+    }
+  }
+
+  return new Response('ok', { status: 200 })
+}
+
+// ⚠️ Netlify parse le corps par défaut, ce qui DÉTRUIRAIT la signature. Cette
+// configuration lui dit de nous laisser le flux brut.
+export const config = { path: '/.netlify/functions/paiement-webhook' }
