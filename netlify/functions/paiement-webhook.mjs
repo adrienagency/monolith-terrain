@@ -28,6 +28,7 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { getStore } from '@netlify/blobs'
+import { PAYS_EXCLUS } from './_paiement-catalogue.mjs'
 
 /**
  * Vérifie la signature Stripe. Pure, donc testable.
@@ -84,25 +85,52 @@ export default async (req) => {
   const cle = `session/${s.id}`
   if (await journal.get(cle)) return new Response('déjà traité', { status: 200 })
 
+  const pays = s.customer_details?.address?.country || ''
+  // ⚠️ Stripe Checkout n'offre AUCUN moyen de restreindre le PAYS DE
+  // FACTURATION par la config (seule l'adresse de LIVRAISON l'accepte, via
+  // shipping_address_collection). Un client depuis un pays exclu peut donc
+  // toujours payer. On ne bloque pas le paiement — l'argent est déjà pris —
+  // mais on bloque la LIVRAISON et on alerte Adrien : la conformité TVA/
+  // légale de ce pays n'est pas résolue, une régularisation manuelle
+  // (remboursement ou traitement à part) doit être décidée au cas par cas.
+  const bloque = PAYS_EXCLUS.includes(pays)
+
   const commande = {
     session: s.id,
     payeLe: new Date().toISOString(),
     centimes: s.amount_total,
     devise: s.currency,
     email: s.customer_details?.email || '',
-    pays: s.customer_details?.address?.country || '',
+    pays,
     article: s.metadata?.article || '',
     livrable: s.metadata?.livrable || '',
     format: s.metadata?.format || '',
     retour: s.metadata?.retour || '',
     livree: false,
+    bloque,
   }
   // On écrit AVANT d'envoyer quoi que ce soit : si l'email échoue, la commande
   // existe et se rattrape à la main. L'inverse perdrait la trace d'un paiement.
   await journal.setJSON(cle, commande)
 
   const resend = process.env.RESEND_API_KEY
-  if (resend && commande.email) {
+  if (resend && bloque) {
+    // Pas de mail client ici : la commande attend un arbitrage humain.
+    try {
+      await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${resend}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          from: process.env.SHIBU_MAIL_EXPEDITEUR || 'ShibuMap <affiche@shibumap.com>',
+          to: ['adrien@adrienagency.com'],
+          subject: `ShibuMap — commande bloquée (pays exclu : ${pays})`,
+          text: `Une commande vient d'être payée depuis un pays actuellement exclu (${pays}) — livraison suspendue en attendant ta décision (remboursement ou régularisation).\n\nSession : ${s.id}\nMontant : ${(commande.centimes / 100).toFixed(2)} ${commande.devise?.toUpperCase()}\nEmail client : ${commande.email}\nArticle : ${commande.article}`,
+        }),
+      })
+    } catch (err) {
+      console.error('[paiement] alerte pays exclu non envoyée :', err?.message)
+    }
+  } else if (resend && commande.email) {
     try {
       await fetch('https://api.resend.com/emails', {
         method: 'POST',
