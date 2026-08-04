@@ -33,6 +33,52 @@ export const PICTOS = {
 }
 export const PICTO_KEYS = ['ravito', 'eau', 'repas', 'dodo', 'wc', 'vue', 'col', 'secours', 'arrivee']
 
+// Le mot FRANÇAIS de chaque picto — pour tout ce qui doit être LU et pas
+// seulement vu (carnet de course : aria-label + title).
+// ⚠️ LA CLÉ INTERNE N'EST PAS UN LIBELLÉ. Le carnet posait `title="ravito"`,
+// `title="dodo"`, `title="wc"` : un lecteur d'écran énonçait le nom de
+// variable, et l'information « il y a de l'eau au prochain point » — celle qui
+// décide combien on boit maintenant — restait purement visuelle. Une clé
+// absente de cette table rend une chaîne vide : le picto reste muet plutôt que
+// d'annoncer un mot faux.
+export const LIBELLES_PICTOS = Object.freeze({
+  ravito: 'Ravitaillement',
+  eau: "Point d'eau",
+  repas: 'Repas chaud',
+  dodo: 'Base de vie',
+  wc: 'Toilettes',
+  vue: 'Point de vue',
+  col: 'Col',
+  secours: 'Poste de secours',
+  arrivee: 'Arrivée',
+  gare: 'Gare',
+  bus: 'Bus',
+  telepherique: 'Téléphérique',
+  metro: 'Métro',
+  aeroport: 'Aéroport',
+  bateau: 'Bateau',
+})
+
+// L'ORDRE D'IMPORTANCE POUR UN COUREUR — une seule source, ici, à côté des
+// deux tables qu'il ordonne.
+// ⚠️ LA TRONCATURE ÉTAIT ARBITRAIRE. Le carnet de course n'affiche que trois
+// pictos (hauteur FIXE : une rangée qui passe à la ligne se fait couper en
+// deux), et il gardait les trois PREMIERS de `suivant.pictos` — c'est-à-dire
+// l'ordre de SAISIE de l'organisateur (ui/studio.js pousse au fil des clics,
+// sans jamais trier). Une base de vie porte réalistement ravito + eau + repas
+// + dodo + wc + secours : le coureur pouvait lire « Toilettes, Point de vue,
+// Col » et ne jamais apprendre qu'il y a un poste de secours et de l'eau.
+// Trié, il perd les trois moins décisifs au lieu de trois au hasard — et le
+// rendu affiche un « +n » pour dire qu'il en manque.
+// Une clé absente de cette liste passe en dernier (voir rangPicto).
+export const ORDRE_PICTOS = Object.freeze([
+  'secours', 'eau', 'ravito', 'repas', 'dodo', 'wc',
+  'arrivee', 'col', 'vue',
+  'gare', 'bus', 'telepherique', 'metro', 'aeroport', 'bateau',
+])
+const RANGS = new Map(ORDRE_PICTOS.map((k, i) => [k, i]))
+export const rangPicto = (cle) => (RANGS.has(cle) ? RANGS.get(cle) : ORDRE_PICTOS.length)
+
 const CART_H = 26 // hauteur fixe d'un cartouche (px) — pas de mesure DOM
 const CHIP_H = 18
 

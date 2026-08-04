@@ -13,12 +13,26 @@ export function snapToKm(cumKm, km) {
 
 // D+/D- avec hystérésis : on n'accumule un segment que quand le cumul depuis
 // le dernier point de bascule dépasse le seuil (le bruit DEM ne compte pas)
-export function ascentStats(eles, { hysteresis = 8 } = {}) {
+//
+// ⚠️ `debut`/`fin` SONT DES BORNES, PAS UN slice(). Le carnet de course
+// (carnet-course.js) appelle ceci à CHAQUE IMAGE de lecture pour le « D+ qui
+// reste » : écrit `ascentStats(eles.slice(idx))`, ça allouerait un tableau de
+// 10 000 flottants soixante fois par seconde — 600 000 copies/s pour un
+// chiffre qui bouge de quelques mètres. Les bornes coûtent deux entiers.
+// Le BALAYAGE, lui, reste O(n) et c'est irréductible : l'hystérésis fait
+// dépendre le résultat du point de DÉPART, donc aucun cumul partiel ne peut
+// être précalculé une fois pour toutes (un « D+ restant » tiré d'une somme
+// suffixe mentirait aux abords des seuils). C'est l'allocation qu'on
+// supprime, pas la boucle — et c'est l'allocation qui coûtait.
+export function ascentStats(eles, { hysteresis = 8, debut = 0, fin = null } = {}) {
   let dplus = 0
   let dminus = 0
   if (!eles?.length) return { dplus, dminus }
-  let ref = eles[0]
-  for (let i = 1; i < eles.length; i++) {
+  const dernier = eles.length - 1
+  const a = Math.max(0, Math.min(Math.trunc(debut) || 0, dernier))
+  const b = fin == null ? dernier : Math.max(a, Math.min(Math.trunc(fin), dernier))
+  let ref = eles[a]
+  for (let i = a + 1; i <= b; i++) {
     const d = eles[i] - ref
     if (d >= hysteresis) { dplus += d; ref = eles[i] }
     else if (d <= -hysteresis) { dminus += -d; ref = eles[i] }

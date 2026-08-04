@@ -33,7 +33,10 @@ import { createGoto, geocode, mainParts } from './goto.js'
 import { frameTrack } from './gpx.js'
 import { GpxLayerManager } from './gpx-layers.js'
 import { buildRaceLabels } from './race-labels.js'
+import { buildCourseBar } from './ui/course-bar.js'
 import { snapToKm, ascentStats, parseRace } from './race-model.js'
+import { carnetALaLigne, resumeParcours } from './carnet-course.js'
+import { lisserChamps, decroissant } from './lissage.js'
 import { SPORTS, DEFAULT_SPORT, sanitizeSvgMarkup, isValidIconDataUrl, rasterizeToCanvas } from './ui/sport-icons.js'
 import { worldToLatLon, latLonToWorld, parseLatLon, sphereToLatLon, R_GLOBE } from './geo.js'
 import { fetchTransports } from './transports.js'
@@ -4405,6 +4408,248 @@ const raceLabels = buildRaceLabels({
   },
 })
 
+// ---- La barre course : plein écran, hauteur fixe, seule survivante à
+// l'écran pendant la lecture d'un tracé — voir syncCourseBarMode() plus bas
+// pour l'entrée/sortie de mode (déclenchée par gpxLayer.isPlaying(), pas par
+// les call sites d'engage/disengageGpxFollow, pour couvrir aussi la fin de
+// lecture automatique et le bouton ✕ du profil). Le Carnet (droite) et le
+// profil de gpx.js (gauche, RÉUTILISÉ tel quel — voir syncCourseBarMode)
+// vivent tous les deux dedans, plus de carte flottante séparée.
+const courseBar = buildCourseBar({
+  // ⚠️ DANS body, PAS DANS #app — et c'est structurel, pas cosmétique.
+  // `#app` porte la règle `#app, #app canvas { width: 100vw; height: 100vh }`
+  // (style.css) pour la scène 3D. Or la barre ACCUEILLE le profil GPX, qui
+  // est un <canvas> : posée dans #app, ce canvas héritait de 100vw/100vh par
+  // un sélecteur d'ID imbattable en spécificité, et débordait sa zone
+  // (constaté le 2026-08-04 : canvas à 1014 px dans un panneau de 344 px).
+  // La barre est du chrome d'interface : sa place est à côté de la scène.
+  container: document.body,
+  onTogglePlay: () => togglePlay(),
+  onQuit: () => quitterModeCourse(),
+  getSpeed: () => params.gpxFollowSpeed,
+  setSpeed: (v) => { params.gpxFollowSpeed = v },
+  getCameraRig: () => (drone.active ? drone : null),
+  isPlaying: () => gpxLayer.isPlaying?.() ?? false,
+})
+// Les chiffres de lecture sont LISSÉS avant d'atteindre le Carnet — une
+// valeur qui saute à 60 im/s ne se lit pas (demande Adrien, « moyennée pour
+// être lisible »). État de lissage tenu ici (pas dans carnet-course.js, qui
+// reste un pur formateur sans notion de temps).
+let _carnetLisse = {}
+let _carnetHorloge = 0
+// le D+ restant ne remonte pas tant qu'on avance : on garde le dernier vu ET
+// l'index auquel il a été vu, parce qu'une tête de lecture qui RECULE (relance,
+// saut dans le profil) doit pouvoir le faire remonter — voir plus bas.
+let _dplusVu = null
+let _dplusIdx = -1
+params.onHoverIndex = (i) => {
+  const lay = gpxLayer.activeLayer
+  const track = lay?.gpx?.track
+  if (i < 0 || !track?.world || lay?.visible === false || lay?.showRaceInfo === false) {
+    courseBar.carnet.update(null)
+    _carnetLisse = {}
+    _dplusVu = null
+    _dplusIdx = -1
+    return
+  }
+  // ⚠️ LES ALTITUDES DU RELIEF, PAS CELLES DU FICHIER. `p.ele` est null sur
+  // tout GPX sans balise <ele> (tracés dessinés à la main, exports d'éditeurs
+  // de parcours) : un `p.ele || 0` mettait 0 m partout, donc pente +0,0 %,
+  // D+ 0 m et bande toute verte À VIE — pendant que le profil altimétrique,
+  // dans la même barre, affichait le vrai relief tiré du DEM. Deux vérités
+  // contradictoires côte à côte. _elevations() est CE que dessine le profil.
+  // ⚠️ ET IL RESTE UN « 0 » DANS _elevations() — assumé, pas oublié. Sa
+  // dernière ligne rend 0 quand il n'y a NI p.ele NI DEM. Ce carnet ne peut
+  // pas l'atteindre : `track.world` n'est écrit que par rebuild(), qui sort
+  // avant s'il n'y a pas de DEM, et la garde ci-dessus exige `track.world`.
+  // Autrement dit, si on est ici, un DEM a drapé la trace. Faire rendre NaN à
+  // _elevations() serait plus honnête dans l'absolu, mais ce tableau alimente
+  // aussi _trackColors() (Math.min sur NaN → rampe entière NaN), _drawProfile()
+  // (eMin/eMax NaN → plus rien de dessiné) et buildFlightCurve() : on ne change
+  // pas la valeur de repli de quatre consommateurs pour une fenêtre que le
+  // cinquième ne peut pas voir. Ce qui EST corrigé, c'est l'aval : entier() et
+  // signe1() (carnet-course.js) rendent un tiret cadratin sur une valeur non
+  // finie, au lieu d'écrire « 0 m » avec l'aplomb d'une mesure.
+  const eles = lay.gpx._elevations()
+  const brut = carnetALaLigne(
+    // trkPoints : le tableau BRUT, passé par référence — le carnet n'y lit que
+    // l'horodatage de chaque point (durée restante d'après la trace).
+    { cumKm: track.cumKm, eles, waypoints: raceState.waypoints, trkPoints: track.points },
+    i,
+  )
+  if (!brut) { courseBar.carnet.update(null); return }
+  const maintenant = performance.now() / 1000
+  const dt = _carnetHorloge ? maintenant - _carnetHorloge : 0
+  _carnetHorloge = maintenant
+  // ⚠️ ON NE LISSE QUE LA PENTE, et c'est tout l'inverse d'une économie.
+  // Le lissage est une moyenne mobile : il n'a de sens que sur une grandeur
+  // CONTINUE et bruitée. La pente l'est (elle tremble d'une image à l'autre).
+  // Les autres ne le sont pas, et les lisser produisait des mensonges :
+  //   · `dplusProchain` repart de haut à chaque point franchi → l'affichage
+  //     RAMPERAIT vers la nouvelle valeur pendant que le nom du point, lui, a
+  //     déjà basculé. (Le commentaire d'avant nommait ici un champ `dplus` qui
+  //     n'existe dans aucun objet rendu par carnetALaLigne : c'était le nom de
+  //     l'ancien D+ accumulé, supprimé depuis. Un commentaire faux coûte plus
+  //     cher qu'un bug — celui-là justifiait une décision par un champ mort.)
+  //   · `kmAvantSuivant` saute à l'écart suivant → le NOM du point basculait
+  //     instantanément pendant que la distance montait depuis 0 : « Refuge,
+  //     dans 0,4 km » affiché alors qu'il est à 5 km.
+  //   · `km` et `restant` sont un odomètre : lissés, ils retardent sur la
+  //     tête de lecture et contredisent l'étiquette dessinée dans le profil.
+  // ⚠️ ET ON REND CE QUE lisserChamps REND, sans refusionner sur `brut` : sa
+  // sortie part déjà de {...cible}, donc un champ redevenu null (plus de
+  // point suivant) le RESTE — un merge ressuscitait la dernière distance.
+  _carnetLisse = lisserChamps(_carnetLisse, brut, dt, 0.4, ['pente'])
+  // ⚠️ LE SEUL AUTRE NOMBRE VISIBLE QUI TREMBLE : le D+ RESTANT. Il n'est pas
+  // monotone en `i` — l'hystérésis d'ascentStats() fait dépendre le résultat
+  // du point de DÉPART (race-model.js) — donc il peut osciller de quelques
+  // mètres d'une image à l'autre, sur un chiffre de 17 px qu'on lit en
+  // courant. Le lisser mentirait (une moyenne mobile le laisse REMONTER) ;
+  // on force la décroissance, qui est la vérité physique : ce qui reste à
+  // monter ne remonte pas tant qu'on avance. La demande d'Adrien (« la valeur
+  // est moyennée pour être lisible ») portait sur ce qu'on VOIT — et la pente,
+  // seule lissée jusqu'ici, n'est plus affichée nulle part.
+  // Une tête qui RECULE (relance, clic dans le profil) doit pouvoir le faire
+  // remonter : le plancher se réarme dès que l'index n'avance plus.
+  if (i <= _dplusIdx) _dplusVu = null
+  _dplusIdx = i
+  _dplusVu = decroissant(_dplusVu, _carnetLisse.dplusRestant)
+  _carnetLisse.dplusRestant = _dplusVu
+  courseBar.carnet.update(_carnetLisse)
+}
+
+// Entrée/sortie du mode course : décidée sur gpxLayer.isPlaying() (pas les
+// call sites d'engage/disengage — ceux-ci ne couvrent pas la fin de lecture
+// automatique ni le ✕ du profil), et resynchronisée à CHAQUE image tant
+// qu'on lit : un parcours en plusieurs étapes change de calque actif EN
+// PLEINE LECTURE (onTrackTransition ci-dessus), donc le profil à embarquer
+// peut changer sans jamais repasser par « lecture arrêtée puis relancée ».
+// ⚠️ LE MODE COURSE N'EST PAS « EN TRAIN DE LIRE ». Première version : le
+// mode suivait gpxLayer.isPlaying(), donc METTRE EN PAUSE repliait toute la
+// barre, rendait les panneaux, débrayait la caméra — le bouton lecture était
+// un second bouton Quitter, et l'arrivée (auto-pause, gpx.js) éjectait le
+// coureur au moment précis où il veut lire son bilan. Le mode est donc une
+// INTENTION, posée par Lecture et retirée par Quitter (ou par la disparition
+// de la trace) ; isPlaying() ne décide plus que de l'icône du bouton.
+let _courseDemandee = false
+let _enModeCourse = false
+let _profilEmbarque = null
+// ce qui avait le focus AVANT que le mode course ne fasse disparaître toute
+// l'interface (display:none) : sans mémoire, en sortant on rend la main à un
+// bouton devenu invisible ou à <body>, et la tabulation repart du début du
+// document
+let _focusAvantCourse = null
+// mémo du dernier titre/résumé posés : setResume fait un innerHTML, le
+// rappeler à chaque image le referait soixante fois par seconde
+let _cbTitreVu = null
+let _cbResumeVu = null
+let _cbResumeHorloge = 0
+function quitterModeCourse() {
+  _courseDemandee = false
+  gpxLayer.pause()
+  disengageGpxFollow()
+  syncCourseBarMode()
+}
+function syncCourseBarMode() {
+  const profileEl = gpxLayer.activeLayer?.gpx?.profileEl
+  // ⚠️ L'ENTRÉE SE DÉDUIT DE LA LECTURE, ELLE NE SE POSE PAS À LA MAIN.
+  // Première version : `_courseDemandee = true` écrit dans togglePlay(). Mais
+  // la lecture se lance aussi depuis le panneau Parcours et la mini-barre
+  // (route-panel.js / mini-route.js appellent gpx.play() en direct) — par ces
+  // chemins-là, la barre n'apparaissait jamais. Toute lecture qui démarre
+  // ENTRE en course, quel que soit le bouton ; seule la sortie est explicite.
+  if (gpxLayer.isPlaying?.()) _courseDemandee = true
+  // plus de trace = plus de course, quel qu'ait été le souhait
+  if (!gpxLayer.activeLayer?.gpx?.track) _courseDemandee = false
+  const jouable = _courseDemandee
+
+  if (jouable) {
+    // le calque a changé (entrée en mode course, OU étape suivante d'un
+    // parcours en plusieurs tronçons) : le profil suit
+    if (profileEl !== _profilEmbarque) {
+      if (_profilEmbarque) { _profilEmbarque.classList.remove('cb-embedded'); document.body.appendChild(_profilEmbarque) }
+      if (profileEl) { profileEl.classList.add('cb-embedded'); courseBar.profileZone.appendChild(profileEl) }
+      _profilEmbarque = profileEl || null
+    }
+    // ⚠️ TITRE ET CHIFFRES NE SONT PAS ACCROCHÉS AU PROFIL. Ils l'étaient
+    // (rafraîchis seulement quand profileEl changeait de référence), et
+    // raceState.name arrive APRÈS le GPX sur un lien /r/<id> — le payload de
+    // course est poussé par bootInitialView, donc après l'entrée en mode
+    // course. La barre restait sur le nom de calque, ou sur « Parcours »,
+    // jusqu'à un changement d'étape : la demande n°7 d'Adrien servie par un
+    // titre faux. On les resynchronise à chaque image, avec une garde
+    // d'égalité bon marché — setResume fait un innerHTML.
+    const t = gpxLayer.activeLayer?.gpx?.track
+    const titre = raceState.name || t?.name || ''
+    if (titre !== _cbTitreVu) { _cbTitreVu = titre; courseBar.setTitle(titre) }
+    // ⚠️ LES ALTITUDES DU RELIEF, PAS CELLES DU FICHIER — même piège que le
+    // carnet, reproduit ici pendant soixante lignes. `t.points.map(p => p.ele
+    // || 0)` mettait 0 partout sur un GPX sans balise <ele> : la zone « le
+    // parcours » annonçait « D+ 0 m » et « Altitude 0–0 m » COLLÉS au profil
+    // altimétrique qui, lui, est dessiné depuis _elevations() (le DEM) et
+    // montre un vrai relief. Deux vérités contradictoires côte à côte, à
+    // vingt pixels l'une de l'autre.
+    // ⚠️ ET PAS À CHAQUE IMAGE — mais plus pour la raison qui était écrite ici.
+    // Le commentaire d'avant justifiait la garde par le coût de _elevations()
+    // et comptait « déjà appelé une fois par le profil et une fois par le
+    // carnet » : il y en avait QUATRE par image de lecture (setHover,
+    // _drawProfile appelé depuis setHover, ce carnet, _updateHead), donc le
+    // raisonnement était bon et la mesure fausse — et la conclusion « on garde
+    // deux appels » ne protégeait rien. _elevations() est désormais mémoïsé sur
+    // la couche (gpx.js) : les quatre appels sont gratuits.
+    // La garde reste, pour la SEULE raison qui vaut encore : setResume() fait
+    // un innerHTML, et ces chiffres sont FIGÉS (ils ne changent qu'à l'arrivée
+    // du DEM ou au changement de trace). Deux fois par seconde suffit à les
+    // rattraper, et la signature évite l'innerHTML quand rien n'a bougé.
+    const now = performance.now()
+    if (now - _cbResumeHorloge > 500) {
+      _cbResumeHorloge = now
+      const eles = gpxLayer.activeLayer?.gpx?._elevations?.()
+      const r = t && eles?.length ? resumeParcours(t.cumKm, eles) : null
+      const cle = r ? `${r.km}|${r.dplus}|${r.dminus}|${r.altMin}|${r.altMax}` : ''
+      if (cle !== _cbResumeVu) {
+        _cbResumeVu = cle
+        courseBar.setResume(r)
+      }
+    }
+    if (!_enModeCourse) {
+      _enModeCourse = true
+      _focusAvantCourse = document.activeElement
+      document.body.classList.add('ce-course-mode')
+      courseBar.show()
+    }
+    courseBar.tick()
+  } else if (_enModeCourse) {
+    _enModeCourse = false
+    courseBar.hide()
+    document.body.classList.remove('ce-course-mode')
+    if (_profilEmbarque) { _profilEmbarque.classList.remove('cb-embedded'); document.body.appendChild(_profilEmbarque); _profilEmbarque = null }
+    _cbTitreVu = null
+    _cbResumeVu = null
+    _cbResumeHorloge = 0
+    // rendre le focus là où on l'avait pris — la barre vient d'être rendue
+    // inerte, l'utilisateur clavier tabulerait sinon dans le vide
+    if (_focusAvantCourse?.isConnected) _focusAvantCourse.focus?.({ preventScroll: true })
+    else document.body.focus?.()
+    _focusAvantCourse = null
+  }
+}
+// Échap quitte le mode course — le reste de l'application en a l'habitude
+// (réglages, panneaux). Actif UNIQUEMENT en mode course : sans cette garde on
+// volerait la touche à tous les autres écrans.
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !_enModeCourse) return
+  e.preventDefault()
+  quitterModeCourse()
+})
+// ⚠️ DEUX VOIES D'APPEL, ET C'EST VOULU. Les COMMANDES (bouton lecture,
+// Quitter) appellent syncCourseBarMode() directement pour une réponse
+// immédiate : une boucle de rendu ralentie (onglet en arrière-plan,
+// gouverneur de perf, machine chargée) ferait sinon apparaître la barre
+// avec un retard visible sur un simple clic. tick() la rappelle par image
+// pour tout ce qui change SANS clic — fin de lecture automatique, passage
+// à l'étape suivante d'un parcours en plusieurs tronçons.
+
 // grave l'identité de la course sur les flancs du bloc (logo centré + infos
 // haut-droite, disposition « Hawaii ») — appelé à chaque mutation du studio
 // pousse une course (brouillon studio OU payload d'un lien partagé) dans
@@ -4415,11 +4660,16 @@ function syncRaceState(race) {
   const t = gpxLayer.activeLayer?.gpx?.track
   raceState.name = race.name
   raceState.logo = race.logo
+  // ⚠️ TRIÉS PAR KM, ICI ET UNE SEULE FOIS. Le studio pousse les points de
+  // passage dans l'ordre de SAISIE (studio.js : `waypoints.push`), et ni lui
+  // ni parseRace() ne trient. Un organisateur qui saisit « km 20 » puis
+  // « km 5 » cassait tout ce qui lit cette liste en la supposant ordonnée :
+  // point actuel faux, point suivant faux, distance restante négative.
   raceState.waypoints = (race.waypoints || []).map((w) => {
     const idx = t ? snapToKm(t.cumKm, w.km) : null
     const ele = t?.points?.[idx]?.ele
     return { ...w, idx, alt: w.alt ?? (Number.isFinite(ele) ? Math.round(ele) : null) }
-  })
+  }).sort((a, b) => (a.km ?? 0) - (b.km ?? 0))
   raceState.transports.removed = [...(race.transports?.removed || [])]
   // traits verticaux des points de passage sur le profil (gpx.js)
   const g = gpxLayer.activeLayer?.gpx
@@ -4894,7 +5144,9 @@ function togglePlay() {
     } else {
       gpxLayer.play()
       engageGpxFollow()
+      _courseDemandee = true // lancer une lecture, c'est entrer en course
     }
+    syncCourseBarMode() // réponse immédiate au clic — voir la note sur les deux voies
     return
   }
   if (cameraAuto.active) cameraAuto.stop()
@@ -4911,6 +5163,11 @@ function stopPlay() {
   cameraAuto.stop()
   gpxLayer?.stop()
   camera.up.set(0, 1, 0)
+  // Stop (bouton du panneau, Échap) ≠ Pause : on QUITTE la course, on ne la
+  // suspend pas. Sans ça la barre resterait posée sur une lecture remise à
+  // zéro, et le panneau Parcours — d'où vient le bouton — resterait masqué.
+  _courseDemandee = false
+  syncCourseBarMode()
 }
 
 // ------------------------------------------------------------------ GUI
@@ -7394,7 +7651,7 @@ history.reset()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { boats, raceLabels, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, shots, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, pilote,
+window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, shots, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, pilote,
   // INTERRUPTEUR de la teinte d'interface : __exp.setUiTint(false) rend
   // l'interface neutre de v28.css, true la raccorde à la palette.
   setUiTint: (v) => { params.uiTint = v !== false; syncUiTheme() }, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,
@@ -7634,6 +7891,7 @@ function tick() {
   const dt = Math.min(dtBrut, 0.05)
   const t = clock.elapsedTime
 
+  syncCourseBarMode()
   updateCameraMotion(dt)
   // La fenêtre continue, juste après la caméra : le geste se projette sur les
   // axes de la caméra, donc il lui faut la caméra de CETTE image.

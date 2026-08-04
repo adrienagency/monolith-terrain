@@ -1,0 +1,676 @@
+/* La barre course — plein écran, hauteur FIXE.
+
+   PARTI PRIS : ce n'est pas un tableau de bord, c'est la page d'un carnet de
+   course. Le PROFIL est le sujet, il occupe la moitié de la barre et respire ;
+   les chiffres de la course se lisent EN TÊTE, sur la ligne du titre, comme le
+   sous-titre d'une carte ; les contrôles de lecture sont des outils, donc
+   discrets et sans couleur.
+
+   LA RÈGLE DE COULEUR, ÉCRITE CETTE FOIS D'APRÈS CE QUE FAIT LE CODE. Elle
+   disait « le carnet à droite est le seul endroit qui porte de la couleur
+   vive ; un seul accent, réservé à ce qui change » — et les deux moitiés
+   étaient fausses : la plus grande surface colorée de la barre était le
+   remplissage du profil en --ce-accent, c'est-à-dire la zone la plus STATIQUE,
+   pendant que le carnet portait une TROISIÈME famille (--cc-*). Deux familles
+   chromatiques, et une phrase qui n'en décrivait aucune. Le partage est
+   désormais :
+     · --ce-accent  = LA POSITION DE LECTURE, et rien d'autre : réticule du
+       profil, pastille de survol, repères des points franchis ;
+     · --cc-douce / -soutenue / -raide = LA PENTE, sémantique, dans le carnet
+       (bande des kilomètres à venir) et sur la barrière horaire (--cc-raide,
+       la seule donnée qui peut mettre hors course) ;
+     · tout le reste est en ENCRE, y compris l'aire sous la courbe du profil
+       (ink à 8 %, une ombre — pas une couleur).
+
+   La grammaire reprend celle des panneaux ShibuMap (verre, --ce-radius,
+   Bricolage Grotesque pour l'interface, mono pour les chiffres) et emprunte au
+   loader et aux cartouches de course le serif éditorial Rosarivo pour le titre.
+
+   ⚠️ TAILLES DE TEXTE : uniquement les paliers --ce-t-* de v28.css — Y COMPRIS
+      CELLES QUI ARRIVENT PAR LES COMPOSANTS. Cette phrase était fausse depuis
+      l'adoption de .ce-btn et .ce-seg-btn : le premier était en 12 px, le
+      second en 11,5 px, deux valeurs qui n'appartenaient à AUCUN palier. La
+      barre rendait donc 11 / 11,5 / 12 / 13 / 17 / 22 / 34, c'est-à-dire
+      quatre tailles dans une fourchette de 2 px — la « flaque » que v28.css
+      dit avoir asséchée, reconstituée par un autre chemin. Les deux composants
+      pointent désormais sur --ce-t-control (un palier, un rôle : le libellé
+      d'un contrôle), et la barre rend 11 / 12 / 13 / 17 / 22 / 34.
+      Une taille en px littéral dans CE fichier reste interdite (test).
+   ⚠️ ESPACEMENTS : le RYTHME (tout ce qui sépare deux blocs) ne connaît que
+      --ce-gap-tight (6) / --ce-gap-control (8) / --ce-gap-group (14) et
+      --cb-gutter (22) pour les MARGES DE ZONE. Le fichier inventait 1, 2, 3,
+      5, 6, 10, 13, 16, 20, 22, 24, 30 px — quatorze valeurs, donc aucun
+      rythme. Le plus large, 30 px, séparait trois éléments qui forment un
+      GROUPE et dépassait l'écart de la barre au bord de l'écran.
+      ⚠️ ET 22 EST UN JETON, PAS UN NOMBRE RECOPIÉ. Il l'était cinq fois, dont
+      une pour une relation qui n'a rien à voir (l'écart entre deux chiffres de
+      la tête, qui est du rythme de GROUPE : --ce-gap-group). Répété, il ne
+      disait plus ce qu'il désignait.
+      Restent des valeurs de 1 à 3 px : ce ne sont PAS des espacements de mise
+      en page mais du crénage optique entre un nombre et son unité (« 42,3 km »
+      doit se lire comme un seul objet). Elles n'ont rien à faire dans
+      l'échelle de rythme, et les y forcer écarterait l'unité de son chiffre.
+*/
+
+.cb-bar {
+  /* ⚠️ LE JETON EST DÉCLARÉ ICI, PAS SOUS-ENTENDU. `height: var(--cb-body-h,
+     152px)` renvoyait à une variable qui n'existait NULLE PART dans src/ :
+     seule la valeur de repli s'appliquait, et le commentaire de
+     carnet-course.css y renvoyait comme à un réglage existant. Déclaré, il
+     devient ce qu'il prétendait être : un réglage, surchargeable par media
+     query (voir la règle max-height plus bas). */
+  /* 164 et pas 152 : le carnet compte 128 px de contenu (son budget est écrit
+     ligne par ligne en tête de carnet-course.css) plus 2×14 px de marge de
+     zone, soit 156 — à 152 il était rogné, et un rognage dans une boîte
+     `justify-content: center` mange le haut ET le bas. 8 px de jeu.
+     Le profil, lui, encaisse le gain : 136 px de canvas au lieu de 83. */
+  --cb-body-h: 164px;
+  /* LA MARGE DE ZONE — un seul nombre, un seul rôle : l'air entre le bord
+     d'une zone et son contenu. Il vivait en dur à cinq endroits. */
+  --cb-gutter: 22px;
+  /* L'ENCRE DES LIBELLÉS. --ce-muted (encre à 55 %) composée sur
+     --ce-glass-strong (80 %) donne ~3,8:1 — sous les 4,5:1 de WCAG AA, et
+     encore moins en vrai puisque les 20 % restants sont la SCÈNE 3D, dont on
+     ne sait rien. À 72 % on repasse au-dessus du seuil.
+     ⚠️ DÉCLARÉ SUR .cb-bar ET PAS SUR :root, exprès. Un color-mix() posé dans
+     :root fige l'--ce-ink de :root : ni body.dark ni la teinte de palette
+     (main.js écrit les jetons sur document.body.style) ne l'atteindraient —
+     c'est exactement le piège documenté pour --ce-shadow dans v28.css.
+     Calculé sur la barre, il suit l'encre d'où qu'elle vienne. */
+  --ce-muted-fort: color-mix(in srgb, var(--ce-ink) 72%, transparent);
+
+  position: fixed;
+  /* ⚠️ 14 EN DUR ÉTAIT --ce-gap-group, et le fichier se contredisait à 400
+     lignes d'écart : la même règle, dans la media query 680 px, écrivait déjà
+     var(--ce-gap-control) pour ces trois propriétés exactes. */
+  left: var(--ce-gap-group);
+  right: var(--ce-gap-group);
+  bottom: var(--ce-gap-group);
+  z-index: 70;
+  overflow: hidden;
+  /* ⚠️ LE VERRE VIENT DE .ce-glassbox (v28.css), PLUS D'UNE COPIE LOCALE. Les
+     cinq propriétés (fond, backdrop-filter, bordure, rayon, ombre) étaient
+     recopiées ici, et deux avaient DÉRIVÉ : blur(22px) saturate(1.6) contre
+     blur(20px) saturate(1.5) au système. C'est le péché que ce fichier
+     condamne quatre-vingts lignes plus bas pour les trois boutons (« CES TROIS
+     CONTRÔLES SONT CEUX DU SYSTÈME, PLUS DES SOSIES »), commis un cran
+     au-dessus, sur le conteneur — et visible dans la MÊME image, puisque le
+     panneau de profil qu'elle héberge porte, lui, .ce-glassbox (gpx.js).
+     La classe est posée en JS (course-bar.js). */
+  /* ⚠️ LE RETARD DE `visibility` VIT SUR .cb-hidden, PAS ICI. C'est l'état
+     VISÉ qui fournit la transition : à l'aller (on cache) il faut retenir
+     visibility le temps que la barre glisse dehors, au retour (on montre) il
+     la faut IMMÉDIATE — sans quoi la barre monte à l'écran en restant
+     invisible pendant 0,34 s. */
+  transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease,
+    visibility 0s linear 0s;
+}
+/* LA SEULE DIFFÉRENCE ASSUMÉE avec le verre du système : le verre FORT. Ce
+   panneau porte le contenu le plus dense de l'écran par-dessus un rendu 3D qui
+   bouge — 62 % d'opacité n'y tient pas la lecture d'un chiffre de 11 px.
+   ⚠️ ET LE SÉLECTEUR EST DOUBLE, EXPRÈS. Cette feuille est évaluée AVANT
+   v28.css (course-bar.js est importé bien plus haut que v28.css dans main.js) :
+   à spécificité égale, `.ce-glassbox { background: var(--ce-glass) }` gagnerait
+   et le verre fort sauterait en silence. Même piège, même parade que pour
+   l'encre des boutons caméra plus bas. */
+.cb-bar.ce-glassbox { background: var(--ce-glass-strong); }
+.cb-bar.cb-hidden {
+  transform: translateY(calc(100% + 22px));
+  opacity: 0;
+  pointer-events: none;
+  /* ⚠️ pointer-events NE BLOQUE PAS LE CLAVIER. La barre est construite une
+     fois au démarrage dans <body> : hors mode course, ses treize boutons
+     (Replier, Quitter, Lecture, 4 vitesses, 6 caméra) restaient tabulables et
+     activables à Entrée, et un lecteur d'écran annonçait en permanence les
+     groupes « Vitesse de lecture » et « Caméra » sur des écrans où aucune
+     course n'existe. visibility:hidden les retire de l'arbre ; `bar.inert`
+     (course-bar.js) ferme la porte côté JS, pour les navigateurs qui
+     laisseraient passer un focus programmatique. */
+  visibility: hidden;
+  transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease,
+    visibility 0s linear 0.34s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cb-bar { transition: opacity 0.15s linear, visibility 0s linear 0s; }
+  .cb-bar.cb-hidden { transform: none; transition: opacity 0.15s linear, visibility 0s linear 0.15s; }
+}
+
+/* ------------------------------------------------------------------ tête */
+/* TROIS COLONNES : le titre, les chiffres de la course, les commandes.
+   Les chiffres vivaient sous le profil, dans le corps. Résultat : le profil —
+   « le sujet », censé respirer — disposait de 57 px d'amplitude verticale pour
+   dessiner 2 000 m de dénivelé sur 770 px de large (rapport 13,5:1, soit 35 m
+   par pixel), pendant que cette tête de 40 px était une bande morte avec un
+   titre à gauche, deux boutons à droite et un grand vide au milieu. Déplacés
+   ici, ils rendent 41 px au profil ET remplissent la tête. */
+.cb-head {
+  display: flex;
+  /* ⚠️ BASELINE, PAS CENTER — et c'est le défaut que ce fichier dit avoir
+     corrigé DANS les chiffres, quatre-vingt-dix lignes plus bas (« les trois
+     nombres ne posaient pas sur la même ligne. C'est le genre de décalage
+     qu'on ne sait pas nommer mais qui fait dire c'est moche »). L'alignement
+     avait été réglé à l'intérieur du groupe et laissé faux ENTRE les groupes,
+     sur la seule ligne que l'œil lit en premier : le titre (boîte de 22 × 1,18
+     + 0,12em ≈ 28,6 px) et le <dl> des chiffres (≈ 17 px) étaient centrés
+     INDÉPENDAMMENT dans les 40 px, donc leurs lignes de base ne pouvaient pas
+     coïncider — le padding-bottom de 0,12em du titre suffit à lui seul à le
+     remonter d'environ 1,3 px, avant même de compter l'écart d'ascendante
+     entre un serif à 22 px et un mono à 13. Les commandes, elles, n'ont pas de
+     ligne de base à partager : elles se recentrent (align-self plus bas). */
+  align-items: baseline;
+  gap: var(--ce-gap-group);
+  /* ⚠️ min-height ET PAS height. La tête était bloquée à 40 px pendant que la
+     branche tactile du système (v28.css, @media pointer: coarse) porte
+     .ce-icon-btn à 44×44 et .ce-btn à 34 : sur un téléphone en paysage, où les
+     conditions coarse ET max-height:520 sont vraies EN MÊME TEMPS, le bouton
+     Replier faisait 44 px dans une tête de 32 — il débordait de 6 px en haut
+     et en bas, chevauchait le filet et le sommet du profil. Rien ne
+     l'attrapait : le test WCAG ne lit que les déclarations de base de v28.css
+     et n'entre jamais dans le bloc coarse. La tête n'a aucune raison d'être
+     plus rigide que la barre ; la hauteur reste DÉCIDÉE (voir le bloc coarse
+     en fin de fichier), elle n'est simplement plus subie. */
+  min-height: 40px;
+  padding: 0 var(--ce-gap-control) 0 var(--cb-gutter);
+  border-bottom: 1px solid var(--ce-hairline);
+}
+.cb-title {
+  /* Rosarivo : le serif que ShibuMap réserve déjà au NOM DE LA COURSE
+     (écran de chargement, cartouche du profil). C'est ce qui distingue « une
+     course » d'« un panneau d'outils » au premier coup d'œil. */
+  font-family: 'Rosarivo', Georgia, serif;
+  font-weight: 400;
+  /* ⚠️ LA TÊTE N'AVAIT PAS DE PREMIER RANG. Le titre était en --ce-t-num,
+     c'est-à-dire à la taille EXACTE des quatre valeurs de course d'à côté —
+     mais celles-ci sont en mono, graisse 600, tabulaires. À taille égale, un
+     mono gras l'emporte optiquement sur un serif en 400 : le nom de la course,
+     seul geste éditorial de l'écran et demande n°7 d'Adrien, était l'élément
+     le plus FAIBLE de sa propre ligne, face à quatre blocs de données. Neuf
+     textes du même rang dans 40 px. Le palier --ce-t-title existe pour ça et
+     pour rien d'autre (v28.css). La tête l'absorbe : 22 × 1,18 + 0,12em ≈ 29
+     px pour 40 px de haut. Le client a demandé que les GROS chiffres soient
+     gros, pas que le titre soit petit. */
+  font-size: var(--ce-t-title);
+  /* ⚠️ 1 COUPAIT LES JAMBAGES, et le dépôt avait DÉJÀ payé ce bug (v28.css,
+     .ce-hubq : « le g de design était tranché net », capture Adrien). Le
+     coupable est le couple interlignage serré + overflow:hidden : en Rosarivo
+     la descendante plonge bas, il lui faut 1.18 ET une réserve dessous. Sans
+     ça, « Trail du Puy », « Grand Raid », « Marathon de Gap » — la majorité
+     des noms français — sortaient rognés. La tête absorbe les ~3 px. */
+  line-height: 1.18;
+  padding-bottom: 0.12em;
+  letter-spacing: 0.005em;
+  margin: 0;
+  color: var(--ce-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* ⚠️ LE TITRE ABSORBE TOUT LE DÉFICIT, PARCE QU'IL EST LE SEUL À SAVOIR SE
+     TRONQUER PROPREMENT. Titre et chiffres étaient tous deux en `flex: 0 1
+     auto` : ils rétrécissaient ENSEMBLE, proportionnellement. Le titre
+     dégradait bien (ellipsis ci-dessus) ; les chiffres, eux, n'ont pas
+     d'ellipse — leurs enfants sont en `white-space: nowrap` — donc c'était
+     l'`overflow: hidden` du <dl> qui tranchait, à la limite d'un glyphe.
+     « Sommet 2 380 m » devenait « Sommet 2 38 », qui se lit comme un nombre
+     valide. Il suffit d'un nom de course français ordinaire (« Ultra-Trail du
+     Mont-Blanc — Parcours Intégral de la Haute-Route ») et d'une fenêtre entre
+     1100 et ~1300 px. Un chiffre tranché est une faute visuelle terminale.
+     Les chiffres sont désormais en `flex: none` : ils gardent leur largeur
+     naturelle et disparaissent palier par palier via les media queries déjà
+     écrites, ce qui est le comportement DÉCIDÉ.
+     ⚠️ Le plancher est à 6ch et pas à 0 : au-delà, le titre finirait par
+     pousser les chiffres hors du <dl>, mais un plancher trop haut pousserait
+     QUITTER hors de la barre (la tête n'a pas d'overflow, .cb-bar oui) — 6ch
+     tient dans tous les paliers, l'addition est refaite dans le responsive. */
+  min-width: 6ch;
+  flex: 0 1 auto;
+}
+.cb-title.cb-empty { color: var(--ce-muted-fort); }
+.cb-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ce-gap-tight);
+  flex: none;
+  margin-left: auto;
+  /* deux boutons n'ont pas de ligne de base à partager avec un titre : la tête
+     étant passée en `align-items: baseline`, ils se recentrent explicitement
+     (sinon leur propre ligne de base — le texte de « Quitter » — irait
+     s'aligner sur celle du titre et le bouton pendrait sous le filet) */
+  align-self: center;
+}
+
+/* ⚠️ CES TROIS CONTRÔLES SONT CEUX DU SYSTÈME, PLUS DES SOSIES.
+   v28.css définit .ce-icon-btn (32×32, rayon 10, hover --ce-hover, svg 16),
+   .ce-seg / .ce-seg-btn (rail --ce-hover, rayon 10/8, hauteur 26, puce active
+   sur --ce-glass-strong) et .ce-btn (hauteur 30, rayon 10, bordure hairline,
+   12 px / 600), et kit.js expose les trois usines. La barre les redessinait à
+   la main, avec des valeurs qui avaient dérivé sur CHAQUE axe : rail à 14 % au
+   lieu de 5 %, rayon 999 au lieu de 10, hauteur 30 au lieu de 26, puce sur
+   --ce-porcelain au lieu de --ce-glass-strong, 13 px mono au lieu de 11,5 px
+   d'interface, et un Quitter en graisse 400 quand TOUS les boutons texte du
+   produit sont en 600. Cinq différences pour le seul segmenté, aucune décidée.
+   Résultat à l'écran : la barre était la seule surface de ShibuMap dont les
+   contrôles ne ressemblaient à aucun autre écran du produit.
+   Ne reste ici que ce qui est une VRAIE différence de rôle — voir chaque bloc.
+   WCAG 2.5.8 (24×24) : .ce-icon-btn fait 32, .ce-seg-btn 26, .ce-btn 30.
+   ⚠️ ET CHAQUE SURCHARGE EST QUALIFIÉE PAR .cb-bar, exprès. Cette feuille est
+   évaluée AVANT v28.css (course-bar.js est importé ligne 36 de main.js,
+   v28.css ligne 160, et l'ordre des CSS dans le bundle suit l'ordre
+   d'évaluation des modules) : à spécificité égale, c'est .ce-icon-btn qui
+   gagnerait, et l'encre atténuée des boutons caméra sauterait en silence. */
+.cb-bar .cb-collapse { color: var(--ce-muted-fort); }
+.cb-bar .cb-collapse:hover { color: var(--ce-ink); }
+/* ⚠️ QUITTER EST LA SEULE PORTE DE SORTIE d'un mode qui a fait disparaître
+   toute l'interface. C'était l'élément le plus FAIBLE de la composition :
+   12 px, gris à 55 %, sans fond, sans bordure — pendant que le bouton lecture,
+   qui ne fait qu'une pause, était l'objet au contraste maximal de l'écran.
+   .ce-btn lui rend son contour et son encre pleine sans en faire une action
+   colorée (ce n'est pas une action de publication). */
+.cb-quit { letter-spacing: 0.01em; }
+.cb-collapse:focus-visible, .cb-quit:focus-visible,
+.cb-play:focus-visible, .cb-speed-btn:focus-visible, .cb-cam-btn:focus-visible {
+  outline: 2px solid var(--ce-accent);
+  outline-offset: 2px;
+}
+/* le chevron est un TRACÉ, pas un carré à deux bordures tourné à 45° — voir
+   ICONE_CHEVRON dans course-bar.js et la note sur les icônes bricolées */
+.cb-collapse svg { transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1); }
+.cb-collapsed .cb-collapse svg { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .cb-collapse svg { transition: none; } }
+
+/* les chiffres de la COURSE (figés) — pas ceux du carnet, qui défilent.
+   Libellé et valeur sur UNE ligne de base commune : empilés, .cb-alt était à
+   14 px quand les deux autres étaient à 17, et les trois nombres ne posaient
+   pas sur la même ligne. C'est le genre de décalage qu'on ne sait pas nommer
+   mais qui fait dire « c'est moche ». */
+.cb-chiffres {
+  display: flex;
+  align-items: baseline;
+  /* l'écart entre deux chiffres est du rythme de GROUPE, pas une marge de
+     zone : 22 (--cb-gutter) y était recopié pour une relation qui n'a rien à
+     voir avec celle qu'il désigne */
+  gap: var(--ce-gap-group);
+  margin: 0;
+  /* flex: none + plus d'overflow — voir la note de .cb-title : c'est LUI qui
+     absorbe le manque de place, et il n'y a donc plus rien à cacher ici */
+  flex: none;
+}
+.cb-chiffre {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ce-gap-tight);
+  min-width: 0;
+  white-space: nowrap;
+}
+.cb-chiffre dt {
+  font-size: var(--ce-t-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ce-muted-fort);
+}
+.cb-chiffre dd {
+  margin: 0;
+  font-family: var(--ce-mono);
+  font-weight: 600;
+  /* ⚠️ UN PALIER SOUS LES CHIFFRES VIVANTS, ET C'EST UNE DÉCISION DE RANG.
+     Ils étaient à 10,5 px, écrasés dans une ligne unique (reproche d'Adrien du
+     2026-08-04), puis remontés à --ce-t-num (17) — c'est-à-dire à la taille
+     EXACTE du D+ restant et de la barrière, qui vivent dans le carnet et
+     CHANGENT. Quatre chiffres figés à 17 px contre deux chiffres vivants à
+     17 px, et les figés PLUS HAUT dans la page, sur la ligne du titre, là où
+     l'œil atterrit en premier : la hiérarchie typographique disait qu'ils
+     comptent autant. Ils ne comptent pas autant — pour un coureur en course,
+     le D+ TOTAL est la donnée la moins actionnable de la barre (on la lit une
+     fois au départ), le D+ RESTANT est celle sur laquelle il règle son allure.
+     13 px reste largement lisible depuis un fauteuil pour une légende, et le
+     titre Rosarivo redevient le premier rang de la tête — ce que la note de
+     .cb-title réclame déjà. */
+  font-size: var(--ce-t-body);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--ce-ink);
+  white-space: nowrap;
+}
+/* ⚠️ UNE SEULE RECETTE POUR LE SUFFIXE D'UNITÉ, dans toute la barre. Le même
+   rôle sémantique — « ce nombre et son unité forment un seul objet » — était
+   écrit de TROIS façons : ici (11 px / 500 / 3 px), .cc-u (11 / 500 / 2 px) et
+   .cc-hero-pct (13 / 600 / 2 px). Le changement de TAILLE du héros est
+   argumenté (un suffixe accolé à un chiffre de 34 px doit peser plus) ; l'écart
+   de crénage 3 contre 2 et le saut de graisse 500 → 600 ne l'étaient nulle
+   part. Or l'en-tête de ce fichier défend justement ces 1-3 px comme du
+   crénage optique DÉCIDÉ : deux valeurs pour la même relation, ce n'est plus
+   une décision. Recette unique : palier d'unité, graisse 500, 2 px. */
+.cb-chiffre dd span {
+  font-size: var(--ce-t-unit);
+  font-weight: 500;
+  color: var(--ce-muted-fort);
+  margin-left: 2px;
+  letter-spacing: 0;
+}
+
+/* ------------------------------------------------------------------ corps */
+.cb-body {
+  display: flex;
+  align-items: stretch;
+  /* hauteur FIXE, jamais dérivée du contenu (demande Adrien : « la hauteur ne
+     varie pas constamment »). Le contenu s'y plie ; s'il ne rentre pas, c'est
+     le contenu qu'on réduit, pas la barre qu'on agrandit. */
+  height: var(--cb-body-h);
+  overflow: hidden;
+  transition: height 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* replié : hauteur zéro ET hors d'atteinte. Sans visibility, les boutons
+   vitesse/caméra restaient focusables dans une boîte de 0 px de haut —
+   `overflow: hidden` cache les pixels, pas le parcours clavier. */
+.cb-collapsed .cb-body { height: 0; visibility: hidden; }
+@media (prefers-reduced-motion: reduce) { .cb-body { transition: none; } }
+
+.cb-zone { min-width: 0; display: flex; }
+
+/* ----------------------------------------------------- zone 1 : LE PARCOURS */
+.cb-zone-parcours {
+  flex: 1 1 auto;
+  flex-direction: column;
+  padding: var(--ce-gap-group) var(--cb-gutter);
+  min-width: 0;
+}
+.cb-profil { flex: 1; min-height: 0; display: flex; }
+
+/* ------------------------------------------------------ zone 2 : LA LECTURE */
+/* pas de séparateur dur : un simple creux de fond suffit à détacher les
+   outils du contenu, sans découper la barre en trois boîtes.
+   ⚠️ ET CETTE FOIS LE CODE LE FAIT. La version d'avant écrivait exactement ce
+   commentaire, puis posait un fond teinté ET un border-left ET un border-right
+   juste en dessous : ceinture, bretelles, et une deuxième ceinture. À l'écran
+   on lisait boîte | boîte | boîte — précisément ce que le commentaire jurait
+   éviter. Dans un dépôt où un commentaire faux coûte plus cher qu'un bug,
+   c'était doublement fautif. Le creux seul suffit. */
+/* ⚠️ ET LE CREUX ÉPOUSE LES OUTILS, PAS LA COLONNE. Le fond teinté était posé
+   sur .cb-zone-lecture, donc sur les 164 px du corps, pour un contenu qui en
+   fait 72 (bouton lecture 46, ou pile vitesses 26+4 + écart 8 + caméra 32) :
+   il restait ~46 px de teinte morte au-dessus et autant en dessous, soit 56 %
+   de la colonne en aplat vide. C'est exactement la lecture « boîte
+   fonctionnelle » — un rectangle gris pleine hauteur dans lequel flottent de
+   petits boutons, entre un profil qui remplit sa zone et un carnet qui remplit
+   la sienne. Un creux de 164 px pour 72 px de contenu n'est pas un creux,
+   c'est une colonne. La teinte descend donc sur le GROUPE d'outils, et le vide
+   redevient du verre comme dans les deux zones voisines. */
+.cb-zone-lecture {
+  flex: 0 0 auto;
+  align-items: center;
+  padding: var(--ce-gap-group) var(--cb-gutter);
+}
+.cb-outils {
+  display: flex;
+  align-items: center;
+  gap: var(--ce-gap-group);
+  border-radius: var(--ce-radius);
+  padding: var(--ce-gap-control) var(--ce-gap-group);
+  /* --ce-hover, pas un color-mix local à 3,5 % : la barre avait quatre niveaux
+     de surface (3,5 / 5 / 7 / 14 %) dont deux improvisés hors système, et
+     3,5 % contre 5 % est indiscernable à l'œil. */
+  background: var(--ce-hover);
+}
+.cb-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ce-gap-control);
+  /* stretch, pas flex-start : la pilule des vitesses et la rangée caméra
+     (6 × 32 + 5 × 6 = 222 px) s'alignaient à gauche et laissaient un bord
+     droit en dents de scie. Étirée, la pilule partage ce bord avec la rangée
+     — et ses quatre boutons se partagent la largeur (.ce-seg-btn { flex: 1 }),
+     donc changer de vitesse ne fait pas bouger la pilule. */
+  align-items: stretch;
+}
+
+.cb-play {
+  width: 46px; height: 46px;
+  border-radius: 50%;
+  border: none;
+  /* 88 % et pas l'encre pleine : en mode sombre, un disque quasi blanc sur
+     verre noir écrase visuellement le chiffre héros de 34 px et le profil
+     entier. Il reste le point d'ancrage sans crever le verre. */
+  background: color-mix(in srgb, var(--ce-ink) 88%, transparent);
+  color: var(--ce-porcelain);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex: none;
+  transition: transform 0.14s ease;
+}
+/* le glyphe est un SVG centré sur (10,10) — plus de triangle en bordures ni de
+   pause en box-shadow décentrée de 2,4 px (voir course-bar.js) */
+.cb-play svg { width: 20px; height: 20px; display: block; }
+.cb-play:active { transform: scale(0.94); }
+@media (prefers-reduced-motion: reduce) { .cb-play { transition: none; } }
+
+/* .ce-seg / .ce-seg-btn font tout le reste. La SEULE différence légitime avec
+   le segmenté du système : ces libellés sont des NOMBRES (0,5× 1× 2× 4×), donc
+   mono et chasse fixe — sans quoi la pilule change de largeur en changeant de
+   vitesse. Le reste (rail, rayon, hauteur, puce active) est au système. */
+/* ⚠️ SEULE EXCEPTION ASSUMÉE au rail du système : .ce-seg est teinté en
+   --ce-hover, et la pilule vit maintenant DANS .cb-outils, lui aussi en
+   --ce-hover — le rail y disparaîtrait. --ce-track est le jeton de PISTE,
+   c'est exactement son rôle. Une différence décidée, pas une dérive. */
+.cb-bar .cb-speeds { background: var(--ce-track); }
+.cb-bar .cb-speed-btn {
+  font-family: var(--ce-mono);
+  font-variant-numeric: tabular-nums;
+}
+/* ⚠️ ET L'ENCRE DES TROIS VITESSES INACTIVES, QUI AVAIT ÉTÉ OUBLIÉE. Elles
+   héritaient de `.ce-seg-btn { color: var(--ce-muted) }`, c'est-à-dire
+   exactement le contraste que --ce-muted-fort a été déclaré pour corriger en
+   tête de ce fichier (~3,8:1 sur du verre, sous les 4,5:1 de WCAG AA, et moins
+   encore en vrai puisque ce qu'il y a derrière est la SCÈNE 3D). Le chevron de
+   repli l'a reçu, les six boutons caméra aussi : le raisonnement avait été
+   tenu partout SAUF sur le segmenté — trois libellés sur quatre, à 12 px.
+   Même mécanique et même qualification par .cb-bar que les deux autres. */
+.cb-bar .cb-speed-btn:not(.on) { color: var(--ce-muted-fort); }
+
+.cb-cam { display: flex; gap: var(--ce-gap-tight); transition: opacity 0.15s; }
+.cb-cam.cb-cam-off { opacity: 0.28; }
+/* .ce-icon-btn fait la taille, le rayon, le hover et le svg à 16 px. Ne reste
+   ici que l'encre atténuée (ce sont des outils, pas des actions) et le retour
+   tactile à l'appui. */
+.cb-bar .cb-cam-btn {
+  color: var(--ce-muted-fort);
+  transition: background 0.15s, color 0.15s, transform 0.12s ease;
+}
+/* ⚠️ L'ESTOMPAGE VIT SUR LE GROUPE, PAS SUR CHAQUE BOUTON. .ce-icon-btn pose
+   opacity: 0.3 sur :disabled ; multiplié par les 0,28 de .cb-cam-off, les six
+   pictos tombaient à 8 % — invisibles au lieu d'éteints. Un seul des deux
+   parle, et c'est le groupe (les six sont toujours désactivés ensemble). */
+.cb-bar .cb-cam-btn:disabled { opacity: 1; }
+.cb-bar .cb-cam-btn:hover:not(:disabled) { color: var(--ce-ink); }
+.cb-cam-btn:active:not(:disabled) { transform: scale(0.9); }
+@media (prefers-reduced-motion: reduce) { .cb-cam-btn { transition: none; } }
+
+/* ------------------------------------------------------- zone 3 : LE CARNET */
+/* ⚠️ LA LARGEUR DE CETTE ZONE EST UN BUDGET, PAS UN GOÛT — et il ne l'était
+   nulle part. Le budget de HAUTEUR est compté ligne par ligne en tête de
+   carnet-course.css depuis le début ; celui de LARGEUR n'existait pas, et il
+   ne passait pas : à 236 px (palier 681–900) la colonne de droite disposait de
+   ~80 px pour une rangée « D+ RESTANT · 1 840 m » dont la largeur naturelle
+   est d'environ 150 — le libellé s'écrasait jusqu'à « D… ». Ironie qui
+   confirme le diagnostic : sous 680 px, où la zone passe en `flex: 1 1 auto`,
+   la colonne redevenait large et le problème disparaissait. C'était donc la
+   TABLETTE EN PORTRAIT le cas cassé, pas le téléphone.
+   L'addition est écrite en tête de carnet-course.css, à côté de celle des
+   hauteurs, et elle se refait à chaque palier. */
+.cb-zone-carnet {
+  flex: 0 0 340px;
+  min-width: 0;
+  padding: var(--ce-gap-group) var(--cb-gutter);
+}
+
+/* ------------------------------------------------- profil GPX embarqué */
+/* gpx.js construit ce panneau pour vivre seul, en carte flottante. Embarqué
+   ici, il perd son propre chrome (verre, position, largeur) — la barre fournit
+   les trois — et ses deux titres : le nôtre, en tête de barre, est le SEUL. */
+.gpx-profile.cb-embedded {
+  /* ⚠️ `position` ET `width` sont des REPRISES, pas des réglages : le panneau
+     autonome est en position:fixed avec une largeur en pixels calculée au
+     runtime (--gpx-profile-width, mesurée sur la barre de recherche par
+     syncGpxProfilePosition() dans main.js). Embarqué, il doit oublier les
+     deux, sinon il garde ses ~400 px au milieu d'une zone plus large — c'est
+     le « profil qui ne remplit pas » du 2026-08-04. */
+  position: static !important;
+  left: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  width: 100% !important;
+  max-width: none !important;
+  height: 100%;
+  opacity: 1 !important;
+  background: none;
+  border: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.gpx-profile.cb-embedded .gpx-race-name,
+.gpx-profile.cb-embedded .gpx-profile-head,
+.gpx-profile.cb-embedded .gpx-collapse,
+.gpx-profile.cb-embedded .gpx-close {
+  display: none !important;
+}
+.gpx-profile.cb-embedded canvas {
+  /* le bitmap se recale sur CETTE taille (voir _drawProfile dans gpx.js) :
+     plus d'étirement, donc plus de courbe aplatie ni de chiffres comprimés */
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  display: block;
+  padding: 0;
+}
+
+/* ------------------------------------------------------------- responsive */
+@media (max-width: 1100px) {
+  /* 316 : la colonne perd ses deux suffixes de libellé les plus larges
+     (« restant » sur le D+ et sur le sommet, carnet-course.css) parce que le
+     jumeau figé de la tête disparaît au même palier — le budget de largeur
+     tombe de 296 à 272 px de contenu. */
+  .cb-zone-carnet { flex-basis: 316px; }
+  /* le SOMMET est le quatrième chiffre : c'est celui qui décide le moins
+     d'une allure une fois la course lancée (la distance et le D+ le font
+     d'abord). Ce n'est plus l'amplitude d'altitude — celle-ci était l'échelle
+     Y du profil et vivait au mauvais endroit ; le profil l'écrit désormais sur
+     lui-même (gpx.js), et la tête garde le seul chiffre d'altitude qui décide
+     quelque chose : le point haut. */
+  .cb-chiffre-sommet { display: none; }
+}
+@media (max-width: 900px) {
+  /* ⚠️ LE BOUTON LECTURE SURVIT TOUJOURS. Une première version masquait la
+     zone entière sous 900 px : plus aucun moyen de mettre en pause sur une
+     tablette (la barre d'espace n'y existe pas). Ce sont les RÉGLAGES qui
+     partent — vitesse et caméra, l'une et l'autre accessoires. */
+  .cb-zone-lecture { padding: var(--ce-gap-group); }
+  .cb-stack { display: none; }
+  /* plus que le bouton lecture dans le groupe : une pastille teintée autour
+     d'un disque déjà contrasté ne dit plus rien, on rend le verre */
+  .cb-outils { background: none; padding: 0; }
+  /* 284 et plus 236 : la marge de zone tombe à 14 (donc 28 au lieu de 44) et
+     l'ancrage de la barrière (« km 42 ») part, mais les 236 d'avant ne
+     tenaient tout simplement pas — voir le budget en tête de
+     carnet-course.css. Les 48 px viennent du profil, qui en a. */
+  .cb-zone-carnet { flex-basis: 284px; padding: var(--ce-gap-group); }
+  .cb-chiffre-dmoins { display: none; }
+}
+@media (max-width: 680px) {
+  .cb-bar { left: var(--ce-gap-control); right: var(--ce-gap-control); bottom: var(--ce-gap-control); }
+  /* sous cette largeur, profil ET carnet côte à côte deviennent deux colonnes
+     trop étroites pour être lues : le carnet gagne, c'est lui qui porte
+     l'information de course. Il doit alors S'ÉTIRER (flex:1) — en base fixe
+     il restait collé à gauche avec le reste de la barre vide. */
+  .cb-zone-parcours { display: none; }
+  .cb-zone-carnet { flex: 1 1 auto; }
+  .cb-chiffres { display: none; }
+}
+/* ⚠️ LE RESPONSIVE NE PEUT PAS NE REGARDER QUE LA LARGEUR. Sur un téléphone
+   en paysage (844×390 px CSS), 40 px de tête + 152 px de corps + 8 px de marge
+   font 51 % de la hauteur d'écran : l'utilisateur ne voit presque plus la
+   carte qu'il regarde courir. --cb-body-h existe pour ça — encore fallait-il
+   le déclarer (voir en tête de fichier). Surcharge sur .cb-bar et pas sur
+   :root, parce que c'est là qu'il est déclaré. */
+@media (max-height: 520px) {
+  /* Le budget du carnet retombe à 92 px disponibles : la colonne de droite
+     seule, plus le héros. On ne rogne JAMAIS en espérant que ça passe — on
+     retire des lignes NOMMÉMENT, et la hauteur suit. Le compte est refait
+     ligne par ligne en tête de carnet-course.css.
+     ⚠️ --ce-t-hero-compact ET --ce-t-title : deux paliers, déclarés dans
+     v28.css avec leur rôle. Un « 26px » inventé ici était une sixième valeur
+     typographique qui n'existait dans aucune échelle. */
+  .cb-bar { --cb-body-h: 120px; --ce-t-hero: var(--ce-t-hero-compact); --ce-t-title: var(--ce-t-num); }
+  .cb-head { min-height: 32px; }
+  /* ⚠️ ON NE MASQUE QUE CE QUI EST VRAIMENT REDONDANT. La règle d'avant
+     masquait `.cc-head` EN BLOC — or `.cc-km` vit dedans, et `.cc-km` n'existe
+     que pour le cas « profil disparu », déclaré sous 680 px de LARGE. Les deux
+     media queries étant indépendantes, une fenêtre de 667×375 (iPhone SE/8 en
+     paysage, c'est-à-dire l'orientation naturelle de ce mode) cochait les
+     deux : plus de profil donc plus de pastille, ET plus de `.cc-km`. Le
+     coureur perdait toute indication de sa position sur le parcours, et le
+     commentaire de carnet-course.css devenait faux exactement dans le cas
+     qu'il décrit. Ce qui saute ici, c'est le point QUITTÉ — la ligne la moins
+     actionnable du panneau, de son propre aveu. */
+  .cb-bar .cc-depuis,
+  .cb-bar .cc-slope-wrap { display: none; }
+}
+/* au-dessus de 680 px le profil est là : sa pastille porte déjà le km, la tête
+   du carnet n'a alors plus rien à dire du tout et on retire la ligne ET son
+   écart (8 px rendus au budget) */
+@media (min-width: 681px) and (max-height: 520px) {
+  .cb-bar .cc-head { display: none; }
+}
+/* écran COURT ET ÉTROIT : le profil a disparu, `.cc-km` redevient le seul
+   porteur du kilométrage parcouru. Il coûte 13 px + 8 px d'écart : on les rend
+   à la barre plutôt que de rogner le seul repère de position qui reste. */
+@media (max-width: 680px) and (max-height: 520px) {
+  .cb-bar { --cb-body-h: 144px; }
+}
+
+/* ------------------------------------------------------------ TACTILE
+   ⚠️ LA BRANCHE COARSE DU SYSTÈME N'AVAIT JAMAIS ÉTÉ REGARDÉE ICI, et elle
+   change deux choses sous nos pieds :
+     · v28.css porte .ce-icon-btn à 44×44 et .ce-btn à 34 de haut. La tête,
+       bloquée en `height: 40px` (et 32 sur écran court), les faisait déborder
+       de 6 px en haut ET en bas, par-dessus le filet et le sommet du profil.
+       C'est réglé à la source (min-height sur .cb-head) ; on décide ici de la
+       hauteur au lieu de la subir.
+     · la rangée caméra passe de 222 à 294 px (6×44 + 5×6), donc le groupe
+       d'outils de 310 à 382 : sur iPad en paysage (1024), la zone du PROFIL —
+       « le sujet » — tombait à ~250 px et devenait la plus petite des trois.
+       On avance donc à 1100 px le palier qui range vitesses et caméra ; le
+       bouton Lecture, lui, survit toujours (voir la note du palier 900). */
+@media (pointer: coarse) {
+  .cb-head { min-height: 52px; }
+}
+@media (pointer: coarse) and (max-width: 1100px) {
+  .cb-stack { display: none; }
+  .cb-outils { background: none; padding: 0; }
+}
+/* écran court ET tactile (téléphone en paysage, 844×390) : les deux conditions
+   sont vraies en même temps, et c'est le cas qui débordait. 48 px logent le
+   bouton de 44 avec 2 px de part et d'autre. */
+@media (pointer: coarse) and (max-height: 520px) {
+  .cb-head { min-height: 48px; }
+}
+
+/* --------------------------------------------------- repli du reste de l'UI */
+/* Même recette que body.af-mode (affiche.css) : EXCLURE plutôt qu'énumérer.
+   Une énumération oublie toujours quelque chose (vécu : barre de recherche,
+   segments de mode… — voir le commentaire d'affiche.css).
+   ⚠️ PIÈGE VÉCU (2026-08-04) : la scène 3D n'est PAS un enfant direct de
+   body — le canvas vit DANS #app (main.js : container.appendChild(renderer.
+   domElement)). Exclure « canvas » au niveau de body, comme le fait
+   affiche.css, masquait #app EN ENTIER, canvas compris, d'où un rendu WebGL
+   cassé (glBlitFramebuffer sur un canvas à 0×0).
+   On exclut donc #app (la scène et ses cartouches ancrés) ET la barre
+   elle-même, posée dans body à côté — voir la note du call site
+   buildCourseBar() dans main.js pour pourquoi elle n'est pas dans #app. */
+body.ce-course-mode > *:not(#app):not(.cb-bar) {
+  display: none !important;
+}

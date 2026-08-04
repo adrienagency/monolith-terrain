@@ -1,0 +1,562 @@
+/* Le Carnet de course — contenu du panneau droit de la barre course.
+   course-bar.css fournit le verre, la position ET les jetons locaux
+   (--cb-body-h, --ce-muted-fort, déclarés sur .cb-bar) ; ici, uniquement le
+   contenu et sa hiérarchie.
+
+   ⚠️ CONTRAINTE DE HAUTEUR : ce panneau vit dans une barre à hauteur FIXE,
+   --cb-body-h (déclaré sur .cb-bar dans course-bar.css — il ne l'était NULLE
+   PART, ce commentaire renvoyait à un réglage qui n'existait pas). Tout ce
+   qui est écrit ici doit y tenir sans déborder — un dépassement ne « scrolle »
+   pas, il se fait rogner (vécu le 2026-08-04 : rangée de pictos coupée en
+   deux), et AUCUNE ligne n'a le droit de passer à la ligne : voir
+   .cc-next-row.
+
+   LE BUDGET DE HAUTEUR, ligne par ligne (164 − 2×14 de marge = 136 px
+   disponibles) :
+       « depuis X » / durée       13   (11 px × 1.2)
+       + écart                     8
+       le bloc principal :       90,6  (voir .cc-side, min-height)
+           D+ restant   17         (17 px, interlignage 1)
+           + écart       6
+           Barrière     17
+           + écart       6
+           prochain   44,6 = libellé 11 + 1 + rangée 16 + 1 + sous-ligne 15,6
+       + écart                     8
+       bande de pente             11   (9 px de bande, 11 px de repère)
+       ————————————————————————————
+       total                   130,6, reste 5,4 px de jeu
+
+   ⚠️ ET LE PIRE CAS EST DÉSORMAIS RÉSERVÉ, PAS REPRIS. La barre a une hauteur
+   fixe, mais son CONTENU se recentrait : avec `justify-content: center` et des
+   rangées montées/démontées par `hidden`, l'apparition de la rangée Barrière
+   (23 px) ou le passage du bloc « prochain point » (44,6 px) à Sommet/Altitude
+   au dernier point franchi faisaient SAUTER verticalement le chiffre héros de
+   34 px — celui qu'on lit en courant des yeux — de 11 puis de 15 px. C'était
+   la lettre de la demande n°3 respectée (la barre ne bouge pas) et son esprit
+   trahi : « la hauteur varie constamment » se voyait sur le chiffre, pas sur
+   le cadre. `.cc-side` est donc ancrée à 91 px — la somme ci-dessus — et le
+   budget reste exactement celui qui est écrit ici.
+
+   LE BUDGET DE LARGEUR, qui n'existait NULLE PART et ne passait pas. Le
+   panneau vit dans .cb-zone-carnet (course-bar.css) ; contenu = basis −
+   2×marge de zone. Le héros est en `flex: none`, il ne rétrécit jamais : tout
+   le déficit tombait sur le libellé de la colonne, qui s'écrasait jusqu'à
+   « D… » (mesuré à 236 px de basis, palier 681–900 — c'est-à-dire la TABLETTE
+   EN PORTRAIT, pas le téléphone, qui redevient large sous 680 px).
+       héros « 112,4 km »          ~105  (34 px mono + unité 13 px)
+       + écart de .cc-main            14
+       + filet + retrait de .cc-side  15
+       + la rangée la plus large :
+           ≥ 1101 px : « SOMMET RESTANT » 116 + 8 + « 1 840 » 47 + « m » 8   ≈ 179
+           ≤ 1100 px : le suffixe « restant » part (le jumeau figé de la tête
+             disparaît au même palier)              « SOMMET » 52 …          ≈ 145
+           ≤ 900 px  : l'ancrage « km 42 » part aussi                        ≈ 132
+       ————————————————————————————
+       il faut donc ≈ 313 / 279 / 266 px de contenu, soit 340 / 316 / 284 px
+       de basis (marge de zone : 22 au-dessus de 900 px, 14 en dessous).
+   ⚠️ CES LARGEURS SONT DES MÉTRIQUES NOMINALES, comme les hauteurs : les
+   glyphes réels de Bricolage Grotesque et de la mono résolue ne sont pas
+   mesurés ici (aucun navigateur dans ce dépôt). L'ellipse de .cc-l reste donc
+   le filet, exactement comme `overflow: hidden` l'est pour la hauteur.
+
+   ⚠️ LA RANGÉE « PENTE » A ÉTÉ SUPPRIMÉE, ET SA PLACE VA À LA BARRIÈRE. La
+   pente était représentée QUATRE fois en même temps à l'écran : sa valeur
+   chiffrée ici, la bande des 2 km à venir juste au-dessus, le profil
+   altimétrique dans la même barre avec sa crosshair posée dessus, et le relief
+   3D lui-même — sujet de l'application — avec la caméra derrière la tête de
+   lecture. Un coureur qui VOIT la côte n'a pas besoin qu'on la lui dise deux
+   fois de plus, et cette rangée occupait 23 px (valeur + écart) sur les 88 de
+   la colonne. La bande reste : c'est la seule des quatre à être qualitative,
+   PROSPECTIVE et lisible du coin de l'œil. Le champ `pente` reste calculé
+   (il alimente phraseDuCarnet pour les lecteurs d'écran et la bande) : rien de
+   jeté côté logique, une rangée rendue à la barrière horaire — c'est-à-dire à
+   la seule donnée du modèle qui puisse mettre un coureur hors course.
+   Barrière et Altitude/Sommet s'excluent (l'une suppose un prochain point,
+   l'autre son absence) : le pire cas est bien celui compté ci-dessus.
+
+   ⚠️ LA SOUS-LIGNE DU PROCHAIN POINT EST PASSÉE DE 11 À 13 px (+2,6 px, pris
+   sur le jeu). Elle partageait son palier avec « depuis X », « +2 km » et les
+   capitales des libellés : la ligne qui CHANGE et qui décide de l'allure
+   retombait au rang des étiquettes fixes.
+   ⚠️ CE BUDGET EST COMPTÉ SUR LES MÉTRIQUES NOMINALES, PAS MESURÉ À L'ÉCRAN.
+   D'où les `line-height` explicites partout ci-dessous : sans eux, le
+   `normal` du navigateur ajoute ~20 % par ligne (soit ~15 px sur ce panneau)
+   et le compte tombe faux sans que personne ne l'ait écrit nulle part. Toute
+   ligne ajoutée ici se paie sur les 8 px de jeu, puis sur --cb-body-h.
+
+   ⚠️ TAILLES DE TEXTE : uniquement les cinq paliers --ce-t-* de v28.css.
+   Douze tailles cohabitaient dans 152 px de haut (9 / 9,5 / 10 / 10,5 / 11 /
+   12 / 13,5 / 14 / 15 / 16 / 17 / 34), dont trois pour le MÊME rôle. Ce
+   n'était pas une échelle, c'était une flaque. Plancher absolu : 11 px — un
+   libellé de 9 px en encre à 55 % posé sur du verre à travers lequel bouge un
+   rendu 3D ne se lit pas, et c'est précisément là qu'Adrien avait demandé
+   « pense lisibilité ». */
+
+/* les blocs qui s'excluent (altitude vs prochain point, pictos vides) sont
+   masqués par la propriété `hidden` — sans ce rappel, un display:flex posé
+   plus bas gagne contre la feuille de l'agent et le bloc reste visible */
+.cc-body[hidden],
+.cc-body [hidden] { display: none !important; }
+
+.cc-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--ce-gap-control);
+  min-width: 0;
+  height: 100%;
+  /* ⚠️ CE overflow N'EST PAS LA SOLUTION, C'EST LE FILET. Avec le
+     justify-content:center ci-dessus, un contenu trop haut est rogné EN HAUT
+     ET EN BAS — c'est comme ça que la rangée de pictos s'est retrouvée coupée
+     en deux le 2026-08-04. Ce qui empêche vraiment le dépassement, c'est le
+     budget compté en tête de fichier et la grille de .cc-next-row, qui rend
+     le retour à la ligne structurellement impossible. Le filet est là pour le
+     jour où quelqu'un ajoute une ligne sans refaire l'addition. */
+  overflow: hidden;
+}
+
+/* ------------------------------------------------ 1. d'où je viens (petit) */
+.cc-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--ce-gap-control);
+  min-width: 0;
+  flex: none;
+}
+.cc-depuis {
+  line-height: 1.2;
+  font-size: var(--ce-t-micro);
+  color: var(--ce-muted-fort);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+/* le km parcouru : la pastille du profil le porte déjà, collée à la tête de
+   lecture. Il ne réapparaît que sous 680 px, là où le profil disparaît
+   (course-bar.css) et où plus personne ne le dit.
+   ⚠️ ET LA MEDIA QUERY DE HAUTEUR NE LE REPREND PLUS. Elle masquait `.cc-head`
+   en bloc — or c'est ici que vit `.cc-km` : sur 667×375 (iPhone SE en
+   paysage) les deux conditions étaient vraies en même temps, il n'y avait donc
+   ni profil, ni pastille, ni km. Ce commentaire était faux exactement dans le
+   cas qu'il décrit. course-bar.css conditionne désormais ce masquage à la
+   PRÉSENCE du profil (min-width: 681px). */
+.cc-km {
+  line-height: 1.2;
+  display: none;
+  font-family: var(--ce-mono);
+  font-size: var(--ce-t-micro);
+  color: var(--ce-muted-fort);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+  white-space: nowrap; /* jamais de césure entre un nombre et son unité */
+}
+@media (max-width: 680px) { .cc-km { display: inline; } }
+
+/* LA DURÉE D'APRÈS LA TRACE — la réponse à « dans combien de temps j'y
+   arrive », la seule que le modèle permette sans inventer une allure (voir
+   dureeRestante() dans carnet-course.js). Elle est POSÉE DANS UNE LIGNE QUI
+   EXISTAIT DÉJÀ : au-dessus de 680 px, .cc-km est masqué et la droite de la
+   tête était vide. Zéro pixel de hauteur ajouté à un budget qui n'en a pas.
+   Sous 680 px, le profil a disparu et .cc-km redevient le seul repère de
+   position : c'est lui qui garde la place. */
+.cc-eta {
+  line-height: 1.2;
+  font-size: var(--ce-t-micro);
+  color: var(--ce-muted-fort);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+  white-space: nowrap;
+}
+@media (max-width: 680px) { .cc-eta { display: none; } }
+
+/* ------------------------------------------- 2. la pente à venir, en bande */
+.cc-slope-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--ce-gap-control);
+  flex: none;
+}
+.cc-slope {
+  height: 9px;
+  /* le rayon vient du système (v28.css) : 2 px n'appartenait à aucune échelle
+     — la barre affichait cinq rayons dont deux inventés sur place */
+  border-radius: var(--ce-radius-xs);
+  overflow: hidden;
+  background: var(--ce-track);
+  display: flex;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+  /* le repère « vous êtes ici » : sans lui, rien ne dit que la bande se lit
+     de gauche à droite depuis la position courante — il fallait le deviner */
+  border-left: 2px solid var(--ce-ink);
+}
+/* ⚠️ DEUX CANAUX, PAS UN SEUL. La bande n'encodait sa donnée QUE par la
+   teinte : en deutéranopie, --cc-douce (#3f7a4f), --cc-soutenue (#c98a2c) et
+   --cc-raide (#b5432f) convergent vers des ocres voisins de luminance très
+   proche, et le segment 'inconnue' (fond nu) devenait indistinguable d'un
+   segment absent. Le libellé dynamique couvre les lecteurs d'écran ; un
+   utilisateur daltonien VOYANT, lui, n'avait aucun repli — le chiffre de pente
+   affiché à côté était celui de la position courante, pas celui des segments à
+   venir, et il n'existe même plus. La HAUTEUR du segment devient le second
+   canal : la sévérité se lit comme un profil en escalier, gratuitement (la
+   bande fait toujours 9 px), et 'inconnue' devient visiblement VIDE plutôt
+   qu'ambigu. */
+.cc-slope { align-items: flex-end; }
+.cc-slope i { display: block; flex: 1 1 0; height: 100%; align-self: flex-end; }
+.cc-slope i[data-classe='douce'] { background: var(--cc-douce); height: 40%; }
+.cc-slope i[data-classe='soutenue'] { background: var(--cc-soutenue); height: 70%; }
+.cc-slope i[data-classe='raide'] { background: var(--cc-raide); height: 100%; }
+/* 'inconnue' (altitude NaN : trou de tuile DEM, bord d'emprise) : la piste nue
+   apparaît. Ne rien peindre est la seule réponse honnête — teinter en vert
+   dirait « c'est plat », en rouge « c'est un mur », et les deux mentiraient. */
+.cc-slope i[data-classe='inconnue'] { background: none; }
+/* la portée de la bande, écrite — elle ne vivait que dans un title, donc
+   invisible au coup d'œil et inatteignable au tactile. Le texte vient de
+   PORTEE_PENTES (carnet-course.js), pas d'une constante recopiée à la main. */
+.cc-portee {
+  line-height: 1;
+  font-family: var(--ce-mono);
+  font-size: var(--ce-t-micro);
+  color: var(--ce-muted-fort);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+/* ------------------------ 3. le gros chiffre + la colonne de droite, à côté */
+.cc-main {
+  display: flex;
+  align-items: center;
+  gap: var(--ce-gap-group);
+  min-width: 0;
+  /* sans min-height:0 un enfant flex refuse de rétrécir sous sa taille de
+     contenu : c'est LUI qui faisait déborder la boîte à hauteur fixe */
+  min-height: 0;
+}
+
+.cc-hero {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+  flex: none;
+}
+.cc-hero-val {
+  font-family: var(--ce-mono);
+  /* ⚠️ 700 ET PAS 800 : LA HIÉRARCHIE ÉTAIT ÉCRITE DANS UN AXE QUI N'EXISTE
+     PAS CHEZ LE DESTINATAIRE. Elle s'appuyait sur trois graisses de mono —
+     800 (héros), 700 (.cc-v), 600 (.cb-chiffre dd) — or --ce-mono vaut
+     `'SF Mono', ui-monospace, Consolas, monospace` et SF Mono n'est chargé
+     nulle part (index.html ne charge que Rosarivo et Bricolage Grotesque).
+     Sur Windows — la machine d'Adrien — la famille résolue est Consolas, qui
+     n'a que Regular et Bold : 600, 700 et 800 rendent tous le MÊME gras. Trois
+     rangs déclarés, deux rangs affichés. C'est la TAILLE qui porte seule la
+     hiérarchie (34 / 17 / 13), et elle la porte bien ; deux graisses suffisent
+     à la doubler. Le jour où une mono variable entre dans le @import des
+     polices, ce fichier redeviendra libre d'en déclarer trois. */
+  font-weight: 700;
+  /* LE chiffre du carnet — celui qu'on lit en courant des yeux sur la barre.
+     « Les chiffres les plus importants sont gros » (Adrien). */
+  font-size: var(--ce-t-hero);
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ce-ink);
+  display: flex;
+  align-items: baseline;
+}
+.cc-hero-pct {
+  /* l'unité du héros monte d'UN palier de l'échelle (--ce-t-body au lieu de
+     --ce-t-unit) — pas d'une douzième valeur inventée. Raison optique : un
+     suffixe accolé à un chiffre de 34 px doit peser plus que le même suffixe
+     accolé à un chiffre de 17 px, sinon il décroche du nombre. */
+  font-size: var(--ce-t-body);
+  /* 500, comme les deux autres suffixes d'unité de la barre : le changement de
+     TAILLE est argumenté juste au-dessus, le saut de graisse 500 → 600 ne
+     l'était nulle part. Une seule recette pour une seule relation. */
+  font-weight: 500;
+  color: var(--ce-muted-fort);
+  margin-left: 2px;
+}
+.cc-hero-lbl {
+  font-size: var(--ce-t-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ce-muted-fort);
+  margin-top: var(--ce-gap-tight);
+}
+/* ⚠️ LA SEULE COULEUR SÉMANTIQUE DU PANNEAU VA À LA BARRIÈRE HORAIRE, plus à
+   la pente. Elle allait à la pente — la question la MOINS actionnable des
+   cinq, déjà dite par la bande, par le profil et par le relief lui-même —
+   pendant que la barrière, seule donnée capable de mettre un coureur hors
+   course, n'avait aucune couleur, 11 px, et vivait derrière un « · ».
+   --cc-raide est déjà le jeton d'alerte du système : on le réutilise plutôt
+   que d'en inventer un frère qui dirait la même chose. La teinte de pente,
+   elle, est portée par la bande — qui la portait déjà. */
+/* ⚠️ ELLE N'EST PLUS POSÉE PAR LA FEUILLE, MAIS PAR L'ÉTAT (ui/carnet-course.js
+   l'ajoute et la retire dans update()). Écrite une fois pour toutes à la
+   construction, elle rendait le chiffre rouge DÈS QU'UN CUTOFF EXISTAIT : un
+   rouge toujours rouge n'est pas une alerte, c'est une couleur de rangée. Elle
+   ne s'allume que quand la barrière est portée par le point IMMÉDIATEMENT
+   suivant ; plus loin sur le parcours, la rangée reste en encre pleine.
+   La règle elle-même vit APRÈS .cc-v — voir la note à côté d'elle. */
+
+/* ⚠️ UNE GRILLE, ET ELLE EST PORTÉE PAR LA COLONNE — PAS PAR CHAQUE RANGÉE.
+   Les trois rangées étaient trois boîtes flex indépendantes en
+   `justify-content: space-between` : c'est le bord DROIT du bloc valeur qui
+   s'alignait, et ce bord est l'UNITÉ, pas le chiffre. « 2 380 m » et « 12h30 »
+   (dont l'unité est vide) posaient donc leurs derniers chiffres à une
+   quinzaine de pixels l'un de l'autre — toute la peine prise sur tabular-nums
+   annulée par la mise en page, trois nombres empilés qui ne formaient pas une
+   colonne. Une seule grille, trois colonnes partagées (libellé / valeur /
+   unité) : les chiffres s'alignent, les unités aussi.
+   Les rangées passent en `display: contents` pour livrer leurs trois enfants
+   à cette grille ; `[hidden]` (display:none !important, en tête de fichier)
+   reste prioritaire et démonte la rangée entière.
+   ⚠️ min-height = LE PIRE CAS, calculé en tête de fichier. Sans lui, la
+   colonne rétrécit quand une rangée disparaît, .cc-main suit, et le chiffre
+   héros — centré dans .cc-body — saute verticalement en pleine lecture.
+   `align-content: start` : la place réservée reste EN BAS, les rangées ne se
+   redistribuent pas dans la hauteur libre. */
+.cc-side {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  align-content: start;
+  row-gap: var(--ce-gap-tight);
+  column-gap: 0;
+  min-width: 0;
+  min-height: 91px;
+  flex: 1;
+  border-left: 1px solid var(--ce-hairline);
+  padding-left: var(--ce-gap-group);
+}
+.cc-stat { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+/* libellé, valeur et unité sur UNE ligne, pour laisser la place au prochain
+   point (qui, lui, a besoin de deux lignes) sans grandir la barre */
+.cc-stat-duo { display: contents; }
+.cc-l {
+  line-height: 1;
+  font-size: var(--ce-t-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ce-muted-fort);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Le suffixe escamotable du libellé — « D+ restant », « Sommet restant ».
+   ⚠️ IL RÈGLE UNE VRAIE COLLISION, PAS UN DÉTAIL DE STYLE. La tête de barre
+   affiche « SOMMET » (le point culminant de TOUT le parcours, figé) et cette
+   colonne affichait « SOMMET » (le point culminant de CE QUI RESTE, vivant) :
+   même mot, même taille, même barre, deux nombres différents — exactement la
+   répétition que la demande n°7 condamne, déplacée du titre vers les chiffres.
+   Le suffixe apparaît donc EXACTEMENT au palier où le jumeau figé est visible
+   (course-bar.css masque .cb-chiffre-sommet sous 1101 px) : au-dessus le mot
+   lève l'ambiguïté, en dessous il n'y a plus d'ambiguïté à lever et la place
+   revient au budget de largeur. Un libellé de 14 caractères en capitales
+   espacées est le texte le plus large de la colonne. */
+.cc-l-suf { display: none; }
+@media (min-width: 1101px) {
+  .cc-stat-dplus .cc-l-suf,
+  .cc-stat-sommet .cc-l-suf { display: inline; }
+}
+.cc-v {
+  line-height: 1;
+  font-family: var(--ce-mono);
+  font-weight: 700;
+  font-size: var(--ce-t-num);
+  font-variant-numeric: tabular-nums;
+  color: var(--ce-ink);
+  /* l'écart au libellé est porté par la VALEUR et pas par la grille : la
+     colonne de l'unité doit rester collée à son chiffre (2 px de crénage
+     optique), un column-gap uniforme les aurait écartés de 8 */
+  padding-left: var(--ce-gap-control);
+  /* les nombres s'alignent par la droite : c'est ce qui fait une colonne */
+  text-align: right;
+  /* ⚠️ ET ELLE PEUT ENFIN RÉTRÉCIR. La barrière est du TEXTE LIBRE TIERS
+     (race-model.js : `String(w.cutoff || '')`, aucune longueur imposée,
+     <input> libre dans le studio) et cette boîte n'avait ni min-width:0 ni
+     overflow ni ellipse : `white-space: nowrap` lui donnait une taille
+     minimale automatique égale à son min-content, donc elle ne rétrécissait
+     PAS — tout le rétrécissement tombait sur le libellé, puis le débordement
+     était tranché AU GLYPHE par l'overflow du panneau. Une barrière saisie
+     « dim. 12h30 (stricte) » se lisait « dim. 12h30 (str » : une heure qui a
+     l'air valide et qui ne l'est pas, c'est-à-dire la « faute visuelle
+     terminale » que .cb-title documente pour les chiffres de la tête. La
+     chaîne est bornée à la source (MAX_CUTOFF, carnet-course.js) ; ceci est
+     le filet. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* ⚠️ ET ELLE EST ÉCRITE **APRÈS** .cc-v, PAS AVANT — SINON ELLE NE S'APPLIQUE
+   PAS DU TOUT. L'élément porte les deux classes (`cc-v cc-v-limite`) et les
+   deux sélecteurs ont la MÊME spécificité (0,1,0) : c'est l'ordre dans la
+   feuille qui tranche, et `.cc-v { color: var(--ce-ink) }` était déclaré
+   quarante lignes plus bas. La barrière horaire n'a donc JAMAIS été rouge —
+   pas « toujours rouge », comme le laissait croire la lecture du fichier :
+   jamais. Deux commentaires de ce fichier défendaient longuement une teinte
+   d'alerte que le navigateur écrasait en silence. Toute règle d'ÉTAT posée sur
+   une classe de base doit vivre après elle, ou porter une spécificité
+   supérieure. */
+.cc-v-limite { color: var(--cc-raide); }
+.cc-u {
+  font-size: var(--ce-t-unit);
+  font-weight: 500;
+  color: var(--ce-muted-fort);
+  margin-left: 2px;
+  white-space: nowrap;
+}
+/* l'ANCRAGE de la barrière (« km 42 ») occupe la colonne d'unité : une heure
+   qui ne désigne aucun lieu n'est pas actionnable, et la barrière affichée
+   n'est plus forcément celle du point suivant (prochaineBarriere()). Sous
+   900 px il part — le budget de largeur ne le porte plus, et le libellé
+   « BARRIÈRE » reste, lui, exact. */
+@media (max-width: 900px) { .cc-stat-barriere .cc-u { display: none; } }
+/* le prochain point occupe la largeur entière : il a son propre empilement */
+.cc-next { grid-column: 1 / -1; }
+
+/* ⚠️ MÊME RAISONNEMENT QUE .cc-km, APPLIQUÉ À L'ALTITUDE — il ne l'était pas.
+   La rangée « Altitude » redouble la pastille du profil, qui affiche déjà
+   « 1240 m · km 12,4 » COLLÉE à la tête de lecture, donc mieux placée puisque
+   sur la courbe. C'est mot pour mot ce qui a fait masquer .cc-km au-dessus de
+   680 px ; la règle avait été appliquée au kilométrage et pas à l'altitude,
+   alors que les deux sortent de la même pastille. Et c'est plus gênant qu'il
+   n'y paraît : cette rangée ne s'affiche QUE quand il n'y a pas de prochain
+   point — c'est-à-dire sur un GPX brut sans <wpt>, le cas le PLUS courant.
+   Dans le cas majoritaire, la moitié de la colonne de droite disait donc ce
+   que la pastille dit vingt centimètres plus à gauche.
+   Au-dessus de 680 px la place va au SOMMET RESTANT, le seul chiffre
+   d'altitude prospectif et absent partout ailleurs ; sous 680 px le profil
+   disparaît, et l'altitude courante reprend son rôle.
+   Les deux rangées sont montées/démontées par la même condition côté JS
+   (`montre(…, !t.aSuivant)`) : le CSS ne fait que choisir laquelle des deux
+   parle. `[hidden]` reste prioritaire (display:none !important, en tête). */
+/* ⚠️ `display: contents` ET PAS `flex` : les rangées duo livrent leurs trois
+   enfants à la grille de .cc-side (voir plus haut). Un `flex` remis ici
+   ressusciterait une boîte intermédiaire, et la rangée sortirait de la
+   colonne partagée sans que rien ne le signale. */
+.cc-stat.cc-stat-alt { display: none; }
+@media (max-width: 680px) {
+  .cc-stat.cc-stat-alt { display: contents; }
+  .cc-stat.cc-stat-sommet { display: none; }
+}
+
+/* ------------------------------------------------------ 4. LE PROCHAIN POINT
+   Le point sur lequel un coureur règle son allure et sa gestion d'eau. Il
+   était le plus PETIT texte du panneau — 9 px, majuscules, gris, tronqué —
+   pendant que celui qu'il venait de quitter, et qui ne lui sert plus, était le
+   plus gros. Les deux rôles ont été échangés. */
+.cc-next { flex: none; }
+/* ⚠️ GRILLE À DEUX COLONNES, PAS UN flex-wrap. Un `flex-wrap: wrap` autorise
+   le contenu à prendre un nombre VARIABLE de lignes dans une boîte de hauteur
+   figée sous overflow:hidden — entre 900 et 1100 px, les pictos passaient à
+   une troisième ligne et le nom du point se retrouvait coupé en deux. Une
+   grille à une seule ligne ne peut pas déborder : le nom rétrécit (min-width:0
+   + ellipsis), les pictos gardent leur largeur. */
+.cc-next-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ce-gap-control);
+  min-width: 0;
+}
+.cc-name {
+  line-height: 1.2;
+  font-weight: 600;
+  font-size: var(--ce-t-body);
+  letter-spacing: -0.01em;
+  color: var(--ce-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+/* la sous-ligne est la ligne qui CHANGE : distance au prochain point et
+   dénivelé qui l'en sépare. Elle était au palier des étiquettes fixes — voir
+   la note en tête de fichier. Encre pleine, palier « nom propre ». */
+.cc-next-sub {
+  line-height: 1.2;
+  font-family: var(--ce-mono);
+  font-size: var(--ce-t-body);
+  color: var(--ce-ink);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* pictos du prochain point, sur la ligne de son nom : « eau à Refuge du Test »
+   est UNE information, pas deux */
+/* l'écart entre deux pastilles est celui de deux contrôles frères — c'est la
+   définition littérale de --ce-gap-tight. 3 px était une valeur brute, et
+   l'en-tête de course-bar.css ne tolère les valeurs de 1 à 3 px que pour le
+   crénage optique entre un nombre et son unité. La rangée fait au plus trois
+   pastilles de 16 px : la grille de .cc-next-row absorbe les 6 px gagnés. */
+.cc-pictos { display: inline-flex; gap: var(--ce-gap-tight); align-items: center; flex: none; }
+.cc-picto {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  /* ⚠️ --ce-track (14 %) ET PLUS --ce-hover (5 %). La graduation proche/loin
+     ne se voyait pas, et elle était même optiquement INVERSÉE : proche =
+     disque plein à 5 % d'encre, loin = anneau de 1 px à 8 % — les deux états
+     étaient indiscernables du verre nu, et le seul qui portait un peu de
+     matière était celui censé être ATTÉNUÉ. Le commentaire d'en dessous
+     revendiquait « 45 % d'écart de surface » : géométriquement vrai,
+     perceptuellement nul, puisque les deux surfaces différaient de 3 points
+     d'alpha. --ce-track est le jeton de PISTE, déjà utilisé par .cc-slope et
+     par le rail des vitesses : 14 % contre un contour à 8 %, deux états
+     réellement distincts, sans toucher à l'encre du glyphe ni au gabarit. */
+  background: var(--ce-track);
+  color: var(--ce-ink);
+  flex: none;
+}
+/* Point encore loin : l'annonce est GRADUÉE, jamais supprimée — savoir qu'il y
+   a de l'eau dans 8 km est ce qui décide combien on boit maintenant.
+   ⚠️ MAIS PLUS PAR L'OPACITÉ. Le raisonnement du dépôt se retournait contre
+   lui-même : on défend — à raison — qu'il faut annoncer l'eau d'un ravito à
+   8 km, puis l'état « loin », c'est-à-dire justement le cas défendu, était le
+   seul rendu à 45 % d'opacité, sur du verre, au-dessus d'un rendu 3D qui
+   bouge. À 16 px de diamètre et 10 px de glyphe, le contraste tombait très en
+   dessous du 3:1 exigé par WCAG 1.4.11 pour un graphique porteur de sens.
+   La graduation passe donc par le FOND (plein vs contour) — et le plein est
+   désormais à 14 % d'encre (--ce-track) et non plus à 5 %, sans quoi les deux
+   états ne différaient que de 3 points d'alpha : « 45 % d'écart de surface »
+   était géométriquement vrai et perceptuellement nul, puisque la surface n'est
+   pas du contraste, et c'est bien du contraste que réclame la note WCAG
+   1.4.11 citée deux lignes plus haut. Rien de tout cela ne touche à l'encre
+   du glyphe — et l'information est
+   aussi PORTÉE PAR LE TEXTE (ui/carnet-course.js ajoute « , plus loin » à
+   l'aria-label), parce qu'un drapeau visuel sans équivalent textuel n'existe
+   pas pour un utilisateur de lecteur d'écran. */
+.cc-picto[data-loin] {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--ce-hairline);
+}
+.cc-picto svg { width: 10px; height: 10px; }
+/* « +2 » : la troncature à trois pictos devient VISIBLE. Elle ne l'était pas,
+   et le coureur ne pouvait pas savoir qu'il manquait quelque chose au prochain
+   point. Même gabarit de 16 px, donc aucun coût de hauteur. */
+.cc-picto-plus {
+  font-family: var(--ce-mono);
+  font-size: var(--ce-t-micro);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  color: var(--ce-muted-fort);
+  line-height: 1;
+}
+
+/* le résumé lu à voix haute : hors de l'écran, jamais hors de l'arbre
+   d'accessibilité (display:none le rendrait muet) */
+.cc-sr {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

@@ -8,6 +8,7 @@ import * as THREE from 'three'
 import { Line2 } from 'three/addons/lines/Line2.js'
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js'
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js'
+import { construitRuban, teintesDepuis, fractionDeTraine, TEINTES_COURSE } from './ruban-trace.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { latLonToWorld, metersPerPixel, surfaceMetersPerUnit, demSpan, EARTH_RADIUS_M } from './geo.js'
 import { dansFenetre } from './fenetre-clip.js'
@@ -33,7 +34,19 @@ export function parseGpx(text) {
     const lon = parseFloat(n.getAttribute('lon'))
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue
     const eleN = n.querySelector('ele')
-    points.push({ lat, lon, ele: eleN ? parseFloat(eleN.textContent) : null })
+    // ⚠️ L'HEURE DU POINT ÉTAIT JETÉE, ET AVEC ELLE LA SEULE DONNÉE TEMPORELLE
+    // QUE LE MODÈLE POUVAIT AVOIR. Un <trkpt> sorti d'une montre ou d'un export
+    // de course porte presque toujours un <time> ; on lisait lat/lon/ele et on
+    // laissait celui-là au parseur. Résultat : le carnet de course déclarait
+    // dans ses commentaires qu'aucune durée n'était calculable — vrai de ce que
+    // le modèle CONTENAIT, faux de ce qu'il pouvait contenir.
+    // Ce qu'on en tire est une SOUSTRACTION, pas une prédiction : le temps que
+    // la trace enregistrée a mis d'ici à l'arrivée (voir dureeRestante() dans
+    // carnet-course.js). Un parcours dessiné à la main n'a pas de <time> : la
+    // valeur reste null et tout l'aval retombe sur le tiret cadratin.
+    const tN = n.querySelector('time')
+    const t = tN ? Date.parse(tN.textContent) : NaN
+    points.push({ lat, lon, ele: eleN ? parseFloat(eleN.textContent) : null, t: Number.isFinite(t) ? t : null })
   }
   if (points.length < 2) throw new Error('no usable track points')
   const name = doc.querySelector('trk > name, rte > name, metadata > name')?.textContent?.trim()
@@ -184,16 +197,40 @@ function distM(a, b) {
 
 // ---------------------------------------------------------------- reveal head
 
-// The SINGLE source of truth for "where is the reveal head" — the exact real
-// track vertex the Line2 is currently cut to (see _applyReveal()). Both the
-// geometry reveal AND the playback-head marker call this one function so
-// they can never compute two different answers again (see the task-16 bug
-// report: a separately-smoothed curve for the marker was exactly what made
-// the triangle and the drawn line disagree).
-export function revealVertexIndex(t, segCount) {
-  const n = segCount || 0
-  if (n <= 0) return 0
-  return THREE.MathUtils.clamp(Math.round(THREE.MathUtils.clamp(t, 0, 1) * n), 0, n)
+// ⚠️ L'ABSCISSE CURVILIGNE EST LA SEULE RÉFÉRENCE, ET C'EST TOUT LE SUJET.
+//
+// L'ancienne version rendait `round(t × nbSegments)` : `t` y était une
+// fraction d'INDEX DE SOMMET. Or tout le reste de l'affichage se gradue en
+// DISTANCE PARCOURUE — le profil place ses abscisses en `cumKm[i]/totKm`
+// (voir _drawProfile), le carnet compte des kilomètres, et le ruban se
+// dévoile sur sa distance cumulée normalisée. Ces deux mesures ne coïncident
+// que si les points du GPX sont régulièrement espacés, ce qu'ils ne sont
+// jamais : un relevé est dense en lacets et très étiré en ligne droite. À
+// 50 % d'index on pouvait donc être à 35 % de la distance — la tête, les
+// chiffres et le profil partaient chacun de leur côté.
+//
+// Ici, `t` est une fraction de DISTANCE. On cherche dans quel intervalle de
+// `cumKm` elle tombe, et on rend l'index réel correspondant. Le ruban lit le
+// même `t` directement dans son shader : les deux ne peuvent plus diverger.
+export function indexALAbscisse(t, cumKm) {
+  const n = cumKm?.length ?? 0
+  if (n < 2) return 0
+  const total = cumKm[n - 1]
+  if (!(total > 0)) return 0
+  const cible = THREE.MathUtils.clamp(t, 0, 1) * total
+  // recherche dichotomique : appelée à chaque image, sur des tracés de
+  // plusieurs milliers de points
+  let bas = 0
+  let haut = n - 1
+  while (bas < haut) {
+    const mid = (bas + haut) >> 1
+    if (cumKm[mid] < cible) bas = mid + 1
+    else haut = mid
+  }
+  // on rend le sommet le PLUS PROCHE en distance, pas le suivant : un demi-
+  // intervalle d'erreur systématique se verrait sur le réticule du profil
+  if (bas > 0 && cible - cumKm[bas - 1] < cumKm[bas] - cible) bas--
+  return bas
 }
 
 // One step of critically-damped exponential follow of the marker's OWN
@@ -353,101 +390,6 @@ function textSprite(text, color, scale = 1, opacity = 1, renderOrder = 20) {
   sp.renderOrder = renderOrder
   return sp
 }
-
-// ---- composed playback-head marker (task 24 §2) ----------------------------
-// "Un pointeur = une badge carrée arrondie portant l'icône du sport, posée
-// directement SUR un triangle pointant vers le bas" — ONE sprite, ONE
-// texture, baked together in a single canvas, replacing the old two
-// INDEPENDENT sprites (a bare triangle + a separately-positioned icon
-// billboard) that could only ever be kept aligned by two matching per-frame
-// offset formulas agreeing exactly — which is exactly the kind of thing that
-// silently drifts apart the moment one of the two offsets is tuned alone.
-// Baking them into one texture makes drifting apart structurally impossible.
-//
-// Layout (canvas px, see the constants below): the triangle is drawn FIRST
-// with its apex at the very last pixel row and its base overlapping UP into
-// where the badge will be; the rounded-square badge is drawn SECOND on top,
-// its bottom edge covering that overlap — the two shapes read as one
-// continuous pin silhouette with no visible seam. The sport icon (if any) is
-// recoloured to solid white (see recolorToWhite() below — the source-in
-// compositing trick preserves the icon's exact alpha mask/anti-aliasing
-// while discarding its original ink colour) and drawn centred in the badge.
-const HM_W = 100
-const HM_H = 98
-const HM_BADGE = { x: 8, y: 6, w: 84, h: 84, r: 18 }
-const HM_TRI = { apexX: 50, apexY: HM_H, baseY: 74, halfW: 17 } // apex sits on the LAST row on purpose (see the sprite.center note below)
-
-// Recolours a dark-ink icon canvas to solid white, preserving its alpha mask
-// exactly (anti-aliased edges included) — "source-in" draws the new fill
-// only where the EXISTING (destination) pixels already had alpha, using the
-// new fill's own alpha × the destination's, so the icon's silhouette survives
-// untouched while its colour is replaced outright. Lets every sport icon
-// (rasterized once, dark ink, for the panel row + the map) read against the
-// marker's own dark badge without sport-icons.js needing a second colour pass.
-function recolorToWhite(srcCanvas) {
-  const c = document.createElement('canvas')
-  c.width = srcCanvas.width
-  c.height = srcCanvas.height
-  const ctx = c.getContext('2d')
-  ctx.drawImage(srcCanvas, 0, 0)
-  ctx.globalCompositeOperation = 'source-in'
-  ctx.fillStyle = '#fff'
-  ctx.fillRect(0, 0, c.width, c.height)
-  return c
-}
-
-function roundedRectPath(ctx, x, y, w, h, r) {
-  ctx.beginPath()
-  ctx.moveTo(x + r, y)
-  ctx.arcTo(x + w, y, x + w, y + h, r)
-  ctx.arcTo(x + w, y + h, x, y + h, r)
-  ctx.arcTo(x, y + h, x, y, r)
-  ctx.arcTo(x, y, x + w, y, r)
-  ctx.closePath()
-}
-
-// Builds the composed marker texture. `iconCanvas` is the RASTERIZED sport
-// icon (see sport-icons.js's rasterizeToCanvas — a small square canvas, dark
-// ink on transparent) or null (no icon yet / none assigned — the badge still
-// draws, just empty, so the marker's silhouette never flickers in/out as
-// icons load). `ink` is the badge/triangle fill colour.
-export function composeHeadMarkerTexture(iconCanvas, ink = '#17191b') {
-  const c = document.createElement('canvas')
-  c.width = HM_W
-  c.height = HM_H
-  const ctx = c.getContext('2d')
-  ctx.fillStyle = ink
-  // triangle first — apex down, base overlapping up into the badge's own
-  // footprint so the badge (drawn next) hides the seam
-  ctx.beginPath()
-  ctx.moveTo(HM_TRI.apexX, HM_TRI.apexY)
-  ctx.lineTo(HM_TRI.apexX - HM_TRI.halfW, HM_TRI.baseY)
-  ctx.lineTo(HM_TRI.apexX + HM_TRI.halfW, HM_TRI.baseY)
-  ctx.closePath()
-  ctx.fill()
-  // badge on top — a rounded square "holding" the icon
-  roundedRectPath(ctx, HM_BADGE.x, HM_BADGE.y, HM_BADGE.w, HM_BADGE.h, HM_BADGE.r)
-  ctx.fill()
-  if (iconCanvas) {
-    const white = recolorToWhite(iconCanvas)
-    const inset = HM_BADGE.w * 0.16
-    ctx.drawImage(white, HM_BADGE.x + inset, HM_BADGE.y + inset, HM_BADGE.w - inset * 2, HM_BADGE.h - inset * 2)
-  }
-  const tex = new THREE.CanvasTexture(c)
-  tex.colorSpace = THREE.SRGBColorSpace
-  return tex
-}
-const HM_ASPECT = HM_W / HM_H
-const HEAD_MARKER_INK = '#17191b' // same dark ink as the arch's default (light-mode) fill
-
-// same sizeAttenuation:false / BASE_H sizing convention as GPX_LABEL_BASE_H
-// above (this app's #1 recurring sizing trap: real on-screen size =
-// projectionMatrix[5]*scale, ~3.7x the naive scale/2*viewport formula at
-// this app's 30° fov) — KEPT even though the marker itself was rebuilt (task
-// 24 §2), per the brief's own instruction. Tuned so the badge portion (which
-// dominates the composed shape, ~86% of its own height) reads at roughly the
-// old standalone icon's size (0.011) — see the task-24 report for the
-// measured live px.
 // How far the drawn track floats above the terrain it's draped on, in WORLD
 // units. This used to be 0.16 and it read as a visible hover — the track
 // hanging in the air over ridgelines instead of lying on them.
@@ -467,29 +409,69 @@ const HEAD_MARKER_INK = '#17191b' // same dark ink as the arch's default (light-
 // leaves the geometry ON the ground. What remains here is a hair of physical
 // clearance for the head marker and hover cursor to sit against.
 const DRAPE_LIFT = 0.012
-const HEAD_MARKER_BASE_H = 0.013
-// The sprite's PIVOT (THREE.Sprite.center, not just its texture) is set to
-// the triangle's apex — see the constructor below — rather than the default
-// centre. This is what makes the ground-clearance gap a genuine WORLD-SPACE
-// constant instead of a fraction of the sprite's own (distance-dependent,
-// sizeAttenuation:false) on-screen footprint: with a centred pivot, "how far
-// below centre is the apex" would itself grow with camera distance (the
-// footprint grows to hold its screen size constant), so ANY fixed fraction
-// of it would silently balloon at range — exactly the bug the brief flags.
-// Anchoring at the apex sidesteps the whole problem: `sprite.position` IS
-// the apex, so a fixed world-unit gap really stays fixed. See
-// HEAD_MARKER_GROUND_GAP below.
-// exported (alongside HEAD_MARKER_GROUND_GAP) purely so test/gpx.test.js can
-// pin these two numbers without a DOM — the rest of composeHeadMarkerTexture
-// needs document.createElement('canvas') and stays DOM-only, same pattern as
-// every other rasterizer in this codebase (see sport-icons.js's own comment).
-export const HM_APEX_V = (HM_H - HM_TRI.apexY) / HM_H // ~0 — apex sits on the last row by construction
-// Small, CONSTANT world-space clearance between the apex and
-// terrain.sample() at the head — "vraiment juste au dessus du sol,
-// toujours", measured (not scaled by camera distance, see the pivot note
-// above) across a playback run in the task-24 report.
-export const HEAD_MARKER_GROUND_GAP = 0.05
+// Le ruban (voir ruban-trace.js). Le PAS est ce qui l'empêche de traverser le
+// relief : 0,07 unité, soit plus fin que la maille du terrain la plus dense
+// (~0,11 pour un bloc de 56 unités en 512 segments), donc la corde entre deux
+// sections reste toujours sous la flèche du relief.
+const RUBAN_PAS = 0.07
+// demi-largeur pour gpxWidth = 1 ; le réglage de largeur du panneau la
+// multiplie. En unités MONDE cette fois, plus en pixels d'écran — c'est tout
+// l'intérêt d'un ruban posé dans la scène : sa largeur veut dire quelque
+// chose au sol.
+// ⚠️ DIVISÉE PAR DEUX ET DEMI (0,055 → 0,022). Le premier réglage donnait un
+// ruban de 0,33 unité de large : un boudin qui bouchait les vallées — « beaucoup
+// trop épais pour la carte » (Adrien). Un tracé de course se pose SUR une carte,
+// il ne la remplace pas. On est maintenant à 0,13 unité au réglage par défaut.
+const RUBAN_DEMI_LARGEUR = 0.022
+// LE SURVOL. Toutes ces longueurs sont en unités monde, à rapporter à un bloc
+// de 56 unités dont le relief occupe une trentaine en vertical.
+//   • garde : le ruban doit se lire comme un objet POSÉ AU-DESSUS du relief et
+//     non comme une décalcomanie ; en dessous, l'ombrage du terrain le ravale
+//     dans la pente. Redescendue de 0,30 à 0,20 en même temps que la largeur :
+//     un ruban fin qui vole aussi haut qu'un ruban épais ne survole plus, il
+//     lévite — la garde se lit toujours PAR RAPPORT à la largeur.
+//   • parPente reste FAIBLE. La non-pénétration est déjà garantie ailleurs
+//     (plancher pris au point le plus haut sous la largeur, puis garde remise
+//     après lissage) : ce terme n'est plus qu'un confort visuel. Trop fort, il
+//     faisait varier le survol de 0,31 à 1,48 selon la pente — un survol qui
+//     change du simple au quintuple se lit comme un défaut, pas comme un vol.
+//   • lissages : le chemin se contente d'un adoucissement court (le bruit GPS
+//     se compte en dizaines de mètres), l'altitude en demande beaucoup plus,
+//     parce que c'est le RELIEF sous le tracé qui est bruité, pas le tracé.
+// ⚠️ QUATRIÈME RÉGLAGE — encore plus bas, encore plus fidèle. Le survol tombe
+// à 0,06, soit moins de la MOITIÉ de la largeur du ruban : à cette hauteur il
+// ne plane plus, il effleure. Et les lissages sont à nouveau divisés par deux.
+//
+// Ce qui rend cette précision possible SANS danger, c'est que la
+// non-pénétration ne repose PAS sur le lissage : le plancher est pris au point
+// le plus haut sous toute la largeur, et la garde est remise APRÈS lissage
+// (voir ruban-trace.js). On peut donc serrer ces valeurs autant qu'on veut —
+// le ruban suivra le terrain de plus en plus près sans jamais y entrer. La
+// seule limite est esthétique : à lissage nul, il reprendrait le bruit du DEM.
+const RUBAN_GARDE = 0.06
+const RUBAN_PAR_PENTE = 0.06
+const RUBAN_PLAFOND = 0.1
+const RUBAN_LISSAGE_CHEMIN = 0.1
+const RUBAN_LISSAGE_ALTITUDE = 0.3
+const RUBAN_DILATATION = 0.1
+// Fondu des bords, en fraction de la demi-largeur : au-delà de ce seuil le
+// ruban s'efface progressivement au lieu de s'arrêter net. C'est l'autre
+// moitié du « dégradé plus diffus » — la couleur s'adoucit (voir
+// DIFFUSION_TEINTES) ET la silhouette cesse d'être découpée au ciseau.
+const RUBAN_FONDU_BORD = 0.55
 
+// ── LE SILLAGE DE TÊTE ────────────────────────────────────────────────────
+// L'effet de vitesse demandé par Adrien : une lueur filante qui vit devant le
+// tracé et se résorbe en quelques dizaines de mètres.
+// ⚠️ IL EST FABRIQUÉ EN GÉOMÉTRIE, PAS EN POST-TRAITEMENT. La passe de bloom
+// de l'appli a été retirée le 2026-08-02 (voir main.js) : pousser des couleurs
+// au-delà de 1 ne produirait donc AUCUNE lueur. Un second ruban, plus large et
+// en mélange additif, la fabrique explicitement — et coûte un draw call au lieu
+// d'une passe plein écran.
+const SILLAGE_LARGEUR = 5.5 // multiplie la demi-largeur du ruban
+const SILLAGE_TRAINE = 1.6 // longueur de la traîne, en unités monde
+const SILLAGE_VITESSE = 7 // défilement des filaments
+const SILLAGE_DENSITE = 5.5 // nombre de filaments par unité monde
 // village announcements (task 16 §3) — "plus de 5k habitants" per the brief,
 // verbatim.
 const VILLAGE_MIN_POP = 5000
@@ -542,6 +524,10 @@ export class GpxLayer {
     this.lineMat = null
     this.glowLine = null
     this.glowMat = null
+    this.ruban = null
+    this.rubanMat = null
+    this.sillage = null
+    this.sillageMat = null
     this.hoverIdx = -1
 
     // progressive-reveal playback: headT is the play position (0..1, by
@@ -567,35 +553,16 @@ export class GpxLayer {
     this.cursor.visible = false
     this.group.add(this.cursor)
 
-    // playback-head marker (task 24 §2): ONE composed sprite — a rounded
-    // badge (holding the sport icon) sitting directly on a downward-pointing
-    // triangle, baked into a single texture so the two parts can never drift
-    // apart (see composeHeadMarkerTexture() above). Billboarded +
-    // screen-space sized as usual (sizeAttenuation:false, HEAD_MARKER_BASE_H).
-    // `center` is set to the triangle's APEX (not the sprite's geometric
-    // centre) — see HM_APEX_V's comment — so `this.headMarker.position` IS
-    // the apex, letting _updateHead() add a small, genuinely constant
-    // world-space gap instead of one that scales with camera distance.
-    // Positioned each frame in _updateHead() at the EXACT reveal-head vertex
-    // (see revealVertexIndex()) — the same point _applyReveal() cuts the
-    // real Line2 to, never a separately-smoothed curve (see the task-16 bug
-    // report). _headDisp/_headDispValid are the critically-damped follow
-    // state that keeps its motion from stuttering (smoothing in TIME, not
-    // space — see stepHeadFollow()). No icon yet (setIcon() rebuilds the
-    // texture once the sport/custom icon resolves) so the badge starts empty
-    // rather than costing an extra sprite.
-    this.headMarker = new THREE.Sprite(
-      new THREE.SpriteMaterial({ map: composeHeadMarkerTexture(null, HEAD_MARKER_INK), depthTest: false, transparent: true })
-    )
-    this.headMarker.material.sizeAttenuation = false
-    this.headMarker.center.set(0.5, HM_APEX_V)
-    this.headMarker.scale.set(HEAD_MARKER_BASE_H * HM_ASPECT, HEAD_MARKER_BASE_H, 1)
-    this.headMarker.renderOrder = 23
-    this.headMarker.visible = false
-    this.group.add(this.headMarker)
+    // ⚠️ PLUS DE PICTO DE TÊTE DE COURSE. Le cartouche billboardé qui suivait
+    // la lecture a été retiré à la demande d'Adrien : sur une carte déjà
+    // peuplée de cartouches de points de passage, un cartouche de plus, mobile
+    // et toujours au premier plan, écrasait la lecture du parcours lui-même.
+    // Ce qui suit N'EST PAS mort pour autant : _headDisp reste la position de
+    // la tête, amortie dans le TEMPS (stepHeadFollow), et c'est elle que la
+    // caméra de poursuite lit via getHeadPos(). On a supprimé le dessin, pas
+    // le suivi.
     this._headDisp = new THREE.Vector3()
     this._headDispValid = false
-    this._headIconCanvas = null // the RAW icon canvas last passed to setIcon() — kept so a future ink/theme change could rebuild without a caller round-trip
 
     // multi-layer stacking (task 22 §2, "comme dans Figma") — an additive
     // renderOrder offset + a tiny world-Y nudge, set via setRenderDepth()
@@ -620,6 +587,14 @@ export class GpxLayer {
     this._villageFadeKm = 0
     this._villageBuildId = 0
 
+    // uniforme PARTAGÉ entre le matériau du ruban et _applyReveal : créé une
+    // seule fois pour survivre aux rebuild() du terrain (qui reconstruisent
+    // le maillage mais ne doivent pas rembobiner la lecture en cours)
+    this._rubanProgress = { value: 1 }
+    // horloge du sillage, avancée par tick() — PARTAGÉE elle aussi, pour la
+    // même raison : un rebuild du terrain en pleine lecture ne doit pas
+    // rembobiner l'animation des filaments
+    this._tempsSillage = { value: 0 }
     this._buildDom()
     this._ray = new THREE.Raycaster()
     this._mouseWorld = new THREE.Vector2()
@@ -661,6 +636,14 @@ export class GpxLayer {
       this.setHover(i, false)
     })
     this.profileCanvas.addEventListener('pointerleave', () => this.setHover(-1, false))
+    // le profil est redessiné quand SA BOÎTE change, pas seulement quand la
+    // trace change : embarqué dans la barre course, il passe d'un panneau
+    // flottant étroit à une zone pleine largeur — sans ça il garderait le
+    // bitmap de l'ancienne taille, donc une courbe étirée
+    if (typeof ResizeObserver !== 'undefined') {
+      this._profileRO = new ResizeObserver(() => this._drawProfile())
+      this._profileRO.observe(this.profileCanvas)
+    }
 
     // playback head label: altitude + slope readouts, tweened, floating near
     // the moving head (position:fixed DOM, same idea as gpx-tip)
@@ -686,6 +669,7 @@ export class GpxLayer {
     // pointNames: optional index -> custom label map, set via setPointName();
     // a fresh track always starts with no custom names
     this.track = { points, name, cumKm, world: null, pointNames: {} }
+    this._elesCache = null
     // trace neuve = titre neuf : ni le renommage du calque précédent ni le nom
     // de course de la trace précédente ne survivent (voir setDisplayName)
     this.displayName = ''
@@ -703,6 +687,10 @@ export class GpxLayer {
   // every terrain rebuild so the line always matches the relief under it.
   rebuild() {
     this._disposeLine()
+    // le drapage réécrit track.world EN PLACE : l'objet `track` ne change pas
+    // de référence, donc le cache d'altitudes de _elevations() ne peut pas le
+    // détecter tout seul. C'est ici qu'on le purge.
+    this._elesCache = null
     const dem = this.getDem()
     if (!this.track || !dem) return
 
@@ -749,6 +737,269 @@ export class GpxLayer {
     const vertexColors = gradientOn ? this._trackColors(eles) : null
     const ro = this._renderOffset
 
+    // ── LE RUBAN ────────────────────────────────────────────────────────
+    // Le tracé par défaut n'est plus une ligne d'écran mais un ruban couché
+    // dans le relief (voir l'en-tête de ruban-trace.js). Line2 reste en
+    // dessous, joignable par `gpxRuban: false` : il sert encore au dégradé
+    // par altitude/pente, que le ruban n'implémente pas (son dégradé à lui
+    // est transversal, c'est un modelé, pas une donnée).
+    const utiliseRuban = this.params.gpxRuban !== false && !gradientOn
+    if (utiliseRuban) {
+      this._construitRuban(world, lineColor, ro)
+      this._applyReveal(this._revealT ?? 1)
+    }
+    this._rebuildSuite({ pts, world, eles, vertexColors, gradientOn, lineColor, width, ro, utiliseRuban })
+  }
+
+  // Ruban qui survole le relief — la géométrie vient du module pur
+  // ruban-trace.js, ici on ne fait que l'habiller et l'accrocher à la scène.
+  _construitRuban(world, lineColor, ro) {
+    const fen = this.terrain?.fenetre ?? { x: 0, z: 0 }
+    const demiChamp = TERRAIN_SIZE / 2
+    const grid = this.getGrid?.()
+    // ⚠️ MÊME SOURCE D'ALTITUDE QUE LE DRAPÉ DES POINTS, sans quoi le ruban
+    // flotterait au-dessus du bloc voisin (ou s'y enfoncerait) dès qu'un tracé
+    // déborde du bloc central : c'est la règle du damier (voir rebuild()).
+    const sol = (x, z) => {
+      const dedans = Math.abs(x) < demiChamp && Math.abs(z) < demiChamp
+      if (dedans) return this.terrain.sample(x - fen.x, z - fen.z) + this._depthOffsetY
+      const h = grid?.heightAt(x, z)
+      return (h != null ? h : 0) + this._depthOffsetY
+    }
+
+    const largeur = RUBAN_DEMI_LARGEUR * (this.params.gpxWidth ?? 3)
+
+    // ⚠️ LES TEINTES SONT ÉCRITES EN sRGB, LE TAMPON VEUT DU LINÉAIRE. three.js
+    // (ColorManagement, actif par défaut depuis r152) considère un attribut
+    // `color` comme DÉJÀ linéaire et ne le convertit pas. Passer des valeurs
+    // sRGB brutes, c'est les faire éclaircir en sortie : le vermillon 1/0,42/0,08
+    // ressortait en 1/0,68/0,30, un ambre délavé qui se noyait dans la carte
+    // pâle — exactement le défaut qu'on essayait de corriger. Et le liseré
+    // « presque noir » 0,07/0,05/0,09 ressortait en brun moyen, donc n'ombrait
+    // plus rien. Un aller-retour par THREE.Color remet tout d'aplomb.
+    const versLineaire = (stops) => stops.map((c) => {
+      const k = new THREE.Color().setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace)
+      return [k.r, k.g, k.b]
+    })
+    // la couleur du panneau arrive en HEX, donc déjà convertie en linéaire par
+    // THREE.Color : on la relit en sRGB pour que les DEUX chemins déclinent le
+    // modelé dans le même espace, sinon les demi-teintes ne se ressemblent pas
+    const srgb = new THREE.Color(lineColor).getRGB({ r: 0, g: 0, b: 0 }, THREE.SRGBColorSpace)
+    const teintes = this.params.gpxRubanOr === false
+      ? teintesDepuis([srgb.r, srgb.g, srgb.b])
+      : TEINTES_COURSE
+
+    const r = construitRuban(world, {
+      sol,
+      demiLargeur: largeur,
+      pas: RUBAN_PAS,
+      garde: RUBAN_GARDE,
+      parPente: RUBAN_PAR_PENTE,
+      plafond: RUBAN_PLAFOND,
+      lissageChemin: RUBAN_LISSAGE_CHEMIN,
+      lissageAltitude: RUBAN_LISSAGE_ALTITUDE,
+      dilatationLongueur: RUBAN_DILATATION,
+      teintes: versLineaire(teintes),
+    })
+    if (!r.indices.length) return
+
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(r.positions), 3))
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(r.couleurs), 3))
+    // la position le long du tracé, par sommet : c'est elle qui permet un
+    // dévoilement CONTINU (voir _applyReveal)
+    geo.setAttribute('aDist', new THREE.BufferAttribute(new Float32Array(r.distances), 1))
+    // position EN TRAVERS (-1..1) : elle sert au fondu des bords, voir le
+    // shader plus bas
+    geo.setAttribute('aTrav', new THREE.BufferAttribute(new Float32Array(r.transverses), 1))
+    geo.setIndex(r.indices)
+    geo.computeBoundingSphere()
+
+    const mat = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.96,
+      side: THREE.DoubleSide,
+      // ⚠️ LE RUBAN ÉCRIT SA PROFONDEUR — contrairement à la version « posée au
+      // sol ». Tant qu'il était coplanaire au relief, écrire la profondeur ne
+      // faisait que provoquer du z-fighting pour rien. Maintenant qu'il SURVOLE,
+      // c'est un objet à part entière : sans écriture, un lacet qui repasse
+      // au-dessus d'un autre se mélangerait aux deux au lieu de le masquer, et
+      // le tracé perdrait sa lecture en épingles.
+      depthWrite: true,
+    })
+    // ⚠️ LE DÉVOILEMENT SE FAIT AU FRAGMENT, PAS À LA GÉOMÉTRIE. setDrawRange
+    // ne coupe qu'aux sommets : la tête avançait par bonds d'un sommet entier,
+    // et c'est exactement le « ça saccade » d'Adrien. En comparant une distance
+    // interpolée à un uniforme, la coupe tombe où elle veut DANS le triangle —
+    // l'avancée devient continue quelle que soit la densité du tracé.
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uProgress = this._rubanProgress
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          '#include <common>\nattribute float aDist;\nattribute float aTrav;\nvarying float vDist;\nvarying float vTrav;',
+        )
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvDist = aDist;\nvTrav = aTrav;')
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          '#include <common>\nuniform float uProgress;\nvarying float vDist;\nvarying float vTrav;',
+        )
+        .replace(
+          '#include <dithering_fragment>',
+          `#include <dithering_fragment>
+           if (vDist > uProgress) discard;
+           // pointe adoucie : une coupe franche ferait un bord net qui
+           // « clignote » quand la tête traverse un sommet
+           gl_FragColor.a *= smoothstep(uProgress, uProgress - 0.004, vDist) * 0.15 + 0.85;
+           // FONDU DES BORDS — la seconde moitié du « dégradé plus diffus ».
+           // La couleur s'adoucit déjà d'un rail à l'autre ; ici c'est la
+           // SILHOUETTE qui cesse d'être découpée au ciseau : au-delà du seuil,
+           // le ruban s'efface au lieu de s'arrêter net sur le relief.
+           gl_FragColor.a *= 1.0 - smoothstep(${RUBAN_FONDU_BORD.toFixed(2)}, 1.0, abs(vTrav));
+           // ⚠️ ON JETTE CE QUI EST QUASI TRANSPARENT. Le ruban ÉCRIT sa
+           // profondeur : sans ce rejet, la frange invisible du bord écrirait
+           // quand même dans le tampon et masquerait ce qui passe derrière.
+           if (gl_FragColor.a < 0.02) discard;`
+        )
+    }
+    mat.customProgramCacheKey = () => 'ruban-trace'
+    this._coupeALaFenetre(mat)
+
+    this.rubanMat = mat
+    this.ruban = new THREE.Mesh(geo, mat)
+    this.ruban.renderOrder = 6 + ro
+    this.ruban.frustumCulled = false
+    this.group.add(this.ruban)
+
+    this._construitSillage(world, sol, largeur, r, ro)
+  }
+
+  // ─────────────────────────── LE SILLAGE DE TÊTE ───────────────────────────
+  // « un effet de vitesse un peu tech qui bouge, un peu comme un blur et
+  // brillant à la fois, qui se résorbe progressivement » (Adrien).
+  //
+  // Un second ruban, bien plus large, en MÉLANGE ADDITIF : là où il se
+  // superpose à lui-même et au tracé, les lumières s'ajoutent et le cœur
+  // sature vers le blanc — c'est ce qui donne le noyau incandescent des
+  // références, sans passe de bloom (retirée de l'appli, voir les constantes).
+  //
+  // ⚠️ LA TRAÎNE SE COMPTE EN UNITÉS MONDE, PAS EN MÈTRES RÉELS. Un bloc fait
+  // toujours 56 unités quelle que soit l'étendue qu'il représente : une traîne
+  // fixée en mètres réels serait invisible sur un 200 km et noierait un 5 km.
+  // Un effet visuel se règle à l'échelle où on le REGARDE.
+  _construitSillage(world, sol, largeur, ruban, ro) {
+    // ⚠️ MÊMES ALTITUDES QUE LE RUBAN, imposées. Le halo est cinq fois plus
+    // large : s'il calculait son propre plancher, il le prendrait sur une bande
+    // cinq fois plus large donc plus haute, et sur un versant la lueur
+    // décollerait du tracé qu'elle enveloppe.
+    const s = construitRuban(world, {
+      sol,
+      demiLargeur: largeur * SILLAGE_LARGEUR,
+      pas: RUBAN_PAS,
+      lissageChemin: RUBAN_LISSAGE_CHEMIN,
+      altitudesImposees: ruban.altitudes,
+    })
+    if (!s.indices.length) return
+
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(s.positions), 3))
+    geo.setAttribute('aDist', new THREE.BufferAttribute(new Float32Array(s.distances), 1))
+    geo.setAttribute('aTrav', new THREE.BufferAttribute(new Float32Array(s.transverses), 1))
+    geo.setIndex(s.indices)
+    geo.computeBoundingSphere()
+
+    const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      // additif : la lumière s'AJOUTE au terrain au lieu de le remplacer
+      blending: THREE.AdditiveBlending,
+      // pas d'écriture de profondeur (sinon le halo masquerait le tracé qu'il
+      // entoure), mais le TEST reste actif : une crête avale la lueur, ce qui
+      // se lit comme une vraie lumière et non comme un autocollant
+      depthWrite: false,
+      // ⚠️ SANS CE BIAIS, LE SILLAGE EST INVISIBLE — mesuré : UN pixel gagné sur
+      // 935 × 595. Le halo partage exactement les altitudes du ruban (c'est
+      // voulu, voir plus haut) et le ruban, lui, ÉCRIT sa profondeur. Le cœur
+      // du halo — la partie qui porte toute la lumière — se retrouvait donc
+      // recalé par le test de profondeur contre le tracé qu'il est censé faire
+      // rayonner. Le biais se fait en espace de PROFONDEUR, pas en déplaçant la
+      // géométrie : constant à l'écran, et il ne décolle donc pas la lueur du
+      // tracé quand on s'éloigne (c'est la règle déjà retenue pour la ligne,
+      // voir le commentaire de DRAPE_LIFT).
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
+      side: THREE.DoubleSide,
+      uniforms: {
+        uProgress: this._rubanProgress,
+        uTemps: this._tempsSillage,
+        uTraine: { value: fractionDeTraine(SILLAGE_TRAINE, s.longueur) },
+        uLongueur: { value: s.longueur },
+        uBraise: { value: new THREE.Color().setRGB(1, 0.3, 0.05, THREE.SRGBColorSpace) },
+        uEtincelle: { value: new THREE.Color().setRGB(1, 0.93, 0.72, THREE.SRGBColorSpace) },
+      },
+      vertexShader: `
+        attribute float aDist;
+        attribute float aTrav;
+        varying float vDist;
+        varying float vTrav;
+        void main() {
+          vDist = aDist;
+          vTrav = aTrav;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: `
+        uniform float uProgress, uTemps, uTraine, uLongueur;
+        uniform vec3 uBraise, uEtincelle;
+        varying float vDist;
+        varying float vTrav;
+        void main() {
+          // distance DERRIÈRE la tête, en fraction de tracé
+          float d = uProgress - vDist;
+          if (d < 0.0 || d > uTraine) discard;
+          // résorption : le carré concentre la lumière juste derrière la tête
+          // et laisse la traîne s'éteindre en douceur, comme les références
+          float f = 1.0 - d / uTraine;
+          f *= f;
+
+          // DEUX gaussiennes superposées : un noyau étroit qui donne le trait
+          // incandescent, un halo large qui donne le flou. C'est leur somme qui
+          // fait lire « net ET flou en même temps ».
+          float a = abs(vTrav);
+          float noyau = exp(-a * a * 30.0);
+          float halo  = exp(-a * a * 2.6);
+
+          // LES FILAMENTS — l'effet de vitesse. Ils défilent vers l'arrière et
+          // sont cisaillés par la position transversale, ce qui les fait
+          // diverger en éventail au lieu de rester parallèles.
+          float phase = vDist * uLongueur * ${SILLAGE_DENSITE.toFixed(1)} - uTemps * ${SILLAGE_VITESSE.toFixed(1)} + a * 5.0;
+          float filaments = 0.62 + 0.38 * sin(phase);
+
+          float i = f * (noyau + halo * 0.42 * filaments);
+          // le cœur vire au blanc chaud, la traîne reste braise
+          vec3 teinte = mix(uBraise, uEtincelle, clamp(noyau * f * 1.4, 0.0, 1.0));
+          gl_FragColor = vec4(teinte * i, i);
+        }`,
+    })
+    this._coupeALaFenetre(mat)
+
+    this.sillageMat = mat
+    this.sillage = new THREE.Mesh(geo, mat)
+    // au-dessus du ruban : additif, il ne masque rien de toute façon
+    this.sillage.renderOrder = 7 + ro
+    this.sillage.frustumCulled = false
+    this.sillage.visible = false
+    this.group.add(this.sillage)
+  }
+
+  // La suite du rebuild : l'ancienne ligne Line2 (seulement quand le ruban
+  // n'est pas utilisé), puis tout ce qui se pose PAR-DESSUS le tracé —
+  // étiquettes, points de passage, bornes kilométriques, arches. Extrait de
+  // rebuild() pour que la construction du tracé ait deux implémentations sans
+  // dupliquer la centaine de lignes qui les suit.
+  _rebuildSuite({ pts, world, eles, vertexColors, gradientOn, lineColor, width, ro, utiliseRuban }) {
+    if (utiliseRuban) return this._rebuildDecors({ world, eles, ro })
     const geo = new LineGeometry()
     geo.setPositions(pts)
     if (vertexColors) geo.setColors(vertexColors)
@@ -798,6 +1049,18 @@ export class GpxLayer {
       this.group.add(this.glowLine)
     }
 
+    return this._rebuildDecors({ world, eles, ro })
+  }
+
+  // Tout ce qui se pose PAR-DESSUS le tracé, quelle que soit la façon dont il
+  // est dessiné : étiquettes de points, bornes kilométriques, arches, stats.
+  _rebuildDecors({ world, eles, ro }) {
+    // relus ici plutôt que passés depuis rebuild() : ce sont les deux seules
+    // valeurs de son ancienne portée dont les décors se servent, et les
+    // relire coûte moins qu'un paramètre de plus à faire suivre par les deux
+    // chemins de construction du tracé
+    const dem = this.getDem()
+    const fen = this.terrain?.fenetre ?? ZERO
     const names = this.track.pointNames || {}
     const mk = (label, v, scale = 1, opacity = 1) => {
       const s = textSprite(label, this.params.hudAccent, scale, opacity, 20 + ro)
@@ -893,8 +1156,12 @@ export class GpxLayer {
     this._syncProfileTitle()
     const totKm = this.track.cumKm[this.track.cumKm.length - 1]
     const gain = eles.reduce((g, e, i) => (i && e > eles[i - 1] ? g + e - eles[i - 1] : g), 0)
+    // ⚠️ Virgule décimale, pas point : cette ligne voisine le Carnet de course
+    // dans la barre course, qui formate en français. Deux séparateurs
+    // décimaux côte à côte dans la même barre, ça se remarque.
+    const km1 = totKm.toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
     this.profileEl.querySelector('.gpx-stats').textContent =
-      `${totKm.toFixed(1)} KM · ↗ ${Math.round(gain)} M · ${Math.round(Math.min(...eles))}–${Math.round(Math.max(...eles))} M`
+      `${km1} KM · ↗ ${Math.round(gain)} M · ${Math.round(Math.min(...eles))}–${Math.round(Math.max(...eles))} M`
     // respect the layer's visibility — a terrain rebuild must not resurrect
     // the profile strip while the track is hidden (or while in orbit)
     this.profileEl.classList.toggle('hidden', !this.group.visible)
@@ -1081,10 +1348,29 @@ export class GpxLayer {
     this._archGroups = []
   }
 
+  // ⚠️ MÉMORISÉ, ET LE COMPTE DES APPELS ÉTAIT FAUX. Par image de LECTURE, ce
+  // tableau était reconstruit QUATRE fois : setHover(), _drawProfile() (que
+  // setHover appelle), le Carnet de course (main.js, params.onHoverIndex) et
+  // _updateHead(). Le commentaire de main.js en comptait deux et en concluait
+  // qu'un troisième appel serait « cher en mémoire » — le raisonnement était
+  // bon, la mesure fausse, et la conclusion ne protégeait rien : à 2 400
+  // points (MAX_POINTS) c'étaient ~4 tableaux neufs par image, soit ~2 Mo/s de
+  // déchets pendant qu'une scène WebGL cherche à tenir 60 im/s.
+  //
+  // La clé d'invalidation est EXACTEMENT ce dont le résultat dépend, rien de
+  // plus : l'objet DEM (main.js rend `() => dem`, donc une référence NEUVE à
+  // chaque chargement de relief), l'exagération (elle divise mPerUnit) et la
+  // trace. `track.world` n'y figure pas parce qu'il est réécrit EN PLACE dans
+  // un objet `track` inchangé : c'est rebuild() qui vide le cache à la main,
+  // et setTrack() aussi. Sans ces deux purges, la mémoïsation rendrait des
+  // altitudes drapées sur le relief d'avant.
   _elevations() {
     const dem = this.getDem()
-    const mPerUnit = dem ? surfaceMetersPerUnit(dem) / this.params.demExaggeration : 1
-    return this.track.points.map((p, i) => {
+    const exag = this.params.demExaggeration
+    if (this.track && this._elesCache && this._elesTrack === this.track
+        && this._elesDem === dem && this._elesExag === exag) return this._elesCache
+    const mPerUnit = dem ? surfaceMetersPerUnit(dem) / exag : 1
+    const out = this.track.points.map((p, i) => {
       if (p.ele != null && Number.isFinite(p.ele)) return p.ele
       const w = this.track.world?.[i]
       // subtract the SAME lift rebuild() added, or every derived altitude is
@@ -1092,6 +1378,11 @@ export class GpxLayer {
       // literal repeated in two places that can drift apart
       return w && dem ? (w.y - DRAPE_LIFT) * mPerUnit + dem.meanM : 0
     })
+    this._elesTrack = this.track
+    this._elesDem = dem
+    this._elesExag = exag
+    this._elesCache = out
+    return out
   }
 
   // per-vertex [r,g,b, r,g,b, ...] ramp for the gradient modes, one triple
@@ -1129,12 +1420,59 @@ export class GpxLayer {
   _drawProfile() {
     if (!this.track?.world) return
     const cv = this.profileCanvas
+    // ⚠️ ON NE DESSINE PAS DANS UNE BOÎTE QUI N'EST PAS POSÉE — et surtout on
+    // ne retombe JAMAIS sur la taille du bitmap. Les deux états que le client
+    // a explicitement demandés mettent ce canvas à 0×0 en CSS SANS arrêter la
+    // lecture : la barre repliée (`.cb-collapsed .cb-body { height: 0 }`) et
+    // le téléphone (`.cb-zone-parcours { display: none }` sous 680 px). Le
+    // repli `cv.clientWidth || cv.width` rendait alors la taille du BITMAP —
+    // qu'on venait ensuite multiplier par la densité d'écran. Avec dpr = 2 :
+    // bmW = cv.width × 2 ≠ cv.width, donc on réécrivait cv.width = 2 × cv.width
+    // et l'image d'après recommençait : 800 → 1600 → 3200 → 6400… À raison
+    // d'un appel par image (setHover, en continu pendant la lecture), on
+    // dépassait la limite de canvas du navigateur en une fraction de seconde,
+    // pendant que la scène 3D tourne. Sur dpr = 1 c'était inoffensif : voilà
+    // pourquoi ça a pu passer.
+    // Sortir ici, c'est aussi ne plus rien redessiner NI appeler _elevations()
+    // tant que la barre est repliée ou la zone masquée.
+    if (!cv.clientWidth || !cv.clientHeight) return
     const ctx = cv.getContext('2d')
-    const css = getComputedStyle(document.documentElement)
-    const ink = css.getPropertyValue('--hud-ink').trim() || '#17191b'
-    const accent = css.getPropertyValue('--hud-accent').trim() || '#ff4d00'
-    const W = cv.width
-    const H = cv.height
+    // ⚠️ LES JETONS SE LISENT SUR LE CANVAS, PAS SUR <html>. Le mode sombre
+    // (body.dark) et la teinte de palette (main.js écrit les jetons sur
+    // document.body.style) posent les --ce-* sur BODY : lus sur
+    // documentElement, on récupérait les valeurs CLAIRES de :root — d'où une
+    // pastille de survol en porcelaine blanche au milieu d'une barre noire.
+    // Les propriétés personnalisées s'héritent : le canvas les a toutes.
+    const css = getComputedStyle(cv)
+    // ⚠️ DEUX ORANGES ET DEUX NOIRS COHABITAIENT DANS 152 px DE HAUT. Le
+    // profil se dessinait en --hud-ink (#17191b, noir FROID) et --hud-accent
+    // (#ff4d00, vermillon) pendant que la barre qui l'entoure est en --ce-ink
+    // (stone-900, noir CHAUD) et --ce-accent (orange-600). Le trait de la
+    // courbe touchait presque le chiffre « 42,3 » écrit dans une autre encre,
+    // et le remplissage orange de la courbe — la plus grande surface colorée
+    // de la barre — jurait avec le seul --ce-accent de la composition.
+    // Embarqué, le profil parle donc la langue de la barre ; autonome (HUD
+    // flottant), il garde la sienne.
+    const emb = !!cv.closest?.('.cb-embedded')
+    const jeton = (nom, repli) => css.getPropertyValue(nom).trim() || repli
+    const ink = emb ? jeton('--ce-ink', '#1c1917') : jeton('--hud-ink', '#17191b')
+    const accent = emb ? jeton('--ce-accent', '#ea580c') : jeton('--hud-accent', '#ff4d00')
+    // ⚠️ LE BITMAP SUIT SA BOÎTE — il n'est PLUS figé au 720×96 de l'attribut
+    // HTML. Un bitmap fixe étiré par CSS déforme tout ce qu'on y dessine :
+    // dans la barre course (large et basse), la courbe s'aplatissait et les
+    // chiffres du survol se comprimaient jusqu'à l'illisible. On redimensionne
+    // donc le bitmap à la taille RENDUE × la densité d'écran, et on dessine
+    // ensuite en pixels CSS (setTransform) — le code de tracé plus bas n'a pas
+    // à savoir que la densité existe. Plafond à 2 : au-delà on paie de la
+    // mémoire vidéo pour une courbe lissée que personne ne verra plus nette.
+    // ⚠️ clientWidth/clientHeight SEULS : voir la garde en tête de méthode.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    const W = Math.max(1, Math.round(cv.clientWidth))
+    const H = Math.max(1, Math.round(cv.clientHeight))
+    const bmW = Math.round(W * dpr)
+    const bmH = Math.round(H * dpr)
+    if (cv.width !== bmW || cv.height !== bmH) { cv.width = bmW; cv.height = bmH }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, W, H)
 
     const eles = this._elevations()
@@ -1143,8 +1481,50 @@ export class GpxLayer {
     const eMin = Math.min(...eles)
     const eMax = Math.max(...eles)
     const pad = 8
-    const X = (i) => pad + (this.track.cumKm[i] / totKm) * (W - pad * 2)
-    const Y = (e) => H - pad - ((e - eMin) / Math.max(eMax - eMin, 1)) * (H - pad * 2 - 10)
+    // ⚠️ LE PADDING HORIZONTAL ET LE VERTICAL N'ONT PAS LE MÊME PATRON. Le
+    // vertical (`pad`) est une réserve DE DESSIN : la courbe ne doit pas coller
+    // au bord haut/bas de son bitmap. L'horizontal, lui, était une MARGE — et
+    // une marge de plus, en double de celle que la zone porte déjà. Embarqué,
+    // le profil vit dans .cb-zone-parcours, qui a 22 px de padding (--cb-gutter,
+    // la marge de zone) : la courbe démarrait donc à 30 px du bord de la barre
+    // et l'étiquette « 1840 m » à 32, quand le titre de la tête, lui, commence
+    // à 22. Dix pixels de dérive entre les deux seuls textes calés à gauche de
+    // cette moitié de barre, et une zone dont le contenu ne touche jamais ses
+    // bords alors que le parti pris écrit en tête de course-bar.css est que le
+    // profil « est le sujet, il occupe la moitié de la barre et respire ».
+    // Autonome (HUD flottant), le panneau n'a pas de zone autour de lui : il
+    // garde ses 8 px.
+    const padX = emb ? 0 : pad
+    const X = (i) => padX + (this.track.cumKm[i] / totKm) * (W - padX * 2)
+    // ⚠️ LA RÉSERVE DU HAUT DOIT LOGER LA PASTILLE DE SURVOL, PAS LA MOITIÉ.
+    // Elle valait 10 px pour une pastille posée à `pad + 1` et haute de 17 px,
+    // soit 18 px d'encombrement : il en manquait 8, et la pastille passait
+    // donc systématiquement par-dessus le POINT CULMINANT — l'endroit exact
+    // qu'un coureur regarde en premier. En lecture, hoverIdx est maintenu en
+    // continu par la tête, donc le sommet était masqué en permanence.
+    // Conditionnelle : hors survol on ne paie pas cette réserve, la courbe
+    // récupère 15 px d'amplitude.
+    const reserve = this.hoverIdx >= 0 ? 19 : 4
+    // Amplitude plancher à 1. ⚠️ LE COMMENTAIRE D'AVANT DISAIT FAUX : il
+    // affirmait que « dans une barre repliée (corps à 0 px) H vaut 1 ». H
+    // valait cv.height, c'est-à-dire le bitmap — c'était l'écroulement décrit
+    // en tête de méthode. La barre repliée ne passe désormais plus par ici du
+    // tout ; le plancher reste pour la TRANSITION de repli, où la boîte est
+    // posée mais de quelques pixels seulement (H - 16 - 19 y serait négatif,
+    // donc une courbe dessinée à l'envers).
+    const ampli = Math.max(H - pad * 2 - reserve, 1)
+    const Y = (e) => H - pad - ((e - eMin) / Math.max(eMax - eMin, 1)) * ampli
+
+    // LIGNE DE BASE — la clé de lecture la moins chère qui soit : sans elle,
+    // rien ne dit où la courbe « pose » et l'aire flotte dans le vide.
+    if (emb) {
+      ctx.strokeStyle = jeton('--ce-hairline', 'rgba(0,0,0,0.08)')
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(padX, H - pad + 0.5)
+      ctx.lineTo(W - padX, H - pad + 0.5)
+      ctx.stroke()
+    }
 
     // area fill + line
     ctx.beginPath()
@@ -1152,7 +1532,15 @@ export class GpxLayer {
     for (let i = 0; i < eles.length; i++) ctx.lineTo(X(i), Y(eles[i]))
     ctx.lineTo(X(eles.length - 1), H - pad)
     ctx.closePath()
-    ctx.fillStyle = accent + '22'
+    // ⚠️ L'ACCENT EST RÉSERVÉ À LA POSITION DE LECTURE (réticule, repères de
+    // points, pastille) — voir la règle de couleur en tête de course-bar.css.
+    // Le remplissage de l'aire est la PLUS GRANDE surface de la barre et la
+    // plus STATIQUE : peint en accent, il dépensait la couleur vive sur ce qui
+    // ne change jamais, et la règle écrite disait le contraire de ce que le
+    // code faisait. Une ombre d'encre à 8 % dit « voici le volume » sans
+    // prétendre « voici ce qui bouge ». Le HUD flottant autonome, lui, garde
+    // sa propre langue (--hud-accent) : ce n'est pas la même composition.
+    ctx.fillStyle = emb ? ink + '14' : accent + '22'
     ctx.fill()
     ctx.beginPath()
     for (let i = 0; i < eles.length; i++) i ? ctx.lineTo(X(i), Y(eles[i])) : ctx.moveTo(X(i), Y(eles[i]))
@@ -1168,7 +1556,7 @@ export class GpxLayer {
       ctx.lineWidth = 1
       for (const t of this.raceTicks) {
         if (t.km > headKm) continue
-        const x = pad + (Math.min(t.km, totKm) / totKm) * (W - pad * 2)
+        const x = padX + (Math.min(t.km, totKm) / totKm) * (W - padX * 2)
         ctx.globalAlpha = 0.55
         ctx.beginPath()
         ctx.moveTo(x, pad)
@@ -1180,6 +1568,30 @@ export class GpxLayer {
         ctx.fillStyle = accent
         ctx.fill()
       }
+    }
+
+    // LES DEUX ALTITUDES EXTRÊMES, ÉCRITES SUR LE GRAPHIQUE (profil embarqué).
+    // ⚠️ C'EST L'ÉCHELLE Y DU DESSIN, pas une décoration : eMin/eMax sont
+    // littéralement les bornes de Y(). Elles vivaient uniquement dans le bloc
+    // « Altitude 320–1840 m » de la tête de barre — c'est-à-dire ailleurs, et
+    // masqué dès 1100 px de large. Un profil de 136 px de haut sans aucune
+    // graduation n'est pas un graphique, c'est une silhouette : on ne peut y
+    // lire ni à quelle altitude on court, ni quelle amplitude la courbe
+    // couvre. Écrites ici, elles suivent le graphique partout où il va.
+    // 72 % d'encre = --ce-muted-fort, en hexadécimal parce que le canvas doit
+    // recevoir une couleur qu'il sait lire dans TOUS les navigateurs (le jeton
+    // est un color-mix(), que fillStyle n'accepte pas partout).
+    if (emb) {
+      ctx.font = '500 11px "SF Mono", ui-monospace, monospace'
+      ctx.fillStyle = ink.length === 7 ? ink + 'b8' : ink
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'top'
+      // même bord gauche que la courbe (donc que le titre de la tête) : ces
+      // deux nombres sont l'ÉCHELLE du graphique, ils se lisent au ras de lui
+      ctx.fillText(`${Math.round(eMax)} m`, padX, pad + 1)
+      ctx.textBaseline = 'bottom'
+      ctx.fillText(`${Math.round(eMin)} m`, padX, H - pad - 2)
+      ctx.textBaseline = 'alphabetic'
     }
 
     // hover crosshair
@@ -1195,14 +1607,32 @@ export class GpxLayer {
       ctx.beginPath()
       ctx.arc(X(i), Y(eles[i]), 3.2, 0, Math.PI * 2)
       ctx.fill()
-      ctx.font = '10px "SF Mono", ui-monospace, monospace'
+      // pastille lisible plutôt que du texte nu posé sur la courbe : dans la
+      // barre course le profil est large et clair, un texte fin s'y perdait
+      // virgule décimale : ce texte voisine le Carnet, qui formate en français
+      const kmTxt = this.track.cumKm[i].toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+      const txt = `${Math.round(eles[i])} m · km ${kmTxt}`
+      ctx.font = '600 11px "SF Mono", ui-monospace, monospace'
+      const aDroite = X(i) > W / 2
+      const tw = ctx.measureText(txt).width
+      const bx = X(i) + (aDroite ? -tw - 12 : 6)
+      const by = pad + 1
+      ctx.globalAlpha = 0.92
+      ctx.fillStyle = css.getPropertyValue('--ce-porcelain').trim() || '#fbfbfc'
+      ctx.beginPath()
+      // le rayon vient du système (v28.css : --ce-radius-xs), il ne s'invente
+      // pas ici — la barre affichait cinq rayons dont deux, 5 et 2, n'étaient
+      // dans aucune échelle. Le canvas ne peut pas consommer un jeton CSS : on
+      // le LIT, on ne le recopie pas.
+      const rPastille = parseFloat(jeton('--ce-radius-xs', '4px')) || 4
+      ctx.roundRect?.(bx, by, tw + 10, 17, rPastille)
+      if (ctx.roundRect) ctx.fill()
+      ctx.globalAlpha = 1
       ctx.fillStyle = ink
-      ctx.textAlign = X(i) > W / 2 ? 'right' : 'left'
-      ctx.fillText(
-        `${Math.round(eles[i])} m · km ${this.track.cumKm[i].toFixed(1)}`,
-        X(i) + (X(i) > W / 2 ? -6 : 6),
-        pad + 8
-      )
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(txt, bx + 5, by + 9)
+      ctx.textBaseline = 'alphabetic'
     }
   }
 
@@ -1239,25 +1669,22 @@ export class GpxLayer {
 
   // isPlaybackHead distinguishes the two callers that share this bookkeeping
   // (hoverIdx tracking, profile crosshair, tooltip text): mouse-driven hover
-  // (from the 3D scene or the profile strip) shows the accent sphere;
-  // playback (from _updateHead()) shows the black triangle marker instead —
-  // see the task-13 brief's "circle -> triangle" ask. The triangle's own
-  // position/visibility is actually set in _updateHead() (the exact reveal-
-  // head vertex, damped in time — see stepHeadFollow()); this only
-  // suppresses the sphere so the two markers never show at once.
+  // (from the 3D scene or the profile strip) shows the accent sphere ;
+  // pendant la LECTURE, la position de la tête ne se marque plus d'aucun objet
+  // 3D (le picto a été retiré, voir le constructeur) — c'est la pointe du
+  // ruban dévoilé qui la donne, et le réticule du profil qui la chiffre.
   setHover(i, fromScene, clientX, clientY, isPlaybackHead = false) {
     this.hoverIdx = i
     if (i < 0 || !this.track?.world) {
       this.cursor.visible = false
-      this.headMarker.visible = false
       this.tipEl.classList.add('hidden')
       this._drawProfile()
+      this.params.onHoverIndex?.(-1)
       return
     }
     if (isPlaybackHead) {
       this.cursor.visible = false
     } else {
-      this.headMarker.visible = false
       this.cursor.visible = true
       this.cursor.position.copy(this.track.world[i])
       const s = Math.max(0.5, this.camera.position.distanceTo(this.cursor.position) * 0.02)
@@ -1280,6 +1707,11 @@ export class GpxLayer {
       this.tipEl.classList.add('hidden')
     }
     this._drawProfile()
+    // Hook générique pour un lecteur externe (Le Carnet de course) : reçoit
+    // le même index que la crosshair du profil, qu'il vienne du survol
+    // souris OU de la tête de lecture animée. GpxLayer ne sait rien du
+    // Carnet — il ne fait que prévenir.
+    this.params.onHoverIndex?.(i)
   }
 
   // ---------------------------------------------------------------- fly
@@ -1356,23 +1788,15 @@ export class GpxLayer {
     this.rebuild()
   }
 
-  // sport icon shown INSIDE the composed head-marker badge (task 22 §4/§3,
-  // rebuilt task 24 §2). `tex` is the SOURCE icon texture (a THREE.Texture
-  // whose .image is the small rasterized icon canvas — see sport-icons.js's
-  // rasterizeToCanvas + main.js's caching); lifecycle of THAT source texture
-  // still stays with the caller (GpxLayerManager may share/reuse one across
-  // several layers). What's NEW here: this class now bakes that icon into
-  // its OWN composed marker texture (see composeHeadMarkerTexture()), so
-  // THIS derived texture is what GpxLayer owns and must dispose itself —
-  // every call replaces it. Pass null/undefined to clear (no icon assigned,
-  // or its texture is still loading) — the badge still draws, just empty.
+  // ⚠️ L'ICÔNE DE SPORT N'A PLUS DE CONSOMMATEUR 3D. Elle n'était affichée que
+  // dans le cartouche de tête de course, retiré à la demande d'Adrien (voir le
+  // constructeur). On garde la méthode et la référence — le sélecteur d'icône
+  // du panneau Parcours et GpxLayerManager continuent de l'appeler, et l'icône
+  // sert encore dans la liste des parcours — mais elle ne compose plus rien
+  // dans la scène. À trancher : soit lui redonner une place (repère de départ,
+  // réticule du profil), soit retirer le sélecteur.
   setIcon(tex) {
-    const iconCanvas = tex?.image instanceof HTMLCanvasElement ? tex.image : null
-    this._headIconCanvas = iconCanvas
-    const newMap = composeHeadMarkerTexture(iconCanvas, HEAD_MARKER_INK)
-    this.headMarker.material.map?.dispose()
-    this.headMarker.material.map = newMap
-    this.headMarker.material.needsUpdate = true
+    this._headIconTex = tex || null
   }
 
   // multi-layer stacking (task 22 §2) — additive renderOrder + a small
@@ -1387,6 +1811,10 @@ export class GpxLayer {
   // advances the progressive-reveal head while playing — called from the
   // main render loop each frame with a real per-frame dt.
   tick(dt) {
+    // les filaments du sillage défilent en TEMPS, pas en distance : ils
+    // continuent donc de vibrer même quand la tête est commandée image par
+    // image par la poursuite, ou quand la lecture est en pause sur place
+    this._tempsSillage.value += dt
     // ⚠️ QUELQU'UN A LA MAIN SUR LA TÊTE — ON N'AVANCE PAS. La poursuite
     // hélicoptère commande la tête image par image (voir setHeadAt) et son
     // horloge n'a AUCUNE raison de coïncider avec celle de la lecture : la
@@ -1466,7 +1894,6 @@ export class GpxLayer {
     this._headCommande = false
     if (this.playing || !this.track) return
     this._applyReveal(1)
-    this.headMarker.visible = false
     this.headLabel?.classList.add('hidden')
     this._hideVillages()
     this.setHover(-1, false)
@@ -1485,21 +1912,35 @@ export class GpxLayer {
   // .setPositions, which sets it to the full segment count by default).
   _applyReveal(t) {
     this._revealT = THREE.MathUtils.clamp(t, 0, 1)
-    const count = revealVertexIndex(this._revealT, this._segCount)
+    // ⚠️ LE RUBAN NE SE COUPE PAS À LA GÉOMÉTRIE. Un simple uniforme, comparé
+    // par fragment à la distance interpolée le long du tracé (voir le shader
+    // dans _construitRuban) : la coupe tombe où elle veut À L'INTÉRIEUR d'un
+    // triangle. C'est ce qui supprime les à-coups — instanceCount, lui, ne
+    // pouvait avancer que d'un sommet entier à la fois, et sur un GPX décimé
+    // à 2 400 points ce cran se voyait.
+    this._rubanProgress.value = this._revealT
+    // le sillage n'a de sens que s'il Y A une tête : tracé entièrement
+    // dévoilé, plus rien n'avance, donc plus de lueur de vitesse
+    if (this.sillage) this.sillage.visible = this._revealT < 0.999
+    // Line2 (repli quand le dégradé de pente est actif) ne sait couper qu'à un
+    // sommet entier : on lui donne le sommet qui correspond à la même
+    // DISTANCE, pas au même rang — voir indexALAbscisse.
+    const count = Math.min(indexALAbscisse(this._revealT, this.track?.cumKm), this._segCount)
     if (this.line) this.line.geometry.instanceCount = count
     if (this.glowLine) this.glowLine.geometry.instanceCount = count
   }
 
-  // positions the head marker + tweened alt/slope label at the current
-  // headT, and drives the profile-strip cursor to match (setHover keeps the
-  // DOM tooltip suppressed since fromScene is false here).
+  // Place la position de tête suivie par la caméra, l'étiquette alt/pente, et
+  // pousse le réticule du profil au même endroit (setHover garde l'infobulle
+  // DOM muette puisque fromScene est faux ici).
   _updateHead(dt) {
     const world = this.track.world
-    // the SAME formula _applyReveal() just cut the real Line2 to — see
-    // revealVertexIndex()'s own comment. This is what fixes the task-16 bug:
-    // one function, one answer, used by both the geometry and the marker.
-    const headIdx = revealVertexIndex(this.headT, this._segCount)
-    this.setHover(headIdx, false, undefined, undefined, true) // playback: triangle, not the hover sphere
+    // ⚠️ LA MÊME MESURE QUE LE RUBAN — la distance parcourue, pas le rang du
+    // sommet (voir indexALAbscisse). C'est ce qui recale entre eux le ruban,
+    // le réticule du profil, les chiffres du carnet et la caméra : ils lisent
+    // tous le même `headT`, converti une seule fois, ici.
+    const headIdx = indexALAbscisse(this.headT, this.track.cumKm)
+    this.setHover(headIdx, false, undefined, undefined, true)
 
     const eles = this._elevations()
     const cumKm = this.track.cumKm
@@ -1516,30 +1957,14 @@ export class GpxLayer {
     this._dispSlope =
       this._dispSlope == null ? targetSlope : THREE.MathUtils.damp(this._dispSlope, targetSlope, lambda, dt)
 
-    // marker position: EXACTLY the real track vertex the Line2 is cut to
-    // (world[headIdx] — same idx as above), critically-damped in TIME (never
-    // a different, smoother curve — see stepHeadFollow()'s comment and the
-    // task-16 bug report). world[headIdx].y already carries the real terrain
-    // sample from rebuild() (terrain.sample(x,z) + 0.16), so riding it also
-    // fixes "le triangle doit suivre le dénivelé" for free — no separate
-    // elevation lookup needed.
+    // La position de tête n'est plus dessinée (le picto a été retiré), mais
+    // elle reste calculée : c'est ce que la caméra de poursuite lit via
+    // getHeadPos(), et ce qui ancre l'étiquette alt/pente juste en dessous.
+    // Amortie dans le TEMPS, jamais le long d'une courbe différente — sans
+    // quoi la caméra viserait un point que le ruban n'a pas encore atteint.
     stepHeadFollow(this._headDisp, world[headIdx], HEAD_FOLLOW_LAMBDA, dt, this._headDispValid)
     this._headDispValid = true
     const pos = this._headDisp
-    // task 24 §2: a small, CONSTANT world-space gap above the ground — NOT
-    // scaled by camera distance (the old `camDist * 0.02` formula this
-    // replaces is exactly the bug the brief flagged: "vraiment juste au
-    // dessus du sol, toujours" means the same tiny gap at any zoom/pitch,
-    // not one that balloons far from the camera). This is only possible
-    // because the sprite's pivot is the triangle's own apex (see
-    // HM_APEX_V/this.headMarker.center in the constructor) — position.y
-    // here already carries world[headIdx].y = terrain.sample(x,z) + 0.16
-    // (the line's own anti-z-fight lift, see the comment above), so the
-    // apex sits ~0.16+0.05 world units above the true terrain sample —
-    // small and, critically, the SAME at any zoom (see the task-24 report's
-    // measured gap across a full playback run).
-    this.headMarker.position.set(pos.x, pos.y + HEAD_MARKER_GROUND_GAP, pos.z)
-    this.headMarker.visible = true
 
     const v = pos.clone().project(this.camera)
     const x = (v.x * 0.5 + 0.5) * window.innerWidth
@@ -1697,6 +2122,20 @@ export class GpxLayer {
     this._disposeArches()
     this._ponctuels = [] // les objets qu'il pointait viennent d'être détruits
     this._segCount = 0
+    if (this.sillage) {
+      this.group.remove(this.sillage)
+      this.sillage.geometry.dispose()
+      this.sillageMat?.dispose()
+      this.sillage = null
+      this.sillageMat = null
+    }
+    if (this.ruban) {
+      this.group.remove(this.ruban)
+      this.ruban.geometry.dispose()
+      this.rubanMat?.dispose()
+      this.ruban = null
+      this.rubanMat = null
+    }
     if (this.line) {
       this.group.remove(this.line)
       this.line.geometry.dispose()
@@ -1740,7 +2179,6 @@ export class GpxLayer {
     this._disposeVillages()
     this.track = null
     this.cursor.visible = false
-    this.headMarker.visible = false
     this._headDispValid = false
     this._villageHits = []
     this._villageLeadKm = 0

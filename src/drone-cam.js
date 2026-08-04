@@ -199,12 +199,18 @@ export class DroneCam {
     // sur la tête, sans latence — la tête est TOUJOURS pile au centre.
     // ADOUCI (retour Adrien 2026-07-24 : « moins d'à-coups, plus souple ») —
     // on revient vers des demi-vies longues ; la verticale est la plus
-    // amortie (c'est elle qui encaisse le relief et créait les secousses)
-    this.posHalfLife = 0.32 // s — latence de suivi horizontale
-    this.posHalfLifeY = 0.6 // la bosse se lisse au lieu de secouer
+    // amortie (c'est elle qui encaisse le relief et créait les secousses).
+    // ATTÉNUÉ À NOUVEAU (2026-08-04, « la caméra peut atténuer ses
+    // mouvements ») : demi-vies allongées d'environ trois quarts. Ce n'est pas
+    // qu'un confort — le ruban vient d'être rendu BEAUCOUP plus fidèle au
+    // terrain (lissages divisés par deux, garde à 0,06), donc la tête que
+    // cette caméra suit accidente davantage. Amortir plus, c'est ce qui permet
+    // au tracé d'être précis sans que la vue en paie le prix.
+    this.posHalfLife = 0.55 // s — latence de suivi horizontale
+    this.posHalfLifeY = 1.05 // la bosse se lisse au lieu de secouer
     this.maxYawRateDeg = 120 // conservés pour compat API (plus utilisés par _aim)
     this.maxPitchRateDeg = 160
-    this.rotHalfLife = 0.2 // aim adouci lui aussi
+    this.rotHalfLife = 0.34 // aim adouci lui aussi
     this._headWorld = null // vraie position monde de la tête (passée par main.js)
 
     this._q = new THREE.Quaternion()

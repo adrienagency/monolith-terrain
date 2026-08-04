@@ -48,7 +48,7 @@ class FakeDoc {
 
 let parseGpx
 let frameTrack
-let revealVertexIndex
+let indexALAbscisse
 let stepHeadFollow
 let pickKmInterval
 let profileTitle
@@ -56,8 +56,6 @@ let pickVillagesAlongTrack
 let villageLeadKm
 let villageOpacity
 let detectLoop
-let HM_APEX_V
-let HEAD_MARKER_GROUND_GAP
 let slopeRampColor
 let THREE
 before(async () => {
@@ -70,7 +68,7 @@ before(async () => {
   ;({
     parseGpx,
     frameTrack,
-    revealVertexIndex,
+    indexALAbscisse,
     stepHeadFollow,
     pickKmInterval,
     profileTitle,
@@ -78,8 +76,6 @@ before(async () => {
     villageLeadKm,
     villageOpacity,
     detectLoop,
-    HM_APEX_V,
-    HEAD_MARKER_GROUND_GAP,
     slopeRampColor,
   } = await import('../src/gpx.js'))
 })
@@ -141,21 +137,42 @@ test('throws when under two usable points', () => {
   assert.throws(() => parseGpx(wrap(pt(45, 6, 1))), /no track points|no usable/)
 })
 
-// ---- reveal head (task 16 §1: the triangle-vs-reveal-head bug) ------------
+// ---- tête de lecture : l'abscisse curviligne est la seule référence --------
 
-test('revealVertexIndex matches the exact vertex _applyReveal() cuts the line to', () => {
-  assert.equal(revealVertexIndex(0, 10), 0)
-  assert.equal(revealVertexIndex(1, 10), 10)
-  assert.equal(revealVertexIndex(0.5, 10), 5)
-  // rounds, doesn't floor/ceil — a t just past the midpoint between two
-  // vertices should land on the nearer one
-  assert.equal(revealVertexIndex(0.049, 10), 0)
-  assert.equal(revealVertexIndex(0.051, 10), 1)
+test('indexALAbscisse rend l’index à la DISTANCE demandée, pas au rang demandé', () => {
+  // points réguliers : distance et rang coïncident, c’est le cas facile
+  const regulier = [0, 1, 2, 3, 4]
+  assert.equal(indexALAbscisse(0, regulier), 0)
+  assert.equal(indexALAbscisse(1, regulier), 4)
+  assert.equal(indexALAbscisse(0.5, regulier), 2)
 })
 
-test('revealVertexIndex is degenerate-safe (no track / zero segments)', () => {
-  assert.equal(revealVertexIndex(0.5, 0), 0)
-  assert.equal(revealVertexIndex(0.5, null), 0)
+test('LE BUG DE DÉSYNCHRONISATION : sur un tracé irrégulier, rang ≠ distance', () => {
+  // 4 points serrés (un lacet) puis un très long segment (une ligne droite) —
+  // exactement la forme d’un vrai relevé GPS
+  const cumKm = [0, 0.1, 0.2, 0.3, 10]
+  // à mi-DISTANCE (5 km) on est au milieu du long segment, donc au dernier
+  // point atteint : l’index 3. L’ancienne formule par rang rendait
+  // round(0,5 × 4) = 2, c’est-à-dire 200 m — 4,8 km d’écart.
+  assert.equal(indexALAbscisse(0.5, cumKm), 3)
+  const parRang = Math.round(0.5 * (cumKm.length - 1))
+  assert.notEqual(indexALAbscisse(0.5, cumKm), parRang)
+})
+
+test('indexALAbscisse choisit le sommet le PLUS PROCHE, sans biais systématique', () => {
+  const cumKm = [0, 10, 20]
+  assert.equal(indexALAbscisse(0.24, cumKm), 0) // 4,8 km : plus près de 0
+  assert.equal(indexALAbscisse(0.26, cumKm), 1) // 5,2 km : plus près de 10
+})
+
+test('indexALAbscisse survit aux cas dégénérés', () => {
+  assert.equal(indexALAbscisse(0.5, null), 0)
+  assert.equal(indexALAbscisse(0.5, []), 0)
+  assert.equal(indexALAbscisse(0.5, [0]), 0)
+  assert.equal(indexALAbscisse(0.5, [0, 0]), 0) // tracé immobile : pas de division par zéro
+  // hors bornes : on reste dans le tracé
+  assert.equal(indexALAbscisse(-3, [0, 1, 2]), 0)
+  assert.equal(indexALAbscisse(9, [0, 1, 2]), 2)
 })
 
 test('stepHeadFollow snaps (not eases) on the first call — no fly-in from a stale spot', () => {
@@ -181,7 +198,9 @@ test('stepHeadFollow eases toward (not through) a moving target once valid', () 
 test('the reveal-head follow tracks real (rising) terrain elevation, with a small max lag', async () => {
   const { points } = parseGpx(await (await import('node:fs/promises')).readFile(new URL('./fixtures-montenvers.gpx', import.meta.url), 'utf8'))
   const world = points.map((p, i) => new THREE.Vector3(i * 0.15, p.ele / 100 + 0.16, Math.sin(i * 0.35) * 0.3))
-  const segCount = world.length - 1
+  // distance cumulée réelle du tracé : c’est elle qui gradue la lecture
+  const cumKm = [0]
+  for (let i = 1; i < world.length; i++) cumKm.push(cumKm[i - 1] + world[i].distanceTo(world[i - 1]))
 
   const duration = 8 // short climb, clamp(90, max(8, totalKm*1.5)) territory
   const dt = 1 / 60
@@ -192,7 +211,7 @@ test('the reveal-head follow tracks real (rising) terrain elevation, with a smal
   const ys = []
   while (headT < 1) {
     headT = Math.min(1, headT + dt / duration)
-    const idx = revealVertexIndex(headT, segCount)
+    const idx = indexALAbscisse(headT, cumKm)
     const target = world[idx]
     stepHeadFollow(disp, target, 14, dt, valid)
     valid = true
@@ -332,24 +351,14 @@ test('villageOpacity ramps in before the hit, peaks at it, fades out after', () 
   assert.equal(villageOpacity(11, hitKm, lead, fade), 0, 'gone well after passing')
 })
 
-// ---- composed playback-head marker (task 24 §2) ----------------------------
-// "Fais attention à ce que ce pointeur soit vraiment juste au dessus du sol,
-// toujours" — the apex-to-ground gap must be a genuine WORLD-SPACE constant,
-// never a function of camera distance. This is only true because the sprite
-// pivots on its own apex (HM_APEX_V ~ 0) rather than its geometric centre —
-// pin both numbers so a future change can't silently reintroduce a
-// distance-scaled offset (the exact bug this task fixed).
-
-test('HM_APEX_V pins the sprite pivot to the triangle apex (not the sprite centre)', () => {
-  assert.ok(Math.abs(HM_APEX_V) < 1e-6, `expected the pivot at the apex (~0), got ${HM_APEX_V}`)
-})
-
-test('HEAD_MARKER_GROUND_GAP is a small, fixed world-unit constant', () => {
-  assert.ok(HEAD_MARKER_GROUND_GAP > 0 && HEAD_MARKER_GROUND_GAP < 0.3, `gap ${HEAD_MARKER_GROUND_GAP} is not in a "small and constant" band`)
-  // it's a plain number, not a function — nothing here CAN read camera
-  // distance, which is the structural guarantee the brief asked for
-  assert.equal(typeof HEAD_MARKER_GROUND_GAP, 'number')
-})
+// Le cartouche de tête de course (un badge portant l'icône du sport, posé sur
+// un triangle) a été SUPPRIMÉ à la demande d'Adrien : sur une carte déjà
+// peuplée de cartouches de points de passage, un cartouche mobile de plus,
+// toujours au premier plan, écrasait la lecture du parcours. Les deux
+// constantes qui épinglaient sa géométrie (HM_APEX_V, HEAD_MARKER_GROUND_GAP)
+// et leurs tests sont partis avec lui. Ce qui reste testé plus haut, c'est
+// stepHeadFollow : la position de tête existe toujours, la caméra de
+// poursuite la lit — c'est le DESSIN qu'on a retiré, pas le suivi.
 
 // ---- six-stop slope ramp (task 27 §1) --------------------------------------
 // "Pente faible bleu > vert > jaune > orange > rouge > noir (pente max)" —

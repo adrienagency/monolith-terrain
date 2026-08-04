@@ -33,6 +33,61 @@
   --ce-gap-control: 8px; /* between sibling controls (rows) in a group */
   --ce-gap-group: 14px; /* before an L3 sub-group heading / between groups */
   --ce-gap-tight: 6px; /* between a heading/label and the content it introduces */
+
+  /* ÉCHELLE TYPOGRAPHIQUE — cinq paliers, un par RÔLE, et rien entre les deux.
+     Posée pour la barre course (course-bar.css / carnet-course.css), où douze
+     tailles cohabitaient dans 152 px de haut : 9 / 9,5 / 10 / 10,5 / 11 / 12 /
+     13,5 / 14 / 15 / 16 / 17 / 34. Le même rôle sémantique — le suffixe
+     d'unité — y avait trois tailles selon la zone. 9 contre 9,5, ou 13,5
+     contre 14 : invisibles à l'œil, bien réels dans le fichier, et preuve
+     qu'aucune décision n'avait été prise, seulement des retouches successives.
+     ⚠️ PLANCHER À 11 px, ET IL EST DUR. En dessous, un libellé posé sur du
+     verre translucide à travers lequel bouge un rendu 3D ne se lit plus.
+     Quand la place manque, on la prend ailleurs — jamais sur la taille. */
+  --ce-t-micro: 11px; /* libellés capitale (DISTANCE, PENTE, RESTANTS) */
+  --ce-t-unit: 11px; /* suffixes d'unité (km, m, %) — même palier, autre rôle */
+  --ce-t-body: 13px; /* un nom propre : point de passage, lieu */
+  --ce-t-num: 17px; /* les chiffres qui se lisent depuis un fauteuil */
+  /* LE NOM DE LA COURSE, unique par écran, en serif éditorial. Sixième palier
+     ajouté le 2026-08-04 : le titre partageait --ce-t-num avec les quatre
+     valeurs de la tête de barre, mais à taille ÉGALE un mono gras l'emporte
+     optiquement sur un serif en 400 — le seul geste éditorial de l'écran
+     (demande n°7 d'Adrien) était donc l'élément le plus faible de sa propre
+     ligne. Un palier, pas un réglage : il ne sert qu'à ça. */
+  --ce-t-title: 22px;
+  --ce-t-hero: 34px; /* LE chiffre, un seul par panneau */
+  /* le même rôle que --ce-t-hero, sur un écran COURT (téléphone en paysage,
+     @media max-height dans course-bar.css). Déclaré ici parce qu'un palier
+     inventé dans une media query est un palier que personne ne retrouve. */
+  --ce-t-hero-compact: 26px;
+  /* LE LIBELLÉ D'UN CONTRÔLE — sixième rôle, déclaré le 2026-08-04 parce qu'il
+     EXISTAIT DÉJÀ, en dur, dans deux composants : .ce-btn était à 12 px et
+     .ce-seg-btn à 11,5 px, deux valeurs qui n'appartenaient à aucun palier.
+     La barre course rendait donc 11 / 11,5 / 12 / 13 / 17 / 22 / 34 — quatre
+     tailles dans une fourchette de 2 px, c'est-à-dire la « flaque » que cette
+     échelle dit avoir asséchée, reconstituée par un autre chemin, pendant que
+     l'en-tête de course-bar.css jurait « uniquement les paliers --ce-t-* ».
+     Un libellé de contrôle n'est ni un micro-libellé en capitales (11) ni un
+     nom propre (13) : c'est le texte d'un objet qu'on CLIQUE, il se pose un
+     cran sous le contenu qu'il commande. Un palier, deux composants, et
+     0,5 px de moins sur le segmenté — invisible partout ailleurs. */
+  --ce-t-control: 12px;
+
+  /* LES RAYONS, EN ÉCHELLE EUX AUSSI. --ce-radius (16) était le seul déclaré :
+     tout ce qui est plus petit qu'un panneau s'inventait donc sa forme au cas
+     par cas — la seule barre course en comptait cinq (16, 10, 8, 5, 2), dont
+     deux qui n'appartenaient à rien. Deux paliers couvrent ce qui vit DANS un
+     panneau : une puce ou un champ (s), une bande ou une pastille (xs). */
+  --ce-radius-s: 8px;
+  --ce-radius-xs: 4px;
+
+  /* pente sémantique (carnet-course.css) — séparée de --ce-accent, qui reste
+     réservé à l'action. Sémantique et non décorative : elle ne suit donc PAS
+     la palette du relief (une pente raide reste rouge sur une carte verte).
+     Elle suit en revanche le thème, voir body.dark plus bas. */
+  --cc-douce: #3f7a4f;
+  --cc-soutenue: #c98a2c;
+  --cc-raide: #b5432f;
 }
 body.dark {
   --ce-ink: #e7e5e4; /* stone-200 */
@@ -50,6 +105,14 @@ body.dark {
   --ce-track: rgba(231, 229, 228, 0.16);
   --ce-hover: rgba(231, 229, 228, 0.06);
   --ce-porcelain: #17191d;
+  /* pente sémantique, remontée en luminosité : les versions claires
+     (#3f7a4f / #c98a2c / #b5432f) descendent sous le seuil de lisibilité sur
+     le fond sombre de la barre course — un vert forêt sur un brun-noir ne se
+     distingue plus d'un gris. Mêmes teintes, plus claires et un peu moins
+     saturées, pour garder le même code couleur d'un thème à l'autre. */
+  --cc-douce: #6fbe83;
+  --cc-soutenue: #eab54f;
+  --cc-raide: #e9705a;
 }
 
 .ce-glassbox {
@@ -2195,11 +2258,14 @@ body.ce-railR-off .ce-dock-right {
   flex: 1;
   height: 26px;
   border: 0;
-  border-radius: 8px;
+  /* la puce d'un segmenté est le petit rayon du système — déclaré, plus
+     recopié (voir --ce-radius-s en tête de fichier) */
+  border-radius: var(--ce-radius-s);
   background: transparent;
   color: var(--ce-muted);
   font-family: var(--ce-font);
-  font-size: 11.5px;
+  /* 11,5 px n'était dans AUCUN palier — voir --ce-t-control en tête de fichier */
+  font-size: var(--ce-t-control);
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
@@ -2220,7 +2286,9 @@ body.ce-railR-off .ce-dock-right {
   background: transparent;
   color: var(--ce-ink);
   font-family: var(--ce-font);
-  font-size: 12px;
+  /* même palier que le segmenté : les deux sont des LIBELLÉS DE CONTRÔLE, et
+     ils étaient à 12 et 11,5 px — deux valeurs pour un seul rôle */
+  font-size: var(--ce-t-control);
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s;
