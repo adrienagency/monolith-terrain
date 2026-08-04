@@ -400,6 +400,29 @@ export function construitRuban(points, {
   return { positions, couleurs, indices, distances, transverses, altitudes, longueur, nbPoints: pts.length }
 }
 
+/**
+ * LE NEZ ARRONDI — de combien la coupe de tête RECULE, à la position
+ * transversale `u` (−1 au bord gauche, +1 au bord droit).
+ *
+ * ⚠️ POURQUOI CETTE FONCTION EXISTE. Le dévoilement compare la distance le
+ * long du tracé à un uniforme, et cette distance est la MÊME sur toute la
+ * largeur d'une section (les rails partagent leur abscisse). La coupe tombait
+ * donc perpendiculairement au tracé : un couperet bien droit, que la moindre
+ * capture d'écran trahissait. En reculant la coupe sur les bords selon
+ * `1 − √(1 − u²)`, le contour devient un demi-cercle exact de rayon égal à la
+ * demi-largeur — le tracé se termine en pointe ronde, comme un trait de pinceau.
+ *
+ * Le rayon s'exprime dans la MÊME unité que la distance comparée (fraction de
+ * tracé), d'où le passage par fractionDeTraine au câblage.
+ *
+ * Le shader en est la transcription littérale, en une ligne — c'est ici que la
+ * géométrie est décrite et vérifiée.
+ */
+export function retraitDuNez(u, rayon) {
+  const a = Math.min(1, Math.abs(fini(u)))
+  return fini(rayon) * (1 - Math.sqrt(1 - a * a))
+}
+
 // Convertit une longueur de traîne exprimée en unités MONDE (« le sillage dure
 // quelques dizaines de mètres ») en fraction du tracé, la seule unité que le
 // shader manipule puisque `aDist` est normalisé. Un tracé de 150 km et un de

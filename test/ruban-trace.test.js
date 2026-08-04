@@ -11,6 +11,7 @@ import {
   plancherDuRuban,
   construitRuban,
   fractionDeTraine,
+  retraitDuNez,
   teintesDepuis,
   profilDeTeintes,
   PROFIL_RAILS,
@@ -238,6 +239,41 @@ test('fractionDeTraine convertit une longueur MONDE en fraction de tracé', () =
   assert.equal(fractionDeTraine(1.6, 0), 0)
   assert.equal(fractionDeTraine(0, 40), 0)
   assert.equal(fractionDeTraine(NaN, 40), 0)
+})
+
+// ── nez arrondi ────────────────────────────────────────────────────────────
+
+test('retraitDuNez : nul sur l’axe, maximal aux bords, symétrique', () => {
+  assert.equal(retraitDuNez(0, 0.5), 0, 'au centre, le nez va aussi loin que la coupe')
+  assert.ok(Math.abs(retraitDuNez(1, 0.5) - 0.5) < 1e-12, 'au bord, il recule d’un rayon entier')
+  assert.ok(Math.abs(retraitDuNez(-0.6, 0.5) - retraitDuNez(0.6, 0.5)) < 1e-12)
+  // monotone : sinon le contour ondulerait au lieu de s’arrondir
+  let prec = -1
+  for (let u = 0; u <= 1; u += 0.05) {
+    const r = retraitDuNez(u, 0.5)
+    assert.ok(r >= prec, `retrait non monotone en u=${u}`)
+    prec = r
+  }
+})
+
+test('LE CONTOUR DU NEZ EST UN VRAI DEMI-CERCLE, pas une approximation', () => {
+  // le centre du cercle est à un rayon en arrière de la pointe, sur l’axe.
+  // Tout point du contour doit se trouver EXACTEMENT à un rayon de ce centre —
+  // c’est ça qui distingue un nez rond d’un nez simplement biseauté.
+  const rayon = 0.4
+  for (let u = -1; u <= 1; u += 0.1) {
+    const leLongDeLAxe = rayon - retraitDuNez(u, rayon) // depuis le centre du cercle
+    const enTravers = u * rayon // la demi-largeur EST le rayon, par construction
+    const d = Math.hypot(leLongDeLAxe, enTravers)
+    assert.ok(Math.abs(d - rayon) < 1e-12, `u=${u.toFixed(1)} : distance ${d}, attendue ${rayon}`)
+  }
+})
+
+test('retraitDuNez : cas dégénérés, jamais de NaN', () => {
+  // au-delà des bords (interpolation du GPU en coin de triangle) on plafonne
+  assert.ok(Math.abs(retraitDuNez(1.4, 0.5) - 0.5) < 1e-12)
+  assert.equal(retraitDuNez(0.5, 0), 0, 'rayon nul : aucun arrondi, pas une division par zéro')
+  for (const v of [retraitDuNez(NaN, 0.5), retraitDuNez(0.5, NaN)]) assert.ok(Number.isFinite(v))
 })
 
 // ── modelé transversal ─────────────────────────────────────────────────────

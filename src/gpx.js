@@ -833,6 +833,10 @@ export class GpxLayer {
     // et c'est exactement le « ça saccade » d'Adrien. En comparant une distance
     // interpolée à un uniforme, la coupe tombe où elle veut DANS le triangle —
     // l'avancée devient continue quelle que soit la densité du tracé.
+    // rayon du nez arrondi, dans l'unité du dévoilement (fraction de tracé) :
+    // il vaut la demi-largeur du ruban, ce qui fait du contour un demi-cercle
+    // exact — voir retraitDuNez() dans ruban-trace.js
+    const rayonNez = fractionDeTraine(largeur, r.longueur)
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.uProgress = this._rubanProgress
       shader.vertexShader = shader.vertexShader
@@ -849,10 +853,19 @@ export class GpxLayer {
         .replace(
           '#include <dithering_fragment>',
           `#include <dithering_fragment>
-           if (vDist > uProgress) discard;
+           // ⚠️ NEZ ARRONDI. La distance le long du tracé est la MÊME sur toute
+           // la largeur d'une section : couper dessus donnait un couperet bien
+           // droit, que la moindre capture d'écran trahissait. On recule la
+           // coupe sur les bords selon 1 − √(1 − u²) — le contour devient un
+           // demi-cercle exact de rayon égal à la demi-largeur. Transcription
+           // littérale de retraitDuNez() (ruban-trace.js), où la géométrie est
+           // décrite et vérifiée.
+           float aT = min(1.0, abs(vTrav));
+           float tete = uProgress - ${rayonNez.toFixed(8)} * (1.0 - sqrt(1.0 - aT * aT));
+           if (vDist > tete) discard;
            // pointe adoucie : une coupe franche ferait un bord net qui
            // « clignote » quand la tête traverse un sommet
-           gl_FragColor.a *= smoothstep(uProgress, uProgress - 0.004, vDist) * 0.15 + 0.85;
+           gl_FragColor.a *= smoothstep(tete, tete - 0.004, vDist) * 0.15 + 0.85;
            // FONDU DES BORDS — la seconde moitié du « dégradé plus diffus ».
            // La couleur s'adoucit déjà d'un rail à l'autre ; ici c'est la
            // SILHOUETTE qui cesse d'être découpée au ciseau : au-delà du seuil,
@@ -935,6 +948,9 @@ export class GpxLayer {
         uProgress: this._rubanProgress,
         uTemps: this._tempsSillage,
         uTraine: { value: fractionDeTraine(SILLAGE_TRAINE, s.longueur) },
+        // le halo a SON propre rayon de nez (il est bien plus large) : sans ça
+        // une lueur au front carré déborderait autour d'une pointe ronde
+        uRayonNez: { value: fractionDeTraine(largeur * SILLAGE_LARGEUR, s.longueur) },
         uLongueur: { value: s.longueur },
         uBraise: { value: new THREE.Color().setRGB(1, 0.3, 0.05, THREE.SRGBColorSpace) },
         uEtincelle: { value: new THREE.Color().setRGB(1, 0.93, 0.72, THREE.SRGBColorSpace) },
@@ -950,13 +966,18 @@ export class GpxLayer {
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }`,
       fragmentShader: `
-        uniform float uProgress, uTemps, uTraine, uLongueur;
+        uniform float uProgress, uTemps, uTraine, uLongueur, uRayonNez;
         uniform vec3 uBraise, uEtincelle;
         varying float vDist;
         varying float vTrav;
         void main() {
+          // MÊME NEZ ARRONDI QUE LE RUBAN (voir retraitDuNez, ruban-trace.js) :
+          // la tête du halo recule sur ses bords, sinon la lueur se terminerait
+          // au carré autour d'une pointe ronde.
+          float aT = min(1.0, abs(vTrav));
+          float tete = uProgress - uRayonNez * (1.0 - sqrt(1.0 - aT * aT));
           // distance DERRIÈRE la tête, en fraction de tracé
-          float d = uProgress - vDist;
+          float d = tete - vDist;
           if (d < 0.0 || d > uTraine) discard;
           // résorption : le carré concentre la lumière juste derrière la tête
           // et laisse la traîne s'éteindre en douceur, comme les références
