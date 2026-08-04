@@ -12,6 +12,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--", "--port", "5501", "--strictPort"],
       "port": 5501
+    },
+    {
+      "name": "monolith-regroupement",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "5503", "--strictPort"],
+      "port": 5503
     }
   ]
 }

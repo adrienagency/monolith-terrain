@@ -159,6 +159,17 @@ function trapezoid(t, ramp = 0.16) {
 // frame-rate-independent exponential approach (Lowe, Game Programming Gems 4)
 const damp = (cur, target, halfLife, dt) => cur + (target - cur) * (1 - Math.pow(2, -dt / halfLife))
 
+// amortit la VISEE (aim) vers sa cible, meme loi que `damp` mais appliquee en
+// place sur un objet {x,y,z} — c'est ce que _aim() utilise pour ne plus
+// pivoter la vue d'un coup a chaque petit changement de cap de la tete (voir
+// le commentaire de _aim ci-dessous pour l'arbitrage complet).
+export function amortisVisee(vise, cible, halfLife, dt) {
+  vise.x = damp(vise.x, cible.x, halfLife, dt)
+  vise.y = damp(vise.y, cible.y, halfLife, dt)
+  vise.z = damp(vise.z, cible.z, halfLife, dt)
+  return vise
+}
+
 export class DroneCam {
   // sampleGround(x, z) -> terrain surface height at world XZ
   constructor({ camera, controls, sampleGround }) {
@@ -211,7 +222,15 @@ export class DroneCam {
     this.maxYawRateDeg = 120 // conservés pour compat API (plus utilisés par _aim)
     this.maxPitchRateDeg = 160
     this.rotHalfLife = 0.34 // aim adouci lui aussi
+    // RELÂCHÉ (Adrien 2026-08-04, « tu peux relâcher un peu la pression sur la
+    // caméra pour fluidifier ») : la visée était verrouillée sans amortissement
+    // (voir l'historique de _aim ci-dessous) — chaque petit changement de cap
+    // de la tête pivotait donc la vue d'un coup. La moitié de posHalfLife
+    // (0,55 s) garde la visée nettement plus réactive que la position : on
+    // relâche la pression, on ne débraye pas le suivi.
+    this.aimHalfLife = 0.28
     this._headWorld = null // vraie position monde de la tête (passée par main.js)
+    this._viseDisp = new THREE.Vector3() // cible de visée amortie — posée sur la tête au start()
 
     this._q = new THREE.Quaternion()
     this._m = new THREE.Matrix4()
@@ -292,6 +311,11 @@ export class DroneCam {
     this.t = THREE.MathUtils.clamp(seedAt, 0, 1)
     this._desiredFor(this.t, this._pos)
     this.camera.position.copy(this._pos)
+    // pose la visée amortie SUR la tête avant la première image : sans ça
+    // _viseDisp part de l'origine du monde (0,0,0) et la toute première
+    // frame amortit un balayage géant jusqu'à la tête — même piège que
+    // _headDispValid dans gpx.js (snap au démarrage, jamais de damp à froid).
+    this._head(this.t, this._viseDisp)
     this._aim(0, this.t, false)
     this.active = true
     return true
@@ -398,16 +422,31 @@ export class DroneCam {
   }
 
   _aim(dt, s, arrived) {
-    // La tête est TOUJOURS pile au centre : on vise la VRAIE position monde de
-    // la tête (headWorld) et on regarde EXACTEMENT dessus — pas de cap de
-    // vitesse, pas de slerp d'orientation. Toute la douceur (ease-in-ease-out)
-    // vient du damping de POSITION plus haut ; l'aim, lui, ne lague jamais.
+    // RELÂCHÉ (Adrien 2026-08-04, « tu peux relâcher un peu la pression sur la
+    // caméra pour fluidifier »). Historique : cette fonction visait PILE la
+    // tête à chaque image, sans amortissement — « pas de cap de vitesse, pas
+    // de slerp d'orientation [...] l'aim, lui, ne lague jamais », choix
+    // délibéré à l'origine pour que toute la douceur vienne du seul damping
+    // de POSITION. Mais un aim à latence nulle pivote la vue d'un coup au
+    // moindre changement de cap de la tête, même quand la position glisse
+    // doucement — c'est le "à-coup" remonté par Adrien. La visée suit
+    // maintenant sa cible avec le même amortissement exponentiel que la
+    // position (aimHalfLife = 0,28 s, la MOITIÉ de posHalfLife = 0,55 s : on
+    // relâche la pression, on ne débraye pas). Contrepartie assumée : la tête
+    // n'est plus rigoureusement au centre pendant un virage — elle dérive un
+    // peu puis se recentre — mais reste nettement plus réactive que la
+    // position, donc jamais perçue comme "en retard".
     const head = this._head(s, _headPt)
-    this.controls.target.copy(head)
+    if (dt <= 0) this._viseDisp.copy(head)
+    else amortisVisee(this._viseDisp, head, this.aimHalfLife, dt)
+    this.controls.target.copy(this._viseDisp)
     this.camera.up.copy(this._up)
-    this.camera.lookAt(head)
-    // garde le heading/pitch cohérents pour syncToCamera() (suspension au drag)
-    _fwd.copy(head).sub(this._pos)
+    this.camera.lookAt(this._viseDisp)
+    // garde le heading/pitch cohérents pour syncToCamera() (suspension au
+    // drag) — calculés depuis la visée AMORTIE, pas la cible instantanée :
+    // sinon reprendre la main pendant un virage ferait sauter la vue jusqu'à
+    // la tête brute au lieu de repartir d'où l'œil la regardait vraiment.
+    _fwd.copy(this._viseDisp).sub(this._pos)
     const h = Math.hypot(_fwd.x, _fwd.z)
     if (h > 1e-6) { this._headingDir.set(_fwd.x / h, 0, _fwd.z / h); this._pitch = Math.atan2(_fwd.y, h) }
 
