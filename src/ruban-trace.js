@@ -126,6 +126,30 @@ export function teintesDepuis(teinte, rails = PROFIL_RAILS) {
   return profilDeTeintes(teinte, bord, rails)
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// LA LARGEUR — réglable depuis le panneau Parcours
+// ═══════════════════════════════════════════════════════════════════════════
+// La demi-largeur EFFECTIVE du ruban. Isolée ici (et plus dans gpx.js) parce
+// que TROIS endroits en dépendent — la géométrie du ruban, le rayon du nez
+// arrondi (rayonNez) et le halo de vitesse (_construitSillage, qui la reçoit
+// en paramètre) — et qu'ils doivent lire la MÊME valeur : sinon la pointe ne
+// colle plus à la largeur, ou le halo se détache du tracé qu'il enveloppe.
+// C'est aussi ce qui a permis de retrouver la régression : setWidth() ne
+// touchait que l'ancienne Line2 (lineMat/glowMat), jamais cette valeur-là, qui
+// est cuite dans la géométrie du ruban au moment du rebuild — il faut donc
+// reconstruire le ruban, pas juste changer un uniforme.
+// ⚠️ DIVISÉE PAR DEUX ET DEMI (0,055 → 0,022 à l'origine, dans gpx.js). Le
+// premier réglage donnait un ruban de 0,33 unité de large : un boudin qui
+// bouchait les vallées — « beaucoup trop épais pour la carte » (Adrien). Un
+// tracé de course se pose SUR une carte, il ne la remplace pas.
+export const RUBAN_DEMI_LARGEUR_BASE = 0.022
+export function largeurRuban(base, reglage) {
+  // reglage <= 0 ou non fini (undefined, null, NaN...) : on retombe sur 3, le
+  // defaut du panneau, plutot que produire un ruban nul ou invisible
+  const k = Number.isFinite(reglage) && reglage > 0 ? reglage : 3
+  return base * k
+}
+
 const dist2D = (a, b) => Math.hypot(b.x - a.x, b.z - a.z)
 const fini = (v, repli = 0) => (Number.isFinite(v) ? v : repli)
 

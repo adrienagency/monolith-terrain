@@ -8,7 +8,7 @@ import * as THREE from 'three'
 import { Line2 } from 'three/addons/lines/Line2.js'
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js'
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js'
-import { construitRuban, teintesDepuis, fractionDeTraine, TEINTES_COURSE } from './ruban-trace.js'
+import { construitRuban, teintesDepuis, fractionDeTraine, TEINTES_COURSE, largeurRuban, RUBAN_DEMI_LARGEUR_BASE } from './ruban-trace.js'
 import { TERRAIN_SIZE } from './terrain.js'
 import { latLonToWorld, metersPerPixel, surfaceMetersPerUnit, demSpan, EARTH_RADIUS_M } from './geo.js'
 import { dansFenetre } from './fenetre-clip.js'
@@ -414,15 +414,9 @@ const DRAPE_LIFT = 0.012
 // (~0,11 pour un bloc de 56 unités en 512 segments), donc la corde entre deux
 // sections reste toujours sous la flèche du relief.
 const RUBAN_PAS = 0.07
-// demi-largeur pour gpxWidth = 1 ; le réglage de largeur du panneau la
-// multiplie. En unités MONDE cette fois, plus en pixels d'écran — c'est tout
-// l'intérêt d'un ruban posé dans la scène : sa largeur veut dire quelque
-// chose au sol.
-// ⚠️ DIVISÉE PAR DEUX ET DEMI (0,055 → 0,022). Le premier réglage donnait un
-// ruban de 0,33 unité de large : un boudin qui bouchait les vallées — « beaucoup
-// trop épais pour la carte » (Adrien). Un tracé de course se pose SUR une carte,
-// il ne la remplace pas. On est maintenant à 0,13 unité au réglage par défaut.
-const RUBAN_DEMI_LARGEUR = 0.022
+// La demi-largeur de base (RUBAN_DEMI_LARGEUR_BASE) et le calcul qui la
+// combine au réglage du panneau (largeurRuban) vivent dans ruban-trace.js,
+// PAS ici — voir ce module pour le pourquoi (setWidth() en dépend aussi).
 // LE SURVOL. Toutes ces longueurs sont en unités monde, à rapporter à un bloc
 // de 56 unités dont le relief occupe une trentaine en vertical.
 //   • garde : le ruban doit se lire comme un objet POSÉ AU-DESSUS du relief et
@@ -767,7 +761,11 @@ export class GpxLayer {
       return (h != null ? h : 0) + this._depthOffsetY
     }
 
-    const largeur = RUBAN_DEMI_LARGEUR * (this.params.gpxWidth ?? 3)
+    // ⚠️ CETTE VALEUR EST CUITE DANS LA GÉOMÉTRIE — voir setWidth() et
+    // ruban-trace.js. rayonNez (plus bas) et _construitSillage() reçoivent
+    // tous les deux CETTE MÊME variable `largeur` : c'est ce qui les garde
+    // cohérents entre eux quand le réglage du panneau change.
+    const largeur = largeurRuban(RUBAN_DEMI_LARGEUR_BASE, this.params.gpxWidth)
 
     // ⚠️ LES TEINTES SONT ÉCRITES EN sRGB, LE TAMPON VEUT DU LINÉAIRE. three.js
     // (ColorManagement, actif par défaut depuis r152) considère un attribut
@@ -1792,9 +1790,14 @@ export class GpxLayer {
     this.cursor.material.color.set(c)
   }
 
+  // ⚠️ LE RUBAN SE RECONSTRUIT, LA LIGNE SE RÈGLE. La largeur du ruban est CUITE
+  // dans sa géométrie (voir _construitRuban) : changer un uniforme n'y suffit pas.
+  // C'est la régression qu'Adrien a vue — depuis que le ruban a remplacé Line2,
+  // les puces Fine/Classique/Épaisse ne changeaient plus rien.
   setWidth(v) {
     if (this.lineMat) this.lineMat.linewidth = v
     if (this.glowMat) this.glowMat.linewidth = v * 2.4
+    if (this.ruban && this.track) this.rebuild()
   }
 
   // gradient / glow need the geometry (vertex colours) or a second line rebuilt.
