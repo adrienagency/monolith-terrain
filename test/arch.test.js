@@ -11,6 +11,7 @@ import {
   textInkFor,
   OLD_ARCH_WIDTH,
   ARCH_TARGET_WIDTH,
+  ARCH_MAX_ROLL,
 } from '../src/arch.js'
 
 test('headingAt points from the previous point to the next, normalized', () => {
@@ -146,6 +147,45 @@ test('archTransform: uneven feet produce a nonzero roll banking toward the lower
   const vTilted = new Vector3(1, 0, 0).applyQuaternion(tilted.quaternion)
   assert.ok(Math.abs(vLevel.y) < 1e-9)
   assert.ok(Math.abs(vTilted.y) > 1e-6) // the width axis is no longer perfectly horizontal
+})
+
+// Task 3 (2026-08-04, "l'arche vole très très loin du sol" — capture d'Adrien
+// à fort zoom). REPRODUIT en direct sur le Grand Raid : le repli sur le bloc
+// voisin du damier était écarté (mesuré : -0,003 et +0,075 à zoom normal),
+// et le recuit du MAILLAGE (384 -> 768, "fenêtre continue") ne bouge PAS
+// `terrain.sample` — vérifié en direct, résolution non plus. Ce qui BOUGE,
+// c'est le MNT lui-même à un zoom plus fin (z10 -> z14) : le relief grossier
+// lissait une paroi réelle (Réunion, cirques) que le MNT fin révèle. Mesuré
+// EN VRAI dans l'app sur l'arche d'arrivée : deux pieds à 0,6 unité d'écart,
+// sol A/B mesuré à -6,25/-7,12 (0,87 unité de dénivelé) -> AUCUNE butée sur
+// `atan2`, la porte bascule à 65,5° depuis la verticale. Une porte à 65° ne
+// se lit pas comme "posée en pente", elle se lit comme "qui s'envole" —
+// exactement le symptôme. La butée limite le bank à un angle plausible ;
+// au-delà, mieux vaut une porte qui mord légèrement le sol qu'une porte qui
+// tourne sur elle-même.
+test('archTransform: roll is CLAMPED on an extreme slope — a real cliff between the two feet must not spin the gate past a plausible bank', () => {
+  const spec = { kind: 'finish', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0, z: 1 } }
+  const proto = { widthIsX: true, worldWidth: 0.6, worldHeight: 0.5, worldDepth: 0.1 }
+  // écart de sol mesuré en vrai (0,871 unité sur 0,6 de large) — sans butée,
+  // atan2(0.871, 0.6) ≈ 55° et une pente réelle plus raide encore mesurait 65°.
+  const { quaternion } = archTransform(spec, 0, 0.871, proto)
+  const v = new Vector3(1, 0, 0).applyQuaternion(quaternion) // local width axis (widthIsX=true)
+  const rollFromVertical = Math.abs(Math.asin(Math.max(-1, Math.min(1, v.y))))
+  assert.ok(
+    rollFromVertical <= ARCH_MAX_ROLL + 1e-6,
+    `roll ${(rollFromVertical * 180 / Math.PI).toFixed(1)}° dépasse la butée de ${(ARCH_MAX_ROLL * 180 / Math.PI).toFixed(1)}°`
+  )
+})
+
+test('archTransform: roll still banks toward the lower foot within the clamp (a MODEST slope is not flattened)', () => {
+  const spec = { kind: 'finish', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0, z: 1 } }
+  const proto = { widthIsX: true, worldWidth: 1, worldHeight: 1, worldDepth: 0.2 }
+  // pente modeste (bien sous la butée) : la butée ne doit rien changer ici,
+  // sinon on aurait juste déplacé le bug (une pente plausible deviendrait plate).
+  const { quaternion } = archTransform(spec, 0, 0.05, proto)
+  const v = new Vector3(1, 0, 0).applyQuaternion(quaternion)
+  const expected = Math.atan2(0.05, 1)
+  assert.ok(Math.abs(Math.asin(v.y) - expected) < 1e-6)
 })
 
 // Regression test for a real bug caught during task 25's own verification:

@@ -219,6 +219,25 @@ export function archFeet(spec, proto) {
   return { N, U, up, postA, postB }
 }
 
+// Task 3 (2026-08-04, "l'arche vole très très loin du sol" — capture d'Adrien
+// à fort zoom). MESURÉ EN DIRECT dans l'app avant de corriger quoi que ce
+// soit — l'hypothèse de départ (le sol change sous une arche déjà construite,
+// et rien ne la repose) ne tenait pas : `terrain.sample` ne dépend PAS de la
+// résolution du maillage (vérifié, y compris après un recuit 384→768 en
+// fenêtre continue — l'écart au sol restait de l'ordre du centimètre), et
+// tout changement de zoom DEM reconstruit déjà l'arche à neuf (son uuid THREE
+// change à chaque palier — confirmé par `uuid` avant/après). Le vrai
+// coupable : un MNT plus fin (zoom profond) révèle un relief que le MNT
+// grossier lissait — mesuré sur la Diagonale des Fous, arrivée : deux pieds
+// à 0,6 unité d'écart avec 0,87 unité de dénivelé réel entre eux (un vrai
+// à-pic de cirque réunionnais). Sans butée, `atan2` rendait un bank de 65,5°
+// EN VRAI — une porte à 65° de la verticale ne se lit pas comme "en pente",
+// elle se lit comme "qui s'envole". D'où la butée : au-delà d'un angle
+// plausible, mieux vaut que la porte morde légèrement le sol (comme le
+// permettait déjà "un petit tilt plutôt qu'un étirement par pied impossible",
+// voir le commentaire d'archTransform plus haut) que de tourner sur elle-même.
+export const ARCH_MAX_ROLL = Math.PI / 6 // 30°, mesuré comme la limite plausible avant que "penché" ne se lise "qui vole"
+
 export function archTransform(spec, groundA, groundB, proto) {
   const { N, U, up, postA, postB } = archFeet(spec, proto)
 
@@ -227,7 +246,8 @@ export function archTransform(spec, groundA, groundB, proto) {
   else basis.makeBasis(N, up, U.clone().negate())
   const qYaw = new THREE.Quaternion().setFromRotationMatrix(basis)
 
-  const roll = proto.worldWidth > 1e-6 ? Math.atan2((groundB ?? 0) - (groundA ?? 0), proto.worldWidth) : 0
+  const rawRoll = proto.worldWidth > 1e-6 ? Math.atan2((groundB ?? 0) - (groundA ?? 0), proto.worldWidth) : 0
+  const roll = THREE.MathUtils.clamp(rawRoll, -ARCH_MAX_ROLL, ARCH_MAX_ROLL)
   const qRoll = new THREE.Quaternion().setFromAxisAngle(N, roll)
   const quaternion = qRoll.multiply(qYaw)
 
