@@ -49,11 +49,18 @@
        + la rangée la plus large :
            ≥ 1101 px : « SOMMET RESTANT » 116 + 8 + « 1 840 » 47 + « m » 8   ≈ 179
            ≤ 1100 px : le suffixe « restant » part (le jumeau figé de la tête
-             disparaît au même palier)              « SOMMET » 52 …          ≈ 145
-           ≤ 900 px  : l'ancrage « km 42 » part aussi                        ≈ 132
+             disparaît au même palier), ET L'ANCRAGE DE LA BARRIÈRE AVEC LUI
+             (« km 42 » vivait ici jusqu'à ce palier, PAS jusqu'à 900 — voir
+             .cc-u plus bas : au 900 d'origine, ses 6ch fixes + les 6ch de
+             .cc-v ne laissaient plus la place de « BARRIÈRE », mesuré sur
+             une lecture complète)                    « SOMMET » 52 …          ≈ 145
        ————————————————————————————
-       il faut donc ≈ 313 / 279 / 266 px de contenu, soit 340 / 316 / 284 px
-       de basis (marge de zone : 22 au-dessus de 900 px, 14 en dessous).
+       il faut donc ≈ 313 / 279 px de contenu, soit 340 / 316 px de basis
+       au-dessus de 900 px (marge de zone : 22) ; sous 900 px la zone tombe à
+       284 px de basis (marge 14) pour d'autres raisons (voir course-bar.css,
+       palier @media max-width:900px) et n'est plus contrainte par CETTE
+       rangée : l'ancrage y est déjà parti à 1101, il ne reste rien de lui à
+       perdre une seconde fois.
    ⚠️ CES LARGEURS SONT DES MÉTRIQUES NOMINALES, comme les hauteurs : les
    glyphes réels de Bricolage Grotesque et de la mono résolue ne sont pas
    mesurés ici (aucun navigateur dans ce dépôt). L'ellipse de .cc-l reste donc
@@ -71,6 +78,19 @@
    INTENTION (quelle largeur nominale vise-t-on), mais la valeur qui la fait
    TENIR est maintenant écrite en `ch`, insensible au nombre de chiffres
    affichés.
+   ⚠️ ET LA COLONNE UNITÉ (.cc-u) A LE MÊME BUG SUR L'ANCRAGE DE LA BARRIÈRE
+   (« km 42 »), MANQUÉ AU PREMIER PASSAGE DE CETTE CORRECTION. Le GPX qui a
+   servi à la première mesure n'avait aucun point de passage : la rangée
+   Barrière est restée masquée tout du long, et son propre glissement
+   (troisième colonne, même grille partagée) est passé inaperçu jusqu'à une
+   relecture avec un parcours qui EN a (démo La Grande Traversée, 16 points).
+   `.cc-stat-barriere .cc-u` porte maintenant sa propre largeur fixe (voir sa
+   règle, après `.cc-u`) : la leçon à retenir n'est pas la correction en
+   elle-même, c'est qu'une rangée masquée par les données de test n'est PAS
+   une rangée vérifiée. Deuxième leçon, trouvée en rejouant la démo sur une
+   lecture COMPLÈTE plutôt qu'une image isolée : la première version de ce
+   filet cassait « BARRIÈRE » (tronqué à chaque image, palier 900–1100 px) —
+   voir la règle de .cc-u pour le chiffre et le palier corrigé.
 
    ⚠️ LA RANGÉE « PENTE » A ÉTÉ SUPPRIMÉE, ET SA PLACE VA À LA BARRIÈRE. La
    pente était représentée QUATRE fois en même temps à l'écran : sa valeur
@@ -117,6 +137,37 @@
   justify-content: center;
   gap: var(--ce-gap-control);
   min-width: 0;
+  /* ⚠️ width:100% MANQUAIT, ET LE PANNEAU ENTIER PRENAIT LA TAILLE DE SON
+     CONTENU AU LIEU DE CELLE DE SA ZONE — TROUVÉ EN TRAQUANT LE DERNIER
+     GLISSEMENT D'UNE SÉRIE QUE .cc-v ET .cc-u NE POUVAIENT PAS EXPLIQUER.
+     .cb-zone-carnet (course-bar.css) est `display:flex` (héritage de
+     .cb-zone) : sans largeur posée sur SON SEUL ENFANT, l'axe principal
+     d'un flex container ne stretche JAMAIS — seul l'axe croisé le fait par
+     défaut (`align-items:stretch`, ce qui explique `height:100%` juste en
+     dessous : lui, il n'avait pas besoin de cette ligne). .cc-body prenait
+     donc sa largeur NATURELLE (celle de .cc-main, donc du héros + de
+     .cc-side), qui varie avec le contenu de .cc-side — exactement l'inverse
+     de ce que `flex:1` sur .cc-side est censé garantir : .cc-side ne
+     « remplit l'espace restant » que si le CONTENEUR qui le porte a déjà
+     une largeur fixe à distribuer, or il n'en avait aucune.
+     ⚠️ CAS QUI L'A RÉVÉLÉ : SOMMET RESTANT reste MASQUÉ tant qu'il y a un
+     prochain point (`montre(rSommet.ligne, 'sommetOn', !t.aSuivant &&
+     t.aSommet)`, carnet-course.js) et s'ALLUME au dernier point franchi —
+     donc le libellé de la colonne 1 passe de « D+ RESTANT » (76 px) à
+     « SOMMET RESTANT » (116 px) À L'ARRIVÉE, précisément quand .cc-next
+     disparaît. Sans largeur fixée, .cc-main grandissait de +40 px pour
+     l'accueillir, et TOUTE la colonne de droite (valeurs, unités) glissait
+     d'autant — mesuré sur la démo, offsetLeft à 500 échantillons, ce
+     glissement survivait à la correction de .cc-v ET .cc-u (largeur fixe)
+     ET à `contain: inline-size` sur .cc-next (voir sa règle) : aucun des
+     deux ne pouvait rien y faire, puisque le problème n'était ni dans une
+     colonne ni dans une rangée, mais dans le CONTENEUR qui les porte toutes.
+     width:100% force .cc-body — donc .cc-main, donc le partage héros/
+     .cc-side — à occuper la largeur RÉELLE de la zone en permanence, que le
+     contenu la remplisse ou non : la seule condition sous laquelle
+     `flex:none` (héros) et `flex:1` (.cc-side) veulent dire ce qu'ils
+     prétendent dire. */
+  width: 100%;
   height: 100%;
   /* ⚠️ CE overflow N'EST PAS LA SOLUTION, C'EST LE FILET. Avec le
      justify-content:center ci-dessus, un contenu trop haut est rogné EN HAUT
@@ -285,10 +336,23 @@
      ne change rien à ÇA), et comme le héros vient AVANT la colonne de droite
      dans le flux, chaque perte de chiffre pousse ou tire tout le bloc
      labels/valeurs/unités qui le suit — mesuré à l'écran, cet effet à lui
-     seul vaut une partie du glissement documenté sur .cc-v. 7ch couvre
-     « 9999,9 » (6 chiffres) + la place du « km » qui suit en plus petit —
-     aucune course connue de ShibuMap n'approche cette distance. */
+     seul vaut une partie du glissement documenté sur .cc-v. 7ch = 130,8 px à
+     l'écran (mesuré, Bricolage… non, mono --ce-t-hero) ; le pire cas mesuré
+     ici, « 9999,9km » (le « km » compté à sa VRAIE taille --ce-t-body, plus
+     petite — pas une addition naïve de huit caractères à 34 px), rend 120,3 px
+     : 7ch tient avec ~10 px de marge, et aucune course connue de ShibuMap
+     n'approche seulement les 4 chiffres.
+     ⚠️ ET overflow:hidden EST LE FILET, PAS UNE DÉCORATION. `text-overflow:
+     ellipsis` ne s'applique pas ici — l'élément est en `display: flex` avec
+     DEUX enfants (le nombre, l'unité), pas un bloc à une seule boîte de texte,
+     et l'ellipse CSS ne fonctionne que sur ce second cas. Sans garde-fou, un
+     jour où le format source change (ou un GPX aberrant) ferait DÉBORDER le
+     héros PAR-DESSUS .cc-side au lieu de rétrécir proprement — remplacer une
+     danse horizontale par un chevauchement serait un très mauvais échange. Le
+     contenu réel ne devrait jamais atteindre cette limite (voir le calcul
+     ci-dessus) ; s'il l'atteint un jour, il est rogné, jamais superposé. */
   width: 7ch;
+  overflow: hidden;
 }
 .cc-hero-pct {
   /* l'unité du héros monte d'UN palier de l'échelle (--ce-t-body au lieu de
@@ -450,11 +514,90 @@
 /* l'ANCRAGE de la barrière (« km 42 ») occupe la colonne d'unité : une heure
    qui ne désigne aucun lieu n'est pas actionnable, et la barrière affichée
    n'est plus forcément celle du point suivant (prochaineBarriere()). Sous
-   900 px il part — le budget de largeur ne le porte plus, et le libellé
-   « BARRIÈRE » reste, lui, exact. */
-@media (max-width: 900px) { .cc-stat-barriere .cc-u { display: none; } }
+   1101 px il part — le budget de largeur ne le porte plus, et le libellé
+   « BARRIÈRE » reste, lui, exact.
+   ⚠️ CE PALIER ÉTAIT 900 px, ET C'EST FAUX DEPUIS QUE CETTE COLONNE A UNE
+   LARGEUR FIGÉE (voir plus bas). `km ${entier(c.kmBarriere)}` (carnet-course.js)
+   grandit à chaque dizaine puis centaine franchie (« km 8 » → « km 23 » →
+   « km 201 », mesuré sur la démo La Grande Traversée) : CETTE colonne (unité)
+   est la MÊME grille partagée que .cc-v, donc chaque franchissement redimen-
+   sionnait la troisième colonne — et comme .cc-l est en `minmax(0,1fr)`, ça
+   repoussait aussi les colonnes 2 et 3 l'une contre l'autre. Le premier passage
+   de cette correction n'avait fixé que .cc-v : le GPX de mesure n'avait aucun
+   <wpt>, donc cette rangée est restée masquée tout du long et le glissement
+   est passé inaperçu.
+   ⚠️ ET LA PREMIÈRE VERSION DE CE CORRECTIF, ELLE, CASSAIT LE LIBELLÉ AU
+   PALIER 900–1100 px — PAS MESURÉE SUR UNE LECTURE COMPLÈTE, C'EST CE QUI L'A
+   LAISSÉ PASSER. Fixer .cc-u à 6ch dès 901 px, ajouté à .cc-v déjà à 6ch,
+   demande 99,5 px de colonnes 2+3 — or à 1014 px (basis 316) la colonne de
+   droite n'a que 157 px de contenu, et « BARRIÈRE » seul (62 px de large,
+   mesuré) ne tenait plus dans les ~58 px restants : rejoué sur les 301
+   images d'une lecture complète, 301/301 tronquaient AVANT que ce palier ne
+   soit corrigé (le code sans le correctif de largeur n'en tronquait AUCUNE
+   sur la même course). Le palier remonte donc à 1101 px, où il rejoint les
+   deux autres largeurs qui libèrent déjà de la place à cette même frontière
+   (le suffixe « restant » et le jumeau figé « SOMMET » de la tête, tous deux
+   sous 1101 px dans course-bar.css) : EN DESSOUS, l'ancrage n'existe plus,
+   rien à figer ; AU-DESSUS, la zone passe à 340 px de basis et la colonne de
+   droite hérite du gain (le héros ne bouge pas, lui, largeur fixe) — assez de
+   place pour les deux colonnes à 6ch ET le libellé, vérifié sur la même
+   lecture complète (0 troncature). */
+.cc-stat-barriere .cc-u {
+  width: 6ch;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 1100px) { .cc-stat-barriere .cc-u { display: none; } }
+/* ⚠️ ET LA COLONNE NUMÉRIQUE (« m ») A BESOIN DE LA MÊME LARGEUR, MAIS
+   SEULEMENT LÀ OÙ L'ANCRAGE PEUT LA LUI DISPUTER. Rejoué sur la démo (Barrière
+   visible en continu du km 8 au km 201, puis démontée après le dernier point) :
+   au moment PRÉCIS où la barrière disparaît, la colonne 3 perdait sa
+   contribution de 6ch et retombait à la largeur de « m » seul — et comme
+   .cc-l est en `minmax(0,1fr)`, l'espace libéré partait dans le libellé, donc
+   la colonne 2 (valeur) glissait de 8,6 px. Un plafond ferme des DEUX côtés de
+   la même colonne partagée règle ça : au-dessus de 1100 px (le seul palier où
+   l'ancrage existe), .cc-u vaut toujours 6ch, que la barrière soit montrée ou
+   non, donc la colonne ne bouge plus quand elle apparaît ou disparaît.
+   ⚠️ ET C'EST GARDÉ PAR LA MÊME MEDIA QUERY QUE L'ANCRAGE, PAS EN DUR SUR LA
+   RÈGLE DE BASE : sous 1101 px l'ancrage est démonté (display:none, ci-dessus),
+   donc `.cc-u` n'y porte jamais que « m » — le fixer à 6ch aussi bas aurait
+   coûté la largeur au libellé pour rien, ET aurait reproduit exactement la
+   troncature de « BARRIÈRE » mesurée et corrigée ci-dessus. */
+@media (min-width: 1101px) {
+  .cc-u {
+    width: 6ch;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
 /* le prochain point occupe la largeur entière : il a son propre empilement */
-.cc-next { grid-column: 1 / -1; }
+.cc-next {
+  grid-column: 1 / -1;
+  /* ⚠️ SANS contain:inline-size, LE NOM DU POINT REDIMENSIONNAIT LA COLONNE
+     PARTAGÉE — TROUVÉ EN VÉRIFIANT LA DANSE SUR UNE LECTURE COMPLÈTE, PAS
+     SUR UNE IMAGE. .cc-next s'étend sur les trois colonnes (`grid-column:
+     1/-1`) ; .cc-name a déjà `overflow:hidden` + `min-width:0` + ellipsis,
+     mais ces trois propriétés ne bornent que la taille MINIMALE de la boîte
+     — pas sa taille de contenu MAXIMALE (max-content), celle que la grille
+     utilise pour décider de combien faire grandir la colonne fr (col1) qui
+     porte cette rangée en même temps que les rangées D+/Sommet/Barrière.
+     Résultat mesuré sur la démo (400 échantillons, offsetLeft) : dès que le
+     nom affiché est le plus long de la course (« Camping du Surchauffant »,
+     23 caractères), .cc-v et .cc-u glissaient de 19 px pendant les quelques
+     dixièmes de seconde où ce nom est affiché — un vrai glissement, à chaque
+     lecture, pas un cas limite théorique. `contain: inline-size` fait
+     exactement ce que min-width:0 ne peut pas faire : il dit au navigateur
+     de traiter cette boîte comme si elle n'avait AUCUNE taille de contenu
+     intrinsèque pour le calcul de la mise en page de ses ANCÊTRES — elle
+     reçoit toujours la largeur que la grille lui donne, et c'est ALORS que
+     l'ellipse de .cc-name tronque proprement le nom trop long, comme prévu,
+     au lieu de pousser la grille. Vérifié : la ligne continue de recevoir sa
+     largeur normale (mesuré 185,6 px sur la démo) et l'ellipse s'engage
+     bien (« Camping du Surchauffant » rendu sur 140 px de 159 nécessaires). */
+  contain: inline-size;
+}
 
 /* ⚠️ MÊME RAISONNEMENT QUE .cc-km, APPLIQUÉ À L'ALTITUDE — il ne l'était pas.
    La rangée « Altitude » redouble la pastille du profil, qui affiche déjà

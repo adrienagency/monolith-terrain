@@ -495,9 +495,25 @@
    la colonne redevenait large et le problème disparaissait. C'était donc la
    TABLETTE EN PORTRAIT le cas cassé, pas le téléphone.
    L'addition est écrite en tête de carnet-course.css, à côté de celle des
-   hauteurs, et elle se refait à chaque palier. */
+   hauteurs, et elle se refait à chaque palier.
+   ⚠️ 390 ET PLUS 340 — LE BUDGET A DÛ ÊTRE REFAIT QUAND .cc-v ET .cc-u SONT
+   PASSÉS EN LARGEUR FIXE (carnet-course.css). Le budget nominal de ce fichier
+   comptait « SOMMET RESTANT » 116 + 8 + « 1 840 » 47 + « m » 8 ≈ 179 pour
+   340 px de basis, et ça passait tout juste PARCE QUE les colonnes `auto`
+   pouvaient reprendre le peu de jeu qui restait. Fixées, .cc-v vaut 6ch =
+   56 px (pas 47 : « 10 185 », le D+ total d'une vraie course, en a besoin —
+   voir sa règle) et .cc-u, quand la barrière est visible, vaut aussi 6ch =
+   43 px (pas 8 : voir sa règle). 116+8+56+43 = 223 px, contre 180 px
+   disponibles à 340 : le libellé « SOMMET RESTANT » se tronquait sur PRESQUE
+   CHAQUE image d'une lecture avec barrière (327/301 troncatures mesurées,
+   démo La Grande Traversée à 1150 px). Balayé de 340 à 400 px par pas de
+   quelques pixels sur la même lecture complète : 384 px est le premier qui
+   passe à zéro troncature ; 390 laisse une marge plutôt que de coller au
+   pixel près à une mesure qui dépend des polices du poste. Le PROFIL, zone
+   voisine en `flex: 1 1 auto`, absorbe la différence — c'est lui qui a de la
+   place à donner, pas le carnet qui peut encore rétrécir. */
 .cb-zone-carnet {
-  flex: 0 0 340px;
+  flex: 0 0 390px;
   min-width: 0;
   padding: var(--ce-gap-group) var(--cb-gutter);
 }
@@ -573,11 +589,19 @@
   /* plus que le bouton lecture dans le groupe : une pastille teintée autour
      d'un disque déjà contrasté ne dit plus rien, on rend le verre */
   .cb-outils { background: none; padding: 0; }
-  /* 284 et plus 236 : la marge de zone tombe à 14 (donc 28 au lieu de 44) et
-     l'ancrage de la barrière (« km 42 ») part, mais les 236 d'avant ne
-     tenaient tout simplement pas — voir le budget en tête de
-     carnet-course.css. Les 48 px viennent du profil, qui en a. */
-  .cb-zone-carnet { flex-basis: 284px; padding: var(--ce-gap-group); }
+  /* 310 et plus 284 : MÊME CORRECTION QUE LE PALIER ≥1101px (voir sa note,
+     .cb-zone-carnet hors media query) et pour la MÊME raison — .cc-v est
+     passé de largeur `auto` à 6ch fixe (carnet-course.css), et le label
+     « SOMMET » (sans suffixe à ce palier) s'est mis à tronquer sur TOUTE
+     une lecture démo à 284 px, alors qu'il ne tronquait jamais avant. 300 px
+     suffit (mesuré, balayage 284→360 sur la lecture complète) ; 310 laisse
+     une marge sans franchir les 316 du palier voisin (`etroit < moyen`, test
+     verrouillé). 284 et plus 236 avant lui : la marge de zone tombe à 14
+     (donc 28 au lieu de 44) et l'ancrage de la barrière (« km 42 ») part,
+     mais les 236 d'avant ne tenaient tout simplement pas — voir le budget en
+     tête de carnet-course.css. Les 26 px de plus (310 contre 284) viennent
+     du profil, qui en a. */
+  .cb-zone-carnet { flex-basis: 310px; padding: var(--ce-gap-group); }
   .cb-chiffre-dmoins { display: none; }
 }
 @media (max-width: 680px) {
