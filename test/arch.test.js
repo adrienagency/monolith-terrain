@@ -11,8 +11,22 @@ import {
   textInkFor,
   OLD_ARCH_WIDTH,
   ARCH_TARGET_WIDTH,
-  ARCH_MAX_ROLL,
 } from '../src/arch.js'
+
+// Task 3 relecture (2026-08-04) : verifie ce que le rendu REEL ferait des deux
+// pieds — pas juste l'angle du quaternion — a partir des SEULES valeurs
+// publiques que renvoie archTransform (position, quaternion) + le proto
+// utilise. C'est exactement la geometrie que buildArchMesh applique a
+// l'instance clonee (voir archFeet : le pied A est toujours au niveau du
+// vertex local (demi-largeur, 0, 0) si widthIsX, sinon (0, 0, demi-largeur)),
+// donc une boite noire fidele au rendu plutot qu'un recalcul independant qui
+// pourrait diverger de l'implementation sans que le test s'en apercoive.
+function piedsRendus(position, quaternion, proto) {
+  const demi = proto.worldWidth / 2
+  const local = proto.widthIsX ? new Vector3(demi, 0, 0) : new Vector3(0, 0, demi)
+  const offset = local.clone().applyQuaternion(quaternion)
+  return { A: position.y + offset.y, B: position.y - offset.y }
+}
 
 test('headingAt points from the previous point to the next, normalized', () => {
   const world = [{ x: 0, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }, { x: 20, y: 0, z: 0 }]
@@ -120,11 +134,18 @@ test('archTransform: the two feet straddle spec.pos symmetrically along perp(dir
   assert.ok(Math.abs(postB.x - 10) < 1e-9 && Math.abs(postB.z - 21) < 1e-9)
 })
 
-test('archTransform: gate position sits at the AVERAGE of the two ground samples (not either one alone)', () => {
+// Task 3 relecture : l'ancien exemple (groundA=2, groundB=6, worldWidth=1)
+// demandait un denivele de 4 unites a une porte large de 1 seule — DEJA hors
+// de portee d'une inclinaison pure (voir plus bas, "au-dela de portee"), donc
+// la moyenne n'y est plus la bonne reponse depuis le correctif "jamais
+// enterrer un pied". Repris avec un denivele ATTEIGNABLE (0,6 sur une largeur
+// de 1) : la ou une inclinaison peut poser les deux pieds pile sur leur sol,
+// le centre retombe EXACTEMENT sur la moyenne, comme avant.
+test('archTransform: gate position sits at the AVERAGE of the two ground samples when the slope is within reach', () => {
   const spec = { kind: 'start', pos: { x: 0, y: 0, z: 0 }, dir: { x: 1, z: 0 } }
   const proto = { widthIsX: true, worldWidth: 1, worldHeight: 1, worldDepth: 0.2 }
-  const { position } = archTransform(spec, 2, 6, proto)
-  assert.ok(Math.abs(position.y - 4) < 1e-9)
+  const { position } = archTransform(spec, 2, 2.6, proto)
+  assert.ok(Math.abs(position.y - 2.3) < 1e-9)
 })
 
 test('archTransform: level ground (equal foot heights) yields zero roll', () => {
@@ -149,43 +170,111 @@ test('archTransform: uneven feet produce a nonzero roll banking toward the lower
   assert.ok(Math.abs(vTilted.y) > 1e-6) // the width axis is no longer perfectly horizontal
 })
 
-// Task 3 (2026-08-04, "l'arche vole très très loin du sol" — capture d'Adrien
-// à fort zoom). REPRODUIT en direct sur le Grand Raid : le repli sur le bloc
-// voisin du damier était écarté (mesuré : -0,003 et +0,075 à zoom normal),
-// et le recuit du MAILLAGE (384 -> 768, "fenêtre continue") ne bouge PAS
-// `terrain.sample` — vérifié en direct, résolution non plus. Ce qui BOUGE,
-// c'est le MNT lui-même à un zoom plus fin (z10 -> z14) : le relief grossier
-// lissait une paroi réelle (Réunion, cirques) que le MNT fin révèle. Mesuré
-// EN VRAI dans l'app sur l'arche d'arrivée : deux pieds à 0,6 unité d'écart,
-// sol A/B mesuré à -6,25/-7,12 (0,87 unité de dénivelé) -> AUCUNE butée sur
-// `atan2`, la porte bascule à 65,5° depuis la verticale. Une porte à 65° ne
-// se lit pas comme "posée en pente", elle se lit comme "qui s'envole" —
-// exactement le symptôme. La butée limite le bank à un angle plausible ;
-// au-delà, mieux vaut une porte qui mord légèrement le sol qu'une porte qui
-// tourne sur elle-même.
-test('archTransform: roll is CLAMPED on an extreme slope — a real cliff between the two feet must not spin the gate past a plausible bank', () => {
-  const spec = { kind: 'finish', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0, z: 1 } }
-  const proto = { widthIsX: true, worldWidth: 0.6, worldHeight: 0.5, worldDepth: 0.1 }
-  // écart de sol mesuré en vrai (0,871 unité sur 0,6 de large) — sans butée,
-  // atan2(0.871, 0.6) ≈ 55° et une pente réelle plus raide encore mesurait 65°.
-  const { quaternion } = archTransform(spec, 0, 0.871, proto)
-  const v = new Vector3(1, 0, 0).applyQuaternion(quaternion) // local width axis (widthIsX=true)
-  const rollFromVertical = Math.abs(Math.asin(Math.max(-1, Math.min(1, v.y))))
-  assert.ok(
-    rollFromVertical <= ARCH_MAX_ROLL + 1e-6,
-    `roll ${(rollFromVertical * 180 / Math.PI).toFixed(1)}° dépasse la butée de ${(ARCH_MAX_ROLL * 180 / Math.PI).toFixed(1)}°`
-  )
-})
+// Task 3, relecture (2026-08-04). Premiere version de ce correctif : butee
+// fixe de 30° sur l'ANGLE de roll, sans jamais verifier son effet sur la
+// POSITION reelle des pieds. Demontage par la relecture, chiffres a l'appui
+// (sur le cas de reference ci-dessous, worldWidth=0,6, denivele=0,871) :
+// borner l'angle a 30° reduit le roll (bien) mais laisse `position.y` a
+// l'ancienne moyenne NON corrigee — l'ecart pied/sol calcule PASSAIT de
+// ~0,19 a ~0,29 (+50 %) avec la butee, parce que rien ne relevait le centre
+// pour compenser un roll desormais insuffisant. Et le vrai probleme n'etait
+// pas seulement "l'angle est trop grand" : `atan2(denivele, largeur)` n'est
+// de toute facon PAS la bonne formule (elle ne pose exactement les deux
+// pieds au sol dans AUCUN cas, meme sur une pente douce — voir le test
+// "AVERAGE" plus haut, qui ne tombait juste pas sur ce defaut par hasard) ;
+// et rien ne decidait ce qui doit arriver quand le denivele DEPASSE la
+// largeur de la porte (0,871 > 0,6 ici) — aucune inclinaison pure ne peut
+// alors poser les deux pieds (asin d'un rapport superieur a 1 est indefini),
+// et l'ancien code laissait ce cas au hasard (un pied pouvait finir enterre
+// dans le relief).
+//
+// Le correctif refait le calcul en entier :
+//   1. roll = asin(clamp((gA-gB) / largeur, -1, 1)) — la VRAIE geometrie
+//      (pas une approximation) : quand c'est ATTEIGNABLE, les deux pieds
+//      tombent PILE sur leur sol (zero residu). Le clamp a ±1 n'est pas un
+//      choix arbitraire : au-dela, aucune inclinaison ne fait mieux que 90°
+//      (incliner davantage REDUIRAIT le denivele rattrape, ce serait pire).
+//   2. `position.y` n'est plus TOUJOURS la moyenne : JAMAIS enterrer un pied
+//      (une porte qui mord la roche est aussi fausse qu'une porte qui vole,
+//      relecture task 3) — si le denivele depasse ce que l'inclinaison peut
+//      rattraper, le centre se souleve juste assez pour que les DEUX pieds
+//      restent au-dessus de leur sol ; un seul flotte alors, du minimum
+//      necessaire (denivele - largeur), jamais plus.
+//
+// Ces trois tests couvrent : le cas ATTEIGNABLE (zero residu, mieux que
+// l'ancienne formule), le cas HORS DE PORTEE mesure en vrai (aucun pied
+// enterre, le flottement mesure au plus juste), et la preuve que 90° n'est
+// pas une valeur choisie mais la limite mathematique de sin().
 
-test('archTransform: roll still banks toward the lower foot within the clamp (a MODEST slope is not flattened)', () => {
+test('archTransform: on a slope WITHIN reach, both feet land EXACTLY on their own ground sample (zero residual)', () => {
   const spec = { kind: 'finish', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0, z: 1 } }
   const proto = { widthIsX: true, worldWidth: 1, worldHeight: 1, worldDepth: 0.2 }
-  // pente modeste (bien sous la butée) : la butée ne doit rien changer ici,
-  // sinon on aurait juste déplacé le bug (une pente plausible deviendrait plate).
-  const { quaternion } = archTransform(spec, 0, 0.05, proto)
+  // denivele 0,6 pour une largeur de 1 : atteignable (0,6 <= 1)
+  const groundA = 2, groundB = 2.6
+  const r = archTransform(spec, groundA, groundB, proto)
+  const { A, B } = piedsRendus(r.position, r.quaternion, proto)
+  assert.ok(Math.abs(A - groundA) < 1e-9, `pied A a ${A}, sol reel ${groundA}`)
+  assert.ok(Math.abs(B - groundB) < 1e-9, `pied B a ${B}, sol reel ${groundB}`)
+})
+
+test('archTransform: the SAME within-reach check holds for widthIsX=false (the branch the shipped GLB actually uses)', () => {
+  const spec = { kind: 'finish', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0.6, z: 0.8 } }
+  const proto = { widthIsX: false, worldWidth: 0.8, worldHeight: 1, worldDepth: 0.2 }
+  const groundA = -1.1, groundB = -0.7 // denivele 0,4 <= largeur 0,8
+  const r = archTransform(spec, groundA, groundB, proto)
+  const { A, B } = piedsRendus(r.position, r.quaternion, proto)
+  assert.ok(Math.abs(A - groundA) < 1e-9, `pied A a ${A}, sol reel ${groundA}`)
+  assert.ok(Math.abs(B - groundB) < 1e-9, `pied B a ${B}, sol reel ${groundB}`)
+})
+
+// Cas de reference MESURE EN VRAI dans l'app (task-3-report.md) sur l'arche
+// d'arrivee de la Diagonale des Fous, zoom fin : deux pieds a 0,6 unite
+// d'ecart (ARCH_TARGET_WIDTH), solA/solB mesures a -3,321/-2,45, soit un
+// denivele reel de 0,871 — au-dela des 0,6 que la porte peut rattraper par
+// inclinaison seule. Avant ce correctif, `atan2` rendait un roll mesure a
+// 65,5° et `position.y` restait la moyenne non corrigee (aucun garde-fou sur
+// l'enfoncement). Ici : AUCUN pied ne doit passer sous son sol, et le
+// flottement du pied qui ne touche pas doit etre EXACTEMENT le denivele
+// impossible a rattraper (0,871 - 0,6 = 0,271), ni plus ni moins.
+test('archTransform: on the measured real cliff (0.871 over 0.6 of width), no foot is ever buried and the unavoidable hover is minimal', () => {
+  const spec = { kind: 'finish', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0.034, z: 0.999 } }
+  const proto = { widthIsX: true, worldWidth: 0.6, worldHeight: 0.5, worldDepth: 0.1 }
+  const groundA = -3.321, groundB = -2.45
+  const r = archTransform(spec, groundA, groundB, proto)
+  const { A, B } = piedsRendus(r.position, r.quaternion, proto)
+  const EPS = 1e-6
+  // jamais enterre : chaque pied rendu est AU MOINS a son sol reel
+  assert.ok(A >= groundA - EPS, `pied A enterre : ${A} < sol ${groundA}`)
+  assert.ok(B >= groundB - EPS, `pied B enterre : ${B} < sol ${groundB}`)
+  // le flottement total (somme des deux ecarts) est le denivele impossible a
+  // rattraper — pas plus : la porte ne s'envole pas, elle mord juste ce
+  // qu'elle ne peut pas suivre.
+  const flottementTotal = (A - groundA) + (B - groundB)
+  const shortfall = Math.abs(groundB - groundA) - proto.worldWidth // 0.871 - 0.6 = 0.271
+  assert.ok(Math.abs(flottementTotal - shortfall) < 1e-6, `flottement total ${flottementTotal}, attendu ${shortfall}`)
+})
+
+test('archTransform: the roll on that same real cliff saturates at exactly 90° — the mathematical limit of sin(), not a tuned constant', () => {
+  const spec = { kind: 'finish', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0.034, z: 0.999 } }
+  const proto = { widthIsX: true, worldWidth: 0.6, worldHeight: 0.5, worldDepth: 0.1 }
+  const { quaternion } = archTransform(spec, -3.321, -2.45, proto)
   const v = new Vector3(1, 0, 0).applyQuaternion(quaternion)
-  const expected = Math.atan2(0.05, 1)
-  assert.ok(Math.abs(Math.asin(v.y) - expected) < 1e-6)
+  const rollFromVertical = Math.abs(Math.asin(Math.max(-1, Math.min(1, v.y))))
+  assert.ok(Math.abs(rollFromVertical - Math.PI / 2) < 1e-6, `roll ${(rollFromVertical * 180 / Math.PI).toFixed(1)}°, attendu 90°`)
+})
+
+test('archTransform: a MODEST slope (well within reach) still banks toward the lower foot — the fix does not flatten normal terrain', () => {
+  const spec = { kind: 'finish', pos: { x: 0, y: 0, z: 0 }, dir: { x: 0, z: 1 } }
+  const proto = { widthIsX: true, worldWidth: 1, worldHeight: 1, worldDepth: 0.2 }
+  const level = archTransform(spec, 0, 0, proto)
+  const tilted = archTransform(spec, 0, 0.05, proto)
+  const vLevel = new Vector3(1, 0, 0).applyQuaternion(level.quaternion)
+  const vTilted = new Vector3(1, 0, 0).applyQuaternion(tilted.quaternion)
+  assert.ok(Math.abs(vLevel.y) < 1e-9)
+  assert.ok(Math.abs(vTilted.y) > 1e-6)
+  // et sur cette pente modeste, toujours zero residu (le point precedent)
+  const { A, B } = piedsRendus(tilted.position, tilted.quaternion, proto)
+  assert.ok(Math.abs(A - 0) < 1e-9 && Math.abs(B - 0.05) < 1e-9)
 })
 
 // Regression test for a real bug caught during task 25's own verification:

@@ -220,24 +220,53 @@ export function archFeet(spec, proto) {
 }
 
 // Task 3 (2026-08-04, "l'arche vole très très loin du sol" — capture d'Adrien
-// à fort zoom). MESURÉ EN DIRECT dans l'app avant de corriger quoi que ce
-// soit — l'hypothèse de départ (le sol change sous une arche déjà construite,
-// et rien ne la repose) ne tenait pas : `terrain.sample` ne dépend PAS de la
-// résolution du maillage (vérifié, y compris après un recuit 384→768 en
-// fenêtre continue — l'écart au sol restait de l'ordre du centimètre), et
-// tout changement de zoom DEM reconstruit déjà l'arche à neuf (son uuid THREE
-// change à chaque palier — confirmé par `uuid` avant/après). Le vrai
-// coupable : un MNT plus fin (zoom profond) révèle un relief que le MNT
-// grossier lissait — mesuré sur la Diagonale des Fous, arrivée : deux pieds
-// à 0,6 unité d'écart avec 0,87 unité de dénivelé réel entre eux (un vrai
-// à-pic de cirque réunionnais). Sans butée, `atan2` rendait un bank de 65,5°
-// EN VRAI — une porte à 65° de la verticale ne se lit pas comme "en pente",
-// elle se lit comme "qui s'envole". D'où la butée : au-delà d'un angle
-// plausible, mieux vaut que la porte morde légèrement le sol (comme le
-// permettait déjà "un petit tilt plutôt qu'un étirement par pied impossible",
-// voir le commentaire d'archTransform plus haut) que de tourner sur elle-même.
-export const ARCH_MAX_ROLL = Math.PI / 6 // 30°, mesuré comme la limite plausible avant que "penché" ne se lise "qui vole"
-
+// à fort zoom), CORRIGÉ APRÈS RELECTURE. Mesuré en direct avant de corriger
+// quoi que ce soit : l'hypothèse de départ (le sol change sous une arche déjà
+// construite, rien ne la repose) ne tenait pas — `terrain.sample` ne dépend
+// pas de la résolution du maillage, et tout vrai changement de MNT
+// reconstruit déjà l'arche à neuf (son uuid THREE change à chaque palier).
+// Le vrai coupable, mesuré sur la Diagonale des Fous à zoom fin : un MNT plus
+// fin révèle un vrai à-pic réunionnais que le MNT grossier lissait — deux
+// pieds à 0,6 unité d'écart (ARCH_TARGET_WIDTH) posés sur un dénivelé réel de
+// 0,871.
+//
+// PREMIÈRE VERSION DE CE CORRECTIF (démontée en relecture, gardée en mémoire
+// pour ne pas y retomber) : une simple butée d'ANGLE à 30° sur l'ancien
+// `roll = atan2(dénivelé, largeur)`. Deux défauts, chiffres à l'appui sur le
+// cas ci-dessus : (1) `atan2` n'a JAMAIS posé les deux pieds exactement au
+// sol, même sur une pente douce (c'est déjà l'origine du résidu de +0,075
+// qu'Adrien avait lui-même jugé "posé correctement" avant cette tâche) — donc
+// borner l'angle ne pouvait pas, à lui seul, ramener les pieds au sol ; (2)
+// `position.y` restait la moyenne NON corrigée : borner l'angle SANS relever
+// le centre a fait passer l'écart pied/sol du cas de référence de ~0,19 à
+// ~0,29 (+50 %) — la butée aggravait le symptôme qu'elle prétendait corriger.
+// Et rien ne décidait ce qui doit arriver quand le dénivelé DÉPASSE la
+// largeur de la porte (0,871 > 0,6 ici) : `atan2` masque ce cas au lieu de le
+// traiter — un pied pouvait finir enterré dans le relief au hasard.
+//
+// LA VRAIE GÉOMÉTRIE, à la place d'une approximation :
+//   sin(roll) = (gA − gB) / largeur
+// (le pied A monte de `demiLargeur · sin(roll)` par rotation — c'est la
+// projection verticale exacte d'un bras de levier de longueur `demiLargeur`
+// qu'on incline de `roll` autour de l'axe N, pas une heuristique.) Ça pose
+// les deux pieds PILE sur leur sol dès que c'est géométriquement possible
+// (|gA−gB| ≤ largeur). Au-delà, `asin` d'un rapport hors [-1, 1] est
+// indéfini PAR CONSTRUCTION : c'est la preuve qu'aucune inclinaison pure ne
+// peut poser les deux pieds — pas un cas à masquer. On clampe donc le
+// RAPPORT (pas l'angle) à [-1, 1], ce qui pose roll à ±90° : c'est la LIMITE
+// MATHÉMATIQUE de sin(), pas une valeur choisie à la main — au-delà de 90°,
+// incliner davantage réduirait le dénivelé rattrapé (sin redescend), ce
+// serait donc strictement pire.
+//
+// RÈGLE EXPLICITE pour le cas hors de portée (relecture : « une porte qui a
+// un pied dans la roche est aussi fausse qu'une porte qui vole ») : NE JAMAIS
+// ENTERRER UN PIED. `position.y` n'est donc plus toujours la moyenne des deux
+// sols — c'est la position la PLUS BASSE qui laisse encore les deux pieds
+// au-dessus (ou pile sur) leur sol. Dans le cas atteignable, ça retombe
+// EXACTEMENT sur l'ancienne moyenne, par construction (gA−dA et gB−dB valent
+// alors tous les deux (gA+gB)/2 — voir test/arch.test.js). Hors de portée, un
+// seul pied touche pile son sol et l'autre flotte du minimum incompressible
+// (dénivelé − largeur) : jamais plus, jamais enterré.
 export function archTransform(spec, groundA, groundB, proto) {
   const { N, U, up, postA, postB } = archFeet(spec, proto)
 
@@ -246,15 +275,36 @@ export function archTransform(spec, groundA, groundB, proto) {
   else basis.makeBasis(N, up, U.clone().negate())
   const qYaw = new THREE.Quaternion().setFromRotationMatrix(basis)
 
-  const rawRoll = proto.worldWidth > 1e-6 ? Math.atan2((groundB ?? 0) - (groundA ?? 0), proto.worldWidth) : 0
-  const roll = THREE.MathUtils.clamp(rawRoll, -ARCH_MAX_ROLL, ARCH_MAX_ROLL)
+  const gA = groundA ?? spec.pos.y
+  const gB = groundB ?? spec.pos.y
+  const demi = proto.worldWidth / 2
+
+  let roll = 0
+  let dA = 0 // hauteur (relative au CENTRE de la porte) que le pied A atteint une fois inclinée
+  if (demi > 1e-6) {
+    // Signe réel de "de combien monte le pied A par unité de sin(roll)",
+    // dérivé de la MÊME géométrie que postA/postB dans archFeet, pas
+    // redeviné à la main : `up` y est construit comme `N × U`, et N/U sont
+    // TOUS LES DEUX horizontaux par construction (voir archFeet) — leur
+    // produit vectoriel est donc TOUJOURS exactement vertical (up.y = ±1,
+    // jamais une valeur intermédiaire). Le pied A est au vertex local
+    // (demiLargeur, 0, 0) si widthIsX (colonne U de la base), ou (0, 0,
+    // demiLargeur) sinon (colonne −U, voir archFeet sur le negate pour
+    // rester une vraie rotation) : d'où le signe opposé entre les deux
+    // branches.
+    const signe = (proto.widthIsX ? 1 : -1) * Math.sign(up.y || 1)
+    const cible = THREE.MathUtils.clamp((gA - gB) / (2 * demi * signe), -1, 1)
+    roll = Math.asin(cible)
+    dA = demi * Math.sin(roll) * signe
+  }
   const qRoll = new THREE.Quaternion().setFromAxisAngle(N, roll)
   const quaternion = qRoll.multiply(qYaw)
 
-  const gA = groundA ?? spec.pos.y
-  const gB = groundB ?? spec.pos.y
+  const dB = -dA // les deux pieds sont symétriques autour du centre : même rotation, offsets opposés
+  const centreY = demi > 1e-6 ? Math.max(gA - dA, gB - dB) : (gA + gB) / 2
+
   return {
-    position: { x: spec.pos.x, y: (gA + gB) / 2, z: spec.pos.z },
+    position: { x: spec.pos.x, y: centreY, z: spec.pos.z },
     quaternion,
     postA,
     postB,
