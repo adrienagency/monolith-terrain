@@ -511,7 +511,23 @@
    passe à zéro troncature ; 390 laisse une marge plutôt que de coller au
    pixel près à une mesure qui dépend des polices du poste. Le PROFIL, zone
    voisine en `flex: 1 1 auto`, absorbe la différence — c'est lui qui a de la
-   place à donner, pas le carnet qui peut encore rétrécir. */
+   place à donner, pas le carnet qui peut encore rétrécir.
+   ⚠️ ET C'EST UNE TENSION RÉELLE AVEC LA PHRASE D'OUVERTURE DE CE FICHIER
+   (« le PROFIL est le sujet, il occupe la moitié de la barre et respire »),
+   PAS UN DÉTAIL. Élargir le carnet de 50 px ici (et de 26 au palier ≤900,
+   voir @media max-width:900px plus bas) rétrécit le profil d'autant, sur
+   les deux paliers où l'un des deux libellés qui pèsent le plus dans ce
+   budget, « SOMMET RESTANT » (116 px, 14 caractères), doit rester intégral.
+   Une tâche ultérieure du même plan renomme ce libellé en « D− restant »
+   (10 caractères) : mesuré en substituant les deux textes sur le même
+   élément, à contrainte de colonne identique, « D− RESTANT » ne pèse plus
+   que 76 px — 40 px de moins. Ce renommage fait, 390 (et 310 au palier
+   ≤900) redeviennent trop généreux d'à peu près ce même ordre de grandeur
+   (moins la marge de sécurité déjà ajoutée ici) : LARGEURS À REVOIR CE
+   JOUR-LÀ, dans le sens du profil, pas du carnet — voir la note miroir dans
+   carnet-course.css (rubrique BUDGET DE LARGEUR) pour le calcul complet. Ce
+   correctif-ci ne fait pas ce choix à la place d'Adrien : il documente
+   l'écart et le chiffre qui permettrait de le refermer. */
 .cb-zone-carnet {
   flex: 0 0 390px;
   min-width: 0;
@@ -600,7 +616,11 @@
      (donc 28 au lieu de 44) et l'ancrage de la barrière (« km 42 ») part,
      mais les 236 d'avant ne tenaient tout simplement pas — voir le budget en
      tête de carnet-course.css. Les 26 px de plus (310 contre 284) viennent
-     du profil, qui en a. */
+     du profil, qui en a.
+     ⚠️ ET CE 310 EST À REVOIR AU MÊME MOMENT QUE LE 390 CI-DESSUS, MÊME
+     CAUSE : « SOMMET » (sans suffixe à ce palier) raccourcit lui aussi
+     quand le libellé devient « D− restant ». Voir la note complète (calcul
+     du gain, ≈40 px) sur .cb-zone-carnet hors media query. */
   .cb-zone-carnet { flex-basis: 310px; padding: var(--ce-gap-group); }
   .cb-chiffre-dmoins { display: none; }
 }

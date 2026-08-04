@@ -66,6 +66,23 @@
    mesurés ici (aucun navigateur dans ce dépôt). L'ellipse de .cc-l reste donc
    le filet, exactement comme `overflow: hidden` l'est pour la hauteur.
 
+   ⚠️ « SOMMET RESTANT » VA ÊTRE RENOMMÉ « D− RESTANT » PAR UNE TÂCHE
+   ULTÉRIEURE DU MÊME PLAN — ET CE BUDGET DEVRA ÊTRE REFAIT CE JOUR-LÀ. Ce
+   libellé pèse 116 px sur les ≈223 px de besoin de la rangée la plus large
+   (voir le calcul ci-dessus et celui de .cc-v un peu plus bas) ; il passe de
+   14 caractères (« SOMMET RESTANT ») à 10 (« D− RESTANT »). Mesuré dans le
+   navigateur en substituant les deux textes SUR LE MÊME élément (donc à
+   contrainte de colonne identique) : 116 px → 76 px, soit ≈40 px libérés.
+   Les deux largeurs de .cb-zone-carnet posées dans course-bar.css pour cette
+   même tâche (340→390 px au palier ≥1101, 284→310 px au palier ≤900)
+   absorbaient exactement le manque créé par CE libellé encore long ; une
+   fois le renommage fait, elles redeviennent trop généreuses de l'ordre de
+   ces mêmes 40 px (moins la marge de sécurité déjà ajoutée) — donc À
+   REVOIR, PAS forcément à annuler complètement, voir la note sur
+   .cb-zone-carnet dans course-bar.css pour l'arbitrage complet (largeur du
+   carnet contre largeur du profil, une décision qui appartient à Adrien,
+   pas à ce correctif).
+
    ⚠️ LE BUDGET CI-DESSUS SUPPOSAIT DES COLONNES `auto`, ET C'ÉTAIT LE BUG
    SUIVANT. Une colonne `auto` se redimensionne sur son contenu le plus large
    VISIBLE À CET INSTANT — donc à chaque chiffre gagné ou perdu par le D+
@@ -516,6 +533,21 @@
    n'est plus forcément celle du point suivant (prochaineBarriere()). Sous
    1101 px il part — le budget de largeur ne le porte plus, et le libellé
    « BARRIÈRE » reste, lui, exact.
+   ⚠️ DÉCLARÉ EN TOUTES LETTRES, PAS COMME UN EFFET DE BORD DE LARGEUR : ENTRE
+   901 ET 1100 px, ON CHOISIT DE PERDRE L'ANCRAGE KILOMÉTRIQUE PLUTÔT QUE
+   D'AFFICHER UN LIBELLÉ TRONQUÉ. C'est une PERTE D'INFORMATION réelle, pas
+   un simple réglage — sur cette plage de tailles d'écran courante (tablette
+   en paysage, petit portable), le coureur perd « km 42 », c'est-à-dire le
+   lieu où sa barrière horaire s'applique ; il garde l'heure elle-même
+   (« 12h30 ») et le libellé « BARRIÈRE ». L'arbitrage retenu : un mot coupé
+   au milieu (« BARRIÈR… ») est la « faute visuelle terminale » que ce
+   fichier condamne déjà pour .cb-title et pour .cc-v — un nombre ou un mot
+   tronqué SANS AVERTISSEMENT se lit comme une valeur juste, alors qu'un
+   ancrage absent se voit et ne ment à personne (le libellé « BARRIÈRE » et
+   l'heure restent lisibles, rien ne prétend être complet). Entre les deux
+   défauts, celui qui s'annonce honnêtement l'emporte sur celui qui ment par
+   omission. Un lecteur qui n'est pas d'accord avec cet arbitrage peut le
+   contester : c'est écrit ici pour ça, pas enterré dans une note de largeur.
    ⚠️ CE PALIER ÉTAIT 900 px, ET C'EST FAUX DEPUIS QUE CETTE COLONNE A UNE
    LARGEUR FIGÉE (voir plus bas). `km ${entier(c.kmBarriere)}` (carnet-course.js)
    grandit à chaque dizaine puis centaine franchie (« km 8 » → « km 23 » →
