@@ -175,38 +175,36 @@ export function pictosDuCarnet(waypoints, km, { seuilLoinKm = 3, points = null }
   return out
 }
 
-// LE D+ QUI RESTE À MONTER — jusqu'à l'arrivée, et jusqu'au prochain point.
+// LE D+ QUI RESTE À MONTER — jusqu'à l'arrivée, et jusqu'au prochain point —
+// ET LE D− QUI RESTE À DESCENDRE jusqu'à l'arrivée.
 //
 // ⚠️ C'EST UN REMPLAÇANT, PAS UN AJOUT. Le carnet affichait le D+ ACCUMULÉ
 // depuis le dernier point franchi : un rétroviseur. Ce chiffre ne change
 // aucune décision en course — on ne redescend pas ce qu'on a monté. Ce qu'un
 // coureur gère, c'est ce qui reste dans les jambes.
 // `points` évite de recalculer pointsDePassage() : l'appelant l'a déjà.
+//
+// ⚠️ dMoinsRestant N'ÉTAIT PAS CALCULÉ DU TOUT — LA COLONNE AFFICHAIT UN
+// SOMMET. « D− restant » promet une DESCENTE cumulée, pas l'altitude du point
+// culminant qui reste à franchir (deux informations différentes : un sommet
+// ne redescend jamais avec la position, un D− restant, si). ascentStats()
+// rend dplus ET dminus dans le MÊME balayage — celui qui tournait déjà ici
+// pour dplusRestant : dminus était calculé puis jeté. On ne fait donc pas un
+// balayage de plus, on arrête d'en jeter un.
 export function deniveleRestant(cumKm, eles, i, waypoints, points = null) {
-  if (!cumKm?.length || !eles?.length) return { dplusRestant: 0, dplusProchain: null }
+  if (!cumKm?.length || !eles?.length) return { dplusRestant: 0, dplusProchain: null, dMoinsRestant: 0 }
   const idx = Math.max(0, Math.min(i, eles.length - 1))
   const { suivant } = points || pointsDePassage(waypoints, cumKm[idx] ?? 0)
-  const dplusRestant = ascentStats(eles, { debut: idx }).dplus
+  const { dplus, dminus } = ascentStats(eles, { debut: idx })
   const dplusProchain = suivant
     ? ascentStats(eles, { debut: idx, fin: indexPourKm(cumKm, suivant.km) }).dplus
     : null
-  return { dplusRestant, dplusProchain }
-}
-
-// LE POINT CULMINANT DE CE QUI RESTE — la seule altitude qui décide encore
-// quelque chose pour un coureur (« il me reste un mur à 2 180 »), là où
-// l'altitude COURANTE, elle, est déjà écrite sur la pastille du profil, collée
-// à la tête de lecture, c'est-à-dire mieux placée que nous.
-// ⚠️ N'EST APPELÉ QUE DANS LE CAS « pas de prochain point » (voir
-// carnetALaLigne) : dans ce cas-là deniveleRestant() ne lance PAS son second
-// ascentStats(), donc ce balayage remplace un balayage — le coût par image ne
-// bouge pas. L'appeler inconditionnellement en ajouterait un quatrième.
-export function sommetRestant(eles, i) {
-  if (!eles?.length) return null
-  const debut = Math.max(0, Math.min(i, eles.length - 1))
-  let max = -Infinity
-  for (let k = debut; k < eles.length; k++) if (eles[k] > max) max = eles[k]
-  return Number.isFinite(max) ? Math.round(max) : null
+  // même contrat d'affichage que dplusProchain, à l'envers : ce chiffre ne
+  // sert QUE quand il n'y a pas de prochain point (voir carnetALaLigne, le
+  // bloc « prochain point » et le bloc D−/Altitude s'excluent) — null dit
+  // « pas la peine de regarder », pas « zéro mètre de descente ».
+  const dMoinsRestant = suivant ? null : dminus
+  return { dplusRestant: dplus, dplusProchain, dMoinsRestant }
 }
 
 // Bande de pente pour la puce visuelle du carnet — `n` segments égaux,
@@ -319,10 +317,10 @@ export function carnetALaLigne({ cumKm, eles, waypoints = [], trkPoints = null }
     kmAvantSuivant,
     // la durée que la TRACE a mis d'ici à l'arrivée — voir dureeRestante()
     dureeRestante: dureeRestante(trkPoints, idx),
-    // remplace l'altitude COURANTE dans la colonne de droite quand il n'y a
-    // pas de prochain point — voir sommetRestant() pour le pourquoi et pour
-    // pourquoi ce balayage ne coûte rien de plus.
-    sommetRestant: suivant ? null : sommetRestant(eles, idx),
+    // dMoinsRestant (dans le spread ci-dessous) remplace l'altitude COURANTE
+    // dans la colonne de droite quand il n'y a pas de prochain point — voir
+    // deniveleRestant() pour le pourquoi et pour pourquoi ce chiffre ne coûte
+    // rien de plus qu'un balayage déjà en cours.
     ...deniveleRestant(cumKm, eles, idx, waypoints, points),
     pictos: pictosDuCarnet(waypoints, km, { points }),
     fenetrePentes: fenetreDePentes(cumKm, eles, km),
@@ -442,10 +440,13 @@ export function textesDuCarnet(c) {
     duree: duree ? `${duree} sur la trace` : '',
     dplusRestant: entier(c.dplusRestant),
     alt: entier(c.alt),
-    // LE POINT CULMINANT RESTANT, qui remplace l'altitude courante partout où
-    // la pastille du profil dit déjà celle-ci (voir carnet-course.css).
-    sommet: entier(c.sommetRestant),
-    aSommet: Number.isFinite(c.sommetRestant),
+    // LE D− RESTANT — mètres de descente cumulée jusqu'à l'arrivée, qui
+    // remplace l'altitude courante partout où la pastille du profil dit déjà
+    // celle-ci (voir carnet-course.css). Pas de signe ici : comme dplusRestant
+    // (« D+ »), c'est le LIBELLÉ qui porte le signe, la valeur reste une
+    // magnitude — un « D− −70 m » doublerait le signe pour rien.
+    dMoinsRestant: entier(c.dMoinsRestant),
+    aDMoinsRestant: Number.isFinite(c.dMoinsRestant),
     // ⚠️ LA BARRIÈRE A SA PROPRE RANGÉE. C'est la seule donnée de tout le
     // modèle qui puisse mettre un coureur HORS COURSE, et elle était le plus
     // petit et le plus pâle texte du panneau : 11 px, mono, encre atténuée,
@@ -509,12 +510,12 @@ export function phraseDuCarnet(c) {
   if (t.duree) bouts.push(t.duree)
   if (t.aSuivant) bouts.push(`${t.prochainNom} ${t.prochainSous}`)
   // ⚠️ LA PHRASE NE SUIT PAS LA MEDIA QUERY. À l'écran, la colonne montre le
-  // sommet restant au-dessus de 680 px et l'altitude courante en dessous (la
+  // D− restant au-dessus de 680 px et l'altitude courante en dessous (la
   // pastille du profil porte déjà celle-ci quand le profil est là). Ici on dit
-  // TOUJOURS le sommet : une annonce qui changerait de sens selon la largeur
-  // de fenêtre serait une information différente pour la même page, et
+  // TOUJOURS le D− restant : une annonce qui changerait de sens selon la
+  // largeur de fenêtre serait une information différente pour la même page, et
   // l'altitude courante n'aide personne à décider quoi que ce soit.
-  else if (t.aSommet) bouts.push(`point culminant restant ${t.sommet} mètres`)
+  else if (t.aDMoinsRestant) bouts.push(`dénivelé négatif restant ${t.dMoinsRestant} mètres`)
   else bouts.push(`altitude ${t.alt} mètres`)
   bouts.push(pente ? `pente ${pente} pour cent` : 'pente inconnue')
   // la barrière est énoncée EN DERNIER et en toutes lettres : c'est la seule

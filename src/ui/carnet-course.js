@@ -132,12 +132,8 @@ export function buildCarnetCourse({ container, srNode = null }) {
   // troisième colonne d'une grille portée par .cc-side (carnet-course.css) :
   // les chiffres forment enfin une colonne, les unités aussi.
   //
-  // ⚠️ ET LE LIBELLÉ A UN SUFFIXE ESCAMOTABLE. « SOMMET RESTANT » est le plus
-  // large texte de la colonne (14 caractères en capitales espacées) dans un
-  // panneau dont la largeur est la vraie contrainte — le CSS le révèle
-  // exactement aux largeurs où son jumeau figé est visible dans la tête de
-  // barre, et le range partout ailleurs. Voir le budget de LARGEUR en tête de
-  // carnet-course.css.
+  // ⚠️ ET LE LIBELLÉ A UN SUFFIXE ESCAMOTABLE. Voir le budget de LARGEUR en
+  // tête de carnet-course.css.
   const duo = (libelle, { suffixe = '', cls = '' } = {}) => {
     const ligne = el('div', `cc-stat cc-stat-duo${cls ? ` ${cls}` : ''}`, side)
     const l = el('span', 'cc-l', ligne)
@@ -165,18 +161,20 @@ export function buildCarnetCourse({ container, srNode = null }) {
   // Les lignes ci-dessous ne servent QUE quand il n'y a pas de prochain point
   // (trace sans <wpt>, ou dernier point franchi) : elles et le bloc « prochain
   // point » s'excluent. Entre elles, c'est le CSS qui tranche selon la largeur
-  // — le sommet restant tant que le profil est là (sa pastille porte déjà
+  // — le D− restant tant que le profil est là (sa pastille porte déjà
   // l'altitude courante), l'altitude courante quand il disparaît.
-  // ⚠️ « SOMMET » TOUT COURT DISAIT LA MÊME CHOSE QUE LA TÊTE DE BARRE ET UN
-  // AUTRE NOMBRE. La tête affiche `altMax` — le point culminant de TOUT le
-  // parcours — sous le même libellé, à la même taille, dans la même barre :
-  // au-dessus de 1101 px un coureur lisait « SOMMET 1840 m » à gauche et
-  // « SOMMET 1450 m » à droite. C'est la répétition que la demande n°7
-  // condamne, déplacée du titre vers les chiffres. Le suffixe « restant »
-  // apparaît exactement là où le jumeau de la tête est visible (au-dessous, la
-  // tête masque le sien : plus de collision, plus besoin du mot).
-  const rSommet = duo('Sommet', { suffixe: 'restant', cls: 'cc-stat-sommet' })
-  rSommet.unite.textContent = 'm'
+  // ⚠️ « SOMMET » ÉTAIT UN MENSONGE DE DONNÉE, PAS SEULEMENT DE MOT. La
+  // colonne affichait l'ALTITUDE du point culminant restant sous un libellé
+  // qui, une fois renommé « D− restant », aurait promis un DÉNIVELÉ NÉGATIF —
+  // deux informations différentes. Le champ sous-jacent est désormais
+  // `dMoinsRestant` (voir deniveleRestant() dans carnet-course.js), une vraie
+  // descente cumulée jusqu'à l'arrivée, pas un maximum d'altitude. Accessoirement
+  // ça règle aussi l'ancienne collision avec la tête de barre : elle affiche
+  // `altMax` sous le mot « Sommet » (le point culminant de TOUT le parcours) —
+  // « D− » ne porte plus ce mot, il n'y a donc plus deux nombres différents
+  // sous le même libellé dans la même barre.
+  const rDMoins = duo('D−', { suffixe: 'restant', cls: 'cc-stat-dmoins' })
+  rDMoins.unite.textContent = 'm'
   const rAlt = duo('Altitude', { cls: 'cc-stat-alt' })
   rAlt.unite.textContent = 'm'
 
@@ -326,7 +324,7 @@ export function buildCarnetCourse({ container, srNode = null }) {
     pose(rBarriere.txt, 'barriere', t.barriere)
     pose(rBarriere.unite, 'barriereOu', t.barriereOu)
     pose(rAlt.txt, 'alt', t.alt)
-    pose(rSommet.txt, 'sommet', t.sommet)
+    pose(rDMoins.txt, 'dmoins', t.dMoinsRestant)
 
     // ⚠️ LA TEINTE D'ALERTE EST UN ÉTAT, ET ELLE SE POSE ICI. Elle vivait en
     // dur dans la feuille (.cc-v-limite ajoutée une fois à la construction) :
@@ -348,7 +346,7 @@ export function buildCarnetCourse({ container, srNode = null }) {
     // colonne ne se recentre plus quand une rangée apparaît ou disparaît.
     montre(rBarriere.ligne, 'barriereOn', t.aBarriere)
     montre(rAlt.ligne, 'altOn', !t.aSuivant)
-    montre(rSommet.ligne, 'sommetOn', !t.aSuivant && t.aSommet)
+    montre(rDMoins.ligne, 'dmoinsOn', !t.aSuivant && t.aDMoinsRestant)
     if (t.aSuivant) {
       pose(nSuivNom, 'nom', t.prochainNom)
       pose(nSuivSous, 'sous', t.prochainSous)

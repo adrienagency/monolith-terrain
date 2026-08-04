@@ -124,7 +124,28 @@ test('deniveleRestant compte ce qui RESTE à monter, pas ce qui est derrière', 
   assert.equal(depart.dplusProchain, 50)
   // plus de point suivant → plus de D+ intermédiaire à annoncer
   assert.equal(deniveleRestant(cumKm, eles, 4, waypoints).dplusProchain, null)
-  assert.deepEqual(deniveleRestant([], [], 0, []), { dplusRestant: 0, dplusProchain: null })
+  assert.deepEqual(deniveleRestant([], [], 0, []), { dplusRestant: 0, dplusProchain: null, dMoinsRestant: 0 })
+})
+
+test('deniveleRestant expose le D− RESTANT — une descente cumulée, pas un sommet', () => {
+  // ⚠️ CE N'EST PAS UNE ALTITUDE. Le carnet affichait le point culminant
+  // restant sous un libellé qui promet un dénivelé négatif : « D− restant »
+  // doit être la descente cumulée entre la position courante et l'arrivée, à
+  // la MÊME hystérésis que le D+ (ascentStats, un seul balayage pour les
+  // deux), pas un maximum d'altitude qui ne redescend jamais.
+  // au départ (index 0) : eles 1000→1050→1150 (monte) →1140→1080→1080
+  // (descend), hystérésis 8 : dminus = 10 + 60 = 70
+  assert.equal(deniveleRestant(cumKm, eles, 0, []).dMoinsRestant, 70)
+  // au sommet (index 2, km 2) : ce qui reste EST la redescente — le chiffre
+  // ne bouge pas, preuve que ce n'est pas une altitude qui varie avec i
+  assert.equal(deniveleRestant(cumKm, eles, 2, []).dMoinsRestant, 70)
+  // juste avant l'arrivée plate (index 4) : plus rien à descendre
+  assert.equal(deniveleRestant(cumKm, eles, 4, []).dMoinsRestant, 0)
+  // exclusif avec le bloc « prochain point », même contrat d'affichage que
+  // l'ancien sommetRestant() : dès qu'un point de passage reste devant, la
+  // valeur n'est pas exposée (elle ne sert que quand la colonne bascule sur
+  // Altitude/D− faute de prochain point à montrer)
+  assert.equal(deniveleRestant(cumKm, eles, 0, waypoints).dMoinsRestant, null)
 })
 
 test('fenetreDePentes omet les segments hors piste plutôt que de les inventer', () => {

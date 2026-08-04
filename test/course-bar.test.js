@@ -431,22 +431,28 @@ test('la bande de pente n’encode pas sa donnée par la seule couleur', () => {
   assert.ok(h('douce') < h('soutenue') && h('soutenue') < h('raide'), 'la sévérité doit monter')
 })
 
-test('le SOMMET RESTANT remplace l’altitude qui redoublait la pastille', () => {
+test('le D− RESTANT remplace l’altitude qui redoublait la pastille', () => {
   // la pastille du profil affiche déjà « 1240 m · km 12,4 » collée à la tête
   // de lecture, donc mieux placée. C'est le raisonnement qui avait fait
   // masquer .cc-km au-dessus de 680 px — il n'était pas appliqué à l'altitude.
+  // ⚠️ ET LA VALEUR N'EST PLUS UN SOMMET. Le carnet affichait ici le point
+  // culminant restant — une ALTITUDE, 1150 m à l'index 1 — sous un libellé qui
+  // promet un DÉNIVELÉ NÉGATIF. deniveleRestant() (carnet-course.js) calcule
+  // désormais la vraie descente cumulée jusqu'à l'arrivée, à la même
+  // hystérésis que le D+ : 70 m ici (1150→1140→1080, hystérésis 8), pas 1150.
   const t = textesDuCarnet(carnetALaLigne({ cumKm, eles, waypoints: [] }, 1))
-  assert.equal(t.aSommet, true)
-  assert.match(t.sommet, /^1.?150$/, `sommet attendu, reçu « ${t.sommet} »`)
-  // pas de balayage inutile quand il y a un prochain point : le sommet ne sert
-  // que dans le cas « pas de point de passage »
+  assert.equal(t.aDMoinsRestant, true)
+  assert.equal(t.dMoinsRestant, '70', `dénivelé négatif attendu, reçu « ${t.dMoinsRestant} »`)
+  // pas de balayage inutile quand il y a un prochain point : le D− restant ne
+  // sert que dans le cas « pas de point de passage » (même contrat que l'ancien
+  // sommetRestant, juste une autre donnée dessous)
   const avec = carnetALaLigne({ cumKm, eles, waypoints: [{ km: 4, name: 'Col', pictos: [] }] }, 1)
-  assert.equal(avec.sommetRestant, null)
+  assert.equal(avec.dMoinsRestant, null)
   // et le CSS choisit laquelle des deux rangées parle, selon que le profil est
   // là ou non
   const css = codeSeul(lire('src/ui/carnet-course.css'))
   assert.match(css, /\.cc-stat\.cc-stat-alt\s*\{\s*display:\s*none/)
-  assert.match(css, /@media \(max-width: 680px\)[^}]*\{[\s\S]*?cc-stat-sommet[^}]*display:\s*none/)
+  assert.match(css, /@media \(max-width: 680px\)[^}]*\{[\s\S]*?cc-stat-dmoins[^}]*display:\s*none/)
 })
 
 test('les pictos du prochain point sont triés par IMPORTANCE, et la coupe se voit', () => {
@@ -835,18 +841,30 @@ test('les chiffres FIGÉS de la tête cèdent un palier aux chiffres VIVANTS', (
   assert.match(cb.match(/\.cb-head-actions\s*\{[^}]*\}/s)[0], /align-self:\s*center/)
 })
 
-test('« Sommet » ne désigne pas deux nombres différents dans la même barre', () => {
-  // la tête affiche altMax (tout le parcours, figé), la colonne affiche le
-  // sommet RESTANT (vivant) : au-dessus de 1101 px un coureur lisait
-  // « SOMMET 1840 m » à gauche et « SOMMET 1450 m » à droite, même libellé,
-  // même taille. C'est la répétition que la demande n°7 condamne, déplacée du
-  // titre vers les chiffres.
+test('« Sommet restant » est devenu « D− restant », et son signe est le vrai moins', () => {
+  // AVANT : la tête affichait altMax (tout le parcours, figé) sous « SOMMET »,
+  // la colonne affichait aussi « SOMMET » pour le point culminant RESTANT
+  // (vivant) : au-dessus de 1101 px un coureur lisait « SOMMET 1840 m » à
+  // gauche et « SOMMET 1450 m » à droite, même libellé, même taille — la
+  // répétition que la demande n°7 condamnait. Le renommage en « D− restant »
+  // règle la collision de mot EN MÊME TEMPS qu'il corrige la donnée en
+  // dessous (voir le test précédent) : il n'y a plus de mot commun entre la
+  // tête et la colonne.
   const ui = codeSeul(lire('src/ui/carnet-course.js'))
-  assert.match(ui, /duo\('Sommet', \{ suffixe: 'restant'/, 'le carnet doit dire « restant »')
+  assert.match(ui, /duo\('D−', \{ suffixe: 'restant'/, 'le carnet doit dire « D− restant »')
+  assert.ok(!/duo\('Sommet'/.test(ui), '« Sommet » ne doit plus être un libellé du carnet')
+  // ⚠️ LE VRAI SIGNE MOINS (U+2212), PAS UN TRAIT D'UNION. Le carnet écrit
+  // déjà « D+ » avec un vrai plus ; un « D-» au trait d'union ferait un
+  // couple bancal à l'œil à côté de lui.
+  assert.ok(ui.includes("duo('D−'"), 'le signe doit être U+2212 (moins mathématique)')
+  assert.ok(!ui.includes("duo('D-'"), 'pas un trait d’union à la place du signe moins')
   const css = codeSeul(lire('src/ui/carnet-course.css'))
-  // le mot n'apparaît qu'au palier où le jumeau figé de la tête est visible —
-  // course-bar.css masque .cb-chiffre-sommet sous 1101 px
-  assert.match(css, /@media \(min-width: 1101px\)[\s\S]*?cc-stat-sommet \.cc-l-suf[^}]*display:\s*inline/)
+  // le suffixe garde le même palier de largeur qu'avant (voir la note de
+  // carnet-course.css : ce n'est plus une histoire de collision de mot avec la
+  // tête, seulement un arbitrage de budget de largeur)
+  assert.match(css, /@media \(min-width: 1101px\)[\s\S]*?cc-stat-dmoins \.cc-l-suf[^}]*display:\s*inline/)
+  // la tête, elle, garde son « SOMMET » (altMax, tout le parcours) — c'est un
+  // chiffre différent qui n'a plus besoin de bouger pour cette tâche
   assert.match(codeSeul(lire('src/ui/course-bar.css')),
     /@media \(max-width: 1100px\)[\s\S]*?cb-chiffre-sommet[^}]*display:\s*none/)
 })

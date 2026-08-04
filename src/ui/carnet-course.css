@@ -29,7 +29,7 @@
    ⚠️ ET LE PIRE CAS EST DÉSORMAIS RÉSERVÉ, PAS REPRIS. La barre a une hauteur
    fixe, mais son CONTENU se recentrait : avec `justify-content: center` et des
    rangées montées/démontées par `hidden`, l'apparition de la rangée Barrière
-   (23 px) ou le passage du bloc « prochain point » (44,6 px) à Sommet/Altitude
+   (23 px) ou le passage du bloc « prochain point » (44,6 px) à D−/Altitude
    au dernier point franchi faisaient SAUTER verticalement le chiffre héros de
    34 px — celui qu'on lit en courant des yeux — de 11 puis de 15 px. C'était
    la lettre de la demande n°3 respectée (la barre ne bouge pas) et son esprit
@@ -46,7 +46,9 @@
        héros « 112,4 km »          ~105  (34 px mono + unité 13 px)
        + écart de .cc-main            14
        + filet + retrait de .cc-side  15
-       + la rangée la plus large :
+       + la rangée la plus large (chiffres d'AVANT le renommage « Sommet
+         restant » → « D− restant », voir la note ⚠️ juste en dessous — ce
+         calcul reste à refaire avec le libellé actuel, plus court) :
            ≥ 1101 px : « SOMMET RESTANT » 116 + 8 + « 1 840 » 47 + « m » 8   ≈ 179
            ≤ 1100 px : le suffixe « restant » part (le jumeau figé de la tête
              disparaît au même palier), ET L'ANCRAGE DE LA BARRIÈRE AVEC LUI
@@ -66,27 +68,29 @@
    mesurés ici (aucun navigateur dans ce dépôt). L'ellipse de .cc-l reste donc
    le filet, exactement comme `overflow: hidden` l'est pour la hauteur.
 
-   ⚠️ « SOMMET RESTANT » VA ÊTRE RENOMMÉ « D− RESTANT » PAR UNE TÂCHE
-   ULTÉRIEURE DU MÊME PLAN — ET CE BUDGET DEVRA ÊTRE REFAIT CE JOUR-LÀ. Ce
-   libellé pèse 116 px sur les ≈223 px de besoin de la rangée la plus large
-   (voir le calcul ci-dessus et celui de .cc-v un peu plus bas) ; il passe de
-   14 caractères (« SOMMET RESTANT ») à 10 (« D− RESTANT »). Mesuré dans le
-   navigateur en substituant les deux textes SUR LE MÊME élément (donc à
-   contrainte de colonne identique) : 116 px → 76 px, soit ≈40 px libérés.
-   Les deux largeurs de .cb-zone-carnet posées dans course-bar.css pour cette
-   même tâche (340→390 px au palier ≥1101, 284→310 px au palier ≤900)
-   absorbaient exactement le manque créé par CE libellé encore long ; une
-   fois le renommage fait, elles redeviennent trop généreuses de l'ordre de
+   ⚠️ « SOMMET RESTANT » A ÉTÉ RENOMMÉ « D− RESTANT », ET CE BUDGET N'A PAS
+   ENCORE ÉTÉ REFAIT — le calcul ci-dessus (et celui de .cc-v un peu plus bas)
+   date d'avant le renommage et reste écrit avec l'ancien libellé, qui pesait
+   116 px sur les ≈223 px de besoin de la rangée la plus large. Le nouveau
+   libellé passe de 14 caractères (« SOMMET RESTANT ») à 10 (« D− RESTANT »,
+   la MÊME longueur que « D+ RESTANT », déjà présent dans la même colonne) ;
+   mesuré dans le navigateur en substituant les deux textes SUR LE MÊME
+   élément (donc à contrainte de colonne identique) : 116 px → 76 px, soit
+   40 px libérés — voir le rapport de tâche pour la mesure détaillée.
+   Les deux largeurs de .cb-zone-carnet posées dans course-bar.css pour la
+   tâche qui a introduit ce libellé long (340→390 px au palier ≥1101,
+   284→310 px au palier ≤900) absorbaient exactement le manque qu'il créait ;
+   maintenant qu'il est raccourci, elles sont trop généreuses de l'ordre de
    ces mêmes 40 px (moins la marge de sécurité déjà ajoutée) — donc À
    REVOIR, PAS forcément à annuler complètement, voir la note sur
    .cb-zone-carnet dans course-bar.css pour l'arbitrage complet (largeur du
    carnet contre largeur du profil, une décision qui appartient à Adrien,
-   pas à ce correctif).
+   pas à ce correctif — ce fichier ne touche donc PAS ces largeurs-là).
 
    ⚠️ LE BUDGET CI-DESSUS SUPPOSAIT DES COLONNES `auto`, ET C'ÉTAIT LE BUG
    SUIVANT. Une colonne `auto` se redimensionne sur son contenu le plus large
    VISIBLE À CET INSTANT — donc à chaque chiffre gagné ou perdu par le D+
-   restant, le Sommet restant ou la barrière, PAS seulement au chargement.
+   restant, le D− restant ou la barrière, PAS seulement au chargement.
    Rejoué dans un navigateur (Diagonale des Fous, 158 km, D+ 10 185 m) :
    jusqu'à 72 px de glissement horizontal sur toute une lecture, mesuré par
    échantillonnage de offsetLeft (400 images). .cc-v et .cc-hero-val portent
@@ -121,7 +125,7 @@
    (il alimente phraseDuCarnet pour les lecteurs d'écran et la bande) : rien de
    jeté côté logique, une rangée rendue à la barrière horaire — c'est-à-dire à
    la seule donnée du modèle qui puisse mettre un coureur hors course.
-   Barrière et Altitude/Sommet s'excluent (l'une suppose un prochain point,
+   Barrière et Altitude/D− s'excluent (l'une suppose un prochain point,
    l'autre son absence) : le pire cas est bien celui compté ci-dessus.
 
    ⚠️ LA SOUS-LIGNE DU PROCHAIN POINT EST PASSÉE DE 11 À 13 px (+2,6 px, pris
@@ -167,18 +171,22 @@
      de ce que `flex:1` sur .cc-side est censé garantir : .cc-side ne
      « remplit l'espace restant » que si le CONTENEUR qui le porte a déjà
      une largeur fixe à distribuer, or il n'en avait aucune.
-     ⚠️ CAS QUI L'A RÉVÉLÉ : SOMMET RESTANT reste MASQUÉ tant qu'il y a un
-     prochain point (`montre(rSommet.ligne, 'sommetOn', !t.aSuivant &&
-     t.aSommet)`, carnet-course.js) et s'ALLUME au dernier point franchi —
-     donc le libellé de la colonne 1 passe de « D+ RESTANT » (76 px) à
-     « SOMMET RESTANT » (116 px) À L'ARRIVÉE, précisément quand .cc-next
-     disparaît. Sans largeur fixée, .cc-main grandissait de +40 px pour
-     l'accueillir, et TOUTE la colonne de droite (valeurs, unités) glissait
-     d'autant — mesuré sur la démo, offsetLeft à 500 échantillons, ce
-     glissement survivait à la correction de .cc-v ET .cc-u (largeur fixe)
-     ET à `contain: inline-size` sur .cc-next (voir sa règle) : aucun des
-     deux ne pouvait rien y faire, puisque le problème n'était ni dans une
-     colonne ni dans une rangée, mais dans le CONTENEUR qui les porte toutes.
+     ⚠️ CAS QUI L'A RÉVÉLÉ : LE BLOC D−/ALTITUDE reste MASQUÉ tant qu'il y a un
+     prochain point (`montre(rDMoins.ligne, 'dmoinsOn', !t.aSuivant &&
+     t.aDMoinsRestant)`, carnet-course.js) et s'ALLUME au dernier point franchi
+     — à l'époque du diagnostic le libellé de la colonne 1 passait de
+     « D+ RESTANT » (76 px) à « SOMMET RESTANT » (116 px) À L'ARRIVÉE,
+     précisément quand .cc-next disparaît (le renommage en « D− RESTANT »,
+     tâche ultérieure, a depuis égalisé les deux largeurs — la mécanique du
+     bug reste vraie pour toute AUTRE rangée qui grandirait de la même façon,
+     la barrière par exemple). Sans largeur fixée, .cc-main grandissait de
+     +40 px pour accueillir le libellé le plus long, et TOUTE la colonne de
+     droite (valeurs, unités) glissait d'autant — mesuré sur la démo,
+     offsetLeft à 500 échantillons, ce glissement survivait à la correction de
+     .cc-v ET .cc-u (largeur fixe) ET à `contain: inline-size` sur .cc-next
+     (voir sa règle) : aucun des deux ne pouvait rien y faire, puisque le
+     problème n'était ni dans une colonne ni dans une rangée, mais dans le
+     CONTENEUR qui les porte toutes.
      width:100% force .cc-body — donc .cc-main, donc le partage héros/
      .cc-side — à occuper la largeur RÉELLE de la zone en permanence, que le
      contenu la remplisse ou non : la seule condition sous laquelle
@@ -451,21 +459,22 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Le suffixe escamotable du libellé — « D+ restant », « Sommet restant ».
-   ⚠️ IL RÈGLE UNE VRAIE COLLISION, PAS UN DÉTAIL DE STYLE. La tête de barre
-   affiche « SOMMET » (le point culminant de TOUT le parcours, figé) et cette
-   colonne affichait « SOMMET » (le point culminant de CE QUI RESTE, vivant) :
+/* Le suffixe escamotable du libellé — « D+ restant », « D− restant ».
+   ⚠️ IL RÉGLAIT UNE VRAIE COLLISION, PAS UN DÉTAIL DE STYLE — ET LE
+   RENOMMAGE L'A FAIT DISPARAÎTRE TOUT SEUL. La tête de barre affiche
+   « SOMMET » (le point culminant de TOUT le parcours, figé) ; cette colonne
+   affichait aussi « SOMMET » (le point culminant de CE QUI RESTE, vivant) :
    même mot, même taille, même barre, deux nombres différents — exactement la
-   répétition que la demande n°7 condamne, déplacée du titre vers les chiffres.
-   Le suffixe apparaît donc EXACTEMENT au palier où le jumeau figé est visible
-   (course-bar.css masque .cb-chiffre-sommet sous 1101 px) : au-dessus le mot
-   lève l'ambiguïté, en dessous il n'y a plus d'ambiguïté à lever et la place
-   revient au budget de largeur. Un libellé de 14 caractères en capitales
-   espacées est le texte le plus large de la colonne. */
+   répétition que la demande n°7 condamnait. Depuis que la colonne dit
+   « D− » et non plus « Sommet », il n'y a plus deux nombres sous le même mot :
+   le suffixe garde le même palier d'apparition (≥ 1101 px, celui où la place
+   existe dans le budget de largeur) mais n'a plus besoin de coïncider avec la
+   disparition du jumeau figé de la tête (course-bar.css, .cb-chiffre-sommet)
+   pour une autre raison — c'est un pur arbitrage de largeur désormais. */
 .cc-l-suf { display: none; }
 @media (min-width: 1101px) {
   .cc-stat-dplus .cc-l-suf,
-  .cc-stat-sommet .cc-l-suf { display: inline; }
+  .cc-stat-dmoins .cc-l-suf { display: inline; }
 }
 .cc-v {
   line-height: 1;
@@ -481,7 +490,7 @@
   /* les nombres s'alignent par la droite : c'est ce qui fait une colonne */
   text-align: right;
   /* ⚠️ LARGEUR FIXE, ET min-width:0 RESTE — MESURÉ SUR UNE LECTURE RÉELLE
-     (« la barre danse en horizontal »). D+ restant, Sommet restant et
+     (« la barre danse en horizontal »). D+ restant, D− restant et
      Altitude partagent cette MÊME colonne de grille (.cc-side, minmax(0,1fr)
      auto auto) : en `auto` SEUL, la colonne se redimensionne sur le plus
      large contenu VISIBLE à cet instant, et un chiffre qui change de rang —
@@ -614,7 +623,7 @@
      mais ces trois propriétés ne bornent que la taille MINIMALE de la boîte
      — pas sa taille de contenu MAXIMALE (max-content), celle que la grille
      utilise pour décider de combien faire grandir la colonne fr (col1) qui
-     porte cette rangée en même temps que les rangées D+/Sommet/Barrière.
+     porte cette rangée en même temps que les rangées D+/D−/Barrière.
      Résultat mesuré sur la démo (400 échantillons, offsetLeft) : dès que le
      nom affiché est le plus long de la course (« Camping du Surchauffant »,
      23 caractères), .cc-v et .cc-u glissaient de 19 px pendant les quelques
@@ -641,9 +650,10 @@
    point — c'est-à-dire sur un GPX brut sans <wpt>, le cas le PLUS courant.
    Dans le cas majoritaire, la moitié de la colonne de droite disait donc ce
    que la pastille dit vingt centimètres plus à gauche.
-   Au-dessus de 680 px la place va au SOMMET RESTANT, le seul chiffre
-   d'altitude prospectif et absent partout ailleurs ; sous 680 px le profil
-   disparaît, et l'altitude courante reprend son rôle.
+   Au-dessus de 680 px la place va au D− RESTANT, le seul chiffre PROSPECTIF
+   de la colonne (une descente encore à venir, pas une mesure figée) et absent
+   partout ailleurs ; sous 680 px le profil disparaît, et l'altitude courante
+   reprend son rôle.
    Les deux rangées sont montées/démontées par la même condition côté JS
    (`montre(…, !t.aSuivant)`) : le CSS ne fait que choisir laquelle des deux
    parle. `[hidden]` reste prioritaire (display:none !important, en tête). */
@@ -654,7 +664,7 @@
 .cc-stat.cc-stat-alt { display: none; }
 @media (max-width: 680px) {
   .cc-stat.cc-stat-alt { display: contents; }
-  .cc-stat.cc-stat-sommet { display: none; }
+  .cc-stat.cc-stat-dmoins { display: none; }
 }
 
 /* ------------------------------------------------------ 4. LE PROCHAIN POINT
