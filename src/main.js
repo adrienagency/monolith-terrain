@@ -469,6 +469,19 @@ const params = {
   // toggle. 1x matches the default reveal pace (totalKm*1.5s, see gpx.js
   // tick()); 0.5x–3x covers "slow enough to read the terrain" to "quick preview"
   gpxFollow: true,
+  // ⚠️ LA CAUSE, PAS SEULEMENT L'ÉTAT (task 2, CONSTAT 1 de relecture).
+  // gpxFollow=false à lui seul ne dit rien sur le POURQUOI — et c'était le
+  // trou : le FINALE (fin de parcours, tick()) coupe gpxFollow tout comme le
+  // bouton « ✕ Quitter le suivi » (route-panel.js) ou la case à cocher
+  // « Suivi » le font, mais SEUL le FINALE doit se voir réarmé tout seul à la
+  // relance — une coupure explicite de l'utilisateur doit tenir, même après
+  // un parcours qui va au bout tout seul (gpx.js tick() n'y remet PAS headT à
+  // 0, contrairement à stop() : une relance après verrait quand même
+  // `headT >= 1`, donc « repart du début », sans cette distinction). VRAI
+  // uniquement entre le moment où le FINALE coupe et la prochaine fois que
+  // gpxFollow change de valeur PAR N'IMPORTE QUELLE AUTRE VOIE (voir chaque
+  // site qui écrit params.gpxFollow : ils remettent tous ce drapeau à false).
+  gpxFollowCoupeParFinale: false,
   gpxFollowSpeed: 1,
 
   // ocean (real-world bathymetry read) — Adrien's Caribbean-lagoon ramp
@@ -5034,14 +5047,26 @@ function engageGpxFollow() {
   // isPlaying() redevient bien true et mode reste 'surface' après un clic
   // Lecture. C'est params.gpxFollow qui reste bloqué à false pour le reste de
   // la session — le FINALE de fin de parcours (plus bas dans tick(), recul
-  // isométrique) l'éteint délibérément et rien ne le rallumait derrière.
-  // gpxLayer.lastPlayRestarted (posé par GpxLayerManager.play(), juste appelé
-  // par TOUS les boutons Lecture — barre de course, panneau Parcours,
-  // mini-barre — avant d'atterrir ici) dit si CETTE lecture repart du tout
-  // début ; si oui, une pression Lecture est une intention explicite qui
-  // réarme le suivi. Doit tourner AVANT peutEngagerLeSuivi, sinon la garde
+  // isométrique) l'éteint délibérément et rien ne le rallumait derrière — MAIS
+  // (CONSTAT 1 de relecture) une coupure EXPLICITE (« ✕ Quitter le suivi »,
+  // case à cocher) ne doit JAMAIS être défaite par une relance : d'où
+  // `gpxFollowCoupeParFinale`, vrai seulement si c'est le FINALE — et lui
+  // seul — qui a fait passer gpxFollow à false (posé/effacé à chaque site qui
+  // écrit params.gpxFollow, voir leurs commentaires respectifs).
+  // gpxLayer.consommerRelanceDepuisLeDebut() (posé par GpxLayerManager.play(),
+  // appelé par TOUS les boutons Lecture — barre de course, panneau Parcours,
+  // mini-barre — avant d'atterrir ici ; CONSOMMÉ, pas relu, voir CONSTAT 2 /
+  // creerDrapeauConsommable dans gpx-layers.js) dit si CETTE lecture repart du
+  // tout début. Doit tourner AVANT peutEngagerLeSuivi, sinon la garde
   // sortirait sur l'ancien gpxFollow=false avant qu'on ait pu le relever.
-  if (doitReamorcerSuivi({ relanceDepuisLeDebut: !!gpxLayer.lastPlayRestarted, gpxFollow: params.gpxFollow })) params.gpxFollow = true
+  if (doitReamorcerSuivi({
+    relanceDepuisLeDebut: gpxLayer.consommerRelanceDepuisLeDebut(),
+    gpxFollow: params.gpxFollow,
+    coupeParFinale: params.gpxFollowCoupeParFinale,
+  })) {
+    params.gpxFollow = true
+    params.gpxFollowCoupeParFinale = false // consommé : la raison ne vaut plus une fois réarmée
+  }
   // Garde extraite dans suivi-course.js (testable).
   if (!peutEngagerLeSuivi({ suiviDemande: params.gpxFollow, enLecture: gpxLayer.isPlaying(), mode: modes.mode })) return
   followManual = false // nouveau Play → le rail reprend (jusqu'au 1er geste)
@@ -7922,6 +7947,14 @@ function tick() {
     else if (_wasPlaying) {
       _wasPlaying = false
       if ((gpxLayer.headT ?? 0) >= 0.999 && raceState.waypoints.length) {
+        // ⚠️ LA CAUSE SE POSE ICI, PAS PLUS BAS — task 2, CONSTAT 1. Le drapeau
+        // ne doit passer à true QUE si c'est CE bloc-ci qui fait le passage
+        // true→false : si gpxFollow était déjà à false (l'utilisateur avait
+        // cliqué « ✕ Quitter le suivi » avant que le parcours ne finisse tout
+        // seul), ce n'est PAS le FINALE qui a coupé le suivi, et le drapeau ne
+        // doit pas prétendre le contraire — sinon la relance réarmerait un
+        // suivi que l'utilisateur venait justement de refuser.
+        if (params.gpxFollow) params.gpxFollowCoupeParFinale = true
         params.gpxFollow = false
         followManual = false
         followZoomVel = 0

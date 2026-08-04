@@ -56,6 +56,25 @@ export function canAddLayer(count) {
   return count < MAX_LAYERS
 }
 
+// UN DRAPEAU « À CONSOMMER UNE SEULE FOIS ». Remplace ce qui était une simple
+// propriété publique mutable (`lastPlayRestarted`) — relevé en relecture
+// (task 2, CONSTAT 2) comme pouvant FUIR : lue deux fois sans qu'un second
+// play() n'ait eu lieu, elle rendait encore le résultat du premier appel ; et
+// la transition automatique de séquence (tick(), plus bas) pose le play()
+// d'une COUCHE directement, sans passer par GpxLayerManager.play(), donc sans
+// jamais toucher la propriété — un futur appel isolé aurait pu lire une
+// valeur périmée d'un tout autre calque. `consommer()` remet TOUJOURS à false
+// après lecture (impossible de la relire deux fois par erreur) ; `poser()`
+// permet aux chemins qui ne sont PAS une vraie pression Lecture d'écraser
+// explicitement une valeur en attente plutôt que de la laisser filer.
+export function creerDrapeauConsommable() {
+  let valeur = false
+  return {
+    poser(v) { valeur = !!v },
+    consommer() { const v = valeur; valeur = false; return v },
+  }
+}
+
 let _uid = 0
 const nextId = () => `gpx-layer-${++_uid}`
 
@@ -72,14 +91,17 @@ export class GpxLayerManager {
     this.layers = [] // [{ id, gpx: GpxLayer, name, visible }]
     this.activeIndex = -1 // focused layer — panel controls + which profile strip shows
     this.playingIndex = -1 // -1 = not sequencing
-    // ⚠️ VRAI SEULEMENT LE TEMPS D'UN APPEL play() — voir play() ci-dessous.
-    // main.js (engageGpxFollow) le lit pour savoir s'il faut réarmer le
-    // suivi caméra coupé par le FINALE de fin de parcours (task 2, régression
-    // « le suivi ne repart pas après une relecture »). Trois boutons Lecture
-    // distincts (barre de course, panneau Parcours, mini-barre) appellent
-    // tous play() puis le hook de suivi : centraliser ICI, plutôt que dans
-    // main.js, couvre les trois d'un coup.
-    this.lastPlayRestarted = false
+    // À CONSOMMER, PAS À RELIRE — voir creerDrapeauConsommable() plus haut
+    // (task 2, CONSTAT 2 de relecture : une propriété publique mutable pouvait
+    // fuiter — lue deux fois, ou lue après un play() de COUCHE posé en direct
+    // par la transition de séquence, plus bas dans tick()). main.js
+    // (engageGpxFollow, via consommerRelanceDepuisLeDebut()) le lit pour
+    // savoir s'il faut réarmer le suivi caméra coupé par le FINALE de fin de
+    // parcours (régression « le suivi ne repart pas après une relecture »).
+    // Trois boutons Lecture distincts (barre de course, panneau Parcours,
+    // mini-barre) appellent tous play() puis le hook de suivi : centraliser
+    // ICI, plutôt que dans main.js, couvre les trois d'un coup.
+    this._relanceDepuisLeDebut = creerDrapeauConsommable()
 
     // hooks main.js wires up — kept as plain callback slots (same shape as
     // GpxLayer's own onDone-style hooks elsewhere in this codebase) rather
@@ -324,12 +346,20 @@ export class GpxLayerManager {
     }
     const layer = this.playingLayer
     if (!layer) return
-    // À LIRE AVANT layer.gpx.play() : c'est CE play()-là qui remet headT à 0
+    // À POSER AVANT layer.gpx.play() : c'est CE play()-là qui remet headT à 0
     // quand le parcours était fini (même test — headT >= 1 — que gpx.js
     // applique en interne). Le lire après donnerait toujours false.
-    this.lastPlayRestarted = layer.gpx.headT >= 1
+    this._relanceDepuisLeDebut.poser(layer.gpx.headT >= 1)
     layer.gpx.play()
     this.onTrackStart?.(layer, this.playingIndex)
+  }
+
+  // main.js CONSOMME ce drapeau (jamais lu directement) — voir
+  // creerDrapeauConsommable() : deux lectures d'affilée sans play() entre les
+  // deux renvoient false la seconde fois, donc aucun appel isolé plus tard ne
+  // peut retomber par erreur sur le résultat d'un play() déjà traité.
+  consommerRelanceDepuisLeDebut() {
+    return this._relanceDepuisLeDebut.consommer()
   }
 
   pause() {
@@ -381,6 +411,15 @@ export class GpxLayerManager {
       this._showTransition(layer.name || layer.gpx.track?.name, nextLayer.name || nextLayer.gpx.track?.name)
       this.playingIndex = next
       this.focus(nextLayer.id)
+      // ⚠️ CE play()-LÀ CONTOURNE play() CI-DESSUS (task 2, CONSTAT 2) — c'est
+      // le play() DE LA COUCHE, en direct, pas celui du manager. Une
+      // transition automatique de séquence n'est PAS une pression Lecture de
+      // l'utilisateur ; sans ce poser(false) explicite, un drapeau resté à
+      // true depuis le tout dernier VRAI play() (potentiellement sur un autre
+      // calque) aurait pu fuiter jusqu'à engageGpxFollow() et réarmer le
+      // suivi hors de propos. Le suivi caméra d'une transition de séquence a
+      // déjà son propre mécanisme (onTrackTransition → retarget, pas restart).
+      this._relanceDepuisLeDebut.poser(false)
       nextLayer.gpx.play()
       this.onTrackTransition?.(layer, nextLayer, next)
     }

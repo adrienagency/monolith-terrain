@@ -19,14 +19,26 @@ export function peutEngagerLeSuivi(etat) {
 // drone=false / pilote=false / gpxFollow=false pour le reste de la session,
 // quel que soit le nombre de clics sur Lecture.
 //
+// ⚠️ CORRECTIF DE RELECTURE (task-2 report, addenda) — `gpxFollow` À LUI SEUL
+// NE SUFFIT PAS. Scénario qui cassait la première version : l'utilisateur
+// clique « ✕ Quitter le suivi » (route-panel.js) PENDANT la lecture — refus
+// EXPLICITE — puis laisse le parcours se terminer tout seul. gpx.js `tick()`
+// auto-pause en fin de lecture SANS remettre headT à 0 (contrairement à
+// `stop()`, qui le fait) : au clic Lecture suivant, la relance repart bien du
+// début (headT valait 1), et l'ancienne version réarmait le suivi À TORT,
+// écrasant le refus explicite de l'utilisateur. Il faut donc savoir POURQUOI
+// gpxFollow est à false, pas seulement QU'IL l'est — d'où `coupeParFinale` :
+// vrai seulement quand c'est le FINALE (et lui seul) qui a fait le passage
+// true→false ; toute coupure explicite (bouton Quitter, case à cocher) le
+// remet à false, et le réarmement ne se déclenche alors plus jamais.
+//
 // La règle : une pression sur Lecture qui repart DU TOUT DÉBUT (même test
 // que gpx.js applique lui-même dans play() pour savoir s'il remet headT à
-// 0 : `headT >= 1` — voir GpxLayerManager.lastPlayRestarted, gpx-layers.js)
-// doit réarmer le suivi. Une simple REPRISE en cours de course (pause
-// volontaire, suivi déjà coupé à la main par la case à cocher du panneau
-// Parcours) ne le doit pas — sinon Lecture écraserait un choix que
-// l'utilisateur vient de faire.
+// 0 : `headT >= 1` — voir gpx-layers.js) réarme le suivi UNIQUEMENT si la
+// coupure venait du FINALE. Une simple REPRISE en cours de course, ou une
+// relance après un refus explicite, ne le doit pas — sinon Lecture
+// écraserait un choix que l'utilisateur vient de faire.
 export function doitReamorcerSuivi(etat) {
   if (!etat) return false
-  return !!(etat.relanceDepuisLeDebut && !etat.gpxFollow)
+  return !!(etat.relanceDepuisLeDebut && !etat.gpxFollow && etat.coupeParFinale)
 }

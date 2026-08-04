@@ -36,24 +36,42 @@ test('cas degeneres : jamais de plantage', () => {
 //
 // La regle : une PRESSION EXPLICITE sur Lecture qui repart DU DEBUT (c'est le
 // meme test que gpx.js applique lui-meme dans play() pour decider s'il faut
-// remettre headT a 0 : `headT >= 1` — capture par GpxLayerManager en tant que
-// `lastPlayRestarted`, voir gpx-layers.js) doit reamorcer le suivi. Une
-// simple REPRISE en cours de course (pause volontaire, suivi deja coupe a la
-// main par la case a cocher du panneau Parcours) ne le doit pas — sinon
-// Lecture ecraserait un choix que l'utilisateur vient de faire.
+// remettre headT a 0 : `headT >= 1` — capture par gpx-layers.js) reamorce le
+// suivi SI ET SEULEMENT SI c'est le FINALE qui l'a coupe (coupeParFinale).
 test('le suivi se reamorce sur une relance depuis le debut (le bug d Adrien)', () => {
-  assert.equal(doitReamorcerSuivi({ relanceDepuisLeDebut: true, gpxFollow: false }), true)
+  assert.equal(doitReamorcerSuivi({ relanceDepuisLeDebut: true, gpxFollow: false, coupeParFinale: true }), true)
 })
 
 test('le suivi ne se reamorce PAS sur une simple reprise en cours de course', () => {
-  assert.equal(doitReamorcerSuivi({ relanceDepuisLeDebut: false, gpxFollow: false }), false)
+  assert.equal(doitReamorcerSuivi({ relanceDepuisLeDebut: false, gpxFollow: false, coupeParFinale: true }), false)
 })
 
 test('rien a reamorcer si le suivi est deja actif', () => {
-  assert.equal(doitReamorcerSuivi({ relanceDepuisLeDebut: true, gpxFollow: true }), false)
+  assert.equal(doitReamorcerSuivi({ relanceDepuisLeDebut: true, gpxFollow: true, coupeParFinale: true }), false)
 })
 
 test('doitReamorcerSuivi : cas degeneres, jamais de plantage', () => {
   assert.equal(doitReamorcerSuivi(undefined), false)
   assert.equal(doitReamorcerSuivi({}), false)
+})
+
+// ------------------------------------------- CONSTAT 1 (relecture) ---------
+// Ce que la premiere version ratait : gpxFollow=false a lui seul ne dit RIEN
+// sur le POURQUOI. Scenario qui casse sans coupeParFinale : l'utilisateur
+// clique « Quitter le suivi » (route-panel.js) PENDANT la lecture — refus
+// EXPLICITE, gpxFollow -> false — puis laisse le parcours se terminer tout
+// seul. gpx.js tick() auto-pause en fin de lecture SANS remettre headT a 0
+// (contrairement a stop(), qui le fait) : au clic Lecture suivant, headT
+// valait encore 1, donc relanceDepuisLeDebut=true — et l'ancienne version
+// (sans coupeParFinale) reamorcait le suivi a tort, ecrasant le refus de
+// l'utilisateur. Avec coupeParFinale=false (coupure explicite, pas le
+// FINALE), le suivi doit rester coupe.
+test('CONSTAT 1 : Quitter le suivi puis laisser le parcours finir tout seul ne doit PAS se rearmer a la relance', () => {
+  assert.equal(doitReamorcerSuivi({ relanceDepuisLeDebut: true, gpxFollow: false, coupeParFinale: false }), false)
+})
+
+test('CONSTAT 1 : seul le FINALE (coupeParFinale=true) autorise le rearmement, jamais une coupure explicite', () => {
+  // meme relance depuis le debut, meme gpxFollow=false — seule la CAUSE change
+  assert.equal(doitReamorcerSuivi({ relanceDepuisLeDebut: true, gpxFollow: false, coupeParFinale: true }), true)
+  assert.equal(doitReamorcerSuivi({ relanceDepuisLeDebut: true, gpxFollow: false, coupeParFinale: false }), false)
 })

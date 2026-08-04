@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { reorderArray, layerDepth, nextLayerIndex, canAddLayer, MAX_LAYERS } from '../src/gpx-layers.js'
+import { reorderArray, layerDepth, nextLayerIndex, canAddLayer, MAX_LAYERS, creerDrapeauConsommable } from '../src/gpx-layers.js'
 
 // ---- reorderArray (drag/drop reorder — task 22 §2) -------------------------
 
@@ -82,4 +82,37 @@ test('canAddLayer allows up to MAX_LAYERS (10) and refuses beyond it', () => {
   assert.equal(canAddLayer(9), true)
   assert.equal(canAddLayer(10), false)
   assert.equal(canAddLayer(11), false)
+})
+
+// ---- creerDrapeauConsommable (task 2, CONSTAT 2 de relecture) --------------
+//
+// GpxLayerManager exposait `lastPlayRestarted` comme une PROPRIÉTÉ PUBLIQUE
+// MUTABLE, sans consommation : rien n'empêchait de la lire deux fois (la
+// deuxième lecture voyait encore le résultat de la première, potentiellement
+// périmé), ni un chemin qui pose le play() d'une COUCHE directement (la
+// transition automatique de séquence, tick() plus bas) de laisser filer une
+// valeur d'un tout autre appel. Ce petit magasin « un seul coup » remplace la
+// propriété brute : `consommer()` remet TOUJOURS à false après lecture, et
+// `poser(false)` permet aux chemins qui ne sont PAS une vraie pression
+// utilisateur sur Lecture (la transition de séquence) d'effacer
+// explicitement une valeur en attente plutôt que de la laisser fuiter.
+test('creerDrapeauConsommable : consommer() vide le drapeau — la deuxieme lecture ne voit plus rien', () => {
+  const d = creerDrapeauConsommable()
+  d.poser(true)
+  assert.equal(d.consommer(), true)
+  assert.equal(d.consommer(), false) // pas de fuite : deja consomme
+})
+
+test('creerDrapeauConsommable : poser(false) efface explicitement un true en attente', () => {
+  // c est exactement ce que fait tick() avant nextLayer.gpx.play() : la
+  // transition automatique de sequence n est PAS une pression Lecture, donc
+  // ne doit jamais etre confondue avec une relance depuis le debut
+  const d = creerDrapeauConsommable()
+  d.poser(true)
+  d.poser(false)
+  assert.equal(d.consommer(), false)
+})
+
+test('creerDrapeauConsommable : jamais pose reste a false par defaut', () => {
+  assert.equal(creerDrapeauConsommable().consommer(), false)
 })

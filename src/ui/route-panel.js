@@ -65,6 +65,13 @@ export function buildRoutePanel(ctx) {
   }, { ghost: true })
   const exitFollowBtn = button('✕ Quitter le suivi', () => {
     params.gpxFollow = false
+    // ⚠️ REFUS EXPLICITE — task 2, CONSTAT 1. Sans ce reset, une relance après
+    // que le parcours a fini tout seul (gpx.js tick() ne remet PAS headT à 0
+    // en fin de lecture, contrairement à Stop) réarmerait le suivi que
+    // l'utilisateur vient justement de refuser ici — voir doitReamorcerSuivi
+    // (src/suivi-course.js) et le FINALE (tick(), plus bas dans main.js) qui
+    // posent/lisent ce même drapeau.
+    params.gpxFollowCoupeParFinale = false
     ctx.stopFollow?.()
     refreshAll()
     syncPlayBtn()
@@ -344,6 +351,10 @@ export function buildRoutePanel(ctx) {
       get: () => params.gpxFollow,
       set: (v) => {
         params.gpxFollow = v
+        // toute manipulation MANUELLE de la case efface la cause automatique
+        // (task 2, CONSTAT 1) — que la case parte à ON ou à OFF, ce n'est de
+        // toute façon plus le FINALE qui décide de l'état de gpxFollow
+        params.gpxFollowCoupeParFinale = false
         if (v) ctx.startFollow?.()
         else ctx.stopFollow?.()
         refreshAll() // reveals/hides the Follow-speed slider right away
