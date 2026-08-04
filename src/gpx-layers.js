@@ -72,6 +72,14 @@ export class GpxLayerManager {
     this.layers = [] // [{ id, gpx: GpxLayer, name, visible }]
     this.activeIndex = -1 // focused layer — panel controls + which profile strip shows
     this.playingIndex = -1 // -1 = not sequencing
+    // ⚠️ VRAI SEULEMENT LE TEMPS D'UN APPEL play() — voir play() ci-dessous.
+    // main.js (engageGpxFollow) le lit pour savoir s'il faut réarmer le
+    // suivi caméra coupé par le FINALE de fin de parcours (task 2, régression
+    // « le suivi ne repart pas après une relecture »). Trois boutons Lecture
+    // distincts (barre de course, panneau Parcours, mini-barre) appellent
+    // tous play() puis le hook de suivi : centraliser ICI, plutôt que dans
+    // main.js, couvre les trois d'un coup.
+    this.lastPlayRestarted = false
 
     // hooks main.js wires up — kept as plain callback slots (same shape as
     // GpxLayer's own onDone-style hooks elsewhere in this codebase) rather
@@ -316,6 +324,10 @@ export class GpxLayerManager {
     }
     const layer = this.playingLayer
     if (!layer) return
+    // À LIRE AVANT layer.gpx.play() : c'est CE play()-là qui remet headT à 0
+    // quand le parcours était fini (même test — headT >= 1 — que gpx.js
+    // applique en interne). Le lire après donnerait toujours false.
+    this.lastPlayRestarted = layer.gpx.headT >= 1
     layer.gpx.play()
     this.onTrackStart?.(layer, this.playingIndex)
   }

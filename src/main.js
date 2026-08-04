@@ -32,6 +32,7 @@ import { intersectionGlobe, viseeArrivee, ZOOM_PALIER_MIN } from './escalier-zoo
 import { createGoto, geocode, mainParts } from './goto.js'
 import { frameTrack } from './gpx.js'
 import { GpxLayerManager } from './gpx-layers.js'
+import { peutEngagerLeSuivi, doitReamorcerSuivi } from './suivi-course.js'
 import { buildRaceLabels } from './race-labels.js'
 import { buildCourseBar } from './ui/course-bar.js'
 import { snapToKm, ascentStats, parseRace } from './race-model.js'
@@ -5027,7 +5028,22 @@ function flyTrack() {
 // The per-frame drive itself (drone.updateAt, fed gpxLayer.headT) lives in
 // updateCameraMotion() below, reusing DroneCam wholesale — no new camera rig.
 function engageGpxFollow() {
-  if (!params.gpxFollow || !gpxLayer.isPlaying() || modes.mode !== 'surface') return
+  // ⚠️ RÉARMEMENT AVANT LA GARDE, ET C'EST DÉLIBÉRÉ — voir task-2 report pour
+  // la mesure qui a établi la cause. Les trois verrous nommés dans le brief
+  // (gpxFollow / isPlaying / mode) ne sont PAS individuellement en tort :
+  // isPlaying() redevient bien true et mode reste 'surface' après un clic
+  // Lecture. C'est params.gpxFollow qui reste bloqué à false pour le reste de
+  // la session — le FINALE de fin de parcours (plus bas dans tick(), recul
+  // isométrique) l'éteint délibérément et rien ne le rallumait derrière.
+  // gpxLayer.lastPlayRestarted (posé par GpxLayerManager.play(), juste appelé
+  // par TOUS les boutons Lecture — barre de course, panneau Parcours,
+  // mini-barre — avant d'atterrir ici) dit si CETTE lecture repart du tout
+  // début ; si oui, une pression Lecture est une intention explicite qui
+  // réarme le suivi. Doit tourner AVANT peutEngagerLeSuivi, sinon la garde
+  // sortirait sur l'ancien gpxFollow=false avant qu'on ait pu le relever.
+  if (doitReamorcerSuivi({ relanceDepuisLeDebut: !!gpxLayer.lastPlayRestarted, gpxFollow: params.gpxFollow })) params.gpxFollow = true
+  // Garde extraite dans suivi-course.js (testable).
+  if (!peutEngagerLeSuivi({ suiviDemande: params.gpxFollow, enLecture: gpxLayer.isPlaying(), mode: modes.mode })) return
   followManual = false // nouveau Play → le rail reprend (jusqu'au 1er geste)
   followZoomVel = 0
   const w = gpxLayer.track?.world
@@ -5079,6 +5095,9 @@ function togglePlay() {
       gpxLayer.pause()
       disengageGpxFollow()
     } else {
+      // Le réarmement du suivi (si la relance repart du tout début, voir
+      // engageGpxFollow) se joue APRÈS gpxLayer.play() : c'est ce play()-là
+      // qui pose gpxLayer.lastPlayRestarted, lu juste en dessous.
       gpxLayer.play()
       engageGpxFollow()
       _courseDemandee = true // lancer une lecture, c'est entrer en course
