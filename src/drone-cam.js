@@ -437,8 +437,12 @@ export class DroneCam {
     // peu puis se recentre — mais reste nettement plus réactive que la
     // position, donc jamais perçue comme "en retard".
     const head = this._head(s, _headPt)
-    if (dt <= 0) this._viseDisp.copy(head)
-    else amortisVisee(this._viseDisp, head, this.aimHalfLife, dt)
+    // pas de branche dt<=0 ici (contrairement à _applyPose sur _pos) : à
+    // dt=0, amortisVisee est DÉJÀ un no-op par construction (1 − 2^0 = 0) —
+    // et au premier appel (depuis start()), _viseDisp vient d'être posé sur
+    // la tête juste avant, donc ce no-op laisse déjà vise == head. Une garde
+    // explicite ne ferait que dupliquer ce que la formule donne toute seule.
+    amortisVisee(this._viseDisp, head, this.aimHalfLife, dt)
     this.controls.target.copy(this._viseDisp)
     this.camera.up.copy(this._up)
     this.camera.lookAt(this._viseDisp)

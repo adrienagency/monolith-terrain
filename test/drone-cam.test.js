@@ -537,32 +537,61 @@ test('a vertically-noisy GPX cannot pump the camera (stabilized gimbal)', () => 
   assert.ok(maxStep < 0.35, `camera Y stepped ${maxStep.toFixed(3)} in one frame — the noise got through`)
 })
 
-// BORNE RECALIBRÉE (task 4, 2026-08-04 — « tu peux relâcher un peu la
-// pression sur la caméra pour fluidifier »).
+// RENOMMÉ ET RECALIBRÉ (task 4, 2026-08-04 — « tu peux relâcher un peu la
+// pression sur la caméra pour fluidifier »). L'ancien nom du test
+// ('the head stays locked near screen centre') et sa citation d'origine
+// (« dans les 10% du centre de l'écran ») décrivaient un VERROUILLAGE strict.
+// Ce n'est plus ce qui est vérifié ici — le nom mentait au lecteur, donc il
+// change, pas seulement la borne.
 //
-// La citation d'origine ci-dessous demandait À LA FOIS un centrage à 10 % ET
-// « une toute petite latence » — les deux sont en tension dès qu'une latence
-// existe VRAIMENT : _aim() visait jusqu'ici la tête à latence nulle (0,15 de
-// marge ne mesurait donc que le damping de POSITION), ce qui produisait
-// l'à-coup remonté par Adrien à chaque petit changement de cap. Le correctif
-// (aimHalfLife = 0,28 s, voir drone-cam.js) amortit désormais aussi la visée
-// EN POSITION MONDE, sur le même modèle que _headDisp dans gpx.js — et un
-// point qui chasse une cible en mouvement avec un filtre exponentiel a par
-// construction un retard permanent proportionnel à la vitesse (pas seulement
-// pendant les virages), qui ne s'annule que sur un sujet immobile.
+// La citation d'origine demandait À LA FOIS un centrage à 10 % ET « une
+// toute petite latence » — les deux sont en tension dès qu'une latence existe
+// VRAIMENT : _aim() visait jusqu'ici la tête à latence nulle (0,15 de marge
+// ne mesurait donc que le damping de POSITION). Le correctif (aimHalfLife =
+// 0,28 s, voir drone-cam.js) amortit désormais aussi la visée EN POSITION
+// MONDE, sur le même modèle que _headDisp dans gpx.js.
+//
+// RELECTURE (2026-08-04) : plutôt qu'une seule moyenne globale desserrée, il
+// a été suggéré de séparer la mesure en deux bornes serrées — un régime
+// ÉTABLI entre virages (qui devrait rester proche du centre) et un pic
+// PENDANT un virage (qui a le droit d'être large). Tentative faite, mesures
+// à l'appui, et REJETÉE : la séparation ne discrimine rien sur cette
+// implémentation.
+//
+// Preuve : un tracé PARFAITEMENT DROIT (zéro virage, zéro courbure) produit
+// déjà un écart NDC moyen non nul et qui CROÎT avec la vitesse de défilement
+// — voir le test 'même sans aucun virage...' juste en dessous : ≈0,20 à 5
+// u/s, ≈0,38 à 10 u/s, ≈0,65 à 20 u/s. Sur la fixture ci-dessous (zigzag
+// 55°), classer chaque frame « en virage » ou « stable » via le taux de
+// rotation réel du CAP DU TRACÉ (pas de la caméra) donne des moyennes quasi
+// identiques (steady ≈0,61 / virage ≈0,64 sur un balayage de seuils 5 à
+// 40°/s) : le régime « stable » n'a RIEN de serré. La raison géométrique :
+// _viseDisp est un point en POSITION MONDE qui chasse la tête avec un
+// filtre exponentiel ; vu depuis le CÔTÉ (la caméra est délibérément placée
+// « sur le côté » du parcours, cf. _buildCurves), ce point traîne derrière
+// la tête d'une distance ≈ vitesse × constante-de-temps, TOUJOURS, même en
+// ligne droite — ce n'est pas un effet de virage, c'est le prix de tout
+// mouvement. Forcer une borne serrée sur un "régime stable" qui n'existe pas
+// séparément aurait juste échoué en permanence ou été aussi lâche que
+// l'autre — dans les deux cas, deux bornes n'auraient rien apporté qu'une
+// seule ne dise déjà. D'où le choix : UNE borne globale honnêtement nommée et
+// documentée, complétée par le test de proportionnalité à la vitesse
+// ci-dessous qui, lui, pinne précisément la mécanique réelle plutôt qu'une
+// distinction stable/virage qui n'existe pas dans les faits.
 //
 // Sur cette fixture (épingles à 55° enchaînées sans répit, terrain
 // accidenté, 40 s pour ~600 unités) : mean NDC ≈ 0,634 (mesuré, contre
-// ≈0,10 à latence nulle). Une fixture plus réaliste (virages à 20°, jambes de
-// 60 unités, mêmes réglages) redescend à une base ≈0,36 entre virages avec un
-// pic ≈0,77 pendant — cohérent avec « dérive un peu puis se recentre »
-// plutôt qu'un décentrage permanent massif. 0,75 borne la torture fixture
-// avec marge sans revalider un vrai bug de centrage.
-test('the head stays locked near screen centre — the final framing spec', () => {
-  // 'Calle un follow sur le point d'avancée... toujours toujours focus sur
-  // lui, dans les 10% du centre de l'écran, une toute petite latence.'
-  // This SUPERSEDED the lower-third framing and the directorial pitch floor —
-  // and is now itself partly superseded by task 4's aim damping, see above.
+// ≈0,10 à latence nulle). 0,75 borne cette torture fixture avec marge —
+// vérifié par la relecture : repatcher aimHalfLife à 0,35/0,55/5,0 fait
+// remonter la mesure à 0,80/0,92/70 respectivement, donc la borne attrape
+// encore un mauvais dosage dès ~+20 %.
+test('the head sits within a bounded (not locked) distance of centre — envelope loosened by aim damping, task 4', () => {
+  // Citation d'origine (contrat AVANT task 4, désormais partiellement
+  // dépassé — voir le commentaire au-dessus) : 'Calle un follow sur le point
+  // d'avancée... toujours toujours focus sur lui, dans les 10% du centre de
+  // l'écran, une toute petite latence.' Ce test vérifie maintenant un
+  // PLAFOND large (0,75), pas un verrou à 10 % : voir le commentaire
+  // au-dessus pour ce qui reste réellement garanti et pourquoi.
   const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 400)
   const controls = { target: new THREE.Vector3() }
   const drone = new DroneCam({ camera, controls, sampleGround: mountainGround })
@@ -581,4 +610,53 @@ test('the head stays locked near screen centre — the final framing spec', () =
   }
   const mean = sum / n
   assert.ok(mean < 0.75 /* recalibré task 4 : voir le commentaire au-dessus du test */, `mean NDC distance ${mean.toFixed(3)} — the head is not locked to centre`)
+})
+
+// Ce test pinne le VRAI mécanisme derrière la borne desserrée ci-dessus, à la
+// place d'un découpage stable/virage qui n'existe pas (voir le long
+// commentaire au-dessus) : sur un tracé PARFAITEMENT DROIT — zéro virage,
+// zéro courbure — l'écart NDC moyen n'est PAS nul et croît avec la vitesse de
+// défilement. _viseDisp (position monde) traîne derrière la tête d'une
+// distance ≈ vitesse × constante de temps de aimHalfLife ; vu depuis le côté
+// (la caméra encadre delibérément le parcours de profil), ce retard se lit à
+// l'écran même sans le moindre changement de cap. C'est la vraie nature du
+// compromis accepté par Adrien : « relâcher la pression » coûte un peu de
+// centrage EN PERMANENCE, proportionnellement à l'allure, pas seulement dans
+// les virages.
+test('même sans aucun virage, la visée amortie dérive du centre proportionnellement à la vitesse', () => {
+  function buildStraight(length, n) {
+    const pts = []
+    for (let i = 0; i <= n; i++) pts.push({ x: 0, y: 2, z: (length * i) / n })
+    return pts
+  }
+  function meanNdcAtSpeed(duration, length = 600) {
+    const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 4000)
+    const controls = { target: new THREE.Vector3() }
+    const drone = new DroneCam({ camera, controls, sampleGround: () => 0 })
+    assert.ok(drone.start(buildStraight(length, 400), { duration }))
+    const dt = 1 / 30
+    const head = new THREE.Vector3()
+    let sum = 0, n = 0
+    // s in [0.3, 0.9] : loin du seedAt de start() et de l'arrivée, le régime
+    // est établi (ni le transitoire de démarrage ni le ralenti de fin).
+    for (let s = 0.3; s <= 0.9; s += dt / duration) {
+      drone.updateAt(dt, s)
+      camera.updateMatrixWorld(true)
+      camera.matrixWorldInverse.copy(camera.matrixWorld).invert()
+      drone.curve.getPointAt(s, head)
+      head.project(camera)
+      sum += Math.hypot(head.x, head.y); n++
+    }
+    return sum / n
+  }
+  const slow = meanNdcAtSpeed(120) // ~5 u/s
+  const mid = meanNdcAtSpeed(60) // ~10 u/s
+  const fast = meanNdcAtSpeed(30) // ~20 u/s
+  // pas de virage nulle part ici : si l'écart était uniquement le prix des
+  // virages, ces trois mesures seraient toutes ~0. Elles ne le sont pas, et
+  // elles montent avec la vitesse — c'est la preuve du mécanisme, pas un
+  // artefact de fixture.
+  assert.ok(slow > 0.05, `même lent, l'écart doit être mesurable (obtenu ${slow.toFixed(3)})`)
+  assert.ok(mid > slow, `l'écart doit croître avec la vitesse (lent ${slow.toFixed(3)} >= moyen ${mid.toFixed(3)})`)
+  assert.ok(fast > mid, `l'écart doit croître avec la vitesse (moyen ${mid.toFixed(3)} >= rapide ${fast.toFixed(3)})`)
 })
