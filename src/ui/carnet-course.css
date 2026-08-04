@@ -59,6 +59,19 @@
    mesurés ici (aucun navigateur dans ce dépôt). L'ellipse de .cc-l reste donc
    le filet, exactement comme `overflow: hidden` l'est pour la hauteur.
 
+   ⚠️ LE BUDGET CI-DESSUS SUPPOSAIT DES COLONNES `auto`, ET C'ÉTAIT LE BUG
+   SUIVANT. Une colonne `auto` se redimensionne sur son contenu le plus large
+   VISIBLE À CET INSTANT — donc à chaque chiffre gagné ou perdu par le D+
+   restant, le Sommet restant ou la barrière, PAS seulement au chargement.
+   Rejoué dans un navigateur (Diagonale des Fous, 158 km, D+ 10 185 m) :
+   jusqu'à 72 px de glissement horizontal sur toute une lecture, mesuré par
+   échantillonnage de offsetLeft (400 images). .cc-v et .cc-hero-val portent
+   désormais une largeur FIXE (6ch / 7ch, voir leurs règles) au lieu d'un
+   `auto` ou d'un `min-width:0` : le budget ci-dessus reste la bonne
+   INTENTION (quelle largeur nominale vise-t-on), mais la valeur qui la fait
+   TENIR est maintenant écrite en `ch`, insensible au nombre de chiffres
+   affichés.
+
    ⚠️ LA RANGÉE « PENTE » A ÉTÉ SUPPRIMÉE, ET SA PLACE VA À LA BARRIÈRE. La
    pente était représentée QUATRE fois en même temps à l'écran : sa valeur
    chiffrée ici, la bande des 2 km à venir juste au-dessus, le profil
@@ -264,6 +277,18 @@
   color: var(--ce-ink);
   display: flex;
   align-items: baseline;
+  /* ⚠️ LARGEUR FIXE, MÊME RAISON QUE .cc-v CI-DESSOUS. .cc-hero est en `flex:
+     none` juste avant .cc-side (`flex: 1`) dans .cc-main (même fichier,
+     rubrique 3) : sur un GPX en lecture, « X,Y km restants » perd un chiffre
+     entier chaque fois que la distance restante franchit une puissance de
+     dix vers le bas (« 10,0 » → « 9,9 » : 4 caractères, pas 3, tabular-nums
+     ne change rien à ÇA), et comme le héros vient AVANT la colonne de droite
+     dans le flux, chaque perte de chiffre pousse ou tire tout le bloc
+     labels/valeurs/unités qui le suit — mesuré à l'écran, cet effet à lui
+     seul vaut une partie du glissement documenté sur .cc-v. 7ch couvre
+     « 9999,9 » (6 chiffres) + la place du « km » qui suit en plus petit —
+     aucune course connue de ShibuMap n'approche cette distance. */
+  width: 7ch;
 }
 .cc-hero-pct {
   /* l'unité du héros monte d'UN palier de l'échelle (--ce-t-body au lieu de
@@ -374,18 +399,31 @@
   padding-left: var(--ce-gap-control);
   /* les nombres s'alignent par la droite : c'est ce qui fait une colonne */
   text-align: right;
-  /* ⚠️ ET ELLE PEUT ENFIN RÉTRÉCIR. La barrière est du TEXTE LIBRE TIERS
-     (race-model.js : `String(w.cutoff || '')`, aucune longueur imposée,
-     <input> libre dans le studio) et cette boîte n'avait ni min-width:0 ni
-     overflow ni ellipse : `white-space: nowrap` lui donnait une taille
-     minimale automatique égale à son min-content, donc elle ne rétrécissait
-     PAS — tout le rétrécissement tombait sur le libellé, puis le débordement
-     était tranché AU GLYPHE par l'overflow du panneau. Une barrière saisie
-     « dim. 12h30 (stricte) » se lisait « dim. 12h30 (str » : une heure qui a
-     l'air valide et qui ne l'est pas, c'est-à-dire la « faute visuelle
-     terminale » que .cb-title documente pour les chiffres de la tête. La
-     chaîne est bornée à la source (MAX_CUTOFF, carnet-course.js) ; ceci est
-     le filet. */
+  /* ⚠️ LARGEUR FIXE, ET min-width:0 RESTE — MESURÉ SUR UNE LECTURE RÉELLE
+     (« la barre danse en horizontal »). D+ restant, Sommet restant et
+     Altitude partagent cette MÊME colonne de grille (.cc-side, minmax(0,1fr)
+     auto auto) : en `auto` SEUL, la colonne se redimensionne sur le plus
+     large contenu VISIBLE à cet instant, et un chiffre qui change de rang —
+     « 10 185 » → « 9 987 » (6 caractères → 5, le séparateur de milliers de
+     FMT0 disparaît avec le quatrième chiffre) — redimensionne la colonne à
+     CHAQUE image où ça arrive. tabular-nums fige la largeur d'UN chiffre, pas
+     le NOMBRE de chiffres affichés : ça ne protège pas de cet effet-là. Rejoué
+     sur le GPX de la Diagonale des Fous (158 km, D+ 10 185 m), la colonne
+     unité glissait de 72 px sur la lecture complète — mesuré par offsetLeft
+     sur 400 échantillons, écart-type non nul. 6ch couvre le pire cas vu ici
+     (« 10 185 », 6 caractères) avec une marge pour les D+ à cinq chiffres des
+     ultras extrêmes (Tor des Géants ≈ 24 000 m).
+     ⚠️ ET min-width:0 EST CE QUI FAIT TENIR LE 6ch, PAS UN VESTIGE DE L'ANCIEN
+     FILET. La barrière est du TEXTE LIBRE TIERS (race-model.js : `String(w.
+     cutoff || '')`, aucune longueur imposée, <input> libre dans le studio) et
+     partage la même colonne ; en grille, un enfant en `white-space: nowrap`
+     réclame par défaut au moins son min-content — ici tout le texte, puisqu'il
+     ne casse jamais — et ce min-content aurait ÉCRASÉ notre `width: 6ch` dès
+     qu'une barrière dépasse 6 caractères, redonnant à la colonne une largeur
+     qui varie avec le texte saisi par l'organisateur. min-width:0 annule cette
+     taille minimale automatique : c'est SEULEMENT grâce à lui que 6ch devient
+     un plafond ferme, et que l'ellipse ci-dessous a quelque chose à faire. */
+  width: 6ch;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
