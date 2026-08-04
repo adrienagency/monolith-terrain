@@ -37,7 +37,6 @@ import { buildCourseBar } from './ui/course-bar.js'
 import { snapToKm, ascentStats, parseRace } from './race-model.js'
 import { carnetALaLigne, resumeParcours } from './carnet-course.js'
 import { lisserChamps, decroissant } from './lissage.js'
-import { SPORTS, DEFAULT_SPORT, sanitizeSvgMarkup, isValidIconDataUrl, rasterizeToCanvas } from './ui/sport-icons.js'
 import { worldToLatLon, latLonToWorld, parseLatLon, sphereToLatLon, R_GLOBE } from './geo.js'
 import { fetchTransports } from './transports.js'
 import { TERRAIN_SIZE, RES_FENETRE_CONTINUE } from './terrain.js'
@@ -4949,68 +4948,6 @@ async function loadDemoRace() {
   if (bundle) await studio.importProject(bundle)
 }
 
-// ---- GPX sport-icon head billboard (task 22 §3/4) --------------------------
-// One CanvasTexture per built-in sport, rasterized once from sport-icons.js's
-// inline SVG table (rasterizeToCanvas is async — an Image decode — so build
-// the whole small set up front rather than resolving per-frame/per-layer).
-// GpxLayerManager.setDefaultIconResolver expects a SYNCHRONOUS (sportKey) =>
-// texture lookup, hence the cache instead of resolving on demand.
-const _sportIconTex = new Map()
-Promise.all(
-  SPORTS.map((s) =>
-    rasterizeToCanvas(s.svg, { size: 128, color: '#232019' }).then((canvas) => {
-      const tex = new THREE.CanvasTexture(canvas)
-      tex.colorSpace = THREE.SRGBColorSpace
-      _sportIconTex.set(s.key, tex)
-    })
-  )
-).then(() => gpxLayer.setDefaultIconResolver((sportKey) => _sportIconTex.get(sportKey) || _sportIconTex.get(DEFAULT_SPORT)))
-
-// custom per-layer icon upload (task 22 §3) — one hidden file input shared
-// by every layer row's "Upload…" button (see route-panel.js); the row that
-// triggered it is remembered in a closure var since the <input> itself only
-// knows "a file changed", not which layer asked.
-let _iconUploadTargetId = null
-const iconFileInput = document.createElement('input')
-iconFileInput.type = 'file'
-iconFileInput.accept = 'image/*,.svg'
-iconFileInput.style.display = 'none'
-document.body.appendChild(iconFileInput)
-iconFileInput.addEventListener('change', async () => {
-  const f = iconFileInput.files?.[0]
-  const targetId = _iconUploadTargetId
-  iconFileInput.value = ''
-  _iconUploadTargetId = null
-  if (!f || !targetId) return
-  try {
-    const isSvg = /\.svg$/i.test(f.name) || f.type === 'image/svg+xml'
-    let canvas
-    if (isSvg) {
-      const clean = sanitizeSvgMarkup(await f.text())
-      if (!clean) { modes.announce('ICON REJECTED — INVALID SVG'); return }
-      canvas = await rasterizeToCanvas(clean, { size: 128, color: '#232019' })
-    } else {
-      const dataUrl = await new Promise((resolve, reject) => {
-        const r = new FileReader()
-        r.onload = () => resolve(r.result)
-        r.onerror = () => reject(new Error('read failed'))
-        r.readAsDataURL(f)
-      })
-      if (!isValidIconDataUrl(dataUrl)) { modes.announce('ICON REJECTED — TOO LARGE OR UNSUPPORTED TYPE'); return }
-      canvas = await rasterizeToCanvas(dataUrl, { size: 128 })
-    }
-    const tex = new THREE.CanvasTexture(canvas)
-    tex.colorSpace = THREE.SRGBColorSpace
-    gpxLayer.setCustomIcon(targetId, tex)
-  } catch (err) {
-    modes.announce(`ICON ERROR — ${String(err.message).toUpperCase()}`)
-  }
-})
-function requestIconUpload(layerId) {
-  _iconUploadTargetId = layerId
-  iconFileInput.click()
-}
-
 // hand the flight to the existing tour controller
 // cinematic drone follow-cam for the GPX track (terrain-aware chase camera)
 const drone = new DroneCam({ camera, controls, sampleGround: (x, z) => terrain.sample?.(x, z) ?? 0 })
@@ -7357,7 +7294,6 @@ const routePanel = buildRoutePanel({
   loadDemo: () => loadDemoRace(),
   startFollow: engageGpxFollow,
   stopFollow: disengageGpxFollow,
-  uploadIcon: requestIconUpload,
   // Race Studio — closures paresseuses : `studio`/`raceLabels` sont définis
   // plus bas dans le module, mais lus au CLIC, jamais au build du panneau
   openStudio: () => studio.enter(),

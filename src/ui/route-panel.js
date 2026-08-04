@@ -14,7 +14,6 @@
 
 import { slider, color, toggle, visibleWhen, button, section, el, refreshAll, onRefresh } from './kit.js'
 import { Panel } from './shell.js'
-import { SPORTS, getSport } from './sport-icons.js'
 import { MAX_LAYERS } from '../gpx-layers.js'
 
 const ICON =
@@ -23,7 +22,6 @@ const ICON =
 const DRAG_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>'
 const EYE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.8-7 10-7 10 7 10 7-3.8 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>'
 const EYE_OFF_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3l18 18M10.6 5.2A10.9 10.9 0 0 1 12 5c6.2 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4M6.5 6.7C3.4 8.8 2 12 2 12s3.8 7 10 7c1.5 0 2.9-.4 4.1-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>'
-const UPLOAD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4M7 8l5-5 5 5M4 18v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1"/></svg>'
 const FLAG_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/></svg>'
 
 // presets d'épaisseur du tracé — le réglage STAR en chips (règle constante) ;
@@ -123,8 +121,8 @@ export function buildRoutePanel(ctx) {
 
   // ------------------------------------------------------------ Mes courses
   // task 22 §1/2 : les traces GPX en calques « comme dans Figma » — réordonner
-  // par glisser, icône sport par course, œil, infos course, retirer. Le style
-  // reste GLOBAL (voir gpx-layers.js) : ici ne vit que l'identité par course.
+  // par glisser, nom, œil, infos course, retirer. Le style reste GLOBAL (voir
+  // gpx-layers.js) : ici ne vit que l'identité par course.
   const sLayers = panel.addSection(section('Mes courses'))
   const listEl = el('div', 'ce-gpx-layers')
   const addCard = el('button', 'ce-lib-add')
@@ -133,16 +131,14 @@ export function buildRoutePanel(ctx) {
   addCard.addEventListener('click', () => ctx.loadGpx())
   sLayers.body.append(listEl, addCard)
 
-  let openPickerId = null // which row's icon picker is expanded (one at a time)
+  // ⚠️ PLUS DE SÉLECTEUR D'ICÔNE DE SPORT. Il ne servait qu'à habiller le
+  // cartouche de tête de course, retiré à la demande d'Adrien : l'icône
+  // choisie n'avait dès lors plus le moindre consommateur à l'écran, et un
+  // réglage qui ne change rien est pire qu'un réglage absent. Sont partis avec
+  // lui : la table SPORTS, le téléversement d'icône personnalisée et son
+  // désinfecteur SVG (src/ui/sport-icons.js), GpxLayerManager.setSport /
+  // setCustomIcon / setDefaultIconResolver, et GpxLayer.setIcon.
   let dragFromIndex = null
-
-  function iconMarkupFor(l) {
-    // a custom (uploaded) icon has no inline SVG to show in the row itself
-    // (it's a rasterized texture, not markup) — a generic "custom image"
-    // glyph stands in so the row still reads as "this one has its own icon"
-    if (l.customIconTex) return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="1.8" fill="currentColor" stroke="none"/><path d="M21 15l-5-5-11 11"/></svg>'
-    return getSport(l.sport).svg
-  }
 
   function renderLayers(layers) {
     listEl.replaceChildren()
@@ -161,16 +157,6 @@ export function buildRoutePanel(ctx) {
       const dragHandle = el('span', 'ce-gpx-drag')
       dragHandle.innerHTML = DRAG_ICON
       dragHandle.title = 'Glisser pour réordonner'
-
-      const iconBtn = el('button', 'ce-gpx-icon-btn')
-      iconBtn.type = 'button'
-      iconBtn.title = 'Changer l’icône'
-      iconBtn.innerHTML = iconMarkupFor(l)
-      iconBtn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        openPickerId = openPickerId === l.id ? null : l.id
-        renderLayers(ctx.gpx.layers)
-      })
 
       const nameInput = el('input', 'ce-tpl-name ce-gpx-lname')
       nameInput.type = 'text'
@@ -214,7 +200,7 @@ export function buildRoutePanel(ctx) {
         ctx.gpx.removeLayer(l.id)
       })
 
-      row.append(dragHandle, iconBtn, nameInput, raceBtn, eyeBtn, removeBtn)
+      row.append(dragHandle, nameInput, raceBtn, eyeBtn, removeBtn)
       // clicking the row (but not one of its controls) focuses this layer —
       // Points/Playback/Race-name below all act on whichever layer is focused
       row.addEventListener('click', (e) => {
@@ -246,34 +232,6 @@ export function buildRoutePanel(ctx) {
       })
 
       listEl.append(row)
-
-      if (openPickerId === l.id) {
-        const picker = el('div', 'ce-gpx-iconpicker')
-        for (const s of SPORTS) {
-          const b = el('button', 'ce-gpx-iconopt' + (l.sport === s.key && !l.customIconTex ? ' on' : ''))
-          b.type = 'button'
-          b.title = s.label
-          b.innerHTML = s.svg
-          b.addEventListener('click', (e) => {
-            e.stopPropagation()
-            openPickerId = null
-            ctx.gpx.setSport(l.id, s.key) // triggers onChange -> re-render, closing the picker
-          })
-          picker.append(b)
-        }
-        const upBtn = el('button', 'ce-gpx-iconopt ce-gpx-iconupload')
-        upBtn.type = 'button'
-        upBtn.title = 'Importer une icône (SVG ou image)'
-        upBtn.innerHTML = UPLOAD_ICON
-        upBtn.addEventListener('click', (e) => {
-          e.stopPropagation()
-          openPickerId = null
-          renderLayers(ctx.gpx.layers) // close the picker immediately; upload itself is async
-          ctx.uploadIcon?.(l.id)
-        })
-        picker.append(upBtn)
-        listEl.append(picker)
-      }
     })
   }
 

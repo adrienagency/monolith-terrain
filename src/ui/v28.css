@@ -2048,26 +2048,6 @@ body.ce-railR-off .ce-dock-right {
   width: 14px;
   height: 14px;
 }
-.ce-gpx-icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  flex: none;
-  border: 1px solid var(--ce-hairline);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--ce-ink);
-  cursor: pointer;
-}
-.ce-gpx-icon-btn:hover {
-  border-color: var(--ce-accent);
-}
-.ce-gpx-icon-btn svg {
-  width: 14px;
-  height: 14px;
-}
 .ce-gpx-lname {
   flex: 1;
   min-width: 0;
@@ -2087,45 +2067,6 @@ body.ce-railR-off .ce-dock-right {
   color: var(--ce-muted);
   align-self: center;
   white-space: nowrap;
-}
-.ce-gpx-iconpicker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 6px;
-  margin: -2px 0 2px;
-  border: 1px solid var(--ce-hairline);
-  border-radius: 8px;
-  background: var(--ce-track);
-}
-.ce-gpx-iconopt {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--ce-ink);
-  cursor: pointer;
-}
-.ce-gpx-iconopt:hover {
-  background: var(--ce-hover);
-}
-.ce-gpx-iconopt.on {
-  border-color: var(--ce-accent);
-  color: var(--ce-accent);
-}
-.ce-gpx-iconopt svg {
-  width: 15px;
-  height: 15px;
-}
-.ce-gpx-iconupload {
-  border-left: 1px solid var(--ce-hairline);
-  border-radius: 6px 6px 6px 6px;
-  margin-left: 2px;
-  padding-left: 2px;
 }
 
 /* slider */

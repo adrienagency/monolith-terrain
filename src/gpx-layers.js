@@ -4,7 +4,7 @@
 // dans Figma". gpx.js's GpxLayer already models exactly ONE track's visuals
 // + playback; this manager owns N of them — the array, its order (both
 // visual stacking AND sequenced playback order — one list, one meaning),
-// per-layer chrome (sport icon, name, visibility), and multi-track
+// per-layer chrome (name, visibility), and multi-track
 // sequenced playback with a camera-handover hook.
 //
 // Style stays GLOBAL on purpose: width/colour/gradient/glow/markers(arches)/
@@ -14,11 +14,10 @@
 // should read as ONE coherent map style, not a patchwork of independently
 // themed legs; (2) it's zero regression risk against the existing
 // TEMPLATE_KEYS / share-link diff, neither of which needed to change. What
-// genuinely varies per layer — order, sport icon, name, visibility — is
+// genuinely varies per layer — order, name, visibility — is
 // exactly what this file adds.
 
 import { GpxLayer, parseGpx } from './gpx.js'
-import { getSport } from './ui/sport-icons.js'
 
 export const MAX_LAYERS = 10
 
@@ -70,7 +69,7 @@ export class GpxLayerManager {
     this.params = params
     this.getDem = getDem
     this.getGrid = getGrid // damier de blocs voisins (block-grid.js), optionnel
-    this.layers = [] // [{ id, gpx: GpxLayer, sport, name, visible }]
+    this.layers = [] // [{ id, gpx: GpxLayer, name, visible }]
     this.activeIndex = -1 // focused layer — panel controls + which profile strip shows
     this.playingIndex = -1 // -1 = not sequencing
 
@@ -143,18 +142,17 @@ export class GpxLayerManager {
   // Returns the new layer entry, or null (cap reached / unparsable — caller
   // decides how to announce either). This is what BOTH "Load GPX…" and drag
   // & drop now do — a single GPX file is simply the first layer.
-  addLayer(text, { sport = null } = {}) {
+  addLayer(text) {
     if (!canAddLayer(this.layers.length)) return null
     const { points, name } = parseGpx(text)
     const gpx = new GpxLayer({ scene: this.scene, camera: this.camera, terrain: this.terrain, params: this.params, getDem: this.getDem, getGrid: this.getGrid })
     gpx.onCleared = () => this.onTrackCleared?.(this) // ✕ du profil → main.js resynchronise le damier
     gpx.setTrack(points, name)
     // sourceText : le XML d'origine, conservé pour l'export projet Race Studio
-    const entry = { id: nextId(), gpx, sport: sport || getSport(null).key, name, visible: true, sourceText: text }
+    const entry = { id: nextId(), gpx, name, visible: true, sourceText: text }
     this.layers.push(entry)
     this._applyDepths()
     this.focus(entry.id)
-    this._syncIcons()
     this.onChange?.(this.layers)
     return entry
   }
@@ -235,35 +233,13 @@ export class GpxLayerManager {
     this.onChange?.(this.layers)
   }
 
-  setSport(id, sportKey) {
-    const l = this.layers.find((x) => x.id === id)
-    if (!l) return
-    l.sport = getSport(sportKey).key
-    l.customIconTex = null
-    this._syncIcons()
-    this.onChange?.(this.layers)
-  }
-
-  // A custom uploaded icon (task 22 §3) — `tex` is a ready THREE.Texture the
-  // caller built (see sport-icons.js's rasterizeToCanvas + main.js's upload
-  // wiring); this manager only stores/applies it, never fetches or decodes.
-  setCustomIcon(id, tex) {
-    const l = this.layers.find((x) => x.id === id)
-    if (!l) return
-    l.customIconTex = tex
-    this._syncIcons()
-    this.onChange?.(this.layers)
-  }
-
-  _syncIcons() {
-    for (const l of this.layers) l.gpx.setIcon(l.customIconTex || this._defaultIconTex?.(l.sport) || null)
-  }
-  // main.js supplies the default-sport → texture lookup (cached, built once
-  // per sport key) since it needs a live GL context this module doesn't own.
-  setDefaultIconResolver(fn) {
-    this._defaultIconTex = fn
-    this._syncIcons()
-  }
+  // ⚠️ PLUS D'ICÔNE PAR COURSE. setSport / setCustomIcon /
+  // setDefaultIconResolver / _syncIcons ont été retirés avec le sélecteur du
+  // panneau Parcours (voir route-panel.js) : leur seule destination était le
+  // cartouche de tête de course, lui-même supprimé. Le champ `sport` d'une
+  // couche est parti aussi — il n'a jamais été sérialisé (ni dans un
+  // .shibumap-race, ni dans une charge publiée), donc aucune carte existante
+  // n'en dépend.
 
   // ---------------------------------------------------------------- global style passthrough
   // Every one of these fans out to ALL layers — see the file header for why

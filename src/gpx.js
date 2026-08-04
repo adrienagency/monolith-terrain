@@ -1788,17 +1788,6 @@ export class GpxLayer {
     this.rebuild()
   }
 
-  // ⚠️ L'ICÔNE DE SPORT N'A PLUS DE CONSOMMATEUR 3D. Elle n'était affichée que
-  // dans le cartouche de tête de course, retiré à la demande d'Adrien (voir le
-  // constructeur). On garde la méthode et la référence — le sélecteur d'icône
-  // du panneau Parcours et GpxLayerManager continuent de l'appeler, et l'icône
-  // sert encore dans la liste des parcours — mais elle ne compose plus rien
-  // dans la scène. À trancher : soit lui redonner une place (repère de départ,
-  // réticule du profil), soit retirer le sélecteur.
-  setIcon(tex) {
-    this._headIconTex = tex || null
-  }
-
   // multi-layer stacking (task 22 §2) — additive renderOrder + a small
   // world-Y nudge, applied on the NEXT rebuild(). See the constructor
   // comment on _renderOffset/_depthOffsetY for why both default to zero.

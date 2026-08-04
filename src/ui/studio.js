@@ -11,6 +11,7 @@ import { keepScroll } from './kit.js'
 import { PICTOS, PICTO_KEYS } from '../race-labels.js'
 import { serializeRace, parseRace } from '../race-model.js'
 import { TRANSPORT_CATS } from '../transports.js'
+import { verifieLogo, FORMATS_LOGO } from '../logo-course.js'
 
 const DRAFT_KEY = 'shibumap-race-draft' // héritage (une seule course)
 const DRAFTS_KEY = 'shibumap-race-drafts' // un brouillon PAR course (clé = nom du calque)
@@ -140,17 +141,41 @@ export function buildStudio(deps) {
     pick.textContent = draft.race.logo ? 'Changer le logo' : 'Choisir un logo…'
     const file = document.createElement('input')
     file.type = 'file'
-    file.accept = 'image/*'
+    // l'attribut `accept` n'est qu'un filtre de confort dans le sélecteur de
+    // fichiers — il se contourne, et il laissait passer le SVG. La vraie règle
+    // est verifieLogo(), appliquée ci-dessous.
+    file.accept = FORMATS_LOGO.map((f) => `image/${f}`).join(',')
     file.style.display = 'none'
+    const alerte = document.createElement('p')
+    alerte.className = 'hint studio-logo-refus'
+    alerte.hidden = true
     file.addEventListener('change', () => {
       const f = file.files?.[0]
       if (!f) return
       const r = new FileReader()
-      r.onload = () => { draft.race.logo = r.result; saveDraft(); render() }
+      r.onload = () => {
+        // ⚠️ ON VÉRIFIE AVANT D'ÉCRIRE. Un logo hors règles finissait sinon
+        // dans le brouillon localStorage — au risque d'en saturer le quota et
+        // de faire échouer toutes les sauvegardes suivantes — puis disparaissait
+        // en silence à la publication (logoForPublish rend null). Voir
+        // src/logo-course.js.
+        const v = verifieLogo(r.result)
+        if (!v.ok) {
+          alerte.textContent = v.raison
+          alerte.hidden = false
+          file.value = '' // sinon re-choisir LE MÊME fichier ne déclenche rien
+          return
+        }
+        alerte.hidden = true
+        draft.race.logo = r.result
+        saveDraft()
+        render()
+      }
+      r.onerror = () => { alerte.textContent = 'Fichier illisible — réessaie.'; alerte.hidden = false }
       r.readAsDataURL(f)
     })
     pick.addEventListener('click', () => file.click())
-    lg.append(pick, file)
+    lg.append(pick, file, alerte)
     if (draft.race.logo) {
       const rm = document.createElement('button')
       rm.className = 'studio-btn ghost'
