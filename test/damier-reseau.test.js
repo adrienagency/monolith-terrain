@@ -227,16 +227,61 @@ function pointsDuDamier(dem, cellules = null) {
   return points
 }
 
+// le pendant String de pointsDuDamier : les 24 clés du damier 5×5, centre exclu
+function toutesLesCellules() {
+  const s = new Set()
+  for (let j = -2; j <= 2; j++) for (let i = -2; i <= 2; i++) if (i || j) s.add(`${i},${j}`)
+  return s
+}
+
+// LA ZONE ISOLÉE, PAS LE GPX — et pourquoi ce fichier en a besoin depuis la
+// Tâche 2 du plan damier multi-blocs (« le damier toujours carré »). Le
+// chemin GPX (cellsForTrack, points) est désormais plafonné à un carré 3×3
+// (CARRE_COTE_MAX, src/damier-carre.js) : 24 points ne réclament plus que 8
+// voisines, quelle que soit leur disposition. cellsForParts (le chemin zone
+// isolée, `setRegionParts`), lui, reste borné à GRID_R = 2 (5×5), inchangé
+// par cette tâche — c'est le SEUL chemin qui met encore légitimement le
+// damier, et donc le cache de MNT, sous la charge de 24 dalles que CE FICHIER
+// exige : il ne porte pas sur le nombre de cellules mais sur le cache à trois
+// étages, l'éviction par octets et la mémoire des échecs à TTL, et le damier
+// plein n'est qu'un MOYEN de les mettre sous charge.
+//
+// ⚠️ `cellules` doit décrire un RECTANGLE contigu en (i,j) : c'est la seule
+// forme qu'une boîte englobante en coordonnées monde peut reproduire
+// exactement (segment/rectangle sur son pourtour, appartenance du centre à
+// l'intérieur — cf. cellsForParts). Les deux usages d'ici (le damier plein,
+// une colonne) sont chacun un rectangle.
+function regionDesCellules(dem, cellules) {
+  let iMin = Infinity, iMax = -Infinity, jMin = Infinity, jMax = -Infinity
+  for (const k of cellules) {
+    const [i, j] = k.split(',').map(Number)
+    if (i < iMin) iMin = i
+    if (i > iMax) iMax = i
+    if (j < jMin) jMin = j
+    if (j > jMax) jMax = j
+  }
+  const marge = 0.4 // < 0.5 : le contour reste DANS chaque dalle extrême, ne mord jamais la voisine
+  const x0 = (iMin - marge) * TERRAIN_SIZE
+  const x1 = (iMax + marge) * TERRAIN_SIZE
+  const z0 = (jMin - marge) * TERRAIN_SIZE
+  const z1 = (jMax + marge) * TERRAIN_SIZE
+  const anneau = [[x0, z0], [x1, z0], [x1, z1], [x0, z1], [x0, z0]]
+    .map(([x, z]) => worldToLatLon(dem, x, z))
+    .map((c) => [c.lon, c.lat])
+  return [[anneau]]
+}
+
 async function damierPlein({ bathy = true } = {}) {
   serve({ bathy })
   const dem = await loadDem({ lat: LAT, lon: LON, zoom: ZOOM, bathy: false })
-  const points = pointsDuDamier(dem)
   const grid = new GrilleTest({ scene: { add() {}, remove() {} }, params: {}, getMainDem: () => dem })
   appels.clear() // on ne compte QUE le damier, pas le bloc central
-  grid.onReady = () => grid.sync(points) // exactement ce que fait main.js
-  grid.sync(points)
+  // zone isolée, pas GPX : cf. la note au-dessus de regionDesCellules().
+  grid.setRegionParts(regionDesCellules(dem, toutesLesCellules()))
+  grid.onReady = () => grid.sync([]) // exactement ce que fait main.js (sans points GPX)
+  grid.sync([])
   await jusquA(() => grid.cells.size >= 24)
-  return { grid, points, dem }
+  return { grid, dem }
 }
 
 test('un damier de 24 dalles ne charge chaque MNT qu une fois, malgré 24 resynchros', async () => {
@@ -246,6 +291,26 @@ test('un damier de 24 dalles ne charge chaque MNT qu une fois, malgré 24 resync
   assert.equal(pour('elevation-tiles-prod'), 216, `${pour('elevation-tiles-prod')} requêtes d altitude`)
   assert.equal(total(), uniques(), `${total()} requêtes pour ${uniques()} URL distinctes`)
   assert.ok(total() < 500, `${total()} requêtes — la cible du plan est < 500`)
+})
+
+// LA FRONTIÈRE ELLE-MÊME (Tâche 2 du plan damier multi-blocs) : rien ne la
+// verrouillait avant cette correction. Mêmes 24 points GPX des deux côtés —
+// seul le chemin change.
+test('le chemin GPX plafonne a 8 voisines (carre 3x3), le chemin zone isolee monte a 24', async () => {
+  serve({ bathy: false })
+  const dem = await loadDem({ lat: LAT, lon: LON, zoom: ZOOM, bathy: false })
+  const points = pointsDuDamier(dem) // les 24 points, un par dalle du 5x5
+  const grid = new GrilleTest({ scene: { add() {}, remove() {} }, params: {}, getMainDem: () => dem })
+
+  grid.sync(points) // chemin GPX seul : cellsForTrack, plafonné à CARRE_COTE_MAX = 3
+  await jusquA(() => grid.cells.size >= 8)
+  assert.equal(grid.cells.size, 8, 'le chemin GPX reste a un carre 3x3 (8 voisines) meme avec 24 points')
+  assert.ok(grid.carreCourant().cote <= 3, 'plafond 3x3 non respecte')
+
+  grid.setRegionParts(regionDesCellules(dem, toutesLesCellules()))
+  grid.sync([]) // plus aucun point GPX : seule la zone isolee reclame desormais
+  await jusquA(() => grid.cells.size >= 24)
+  assert.equal(grid.cells.size, 24, 'le chemin zone isolee, lui, atteint le damier 5x5 complet')
 })
 
 // ------------------------------------------------------- la mémoire d'abord
@@ -259,14 +324,16 @@ test('un damier de 24 dalles ne charge chaque MNT qu une fois, malgré 24 resync
 // (delete + set = simple MRU : le cache gardait les 14 entrées que des cellules
 // vivantes détenaient déjà).
 test('détacher puis rattacher : un MNT rendu par le cache le QUITTE', async () => {
-  const { grid, points, dem } = await damierPlein()
+  const { grid, dem } = await damierPlein()
   assert.equal(grid._demPending.size, 0, 'plus aucun chargement en vol')
   assert.equal(grid._demCache.size, 0, `le cache double ${grid._demCache.size} MNT déjà vivants`)
 
   // 1. dézoom partiel : on ne garde que la couronne i = -2, les 20 autres
-  // dalles meurent et leurs MNT passent au cache des détachés
+  // dalles meurent et leurs MNT passent au cache des détachés. Zone isolée,
+  // pas GPX : cf. la note au-dessus de regionDesCellules().
   const garde = new Set(['-2,-2', '-2,-1', '-2,0', '-2,1', '-2,2'])
-  grid.sync(pointsDuDamier(dem, garde))
+  grid.setRegionParts(regionDesCellules(dem, garde))
+  grid.sync([])
   await jusquA(() => grid.cells.size === 5, { stable: 5 })
   assert.equal(grid.cells.size, 5)
   const detaches = grid._demCache.size
@@ -274,7 +341,8 @@ test('détacher puis rattacher : un MNT rendu par le cache le QUITTE', async () 
 
   // 2. retour : les dalles renaissent, une partie de leurs MNT sort du cache
   appels.clear()
-  grid.sync(points)
+  grid.setRegionParts(regionDesCellules(dem, toutesLesCellules()))
+  grid.sync([])
   await jusquA(() => grid.cells.size >= 24)
   assert.equal(grid.cells.size, 24, 'le damier est revenu au complet')
 
@@ -308,6 +376,11 @@ test('détacher puis rattacher : un MNT rendu par le cache le QUITTE', async () 
 
 test('un damier démonté ne retient que le budget d octets prévu, pas 24 MNT', async () => {
   const { grid } = await damierPlein()
+  // damierPlein() pose une zone isolée (cf. sa note) : elle est un ÉTAT du
+  // damier (block-grid.js), pas un argument de sync — il faut l'effacer
+  // explicitement pour que sync([]) démonte vraiment tout, comme le ferait
+  // main.js en quittant le mode isolé.
+  grid.setRegionParts(null)
   grid.sync([]) // dézoom : plus une seule dalle n'est réclamée
   assert.equal(grid.cells.size, 0)
   // ⚠️ CE QUI EST PLAFONNÉ, CE SONT LES OCTETS — pas le nombre d'entrées.
@@ -399,7 +472,10 @@ test('le centre est rechargé À LA MÊME PLACE : la dalle se pose quand même',
   let centre = avant
   const grid = new GrilleTest({ scene: { add() {}, remove() {} }, params: {}, getMainDem: () => centre })
   appels.clear()
-  grid.sync(pointsDuDamier(avant))
+  // zone isolée, pas GPX : cf. la note au-dessus de regionDesCellules() — ce
+  // test met le damier plein (24) sous charge, pas seulement 8.
+  grid.setRegionParts(regionDesCellules(avant, toutesLesCellules()))
+  grid.sync([])
   centre = memeEndroit // rechargement du centre pendant le vol (re-drapage, restyle…)
   await jusquA(() => grid.cells.size >= 24)
   assert.equal(grid.cells.size, 24, 'un MNT encore juste ne doit pas être jeté')
@@ -416,10 +492,12 @@ test("une dalle en échec ne se redemande pas à chaque arrivée de voisine", as
   const xMort = dem.originTileX + 2 * 3 // origine de la colonne i = +2
   serve({ bathy: false, tuileMorte: (z, x) => x >= xMort })
 
-  const points = pointsDuDamier(dem)
+  // zone isolée, pas GPX : cf. la note au-dessus de regionDesCellules() — les
+  // 24 dalles visées (dont les 5 mortes) dépassent le plafond 3x3 du GPX.
   const grid = new GrilleTest({ scene: { add() {}, remove() {} }, params: {}, getMainDem: () => dem })
-  grid.onReady = () => grid.sync(points)
-  grid.sync(points)
+  grid.setRegionParts(regionDesCellules(dem, toutesLesCellules()))
+  grid.onReady = () => grid.sync([])
+  grid.sync([])
   await jusquA(() => grid.cells.size >= 19)
 
   assert.equal(grid.cells.size, 19, 'les 5 dalles hors couverture ne naissent pas, les autres si')
@@ -442,17 +520,19 @@ test('… mais elle se redemande une fois le TTL passé : la mémoire des échec
   const xMort = dem.originTileX + 2 * 3
   serve({ bathy: false, tuileMorte: (z, x) => x >= xMort })
 
-  const points = pointsDuDamier(dem)
+  // zone isolée, pas GPX : cf. la note au-dessus de regionDesCellules() —
+  // même raison que le test précédent.
   const grid = new GrilleTest({ scene: { add() {}, remove() {} }, params: {}, getMainDem: () => dem })
-  grid.onReady = () => grid.sync(points)
-  grid.sync(points)
+  grid.setRegionParts(regionDesCellules(dem, toutesLesCellules()))
+  grid.onReady = () => grid.sync([])
+  grid.sync([])
   await jusquA(() => grid.cells.size >= 19)
   assert.equal(grid._demFailed.size, 5, 'les 5 dalles mortes sont retenues comme telles')
 
   // le réseau revient, et on vieillit les échecs plutôt que d'attendre 60 s
   serve({ bathy: false })
   for (const k of grid._demFailed.keys()) grid._demFailed.set(k, Date.now() - 61_000)
-  grid.sync(points)
+  grid.sync([])
   await jusquA(() => grid.cells.size >= 24)
   assert.equal(grid.cells.size, 24, 'un échec oublié doit pouvoir être retenté')
 })
