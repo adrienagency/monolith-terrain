@@ -111,6 +111,31 @@ test('les huit lettres d elision sont TOUTES des mots mineurs, pas seulement d e
   assert.equal(casseDeNom("LA COURSE QUI T'ATTEND"), "La Course Qui t'Attend")
 })
 
+// ⚠️ CONSTAT DE RELECTURE (2026-08-05, 5e tour) : UNE LETTRE ISOLÉE N'EST UN
+// MOT MINEUR QUE SI ELLE EST ÉLIDÉE — c'est-à-dire suivie d'une apostrophe.
+// Le tour précédent avait fait entrer les huit lettres d'élision dans
+// MOTS_MINEURS, consultée aussi bien depuis composerAvecElisions() (le bon
+// cas) que depuis casserSegment() pour un jeton AUTONOME, sans apostrophe —
+// exactement le cas d'un identifiant de section (« Boucle A », « Parcours
+// C », « Section T »), banal dans un nom de course à secteurs. Le « l » de
+// « l'Ultra » est une élision ; le « L » de « Parcours L » est un
+// identifiant : les confondre n'était pas propre aux six lettres ajoutées
+// au tour précédent (d/l l'étaient déjà, « Parcours L » → « Parcours l »),
+// mais leur nombre est passé de deux à huit sur vingt-six, rendant le
+// défaut visible ET incohérent d'une lettre à l'autre (« Parcours A »
+// correct, « Parcours C » cassé, sans raison qu'un utilisateur puisse voir).
+test('une lettre isolee n est un mot mineur QUE si elle est elidee', () => {
+  assert.equal(casseDeNom('BOUCLE C'), 'Boucle C')
+  assert.equal(casseDeNom('PARCOURS L'), 'Parcours L')
+  assert.equal(casseDeNom('PARCOURS M'), 'Parcours M')
+  assert.equal(casseDeNom('SECTION T'), 'Section T')
+  // non-régression : les élisions RESTENT des mots mineurs quand elles SONT
+  // suivies d'une apostrophe, où qu'elles soient dans le titre
+  assert.equal(casseDeNom("L'ULTRA-TRAIL DU MONT-BLANC"), "L'Ultra-Trail du Mont-Blanc")
+  assert.equal(casseDeNom("TRAIL DE L'ENFER"), "Trail de l'Enfer")
+  assert.equal(casseDeNom("ET J'IRAI LOIN"), "Et j'Irai Loin")
+})
+
 // ⚠️ « KM » N'EST JAMAIS CAPITALISÉ, MÊME EN BORDURE DE TITRE — parce que
 // c'est une UNITÉ, pas parce qu'il occupe telle ou telle position. La
 // première version le faisait dépendre de la règle de bordure (mot mineur

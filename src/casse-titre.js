@@ -43,16 +43,28 @@
 // LETTRE — la définition même de l'élision (l', d', j', n', s', c', m', t').
 // Au-delà d'une lettre, l'apostrophe est INTERNE au mot et celui-ci se
 // compose comme un bloc, voir composerAvecElisions() plus bas.
-// Trois catégories pour les segments qui, eux, SONT entièrement en capitales :
+// ⚠️ ET UNE LETTRE ISOLÉE N'EST UNE ÉLISION QUE SI ELLE EST SUIVIE D'UNE
+// APOSTROPHE — ni avant, ni sans elle. « l » dans « l'Ultra » est une
+// élision ; « L » dans « Parcours L » (un identifiant de section, banal
+// dans un nom de course à secteurs) n'en est pas une, c'est un mot comme un
+// autre. Une correction précédente avait fait rejoindre les huit lettres
+// d'élision (l d j n s c m t) à MOTS_MINEURS, consultée aussi bien depuis la
+// scission sur apostrophe (le bon cas) que pour un jeton AUTONOME — et
+// « Parcours C » ressortait « Parcours c », une lettre de section devenue
+// minuscule sans qu'aucune apostrophe ne le justifie. Les lettres d'élision
+// vivent donc à part (ELISIONS ci-dessous), consultées SEULEMENT par
+// composerAvecElisions() quand l'apostrophe est là ; une lettre isolée sans
+// apostrophe suit le chemin normal de casserSegment(), qui ne les connaît
+// plus — c'est ELLE qui a raison, comme n'importe quel autre mot court.
+// Quatre catégories pour les segments qui, eux, SONT entièrement en capitales :
 //   1. LES UNITÉS DE MESURE (km…) : minuscules, TOUJOURS — jamais de
 //      majuscule, quelle que soit leur position dans le titre. Une unité ne
 //      nomme rien, et ce n'est pas une question de rôle grammatical comme les
 //      mots mineurs ci-dessous : « km » en tête de titre resterait « km ».
-//   2. LES MOTS MINEURS (prépositions, articles — et les HUIT LETTRES
-//      D'ÉLISION une fois l'apostrophe isolée comme séparateur, voir plus
-//      bas) : minuscules, SAUF si le segment est le TOUT PREMIER mot du
-//      titre — un titre s'ouvre sur une majuscule, par convention
-//      typographique, quel que soit le rôle grammatical de son premier mot.
+//   2. LES MOTS MINEURS (prépositions, articles) : minuscules, SAUF si le
+//      segment est le TOUT PREMIER mot du titre — un titre s'ouvre sur une
+//      majuscule, par convention typographique, quel que soit le rôle
+//      grammatical de son premier mot.
 //      ⚠️ SEUL LE PREMIER, PAS LE DERNIER : forcer aussi la capitale sur le
 //      dernier mot est la convention du title case anglophone, pas de la
 //      composition française — et elle avait fait capitaliser une unité de
@@ -63,8 +75,9 @@
 //      injouable en français), « MONT » ou « RAID » se lisent (au plus deux).
 //      Le seuil ne s'applique qu'aux mots courts : au-delà de quatre lettres,
 //      un mot français a presque toujours de quoi se prononcer.
-//   4. LE RESTE (noms propres et communs du titre) : casse de nom, une
-//      capitale et le reste en minuscules.
+//   4. LE RESTE (noms propres et communs du titre, ET les lettres isolées
+//      SANS apostrophe — un identifiant de section garde sa capitale) :
+//      casse de nom, une capitale et le reste en minuscules.
 
 // une unité ne nomme rien, dans un titre ou ailleurs — contrairement à un
 // mot mineur (article, préposition), sa minuscule ne dépend d'AUCUNE
@@ -80,27 +93,28 @@ const UNITES = new Set(['km'])
 // « Trail du Bout du Monde » (bout en minuscule à côté de Monde en
 // capitale, sur un toponyme : incohérent à l'œil).
 //
-// ⚠️ LES HUIT LETTRES, SANS APOSTROPHE — « d », pas « d' ». La scission de
-// composerAvecElisions() isole l'apostrophe comme séparateur : un segment ne
-// contient donc plus jamais le caractère « ' ». (Une première version avait
-// « d' »/« l' » avec l'apostrophe : du code mort qui avait l'air vivant,
-// aucun segment ne pouvait plus jamais les matcher une fois la scission
-// écrite.)
-// ⚠️ ET LES HUIT, PAS DEUX. Le commentaire de composerAvecElisions() décrit
-// l'élision comme huit lettres (l d j n s c m t) et la scission les traite
-// bien génériquement — mais cette liste n'en contenait que deux (d, l) :
-// une incohérence entre le code et son propre commentaire, trouvée en
-// relecture. Une élision d'une autre lettre que d'/l', placée APRÈS le
-// premier mot du titre (« la course qui n'attend personne »), gardait donc
-// à tort sa majuscule (« N'Attend » au lieu de « n'Attend » — c'est le
-// PRÉFIXE d'élision qui doit perdre sa capitale hors tête de titre, pas le
-// mot qu'il introduit, qui reste un mot comme un autre). Les huit :
-// l' (le, la), d' (de), j' (je), n' (ne), s' (se, si), c' (ce), m' (me),
-// t' (te) — les seules élisions à une lettre du français courant.
 const MOTS_MINEURS = new Set([
   'de', 'du', 'des', 'la', 'le', 'les', 'et', 'en', 'à', 'sur',
-  'l', 'd', 'j', 'n', 's', 'c', 'm', 't',
 ])
+
+// ⚠️ ENSEMBLE À PART, ET C'EST LE POINT — pas fondu dans MOTS_MINEURS. Une
+// lettre isolée n'est un mot mineur QUE si elle est ÉLIDÉE, c'est-à-dire
+// suivie d'une apostrophe : « l » dans « l'Ultra » l'est, « L » dans
+// « Parcours L » (un identifiant de section) ne l'est pas. Fondre les deux
+// dans MOTS_MINEURS — consultée aussi bien par la scission sur apostrophe
+// que pour un jeton autonome — avait fait perdre sa capitale à toute lettre
+// de section qui tombait sur l'une des huit : « Boucle C », « Parcours M »,
+// « Section T » devenaient « Boucle c », « Parcours m », « Section t »,
+// alors que « Parcours A » restait correct — incohérent d'une lettre à
+// l'autre, sans qu'un utilisateur puisse voir pourquoi. Ce Set n'est donc
+// consulté QUE par composerAvecElisions(), et seulement quand l'apostrophe
+// est là ; casserSegment() — le chemin d'un jeton autonome — ne le connaît
+// pas, et une lettre isolée y suit le chemin normal (casse de nom, capitale
+// gardée). Les huit : l' (le, la), d' (de), j' (je), n' (ne), s' (se, si),
+// c' (ce), m' (me), t' (te) — les seules élisions à une lettre du français
+// courant. Sans apostrophe, pas « d' » : la scission de composerAvecElisions
+// isole l'apostrophe comme séparateur, un segment ne la contient jamais.
+const ELISIONS = new Set(['l', 'd', 'j', 'n', 's', 'c', 'm', 't'])
 
 // ⚠️ LA SUITE DE CONSONNES, PAS LE COMPTE DE VOYELLES. Un compte de voyelles
 // avait été essayé d'abord (moins de deux voyelles sur un mot de 4 lettres ou
@@ -164,21 +178,37 @@ export function casseDeNom(titre) {
     if (UNITES.has(minuscule)) return minuscule // jamais de majuscule, même en tête : voir la note de UNITES
     if (MOTS_MINEURS.has(minuscule)) return enTete ? casseNom(seg) : minuscule
     if (estUnSigle(seg)) return seg // sigle : capitales intactes, où qu'il soit dans le titre
-    return casseNom(seg)
+    return casseNom(seg) // couvre aussi une LETTRE ISOLÉE sans apostrophe (« Parcours L ») : ce n'est pas une élision, elle garde sa capitale
+  }
+
+  // ⚠️ LE PRÉFIXE D'ÉLISION A SA PROPRE FONCTION, casserSegment() NE LE VOIT
+  // PLUS — précisément pour que « Parcours L » (une lettre isolée, jamais
+  // suivie d'apostrophe) ne passe JAMAIS par ELISIONS, seulement par
+  // casserSegment() ci-dessus. Le drapeau dejaVuUnMot avance ici de la même
+  // façon (un titre qui commence par une élision, « L'Ultra-Trail », doit
+  // quand même marquer son premier mot), mais la question posée est
+  // « est-ce une des huit élisions ? » (ELISIONS), pas « est-ce un mot
+  // mineur ? » (MOTS_MINEURS) — les deux listes ne se confondent plus.
+  const casserElision = (lettre) => {
+    const enTete = !dejaVuUnMot
+    dejaVuUnMot = true
+    const minuscule = lettre.toLowerCase()
+    return (ELISIONS.has(minuscule) && !enTete) ? minuscule : casseNom(lettre)
   }
 
   // ⚠️ L'APOSTROPHE NE SCINDE QUE SI CE QUI LA PRÉCÈDE FAIT UNE SEULE
   // LETTRE — la définition même de l'élision. « L'ULTRA » (préfixe « L »,
-  // une lettre) devient deux mots, « L » puis « ULTRA », composés
-  // indépendamment ; « AUJOURD'HUI » (préfixe « AUJOURD », sept lettres)
-  // reste UN SEUL mot, dont seule la première lettre se capitalise —
-  // casserSegment() gère déjà ce cas tout seul puisqu'il tolère
-  // l'apostrophe interne (voir estEntierementEnCapitales). Récursif sur le
-  // reste : une élision chaînée (rarissime en français, mais rien ne
-  // l'interdit) se scinderait aussi loin qu'il le faut.
+  // une lettre) devient deux mots composés indépendamment (le préfixe par
+  // casserElision(), le reste par composerAvecElisions() en récursif) ;
+  // « AUJOURD'HUI » (préfixe « AUJOURD », sept lettres) reste UN SEUL mot,
+  // dont seule la première lettre se capitalise — casserSegment() gère ce
+  // cas tout seul puisqu'il tolère l'apostrophe interne (voir
+  // estEntierementEnCapitales). Récursif sur le reste : une élision chaînée
+  // (rarissime en français, mais rien ne l'interdit) se scinderait aussi
+  // loin qu'il le faut.
   const composerAvecElisions = (segment) => {
     const i = segment.search(/['’]/)
-    if (i === 1) return casserSegment(segment.slice(0, 1)) + segment[1] + composerAvecElisions(segment.slice(2))
+    if (i === 1) return casserElision(segment.slice(0, 1)) + segment[1] + composerAvecElisions(segment.slice(2))
     return casserSegment(segment)
   }
 
