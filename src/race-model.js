@@ -59,6 +59,23 @@ export function layoutCartouches(items, { avoid = true, gap = 6, minY = 0, maxY 
 // garde : +null vaut 0 en JS — null/'' doivent rester d, jamais devenir 0
 const num = (v, d = null) => (v == null || v === '' ? d : Number.isFinite(+v) ? +v : d)
 
+// ⚠️ LE LOGO DE COURSE EST UNE URL CHOISIE PAR UN TIERS TANT QU'ON NE L'A PAS
+// VÉRIFIÉE. Il valait `typeof r.logo === 'string' ? r.logo : null` — donc
+// `https://moi.example/pixel.gif` passait tel quel, et ground-info-layer.js
+// (`img.src = r.logo`) allait le chercher : l'adresse IP, l'en-tête
+// User-Agent et le Referer de CHAQUE destinataire du lien partaient chez
+// l'auteur du lien, sans un clic. Le logo de PREMIER NIVEAU était déjà filtré
+// (share-link.js, parseRacePayload) ; celui rangé dans `race` ne l'était pas,
+// alors que les deux arrivent du même POST anonyme.
+// LA RÈGLE VIT ICI, ET UNE SEULE FOIS : share-link.js l'importe (l'inverse
+// ferait un cycle, share-link importe déjà parseRace). Même allowlist que le
+// serveur (netlify/functions/race.mjs) et que logo-course.js.
+export const LOGO_DATA_URL_RE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/
+
+// Un logo qui ne correspond pas devient null : une course sans logo s'affiche
+// très bien, une course avec un mouchard non.
+const logoSur = (v) => (typeof v === 'string' && LOGO_DATA_URL_RE.test(v) ? v : null)
+
 export function serializeRace({ race, look, gpxText }) {
   return JSON.stringify({ format: 'shibumap-race', version: 1, race, look, gpx: gpxText })
 }
@@ -71,7 +88,7 @@ export function parseRace(text) {
     return {
       race: {
         name: String(r.name || ''),
-        logo: typeof r.logo === 'string' ? r.logo : null,
+        logo: logoSur(r.logo),
         waypoints: (Array.isArray(r.waypoints) ? r.waypoints : []).map((w) => ({
           km: num(w.km, 0),
           name: String(w.name || ''),

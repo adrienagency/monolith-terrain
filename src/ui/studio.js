@@ -135,7 +135,18 @@ export function buildStudio(deps) {
     // logo
     const lg = document.createElement('div')
     lg.className = 'studio-logo'
-    lg.innerHTML = draft.race.logo ? `<img src="${draft.race.logo}" alt="logo">` : ''
+    // ⚠️ LE LOGO NE PASSE PAS PAR UN ATTRIBUT INTERPOLÉ. Le brouillon peut
+    // venir d'un projet .shibumap-race.json déposé (openTrackFile → parseRace →
+    // importProject) : une chaîne portant un guillemet sortait de l'attribut
+    // `src` et écrivait du HTML dans le panneau. parseRace() la filtre
+    // désormais (LOGO_DATA_URL_RE), et `.src` est une PROPRIÉTÉ, pas un
+    // attribut recopié — deux verrous, aucun coût.
+    if (draft.race.logo) {
+      const vignette = document.createElement('img')
+      vignette.src = draft.race.logo
+      vignette.alt = 'logo'
+      lg.append(vignette)
+    }
     const pick = document.createElement('button')
     pick.className = 'studio-btn ghost'
     pick.textContent = draft.race.logo ? 'Changer le logo' : 'Choisir un logo…'

@@ -38,7 +38,7 @@
 // to the globals), so this file stays testable in Node with neither.
 
 import { TEMPLATE_KEYS, captureLook } from './templates-user.js'
-import { parseRace } from './race-model.js'
+import { parseRace, LOGO_DATA_URL_RE } from './race-model.js'
 import { COURSE_ELASTIQUE } from './fenetre-course.js'
 
 const FORMAT = 'shibumap-share'
@@ -280,7 +280,9 @@ export function trackToGpx(track) {
   return lines.join('')
 }
 
-const LOGO_DATA_URL_RE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/
+// La règle vit dans race-model.js — le seul module que ce fichier ET le
+// validateur de course partagent déjà. Deux copies de cette allowlist, c'est
+// la garantie qu'un jour l'une des deux dérive.
 
 // Untrusted decoded response from GET RACE_ENDPOINT?id=… → a safe
 // { gpx, logo, state, race } or null. `state`, if present, is re-validated

