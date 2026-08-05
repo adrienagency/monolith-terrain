@@ -30,7 +30,7 @@ import { Globe } from './globe.js'
 import { Modes, stepZoom } from './modes.js'
 import { intersectionGlobe, viseeArrivee, ZOOM_PALIER_MIN } from './escalier-zoom.js'
 import { createGoto, geocode, mainParts } from './goto.js'
-import { frameTrack } from './gpx.js'
+import { frameTrack, viseLeCanevas3D } from './gpx.js'
 import { GpxLayerManager } from './gpx-layers.js'
 import { peutEngagerLeSuivi, doitReamorcerSuivi } from './suivi-course.js'
 import { buildRaceLabels } from './race-labels.js'
@@ -2012,7 +2012,18 @@ window.addEventListener('pointermove', (e) => {
   const nx = (e.clientX / window.innerWidth) * 2 - 1
   const ny = -((e.clientY / window.innerHeight) * 2 - 1)
   mouse.set(nx, ny)
-  if (modes && modes.mode === 'surface') {
+  // ⚠️ GARDE STRUCTURELLE (task 13, RÉGRESSION CORRIGÉE) — voir viseLeCanevas3D
+  // dans gpx.js pour le pourquoi complet. Cet écouteur est posé sur `window`
+  // (pas sur le canevas 3D) parce qu'il doit connaître la souris même hors du
+  // rendu, pour l'autofocus du bokeh plus bas. Mais ça veut dire qu'il reçoit
+  // AUSSI les mouvements qui bullent depuis un panneau DOM empilé par-dessus
+  // le rendu (le profil du parcours, entre autres) — sans cette garde, le
+  // picking 3D ci-dessous se relançait pour rien à chacun de ces mouvements,
+  // ratait systématiquement (rien à toucher sous un panneau DOM) et écrasait
+  // hoverIdx à -1 dans le MÊME tick que le survol légitime du profil (task
+  // 12), avant tout repaint : le réticule, l'infobulle et le carnet ne
+  // s'affichaient donc plus jamais hors lecture.
+  if (modes && modes.mode === 'surface' && viseLeCanevas3D(e.target, renderer.domElement)) {
     gpxLayer.pointerMove(mouse, e.clientX, e.clientY)
     // ⚠️ SEULE AFFORDANCE DU CLIC-POUR-REPRENDRE (task 9) — hoverIdx vient
     // d'être tenu à jour ci-dessus par le picking 3D déjà en place

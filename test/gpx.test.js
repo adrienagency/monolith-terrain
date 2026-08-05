@@ -52,6 +52,7 @@ let indexALAbscisse
 let fractionAuClic
 let repereDeSurvol
 let peutSurvolerLeTrace
+let viseLeCanevas3D
 let stepHeadFollow
 let pickKmInterval
 let profileTitle
@@ -75,6 +76,7 @@ before(async () => {
     fractionAuClic,
     repereDeSurvol,
     peutSurvolerLeTrace,
+    viseLeCanevas3D,
     stepHeadFollow,
     pickKmInterval,
     profileTitle,
@@ -239,6 +241,38 @@ test('peutSurvolerLeTrace : calque masque (toggle "afficher le trace"), pas de s
   // group.visible, PAS line.visible — line.visible reste vrai calque masque,
   // ce qui gardait jadis l'infobulle DOM vivante sur un calque invisible
   assert.equal(peutSurvolerLeTrace({ world: [{ x: 0 }, { x: 1 }] }, false), false)
+})
+
+// ---- garde structurelle du pointermove global (task 13) : LE BUG DE CETTE TACHE ----
+
+test('viseLeCanevas3D : un evenement qui cible le canevas 3D pilote le picking', () => {
+  const canevas3D = {}
+  assert.equal(viseLeCanevas3D(canevas3D, canevas3D), true)
+})
+
+test('viseLeCanevas3D : LE BUG CORRIGE — un evenement qui bulle depuis le profil ne pilote PAS le picking', () => {
+  // Reproduit exactement la regression mesuree : le pointermove du canevas du
+  // profil (task 12) remonte par bulle jusqu'a window, ou l'ecouteur global
+  // relancait le raycast 3D et ecrasait hoverIdx a -1 dans le meme tick, avant
+  // tout repaint. La cible de l'evenement est le canevas du PROFIL, pas celui
+  // du rendu 3D — la regle doit donc refuser le picking, quel que soit le nom
+  // ou la classe CSS de ce canevas de profil.
+  const canevas3D = {}
+  const canevasProfil = {}
+  assert.equal(viseLeCanevas3D(canevasProfil, canevas3D), false)
+})
+
+test('viseLeCanevas3D : aucune liste de selecteurs — n importe quelle autre surface DOM est refusee pareil', () => {
+  // Le piege a eviter (voir le brief task 13) : une correction qui testerait
+  // un nom de classe ou une liste de panneaux connus (barre de course, HUD
+  // flottant, panneau Parcours) devrait etre mise a jour a chaque nouveau
+  // panneau. Cette regle ne connait qu'UNE seule surface legitime — le
+  // canevas 3D lui-meme — donc un panneau qui n'existe pas encore aujourd'hui
+  // est deja correctement refuse, sans aucune modification a venir ici.
+  const canevas3D = {}
+  assert.equal(viseLeCanevas3D({}, canevas3D), false)
+  assert.equal(viseLeCanevas3D(null, canevas3D), false)
+  assert.equal(viseLeCanevas3D(undefined, canevas3D), false)
 })
 
 test('stepHeadFollow snaps (not eases) on the first call — no fly-in from a stale spot', () => {

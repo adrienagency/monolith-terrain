@@ -286,6 +286,42 @@ export function peutSurvolerLeTrace(track, groupVisible) {
   return !!track?.world && !!groupVisible
 }
 
+// GARDE STRUCTURELLE DE L'ÉCOUTEUR pointermove GLOBAL (task 13) — extraite en
+// fonction PURE, même esprit que peutSurvolerLeTrace ci-dessus.
+//
+// POURQUOI CET ÉCOUTEUR GLOBAL EXISTE. `main.js` pose un `pointermove` sur
+// `window`, pas sur le canevas 3D lui-même : il doit connaître la position de
+// la souris même quand elle n'est PAS au-dessus du rendu (pour l'autofocus du
+// bokeh, entre autres), et un écouteur sur `window` reçoit tous les
+// mouvements où qu'ils tombent.
+//
+// POURQUOI IL ÉTAIT INOFFENSIF JUSQU'ICI. Le picking 3D qu'il déclenche
+// (GpxLayer.pointerMove) passait par une garde qui exigeait `this.line` —
+// l'ancienne Line2, jamais construite sous le ruban, le rendu PAR DÉFAUT.
+// Cette garde sortait donc TOUJOURS avant le raycast, quel que soit
+// l'endroit d'où venait l'événement : DOM ou canevas, aucune différence.
+//
+// CE QUI L'A RÉVEILLÉ. La task 9 a — à raison — remplacé cette garde par
+// `peutSurvolerLeTrace`, qui ne regarde plus `this.line` et laisse donc le
+// raycast s'exécuter sous le rendu par défaut. Un mouvement de souris au-
+// dessus du profil (un `<canvas>` DOM, empilé par-dessus le rendu WebGL,
+// PAS dedans) bulle jusqu'à `window` et relance ce raycast : il ne touche
+// rien (la souris n'est pas sur le tracé en 3D) et écrase hoverIdx à -1
+// DANS LE MÊME TICK que le survol légitime du profil (task 12), avant tout
+// repaint — d'où le réticule et le carnet qui ne s'affichaient plus jamais
+// hors lecture.
+//
+// LA RÈGLE, ET POURQUOI ELLE NE LISTE AUCUN PANNEAU. La correction évidente
+// — ignorer les événements venant « du profil » — se ferait mal en testant
+// une classe CSS ou une liste de sélecteurs : il existe au moins trois
+// profils (barre de course, HUD flottant, panneau Parcours), et un autre
+// viendra un jour. La question posée ici est structurelle et vaut pour
+// n'importe quelle surface DOM empilée au-dessus du rendu, présente ou
+// future : l'événement vise-t-il le canevas 3D LUI-MÊME, ou autre chose ?
+export function viseLeCanevas3D(cible, canevas3D) {
+  return cible === canevas3D
+}
+
 // One step of critically-damped exponential follow of the marker's OWN
 // transform toward the true reveal-head vertex (mutates + returns `disp`).
 // This is the "smoothing in TIME, not space" fix: the target itself is
