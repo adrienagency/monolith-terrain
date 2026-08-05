@@ -31,7 +31,7 @@ import { plansEauRetenus } from './plan-eau.js'
 import { resChamp, spanChamp } from './mer-emprise.js'
 // L'emprise du DAMIER — même machinerie, autre cause : ici la mer s'étend parce
 // que des cases voisines sont posées, pas parce que le relief défile.
-import { empriseDeMer } from './damier-carre.js'
+import { empriseDeMer, coteGeometrique, geometrieDeMer } from './damier-carre.js'
 // wave engine shared with ocean-lab (C:\Dev\ocean-lab) — the Vite alias
 // resolves to the LIVE ocean-lab source when it's cloned next to this repo,
 // to the committed src/vendor/ocean-waves copy otherwise (npm run sync:waves)
@@ -912,8 +912,8 @@ export class RealWater {
     // 3×3, le champ aurait recopié la rangée de bord du bloc central sur toute
     // la bande voisine — donc de la TERRE partout où le bloc central touche la
     // terre à son bord, donc une mer qui disparaît pile là où la tâche existe
-    // pour la faire apparaître. `_echSol` (posé par `rebuild` depuis main.js)
-    // interroge les cellules du damier ; il n'existe que là.
+    // pour la faire apparaître. `_fabriqueSol` (posée par `rebuild` depuis
+    // main.js) interroge les cellules du damier ; elle n'existe que là.
     const echChamp = terrain.dem?.empriseCote > 1 && params ? terrain.sampleChamp(params) : null
     const water = new Uint8Array(n * n)
     // ⚠️ LES DEMI-FLOTTANTS SONT ÉCRITS DIRECTEMENT, sans Float32Array
@@ -943,6 +943,17 @@ export class RealWater {
     // faux, donc la règle d'altitude décide seule — le comportement des dalles
     // voisines aujourd'hui. Test omis quand les empreintes coïncident, pour ne
     // rien changer au débordement élastique du mode continu (mer-emprise.js).
+    //
+    // 🔴 ET CE REPLI A UN PRIX, NOUVELLEMENT VISIBLE. La règle d'altitude seule
+    // déclare « mer » tout ce qui est sous le niveau zéro : un POLDER, un lac de
+    // barrage sous la mer, la Camargue, la Caspienne. Sur les cases voisines,
+    // ces surfaces reçoivent donc la mer ANIMÉE — houle et ressac compris —
+    // alors que le bloc central, lui, les tient pour de la terre grâce à son
+    // masque. Chaque cellule du damier charge pourtant SON masque côtier
+    // (block-grid.js, `fetchCoastMask` par cellule) : il sert au relief, pas
+    // encore à la mer. Les brancher demanderait un masque par case côté GPU
+    // (uCoastMask est unique) — c'est un chantier, pas un oubli, et il n'a
+    // d'objet que sur les zones à polders.
     const borne = spanMasque < span
     const landAt = cd
       ? (x, z) => {
@@ -954,7 +965,12 @@ export class RealWater {
           return cd.data[py * cd.width + px] > 127
         }
       : null
-    const ech = this._echSol || echChamp || (terrain.sample ? terrain.sample : null)
+    // ⚠️ LA FABRIQUE EST APPELÉE ICI, PAS À LA RECONSTRUCTION. Le champ est
+    // recuit après coup (masque côtier tardif, dalles du damier qui atterrissent
+    // une à une) et le damier a pu gagner des cases entre-temps : un
+    // échantillonneur figé à la reconstruction ne les verrait jamais, et la mer
+    // garderait un fond écrêté exactement là où la case vient d'arriver.
+    const ech = (this._fabriqueSol ? this._fabriqueSol() : null) || echChamp || (terrain.sample ? terrain.sample : null)
     // ⚠️ LE CHAMP EST CENTRÉ SUR LE CARRÉ, PAS SUR L'ORIGINE. Un carré de côté
     // PAIR a son centre sur une jointure (damier-carre.js) : cuit autour de
     // zéro, le champ d'un 2×2 aurait couvert un demi-bloc de trop d'un côté et
@@ -1132,15 +1148,19 @@ export class RealWater {
    *   empriseVivante()`, JAMAIS `carreCourant()` : la première dit ce qui est
    *   POSÉ (5×5 possible en zone isolée), la seconde ce que le tracé a réclamé
    *   (plafonné à 3×3). `null` = comportement d'avant, un bloc.
-   * @param echantillonSol {(x,z)=>number|null} hauteur du sol en un point
-   *   QUELCONQUE du damier. Indispensable dès que `carre.cote > 1` : ni
+   * @param fabriqueSol {(()=>(x,z)=>number)|null} FABRIQUE d'échantillonneur de
+   *   sol sur tout le damier. Indispensable dès que `carre.cote > 1` : ni
    *   `terrain.sample` ni `terrain.sampleChamp` ne connaissent les cellules
    *   voisines, et `sampleDem` clampe hors des bornes du MNT central.
+   *   ⚠️ UNE FABRIQUE, PAS UN ÉCHANTILLONNEUR. Le champ est recuit après coup
+   *   (`recuireChamp`, arrivée du masque côtier) et le damier a pu gagner des
+   *   cases entre-temps : un échantillonneur figé à la reconstruction les
+   *   ignorerait, et la mer garderait un fond écrêté là où la case est arrivée.
    * @param planchier {number|null} le fond commun du damier
    *   (`BlockGrid.planchierCommun()`), auquel la jupe descend. `null` = le
    *   budget bathymétrique d'avant.
    */
-  rebuild({ terrain, params, carre = null, echantillonSol = null, planchier = null }) {
+  rebuild({ terrain, params, carre = null, fabriqueSol = null, planchier = null }) {
     this._clear()
     if (!params.waterReal || params.source !== 'real' || !terrain.dem) return
 
@@ -1167,13 +1187,20 @@ export class RealWater {
       ? { span: this._spanDem, res: resChamp(coteFenetre), centre: { x: 0, z: 0 }, cote: coteFenetre }
       : empriseDeMer(carre, TERRAIN_SIZE)
     this._emprise = emprise
-    this._cote = emprise.cote
     this._span = emprise.span
     // le masque côtier suit le MNT, pas le carré : voir MASQUE_UV_GLSL
     this._spanMasque = this._spanDem
-    // et l'échantillonneur du damier ne sert QUE là — en mode continu c'est
-    // `sampleChamp` qui répond (voir _bakeField)
-    this._echSol = coteFenetre > 1 ? null : echantillonSol || null
+    // ⚠️ ET LA GÉOMÉTRIE NE SUIT PAS LE CHAMP. En mode continu le champ couvre
+    // trois blocs mais le SOCLE reste UN bloc — c'est le relief qui défile
+    // dedans. Une mer taillée sur `emprise.cote` y déborderait de trois blocs de
+    // large sur la table, et rien ne l'arrêterait : la surface ne porte aucun
+    // plan de coupe (main.js), son seul arrêt est `uHalf`. `coteGeometrique`
+    // sépare les deux, et c'est LUI que lisent le clip, la maille, la
+    // segmentation et la jupe — `emprise.cote` ne sert plus qu'au champ.
+    const coteGeo = coteGeometrique(coteFenetre, emprise.cote)
+    // et la fabrique d'échantillonneur du damier ne sert QUE là — en mode
+    // continu c'est `sampleChamp` qui répond (voir _bakeField)
+    this._fabriqueSol = coteFenetre > 1 ? null : fabriqueSol || null
 
     const seaY = terrain.mapUniforms.uSeaY.value
     const fieldTex = this._bakeField(terrain, seaY > -9000 ? seaY : -1e9, params)
@@ -1246,36 +1273,18 @@ export class RealWater {
       // sont vives (damier-bords.js). Multiplier le rayon avec le côté aurait
       // rongé un quart de bloc dans chaque angle.
       //
-      // ⚠️ ET LA MARGE NE SE MULTIPLIE PAS NON PLUS — divergence assumée avec le
-      // brief, qui écrivait `rayonEauDansSocle() * cote`. `rayonEauDansSocle()`
-      // vaut `28 − chanfrein − marge` : le multiplier par trois multiplierait
-      // AUSSI les 0,22 unité de retrait, et l'eau d'un 3×3 s'arrêterait à 83,34
-      // au lieu de 83,78 — 0,44 unité de socle nu tout autour, quand ce module
-      // existe pour tenir ces trois nombres à six MILLIÈMES près (plinth.js).
-      // Le retrait est celui du bord EXTÉRIEUR, et il n'y en a qu'un.
-      const demiEau = rayonEauDansSocle() + (TERRAIN_SIZE / 2) * (emprise.cote - 1)
-      mat.uniforms.uHalf.value = demiEau
+      // Les trois mesures elles-mêmes (arrêt, maille, segmentation) sont dans
+      // `geometrieDeMer`, pur et testé : ce fichier tire three.js et rien de ce
+      // qu'il contient n'est vérifiable en node.
+      const mesures = geometrieDeMer({ cote: coteGeo, rayonEau: rayonEauDansSocle(), taille: TERRAIN_SIZE })
+      mat.uniforms.uHalf.value = mesures.demiEau
       mat.uniforms.uCornerR.value = r
       mat.uniforms.uCornerN.value = exposantCoin(params.slabCornerSmoothing)
       mat.uniforms.uCentre.value.set(emprise.centre.x, emprise.centre.z)
       // le plan d'eau EST la fenêtre : il ne bouge pas, c'est son champ qui défile
       mat.uniforms.uSpan.value = this._span
       mat.uniforms.uSpanMasque.value = this._spanMasque
-      // ⚠️ LA SEGMENTATION NE SUIT PAS L'EMPRISE LINÉAIREMENT. Garder la densité
-      // d'un bloc (4,57 segments par unité) donnerait 768² = 590 000
-      // quadrilatères sur un 3×3, pour des vagues dont la longueur d'onde se
-      // compte en unités. On plafonne — et à `cote = 1` la valeur est EXACTEMENT
-      // les 256 d'avant. VALEUR PROVISOIRE, NON MESURÉE : la Tâche 7 relève le
-      // coût réel de trois segmentations et la remplace par un chiffre défendu.
-      const seg = Math.min(384, 256 * emprise.cote)
-      // ⚠️ LA MAILLE DOIT DÉBORDER LE CLIP, PAS L'INVERSE : c'est `uHalf` qui
-      // arrête l'eau (voir SOCLE_MARGE_EAU), la maille ne fait que la porter. Le
-      // facteur 0,998 suffisait sur un bloc (27,944 contre 27,78) et sur un 3×3
-      // (83,832 contre 83,78), mais repassait SOUS le clip au 5×5 — 139,72
-      // contre 139,78 — et rognait un cheveu de mer sur tout le pourtour. À
-      // `cote = 1` le maximum retombe sur l'expression d'avant, au bit près.
-      const large = Math.max(TERRAIN_SIZE * emprise.cote * 0.998, (demiEau + 0.05) * 2)
-      const geo = new THREE.PlaneGeometry(large, large, seg, seg)
+      const geo = new THREE.PlaneGeometry(mesures.large, mesures.large, mesures.seg, mesures.seg)
       geo.rotateX(-Math.PI / 2)
       // ⚠️ LE CENTRE VA DANS LA GÉOMÉTRIE, PAS DANS `mesh.position`. Le vertex
       // lit `position.xz` COMME DES COORDONNÉES MONDE (`vWorld = vec3(p.x, …,
@@ -1284,8 +1293,10 @@ export class RealWater {
       // son champ, son masque et son clip un demi-bloc à côté. `position.y`
       // reste 0 et c'est bien `mesh.position.y` qui porte le niveau d'eau —
       // seule la hauteur passe par la matrice, parce que le shader la reprend
-      // par `uWaterY`.
-      geo.translate(emprise.centre.x, 0, emprise.centre.z)
+      // par `uWaterY`. (Le test coûte moins qu'une passe sur les 148 000 sommets
+      // du plan pour ajouter zéro : le carré est centré dès que son côté est
+      // impair, c'est-à-dire dans la grande majorité des cas.)
+      if (emprise.centre.x || emprise.centre.z) geo.translate(emprise.centre.x, 0, emprise.centre.z)
       const mesh = new THREE.Mesh(geo, mat)
       mesh.position.set(0, this._seaBase, 0)
       // above the draped OSM water polygons (17) so harbours read UNDER the
@@ -1377,10 +1388,10 @@ export class RealWater {
         // angles, et leur débordement commun qui masquait le socle. Le demi-côté
         // suit donc le carré comme celui de la surface, et le rayon de coin ne
         // suit pas — les quatre coins du damier valent ceux d'un bloc seul.
-        const sgeo = buildRimGeometry(demiEau, r, exposantCoin(params.slabCornerSmoothing))
+        const sgeo = buildRimGeometry(mesures.demiEau, r, exposantCoin(params.slabCornerSmoothing))
         // même raison que pour la surface : le vertex de la jupe lit `p.xz`
         // comme des coordonnées MONDE, le décalage va donc dans la géométrie.
-        sgeo.translate(emprise.centre.x, 0, emprise.centre.z)
+        if (emprise.centre.x || emprise.centre.z) sgeo.translate(emprise.centre.x, 0, emprise.centre.z)
         const skirt = new THREE.Mesh(sgeo, smat)
         skirt.renderOrder = 16 // sous la surface (18) : la mer se dessine par-dessus
         skirt.frustumCulled = false
@@ -1585,6 +1596,26 @@ export class RealWater {
   // terre/mer du masque côtier, SANS reconstruire les meshes : la nouvelle
   // texture remplace l'ancienne partout (surface, jupe, lacs) puis l'ancienne
   // est disposée — _textures reste cohérent pour _clear().
+  /**
+   * Recuire le champ, sans rien reconstruire — la seule réponse tenable à des
+   * dalles de damier qui atterrissent une à une.
+   *
+   * ⚠️ POURQUOI CE POINT D'ENTRÉE EXISTE. Le garde de `main.js` ne rebâtit la
+   * mer que si la FORME du carré change ; or le carré s'ouvre dès la première
+   * voisine, et les six ou sept suivantes n'y changent plus rien. Sans recuit,
+   * leur relief resterait absent du champ — donc, là où le bord du bloc central
+   * est de la terre, PAS DE MER : le défaut même que la mer étendue existe pour
+   * supprimer. Rebâtir à chaque arrivée n'est pas la réponse (huit cuissons
+   * d'affilée gèlent la page) : l'appelant amortit, ici on ne fait que le champ.
+   *
+   * Rend `true` si le champ a bien été recuit — l'appelant peut mesurer.
+   */
+  recuireChamp() {
+    if (!this._bakeCtx || !this.materials.length) return false
+    this._rebakeField()
+    return true
+  }
+
   _rebakeField() {
     if (!this._bakeCtx || !this.materials.length) return
     const { terrain, seaY, params } = this._bakeCtx

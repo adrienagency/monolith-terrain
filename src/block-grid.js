@@ -870,6 +870,66 @@ export class BlockGrid {
     return refaites
   }
 
+  /**
+   * Un échantillonneur de sol SUR TOUT LE DAMIER, et SANS grain FBM.
+   *
+   * ⚠️ CE N'EST PAS `heightAt`, ET LA DIFFÉRENCE COÛTE UNE DEMI-SECONDE.
+   * `heightAt` passe par `cell.terrain.sample`, c'est-à-dire `_makeDemSampler`
+   * et ses cinq octaves de simplex par point. C'est ce qu'il faut pour poser un
+   * objet au sol. Ce n'est PAS ce qu'il faut pour cuire le champ de la mer :
+   * `terrain.js:2083` le dit et le chiffre depuis la fenêtre continue — ~175 ns
+   * le point, et le grain est éteint sous 90 m par `landFactor`, donc NUL à la
+   * ligne d'eau, la seule chose que ce champ sert à trouver.
+   *
+   * MESURÉ, reproduction fidèle de `_bakeField` (médiane de 3, MNT 1536²,
+   * script rejouable dans .superpowers/sdd/2026-08-05-damier-multi-blocs/
+   * mesure-cuisson.mjs) :
+   *
+   *   champ    avec grain   sans grain   gain
+   *   384²       32 ms        17 ms      ×1,9
+   *   1152²     285 ms        53 ms      ×5,4     ← damier 3×3
+   *   1920²     789 ms       182 ms      ×4,3     ← damier 5×5
+   *
+   * Le relecteur de la ronde 1 a mesuré de son côté 278 / 65 / 760 : mêmes
+   * ordres de grandeur, même conclusion. Une demi-seconde à une seconde de fil
+   * principal, cumulée avec la rafale de murs de la Tâche 3 dans le MÊME tour
+   * de boucle, pour un déplacement nul là où on regarde.
+   *
+   * ⚠️ ET C'EST TOUT OU RIEN. Le bloc CENTRAL passe par le même chemin sans
+   * grain que ses voisines : un centre grainé accolé à des voisines lisses
+   * marquerait une discontinuité de fond pile à la jointure — l'inverse de ce
+   * que le damier cherche.
+   *
+   * Rend `null` hors relief réel, ou tant que le bloc central n'a pas de MNT :
+   * l'appelant garde alors son chemin d'avant.
+   *
+   * @param {object} params - lu pour `demExaggeration` et `source`
+   * @param {(x,z)=>number} centre - échantillonneur du bloc CENTRAL, sans grain
+   *   (`terrain.sampleChamp(params)`) — il n'appartient pas au damier
+   */
+  echantillonSansGrain(params, centre) {
+    if (!centre) return null
+    // Les échantillonneurs par case sont fabriqués À LA DEMANDE et gardés le
+    // temps d'UNE cuisson : chacun ferme sur une échelle et un MNT, les rebâtir
+    // par texel coûterait plus cher que le grain qu'on vient d'économiser.
+    const parCase = new Map()
+    return (x, z) => {
+      const i = Math.round(x / TERRAIN_SIZE)
+      const j = Math.round(z / TERRAIN_SIZE)
+      if (i === 0 && j === 0) return centre(x, z)
+      const cle = `${i},${j}`
+      let ech = parCase.get(cle)
+      if (ech === undefined) {
+        ech = this.cells.get(cle)?.terrain?.sampleChamp?.(params) || null
+        parCase.set(cle, ech)
+      }
+      // pas (encore) de cellule ici : le centre répond, clampé — c'est ce que
+      // faisait tout le champ avant le damier. Le recuit différé de main.js
+      // rattrape dès que la dalle atterrit.
+      return ech ? ech(x - i * TERRAIN_SIZE, z - j * TERRAIN_SIZE) : centre(x, z)
+    }
+  }
+
   // Hauteur du sol à un point monde QUELCONQUE du damier (drapage GPX hors du
   // bloc central) — null si aucune cellule chargée ne couvre le point.
   heightAt(x, z) {

@@ -116,6 +116,8 @@ import { buildShortcutsOverlay } from './ui/shortcuts-overlay.js'
 import { buildChangelogOverlay } from './ui/changelog-overlay.js'
 import { APP_STAGE } from './changelog.js'
 import { BlockGrid, GRID_R } from './block-grid.js'
+// la signature d'un carre du damier : ce qui decide si la mer doit se rebatir
+import { cleDuCarre } from './damier-carre.js'
 import { buildTemplatesPanel } from './ui/templates-panel.js'
 import { buildFondsPanel, contributeTerrainSections, buildPaletteCreation } from './ui/create-panel.js'
 import { buildStore } from './ui/store.js'
@@ -4377,8 +4379,7 @@ function carreDeMer() {
 }
 
 /**
- * La hauteur du sol en un point QUELCONQUE du carré, pour la cuisson du champ
- * de la mer.
+ * La FABRIQUE d'échantillonneur de sol du carré, pour la cuisson du champ.
  *
  * ⚠️ `terrain.sample` NE SUFFIT PAS, et son échec est muet : il ne connaît que
  * le MNT du bloc central, et `sampleDem` clampe hors de ses bornes (dem.js).
@@ -4387,36 +4388,46 @@ function carreDeMer() {
  * où ce bord touche la terre, donc pas de mer sur les huit cases : l'inverse
  * exact de ce que la mer étendue existe pour faire.
  *
- * `heightAt` rend `null` pour le bloc central (qui appartient à `terrain`) ET
- * pour une case du carré pas encore arrivée — les dalles atterrissent une à une
- * sur plusieurs secondes. Le repli sur `terrain.sample` vaut donc, dans ce
- * second cas, la valeur clampée d'avant ; c'est temporaire, et la mer se recuit
- * à l'arrivée de la case (voir merSuitLeDamier).
+ * ⚠️ ET `heightAt` NON PLUS, POUR LA RAISON INVERSE : il passe par
+ * `cell.terrain.sample`, donc cinq octaves de simplex par point. Le chiffre est
+ * dans `blockGrid.echantillonSansGrain` — 285 ms de fil principal gelé contre
+ * 53 sur un 3×3. `terrain.js:2083` documente déjà ce refus pour la fenêtre
+ * continue, et pour la même raison : le grain est éteint sous 90 m par
+ * `landFactor`, donc NUL à la ligne d'eau — la seule chose que ce champ sert à
+ * trouver. On paierait un quart de seconde pour un déplacement nul là où on
+ * regarde.
+ * `blockGrid.echantillonSansGrain` prend le même chemin que `sampleChamp`, pour
+ * le centre comme pour les voisines (tout ou rien : un centre grainé accolé à
+ * des voisines lisses marquerait une marche pile à la jointure).
+ *
+ * Une FABRIQUE et non un échantillonneur : le champ est recuit après coup
+ * (`merRecuitDiffere`), et le damier a pu gagner des cases entre-temps.
  */
-function solDuDamier(x, z) {
-  const h = blockGrid.heightAt(x, z)
-  return h === null ? terrain.sample(x, z) : h
+function fabriqueSolDuDamier() {
+  return blockGrid.echantillonSansGrain(params, terrain.sampleChamp(params))
 }
 
-const cleCarre = (c) => `${c.cote}:${c.i0},${c.j0}` // côté ET centre, en un mot
 // L'état de départ EST un bloc seul : rien à reconstruire tant que le damier
-// reste vide.
-let _merCarrePose = cleCarre({ i0: 0, j0: 0, cote: 1 })
+// reste vide. (`cleDuCarre` vit dans damier-carre.js — le nombre de
+// reconstructions qu'elle produit sur une rafale d'arrivées est mesuré là-bas.)
+let _merCarrePose = cleDuCarre({ i0: 0, j0: 0, cote: 1 })
 
 function optionsDeMer() {
   const carre = carreDeMer()
   // toute reconstruction fait foi, d'où qu'elle vienne (zoom, template, zone) :
   // sans cette ligne la mémoire ci-dessous se périmerait en silence et la mer
   // resterait taillée sur un carré qu'elle ne porte plus.
-  _merCarrePose = cleCarre(carre)
+  _merCarrePose = cleDuCarre(carre)
   return {
     terrain,
     params,
     carre,
-    echantillonSol: solDuDamier,
-    // ⚠️ SEULEMENT QUAND LE DAMIER EXISTE. Sur un bloc seul la jupe garde son
-    // budget bathymétrique d'avant : lui imposer le `baseY` du socle
-    // l'allongerait sans raison et changerait l'aspect du bloc principal.
+    // ⚠️ SEULEMENT QUAND LE DAMIER S'ÉTEND. Sur un bloc seul, le champ garde le
+    // chemin d'avant (`terrain.sample`, grain compris) : le rendre lisse là
+    // aussi changerait la mer du bloc principal, qui n'est pas le sujet.
+    fabriqueSol: carre.cote > 1 ? fabriqueSolDuDamier : null,
+    // ⚠️ MÊME RÈGLE POUR LA JUPE. Lui imposer le `baseY` du socle sur un bloc
+    // seul l'allongerait sans raison et changerait l'aspect du bloc principal.
     planchier: carre.cote > 1 ? blockGrid.planchierCommun() : null,
   }
 }
@@ -4426,21 +4437,49 @@ function optionsDeMer() {
  *
  * ⚠️ NE PAS REBÂTIR À CHAQUE ARRIVÉE DE CELLULE. `onGridChanged` part à chaque
  * dalle reçue (jusqu'à 24 sur un damier plein) et une reconstruction recuit le
- * champ : 1 152² texels sur un 3×3, soit 1,33 million d'échantillons de relief
- * plus une distance de chanfrein en deux passes. Huit d'affilée gèleraient la
- * page. Le seul motif légitime est un changement de FORME du carré — son côté
- * ou son centre —, et `cleCarre` porte exactement ces deux-là.
+ * champ. Le seul motif légitime de RECONSTRUIRE est un changement de FORME du
+ * carré — son côté ou son centre —, et `cleDuCarre` porte exactement ces deux-là.
+ *
+ * ⚠️ MAIS LE CHAMP, LUI, DOIT RATTRAPER LE DAMIER. Le carré s'ouvre dès la
+ * PREMIÈRE voisine ; les six ou sept suivantes ne changent plus sa forme, donc
+ * ne reconstruisent rien — et leur relief resterait absent du champ, c'est-à-dire
+ * PAS DE MER là où le bord du bloc central est de la terre. C'est le scénario
+ * NOMINAL, pas un cas limite. D'où le recuit différé ci-dessous : ni par dalle
+ * (huit cuissons d'affilée gèlent la page), ni jamais.
  */
 function merSuitLeDamier() {
-  const cle = cleCarre(carreDeMer())
-  if (cle === _merCarrePose) return
-  // ⚠️ NOTÉ ICI AUSSI, pas seulement dans `optionsDeMer` : quand la mer est
-  // débrayée (FLAGS.water, ou l'interrupteur), `realWater?.rebuild(...)` court-
-  // circuite l'évaluation de ses arguments et la mémoire ne serait jamais
-  // rafraîchie — le garde ne convergerait plus et rappellerait waterRebuild à
-  // chaque arrivée de dalle, pour rien.
-  _merCarrePose = cle
-  waterRebuild()
+  const cle = cleDuCarre(carreDeMer())
+  if (cle !== _merCarrePose) {
+    // ⚠️ NOTÉ ICI AUSSI, pas seulement dans `optionsDeMer` : quand la mer est
+    // débrayée (FLAGS.water, ou l'interrupteur), `realWater?.rebuild(...)`
+    // court-circuite l'évaluation de ses arguments et la mémoire ne serait
+    // jamais rafraîchie — le garde ne convergerait plus et rappellerait
+    // waterRebuild à chaque arrivée de dalle, pour rien.
+    _merCarrePose = cle
+    waterRebuild()
+  }
+  merRecuitDiffere()
+}
+
+// ⏱️ LE RECUIT DIFFÉRÉ DU CHAMP — un seul, après la dernière arrivée.
+//
+// Le délai n'est pas un réglage de confort : les dalles atterrissent à plusieurs
+// SECONDES d'intervalle (chacune est un aller-retour réseau, cf. block-grid.js),
+// donc un amortissement court suffit à fondre une rafale sans jamais faire
+// attendre l'utilisateur. Chaque arrivée repousse l'échéance ; seule la dernière
+// paie. Et ce n'est PAS une reconstruction : ni géométrie, ni matériau, ni lacs
+// — `recuireChamp` ne refait que la texture du champ et la repointe partout.
+const MER_RECUIT_MS = 300
+let _merRecuitTimer = 0
+function merRecuitDiffere() {
+  // rien à rattraper tant que le damier ne s'étend pas : le champ d'un bloc seul
+  // ne dépend que du MNT central, qui n'attend personne.
+  if (carreDeMer().cote <= 1) return
+  clearTimeout(_merRecuitTimer)
+  _merRecuitTimer = setTimeout(() => {
+    _merRecuitTimer = 0
+    realWater?.recuireChamp?.()
+  }, MER_RECUIT_MS)
 }
 
 const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: () => dem, getGrid: () => blockGrid })

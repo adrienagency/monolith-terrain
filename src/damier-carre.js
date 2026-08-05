@@ -167,3 +167,76 @@ export function empriseDeMer(carre, taille) {
     cote,
   }
 }
+
+/**
+ * La signature d'un carré : son côté ET son coin, en un mot.
+ *
+ * C'est exactement ce dont la mer a besoin pour savoir si elle doit se rebâtir
+ * — deux carrés de même clé ont forcément même côté, même centre, même emprise
+ * et même résolution de champ. Ici plutôt que dans `main.js` parce que le
+ * nombre de reconstructions qu'elle produit sur une rafale d'arrivées est une
+ * PROPRIÉTÉ MESURABLE, et qu'on ne mesure pas ce qui vit dans un fichier
+ * intestable (voir test/damier-mer.test.js).
+ */
+export function cleDuCarre(carre) {
+  const c = Math.max(1, Math.round(carre?.cote ?? 1))
+  return `${c}:${carre?.i0 ?? 0},${carre?.j0 ?? 0}`
+}
+
+/**
+ * Le côté que la GÉOMÉTRIE de la mer doit suivre — plan d'eau, clip, jupe.
+ *
+ * ⚠️ CE N'EST PAS TOUJOURS LE CÔTÉ DU CHAMP, ET LES CONFONDRE SE VOIT À LA
+ * PREMIÈRE IMAGE. En mode continu le champ couvre bien trois blocs (c'est tout
+ * l'objet de mer-emprise.js), mais le SOCLE reste UN bloc : c'est le relief qui
+ * défile dedans, pas le bloc qui grandit. Une mer taillée sur trois blocs y
+ * déborderait sur la table, sans rien pour l'arrêter — la surface ne porte
+ * aucun plan de coupe, son seul arrêt est `uHalf`.
+ *
+ * Le damier, lui, POSE réellement les cases : là, et là seulement, la géométrie
+ * suit le carré.
+ *
+ * @param {number} coteFenetre - côté de l'emprise CONTINUE (1 hors mode continu)
+ * @param {number} coteCarre - côté du carré du DAMIER
+ */
+export function coteGeometrique(coteFenetre, coteCarre) {
+  if (coteFenetre > 1) return 1
+  return Math.max(1, Math.round(coteCarre ?? 1))
+}
+
+/**
+ * Ce que la mer doit MESURER pour couvrir `cote` blocs : où elle s'arrête, la
+ * largeur de sa maille, et sa segmentation.
+ *
+ * Pur, donc testable — `ocean.js` tire three.js et ne l'est pas. C'est la seule
+ * raison pour laquelle ces trois lignes vivent ici plutôt que là-bas.
+ *
+ * @param {number} cote - côté GÉOMÉTRIQUE (voir coteGeometrique)
+ * @param {number} rayonEau - `rayonEauDansSocle()` : où l'eau s'arrête sur UN
+ *   bloc, chanfrein et marge déduits (plinth.js)
+ * @param {number} taille - largeur d'un bloc (TERRAIN_SIZE)
+ */
+export function geometrieDeMer({ cote, rayonEau, taille }) {
+  const c = Math.max(1, Math.round(cote ?? 1))
+  // ⚠️ LE RETRAIT NE SE MULTIPLIE PAS. `rayonEau` vaut `taille/2 − chanfrein −
+  // marge` : le multiplier par le côté multiplierait AUSSI les 0,22 unité de
+  // retrait, et l'eau d'un 3×3 s'arrêterait à 83,34 au lieu de 83,78 — 0,44
+  // unité de socle nu tout autour, dans un chantier qui tient ces nombres à six
+  // MILLIÈMES près (plinth.js:64-77). Le retrait est celui du bord EXTÉRIEUR,
+  // et il n'y en a qu'un.
+  const demiEau = rayonEau + (taille / 2) * (c - 1)
+  // ⚠️ LA MAILLE DOIT DÉBORDER LE CLIP, PAS L'INVERSE : c'est `demiEau` qui
+  // arrête l'eau, la maille ne fait que la porter. Le facteur 0,998 suffisait
+  // sur un bloc (27,944 contre 27,78) et sur un 3×3 (83,832 contre 83,78), mais
+  // repassait SOUS le clip au 5×5 — 139,72 contre 139,78 — et rognait un cheveu
+  // de mer sur tout le pourtour. À `cote = 1` le maximum retombe sur
+  // l'expression d'avant, au bit près.
+  const large = Math.max(taille * c * 0.998, (demiEau + 0.05) * 2)
+  // ⚠️ LA SEGMENTATION NE SUIT PAS L'EMPRISE LINÉAIREMENT. Garder la densité
+  // d'un bloc (4,57 segments par unité) donnerait 768² = 590 000 quadrilatères
+  // sur un 3×3, pour des vagues dont la longueur d'onde se compte en unités.
+  // VALEUR PROVISOIRE, NON MESURÉE : la Tâche 7 relève le coût réel de trois
+  // segmentations et la remplace par un chiffre défendu.
+  const seg = Math.min(384, 256 * c)
+  return { demiEau, large, seg, cote: c }
+}
