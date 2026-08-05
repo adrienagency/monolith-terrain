@@ -1667,7 +1667,10 @@ export class RealWater {
   recuireChampDiffere(cote) {
     clearTimeout(this._minuteurRecuit)
     this._minuteurRecuit = 0
-    if (!(cote > 1)) return false
+    // rien à cuire (mer débrayée, mode région, pas de MNT) : ne pas armer. Le
+    // rappel se garderait de lui-même — `recuireChamp` rend `false` — mais un
+    // minuteur qui ne peut rien faire n'a aucune raison de tourner.
+    if (!(cote > 1) || !this._bakeCtx || !this.materials.length) return false
     this._minuteurRecuit = setTimeout(() => {
       this._minuteurRecuit = 0
       this.recuireChamp()

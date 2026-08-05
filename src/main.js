@@ -4471,7 +4471,7 @@ function merSuitLeDamier() {
 // test alors qu'`ocean.js` l'est. Ce n'est PAS une reconstruction : ni
 // géométrie, ni matériau, ni lacs — seulement la texture du champ, repointée
 // partout.
-function merRecuitDiffere(carre = carreDeMer()) {
+function merRecuitDiffere(carre) {
   realWater?.recuireChampDiffere?.(carre.cote)
 }
 

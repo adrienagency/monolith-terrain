@@ -197,25 +197,49 @@ test('recuireChamp recuit vraiment, et lit le damier tel qu\'il est ALORS', () =
   for (const m of eau.materials) if (m.uniforms.uField) assert.equal(m.uniforms.uField.value, apres)
 })
 
-// ⚠️ ET LA FABRIQUE EST LA RAISON POUR LAQUELLE ÇA MARCHE. Avec un
-// échantillonneur FIGÉ à la reconstruction, `recuireChamp()` rendrait `true` et
-// ne changerait rien : le recuit tournerait pour rien, ce qui est pire qu'un
-// recuit absent (on paie la cuisson sans le résultat).
-test('un echantillonneur fige rendrait le recuit inutile', () => {
-  let arrivee = false
-  const echFige = () => (arrivee ? -5 : +5)
-  const { eau } = batit({ carre: { i0: -1, j0: -1, cote: 3 }, fabriqueSol: () => echFige })
-  const sousLEau = (tex) => {
-    const d = tex.image.data
-    let n = 0
-    for (let k = 0; k < d.length; k += 2) if (d[k] & 0x8000) n++
-    return n / (d.length / 2)
-  }
-  arrivee = true
+// ⚠️ CE TEST A ÉTÉ REFAIT EN RONDE 3. Il s'appelait « un echantillonneur fige
+// rendrait le recuit inutile » et SURVIVAIT à la mutation qu'il nommait : son
+// « échantillonneur figé » était une fermeture qui relisait une variable
+// mutable, donc pas figé du tout. C'était de surcroît un quasi-doublon du test
+// précédent. Il vérifie maintenant le seul comportement que l'autre ne couvre
+// pas, et que le contrat « FABRIQUE, pas échantillonneur » porte tout entier :
+// la fabrique est RAPPELÉE à chaque cuisson. Capturée une fois, elle ne verrait
+// jamais les dalles arrivées depuis — le recuit tournerait, et pour rien.
+test('la fabrique est rappelee a CHAQUE cuisson, jamais capturee une fois', () => {
+  let appels = 0
+  const fabriqueSol = () => { appels++; return () => -5 }
+  const { eau } = batit({ carre: { i0: -1, j0: -1, cote: 3 }, fabriqueSol })
+  assert.equal(appels, 1, 'la reconstruction doit fabriquer son echantillonneur')
   eau.recuireChamp()
-  // celui-là VOIT le changement parce que la fabrique est rappelée : c'est la
-  // démonstration que le contrat « fabrique, pas échantillonneur » porte tout.
-  assert.equal(sousLEau(eau._fieldTex), 1)
+  assert.equal(appels, 2, 'le recuit reutilise un echantillonneur perime')
+  eau.recuireChamp()
+  assert.equal(appels, 3)
+})
+
+// 🔴 CHAQUE RECUIT DOIT LAISSER `_textures` COHÉRENT, sinon la mer FUIT.
+// `_clear()` ne dispose que ce que `_textures` contient : une texture de champ
+// remplacée mais laissée hors du tableau ne serait jamais libérée — 5,3 Mio de
+// demi-flottantes par recuit sur un 3×3, jusqu'à huit recuits sur un 5×5, soit
+// une quarantaine de mégaoctets perdus par session. Le tableau ne doit ni
+// grandir (l'ancienne est REMPLACÉE, pas ajoutée), ni oublier la nouvelle, ni
+// retenir l'ancienne, qui vient d'être disposée.
+test('un recuit remplace la texture dans _textures, sans en abandonner aucune', () => {
+  const { eau } = batit({ carre: { i0: -1, j0: -1, cote: 3 }, fabriqueSol: () => () => -5 })
+  const avant = eau._fieldTex
+  const nb = eau._textures.length
+  assert.ok(eau._textures.includes(avant), 'le champ de depart n\'est pas suivi')
+
+  eau.recuireChamp()
+  const apres = eau._fieldTex
+  assert.notEqual(apres, avant)
+  assert.ok(eau._textures.includes(apres), 'la texture recuite ne sera JAMAIS disposee : elle fuit')
+  assert.ok(!eau._textures.includes(avant), 'la texture disposee est encore suivie')
+  assert.equal(eau._textures.length, nb, 'le suivi des textures enfle a chaque recuit')
+
+  // … et trois recuits de plus ne font toujours pas enfler le tableau
+  for (let i = 0; i < 3; i++) eau.recuireChamp()
+  assert.equal(eau._textures.length, nb)
+  assert.ok(eau._textures.includes(eau._fieldTex))
 })
 
 // ⚠️ L'ÉCHÉANCE S'ANNULE QUAND LE DAMIER SE REFERME, ET C'EST L'ORDRE DES DEUX
@@ -236,6 +260,25 @@ test('le damier qui se referme ANNULE l\'echeance de recuit', (t) => {
   assert.equal(eau.recuireChampDiffere(1), false, 'le damier referme ne devrait rien armer')
   t.mock.timers.tick(5000)
   assert.equal(recuits, 0, 'une cuisson est partie APRES le demontage du damier')
+})
+
+// ⚠️ ET LE DÉLAI LUI-MÊME EST UNE VALEUR, PAS UN RÉGLAGE DE CONFORT. `ocean.js`
+// l'écrit ; sans ce test la phrase était creuse — le porter de 300 ms à 3 s ne
+// faisait rougir personne, et c'est trois secondes de mer fausse après la
+// dernière dalle, en silence. Les bornes disent les deux exigences en même
+// temps : assez LONG pour fondre une rafale d'arrivées (rien n'est parti à
+// 299 ms), assez COURT pour que la mer se corrige avant que l'œil ne s'y pose
+// (tout est parti à 400 ms).
+test('l\'amortissement du recuit tient dans une demi-seconde', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let recuits = 0
+  const { eau } = batit({ carre: { i0: -1, j0: -1, cote: 3 }, fabriqueSol: () => () => -5 })
+  eau.recuireChamp = () => { recuits++; return true }
+  eau.recuireChampDiffere(3)
+  t.mock.timers.tick(299)
+  assert.equal(recuits, 0, 'le recuit part trop tot : une rafale d\'arrivees ne fondra pas')
+  t.mock.timers.tick(101) // 400 ms au total
+  assert.equal(recuits, 1, 'le recuit tarde : autant de mer fausse apres la derniere dalle')
 })
 
 test('les arrivees successives fondent en UN seul recuit', (t) => {
@@ -293,9 +336,14 @@ function grilleBouchon(cellules) {
   grille.cells = new Map(cellules)
   return grille
 }
-// une cellule qui RAPPORTE les coordonnées qu'on lui a servies
-const cellQuiNote = (journal) => ({
-  terrain: { sampleChamp: () => (x, z) => { journal.push([x, z]); return 0 } },
+// Une cellule qui RAPPORTE les coordonnées qu'on lui a servies, par les DEUX
+// chemins : `sampleChamp` (celui de la mer) et `sample` (celui de `heightAt`,
+// qui pose les objets au sol).
+const cellQuiNote = (journal, journalSol = journal) => ({
+  terrain: {
+    sampleChamp: () => (x, z) => { journal.push([x, z]); return 0 },
+    sample: (x, z) => { journalSol.push([x, z]); return 0 },
+  },
 })
 
 test('les voisines sont interrogees en coordonnees LOCALES', () => {
@@ -326,13 +374,51 @@ test('sans echantillonneur de centre, la fabrique se recuse', () => {
   assert.equal(grilleBouchon([]).echantillonSansGrain({}, null), null)
 })
 
-// La frontière entre cases : `Math.round(x / 56)` — un point à 28 unités bascule
-// sur la case suivante, exactement comme `heightAt`. Vérifié pour que les deux
-// ne divergent jamais (un objet posé au sol et le fond de la mer sous lui).
+// ⚠️ CE TEST A ÉTÉ REFAIT EN RONDE 3 : son titre annonçait une comparaison avec
+// `heightAt` et il ne l'appelait JAMAIS — il comparait à une paire écrite en dur.
+// Conséquence relevée par la revue : `heightAt` n'était exécuté par aucun test du
+// dépôt, et une mutation de son `Math.round` en `Math.floor` ne tuait rien.
+//
+// L'assertion est maintenant CROISÉE, et c'est bien la propriété qui compte : le
+// fond de la mer sous un point et l'objet posé au sol en ce même point doivent
+// venir de la MÊME case. Une divergence de découpage ferait flotter les bateaux
+// à une jointure sur deux, sans que rien ne le signale.
 test('la frontiere entre cases est la MEME que celle de heightAt', () => {
-  const journal = []
-  const grille = grilleBouchon([['1,0', cellQuiNote(journal)]])
+  const SONDES = [
+    [28, 0], // pile à la frontière : Math.round(0.5) = 1 → case (1,0)
+    [27.9, 0], // juste avant : encore le bloc central
+    [-28, 0], // la frontière opposée : Math.round(-0.5) = -0 → case (0,0) en JS
+    [84, 56], // deux cases plus loin, en diagonale
+    [-83, -29],
+  ]
+  const journalMer = []
+  const journalSol = []
+  const cellules = []
+  for (let j = -2; j <= 2; j++) {
+    for (let i = -2; i <= 2; i++) {
+      if (i === 0 && j === 0) continue // heightAt rend null au centre : il n'est pas au damier
+      cellules.push([`${i},${j}`, cellQuiNote(journalMer, journalSol)])
+    }
+  }
+  const grille = grilleBouchon(cellules)
   const ech = grille.echantillonSansGrain({}, () => 0)
-  ech(28, 0) // pile à la frontière : Math.round(0.5) = 1 → case (1,0), local -28
-  assert.deepEqual(journal, [[-28, 0]])
+
+  for (const [x, z] of SONDES) {
+    const h = grille.heightAt(x, z) // ← le VRAI heightAt, celui qui pose les objets au sol
+    if (h === null) journalSol.push(null) // bloc central : il appartient à `terrain`
+    ech(x, z)
+  }
+  // la mer note aussi `null` pour le centre, par construction de sa fabrique :
+  // on le rejoue ici pour que les deux journaux se comparent point à point.
+  const merNormalise = []
+  let k = 0
+  for (const [x, z] of SONDES) {
+    const i = Math.round(x / TERRAIN_SIZE)
+    const j = Math.round(z / TERRAIN_SIZE)
+    merNormalise.push(i === 0 && j === 0 ? null : journalMer[k++])
+  }
+  assert.deepEqual(merNormalise, journalSol, 'la mer et heightAt ne decoupent pas le damier pareil')
+  // … et le découpage attendu, écrit une fois, pour que les deux puissent être
+  // fausses ENSEMBLE sans passer.
+  assert.deepEqual(journalSol, [[-28, 0], null, null, [-28, 0], [-27, 27]])
 })
