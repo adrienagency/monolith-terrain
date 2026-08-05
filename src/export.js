@@ -5,7 +5,7 @@
 
 import * as THREE from 'three'
 import { Output, Mp4OutputFormat, BufferTarget, CanvasSource, QUALITY_HIGH } from 'mediabunny'
-import { safeAspect } from './viewport.js'
+import { safeAspect, glSizeLimit, fitDrawingBuffer } from './viewport.js'
 
 // Ces trois-là sont exportées pour l'enregistreur vidéo (export-recorder.js),
 // qui force lui aussi la taille du canevas le temps d'une capture. Deux copies
@@ -16,16 +16,115 @@ export function saveState(renderer, camera) {
   return { width: size.x, height: size.y, pixelRatio: renderer.getPixelRatio(), aspect: camera.aspect }
 }
 
-export function applySize({ renderer, composer, camera }, width, height) {
+// ---------------------------------------------------------------------------
+// LE PLAFOND MATÉRIEL SUR LE CHEMIN D'EXPORT
+// ---------------------------------------------------------------------------
+//
+// `applyRenderSize` (viewport.js) borne le rendu temps réel. L'export ne passe
+// PAS par là, et c'est délibéré : un export 4K doit rester un vrai 4K, un test
+// verrouille la séparation des deux chemins (viewport-aspect.test.js). Le prix
+// de cette séparation, jamais payé jusqu'ici : ce chemin-ci n'avait AUCUN
+// plafond. Le 50 × 70 paysage — le format par défaut de la boutique — réclame
+// 8 339 px de large à 300 dpi ; `MAX_RENDERBUFFER_SIZE` vaut 8 192 sur une
+// bonne moitié du parc ; et le pilote rabote alors UNE SEULE dimension, sans
+// exception ni un mot en console. L'affiche sort écrasée de 1,8 %, avec 13 mm
+// de papier nu sur un bord, et le défaut se découvre après le tirage payé.
+//
+// ═══ ÉCRÊTER OU REFUSER ? NI L'UN NI L'AUTRE ═══════════════════════════════
+//
+// ÉCRÊTER EN SILENCE est exactement le défaut d'origine : c'est ce que fait
+// déjà le pilote. Le refaire à la main proprement ne changerait rien à ce qui
+// blesse — l'image déformée — et rendrait juste la faute nôtre.
+//
+// REFUSER (lever) casserait un appelant qui marchait. `applySize` est PARTAGÉ
+// avec l'enregistreur vidéo : une exception ici perdrait un enregistrement en
+// cours pour une taille que la carte aurait rendue un cheveu moins fine. Et
+// refuser est bien le bon geste — mais UN CRAN PLUS HAUT, avant toute promesse
+// à l'acheteur : c'est `degradePour` (export-dpi.js) qui rend `null` et retire
+// le format de la grille. On ne refuse pas au moment de peindre.
+//
+// LA TROISIÈME VOIE — celle retenue : RÉDUIRE PROPORTIONNELLEMENT, LE DIRE, ET
+// LE RENDRE. Les deux côtés reculent du MÊME facteur, donc l'aspect survit au
+// pixel d'arrondi près : on perd de la finesse, jamais la géométrie. C'est déjà
+// la règle de `fitDrawingBuffer` pour l'affichage, et deux règles opposées pour
+// le même problème seraient une incohérence de plus à découvrir un jour. Le
+// `console.warn` casse le silence qui a rendu ce défaut invisible, et la valeur
+// de retour laisse l'appelant constater ce qui a VRAIMENT été rendu.
+//
+// ═══ QUI CONNAÎT LA LIMITE ═════════════════════════════════════════════════
+//
+// Personne ici. `glSizeLimit` (viewport.js) la mesure déjà — le plus petit de
+// MAX_TEXTURE_SIZE et MAX_RENDERBUFFER_SIZE — et `fitDrawingBuffer` sait déjà
+// reculer sans déformer, parité comprise. On les importe. Deux sources pour une
+// même vérité finissent toujours par diverger, et celle-là ne se contredit
+// qu'au moment du tirage.
+//
+// ═══ ET `degradePour` DANS TOUT ÇA ? INDÉPENDANT, VOLONTAIREMENT ═══════════
+//
+// 1. `applySize` est partagé avec la vidéo, qui n'a ni format d'affiche ni dpi.
+//    `degradePour(format, orientation, limite)` n'aurait rien à lui dire.
+// 2. Les deux ne répondent pas à la même question. `degradePour` DÉCIDE avant
+//    (quelle densité promettre) ; ce plafond-ci CONSTATE après (ce que la carte
+//    accepte réellement). Un filet qui dépend de l'arithmétique de celui qu'il
+//    doit rattraper n'est pas un filet.
+// 3. Ils lisent la MÊME limite mesurée, donc ils ne peuvent pas se contredire :
+//    quand `degradePour` a fait son travail, ce plafond ne mord jamais. S'il
+//    mord, c'est qu'une taille est arrivée ici sans passer par lui — et
+//    l'avertissement ci-dessous est précisément là pour le dire.
+
+// La taille réellement servie au compositeur : celle demandée tant que la carte
+// suit, une réduction proportionnelle sinon.
+//
+// ⚠️ RETOUR À L'IDENTIQUE QUAND ÇA PASSE, ET C'EST LA CONTRAINTE QUI PRIME.
+// Tant que le grand côté tient sous la limite — ou qu'aucune limite n'est
+// lisible — on ressort les nombres reçus, tels quels, sans les faire transiter
+// par le moindre calcul. Les crans du menu d'export plafonnent à 3 840 px
+// (export-presets.js) : l'enregistreur vidéo ne peut donc pas atteindre cette
+// branche, et son comportement reste strictement celui d'avant ce garde-fou.
+export function tailleSousPlafond(renderer, width, height) {
+  // un contexte perdu ne doit pas empêcher un export : sans limite lisible on
+  // sert la taille demandée, exactement comme applyRenderSize (viewport.js)
+  let limite = 0
+  try { limite = glSizeLimit(renderer?.getContext?.()) } catch { limite = 0 }
+  if (!(limite > 0) || !(Math.max(width, height) > limite)) return [width, height]
+  // densité 1 : le tampon de dessin VAUT ces pixels-là (setPixelRatio(1) juste
+  // au-dessus), donc c'est bien la taille demandée qu'on soumet à la limite.
+  const fit = fitDrawingBuffer(width, height, 1, limite)
+  console.warn(
+    `[ShibuMap] export raboté : ${width}×${height} demandés dépassent la limite matérielle `
+    + `de cette carte (${limite} px). Taille ramenée à ${fit.width}×${fit.height} — `
+    + `les deux côtés du même facteur, aspect préservé (${(width / height).toFixed(4)} → `
+    + `${(fit.width / fit.height).toFixed(4)}). Sans ce garde-fou, le pilote rabote UNE SEULE `
+    + `dimension, sans rien dire, et l'affiche part à l'impression écrasée.`
+  )
+  return [fit.width, fit.height]
+}
+
+// `aspect` est celui de l'IMAGE ENTIÈRE, pas celui du morceau qu'on rend.
+// three construit le frustum complet à partir de `aspect`, puis `setViewOffset`
+// y découpe une fenêtre : passer l'aspect d'une tuile étirerait chaque tuile.
+// Par défaut il vaut celui de la taille demandée — c'est le cas du rendu plein
+// cadre, et c'est ce que l'enregistreur vidéo obtient sans rien changer.
+//
+// Renvoie la taille RÉELLEMENT appliquée : elle peut différer de la demande si
+// le plafond matériel a mordu (voir au-dessus).
+export function applySize({ renderer, composer, camera }, width, height, aspect = safeAspect(width, height)) {
   renderer.setPixelRatio(1)
-  composer.setSize(width, height, false)
+  const [w, h] = tailleSousPlafond(renderer, width, height)
+  composer.setSize(w, h, false)
   // Ici on ne peut pas renoncer comme le fait le resize (l'appelant attend une
   // image), donc on borne à 1 px au lieu de risquer `0 / 0`. Un export vidéo
   // enchaîne des centaines de frames sur cette même caméra : un aspect NaN posé
   // une fois y resterait jusqu'à la fin, muet, et ressortirait ensuite par
   // restoreState dans la vue interactive. Voir viewport.js.
-  camera.aspect = safeAspect(width, height)
+  //
+  // ⚠️ L'ASPECT SUIT LA DEMANDE, PAS LE TAMPON — même règle qu'applyRenderSize
+  // (« la caméra suit le cadre, jamais le tampon »). La réduction ci-dessus est
+  // proportionnelle : l'écart est celui d'un arrondi, alors qu'aligner l'aspect
+  // sur le tampon raboté déplacerait le cadrage de l'utilisateur.
+  camera.aspect = aspect
   camera.updateProjectionMatrix()
+  return { width: w, height: h, aspect, rabote: w !== width || h !== height }
 }
 
 export function restoreState({ renderer, composer, camera }, saved) {

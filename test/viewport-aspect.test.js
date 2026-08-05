@@ -107,9 +107,17 @@ test('main.js : le resize n’écrit plus camera.aspect lui-même', () => {
     'l’aspect se pose dans applyRenderSize, une seule fois, avec son garde-fou (voir viewport.js)')
 })
 
+// Depuis le 06/08/2026 `applySize` prend un quatrième argument — l'aspect de
+// l'IMAGE ENTIÈRE, pour que le pavage puisse rendre une tuile sans l'étirer.
+// Le garde-fou n'a pas bougé de place, il a changé de rôle : safeAspect est
+// désormais la VALEUR PAR DÉFAUT de ce paramètre, ce qui est exactement ce que
+// reçoit l'enregistreur vidéo, qui ne passe rien. L'intention du test est la
+// même : personne ne divise la taille brute. (Le comportement, lui, est
+// verrouillé côté exécution dans export-plafond.test.js.)
 test('export.js : applySize borne l’aspect au lieu de diviser la taille brute', () => {
   const src = fs.readFileSync(path.join(ROOT, 'src/export.js'), 'utf8')
-  assert.match(src, /camera\.aspect = safeAspect\(width, height\)/)
+  assert.match(src, /aspect = safeAspect\(width, height\)/)
+  assert.match(src, /camera\.aspect = aspect\b/)
   assert.doesNotMatch(src, /camera\.aspect = width \/ height/)
 })
 
