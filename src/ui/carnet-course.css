@@ -46,39 +46,34 @@
        héros « 112,4 km »          ~105  (34 px mono + unité 13 px)
        + écart de .cc-main            14
        + filet + retrait de .cc-side  15
-       + la rangée la plus large (chiffres d'AVANT le renommage « Sommet
-         restant » → « D− restant », voir la note ⚠️ juste en dessous — ce
-         calcul reste à refaire avec le libellé actuel, plus court) :
-           ≥ 1101 px : « SOMMET RESTANT » 116 + 8 + « 1 840 » 47 + « m » 8   ≈ 179
-           ≤ 1100 px : le suffixe « restant » part (le jumeau figé de la tête
-             disparaît au même palier), ET L'ANCRAGE DE LA BARRIÈRE AVEC LUI
-             (« km 42 » vivait ici jusqu'à ce palier, PAS jusqu'à 900 — voir
-             .cc-u plus bas : au 900 d'origine, ses 6ch fixes + les 6ch de
-             .cc-v ne laissaient plus la place de « BARRIÈRE », mesuré sur
-             une lecture complète)                    « SOMMET » 52 …          ≈ 145
-       ————————————————————————————
-       il faut donc ≈ 313 / 279 px de contenu, soit 340 / 316 px de basis
-       au-dessus de 900 px (marge de zone : 22) ; sous 900 px la zone tombe à
-       284 px de basis (marge 14) pour d'autres raisons (voir course-bar.css,
-       palier @media max-width:900px) et n'est plus contrainte par CETTE
-       rangée : l'ancrage y est déjà parti à 1101, il ne reste rien de lui à
-       perdre une seconde fois.
+       + la rangée la plus large       voir la mesure ⚠️ juste en dessous —
+         le sous-calcul qui vivait ici (basé sur « SOMMET RESTANT », l'ancien
+         libellé) est retiré : il datait d'avant le renommage en « D−
+         restant » et son total (≈313/279 px de contenu) est PÉRIMÉ depuis
+         que la rangée la plus large a changé de largeur. Ne pas le
+         reconstituer de mémoire — repartir de la mesure à jour.
    ⚠️ CES LARGEURS SONT DES MÉTRIQUES NOMINALES, comme les hauteurs : les
    glyphes réels de Bricolage Grotesque et de la mono résolue ne sont pas
-   mesurés ici (aucun navigateur dans ce dépôt). L'ellipse de .cc-l reste donc
-   le filet, exactement comme `overflow: hidden` l'est pour la hauteur.
+   mesurés ici (aucun navigateur dans ce dépôt) — SAUF la mesure du paragraphe
+   suivant, qui elle a été faite dans un vrai navigateur, sur l'élément réel.
+   L'ellipse de .cc-l reste le filet, exactement comme `overflow: hidden`
+   l'est pour la hauteur.
 
-   ⚠️ « SOMMET RESTANT » A ÉTÉ RENOMMÉ « D− RESTANT », ET CE BUDGET N'A PAS
-   ENCORE ÉTÉ REFAIT — le calcul ci-dessus (et celui de .cc-v un peu plus bas)
-   date d'avant le renommage et reste écrit avec l'ancien libellé, qui pesait
-   116 px sur les ≈223 px de besoin de la rangée la plus large. Le nouveau
+   ⚠️ « SOMMET RESTANT » A ÉTÉ RENOMMÉ « D− RESTANT » — C'EST CE QUI REND LE
+   SOUS-CALCUL RETIRÉ CI-DESSUS OBSOLÈTE, ET VOICI LA MESURE À JOUR. Le
    libellé passe de 14 caractères (« SOMMET RESTANT ») à 10 (« D− RESTANT »,
    la MÊME longueur que « D+ RESTANT », déjà présent dans la même colonne) ;
-   mesuré dans le navigateur en substituant les deux textes SUR LE MÊME
-   élément (donc à contrainte de colonne identique) : 116 px → 76 px, soit
-   40 px libérés — voir le rapport de tâche pour la mesure détaillée.
+   mesuré dans un vrai navigateur en substituant les deux textes SUR LE MÊME
+   élément (donc à contrainte de colonne identique, police réellement résolue
+   — Bricolage Grotesque 11 px, 400, letter-spacing 1,32 px, uppercase) :
+   115,6875 px → 76,109375 px, soit ≈40 px libérés (mesure détaillée dans le
+   rapport de la tâche qui a fait ce renommage). Effet notable : « D− restant »
+   et « D+ restant » sont désormais d'EXACTEMENT la même largeur — cette
+   rangée ne fait plus varier la largeur de colonne à elle seule, et n'est
+   plus forcément « la rangée la plus large » qu'un budget refait devrait
+   identifier avant de reposer .cb-zone-carnet.
    Les deux largeurs de .cb-zone-carnet posées dans course-bar.css pour la
-   tâche qui a introduit ce libellé long (340→390 px au palier ≥1101,
+   tâche qui a introduit le libellé long (340→390 px au palier ≥1101,
    284→310 px au palier ≤900) absorbaient exactement le manque qu'il créait ;
    maintenant qu'il est raccourci, elles sont trop généreuses de l'ordre de
    ces mêmes 40 px (moins la marge de sécurité déjà ajoutée) — donc À

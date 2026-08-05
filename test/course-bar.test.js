@@ -29,6 +29,7 @@ import {
   prochaineBarriere,
   prochainRavitaillement,
   dureeRestante,
+  deniveleRestant,
   PORTEE_PENTES,
 } from '../src/carnet-course.js'
 import { decroissant } from '../src/lissage.js'
@@ -720,6 +721,45 @@ test('le D+ RESTANT ne remonte pas d’une image à l’autre', () => {
   // et le commentaire ne justifie plus une décision par un champ mort : aucun
   // objet rendu par carnetALaLigne() n'a jamais eu de champ nommé `dplus`
   assert.ok(!/`dplus` repart à 0 à chaque point franchi/.test(main))
+})
+
+test('le D− RESTANT ne remonte pas non plus — MÊME appel ascentStats, MÊME défaut', () => {
+  // ⚠️ CE TEST EXISTE PARCE QUE LE PREMIER N'ÉTAIT PAS ASSEZ. deniveleRestant()
+  // tire `dplus` ET `dminus` du MÊME `ascentStats(eles, { debut: idx })`
+  // (carnet-course.js) : l'hystérésis qui rend `dplusRestant` non monotone en
+  // `idx` (voir le test précédent) s'applique À L'IDENTIQUE à `dMoinsRestant`.
+  // Renommer « Sommet restant » en « D− restant » sans étendre la même
+  // protection aurait remplacé un mensonge (une altitude sous un libellé de
+  // dénivelé) par un autre plus discret (un dénivelé qui remonte de temps en
+  // temps pendant une lecture qui avance).
+  //
+  // Profil qui fait RÉELLEMENT osciller le dminus BRUT (pas un cas fabriqué à
+  // la main sans rapport avec le code réel — trouvé en balayant ascentStats
+  // avec des profils aléatoires jusqu'à ce qu'un `idx` produise un dminus
+  // PLUS GRAND que celui d'un `idx` précédent) :
+  const dents = [0, 1, 2, 3, 4, 5, 6]
+  const profil = [1000, 1006, 1007, 999, 992, 986, 978]
+  const brut = dents.map((_, i) => deniveleRestant(dents, profil, i, []).dMoinsRestant)
+  assert.deepEqual(brut, [22, 28, 29, 21, 14, 8, 0],
+    `le dminus BRUT doit bien osciller (22→28→29) pour que ce test prouve quelque chose : ${brut}`)
+  assert.ok(brut[1] > brut[0], 'la valeur brute REMONTE bien en idx=1 : c’est le défaut à corriger')
+  // ⚠️ ET C'EST ICI QUE LA PROTECTION DOIT AGIR, SUR TOUTE UNE LECTURE — pas
+  // seulement sur deux valeurs isolées. On rejoue exactement l'algorithme de
+  // `main.js` (onHoverIndex) : un plancher qui part de `null` (première image
+  // : on accepte) puis ne fait que décroître, image après image.
+  let plancher = null
+  const lisse = brut.map((v) => { plancher = decroissant(plancher, v); return plancher })
+  assert.deepEqual(lisse, [22, 22, 22, 21, 14, 8, 0])
+  for (let i = 1; i < lisse.length; i++) {
+    assert.ok(lisse[i] <= lisse[i - 1], `D− restant lissé a remonté à l'index ${i} : ${lisse[i - 1]} → ${lisse[i]}`)
+  }
+  // et la protection est bien CÂBLÉE dans main.js, pas seulement démontrée
+  // ici dans l'abstrait : même mécanique que _dplusVu, sur son propre état.
+  const main = lire('src/main.js')
+  assert.match(main, /decroissant\(_dMoinsVu, _carnetLisse\.dMoinsRestant\)/)
+  // les deux planchers se réarment sur la MÊME tête de lecture qui recule —
+  // pas deux horloges indépendantes qui pourraient dériver l'une de l'autre
+  assert.match(main, /if \(i <= _restIdx\) \{ _dplusVu = null; _dMoinsVu = null \}/)
 })
 
 test('rien n’est calculé à 60 im/s pour être jeté', () => {

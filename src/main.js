@@ -4450,11 +4450,15 @@ const courseBar = buildCourseBar({
 // reste un pur formateur sans notion de temps).
 let _carnetLisse = {}
 let _carnetHorloge = 0
-// le D+ restant ne remonte pas tant qu'on avance : on garde le dernier vu ET
-// l'index auquel il a été vu, parce qu'une tête de lecture qui RECULE (relance,
-// saut dans le profil) doit pouvoir le faire remonter — voir plus bas.
+// le D+ restant ET le D− restant ne remontent pas tant qu'on avance : on
+// garde le dernier vu de CHACUN, mais un seul index de référence (`_restIdx`)
+// suffit aux deux — les deux planchers dépendent de la MÊME tête de lecture,
+// donc du même « est-ce qu'on a reculé ? », pas de deux horloges séparées qui
+// pourraient dériver l'une de l'autre. Une tête qui RECULE (relance, saut
+// dans le profil) doit pouvoir faire remonter les deux : voir plus bas.
 let _dplusVu = null
-let _dplusIdx = -1
+let _dMoinsVu = null
+let _restIdx = -1
 params.onHoverIndex = (i) => {
   const lay = gpxLayer.activeLayer
   const track = lay?.gpx?.track
@@ -4462,7 +4466,8 @@ params.onHoverIndex = (i) => {
     courseBar.carnet.update(null)
     _carnetLisse = {}
     _dplusVu = null
-    _dplusIdx = -1
+    _dMoinsVu = null
+    _restIdx = -1
     return
   }
   // ⚠️ LES ALTITUDES DU RELIEF, PAS CELLES DU FICHIER. `p.ele` est null sur
@@ -4513,21 +4518,38 @@ params.onHoverIndex = (i) => {
   // sortie part déjà de {...cible}, donc un champ redevenu null (plus de
   // point suivant) le RESTE — un merge ressuscitait la dernière distance.
   _carnetLisse = lisserChamps(_carnetLisse, brut, dt, 0.4, ['pente'])
-  // ⚠️ LE SEUL AUTRE NOMBRE VISIBLE QUI TREMBLE : le D+ RESTANT. Il n'est pas
-  // monotone en `i` — l'hystérésis d'ascentStats() fait dépendre le résultat
-  // du point de DÉPART (race-model.js) — donc il peut osciller de quelques
-  // mètres d'une image à l'autre, sur un chiffre de 17 px qu'on lit en
-  // courant. Le lisser mentirait (une moyenne mobile le laisse REMONTER) ;
-  // on force la décroissance, qui est la vérité physique : ce qui reste à
-  // monter ne remonte pas tant qu'on avance. La demande d'Adrien (« la valeur
-  // est moyennée pour être lisible ») portait sur ce qu'on VOIT — et la pente,
-  // seule lissée jusqu'ici, n'est plus affichée nulle part.
-  // Une tête qui RECULE (relance, clic dans le profil) doit pouvoir le faire
-  // remonter : le plancher se réarme dès que l'index n'avance plus.
-  if (i <= _dplusIdx) _dplusVu = null
-  _dplusIdx = i
+  // ⚠️ LES DEUX AUTRES NOMBRES VISIBLES QUI TREMBLENT : le D+ RESTANT ET le
+  // D− RESTANT. Aucun des deux n'est monotone en `i` — les DEUX sortent du
+  // MÊME appel `ascentStats(eles, { debut: idx })` (carnet-course.js,
+  // deniveleRestant), et c'est cet appel dont l'hystérésis fait dépendre le
+  // résultat du point de DÉPART (race-model.js le dit explicitement) : dplus
+  // ET dminus peuvent donc chacun osciller de quelques mètres d'une image à
+  // l'autre, sur des chiffres de 17 px qu'on lit en courant. Corriger le D+
+  // sans étendre la MÊME protection au D− aurait laissé filer exactement le
+  // mensonge que le renommage « Sommet restant » → « D− restant » visait à
+  // éliminer (une valeur présentée comme un cumul qui ne redescend jamais,
+  // mais qui remonte quand même de temps en temps). Le lissage mentirait
+  // aussi (une moyenne mobile LAISSE remonter la valeur) ; on force donc la
+  // décroissance sur les deux, qui est la vérité physique : ce qui reste à
+  // monter — ou à descendre — ne remonte pas tant qu'on avance. La demande
+  // d'Adrien (« la valeur est moyennée pour être lisible ») portait sur ce
+  // qu'on VOIT — et la pente, seule lissée jusqu'ici, n'est plus affichée
+  // nulle part.
+  // Une tête qui RECULE (relance, clic dans le profil) doit pouvoir faire
+  // remonter les deux : les deux planchers se réarment dès que l'index
+  // n'avance plus (même horloge, `_restIdx`, voir sa déclaration plus haut).
+  if (i <= _restIdx) { _dplusVu = null; _dMoinsVu = null }
+  _restIdx = i
   _dplusVu = decroissant(_dplusVu, _carnetLisse.dplusRestant)
   _carnetLisse.dplusRestant = _dplusVu
+  // dMoinsRestant vaut `null` tant qu'il y a un prochain point (voir
+  // deniveleRestant()) : decroissant(x, null) rend `null` (sa première garde,
+  // « cible non finie »), ce qui RÉARME le plancher tout seul, sans avoir
+  // besoin d'un `if` de plus ici — le jour où la valeur redevient un nombre
+  // (plus de prochain point), `_dMoinsVu` est déjà retombé à `null` et
+  // repart d'accueil, comme à la première image.
+  _dMoinsVu = decroissant(_dMoinsVu, _carnetLisse.dMoinsRestant)
+  _carnetLisse.dMoinsRestant = _dMoinsVu
   courseBar.carnet.update(_carnetLisse)
 }
 

@@ -148,6 +148,20 @@ test('deniveleRestant expose le D− RESTANT — une descente cumulée, pas un s
   assert.equal(deniveleRestant(cumKm, eles, 0, waypoints).dMoinsRestant, null)
 })
 
+test('deniveleRestant somme TOUTES les descentes d’un profil en dents de scie, pas la première', () => {
+  // ⚠️ POINT DE VÉRIFICATION EXPLICITE DE LA CONSIGNE : ascentStats() ne
+  // s'arrête pas au premier changement de pente, mais ça se lit dans le code,
+  // ça ne se prouve pas — d'où ce test. Profil descente→montée→descente→
+  // montée→descente (hystérésis 8, toutes les variations la dépassent) :
+  // une implémentation qui s'arrêterait au premier changement de sens ne
+  // rendrait QUE le premier segment (100 m), pas le cumul des trois.
+  const dents = [0, 1, 2, 3, 4, 5]
+  const profil = [1000, 900, 950, 850, 900, 800] // -100, +50, -100, +50, -100
+  const r = deniveleRestant(dents, profil, 0, [])
+  assert.equal(r.dMoinsRestant, 300, 'les trois descentes doivent s’additionner : 100+100+100')
+  assert.equal(r.dplusRestant, 100, 'les deux remontées doivent s’additionner : 50+50')
+})
+
 test('fenetreDePentes omet les segments hors piste plutôt que de les inventer', () => {
   // piste 0..5, fenêtre CENTRÉE de 2 km sur km=0.2 -> [-0.8, 1.2] : avant 0 coupé
   const f = fenetreDePentes(cumKm, eles, 0.2, { porteeKm: 2, segments: 5, versAvant: false })
