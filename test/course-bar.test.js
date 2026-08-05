@@ -992,3 +992,16 @@ test('Stop coupe la lecture ET le suivi caméra, dans main.js', () => {
   assert.match(bloc, /gpxLayer\.stop\(\)/)
   assert.match(bloc, /disengageGpxFollow\(\)/)
 })
+
+// ================================================ 16. la marge de tête
+test('la tête a une marge haute, au jeton de zone du fichier', () => {
+  // Adrien : « au-dessus de "Grand raid..." il n'y a pas de marge dans le
+  // bloc » — mesuré dans le navigateur avant correction : 0 px entre le haut
+  // de .cb-bar et la ligne du titre (le raccourci `padding` juste au-dessus
+  // pose le haut à 0). --cb-gutter est déjà LE jeton de marge de zone de ce
+  // fichier (utilisé cinq fois ailleurs pour le même rôle) : un verrou léger
+  // pour que cette ligne ne disparaisse pas en silence dans une prochaine
+  // passe sur le raccourci `padding`.
+  const bloc = codeSeul(lire('src/ui/course-bar.css')).match(/\.cb-head\s*\{[^}]*\}/s)[0]
+  assert.match(bloc, /padding-block-start:\s*var\(--cb-gutter\)/)
+})
