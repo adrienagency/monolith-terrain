@@ -558,7 +558,7 @@ test('deux socles de reliefs differents partagent le meme fond', () => {
 
 // le point le plus bas de la géométrie rendue
 function fondDe(res) {
-  const pos = res.geometry.getAttribute('position')
+  const pos = res.geo.getAttribute('position')
   let min = Infinity
   for (let i = 0; i < pos.count; i++) min = Math.min(min, pos.getY(i))
   return Math.round(min * 1e6) / 1e6
@@ -998,7 +998,7 @@ const plat = (y) => () => y
 
 // mesure : jusqu'où la géométrie rentre vers l'intérieur, sur un côté donné
 function rentreeSur(res, axe, signe) {
-  const pos = res.geometry.getAttribute('position')
+  const pos = res.geo.getAttribute('position')
   let extreme = -Infinity
   for (let i = 0; i < pos.count; i++) {
     const v = axe === 'x' ? pos.getX(i) : pos.getZ(i)
@@ -1022,7 +1022,7 @@ test('un bord interieur perd son conge : le socle va jusqu\'au bord', () => {
   // nord exterieur, sud interieur (une case au sud)
   const masque = masqueDepuisContour(slab.ring, demi, { nord: true, est: true, sud: false, ouest: true })
   const r = buildSlabWalls(plat(10), { resolution: 32, masqueArrondi: masque })
-  const pos = r.geometry.getAttribute('position')
+  const pos = r.geo.getAttribute('position')
   // sur le cote SUD, la geometrie doit atteindre +demi PARTOUT en profondeur
   let sudLePlusLoin = -Infinity
   let sudAuFond = -Infinity
@@ -1041,7 +1041,7 @@ test('un bord exterieur garde son conge quand son voisin l\'a perdu', () => {
   const demi = Math.max(...slab.ring.map((p) => Math.abs(p.x)))
   const masque = masqueDepuisContour(slab.ring, demi, { nord: true, est: true, sud: false, ouest: true })
   const r = buildSlabWalls(plat(10), { resolution: 32, masqueArrondi: masque })
-  const pos = r.geometry.getAttribute('position')
+  const pos = r.geo.getAttribute('position')
   let fond = Infinity
   for (let i = 0; i < pos.count; i++) fond = Math.min(fond, pos.getY(i))
   let nordLePlusLoin = Infinity
@@ -1061,7 +1061,7 @@ test('le fond reste soude au bas des murs, arrondi ou pas', () => {
   const demi = Math.max(...slab.ring.map((p) => Math.abs(p.x)))
   const masque = masqueDepuisContour(slab.ring, demi, { nord: true, est: false, sud: false, ouest: false })
   const r = buildSlabWalls(plat(10), { resolution: 32, masqueArrondi: masque })
-  const geo = r.geometry
+  const geo = r.geo
   geo.computeBoundingBox()
   assert.ok(geo.getAttribute('position').count > 0)
   // aucun sommet ne doit etre isole : un trou se voit comme un ecart d'index
