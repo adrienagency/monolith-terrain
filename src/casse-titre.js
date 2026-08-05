@@ -18,13 +18,18 @@
 // fait passer pour « déjà composé » par une première version qui ne
 // découpait que sur l'espace — son filtre « entièrement en capitales »
 // (lettres seules) ne matchait jamais un jeton contenant un « - », donc il
-// ressortait taché de majuscules (« du MONT-BLANC »). L'APOSTROPHE EST LE
-// MÊME PIÈGE : un titre comme « L'ULTRA-TRAIL » a un segment de tête,
-// « L'ULTRA », que le même filtre lettres-seules ne reconnaissait pas non
-// plus — « L'Échappée Belle », « L'Ultra-Trail » sont des noms de course
-// plausibles. Trait d'union ET apostrophe sont désormais des séparateurs de
-// plus, au même titre que l'espace : chaque segment qu'ils isolent suit
-// indépendamment la même règle que n'importe quel autre mot.
+// ressortait taché de majuscules (« du MONT-BLANC »). Le trait d'union est
+// désormais un séparateur de plus, au même titre que l'espace.
+// ⚠️ MAIS L'APOSTROPHE N'EST PAS UN SÉPARATEUR UNIVERSEL COMME LE TRAIT
+// D'UNION — une première correction l'avait traitée comme telle, et
+// « AUJOURD'HUI », « QUELQU'UN », « PRESQU'ÎLE » (des mots réels, plausibles
+// dans un nom de course) en ressortaient mal composés (« Aujourd'Hui », un H
+// majuscule fautif) : PIRE que le bug d'origine, parce que SILENCIEUX — le
+// mot n'a plus l'air suspect, il est juste faux. La règle : on ne recommence
+// un mot après l'apostrophe QUE si ce qui précède se réduit à UNE SEULE
+// LETTRE — la définition même de l'élision (l', d', j', n', s', c', m', t').
+// Au-delà d'une lettre, l'apostrophe est INTERNE au mot et celui-ci se
+// compose comme un bloc, voir composerAvecElisions() plus bas.
 // Trois catégories pour les segments qui, eux, SONT entièrement en capitales :
 //   1. LES UNITÉS DE MESURE (km…) : minuscules, TOUJOURS — jamais de
 //      majuscule, quelle que soit leur position dans le titre. Une unité ne
@@ -81,6 +86,10 @@ const MOTS_MINEURS = new Set([
 // c'est le seuil qui ne se prononce (quasiment) jamais sans voyelle entre
 // elles.
 const VOYELLE = /[AEIOUYÀÂÄÉÈÊËÏÎÔÖÙÛÜ]/
+// une apostrophe INTERNE (aujourd'hui, presqu'île) n'est ni une voyelle ni
+// une consonne : la retirer avant de compter, sinon elle gonflerait à tort
+// une suite de consonnes ou le nombre de lettres du seuil « sigle »
+const soloLettres = (s) => s.replace(/['’]/g, '')
 function pireSuiteDeConsonnes(motMaj) {
   let max = 0
   let courant = 0
@@ -91,21 +100,23 @@ function pireSuiteDeConsonnes(motMaj) {
   return max
 }
 function estUnSigle(motMaj) {
+  const lettres = soloLettres(motMaj)
   // au-delà de quatre lettres un mot français a presque toujours de quoi se
   // prononcer : le seuil ne sert qu'à départager les mots courts
-  if (motMaj.length > 4) return false
-  return pireSuiteDeConsonnes(motMaj) >= 3
+  if (lettres.length > 4) return false
+  return pireSuiteDeConsonnes(lettres) >= 3
 }
 
-// pas de chiffres dans la classe, et ni le trait d'union ni l'apostrophe non
-// plus : les trois sont des séparateurs traités À CÔTÉ (chiffres → jamais
-// transformé, trait d'union/apostrophe → découpe en segments), jamais À
-// L'INTÉRIEUR d'un segment jugé « entièrement en capitales »
+// pas de chiffres dans la classe, et pas de trait d'union non plus : les
+// deux sont des séparateurs traités À CÔTÉ (chiffres → jamais transformé,
+// trait d'union → découpe en segments), jamais À L'INTÉRIEUR d'un segment
+// jugé « entièrement en capitales ». L'apostrophe, elle, est TOLÉRÉE ici —
+// composerAvecElisions() décide plus bas si elle scinde ou reste interne,
+// mais dans les deux cas le morceau qui atteint ce filtre peut en porter
+// une (« AUJOURD'HUI » entier, ou « L » puis « ULTRA » séparément) : la
+// tester sur les lettres seules, apostrophe retirée, couvre les deux.
 const SEUL_MAJUSCULES = /^[A-ZÀ-Ý]+$/
-// l'apostrophe DROITE (l'élision saisie au clavier) et la COURBE (celle
-// qu'un correcteur de saisie substitue) : les deux marquent la même élision,
-// un titre saisi sur des claviers différents peut porter l'une ou l'autre
-const SEPARATEURS = /([-'’])/
+const estEntierementEnCapitales = (s) => SEUL_MAJUSCULES.test(soloLettres(s))
 
 const casseNom = (mot) => mot.charAt(0) + mot.slice(1).toLowerCase()
 
@@ -120,7 +131,7 @@ export function casseDeNom(titre) {
   let dejaVuUnMot = false
 
   const casserSegment = (seg) => {
-    if (!SEUL_MAJUSCULES.test(seg)) return seg // pas entièrement en capitales : intact (déjà composé, nombre, ponctuation)
+    if (!estEntierementEnCapitales(seg)) return seg // pas entièrement en capitales : intact (déjà composé, nombre, ponctuation)
     const enTete = !dejaVuUnMot
     dejaVuUnMot = true
     const minuscule = seg.toLowerCase()
@@ -130,16 +141,26 @@ export function casseDeNom(titre) {
     return casseNom(seg)
   }
 
+  // ⚠️ L'APOSTROPHE NE SCINDE QUE SI CE QUI LA PRÉCÈDE FAIT UNE SEULE
+  // LETTRE — la définition même de l'élision. « L'ULTRA » (préfixe « L »,
+  // une lettre) devient deux mots, « L » puis « ULTRA », composés
+  // indépendamment ; « AUJOURD'HUI » (préfixe « AUJOURD », sept lettres)
+  // reste UN SEUL mot, dont seule la première lettre se capitalise —
+  // casserSegment() gère déjà ce cas tout seul puisqu'il tolère
+  // l'apostrophe interne (voir estEntierementEnCapitales). Récursif sur le
+  // reste : une élision chaînée (rarissime en français, mais rien ne
+  // l'interdit) se scinderait aussi loin qu'il le faut.
+  const composerAvecElisions = (segment) => {
+    const i = segment.search(/['’]/)
+    if (i === 1) return casserSegment(segment.slice(0, 1)) + segment[1] + composerAvecElisions(segment.slice(2))
+    return casserSegment(segment)
+  }
+
   return titre
     .split(/(\s+)/) // les espaces sont capturés, pas seulement lus : recomposer À L'IDENTIQUE
     .map((jeton) => jeton
-      // trait d'union ET apostrophe dans LA MÊME scission : « L'ULTRA-TRAIL »
-      // a besoin des deux à la fois (L' puis Ultra puis -Trail), et deux
-      // scissions successives (d'abord l'une, puis l'autre sur chaque
-      // morceau) referaient courir le même risque d'oubli qui a produit ce
-      // bug — un seul passage, aucun caractère de jonction ne peut y échapper
-      .split(SEPARATEURS)
-      .map((s) => (SEPARATEURS.test(s) ? s : casserSegment(s)))
+      .split(/(-)/) // le trait d'union aussi : « MONT-BLANC » se compose Mont puis Blanc, pas comme un seul bloc
+      .map((s) => (s === '-' ? s : composerAvecElisions(s)))
       .join(''))
     .join('')
 }

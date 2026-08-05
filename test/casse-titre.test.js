@@ -54,6 +54,25 @@ test('un mot a trait d union se compose SEGMENT PAR SEGMENT', () => {
 // sont des noms de course parfaitement plausibles.
 test('un mot avec elision se compose SEGMENT PAR SEGMENT, comme un trait d union', () => {
   assert.equal(casseDeNom("L'ULTRA-TRAIL DU MONT-BLANC"), "L'Ultra-Trail du Mont-Blanc")
+  // l'apostrophe COURBE (celle qu'un correcteur de saisie substitue à la
+  // droite) doit scinder de la même façon, et être rendue TELLE QUELLE —
+  // on ne force pas une apostrophe sur l'autre
+  assert.equal(casseDeNom('L’ULTRA-TRAIL DU MONT-BLANC'), 'L’Ultra-Trail du Mont-Blanc')
+})
+
+// ⚠️ TOUTES LES APOSTROPHES NE COUPENT PAS UN MOT. La correction ci-dessus
+// traitait l'apostrophe comme un séparateur UNIVERSEL — et « aujourd'hui »,
+// « quelqu'un », « presqu'île » (des mots réels, plausibles dans un nom de
+// course) en ressortaient mal composés (« Aujourd'Hui », un H majuscule
+// fautif) : PIRE que le bug d'origine, parce que silencieux — le mot n'a
+// plus l'air suspect. La règle : on ne recommence un mot après l'apostrophe
+// QUE si ce qui précède se réduit à UNE SEULE LETTRE (la définition même de
+// l'élision — l', d', j', n', s', c', m', t'). Au-delà, l'apostrophe est
+// INTERNE au mot, qui se compose comme un bloc.
+test('l apostrophe ne recommence un mot que si l elision fait une seule lettre', () => {
+  assert.equal(casseDeNom("AUJOURD'HUI"), "Aujourd'hui")
+  assert.equal(casseDeNom("QUELQU'UN"), "Quelqu'un")
+  assert.equal(casseDeNom("LA PRESQU'ILE SAUVAGE"), "La Presqu'ile Sauvage")
 })
 
 // ⚠️ « KM » N'EST JAMAIS CAPITALISÉ, MÊME EN BORDURE DE TITRE — parce que
