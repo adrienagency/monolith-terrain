@@ -7132,6 +7132,68 @@ async function openAfficheUI(etatInitial = null) {
         rendu.restaurer()
       }
     },
+    // ═══════ LE TIRAGE : LA MÊME SCÈNE, MAIS PAVÉE ═════════════════════════
+    //
+    // L'aperçu au-dessus rend l'affiche EN UNE PASSE, à 1 100 px : c'est ce
+    // qu'on regarde pour décider. Celui-ci rend la MÊME composition à sa taille
+    // d'impression — jusqu'à 35,7 Mpx — en tuiles recollées bande par bande.
+    // Tout ce qui les distingue est la taille et le pavage ; le cadrage, le
+    // point de netteté et l'épaisseur des traits passent par exactement les
+    // mêmes fonctions, ce qui est la seule façon que l'écran et le fichier ne
+    // divergent pas.
+    //
+    // ⚠️ RIEN NE L'APPELLE ENCORE : le déclenchement, la progression et
+    // l'annulation appartiennent à la tâche 8 (« rendre avant d'encaisser »).
+    // Il est branché ici, et pas laissé dans export.js, pour que le chemin de
+    // production existe — c'est précisément faute de ce branchement que
+    // planTuiles a dormi trois mois dans son propre test.
+    //
+    // @param {[number,number]} totalPx - la taille à produire, fond perdu compris
+    // @param {number} hauteurFiniePx - la hauteur APRÈS coupe
+    // @param {number} hauteurMm - la même hauteur, en millimètres
+    rendreTirage: async ({ totalPx, hauteurFiniePx, hauteurMm, dpi, cadrage, pointNet, surBande, onProgress, annule }) => {
+      const { exporteAffichePavee } = await import('./export.js')
+      const aspect = totalPx[0] / totalPx[1]
+      return exporteAffichePavee({
+        renderer, composer, camera,
+        totalPx, dpi,
+        // Le classement des effets a besoin de savoir ce qui est ALLUMÉ : la
+        // marge de recouvrement dépend du bokeh, et la liste à neutraliser du
+        // vignettage et du grain. Voir export-effets.js.
+        effets: {
+          smaaActif: true,
+          bokehActif: !!(params.bokehEnabled && params.bokehScale > 0),
+          bokehScale: params.bokehScale,
+          vignette: params.vignette,
+          grain: params.grain,
+          occlusionActive: !!params.ssaoEnabled,
+        },
+        // ⚠️ UN SEUL INSTANT DE CARTE, PAS DOUZE. Entre deux tuiles il y a des
+        // `await` ; une reconstruction de calque qui y atterrirait mettrait
+        // dans la moitié basse de l'affiche des rivières que la moitié haute
+        // n'a pas. On pose donc la fenêtre et on laisse les calques en cours
+        // se terminer AVANT la première tuile.
+        avantTirage: () => { f3Fige(); return rebuildMapLayers() },
+        // ⚠️ RAPPELÉ À CHAQUE TUILE, ET RESTAURÉ À CHAQUE TUILE. C'est
+        // l'arbitrage de la réserve nº 2 de la tâche 5 : plutôt que de geler
+        // les reconstructions — ce qui demanderait à export.js de connaître six
+        // entrées du pipeline de données et laisserait quand même passer ce qui
+        // est déjà en vol — on referme le cycle sur chaque tuile. Un matériau
+        // né en route est repris au tour suivant, avec sa référence d'écran
+        // intacte ; un matériau déjà réglé n'est jamais réglé deux fois.
+        preparerTuile: ({ cadrage: fenetre, largeur: w, hauteur: h }) => {
+          const rendu = cadrerAffiche(aspect, cadrage, pointNet, fenetre)
+          // ⚠️ LA HAUTEUR DE RÉFÉRENCE EST CELLE DU FORMAT FINI, pas celle du
+          // rendu avec fond perdu : c'est la convention d'appel de
+          // `reglerTraits` (export-traits.js), et c'est à elle seule que
+          // l'aperçu et le tirage donnent la même épaisseur sur le papier. Les
+          // apparier autrement décale tout de 0,86 % sur un 50 × 70.
+          const traits = reglerTraitsAffiche({ tuile: { w, h }, hauteurTotalePx: hauteurFiniePx, hauteurMm, dpi })
+          return { restaurer() { traits.restaurer(); rendu.restaurer() } }
+        },
+        surBande, onProgress, annule,
+      })
+    },
     // Le MÊME nom que celui gravé sur le flanc du bloc (groundInfo.info) : deux
     // sources donneraient deux noms pour un seul lieu.
     lieu: () => ({
