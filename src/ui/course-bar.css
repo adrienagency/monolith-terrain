@@ -171,6 +171,14 @@
      en fin de fichier), elle n'est simplement plus subie. */
   min-height: 40px;
   padding: 0 var(--ce-gap-control) 0 var(--cb-gutter);
+  /* ⚠️ LA MARGE HAUTE MANQUAIT ENTIÈREMENT : le padding ci-dessus la posait
+     à 0, et le titre touchait le bord du bloc (mesuré dans le navigateur :
+     0 px entre le haut de .cb-bar et la ligne du titre, contre 22 px partout
+     ailleurs dans cette barre — --cb-gutter est déjà LE jeton de la marge de
+     zone, voir sa déclaration en tête de fichier). Posée APRÈS le raccourci
+     `padding`, exprès : la propriété logique gagne sur la valeur "0" que le
+     raccourci vient d'écrire pour le haut. */
+  padding-block-start: var(--cb-gutter);
   border-bottom: 1px solid var(--ce-hairline);
 }
 .cb-title {

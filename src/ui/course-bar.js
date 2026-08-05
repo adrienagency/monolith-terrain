@@ -18,6 +18,7 @@
 // que le profil est embarqué ici (.cb-embedded dans course-bar.css).
 import './course-bar.css'
 import { buildCarnetCourse } from './carnet-course.js'
+import { casseDeNom } from '../casse-titre.js'
 
 const VITESSES = [0.5, 1, 2, 4]
 
@@ -227,7 +228,14 @@ export function buildCourseBar({ container, onTogglePlay, onQuit, getSpeed, setS
   }
 
   function setTitle(name) {
-    titleEl.textContent = name || 'Parcours'
+    // ⚠️ LA CASSE NE TOUCHE QUE L'AFFICHAGE. `name` reste EXACTEMENT ce que
+    // l'appelant a passé (raceState.name ou le nom du calque, voir
+    // syncCourseBarMode dans main.js) — casseDeNom() est pure, elle ne fait
+    // que dériver une chaîne d'affichage, jamais réécrire la donnée
+    // d'origine. Beaucoup d'organisateurs saisissent au clavier verrouillé
+    // majuscules : « GRAND RAID REUNION 2025 » se lisait moins bien qu'un
+    // titre composé.
+    titleEl.textContent = (name && casseDeNom(name)) || 'Parcours'
     titleEl.classList.toggle('cb-empty', !name)
   }
 
