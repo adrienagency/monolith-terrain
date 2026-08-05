@@ -21,6 +21,12 @@ import { latLonToWorld } from './geo.js'
 import { buildSlabWalls } from './plinth.js'
 import { exposantCoin } from './fenetre-clip.js'
 import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
+import { carreCouvrant, cellulesDuCarre, carreSousPlafond } from './damier-carre.js'
+
+// Le côté maximal du damier sur le chemin GPX. DISTINCT de GRID_R (qui reste
+// à 2 pour le cadrage du mode zone isolée, cf. region-mask.js:523 et
+// test/region-grid.test.js) : ici on borne une FORME carrée, là-bas un rayon.
+export const CARRE_COTE_MAX = 3
 
 export const GRID_R = 2 // rayon du damier : 2 → 5×5 max, centre exclu
 
@@ -297,6 +303,9 @@ export class BlockGrid {
     this._demCache = new Map() // LRU zoom:tx,ty → dem DÉTACHÉ (borné en octets)
     this._demFailed = new Map() // zoom:tx,ty → date de l'échec (cf. DEM_FAIL_TTL_MS)
     this._need = new Set() // dalles réclamées par la DERNIÈRE synchro (cf. sync)
+    // La forme carrée du damier, relue par le socle (bords), la mer (emprise),
+    // les textes (écart) et la caméra (cadrage). Toujours définie.
+    this._carre = { i0: 0, j0: 0, cote: 1 }
     // Contour de la zone ISOLÉE, s'il y en a une. C'est un ÉTAT du damier et
     // pas un argument de sync() pour une raison précise : sync est rappelée de
     // partout (re-drapage GPX, arrivée d'un voisin, fermeture d'un parcours), et
@@ -317,21 +326,38 @@ export class BlockGrid {
     return r * TERRAIN_SIZE
   }
 
-  // Quelles cellules le tracé touche-t-il ? (coordonnées monde CONTINUES du
+  // Quelles cellules le tracé réclame-t-il ? (coordonnées monde CONTINUES du
   // DEM central — latLonToWorld extrapole linéairement au-delà de ±28.)
+  //
+  // ⚠️ CE N'EST PLUS LE CHEMIN DU TRACÉ, C'EST SON CARRÉ. Ne charger que les
+  // cases traversées laissait des trous béants entre elles. Voir damier-carre.js.
   cellsForTrack(points) {
     const dem = this.getMainDem()
-    const need = new Set()
-    if (!dem || !points?.length) return need
+    if (!dem || !points?.length) return this._poseCarre({ i0: 0, j0: 0, cote: 1 })
+    // frontière avec la fenêtre continue : quand l'emprise est précuite, le
+    // damier n'existe pas (cf. main.js:4404) — et son géoréférencement ne
+    // serait de toute façon pas celui qu'attend latLonToWorld ici.
+    if (dem.empriseCote > 1) return this._poseCarre({ i0: 0, j0: 0, cote: 1 })
+    const touchees = new Set()
     for (const p of points) {
       const w = latLonToWorld(dem, p.lat, p.lon)
       const i = Math.round(w.x / TERRAIN_SIZE)
       const j = Math.round(w.z / TERRAIN_SIZE)
-      if (i === 0 && j === 0) continue
-      if (Math.abs(i) > GRID_R || Math.abs(j) > GRID_R) continue // hors damier 5×5
-      need.add(`${i},${j}`)
+      if (Math.abs(i) > GRID_R || Math.abs(j) > GRID_R) continue
+      touchees.add(`${i},${j}`)
     }
-    return need
+    const plafond = this.params?.damierMax
+    return this._poseCarre(carreSousPlafond(carreCouvrant(touchees, { cotemax: CARRE_COTE_MAX }), plafond))
+  }
+
+  _poseCarre(carre) {
+    this._carre = carre
+    return cellulesDuCarre(carre)
+  }
+
+  /** La forme carrée courante du damier : { i0, j0, cote }. Jamais null. */
+  carreCourant() {
+    return this._carre
   }
 
   // Le contour de la zone isolée que le damier doit porter (null = plus de

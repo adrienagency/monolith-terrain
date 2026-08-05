@@ -87,3 +87,44 @@ test('le carré rétréci contient toujours le bloc central', () => {
   assert.equal(bride.cote, 1)
   assert.equal(cellulesDuCarre(bride).size, 0, 'plus aucune voisine')
 })
+
+// BRANCHEMENT DANS LE DAMIER (Tâche 2) — cellsForTrack ne rend plus le seul
+// chemin du tracé, mais le carré qui l'enveloppe.
+import { BlockGrid } from '../src/block-grid.js'
+import { TERRAIN_SIZE } from '../src/terrain.js'
+
+// un DEM bouchonné dont latLonToWorld rend une grille simple : 1 degré = 1 bloc
+function demBouchon() {
+  return { size: 768, zoom: 12, tx: 0, ty: 0, extentMeters: 5000, meanM: 0, lat: 0, lon: 0 }
+}
+
+test('cellsForTrack rend un carre plein, pas le seul chemin du trace', () => {
+  const g = new BlockGrid({ scene: null, params: {}, getMainDem: demBouchon, getMainTerrain: () => null, getPlinth: () => null })
+  // un tracé en diagonale ne touche que (0,0), (1,1) : le carré doit remplir
+  const points = [{ lat: 0, lon: 0 }, { lat: 0.5, lon: 0.5 }]
+  const need = g.cellsForTrack(points)
+  const carre = g.carreCourant()
+  assert.ok(carre.cote >= 1 && carre.cote <= 3, `cote ${carre.cote} hors bornes`)
+  // AUCUN TROU : tout ce que le carré décrit est réclamé
+  for (const k of cellulesDuCarre(carre)) {
+    assert.ok(need.has(k), `${k} manque : le damier est troue`)
+  }
+})
+
+test('le damier ne depasse jamais 3 de cote sur le chemin GPX', () => {
+  const g = new BlockGrid({ scene: null, params: {}, getMainDem: demBouchon, getMainTerrain: () => null, getPlinth: () => null })
+  const points = []
+  for (let k = -60; k <= 60; k++) points.push({ lat: k / 10, lon: k / 10 })
+  g.cellsForTrack(points)
+  assert.ok(g.carreCourant().cote <= 3, 'plafond 3x3 non respecte')
+})
+
+// LE GARDE-FOU DE LA FRONTIÈRE (contrainte globale 3). En mode continu le
+// damier doit rester vide ; c'était un invariant de fait, jamais testé.
+test('en mode fenetre continue le damier reste vide', () => {
+  const dem = { ...demBouchon(), empriseCote: 3 }
+  const g = new BlockGrid({ scene: null, params: {}, getMainDem: () => dem, getMainTerrain: () => null, getPlinth: () => null })
+  const need = g.cellsForTrack([{ lat: 0, lon: 0 }, { lat: 0.5, lon: 0.5 }])
+  assert.equal(need.size, 0, 'le damier n\'existe pas quand l\'emprise est precuite')
+  assert.equal(g.carreCourant().cote, 1)
+})
