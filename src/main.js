@@ -74,6 +74,7 @@ import { SunDisc } from './sun-disc.js'
 import { Plinth, bandeContact } from './plinth.js'
 // le cadrage de l'affiche : « tout le socle » se calcule, il ne se devine pas
 import { cadrageValide, distanceCadrage, distanceAffiche } from './print-page.js'
+import { composeDecalage } from './export-cadrage.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
 import { fetchRegionMask, regionMaskFromParts, frameRegion, rasterizeMask } from './region-mask.js'
@@ -6900,7 +6901,12 @@ initTips()
 //
 // Rend un objet qui sait tout remettre en place : la caméra de la scène ne doit
 // pas garder une trace de l'aperçu.
-function cadrerAffiche(aspect, cadrage, pointNet = null) {
+//
+// `tuile` est le cadrage d'une tuile de tirage (`cadrageTuile`, print-page.js),
+// ou `null` pour un rendu plein cadre — l'aperçu à l'écran. Il entre ICI, et
+// nulle part ailleurs : c'est la seule façon de garantir qu'il se COMPOSE avec
+// le cadrage de l'acheteur au lieu de l'écraser.
+function cadrerAffiche(aspect, cadrage, pointNet = null, tuile = null) {
   const c = cadrageValide(cadrage || {})
   const sauve = {
     pos: camera.position.clone(),
@@ -6974,12 +6980,18 @@ function cadrerAffiche(aspect, cadrage, pointNet = null) {
   // réglage, et l'aperçu ne dirait plus la même chose que la vue d'origine.
   // `zoom` ne fait que resserrer le champ, ce que fait un objectif.
   camera.zoom = c.zoom
-  // Le décalage, en fraction de l'image. setViewOffset décrit une fenêtre dans
-  // une image plus grande : ici la « grande » est la même, seul l'offset bouge.
-  if (c.x || c.y) {
-    const W = 10000
-    const H = Math.round(W / aspect)
-    camera.setViewOffset(W, H, (c.x * W) / 2, (c.y * H) / 2, W, H)
+  // ⚠️ UN SEUL setViewOffset, JAMAIS DEUX. Le décalage de l'acheteur et celui
+  // du pavage visent le même setteur, qui n'est pas cumulatif : appelés à la
+  // suite, le second efface le premier et l'affiche part au tirage recentrée,
+  // sans une ligne en console. On les compose donc AVANT (export-cadrage.js),
+  // et on ne pose qu'un seul jeu d'arguments.
+  //
+  // ⚠️ Et setViewOffset REPOSE `camera.aspect` à fullWidth/fullHeight. Le cadre
+  // que rend le module vaut donc exactement l'aspect demandé — c'est pour ça
+  // qu'il n'arrondit plus sa hauteur (voir export-cadrage.js).
+  const vue = composeDecalage({ x: c.x, y: c.y, aspect }, tuile)
+  if (vue) {
+    camera.setViewOffset(vue.fullWidth, vue.fullHeight, vue.offsetX, vue.offsetY, vue.width, vue.height)
   } else camera.clearViewOffset()
   camera.updateProjectionMatrix()
 
