@@ -366,7 +366,26 @@ export class BlockGrid {
     return cellulesDuCarre(carre)
   }
 
-  /** La forme carrée courante du damier : { i0, j0, cote }. Jamais null. */
+  /**
+   * ⚠️ RÉSERVÉE AU CHARGEMENT — ET ELLE N'A PLUS AUCUN LECTEUR DE PRODUCTION.
+   *
+   * Ce que le dernier `cellsForTrack` a RÉCLAMÉ : la forme du carré que le tracé
+   * GPX fait charger, plafonnée à `CARRE_COTE_MAX` (3×3) et par le palier
+   * machine. Jamais null.
+   *
+   * ⚠️ CE N'EST PAS LA FORME DU DAMIER, et le nom le laisse croire. Elle ignore
+   * les dalles nées d'une zone isolée : sur une zone isolée qui remplit un 5×5
+   * sans aucun tracé, elle rend encore `{cote: 1}` (c'est un cas de
+   * test/damier-carre.js). Depuis le 2026-08-05, PLUS RIEN en production ne la
+   * lit — le socle, la mer, la jupe, les textes gravés et le cadrage caméra
+   * passent tous par `empriseVivante()` ci-dessous. Seuls les tests l'appellent,
+   * pour vérifier ce que le CHARGEMENT a décidé.
+   *
+   * Elle est gardée pour ça, et elle porte cet avertissement pour la même raison
+   * qu'elle est gardée : la prochaine personne qui la trouvera par son nom
+   * croira qu'elle décrit le damier. Tout ce qui est GÉOMÉTRIE lit
+   * `empriseVivante()`.
+   */
   carreCourant() {
     return this._carre
   }

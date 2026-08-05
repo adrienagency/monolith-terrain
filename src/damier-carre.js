@@ -191,9 +191,15 @@ export function ecartTextes(carre, taille, marge) {
  *
  * ⚠️ L'APPELANT DOIT LUI PASSER `BlockGrid.empriseVivante()`, PAS
  * `carreCourant()` : la première dit ce qui est POSÉ (jusqu'à 5×5 en zone
- * isolée), la seconde ce que le TRACÉ a réclamé (plafonné à 3×3). Cuire la mer
- * sur la seconde la ferait trop petite pour la carte qu'elle porte, et le
- * défaut n'apparaîtrait qu'en mode zone isolée — donc tard.
+ * isolée), la seconde ce que le TRACÉ a réclamé (plafonné à 3×3).
+ *
+ * ⚠️ CE QUE ÇA CASSE EXACTEMENT (justification corrigée le 2026-08-05, la règle,
+ * elle, n'a pas bougé). Les deux carrés ne diffèrent QUE sous zone isolée — le
+ * chemin GPX pose exactement le carré qu'il vient de calculer. Or la zone isolée
+ * allume `params.regionMode`, et `ocean.js` saute alors toute la mer ouverte et
+ * sa jupe. Ce n'est donc pas « une mer trop petite » qu'on verrait : c'est le
+ * CHAMP CUIT et les LACS, calibrés sur la largeur et le centre rendus ici, qui
+ * seraient ceux d'un carré plus étroit que la carte posée.
  */
 export function empriseDeMer(carre, taille) {
   const cote = Math.max(1, Math.round(carre?.cote ?? 1))

@@ -484,7 +484,12 @@ test('main.js lit empriseVivante, jamais carreCourant, pour la mer', () => {
   const mer = MAIN.slice(MAIN.indexOf('function carreDeMer'), MAIN.indexOf('function carreDeMer') + 2600)
   assert.ok(mer.length > 200, 'carreDeMer introuvable dans main.js')
   assert.match(mer, /blockGrid\.empriseVivante\(\)/)
-  assert.doesNotMatch(mer, /carreCourant\(\)/, 'carreCourant plafonne à 3x3 : mer trop petite en zone isolée')
+  // ⚠️ LE MOTIF EXACT, corrigé le 2026-08-05 : ce n'est PAS « une mer trop
+  // petite ». Les deux carrés ne diffèrent que sous zone isolée, et la zone
+  // isolée fait sauter toute la mer ouverte (params.regionMode, ocean.js). Ce
+  // que carreCourant() fausserait, c'est le CHAMP CUIT et les LACS, calibrés sur
+  // la largeur et le centre de ce carré-ci.
+  assert.doesNotMatch(mer, /carreCourant\(\)/, 'carreCourant plafonne à 3x3 : champ cuit et lacs calibrés trop étroit en zone isolée')
 })
 
 // ⚠️ LE GRAIN FBM EST REFUSÉ, ET C'EST CHIFFRÉ. 285 ms de fil principal gelé

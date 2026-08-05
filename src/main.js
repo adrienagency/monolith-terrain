@@ -4474,9 +4474,18 @@ syncHazeColor()
  *
  * ⚠️ `empriseVivante()`, JAMAIS `carreCourant()`. La première dit ce qui est
  * POSÉ — jusqu'à 5×5 quand une zone isolée est active ; la seconde dit ce que
- * le TRACÉ a réclamé et se plafonne à 3×3 (block-grid.js). Lire la seconde
- * cuirait une mer trop petite pour la carte qu'elle porte, et le défaut ne se
- * verrait qu'en mode zone isolée — donc tard.
+ * le TRACÉ a réclamé et se plafonne à 3×3 (block-grid.js).
+ *
+ * ⚠️ ET LE SYMPTÔME N'EST PAS « UNE MER TROP PETITE » — corrigé le 2026-08-05,
+ * la règle était juste, sa justification fausse. Les deux carrés ne diffèrent
+ * QUE sous zone isolée (le chemin GPX pose exactement le carré qu'il vient de
+ * calculer, `_poseCarre`), et la zone isolée allume `params.regionMode` — qui
+ * fait sauter à `ocean.js` TOUTE la mer ouverte ET sa jupe : elles sont sous le
+ * seul `if (seaY > -9000 && !params.regionMode)` de `rebuild`. Ce qu'on
+ * casserait en lisant l'autre, c'est le CHAMP CUIT (`_bakeField`, en amont de ce
+ * `if`) et les LACS, qui lisent tous deux `_span`/`uCentre` : leur échelle et
+ * leur centre seraient ceux d'un carré plus petit que la carte posée. Un défaut
+ * plus discret que « la mer s'arrête trop tôt », donc pire à trouver.
  */
 function carreDeMer() {
   return blockGrid.empriseVivante()

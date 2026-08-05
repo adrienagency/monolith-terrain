@@ -1162,6 +1162,12 @@ export class RealWater {
    *   empriseVivante()`, JAMAIS `carreCourant()` : la première dit ce qui est
    *   POSÉ (5×5 possible en zone isolée), la seconde ce que le tracé a réclamé
    *   (plafonné à 3×3). `null` = comportement d'avant, un bloc.
+   *   ⚠️ ET CE N'EST PAS LA MER OUVERTE QUI EN SOUFFRIRAIT (justification
+   *   corrigée le 2026-08-05). Les deux carrés ne diffèrent que sous zone
+   *   isolée, or la zone isolée allume `params.regionMode`, qui saute d'un bloc
+   *   la mer ouverte ET la jupe (le `if` unique, plus bas). Ce qui reste
+   *   concerné, c'est le champ cuit juste en dessous (`_bakeField`) et les lacs
+   *   — tous deux calibrés sur `_span`/`uCentre`, donc sur ce carré-ci.
    * @param fabriqueSol {(()=>(x,z)=>number)|null} FABRIQUE d'échantillonneur de
    *   sol sur tout le damier. Indispensable dès que `carre.cote > 1` : ni
    *   `terrain.sample` ni `terrain.sampleChamp` ne connaissent les cellules
