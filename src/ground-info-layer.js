@@ -7,9 +7,12 @@ import * as THREE from 'three'
 import { TERRAIN_SIZE } from './terrain.js'
 import { gatherGroundInfo } from './ground-info.js'
 import { rectFenetre, statsRect } from './dem-emprise.js'
+import { ecartTextes, centreDuCarre, cleDuCarre } from './damier-carre.js'
 
-const HALF = TERRAIN_SIZE / 2
 const GAP = 6 // clear safety ring: no text ever touches the slab edge
+const FROLE = 0.06 // les plans muraux frôlent le flanc, sans le toucher
+// L'état de départ, et celui où tout revient : un bloc seul, centré sur zéro.
+const CARRE_SEUL = Object.freeze({ i0: 0, j0: 0, cote: 1 })
 
 // the two cartouche typefaces (loaded from Google Fonts in index.html)
 const TITLE_FONT = 'Rosarivo, Georgia, serif'
@@ -126,6 +129,64 @@ export class GroundInfoLayer {
     // carte posée. Voir ground-info.js pour la règle.
     this.lastFenetre = null
     this.enabled = true
+    // Le carré du damier RÉELLEMENT POSÉ. Tant qu'il vaut un bloc seul, toute
+    // la mise en page rend exactement les valeurs d'avant le damier.
+    this.carre = CARRE_SEUL
+    // Le resserrement demandé par le mode zone isolée. Gardé à part de
+    // `group.scale` : c'est `_appliqueEchelle` qui arbitre (voir setFrameScale).
+    this._echelleDemandee = 1
+  }
+
+  // ═══ LE CADRE OÙ SE POSENT LES TEXTES ═════════════════════════════════════
+  //
+  // Tout le cartouche pendait d'un `HALF` unique (le demi-bloc). Il pend
+  // désormais des quatre bords du CARRÉ posé, écartés de la marge voulue :
+  // `FROLE` pour les plans muraux, `GAP` pour l'anneau de sécurité au sol, `0`
+  // pour les bords nus (les retraits horizontaux SUR le flanc). La marge ne
+  // change jamais — c'est elle, « la même distance du bloc le plus proche ».
+  //
+  // Sur un bloc seul, `_cadre(m)` rend ±(TERRAIN_SIZE/2 + m) : le retour au 1×1
+  // remet donc chaque texte à sa valeur d'avant, au chiffre près.
+  _cadre(marge) {
+    return ecartTextes(this.carre, TERRAIN_SIZE, marge)
+  }
+
+  // Le centre du carré — nul sur un côté IMPAIR, décalé d'un demi-bloc sur un
+  // côté PAIR (damier-carre.js). Sans lui, un 2×2 collerait tous les textes du
+  // même côté au lieu de les répartir autour du damier.
+  _centre() {
+    return centreDuCarre(this.carre, TERRAIN_SIZE)
+  }
+
+  /**
+   * LE DAMIER A CHANGÉ DE FORME — les textes s'écartent, ou reviennent.
+   *
+   * ⚠️ L'APPELANT LIT `BlockGrid.empriseVivante()`, JAMAIS `carreCourant()` :
+   * la première dit ce qui est POSÉ (jusqu'à 5×5 en zone isolée), la seconde ce
+   * que le tracé a RÉCLAMÉ (plafonné à 3×3). Lire la seconde écarterait les
+   * textes du mauvais montant, et seulement en mode zone isolée — donc tard.
+   *
+   * ⚠️ GARDÉ SUR UN CHANGEMENT DE FORME RÉEL. `onGridChanged` part à CHAQUE
+   * dalle reçue (jusqu'à 24 sur un damier plein) et re-poser le cartouche
+   * redessine une dizaine de canevas de texte ; la forme du carré, elle, ne
+   * change que trois ou quatre fois sur la même rafale. `cleDuCarre` porte
+   * exactement les deux choses dont la mise en page dépend — le côté et le coin.
+   *
+   * @returns {boolean} vrai si le cartouche a été re-posé
+   */
+  setCarre(carre) {
+    const cote = Math.max(1, Math.round(carre?.cote ?? 1))
+    const c = { i0: Math.round(carre?.i0 ?? 0), j0: Math.round(carre?.j0 ?? 0), cote }
+    if (cleDuCarre(c) === cleDuCarre(this.carre)) return false
+    this.carre = c
+    this._appliqueEchelle() // le damier peut annuler le resserrement de la zone
+    this.rerender()
+    // ⚠️ ET LES PLANS COURSE. `rerender` ne touche qu'à `meshes` ; le logo et le
+    // cartouche d'infos vivent dans `raceMeshes` et sont gravés sur le MÊME
+    // flanc — oubliés ici, ils resteraient sur le mur du bloc central, c'est-à-
+    // dire à l'intérieur du damier.
+    this._applyRace()
+    return true
   }
 
   // flat plane carrying a canvas, sized so 1 world unit ≈ `scale` canvas px,
@@ -160,11 +221,17 @@ export class GroundInfoLayer {
       new THREE.PlaneGeometry(worldW, worldH),
       new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })
     )
+    const mur = this._cadre(FROLE)
     if (side === 'north') {
-      mesh.position.set(-cx, cy, -HALF - 0.06)
+      // ⚠️ LE MIROIR SE PREND SUR LE CENTRE DU CARRÉ, PAS SUR L'ORIGINE. La face
+      // nord est retournée (rotation.y = π), donc un texte calé à gauche du
+      // flanc sud se cale à droite du flanc nord — ce qui n'est vrai que si on
+      // le renvoie autour du milieu du MUR. Sur un bloc seul le centre vaut
+      // zéro et l'expression retombe sur `-cx`, au bit près.
+      mesh.position.set(2 * this._centre().x - cx, cy, mur.nord)
       mesh.rotation.y = Math.PI
     } else {
-      mesh.position.set(cx, cy, HALF + 0.06) // just outside the south wall
+      mesh.position.set(cx, cy, mur.sud) // just outside the south wall
     }
     mesh.renderOrder = 6
     this.group.add(mesh)
@@ -201,8 +268,11 @@ export class GroundInfoLayer {
       const tc = textCanvas(lines, { family: BODY_FONT, weight: 600, px: 44, align: 'right', color: inkRGBA(ink, 0.9), track: 0.08 })
       const h = wallH * 0.3
       const w = (tc.w / tc.h) * h
+      // calé sur le bord EST du damier, pas sur celui du bloc central : sinon
+      // le cartouche d'infos finit au milieu d'un flanc de 168 unités
+      const bord = this._cadre(0)
       for (const side of ['south', 'north']) {
-        this._addWallPlane(tc.canvas, HALF - 6 - w / 2, baseY + h / 2 + 1.1, w, h, { side, list: this.raceMeshes })
+        this._addWallPlane(tc.canvas, bord.est - 6 - w / 2, baseY + h / 2 + 1.1, w, h, { side, list: this.raceMeshes })
       }
     }
     // logo — centré sur le flanc, ratio préservé, ~55 % de la hauteur du mur
@@ -217,7 +287,8 @@ export class GroundInfoLayer {
         const h = wallH * 0.55
         const w = (img.naturalWidth / Math.max(1, img.naturalHeight)) * h
         for (const side of ['south', 'north']) {
-          this._addWallPlane(c, 0, baseY + wallH * 0.5, w, h, { side, list: this.raceMeshes })
+          // « centré sur le flanc » = centré sur le CARRÉ, pas sur zéro
+          this._addWallPlane(c, this._centre().x, baseY + wallH * 0.5, w, h, { side, list: this.raceMeshes })
         }
       }
       img.src = r.logo
@@ -229,7 +300,7 @@ export class GroundInfoLayer {
       const h = wallH * 0.28
       const w = (tc.w / tc.h) * h
       for (const side of ['south', 'north']) {
-        this._addWallPlane(tc.canvas, 0, baseY + wallH * 0.5, w, h, { side, list: this.raceMeshes })
+        this._addWallPlane(tc.canvas, this._centre().x, baseY + wallH * 0.5, w, h, { side, list: this.raceMeshes })
       }
     }
   }
@@ -242,7 +313,10 @@ export class GroundInfoLayer {
     // so the label never sinks into the surface and stays legible
     const ink = this.getWallInk?.() || this.getInk?.() || '#222'
     const baseY = this.getBaseY?.() ?? -8
-    const xLeft = -HALF + 6.5 // clear of the rounded corner, small left margin
+    // calé sur le bord OUEST du damier (le coin visible), pas sur celui du bloc
+    // central : c'est une plaque de musée, elle vit dans le coin bas-gauche du
+    // flanc que l'on voit
+    const xLeft = this._cadre(0).ouest + 6.5 // clear of the rounded corner, small left margin
     // NAME (+ country) — the identity line(s)
     const nameLines = [String(info.name || '').toUpperCase()]
     if (info.country && info.country.toUpperCase() !== nameLines[0]) nameLines.push(info.country.toUpperCase())
@@ -274,20 +348,20 @@ export class GroundInfoLayer {
   }
 
   // Place a block flush to the slab on `side`, its inner edge at the safety
-  // margin (HALF + GAP) so nothing ever touches the slab. `near` is the block's
+  // margin (`_cadre(GAP)`) so nothing ever touches the slab. `near` is the block's
   // leading edge along the run of that side. Returns the trailing edge so blocks
   // stack. Text alignment matches the side: left→right-flush, right→left-flush,
   // top/bottom→centered — computed in the caller's textCanvas align.
   _place(canvas, side, near, worldW) {
     const worldH = (worldW * canvas.height) / canvas.width
-    const m = HALF + GAP
+    const sol = this._cadre(GAP)
     let x = 0
     let z = 0
     if (side === 'left') {
-      x = -m - worldW / 2
+      x = sol.ouest - worldW / 2
       z = near + worldH / 2
     } else if (side === 'right') {
-      x = m + worldW / 2
+      x = sol.est + worldW / 2
       z = near + worldH / 2
     } else if (side === 'bottom') {
       z = near + worldH / 2
@@ -318,7 +392,9 @@ export class GroundInfoLayer {
     const ink = this.getInk?.() || '#222'
     const title = inkRGBA(ink, 0.8) // titles at 80% opacity
     const body = inkRGBA(ink, 0.6) // body text at 60%
-    const m = HALF + GAP
+    // les quatre bords du damier, anneau de sécurité compris : c'est là que la
+    // mise au sol commence, au sud comme au nord, à l'est comme à l'ouest
+    const sol = this._cadre(GAP)
 
     // TITLE + coords — below the slab (south), centered
     const titleLines = [String(info.name || '').toUpperCase()]
@@ -328,7 +404,7 @@ export class GroundInfoLayer {
       // rather than a synthesized faux-bold; the px54 size carries the title
       textCanvas(titleLines, { family: TITLE_FONT, weight: 400, px: 54, align: 'center', color: title, track: 0.03 }).canvas,
       'bottom',
-      m,
+      sol.sud,
       50
     )
     this._place(
@@ -351,18 +427,20 @@ export class GroundInfoLayer {
       this._place(
         textCanvas(statLines, { family: BODY_FONT, weight: 500, px: 22, align: 'right', color: body, track: 0.06 }).canvas,
         'left',
-        -m - 4,
+        sol.nord - 4,
         38
       )
     }
 
     // DESCRIPTION — lower-left, right-flush
+    // le 6 est un décalage depuis le MILIEU du cadre (il valait z = 6 sur un
+    // bloc seul, dont le centre est zéro) : il suit donc le centre du carré
     let descEnd = null
-    if (info.description) descEnd = this._placeWrapped(info.description, 'left', 6, body, { weight: 400, px: 21 })
+    if (info.description) descEnd = this._placeWrapped(info.description, 'left', this._centre().z + 6, body, { weight: 400, px: 21 })
 
     // ANECDOTE — right side, left-flush, marked with a ◆
     let anecEnd = null
-    if (info.anecdote) anecEnd = this._placeWrapped(`◆ ${info.anecdote}`, 'right', -m - 4, body, { weight: 400, px: 20 })
+    if (info.anecdote) anecEnd = this._placeWrapped(`◆ ${info.anecdote}`, 'right', sol.nord - 4, body, { weight: 400, px: 20 })
 
     // WIKIPEDIA CREDIT — the description + anecdote are scraped from the nearest
     // Wikipedia article, so we say so plainly right under the blurb (Adrien :
@@ -388,7 +466,7 @@ export class GroundInfoLayer {
 
     // COMPASS ROSE — north-east corner
     const rose = compassCanvas(inkRGBA(ink, 0.72))
-    this._addPlaneAt(rose, m + 12, -m - 12, 24, 24)
+    this._addPlaneAt(rose, sol.est + 12, sol.nord - 12, 24, 24)
 
     // BLOCK LABEL — name + coordinates engraved on the vertical south face
     this._sideLabel(info)
@@ -466,15 +544,49 @@ export class GroundInfoLayer {
   // une fraction du bloc et les textes restaient plaqués aux bords de ce bloc
   // devenu invisible : l'île avait l'air abandonnée au milieu de rien.
   //
-  // Toute la mise en page pend d'un HALF unique (le demi-bloc), donc il suffit
-  // de mettre le GROUPE à l'échelle : les textes se rapprochent ET rapetissent
-  // du même geste, exactement dans les proportions du cadre plus serré. Y reste
+  // Toute la mise en page pend d'un cadre unique (`_cadre`), donc il suffit de
+  // mettre le GROUPE à l'échelle : les textes se rapprochent ET rapetissent du
+  // même geste, exactement dans les proportions du cadre plus serré. Y reste
   // à 1 — les plans sont couchés dans le plan XZ, une échelle sur X et Z les
   // met à l'échelle dans leur propre plan sans les décoller du sol.
   //
+  // ⚠️ CE N'EST PAS LE MÉCANISME DU DAMIER, et les confondre serait tentant :
+  // celui-ci RAPETISSE les textes en les rapprochant (c'est voulu : l'île est
+  // plus petite), là où `setCarre` les écarte SANS toucher à leur taille — un
+  // damier ne grossit pas la carte, il en pose plusieurs. D'où deux mécanismes,
+  // et la règle d'arbitrage de `_appliqueEchelle` ci-dessous.
+  //
   // `1` remet tout en place : décocher l'isolation n'a rien d'autre à défaire.
   setFrameScale(k) {
-    const s = Number.isFinite(k) && k > 0 ? Math.min(1, Math.max(0.15, k)) : 1
+    this._echelleDemandee = Number.isFinite(k) && k > 0 ? Math.min(1, Math.max(0.15, k)) : 1
+    this._appliqueEchelle()
+  }
+
+  // ═══ QUI GAGNE, DU DAMIER OU DE LA ZONE ISOLÉE : LE DAMIER ════════════════
+  //
+  // Les deux peuvent être actifs en même temps — une zone isolée POSE des
+  // dalles voisines (main.js:syncRegionGrid), jusqu'à 5×5. Et les deux tirent
+  // la mise en page dans des sens opposés : `setCarre` écarte les textes pour
+  // dégager les blocs, `setFrameScale` les resserre pour épouser une île plus
+  // petite que son bloc.
+  //
+  // Le damier gagne, parce que ce qu'il dit est PHYSIQUE : ses dalles sont
+  // posées, elles occupent le sol. Un resserrement par-dessus ramènerait les
+  // textes SOUS une dalle réelle — le défaut exact que cette tâche corrige, et
+  // ce dernier resterait invisible tant qu'on ne regarde pas une zone isolée
+  // qui déborde de son bloc, c'est-à-dire le cas normal depuis le recadrage sur
+  // cinq dalles (main.js:6579).
+  //
+  // Le resserrement n'est pas perdu pour autant : il est GARDÉ, et reprend dès
+  // que le damier se referme. Sur un bloc seul (cote === 1) le comportement est
+  // identique à celui d'avant, au bit près.
+  //
+  // Ce qu'on abandonne en le disant : une île PLUS PETITE qu'un bloc pendant
+  // qu'un tracé GPX, lui, ouvre le damier. Là, les textes s'écarteront jusqu'aux
+  // dalles du tracé au lieu d'épouser l'île. C'est le bon compromis — ils
+  // resteront LISIBLES, hors des blocs ; l'arbitrage inverse les enterrerait.
+  _appliqueEchelle() {
+    const s = this.carre.cote > 1 ? 1 : this._echelleDemandee
     this.group.scale.set(s, 1, s)
   }
 }

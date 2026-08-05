@@ -145,6 +145,43 @@ export function centreDuCarre({ i0, j0, cote } = {}, taille) {
 }
 
 /**
+ * Où poser les textes du cartouche pour qu'ils restent à la MÊME distance du
+ * bloc le plus proche, quelle que soit la taille de la grille.
+ *
+ * « Lorsqu'on a plusieurs cases, les blocs se construisent SUR les textes. Il
+ * faut que les textes s'éloignent tout en restant à la même distance du bloc le
+ * plus proche qu'ils le sont actuellement. » (Adrien)
+ *
+ * `ground-info-layer.js` pose tout son cartouche à partir d'un demi-bloc unique
+ * (`HALF`) : le flanc sud à `HALF + 0,06`, l'anneau de sécurité au sol à
+ * `HALF + 6`. Avec un damier ce n'est plus le demi-BLOC qu'il faut, mais le
+ * demi-côté du CARRÉ — et il faut y ajouter le CENTRE du carré, qui n'est nul
+ * que pour un côté impair (voir `centreDuCarre`). Oublier le centre collerait
+ * tous les textes d'un seul côté en 2×2.
+ *
+ * La marge, elle, ne bouge JAMAIS : c'est elle, la « même distance ».
+ *
+ * ⚠️ L'APPELANT DOIT LIRE `BlockGrid.empriseVivante()`, PAS `carreCourant()` —
+ * même règle qu'`empriseDeMer` ci-dessous, et pour la même raison.
+ *
+ * @param {{i0:number, j0:number, cote:number}} carre - le carré POSÉ
+ * @param {number} taille - largeur d'un bloc (TERRAIN_SIZE)
+ * @param {number} marge - la distance au bloc le plus proche, inchangée
+ * @returns {{sud:number, nord:number, est:number, ouest:number}} en unités monde
+ */
+export function ecartTextes(carre, taille, marge) {
+  const cote = Math.max(1, Math.round(carre?.cote ?? 1))
+  const demi = (taille * cote) / 2
+  const c = centreDuCarre(carre || { i0: 0, j0: 0, cote: 1 }, taille)
+  return {
+    sud: c.z + demi + marge,
+    nord: c.z - demi - marge,
+    est: c.x + demi + marge,
+    ouest: c.x - demi - marge,
+  }
+}
+
+/**
  * L'emprise que la mer doit couvrir pour porter tout le damier d'un seul
  * tenant : largeur au sol, résolution de champ, et centre.
  *

@@ -4522,6 +4522,26 @@ function merRecuitDiffere(carre) {
   realWater?.recuireChampDiffere?.(carre.cote)
 }
 
+// ═══════ LE CARTOUCHE GRAVÉ S'ÉCARTE AVEC LE DAMIER ═════════════════════════
+//
+// « Lorsqu'on a plusieurs cases, les blocs se construisent SUR les textes. Il
+// faut que les textes s'éloignent tout en restant à la même distance du bloc le
+// plus proche qu'ils le sont actuellement — vers le sud, l'est et l'ouest en
+// fonction de la grille produite. Et se rapprocher si j'ai moins de blocs
+// affichés. » (Adrien)
+//
+// ⚠️ MÊME LECTURE QUE LA MER : `empriseVivante()`, jamais `carreCourant()` — la
+// raison est écrite en toutes lettres sur `carreDeMer` ci-dessus.
+//
+// ⚠️ QUATRIÈME MOTIF DE RECONSTRUCTION DE LA BOUCLE `onGridChanged`, mais le
+// moins cher des quatre : le garde vit dans `GroundInfoLayer.setCarre` et ne
+// laisse passer qu'un changement de FORME du carré (côté ou coin), soit trois
+// ou quatre fois sur une rafale de 24 arrivées — comptés par
+// test/damier-cadre.test.js, qui rougit si ce nombre remonte.
+function cartoucheSuitLeDamier() {
+  groundInfo.setCarre(blockGrid.empriseVivante())
+}
+
 const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: () => dem, getGrid: () => blockGrid })
 
 // ---- Race Studio : état de la course + cartouches espace-écran ------------
@@ -5134,6 +5154,7 @@ blockGrid.onGridChanged = () => {
   // changé — mais leurs pires cas se CUMULENT sur une même arrivée de dalle, et
   // c'est ce cumul, pas un garde manquant, que la Tâche 12 doit mesurer.
   merSuitLeDamier()
+  cartoucheSuitLeDamier()
 }
 // le damier se resynchronise à CHAQUE re-drapage global (zone, zoom, ajout de
 // calque) — idempotent, borné 5×5, cellules en cache LRU
