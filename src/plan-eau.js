@@ -274,6 +274,39 @@ export function longueurMinM(blocM) {
   return blocM > 0 ? Math.min(LONGUEUR_MIN_M, LONGUEUR_PART_BLOC * blocM) : LONGUEUR_MIN_M
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// LE DAMIER : CE QUI BORNE CE MODULE, ET POURQUOI IL S'ARRÊTE AU BLOC CENTRAL
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Tâche 8 du chantier damier multi-blocs (2026-08-05). Question posée : « qu'
+// est-ce qui borne l'emprise des plans d'eau ? ». Réponse, pour CE module et
+// pour `lake.js` : **rien d'autre que le MNT qu'on leur tend**. Ni constante
+// d'étendue, ni contour, ni requête réseau — `detectLakes` parcourt `dem.data`
+// sur `dem.size²` cellules, et tout ici se mesure en cellules × `cellM`. Le
+// coût est du CPU (mesuré en tête de lake.js : 316 ms de remplissage sur une
+// emprise 3×3 recollée), pas du réseau : ces deux fichiers-là ne coûteraient
+// rien à étendre.
+//
+// L'ÉCART EST DONC AILLEURS, EN DEUX ENDROITS, ET AUCUN N'EST ICI :
+//
+//   · le SEUL consommateur est `ocean.js` (`_batirLacs`), qui reçoit les lacs du
+//     MNT du bloc central et les taille sur `_spanDem` — la grille du MNT, qui
+//     ne grandit PAS avec le carré du damier (c'est écrit là-bas, et c'est ce
+//     qui empêche un lac d'être étiré au format du damier) ;
+//   · le calque VECTORIEL des rivières et des lacs OSM est dans
+//     `src/map/water-layer.js`, il est borné par une emprise Overpass, et son
+//     refus d'extension y est mesuré et argumenté au long.
+//
+// ⚠️ ET LA DÉTECTION PAR DALLE N'EST PAS LE RACCOURCI QU'ELLE PARAÎT. Chaque
+// dalle du damier a son PROPRE MNT : faire tourner `detectLakes` dessus rendrait
+// des composantes coupées au bord de la dalle, et le plancher de longueur
+// ci-dessus — `min(3 km, 80 % du bloc)` — les jugerait dalle par dalle. Un lac à
+// cheval sur une jointure qui n'entame qu'un coin de la voisine y tomberait sous
+// le plancher et disparaîtrait de CE côté-là seulement : une nappe animée d'un
+// côté de la jointure et rien de l'autre, ce qui est pire que la coupure
+// franche d'aujourd'hui. Le périmètre, lui, ignore déjà les bords de grille
+// (voir `mesurePlanEau`), mais la LONGUEUR non — et c'est elle qui décide.
+
 /**
  * Mesure géométrique d'une composante de `detectLakes`, en mètres au sol.
  *

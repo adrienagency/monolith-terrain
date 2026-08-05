@@ -309,6 +309,101 @@ export class WaterLayer {
     }
     return out
   }
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 🔴 LE DAMIER : CE CALQUE S'ARRÊTE AU BLOC CENTRAL, ET C'EST UN REFUS MOTIVÉ
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // Tâche 8 du chantier damier multi-blocs (2026-08-05). Le constat est réel :
+  // sur un damier, rivières et lacs vectoriels n'existent QUE sur le bloc
+  // central, donc une rivière s'arrête net à une jointure. La mer, l'heure, le
+  // clip de surface, les arrondis et les huit réglages de matière ont tous été
+  // étendus au carré ; celui-ci ne l'est PAS. La raison est écrite ici plutôt
+  // qu'ailleurs parce que c'est ici qu'on vient la chercher.
+  //
+  // CE QUI BORNE L'EMPRISE : `patchBounds(dem)`, la boîte lat/lon du MNT servi
+  // juste en dessous — le bloc central, ou le champ recollé du mode continu (là
+  // `extentMeters` est déjà multiplié par `empriseCote`, dem-emprise.js, d'où
+  // une emprise déjà 3×3 dans CE mode, qui n'est pas le damier). Une emprise,
+  // donc UNE paire de requêtes Overpass : lignes + aires.
+  //
+  // ── ROUTE A — une emprise par case. MESURÉE, REFUSÉE ────────────────────────
+  //
+  // Mesure par exécution du module `overpass.js` de production (écart minimal
+  // 1 200 ms, budget d'attente 6 000 ms), point d'accès simulé, latence 927 ms
+  // — la mesure de référence du module. Rejouée par test/damier-eau-reseau.test.js :
+  //
+  //   cases | requêtes | pic simultané | servies (2 créneaux/IP) | disjoncteur
+  //   ------|----------|---------------|-------------------------|------------
+  //     1   |     2    |       2       |          2 / 2          |   fermé
+  //     9   |    18    |    **18**     |       **2 / 18**        | **fermé**
+  //    25   |    50    |      50       |          2 / 50         |   fermé
+  //
+  // 🔴 L'ÉCART MINIMAL NE SÉRIALISE RIEN. On le lit comme une file d'attente ;
+  // ce n'en est pas une. Chaque appel calcule `_lastAt + minInterval - now`
+  // AVANT que le précédent n'ait écrit `_lastAt` (overpass.js, dans l'IIFE) :
+  // dix-huit appels lancés dans le même tour de boucle attendent donc le MÊME
+  // délai, puis partent ENSEMBLE. Mesuré : les 18 départs tiennent dans la même
+  // milliseconde. Ce n'est pas 9 fois plus de requêtes étalées, c'est une rafale
+  // de 18 requêtes simultanées vers overpass-api.de depuis le navigateur du
+  // visiteur — et l'application appelle le point d'accès PUBLIC directement
+  // depuis chaque navigateur, donc chaque visiteur, sous son IP.
+  //
+  // 🔴 ET LE DISJONCTEUR NE VOIT RIEN PASSER. Le point d'accès public limite par
+  // adresse IP (deux créneaux) : modélisé, 16 des 18 repartent en 429. Or un 429
+  // est une `ErreurRequeteOverpass`, qui n'ouvre PAS le repos de 60 s — à raison,
+  // c'est écrit là-bas : couper l'eau partout sur un 429 ponctuel fabriquerait la
+  // panne qu'on cherche à éviter. Conséquence : la rafale ne déclenche aucun
+  // garde-fou, huit cases sur neuf n'ont d'eau QUAND MÊME PAS, et il ne reste
+  // que le coût — 9× le trafic vers un service qui bannit par IP, pendant une
+  // campagne de communication. Une extension qui glisse SOUS le seul garde-fou
+  // du module n'est pas un effet de bord, c'est le défaut lui-même.
+  //
+  // ── ROUTE B — une seule requête sur le carré entier (comme la mer). REFUSÉE ─
+  //
+  // C'est ce que la mer a fait (empriseDeMer, damier-carre.js), et pour la mer
+  // c'était juste : son champ est CUIT LOCALEMENT, il ne coûte pas de réseau.
+  // Ici la charge grandit avec la surface. Extrapolé des trois points mesurés en
+  // tête de ce fichier (Chamonix, le cas CREUX) : 24 km → 10 752 ways / 15 Mo,
+  // 46 km → 48 707 / 62 Mo, 91 km → 234 594 / 286 Mo, soit une densité qui monte
+  // avec l'emprise (18,7 → 23,0 → 28,3 ways/km²). Un 3×3 à z12 fait 72 km de
+  // côté : ~137 000 ways / **~170 Mo**, contre un plafond `OVERPASS_MAXSIZE` de
+  // 48 Mo. La requête serait REFUSÉE par le serveur, retomberait sur `null`,
+  // donc sur Natural Earth — le bloc central PERDRAIT son eau fine pour que les
+  // voisines n'en gagnent aucune. Et Chamonix est le cas creux : le même z12 sur
+  // Paris pesait déjà 238 Mo à UN bloc.
+  //
+  // ── ROUTE C — n'étendre que les sources LOCALES. Sans objet ────────────────
+  //
+  // Les tuiles (Overture + lacs mondiaux) sont auto-hébergées : les servir aux
+  // voisines ne coûterait pas un octet à Overpass. Mais elles ne portent pas la
+  // donnée du défaut : au-delà de `OSM_MIN_ZOOM` les LIGNES de rivière viennent
+  // d'Overpass et de lui seul ; les tuiles mondiales ne portent QUE des lacs
+  // (LAKE_LOD_LEVELS), et les tuiles riches s'arrêtent à la boîte alpine
+  // (WATER_REGION, 5-8° E / 44,5-47° N). Hors de cette boîte, une rivière
+  // s'arrêterait exactement où elle s'arrête aujourd'hui. Dedans, on collerait
+  // une rivière Natural Earth 1:10m au bout d'une rivière Overpass — la source
+  // dont la grossièreté a déjà fait RETIRER le liseré de côte de ce fichier
+  // (« ses cordes droites coupaient visiblement les caps ») : le trait ne
+  // s'arrêterait plus, il ferait un saut latéral à la jointure. On échangerait
+  // une coupure franche contre un faux raccord.
+  //
+  // ── CE QUI RESTE VRAI, ET CE QU'IL FAUDRAIT POUR ROUVRIR ───────────────────
+  //
+  // L'écart n'est pas nié : sur un damier, la rivière s'arrête à la jointure.
+  // La condition de réouverture est UNE et elle est nommable : que l'eau fine ne
+  // vienne plus du point d'accès Overpass public appelé par le navigateur de
+  // chaque visiteur — soit des tuiles vectorielles auto-hébergées couvrant les
+  // zones servies (le chemin déjà pris pour les lacs mondiaux et la boîte
+  // alpine), soit une instance Overpass à nous. Les deux déplacent la limite du
+  // « combien de requêtes » vers le « combien d'octets on héberge », qui est un
+  // coût qu'on maîtrise. Tant que la source est publique et appelée par IP de
+  // visiteur, multiplier les emprises est un risque de bannissement qui couperait
+  // le calque pour TOUT LE MONDE, pas une dépense de performance.
+  //
+  // ⚠️ NE PAS « CORRIGER » ÇA EN AJOUTANT UN WaterLayer PAR DALLE sur le patron
+  // de `peintCelluleSol` / `peintCelluleNuit` (main.js). Ces deux-là copient des
+  // MOSAÏQUES DE TUILES auto-hébergées : leur patron est juste PARCE QUE leur
+  // source est locale. Le calque d'eau ne partage pas cette propriété.
   async rebuild({ dem, terrain, params }) {
     const id = ++this._buildId
     this._clear()
