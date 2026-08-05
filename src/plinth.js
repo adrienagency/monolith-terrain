@@ -8,6 +8,7 @@ import { TERRAIN_SIZE } from './terrain.js'
 import { PBR_BY_ID, GLASS_BY_ID } from './material-presets.js'
 import { TEXTURE_BUILDERS, microRoughnessTextures, rugositeRecentree } from './material-textures.js'
 import { exposantCoin, arcCoin } from './fenetre-clip.js' // module sans dépendance : pas de cycle
+import { masqueDepuisContour } from './damier-bords.js' // idem : pur, aucune importation
 
 const HALF = TERRAIN_SIZE / 2
 const UVSCALE = 6 // world units per texture tile on the socle walls
@@ -209,7 +210,26 @@ export function computeSlab(sample, depth, samples = 256, cornerRadius = 0, corn
 // Le damier s'en sert pour que ses voisines portent la même que le bloc central ;
 // sans elle, chacune mesurerait la sienne sur son propre relief.
 // `arrondi` : rayon du congé bas (0 = arête vive, la géométrie d'avant).
-export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 0, cornerExp = 2, baseYFloor = null, chanfrein = SOCLE_CHANFREIN, aoForce = SOCLE_AO_FORCE, aoBande = null, arrondi = SOCLE_ARRONDI, arrondiSeg = SOCLE_ARRONDI_SEG } = {}) {
+//
+// `masqueArrondi` : un réel par sommet du contour (1 = arrondi, 0 = arête vive),
+// pour que les jointures du damier soient PLATES. Deux congés qui se font face
+// à une jointure creusent une rainure — c'est le défaut que ce paramètre
+// supprime. null = arrondi uniforme, la géométrie d'avant, exacte.
+//
+// `bords` : le raccourci de l'appelant qui ne veut pas retracer le contour lui-
+// même — `{ nord, est, sud, ouest }` (cf. damier-bords.js), converti ICI en
+// masque à partir du contour que computeSlab vient de rendre.
+//
+// ⚠️ POURQUOI CE SECOND CHEMIN EXISTE. Calculer le masque chez l'appelant
+// l'oblige à retracer le contour, donc à rappeler computeSlab — et computeSlab
+// ÉCHANTILLONNE LE RELIEF (4·n points de bord + un balayage intérieur), c'est
+// l'essentiel des ~9,4 ms d'une reconstruction de mur. Le damier en fait
+// jusqu'à 36 par chargement (block-grid.js, egaliseHauteurs) : le doublement
+// serait payé pour retrouver un contour qu'on a déjà sous la main. Et deux
+// tracés, c'est deux occasions de diverger — un masque décalé d'un sommet ne se
+// voit pas en test unitaire, il se voit à l'écran. `masqueArrondi` gagne quand
+// les deux sont donnés.
+export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 0, cornerExp = 2, baseYFloor = null, chanfrein = SOCLE_CHANFREIN, aoForce = SOCLE_AO_FORCE, aoBande = null, arrondi = SOCLE_ARRONDI, arrondiSeg = SOCLE_ARRONDI_SEG, masqueArrondi = null, bords = null } = {}) {
   const slab = computeSlab(sample, depth, resolution, cornerR, cornerExp)
   const ring = slab.ring
   const baseY = baseYFloor != null ? Math.min(baseYFloor, slab.baseY) : slab.baseY
@@ -226,6 +246,16 @@ export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 
   // le congé bas ne mange jamais plus du quart du mur, comme le chanfrein
   const rd = Math.max(0, Math.min(arrondi, (topMax - baseY) * 0.25))
   const segArc = rd > 0 ? Math.max(1, Math.round(arrondiSeg)) : 0
+
+  // ⚠️ LE CHANFREIN ET LE CONGÉ SONT DÉSORMAIS PAR SOMMET. Ils étaient deux
+  // scalaires ; sur un damier, les côtés qui touchent une autre case doivent
+  // rester vifs. Les fonctions ci-dessous rendent la valeur d'AVANT quand aucun
+  // masque n'est fourni — le bloc isolé est bit à bit inchangé (verrouillé par
+  // empreinte dans test/damier-bords.test.js).
+  const masque = masqueArrondi || (bords ? masqueDepuisContour(ring, HALF, bords) : null)
+  const kMasque = (k) => masque[k] ?? 1
+  const chDe = masque ? (k) => ch * kMasque(k) : () => ch
+  const rdDe = masque ? (k) => rd * kMasque(k) : () => rd
 
   const positions = []
   const normals = []
@@ -329,7 +359,9 @@ export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 
   // mur de 5 sur 5. C'est exactement le « en mode isolé les socles semblent tous
   // différents » d'Adrien — deux murs voisins, deux dégradés de pied. Le rang
   // `yAo` fixe la bande à une hauteur MONDE, la même pour tout le monde.
-  const yFil = baseY + rd // là où le mur s'arrête et où le congé commence
+  // là où le mur s'arrête et où le congé commence. PAR SOMMET depuis le masque :
+  // un sommet d'arête intérieure n'a pas de congé, son mur descend jusqu'au fond.
+  const yFilDe = (k) => baseY + rdDe(k)
   let acc = 0
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n
@@ -342,59 +374,81 @@ export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 
     // les altitudes du profil, forcées décroissantes : sur un bord très bas, le
     // pied du chanfrein peut passer sous le départ du congé
     const niveaux = (k) => {
+      const chK = chDe(k)
+      const yFil = yFilDe(k)
       const yT = ring[k].y
-      const yC = Math.max(ch > 0 ? yT - ch : yT, yFil)
+      const yC = Math.max(chK > 0 ? yT - chK : yT, yFil)
       const yA = Math.min(Math.max(baseY + bande, yFil), yC)
-      return { yT, yC, yA }
+      return { yT, yC, yA, yFil, ch: chK }
     }
     const a = niveaux(i)
     const b = niveaux(j)
     const uv = (y) => (y - baseY) / UVSCALE
-    // une bande du mur : quatre sommets, deux triangles, normales de face
-    const bande2 = (yA0, dHaut, yB0, dBas, yA1, yB1) => {
-      const p0 = point(i, dHaut, yA0)
-      const q0 = point(j, dHaut, yB0)
-      const p1 = point(i, dBas, yA1)
-      const q1 = point(j, dBas, yB1)
-      pousse(p0, p1, q0, [u0, uv(yA0)], [u0, uv(yA1)], [u1, uv(yB0)])
-      pousse(q0, p1, q1, [u1, uv(yB0)], [u0, uv(yA1)], [u1, uv(yB1)])
+    // Une bande du mur : quatre sommets, deux triangles, normales de face.
+    //
+    // ⚠️ LA RENTRÉE EST PRISE SÉPARÉMENT AUX DEUX EXTRÉMITÉS. Quand le sommet i
+    // a un congé et le sommet j non, la bande devient un triangle dégénéré d'un
+    // côté — C'EST LE RACCORD VOULU, pas un défaut : c'est ainsi que le socle
+    // passe d'une arête arrondie à une arête vive sans ouvrir de jour.
+    const bande2 = (yHi, dHi, yHj, dHj, yBi, dBi, yBj, dBj) => {
+      const p0 = point(i, dHi, yHi)
+      const q0 = point(j, dHj, yHj)
+      const p1 = point(i, dBi, yBi)
+      const q1 = point(j, dBj, yBj)
+      pousse(p0, p1, q0, [u0, uv(yHi)], [u0, uv(yBi)], [u1, uv(yHj)])
+      pousse(q0, p1, q1, [u1, uv(yHj)], [u0, uv(yBi)], [u1, uv(yBj)])
     }
     // 1. le liseré d'arête haute — le sommet du mur ne bouge PAS, il doit rester
     //    exactement sur le bord du relief (sinon on voit le jour sous la carte)
-    if (ch > 0) bande2(a.yT, 0, b.yT, ch, a.yC, b.yC)
+    if (ch > 0) bande2(a.yT, 0, b.yT, 0, a.yC, a.ch, b.yC, b.ch)
     // 2. le mur, coupé au sommet de la bande d'occlusion
-    bande2(a.yC, ch, b.yC, ch, a.yA, b.yA)
+    bande2(a.yC, a.ch, b.yC, b.ch, a.yA, a.ch, b.yA, b.ch)
     // 3. le bas du mur, jusqu'au départ du congé
-    bande2(a.yA, ch, b.yA, ch, yFil, yFil)
+    bande2(a.yA, a.ch, b.yA, b.ch, a.yFil, a.ch, b.yFil, b.ch)
     // 4. LE CONGÉ. Normales analytiques lisses : avec des normales de face, trois
     //    segments se liraient comme trois facettes — l'inverse d'un arrondi.
     for (let k = 0; k < segArc; k++) {
       const t0 = (Math.PI / 2) * (k / segArc)
       const t1 = (Math.PI / 2) * ((k + 1) / segArc)
-      const d0 = ch + rd - rd * Math.cos(t0)
-      const d1 = ch + rd - rd * Math.cos(t1)
-      const y0 = baseY + rd - rd * Math.sin(t0)
-      const y1 = baseY + rd - rd * Math.sin(t1)
+      // rayon nul au sommet → les quatre points s'effondrent sur le pied du mur :
+      // la colonne d'arc disparaît toute seule, sans cas particulier à écrire
+      const rdI = rdDe(i)
+      const rdJ = rdDe(j)
+      const d0i = a.ch + rdI - rdI * Math.cos(t0)
+      const d1i = a.ch + rdI - rdI * Math.cos(t1)
+      const d0j = b.ch + rdJ - rdJ * Math.cos(t0)
+      const d1j = b.ch + rdJ - rdJ * Math.cos(t1)
+      const y0i = baseY + rdI - rdI * Math.sin(t0)
+      const y1i = baseY + rdI - rdI * Math.sin(t1)
+      const y0j = baseY + rdJ - rdJ * Math.sin(t0)
+      const y1j = baseY + rdJ - rdJ * Math.sin(t1)
       const nA0 = normaleArc(i, t0)
       const nB0 = normaleArc(j, t0)
       const nA1 = normaleArc(i, t1)
       const nB1 = normaleArc(j, t1)
-      const p0 = point(i, d0, y0)
-      const q0 = point(j, d0, y0)
-      const p1 = point(i, d1, y1)
-      const q1 = point(j, d1, y1)
-      pousse(p0, p1, q0, [u0, uv(y0)], [u0, uv(y1)], [u1, uv(y0)], nA0, nA1, nB0)
-      pousse(q0, p1, q1, [u1, uv(y0)], [u0, uv(y1)], [u1, uv(y1)], nB0, nA1, nB1)
+      const p0 = point(i, d0i, y0i)
+      const q0 = point(j, d0j, y0j)
+      const p1 = point(i, d1i, y1i)
+      const q1 = point(j, d1j, y1j)
+      pousse(p0, p1, q0, [u0, uv(y0i)], [u0, uv(y1i)], [u1, uv(y0j)], nA0, nA1, nB0)
+      pousse(q0, p1, q1, [u1, uv(y0j)], [u0, uv(y1i)], [u1, uv(y1j)], nB0, nA1, nB1)
     }
   }
-  // le fond, rentré du chanfrein ET du congé
+  // Le fond, rentré du chanfrein ET du congé.
+  //
+  // ⚠️ PAR SOMMET, ET C'EST LE PIÈGE DE CETTE FONCTION. La rentrée était une
+  // valeur UNIQUE (`ch + rd`) parce que les quatre côtés portaient le même
+  // congé. Avec un masque elle ne l'est plus : un fond rentré partout de la même
+  // distance ne rejoindrait plus le pied des murs restés vifs, et le socle
+  // s'ouvrirait par en dessous — exactement la classe de défaut (« on voit sous
+  // la carte ») que le reste de ce fichier passe son temps à éviter.
   const cen = new THREE.Vector3(0, baseY, 0)
   const capUv = (x, z) => [x / UVSCALE, z / UVSCALE]
-  const dFond = ch + rd
+  const dFond = (k) => chDe(k) + rdDe(k)
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n
-    const pv = point(i, dFond, baseY)
-    const qv = point(j, dFond, baseY)
+    const pv = point(i, dFond(i), baseY)
+    const qv = point(j, dFond(j), baseY)
     pousse(cen, qv, pv, capUv(0, 0), capUv(qv.x, qv.z), capUv(pv.x, pv.z))
   }
   const geo = new THREE.BufferGeometry()
@@ -500,6 +554,15 @@ export class Plinth {
     this.group.add(this.glassPool)
 
     this.depth = params.plinthDepth ?? 7
+
+    // Les arêtes du bloc central encore exposées au vide — `{nord,est,sud,ouest}`
+    // ou null (bloc isolé : les quatre le sont). Posé par main.js depuis le
+    // damier (BlockGrid.bordsHero) ; relu par rebuild(). C'est un CHAMP et non un
+    // argument de rebuild() à dessein : rebuild est appelée depuis une dizaine
+    // d'endroits de main.js (curseur d'épaisseur, régénération, sortie de zone
+    // isolée…) et il faudrait le passer à chacun — un oubli quelque part rendrait
+    // ses quatre arrondis au héros sans que rien ne le signale.
+    this.bordsHero = null
   }
 
   // ═══════════ LA DIFFUSION SOUS-SURFACIQUE — CE QUE C'EST, ET SON PRIX ═══════
@@ -781,7 +844,12 @@ if (uSSS > 0.001) {
     // v42: meme formule que le clip de la mer (rayon clampe, cercle)
     const cornerR = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE))
     const cornerExp = exposantCoin(params.slabCornerSmoothing)
-    const { geo, baseY, bande } = buildSlabWalls(sample, { depth: this.depth, resolution: params.resolution ?? 256, cornerR, cornerExp, baseYFloor })
+    // ⚠️ LE BLOC CENTRAL AUSSI PERD SES ARRONDIS INTÉRIEURS. C'est le défaut le
+    // plus visible des captures d'Adrien : le héros gardait ses quatre congés AU
+    // MILIEU du damier, et chaque jointure avec une voisine creusait sa rainure.
+    // `bordsHero` est posé par main.js à chaque changement de damier (null hors
+    // damier = les quatre côtés exposés, la géométrie d'avant, exacte).
+    const { geo, baseY, bande } = buildSlabWalls(sample, { depth: this.depth, resolution: params.resolution ?? 256, cornerR, cornerExp, baseYFloor, bords: this.bordsHero })
     this.baseY = baseY
     // la bande de référence du bloc CENTRAL : le damier et la jupe de zone
     // isolée la relisent ici pour ne pas en inventer une chacun de leur côté

@@ -4916,7 +4916,34 @@ blockGrid.onCoastReady = (cell) => {
 function trafficSpan() {
   return dem?.empriseCote > 1 ? (TERRAIN_SIZE * dem.empriseCote) / 2 : blockGrid.spanRadius()
 }
-blockGrid.onGridChanged = () => traffic.setSpan(trafficSpan())
+// ═══════ LE SOCLE DU HÉROS SUIT LE DAMIER, LUI AUSSI ════════════════════════
+//
+// Le damier retire le congé et le chanfrein des arêtes qui touchent une autre
+// case (block-grid.js, damier-bords.js) — mais le bloc CENTRAL ne passe pas par
+// là : son socle est bâti par plinth.rebuild(). Sans ce recalage il gardait ses
+// quatre arrondis AU MILIEU du damier, et chaque jointure avec une voisine
+// creusait sa rainure : le défaut que montre la première capture d'Adrien.
+//
+// ⚠️ ON NE RE-COULE QUE SI LES BORDS ONT VRAIMENT CHANGÉ. onGridChanged part à
+// CHAQUE arrivée de dalle (jusqu'à 24 sur un damier plein) et plinth.rebuild
+// coûte ~2,2 ms au maillage du héros (voir fenetre-elan.js) : rebâtir à chaque
+// fois paierait 24 fois un travail utile 4 fois au plus.
+// état de départ : bloc isolé, les quatre côtés au vide — c'est déjà ce que le
+// socle porte au démarrage, donc rien à re-couler tant que le damier est vide
+let bordsHeroPoses = '1111'
+function majBordsHero() {
+  const b = blockGrid.bordsHero()
+  const cle = `${+b.nord}${+b.est}${+b.sud}${+b.ouest}`
+  if (cle === bordsHeroPoses) return
+  bordsHeroPoses = cle
+  // 1111 = quatre côtés au vide : on rend null, donc la géométrie d'origine
+  plinth.bordsHero = cle === '1111' ? null : b
+  plinth.rebuild(terrain, params, socleEmprise())
+}
+blockGrid.onGridChanged = () => {
+  traffic.setSpan(trafficSpan())
+  majBordsHero()
+}
 // le damier se resynchronise à CHAQUE re-drapage global (zone, zoom, ajout de
 // calque) — idempotent, borné 5×5, cellules en cache LRU
 const _rebuildAllRaw = gpxLayer.rebuildAll.bind(gpxLayer)

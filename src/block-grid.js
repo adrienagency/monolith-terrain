@@ -22,6 +22,7 @@ import { buildSlabWalls, computeSlab } from './plinth.js'
 import { exposantCoin } from './fenetre-clip.js'
 import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
 import { carreCouvrant, cellulesDuCarre, carreSousPlafond } from './damier-carre.js'
+import { bordsExterieurs } from './damier-bords.js'
 
 // Le côté maximal du damier sur le chemin GPX. DISTINCT de GRID_R (qui reste
 // à 2 pour le cadrage du mode zone isolée, cf. region-mask.js:523 et
@@ -422,7 +423,12 @@ export class BlockGrid {
         changed = true
       }
     }
-    if (changed) this.onGridChanged?.()
+    // ⚠️ UN DÉPART REDONNE SES ARÊTES AU VIDE À LA CASE QUI RESTE. Sans cette
+    // ligne, la survivante garderait l'arête VIVE qu'elle avait quand une
+    // voisine la touchait — un socle brutalement coupé au bord du damier, le
+    // défaut symétrique de la rainure que la Tâche 5 supprime. egaliseHauteurs()
+    // ne re-coule que ce qui a réellement changé (plancher OU bords).
+    if (changed) { this.egaliseHauteurs(); this.onGridChanged?.() }
     if (!dem) return
     // charger le manquant
     // ⚠️ le damier ALIGNE les voisins sur la grille de tuiles du bloc central
@@ -648,6 +654,7 @@ export class BlockGrid {
     cell._paramsMurs = { resolution, cornerR, cornerExp }
     cell.baseYPropre = computeSlab(terrain.sample, plinth?.depth ?? 7, resolution, cornerR, cornerExp).baseY
     cell.planchierPose = null // pas encore de murs : egaliseHauteurs() (fin de méthode) les pose
+    cell.bordsPoses = null // … ni de bords d'arrondi : même chose
     // dès la naissance, la cellule porte le matériau/shader de la dalle centrale
     this._applyLook(cell, this.params)
     // masque côtier de LA cellule : chaque voisin a SON dem/footprint, le
@@ -706,7 +713,7 @@ export class BlockGrid {
   // JAMAIS le matériau `wallMat` : il est PARTAGÉ entre le socle central, les
   // 24 murs voisins possibles et la jupe de zone isolée (plinth.js:423-438) —
   // le disposer couperait tous les autres socles du damier d'un coup.
-  _rebuildCellWalls(cell, plancher) {
+  _rebuildCellWalls(cell, plancher, bords = this.bordsDe(cell.i, cell.j)) {
     const plinth = this.getPlinth?.()
     if (!plinth?.wallMat || plinth.group?.visible === false) return
     // ⚠️ NE JAMAIS RELIRE this.params ICI (revue, Finding 3) : resolution,
@@ -730,6 +737,12 @@ export class BlockGrid {
       // un pied sombre quatre fois plus grand que sa voisine de plaine, et
       // deux socles accolés cessaient de se ressembler (voir bandeContact).
       aoBande: plinth.aoBande ?? null,
+      // … et PAS D'ARRONDI sur les arêtes qui touchent une autre case : deux
+      // congés qui se font face à une jointure creusent une rainure (Adrien :
+      // « les arrondis sont vilains »). buildSlabWalls dérive le masque de son
+      // PROPRE contour — le calculer ici obligerait à retracer un computeSlab,
+      // soit doubler le coût d'une reconstruction de mur (voir plinth.js).
+      bords,
     })
     if (cell.walls) {
       const ancienne = cell.walls.geometry
@@ -803,14 +816,43 @@ export class BlockGrid {
   // « le pire cas … reste borné ») pour qu'une régression future (une boucle
   // imbriquée ajoutée sans y penser) ne fasse pas dériver ce chiffre en
   // silence.
+  // Les arêtes de la case (i,j) qui touchent encore le vide. On interroge les
+  // cases RÉELLEMENT posées, jamais la forme supposée du damier : le mode zone
+  // isolée en pose des figures trouées (cf. damier-bords.js).
+  bordsDe(i, j) {
+    return bordsExterieurs(i, j, new Set(this.cells.keys()))
+  }
+
+  // … et celles du BLOC CENTRAL, que main.js redonne au socle du héros. Il ne
+  // figure jamais dans this.cells (la boucle qui peuple le damier le saute),
+  // d'où cette méthode plutôt qu'un appel direct côté main.js.
+  bordsHero() {
+    return this.bordsDe(0, 0)
+  }
+
+  // signature comparable d'un jeu de bords, pour ne re-couler que ce qui bouge
+  static _cleBords(b) {
+    return `${+b.nord}${+b.est}${+b.sud}${+b.ouest}`
+  }
+
   egaliseHauteurs() {
     const plancher = this.planchierCommun()
     if (!Number.isFinite(plancher)) return 0
+    // ⚠️ UNE ARRIVÉE CHANGE LES BORDS DES CASES DÉJÀ POSÉES, pas seulement les
+    // siens. La voisine d'à côté avait une arête au vide ; elle a maintenant une
+    // jointure — et si on ne la re-coule pas, elle garde son congé face au congé
+    // de la nouvelle : la rainure réapparaît à chaque jointure NEUVE, celles-là
+    // mêmes qu'on vient de corriger. C'est la raison d'être de `bordsPoses` : le
+    // plancher n'est plus le seul motif de reconstruction.
+    const posees = new Set(this.cells.keys())
     let refaites = 0
     for (const cell of this.cells.values()) {
-      if (cell.planchierPose === plancher) continue
-      this._rebuildCellWalls(cell, plancher)
+      const bords = bordsExterieurs(cell.i, cell.j, posees)
+      const cleBords = BlockGrid._cleBords(bords)
+      if (cell.planchierPose === plancher && cell.bordsPoses === cleBords) continue
+      this._rebuildCellWalls(cell, plancher, bords)
       cell.planchierPose = plancher
+      cell.bordsPoses = cleBords
       refaites++
     }
     return refaites
