@@ -5054,6 +5054,11 @@ blockGrid.onReady = (cell) => {
   // naissance (block-grid.js) : une dalle arrivée après le crépuscule ne doit
   // pas rester en plein jour au milieu d'un damier éteint.
   peintCelluleNuit(cell)
+  // … et ses deux mosaïques de couches de sol, au même titre et pour la même
+  // raison : occupation du sol (ESA WorldCover) et hauteur de canopée (ETH).
+  // Les deux OPACITÉS, elles, lui ont déjà été posées par `_applyLook`.
+  peintCelluleSol(cell)
+  peintCelluleCanopee(cell)
   if (params.regionMode && blockGrid.regionParts) {
     paintCellRegion(cell)
     rebuildRegionSkirtSoon()
@@ -5610,8 +5615,15 @@ function refreshNuitIntensite(hour = params.timeOfDay ?? 10) {
 // compter — et TOUTE tirette de couche ajoutée plus tard doit passer par ici,
 // sinon elle rendra une valeur qui disparaît au premier gabarit chargé.
 function appliqueReglagesCouches() {
-  terrain.setSolOpacite(opaciteSol(params.solForce))
-  terrain.setCanopeeOpacite(opaciteCanopee(params.canopeeForce))
+  const forceSol = opaciteSol(params.solForce)
+  const forceCanopee = opaciteCanopee(params.canopeeForce)
+  terrain.setSolOpacite(forceSol)
+  terrain.setCanopeeOpacite(forceCanopee)
+  // … et les voisines avec elle, au même titre que les deux tirettes de la nuit
+  // plus bas : une force de lavis qui ne s'applique qu'au bloc central rejoue
+  // la coupure à la jointure, en plus discret.
+  blockGrid.setSolOpacite(forceSol)
+  blockGrid.setCanopeeOpacite(forceCanopee)
   const fond = fondNuit(params.nuitAssombrissement)
   const gain = gainNuit(params.nuitForce)
   terrain.setNuitFond(fond)
@@ -5780,7 +5792,58 @@ const chargeIndexSol = () => {
   return solIndex
 }
 
+// LA MOSAÏQUE D'OCCUPATION DU SOL D'UNE DALLE DU DAMIER — même patron que
+// `peintCelluleNuit` et `paintCellAerial`, et pour la même raison : chaque
+// dalle a SON emprise, donc sa propre mosaïque et son propre layer (dont le
+// `_buildId` ne collisionne avec celui de personne).
+//
+// ⚠️ SANS ELLE, UN LAVIS D'UN CÔTÉ DE LA JOINTURE ET RIEN DE L'AUTRE. C'est
+// exactement le défaut de la couche nocturne, en moins violent parce que celle
+// -ci n'éteint pas le sol — mais la coupure est de la même nature, et elle est
+// franche : la forêt s'arrête au bord du bloc central.
+//
+// ⚠️ ALLUMER LA COUCHE PASSE PAR `_gateCouche`, DONC PAR UN `#define`. On a
+// vérifié ce que ça coûte vraiment sur 24 dalles, plutôt que de le supposer :
+// three met ses programmes en CACHE PAR CLÉ (three.module.js, `acquireProgram`
+// ~l.7328, clé bâtie par `getProgramCacheKey` ~l.7114 à partir des `defines` et
+// de `customProgramCacheKey`, que terrain.js ne redéfinit pas). Les 25 matériaux
+// de terrain portent donc la MÊME clé et se partagent UN SEUL programme :
+// allumer la couche en compile un, pas vingt-quatre. Ce qui reste est une
+// réinitialisation de matériau par dalle (`needsUpdate`) et, surtout, la
+// mosaïque elle-même — le vrai budget, le même que celui déjà accepté pour la
+// photo aérienne et les lumières nocturnes.
+//
+// ⚠️ LE PLAFOND ET LE PLANCHER VIENNENT DE LA ZONE DE **CETTE** DALLE, pas de
+// celle du bloc central : le socle mondial n'est cuit qu'en z8-z9 et les zones
+// fines montent à z14. Une dalle qui déborde d'une zone fine réclamerait sinon
+// du z14 jamais écrit, tomberait en 404 et resterait vide sous une couche
+// allumée — le « pire des deux mondes » déjà écrit pour le bloc central.
+async function peintCelluleSol(cell) {
+  if (!cell?.terrain) return
+  if (!couchesActives.has('occupation-sol') || !cell.dem || params.source !== 'real') {
+    cell.terrain.setSol(null)
+    return
+  }
+  const bounds = demBounds(cell.dem)
+  const zone = zoneSolPour(await chargeIndexSol(), bounds)
+  // hors zone cuite, la dalle reste nue — SANS éteindre la couche ni parler :
+  // l'avertissement et l'extinction appartiennent au bloc central (refreshSol),
+  // sinon une seule dalle de bord éteindrait la couche de tout le monde
+  if (!zone || cell.disposed) { cell.terrain.setSol(null); return }
+  cell.sol ??= new OccupationSolLayer({ maxTexturePx: renderer.capabilities.maxTextureSize })
+  const built = await cell.sol.build(bounds, { zmax: zone.zmax, zmin: zone.zmin })
+  if (built === SUPERSEDED || !built?.texture) return
+  // MÊME GARDE D'APRÈS-ATTENTE que le bloc central (voir `couchePartieEnVol`) :
+  // la couche a pu être éteinte, ou la dalle retirée, pendant le téléchargement.
+  if (cell.disposed || !couchesActives.has('occupation-sol')) return
+  cell.terrain.setSol(built)
+}
+
 async function refreshSol() {
+  // le damier suit la principale, allumage comme extinction (même première
+  // ligne que `refreshNuit` — et elle est AVANT les sorties anticipées, sinon
+  // éteindre la couche laisserait le lavis posé sur les voisines)
+  for (const cell of blockGrid.cells.values()) peintCelluleSol(cell)
   if (!couchesActives.has('occupation-sol') || !dem || params.source !== 'real') {
     terrain.setSol(null)
     solAttribution = null
@@ -5868,7 +5931,30 @@ const chargeIndexCanopee = () => {
   return canopeeIndex
 }
 
+// LA MOSAÏQUE DE CANOPÉE D'UNE DALLE DU DAMIER — jumelle exacte de
+// `peintCelluleSol` juste au-dessus, y compris pour le silence hors zone cuite
+// et pour la garde d'après-attente. Voir son en-tête pour le raisonnement (et
+// pour ce que coûte vraiment le `_gateCouche` sur 24 dalles : un programme, pas
+// vingt-quatre).
+async function peintCelluleCanopee(cell) {
+  if (!cell?.terrain) return
+  if (!couchesActives.has('canopee') || !cell.dem || params.source !== 'real') {
+    cell.terrain.setCanopee(null)
+    return
+  }
+  const bounds = demBounds(cell.dem)
+  const zone = zoneCanopeePour(await chargeIndexCanopee(), bounds)
+  if (!zone || cell.disposed) { cell.terrain.setCanopee(null); return }
+  cell.canopee ??= new CanopeeLayer({ maxTexturePx: renderer.capabilities.maxTextureSize })
+  const built = await cell.canopee.build(bounds, { zmax: zone.zmax, zmin: zone.zmin })
+  if (built === SUPERSEDED || !built?.texture) return
+  if (cell.disposed || !couchesActives.has('canopee')) return
+  cell.terrain.setCanopee(built)
+}
+
 async function refreshCanopee() {
+  // le damier suit la principale, allumage comme extinction — voir refreshSol
+  for (const cell of blockGrid.cells.values()) peintCelluleCanopee(cell)
   if (!couchesActives.has('canopee') || !dem || params.source !== 'real') {
     terrain.setCanopee(null)
     canopeeAttribution = null

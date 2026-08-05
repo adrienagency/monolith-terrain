@@ -322,6 +322,10 @@ export class BlockGrid {
     this._nuitIntensite = null
     this._nuitFond = null
     this._nuitGain = null
+    // … et les deux tirettes des couches de sol, même contrat (voir
+    // setSolOpacite / setCanopeeOpacite)
+    this._solOpacite = null
+    this._canopeeOpacite = null
   }
 
   // rayon MONDE couvert par le damier au-delà du bloc central (0 si aucun
@@ -1041,6 +1045,22 @@ export class BlockGrid {
     this._nuitGain = v
     for (const cell of this.cells.values()) cell.terrain?.setNuitGain?.(v)
   }
+  // LES DEUX TIRETTES DES COUCHES DE SOL — même contrat que les trois de la
+  // nuit ci-dessus, mémoire comprise : `appliqueReglagesCouches` (main.js) est
+  // idempotente et rappelée à chaque gabarit chargé, donc la garde « changement
+  // réel » évite 24 écritures pour rien ; et la valeur mémorisée est ce qui
+  // habille une dalle NÉE plus tard (voir `_applyLook`), sans quoi elle
+  // afficherait un lavis à pleine force au milieu d'un damier atténué.
+  setSolOpacite(v) {
+    if (v === this._solOpacite) return
+    this._solOpacite = v
+    for (const cell of this.cells.values()) cell.terrain?.setSolOpacite?.(v)
+  }
+  setCanopeeOpacite(v) {
+    if (v === this._canopeeOpacite) return
+    this._canopeeOpacite = v
+    for (const cell of this.cells.values()) cell.terrain?.setCanopeeOpacite?.(v)
+  }
 
   // le look a changé (template, contours, rampe, MATÉRIAU…) — les voisins
   // suivent la dalle PRINCIPALE comme un composant (Adrien) : même rampe, même
@@ -1080,6 +1100,9 @@ export class BlockGrid {
     if (this._nuitIntensite != null) t.setNuitIntensite?.(this._nuitIntensite)
     if (this._nuitFond != null) t.setNuitFond?.(this._nuitFond)
     if (this._nuitGain != null) t.setNuitGain?.(this._nuitGain)
+    // … et les deux opacités des couches de sol, pour la même raison exactement
+    if (this._solOpacite != null) t.setSolOpacite?.(this._solOpacite)
+    if (this._canopeeOpacite != null) t.setCanopeeOpacite?.(this._canopeeOpacite)
   }
 
   // ══════════ LE CENTRE FAIT FOI — ET IL LE FAIT SANS RIEN RECUIRE ══════════
@@ -1226,6 +1249,8 @@ export class BlockGrid {
     this._keepDetachedDem(cell.demKey, cell.demRaw)
     cell.aerial?.dispose?.() // AerialLayer dédié de la cellule (posé par main.js)
     cell.nuit?.dispose?.() // … et son NuitLayer, même contrat (posé par main.js)
+    cell.sol?.dispose?.() // … son OccupationSolLayer …
+    cell.canopee?.dispose?.() // … et son CanopeeLayer, toujours le même contrat
     if (cell.walls) {
       this.scene.remove(cell.walls)
       cell.walls.geometry?.dispose() // le matériau des murs est PARTAGÉ (socle principal) — ne pas disposer
