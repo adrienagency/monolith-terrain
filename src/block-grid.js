@@ -761,13 +761,25 @@ export class BlockGrid {
     }
   }
 
-  // Re-coule les murs de toutes les cellules dont le fond n'est pas au
-  // plancher commun. Rendu : le nombre de cellules refaites (0 = rien à
-  // faire), pour que l'appelant puisse mesurer le coût réel de l'égalisation.
+  // Re-coule les murs de toutes les cellules dont le fond n'est pas au plancher
+  // commun, OU dont les arêtes exposées ont changé. Rendu : le nombre de
+  // cellules refaites (0 = rien à faire), pour que l'appelant puisse mesurer le
+  // coût réel de l'égalisation.
   //
-  // MESURÉ (compteur temporaire, damier 3×3 complet, 8 voisines qui
-  // atterrissent une à une) — le total dépend de l'ORDRE d'arrivée, pas
-  // seulement du nombre de cellules :
+  // ⚠️ DEUX MOTIFS, DEUX COÛTS DE NATURES DIFFÉRENTES, ET IL FAUT LES LIRE
+  // SÉPARÉMENT. Les chiffres ci-dessous ne valent QUE pour le motif du plancher.
+  // Le motif des bords (Tâche 5) ne dépend, lui, d'AUCUN ordre d'arrivée : il
+  // coûte exactement `N + E`, une reconstruction par naissance plus une par
+  // arête d'adjacence entre deux cellules — 16 sur un damier 3×3, 60 sur le 5×5
+  // maximal. Démonstration et verrou dans test/damier-hauteur.test.js (« à
+  // plancher STABLE, le motif des bords coûte N + E »). Ce second verrou existe
+  // parce que le scénario du pire cas ci-dessous ne l'exerce PAS : le plancher y
+  // bat son record à chaque arrivée, donc le conjoint sur les bords n'y décide
+  // jamais rien et le neutraliser laissait le chiffre 36 intact.
+  //
+  // MOTIF DU PLANCHER — MESURÉ (compteur temporaire, damier 3×3 complet,
+  // 8 voisines qui atterrissent une à une). Le total dépend de l'ORDRE
+  // d'arrivée, pas seulement du nombre de cellules :
   //   ordre réseau typique (5 tirages aléatoires, profondeur sans
   //     corrélation avec l'ordre d'arrivée)         9 à 24 reconstructions
   //   pire cas (chaque arrivée bat le record de

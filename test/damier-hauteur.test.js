@@ -213,3 +213,82 @@ test('egaliseHauteurs : le pire cas (profondeur strictement decroissante) reste 
   }
   assert.ok(total <= 40, `pire cas hors de la marge attendue : ${total} reconstructions pour 8 cellules`)
 })
+
+// ═══════ RONDE DE RELECTURE 2 : LE SECOND MOTIF, MESURÉ TOUT SEUL ═══════════
+//
+// ⚠️ LE TEST CI-DESSUS NE MESURE QU'UN MOTIF SUR DEUX. Depuis la Tâche 5,
+// egaliseHauteurs() re-coule pour DEUX raisons : le plancher commun a bougé, ou
+// les BORDS de la cellule ont changé (une voisine est arrivée à côté d'elle, et
+// l'arête qu'elle avait au vide est devenue une jointure — sans quoi son congé
+// resterait face à celui de la nouvelle, et la rainure reviendrait). Or dans le
+// scénario ci-dessus le plancher bat son record à CHAQUE arrivée :
+// `planchierPose === plancher` est déjà faux partout, le conjoint `bordsPoses`
+// ne décide jamais rien, et le chiffre 36 reste identique si on le neutralise.
+// Vérifié en relecture. Le motif des bords était donc entré dans le code sans
+// aucun verrou dessus.
+//
+// Ici le plancher est FIXÉ par le socle central, plus profond que toute
+// cellule : il ne bouge pas d'un bout à l'autre du remplissage (le test le
+// vérifie à chaque tour). Seuls les bords décident.
+//
+// CE QUE ÇA COÛTE, et pourquoi c'est une ÉGALITÉ et pas une fourchette : le
+// total vaut exactement `N + E` — N reconstructions de naissance, plus une par
+// ARÊTE D'ADJACENCE entre deux cellules du damier. Chaque paire adjacente
+// {A, B} en déclenche une et une seule : celle des deux qui arrive en premier
+// est re-coulée quand l'autre arrive. Ce raisonnement ne fait intervenir aucun
+// ordre — et c'est bien ce qu'on mesure : dix ordres d'arrivée donnent le MÊME
+// total, là où le motif du plancher, lui, va de 8 à 36 selon l'ordre.
+//   damier 3×3 : N = 8,  E = 8   →  16
+//   damier 5×5 : N = 24, E = 36  →  60   (GRID_R = 2, le damier maximal)
+// Le pic PAR ARRIVÉE, lui, reste borné par 1 + 4 voisines = 5 murs, soit
+// ~47 ms : c'est ce chiffre-là qui décide du confort, et il ne bouge pas.
+function celluleBouchon2D(i, j) {
+  return { i, j, terrain: { sample: () => -5 }, baseYPropre: -12, planchierPose: null,
+    bordsPoses: null, _paramsMurs: { resolution: 8, cornerR: 0, cornerExp: 2 } }
+}
+function remplit(ordre) {
+  // socle central TRÈS profond : c'est lui qui fixe le plancher commun, et
+  // aucune arrivée ne peut le faire descendre
+  const { g } = damierMursBouchon(-99)
+  let total = 0
+  let pic = 0
+  for (const [i, j] of ordre) {
+    g.cells.set(`${i},${j}`, celluleBouchon2D(i, j))
+    const refaites = g.egaliseHauteurs()
+    total += refaites
+    pic = Math.max(pic, refaites)
+    assert.equal(g.planchierCommun(), -99, 'preambule : le plancher doit rester STABLE')
+  }
+  return { total, pic }
+}
+function voisinesDe(R) {
+  const out = []
+  for (let j = -R; j <= R; j++) for (let i = -R; i <= R; i++) if (i || j) out.push([i, j])
+  return out
+}
+
+test('egaliseHauteurs : a plancher STABLE, le motif des bords coute N + E, quel que soit l ordre', () => {
+  const cases = voisinesDe(2) // 24 voisines : le damier maximal, GRID_R = 2
+  const parLigne = [...cases]
+  const parColonne = [...cases].sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const enSpirale = [...cases].sort((a, b) => Math.hypot(...a) - Math.hypot(...b))
+  const aRebours = [...cases].reverse()
+  // tirage pseudo-aléatoire REPRODUCTIBLE : un Math.random ferait clignoter le
+  // test au lieu de le faire échouer
+  let graine = 12345
+  const rnd = () => ((graine = (graine * 1103515245 + 12345) % 2147483648) / 2147483648)
+  const ordres = [parLigne, parColonne, enSpirale, aRebours]
+  for (let k = 0; k < 4; k++) ordres.push([...cases].sort(() => rnd() - 0.5))
+
+  for (const ordre of ordres) {
+    const { total, pic } = remplit(ordre)
+    assert.equal(total, 60, `5x5 : le motif des bords doit couter exactement N+E = 24+36 (mesure ${total})`)
+    assert.ok(pic <= 5, `une seule arrivee ne touche qu elle-meme et ses 4 voisines (pic ${pic})`)
+  }
+})
+
+test('egaliseHauteurs : le meme compte tient sur un 3x3', () => {
+  const { total, pic } = remplit(voisinesDe(1))
+  assert.equal(total, 16, '3x3 : N+E = 8+8')
+  assert.ok(pic <= 5)
+})

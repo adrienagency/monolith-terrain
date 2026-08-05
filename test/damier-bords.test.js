@@ -129,6 +129,10 @@ test('un coin entre un bord exterieur et un interieur ne l\'est pas', () => {
 // consomme — c'est là qu'était le défaut visible (« les arrondis sont vilains »).
 
 const plat = (y) => () => y
+// deux reliefs qui font travailler le profil : l'un doux, l'autre assez raide
+// pour que les altitudes du profil s'écrasent les unes sur les autres
+const vallonne = (x, z) => 6 * Math.sin(x * 0.21) + 4 * Math.cos(z * 0.13) - 2
+const abrupt = (x, z) => 22 * Math.sin(x * 0.5) * Math.cos(z * 0.37)
 
 // jusqu'où la géométrie va, sur un axe et dans un sens donnés
 function extremeSur(pos, axe, signe) {
@@ -184,44 +188,79 @@ test('un bord exterieur garde son conge quand son voisin l\'a perdu', () => {
   assert.ok(rentree > 0.5, `le nord, exterieur, doit garder son conge rentrant (${rentree})`)
 })
 
-// ⚠️ LE PIÈGE DU FOND. Avec des arrondis par sommet, un fond rentré d'une
-// valeur UNIQUE ne rejoint plus le bas des murs : on voit sous le socle. Le
-// test le mesure au lieu de le supposer — pour CHAQUE sommet du contour, le
-// bas du mur et le bord du fond doivent être au même point.
-test('le fond reste soude au bas des murs, arrondi ou pas', () => {
-  const { ring, demi } = contourDe(32)
-  const masque = masqueDepuisContour(ring, demi, { nord: true, est: false, sud: false, ouest: false })
-  const geo = buildSlabWalls(plat(10), { resolution: 32, masqueArrondi: masque }).geo
-  assert.equal(geo.getIndex(), null, 'geometrie non indexee, comme avant')
+// ══════ LE PIÈGE DU FOND, MESURÉ PAR L'ÉTANCHÉITÉ ═══════════════════════════
+//
+// ⚠️ CE QUE LA PREMIÈRE VERSION DE CE TEST NE VOYAIT PAS (revue, ronde 1). Elle
+// comptait la MULTIPLICITÉ des sommets posés dans le plan du fond. Or avec un
+// fond rentré d'une valeur unique — LE PIÈGE EXACT — les deux anneaux (bord du
+// fond, pied du mur) cessent de coïncider mais chaque sommet reste vu deux fois,
+// une fois par l'éventail du fond, une fois par la bande du mur. Le mutant
+// `dFond = () => ch + rd` passait donc 36/36. Un test qui décrit une
+// correspondance sans jamais la calculer.
+//
+// La bonne mesure est l'APPARIEMENT DES ARÊTES : dans un maillage fermé, chaque
+// arête est partagée par exactement deux triangles. Celles qui ne le sont pas
+// sont des bords libres — des trous. Le socle en a exactement `ring.length` : la
+// couronne HAUTE du mur, ouverte par construction puisque c'est le relief qui la
+// ferme. Ce nombre est INVARIANT — vérifié sur 2 720 configurations (4 reliefs ×
+// 5 résolutions × 4 rayons de coin × 2 exposants × les 16 motifs de bords, plus
+// le socle nu) : pas une seule ne s'en écarte d'une unité. C'est donc une
+// égalité stricte, pas une fourchette.
+const CLE_MM = 1e4 // les sommets se recollent au dix-millième d'unité monde
+function aretesLibres(geo) {
   const pos = geo.getAttribute('position')
-  let fond = Infinity
-  for (let i = 0; i < pos.count; i++) fond = Math.min(fond, pos.getY(i))
-  // tous les sommets posés au fond, arrondis à 1e-4 : le bord du fond et le
-  // pied du mur doivent tomber sur les MÊMES points, sinon il y a un jour
-  const auFond = new Map()
-  for (let i = 0; i < pos.count; i++) {
-    if (Math.abs(pos.getY(i) - fond) > 1e-6) continue
-    const cle = `${Math.round(pos.getX(i) * 1e4)},${Math.round(pos.getZ(i) * 1e4)}`
-    auFond.set(cle, (auFond.get(cle) ?? 0) + 1)
+  const cle = (i) => `${Math.round(pos.getX(i) * CLE_MM)}|${Math.round(pos.getY(i) * CLE_MM)}|${Math.round(pos.getZ(i) * CLE_MM)}`
+  const aretes = new Map()
+  for (let t = 0; t < pos.count; t += 3) {
+    const c = [cle(t), cle(t + 1), cle(t + 2)]
+    // un triangle dégénéré n'a pas d'arête à apparier : c'est le raccord d'un
+    // sommet sans congé, il n'ouvre rien
+    if (c[0] === c[1] || c[1] === c[2] || c[0] === c[2]) continue
+    for (let k = 0; k < 3; k++) {
+      const a = c[k]
+      const b = c[(k + 1) % 3]
+      const e = a < b ? `${a}//${b}` : `${b}//${a}`
+      aretes.set(e, (aretes.get(e) ?? 0) + 1)
+    }
   }
-  // chaque point du bord du fond est partagé par le fond ET par le pied du
-  // mur (ou du congé) : un point vu une seule fois est un bord libre
-  const orphelins = [...auFond.values()].filter((c) => c < 2).length
-  assert.equal(orphelins, 0, 'des sommets de fond sans mur en face : on voit sous le socle')
+  return [...aretes.values()].filter((v) => v !== 2).length
+}
+
+// les 16 motifs de bords possibles, du carré isolé à la case entièrement cernée
+const MOTIFS = Array.from({ length: 16 }, (_, m) => ({
+  nord: !!(m & 1), est: !!(m & 2), sud: !!(m & 4), ouest: !!(m & 8),
+}))
+
+test('le fond reste soude au bas des murs : aucun trou, quel que soit le motif', () => {
+  const geo = buildSlabWalls(plat(10), { resolution: 32 }).geo
+  assert.equal(geo.getIndex(), null, 'geometrie non indexee, comme avant')
+  const n = computeSlab(plat(10), 7, 32).ring.length
+  // la référence : le socle NU n'a que sa couronne haute d'ouverte
+  assert.equal(aretesLibres(geo), n, 'preambule : le socle sans masque est deja etanche')
+  // … et AUCUN motif de bords n'en ouvre une de plus
+  for (const bords of MOTIFS) {
+    const g = buildSlabWalls(plat(10), { resolution: 32, bords }).geo
+    assert.equal(aretesLibres(g), n,
+      `motif ${JSON.stringify(bords)} : le fond ne rejoint plus le bas des murs, on voit sous le socle`)
+  }
 })
 
-// et le même contrôle sur un socle SANS aucun masque : la référence
-test('sans masque, le fond etait deja soude — la mesure est bien discriminante', () => {
-  const pos = buildSlabWalls(plat(10), { resolution: 32 }).geo.getAttribute('position')
-  let fond = Infinity
-  for (let i = 0; i < pos.count; i++) fond = Math.min(fond, pos.getY(i))
-  const auFond = new Map()
-  for (let i = 0; i < pos.count; i++) {
-    if (Math.abs(pos.getY(i) - fond) > 1e-6) continue
-    const cle = `${Math.round(pos.getX(i) * 1e4)},${Math.round(pos.getZ(i) * 1e4)}`
-    auFond.set(cle, (auFond.get(cle) ?? 0) + 1)
+// … et sur du relief, à d'autres résolutions et avec des coins filettés : les
+// trois axes par lesquels un fond mal rentré pourrait passer entre les mailles
+test('etancheite : meme sur relief, autres resolutions, coins filettes', () => {
+  const cas = [
+    [vallonne, { resolution: 24, depth: 5 }],
+    [vallonne, { resolution: 24, cornerR: 6, cornerExp: 3 }],
+    [abrupt, { resolution: 16, cornerR: 2.5 }],
+    [abrupt, { resolution: 48 }],
+  ]
+  for (const [sample, o] of cas) {
+    const n = computeSlab(sample, o.depth ?? 7, o.resolution, o.cornerR ?? 0, o.cornerExp ?? 2).ring.length
+    for (const bords of [null, ...MOTIFS]) {
+      const g = buildSlabWalls(sample, { ...o, bords }).geo
+      assert.equal(aretesLibres(g), n, `${JSON.stringify(o)} / ${JSON.stringify(bords)}`)
+    }
   }
-  assert.equal([...auFond.values()].filter((c) => c < 2).length, 0)
 })
 
 // un masque tout à 1 doit rendre EXACTEMENT le socle sans masque : c'est la
@@ -243,7 +282,6 @@ test('un masque tout a 1 rend le socle d\'origine, au bit pres', () => {
 // code d'AVANT la Tâche 5 (position + normal + uv + color, octet par octet).
 // Si l'une bouge, ce n'est pas une empreinte à rafraîchir : c'est que le socle
 // par défaut a changé.
-const vallonne = (x, z) => 6 * Math.sin(x * 0.21) + 4 * Math.cos(z * 0.13) - 2
 function empreinte(geo) {
   const h = createHash('sha256')
   for (const nom of ['position', 'normal', 'uv', 'color']) {
@@ -292,6 +330,20 @@ test('l\'option `bords` rend le meme socle que le masque calcule dehors', () => 
   assert.deepEqual(
     Array.from(parBords.getAttribute('position').array),
     Array.from(parMasque.getAttribute('position').array))
+})
+
+// ⚠️ ET UN MASQUE DE LA MAUVAISE LONGUEUR LÈVE, il ne se rattrape pas. C'est le
+// seul vrai risque de `masqueArrondi` : un contour tracé avec d'autres réglages.
+// Rattrapé en silence, il rendait un socle plausible avec la rainure encore là.
+test('un masque qui n\'a pas la longueur du contour est refuse', () => {
+  const { ring } = contourDe(24)
+  assert.throws(
+    () => buildSlabWalls(plat(10), { resolution: 24, masqueArrondi: new Float32Array(ring.length - 1).fill(0) }),
+    /les deux tracés ont divergé/)
+  // … et la MÊME longueur mais un contour tracé avec un autre `resolution`
+  assert.throws(
+    () => buildSlabWalls(plat(10), { resolution: 32, masqueArrondi: new Float32Array(ring.length).fill(0) }),
+    /96 sommets pour un contour de 128/)
 })
 
 test('`bords` : quatre cotes exterieurs = le socle d\'origine, au bit pres', () => {
@@ -380,6 +432,13 @@ test('main.js recale le socle du heros quand le damier change', () => {
   const src = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')
   assert.match(src, /plinth\.bordsHero\s*=/, 'main.js doit poser plinth.bordsHero')
   assert.match(src, /blockGrid\.bordsHero\(\)/, 'et le lire sur le damier')
+  // ⚠️ EXACTEMENT UN POSEUR, pas « au moins un » (revue, ronde 1). `bordsHero`
+  // est un champ public, et main.js tient à côté de lui la signature déjà posée
+  // (`bordsHeroPoses`) qui décide s'il faut re-couler. Un second poseur ailleurs
+  // désynchroniserait les deux : le champ changerait, la signature non, et le
+  // socle du héros garderait sa géométrie d'avant sans que rien ne le signale.
+  const poseurs = src.match(/plinth\.bordsHero\s*=/g) ?? []
+  assert.equal(poseurs.length, 1, `${poseurs.length} endroits posent plinth.bordsHero : il n'en faut qu'un`)
   const m = src.match(/function majBordsHero\(\)\s*\{[\s\S]*?\n\}/)
   assert.ok(m, 'majBordsHero() introuvable')
   assert.match(m[0], /plinth\.rebuild\(terrain, params, socleEmprise\(\)\)/,

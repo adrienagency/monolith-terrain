@@ -253,9 +253,19 @@ export function buildSlabWalls(sample, { depth = 7, resolution = 256, cornerR = 
   // masque n'est fourni — le bloc isolé est bit à bit inchangé (verrouillé par
   // empreinte dans test/damier-bords.test.js).
   const masque = masqueArrondi || (bords ? masqueDepuisContour(ring, HALF, bords) : null)
-  const kMasque = (k) => masque[k] ?? 1
-  const chDe = masque ? (k) => ch * kMasque(k) : () => ch
-  const rdDe = masque ? (k) => rd * kMasque(k) : () => rd
+  // ⚠️ UN MASQUE QUI N'A PAS LA LONGUEUR DU CONTOUR EST UNE ERREUR, PAS UN CAS À
+  // RATTRAPER. Le rattrapage d'avant (`masque[k] ?? 1`) rendait l'arrondi par
+  // défaut aux sommets manquants : un masque tronqué ou tracé avec d'autres
+  // réglages — le seul vrai risque de cette option, et l'argument même qui a
+  // fait ajouter `bords` à côté — donnait alors une géométrie plausible, avec la
+  // rainure toujours là et rien pour le dire. La longueur du contour dépend de
+  // `resolution`, `cornerR` et `cornerExp` : qui trace le sien doit passer les
+  // mêmes.
+  if (masque && masque.length !== n) {
+    throw new Error(`masqueArrondi de ${masque.length} sommets pour un contour de ${n} : les deux tracés ont divergé`)
+  }
+  const chDe = masque ? (k) => ch * masque[k] : () => ch
+  const rdDe = masque ? (k) => rd * masque[k] : () => rd
 
   const positions = []
   const normals = []
