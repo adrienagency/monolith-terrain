@@ -594,6 +594,12 @@ export class BlockGrid {
     // ---------------------------------------------------------------------
     // UNE DALLE VOISINE SORT ENTIÈREMENT DE LA PASSE D'OMBRE (28/07/2026)
     // ---------------------------------------------------------------------
+    // ⚠️ DAMIER : CONTRAINTE ASSUMÉE — et c'est la seule de la famille où la
+    // voisine ne suit PAS le bloc central exprès, pour un gain mesuré :
+    // −23,7 % de triangles par image. Ce n'est ni un oubli ni un uniforme
+    // manquant ; test/damier-uniformes.test.js ne peut pas la surveiller (ce
+    // sont des drapeaux d'objet, pas de la matière), il vérifie seulement que
+    // cette décision reste écrite ici. Le raisonnement complet suit.
     // ⚠️ IL FAUT COUPER LES DEUX DRAPEAUX, ET `receiveShadow` EST LE VRAI.
     // Ce n'est pas une ceinture-et-bretelles : le rendu est en VSM
     // (`renderer.shadowMap.type = THREE.VSMShadowMap`, main.js), et three écrit

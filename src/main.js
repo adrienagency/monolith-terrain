@@ -1522,6 +1522,15 @@ const realWater = FLAGS.water ? new RealWater(scene) : null
 // ÉVÉNEMENTS — les éléments 3D rapportés qui vivent sur la carte. Les bateaux
 // sont le premier ; la catégorie est prévue pour en accueillir d'autres.
 const boats = new Boats(scene)
+// ⚠️ DAMIER : CONTRAINTE ASSUMÉE — les calques de carte ne sortent pas du bloc
+// central. Lacs, rivières, toponymes : ce ne sont PAS des uniformes, c'est une
+// GÉOMÉTRIE unique, bâtie pour l'emprise de `dem` (`mapLayers.rebuild({ dem,
+// terrain, params })`). Les dalles voisines n'ont donc ni lac ni nom de village,
+// par construction — les y étendre demanderait une géométrie par dalle, sa
+// propre requête Overpass et son propre budget : un projet, pas une ligne.
+// Rien dans test/damier-uniformes.test.js ne peut le surveiller (il ne voit que
+// les uniformes et le matériau) ; ce commentaire EST la surveillance, et le
+// test vérifie qu'il n'a pas disparu.
 const mapLayers = new MapLayers(scene, camera) // water/places overlays, populated per zone
 
 const labelOpts = () => ({
@@ -5483,6 +5492,16 @@ params.onSeekRequest = (f) => seekAndResumeCourse(f)
 
 // ------------------------------------------------------------------ GUI
 
+// ⚠️ DAMIER : CONTRAINTE ASSUMÉE — le balayage s'arrête au bord du bloc central.
+// `ScanController` reçoit les uniformes du SEUL bloc central et son rayon est
+// `TERRAIN_SIZE / 2` : l'effet est CALIBRÉ SUR UN BLOC. L'étendre au damier
+// n'est pas un essaimage de plus, c'est un changement de géométrie de l'effet
+// (rayon, origine, durée) — donc un travail, pas une ligne. En attendant, le
+// radar s'arrête net à la jointure, et c'est voulu.
+// ⚠️ ET C'EST UNE POIGNÉE CÉDÉE : ce module écrit dans `terrain.mapUniforms`
+// quand il veut, hors de tout péage. test/damier-uniformes.test.js le sait (il
+// est nommé dans `POIGNEES_CEDEES`) et refusera la PROCHAINE cession non
+// déclarée — c'est le seul garde-fou possible ici.
 scan = new ScanController(terrain.mapUniforms, TERRAIN_SIZE / 2)
 
 const waterRebuild = () => {
