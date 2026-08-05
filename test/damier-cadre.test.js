@@ -596,6 +596,48 @@ test('la molette rend la butee AVANT de laisser l\'escalier dezoomer', () => {
   assert.match(SRC_MAIN, /cadrageWheel: \(deltaY\) =>/, 'et modes.js recoit bien le hook')
 })
 
+// ⚠️ POURQUOI CE TEST EST UNE PROPRIÉTÉ ET PAS UNE LISTE DE TROIS NOMS.
+// Le cadrage EMPRUNTE des réglages à la caméra (`controls.maxDistance`, et les
+// deux plans de coupe) pour pouvoir reculer à 490 unités. S'il en oublie un au
+// retour, la caméra reste libre PARTOUT DANS L'APPLICATION, longtemps après que
+// l'utilisateur a quitté le cadrage — et le symptôme (« la molette ne rend plus
+// la main à l'orbite ») ne désigne jamais sa cause. Un quatrième réglage
+// emprunté demain doit rougir ici tout seul : on lit donc ce qui est CAPTURÉ et
+// on exige le geste inverse, au lieu d'énumérer ce qu'on connaît aujourd'hui.
+const echappe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+test('tout ce que le cadrage EMPRUNTE a la camera lui est RENDU', () => {
+  const capture = /cadrageDamier \?\?= \{([^}]*)\}/.exec(SRC_MAIN)
+  assert.ok(capture, 'le cadrage capture bien l\'etat de camera avant de le desserrer')
+  const emprunts = capture[1]
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => {
+      const m = /^([A-Za-z_$][\w$]*)\s*:\s*(.+)$/.exec(p)
+      assert.ok(m, `emprunt illisible : « ${p} »`)
+      return { cle: m[1], source: m[2].trim() }
+    })
+  assert.ok(emprunts.length >= 3, `au moins maxDistance, near et far (lu : ${emprunts.length})`)
+
+  const sortie = /function quitteCadrageDamier\(\)\s*\{([\s\S]*?)\n\}/.exec(SRC_MAIN)
+  assert.ok(sortie, 'la sortie du cadrage existe')
+  const corps = sortie[1]
+  for (const { cle, source } of emprunts) {
+    const rendu = new RegExp(`${echappe(source)}\\s*=\\s*cadrageDamier\\.${cle}\\b`)
+    assert.match(corps, rendu, `« ${source} » est emprunte mais jamais rendu a la sortie`)
+    // …et rendu AVANT que la sauvegarde ne soit jetée, sinon on rendrait null.
+    const oubli = corps.indexOf('cadrageDamier = null')
+    assert.ok(oubli === -1 || corps.search(rendu) < oubli, `« ${source} » est rendu apres l'oubli de la sauvegarde`)
+  }
+  // rendre `near`/`far` sans le dire à la matrice de projection ne rend rien du
+  // tout : la caméra garderait ses plans de coupe desserrés jusqu'au prochain
+  // changement de fov.
+  if (emprunts.some((e) => e.source.startsWith('camera.'))) {
+    assert.match(corps, /camera\.updateProjectionMatrix\(\)/, 'les plans de coupe rendus doivent etre appliques')
+  }
+})
+
 test('modes.js consulte le cadrage avant de compter ses crans', () => {
   const SRC_MODES = fs.readFileSync(path.join(RACINE, 'src/modes.js'), 'utf8')
   const geste = SRC_MODES.indexOf('_zoomGesture(e) {')

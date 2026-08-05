@@ -1150,6 +1150,20 @@ sun.castShadow = true
 // que le visiteur y touche — voir setShadowRes.)
 sun.shadow.mapSize.set(params.shadowRes, params.shadowRes)
 // wide enough to catch the slab's cast shadow spilling onto the base
+//
+// ⚠️ CE VOLUME EST CELUI D'UN SEUL BLOC, ET IL N'A JAMAIS SUIVI LE DAMIER. ±42
+// couvre le bloc central (±28) et sa retombée sur le socle ; un 3×3 s'étend à
+// ±84 et un 5×5 à ±140, donc les dalles voisines ne projettent rien et n'en
+// reçoivent rien. Ce n'est pas nouveau — c'est l'état depuis le premier bloc
+// voisin — mais le cadrage de tout le damier (voir `cadreLeDamier` plus bas)
+// met désormais les huit voisines à l'écran d'un seul coup, et rend donc la
+// coupure franchement visible au lieu de la laisser hors champ.
+//
+// L'ÉLARGIR N'EST PAS GRATUIT : la carte d'ombres garde sa résolution, donc
+// tripler le côté divise par trois la finesse de CHAQUE ombre, y compris celles
+// du bloc central qu'on regarde de près le reste du temps. Le vrai remède est
+// une cascade (CSM) ou un volume qui suit `empriseVivante()` avec une carte
+// agrandie d'autant — un chantier à lui seul, à mesurer avant de le promettre.
 sun.shadow.camera.left = -42
 sun.shadow.camera.right = 42
 sun.shadow.camera.top = 42
