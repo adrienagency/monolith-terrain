@@ -18,7 +18,7 @@ import * as THREE from 'three'
 import { Terrain, TERRAIN_SIZE } from './terrain.js'
 import { loadDem, demTilePx } from './dem.js'
 import { latLonToWorld } from './geo.js'
-import { buildSlabWalls } from './plinth.js'
+import { buildSlabWalls, computeSlab } from './plinth.js'
 import { exposantCoin } from './fenetre-clip.js'
 import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
 import { carreCouvrant, cellulesDuCarre, carreSousPlafond } from './damier-carre.js'
@@ -614,34 +614,29 @@ export class BlockGrid {
     this.scene.add(terrain.mesh)
 
     const cell = { i, j, terrain, dem }
-    // SOCLE : mêmes murs que le bloc principal (matériau partagé → suit le
-    // panneau Block), baseY plafonné au socle central pour un fond de damier
-    // plat sans percer un voisin plus profond
+    // ⚠️ S'INSCRIRE TOUT DE SUITE, AVANT egaliseHauteurs() (fin de méthode).
+    // Cette cellule doit ENTRER dans le plancher commun qu'elle va peut-être
+    // faire descendre, et recevoir elle-même ses murs — sinon egaliseHauteurs()
+    // ne la verrait pas encore : sync() ne fait son propre this.cells.set(key,
+    // cell) qu'APRÈS le retour de cette méthode. Ce second set (dans sync) ne
+    // fait ensuite que réécrire le MÊME objet à la MÊME clé : sans effet.
+    this.cells.set(`${i},${j}`, cell)
+    // BASE PROPRE DE LA CELLULE (Adrien) : le fond NATUREL de son relief, SANS
+    // aucun plancher imposé — c'est CETTE valeur, et pas celle déjà écrêtée par
+    // un plancher commun, que planchierCommun() doit lire. La mémoriser après
+    // écrêtage verrouillerait le plancher sur la première valeur rencontrée, et
+    // il ne redescendrait plus jamais (bug silencieux : tous les tests
+    // passeraient quand même, puisque rien ne le distingue à l'unité).
     const plinth = this.getPlinth?.()
-    if (plinth?.wallMat && plinth.group?.visible !== false) {
-      const cornerR = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (this.params.slabCorner ?? 0) * TERRAIN_SIZE))
-      const { geo } = buildSlabWalls(terrain.sample, {
-        depth: plinth.depth ?? 7,
-        resolution: p.resolution,
-        cornerR,
-        cornerExp: exposantCoin(this.params.slabCornerSmoothing), // même coin que la dalle centrale
-        baseYFloor: plinth.baseY,
-        // … et MÊME bande d'occlusion de contact. Sans ce partage, chaque
-        // voisine mesurait son propre point haut : une dalle de montagne cuisait
-        // un pied sombre quatre fois plus grand que sa voisine de plaine, et
-        // deux socles accolés cessaient de se ressembler (voir bandeContact).
-        aoBande: plinth.aoBande ?? null,
-      })
-      const walls = new THREE.Mesh(geo, plinth.wallMat)
-      // même raison, et même piège VSM, que le relief de la voisine ci-dessus :
-      // ces murs n'ont rien sous eux à ombrer et sortent du cadre de la caméra
-      // d'ombre avec le reste de la dalle. Les DEUX drapeaux, donc.
-      walls.castShadow = false
-      walls.receiveShadow = false
-      walls.position.set(i * TERRAIN_SIZE, 0, j * TERRAIN_SIZE)
-      this.scene.add(walls)
-      cell.walls = walls
-    }
+    const cornerR = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (this.params.slabCorner ?? 0) * TERRAIN_SIZE))
+    cell.baseYPropre = computeSlab(
+      terrain.sample,
+      plinth?.depth ?? 7,
+      p.resolution,
+      cornerR,
+      exposantCoin(this.params.slabCornerSmoothing)
+    ).baseY
+    cell.planchierPose = null // pas encore de murs : egaliseHauteurs() (fin de méthode) les pose
     // dès la naissance, la cellule porte le matériau/shader de la dalle centrale
     this._applyLook(cell, this.params)
     // masque côtier de LA cellule : chaque voisin a SON dem/footprint, le
@@ -665,7 +660,108 @@ export class BlockGrid {
         })
         .catch(() => {})
     }
+    // MURS DU DAMIER : posés ICI, au plancher COMMUN de TOUTES les cellules
+    // déjà là (et du bloc central) — jamais seulement de celle-ci. Une arrivée
+    // plus profonde que tout ce qui précède fait aussi RE-COULER les murs déjà
+    // posés des cellules voisines : c'est tout le sujet de cette méthode.
+    this.egaliseHauteurs()
     return cell
+  }
+
+  // LE PLANCHER COMMUN — « la hauteur des blocs sera toujours égale à celle du
+  // bloc dont la base va le plus bas » (Adrien).
+  //
+  // ⚠️ IL SE RECALCULE À CHAQUE ARRIVÉE, et c'est la difficulté : les cellules
+  // atterrissent une à une, sur plusieurs secondes. Une voisine plus profonde
+  // que toutes les précédentes oblige à RE-COULER les murs déjà posés — sinon
+  // le damier montre une marche à la jointure, exactement le défaut d'origine.
+  // Seuls les MURS sont refaits : le terrain, son MNT et ses textures ne
+  // bougent pas (c'est ce qui rend l'opération tenable).
+  planchierCommun() {
+    const socle = this.getPlinth?.()
+    let bas = Number.isFinite(socle?.baseY) ? socle.baseY : null
+    for (const cell of this.cells.values()) {
+      const b = cell.baseYPropre
+      if (!Number.isFinite(b)) continue
+      bas = bas === null ? b : Math.min(bas, b)
+    }
+    return bas
+  }
+
+  // Bâtit (ou re-bâtit) les murs de socle d'UNE cellule, au plancher imposé.
+  // Extrait de _buildCell (Tâche 3) : c'est le SEUL endroit qui pose des murs
+  // de damier, appelé à la naissance d'une cellule ET à chaque égalisation
+  // (egaliseHauteurs). Dispose l'ANCIENNE géométrie s'il y en avait une — mais
+  // JAMAIS le matériau `wallMat` : il est PARTAGÉ entre le socle central, les
+  // 24 murs voisins possibles et la jupe de zone isolée (plinth.js:423-438) —
+  // le disposer couperait tous les autres socles du damier d'un coup.
+  _rebuildCellWalls(cell, plancher) {
+    const plinth = this.getPlinth?.()
+    if (!plinth?.wallMat || plinth.group?.visible === false) return
+    const resolution = Math.min(this.params.resolution ?? NEIGHBOUR_RES, NEIGHBOUR_RES)
+    const cornerR = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (this.params.slabCorner ?? 0) * TERRAIN_SIZE))
+    const { geo } = buildSlabWalls(cell.terrain.sample, {
+      depth: plinth.depth ?? 7,
+      resolution,
+      cornerR,
+      cornerExp: exposantCoin(this.params.slabCornerSmoothing), // même coin que la dalle centrale
+      baseYFloor: plancher,
+      // … et MÊME bande d'occlusion de contact. Sans ce partage, chaque
+      // voisine mesurait son propre point haut : une dalle de montagne cuisait
+      // un pied sombre quatre fois plus grand que sa voisine de plaine, et
+      // deux socles accolés cessaient de se ressembler (voir bandeContact).
+      aoBande: plinth.aoBande ?? null,
+    })
+    if (cell.walls) {
+      const ancienne = cell.walls.geometry
+      cell.walls.geometry = geo
+      ancienne?.dispose() // jamais wallMat : PARTAGÉ, cf. plinth.js:423-438 — ne JAMAIS le disposer ici
+    } else {
+      const walls = new THREE.Mesh(geo, plinth.wallMat)
+      // même raison, et même piège VSM, que le relief de la voisine : ces murs
+      // n'ont rien sous eux à ombrer et sortent du cadre de la caméra d'ombre
+      // avec le reste de la dalle. Les DEUX drapeaux, donc.
+      walls.castShadow = false
+      walls.receiveShadow = false
+      walls.position.set(cell.i * TERRAIN_SIZE, 0, cell.j * TERRAIN_SIZE)
+      this.scene.add(walls)
+      cell.walls = walls
+    }
+  }
+
+  // Re-coule les murs de toutes les cellules dont le fond n'est pas au
+  // plancher commun. Rendu : le nombre de cellules refaites (0 = rien à
+  // faire), pour que l'appelant puisse mesurer le coût réel de l'égalisation.
+  //
+  // MESURÉ (compteur temporaire, damier 3×3 complet — 8 voisines qui
+  // atterrissent une à une, sur l'ordre RÉSEAU réel, sans rapport avec leur
+  // profondeur) : 9 reconstructions pour 8 cellules — sous les 24 qui
+  // signeraient un coût quadratique à revoir.
+  //
+  // ⚠️ CE CHIFFRE DÉPEND DE L'ORDRE D'ARRIVÉE, ET LE PIRE CAS EST QUADRATIQUE.
+  // Si les 8 voisines arrivent dans l'ordre EXACTEMENT inverse de leur
+  // profondeur (chaque nouvelle bat le record), la boucle rebâtit TOUTES les
+  // cellules déjà là à CHAQUE arrivée : mesuré, 36 reconstructions pour les
+  // 8 mêmes cellules — au-dessus du seuil. Ni « trier les arrivées » (l'ordre
+  // est celui du réseau, imposé) ni « différer d'une image » (main.js
+  // resynchronise à CHAQUE arrivée, séparée des autres par plusieurs
+  // secondes — il n'y a rien à regrouper dans une même image) ne s'applique
+  // ici sans toucher au séquencement de sync(), hors du périmètre de cette
+  // tâche (« ne pas améliorer au passage » — la Tâche 5 revient dans cet
+  // appel). Le cas réseau réel (voisines dont la profondeur ne corrèle pas à
+  // l'ordre d'arrivée) reste largement sous le seuil ; le pire cas est
+  // possible mais rare, et documenté ici pour que la Tâche 5 le sache.
+  egaliseHauteurs() {
+    const plancher = this.planchierCommun()
+    if (!Number.isFinite(plancher)) return 0
+    let refaites = 0
+    for (const cell of this.cells.values()) {
+      if (cell.planchierPose === plancher) continue
+      this._rebuildCellWalls(cell, plancher)
+      cell.planchierPose = plancher
+      refaites++
+    }
+    return refaites
   }
 
   // Hauteur du sol à un point monde QUELCONQUE du damier (drapage GPX hors du
