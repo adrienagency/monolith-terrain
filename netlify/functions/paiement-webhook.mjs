@@ -57,6 +57,66 @@ export function signatureValide(brut, entete, secret, toleranceS = 300, maintena
   return timingSafeEqual(Buffer.from(attendu, 'hex'), Buffer.from(recu, 'hex'))
 }
 
+/**
+ * Ce qu'on GARDE d'une session payée. Pure, donc testable — comme
+ * `signatureValide` au-dessus, et pour la même raison : c'est le contenu de cet
+ * objet qui décide de ce qu'on saura encore d'une vente dans six mois.
+ *
+ * ⚠️ `s.customer` EST L'IDENTIFIANT DE LA FICHE CLIENT que Stripe vient de
+ * créer (`customer_creation: 'always'`, côté caisse). Il était JETÉ : on ne
+ * gardait que l'email. Or c'est le seul fil qui reliera un jour un achat à un
+ * compte ShibuMap — un email se change, un `cus_…` ne bouge pas. Le perdre à
+ * chaque vente, c'est rendre le rattachement impossible rétroactivement.
+ *
+ * ⚠️ `s.metadata.compte` N'EXISTE PAS ENCORE, et on le lit quand même. Il n'y a
+ * pas de système de comptes dans ShibuMap ; le jour où il y en aura un, la
+ * caisse posera cette clé et les commandes la porteront SANS reprise de
+ * données. Lire une clé absente coûte une chaîne vide ; l'ajouter après coup
+ * coûte toutes les ventes déjà faites.
+ *
+ * ⚠️ `s.invoice` PEUT ÊTRE VIDE SANS QUE RIEN N'AILLE MAL. Stripe n'établit la
+ * facture qu'APRÈS encaissement, pas à la fin de la session : sur un moyen de
+ * paiement différé (SEPA, virement, Bacs…), la commande est écrite avant que la
+ * facture existe. Une chaîne vide ici ne veut donc pas dire « pas de facture »,
+ * elle veut dire « pas encore » — c'est l'événement `invoice.paid` qui la
+ * porterait, si on l'écoutait un jour.
+ *
+ * Les trois champs acceptent la forme CHAÎNE comme la forme DÉVELOPPÉE (`{ id }`) :
+ * une requête avec `expand` renvoie l'objet entier, et on ne veut pas stocker
+ * `[object Object]` dans le journal des ventes.
+ */
+export function commandeDepuisSession(s, maintenant = new Date()) {
+  const pays = s.customer_details?.address?.country || ''
+  // ⚠️ Stripe Checkout n'offre AUCUN moyen de restreindre le PAYS DE
+  // FACTURATION par la config (seule l'adresse de LIVRAISON l'accepte, via
+  // shipping_address_collection). Un client depuis un pays exclu peut donc
+  // toujours payer. On ne bloque pas le paiement — l'argent est déjà pris —
+  // mais on bloque la LIVRAISON et on alerte Adrien : la conformité TVA/
+  // légale de ce pays n'est pas résolue, une régularisation manuelle
+  // (remboursement ou traitement à part) doit être décidée au cas par cas.
+  const bloque = PAYS_EXCLUS.includes(pays)
+
+  const ident = (v) => (typeof v === 'string' ? v : v?.id || '')
+
+  return {
+    session: s.id,
+    payeLe: maintenant.toISOString(),
+    centimes: s.amount_total,
+    devise: s.currency,
+    email: s.customer_details?.email || '',
+    client: ident(s.customer),
+    compte: s.metadata?.compte || '',
+    facture: ident(s.invoice),
+    pays,
+    article: s.metadata?.article || '',
+    livrable: s.metadata?.livrable || '',
+    format: s.metadata?.format || '',
+    retour: s.metadata?.retour || '',
+    livree: false,
+    bloque,
+  }
+}
+
 export default async (req) => {
   if (req.method !== 'POST') return new Response('méthode', { status: 405 })
 
@@ -85,30 +145,8 @@ export default async (req) => {
   const cle = `session/${s.id}`
   if (await journal.get(cle)) return new Response('déjà traité', { status: 200 })
 
-  const pays = s.customer_details?.address?.country || ''
-  // ⚠️ Stripe Checkout n'offre AUCUN moyen de restreindre le PAYS DE
-  // FACTURATION par la config (seule l'adresse de LIVRAISON l'accepte, via
-  // shipping_address_collection). Un client depuis un pays exclu peut donc
-  // toujours payer. On ne bloque pas le paiement — l'argent est déjà pris —
-  // mais on bloque la LIVRAISON et on alerte Adrien : la conformité TVA/
-  // légale de ce pays n'est pas résolue, une régularisation manuelle
-  // (remboursement ou traitement à part) doit être décidée au cas par cas.
-  const bloque = PAYS_EXCLUS.includes(pays)
-
-  const commande = {
-    session: s.id,
-    payeLe: new Date().toISOString(),
-    centimes: s.amount_total,
-    devise: s.currency,
-    email: s.customer_details?.email || '',
-    pays,
-    article: s.metadata?.article || '',
-    livrable: s.metadata?.livrable || '',
-    format: s.metadata?.format || '',
-    retour: s.metadata?.retour || '',
-    livree: false,
-    bloque,
-  }
+  const commande = commandeDepuisSession(s)
+  const { pays, bloque } = commande
   // On écrit AVANT d'envoyer quoi que ce soit : si l'email échoue, la commande
   // existe et se rattrape à la main. L'inverse perdrait la trace d'un paiement.
   await journal.setJSON(cle, commande)

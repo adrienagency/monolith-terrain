@@ -85,6 +85,59 @@ export default async (req) => {
     // pas de compte.
     customer_creation: 'always',
     billing_address_collection: 'required',
+    // ═════════════════════════════════════════════════════════════════════════
+    // LA FACTURE NUMÉROTÉE (ajoutée le 2026-08-05)
+    // ═════════════════════════════════════════════════════════════════════════
+    //
+    // Un club ou une collectivité qui achète une affiche demandera une facture,
+    // pas un reçu. `invoice_creation` la fait établir, numéroter et rendre en
+    // PDF par Stripe après le paiement.
+    //
+    // ⚠️ IL N'EXISTE QU'EN `mode: 'payment'` — vérifié dans la référence API
+    // (Create a Checkout Session) : ni `subscription` (qui facture tout seul),
+    // ni `setup`. C'est notre mode, donc rien ne bloque ici.
+    //
+    // ⚠️ ET LES DEUX PRÉALABLES SONT DÉJÀ RÉUNIS DEUX LIGNES PLUS HAUT, c'est
+    // ce qui rend l'activation sûre : une facture a besoin d'une FICHE CLIENT
+    // (`customer_creation: 'always'`) et d'une ADRESSE DE FACTURATION
+    // (`billing_address_collection: 'required'`). Rien de nouveau n'est demandé
+    // à l'acheteur : le tunnel collecte déjà tout ce que la facture exige, donc
+    // aucun paiement qui aboutit aujourd'hui ne peut échouer à cause de ceci.
+    //
+    // ⚠️ CE N'EST PAS GRATUIT. Les factures post-paiement de Checkout ne font
+    // PAS partie de Stripe Invoicing et se facturent à part : 0,4 % du total,
+    // plafonné à 2 € par facture. Soit ~8 centimes sur l'affiche à 19 €, ~36
+    // centimes sur celle à 89 €. C'est le prix de la facture, à assumer sur
+    // chaque vente — pas une option qu'on active en passant.
+    //
+    // ⚠️ ET L'ENVOI DÉPEND DU DASHBOARD, PAS DU CODE. Sans « Paiements réussis »
+    // coché dans Paramètres > Entreprise > E-mails aux clients, la facture est
+    // bien créée et numérotée mais AUCUN MAIL NE PART — et rien ici ne le dira.
+    // À cocher côté RÉEL, pas seulement en test (les deux modes ont leurs
+    // propres réglages).
+    //
+    // ⚠️ PAS DE `footer` NI DE `account_tax_ids` ICI, ET C'EST DÉLIBÉRÉ. La
+    // mention de TVA qu'une facture française doit porter dépend du régime, et
+    // le catalogue le dit noir sur blanc : la franchise transfrontalière est
+    // « le point que le SIE doit confirmer ». Écrire un article du CGI dans du
+    // code avant cette confirmation, c'est imprimer une affirmation fiscale
+    // fausse sur un document opposable. Ce texte se pose dans le Dashboard
+    // (Paramètres > Facturation), là où Adrien peut le corriger sans
+    // redéploiement, le jour où le régime est tranché.
+    invoice_creation: {
+      enabled: true,
+      invoice_data: {
+        description: art.libelle,
+        // Les mêmes clés que la session : sans elles, une facture retrouvée
+        // dans le Dashboard ne dit ni QUOI a été vendu, ni à quelle commande
+        // ShibuMap elle se rattache.
+        metadata: {
+          article: corps.article,
+          livrable: art.livrable,
+          format: art.format || '',
+        },
+      },
+    },
     // ⚠️ MANAGED PAYMENTS EST DÉSACTIVÉ VOLONTAIREMENT, ET C'EST UNE DÉCISION,
     // PAS QU'UN CONTOURNEMENT. Découvert en production le 2026-08-04 : le compte
     // Stripe l'a actif par défaut (Stripe devient marchand officiel — il gère
@@ -146,18 +199,42 @@ export default async (req) => {
     params.shipping_address_collection = { allowed_countries: PAYS_AUTORISES }
   }
 
-  const r = await fetch(`${STRIPE}/checkout/sessions`, {
+  const creerSession = (p, marque = '') => fetch(`${STRIPE}/checkout/sessions`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${cle}`,
       'content-type': 'application/x-www-form-urlencoded',
       // ⚠️ CLÉ D'IDEMPOTENCE : un double-clic, un réseau qui bégaie, et sans
       // elle on crée deux sessions pour un seul achat.
-      'idempotency-key': `${corps.article}:${corps.retour || ''}:${Math.floor(Date.now() / 6000)}`,
+      'idempotency-key': `${corps.article}:${corps.retour || ''}:${Math.floor(Date.now() / 6000)}${marque}`,
     },
-    body: encode(params),
+    body: encode(p),
   })
-  const s = await r.json()
+
+  let r = await creerSession(params)
+  let s = await r.json()
+
+  // ⚠️ LE REPLI SANS FACTURE — parce qu'ici, une erreur ne coûte pas un rapport
+  // de bug, elle coûte une VENTE : l'acheteur verrait un message d'erreur au
+  // lieu de la page de paiement. Tout ce que la documentation exige est réuni
+  // plus haut, mais la disponibilité réelle d'une option se juge sur le COMPTE,
+  // et ce compte encaisse pour de vrai. Si Stripe refuse la facture, on refait
+  // donc la session SANS elle plutôt que de renvoyer une 502 : la vente passe,
+  // la facture manque, et le journal le crie.
+  //
+  // LE FILET EST ÉTROIT À DESSEIN : on ne rejoue que si Stripe désigne
+  // explicitement `invoice_creation`. Toute autre erreur remonte telle quelle,
+  // exactement comme avant.
+  //
+  // La seconde tentative porte une clé d'idempotence DISTINCTE : la première
+  // est brûlée par la requête refusée.
+  if (!r.ok && /invoice_creation/.test(`${s?.error?.param || ''} ${s?.error?.message || ''}`)) {
+    console.error('[paiement] ⚠️ facture refusée par Stripe, session refaite SANS facture :', s?.error?.message)
+    const { invoice_creation: _sansFacture, ...reste } = params
+    r = await creerSession(reste, ':sf')
+    s = await r.json()
+  }
+
   if (!r.ok) {
     console.error('[paiement] Stripe a refusé :', s?.error?.message)
     return json({ ok: false, erreur: s?.error?.message || 'Stripe' }, 502)
