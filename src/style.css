@@ -642,7 +642,9 @@ body.dark .ce-notice {
   display: block;
   width: 100%;
   height: 96px;
-  cursor: crosshair;
+  /* le profil entier est cliquable depuis la task 9 (clic = reprendre la
+     lecture à cet endroit) : le curseur l'annonce, seule affordance visible */
+  cursor: pointer;
   padding: 0 6px 8px;
   box-sizing: border-box;
 }

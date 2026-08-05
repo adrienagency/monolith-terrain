@@ -49,6 +49,7 @@ class FakeDoc {
 let parseGpx
 let frameTrack
 let indexALAbscisse
+let fractionAuClic
 let stepHeadFollow
 let pickKmInterval
 let profileTitle
@@ -69,6 +70,7 @@ before(async () => {
     parseGpx,
     frameTrack,
     indexALAbscisse,
+    fractionAuClic,
     stepHeadFollow,
     pickKmInterval,
     profileTitle,
@@ -173,6 +175,24 @@ test('indexALAbscisse survit aux cas dégénérés', () => {
   // hors bornes : on reste dans le tracé
   assert.equal(indexALAbscisse(-3, [0, 1, 2]), 0)
   assert.equal(indexALAbscisse(9, [0, 1, 2]), 2)
+})
+
+// ---- clic sur le profil : x de canevas -> fraction de DISTANCE ------------
+
+test('un clic sur le profil rend la fraction de DISTANCE, pas de largeur', () => {
+  // le profil est gradue en abscisse curviligne : x/largeur EST deja la fraction
+  assert.equal(fractionAuClic(0, 800, 0), 0)
+  assert.equal(fractionAuClic(400, 800, 0), 0.5)
+  assert.equal(fractionAuClic(900, 800, 0), 1, 'hors bornes : on borne')
+})
+
+test('fractionAuClic retire le padding horizontal avant de diviser (panneau HUD, padX > 0)', () => {
+  // même formule que X(i) dans _drawProfile (padX + fraction*(largeur-2*padX)),
+  // inversée : le padding se retranche des DEUX côtés avant la division
+  assert.equal(fractionAuClic(8, 800, 8), 0) // bord gauche utile
+  assert.equal(fractionAuClic(792, 800, 8), 1) // bord droit utile (800 - 8)
+  assert.equal(fractionAuClic(400, 800, 8), 0.5) // milieu de la zone utile (784 px) depuis x=8
+  assert.equal(fractionAuClic(0, 800, 8), 0, 'avant le padding : borne a 0, pas negatif')
 })
 
 test('stepHeadFollow snaps (not eases) on the first call — no fly-in from a stale spot', () => {

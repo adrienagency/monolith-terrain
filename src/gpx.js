@@ -233,6 +233,26 @@ export function indexALAbscisse(t, cumKm) {
   return bas
 }
 
+// padding horizontal du profil quand il n'est PAS embarqué (panneau HUD
+// flottant) — même valeur que le `pad` local de _drawProfile, nommée ici
+// pour n'exister qu'à UN endroit : c'est ELLE qui définit X(i), et c'est
+// fractionAuClic() ci-dessous qui doit en rendre l'exacte réciproque.
+export const PROFILE_PAD_X = 8
+
+// L'INVERSE EXACT DE X(i) DANS _drawProfile — même piège qu'indexALAbscisse
+// ci-dessus, à un cran plus bas : X(i) place l'abscisse i à
+// `padX + (cumKm[i]/totKm) * (largeur - 2*padX)`. Cliquer à `x` doit donc
+// rendre la MÊME fraction de distance que celle qui a servi à dessiner ce
+// point-là, pas une fraction de pixels bruts — sans quoi le padding (nul
+// embarqué, 8 px en HUD flottant) décale systématiquement le point cliqué.
+// Le résultat se pose tel quel dans `headT` : c'est déjà une fraction
+// d'abscisse curviligne, aucune conversion d'index ne s'intercale ici.
+export function fractionAuClic(x, largeur, padX) {
+  const utile = largeur - padX * 2
+  if (!(utile > 0)) return 0
+  return THREE.MathUtils.clamp((x - padX) / utile, 0, 1)
+}
+
 // One step of critically-damped exponential follow of the marker's OWN
 // transform toward the true reveal-head vertex (mutates + returns `disp`).
 // This is the "smoothing in TIME, not space" fix: the target itself is
@@ -630,6 +650,21 @@ export class GpxLayer {
       this.setHover(i, false)
     })
     this.profileCanvas.addEventListener('pointerleave', () => this.setHover(-1, false))
+    // ⚠️ CLIC-POUR-REPRENDRE (task 9) — GpxLayer se contente de convertir le
+    // pixel cliqué en fraction de DISTANCE (fractionAuClic, réciproque exacte
+    // de X(i) dans _drawProfile) et de prévenir main.js par le MÊME canal que
+    // le survol (params.onHoverIndex existe déjà pour ça). Positionner la
+    // tête ET relancer lecture + suivi caméra vivent dans main.js : c'est là
+    // que se trouvent gpxLayer.play()/engageGpxFollow() et leurs gardes
+    // (peutEngagerLeSuivi, gpxFollowCoupeParFinale) — les dupliquer ici
+    // créerait un second chemin susceptible de diverger du bouton Lecture.
+    this.profileCanvas.addEventListener('click', (e) => {
+      if (!this.track) return
+      const r = this.profileCanvas.getBoundingClientRect()
+      const emb = !!this.profileCanvas.closest?.('.cb-embedded')
+      const f = fractionAuClic(e.clientX - r.left, r.width, emb ? 0 : PROFILE_PAD_X)
+      this.params.onSeekRequest?.(f)
+    })
     // le profil est redessiné quand SA BOÎTE change, pas seulement quand la
     // trace change : embarqué dans la barre course, il passe d'un panneau
     // flottant étroit à une zone pleine largeur — sans ça il garderait le
@@ -1512,8 +1547,10 @@ export class GpxLayer {
     // bords alors que le parti pris écrit en tête de course-bar.css est que le
     // profil « est le sujet, il occupe la moitié de la barre et respire ».
     // Autonome (HUD flottant), le panneau n'a pas de zone autour de lui : il
-    // garde ses 8 px.
-    const padX = emb ? 0 : pad
+    // garde ses 8 px. Valeur PARTAGÉE avec fractionAuClic (voir plus haut) —
+    // c'est cette même constante que le clic doit retrancher pour retomber
+    // sur la fraction de distance qui a servi à placer X(i) ici.
+    const padX = emb ? 0 : PROFILE_PAD_X
     const X = (i) => padX + (this.track.cumKm[i] / totKm) * (W - padX * 2)
     // ⚠️ LA RÉSERVE DU HAUT DOIT LOGER LA PASTILLE DE SURVOL, PAS LA MOITIÉ.
     // Elle valait 10 px pour une pastille posée à `pad + 1` et haute de 17 px,
@@ -1661,7 +1698,18 @@ export class GpxLayer {
   pointerMove(mouseNdc, clientX, clientY) {
     // group.visible covers the "show track" toggle — line.visible alone stays
     // true when the layer is hidden, which kept the DOM tooltip alive
-    if (!this.track?.world || !this.line || !this.group.visible) return
+    // ⚠️ `this.line` NE DOIT PLUS FIGURER DANS CETTE GARDE (task 9) — Line2
+    // n'est construit QUE quand le ruban n'est PAS utilisé (voir
+    // _rebuildSuite : `if (utiliseRuban) return this._rebuildDecors(...)`),
+    // et le ruban est le rendu PAR DÉFAUT (gpxRuban !== false, gradient
+    // éteint par défaut). L'ancienne garde exigeait `this.line` : sous le
+    // rendu par défaut il valait toujours null, donc ce picking — et tout ce
+    // qui en dépend, y compris le clic-pour-reprendre de cette tâche — ne
+    // s'exécutait JAMAIS. Trouvé en vérifiant au navigateur (hoverIdx resté
+    // à -1 sur tout un tracé de démo, this.line confirmé null). Le raycasting
+    // ci-dessous ne lit que `this.track.world`, jamais `this.line` : rien
+    // d'autre n'en dépendait.
+    if (!this.track?.world || !this.group.visible) return
     this._ray.setFromCamera(mouseNdc, this.camera)
     const ray = this._ray.ray
     // ⚠️ LE RAYON EST EN MONDE, `track.world` EST EN CHAMP. En mode continu le

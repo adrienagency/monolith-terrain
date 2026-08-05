@@ -2004,7 +2004,17 @@ window.addEventListener('pointermove', (e) => {
   const nx = (e.clientX / window.innerWidth) * 2 - 1
   const ny = -((e.clientY / window.innerHeight) * 2 - 1)
   mouse.set(nx, ny)
-  if (modes && modes.mode === 'surface') gpxLayer.pointerMove(mouse, e.clientX, e.clientY)
+  if (modes && modes.mode === 'surface') {
+    gpxLayer.pointerMove(mouse, e.clientX, e.clientY)
+    // ⚠️ SEULE AFFORDANCE DU CLIC-POUR-REPRENDRE (task 9) — hoverIdx vient
+    // d'être tenu à jour ci-dessus par le picking 3D déjà en place
+    // (GpxLayer.pointerMove) : rien n'annonçait que le ruban est cliquable,
+    // d'où ce curseur, réinitialisé en dehors du survol pour ne pas rester
+    // collé une fois la souris repartie.
+    renderer.domElement.style.cursor = gpxLayer.activeLayer?.gpx?.hoverIdx >= 0 ? 'pointer' : ''
+  } else if (renderer.domElement.style.cursor) {
+    renderer.domElement.style.cursor = ''
+  }
 })
 
 // click-to-dive: a plain click on the map (NOT an orbit drag) plunges one level
@@ -2056,6 +2066,21 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     return
   }
   if (modes.mode !== 'surface') return
+  // ⚠️ LE CLIC SUR LE RUBAN REPREND LA LECTURE, ET PASSE AVANT LA PLONGÉE
+  // (task 9). hoverIdx est déjà tenu à jour en continu par le picking 3D du
+  // survol (pointermove ci-dessus, GpxLayer.pointerMove) : pas de second
+  // raycast ici, juste la MÊME conversion distance que partout ailleurs dans
+  // l'affichage (cumKm[i]/totKm) — hoverIdx désigne déjà un sommet réel, pas
+  // besoin d'indexALAbscisse qui va dans l'autre sens (fraction -> sommet).
+  const traceHoverIdx = gpxLayer.activeLayer?.gpx?.hoverIdx ?? -1
+  const traceCumKm = gpxLayer.activeLayer?.gpx?.track?.cumKm
+  if (traceHoverIdx >= 0 && traceCumKm?.length) {
+    const totKm = traceCumKm[traceCumKm.length - 1]
+    if (totKm > 0) {
+      seekAndResumeCourse(traceCumKm[traceHoverIdx] / totKm)
+      return
+    }
+  }
   if (params.source !== 'real' || !dem || params.demZoom >= userFineZoom) return // already at finest detail
   focusRay.setFromCamera(_clickNdc, camera)
   const hitDist = focusRayHit(focusRay.ray.origin, focusRay.ray.direction, terrain.sample, { halfExtent: TERRAIN_SIZE / 2 })
@@ -5179,6 +5204,40 @@ function stopPlay() {
   _courseDemandee = false
   syncCourseBarMode()
 }
+
+// ---- Clic-pour-reprendre (task 9) : profil GPX ET ruban 3D partagent CE
+// point d'entrée UNIQUE — gpx.js (clic profil, params.onSeekRequest) et le
+// pointerup ci-dessus (clic ruban) se contentent de trouver `f`, une
+// fraction de DISTANCE (jamais un rang de sommet — voir indexALAbscisse en
+// tête de gpx.js). Ce qui suit REJOUE le bouton Lecture (gpxLayer.play() +
+// engageGpxFollow(), mêmes gardes que togglePlay() ci-dessus), positionné
+// plutôt que reparti de zéro.
+//
+// ⚠️ L'ORDRE COMPTE — position AVANT play(). gpx.js play()/GpxLayerManager
+// play() ne remettent headT à 0 QUE s'il valait déjà 1 (fin de parcours) :
+// en posant `f` d'abord (toujours < 1 pour un clic réel), on empêche play()
+// d'écraser l'endroit choisi. Poser `f` APRÈS aurait le même effet visuel
+// dans le cas courant, mais réintroduirait le cas où le clic tombe pile en
+// fin de tracé — play() verrait alors encore l'ancien headT >= 1 et
+// repartirait du début au lieu de rester où l'utilisateur a cliqué.
+//
+// ⚠️ NE RÉIMPOSE PAS LE SUIVI CAMÉRA SUR UN REFUS EXPLICITE. engageGpxFollow
+// relit params.gpxFollow tel quel : si l'utilisateur a cliqué « ✕ Quitter le
+// suivi », gpxFollow vaut false et peutEngagerLeSuivi (suivi-course.js) ne
+// laisse rien passer — la lecture reprend seule, sans caméra imposée.
+function seekAndResumeCourse(f) {
+  if (!modes || modes.mode !== 'surface' || modes.busy) return
+  if (!gpxLayer?.track) return
+  gpxLayer.setHeadAt(f)
+  gpxLayer.play()
+  engageGpxFollow()
+  // ⚠️ PAS `_courseDemandee = true` À LA MAIN ICI — voir le commentaire de
+  // syncCourseBarMode() : l'entrée en mode course SE DÉDUIT de la lecture
+  // (gpxLayer.isPlaying()), elle ne se pose plus à la main depuis la
+  // régression qu'un `_courseDemandee` écrit à la main avait causée ailleurs.
+  syncCourseBarMode()
+}
+params.onSeekRequest = (f) => seekAndResumeCourse(f)
 
 // ------------------------------------------------------------------ GUI
 
