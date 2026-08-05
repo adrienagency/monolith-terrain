@@ -647,3 +647,211 @@ test('modes.js consulte le cadrage avant de compter ses crans', () => {
   assert.ok(appel > geste, 'le hook est branche dans le geste de molette')
   assert.ok(compteur > appel, 'et il passe AVANT que le geste ne soit compte comme frais')
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⑧ LES PORTES DE SORTIE — la propriété que ⑦ NE PORTAIT PAS
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// La propriété ⑦ vérifie que tout ce que le cadrage EMPRUNTE lui est RENDU
+// dans `quitteCadrageDamier`. Elle est restée verte pendant que deux portes de
+// sortie ne passaient JAMAIS par cette fonction. Le trou est exact : ⑦ regarde
+// la CAISSE, pas les PORTES.
+//
+// Le défaut, en entier, par la porte du bouton globe : `modes.enterOrbit` SAUVE
+// `camera.near` dans `_surfCam` (modes.js) et le REPOSE au retour de plongée,
+// pendant que `maxDistance` retombe, lui, à 150. Parti avec le near desserré du
+// cadrage (≈ 122 unités sur un 3×3), on revient donc avec une caméra à ~145
+// unités derrière un plan de coupe à 122 : toute la moitié proche de la carte
+// est tranchée, et rien dans la vue orbitale ne dit d'où ça vient.
+//
+// ⚠️ ET ON NE VEUT PAS D'UNE LISTE DE DEUX NOMS. Ce chantier a écrit TROIS FOIS
+// le même correctif sur trois réglages différents avant de comprendre que la
+// faille appartenait au CHEMIN et non au réglage (l'histoire est racontée en
+// tête de test/damier-uniformes.test.js). Une liste de portes connues aurait
+// exactement le même destin : elle serait juste le jour où on l'écrit. Les
+// portes sont donc DÉRIVÉES de main.js, en trois temps.
+//
+//   ① QUI PILOTE LA CAMÉRA. La liste est DÉJÀ dans le code, et elle s'entretient
+//     toute seule : c'est la garde qui décide, à chaque image, s'il faut faire
+//     avancer un mouvement de caméra (`… .active || … .active) →
+//     updateCameraMotion(dt)`). Un pilote absent de cette garde ne bougerait
+//     jamais la caméra — donc il n'existe pas. On y ajoute `modes`, et c'est le
+//     seul nom écrit à la main : ce n'est pas un pilote parmi les autres, c'est
+//     LA MACHINE DE MODES, et c'est par elle que le défaut est arrivé.
+//
+//   ② QUOI LEUR DEMANDER. Pas une liste de verbes de DÉMARRAGE — un verbe
+//     inventé demain (`shots.rejoue()`) en tomberait dehors et personne ne le
+//     saurait —, mais la liste des verbes INERTES. Tout le reste est une porte
+//     jusqu'à preuve écrite du contraire, donc la propriété échoue du bon côté :
+//     un ajout non déclaré ROUGIT au lieu de passer.
+//
+//   ③ OÙ. Sur le CHEMIN qui mène à l'appel, à l'intérieur de sa fonction —
+//     c'est-à-dire ce qui s'exécute forcément avant lui, les branches voisines
+//     déjà refermées ôtées. Deux raisons de ne pas se contenter du corps entier
+//     de la fonction : rendre APRÈS avoir confié la caméra ne rend rien
+//     (`enterOrbit` a déjà photographié le near desserré), et une restitution
+//     posée dans l'autre branche d'un `if` ne s'exécute jamais sur ce chemin-là.
+//     Le clic sur la carte a exactement cette forme : plongée depuis le globe
+//     dans une branche, plongée depuis la surface dans l'autre.
+
+// ⚠️ LES COMMENTAIRES SONT DE LA PROSE, PAS DU CODE — même piège que
+// test/damier-uniformes.test.js. main.js CITE `modes.flyTo` et
+// `quitteCadrageDamier` dans les commentaires qui expliquent ce défaut-ci :
+// balayés tels quels, ils blanchiraient les portes qu'ils décrivent.
+// Le compte de lignes est préservé (les messages d'échec donnent un numéro).
+const codeSeul = (src) => src
+  .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+  .replace(/(^|[^:'"`])\/\/.*$/gm, '$1')
+const CODE_MAIN = codeSeul(SRC_MAIN)
+
+// ⚠️ CES DEUX FONCTIONS SONT RECOPIÉES DE test/damier-uniformes.test.js, et
+// c'est délibéré : ce fichier-ci ne doit RIEN pouvoir casser dans le test
+// d'architecture du damier. Une dépendance partagée ferait de tout réglage fin
+// ici une modification là-bas.
+const MOTS_DE_CONTROLE = new Set(['if', 'for', 'while', 'switch', 'catch', 'else', 'do', 'try', 'return'])
+function nomDUnite(avant) {
+  return avant.match(/\bfunction\s+([\w$]+)\s*\([^()]*\)$/)?.[1]
+    || avant.match(/([A-Za-z_$][\w$]*)\s*:\s*(?:async\s*)?\(?[^()]*\)?\s*=>$/)?.[1]
+    || avant.match(/(?:const|let|var)\s+([\w$]+)\s*=\s*(?:async\s*)?\(?[^()]*\)?\s*=>$/)?.[1]
+    || avant.match(/([A-Za-z_$][\w$]*)\s*\([^()]*\)\s*$/)?.[1]
+    || '(anonyme)'
+}
+// La plus petite fonction qui contient `idx`. Pas le fichier, pas la fonction de
+// premier niveau : la moitié des portes de la caméra sont des `flyTo: (…) => {}`
+// au milieu d'un objet de contexte de panneau, et une granularité plus large les
+// blanchirait grâce au voisin d'à côté qui, lui, rend bien l'emprunt.
+function uniteEnglobante(src, idx) {
+  let profondeur = 0
+  for (let i = idx; i >= 0; i--) {
+    const c = src[i]
+    if (c === '}') { profondeur++; continue }
+    if (c !== '{') continue
+    if (profondeur > 0) { profondeur--; continue }
+    const avant = src.slice(Math.max(0, i - 300), i).replace(/\s+$/, '')
+    const tete = avant.match(/([A-Za-z_$][\w$]*)\s*\([^()]*\)\s*$/)
+    const estFonction = /=>$/.test(avant)
+      || /\bfunction\b[^()]*\([^()]*\)$/.test(avant)
+      || (tete && !MOTS_DE_CONTROLE.has(tete[1]))
+    if (!estFonction) continue // bloc de contrôle : on remonte encore
+    let d = 0
+    for (let j = i; j < src.length; j++) {
+      if (src[j] === '{') d++
+      else if (src[j] === '}' && --d === 0) return { debut: i, texte: src.slice(i, j + 1), nom: nomDUnite(avant) }
+    }
+    return { debut: i, texte: src.slice(i), nom: nomDUnite(avant) }
+  }
+  return null
+}
+
+// Ce qui s'exécute FORCÉMENT avant `fin`, dans l'unité qui commence à `debut` :
+// on remonte le texte à l'envers en SAUTANT tout bloc déjà refermé (la branche
+// `if` d'à côté, une boucle terminée). Sans ce saut, une restitution posée dans
+// une branche voisine blanchirait la branche qu'on regarde.
+//
+// ⚠️ CE QUE CETTE APPROXIMATION LAISSE PASSER, et c'est écrit ici pour que
+// personne ne la croie plus forte qu'elle n'est : un `if (x) quitteCadrageDamier()`
+// SANS accolades compte comme rendu, alors qu'il est conditionnel. Le test lit
+// du texte, il ne suit pas le flot de contrôle.
+function cheminAvant(src, fin, debut) {
+  let out = ''
+  let i = fin
+  while (i > debut) {
+    const c = src[--i]
+    if (c === '}') {
+      let d = 1
+      while (i > debut && d > 0) { const k = src[--i]; if (k === '}') d++; else if (k === '{') d-- }
+      continue
+    }
+    out = c + out
+  }
+  return out
+}
+
+// ② LES VERBES INERTES — À MODIFIER CONSCIEMMENT, JAMAIS PAR RÉFLEXE.
+// Une entrée ici déclare qu'un appel NE CONFIE PAS la caméra : soit il l'ARRÊTE
+// (on ne peut pas trop rendre), soit il ne fait qu'entretenir un mouvement DÉJÀ
+// commencé — auquel cas la porte qui l'a commencé a déjà rendu l'emprunt.
+// Chaque ligne porte sa raison.
+const VERBES_INERTES = {
+  stop: 'arrête un pilote — un cadrage qui survit à un arrêt est le cas NORMAL (la molette et le bouton iso le gèrent)',
+  cancel: 'même chose que stop',
+  update: 'entretien par image d\'un mouvement déjà commencé',
+  updateAt: 'idem, piloté par l\'horloge de lecture GPX',
+  setSpeed: 'un réglage de vitesse, pas un départ',
+  announce: 'écrit une ligne de HUD',
+  retarget: 'change la CIBLE d\'un vol déjà en cours (changement d\'étape), sans le recommencer — voir gpxLayer.onTrackTransition',
+  followPivot: 'lecture de la pose du rail de suivi',
+  syncToCamera: 'recale le rail sur la caméra que l\'utilisateur vient de bouger',
+}
+
+test('toute porte qui confie la camera rend D\'ABORD ce que le cadrage a emprunte', () => {
+  // ① la liste des pilotes, LUE dans la garde par image de main.js
+  const garde = CODE_MAIN.split('\n').find((l) => /\bupdateCameraMotion\(dt\)/.test(l) && /\.active\b/.test(l))
+  assert.ok(garde, 'la garde par image « … .active … updateCameraMotion(dt) » a disparu ou changé de forme — ce test ne sait plus qui pilote la camera')
+  const pilotes = new Set([...garde.matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\.active\b/g)].map((m) => m[1]))
+  assert.ok(pilotes.size >= 4, `la garde par image devrait nommer au moins quatre pilotes (lu : ${[...pilotes].join(', ')})`)
+  // …et la machine de modes, le seul nom ecrit a la main (voir l'en-tete ①)
+  pilotes.add('modes')
+
+  const appels = /(?<![.\w$])([A-Za-z_$][\w$]*)\s*\??\.\s*([A-Za-z_$][\w$]*)\s*\(/g
+  const portes = []
+  const trous = []
+  let m
+  while ((m = appels.exec(CODE_MAIN))) {
+    if (!pilotes.has(m[1]) || m[2] in VERBES_INERTES) continue
+    const ligne = CODE_MAIN.slice(0, m.index).split('\n').length
+    const u = uniteEnglobante(CODE_MAIN, m.index)
+    assert.ok(u, `main.js:${ligne} — ${m[1]}.${m[2]}() n'est dans aucune fonction : le decoupage ne suit plus le fichier`)
+    // ③ la restitution doit etre sur le CHEMIN qui mene a l'appel
+    portes.push(`${u.nom} → ${m[1]}.${m[2]}()`)
+    if (!cheminAvant(CODE_MAIN, m.index, u.debut).includes('quitteCadrageDamier()')) {
+      trous.push(`main.js:${ligne} — « ${u.nom} » confie la camera a ${m[1]}.${m[2]}() sans avoir rendu l'emprunt du cadrage`)
+    }
+  }
+  // ⚠️ LE CANARI. Sans lui, un renommage de pilote rendrait ce test vert en
+  // ayant cessé de regarder — la panne la plus silencieuse qu'un test de source
+  // puisse avoir. Onze portes le 2026-08-05.
+  assert.ok(portes.length >= 10, `trop peu de portes trouvees (${portes.length}) : le balayage ne lit plus main.js\n${portes.join('\n')}`)
+  assert.deepEqual(trous, [], `\n${trous.join('\n')}\n\n⚠️ Une porte de sortie du cadrage du damier ne rend pas son emprunt.\nAppeler quitteCadrageDamier() AVANT de confier la camera (voir le bouton globe),\nou — si cet appel ne confie vraiment rien — declarer son verbe dans VERBES_INERTES avec sa raison.`)
+})
+
+// ⚠️ ET LES TROIS SORTIES HISTORIQUES, NOMMÉMENT. La propriété ci-dessus ne les
+// voit PAS : aucune des trois ne confie la caméra à un pilote nommé — le bouton
+// iso et le cadrage passent par le `flyTo` LOCAL (une fonction, pas un objet),
+// l'auto-fermeture ne fait rien du tout. Elles étaient pourtant les trois seules
+// à rendre l'emprunt quand la revue a trouvé le défaut, et la mutation l'a
+// montré : les retirer une par une ne faisait rougir personne. Une propriété qui
+// attrape le futur ne dispense pas de tenir le présent.
+//
+// ⚠️ ET LE `flyTo` LOCAL N'EST DÉLIBÉRÉMENT PAS UNE PORTE. Les presets de vue
+// (pavé numérique) volent « au MÊME rayon, seul l'angle change » : leur rendre
+// `maxDistance` en plein cadrage ramènerait la butée à 150 sous une caméra
+// posée à ~490, et `controls.update()` la happerait d'un coup à l'image
+// suivante. Un à-coup visible pour corriger un plan de coupe qui, sur ce
+// chemin-là, ne coupe rien. `applyIsoView`, lui, calcule sa distance APRÈS
+// avoir rendu — c'est pour ça qu'il peut le faire.
+test('les trois sorties historiques rendent toujours l\'emprunt', () => {
+  const avant = (corps, quoi, msg) => {
+    const rendu = corps.indexOf('quitteCadrageDamier()')
+    const suite = corps.indexOf(quoi)
+    assert.ok(rendu >= 0, `${msg} : plus aucune restitution`)
+    assert.ok(suite > rendu, `${msg} : la restitution ne passe plus AVANT « ${quoi} »`)
+  }
+  // ① le bouton iso — il mesure `dist` contre `controls.maxDistance`, donc il
+  //    doit avoir rendu la vraie butée avant de la lire
+  const iso = /function applyIsoView\(i\)\s*\{([\s\S]*?)\n\}/.exec(CODE_MAIN)
+  assert.ok(iso, 'applyIsoView existe')
+  avant(iso[1], 'controls.maxDistance', 'bouton iso')
+  // ② la molette vers l'INTÉRIEUR : sortie immédiate, sans seuil (sinon le
+  //    glissé inertiel de modes.js passerait sous le near desserré)
+  const molette = /function molettePendantCadrageDamier\(deltaY\)\s*\{([\s\S]*?)\n\}/.exec(CODE_MAIN)
+  assert.ok(molette, 'le hook molette existe')
+  const approche = /if \(!\(deltaY > 0\)\) \{([\s\S]*?)\n  \}/.exec(molette[1])
+  assert.ok(approche, 'la branche « on s\'approche » existe toujours')
+  assert.match(approche[1], /quitteCadrageDamier\(\)/, 'un cran vers l\'interieur sort du cadrage TOUT DE SUITE')
+  // ③ le repli à 1×1 : le damier retombe sur une seule case, il n'y a plus rien
+  //    à cadrer et l'escalier de zoom va relire `controls.maxDistance`
+  const grille = /blockGrid\.onGridChanged = \(\) => \{([\s\S]*?)\n\}/.exec(CODE_MAIN)
+  assert.ok(grille, 'l\'auto-fermeture vit toujours dans onGridChanged')
+  assert.match(grille[1], /modeBoutonCamera\(\) !== 'ensemble'\) quitteCadrageDamier\(\)/, 'le cadrage se referme seul quand le damier retombe a une case')
+})

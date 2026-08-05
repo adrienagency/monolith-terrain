@@ -2120,6 +2120,11 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     const p = intersectionGlobe(focusRay.ray.origin, focusRay.ray.direction, R_GLOBE)
     if (!p) return // clic dans le noir, à côté du disque de la planète
     const { lat, lon } = sphereToLatLon(_globeHit.set(p.x, p.y, p.z))
+    // en orbite le cadrage du damier est déjà rendu (la porte orbitale le rend
+    // en partant) : ce rappel ne coûte rien et fait de la règle une règle SANS
+    // exception — « toute porte rend d'abord », pas « toute porte sauf celles
+    // dont on a vérifié qu'elles arrivent après une autre ».
+    quitteCadrageDamier()
     modes.plongeDepuisGlobe(lat, lon)
     return
   }
@@ -2160,6 +2165,11 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   const py = focusRay.ray.origin.y + focusRay.ray.direction.y * hitDist
   const pz = focusRay.ray.origin.z + focusRay.ray.direction.z * hitDist
   const { lat, lon } = worldToLatLon(dem, px, pz)
+  // ⚠️ LE CLIC-PLONGÉE REND D'ABORD L'EMPRUNT DU CADRAGE. `_loadDive` (modes.js)
+  // repose bien `maxDistance` en arrivant, mais PAS `near`/`far` — il ne les a
+  // pas touchés. Plonger depuis le cadrage laissait donc un plan de coupe à
+  // ≈ 122 unités sur une caméra revenue à ~145 : la carte arrivait tranchée.
+  quitteCadrageDamier()
   // pass the clicked world point so the dive leans 30% toward it before loading
   modes.diveTo({ lat, lon, zoom: stepZoom(params.demZoom, 1, userFineZoom), point: new THREE.Vector3(px, py, pz) })
 })
@@ -5273,6 +5283,12 @@ async function loadGpxText(text) {
     //
     // La branche orbitale l'obtient gratuitement : `flyTo` finit par
     // `loadSurface(lat, lon, zoom)`, qui centre déjà.
+    //
+    // ⚠️ `modes.flyTo` DEPUIS LA SURFACE REPASSE PAR L'ORBITE (modes.js), donc
+    // par le même `_surfCam` que le bouton globe : on rend d'abord ce que le
+    // cadrage du damier avait emprunté, sinon le retour de plongée reposerait
+    // un plan de coupe à ≈ 122 unités sur une caméra qui n'est plus qu'à 145.
+    quitteCadrageDamier()
     if (modes.mode === 'orbital') await modes.flyTo(f.lat, f.lon, f.zoom)
     else await loadRealTerrain({ centreSur: { lat: f.lat, lon: f.lon } })
     // au chargement d'un GPX, on démarre en vue isométrique (Adrien) — comme un
@@ -5390,6 +5406,10 @@ function flyTrack() {
   tour.active = false
   tween.active = false
   cameraAuto.stop()
+  // ⚠️ ET LE CADRAGE DU DAMIER REND SON EMPRUNT — le survol vole au ras du sol,
+  // le `near` desserré (≈ 122 sur un 3×3) découperait tout le décor devant la
+  // caméra pendant tout le vol. Voir `quitteCadrageDamier`.
+  quitteCadrageDamier()
   // ESSAI 2026-08-01 — même bascule que le suivi juste dessous : le survol du
   // tracé passe à la poursuite hélicoptère. L'ancien reste sous le `if`.
   if (suiviHelicoActif() && pilote.lancerPoursuite()) return
@@ -5446,6 +5466,9 @@ function engageGpxFollow() {
   tour.active = false
   tween.active = false
   cameraAuto.stop()
+  // ⚠️ ET LE CADRAGE DU DAMIER REND SON EMPRUNT — même raison que `flyTrack`
+  // juste au-dessus : le suivi de tête colle au sol.
+  quitteCadrageDamier()
   // ⚠️ ESSAI DU 2026-08-01 — LE SUIVI LANCE LA POURSUITE HÉLICOPTÈRE.
   // Adrien : « lance la vue d'hélico, remplace celle actuelle de suivi tout en
   // la laissant de côté ». L'ancien rail DroneCam est intact, juste en dessous :
@@ -5504,6 +5527,7 @@ function togglePlay() {
   else {
     tour.active = false
     drone.stop()
+    quitteCadrageDamier() // une automation prend la caméra : elle ne joue pas avec les plans de coupe du cadrage
     cameraAuto.start(params.camMove, params.camSpeed)
   }
 }
@@ -7226,7 +7250,15 @@ const topBar = buildTopBar({
     refreshAll()
   },
   // the Globe button always shows the WHOLE planet, spinning slowly
-  enterOrbit: () => { cameraAuto.stop(); modes.enterOrbit(16000000) },
+  //
+  // ⚠️ ET IL REND D'ABORD CE QUE LE CADRAGE DU DAMIER AVAIT EMPRUNTÉ. C'est la
+  // porte par laquelle le défaut est arrivé : `modes.enterOrbit` SAUVE
+  // `camera.near` dans `_surfCam` (modes.js) et le REPOSE au retour de plongée,
+  // pendant que `maxDistance` retombe, lui, à 150. Parti avec le near desserré
+  // du cadrage (≈ 122 sur un 3×3), on revient donc avec une caméra à ~145
+  // unités derrière un plan de coupe à 122 : toute la moitié proche de la carte
+  // est tranchée, et rien dans la vue orbitale ne laisse deviner pourquoi.
+  enterOrbit: () => { quitteCadrageDamier(); cameraAuto.stop(); modes.enterOrbit(16000000) },
   // the "?" button replays the guided tour (lazy-loaded, tiny)
   startTutorial: async () => {
     const { startTutorial } = await import('./ui/tutorial.js')
@@ -7477,6 +7509,11 @@ function molettePendantCadrageDamier(deltaY) {
 cineBtn = buildCineButton({
   next: () => {
     if (modes.mode !== 'surface' || modes.busy) return
+    // ⚠️ MÊME GESTE QU'`applyIsoView` : un plan de cinéma passe au ras du sol
+    // (poursuite, travelling, contre-plongée) et partirait avec le `near`
+    // desserré du cadrage du damier — ≈ 122 unités, c'est-à-dire tout le décor
+    // découpé devant la caméra pendant toute la durée du plan.
+    quitteCadrageDamier()
     shots.next()
   },
 })
@@ -7866,6 +7903,7 @@ const explorePanel = buildExplorePanel({
   // sans le géocoder tant que personne ne demande à isoler.
   flyTo: (lat, lon, zoom, nom = null) => {
     setRegionTarget(nom ? { name: nom } : null)
+    quitteCadrageDamier() // `modes.flyTo` repasse par l'orbite : voir le bouton globe
     return modes.flyTo(lat, lon, zoom)
   },
 })
@@ -7981,6 +8019,7 @@ const cameraPanel = buildCameraPanel({
     if (modes.mode !== 'surface') return
     tour.active = false
     drone.stop()
+    quitteCadrageDamier() // même raison que `togglePlay` : l'automation reprend la caméra
     cameraAuto.start(move, speed)
   },
   stopCamera: () => cameraAuto.stop(),
@@ -8814,7 +8853,8 @@ if (EMBED) {
     try {
       if (d.type === 'shibumap:apply' && d.look) applyUserTemplate({ look: d.look })
       else if (d.type === 'shibumap:palette' && d.palette) { applyPaletteWithBg(d.palette); refreshAll() }
-      else if (d.type === 'shibumap:goto' && Number.isFinite(d.lat) && Number.isFinite(d.lon)) modes.flyTo(d.lat, d.lon, d.zoom ?? 10)
+      // quitteCadrageDamier avant modes.flyTo : il repasse par l'orbite, voir le bouton globe
+      else if (d.type === 'shibumap:goto' && Number.isFinite(d.lat) && Number.isFinite(d.lon)) { quitteCadrageDamier(); modes.flyTo(d.lat, d.lon, d.zoom ?? 10) }
     } catch {}
   })
   try { window.parent?.postMessage({ type: 'shibumap:ready' }, '*') } catch {}
@@ -8971,7 +9011,7 @@ const atelier = buildAtelier({
   // clé de stockage à inventer : l'état courant dit déjà la vérité.
   hasZone: () => params.demLocation !== START_VIEW.name,
   searchZone: (q) => (parseLatLon(q) ? gotoCtl.go(q) : gotoCtl.search(q)),
-  flyTo: (lat, lon, zoom, name = null) => { setRegionTarget(name ? { name } : null); return modes.flyTo(lat, lon, zoom) },
+  flyTo: (lat, lon, zoom, name = null) => { setRegionTarget(name ? { name } : null); quitteCadrageDamier(); return modes.flyTo(lat, lon, zoom) }, // quitteCadrageDamier : `modes.flyTo` repasse par l'orbite, voir le bouton globe
   // ⑧ Le zoom se fige pendant l'habillage — même levier que la boutique
   // (store.js). modes.locked neutralise la molette et l'escalier de niveaux ;
   // flyTo passe toujours, sinon l'étape ⓪ ne pourrait plus déménager la carte.
