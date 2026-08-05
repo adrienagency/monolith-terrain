@@ -628,14 +628,25 @@ export class BlockGrid {
     // il ne redescendrait plus jamais (bug silencieux : tous les tests
     // passeraient quand même, puisque rien ne le distingue à l'unité).
     const plinth = this.getPlinth?.()
+    // ⚠️ FIGÉS ICI, RÉUTILISÉS À CHAQUE RECONSTRUCTION (revue, Finding 3).
+    // resolution/cornerR/cornerExp fixent la FORME du maillage de murs — la
+    // MÊME qui sert à calculer baseYPropre juste en dessous. _rebuildCellWalls
+    // est maintenant appelée PLUSIEURS fois dans la vie d'une cellule (chaque
+    // égalisation), alors que l'ancien code ne bâtissait les murs qu'une seule
+    // fois, à la naissance : si elle relisait this.params à chaud à chaque
+    // appel, un réglage de panneau Block changé pendant qu'un damier charge
+    // encore ferait rebâtir une géométrie dont le fond RÉEL diverge de
+    // baseYPropre — un défaut silencieux, invisible tant que personne n'y
+    // touche pendant un chargement. depth et aoBande, eux, restent lus EN
+    // DIRECT sur le socle central à chaque reconstruction (cf.
+    // _rebuildCellWalls) : ils sont censés SUIVRE le panneau Block en temps
+    // réel, comme le matériau (voir restyle()) — pas la même famille de
+    // paramètre que la forme du maillage.
+    const resolution = p.resolution
     const cornerR = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (this.params.slabCorner ?? 0) * TERRAIN_SIZE))
-    cell.baseYPropre = computeSlab(
-      terrain.sample,
-      plinth?.depth ?? 7,
-      p.resolution,
-      cornerR,
-      exposantCoin(this.params.slabCornerSmoothing)
-    ).baseY
+    const cornerExp = exposantCoin(this.params.slabCornerSmoothing)
+    cell._paramsMurs = { resolution, cornerR, cornerExp }
+    cell.baseYPropre = computeSlab(terrain.sample, plinth?.depth ?? 7, resolution, cornerR, cornerExp).baseY
     cell.planchierPose = null // pas encore de murs : egaliseHauteurs() (fin de méthode) les pose
     // dès la naissance, la cellule porte le matériau/shader de la dalle centrale
     this._applyLook(cell, this.params)
@@ -698,13 +709,21 @@ export class BlockGrid {
   _rebuildCellWalls(cell, plancher) {
     const plinth = this.getPlinth?.()
     if (!plinth?.wallMat || plinth.group?.visible === false) return
-    const resolution = Math.min(this.params.resolution ?? NEIGHBOUR_RES, NEIGHBOUR_RES)
-    const cornerR = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (this.params.slabCorner ?? 0) * TERRAIN_SIZE))
+    // ⚠️ NE JAMAIS RELIRE this.params ICI (revue, Finding 3) : resolution,
+    // cornerR et cornerExp sont FIGÉS à la naissance de la cellule (cf.
+    // _buildCell) parce que ce sont eux qui ont servi à calculer
+    // baseYPropre — les relire à chaud romprait la cohérence entre le fond
+    // annoncé et le fond réellement bâti. Repli défensif si jamais appelée
+    // sur une cellule qui n'en porte pas (cellule bouchon de test) : même
+    // calcul que l'ancien code, pour ne rien changer de son comportement.
+    const { resolution = Math.min(this.params.resolution ?? NEIGHBOUR_RES, NEIGHBOUR_RES),
+      cornerR = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (this.params.slabCorner ?? 0) * TERRAIN_SIZE)),
+      cornerExp = exposantCoin(this.params.slabCornerSmoothing) } = cell._paramsMurs || {}
     const { geo } = buildSlabWalls(cell.terrain.sample, {
       depth: plinth.depth ?? 7,
       resolution,
       cornerR,
-      cornerExp: exposantCoin(this.params.slabCornerSmoothing), // même coin que la dalle centrale
+      cornerExp, // même coin que la dalle centrale — figé à la naissance, voir plus haut
       baseYFloor: plancher,
       // … et MÊME bande d'occlusion de contact. Sans ce partage, chaque
       // voisine mesurait son propre point haut : une dalle de montagne cuisait
@@ -733,24 +752,57 @@ export class BlockGrid {
   // plancher commun. Rendu : le nombre de cellules refaites (0 = rien à
   // faire), pour que l'appelant puisse mesurer le coût réel de l'égalisation.
   //
-  // MESURÉ (compteur temporaire, damier 3×3 complet — 8 voisines qui
-  // atterrissent une à une, sur l'ordre RÉSEAU réel, sans rapport avec leur
-  // profondeur) : 9 reconstructions pour 8 cellules — sous les 24 qui
-  // signeraient un coût quadratique à revoir.
+  // MESURÉ (compteur temporaire, damier 3×3 complet, 8 voisines qui
+  // atterrissent une à une) — le total dépend de l'ORDRE d'arrivée, pas
+  // seulement du nombre de cellules :
+  //   ordre réseau typique (5 tirages aléatoires, profondeur sans
+  //     corrélation avec l'ordre d'arrivée)         9 à 24 reconstructions
+  //   pire cas (chaque arrivée bat le record de
+  //     profondeur, ordre décroissant explicite)    36 reconstructions
+  //   meilleur cas (le centre est déjà le plus
+  //     profond, rien à re-couler après coup)         8 reconstructions
+  // ⚠️ RELECTURE (ronde 1) : un premier relevé « ordre réseau » à 9 avait été
+  // pris pour LE chiffre représentatif ; rejoué sur cinq ordres aléatoires,
+  // le total est monté jusqu'à 24 — LE SEUIL DU BRIEF EST DONC ATTEIGNABLE
+  // PAR UN ORDRE D'ARRIVÉE ORDINAIRE, pas seulement par un cas construit pour
+  // nuire. C'est bien la signature d'un coût QUADRATIQUE dans le pire cas :
+  // chaque nouveau minimum de profondeur force la reconstruction de TOUTES
+  // les cellules déjà posées, et rien ne borne combien de fois un damier de
+  // n cellules peut battre son propre record en arrivant dans le pire ordre
+  // (n(n+1)/2, soit 36 pour n=8).
   //
-  // ⚠️ CE CHIFFRE DÉPEND DE L'ORDRE D'ARRIVÉE, ET LE PIRE CAS EST QUADRATIQUE.
-  // Si les 8 voisines arrivent dans l'ordre EXACTEMENT inverse de leur
-  // profondeur (chaque nouvelle bat le record), la boucle rebâtit TOUTES les
-  // cellules déjà là à CHAQUE arrivée : mesuré, 36 reconstructions pour les
-  // 8 mêmes cellules — au-dessus du seuil. Ni « trier les arrivées » (l'ordre
-  // est celui du réseau, imposé) ni « différer d'une image » (main.js
-  // resynchronise à CHAQUE arrivée, séparée des autres par plusieurs
-  // secondes — il n'y a rien à regrouper dans une même image) ne s'applique
-  // ici sans toucher au séquencement de sync(), hors du périmètre de cette
-  // tâche (« ne pas améliorer au passage » — la Tâche 5 revient dans cet
-  // appel). Le cas réseau réel (voisines dont la profondeur ne corrèle pas à
-  // l'ordre d'arrivée) reste largement sous le seuil ; le pire cas est
-  // possible mais rare, et documenté ici pour que la Tâche 5 le sache.
+  // CE QUE ÇA COÛTE EN TEMPS : ~9,4 ms par reconstruction de mur mesurés en
+  // relecture, soit ~340 ms cumulés sur les 36 du pire cas — négligeable
+  // ÉTALÉ sur les PLUSIEURS SECONDES que prend un chargement réseau complet
+  // (chaque arrivée est un aller-retour réseau séparé, cf. _loadCellDem).
+  //
+  // ⚠️ LE VRAI RISQUE N'EST DONC PAS LE TOTAL CUMULÉ, C'EST LA RAFALE
+  // SYNCHRONE D'UNE SEULE ARRIVÉE. Si la cellule la PLUS profonde du damier
+  // atterrit EN DERNIER (après que toutes les autres ont déjà leurs murs),
+  // cette unique arrivée rebâtit d'un coup TOUTES les cellules déjà posées —
+  // jusqu'à 23 murs sur un damier 5×5 plein (GRID_R = 2, 24 voisines
+  // possibles) — dans le MÊME tour de boucle synchrone, avant que le
+  // navigateur ne peigne la moindre image. 23 × ~9,4 ms ≈ 216 ms : un gel
+  // d'image net et visible, pas une dégradation progressive.
+  //
+  // LA SORTIE, ET POURQUOI ELLE N'EST PAS PRISE ICI. La vraie parade est de
+  // rendre l'égalisation PARESSEUSE : au lieu de rebâtir tout de suite dans
+  // egaliseHauteurs(), marquer les cellules concernées « sales »
+  // (planchierPose resterait périmé) et ne les re-couler qu'au prochain
+  // rendu, quelques-unes par image, jusqu'à résorption — le même principe
+  // qu'un budget de reconstruction par frame. Cette sortie n'est pas prise
+  // dans cette tâche :
+  //   · elle demande un point d'ancrage dans la BOUCLE DE RENDU (un appel
+  //     périodique du type flushDirtyWalls()) que rien dans block-grid.js ne
+  //     possède aujourd'hui — le câbler reviendrait à toucher main.js, hors
+  //     périmètre annoncé (« ne câble rien dans src/main.js cette fois ») ;
+  //   · le brief demande explicitement de NE PAS améliorer au passage : la
+  //     Tâche 5 revient dans ce même appel et est le bon endroit pour en
+  //     décider, avec la vue d'ensemble de ce qu'elle y ajoute.
+  // Un test verrouille le pire cas mesuré (voir test/damier-hauteur.test.js,
+  // « le pire cas … reste borné ») pour qu'une régression future (une boucle
+  // imbriquée ajoutée sans y penser) ne fasse pas dériver ce chiffre en
+  // silence.
   egaliseHauteurs() {
     const plancher = this.planchierCommun()
     if (!Number.isFinite(plancher)) return 0
