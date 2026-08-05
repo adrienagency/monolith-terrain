@@ -699,7 +699,9 @@ git commit -m "feat: toutes les cases du damier descendent au meme fond"
 **Interfaces**
 - Consomme : rien.
 - Produit :
-  - `bordsExterieurs(i, j, { i0, j0, cote })` → `{ nord, est, sud, ouest }` de booléens. Une arête est extérieure quand aucune case du carré ne la jouxte.
+  - `bordsExterieurs(i, j, cellules)` → `{ nord, est, sud, ouest }` de booléens. `cellules` est le `Set<string>` des cases **réellement posées** (`blockGrid.cells.keys()`). Une arête est extérieure quand aucune case ne la jouxte.
+
+⚠️ **On interroge les cases posées, pas le carré.** La première version de ce plan passait `{ i0, j0, cote }` et déduisait l'appartenance au bord depuis la forme carrée. C'est faux dès qu'une **zone isolée** est active : `cellsForParts` peut poser une figure trouée (deux îlots opposés ne remplissent pas le carré entre eux, cf. `src/block-grid.js:151-153`), et une arête déclarée intérieure sans voisine derrière laisserait un **jour visible sous la carte** — le socle n'a alors plus de mur là où il en faut un. Poser la question à l'ensemble des cases est correct dans les deux modes, et se réduit tout seul au cas du carré quand le damier en est un.
   - `masqueDepuisContour(contour, demi, bords, marge?)` → `Float32Array` de longueur égale à celle du contour, valeur 1 sur les sommets à arrondir et 0 sur les autres. Sert à moduler `arrondi` **et** `chanfrein` par sommet.
 
 ⚠️ **Une seule fonction de masque, pas deux.** L'envie naturelle est d'écrire aussi une variante qui reproduit le découpage de `computeSlab` (tant de sommets pour le côté nord, tant pour l'arc, etc.). Elle marcherait aujourd'hui et casserait au prochain réglage de densité d'arc — un couplage muet entre deux fichiers, exactement ce qui a déjà coûté un chantier ici (cf. le commentaire « LA DENSITÉ DE L'ARC SE MESURE EN LONGUEUR », `src/plinth.js:163`). On étiquette par **position**, qui ne ment pas. Ne pas créer de seconde fonction.
@@ -722,31 +724,58 @@ import { computeSlab } from '../src/plinth.js'
 
 // convention d'axes de computeSlab : z=-HALF est le NORD, z=+HALF le SUD,
 // x=+HALF l'EST, x=-HALF l'OUEST. j croît vers le sud (z croissant).
-const carre3 = { i0: -1, j0: -1, cote: 3 }
+//
+// `cellules` = les cases VOISINES posees. Le bloc central "0,0" n'y figure
+// jamais (block-grid.js:178 le saute) mais existe toujours : bordsExterieurs
+// doit le savoir sans qu'on le lui passe.
+const damier3x3 = new Set(['-1,-1', '0,-1', '1,-1', '-1,0', '1,0', '-1,1', '0,1', '1,1'])
+const seul = new Set()
 
 test('une case isolee a ses quatre bords exterieurs', () => {
-  assert.deepEqual(bordsExterieurs(0, 0, { i0: 0, j0: 0, cote: 1 }),
+  assert.deepEqual(bordsExterieurs(0, 0, seul),
     { nord: true, est: true, sud: true, ouest: true })
 })
 
 test('la case du milieu d\'un 3x3 n\'a AUCUN bord exterieur', () => {
-  assert.deepEqual(bordsExterieurs(0, 0, carre3),
+  assert.deepEqual(bordsExterieurs(0, 0, damier3x3),
     { nord: false, est: false, sud: false, ouest: false })
 })
 
 test('le coin nord-ouest d\'un 3x3 garde ses deux bords exposes', () => {
-  assert.deepEqual(bordsExterieurs(-1, -1, carre3),
+  assert.deepEqual(bordsExterieurs(-1, -1, damier3x3),
     { nord: true, est: false, sud: false, ouest: true })
 })
 
 test('le bord nord milieu n\'expose que le nord', () => {
-  assert.deepEqual(bordsExterieurs(0, -1, carre3),
+  assert.deepEqual(bordsExterieurs(0, -1, damier3x3),
     { nord: true, est: false, sud: false, ouest: false })
 })
 
 test('le coin sud-est expose sud et est', () => {
-  assert.deepEqual(bordsExterieurs(1, 1, carre3),
+  assert.deepEqual(bordsExterieurs(1, 1, damier3x3),
     { nord: false, est: true, sud: true, ouest: false })
+})
+
+// LE BLOC CENTRAL EXISTE TOUJOURS, même absent de l'ensemble des voisines.
+// L'oublier donnerait un arrondi au bord d'une case collée au héros — une
+// rainure en plein milieu du damier, le défaut exact des captures d'Adrien.
+test('une voisine collee au bloc central ne s\'arrondit pas de ce cote', () => {
+  const b = bordsExterieurs(1, 0, new Set(['1,0']))
+  assert.equal(b.ouest, false, 'a l\'ouest il y a le bloc central')
+  assert.equal(b.est, true)
+  assert.equal(b.nord, true)
+  assert.equal(b.sud, true)
+})
+
+// ⚠️ LE CAS QUE LE CARRÉ NE SAVAIT PAS TRAITER. Une zone isolée peut poser
+// une figure TROUÉE (deux ilots opposes, block-grid.js:151-153). Deduire les
+// bords d'un carre supposé plein declarerait ici l'arete interieure, le socle
+// n'aurait pas de mur, et on verrait le jour sous la carte.
+test('un damier troue expose les aretes qui n\'ont pas de voisine', () => {
+  const troue = new Set(['-1,-1', '1,1']) // deux ilots en diagonale, rien entre
+  const b = bordsExterieurs(-1, -1, troue)
+  assert.deepEqual(b, { nord: true, est: true, sud: true, ouest: true },
+    'aucune voisine adjacente : les quatre aretes restent exposees')
 })
 
 // LE MASQUE — c'est lui que le socle consomme, sommet par sommet. On le teste
@@ -834,25 +863,42 @@ Créer `src/damier-bords.js` :
 // entre deux cases, les deux congés se font face et creusent une rainure — le
 // « les arrondis posent problème et sont vilains » des captures d'Adrien.
 //
-// ⚠️ CE MODULE NE MARCHE QUE PARCE QUE LE DAMIER EST UN CARRÉ PLEIN. Sur une
-// forme trouée, « la case d'à côté existe-t-elle » demanderait de connaître
-// l'ensemble des cases ; ici il suffit de regarder si l'on est au bord du
-// carré. Voir damier-carre.js.
+// ⚠️ ON INTERROGE LES CASES POSÉES, PAS LA FORME SUPPOSÉE DU DAMIER. Déduire
+// « suis-je au bord ? » d'un carré plein serait plus court et serait FAUX : le
+// mode zone isolée pose des figures trouées (deux îlots opposés ne remplissent
+// pas le carré entre eux, block-grid.js:151-153). Une arête déclarée
+// intérieure sans voisine derrière, c'est un mur qu'on ne construit pas — et
+// le jour sous la carte à cet endroit. Poser la question à l'ensemble des
+// cases est juste dans les deux modes, et se réduit tout seul au cas du carré.
 
 /**
- * Les quatre arêtes de la case (i,j) sont-elles au bord du carré ?
+ * Les quatre arêtes de la case (i,j) touchent-elles le vide ?
  *
  * Convention d'axes de computeSlab (plinth.js:152-155) : z = −HALF est le
  * NORD, z = +HALF le SUD, x = +HALF l'EST, x = −HALF l'OUEST. `j` croît vers
  * le sud, `i` vers l'est.
+ *
+ * ⚠️ LE BLOC CENTRAL (0,0) EXISTE TOUJOURS et ne figure JAMAIS dans
+ * `cellules` — la boucle qui peuple le damier le saute explicitement
+ * (block-grid.js:178). L'oublier arrondirait le bord d'une voisine collée au
+ * héros : une rainure en plein milieu du damier.
+ *
+ * @param {number} i - colonne de la case, vers l'est
+ * @param {number} j - rangée de la case, vers le sud
+ * @param {Set<string>} cellules - clés "i,j" des cases voisines posées
  */
-export function bordsExterieurs(i, j, { i0, j0, cote } = {}) {
-  const c = Math.max(1, Math.round(cote ?? 1))
+export function bordsExterieurs(i, j, cellules) {
+  const posee = (di, dj) => {
+    const ci = i + di
+    const cj = j + dj
+    if (ci === 0 && cj === 0) return true // le héros est toujours là
+    return !!cellules?.has(`${ci},${cj}`)
+  }
   return {
-    nord: j <= j0,
-    est: i >= i0 + c - 1,
-    sud: j >= j0 + c - 1,
-    ouest: i <= i0,
+    nord: !posee(0, -1),
+    est: !posee(1, 0),
+    sud: !posee(0, 1),
+    ouest: !posee(-1, 0),
   }
 }
 
@@ -1078,7 +1124,9 @@ Attendu : RÉUSSITE. **Tout test existant du socle doit rester vert au bit près
 À l'appel de `buildSlabWalls` (~ligne 579), calculer le masque depuis le carré courant :
 
 ```js
-    const bords = bordsExterieurs(cell.i, cell.j, this.carreCourant())
+    // les cases RÉELLEMENT posées, pas la forme supposée du damier
+    const posees = new Set(this.cells.keys())
+    const bords = bordsExterieurs(cell.i, cell.j, posees)
     // le contour est celui que computeSlab vient de tracer pour cette cellule
     const masque = masqueDepuisContour(slab.ring, TERRAIN_SIZE / 2, bords)
 ```
@@ -1107,7 +1155,9 @@ git commit -m "fix: les aretes interieures du damier perdent leur conge et leur 
 - Modifier : `package.json`
 
 **Interfaces**
-- Consomme : `resChamp`, `spanChamp` (`src/mer-emprise.js`), `BlockGrid.carreCourant()` (Tâche 2), `BlockGrid.planchierCommun()` (Tâche 3).
+- Consomme : `resChamp`, `spanChamp` (`src/mer-emprise.js`), **`BlockGrid.empriseVivante()`** (Tâche 2), `BlockGrid.planchierCommun()` (Tâche 3).
+
+⚠️ **`empriseVivante()`, pas `carreCourant()`.** La première dit ce qui est **posé** et monte jusqu'à 5×5 quand une zone isolée est active ; la seconde dit ce que le **tracé a réclamé** et se plafonne à 3×3. Lire la seconde ferait cuire une mer trop petite pour la carte qu'elle porte, et le défaut n'apparaîtrait qu'en mode zone isolée — donc tard.
 - Produit : `Ocean.rebuild({ terrain, params, carre })` — `carre` = `{ i0, j0, cote }` ou `null` (comportement d'avant, un bloc).
 
 **C'est la tâche la plus lourde du plan.** Trois choses changent ensemble : l'emprise du plan d'eau, la résolution de son champ, et le centre — car un carré 2×2 n'est **pas** centré sur l'origine.
@@ -1265,7 +1315,7 @@ Le rayon de coin et la jupe suivent : `buildRimGeometry(rayonEauDansSocle() * em
 
 - [ ] **Étape 6 : câbler dans `src/main.js`**
 
-Passer `carre: blockGrid.carreCourant()` à chaque appel de `ocean.rebuild`, et rappeler `rebuild` quand `onGridChanged` se déclenche (`src/block-grid.js:307`).
+Passer `carre: blockGrid.empriseVivante()` à chaque appel de `ocean.rebuild`, et rappeler `rebuild` quand `onGridChanged` se déclenche (`src/block-grid.js:307`).
 
 ⚠️ **Ne pas rebâtir la mer à chaque arrivée de cellule.** Le damier se resynchronise à chaque dalle reçue ; recuire un champ 1152² huit fois de suite gèlerait la page. Ne rebâtir que si `cote` **ou** le centre ont changé.
 
@@ -1359,7 +1409,7 @@ Une troisième issue n'est pas acceptable : laisser l'écart sans le documenter.
 - Modifier : `package.json`
 
 **Interfaces**
-- Consomme : `BlockGrid.carreCourant()` (Tâche 2), `centreDuCarre` (Tâche 6).
+- Consomme : `BlockGrid.empriseVivante()` (Tâche 2 — **pas** `carreCourant()`, cf. l'avertissement de la Tâche 6), `centreDuCarre` (Tâche 6).
 
 **Bonne nouvelle** : `setFrameScale(k)` existe déjà (`src/ground-info-layer.js:476`) et sert au mode zone isolée (`src/main.js:6246`). Le commentaire de la ligne 469 le dit : « Toute la mise en page pend d'un HALF unique (le demi-bloc), donc il suffit… ». L'essentiel du travail est donc de **l'appeler avec le côté du carré**, puis de vérifier les cas que le mode zone isolée ne rencontre jamais.
 
@@ -1469,7 +1519,7 @@ git commit -m "feat: les textes graves suivent la taille et le centre du damier"
 - Modifier : `test/damier-cadre.test.js`
 
 **Interfaces**
-- Consomme : `poseIsometrique(points, { fovDeg, marge })` (`src/vue-ensemble.js`), `carreCourant()` (Tâche 2), `centreDuCarre` (Tâche 6).
+- Consomme : `poseIsometrique(points, { fovDeg, marge })` (`src/vue-ensemble.js`), `empriseVivante()` (Tâche 2 — **pas** `carreCourant()`, cf. l'avertissement de la Tâche 6), `centreDuCarre` (Tâche 6).
 - Produit : `modeCameraDamier`, `doitVraimentDezoomer`, `poseDamier` — trois fonctions pures exportées par `src/vue-ensemble.js` (signatures à l'étape 3). Aucune tâche ultérieure ne les consomme ; c'est la dernière du plan à toucher la caméra.
 
 **Demande** : « le bouton caméra en vue multi-cases permettra de voir toutes les cases à la fois en isométrique **sans passer au zoom inférieur**, et on reviendra au mode précédent si une seule case est affichée. Si l'utilisateur continue de dézoomer, alors on dézoome vraiment. »
