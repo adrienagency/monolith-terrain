@@ -47,6 +47,7 @@ import { deriveUiTokens, UI_TOKEN_VARS } from './ui-theme.js'
 import { gradeForDem, elevationHistogram } from './relief-grade.js'
 import { buildPalettePool, pickShufflePalette } from './shuffle-pool.js'
 import { peakVantage } from './camera-poses.js'
+import { poseIsometrique } from './vue-ensemble.js'
 import { focusRayHit } from './autofocus.js'
 import { doitRafraichirCartouche } from './ground-info.js'
 import { GroundInfoLayer } from './ground-info-layer.js'
@@ -8034,7 +8035,10 @@ function tick() {
     if (playingNow) _wasPlaying = true
     else if (_wasPlaying) {
       _wasPlaying = false
-      if ((gpxLayer.headT ?? 0) >= 0.999 && raceState.waypoints.length) {
+      // Le recul final vaut pour TOUTE course arrivée au bout — Adrien l'a
+      // demandé sans condition ; un GPX simple (sans point de passage) y a
+      // autant droit qu'une course balisée, d'où l'absence de garde ici.
+      if ((gpxLayer.headT ?? 0) >= 0.999) {
         // ⚠️ LA CAUSE SE POSE ICI, PAS PLUS BAS — task 2, CONSTAT 1. Le drapeau
         // ne doit passer à true QUE si c'est CE bloc-ci qui fait le passage
         // true→false : si gpxFollow était déjà à false (l'utilisateur avait
@@ -8047,18 +8051,14 @@ function tick() {
         followManual = false
         followZoomVel = 0
         drone.stop()
-        // cadrage FINAL : toute la course visible, toutes les étapes — la
-        // caméra se place en biais élevé à la distance qui englobe la bbox
-        // du tracé (marge 1.35), quel que soit le parcours
+        // cadrage FINAL : toute la course visible, toutes les étapes, vue
+        // depuis la vraie direction isométrique (45° en plan, 35,264° en
+        // site) — calcul délégué à un module pur pour rester testable sans
+        // three.js (voir test/vue-ensemble.test.js)
         const track = gpxLayer.activeLayer?.gpx?.track
-        if (track?.world?.length) {
-          const box = new THREE.Box3()
-          for (const pw of track.world) box.expandByPoint(pw)
-          const ctr = box.getCenter(new THREE.Vector3())
-          const sph = box.getBoundingSphere(new THREE.Sphere())
-          const dist = (sph.radius * 1.35) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
-          const dir = new THREE.Vector3(0.5, 0.85, 0.6).normalize()
-          flyTo(ctr.clone().addScaledVector(dir, dist), ctr)
+        const pose = track?.world?.length ? poseIsometrique(track.world, { fovDeg: camera.fov }) : null
+        if (pose) {
+          flyTo(pose.position, pose.cible)
         } else {
           applyIsoView(0)
         }
