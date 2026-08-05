@@ -75,6 +75,42 @@ test('l apostrophe ne recommence un mot que si l elision fait une seule lettre',
   assert.equal(casseDeNom("LA PRESQU'ILE SAUVAGE"), "La Presqu'ile Sauvage")
 })
 
+// ⚠️ CONSTAT DE RELECTURE (2026-08-05, 4e tour) : LE COMMENTAIRE ET LE CODE
+// SE CONTREDISAIENT. Le commentaire de composerAvecElisions() définit
+// l'élision comme HUIT lettres (l' d' j' n' s' c' m' t'), et la scission
+// (préfixe d'une seule lettre) les traite bien génériquement — mais
+// MOTS_MINEURS n'en contenait que deux (d, l). Une élision d'une autre
+// lettre, placée APRÈS le premier mot du titre, gardait donc à tort sa
+// majuscule (« N'Attend » restait « N'Attend » au lieu de « n'Attend »).
+// Chaque cas ci-dessous est une tournure qui existe réellement en français,
+// plausible comme titre ou accroche de course — pas une phrase fabriquée
+// pour l'occasion :
+//   - d'/l' : déjà vérifiées ailleurs (mots-titres composés), reprises ici
+//     en position NON initiale, celle que le défaut visait précisément ;
+//   - j' : conjonction + pronom sujet élidé ;
+//   - n' : négation ;
+//   - s' : pronom réfléchi élidé devant un verbe qui commence par une voyelle ;
+//   - c' : présentatif « c'est » ;
+//   - m'/t' : pronom complément élidé — le clou du marketing course à pied
+//     (« la course qui t'attend »).
+// ⚠️ ET LE MOT QUI SUIT L'ÉLISION GARDE SA MAJUSCULE, MÊME LOIN DU DÉBUT DU
+// TITRE — ce n'est PAS une régression, c'est la même règle que partout
+// ailleurs dans ce fichier : casserSegment() capitalise tout mot qui n'est
+// ni un mot mineur ni un sigle, sans distinguer verbe, nom ou adjectif
+// (« RAID », « FOUS », « ATTEND » suivent tous le même chemin). C'est déjà
+// ainsi que « L'Ultra-Trail » et « d'Automne » se composent : le préfixe
+// d'élision est mineur, le mot qu'il introduit ne l'est pas.
+test('les huit lettres d elision sont TOUTES des mots mineurs, pas seulement d et l', () => {
+  assert.equal(casseDeNom("LA TRAVERSEE D'AUTOMNE"), "La Traversee d'Automne")
+  assert.equal(casseDeNom("LA COURSE DE L'AUBE"), "La Course de l'Aube")
+  assert.equal(casseDeNom("ET J'IRAI LOIN"), "Et j'Irai Loin")
+  assert.equal(casseDeNom("LA COURSE QUI N'ATTEND PERSONNE"), "La Course Qui n'Attend Personne")
+  assert.equal(casseDeNom("LA COURSE QUI S'ELANCE"), "La Course Qui s'Elance")
+  assert.equal(casseDeNom("LA COURSE C'EST MAINTENANT"), "La Course c'Est Maintenant")
+  assert.equal(casseDeNom("LA COURSE QUI M'ATTEND"), "La Course Qui m'Attend")
+  assert.equal(casseDeNom("LA COURSE QUI T'ATTEND"), "La Course Qui t'Attend")
+})
+
 // ⚠️ « KM » N'EST JAMAIS CAPITALISÉ, MÊME EN BORDURE DE TITRE — parce que
 // c'est une UNITÉ, pas parce qu'il occupe telle ou telle position. La
 // première version le faisait dépendre de la règle de bordure (mot mineur

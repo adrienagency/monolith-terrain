@@ -4,6 +4,19 @@
 // course affichait alors « GRAND RAID REUNION 2025 » criée d'un bout à
 // l'autre, plus difficile à lire qu'un titre composé.
 //
+// ⚠️ CE MODULE EST UN COMPROMIS RAISONNABLE, PAS UNE VÉRITÉ LINGUISTIQUE.
+// Quatre tours de relecture ont chacun trouvé un titre réel qui mettait la
+// règle en défaut (un mot composé, une élision, un toponyme, une
+// incohérence entre deux listes) — et rien ne dit qu'un cinquième
+// n'existe pas. La fonction n'a et n'aura JAMAIS de dictionnaire de noms
+// propres ou communs : elle raisonne sur la FORME du mot (longueur,
+// voyelles, apostrophe, position), jamais sur son SENS. C'est délibéré —
+// un dictionnaire fermé serait toujours incomplet face à des milliers de
+// noms de course inventés — mais ça veut dire qu'elle peut se tromper sur
+// un titre qu'aucun des cas ci-dessous n'anticipe. En cas de doute,
+// l'affichage reste réversible : c'est un rendu, jamais la donnée source
+// (voir la note FONCTION PURE plus bas).
+//
 // ⚠️ FONCTION PURE, ET C'EST LA RÈGLE DE FOND. Elle prend une chaîne, en rend
 // une autre : c'est course-bar.js qui décide de n'en faire usage qu'à
 // L'AFFICHAGE (titleEl.textContent), jamais sur raceState.name ni sur quoi
@@ -35,11 +48,11 @@
 //      majuscule, quelle que soit leur position dans le titre. Une unité ne
 //      nomme rien, et ce n'est pas une question de rôle grammatical comme les
 //      mots mineurs ci-dessous : « km » en tête de titre resterait « km ».
-//   2. LES MOTS MINEURS (prépositions, articles — et « d »/« l » une fois
-//      l'apostrophe de l'élision isolée comme séparateur, voir plus bas) :
-//      minuscules, SAUF si le segment est le TOUT PREMIER mot du titre — un
-//      titre s'ouvre sur une majuscule, par convention typographique, quel
-//      que soit le rôle grammatical de son premier mot.
+//   2. LES MOTS MINEURS (prépositions, articles — et les HUIT LETTRES
+//      D'ÉLISION une fois l'apostrophe isolée comme séparateur, voir plus
+//      bas) : minuscules, SAUF si le segment est le TOUT PREMIER mot du
+//      titre — un titre s'ouvre sur une majuscule, par convention
+//      typographique, quel que soit le rôle grammatical de son premier mot.
 //      ⚠️ SEUL LE PREMIER, PAS LE DERNIER : forcer aussi la capitale sur le
 //      dernier mot est la convention du title case anglophone, pas de la
 //      composition française — et elle avait fait capitaliser une unité de
@@ -67,13 +80,26 @@ const UNITES = new Set(['km'])
 // « Trail du Bout du Monde » (bout en minuscule à côté de Monde en
 // capitale, sur un toponyme : incohérent à l'œil).
 //
-// ⚠️ « d » ET « l », PAS « d' » ET « l' » — la scission sur l'apostrophe,
-// juste en dessous, isole l'apostrophe comme séparateur : un segment ne
-// contient donc plus jamais le caractère « ' ». Les entrées « d' »/« l' »
-// d'une première version étaient du code mort qui avait l'air vivant —
-// aucun segment ne pouvait plus jamais les matcher.
+// ⚠️ LES HUIT LETTRES, SANS APOSTROPHE — « d », pas « d' ». La scission de
+// composerAvecElisions() isole l'apostrophe comme séparateur : un segment ne
+// contient donc plus jamais le caractère « ' ». (Une première version avait
+// « d' »/« l' » avec l'apostrophe : du code mort qui avait l'air vivant,
+// aucun segment ne pouvait plus jamais les matcher une fois la scission
+// écrite.)
+// ⚠️ ET LES HUIT, PAS DEUX. Le commentaire de composerAvecElisions() décrit
+// l'élision comme huit lettres (l d j n s c m t) et la scission les traite
+// bien génériquement — mais cette liste n'en contenait que deux (d, l) :
+// une incohérence entre le code et son propre commentaire, trouvée en
+// relecture. Une élision d'une autre lettre que d'/l', placée APRÈS le
+// premier mot du titre (« la course qui n'attend personne »), gardait donc
+// à tort sa majuscule (« N'Attend » au lieu de « n'Attend » — c'est le
+// PRÉFIXE d'élision qui doit perdre sa capitale hors tête de titre, pas le
+// mot qu'il introduit, qui reste un mot comme un autre). Les huit :
+// l' (le, la), d' (de), j' (je), n' (ne), s' (se, si), c' (ce), m' (me),
+// t' (te) — les seules élisions à une lettre du français courant.
 const MOTS_MINEURS = new Set([
-  'de', 'du', 'des', 'la', 'le', 'les', 'et', 'en', 'à', 'sur', 'd', 'l',
+  'de', 'du', 'des', 'la', 'le', 'les', 'et', 'en', 'à', 'sur',
+  'l', 'd', 'j', 'n', 's', 'c', 'm', 't',
 ])
 
 // ⚠️ LA SUITE DE CONSONNES, PAS LE COMPTE DE VOYELLES. Un compte de voyelles
