@@ -9,13 +9,17 @@ test('un titre tout en capitales redevient un nom propre', () => {
 
 test('les petits mots restent en minuscules, SAUF en tete', () => {
   assert.equal(casseDeNom('LES 100 KM DE MILLAU'), 'Les 100 km de Millau')
-  // ⚠️ SEUL LE PREMIER MOT DU TITRE EST FORCÉ EN CAPITALE — pas le dernier.
-  // Capitaliser le dernier mot d'une locution est une convention anglophone
-  // (title case) ; la composition française capitalise le premier mot et les
-  // mots qui nomment quelque chose, rien de plus. « bout » reste en
-  // minuscule aux DEUX occurrences (tranché en relecture) : dans « de bout
-  // en bout », il ne nomme rien, comme les prépositions qui l'entourent.
-  assert.equal(casseDeNom('DE BOUT EN BOUT'), 'De bout en bout')
+})
+
+// ⚠️ « bout » N'EST PAS UN MOT MINEUR — retiré en relecture. Il l'avait
+// rejoint pour faire passer « de bout en bout » (cas de test abandonné : les
+// deux exigences du plan — dernier mot jamais forcé, ET bout toujours en
+// minuscule — étaient incompatibles avec un titre où bout n'est PAS en
+// dernière position). Le garder en mot mineur avait un coût réel, trouvé en
+// relecture : sur un toponyme comme « bout du monde », il aurait cassé
+// l'harmonie avec le nom propre voisin.
+test('bout est un nom commun ordinaire, pas un mot mineur', () => {
+  assert.equal(casseDeNom('TRAIL DU BOUT DU MONDE'), 'Trail du Bout du Monde')
 })
 
 test('les sigles gardent leurs capitales', () => {
@@ -41,6 +45,15 @@ test('cas degeneres', () => {
 test('un mot a trait d union se compose SEGMENT PAR SEGMENT', () => {
   assert.equal(casseDeNom('MARATHON DU MONT-BLANC'), 'Marathon du Mont-Blanc')
   assert.equal(casseDeNom('ULTRA-TRAIL DU MONT-BLANC'), 'Ultra-Trail du Mont-Blanc')
+})
+
+// ⚠️ L'APOSTROPHE EST LE MÊME PIÈGE QUE LE TIRET, sur le caractère d'à côté.
+// Un segment de tête comme « L'ULTRA » ne matchait jamais le filtre
+// lettres-seules (apostrophe non reconnue) et ressortait taché de
+// majuscules (« L'ULTRA-Trail »). « L'Ultra-Trail », « L'Échappée Belle »
+// sont des noms de course parfaitement plausibles.
+test('un mot avec elision se compose SEGMENT PAR SEGMENT, comme un trait d union', () => {
+  assert.equal(casseDeNom("L'ULTRA-TRAIL DU MONT-BLANC"), "L'Ultra-Trail du Mont-Blanc")
 })
 
 // ⚠️ « KM » N'EST JAMAIS CAPITALISÉ, MÊME EN BORDURE DE TITRE — parce que

@@ -18,20 +18,23 @@
 // fait passer pour « déjà composé » par une première version qui ne
 // découpait que sur l'espace — son filtre « entièrement en capitales »
 // (lettres seules) ne matchait jamais un jeton contenant un « - », donc il
-// ressortait taché de majuscules (« du MONT-BLANC »). Le trait d'union est
-// désormais un séparateur de plus, au même titre que l'espace : chaque
-// segment qu'il isole suit indépendamment la même règle que n'importe quel
-// autre mot.
+// ressortait taché de majuscules (« du MONT-BLANC »). L'APOSTROPHE EST LE
+// MÊME PIÈGE : un titre comme « L'ULTRA-TRAIL » a un segment de tête,
+// « L'ULTRA », que le même filtre lettres-seules ne reconnaissait pas non
+// plus — « L'Échappée Belle », « L'Ultra-Trail » sont des noms de course
+// plausibles. Trait d'union ET apostrophe sont désormais des séparateurs de
+// plus, au même titre que l'espace : chaque segment qu'ils isolent suit
+// indépendamment la même règle que n'importe quel autre mot.
 // Trois catégories pour les segments qui, eux, SONT entièrement en capitales :
 //   1. LES UNITÉS DE MESURE (km…) : minuscules, TOUJOURS — jamais de
 //      majuscule, quelle que soit leur position dans le titre. Une unité ne
 //      nomme rien, et ce n'est pas une question de rôle grammatical comme les
 //      mots mineurs ci-dessous : « km » en tête de titre resterait « km ».
-//   2. LES MOTS MINEURS (prépositions, articles, et quelques noms communs
-//      qui ne nomment rien dans une locution figée comme « de bout en
-//      bout ») : minuscules, SAUF si le segment est le TOUT PREMIER mot du
-//      titre — un titre s'ouvre sur une majuscule, par convention
-//      typographique, quel que soit le rôle grammatical de son premier mot.
+//   2. LES MOTS MINEURS (prépositions, articles — et « d »/« l » une fois
+//      l'apostrophe de l'élision isolée comme séparateur, voir plus bas) :
+//      minuscules, SAUF si le segment est le TOUT PREMIER mot du titre — un
+//      titre s'ouvre sur une majuscule, par convention typographique, quel
+//      que soit le rôle grammatical de son premier mot.
 //      ⚠️ SEUL LE PREMIER, PAS LE DERNIER : forcer aussi la capitale sur le
 //      dernier mot est la convention du title case anglophone, pas de la
 //      composition française — et elle avait fait capitaliser une unité de
@@ -50,14 +53,22 @@
 // position : même en tête de titre, « km » resterait « km ».
 const UNITES = new Set(['km'])
 
-// ⚠️ « bout » N'EST PAS UNE PRÉPOSITION, mais dans une locution comme « de
-// bout en bout » il ne nomme rien de plus qu'elles — trancher au cas par cas
-// (mot par mot, jamais par titre entier) plutôt que par une règle générale
-// de longueur ou de densité de voyelles, qui le rendrait indiscernable d'un
-// nom de course comme « Raid » ou « Fous ».
+// ⚠️ « bout » N'EST PLUS ICI — retiré en relecture. Il l'avait rejoint pour
+// faire passer « de bout en bout » (minuscule aux deux occurrences), mais ce
+// cas de test a lui-même été abandonné : les deux exigences du plan qui le
+// justifiaient (jamais forcer le DERNIER mot, ET bout toujours minuscule)
+// étaient incompatibles dès qu'un titre plaçait bout ailleurs qu'en fin —
+// et le garder en mot mineur avait un coût réel sur un titre comme
+// « Trail du Bout du Monde » (bout en minuscule à côté de Monde en
+// capitale, sur un toponyme : incohérent à l'œil).
+//
+// ⚠️ « d » ET « l », PAS « d' » ET « l' » — la scission sur l'apostrophe,
+// juste en dessous, isole l'apostrophe comme séparateur : un segment ne
+// contient donc plus jamais le caractère « ' ». Les entrées « d' »/« l' »
+// d'une première version étaient du code mort qui avait l'air vivant —
+// aucun segment ne pouvait plus jamais les matcher.
 const MOTS_MINEURS = new Set([
-  'de', 'du', 'des', 'la', 'le', 'les', 'et', 'en', 'à', 'sur', "d'", "l'",
-  'bout',
+  'de', 'du', 'des', 'la', 'le', 'les', 'et', 'en', 'à', 'sur', 'd', 'l',
 ])
 
 // ⚠️ LA SUITE DE CONSONNES, PAS LE COMPTE DE VOYELLES. Un compte de voyelles
@@ -86,11 +97,15 @@ function estUnSigle(motMaj) {
   return pireSuiteDeConsonnes(motMaj) >= 3
 }
 
-// pas de chiffres dans la classe, et pas de trait d'union non plus : les deux
-// sont des séparateurs traités À CÔTÉ (chiffres → jamais transformé, trait
-// d'union → découpe en segments), jamais À L'INTÉRIEUR d'un segment jugé
-// « entièrement en capitales »
+// pas de chiffres dans la classe, et ni le trait d'union ni l'apostrophe non
+// plus : les trois sont des séparateurs traités À CÔTÉ (chiffres → jamais
+// transformé, trait d'union/apostrophe → découpe en segments), jamais À
+// L'INTÉRIEUR d'un segment jugé « entièrement en capitales »
 const SEUL_MAJUSCULES = /^[A-ZÀ-Ý]+$/
+// l'apostrophe DROITE (l'élision saisie au clavier) et la COURBE (celle
+// qu'un correcteur de saisie substitue) : les deux marquent la même élision,
+// un titre saisi sur des claviers différents peut porter l'une ou l'autre
+const SEPARATEURS = /([-'’])/
 
 const casseNom = (mot) => mot.charAt(0) + mot.slice(1).toLowerCase()
 
@@ -98,10 +113,10 @@ export function casseDeNom(titre) {
   if (!titre) return ''
   // ⚠️ UN SEUL DRAPEAU POUR TOUT LE TITRE, PAS UN INDEX DE JETON. Repérer
   // « le premier mot » par position de jeton se cassait dès qu'un mot à trait
-  // d'union ouvrait le titre (son premier SEGMENT, pas le jeton entier, doit
-  // porter la bordure) — un drapeau qui se ferme au premier segment
-  // alphabétique rencontré, quel que soit le découpage qui l'a produit, n'a
-  // pas ce problème.
+  // d'union OU à élision ouvrait le titre (son premier SEGMENT, pas le jeton
+  // entier, doit porter la bordure) — un drapeau qui se ferme au premier
+  // segment alphabétique rencontré, quel que soit le découpage qui l'a
+  // produit, n'a pas ce problème.
   let dejaVuUnMot = false
 
   const casserSegment = (seg) => {
@@ -118,8 +133,13 @@ export function casseDeNom(titre) {
   return titre
     .split(/(\s+)/) // les espaces sont capturés, pas seulement lus : recomposer À L'IDENTIQUE
     .map((jeton) => jeton
-      .split(/(-)/) // le trait d'union aussi : « MONT-BLANC » se compose Mont puis Blanc, pas comme un seul bloc
-      .map((s) => (s === '-' ? s : casserSegment(s)))
+      // trait d'union ET apostrophe dans LA MÊME scission : « L'ULTRA-TRAIL »
+      // a besoin des deux à la fois (L' puis Ultra puis -Trail), et deux
+      // scissions successives (d'abord l'une, puis l'autre sur chaque
+      // morceau) referaient courir le même risque d'oubli qui a produit ce
+      // bug — un seul passage, aucun caractère de jonction ne peut y échapper
+      .split(SEPARATEURS)
+      .map((s) => (SEPARATEURS.test(s) ? s : casserSegment(s)))
       .join(''))
     .join('')
 }
