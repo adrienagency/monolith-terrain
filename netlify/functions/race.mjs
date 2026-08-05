@@ -59,6 +59,11 @@
 //     shibumap.com, so it must never come back as something a browser would
 //     execute or render as HTML/SVG
 //
+// Et sur la LECTURE, qui est l'autre moitié du problème : un budget d'OCTETS
+// par IP, distinct du seau d'écriture et bien plus généreux, parce qu'un lien
+// #r=<id> est fait pour être ouvert par des centaines de coureurs dont beaucoup
+// partagent une même adresse publique. Voir « limitation de débit en LECTURE ».
+//
 // RETENTION: stored forever, no TTL. Netlify Blobs has no built-in
 // expiry — see the task report for why "store indefinitely for now, revisit
 // once real usage/cost data exists" was chosen over inventing a cleanup
@@ -119,8 +124,12 @@ function secretMatches(sent, storedHash) {
   return timingSafeEqual(Buffer.from(hashSecret(sent), 'hex'), Buffer.from(storedHash, 'hex'))
 }
 
-function jsonResponse(obj, status) {
-  return new Response(JSON.stringify(obj), {
+// `obj` accepte AUSSI une chaîne déjà sérialisée : la lecture doit mesurer
+// exactement les octets qu'elle rend pour les débiter (voir le budget de
+// lecture plus bas), et sérialiser deux fois un payload de plusieurs mégaoctets
+// juste pour le peser serait absurde.
+function jsonResponse(obj, status, enTetesSup = null) {
+  return new Response(typeof obj === 'string' ? obj : JSON.stringify(obj), {
     status,
     headers: {
       // NEVER text/html, NEVER an image/* content-type on the way back out —
@@ -128,6 +137,7 @@ function jsonResponse(obj, status) {
       'content-type': 'text/plain; charset=utf-8',
       'x-content-type-options': 'nosniff',
       'access-control-allow-origin': '*',
+      ...(enTetesSup || {}),
     },
   })
 }
@@ -205,6 +215,120 @@ async function takeToken(store, ip, now = Date.now()) {
     await store.setJSON(key, next)
   } catch {}
   return true
+}
+
+// ---- limitation de débit en LECTURE ----------------------------------------
+// LE SEAU CI-DESSUS NE PROTÈGE QUE L'ÉCRITURE. Pendant longtemps le GET n'avait
+// aucun frein : il répondait avant même d'atteindre takeToken. Or c'est LA
+// LECTURE qui coûte de la bande passante — une réponse peut peser jusqu'à
+// MAX_BODY_CHARS (≈ 4,26 Mo). Déposer une course au plafond ne demande qu'une
+// écriture (largement sous les 12 autorisées), et il suffit ensuite de relire
+// cet id en boucle pour vider l'allocation mensuelle de bande passante en
+// quelques minutes depuis UNE SEULE machine : site en pause, ou facture.
+//
+// POURQUOI PAS LE MÊME SEAU QUE L'ÉCRITURE. Un lien #r=<id> est fait pour être
+// envoyé à des centaines de coureurs, et beaucoup partagent une adresse IP
+// publique (wifi de club, réseau d'entreprise, NAT d'opérateur mobile).
+// 12 requêtes par 10 minutes casserait le produit dès le premier départ groupé.
+//
+// POURQUOI DES OCTETS ET NON DES REQUÊTES. Ce qui se paie, c'est la bande
+// passante, pas l'invocation. Un plafond en requêtes assez généreux pour un NAT
+// plein de coureurs (des centaines) laisserait quand même passer des centaines
+// × 4,26 Mo, soit plusieurs gigaoctets. Compter les octets rend au contraire les
+// deux profils très différents : une lecture normale (trace décimée à
+// MAX_POINTS ≈ 200-300 ko) coûte peu et passe des milliers de fois, tandis
+// qu'un payload gonflé au plafond épuise le budget en quelques centaines de
+// coups. C'est aussi ce qui laisse passer gratuitement les lectures peu
+// coûteuses — une carte nue, un 404 — sans les traiter à part.
+//
+// LE CHIFFRE. 1 Gio par tranche de 10 minutes et par IP :
+//   - côté usage légitime, cela couvre ≈ 3 600 lectures d'une course typique
+//     (300 ko) ou ≈ 430 lectures d'une course LOURDE (2,5 Mo : gros logo +
+//     trace) depuis une seule adresse IP, cache CDN entièrement contourné. Le
+//     scénario légitime le plus proche du plafond est donc un départ de masse
+//     où plus de 400 appareils DISTINCTS partagent une même IP publique et
+//     ouvrent le lien dans le même quart d'heure. On n'y est pas.
+//   - côté abus, cela ramène une machine seule de ~80 Mo/s à 1,79 Mo/s
+//     comptés ici. Et comme on débite les octets AVANT compression alors que la
+//     facture porte sur le flux compressé (du GPX, c'est du texte : gzip divise
+//     par 3 à 5), la ponction réelle est plutôt de l'ordre de 0,4 Mo/s. Vider
+//     une allocation de quelques dizaines de gigaoctets demande alors des
+//     heures au lieu de trois minutes.
+// Ce n'est donc pas un mur, c'est un débit : le but est de transformer une
+// purge instantanée en fuite lente et visible. Un plafond assez bas pour rendre
+// l'abus impossible refuserait des coureurs, et c'est exactement ce qu'on
+// refuse de faire.
+//
+// PREMIÈRE RAFALE : le seau démarre plein, donc un attaquant peut prendre 1 Gio
+// d'un coup avant d'être freiné. Assumé — un seul Gio n'est pas ce qui met le
+// site en pause, la répétition l'était.
+export const LECTURE_CAP_OCTETS = 1024 * 1024 * 1024 // 1 Gio d'octets servis
+export const LECTURE_FENETRE_MS = 10 * 60 * 1000 // rechargé en entier en 10 min
+
+// Clé distincte de celle de l'écriture (`rl_`) : lire beaucoup ne doit jamais
+// empêcher un organisateur de corriger sa course, ni l'inverse. Le préfixe
+// contient un « _ », que ID_RE interdit — aucun seau ne peut donc entrer en
+// collision avec un identifiant de course dans le même magasin.
+export const cleSeauLecture = (ip) => `rlq_${String(ip).replace(/[^a-zA-Z0-9:._-]/g, '')}`.slice(0, 96)
+
+// Solde d'octets de cette IP, ou null quand il n'y a rien à compter (pas d'IP
+// lisible, magasin en panne). null veut dire « sers sans compter » : comme pour
+// l'écriture, une panne du magasin ne doit pas fermer le site.
+async function creditLecture(store, ip, now = Date.now()) {
+  if (!ip) return null
+  let seau = null
+  try {
+    seau = await store.get(cleSeauLecture(ip), { type: 'json' })
+  } catch {
+    return null
+  }
+  return refillBucket(seau, now, LECTURE_CAP_OCTETS, LECTURE_FENETRE_MS)
+}
+
+// Le débit a lieu APRÈS coup, sur la taille réellement servie. Conséquence
+// voulue : on ne refuse jamais une requête à quelqu'un qui avait encore du
+// crédit au moment de la demander — le solde peut passer sous zéro, et c'est la
+// requête SUIVANTE qui est refusée. Le découvert est borné par une réponse.
+async function debiterLecture(store, ip, seau, octets) {
+  if (!ip || !seau) return
+  try {
+    await store.setJSON(cleSeauLecture(ip), { tokens: seau.tokens - octets, at: seau.at })
+  } catch {}
+}
+
+// Secondes à attendre avant que le solde redevienne positif, pour Retry-After.
+// Un découvert profond ne doit pas renvoyer une éternité : on borne à la
+// fenêtre, au bout de laquelle le seau est de toute façon plein.
+export function delaiRecharge(solde, cap = LECTURE_CAP_OCTETS, fenetreMs = LECTURE_FENETRE_MS) {
+  const manque = Math.max(1, 1 - (Number.isFinite(solde) ? solde : 0))
+  const ms = (manque * fenetreMs) / cap
+  return Math.min(Math.round(fenetreMs / 1000), Math.max(1, Math.ceil(ms / 1000)))
+}
+
+// EN-TÊTES DE CACHE DE LA LECTURE — le complément indispensable du budget
+// ci-dessus. Sans eux, chaque coureur d'un départ groupé est un appel de
+// fonction et un aller-retour Blobs ; avec eux, le réseau de diffusion sert la
+// rafale et l'origine ne voit qu'une requête par tranche. Le budget reste
+// dimensionné COMME SI le cache n'existait pas : un cache est une optimisation,
+// pas une garantie, et un attaquant peut le contourner (URL variée, en-tête de
+// requête sans-cache).
+//
+// LA DURÉE EST LE COMPROMIS. Le PUT existe précisément pour qu'une course
+// corrigée atteigne ceux qui détiennent déjà le lien ; un cache long
+// remplacerait ce bug-là par le même bug côté réseau. 30 secondes parce que :
+//   - c'est déjà largement assez pour absorber un départ (à 10 requêtes/s, une
+//     seule atteint l'origine au lieu de 300) — allonger encore n'apporte
+//     presque rien, la fusion sature vite ;
+//   - c'est le pire décalage que verra un organisateur qui corrige son tracé
+//     puis recharge son propre lien pour vérifier. Une demi-minute se
+//     comprend ; dix minutes se vivent comme « ma correction n'a pas pris ».
+// max-age=0 côté navigateur : un rechargement manuel doit TOUJOURS repartir
+// chercher la version fraîche. Seul le cache partagé garde une copie.
+// L'en-tête Netlify dit la même chose dans le dialecte du CDN, qui a priorité
+// sur cache-control quand il est présent ; les deux doivent rester d'accord.
+const CACHE_LECTURE = {
+  'cache-control': 'public, max-age=0, must-revalidate',
+  'netlify-cdn-cache-control': 'public, s-maxage=30, must-revalidate',
 }
 
 // Netlify place l'IP du client dans x-nf-client-connection-ip ; x-forwarded-for
@@ -306,6 +430,23 @@ export async function handleRace(req, store) {
   if (req.method === 'GET') {
     const id = url.searchParams.get('id') || ''
     if (!ID_RE.test(id)) return jsonResponse({ error: 'bad id' }, 400)
+
+    // Le solde se consulte AVANT d'aller chercher le blob : même doctrine que
+    // l'écriture, inutile de tirer 4 Mo du magasin pour quelqu'un qu'on va
+    // refuser. Voir le bloc « limitation de débit en LECTURE » pour l'arbitrage.
+    const ip = clientIp(req.headers)
+    const seau = await creditLecture(store, ip)
+    if (seau && seau.tokens <= 0) {
+      return jsonResponse({ error: 'trop de lectures depuis cette adresse, réessayez dans un instant' }, 429, {
+        'retry-after': String(delaiRecharge(seau.tokens)),
+        // sans cela le navigateur cache le délai à l'appelant d'une autre origine
+        'access-control-expose-headers': 'retry-after',
+        // un refus ne se met JAMAIS en cache : il vaut pour cette IP à cet
+        // instant, et une copie partagée le servirait à des innocents
+        'cache-control': 'no-store',
+      })
+    }
+
     let payload
     try {
       payload = await store.get(id, { type: 'json' })
@@ -318,7 +459,11 @@ export async function handleRace(req, store) {
     // donner le payload à des inconnus ; il ne doit jamais leur donner en
     // plus de quoi le réécrire.
     const { secretHash, ...publicPayload } = payload
-    return jsonResponse({ ok: true, payload: publicPayload }, 200)
+    // Sérialisé une fois, pesé, débité, rendu : ce sont bien les octets qui
+    // partent sur le fil qu'on compte, pas une estimation.
+    const corps = JSON.stringify({ ok: true, payload: publicPayload })
+    await debiterLecture(store, ip, seau, Buffer.byteLength(corps, 'utf8'))
+    return jsonResponse(corps, 200, CACHE_LECTURE)
   }
 
   if (req.method !== 'POST' && req.method !== 'PUT') return jsonResponse({ error: 'method not allowed' }, 405)
