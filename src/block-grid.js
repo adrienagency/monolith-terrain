@@ -316,6 +316,12 @@ export class BlockGrid {
     this.onReady = null // (cell) => {} — un voisin vient d'arriver (re-drapage GPX)
     this.onGridChanged = null // () => {} — le damier a gagné/perdu une cellule
     this.onCoastReady = null // (cell) => {} — son trait de côte est arrivé (re-découpe de zone)
+    // LES TROIS SCALAIRES DE LA COUCHE NOCTURNE, MÉMORISÉS — voir
+    // setNuitIntensite(). `null` = « main.js n'a encore rien dit » : une dalle
+    // qui naît garde alors les valeurs d'usine de son Terrain.
+    this._nuitIntensite = null
+    this._nuitFond = null
+    this._nuitGain = null
   }
 
   // rayon MONDE couvert par le damier au-delà du bloc central (0 si aucun
@@ -990,6 +996,52 @@ export class BlockGrid {
     for (const cell of this.cells.values()) cell.terrain?.setAerialCoastFade?.(v)
   }
 
+  // ═══════ LES LUMIÈRES NOCTURNES DESCENDENT AUSSI JUSQU'AUX VOISINES ════════
+  //
+  // ⚠️ C'EST LE DÉFAUT « LA CARTE EST COUPÉE EN DEUX ». La couche nocturne ne
+  // fait pas qu'ajouter des lumières : elle ÉTEINT le sol d'abord (uNuitFond
+  // ≈ 0,22 de ce qui reste, cf. le fragment de terrain.js), et c'est ce
+  // facteur-là qui se voit. Posée sur la seule dalle centrale, elle laissait
+  // une moitié de damier presque noire, ville allumée, et l'autre moitié à
+  // pleine luminosité — la frontière exactement sur une jointure.
+  //
+  // Et ce n'est pas l'utilisateur qui l'allumait : `tenteAllumageNuit`
+  // (main.js) allume la couche TOUT SEUL quand la nuit tombe, donc le simple
+  // fait de traîner la tirette de 24 h fabriquait la coupure.
+  //
+  // Trois scalaires ici, la MOSAÏQUE ailleurs : chaque dalle a son emprise,
+  // donc sa propre mosaïque — c'est main.js qui la bâtit, exactement comme
+  // `paintCellAerial` le fait pour la photo aérienne.
+  //
+  // ⚠️ LA VALEUR EST MÉMORISÉE, ET LA TOURNÉE GARDÉE SUR UN CHANGEMENT RÉEL.
+  // `applyTimeOfDay` (main.js) redescend l'intensité à CHAQUE DIXIÈME D'HEURE
+  // de la tirette de 24 h, et le cas de très loin le plus fréquent est « couche
+  // éteinte » : la même valeur 0, réécrite indéfiniment sur 24 dalles. On sort
+  // avant la boucle quand rien n'a bougé.
+  //
+  // La mémoire a un SECOND emploi, et c'est lui qui compte le plus : elle
+  // habille les dalles qui naissent APRÈS (voir `_applyLook`). Sans elle, une
+  // voisine arrivée après le crépuscule resterait en plein jour au milieu d'un
+  // damier éteint — le défaut d'origine, simplement décalé dans le temps.
+  //
+  // Coût d'une tournée qui passe : une écriture d'uniforme par dalle (24 au
+  // maximum). Rien à recuire, rien à recompiler.
+  setNuitIntensite(v) {
+    if (v === this._nuitIntensite) return
+    this._nuitIntensite = v
+    for (const cell of this.cells.values()) cell.terrain?.setNuitIntensite?.(v)
+  }
+  setNuitFond(v) {
+    if (v === this._nuitFond) return
+    this._nuitFond = v
+    for (const cell of this.cells.values()) cell.terrain?.setNuitFond?.(v)
+  }
+  setNuitGain(v) {
+    if (v === this._nuitGain) return
+    this._nuitGain = v
+    for (const cell of this.cells.values()) cell.terrain?.setNuitGain?.(v)
+  }
+
   // le look a changé (template, contours, rampe, MATÉRIAU…) — les voisins
   // suivent la dalle PRINCIPALE comme un composant (Adrien) : même rampe, même
   // matériau/relief/shader de surface. Ce qui doit rester PROPRE à chaque dalle
@@ -1020,6 +1072,37 @@ export class BlockGrid {
     t.setAerialCoastFade?.(p.aerialCoastFade ?? 0.1)
     // continuité de teinte : aligner la plage hypsométrique sur le bloc central
     if (mt) t.mapUniforms.uHeightRange.value.copy(mt.mapUniforms.uHeightRange.value)
+    // L'ENCRE DES COURBES ET DE LA GRILLE — recopiée du centre, jamais relue
+    // dans `params`.
+    //
+    // ⚠️ ELLE BASCULE TOUTE SEULE AVEC L'HEURE, et c'est pour ça qu'elle est
+    // ici : `applyTimeOfDay` → `setDarkMode` → `applyGridContour` retourne
+    // l'encre en clair quand la nuit tombe, et n'écrivait que sur la dalle
+    // centrale. Une voisine née avant le crépuscule gardait ses courbes
+    // sombres à côté d'un centre passé au blanc.
+    //
+    // ⚠️ ET ON COPIE L'UNIFORME, ON NE RELIT PAS LA RÈGLE. `uContourWeight` ne
+    // vaut PAS `params.contourWeight` en mode sombre : `setDarkMode` l'écrase à
+    // 0,5 APRÈS `applyGridContour`. Rejouer la règle ici la dupliquerait — et
+    // la deuxième copie prendrait du retard au premier changement. Le centre
+    // fait foi, comme pour uHeightRange juste au-dessus.
+    if (mt) {
+      const um = t.mapUniforms, uc = mt.mapUniforms
+      um.uContourColor.value.copy(uc.uContourColor.value)
+      um.uGridColor.value.copy(uc.uGridColor.value)
+      um.uContourInterval.value = uc.uContourInterval.value
+      um.uContourOpacity.value = uc.uContourOpacity.value
+      um.uContourWeight.value = uc.uContourWeight.value
+      um.uGridStep.value = uc.uGridStep.value
+      um.uGridOpacity.value = uc.uGridOpacity.value
+    }
+    // LES TROIS SCALAIRES DE LA COUCHE NOCTURNE — reposés ici, et c'est ce qui
+    // rattrape les dalles NÉES APRÈS le crépuscule : `_buildCell` appelle
+    // `_applyLook`, donc une voisine reçoit l'état de la couche au moment même
+    // où elle arrive. La mosaïque, elle, la rejoint par `peintCelluleNuit`.
+    if (this._nuitIntensite != null) t.setNuitIntensite?.(this._nuitIntensite)
+    if (this._nuitFond != null) t.setNuitFond?.(this._nuitFond)
+    if (this._nuitGain != null) t.setNuitGain?.(this._nuitGain)
   }
 
   clear() {
@@ -1042,6 +1125,7 @@ export class BlockGrid {
     // son MNT n'a plus de porteur : il passe au cache des DÉTACHÉS, borné
     this._keepDetachedDem(cell.demKey, cell.demRaw)
     cell.aerial?.dispose?.() // AerialLayer dédié de la cellule (posé par main.js)
+    cell.nuit?.dispose?.() // … et son NuitLayer, même contrat (posé par main.js)
     if (cell.walls) {
       this.scene.remove(cell.walls)
       cell.walls.geometry?.dispose() // le matériau des murs est PARTAGÉ (socle principal) — ne pas disposer

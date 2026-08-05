@@ -5011,6 +5011,11 @@ const allGpxPoints = () => gpxLayer.layers.flatMap((l) => l.gpx.track?.points ??
 blockGrid.onReady = (cell) => {
   gpxLayer.rebuildAll()
   paintCellAerial(cell)
+  // … et sa MOSAÏQUE de lumières nocturnes, si la couche est allumée. Les trois
+  // scalaires de la couche, eux, lui ont déjà été posés par `_applyLook` à sa
+  // naissance (block-grid.js) : une dalle arrivée après le crépuscule ne doit
+  // pas rester en plein jour au milieu d'un damier éteint.
+  peintCelluleNuit(cell)
   if (params.regionMode && blockGrid.regionParts) {
     paintCellRegion(cell)
     rebuildRegionSkirtSoon()
@@ -5531,9 +5536,17 @@ const nuitLayer = new NuitLayer({ maxTexturePx: renderer.capabilities.maxTexture
 // toujours — et quand elle en diffère, lire params fait briller les villes en
 // plein midi pendant que le soleil, lui, obéit à l'argument. Le défaut est
 // apparu au premier essai : forcer 12 h laissait la couche à pleine intensité.
+// L'intensité part au bloc central ET au damier. Le garde « changement réel »
+// — indispensable, `applyTimeOfDay` passe ici à chaque dixième d'heure de la
+// tirette de 24 h — vit dans `BlockGrid.setNuitIntensite`, avec la boucle qu'il
+// protège et la mémoire dont les dalles à naître ont besoin.
+function poseNuitIntensite(v) {
+  terrain.setNuitIntensite(v)
+  blockGrid.setNuitIntensite(v) // les voisines suivent la principale
+}
 function refreshNuitIntensite(hour = params.timeOfDay ?? 10) {
   const on = couchesActives.has('lumieres-nocturnes')
-  if (!on) { terrain.setNuitIntensite(0); return }
+  if (!on) { poseNuitIntensite(0); return }
   // DEUX facteurs, et le second n'est pas cosmétique : sous 20 km, la DALLE
   // couvre trois pixels de Black Marble et la couche devient un voile gris
   // uniforme — constaté à Tokyo z16. `facteurEchelleNuit` l'éteint alors.
@@ -5543,7 +5556,10 @@ function refreshNuitIntensite(hour = params.timeOfDay ?? 10) {
   // Paris z12 en 3×3 rendait 0,949 au lieu de 0, c'est-à-dire le voile gris à
   // pleine intensité sous un garde qui croyait l'avoir éteint.
   const echelle = facteurEchelleNuit(largeurDalleKm(dem ? demBounds(dem) : null, dem?.empriseCote))
-  terrain.setNuitIntensite(intensiteNuit(hour) * echelle)
+  // ⚠️ UNE SEULE VALEUR POUR TOUT LE DAMIER, et c'est juste : `echelle` se
+  // mesure sur la largeur d'UNE dalle, et toutes les dalles partagent le zoom
+  // du bloc central. Recalculer par dalle rendrait le même nombre.
+  poseNuitIntensite(intensiteNuit(hour) * echelle)
 }
 
 // LES SOUS-OPTIONS, POUSSÉES DANS LES UNIFORMES.
@@ -5558,8 +5574,15 @@ function refreshNuitIntensite(hour = params.timeOfDay ?? 10) {
 function appliqueReglagesCouches() {
   terrain.setSolOpacite(opaciteSol(params.solForce))
   terrain.setCanopeeOpacite(opaciteCanopee(params.canopeeForce))
-  terrain.setNuitFond(fondNuit(params.nuitAssombrissement))
-  terrain.setNuitGain(gainNuit(params.nuitForce))
+  const fond = fondNuit(params.nuitAssombrissement)
+  const gain = gainNuit(params.nuitForce)
+  terrain.setNuitFond(fond)
+  terrain.setNuitGain(gain)
+  // … et les voisines avec elle : les deux tirettes dosent l'extinction du sol
+  // et la force de la lueur, donc un damier qui ne les reçoit pas rejoue la
+  // coupure à la jointure, en plus discret.
+  blockGrid.setNuitFond(fond)
+  blockGrid.setNuitGain(gain)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -5640,7 +5663,44 @@ function couchePartieEnVol(id, demAuDepart) {
   return !couchesActives.has(id) || dem !== demAuDepart || params.source !== 'real'
 }
 
+// LA MOSAÏQUE NOCTURNE D'UNE DALLE DU DAMIER — même patron que
+// `paintCellAerial`, et pour les mêmes raisons : chaque dalle a SON emprise,
+// donc sa propre mosaïque, et son propre `NuitLayer` (dont le `_buildId` ne
+// collisionne avec celui de personne).
+//
+// ⚠️ CE N'EST PAS SUR LE CHEMIN DE L'HEURE, et ça doit le rester. Cette
+// fonction touche le réseau et cuit un canevas ; `applyTimeOfDay` passe à
+// chaque dixième d'heure. Elle n'est appelée que sur un changement RÉEL :
+// naissance d'une dalle, bascule de la couche, déplacement de carte. Le cycle
+// horaire, lui, ne pousse que l'intensité (`poseNuitIntensite`, un flottant).
+//
+// ⚠️ ET LE BUDGET EST BEAUCOUP PLUS PETIT QU'IL N'Y PARAÎT : Black Marble est
+// plafonné à z8 et la mosaïque à 1024 px (voir map/nuit-layer.js), là où la
+// photo aérienne — déjà bâtie par dalle, elle — monte à 4096. Une dalle de
+// 30 km tient dans une ou deux tuiles z8, les mêmes que ses voisines : le
+// cache HTTP du navigateur sert tout le damier avec les téléchargements du
+// bloc central.
+//
+// Silencieux comme la photo : pas de notice par dalle, le bloc central porte
+// déjà l'attribution légale.
+async function peintCelluleNuit(cell) {
+  if (!cell?.terrain) return
+  if (!couchesActives.has('lumieres-nocturnes') || !cell.dem || params.source !== 'real') {
+    cell.terrain.setNuit(null)
+    return
+  }
+  cell.nuit ??= new NuitLayer({ maxTexturePx: renderer.capabilities.maxTextureSize })
+  const built = await cell.nuit.build(demBounds(cell.dem))
+  if (built === SUPERSEDED || !built?.texture) return
+  // MÊME GARDE D'APRÈS-ATTENTE que le bloc central (voir `couchePartieEnVol`) :
+  // la couche a pu être éteinte, ou la dalle retirée, pendant le téléchargement.
+  if (cell.disposed || !couchesActives.has('lumieres-nocturnes')) return
+  cell.terrain.setNuit(built)
+}
+
 async function refreshNuit() {
+  // le damier suit la principale, allumage comme extinction
+  for (const cell of blockGrid.cells.values()) peintCelluleNuit(cell)
   if (!couchesActives.has('lumieres-nocturnes') || !dem || params.source !== 'real') {
     terrain.setNuit(null)
     refreshNuitIntensite()
