@@ -475,6 +475,25 @@
    Même mécanique et même qualification par .cb-bar que les deux autres. */
 .cb-bar .cb-speed-btn:not(.on) { color: var(--ce-muted-fort); }
 
+/* ⚠️ SANS FOND, STOP FLOTTAIT SEUL AU MILIEU DE SES VOISINS (retour d'Adrien
+   après essai) : Lecture est un disque plein (color-mix ink 88 %), la pilule
+   des vitesses juste en dessous a son propre rail --ce-track — Stop, lui,
+   restait transparent jusqu'au survol, posé à même le creux de .cb-outils
+   (--ce-hover, 5 % d'encre) dont il ne se détachait quasiment pas. Pas de
+   couleur inventée : --ce-track EST le jeton « surface de repos » déjà en
+   service à 8 px de là pour la pilule de vitesse, dans ce même groupe
+   d'outils — Stop en hérite pour rejoindre le même gabarit visuel, en clair
+   comme en sombre (le jeton bascule déjà avec le thème, voir v28.css). Le
+   hover de .ce-icon-btn (--ce-hover, plus clair) resterait sinon perdant la
+   partie sur l'égalité de spécificité contre cette règle, la feuille de
+   v28.css étant chargée APRÈS celle-ci (voir la note plus haut sur .cb-bar
+   .cb-collapse) : la règle :hover ci-dessous fige donc le même fond au survol,
+   pour ne pas voir Stop s'éclaircir puis se réassombrir sous la souris. */
+.cb-bar .cb-stop,
+.cb-bar .cb-stop:hover {
+  background: var(--ce-track);
+}
+
 .cb-cam { display: flex; gap: var(--ce-gap-tight); transition: opacity 0.15s; }
 .cb-cam.cb-cam-off { opacity: 0.28; }
 /* .ce-icon-btn fait la taille, le rayon, le hover et le svg à 16 px. Ne reste

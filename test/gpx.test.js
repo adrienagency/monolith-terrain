@@ -50,6 +50,7 @@ let parseGpx
 let frameTrack
 let indexALAbscisse
 let fractionAuClic
+let repereDeSurvol
 let peutSurvolerLeTrace
 let stepHeadFollow
 let pickKmInterval
@@ -72,6 +73,7 @@ before(async () => {
     frameTrack,
     indexALAbscisse,
     fractionAuClic,
+    repereDeSurvol,
     peutSurvolerLeTrace,
     stepHeadFollow,
     pickKmInterval,
@@ -195,6 +197,23 @@ test('fractionAuClic retire le padding horizontal avant de diviser (panneau HUD,
   assert.equal(fractionAuClic(792, 800, 8), 1) // bord droit utile (800 - 8)
   assert.equal(fractionAuClic(400, 800, 8), 0.5) // milieu de la zone utile (784 px) depuis x=8
   assert.equal(fractionAuClic(0, 800, 8), 0, 'avant le padding : borne a 0, pas negatif')
+})
+
+// ---- repere de survol (task 12) : suit le pixel, pas un sommet ----
+
+test('le repere de survol suit le pixel, il ne s aimante pas a un sommet', () => {
+  // fractionAuClic est deja la conversion pixel -> fraction ; ce test verrouille
+  // que le repere de survol utilise la MEME fonction et rend donc une fraction
+  // continue (un pixel de plus deplace le trait), jamais un index de sommet arrondi
+  const a = fractionAuClic(400, 800, 0)
+  const b = fractionAuClic(401, 800, 0)
+  assert.notEqual(a, b, 'un pixel de plus doit deplacer le repere')
+  assert.equal(repereDeSurvol(a), a)
+})
+
+test('sortir du canevas efface le repere', () => {
+  assert.equal(repereDeSurvol(null), null)
+  assert.equal(repereDeSurvol(undefined), null)
 })
 
 // ---- garde du picking 3D : le ruban (this.line == null) doit rester survolable ----

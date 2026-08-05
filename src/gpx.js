@@ -254,6 +254,18 @@ export function fractionAuClic(x, largeur, padX) {
   return THREE.MathUtils.clamp((x - padX) / utile, 0, 1)
 }
 
+// GARDE DE L'ÉTAT DE SURVOL DU PROFIL (task 12), EXTRAITE EN FONCTION PURE —
+// même esprit que peutSurvolerLeTrace ci-dessous : un `pointerleave` doit
+// EFFACER le repère, pas le laisser figé sur la dernière position connue.
+// Volontairement triviale (elle ne fait QUE filtrer les valeurs non finies) :
+// c'est la fraction elle-même — celle de fractionAuClic, PAS un index de
+// sommet — qui doit alimenter le trait, pour qu'il suive le pixel exact du
+// curseur plutôt que de s'aimanter au sommet le plus proche comme le fait le
+// réticule de lecture (hoverIdx, plus haut dans ce fichier).
+export function repereDeSurvol(fraction) {
+  return typeof fraction === 'number' && Number.isFinite(fraction) ? THREE.MathUtils.clamp(fraction, 0, 1) : null
+}
+
 // GARDE DE pointerMove(), EXTRAITE EN FONCTION PURE (task 9, relecture) —
 // un calque est survolable s'il porte des sommets ET si son groupe (le
 // toggle « afficher le tracé ») est visible. `group.visible`, PAS
@@ -564,6 +576,10 @@ export class GpxLayer {
     this.sillage = null
     this.sillageMat = null
     this.hoverIdx = -1
+    // repère de survol du profil (task 12) — fraction de DISTANCE (0..1),
+    // au pixel, indépendante de hoverIdx qui s'aimante au sommet le plus
+    // proche : null quand la souris n'est pas sur le canevas
+    this._survolFraction = null
 
     // progressive-reveal playback: headT is the play position (0..1, by
     // segment index) — _revealT is what's currently drawn (persists across
@@ -664,13 +680,26 @@ export class GpxLayer {
     this.profileCanvas.addEventListener('pointermove', (e) => {
       if (!this.track) return
       const r = this.profileCanvas.getBoundingClientRect()
+      // ⚠️ REPÈRE DE SURVOL (task 12) — MÊME fractionAuClic que le clic-pour-
+      // reprendre (réciproque exacte de X(i) dans _drawProfile), PAS le calcul
+      // km/findIndex ci-dessous qui alimente hoverIdx : celui-ci s'aimante au
+      // sommet le plus proche pour le réticule de LECTURE, alors qu'Adrien
+      // demande un trait qui « suit exactement ma souris » — au pixel, sans
+      // s'accrocher à aucun sommet. Posé AVANT setHover() : son appel interne
+      // à _drawProfile() dessine alors les deux repères dans la MÊME image.
+      const emb = !!this.profileCanvas.closest?.('.cb-embedded')
+      this._survolFraction = repereDeSurvol(fractionAuClic(e.clientX - r.left, r.width, emb ? 0 : PROFILE_PAD_X))
       const f = (e.clientX - r.left) / r.width
       const km = f * this.track.cumKm[this.track.cumKm.length - 1]
       let i = this.track.cumKm.findIndex((v) => v >= km)
       if (i < 0) i = this.track.cumKm.length - 1
       this.setHover(i, false)
     })
-    this.profileCanvas.addEventListener('pointerleave', () => this.setHover(-1, false))
+    this.profileCanvas.addEventListener('pointerleave', () => {
+      // même ordre : effacer le repère AVANT setHover(), qui redessine
+      this._survolFraction = repereDeSurvol(null)
+      this.setHover(-1, false)
+    })
     // ⚠️ CLIC-POUR-REPRENDRE (task 9) — GpxLayer se contente de convertir le
     // pixel cliqué en fraction de DISTANCE (fractionAuClic, réciproque exacte
     // de X(i) dans _drawProfile) et de prévenir main.js par le MÊME canal que
@@ -1669,6 +1698,34 @@ export class GpxLayer {
       ctx.textBaseline = 'bottom'
       ctx.fillText(`${Math.round(eMin)} m`, padX, H - pad - 2)
       ctx.textBaseline = 'alphabetic'
+    }
+
+    // ⚠️ REPÈRE DE SURVOL (task 12) — « une couleur différente de celles qui
+    // sont déjà sur le profil ». L'accent est déjà pris trois fois sur ce
+    // graphique (réticule ci-dessous, sa pastille, les points de passage) et
+    // la règle en tête de course-bar.css le réserve à LA POSITION DE LECTURE.
+    // Ce trait-ci ne dit pas « c'est ici que tu es » mais « c'est ici que tu
+    // IRAIS si tu cliques » — une intention différente, qui ne doit donc pas
+    // parler la langue de l'accent. `ink` en encre atténuée ET en pointillé
+    // (double distinction : teinte ET tracé) évite toute confusion visuelle
+    // avec le réticule plein ci-dessous quand les deux sont visibles à la
+    // fois — ce qui arrive à chaque survol du profil, puisque le réticule
+    // (hoverIdx, aimanté au sommet le plus proche) et ce repère (la fraction
+    // EXACTE du pixel, via fractionAuClic) sont posés par le MÊME pointermove.
+    // Dessiné APRÈS la courbe et AVANT la pastille de survol ci-dessous, pour
+    // ne masquer ni l'une ni l'autre.
+    if (this._survolFraction != null) {
+      const xs = padX + this._survolFraction * (W - padX * 2)
+      ctx.save()
+      ctx.strokeStyle = ink
+      ctx.globalAlpha = 0.4
+      ctx.lineWidth = 1
+      ctx.setLineDash([3, 3])
+      ctx.beginPath()
+      ctx.moveTo(xs, pad)
+      ctx.lineTo(xs, H - pad)
+      ctx.stroke()
+      ctx.restore()
     }
 
     // hover crosshair
