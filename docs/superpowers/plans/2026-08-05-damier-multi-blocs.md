@@ -574,17 +574,54 @@ test('le plancher du bloc central ne suffit pas a egaliser', () => {
   const b = buildSlabWalls(plat(-40), { resolution: 32, baseYFloor: centre })
   assert.notEqual(fondDe(a), fondDe(b), 'c\'est bien le defaut qu\'on corrige')
 })
+
+// ══════ LE TEST QUI ÉCHOUE, ET QUI PORTE LE TRAVAIL DE CETTE TÂCHE ══════
+// Les deux tests ci-dessus caractérisent le mécanisme existant ; celui-ci
+// exige ce qui n'existe pas encore : que le damier CALCULE le bon plancher.
+import { BlockGrid } from '../src/block-grid.js'
+
+function damierBouchon(basesY) {
+  const g = new BlockGrid({
+    scene: null,
+    params: {},
+    getMainDem: () => null,
+    getMainTerrain: () => null,
+    getPlinth: () => ({ baseY: basesY.centre }),
+  })
+  let k = 0
+  for (const b of basesY.voisines) {
+    k++
+    g.cells.set(`${k},0`, { i: k, j: 0, baseYPropre: b, planchierPose: null })
+  }
+  return g
+}
+
+test('le plancher commun est le plus bas de TOUTES les cases, centre inclus', () => {
+  const g = damierBouchon({ centre: -10, voisines: [-4, -37, -12] })
+  assert.equal(g.planchierCommun(), -37, 'la voisine la plus profonde impose le fond')
+})
+
+test('sans voisine, le plancher commun est celui du bloc principal', () => {
+  const g = damierBouchon({ centre: -10, voisines: [] })
+  assert.equal(g.planchierCommun(), -10)
+})
+
+test('une case sans base connue ne fausse pas le plancher', () => {
+  const g = damierBouchon({ centre: -10, voisines: [-4] })
+  g.cells.set('9,0', { i: 9, j: 0, baseYPropre: undefined, planchierPose: null })
+  assert.equal(g.planchierCommun(), -10, 'undefined ignore, pas propage en NaN')
+})
 ```
 
 Ajouter le fichier à la ligne `"test"` de `package.json`.
 
-- [ ] **Étape 2 : lancer pour voir l'état de départ**
+- [ ] **Étape 2 : lancer pour vérifier l'échec**
 
 ```bash
 node --test test/damier-hauteur.test.js
 ```
 
-Attendu : le premier test RÉUSSIT (le mécanisme `baseYFloor` fonctionne déjà), le second RÉUSSIT aussi (il documente le défaut). Ces tests verrouillent le contrat ; le travail de cette tâche est de faire **calculer** le bon plancher par `BlockGrid`.
+Attendu : les deux premiers tests RÉUSSISSENT — ils caractérisent le mécanisme `baseYFloor` qui existe déjà, et documentent le défaut qu'on corrige. **Les trois derniers ÉCHOUENT** avec `g.planchierCommun is not a function` : c'est le rouge de cette tâche.
 
 - [ ] **Étape 3 : implémenter le plancher commun**
 
@@ -663,7 +700,9 @@ git commit -m "feat: toutes les cases du damier descendent au meme fond"
 - Consomme : rien.
 - Produit :
   - `bordsExterieurs(i, j, { i0, j0, cote })` → `{ nord, est, sud, ouest }` de booléens. Une arête est extérieure quand aucune case du carré ne la jouxte.
-  - `masqueArrondi(cote, resolution, cornerR, bords)` → `Float32Array` de longueur = celle du contour, valeur 1 sur les portions extérieures et 0 sur les intérieures. Sert à moduler `arrondi` **et** `chanfrein` par sommet.
+  - `masqueDepuisContour(contour, demi, bords, marge?)` → `Float32Array` de longueur égale à celle du contour, valeur 1 sur les sommets à arrondir et 0 sur les autres. Sert à moduler `arrondi` **et** `chanfrein` par sommet.
+
+⚠️ **Une seule fonction de masque, pas deux.** L'envie naturelle est d'écrire aussi une variante qui reproduit le découpage de `computeSlab` (tant de sommets pour le côté nord, tant pour l'arc, etc.). Elle marcherait aujourd'hui et casserait au prochain réglage de densité d'arc — un couplage muet entre deux fichiers, exactement ce qui a déjà coûté un chantier ici (cf. le commentaire « LA DENSITÉ DE L'ARC SE MESURE EN LONGUEUR », `src/plinth.js:163`). On étiquette par **position**, qui ne ment pas. Ne pas créer de seconde fonction.
 
 **Contexte géométrique** — `computeSlab` (`src/plinth.js:137-199`) construit son contour dans un ordre fixe et documenté :
 - cas carré (`cornerR === 0`, lignes 150-155) : 4 côtés de `n` échantillons chacun, dans l'ordre **z=−HALF (nord), x=+HALF (est), z=+HALF (sud), x=−HALF (ouest)** ;
@@ -678,7 +717,8 @@ Créer `test/damier-bords.test.js` :
 ```js
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { bordsExterieurs, masqueArrondi } from '../src/damier-bords.js'
+import { bordsExterieurs, masqueDepuisContour } from '../src/damier-bords.js'
+import { computeSlab } from '../src/plinth.js'
 
 // convention d'axes de computeSlab : z=-HALF est le NORD, z=+HALF le SUD,
 // x=+HALF l'EST, x=-HALF l'OUEST. j croît vers le sud (z croissant).
@@ -709,39 +749,65 @@ test('le coin sud-est expose sud et est', () => {
     { nord: false, est: true, sud: true, ouest: false })
 })
 
-// LE MASQUE — c'est lui que le socle consomme, sommet par sommet.
+// LE MASQUE — c'est lui que le socle consomme, sommet par sommet. On le teste
+// sur un VRAI contour rendu par computeSlab, pas sur un contour inventé : le
+// but du module est justement de ne pas dupliquer le découpage de plinth.js.
+const TOUS = { nord: true, est: true, sud: true, ouest: true }
+const AUCUN = { nord: false, est: false, sud: false, ouest: false }
+const platA10 = () => 10
+
+function contourCarre(n = 32) {
+  const slab = computeSlab(platA10, 7, n)
+  const demi = Math.max(...slab.ring.map((p) => Math.abs(p.x)))
+  return { ring: slab.ring, demi }
+}
+
 test('le masque d\'une case isolee vaut 1 partout', () => {
-  const m = masqueArrondi(1, 32, 0, { nord: true, est: true, sud: true, ouest: true })
-  assert.equal(m.length, 4 * 32, 'contour carre : 4 cotes de n')
+  const { ring, demi } = contourCarre()
+  const m = masqueDepuisContour(ring, demi, TOUS)
+  assert.equal(m.length, ring.length, 'un reel par sommet du contour')
   for (const v of m) assert.equal(v, 1)
 })
 
 test('le masque de la case centrale vaut 0 partout', () => {
-  const m = masqueArrondi(1, 32, 0, { nord: false, est: false, sud: false, ouest: false })
-  for (const v of m) assert.equal(v, 0)
+  const { ring, demi } = contourCarre()
+  for (const v of masqueDepuisContour(ring, demi, AUCUN)) assert.equal(v, 0)
 })
 
-// L'ORDRE DES CÔTÉS EST CELUI DE computeSlab, pas un ordre choisi ici. Se
-// tromper d'ordre arrondit le mauvais côté, et ça ne se voit qu'à l'écran.
-test('le masque suit l\'ordre nord, est, sud, ouest de computeSlab', () => {
-  const n = 8
-  const m = masqueArrondi(1, n, 0, { nord: true, est: false, sud: false, ouest: false })
-  for (let k = 0; k < n; k++) assert.equal(m[k], 1, `sommet ${k} : le nord doit etre arrondi`)
-  for (let k = n; k < 4 * n; k++) assert.equal(m[k], 0, `sommet ${k} : les autres cotes non`)
+// L'ÉTIQUETAGE SE FAIT PAR POSITION, pas par index. Un sommet du bord nord
+// est celui dont z vaut -demi ; c'est vrai quel que soit l'ordre dans lequel
+// computeSlab a tracé son contour, et ça le restera s'il change.
+test('seuls les sommets du cote expose sont marques', () => {
+  const { ring, demi } = contourCarre()
+  const m = masqueDepuisContour(ring, demi, { nord: true, est: false, sud: false, ouest: false })
+  let marques = 0
+  for (let k = 0; k < ring.length; k++) {
+    if (m[k] === 1) {
+      assert.ok(ring[k].z <= -demi + 1e-3, `sommet ${k} marque alors qu'il n'est pas au nord`)
+      marques++
+    }
+  }
+  assert.ok(marques > 0, 'le cote nord doit bien etre marque')
 })
 
+// UN COIN N'EST ARRONDI QUE SI SES DEUX CÔTÉS LE SONT. Un quart de rond qui
+// se termine à plat contre une jointure est pire que pas d'arrondi du tout.
 test('un coin entre deux bords exterieurs reste arrondi', () => {
-  const n = 8
-  const m = masqueArrondi(1, n, 0, { nord: true, est: true, sud: false, ouest: false })
-  assert.equal(m[n - 1], 1, 'fin du nord')
-  assert.equal(m[n], 1, 'debut de l\'est')
+  const slab = computeSlab(platA10, 7, 32, 2.5) // cornerR > 0 : de vrais arcs
+  const demi = Math.max(...slab.ring.map((p) => Math.abs(p.x)))
+  const m = masqueDepuisContour(slab.ring, demi, { nord: true, est: true, sud: false, ouest: false })
+  // un sommet d'arc du coin nord-est : x > 0, z < 0, sur aucun des deux bords droits
+  const k = slab.ring.findIndex((p) => p.x > 0 && p.z < 0 && p.x < demi - 1e-3 && p.z > -demi + 1e-3)
+  assert.ok(k >= 0, 'preambule : il existe bien un sommet d\'arc au nord-est')
+  assert.equal(m[k], 1, 'nord et est exposes : le coin garde son arrondi')
 })
 
 test('un coin entre un bord exterieur et un interieur ne l\'est pas', () => {
-  const n = 8
-  const m = masqueArrondi(1, n, 0, { nord: true, est: false, sud: false, ouest: false })
-  assert.equal(m[n - 1], 1, 'le nord garde son arrondi jusqu\'au bout')
-  assert.equal(m[n], 0, 'l\'est, interieur, demarre a plat')
+  const slab = computeSlab(platA10, 7, 32, 2.5)
+  const demi = Math.max(...slab.ring.map((p) => Math.abs(p.x)))
+  const m = masqueDepuisContour(slab.ring, demi, { nord: true, est: false, sud: false, ouest: false })
+  const k = slab.ring.findIndex((p) => p.x > 0 && p.z < 0 && p.x < demi - 1e-3 && p.z > -demi + 1e-3)
+  assert.equal(m[k], 0, 'l\'est est interieur : le coin nord-est doit etre vif')
 })
 ```
 
@@ -791,60 +857,26 @@ export function bordsExterieurs(i, j, { i0, j0, cote } = {}) {
 }
 
 /**
- * Le masque d'arrondi, un réel par sommet du contour rendu par computeSlab :
+ * Le masque d'arrondi : un réel par sommet du contour rendu par computeSlab,
  * 1 = arrondi de plein droit, 0 = arête vive.
  *
- * ⚠️ L'ORDRE EST CELUI DE computeSlab ET DE NUL AUTRE (plinth.js:152-155 pour
- * le contour carré, 182-189 pour le contour arrondi) : nord, est, sud, ouest,
- * dans le sens horaire depuis le coin −x/−z. Se tromper d'ordre arrondit le
- * mauvais côté, et rien ne le signale à part l'écran.
+ * ⚠️ ON ÉTIQUETTE PAR POSITION, PAS PAR INDEX. Reproduire le découpage de
+ * computeSlab (straightN, longueurs d'arc rendues par arcCoin) marcherait
+ * aujourd'hui et casserait au prochain réglage de densité d'arc — un couplage
+ * muet entre deux fichiers, exactement ce qui a déjà coûté un chantier ici
+ * (cf. « LA DENSITÉ DE L'ARC SE MESURE EN LONGUEUR », plinth.js:163). La
+ * position, elle, ne ment pas.
  *
- * ⚠️ LES COINS. Un coin n'est arrondi que si SES DEUX côtés le sont — un
- * quart de rond qui se termine à plat contre une jointure est pire que pas
- * d'arrondi du tout. Dans le contour arrondi, les arcs sont insérés APRÈS
- * chaque côté : nord, arc(nord-est), est, arc(est-sud), sud, arc(sud-ouest),
- * ouest, arc(ouest-nord).
- *
- * @param {number} cote - côté du carré (sert de garde : à 1, tout est exposé)
- * @param {number} resolution - `n` de computeSlab (échantillons par côté)
- * @param {number} cornerR - rayon de coin ; 0 = contour carré simple
- * @param {{nord:boolean,est:boolean,sud:boolean,ouest:boolean}} bords
- * @returns {Float32Array}
- */
-export function masqueArrondi(cote, resolution, cornerR, bords) {
-  const n = Math.max(8, Math.round(resolution))
-  const b = bords || { nord: true, est: true, sud: true, ouest: true }
-  if (!(cornerR > 0)) {
-    // contour carré : 4 blocs de n sommets, dans l'ordre nord, est, sud, ouest
-    const m = new Float32Array(4 * n)
-    const v = [b.nord, b.est, b.sud, b.ouest]
-    for (let c = 0; c < 4; c++) {
-      const val = v[c] ? 1 : 0
-      m.fill(val, c * n, (c + 1) * n)
-    }
-    return m
-  }
-  // contour arrondi : les longueurs de côté et d'arc doivent être fournies par
-  // l'appelant, qui seul connaît le découpage retenu par computeSlab.
-  throw new Error('masqueArrondi : contour arrondi non couvert, passer par masqueDepuisContour')
-}
-
-/**
- * Variante robuste : au lieu de reproduire le découpage de computeSlab, on
- * étiquette chaque sommet par sa POSITION. Un sommet appartient au côté dont
- * il est le plus proche, et un sommet de coin appartient aux deux.
- *
- * ⚠️ C'EST CETTE VARIANTE QUE LE SOCLE UTILISE. Reproduire le découpage
- * (straightN, longueurs d'arc rendues par arcCoin) marcherait aujourd'hui et
- * casserait au prochain réglage de densité d'arc — un couplage muet entre
- * deux fichiers, exactement ce qui a déjà coûté un chantier ici (cf. le
- * commentaire « LA DENSITÉ DE L'ARC SE MESURE EN LONGUEUR », plinth.js:163).
- * La position, elle, ne ment pas.
+ * ⚠️ LES COINS. Un sommet d'arc n'est sur aucun des quatre côtés droits : il
+ * appartient au COIN entre deux d'entre eux, et n'est arrondi que si les deux
+ * le sont. Un quart de rond qui se termine à plat contre une jointure est pire
+ * que pas d'arrondi du tout.
  *
  * @param {Array<{x:number,z:number}>} contour - le `ring` de computeSlab
  * @param {number} demi - HALF, le demi-côté du bloc
  * @param {{nord:boolean,est:boolean,sud:boolean,ouest:boolean}} bords
  * @param {number} marge - tolérance monde pour « ce sommet est sur ce côté »
+ * @returns {Float32Array}
  */
 export function masqueDepuisContour(contour, demi, bords, marge = 1e-3) {
   const b = bords || { nord: true, est: true, sud: true, ouest: true }
@@ -873,7 +905,7 @@ export function masqueDepuisContour(contour, demi, bords, marge = 1e-3) {
 }
 ```
 
-Note : le test « le masque suit l'ordre nord, est, sud, ouest » vise `masqueArrondi` (cas carré). Les tests de coin visent `masqueDepuisContour` — les adapter à l'étape 1 si l'implémenteur préfère n'exposer que la seconde. **Une seule des deux doit survivre à la Tâche 5** ; garder les deux serait deux vérités pour une question.
+⚠️ Le fichier n'exporte que **deux** symboles : `bordsExterieurs` et `masqueDepuisContour`. Toute troisième fonction de masque est un défaut, pas un ajout — deux façons de répondre à la même question, dont une seule est branchée.
 
 - [ ] **Étape 4 : lancer les tests**
 
@@ -1437,7 +1469,8 @@ git commit -m "feat: les textes graves suivent la taille et le centre du damier"
 - Modifier : `test/damier-cadre.test.js`
 
 **Interfaces**
-- Consomme : `poseIsometrique(points, { fovDeg, marge })` (`src/vue-ensemble.js`), `carreCourant()`, `centreDuCarre`.
+- Consomme : `poseIsometrique(points, { fovDeg, marge })` (`src/vue-ensemble.js`), `carreCourant()` (Tâche 2), `centreDuCarre` (Tâche 6).
+- Produit : `modeCameraDamier`, `doitVraimentDezoomer`, `poseDamier` — trois fonctions pures exportées par `src/vue-ensemble.js` (signatures à l'étape 3). Aucune tâche ultérieure ne les consomme ; c'est la dernière du plan à toucher la caméra.
 
 **Demande** : « le bouton caméra en vue multi-cases permettra de voir toutes les cases à la fois en isométrique **sans passer au zoom inférieur**, et on reviendra au mode précédent si une seule case est affichée. Si l'utilisateur continue de dézoomer, alors on dézoome vraiment. »
 
@@ -1453,7 +1486,7 @@ Le point 3 est le piège : il faut distinguer « le bouton a cadré » de « l'u
 Ajouter à `test/damier-cadre.test.js` un test du module pur de décision :
 
 ```js
-import { modeCameraDamier, doitVraimentDezoomer } from '../src/vue-ensemble.js'
+import { modeCameraDamier, doitVraimentDezoomer, poseDamier } from '../src/vue-ensemble.js'
 
 test('en 1x1 le bouton camera garde son comportement d\'avant', () => {
   assert.equal(modeCameraDamier({ cote: 1 }), 'bloc')
@@ -1465,11 +1498,21 @@ test('des qu\'il y a plusieurs cases, le bouton cadre l\'ensemble', () => {
 })
 
 // LE PIÈGE : cadrer l'ensemble ne doit PAS changer le zoom geographique.
-// Un dezoom d'escalier rechargerait tout le damier a une autre resolution.
+// Un dezoom d'escalier rechargerait tout le damier a une autre resolution —
+// et la demande dit explicitement « sans passer au zoom inferieur ».
 test('cadrer l\'ensemble ne consomme pas un cran de zoom', () => {
-  const avant = 12
-  const r = modeCameraDamier({ cote: 3 }, { zoom: avant })
-  assert.equal(r === 'ensemble' ? avant : avant, avant, 'le zoom ne bouge pas')
+  const etat = { zoom: 12, cote: 3 }
+  const pose = poseDamier(etat, { fovDeg: 45, marge: 1.1 })
+  assert.equal(pose.zoom, 12, 'le zoom geographique doit etre rendu inchange')
+  assert.ok(pose.hauteur > 0, 'la camera monte pour tout voir')
+  assert.ok(Number.isFinite(pose.cible.x) && Number.isFinite(pose.cible.z))
+})
+
+test('la pose isometrique cadre le carre, pas le seul bloc principal', () => {
+  const seul = poseDamier({ zoom: 12, cote: 1 }, { fovDeg: 45, marge: 1.1 })
+  const large = poseDamier({ zoom: 12, cote: 3 }, { fovDeg: 45, marge: 1.1 })
+  assert.ok(large.hauteur > seul.hauteur, 'un 3x3 demande de monter plus haut')
+  assert.equal(large.zoom, seul.zoom, 'et toujours sans changer de zoom')
 })
 
 // ET SON REVERS : si l'utilisateur insiste, il doit pouvoir sortir.
@@ -1489,7 +1532,13 @@ test('hors du cadrage, tout dezoom est un vrai dezoom', () => {
 node --test test/damier-cadre.test.js
 ```
 
-- [ ] **Étape 3 : implémenter les deux fonctions pures dans `src/vue-ensemble.js`**, puis les câbler au bouton caméra et à la molette dans `main.js`. Le cadrage utilise `poseIsometrique` sur les **quatre coins du carré** projetés au sol, pas sur les points du tracé.
+- [ ] **Étape 3 : implémenter les trois fonctions pures dans `src/vue-ensemble.js`**
+
+- `modeCameraDamier(carre, etat?)` → `'bloc' | 'ensemble'` ;
+- `doitVraimentDezoomer({ mode, cumul })` → booléen (seuil de molette cumulée, à figer et commenter) ;
+- `poseDamier({ zoom, cote }, { fovDeg, marge })` → `{ cible: {x, z}, hauteur, zoom }`. Elle s'appuie sur `poseIsometrique` appliquée aux **quatre coins du carré** projetés au sol — pas aux points du tracé, qui ne remplissent pas le carré — et **rend le zoom qu'on lui a donné**, inchangé. C'est ce dernier point qui porte l'exigence « sans passer au zoom inférieur ».
+
+Puis câbler au bouton caméra et à la molette dans `main.js`.
 
 - [ ] **Étape 4 : lancer les tests**
 
@@ -1606,7 +1655,7 @@ git commit -m "perf: campagne de mesure du damier carre et garde-fous de palier"
 
 **Points à surveiller pendant l'exécution**
 
-- La Tâche 4 propose **deux** fonctions de masque ; une seule doit survivre à la Tâche 5. Si les deux restent, c'est un défaut à signaler.
+- La Tâche 4 n'expose que **deux** symboles (`bordsExterieurs`, `masqueDepuisContour`). Une troisième fonction de masque, même utile en apparence, est un défaut : deux façons de répondre à la même question dont une seule est branchée.
 - La Tâche 5 touche `plinth.js`, partagé avec le bloc central et le mode zone isolée. Tout test de socle qui bouge sans masque est une régression, pas un ajustement.
 - La Tâche 6 est la plus lourde ; si elle dépasse deux allers-retours de revue, la scinder (emprise, puis jupe).
 - Les Tâches 8 et 11 peuvent conclure « on ne fait rien », mais **jamais sans écrire pourquoi**.
