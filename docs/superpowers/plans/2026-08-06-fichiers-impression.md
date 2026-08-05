@@ -2,221 +2,211 @@
 
 > **Pour les agents :** SOUS-COMPÉTENCE REQUISE : `superpowers:subagent-driven-development`. Les étapes utilisent des cases à cocher (`- [ ]`).
 
-**Objectif :** produire un fichier d'affiche qu'un imprimeur imprime sans jamais rappeler, et que l'acheteur reçoit conforme à ce qu'il a vu à l'écran.
+**Objectif :** produire un fichier d'affiche qu'un imprimeur imprime sans jamais rappeler, et que l'acheteur reçoit **identique à ce qu'il a validé**.
 
-**Architecture :** le rendu haute résolution se fait dans le navigateur, en **bandes de largeur pleine** plutôt qu'en tuiles carrées ; la sortie par défaut est **RGB étiqueté** dans un PDF aux boîtes explicites ; le CMJN devient une option servie avec le profil de l'imprimeur, jamais un profil deviné.
+**Architecture :** pavage à deux dimensions en tuiles de **2048**, toujours ; composition **bande par bande**, jamais d'image pleine en mémoire ; sortie **RGB étiqueté** ; et — c'est la clé — **le dernier écran avant paiement est produit par le compositeur d'export lui-même**, donc l'acheteur valide le fichier et non une maquette.
 
 **Pile technique :** three.js, postprocessing, JavaScript ES modules, tests `node --test`.
 
 ---
 
-## Ce que deux campagnes de recherche ont établi, et qui pilote ce plan
+## Ce qui est acquis — ne le re-cherchez pas
 
-Un agent a dépouillé le MediaStandard Print 2018 du bvdm et les spécifications publiées des prestataires d'impression à la demande. Un autre a lu le code de ShibuMap, celui de `postprocessing`, celui de `pdf-lib`, et mesuré les budgets mémoire. **Ne re-cherchez pas ces points, ils sont acquis :**
+Deux campagnes de recherche, un agent attaquant et un agent correcteur ont établi ceci. **C'est du travail vérifié, pas des hypothèses.**
 
-| Fait établi | Conséquence pour ce plan |
-|---|---|
-| Les prestataires d'impression à la demande **demandent du RGB** ; leurs presses ont plus de quatre encres | La sortie par défaut est RGB, pas CMJN |
-| Convertir en CMJN est **destructif et irréversible** | On ne sépare jamais sans le profil du destinataire |
-| **300 dpi est un plafond de trame, pas une règle** ; le grand format se raisonne en distance de lecture | 300 dpi jusqu'à A2, 250 en A1, 180 en A0 |
-| **Ghostscript est sous AGPL** | Voie fermée sans licence commerciale. Ne pas l'envisager |
-| **Aucun validateur PDF/X libre n'existe** | La conformité PDF/X reste une intention tant qu'un préflight professionnel ne l'a pas confirmée |
-| Le fond perdu et les repères **ne se superposent jamais** si le décalage des repères ≥ le fond perdu | Le problème « traits invisibles sur fond sombre » est un artefact de réglage |
-| La gestion des couleurs amont de ShibuMap **est propre et vérifiée** | Rien à refaire de ce côté |
+**Sur l'imprimeur :** les prestataires d'impression à la demande **demandent du RGB** (presses à plus de quatre encres) ; convertir en CMJN est **destructif et irréversible** ; 300 dpi est un **plafond de trame**, pas une règle, et le grand format se raisonne en distance de lecture ; **Ghostscript est AGPL**, voie fermée ; **aucun validateur PDF/X libre n'existe**.
+
+**Sur le code :** la gestion des couleurs amont est **propre et vérifiée** ; la chaîne d'effets est **complète** (rien d'oublié) ; le mappage tonal ACES est **bien inoffensif** en rendu par morceaux ; `planTuiles` / `cadrageTuile` / `poidsRendu` existent, sont testés, et **ne sont appelés que par leur propre test**.
+
+**Le chiffre qui structure tout :** **2048 est le plancher garanti de WebGL2.** Aucune machine ne descend en dessous. En pavant à 2048, la détection matérielle devient inutile.
 
 ---
 
-## Les quatre défauts qui produiraient une affiche cassée
+## Les six défauts établis, et ce qu'ils produisent
 
-Ils sont le cœur de la phase A. Chacun produit un fichier **techniquement valide** que l'imprimeur imprimerait sans broncher, et dont l'acheteur se plaindrait.
+Chacun livre un fichier **techniquement valide** que l'imprimeur imprimerait sans broncher.
 
-**1. Le vignettage détruit l'image en rendu tuilé.** `VignetteEffect` calcule `distance(uv, centre)` où `uv` court de 0 à 1 **sur la cible de rendu**. Chaque tuile étant une cible, **chacune reçoit son vignettage complet** : l'affiche sort en damier de rectangles assombris. Ce n'est pas une couture, c'est l'image perdue.
+| # | Défaut | Ce que reçoit le client | Preuve |
+|---|---|---|---|
+| 1 | **Le format par défaut dépasse le plafond matériel** — 50 × 70 paysage demande 8 339 px, la limite courante est 8 192, et le rabotage est **silencieux** | 13 mm de papier nu sur un bord, 1,8 % d'écrasement | `src/ui/affiche.js:81,87` ; `src/export.js:19-29` (aucun plafond) |
+| 2 | **Le cartouche et le logo ne sont pas des pixels rendus** — ce sont des éléments d'interface empilés | Une carte nue, sans titre ni logo, payée 19 € | `src/ui/affiche.js:133` |
+| 3 | **Le vignettage détruit l'image** en rendu par morceaux : chaque tuile reçoit le sien | Un damier de rectangles assombris | `VignetteEffect`, `uv` relatif à la cible |
+| 4 | **Le cadrage de l'acheteur est écrasé** — deux `setViewOffset` concurrents, plus `camera.aspect` réécrit | Une composition qui n'est pas la sienne | `src/main.js:6912` ; `src/export.js:27-28` |
+| 5 | **Les traits deviennent des cheveux** sur les segments horizontaux seulement | Fleuves et tracé en peigne | `LineMaterial.js:217-228` ; `src/gpx.js:1168` |
+| 6 | **Le grain se répète** à l'identique par tuile | Une grille visible | `NoiseEffect`, `rand(uv * time)` |
 
-**2. Le grain se répète à l'identique.** `NoiseEffect` fait `rand(uv * (1.0 + time))`, avec le même `uv` par tuile et un `time` gelé pendant l'export : le même motif dans chaque tuile, formant une grille.
-
-**3. Le cadrage de l'acheteur est écrasé en silence.** `cadrerAffiche()` (`src/main.js:6912`) utilise **déjà** `camera.setViewOffset(...)` pour porter le décalage composé au pouce par l'utilisateur. `cadrageTuile()` (`src/print-page.js`) rend un jeu d'arguments **complet et concurrent**. Le second appel écrase le premier : affiche correctement tuilée, **recentrée**, composition perdue sans le moindre signal.
-
-**4. La profondeur de champ est verrouillée à 720 px.** `ensureDof()` (`src/main.js:1999`) construit l'effet avec `height: 720`, qui fixe les cibles internes **quelle que soit la sortie**. Sur 8 339 px de haut, le flou est calculé en petit puis agrandi onze fois. Ce n'est pas un défaut de tuilage : c'est un plafond déjà présent.
+Et un mensonge : `ligneVerite()` **promet 300 dpi** là où la mosaïque aérienne plafonne à ~208 effectifs et les étiquettes sont cuites à 88 px de corps.
 
 ---
 
-## Le mensonge à corriger
+## Les décisions prises, et par qui
 
-`ligneVerite()` (`src/ui/affiche.js`) **annonce « 300 dpi » à l'acheteur**. C'est vrai du fichier et faux de l'image :
+**Par Adrien :**
+- **Dégrader avant de cacher.** Sur une machine faible, on baisse la résolution du format demandé plutôt que de le retirer. On ne le cache que si même dégradé il ne passe pas. *(Sa formulation : « ok pour abaisser un peu la qualité […] On peut aussi cacher certains formats. »)*
+- Rendre **avant** d'encaisser.
+- Dire la vérité sur la résolution.
 
-- la mosaïque aérienne couvre tout le bloc en 4 096 texels → **≈ 208 dpi effectifs** sur 500 mm ;
-- le maillage du relief plafonne à `res 768` → un quad fait ~7,8 px sur le tirage, arêtes facettées visibles sur les crêtes ;
-- les étiquettes sont cuites à **88 px de corps** (`makeLabelTexture`, `src/map/text-label.js`) → noms de villes flous.
-
-**Soit on corrige les trois amonts, soit on cesse de promettre 300 dpi.** Ne pas trancher, c'est programmer un remboursement.
+**Par l'agent correcteur, sur mesure :**
+- Pavage 2D à 2048 **toujours**, la bande pleine largeur devenant le cas à une colonne.
+- Échelle de dpi : **300 jusqu'au A2, 250 sur le 50 × 70, 200 sur le 61 × 91** — ce qui dépasse déjà la source, la mosaïque plafonnant à ~208.
+- **Fond perdu : garder 3 mm.** Les 5 mm du plan précédent étaient le décalage des **repères**, pas le débord. Monter `MARGE_SECURITE_MM` de 5 à 8.
 
 ---
 
 ## Contraintes globales
 
-1. **Rien de ce plan ne déploie.** Le déploiement est une décision d'Adrien.
-2. **Ne touchez pas à la gestion des couleurs amont** (`renderer.outputColorSpace`, classement sRGB/NoColorSpace des textures). Elle est vérifiée correcte.
-3. **Ne touchez pas aux fonctions de paiement** (`netlify/functions/paiement*.mjs`) : vérification de signature, idempotence, ordre d'écriture. Un audit les a validées.
-4. **N'envisagez jamais Ghostscript** — AGPL, incompatible avec un service en ligne fermé.
-5. `package.json` liste les tests **un par un** ; tout fichier ajouté doit y figurer, audit disque-vs-liste à l'appui.
-6. **Deux tests d'architecture existent** (réglages de matière du terrain, restitution du cadrage caméra). S'ils rougissent, ils vous ont attrapé — n'ajoutez pas d'exception sans justification.
-7. Français dans les commentaires et les nouveaux symboles.
-8. Un commit par tâche, message en français.
+1. **Rien ne déploie.** Le déploiement est une décision d'Adrien.
+2. **Ne touchez pas** à la gestion des couleurs amont, ni aux fonctions de paiement (signature, idempotence, ordre d'écriture — audit favorable).
+3. **N'envisagez jamais Ghostscript** (AGPL).
+4. ⚠️ **`applySize` est partagé avec l'enregistreur vidéo.** Toute modification doit le laisser strictement inchangé quand l'appelant ne passe rien de nouveau.
+5. `package.json` liste les tests **un par un** ; audit disque-vs-liste après tout ajout.
+6. **Deux tests d'architecture existent.** S'ils rougissent, ils vous ont attrapé.
+7. Français dans les commentaires et les nouveaux symboles. Un commit par tâche.
 
 ---
 
 ## Structure des fichiers
 
-**Créés**
-- `src/export-effets.js` — pur. Quels effets survivent au rendu par bandes, et lesquels doivent être neutralisés ou réappliqués après coup.
-- `src/export-cadrage.js` — pur. Composition du décalage de l'acheteur avec celui de la bande.
-- `src/pdf-affiche.js` — construction du PDF : boîtes, fond perdu, repères, étiquetage.
-- `src/mockup-mur.js` — pur. Calibration d'échelle d'une photo de pièce et pose du cadre.
-- les tests correspondants.
+**Créés :** `src/export-effets.js` (quels effets survivent), `src/export-dpi.js` (l'échelle de résolution et la dégradation), `src/compositeur-affiche.js` (cartouche, logo, attribution en canevas), `src/mockup-mur.js` (calibration et pose du cadre), plus leurs tests.
 
-**Modifiés**
-- `src/export.js` — chemin par bandes au lieu du mono-canevas.
-- `src/main.js` — composition des décalages, recuisson des étiquettes.
-- `src/ui/affiche.js` — écran de validation, échelle, mockup, vérité sur la résolution.
-- `src/print-page.js` — bandes plutôt que tuiles carrées, si la mesure le confirme.
+**Modifiés :** `src/export.js` (pavage, plafond, aspect), `src/main.js` (composition des décalages, épaisseur des lignes), `src/ui/affiche.js` (aperçu par le compositeur, sonde, vérité sur le dpi), `src/print-page.js` (`MARGE_SECURITE_MM`).
 
 ---
 
 # PHASE A — Le rendu qui ne casse pas
 
-Nécessaire que ShibuMap vende un fichier **ou** une impression. À faire en premier.
+## Tâche 1 : l'échelle de résolution et la dégradation
 
-## Tâche 1 : quels effets survivent au rendu par bandes
+**Créer** `src/export-dpi.js` + test. **Produit :** `dpiPour(format, orientation)` et `degradePour(format, orientation, limiteMaterielle)` → `{ dpi, px, tuiles } | null` (null = même dégradé, ça ne passe pas).
 
-**Fichiers :** créer `src/export-effets.js` et `test/export-effets.test.js` ; modifier `package.json`.
+**La table de référence**, établie par mesure sur les **sept** formats de `src/print-page.js:53-61` (attention : sept, pas huit) dans les **deux orientations**, fond perdu de 3 mm compris :
 
-**Produit :** `effetsSurs(chaine)` → `{ gardes: [...], neutralises: [...], aReappliquer: [...] }`, et `raisonNeutralisation(nom)` → chaîne explicative.
+| format | dpi | px | tuiles |
+|---|---|---|---|
+| a4 | 300 | 3579×2552 | 4 |
+| 30x40 | 300 | 4796×3615 | 6 |
+| a3 | 300 | 5032×3579 | 6 |
+| 40x50 | 300 | 5977×4796 | 9 |
+| a2 | 300 | 7087×5032 | 12 |
+| 50x70 | **250** | 6949×4981 | 12 |
+| 61x91 | **200** | 7245×4851 | 12 |
 
-**Le classement à établir, et il doit être justifié dans le code, effet par effet :**
+**La règle de dégradation, dans cet ordre :** garder le format et **baisser le dpi** jusqu'à passer ; ne retirer le format de la grille **que** si même le plancher ne passe pas. Fixez ce plancher et **justifiez-le** — en dessous d'une certaine densité, l'affiche n'est plus vendable, et livrer une bouillie est pire que refuser.
 
-*Sûrs* (opèrent par pixel, sans voisinage) : exposition, mappage tonal ACES, teinte/saturation, luminosité/contraste.
+- [ ] Tests d'abord, dont un qui **échoue si un format nouveau apparaît sans entrée dans la table**.
+- [ ] Rouge vérifié, puis le module, puis vert, puis `npm test`, puis commit.
 
-*À neutraliser pendant l'export* : le vignettage et le grain, pour les raisons ci-dessus. **Le vignettage doit être réappliqué une fois sur l'image entière** — sinon on change l'aspect de l'affiche, ce qui est un autre défaut. Le grain, lui, doit être réappliqué **à une échelle choisie** : un grain par pixel à 300 dpi est invisible et ne fait qu'alourdir le fichier.
+## Tâche 2 : le plafond et l'aspect dans `export.js`
 
-*Demandant un recouvrement* : l'anticrénelage SMAA et le bokeh, qui lisent le voisinage. Au bord d'une bande, ce voisinage est le bord de l'image.
+**Modifier** `src/export.js`. Deux défauts au même endroit.
 
-*À signaler* : l'occlusion ambiante, éteinte par défaut mais activable à la main, avec un rayon en unités monde qui produit une discontinuité d'ombrage au bord de bande.
+`applySize` (`:19-29`) appelle `composer.setSize` **sans plafond** — le garde-fou de `src/viewport.js:164,298-300` n'est pas sur ce chemin. Et il écrase `camera.aspect` avec celui de la tuile, alors que `setViewOffset` attend celui de l'**affiche entière** (three construit le frustum complet depuis `aspect`, puis y découpe la fenêtre).
 
-- [ ] **Étape 1 :** écrire les tests, y compris un test qui **échoue si un effet nouveau apparaît dans la chaîne sans être classé** — c'est la propriété qui compte, pas la liste d'aujourd'hui.
-- [ ] **Étape 2 :** les lancer, vérifier le rouge.
-- [ ] **Étape 3 :** écrire le module.
-- [ ] **Étape 4 :** vert, puis `npm test` en entier.
-- [ ] **Étape 5 :** commit.
+**La signature qui règle les deux :** `applySize(ctx, w, h, aspect = safeAspect(w, h))`. L'enregistreur vidéo ne passe rien → **strictement inchangé**. Le chemin d'export passe l'aspect de l'affiche.
 
-## Tâche 2 : composer les deux décalages de cadrage
+- [ ] Un test qui **prouve que la vidéo est inchangée** (même sortie qu'avant sur le chemin sans argument).
+- [ ] Un test qui échoue si le plafond disparaît.
 
-**Fichiers :** créer `src/export-cadrage.js` et son test ; modifier `src/main.js`.
+## Tâche 3 : composer les deux décalages de cadrage
 
-**Produit :** `composeDecalage(acheteur, bande)` → le jeu d'arguments unique de `setViewOffset`.
+**Créer** `src/export-cadrage.js` + test ; **modifier** `src/main.js`.
 
-⚠️ **C'est le défaut le plus sournois du dossier** : il ne casse rien visiblement, il livre une composition qui n'est pas celle que l'acheteur a validée.
+⚠️ **Ce n'est pas une addition.** `cadrerAffiche()` raisonne sur une largeur virtuelle de 10 000 ; le pavage raisonne en pixels réels. La composition est `offsetX = c.x·Wt/2`, `offsetY = c.y·Ht/2 + yTuile`, `width = Wt`, `height = hTuile` — une addition **après remise à l'échelle**. L'agent correcteur a vérifié que c'est mathématiquement fondé.
 
-- [ ] **Étape 1 :** écrire d'abord le test qui **démontre le défaut actuel** — deux appels successifs, le second écrase le premier. Il doit échouer avec le code d'aujourd'hui.
-- [ ] **Étape 2 :** écrire la composition, et vérifier par mutation qu'un test meurt si l'un des deux décalages est ignoré.
-- [ ] **Étape 3 :** brancher dans `main.js`, un seul appel.
-- [ ] **Étape 4 :** `npm test`, commit.
+- [ ] Écrire d'abord le test qui **démontre le défaut actuel** (le second appel écrase le premier), et le voir échouer.
+- [ ] Vérifier par mutation qu'un test meurt si l'un des deux décalages est ignoré.
 
-## Tâche 3 : le rendu par bandes de largeur pleine
+## Tâche 4 : les effets qui ne survivent pas au pavage
 
-**Fichiers :** modifier `src/export.js`, `src/print-page.js` ; tests.
+**Créer** `src/export-effets.js` + test.
 
-**Pourquoi des bandes et pas des tuiles carrées.** La largeur maximale du catalogue (7 276 px pour le 61 × 91) passe sous les 8 192 de `MAX_RENDERBUFFER_SIZE` sur la plupart des cartes. Rendre des bandes de largeur pleine **supprime toutes les coutures verticales**, et permet de pousser les lignes dans un encodeur en flux sans jamais allouer un canevas pleine taille — ce qui contourne la limite de Safari (16,8 Mpx, dépassée dès le format 30 × 40).
+*Sûrs :* exposition, ACES, teinte/saturation, contraste. *À neutraliser puis **réappliquer une fois sur l'image entière** :* vignettage et grain — les neutraliser sans les réappliquer changerait l'aspect de l'affiche, ce qui est un autre défaut. Le grain doit être réappliqué **à une échelle choisie** : un grain par pixel à 300 dpi est invisible et alourdit le fichier.
 
-⚠️ **`planTuiles`, `cadrageTuile` et `poidsRendu` existent, sont testés, et ne sont appelés que par leur propre test.** Le tuilage est spécifié, pas branché. Vérifiez si le passage en bandes demande de les modifier ou seulement de les paramétrer — et **si vous les modifiez, leur propriété non négociable doit tenir** : la somme des bandes retombe exactement sur la taille pleine.
+⚠️ *Demandant un recouvrement :* SMAA et le bokeh. **Le rayon du bokeh en pixels d'affiche dépend de la hauteur de tuile** (l'effet est verrouillé à 720 px de haut, `src/main.js:2060`) — la marge n'est donc **pas une constante**. Établissez-la en lisant le code de `postprocessing`, pas en la devinant.
 
-- [ ] **Étape 1 :** mesurer. Combien de bandes, quelle hauteur, quel pic mémoire, sur les huit formats du catalogue. **Committez le script de mesure.**
-- [ ] **Étape 2 :** les tests, dont un qui vérifie l'absence de couture sur une scène de contrôle.
-- [ ] **Étape 3 :** l'implémentation.
-- [ ] **Étape 4 :** vérifier sur les trois formats extrêmes, `npm test`, commit.
+- [ ] Un test qui **échoue si un effet nouveau apparaît dans la chaîne sans être classé** — c'est la propriété qui compte, pas la liste d'aujourd'hui.
 
-## Tâche 4 : le recouvrement pour SMAA et le bokeh
+## Tâche 5 : l'épaisseur des traits
 
-**Fichiers :** `src/export-effets.js`, `src/export.js`, tests.
+**Modifier** `src/main.js`, `src/gpx.js`, `src/map/water-layer.js`.
 
-Chaque bande est rendue avec quelques pixels de marge, puis rognée. La marge doit être **au moins le rayon du plus large des effets à voisinage**.
+`LineMaterial` ajoute son épaisseur en espace **clip**, hors de la matrice de projection : le décalage de tuile ne la corrige pas. Et `resolution` est figée à la taille de la fenêtre, remise à jour uniquement par `onResize` que l'export n'appelle jamais.
 
-- [ ] **Étape 1 :** établir le rayon nécessaire par effet, en le lisant dans le code de `postprocessing`, pas en le devinant. Écrire le chiffre et sa source.
-- [ ] **Étape 2 :** test qui échoue si la marge devient inférieure au rayon.
-- [ ] **Étape 3 :** implémenter, vérifier l'absence de couture.
-- [ ] **Étape 4 :** commit.
+**Les deux gestes, tous deux nécessaires :** `resolution = (tuile.w, tuile.h)` — obligatoire pour que `offset.x /= aspect` reste isotrope — **et** `linewidth = épaisseurRelative × hauteur_totale_affiche`, sans quoi un trait de 2 px fait 0,17 mm à 300 dpi.
 
-## Tâche 5 : dire la vérité sur la résolution
+⚠️ **L'aperçu ment déjà** (résolution = fenêtre). Corrigez-le aussi, sinon l'écran et le fichier divergeront.
 
-**Fichiers :** `src/map/text-label.js`, `src/ui/affiche.js`, tests.
+- [ ] Restaurer l'état après export. Test de non-régression sur l'affichage normal.
 
-Trois amonts plafonnent sous les 300 dpi annoncés. **Traitez-les dans cet ordre de rentabilité :**
+## Tâche 6 : brancher le pavage
 
-1. **Les étiquettes** — cuites à 88 px de corps. Les recuire à la résolution d'impression est le gain le plus visible pour le moins d'effort. Mesurez le coût mémoire de la recuisson.
-2. **`ligneVerite()`** — doit annoncer la résolution **réelle** du format choisi, pas 300 en dur.
-3. **La mosaïque aérienne et le maillage** — documentez leur plafond dans le code. Ne les changez pas dans cette tâche : c'est un autre chantier, et le mesurer suffit à cesser de mentir.
+**Modifier** `src/export.js`. `planTuiles` et `cadrageTuile` existent et sont testés — **appelez-les, ne les réécrivez pas**. Leur propriété non négociable (la somme des tuiles retombe exactement sur la taille pleine) doit tenir.
 
-- [ ] Étapes : mesure → tests → implémentation → commit.
+**Composition bande par bande, jamais d'image pleine :** le canevas de composition reste sous 11,9 Mpx partout, contre 16,7 admis par iOS — 29 % de marge. Le pic mémoire tombe à 226 Mo au lieu de 1 141.
 
----
-
-# PHASE B — L'emballage et la livraison
-
-## Tâche 6 : étiqueter la sortie
-
-L'image exportée n'est **pas étiquetée** — ni profil en PNG, ni marqueur en JPEG. Un fichier sRGB non étiqueté sera *supposé* sRGB. Une chaîne d'impression ne repose pas sur une supposition.
-
-- [ ] Incorporer le profil, tester que l'étiquette est présente et correcte.
-
-## Tâche 7 : le PDF et ses boîtes
-
-**Fichiers :** créer `src/pdf-affiche.js` et son test.
-
-**Les trois nombres qui règlent le problème des repères invisibles :** fond perdu **5 mm**, décalage des repères **≥ 5 mm**, marge de la boîte support **≈ 15 mm** au-delà du format fini. Les repères se posent alors sur du papier nu, quel que soit le fond de l'affiche.
-
-**Les boîtes :** `TrimBox` = format fini exact, `BleedBox` = TrimBox + 5 mm, `MediaBox` = TrimBox + 15 mm, centrées. Épaisseur des repères : **0,1 mm maximum**.
-
-⚠️ **Par défaut, pas de repères du tout** pour le flux d'impression à la demande : ces prestataires travaillent à partir des boîtes et des gabarits, les repères y sont au mieux inutiles.
-
-⚠️ **Le piège du JPEG CMJN, si vous y venez un jour :** `pdf-lib` applique **inconditionnellement** un tableau de décodage inversé à tout JPEG à quatre canaux (convention Adobe). Un encodeur qui ne s'y conforme pas produit une affiche **en négatif**, sans qu'aucune interface ne prévienne.
-
-- [ ] Étapes : tests des boîtes → implémentation → vérification qu'un lecteur PDF lit bien les boîtes attendues → commit.
-
-## Tâche 8 : la livraison
-
-⚠️ **Netlify Blobs n'expose aucune URL publique ni signée.** Un PDF de 30 à 50 Mo devrait repasser par une fonction pour atteindre l'acheteur, et buterait sur la limite de charge utile.
-
-- [ ] **Étape 1 :** établir l'option retenue et **pourquoi**, avec ses coûts. Ne pas implémenter avant d'avoir écrit cette décision.
-- [ ] **Étape 2 :** implémenter, avec expiration du lien.
-- [ ] **Étape 3 :** brancher dans le courriel que le webhook envoie déjà.
+- [ ] **Mesurer d'abord** : nombre de tuiles, pic mémoire, durée, sur les sept formats × deux orientations. **Committez le script.**
+- [ ] Test d'absence de couture sur une scène de contrôle.
 
 ---
 
-# PHASE C — Ce que l'acheteur voit avant d'envoyer
+# PHASE B — Ce que l'acheteur voit et reçoit
 
-## Tâche 9 : l'écran de validation avec échelle
+## Tâche 7 : le compositeur, et la fidélité par construction
 
-**C'est la meilleure protection contre les retours**, pas un confort. Un imprimeur rappelle aussi quand le client découvre après coup que son titre est coupé ou qu'il s'est trompé de format.
+**Créer** `src/compositeur-affiche.js` + test.
 
-- [ ] Le visuel final, une **règle graduée** à côté, et la **zone de fond perdu visible** — pour que l'acheteur voie ce qui sera coupé.
+Le cartouche, le logo et l'attribution sont dessinés en canevas 2D, **en fractions de largeur de feuille**. Bonne nouvelle vérifiée : le CSS est **déjà entièrement en `cqw`** (`affiche.css:146,157,493`) — le module relit les mêmes fractions. Même police via `document.fonts.ready`, `ctx.letterSpacing`, dégradé du `::before` en `createLinearGradient`.
 
-## Tâche 10 : le mockup mural à l'échelle
+**⚠️ Le point qui décide de tout, et ce n'est pas une technique :** **le dernier écran avant paiement doit être produit par ce compositeur-là**, réduit à 1 100 px — pas par le DOM. L'acheteur valide alors le fichier, pas une maquette, et l'écart **cesse d'exister par construction**. Le DOM reste pour l'édition interactive.
 
-**Fichiers :** créer `src/mockup-mur.js` et son test.
+Ce module absorbe aussi `stampCredit`, dont le canevas pleine taille échoue **en silence** sur iOS (`catch { return blob }`, `src/export.js:74-94`), et c'est le seul endroit où brancher `creditFor` — `src/export.js:64` porte un avertissement en rouge : sans lui, **vendre viole la licence** des sources bathymétriques.
 
-Neuf images de salon sont fournies dans le Drive d'Adrien. ⚠️ **Elles sont générées par IA : elles n'ont aucune dimension réelle.** Un canapé dessiné peut faire 180 ou 240 cm, et la perspective peut être incohérente d'un bout à l'autre.
+- [ ] Test de fidélité : le compositeur et le DOM produisent la même mise en page aux mêmes fractions.
 
-**La règle de calibration, non négociable :** ne pas calibrer sur le canapé, mais sur les repères que la réalité contraint le plus — hauteur sous plafond, hauteur de porte, hauteur d'assise, hauteur de prise. Puis **croiser plusieurs repères dans la même image**. S'ils s'accordent, l'échelle est fiable. **S'ils divergent, l'image est écartée**, quitte à n'en garder que trois sur neuf.
+## Tâche 8 : rendre avant d'encaisser, et la sonde
+
+**Modifier** `src/ui/affiche.js`.
+
+Le clic lance le rendu pavé avec progression, **puis** ouvre Stripe. La classe d'échec « il a payé, ça a raté » disparaît.
+
+Une **sonde** à l'ouverture de l'écran (allouer une cible 2048², un canevas de bande, relire un pixel — une image) détermine ce que la machine peut faire. **Dégrader d'abord, cacher ensuite** (décision d'Adrien).
+
+- [ ] Progression visible. Annulation possible. Test de la sonde sur des limites simulées.
+
+## Tâche 9 : le PDF et ses boîtes
+
+**Créer** `src/pdf-affiche.js` + test.
+
+`TrimBox` = format fini exact, `BleedBox` = TrimBox + **3 mm**, `MediaBox` = TrimBox + marge suffisante pour les repères. **Pas de repères par défaut** (les prestataires travaillent aux boîtes). Si repères : décalage ≥ fond perdu, épaisseur 0,1 mm — ils se posent alors sur du papier nu, ce qui **règle le problème du fond sombre**.
+
+⚠️ **Si un jour vous embarquez un JPEG CMJN** : `pdf-lib` applique **inconditionnellement** un décodage inversé aux images à quatre canaux (convention Adobe). Un encodeur non conforme produit une affiche **en négatif**, sans avertissement.
+
+⚠️ **Dites à Adrien dans le rapport que la conformité PDF/X n'est pas prouvée** — aucun validateur libre n'existe. Tant qu'un préflight professionnel ne l'a pas confirmée, c'est une intention.
+
+## Tâche 10 : la livraison
+
+⚠️ **Netlify Blobs n'expose aucune URL publique ni signée.** Et la composition ne part pas au serveur aujourd'hui : `metadata.retour` ne porte qu'un identifiant de 12 caractères, l'affiche n'existe que dans le stockage de session de l'acheteur.
+
+- [ ] **Écrire la décision et son coût avant d'implémenter.** Lien à expiration, branché dans le courriel que le webhook envoie déjà.
+
+---
+
+# PHASE C — Le mockup
+
+## Tâche 11 : le mur à l'échelle
+
+**Créer** `src/mockup-mur.js` + test. Neuf images de salon dans le Drive d'Adrien.
+
+⚠️ **Elles sont générées par IA : aucune dimension réelle.** Un canapé dessiné peut faire 180 ou 240 cm, et la perspective peut être incohérente d'un bout à l'autre.
+
+**La règle :** calibrer sur les repères que la réalité contraint le plus — hauteur sous plafond, porte, assise, prise — puis **croiser plusieurs repères dans la même image**. S'ils s'accordent, l'échelle tient. **S'ils divergent au-delà d'un seuil que vous devez fixer et justifier, l'image est écartée**, quitte à n'en garder que trois sur neuf.
 
 Un mockup qui ment est pire que pas de mockup.
 
-- [ ] **Étape 1 :** module pur de calibration, avec le test qui **rejette** une image dont les repères se contredisent.
-- [ ] **Étape 2 :** examiner les neuf images, mesurer, dire lesquelles passent.
-- [ ] **Étape 3 :** pose du cadre à l'échelle vraie.
-
 ---
 
-## Auto-revue
+## Ce que ce plan ne couvre pas, délibérément
 
-**Ce que ce plan ne couvre pas, délibérément :** la conversion CMJN et le PDF/X strict, qui dépendent de la réponse des prestataires d'impression ; la correction de la mosaïque aérienne et du maillage, qui sont un autre chantier.
+La conversion CMJN et le PDF/X strict (dépendent de la réponse des prestataires) ; la mosaïque aérienne et le maillage, dont le plafond sera **documenté** et non corrigé.
 
-**Le point le plus risqué :** la conformité PDF/X ne sera pas prouvée par ce plan. Aucun validateur libre n'existe. Tant qu'un fichier n'a pas passé un préflight professionnel réel, la conformité reste une intention — **et le plan doit le dire à Adrien plutôt que de le laisser croire acquis**.
+**Le risque assumé :** la conformité PDF/X ne sera pas prouvée par ce plan.
