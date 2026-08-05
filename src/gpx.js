@@ -15,6 +15,7 @@ import { dansFenetre } from './fenetre-clip.js'
 import { loadLayerForBounds, patchBounds } from './map/geo-data.js'
 import { makeLabelTexture, labelPlate, labelPlateInk, labelFontReady } from './map/text-label.js'
 import { computeArchSpecs, buildArchMesh, disposeArchGroup } from './arch.js'
+import { animationsActives } from './animations.js'
 
 const MAX_POINTS = 2400 // decimation budget — hover & profile stay O(small)
 
@@ -1890,7 +1891,11 @@ export class GpxLayer {
     // les filaments du sillage défilent en TEMPS, pas en distance : ils
     // continuent donc de vibrer même quand la tête est commandée image par
     // image par la poursuite, ou quand la lecture est en pause sur place
-    this._tempsSillage.value += dt
+    // ⚠️ SEUL ce scintillement obéit à l'interrupteur Animations. La lecture du
+    // parcours (headT, quelques lignes plus bas) n'est PAS un agrément qu'on
+    // coupe — c'est le produit lui-même — donc elle reçoit `dt` sans condition,
+    // même animations coupées : voir la note de recensement de animations.js.
+    if (animationsActives({ reglage: this.params.animations })) this._tempsSillage.value += dt
     // ⚠️ QUELQU'UN A LA MAIN SUR LA TÊTE — ON N'AVANCE PAS. La poursuite
     // hélicoptère commande la tête image par image (voir setHeadAt) et son
     // horloge n'a AUCUNE raison de coïncider avec celle de la lecture : la

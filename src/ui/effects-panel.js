@@ -382,10 +382,24 @@ export function buildEffectsPanel(ctx) {
   sRen.body.append(ssT, ssF, ssN, ssC)
   for (const c of [ssF, ssN, ssC]) visibleWhen(c, () => params.sssEnabled)
 
+  // ---- Animations — interrupteur UNIQUE (Adrien, tâche 11) : coupe tout le
+  // mouvement ambiant (nuages, mer, faune, grain…) d'un coup, pas de réglage
+  // par famille. La lecture d'un parcours GPX et les mouvements de caméra
+  // n'obéissent PAS à cet interrupteur — voir src/animations.js pour la
+  // frontière exacte et la liste des consommateurs.
+  const animT = toggle({
+    label: 'Animations',
+    get: () => params.animations,
+    set: (v) => { params.animations = v; refreshAll() },
+  })
+  animT.setAttribute('data-tip', 'Coupe le mouvement ambiant (nuages, mer, faune…) — allège aussi les machines lentes.')
+  sRen.body.append(animT)
+
   onRefresh(() => {
     const bits = []
     if (params.ssaoEnabled) bits.push('SSAO')
     if (params.sssEnabled) bits.push('SSS')
+    if (!params.animations) bits.push('Anim. coupées')
     sRen.setMeta(bits.length ? bits.join(' · ') : 'Off')
   }, sRen.head)
 

@@ -86,6 +86,7 @@ import { loadUserPalettes, saveUserPalettes, paletteFromParams } from './user-pa
 import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT, rememberRaceSecret, recallRaceSecret, updateRace } from './share-link.js'
 import { Boats } from './boats.js'
 import { DroneCam } from './drone-cam.js'
+import { animationsActives, reglageInitial } from './animations.js'
 import { makeGradientTexture, deriveBgModel, normalizeBgStops, normalizeBgPoints, bgLuminance, autoDarkTarget, derivePlinthColor, deriveMetalTints, deriveAoColor, deriveHazeColor, BG_MODES, ENVIRONMENTS, ENV_BY_ID } from './background.js'
 import { CameraAutomation, CAMERA_MOVES } from './camera-automation.js'
 import { CameraShotPlayer, TOP_DOWN_DIR } from './camera-shots.js'
@@ -395,6 +396,12 @@ const params = {
   flyDuration: 1.8,
   flyEasing: 'smooth',
   paused: false,
+
+  // L'INTERRUPTEUR D'ANIMATIONS (panneau Effets) — DIFFÉRENT de `paused` ci-dessus :
+  // `paused` est un reste mort (plus aucune UI ne le touche), celui-ci est câblé et
+  // vivant. `prefers-reduced-motion` ne fixe que ce réglage de DÉPART — un choix fait
+  // ICI prime pour toute la session (voir animations.js, animationsActives()).
+  animations: reglageInitial(window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)').matches : false),
 
   // performance
   // LA DENSITÉ DE L'ÉCRAN, LUE — et non plus un 2 en dur.
@@ -7932,6 +7939,11 @@ let tickTimer = 0
 // et une variable encore dans sa zone morte lèverait une ReferenceError au pire
 // endroit possible. Voir le rendez-vous de préchauffage en bas du fichier.
 let programmesPrets = false
+// Horloge du mouvement AMBIANT — figée quand l'interrupteur Animations est
+// coupé, jamais remise à zéro (voir dtAmb dans tick()) : les décorations qui
+// lisent un temps absolu (le clignotement du cadran HUD, par exemple) doivent
+// se figer là où elles en étaient, pas sauter à t=0.
+let tAmb = 0
 // a pending rAF never fires once the tab goes hidden — swap the chain onto
 // the timeout fallback at that exact moment so rendering never stalls
 document.addEventListener('visibilitychange', () => {
@@ -7959,6 +7971,17 @@ function tick() {
   const dtBrut = clock.getDelta()
   const dt = Math.min(dtBrut, 0.05)
   const t = clock.elapsedTime
+
+  // L'INTERRUPTEUR D'ANIMATIONS — dtAmb est le SEUL delta que reçoivent les
+  // consommateurs AMBIANTS (nuages, mer, faune, HUD, grain…). FIGER, PAS
+  // CACHER : on continue d'appeler leur update() chaque image (sinon un
+  // rendu qui dépend de la caméra courante — billboards, projections —
+  // deviendrait faux dès que la caméra bouge), on leur coupe seulement
+  // l'avancée du temps. La lecture GPX et les mouvements de caméra ne
+  // passent JAMAIS par dtAmb : ce ne sont pas des agréments, voir animations.js.
+  const animsOn = animationsActives({ reglage: params.animations })
+  const dtAmb = animsOn ? dt : 0
+  tAmb += dtAmb
 
   syncCourseBarMode()
   updateCameraMotion(dt)
@@ -7994,8 +8017,12 @@ function tick() {
 
   // idle planet spin: in orbital view the Earth slowly turns under the camera
   // until the user takes the controls back
+  // ⚠️ dtAmb, PAS dt : cette rotation part TOUTE SEULE après 3 s d'inactivité,
+  // personne ne l'a déclenchée — c'est la décoration ambiante, pas le "mouvement
+  // de caméra déclenché par l'utilisateur" qu'exclut l'interrupteur (celui-là
+  // parle d'un geste, pas d'un écran laissé sans y toucher).
   if (modes.mode === 'orbital' && !modes.busy && !controlsHeld && performance.now() - lastUserInput > 3000) {
-    camera.position.applyAxisAngle(UP, dt * 0.035)
+    camera.position.applyAxisAngle(UP, dtAmb * 0.035)
     camera.lookAt(0, 0, 0)
   }
 
@@ -8009,7 +8036,9 @@ function tick() {
   if (!(drone.active && params.gpxFollow && gpxLayer.isPlaying())) modes.update(dt)
   zoomStepper.update()
   if (modes.mode === 'orbital') {
-    globe.update(camera, dt)
+    // dtAmb : seule la coquille de nuages qui orbite la planète (globe-clouds.js)
+    // lit ce delta — le reste de globe.update() suit la caméra, pas l'horloge.
+    globe.update(camera, dtAmb)
     // En orbite le soleil SUIT LA CAMÉRA (validé avec Adrien : un soleil fixe
     // à la scène n'éclairait qu'un hémisphère — la moitié des continents
     // restait à jamais dans la nuit). Décalé de ~42° pour que la face visible
@@ -8067,15 +8096,20 @@ function tick() {
   }
 
   if (!params.paused && modes.mode === 'surface') {
-    hud3.update(dt, t, params)
+    // dtAmb/tAmb partout ici SAUF gpxLayer.tick : nuages, mer, faune, cadran HUD
+    // sont le mouvement AMBIANT que l'interrupteur Animations coupe. gpx.js, lui,
+    // reçoit le VRAI dt et tranche seul en interne — sa tête de course (lecture
+    // GPX) n'est PAS une décoration, seul son scintillement de sillage l'est
+    // (voir le commentaire au-dessus de _tempsSillage dans gpx.js).
+    hud3.update(dtAmb, tAmb, params)
     // le peuplement du ciel suit la puissance de la machine (Adrien) : le
     // palier du gouverneur de perf pilote le nombre de nuages instanciés
     clouds.setTier?.(aq?.tier ?? 0)
-    clouds.update(dt, params, camera)
-    traffic.update(dt)
-    terrain.tickSurfaceFx(dt, params.fx[params.surfaceFx]?.speed ?? 0) // animate at the effect's speed
-    terrain.tickLiquidMetal(dt, params.lmSpeed) // molten flow when liquid metal is on
-    terrain.tickSurfaceMaterial(dt) // drifting sand (relief material flow)
+    clouds.update(dtAmb, params, camera)
+    traffic.update(dtAmb)
+    terrain.tickSurfaceFx(dtAmb, params.fx[params.surfaceFx]?.speed ?? 0) // animate at the effect's speed
+    terrain.tickLiquidMetal(dtAmb, params.lmSpeed) // molten flow when liquid metal is on
+    terrain.tickSurfaceMaterial(dtAmb) // drifting sand (relief material flow)
     gpxLayer.tick?.(dt) // shimmer: flowing dashOffset highlight along the route line
   }
   peaksLayer.update(camera, window.innerWidth, window.innerHeight, modes.mode === 'surface')
@@ -8117,10 +8151,13 @@ function tick() {
   // `half` = le demi-BLOC (l'échelle du bateau), `bord` = où l'eau s'arrête :
   // le bloc, ou l'emprise 3×3 entière en mode continu. Les confondre aurait
   // triplé la vitesse au sol du vapeur — voir l'en-tête de stepBoat.
-  boats.update(dt, TERRAIN_SIZE / 2, (TERRAIN_SIZE * (dem?.empriseCote > 1 ? dem.empriseCote : 1)) / 2)
-  realWater?.update(dt, sun) // water simulation: waves, caustics, sun glint
-  // temps des caustiques de fond (terrain + blocs voisins du damier)
-  terrain.mapUniforms.uCausT.value += dt
+  // dtAmb : la flotte (bateaux, baleine…) est du mouvement ambiant — figée,
+  // elle reste À FLOT là où elle est, elle ne disparaît pas (voir stepBoat).
+  boats.update(dtAmb, TERRAIN_SIZE / 2, (TERRAIN_SIZE * (dem?.empriseCote > 1 ? dem.empriseCote : 1)) / 2)
+  realWater?.update(dtAmb, sun) // water simulation: waves, caustics, sun glint — figée par dtAmb, jamais cachée
+  // temps des caustiques de fond (terrain + blocs voisins du damier) — dtAmb :
+  // décoration ambiante, la nappe de caustiques reste visible, juste immobile
+  terrain.mapUniforms.uCausT.value += dtAmb
   for (const cell of blockGrid.cells.values()) {
     cell.terrain.mapUniforms.uCausT.value = terrain.mapUniforms.uCausT.value
     cell.terrain.mapUniforms.uSeaCausK.value = terrain.mapUniforms.uSeaCausK.value
@@ -8143,7 +8180,12 @@ function tick() {
   if (!programmesPrets) return
   aq.update(dtBrut) // adaptive quality : le temps RÉEL, jamais le dt de simulation (voir plus haut)
   majCarteOmbre() // la carte d'ombre n'est redessinée que si elle changerait
-  composer.render(dt)
+  // dtAmb, PAS dt : c'est CE delta que le composer transmet à ses passes, et
+  // c'est lui qui fait vivre le grain (NoiseEffect anime son bruit sur un
+  // uniforme `time` alimenté par ce paramètre — voir node_modules/postprocessing
+  // src/effects/NoiseEffect.js). Le reste de la chaîne (SSAO, DoF, tons, SMAA)
+  // ne lit pas ce delta ; seul le grain scintillait tout seul.
+  composer.render(dtAmb)
   if (recorder?.recording) recorder.captureFrame() // null until first export
 }
 

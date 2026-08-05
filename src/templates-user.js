@@ -162,6 +162,9 @@ export const TEMPLATE_KEYS = [
 //     grosse machine : c'est le seul groupe qu'il serait nuisible d'ajouter.
 //   gpxVisible/gpxAltitude — la trace elle-même, pas son style.
 //   paused — état transitoire.
+//   animations — préférence propre à LA PERSONNE (accessibilité), pas au
+//     style de la carte ; un template ne doit jamais rallumer ou couper le
+//     mouvement à la place de qui l'a réglé (voir src/animations.js).
 //   ringSpeed/flyDuration/flyEasing — aucune interface ne les expose, ils
 //     valent donc toujours leur défaut ; les sauver n'apporterait rien.
 

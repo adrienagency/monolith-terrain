@@ -3,6 +3,7 @@
 // setting you dig for). Glyph follows the sky: sun by day, moon at night.
 
 import { el, refreshAll } from './kit.js'
+import { animationsActives } from '../animations.js'
 
 // `onLecture(on)` est appelé à CHAQUE bascule du bouton ▶ — c'est le premier
 // des deux déclencheurs de l'allumage automatique des lumières nocturnes
@@ -52,12 +53,19 @@ export function buildHourPill({ params, applyTimeOfDay, onLecture = null }) {
     if (!playing) return
     const dt = lastT ? (now - lastT) / 1000 : 0
     lastT = now
-    // 1 = 24 h par minute → 24 h de simulation en 60 s ; vitesse N = N× plus vite
-    const hoursPerSec = (24 / 60) * (params.dayCycleSpeed || 1)
-    params.timeOfDay = (params.timeOfDay + hoursPerSec * dt) % 24
-    applyTimeOfDay(params.timeOfDay)
-    range.value = String(params.timeOfDay)
-    sync()
+    // Le cycle jour/nuit auto vit tout seul dès le clic ▶ — sans un geste de
+    // plus, tout comme la dérive des nuages ou la houle : c'est du mouvement
+    // AMBIANT, donc l'interrupteur Animations le fige (le soleil reste où il
+    // est). `lastT` est mis à jour MÊME figé, pour ne pas rendre un dt géant
+    // à la reprise.
+    if (animationsActives({ reglage: params.animations })) {
+      // 1 = 24 h par minute → 24 h de simulation en 60 s ; vitesse N = N× plus vite
+      const hoursPerSec = (24 / 60) * (params.dayCycleSpeed || 1)
+      params.timeOfDay = (params.timeOfDay + hoursPerSec * dt) % 24
+      applyTimeOfDay(params.timeOfDay)
+      range.value = String(params.timeOfDay)
+      sync()
+    }
     rafId = requestAnimationFrame(tick)
   }
   const setPlaying = (on) => {
