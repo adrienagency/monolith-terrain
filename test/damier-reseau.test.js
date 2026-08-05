@@ -215,12 +215,11 @@ async function jusquA(pret, { stable = 25, max = 800 } = {}) {
 }
 
 // les 24 points, un par dalle du damier 5×5 (centre exclu)
-function pointsDuDamier(dem, cellules = null) {
+function pointsDuDamier(dem) {
   const points = []
   for (let j = -2; j <= 2; j++) {
     for (let i = -2; i <= 2; i++) {
       if (!i && !j) continue
-      if (cellules && !cellules.has(`${i},${j}`)) continue
       points.push(worldToLatLon(dem, i * TERRAIN_SIZE, j * TERRAIN_SIZE))
     }
   }
@@ -444,9 +443,13 @@ async function centreQuiBouge() {
 
   let centre = avant
   const grid = new GrilleTest({ scene: { add() {}, remove() {} }, params: {}, getMainDem: () => centre })
-  const points = pointsDuDamier(avant)
   appels.clear()
-  grid.sync(points) // les 24 chargements partent, alignés sur `avant`
+  // zone isolée, pas GPX : cf. la note au-dessus de regionDesCellules() — ce
+  // montage a besoin des 24 chargements en vol (pas 8) pour mettre sous
+  // charge la garde de géoréférence qu'il vérifie ; le chemin GPX plafonné à
+  // 3×3 depuis la Tâche 2 ne suffirait plus à le prouver.
+  grid.setRegionParts(regionDesCellules(avant, toutesLesCellules()))
+  grid.sync([]) // les 24 chargements partent, alignés sur `avant`
   centre = apres // …et le bloc central change SOUS eux, avant tout atterrissage
   await jusquA(() => grid._demPending.size === 0, { stable: 5 })
   return grid

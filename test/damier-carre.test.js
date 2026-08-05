@@ -128,3 +128,42 @@ test('en mode fenetre continue le damier reste vide', () => {
   assert.equal(need.size, 0, 'le damier n\'existe pas quand l\'emprise est precuite')
   assert.equal(g.carreCourant().cote, 1)
 })
+
+// EMPRISE VIVANTE (correctif du relecteur, Tâche 2) — carreCourant() ne dit
+// que ce que le TRACÉ a réclamé, plafonné à 3×3. empriseVivante() dit ce qui
+// est réellement POSÉ dans this.cells, quelle que soit la raison (GPX ou
+// zone isolée), et n'est jamais plafonnée : la géométrie (socle, mer, jupe,
+// textes, cadrage) doit lire celle-ci, pas carreCourant().
+
+test('emprise vivante : damier vide -> 1x1 sur le bloc central', () => {
+  const g = new BlockGrid({ scene: null, params: {}, getMainDem: () => null, getMainTerrain: () => null, getPlinth: () => null })
+  assert.deepEqual(g.empriseVivante(), { i0: 0, j0: 0, cote: 1 })
+})
+
+test('emprise vivante : peuplée par le chemin GPX, même résultat que carreCourant()', () => {
+  const g = new BlockGrid({ scene: null, params: {}, getMainDem: demBouchon, getMainTerrain: () => null, getPlinth: () => null })
+  // un tracé en diagonale : cellsForTrack pose un carré, on peuple this.cells
+  // avec exactement ce qu'il a réclamé (sync() le ferait via le réseau)
+  const need = g.cellsForTrack([{ lat: 0, lon: 0 }, { lat: 0.5, lon: 0.5 }])
+  for (const k of need) {
+    const [i, j] = k.split(',').map(Number)
+    g.cells.set(k, { i, j })
+  }
+  assert.deepEqual(g.empriseVivante(), g.carreCourant(), 'rien à peupler que le carré n a déjà décrit')
+})
+
+// LA DIVERGENCE ELLE-MÊME, verrouillée noir sur blanc : une zone isolée peut
+// peupler this.cells jusqu'aux bords du 5×5 (GRID_R = 2, inchangé par cette
+// tâche) SANS jamais passer par cellsForTrack — carreCourant() reste donc
+// figé au 1×1 par défaut, pendant qu'empriseVivante() suit la réalité.
+test('emprise vivante : zone isolée jusqu au bord du 5x5 -> côté 5, carreCourant() reste à 1', () => {
+  const g = new BlockGrid({ scene: null, params: {}, getMainDem: demBouchon, getMainTerrain: () => null, getPlinth: () => null })
+  for (let j = -2; j <= 2; j++) {
+    for (let i = -2; i <= 2; i++) {
+      if (!i && !j) continue // le bloc central n'est pas une cellule du damier
+      g.cells.set(`${i},${j}`, { i, j })
+    }
+  }
+  assert.equal(g.empriseVivante().cote, 5, 'le 5x5 posé par la zone isolée doit se lire dans empriseVivante()')
+  assert.equal(g.carreCourant().cote, 1, 'carreCourant() ne bouge que sur cellsForTrack, jamais appelé ici')
+})

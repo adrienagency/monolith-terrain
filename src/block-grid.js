@@ -360,6 +360,24 @@ export class BlockGrid {
     return this._carre
   }
 
+  /**
+   * L'emprise RÉELLEMENT occupée par le damier : le plus petit carré qui
+   * contient toutes les cellules vivantes ET le bloc central, quelle que soit
+   * la raison de leur présence (tracé GPX ou zone isolée).
+   *
+   * ⚠️ NE PAS CONFONDRE AVEC carreCourant(). Celle-là dit ce que le TRACÉ a
+   * réclamé — elle pilote le CHARGEMENT et se plafonne à 3×3. Celle-ci dit ce
+   * qui est POSÉ, et monte donc jusqu'à 5×5 quand une zone isolée est active.
+   * Tout ce qui est GÉOMÉTRIE (socle, mer, jupe, textes, cadrage) doit lire
+   * celle-ci : lire l'autre ferait calculer une mer trop petite pour la carte
+   * qu'elle est censée porter.
+   */
+  empriseVivante() {
+    const cles = []
+    for (const cell of this.cells.values()) cles.push(`${cell.i},${cell.j}`)
+    return carreCouvrant(cles, { cotemax: Infinity }) // aucun plafond : c'est un CONSTAT, pas une commande
+  }
+
   // Le contour de la zone isolée que le damier doit porter (null = plus de
   // zone). L'appelant enchaîne avec sync() pour que le damier se refasse.
   setRegionParts(parts) {
