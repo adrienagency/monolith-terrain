@@ -139,7 +139,21 @@ test('le terrain fait défiler son masque côtier avec le même décalage', () =
   assert.ok(src.includes('vec2 cmUv = (vWorldPos.xz - uBlockOffset + uFenetre) / uMaskSpan + 0.5;'))
   // ⚠️ et surtout : le CLIP de socle ne doit PAS recevoir ce décalage — il est
   // la fenêtre. S'il le recevait, le bloc lui-même défilerait, donc disparaîtrait.
-  assert.ok(src.includes('vec2 cq = max(abs(vWorldPos.xz - uBlockOffset) - vec2(uSlabHalf - uSlabCorner), 0.0);'))
+  //
+  // ⚠️ L'EXPRESSION A CHANGÉ, PAS LA PROPRIÉTÉ. Le rayon de coin est désormais
+  // choisi PAR QUADRANT (uCoinsDamier, cf. test/damier-clip-surface.js) pour que
+  // deux dalles voisines ne s'arrondissent plus le long de leur jointure : le
+  // rayon nominal `uSlabCorner` ne figure donc plus tel quel dans la distance.
+  // Ce qui est vérifié ici reste le MÊME : les coordonnées que le clip mesure
+  // sont `vWorldPos.xz - uBlockOffset`, SANS uFenetre.
+  assert.ok(src.includes('vec2 pl = vWorldPos.xz - uBlockOffset;'),
+    'le clip de socle lit le monde moins le décalage de BLOC, rien d autre')
+  assert.ok(src.includes('vec2 cq = max(abs(pl) - vec2(uSlabHalf - rCoin), 0.0);'))
+  // … et la preuve directe : aucune des lignes du clip ne mentionne uFenetre
+  const clip = src.match(/} else if \(uSlabCorner > 0\.0\) \{[\s\S]*?\n  \}/)
+  assert.ok(clip, 'le clip de superellipse est introuvable')
+  assert.equal(clip[0].includes('uFenetre'), false,
+    'le clip EST la fenêtre : lui donner le décalage ferait défiler le bloc lui-même')
 })
 
 test('ancrage : la mer ajoute la fenêtre, un lac ne l ajoute pas', () => {

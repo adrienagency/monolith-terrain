@@ -92,3 +92,98 @@ export function masqueDepuisContour(contour, demi, bords, marge = 1e-3) {
   }
   return m
 }
+
+// ══════════ LE MÊME ARRONDI, MAIS SUR LA SURFACE DE CARTE ═══════════════════
+//
+// Le socle (ci-dessus) et la SURFACE sont deux arrondis INDÉPENDANTS. Le socle
+// est de la géométrie, masquée par sommet ; la surface est découpée dans le
+// fragment shader (terrain.js, `else if (uSlabCorner > 0.0)`) par une distance
+// signée à un rectangle aux coins arrondis. La Tâche 5 n'a traité que le
+// premier — d'où, sur les captures, une rainure sombre le long de chaque
+// jointure et un TROU EN ÉTOILE là où quatre blocs se rejoignent : quatre
+// coins arrondis qui se font face.
+//
+// Le `abs()` de ce clip le rend symétrique sur les quatre côtés : chaque bloc
+// du damier a son propre carré arrondi, jointures comprises. La correction est
+// de choisir le rayon PAR QUADRANT, avec la règle du socle, mot pour mot :
+// UN COIN N'EST ARRONDI QUE SI SES DEUX CÔTÉS SONT EXTÉRIEURS.
+//
+// ⚠️ CE MODULE EST LA SEULE VÉRITÉ, ET IL A DEUX LECTEURS QUI NE PEUVENT PAS SE
+// PARLER : le shader (transcrit à la main, aucun test ne le compile ici) et
+// `map/block-clip.js` (le pendant JS, qui découpe les calques en surimpression).
+// Les deux appellent `rayonCoin` — le JS pour de vrai, le GLSL en copie d'une
+// ligne, volontairement lisible côte à côte.
+
+/**
+ * Les quatre coins de la dalle, dans l'ordre des quadrants du plan (x, z) :
+ * `ne` = (x ≥ 0, z < 0), `se` = (x ≥ 0, z ≥ 0), `so` = (x < 0, z ≥ 0),
+ * `no` = (x < 0, z < 0). 1 = le coin garde son arrondi, 0 = il reste vif.
+ *
+ * Convention d'axes de computeSlab, la même que `bordsExterieurs` : z = −HALF
+ * est le NORD, z = +HALF le SUD, x = +HALF l'EST, x = −HALF l'OUEST.
+ *
+ * `bords` absent = bloc isolé : les quatre coins arrondis, c'est-à-dire le
+ * comportement d'avant, au bit près.
+ *
+ * @param {{nord:boolean,est:boolean,sud:boolean,ouest:boolean}} [bords]
+ * @returns {{ne:number,se:number,so:number,no:number}}
+ */
+export function facteursCoins(bords) {
+  const b = bords || { nord: true, est: true, sud: true, ouest: true }
+  return {
+    ne: b.nord && b.est ? 1 : 0,
+    se: b.sud && b.est ? 1 : 0,
+    so: b.sud && b.ouest ? 1 : 0,
+    no: b.nord && b.ouest ? 1 : 0,
+  }
+}
+
+/**
+ * Le rayon d'arrondi qui s'applique AU POINT (x, z) : celui de son quadrant.
+ *
+ * ⚠️ C'EST UNE FONCTION DU POINT, PAS DU COIN LE PLUS PROCHE. La formule du
+ * clip reste celle d'avant — `max(|p| − (demi − r), 0)` puis superellipse — et
+ * elle n'a besoin que d'un `r` par fragment. Choisir le quadrant par le SIGNE
+ * des coordonnées suffit : le rayon ne pèse que dans le coin de son quadrant,
+ * et au milieu d'un côté droit les deux composantes de la différence
+ * s'annulent quel que soit `r` (voir plus bas, `dansDalle`).
+ *
+ * La frontière entre quadrants tombe pile sur x = 0 et z = 0, au CENTRE de la
+ * dalle, à `demi` unités de tout bord : un changement de rayon y est
+ * rigoureusement invisible.
+ *
+ * @param {number} x - abscisse LOCALE au bloc (le décalage de damier retranché)
+ * @param {number} z - ordonnée locale au bloc
+ * @param {number} rayon - le rayon nominal, celui que règle l'utilisateur
+ * @param {{ne:number,se:number,so:number,no:number}} [facteurs]
+ */
+export function rayonCoin(x, z, rayon, facteurs) {
+  const f = facteurs || { ne: 1, se: 1, so: 1, no: 1 }
+  const k = x >= 0 ? (z >= 0 ? f.se : f.ne) : z >= 0 ? f.so : f.no
+  return rayon * k
+}
+
+/**
+ * Le point (x, z) survit-il au clip de surface ? LE PENDANT EXACT du shader.
+ *
+ * Rendu ici plutôt que dans `map/block-clip.js` pour que la règle et sa preuve
+ * vivent dans le module pur : `slabInside` s'y ramène en une ligne, et les
+ * tests de cette fonction sont la SEULE preuve possible du shader, faute de
+ * contexte graphique.
+ *
+ * @param {number} x - abscisse locale au bloc
+ * @param {number} z - ordonnée locale au bloc
+ * @param {number} demi - le demi-côté du bloc
+ * @param {number} rayon - rayon nominal des coins (0 = carré vif)
+ * @param {number} exposant - l'exposant de la superellipse (2 = cercle)
+ * @param {{ne:number,se:number,so:number,no:number}} [facteurs]
+ */
+export function dansDalle(x, z, demi, rayon, exposant, facteurs) {
+  if (Math.abs(x) > demi || Math.abs(z) > demi) return false
+  const r = rayonCoin(x, z, rayon, facteurs)
+  if (r <= 0) return true // coin vif : la dalle va jusqu'au carré, comme le socle
+  const qx = Math.max(Math.abs(x) - (demi - r), 0)
+  const qz = Math.max(Math.abs(z) - (demi - r), 0)
+  if (qx === 0 && qz === 0) return true
+  return Math.pow(Math.pow(qx, exposant) + Math.pow(qz, exposant), 1 / exposant) <= r
+}

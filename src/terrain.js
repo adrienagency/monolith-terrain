@@ -13,6 +13,7 @@ import { ATLAS_ANALYSE, ATLAS_MER, fracBassinEmprise } from './dem-emprise.js'
 // fonction pure rend des descriptions. Le même nom pour les deux se lit comme
 // une récursion qui n'existe pas.
 import { plansFenetre as demiPlansFenetre, exposantCoin } from './fenetre-clip.js'
+import { facteursCoins } from './damier-bords.js' // module pur, aucune importation
 // L'analyse de relief et le masque de mer ne sont plus calcules ici : ils
 // partent dans un Worker (terrain-jobs.js). ~470 ms de fil principal fige par
 // reconstruction, sur MNT 1536². Le calcul est identique octet pour octet.
@@ -215,6 +216,15 @@ export class Terrain {
       // v42: MEME arrondi que la mer (rayon clampe, cercle) - l'ecart entre
       // le coin du socle et celui de l'eau se voyait (retour Adrien)
       uSlabCorner: { value: Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE)) },
+      // ══════ QUELS COINS CE BLOC A LE DROIT D'ARRONDIR (damier) ═════════════
+      // (ne, se, so, no), 1 = arrondi, 0 = coin vif. Posé par setBordsDamier(),
+      // et (1,1,1,1) tant que personne ne parle : le bloc isolé, la fenêtre
+      // continue et le mode zone isolée gardent EXACTEMENT le clip d'avant.
+      // ⚠️ DES FACTEURS, PAS DES RAYONS. Le rayon nominal reste uSlabCorner, que
+      // le curseur du panneau Block réécrit en direct : stocker quatre rayons
+      // ici obligerait à les rafraîchir à chaque mouvement de curseur, et le
+      // premier oubli figerait l'arrondi du damier sur sa valeur d'alors.
+      uCoinsDamier: { value: new THREE.Vector4(1, 1, 1, 1) },
       // optional aerial-photo skin (src/map/aerial-layer.js) — off unless a
       // texture is set. uAerialOffset/Scale place the tile mosaic on the block
       // (the grid always overhangs the patch); uAerialOpacity is the dial that
@@ -511,6 +521,7 @@ uniform vec3 uContourColor;
 uniform float uSlabHalf;
 uniform float uSlabCorner;
 uniform float uSlabCornerN;
+uniform vec4 uCoinsDamier; // (ne, se, so, no) — voir le clip de socle plus bas
 uniform float uMaskSpan; // largeur au sol des masques (56, ou 168 sur l'emprise 3×3)
 uniform vec2 uFenetre;   // décalage de lecture du mode continu (0 sinon)
 uniform vec2 uBlockOffset;
@@ -895,11 +906,32 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
     // --- rounded-rect footprint clip: discard fragments outside the slab's
     // filleted corners so the block's vertical edges read soft (matches the
     // plinth walls). Zero radius = untouched square. SDF of a rounded box.
-    vec2 cq = max(abs(vWorldPos.xz - uBlockOffset) - vec2(uSlabHalf - uSlabCorner), 0.0);
+    vec2 pl = vWorldPos.xz - uBlockOffset; // local au bloc (damier)
+    // ══════ LE RAYON EST CHOISI PAR QUADRANT — src/damier-bords.js ══════════
+    // L'abs() seul rendait ce clip symétrique sur les QUATRE côtés : chaque
+    // bloc du damier gardait son propre carré arrondi, jointures comprises. À
+    // l'écran : une rainure le long de chaque jointure, et un trou en étoile là
+    // où quatre blocs se rejoignent. uCoinsDamier = (ne, se, so, no), 1 =
+    // arrondi de plein droit, 0 = coin vif — un coin n'est arrondi que si SES
+    // DEUX côtés sont extérieurs, la règle du socle mot pour mot.
+    // TRANSCRIPTION LIGNE À LIGNE de rayonCoin() : quadrant par le signe, x >= 0
+    // = est, z >= 0 = sud. À (1,1,1,1) mix rend son opérande tel quel et
+    // l'expression redevient celle d'avant, au bit près.
+    // (Pas d'accent grave dans ce bloc : il vit dans un template literal JS, il
+    // le terminerait — même piège qu'ocean.js, et il coûte une suite entière.)
+    float fx = step(0.0, pl.x); // 1 = est
+    float fz = step(0.0, pl.y); // 1 = sud  (pl.y EST le z monde : vec2.xz)
+    float rCoin = uSlabCorner * mix(
+      mix(uCoinsDamier.w, uCoinsDamier.x, fx),  // nord : no | ne
+      mix(uCoinsDamier.z, uCoinsDamier.y, fx),  // sud  : so | se
+      fz);
+    vec2 cq = max(abs(pl) - vec2(uSlabHalf - rCoin), 0.0);
     // superellipse boundary |x|^n + |y|^n = r^n (n=2 circle, higher = squircle);
     // straight edges stay exact (one component is 0), only corners are shaped
     float pn = pow(pow(cq.x, uSlabCornerN) + pow(cq.y, uSlabCornerN), 1.0 / uSlabCornerN);
-    if (pn > uSlabCorner) discard;
+    // rCoin = 0 : cq vaut zéro dans tout le carré (pn = 0, et 0.0 > 0.0 est faux)
+    // et sort dès qu'on le dépasse — le coin vif, sans branchement de plus.
+    if (pn > rCoin) discard;
   }
 
   // smooth interpolated normal (world space) — screen-space derivatives look blotchy
@@ -1605,6 +1637,23 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const py = Math.min(img.height - 1, (v * img.height) | 0)
     return img.data[(py * img.width + px) * 4] / 255 // red channel
   }
+  // ══════════ LES COINS QUE CE BLOC A ENCORE LE DROIT D'ARRONDIR ════════════
+  //
+  // Le pendant, pour la SURFACE de carte, de ce que `plinth.bordsHero` et
+  // `_rebuildCellWalls` font déjà au socle. Deux arrondis indépendants sur un
+  // même bloc : sans celui-ci, chaque dalle du damier gardait son propre carré
+  // arrondi et laissait une rainure à chaque jointure, un trou en étoile là où
+  // quatre dalles se rejoignent.
+  //
+  // `null` (ou les quatre côtés extérieurs) = bloc isolé : clip d'avant au bit
+  // près. Le décodage est dans src/damier-bords.js, avec ses tests — c'est la
+  // seule vérité, le shader n'en est qu'une transcription.
+  setBordsDamier(bords) {
+    const f = facteursCoins(bords)
+    this._coinsDamier = f.ne && f.se && f.so && f.no ? null : f // tout à 1 = rien à dire
+    this.mapUniforms.uCoinsDamier.value.set(f.ne, f.se, f.so, f.no)
+  }
+
   // the block footprint for overlay clipping (slab superellipse + region cutout)
   blockFootprint() {
     const u = this.mapUniforms
@@ -1613,6 +1662,10 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       half: u.uSlabHalf.value,
       corner: regionOn ? 0 : u.uSlabCorner.value,
       cornerN: u.uSlabCornerN.value,
+      // ⚠️ LES CALQUES SUIVENT LE MÊME CLIP QUE LE RELIEF. Sans `coins`, un
+      // cours d'eau qui traverse une jointure s'arrêterait court sur l'ancien
+      // quart de rond pendant que le terrain, lui, va maintenant jusqu'au bord.
+      coins: regionOn ? null : this._coinsDamier ?? null,
       regionOn,
       regionSample: regionOn ? (x, z) => this.regionSample(x, z) : null,
     }

@@ -5057,6 +5057,14 @@ function majBordsHero() {
   // 1111 = quatre côtés au vide : on rend null, donc la géométrie d'origine
   plinth.bordsHero = cle === '1111' ? null : b
   plinth.rebuild(terrain, params, socleEmprise())
+  // ⚠️ ET LA SURFACE DE CARTE, QUI EST UN SECOND ARRONDI. Le socle ci-dessus est
+  // de la géométrie ; le carré arrondi de la carte est découpé dans le fragment
+  // shader (terrain.js). Ne traiter que le premier laissait le relief du héros
+  // s'arrêter court près des jointures : une rainure sombre entre deux dalles,
+  // et un trou en étoile là où quatre se rejoignent. Même règle, même source
+  // (damier-bords.js), un seul appel — les voisines, elles, passent par
+  // blockGrid.majCoinsSurface().
+  terrain.setBordsDamier(cle === '1111' ? null : b)
 }
 blockGrid.onGridChanged = () => {
   traffic.setSpan(trafficSpan())

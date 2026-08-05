@@ -428,7 +428,7 @@ export class BlockGrid {
     // voisine la touchait — un socle brutalement coupé au bord du damier, le
     // défaut symétrique de la rainure que la Tâche 5 supprime. egaliseHauteurs()
     // ne re-coule que ce qui a réellement changé (plancher OU bords).
-    if (changed) { this.egaliseHauteurs(); this.onGridChanged?.() }
+    if (changed) { this.egaliseHauteurs(); this.majCoinsSurface(); this.onGridChanged?.() }
     if (!dem) return
     // charger le manquant
     // ⚠️ le damier ALIGNE les voisins sur la grille de tuiles du bloc central
@@ -468,6 +468,7 @@ export class BlockGrid {
           cell.demKey = demKey
           cell.demRaw = nDem
           this.cells.set(key, cell)
+          this.majCoinsSurface() // … et la NOUVELLE change les coins de ses voisines
           this.onReady?.(cell)
           this.onGridChanged?.()
         })
@@ -683,6 +684,9 @@ export class BlockGrid {
     // plus profonde que tout ce qui précède fait aussi RE-COULER les murs déjà
     // posés des cellules voisines : c'est tout le sujet de cette méthode.
     this.egaliseHauteurs()
+    // … et les COINS DE SURFACE, qui ne passent pas par les murs (voir
+    // majCoinsSurface : ils survivent à un socle masqué et à un plancher inconnu)
+    this.majCoinsSurface()
     return cell
   }
 
@@ -840,6 +844,29 @@ export class BlockGrid {
   // d'où cette méthode plutôt qu'un appel direct côté main.js.
   bordsHero() {
     return this.bordsDe(0, 0)
+  }
+
+  // ══════ LES COINS DE SURFACE DE TOUTES LES CASES, EN UNE PASSE ═══════════
+  //
+  // Le pendant, pour la CARTE, de ce qu'`egaliseHauteurs` fait aux murs. Il y a
+  // deux arrondis indépendants sur un bloc — le socle (géométrie, masquée par
+  // sommet) et la surface (découpée dans le fragment shader) — et seul le
+  // premier avait été traité : chaque dalle gardait son propre carré arrondi,
+  // d'où la rainure le long des jointures et le trou en étoile là où quatre
+  // dalles se rejoignent.
+  //
+  // ⚠️ À PART, ET PAS DANS `_rebuildCellWalls`. Deux raisons, et chacune suffit :
+  //   · le clip de surface ne dépend PAS du socle, alors que `_rebuildCellWalls`
+  //     abandonne sans rien faire quand le socle est masqué (panneau Block) — la
+  //     carte, elle, reste à l'écran et garderait ses arrondis de jointure ;
+  //   · `egaliseHauteurs` sort aussi tant que le plancher commun n'est pas
+  //     connu, ce qui est exactement l'état du tout premier chargement.
+  // Coût : 24 cases au pire, quatre booléens et un vec4 chacune.
+  majCoinsSurface() {
+    const posees = new Set(this.cells.keys())
+    for (const cell of this.cells.values()) {
+      cell.terrain?.setBordsDamier?.(bordsExterieurs(cell.i, cell.j, posees))
+    }
   }
 
   // signature comparable d'un jeu de bords, pour ne re-couler que ce qui bouge

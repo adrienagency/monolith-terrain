@@ -1,24 +1,25 @@
 // The block footprint, in JS, so overlay lines can be clipped to exactly what the
 // terrain shows. slabInside mirrors terrain.js's slab-corner discard (superellipse).
-
+//
+// ⚠️ LA RÈGLE DES COINS N'EST PAS ÉCRITE ICI. Elle vit dans src/damier-bords.js
+// (`dansDalle`), avec ses tests, parce que le SHADER en est le second lecteur et
+// qu'aucun test ne peut le compiler : deux vérités pour une question, c'est
+// exactement le défaut qu'on vient de corriger sur le damier. `coins` (les
+// quatre facteurs 0/1) arrive de `terrain.blockFootprint()` ; absent, la dalle
+// s'arrondit sur ses quatre coins — le bloc isolé d'avant, au bit près.
 import * as THREE from 'three'
+import { dansDalle } from '../damier-bords.js'
 
-export function slabInside(x, z, half, corner, cornerN) {
-  if (Math.abs(x) > half || Math.abs(z) > half) return false
-  if (corner <= 0) return true
-  const qx = Math.max(Math.abs(x) - (half - corner), 0)
-  const qz = Math.max(Math.abs(z) - (half - corner), 0)
-  if (qx === 0 && qz === 0) return true
-  const pn = Math.pow(Math.pow(qx, cornerN) + Math.pow(qz, cornerN), 1 / cornerN)
-  return pn <= corner
+export function slabInside(x, z, half, corner, cornerN, coins = null) {
+  return dansDalle(x, z, half, corner, cornerN, coins)
 }
 
 // insideBlock predicate = slab AND (region mask when a region cutout is active)
-export function makeInsideBlock({ half, corner, cornerN, regionOn, regionSample }) {
+export function makeInsideBlock({ half, corner, cornerN, coins = null, regionOn, regionSample }) {
   if (regionOn && regionSample) {
-    return (x, z) => slabInside(x, z, half, corner, cornerN) && regionSample(x, z) >= 0.5
+    return (x, z) => slabInside(x, z, half, corner, cornerN, coins) && regionSample(x, z) >= 0.5
   }
-  return (x, z) => slabInside(x, z, half, corner, cornerN)
+  return (x, z) => slabInside(x, z, half, corner, cornerN, coins)
 }
 
 // Clip a world-space polyline to the block: densify to `step`, keep contiguous
@@ -72,8 +73,12 @@ export function clipPolylineToBlock(pts, insideBlock, step = 0.6, bisect = 7) {
 // the block, never let it stick out. Returned ring is closed (first === last),
 // matching the GeoJSON ring convention used elsewhere in this file, and wound
 // counter-clockwise in the (x,z) plane (theta increasing).
+// ⚠️ TOUJOURS CONVEXE AVEC DES COINS MIXTES. Un coin remis vif (jointure de
+// damier) ne fait que POUSSER la frontière vers le carré : le rectangle aux
+// coins partiellement arrondis reste l'intersection de demi-plans et d'arcs
+// convexes, donc Sutherland-Hodgman reste exact.
 export function blockOutline(fp, n = 192, bisect = 30) {
-  const { half, corner, cornerN } = fp
+  const { half, corner, cornerN, coins = null } = fp
   const maxR = Math.SQRT2 * half + 1
   const out = []
   for (let i = 0; i < n; i++) {
@@ -82,7 +87,7 @@ export function blockOutline(fp, n = 192, bisect = 30) {
     let lo = 0, hi = maxR
     for (let k = 0; k < bisect; k++) {
       const mid = (lo + hi) / 2
-      if (slabInside(dx * mid, dz * mid, half, corner, cornerN)) lo = mid; else hi = mid
+      if (slabInside(dx * mid, dz * mid, half, corner, cornerN, coins)) lo = mid; else hi = mid
     }
     out.push({ x: dx * lo, z: dz * lo })
   }
