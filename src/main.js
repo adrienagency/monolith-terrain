@@ -3163,6 +3163,13 @@ async function loadRealTerrain(opts = {}) {
     // une optimisation. `_amorce` est retombé à faux, donc ce rebuild est plein.
     // Il coûte ~370 ms, sur un chemin où le chargement a DÉJÀ échoué.
     try { terrain.rebuild(params) } catch (e) { console.error('repli procédural impossible:', e) }
+    // ⚠️ ET LE DAMIER PART AVEC. Les dalles voisines portent le relief RÉEL du
+    // chargement précédent : les laisser autour d'un centre redevenu procédural
+    // donne une carte coupée en deux à la jointure — plage hypsométrique, mer
+    // et masques d'un côté, bruit de l'autre. `clear()` est écrite pour ça (les
+    // chargements encore en vol atterrissent sans bâtir personne), et le
+    // prochain chargement réussi les fait renaître par `sync()`.
+    blockGrid?.clear()
     setTimeout(() => {
       hideLoading()
       loadingStatus.textContent = 'generating terrain…'
@@ -3647,6 +3654,12 @@ function applyPalette(p) {
   // utilisateur, shuffle, monochrome, reset, lien de partage et message embed
   // y passent tous. Une seule ligne couvre donc les six.
   syncUiTheme()
+  // ⚠️ ET LES DALLES VOISINES. La rampe TERRESTRE suit toute seule (texture
+  // partagée : `rebuildRamp` repointe ses emprunteuses), mais pas les trois
+  // couleurs de la MER ni l'encre des courbes — sur une carte côtière, un
+  // changement de palette accordait la terre entre les dalles et laissait le
+  // désaccord de la mer pile sur la jointure.
+  blockGrid?.diffuseDuCentre()
   refreshAll()
 }
 
@@ -3670,6 +3683,11 @@ function applyStyle(s) {
   terrain.mapUniforms.uHeightContrast.value = s.heightContrast
   terrain.mapUniforms.uHeightPivot.value = s.heightPivot
   terrain.mapUniforms.uSlopeTint.value = s.slopeTint
+  // ⚠️ ET LES DALLES VOISINES — sournois, celui-là : `applyAutoShade` (juste en
+  // dessous) recalcule ces quatre valeurs à CHAQUE chargement de relief, donc
+  // le désaccord apparaissait et disparaissait selon l'ordre d'arrivée des
+  // dalles. Une voisine née avant le recalcul gardait l'ancien contraste.
+  blockGrid?.diffuseDuCentre()
   refreshAll()
 }
 
@@ -3722,6 +3740,14 @@ function applyGridContour(g) {
   if (g.gridColor) terrain.mapUniforms.uGridColor.value.set(g.gridColor)
   if (g.contourWeight != null && !params.darkMode) terrain.mapUniforms.uContourWeight.value = g.contourWeight
   globe.setInk(g.contourColor)
+  // ⚠️ ET LES DALLES VOISINES. `_applyLook` recopie déjà l'encre du centre,
+  // mais il ne tourne qu'à la naissance d'une dalle et sur `restyle()` : sans
+  // cette ligne, traîner le curseur d'intervalle des courbes laissait le damier
+  // en arrière jusqu'au prochain changement de palette ou de fond.
+  // ⚠️ `diffuseDuCentre`, PAS `restyle` : celui-ci rejoue setColorMode /
+  // setMaterialMode / setLiquidMetal sur 24 dalles, ce qu'un curseur traîné ne
+  // peut pas payer. La diffusion, elle, ne fait que recopier : 8,0 µs pour 24 dalles, mesuré.
+  blockGrid?.diffuseDuCentre()
   refreshAll()
 }
 
@@ -3752,6 +3778,12 @@ function setDarkMode(v) {
   // light ink reads bolder on dark terrain — thin the contour strokes further
   // so the sheet keeps its engraved fineness at night
   terrain.mapUniforms.uContourWeight.value = v ? 0.5 : params.contourWeight
+  // ⚠️ ET UNE SECONDE DIFFUSION, APRÈS CETTE LIGNE-LÀ. `applyGridContour`
+  // ci-dessus en a déjà fait une, mais elle a recopié l'épaisseur d'AVANT :
+  // cette écriture-ci arrive après elle, exprès (voir le commentaire de
+  // `_copieDuCentre` — le centre fait foi, on ne rejoue pas la règle). Sans ce
+  // rappel, les voisines gardaient l'épaisseur du jour toute la nuit.
+  blockGrid?.diffuseDuCentre()
   // the slab and its table follow the sheet, so the object reads as one piece
   params.plinthColor = v ? DARK.plinth : LIGHT_PLINTH.plinth
   plinth.setColors(params) // wall follows the mode; the table is shadow-only
@@ -3798,6 +3830,12 @@ function applySurface(s) {
   terrain.updateMaterial(params)
   terrain.rebuildRoughness(params)
   if (params.liquidMetal) terrain.setLiquidMetal(true, params) // keep the chrome over template swaps
+  // ⚠️ ET LES DALLES VOISINES. Les CARTES (rugosité, bump) leur arrivent toutes
+  // seules — elles les empruntent au centre, et `rebuildRoughness` repointe ses
+  // emprunteuses. Les SCALAIRES du matériau (bumpScale, envMapIntensity,
+  // transmission, et le métal liquide) ne sont partagés par rien : sans cette
+  // ligne, un template changeait le fini du centre et pas celui du damier.
+  blockGrid?.diffuseDuCentre()
 }
 // Repose le développement maison. Seul resetLook s'en sert — les templates et
 // le dé n'ont pas le droit d'y toucher (voir applyLook).
@@ -7387,6 +7425,7 @@ const shadersPanel = buildShadersPanel({
   setLmParam: (k, v) => {
     params[k] = v
     if (params.liquidMetal) terrain.setLiquidMetal(true, params)
+    blockGrid?.diffuseDuCentre() // métal, poli, reflet : le damier miroite pareil
   },
   surfaceFxList: FX_LIST.map(({ id, label }) => ({ value: String(id), label })),
   fxMeta: FX_META,
@@ -7434,16 +7473,22 @@ const shadersPanel = buildShadersPanel({
   setMatRoughness: (v) => {
     params.terrainMatRoughness = v
     terrain.setTerrainMatRoughness(v)
+    // ⚠️ `setMaterialMode` repose la rugosité du PRÉRÉGLAGE, pas celle de ce
+    // curseur : sans cette ligne le damier restait au fini par défaut du
+    // matériau pendant que le bloc central portait le fini choisi.
+    blockGrid?.diffuseDuCentre()
   },
   getMatNoise: () => params.terrainMatNoise,
   setMatNoise: (v) => {
     params.terrainMatNoise = v
     terrain.setMatNoise(v)
+    blockGrid?.diffuseDuCentre()
   },
   getMatAboveZero: () => params.terrainMatAboveZero,
   setMatAboveZero: (v) => {
     params.terrainMatAboveZero = v
     terrain.setMatAboveZero(v)
+    blockGrid?.diffuseDuCentre()
   },
   // live glass knobs (only shown when the relief material is Glass)
   glassControls: [
@@ -8410,6 +8455,11 @@ function tick() {
     // shader de surface : les voisins suivent le temps de la dalle principale
     // (un composant : ils n'avancent pas leur propre horloge) — animation synchrone
     cell.terrain.mapUniforms.uFxTime.value = terrain.mapUniforms.uFxTime.value
+    // … et l'horloge du MÉTAL LIQUIDE, pour la même raison et au même titre.
+    // Elle manquait : `tickLiquidMetal` n'avance que celle du bloc central, donc
+    // le flux de chrome coulait au centre et restait figé sur les voisines —
+    // une jointure visible dès que le métal liquide est allumé.
+    cell.terrain.mapUniforms.uLmFlow.value = terrain.mapUniforms.uLmFlow.value
   }
   realWater?.setView(camera.position.y, controls.getDistance?.() ?? camera.position.distanceTo(controls.target)) // accalmie altitude + taille des remous de côte selon la distance d'affichage
   // PRÉCHAUFFAGE DES SHADERS — voir warmup.js et le rendez-vous en bas de tick.

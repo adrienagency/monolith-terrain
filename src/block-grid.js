@@ -1070,24 +1070,73 @@ export class BlockGrid {
     t.setSurfaceFx?.(p.surfaceFx | 0)
     if ((p.surfaceFx | 0) > 0 && p.fx?.[p.surfaceFx]) t.applyFxParams?.(p.fx[p.surfaceFx])
     t.setAerialCoastFade?.(p.aerialCoastFade ?? 0.1)
-    // continuité de teinte : aligner la plage hypsométrique sur le bloc central
-    if (mt) t.mapUniforms.uHeightRange.value.copy(mt.mapUniforms.uHeightRange.value)
-    // L'ENCRE DES COURBES ET DE LA GRILLE — recopiée du centre, jamais relue
-    // dans `params`.
-    //
-    // ⚠️ ELLE BASCULE TOUTE SEULE AVEC L'HEURE, et c'est pour ça qu'elle est
-    // ici : `applyTimeOfDay` → `setDarkMode` → `applyGridContour` retourne
-    // l'encre en clair quand la nuit tombe, et n'écrivait que sur la dalle
-    // centrale. Une voisine née avant le crépuscule gardait ses courbes
-    // sombres à côté d'un centre passé au blanc.
-    //
-    // ⚠️ ET ON COPIE L'UNIFORME, ON NE RELIT PAS LA RÈGLE. `uContourWeight` ne
-    // vaut PAS `params.contourWeight` en mode sombre : `setDarkMode` l'écrase à
-    // 0,5 APRÈS `applyGridContour`. Rejouer la règle ici la dupliquerait — et
-    // la deuxième copie prendrait du retard au premier changement. Le centre
-    // fait foi, comme pour uHeightRange juste au-dessus.
-    if (mt) {
-      const um = t.mapUniforms, uc = mt.mapUniforms
+    // LES SCALAIRES ET LES COULEURS QUE LE CENTRE PORTE — en DERNIER, parce
+    // qu'ils font foi sur tout ce qui vient d'être reposé depuis `params`.
+    this._copieDuCentre(t, mt)
+    // LES TROIS SCALAIRES DE LA COUCHE NOCTURNE — reposés ici, et c'est ce qui
+    // rattrape les dalles NÉES APRÈS le crépuscule : `_buildCell` appelle
+    // `_applyLook`, donc une voisine reçoit l'état de la couche au moment même
+    // où elle arrive. La mosaïque, elle, la rejoint par `peintCelluleNuit`.
+    if (this._nuitIntensite != null) t.setNuitIntensite?.(this._nuitIntensite)
+    if (this._nuitFond != null) t.setNuitFond?.(this._nuitFond)
+    if (this._nuitGain != null) t.setNuitGain?.(this._nuitGain)
+  }
+
+  // ══════════ LE CENTRE FAIT FOI — ET IL LE FAIT SANS RIEN RECUIRE ══════════
+  //
+  // La diffusion la moins chère du damier : on RECOPIE ce que le bloc central
+  // porte à cet instant, uniforme par uniforme. Rien n'est recalculé, aucune
+  // texture n'est recuite, aucun `needsUpdate` n'est levé — donc aucun des 24
+  // programmes n'est recompilé. C'est ce qui la rend utilisable sur un CURSEUR
+  // TRAÎNÉ, là où `restyle()` (qui rejoue `setColorMode`, `setMaterialMode` et
+  // `setLiquidMetal` sur chaque dalle) ne l'est pas.
+  //
+  // CHIFFRÉ, damier plein (24 dalles), reproduction fidèle des types réels
+  // (.superpowers/sdd/2026-08-05-damier-multi-blocs/mesure-diffusion.mjs) :
+  //     648 recopies  →  8,0 µs par tournée
+  //                   →  0,048 % d'une image à 60 Hz
+  //                   →  0,48 ms par seconde de curseur traîné
+  // On peut donc la rappeler à chaque pas de curseur sans compter. `restyle()`,
+  // lui, rejoue par dalle setColorMode (+ rebuildRamp, qui retombe sur
+  // `_adoptShared` et lève `material.needsUpdate`), setMaterialMode et
+  // setLiquidMetal : 24 réinitialisations de matériau par image sur un curseur
+  // traîné — non mesuré ici, mais d'un tout autre ordre, et inutile quand rien
+  // de structurel n'a bougé.
+  //
+  // ⚠️ ON COPIE L'UNIFORME, ON NE RELIT PAS LA RÈGLE — et c'est vrai pour toute
+  // cette liste, pas seulement pour l'encre. `uContourWeight` ne vaut PAS
+  // `params.contourWeight` en mode sombre (`setDarkMode` l'écrase à 0,5 APRÈS
+  // `applyGridContour`) ; `uTint` ne vaut pas `params.mapTint` sous une matière
+  // de relief (elle l'éteint) ni sous le métal liquide (qui le rabat à 0,1).
+  // Rejouer la règle ici la dupliquerait, et la deuxième copie prendrait du
+  // retard au premier changement.
+  //
+  // ⚠️ AJOUTER UN RÉGLAGE ICI NE SUFFIT PAS. Cette liste habille les dalles qui
+  // NAISSENT (via `_applyLook`) et celles qui vivent (via `diffuseDuCentre`) —
+  // mais encore faut-il que quelqu'un appelle la seconde quand le réglage
+  // change. test/damier-uniformes.test.js vérifie les deux moitiés séparément,
+  // parce qu'aucune ne suffit seule.
+  //
+  // ⚠️ CHAQUE GROUPE EST GARDÉ PAR LA PRÉSENCE DE SON PREMIER UNIFORME, et les
+  // groupes sont écrits À PLAT, un uniforme par ligne. Deux raisons, et la
+  // seconde est la plus importante :
+  //   · un Terrain bouchon (les tests du damier) ne porte pas toute la liste —
+  //     une tournée qui explose sur le premier absent emporterait tout ce qui
+  //     suit, l'encre comprise ;
+  //   · test/damier-uniformes.test.js LIT CETTE MÉTHODE. Remplacer ces lignes
+  //     par une boucle sur un tableau de noms rendrait la liste invisible à son
+  //     balayage, et le test repasserait au vert en ayant cessé de voir.
+  _copieDuCentre(t, mt = this.getMainTerrain?.()) {
+    if (!t || !mt || t === mt) return
+    const um = t.mapUniforms, uc = mt.mapUniforms
+    if (!um || !uc) return
+    // continuité de teinte : la plage hypsométrique du centre
+    if (um.uHeightRange && uc.uHeightRange) um.uHeightRange.value.copy(uc.uHeightRange.value)
+    // L'ENCRE DES COURBES ET DE LA GRILLE. ⚠️ Elle bascule TOUTE SEULE avec
+    // l'heure : `applyTimeOfDay` → `setDarkMode` → `applyGridContour` retourne
+    // l'encre en clair quand la nuit tombe. Une voisine née avant le crépuscule
+    // gardait ses courbes sombres à côté d'un centre passé au blanc.
+    if (um.uContourColor && uc.uContourColor) {
       um.uContourColor.value.copy(uc.uContourColor.value)
       um.uGridColor.value.copy(uc.uGridColor.value)
       um.uContourInterval.value = uc.uContourInterval.value
@@ -1096,13 +1145,64 @@ export class BlockGrid {
       um.uGridStep.value = uc.uGridStep.value
       um.uGridOpacity.value = uc.uGridOpacity.value
     }
-    // LES TROIS SCALAIRES DE LA COUCHE NOCTURNE — reposés ici, et c'est ce qui
-    // rattrape les dalles NÉES APRÈS le crépuscule : `_buildCell` appelle
-    // `_applyLook`, donc une voisine reçoit l'état de la couche au moment même
-    // où elle arrive. La mosaïque, elle, la rejoint par `peintCelluleNuit`.
-    if (this._nuitIntensite != null) t.setNuitIntensite?.(this._nuitIntensite)
-    if (this._nuitFond != null) t.setNuitFond?.(this._nuitFond)
-    if (this._nuitGain != null) t.setNuitGain?.(this._nuitGain)
+    // LES TROIS COULEURS DE LA MER. La rampe terrestre, elle, suit toute seule
+    // (texture partagée, cf. `shareTexturesFrom`) : sans ces trois lignes, un
+    // changement de palette sur une carte côtière accordait la TERRE entre les
+    // dalles et laissait la MER en désaccord — exactement sur la jointure.
+    if (um.uOceanShallow && uc.uOceanShallow) {
+      um.uOceanShallow.value.copy(uc.uOceanShallow.value)
+      um.uOceanMid.value.copy(uc.uOceanMid.value)
+      um.uOceanDeep.value.copy(uc.uOceanDeep.value)
+    }
+    // L'OMBRAGE DU RELIEF. ⚠️ Sournois, parce qu'`applyAutoShade` (main.js)
+    // RECALCULE ces valeurs à chaque chargement de relief : le désaccord
+    // apparaissait et disparaissait selon l'ordre d'arrivée des dalles.
+    if (um.uHeightContrast && uc.uHeightContrast) {
+      um.uTint.value = uc.uTint.value
+      um.uHeightContrast.value = uc.uHeightContrast.value
+      um.uHeightPivot.value = uc.uHeightPivot.value
+      um.uSlopeTint.value = uc.uSlopeTint.value
+    }
+    // LA MATIÈRE PROCÉDURALE DU RELIEF (bruit en relief + « au-dessus de zéro »)
+    if (um.uMatNoiseOn && uc.uMatNoiseOn) {
+      um.uMatNoiseOn.value = uc.uMatNoiseOn.value
+      um.uMatNoiseAmt.value = uc.uMatNoiseAmt.value
+      um.uMatNoiseCut.value = uc.uMatNoiseCut.value
+      um.uMatNoiseSoft.value = uc.uMatNoiseSoft.value
+      um.uMatAboveZero.value = uc.uMatAboveZero.value
+    }
+    // LE MÉTAL LIQUIDE — l'interrupteur et l'amplitude du flux. L'HORLOGE
+    // (`uLmFlow`), elle, est recopiée par image dans la boucle de rendu, avec
+    // celles des caustiques et du shader de surface : deux dalles qui avancent
+    // leur propre horloge ne miroitent pas en phase.
+    if (um.uLmOn && uc.uLmOn) {
+      um.uLmOn.value = uc.uLmOn.value
+      um.uLmFlowAmt.value = uc.uLmFlowAmt.value
+    }
+    // ET LA MATIÈRE THREE ELLE-MÊME. Pas d'uniforme ici : ce sont des scalaires
+    // du MeshStandardMaterial, et ils se voient autant. `roughness` porte le
+    // curseur « Poli » du matériau de relief, que `setMaterialMode` ne repose
+    // PAS (il repose celui du préréglage) — le damier restait au défaut.
+    // ⚠️ Aucun `needsUpdate` : ces cinq-là sont poussés à chaque image par
+    // three, le lever ferait recompiler 24 programmes pour rien.
+    const mm = t.material, mc = mt.material
+    if (mm && mc) {
+      mm.roughness = mc.roughness
+      mm.metalness = mc.metalness
+      mm.envMapIntensity = mc.envMapIntensity
+      mm.transmission = mc.transmission
+      mm.bumpScale = mc.bumpScale
+    }
+  }
+
+  // La tournée publique : le centre vient de changer, les dalles VIVANTES
+  // suivent. (Les dalles à naître, elles, sont servies par `_applyLook`.)
+  // À préférer systématiquement à `restyle()` quand rien de structurel n'a
+  // bougé — voir le chiffrage au-dessus de `_copieDuCentre`.
+  diffuseDuCentre() {
+    const mt = this.getMainTerrain?.()
+    if (!mt) return
+    for (const cell of this.cells.values()) this._copieDuCentre(cell.terrain, mt)
   }
 
   clear() {

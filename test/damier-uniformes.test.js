@@ -260,10 +260,34 @@ for (const u of PARTAGE) if (!PROPAGE.has(u)) PROPAGE.set(u, 'partage de texture
 //     DÉCLENCHEMENT. Ceux du partage en sont retirés — ils partent tout seuls.
 const METH_GRILLE = methodesDe(BLOCK_GRID)
 const LOOK = (() => {
-  const corps = METH_GRILLE._applyLook
-  assert.ok(corps, 'block-grid.js : `_applyLook` a disparu ou a été renommée — ce test ne sait plus quoi lire')
-  const out = reglagesEcrits(corps)
-  for (const m of corps.matchAll(/\bt\s*\??\.\s*([A-Za-z_$][\w$]*)\s*\??\.?\(/g)) for (const u of ferme(m[1])) out.add(u)
+  assert.ok(METH_GRILLE._applyLook, 'block-grid.js : `_applyLook` a disparu ou a été renommée — ce test ne sait plus quoi lire')
+  // ⚠️ ON SUIT `this._…()` DANS BLOCK-GRID AUSSI. `_applyLook` délègue le gros
+  // de sa liste à `_copieDuCentre` (qui sert aussi à `diffuseDuCentre`) : ne
+  // lire que le corps d'`_applyLook` rendrait une surface presque vide, et le
+  // test passerait au vert en ayant cessé de regarder.
+  const out = new Set()
+  const vus = new Set()
+  const suit = (nom) => {
+    const corps = METH_GRILLE[nom]
+    if (!corps || vus.has(nom)) return
+    vus.add(nom)
+    reglagesEcrits(corps, out)
+    // sur une dalle : `t.xxx()` (terrain.js), ou `this._xxx()` (block-grid.js)
+    for (const m of corps.matchAll(/\b(?:t|um)\s*\??\.\s*([A-Za-z_$][\w$]*)\s*\??\.?\(/g)) for (const u of ferme(m[1])) out.add(u)
+    for (const m of corps.matchAll(/\bthis\.(_?[A-Za-z]\w*)\s*\(/g)) suit(m[1])
+  }
+  suit('_applyLook')
+  // les copies d'uniformes de `_copieDuCentre` s'écrivent `um.uXxx.value = …`,
+  // que `reglagesEcrits` voit déjà ; les propriétés du matériau, elles, passent
+  // par un alias local (`const mm = t.material`) qu'il faut nommer ici
+  for (const nom of vus) {
+    const corps = METH_GRILLE[nom]
+    for (const m of corps.matchAll(/(?:const|let)\s+([\w$]+)\s*=\s*t\.material\b/g)) {
+      for (const w of corps.matchAll(new RegExp(`\\b${m[1]}\\.([a-z]\\w*)\\s*=(?!=)`, 'g'))) {
+        if (!MATERIAU_IGNORE.has(w[1])) out.add('material.' + w[1])
+      }
+    }
+  }
   for (const u of PARTAGE) out.delete(u)
   return out
 })()
@@ -310,40 +334,52 @@ function nomDUnite(avant) {
 }
 const numLigne = (src, i) => src.slice(0, i).split('\n').length
 
-// ─── les fonctions de premier niveau de main.js, pour le crédit transitif :
-//     une fonction qui délègue à une fonction qui prévient le damier est en
-//     règle (`setDarkMode` → `applyGridContour`, par exemple).
-const FONCTIONS_MAIN = (() => {
-  const out = []
-  let cur = null
-  for (const l of MAIN.split('\n')) {
-    const d = l.match(/^(?:export\s+)?(?:async\s+)?function\s+([\w$]+)\s*\(/)
-      || l.match(/^(?:const|let|var)\s+([\w$]+)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{/)
-    if (d) { cur = { nom: d[1], corps: [l] }; out.push(cur); continue }
-    if (cur) { cur.corps.push(l); if (/^\}/.test(l)) cur = null }
-  }
-  for (const f of out) f.corps = f.corps.join('\n')
-  return new Map(out.map((f) => [f.nom, f]))
-})()
-const previentLeDamier = (() => {
-  const vu = new Map()
-  const f = (nom, pile = new Set()) => {
-    if (vu.has(nom)) return vu.get(nom)
-    const fn = FONCTIONS_MAIN.get(nom)
-    if (!fn || pile.has(nom)) return false
-    pile.add(nom)
-    let r = /\bblockGrid\b/.test(fn.corps)
-    if (!r) {
-      for (const m of fn.corps.matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g)) {
-        if (m[1] !== nom && FONCTIONS_MAIN.has(m[1]) && f(m[1], pile)) { r = true; break }
-      }
+// ─── LE CRÉDIT DE DÉLÉGATION. Une unité qui appelle une fonction qui, elle,
+//     prévient le damier est en règle : `setDarkMode` passe par
+//     `applyGridContour`, et les curseurs du panneau Carte passent par un petit
+//     `encre()` local. Sans ce crédit, la seule façon d'être vert serait
+//     d'écrire `blockGrid` en toutes lettres partout — le test dicterait la
+//     forme du code au lieu d'en vérifier la propriété.
+function fonctionsNommees(src) {
+  const out = new Map()
+  const pose = (nom, debut) => {
+    if (out.has(nom)) return
+    let i = src.indexOf('{', debut)
+    const finLigne = src.indexOf('\n', debut)
+    if (i < 0 || (finLigne >= 0 && i > finLigne)) { // flèche d'une seule ligne, sans accolades
+      out.set(nom, src.slice(debut, finLigne < 0 ? src.length : finLigne))
+      return
     }
-    pile.delete(nom)
-    if (pile.size === 0) vu.set(nom, r)
-    return r
+    let d = 0
+    for (let j = i; j < src.length; j++) {
+      if (src[j] === '{') d++
+      else if (src[j] === '}' && --d === 0) { out.set(nom, src.slice(debut, j + 1)); return }
+    }
+    out.set(nom, src.slice(debut))
   }
-  return f
-})()
+  // ⚠️ `^` AVEC LE DRAPEAU `m`, PAS `(?:^|\n)` : avec le second, `m.index`
+  // tombe SUR le saut de ligne, `indexOf('\n', debut)` rend `debut` lui-même,
+  // et toutes les fonctions se retrouvent avec un corps vide — donc plus aucun
+  // crédit de délégation, et un test rouge partout pour une raison invisible.
+  for (const m of src.matchAll(/^[ \t]*(?:export\s+)?(?:async\s+)?function\s+([\w$]+)\s*\(/gm)) pose(m[1], m.index)
+  for (const m of src.matchAll(/^[ \t]*(?:const|let|var)\s+([\w$]+)\s*=\s*(?:async\s*)?\(?[\w\s,{}=]*\)?\s*=>/gm)) pose(m[1], m.index)
+  return out
+}
+const FONCTIONS = new Map() // fichier → Map(nom → corps)
+function previentLeDamier(fichier, src, damier, nom, pile = new Set()) {
+  if (!FONCTIONS.has(fichier)) FONCTIONS.set(fichier, fonctionsNommees(src))
+  const corps = FONCTIONS.get(fichier).get(nom)
+  if (!corps || pile.has(nom)) return false
+  pile.add(nom)
+  let r = new RegExp(`\\b${damier}\\b`).test(corps)
+  if (!r) {
+    for (const m of corps.matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g)) {
+      if (m[1] !== nom && previentLeDamier(fichier, src, damier, m[1], pile)) { r = true; break }
+    }
+  }
+  pile.delete(nom)
+  return r
+}
 
 // ─── le balayage de la propriété ②, sur un fichier quelconque
 function portesSansPeage(fichier, src, brut, damier, motifs) {
@@ -360,7 +396,7 @@ function portesSansPeage(fichier, src, brut, damier, motifs) {
       let ok = u ? re2.test(u.texte) : false
       if (!ok && u) {
         for (const c of u.texte.matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g)) {
-          if (previentLeDamier(c[1])) { ok = true; break }
+          if (previentLeDamier(fichier, src, damier, c[1])) { ok = true; break }
         }
       }
       if (ok) continue
@@ -491,7 +527,7 @@ test('qui change le look du bloc central previent le damier', () => {
     '  1. RAPPELER LE DAMIER. Le geste le moins cher d\'abord :',
     '     · une poignée de couleurs ou de scalaires → `blockGrid?.diffuseDuCentre()`,',
     '       qui recopie du centre sans rien recuire ni recompiler (mesuré :',
-    '       quelques dizaines de microsecondes pour 24 dalles) — c\'est le geste',
+    '       8,0 µs pour 24 dalles) — c\'est le geste',
     '       à faire même sur un curseur traîné ;',
     '     · un changement de MATÉRIAU ou de mode de colorisation →',
     '       `blockGrid?.restyle(params)`, plus complet et beaucoup plus cher : à',

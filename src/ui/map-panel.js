@@ -82,13 +82,22 @@ export function buildMapPanel(ctx) {
   for (const row of [aerialOpacity, aerialCoastFade]) visibleWhen(row, () => params.aerialEnabled)
 
   const sContour = panel.addSection(section('Courbes & grille'))
-  const contourWeight = slider({ label: 'Épaisseur des courbes', min: 0.3, max: 1.6, step: 0.05, get: () => params.contourWeight, set: (v) => { params.contourWeight = v; if (!params.darkMode) u().uContourWeight.value = v } })
+  // ⚠️ CES CINQ CURSEURS ÉCRIVENT LES UNIFORMES DU BLOC CENTRAL EN DIRECT —
+  // `u()` est `terrain.mapUniforms`, pas un réglage de `params` qu'une fonction
+  // de main.js redistribuerait ensuite. Ils court-circuitent donc
+  // `applyGridContour` ET son rappel au damier : sans le `diffuseDuCentre()` de
+  // chaque ligne, traîner l'un d'eux laissait les dalles voisines avec les
+  // courbes d'avant, jusqu'au prochain changement de palette ou de fond.
+  // La diffusion ne recopie que des scalaires du centre — 8,0 µs pour 24 dalles,
+  // mesuré, rien de recuit, rien de recompilé : elle tient sur un curseur traîné.
+  const encre = () => ctx.blockGrid?.diffuseDuCentre()
+  const contourWeight = slider({ label: 'Épaisseur des courbes', min: 0.3, max: 1.6, step: 0.05, get: () => params.contourWeight, set: (v) => { params.contourWeight = v; if (!params.darkMode) u().uContourWeight.value = v; encre() } })
   sContour.body.append(
-    slider({ label: 'Intervalle des courbes', min: 0.04, max: 0.6, step: 0.01, get: () => params.contourInterval, set: (v) => { params.contourInterval = v; u().uContourInterval.value = v } }),
-    slider({ label: 'Opacité des courbes', min: 0, max: 1, step: 0.02, get: () => params.contourOpacity, set: (v) => { params.contourOpacity = v; u().uContourOpacity.value = v } }),
+    slider({ label: 'Intervalle des courbes', min: 0.04, max: 0.6, step: 0.01, get: () => params.contourInterval, set: (v) => { params.contourInterval = v; u().uContourInterval.value = v; encre() } }),
+    slider({ label: 'Opacité des courbes', min: 0, max: 1, step: 0.02, get: () => params.contourOpacity, set: (v) => { params.contourOpacity = v; u().uContourOpacity.value = v; encre() } }),
     contourWeight,
-    slider({ label: 'Taille de la grille', min: 2, max: 14, step: 0.5, get: () => params.gridStep, set: (v) => { params.gridStep = v; u().uGridStep.value = v } }),
-    slider({ label: 'Opacité de la grille', min: 0, max: 1, step: 0.02, get: () => params.gridOpacity, set: (v) => { params.gridOpacity = v; u().uGridOpacity.value = v } })
+    slider({ label: 'Taille de la grille', min: 2, max: 14, step: 0.5, get: () => params.gridStep, set: (v) => { params.gridStep = v; u().uGridStep.value = v; encre() } }),
+    slider({ label: 'Opacité de la grille', min: 0, max: 1, step: 0.02, get: () => params.gridOpacity, set: (v) => { params.gridOpacity = v; u().uGridOpacity.value = v; encre() } })
   )
   // dead in dark mode — main.js pins the uniform to 0.5 there (setDarkMode); the
   // readout would keep moving with nothing rendering, so hide rather than honour
