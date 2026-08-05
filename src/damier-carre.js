@@ -269,11 +269,50 @@ export function geometrieDeMer({ cote, rayonEau, taille }) {
   // de mer sur tout le pourtour. À `cote = 1` le maximum retombe sur
   // l'expression d'avant, au bit près.
   const large = Math.max(taille * c * 0.998, (demiEau + 0.05) * 2)
-  // ⚠️ LA SEGMENTATION NE SUIT PAS L'EMPRISE LINÉAIREMENT. Garder la densité
-  // d'un bloc (4,57 segments par unité) donnerait 768² = 590 000 quadrilatères
-  // sur un 3×3, pour des vagues dont la longueur d'onde se compte en unités.
-  // VALEUR PROVISOIRE, NON MESURÉE : la Tâche 7 relève le coût réel de trois
-  // segmentations et la remplace par un chiffre défendu.
+  // ⚠️ LA SEGMENTATION NE SUIT PAS L'EMPRISE LINÉAIREMENT, ET LE PLAFOND DE 384
+  // EST MESURÉ (Tâche 7 — il était provisoire).
+  //
+  // L'ÉTALON EST LE BLOC SEUL : 256 segments sur 55,888 unités, soit 4,581
+  // segment/unité. C'est la seule mer de ce dépôt qu'un œil humain ait validée
+  // (« vraiment top », Adrien, captures du 2026-08-05) ; toute segmentation de
+  // damier se lit donc en pourcentage de celle-là.
+  //
+  // LES TROIS SEGMENTATIONS, SUR UN DAMIER 3×3 (scripts rejouables dans
+  // .superpowers/sdd/2026-08-05-damier-multi-blocs/ : mesure-segmentation.mjs
+  // pour les colonnes de gauche, banc-mer.html pour le GPU) :
+  //
+  //   seg   quadrilatères   construction   mémoire   GPU/image   densité
+  //   256      65 536          11,8 ms      3,5 Mo    0,042 ms   33 % ← replie
+  //   384     147 456          30,3 ms      7,9 Mo    0,057 ms   50 % ← retenu
+  //   512     262 144          55,1 ms     14,0 Mo    0,139 ms   67 %
+  //   768     589 824         134,1 ms     31,5 Mo    0,244 ms  100 %
+  //
+  // (construction : `new THREE.PlaneGeometry` + `rotateX`, médiane de 5, node
+  // 24 / three 172, Ryzen 9 5900X. GPU : temps GPU réel par image, requête
+  // temporelle WebGL2, 1920×1080, RTX 3080, caméra de survol.)
+  //
+  // CE QUI DÉCIDE N'EST PAS LE GPU. À 0,057 ms par image, la mer d'un 3×3 coûte
+  // 0,34 % d'une image à 60 Hz sur cette carte — et même 768 n'en coûterait que
+  // 1,5 %. Ce qui décide, c'est la CONSTRUCTION sur le fil principal : elle est
+  // payée à chaque changement de FORME du carré (jusqu'à quatre fois sur un
+  // remplissage, cf. `cleDuCarre` et main.js:5175), dans le même tour de boucle
+  // synchrone que l'égalisation des murs et le socle du héros. 384 y met 30 ms ;
+  // 512 en mettrait 55, sur un pic d'arrivée déjà mesuré à 74 ms.
+  //
+  // ET L'ESCALIER DE CRÊTE ? À 384 sur un 3×3, la maille fait 0,437 unité. Les
+  // longueurs d'onde du spectre (ocean-waves : 2,5 à 26 « mètres de spectre »,
+  // × `lenSea` ∈ [0,231 ; 0,420]) donnent 0,58 à 10,9 unités. La houle dominante
+  // garde 7 à 19 segments par longueur d'onde : elle ne peut pas faire d'angles.
+  // Seule la mer du VENT la plus courte tombe à 1,3 segment au zoom large —
+  // sous Nyquist, donc repliée. Elle l'est DÉJÀ à 2,6 sur le bloc seul, et
+  // ocean.js:54-57 documente ce compromis depuis la v39. 256 la ferait tomber à
+  // 0,9 et emporterait aussi la mer du vent du zoom de course : c'est ce qui
+  // écarte 256, pas le GPU.
+  //
+  // ⚠️ CE QUI N'A PAS ÉTÉ VÉRIFIÉ : l'escalier VU À L'ŒIL. Aucun agent de ce
+  // chantier n'a eu de session graphique. Le critère ci-dessus est géométrique.
+  // `banc-mer.html?voir=512` affiche la crête à la caméra la plus basse, en un
+  // clic, pour trancher à l'œil le jour où quelqu'un regarde.
   const seg = Math.min(384, 256 * c)
   return { demiEau, large, seg, cote: c }
 }

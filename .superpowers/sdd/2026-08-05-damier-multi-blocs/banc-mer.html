@@ -1,0 +1,267 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Banc — segmentation de la mer du damier</title>
+<!--
+  REJOUABLE : npm run dev, puis ouvrir
+  http://localhost:5503/.superpowers/sdd/2026-08-05-damier-multi-blocs/banc-mer.html
+
+  CE QUE CE BANC MESURE, ET CE QU'IL NE MESURE PAS (Tâche 7).
+
+  Il isole LE SEUL POSTE QUE LA SEGMENTATION DÉCIDE : le travail par SOMMET du
+  plan d'eau. Le vertex y refait, verbatim, ce que fait `ocean.js` — le spectre
+  à 16 vagues de Gerstner (module `ocean-waves`, le MÊME code GLSL que la
+  production, importé et non recopié) plus les cinq lectures de texture du
+  champ (une pour le sol/rivage, quatre pour le gradient de `shoreSurf`).
+
+  Il ne mesure PAS le coût par PIXEL (réfraction, écume, éclairage) : celui-là
+  est IDENTIQUE aux trois segmentations, donc il ne décide de rien — mais il
+  domine le budget d'image réel, et c'est pourquoi les images par seconde
+  relevées ici sont un PLAFOND, pas la fréquence de l'application.
+
+  ⚠️ ET LA MACHINE COMPTE PLUS QUE TOUT. Ce banc tourne sur la machine de
+  l'agent ; les paliers 2 et 3 existent précisément pour des machines qui n'ont
+  rien à voir. Un « aucune différence mesurable » relevé ici ne vaut pas pour
+  elles. Le chiffre qui décide, lui (le temps de CONSTRUCTION de la géométrie,
+  payé sur le fil principal), se mesure sans navigateur : mesure-segmentation.mjs.
+-->
+<style>
+  body { margin: 0; background: #0b1015; color: #cfe; font: 13px/1.5 ui-monospace, monospace; }
+  #sortie { position: fixed; left: 8px; top: 8px; white-space: pre; z-index: 2;
+            background: #000a; padding: 8px 12px; border-radius: 6px; }
+  canvas { display: block; }
+</style>
+<div id="sortie">chauffe…</div>
+<script type="module">
+import * as THREE from 'three'
+import { GERSTNER_GLSL, makeSeaState, seaStateToUniforms } from 'ocean-waves'
+import { TERRAIN_SIZE } from '/src/terrain.js'
+import { geometrieDeMer } from '/src/damier-carre.js'
+import { rayonEauDansSocle } from '/src/plinth.js'
+import { resChamp } from '/src/mer-emprise.js'
+
+const COTE = 3 // le damier du brief
+const SEGS = [256, 384, 512, 768]
+const IMAGES = 6 // mesures par segmentation, après 2 de chauffe
+const CHAUFFE = 2
+// ⚠️ POURQUOI ON DESSINE 50 FOIS PAR MESURE. Chrome grossit `performance.now()`
+// à 100 µs (défense contre les attaques temporelles) et une seule passe de ce
+// plan tient sous ce grain sur une carte récente : la première version de ce
+// banc rendait « 0,10 ms » pour TOUTES les segmentations, c'est-à-dire le
+// plancher du chronomètre et rien d'autre. On empile donc 50 rendus par mesure
+// et on divise — le chiffre imprimé reste UNE passe.
+const REPETITIONS = 50
+
+const mes = geometrieDeMer({ cote: COTE, rayonEau: rayonEauDansSocle(), taille: TERRAIN_SIZE })
+const sortie = document.getElementById('sortie')
+
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' })
+renderer.setPixelRatio(1)
+renderer.setSize(1920, 1080, false) // la taille de la campagne du 28/07
+document.body.appendChild(renderer.domElement)
+renderer.domElement.style.width = '100vw'
+renderer.domElement.style.height = 'auto'
+
+const scene = new THREE.Scene()
+const camera = new THREE.PerspectiveCamera(30, 1920 / 1080, 0.5, 1200)
+
+// champ du damier 3×3, aux dimensions RÉELLES (resChamp(3) = 1152²) : le
+// vertex y fait ses cinq lectures, et la taille de la texture pèse sur le cache
+const R = resChamp(COTE)
+const data = new Uint8Array(R * R * 4)
+for (let i = 0; i < R * R; i++) {
+  const x = (i % R) / R - 0.5
+  const z = Math.floor(i / R) / R - 0.5
+  const d = Math.min(1, Math.hypot(x, z) * 2.4)
+  data[i * 4] = 90            // R : sol
+  data[i * 4 + 1] = d * 255   // G : distance au rivage
+  data[i * 4 + 2] = 0
+  data[i * 4 + 3] = 255
+}
+const champ = new THREE.DataTexture(data, R, R, THREE.RGBAFormat)
+champ.needsUpdate = true
+champ.minFilter = THREE.LinearFilter
+champ.magFilter = THREE.LinearFilter
+
+const sea = makeSeaState(1234)
+const u = seaStateToUniforms(sea)
+
+const VERT = /* glsl */`
+${GERSTNER_GLSL}
+uniform sampler2D uField;
+uniform float uTime, uWaveH, uChop, uSpeedMul, uLenScale, uSpan;
+varying float vY;
+// la houle de côte d'ocean.js:81-101 — quatre lectures de champ de plus
+vec3 shoreSurf(vec2 uvF, float t, out float crestS) {
+  float dShore = texture2D(uField, uvF).g;
+  float shoal = (1.0 - smoothstep(0.02, 0.22, dShore)) * smoothstep(0.006, 0.03, dShore);
+  crestS = 0.0;
+  vec2 e = vec2(1.0 / 384.0, 0.0);
+  float gX = texture2D(uField, uvF + e.xy).g - texture2D(uField, uvF - e.xy).g;
+  float gZ = texture2D(uField, uvF + e.yx).g - texture2D(uField, uvF - e.yx).g;
+  vec2 dir = vec2(gX, gZ);
+  float gLen = length(dir);
+  dir = gLen > 1e-5 ? dir / gLen : vec2(0.0);
+  float lamS = max(uLenScale * 3.5, 0.4);
+  float k = 6.28318 / lamS;
+  float ph = dShore * 15.0 * k + t * uSpeedMul * 2.6;
+  float amp = uWaveH * uLenScale * 0.16 * shoal;
+  crestS = shoal * max(sin(ph), 0.0);
+  return vec3(amp * sin(ph), amp * cos(ph) * k * dir.x, amp * cos(ph) * k * dir.y);
+}
+void main() {
+  vec3 p = position;
+  vec2 uvF = p.xz / uSpan + 0.5;
+  vec4 f = texture2D(uField, uvF);
+  float fade = smoothstep(0.0, 0.10, f.g);
+  vec3 nAcc; float crest;
+  vec3 disp = oceanGerstner(p.xz, uTime, uWaveH, uChop, uSpeedMul, uLenScale, fade, nAcc, crest);
+  float crestS;
+  vec3 surf = shoreSurf(uvF, uTime, crestS);
+  disp.y += surf.x;
+  p += disp;
+  vY = disp.y;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+}`
+
+const FRAG = /* glsl */`
+varying float vY;
+void main() {
+  float c = clamp(vY * 1.4 + 0.5, 0.0, 1.0);
+  gl_FragColor = vec4(mix(vec3(0.03, 0.16, 0.30), vec3(0.75, 0.90, 0.98), c * c), 1.0);
+}`
+
+function faitMesh(seg) {
+  const geo = new THREE.PlaneGeometry(mes.large, mes.large, seg, seg)
+  geo.rotateX(-Math.PI / 2)
+  const mat = new THREE.ShaderMaterial({
+    vertexShader: VERT,
+    fragmentShader: FRAG,
+    uniforms: {
+      uField: { value: champ },
+      uTime: { value: 0 },
+      uWaveH: { value: 0.5 },
+      uChop: { value: 0.6 },
+      uSpeedMul: { value: 1 },
+      uLenScale: { value: 0.42 },
+      uSpan: { value: TERRAIN_SIZE * COTE },
+      uWaveA: { value: u.a },
+      uWaveB: { value: u.b },
+    },
+  })
+  const m = new THREE.Mesh(geo, mat)
+  m.frustumCulled = false
+  return m
+}
+
+// ══════ LES DEUX POSTES DE CAMÉRA ═════════════════════════════════════════
+// « survol » : le damier entier à l'écran, la vue de travail.
+// « rasante » : la caméra la plus basse que l'application autorise
+// (main.js:1119-1120 — maxPolarAngle 0,49π, minDistance 6). C'est là que
+// l'escalier de crête se voit, s'il se voit.
+const POSTES = {
+  survol: () => { camera.position.set(0, 210, 210); camera.lookAt(0, 0, 0) },
+  rasante: () => {
+    const d = 6
+    camera.position.set(0, d * Math.cos(Math.PI * 0.49), d * Math.sin(Math.PI * 0.49))
+    camera.lookAt(0, 0, 40)
+  },
+}
+
+const lignes = []
+const infoGL = renderer.getContext().getExtension('WEBGL_debug_renderer_info')
+lignes.push(`GPU : ${infoGL ? renderer.getContext().getParameter(infoGL.UNMASKED_RENDERER_WEBGL) : 'inconnu'}`)
+lignes.push(`cible 1920×1080, damier ${COTE}×${COTE}, plan de ${mes.large.toFixed(1)} u, champ ${R}²`)
+lignes.push(`seg    quads     poste      ms/image (médiane)   im/s`)
+sortie.textContent = lignes.join('\n')
+
+// ⚠️ TROIS PIÈGES SUCCESSIFS, ET C'EST LA TROISIÈME VERSION DE CETTE FONCTION.
+//   1. `performance.now()` est grossi à 100 µs par Chrome — une passe de ce
+//      plan tient dessous. D'où les 50 rendus empilés par mesure.
+//   2. Le chronomètre du PROCESSEUR ne mesure pas le GPU. Avec `gl.finish()`
+//      sous ANGLE/D3D11, ce banc a rendu 0,006 ms pour 590 000 sommets,
+//      c'est-à-dire la file d'attente et rien d'autre — un chiffre absurde qui
+//      serait passé pour une mesure. On interroge donc le GPU lui-même
+//      (EXT_disjoint_timer_query_webgl2, en nanosecondes).
+//   3. Et le résultat d'une requête GPU ne s'attend PAS en boucle active : le
+//      pilote a besoin que la boucle d'événements tourne pour vider sa file.
+//      Une attente active bloque la page pour toujours (constaté : plus de
+//      quatre minutes sans une seule mesure). On rend donc la main entre
+//      l'émission et la lecture — d'où l'`await` ci-dessous.
+//
+// ⚠️ ET IL FAUT QUE L'ONGLET SOIT AU PREMIER PLAN. Un onglet caché voit son
+// `requestAnimationFrame` ramené à ~1 Hz : le banc finit quand même, mais en
+// quelques minutes au lieu de quelques secondes.
+const gl = renderer.getContext()
+const EXT = gl.getExtension('EXT_disjoint_timer_query_webgl2')
+if (!EXT) throw new Error('EXT_disjoint_timer_query_webgl2 absente : ce banc ne peut pas mesurer le GPU')
+
+const tour = () => new Promise((r) => requestAnimationFrame(r))
+
+async function mesureGPU(dessine, repetitions) {
+  const q = gl.createQuery()
+  gl.beginQuery(EXT.TIME_ELAPSED_EXT, q)
+  for (let r = 0; r < repetitions; r++) dessine(r)
+  gl.endQuery(EXT.TIME_ELAPSED_EXT)
+  gl.flush()
+  for (let essai = 0; essai < 300; essai++) {
+    await tour()
+    if (!gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) continue
+    const perdu = gl.getParameter(EXT.GPU_DISJOINT_EXT)
+    const ns = gl.getQueryParameter(q, gl.QUERY_RESULT)
+    gl.deleteQuery(q)
+    return perdu ? null : ns / 1e6 / repetitions // ms par passe
+  }
+  gl.deleteQuery(q)
+  return null
+}
+
+async function mesure(seg, poste) {
+  const mesh = faitMesh(seg)
+  scene.add(mesh)
+  POSTES[poste]()
+  const t = []
+  for (let n = 0; n < CHAUFFE + IMAGES; n++) {
+    const ms = await mesureGPU((r) => {
+      mesh.material.uniforms.uTime.value = (n * REPETITIONS + r) * 0.016
+      renderer.render(scene, camera)
+    }, REPETITIONS)
+    if (n >= CHAUFFE && ms != null) t.push(ms)
+  }
+  scene.remove(mesh)
+  mesh.geometry.dispose()
+  mesh.material.dispose()
+  t.sort((a, b) => a - b)
+  if (!t.length) return null
+  return t[t.length >> 1]
+}
+
+// ⚠️ DEUX PASSES, ET SEULE LA SECONDE COMPTE. Un GPU au repos tourne à basse
+// frequence et met quelques dizaines de millisecondes a remonter : sans ce
+// preambule, la PREMIERE segmentation mesuree payait la montee en regime pour
+// toutes les autres et rendait 0,556 ms la ou la plus LOURDE des quatre en
+// rendait 0,131 — un classement inverse, publiable tel quel et faux. Une passe
+// de chauffe qui parcourt exactement les memes configurations coute le double
+// du temps et supprime l artefact sans rien supposer de sa cause.
+window.RESULTATS = []
+for (const passe of [1, 2]) {
+for (const poste of ['survol', 'rasante']) {
+  for (const seg of SEGS) {
+    const ms = await mesure(seg, poste)
+    if (passe === 1) continue
+    window.RESULTATS.push({ seg, poste, ms })
+    lignes.push(`${String(seg).padEnd(6)} ${String(seg * seg).padEnd(9)} ${poste.padEnd(10)} ` +
+      (ms == null ? '   (mesure perdue)' : `${ms.toFixed(3).padStart(8)} ms          ${(1000 / ms).toFixed(0).padStart(5)}`))
+    sortie.textContent = lignes.join('\n')
+  }
+}
+}
+// la vue qui sert à JUGER l'escalier : on laisse la dernière rasante à l'écran
+POSTES.rasante()
+scene.add(faitMesh(Number(new URLSearchParams(location.search).get('voir') || 384)))
+;(function anim() {
+  requestAnimationFrame(anim)
+  scene.children[0].material.uniforms.uTime.value = performance.now() * 0.001
+  renderer.render(scene, camera)
+})()
+window.FINI = true
+</script>

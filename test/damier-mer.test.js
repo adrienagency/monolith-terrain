@@ -206,9 +206,11 @@ test('la maille du plan d\'eau deborde toujours le clip qui l\'arrete', () => {
   assert.ok(TAILLE * 5 * 0.998 / 2 < 139.78, 'le cas que ce garde existe pour attraper a disparu')
 })
 
-// La segmentation est PROVISOIRE (Tâche 7 la mesurera). On verrouille sa FORME :
-// à densité constante (4,57 segments par unité), un 3x3 rendrait 768² = 590 000
-// quadrilatères pour des vagues dont la longueur d'onde se compte en unités.
+// La segmentation est MESURÉE depuis la Tâche 7 (elle était provisoire). On
+// verrouille sa FORME : à densité constante (4,57 segments par unité), un 3x3
+// rendrait 768² = 590 000 quadrilatères pour des vagues dont la longueur d'onde
+// se compte en unités. Le chiffre lui-même, et les trois mesures qui l'ont
+// choisi, sont dans le test suivant.
 test('la segmentation est plafonnee, pas lineaire', () => {
   const seg = (cote) => geometrieDeMer({ cote, rayonEau: RAYON_EAU, taille: TAILLE }).seg
   assert.equal(seg(1), 256, 'un bloc seul garde EXACTEMENT sa segmentation d\'avant')
@@ -224,6 +226,51 @@ test('la segmentation est plafonnee, pas lineaire', () => {
   assert.equal(Number(densite(1).toFixed(3)), 4.571)
   assert.equal(densite(3), densite(1) / 2, 'le 3x3 doit couter exactement la moitie de la densite')
   assert.equal(Number((densite(5) / densite(1)).toFixed(3)), 0.3, 'le 5x5 tombe a 30 % de la densite d un bloc')
+})
+
+// ══════ LE NOMBRE DE QUADRILATÈRES DU PLAN D'EAU, BORNÉ PAR LA MESURE ═══════
+//
+// Tâche 7, étape 4. La valeur retenue est 384 sur tout damier, et ce n'est plus
+// un choix en l'air : les trois segmentations ont été mesurées sur un 3×3
+// (scripts .superpowers/sdd/2026-08-05-damier-multi-blocs/mesure-segmentation.mjs
+// et banc-mer.html) —
+//
+//   seg   quadrilatères   construction   mémoire   GPU/image   densité
+//   256      65 536          11,8 ms      3,5 Mo    0,042 ms    33 %
+//   384     147 456          30,3 ms      7,9 Mo    0,057 ms    50 %  ← retenu
+//   512     262 144          55,1 ms     14,0 Mo    0,139 ms    67 %
+//
+// — et c'est la CONSTRUCTION qui décide, pas le GPU : elle est payée sur le fil
+// principal à chaque changement de forme du carré, dans le même tour de boucle
+// qu'une arrivée de dalle déjà mesurée à 74 ms de gel (mesure-arrivee.mjs).
+// 256 est écarté pour une autre raison : sa maille de 0,655 unité replie la mer
+// du vent jusqu'au zoom de course (1,6 segment par longueur d'onde, sous
+// Nyquist). Le raisonnement complet est dans src/damier-carre.js.
+//
+// ⚠️ CE TEST BORNE UN COÛT, PAS UNE PRÉFÉRENCE. S'il rougit, c'est que la mer
+// d'un damier vient de doubler ou de moitir sa charge de sommets : la question
+// à se poser est « qui a payé cette facture ? », pas « quel chiffre remettre ».
+test('le plan d\'eau d\'un 3x3 reste borne a 147 456 quadrilateres', () => {
+  const g = geometrieDeMer({ cote: 3, rayonEau: RAYON_EAU, taille: TAILLE })
+  assert.equal(g.seg, 384)
+  assert.equal(g.seg ** 2, 147_456, 'quadrilateres du plan d\'eau d\'un damier 3x3')
+  assert.equal((g.seg + 1) ** 2, 148_225, 'sommets — c\'est eux que le vertex paie')
+  // la maille au sol, celle qui décide de l'escalier de crête
+  assert.equal(Number((g.large / g.seg).toFixed(4)), 0.4366, 'largeur d\'un segment, en unites monde')
+  // …et le rapport à l'étalon validé à l'écran : la MOITIÉ, exactement
+  const etalon = geometrieDeMer({ cote: 1, rayonEau: RAYON_EAU, taille: TAILLE })
+  assert.equal((g.seg / g.large) / (etalon.seg / etalon.large), 0.5)
+})
+
+test('la charge du plan d\'eau ne grimpe plus, quelle que soit la taille du damier', () => {
+  // le plafond est un PLAFOND : le 5×5 ne paie pas plus de sommets que le 3×3.
+  for (const cote of [2, 3, 4, 5]) {
+    const g = geometrieDeMer({ cote, rayonEau: RAYON_EAU, taille: TAILLE })
+    assert.equal(g.seg ** 2, 147_456, `cote ${cote} : la charge de sommets doit rester plafonnee`)
+  }
+  // et un bloc seul reste STRICTEMENT en dessous : c'est le cas nominal, il ne
+  // doit pas payer la facture du damier.
+  assert.ok(geometrieDeMer({ cote: 1, rayonEau: RAYON_EAU, taille: TAILLE }).seg ** 2 < 147_456)
 })
 
 // LA CHAÎNE ENTIÈRE, celle que main.js et ocean.js parcourent : un carré posé
