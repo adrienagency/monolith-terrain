@@ -116,8 +116,17 @@ test('l échelle du MNT est prise sur l EMPRISE, pas sur un socle', () => {
   // relief visible jusqu'à −31,94, socle à −38,94. La jupe passe SOUS le fond
   // marin le plus profond et reste DANS le bloc. Avec l'échelle fautive elle se
   // serait arrêtée à −22,98, soit 8,96 unités au-dessus du fond.
+  //
+  // ⚠️ LE SYMBOLE A CHANGÉ DE NOM AVEC LE DAMIER, PAS DE SENS. `this._span`
+  // désignait deux choses que le mode continu confondait légitimement : ce que
+  // couvre le MNT, et ce que couvre le champ de la mer. Le damier les sépare —
+  // le carré peut faire 280 unités pendant que le MNT central en couvre 56 —
+  // et c'est `_spanDem` qui garde le sens d'ICI : l'emprise du MNT. En mode
+  // continu les deux valent la même chose, donc ce test protège exactement la
+  // même propriété qu'avant. Voir la note en tête de `rebuild` (ocean.js).
   const src = readFileSync(new URL('../src/ocean.js', import.meta.url), 'utf8')
-  assert.ok(src.includes('const demScale = (this._span / terrain.dem.extentMeters) * params.demExaggeration'))
+  assert.ok(src.includes('const demScale = (this._spanDem / terrain.dem.extentMeters) * params.demExaggeration'))
+  assert.ok(src.includes('this._spanDem = spanChamp(TERRAIN_SIZE, coteFenetre)'), '_spanDem doit rester l emprise du MNT')
   assert.equal(src.includes('(TERRAIN_SIZE / terrain.dem.extentMeters)'), false)
   assert.equal(src.includes('(TERRAIN_SIZE / dem.extentMeters)'), false)
 })

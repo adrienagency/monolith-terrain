@@ -3213,7 +3213,7 @@ function regenerateTerrain() {
       terrain.rebuildRoughness(params)
       plinth.rebuild(terrain, params, socleEmprise()) // walls hug the new relief border (also re-welds the region skirt in region mode — see the plinth.rebuild wrapper)
       terrain.refreshMatTiling(params) // re-tile the relief material to the new zoom scale
-      realWater?.rebuild({ terrain, params }) // water simulation follows the new relief
+      realWater?.rebuild(optionsDeMer()) // water simulation follows the new relief
       const _mlp = mapLayers.rebuild({ dem: terrain.dem, terrain, params }) // water/places re-drape on the new relief
       // The aerial skin has to re-derive here too. This calls mapLayers.rebuild
       // DIRECTLY rather than through the rebuildMapLayers wrapper, and that
@@ -4357,6 +4357,92 @@ const blockGrid = new BlockGrid({ scene, params, getMainDem: () => dem, getMainT
 _colorReady = true
 syncHazeColor()
 
+// ═══════ UNE SEULE MER, UNE SEULE JUPE, POUR TOUT LE CARRÉ DU DAMIER ════════
+//
+// Trois choses descendent d'ici vers `realWater.rebuild` : le CARRÉ (largeur,
+// résolution du champ, centre), un ÉCHANTILLONNEUR qui sait répondre au-delà du
+// bloc central, et le PLANCHER commun où la jupe s'arrête.
+
+/**
+ * Le carré que la mer doit couvrir.
+ *
+ * ⚠️ `empriseVivante()`, JAMAIS `carreCourant()`. La première dit ce qui est
+ * POSÉ — jusqu'à 5×5 quand une zone isolée est active ; la seconde dit ce que
+ * le TRACÉ a réclamé et se plafonne à 3×3 (block-grid.js). Lire la seconde
+ * cuirait une mer trop petite pour la carte qu'elle porte, et le défaut ne se
+ * verrait qu'en mode zone isolée — donc tard.
+ */
+function carreDeMer() {
+  return blockGrid.empriseVivante()
+}
+
+/**
+ * La hauteur du sol en un point QUELCONQUE du carré, pour la cuisson du champ
+ * de la mer.
+ *
+ * ⚠️ `terrain.sample` NE SUFFIT PAS, et son échec est muet : il ne connaît que
+ * le MNT du bloc central, et `sampleDem` clampe hors de ses bornes (dem.js).
+ * Cuit avec lui sur les 168 unités d'un 3×3, le champ aurait recopié la rangée
+ * de bord du bloc central sur toute la bande voisine — donc de la TERRE partout
+ * où ce bord touche la terre, donc pas de mer sur les huit cases : l'inverse
+ * exact de ce que la mer étendue existe pour faire.
+ *
+ * `heightAt` rend `null` pour le bloc central (qui appartient à `terrain`) ET
+ * pour une case du carré pas encore arrivée — les dalles atterrissent une à une
+ * sur plusieurs secondes. Le repli sur `terrain.sample` vaut donc, dans ce
+ * second cas, la valeur clampée d'avant ; c'est temporaire, et la mer se recuit
+ * à l'arrivée de la case (voir merSuitLeDamier).
+ */
+function solDuDamier(x, z) {
+  const h = blockGrid.heightAt(x, z)
+  return h === null ? terrain.sample(x, z) : h
+}
+
+const cleCarre = (c) => `${c.cote}:${c.i0},${c.j0}` // côté ET centre, en un mot
+// L'état de départ EST un bloc seul : rien à reconstruire tant que le damier
+// reste vide.
+let _merCarrePose = cleCarre({ i0: 0, j0: 0, cote: 1 })
+
+function optionsDeMer() {
+  const carre = carreDeMer()
+  // toute reconstruction fait foi, d'où qu'elle vienne (zoom, template, zone) :
+  // sans cette ligne la mémoire ci-dessous se périmerait en silence et la mer
+  // resterait taillée sur un carré qu'elle ne porte plus.
+  _merCarrePose = cleCarre(carre)
+  return {
+    terrain,
+    params,
+    carre,
+    echantillonSol: solDuDamier,
+    // ⚠️ SEULEMENT QUAND LE DAMIER EXISTE. Sur un bloc seul la jupe garde son
+    // budget bathymétrique d'avant : lui imposer le `baseY` du socle
+    // l'allongerait sans raison et changerait l'aspect du bloc principal.
+    planchier: carre.cote > 1 ? blockGrid.planchierCommun() : null,
+  }
+}
+
+/**
+ * Le damier a gagné ou perdu une case — la mer suit, mais PAS À CHAQUE FOIS.
+ *
+ * ⚠️ NE PAS REBÂTIR À CHAQUE ARRIVÉE DE CELLULE. `onGridChanged` part à chaque
+ * dalle reçue (jusqu'à 24 sur un damier plein) et une reconstruction recuit le
+ * champ : 1 152² texels sur un 3×3, soit 1,33 million d'échantillons de relief
+ * plus une distance de chanfrein en deux passes. Huit d'affilée gèleraient la
+ * page. Le seul motif légitime est un changement de FORME du carré — son côté
+ * ou son centre —, et `cleCarre` porte exactement ces deux-là.
+ */
+function merSuitLeDamier() {
+  const cle = cleCarre(carreDeMer())
+  if (cle === _merCarrePose) return
+  // ⚠️ NOTÉ ICI AUSSI, pas seulement dans `optionsDeMer` : quand la mer est
+  // débrayée (FLAGS.water, ou l'interrupteur), `realWater?.rebuild(...)` court-
+  // circuite l'évaluation de ses arguments et la mémoire ne serait jamais
+  // rafraîchie — le garde ne convergerait plus et rappellerait waterRebuild à
+  // chaque arrivée de dalle, pour rien.
+  _merCarrePose = cle
+  waterRebuild()
+}
+
 const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: () => dem, getGrid: () => blockGrid })
 
 // ---- Race Studio : état de la course + cartouches espace-écran ------------
@@ -4943,6 +5029,14 @@ function majBordsHero() {
 blockGrid.onGridChanged = () => {
   traffic.setSpan(trafficSpan())
   majBordsHero()
+  // ⚠️ TROISIÈME MOTIF DE RECONSTRUCTION DANS CETTE MÊME BOUCLE, et il faut le
+  // dire : `majBordsHero` (Tâche 5) re-coule déjà le socle du héros quand ses
+  // arêtes changent, et `egaliseHauteurs` re-coule les murs des cases sur DEUX
+  // motifs (plancher + bords, N + E = 60 sur un 5×5). `merSuitLeDamier` ajoute
+  // le sien. Les trois sont gardés — chacun sort tout de suite quand rien n'a
+  // changé — mais leurs pires cas se CUMULENT sur une même arrivée de dalle, et
+  // c'est ce cumul, pas un garde manquant, que la Tâche 12 doit mesurer.
+  merSuitLeDamier()
 }
 // le damier se resynchronise à CHAQUE re-drapage global (zone, zoom, ajout de
 // calque) — idempotent, borné 5×5, cellules en cache LRU
@@ -5304,7 +5398,7 @@ params.onSeekRequest = (f) => seekAndResumeCourse(f)
 scan = new ScanController(terrain.mapUniforms, TERRAIN_SIZE / 2)
 
 const waterRebuild = () => {
-  realWater?.rebuild({ terrain, params })
+  realWater?.rebuild(optionsDeMer())
   // caustiques AU FOND (shader terrain) : on/off avec la mer animée
   terrain.mapUniforms.uSeaCausK.value = params.waterReal ? 1 : 0
   setSeaEnabled(params.seaEnabled) // rebuild repose group.visible : on rappelle la règle

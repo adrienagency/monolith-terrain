@@ -14,6 +14,8 @@
 // extérieures (les arrondis), l'emprise de la mer, le tracé de sa jupe, et
 // de combien les textes gravés doivent s'écarter du bloc.
 
+import { resChamp, spanChamp } from './mer-emprise.js'
+
 const CLE = (i, j) => `${i},${j}`
 
 const entier = (v) => (Number.isFinite(v) ? Math.round(v) : null)
@@ -124,4 +126,44 @@ export function carreSousPlafond(carre, damierMax) {
     c = { i0: ancre(c.i0, c.i0 + c.cote - 1, cote), j0: ancre(c.j0, c.j0 + c.cote - 1, cote), cote }
   }
   return c
+}
+
+/**
+ * Le centre du carré, en unités monde.
+ *
+ * ⚠️ UN CARRÉ DE CÔTÉ PAIR N'EST PAS CENTRÉ SUR LE BLOC PRINCIPAL : son
+ * centre tombe sur une jointure. Poser la mer en (0,0) la ferait déborder
+ * d'un demi-bloc d'un côté et manquer de l'autre — un défaut qui ne se voit
+ * qu'en 2×2, donc rarement, donc tard.
+ */
+export function centreDuCarre({ i0, j0, cote } = {}, taille) {
+  const c = Math.max(1, Math.round(cote ?? 1))
+  return {
+    x: ((i0 ?? 0) + (c - 1) / 2) * taille,
+    z: ((j0 ?? 0) + (c - 1) / 2) * taille,
+  }
+}
+
+/**
+ * L'emprise que la mer doit couvrir pour porter tout le damier d'un seul
+ * tenant : largeur au sol, résolution de champ, et centre.
+ *
+ * On réutilise `spanChamp`/`resChamp` de mer-emprise.js — la machinerie de la
+ * fenêtre continue, mesurée et éprouvée (3×3 → 1152², 5,3 Mo) — au lieu d'en
+ * écrire une seconde qui dirait la même chose autrement.
+ *
+ * ⚠️ L'APPELANT DOIT LUI PASSER `BlockGrid.empriseVivante()`, PAS
+ * `carreCourant()` : la première dit ce qui est POSÉ (jusqu'à 5×5 en zone
+ * isolée), la seconde ce que le TRACÉ a réclamé (plafonné à 3×3). Cuire la mer
+ * sur la seconde la ferait trop petite pour la carte qu'elle porte, et le
+ * défaut n'apparaîtrait qu'en mode zone isolée — donc tard.
+ */
+export function empriseDeMer(carre, taille) {
+  const cote = Math.max(1, Math.round(carre?.cote ?? 1))
+  return {
+    span: spanChamp(taille, cote),
+    res: resChamp(cote),
+    centre: centreDuCarre(carre || { i0: 0, j0: 0, cote: 1 }, taille),
+    cote,
+  }
 }

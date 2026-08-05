@@ -29,6 +29,9 @@ import { plansEauRetenus } from './plan-eau.js'
 // LE CHAMP SUIT LE RELIEF — règles pures et testées, voir src/mer-emprise.js
 // pour la mesure d'avant/après et le pourquoi de chaque choix.
 import { resChamp, spanChamp } from './mer-emprise.js'
+// L'emprise du DAMIER — même machinerie, autre cause : ici la mer s'étend parce
+// que des cases voisines sont posées, pas parce que le relief défile.
+import { empriseDeMer } from './damier-carre.js'
 // wave engine shared with ocean-lab (C:\Dev\ocean-lab) — the Vite alias
 // resolves to the LIVE ocean-lab source when it's cloned next to this repo,
 // to the committed src/vendor/ocean-waves copy otherwise (npm run sync:waves)
@@ -111,6 +114,41 @@ export const SEABEDS = [
   { id: 'ink', name: 'Ink', floor: { shallow: '#4a6a84', mid: '#2c4964', deep: '#16293a' }, caustics: 0 },
 ]
 
+// ══════════ L'EMPREINTE DU MASQUE CÔTIER N'EST PAS CELLE DU CHAMP ═══════════
+//
+// Les quatre shaders lisaient le masque côtier avec l'uv du CHAMP, et c'était
+// juste tant que les deux couvraient la même chose : sur un bloc seul, 56 et
+// 56 ; en mode continu, 168 et 168 (le masque y est recollé sur l'emprise,
+// comme le MNT).
+//
+// LE DAMIER ROMPT CETTE ÉGALITÉ. Le champ de la mer couvre tout le carré —
+// jusqu'à 280 unités sur un 5×5 — alors que le masque reste celui du BLOC
+// CENTRAL, 56 unités. Lu sur le span du champ, il serait AGRANDI d'autant :
+// sur un 3×3, le tiers central du masque s'étalerait sur les neuf cases, et le
+// bloc central lui-même verrait sa côte remplacée par le tiers central de la
+// sienne. Autrement dit, la mer du héros aurait cessé d'être juste — la pire
+// forme de régression, puisqu'elle arriverait par une fonctionnalité voisine.
+//
+// La règle : le masque se lit sur SON empreinte, et HORS de celle-ci il ne dit
+// RIEN. `uvMasqueCotier` rend alors un uv négatif, et chaque appelant retombe
+// sur la règle d'altitude seule — exactement ce que voient les dalles voisines
+// aujourd'hui, qui n'ont jamais eu de masque côtier dans la mer animée.
+//
+// ⚠️ LE PREMIER `return` GARDE LA FENÊTRE CONTINUE AU BIT PRÈS. Quand les deux
+// empreintes coïncident, l'uv sort tel quel et la texture (ClampToEdgeWrapping)
+// se colle au bord — c'est ce dont dépend le débordement élastique du mode
+// continu, qui lit jusqu'à 91 unités pour un champ qui en couvre 84
+// (src/mer-emprise.js). Un test de bornes inconditionnel effacerait le masque
+// pile dans ce débordement.
+const MASQUE_UV_GLSL = /* glsl */ `
+vec2 uvMasqueCotier(vec2 xzChamp) {
+  vec2 uv = xzChamp / uSpanMasque + 0.5;
+  if (uSpanMasque >= uSpan) return uv; // même empreinte : clamp au bord, comme avant
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return vec2(-1.0);
+  return uv;
+}
+`
+
 const VERT = /* glsl */ `
 uniform float uTime;
 uniform float uWaveH;    // wave height (user slider), in spectrum metres
@@ -133,6 +171,9 @@ uniform sampler2D uCoastMask; // OSM land/sea (R : 1 land, 0 sea) — the REAL s
 uniform float uCoastMaskOn;   // 1 when the coast mask is loaded for this patch
 uniform float uSpan;    // largeur au sol du champ : 56, ou 168 sur l'emprise 3×3
 uniform vec2 uFenetre;  // décalage de lecture du mode continu (0 sinon)
+uniform vec2 uCentre;   // centre du carré du damier (0 hors damier) — voir FRAG
+uniform float uSpanMasque; // empreinte du masque côtier — voir MASQUE_UV_GLSL
+${MASQUE_UV_GLSL}
 #ifdef IS_LAKE
 uniform sampler2D uMask;    // A coverage, G shore distance (lake bbox)
 uniform vec2 uMaskMin;
@@ -166,7 +207,10 @@ void main() {
 
   // waves die out on the beach: fade by the local depth so a swell can never
   // wash over the coastline polygons
-  vec2 uvF = xzChamp / uSpan + 0.5;
+  // ⚠️ MOINS LE CENTRE DU CARRÉ : le champ est cuit AUTOUR de ce centre, qui
+  // tombe sur une jointure quand le côté du damier est pair (damier-carre.js).
+  // Hors damier uCentre vaut (0,0) et l'expression est celle d'avant.
+  vec2 uvF = (xzChamp - uCentre) / uSpan + 0.5;
   vec2 f = texture2D(uField, uvF).rg;
 #ifdef IS_LAKE
   vec2 m = (xz - uMaskMin) / uMaskSize;
@@ -176,7 +220,10 @@ void main() {
   // masque côtier : sur la vraie terre (polders sous 0 compris) houle, ressac
   // et lift meurent — le fragment y discarde le plan, laisser des vagues au
   // bord dessinerait des artefacts de silhouette le long du trait de côte
-  if (uCoastMaskOn > 0.5) shoreD *= 1.0 - texture2D(uCoastMask, uvF).r;
+  if (uCoastMaskOn > 0.5) {
+    vec2 uvM = uvMasqueCotier(xzChamp);
+    if (uvM.x >= 0.0) shoreD *= 1.0 - texture2D(uCoastMask, uvM).r;
+  }
 #endif
   // v45 : les vagues vivent JUSQU'À la côte — le déclin v40 (0.35) aplatissait
   // toute la frange côtière : plus aucune interaction mer/îles. Le niveau
@@ -227,7 +274,14 @@ void main() {
   // au BORD DU SOCLE. Mesuré en coordonnées de champ, un lac de l'emprise voyait
   // son déplacement horizontal annulé partout (il est à plus de 28 unités du
   // centre du champ) — ses vagues perdaient leur choppiness sans raison.
-  float edgeHold = 1.0 - smoothstep(uHalf - 2.0, uHalf - 0.15, max(abs(xzVue.x), abs(xzVue.y)));
+  // ⚠️ ET AUTOUR DU CENTRE DU CARRÉ, pas de l'origine : un carré de côté PAIR
+  // n'est pas centré sur le bloc principal (damier-carre.js, centreDuCarre).
+  // Mesuré depuis l'origine, le fondu de bord d'un 2×2 tomberait à cheval sur
+  // la jointure au lieu du pourtour, et la surface se désolidariserait de la
+  // jupe d'un côté du damier. Hors damier uCentre vaut (0,0) : expression
+  // d'avant, au bit près.
+  vec2 xzBord = xzVue - uCentre;
+  float edgeHold = 1.0 - smoothstep(uHalf - 2.0, uHalf - 0.15, max(abs(xzBord.x), abs(xzBord.y)));
   p.xz += disp.xz * edgeHold;
   // NIVEAU MOYEN : PLUS AUCUN RELÈVEMENT EN MER (décision d'Adrien).
   //
@@ -295,6 +349,14 @@ uniform sampler2D uCoastMask; // trait de côte vectoriel (R : 1 terre, 0 mer) �
 uniform float uCoastMaskOn;   // 1 quand le masque du patch est chargé (sinon : règle altitude seule)
 uniform float uSpan;    // largeur au sol du champ : 56, ou 168 sur l'emprise 3×3
 uniform vec2 uFenetre;  // décalage de lecture du mode continu (0 sinon)
+uniform float uSpanMasque; // empreinte du masque côtier — voir MASQUE_UV_GLSL
+// Centre du carré du damier, en unités monde. (0,0) partout ailleurs.
+// ⚠️ UN CARRÉ DE CÔTÉ PAIR N'EST PAS CENTRÉ SUR LE BLOC PRINCIPAL : son centre
+// tombe sur une jointure (damier-carre.js). Le clip ci-dessous, mesuré depuis
+// l'origine, rognerait alors la mer d'un demi-bloc d'un côté et la laisserait
+// déborder de l'autre — un défaut qui ne se voit qu'en 2×2, donc tard.
+uniform vec2 uCentre;
+${MASQUE_UV_GLSL}
 uniform float uHalf;     // rounded-square clip: half extent…
 uniform float uCornerR;  // …and corner radius (sea only; lakes use the mask)
 uniform float uCornerN;  // exposant de superellipse du coin : 2 = arc de cercle,
@@ -358,11 +420,11 @@ void main() {
   // superellipse |x|^n + |y|^n = r^n, la MEME que le clip du relief : a n = 2 on
   // retrouve exactement le cercle d'avant (length()), au bit pres sur les cotes
   // droits ou l'une des deux composantes est nulle.
-  vec2 mq = max(abs(xzVue) - vec2(uHalf - uCornerR), 0.0);
+  vec2 mq = max(abs(xzVue - uCentre) - vec2(uHalf - uCornerR), 0.0);
   float pn = pow(pow(mq.x, uCornerN) + pow(mq.y, uCornerN), 1.0 / uCornerN);
   if (pn > uCornerR) discard;
 
-  vec2 uvF = xzChamp / uSpan + 0.5;
+  vec2 uvF = (xzChamp - uCentre) / uSpan + 0.5; // champ centré sur le carré, voir VERT
   vec2 f = texture2D(uField, uvF).rg;
 
 #ifdef IS_LAKE
@@ -383,7 +445,8 @@ void main() {
   // CONTRAT : masque absent (uCoastMaskOn = 0) → comportement inchangé.
   float coastLand = 0.0;
   if (uCoastMaskOn > 0.5) {
-    coastLand = texture2D(uCoastMask, uvF).r;
+    vec2 uvM = uvMasqueCotier(xzChamp);
+    if (uvM.x >= 0.0) coastLand = texture2D(uCoastMask, uvM).r;
     if (coastLand > 0.8) discard;
   }
   float shoreAA = smoothstep(0.0, 0.02, depth);
@@ -524,6 +587,9 @@ uniform sampler2D uCoastMask; // même masque côtier que la surface (R : 1 terr
 uniform float uCoastMaskOn;
 uniform float uSpan;    // largeur au sol du champ : 56, ou 168 sur l'emprise 3×3
 uniform vec2 uFenetre;  // décalage de lecture du mode continu (0 sinon)
+uniform float uSpanMasque; // empreinte du masque côtier — voir MASQUE_UV_GLSL
+uniform vec2 uCentre;   // centre du carre du damier (0 sinon) — voir FRAG
+${MASQUE_UV_GLSL}
 ${GERSTNER_GLSL}
 ${SHORE_SURF_GLSL}
 varying vec3 vWorld;
@@ -540,12 +606,15 @@ void main() {
   // cette égalité, pas un réglage, qui garantit que les deux restent soudées.
   // Un demi-pixel d'écart entre ces deux expressions ouvrirait un jour de
   // lumière sur tout le périmètre du bloc.
-  vec2 uvF = (p.xz + uFenetre) / uSpan + 0.5;
+  vec2 uvF = (p.xz + uFenetre - uCentre) / uSpan + 0.5; // champ centré sur le carré
   vec2 f = texture2D(uField, uvF).rg;
   float shoreD = max((uWaterY - f.r) * 2.0, f.g);
   // même règle que la surface : les vagues du haut de jupe meurent sur la
   // terre du masque (le fragment discarde ces colonnes, pas de houle au bord)
-  if (uCoastMaskOn > 0.5) shoreD *= 1.0 - texture2D(uCoastMask, uvF).r;
+  if (uCoastMaskOn > 0.5) {
+    vec2 uvM = uvMasqueCotier(p.xz + uFenetre);
+    if (uvM.x >= 0.0) shoreD *= 1.0 - texture2D(uCoastMask, uvM).r;
+  }
   float fade = smoothstep(0.0, 0.10, shoreD); // v45 : même déclin serré que la surface
   float fadeLift = smoothstep(0.0, 0.55, shoreD);
   float y = uBottomY;
@@ -587,6 +656,9 @@ uniform sampler2D uCoastMask; // même masque côtier que la surface (R : 1 terr
 uniform float uCoastMaskOn;
 uniform float uSpan;    // largeur au sol du champ : 56, ou 168 sur l'emprise 3×3
 uniform vec2 uFenetre;  // décalage de lecture du mode continu (0 sinon)
+uniform float uSpanMasque; // empreinte du masque côtier — voir MASQUE_UV_GLSL
+uniform vec2 uCentre;   // centre du carre du damier (0 sinon) — voir FRAG
+${MASQUE_UV_GLSL}
 varying vec3 vWorld;
 varying float vV;
 #include <fog_pars_fragment>
@@ -604,13 +676,16 @@ void main() {
   // pas de jupe devant la terre (côte qui touche le bord du bloc)
   // MÊME expression que le vertex de la jupe et que la surface : c'est ce qui
   // fait qu'en défilant, le rideau d'eau s'efface pile où la côte arrive au bord.
-  vec2 uvF = (vWorld.xz + uFenetre) / uSpan + 0.5;
+  vec2 uvF = (vWorld.xz + uFenetre - uCentre) / uSpan + 0.5; // champ centré sur le carré
   float ground = texture2D(uField, uvF).r;
   if (uWaterY - ground < -0.005) discard;
   // masque côtier : pas de rideau d'eau devant un polder sous le niveau 0 —
   // la règle altitude ci-dessus ne sait pas qu'il est terre (contrat : masque
   // absent → comportement inchangé)
-  if (uCoastMaskOn > 0.5 && texture2D(uCoastMask, uvF).r > 0.5) discard;
+  if (uCoastMaskOn > 0.5) {
+    vec2 uvM = uvMasqueCotier(vWorld.xz + uFenetre);
+    if (uvM.x >= 0.0 && texture2D(uCoastMask, uvM).r > 0.5) discard;
+  }
 
   float g = clamp((uWaterY - vWorld.y) / max(uWaterY - uBottomY, 1e-3), 0.0, 1.0);
   vec3 col = uDeep * mix(1.05, 0.45, g); // s'assombrit vers le fond
@@ -772,6 +847,12 @@ function waterMaterial({ isLake, params, fieldTex }) {
         // décalage de lecture du mode continu — voir src/mer-emprise.js
         uSpan: { value: TERRAIN_SIZE },
         uFenetre: { value: new THREE.Vector2(0, 0) },
+        // le masque côtier couvre le bloc central (56) ou, en mode continu,
+        // l'emprise recollée — jamais le carré du damier (MASQUE_UV_GLSL)
+        uSpanMasque: { value: TERRAIN_SIZE },
+        // centre du carré du damier : (0,0) hors damier et sur tout carré de
+        // côté IMPAIR ; décalé d'un demi-bloc sur un côté pair (centreDuCarre)
+        uCentre: { value: new THREE.Vector2(0, 0) },
       },
     ]),
   })
@@ -808,15 +889,32 @@ export class RealWater {
   //
   // Prix : 1 152² texels RG demi-flottants = 5,3 Mo de VRAM (0,6 Mo avant), et
   // une cuisson par reconstruction — jamais par image.
+  //
+  // ══════════ DAMIER : LE CHAMP COUVRE LE CARRÉ, PAS LE BLOC CENTRAL ═════════
+  //
+  // Même règle, autre cause. `rebuild` pose `this._emprise` (largeur au sol,
+  // résolution, centre) AVANT d'appeler cette méthode, et c'est la SEULE source
+  // de ces deux nombres ici : les relire de `resChamp`/`TERRAIN_SIZE` ferait une
+  // mer de la bonne taille avec des vagues à la mauvaise échelle — un défaut qui
+  // ne lève rien et ne se voit qu'à l'œil, sur la longueur d'onde de la houle.
   _bakeField(terrain, seaY, params) {
-    const cote = terrain.dem?.empriseCote > 1 ? terrain.dem.empriseCote : 1
-    const n = resChamp(cote)
-    const span = spanChamp(TERRAIN_SIZE, cote)
+    const emprise = this._emprise
+    const n = emprise.res
+    const span = emprise.span
     // ⚠️ `terrain.sample` NE PEUT PAS SERVIR ICI EN MODE CONTINU : il répond
     // « sous le point AFFICHÉ en x », donc il porte le décalage et rendrait un
     // champ neuf à chaque pas. `sampleChamp` répond « au point du MONDE » et
     // saute le grain FBM, nul à la ligne d'eau (terrain.js dit pourquoi).
-    const echChamp = cote > 1 && params ? terrain.sampleChamp(params) : null
+    //
+    // ⚠️ ET IL NE SUFFIT PAS NON PLUS SUR LE DAMIER, pour une raison inverse :
+    // les deux ne connaissent que le MNT du bloc CENTRAL, et `sampleDem` clampe
+    // hors de ses bornes (src/dem.js). Cuit avec eux sur les 168 unités d'un
+    // 3×3, le champ aurait recopié la rangée de bord du bloc central sur toute
+    // la bande voisine — donc de la TERRE partout où le bloc central touche la
+    // terre à son bord, donc une mer qui disparaît pile là où la tâche existe
+    // pour la faire apparaître. `_echSol` (posé par `rebuild` depuis main.js)
+    // interroge les cellules du damier ; il n'existe que là.
+    const echChamp = terrain.dem?.empriseCote > 1 && params ? terrain.sampleChamp(params) : null
     const water = new Uint8Array(n * n)
     // ⚠️ LES DEMI-FLOTTANTS SONT ÉCRITS DIRECTEMENT, sans Float32Array
     // intermédiaire : à 1 152² celui-ci pesait 10,6 Mo de tas transitoire pour
@@ -832,22 +930,41 @@ export class RealWater {
     // ⚠️ FOULÉE DE 1 : le masque côtier est un Uint8Array R8 depuis la passe
     // de mémoire du 2026-07-29, plus une ImageData RGBA (voir coast-mask.js).
     const cd = this._coastImage
-    // ⚠️ `span`, PAS `TERRAIN_SIZE` : coast-mask.js rastérise le masque sur le
-    // footprint du MNT, et le MNT recollé couvre les 168 unités de l'emprise.
-    // Lu sur 56, le masque était agrandi trois fois — la terre du continent
-    // voisin se serait posée sur la baie qu'on regarde.
+    // ⚠️ `spanMasque`, PAS `span` ET PAS `TERRAIN_SIZE` — les deux erreurs
+    // symétriques ont chacune un cas. coast-mask.js rastérise le masque sur le
+    // footprint du MNT : 56 unités sur un bloc, 168 sur l'emprise RECOLLÉE du
+    // mode continu. Lu sur 56 en mode continu, le masque était agrandi trois
+    // fois (la terre du continent voisin se posait sur la baie qu'on regarde) ;
+    // lu sur le span du CARRÉ du damier, il le serait tout autant, dans l'autre
+    // sens. `_spanMasque` dit son empreinte réelle, et le pendant GLSL de ces
+    // trois lignes est `uvMasqueCotier` (voir MASQUE_UV_GLSL).
+    const spanMasque = this._spanMasque ?? span
+    // hors de l'empreinte, le masque ne dit RIEN : ni terre ni mer. On rend
+    // faux, donc la règle d'altitude décide seule — le comportement des dalles
+    // voisines aujourd'hui. Test omis quand les empreintes coïncident, pour ne
+    // rien changer au débordement élastique du mode continu (mer-emprise.js).
+    const borne = spanMasque < span
     const landAt = cd
       ? (x, z) => {
-          const px = Math.max(0, Math.min(cd.width - 1, Math.round((x / span + 0.5) * (cd.width - 1))))
-          const py = Math.max(0, Math.min(cd.height - 1, Math.round((z / span + 0.5) * (cd.height - 1))))
+          const u = x / spanMasque + 0.5
+          const v = z / spanMasque + 0.5
+          if (borne && (u < 0 || u > 1 || v < 0 || v > 1)) return false
+          const px = Math.max(0, Math.min(cd.width - 1, Math.round(u * (cd.width - 1))))
+          const py = Math.max(0, Math.min(cd.height - 1, Math.round(v * (cd.height - 1))))
           return cd.data[py * cd.width + px] > 127
         }
       : null
-    const ech = echChamp || (terrain.sample ? terrain.sample : null)
+    const ech = this._echSol || echChamp || (terrain.sample ? terrain.sample : null)
+    // ⚠️ LE CHAMP EST CENTRÉ SUR LE CARRÉ, PAS SUR L'ORIGINE. Un carré de côté
+    // PAIR a son centre sur une jointure (damier-carre.js) : cuit autour de
+    // zéro, le champ d'un 2×2 aurait couvert un demi-bloc de trop d'un côté et
+    // manqué l'autre moitié. Hors damier ce décalage vaut zéro.
+    const cx = emprise.centre?.x ?? 0
+    const cz = emprise.centre?.z ?? 0
     for (let j = 0; j < n; j++) {
-      const z = (j / (n - 1) - 0.5) * span
+      const z = (j / (n - 1) - 0.5) * span + cz
       for (let i = 0; i < n; i++) {
-        const x = (i / (n - 1) - 0.5) * span
+        const x = (i / (n - 1) - 0.5) * span + cx
         const h = ech ? ech(x, z) : 0
         half[(j * n + i) * 2] = THREE.DataUtils.toHalfFloat(h)
         water[j * n + i] = h < seaY && !(landAt && landAt(x, z)) ? 1 : 0
@@ -1008,15 +1125,55 @@ export class RealWater {
     this._genLacs = (this._genLacs ?? 0) + 1
   }
 
-  // (Re)build for the current zone. Cheap no-op when the option is off.
-  rebuild({ terrain, params }) {
+  /**
+   * (Re)build for the current zone. Cheap no-op when the option is off.
+   *
+   * @param carre {{i0,j0,cote}|null} l'emprise du damier — `BlockGrid.
+   *   empriseVivante()`, JAMAIS `carreCourant()` : la première dit ce qui est
+   *   POSÉ (5×5 possible en zone isolée), la seconde ce que le tracé a réclamé
+   *   (plafonné à 3×3). `null` = comportement d'avant, un bloc.
+   * @param echantillonSol {(x,z)=>number|null} hauteur du sol en un point
+   *   QUELCONQUE du damier. Indispensable dès que `carre.cote > 1` : ni
+   *   `terrain.sample` ni `terrain.sampleChamp` ne connaissent les cellules
+   *   voisines, et `sampleDem` clampe hors des bornes du MNT central.
+   * @param planchier {number|null} le fond commun du damier
+   *   (`BlockGrid.planchierCommun()`), auquel la jupe descend. `null` = le
+   *   budget bathymétrique d'avant.
+   */
+  rebuild({ terrain, params, carre = null, echantillonSol = null, planchier = null }) {
     this._clear()
     if (!params.waterReal || params.source !== 'real' || !terrain.dem) return
 
-    // le côté de l'emprise : 1 sur un socle ordinaire, 3 en mode continu
-    const cote = terrain.dem.empriseCote > 1 ? terrain.dem.empriseCote : 1
-    this._cote = cote
-    this._span = spanChamp(TERRAIN_SIZE, cote)
+    // ══════════ DEUX LARGEURS, ET LES CONFONDRE EST MUET ═══════════════════════
+    //
+    // `_spanDem` : ce que couvre `terrain.dem` au sol — 56 sur un bloc, 168 en
+    //   mode continu (le MNT y est RECOLLÉ, `extentMeters` a triplé). C'est elle
+    //   qui convertit les mètres du MNT en unités de scène : échelle de la houle,
+    //   profondeur bathymétrique, taille et position des lacs.
+    // `_span`    : ce que couvre le CHAMP de la mer. Elle suit l'emprise du
+    //   DAMIER, qui monte à 280 unités sur un 5×5 pendant que le MNT central,
+    //   lui, en couvre toujours 56.
+    //
+    // Avant le damier les deux étaient toujours égales, d'où une seule variable.
+    // Servir `_span` au calcul d'échelle sur un 3×3 triplerait la houle et la
+    // profondeur du fond, et allongerait les lacs d'autant — trois défauts
+    // silencieux pour une seule confusion.
+    const coteFenetre = terrain.dem.empriseCote > 1 ? terrain.dem.empriseCote : 1
+    this._spanDem = spanChamp(TERRAIN_SIZE, coteFenetre)
+    // Les deux modes ne coexistent JAMAIS : `cellsForTrack` referme le damier
+    // dès que l'emprise continue est montée (block-grid.js). On prend donc celui
+    // des deux qui parle, sans les faire dépendre l'un de l'autre.
+    const emprise = coteFenetre > 1
+      ? { span: this._spanDem, res: resChamp(coteFenetre), centre: { x: 0, z: 0 }, cote: coteFenetre }
+      : empriseDeMer(carre, TERRAIN_SIZE)
+    this._emprise = emprise
+    this._cote = emprise.cote
+    this._span = emprise.span
+    // le masque côtier suit le MNT, pas le carré : voir MASQUE_UV_GLSL
+    this._spanMasque = this._spanDem
+    // et l'échantillonneur du damier ne sert QUE là — en mode continu c'est
+    // `sampleChamp` qui répond (voir _bakeField)
+    this._echSol = coteFenetre > 1 ? null : echantillonSol || null
 
     const seaY = terrain.mapUniforms.uSeaY.value
     const fieldTex = this._bakeField(terrain, seaY > -9000 ? seaY : -1e9, params)
@@ -1026,14 +1183,17 @@ export class RealWater {
     this._fieldTex = fieldTex
     this._bakeCtx = { terrain, seaY: seaY > -9000 ? seaY : -1e9, params }
 
-    // ⚠️ `this._span`, PAS `TERRAIN_SIZE`. Sur une emprise 3×3 `extentMeters` a
+    // ⚠️ `this._spanDem`, PAS `TERRAIN_SIZE`. Sur une emprise 3×3 `extentMeters` a
     // TRIPLÉ (dem-emprise.js), donc `TERRAIN_SIZE / extentMeters` rendait une
     // échelle TROIS FOIS TROP PETITE. Conséquences, toutes silencieuses : une
     // houle trois fois trop calme, et surtout un `bathyScene` au tiers de sa
     // valeur — la jupe de mer était alors trop courte pour rejoindre le fond,
     // c'est-à-dire un rideau d'eau suspendu au-dessus du vide. Hors mode continu
-    // `_span` vaut TERRAIN_SIZE et l'expression est celle d'avant, au bit près.
-    const demScale = (this._span / terrain.dem.extentMeters) * params.demExaggeration
+    // `_spanDem` vaut TERRAIN_SIZE et l'expression est celle d'avant, au bit près.
+    // ⚠️ `_spanDem` ET NON `_span` DEPUIS LE DAMIER : `extentMeters` suit le MNT,
+    // qui ne grandit PAS avec le carré du damier (voir la note en tête de
+    // méthode). Les deux valeurs coïncident partout ailleurs.
+    const demScale = (this._spanDem / terrain.dem.extentMeters) * params.demExaggeration
     // wave amplitude follows the VIEW SCALE: at a 20 km bay the swell reads,
     // at a 500 km continental view the same scene-unit swell would be a
     // 30 m monster — the sea (and the lakes) calm as you zoom out
@@ -1081,14 +1241,51 @@ export class RealWater {
       // rayonEauDansSocle.
       const rSocle = Math.min(TERRAIN_SIZE / 2 - 0.05, Math.max(0.05, (params.slabCorner ?? 0) * TERRAIN_SIZE))
       const r = rayonCoinEau(rSocle)
-      mat.uniforms.uHalf.value = rayonEauDansSocle()
+      // ⚠️ LE DEMI-CÔTÉ SUIT LE CARRÉ, LE RAYON DE COIN NON. Le damier n'a que
+      // QUATRE coins arrondis, ceux du carré entier — les jointures intérieures
+      // sont vives (damier-bords.js). Multiplier le rayon avec le côté aurait
+      // rongé un quart de bloc dans chaque angle.
+      //
+      // ⚠️ ET LA MARGE NE SE MULTIPLIE PAS NON PLUS — divergence assumée avec le
+      // brief, qui écrivait `rayonEauDansSocle() * cote`. `rayonEauDansSocle()`
+      // vaut `28 − chanfrein − marge` : le multiplier par trois multiplierait
+      // AUSSI les 0,22 unité de retrait, et l'eau d'un 3×3 s'arrêterait à 83,34
+      // au lieu de 83,78 — 0,44 unité de socle nu tout autour, quand ce module
+      // existe pour tenir ces trois nombres à six MILLIÈMES près (plinth.js).
+      // Le retrait est celui du bord EXTÉRIEUR, et il n'y en a qu'un.
+      const demiEau = rayonEauDansSocle() + (TERRAIN_SIZE / 2) * (emprise.cote - 1)
+      mat.uniforms.uHalf.value = demiEau
       mat.uniforms.uCornerR.value = r
       mat.uniforms.uCornerN.value = exposantCoin(params.slabCornerSmoothing)
+      mat.uniforms.uCentre.value.set(emprise.centre.x, emprise.centre.z)
       // le plan d'eau EST la fenêtre : il ne bouge pas, c'est son champ qui défile
       mat.uniforms.uSpan.value = this._span
-      const seg = 256
-      const geo = new THREE.PlaneGeometry(TERRAIN_SIZE * 0.998, TERRAIN_SIZE * 0.998, seg, seg)
+      mat.uniforms.uSpanMasque.value = this._spanMasque
+      // ⚠️ LA SEGMENTATION NE SUIT PAS L'EMPRISE LINÉAIREMENT. Garder la densité
+      // d'un bloc (4,57 segments par unité) donnerait 768² = 590 000
+      // quadrilatères sur un 3×3, pour des vagues dont la longueur d'onde se
+      // compte en unités. On plafonne — et à `cote = 1` la valeur est EXACTEMENT
+      // les 256 d'avant. VALEUR PROVISOIRE, NON MESURÉE : la Tâche 7 relève le
+      // coût réel de trois segmentations et la remplace par un chiffre défendu.
+      const seg = Math.min(384, 256 * emprise.cote)
+      // ⚠️ LA MAILLE DOIT DÉBORDER LE CLIP, PAS L'INVERSE : c'est `uHalf` qui
+      // arrête l'eau (voir SOCLE_MARGE_EAU), la maille ne fait que la porter. Le
+      // facteur 0,998 suffisait sur un bloc (27,944 contre 27,78) et sur un 3×3
+      // (83,832 contre 83,78), mais repassait SOUS le clip au 5×5 — 139,72
+      // contre 139,78 — et rognait un cheveu de mer sur tout le pourtour. À
+      // `cote = 1` le maximum retombe sur l'expression d'avant, au bit près.
+      const large = Math.max(TERRAIN_SIZE * emprise.cote * 0.998, (demiEau + 0.05) * 2)
+      const geo = new THREE.PlaneGeometry(large, large, seg, seg)
       geo.rotateX(-Math.PI / 2)
+      // ⚠️ LE CENTRE VA DANS LA GÉOMÉTRIE, PAS DANS `mesh.position`. Le vertex
+      // lit `position.xz` COMME DES COORDONNÉES MONDE (`vWorld = vec3(p.x, …,
+      // p.z)`) : une translation portée par la matrice du mesh déplacerait le
+      // rendu sans déplacer ce que le shader croit regarder, et la mer lirait
+      // son champ, son masque et son clip un demi-bloc à côté. `position.y`
+      // reste 0 et c'est bien `mesh.position.y` qui porte le niveau d'eau —
+      // seule la hauteur passe par la matrice, parce que le shader la reprend
+      // par `uWaterY`.
+      geo.translate(emprise.centre.x, 0, emprise.centre.z)
       const mesh = new THREE.Mesh(geo, mat)
       mesh.position.set(0, this._seaBase, 0)
       // above the draped OSM water polygons (17) so harbours read UNDER the
@@ -1124,7 +1321,17 @@ export class RealWater {
       // jupe de verre au bord du socle : comble le vide entre le niveau de
       // l'eau et le fond marin sur le pourtour du bloc (option seaEdge)
       if (params.seaEdge ?? true) {
+        // ⚠️ LE FOND DE LA JUPE DESCEND AU PLANCHER COMMUN DU DAMIER, quand il y
+        // en a un. La Tâche 3 égalise TOUTES les cases sur la base la plus
+        // profonde : une jupe taillée sur le seul budget bathymétrique du bloc
+        // central s'arrêterait au-dessus du fond des autres, et le rideau d'eau
+        // laisserait voir le vide sous lui sur trois côtés du carré. `Math.min`
+        // et pas une affectation sèche : on ne remonte JAMAIS la jupe, sinon un
+        // damier peu profond raccourcirait la mer d'un bloc seul.
         const drop = Math.max(2.0, bathyScene + 0.6)
+        const bas = Number.isFinite(planchier)
+          ? Math.min(this._seaBase - drop, planchier)
+          : this._seaBase - drop
         const smat = new THREE.ShaderMaterial({
           name: 'real-water-skirt',
           vertexShader: SKIRT_VERT,
@@ -1145,7 +1352,7 @@ export class RealWater {
               uLenScale: { value: lenSea },
               uLift: { value: SPEC_AMP_SUM * lenSea * this._waveH },
               uWaterY: { value: this._seaBase },
-              uBottomY: { value: this._seaBase - drop },
+              uBottomY: { value: bas },
               uField: { value: null },
               // masque côtier : affecté APRÈS création (règle du clone) par
               // _pushCoastMask, qui couvre tout matériau portant uCoastMask
@@ -1159,14 +1366,21 @@ export class RealWater {
               uSurfCalm: { value: 1 },
               uSpan: { value: this._span },
               uFenetre: { value: new THREE.Vector2(0, 0) },
+              uSpanMasque: { value: this._spanMasque },
+              uCentre: { value: new THREE.Vector2(emprise.centre.x, emprise.centre.z) },
             },
           ]),
         })
         smat.uniforms.uField.value = fieldTex // post-merge (règle du clone)
         // Le flanc lit EXACTEMENT le même bord et le même coin que la surface
         // qu'il porte : c'est leur divergence qui ouvrait un liseré dans les
-        // angles, et leur débordement commun qui masquait le socle.
-        const sgeo = buildRimGeometry(rayonEauDansSocle(), r, exposantCoin(params.slabCornerSmoothing))
+        // angles, et leur débordement commun qui masquait le socle. Le demi-côté
+        // suit donc le carré comme celui de la surface, et le rayon de coin ne
+        // suit pas — les quatre coins du damier valent ceux d'un bloc seul.
+        const sgeo = buildRimGeometry(demiEau, r, exposantCoin(params.slabCornerSmoothing))
+        // même raison que pour la surface : le vertex de la jupe lit `p.xz`
+        // comme des coordonnées MONDE, le décalage va donc dans la géométrie.
+        sgeo.translate(emprise.centre.x, 0, emprise.centre.z)
         const skirt = new THREE.Mesh(sgeo, smat)
         skirt.renderOrder = 16 // sous la surface (18) : la mer se dessine par-dessus
         skirt.frustumCulled = false
@@ -1196,7 +1410,7 @@ export class RealWater {
     // Mesure, durée TOTALE de rebuild : Annecy 3×3 875 → 201 ms, Annecy z12
     // 187 → 98 ms, La Réunion 3×3 556 → 67 ms.
     const cuits = lacsMemoLire(dem)
-    if (cuits) this._batirLacs(cuits, { dem, params, fieldTex, cote })
+    if (cuits) this._batirLacs(cuits, { dem, params, fieldTex, cote: coteFenetre, centre: emprise.centre })
     else {
       // ⚠️ LE GARDE-FOU EST UNE GÉNÉRATION, pas une comparaison de MNT : entre
       // le départ et l'arrivée, `_clear()` a pu disposer `fieldTex` et le groupe
@@ -1208,7 +1422,7 @@ export class RealWater {
       runLakeJob({ data: dem.data, size: dem.size }).then((r) => {
         if (!r || gen !== this._genLacs) return
         lacsMemoEcrire(dem, r.lacs)
-        this._batirLacs(r.lacs, { dem, params, fieldTex, cote })
+        this._batirLacs(r.lacs, { dem, params, fieldTex, cote: coteFenetre, centre: emprise.centre })
       })
     }
     this._applySea()
@@ -1236,8 +1450,12 @@ export class RealWater {
    * Worker). Tout ce qu'elle lit est donc passé en paramètre ou relu sur
    * `this` — rien ne doit dépendre de l'instant où elle tourne.
    */
-  _batirLacs(lacs, { dem, params, fieldTex, cote }) {
-    const scale = (this._span / dem.extentMeters) * params.demExaggeration
+  _batirLacs(lacs, { dem, params, fieldTex, cote, centre = { x: 0, z: 0 } }) {
+    // ⚠️ `_spanDem` ET NON `_span` : un lac est taillé sur la grille du MNT, et
+    // le MNT ne grandit PAS avec le carré du damier (voir `rebuild`). Servir le
+    // span du champ ici étirerait chaque lac du bloc central au format du
+    // damier — un lac trois fois trop grand, posé trois fois trop loin.
+    const scale = (this._spanDem / dem.extentMeters) * params.demExaggeration
     const cellM = dem.extentMeters / (dem.size - 1)
     // ⚠️ LA LARGEUR D'UN BLOC, PAS CELLE DE L'EMPRISE. En mode continu
     // `extentMeters` est déjà multiplié par `empriseCote` (dem-emprise.js) :
@@ -1265,7 +1483,7 @@ export class RealWater {
       const { tex, minX, minY, w, h } = this._bakeLakeMask(lake)
       this._textures.push(tex)
       const yLake = (lake.elevM - dem.meanM) * scale + 0.04 + (params.detail ?? 0) * 0.6 + 0.025
-      const toWorld = (g, n) => (g / (n - 1) - 0.5) * this._span
+      const toWorld = (g, n) => (g / (n - 1) - 0.5) * this._spanDem // grille du MNT, pas du champ
       const size = lake.size
       const x0 = toWorld(minX, size)
       const z0 = toWorld(minY, size)
@@ -1282,6 +1500,9 @@ export class RealWater {
       mat.uniforms.uMaskSize.value.set(Math.max(1e-4, x1 - x0), Math.max(1e-4, z1 - z0))
       mat.uniforms.uDepthMax.value = 0.9
       mat.uniforms.uSpan.value = this._span
+      mat.uniforms.uSpanMasque.value = this._spanMasque
+      // le lac lit le MÊME champ que la mer, donc le même centre de carré
+      mat.uniforms.uCentre.value.set(centre.x, centre.z)
       // clip de fenêtre : un lac de l'emprise qui sort du socle flotterait
       // au-dessus du vide. 1e6 hors mode continu = pas de clip, comme avant.
       if (cote > 1) {
