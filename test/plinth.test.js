@@ -109,3 +109,38 @@ test('zero corner radius keeps the exact square ring (backward compatible)', () 
   assert.equal(sq.ring.length, 800)
   assert.equal(sq2.ring.length, 800)
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LE SOCLE EST COULÉ À LA RÉSOLUTION DU MAILLAGE — pas à celle du réglage
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Les trois tests du haut de ce fichier disent, depuis toujours, que le contour
+// du mur doit tomber sur les sommets de bord du maillage : « a coarse ring would
+// miss relief between samples → visible underside ». Ils le vérifient sur
+// `computeSlab`, à qui on PASSE la résolution — donc ils restent verts même si
+// l'appelant passe la mauvaise.
+//
+// Et c'est exactement ce qui s'est produit : en fenêtre continue, le module de
+// finesse rabat le maillage à 384 tant que l'image bouge, et `Plinth.rebuild`
+// lisait `params.resolution` — 768. Deux résolutions, le décollement que les
+// trois tests du haut existent pour empêcher, et 24,5 ms par image au lieu de
+// 14,6 (balayage du 2026-08-05 :
+// .superpowers/sdd/2026-08-05-damier-multi-blocs/mesure-socle-fenetre.mjs).
+//
+// ⚠️ CE TEST LIT LA SOURCE, et il n'y a pas d'alternative honnête : `Plinth`
+// construit des objets three attachés à une scène, et la seule chose à vérifier
+// est QUELLE VALEUR l'appelant transmet. `terrain.resMaillage(params)` rend
+// `params.resolution` tel quel hors emprise continue — le bloc ordinaire, le
+// damier et la zone isolée sont donc inchangés au bit près.
+test('Plinth.rebuild coule le socle a la resolution du MAILLAGE', async () => {
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/plinth.js'), 'utf8')
+  const appel = /rebuild\(terrain, params, baseYFloor = null\)\s*\{([\s\S]*?)\n  \}/.exec(src)
+  assert.ok(appel, 'Plinth.rebuild existe toujours sous cette signature')
+  const murs = /buildSlabWalls\(sample, \{([^}]*)\}\)/.exec(appel[1])
+  assert.ok(murs, 'rebuild coule bien ses murs avec buildSlabWalls')
+  assert.match(murs[1], /resolution:\s*terrain\.resMaillage\(params\)/, 'la resolution vient du maillage du terrain')
+  assert.doesNotMatch(murs[1], /resolution:\s*params\.resolution/, 'et surtout PAS du reglage brut : en fenetre continue les deux different')
+})

@@ -88,9 +88,18 @@ const TAU_ABSORPTION = 0.05
 
 // Sous cette vitesse (unités monde par seconde), l'élan s'éteint net.
 // ⚠️ CE SEUIL EST UN POSTE DE DÉPENSE, pas un détail : chaque image d'élan
-// coûte `tickFenetre` (9,9 ms) + `plinth.rebuild` (2,2 ms). Une exponentielle
-// ne s'annulant jamais, sans seuil on paierait 12 ms par image indéfiniment
-// pour un déplacement invisible. 2 unités/s valent **un demi-pixel par image**
+// coûte `tickFenetre` (9,9 ms, mesuré au navigateur) + `plinth.rebuild`.
+//
+// ⚠️ ET LE SECOND CHIFFRE ÉTAIT FAUX D'UN FACTEUR SEPT. Ce commentaire annonçait
+// « 2,2 ms », donc « 12 ms par image » — un budget qui se lisait comme mesuré et
+// ne l'était pas. Balayage du 2026-08-05 (Ryzen 9 5900X, `buildSlabWalls`
+// réelle, .superpowers/sdd/2026-08-05-damier-multi-blocs/mesure-socle-fenetre.mjs) :
+// 5,5 ms à res 128 · 8,7 à 256 · 14,6 à 384 · 24,5 à 768. Le socle suit
+// désormais la finesse du maillage (384 en mouvement), donc **14,6 ms**, et une
+// image d'élan vaut **~24 ms**, pas 12. Une exponentielle ne s'annulant jamais,
+// sans seuil on paierait ces 24 ms par image indéfiniment pour un déplacement
+// invisible — l'argument du seuil est donc DEUX FOIS plus fort qu'écrit, pas
+// moins. 2 unités/s valent **un demi-pixel par image**
 // sur un écran de 800 px de haut (1 unité = 14,3 px) : à la limite de la
 // perception. Mesuré au banc : l'élan meurt en 1,0 à 1,3 s au lieu de jamais.
 export const V_ARRET = 2

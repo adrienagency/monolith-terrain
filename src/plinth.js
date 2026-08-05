@@ -859,7 +859,30 @@ if (uSSS > 0.001) {
     // MILIEU du damier, et chaque jointure avec une voisine creusait sa rainure.
     // `bordsHero` est posé par main.js à chaque changement de damier (null hors
     // damier = les quatre côtés exposés, la géométrie d'avant, exacte).
-    const { geo, baseY, bande } = buildSlabWalls(sample, { depth: this.depth, resolution: params.resolution ?? 256, cornerR, cornerExp, baseYFloor, bords: this.bordsHero })
+    //
+    // ══════════ LA RÉSOLUTION EST CELLE DU MAILLAGE, PAS CELLE DU RÉGLAGE ══════
+    //
+    // ⚠️ `terrain.resMaillage(params)`, ET NON `params.resolution`. La ligne
+    // au-dessus dit depuis toujours « match the wall ring to the terrain mesh
+    // edge resolution » — et depuis la fenêtre continue, elle avait cessé d'être
+    // vraie : le module de finesse rabat volontairement le maillage à 384 tant
+    // que l'image bouge (fenetre-finesse.js) pendant que le socle, lui, restait
+    // coulé à 768. Le contour du mur suivait donc le relief PLUS FINEMENT que le
+    // bord de la carte posée dessus, c'est-à-dire le décollement exact que ce
+    // commentaire existe pour empêcher.
+    //
+    // ET ÇA COÛTAIT CHER : en fenêtre continue, `main.js` rappelle `rebuild` à
+    // CHAQUE image où la fenêtre bouge. Mesuré (Ryzen 9 5900X, node,
+    // .superpowers/sdd/2026-08-05-damier-multi-blocs/mesure-socle-fenetre.mjs) :
+    // 5,5 ms à res 128 · 8,7 à 256 · 14,6 à 384 · 24,5 à 768. Suivre le maillage
+    // rend donc **9,9 ms par image** de glissement, 40 % du poste.
+    //
+    // ⚠️ HORS FENÊTRE CONTINUE, C'EST LA MÊME VALEUR AU BIT PRÈS. `resMaillage`
+    // rend `params.resolution` tel quel dès que l'emprise vaut un bloc : le bloc
+    // ordinaire, le damier et la zone isolée ne voient aucun changement. Seul le
+    // `?? 256` disparaît, et il ne servait qu'à un `params` sans résolution —
+    // que ni `Terrain` ni `create-panel` ne produisent.
+    const { geo, baseY, bande } = buildSlabWalls(sample, { depth: this.depth, resolution: terrain.resMaillage(params), cornerR, cornerExp, baseYFloor, bords: this.bordsHero })
     this.baseY = baseY
     // la bande de référence du bloc CENTRAL : le damier et la jupe de zone
     // isolée la relisent ici pour ne pas en inventer une chacun de leur côté

@@ -57,7 +57,7 @@ function swapClone(prev, src, repeat) {
 export const TERRAIN_SIZE = 56
 
 // Plafond de résolution du maillage en mode fenêtre continue — voir
-// `Terrain._resFenetre` pour la mesure qui l'impose.
+// `Terrain.resMaillage` pour la mesure qui l'impose.
 export const RES_FENETRE_CONTINUE = 384
 
 // Fancy surface-shader ids match the `surfaceFx` GLSL switch below; their
@@ -129,7 +129,7 @@ export class Terrain {
     this.fenetre = { x: 0, z: 0 }
     // La finesse du maillage en mode continu, posée par main.js une fois par
     // image (fenetre-finesse.js). Zéro = « personne n'a d'avis », et on retombe
-    // sur le plafond permanent du jalon 3. Voir `_resFenetre`.
+    // sur le plafond permanent du jalon 3. Voir `resMaillage`.
     this.resFenetre = 0
     this.analysisMax = opts.analysisMax ?? 0
     this.seaMax = opts.seaMax ?? 0
@@ -1958,7 +1958,13 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // zone, de zoom, de palette) où main.js n'a pas encore eu son image pour
   // remettre `resFenetre` à jour. Sans le min, un utilisateur passé à 256 dans
   // les Paramètres se verrait servir du 384 le temps d'une reconstruction.
-  _resFenetre(params) {
+  //
+  // ⚠️ ET ELLE EST PUBLIQUE DEPUIS LE 2026-08-05 (elle s'appelait `_resFenetre`).
+  // `plinth.js` la lit : le socle est coulé sur le MÊME contour que le bord du
+  // maillage, et deux résolutions différentes les décollent l'un de l'autre.
+  // C'était le cas pendant tout glissement de fenêtre — maillage à 384, socle à
+  // 768 — jusqu'à ce que la revue finale du damier le mesure.
+  resMaillage(params) {
     if (!(this.dem?.empriseCote > 1)) return params.resolution
     return Math.min(params.resolution, this.resFenetre || RES_FENETRE_CONTINUE)
   }
@@ -1972,13 +1978,13 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // refaire pour changer un nombre de triangles serait payer 1,4 s pour rien.
   //
   // Ce qui dépend de `res`, et qu'il faut donc refaire, c'est exactement trois
-  // choses — celles que l'avertissement de `_resFenetre` nomme depuis le jalon
+  // choses — celles que l'avertissement de `resMaillage` nomme depuis le jalon
   // 3 : le gabarit de grille (`gridTemplate`), le champ de grain
   // (`detailFieldEmprise`) et le champ de teinte (`tintField`).
   //
   // @returns {number} millisecondes passées, pour que l'appelant puisse le dire
   majResFenetre(params) {
-    const res = this._resFenetre(params)
+    const res = this.resMaillage(params)
     const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now()
     const tpl = gridTemplate(res, TERRAIN_SIZE)
     const geo = new THREE.BufferGeometry()
@@ -2052,7 +2058,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // 1,901 maille/λ de res 768 ; il a la même apparence, il est simplement deux
   // fois plus large en unités monde.
   _detailScaleFenetre(params) {
-    return this._detailScalePour(params, this._resFenetre(params))
+    return this._detailScalePour(params, this.resMaillage(params))
   }
 
   // La même chose pour une résolution NOMMÉE, et non pour celle de l'instant.
@@ -2440,7 +2446,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     if (!(this.dem?.empriseCote > 1) || params.source !== 'real') return false
     const geo = this.mesh.geometry
     if (!geo?.attributes?.position) return false
-    const res = this._resFenetre(params)
+    const res = this.resMaillage(params)
     // Le sampler est refait à chaque pas — il capture `params` (exagération,
     // détail, mode couleur), qui peuvent avoir changé entre deux images. Il ne
     // capture PAS le décalage : `fenetre` est lu par référence.
@@ -2500,7 +2506,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
    *      lit comme une carte cassée, pas comme un repli.
    */
   _resAmorce(params) {
-    const res = this._resFenetre(params)
+    const res = this.resMaillage(params)
     if (this.dem || params.source !== 'real' || !this._amorce) return res
     return Math.min(res, Terrain.RES_AMORCE)
   }

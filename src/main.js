@@ -2561,8 +2561,23 @@ function f3Tick(dt) {
   _f3Sale = false
   if (!refait) terrain.tickFenetre(params)
   // Le socle SUIT — il ne lit que `terrain.sample`, qui porte déjà le décalage.
-  // Mesuré à 2,2 ms par image, assez peu pour le refaire à chaque pas, assez
-  // pour ne le refaire QUE quand la fenêtre a bougé.
+  //
+  // ⚠️ CE N'EST PAS 2,2 ms, C'EST LE POSTE LE PLUS CHER DE LA BOUCLE. Le chiffre
+  // de 2,2 ms qui vivait ici (et dans fenetre-elan.js) n'a jamais été mesuré sur
+  // ce chemin ; la campagne de la Tâche 12 chiffrait déjà le MÊME appel à 26,2 ms
+  // sur le bloc central, et personne n'avait rapproché les deux. Balayage refait
+  // le 2026-08-05 (Ryzen 9 5900X, node, `buildSlabWalls` réelle — voir
+  // .superpowers/sdd/2026-08-05-damier-multi-blocs/mesure-socle-fenetre.mjs) :
+  //
+  //     res 128 → 5,5 ms │ 256 → 8,7 ms │ 384 → 14,6 ms │ 768 → 24,5 ms
+  //
+  // Le socle suit désormais la MÊME dégradation que le relief (`resMaillage`,
+  // plinth.js) : 14,6 ms tant que l'image bouge au lieu de 24,5. Une image de
+  // glissement vaut donc ~24 ms (9,9 de `tickFenetre` + 14,6), et non 12.
+  //
+  // Le refaire à chaque pas reste le bon choix — un socle qui ne suivrait pas le
+  // relief se verrait immédiatement —, mais c'est un choix CHER, et le garde
+  // au-dessus (`_f3Sale`) est ce qui l'empêche de coûter au repos.
   plinth.rebuild(terrain, params, socleEmprise())
   f3CalquesSuivent()
 }
