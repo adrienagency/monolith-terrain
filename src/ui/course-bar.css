@@ -678,6 +678,18 @@
      typographique qui n'existait dans aucune échelle. */
   .cb-bar { --cb-body-h: 120px; --ce-t-hero: var(--ce-t-hero-compact); --ce-t-title: var(--ce-t-num); }
   .cb-head { min-height: 32px; }
+  /* ⚠️ RELECTURE FINALE (2026-08-04) — LA MARGE HAUTE DU TITRE (--cb-gutter,
+     22px, posée plus haut sur .cb-head) N'EST PAS SURCHARGÉE PAR CE BLOC : elle
+     s'ajoute donc, telle quelle, aux 120px de --cb-body-h ci-dessus qui sont
+     justement le budget que ce palier existe pour gagner (152 → 120, voir la
+     note au-dessus du bloc). .cb-head est en content-box (v28.css), donc ces
+     22px s'ajoutent au min-height plutôt que le contenir : sur un téléphone en
+     paysage (844×390), la barre reprenait ~22 des 32px économisés — le défaut
+     exact que cette media query existe pour corriger. On resserre la marge à
+     --ce-gap-control (8px, le jeton d'écart le plus étroit du système) plutôt
+     que de la supprimer : Adrien l'a demandée, elle doit rester visible, juste
+     plus discrète tant que la hauteur est comptée au pixel près. */
+  .cb-head { padding-block-start: var(--ce-gap-control); }
   /* ⚠️ ON NE MASQUE QUE CE QUI EST VRAIMENT REDONDANT. La règle d'avant
      masquait `.cc-head` EN BLOC — or `.cc-km` vit dedans, et `.cc-km` n'existe
      que pour le cas « profil disparu », déclaré sous 680 px de LARGE. Les deux

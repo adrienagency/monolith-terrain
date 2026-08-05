@@ -16,6 +16,7 @@ import { loadLayerForBounds, patchBounds } from './map/geo-data.js'
 import { makeLabelTexture, labelPlate, labelPlateInk, labelFontReady } from './map/text-label.js'
 import { computeArchSpecs, buildArchMesh, disposeArchGroup } from './arch.js'
 import { animationsActives } from './animations.js'
+import { survolVientDeLaSouris } from './clic-ruban.js'
 
 const MAX_POINTS = 2400 // decimation budget — hover & profile stay O(small)
 
@@ -612,6 +613,11 @@ export class GpxLayer {
     this.sillage = null
     this.sillageMat = null
     this.hoverIdx = -1
+    // ⚠️ hoverIdx A DEUX ÉCRIVAINS (relecture finale, 2026-08-04, BLOQUANT) —
+    // voir le détail complet dans setHover() ci-dessous et dans clic-ruban.js.
+    // _survolSouris distingue LEQUEL des deux a écrit en dernier : vrai
+    // seulement quand c'est un survol souris réel, jamais la tête de lecture.
+    this._survolSouris = false
     // repère de survol du profil (task 12) — fraction de DISTANCE (0..1),
     // au pixel, indépendante de hoverIdx qui s'aimante au sommet le plus
     // proche : null quand la souris n'est pas sur le canevas
@@ -1644,9 +1650,19 @@ export class GpxLayer {
     // donc systématiquement par-dessus le POINT CULMINANT — l'endroit exact
     // qu'un coureur regarde en premier. En lecture, hoverIdx est maintenu en
     // continu par la tête, donc le sommet était masqué en permanence.
-    // Conditionnelle : hors survol on ne paie pas cette réserve, la courbe
-    // récupère 15 px d'amplitude.
-    const reserve = this.hoverIdx >= 0 ? 19 : 4
+    // ⚠️ RELECTURE FINALE (2026-08-04) — INCONDITIONNELLE, ET C'EST DÉLIBÉRÉ.
+    // Une réserve conditionnelle (19 en survol, 4 sinon) ne se voyait jamais
+    // tant que le survol souris HORS LECTURE était cassé (voir _survolSouris
+    // dans setHover, et le clic-pour-reprendre plus bas dans ce fichier) :
+    // hoverIdx ne passait alors jamais de -1 à ≥0 sous la souris. Depuis que
+    // c'est réparé, entrer/sortir du profil fait bien passer hoverIdx par les
+    // deux valeurs — et la réserve, donc l'amplitude Y, changeait à CHAQUE
+    // survol : la courbe entière se redessinait 15 px plus bas puis remontait,
+    // un tressautement sur ce que l'en-tête de ce fichier appelle « le sujet »
+    // de la barre. Une courbe stable vaut mieux qu'une courbe ample qui
+    // tressaute : la réserve reste à 19 en permanence, la courbe perd 15 px
+    // d'amplitude tout le temps plutôt que de sauter parfois.
+    const reserve = 19
     // Amplitude plancher à 1. ⚠️ LE COMMENTAIRE D'AVANT DISAIT FAUX : il
     // affirmait que « dans une barre repliée (corps à 0 px) H vaut 1 ». H
     // valait cv.height, c'est-à-dire le bitmap — c'était l'écroulement décrit
@@ -1849,8 +1865,23 @@ export class GpxLayer {
   // pendant la LECTURE, la position de la tête ne se marque plus d'aucun objet
   // 3D (le picto a été retiré, voir le constructeur) — c'est la pointe du
   // ruban dévoilé qui la donne, et le réticule du profil qui la chiffre.
+  //
+  // ⚠️ hoverIdx A DEUX ÉCRIVAINS, ET LE CLIC-POUR-REPRENDRE (main.js) LES
+  // CONFONDAIT (relecture finale, 2026-08-04, BLOQUANT). Ce setter est appelé
+  // À CHAQUE IMAGE de lecture par _updateHead (isPlaybackHead=true), ET par le
+  // picking souris réel (pointerMove ci-dessus, isPlaybackHead=false, PUIS le
+  // profil embarqué, même valeur). Un rAF s'intercale TOUJOURS entre le
+  // pointerdown et le pointerup d'un clic : pendant une lecture, hoverIdx vaut
+  // donc l'index de la TÊTE au moment du clic, quel que soit ce qu'il y a sous
+  // le curseur — un `hoverIdx >= 0` tout seul ne peut pas distinguer les deux.
+  // `_survolSouris` porte cette distinction, et LUI SEUL : vrai uniquement
+  // quand ce setter vient d'être appelé pour un survol souris réel. Voir
+  // clic-ruban.js (doitReprendreLaLecture) pour l'endroit qui en dépend, et le
+  // test qui verrouille le cas — ce piège se réintroduit tout seul dès qu'un
+  // nouvel appelant de setHover apparaît sans passer par isPlaybackHead.
   setHover(i, fromScene, clientX, clientY, isPlaybackHead = false) {
     this.hoverIdx = i
+    this._survolSouris = survolVientDeLaSouris(isPlaybackHead, i)
     if (i < 0 || !this.track?.world) {
       this.cursor.visible = false
       this.tipEl.classList.add('hidden')
@@ -2032,6 +2063,15 @@ export class GpxLayer {
     this.playing = true
   }
 
+  // ⚠️ NE REMET PAS hoverIdx À -1 — C'EST VOULU, PAS UN OUBLI. hoverIdx reste
+  // à l'index de la tête au moment de la pause, pour garder le réticule du
+  // profil visible sur la position quittée plutôt que de l'effacer. Ça ne
+  // relance PAS la lecture au clic suivant pour autant : le dernier écrivain
+  // de hoverIdx reste la tête (setHover(…, isPlaybackHead=true), voir tick()),
+  // donc _survolSouris reste faux tant qu'aucun mouvement de souris n'a
+  // retraversé le canevas 3D ou le profil (voir clic-ruban.js). Un clic loin
+  // du tracé, juste après Pause, plonge donc bien sur le terrain — il ne
+  // relance pas la lecture là où elle s'est arrêtée.
   pause() {
     this.playing = false
   }

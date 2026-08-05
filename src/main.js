@@ -33,6 +33,7 @@ import { createGoto, geocode, mainParts } from './goto.js'
 import { frameTrack, viseLeCanevas3D } from './gpx.js'
 import { GpxLayerManager } from './gpx-layers.js'
 import { peutEngagerLeSuivi, doitReamorcerSuivi } from './suivi-course.js'
+import { doitReprendreLaLecture } from './clic-ruban.js'
 import { buildRaceLabels } from './race-labels.js'
 import { buildCourseBar } from './ui/course-bar.js'
 import { snapToKm, ascentStats, parseRace } from './race-model.js'
@@ -2091,14 +2092,27 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   // raycast ici, juste la MÊME conversion distance que partout ailleurs dans
   // l'affichage (cumKm[i]/totKm) — hoverIdx désigne déjà un sommet réel, pas
   // besoin d'indexALAbscisse qui va dans l'autre sens (fraction -> sommet).
-  const traceHoverIdx = gpxLayer.activeLayer?.gpx?.hoverIdx ?? -1
-  const traceCumKm = gpxLayer.activeLayer?.gpx?.track?.cumKm
-  if (traceHoverIdx >= 0 && traceCumKm?.length) {
-    const totKm = traceCumKm[traceCumKm.length - 1]
-    if (totKm > 0) {
-      seekAndResumeCourse(traceCumKm[traceHoverIdx] / totKm)
-      return
-    }
+  //
+  // ⚠️ hoverIdx SEUL NE SUFFIT PLUS (relecture finale, 2026-08-04, BLOQUANT).
+  // hoverIdx a DEUX écrivains — le picking souris ci-dessus ET la tête de
+  // lecture, qui le réécrit CHAQUE IMAGE pendant qu'elle joue (gpx.js,
+  // _updateHead). Un rAF s'intercale TOUJOURS entre le pointerdown et le
+  // pointerup d'un clic : `hoverIdx >= 0` seul restait donc vrai en
+  // PERMANENCE pendant la lecture, quel que soit ce qu'il y avait sous le
+  // curseur — chaque clic (y compris loin du tracé, destiné à plonger sur le
+  // terrain) relançait `seekAndResumeCourse`, qui réinitialise la poursuite
+  // caméra via `engageGpxFollow` → `pilote.lancerPoursuite()`. `_survolSouris`
+  // (posé par GpxLayer.setHover, voir gpx.js) distingue les deux écrivains ;
+  // `doitReprendreLaLecture` (clic-ruban.js, testé) encode la garde complète —
+  // voir ce fichier pour le détail, et test/clic-ruban.test.js pour le
+  // scénario qui verrouille « en lecture, un clic hors du ruban plonge ».
+  const traceGpx = gpxLayer.activeLayer?.gpx
+  const traceHoverIdx = traceGpx?.hoverIdx ?? -1
+  const traceCumKm = traceGpx?.track?.cumKm
+  const traceTotKm = traceCumKm?.length ? traceCumKm[traceCumKm.length - 1] : 0
+  if (doitReprendreLaLecture({ survolSouris: traceGpx?._survolSouris, hoverIdx: traceHoverIdx, totKm: traceTotKm })) {
+    seekAndResumeCourse(traceCumKm[traceHoverIdx] / traceTotKm)
+    return
   }
   if (params.source !== 'real' || !dem || params.demZoom >= userFineZoom) return // already at finest detail
   focusRay.setFromCamera(_clickNdc, camera)
