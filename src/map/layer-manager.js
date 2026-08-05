@@ -29,9 +29,12 @@ export class MapLayers {
   // SP2: OSM attribution (ODbL) + loading state, derived from the live layers
   isOsmActive() { return Object.values(this._layers).some((l) => l.usingOsm) }
   isLoading() { return Object.values(this._layers).some((l) => l.loading) }
-  // keep fat-line screen-space widths correct after a viewport resize
+  // keep fat-line screen-space widths correct after a viewport resize.
+  // La traversée vit maintenant DANS le calque, avec la valeur mémorisée que
+  // ses reconstructions reliront (water-layer.js) : la faire ici laissait la
+  // prochaine reconstruction repartir de `window.innerHeight`.
   onResize(w, h) {
-    for (const l of [this.water]) l.group.traverse((o) => { if (o.material && o.material.isLineMaterial) o.material.resolution.set(w, h) })
+    for (const l of [this.water]) l.onResize?.(w, h)
   }
   // hide the whole set outside surface mode (globe/export)
   setSurfaceVisible(v) {

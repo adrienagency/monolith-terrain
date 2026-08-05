@@ -594,6 +594,18 @@ export class GpxLayer {
     this.group = new THREE.Group()
     this.group.name = 'gpx'
     scene.add(this.group)
+    // ══════════ LA RÉSOLUTION DES TRAITS LARGES — UNE SEULE VÉRITÉ ══════════
+    //
+    // `LineMaterial` a besoin de la taille du TAMPON DE DESSIN pour convertir
+    // son `linewidth` (en pixels) vers l'espace clip — voir export-traits.js.
+    // Elle était relue depuis `window.innerWidth/innerHeight` À CHAQUE
+    // construction, ce qui ment deux fois : en boutique et dans le Studio,
+    // `#app` n'est qu'un cadre plus petit que la fenêtre (viewport.js le dit
+    // déjà pour le compositeur) ; et après un redimensionnement, une
+    // reconstruction ré-écrasait la valeur que `onResize` venait de poser par
+    // celle de la fenêtre. On la garde donc ici, `onResize` la tient à jour, et
+    // rien d'autre ne la fabrique.
+    this._resolution = new THREE.Vector2(window.innerWidth, window.innerHeight)
     // ══════════ LE DÉCALAGE DE FENÊTRE (mode continu 3×3) ═══════════════════
     //
     // La trace est cuite en coordonnées de CHAMP (`latLonToWorld`) et le groupe
@@ -1165,7 +1177,7 @@ export class GpxLayer {
       polygonOffsetFactor: -4,
       polygonOffsetUnits: -4,
     })
-    this.lineMat.resolution.set(window.innerWidth, window.innerHeight)
+    this.lineMat.resolution.copy(this._resolution)
     this._coupeALaFenetre(this.lineMat)
     this.line = new Line2(geo, this.lineMat)
     this.line.computeLineDistances()
@@ -1187,7 +1199,7 @@ export class GpxLayer {
         vertexColors: gradientOn,
         alphaToCoverage: false,
       })
-      this.glowMat.resolution.set(window.innerWidth, window.innerHeight)
+      this.glowMat.resolution.copy(this._resolution)
       this._coupeALaFenetre(this.glowMat)
       this.glowLine = new Line2(glowGeo, this.glowMat)
       this.glowLine.computeLineDistances()
@@ -1962,7 +1974,12 @@ export class GpxLayer {
 
   // ---------------------------------------------------------------- misc
 
+  // ⚠️ LA VALEUR MÉMORISÉE D'ABORD, LES MATÉRIAUX ENSUITE. Une reconstruction
+  // peut arriver bien après ce redimensionnement (arrivée d'une tuile, curseur
+  // d'exagération) : sans le miroir, elle repartirait de la taille de la
+  // fenêtre et défferait ce qu'on vient de poser.
   onResize(w, h) {
+    if (w > 0 && h > 0) this._resolution.set(w, h)
     this.lineMat?.resolution.set(w, h)
     this.glowMat?.resolution.set(w, h)
   }

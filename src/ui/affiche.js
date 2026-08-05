@@ -72,7 +72,9 @@ export function ligneVerite(geo) {
  *
  * @param {object} ctx
  * @param {() => Promise<string>} ctx.rendreApercu - rend la scène au ratio
- *   demandé et rend une URL d'image. Reçoit { largeur, hauteur }.
+ *   demandé et rend une URL d'image. Reçoit { largeur, hauteur, hauteurMm,
+ *   cadrage, pointNet } — `hauteurMm` est la hauteur physique du tirage, dont
+ *   se déduit la densité réelle de la vignette (export-traits.js).
  * @param {() => {nom:string, lat:number, lon:number, altMax:number|null}} ctx.lieu
  * @param {(commande) => void} [ctx.onCommander] - le pas suivant (paiement)
  */
@@ -442,6 +444,12 @@ export function ouvrirAffiche(ctx) {
       const url = await ctx.rendreApercu({
         largeur: Math.max(2, Math.round(W * k)),
         hauteur: Math.max(2, Math.round(H * k)),
+        // La hauteur PHYSIQUE que cette vignette représente. Elle ne sert pas au
+        // cadrage — elle donne la densité réelle de l'aperçu (quelques dizaines
+        // de dpi, pas 300), donc le bon plancher d'épaisseur de trait. Voir
+        // export-traits.js. `finiPx` est le format APRÈS coupe : la hauteur qui
+        // lui correspond est `hauteurMm`, sans fond perdu.
+        hauteurMm: geo.hauteurMm,
         cadrage: { ...etat.cadrage },
         pointNet: etat.pointNet,
       })

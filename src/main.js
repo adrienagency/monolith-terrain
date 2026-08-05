@@ -75,6 +75,9 @@ import { Plinth, bandeContact } from './plinth.js'
 // le cadrage de l'affiche : « tout le socle » se calcule, il ne se devine pas
 import { cadrageValide, distanceCadrage, distanceAffiche } from './print-page.js'
 import { composeDecalage } from './export-cadrage.js'
+// l'épaisseur des traits larges : elle vit HORS de la matrice de projection,
+// donc ni le cadrage ni le pavage ne la corrigent — voir export-traits.js
+import { materiauxDeLigne, reglerTraits } from './export-traits.js'
 import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
 import { fetchRegionMask, regionMaskFromParts, frameRegion, rasterizeMask } from './region-mask.js'
@@ -7016,6 +7019,36 @@ function cadrerAffiche(aspect, cadrage, pointNet = null, tuile = null) {
   return { restaurer }
 }
 
+// ═══════════ L'ÉPAISSEUR DES TRAITS, LE TEMPS D'UN RENDU D'AFFICHE ══════════
+//
+// `cadrerAffiche` juste au-dessus règle tout ce qui passe par la matrice de
+// projection. Les traits larges (`LineMaterial` : les fleuves, les contours de
+// lac, le halo du tracé) n'y passent PAS — ils s'élargissent en espace clip,
+// après la projection, à partir d'une `resolution` figée à la taille du tampon
+// d'écran. Le décalage de tuile ne les corrige donc pas, et sans le geste
+// ci-dessous une affiche sort en peigne : les segments horizontaux d'une
+// épaisseur, les verticaux d'une autre. Le raisonnement complet, la formule de
+// l'anisotropie et le plancher de 0,25 pt sont dans export-traits.js.
+//
+// ⚠️ ON TRAVERSE LA SCÈNE plutôt que d'énumérer trois matériaux connus : un
+// quatrième calque à traits larges doit être pris en charge le jour où il
+// arrive, pas le jour où quelqu'un remarque le peigne sur un tirage payé.
+//
+// ⚠️ RENDRE L'ÉTAT EST LA MOITIÉ DU TRAVAIL. L'appelant DOIT appeler
+// `restaurer()` dans un `finally` : l'export dure une seconde, la carte que
+// l'utilisateur regarde reste.
+//
+// @param {{w:number, h:number}} tuile - la taille RÉELLEMENT rendue (plafond
+//   matériel compris : passer par `tailleSousPlafond` avant, pas la demande)
+// @param {number} hauteurTotalePx - la hauteur de l'affiche ENTIÈRE ; pour un
+//   aperçu plein cadre c'est celle de la tuile, pour un tirage pavé c'est celle
+//   de l'image finie
+// @param {number} [hauteurMm] - la hauteur physique du tirage, qui donne la
+//   densité réelle et donc le plancher d'encre
+function reglerTraitsAffiche({ tuile, hauteurTotalePx, hauteurMm = 0, dpi = 0 }) {
+  return reglerTraits(materiauxDeLigne(scene), { tuile, hauteurTotalePx, hauteurMm, dpi })
+}
+
 /**
  * Où le relief est-il touché par un clic sur la feuille ?
  *
@@ -7055,7 +7088,9 @@ function etatCarteEncode() {
 
 async function openAfficheUI(etatInitial = null) {
   const { ouvrirAffiche } = await import('./ui/affiche.js')
-  const { exportImage } = await import('./export.js')
+  // `tailleSousPlafond` avec lui : l'épaisseur des traits se règle sur ce qui
+  // est VRAIMENT peint, et le plafond matériel peut avoir raboté la demande.
+  const { exportImage, tailleSousPlafond } = await import('./export.js')
   // Ce qu'on devra rendre en sortant : l'affiche emprunte des réglages de carte,
   // elle ne se les approprie pas.
   const lieuxAvant = params.placesEnabled
@@ -7069,8 +7104,21 @@ async function openAfficheUI(etatInitial = null) {
     // Un VRAI rendu au ratio demandé, pas un recadrage de l'écran — c'est tout
     // l'intérêt de la passe. Sans crédit incrusté : la ligne d'attribution a sa
     // place sur l'affiche finale, pas en travers d'une vignette de choix.
-    rendreApercu: async ({ largeur, hauteur, cadrage, pointNet }) => {
+    rendreApercu: async ({ largeur, hauteur, hauteurMm, cadrage, pointNet }) => {
       const rendu = cadrerAffiche(largeur / hauteur, cadrage, pointNet)
+      // ⚠️ L'APERÇU MENTAIT DÉJÀ, ET C'EST LUI QU'ON REGARDE POUR DÉCIDER.
+      // Sa `resolution` valait la taille de la FENÊTRE alors qu'il rend au
+      // ratio de l'affiche : les fleuves y sortaient déjà anisotropes, et
+      // toujours à leur épaisseur d'écran, jamais à celle du tirage. Le corriger
+      // ici n'est pas une politesse : sans ça l'écran et le fichier
+      // divergeraient, ce que tout ce chantier existe pour empêcher.
+      //
+      // La tuile de l'aperçu, c'est l'aperçu tout entier — d'où
+      // `hauteurTotalePx = h`. `hauteurMm` vient de la géométrie de la page
+      // (ui/affiche.js) : c'est elle qui donne la densité RÉELLE de cette
+      // vignette, et donc le bon plancher d'encre.
+      const [w, h] = tailleSousPlafond(renderer, largeur, hauteur)
+      const traits = reglerTraitsAffiche({ tuile: { w, h }, hauteurTotalePx: h, hauteurMm })
       try {
         const blob = await exportImage({
           renderer, composer, camera,
@@ -7080,6 +7128,7 @@ async function openAfficheUI(etatInitial = null) {
         })
         return URL.createObjectURL(blob)
       } finally {
+        traits.restaurer()
         rendu.restaurer()
       }
     },

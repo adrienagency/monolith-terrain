@@ -260,6 +260,28 @@ export class WaterLayer {
     this.group = new THREE.Group(); this.group.name = 'water'; scene.add(this.group)
     this._buildId = 0; this.usingOsm = false; this.loading = false
     this._lakeMats = []; this._sun = null
+    // ══════════ LA RÉSOLUTION DES FLEUVES — UNE SEULE VÉRITÉ ═══════════════
+    //
+    // Les rivières et les contours de lac sont des `LineSegments2` : leur
+    // épaisseur est en pixels du TAMPON DE DESSIN, convertie en espace clip par
+    // `LineMaterial` (voir export-traits.js). Elle était relue depuis
+    // `window.innerWidth/innerHeight` à chaque reconstruction — or le calque se
+    // reconstruit à chaque zone, à chaque zoom et à chaque arrivée de tuile.
+    // En boutique et dans le Studio, `#app` est plus petit que la fenêtre ; et
+    // après un redimensionnement, la première reconstruction ré-écrasait la
+    // valeur que `onResize` venait de poser. On la garde donc ici.
+    this._resolution = new THREE.Vector2(window.innerWidth, window.innerHeight)
+  }
+
+  // Les traits larges du calque suivent la taille du tampon de dessin : la
+  // valeur mémorisée d'abord (les reconstructions à venir la reliront), les
+  // matériaux vivants ensuite.
+  onResize(w, h) {
+    if (w > 0 && h > 0) this._resolution.set(w, h)
+    this.group.traverse((o) => {
+      const m = o.material
+      if (m && m.isLineMaterial) m.resolution.set(w, h)
+    })
   }
   _clear() {
     this.group.traverse((o) => { if (o.isLineSegments2 || o.isLine2 || o.isMesh) { o.geometry.dispose(); o.material.dispose() } })
@@ -550,7 +572,11 @@ export class WaterLayer {
     // Hors mode continu `fenetre` vaut (0,0) et l'expression est celle d'avant.
     const fen = terrain.fenetre ?? { x: 0, z: 0 }
     const sample = (x, z) => (terrain.sample ? terrain.sample(x - fen.x, z - fen.z) : 0)
-    const resolution = new THREE.Vector2(window.innerWidth, window.innerHeight)
+    // La résolution du calque, pas celle de la fenêtre (voir le constructeur).
+    // `buildLineSegments` la COPIE dans chaque matériau : aucun partage de
+    // référence, un export peut donc régler les matériaux sans toucher à cette
+    // valeur-ci.
+    const resolution = this._resolution
     const ink = params.darkMode ? '#7fb2d6' : '#2b7fc4'
     // Lakes get a distinctly more saturated blue than the general water ink
     // in both themes — "en bleu assez visible" — while still respecting the
