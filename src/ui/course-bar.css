@@ -275,7 +275,8 @@
    colorée (ce n'est pas une action de publication). */
 .cb-quit { letter-spacing: 0.01em; }
 .cb-collapse:focus-visible, .cb-quit:focus-visible,
-.cb-play:focus-visible, .cb-speed-btn:focus-visible, .cb-cam-btn:focus-visible {
+.cb-play:focus-visible, .cb-stop:focus-visible,
+.cb-speed-btn:focus-visible, .cb-cam-btn:focus-visible {
   outline: 2px solid var(--ce-accent);
   outline-offset: 2px;
 }

@@ -955,3 +955,40 @@ test('aucune couleur en dur dans les deux feuilles de la barre course', () => {
     assert.ok(!/\brgba?\(/.test(css), `${f} : couleur rgb() en dur`)
   }
 })
+
+// ================================================ 15. le bouton Stop
+test('un bouton Stop existe à côté de Pause, au gabarit du système, et appelle onStop', () => {
+  // Adrien : « il manque un bouton de stop du tracé ». Pause suspend la
+  // lecture (la tête reste où elle est), Quitter referme toute la barre :
+  // rien ne permettait de stopper le tracé — ramener la tête au départ et
+  // couper le suivi caméra — sans sortir du mode course.
+  const js = lire('src/ui/course-bar.js')
+  const debut = js.indexOf('class="cb-stop')
+  assert.ok(debut >= 0, 'le bouton cb-stop est introuvable dans le gabarit')
+  const bloc = js.slice(debut, js.indexOf('</button>', debut))
+  // ⚠️ MÊME GABARIT QUE SES VOISINS. .ce-icon-btn fait la taille, le rayon et
+  // le hover — pas question de redessiner un quatrième bouton à la main dans
+  // un fichier qui condamne déjà cette dérive pour les trois autres.
+  assert.match(bloc, /ce-icon-btn/, 'le bouton Stop doit porter .ce-icon-btn')
+  assert.match(bloc, /data-role="stop"/)
+  assert.match(bloc, /aria-label="Arrêter la lecture"/)
+  // à DROITE de Pause : dans le groupe de transport, juste après cb-play
+  const outils = js.slice(js.indexOf('<div class="cb-outils">'), js.indexOf('<div class="cb-stack">'))
+  assert.ok(outils.indexOf('cb-play') >= 0 && outils.indexOf('cb-play') < outils.indexOf('cb-stop'),
+    'Stop doit suivre Lecture/Pause dans le groupe de transport, pas le précéder')
+  // et le clic appelle le paramètre onStop, comme onTogglePlay/onQuit pour
+  // leurs boutons respectifs
+  assert.match(js, /stopBtn\.addEventListener\('click', onStop\)/)
+})
+
+test('Stop coupe la lecture ET le suivi caméra, dans main.js', () => {
+  // gpx.stop() ramène la tête au départ et restaure la ligne entière (ce
+  // n'est PAS une pause) ; sans couper aussi le suivi, la caméra continuerait
+  // de chasser une tête qui vient de sauter au kilomètre zéro.
+  const main = lire('src/main.js')
+  const debut = main.indexOf('onStop:')
+  assert.ok(debut >= 0, 'onStop doit être câblé au constructeur de la barre')
+  const bloc = main.slice(debut, debut + 200)
+  assert.match(bloc, /gpxLayer\.stop\(\)/)
+  assert.match(bloc, /disengageGpxFollow\(\)/)
+})

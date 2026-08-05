@@ -4439,6 +4439,13 @@ const courseBar = buildCourseBar({
   container: document.body,
   onTogglePlay: () => togglePlay(),
   onQuit: () => quitterModeCourse(),
+  // Stop ≠ Pause ≠ Quitter : Pause suspend la tête où elle est, Quitter
+  // referme toute la barre. Stop ramène le tracé au départ (gpx.stop()
+  // restaure la ligne entière, voir gpx.js) et coupe le suivi caméra — même
+  // paire d'appels que stopFollow passée aux autres panneaux (routePanel,
+  // miniRoute) — SANS sortir du mode course : la barre reste posée, prête à
+  // relancer une lecture depuis le début.
+  onStop: () => { gpxLayer.stop(); disengageGpxFollow(); syncCourseBarMode() },
   getSpeed: () => params.gpxFollowSpeed,
   setSpeed: (v) => { params.gpxFollowSpeed = v },
   getCameraRig: () => (drone.active ? drone : null),

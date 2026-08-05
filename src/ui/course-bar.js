@@ -38,6 +38,9 @@ const icPlein = (d) => `<svg viewBox="0 0 20 20" fill="currentColor">${d}</svg>`
 const ICONE_LECTURE = icPlein('<path d="M7 4.6 16 10 7 15.4Z"/>')
 // deux barres de 2,9 px espacées de 1,8 : l'encre va de 6,2 à 13,8, centre 10
 const ICONE_PAUSE = icPlein('<rect x="6.2" y="4.5" width="2.9" height="11" rx="1"/><rect x="10.9" y="4.5" width="2.9" height="11" rx="1"/>')
+// carré plein centré sur (10,10) — même langue que le triangle de lecture et
+// les deux barres de pause, un glyphe DESSINÉ, pas un carré CSS bricolé
+const ICONE_STOP = icPlein('<rect x="5.5" y="5.5" width="9" height="9" rx="1.5"/>')
 const ICONE_CHEVRON = ic('<path d="M6 8.4 10 12.4 14 8.4"/>')
 
 // Icônes DESSINÉES, pas bricolées en bordures CSS : la première version
@@ -57,7 +60,7 @@ const CAM_BTNS = [
 const nb = (v, d = 0) =>
   (Number.isFinite(v) ? v : 0).toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d })
 
-export function buildCourseBar({ container, onTogglePlay, onQuit, getSpeed, setSpeed, getCameraRig, isPlaying }) {
+export function buildCourseBar({ container, onTogglePlay, onQuit, onStop, getSpeed, setSpeed, getCameraRig, isPlaying }) {
   const bar = document.createElement('div')
   // ⚠️ .ce-glassbox EST LE VERRE DU SYSTÈME, PAS UNE DÉCORATION À RECOPIER.
   // La barre redéclarait à la main les cinq propriétés de .ce-glassbox, avec
@@ -104,6 +107,7 @@ export function buildCourseBar({ container, onTogglePlay, onQuit, getSpeed, setS
       <section class="cb-zone cb-zone-lecture">
         <div class="cb-outils">
           <button class="cb-play" type="button" aria-label="Lecture">${ICONE_LECTURE}</button>
+          <button class="cb-stop ce-icon-btn" type="button" data-role="stop" aria-label="Arrêter la lecture">${ICONE_STOP}</button>
           <div class="cb-stack">
             <div class="cb-speeds ce-seg" role="group" aria-label="Vitesse de lecture"></div>
             <div class="cb-cam" role="group" aria-label="Caméra"></div>
@@ -118,6 +122,7 @@ export function buildCourseBar({ container, onTogglePlay, onQuit, getSpeed, setS
 
   const titleEl = bar.querySelector('.cb-title')
   const playBtn = bar.querySelector('.cb-play')
+  const stopBtn = bar.querySelector('.cb-stop')
   const speedsEl = bar.querySelector('.cb-speeds')
   const camEl = bar.querySelector('.cb-cam')
   const profileZone = bar.querySelector('.cb-profil')
@@ -187,6 +192,7 @@ export function buildCourseBar({ container, onTogglePlay, onQuit, getSpeed, setS
   }
 
   playBtn.addEventListener('click', onTogglePlay)
+  stopBtn.addEventListener('click', onStop)
 
   // ⚠️ UN SEUL ENDROIT ÉCRIT L'ÉTAT DU BOUTON REPLIER, et il est appelé
   // depuis les DEUX chemins qui replient ou déplient. La version d'avant
