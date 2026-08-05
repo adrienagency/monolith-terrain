@@ -895,10 +895,24 @@ export class BlockGrid {
    * principal, cumulée avec la rafale de murs de la Tâche 3 dans le MÊME tour
    * de boucle, pour un déplacement nul là où on regarde.
    *
-   * ⚠️ ET C'EST TOUT OU RIEN. Le bloc CENTRAL passe par le même chemin sans
-   * grain que ses voisines : un centre grainé accolé à des voisines lisses
-   * marquerait une discontinuité de fond pile à la jointure — l'inverse de ce
-   * que le damier cherche.
+   * ET C'EST TOUT OU RIEN : le bloc CENTRAL passe par le même chemin sans grain
+   * que ses voisines.
+   *
+   * ⚠️ CORRECTION DE LA RONDE 2 — LA RAISON QUE J'AVAIS ÉCRITE ÉTAIT FAUSSE.
+   * J'invoquais « une marche de fond pile à la jointure » entre un centre grainé
+   * et des voisines lisses. C'est impossible, et ma propre prémisse le dit :
+   * `landFactor` éteint le grain sous 90 m, donc il est nul PARTOUT OÙ IL Y A DE
+   * LA MER. Le relecteur l'a mesuré sur 1 327 104 texels — écart du canal R
+   * exactement zéro sur chaque texel de mer, à tous les réglages du curseur
+   * Détail. Un fond identique des deux côtés ne peut pas marcher.
+   *
+   * Ce qui pourrait diverger, c'est le TRAIT DE CÔTE, là où le grain commence à
+   * mordre — et seulement au maximum du curseur, nul au réglage par défaut. Les
+   * vraies raisons du tout-ou-rien sont donc plus simples, et elles suffisent :
+   * une seule règle plutôt que deux, le neuvième que porte le bloc central
+   * économisé aussi (32 ms → 17 ms sur un champ de bloc), et surtout la même
+   * décision que le mode continu prend déjà en production depuis
+   * `terrain.js:2091`.
    *
    * Rend `null` hors relief réel, ou tant que le bloc central n'a pas de MNT :
    * l'appelant garde alors son chemin d'avant.

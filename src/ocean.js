@@ -39,6 +39,14 @@ import { makeSeaState, seaStateToUniforms, GERSTNER_GLSL } from 'ocean-waves'
 
 const FIELD_RES = 384 // height/shore field over the whole slab
 
+// ⏱️ L'AMORTISSEMENT DU RECUIT DE CHAMP (voir recuireChampDiffere).
+// Ce n'est pas un réglage de confort : les dalles du damier atterrissent à
+// plusieurs SECONDES d'intervalle — chacune est un aller-retour réseau
+// (block-grid.js) — donc un amortissement court suffit à fondre une rafale sans
+// jamais faire attendre. Chaque arrivée repousse l'échéance ; seule la dernière
+// paie.
+const RECUIT_DIFFERE_MS = 300
+
 // spectrum units → scene units: the sea state is authored in "spectrum
 // metres" (dominant swell λ 12-24 m); at 0.12 scene units per metre the
 // dominant wavelength lands at 1.4-2.9 scene units — the same band the old
@@ -1133,6 +1141,12 @@ export class RealWater {
     this._seaMesh = null
     this._fieldTex = null
     this._bakeCtx = null
+    // … et l'échéance de recuit part avec : elle porterait sur un champ qui
+    // n'existe plus. `recuireChamp` se garde déjà sur `_bakeCtx`, mais laisser
+    // courir un minuteur mort est le genre de détail qui devient un défaut le
+    // jour où quelqu'un ajoute un effet de bord dans le rappel.
+    clearTimeout(this._minuteurRecuit)
+    this._minuteurRecuit = 0
     // 🔴 ET LE BÂTI DES LACS EN VOL EST PÉRIMÉ ICI, pas dans `rebuild`. Le cas
     // qui l'exige : on éteint « Mer animée » alors qu'un travail est parti —
     // `rebuild` fait `_clear()` puis RETOURNE, sans jamais atteindre la ligne
@@ -1462,6 +1476,17 @@ export class RealWater {
    * `this` — rien ne doit dépendre de l'instant où elle tourne.
    */
   _batirLacs(lacs, { dem, params, fieldTex, cote, centre = { x: 0, z: 0 } }) {
+    // 🔴 LE CHAMP SE RELIT SUR `this`, IL NE SE CAPTURE PLUS — et c'est le
+    // recuit différé qui l'exige. Le garde-fou de génération ci-dessus ne couvre
+    // que `_clear()` ; or `recuireChamp()` NE fait pas de `_clear()`, il
+    // remplace la texture et **dispose l'ancienne**. Le détecteur de lacs met
+    // ~600 ms au Worker, le recuit part à 300 ms : la fenêtre est grande
+    // ouverte, et une arrivée de dalle pendant un chargement de damier suffit à
+    // la traverser. Le lac se serait alors posé sur une texture détruite — ce
+    // qui, comme le dit le commentaire du garde, ne lève rien : ça peint du
+    // noir. Sur le chemin synchrone (fente de dem-memo) les deux valeurs sont
+    // le même objet, donc rien ne change.
+    const champ = this._fieldTex || fieldTex
     // ⚠️ `_spanDem` ET NON `_span` : un lac est taillé sur la grille du MNT, et
     // le MNT ne grandit PAS avec le carré du damier (voir `rebuild`). Servir le
     // span du champ ici étirerait chaque lac du bloc central au format du
@@ -1500,7 +1525,7 @@ export class RealWater {
       const z0 = toWorld(minY, size)
       const x1 = toWorld(minX + w - 1, size)
       const z1 = toWorld(minY + h - 1, size)
-      const mat = waterMaterial({ isLake: true, params, fieldTex })
+      const mat = waterMaterial({ isLake: true, params, fieldTex: champ })
       mat.uniforms.uWaterY.value = yLake
       const lenLake = LEN_SCALE * Math.min(1, Math.max(0.55, this._waveScale)) * 0.5
       mat.uniforms.uLenScale.value = lenLake
@@ -1613,6 +1638,40 @@ export class RealWater {
   recuireChamp() {
     if (!this._bakeCtx || !this.materials.length) return false
     this._rebakeField()
+    return true
+  }
+
+  /**
+   * Le même recuit, mais AMORTI : un seul, après la dernière arrivée de dalle.
+   *
+   * Ici et pas dans `main.js` pour deux raisons. La mer possède son champ, donc
+   * elle possède la décision de le recuire ; et ce fichier est exécutable en
+   * test (test/damier-mer-runtime.test.js) alors que `main.js` ne l'est pas —
+   * un minuteur qu'aucun test ne peut piloter est un minuteur qui dérive.
+   *
+   * ⚠️ ON ANNULE AVANT DE DÉCIDER, PAS APRÈS. Sortir en premier quand le damier
+   * s'est refermé laisserait une échéance ARMÉE derrière soi : des dalles se
+   * posent, le minuteur part à 300 ms, puis le damier se referme dans
+   * l'intervalle — la croix du profil, ou la fenêtre continue qui referme le
+   * damier (block-grid.js `cellsForTrack`). Trois cents millisecondes plus tard
+   * on recuirait un champ qu'on vient de reconstruire correctement : ~41 ms de
+   * fil principal jetés en bloc seul, ~56 ms en mode continu. Le résultat serait
+   * identique, donc rien ne se corromprait — mais le gel tomberait pile au
+   * moment où l'utilisateur vient de fermer un parcours ou d'attraper la carte
+   * pour la faire glisser.
+   *
+   * @param {number} cote - côté du carré POSÉ. À 1 il n'y a rien à rattraper :
+   *   le champ d'un bloc seul ne dépend que du MNT central, qui n'attend
+   *   personne.
+   */
+  recuireChampDiffere(cote) {
+    clearTimeout(this._minuteurRecuit)
+    this._minuteurRecuit = 0
+    if (!(cote > 1)) return false
+    this._minuteurRecuit = setTimeout(() => {
+      this._minuteurRecuit = 0
+      this.recuireChamp()
+    }, RECUIT_DIFFERE_MS)
     return true
   }
 

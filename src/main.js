@@ -4397,8 +4397,9 @@ function carreDeMer() {
  * trouver. On paierait un quart de seconde pour un déplacement nul là où on
  * regarde.
  * `blockGrid.echantillonSansGrain` prend le même chemin que `sampleChamp`, pour
- * le centre comme pour les voisines (tout ou rien : un centre grainé accolé à
- * des voisines lisses marquerait une marche pile à la jointure).
+ * le centre comme pour les voisines — tout ou rien, et la raison est là-bas (ce
+ * n'est PAS une marche de fond à la jointure : le grain est nul partout où il y
+ * a de la mer, mesuré à zéro exact sur 1 327 104 texels).
  *
  * Une FABRIQUE et non un échantillonneur : le champ est recuit après coup
  * (`merRecuitDiffere`), et le damier a pu gagner des cases entre-temps.
@@ -4448,7 +4449,8 @@ function optionsDeMer() {
  * (huit cuissons d'affilée gèlent la page), ni jamais.
  */
 function merSuitLeDamier() {
-  const cle = cleDuCarre(carreDeMer())
+  const carre = carreDeMer() // lu UNE fois : il traverse les deux décisions
+  const cle = cleDuCarre(carre)
   if (cle !== _merCarrePose) {
     // ⚠️ NOTÉ ICI AUSSI, pas seulement dans `optionsDeMer` : quand la mer est
     // débrayée (FLAGS.water, ou l'interrupteur), `realWater?.rebuild(...)`
@@ -4458,28 +4460,19 @@ function merSuitLeDamier() {
     _merCarrePose = cle
     waterRebuild()
   }
-  merRecuitDiffere()
+  merRecuitDiffere(carre)
 }
 
 // ⏱️ LE RECUIT DIFFÉRÉ DU CHAMP — un seul, après la dernière arrivée.
 //
-// Le délai n'est pas un réglage de confort : les dalles atterrissent à plusieurs
-// SECONDES d'intervalle (chacune est un aller-retour réseau, cf. block-grid.js),
-// donc un amortissement court suffit à fondre une rafale sans jamais faire
-// attendre l'utilisateur. Chaque arrivée repousse l'échéance ; seule la dernière
-// paie. Et ce n'est PAS une reconstruction : ni géométrie, ni matériau, ni lacs
-// — `recuireChamp` ne refait que la texture du champ et la repointe partout.
-const MER_RECUIT_MS = 300
-let _merRecuitTimer = 0
-function merRecuitDiffere() {
-  // rien à rattraper tant que le damier ne s'étend pas : le champ d'un bloc seul
-  // ne dépend que du MNT central, qui n'attend personne.
-  if (carreDeMer().cote <= 1) return
-  clearTimeout(_merRecuitTimer)
-  _merRecuitTimer = setTimeout(() => {
-    _merRecuitTimer = 0
-    realWater?.recuireChamp?.()
-  }, MER_RECUIT_MS)
+// La mécanique (l'amortissement, et surtout l'annulation quand le damier se
+// referme) vit dans `RealWater.recuireChampDiffere` : la mer possède son champ,
+// donc la décision de le recuire, et ce fichier-ci n'est exécutable par aucun
+// test alors qu'`ocean.js` l'est. Ce n'est PAS une reconstruction : ni
+// géométrie, ni matériau, ni lacs — seulement la texture du champ, repointée
+// partout.
+function merRecuitDiffere(carre = carreDeMer()) {
+  realWater?.recuireChampDiffere?.(carre.cote)
 }
 
 const gpxLayer = new GpxLayerManager({ scene, camera, terrain, params, getDem: () => dem, getGrid: () => blockGrid })

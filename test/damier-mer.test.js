@@ -328,9 +328,10 @@ test('le nombre de reconstructions reste borne sur une rafale d\'arrivees', () =
 test('la majorite des arrivees ne reconstruit rien — d\'ou le recuit differe', () => {
   const n = reconstructions(melange(CASES_5x5, 7))
   assert.ok(CASES_5x5.length - n >= 16, `${CASES_5x5.length - n} arrivees muettes, attendu >= 16`)
-  assert.match(MAIN, /function merRecuitDiffere\(\)/, 'aucun recuit differe : ces arrivees seraient perdues')
-  assert.match(MAIN, /realWater\?\.recuireChamp\?\.\(\)/)
-  assert.match(OCEAN, /recuireChamp\(\)/, 'ocean.js n\'expose pas de recuit sans reconstruction')
+  // le recuit lui-même est EXÉCUTÉ dans test/damier-mer-runtime.test.js : ici
+  // on ne vérifie que le fil, entre le damier et la mer.
+  assert.match(MAIN, /realWater\?\.recuireChampDiffere\?\.\(carre\.cote\)/, 'le damier ne previent plus la mer')
+  assert.match(MAIN, /merRecuitDiffere\(carre\)/, 'onGridChanged n\'amorce plus le recuit')
 })
 
 // ════════════════════════ 5. LE COÛT, ET SA BORNE ═══════════════════════════
@@ -354,9 +355,15 @@ test('le champ d\'un 5x5 est chiffre, et il coute quatre fois le 3x3', () => {
   assert.equal(Number((vram(res5) / 1048576).toFixed(1)), 14.1, 'la memoire video du 5x5 a change')
   assert.ok(vram(res5) / vram(res3) > 2.7, 'le cout du 5x5 devrait etre pres de trois fois celui du 3x3')
   // + le transitoire de la cuisson : `water` (1 octet) et `dist` (4 octets) par
-  // texel, soit ~18,4 Mo de tas en plus le temps de la passe de chanfrein.
+  // texel. 1920² × 5 = 18 432 000 octets, soit 17,6 Mio — ou 18,4 Mo si on
+  // compte en millions. (Mon rapport de ronde 1 annonçait 18,3 : ni l'un ni
+  // l'autre. Les deux unités sont écrites ici pour qu'on ne puisse plus les
+  // mélanger.)
   const transitoire = res5 * res5 * (1 + 4)
-  assert.ok(transitoire < 24 * 1024 * 1024, `${(transitoire / 1048576).toFixed(1)} Mo de tas transitoire`)
+  assert.equal(transitoire, 18_432_000)
+  assert.equal(Number((transitoire / 1048576).toFixed(1)), 17.6, 'Mio')
+  assert.equal(Number((transitoire / 1e6).toFixed(1)), 18.4, 'Mo')
+  assert.ok(transitoire < 24 * 1024 * 1024)
 })
 
 // ═══════ 6. VERROUS DE CÂBLAGE — ce qui n'existe qu'en GLSL ou en three.js ═══
