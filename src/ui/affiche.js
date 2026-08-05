@@ -99,6 +99,13 @@ export function ouvrirAffiche(ctx) {
     // l'affiche déplace la caméra, donc une distance mesurée à l'écran
     // désignerait un autre plan une fois l'affiche cadrée.
     pointNet: null,
+    // ⚠️ LA COMPOSITION RETROUVÉE APRÈS UN ALLER-RETOUR CHEZ STRIPE. Partir
+    // payer est une NAVIGATION : l'application est déchargée, et sans ceci
+    // l'acheteur qui renonce revient devant une affiche vierge et doit tout
+    // recomposer. Voir src/paiement.js (afficheSerialisable) pour ce qui
+    // traverse — le LOGO importé, lui, ne traverse pas : c'est une URL d'objet,
+    // elle meurt avec le document.
+    ...(ctx.etatInitial || {}),
   }
 
   document.body.classList.add('af-mode')
@@ -514,16 +521,27 @@ export function ouvrirAffiche(ctx) {
     appliquer({ refaireRendu: 'differe' })
   }, { passive: false })
 
-  cta.addEventListener('click', () => {
+  cta.addEventListener('click', async (e) => {
     cta.disabled = true
     ctaTexte.textContent = 'Un instant…'
     const geo = geometriePage({ format: etat.format, orientation: etat.orientation, dpi: DPI_IMPRESSION })
+    // ⚠️ RÉARMER LE BOUTON N'EST PLUS AUTOMATIQUE. Tant que le paiement n'était
+    // pas branché, un `setTimeout` le rendait actif au bout de 1,2 s. Depuis
+    // qu'un clic réussi part chez Stripe, ce réarmement serait FAUX : le bouton
+    // redeviendrait cliquable pendant que le navigateur quitte la page, et un
+    // second clic ouvrirait une seconde session de paiement. On ne réarme donc
+    // que sur un ÉCHEC — c'est-à-dire quand on reste à l'écran.
+    let reste = true
     try {
-      ctx.onCommander?.({ ...etat, geo, prix: PRIX_AFFICHE_EUR })
+      // ⚠️ `altKey` n'est qu'une INTENTION, pas une autorisation : c'est le
+      // geste qui déclenche la demande du code d'atelier. Le secret, lui, est
+      // saisi puis vérifié CÔTÉ SERVEUR — voir netlify/functions/paiement.mjs.
+      const suite = ctx.onCommander?.({ ...etat, geo, prix: PRIX_AFFICHE_EUR, atelier: !!e.altKey })
+      if (suite && typeof suite.then === 'function') reste = (await suite) !== 'parti'
+    } catch (err) {
+      console.warn('commande :', err)
     } finally {
-      // le paiement n'est pas encore branché : on rend la main plutôt que de
-      // laisser un bouton mort à l'écran
-      setTimeout(() => { cta.disabled = false; ctaTexte.textContent = 'Recevoir le fichier' }, 1200)
+      if (reste) { cta.disabled = false; ctaTexte.textContent = 'Recevoir le fichier' }
     }
   })
 

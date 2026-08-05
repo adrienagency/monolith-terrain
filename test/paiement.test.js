@@ -7,7 +7,13 @@ import { createHmac } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { ARTICLES, article, prixEuros, PAYS_AUTORISES, PAYS_EXCLUS } from '../netlify/functions/_paiement-catalogue.mjs'
 import { signatureValide, commandeDepuisSession } from '../netlify/functions/paiement-webhook.mjs'
-import caisse from '../netlify/functions/paiement.mjs'
+import caisse, { codeAtelierValide, commandeAtelier } from '../netlify/functions/paiement.mjs'
+import { etatDepuisSources, SESSION_RE as SESSION_RE_SERVEUR } from '../netlify/functions/paiement-etat.mjs'
+import {
+  identifiantArticle, FORMATS_IMPRIMES, SESSION_RE, lireRetourPaiement, urlSansRetour,
+  afficheSerialisable, afficheRestauree, poserPanier, lirePanier, viderPanier, CLE_PANIER,
+  demanderCaisse, verifierPaiement, messageRetour, URL_CAISSE,
+} from '../src/paiement.js'
 
 test('le prix vient du SERVEUR : un article inconnu ne s’invente pas', () => {
   // La faille numéro un des paiements web : accepter `{ prix }` du navigateur.
@@ -238,4 +244,363 @@ test('le repli est ÉTROIT : toute autre erreur Stripe remonte comme avant', asy
   assert.equal(rep.status, 502)
   assert.equal(json.ok, false)
   assert.equal(json.erreur, 'Invalid amount.')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LE TUNNEL, CÔTÉ NAVIGATEUR — l'aller, le retour, et ce qui survit entre
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── L'article : ce que le client a le droit de demander ─────────────────────
+
+test('tout identifiant que le CLIENT sait produire existe dans le catalogue SERVEUR', () => {
+  // Le garde qui empêche les deux fichiers de diverger en silence : le jour où
+  // un format d'impression est ajouté d'un seul côté, cette ligne le dit.
+  for (const format of FORMATS_IMPRIMES) {
+    const id = identifiantArticle({ livrable: 'impression', format })
+    assert.ok(article(id), `${id} n’est pas au catalogue serveur`)
+  }
+  assert.equal(identifiantArticle({}), 'affiche-pdf')
+  assert.ok(article(identifiantArticle({})))
+})
+
+test('un article que l’écran ne sait pas nommer vaut null, jamais un identifiant inventé', () => {
+  assert.equal(identifiantArticle({ livrable: 'impression', format: '12x12' }), null)
+  assert.equal(identifiantArticle({ livrable: 'impression', format: '' }), null)
+  assert.equal(identifiantArticle({ livrable: 'tatouage' }), null)
+  // et pas d'accès aux clés héritées d'Object, comme côté serveur
+  assert.equal(identifiantArticle({ livrable: 'impression', format: 'constructor' }), null)
+})
+
+// ── Le retour d'URL, à qui l'on ne fait pas confiance ───────────────────────
+
+test('le retour de Stripe se lit, mais un « ?paye= » illisible ne confirme rien', () => {
+  assert.deepEqual(lireRetourPaiement('?paye=cs_test_a1b2c3d4e5'), { cas: 'paye', session: 'cs_test_a1b2c3d4e5' })
+  assert.deepEqual(lireRetourPaiement('?paiement=annule'), { cas: 'annule', session: '' })
+  assert.deepEqual(lireRetourPaiement(''), { cas: null, session: '' })
+  assert.deepEqual(lireRetourPaiement('?embed=1'), { cas: null, session: '' })
+  // ⚠️ Le gabarit non remplacé : quelqu'un recopie la success_url du code
+  // source. Il ne doit pas partir chez Stripe, et surtout rien confirmer.
+  assert.equal(lireRetourPaiement('?paye={CHECKOUT_SESSION_ID}').cas, 'invalide')
+  assert.equal(lireRetourPaiement('?paye=oui').cas, 'invalide')
+  assert.equal(lireRetourPaiement('?paye=').cas, 'invalide')
+  assert.equal(lireRetourPaiement('?paye=cs_' + 'x'.repeat(200)).cas, 'invalide')
+  // une session invalide ne repart JAMAIS dans l'objet rendu
+  assert.equal(lireRetourPaiement('?paye=<script>').session, '')
+})
+
+test('le client et le serveur ont EXACTEMENT la même idée d’un identifiant de session', () => {
+  // Deux expressions régulières dans deux fichiers, c'est deux occasions de
+  // diverger. Celle-ci n'en laisse pas l'occasion.
+  const echantillons = [
+    'cs_test_a1b2c3d4e5', 'cs_live_' + 'a'.repeat(60), 'atelier_0123456789abcdef',
+    'cs_court', 'atelier_MAJUSCULES', 'atelier_', '', 'nimportequoi',
+    'cs_test_a1b2c3d4e5 ', ' cs_test_a1b2c3d4e5', 'cs_test_a1b2c3d4e5\n',
+  ]
+  for (const s of echantillons) {
+    assert.equal(SESSION_RE.test(s), SESSION_RE_SERVEUR.test(s), `désaccord sur « ${s} »`)
+  }
+})
+
+test('l’URL se débarrasse des paramètres de retour, et de rien d’autre', () => {
+  // Laisser « ?paye= » dans la barre d'adresse, c'est une confirmation qui se
+  // rejoue à chaque rechargement — et qui part dans un signet.
+  assert.equal(urlSansRetour('https://shibumap.com/?paye=cs_test_a1b2c3d4e5'), '/')
+  assert.equal(urlSansRetour('https://shibumap.com/?paiement=annule&studio=1'), '/?studio=1')
+  assert.equal(urlSansRetour('https://shibumap.com/?paye=x#s=abc'), '/#s=abc')
+  assert.equal(urlSansRetour('pas une url'), null)
+})
+
+// ── Le panier : ce qui survit à l'aller-retour ──────────────────────────────
+
+/** Un `sessionStorage` de test. `casse` simule une navigation privée. */
+function stockage(casse = false) {
+  const m = new Map()
+  return {
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => { if (casse) throw new Error('quota'); m.set(k, String(v)) },
+    removeItem: (k) => m.delete(k),
+  }
+}
+
+const etatAffiche = {
+  format: '40x50', orientation: 'portrait', cartouche: false, cartoucheSombre: true,
+  titre: 'Nā Pali', cadrage: { zoom: 1.7, x: -0.2, y: 0.1 }, pointNet: { x: 1, y: 2, z: 3 },
+}
+
+test('la composition de l’affiche traverse l’aller-retour vers Stripe', () => {
+  // ⚠️ LE PIÈGE DU TUNNEL HÉBERGÉ : partir payer est une NAVIGATION, pas une
+  // fenêtre modale. L'application est déchargée puis rechargée au retour ; sans
+  // ce panier, l'acheteur qui renonce doit TOUT recomposer.
+  const s = stockage()
+  poserPanier({ id: 'p-1', article: 'affiche-pdf', carte: 'AAA', affiche: afficheSerialisable(etatAffiche) }, s)
+  const relu = lirePanier(s)
+  assert.equal(relu.article, 'affiche-pdf')
+  assert.equal(relu.carte, 'AAA')
+  assert.deepEqual(relu.affiche, {
+    format: '40x50', orientation: 'portrait', cartouche: false, cartoucheSombre: true,
+    titre: 'Nā Pali', cadrage: { zoom: 1.7, x: -0.2, y: 0.1 }, pointNet: { x: 1, y: 2, z: 3 },
+  })
+})
+
+test('le LOGO importé ne traverse pas, et on ne fait pas semblant', () => {
+  // C'est une URL d'objet (« blob: ») : elle meurt avec le document. La copier
+  // dans le stockage produirait un cadre vide à l'arrivée — pire qu'un logo
+  // manquant, parce qu'on croirait l'avoir sauvegardé.
+  const serialise = afficheSerialisable({ ...etatAffiche, logo: { url: 'blob:https://x/y', coin: 'br', taille: 0.2 } })
+  assert.ok(!('logo' in serialise))
+  assert.equal(JSON.stringify(serialise).includes('blob:'), false)
+})
+
+test('un stockage qui refuse d’écrire ne fait pas échouer l’achat', () => {
+  // Navigation privée, quota plein : on perd le retour, pas la vente.
+  assert.equal(poserPanier({ id: 'p-1', affiche: {} }, stockage(true)), false)
+  assert.doesNotThrow(() => viderPanier(stockage(true)))
+})
+
+test('un panier abîmé rend null, il ne casse pas le démarrage du site', () => {
+  const s = stockage()
+  s.setItem(CLE_PANIER, 'pas du json')
+  assert.equal(lirePanier(s), null)
+  s.setItem(CLE_PANIER, '"une chaîne"')
+  assert.equal(lirePanier(s), null)
+  assert.equal(lirePanier(stockage()), null)
+})
+
+test('une composition relue est REVALIDÉE : un format inconnu retombe sur le défaut', () => {
+  // Le stockage est de même origine, donc sans attaquant distant — mais une
+  // version PRÉCÉDENTE de ce code a pu y écrire une autre forme.
+  assert.equal(afficheRestauree({ format: 'A0' }).format, '50x70')
+  assert.equal(afficheRestauree({ format: '30x40' }).format, '30x40')
+  assert.equal(afficheRestauree(null), null)
+  // un cadrage absurde ne traverse pas jusqu'à la caméra
+  const c = afficheRestauree({ cadrage: { zoom: NaN, x: 'gauche' } }).cadrage
+  assert.ok(Number.isFinite(c.zoom) && Number.isFinite(c.x) && Number.isFinite(c.y))
+  // un point net incomplet vaut « pas de point net », jamais un NaN
+  assert.equal(afficheRestauree({ pointNet: { x: 1, y: 2 } }).pointNet, null)
+  assert.equal(afficheRestauree({ pointNet: { x: 1, y: 2, z: NaN } }).pointNet, null)
+})
+
+// ── L'aller : ce que le navigateur poste, et ce qu'il ne poste pas ──────────
+
+test('AUCUN PRIX ne part du navigateur', () => {
+  // La faille numéro un des paiements web, vue depuis l'autre bout du fil.
+  // Les commentaires ont le droit de PARLER de prix — c'est même leur travail
+  // ici. C'est le CODE qui ne doit pas en manipuler.
+  const code = readFileSync(new URL('../src/paiement.js', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|\s)\/\/.*$/gm, '')
+  assert.ok(!/\bprix\b/.test(code), 'src/paiement.js ne doit jamais manipuler de prix')
+  assert.ok(!/\bcentimes\b/.test(code), 'ni de centimes')
+})
+
+test('la demande de caisse poste un identifiant d’article, et rien de plus', async () => {
+  let vu = null
+  const r = await demanderCaisse({ article: 'affiche-pdf', retour: 'p-42' }, async (url, init) => {
+    vu = { url, corps: JSON.parse(init.body) }
+    return { ok: true, status: 200, json: async () => ({ ok: true, url: 'https://checkout.stripe.com/x', id: 'cs_1' }) }
+  })
+  assert.equal(vu.url, URL_CAISSE)
+  assert.deepEqual(vu.corps, { article: 'affiche-pdf', retour: 'p-42' })
+  assert.equal(r.ok, true)
+  assert.equal(r.url, 'https://checkout.stripe.com/x')
+})
+
+test('le code d’atelier ne part QUE s’il y en a un', async () => {
+  let corps = null
+  const faux = async (_u, init) => {
+    corps = JSON.parse(init.body)
+    return { ok: true, status: 200, json: async () => ({ ok: true, url: 'u' }) }
+  }
+  await demanderCaisse({ article: 'affiche-pdf' }, faux)
+  assert.ok(!('code' in corps), 'une commande ordinaire ne porte aucune trace du contournement')
+  await demanderCaisse({ article: 'affiche-pdf', code: 'phrase-secrete' }, faux)
+  assert.equal(corps.code, 'phrase-secrete')
+})
+
+test('une caisse en panne rend une erreur lisible, jamais une exception', async () => {
+  // ⚠️ Une fonction non déployée rend la page 404 de Netlify, en HTML :
+  // `res.json()` lèverait, et l'acheteur verrait un bouton mort.
+  const html = await demanderCaisse({ article: 'affiche-pdf' }, async () => ({
+    ok: false, status: 404, json: async () => { throw new SyntaxError('Unexpected token <') },
+  }))
+  assert.equal(html.ok, false)
+  assert.match(html.erreur, /caisse indisponible/)
+
+  const reseau = await demanderCaisse({ article: 'affiche-pdf' }, async () => { throw new TypeError('Failed to fetch') })
+  assert.deepEqual(reseau, { ok: false, erreur: 'réseau' })
+
+  const refus = await demanderCaisse({ article: 'affiche-pdf' }, async () => ({
+    ok: false, status: 403, json: async () => ({ ok: false, erreur: 'code refusé' }),
+  }))
+  assert.equal(refus.erreur, 'code refusé')
+
+  // sans article, on ne dérange même pas le serveur
+  let appele = false
+  await demanderCaisse({ article: null }, async () => { appele = true })
+  assert.equal(appele, false)
+})
+
+// ── Le retour : le serveur tranche, pas l'URL ───────────────────────────────
+
+test('une panne réseau ne fabrique JAMAIS une confirmation de paiement', async () => {
+  const r = await verifierPaiement('cs_test_a1b2c3d4e5', async () => { throw new TypeError('offline') })
+  assert.equal(r.etat, 'indisponible')
+})
+
+test('un identifiant de forme douteuse ne part même pas au serveur', async () => {
+  let appele = false
+  const r = await verifierPaiement('{CHECKOUT_SESSION_ID}', async () => { appele = true })
+  assert.equal(appele, false)
+  assert.equal(r.etat, 'inconnue')
+})
+
+test('aucun message de retour ne promet un téléchargement', () => {
+  // La doctrine du projet : la chaîne PDF n'existe pas encore, on le DIT.
+  // Promettre un fichier qui n'arrive pas coûte plus cher qu'assumer un chantier.
+  for (const etat of ['paye', 'en-attente', 'expiree', 'livree', 'indisponible', 'inconnue', 'nimportequoi']) {
+    const m = messageRetour(etat)
+    assert.ok(m.length > 20, `${etat} : message trop court pour être honnête`)
+    assert.ok(!/télécharg|download/i.test(m), `${etat} promet un téléchargement`)
+  }
+  assert.match(messageRetour('paye'), /pas encore produit/)
+  assert.match(messageRetour('inconnue'), /ne correspond à aucun paiement/)
+})
+
+// ── L'état d'une session, vu du serveur ─────────────────────────────────────
+
+test('le journal fait foi ; Stripe ne sert que tant qu’il n’a rien écrit', () => {
+  // Stripe redirige l'acheteur AVANT d'avoir livré son webhook : sans le
+  // recours à Stripe, un paiement valide s'annoncerait « inconnu » pendant les
+  // premières secondes.
+  assert.equal(etatDepuisSources({ article: 'affiche-pdf', livrable: 'fichier' }, null).etat, 'paye')
+  assert.equal(etatDepuisSources(null, { payment_status: 'paid' }).etat, 'paye')
+  assert.equal(etatDepuisSources(null, { payment_status: 'unpaid', status: 'open' }).etat, 'en-attente')
+  assert.equal(etatDepuisSources(null, { payment_status: 'unpaid', status: 'expired' }).etat, 'expiree')
+  assert.equal(etatDepuisSources(null, { payment_status: 'no_payment_required' }).etat, 'paye')
+  // une session inventée : personne ne la connaît, on ne confirme rien
+  assert.equal(etatDepuisSources(null, null).etat, 'inconnue')
+  // une commande déjà livrée le dit — c'est ça, « déjà consommée »
+  assert.equal(etatDepuisSources({ livree: true }, null).etat, 'livree')
+})
+
+test('l’état d’une session ne rend AUCUNE donnée personnelle', () => {
+  // ⚠️ Un « ?paye=… » se recopie et se partage. Le premier venu qui l'ouvre ne
+  // doit y trouver ni l'email, ni l'adresse, ni le montant de l'acheteur.
+  const e = etatDepuisSources({
+    article: 'affiche-pdf', livrable: 'fichier', email: 'club@example.org',
+    pays: 'FR', centimes: 1900, client: 'cus_ABC', facture: 'in_X',
+  }, null)
+  assert.deepEqual(Object.keys(e).sort(), ['article', 'atelier', 'etat', 'livrable', 'livree'])
+  assert.equal(JSON.stringify(e).includes('example.org'), false)
+  assert.equal(JSON.stringify(e).includes('1900'), false)
+})
+
+// ── LE CONTOURNEMENT D'ATELIER ──────────────────────────────────────────────
+
+test('sans SHIBU_CODE_ATELIER, le contournement n’existe pas', () => {
+  assert.equal(codeAtelierValide('nimporte quoi', undefined), false)
+  assert.equal(codeAtelierValide('', ''), false)
+  assert.equal(codeAtelierValide('', undefined), false)
+})
+
+test('un secret COURT est refusé comme s’il était absent', () => {
+  // Sans ce plancher, un « SHIBU_CODE_ATELIER=test » posé pour voir ouvrirait
+  // une caisse que l'on force en quelques milliers d'essais.
+  assert.equal(codeAtelierValide('test', 'test'), false)
+  assert.equal(codeAtelierValide('a'.repeat(23), 'a'.repeat(23)), false)
+  assert.equal(codeAtelierValide('a'.repeat(24), 'a'.repeat(24)), true)
+})
+
+test('un code faux est refusé, quelle que soit sa forme', () => {
+  const bon = 'un-secret-assez-long-pour-passer'
+  assert.equal(codeAtelierValide(bon, bon), true)
+  assert.equal(codeAtelierValide(bon + 'x', bon), false)
+  assert.equal(codeAtelierValide(bon.slice(0, -1), bon), false)
+  assert.equal(codeAtelierValide(bon.toUpperCase(), bon), false)
+  // rien de tout ça ne doit lever (timingSafeEqual jette sur deux tailles différentes)
+  for (const v of [null, undefined, 0, {}, [], Buffer.from(bon)]) {
+    assert.equal(codeAtelierValide(v, bon), false)
+  }
+})
+
+test('la commande d’atelier a la forme d’une vraie, à 0 € et marquée', () => {
+  const c = commandeAtelier(commandeDepuisSession, {
+    id: 'atelier_0123456789abcdef',
+    art: ARTICLES['affiche-pdf'],
+    corps: { article: 'affiche-pdf', retour: 'p-7' },
+  })
+  assert.equal(c.atelier, true, 'sans ce marqueur, un essai passe pour une vente')
+  // ⚠️ ZÉRO, et pas 1900 : rien n'a été encaissé. Le jour où l'on additionnera
+  // ce journal, personne ne se souviendra de retrancher les essais.
+  assert.equal(c.centimes, 0)
+  assert.equal(c.email, '', 'pas d’acheteur, donc pas d’email — donc aucun mail ne part')
+  assert.equal(c.session, 'atelier_0123456789abcdef')
+  assert.equal(c.article, 'affiche-pdf')
+  assert.equal(c.livrable, 'fichier')
+  assert.equal(c.retour, 'p-7')
+  assert.equal(c.livree, false)
+  assert.equal(c.bloque, false)
+})
+
+/** Fait tourner la caisse en enregistrant les URL appelées, pas seulement les corps. */
+async function caisseAvecCode(corpsRequete, codeEnv) {
+  const fetchOriginel = globalThis.fetch
+  const cleOriginelle = process.env.STRIPE_SECRET_KEY
+  const codeOriginel = process.env.SHIBU_CODE_ATELIER
+  const appels = []
+  process.env.STRIPE_SECRET_KEY = 'sk_test_bouchon_pas_une_vraie_cle'
+  if (codeEnv === undefined) delete process.env.SHIBU_CODE_ATELIER
+  else process.env.SHIBU_CODE_ATELIER = codeEnv
+  globalThis.fetch = async (url) => {
+    appels.push(String(url))
+    return { ok: true, json: async () => ({ url: 'https://checkout.stripe.com/x', id: 'cs_1' }) }
+  }
+  try {
+    const rep = await caisse(new Request('https://shibumap.com/.netlify/functions/paiement', {
+      method: 'POST', body: JSON.stringify(corpsRequete),
+    }))
+    return { appels, rep, json: await rep.json() }
+  } finally {
+    globalThis.fetch = fetchOriginel
+    if (cleOriginelle === undefined) delete process.env.STRIPE_SECRET_KEY
+    else process.env.STRIPE_SECRET_KEY = cleOriginelle
+    if (codeOriginel === undefined) delete process.env.SHIBU_CODE_ATELIER
+    else process.env.SHIBU_CODE_ATELIER = codeOriginel
+  }
+}
+
+test('un code d’atelier faux : 403, et AUCUNE session Stripe n’est créée', async () => {
+  const { appels, rep, json } = await caisseAvecCode(
+    { article: 'affiche-pdf', code: 'devine' }, 'un-secret-assez-long-pour-passer'
+  )
+  assert.equal(rep.status, 403)
+  assert.equal(json.erreur, 'code refusé')
+  assert.deepEqual(appels, [], 'un code refusé ne doit rien ouvrir du tout')
+})
+
+test('un code envoyé alors que l’environnement n’en a aucun est refusé', async () => {
+  // Le cas qui compte le plus : le contournement ne s'active pas tout seul.
+  const { rep, json } = await caisseAvecCode({ article: 'affiche-pdf', code: 'x' }, undefined)
+  assert.equal(rep.status, 403)
+  assert.equal(json.erreur, 'code refusé')
+})
+
+test('le bon code ne passe JAMAIS par api.stripe.com', async () => {
+  // Tout l'intérêt : Adrien éprouve la chaîne sans qu'un centime bouge. Le
+  // journal (Netlify Blobs) est absent sous node, donc la réponse est un 502
+  // « journal indisponible » — ce qu'on vérifie ici, c'est qu'aucune session de
+  // paiement n'a été ouverte en chemin.
+  const { appels, rep } = await caisseAvecCode(
+    { article: 'affiche-pdf', code: 'un-secret-assez-long-pour-passer' }, 'un-secret-assez-long-pour-passer'
+  )
+  assert.equal(appels.filter((u) => u.includes('api.stripe.com')).length, 0)
+  assert.ok(rep.status === 200 || rep.status === 502, `statut inattendu : ${rep.status}`)
+})
+
+test('une commande ORDINAIRE ne regarde même pas le code d’atelier', async () => {
+  // Le contournement ne doit rien coûter ni rien changer au chemin des ventes.
+  const { appels, json } = await caisseAvecCode({ article: 'affiche-pdf' }, 'un-secret-assez-long-pour-passer')
+  assert.equal(json.ok, true)
+  assert.equal(appels.length, 1)
+  assert.match(appels[0], /api\.stripe\.com/)
 })

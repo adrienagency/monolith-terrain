@@ -23,14 +23,67 @@
 //
 //   STRIPE_SECRET_KEY      sk_test_… puis sk_live_…
 //   SHIBU_URL_SITE         https://shibumap.com  (pour les retours)
+//   SHIBU_CODE_ATELIER     un secret long, connu d'Adrien seul — voir plus bas
 //
 // Pas de SDK Stripe : l'API REST suffit pour une session, et une dépendance de
 // moins, c'est une dépendance de moins à tenir à jour dans une fonction qui
 // manipule de l'argent.
 
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { article, PAYS_AUTORISES } from './_paiement-catalogue.mjs'
 
 const STRIPE = 'https://api.stripe.com/v1'
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LE CONTOURNEMENT D'ATELIER — ET POURQUOI IL EST ICI, SUR LE SERVEUR
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Adrien doit pouvoir dérouler la chaîne de production du PDF de bout en bout
+// sans payer 19 € à chaque essai. C'est un besoin légitime, et c'est aussi la
+// façon la plus classique d'ouvrir un trou dans une caisse.
+//
+// ⚠️ NE JAMAIS DÉPLACER CE TEST CÔTÉ NAVIGATEUR. Un drapeau client, un
+// `?gratuit=1`, un `localStorage.atelier = true` : tout ça est écrit dans le
+// bundle livré au navigateur, donc lisible par n'importe qui ouvre les outils
+// de développement. Un contournement qu'on peut LIRE n'est pas un
+// contournement, c'est une caisse ouverte. Le seul endroit où un secret reste
+// un secret, c'est ici — dans une variable d'environnement Netlify que le
+// navigateur ne peut pas atteindre, même en démontant le code.
+//
+// C'est pour la même raison que le mécanisme, lui, peut être public : le code
+// côté client a le droit de dire « il existe un code d'atelier » et même
+// comment on le saisit. Ce qui protège la caisse n'est pas l'ignorance du
+// mécanisme, c'est la valeur de `SHIBU_CODE_ATELIER`.
+//
+// Comment Adrien s'en sert : il pose `SHIBU_CODE_ATELIER` dans Netlify (une
+// phrase longue, ≥ 24 caractères), puis, sur l'écran d'affiche, il clique
+// « Recevoir le fichier » EN MAINTENANT ALT. L'application lui demande le code
+// et le poste ici. La commande est alors écrite dans le journal comme une vraie
+// commande — c'est tout l'intérêt : la chaîne PDF verra exactement ce qu'elle
+// verra en production — mais marquée `atelier: true` et à 0 €, pour qu'aucune
+// comptabilité ne puisse jamais la prendre pour une vente.
+const LONGUEUR_MIN_CODE = 24
+
+/**
+ * ⚠️ COMPARAISON À TEMPS CONSTANT, comme la signature du webhook : un `===` sur
+ * un secret fuit, caractère par caractère, de quoi le reconstruire.
+ *
+ * ⚠️ ET UN SECRET COURT EST REFUSÉ. Sans ce plancher, poser
+ * `SHIBU_CODE_ATELIER=test` dans Netlify « pour voir » créerait une caisse que
+ * l'on force en quelques milliers d'essais. Un code trop court se comporte
+ * exactement comme un code absent : le contournement n'existe pas.
+ */
+export function codeAtelierValide(propose, attendu = process.env.SHIBU_CODE_ATELIER) {
+  if (typeof attendu !== 'string' || attendu.length < LONGUEUR_MIN_CODE) return false
+  if (typeof propose !== 'string' || !propose) return false
+  const a = Buffer.from(attendu, 'utf8')
+  const b = Buffer.from(propose, 'utf8')
+  // Les longueurs se comparent en clair : elle fuit de toute façon par le temps
+  // de transfert, et `timingSafeEqual` lève sur deux tampons de tailles
+  // différentes.
+  if (a.length !== b.length) return false
+  return timingSafeEqual(a, b)
+}
 
 // Stripe attend de l'`application/x-www-form-urlencoded` avec des clés en
 // crochets. Un petit encodeur vaut mieux qu'un SDK de 2 Mo.
@@ -56,6 +109,40 @@ function suffixeAleatoire() {
 const json = (corps, statut = 200) =>
   new Response(JSON.stringify(corps), { status: statut, headers: { 'content-type': 'application/json' } })
 
+/**
+ * La commande écrite au journal par le contournement d'atelier. Pure (on lui
+ * passe `commandeDepuisSession`), donc testable — et c'est le seul endroit du
+ * projet où une ligne du journal des ventes s'écrit SANS qu'un euro soit passé.
+ *
+ * ⚠️ ELLE A EXACTEMENT LA FORME D'UNE VRAIE COMMANDE, à deux différences près,
+ * toutes les deux volontaires. La forme identique est tout l'intérêt : la
+ * chaîne PDF doit voir en atelier ce qu'elle verra en production, sinon l'essai
+ * ne prouve rien.
+ */
+export function commandeAtelier(commandeDepuisSession, { id, art, corps }) {
+  return {
+    ...commandeDepuisSession({
+      id,
+      // ⚠️ ZÉRO, ET PAS LE PRIX DE L'ARTICLE. Rien n'a été encaissé ; écrire
+      // 1900 ici poserait une vente fantôme dans le journal, et le jour où l'on
+      // additionnera ce journal, personne ne se souviendra de la retrancher.
+      amount_total: 0,
+      currency: 'eur',
+      // Pas d'email : il n'y a pas d'acheteur. Le webhook n'écrira jamais cette
+      // commande — elle ne passe pas par lui — donc aucun mail ne part.
+      customer_details: { email: '', address: { country: 'FR' } },
+      metadata: {
+        article: corps.article,
+        livrable: art.livrable,
+        format: art.format || '',
+        retour: String(corps.retour || '').slice(0, 200),
+      },
+    }),
+    // Le marqueur qui empêche à jamais de confondre un essai et une vente.
+    atelier: true,
+  }
+}
+
 export default async (req) => {
   if (req.method !== 'POST') return json({ ok: false, erreur: 'méthode' }, 405)
 
@@ -73,6 +160,42 @@ export default async (req) => {
   if (!art) return json({ ok: false, erreur: 'article inconnu' }, 400)
 
   const site = (process.env.SHIBU_URL_SITE || new URL(req.url).origin).replace(/\/$/, '')
+
+  // ── LE CONTOURNEMENT D'ATELIER (voir codeAtelierValide plus haut) ─────────
+  //
+  // On court-circuite Stripe entièrement plutôt que de fabriquer une remise de
+  // 100 % : une session à zéro euro sort de Checkout avec
+  // `payment_status: 'no_payment_required'`, que le webhook REFUSE — à raison,
+  // c'est son garde le plus important. Le contournement n'a donc pas à tordre
+  // le chemin des vraies ventes ; il en emprunte un autre, plus court, qui
+  // aboutit au même endroit : une commande dans le journal.
+  if (corps?.code !== undefined) {
+    if (!codeAtelierValide(corps.code)) {
+      // Même réponse qu'un article inconnu, et surtout AUCUN indice sur ce qui
+      // a échoué (code absent de l'environnement ? trop court ? faux ?) : on ne
+      // renseigne pas qui sonde.
+      console.warn('[paiement] code d’atelier refusé')
+      return json({ ok: false, erreur: 'code refusé' }, 403)
+    }
+    const id = `atelier_${randomBytes(8).toString('hex')}`
+    // Import dynamique — le chemin des vraies ventes ne paie pas le chargement
+    // du client Blobs à chaque démarrage à froid.
+    const [{ commandeDepuisSession }, { getStore }] = await Promise.all([
+      import('./paiement-webhook.mjs'),
+      import('@netlify/blobs'),
+    ])
+    const commande = commandeAtelier(commandeDepuisSession, { id, art, corps })
+    try {
+      await getStore('paiements').setJSON(`session/${id}`, commande)
+    } catch (err) {
+      console.error('[paiement] commande d’atelier non journalisée :', err?.message)
+      return json({ ok: false, erreur: 'journal indisponible' }, 502)
+    }
+    console.info('[paiement] commande d’ATELIER (0 €) :', id, corps.article)
+    // La même page de retour que pour une vraie vente : c'est aussi ce
+    // chemin-là qu'on veut éprouver.
+    return json({ ok: true, url: `${site}/?paye=${id}`, id })
+  }
 
   const params = {
     mode: 'payment',

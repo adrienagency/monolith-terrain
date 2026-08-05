@@ -85,6 +85,11 @@ import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
 import { TEMPLATE_KEYS, captureLook, captureView, serializeTemplate, parseTemplate, stripFromLook, loadUserTemplates, saveUserTemplates } from './templates-user.js'
 import { loadUserPalettes, saveUserPalettes, paletteFromParams } from './user-palettes.js'
 import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT, rememberRaceSecret, recallRaceSecret, updateRace } from './share-link.js'
+import {
+  identifiantArticle, identifiantPanier, afficheSerialisable,
+  lireRetourPaiement, urlSansRetour, poserPanier, lirePanier, viderPanier,
+  demanderCaisse, verifierPaiement, messageRetour,
+} from './paiement.js'
 import { Boats } from './boats.js'
 import { DroneCam } from './drone-cam.js'
 import { animationsActives, reglageInitial } from './animations.js'
@@ -724,6 +729,63 @@ if (location.hash.startsWith('#s=')) {
   } catch (err) {
     console.warn('share link ignored:', err) // a garbled/old-format fragment just boots the default view
   }
+}
+
+// ── LE RETOUR DE STRIPE ─────────────────────────────────────────────────────
+//
+// ⚠️ PARTIR PAYER EST UNE NAVIGATION, PAS UNE FENÊTRE MODALE. Stripe Checkout
+// est une page hébergée chez Stripe : le navigateur QUITTE l'application, et il
+// la RECHARGE au retour. Tout ce qui vivait en mémoire est perdu — le look, le
+// lieu, la pose de caméra, et la composition de l'affiche. Sans ce bloc,
+// l'acheteur qui renonce revient sur la vue d'ouverture de La Réunion et doit
+// tout refaire : c'est un abandon de vente garanti, et aucun test unitaire ne
+// l'aurait jamais montré.
+//
+// Ce qui survit VRAIMENT à l'aller-retour : le `sessionStorage` de l'onglet
+// (même origine, même onglet, la navigation vers stripe.com ne l'efface pas).
+// C'est donc là qu'on a déposé le panier au moment de partir — voir
+// src/paiement.js. La carte y voyage encodée par share-link.js, la composition
+// de l'affiche à côté.
+//
+// ⚠️ ET ON N'ÉCRIT PAS `#s=` DANS L'URL POUR ÇA. Ce serait plus court, mais un
+// fragment `#s=` fait booter l'application en VISIONNEUSE (`IS_SHIBU`, juste
+// en dessous) : l'acheteur reviendrait dans une shibu reçue en lecture seule,
+// sans ses outils, incapable de relancer sa commande.
+const RETOUR_PAIEMENT = lireRetourPaiement(location.search)
+// Une restauration compte comme un état venu d'ailleurs : le look d'ouverture
+// ne doit pas l'écraser (voir `fromLink`, plus bas).
+let PANIER_RESTAURE = null
+if (RETOUR_PAIEMENT.cas && !location.hash.startsWith('#s=') && !location.hash.startsWith('#r=')) {
+  try {
+    PANIER_RESTAURE = lirePanier()
+    const decoded = PANIER_RESTAURE?.carte && decodeShareState(PANIER_RESTAURE.carte)
+    const repris = decoded && parseShareState(decoded, BASE_TEMPLATE_LOOK)
+    if (repris) {
+      Object.assign(params, repris.look)
+      params.demLat = repris.loc.lat
+      params.demLon = repris.loc.lon
+      params.demZoom = repris.loc.zoom
+      params.demLocation = 'Custom'
+      pendingShareCam = repris.cam
+      pendingShareFen = repris.fen
+    }
+  } catch (err) {
+    // Un panier illisible ne doit jamais empêcher le site de s'ouvrir : on perd
+    // la composition, pas la session.
+    console.warn('panier de paiement ignoré :', err)
+  }
+  // ⚠️ L'URL SE NETTOIE TOUT DE SUITE. `?paye=…` laissé dans la barre
+  // d'adresse, c'est une confirmation qui se rejoue à chaque rechargement, qui
+  // part dans un signet et dans l'historique partagé. Le paramètre a été lu, il
+  // n'a plus rien à faire là. `replaceState` n'ajoute pas d'entrée d'historique :
+  // le bouton « précédent » ne ramène pas chez Stripe.
+  const propre = urlSansRetour(location.href)
+  // ⚠️ `window.history`, PAS `history`. Ce fichier déclare plus bas un `const
+  // history` (la pile d'annulation, src/history.js) : le nom global est donc
+  // masqué ICI MÊME par sa zone morte temporelle, et un `history.replaceState`
+  // nu lève un ReferenceError que le `catch` avalerait en silence — l'URL
+  // resterait sale sans que rien ne le dise. Vu en vrai, dans le navigateur.
+  if (propre) { try { window.history.replaceState(null, '', propre) } catch { /* pas grave */ } }
 }
 
 // EMBED (shibumap.com/templates) : la carte boote DIRECTEMENT sur la zone
@@ -3178,7 +3240,12 @@ async function fetchAndBuildDem({ centreSur = null } = {}) {
   // Adrien's saved look becomes the opening view — applied ONCE, after the very
   // first terrain build (so rampStops/material have a mesh to land on), then
   // never again so the user's own edits are never stomped.
-  const fromLink = location.hash.startsWith('#s=') || location.hash.startsWith('#r=')
+  // ⚠️ UN RETOUR DE PAIEMENT COMPTE COMME UN LIEN. Le look restauré du panier
+  // vient d'être posé sur `params` au démarrage ; sans ce terme, le look
+  // d'ouverture d'Adrien l'écraserait ici même, et l'acheteur qui a renoncé
+  // retrouverait son LIEU mais pas ses COULEURS — le pire des deux mondes,
+  // parce qu'on croirait l'état sauvegardé.
+  const fromLink = location.hash.startsWith('#s=') || location.hash.startsWith('#r=') || !!PANIER_RESTAURE
   if (!_startupLookApplied && !fromLink && !IS_EMBED) {
     _startupLookApplied = true
     // `view` du fichier s'il en porte une ; sinon la VUE ISOMÉTRIQUE 1, qui
@@ -6959,7 +7026,22 @@ function viserPointNet({ u, v, aspect, cadrage }) {
   }
 }
 
-async function openAfficheUI() {
+// L'ÉTAT DE LA CARTE, ENCODÉ — le même que celui d'un lien de partage, et
+// volontairement le même : c'est le seul format de ce projet qui sache
+// reconstituer un lieu, un look et une pose de caméra, et il est déjà validé à
+// la relecture (parseShareState). En fabriquer un second pour le paiement, ce
+// serait deux formats à maintenir et un seul testé.
+function etatCarteEncode() {
+  const cam = {
+    px: camera.position.x, py: camera.position.y, pz: camera.position.z,
+    tx: controls.target.x, ty: controls.target.y, tz: controls.target.z,
+  }
+  return encodeShareState(
+    captureShareState(params, cam, BASE_TEMPLATE_LOOK, fenetreContinueActive() ? terrain.fenetre : null)
+  )
+}
+
+async function openAfficheUI(etatInitial = null) {
   const { ouvrirAffiche } = await import('./ui/affiche.js')
   const { exportImage } = await import('./export.js')
   // Ce qu'on devra rendre en sortant : l'affiche emprunte des réglages de carte,
@@ -6969,6 +7051,9 @@ async function openAfficheUI() {
   // doit être ce qui partira au tirage. Élan éteint, débordement résorbé.
   f3Fige()
   ouvrirAffiche({
+    // La composition retrouvée après un aller-retour chez Stripe, s'il y en a
+    // une. `null` le reste du temps : l'écran s'ouvre sur ses valeurs propres.
+    etatInitial,
     // Un VRAI rendu au ratio demandé, pas un recadrage de l'écran — c'est tout
     // l'intérêt de la passe. Sans crédit incrusté : la ligne d'attribution a sa
     // place sur l'affiche finale, pas en travers d'une vignette de choix.
@@ -6994,12 +7079,59 @@ async function openAfficheUI() {
       lon: dem?.lon ?? NaN,
       altMax: Number.isFinite(dem?.maxM) ? dem.maxM : null,
     }),
-    onCommander: (commande) => {
-      // Le paiement n'est pas encore branché — voir le plan de monétisation.
-      // On le DIT plutôt que d'afficher une fausse confirmation : promettre un
-      // fichier qui n'arrive pas coûte plus cher que d'assumer un chantier.
-      console.info('[affiche] commande demandée :', commande)
-      showNotice('Le paiement arrive bientôt — le fichier n’est pas encore livrable.')
+    // ── L'ALLER : on quitte l'application pour la page de paiement Stripe ──
+    //
+    // ⚠️ AUCUN PRIX NE PART D'ICI. On n'envoie qu'un IDENTIFIANT d'article ; le
+    // prix, le libellé et la TVA vivent dans le catalogue serveur, hors de
+    // portée du navigateur. Voir netlify/functions/_paiement-catalogue.mjs.
+    onCommander: async (commande) => {
+      const article = identifiantArticle(commande)
+      if (!article) {
+        // Ne JAMAIS ouvrir une session pour un article qu'on ne sait pas
+        // nommer : la caisse la refuserait, mais l'acheteur aurait déjà vu la
+        // page de paiement s'ouvrir puis échouer.
+        showNotice('Ce format ne se commande pas encore. Écris à adrien@adrienagency.com.')
+        return
+      }
+
+      // ── Le contournement d'atelier (Alt + clic) ────────────────────────
+      // ⚠️ LE CODE N'EST NI DANS CE FICHIER, NI DANS LE BUNDLE, NI DANS LE
+      // STOCKAGE DU NAVIGATEUR. Il est SAISI à la demande et vérifié côté
+      // serveur contre `SHIBU_CODE_ATELIER` — voir netlify/functions/
+      // paiement.mjs. Ce qui suit ne sait pas si le code est bon, et c'est
+      // exactement ce qu'on veut : un contournement que le client peut
+      // trancher n'en est pas un.
+      let code = ''
+      if (commande.atelier) {
+        code = String(window.prompt('Code d’atelier (vérifié côté serveur) :') || '').trim()
+        if (!code) return // demi-tour : on ne lance rien
+      }
+
+      // ⚠️ LE PANIER SE DÉPOSE AVANT DE PARTIR, PAS APRÈS. Une fois
+      // `location.assign` appelé, plus une ligne de ce fichier ne s'exécute :
+      // le document est en train d'être remplacé. Écrire le panier après,
+      // c'est ne jamais l'écrire.
+      const id = identifiantPanier()
+      poserPanier({ id, article, carte: etatCarteEncode(), affiche: afficheSerialisable(commande) })
+
+      const r = await demanderCaisse({ article, retour: id, code })
+      if (!r.ok) {
+        // On reste à l'écran : le panier n'a plus de raison d'être, la
+        // composition est toujours sous les yeux de l'utilisateur.
+        viderPanier()
+        console.warn('[affiche] caisse :', r.erreur)
+        showNotice(
+          r.erreur === 'code refusé'
+            ? 'Code d’atelier refusé.'
+            : 'Le paiement n’a pas pu s’ouvrir. Réessaie dans un instant — rien n’a été débité.'
+        )
+        return
+      }
+      location.assign(r.url)
+      // « parti » : l'écran d'affiche laisse son bouton désactivé plutôt que de
+      // le réarmer pendant que le navigateur quitte la page (un second clic
+      // ouvrirait une seconde session de paiement).
+      return 'parti'
     },
     // Les noms de villes : l'affiche peut les couper sans couper la carte
     // qu'Adrien avait composée. On mémorise l'état d'avant et on le rend en
@@ -7020,6 +7152,44 @@ async function openAfficheUI() {
       refreshAll()
     },
   })
+}
+
+// ── LE RETOUR : ce qu'on montre à quelqu'un qui revient de chez Stripe ──────
+//
+// ⚠️ ON NE CROIT PAS `?paye=`. C'est un paramètre d'URL : il se tape à la main,
+// se copie, se partage, se recharge. Il dit seulement QUOI DEMANDER au serveur.
+// La réponse vient de netlify/functions/paiement-etat.mjs, qui a la clé secrète
+// et interroge Stripe — et qui, en cas de panne, rend « indisponible » plutôt
+// que « payé » : une coupure réseau ne doit jamais fabriquer une confirmation.
+//
+// ⚠️ ET AUCUN MESSAGE NE PROMET UN TÉLÉCHARGEMENT. La chaîne PDF n'existe pas
+// encore. C'était déjà la doctrine du code qu'on remplace ici (« on le DIT
+// plutôt que d'afficher une fausse confirmation ») ; elle vaut d'autant plus
+// maintenant que l'argent est réellement encaissé. Voir messageRetour().
+async function reprendreApresPaiement() {
+  const { cas, session } = RETOUR_PAIEMENT
+  if (!cas) return
+  const panier = PANIER_RESTAURE
+  // Le panier a servi : la carte est déjà restaurée, la composition est sur le
+  // point de l'être. Le laisser derrière ferait ressusciter une affiche d'il y
+  // a une heure au prochain retour de paiement de cet onglet.
+  viderPanier()
+
+  if (cas === 'annule') {
+    showNotice('Paiement annulé — rien n’a été débité. Ta composition est intacte.')
+    await openAfficheUI(panier?.affiche || null)
+    return
+  }
+
+  // `invalide` : un `?paye=` qui ne ressemble même pas à un identifiant Stripe.
+  // On n'interroge personne, et on ne confirme rien.
+  const { etat } = cas === 'paye' ? await verifierPaiement(session) : { etat: 'inconnue' }
+  showNotice(messageRetour(etat), { duration: 9000 })
+  // Un paiement abouti ne rouvre PAS l'écran d'affiche : son bouton inviterait
+  // à payer une seconde fois la même affiche. La carte, elle, est restaurée —
+  // c'est ce qu'on veut retrouver. Dans tous les autres cas (en attente,
+  // expirée, injoignable), l'écran se rouvre pour pouvoir relancer.
+  if (etat !== 'paye' && etat !== 'livree' && panier?.affiche) await openAfficheUI(panier.affiche)
 }
 
 async function openExportUI() {
@@ -9087,6 +9257,11 @@ enterRouteSpace = (content) => {
 setTimeout(() => {
   if (EMBED) return
   if (IS_SHIBU) return // une shibu reçue : viewer épuré, jamais d'onboarding
+  // ⚠️ EN TÊTE, ET SUR LE MÊME RENDEZ-VOUS QUE LA VISITE GUIDÉE. Quelqu'un qui
+  // revient de chez Stripe n'a pas besoin qu'on lui présente l'interface : il
+  // attend une réponse sur son paiement. Et le relief doit être là — l'écran
+  // d'affiche refait un rendu, il lui faut une scène.
+  if (RETOUR_PAIEMENT.cas) { reprendreApresPaiement(); return }
   if (IS_STORE_BOOT) { store.enter(); return } // /templates → boutique directe
   if (IS_STUDIO_BOOT) { studio.enter(); return } // ?studio=1 → Race Studio direct
 }, 2500)
@@ -9098,6 +9273,9 @@ setTimeout(() => {
 // encore posées : c'est le drapeau de boot qu'il faut interroger, pas la classe).
 setTimeout(() => {
   if (EMBED || IS_SHIBU || IS_STORE_BOOT || IS_STUDIO_BOOT) return
+  // L'accueil s'élèverait par-dessus la réponse au paiement, et l'écran
+  // d'affiche s'ouvrirait derrière lui.
+  if (RETOUR_PAIEMENT.cas) return
   hub.show()
 }, 900)
 
