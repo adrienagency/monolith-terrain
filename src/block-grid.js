@@ -816,34 +816,65 @@ export class BlockGrid {
   // n cellules peut battre son propre record en arrivant dans le pire ordre
   // (n(n+1)/2, soit 36 pour n=8).
   //
-  // CE QUE ÇA COÛTE EN TEMPS : ~9,4 ms par reconstruction de mur mesurés en
-  // relecture, soit ~340 ms cumulés sur les 36 du pire cas — négligeable
-  // ÉTALÉ sur les PLUSIEURS SECONDES que prend un chargement réseau complet
-  // (chaque arrivée est un aller-retour réseau séparé, cf. _loadCellDem).
+  // CE QUE ÇA COÛTE EN TEMPS : 9,4 ms par reconstruction de mur (buildSlabWalls
+  // réelle, resolution 256, médiane, Ryzen 9 5900X — script rejouable
+  // .superpowers/sdd/2026-08-05-damier-multi-blocs/mesure-arrivee.mjs), soit
+  // ~340 ms cumulés sur les 36 du pire cas — négligeable ÉTALÉ sur les
+  // PLUSIEURS SECONDES que prend un chargement réseau complet (chaque arrivée
+  // est un aller-retour réseau séparé, cf. _loadCellDem).
   //
   // ⚠️ LE VRAI RISQUE N'EST DONC PAS LE TOTAL CUMULÉ, C'EST LA RAFALE
   // SYNCHRONE D'UNE SEULE ARRIVÉE. Si la cellule la PLUS profonde du damier
   // atterrit EN DERNIER (après que toutes les autres ont déjà leurs murs),
   // cette unique arrivée rebâtit d'un coup TOUTES les cellules déjà posées —
-  // jusqu'à 23 murs sur un damier 5×5 plein (GRID_R = 2, 24 voisines
-  // possibles) — dans le MÊME tour de boucle synchrone, avant que le
-  // navigateur ne peigne la moindre image. 23 × ~9,4 ms ≈ 216 ms : un gel
-  // d'image net et visible, pas une dégradation progressive.
+  // jusqu'à 24 murs sur un damier 5×5 plein (GRID_R = 2), dans le MÊME tour de
+  // boucle synchrone, avant que le navigateur ne peigne la moindre image.
   //
-  // LA SORTIE, ET POURQUOI ELLE N'EST PAS PRISE ICI. La vraie parade est de
-  // rendre l'égalisation PARESSEUSE : au lieu de rebâtir tout de suite dans
-  // egaliseHauteurs(), marquer les cellules concernées « sales »
-  // (planchierPose resterait périmé) et ne les re-couler qu'au prochain
-  // rendu, quelques-unes par image, jusqu'à résorption — le même principe
-  // qu'un budget de reconstruction par frame. Cette sortie n'est pas prise
-  // dans cette tâche :
-  //   · elle demande un point d'ancrage dans la BOUCLE DE RENDU (un appel
-  //     périodique du type flushDirtyWalls()) que rien dans block-grid.js ne
-  //     possède aujourd'hui — le câbler reviendrait à toucher main.js, hors
-  //     périmètre annoncé (« ne câble rien dans src/main.js cette fois ») ;
-  //   · le brief demande explicitement de NE PAS améliorer au passage : la
-  //     Tâche 5 revient dans ce même appel et est le bon endroit pour en
-  //     décider, avec la vue d'ensemble de ce qu'elle y ajoute.
+  // ══════ CE QUE LA CAMPAGNE DE LA TÂCHE 12 A RÉELLEMENT MESURÉ ═══════════
+  //
+  // Les murs ne sont qu'un des motifs de `onGridChanged`. Mesuré arrivée par
+  // arrivée, sur 205 ordres d'arrivée × 2 scénarios × 2 tailles (le compte vient
+  // d'une vraie BlockGrid, les coûts unitaires de vraies constructions ; le
+  // script vérifie d'abord que compter sans bâtir donne la même séquence que
+  // bâtir), LE PIC DE GEL SUR UNE SEULE ARRIVÉE vaut :
+  //
+  //   damier 3×3 (chemin GPX, le cas de tout le monde)   ordinaire   adverse
+  //     murs re-coulés, total du remplissage                16 à 18       36
+  //     PIC de murs sur une arrivée                              5        8
+  //     PIC DE GEL SYNCHRONE                                 74 ms   122 ms
+  //   damier 5×5 (zone isolée)
+  //     murs re-coulés, total du remplissage                60 à 97      300
+  //     PIC de murs sur une arrivée                             21       24
+  //     PIC DE GEL SYNCHRONE                                228 ms   286 ms
+  //
+  // (« adverse » = chaque arrivée bat le record de profondeur ; « ordinaire » =
+  // 200 ordres réseau tirés au hasard + 5 ordres nommés.)
+  //
+  // ⚠️ LE PIC DU 3×3 N'EST PAS FAIT QUE DE MURS, et c'est ce qui change la
+  // conclusion. Ses 74 ms se décomposent en 4 murs (43 ms) + le plan d'eau
+  // (29 ms : `merSuitLeDamier` reconstruit la mer quand la FORME du carré
+  // change, et sa seule PlaneGeometry 384² coûte ça) + les textes (1,8 ms). Le
+  // socle du héros, lui, coûte 26 ms à lui seul quand ses arêtes changent
+  // (`plinth.rebuild`, resolution 768) — au plus 4 fois par remplissage.
+  //
+  // LA SORTIE, ET POURQUOI ELLE N'EST TOUJOURS PAS PRISE. La parade connue est
+  // de rendre l'égalisation PARESSEUSE : marquer les cellules « sales » et ne
+  // les re-couler qu'au prochain rendu, quelques-unes par image. Trois raisons
+  // chiffrées de ne pas la prendre, dans cet ordre :
+  //   · SUR LE 3×3, ELLE NE SUPPRIME PAS LE HOQUET, ELLE LE MOITIT. 74 ms − 43
+  //     de murs = 31 ms, soit encore deux images perdues. Les deux plus gros
+  //     postes unitaires (plan d'eau 29 ms, socle du héros 26 ms) ne la
+  //     concernent pas. Le 3×3 est le SEUL damier qu'un tracé GPX puisse ouvrir
+  //     (CARRE_COTE_MAX = 3) : c'est lui, le cas de tout le monde.
+  //   · ELLE RÉGRESSERAIT UN DÉFAUT VISIBLE POUR CORRIGER UN À-COUP. Étaler les
+  //     re-coulages, c'est afficher pendant quelques images les marches de
+  //     plancher et les rainures de jointure que les Tâches 3 et 5 ont
+  //     supprimées. On échangerait un gel de 40 ms contre un défaut vu.
+  //   · elle demande toujours un point d'ancrage dans la BOUCLE DE RENDU (un
+  //     flushDirtyWalls() périodique) que rien dans block-grid.js ne possède.
+  // Elle GARDE tout son intérêt sur le 5×5 de la zone isolée, où elle enlèverait
+  // 200 des 228 ms : si ce mode devient un usage courant, c'est là qu'il faudra
+  // la reprendre — et c'est là seulement.
   // Un test verrouille le pire cas mesuré (voir test/damier-hauteur.test.js,
   // « le pire cas … reste borné ») pour qu'une régression future (une boucle
   // imbriquée ajoutée sans y penser) ne fasse pas dériver ce chiffre en

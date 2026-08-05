@@ -446,6 +446,19 @@ const params = {
   // chaque reconstruction : sur une machine lente c'est une seconde de page
   // figée que le visiteur lit comme « ça a planté ».
   analysisMax: MACHINE.analyseMax,
+  // Plafond du nombre de cellules VOISINES du damier (24 / 12 / 8 / 4 selon le
+  // palier). Lu par `BlockGrid.cellsForTrack` (block-grid.js:360), qui rétrécit
+  // le CÔTÉ du carré tant qu'il en demande plus — jamais des cases isolées, ce
+  // qui rouvrirait le trou que damier-carre.js existe pour boucher.
+  //
+  // ⚠️ CETTE LIGNE MANQUAIT, ET LE MÉCANISME ENTIER NE S'EXÉCUTAIT PAS. La table
+  // portait `damierMax`, `carreSousPlafond` savait le faire respecter,
+  // `block-grid.js` le lisait — mais personne ne le posait ici : la lecture
+  // rendait `undefined`, le plafond retombait sur `Infinity`, et une machine de
+  // palier 3 chargeait exactement le même damier qu'une machine de palier 0.
+  // Mesuré en Tâche 12 ; verrouillé par test/damier-palier.test.js, qui lit
+  // cette ligne-ci parce qu'aucun test ne peut exécuter main.js.
+  damierMax: MACHINE.damierMax,
 
   // globe (orbital view)
   globeExaggeration: 18,
