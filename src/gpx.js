@@ -253,6 +253,26 @@ export function fractionAuClic(x, largeur, padX) {
   return THREE.MathUtils.clamp((x - padX) / utile, 0, 1)
 }
 
+// GARDE DE pointerMove(), EXTRAITE EN FONCTION PURE (task 9, relecture) —
+// un calque est survolable s'il porte des sommets ET si son groupe (le
+// toggle « afficher le tracé ») est visible. `group.visible`, PAS
+// `line.visible` : ce dernier reste vrai calque masqué, ce qui gardait
+// jadis l'infobulle DOM vivante sur un tracé invisible.
+//
+// ⚠️ ELLE NE PREND VOLONTAIREMENT AUCUN PARAMÈTRE « line ». La garde en ligne
+// qu'elle remplace exigeait `this.line` — construit UNIQUEMENT quand Line2
+// remplace le ruban (mode dégradé de pente), jamais sous le rendu PAR DÉFAUT
+// (ruban). Sous ce rendu par défaut, `this.line` valait toujours `null` et
+// la garde sortait à chaque appel : le survol 3D du tracé — et tout ce qui
+// en dépend, y compris le clic-pour-reprendre de cette tâche — ne
+// s'exécutait JAMAIS. Rien ne le testait, donc rien ne l'a vu pendant des
+// semaines de ce plan. Extraite ici et testée seule (sans DOM ni caméra
+// THREE), un futur remaniement qui réintroduirait une dépendance au rendu
+// Line2 fera rougir CE test avant d'atteindre le navigateur.
+export function peutSurvolerLeTrace(track, groupVisible) {
+  return !!track?.world && !!groupVisible
+}
+
 // One step of critically-damped exponential follow of the marker's OWN
 // transform toward the true reveal-head vertex (mutates + returns `disp`).
 // This is the "smoothing in TIME, not space" fix: the target itself is
@@ -1696,20 +1716,15 @@ export class GpxLayer {
 
   // nearest track point to the pointer ray (screen-space tolerance)
   pointerMove(mouseNdc, clientX, clientY) {
-    // group.visible covers the "show track" toggle — line.visible alone stays
-    // true when the layer is hidden, which kept the DOM tooltip alive
-    // ⚠️ `this.line` NE DOIT PLUS FIGURER DANS CETTE GARDE (task 9) — Line2
-    // n'est construit QUE quand le ruban n'est PAS utilisé (voir
-    // _rebuildSuite : `if (utiliseRuban) return this._rebuildDecors(...)`),
-    // et le ruban est le rendu PAR DÉFAUT (gpxRuban !== false, gradient
-    // éteint par défaut). L'ancienne garde exigeait `this.line` : sous le
-    // rendu par défaut il valait toujours null, donc ce picking — et tout ce
-    // qui en dépend, y compris le clic-pour-reprendre de cette tâche — ne
-    // s'exécutait JAMAIS. Trouvé en vérifiant au navigateur (hoverIdx resté
-    // à -1 sur tout un tracé de démo, this.line confirmé null). Le raycasting
-    // ci-dessous ne lit que `this.track.world`, jamais `this.line` : rien
-    // d'autre n'en dépendait.
-    if (!this.track?.world || !this.group.visible) return
+    // Garde extraite en fonction PURE (voir peutSurvolerLeTrace ci-dessus,
+    // avant la classe) — testable sans DOM ni caméra THREE, ce qu'une
+    // condition en ligne ne permettait pas. Sans ce test, `!this.line` a pu
+    // se réintroduire ici sans qu'aucun test ne rougisse : c'est EXACTEMENT
+    // ce qui s'est produit (task 9) — Line2 n'est construit que quand le
+    // ruban n'est PAS utilisé, or le ruban est le rendu PAR DÉFAUT, donc
+    // `this.line` valait toujours null et ce picking — et tout ce qui en
+    // dépend, y compris le clic-pour-reprendre — ne s'exécutait JAMAIS.
+    if (!peutSurvolerLeTrace(this.track, this.group.visible)) return
     this._ray.setFromCamera(mouseNdc, this.camera)
     const ray = this._ray.ray
     // ⚠️ LE RAYON EST EN MONDE, `track.world` EST EN CHAMP. En mode continu le

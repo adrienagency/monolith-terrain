@@ -50,6 +50,7 @@ let parseGpx
 let frameTrack
 let indexALAbscisse
 let fractionAuClic
+let peutSurvolerLeTrace
 let stepHeadFollow
 let pickKmInterval
 let profileTitle
@@ -71,6 +72,7 @@ before(async () => {
     frameTrack,
     indexALAbscisse,
     fractionAuClic,
+    peutSurvolerLeTrace,
     stepHeadFollow,
     pickKmInterval,
     profileTitle,
@@ -193,6 +195,31 @@ test('fractionAuClic retire le padding horizontal avant de diviser (panneau HUD,
   assert.equal(fractionAuClic(792, 800, 8), 1) // bord droit utile (800 - 8)
   assert.equal(fractionAuClic(400, 800, 8), 0.5) // milieu de la zone utile (784 px) depuis x=8
   assert.equal(fractionAuClic(0, 800, 8), 0, 'avant le padding : borne a 0, pas negatif')
+})
+
+// ---- garde du picking 3D : le ruban (this.line == null) doit rester survolable ----
+
+test('peutSurvolerLeTrace : le ruban reste survolable (this.line absent, LE BUG CORRIGE)', () => {
+  // LE BUG DE CETTE TACHE : l'ancienne garde de pointerMove exigeait `this.line`,
+  // construit UNIQUEMENT quand Line2 remplace le ruban (mode degrade de pente) —
+  // jamais sous le rendu par defaut (ruban). Cette fonction ne prend meme plus
+  // de parametre "line" : rien ne peut plus reintroduire cette dependance sans
+  // faire rougir ce test. Une trace avec des sommets, un groupe visible : ca DOIT
+  // rester survolable, meme si aucun Line2 n'existe (c'est exactement le cas du
+  // ruban).
+  assert.equal(peutSurvolerLeTrace({ world: [{ x: 0 }, { x: 1 }] }, true), true)
+})
+
+test('peutSurvolerLeTrace : pas de trace chargee, pas de survol', () => {
+  assert.equal(peutSurvolerLeTrace(null, true), false)
+  assert.equal(peutSurvolerLeTrace(undefined, true), false)
+  assert.equal(peutSurvolerLeTrace({ world: null }, true), false)
+})
+
+test('peutSurvolerLeTrace : calque masque (toggle "afficher le trace"), pas de survol', () => {
+  // group.visible, PAS line.visible — line.visible reste vrai calque masque,
+  // ce qui gardait jadis l'infobulle DOM vivante sur un calque invisible
+  assert.equal(peutSurvolerLeTrace({ world: [{ x: 0 }, { x: 1 }] }, false), false)
 })
 
 test('stepHeadFollow snaps (not eases) on the first call — no fly-in from a stale spot', () => {
