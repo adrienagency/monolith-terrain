@@ -48,7 +48,7 @@ import { deriveUiTokens, UI_TOKEN_VARS } from './ui-theme.js'
 import { gradeForDem, elevationHistogram } from './relief-grade.js'
 import { buildPalettePool, pickShufflePalette } from './shuffle-pool.js'
 import { peakVantage } from './camera-poses.js'
-import { poseIsometrique } from './vue-ensemble.js'
+import { poseIsometrique, modeCameraDamier, doitVraimentDezoomer, poseDamier, cumuleDezoom } from './vue-ensemble.js'
 import { focusRayHit } from './autofocus.js'
 import { doitRafraichirCartouche } from './ground-info.js'
 import { GroundInfoLayer } from './ground-info-layer.js'
@@ -3437,6 +3437,11 @@ modes = new Modes({
       followZoomVel = Math.min(2.4, Math.max(-2.4, followZoomVel + Math.sign(deltaY) * 0.32))
       return true
     },
+    // molette pendant le cadrage du damier : un cran mou est AVALÉ (le bouton
+    // vient de cadrer, la main est encore sur la molette), l'insistance rend la
+    // caméra et laisse l'escalier de zoom dézoomer pour de bon. Le seuil est
+    // dans vue-ensemble.js, avec sa justification.
+    cadrageWheel: (deltaY) => molettePendantCadrageDamier(deltaY),
     // world point under a screen NDC (for zoom-toward-cursor) — marches the
     // height field like the autofocus ray; null on a sky/off-map miss
     pointUnder: (nx, ny) => {
@@ -5155,6 +5160,18 @@ blockGrid.onGridChanged = () => {
   // c'est ce cumul, pas un garde manquant, que la Tâche 12 doit mesurer.
   merSuitLeDamier()
   cartoucheSuitLeDamier()
+  // LE CADRAGE SUIT LE DAMIER QUI GRANDIT. On clique sur le bouton dès qu'on
+  // voit plusieurs cases — c'est-à-dire presque toujours AVANT la fin du
+  // chargement. Sans ce rappel, le cadrage resterait celui du 2×2 d'alors et le
+  // 3×3 arrivé ensuite déborderait de l'écran. Gardé par la clé du carré : les
+  // vingt dalles qui arrivent sans changer la FORME ne rejouent aucun vol.
+  if (cadrageDamier) {
+    // …et il se referme tout seul si le damier retombe à une seule case (une
+    // recherche ailleurs, un tracé fermé) : plus rien à cadrer, la caméra doit
+    // rendre sa butée avant que l'escalier de zoom ne la relise.
+    if (modeBoutonCamera() !== 'ensemble') quitteCadrageDamier()
+    else if (cleDuCarre(carrePourCamera()) !== cleCadrageDamier) cadreLeDamier()
+  }
 }
 // le damier se resynchronise à CHAQUE re-drapage global (zone, zoom, ajout de
 // calque) — idempotent, borné 5×5, cellules en cache LRU
@@ -7302,6 +7319,10 @@ let isoIndex = -1
 // vole (rotation orbitale) vers la vue iso i ; met à jour le badge de l'icône
 function applyIsoView(i) {
   if (modes.mode !== 'surface' || modes.busy) return
+  // toute vue iso classique rend d'abord la butée empruntée par le cadrage du
+  // damier — sinon `dist` resterait mesurée contre un `maxDistance` desserré et
+  // la porte orbitale ne s'ouvrirait plus jamais (voir quitteCadrageDamier).
+  quitteCadrageDamier()
   tour.active = false
   isoIndex = ((i % ISO_VIEWS.length) + ISO_VIEWS.length) % ISO_VIEWS.length
   const v = ISO_VIEWS[isoIndex]
@@ -7309,6 +7330,113 @@ function applyIsoView(i) {
   const pos = v.target.clone().addScaledVector(v.dir.clone().normalize(), dist)
   flyTo(pos, v.target.clone(), { orbit: true })
   isoBtn?.setBadge(v.name)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LE BOUTON CAMÉRA CADRE TOUT LE DAMIER — sans changer de zoom géographique
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Adrien : « Le bouton caméra en vue multi-cases permettra de voir toutes les
+// cases à la fois en isométrique sans passer au zoom inférieur. Et on reviendra
+// au mode précédent si une seule case est affichée. Si dans ce mode de vue,
+// l'utilisateur continue de dézoomer, alors on dézoome vraiment. »
+//
+// Les trois RÈGLES vivent dans `src/vue-ensemble.js` (pur, testé) ; ici il n'y a
+// que la plomberie three.js qu'un module pur ne peut pas faire.
+//
+// ⚠️ AUCUNE LIGNE DE CE BLOC NE TOUCHE À `params.demZoom`, ni n'appelle
+// `loadRealTerrain`, `stepZoom` ou `pasEscalier` : c'est ÇA, « sans passer au
+// zoom inférieur ». Un cran d'escalier rechargerait les neuf dalles à une autre
+// résolution — le relief perdrait sa finesse et tout le chargement déjà payé
+// partirait à la poubelle.
+const MARGE_CADRAGE_DAMIER = 1.1 // le damier respire un peu dans le cadre
+// Ce qu'on doit rendre à la caméra en sortant. `null` = pas de cadrage en cours.
+let cadrageDamier = null
+let cumulDezoomDamier = 0
+let dernierCranDamier = 0
+let cleCadrageDamier = ''
+
+// ⚠️ `empriseVivante()`, JAMAIS `carreCourant()` — même règle que la mer et le
+// cartouche : la première dit ce qui est POSÉ (jusqu'à 5×5 en zone isolée), la
+// seconde ce que le tracé a RÉCLAMÉ (plafonné à 3×3).
+function carrePourCamera() {
+  return blockGrid?.empriseVivante?.() ?? { i0: 0, j0: 0, cote: 1 }
+}
+
+function modeBoutonCamera() {
+  return modeCameraDamier(carrePourCamera(), { continu: fenetreContinueActive() && dem?.empriseCote > 1 })
+}
+
+// Recule la caméra jusqu'à voir les N×N cases, en isométrie vraie.
+function cadreLeDamier() {
+  if (modes.mode !== 'surface' || modes.busy) return false
+  const carre = carrePourCamera()
+  const pose = poseDamier(
+    { zoom: params.demZoom, cote: carre.cote, i0: carre.i0, j0: carre.j0, taille: TERRAIN_SIZE },
+    { fovDeg: camera.fov, marge: MARGE_CADRAGE_DAMIER }
+  )
+  if (!pose) return false
+  // ⚠️ IL FAUT DESSERRER `maxDistance` ET LE COUPLE near/far, SINON RIEN NE SE
+  // VOIT. Un 3×3 de 56 unités demande ~490 unités de recul à fov 30 ; le socle
+  // de la vue iso s'arrête à 150 (`controls.update()` re-clampe à chaque image)
+  // et la caméra porte far = 290 (le damier serait purement et simplement
+  // découpé). On relève AUSSI `near` : à 490 unités avec near = 0,5, la
+  // précision du tampon de profondeur tombe à ~0,03 unité, du même ordre que
+  // les 0,06 qui séparent les plans gravés du flanc — les textes se mettraient
+  // à clignoter. `near = distance/4` la ramène à ~1e-4, et rien n'est jamais
+  // plus près que ça (le coin le plus proche du damier est à distance − rayon).
+  cadrageDamier ??= { maxDistance: controls.maxDistance, near: camera.near, far: camera.far }
+  controls.maxDistance = Math.max(cadrageDamier.maxDistance, pose.distance / 0.97)
+  camera.near = Math.max(cadrageDamier.near, pose.distance * 0.25)
+  camera.far = Math.max(cadrageDamier.far, pose.distance * 2)
+  camera.updateProjectionMatrix()
+  cumulDezoomDamier = 0
+  dernierCranDamier = performance.now()
+  cleCadrageDamier = cleDuCarre(carre)
+  flyTo(
+    new THREE.Vector3(pose.position.x, pose.position.y, pose.position.z),
+    new THREE.Vector3(pose.cible.x, pose.cible.y, pose.cible.z),
+    { orbit: true }
+  )
+  isoBtn?.setBadge(`${carre.cote}×${carre.cote}`)
+  return true
+}
+
+// Rend à la caméra ce qu'on lui avait emprunté. Appelée AVANT de laisser
+// l'escalier de zoom (ou la porte orbitale) reprendre la main : `modes.js` lit
+// `controls.maxDistance` pour savoir s'il est en butée, et il doit lire la
+// vraie, pas celle du cadrage.
+function quitteCadrageDamier() {
+  if (!cadrageDamier) return false
+  controls.maxDistance = cadrageDamier.maxDistance
+  camera.near = cadrageDamier.near
+  camera.far = cadrageDamier.far
+  camera.updateProjectionMatrix()
+  cadrageDamier = null
+  cumulDezoomDamier = 0
+  cleCadrageDamier = ''
+  isoBtn?.setBadge(isoIndex >= 0 ? ISO_VIEWS[isoIndex].name : '')
+  return true
+}
+
+// LA MOLETTE PENDANT LE CADRAGE. Rendre `true` avale le cran.
+//
+// ⚠️ UN CRAN VERS L'INTÉRIEUR SORT TOUT DE SUITE, sans seuil : vouloir
+// s'approcher, c'est avoir fini de regarder l'ensemble — et surtout, le glissé
+// inertiel de modes.js passerait sinon sous le `near` desserré ci-dessus et
+// ferait disparaître le décor.
+function molettePendantCadrageDamier(deltaY) {
+  if (!cadrageDamier) return false
+  if (!(deltaY > 0)) {
+    quitteCadrageDamier()
+    return false // le cran d'approche suit son chemin normal
+  }
+  const now = performance.now()
+  cumulDezoomDamier = cumuleDezoom(cumulDezoomDamier, deltaY, now - dernierCranDamier)
+  dernierCranDamier = now
+  if (!doitVraimentDezoomer({ mode: 'ensemble', cumul: cumulDezoomDamier })) return true // cran mou : avalé
+  quitteCadrageDamier()
+  return false // l'utilisateur insiste : on dézoome VRAIMENT (escalier / orbite)
 }
 // Bouton cinéma — MÊME MÉCANIQUE QUE LE BOUTON ISO (Adrien) : chaque clic passe
 // au plan suivant, et un petit numéro apparaît au-dessus.
@@ -7339,8 +7467,15 @@ cineBtn = buildCineButton({
 // `__exp.pilote.next()` dans la console et par les scripts de tournage.
 
 isoBtn = buildIsoButton({
-  // chaque clic passe à la vue suivante (rotation orbitale)
-  flyIso: () => applyIsoView(isoIndex + 1),
+  // DEUX COMPORTEMENTS, ET C'EST LE DAMIER QUI TRANCHE (Adrien) :
+  //  — plusieurs cases posées → le bouton cadre L'ENSEMBLE en isométrie, sans
+  //    toucher au zoom géographique ;
+  //  — une seule case → il retrouve son comportement d'avant, au bit près :
+  //    chaque clic passe à la vue suivante (rotation orbitale).
+  flyIso: () => {
+    if (modeBoutonCamera() === 'ensemble' && cadreLeDamier()) return
+    applyIsoView(isoIndex + 1) // …qui rend d'abord la butée empruntée par le cadrage
+  },
 })
 
 // bottom-left cartography corner (Adrien) : aerial toggle · base · shuffle
@@ -8144,7 +8279,7 @@ history.reset()
 // ------------------------------------------------------------------ loop
 
 // console access for debugging/scripting
-window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, shots, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, pilote,
+window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, scene, camera, controls, params, terrain, loadRealTerrain, applyTimeOfDay, globe, modes, gotoCtl, gpxLayer, loadGpxText, flyTrack, tour, drone, cameraAuto, shots, applyBackground, autoBgColours, clouds, plinth, peaksLayer, blockGrid, refreshAerial, paintCellAerial, applyIsoView, flyTo, cadreLeDamier, quitteCadrageDamier, modeBoutonCamera, get tween() { return tween }, get isoIndex() { return isoIndex }, applyPalette, applyStyle, applyGridContour, applyMonochrome, applyTemplate, setDarkMode, groundInfo, pilote,
   // INTERRUPTEUR de la teinte d'interface : __exp.setUiTint(false) rend
   // l'interface neutre de v28.css, true la raccorde à la palette.
   setUiTint: (v) => { params.uiTint = v !== false; syncUiTheme() }, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,

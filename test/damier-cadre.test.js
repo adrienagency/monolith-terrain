@@ -19,6 +19,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { centreDuCarre, ecartTextes } from '../src/damier-carre.js'
+import {
+  modeCameraDamier,
+  doitVraimentDezoomer,
+  poseDamier,
+  cumuleDezoom,
+  SEUIL_SORTIE_ENSEMBLE,
+  OUBLI_MOLETTE_MS,
+} from '../src/vue-ensemble.js'
 
 const RACINE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -340,4 +348,260 @@ test('main.js branche le cartouche sur onGridChanged, et lit l\'emprise VIVANTE'
   const boucle = /blockGrid\.onGridChanged = \(\) => \{([\s\S]*?)\n\}/.exec(SRC_MAIN)
   assert.ok(boucle, 'la boucle du damier existe')
   assert.match(boucle[1], /cartoucheSuitLeDamier\(\)/, 'le cartouche est rappele a chaque changement de damier')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⑥ LE BOUTON CAMÉRA CADRE TOUT LE DAMIER (Tâche 10)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// « Le bouton camera en vue multi-cases permettra de voir toutes les cases a la
+// fois en isometrique sans passer au zoom inferieur. Et on reviendra au mode
+// precedent si une seule case est affichee. Si dans ce mode de vue,
+// l'utilisateur continue de dezoomer, alors on dezoome vraiment. » (Adrien)
+
+const rad = (d) => (d * Math.PI) / 180
+
+// ---- 1. quel comportement le bouton doit prendre ---------------------------
+
+test('en 1x1 le bouton camera garde son comportement d\'avant', () => {
+  assert.equal(modeCameraDamier({ cote: 1 }), 'bloc')
+})
+
+test('des qu\'il y a plusieurs cases, le bouton cadre l\'ensemble', () => {
+  assert.equal(modeCameraDamier({ cote: 2 }), 'ensemble', 'DEUX cases suffisent, pas trois')
+  assert.equal(modeCameraDamier({ cote: 3 }), 'ensemble')
+  assert.equal(modeCameraDamier({ cote: 5 }), 'ensemble', 'le 5x5 de la zone isolee aussi')
+})
+
+test('sans carre lisible, le bouton reste celui d\'avant', () => {
+  // un damier pas encore synchronise ne doit pas envoyer la camera a 500 unites
+  for (const carre of [undefined, null, {}, { cote: 0 }, { cote: NaN }]) {
+    assert.equal(modeCameraDamier(carre), 'bloc', JSON.stringify(carre))
+  }
+})
+
+test('la fenetre continue n\'a PAS de damier : le bouton n\'y cadre rien', () => {
+  // Son emprise 3x3 est celle du CHAMP ; le socle reste UN bloc et c'est le
+  // relief qui defile dedans (damier-carre.js, coteGeometrique). Reculer la
+  // camera pour « tout voir » y cadrerait du vide autour d'un bloc unique.
+  assert.equal(modeCameraDamier({ cote: 3 }, { continu: true }), 'bloc')
+  assert.equal(modeCameraDamier({ cote: 3 }, { continu: false }), 'ensemble')
+})
+
+// ---- 2. la pose : tout le carre, et le zoom RENDU INCHANGÉ -----------------
+
+// LE PIÈGE : cadrer l'ensemble ne doit PAS changer le zoom geographique.
+// Un dezoom d'escalier rechargerait tout le damier a une autre resolution —
+// et la demande dit explicitement « sans passer au zoom inferieur ».
+test('cadrer l\'ensemble ne consomme pas un cran de zoom', () => {
+  const pose = poseDamier({ zoom: 12, cote: 3 }, { fovDeg: 45, marge: 1.1 })
+  assert.equal(pose.zoom, 12, 'le zoom geographique doit etre rendu inchange')
+  assert.ok(pose.hauteur > 0, 'la camera monte pour tout voir')
+  assert.ok(Number.isFinite(pose.cible.x) && Number.isFinite(pose.cible.z))
+})
+
+test('le zoom rendu est CELUI QU\'ON A DONNÉ, pas une constante', () => {
+  // ⚠️ CE TEST EXISTE PARCE QUE `assert.equal(pose.zoom, 12)` SEUL NE PROUVE
+  // RIEN : il survit a un `zoom: 12` code en dur. Deux zooms differents, et une
+  // implementation qui invente sa valeur meurt sur l'un des deux.
+  for (const z of [3, 7, 12, 16]) {
+    assert.equal(poseDamier({ zoom: z, cote: 3 }, { fovDeg: 45, marge: 1.1 }).zoom, z, `zoom ${z}`)
+    assert.equal(poseDamier({ zoom: z, cote: 1 }, { fovDeg: 45, marge: 1.1 }).zoom, z, `zoom ${z} en 1x1`)
+  }
+})
+
+test('la pose isometrique cadre le carre, pas le seul bloc principal', () => {
+  const seul = poseDamier({ zoom: 12, cote: 1 }, { fovDeg: 45, marge: 1.1 })
+  const large = poseDamier({ zoom: 12, cote: 3 }, { fovDeg: 45, marge: 1.1 })
+  assert.ok(large.hauteur > seul.hauteur, 'un 3x3 demande de monter plus haut')
+  assert.equal(large.zoom, seul.zoom, 'et toujours sans changer de zoom')
+  // …et il monte EXACTEMENT trois fois plus haut : le recul est lineaire en
+  // cote. Un cadrage qui n'aurait retenu que le bloc central passerait le
+  // « plus haut » ci-dessus par accident (marge, arrondi) mais pas ce rapport.
+  presque(large.hauteur / seul.hauteur, 3, 'un 3x3 recule d\'un facteur 3, pas d\'un cheveu')
+})
+
+test('la sphere cadree circonscrit les QUATRE COINS du carre au sol', () => {
+  // C'est la propriete qui distingue « cadrer le carre » de « cadrer le trace »
+  // ou « cadrer le centre » : le rayon vaut la DEMI-DIAGONALE du carre.
+  // rayon = distance * tan(fov/2) / marge
+  for (const cote of [1, 2, 3, 5]) {
+    const fovDeg = 30
+    const marge = 1.1
+    const p = poseDamier({ zoom: 12, cote, taille: TAILLE }, { fovDeg, marge })
+    const rayon = (p.distance * Math.tan(rad(fovDeg / 2))) / marge
+    presque(rayon, ((TAILLE * cote) / 2) * Math.SQRT2, `cote ${cote}`)
+  }
+})
+
+test('la pose est la vraie isometrie : azimut 45, site atan(1/√2)', () => {
+  const p = poseDamier({ zoom: 12, cote: 3, taille: TAILLE }, { fovDeg: 30, marge: 1.1 })
+  const dx = p.position.x - p.cible.x
+  const dz = p.position.z - p.cible.z
+  presque(dx, dz, 'azimut 45 : x et z egalement ecartes')
+  assert.ok(dx > 0, 'la camera est bien reculee, pas posee sur la cible')
+  presque(p.hauteur / p.distance, Math.sin(Math.atan(1 / Math.SQRT2)), 'site isometrique')
+  presque(p.hauteur, p.position.y, 'la hauteur EST celle de la camera')
+})
+
+test('un carre de cote PAIR se cadre sur son centre, pas sur l\'origine', () => {
+  // ⚠️ LE PIÈGE QUI A COÛTÉ DEUX RONDES À LA MER. Le centre d'un 2x2 tombe sur
+  // une jointure : viser (0,0) decadrerait la vue d'un demi-bloc.
+  const carre = { i0: -1, j0: -1, cote: 2 }
+  const p = poseDamier({ zoom: 12, ...carre, taille: TAILLE }, { fovDeg: 30, marge: 1.1 })
+  const c = centreDuCarre(carre, TAILLE)
+  presque(p.cible.x, c.x, 'la cible suit centreDuCarre')
+  presque(p.cible.z, c.z)
+  assert.notEqual(p.cible.x, 0, 'surtout PAS l\'origine')
+
+  // et un 2x2 ancre a l'oppose vise l'autre cote de zero
+  const autre = poseDamier({ zoom: 12, i0: 0, j0: 0, cote: 2, taille: TAILLE }, { fovDeg: 30, marge: 1.1 })
+  presque(autre.cible.x, TAILLE / 2)
+  presque(autre.cible.x, -p.cible.x, 'les deux ancrages sont symetriques autour de zero')
+})
+
+test('un cote IMPAIR reste centre sur le bloc principal', () => {
+  for (const cote of [1, 3, 5]) {
+    const p = poseDamier({ zoom: 12, cote, taille: TAILLE }, { fovDeg: 30, marge: 1.1 })
+    presque(p.cible.x, 0, `cote ${cote}`)
+    presque(p.cible.z, 0, `cote ${cote}`)
+  }
+})
+
+test('la marge et le champ de vision sont vraiment consommes', () => {
+  const serre = poseDamier({ zoom: 12, cote: 3 }, { fovDeg: 30, marge: 1 })
+  const large = poseDamier({ zoom: 12, cote: 3 }, { fovDeg: 30, marge: 1.3 })
+  presque(large.distance / serre.distance, 1.3, 'la marge multiplie le recul')
+  const etroit = poseDamier({ zoom: 12, cote: 3 }, { fovDeg: 15, marge: 1.1 })
+  assert.ok(etroit.distance > serre.distance, 'un objectif plus long recule davantage')
+})
+
+// ---- 3. « s'il continue de dezoomer, on dezoome vraiment » ------------------
+
+// ET SON REVERS : si l'utilisateur insiste, il doit pouvoir sortir.
+test('un dezoom franc sort du cadrage et dezoome vraiment', () => {
+  assert.equal(doitVraimentDezoomer({ mode: 'ensemble', cumul: 0.2 }), false, 'un cran mou ne sort pas')
+  assert.equal(doitVraimentDezoomer({ mode: 'ensemble', cumul: 1.5 }), true, 'l\'insistance sort')
+})
+
+test('hors du cadrage, tout dezoom est un vrai dezoom', () => {
+  assert.equal(doitVraimentDezoomer({ mode: 'bloc', cumul: 0.1 }), true)
+  // ⚠️ ET AUSSI POUR UN MODE INCONNU OU ABSENT. Un `mode !== 'bloc'` a la place
+  // du `mode !== 'ensemble'` gelerait la molette de toute l'application des
+  // qu'un appelant oublie le champ.
+  assert.equal(doitVraimentDezoomer({ cumul: 0.1 }), true, 'mode absent')
+  assert.equal(doitVraimentDezoomer({ mode: 'orbite', cumul: 0 }), true, 'mode inconnu')
+  assert.equal(doitVraimentDezoomer(), true, 'aucun argument du tout')
+})
+
+test('le seuil est franchi À la valeur, pas seulement au-dela', () => {
+  // borne le seuil des DEUX cotes : un seuil deplace, ou un `>` a la place du
+  // `>=`, meurt ici.
+  assert.equal(doitVraimentDezoomer({ mode: 'ensemble', cumul: SEUIL_SORTIE_ENSEMBLE }), true)
+  assert.equal(doitVraimentDezoomer({ mode: 'ensemble', cumul: SEUIL_SORTIE_ENSEMBLE - 1e-9 }), false)
+})
+
+test('UN cran de souris ne sort jamais, DEUX sortent', () => {
+  // C'est la justification du seuil, et elle se teste. Un cran de souris vaut
+  // 100 px (Chrome) ou 120 px (Windows/Firefox) : les deux valent 1 apres
+  // normalisation, et 1 < seuil <= 2.
+  for (const px of [100, 120, 240]) {
+    const un = cumuleDezoom(0, px, 0)
+    assert.equal(un, 1, `un cran de ${px} px vaut exactement 1`)
+    assert.equal(doitVraimentDezoomer({ mode: 'ensemble', cumul: un }), false, `un seul cran de ${px} px reste`)
+    const deux = cumuleDezoom(un, px, 60)
+    assert.equal(doitVraimentDezoomer({ mode: 'ensemble', cumul: deux }), true, `deux crans de ${px} px sortent`)
+  }
+})
+
+test('une caresse de pave tactile ne defait pas le cadrage', () => {
+  let c = 0
+  for (let k = 0; k < 5; k++) c = cumuleDezoom(c, 4, 30) // 5 evenements de 4 px
+  presque(c, 0.2, '20 px cumules')
+  assert.equal(doitVraimentDezoomer({ mode: 'ensemble', cumul: c }), false)
+  // …mais un balayage franc a deux doigts, lui, sort
+  for (let k = 0; k < 40; k++) c = cumuleDezoom(c, 4, 12)
+  assert.equal(doitVraimentDezoomer({ mode: 'ensemble', cumul: c }), true, '180 px : c\'est un geste')
+})
+
+test('un cran isole ne s\'ajoute pas a un total perime', () => {
+  const un = cumuleDezoom(0, 100, 40)
+  assert.equal(cumuleDezoom(un, 100, OUBLI_MOLETTE_MS + 1), 1, 'le silence a remis le compteur a zero')
+  assert.equal(cumuleDezoom(un, 100, OUBLI_MOLETTE_MS), 2, '…mais pas AVANT la fin du silence')
+})
+
+test('seul le DEZOOM compte dans le cumul', () => {
+  // deltaY < 0 = on s'approche : ca ne fait pas avancer une sortie par dezoom.
+  assert.equal(cumuleDezoom(0.5, -400, 10), 0.5)
+  assert.equal(cumuleDezoom(0.5, 0, 10), 0.5)
+  assert.equal(cumuleDezoom(0.5, NaN, 10), 0.5)
+  // …et le silence remet a zero meme sans cran de dezoom
+  assert.equal(cumuleDezoom(0.5, -400, OUBLI_MOLETTE_MS + 1), 0)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⑦ LE CÂBLAGE DU BOUTON — même règle que ⑤ : main.js se LIT
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ SANS CETTE SECTION, TOUT CE QUI PRÉCÈDE RESTERAIT VERT AVEC LE BOUTON
+// INCHANGÉ À L'ÉCRAN. Et le point le plus fragile n'est PAS testable autrement :
+// « sans passer au zoom inferieur » est une propriete de ce que le cadrage
+// N'APPELLE PAS.
+
+test('le bouton camera choisit entre l\'ensemble et la vue d\'avant', () => {
+  const btn = /flyIso: \(\) => \{([\s\S]*?)\n  \},/.exec(SRC_MAIN)
+  assert.ok(btn, 'le bouton iso a bien une branche')
+  assert.match(btn[1], /modeCameraDamier\(|modeBoutonCamera\(\)/, 'il demande au damier quoi faire')
+  assert.match(btn[1], /cadreLeDamier\(\)/, 'plusieurs cases → il cadre l\'ensemble')
+  assert.match(btn[1], /applyIsoView\(/, 'une seule case → son comportement d\'avant')
+})
+
+test('le cadrage lit l\'emprise VIVANTE et ne touche JAMAIS au zoom', () => {
+  const fn = /function cadreLeDamier\(\)\s*\{([\s\S]*?)\n\}/.exec(SRC_MAIN)
+  assert.ok(fn, 'le cadrage du damier existe')
+  assert.match(fn[1], /poseDamier\(/, 'il delegue la pose au module pur')
+  assert.match(fn[1], /empriseVivante\(\)|carrePourCamera\(\)/, 'ce qui est POSE...')
+  assert.doesNotMatch(fn[1], /carreCourant\(\)/, '...pas ce que le trace a RECLAME')
+  // ⚠️ LE CŒUR DE LA DEMANDE : le cadrage recule la CAMÉRA, il ne change pas la
+  // CARTE. Un seul de ces appels et les neuf dalles se rechargeraient a une
+  // autre resolution.
+  assert.doesNotMatch(fn[1], /demZoom\s*=[^=]/, 'aucune ecriture du zoom geographique')
+  assert.doesNotMatch(fn[1], /loadRealTerrain|pasEscalier|stepZoom|_coarsen|enterOrbit/, 'aucun cran d\'escalier')
+
+  const lecture = /const carre = carrePourCamera\(\)/.test(fn[1])
+  assert.ok(lecture, 'il lit le carre une fois, en tete')
+  const src = /function carrePourCamera\(\)\s*\{([\s\S]*?)\n\}/.exec(SRC_MAIN)
+  assert.ok(src, 'et carrePourCamera existe')
+  assert.match(src[1], /empriseVivante/, 'et c\'est bien l\'emprise vivante qu\'il rend')
+})
+
+test('la molette rend la butee AVANT de laisser l\'escalier dezoomer', () => {
+  // ⚠️ L'ORDRE EST LA CORRECTION. modes.js decide « je suis en butee » en
+  // comparant la distance a controls.maxDistance ; rendre `false` sans avoir
+  // remis la vraie valeur laisserait la porte orbitale fermee pour toujours.
+  const fn = /function molettePendantCadrageDamier\(deltaY\)\s*\{([\s\S]*?)\n\}/.exec(SRC_MAIN)
+  assert.ok(fn, 'le hook molette existe')
+  assert.match(fn[1], /doitVraimentDezoomer\(/, 'c\'est la regle pure qui tranche')
+  assert.match(fn[1], /cumuleDezoom\(/, 'un CUMUL de molette, pas un booleen')
+  // ⚠️ CE TEST A DÉJÀ SURVÉCU À SA PROPRE MUTATION une fois : il cherchait le
+  // PREMIER `quitteCadrageDamier()`, celui de la branche « on s'approche », et
+  // restait donc vert quand on supprimait celui de la branche « il insiste ».
+  // On ancre maintenant la recherche APRÈS la règle qui tranche.
+  const regle = fn[1].indexOf('doitVraimentDezoomer(')
+  const rendu = fn[1].indexOf('quitteCadrageDamier()', regle)
+  const faux = fn[1].lastIndexOf('return false')
+  assert.ok(regle >= 0, 'la regle est consultee')
+  assert.ok(rendu > regle && faux > rendu, 'on rend la butee, PUIS on laisse passer le cran')
+
+  assert.match(SRC_MAIN, /cadrageWheel: \(deltaY\) =>/, 'et modes.js recoit bien le hook')
+})
+
+test('modes.js consulte le cadrage avant de compter ses crans', () => {
+  const SRC_MODES = fs.readFileSync(path.join(RACINE, 'src/modes.js'), 'utf8')
+  const geste = SRC_MODES.indexOf('_zoomGesture(e) {')
+  assert.ok(geste > 0)
+  const appel = SRC_MODES.indexOf('this.hooks.cadrageWheel?.(', geste)
+  const compteur = SRC_MODES.indexOf('this._lastWheelT = now', geste)
+  assert.ok(appel > geste, 'le hook est branche dans le geste de molette')
+  assert.ok(compteur > appel, 'et il passe AVANT que le geste ne soit compte comme frais')
 })

@@ -192,6 +192,14 @@ export class Modes {
       // pendant le suivi de tête GPX, la molette pilote le STANDOFF de la
       // caméra de suivi (zoom/dézoom autour de la tête) — pas l'escalier
       if (this.hooks.followWheel?.(e.deltaY)) { e.preventDefault(); return }
+      // LE CADRAGE DU DAMIER TIENT LA MOLETTE (voir vue-ensemble.js et le bloc
+      // `cadreLeDamier` de main.js). Tant que le cumul de dézoom n'atteint pas
+      // le seuil, le cran est avalé : le bouton caméra vient de cadrer tout le
+      // damier, et un cran réflexe ne doit pas défaire ce qu'on demandait. Dès
+      // que l'utilisateur insiste, le hook rend `false` APRÈS avoir remis
+      // `controls.maxDistance` — sans quoi la butée lue trois lignes plus bas
+      // serait celle du cadrage, pas la vraie.
+      if (this.hooks.cadrageWheel?.(e.deltaY)) { e.preventDefault(); return }
       if (this._diveTween || this.busy) return
       e.preventDefault()
       const now = performance.now()
