@@ -421,7 +421,12 @@ export function bandesDuPlan(plan) {
 // REJOUABLE. Sous node il n'y a ni DOM ni WebGL ; le test fournit un support en
 // mémoire qui compte les écritures pixel par pixel. Sans cette couture-là,
 // l'invariant ① ne se vérifierait qu'à l'œil, sur un tirage.
-function supportNavigateur() {
+// ⚠️ EXPORTÉ POUR ÊTRE ENVELOPPÉ, PAS POUR ÊTRE REMPLACÉ. Le compositeur
+// d'affiche (compositeur-affiche.js) a besoin de la MÊME toile, mais avec un
+// passage de plus juste avant l'encodage : la réapplication du vignettage et du
+// grain, puis le cartouche. Le recopier là-bas aurait donné deux toiles à
+// maintenir — dont une seule connaîtrait le piège du `c.width = 1` ci-dessous.
+export function supportNavigateur() {
   return {
     creerToile(largeur, hauteur) {
       const c = document.createElement('canvas')
@@ -432,6 +437,10 @@ function supportNavigateur() {
         largeur,
         hauteur,
         poser(src, sx, sy, sw, sh, dx, dy, dw, dh) { g.drawImage(src, sx, sy, sw, sh, dx, dy, dw, dh) },
+        // Le contexte, pour qui doit dessiner PAR-DESSUS la bande avant qu'elle
+        // soit encodée — le compositeur d'affiche, et lui seul. L'orchestrateur
+        // ne s'en sert pas : il ne connaît que `poser` et `encoder`.
+        contexte2d: () => g,
         encoder: (format, quality) =>
           new Promise((res, rej) =>
             c.toBlob((b) => (b ? res(b) : rej(new Error('Canvas capture failed'))), format, quality)

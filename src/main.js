@@ -2101,8 +2101,53 @@ const contrastFx = new BrightnessContrastEffect({ brightness: 0, contrast: param
 const hueSat = new HueSaturationEffect({ saturation: params.saturation })
 const grain = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false })
 grain.blendMode.opacity.value = params.grain
-const vignette = new VignetteEffect({ darkness: params.vignette, offset: 0.28 })
+// ⚠️ UN SEUL ENDROIT POUR L'OFFSET DU VIGNETTAGE. Le compositeur d'affiche doit
+// le RÉAPPLIQUER à l'identique sur le fichier imprimé — le pavage l'éteint,
+// sinon chaque tuile reçoit son propre vignettage et l'affiche sort en damier.
+// Un 0,28 recopié là-bas ne resterait juste que jusqu'au jour où celui-ci bouge.
+const VIGNETTE_OFFSET = 0.28
+const vignette = new VignetteEffect({ darkness: params.vignette, offset: VIGNETTE_OFFSET })
 const smaa = new SMAAEffect()
+
+// ═══════════ NEUTRALISER POUR PAVER, RÉAPPLIQUER POUR LIVRER ═══════════════
+//
+// `planPavage` (export-effets.js) range le vignettage et le grain dans
+// `NEUTRALISER` : leur sortie dépend de la position dans la CIBLE, donc chaque
+// tuile en recevrait un exemplaire entier. Les éteindre seulement livrerait UNE
+// AUTRE AFFICHE — plus plate que celle validée à l'écran. Les deux gestes ne se
+// séparent pas : c'est le compositeur (compositeur-affiche.js) qui les
+// réapplique, une seule fois, en fractions de l'image entière.
+//
+// ⚠️ `darkness = 0` ÉTEINT VRAIMENT LE VIGNETTAGE, ce n'est pas un « presque ».
+// Le facteur vaut `smoothstep(0.8, offset·0.799, d·(darkness + offset))` : avec
+// darkness nul, l'argument plafonne à 0,707·0,28 = 0,198, sous la borne
+// 0,28·0,799 = 0,224. Le lissage rend donc 1 partout, c'est-à-dire l'identité.
+function neutraliserEffetsAffiche() {
+  const dVignette = vignette.darkness
+  const oGrain = grain.blendMode.opacity.value
+  vignette.darkness = 0
+  grain.blendMode.opacity.value = 0
+  return function restaurer() {
+    vignette.darkness = dVignette
+    grain.blendMode.opacity.value = oGrain
+  }
+}
+
+// Le logo de l'acheteur, prêt à être dessiné sur un canevas 2D. `null` si rien
+// n'a été importé, ou si l'image refuse de se décoder — un logo illisible ne
+// doit pas faire perdre l'affiche.
+async function chargerLogoAffiche(url) {
+  if (!url) return null
+  try {
+    const img = new Image()
+    img.src = url
+    await img.decode()
+    return img
+  } catch {
+    console.warn('[ShibuMap] compositeur : le logo importé ne se décode pas, l’affiche part sans lui.')
+    return null
+  }
+}
 
 composer.addPass(new EffectPass(camera, exposureFx, toneMap, hueSat, contrastFx, grain, vignette, smaa))
 // only builds the pass if bokeh is actually on at boot (it is not, by default)
@@ -7090,13 +7135,82 @@ async function openAfficheUI(etatInitial = null) {
   const { ouvrirAffiche } = await import('./ui/affiche.js')
   // `tailleSousPlafond` avec lui : l'épaisseur des traits se règle sur ce qui
   // est VRAIMENT peint, et le plafond matériel peut avoir raboté la demande.
-  const { exportImage, tailleSousPlafond } = await import('./export.js')
+  const { exportImage, tailleSousPlafond, supportNavigateur } = await import('./export.js')
+  const {
+    planComposition, supportAffiche, mentionsAffiche, attendrePolices,
+    tailleValidation, composerValidation,
+  } = await import('./compositeur-affiche.js')
   // Ce qu'on devra rendre en sortant : l'affiche emprunte des réglages de carte,
   // elle ne se les approprie pas.
   const lieuxAvant = params.placesEnabled
   // ⚠️ MÊME GEL QUE L'EXPORT, ET POUR LA MÊME RAISON : ce que l'aperçu montre
   // doit être ce qui partira au tirage. Élan éteint, débordement résorbé.
   f3Fige()
+
+  // Le MÊME nom que celui gravé sur le flanc du bloc (groundInfo.info) : deux
+  // sources donneraient deux noms pour un seul lieu.
+  const lieuCourant = () => ({
+    nom: groundInfo?.info?.name || '',
+    lat: dem?.lat ?? NaN,
+    lon: dem?.lon ?? NaN,
+    altMax: Number.isFinite(dem?.maxM) ? dem.maxM : null,
+  })
+
+  // ═══════ LA LIGNE D'ATTRIBUTION DE CETTE AFFICHE-CI ════════════════════════
+  //
+  // ⚠️ OBLIGATION DE LICENCE, ET LE SEUL ENDROIT OÙ ELLE SE BRANCHE POUR
+  // L'AFFICHE. `creditFor` existait depuis la bathymétrie côtière et personne
+  // ne l'appelait sur ce chemin : export.js portait l'avertissement en rouge.
+  // Vendre une image dont le fond marin vient d'une source à attribution
+  // imposée, sans cette mention mot pour mot, est une violation — pas un oubli
+  // d'ornement. `demBounds` et jamais `patchBounds` : l'emprise VRAIE du champ
+  // exporté, donc jamais moins de sources que de données.
+  const attributionAffiche = () => {
+    try {
+      return mentionsAffiche({
+        bathyIndex: bathySourceIndex(),
+        bounds: demBounds(terrain.dem),
+        creditsForBounds,
+      })
+    } catch {
+      // `mentionsAffiche` retombe déjà sur la ligne de base : ici on rattrape
+      // seulement l'emprise illisible, et on ne rend JAMAIS `null` — une
+      // affiche sans attribution ne doit pas pouvoir sortir d'ici.
+      return mentionsAffiche({})
+    }
+  }
+
+  // Tout ce que le compositeur doit dessiner, pour une surface donnée. Le MÊME
+  // plan sert l'écran de validation et le fichier imprimé : c'est là que « ce
+  // qu'il voit » et « ce qu'il reçoit » cessent de pouvoir diverger.
+  //
+  // Le ratio du logo vient de l'IMAGE décodée, pas de l'état : `height: auto`
+  // du CSS ne se devine pas, il se mesure.
+  const planAffiche = ({ largeur, hauteur, fondPerduPx, largeurMm, etat, logoImg }) =>
+    planComposition({
+      largeur,
+      hauteur,
+      fondPerduPx,
+      largeurMm,
+      cartouche: {
+        actif: etat?.cartouche !== false,
+        sombre: !!etat?.cartoucheSombre,
+        titre: etat?.titre || '',
+        lieu: lieuCourant(),
+      },
+      logo: etat?.logo && logoImg
+        ? {
+            taille: etat.logo.taille,
+            coin: etat.logo.coin,
+            ratio: (logoImg.naturalWidth || logoImg.width || 1) / (logoImg.naturalHeight || logoImg.height || 1),
+          }
+        : null,
+      vignette: params.vignette,
+      vignetteOffset: VIGNETTE_OFFSET,
+      grain: params.grain,
+      attribution: attributionAffiche(),
+    })
+
   ouvrirAffiche({
     // La composition retrouvée après un aller-retour chez Stripe, s'il y en a
     // une. `null` le reste du temps : l'écran s'ouvre sur ses valeurs propres.
@@ -7151,57 +7265,149 @@ async function openAfficheUI(etatInitial = null) {
     // @param {[number,number]} totalPx - la taille à produire, fond perdu compris
     // @param {number} hauteurFiniePx - la hauteur APRÈS coupe
     // @param {number} hauteurMm - la même hauteur, en millimètres
-    rendreTirage: async ({ totalPx, hauteurFiniePx, hauteurMm, dpi, cadrage, pointNet, surBande, onProgress, annule }) => {
+    // @param {number} largeurMm - la largeur FINIE, en millimètres (densité du grain)
+    // @param {number} fondPerduPx - le fond perdu, en pixels (repère du cartouche)
+    // @param {object} etat - la composition : cartouche, titre, encre, logo
+    rendreTirage: async ({
+      totalPx, hauteurFiniePx, hauteurMm, largeurMm, fondPerduPx = 0, dpi,
+      cadrage, pointNet, etat, surBande, onProgress, annule,
+    }) => {
       const { exporteAffichePavee } = await import('./export.js')
       const aspect = totalPx[0] / totalPx[1]
-      return exporteAffichePavee({
-        renderer, composer, camera,
-        totalPx, dpi,
-        // Le classement des effets a besoin de savoir ce qui est ALLUMÉ : la
-        // marge de recouvrement dépend du bokeh, et la liste à neutraliser du
-        // vignettage et du grain. Voir export-effets.js.
-        effets: {
-          smaaActif: true,
-          bokehActif: !!(params.bokehEnabled && params.bokehScale > 0),
-          bokehScale: params.bokehScale,
-          vignette: params.vignette,
-          grain: params.grain,
-          occlusionActive: !!params.ssaoEnabled,
-        },
-        // ⚠️ UN SEUL INSTANT DE CARTE, PAS DOUZE. Entre deux tuiles il y a des
-        // `await` ; une reconstruction de calque qui y atterrirait mettrait
-        // dans la moitié basse de l'affiche des rivières que la moitié haute
-        // n'a pas. On pose donc la fenêtre et on laisse les calques en cours
-        // se terminer AVANT la première tuile.
-        avantTirage: () => { f3Fige(); return rebuildMapLayers() },
-        // ⚠️ RAPPELÉ À CHAQUE TUILE, ET RESTAURÉ À CHAQUE TUILE. C'est
-        // l'arbitrage de la réserve nº 2 de la tâche 5 : plutôt que de geler
-        // les reconstructions — ce qui demanderait à export.js de connaître six
-        // entrées du pipeline de données et laisserait quand même passer ce qui
-        // est déjà en vol — on referme le cycle sur chaque tuile. Un matériau
-        // né en route est repris au tour suivant, avec sa référence d'écran
-        // intacte ; un matériau déjà réglé n'est jamais réglé deux fois.
-        preparerTuile: ({ cadrage: fenetre, largeur: w, hauteur: h }) => {
-          const rendu = cadrerAffiche(aspect, cadrage, pointNet, fenetre)
-          // ⚠️ LA HAUTEUR DE RÉFÉRENCE EST CELLE DU FORMAT FINI, pas celle du
-          // rendu avec fond perdu : c'est la convention d'appel de
-          // `reglerTraits` (export-traits.js), et c'est à elle seule que
-          // l'aperçu et le tirage donnent la même épaisseur sur le papier. Les
-          // apparier autrement décale tout de 0,86 % sur un 50 × 70.
-          const traits = reglerTraitsAffiche({ tuile: { w, h }, hauteurTotalePx: hauteurFiniePx, hauteurMm, dpi })
-          return { restaurer() { traits.restaurer(); rendu.restaurer() } }
-        },
-        surBande, onProgress, annule,
+      // ═══ CE QUI N'EST PAS LA CARTE — NEUTRALISÉ ICI, RÉAPPLIQUÉ LÀ-BAS ═══
+      //
+      // Le pavage rend la carte NUE : le cartouche et le logo sont du DOM
+      // empilé sur l'aperçu, et `exportImage` ne lit que le canevas WebGL.
+      // C'est le compositeur qui les incruste, en même temps qu'il remet le
+      // vignettage et le grain qu'on éteint juste en dessous — et qu'il pose
+      // l'attribution, sans laquelle l'affiche ne peut pas être vendue.
+      const logoImg = await chargerLogoAffiche(etat?.logo?.url)
+      const plan = planAffiche({
+        largeur: totalPx[0], hauteur: totalPx[1], fondPerduPx, largeurMm, etat, logoImg,
       })
+      // ⚠️ AVANT LA PREMIÈRE BANDE, PAS À CHAQUE LIGNE. Un canevas ne rerend
+      // pas quand une fonte arrive : il a déjà peint. Sans cette attente, les
+      // premières bandes sortiraient en police de repli et les dernières non.
+      await attendrePolices(plan)
+      const restaurerEffets = neutraliserEffetsAffiche()
+      try {
+        return await exporteAffichePavee({
+          renderer, composer, camera,
+          totalPx, dpi,
+          // Le classement des effets a besoin de savoir ce qui est ALLUMÉ : la
+          // marge de recouvrement dépend du bokeh, et la liste à neutraliser du
+          // vignettage et du grain. Voir export-effets.js.
+          effets: {
+            smaaActif: true,
+            bokehActif: !!(params.bokehEnabled && params.bokehScale > 0),
+            bokehScale: params.bokehScale,
+            vignette: params.vignette,
+            grain: params.grain,
+            occlusionActive: !!params.ssaoEnabled,
+          },
+          // ⚠️ UN SEUL INSTANT DE CARTE, PAS DOUZE. Entre deux tuiles il y a des
+          // `await` ; une reconstruction de calque qui y atterrirait mettrait
+          // dans la moitié basse de l'affiche des rivières que la moitié haute
+          // n'a pas. On pose donc la fenêtre et on laisse les calques en cours
+          // se terminer AVANT la première tuile.
+          avantTirage: () => { f3Fige(); return rebuildMapLayers() },
+          // ⚠️ RAPPELÉ À CHAQUE TUILE, ET RESTAURÉ À CHAQUE TUILE. C'est
+          // l'arbitrage de la réserve nº 2 de la tâche 5 : plutôt que de geler
+          // les reconstructions — ce qui demanderait à export.js de connaître six
+          // entrées du pipeline de données et laisserait quand même passer ce qui
+          // est déjà en vol — on referme le cycle sur chaque tuile. Un matériau
+          // né en route est repris au tour suivant, avec sa référence d'écran
+          // intacte ; un matériau déjà réglé n'est jamais réglé deux fois.
+          preparerTuile: ({ cadrage: fenetre, largeur: w, hauteur: h }) => {
+            const rendu = cadrerAffiche(aspect, cadrage, pointNet, fenetre)
+            // ⚠️ LA HAUTEUR DE RÉFÉRENCE EST CELLE DU FORMAT FINI, pas celle du
+            // rendu avec fond perdu : c'est la convention d'appel de
+            // `reglerTraits` (export-traits.js), et c'est à elle seule que
+            // l'aperçu et le tirage donnent la même épaisseur sur le papier. Les
+            // apparier autrement décale tout de 0,86 % sur un 50 × 70.
+            const traits = reglerTraitsAffiche({ tuile: { w, h }, hauteurTotalePx: hauteurFiniePx, hauteurMm, dpi })
+            return { restaurer() { traits.restaurer(); rendu.restaurer() } }
+          },
+          // ⚠️ LE COMPOSITEUR ENTRE PAR LA TOILE, PAS PAR L'ORCHESTRATEUR. Le
+          // pavage a une preuve pixel par pixel à tenir : on ne lui ajoute pas un
+          // « et dessine aussi le cartouche ». Son support est injectable — c'est
+          // ce qui rend sa preuve rejouable — et on lui donne donc la même toile,
+          // augmentée d'un passage avant l'encodage de chaque bande.
+          support: supportAffiche({ plan, logo: logoImg, base: supportNavigateur() }),
+          surBande, onProgress, annule,
+        })
+      } finally {
+        restaurerEffets()
+      }
     },
-    // Le MÊME nom que celui gravé sur le flanc du bloc (groundInfo.info) : deux
-    // sources donneraient deux noms pour un seul lieu.
-    lieu: () => ({
-      nom: groundInfo?.info?.name || '',
-      lat: dem?.lat ?? NaN,
-      lon: dem?.lon ?? NaN,
-      altMax: Number.isFinite(dem?.maxM) ? dem.maxM : null,
-    }),
+    // ═══════ L'ÉCRAN DE VALIDATION — CELUI QUI DÉCIDE DE TOUT ══════════════
+    //
+    // ⚠️ CET ÉCRAN-LÀ N'EST PAS PRODUIT PAR LE DOM, ET C'EST LA DÉCISION
+    // D'ARCHITECTURE LA PLUS IMPORTANTE DU CHANTIER.
+    //
+    // `rendreApercu` ci-dessus sert l'ÉDITION : on y tire l'image au pouce, on
+    // change de format, on tape un titre — trente rendus par minute, où la
+    // fluidité du DOM est exactement ce qu'il faut. Mais devant le bouton de
+    // paiement, la question change : l'acheteur ne choisit plus, il VALIDE.
+    //
+    // S'il valide une maquette DOM, l'écart avec le fichier se combat sans fin
+    // — une police qui ne tombe pas pareil, un interlettrage qu'un canevas
+    // n'applique pas, un dégradé aux mauvais arrêts — et chaque écart restant
+    // se découvre après un tirage payé. S'il valide une image produite PAR LE
+    // COMPOSITEUR, il valide le fichier : même code, mêmes fractions, même
+    // dégradé, à un facteur d'échelle près. L'écart ne se minimise pas, IL
+    // CESSE D'EXISTER PAR CONSTRUCTION.
+    //
+    // D'où le contrat, symétrique de celui du tirage : on rend la carte NUE
+    // (vignettage et grain éteints, comme pour le pavage), et le compositeur
+    // remet tout — sinon l'acheteur validerait une affiche deux fois vignettée
+    // et recevrait un fichier qui ne l'est qu'une fois, c'est-à-dire très
+    // exactement l'écart qu'on prétend supprimer.
+    //
+    // ⚠️ IL MONTRE LE FORMAT FINI, PAS LE FICHIER : le fond perdu part au
+    // massicot, le lui montrer serait lui faire valider 6 mm qu'il ne verra
+    // jamais.
+    //
+    // Rien ne l'appelle encore : c'est la tâche 8 qui possède le moment
+    // « rendre avant d'encaisser ». Le chemin de production, lui, existe.
+    rendreValidation: async ({ finiPx, largeurMm, hauteurMm, cadrage, pointNet, etat }) => {
+      const t = tailleValidation(finiPx)
+      const rendu = cadrerAffiche(t.largeur / t.hauteur, cadrage, pointNet)
+      const [w, h] = tailleSousPlafond(renderer, t.largeur, t.hauteur)
+      const traits = reglerTraitsAffiche({ tuile: { w, h }, hauteurTotalePx: h, hauteurMm })
+      const restaurerEffets = neutraliserEffetsAffiche()
+      let bmp = null
+      try {
+        const carte = await exportImage({
+          renderer, composer, camera,
+          width: t.largeur, height: t.hauteur,
+          format: 'image/png',
+          // pas de crédit ici : c'est le compositeur qui pose l'attribution,
+          // au même endroit et de la même encre que sur le fichier imprimé
+          credit: null,
+        })
+        bmp = await createImageBitmap(carte)
+        const logoImg = await chargerLogoAffiche(etat?.logo?.url)
+        // fond perdu nul : l'écran de validation EST le format fini
+        const plan = planAffiche({
+          largeur: t.largeur, hauteur: t.hauteur, fondPerduPx: 0, largeurMm, etat, logoImg,
+        })
+        const toile = document.createElement('canvas')
+        toile.width = t.largeur
+        toile.height = t.hauteur
+        await composerValidation({ image: bmp, toile, plan, logo: logoImg })
+        const blob = await new Promise((res, rej) =>
+          toile.toBlob((b) => (b ? res(b) : rej(new Error('Canvas capture failed'))), 'image/png')
+        )
+        return URL.createObjectURL(blob)
+      } finally {
+        bmp?.close?.()
+        traits.restaurer()
+        rendu.restaurer()
+        restaurerEffets()
+      }
+    },
+    lieu: lieuCourant,
     // ── L'ALLER : on quitte l'application pour la page de paiement Stripe ──
     //
     // ⚠️ AUCUN PRIX NE PART D'ICI. On n'envoie qu'un IDENTIFIANT d'article ; le

@@ -28,6 +28,11 @@ import {
   FORMATS_AFFICHE, geometriePage, DPI_IMPRESSION,
   CADRAGE_DEFAUT, CADRAGE_ZOOM_MIN, CADRAGE_ZOOM_CURSEUR_MAX, cadrageValide,
 } from '../print-page.js'
+// ⚠️ LE TEXTE DU CARTOUCHE VIENT DU COMPOSITEUR, IL N'EST PLUS ÉCRIT ICI. Deux
+// façons de formater une latitude, c'est un écart entre l'aperçu et le fichier
+// vendu qui ne se découvre qu'après la vente. Le compositeur est la source ;
+// cet écran l'affiche. Voir src/compositeur-affiche.js.
+import { coordonneesCartouche, texteCartouche } from '../compositeur-affiche.js'
 
 // Le prix de lancement. Un seul endroit, pour que l'étiquette et le bouton ne
 // puissent pas se contredire.
@@ -39,15 +44,9 @@ const APERCU_MAX_PX = 1100
 
 const ICONE_CROIX = '<svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M2.5 2.5l10 10M12.5 2.5l-10 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
 
-/**
- * Le sous-titre du cartouche : les coordonnées, dans la forme qu'un
- * cartographe écrirait. Pur, pour être testable.
- */
-export function coordonneesCartouche(lat, lon) {
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return ''
-  const f = (v, pos, neg) => `${Math.abs(v).toFixed(3)}° ${v >= 0 ? pos : neg}`
-  return `${f(lat, 'N', 'S')}  ·  ${f(lon, 'E', 'O')}`
-}
+// Réexporté pour les appelants historiques : la définition, elle, est dans le
+// compositeur — c'est lui qui l'écrit sur le fichier vendu.
+export { coordonneesCartouche }
 
 /**
  * La ligne de vérité : ce que l'acheteur reçoit, en clair.
@@ -408,9 +407,12 @@ export function ouvrirAffiche(ctx) {
     const lieu = ctx.lieu?.() || {}
     cartouche.style.display = etat.cartouche ? '' : 'none'
     cartouche.classList.toggle('sombre', etat.cartoucheSombre)
-    cartLieu.textContent = etat.titre || lieu.nom || ''
-    cartSous.textContent = coordonneesCartouche(lieu.lat, lieu.lon)
-    cartAlt.textContent = Number.isFinite(lieu.altMax) ? `${Math.round(lieu.altMax)} m` : ''
+    // ⚠️ LES MÊMES TROIS CHAÎNES QUE LE FICHIER VENDU, par construction : c'est
+    // le compositeur qui les fabrique, pour les deux.
+    const t = texteCartouche({ titre: etat.titre, lieu })
+    cartLieu.textContent = t.lieu
+    cartSous.textContent = t.sous
+    cartAlt.textContent = t.alt
 
     verite.textContent = ''
     for (const bout of ligneVerite(geo)) verite.append(el('span', null, bout))
