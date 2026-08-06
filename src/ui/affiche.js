@@ -25,9 +25,14 @@
 import './affiche.css'
 import { el } from './kit.js'
 import {
-  FORMATS_AFFICHE, geometriePage, DPI_IMPRESSION,
+  FORMATS_AFFICHE, geometriePage, DPI_IMPRESSION, pxPourMm,
   CADRAGE_DEFAUT, CADRAGE_ZOOM_MIN, CADRAGE_ZOOM_CURSEUR_MAX, cadrageValide,
 } from '../print-page.js'
+// La grille des formats que CETTE machine peut rendre. Le module ne touche à
+// rien : il lit des plafonds, en déduit une limite, et `degradePour` fait le
+// reste. Voir src/sonde-materielle.js.
+import { dpiRetenu, ligneFormat, replierSur, grilleAffiche } from '../sonde-materielle.js'
+import { PLAFOND_REFERENCE } from '../export-dpi.js'
 // ⚠️ LE TEXTE DU CARTOUCHE VIENT DU COMPOSITEUR, IL N'EST PLUS ÉCRIT ICI. Deux
 // façons de formater une latitude, c'est un écart entre l'aperçu et le fichier
 // vendu qui ne se découvre qu'après la vente. Le compositeur est la source ;
@@ -41,6 +46,19 @@ export const PRIX_AFFICHE_EUR = 19
 // La plus grande dimension de l'aperçu, en pixels. Assez pour juger un cadrage
 // et une couleur, assez petit pour que changer de format reste instantané.
 const APERCU_MAX_PX = 1100
+
+/**
+ * Un poids d'octets, en clair.
+ *
+ * ⚠️ ON L'ANNONCE, ET CE N'EST PAS UN ORNEMENT : une affiche pèse 21 à 89 Mo en
+ * PNG. Quelqu'un qui reçoit ça par mail sur un forfait mobile a le droit de le
+ * savoir avant de payer, pas après.
+ */
+export function poidsLisible(octets) {
+  if (!(octets > 0)) return ''
+  const mo = octets / 1e6
+  return mo >= 10 ? `${Math.round(mo)} Mo` : `${mo.toFixed(1).replace('.', ',')} Mo`
+}
 
 const ICONE_CROIX = '<svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M2.5 2.5l10 10M12.5 2.5l-10 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
 
@@ -75,9 +93,36 @@ export function ligneVerite(geo) {
  *   cadrage, pointNet } — `hauteurMm` est la hauteur physique du tirage, dont
  *   se déduit la densité réelle de la vignette (export-traits.js).
  * @param {() => {nom:string, lat:number, lon:number, altMax:number|null}} ctx.lieu
+ * @param {() => object} [ctx.sonder] - la sonde matérielle, exécutée UNE FOIS à
+ *   l'ouverture : elle alloue pour de vrai et rend `{ limitePx, grille, … }`.
+ *   Voir src/sonde-materielle.js.
+ * @param {(o) => Promise<string>} [ctx.rendreValidation] - l'écran de validation,
+ *   produit par le COMPOSITEUR (pas par le DOM) et réduit à 1 100 px.
+ * @param {(o) => Promise<object>} [ctx.rendreTirage] - le rendu pavé du fichier.
  * @param {(commande) => void} [ctx.onCommander] - le pas suivant (paiement)
  */
 export function ouvrirAffiche(ctx) {
+  // ═══════ CE QUE CETTE MACHINE-CI PEUT IMPRIMER ═══════════════════════════
+  //
+  // ⚠️ À L'OUVERTURE, PAS AU CLIC. La grille des formats en dépend : proposer un
+  // 61 × 91 puis le retirer au moment de payer serait pire que ne l'avoir jamais
+  // montré. La sonde alloue vraiment (une cible de tuile, un canevas de bande) —
+  // c'est une image de retard, une fois, contre un tirage raté.
+  //
+  // Sans sonde branchée, on retombe sur la TABLE NOMINALE (`PLAFOND_REFERENCE`,
+  // le plafond sous lequel aucune densité nominale ne déborde) : c'est le
+  // comportement d'avant, et il ne doit pas dépendre de l'existence de ce
+  // paramètre.
+  const sonde = (() => {
+    try {
+      return ctx.sonder?.() || null
+    } catch (err) {
+      console.warn('[affiche] sonde matérielle :', err)
+      return null
+    }
+  })()
+  const grilleFormats = sonde?.grille?.length ? sonde.grille : grilleAffiche({ limitePx: PLAFOND_REFERENCE })
+
   const etat = {
     format: '50x70',
     // ⚠️ PAYSAGE PAR DÉFAUT, contre la tradition de l'affiche — et c'est la
@@ -108,6 +153,29 @@ export function ouvrirAffiche(ctx) {
     // elle meurt avec le document.
     ...(ctx.etatInitial || {}),
   }
+
+  // ⚠️ LE DÉFAUT N'EST PAS TOUJOURS JOUABLE. Sur une machine plafonnée à
+  // 4 096 px, le 50 × 70 — le format d'ouverture de la boutique — sort de la
+  // grille (tâche 1). S'ouvrir dessus montrerait une feuille vide et un bouton
+  // qui ne peut rien produire. On replie donc AVANT le premier rendu, en gardant
+  // le format plutôt que le sens quand on peut.
+  {
+    const repli = replierSur(grilleFormats, etat.format, etat.orientation)
+    if (repli) { etat.format = repli.format; etat.orientation = repli.orientation }
+  }
+
+  /**
+   * La géométrie de la page COURANTE, à la densité que cette machine tient.
+   *
+   * ⚠️ C'EST LA SEULE FABRIQUE DE `geo` DE CET ÉCRAN. Il en existait trois
+   * appels à `DPI_IMPRESSION` en dur ; avec une densité qui peut être dégradée,
+   * trois sources auraient fini par annoncer une densité et en rendre une autre.
+   */
+  const geoCourante = () => geometriePage({
+    format: etat.format,
+    orientation: etat.orientation,
+    dpi: dpiRetenu(grilleFormats, etat.format, etat.orientation) ?? DPI_IMPRESSION,
+  })
 
   document.body.classList.add('af-mode')
   const scene = el('div', 'af-scene')
@@ -150,7 +218,7 @@ export function ouvrirAffiche(ctx) {
   // Les formats, dessinés à leur vraie proportion.
   const gFormat = el('div', 'af-groupe')
   gFormat.append(el('p', 'af-legende', 'Format'))
-  const grille = el('div', 'af-formats')
+  const grilleEl = el('div', 'af-formats')
   const boutonsFormat = new Map()
   for (const f of FORMATS_AFFICHE) {
     const b = el('button', 'af-fmt')
@@ -162,13 +230,25 @@ export function ouvrirAffiche(ctx) {
     const nom = el('b', null, f.label.split(' · ')[0])
     b.append(vignette, nom)
     b.addEventListener('click', () => {
-      etat.format = f.id
+      // Changer de format peut changer le sens : un 61 × 91 qui ne tient qu'en
+      // portrait ne doit pas laisser le segment sur « Paysage » et rendre au
+      // hasard. `replierSur` garde le format demandé et ajuste le sens.
+      const repli = replierSur(grilleFormats, f.id, etat.orientation)
+      if (!repli) return
+      etat.format = repli.format
+      etat.orientation = repli.orientation
       appliquer({ refaireRendu: true })
     })
     boutonsFormat.set(f.id, b)
-    grille.append(b)
+    grilleEl.append(b)
   }
-  gFormat.append(grille)
+  gFormat.append(grilleEl)
+  // ⚠️ DÉGRADER D'ABORD, CACHER ENSUITE — la décision d'Adrien, appliquée ici et
+  // nulle part ailleurs. La densité, elle, a déjà été baissée par `degradePour` ;
+  // ce qui suit ne retire de la grille QUE ce qui ne passe même pas au plancher
+  // de 150 dpi. Un format caché est caché, pas grisé : un bouton désactivé
+  // demande « pourquoi ? » sans jamais y répondre.
+  for (const [id, b] of boutonsFormat) b.hidden = !ligneFormat(grilleFormats, id)?.dispo
 
   // Orientation.
   const gOrient = el('div', 'af-groupe')
@@ -176,9 +256,13 @@ export function ouvrirAffiche(ctx) {
   const seg = el('div', 'af-seg')
   const bPortrait = el('button', null, 'Portrait')
   const bPaysage = el('button', null, 'Paysage')
-  for (const [b, v] of [[bPortrait, 'portrait'], [bPaysage, 'paysage']]) {
+  const boutonsSens = new Map([[bPortrait, 'portrait'], [bPaysage, 'paysage']])
+  for (const [b, v] of boutonsSens) {
     b.type = 'button'
     b.addEventListener('click', () => {
+      // Un sens qui ne tient pas sur cette machine est caché, pas cliquable :
+      // ce garde-fou est là pour le clavier, qui atteint ce qu'on a oublié.
+      if (!ligneFormat(grilleFormats, etat.format)?.[v]) return
       etat.orientation = v
       appliquer({ refaireRendu: true })
     })
@@ -368,7 +452,7 @@ export function ouvrirAffiche(ctx) {
   let jeton = 0
   let differe = null
   function appliquer({ refaireRendu = false } = {}) {
-    const geo = geometriePage({ format: etat.format, orientation: etat.orientation, dpi: DPI_IMPRESSION })
+    const geo = geoCourante()
     if (!geo) return
     // Le cadrage se re-borne à CHAQUE passage : baisser le zoom doit ramener les
     // décalages dans la nouvelle marge, sinon l'image resterait poussée dehors.
@@ -395,6 +479,9 @@ export function ouvrirAffiche(ctx) {
     for (const [id, b] of boutonsFormat) b.setAttribute('aria-pressed', String(id === etat.format))
     bPortrait.setAttribute('aria-pressed', String(etat.orientation === 'portrait'))
     bPaysage.setAttribute('aria-pressed', String(etat.orientation === 'paysage'))
+    // Un sens que le format courant ne tient pas sur cette machine disparaît —
+    // même règle que les formats, et pour la même raison.
+    for (const [b, v] of boutonsSens) b.hidden = !ligneFormat(grilleFormats, etat.format)?.[v]
 
     // La feuille prend la proportion du format ET reste dans l'estrade : sans
     // les deux plafonds, un 61 × 91 en portrait sortirait par le haut.
@@ -488,7 +575,7 @@ export function ouvrirAffiche(ctx) {
     // coordonnées normalisées de three : −1 à +1, y vers le HAUT
     const u = ((e.clientX - r.left) / r.width) * 2 - 1
     const v = -(((e.clientY - r.top) / r.height) * 2 - 1)
-    const geo = geometriePage({ format: etat.format, orientation: etat.orientation, dpi: DPI_IMPRESSION })
+    const geo = geoCourante()
     const p = ctx.viserPointNet?.({ u, v, aspect: geo.largeurMm / geo.hauteurMm, cadrage: etat.cadrage })
     // Un clic dans le ciel ne remet PAS le point à zéro : on garde le précédent
     // plutôt que de rendre l'image entièrement floue sur un geste raté.
@@ -531,26 +618,188 @@ export function ouvrirAffiche(ctx) {
     appliquer({ refaireRendu: 'differe' })
   }, { passive: false })
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // RENDRE AVANT D'ENCAISSER
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // ⚠️ C'EST L'ORDRE QUI SUPPRIME UNE CLASSE D'ÉCHEC ENTIÈRE. Payer puis rendre,
+  // c'est accepter qu'un pilote refuse une tuile, qu'un canevas de 12 Mpx sorte
+  // vide ou qu'un onglet manque de mémoire APRÈS le débit — et il ne reste alors
+  // qu'un remboursement, une excuse et un acheteur perdu. Rendre puis payer, le
+  // même échec ne coûte qu'un message et un bouton réarmé.
+  //
+  // Trois temps, et le deuxième est le seul qui dure :
+  //   ① l'écran de validation (le COMPOSITEUR, réduit à 1 100 px) — quelques
+  //      centaines de millisecondes, et c'est ce que l'acheteur regarde pendant
+  //      que le reste se fabrique ;
+  //   ② le tirage pavé, avec sa progression et son bouton d'annulation ;
+  //   ③ Stripe.
+  //
+  // ⚠️ ON NE GARDE PAS LE FICHIER. Une affiche pèse 21 à 89 Mo en PNG, et partir
+  // payer est une NAVIGATION : le document est remplacé, ces octets meurent de
+  // toute façon. Les tenir en mémoire jusque-là, c'est prendre le risque de
+  // manquer de place pour rien. Ce qu'on garde est ce qui vaut : la PREUVE que
+  // cette machine sait produire ce fichier, et son poids, qu'on annonce.
+  const voile = el('div', 'af-tirage')
+  voile.setAttribute('role', 'status')
+  voile.setAttribute('aria-live', 'polite')
+  const tirCarte = el('div', 'af-tir-carte')
+  const tirImg = el('img', 'af-tir-img')
+  tirImg.alt = ''
+  const tirTitre = el('h2', 'af-tir-titre', 'On fabrique ton fichier')
+  const tirEtape = el('p', 'af-tir-etape', 'Vérification de ton affiche…')
+  const tirJauge = el('div', 'af-tir-jauge')
+  const tirBarre = el('i')
+  tirJauge.append(tirBarre)
+  const tirDetail = el('p', 'af-tir-detail', '')
+  const tirAnnuler = el('button', 'af-lien af-tir-annuler')
+  tirAnnuler.type = 'button'
+  tirAnnuler.textContent = 'Annuler'
+  tirCarte.append(tirImg, tirTitre, tirEtape, tirJauge, tirDetail, tirAnnuler)
+  voile.append(tirCarte)
+  stage.append(voile)
+
+  // L'annulation : un seul drapeau, consulté par l'orchestrateur entre deux
+  // tuiles (`annule`) et par nous entre deux étapes. Un rendu déjà lancé ne
+  // s'interrompt pas au milieu d'une tuile — c'est un appel GPU synchrone — mais
+  // au pire on attend une tuile, pas douze.
+  let annulation = false
+  let enTirage = false
+  tirAnnuler.addEventListener('click', () => {
+    annulation = true
+    tirEtape.textContent = 'Annulation…'
+    tirAnnuler.disabled = true
+  })
+
+  function ouvrirVoile() {
+    annulation = false
+    enTirage = true
+    tirAnnuler.disabled = false
+    tirBarre.style.width = '0%'
+    tirDetail.textContent = ''
+    tirEtape.textContent = 'Vérification de ton affiche…'
+    tirImg.classList.remove('vu')
+    voile.classList.add('ouvert')
+  }
+  function fermerVoile() {
+    enTirage = false
+    voile.classList.remove('ouvert')
+    if (tirImg.src?.startsWith('blob:')) { URL.revokeObjectURL(tirImg.src); tirImg.removeAttribute('src') }
+  }
+
   cta.addEventListener('click', async (e) => {
+    if (enTirage) return
+    // ⚠️ `altKey` n'est qu'une INTENTION, pas une autorisation : c'est le geste
+    // qui déclenche la demande du code d'atelier. Le secret, lui, est saisi puis
+    // vérifié CÔTÉ SERVEUR — voir netlify/functions/paiement.mjs. Il se lit
+    // MAINTENANT : l'événement ne survivra pas aux `await` qui suivent.
+    const atelier = !!e.altKey
     cta.disabled = true
     ctaTexte.textContent = 'Un instant…'
-    const geo = geometriePage({ format: etat.format, orientation: etat.orientation, dpi: DPI_IMPRESSION })
-    // ⚠️ RÉARMER LE BOUTON N'EST PLUS AUTOMATIQUE. Tant que le paiement n'était
-    // pas branché, un `setTimeout` le rendait actif au bout de 1,2 s. Depuis
-    // qu'un clic réussi part chez Stripe, ce réarmement serait FAUX : le bouton
-    // redeviendrait cliquable pendant que le navigateur quitte la page, et un
-    // second clic ouvrirait une seconde session de paiement. On ne réarme donc
-    // que sur un ÉCHEC — c'est-à-dire quand on reste à l'écran.
+    const geo = geoCourante()
+    // ⚠️ RÉARMER LE BOUTON N'EST PAS AUTOMATIQUE. Un clic réussi part chez
+    // Stripe : le bouton redeviendrait cliquable pendant que le navigateur
+    // quitte la page, et un second clic ouvrirait une seconde session de
+    // paiement. On ne réarme que quand on RESTE à l'écran.
     let reste = true
+    ouvrirVoile()
     try {
-      // ⚠️ `altKey` n'est qu'une INTENTION, pas une autorisation : c'est le
-      // geste qui déclenche la demande du code d'atelier. Le secret, lui, est
-      // saisi puis vérifié CÔTÉ SERVEUR — voir netlify/functions/paiement.mjs.
-      const suite = ctx.onCommander?.({ ...etat, geo, prix: PRIX_AFFICHE_EUR, atelier: !!e.altKey })
+      if (!geo) throw new Error('format indisponible')
+
+      // ── ① CE QU'IL VALIDE — produit par le compositeur, pas par le DOM ────
+      //
+      // La feuille derrière est une maquette DOM : elle sert à composer. Celle-ci
+      // sort du MÊME code que le fichier, à un facteur d'échelle près. C'est la
+      // décision d'architecture du chantier : l'acheteur valide le fichier, pas
+      // une imitation. Voir rendreValidation dans main.js.
+      if (ctx.rendreValidation) {
+        const url = await ctx.rendreValidation({
+          finiPx: geo.finiPx,
+          largeurMm: geo.largeurMm,
+          hauteurMm: geo.hauteurMm,
+          cadrage: { ...etat.cadrage },
+          pointNet: etat.pointNet,
+          etat,
+        })
+        if (annulation) throw new Error('Rendu annulé')
+        const ancienne = tirImg.src
+        // ⚠️ ON N'ATTEND PAS `decode()`, ET C'EST UNE CORRECTION OBSERVÉE, PAS
+        // UNE PRÉCAUTION. Un `await img.decode()` NE SE RÉSOUT PAS tant que le
+        // document n'est pas composité : onglet en arrière-plan, fenêtre
+        // réduite, ou simplement masquée. L'image était complète (1 100 × 786,
+        // `complete === true`) et la promesse ne rendait jamais la main — tout
+        // l'achat restait bloqué sur « Vérification de ton affiche… ». C'est
+        // exactement ce que quelqu'un fait pendant qu'un tirage tourne : il va
+        // voir ailleurs. L'affichage est cosmétique, il ne commande rien.
+        tirImg.src = url
+        tirImg.addEventListener('load', () => tirImg.classList.add('vu'), { once: true })
+        if (tirImg.complete) tirImg.classList.add('vu')
+        if (ancienne?.startsWith('blob:')) URL.revokeObjectURL(ancienne)
+      }
+
+      // ── ② LE FICHIER, TUILE PAR TUILE ─────────────────────────────────────
+      if (ctx.rendreTirage) {
+        if (annulation) throw new Error('Rendu annulé')
+        tirEtape.textContent = 'Rendu du fichier…'
+        const debut = (globalThis.performance || Date).now()
+        let octets = 0
+        const r = await ctx.rendreTirage({
+          totalPx: geo.totalPx,
+          hauteurFiniePx: geo.finiPx[1],
+          hauteurMm: geo.hauteurMm,
+          largeurMm: geo.largeurMm,
+          fondPerduPx: pxPourMm(geo.fondPerduMm, geo.dpi),
+          dpi: geo.dpi,
+          cadrage: { ...etat.cadrage },
+          pointNet: etat.pointNet,
+          etat,
+          // ⚠️ ON PREND LA BANDE POUR NE PAS LA GARDER. Fournir `surBande` dit à
+          // l'orchestrateur de LÂCHER le blob (voir export.js) : douze bandes
+          // d'A2 conservées, c'est l'image pleine sous une autre forme. On n'en
+          // retient que le poids, pour pouvoir l'annoncer.
+          surBande: (b) => { octets += b?.blob?.size || 0 },
+          onProgress: (f) => {
+            const pct = Math.max(0, Math.min(100, Math.round(f * 100)))
+            tirBarre.style.width = `${pct}%`
+            tirDetail.textContent = `${pct} %`
+          },
+          annule: () => annulation,
+        })
+        const secondes = ((globalThis.performance || Date).now() - debut) / 1000
+        tirBarre.style.width = '100%'
+        const poids = poidsLisible(octets)
+        tirEtape.textContent = 'Ton fichier est prêt.'
+        tirDetail.textContent = [
+          poids,
+          `${r?.plan?.tuiles?.length ?? '?'} tuiles`,
+          `${secondes.toFixed(1).replace('.', ',')} s`,
+        ].filter(Boolean).join(' · ')
+      }
+
+      // ── ③ SEULEMENT MAINTENANT, LA CAISSE ─────────────────────────────────
+      if (annulation) throw new Error('Rendu annulé')
+      tirTitre.textContent = 'Fichier prêt'
+      tirEtape.textContent = 'Ouverture du paiement sécurisé…'
+      tirAnnuler.hidden = true
+      const suite = ctx.onCommander?.({ ...etat, geo, prix: PRIX_AFFICHE_EUR, atelier })
       if (suite && typeof suite.then === 'function') reste = (await suite) !== 'parti'
     } catch (err) {
-      console.warn('commande :', err)
+      const annule = annulation || /annul/i.test(err?.message || '')
+      if (!annule) console.warn('commande :', err)
+      if (!annule) {
+        tirTitre.textContent = 'Le fichier n’a pas pu être produit'
+        tirEtape.textContent = 'Rien n’a été débité. Essaie un format plus petit, ou réessaie.'
+        tirDetail.textContent = String(err?.message || '')
+        tirAnnuler.disabled = false
+        tirAnnuler.textContent = 'Fermer'
+        // On laisse le voile ouvert : un échec qui disparaît tout seul ne
+        // s'explique jamais. Le bouton, lui, redevient « Fermer ».
+        await new Promise((res) => tirAnnuler.addEventListener('click', res, { once: true }))
+        tirAnnuler.textContent = 'Annuler'
+      }
     } finally {
+      tirAnnuler.hidden = false
+      fermerVoile()
       if (reste) { cta.disabled = false; ctaTexte.textContent = 'Recevoir le fichier' }
     }
   })
@@ -566,11 +815,31 @@ export function ouvrirAffiche(ctx) {
     // l'écran laisse derrière elle le logo et le dernier aperçu.
     if (etat.logo?.url) URL.revokeObjectURL(etat.logo.url)
     if (img.src?.startsWith('blob:')) URL.revokeObjectURL(img.src)
+    if (tirImg.src?.startsWith('blob:')) URL.revokeObjectURL(tirImg.src)
     ctx.onFermer?.()
   }
-  function surTouche(e) { if (e.key === 'Escape') partir() }
-  fermer.addEventListener('click', partir)
+  // ⚠️ ÉCHAP PENDANT UN TIRAGE ANNULE LE TIRAGE, IL NE FERME PAS L'ÉCRAN. Fermer
+  // laisserait l'orchestrateur peindre des tuiles dans une scène qu'on est en
+  // train de rendre à la carte — et le geste réflexe pour « stop » est Échap,
+  // pas la croix.
+  function surTouche(e) {
+    if (e.key !== 'Escape') return
+    if (enTirage) { annulation = true; tirEtape.textContent = 'Annulation…'; tirAnnuler.disabled = true; return }
+    partir()
+  }
+  fermer.addEventListener('click', () => { if (!enTirage) partir() })
   window.addEventListener('keydown', surTouche)
+
+  // ⚠️ LE CAS OÙ IL N'Y A RIEN À VENDRE, DIT PLUTÔT QUE CACHÉ. Si aucun format ne
+  // passe — plafonds illisibles, cible refusée, canevas de bande refusé — la
+  // grille est vide et le bouton ne peut rien produire. Le laisser cliquable
+  // serait promettre un fichier qu'on sait ne pas pouvoir faire.
+  if (!grilleFormats.some((g) => g.dispo)) {
+    cta.disabled = true
+    rassure.textContent = sonde?.raison
+      ? `Cet appareil ne peut pas produire de fichier d’impression (${sonde.raison}). L’image à l’écran, elle, reste gratuite.`
+      : 'Cet appareil ne peut pas produire de fichier d’impression. L’image à l’écran, elle, reste gratuite.'
+  }
 
   appliquer({ refaireRendu: true })
   if (ctx.bokehActif?.()) viseur(true)

@@ -2133,6 +2133,48 @@ function neutraliserEffetsAffiche() {
   }
 }
 
+// ═══════════ LE FOND DE SCÈNE, TRANCHÉ COMME LE RESTE ══════════════════════
+//
+// ⚠️ TROUVÉ SUR LE PREMIER TIRAGE RÉEL, ET RIEN NE L'AVAIT ANNONCÉ. Le plan
+// d'effets (export-effets.js) range le vignettage et le grain dans
+// « neutraliser » parce qu'ils dépendent de la position dans la CIBLE. Le fond
+// de scène en dépend exactement de la même façon, et il n'y figure pas : trois
+// lignes en tête de background.js le disent pourtant — « three.js draws a plain
+// (UV-mapped) background texture stretched to fill the viewport ». Le viewport,
+// pendant un pavage, C'EST LA TUILE. Chaque tuile recevait donc le dégradé
+// ENTIER, et l'affiche sortait en damier de 4 × 3 dégradés, avec deux coutures
+// horizontales en travers de toute la feuille. Vu, pas déduit.
+//
+// ⚠️ ET ÇA NE SE NEUTRALISE PAS : le fond est DERRIÈRE le relief, le compositeur
+// dessine PAR-DESSUS. L'éteindre livrerait une affiche au ciel noir. On ne
+// l'éteint donc pas, ON LE TRANCHE : la texture reçoit la fraction d'elle-même
+// qui revient à cette tuile-là, et le dégradé traverse l'affiche d'un bord à
+// l'autre comme il traverse l'écran.
+//
+// La restauration est celle du cycle de `preparerTuile` : traverser, poser,
+// rendre, remettre — fermé sur chaque tuile.
+function cadrerFondPourTuile(fenetre) {
+  const tex = scene.background
+  // Une couleur unie (`Color`) n'a ni `repeat` ni `offset`, et n'a pas ce défaut :
+  // elle est la même partout. Rien à faire, et surtout rien à casser.
+  if (!tex?.isTexture || !tex.repeat || !tex.offset || !fenetre?.fullWidth) return null
+  const { fullWidth: W, fullHeight: H, offsetX, offsetY, width, height } = fenetre
+  const repeatAvant = tex.repeat.clone()
+  const offsetAvant = tex.offset.clone()
+  tex.repeat.set(width / W, height / H)
+  // ⚠️ L'AXE VERTICAL EST INVERSÉ. L'origine d'une texture est en BAS à gauche,
+  // celle du plan de tuiles en HAUT à gauche : prendre `offsetY / H` tel quel
+  // retournerait le dégradé de haut en bas, ce qui ne se voit que sur un fond
+  // asymétrique — c'est-à-dire tous sauf celui qu'on regarde en premier.
+  tex.offset.set(offsetX / W, 1 - (offsetY + height) / H)
+  return {
+    restaurer() {
+      tex.repeat.copy(repeatAvant)
+      tex.offset.copy(offsetAvant)
+    },
+  }
+}
+
 // Le logo de l'acheteur, prêt à être dessiné sur un canevas 2D. `null` si rien
 // n'a été importé, ou si l'image refuse de se décoder — un logo illisible ne
 // doit pas faire perdre l'affiche.
@@ -5957,8 +5999,13 @@ function tenteAllumageNuit({ lecture = false, nuit = false } = {}) {
 //
 // On revérifie aussi que le CHAMP n'a pas changé : une mosaïque bâtie sur
 // l'emprise d'avant un déplacement se peindrait sur le nouveau bloc, décalée.
+// ⚠️ ET LE GEL DE TIRAGE EST UNE TROISIÈME RAISON DE NE PAS POSER. Une mosaïque
+// qui atterrit entre deux bandes d'une affiche met dans la moitié basse une
+// donnée que la moitié haute n'a pas — voir `figerPourTirage`. Le rattacher ici
+// plutôt que de le recopier dans les trois `refresh*` : c'est déjà le point où
+// l'on décide de ne pas poser ce qui revient du réseau.
 function couchePartieEnVol(id, demAuDepart) {
-  return !couchesActives.has(id) || dem !== demAuDepart || params.source !== 'real'
+  return carteGelee() || !couchesActives.has(id) || dem !== demAuDepart || params.source !== 'real'
 }
 
 // LA MOSAÏQUE NOCTURNE D'UNE DALLE DU DAMIER — même patron que
@@ -6335,6 +6382,11 @@ async function refreshAerialCore() {
   // which is the ordinary case every time the user changes scale.
   if (built === SUPERSEDED) return
 
+  // ⚠️ UNE AFFICHE EST EN COURS DE TIRAGE : ON NE POSE PAS. C'est le cas nommé
+  // par la réserve de la tâche 6 — la photo aérienne qui arrive du réseau au
+  // milieu du pavage. On le redemandera au dégel (voir `figerPourTirage`).
+  if (carteGelee()) { _gelDemande = true; return }
+
   terrain.setAerial(built)
   if (!built) {
     // Covered on paper but every tile failed — a network/provider problem, NOT
@@ -6369,11 +6421,79 @@ async function paintCellAerial(cell) {
   cell.aerial ??= new AerialLayer({ maxTexturePx: renderer.capabilities.maxTextureSize })
   const built = await cell.aerial.build(bounds)
   if (built === SUPERSEDED || !built?.texture) return
+  // Même gel que le bloc central : une dalle voisine qui s'habille au milieu
+  // d'un tirage change l'affiche entre deux bandes.
+  if (carteGelee()) { _gelDemande = true; return }
   cell.terrain.setAerial(built)
   cell.terrain.setAerialOpacity(params.aerialOpacity)
   cell.terrain.setAerialCoastFade(params.aerialCoastFade ?? 0.1)
 }
-const rebuildMapLayers = () => { const p = mapLayers.rebuild({ dem, terrain, params }); refreshOsmCredit(); refreshAerial(); refreshNuit(); refreshSol(); refreshCanopee(); return p.then(() => refreshOsmCredit()) }
+// ═══════════ GELER LA CARTE PENDANT UN TIRAGE ══════════════════════════════
+//
+// ⚠️ LA MOITIÉ QUE LA TÂCHE 6 N'A PAS PU FERMER. Elle a fermé le cycle des
+// MATÉRIAUX sur chaque tuile — traverser, régler, rendre, remettre — donc un
+// matériau né en route est repris au tour suivant. Ce qu'elle a laissé ouvert,
+// c'est le CONTENU : entre deux bandes il y a un `await`, et une mosaïque
+// aérienne qui arrive du réseau à cet instant-là met dans la moitié basse de
+// l'affiche une photo que la moitié haute n'a pas. Ça ne se voit pas à l'écran,
+// ça se voit sur le papier, et ça ne se reproduit pas.
+//
+// LE GEL APPARTIENT ICI, pas à export.js : c'est ici que vivent les six entrées
+// du pipeline de données, et l'orchestrateur de pavage n'a aucune raison de les
+// connaître (c'est l'argument même de la tâche 6 contre le gel côté export).
+//
+// Trois gestes, et le troisième est celui qu'on oublie :
+//   ① on refuse les reconstructions NOUVELLES (ci-dessous) ;
+//   ② on refuse la POSE de ce qui revenait du réseau (`couchePartieEnVol` et
+//      les deux atterrissages de la photo aérienne) ;
+//   ③ on arrête la BOUCLE D'IMAGES. Sans ça, une image de rAF se glisse entre
+//      deux bandes, avance les nuages, la mer et la faune, et rend au passage la
+//      scène à la taille de la tuile précédente : le contenu change d'une bande
+//      à l'autre alors même qu'aucune donnée n'est arrivée.
+//
+// Rien n'est perdu : ce qui a été refusé est REDEMANDÉ au dégel.
+let _gelTirage = 0
+let _gelDemande = false
+const carteGelee = () => _gelTirage > 0
+
+function figerPourTirage() {
+  _gelTirage++
+  if (_gelTirage === 1) {
+    // même mise au repos que l'export vidéo : élan éteint, débordement résorbé,
+    // maillage de repos — l'affiche part de maintenant, pas dans une demi-seconde
+    f3Fige()
+    loopPaused = true
+    cancelAnimationFrame(rafId)
+    clearTimeout(tickTimer)
+  }
+  let rendu = false
+  return function degeler() {
+    if (rendu) return // un dégel appelé deux fois libérerait le gel d'un autre
+    rendu = true
+    _gelTirage--
+    if (_gelTirage > 0) return
+    loopPaused = false
+    clock.getDelta() // on avale la durée du tirage, sinon dt saute d'un bond
+    tick()
+    if (_gelDemande) { _gelDemande = false; rebuildMapLayers() }
+  }
+}
+
+// ⚠️ LA PROMESSE COUVRE MAINTENANT LES QUATRE CALQUES DE TEXTURE, PAS LE SEUL
+// `mapLayers.rebuild`. Elle ne le faisait pas, et c'est précisément ce qui
+// rendait la « mise au repos avant la première tuile » incomplète : on attendait
+// les routes et les rivières pendant que la photo aérienne, la nuit,
+// l'occupation du sol et la canopée étaient encore en vol. Chacune est mise à
+// l'abri de sa propre erreur : un calque qui échoue ne doit pas faire échouer
+// l'attente des autres — c'était déjà le cas quand personne n'attendait.
+const calmement = (p) => Promise.resolve(p).catch((e) => { console.warn('[ShibuMap] calque :', e); return null })
+const rebuildMapLayers = () => {
+  if (carteGelee()) { _gelDemande = true; return Promise.resolve() }
+  const p = mapLayers.rebuild({ dem, terrain, params })
+  refreshOsmCredit()
+  return Promise.all([p, refreshAerial(), refreshNuit(), refreshSol(), refreshCanopee()].map(calmement))
+    .then(() => refreshOsmCredit())
+}
 
 // "individualiser la zone" — clip the map to the administrative boundary under
 // the view (continent/country/region/departement by zoom). The landform sits
@@ -7140,6 +7260,7 @@ async function openAfficheUI(etatInitial = null) {
     planComposition, supportAffiche, mentionsAffiche, attendrePolices,
     tailleValidation, composerValidation,
   } = await import('./compositeur-affiche.js')
+  const { sonderMateriel } = await import('./sonde-materielle.js')
   // Ce qu'on devra rendre en sortant : l'affiche emprunte des réglages de carte,
   // elle ne se les approprie pas.
   const lieuxAvant = params.placesEnabled
@@ -7215,6 +7336,70 @@ async function openAfficheUI(etatInitial = null) {
     // La composition retrouvée après un aller-retour chez Stripe, s'il y en a
     // une. `null` le reste du temps : l'écran s'ouvre sur ses valeurs propres.
     etatInitial,
+    // ═══════ LA SONDE — CE QUE CETTE MACHINE-CI PEUT VRAIMENT IMPRIMER ══════
+    //
+    // ⚠️ ON ALLOUE, ON NE CROIT PAS. `MAX_RENDERBUFFER_SIZE` est une promesse ;
+    // un canevas 2D de 12 Mpx est refusé EN SILENCE sur iOS. Les deux défauts se
+    // ressemblent : on obtient une image, et elle est fausse. La sonde alloue
+    // donc pour de vrai une cible de tuile et un canevas de bande, et relit un
+    // pixel de chacun — une image de retard à l'ouverture, contre un tirage
+    // raté. Le raisonnement complet est dans src/sonde-materielle.js ; ici il
+    // n'y a que le branchement sur le vrai renderer et le vrai document.
+    sonder: () => sonderMateriel({
+      gl: renderer.getContext(),
+      memoireGo: navigator.deviceMemory,
+      essaiCible: (cote) => {
+        // Une cible de la taille d'une tuile, peinte puis RELUE. Le pilote qui
+        // refuse ne lève rien : c'est le pixel qui le dit.
+        const cible = new THREE.WebGLRenderTarget(cote, cote)
+        const avant = renderer.getRenderTarget()
+        // ⚠️ LA SONDE NE DOIT RIEN LAISSER DERRIÈRE ELLE. La couleur d'effacement
+        // est un état global du renderer : la remettre à 0 « par défaut »
+        // repeindrait le ciel de la scène en noir transparent au prochain rendu.
+        const couleurAvant = new THREE.Color()
+        renderer.getClearColor(couleurAvant)
+        const alphaAvant = renderer.getClearAlpha()
+        try {
+          renderer.setRenderTarget(cible)
+          renderer.setClearColor(0x336699, 1)
+          renderer.clear(true, true, false)
+          const px = new Uint8Array(4)
+          renderer.readRenderTargetPixels(cible, cote - 1, cote - 1, 1, 1, px)
+          // On ne compare pas à l'octet près : l'espace colorimétrique de la
+          // cible n'est pas garanti. Ce qu'on exige, c'est qu'il se soit passé
+          // QUELQUE CHOSE — un tampon incomplet rend du noir ou du vide.
+          return px[0] + px[1] + px[2] > 0
+        } finally {
+          renderer.setRenderTarget(avant)
+          renderer.setClearColor(couleurAvant, alphaAvant)
+          cible.dispose()
+        }
+      },
+      essaiToile: (largeur, hauteur) => {
+        // Le canevas de bande, à la largeur qu'un vrai tirage demanderait. C'est
+        // LUI que les appareils à mémoire courte refusent en silence.
+        const c = document.createElement('canvas')
+        c.width = largeur
+        c.height = hauteur
+        try {
+          const g = c.getContext('2d', { alpha: false })
+          if (!g) return false
+          g.fillStyle = '#336699'
+          g.fillRect(largeur - 2, hauteur - 2, 2, 2)
+          const d = g.getImageData(largeur - 1, hauteur - 1, 1, 1).data
+          return d[0] + d[1] + d[2] > 0
+        } catch {
+          return false
+        } finally {
+          // ⚠️ RAMENER À 1 × 1 LIBÈRE VRAIMENT LE TAMPON — même piège que la
+          // toile de composition (export.js) : lâcher la référence ne suffit
+          // pas, et une sonde qui laisse 65 Mo derrière elle est une sonde qui
+          // fait échouer le tirage qu'elle vient d'autoriser.
+          c.width = 1
+          c.height = 1
+        }
+      },
+    }),
     // Un VRAI rendu au ratio demandé, pas un recadrage de l'écran — c'est tout
     // l'intérêt de la passe. Sans crédit incrusté : la ligne d'attribution a sa
     // place sur l'affiche finale, pas en travers d'une vignette de choix.
@@ -7290,6 +7475,7 @@ async function openAfficheUI(etatInitial = null) {
       // premières bandes sortiraient en police de repli et les dernières non.
       await attendrePolices(plan)
       const restaurerEffets = neutraliserEffetsAffiche()
+      let degeler = null
       try {
         return await exporteAffichePavee({
           renderer, composer, camera,
@@ -7301,8 +7487,19 @@ async function openAfficheUI(etatInitial = null) {
             smaaActif: true,
             bokehActif: !!(params.bokehEnabled && params.bokehScale > 0),
             bokehScale: params.bokehScale,
-            vignette: params.vignette,
-            grain: params.grain,
+            // ⚠️ L'ÉTAT VIVANT DES EFFETS, PAS `params` — ET C'EST UN TIRAGE RÉEL
+            // QUI L'A MONTRÉ. En lisant `params`, le plan d'effets voyait le
+            // vignettage allumé alors qu'il venait d'être éteint deux lignes plus
+            // haut, et criait « l'affiche sortira en damier » sur une affiche
+            // parfaitement recollée. Un avertissement qui se déclenche à tort est
+            // un avertissement qu'on apprend à ignorer — c'est-à-dire un
+            // avertissement perdu. Lu ici, il redevient la bonne question :
+            // « au moment de paver, reste-t-il un effet allumé qui dépende de la
+            // position dans la cible ? » Il rougira le jour où quelqu'un retirera
+            // `neutraliserEffetsAffiche`. Ce que le COMPOSITEUR réapplique vient,
+            // lui, de `params`, lu AVANT la neutralisation (voir planAffiche).
+            vignette: vignette.darkness,
+            grain: grain.blendMode.opacity.value,
             occlusionActive: !!params.ssaoEnabled,
           },
           // ⚠️ UN SEUL INSTANT DE CARTE, PAS DOUZE. Entre deux tuiles il y a des
@@ -7310,7 +7507,16 @@ async function openAfficheUI(etatInitial = null) {
           // dans la moitié basse de l'affiche des rivières que la moitié haute
           // n'a pas. On pose donc la fenêtre et on laisse les calques en cours
           // se terminer AVANT la première tuile.
-          avantTirage: () => { f3Fige(); return rebuildMapLayers() },
+          // ⚠️ ET LE GEL SE POSE APRÈS LA MISE AU REPOS, JAMAIS AVANT : posé
+          // avant, il refuserait la reconstruction qui EST la mise au repos, et
+          // on tirerait la carte telle qu'elle était au clic. `rebuildMapLayers`
+          // attend désormais les quatre calques de texture, pas seulement les
+          // routes : c'est ce qui rend cette attente vraie.
+          avantTirage: async () => {
+            f3Fige()
+            await rebuildMapLayers()
+            degeler = figerPourTirage()
+          },
           // ⚠️ RAPPELÉ À CHAQUE TUILE, ET RESTAURÉ À CHAQUE TUILE. C'est
           // l'arbitrage de la réserve nº 2 de la tâche 5 : plutôt que de geler
           // les reconstructions — ce qui demanderait à export.js de connaître six
@@ -7320,13 +7526,16 @@ async function openAfficheUI(etatInitial = null) {
           // intacte ; un matériau déjà réglé n'est jamais réglé deux fois.
           preparerTuile: ({ cadrage: fenetre, largeur: w, hauteur: h }) => {
             const rendu = cadrerAffiche(aspect, cadrage, pointNet, fenetre)
+            // Le fond de scène est tranché comme la caméra l'est : sans ça,
+            // chaque tuile reçoit le dégradé entier. Voir `cadrerFondPourTuile`.
+            const fond = cadrerFondPourTuile(fenetre)
             // ⚠️ LA HAUTEUR DE RÉFÉRENCE EST CELLE DU FORMAT FINI, pas celle du
             // rendu avec fond perdu : c'est la convention d'appel de
             // `reglerTraits` (export-traits.js), et c'est à elle seule que
             // l'aperçu et le tirage donnent la même épaisseur sur le papier. Les
             // apparier autrement décale tout de 0,86 % sur un 50 × 70.
             const traits = reglerTraitsAffiche({ tuile: { w, h }, hauteurTotalePx: hauteurFiniePx, hauteurMm, dpi })
-            return { restaurer() { traits.restaurer(); rendu.restaurer() } }
+            return { restaurer() { fond?.restaurer(); traits.restaurer(); rendu.restaurer() } }
           },
           // ⚠️ LE COMPOSITEUR ENTRE PAR LA TOILE, PAS PAR L'ORCHESTRATEUR. Le
           // pavage a une preuve pixel par pixel à tenir : on ne lui ajoute pas un
@@ -7337,7 +7546,11 @@ async function openAfficheUI(etatInitial = null) {
           surBande, onProgress, annule,
         })
       } finally {
+        // ⚠️ DANS CET ORDRE. Le dégel relance la boucle d'images ; si les effets
+        // n'étaient pas encore remis, la première image d'après montrerait une
+        // carte sans vignettage ni grain — un clignotement à chaque tirage.
         restaurerEffets()
+        degeler?.()
       }
     },
     // ═══════ L'ÉCRAN DE VALIDATION — CELUI QUI DÉCIDE DE TOUT ══════════════
@@ -7376,6 +7589,9 @@ async function openAfficheUI(etatInitial = null) {
       const [w, h] = tailleSousPlafond(renderer, t.largeur, t.hauteur)
       const traits = reglerTraitsAffiche({ tuile: { w, h }, hauteurTotalePx: h, hauteurMm })
       const restaurerEffets = neutraliserEffetsAffiche()
+      // Le même gel que le tirage, et pour la même raison en plus petit : ce que
+      // l'acheteur valide doit être l'instant du tirage, pas l'instant d'après.
+      const degeler = figerPourTirage()
       let bmp = null
       try {
         const carte = await exportImage({
@@ -7405,6 +7621,7 @@ async function openAfficheUI(etatInitial = null) {
         traits.restaurer()
         rendu.restaurer()
         restaurerEffets()
+        degeler()
       }
     },
     lieu: lieuCourant,

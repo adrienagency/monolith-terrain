@@ -46,6 +46,8 @@ body.af-mode > *:not(.af-scene):not(.af-fermer):not(canvas) {
 
 /* ── L'estrade : l'affiche, et rien d'autre ─────────────────────────────── */
 .af-stage {
+  /* repère du voile de tirage (.af-tirage), qui couvre l'estrade et pas le rail */
+  position: relative;
   display: grid;
   place-items: center;
   padding: clamp(28px, 6vh, 76px) clamp(24px, 5vw, 72px);
@@ -243,6 +245,14 @@ body.dark .af-sheet {
   font-family: inherit;
   transition: background 0.16s, border-color 0.16s, transform 0.16s;
 }
+/* ⚠️ `display: grid` CI-DESSUS BAT L'ATTRIBUT `hidden`. La feuille du navigateur
+   pose `[hidden] { display: none }`, mais toute règle d'auteur qui redéclare
+   `display` la remplace : un format retiré de la grille par la sonde matérielle
+   serait resté visible ET cliquable, et aurait produit un fichier qu'on venait
+   de juger impossible. Même piège pour le segment d'orientation — lui n'a pas
+   de `display`, mais on l'écrit quand même : la règle doit valoir pour les deux,
+   pas pour celui qui est tombé dedans. */
+.af-fmt[hidden], .af-seg button[hidden] { display: none; }
 .af-fmt:hover { background: var(--ce-hover); }
 .af-fmt:active { transform: translateY(1px); }
 .af-fmt:focus-visible { outline: 2px solid var(--ce-accent); outline-offset: 2px; }
@@ -531,4 +541,90 @@ body.dark .af-sheet {
 }
 @media (prefers-reduced-motion: reduce) {
   .af-sheet.vise::before { animation: none; opacity: 0.8; }
+}
+
+/* ── LE TIRAGE : ce qu'on montre pendant qu'on fabrique le fichier ────────────
+   Il couvre l'estrade et PAS le rail : le rail est déjà inerte (le bouton est
+   désactivé), et laisser voir la composition à côté de son rendu est ce qui
+   rend l'attente lisible. L'image montrée n'est PAS la feuille du DOM — elle
+   sort du compositeur, c'est-à-dire du même code que le fichier. */
+.af-tirage {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  /* un voile, pas un mur : la composition reste devinable derrière, ce qui
+     rattache l'image en cours de fabrication à celle qu'on vient de régler */
+  background: color-mix(in srgb, var(--ce-porcelain) 80%, transparent);
+  backdrop-filter: blur(12px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.22s ease, visibility 0.22s;
+}
+.af-tirage.ouvert { opacity: 1; visibility: visible; }
+.af-tir-carte {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: min(460px, 100%);
+  max-height: 100%;
+  text-align: center;
+}
+.af-tir-img {
+  max-width: 100%;
+  min-height: 0;
+  flex: 0 1 auto;
+  object-fit: contain;
+  border-radius: 2px;
+  box-shadow: 0 2px 6px rgba(28, 25, 23, 0.16), 0 24px 60px -20px rgba(28, 25, 23, 0.45);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.af-tir-img.vu { opacity: 1; }
+.af-tir-titre {
+  margin: 6px 0 0;
+  font-family: var(--ce-font);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ce-ink);
+}
+.af-tir-etape {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ce-muted);
+}
+/* La jauge est LARGE et plate : une progression qu'on lit d'un coup d'œil,
+   pas un ornement. Elle existe parce qu'un tirage dure des dizaines de
+   secondes — sans elle, l'utilisateur croit que rien ne se passe et recharge. */
+.af-tir-jauge {
+  width: min(320px, 100%);
+  height: 4px;
+  border-radius: 999px;
+  background: var(--ce-track);
+  overflow: hidden;
+}
+.af-tir-jauge i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ce-accent);
+  transition: width 0.2s linear;
+}
+.af-tir-detail {
+  margin: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ce-muted);
+}
+.af-tir-annuler { margin-top: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .af-tirage { transition: none; }
+  .af-tir-img { transition: none; }
+  .af-tir-jauge i { transition: none; }
 }
