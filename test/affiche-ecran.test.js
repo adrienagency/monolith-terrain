@@ -88,14 +88,46 @@ test('⚠️ L’OPTION FERMÉE DIT POURQUOI, ET SI ÇA VAUT LA PEINE D’ATTEND
 test('l’option fermée n’est PAS un bouton désactivé', () => {
   // Un bouton grisé de la même forme que celui d'à côté se lit comme un
   // chargement qui n'a pas abouti : on reclique, on recharge la page.
+  //
+  // ⚠️ CE QUI COMPTE EST LA FORME, PAS LE CURSEUR. Depuis que la phrase
+  // d'explication est repliée sous un `<summary>`, la ligne est cliquable —
+  // pour ouvrir une raison, pas pour acheter. Ce qui ne doit jamais revenir,
+  // c'est le FOND ACCENTUÉ du bouton d'à côté : c'est lui, et lui seul, qui
+  // ferait lire un chargement raté.
   const bloc = CSS.slice(CSS.indexOf('\n.af-issue {'), CSS.indexOf('\n.af-issue-phrase'))
   assert.ok(bloc.length > 0, '.af-issue doit exister dans le CSS')
   assert.equal(/background:\s*var\(--ce-accent\)/.test(bloc), false)
-  assert.equal(/cursor:\s*pointer/.test(bloc), false)
-  assert.match(bloc, /cursor:\s*default/)
+  assert.equal(/background:\s*color-mix\(in srgb, var\(--ce-accent\)/.test(bloc), false)
   // et le bouton d'achat, lui, garde son fond accentué : la hiérarchie tient
   const cta = CSS.slice(CSS.indexOf('\n.af-cta {'), CSS.indexOf('\n.af-cta:hover'))
   assert.match(cta, /background:\s*var\(--ce-accent\)/)
+})
+
+test('⚠️ L’OPTION FERMÉE TIENT SUR UNE LIGNE, ET SA RAISON SE DÉPLIE', () => {
+  // Le bloc bordé pesait ≈ 90 px d'un pied fixe qui en occupait 320 sur 900 :
+  // on payait une issue FERMÉE au prix d'une section de réglages qu'on ne
+  // voyait plus. La ligne garde le nom et la pastille « Bientôt » ; la phrase
+  // descend sous un `<summary>`, donc elle reste dans la page, atteignable au
+  // clavier — elle n'est pas partie dans une infobulle que le tactile ignore.
+  assert.match(AFFICHE, /const issue = el\('details', 'af-issue'\)/)
+  assert.match(AFFICHE, /const issueLigne = el\('summary', 'af-issue-ligne'\)/)
+  // et l'encadré a disparu : plus de bordure ni de rembourrage sur `.af-issue`
+  const bloc = CSS.slice(CSS.indexOf('\n.af-issue {'), CSS.indexOf('\n.af-issue-ligne'))
+  assert.equal(/border:\s*1px solid/.test(bloc), false, 'l’encadré ne doit pas revenir')
+  assert.equal(/padding:/.test(bloc), false, 'le rembourrage de l’encadré non plus')
+})
+
+test('⚠️ SOUS 900 PX, L’ISSUE FERMÉE DISPARAÎT — ELLE NE MÈNE NULLE PART', () => {
+  // Mesuré sur un 390 × 800 : le rail passe sous la feuille en bande de 56 vh
+  // (469 px) dont le pied prenait 302. Il restait 146 px défilants pour 920 px
+  // de contrôles, c'est-à-dire ZÉRO section visible d'un seul tenant. On ne
+  // garde pas une porte annoncée close au prix d'un réglage utilisable.
+  const etroit = CSS.slice(CSS.indexOf('@media (max-width: 900px)'))
+  const bloc = etroit.slice(0, etroit.indexOf('\n}\n'))
+  assert.match(bloc, /\.af-issue \{ display: none; \}/)
+  // et elle n'est PAS masquée ailleurs : sur un grand écran, elle a sa place
+  const large = CSS.slice(0, CSS.indexOf('@media (max-width: 900px)'))
+  assert.equal(/\.af-issue \{[^}]*display:\s*none/.test(large), false)
 })
 
 test('à 0 €, l’étiquette et la phrase de réassurance restent cohérentes avec le nouveau bouton', () => {
@@ -216,11 +248,113 @@ test('⚠️ LA RANGÉE RÉSERVE UN CARRÉ FIXE, ET LA CONSTANTE N\u2019EXISTE Q
 // 5. LES TITRES PORTENT LEUR SUJET
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('⚠️ « COMMENT TU LA REÇOIS » A RETROUVÉ SON SUJET', () => {
-  // Adrien, 2026-08-06 : « il faut toujours le sujet ». Le titre commençait par
-  // un complément et laissait le produit dans un pronom — « la » quoi ?
+test('⚠️ « COMMENT TU LA REÇOIS » NE REVIENT PAS, MÊME PAR LA PORTE DE DERRIÈRE', () => {
+  // Adrien, 2026-08-06 : « il faut toujours le sujet ». Le titre du pied
+  // commençait par un complément et laissait le produit dans un pronom — « la »
+  // quoi ? Il avait donc été réécrit en « Comment on t'envoie ton affiche ? ».
+  //
+  // ⚠️ ET IL A ENSUITE ÉTÉ RETIRÉ, POUR UNE AUTRE RAISON QUE SA GRAMMAIRE. Le
+  // pied FIXE occupait 320 px, soit 37 % du rail : « Format » et « Ton logo »
+  // ne pouvaient pas coexister à l'écran. Une légende qui ANNONCE ce que les
+  // deux éléments d'en dessous montrent déjà — un bouton plein, puis une ligne
+  // à filet marquée « Bientôt » — est du commentaire, et le commentaire se
+  // payait ici en réglages qu'on ne voyait plus.
+  //
+  // Ce que ce test garde : la version sans sujet ne doit revenir sous aucune
+  // forme, et les deux issues doivent rester lisibles SANS légende pour les
+  // présenter.
   assert.equal(AFFICHE.includes('Comment tu la reçois'), false)
-  assert.match(AFFICHE, /af-legende', 'Comment on t’envoie ton affiche \?'/)
+  assert.equal(AFFICHE.includes('Comment on t’envoie ton affiche'), false)
+  // le pied ne porte plus de légende du tout
+  assert.match(AFFICHE, /pied\.append\(verite, noteDpi, garde, cta, rassure, issue\)/)
+  // et les deux issues sont toujours là, l'une après l'autre
+  assert.match(AFFICHE, /af-issue-nom', 'Faire imprimer et livrer'/)
+  assert.match(AFFICHE, /af-issue-tag', 'Bientôt'/)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. LE RANGEMENT DU PANNEAU — TREIZE DÉCISIONS, AUCUNE RETIRÉE
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('⚠️ FORMAT ET SENS SONT UNE SEULE DÉCISION, SOUS UNE SEULE LÉGENDE', () => {
+  // Deux légendes coûtaient deux fois : une trentaine de pixels dans un rail où
+  // il en manquait deux cents, et deux questions là où on n'en pose qu'une —
+  // la forme du papier. Personne ne choisit un 50 × 70 sans savoir s'il le veut
+  // debout ou couché.
+  assert.equal(AFFICHE.includes("'af-legende', 'Sens'"), false, '« Sens » n’a plus de légende à lui')
+  assert.equal(AFFICHE.includes('const gOrient'), false, 'le groupe « Sens » a disparu')
+  // le segment se colle SOUS la grille, dans le bloc « Format »
+  assert.match(AFFICHE, /const seg = el\('div', 'af-seg af-seg-sens'\)/)
+  assert.match(AFFICHE, /gFormat\.append\(seg\)/)
+  // ⚠️ ET AUCUN RÉGLAGE N'EST PERDU : les deux boutons répondent toujours
+  assert.match(AFFICHE, /seg\.append\(bPortrait, bPaysage\)/)
+  assert.match(CSS, /\.af-seg-sens \{ margin-top: 10px; \}/)
+})
+
+test('⚠️ LES FINITIONS SE REPLIENT — ET C’EST LE SEUL REPLI DU PANNEAU', () => {
+  // La position d'Adrien est arrêtée : ni accordéon général, ni étapes
+  // numérotées. Chaque réglage se voit instantanément dans l'aperçu, et des
+  // étapes casseraient la boucle « je tourne, je regarde » qui EST le produit.
+  // Un seul `<details>`, sur ce qu'on règle en dernier, n'est pas un accordéon.
+  assert.match(AFFICHE, /const finitions = el\('details', 'af-finitions'\)/)
+  assert.match(AFFICHE, /el\('summary', null, 'Finitions'\)/)
+  // FERMÉ PAR DÉFAUT : aucun `open` n'est posé
+  assert.equal(/finitions\.open\s*=\s*true/.test(AFFICHE), false)
+  assert.equal(/finitions\.setAttribute\('open'/.test(AFFICHE), false)
+  // les trois réglages qu'il contient sont EXACTEMENT ceux qu'on règle en
+  // dernier — le logo, l'encre du cartouche, les noms de villes
+  assert.match(AFFICHE, /finitions\.append\(resumeFinitions, basculeEncre, basculeLieux, gLogo\)/)
+  // ⚠️ ET RIEN N'EST RETIRÉ : les trois répondent toujours
+  assert.match(AFFICHE, /cocheEncre\.addEventListener\('change'/)
+  assert.match(AFFICHE, /cocheLieux\.addEventListener\('change'/)
+  assert.match(AFFICHE, /fichier\.addEventListener\('change'/)
+  // le cartouche, lui, garde ses deux décisions premières
+  assert.match(AFFICHE, /gCart\.append\(bascule, champ\)/)
+})
+
+test('un seul `<details>` dans le rail : ce n’est pas un accordéon déguisé', () => {
+  // ⚠️ LA RÈGLE QUI COMPTE, ÉCRITE EN CHIFFRES. Le jour où quelqu'un replie
+  // « Cadrage » puis « Format » pour gagner encore des pixels, le panneau
+  // devient exactement ce qu'Adrien a refusé. Le corps du rail n'a droit qu'à
+  // UN repli ; celui du pied (l'issue d'impression) vit ailleurs.
+  const corps = AFFICHE.slice(AFFICHE.indexOf('const corps = el('), AFFICHE.indexOf('const pied = el('))
+  const replis = [...corps.matchAll(/el\('details'/g)]
+  assert.equal(replis.length, 1, `le corps du rail porte ${replis.length} replis, il n’en tolère qu’un`)
+})
+
+test('⚠️ LA GOUTTIÈRE DE DÉFILEMENT EST RÉSERVÉE : « TOUT LE SOCLE » N’EST PLUS COUPÉ', () => {
+  // Sans elle, la barre se pose SUR le contenu : le lien aligné à droite de la
+  // légende « Cadrage » était coupé dans sa dernière lettre, et la largeur utile
+  // changeait selon qu'on débordait ou non — la grille des formats se
+  // recalculait au repliement des finitions.
+  const bloc = CSS.slice(CSS.indexOf('.af-rail-corps {'), CSS.indexOf('.af-rail h1'))
+  assert.match(bloc, /scrollbar-gutter:\s*stable/)
+})
+
+test('⚠️ LA TAILLE EST ÉCRITE SOUS LA FEUILLE, ET HORS DE CE QUI S’IMPRIME', () => {
+  // C'est la seule information que les concurrents étudiés refusent d'enterrer.
+  // Elle vivait en 11 px collée au bouton d'achat, à cinq cents pixels du
+  // visuel qu'elle décrit.
+  assert.match(AFFICHE, /const taille = el\('p', 'af-taille'\)/)
+  // ⚠️ HORS DE `.af-sheet` : tout ce qui est dans la feuille part à l'impression
+  assert.match(AFFICHE, /wrap\.append\(sheet, taille\)/)
+  assert.equal(/sheet\.append\([^)]*taille/.test(AFFICHE), false, 'la légende ne doit jamais entrer dans la feuille')
+  // et elle se relit de `geo`, comme la ligne de vérité : une seule source
+  assert.match(AFFICHE, /taille\.textContent = tailleSousFeuille\(geo, etat\.orientation\)/)
+})
+
+test('⚠️ UNE DENSITÉ DÉGRADÉE EST EXPLIQUÉE, ET LA NOTE SE TAIT AU NOMINAL', () => {
+  // La ligne de vérité annonce parfois 250 dpi sans dire pourquoi ; quelqu'un
+  // qui a lu 300 ailleurs va douter du produit alors que c'est sa machine qui
+  // est en cause. (Le TEXTE de la note, lui, se vérifie avec des valeurs dans
+  // test/affiche-mots.test.js — il se fabrique, il ne se relit pas.)
+  assert.match(AFFICHE, /const noteDpi = el\('p', 'af-note-dpi'\)/)
+  assert.match(AFFICHE, /noteDpi\.hidden = true/)
+  // la densité comparée est celle du couple (format, sens) RETENU, contre la
+  // nominale de la table : deux sources différentes, sinon la note ne dirait rien
+  assert.match(AFFICHE, /nominal: dpiPour\(etat\.format, etat\.orientation\)/)
+  assert.match(AFFICHE, /noteDpi\.hidden = !mot/)
+  assert.match(AFFICHE, /import \{ PLAFOND_REFERENCE, dpiPour \} from '\.\.\/export-dpi\.js'/)
 })
 
 test('les autres titres du panneau ne commencent plus par un verbe ou un complément', () => {

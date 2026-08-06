@@ -54,12 +54,34 @@ body.af-mode > *:not(.af-scene):not(.af-fermer):not(canvas) {
   min-width: 0;
   min-height: 0;
 }
+/* ⚠️ DEUX RANGÉES, PAS `place-items: center`. La feuille occupe la première,
+   qui prend toute la place restante (`minmax(0, 1fr)` — le `0` lui rend le
+   droit de rétrécir, sans quoi la légende de taille pousserait la feuille hors
+   de l'estrade sur un écran bas) ; la taille écrite s'assoit dessous, sur une
+   rangée `auto` qui ne mesure que son texte. La feuille garde ses `height:
+   100%` : la rangée est définie, ils résolvent contre elle. */
 .af-sheet-wrap {
   display: grid;
-  place-items: center;
+  grid-template-rows: minmax(0, 1fr) auto;
+  justify-items: center;
+  align-items: center;
+  gap: 12px;
   width: 100%;
   height: 100%;
   min-height: 0;
+}
+
+/* La taille du tirage, sous la feuille. Encre de commentaire et petite chasse :
+   elle informe, elle ne réclame rien. Le chiffre est en tabulaire pour qu'il ne
+   danse pas quand on passe d'un format à l'autre. */
+.af-taille {
+  margin: 0;
+  font-family: var(--ce-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ce-muted);
+  text-align: center;
 }
 
 /* La feuille. L'ombre porte un DÉCALAGE et un flou franc : une feuille pose
@@ -197,6 +219,14 @@ body.dark .af-sheet {
      horizontal `auto` lui aussi, et une barre de défilement latérale s'ouvrait
      sous « Ton logo » pour deux pixels de débord. */
   overflow-x: hidden;
+  /* ⚠️ LA GOUTTIÈRE EST RÉSERVÉE MÊME QUAND ELLE NE SERT PAS. Sans elle, la
+     barre de défilement se pose SUR le contenu quand il déborde : « Tout le
+     socle », le lien aligné à droite de la légende « Cadrage », était coupé
+     dans sa dernière lettre. Et la largeur utile changeait selon qu'on
+     débordait ou non — la grille des formats se recalculait au repliement des
+     finitions. Une gouttière stable coûte une dizaine de pixels une fois pour
+     toutes et rend la colonne immobile. */
+  scrollbar-gutter: stable;
   padding-bottom: 20px;
 }
 .af-rail h1 {
@@ -337,6 +367,10 @@ body.dark .af-sheet {
 }
 .af-seg button[aria-pressed='true'] { background: var(--ce-porcelain); color: var(--ce-ink); font-weight: 600; }
 .af-seg button:focus-visible { outline: 2px solid var(--ce-accent); outline-offset: -2px; }
+/* Le sens n'a plus de légende à lui : il se colle sous les pastilles, dans le
+   même bloc. L'écart est celui d'une même décision qu'on affine, pas celui de
+   deux questions successives. */
+.af-seg-sens { margin-top: 10px; }
 
 .af-bascule {
   display: flex;
@@ -362,10 +396,77 @@ body.dark .af-sheet {
 .af-champ::placeholder { color: var(--ce-muted); }
 .af-champ:focus-visible { outline: 2px solid var(--ce-accent); outline-offset: -1px; border-color: transparent; }
 
-/* ── Le pied : la vérité, puis l'action ─────────────────────────────────── */
+/* ── LE REPLI DES FINITIONS ──────────────────────────────────────────────────
+   Le SEUL de ce panneau, et il ne contient que ce qu'on règle en dernier : le
+   logo, l'encre du cartouche, les noms de villes. Le raisonnement — pourquoi ce
+   n'est pas un accordéon, et pourquoi ces trois-là et pas d'autres — est dans
+   src/ui/affiche.js, au-dessus de `finitions`.
+
+   ⚠️ IL DOIT SE VOIR COMME UN REPLI, PAS COMME UNE LÉGENDE. S'il ressemblait
+   aux autres titres du rail, on le lirait comme une section vide et on ne
+   penserait jamais à cliquer — c'est-à-dire qu'on aurait bel et bien retiré
+   trois réglages. Le chevron le dit, et il tourne. */
+.af-finitions {
+  margin-bottom: 18px;
+  border-top: 1px solid var(--ce-hairline);
+  padding-top: 12px;
+}
+/* ⚠️ ON GARDE LE `display: list-item` DE LA FEUILLE DU NAVIGATEUR, ON NE RETIRE
+   QUE LA PUCE. La première version posait le summary en `flex` — c'est commode
+   pour aligner un chevron, et c'est le réflexe. Mais le `display` d'un
+   `<summary>` n'est pas décoratif : c'est lui qui porte le repli dans le moteur,
+   et les navigateurs ne s'accordent pas sur ce qu'il reste des semantiques une
+   fois qu'on l'a remplacé. Vérifié ici : focus au clavier et ouverture au clic
+   tiennent dans les deux écritures — mais l'une repose sur le comportement
+   natif et l'autre sur la bienveillance du moteur, et ce n'est pas un pari
+   qu'on prend pour économiser une ligne d'alignement. Le chevron s'aligne donc
+   en `inline-block`. Même choix, même raison, sur `.af-issue-ligne` plus bas. */
+.af-finitions > summary {
+  display: list-item;
+  list-style: none;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ce-muted);
+  padding: 2px 0;
+  transition: color 0.16s;
+}
+/* WebKit garde son propre triangle tant qu'on ne le désarme pas explicitement. */
+.af-finitions > summary::-webkit-details-marker { display: none; }
+.af-finitions > summary::before {
+  content: '';
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 8px;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg) translateY(-2px);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.af-finitions[open] > summary::before { transform: rotate(45deg) translateY(-3px); }
+.af-finitions > summary:hover { color: var(--ce-ink); }
+.af-finitions > summary:focus-visible { outline: 2px solid var(--ce-accent); outline-offset: 2px; border-radius: 4px; }
+/* Le groupe « Ton logo » garde sa légende à l'intérieur du repli : ouvert, on
+   doit retrouver le panneau qu'on connaissait. Sa marge basse, elle, tombe —
+   le repli porte déjà la sienne. */
+.af-finitions > .af-groupe { margin-bottom: 0; margin-top: 6px; }
+@media (prefers-reduced-motion: reduce) {
+  .af-finitions > summary::before { transition: none; }
+}
+
+/* ── Le pied : la vérité, puis l'action ───────────────────────────────────
+   ⚠️ CHAQUE PIXEL D'ICI EST PRIS AUX RÉGLAGES. Le pied est le bloc FIXE du
+   rail : ce qu'il occupe, la zone défilante ne l'a pas. Mesuré avant cette
+   passe : 320 px, soit 37 % du rail — et 0 section de réglages visible d'un
+   seul tenant sur un téléphone de 800 px de haut. Les marges de ce bloc se
+   relisent donc au pixel, elles ne s'arrondissent pas vers le haut. */
 .af-pied {
   border-top: 1px solid var(--ce-hairline);
-  padding: 16px 0 22px;
+  padding: 13px 0 15px;
   background: var(--ce-porcelain);
 }
 .af-verite {
@@ -373,11 +474,20 @@ body.dark .af-sheet {
   font-size: 11px;
   letter-spacing: 0.06em;
   color: var(--ce-muted);
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   display: flex;
   flex-wrap: wrap;
   gap: 4px 10px;
 }
+/* La cause d'une densité dégradée. Encre de commentaire : c'est une note de bas
+   de page sur la ligne du dessus, pas un avertissement. */
+.af-note-dpi {
+  margin: -4px 0 10px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ce-muted);
+}
+.af-note-dpi[hidden] { display: none; }
 .af-cta {
   appearance: none;
   border: 0;
@@ -405,7 +515,7 @@ body.dark .af-sheet {
 .af-cta span:last-child { font-variant-numeric: tabular-nums; opacity: 0.9; }
 
 .af-rassure {
-  margin: 11px 0 0;
+  margin: 9px 0 0;
   font-size: 12px;
   line-height: 1.5;
   color: var(--ce-muted);
@@ -427,19 +537,46 @@ body.dark .af-sheet {
 
    La hiérarchie tient à trois choses : le bouton d'achat est plein et accentué,
    celui-ci n'a qu'un filet ; il vient APRÈS ; et son encre est celle des
-   commentaires. */
+   commentaires.
+
+   ⚠️ ET CE N'EST PLUS UN ENCADRÉ, C'EST UNE LIGNE. Le bloc bordé pesait ≈ 90 px
+   d'un pied qui en occupait 320 sur 900. On ne paie pas une issue FERMÉE au
+   prix d'une section de réglages qu'on ne voit plus. La phrase n'est pas perdue
+   pour autant : elle vit sous le `<summary>`, à un clic, et le repli se signale
+   par le même chevron que « Finitions » — un vocabulaire, pas deux. */
 .af-issue {
-  margin: 16px 0 0;
-  padding: 11px 13px 12px;
-  border: 1px solid var(--ce-hairline);
-  border-radius: 12px;
+  margin: 12px 0 0;
   cursor: default;
 }
+/* `display: list-item` — voir l'encadré sur `.af-finitions > summary` : on ne
+   remplace pas le display d'un `<summary>`, c'est lui qui porte le repli. La
+   pastille se range donc à droite par un flottant, pas par `space-between`. */
 .af-issue-ligne {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  display: list-item;
+  list-style: none;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.af-issue-ligne::-webkit-details-marker { display: none; }
+.af-issue-ligne:focus-visible { outline: 2px solid var(--ce-accent); outline-offset: 2px; border-radius: 6px; }
+/* Le chevron rejoint le nom, à gauche : c'est lui qui dit qu'il y a une raison
+   à lire. Il ne peut pas vivre sur `.af-issue-nom`, qui est le texte lui-même. */
+.af-issue-ligne::before {
+  content: '';
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 8px;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--ce-muted);
+  border-bottom: 1.5px solid var(--ce-muted);
+  transform: rotate(-45deg) translateY(-2px);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.af-issue[open] > .af-issue-ligne::before { transform: rotate(45deg) translateY(-3px); }
+.af-issue-tag { float: right; }
+@media (prefers-reduced-motion: reduce) {
+  .af-issue-ligne::before { transition: none; }
 }
 .af-issue-nom {
   font-size: 13.5px;
@@ -566,6 +703,21 @@ body.dark .af-sheet {
   /* même remarque qu'en haut : `minmax(0, …)`, sinon les libellés reprennent la
      main sur la largeur des colonnes */
   .af-formats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  /* ══════ L'ISSUE FERMÉE DISPARAÎT ICI, ET SEULEMENT ICI ═══════════════════
+     ⚠️ MESURÉ, PAS SUPPOSÉ. Sur un téléphone de 390 × 800, le rail est une
+     bande de 56 vh — 469 px — dont le pied fixe prenait 302. Il restait
+     146 px défilants pour 920 px de contrôles : ZÉRO section de réglages
+     visible d'un seul tenant. Le panneau n'était pas serré, il était cassé.
+
+     Ce qu'on retire est la seule chose de cet écran qui ne mène nulle part :
+     une issue qu'on ANNONCE FERMÉE. Sur un grand écran elle a sa place — elle
+     dit qu'on y travaille, et ça vaut une ligne. Sur un téléphone, elle
+     coûterait un réglage que l'acheteur, lui, peut vraiment utiliser. Aucune
+     décision n'est perdue au passage : elle n'en offrait aucune. */
+  .af-issue { display: none; }
+  /* La feuille prend déjà toute la place qu'on lui laisse : la taille écrite
+     dessous se resserre contre elle plutôt que de manger l'estrade. */
+  .af-sheet-wrap { gap: 8px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

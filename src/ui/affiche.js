@@ -32,7 +32,7 @@ import {
 // rien : il lit des plafonds, en déduit une limite, et `degradePour` fait le
 // reste. Voir src/sonde-materielle.js.
 import { dpiRetenu, ligneFormat, replierSur, grilleAffiche } from '../sonde-materielle.js'
-import { PLAFOND_REFERENCE } from '../export-dpi.js'
+import { PLAFOND_REFERENCE, dpiPour } from '../export-dpi.js'
 // ⚠️ LE TEXTE DU CARTOUCHE VIENT DU COMPOSITEUR, IL N'EST PLUS ÉCRIT ICI. Deux
 // façons de formater une latitude, c'est un écart entre l'aperçu et le fichier
 // vendu qui ne se découvre qu'après la vente. Le compositeur est la source ;
@@ -45,6 +45,10 @@ import {
   estSurLaFeuille, viseesDeRepli, doitAvertirAvantAchat,
   AVERTISSEMENT_NETTETE, MESSAGE_POINT_REPLACE,
 } from '../affiche-nettete.js'
+// La taille écrite sous la feuille et la cause d'une densité dégradée. Elles
+// sont dehors pour la même raison que les décisions de netteté ci-dessus :
+// elles se fabriquent à partir de nombres, donc elles se testent sous node.
+import { tailleSousFeuille, noteDensite } from '../affiche-mots.js'
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LE PRIX AFFICHÉ — UNE ÉTIQUETTE, PAS UN PRIX
@@ -99,8 +103,12 @@ export function phraseRassurance(euros = PRIX_AFFICHE_EUR) {
   // paiement. Il est maintenant fabriqué AVANT, mis au coffre, et rendu au
   // retour de la caisse : promettre le mail ferait attendre pour rien quelqu'un
   // qui a déjà son fichier à l'écran.
+  // ⚠️ ET ELLE TIENT SUR UNE LIGNE DEPUIS LE RANGEMENT DU PANNEAU. Elle en
+  // faisait trois — un `<br>` plus deux replis — dans un pied qui mangeait 37 %
+  // du rail. Chaque ligne de réassurance ici est une ligne de réglage en moins
+  // à l'écran ; la promesse tient en une phrase, le reste était de l'emphase.
   if (euros > 0) {
-    return 'Le PDF se télécharge dès le paiement validé. <b>Pas de compte à créer.</b><br>L’image à l’écran, elle, reste gratuite.'
+    return 'Le PDF se télécharge dès le paiement validé. <b>Pas de compte à créer.</b>'
   }
   // ⚠️ RÉÉCRITE PARCE QU'ELLE PARLAIT COMME UN CAHIER DES CHARGES (Adrien,
   // 2026-08-06 : « le texte n'est pas très français, optimise »). Ce qu'elle
@@ -115,8 +123,16 @@ export function phraseRassurance(euros = PRIX_AFFICHE_EUR) {
   //     posée.
   // Ce qui la remplace dit les trois choses DANS L'ORDRE OÙ ELLES ARRIVENT :
   // c'est gratuit, on ne te demande rien, tu repars avec le fichier.
-  return 'Le fichier est <b>offert</b> en ce moment. On ne te demande pas de carte, et rien ne t’est débité.<br>Tu récupères ton PDF juste après.'
+  return 'Le fichier est <b>offert</b>, sans carte bancaire. Tu récupères ton PDF juste après.'
 }
+
+// Les deux phrases qui se FABRIQUENT à partir de nombres — la taille écrite
+// sous la feuille et la cause d'une densité dégradée — vivent dans un module
+// sans DOM, pour la même raison que `affiche-nettete.js` : une chaîne
+// construite se teste avec des VALEURS, pas avec une expression régulière
+// posée sur ce fichier-ci (qui importe une feuille de style, donc ne se charge
+// pas sous node). Réexportées pour les appelants ; la définition est là-bas.
+export { tailleSousFeuille, noteDensite }
 
 // La plus grande dimension de l'aperçu, en pixels. Assez pour juger un cadrage
 // et une couleur, assez petit pour que changer de format reste instantané.
@@ -327,7 +343,11 @@ export function ouvrirAffiche(ctx) {
   const signature = el('div', 'af-signature', SIGNATURE_TEXTE)
   signature.setAttribute('aria-hidden', 'true')
   sheet.append(img, logoImg, cartouche, signature)
-  wrap.append(sheet)
+  // La taille, écrite là où on la cherche : sous l'objet qu'elle mesure. Elle
+  // ne fait PAS partie de l'affiche — elle est hors de `.af-sheet`, donc hors
+  // de tout ce qui sera imprimé. Voir `tailleSousFeuille`.
+  const taille = el('p', 'af-taille')
+  wrap.append(sheet, taille)
   stage.append(wrap)
 
   // ── le rail ───────────────────────────────────────────────────────────────
@@ -342,7 +362,18 @@ export function ouvrirAffiche(ctx) {
     )
   )
 
-  // Les formats, dessinés à leur vraie proportion.
+  // ══════ FORMAT ET SENS SONT UNE SEULE DÉCISION ════════════════════════════
+  //
+  // ⚠️ ILS ÉTAIENT DEUX GROUPES, AVEC DEUX LÉGENDES, ET ÇA COÛTAIT DEUX FOIS.
+  // Deux fois en pixels — une légende, son interligne et la marge d'un groupe,
+  // soit une trentaine de pixels dans un rail où il en manquait deux cents.
+  // Et deux fois en attention : « Format » puis « Sens » se lisent comme deux
+  // questions successives, alors qu'on n'en pose qu'une, la FORME DU PAPIER.
+  // Personne ne choisit un 50 × 70 sans savoir s'il le veut debout ou couché.
+  //
+  // Le segment se colle donc SOUS la grille de pastilles, dans le même bloc :
+  // les sept formes, puis le sens qu'on leur donne. Aucun réglage n'est retiré
+  // — c'est un rangement, pas une amputation.
   const gFormat = el('div', 'af-groupe')
   gFormat.append(el('p', 'af-legende', 'Format'))
   const grilleEl = el('div', 'af-formats')
@@ -419,10 +450,9 @@ export function ouvrirAffiche(ctx) {
   // demande « pourquoi ? » sans jamais y répondre.
   for (const [id, b] of boutonsFormat) b.hidden = !ligneFormat(grilleFormats, id)?.dispo
 
-  // Orientation.
-  const gOrient = el('div', 'af-groupe')
-  gOrient.append(el('p', 'af-legende', 'Sens'))
-  const seg = el('div', 'af-seg')
+  // Le sens, sans légende à lui : il est dans le bloc « Format », juste sous
+  // les pastilles, et celles-ci montrent déjà la forme qu'il donne.
+  const seg = el('div', 'af-seg af-seg-sens')
   const bPortrait = el('button', null, 'Portrait')
   const bPaysage = el('button', null, 'Paysage')
   const boutonsSens = new Map([[bPortrait, 'portrait'], [bPaysage, 'paysage']])
@@ -437,7 +467,7 @@ export function ouvrirAffiche(ctx) {
     })
   }
   seg.append(bPortrait, bPaysage)
-  gOrient.append(seg)
+  gFormat.append(seg)
 
   // Le cartouche : ce qui distingue une affiche d'une capture d'écran.
   const gCart = el('div', 'af-groupe')
@@ -473,7 +503,11 @@ export function ouvrirAffiche(ctx) {
     ctx.setLieuxAffiches?.(cocheLieux.checked)
     appliquer({ refaireRendu: true })
   })
-  gCart.append(bascule, champ, basculeEncre, basculeLieux)
+  // ⚠️ LE CARTOUCHE GARDE SES DEUX DÉCISIONS PREMIÈRES — est-ce qu'on imprime
+  // une légende, et sous quel nom. L'encre et les noms de villes, eux, sont des
+  // FINITIONS : on ne les touche qu'une fois la composition trouvée. Ils
+  // descendent dans le repli d'en dessous.
+  gCart.append(bascule, champ)
 
   coche.addEventListener('change', () => { etat.cartouche = coche.checked; appliquer({}) })
   cocheEncre.addEventListener('change', () => { etat.cartoucheSombre = cocheEncre.checked; appliquer({}) })
@@ -569,6 +603,28 @@ export function ouvrirAffiche(ctx) {
   })
   gLogo.append(etiqFichier, fichier, logoOutils)
 
+  // ══════ LES FINITIONS SE REPLIENT — ET SEULEMENT ELLES ════════════════════
+  //
+  // ⚠️ CE N'EST PAS UN ACCORDÉON, ET LA DIFFÉRENCE N'EST PAS UNE NUANCE. La
+  // position d'Adrien est arrêtée : chaque réglage se voit instantanément dans
+  // l'aperçu, et découper le panneau en étapes casserait la boucle « je tourne,
+  // je regarde » qui EST le produit. Un panneau replié partout obligerait à
+  // ouvrir un tiroir pour voir bouger la feuille — c'est exactement ce qu'on
+  // refuse.
+  //
+  // Ce repli-ci est le seul, et il ne contient que ce qu'on règle EN DERNIER :
+  // le logo (qu'on n'a le plus souvent pas), l'encre du cartouche, les noms de
+  // villes. Aucune de ces trois décisions n'est nécessaire pour juger un
+  // cadrage ; les trois ensemble pesaient ≈ 180 px, c'est-à-dire une section
+  // entière volée aux réglages qu'on regarde vraiment.
+  //
+  // ⚠️ FERMÉ PAR DÉFAUT, ET RIEN N'EST RETIRÉ. Le produit se vend sur la
+  // personnalisation : les treize décisions sont toujours là, à un clic, et le
+  // repli ANNONCE ce qu'il contient plutôt que de le cacher.
+  const finitions = el('details', 'af-finitions')
+  const resumeFinitions = el('summary', null, 'Finitions')
+  finitions.append(resumeFinitions, basculeEncre, basculeLieux, gLogo)
+
   // ══════ LA NETTETÉ PASSE DEVANT, QUAND IL Y A DU BOKEH ════════════════════
   //
   // Adrien : « l'utilisateur peut choisir le point de son bokeh dès que le
@@ -600,11 +656,14 @@ export function ouvrirAffiche(ctx) {
     corps.append(gNet)
   }
 
-  corps.append(gFormat, gOrient, gCadre, gCart, gLogo)
+  corps.append(gFormat, gCadre, gCart, finitions)
 
   // ── le pied : la vérité, puis l'action ────────────────────────────────────
   const pied = el('div', 'af-pied')
   const verite = el('div', 'af-verite')
+  // La cause d'une densité dégradée, écrite seulement quand il y en a une.
+  const noteDpi = el('p', 'af-note-dpi')
+  noteDpi.hidden = true
   const cta = el('button', 'af-cta')
   cta.type = 'button'
   const ctaTexte = el('span', null, CTA_TELECHARGER)
@@ -625,8 +684,18 @@ export function ouvrirAffiche(ctx) {
   // trois jours ? La phrase répond aux deux d'un coup — on n'a pas encore
   // d'imprimeur, ET le fichier d'à côté s'imprime déjà partout. Aucune date
   // n'est promise : une date manquée coûte plus cher qu'une absence de date.
-  const issue = el('div', 'af-issue')
-  const issueLigne = el('div', 'af-issue-ligne')
+  //
+  // ⚠️ ET DEPUIS LE RANGEMENT DU PANNEAU, C'EST UNE LIGNE, PLUS UN ENCADRÉ. Le
+  // bloc bordé pesait ≈ 90 px de pied — pour une issue FERMÉE, sous un bouton
+  // qu'on ne voyait déjà pas en même temps que « Format ». On paie une porte
+  // close au prix d'une section de réglages ; c'était le mauvais échange.
+  // La ligne garde tout ce qui comptait — le nom, la pastille « Bientôt » — et
+  // la phrase descend d'un cran, sous un `<summary>` : elle reste dans la page,
+  // lisible par le clavier et par la recherche, mais elle ne prend sa place que
+  // quand quelqu'un veut savoir. Personne ne perd d'information ; l'écran
+  // récupère quatre-vingts pixels.
+  const issue = el('details', 'af-issue')
+  const issueLigne = el('summary', 'af-issue-ligne')
   issueLigne.append(
     el('span', 'af-issue-nom', 'Faire imprimer et livrer'),
     el('i', 'af-issue-tag', 'Bientôt')
@@ -684,18 +753,24 @@ export function ouvrirAffiche(ctx) {
   gardeBoutons.append(bDeplacer, bContinuer)
   garde.append(gardeTitre, gardePhrase, gardeBoutons)
 
-  // La légende qui dit qu'il y a un CHOIX. Sans elle, le bloc du bas se lit
-  // comme une note posée sous un bouton ; avec elle, ce sont deux façons
-  // d'avoir la même affiche, dont une seule est ouverte.
+  // ══════ LE PIED N'A PLUS DE LÉGENDE, ET C'EST MESURÉ ══════════════════════
   //
-  // ⚠️ ET ELLE PORTE SON SUJET. L'ancienne version commençait par un complément
-  // et laissait le nom du produit dans un pronom : « la » quoi ?
-  // Adrien, 2026-08-06 : « il faut toujours le sujet ». C'est la même règle qui
-  // a fait renommer les étapes du tirage plus bas (le nom d'action « Rendu du
-  // fichier » est devenu « On rend ton fichier ») et la case d'encre du cartouche.
-  // Le nom retenu est « affiche », pas « carte » : c'est celui que porte tout
-  // le reste de cet écran, du titre au bouton.
-  pied.append(verite, el('p', 'af-legende', 'Comment on t’envoie ton affiche ?'), garde, cta, rassure, issue)
+  // Il en portait une — « Comment on t'envoie ton affiche ? » — qui annonçait
+  // les deux issues. Elle était juste, et elle a coûté trop cher : le pied FIXE
+  // occupait 320 px, soit 37 % du rail, et il ne restait que 452 px de zone
+  // défilante pour 920 px de contrôles. « Format » et « Ton logo » ne pouvaient
+  // pas coexister à l'écran.
+  //
+  // ⚠️ CE QUI DISPARAÎT EST LA QUESTION, PAS LA RÉPONSE. Les deux issues sont
+  // toujours là, l'une sous l'autre, et la fermée porte toujours son « Bientôt »
+  // en toutes lettres : un bouton plein puis une ligne à filet se lisent COMME
+  // un choix, sans qu'on ait besoin de l'annoncer. Une légende qui décrit ce
+  // que les deux éléments d'en dessous montrent déjà est du commentaire, et le
+  // commentaire se paie en réglages qu'on ne voit plus.
+  //
+  // (La règle du sujet, elle, n'a pas bougé — voir les libellés du tirage, plus
+  // bas : « On rend ton fichier », pas « Rendu du fichier ».)
+  pied.append(verite, noteDpi, garde, cta, rassure, issue)
   rail.append(corps, pied)
 
   // ── la sortie ─────────────────────────────────────────────────────────────
@@ -834,6 +909,20 @@ export function ouvrirAffiche(ctx) {
 
     verite.textContent = ''
     for (const bout of ligneVerite(geo)) verite.append(el('span', null, bout))
+
+    // La taille sous la feuille, et la cause d'une densité dégradée s'il y en a
+    // une. Les deux se relisent de `geo` à chaque passage : c'est la même
+    // source que la ligne de vérité, il n'y a donc pas deux façons d'annoncer
+    // une taille ni deux façons d'annoncer une densité.
+    taille.textContent = tailleSousFeuille(geo, etat.orientation)
+    const mot = noteDensite({
+      dpi: geo.dpi,
+      nominal: dpiPour(etat.format, etat.orientation),
+      largeurCm: geo.largeurMm / 10,
+      hauteurCm: geo.hauteurMm / 10,
+    })
+    noteDpi.textContent = mot
+    noteDpi.hidden = !mot
 
     if (refaireRendu === 'differe') {
       // ⚠️ UN RENDU PAR CRAN DE CURSEUR SERAIT INJOUABLE : chaque rendu redessine
