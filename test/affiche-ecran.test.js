@@ -32,12 +32,30 @@ test('⚠️ LE MENU DIT « IMPRIMER », PAS « VOIR »', () => {
   // À côté de « Exporter une image ou une vidéo », « Voir mon affiche » se
   // lisait comme un deuxième aperçu : le seul endroit d'où l'on sort un fichier
   // d'impression n'annonçait pas qu'il imprimait.
-  assert.match(BARS, /pubItem\(I\.export, 'Imprimer mon affiche',/)
+  assert.match(BARS, /pubItem\(I\.imprimante, 'Imprimer mon affiche',/)
   assert.equal(BARS.includes("'Voir mon affiche'"), false)
   // et la sous-ligne garde la promesse de l'ancien libellé : on regarde d'abord
-  const sous = BARS.match(/pubItem\(I\.export, 'Imprimer mon affiche', '([^']+)'/)
+  const sous = BARS.match(/pubItem\(I\.imprimante, 'Imprimer mon affiche', '([^']+)'/)
   assert.ok(sous, 'la vignette d’entrée doit garder une sous-ligne')
   assert.match(sous[1], /vrai format/)
+})
+
+test('⚠️ ET L’ICÔNE EST UNE IMPRIMANTE, PAS UNE FLÈCHE DE TÉLÉVERSEMENT', () => {
+  // Adrien, 2026-08-06 : l'entrée portait `I.export` — la flèche vers le haut,
+  // partagée avec « Exporter une image ». Le geste annoncé était l'inverse de
+  // celui qu'on propose : on ne dépose pas un fichier, on en sort un.
+  const svg = BARS.match(/\n {2}imprimante:\s+'([^']+)'/)
+  assert.ok(svg, 'le jeu d’icônes doit porter une imprimante')
+  // même facture que le reste du jeu : grille de 24, trait 1,8, currentColor,
+  // aucun remplissage — une icône qui sortirait du lot se verrait
+  assert.match(svg[1], /viewBox="0 0 24 24"/)
+  assert.match(svg[1], /stroke="currentColor"/)
+  assert.match(svg[1], /stroke-width="1\.8"/)
+  assert.match(svg[1], /fill="none"/)
+  // et elle n'est pas la flèche de téléversement recopiée
+  const exporte = BARS.match(/\n {2}export:\s+'([^']+)'/)
+  assert.ok(exporte)
+  assert.notEqual(svg[1], exporte[1])
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -87,7 +105,22 @@ test('à 0 €, l’étiquette et la phrase de réassurance restent cohérentes 
   assert.match(AFFICHE, /export function etiquettePrix/)
   assert.match(AFFICHE, /euros > 0 \? `\$\{euros\} €` : 'Gratuit'/)
   assert.match(AFFICHE, /export function phraseRassurance/)
-  assert.match(AFFICHE, /Le PDF se télécharge dès le retour/)
+  assert.match(AFFICHE, /Tu récupères ton PDF juste après/)
+})
+
+test('⚠️ LA PHRASE DE RÉASSURANCE PARLE FRANÇAIS, PAS CAHIER DES CHARGES', () => {
+  // Adrien, 2026-08-06 : « le texte n'est pas très français, optimise ». Les
+  // trois tournures qui l'avaient fait tiquer, épinglées une par une pour
+  // qu'elles ne reviennent pas par une autre porte.
+  const gratuite = AFFICHE.match(/return 'Le fichier est <b>offert<\/b>([^']+)'/)
+  assert.ok(gratuite, 'la phrase à 0 € doit exister')
+  const phrase = gratuite[1]
+  // « mise en service » : du vocabulaire d'ingénieur sur un écran d'achat
+  assert.equal(/mise en service/i.test(phrase), false)
+  // « dès le retour » : le retour de quoi ? Il ne sait pas encore qu'il part
+  assert.equal(/dès le retour/i.test(phrase), false)
+  // les deux-points qui annoncent une liste : c'est un formulaire, pas une phrase
+  assert.equal(phrase.includes(' : '), false)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -137,4 +170,81 @@ test('la pastille reste soumise à `hidden` : un format retiré par la sonde ne 
   assert.match(AFFICHE, /b\.hidden = !ligneFormat\(grilleFormats, id\)\?\.dispo/)
   // et la pastille est redessinée dans le sens que CE format donnerait
   assert.match(AFFICHE, /replierSur\(grilleFormats, id, etat\.orientation\)\?\.orientation/)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4. LA GRILLE DES FORMATS EST D'APLOMB
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('⚠️ QUATRE COLONNES VRAIMENT ÉGALES : `minmax(0, 1fr)`, PAS `1fr`', () => {
+  // La grille était posée de travers en portrait, et la cause n'était ni le
+  // `gap` ni la pastille : `1fr` vaut `minmax(auto, 1fr)`, donc une colonne ne
+  // descend jamais sous la largeur minimale de son contenu. Avec des libellés en
+  // `nowrap`, « 30 × 40 cm » imposait sa loi à « A4 » et les quatre colonnes
+  // sortaient à 41,9 / 70,1 / 64 / 70,1 px — sept pastilles sur un pas
+  // irrégulier. Le `0` rend aux colonnes le droit de rétrécir.
+  // toutes les déclarations de `.af-formats`, media query comprise : une seule
+  // qui repartirait en `1fr` suffirait à retordre la grille sur son point de
+  // rupture, là où personne ne regarde
+  const regles = [...CSS.matchAll(/\.af-formats[^{]*\{[^}]*\}/g)]
+    .map((m) => m[0])
+    .filter((r) => r.includes('grid-template-columns'))
+  assert.equal(regles.length, 2, 'la grille est déclarée en large ET en étroit')
+  for (const r of regles) assert.match(r, /grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/)
+})
+
+test('le libellé de pastille perd son unité — c\u2019est ce qui fait tenir les colonnes', () => {
+  // « cm » quatre fois, c'est du bruit qui coûtait la mise en page : la légende
+  // dit « Format » et la ligne de vérité écrit « 50 × 70 cm · 250 dpi · … ».
+  assert.match(AFFICHE, /export function etiquetteFormat/)
+  assert.match(AFFICHE, /etiquetteFormat\(f\.label\)/)
+  // le libellé complet ne disparaît pas pour autant : il passe dans l'infobulle
+  assert.match(AFFICHE, /b\.title = f\.label/)
+})
+
+test('⚠️ LA RANGÉE RÉSERVE UN CARRÉ FIXE, ET LA CONSTANTE N\u2019EXISTE QU\u2019UNE FOIS', () => {
+  // La pastille change de hauteur avec le sens (30 px debout, 20 à 24 couchée) :
+  // sans bande réservée, les deux rangées de la grille n'avaient pas la même
+  // hauteur et les noms ne s'alignaient pas de l'une à l'autre. Le côté est
+  // décidé en JS (`COTE_VIGNETTE`) ; le CSS ne fait que le lire.
+  const bloc = CSS.slice(CSS.indexOf('\n.af-fmt {'), CSS.indexOf('\n.af-fmt[hidden]'))
+  assert.match(bloc, /grid-template-rows:\s*var\(--af-cote-vignette, 30px\) auto/)
+  assert.match(AFFICHE, /grilleEl\.style\.setProperty\('--af-cote-vignette', `\$\{COTE_VIGNETTE\}px`\)/)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 5. LES TITRES PORTENT LEUR SUJET
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('⚠️ « COMMENT TU LA REÇOIS » A RETROUVÉ SON SUJET', () => {
+  // Adrien, 2026-08-06 : « il faut toujours le sujet ». Le titre commençait par
+  // un complément et laissait le produit dans un pronom — « la » quoi ?
+  assert.equal(AFFICHE.includes('Comment tu la reçois'), false)
+  assert.match(AFFICHE, /af-legende', 'Comment on t’envoie ton affiche \?'/)
+})
+
+test('les autres titres du panneau ne commencent plus par un verbe ou un complément', () => {
+  // La même règle appliquée partout, pas seulement là où Adrien l'a vue : les
+  // étapes du tirage annonçaient des noms d'action (« Rendu du fichier… ») là
+  // où l'écran d'à côté disait déjà « On fabrique ton fichier ».
+  for (const mort of [
+    'Écrire en clair (fond sombre)',
+    'Vérification de ton affiche…',
+    'Rendu du fichier…',
+    'Ouverture du paiement sécurisé…',
+    'Annulation…',
+  ]) {
+    assert.equal(AFFICHE.includes(`'${mort}'`), false, `« ${mort} » n’a pas de sujet`)
+  }
+  for (const vivant of [
+    'On fabrique ton fichier',
+    'On vérifie ton affiche…',
+    'On rend ton fichier…',
+    'On ouvre le paiement sécurisé…',
+    'On annule…',
+    'Ton fichier est prêt',
+    'Texte clair sur fond sombre',
+  ]) {
+    assert.ok(AFFICHE.includes(`'${vivant}'`), `« ${vivant} » doit être écrit`)
+  }
 })

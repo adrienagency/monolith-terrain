@@ -4,6 +4,12 @@
 // stays a single reusable element rather than a queue/stack.
 
 import { el } from './kit.js'
+// ⚠️ LA HAUTEUR DU MESSAGE SE CALCULE, ELLE N'EST PAS ÉCRITE. Voir
+// src/plancher-ui.js : le message se pose au-dessus de ce qui est réellement
+// amarré en bas (barre de menu seule, barre + profil de course…), et la mesure
+// se fait ICI, à l'instant d'afficher — c'est le seul moment où l'on sait ce
+// qu'il y a à surplomber.
+import { mesurerPlancher } from '../plancher-ui.js'
 
 let toastEl = null
 let hideTimer = null
@@ -13,6 +19,7 @@ export function showToast(text, { duration = 2800 } = {}) {
     toastEl = el('div', 'ce-toast')
     document.body.append(toastEl)
   }
+  mesurerPlancher()
   toastEl.textContent = text
   clearTimeout(hideTimer)
   toastEl.classList.remove('show')
@@ -72,6 +79,10 @@ export function showLivraison({ texte, detail = '', nom = 'affiche.pdf', url, on
   })
   fermer.addEventListener('click', () => { carte.remove(); livraisonEl = null })
   carte.append(lien, fermer)
+  // Elle aussi se pose AU-DESSUS de ce qui est affiché en bas : une carte de
+  // livraison à moitié cachée par la barre de menu, c'est un fichier payé qu'on
+  // ne retrouve pas.
+  mesurerPlancher()
   document.body.append(carte)
   livraisonEl = carte
   // ⚠️ UN REFLOW, PAS UN `requestAnimationFrame` — ET C'EST UNE CORRECTION

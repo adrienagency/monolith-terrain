@@ -189,10 +189,17 @@ body.ld-warm:has(#loading:not(.hidden)) #app {
 
 /* transient toast (Share button feedback) — bottom-centre, matches the
    loader card's glass treatment so it reads as the same visual family */
+/* ⚠️ LE `bottom` N'EST PLUS UNE CONSTANTE (Adrien, 2026-08-06 : « les infos type
+   "lien copié" doivent apparaître tout le temps au-dessus de l'UI affichée […]
+   je ne parle pas de z-index, mais de l'axe Y »). `--ce-plancher-ui` est mesuré
+   sur ce qui est RÉELLEMENT amarré en bas — barre de menu seule, barre + profil
+   de course — à l'instant d'afficher le message (src/plancher-ui.js). Le 32 px
+   de repli est l'ancienne valeur : une page qui n'a encore affiché aucun
+   message ne doit pas dépendre de cette mesure. */
 .ce-toast {
   position: fixed;
   left: 50%;
-  bottom: 32px;
+  bottom: var(--ce-plancher-ui, 32px);
   transform: translate(-50%, 8px);
   max-width: min(86vw, 420px);
   padding: 11px 18px;
@@ -264,10 +271,12 @@ body.dark .ce-notice {
    `pointer-events: none`, ce qui rendrait le lien mort), et elle se pose en bas
    plutôt qu'au centre — la confirmation de paiement occupe déjà le milieu, et
    les deux arrivent au même instant. */
+/* Elle suit le même plancher que le toast : une carte à moitié cachée par la
+   barre de menu, c'est un fichier payé qu'on ne retrouve pas. */
 .ce-livraison {
   position: fixed;
   left: 50%;
-  bottom: 34px;
+  bottom: var(--ce-plancher-ui, 34px);
   transform: translate(-50%, 12px);
   max-width: min(88vw, 380px);
   padding: 16px 20px 14px;

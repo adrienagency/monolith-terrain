@@ -102,7 +102,20 @@ export function phraseRassurance(euros = PRIX_AFFICHE_EUR) {
   if (euros > 0) {
     return 'Le PDF se télécharge dès le paiement validé. <b>Pas de compte à créer.</b><br>L’image à l’écran, elle, reste gratuite.'
   }
-  return 'Le fichier est <b>offert</b> pendant la mise en service : aucune carte ne te sera demandée, aucun montant débité.<br>Le PDF se télécharge dès le retour.'
+  // ⚠️ RÉÉCRITE PARCE QU'ELLE PARLAIT COMME UN CAHIER DES CHARGES (Adrien,
+  // 2026-08-06 : « le texte n'est pas très français, optimise »). Ce qu'elle
+  // disait, et pourquoi ça ne marchait pas :
+  //   · « pendant la mise en service » — du vocabulaire d'ingénieur. Personne
+  //     ne met une affiche « en service » ; celui qui lit ça cherche ce qu'il a
+  //     raté.
+  //   · les deux-points suivis d'une énumération — la tournure d'un formulaire,
+  //     pas d'une phrase qu'on dirait à quelqu'un.
+  //   · « dès le retour » — le retour DE QUOI ? Il ne sait pas encore qu'il va
+  //     partir chez Stripe ; la phrase répond à une question qu'il ne s'est pas
+  //     posée.
+  // Ce qui la remplace dit les trois choses DANS L'ORDRE OÙ ELLES ARRIVENT :
+  // c'est gratuit, on ne te demande rien, tu repars avec le fichier.
+  return 'Le fichier est <b>offert</b> en ce moment. On ne te demande pas de carte, et rien ne t’est débité.<br>Tu récupères ton PDF juste après.'
 }
 
 // La plus grande dimension de l'aperçu, en pixels. Assez pour juger un cadrage
@@ -123,6 +136,39 @@ export function poidsLisible(octets) {
 }
 
 const ICONE_CROIX = '<svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M2.5 2.5l10 10M12.5 2.5l-10 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
+
+/**
+ * Le nom d'un format tel qu'il s'écrit SOUS une pastille.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⚠️ L'UNITÉ TOMBE, ET C'EST CE QUI REMET LA GRILLE D'APLOMB
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * La grille des sept formats était posée de travers, et la cause n'était ni le
+ * `gap`, ni la pastille, ni la cellule sélectionnée : c'étaient LES MOTS.
+ * `.af-formats` demande quatre colonnes égales (`repeat(4, 1fr)`), mais `1fr`
+ * vaut `minmax(auto, 1fr)` — une colonne ne descend jamais sous la largeur
+ * minimale de son contenu. Or les libellés sont en `white-space: nowrap`, et
+ * « 30 × 40 cm » mesure 56 px là où « A4 » en mesure 13,5. Mesuré à l'écran
+ * (rail de 344 px, grille de 276 px) : la somme des quatre minimums remplissait
+ * EXACTEMENT la grille, il ne restait plus un pixel à répartir, et les colonnes
+ * sortaient à 41,9 / 70,1 / 64 / 70,1 px. Les sept pastilles ne tombaient donc
+ * pas sur un pas régulier — 44, puis 55, puis 54 px entre elles, avec 10 px de
+ * marge à gauche contre 23 à droite.
+ *
+ * Pourquoi ça se voyait EN PORTRAIT et pas en paysage : en paysage la pastille
+ * fait 30 px de large et remplit sa cellule, l'irrégularité passe pour de la
+ * respiration. En portrait elle n'en fait que 20 à 24 et flotte au milieu — le
+ * pas irrégulier devient la seule chose qu'on lise.
+ *
+ * Le « cm » répété quatre fois était donc du bruit qui coûtait la mise en page.
+ * Il ne manque à personne : la légende dit « Format » et la ligne de vérité,
+ * trois centimètres plus bas, écrit « 50 × 70 cm · 250 dpi · … ». Le libellé
+ * complet reste dans l'infobulle du bouton.
+ */
+export function etiquetteFormat(label) {
+  return String(label || '').split(' · ')[0].replace(/\s*cm$/, '')
+}
 
 // Réexporté pour les appelants historiques : la définition, elle, est dans le
 // compositeur — c'est lui qui l'écrit sur le fichier vendu.
@@ -308,7 +354,9 @@ export function ouvrirAffiche(ctx) {
     const b = el('button', 'af-fmt')
     b.type = 'button'
     const vignette = el('i')
-    const nom = el('b', null, f.label.split(' · ')[0])
+    const nom = el('b', null, etiquetteFormat(f.label))
+    // Le libellé entier — unité comprise — reste à un survol de distance.
+    b.title = f.label
     b.append(vignette, nom)
     vignettesFormat.set(f.id, vignette)
     b.addEventListener('click', () => {
@@ -346,6 +394,14 @@ export function ouvrirAffiche(ctx) {
   // une seconde façon de décider d'un sens : le jour où l'une des deux change,
   // la pastille annoncerait une forme et la feuille en montrerait une autre.
   const COTE_VIGNETTE = 30
+  // ⚠️ ET LA RANGÉE RÉSERVE CE CARRÉ, MÊME QUAND LA PASTILLE EST COUCHÉE. Le
+  // JS ne posait que la taille de la pastille : en paysage sa HAUTEUR retombait
+  // à 20-24 px, et les deux rangées de la grille n'avaient plus la même hauteur
+  // (mesuré : 68,3 px puis 65,9 px) — les noms de formats ne s'alignaient donc
+  // pas d'une rangée à l'autre. La bande qui la contient est maintenant haute
+  // de `COTE_VIGNETTE` quoi qu'il arrive, et la pastille s'y centre. La
+  // constante reste ICI, en un seul exemplaire ; le CSS ne fait que la lire.
+  grilleEl.style.setProperty('--af-cote-vignette', `${COTE_VIGNETTE}px`)
 
   /** Dessine une pastille à la proportion exacte d'un format, dans un sens donné. */
   function dessinerVignette(vignette, id, sens) {
@@ -399,7 +455,9 @@ export function ouvrirAffiche(ctx) {
   const basculeEncre = el('label', 'af-bascule')
   const cocheEncre = el('input')
   cocheEncre.type = 'checkbox'
-  basculeEncre.append(el('span', null, 'Écrire en clair (fond sombre)'), cocheEncre)
+  // « Écrire en clair (fond sombre) » commençait par un verbe et ne disait pas
+  // ce qui s'écrivait ; la case décrit maintenant l'état qu'elle donne.
+  basculeEncre.append(el('span', null, 'Texte clair sur fond sombre'), cocheEncre)
   // ⚠️ LES NOMS DE VILLES SONT UN RÉGLAGE DE LA CARTE, PAS DU CARTOUCHE — et
   // c'est pour ça qu'ils ne se traitent pas comme les deux cases au-dessus.
   // Adrien : « les noms des villes sont coupés, il doit pouvoir les
@@ -629,7 +687,15 @@ export function ouvrirAffiche(ctx) {
   // La légende qui dit qu'il y a un CHOIX. Sans elle, le bloc du bas se lit
   // comme une note posée sous un bouton ; avec elle, ce sont deux façons
   // d'avoir la même affiche, dont une seule est ouverte.
-  pied.append(verite, el('p', 'af-legende', 'Comment tu la reçois'), garde, cta, rassure, issue)
+  //
+  // ⚠️ ET ELLE PORTE SON SUJET. L'ancienne version commençait par un complément
+  // et laissait le nom du produit dans un pronom : « la » quoi ?
+  // Adrien, 2026-08-06 : « il faut toujours le sujet ». C'est la même règle qui
+  // a fait renommer les étapes du tirage plus bas (le nom d'action « Rendu du
+  // fichier » est devenu « On rend ton fichier ») et la case d'encre du cartouche.
+  // Le nom retenu est « affiche », pas « carte » : c'est celui que porte tout
+  // le reste de cet écran, du titre au bouton.
+  pied.append(verite, el('p', 'af-legende', 'Comment on t’envoie ton affiche ?'), garde, cta, rassure, issue)
   rail.append(corps, pied)
 
   // ── la sortie ─────────────────────────────────────────────────────────────
@@ -938,7 +1004,7 @@ export function ouvrirAffiche(ctx) {
   const tirImg = el('img', 'af-tir-img')
   tirImg.alt = ''
   const tirTitre = el('h2', 'af-tir-titre', 'On fabrique ton fichier')
-  const tirEtape = el('p', 'af-tir-etape', 'Vérification de ton affiche…')
+  const tirEtape = el('p', 'af-tir-etape', 'On vérifie ton affiche…')
   const tirJauge = el('div', 'af-tir-jauge')
   const tirBarre = el('i')
   tirJauge.append(tirBarre)
@@ -958,7 +1024,7 @@ export function ouvrirAffiche(ctx) {
   let enTirage = false
   tirAnnuler.addEventListener('click', () => {
     annulation = true
-    tirEtape.textContent = 'Annulation…'
+    tirEtape.textContent = 'On annule…'
     tirAnnuler.disabled = true
   })
 
@@ -968,7 +1034,7 @@ export function ouvrirAffiche(ctx) {
     tirAnnuler.disabled = false
     tirBarre.style.width = '0%'
     tirDetail.textContent = ''
-    tirEtape.textContent = 'Vérification de ton affiche…'
+    tirEtape.textContent = 'On vérifie ton affiche…'
     tirImg.classList.remove('vu')
     voile.classList.add('ouvert')
   }
@@ -1074,7 +1140,7 @@ export function ouvrirAffiche(ctx) {
         // document n'est pas composité : onglet en arrière-plan, fenêtre
         // réduite, ou simplement masquée. L'image était complète (1 100 × 786,
         // `complete === true`) et la promesse ne rendait jamais la main — tout
-        // l'achat restait bloqué sur « Vérification de ton affiche… ». C'est
+        // l'achat restait bloqué sur « On vérifie ton affiche… ». C'est
         // exactement ce que quelqu'un fait pendant qu'un tirage tourne : il va
         // voir ailleurs. L'affichage est cosmétique, il ne commande rien.
         tirImg.src = url
@@ -1086,7 +1152,7 @@ export function ouvrirAffiche(ctx) {
       // ── ② LE FICHIER, TUILE PAR TUILE ─────────────────────────────────────
       if (ctx.rendreTirage) {
         if (annulation) throw new Error('Rendu annulé')
-        tirEtape.textContent = 'Rendu du fichier…'
+        tirEtape.textContent = 'On rend ton fichier…'
         const debut = (globalThis.performance || Date).now()
         const r = await ctx.rendreTirage({
           totalPx: geo.totalPx,
@@ -1128,8 +1194,8 @@ export function ouvrirAffiche(ctx) {
 
       // ── ③ SEULEMENT MAINTENANT, LA CAISSE ─────────────────────────────────
       if (annulation) throw new Error('Rendu annulé')
-      tirTitre.textContent = 'Fichier prêt'
-      tirEtape.textContent = 'Ouverture du paiement sécurisé…'
+      tirTitre.textContent = 'Ton fichier est prêt'
+      tirEtape.textContent = 'On ouvre le paiement sécurisé…'
       tirAnnuler.hidden = true
       // ⚠️ LE PDF PART AVEC LA COMMANDE. C'est `onCommander` qui connaît
       // l'identifiant de panier — celui qui reliera le retour de Stripe à ce
@@ -1193,7 +1259,7 @@ export function ouvrirAffiche(ctx) {
   // pas la croix.
   function surTouche(e) {
     if (e.key !== 'Escape') return
-    if (enTirage) { annulation = true; tirEtape.textContent = 'Annulation…'; tirAnnuler.disabled = true; return }
+    if (enTirage) { annulation = true; tirEtape.textContent = 'On annule…'; tirAnnuler.disabled = true; return }
     // ⚠️ ÉCHAP DEVANT LA GARDE DE NETTETÉ REFERME LA QUESTION, il ne quitte pas
     // l'écran — et il ne CONFIRME rien. On ne veut pas d'un avertissement qui
     // enferme, mais on ne veut pas non plus qu'un réflexe le fasse passer.

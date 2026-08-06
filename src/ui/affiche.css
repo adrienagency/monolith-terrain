@@ -226,11 +226,28 @@ body.dark .af-sheet {
 /* Les formats : chaque pastille est dessinée À SA VRAIE PROPORTION. On choisit
    une forme, pas une ligne dans une liste — et on la reconnaît avant de lire
    son nom. */
+/* ⚠️ `minmax(0, 1fr)` ET PAS `1fr`, ET C'EST TOUTE LA CORRECTION DE MISE EN PAGE.
+   `1fr` vaut `minmax(auto, 1fr)` : une colonne ne descend jamais sous la largeur
+   minimale de son contenu. Les libellés étant en `white-space: nowrap`,
+   « 30 × 40 cm » (56 px) imposait sa loi à côté de « A4 » (13,5 px) — mesuré à
+   l'écran, la somme des quatre minimums remplissait exactement la grille, il ne
+   restait rien à répartir, et les colonnes sortaient à 41,9 / 70,1 / 64 /
+   70,1 px. Les sept pastilles ne tombaient plus sur un pas régulier. Le `0`
+   rend aux colonnes le droit de rétrécir, donc à `1fr` celui de les égaliser.
+   (Le libellé, lui, a perdu son « cm » côté JS — voir `etiquetteFormat`. Les
+   deux vont ensemble : des colonnes égales avec des textes trop longs ne
+   feraient que déplacer le problème vers un débordement.) */
 .af-formats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
+/* ⚠️ DEUX RANGÉES DÉCLARÉES, DONT LA PREMIÈRE EST UN CARRÉ FIXE. La pastille est
+   mesurée en JS et change de hauteur avec le sens (30 px debout, 20 à 24 px
+   couchée) : sans bande réservée, les deux rangées de la grille n'avaient pas la
+   même hauteur et les noms de formats ne s'alignaient pas de l'une à l'autre.
+   `--af-cote-vignette` est posé par affiche.js, qui est le seul à connaître ce
+   côté — le repli n'est là que pour une pastille rendue avant lui. */
 .af-fmt {
   appearance: none;
   border: 1px solid var(--ce-hairline);
@@ -238,6 +255,8 @@ body.dark .af-sheet {
   border-radius: 11px;
   padding: 12px 6px 9px;
   display: grid;
+  grid-template-rows: var(--af-cote-vignette, 30px) auto;
+  align-items: center;
   justify-items: center;
   gap: 8px;
   cursor: pointer;
@@ -278,12 +297,18 @@ body.dark .af-sheet {
 @media (prefers-reduced-motion: reduce) {
   .af-fmt i { transition: opacity 0.16s, background 0.16s; }
 }
+/* `max-width` + `overflow` : la colonne peut désormais rétrécir sous le texte
+   (voir `minmax(0, 1fr)` plus haut), donc un libellé trop long doit se couper
+   proprement au lieu de déborder sur son voisin. */
 .af-fmt b {
   font-size: 10.5px;
   font-weight: 500;
   letter-spacing: 0.01em;
   opacity: 0.72;
   white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .af-fmt[aria-pressed='true'] { border-color: var(--ce-accent); background: color-mix(in srgb, var(--ce-accent) 8%, transparent); }
 .af-fmt[aria-pressed='true'] i { opacity: 1; color: var(--ce-accent); background: color-mix(in srgb, var(--ce-accent) 16%, transparent); }
@@ -538,7 +563,9 @@ body.dark .af-sheet {
     padding: 20px 18px 0;
   }
   .af-stage { padding: 58px 20px 12px; }
-  .af-formats { grid-template-columns: repeat(4, 1fr); }
+  /* même remarque qu'en haut : `minmax(0, …)`, sinon les libellés reprennent la
+     main sur la largeur des colonnes */
+  .af-formats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
 @media (prefers-reduced-motion: reduce) {

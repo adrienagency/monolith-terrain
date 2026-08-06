@@ -16,6 +16,16 @@ const I = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 2.6 4 5.7 4 9s-1.2 6.4-4 9c-2.8-2.6-4-5.7-4-9s1.2-6.4 4-9z"/></svg>',
   export:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 15V4m0 0l-4 4m4-4l4 4"/><path d="M4 15v3a2 2 0 002 2h12a2 2 0 002-2v-3"/></svg>',
+  // ⚠️ UNE IMPRIMANTE, PAS UNE FLÈCHE VERS LE HAUT (Adrien, 2026-08-06).
+  // « Imprimer mon affiche » portait `export` — le téléversement — c'est-à-dire
+  // exactement le geste inverse de celui qu'on propose : on ne dépose rien, on
+  // sort un objet imprimable. Même facture que le reste du jeu : grille de 24,
+  // trait de 1,8, `currentColor`, aucun remplissage.
+  //   · la feuille qui entre par le haut,
+  //   · le corps de la machine,
+  //   · la feuille qui sort par le bas.
+  imprimante:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 9V3.5h10V9"/><path d="M7 17.5H5a2 2 0 01-2-2V11a2 2 0 012-2h14a2 2 0 012 2v4.5a2 2 0 01-2 2h-2"/><rect x="7" y="14" width="10" height="6.5" rx="1"/></svg>',
   moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 13.5A8 8 0 0110.5 4 8 8 0 1020 13.5z"/></svg>',
   sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3L7 7M17 17l1.7 1.7M18.7 5.3L17 7M7 17l-1.7 1.7"/></svg>',
   eyeOff:
@@ -174,7 +184,10 @@ export function buildTopBar(ctx) {
   // deuxième aperçu, et le seul endroit d'où l'on sort un fichier d'impression
   // n'annonçait pas qu'il imprimait. La sous-ligne, elle, garde la promesse de
   // l'ancien libellé : on regarde d'abord, on décide ensuite.
-  pubItem(I.export, 'Imprimer mon affiche', 'En vrai format d’abord, le fichier d’impression ensuite.', async () => {
+  // ⚠️ ET L'ICÔNE SUIT LE VERBE : une imprimante, pas la flèche de téléversement
+  // qu'elle partageait avec « Exporter une image » — la même image pour deux
+  // sorties différentes, dont une qui montait un fichier au lieu d'en sortir un.
+  pubItem(I.imprimante, 'Imprimer mon affiche', 'En vrai format d’abord, le fichier d’impression ensuite.', async () => {
     try { await ctx.openAffiche() } catch (err) { console.error('Affiche failed to open:', err) }
   })
   // openExport est async (pile d'export lazy-loadée au premier clic)
