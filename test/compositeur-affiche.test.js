@@ -34,6 +34,7 @@ import {
   CQW_CARTOUCHE, CQW_LOGO_MARGE, TYPO_CARTOUCHE, ENCRES, VOILE_HAUTEUR,
   POLICE_TITRE, POLICE_MONO, COINS_LOGO, VALIDATION_MAX_PX,
   ATTRIBUTION_FRACTION_HAUTEUR, ATTRIBUTION_PX_MIN, ATTRIBUTION_PAD_EM,
+  CQW_SIGNATURE, TYPO_SIGNATURE, SIGNATURE_TEXTE, SIGNATURE_OMBRE_EM, planSignature,
   coordonneesCartouche, texteCartouche, zoneFinie, densiteEffective,
   echelleGrainSurface, mentionsAffiche, planCartouche, planLogo, planAttribution,
   planComposition, facteurVignettage, melangeOverlay, bruitCellule,
@@ -146,6 +147,34 @@ test('fidélité : les quatre coins du logo et leur marge sont ceux du CSS', () 
   }
   // `height: auto` : la hauteur du logo se déduit du ratio de l'image
   assert.equal(prop(blocCss(CSS_AFFICHE, '.af-logo'), 'height'), 'auto')
+})
+
+test('fidélité : la signature ShibuMap est posée comme le CSS la pose', () => {
+  const b = blocCss(CSS_AFFICHE, '.af-signature')
+  assert.deepEqual(cqwDe(prop(b, 'font-size')), [CQW_SIGNATURE.taille])
+  assert.deepEqual(cqwDe(prop(b, 'left')), [CQW_SIGNATURE.gauche])
+  assert.deepEqual(cqwDe(prop(b, 'bottom')), [CQW_SIGNATURE.bas])
+  assert.equal(parseFloat(prop(b, 'font-weight')), TYPO_SIGNATURE.poids)
+  assert.equal(parseFloat(prop(b, 'letter-spacing')), TYPO_SIGNATURE.espacement)
+  assert.equal(parseFloat(prop(b, 'opacity')), TYPO_SIGNATURE.opacite)
+  // `line-height: 1` : la boîte vaut la taille de police, ce dont dépend le
+  // calcul de la ligne de base dans `planSignature`
+  assert.equal(parseFloat(prop(b, 'line-height')), 1)
+  assert.equal(prop(b, 'color'), ENCRES.clair.texte)
+  assert.equal(prop(blocCss(CSS_AFFICHE, '.af-signature.sombre'), 'color'), ENCRES.sombre.texte)
+  // sans cartouche : blanc sur ombre, et l'ombre a le flou du module
+  const nu = blocCss(CSS_AFFICHE, '.af-signature.nu')
+  assert.equal(prop(nu, 'color'), '#ffffff')
+  assert.deepEqual(cqwDe(prop(nu, 'text-shadow')), [CQW_SIGNATURE.taille * SIGNATURE_OMBRE_EM])
+})
+
+test('fidélité : l’écran d’édition affiche la MÊME signature que le fichier', () => {
+  // ⚠️ SI CE TEST TOMBE, la marque n'apparaît qu'à l'écran de validation, ou
+  // n'apparaît que sur le fichier : dans les deux cas l'acheteur découvre après
+  // coup quelque chose qu'il n'avait pas composé.
+  assert.match(JS_AFFICHE, /import \{[^}]*SIGNATURE_TEXTE[^}]*\} from '\.\.\/compositeur-affiche\.js'/)
+  assert.match(JS_AFFICHE, /el\('div', 'af-signature', SIGNATURE_TEXTE\)/)
+  assert.equal(JS_AFFICHE.includes(`'${SIGNATURE_TEXTE}'`), false, 'le nom ne se recopie pas dans l’écran')
 })
 
 test('fidélité : les deux familles de police sont celles des jetons', () => {
@@ -415,6 +444,59 @@ test('les quatre coins du logo tombent bien dans les quatre coins', () => {
   // `height: auto` : la hauteur suit le ratio de l'image, jamais une fraction
   assert.equal(boites.hg.hauteur, boites.hg.largeur / 2)
   assert.equal(planLogo({ fini, taille: 10, coin: 'zz', ratio: 1 }).coin, 'hg')
+})
+
+test('⚠️ LA SIGNATURE EST HORS DE PORTÉE DES QUATRE COINS — c’est ce qui remplace un arbitrage', () => {
+  // C'est LA propriété qui justifie d'avoir choisi une place fixe plutôt qu'une
+  // place qui se déplace : la bande de pied est inatteignable par la boîte d'un
+  // logo d'acheteur, quels que soient le coin, la taille du curseur et la forme
+  // de l'image. Si elle tombe, la marque ShibuMap peut se retrouver SOUS le
+  // logo de l'organisateur sur un fichier vendu.
+  const max = Number(JS_AFFICHE.match(/curseur\('Taille', 4, (\d+(?:\.\d+)?)/)[1])
+  assert.ok(max > 0, 'la taille maximale du curseur de logo doit se lire dans l’écran')
+  for (const [W, H] of [[2480, 3508], [7205, 4961], [1100, 781], [4000, 6000], [1748, 2480]]) {
+    for (const fondPerduPx of [0, 35]) {
+      const fini = zoneFinie({ largeur: W, hauteur: H, fondPerduPx })
+      const sig = planSignature({ fini })
+      // ① elle reste DANS le format fini : rien ne part au massicot
+      assert.ok(sig.base <= fini.y + fini.hauteur, 'la signature déborde sous le trait de coupe')
+      assert.ok(sig.x >= fini.x, 'la signature déborde avant le trait de coupe')
+      const hautSignature = sig.base - sig.taille
+      // ② LES DEUX COINS DU BAS ne l'atteignent JAMAIS, quelle que soit la
+      //    taille au curseur et quelle que soit la forme de l'image : leur boîte
+      //    s'arrête au bord inférieur moins `CQW_LOGO_MARGE`, point.
+      for (const coin of ['bg', 'bd']) {
+        for (const taille of [4, 12, max]) {
+          for (const ratio of [0.2, 1, 5]) {
+            const b = planLogo({ fini, taille, coin, ratio })
+            assert.ok(
+              b.y + b.hauteur <= hautSignature,
+              `un logo ${coin} de ${taille} cqw (ratio ${ratio}) touche la signature sur ${W}×${H}`
+            )
+          }
+        }
+      }
+      // ③ LES DEUX COINS DU HAUT ne peuvent descendre jusqu'à elle qu'en ayant
+      //    d'abord avalé l'affiche entière — un logo aussi haut se voit au
+      //    premier coup d'œil, et aucune place ne survivrait à celui-là.
+      const hauteurPourToucher = hautSignature - (fini.y + (CQW_LOGO_MARGE / 100) * fini.largeur)
+      assert.ok(
+        hauteurPourToucher > 0.85 * fini.hauteur,
+        `un logo du haut atteint la signature en ne couvrant que ${(hauteurPourToucher / fini.hauteur * 100) | 0} % de la feuille`
+      )
+    }
+  }
+})
+
+test('l’encre de la signature suit le cartouche, comme l’attribution', () => {
+  const fini = zoneFinie({ largeur: 4000, hauteur: 6000 })
+  assert.equal(planSignature({ fini, cartouche: true }).couleur, ENCRES.clair.texte)
+  assert.equal(planSignature({ fini, cartouche: true, sombre: true }).couleur, ENCRES.sombre.texte)
+  const nue = planSignature({ fini })
+  assert.equal(nue.couleur, '#ffffff')
+  assert.ok(nue.ombre > 0, 'sans voile sous elle, la signature garde son ombre portée')
+  assert.equal(planSignature({ fini, cartouche: true }).ombre, 0)
+  assert.equal(nue.texte, SIGNATURE_TEXTE)
 })
 
 test('un cartouche éteint ne dessine rien, ni voile ni texte', () => {
@@ -699,6 +781,21 @@ test('⚠️ L’ATTRIBUTION EST INCRUSTÉE — MOT POUR MOT — SUR L’AFFICHE
   assert.ok(textes.includes(PLAN_DESSIN.attribution.texte), `attribution absente ; textes posés : ${JSON.stringify(textes)}`)
   assert.ok(PLAN_DESSIN.attribution.texte.includes(SOURCES.emodnet.credit))
   assert.ok(PLAN_DESSIN.attribution.texte.includes(NO_NAVIGATION))
+})
+
+test('⚠️ LA SIGNATURE EST DANS LE FICHIER, PAS SEULEMENT À L’ÉCRAN', () => {
+  // Sans elle sur la toile, l'affiche vendue sort anonyme alors que l'aperçu et
+  // l'écran de validation la montraient. Vérifié par mutation : retirer l'appel
+  // à `dessinerSignature` de `composerSurToile` tue ce test.
+  const ctx = contexteEnregistreur(1100, 781)
+  composerSurToile(ctx, PLAN_DESSIN)
+  const pose = ctx.journal.find((e) => e.type === 'texte' && e.texte === SIGNATURE_TEXTE)
+  assert.ok(pose, `signature absente ; textes posés : ${JSON.stringify(ctx.journal.filter((e) => e.type === 'texte').map((e) => e.texte))}`)
+  // et elle appartient à la BANDE DU BAS, à elle seule : une signature dessinée
+  // sur chaque bande d'un tirage pavé s'imprimerait douze fois
+  const haut = contexteEnregistreur(1100, 200)
+  composerSurToile(haut, PLAN_DESSIN, { toile: { x: 0, y: 0, largeur: 1100, hauteur: 200 } })
+  assert.equal(haut.journal.some((e) => e.type === 'texte' && e.texte === SIGNATURE_TEXTE), false)
 })
 
 test('le cartouche composé porte les trois lignes, et son voile en dégradé', () => {

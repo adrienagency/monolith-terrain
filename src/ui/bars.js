@@ -166,9 +166,15 @@ export function buildTopBar(ctx) {
   // L'AFFICHE EN PREMIER, et ce n'est pas un caprice de rangement : c'est la
   // seule sortie qui vaille quelque chose, les deux autres sont des copies de
   // l'écran. Un menu se lit du haut, et ce qu'on met en tête est ce qu'on
-  // propose. Le libellé promet ce qui se passe VRAIMENT au clic — on voit
-  // l'affiche, on ne paie pas encore.
-  pubItem(I.export, 'Voir mon affiche', 'En vrai format, avant de commander le fichier d’impression.', async () => {
+  // propose.
+  //
+  // ⚠️ « IMPRIMER », PAS « VOIR » (Adrien, 2026-08-06). « Voir mon affiche »
+  // était honnête sur le CLIC — on voit, on ne paie pas — mais muet sur la
+  // DESTINATION : à côté de « Exporter une image », il se lisait comme un
+  // deuxième aperçu, et le seul endroit d'où l'on sort un fichier d'impression
+  // n'annonçait pas qu'il imprimait. La sous-ligne, elle, garde la promesse de
+  // l'ancien libellé : on regarde d'abord, on décide ensuite.
+  pubItem(I.export, 'Imprimer mon affiche', 'En vrai format d’abord, le fichier d’impression ensuite.', async () => {
     try { await ctx.openAffiche() } catch (err) { console.error('Affiche failed to open:', err) }
   })
   // openExport est async (pile d'export lazy-loadée au premier clic)

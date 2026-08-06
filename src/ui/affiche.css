@@ -256,14 +256,27 @@ body.dark .af-sheet {
 .af-fmt:hover { background: var(--ce-hover); }
 .af-fmt:active { transform: translateY(1px); }
 .af-fmt:focus-visible { outline: 2px solid var(--ce-accent); outline-offset: 2px; }
+/* ⚠️ LA PASTILLE EST MESURÉE EN JS, PAS EN CSS, ET SES DEUX CÔTÉS SONT POSÉS.
+   Elle doit basculer avec le sens choisi (elle montrait des affiches debout
+   alors que le segment disait « Paysage »), et son plus grand côté doit rester
+   le même dans les deux sens — sinon la grille des formats change de hauteur
+   à chaque bascule. Une seule dimension en CSS ne peut pas tenir les deux.
+   `box-sizing: border-box` : sans lui, le trait de 1,5 px s'ajoute aux deux
+   axes et la pastille ment de trois pour cent sur la proportion du format. */
 .af-fmt i {
   display: block;
-  width: 100%;
-  max-width: 26px;
+  box-sizing: border-box;
   border: 1.5px solid currentColor;
   border-radius: 2px;
   opacity: 0.42;
-  transition: opacity 0.16s, background 0.16s;
+  transition:
+    opacity 0.16s,
+    background 0.16s,
+    width 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    height 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .af-fmt i { transition: opacity 0.16s, background 0.16s; }
 }
 .af-fmt b {
   font-size: 10.5px;
@@ -374,6 +387,58 @@ body.dark .af-sheet {
   text-align: center;
 }
 .af-rassure b { font-weight: 600; color: var(--ce-ink); }
+
+/* ── L'AUTRE ISSUE : FAIRE IMPRIMER, QUAND CE SERA OUVERT ────────────────────
+   Adrien : « on télécharge l'affiche prête pour impression, ou on effectue
+   l'impression directement via un presta ShibuMap. Mais ça il faut griser
+   l'option car elle n'est pas encore prête. »
+
+   ⚠️ CE N'EST PAS UN BOUTON DÉSACTIVÉ, ET LA DIFFÉRENCE EST TOUT LE SUJET. Un
+   bouton grisé de la même forme que celui d'à côté se lit comme un chargement
+   qui n'a pas abouti : on le survole, on reclique, on recharge la page. Ce
+   bloc-ci n'a jamais eu l'air cliquable — pas de fond plein, pas de survol, pas
+   de curseur main — et il PORTE SA RAISON en toutes lettres. On lit une note
+   sur ce qui viendra, pas un échec.
+
+   La hiérarchie tient à trois choses : le bouton d'achat est plein et accentué,
+   celui-ci n'a qu'un filet ; il vient APRÈS ; et son encre est celle des
+   commentaires. */
+.af-issue {
+  margin: 16px 0 0;
+  padding: 11px 13px 12px;
+  border: 1px solid var(--ce-hairline);
+  border-radius: 12px;
+  cursor: default;
+}
+.af-issue-ligne {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.af-issue-nom {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ce-muted);
+}
+.af-issue-tag {
+  font-family: var(--ce-mono);
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ce-muted);
+  border: 1px solid var(--ce-hairline);
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+.af-issue-phrase {
+  margin: 7px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ce-muted);
+}
 
 /* ── La garde de netteté : la question posée avant d'encaisser ───────────────
    Elle s'ouvre AU-DESSUS du bouton d'achat, qui ne bouge alors pas d'un pixel :
@@ -571,6 +636,36 @@ body.dark .af-sheet {
 .af-logo[data-coin='hd'] { top: 6cqw; right: 6cqw; }
 .af-logo[data-coin='bg'] { bottom: 6cqw; left: 6cqw; }
 .af-logo[data-coin='bd'] { bottom: 6cqw; right: 6cqw; }
+
+/* ── LA SIGNATURE SHIBUMAP ───────────────────────────────────────────────────
+   Elle est IMPRIMÉE : le compositeur la pose sur le fichier vendu, et ces
+   quelques lignes ne font que la montrer pendant qu'on compose. Le raisonnement
+   sur sa place — la bande de pied, hors de portée des quatre coins que le logo
+   de l'acheteur peut occuper — est dans src/compositeur-affiche.js.
+
+   ⚠️ `bottom: 2cqw` ET `left: 6cqw`, PAS L'INVERSE. La marge basse doit rester
+   SOUS les 6 cqw où s'arrête la boîte d'un logo de coin, sinon la signature et
+   le logo « bas gauche » se marchent dessus — ce que toute cette place existe
+   pour éviter. La marge gauche, elle, vaut celle du cartouche : la signature
+   s'aligne sur le nom du lieu. */
+.af-signature {
+  position: absolute;
+  left: 6cqw;
+  bottom: 2cqw;
+  font-family: var(--ce-font);
+  font-size: 1cqw;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  opacity: 0.55;
+  color: #1c1917;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.af-signature.sombre { color: #fafaf9; }
+/* Sans cartouche, il n'y a plus de voile sous elle : blanc sur ombre, comme
+   l'attribution, qui tient sur un fond clair comme sur un fond sombre. */
+.af-signature.nu { color: #ffffff; text-shadow: 0 0 0.6cqw rgba(0, 0, 0, 0.55); }
 
 /* ── Le viseur de netteté ────────────────────────────────────────────────── */
 .af-aide {

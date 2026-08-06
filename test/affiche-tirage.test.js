@@ -191,7 +191,16 @@ test('la densité vendue vient de la sonde, pas de DPI_IMPRESSION en dur', () =>
   // une densité et en rendre une autre.
   assert.match(AFFICHE, /const geoCourante = \(\) => geometriePage\(\{/)
   assert.match(AFFICHE, /dpi: dpiRetenu\(grilleFormats, etat\.format, etat\.orientation\) \?\? DPI_IMPRESSION/)
-  assert.equal(AFFICHE.split('geometriePage({').length - 1, 1, 'une seule fabrique de géométrie')
+  // ⚠️ « UNE SEULE » VAUT POUR LA GÉOMÉTRIE VENDUE, pas pour le nombre d'appels.
+  // La pastille de format prend désormais sa forme de la même fonction — c'est
+  // ce qui l'empêche d'annoncer un sens que la feuille ne montre pas — mais son
+  // appel ne porte NI densité NI fond perdu : il ne décide de rien de ce qui
+  // s'imprime. C'est la DENSITÉ qu'on veut voir naître à un seul endroit.
+  const appels = [...AFFICHE.matchAll(/geometriePage\(\{([^}]*)\}/g)].map((m) => m[1])
+  assert.equal(appels.filter((a) => /\bdpi:/.test(a)).length, 1, 'une seule fabrique de géométrie vendue')
+  for (const a of appels.filter((x) => !/\bdpi:/.test(x))) {
+    assert.match(a, /fondPerduMm: 0/, 'un appel sans densité doit être un appel sans papier')
+  }
 })
 
 test('⚠️ DÉGRADER D’ABORD, CACHER ENSUITE — et le cachage est le dernier recours', () => {

@@ -14,7 +14,8 @@
 //
 //   ① LE CARTOUCHE — nom du lieu, coordonnées, altitude, et le voile dégradé
 //      qui les rend lisibles sur n'importe quel fond.
-//   ② LE LOGO de l'acheteur, dans le coin qu'il a choisi.
+//   ② LE LOGO de l'acheteur, dans le coin qu'il a choisi — et, dans la bande de
+//      pied qu'aucun de ces coins n'atteint, LA SIGNATURE SHIBUMAP.
 //   ③ LE VIGNETTAGE ET LE GRAIN, réappliqués UNE FOIS sur l'image entière.
 //      La tâche 6 les a laissés actifs faute de pouvoir les réappliquer, et le
 //      pavage crie en console : un tirage lancé aujourd'hui sortirait en
@@ -113,6 +114,60 @@ export const CQW_CARTOUCHE = {
 
 /** `.af-logo[data-coin] { top/left/right/bottom: 6cqw }` */
 export const CQW_LOGO_MARGE = 6
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LA SIGNATURE SHIBUMAP — UNE PLACE QUE LE LOGO DE L'ACHETEUR NE PEUT PAS PRENDRE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Adrien : « il manque un logo shibumap. Il doit s'afficher à un endroit où
+// l'organisateur ne met pas son logo. Ou alors le logo change de position en
+// fonction de là où l'organisateur met son logo. »
+//
+// ⚠️ ON A CHOISI LA PLACE RÉSERVÉE, PAS LA PLACE QUI SE DÉPLACE, et la raison
+// n'est pas la simplicité — c'est que la place qui se déplace ne peut pas être
+// juste ici.
+//   · Le logo de l'acheteur prend UN DES QUATRE COINS. Un mark qui « fuit » son
+//     coin n'a que trois refuges, et deux d'entre eux sont déjà occupés : le bas
+//     de la feuille porte le cartouche (nom du lieu à gauche, altitude à
+//     droite). Il ne resterait donc, très souvent, qu'un seul endroit possible —
+//     c'est-à-dire une place fixe, obtenue par un calcul.
+//   · Et un mark qui saute quand l'acheteur déplace SON logo change une
+//     composition qu'il n'a pas demandé de changer : il pose son logo en haut à
+//     droite, et un objet apparaît à l'autre bout de l'affiche.
+//
+// La place retenue est LA BANDE DE PIED, sous le cartouche. Elle est hors de
+// portée des quatre coins PAR CONSTRUCTION, pas par convention : la boîte d'un
+// logo d'acheteur s'arrête toujours à `CQW_LOGO_MARGE` (6 % de la largeur) du
+// bord, et la signature vit en dessous de 4 %. Aucun arbitrage à écrire, rien
+// qui bouge, et les quatre coins restent entièrement à l'acheteur.
+//
+// ⚠️ ET ELLE SE REPÈRE SUR LE RECTANGLE FINI. C'est un OBJET posé sur
+// l'affiche, pas un traitement de l'image (voir l'encadré du voile) : dans le
+// fond perdu, elle partirait au massicot.
+
+/** Ce qui s'imprime. Le nom seul : une affiche n'est pas un support publicitaire. */
+export const SIGNATURE_TEXTE = 'ShibuMap'
+
+/**
+ * `.af-signature { font-size / left / bottom }`, en `cqw` comme tout le reste.
+ *
+ * `taille` reste SOUS celle des coordonnées (2,1 cqw) : la signature doit se
+ * lire quand on s'approche de l'affiche, et disparaître quand on la regarde.
+ */
+export const CQW_SIGNATURE = { taille: 1, gauche: 6, bas: 2 }
+
+/**
+ * La typographie de la signature.
+ *
+ * ⚠️ RÉGLÉE À L'ÉCRAN, PAS AU JUGÉ. Premier essai : 1,4 cqw en 650, l'épaisseur
+ * du bandeau de l'application. Sur la feuille, posée sous les coordonnées et à
+ * la même marge gauche qu'elles, elle se lisait comme une TROISIÈME LIGNE DU
+ * CARTOUCHE — une ligne de plus dans la légende, et non la marque de l'éditeur.
+ * Un tiers plus petite, une graisse en dessous et à moitié transparente, elle
+ * redevient ce qu'elle doit être : quelque chose qu'on trouve en s'approchant
+ * de l'affiche, et qu'on ne voit pas en la regardant.
+ */
+export const TYPO_SIGNATURE = { poids: 600, espacement: 0.02, opacite: 0.55 }
 
 /**
  * Les réglages typographiques du cartouche, eux aussi lus dans le CSS.
@@ -489,6 +544,48 @@ export function planLogo({ fini, taille, coin = 'hg', ratio = 1 } = {}) {
   return { x, y, largeur, hauteur, coin: c }
 }
 
+/**
+ * Le flou de l'ombre portée, en em, quand la signature tombe sur la carte nue.
+ * ⚠️ LE MÊME QUE L'ATTRIBUTION : les deux se posent dans la même bande, et deux
+ * ombres différentes à trois centimètres l'une de l'autre se voient.
+ */
+export const SIGNATURE_OMBRE_EM = 0.6
+
+/**
+ * La signature ShibuMap, en pixels.
+ *
+ * ⚠️ SON ENCRE SUIT LE CARTOUCHE, exactement comme l'attribution — et pour la
+ * même raison observée : blanc à 62 % sur le voile blanc à 82 % du cartouche,
+ * la ligne serait invisible et on croirait l'avoir imprimée. Là où le voile
+ * règne, on prend l'encre du cartouche ; sans cartouche, blanc sur ombre, qui
+ * tient sur un fond clair comme sur un fond sombre.
+ *
+ * @param {{fini:object, cartouche?:boolean, sombre?:boolean, texte?:string}} o
+ * @returns {object|null}
+ */
+export function planSignature({ fini, cartouche = false, sombre = false, texte = SIGNATURE_TEXTE } = {}) {
+  if (!fini || !texte) return null
+  const L = fini.largeur
+  const taille = cqw(CQW_SIGNATURE.taille, L)
+  // `bottom: 2cqw` pose le BAS DE LA BOÎTE ; avec `line-height: 1` la boîte
+  // vaut la taille de police, et la ligne de base tombe une demi-descente plus
+  // haut — la même approximation de 0,21 em que le cartouche.
+  const base = fini.y + fini.hauteur - cqw(CQW_SIGNATURE.bas, L) - 0.21 * taille
+  return {
+    texte,
+    x: fini.x + cqw(CQW_SIGNATURE.gauche, L),
+    base,
+    taille,
+    espacement: TYPO_SIGNATURE.espacement * taille,
+    poids: TYPO_SIGNATURE.poids,
+    police: POLICE_TITRE,
+    opacite: TYPO_SIGNATURE.opacite,
+    alignement: 'left',
+    couleur: cartouche ? (sombre ? ENCRES.sombre : ENCRES.clair).texte : '#ffffff',
+    ombre: cartouche ? 0 : taille * SIGNATURE_OMBRE_EM,
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ⑦ L'ATTRIBUTION — LA GÉOMÉTRIE DE `stampCredit`, ET SES DEUX CORRECTIONS
 // ═══════════════════════════════════════════════════════════════════════════
@@ -684,6 +781,10 @@ export function planComposition({
     fichier,
     cartouche: cart,
     logo: lg,
+    // ⚠️ TOUJOURS PRÉSENTE, quel que soit le reste. Le cartouche peut être
+    // éteint, le logo absent : la signature, elle, est ce qui fait de ce
+    // fichier une affiche ShibuMap, et elle ne dépend d'aucun réglage.
+    signature: planSignature({ fini, cartouche: !!cart, sombre: !!cartouche?.sombre }),
     attribution: planAttribution({
       fini,
       texte: attribution,
@@ -836,6 +937,26 @@ export function dessinerLogo(ctx, boite, image, { dx = 0, dy = 0 } = {}) {
   ctx.drawImage(image, boite.x - dx, boite.y - dy, boite.largeur, boite.hauteur)
 }
 
+/**
+ * La signature ShibuMap.
+ *
+ * ⚠️ ELLE PASSE PAR `dessinerLigne`, pas par un second traceur de texte. C'est
+ * la même mécanique d'interlettrage que le cartouche, replis Safari compris :
+ * un second chemin de dessin finirait par ne plus poser la marque au même
+ * endroit que le CSS. On n'ajoute autour que l'ombre portée — dont
+ * `dessinerLigne` hérite par son propre `save()`.
+ */
+export function dessinerSignature(ctx, sig, decalage = {}) {
+  if (!sig?.texte) return
+  ctx.save()
+  if (sig.ombre > 0) {
+    ctx.shadowColor = 'rgba(0,0,0,0.55)'
+    ctx.shadowBlur = sig.ombre
+  }
+  dessinerLigne(ctx, sig, decalage)
+  ctx.restore()
+}
+
 /** La ligne d'attribution. */
 export function dessinerAttribution(ctx, att, { dx = 0, dy = 0 } = {}) {
   if (!att?.texte) return
@@ -960,7 +1081,8 @@ export function reappliquerEffets(ctx, plan, toile) {
 // ② le voile et le cartouche — du DOM empilé PAR-DESSUS l'image à l'écran :
 //    le vignettage ne l'assombrit pas, et il ne doit pas l'assombrir ici
 // ③ le logo, pour la même raison
-// ④ l'attribution en dernier : rien ne doit pouvoir la couvrir
+// ④ la signature ShibuMap, dans la bande de pied
+// ⑤ l'attribution en dernier : rien ne doit pouvoir la couvrir
 
 /**
  * Composer une toile — l'affiche entière, ou une bande.
@@ -991,6 +1113,10 @@ export function composerSurToile(ctx, plan, { toile = null, logo = null } = {}) 
   }
   if (logo && plan.logo && croise(plan.logo.y, plan.logo.y + plan.logo.hauteur)) {
     dessinerLogo(ctx, plan.logo, logo, { dx, dy })
+  }
+  const sig = plan.signature
+  if (sig && croise(sig.base - sig.taille * 1.3, sig.base + sig.taille * 0.3)) {
+    dessinerSignature(ctx, sig, { dx, dy })
   }
   const att = plan.attribution
   if (att && croise(att.base - att.taille * 1.3, att.base + att.taille * 0.3)) {

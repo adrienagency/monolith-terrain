@@ -37,7 +37,7 @@ import { PLAFOND_REFERENCE } from '../export-dpi.js'
 // façons de formater une latitude, c'est un écart entre l'aperçu et le fichier
 // vendu qui ne se découvre qu'après la vente. Le compositeur est la source ;
 // cet écran l'affiche. Voir src/compositeur-affiche.js.
-import { coordonneesCartouche, texteCartouche } from '../compositeur-affiche.js'
+import { coordonneesCartouche, texteCartouche, SIGNATURE_TEXTE } from '../compositeur-affiche.js'
 // Les décisions autour du point de netteté — sans WebGL, donc testables sans
 // navigateur. Ce module dit POURQUOI un point du monde ne survit pas tel quel à
 // un changement de sens, et porte les mots de l'avertissement d'achat.
@@ -67,7 +67,17 @@ import {
 export const PRIX_AFFICHE_EUR = 0
 
 /**
- * Ce qui s'écrit dans le bouton, à droite de « Recevoir le fichier ».
+ * Ce qui s'écrit à gauche dans le bouton d'achat.
+ *
+ * ⚠️ « TÉLÉCHARGER », PAS « RECEVOIR ». Depuis que l'écran propose DEUX issues —
+ * le fichier maintenant, l'impression un jour — « recevoir » ne distingue plus
+ * rien : on reçoit un fichier comme on reçoit un colis. Le verbe doit dire
+ * lequel des deux on vient de choisir.
+ */
+export const CTA_TELECHARGER = 'Télécharger le fichier'
+
+/**
+ * Ce qui s'écrit dans le bouton, à droite de `CTA_TELECHARGER`.
  *
  * ⚠️ « Gratuit » PLUTÔT QUE « 0 € ». Un bouton qui annonce « 0 € » se lit comme
  * un bug d'affichage ou comme un prix pas encore chargé — on hésite, on
@@ -262,7 +272,15 @@ export function ouvrirAffiche(ctx) {
   const logoImg = el('img', 'af-logo')
   logoImg.alt = ''
   logoImg.style.display = 'none'
-  sheet.append(img, logoImg, cartouche)
+  // ⚠️ LA SIGNATURE EST DANS LE FICHIER VENDU, et elle est ici pour qu'on la
+  // VOIE en composant. Le compositeur la pose sur le PDF ; si l'écran d'édition
+  // ne la montrait pas, elle apparaîtrait pour la première fois sur l'écran de
+  // validation — c'est-à-dire exactement l'écart entre l'aperçu et le fichier
+  // que tout ce chantier existe pour supprimer. Son texte vient donc de là-bas,
+  // il ne se recopie pas.
+  const signature = el('div', 'af-signature', SIGNATURE_TEXTE)
+  signature.setAttribute('aria-hidden', 'true')
+  sheet.append(img, logoImg, cartouche, signature)
   wrap.append(sheet)
   stage.append(wrap)
 
@@ -283,15 +301,16 @@ export function ouvrirAffiche(ctx) {
   gFormat.append(el('p', 'af-legende', 'Format'))
   const grilleEl = el('div', 'af-formats')
   const boutonsFormat = new Map()
+  // La pastille de chaque format, gardée à part : `appliquer` la redessine à
+  // chaque changement de sens.
+  const vignettesFormat = new Map()
   for (const f of FORMATS_AFFICHE) {
     const b = el('button', 'af-fmt')
     b.type = 'button'
     const vignette = el('i')
-    // la pastille porte le RATIO du format : on reconnaît la forme avant de
-    // lire son nom, et c'est ce qui fait de ce choix autre chose qu'une liste
-    vignette.style.aspectRatio = `${f.mm[0]} / ${f.mm[1]}`
     const nom = el('b', null, f.label.split(' · ')[0])
     b.append(vignette, nom)
+    vignettesFormat.set(f.id, vignette)
     b.addEventListener('click', () => {
       // Changer de format peut changer le sens : un 61 × 91 qui ne tient qu'en
       // portrait ne doit pas laisser le segment sur « Paysage » et rendre au
@@ -306,6 +325,37 @@ export function ouvrirAffiche(ctx) {
     grilleEl.append(b)
   }
   gFormat.append(grilleEl)
+
+  // ══════ LA PASTILLE MONTRE LE SENS QU'ON AURA ═════════════════════════════
+  //
+  // ⚠️ ELLE MONTRAIT TOUJOURS UNE AFFICHE DEBOUT. On choisissait « Paysage », le
+  // segment le disait, la feuille au centre basculait — et les sept pastilles
+  // continuaient d'annoncer sept formats en hauteur. Or c'est la FORME qu'on lit
+  // avant le nom : une pastille qui ment sur la forme du format est pire qu'une
+  // pastille générique, elle fait choisir de travers.
+  //
+  // ⚠️ ET LE PLUS GRAND CÔTÉ NE CHANGE PAS. Poser une seule dimension (« 26 px
+  // de large ») ferait varier la hauteur de la rangée d'un sens à l'autre : la
+  // grille sauterait de vingt pixels à chaque bascule, et on ne verrait plus la
+  // seule chose qui compte, la proportion. On inscrit donc chaque format dans un
+  // carré de côté fixe, et il occupe ce carré dans le sens qui est le sien.
+  //
+  // ⚠️ ET LA PROPORTION SORT DE `geometriePage`, PAS D'UN CALCUL D'ICI. C'est la
+  // fonction qui donne déjà sa forme à la FEUILLE, deux lignes plus bas dans
+  // `appliquer`. Retourner les millimètres à la main dans la pastille serait
+  // une seconde façon de décider d'un sens : le jour où l'une des deux change,
+  // la pastille annoncerait une forme et la feuille en montrerait une autre.
+  const COTE_VIGNETTE = 30
+
+  /** Dessine une pastille à la proportion exacte d'un format, dans un sens donné. */
+  function dessinerVignette(vignette, id, sens) {
+    const g = geometriePage({ format: id, orientation: sens, fondPerduMm: 0 })
+    if (!g) return
+    const k = COTE_VIGNETTE / Math.max(g.largeurMm, g.hauteurMm)
+    vignette.style.width = `${(g.largeurMm * k).toFixed(2)}px`
+    vignette.style.height = `${(g.hauteurMm * k).toFixed(2)}px`
+  }
+
   // ⚠️ DÉGRADER D'ABORD, CACHER ENSUITE — la décision d'Adrien, appliquée ici et
   // nulle part ailleurs. La densité, elle, a déjà été baissée par `degradePour` ;
   // ce qui suit ne retire de la grille QUE ce qui ne passe même pas au plancher
@@ -499,11 +549,38 @@ export function ouvrirAffiche(ctx) {
   const verite = el('div', 'af-verite')
   const cta = el('button', 'af-cta')
   cta.type = 'button'
-  const ctaTexte = el('span', null, 'Recevoir le fichier')
+  const ctaTexte = el('span', null, CTA_TELECHARGER)
   const ctaPrix = el('span', null, etiquettePrix())
   cta.append(ctaTexte, ctaPrix)
   const rassure = el('p', 'af-rassure')
   rassure.innerHTML = phraseRassurance()
+
+  // ══════ DEUX ISSUES, ET UNE SEULE EST OUVERTE ═════════════════════════════
+  //
+  // Adrien : « il faut être clair ensuite : on télécharge l'affiche prête pour
+  // impression, ou on effectue l'impression directement via un presta ShibuMap.
+  // Mais ça il faut griser l'option car elle n'est pas encore prête. »
+  //
+  // ⚠️ UNE OPTION GRISÉE DOIT DIRE POURQUOI, ET SURTOUT S'IL FAUT L'ATTENDRE.
+  // « Bientôt » tout seul laisse l'acheteur devant un calcul qu'il ne peut pas
+  // faire : est-ce que je télécharge maintenant, ou est-ce que je reviens dans
+  // trois jours ? La phrase répond aux deux d'un coup — on n'a pas encore
+  // d'imprimeur, ET le fichier d'à côté s'imprime déjà partout. Aucune date
+  // n'est promise : une date manquée coûte plus cher qu'une absence de date.
+  const issue = el('div', 'af-issue')
+  const issueLigne = el('div', 'af-issue-ligne')
+  issueLigne.append(
+    el('span', 'af-issue-nom', 'Faire imprimer et livrer'),
+    el('i', 'af-issue-tag', 'Bientôt')
+  )
+  issue.append(
+    issueLigne,
+    el(
+      'p',
+      'af-issue-phrase',
+      'Nous cherchons encore l’imprimeur. Le fichier ci-dessus, lui, s’imprime déjà chez n’importe quel professionnel.'
+    )
+  )
 
   // ══════ L'AVERTISSEMENT AVANT D'ENCAISSER ═════════════════════════════════
   //
@@ -549,7 +626,10 @@ export function ouvrirAffiche(ctx) {
   gardeBoutons.append(bDeplacer, bContinuer)
   garde.append(gardeTitre, gardePhrase, gardeBoutons)
 
-  pied.append(verite, garde, cta, rassure)
+  // La légende qui dit qu'il y a un CHOIX. Sans elle, le bloc du bas se lit
+  // comme une note posée sous un bouton ; avec elle, ce sont deux façons
+  // d'avoir la même affiche, dont une seule est ouverte.
+  pied.append(verite, el('p', 'af-legende', 'Comment tu la reçois'), garde, cta, rassure, issue)
   rail.append(corps, pied)
 
   // ── la sortie ─────────────────────────────────────────────────────────────
@@ -649,7 +729,19 @@ export function ouvrirAffiche(ctx) {
       cTaille.sync()
     }
 
+    // La signature n'a pas de réglage : elle ne suit que l'encre du cartouche,
+    // parce que c'est le voile de celui-ci qui la rend lisible (ou pas).
+    signature.classList.toggle('sombre', etat.cartouche && etat.cartoucheSombre)
+    signature.classList.toggle('nu', !etat.cartouche)
+
     for (const [id, b] of boutonsFormat) b.setAttribute('aria-pressed', String(id === etat.format))
+    // ⚠️ CHAQUE PASTILLE MONTRE LE SENS QU'ELLE DONNERAIT, pas celui du segment.
+    // Sur une machine qui ne tient qu'une orientation d'un format, cliquer
+    // dessus fait basculer le sens (`replierSur`) : annoncer « Paysage » et
+    // rendre un portrait serait un mensonge de plus, pas un de moins.
+    for (const [id, vignette] of vignettesFormat) {
+      dessinerVignette(vignette, id, replierSur(grilleFormats, id, etat.orientation)?.orientation || etat.orientation)
+    }
     bPortrait.setAttribute('aria-pressed', String(etat.orientation === 'portrait'))
     bPaysage.setAttribute('aria-pressed', String(etat.orientation === 'paysage'))
     // Un sens que le format courant ne tient pas sur cette machine disparaît —
@@ -1076,7 +1168,7 @@ export function ouvrirAffiche(ctx) {
       if (reste) {
         pdfTirage = null
         cta.disabled = false
-        ctaTexte.textContent = 'Recevoir le fichier'
+        ctaTexte.textContent = CTA_TELECHARGER
       }
     }
   }
