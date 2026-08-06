@@ -39,9 +39,54 @@ import { PLAFOND_REFERENCE } from '../export-dpi.js'
 // cet écran l'affiche. Voir src/compositeur-affiche.js.
 import { coordonneesCartouche, texteCartouche } from '../compositeur-affiche.js'
 
-// Le prix de lancement. Un seul endroit, pour que l'étiquette et le bouton ne
-// puissent pas se contredire.
-export const PRIX_AFFICHE_EUR = 19
+// ═══════════════════════════════════════════════════════════════════════════
+// LE PRIX AFFICHÉ — UNE ÉTIQUETTE, PAS UN PRIX
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ CE CHIFFRE NE DÉCIDE DE RIEN, et c'est important de le lire ainsi : le
+// prix qui engage vit dans le catalogue SERVEUR
+// (netlify/functions/_paiement-catalogue.mjs), hors de portée du navigateur.
+// Celui-ci n'est que ce que l'acheteur LIT avant de cliquer. Le changer ici ne
+// change pas ce qui sera facturé ; ça change ce qu'on lui a promis.
+//
+// C'est aussi pour ça qu'un test refuse qu'ils divergent : tenir les deux
+// ensemble n'est pas une discipline à se rappeler, c'est une condition de
+// `npm test`.
+//
+// 0 = gratuité temporaire (2026-08-06), le temps d'éprouver toute la chaîne en
+// production. Pour revenir à 19 € : remettre `19` ici ET `1900` dans le
+// catalogue serveur. Le texte du bouton et la phrase de réassurance, eux, se
+// remettent seuls — ils sont dérivés de ce chiffre.
+export const PRIX_AFFICHE_EUR = 0
+
+/**
+ * Ce qui s'écrit dans le bouton, à droite de « Recevoir le fichier ».
+ *
+ * ⚠️ « Gratuit » PLUTÔT QUE « 0 € ». Un bouton qui annonce « 0 € » se lit comme
+ * un bug d'affichage ou comme un prix pas encore chargé — on hésite, on
+ * n'ose pas cliquer, et l'essai grandeur nature ne se fait pas.
+ */
+export function etiquettePrix(euros = PRIX_AFFICHE_EUR) {
+  return euros > 0 ? `${euros} €` : 'Gratuit'
+}
+
+/**
+ * La phrase sous le bouton. Rendue en HTML (elle porte un `<b>`), et DÉRIVÉE du
+ * prix pour la même raison que le libellé vendu : à 0 €, « dès le paiement
+ * validé » ferait chercher une carte à quelqu'un à qui Stripe n'en demandera
+ * jamais, et « pas de compte à créer » n'est plus le doute principal.
+ */
+export function phraseRassurance(euros = PRIX_AFFICHE_EUR) {
+  // ⚠️ CETTE PHRASE A CHANGÉ PARCE QUE LA CHAÎNE A CHANGÉ. Elle promettait un
+  // envoi par mail — c'était vrai tant que le fichier n'existait pas avant le
+  // paiement. Il est maintenant fabriqué AVANT, mis au coffre, et rendu au
+  // retour de la caisse : promettre le mail ferait attendre pour rien quelqu'un
+  // qui a déjà son fichier à l'écran.
+  if (euros > 0) {
+    return 'Le PDF se télécharge dès le paiement validé. <b>Pas de compte à créer.</b><br>L’image à l’écran, elle, reste gratuite.'
+  }
+  return 'Le fichier est <b>offert</b> pendant la mise en service : aucune carte ne te sera demandée, aucun montant débité.<br>Le PDF se télécharge dès le retour.'
+}
 
 // La plus grande dimension de l'aperçu, en pixels. Assez pour juger un cadrage
 // et une couleur, assez petit pour que changer de format reste instantané.
@@ -431,15 +476,10 @@ export function ouvrirAffiche(ctx) {
   const cta = el('button', 'af-cta')
   cta.type = 'button'
   const ctaTexte = el('span', null, 'Recevoir le fichier')
-  const ctaPrix = el('span', null, `${PRIX_AFFICHE_EUR} €`)
+  const ctaPrix = el('span', null, etiquettePrix())
   cta.append(ctaTexte, ctaPrix)
   const rassure = el('p', 'af-rassure')
-  // ⚠️ CETTE PHRASE A CHANGÉ PARCE QUE LA CHAÎNE A CHANGÉ. Elle promettait un
-  // envoi par mail — c'était vrai tant que le fichier n'existait pas avant le
-  // paiement. Il est maintenant fabriqué AVANT, mis au coffre, et rendu au
-  // retour de la caisse : promettre le mail ferait attendre pour rien quelqu'un
-  // qui a déjà son fichier à l'écran.
-  rassure.innerHTML = 'Le PDF se télécharge dès le paiement validé. <b>Pas de compte à créer.</b><br>L’image à l’écran, elle, reste gratuite.'
+  rassure.innerHTML = phraseRassurance()
   pied.append(verite, cta, rassure)
   rail.append(corps, pied)
 

@@ -5,8 +5,11 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { ARTICLES, article, prixEuros, PAYS_AUTORISES, PAYS_EXCLUS } from '../netlify/functions/_paiement-catalogue.mjs'
-import { signatureValide, commandeDepuisSession, texteConfirmation } from '../netlify/functions/paiement-webhook.mjs'
+import {
+  ARTICLES, article, prixEuros, PAYS_AUTORISES, PAYS_EXCLUS,
+  PRIX_AFFICHE_PDF_CENTIMES, MENTION_GRATUITE, habillageAffichePdf,
+} from '../netlify/functions/_paiement-catalogue.mjs'
+import { signatureValide, commandeDepuisSession, texteConfirmation, sessionAboutie } from '../netlify/functions/paiement-webhook.mjs'
 import caisse, { codeAtelierValide, commandeAtelier } from '../netlify/functions/paiement.mjs'
 import { etatDepuisSources, SESSION_RE as SESSION_RE_SERVEUR } from '../netlify/functions/paiement-etat.mjs'
 import { DPI_NOMINAL, DPI_PLANCHER } from '../src/export-dpi.js'
@@ -19,7 +22,10 @@ import {
 
 test('le prix vient du SERVEUR : un article inconnu ne s’invente pas', () => {
   // La faille numéro un des paiements web : accepter `{ prix }` du navigateur.
-  assert.equal(article('affiche-pdf').centimes, 1900)
+  // ⚠️ ON COMPARE À LA CONSTANTE, PAS À 1900. Le chiffre du jour est
+  // temporairement nul (gratuité de mise en service) ; ce que ce test tient,
+  // c'est que le catalogue serveur fait foi, pas sa valeur.
+  assert.equal(article('affiche-pdf').centimes, PRIX_AFFICHE_PDF_CENTIMES)
   assert.equal(article('affiche-inexistante'), null)
   assert.equal(article(''), null)
   assert.equal(article(null), null)
@@ -33,10 +39,16 @@ test('tous les prix sont des ENTIERS de centimes', () => {
   // toujours par produire un 18,999999999999998.
   for (const [id, a] of Object.entries(ARTICLES)) {
     assert.ok(Number.isInteger(a.centimes), `${id} : ${a.centimes} n’est pas un entier`)
-    assert.ok(a.centimes > 0, `${id} : prix nul ou négatif`)
+    // ⚠️ ZÉRO EST DÉSORMAIS PERMIS, LE NÉGATIF JAMAIS. Zéro est un chemin réel
+    // chez Stripe (commande à coût zéro) ; un montant négatif n'en est pas un.
+    assert.ok(a.centimes >= 0, `${id} : prix négatif`)
+    // ⚠️ ET AUCUN MONTANT ENTRE ZÉRO ET LE MINIMUM STRIPE. Sous 0,50 € en
+    // euros, Stripe refuse la transaction : une affiche à 30 centimes ferait
+    // échouer la caisse en production sans qu'aucun test ne l'ait dit.
+    assert.ok(a.centimes === 0 || a.centimes >= 50, `${id} : ${a.centimes} centimes tombe sous le minimum Stripe (50 centimes en EUR)`)
     assert.ok(a.libelle && a.livrable, `${id} : article incomplet`)
   }
-  assert.equal(prixEuros('affiche-pdf'), 19)
+  assert.equal(prixEuros('affiche-pdf'), PRIX_AFFICHE_PDF_CENTIMES / 100)
   assert.equal(prixEuros('rien'), null)
 })
 
@@ -46,6 +58,69 @@ test('l’imprimé coûte plus cher que le fichier, à tous les formats', () => 
     if (a.livrable !== 'impression') continue
     assert.ok(a.centimes > pdf, `${id} ne peut pas coûter moins que le fichier seul`)
   }
+})
+
+// ══════════ LE LIBELLÉ VENDU NE PEUT PAS MENTIR SUR LE PRIX ═════════════════
+//
+// ⚠️ C'EST LA PROPRIÉTÉ QUI COMPTE, PAS LE CHIFFRE DU JOUR. Le libellé d'un
+// article part sur la page Stripe ET sur une FACTURE NUMÉROTÉE — un document
+// opposable. Un article à 0 € intitulé comme un article payant est trompeur ;
+// un article à 19 € qui s'annonce encore « offert » l'est bien davantage, parce
+// que c'est celui-là qu'on oublie en remontant le prix.
+
+test('⚠️ PRIX NUL ⟺ GRATUITÉ ANNONCÉE, dans les deux sens', () => {
+  const dit = (a) => new RegExp(MENTION_GRATUITE, 'i').test(`${a.libelle} ${a.detail || ''}`)
+  for (const [id, a] of Object.entries(ARTICLES)) {
+    assert.equal(
+      a.centimes === 0, dit(a),
+      a.centimes === 0
+        ? `${id} coûte 0 € mais s’intitule comme un article payant : « ${a.libelle} »`
+        : `${id} coûte ${a.centimes} c et s’annonce encore « ${MENTION_GRATUITE} » : « ${a.libelle} »`
+    )
+  }
+})
+
+test('⚠️ LE LIBELLÉ EST DÉRIVÉ DU PRIX, PAS RECOPIÉ À CÔTÉ', () => {
+  // La construction qui rend la propriété ci-dessus INVIOLABLE : on ne PEUT pas
+  // remonter le chiffre en oubliant la phrase, parce qu'il n'y a pas deux
+  // endroits. Ce test échoue si quelqu'un remet un libellé en dur.
+  const payant = habillageAffichePdf(1900)
+  const gratuit = habillageAffichePdf(0)
+  assert.ok(!new RegExp(MENTION_GRATUITE, 'i').test(`${payant.libelle} ${payant.detail}`),
+    'à 19 €, le libellé ne doit plus annoncer la gratuité')
+  assert.match(gratuit.libelle, new RegExp(MENTION_GRATUITE, 'i'))
+  assert.match(gratuit.detail, new RegExp(MENTION_GRATUITE, 'i'))
+  // La fourchette de densité survit à la bascule : c'est la même phrase de base
+  // des deux côtés, corrigée cette nuit-là et qu'on ne veut pas voir se
+  // dédoubler.
+  assert.match(payant.detail, /150.+300 dpi/)
+  assert.match(gratuit.detail, /150.+300 dpi/)
+  // Et le catalogue utilise bien cette dérivation, pas une copie.
+  assert.deepEqual(
+    { libelle: ARTICLES['affiche-pdf'].libelle, detail: ARTICLES['affiche-pdf'].detail },
+    habillageAffichePdf(PRIX_AFFICHE_PDF_CENTIMES)
+  )
+})
+
+test('⚠️ L’ÉTIQUETTE DU BOUTON ET LE PRIX DU SERVEUR NE PEUVENT PAS DIVERGER', () => {
+  // `src/ui/affiche.js` ne se charge pas sous node (il importe une feuille de
+  // style) : on relit sa source, comme test/affiche-tirage.test.js.
+  //
+  // Ce chiffre-là ne facture rien — c'est ce que l'acheteur LIT avant de
+  // cliquer. Le laisser à 19 pendant que la caisse encaisse 0 (ou l'inverse le
+  // jour de la remontée) est la faute la plus facile à commettre et la plus
+  // pénible à voir : elle ne casse rien, elle ment.
+  const src = readFileSync(new URL('../src/ui/affiche.js', import.meta.url), 'utf8')
+  const m = src.match(/export const PRIX_AFFICHE_EUR = (\d+)/)
+  assert.ok(m, 'PRIX_AFFICHE_EUR doit exister dans src/ui/affiche.js')
+  assert.equal(
+    Number(m[1]), prixEuros('affiche-pdf'),
+    `l’étiquette du bouton annonce ${m[1]} € et le catalogue serveur facture ${prixEuros('affiche-pdf')} €`
+  )
+  // Et le bouton n'écrit pas « 0 € » : à zéro, l'étiquette et la phrase de
+  // réassurance sont dérivées, pas interpolées en dur.
+  assert.match(src, /export function etiquettePrix/)
+  assert.ok(!/`\$\{PRIX_AFFICHE_EUR\} €`/.test(src), 'le prix ne doit plus s’interpoler directement dans le bouton')
 })
 
 test('le Royaume-Uni est exclu du paiement, pas d’une phrase de CGV', () => {
@@ -169,6 +244,45 @@ test('le blocage par pays exclu n’a pas bougé', () => {
   assert.equal(gb.pays, 'GB')
 })
 
+// ── Le garde du webhook : « plus rien n'est dû » ────────────────────────────
+
+test('⚠️ LE WEBHOOK ACCEPTE LA COMMANDE À COÛT ZÉRO, ET RIEN D’AUTRE EN PLUS', () => {
+  // Sans ce cas, l'affiche à 0 € traverserait tout le tunnel Stripe pour être
+  // silencieusement jetée ici : pas de commande au journal, pas de courriel —
+  // c'est-à-dire le maillon qu'on veut éprouver, non éprouvé.
+  assert.equal(sessionAboutie({ payment_status: 'paid', amount_total: 1900 }), true)
+  assert.equal(sessionAboutie({ payment_status: 'no_payment_required', amount_total: 0 }), true)
+
+  // ⚠️ ET LE GARDE RESTE UN GARDE. Une session non payée n'entre pas, quel que
+  // soit son montant — c'est ce qui rend le retour à 19 € sûr sans y retoucher.
+  assert.equal(sessionAboutie({ payment_status: 'unpaid', amount_total: 1900 }), false)
+  assert.equal(sessionAboutie({ payment_status: 'unpaid', amount_total: 0 }), false)
+  // Le cas qui coûterait cher : « aucun paiement requis » annoncé sur un total
+  // NON NUL. Ça ne devrait pas exister ; si ça arrive, on ne livre pas.
+  assert.equal(sessionAboutie({ payment_status: 'no_payment_required', amount_total: 1900 }), false)
+  assert.equal(sessionAboutie({ payment_status: 'no_payment_required' }), false, 'total absent ≠ total nul')
+  assert.equal(sessionAboutie({ payment_status: 'no_payment_required', amount_total: null }), false)
+  assert.equal(sessionAboutie({}), false)
+  assert.equal(sessionAboutie(), false)
+
+  // Et c'est bien CE garde-là que le gestionnaire consulte, pas un `=== 'paid'`
+  // resté en place à côté.
+  const src = readFileSync(new URL('../netlify/functions/paiement-webhook.mjs', import.meta.url), 'utf8')
+  assert.match(src, /if \(!sessionAboutie\(s\)\) return new Response\('non payé'/)
+})
+
+test('une commande à coût zéro s’écrit au journal comme une vraie', () => {
+  // ⚠️ ELLE N'EST PAS MARQUÉE `atelier`, ET C'EST LA DIFFÉRENCE QUI COMPTE : le
+  // contournement d'atelier ne passe pas par Stripe, celle-ci si. Elle porte
+  // donc un vrai `cs_…`, un vrai email, un vrai pays — tout, sauf un montant.
+  const c = commandeDepuisSession(sessionPayee({ amount_total: 0, customer: 'cus_Z' }))
+  assert.equal(c.centimes, 0)
+  assert.equal(c.atelier, undefined, 'ce n’est PAS un essai d’atelier : la chaîne réelle a tourné')
+  assert.equal(c.email, 'club@example.org', 'sans email, aucun courriel de confirmation ne partirait')
+  assert.equal(c.session, 'cs_test_1')
+  assert.equal(c.bloque, false)
+})
+
 // ── La facture, à la création de la session ─────────────────────────────────
 
 /** Fait tourner la caisse contre un Stripe bouchonné. Rend les corps envoyés. */
@@ -210,6 +324,20 @@ test('la session demande une FACTURE, et les deux préalables sont là', async (
   assert.match(envoye, /billing_address_collection=required/)
   // La facture doit dire QUOI a été vendu, sinon elle est introuvable après coup.
   assert.match(envoye, /invoice_creation\[invoice_data\]\[metadata\]\[article\]=affiche-pdf/)
+})
+
+test('⚠️ LE MONTANT ENVOYÉ À STRIPE EST CELUI DU CATALOGUE, ET IL VIENT DU SERVEUR', async () => {
+  // Le navigateur n'a envoyé qu'un identifiant d'article ; c'est la caisse qui
+  // pose le montant. Ce test le vérifie sur la requête réellement construite —
+  // y compris quand ce montant vaut zéro (commande à coût zéro).
+  const { corps } = await caisseAvecStripe([{ ok: true, corps: { url: 'https://stripe/x', id: 'cs_1' } }])
+  const p = new URLSearchParams(corps[0])
+  assert.equal(p.get('line_items[0][price_data][unit_amount]'), String(PRIX_AFFICHE_PDF_CENTIMES))
+  assert.equal(p.get('line_items[0][price_data][currency]'), 'eur')
+  // Et le libellé qui part chez Stripe est celui du catalogue, donc dérivé du
+  // prix : à zéro, la page de paiement dit elle-même que l'article est offert.
+  assert.equal(p.get('line_items[0][price_data][product_data][name]'), ARTICLES['affiche-pdf'].libelle)
+  assert.equal(p.get('invoice_creation[invoice_data][description]'), ARTICLES['affiche-pdf'].libelle)
 })
 
 test('aucune mention fiscale n’est écrite en dur sur la facture', () => {

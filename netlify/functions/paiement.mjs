@@ -164,11 +164,18 @@ export default async (req) => {
   // ── LE CONTOURNEMENT D'ATELIER (voir codeAtelierValide plus haut) ─────────
   //
   // On court-circuite Stripe entièrement plutôt que de fabriquer une remise de
-  // 100 % : une session à zéro euro sort de Checkout avec
-  // `payment_status: 'no_payment_required'`, que le webhook REFUSE — à raison,
-  // c'est son garde le plus important. Le contournement n'a donc pas à tordre
-  // le chemin des vraies ventes ; il en emprunte un autre, plus court, qui
-  // aboutit au même endroit : une commande dans le journal.
+  // 100 % : le contournement n'a pas à tordre le chemin des vraies ventes, il
+  // en emprunte un autre, plus court, qui aboutit au même endroit — une
+  // commande dans le journal.
+  //
+  // ⚠️ IL RESTE UTILE MÊME PENDANT LA GRATUITÉ TEMPORAIRE (voir
+  // `PRIX_AFFICHE_PDF_CENTIMES` dans _paiement-catalogue.mjs), et il ne faut
+  // pas confondre les deux : ce chemin-ci NE PASSE PAS PAR STRIPE DU TOUT —
+  // aucune session, aucun webhook, aucune fiche client — alors que l'affiche à
+  // 0 € traverse, elle, tout le tunnel réel. C'est justement pour ça qu'on
+  // garde les deux : celui-ci sert quand Stripe est en panne, mal configuré, ou
+  // quand on veut la commande sans le tunnel ; l'autre sert à éprouver le
+  // tunnel.
   if (corps?.code !== undefined) {
     if (!codeAtelierValide(corps.code)) {
       // Même réponse qu'un article inconnu, et surtout AUCUN indice sur ce qui
@@ -232,6 +239,19 @@ export default async (req) => {
     // plafonné à 2 € par facture. Soit ~8 centimes sur l'affiche à 19 €, ~36
     // centimes sur celle à 89 €. C'est le prix de la facture, à assumer sur
     // chaque vente — pas une option qu'on active en passant.
+    //
+    // ⚠️ ET ELLE NE COÛTE RIEN PENDANT LA GRATUITÉ TEMPORAIRE, ce qui est la
+    // raison pour laquelle on la laisse branchée plutôt que de la débrancher
+    // conditionnellement : 0,4 % de 0 €, c'est 0 €. Deux conséquences à
+    // connaître, et la seconde compte plus que la première :
+    //   · Stripe n'établit la facture qu'APRÈS ENCAISSEMENT, jamais à la fin de
+    //     la session. Une commande à coût zéro n'a aucun PaymentIntent, donc
+    //     très probablement AUCUNE FACTURE. C'est le SEUL maillon de la chaîne
+    //     que l'essai gratuit n'éprouve pas — il faudra une vraie vente à 19 €
+    //     pour le voir ;
+    //   · si Stripe refusait carrément `invoice_creation` sur une session à
+    //     zéro, le repli ci-dessous refait la session sans elle : la commande
+    //     passe quand même, et le journal le crie. Rien à préparer.
     //
     // ⚠️ ET L'ENVOI DÉPEND DU DASHBOARD, PAS DU CODE. Sans « Paiements réussis »
     // coché dans Paramètres > Entreprise > E-mails aux clients, la facture est

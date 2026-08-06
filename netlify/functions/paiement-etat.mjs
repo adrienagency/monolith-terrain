@@ -62,8 +62,16 @@ export function etatDepuisSources(commande, session) {
     }
   }
   if (session) {
-    // `no_payment_required` = total à zéro (un jour : un code promo à 100 %).
+    // `no_payment_required` = total à zéro. Ce n'est plus une hypothèse depuis
+    // le 2026-08-06 : c'est le cas NORMAL pendant la gratuité temporaire de
+    // l'affiche (voir `PRIX_AFFICHE_PDF_CENTIMES` dans _paiement-catalogue.mjs),
+    // et ce sera celui d'un code promo à 100 % le jour où il en existera un.
     // C'est un paiement abouti du point de vue de Stripe, donc du nôtre.
+    //
+    // ⚠️ CETTE FONCTION EST PLUS PERMISSIVE QUE LE WEBHOOK, ET C'EST VOULU :
+    // elle ne LIVRE rien et n'écrit rien, elle répond à une page de retour. Le
+    // webhook, lui, exige en plus un `amount_total` nul avant d'écrire au
+    // journal — c'est lui qui fait foi.
     const paye = session.payment_status === 'paid' || session.payment_status === 'no_payment_required'
     const etat = paye ? 'paye' : session.status === 'expired' ? 'expiree' : 'en-attente'
     return {

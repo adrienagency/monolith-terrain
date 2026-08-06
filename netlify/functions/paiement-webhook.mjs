@@ -13,8 +13,10 @@
 //     même. C'est le cas le plus injuste, et le plus fréquent sur mobile.
 // Le webhook, lui, part de Stripe vers nous, quoi que fasse le navigateur.
 //
-// ⚠️ ET ON VÉRIFIE `payment_status === 'paid'`, PAS L'EXISTENCE DE LA SESSION.
-// Une session existe dès qu'on l'a créée, avant tout paiement.
+// ⚠️ ET ON VÉRIFIE LE `payment_status`, PAS L'EXISTENCE DE LA SESSION.
+// Une session existe dès qu'on l'a créée, avant tout paiement. Voir
+// `sessionAboutie` plus bas pour le seul cas où « payé » ne veut pas dire
+// `paid`.
 //
 // ═══════════════════════════════════════════════════════════════════════════
 // VARIABLES D'ENVIRONNEMENT
@@ -55,6 +57,36 @@ export function signatureValide(brut, entete, secret, toleranceS = 300, maintena
   const recu = parts.v1
   if (typeof recu !== 'string' || recu.length !== attendu.length) return false
   return timingSafeEqual(Buffer.from(attendu, 'hex'), Buffer.from(recu, 'hex'))
+}
+
+/**
+ * PLUS RIEN N'EST DÛ SUR CETTE SESSION ? Pure, donc testable — et c'est le
+ * garde le plus important du webhook : ce qui passe ici est traité comme une
+ * vente aboutie, écrit au journal, et déclenche la livraison.
+ *
+ * ⚠️ `paid` RESTE LE CAS NORMAL, ET IL N'A PAS BOUGÉ. Le second cas existe
+ * parce que Stripe a un chemin à part pour les COMMANDES À COÛT ZÉRO
+ * (documentation « No-cost orders ») : quand le total d'une session
+ * `mode: 'payment'` vaut zéro, Checkout ne collecte aucun moyen de paiement, ne
+ * crée AUCUN PaymentIntent, et la session se termine en
+ * `payment_status: 'no_payment_required'`. Sans ce second cas, la gratuité
+ * temporaire de l'affiche (voir `PRIX_AFFICHE_PDF_CENTIMES` dans
+ * _paiement-catalogue.mjs) traverserait tout le tunnel pour être SILENCIEUSEMENT
+ * jetée ici : pas de commande au journal, pas de courriel — c'est-à-dire
+ * exactement le maillon qu'Adrien veut éprouver, non éprouvé.
+ *
+ * ⚠️ ET `no_payment_required` SEUL NE SUFFIT PAS : on exige que `amount_total`
+ * soit EXACTEMENT nul. C'est ce qui rend le retour à 19 € sûr sans y toucher —
+ * une session à 1 900 centimes ne peut pas emprunter ce chemin, quoi qu'annonce
+ * son `payment_status`. Le jour où un code promo à 100 % existera, il tombera
+ * dans ce cas parce que son total sera réellement zéro, ce qui est la vérité.
+ *
+ * (La signature de l'événement, elle, est vérifiée AVANT d'arriver ici : ce
+ * qu'on lit est ce que Stripe a écrit, pas ce qu'un inconnu a posté.)
+ */
+export function sessionAboutie(s = {}) {
+  if (s?.payment_status === 'paid') return true
+  return s?.payment_status === 'no_payment_required' && s?.amount_total === 0
 }
 
 /**
@@ -171,7 +203,7 @@ export default async (req) => {
   if (evt.type !== 'checkout.session.completed') return new Response('ignoré', { status: 200 })
 
   const s = evt.data?.object || {}
-  if (s.payment_status !== 'paid') return new Response('non payé', { status: 200 })
+  if (!sessionAboutie(s)) return new Response('non payé', { status: 200 })
 
   const journal = getStore('paiements')
   // ⚠️ IDEMPOTENCE : Stripe REJOUE ses webhooks jusqu'à obtenir un 2xx, et il
