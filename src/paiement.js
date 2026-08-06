@@ -138,6 +138,29 @@ export function livraisonEnSuspens(etat, { fichierPret = false } = {}) {
 }
 
 /**
+ * A-t-on le droit de JETER le fichier que ce panier désigne ?
+ *
+ * ⚠️ UN FICHIER PAYÉ NE S'EFFACE JAMAIS, ET SÛREMENT PAS SUR UNE URL. C'est la
+ * doctrine, et il a fallu une contre-revue pour voir qu'elle n'était appliquée
+ * qu'à moitié : on ne jetait pas sur un coffre muet, mais on jetait encore sur
+ * un `?paiement=annule` ou un `?paye=` malformé. Or `retourAReprendre` donne
+ * volontairement la PRIORITÉ À L'URL — un retour arrière dans l'historique vers
+ * l'adresse d'annulation, ou un identifiant tronqué au copier-coller, suffisait
+ * donc à détruire la marchandise de quelqu'un qui avait payé.
+ *
+ * `panier.session` n'est pas une supposition : elle n'est écrite que par
+ * `armerReprise`, c'est-à-dire APRÈS que le serveur a répondu. Sa présence veut
+ * dire « une livraison est due sur ce panier ». Un paramètre d'URL, qui
+ * s'invente et se rejoue, ne peut pas révoquer une réponse du serveur.
+ *
+ * La clôture reste possible — `viderPanier()` — mais elle s'arrête à la clé :
+ * le fichier, lui, attend sa purge par date plutôt que d'être détruit à tort.
+ */
+export function fichierJetable(panier) {
+  return !!panier?.id && !panier.session
+}
+
+/**
  * L'URL débarrassée des paramètres de retour, pour `history.replaceState`.
  * Laisser `?paye=…` dans la barre d'adresse, c'est laisser un lien qui rejoue
  * une confirmation à chaque rechargement — et qui part dans un signet.

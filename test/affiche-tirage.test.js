@@ -342,7 +342,7 @@ test('⚠️ LE PANIER NE SE VIDE QU’UNE FOIS LE FICHIER PRIS', () => {
   assert.match(bloc, /if \(livraisonEnSuspens\(etat, \{ fichierPret: !!garde \}\)\) \{\s*\n\s*armerReprise\(session\)/)
   // …et on ne jette JAMAIS un fichier sur un paiement abouti : un coffre qui
   // refuse une lecture rend `null` exactement comme un coffre vide.
-  assert.match(bloc, /\} else \{\s*\n\s*if \(!paye\) await jeterDuCoffre\(panier\?\.id\)\s*\n\s*viderPanier\(\)/)
+  assert.match(bloc, /\} else \{\s*\n\s*if \(!paye && fichierJetable\(panier\)\) await jeterDuCoffre\(panier\.id\)\s*\n\s*viderPanier\(\)/)
 
   // La reprise se lit au démarrage DEPUIS LE PANIER, parce que l'URL, elle, est
   // nettoyée dès ce bloc-là et ne survit pas au rechargement.
@@ -361,10 +361,33 @@ test('⚠️ UN ABANDON NE LAISSE PAS SEPT MÉGAOCTETS DERRIÈRE LUI', () => {
   // clé pour les ressortir.
   const bloc = MAIN.slice(MAIN.indexOf('async function reprendreApresPaiement()'))
   const annule = bloc.slice(bloc.indexOf("if (cas === 'annule')"), bloc.indexOf('await verifierPaiement('))
-  assert.match(annule, /await jeterDuCoffre\(panier\?\.id\)\s*\n\s*viderPanier\(\)/, 'l’annulation ne jette pas le fichier')
+  assert.match(annule, /if \(fichierJetable\(panier\)\) await jeterDuCoffre\(panier\.id\)\s*\n\s*viderPanier\(\)/, 'l’annulation ne jette pas le fichier')
 
   // Même chose quand la caisse ne s'ouvre pas : le dépôt vient d'avoir lieu.
   const cmd = MAIN.slice(MAIN.indexOf('onCommander: async (commande)'), MAIN.indexOf('lieuxAffiches:'))
   const echec = cmd.slice(cmd.indexOf('if (!r.ok) {'))
   assert.match(echec, /await jeterDuCoffre\(id\)\s*\n\s*viderPanier\(\)/)
+})
+
+test('⚠️ AUCUN CHEMIN DE MAIN.JS NE JETTE UN FICHIER PAYÉ', () => {
+  // La propriété, pas le chemin d'URL du jour : TOUT appel à `jeterDuCoffre`
+  // qui vise la clé du panier doit passer par `fichierJetable`. Sans ça, il
+  // suffit d'une adresse d'annulation rejouée depuis l'historique — l'URL a la
+  // priorité sur le panier, par construction — pour effacer de la marchandise
+  // payée.
+  const bloc = MAIN.slice(MAIN.indexOf('async function reprendreApresPaiement()'))
+  const visees = [...bloc.matchAll(/(.{0,40})await jeterDuCoffre\(panier[^)]*\)/g)].map((m) => m[0])
+  assert.ok(visees.length >= 2, 'les appels visant le panier ont disparu ou changé de forme')
+  for (const appel of visees) {
+    assert.match(appel, /fichierJetable\(panier\)\) await jeterDuCoffre\(panier\.id\)/, appel.trim())
+  }
+  // et le `panier?.id` optionnel n'a plus lieu d'être : `fichierJetable` a déjà
+  // exigé une clé, donc un `jeter('')` ne peut plus partir d'ici
+  assert.ok(!/await jeterDuCoffre\(panier\?\.id\)/.test(bloc))
+
+  // Les deux autres appels ne visent PAS le panier et doivent rester francs :
+  // le clic de remise (le fichier vient d'être pris) et la caisse en panne (le
+  // dépôt vient d'avoir lieu, rien n'a pu être payé).
+  assert.match(MAIN, /await jeterDuCoffre\(garde\.id\)/)
+  assert.match(MAIN, /await jeterDuCoffre\(id\)\s*\n\s*viderPanier\(\)/)
 })

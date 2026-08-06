@@ -14,7 +14,7 @@ import {
   identifiantArticle, FORMATS_IMPRIMES, SESSION_RE, lireRetourPaiement, urlSansRetour,
   afficheSerialisable, afficheRestauree, poserPanier, lirePanier, viderPanier, CLE_PANIER,
   demanderCaisse, verifierPaiement, messageRetour, URL_CAISSE,
-  retourAReprendre, armerReprise, livraisonEnSuspens,
+  retourAReprendre, armerReprise, livraisonEnSuspens, fichierJetable,
 } from '../src/paiement.js'
 
 test('le prix vient du SERVEUR : un article inconnu ne s’invente pas', () => {
@@ -734,4 +734,43 @@ test('⚠️ LA LIVRAISON SE REJOUE AU RECHARGEMENT, SANS « ?paye= » DANS L’
   viderPanier(s)
   assert.equal(armerReprise('cs_test_a1b2c3d4e5', s), false)
   assert.equal(retourAReprendre('', lirePanier(s)).cas, null)
+})
+
+test('⚠️ UN FICHIER PAYÉ NE SE JETTE JAMAIS, QUOI QUE DISE L’URL', () => {
+  // La doctrine était appliquée à moitié : on ne jetait pas sur un coffre muet,
+  // mais on jetait encore sur un paramètre d'URL. Or `retourAReprendre` donne
+  // volontairement la priorité à l'URL — un retour arrière dans l'historique
+  // vers l'adresse d'annulation, ou un identifiant tronqué au copier-coller,
+  // suffisait donc à détruire la marchandise de quelqu'un qui avait payé.
+  assert.equal(fichierJetable({ id: 'p-1' }), true)
+  assert.equal(fichierJetable({ id: 'p-1', session: '' }), true)
+  assert.equal(fichierJetable({ id: 'p-1', session: 'cs_test_a1b2c3d4e5' }), false)
+  assert.equal(fichierJetable({ id: 'p-1', session: 'atelier_abcd1234' }), false, 'l’atelier paie 0 € mais reçoit un vrai fichier')
+  // pas de clé, rien à jeter — et surtout pas `jeter('')`
+  assert.equal(fichierJetable(null), false)
+  assert.equal(fichierJetable({ session: 'cs_test_a1b2c3d4e5' }), false)
+  assert.equal(fichierJetable({}), false)
+
+  // Le scénario, joué de bout en bout : livraison confirmée et armée, puis les
+  // deux URL qui la contredisent.
+  const s = stockage()
+  poserPanier({ id: 'p-1', article: 'affiche-pdf', carte: 'AAA', affiche: afficheSerialisable(etatAffiche) }, s)
+  assert.equal(armerReprise('cs_test_a1b2c3d4e5', s), true)
+  const paye = lirePanier(s)
+
+  // ① l'URL d'annulation gagne la lecture du retour…
+  assert.equal(retourAReprendre('?paiement=annule', paye).cas, 'annule')
+  // …mais elle ne peut pas révoquer une réponse du serveur.
+  assert.equal(fichierJetable(paye), false)
+
+  // ② un « ?paye= » malformé rend `invalide`, donc un état `inconnue`, donc
+  // `!paye` — la garde `!paye` seule laissait donc passer la destruction.
+  assert.equal(retourAReprendre('?paye=zzz', paye).cas, 'invalide')
+  assert.equal(fichierJetable(paye), false)
+
+  // ③ et le panier d'un achat jamais confirmé, lui, se jette bien : la garde
+  // ne doit pas transformer chaque abandon en sept mégaoctets immortels.
+  viderPanier(s)
+  poserPanier({ id: 'p-2', article: 'affiche-pdf', carte: 'AAA', affiche: afficheSerialisable(etatAffiche) }, s)
+  assert.equal(fichierJetable(lirePanier(s)), true)
 })

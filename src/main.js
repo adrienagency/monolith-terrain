@@ -92,7 +92,7 @@ import { captureShareState, parseShareState, encodeShareState, decodeShareState,
 import {
   identifiantArticle, identifiantPanier, afficheSerialisable,
   retourAReprendre, urlSansRetour, poserPanier, lirePanier, viderPanier,
-  armerReprise, livraisonEnSuspens,
+  armerReprise, livraisonEnSuspens, fichierJetable,
   demanderCaisse, verifierPaiement, messageRetour,
 } from './paiement.js'
 import { Boats } from './boats.js'
@@ -7750,6 +7750,17 @@ async function openAfficheUI(etatInitial = null) {
       // `location.assign` appelé, plus une ligne de ce fichier ne s'exécute :
       // le document est en train d'être remplacé. Écrire le panier après,
       // c'est ne jamais l'écrire.
+      //
+      // ⚠️ LIMITE CONNUE, ÉCRITE ICI PLUTÔT QUE REDÉCOUVERTE : LE PANIER EST UN
+      // EMPLACEMENT UNIQUE. Commander une SECONDE affiche avant d'avoir cliqué
+      // « Télécharger » sur la première écrase la clé de celle-ci — le fichier
+      // payé reste au coffre mais plus rien ne l'y retrouve, et il part à la
+      // purge des 24 h. Le courriel de confirmation rattrape ce cas (c'est
+      // exactement ce pour quoi il existe). Le vrai remède n'est pas une garde
+      // de plus ici : c'est que la livraison due cesse de dépendre d'une clé de
+      // session. Voir « le corollaire » dans critiques-rapport.md — la piste
+      // retenue est de marquer la FICHE du coffre comme due, ce qui la rend
+      // retrouvable sans clé, et même après fermeture de l'onglet.
       const id = identifiantPanier()
       poserPanier({ id, article, carte: etatCarteEncode(), affiche: afficheSerialisable(commande) })
 
@@ -7928,7 +7939,13 @@ async function reprendreApresPaiement() {
   if (cas === 'annule') {
     // Demi-tour chez Stripe : rien n'est dû, et le PDF déposé avant de partir
     // n'a plus aucune raison d'occuper le navigateur pendant vingt-quatre heures.
-    await jeterDuCoffre(panier?.id)
+    //
+    // ⚠️ SAUF SI UNE REPRISE EST ARMÉE. L'URL a la priorité sur le panier (voir
+    // `retourAReprendre`), donc un retour arrière dans l'historique vers cette
+    // adresse-ci peut très bien arriver APRÈS un paiement confirmé. Jeter ici
+    // sans regarder, c'est effacer la marchandise de quelqu'un qui a payé sur
+    // un simple paramètre d'URL. `fichierJetable` porte la règle.
+    if (fichierJetable(panier)) await jeterDuCoffre(panier.id)
     viderPanier()
     showNotice('Paiement annulé — rien n’a été débité. Ta composition est intacte.')
     await openAfficheUI(panier?.affiche || null)
@@ -7957,14 +7974,17 @@ async function reprendreApresPaiement() {
   // onglet rejoue exactement ce retour-ci, sans `?paye=` dans la barre
   // d'adresse — et en redemandant au serveur, jamais en croyant le stockage.
   //
-  // ⚠️ ET ON NE JETTE LE FICHIER QUE QUAND RIEN N'A ÉTÉ PAYÉ. Sur `paye` sans
-  // fichier en main, le coffre a pu simplement refuser une lecture : on vide la
-  // clé (il n'y a rien à rejouer, c'est le mail qui prend le relais) mais on ne
-  // détruit pas un fichier payé sur un doute.
+  // ⚠️ ET ON NE JETTE LE FICHIER QUE QUAND RIEN N'A ÉTÉ PAYÉ — deux fois plutôt
+  // qu'une. Sur `paye` sans fichier en main, le coffre a pu simplement refuser
+  // une lecture : on vide la clé (il n'y a rien à rejouer, c'est le mail qui
+  // prend le relais) mais on ne détruit pas un fichier payé sur un doute. Et
+  // `fichierJetable` ajoute la garde que le seul `!paye` ne donnait pas : un
+  // `?paye=` malformé rend `invalide`, donc `etat = 'inconnue'`, donc `!paye` —
+  // alors qu'une reprise armée sur ce panier prouve un paiement déjà confirmé.
   if (livraisonEnSuspens(etat, { fichierPret: !!garde })) {
     armerReprise(session)
   } else {
-    if (!paye) await jeterDuCoffre(panier?.id)
+    if (!paye && fichierJetable(panier)) await jeterDuCoffre(panier.id)
     viderPanier()
   }
 
