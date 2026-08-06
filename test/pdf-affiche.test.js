@@ -354,3 +354,35 @@ test('les repères demandés se retrouvent dans le contenu de la page', async ()
   // huit traits de plus, c'est huit tracés de plus : le fichier grossit
   assert.ok(avec.octets.length > sans.octets.length)
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LE NOM DU FICHIER — CE QUI ACCOMPAGNE L'AFFICHE CHEZ L'IMPRIMEUR
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('le nom dit le lieu, le format et la densité — et n’en garde que de l’ASCII', async () => {
+  const { nomFichierAffiche } = await import('../src/pdf-affiche.js')
+  assert.equal(
+    nomFichierAffiche({ titre: 'Chamonix-Mont-Blanc', format: '50x70', orientation: 'paysage', dpi: 250 }),
+    'shibumap-chamonix-mont-blanc-50x70-paysage-250dpi.pdf'
+  )
+  // ⚠️ LES ACCENTS ET LES APOSTROPHES TYPOGRAPHIQUES NE TRAVERSENT PAS. Un
+  // « Vallée d’Aoste » arrivé en `Vall_e_d_Aoste.pdf` chez le prestataire, ce
+  // n'est pas une question de goût : c'est un en-tête `Content-Disposition` ou
+  // un dépôt FTP qui a fait ce qu'il a pu.
+  assert.equal(
+    nomFichierAffiche({ titre: 'Vallée d’Aoste', format: 'a2', orientation: 'portrait', dpi: 300 }),
+    'shibumap-vallee-d-aoste-a2-portrait-300dpi.pdf'
+  )
+  assert.match(nomFichierAffiche({ titre: 'Vallée d’Aoste' }), /^[a-z0-9.-]+$/)
+})
+
+test('un titre vide, absurde ou immense donne quand même un nom utilisable', async () => {
+  const { nomFichierAffiche } = await import('../src/pdf-affiche.js')
+  assert.equal(nomFichierAffiche({}), 'shibumap-affiche.pdf')
+  assert.equal(nomFichierAffiche({ titre: '☃☃☃', format: 'a4', dpi: 300 }), 'shibumap-affiche-a4-300dpi.pdf')
+  const long = nomFichierAffiche({ titre: 'a'.repeat(300), format: '50x70', orientation: 'paysage', dpi: 250 })
+  assert.ok(long.length < 90, long)
+  // et jamais de tiret orphelin au raccord : `…aaa-.pdf` est un nom qu'on relit
+  // deux fois pour savoir s'il manque quelque chose
+  assert.ok(!/--|-\./.test(long), long)
+})

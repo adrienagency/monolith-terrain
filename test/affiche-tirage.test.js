@@ -85,18 +85,21 @@ test('Échap pendant un tirage ANNULE le tirage, il ne ferme pas l’écran', ()
 // 3. LA MÉMOIRE — 21 À 89 MO PAR AFFICHE
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('⚠️ LES BANDES SONT PRISES POUR ÊTRE LÂCHÉES', () => {
-  // Fournir `surBande` dit à l'orchestrateur de ne PAS conserver les blobs. On
-  // n'en garde que le poids — partir payer est une navigation, ces octets
-  // meurent de toute façon, mais les tenir jusque-là peut faire manquer la place
-  // au milieu du tirage.
-  assert.match(AFFICHE, /surBande: \(b\) => \{ octets \+= b\?\.blob\?\.size \|\| 0 \}/)
+test('⚠️ LES BLOBS DE BANDE SONT PRIS POUR ÊTRE LÂCHÉS', () => {
+  // Fournir `surBande` dit à l'orchestrateur de ne PAS conserver les blobs.
+  // C'est main.js qui le fournit désormais — il convertit la bande en octets
+  // pour le PDF (`pdf-lib` a besoin de toutes ses images avant `save()`) et
+  // laisse l'orchestrateur lâcher le blob.
+  assert.match(MAIN, /surBande: async \(b\) => \{/)
+  assert.match(MAIN, /octets: new Uint8Array\(await b\.blob\.arrayBuffer\(\)\)/)
   assert.ok(!/rendues\.push\(sortie\)[\s\S]{0,40}surBande/.test(EXPORT))
   assert.match(EXPORT, /rendues\.push\(\{ \.\.\.sortie, blob: null \}\)/)
-  // et le poids est ANNONCÉ : quelqu'un qui reçoit 89 Mo par mail a le droit de
-  // le savoir avant de payer
+  // et les octets gardés sont libérés dès l'emballage écrit : tenir les douze
+  // bandes ET le PDF, ce serait deux fois l'affiche en mémoire
+  assert.match(MAIN, /bandesPdf\.length = 0/)
+  // le poids est ANNONCÉ, et c'est celui du PDF — la grandeur qu'on livre
   assert.match(AFFICHE, /export function poidsLisible\(/)
-  assert.match(AFFICHE, /const poids = poidsLisible\(octets\)/)
+  assert.match(AFFICHE, /poidsLisible\(pdfTirage\.octets\)/)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -241,7 +244,80 @@ test('le contournement d’atelier (Alt + clic) survit aux await ajoutés', () =
   const iAwait = clic.indexOf('await ')
   assert.ok(iLu > 0, 'altKey n’est plus lu')
   assert.ok(iLu < iAwait, 'altKey est lu après un await : il sera toujours faux')
-  assert.match(AFFICHE, /prix: PRIX_AFFICHE_EUR, atelier \}\)/)
+  assert.match(AFFICHE, /prix: PRIX_AFFICHE_EUR, atelier, pdf: pdfTirage \}\)/)
   // et le code d'atelier reste demandé côté main.js, vérifié côté serveur
   assert.match(MAIN, /if \(commande\.atelier\) \{/)
+})
+
+test('⚠️ LE CONTOURNEMENT D’ATELIER PASSE PAR LE MÊME COFFRE QUE LA VENTE', () => {
+  // Adrien éprouve la chaîne sans payer 19 € : si son chemin ne déposait pas le
+  // fichier, il éprouverait TOUT SAUF le maillon qu'on vient d'ajouter — et il
+  // reviendrait de sa fausse caisse sans rien à télécharger. Le dépôt est donc
+  // AVANT `demanderCaisse`, en dehors de toute branche `atelier`.
+  const cmd = MAIN.slice(MAIN.indexOf('onCommander: async (commande)'))
+  const iDepot = cmd.indexOf('await deposer({')
+  const iCaisse = cmd.indexOf('await demanderCaisse(')
+  const iAssign = cmd.indexOf('location.assign(')
+  assert.ok(iDepot > 0, 'le PDF n’est pas mis au coffre')
+  assert.ok(iDepot < iCaisse, 'le dépôt est fait après l’ouverture de la caisse')
+  assert.ok(iCaisse < iAssign)
+  // et il n'y a qu'un seul dépôt : deux chemins, c'est un chemin non couvert
+  assert.equal(cmd.split('await deposer({').length - 1, 1)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. LE PDF — LE MAILLON QUI MANQUAIT
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('⚠️ LE TIRAGE PRODUIT UN PDF, PAS UNE IMAGE JETÉE', () => {
+  // `src/pdf-affiche.js` était du code mort : les bandes étaient encodées puis
+  // lâchées et rien n'emballait quoi que ce soit — exactement la situation de
+  // `planTuiles`, qui a dormi trois mois dans son propre test.
+  assert.match(MAIN, /await construirePdfAffiche\(\{/)
+  assert.match(MAIN, /bandes: bandesPdf,/)
+  // le format FINI, jamais celui avec fond perdu : le débord est posé par
+  // `placerBandes` dans le BleedBox, l'ajouter ici vendrait un 51,2 × 71,2
+  assert.match(MAIN, /largeurMm, hauteurMm,\s*\n\s*bandes: bandesPdf,/)
+  // et l'écran refuse d'ouvrir la caisse sans fichier : payer 19 € pour un PDF
+  // qui n'existe pas est la seule chose pire que ne pas vendre
+  assert.match(AFFICHE, /if \(!pdfTirage\?\.blob\) throw new Error/)
+  const iPdf = AFFICHE.indexOf('if (!pdfTirage?.blob) throw new Error')
+  assert.ok(iPdf > 0 && iPdf < AFFICHE.indexOf('ctx.onCommander?.('))
+})
+
+test('⚠️ LES BANDES SONT EN JPEG — MESURÉ, PAS SUPPOSÉ', () => {
+  // pdf-lib DÉCODE un PNG et le recompresse sans prédicteur de ligne : 3,30 Mo
+  // de PNG grainé deviennent 4,25 Mo de PDF, et l'affiche entière est allouée
+  // en mémoire au passage. Un JPEG est recopié tel quel dans un flux DCTDecode.
+  const bloc = MAIN.slice(MAIN.indexOf('rendreTirage: async'), MAIN.indexOf('rendreValidation: async'))
+  assert.match(bloc, /format: FORMAT_RECOMMANDE,/)
+  assert.match(bloc, /quality: QUALITE_JPEG_TIRAGE,/)
+  // les deux viennent de pdf-affiche.js : c'est lui qui sait ce que son
+  // emballage sait recopier, et une valeur recopiée à la main ici pourrait
+  // rester derrière le jour où elle change là-bas
+  assert.match(MAIN, /FORMAT_RECOMMANDE, QUALITE_JPEG_TIRAGE,\s*\n?\s*\} = await import\('\.\/pdf-affiche\.js'\)/)
+})
+
+test('⚠️ L’EMBALLAGE SE FAIT HORS DU GEL', () => {
+  // La carte est peinte : l'emballage ne la regarde plus. Tenir la scène figée
+  // et les effets éteints pendant l'écriture du PDF ne servirait à rien, et
+  // ferait dépendre l'état de la carte du succès de `pdf-lib`.
+  const bloc = MAIN.slice(MAIN.indexOf('rendreTirage: async'), MAIN.indexOf('rendreValidation: async'))
+  assert.ok(bloc.indexOf('degeler?.()') < bloc.indexOf('await construirePdfAffiche({'))
+})
+
+test('⚠️ LE FICHIER SURVIT AU PAIEMENT, ET NE SORT QUE SI LE SERVEUR A DIT « PAYÉ »', () => {
+  // La réserve nº 1 de la tâche 8. Le coffre contient un fichier produit AVANT
+  // le paiement : le sortir sans vérifier l'état livrerait une affiche à qui a
+  // fait demi-tour chez Stripe. `verifierPaiement` est la seule source qui fasse
+  // foi — `?paye=` ne sert qu'à savoir quoi lui demander.
+  const bloc = MAIN.slice(MAIN.indexOf('async function reprendreApresPaiement()'))
+  const iVerif = bloc.indexOf('await verifierPaiement(session)')
+  const iSortie = bloc.indexOf('await sortirDuCoffre(')
+  assert.ok(iVerif > 0 && iSortie > iVerif, 'le coffre est ouvert avant la vérification')
+  assert.match(bloc, /const paye = etat === 'paye' \|\| etat === 'livree'/)
+  assert.match(bloc, /paye \? await sortirDuCoffre\(panier\?\.id\) : null/)
+  // et le message dit la vérité : il ne promet un téléchargement que si le
+  // fichier est vraiment en main
+  assert.match(bloc, /messageRetour\(etat, \{ fichierPret: !!garde \}\)/)
 })

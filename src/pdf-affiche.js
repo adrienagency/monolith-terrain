@@ -577,7 +577,50 @@ export function poidsPdfAttendu({ octetsBandes = 0, bandes = 1, type = FORMAT_RE
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ⑦ LA CONSTRUCTION
+// ⑦ LE NOM DU FICHIER — CE QUI RESTE QUAND TOUT LE RESTE EST OUBLIÉ
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Le fichier finit dans un dossier de téléchargements, puis dans une pièce
+// jointe, puis chez un imprimeur qui en reçoit trente par jour. Son nom est la
+// seule chose qui l'accompagne : il doit dire le lieu, le format et la densité,
+// et ne contenir que ce qu'un système de fichiers, un serveur de courrier et un
+// formulaire de téléversement acceptent tous les trois.
+//
+// ⚠️ D'OÙ L'ASCII, ET CE N'EST PAS UN RENONCEMENT ESTHÉTIQUE. « Chamonix-Mont-
+// Blanc » est un nom français ordinaire ; les accents et les apostrophes
+// typographiques traversent mal les en-têtes `Content-Disposition` et certains
+// dépôts FTP d'imprimeurs. On translittère une fois, ici, plutôt que de
+// découvrir un « Ann_cy.pdf » chez le prestataire.
+
+const ACCENTS_HORS = (s) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
+/**
+ * Le nom du fichier livré, sans extension imposée par l'appelant.
+ *
+ * @param {object} o
+ * @param {string} [o.titre] - le nom imprimé sur l'affiche
+ * @param {string} [o.format] - `50x70`, `a2`…
+ * @param {string} [o.orientation] @param {number} [o.dpi]
+ * @returns {string} par exemple `shibumap-annecy-50x70-paysage-250dpi.pdf`
+ */
+export function nomFichierAffiche({ titre = '', format = '', orientation = '', dpi = 0 } = {}) {
+  const lisse = ACCENTS_HORS(titre)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    // Un nom de lieu très long ne doit pas produire un nom de fichier que
+    // certains systèmes tronquent au milieu d'un mot.
+    .slice(0, 48)
+    .replace(/-+$/g, '')
+  const bouts = ['shibumap', lisse || 'affiche']
+  if (format) bouts.push(ACCENTS_HORS(format).toLowerCase().replace(/[^a-z0-9]+/g, ''))
+  if (orientation) bouts.push(orientation === 'portrait' ? 'portrait' : 'paysage')
+  if (Number.isFinite(dpi) && dpi > 0) bouts.push(`${Math.round(dpi)}dpi`)
+  return `${bouts.join('-')}.pdf`
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⑧ LA CONSTRUCTION
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**

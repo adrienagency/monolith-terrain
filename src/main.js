@@ -111,7 +111,7 @@ import { History } from './history.js'
 import { isTap } from './gestes.js'
 import { bindShortcuts } from './shortcuts.js'
 import { refreshAll } from './ui/kit.js'
-import { showNotice } from './ui/toast.js'
+import { showNotice, showLivraison } from './ui/toast.js'
 import { showFollowPad, hideFollowPad } from './ui/follow-pad.js'
 import { buildTopBar, buildBottomBar, buildIsoButton, buildCineButton, buildCredits, buildMapCorner, buildQuickCore, buildShibuChrome, initUiLevel, buildAdvToggle, focusSearch, isUiAdvanced } from './ui/bars.js'
 import { routeEntryFor, incomingWaypoints, resolveWaypointKm } from './route-entry.js'
@@ -7260,6 +7260,13 @@ async function openAfficheUI(etatInitial = null) {
     planComposition, supportAffiche, mentionsAffiche, attendrePolices,
     tailleValidation, composerValidation,
   } = await import('./compositeur-affiche.js')
+  // L'EMBALLAGE. Il ne dessine rien : il dit à l'imprimeur ce que l'image EST
+  // (les trois boîtes, l'intention de sortie, les métadonnées). Voir
+  // src/pdf-affiche.js — et c'est lui qui impose le JPEG, pour la raison
+  // mesurée rappelée dans `rendreTirage`.
+  const {
+    construirePdfAffiche, nomFichierAffiche, FORMAT_RECOMMANDE, QUALITE_JPEG_TIRAGE,
+  } = await import('./pdf-affiche.js')
   const { sonderMateriel } = await import('./sonde-materielle.js')
   // Ce qu'on devra rendre en sortant : l'affiche emprunte des réglages de carte,
   // elle ne se les approprie pas.
@@ -7441,11 +7448,20 @@ async function openAfficheUI(etatInitial = null) {
     // mêmes fonctions, ce qui est la seule façon que l'écran et le fichier ne
     // divergent pas.
     //
-    // ⚠️ RIEN NE L'APPELLE ENCORE : le déclenchement, la progression et
-    // l'annulation appartiennent à la tâche 8 (« rendre avant d'encaisser »).
-    // Il est branché ici, et pas laissé dans export.js, pour que le chemin de
-    // production existe — c'est précisément faute de ce branchement que
-    // planTuiles a dormi trois mois dans son propre test.
+    // ═══ ET IL REND UN PDF, PAS UNE IMAGE JETÉE ════════════════════════════
+    //
+    // C'est le dernier maillon, et il a failli manquer : `src/pdf-affiche.js`
+    // était du code mort — les bandes étaient encodées puis lâchées, et rien
+    // n'emballait quoi que ce soit. Exactement la situation de `planTuiles`,
+    // « qui a dormi trois mois dans son propre test ».
+    //
+    // ⚠️ ET LES BANDES SONT EN JPEG, PAS EN PNG. Ce n'est pas un arbitrage de
+    // goût entre qualité et poids, c'est MESURÉ (tâche 9) : `pdf-lib` DÉCODE un
+    // PNG et le recompresse SANS prédicteur de ligne — 3,30 Mo de PNG grainé
+    // deviennent 4,25 Mo de PDF, et l'affiche entière est allouée en mémoire au
+    // passage, juste après un pavage qui vient de passer onze secondes à ne
+    // JAMAIS l'allouer. Un JPEG, lui, est RECOPIÉ TEL QUEL dans un flux
+    // `DCTDecode` : le PDF pèse la somme des bandes plus ~6,4 ko.
     //
     // @param {[number,number]} totalPx - la taille à produire, fond perdu compris
     // @param {number} hauteurFiniePx - la hauteur APRÈS coupe
@@ -7476,10 +7492,26 @@ async function openAfficheUI(etatInitial = null) {
       await attendrePolices(plan)
       const restaurerEffets = neutraliserEffetsAffiche()
       let degeler = null
+      // ⚠️ LES OCTETS DES BANDES SONT GARDÉS, ET C'EST UN CHANGEMENT ASSUMÉ.
+      // Jusqu'ici l'écran d'affiche fournissait `surBande` uniquement pour dire
+      // à l'orchestrateur de LÂCHER les blobs — douze bandes d'A2 en PNG, c'est
+      // l'image pleine sous une autre forme. Mais un PDF ne s'écrit pas au fil :
+      // `pdf-lib` a besoin de toutes ses images avant `save()`. On garde donc,
+      // et ce qu'on garde a changé de nature : ce ne sont plus 89 Mo de PNG mais
+      // la somme des JPEG, c'est-à-dire le poids du PDF lui-même. Les blobs,
+      // eux, sont toujours lâchés par l'orchestrateur (on lui fournit bien un
+      // `surBande`), et les tableaux d'octets sont libérés dès l'emballage fait.
+      const bandesPdf = []
+      let pave = null
       try {
-        return await exporteAffichePavee({
+        pave = await exporteAffichePavee({
           renderer, composer, camera,
           totalPx, dpi,
+          // ⚠️ LE FORMAT DES BANDES EST CELUI QUE LE PDF SAIT RECOPIER. Voir
+          // l'encadré ⑥ de pdf-affiche.js : un PNG serait décodé puis
+          // recompressé sans prédicteur, donc plus lourd que le PNG d'origine.
+          format: FORMAT_RECOMMANDE,
+          quality: QUALITE_JPEG_TIRAGE,
           // Le classement des effets a besoin de savoir ce qui est ALLUMÉ : la
           // marge de recouvrement dépend du bokeh, et la liste à neutraliser du
           // vignettage et du grain. Voir export-effets.js.
@@ -7543,7 +7575,21 @@ async function openAfficheUI(etatInitial = null) {
           // ce qui rend sa preuve rejouable — et on lui donne donc la même toile,
           // augmentée d'un passage avant l'encodage de chaque bande.
           support: supportAffiche({ plan, logo: logoImg, base: supportNavigateur() }),
-          surBande, onProgress, annule,
+          // ⚠️ ON PREND LA BANDE POUR LA CONVERTIR TOUT DE SUITE, ET POUR QUE
+          // L'ORCHESTRATEUR LA LÂCHE. `arrayBuffer()` copie les octets encodés
+          // (quelques mégaoctets par bande en JPEG) ; le blob, lui, est
+          // relâché — c'est la raison d'être de ce rappel côté export.js.
+          surBande: async (b) => {
+            if (b?.blob) {
+              bandesPdf.push({
+                octets: new Uint8Array(await b.blob.arrayBuffer()),
+                type: b.blob.type || FORMAT_RECOMMANDE,
+                hauteurPx: b.hauteur,
+              })
+            }
+            await surBande?.(b)
+          },
+          onProgress, annule,
         })
       } finally {
         // ⚠️ DANS CET ORDRE. Le dégel relance la boucle d'images ; si les effets
@@ -7551,6 +7597,45 @@ async function openAfficheUI(etatInitial = null) {
         // carte sans vignettage ni grain — un clignotement à chaque tirage.
         restaurerEffets()
         degeler?.()
+      }
+
+      // ═══ L'EMBALLAGE — HORS DU GEL, ET C'EST VOLONTAIRE ══════════════════
+      //
+      // La carte est peinte : l'emballage ne la regarde plus. Le faire dans le
+      // `try` ci-dessus tiendrait la scène figée et les effets éteints pendant
+      // la seconde que coûte l'écriture du PDF, pour rien — et un échec de
+      // `pdf-lib` laisserait la carte gelée si le `finally` avait été mal écrit.
+      if (annule?.()) throw new Error('Rendu annulé')
+      const emballage = await construirePdfAffiche({
+        // ⚠️ LE FORMAT FINI, PAS L'IMAGE. `largeurMm`/`hauteurMm` sont les
+        // dimensions APRÈS coupe ; le fond perdu que les bandes portent en plus
+        // est posé par `placerBandes` dans le BleedBox. Passer ici la taille
+        // avec fond perdu vendrait un 51,2 × 71,2 sans que personne ne le voie.
+        largeurMm, hauteurMm,
+        bandes: bandesPdf,
+        titre: `${(etat?.titre || lieuCourant().nom || 'Affiche').trim()} — ShibuMap`,
+        auteur: 'ShibuMap',
+        producteur: 'ShibuMap',
+        outil: 'ShibuMap — affiche d’impression',
+      })
+      // Les octets des bandes ont été recopiés dans le document : les garder une
+      // seconde fois doublerait le pic mémoire de l'emballage pour rien.
+      bandesPdf.length = 0
+      const blob = new Blob([emballage.octets], { type: 'application/pdf' })
+      return {
+        ...pave,
+        pdf: {
+          blob,
+          octets: blob.size,
+          nom: nomFichierAffiche({
+            titre: etat?.titre || lieuCourant().nom,
+            format: etat?.format,
+            orientation: etat?.orientation,
+            dpi,
+          }),
+          boites: emballage.boites,
+          conformite: emballage.conformite,
+        },
       }
     },
     // ═══════ L'ÉCRAN DE VALIDATION — CELUI QUI DÉCIDE DE TOUT ══════════════
@@ -7660,6 +7745,38 @@ async function openAfficheUI(etatInitial = null) {
       const id = identifiantPanier()
       poserPanier({ id, article, carte: etatCarteEncode(), affiche: afficheSerialisable(commande) })
 
+      // ═══ ET LE FICHIER SE MET AU COFFRE, POUR LA MÊME RAISON ═════════════
+      //
+      // ⚠️ C'EST LA RÉSERVE Nº 1 DE LA TÂCHE 8, ET ELLE SE RÈGLE ICI. Partir
+      // chez Stripe est une NAVIGATION : le document est détruit, et le PDF
+      // qu'on vient de mettre onze secondes à produire meurt avec lui. Rendre
+      // avant d'encaisser prouvait que cette machine SAIT le produire ; ce
+      // dépôt-là est ce qui met le fichier EN SÉCURITÉ.
+      //
+      // L'arbitrage entre les trois voies possibles (nouvel onglet, refaire au
+      // retour, persister) est écrit en tête de src/coffre-affiche.js. En deux
+      // mots : le nouvel onglet est bloqué parce que l'activation de
+      // l'utilisateur est consommée depuis onze secondes, et refaire au retour
+      // livrerait une AUTRE affiche — le logo importé ne traverse pas la
+      // navigation.
+      //
+      // ⚠️ ATTENDU, PAS LANCÉ. Une transaction IndexedDB non validée est
+      // abandonnée avec le document : ne pas attendre ce dépôt, c'est ne pas le
+      // faire. Et il ne peut pas échouer bruyamment — un stockage refusé fait
+      // perdre le fichier, jamais la vente.
+      if (commande.pdf?.blob) {
+        const { deposer } = await import('./coffre-affiche.js')
+        await deposer({
+          id,
+          blob: commande.pdf.blob,
+          nom: commande.pdf.nom,
+          octets: commande.pdf.octets,
+          format: commande.format,
+          orientation: commande.orientation,
+          dpi: commande.geo?.dpi,
+        })
+      }
+
       const r = await demanderCaisse({ article, retour: id, code })
       if (!r.ok) {
         // On reste à l'écran : le panier n'a plus de raison d'être, la
@@ -7712,6 +7829,56 @@ async function openAfficheUI(etatInitial = null) {
 // encore. C'était déjà la doctrine du code qu'on remplace ici (« on le DIT
 // plutôt que d'afficher une fausse confirmation ») ; elle vaut d'autant plus
 // maintenant que l'argent est réellement encaissé. Voir messageRetour().
+// ── LE COFFRE : SORTIR CE QU'ON Y AVAIT MIS ────────────────────────────────
+//
+// ⚠️ AUCUNE DE CES DEUX FONCTIONS NE DOIT POUVOIR CASSER LE RETOUR. Quelqu'un
+// qui revient d'un paiement réussi doit voir sa confirmation même si le stockage
+// de son navigateur est en vrac : on perd alors le téléchargement immédiat, pas
+// la confirmation — et le message de retour dit déjà qu'Adrien envoie le fichier
+// par mail.
+async function sortirDuCoffre(id) {
+  if (!id) return null
+  try {
+    const { retirer } = await import('./coffre-affiche.js')
+    return await retirer(id)
+  } catch (err) {
+    console.warn('[ShibuMap] coffre : indisponible au retour —', err?.message || err)
+    return null
+  }
+}
+
+/**
+ * Met le fichier à portée de clic, et ne l'efface qu'une fois pris.
+ *
+ * ⚠️ UN CLIC, PAS UN TÉLÉCHARGEMENT AUTOMATIQUE. Une écriture de fichier
+ * déclenchée sans geste, au retour d'une navigation externe, est exactement ce
+ * que les navigateurs bloquent — et quand ils ne la bloquent pas, elle passe
+ * inaperçue : le fichier atterrit dans un dossier sans que l'acheteur sache
+ * qu'il l'a. La carte reste à l'écran tant qu'il n'a pas cliqué.
+ *
+ * ⚠️ ET L'EFFACEMENT VIENT APRÈS LE CLIC. Jeter l'entrée en la sortant, ce
+ * serait la jeter avant de savoir si le téléchargement a abouti.
+ */
+function proposerLeFichier(garde) {
+  const url = URL.createObjectURL(garde.blob)
+  showLivraison({
+    texte: 'Ton fichier d’impression est prêt.',
+    detail: [garde.nom, garde.octets ? `${(garde.octets / 1e6).toFixed(1).replace('.', ',')} Mo` : '']
+      .filter(Boolean).join(' · '),
+    nom: garde.nom,
+    url,
+    onPris: async () => {
+      try {
+        const { jeter } = await import('./coffre-affiche.js')
+        await jeter(garde.id)
+      } catch { /* une entrée qui survit sera purgée par sa date */ }
+      // L'URL d'objet survit au document : sans ceci, les octets du PDF restent
+      // vivants jusqu'au rechargement de la page.
+      setTimeout(() => URL.revokeObjectURL(url), 60000)
+    },
+  })
+}
+
 async function reprendreApresPaiement() {
   const { cas, session } = RETOUR_PAIEMENT
   if (!cas) return
@@ -7730,7 +7897,17 @@ async function reprendreApresPaiement() {
   // `invalide` : un `?paye=` qui ne ressemble même pas à un identifiant Stripe.
   // On n'interroge personne, et on ne confirme rien.
   const { etat } = cas === 'paye' ? await verifierPaiement(session) : { etat: 'inconnue' }
-  showNotice(messageRetour(etat), { duration: 9000 })
+  // ═══ LE FICHIER QU'ON AVAIT MIS DE CÔTÉ AVANT DE PARTIR ═══════════════════
+  //
+  // ⚠️ ON NE LE SORT QUE SI LE SERVEUR A DIT « PAYÉ ». Le coffre contient un
+  // fichier produit AVANT le paiement : le lire sans avoir vérifié l'état
+  // reviendrait à livrer une affiche à qui a fait demi-tour chez Stripe.
+  // `verifierPaiement` est la seule source qui fasse foi (elle a la clé
+  // secrète) ; `?paye=` ne sert qu'à savoir quoi lui demander.
+  const paye = etat === 'paye' || etat === 'livree'
+  const garde = paye ? await sortirDuCoffre(panier?.id) : null
+  showNotice(messageRetour(etat, { fichierPret: !!garde }), { duration: 9000 })
+  if (garde) proposerLeFichier(garde)
   // Un paiement abouti ne rouvre PAS l'écran d'affiche : son bouton inviterait
   // à payer une seconde fois la même affiche. La carte, elle, est restaurée —
   // c'est ce qu'on veut retrouver. Dans tous les autres cas (en attente,
@@ -9807,6 +9984,12 @@ setTimeout(() => {
   // revient de chez Stripe n'a pas besoin qu'on lui présente l'interface : il
   // attend une réponse sur son paiement. Et le relief doit être là — l'écran
   // d'affiche refait un rendu, il lui faut une scène.
+  // ⚠️ LE BALAI PASSE À CHAQUE VISITE, PAS SEULEMENT AU RETOUR DE LA CAISSE. Un
+  // achat abandonné laisse un PDF de plusieurs mégaoctets dans le navigateur ;
+  // sans ce passage, il y dormirait jusqu'au prochain paiement — c'est-à-dire
+  // peut-être jamais. Une affiche dit où quelqu'un est allé : ce n'est pas une
+  // donnée à laisser traîner. Voir DUREE_VIE_MS (src/coffre-affiche.js).
+  import('./coffre-affiche.js').then((m) => m.purger()).catch(() => {})
   if (RETOUR_PAIEMENT.cas) { reprendreApresPaiement(); return }
   if (IS_STORE_BOOT) { store.enter(); return } // /templates → boutique directe
   if (IS_STUDIO_BOOT) { studio.enter(); return } // ?studio=1 → Race Studio direct

@@ -32,6 +32,59 @@ export function showToast(text, { duration = 2800 } = {}) {
 let noticeEl = null
 let noticeTimer = null
 
+// ═══════════════════════════════════════════════════════════════════════════
+// LA CARTE DE LIVRAISON — LE SEUL MESSAGE DE CETTE APPLICATION QUI ATTEND
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Le toast et la notice s'effacent tout seuls, et c'est juste : ils confirment
+// ou ils refusent. Celle-ci REMET UN FICHIER PAYÉ. Elle ne peut donc ni partir
+// d'elle-même — on ne fait pas disparaître au bout de neuf secondes la seule
+// façon de récupérer ce qu'on vient d'acheter — ni laisser passer les clics :
+// `.ce-notice` est en `pointer-events: none`, ce qui rendrait le lien mort.
+//
+// ⚠️ ET C'EST UN VRAI LIEN, PAS UN BOUTON QUI TÉLÉCHARGE. Un `<a download>` fait
+// le travail du navigateur : clic droit « enregistrer sous », appui long sur
+// mobile, glisser-déposer vers un dossier. Un `click()` programmé n'offre rien
+// de tout ça, et se fait bloquer hors geste de l'utilisateur.
+let livraisonEl = null
+
+export function showLivraison({ texte, detail = '', nom = 'affiche.pdf', url, onPris } = {}) {
+  if (!url) return null
+  livraisonEl?.remove()
+  const carte = el('div', 'ce-livraison')
+  carte.setAttribute('role', 'status')
+  carte.setAttribute('aria-live', 'polite')
+  carte.append(el('p', 'ce-liv-titre', texte || 'Ton fichier est prêt.'))
+  if (detail) carte.append(el('p', 'ce-liv-detail', detail))
+  const lien = el('a', 'ce-liv-lien', 'Télécharger le PDF')
+  lien.href = url
+  lien.download = nom
+  const fermer = el('button', 'ce-liv-fermer', 'Fermer')
+  fermer.type = 'button'
+  let pris = false
+  lien.addEventListener('click', () => {
+    if (pris) return
+    pris = true
+    // ⚠️ APRÈS LE CLIC, PAS AVANT. On ne retire l'exemplaire de secours qu'une
+    // fois le téléchargement lancé — et la carte reste, pour un second clic.
+    lien.textContent = 'Télécharger à nouveau'
+    onPris?.()
+  })
+  fermer.addEventListener('click', () => { carte.remove(); livraisonEl = null })
+  carte.append(lien, fermer)
+  document.body.append(carte)
+  livraisonEl = carte
+  // ⚠️ UN REFLOW, PAS UN `requestAnimationFrame` — ET C'EST UNE CORRECTION
+  // OBSERVÉE. Un rAF NE SE DÉCLENCHE PAS tant que le document n'est pas
+  // composité : onglet en arrière-plan, fenêtre réduite, ou simplement masquée.
+  // La carte restait alors à `opacity: 0`, c'est-à-dire invisible — et c'est
+  // très exactement ce que quelqu'un fait en revenant d'un paiement dans un
+  // autre onglet. `showNotice` utilise déjà ce reflow, pour la même raison.
+  void carte.offsetWidth
+  carte.classList.add('show')
+  return carte
+}
+
 export function showNotice(text, { duration = 5200 } = {}) {
   if (!noticeEl) {
     noticeEl = el('div', 'ce-notice')

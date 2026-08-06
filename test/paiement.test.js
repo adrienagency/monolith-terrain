@@ -604,3 +604,20 @@ test('une commande ORDINAIRE ne regarde même pas le code d’atelier', async ()
   assert.equal(appels.length, 1)
   assert.match(appels[0], /api\.stripe\.com/)
 })
+
+// ── LE MESSAGE DE RETOUR QUAND LE FICHIER EST VRAIMENT LÀ ───────────────────
+
+test('⚠️ LE TÉLÉCHARGEMENT NE SE PROMET QUE SI LE FICHIER EST EN MAIN', () => {
+  // La doctrine n'a pas changé : sans fichier, aucune phrase ne promet de
+  // téléchargement. Ce qui a changé, c'est qu'il peut maintenant y en avoir un
+  // — sorti du coffre, à l'écran, au moment où ce message s'affiche.
+  assert.match(messageRetour('paye'), /pas encore produit/)
+  assert.match(messageRetour('paye', { fichierPret: true }), /téléchargement/)
+  assert.ok(!/pas encore produit/.test(messageRetour('paye', { fichierPret: true })))
+  assert.match(messageRetour('livree', { fichierPret: true }), /téléchargement/)
+  // et un état qui n'est pas un paiement abouti ne promet rien, fichier ou pas :
+  // le coffre contient un fichier produit AVANT le paiement.
+  for (const etat of ['en-attente', 'expiree', 'indisponible', 'inconnue']) {
+    assert.ok(!/télécharg/i.test(messageRetour(etat, { fichierPret: true })), etat)
+  }
+})

@@ -258,6 +258,79 @@ body.dark .ce-notice {
   color: #e8e4da;
 }
 
+/* Carte de livraison — la remise d'un fichier PAYÉ. Même famille visuelle que
+   la notice (papier, flou, ombre douce), trois différences qui comptent : elle
+   ne s'efface pas toute seule, elle REÇOIT LES CLICS (une notice est en
+   `pointer-events: none`, ce qui rendrait le lien mort), et elle se pose en bas
+   plutôt qu'au centre — la confirmation de paiement occupe déjà le milieu, et
+   les deux arrivent au même instant. */
+.ce-livraison {
+  position: fixed;
+  left: 50%;
+  bottom: 34px;
+  transform: translate(-50%, 12px);
+  max-width: min(88vw, 380px);
+  padding: 16px 20px 14px;
+  border-radius: 14px;
+  background: rgba(252, 251, 248, 0.97);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 18px 48px rgba(20, 24, 28, 0.24);
+  backdrop-filter: blur(16px);
+  font-family: 'Bricolage Grotesque', system-ui, sans-serif;
+  color: #23201a;
+  text-align: center;
+  z-index: 95; /* au-dessus de la notice : celle-ci, on n'a pas le droit de la manquer */
+  opacity: 0;
+  transition: opacity 0.3s, transform 0.3s;
+}
+.ce-livraison.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.ce-liv-titre {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.ce-liv-detail {
+  margin: 4px 0 0;
+  font-size: 12px;
+  opacity: 0.62;
+  word-break: break-all;
+}
+.ce-liv-lien {
+  display: block;
+  margin: 12px 0 0;
+  padding: 10px 18px;
+  border-radius: 10px;
+  background: #17191b;
+  color: #fcfbf8;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.ce-liv-fermer {
+  margin: 8px 0 0;
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  opacity: 0.5;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+body.dark .ce-livraison {
+  background: rgba(18, 19, 22, 0.95);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #e8e4da;
+}
+body.dark .ce-liv-lien {
+  background: #e8e4da;
+  color: #17191b;
+}
+
 /* ------------------------------------------------------------- HUD (FUI) */
 :root {
   --hud-ink: #17191b;

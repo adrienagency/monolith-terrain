@@ -278,21 +278,31 @@ export async function verifierPaiement(session, fetchImpl = globalThis.fetch) {
  * ici pour une raison : c'est la DOCTRINE du projet qui s'écrit dans ces
  * phrases, et elle doit rester relisable d'un seul coup d'œil.
  *
- * ⚠️ AUCUNE DE CES PHRASES NE PROMET UN TÉLÉCHARGEMENT. La chaîne PDF n'existe
- * pas encore. Promettre un fichier qui n'arrive pas coûte plus cher que
- * d'assumer un chantier — c'est déjà ce que disait le code qu'on remplace ici,
- * et ça reste vrai maintenant que l'argent est réellement encaissé.
+ * ⚠️ AUCUNE DE CES PHRASES NE PROMET UN TÉLÉCHARGEMENT TANT QU'IL N'Y A PAS DE
+ * FICHIER EN MAIN. C'est la doctrine, et elle n'a pas changé : promettre un
+ * fichier qui n'arrive pas coûte plus cher que d'assumer un chantier.
+ *
+ * `fichierPret` est le SEUL interrupteur, et il ne s'allume pas sur une
+ * intention : l'appelant l'allume quand il a sorti le PDF du coffre et qu'il
+ * est en train de le poser à l'écran (voir src/coffre-affiche.js et
+ * `proposerLeFichier` dans main.js). Sans coffre lisible — navigation privée,
+ * quota, autre machine — on retombe mot pour mot sur la phrase d'avant, qui
+ * reste vraie : c'est Adrien qui envoie le fichier.
  */
-export function messageRetour(etat) {
+export function messageRetour(etat, { fichierPret = false } = {}) {
   switch (etat) {
     case 'paye':
-      return 'Paiement reçu, merci. Le fichier d’impression n’est pas encore produit automatiquement : Adrien te l’envoie par mail. Ta facture Stripe arrive de son côté.'
+      return fichierPret
+        ? 'Paiement reçu, merci. Ton fichier d’impression est prêt : le bouton de téléchargement est en bas de l’écran. Ta facture Stripe arrive de son côté.'
+        : 'Paiement reçu, merci. Le fichier d’impression n’est pas encore produit automatiquement : Adrien te l’envoie par mail. Ta facture Stripe arrive de son côté.'
     case 'en-attente':
       return 'Paiement en cours de confirmation par la banque. Rien à refaire de ton côté : tu recevras un mail dès qu’il est validé.'
     case 'expiree':
       return 'Cette session de paiement a expiré. Ta composition est toujours là — tu peux relancer la commande.'
     case 'livree':
-      return 'Cette commande a déjà été traitée — regarde tes mails, le fichier y est.'
+      return fichierPret
+        ? 'Cette commande a déjà été traitée. Ton exemplaire est là : le bouton de téléchargement est en bas de l’écran.'
+        : 'Cette commande a déjà été traitée — regarde tes mails, le fichier y est.'
     case 'indisponible':
       return 'Impossible de vérifier ce paiement pour l’instant. Si tu as été débité, écris à adrien@adrienagency.com : rien n’est perdu.'
     default:

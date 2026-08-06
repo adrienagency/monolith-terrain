@@ -434,7 +434,12 @@ export function ouvrirAffiche(ctx) {
   const ctaPrix = el('span', null, `${PRIX_AFFICHE_EUR} €`)
   cta.append(ctaTexte, ctaPrix)
   const rassure = el('p', 'af-rassure')
-  rassure.innerHTML = 'Le PDF arrive par mail, tout de suite. <b>Pas de compte à créer.</b><br>L’image à l’écran, elle, reste gratuite.'
+  // ⚠️ CETTE PHRASE A CHANGÉ PARCE QUE LA CHAÎNE A CHANGÉ. Elle promettait un
+  // envoi par mail — c'était vrai tant que le fichier n'existait pas avant le
+  // paiement. Il est maintenant fabriqué AVANT, mis au coffre, et rendu au
+  // retour de la caisse : promettre le mail ferait attendre pour rien quelqu'un
+  // qui a déjà son fichier à l'écran.
+  rassure.innerHTML = 'Le PDF se télécharge dès le paiement validé. <b>Pas de compte à créer.</b><br>L’image à l’écran, elle, reste gratuite.'
   pied.append(verite, cta, rassure)
   rail.append(corps, pied)
 
@@ -635,11 +640,20 @@ export function ouvrirAffiche(ctx) {
   //   ② le tirage pavé, avec sa progression et son bouton d'annulation ;
   //   ③ Stripe.
   //
-  // ⚠️ ON NE GARDE PAS LE FICHIER. Une affiche pèse 21 à 89 Mo en PNG, et partir
-  // payer est une NAVIGATION : le document est remplacé, ces octets meurent de
-  // toute façon. Les tenir en mémoire jusque-là, c'est prendre le risque de
-  // manquer de place pour rien. Ce qu'on garde est ce qui vaut : la PREUVE que
-  // cette machine sait produire ce fichier, et son poids, qu'on annonce.
+  // ⚠️ ET ON GARDE LE FICHIER — C'EST LE CONTRAIRE DE CE QUE FAISAIT CET ÉCRAN,
+  // ET C'EST MESURÉ. La première version jetait les bandes au fil : une affiche
+  // pesait 21 à 89 Mo en PNG, partir payer est une navigation, ces octets
+  // mouraient de toute façon. Deux choses ont changé depuis.
+  //   ① LE POIDS. Les bandes sont maintenant du JPEG (pdf-affiche.js explique
+  //      pourquoi : un PNG serait décodé puis regonflé par pdf-lib), et le PDF
+  //      pèse leur somme. On tient un fichier, pas une image en RVBA.
+  //   ② LA DESTINATION. Ce PDF part au COFFRE avant la caisse — c'est ce qui
+  //      lui fait traverser la navigation vers Stripe. Voir
+  //      src/coffre-affiche.js pour l'arbitrage entre les trois voies, et
+  //      `onCommander` dans main.js pour le dépôt lui-même.
+  // Ce qu'on n'a toujours pas le droit de faire, c'est de tenir douze bandes ET
+  // le PDF : l'emballage libère les octets des bandes dès qu'il a écrit (voir
+  // `rendreTirage`).
   const voile = el('div', 'af-tirage')
   voile.setAttribute('role', 'status')
   voile.setAttribute('aria-live', 'polite')
@@ -697,6 +711,10 @@ export function ouvrirAffiche(ctx) {
     cta.disabled = true
     ctaTexte.textContent = 'Un instant…'
     const geo = geoCourante()
+    // Le fichier produit à l'étape ②, gardé pour être remis à `onCommander` —
+    // qui le met au coffre avant de quitter la page. Déclaré ici parce que le
+    // `finally` doit pouvoir le lâcher, quoi qu'il arrive.
+    let pdfTirage = null
     // ⚠️ RÉARMER LE BOUTON N'EST PAS AUTOMATIQUE. Un clic réussi part chez
     // Stripe : le bouton redeviendrait cliquable pendant que le navigateur
     // quitte la page, et un second clic ouvrirait une seconde session de
@@ -742,7 +760,6 @@ export function ouvrirAffiche(ctx) {
         if (annulation) throw new Error('Rendu annulé')
         tirEtape.textContent = 'Rendu du fichier…'
         const debut = (globalThis.performance || Date).now()
-        let octets = 0
         const r = await ctx.rendreTirage({
           totalPx: geo.totalPx,
           hauteurFiniePx: geo.finiPx[1],
@@ -753,11 +770,6 @@ export function ouvrirAffiche(ctx) {
           cadrage: { ...etat.cadrage },
           pointNet: etat.pointNet,
           etat,
-          // ⚠️ ON PREND LA BANDE POUR NE PAS LA GARDER. Fournir `surBande` dit à
-          // l'orchestrateur de LÂCHER le blob (voir export.js) : douze bandes
-          // d'A2 conservées, c'est l'image pleine sous une autre forme. On n'en
-          // retient que le poids, pour pouvoir l'annoncer.
-          surBande: (b) => { octets += b?.blob?.size || 0 },
           onProgress: (f) => {
             const pct = Math.max(0, Math.min(100, Math.round(f * 100)))
             tirBarre.style.width = `${pct}%`
@@ -767,13 +779,23 @@ export function ouvrirAffiche(ctx) {
         })
         const secondes = ((globalThis.performance || Date).now() - debut) / 1000
         tirBarre.style.width = '100%'
-        const poids = poidsLisible(octets)
+        // ⚠️ LE POIDS ANNONCÉ EST CELUI DU PDF, PAS LA SOMME DES BANDES. C'est
+        // le fichier que l'acheteur recevra ; l'écart entre les deux ne vaut que
+        // quelques kilo-octets de structure, mais annoncer une grandeur qu'on ne
+        // livre pas est exactement l'habitude que ce chantier combat.
+        pdfTirage = r?.pdf || null
         tirEtape.textContent = 'Ton fichier est prêt.'
         tirDetail.textContent = [
-          poids,
+          pdfTirage ? poidsLisible(pdfTirage.octets) : '',
+          pdfTirage ? 'PDF' : '',
           `${r?.plan?.tuiles?.length ?? '?'} tuiles`,
           `${secondes.toFixed(1).replace('.', ',')} s`,
         ].filter(Boolean).join(' · ')
+        // ⚠️ PAS DE PDF, PAS DE VENTE. Le pavage peut avoir réussi et
+        // l'emballage échouer (bibliothèque absente du bundle, boîtes
+        // incohérentes) : l'acheteur paierait alors 19 € pour un fichier qui
+        // n'existe pas. On échoue AVANT la caisse, où ça ne coûte qu'un message.
+        if (!pdfTirage?.blob) throw new Error('le PDF n’a pas pu être fabriqué')
       }
 
       // ── ③ SEULEMENT MAINTENANT, LA CAISSE ─────────────────────────────────
@@ -781,7 +803,12 @@ export function ouvrirAffiche(ctx) {
       tirTitre.textContent = 'Fichier prêt'
       tirEtape.textContent = 'Ouverture du paiement sécurisé…'
       tirAnnuler.hidden = true
-      const suite = ctx.onCommander?.({ ...etat, geo, prix: PRIX_AFFICHE_EUR, atelier })
+      // ⚠️ LE PDF PART AVEC LA COMMANDE. C'est `onCommander` qui connaît
+      // l'identifiant de panier — celui qui reliera le retour de Stripe à ce
+      // fichier-ci — et c'est donc là, à côté de `poserPanier`, que le dépôt au
+      // coffre a sa place. Le lui passer ici est ce qui fait survivre le fichier
+      // à la navigation. Voir src/coffre-affiche.js.
+      const suite = ctx.onCommander?.({ ...etat, geo, prix: PRIX_AFFICHE_EUR, atelier, pdf: pdfTirage })
       if (suite && typeof suite.then === 'function') reste = (await suite) !== 'parti'
     } catch (err) {
       const annule = annulation || /annul/i.test(err?.message || '')
@@ -800,7 +827,16 @@ export function ouvrirAffiche(ctx) {
     } finally {
       tirAnnuler.hidden = false
       fermerVoile()
-      if (reste) { cta.disabled = false; ctaTexte.textContent = 'Recevoir le fichier' }
+      // ⚠️ ON LÂCHE LE PDF DÈS QU'ON RESTE. `reste` veut dire que la caisse ne
+      // s'est pas ouverte : le fichier ne servira plus, et un second essai en
+      // refabriquera un. Le garder ferait cohabiter deux affiches complètes en
+      // mémoire au tirage suivant. Quand on PART, au contraire, on ne touche à
+      // rien : `onCommander` vient de le déposer au coffre.
+      if (reste) {
+        pdfTirage = null
+        cta.disabled = false
+        ctaTexte.textContent = 'Recevoir le fichier'
+      }
     }
   })
 
