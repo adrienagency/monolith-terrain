@@ -90,6 +90,54 @@ export function lireRetourPaiement(recherche) {
 }
 
 /**
+ * Le retour À TRAITER : celui que porte l'URL, ou celui qu'un chargement
+ * précédent a laissé EN SUSPENS dans le panier.
+ *
+ * ⚠️ SANS CETTE SECONDE SOURCE, LA LIVRAISON N'A QU'UN SEUL COUP. L'URL de
+ * retour est nettoyée dès le chargement du module (et elle doit l'être : une
+ * confirmation qui se rejoue depuis un signet est pire). Il ne restait donc
+ * plus aucun chemin vers le fichier payé dès qu'on rechargeait la page, qu'on
+ * fermait l'onglet une seconde, ou qu'on manquait le bouton « Télécharger » :
+ * le PDF dormait dans le coffre jusqu'à sa purge, orphelin.
+ *
+ * ⚠️ ET ÇA NE CONFIRME TOUJOURS RIEN. La session relue du panier repart chez
+ * `verifierPaiement` exactement comme celle de l'URL — c'est le serveur qui
+ * tranche, jamais le stockage. On rejoue une DEMANDE, pas une réponse.
+ *
+ * L'URL a la priorité : un `?paiement=annule` frais doit pouvoir clore une
+ * reprise laissée par une tentative précédente.
+ */
+export function retourAReprendre(recherche, panier) {
+  const direct = lireRetourPaiement(recherche)
+  if (direct.cas) return direct
+  const s = panier?.session || ''
+  return sessionValide(s) ? { cas: 'paye', session: s, reprise: true } : direct
+}
+
+/**
+ * Reste-t-il quelque chose à livrer après ce retour ?
+ *
+ * C'est la question qui décide de la survie du panier — donc de la seule clé
+ * qui ramène au fichier dans le coffre. Pure, et regroupée ici parce qu'elle
+ * énonce une doctrine, pas une condition :
+ *
+ *   · `paye` / `livree` — on ne garde QUE si le fichier est effectivement à
+ *     l'écran et pas encore pris. Une fois cliqué, il n'y a plus rien à rejouer ;
+ *     et si le coffre n'a rien rendu, il n'y a rien à rejouer non plus (c'est
+ *     le mail qui prend le relais).
+ *   · `en-attente` — virement, prélèvement : la banque n'a pas tranché. Jeter
+ *     la clé ici, c'est perdre le fichier AVANT que le paiement ne se confirme.
+ *   · `indisponible` — on n'a pas pu demander. Ne rien jeter sur une panne
+ *     réseau : le prochain chargement redemandera.
+ *   · le reste (`expiree`, `inconnue`, `invalide`, annulation) — rien n'est dû.
+ */
+export function livraisonEnSuspens(etat, { fichierPret = false } = {}) {
+  if (etat === 'en-attente' || etat === 'indisponible') return true
+  if (etat === 'paye' || etat === 'livree') return fichierPret
+  return false
+}
+
+/**
  * L'URL débarrassée des paramètres de retour, pour `history.replaceState`.
  * Laisser `?paye=…` dans la barre d'adresse, c'est laisser un lien qui rejoue
  * une confirmation à chaque rechargement — et qui part dans un signet.
@@ -191,11 +239,32 @@ export function lirePanier(storage = globalThis.sessionStorage) {
       // l'état de la CARTE, encodé par share-link.js — on ne le décode pas ici,
       // c'est main.js qui en a la base de comparaison (BASE_TEMPLATE_LOOK)
       carte: typeof brut.carte === 'string' ? brut.carte : '',
+      // La session à revérifier au prochain chargement, quand la livraison est
+      // restée en suspens (voir `armerReprise`). VALIDÉE DE FORME : on ne
+      // relance pas le serveur sur une chaîne quelconque relue du stockage —
+      // même garde que pour `?paye=`, et pour la même raison.
+      session: sessionValide(brut.session) ? brut.session : '',
       affiche,
     }
   } catch {
     return null
   }
+}
+
+/**
+ * Note dans le panier la session dont la livraison reste en suspens, pour que
+ * le prochain chargement puisse la rejouer sans `?paye=` dans la barre
+ * d'adresse.
+ *
+ * ⚠️ ÇA N'ÉCRIT PAS « C'EST PAYÉ ». Ça écrit « il reste quelque chose à
+ * demander au serveur au sujet de cette session ». La différence est tout le
+ * sujet de ce module : le stockage du navigateur ne décide de rien.
+ */
+export function armerReprise(session, storage = globalThis.sessionStorage) {
+  if (!sessionValide(session)) return false
+  const panier = lirePanier(storage)
+  if (!panier) return false
+  return poserPanier({ ...panier, session }, storage)
 }
 
 export function viderPanier(storage = globalThis.sessionStorage) {

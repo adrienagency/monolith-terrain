@@ -6,13 +6,15 @@ import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { ARTICLES, article, prixEuros, PAYS_AUTORISES, PAYS_EXCLUS } from '../netlify/functions/_paiement-catalogue.mjs'
-import { signatureValide, commandeDepuisSession } from '../netlify/functions/paiement-webhook.mjs'
+import { signatureValide, commandeDepuisSession, texteConfirmation } from '../netlify/functions/paiement-webhook.mjs'
 import caisse, { codeAtelierValide, commandeAtelier } from '../netlify/functions/paiement.mjs'
 import { etatDepuisSources, SESSION_RE as SESSION_RE_SERVEUR } from '../netlify/functions/paiement-etat.mjs'
+import { DPI_NOMINAL, DPI_PLANCHER } from '../src/export-dpi.js'
 import {
   identifiantArticle, FORMATS_IMPRIMES, SESSION_RE, lireRetourPaiement, urlSansRetour,
   afficheSerialisable, afficheRestauree, poserPanier, lirePanier, viderPanier, CLE_PANIER,
   demanderCaisse, verifierPaiement, messageRetour, URL_CAISSE,
+  retourAReprendre, armerReprise, livraisonEnSuspens,
 } from '../src/paiement.js'
 
 test('le prix vient du SERVEUR : un article inconnu ne s’invente pas', () => {
@@ -620,4 +622,116 @@ test('⚠️ LE TÉLÉCHARGEMENT NE SE PROMET QUE SI LE FICHIER EST EN MAIN', ()
   for (const etat of ['en-attente', 'expiree', 'indisponible', 'inconnue']) {
     assert.ok(!/télécharg/i.test(messageRetour(etat, { fichierPret: true })), etat)
   }
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LE CHEMIN DE L'ARGENT, RELU EN DERNIER — les trois défauts de la revue finale
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('⚠️ LE MAIL DE CONFIRMATION NE PROMET PLUS UN LIEN QUI N’EXISTE PAS', () => {
+  // Le webhook n'avait été touché par AUCUN des dix commits du chantier :
+  // l'écran a été rendu honnête, le mail a continué d'annoncer « Le lien de
+  // téléchargement suit dans ce message » — et rien ne l'a jamais ajouté. C'est
+  // le seul canal de tout acheteur dont le coffre local échoue.
+  const t = texteConfirmation({ livrable: 'fichier', session: 'cs_test_a1b2c3d4e5' })
+  assert.ok(!/lien de téléchargement/i.test(t), 'le mail promet toujours un lien')
+  assert.ok(!/https?:\/\//.test(t), 'aucune URL : la livraison distante n’existe pas encore')
+  // Ce qu'il doit dire à la place : OÙ est le fichier…
+  assert.match(t, /onglet/i)
+  assert.match(t, /Télécharger le PDF/)
+  // …et QUOI FAIRE quand il n'y est pas (onglet fermé, navigation privée, autre
+  // machine) — c'est-à-dire le cas même qui rend ce message nécessaire.
+  assert.match(t, /réponds/i)
+  assert.match(t, /cs_test_a1b2c3d4e5/, 'la référence de commande manque au support')
+  // L'imprimé, lui, ne parle ni d'onglet ni de téléchargement : il part par la poste.
+  const imprime = texteConfirmation({ livrable: 'impression' })
+  assert.ok(!/télécharg|onglet/i.test(imprime))
+  assert.match(imprime, /impression/)
+  // Et c'est bien CE texte-là que le webhook envoie.
+  const source = readFileSync(new URL('../netlify/functions/paiement-webhook.mjs', import.meta.url), 'utf8')
+  assert.match(source, /text: texteConfirmation\(commande\),/)
+  assert.ok(!/'Merci — ton fichier[^']*lien de téléchargement/.test(source))
+})
+
+test('⚠️ LE CATALOGUE N’ANNONCE AUCUNE DENSITÉ QUE LA CHAÎNE NE SAIT PAS RENDRE', () => {
+  // Le libellé part sur la page Stripe ET sur la facture numérotée. Il disait
+  // « PDF 300 dpi » alors que la table nominale plafonne déjà le 50 × 70 à 250
+  // et le 61 × 91 à 200, et que la sonde dégrade légitimement jusqu'au plancher
+  // sur une machine bridée (mesuré à 4 096 px : A2 à 170 dpi). Un remboursement
+  // écrit d'avance, sur un document opposable.
+  const { detail } = ARTICLES['affiche-pdf']
+  assert.match(detail, /dpi/, 'le libellé ne dit plus rien de la densité')
+  const annonces = (detail.match(/\d+/g) || []).map(Number)
+  assert.ok(annonces.length >= 2, `« ${detail} » annonce une densité UNIQUE, alors qu'elle varie`)
+  const bas = Math.min(...annonces)
+  const haut = Math.max(...annonces)
+  // La fourchette annoncée est EXACTEMENT celle que la chaîne peut produire :
+  // du plancher de dégradation à la plus haute densité nominale. Trop haute,
+  // c'est la promesse d'aujourd'hui ; trop basse, c'est se dévendre.
+  assert.equal(bas, DPI_PLANCHER, `la borne basse annoncée (${bas}) n'est pas le plancher réel (${DPI_PLANCHER})`)
+  assert.equal(haut, Math.max(...Object.values(DPI_NOMINAL)), 'la borne haute annoncée ne colle pas à la table nominale')
+  // Et aucune densité atteignable ne tombe hors de la fourchette, format par format.
+  for (const [id, nominal] of Object.entries(DPI_NOMINAL)) {
+    assert.ok(nominal <= haut, `${id} : ${nominal} dpi dépasse la fourchette annoncée`)
+    assert.ok(DPI_PLANCHER >= bas, `${id} : le plancher tombe sous la fourchette annoncée`)
+  }
+})
+
+test('⚠️ RIEN N’EST DÛ ? ALORS SEULEMENT LE PANIER PEUT PARTIR', () => {
+  // La question qui décide de la survie de la SEULE clé qui ramène au fichier
+  // payé dans le coffre.
+  assert.equal(livraisonEnSuspens('paye', { fichierPret: true }), true)
+  assert.equal(livraisonEnSuspens('livree', { fichierPret: true }), true)
+  // payé mais rien à l'écran : il n'y a rien à rejouer, c'est le mail qui prend
+  // le relais — et on ne détruit pas le fichier pour autant (voir main.js).
+  assert.equal(livraisonEnSuspens('paye'), false)
+  // virement, prélèvement : la banque n'a pas tranché. Jeter la clé ici, c'est
+  // perdre le fichier AVANT que le paiement ne se confirme.
+  assert.equal(livraisonEnSuspens('en-attente'), true)
+  assert.equal(livraisonEnSuspens('en-attente', { fichierPret: true }), true)
+  // panne réseau : on n'a pas pu demander, donc on ne conclut pas.
+  assert.equal(livraisonEnSuspens('indisponible'), true)
+  for (const etat of ['expiree', 'inconnue', 'invalide', null, undefined]) {
+    assert.equal(livraisonEnSuspens(etat, { fichierPret: true }), false, String(etat))
+  }
+})
+
+test('⚠️ LA LIVRAISON SE REJOUE AU RECHARGEMENT, SANS « ?paye= » DANS L’URL', () => {
+  // L'URL de retour est nettoyée dès le chargement du module — et elle doit
+  // l'être. Il ne restait donc AUCUN chemin vers le fichier payé après un
+  // rechargement, un onglet fermé une seconde, ou un clic manqué : le PDF
+  // dormait dans le coffre jusqu'à la purge des 24 h, orphelin.
+  const s = stockage()
+  poserPanier({ id: 'p-1', article: 'affiche-pdf', carte: 'AAA', affiche: afficheSerialisable(etatAffiche) }, s)
+  // Un panier frais ne rejoue RIEN : on ne relance pas une vérification pour
+  // quelqu'un qui n'est jamais parti payer.
+  assert.equal(retourAReprendre('', lirePanier(s)).cas, null)
+  assert.equal(lirePanier(s).session, '')
+
+  // La livraison reste en suspens : on note la session à revérifier.
+  assert.equal(armerReprise('cs_test_a1b2c3d4e5', s), true)
+  const relu = lirePanier(s)
+  assert.equal(relu.session, 'cs_test_a1b2c3d4e5')
+  assert.equal(relu.id, 'p-1', 'la clé du coffre a été perdue en route')
+  assert.equal(relu.affiche.format, '40x50', 'la composition a été perdue en route')
+
+  // Rechargement : plus de query string, et pourtant le retour se rejoue.
+  const r = retourAReprendre('', relu)
+  assert.equal(r.cas, 'paye')
+  assert.equal(r.session, 'cs_test_a1b2c3d4e5')
+  assert.equal(r.reprise, true)
+  // …et l'URL garde la priorité : une annulation fraîche clôt une reprise.
+  assert.equal(retourAReprendre('?paiement=annule', relu).cas, 'annule')
+  assert.equal(retourAReprendre('?paye=cs_test_zzzzzzzzzz', relu).session, 'cs_test_zzzzzzzzzz')
+
+  // Une session illisible relue du stockage ne part JAMAIS au serveur : même
+  // garde que pour « ?paye= », et pour la même raison.
+  poserPanier({ ...relu, session: 'javascript:alert(1)' }, s)
+  assert.equal(lirePanier(s).session, '')
+  assert.equal(retourAReprendre('', lirePanier(s)).cas, null)
+
+  // Le fichier pris, le panier s'en va — et plus rien ne se rejoue.
+  viderPanier(s)
+  assert.equal(armerReprise('cs_test_a1b2c3d4e5', s), false)
+  assert.equal(retourAReprendre('', lirePanier(s)).cas, null)
 })

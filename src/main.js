@@ -91,7 +91,8 @@ import { loadUserPalettes, saveUserPalettes, paletteFromParams } from './user-pa
 import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT, rememberRaceSecret, recallRaceSecret, updateRace } from './share-link.js'
 import {
   identifiantArticle, identifiantPanier, afficheSerialisable,
-  lireRetourPaiement, urlSansRetour, poserPanier, lirePanier, viderPanier,
+  retourAReprendre, urlSansRetour, poserPanier, lirePanier, viderPanier,
+  armerReprise, livraisonEnSuspens,
   demanderCaisse, verifierPaiement, messageRetour,
 } from './paiement.js'
 import { Boats } from './boats.js'
@@ -755,13 +756,20 @@ if (location.hash.startsWith('#s=')) {
 // fragment `#s=` fait booter l'application en VISIONNEUSE (`IS_SHIBU`, juste
 // en dessous) : l'acheteur reviendrait dans une shibu reçue en lecture seule,
 // sans ses outils, incapable de relancer sa commande.
-const RETOUR_PAIEMENT = lireRetourPaiement(location.search)
+//
+// ⚠️ LE PANIER SE LIT AVANT DE SAVOIR S'IL Y A UN RETOUR, et pas l'inverse.
+// C'est lui qui porte la SECONDE source de retour : une livraison laissée en
+// suspens au chargement précédent (fichier payé jamais pris, paiement encore en
+// attente à la banque). L'URL, elle, est nettoyée dès ce bloc — elle ne survit
+// donc jamais à un rechargement. Voir `retourAReprendre`, src/paiement.js.
+const PANIER_EN_COURS = lirePanier()
+const RETOUR_PAIEMENT = retourAReprendre(location.search, PANIER_EN_COURS)
 // Une restauration compte comme un état venu d'ailleurs : le look d'ouverture
 // ne doit pas l'écraser (voir `fromLink`, plus bas).
 let PANIER_RESTAURE = null
 if (RETOUR_PAIEMENT.cas && !location.hash.startsWith('#s=') && !location.hash.startsWith('#r=')) {
   try {
-    PANIER_RESTAURE = lirePanier()
+    PANIER_RESTAURE = PANIER_EN_COURS
     const decoded = PANIER_RESTAURE?.carte && decodeShareState(PANIER_RESTAURE.carte)
     const repris = decoded && parseShareState(decoded, BASE_TEMPLATE_LOOK)
     if (repris) {
@@ -7780,7 +7788,11 @@ async function openAfficheUI(etatInitial = null) {
       const r = await demanderCaisse({ article, retour: id, code })
       if (!r.ok) {
         // On reste à l'écran : le panier n'a plus de raison d'être, la
-        // composition est toujours sous les yeux de l'utilisateur.
+        // composition est toujours sous les yeux de l'utilisateur. Et le PDF
+        // déposé quelques lignes plus haut s'en va avec lui — sans cela, une
+        // caisse en panne laisserait plusieurs mégaoctets dans le navigateur
+        // pour vingt-quatre heures, sans plus aucune clé pour les ressortir.
+        await jeterDuCoffre(id)
         viderPanier()
         console.warn('[affiche] caisse :', r.erreur)
         showNotice(
@@ -7848,6 +7860,26 @@ async function sortirDuCoffre(id) {
 }
 
 /**
+ * Jette une entrée du coffre, sans jamais se plaindre.
+ *
+ * ⚠️ APPELÉ SUR LES ABANDONS, ET C'EST UNE CORRECTION. Un demi-tour chez Stripe
+ * — ou une caisse qui refuse de s'ouvrir — laissait le PDF déposé juste avant
+ * dormir vingt-quatre heures dans le navigateur : plusieurs mégaoctets, et un
+ * lieu, pour une vente qui n'a pas eu lieu.
+ *
+ * ⚠️ ET JAMAIS SUR UN DOUTE. On ne l'appelle pas quand le serveur a dit « payé » :
+ * un coffre qui refuse une lecture rend `null` exactement comme un coffre vide,
+ * et un fichier payé ne s'efface pas sur une ambiguïté.
+ */
+async function jeterDuCoffre(id) {
+  if (!id) return
+  try {
+    const { jeter } = await import('./coffre-affiche.js')
+    await jeter(id)
+  } catch { /* une entrée qui survit sera purgée par sa date */ }
+}
+
+/**
  * Met le fichier à portée de clic, et ne l'efface qu'une fois pris.
  *
  * ⚠️ UN CLIC, PAS UN TÉLÉCHARGEMENT AUTOMATIQUE. Une écriture de fichier
@@ -7868,10 +7900,14 @@ function proposerLeFichier(garde) {
     nom: garde.nom,
     url,
     onPris: async () => {
-      try {
-        const { jeter } = await import('./coffre-affiche.js')
-        await jeter(garde.id)
-      } catch { /* une entrée qui survit sera purgée par sa date */ }
+      await jeterDuCoffre(garde.id)
+      // ⚠️ ET C'EST ICI, PAS À L'ENTRÉE DU RETOUR, QUE LE PANIER S'EN VA. Il se
+      // vidait avant même de savoir ce que le serveur répondrait : la clé qui
+      // ramène au fichier était détruite AVANT que le fichier soit pris. Un
+      // rechargement, un onglet fermé une seconde, un clic manqué, et le PDF
+      // payé devenait inatteignable jusqu'à la purge des 24 h. Le fichier est
+      // pris : il n'y a plus rien à rejouer, la clé peut partir.
+      viderPanier()
       // L'URL d'objet survit au document : sans ceci, les octets du PDF restent
       // vivants jusqu'au rechargement de la page.
       setTimeout(() => URL.revokeObjectURL(url), 60000)
@@ -7883,12 +7919,17 @@ async function reprendreApresPaiement() {
   const { cas, session } = RETOUR_PAIEMENT
   if (!cas) return
   const panier = PANIER_RESTAURE
-  // Le panier a servi : la carte est déjà restaurée, la composition est sur le
-  // point de l'être. Le laisser derrière ferait ressusciter une affiche d'il y
-  // a une heure au prochain retour de paiement de cet onglet.
-  viderPanier()
+  // ⚠️ LE PANIER NE SE VIDE PLUS ICI. Il se vidait à l'entrée de cette
+  // fonction, AVANT de connaître l'issue : la seule clé qui ramène au fichier
+  // payé était donc détruite avant qu'on sache s'il restait quelque chose à
+  // livrer. Chaque sortie ci-dessous décide elle-même — soit elle arme une
+  // reprise (`armerReprise`), soit elle vide.
 
   if (cas === 'annule') {
+    // Demi-tour chez Stripe : rien n'est dû, et le PDF déposé avant de partir
+    // n'a plus aucune raison d'occuper le navigateur pendant vingt-quatre heures.
+    await jeterDuCoffre(panier?.id)
+    viderPanier()
     showNotice('Paiement annulé — rien n’a été débité. Ta composition est intacte.')
     await openAfficheUI(panier?.affiche || null)
     return
@@ -7906,6 +7947,27 @@ async function reprendreApresPaiement() {
   // secrète) ; `?paye=` ne sert qu'à savoir quoi lui demander.
   const paye = etat === 'paye' || etat === 'livree'
   const garde = paye ? await sortirDuCoffre(panier?.id) : null
+
+  // ═══ CE QUI RESTE DÛ SURVIT AU RECHARGEMENT ═══════════════════════════════
+  //
+  // ⚠️ LA LIVRAISON N'AVAIT QU'UN SEUL COUP, et c'est ce qui se répare ici. Le
+  // fichier est à l'écran mais pas encore pris ? La banque n'a pas tranché
+  // (virement, prélèvement) ? Le serveur est injoignable ? Alors la clé du
+  // panier reste, avec la session à revérifier : le prochain chargement de cet
+  // onglet rejoue exactement ce retour-ci, sans `?paye=` dans la barre
+  // d'adresse — et en redemandant au serveur, jamais en croyant le stockage.
+  //
+  // ⚠️ ET ON NE JETTE LE FICHIER QUE QUAND RIEN N'A ÉTÉ PAYÉ. Sur `paye` sans
+  // fichier en main, le coffre a pu simplement refuser une lecture : on vide la
+  // clé (il n'y a rien à rejouer, c'est le mail qui prend le relais) mais on ne
+  // détruit pas un fichier payé sur un doute.
+  if (livraisonEnSuspens(etat, { fichierPret: !!garde })) {
+    armerReprise(session)
+  } else {
+    if (!paye) await jeterDuCoffre(panier?.id)
+    viderPanier()
+  }
+
   showNotice(messageRetour(etat, { fichierPret: !!garde }), { duration: 9000 })
   if (garde) proposerLeFichier(garde)
   // Un paiement abouti ne rouvre PAS l'écran d'affiche : son bouton inviterait

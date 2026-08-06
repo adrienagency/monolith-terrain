@@ -321,3 +321,50 @@ test('⚠️ LE FICHIER SURVIT AU PAIEMENT, ET NE SORT QUE SI LE SERVEUR A DIT �
   // fichier est vraiment en main
   assert.match(bloc, /messageRetour\(etat, \{ fichierPret: !!garde \}\)/)
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 8. LA LIVRAISON — UN SEUL COUP, C'ÉTAIT UN COUP DE TROP
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('⚠️ LE PANIER NE SE VIDE QU’UNE FOIS LE FICHIER PRIS', () => {
+  // `viderPanier()` s'exécutait à l'ENTRÉE du retour, avant même de savoir ce
+  // que le serveur répondrait. La seule clé qui ramène au PDF payé dans le
+  // coffre était donc détruite avant que le fichier soit pris : un
+  // rechargement, un onglet fermé une seconde, un clic manqué sur
+  // « Télécharger », et le fichier devenait inatteignable jusqu'à la purge des
+  // 24 h. Même chose pour un paiement en attente (virement, prélèvement), où la
+  // clé partait avant la confirmation de la banque.
+  const bloc = MAIN.slice(MAIN.indexOf('async function reprendreApresPaiement()'))
+  const entete = bloc.slice(0, bloc.indexOf("if (cas === 'annule')"))
+  assert.ok(!/viderPanier\(\)/.test(entete), 'le panier se vide avant de connaître l’issue')
+
+  // Ce qui reste dû arme une reprise ; le reste vide.
+  assert.match(bloc, /if \(livraisonEnSuspens\(etat, \{ fichierPret: !!garde \}\)\) \{\s*\n\s*armerReprise\(session\)/)
+  // …et on ne jette JAMAIS un fichier sur un paiement abouti : un coffre qui
+  // refuse une lecture rend `null` exactement comme un coffre vide.
+  assert.match(bloc, /\} else \{\s*\n\s*if \(!paye\) await jeterDuCoffre\(panier\?\.id\)\s*\n\s*viderPanier\(\)/)
+
+  // La reprise se lit au démarrage DEPUIS LE PANIER, parce que l'URL, elle, est
+  // nettoyée dès ce bloc-là et ne survit pas au rechargement.
+  assert.match(MAIN, /const PANIER_EN_COURS = lirePanier\(\)\s*\nconst RETOUR_PAIEMENT = retourAReprendre\(location\.search, PANIER_EN_COURS\)/)
+
+  // Et c'est le CLIC sur « Télécharger » qui solde l'affaire : le coffre, puis
+  // la clé — dans cet ordre, et nulle part ailleurs.
+  const remise = MAIN.slice(MAIN.indexOf('function proposerLeFichier(garde)'), MAIN.indexOf('async function reprendreApresPaiement()'))
+  assert.match(remise, /onPris: async \(\) => \{\s*\n\s*await jeterDuCoffre\(garde\.id\)[\s\S]*?viderPanier\(\)/)
+})
+
+test('⚠️ UN ABANDON NE LAISSE PAS SEPT MÉGAOCTETS DERRIÈRE LUI', () => {
+  // Le PDF est déposé au coffre AVANT de partir chez Stripe. Un demi-tour — ou
+  // une caisse qui refuse de s'ouvrir — laissait donc plusieurs mégaoctets, et
+  // un lieu, dormir vingt-quatre heures dans le navigateur, sans plus aucune
+  // clé pour les ressortir.
+  const bloc = MAIN.slice(MAIN.indexOf('async function reprendreApresPaiement()'))
+  const annule = bloc.slice(bloc.indexOf("if (cas === 'annule')"), bloc.indexOf('await verifierPaiement('))
+  assert.match(annule, /await jeterDuCoffre\(panier\?\.id\)\s*\n\s*viderPanier\(\)/, 'l’annulation ne jette pas le fichier')
+
+  // Même chose quand la caisse ne s'ouvre pas : le dépôt vient d'avoir lieu.
+  const cmd = MAIN.slice(MAIN.indexOf('onCommander: async (commande)'), MAIN.indexOf('lieuxAffiches:'))
+  const echec = cmd.slice(cmd.indexOf('if (!r.ok) {'))
+  assert.match(echec, /await jeterDuCoffre\(id\)\s*\n\s*viderPanier\(\)/)
+})

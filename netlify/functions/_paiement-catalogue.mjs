@@ -13,9 +13,27 @@
 // euros flottants finit toujours par produire un 18,999999999999998.
 export const ARTICLES = {
   // ── Le fichier seul ───────────────────────────────────────────────────────
+  //
+  // ⚠️ CE LIBELLÉ NE PROMET PLUS « 300 dpi », ET C'EST UNE CORRECTION, PAS UNE
+  // PRUDENCE. La densité livrée dépend de DEUX choses qu'on ne connaît pas au
+  // moment d'écrire ce fichier :
+  //   · le FORMAT — la table nominale (src/export-dpi.js) plafonne déjà le
+  //     50 × 70 à 250 dpi et le 61 × 91 à 200, parce qu'au-delà la source elle-
+  //     même n'a plus l'information ;
+  //   · la MACHINE de l'acheteur — la sonde dégrade légitimement quand le
+  //     pilote est bridé (mesuré à 4 096 px : A4 300, 30 × 40 250, A3 240,
+  //     40 × 50 200, A2 170), plancher à 150 dpi.
+  // L'écran d'affiche, lui, montre le VRAI chiffre avant le paiement (voir
+  // `ligneVerite`, src/ui/affiche.js). Ce libellé-ci part sur la page Stripe ET
+  // sur la facture numérotée : y écrire un chiffre que l'acheteur n'obtient pas
+  // est un remboursement écrit d'avance, sur un document opposable.
+  //
+  // La fourchette annoncée doit donc ENCADRER tout ce que la chaîne peut
+  // rendre — plancher compris, nominale maximale comprise. Un test le vérifie
+  // contre `DPI_PLANCHER` et `DPI_NOMINAL` plutôt que contre une phrase.
   'affiche-pdf': {
     libelle: 'Affiche ShibuMap — fichier d’impression',
-    detail: 'PDF 300 dpi, prêt pour l’imprimeur',
+    detail: 'PDF prêt pour l’imprimeur — de 150 à 300 dpi selon le format et ta machine, densité exacte affichée avant le paiement',
     centimes: 1900,
     livrable: 'fichier',
   },

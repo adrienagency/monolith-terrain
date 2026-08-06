@@ -117,6 +117,41 @@ export function commandeDepuisSession(s, maintenant = new Date()) {
   }
 }
 
+/**
+ * Le corps du courriel de confirmation. Pur, donc testable — comme
+ * `commandeDepuisSession` au-dessus, et pour une raison plus dure encore : ces
+ * quelques phrases sont LE SEUL CANAL de tout acheteur dont le coffre local a
+ * échoué (navigation privée, quota, autre machine, onglet fermé).
+ *
+ * ⚠️ IL NE PROMET PLUS DE LIEN, PARCE QU'IL N'Y EN A PAS. La phrase précédente
+ * annonçait « le lien de téléchargement suit dans ce message » — aucun lien n'y
+ * a jamais été ajouté, et la livraison distante n'existe pas encore (le fichier
+ * est dans le navigateur DE L'ACHETEUR, voir src/coffre-affiche.js). Le mail
+ * disait donc le contraire de l'écran, qui, lui, a été rendu honnête.
+ *
+ * ⚠️ ET IL NE SUPPOSE PAS QUE LE COFFRE A MARCHÉ. Ce module ne sait rien du
+ * navigateur d'en face : il indique où le fichier se trouve QUAND tout s'est
+ * bien passé, et il dit quoi faire quand ce n'est pas le cas. C'est la
+ * différence entre une consigne et une promesse.
+ */
+export function texteConfirmation(commande = {}) {
+  if (commande.livrable === 'impression') {
+    return 'Merci — ton affiche part à l’impression. Tu recevras le suivi dès qu’elle est expédiée.'
+  }
+  return [
+    'Merci — ton fichier d’impression est prêt.',
+    '',
+    'Il se télécharge depuis la page ShibuMap où tu l’as composé : reviens sur',
+    'l’onglet d’où tu es parti payer, le bouton « Télécharger le PDF » s’y trouve',
+    'en bas de l’écran. Le fichier a été préparé sur ta machine avant le paiement,',
+    'il n’a donc jamais quitté ton navigateur.',
+    '',
+    'Si ce bouton n’y est pas — onglet fermé, navigation privée, autre appareil —',
+    'réponds simplement à ce message : Adrien te renvoie le fichier à la main.',
+    commande.session ? `\nRéférence de commande : ${commande.session}` : '',
+  ].join('\n').trimEnd()
+}
+
 export default async (req) => {
   if (req.method !== 'POST') return new Response('méthode', { status: 405 })
 
@@ -177,9 +212,7 @@ export default async (req) => {
           from: process.env.SHIBU_MAIL_EXPEDITEUR || 'ShibuMap <affiche@shibumap.com>',
           to: [commande.email],
           subject: 'Ton affiche ShibuMap',
-          text: commande.livrable === 'impression'
-            ? 'Merci — ton affiche part à l’impression. Tu recevras le suivi dès qu’elle est expédiée.'
-            : 'Merci — ton fichier d’impression est prêt. Le lien de téléchargement suit dans ce message.',
+          text: texteConfirmation(commande),
         }),
       })
     } catch (err) {
