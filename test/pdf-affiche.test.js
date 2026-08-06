@@ -30,9 +30,11 @@ import {
   metadonneesXmp,
   poidsPdfAttendu,
   construirePdfAffiche,
-  MARGE_MEDIA_MM,
+  margeMediaPour,
+  MARGE_MEDIA_SANS_REPERES,
   REPERES_AUCUN,
   REPERES_COINS,
+  REPERES_DEFAUT,
   DECALAGE_MM_MIN,
   EPAISSEUR_MM_MAX,
   CHEVAUCHEMENT_PT,
@@ -132,25 +134,58 @@ test('la marge de feuille ne descend jamais sous le fond perdu', () => {
   for (let i = 0; i < 4; i++) assert.ok(PRESQUE(b.mediaBox[i], b.bleedBox[i]))
 })
 
-test('la marge s’élargit d’office pour contenir les repères demandés', () => {
-  const longs = { decalageMm: 6, longueurMm: 20, epaisseurMm: 0.1 }
-  const b = boitesAffiche({ largeurMm: 210, hauteurMm: 297, reperes: longs })
-  assert.ok(b.mm.marge >= besoinMargeReperes(longs))
-  assert.ok(b.mm.marge > MARGE_MEDIA_MM, 'la marge par défaut ne suffisait pas, elle aurait dû croître')
-  assert.ok(verifierBoites(b).ok)
-  // et les huit repères tiennent alors dans la feuille
-  assert.equal(planReperes(b, longs).segments.length, 8)
+test('⚠️ SANS REPÈRE, LA FEUILLE EST LE FOND PERDU — pas dix millimètres de blanc', () => {
+  // LE DÉFAUT SIGNALÉ PAR ADRIEN : Photoshop ouvre un PDF à sa MediaBox, et
+  // annonçait « 520 × 720 mm » pour une affiche de 50 × 70 parce que la marge
+  // valait 10 mm en toutes circonstances — y compris sans le moindre repère à
+  // porter. Sans repère, la boîte support ne porte plus que le fond perdu.
+  const b = boitesAffiche({ largeurMm: 500, hauteurMm: 700, reperes: REPERES_AUCUN })
+  assert.equal(b.mm.marge, MARGE_MEDIA_SANS_REPERES)
+  assert.equal(MARGE_MEDIA_SANS_REPERES, FOND_PERDU_MM)
+  assert.ok(PRESQUE(ptVersMm(b.mediaBox[2] - b.mediaBox[0]), 506, 1e-9))
+  assert.ok(PRESQUE(ptVersMm(b.mediaBox[3] - b.mediaBox[1]), 706, 1e-9))
+  // MediaBox = BleedBox, au point près
+  for (let i = 0; i < 4; i++) assert.ok(PRESQUE(b.mediaBox[i], b.bleedBox[i]))
 })
+
+test('⚠️ LA FEUILLE EST JUSTE CE QU’IL FAUT POUR PORTER LES REPÈRES, NI PLUS NI MOINS', () => {
+  // La marge ne se pose plus d'avance : elle se DÉDUIT. Un millimètre de plus
+  // serait du blanc qui ne porte rien ; un de moins, un repère hors feuille.
+  for (const reperes of [
+    REPERES_DEFAUT,
+    { decalageMm: 6, longueurMm: 20, epaisseurMm: 0.1 },
+    { decalageMm: 3, longueurMm: 3, epaisseurMm: 0.1 },
+  ]) {
+    const b = boitesAffiche({ largeurMm: 210, hauteurMm: 297, reperes })
+    assert.equal(b.mm.marge, besoinMargeReperes(reperes), 'la feuille n’est pas à la taille de ses repères')
+    assert.equal(b.mm.marge, margeMediaPour(reperes))
+    assert.ok(verifierBoites(b).ok)
+    // et les huit repères tiennent alors dans la feuille, sans exception
+    assert.equal(planReperes(b, reperes).segments.length, 8)
+  }
+})
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ③ LES REPÈRES
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('aucun repère par défaut — les prestataires travaillent aux boîtes', () => {
-  assert.equal(REPERES_AUCUN, null)
+test('⚠️ DES TRAITS DE COUPE PAR DÉFAUT — le fichier ne sait pas chez qui il va', () => {
+  // La décision d'origine (« aucun par défaut ») supposait un prestataire qui
+  // travaille aux boîtes. Or le fichier est TÉLÉCHARGÉ : il peut finir chez un
+  // imprimeur qui cale sa lame à la main. Des repères de trop sont sept
+  // millimètres de papier blanc ; des repères manquants sont une coupe devinée.
   const b = boitesAffiche({ largeurMm: 500, hauteurMm: 700 })
+  assert.equal(planReperes(b).segments.length, 8)
+  assert.deepEqual(REPERES_DEFAUT, REPERES_COINS)
+  // et le défaut partagé est gelé : un appelant ne peut pas le modifier en place
+  assert.throws(() => { REPERES_DEFAUT.longueurMm = 99 }, TypeError)
+})
+
+test('on peut toujours n’en vouloir aucun — c’est un défaut, pas un dogme', () => {
+  assert.equal(REPERES_AUCUN, null)
+  const b = boitesAffiche({ largeurMm: 500, hauteurMm: 700, reperes: REPERES_AUCUN })
   assert.deepEqual(planReperes(b, REPERES_AUCUN).segments, [])
-  assert.deepEqual(planReperes(b).segments, [])
 })
 
 test('les repères demandés font huit segments, deux par angle', () => {
@@ -204,8 +239,11 @@ test('l’épaisseur est bornée à 0,1 mm, quelle que soit la demande', () => {
 })
 
 test('une feuille sans marge ne produit AUCUN repère plutôt que des repères hors feuille', () => {
+  // ⚠️ C'EST LA PORTE DE SORTIE du prestataire qui exige MediaBox = BleedBox.
+  // Une marge IMPOSÉE est honorée telle quelle : depuis que les repères sont le
+  // défaut, se laisser élargir « d'office » par eux l'aurait condamnée en
+  // silence. Le fichier sort sans repères, et `construirePdfAffiche` le dit.
   const b = boitesAffiche({ largeurMm: 210, hauteurMm: 297, margeMediaMm: FOND_PERDU_MM })
-  // ici la marge a été forcée au fond perdu : il n'y a plus de papier nu
   assert.equal(b.mm.marge, FOND_PERDU_MM)
   assert.deepEqual(planReperes(b, REPERES_COINS).segments, [])
 })
@@ -306,7 +344,14 @@ test('le PDF produit se relit, et ses trois boîtes sont celles qu’on a demand
   assert.ok(PRESQUE(ptVersMm(trim.height), 700, 1e-6))
   assert.ok(PRESQUE(ptVersMm(bleed.width), 500 + 2 * FOND_PERDU_MM, 1e-6))
   assert.ok(PRESQUE(ptVersMm(bleed.height), 700 + 2 * FOND_PERDU_MM, 1e-6))
-  assert.ok(PRESQUE(ptVersMm(media.width), 500 + 2 * MARGE_MEDIA_MM, 1e-6))
+  // ⚠️ CE QU'ADRIEN LIRA À L'OUVERTURE : Photoshop ouvre à la MediaBox. Elle
+  // vaut le format fini plus ce qu'il faut pour porter les repères, et rien
+  // d'autre — 520 × 720 mm pour un 50 × 70, chacun de ces dix millimètres
+  // portant un trait de coupe.
+  assert.ok(PRESQUE(ptVersMm(media.width), 500 + 2 * margeMediaPour(REPERES_DEFAUT), 1e-6))
+  assert.ok(PRESQUE(ptVersMm(media.width), 520, 1e-9))
+  assert.ok(PRESQUE(ptVersMm(media.height), 720, 1e-9))
+  assert.equal(r.reperes.segments.length, 8, 'le fichier de production porte ses traits de coupe')
   // l'inclusion, relue sur le fichier et non sur le calcul
   assert.ok(bleed.x >= media.x - 1e-6 && bleed.x + bleed.width <= media.x + media.width + 1e-6)
   assert.ok(trim.x >= bleed.x - 1e-6 && trim.x + trim.width <= bleed.x + bleed.width + 1e-6)
@@ -346,13 +391,32 @@ test('un format absurde ou des bandes absentes lèvent, ils ne produisent pas un
   await assert.rejects(() => construirePdfAffiche({ largeurMm: 0, hauteurMm: 297, bandes: [bandeJpeg(10)] }), /format invalide/)
 })
 
-test('les repères demandés se retrouvent dans le contenu de la page', async () => {
-  const sans = await construirePdfAffiche({ largeurMm: 210, hauteurMm: 297, bandes: [bandeJpeg(100)] })
-  const avec = await construirePdfAffiche({ largeurMm: 210, hauteurMm: 297, bandes: [bandeJpeg(100)], reperes: REPERES_COINS })
+test('les repères se retrouvent dans le contenu de la page, et leur absence aussi', async () => {
+  const sans = await construirePdfAffiche({ largeurMm: 210, hauteurMm: 297, bandes: [bandeJpeg(100)], reperes: REPERES_AUCUN })
+  const avec = await construirePdfAffiche({ largeurMm: 210, hauteurMm: 297, bandes: [bandeJpeg(100)] })
   assert.equal(sans.reperes.segments.length, 0)
   assert.equal(avec.reperes.segments.length, 8)
   // huit traits de plus, c'est huit tracés de plus : le fichier grossit
   assert.ok(avec.octets.length > sans.octets.length)
+  // et la feuille rétrécit d'autant quand ils partent
+  assert.ok(sans.boites.mm.marge < avec.boites.mm.marge)
+})
+
+test('⚠️ des repères demandés qui ne tiennent pas ne disparaissent pas en silence', async () => {
+  const cris = []
+  const vrai = console.warn
+  console.warn = (...a) => cris.push(a.join(' '))
+  try {
+    const r = await construirePdfAffiche({
+      largeurMm: 210, hauteurMm: 297, bandes: [bandeJpeg(100)],
+      // une feuille imposée trop étroite : les repères n'y entrent pas
+      margeMediaMm: FOND_PERDU_MM,
+    })
+    assert.equal(r.reperes.segments.length, 0)
+  } finally {
+    console.warn = vrai
+  }
+  assert.match(cris.join(' '), /AUCUN n’a été tracé/)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -7619,6 +7619,15 @@ async function openAfficheUI(etatInitial = null) {
         // dimensions APRÈS coupe ; le fond perdu que les bandes portent en plus
         // est posé par `placerBandes` dans le BleedBox. Passer ici la taille
         // avec fond perdu vendrait un 51,2 × 71,2 sans que personne ne le voie.
+        //
+        // ⚠️ NI `reperes` NI `margeMediaMm` NE SONT PASSÉS, ET C'EST VOULU. Les
+        // traits de coupe sont le DÉFAUT de `pdf-affiche.js` : le fichier est
+        // téléchargé, nous ne savons pas s'il finira chez un prestataire qui
+        // travaille aux boîtes ou chez un imprimeur qui cale sa lame à la main,
+        // et l'asymétrie des deux erreurs tranche (encadré ② du module). La
+        // boîte support s'en déduit — 520 × 720 mm sur un 50 × 70, et chacun de
+        // ces dix millimètres porte un repère. L'acheteur n'a rien à décider :
+        // une case à cocher qu'il ne peut pas juger serait pire que le défaut.
         largeurMm, hauteurMm,
         bandes: bandesPdf,
         titre: `${(etat?.titre || lieuCourant().nom || 'Affiche').trim()} — ShibuMap`,

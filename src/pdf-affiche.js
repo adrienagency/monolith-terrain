@@ -86,19 +86,36 @@ export function ptVersMm(pt) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ② LES REPÈRES — AUCUN PAR DÉFAUT, ET C'EST UNE DÉCISION
+// ② LES REPÈRES — DES TRAITS DE COUPE PAR DÉFAUT, ET C'EST UNE DÉCISION
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// Le réflexe est d'en mettre : un fichier d'impression « sérieux » porte des
-// traits de coupe, c'est ce qu'on voit sur toutes les images de référence. Sauf
-// que ces images viennent de l'offset, où un opérateur cale une lame à la main
-// sur une feuille plus grande que le sujet.
+// ⚠️ CETTE DÉCISION A ÉTÉ PRISE DANS L'AUTRE SENS, PUIS RETOURNÉE. Le
+// raisonnement d'origine était celui-ci : les prestataires d'impression à la
+// commande travaillent AUX BOÎTES — leur imposition lit le TrimBox, place le
+// sujet dans un gabarit, et coupe au massicot programmé. Des repères y sont au
+// mieux inutiles. D'où « aucun par défaut ».
 //
-// Les prestataires d'impression à la commande — ceux qui tireront ces affiches
-// — ne travaillent pas comme ça. Ils travaillent AUX BOÎTES : leur imposition
-// lit le TrimBox, place le sujet dans un gabarit, et coupe au massicot
-// programmé. Des repères dans le fichier y sont au mieux inutiles, au pire
-// imposés une seconde fois par-dessus les leurs. D'où le défaut : AUCUN.
+// Il manquait une prémisse : NOUS NE SAVONS PAS CHEZ QUI CE FICHIER VA. Il est
+// téléchargé par l'acheteur, pas déposé par nous. Il finit chez un prestataire
+// à la commande, ou chez l'imprimeur du coin, ou dans un labo photo — et
+// l'asymétrie des deux erreurs n'est pas discutable :
+//
+//   · DES REPÈRES CHEZ QUI TRAVAILLE AUX BOÎTES : ils vivent au-delà du
+//     BleedBox, donc sur la matière qui part au massicot. Ils ne s'impriment
+//     jamais sur l'affiche finie. Coût réel : sept millimètres de papier blanc
+//     de plus sur chaque bord de la boîte support, et rien d'autre.
+//   · PAS DE REPÈRES CHEZ UN IMPRIMEUR CLASSIQUE : il cale sa lame à la main.
+//     Il refuse le fichier, ou — bien pire — il devine.
+//
+// D'où le défaut : LES REPÈRES D'ANGLE (`REPERES_DEFAUT`). Ce n'est pas pour
+// autant un dogme : `reperes: REPERES_AUCUN` reste le geste d'un appelant à qui
+// un prestataire impose « MediaBox = BleedBox », gabarit à l'appui.
+//
+// ⚠️ ET CE N'EST PAS UN RÉGLAGE D'INTERFACE, DÉLIBÉRÉMENT. L'acheteur d'une
+// affiche ne sait pas ce qu'est un trait de coupe ; une case à cocher qu'il ne
+// peut pas juger est pire qu'un fichier qui sert les deux mondes. Le paramètre
+// vit ici, dans le module, pour le jour où un prestataire nommé demandera le
+// contraire — pas dans l'écran de vente.
 //
 // ═══════════════════════════════════════════════════════════════════════════
 // ⚠️ LE DÉCALAGE, ET LE PROBLÈME DU FOND SOMBRE
@@ -152,33 +169,62 @@ export const EPAISSEUR_MM_MAX = 0.1
  *  jusqu'à le faire disparaître à l'impression. */
 export const EPAISSEUR_MM_DEFAUT = EPAISSEUR_MM_MAX
 
-/** Les repères d'angle, aux valeurs par défaut. À passer explicitement : ce
- *  n'est jamais ce qu'on produit sans le demander. */
+/** Les repères d'angle, aux valeurs par défaut. */
 export const REPERES_COINS = {
   decalageMm: DECALAGE_MM_DEFAUT,
   longueurMm: LONGUEUR_MM_DEFAUT,
   epaisseurMm: EPAISSEUR_MM_DEFAUT,
 }
 
+/**
+ * Ce qu'on produit quand personne ne dit rien : des traits de coupe.
+ *
+ * Gelé (`Object.freeze`) parce qu'un défaut partagé qu'un appelant modifierait
+ * en place changerait la géométrie de tous les tirages suivants.
+ */
+export const REPERES_DEFAUT = Object.freeze({ ...REPERES_COINS })
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ③ LES BOÎTES
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * La marge de feuille par défaut, au-delà du fond perdu.
+ * ⚠️ LA MARGE DE FEUILLE N'EST PLUS UNE CONSTANTE, ET C'EST UN DÉFAUT CORRIGÉ.
  *
- * Elle doit contenir les repères quand il y en a : décalage (4 mm) + longueur
- * (5 mm) = 9 mm, plus 1 mm de respiration. `boitesAffiche` l'élargit d'office
- * si on lui demande des repères plus longs — une marge qui ne contient pas ses
- * propres repères serait exactement le défaut d'inclusion qu'on veut interdire.
+ * Elle valait 10 mm, tout le temps, repères ou pas. Sur un 50 × 70 cela donnait
+ * une MediaBox de 520 × 720 mm — et Photoshop, qui ouvre un PDF à sa MediaBox,
+ * annonçait « 520 × 720 » pour une affiche de 50 × 70. Dix millimètres de blanc
+ * sur chaque bord, ne portant rien, faussant la lecture des dimensions dans
+ * tout logiciel qui ouvre à la boîte support.
  *
- * ⚠️ POUR UN PRESTATAIRE QUI EXIGE « MediaBox = BleedBox » — certains
- * l'imposent, gabarit à l'appui — il suffit de passer `margeMediaMm:
- * FOND_PERDU_MM`. La feuille tombe alors exactement sur le fond perdu, et il
- * n'y a plus de place pour un repère : `planReperes` rend une liste vide plutôt
- * que des traits hors feuille.
+ * La marge se DÉDUIT désormais de ce qu'elle doit porter :
+ *   · SANS REPÈRE : le fond perdu, et rien de plus. MediaBox = BleedBox. Sur un
+ *     50 × 70, la feuille fait 506 × 706 mm, ce qui se lit sans ambiguïté comme
+ *     « 50 × 70 plus 3 mm de fond perdu ».
+ *   · AVEC REPÈRES : exactement de quoi les porter — décalage + longueur, plus
+ *     1 mm de respiration (un repère qui touche le bord de la feuille se fait
+ *     rogner par le premier lecteur qui applique une marge d'impression).
+ *
+ * Aux valeurs par défaut (décalage 4, longueur 5) cela refait 10 mm : la
+ * constante d'origine était BIEN DIMENSIONNÉE, elle était seulement VIDE. La
+ * différence est qu'aujourd'hui chacun de ces millimètres porte un trait, et
+ * qu'un appelant qui change la longueur des repères n'a rien à re-régler.
  */
-export const MARGE_MEDIA_MM = 10
+export const MARGE_MEDIA_SANS_REPERES = FOND_PERDU_MM
+
+/**
+ * La marge de feuille qu'une famille de repères réclame — la boîte support
+ * « juste ce qu'il faut », ni plus ni moins.
+ *
+ * @param {object|null} reperes
+ * @param {number} [fondPerduMm] - le plancher : sans lui, BleedBox sortirait de
+ *   MediaBox, l'erreur de préflight la plus facile à fabriquer
+ * @returns {number} en millimètres
+ */
+export function margeMediaPour(reperes = REPERES_DEFAUT, fondPerduMm = FOND_PERDU_MM) {
+  const fond = Math.max(0, Number.isFinite(fondPerduMm) ? fondPerduMm : FOND_PERDU_MM)
+  return reperes ? Math.max(fond, besoinMargeReperes(reperes)) : fond
+}
 
 /**
  * Les trois boîtes d'une affiche, en points PDF, dans un repère dont l'origine
@@ -194,26 +240,34 @@ export const MARGE_MEDIA_MM = 10
  * @param {number} o.largeurMm - le format FINI, en millimètres
  * @param {number} o.hauteurMm - idem
  * @param {number} [o.fondPerduMm] - 3 mm ; le plancher normatif de print-page.js
- * @param {number} [o.margeMediaMm] - la marge de feuille AU-DELÀ du fond perdu
- * @param {object|null} [o.reperes] - s'ils existent, la marge s'élargit pour eux
+ * @param {number|null} [o.margeMediaMm] - la marge de feuille AU-DELÀ du fond
+ *   perdu. `null` — le défaut — la fait DÉDUIRE des repères. Une valeur
+ *   explicite est honorée telle quelle (plancher : le fond perdu), quitte à ce
+ *   que les repères ne tiennent plus : c'est ainsi qu'on obtient
+ *   « MediaBox = BleedBox » chez un prestataire qui l'impose.
+ * @param {object|null} [o.reperes] - `REPERES_DEFAUT` ; `REPERES_AUCUN` pour rien
  * @returns {object}
  */
 export function boitesAffiche({
   largeurMm,
   hauteurMm,
   fondPerduMm = FOND_PERDU_MM,
-  margeMediaMm = MARGE_MEDIA_MM,
-  reperes = REPERES_AUCUN,
+  margeMediaMm = null,
+  reperes = REPERES_DEFAUT,
 } = {}) {
   const L = Number.isFinite(largeurMm) && largeurMm > 0 ? largeurMm : 0
   const H = Number.isFinite(hauteurMm) && hauteurMm > 0 ? hauteurMm : 0
   if (!L || !H) return null
   const fond = Math.max(0, Number.isFinite(fondPerduMm) ? fondPerduMm : FOND_PERDU_MM)
-  // La marge demandée, jamais inférieure au fond perdu (sinon le BleedBox
-  // déborderait la feuille), et jamais trop courte pour les repères demandés.
-  const demandee = Math.max(0, Number.isFinite(margeMediaMm) ? margeMediaMm : MARGE_MEDIA_MM)
-  const besoinReperes = reperes ? besoinMargeReperes(reperes) : 0
-  const marge = Math.max(fond, demandee, besoinReperes)
+  // ⚠️ UNE MARGE EXPLICITE NE SE FAIT PLUS ÉLARGIR PAR LES REPÈRES. C'était le
+  // cas avant, et avec des repères par défaut cela aurait condamné la seule
+  // porte de sortie : `margeMediaMm: FOND_PERDU_MM` aurait été remonté à 10 mm
+  // par des repères que l'appelant n'avait pas demandés. Qui impose la feuille
+  // l'obtient ; les repères qui n'y tiennent pas ne sont pas tracés, et
+  // `construirePdfAffiche` le DIT.
+  const marge = Number.isFinite(margeMediaMm)
+    ? Math.max(fond, margeMediaMm)
+    : margeMediaPour(reperes, fond)
 
   const feuilleMm = [L + 2 * marge, H + 2 * marge]
   const pt = (mm) => mmVersPt(mm)
@@ -300,7 +354,7 @@ export function verifierBoites(boites, { toleranceP = 1e-6 } = {}) {
  * @param {object|null} reperes - `{decalageMm, longueurMm, epaisseurMm}`
  * @returns {{segments:Array, epaisseurPt:number, epaisseurMm:number}}
  */
-export function planReperes(boites, reperes = REPERES_AUCUN) {
+export function planReperes(boites, reperes = REPERES_DEFAUT) {
   const vide = { segments: [], epaisseurPt: 0, epaisseurMm: 0 }
   if (!boites || !reperes) return vide
   const decMm = Math.max(DECALAGE_MM_MIN, Number.isFinite(reperes.decalageMm) ? reperes.decalageMm : DECALAGE_MM_DEFAUT)
@@ -630,8 +684,8 @@ export function nomFichierAffiche({ titre = '', format = '', orientation = '', d
  * @param {number} o.largeurMm - le format FINI
  * @param {number} o.hauteurMm - idem
  * @param {number} [o.fondPerduMm]
- * @param {number} [o.margeMediaMm]
- * @param {object|null} [o.reperes] - `REPERES_AUCUN` par défaut
+ * @param {number|null} [o.margeMediaMm] - `null` : déduite des repères
+ * @param {object|null} [o.reperes] - `REPERES_DEFAUT` par défaut
  * @param {Array<{octets:Uint8Array, type:string, hauteurPx:number}>} o.bandes -
  *   du HAUT vers le BAS, telles que le pavage les produit. Une seule entrée est
  *   le cas nominal quand la mémoire le permet : pas de jointure du tout.
@@ -644,8 +698,8 @@ export async function construirePdfAffiche({
   largeurMm,
   hauteurMm,
   fondPerduMm = FOND_PERDU_MM,
-  margeMediaMm = MARGE_MEDIA_MM,
-  reperes = REPERES_AUCUN,
+  margeMediaMm = null,
+  reperes = REPERES_DEFAUT,
   bandes,
   titre = 'Affiche ShibuMap',
   auteur = 'ShibuMap',
@@ -706,6 +760,17 @@ export async function construirePdfAffiche({
 
   // ── les repères ───────────────────────────────────────────────────────────
   const rep = planReperes(boites, reperes)
+  // ⚠️ DES REPÈRES DEMANDÉS QUI NE SORTENT PAS NE DOIVENT PAS DISPARAÎTRE EN
+  // SILENCE. Le seul cas où cela arrive est une marge de feuille imposée trop
+  // étroite — et c'est justement le cas où l'appelant croit savoir ce qu'il
+  // fait. `planReperes` renonce plutôt que de tracer des demi-traits ; on le dit.
+  if (reperes && !rep.segments.length) {
+    console.warn(
+      '[ShibuMap] pdf-affiche : des repères de coupe ont été demandés mais AUCUN n’a été tracé. '
+      + `La marge de feuille vaut ${boites.mm.marge} mm, il en faudrait ${besoinMargeReperes(reperes)}. `
+      + 'Laisser `margeMediaMm` à null la déduit des repères ; la fixer, c’est y renoncer.'
+    )
+  }
   for (const s of rep.segments) {
     page.drawLine({
       start: { x: s.x0, y: s.y0 },

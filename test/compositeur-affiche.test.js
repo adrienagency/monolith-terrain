@@ -283,9 +283,125 @@ test('le cartouche se cale sur le bas de la feuille, l’altitude sur la ligne d
 })
 
 test('le voile part du bas et fait 240 % de la hauteur du cartouche', () => {
+  // sans fond perdu — l'écran de validation — le rectangle peint EST le dégradé
   const p = planPour(4000, 5600)
   assert.equal(p.cartouche.voile.y + p.cartouche.voile.hauteur, p.fini.y + p.fini.hauteur)
-  assert.ok(Math.abs(p.cartouche.voile.hauteur / p.cartouche.boite.hauteur - VOILE_HAUTEUR) < 1e-9)
+  assert.equal(p.cartouche.voile.degradeBas, p.fini.y + p.fini.hauteur)
+  assert.equal(p.cartouche.voile.degradeHaut, p.cartouche.voile.y)
+  assert.ok(Math.abs((p.cartouche.voile.degradeBas - p.cartouche.voile.degradeHaut) / p.cartouche.boite.hauteur - VOILE_HAUTEUR) < 1e-9)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠️ LE FOND PERDU DOIT PROLONGER L'IMAGE FINALE — LE DÉFAUT LE PLUS GRAVE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Vu sur un tirage réel, à l'angle d'une affiche sombre : un aplat sombre, et
+// une bande turquoise le long de deux bords. La mer. La carte brute réapparue
+// dans le fond perdu, parce que le voile s'arrêtait au format FINI pendant que
+// le pavage, lui, prolongeait bien la carte.
+//
+// Le fond perdu existe pour absorber la dérive du massicot : une dérive de
+// quelques dixièmes de millimètre faisait donc apparaître une bande CLAIRE sur
+// le bord d'une affiche sombre — le défaut même que le fond perdu doit rendre
+// impossible.
+//
+// La ligne de partage, et c'est elle que ces tests tiennent :
+//   · UN OBJET (cartouche, logo, attribution) ne sort JAMAIS du format fini ;
+//   · UN TRAITEMENT DE L'IMAGE (voile, vignettage, grain) va au bord du FICHIER.
+
+const FOND_PERDU_PX = 35
+const planAvecFondPerdu = (extra = {}) =>
+  planPour(4000, 5600, { fondPerduPx: FOND_PERDU_PX, vignette: 0.6, ...extra })
+
+test('⚠️ LE VOILE DU CARTOUCHE VA JUSQU’AU BORD DU FICHIER, FOND PERDU COMPRIS', () => {
+  const p = planAvecFondPerdu({ cartouche: { actif: true, sombre: true, titre: 'Chamonix', lieu: LIEU } })
+  const v = p.cartouche.voile
+  assert.equal(v.x, 0, 'le voile laisse du papier nu à gauche')
+  assert.equal(v.x + v.largeur, p.largeur, 'le voile laisse du papier nu à droite')
+  assert.equal(v.y + v.hauteur, p.hauteur, 'le voile laisse du papier nu en bas')
+  // et il porte bien l'encre SOMBRE, celle de « écrire en clair (fond sombre) »
+  assert.deepEqual(v.voile, ENCRES.sombre.voile)
+})
+
+test('⚠️ MAIS SON DÉGRADÉ RESTE ANCRÉ SUR LE FORMAT FINI — sinon l’acheteur reçoit une autre affiche', () => {
+  const avec = planAvecFondPerdu()
+  const sans = planPour(4000 - 2 * FOND_PERDU_PX, 5600 - 2 * FOND_PERDU_PX, { vignette: 0.6 })
+  // les deux ont le MÊME rectangle fini ; les bouts du dégradé doivent donc
+  // tomber au même endroit dans ce rectangle, au pixel près.
+  const relatif = (p) => ({
+    haut: p.cartouche.voile.degradeHaut - p.fini.y,
+    bas: p.cartouche.voile.degradeBas - p.fini.y,
+  })
+  assert.deepEqual(relatif(avec), relatif(sans))
+  assert.equal(avec.cartouche.voile.degradeBas, avec.fini.y + avec.fini.hauteur)
+  // le rectangle peint, lui, descend PLUS BAS que le dernier arrêt : c'est ce
+  // débord qui prolonge l'image finale dans le fond perdu.
+  assert.ok(avec.cartouche.voile.y + avec.cartouche.voile.hauteur > avec.cartouche.voile.degradeBas)
+})
+
+test('⚠️ LE RECTANGLE VRAIMENT PEINT COUVRE LES BORDS QUE LE VOILE TOUCHE', () => {
+  // La preuve porte sur le DESSIN, pas sur le plan : c'est `dessinerVoile` qui
+  // décide, et c'est lui qui posait le rectangle trop court.
+  const p = planAvecFondPerdu({ cartouche: { actif: true, sombre: true, titre: 'Chamonix', lieu: LIEU } })
+  const bande = { x: 0, y: p.hauteur - 400, largeur: p.largeur, hauteur: 400 }
+  const ctx = contexteEnregistreur(bande.largeur, bande.hauteur)
+  composerSurToile(ctx, p, { toile: bande })
+  const voile = ctx.journal.find((e) => e.type === 'rect' && e.fill?.type === 'degrade')
+  assert.ok(voile, 'le voile n’est pas posé sur la bande du bas')
+  // trois points du fond perdu, en coordonnées de la bande
+  for (const [x, y, quoi] of [
+    [0, bande.hauteur - 0.5, 'angle bas gauche du fichier'],
+    [p.largeur - 0.5, bande.hauteur - 0.5, 'angle bas droit du fichier'],
+    [FOND_PERDU_PX / 2, bande.hauteur - FOND_PERDU_PX / 2, 'fond perdu bas gauche'],
+  ]) {
+    assert.ok(
+      x >= voile.x && x <= voile.x + voile.w && y >= voile.y && y <= voile.y + voile.h,
+      `${quoi} n’est pas couvert par le voile : la carte brute y réapparaît`
+    )
+  }
+  // et l'arrêt opaque du dégradé est AU-DESSUS du bas du rectangle : tout ce
+  // qui est en dessous — le fond perdu — reçoit donc la couleur clampée, à
+  // pleine opacité. C'est ça, « prolonger l'image finale ».
+  assert.ok(voile.fill.y0 < voile.y + voile.h, 'le dégradé s’arrête au bas du rectangle au lieu du trait de coupe')
+})
+
+test('⚠️ LE CARTOUCHE, LUI, N’ENTRE PAS DANS LE FOND PERDU — il y serait coupé', () => {
+  const p = planAvecFondPerdu()
+  const dedans = (x, y, quoi) => assert.ok(
+    x >= p.fini.x && x <= p.fini.x + p.fini.largeur && y >= p.fini.y && y <= p.fini.y + p.fini.hauteur,
+    `${quoi} sort du format fini : le massicot le prend`
+  )
+  for (const clef of ['lieu', 'sous', 'alt']) {
+    const l = p.cartouche[clef]
+    // la ligne de base ET le haut des capitales : ni l'une ni l'autre ne dépasse
+    dedans(l.x, l.base, `${clef} (ligne de base)`)
+    dedans(l.x, l.base - l.taille, `${clef} (haut des capitales)`)
+  }
+  dedans(p.logo.x, p.logo.y, 'logo (angle haut gauche)')
+  dedans(p.logo.x + p.logo.largeur, p.logo.y + p.logo.hauteur, 'logo (angle bas droit)')
+  dedans(p.attribution.x, p.attribution.base, 'attribution')
+})
+
+test('⚠️ LE VIGNETTAGE ET LE GRAIN, EUX, TRAITENT AUSSI LE FOND PERDU', () => {
+  // Ils s'appliquent en coordonnées du FICHIER : un bloc entièrement situé dans
+  // le fond perdu doit donc être traité comme le reste. S'ils s'arrêtaient au
+  // format fini, le fond perdu montrerait une image non traitée — le même
+  // défaut que le voile, sur un autre calque.
+  const p = planAvecFondPerdu()
+  assert.ok(p.vignettage, 'le plan de contrôle doit porter un vignettage')
+  const nu = new Uint8ClampedArray(4 * 4 * 4).fill(180)
+  const coin = Uint8ClampedArray.from(nu)
+  // un bloc dans le coin haut gauche du FICHIER, hors du format fini
+  reappliquerEffetsPixels(coin, { largeur: 4, hauteur: 4, x: 0, y: 0 }, p)
+  assert.notDeepEqual(Array.from(coin), Array.from(nu))
+  // et il est plus sombre que le même bloc pris au centre : le vignettage
+  // s'extrapole vers l'extérieur au lieu de s'arrêter au trait de coupe
+  const centre = Uint8ClampedArray.from(nu)
+  reappliquerEffetsPixels(centre, {
+    largeur: 4, hauteur: 4,
+    x: Math.round(p.fini.x + p.fini.largeur / 2), y: Math.round(p.fini.y + p.fini.hauteur / 2),
+  }, p)
+  assert.ok(coin[0] < centre[0], 'le coin du fond perdu n’est pas assombri')
 })
 
 test('les quatre coins du logo tombent bien dans les quatre coins', () => {

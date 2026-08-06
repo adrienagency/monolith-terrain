@@ -152,6 +152,40 @@ export const ENCRES = {
 export const VOILE_HAUTEUR = 2.4
 
 // ═══════════════════════════════════════════════════════════════════════════
+// ⚠️ LE VOILE VA JUSQU'AU BORD DU FICHIER, PAS JUSQU'AU BORD DU FORMAT FINI
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// C'est le défaut le plus grave qu'un tirage réel ait montré, et il se voyait
+// sur un angle : un aplat sombre, et une bande turquoise le long de deux bords.
+// La mer. La carte brute, réapparue là où on croyait avoir posé un voile.
+//
+// La cause : le voile était peint sur le RECTANGLE FINI. Tout le reste du
+// module s'y repère à raison — un cartouche, un logo, une attribution ne
+// doivent JAMAIS entrer dans le fond perdu, ils y seraient coupés. Mais le
+// voile n'est pas un élément posé sur l'affiche : c'est un TRAITEMENT DE
+// L'IMAGE. Le pavage, lui, prolonge bien la carte dans les 3 mm de fond perdu.
+// Résultat : le fond perdu montrait ce qu'il y a DESSOUS au lieu de prolonger
+// ce qu'on VOIT.
+//
+// Conséquence à l'impression : le fond perdu existe pour absorber la dérive du
+// massicot. Une dérive de quelques dixièmes de millimètre — normale — faisait
+// donc apparaître une bande CLAIRE sur le bord d'une affiche sombre, c'est-à-
+// dire exactement le défaut que le fond perdu est censé rendre impossible.
+//
+// La règle, et elle vaut pour tout ce qui viendrait s'ajouter au compositeur :
+//   · CE QUI EST UN OBJET (cartouche, logo, attribution) se repère sur le
+//     format fini et n'en sort jamais ;
+//   · CE QUI EST UN TRAITEMENT DE L'IMAGE (le voile, le vignettage, le grain)
+//     va jusqu'aux bords du FICHIER.
+//
+// ⚠️ ET LE DÉGRADÉ, LUI, RESTE ANCRÉ SUR LE FORMAT FINI. Étirer ses deux bouts
+// jusqu'au bord du fichier aurait décalé le voile de 3 mm à l'intérieur de la
+// coupe : l'acheteur aurait validé une affiche et reçu l'autre. On ÉTEND le
+// rectangle peint, on ne DÉPLACE pas les arrêts — au-delà du dernier arrêt, un
+// dégradé de canevas prolonge la couleur de cet arrêt, ce qui est très
+// exactement « prolonger l'image finale ».
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ② LE TEXTE DU CARTOUCHE — UNE SEULE SOURCE POUR LES DEUX ÉCRANS
 // ═══════════════════════════════════════════════════════════════════════════
 //
@@ -321,10 +355,14 @@ export const INTERLIGNE_NORMAL = 1.2
  * `align-items: baseline` du flex rend l'alignement de l'altitude sur le nom du
  * lieu littéralement exact.
  *
- * @param {{fini:object, textes:object, sombre?:boolean}} o
+ * @param {{fini:object, textes:object, sombre?:boolean, fichier?:object}} o
+ *   `fichier` est le rectangle du FICHIER ENTIER, fond perdu compris ; seul le
+ *   voile s'en sert (voir l'encadré ⚠️ au-dessus de `VOILE_HAUTEUR`). Absent,
+ *   il retombe sur le rectangle fini — c'est-à-dire sur l'écran de validation,
+ *   qui n'a pas de fond perdu du tout.
  * @returns {object|null} `null` si le cartouche n'a rien à dire
  */
-export function planCartouche({ fini, textes, sombre = false } = {}) {
+export function planCartouche({ fini, textes, sombre = false, fichier = null } = {}) {
   if (!fini || !textes) return null
   const { lieu, sous, alt } = textes
   if (!lieu && !sous && !alt) return null
@@ -357,15 +395,26 @@ export function planCartouche({ fini, textes, sombre = false } = {}) {
 
   const hautContenu = basLieu - tailleLieu
   const hauteurBoite = fini.y + fini.hauteur - hautContenu + padHaut
+  // Le fichier entier, fond perdu compris. Sans lui — l'écran de validation —
+  // c'est le rectangle fini, et rien ne change.
+  const fich = fichier || fini
+  // Les deux bouts du dégradé, sur le format FINI : ce sont eux qui décident de
+  // ce que l'acheteur voit, et ils ne bougent pas d'un pixel.
+  const degradeBas = fini.y + fini.hauteur
+  // `height: 240%` mesuré depuis le BAS de la boîte (inset: auto 0 0)
+  const degradeHaut = degradeBas - hauteurBoite * VOILE_HAUTEUR
   return {
     // la boîte du cartouche : ce que `::before` mesure pour son voile
     boite: { x: fini.x, y: hautContenu - padHaut, largeur: L, hauteur: hauteurBoite },
     voile: {
-      x: fini.x,
-      // `height: 240%` mesuré depuis le BAS de la boîte (inset: auto 0 0)
-      y: fini.y + fini.hauteur - hauteurBoite * VOILE_HAUTEUR,
-      largeur: L,
-      hauteur: hauteurBoite * VOILE_HAUTEUR,
+      // ── LE RECTANGLE PEINT : jusqu'aux bords du FICHIER ──────────────────
+      x: fich.x,
+      y: degradeHaut,
+      largeur: fich.largeur,
+      hauteur: fich.y + fich.hauteur - degradeHaut,
+      // ── LE DÉGRADÉ : ancré sur le format FINI ────────────────────────────
+      degradeHaut,
+      degradeBas,
       ...(sombre ? ENCRES.sombre : ENCRES.clair),
     },
     sombre: !!sombre,
@@ -616,14 +665,23 @@ export function planComposition({
   attribution = null,
 } = {}) {
   const fini = zoneFinie({ largeur, hauteur, fondPerduPx })
+  // Le FICHIER, fond perdu compris. Seul le voile s'en sert : c'est un
+  // traitement de l'image, pas un objet posé dessus (encadré ⚠️ § ①).
+  const fichier = {
+    x: 0,
+    y: 0,
+    largeur: Math.max(1, Math.round(largeur || 1)),
+    hauteur: Math.max(1, Math.round(hauteur || 1)),
+  }
   const textes = cartouche?.actif === false ? null : cartouche ? texteCartouche(cartouche) : null
-  const cart = textes ? planCartouche({ fini, textes, sombre: !!cartouche.sombre }) : null
+  const cart = textes ? planCartouche({ fini, textes, sombre: !!cartouche.sombre, fichier }) : null
   const lg = logo ? planLogo({ fini, ...logo }) : null
   const cell = largeurMm ? echelleGrainSurface({ largeurFiniePx: fini.largeur, largeurMm }) : null
   return {
-    largeur: Math.max(1, Math.round(largeur || 1)),
-    hauteur: Math.max(1, Math.round(hauteur || 1)),
+    largeur: fichier.largeur,
+    hauteur: fichier.hauteur,
     fini,
+    fichier,
     cartouche: cart,
     logo: lg,
     attribution: planAttribution({
@@ -735,13 +793,25 @@ export function dessinerLigne(ctx, ligne, { dx = 0, dy = 0, couleur } = {}) {
   ctx.restore()
 }
 
-/** Le voile dégradé du `::before`, en `createLinearGradient`. */
+/**
+ * Le voile dégradé du `::before`, en `createLinearGradient`.
+ *
+ * ⚠️ LE RECTANGLE PEINT ET LES BOUTS DU DÉGRADÉ SONT DEUX CHOSES DIFFÉRENTES,
+ * et c'est ce qui règle le défaut du fond perdu. Le rectangle va jusqu'aux
+ * bords du fichier ; les arrêts, eux, restent posés sur le format fini. Sous
+ * `degradeBas`, un dégradé de canevas prolonge la couleur de son premier arrêt
+ * — le voile à pleine opacité. Le fond perdu prolonge donc l'image FINALE, et
+ * non la carte nue qu'il y a dessous.
+ */
 export function dessinerVoile(ctx, voile, { dx = 0, dy = 0 } = {}) {
   if (!voile) return
   const y0 = voile.y - dy
-  const y1 = y0 + voile.hauteur
+  // `degradeHaut`/`degradeBas` sont absents des plans d'avant ce correctif :
+  // on retombe alors sur le rectangle, ce qui redonne l'ancien comportement.
+  const gHaut = (Number.isFinite(voile.degradeHaut) ? voile.degradeHaut : voile.y) - dy
+  const gBas = (Number.isFinite(voile.degradeBas) ? voile.degradeBas : voile.y + voile.hauteur) - dy
   // `linear-gradient(to top, opaque, transparent)` : l'opaque est EN BAS.
-  const g = ctx.createLinearGradient(0, y1, 0, y0)
+  const g = ctx.createLinearGradient(0, gBas, 0, gHaut)
   const [r, v, b] = voile.voile
   g.addColorStop(0, `rgba(${r}, ${v}, ${b}, ${voile.voileAlpha})`)
   g.addColorStop(1, `rgba(${r}, ${v}, ${b}, 0)`)
