@@ -38,6 +38,13 @@ import { PLAFOND_REFERENCE } from '../export-dpi.js'
 // vendu qui ne se découvre qu'après la vente. Le compositeur est la source ;
 // cet écran l'affiche. Voir src/compositeur-affiche.js.
 import { coordonneesCartouche, texteCartouche } from '../compositeur-affiche.js'
+// Les décisions autour du point de netteté — sans WebGL, donc testables sans
+// navigateur. Ce module dit POURQUOI un point du monde ne survit pas tel quel à
+// un changement de sens, et porte les mots de l'avertissement d'achat.
+import {
+  estSurLaFeuille, viseesDeRepli, doitAvertirAvantAchat,
+  AVERTISSEMENT_NETTETE, MESSAGE_POINT_REPLACE,
+} from '../affiche-nettete.js'
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LE PRIX AFFICHÉ — UNE ÉTIQUETTE, PAS UN PRIX
@@ -190,6 +197,17 @@ export function ouvrirAffiche(ctx) {
     // l'affiche déplace la caméra, donc une distance mesurée à l'écran
     // désignerait un autre plan une fois l'affiche cadrée.
     pointNet: null,
+    // ⚠️ ET, À CÔTÉ, L'ENDROIT DE LA FEUILLE OÙ IL A VISÉ — en fraction de
+    // cadre (−1 à +1), pas en pixels. C'est ce qui manquait pour survivre à un
+    // changement de sens : le point du monde ne bouge pas, mais le cadre est
+    // entièrement refait, et il faut bien savoir OÙ re-viser. Voir
+    // `recalerPointNet` et src/affiche-nettete.js.
+    //
+    // Ce couple ne traverse PAS le paiement (afficheSerialisable ne retient que
+    // le point du monde) : au retour on repart donc du centre si le cadre a
+    // changé, ce qui est le comportement d'un premier chargement. C'est assumé
+    // — élargir le format du panier touche au tunnel de paiement.
+    visee: null, // { u, v }
     // ⚠️ LA COMPOSITION RETROUVÉE APRÈS UN ALLER-RETOUR CHEZ STRIPE. Partir
     // payer est une NAVIGATION : l'application est déchargée, et sans ceci
     // l'acheteur qui renonce revient devant une affiche vierge et doit tout
@@ -455,6 +473,12 @@ export function ouvrirAffiche(ctx) {
   // Le groupe n'existe QUE si le gabarit porte du bokeh : un réglage sans effet
   // vaut mieux absent que grisé.
   const gNet = el('div', 'af-groupe af-groupe-net')
+  // ⚠️ DÉCLARÉE DEHORS, REMPLIE DEDANS. `recalerPointNet` écrit dans cette
+  // ligne sans avoir à savoir si le groupe existe : sans bokeh elle n'est
+  // simplement jamais posée dans le DOM, et l'écrire ne coûte rien.
+  const noteNet = el('p', 'af-note')
+  noteNet.setAttribute('role', 'status')
+  noteNet.hidden = true
   if (ctx.bokehActif?.()) {
     const enTeteNet = el('div', 'af-legende-ligne')
     enTeteNet.append(el('p', 'af-legende', 'Point de netteté'))
@@ -463,7 +487,7 @@ export function ouvrirAffiche(ctx) {
     bViser.textContent = 'Choisir'
     enTeteNet.append(bViser)
     const aideNet = el('p', 'af-aide', 'Clique sur l’affiche pour choisir ce qui doit être net. Le reste se fond.')
-    gNet.append(enTeteNet, aideNet)
+    gNet.append(enTeteNet, aideNet, noteNet)
     bViser.addEventListener('click', () => { viseur(true) })
     corps.append(gNet)
   }
@@ -480,7 +504,52 @@ export function ouvrirAffiche(ctx) {
   cta.append(ctaTexte, ctaPrix)
   const rassure = el('p', 'af-rassure')
   rassure.innerHTML = phraseRassurance()
-  pied.append(verite, cta, rassure)
+
+  // ══════ L'AVERTISSEMENT AVANT D'ENCAISSER ═════════════════════════════════
+  //
+  // Adrien : « il faudrait un avertissement très très compréhensible si le
+  // bokeh est activé : attention ! avez-vous bien vérifié où s'effectue le
+  // point sur votre photo ? […] à chaque fois que l'on va passer à l'achat. »
+  //
+  // ⚠️ L'ÉQUILIBRE EST DANS LE NOMBRE DE GESTES, PAS DANS LA GRAVITÉ DU TON.
+  // Il ne doit pas s'esquiver par mégarde ; il ne doit pas non plus punir
+  // quelqu'un qui achète sa cinquième affiche. Le compromis retenu, et
+  // pourquoi :
+  //   ① UN SEUL CLIC de plus, toujours au même endroit. Pas de case à cocher à
+  //      chercher, pas de délai, pas de mot à retaper. Pour qui sait ce qu'il
+  //      fait, c'est un clic ; pour qui ne le sait pas, c'est la seule fois où
+  //      on lui aura dit.
+  //   ② LE PANNEAU S'OUVRE AU-DESSUS DU BOUTON, ET LE BOUTON NE BOUGE PAS.
+  //      ⚠️ LE SENS EST CONTRE-INTUITIF ET IL A ÉTÉ VÉRIFIÉ À L'ÉCRAN. Le pied
+  //      est le bloc FIXE d'un rail en colonne (`.af-rail-corps` est le
+  //      `flex: 1`) : il est ancré en BAS, donc il grandit vers le HAUT. Posé
+  //      SOUS le bouton, le panneau faisait remonter le bouton de 224 px et
+  //      glissait « C'est net au bon endroit » exactement sous le curseur qui
+  //      venait de cliquer — un double-clic l'aurait traversé sans que personne
+  //      ne lise rien. Posé au-dessus, le bouton et la phrase de réassurance ne
+  //      bougent pas d'un pixel : le second clic d'un double-clic retombe sur le
+  //      bouton d'achat, qu'on désactive tant que la question est posée.
+  //      L'avertissement devient inesquivable par inadvertence sans bloquer.
+  //   ③ LE CLAVIER PART SUR L'OPTION PRUDENTE. On donne le focus à « Déplacer
+  //      le point », pas à « Continuer » : une Entrée réflexe doit coûter un
+  //      aller-retour, jamais un fichier flou.
+  //   ④ AUCUNE MÉMOIRE. `doitAvertirAvantAchat` ne consulte qu'un drapeau remis
+  //      à faux à la fin de chaque tentative — « à chaque fois » au sens propre.
+  const garde = el('div', 'af-garde')
+  garde.hidden = true
+  garde.setAttribute('role', 'group')
+  garde.setAttribute('aria-label', 'Vérification du point de netteté')
+  const gardeTitre = el('p', 'af-garde-titre', AVERTISSEMENT_NETTETE.titre)
+  const gardePhrase = el('p', 'af-garde-phrase', AVERTISSEMENT_NETTETE.phrase)
+  const gardeBoutons = el('div', 'af-garde-boutons')
+  const bDeplacer = el('button', 'af-garde-non', AVERTISSEMENT_NETTETE.deplacer)
+  bDeplacer.type = 'button'
+  const bContinuer = el('button', 'af-garde-oui', AVERTISSEMENT_NETTETE.continuer)
+  bContinuer.type = 'button'
+  gardeBoutons.append(bDeplacer, bContinuer)
+  garde.append(gardeTitre, gardePhrase, gardeBoutons)
+
+  pied.append(verite, garde, cta, rassure)
   rail.append(corps, pied)
 
   // ── la sortie ─────────────────────────────────────────────────────────────
@@ -493,10 +562,69 @@ export function ouvrirAffiche(ctx) {
   document.body.append(scene, fermer)
   requestAnimationFrame(() => scene.classList.add('open'))
 
+  // ══════ LE POINT DE NETTETÉ SUIT LE CADRE ═════════════════════════════════
+  //
+  // ⚠️ LA CAUSE, ÉCRITE UNE FOIS POUR TOUTES. Le point est mémorisé en
+  // coordonnées DU MONDE — c'est la bonne décision, `cadrerAffiche` explique
+  // pourquoi une distance d'écran ne survivrait pas au recul de la caméra. Sa
+  // PROFONDEUR était donc déjà recalculée à chaque rendu, correctement. Ce que
+  // personne ne recalculait, c'est s'il était encore SUR LA FEUILLE : passer en
+  // portrait refait le cadre entier (`distanceCadrage` dépend de l'aspect, la
+  // caméra recule, le décalage recoupe), et le point pouvait en sortir. Mise au
+  // point juste, sur un sujet qu'on ne voit plus : affiche entièrement floue,
+  // sans un mot.
+  //
+  // Corriger « en projetant le point dans le nouveau cadre » n'aurait aucun
+  // sens — un point du monde ne se déplace pas parce qu'on change de papier. On
+  // VÉRIFIE, et on RE-VISE quand il faut, au même endroit de la feuille.
+  //
+  // @param {boolean} annoncer - dire à l'utilisateur que le point a bougé ; on
+  //   se tait pour la toute première visée (il n'avait rien choisi, il n'y a
+  //   rien à lui apprendre) et quand c'est LUI qui vient de cliquer.
+  // @returns {boolean} - le point a-t-il changé ?
+  function recalerPointNet({ annoncer = true } = {}) {
+    if (!ctx.bokehActif?.()) return false
+    const geo = geoCourante()
+    if (!geo) return false
+    const aspect = geo.largeurMm / geo.hauteurMm
+    const cadrage = { ...etat.cadrage }
+    const avait = !!etat.pointNet
+    if (avait) {
+      const ndc = ctx.projeterPointNet?.({ point: etat.pointNet, aspect, cadrage })
+      // Encore sur la feuille : on ne touche à rien. Re-viser ici se battrait
+      // avec l'utilisateur, qui avait choisi le sommet et le veut toujours.
+      if (estSurLaFeuille(ndc)) return false
+    }
+    // ⚠️ ON RÉUTILISE `viserPointNet`, LA VISÉE DU CLIC. Pas un second
+    // calculateur de netteté : deux façons de viser finiraient par diverger, et
+    // c'est le genre d'écart qui ne se découvre que sur un tirage payé.
+    for (const essai of viseesDeRepli(etat.visee)) {
+      const p = ctx.viserPointNet?.({ u: essai.u, v: essai.v, aspect, cadrage })
+      if (!p) continue // le ciel : on descend d'un cran dans la liste
+      etat.pointNet = p
+      etat.visee = { u: essai.u, v: essai.v }
+      if (avait && annoncer) {
+        noteNet.textContent = MESSAGE_POINT_REPLACE
+        noteNet.hidden = false
+        // ⚠️ ET LE VISEUR SE RÉARME — c'est la demande d'Adrien, « en cliquant
+        // sur la map à cette étape là on devrait pouvoir refaire le point ».
+        // Le mécanisme est celui du clic ordinaire (`viserIci`), pas un
+        // second ; on ne fait que le rallumer, et SEULEMENT quand le point a
+        // vraiment été perdu. Le rallumer à chaque changement de format
+        // volerait le premier clic de quelqu'un qui voulait recadrer.
+        viseur(true)
+      }
+      return true
+    }
+    // Rien n'a été touché nulle part (une affiche de ciel pur, cadrage extrême)
+    // : on garde ce qu'on avait plutôt que de tout rendre flou.
+    return false
+  }
+
   // ── l'état, poussé dans le DOM ────────────────────────────────────────────
   let jeton = 0
   let differe = null
-  function appliquer({ refaireRendu = false } = {}) {
+  function appliquer({ refaireRendu = false, recaler = true } = {}) {
     const geo = geoCourante()
     if (!geo) return
     // Le cadrage se re-borne à CHAQUE passage : baisser le zoom doit ramener les
@@ -556,9 +684,16 @@ export function ouvrirAffiche(ctx) {
       // l'arrêt. C'est le même compromis que l'aperçu d'un recadrage photo.
       apercuApproche()
       clearTimeout(differe)
-      differe = setTimeout(() => rendre(geo), 260)
+      // ⚠️ LE RECALAGE ATTEND L'ARRÊT, LUI AUSSI. Il tire un rayon dans le
+      // relief : un par cran de molette coûterait ce qu'on vient d'économiser
+      // en ne rendant pas. Il se fait donc juste avant le vrai rendu, quand le
+      // cadrage a fini de bouger.
+      differe = setTimeout(() => { if (recaler) recalerPointNet(); rendre(geoCourante() || geo) }, 260)
     } else if (refaireRendu) {
       clearTimeout(differe)
+      // ⚠️ AVANT `rendre`, PAS APRÈS : le rendu lit `etat.pointNet`. Recaler
+      // ensuite ferait afficher une image d'avance en permanence.
+      if (recaler) recalerPointNet()
       rendre(geo)
     }
   }
@@ -624,9 +759,19 @@ export function ouvrirAffiche(ctx) {
     const p = ctx.viserPointNet?.({ u, v, aspect: geo.largeurMm / geo.hauteurMm, cadrage: etat.cadrage })
     // Un clic dans le ciel ne remet PAS le point à zéro : on garde le précédent
     // plutôt que de rendre l'image entièrement floue sur un geste raté.
-    if (p) etat.pointNet = p
+    if (p) {
+      etat.pointNet = p
+      // Où il a visé DANS LE CADRE : c'est ce qu'on rejouera si un changement
+      // de sens fait sortir le point de la feuille.
+      etat.visee = { u, v }
+      noteNet.hidden = true
+    }
     viseur(false)
-    appliquer({ refaireRendu: true })
+    // ⚠️ PAS DE RECALAGE SUR SON PROPRE CLIC. Un clic dans la bande de bord
+    // (`MARGE_SUR_LA_FEUILLE`) serait aussitôt jugé « hors cadre » et l'écran
+    // annoncerait avoir replacé un point que l'utilisateur venait de poser
+    // exactement là — un avertissement faux, donc un avertissement perdu.
+    appliquer({ refaireRendu: true, recaler: false })
   }
 
   // ── Le geste direct : on tire l'image, on ne cherche pas un curseur ───────
@@ -741,13 +886,64 @@ export function ouvrirAffiche(ctx) {
     if (tirImg.src?.startsWith('blob:')) { URL.revokeObjectURL(tirImg.src); tirImg.removeAttribute('src') }
   }
 
-  cta.addEventListener('click', async (e) => {
-    if (enTirage) return
+  // ── La garde de netteté : posée avant l'achat, jamais pendant ─────────────
+  //
+  // ⚠️ ELLE N'A AUCUNE MÉMOIRE D'UNE COMMANDE À L'AUTRE. `netteteConfirmee` ne
+  // vaut que pour la tentative en cours et retombe dans le `finally` — quelle
+  // que soit l'issue, y compris un départ chez Stripe suivi d'un retour.
+  let netteteConfirmee = false
+  // Ce qu'on rejoue si l'acheteur répond « continuer ». On garde la SUITE, pas
+  // l'événement : `altKey` ne survivrait pas à l'attente d'une réponse.
+  let reprendreAchat = null
+
+  function ouvrirGarde(reprendre) {
+    reprendreAchat = reprendre
+    garde.hidden = false
+    // Le bouton d'achat reste EXACTEMENT où il était, et devient inerte : c'est
+    // ce qui rend l'avertissement inesquivable au double-clic (voir l'encadré
+    // au-dessus de `garde`).
+    cta.disabled = true
+    bDeplacer.focus()
+  }
+  function fermerGarde() {
+    garde.hidden = true
+    reprendreAchat = null
+    cta.disabled = false
+  }
+  bDeplacer.addEventListener('click', () => {
+    fermerGarde()
+    noteNet.hidden = true
+    // On ARME LE VISEUR plutôt que d'expliquer une deuxième fois : le geste
+    // décrit dans l'avertissement devient possible dans la seconde qui suit.
+    viseur(true)
+  })
+  bContinuer.addEventListener('click', () => {
+    const suite = reprendreAchat
+    netteteConfirmee = true
+    fermerGarde()
+    suite?.()
+  })
+
+  cta.addEventListener('click', (e) => {
     // ⚠️ `altKey` n'est qu'une INTENTION, pas une autorisation : c'est le geste
     // qui déclenche la demande du code d'atelier. Le secret, lui, est saisi puis
     // vérifié CÔTÉ SERVEUR — voir netlify/functions/paiement.mjs. Il se lit
-    // MAINTENANT : l'événement ne survivra pas aux `await` qui suivent.
-    const atelier = !!e.altKey
+    // MAINTENANT : l'événement ne survivra pas aux `await` qui suivent, ni à la
+    // question posée par la garde de netteté.
+    lancerAchat(!!e.altKey)
+  })
+
+  async function lancerAchat(atelier) {
+    if (enTirage) return
+    // ── LA QUESTION, S'IL Y A DU FLOU ────────────────────────────────────────
+    // Avant le voile, avant le moindre rendu : ce qui se répare ici ne coûte
+    // qu'un clic, alors que la même erreur découverte sur le PDF coûte un
+    // fichier refait et, un jour où le prix ne sera plus de 0 €, un
+    // remboursement.
+    if (doitAvertirAvantAchat({ bokehActif: !!ctx.bokehActif?.(), dejaConfirme: netteteConfirmee })) {
+      ouvrirGarde(() => lancerAchat(atelier))
+      return
+    }
     cta.disabled = true
     ctaTexte.textContent = 'Un instant…'
     const geo = geoCourante()
@@ -867,6 +1063,11 @@ export function ouvrirAffiche(ctx) {
     } finally {
       tirAnnuler.hidden = false
       fermerVoile()
+      // ⚠️ « À CHAQUE FOIS QUE L'ON VA PASSER À L'ACHAT » (Adrien) : la
+      // confirmation ne vaut QUE pour la tentative qui s'achève. Un second
+      // achat repose la question — le cadre a pu changer entre les deux, et
+      // c'est précisément le cas qui a motivé cette passe.
+      netteteConfirmee = false
       // ⚠️ ON LÂCHE LE PDF DÈS QU'ON RESTE. `reste` veut dire que la caisse ne
       // s'est pas ouverte : le fichier ne servira plus, et un second essai en
       // refabriquera un. Le garder ferait cohabiter deux affiches complètes en
@@ -878,7 +1079,7 @@ export function ouvrirAffiche(ctx) {
         ctaTexte.textContent = 'Recevoir le fichier'
       }
     }
-  })
+  }
 
   function partir() {
     scene.classList.remove('open')
@@ -901,6 +1102,10 @@ export function ouvrirAffiche(ctx) {
   function surTouche(e) {
     if (e.key !== 'Escape') return
     if (enTirage) { annulation = true; tirEtape.textContent = 'Annulation…'; tirAnnuler.disabled = true; return }
+    // ⚠️ ÉCHAP DEVANT LA GARDE DE NETTETÉ REFERME LA QUESTION, il ne quitte pas
+    // l'écran — et il ne CONFIRME rien. On ne veut pas d'un avertissement qui
+    // enferme, mais on ne veut pas non plus qu'un réflexe le fasse passer.
+    if (!garde.hidden) { fermerGarde(); return }
     partir()
   }
   fermer.addEventListener('click', () => { if (!enTirage) partir() })
@@ -917,7 +1122,17 @@ export function ouvrirAffiche(ctx) {
       : 'Cet appareil ne peut pas produire de fichier d’impression. L’image à l’écran, elle, reste gratuite.'
   }
 
-  appliquer({ refaireRendu: true })
+  // ⚠️ ON POSE UN PREMIER POINT AVANT LE PREMIER RENDU, ET C'EST UN DÉFAUT
+  // OBSERVÉ À L'ÉCRAN, PAS UNE COQUETTERIE. Sans point mémorisé, `cadrerAffiche`
+  // ne touche pas à la mise au point : l'affiche héritait de la distance de la
+  // CARTE alors que la caméra venait de reculer pour cadrer le socle, et
+  // l'écran s'ouvrait sur une feuille intégralement floue — la pire première
+  // impression possible, et un fichier vendable en l'état si l'acheteur ne
+  // cliquait nulle part. On vise donc le centre de la feuille (voir
+  // `viseesDeRepli`) ; le viseur reste armé juste après, et le premier clic
+  // remplace ce défaut par le choix de l'utilisateur.
+  recalerPointNet({ annoncer: false })
+  appliquer({ refaireRendu: true, recaler: false })
   if (ctx.bokehActif?.()) viseur(true)
   return { fermer: partir }
 }

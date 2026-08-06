@@ -7104,6 +7104,7 @@ function cadrerAffiche(aspect, cadrage, pointNet = null, tuile = null) {
       camera.setViewOffset(v.fullWidth, v.fullHeight, v.offsetX, v.offsetY, v.width, v.height)
     } else camera.clearViewOffset()
     camera.updateProjectionMatrix()
+    camera.updateMatrixWorld(true) // symétrique du cadrage — voir plus bas
   }
 
   const boite = new THREE.Box3()
@@ -7170,6 +7171,20 @@ function cadrerAffiche(aspect, cadrage, pointNet = null, tuile = null) {
     camera.setViewOffset(vue.fullWidth, vue.fullHeight, vue.offsetX, vue.offsetY, vue.width, vue.height)
   } else camera.clearViewOffset()
   camera.updateProjectionMatrix()
+  // ⚠️ ET LES MATRICES DE MONDE AVEC, SINON LE CLIC DE VISÉE MENT. `lookAt` et
+  // `position` n'écrivent QUE la position et le quaternion : `matrixWorld` — et
+  // donc `matrixWorldInverse` — restent celles de la dernière image rendue,
+  // c'est-à-dire celles de la caméra de la CARTE. Or c'est exactement ce que
+  // lisent `Raycaster.setFromCamera` (origine du rayon) et `Vector3.project`.
+  // Sans cette ligne, `viserPointNet` tire son rayon depuis la caméra d'écran
+  // avec la projection de l'affiche : le point tombe à côté de ce qu'on a
+  // désigné, d'autant plus loin que l'affiche a reculé pour cadrer le socle.
+  // Vérifié dans le navigateur : déplacer `camera.position` ne bouge pas d'un
+  // millimètre les trois derniers termes de `matrixWorld`.
+  // Le rendu, lui, n'en avait pas besoin — `renderer.render` rafraîchit ces
+  // matrices lui-même — ce qui est précisément pourquoi le défaut a pu vivre
+  // jusqu'ici sans se voir sur une image.
+  camera.updateMatrixWorld(true)
 
   // ═══ LE POINT DE NETTETÉ EST UN POINT DU MONDE, PAS UNE DISTANCE ═══════════
   //
@@ -7239,6 +7254,43 @@ function viserPointNet({ u, v, aspect, cadrage }) {
     if (d == null) return null // le ciel, ou hors du bloc : on garde l'ancien point
     const p = focusRay.ray.origin.clone().addScaledVector(focusRay.ray.direction, d)
     return { x: p.x, y: p.y, z: p.z }
+  } finally {
+    r.restaurer()
+  }
+}
+
+/**
+ * Le chemin INVERSE : où tombe un point de netteté déjà mémorisé, dans le cadre
+ * de l'affiche telle qu'elle est composée maintenant ?
+ *
+ * ⚠️ C'EST LA QUESTION QUI MANQUAIT, ET TOUT LE DÉFAUT TIENT DEDANS. Le point
+ * est un point du MONDE : il ne bouge pas quand on passe en portrait, alors que
+ * le cadre, lui, est entièrement refait (`distanceCadrage` dépend de l'aspect,
+ * la caméra recule, le décalage recoupe). Sa profondeur restait donc
+ * parfaitement recalculée pendant qu'il sortait de la feuille — mise au point
+ * juste, sur un sujet qu'on ne voit plus, et l'affiche entière floue.
+ *
+ * On passe par `cadrerAffiche`, LE MÊME cadrage que `viserPointNet` et que le
+ * rendu : deux façons de cadrer finiraient par répondre deux choses.
+ *
+ * @returns {{u:number, v:number, devant:boolean}|null} - coordonnées
+ *   normalisées de three dans le cadre de l'affiche, et de quel côté de
+ *   l'objectif se trouve le point.
+ */
+function projeterPointNet({ point, aspect, cadrage }) {
+  if (!point || ![point.x, point.y, point.z].every(Number.isFinite)) return null
+  const r = cadrerAffiche(aspect, cadrage)
+  try {
+    const p = new THREE.Vector3(point.x, point.y, point.z)
+    // ⚠️ LE CÔTÉ DE L'OBJECTIF SE MESURE AVANT DE PROJETER. Un point passé
+    // DERRIÈRE la caméra se projette quand même, en miroir, avec des
+    // coordonnées parfaitement plausibles : sans ce produit scalaire on le
+    // croirait cadré. Le cas arrive pour de vrai — un gros plan délibéré peut
+    // laisser la caméra en avant du point visé auparavant.
+    const axe = camera.getWorldDirection(new THREE.Vector3())
+    const devant = p.clone().sub(camera.position).dot(axe) > 0
+    p.project(camera)
+    return { u: p.x, v: p.y, devant }
   } finally {
     r.restaurer()
   }
@@ -7834,6 +7886,9 @@ async function openAfficheUI(etatInitial = null) {
     // Le bokeh : actif ou non, et où l'on vise. Voir viserPointNet.
     bokehActif: () => !!(params.bokehEnabled && params.bokehScale > 0),
     viserPointNet,
+    // Et où tombe le point qu'on a déjà : c'est ce qui permet à l'écran de
+    // s'apercevoir qu'un changement de sens vient de le mettre hors cadre.
+    projeterPointNet,
     lieuxAffiches: () => params.placesEnabled,
     setLieuxAffiches: (v) => {
       params.placesEnabled = !!v

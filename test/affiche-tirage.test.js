@@ -77,7 +77,16 @@ test('l’annulation existe, et l’orchestrateur la consulte', () => {
 test('Échap pendant un tirage ANNULE le tirage, il ne ferme pas l’écran', () => {
   // Fermer laisserait l'orchestrateur peindre des tuiles dans une scène qu'on
   // est en train de rendre à la carte.
-  assert.match(AFFICHE, /if \(enTirage\) \{ annulation = true;[\s\S]{0,120}return \}\s*\n\s*partir\(\)/)
+  //
+  // ⚠️ L'ORDRE EST L'ASSERTION, PAS LE VOISINAGE. Le tirage est testé EN
+  // PREMIER et sort par `return` ; ce qui vient ensuite (aujourd'hui la garde de
+  // netteté, demain autre chose) ne peut donc plus détourner l'échappement d'un
+  // rendu en cours. `partir()` reste le dernier recours de la fonction.
+  const touche = AFFICHE.slice(AFFICHE.indexOf('function surTouche(e)'))
+  assert.match(touche, /if \(enTirage\) \{ annulation = true;[\s\S]{0,120}return \}/)
+  const iTirage = touche.indexOf('if (enTirage)')
+  const iPartir = touche.indexOf('partir()')
+  assert.ok(iTirage > 0 && iTirage < iPartir, 'le tirage doit être examiné avant de fermer')
   assert.match(AFFICHE, /fermer\.addEventListener\('click', \(\) => \{ if \(!enTirage\) partir\(\) \}\)/)
 })
 
@@ -239,11 +248,18 @@ test('le contournement d’atelier (Alt + clic) survit aux await ajoutés', () =
   // ⚠️ `e.altKey` DOIT ÊTRE LU AVANT LE PREMIER `await`. L'événement ne survit
   // pas au tour de boucle : lu après, il serait toujours faux, et Adrien ne
   // pourrait plus éprouver la chaîne sans payer.
+  // ⚠️ LA GARDE DE NETTETÉ A RENDU LA CONTRAINTE PLUS FORTE, PAS PLUS FAIBLE.
+  // L'achat peut désormais ATTENDRE une réponse de l'acheteur avant de démarrer
+  // (« c'est net au bon endroit ») : l'événement serait mort depuis longtemps.
+  // `altKey` est donc lu dans l'écouteur lui-même, et passé en argument — la
+  // seule forme qui survive à la fois aux `await` et à l'attente d'une réponse.
   const clic = AFFICHE.slice(AFFICHE.indexOf("cta.addEventListener('click'"))
-  const iLu = clic.indexOf('const atelier = !!e.altKey')
+  const iLu = clic.indexOf('lancerAchat(!!e.altKey)')
   const iAwait = clic.indexOf('await ')
-  assert.ok(iLu > 0, 'altKey n’est plus lu')
+  assert.ok(iLu > 0, 'altKey n’est plus lu dans l’écouteur du bouton')
   assert.ok(iLu < iAwait, 'altKey est lu après un await : il sera toujours faux')
+  // et rien ne doit le relire APRÈS coup depuis un événement conservé
+  assert.ok(!/const atelier = !!e\.altKey/.test(AFFICHE.slice(AFFICHE.indexOf('async function lancerAchat'))))
   assert.match(AFFICHE, /prix: PRIX_AFFICHE_EUR, atelier, pdf: pdfTirage \}\)/)
   // et le code d'atelier reste demandé côté main.js, vérifié côté serveur
   assert.match(MAIN, /if \(commande\.atelier\) \{/)

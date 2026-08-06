@@ -375,6 +375,73 @@ body.dark .af-sheet {
 }
 .af-rassure b { font-weight: 600; color: var(--ce-ink); }
 
+/* ── La garde de netteté : la question posée avant d'encaisser ───────────────
+   Elle s'ouvre AU-DESSUS du bouton d'achat, qui ne bouge alors pas d'un pixel :
+   le pied est ancré en bas du rail et grandit vers le haut. C'est ce qui
+   empêche un double-clic de confirmer sans que personne n'ait rien lu. Le
+   raisonnement complet est dans src/ui/affiche.js, au-dessus de `garde`. */
+.af-garde {
+  margin: 0 0 12px;
+  padding: 13px 14px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--ce-accent) 42%, transparent);
+  background: color-mix(in srgb, var(--ce-accent) 9%, var(--ce-porcelain));
+}
+.af-garde[hidden] { display: none; }
+.af-garde-titre {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ce-ink);
+}
+.af-garde-phrase {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ce-ink);
+}
+.af-garde-boutons {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.af-garde-boutons button {
+  appearance: none;
+  flex: 1 1 auto;
+  border-radius: 9px;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.14s;
+}
+.af-garde-boutons button:hover { filter: brightness(0.96); }
+.af-garde-boutons button:focus-visible { outline: 2px solid var(--ce-ink); outline-offset: 2px; }
+/* L'option prudente, à gauche, et c'est elle qui reçoit le focus au clavier. */
+.af-garde-non {
+  border: 1px solid var(--ce-hairline);
+  background: var(--ce-porcelain);
+  color: var(--ce-ink);
+}
+.af-garde-oui {
+  border: 1px solid transparent;
+  background: var(--ce-ink);
+  color: var(--ce-porcelain);
+}
+
+/* La ligne qui dit qu'un point de netteté vient d'être replacé tout seul. */
+.af-note {
+  margin: var(--ce-gap-tight) 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 500;
+  color: var(--ce-ink);
+}
+.af-note[hidden] { display: none; }
+
 /* La croix : discrète, mais toujours au même endroit que partout ailleurs. */
 .af-fermer {
   position: fixed;
