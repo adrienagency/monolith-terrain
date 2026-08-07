@@ -121,13 +121,21 @@ export const identifiantCompte = (v) => (typeof v === 'string' && COMPTE_RE.test
  * ⚠️ `req` EST LÀ EXPRÈS, ET `corps` N'Y EST PAS. La signature interdit
  * physiquement de lire le corps de la requête : c'est le seul garde-fou qui
  * survive à quelqu'un de pressé.
+ *
+ * Le bouchon de la Phase 0 rendait toujours '' ; il est maintenant branché sur
+ * la vraie vérification (voir `_compte.mjs`, qui interroge Supabase plutôt que
+ * de vérifier un JWT à la main). Réexporté ici pour que les appelants n'aient
+ * qu'un seul endroit où chercher « qui est cette requête ? ».
+ *
+ * ⚠️ DEUX LIGNES, ET PAS `export { compteVerifie } from …`. Cette forme-là
+ * réexporte SANS importer : le nom n'entre jamais dans la portée du module, et
+ * l'appel plus bas lève « compteVerifie is not defined » — à l'exécution, pas
+ * à la compilation. Les tests qui importent le symbole réexporté passent très
+ * bien ; seule la caisse casse. Trouvé par la suite complète, jamais par les
+ * tests ciblés.
  */
-export async function compteVerifie(_req) {
-  // Phase 1 — authentification. Tant qu'elle n'est pas là, aucun achat n'est
-  // rattaché à un compte, et c'est le comportement correct : mieux vaut une
-  // facture à rattacher plus tard qu'une facture rangée chez un inconnu.
-  return ''
-}
+import { compteVerifie } from './_compte.mjs'
+export { compteVerifie }
 
 // Stripe attend de l'`application/x-www-form-urlencoded` avec des clés en
 // crochets. Un petit encodeur vaut mieux qu'un SDK de 2 Mo.
