@@ -63,8 +63,20 @@
 //     courriel. Pas d'identifiant, pas de métadonnées, rien de récupérable ;
 //   · la déconnexion efface POUR DE BON, y compris les traces d'une version
 //     précédente (voir `deconnecter`) ;
-//   · le jeton est court (une heure) et le renouvellement tourne à chaque
-//     usage : un vol donne une fenêtre, pas une clé permanente.
+//   · Supabase fait TOURNER le jeton de renouvellement à chaque usage : le
+//     voleur et le propriétaire ne peuvent pas s'en servir tous les deux
+//     longtemps, le second des deux se retrouvant déconnecté.
+//
+// ⚠️ ET CE QU'IL NE FAUT PAS SE RACONTER. Une version de ce commentaire
+// affirmait qu'« un vol donne une fenêtre, pas une clé permanente ». C'EST
+// FAUX, et un attaquant l'a relevé : le jeton d'accès dure une heure, mais le
+// jeton de RENOUVELLEMENT est rangé juste à côté et se représente
+// indéfiniment. Qui vole ce stockage vole un accès durable.
+//
+// La rotation ci-dessus est un signal de DÉTECTION, pas une prévention — elle
+// ne fait pas de ce choix un choix sûr, elle en borne les dégâts. Un
+// commentaire qui rassure à tort est pire que pas de commentaire : quelqu'un
+// s'y fiera pour décider d'autre chose.
 
 export const URL_CONFIG = '/.netlify/functions/compte-config'
 
