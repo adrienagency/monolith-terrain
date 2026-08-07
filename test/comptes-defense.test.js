@@ -1,0 +1,134 @@
+// LES DÉFENSES DES COMPTES — le pendant de `test/comptes-attaque.test.js`.
+//
+// Chaque test d'ici ferme une porte que la passe d'attaque avait trouvée
+// ouverte. Ils sont écrits pour MOURIR quand on retire la défense : c'est la
+// seule chose qui distingue un test qui protège d'un test qui décore.
+
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import {
+  handleRace,
+  cleSeauLecture,
+  COUT_APPEL_LISTE,
+  LECTURE_CAP_OCTETS,
+} from '../netlify/functions/race.mjs'
+import { compteVerifie } from '../netlify/functions/_compte.mjs'
+
+// Le magasin en mémoire, augmenté de `delete` — que la vraie API Blobs fournit
+// et dont le rattachement a désormais besoin pour retirer l'index du perdant.
+function fakeStore() {
+  const m = new Map()
+  const lus = []
+  const ecrits = []
+  const effaces = []
+  return {
+    lus,
+    ecrits,
+    effaces,
+    keys: () => [...m.keys()],
+    raw: (k) => (m.has(k) ? JSON.parse(m.get(k)) : null),
+    poser: (k, v) => m.set(k, JSON.stringify(v)),
+    async get(key) { lus.push(key); return m.has(key) ? JSON.parse(m.get(key)) : null },
+    async setJSON(key, value) { ecrits.push(key); m.set(key, JSON.stringify(value)) },
+    async delete(key) { effaces.push(key); m.delete(key) },
+    async list({ prefix } = {}) {
+      return { blobs: [...m.keys()].filter((k) => !prefix || k.startsWith(prefix)).map((key) => ({ key })), directories: [] }
+    },
+  }
+}
+
+const GPX = '<gpx version="1.1"><trk><trkseg><trkpt lat="45.9" lon="6.13"/><trkpt lat="45.91" lon="6.14"/></trkseg></trk></gpx>'
+const ETAT = { format: 'shibumap-share', v: 1, loc: { lat: 45.92, lon: 6.87, zoom: 12 } }
+const UID_A = '7f3c1a20-0000-4000-8000-00000000000a'
+const UID_B = '7f3c1a20-0000-4000-8000-00000000000b'
+const JETON = 'aaa.bbb.ccc'
+const ENV = { SUPABASE_URL: 'https://exemple.supabase.co', SUPABASE_ANON_KEY: 'sb_publishable_x' }
+
+// Un Supabase de comédie. ⚠️ Il rend `aud: 'authenticated'` parce que c'est ce
+// que GoTrue rend pour un vrai utilisateur : un faux qui l'omettrait ferait
+// passer les tests pour la mauvaise raison.
+function supabase(corps, statut = 200) {
+  const appels = []
+  const apporter = async (url, opts) => {
+    appels.push({ url, entetes: opts?.headers })
+    return new Response(JSON.stringify(corps), { status: statut })
+  }
+  apporter.appels = appels
+  return apporter
+}
+const sessionAvec = (apporter) => (req) => compteVerifie(req, apporter, ENV)
+const session = (uid, statut = 200) => sessionAvec(supabase({ id: uid, aud: 'authenticated', role: 'authenticated', email: 'x@y.z' }, statut))
+const PERSONNE = async () => ''
+
+const req = (method, { id, secret, jeton, body, ip, mine, claim, extra = '' } = {}) => {
+  const q = new URLSearchParams()
+  if (id) q.set('id', id)
+  if (mine) q.set('mine', '1')
+  if (claim) q.set('claim', '')
+  const url = `https://shibumap.com/.netlify/functions/race${q.toString() ? `?${q}` : ''}${extra}`
+  const headers = {}
+  if (body !== undefined) headers['content-type'] = 'application/json'
+  if (secret) headers['x-shibumap-secret'] = secret
+  if (jeton) headers.authorization = `Bearer ${jeton}`
+  if (ip) headers['x-nf-client-connection-ip'] = ip
+  return new Request(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
+}
+
+async function publier(store, { verifie = PERSONNE, body = { gpx: GPX, state: ETAT, raceName: 'Course' }, jeton, ip } = {}) {
+  const res = await handleRace(req('POST', { body, jeton, ip }), store, verifie)
+  assert.equal(res.status, 201)
+  return await res.json()
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 1. `?mine=1` NON PROUVÉ : on paie AVANT de déranger Supabase
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('un ?mine=1 anonyme débite le seau de lecture AVANT d’appeler Supabase', async () => {
+  const store = fakeStore()
+  const ip = '198.51.100.31'
+  // Ce Supabase-là lève : s'il est appelé, le débit qui le précède doit avoir
+  // eu lieu quand même. C'est la preuve de l'ORDRE, pas seulement du montant.
+  const faux = supabase({ msg: 'invalid JWT' }, 401)
+
+  const res = await handleRace(req('GET', { mine: true, jeton: JETON, ip }), store, sessionAvec(faux))
+  assert.equal(res.status, 401)
+  assert.equal(faux.appels.length, 1)
+
+  const seau = store.raw(cleSeauLecture(ip))
+  assert.ok(seau, 'le refus 401 doit avoir écrit le seau de lecture')
+  assert.equal(LECTURE_CAP_OCTETS - seau.tokens, COUT_APPEL_LISTE,
+    'un appel non prouvé coûte exactement le forfait, ni plus ni moins')
+})
+
+test('une rafale de ?mine=1 anonymes se fait couper, et Supabase cesse d’être appelé', async () => {
+  const store = fakeStore()
+  const ip = '198.51.100.32'
+  const faux = supabase({ msg: 'invalid JWT' }, 401)
+
+  const N = 300
+  let refus = 0
+  for (let i = 0; i < N; i++) {
+    const res = await handleRace(req('GET', { mine: true, jeton: JETON, ip }), store, sessionAvec(faux))
+    if (res.status === 429) refus++
+  }
+
+  // +1 : le seau se recharge en continu, donc le dernier appel peut passer sur
+  // les miettes accumulées pendant la boucle. Ce n'est pas le chiffre qui
+  // compte, c'est qu'il ne dépende plus du nombre de requêtes.
+  const plafond = Math.ceil(LECTURE_CAP_OCTETS / COUT_APPEL_LISTE) + 1
+  assert.ok(refus > 0, `${N} appels anonymes sans un seul refus : le chemin liste n’a toujours aucun frein`)
+  assert.ok(faux.appels.length <= plafond,
+    `Supabase appelé ${faux.appels.length} fois pour ${N} requêtes : le débit ne précède pas la vérification`)
+  assert.ok(faux.appels.length < N, 'l’amplification 1:1 vers Supabase doit avoir disparu')
+})
+
+test('le refus de rafale ne se cache jamais dans un cache partagé', async () => {
+  const store = fakeStore()
+  const ip = '198.51.100.33'
+  await store.setJSON(cleSeauLecture(ip), { tokens: -LECTURE_CAP_OCTETS, at: Date.now() })
+  const res = await handleRace(req('GET', { mine: true, jeton: JETON, ip }), store, session(UID_A))
+  assert.equal(res.status, 429)
+  assert.match(res.headers.get('cache-control') || '', /no-store/)
+  assert.match(res.headers.get('netlify-cdn-cache-control') || '', /no-store/)
+})

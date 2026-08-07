@@ -624,6 +624,31 @@ function entreeVivante(cle, prefixe, brut) {
 // n'affiche plus rien d'utile et la réponse commence à peser.
 const MAX_CARTES_LISTEES = 500
 
+// ---- CE QU'ON FACTURE À « MES CARTES », ET POURQUOI CE N'EST PAS CE QU'ON REND
+//
+// ⚠️ CE COMPTE EST CONTRE-INTUITIF, ET IL LE RESTERA : la réponse de « Mes
+// cartes » pèse quelques kilo-octets et on en débite plusieurs mégaoctets. Ce
+// n'est pas une erreur d'unité. Le seau de lecture est libellé en octets parce
+// que le GET public ne coûte QUE de la bande passante ; sur ce chemin-ci, le
+// fil n'est pas ce qui coûte — un aller-retour SORTANT vers Supabase l'est.
+// Celui-là consomme le quota d'AUTHENTIFICATION du projet, et saturer ce
+// quota-là, c'est empêcher les vraies connexions, pas gonfler une facture.
+// Facturer les octets rendus revient donc à ne rien facturer du tout : la passe
+// d'attaque a mesuré 300 requêtes anonymes = 300 appels Supabase, 0 octet
+// compté. On convertit ce qui coûte en octets fictifs plutôt que d'ouvrir un
+// quatrième seau : un seul budget par IP reste lisible, et un abus de la liste
+// doit AUSSI freiner les lectures de cartes de la même adresse — c'est la même
+// machine.
+//
+// LE FORFAIT SE DÉBITE AVANT `verifieCompte`, et c'est tout l'objet de sa
+// position : on ne paie pas un appel réseau pour quelqu'un qui n'a encore rien
+// prouvé. Sa valeur est celle de la plus grosse lecture possible
+// (MAX_BODY_CHARS, ≈ 4,26 Mo) — « demander la liste sans être connu coûte le
+// prix d'un gros payload » se retient, et cale le plafond à ≈ 250 tentatives
+// par IP et par 10 minutes. Un usage légitime en est très loin : ouvrir son
+// panneau vingt-cinq fois par minute n'existe pas.
+export const COUT_APPEL_LISTE = 4 * 1024 * 1024
+
 // Le refus de lecture, extrait pour être RIGOUREUSEMENT le même des deux côtés.
 // C'est lui qui traitait déjà correctement le cache — un refus vaut pour une IP
 // à un instant, et une copie partagée le servirait à des innocents.
@@ -653,6 +678,13 @@ async function mesCartes(req, store, verifieCompte) {
   const ip = clientIp(req.headers)
   const seau = await creditLecture(store, ip)
   if (seau && seau.tokens <= 0) return refusLecture(seau)
+
+  // ⚠️ ON PAIE D'ABORD, ON VÉRIFIE ENSUITE. `debiterLecture` écrit un solde
+  // ABSOLU calculé depuis `seau` : rappeler la fonction plus bas avec un total
+  // plus grand remplace ce premier débit, il ne s'y ajoute pas. D'où l'addition
+  // portée par `debit`, et non des débits successifs qui s'écraseraient.
+  let debit = COUT_APPEL_LISTE
+  await debiterLecture(store, ip, seau, debit)
 
   const uid = identifiantCompte(await verifieCompte(req))
   // ⚠️ TOUT CE QUI SORT D'ICI PART EN no-store, Y COMPRIS CE REFUS. Une réponse
@@ -685,7 +717,8 @@ async function mesCartes(req, store, verifieCompte) {
   cartes.sort((a, b) => String(b.creeLe).localeCompare(String(a.creeLe)))
 
   const corps = JSON.stringify({ ok: true, cartes })
-  await debiterLecture(store, ip, seau, Buffer.byteLength(corps, 'utf8'))
+  debit += Buffer.byteLength(corps, 'utf8')
+  await debiterLecture(store, ip, seau, debit)
   return jsonResponse(corps, 200, SANS_CACHE)
 }
 
