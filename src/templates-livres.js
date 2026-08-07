@@ -18,6 +18,8 @@
 // (Seule exception : shibustart.json, importé statiquement par main.js parce
 // que c'est le look d'ouverture de l'application.)
 
+import { ORIGINE_SHIBUMAP } from './bibliotheque-origine.js'
+
 // shibuStart EN TÊTE : c'est le look sur lequel l'application s'ouvre (voir
 // START_VIEW dans main.js), donc le premier de la bibliothèque — il faut
 // pouvoir y revenir d'un clic après avoir bricolé.
@@ -53,7 +55,10 @@ export async function chargeTemplatesLivres(fetchImpl = (...a) => fetch(...a)) {
     try {
       const r = await fetchImpl(urlTemplateLivre(slug))
       const t = await r.json()
-      return estTemplateLivre(t) ? { ...t, slug } : null
+      // `origine` est POSÉE ici, pas lue du fichier : ce qui sort de
+      // /templates/defaults/ est de la maison par construction, quel que soit
+      // ce que le .json raconte de lui-même (voir bibliotheque-origine.js).
+      return estTemplateLivre(t) ? { ...t, slug, origine: ORIGINE_SHIBUMAP } : null
     } catch { return null }
   }))
   return all.filter(Boolean)

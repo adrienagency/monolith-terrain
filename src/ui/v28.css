@@ -2269,6 +2269,43 @@ body.ce-railR-off .ce-dock-right {
   color: var(--ce-accent);
 }
 
+/* ------------------------- sous-accordéons de « Mes templates » (Bibliothèque)
+   Deux groupes imbriqués dans une section : « Mes créations » et « Templates
+   ShibuMap ». Ils se replient chacun de leur côté (templates-panel.js). */
+.ce-section-body > .ce-section {
+  border-top: 0;
+}
+.ce-section-body > .ce-section > .ce-section-head {
+  padding: 9px 6px;
+}
+.ce-section-body > .ce-section > .ce-section-head .ce-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ce-muted);
+}
+.ce-section-body > .ce-section > .ce-section-body {
+  padding: 0 0 var(--ce-gap-tight);
+}
+/* Sans création à séparer, le groupe officiel n'a plus rien à séparer d'autre :
+   il perd sa tête et reste ouvert. Un repli qui ne cache qu'une seule chose est
+   une manipulation de plus pour rien (Adrien). */
+.ce-section-body > .ce-section.ce-grp-nu > .ce-section-head {
+  display: none;
+}
+.ce-section-body > .ce-section.ce-grp-nu > .ce-section-body {
+  display: block;
+}
+/* ⚠️ `display: grid` / `display: flex` battent le display:none que l'attribut
+   `hidden` tient de la feuille du navigateur : sans ces deux règles, poser
+   .hidden sur une grille de cartes ou sur une ligne de navigation ne cache
+   RIEN. C'est ce qui laissait les copies masquées bien visibles. */
+.ce-cards[hidden],
+.ce-lib-nav[hidden] {
+  display: none;
+}
+
 /* ---------------------------------------------------------- template cards */
 .ce-cards {
   display: grid;

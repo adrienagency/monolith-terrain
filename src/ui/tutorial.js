@@ -36,7 +36,7 @@ function buildSteps() {
     },
     {
       target: () => findPanel('bibliothèque'),
-      text: 'Bibliothèque — templates et palettes : un clic restyle toute la carte.',
+      text: 'Bibliothèque — mes templates et mes palettes : un clic restyle toute la carte.',
     },
     {
       target: () => findPanel('couleurs'),

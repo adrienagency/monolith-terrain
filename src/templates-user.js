@@ -10,6 +10,16 @@ const LS_KEY = 'shibumap-user-templates'
 const FORMAT = 'shibumap-template'
 const VERSION = 1
 
+// ---- provenance (champ `origine`) ------------------------------------------
+// Le FORMAT du fichier appartient à ce module, donc le vocabulaire du champ
+// aussi. Le classement qui s'en sert vit à côté, dans bibliotheque-origine.js
+// (qui réexporte ces trois-là pour n'offrir qu'une porte aux panneaux).
+// Absence de valeur = provenance INCONNUE, ce n'est pas la même chose que
+// « création de l'utilisateur » : voir bibliotheque-origine.js.
+export const ORIGINE_SHIBUMAP = 'shibumap'
+export const ORIGINE_MOI = 'moi'
+export const lisOrigine = (v) => (v === ORIGINE_SHIBUMAP || v === ORIGINE_MOI ? v : null)
+
 // The look whitelist — every param a template restores. Deliberately EXCLUDES
 // demLat/demLon/demZoom/demLocation/source (location),
 // the loaded GPX track itself (path/visibility/altitude), and per-zoom
@@ -218,8 +228,12 @@ export function parseView(v) {
   return { dir, k, target }
 }
 
+// `origine` voyage avec le fichier (voir bibliotheque-origine.js) : un style
+// rapporté de la boutique reste un gabarit de la maison même après un
+// aller-retour par le disque. Un fichier d'AVANT ce champ n'en porte pas, et
+// c'est traité comme une provenance inconnue, pas comme une création.
 export function serializeTemplate(t) {
-  return JSON.stringify({ format: FORMAT, version: VERSION, name: t.name, thumb: t.thumb, strip: t.strip, shaders: t.shaders, view: t.view || null, look: t.look }, null, 0)
+  return JSON.stringify({ format: FORMAT, version: VERSION, name: t.name, origine: lisOrigine(t.origine) || undefined, thumb: t.thumb, strip: t.strip, shaders: t.shaders, view: t.view || null, look: t.look }, null, 0)
 }
 const HEX_RE = /^#[0-9a-fA-F]{3,8}$/
 // only accept an image data URL for the thumbnail — an imported .json is
@@ -234,7 +248,7 @@ export function parseTemplate(text) {
   // file's flags (a hand-edited/older export could mis-sort itself)
   const derived = stripFromLook(o.look)
   const strip = Array.isArray(o.strip) ? o.strip.filter((c) => typeof c === 'string' && HEX_RE.test(c)).slice(0, 8) : []
-  return { name: String(o.name || 'Imported').slice(0, 40), thumb, strip: strip.length ? strip : derived.strip, shaders: derived.shaders, view: parseView(o.view), look: o.look }
+  return { name: String(o.name || 'Imported').slice(0, 40), origine: lisOrigine(o.origine), thumb, strip: strip.length ? strip : derived.strip, shaders: derived.shaders, view: parseView(o.view), look: o.look }
 }
 
 // derive the vignette strip + shader category from a captured look

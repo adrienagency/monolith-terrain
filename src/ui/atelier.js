@@ -40,6 +40,7 @@ import { LANDMARKS, ISLANDS } from '../landmarks.js'
 // mode avancé (ui/templates-panel.js). Voir src/templates-livres.js : c'est
 // la source unique, pour que les deux modes ne divergent jamais.
 import { chargeTemplatesLivres } from '../templates-livres.js'
+import { trieTemplates } from '../bibliotheque-origine.js'
 import {
   ATELIER_STEPS,
   LAYERS,
@@ -413,15 +414,21 @@ export function buildAtelier(deps) {
     // fabriqué soi-même devenait plus dur à retrouver que ce qu'on n'a pas
     // choisi. Déplier plutôt qu'envoyer ailleurs — on est en train de choisir,
     // un aller-retour vers un autre espace ferait perdre le fil.
-    const lib = capList(defTpls, expanded.tpl)
+    // MÊME TRI QUE LA BIBLIOTHÈQUE (src/bibliotheque-origine.js) : ce qui vient
+    // de la maison d'un côté, les créations de l'autre, et les copies locales
+    // d'un gabarit livré ne s'affichent pas deux fois. Sans ça le mode Simple
+    // reproduisait exactement le doublon signalé en mode Avancé.
+    const { officiels, miens } = trieTemplates(deps.getUserTemplates() || [], defTpls)
+    const lib = capList(defTpls.concat(officiels), expanded.tpl)
+    if (miens.length) body.insertAdjacentHTML('beforeend', '<div class="at-cat">Templates ShibuMap</div>')
     const g = document.createElement('div')
     g.className = 'at-grid'
     for (const t of lib.shown) g.append(tplCard(t))
     body.append(g)
     if (lib.more) body.append(moreBtn('tpl', lib.hidden, 'template'))
-    const mine = deps.getUserTemplates() || []
+    const mine = miens
     if (mine.length) {
-      body.insertAdjacentHTML('beforeend', '<div class="at-cat">Tes templates</div>')
+      body.insertAdjacentHTML('beforeend', '<div class="at-cat">Mes templates</div>')
       const own = capList(mine, expanded.mine)
       const g2 = document.createElement('div')
       g2.className = 'at-grid'
@@ -475,7 +482,7 @@ export function buildAtelier(deps) {
     body.append(row)
     const mine = deps.userPalettes() || []
     if (mine.length) {
-      body.insertAdjacentHTML('beforeend', '<div class="at-cat">Tes palettes</div>')
+      body.insertAdjacentHTML('beforeend', '<div class="at-cat">Mes palettes</div>')
       const g = document.createElement('div')
       g.className = 'at-grid'
       for (const p of mine) g.append(palCard(p))

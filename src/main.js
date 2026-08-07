@@ -86,7 +86,7 @@ import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
 import { buildRegionSkirt, traceSkirt, skirtFloor, regionBaseLevel } from './region-skirt.js'
 import { makeSocleEnvMap } from './socle-env.js'
 import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
-import { TEMPLATE_KEYS, captureLook, captureView, serializeTemplate, parseTemplate, stripFromLook, loadUserTemplates, saveUserTemplates } from './templates-user.js'
+import { TEMPLATE_KEYS, ORIGINE_MOI, captureLook, captureView, serializeTemplate, parseTemplate, stripFromLook, loadUserTemplates, saveUserTemplates } from './templates-user.js'
 import { loadUserPalettes, saveUserPalettes, paletteFromParams } from './user-palettes.js'
 import { captureShareState, parseShareState, encodeShareState, decodeShareState, trackToGpx, parseRacePayload, RACE_ENDPOINT, rememberRaceSecret, recallRaceSecret, updateRace } from './share-link.js'
 import {
@@ -4304,7 +4304,9 @@ function saveCurrentTemplate(name) {
   const clean = String(name || '').trim().slice(0, 40) || 'My look'
   const look = captureLook(params)
   const { strip, shaders } = stripFromLook(look)
-  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: clean, thumb: captureThumbnail(), strip, shaders, view: captureView(camera, controls), look }
+  // origine 'moi' : ce gabarit-ci sort des mains de l'utilisateur, il se range
+  // dans « Mes créations » (voir src/bibliotheque-origine.js)
+  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: clean, origine: ORIGINE_MOI, thumb: captureThumbnail(), strip, shaders, view: captureView(camera, controls), look }
   userTemplates.push(t)
   persistUserTemplates()
   return t
@@ -4327,7 +4329,12 @@ function exportUserTemplate(id) {
 function importTemplateText(text) {
   const parsed = parseTemplate(text)
   if (!parsed) return null
-  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: parsed.name, thumb: parsed.thumb, strip: parsed.strip, shaders: parsed.shaders, view: parsed.view, look: parsed.look }
+  // On ne FORCE pas l'origine à l'import : un fichier de la boutique se déclare
+  // 'shibumap', un export de l'utilisateur 'moi', et un fichier d'avant ce champ
+  // n'en porte pas — provenance inconnue, tranchée par le contenu au moment de
+  // l'affichage (src/bibliotheque-origine.js). Se déclarer de la maison n'ouvre
+  // aucun droit, ça ne fait que ranger la carte dans un accordéon.
+  const t = { id: `ut_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`, name: parsed.name, origine: parsed.origine || undefined, thumb: parsed.thumb, strip: parsed.strip, shaders: parsed.shaders, view: parsed.view, look: parsed.look }
   userTemplates.push(t)
   persistUserTemplates()
   // un gabarit passe par LA MÊME porte que les autres imports : c'est le

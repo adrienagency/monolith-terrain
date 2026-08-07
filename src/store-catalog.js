@@ -16,11 +16,14 @@ export function paletteRecordFromShop(entry) {
 
 // entrée « Styles » (look complet) → texte .shibumap-template, le format que
 // importTemplateText (main.js) sait déjà ranger dans les templates user.
+// Un style de la boutique reste un gabarit DE LA MAISON une fois rapporté : il
+// se range avec les officiels, pas avec les créations (bibliotheque-origine.js).
 export function styleTemplateText(entry) {
   return JSON.stringify({
     format: 'shibumap-template',
     version: 1,
     name: entry.name,
+    origine: 'shibumap',
     strip: entry.strip ?? (entry.look.rampStops || []).map((s) => s.c),
     look: entry.look,
   })
