@@ -32,6 +32,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
   CQW_CARTOUCHE, CQW_LOGO_MARGE, TYPO_CARTOUCHE, ENCRES, VOILE_HAUTEUR,
+  VOILE_PLAFOND_HAUTEUR,
   POLICE_TITRE, POLICE_MONO, COINS_LOGO, VALIDATION_MAX_PX,
   ATTRIBUTION_FRACTION_HAUTEUR, ATTRIBUTION_PX_MIN, ATTRIBUTION_PAD_EM,
   CQW_SIGNATURE, TYPO_SIGNATURE, SIGNATURE_TEXTE, SIGNATURE_OMBRE_EM, planSignature,
@@ -85,7 +86,16 @@ test('fidélité : le padding et le gap du cartouche sont ceux du CSS', () => {
   assert.equal(prop(b, 'left'), '0')
   assert.equal(prop(b, 'right'), '0')
   assert.equal(prop(b, 'bottom'), '0')
-  assert.equal(prop(b, 'container-type'), 'inline-size')
+  // ⚠️ ET LE CARTOUCHE NE DÉCLARE PLUS DE CONTENEUR À LUI. Avec
+  // `container-type: inline-size`, les `cqw` de ses enfants se résolvaient sur
+  // SA boîte de CONTENU — la feuille moins ses deux marges de 6 cqw — et le
+  // titre sortait 12 % plus petit à l'écran que sur le fichier vendu (mesuré :
+  // 27,28 px contre 31 px sur une feuille de 500 px). Sans conteneur à lui, ils
+  // remontent à `.af-sheet`, qui a exactement la largeur que ce module suppose.
+  assert.equal(prop(b, 'container-type'), null)
+  // Et `.af-sheet` est un conteneur de TAILLE, pas seulement de largeur : c'est
+  // ce qui donne au voile son `cqh` (voir le test du plafond, plus bas).
+  assert.equal(prop(blocCss(CSS_AFFICHE, '.af-sheet'), 'container-type'), 'size')
 })
 
 test('fidélité : les trois tailles de police du cartouche sont celles du CSS', () => {
@@ -122,6 +132,12 @@ test('fidélité : les encres et le voile dégradé sont ceux du CSS', () => {
   const voileClair = blocCss(CSS_AFFICHE, '.af-cartouche::before')
   const voileSombre = blocCss(CSS_AFFICHE, '.af-cartouche.sombre::before')
   assert.equal(parseFloat(prop(voileClair, 'height')) / 100, VOILE_HAUTEUR)
+  // ⚠️ ET SON PLAFOND, SANS QUOI L'APERÇU ET LE FICHIER N'ONT PAS LE MÊME
+  // VOILE EN PAYSAGE. `max-height: 45cqh` = 45 % de la hauteur de la FEUILLE ;
+  // le module doit lire exactement le même nombre.
+  const plafond = prop(voileClair, 'max-height')
+  assert.match(plafond, /cqh$/, 'le plafond du voile se mesure en hauteur de feuille (cqh)')
+  assert.equal(parseFloat(plafond) / 100, VOILE_PLAFOND_HAUTEUR)
   for (const [bloc, encre] of [[voileClair, ENCRES.clair], [voileSombre, ENCRES.sombre]]) {
     const fond = prop(bloc, 'background')
     // `to top` : l'opaque est EN BAS — le compositeur doit poser ses arrêts
@@ -277,10 +293,18 @@ const planPour = (largeur, hauteur, extra = {}) =>
   })
 
 test('⚠️ LA MISE EN PAGE EST LA MÊME À TOUTE ÉCHELLE — c’est ce qui fait que l’écran de validation est le fichier', () => {
-  // 1 100 px d'un côté, 7 087 de l'autre : le rapport exact des deux surfaces
-  // que ce module doit rendre identiques.
+  // 1 100 px de large : l'aperçu de l'écran de validation. Le grand est le MÊME
+  // rectangle sept fois plus grand, c'est-à-dire un fichier d'impression.
+  //
+  // ⚠️ ET C'EST UN MULTIPLE EXACT DEPUIS QUE LE VOILE EST PLAFONNÉ EN HAUTEUR
+  // (VOILE_PLAFOND_HAUTEUR). La paire d'avant — 1 100 × 781 face à 7 087 × 5 032
+  // — n'était homothétique qu'à quatre centmillièmes près : tant que TOUTE la
+  // mise en page se mesurait sur la largeur, l'écart ne se voyait pas ; le
+  // plafond, lui, se mesure sur la hauteur et le rend visible. Ce que ce test
+  // doit prouver est l'invariance d'échelle, pas la tolérance d'un arrondi de
+  // fixture — on pose donc un facteur entier.
   const petit = planPour(1100, 781)
-  const grand = planPour(7087, 5032)
+  const grand = planPour(1100 * 7, 781 * 7)
   const k = grand.fini.largeur / petit.fini.largeur
   const proche = (a, b, quoi) =>
     assert.ok(Math.abs(a - b) < 1e-6 * Math.max(1, Math.abs(b)), `${quoi} : ${a} ≠ ${b}`)
@@ -318,6 +342,46 @@ test('le voile part du bas et fait 240 % de la hauteur du cartouche', () => {
   assert.equal(p.cartouche.voile.degradeBas, p.fini.y + p.fini.hauteur)
   assert.equal(p.cartouche.voile.degradeHaut, p.cartouche.voile.y)
   assert.ok(Math.abs((p.cartouche.voile.degradeBas - p.cartouche.voile.degradeHaut) / p.cartouche.boite.hauteur - VOILE_HAUTEUR) < 1e-9)
+  // 4000 × 5600 est un portrait : le plafond ne doit PAS mordre. C'est la
+  // moitié du contrat — l'autre est juste en dessous.
+  assert.ok(p.cartouche.voile.degradeBas - p.cartouche.voile.degradeHaut < p.fini.hauteur * VOILE_PLAFOND_HAUTEUR)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠️ LE VOILE NE MANGE PAS UNE AFFICHE COUCHÉE — LE DÉFAUT DU 2026-08-07
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Adrien : « en mode impression horizontale, le voile prend la totalité de
+// l'image et cache presque tout ». Tout le cartouche se mesure en `cqw` : sa
+// boîte, et les 240 % de voile au-dessus, valent une fraction constante de la
+// LARGEUR. En paysage la largeur est le grand côté et la hauteur le petit, donc
+// le même voile couvrait 65 à 78 % de l'image. Le plafond est en HAUTEUR, seule
+// grandeur qui sait ce que le voile traverse.
+
+test('⚠️ EN PAYSAGE, LE VOILE EST PLAFONNÉ À 45 % DE LA HAUTEUR', () => {
+  // 70 × 50 à 300 dpi, en pixels finis
+  const p = planPour(8268, 5906)
+  const haut = p.cartouche.voile.degradeBas - p.cartouche.voile.degradeHaut
+  // le calcul non plafonné dépasserait largement — c'est bien le plafond qui parle
+  assert.ok(p.cartouche.boite.hauteur * VOILE_HAUTEUR > p.fini.hauteur * VOILE_PLAFOND_HAUTEUR)
+  assert.ok(Math.abs(haut - p.fini.hauteur * VOILE_PLAFOND_HAUTEUR) < 1e-9)
+  // et il reste de la marge AU-DESSUS du texte : un voile qui s'arrêterait sur
+  // la boîte du cartouche se verrait comme un bandeau, ce que tout ce dégradé
+  // existe pour éviter
+  assert.ok(haut > p.cartouche.boite.hauteur * 1.3)
+})
+
+test('en portrait, aucun format n’atteint le plafond — rien ne change', () => {
+  // les sept formats du catalogue, debout, à 300 dpi
+  for (const [lmm, hmm] of [[210, 297], [300, 400], [297, 420], [400, 500], [420, 594], [500, 700], [610, 914]]) {
+    const px = (mm) => Math.ceil((mm / 25.4) * 300)
+    const p = planPour(px(lmm), px(hmm))
+    const haut = p.cartouche.voile.degradeBas - p.cartouche.voile.degradeHaut
+    assert.ok(
+      Math.abs(haut - p.cartouche.boite.hauteur * VOILE_HAUTEUR) < 1e-9,
+      `${lmm}×${hmm} : le plafond ne doit pas mordre en portrait`
+    )
+  }
 })
 
 // ═══════════════════════════════════════════════════════════════════════════

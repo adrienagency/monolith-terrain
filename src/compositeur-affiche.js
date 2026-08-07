@@ -206,6 +206,27 @@ export const ENCRES = {
 /** `.af-cartouche::before { height: 240% }` — 240 % de la hauteur du cartouche. */
 export const VOILE_HAUTEUR = 2.4
 
+/**
+ * `.af-cartouche::before { max-height: 45cqh }` — le voile ne peut pas manger
+ * plus de 45 % de la HAUTEUR FINIE, quoi que dise le calcul ci-dessus.
+ *
+ * ⚠️ POURQUOI UN PLAFOND, ET POURQUOI EN HAUTEUR. Tout le cartouche se mesure
+ * en `cqw` : sa boîte vaut une fraction constante de la LARGEUR de la feuille,
+ * et les 240 % de voile avec elle. En portrait la largeur est le petit côté, le
+ * voile couvre 35 à 42 % de la hauteur — c'est le réglage validé. En paysage la
+ * largeur devient le grand côté et la hauteur le petit : le MÊME voile couvre
+ * 65 à 78 % de l'image (mesuré : 73,3 % sur un 70 × 50, 78,5 % sur un 91 × 61),
+ * et Adrien le voit comme un délavage général. Le défaut n'est donc pas dans le
+ * facteur 2,4 mais dans le fait que rien ne rapportait jamais le voile à la
+ * hauteur qu'il traverse.
+ *
+ * ⚠️ ET 45 % N'EST PAS UN CHIFFRE ROND CHOISI AU HASARD : c'est le premier
+ * plafond qui ne touche AUCUN format en portrait (le plus haut, 40 × 50, monte
+ * à 41,9 %). Ce qui a été validé ne bouge pas ; seul le sens qui déraille est
+ * ramené.
+ */
+export const VOILE_PLAFOND_HAUTEUR = 0.45
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ⚠️ LE VOILE VA JUSQU'AU BORD DU FICHIER, PAS JUSQU'AU BORD DU FORMAT FINI
 // ═══════════════════════════════════════════════════════════════════════════
@@ -456,8 +477,14 @@ export function planCartouche({ fini, textes, sombre = false, fichier = null } =
   // Les deux bouts du dégradé, sur le format FINI : ce sont eux qui décident de
   // ce que l'acheteur voit, et ils ne bougent pas d'un pixel.
   const degradeBas = fini.y + fini.hauteur
-  // `height: 240%` mesuré depuis le BAS de la boîte (inset: auto 0 0)
-  const degradeHaut = degradeBas - hauteurBoite * VOILE_HAUTEUR
+  // `height: 240%` mesuré depuis le BAS de la boîte (inset: auto 0 0), puis
+  // `max-height: 45cqh` — le plafond en hauteur de feuille, sans lequel le
+  // voile mange les deux tiers d'une affiche couchée (voir VOILE_PLAFOND_HAUTEUR).
+  const hauteurVoile = Math.min(
+    hauteurBoite * VOILE_HAUTEUR,
+    fini.hauteur * VOILE_PLAFOND_HAUTEUR
+  )
+  const degradeHaut = degradeBas - hauteurVoile
   return {
     // la boîte du cartouche : ce que `::before` mesure pour son voile
     boite: { x: fini.x, y: hautContenu - padHaut, largeur: L, hauteur: hauteurBoite },

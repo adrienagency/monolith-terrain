@@ -92,20 +92,31 @@ body.af-mode > *:not(.af-scene):not(.af-fermer):not(canvas) {
      `cqw` — un pourcentage de la LARGEUR DE LA FEUILLE, pour qu'il occupe la
      même fraction sur un A4 que sur un 61 × 91. Mais `cqw` sans conteneur
      déclaré retombe sur le viewport : le logo prenait alors une taille qui
-     n'avait aucun rapport avec l'affiche. Le cartouche, lui, déclarait déjà le
-     sien — c'est pour ça qu'il tombait juste et pas le logo. */
-  container-type: inline-size;
+     n'avait aucun rapport avec l'affiche.
+     ⚠️ ET C'EST `size`, PAS `inline-size` — pour que `cqh` existe. Le voile du
+     cartouche a besoin de connaître la HAUTEUR de la feuille pour ne pas la
+     manger en paysage (voir `.af-cartouche::before`), et `cqh` n'est servi que
+     par un conteneur de taille. C'est jouable ici parce que la feuille reçoit
+     sa taille en pixels de `appliquer` : son contenu n'a jamais eu voix au
+     chapitre, la mise en confinement ne lui retire donc rien. */
+  container-type: size;
   background: #fff;
   box-shadow:
     0 2px 6px rgba(28, 25, 23, 0.10),
     0 22px 54px -12px rgba(28, 25, 23, 0.34);
   overflow: hidden;
   /* la feuille change de PROPORTION quand on change de format : c'est le geste
-     central de cet écran, il mérite d'être vu */
+     central de cet écran, il mérite d'être vu.
+     ⚠️ SUR `width`/`height`, PLUS SUR `aspect-ratio`. La feuille se déclarait
+     `width: 100%` + `height: auto` + `aspect-ratio` en paysage : `max-height`
+     rabotait alors la hauteur SANS que la largeur suive, et la feuille prenait
+     la proportion de l'ESTRADE au lieu de celle du format. Mesuré : 1 112 × 766
+     px pour un 40 × 50 comme pour un 50 × 70, soit 16 % d'écart avec le fichier
+     et rien qui bouge quand on change de format. `appliquer` pose maintenant
+     les deux côtés en pixels ; ce sont eux qui s'animent. */
   transition:
-    aspect-ratio 0.44s cubic-bezier(0.16, 1, 0.3, 1),
-    max-width 0.44s cubic-bezier(0.16, 1, 0.3, 1),
-    max-height 0.44s cubic-bezier(0.16, 1, 0.3, 1);
+    width 0.44s cubic-bezier(0.16, 1, 0.3, 1),
+    height 0.44s cubic-bezier(0.16, 1, 0.3, 1);
 }
 body.dark .af-sheet {
   box-shadow:
@@ -149,11 +160,25 @@ body.dark .af-sheet {
    sur un fond. Un dégradé très doux depuis le bas rend le texte lisible partout
    sans se voir comme un bandeau. Il fait partie de l'affiche imprimée : c'est
    pour ça qu'il vit ici et pas dans un calque d'interface. */
+/* ⚠️ ET IL EST PLAFONNÉ EN HAUTEUR DE FEUILLE, DEPUIS LE 2026-08-07. Adrien :
+   « en mode impression horizontale, le voile prend la totalité de l'image et
+   cache presque tout ». La cause n'est pas le plafond qui manquait, c'est
+   l'unité : le cartouche est mesuré en `cqw`, donc sa boîte — et les 240 % de
+   voile au-dessus — valent une fraction CONSTANTE DE LA LARGEUR. En portrait la
+   largeur est le petit côté, le voile fait 35 % de la hauteur ; en paysage la
+   largeur est le GRAND côté et la hauteur le petit, et les mêmes 240 % couvrent
+   65 à 78 % de l'image (mesuré : 71,5 % sur un 70 × 50, 78,5 % sur un 91 × 61).
+   Le `max-height` est donc le bon geste : il ne touche à rien tant que le voile
+   reste raisonnable — aucun format en portrait ne l'atteint, le plus haut fait
+   41,9 % — et il mord uniquement là où le défaut existe.
+   ⚠️ LE COMPOSITEUR DOIT LE CONNAÎTRE (`VOILE_PLAFOND_HAUTEUR`) : sans lui,
+   l'aperçu et le fichier vendu n'auraient plus le même voile. */
 .af-cartouche::before {
   content: '';
   position: absolute;
   inset: auto 0 0;
   height: 240%;
+  max-height: 45cqh;
   background: linear-gradient(to top, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0));
   pointer-events: none;
 }
@@ -161,8 +186,16 @@ body.dark .af-sheet {
   background: linear-gradient(to top, rgba(12, 10, 9, 0.72), rgba(12, 10, 9, 0));
 }
 .af-cartouche > * { position: relative; }
+/* ⚠️ LE CARTOUCHE NE DÉCLARE PLUS SON PROPRE CONTENEUR, ET C'ÉTAIT UN ÉCART
+   AVEC LE FICHIER VENDU. Avec `container-type: inline-size`, les `cqw` de ses
+   trois lignes se résolvaient sur SA boîte de CONTENU — c'est-à-dire la feuille
+   moins ses 2 × 6 cqw de marge — au lieu de la feuille entière. Mesuré sur une
+   feuille de 500 px : `.af-cart-lieu` sortait à 27,28 px à l'écran contre les
+   31 px que le compositeur pose sur le fichier, soit un titre 12 % plus gros
+   sur l'affiche imprimée que sur celle qu'on a validée. Sans conteneur à lui,
+   ses `cqw` remontent à `.af-sheet` — qui a exactement la largeur du cartouche,
+   `left: 0; right: 0` — et les deux moteurs redonnent le même nombre. */
 .af-cartouche {
-  container-type: inline-size;
   position: absolute;
   left: 0;
   right: 0;
@@ -395,6 +428,24 @@ body.dark .af-sheet {
 }
 .af-champ::placeholder { color: var(--ce-muted); }
 .af-champ:focus-visible { outline: 2px solid var(--ce-accent); outline-offset: -1px; border-color: transparent; }
+/* ⚠️ `[hidden]` NE SUFFIT PAS SUR UNE BASCULE. La feuille de style du
+   navigateur pose `[hidden] { display: none }`, et notre `display: flex`
+   d'auteur la remplace — une case rangée par « Affiche nue » serait restée
+   visible ET cochable. Même piège, même remède que les pastilles de format. */
+.af-bascule[hidden], .af-champ[hidden] { display: none; }
+
+/* ── « AFFICHE NUE » ─────────────────────────────────────────────────────────
+   L'interrupteur qui commande les deux décisions d'en dessous, et la phrase qui
+   dit ce qu'on ne peut PAS retirer. Le filet le sépare de ce qu'il gouverne :
+   sans lui, trois cases à la suite se lisent comme trois choix de même rang,
+   alors que le premier éteint les deux autres. Le raisonnement complet — et
+   pourquoi la ligne de sources reste — est dans src/ui/affiche.js. */
+.af-nue {
+  padding-bottom: 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--ce-hairline);
+}
+.af-nue .af-aide { margin-top: 2px; }
 
 /* ── LE REPLI DES FINITIONS ──────────────────────────────────────────────────
    Le SEUL de ce panneau, et il ne contient que ce qu'on règle en dernier : le

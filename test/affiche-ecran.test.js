@@ -308,8 +308,59 @@ test('⚠️ LES FINITIONS SE REPLIENT — ET C’EST LE SEUL REPLI DU PANNEAU',
   assert.match(AFFICHE, /cocheEncre\.addEventListener\('change'/)
   assert.match(AFFICHE, /cocheLieux\.addEventListener\('change'/)
   assert.match(AFFICHE, /fichier\.addEventListener\('change'/)
-  // le cartouche, lui, garde ses deux décisions premières
-  assert.match(AFFICHE, /gCart\.append\(bascule, champ\)/)
+  // le cartouche, lui, garde ses deux décisions premières — précédées depuis le
+  // 2026-08-07 de l'interrupteur qui les commande toutes (« Affiche nue »)
+  assert.match(AFFICHE, /gCart\.append\(gNue, bascule, champ\)/)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// « AFFICHE NUE » — TOUT RETIRER, SAUF CE QU'ON N'A PAS LE DROIT DE RETIRER
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('⚠️ « AFFICHE NUE » EXISTE, ET ELLE ÉTEINT TOUT D’UN SEUL GESTE', () => {
+  // Adrien : « retirer la totalité des infos et du voile (excepté les infos
+  // obligatoires) ». Une case par info aurait laissé les noms de villes au fond
+  // du repli des Finitions — c'est-à-dire hors de portée de qui veut le relief
+  // nu et n'ouvre pas les tiroirs.
+  assert.match(AFFICHE, /'Affiche nue : le relief seul'/)
+  const bloc = AFFICHE.slice(
+    AFFICHE.indexOf("cocheNue.addEventListener('change'"),
+    AFFICHE.indexOf('// ⚠️ LE CARTOUCHE GARDE SES DEUX')
+  )
+  // le cartouche — nom, coordonnées, altitude ET voile — s'éteint
+  assert.match(bloc, /etat\.cartouche = false/)
+  // les noms de villes de la carte aussi
+  assert.match(bloc, /setLieuxAffiches\?\.\(false\)/)
+  // et un vrai rendu suit, parce que les noms de villes sont DANS la carte
+  assert.match(bloc, /appliquer\(\{ refaireRendu: true \}\)/)
+  // ⚠️ RÉVERSIBLE À L'IDENTIQUE : décocher rend ce qu'on avait, pas un défaut
+  assert.match(bloc, /avantLaNudite = \{ cartouche: etat\.cartouche, lieux: cocheLieux\.checked \}/)
+})
+
+test('⚠️ ET ELLE DIT CE QU’ELLE NE PEUT PAS RETIRER — L’ATTRIBUTION', () => {
+  // src/export.js porte l'avertissement en rouge : les licences des données
+  // imposent la mention, MOT POUR MOT pour les sources bathymétriques. Une case
+  // qui promettrait « tout retirer » et laisserait la ligne sur le fichier
+  // ferait découvrir la mention après l'achat.
+  const note = AFFICHE.slice(AFFICHE.indexOf('const noteNue = el('), AFFICHE.indexOf('gNue.append('))
+  assert.match(note, /licences des données/)
+  assert.match(note, /mot pour mot/)
+  // et elle nomme aussi ce qui reste sans être imposé par une licence : on ne
+  // fait pas passer la signature ShibuMap pour une obligation légale
+  assert.match(note, /signature ShibuMap/)
+  // ce qui part est nommé, pas résumé
+  assert.match(note, /coordonnées/)
+  assert.match(note, /voile/)
+  assert.match(note, /noms de villes/)
+})
+
+test('⚠️ `display: flex` DE `.af-bascule` BAT `hidden` — il faut le rendre, là aussi', () => {
+  // Même piège que les pastilles de format : la feuille de style du navigateur
+  // pose `[hidden] { display: none }`, notre `display: flex` la remplace, et une
+  // case rangée par « Affiche nue » serait restée visible ET cochable.
+  assert.match(CSS, /\.af-bascule\[hidden\][^{]*\{[^}]*display:\s*none/)
+  assert.match(AFFICHE, /bascule\.hidden = etat\.nu/)
+  assert.match(AFFICHE, /basculeLieux\.hidden = etat\.nu/)
 })
 
 test('un seul `<details>` dans le rail : ce n’est pas un accordéon déguisé', () => {
@@ -381,4 +432,60 @@ test('les autres titres du panneau ne commencent plus par un verbe ou un complé
   ]) {
     assert.ok(AFFICHE.includes(`'${vivant}'`), `« ${vivant} » doit être écrit`)
   }
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LA FEUILLE PREND LA PROPORTION DU FORMAT — LE DÉFAUT DU « SAUT D'IMAGE »
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Adrien, deux fois : « le visuel passe à la frame suivante quand je clique sur
+// une dimension pour impression ». Mesuré dans un vrai navigateur, fenêtre
+// 1 600 × 900, estrade 1 112 × 766 : la feuille sortait à 1 112 × 766 px pour un
+// A4, un 30 × 40, un 40 × 50 ET un 50 × 70 couchés — c'est-à-dire la proportion
+// de l'ESTRADE, jamais celle du format, et rigoureusement la même pour quatre
+// formats différents. Cause : `width: 100%` + `height: auto` + `aspect-ratio` +
+// `max-height: 100%`. Quand `max-height` rabote la hauteur d'une boîte dont la
+// largeur est déjà définie, la largeur ne suit pas.
+//
+// Deux conséquences. `object-fit: cover` recadrait l'aperçu pour combler
+// l'écart (jusqu'à 16 % sur un 40 × 50 : l'acheteur voyait MOINS que son
+// fichier). Et cliquer d'un format à l'autre ne déplaçait pas un pixel de
+// cadre : seule l'image changeait, d'un coup, sans rien pour l'expliquer.
+
+test('⚠️ LA FEUILLE EST POSÉE EN PIXELS, À LA PROPORTION EXACTE DU FORMAT', () => {
+  // plus de `aspect-ratio` ni de plafonds inline : ce sont eux qui tordaient
+  assert.equal(/sheet\.style\.aspectRatio/.test(AFFICHE), false)
+  assert.equal(/sheet\.style\.maxHeight/.test(AFFICHE), false)
+  // les deux côtés, en pixels, à l'échelle qui fait tenir le format dans la place
+  assert.match(AFFICHE, /const k = Math\.min\(zone\.largeur \/ geo\.largeurMm, zone\.hauteur \/ geo\.hauteurMm\)/)
+  assert.match(AFFICHE, /sheet\.style\.width = `\$\{\(geo\.largeurMm \* k\)\.toFixed\(2\)\}px`/)
+  assert.match(AFFICHE, /sheet\.style\.height = `\$\{\(geo\.hauteurMm \* k\)\.toFixed\(2\)\}px`/)
+  // ⚠️ ET LA PLACE EST MESURÉE, PAS RECOPIÉE : la gouttière entre la feuille et
+  // la ligne de taille est un nombre du CSS, on la relit
+  assert.match(AFFICHE, /parseFloat\(getComputedStyle\(wrap\)\.rowGap\)/)
+  // ⚠️ APRÈS la ligne de taille, dont la hauteur entre dans le calcul. On
+  // cherche l'APPEL, pas la définition — celle-ci vit plus haut dans le fichier.
+  const iTaille = AFFICHE.indexOf('taille.textContent = tailleSousFeuille')
+  assert.ok(iTaille > 0, 'la ligne de taille doit s’écrire dans `appliquer`')
+  assert.ok(
+    AFFICHE.indexOf('poserLaFeuille(geo)', iTaille) > iTaille,
+    'la feuille se pose après la ligne de taille'
+  )
+})
+
+test('⚠️ ET C’EST LA TAILLE QUI S’ANIME, PLUS LA PROPORTION', () => {
+  // Le changement de format doit rester un MOUVEMENT — c'est ce mouvement qui
+  // explique l'image suivante. Il porte maintenant sur les deux longueurs.
+  const bloc = CSS.slice(CSS.indexOf('\n.af-sheet {'), CSS.indexOf('body.dark .af-sheet'))
+  assert.match(bloc, /transition:\s*\n?\s*width 0\.44s/)
+  assert.match(bloc, /height 0\.44s/)
+  assert.equal(/aspect-ratio 0\.44s/.test(bloc), false)
+})
+
+test('⚠️ LA FEUILLE SE REPOSE QUAND LA FENÊTRE CHANGE DE TAILLE', () => {
+  // Des pixels ne se recalculent pas tout seuls. Et on ne refait AUCUN rendu :
+  // redimensionner ne doit pas relancer la scène entière.
+  assert.match(AFFICHE, /const surRedimension = \(\) => \{ appliquer\(\{\}\) \}/)
+  assert.match(AFFICHE, /window\.addEventListener\('resize', surRedimension\)/)
+  assert.match(AFFICHE, /window\.removeEventListener\('resize', surRedimension\)/)
 })

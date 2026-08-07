@@ -257,6 +257,10 @@ export function ouvrirAffiche(ctx) {
     orientation: 'paysage',
     cartouche: true,
     cartoucheSombre: false,
+    // ⚠️ « AFFICHE NUE » — l'intention, pas son effet. Ce qui part au fichier
+    // reste `cartouche: false` : ce drapeau-ci ne sert qu'à l'écran, à savoir
+    // quelles cases n'ont plus rien à décider. Voir la case « Affiche nue ».
+    nu: false,
     titre: ctx.lieu?.().nom || '',
     // ⚠️ LE CADRAGE PART DE « TOUT LE SOCLE », PAS DE LA VUE À L'ÉCRAN. Adrien :
     // « par défaut, la totalité du socle est visible sur l'affiche ». À l'écran
@@ -503,11 +507,72 @@ export function ouvrirAffiche(ctx) {
     ctx.setLieuxAffiches?.(cocheLieux.checked)
     appliquer({ refaireRendu: true })
   })
+  // ══════ « AFFICHE NUE » — TOUT RETIRER, SAUF CE QU'ON NE PEUT PAS ═════════
+  //
+  // Adrien : « il faut aussi donner la capacité à l'utilisateur de retirer la
+  // totalité des infos et du voile (excepté les infos obligatoires). »
+  //
+  // ⚠️ UN SEUL INTERRUPTEUR, PARCE QUE C'EST UNE SEULE INTENTION. « Le relief
+  // seul » n'est pas la somme de trois cases à décocher — dont une enterrée
+  // dans le repli des Finitions ; c'est une manière de vouloir son affiche, et
+  // elle doit se demander d'un geste. Les cases restent, elles se rangent :
+  // tant que l'affiche est nue, elles ne décident plus de rien et disparaissent
+  // plutôt que de se griser.
+  //
+  // ⚠️ ET IL DIT CE QUI RESTE, PARCE QU'IL RESTE QUELQUE CHOSE. La ligne de
+  // sources en bas à droite n'est pas un ornement : les licences des données —
+  // ODbL pour OpenStreetMap, les conditions GEBCO, et la formulation IMPOSÉE
+  // MOT POUR MOT des sources bathymétriques régionales — la rendent obligatoire
+  // sur une image vendue (voir l'avertissement en rouge de src/export.js). La
+  // retirer serait une violation, pas une option. Une case qui promettrait de
+  // « tout retirer » et laisserait cette ligne apparaître sur le fichier serait
+  // pire qu'une case absente : elle ferait découvrir la mention après l'achat.
+  // On l'écrit donc au moment du choix.
+  const gNue = el('div', 'af-nue')
+  const basculeNue = el('label', 'af-bascule')
+  const cocheNue = el('input')
+  cocheNue.type = 'checkbox'
+  cocheNue.checked = !!etat.nu
+  basculeNue.append(el('span', null, 'Affiche nue : le relief seul'), cocheNue)
+  const noteNue = el(
+    'p',
+    'af-aide',
+    // ⚠️ COURTE, PARCE QUE LE RAIL VIENT D'ÊTRE DÉGONFLÉ. Chaque ligne
+    // d'explication ici est une ligne de réglage en moins à l'écran. Elle dit
+    // ce qui part, puis ce qui reste — et surtout POURQUOI ça reste.
+    'Retire le titre, les coordonnées, l’altitude, le voile et les noms de villes. '
+    + 'Restent la ligne de sources — imposée mot pour mot par les licences des données — '
+    + 'et la signature ShibuMap.'
+  )
+  gNue.append(basculeNue, noteNue)
+
+  // Ce qu'on avait avant de tout éteindre, pour le rendre intact au décochage.
+  let avantLaNudite = null
+  cocheNue.addEventListener('change', () => {
+    etat.nu = cocheNue.checked
+    if (etat.nu) {
+      avantLaNudite = { cartouche: etat.cartouche, lieux: cocheLieux.checked }
+      etat.cartouche = false
+      coche.checked = false
+      cocheLieux.checked = false
+      ctx.setLieuxAffiches?.(false)
+    } else {
+      const avant = avantLaNudite || { cartouche: true, lieux: true }
+      etat.cartouche = avant.cartouche
+      coche.checked = avant.cartouche
+      cocheLieux.checked = avant.lieux
+      ctx.setLieuxAffiches?.(avant.lieux)
+    }
+    // Les noms de villes sont DANS la carte : il faut un vrai rendu, pas un
+    // simple repositionnement du DOM.
+    appliquer({ refaireRendu: true })
+  })
+
   // ⚠️ LE CARTOUCHE GARDE SES DEUX DÉCISIONS PREMIÈRES — est-ce qu'on imprime
   // une légende, et sous quel nom. L'encre et les noms de villes, eux, sont des
   // FINITIONS : on ne les touche qu'une fois la composition trouvée. Ils
   // descendent dans le repli d'en dessous.
-  gCart.append(bascule, champ)
+  gCart.append(gNue, bascule, champ)
 
   coche.addEventListener('change', () => { etat.cartouche = coche.checked; appliquer({}) })
   cocheEncre.addEventListener('change', () => { etat.cartoucheSombre = cocheEncre.checked; appliquer({}) })
@@ -842,6 +907,60 @@ export function ouvrirAffiche(ctx) {
     return false
   }
 
+  // ══════ LA FEUILLE PREND LA PROPORTION DU FORMAT — VRAIMENT ═══════════════
+  //
+  // ⚠️ ELLE NE LA PRENAIT PAS EN PAYSAGE, ET C'EST LE DÉFAUT QU'ADRIEN APPELLE
+  // « le visuel passe à la frame suivante ». L'ancienne recette était
+  // `aspect-ratio` + `width: 100%` + `height: auto` + `max-height: 100%` dès que
+  // le format était couché. Or quand `max-height` rabote la hauteur d'une boîte
+  // dont la LARGEUR est déjà définie, la largeur ne suit pas : la feuille garde
+  // ses 100 % et prend la proportion de L'ESTRADE. Mesuré sur une fenêtre de
+  // 1 600 × 900, estrade 1 112 × 766 :
+  //
+  //   40 × 50 paysage → 1 112 × 766 (1,4517) au lieu de 1,25   → 16,1 % d'écart
+  //   30 × 40 paysage → 1 112 × 766 au lieu de 1,3333          →  8,9 %
+  //   50 × 70 paysage → 1 112 × 766 au lieu de 1,4             →  3,7 %
+  //
+  // Deux conséquences, et la seconde est celle qu'on voit. ① `object-fit: cover`
+  // RECADRE l'aperçu pour combler l'écart : l'acheteur voit MOINS que ce qu'il
+  // achète, jusqu'à 14 % de la hauteur du fichier en moins. ② Les quatre formats
+  // ci-dessus donnent EXACTEMENT la même feuille : cliquer d'un format à l'autre
+  // ne déplace pas un pixel de cadre, et la seule chose qui change à l'écran est
+  // l'image, remplacée d'un coup (mesuré : 25 ms entre le clic et le nouveau
+  // `src`, sans fondu). Un plan-coupe sans mouvement pour l'expliquer — c'est
+  // exactement ce que décrit « ça passe à la frame suivante ».
+  //
+  // On pose donc les DEUX CÔTÉS EN PIXELS, à l'échelle qui fait tenir le format
+  // dans la place disponible. Aucun plafond ne peut plus tordre la proportion,
+  // et ce sont ces deux longueurs qui s'animent (voir la transition de
+  // `.af-sheet`), donc le changement de format redevient un mouvement.
+
+  /**
+   * Le rectangle où la feuille a le droit de vivre : la première rangée de
+   * `.af-sheet-wrap`, c'est-à-dire tout sauf la ligne de taille et l'écart qui
+   * l'en sépare.
+   *
+   * ⚠️ MESURÉ, JAMAIS RECOPIÉ. L'écart entre les deux rangées est un nombre du
+   * CSS ; le relire (`rowGap`) plutôt que l'écrire ici évite la deuxième source
+   * de vérité qui se périme au premier changement de gouttière.
+   */
+  function zoneFeuille() {
+    const r = wrap.getBoundingClientRect()
+    const ecart = parseFloat(getComputedStyle(wrap).rowGap) || 0
+    return {
+      largeur: Math.max(1, r.width),
+      hauteur: Math.max(1, r.height - taille.getBoundingClientRect().height - ecart),
+    }
+  }
+
+  /** La feuille, à la proportion exacte du format et au plus grand qui tienne. */
+  function poserLaFeuille(geo) {
+    const zone = zoneFeuille()
+    const k = Math.min(zone.largeur / geo.largeurMm, zone.hauteur / geo.hauteurMm)
+    sheet.style.width = `${(geo.largeurMm * k).toFixed(2)}px`
+    sheet.style.height = `${(geo.hauteurMm * k).toFixed(2)}px`
+  }
+
   // ── l'état, poussé dans le DOM ────────────────────────────────────────────
   let jeton = 0
   let differe = null
@@ -889,13 +1008,13 @@ export function ouvrirAffiche(ctx) {
     // même règle que les formats, et pour la même raison.
     for (const [b, v] of boutonsSens) b.hidden = !ligneFormat(grilleFormats, etat.format)?.[v]
 
-    // La feuille prend la proportion du format ET reste dans l'estrade : sans
-    // les deux plafonds, un 61 × 91 en portrait sortirait par le haut.
-    sheet.style.aspectRatio = `${geo.largeurMm} / ${geo.hauteurMm}`
-    sheet.style.maxWidth = '100%'
-    sheet.style.maxHeight = '100%'
-    sheet.style.width = geo.largeurMm >= geo.hauteurMm ? '100%' : 'auto'
-    sheet.style.height = geo.hauteurMm > geo.largeurMm ? '100%' : 'auto'
+    // Affiche nue : les décisions qu'elle a déjà prises se rangent. Elles ne
+    // sont pas grisées — un réglage désactivé pose une question sans y
+    // répondre — elles s'effacent, et reviennent telles quelles au décochage.
+    bascule.hidden = etat.nu
+    champ.hidden = etat.nu
+    basculeEncre.hidden = etat.nu
+    basculeLieux.hidden = etat.nu
 
     const lieu = ctx.lieu?.() || {}
     cartouche.style.display = etat.cartouche ? '' : 'none'
@@ -923,6 +1042,9 @@ export function ouvrirAffiche(ctx) {
     })
     noteDpi.textContent = mot
     noteDpi.hidden = !mot
+
+    // ⚠️ APRÈS LA LIGNE DE TAILLE, PAS AVANT : `zoneFeuille` la mesure.
+    poserLaFeuille(geo)
 
     if (refaireRendu === 'differe') {
       // ⚠️ UN RENDU PAR CRAN DE CURSEUR SERAIT INJOUABLE : chaque rendu redessine
@@ -1328,12 +1450,15 @@ export function ouvrirAffiche(ctx) {
     }
   }
 
+  const surRedimension = () => { appliquer({}) }
+
   function partir() {
     scene.classList.remove('open')
     document.body.classList.remove('af-mode')
     fermer.remove()
     setTimeout(() => scene.remove(), 340)
     window.removeEventListener('keydown', surTouche)
+    window.removeEventListener('resize', surRedimension)
     clearTimeout(differe)
     // Les URL d'objet survivent au document : sans ça, chaque ouverture de
     // l'écran laisse derrière elle le logo et le dernier aperçu.
@@ -1357,6 +1482,10 @@ export function ouvrirAffiche(ctx) {
   }
   fermer.addEventListener('click', () => { if (!enTirage) partir() })
   window.addEventListener('keydown', surTouche)
+  // ⚠️ LA FEUILLE EST EN PIXELS DEPUIS QU'ELLE TIENT SA PROPORTION : elle ne se
+  // recalcule donc plus toute seule quand la fenêtre change de taille. On ne
+  // refait AUCUN rendu ici — seulement la mise en place, qui est du calcul pur.
+  window.addEventListener('resize', surRedimension)
 
   // ⚠️ LE CAS OÙ IL N'Y A RIEN À VENDRE, DIT PLUTÔT QUE CACHÉ. Si aucun format ne
   // passe — plafonds illisibles, cible refusée, canevas de bande refusé — la
