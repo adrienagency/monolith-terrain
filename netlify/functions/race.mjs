@@ -138,6 +138,25 @@ function secretMatches(sent, storedHash) {
 const COMPTE_RE = /^[A-Za-z0-9-]{8,64}$/
 const identifiantCompte = (v) => (typeof v === 'string' && COMPTE_RE.test(v) ? v : '')
 
+// ⚠️ TROIS ÉTATS, PAS DEUX. `identifiantCompte` rend '' aussi bien pour un champ
+// ABSENT que pour un champ ILLISIBLE, et confondre les deux fait dire au blob
+// « cette carte n'a pas de propriétaire » alors qu'elle en a un qu'on ne sait
+// plus lire (version antérieure du code, correction manuelle, Supabase qui
+// change de format d'id). Le premier venu détenant le secret l'écrasait alors en
+// silence, et le propriétaire d'origine n'avait aucun recours.
+//
+// « Illisible » doit FERMER la porte. Un propriétaire qu'on ne sait pas lire
+// reste un propriétaire — et comme on ne sait pas davantage reconstruire sa clé
+// d'index, aucun transfert PROPRE n'est possible : on refuse plutôt que
+// d'écraser en laissant une entrée orpheline derrière.
+//
+// La chaîne vide compte comme « absent » : c'est ce qu'une publication sans
+// compte laisse dans le magasin, et `autorise()` la traite déjà ainsi.
+function proprietaireDuBlob(v) {
+  if (v === undefined || v === null || v === '') return { present: false, uid: '' }
+  return { present: true, uid: identifiantCompte(v) }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // autorise() — LA fonction d'autorisation, et il n'y en aura jamais deux.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -858,7 +877,15 @@ async function rattacher(req, store, url, verifieCompte) {
   const uid = identifiantCompte(await verifieCompte(req))
   if (!uid) return jsonResponse({ error: 'connexion requise' }, 401, SANS_CACHE)
 
-  const dejaA = identifiantCompte(blob.ownerId)
+  // ⚠️ « ILLISIBLE » N'EST PAS « ABSENT ». Un propriétaire présent mais que
+  // COMPTE_RE refuse ne peut pas être transféré proprement — sa clé d'index est
+  // introuvable, donc son entrée resterait derrière lui. On refuse.
+  const enPlace = proprietaireDuBlob(blob.ownerId)
+  if (enPlace.present && !enPlace.uid) {
+    console.error('[race] claim refusé : ownerId illisible sur', id)
+    return jsonResponse({ error: 'propriétaire de cette carte illisible' }, 409, SANS_CACHE)
+  }
+  const dejaA = enPlace.uid
 
   // Le blob d'abord, l'index ensuite — toujours (voir la doctrine plus haut).
   // Rattacher une carte déjà à soi repasse par là sans dommage : c'est aussi ce

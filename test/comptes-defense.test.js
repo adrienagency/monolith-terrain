@@ -314,3 +314,39 @@ test('les seaux de lecture et de rattachement suivent la même /64', async () =>
 test('deux /64 différentes gardent bien deux seaux', () => {
   assert.notEqual(cleSeauLecture('2001:db8:1234:5678::1'), cleSeauLecture('2001:db8:1234:9999::1'))
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. UN ownerId ILLISIBLE RESTE UN PROPRIÉTAIRE
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('un ownerId malformé ne se laisse pas écraser par un claim', async () => {
+  // Un ownerId que COMPTE_RE refuse (version antérieure, correction manuelle,
+  // changement de format d'id) n'est PAS « pas de propriétaire ». On ne sait
+  // pas le lire, donc on ne sait pas retirer son index : on refuse, on n'écrase
+  // pas en silence.
+  const store = fakeStore()
+  const j = await publier(store)
+  store.poser(j.id, { ...store.raw(j.id), ownerId: 'proprio_avec_underscore' })
+
+  const r = await handleRace(req('POST', { claim: true, id: j.id, secret: j.secret, jeton: JETON }), store, session(UID_B))
+  assert.equal(r.status, 409, 'un propriétaire illisible ferme la porte')
+  assert.equal(store.raw(j.id).ownerId, 'proprio_avec_underscore', 'et rien n’a été réécrit')
+  assert.equal(store.raw(cleIndexProprietaire(UID_B, j.id)), null)
+})
+
+test('un ownerId illisible n’autorise personne à écrire non plus', async () => {
+  const store = fakeStore()
+  const j = await publier(store)
+  store.poser(j.id, { ...store.raw(j.id), ownerId: 'proprio_avec_underscore' })
+  const res = await handleRace(req('PUT', { id: j.id, jeton: JETON, body: { gpx: GPX } }), store, sessionAvec(supabase({ id: 'proprio_avec_underscore', aud: 'authenticated' })))
+  assert.equal(res.status, 403)
+})
+
+test('une carte SANS propriétaire se rattache toujours normalement', async () => {
+  // Le témoin de la règle : « absent » et « illisible » ne sont pas le même cas.
+  const store = fakeStore()
+  const j = await publier(store)
+  const r = await handleRace(req('POST', { claim: true, id: j.id, secret: j.secret, jeton: JETON }), store, session(UID_A))
+  assert.equal(r.status, 200)
+  assert.equal(store.raw(j.id).ownerId, UID_A)
+})
