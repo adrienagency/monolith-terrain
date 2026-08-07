@@ -649,6 +649,20 @@ const MAX_CARTES_LISTEES = 500
 // panneau vingt-cinq fois par minute n'existe pas.
 export const COUT_APPEL_LISTE = 4 * 1024 * 1024
 
+// LE COÛT D'OPÉRATION, lui, est proportionnel au travail réellement fait :
+// une entrée d'index lue = 4 Kio débités. C'est l'autre moitié du même
+// problème — UNE requête HTTP déclenche jusqu'à MAX_CARTES_LISTEES + 1
+// opérations de magasin, et la passe d'attaque a mesuré 60 cartes = 61
+// lectures pour 9 012 octets débités, soit 7,2 MILLIONS de lectures de blobs
+// autorisées par le budget d'1 Gio depuis une seule adresse. Une liste pleine
+// coûte désormais 2 Mio de plus que son forfait, et la même IP tombe à
+// quelques centaines de requêtes.
+//
+// 4 Kio parce que c'est l'ordre de grandeur d'une opération de magasin
+// facturée — PAS le poids de l'entrée, qui fait quelques centaines d'octets.
+// Encore une fois : ce qu'on facture n'est pas ce qu'on rend.
+export const COUT_OPERATION_MAGASIN = 4 * 1024
+
 // Le refus de lecture, extrait pour être RIGOUREUSEMENT le même des deux côtés.
 // C'est lui qui traitait déjà correctement le cache — un refus vaut pour une IP
 // à un instant, et une copie partagée le servirait à des innocents.
@@ -700,6 +714,12 @@ async function mesCartes(req, store, verifieCompte) {
     console.error('race GET mine blobs error:', err)
     return jsonResponse({ error: 'storage unavailable' }, 502, SANS_CACHE)
   }
+
+  // ⚠️ ON FACTURE CE QUE LA LISTE VA COÛTER, PAS CE QU'ELLE VA RENDRE. Une
+  // entrée illisible se saute plus bas mais a bien été LUE : le débit se calcule
+  // sur les clés listées, pas sur les cartes survivantes, sinon remplir son
+  // index d'entrées mortes redeviendrait gratuit.
+  debit += cles.length * COUT_OPERATION_MAGASIN
 
   const cartes = []
   for (const cle of cles) {

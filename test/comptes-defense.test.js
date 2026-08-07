@@ -10,6 +10,7 @@ import {
   handleRace,
   cleSeauLecture,
   COUT_APPEL_LISTE,
+  COUT_OPERATION_MAGASIN,
   LECTURE_CAP_OCTETS,
 } from '../netlify/functions/race.mjs'
 import { compteVerifie } from '../netlify/functions/_compte.mjs'
@@ -131,4 +132,53 @@ test('le refus de rafale ne se cache jamais dans un cache partagé', async () =>
   assert.equal(res.status, 429)
   assert.match(res.headers.get('cache-control') || '', /no-store/)
   assert.match(res.headers.get('netlify-cdn-cache-control') || '', /no-store/)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 2. `?mine=1` PROUVÉ : ce qu'on facture, ce sont les OPÉRATIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('une liste facture un coût d’opération par entrée lue, pas seulement ses octets', async () => {
+  const store = fakeStore()
+  const ip = '198.51.100.34'
+  const N = 12
+  for (let i = 0; i < N; i++) {
+    await publier(store, { verifie: session(UID_A), jeton: JETON, ip: `203.0.113.${i}`, body: { gpx: GPX, state: ETAT, raceName: `Carte ${i}` } })
+  }
+
+  const res = await handleRace(req('GET', { mine: true, jeton: JETON, ip }), store, session(UID_A))
+  assert.equal(res.status, 200)
+  const octets = Buffer.byteLength(await res.text(), 'utf8')
+
+  // Première requête depuis cette IP : le seau part plein et `at` est figé au
+  // moment de la lecture, donc le compte est EXACT — aucun rechargement ne
+  // vient brouiller la mesure.
+  const debite = LECTURE_CAP_OCTETS - store.raw(cleSeauLecture(ip)).tokens
+  assert.equal(debite, COUT_APPEL_LISTE + N * COUT_OPERATION_MAGASIN + octets,
+    'le débit doit valoir forfait + opérations + octets servis')
+  assert.ok(debite > octets * 10, `${debite} octets débités pour ${octets} rendus : le coût d’opération doit dominer`)
+})
+
+test('le prix d’une liste CROÎT avec le nombre d’entrées lues', async () => {
+  // Le vrai défaut n'était pas un plafond trop haut : c'était que 1 carte et
+  // 500 cartes coûtaient la même chose. Deux IP neuves, deux comptes, deux
+  // tailles — l'écart doit être au moins celui des opérations supplémentaires.
+  const store = fakeStore()
+  const cout = async (uid, combien, ip) => {
+    for (let i = 0; i < combien; i++) {
+      await publier(store, { verifie: session(uid), jeton: JETON, ip: `203.0.113.${i % 250}`, body: { gpx: GPX, state: ETAT, raceName: `C${i}` } })
+    }
+    const res = await handleRace(req('GET', { mine: true, jeton: JETON, ip }), store, session(uid))
+    assert.equal(res.status, 200)
+    return LECTURE_CAP_OCTETS - store.raw(cleSeauLecture(ip)).tokens
+  }
+  const petite = await cout(UID_A, 5, '198.51.100.35')
+  const grosse = await cout(UID_B, 205, '198.51.100.36')
+
+  assert.ok(grosse - petite >= 200 * COUT_OPERATION_MAGASIN,
+    `200 entrées de plus n’ont coûté que ${grosse - petite} octets : le nombre d’opérations n’est pas facturé`)
+  // Et le rapport reste très éloigné des millions de lectures d'origine.
+  const requetesAvantFrein = Math.floor(LECTURE_CAP_OCTETS / grosse)
+  assert.ok(requetesAvantFrein * 206 < 100_000,
+    `${(requetesAvantFrein * 206).toLocaleString()} lectures de magasin sur un seul budget — il en fallait des millions pour que ce soit grave`)
 })
