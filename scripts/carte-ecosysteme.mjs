@@ -21,7 +21,7 @@
 // choses-là ne sont écrites nulle part dans le code — elles vivent dans des
 // tableaux de bord et des contrats.
 
-import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync } from 'node:fs'
 import { join, relative, dirname, resolve } from 'node:path'
 
 const RACINE = resolve(new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
@@ -281,7 +281,23 @@ ol.chaine li::before {
   padding: .2rem .5rem; border-radius: 2px; color: var(--encre-douce);
 }
 
-.mermaid { background: var(--papier-creux); border: 1px solid var(--trait); border-radius: 3px; padding: 1rem; overflow-x: auto; }
+/* Le schéma : un SVG en ligne, pas de bibliothèque. Il doit rester lisible
+   dans les deux thèmes, donc toutes ses couleurs passent par les jetons. */
+.schema { margin: 0; }
+.schema svg { width: 100%; height: auto; display: block; }
+.schema .bande rect { fill: var(--papier-creux); stroke: var(--trait); stroke-width: 1; }
+.schema .boite rect { fill: var(--papier); stroke: var(--mer); stroke-width: 1.5; }
+.schema .boite.creux rect { stroke: var(--relief); }
+.schema .boite.pointille rect { stroke: var(--encre-douce); stroke-dasharray: 4 3; }
+.schema .etiquette {
+  font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+  letter-spacing: .12em; text-transform: uppercase; fill: var(--encre-douce);
+}
+.schema .titre { font-size: 14px; font-weight: 600; fill: var(--encre); }
+.schema .detail { font-size: 11.5px; fill: var(--encre-douce); }
+.schema .lien path { fill: none; stroke: var(--encre-douce); stroke-width: 1.2; }
+.schema .lien.pointille path { stroke-dasharray: 4 3; }
+figcaption { color: var(--encre-douce); font-size: .88rem; margin-top: .8rem; max-width: 62ch; }
 
 footer { border-top: 1px solid var(--trait); padding-top: 1.2rem; color: var(--encre-douce); font-size: .86rem; }
 footer code { font-family: ui-monospace, Consolas, monospace; background: var(--papier-creux); padding: .1rem .35rem; border-radius: 2px; }
@@ -316,21 +332,84 @@ footer code { font-family: ui-monospace, Consolas, monospace; background: var(--
 <section>
   <h2><span class="cote">B</span> Comment ça tient ensemble</h2>
   <p class="chapeau">Le navigateur fait tout le rendu ; le serveur ne sert qu'à trois choses — garder les cartes publiées, encaisser, et envoyer des courriels. C'est ce qui permet à ShibuMap de tenir sur un hébergement à vingt dollars.</p>
-  <pre class="mermaid">
-flowchart TD
-  V["Le visiteur<br/>(navigateur)"] --> APP["L'application<br/>three.js / WebGL2"]
-  APP -->|"relief, images,<br/>lieux"| GEO[("${c.sources.length} sources<br/>géographiques publiques")]
-  APP -->|"publier / corriger<br/>une carte"| RACE["race.mjs"]
-  APP -->|"acheter<br/>une affiche"| CAISSE["paiement.mjs"]
-  RACE --> BLOB[("Magasin Netlify<br/>race-payloads")]
-  CAISSE --> STRIPE["Stripe<br/>page hébergée chez eux"]
-  STRIPE -->|"webhook signé"| HOOK["paiement-webhook.mjs"]
-  HOOK --> JOURNAL[("Magasin Netlify<br/>paiements")]
-  HOOK --> MAIL["Resend"]
-  MAIL --> V
-  COMPTE["Supabase — comptes<br/>à ouvrir"] -.-> RACE
-  COMPTE -.-> CAISSE
-  </pre>
+  <figure class="schema">
+  <svg viewBox="0 0 800 428" role="img" aria-labelledby="schema-titre">
+    <title id="schema-titre">Trois étages : le navigateur fait tout le rendu, le serveur ne tient que la publication, l'encaissement et le courriel, et le dehors fournit le relief et les paiements.</title>
+    <defs>
+      <marker id="fleche" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L8,4 L0,8 z" fill="var(--encre-douce)"/>
+      </marker>
+    </defs>
+
+    <g class="bande"><rect x="8" y="8" width="784" height="116" rx="3"/></g>
+    <text class="etiquette" x="20" y="28">Dans le navigateur du visiteur — tout le travail lourd</text>
+    <g class="boite"><rect x="24" y="40" width="240" height="68" rx="3"/></g>
+    <text class="titre" x="40" y="66">L'application</text>
+    <text class="detail" x="40" y="86">three.js, WebGL2</text>
+    <text class="detail" x="40" y="100">relief, tracé, rendu, export PDF</text>
+    <g class="boite"><rect x="288" y="40" width="220" height="68" rx="3"/></g>
+    <text class="titre" x="304" y="66">Le Race Studio</text>
+    <text class="detail" x="304" y="86">la sous-application</text>
+    <text class="detail" x="304" y="100">des organisateurs</text>
+    <g class="boite"><rect x="532" y="40" width="236" height="68" rx="3"/></g>
+    <text class="titre" x="548" y="66">La boutique de gabarits</text>
+    <text class="detail" x="548" y="86">dans l'application,</text>
+    <text class="detail" x="548" y="100">sans rechargement</text>
+
+    <g class="bande"><rect x="8" y="156" width="784" height="104" rx="3"/></g>
+    <text class="etiquette" x="20" y="176">Sur le serveur — ${c.code.fonctions} fonctions, et rien d'autre</text>
+    <g class="boite"><rect x="24" y="188" width="176" height="56" rx="3"/></g>
+    <text class="titre" x="40" y="212">race.mjs</text>
+    <text class="detail" x="40" y="230">publier, corriger, lire</text>
+    <g class="boite"><rect x="224" y="188" width="176" height="56" rx="3"/></g>
+    <text class="titre" x="240" y="212">paiement.mjs</text>
+    <text class="detail" x="240" y="230">la caisse</text>
+    <g class="boite"><rect x="424" y="188" width="200" height="56" rx="3"/></g>
+    <text class="titre" x="440" y="212">paiement-webhook.mjs</text>
+    <text class="detail" x="440" y="230">signature vérifiée</text>
+    <g class="boite creux"><rect x="648" y="188" width="120" height="56" rx="3"/></g>
+    <text class="titre" x="664" y="212">2 magasins</text>
+    <text class="detail" x="664" y="230">${ech(c.code.magasins.join(', '))}</text>
+
+    <g class="bande"><rect x="8" y="292" width="784" height="128" rx="3"/></g>
+    <text class="etiquette" x="20" y="312">Au dehors — ce qui ne nous appartient pas</text>
+    <g class="boite"><rect x="24" y="324" width="220" height="80" rx="3"/></g>
+    <text class="titre" x="40" y="348">${c.sources.length} sources géographiques</text>
+    <text class="detail" x="40" y="368">relief, images, lieux, mer</text>
+    <text class="detail" x="40" y="384">appelées par le navigateur</text>
+    <g class="boite"><rect x="268" y="324" width="176" height="80" rx="3"/></g>
+    <text class="titre" x="284" y="348">Stripe</text>
+    <text class="detail" x="284" y="368">page hébergée chez eux :</text>
+    <text class="detail" x="284" y="384">aucune carte ici</text>
+    <g class="boite"><rect x="468" y="324" width="140" height="80" rx="3"/></g>
+    <text class="titre" x="484" y="348">Resend</text>
+    <text class="detail" x="484" y="368">les courriels</text>
+    <g class="boite pointille"><rect x="632" y="324" width="136" height="80" rx="3"/></g>
+    <text class="titre" x="648" y="348">Supabase</text>
+    <text class="detail" x="648" y="368">les comptes —</text>
+    <text class="detail" x="648" y="384">pas encore ouvert</text>
+
+    <g class="lien">
+      <!-- L'application publie et corrige ses cartes, et ouvre la caisse. -->
+      <path d="M112 108 V188" marker-end="url(#fleche)"/>
+      <path d="M200 108 H312 V188" marker-end="url(#fleche)"/>
+      <!-- ⚠️ Les sources remontent jusqu'au NAVIGATEUR, pas jusqu'au serveur :
+           c'est toute la thèse du schéma, et la flèche doit donc contourner
+           l'étage du milieu par la gouttière plutôt que s'y arrêter. -->
+      <path d="M24 364 H16 V74 H24" marker-end="url(#fleche)"/>
+      <!-- La caisse ouvre une session chez Stripe, qui rappelle le webhook. -->
+      <path d="M312 244 V324" marker-end="url(#fleche)"/>
+      <path d="M440 324 V244" marker-end="url(#fleche)"/>
+      <!-- Le webhook écrit la commande, PUIS fait partir le courriel. -->
+      <path d="M624 216 H648" marker-end="url(#fleche)"/>
+      <path d="M524 244 V324" marker-end="url(#fleche)"/>
+      <!-- race.mjs range les cartes dans le même magasin. -->
+      <path d="M112 244 V252 H690 V244" marker-end="url(#fleche)"/>
+    </g>
+    <g class="lien pointille"><path d="M730 324 V244" marker-end="url(#fleche)"/></g>
+  </svg>
+  <figcaption>Le navigateur parle directement aux sources géographiques : rien de tout ce poids ne transite par le serveur. C'est ce qui permet à ShibuMap de tenir sur un hébergement à vingt dollars.</figcaption>
+  </figure>
 </section>
 
 <section>
@@ -371,8 +450,15 @@ flowchart TD
   <div class="nuage">${c.sources.map((s) => `<span>${ech(s.hote)}</span>`).join('')}</div>
 </section>
 
+<section id="vivant" hidden>
+  <h2><span class="cote">G</span> Le relevé du jour</h2>
+  <p class="chapeau">Compté à 6 h, 12 h et 18 h. Contrairement à tout ce qui précède, ces chiffres-là bougent entre deux déploiements.</p>
+  <div class="releve" id="vivant-chiffres"></div>
+  <p class="cote" id="vivant-heure"></p>
+</section>
+
 <section>
-  <h2><span class="cote">G</span> Ce qui est en chantier</h2>
+  <h2><span class="cote">H</span> Ce qui est en chantier</h2>
   <div class="grille">
     ${c.chantiers.map((t) => `<article class="bloc">
       <h3>${ech(t.quoi)}</h3>
@@ -386,7 +472,39 @@ flowchart TD
   <p>Régénérée par <code>npm run carte</code>, et automatiquement à chaque <code>npm run build</code>. Les surfaces, les prestataires et le chemin de l'argent sont les seules parties tenues à la main — elles ne sont écrites nulle part dans le code. Tout le reste est relevé sur le dépôt.</p>
   <p class="cote">Variables d'environnement attendues : ${c.code.env.map((e) => ech(e)).join(' · ')}</p>
 </footer>
-</div>`
+</div>
+
+<script>
+// Le relevé vivant, s'il est joignable. Il ne l'est que sur shibumap.com et
+// seulement avec la clé dans l'adresse : /tableau-de-bord/?k=…
+//
+// ⚠️ TOUT ÉCHEC EST SILENCIEUX, ET C'EST VOULU. Cette même page est aussi
+// publiée en Artifact, où le réseau est fermé par sécurité — la carte du code
+// doit y rester entièrement lisible sans qu'une erreur vienne salir l'écran.
+(async () => {
+  const cle = new URLSearchParams(location.search).get('k')
+  if (!cle) return
+  try {
+    const r = await fetch('/.netlify/functions/tableau?k=' + encodeURIComponent(cle))
+    if (!r.ok) return
+    const d = await r.json()
+    if (d.enAttente) return
+    const cases = []
+    if (d.cartesPubliees != null) cases.push(['' + d.cartesPubliees, 'cartes publiées'])
+    if (d.commandes != null) cases.push(['' + d.commandes, 'commandes'])
+    if (!cases.length) return
+    document.getElementById('vivant-chiffres').innerHTML =
+      cases.map(([n, l]) => '<div><b>' + n + '</b><span class="cote">' + l + '</span></div>').join('')
+    const t = new Date(d.faitLe)
+    document.getElementById('vivant-heure').textContent =
+      'Relevé de ' + t.toLocaleString('fr-FR', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'long' }) +
+      (d.erreurs && d.erreurs.length ? ' — ' + d.erreurs.join(' ; ') : '')
+    document.getElementById('vivant').hidden = false
+  } catch {
+    /* hors ligne, hors site, ou réseau fermé : la carte du code se suffit */
+  }
+})()
+</script>`
 }
 
 // ── Assemblage ──────────────────────────────────────────────────────────────
@@ -443,7 +561,28 @@ const carte = {
 }
 
 writeFileSync(join(RACINE, 'docs/carte-ecosysteme.json'), JSON.stringify(carte, null, 2))
-writeFileSync(join(RACINE, 'docs/carte-ecosysteme.html'), page(carte))
+
+// Deux sorties, un seul corps. La version Artifact est livrée sans enveloppe
+// (l'hôte pose lui-même doctype et en-tête) ; celle du site en a besoin.
+const corps = page(carte)
+writeFileSync(join(RACINE, 'docs/carte-ecosysteme.html'), corps)
+
+// ⚠️ `public/` est recopié TEL QUEL par vite : écrire ici, c'est publier sur
+// shibumap.com au prochain déploiement. Le `noindex` n'est pas une pudeur —
+// cette page décrit l'architecture, les prestataires et les noms de variables
+// d'environnement. Rien de secret, mais rien qui ait à vivre dans un moteur de
+// recherche. Les chiffres d'affaires, eux, sont derrière une clé (tableau.mjs).
+mkdirSync(join(RACINE, 'public/tableau-de-bord'), { recursive: true })
+writeFileSync(join(RACINE, 'public/tableau-de-bord/index.html'), `<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<style>*,*::before,*::after{box-sizing:border-box}img,svg{max-width:100%}</style>
+${corps}
+</html>
+`)
 
 const { code, tests } = carte
 console.log(`Carte régénérée — ${code.modules} modules (${code.lignes.toLocaleString('fr-FR')} lignes), ${code.fonctions} fonctions serveur, ${carte.sources.length} sources externes.`)

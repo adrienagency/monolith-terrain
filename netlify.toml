@@ -59,6 +59,18 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
+# LE RELEVÉ DU TABLEAU DE BORD — trois fois par jour.
+#
+# ⚠️ L'HEURE EST EN TEMPS UNIVERSEL, Netlify n'accepte rien d'autre. 4/10/16
+# donne bien 6 h / 12 h / 18 h à Paris EN ÉTÉ ; en hiver le relevé tombera une
+# heure plus tôt. On l'assume : une heure de décalage sur un tableau de bord ne
+# vaut pas une double planification avec déduplication.
+#
+# La carte du CODE n'est pas concernée : elle se régénère au build, parce
+# qu'elle ne change que quand on commite. La recalculer à midi ne dirait rien.
+[functions."tableau-releve"]
+  schedule = "0 4,10,16 * * *"
+
 # /templates : l'ancienne vitrine statique est remplacée par la boutique
 # in-app (décision Adrien 2026-07-23) — l'app s'ouvre en mode boutique.
 # force=true : prime sur tout fichier statique résiduel. Les assets

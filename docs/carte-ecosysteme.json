@@ -87,7 +87,7 @@
   "code": {
     "modules": 210,
     "lignes": 74963,
-    "fonctions": 6,
+    "fonctions": 8,
     "piliers": [
       {
         "chemin": "src/ui/kit.js",
@@ -162,6 +162,7 @@
     ],
     "env": [
       "RESEND_API_KEY",
+      "SHIBU_CLE_TABLEAU",
       "SHIBU_CODE_ATELIER",
       "SHIBU_MAIL_EXPEDITEUR",
       "SHIBU_URL_SITE",
@@ -170,7 +171,8 @@
     ],
     "magasins": [
       "paiements",
-      "race-payloads"
+      "race-payloads",
+      "tableau"
     ]
   },
   "sources": [
