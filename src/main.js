@@ -129,12 +129,14 @@ import { BlockGrid, GRID_R } from './block-grid.js'
 // la signature d'un carre du damier : ce qui decide si la mer doit se rebatir
 import { cleDuCarre } from './damier-carre.js'
 import { buildTemplatesPanel } from './ui/templates-panel.js'
-// L'interface du compte. `compteInerte` est le socle SANS session : il répond
-// « personne n'est connecté », et ShibuMap tourne exactement comme avant.
-// ⚠️ LE JOUR OÙ `src/compte.js` ARRIVE (écrit en parallèle), c'est la seule
-// ligne à changer dans tout le fichier : remplacer `compteInerte` par l'objet
-// qu'il exporte. Le contrat attendu est écrit en tête de src/ui/compte.js.
-import { compteInerte, porteExport, buildMesCartesPanel, sectionMonCompte } from './ui/compte.js'
+// L'interface du compte, et — depuis le 2026-08-08 — la vraie session derrière.
+// `compteInerte` (le socle sans session, qui répondait « personne n'est
+// connecté ») reste exporté par ui/compte.js : c'est le défaut de ses panneaux
+// et le contrat de référence, mais il n'est plus ce que l'application branche.
+// `creerCompteApp` compose src/compte.js et rend exactement ce contrat — voir
+// l'en-tête de src/compte-app.js.
+import { porteExport, buildMesCartesPanel, sectionMonCompte } from './ui/compte.js'
+import { creerCompteApp } from './compte-app.js'
 import { buildFondsPanel, contributeTerrainSections, buildPaletteCreation } from './ui/create-panel.js'
 import { buildStore } from './ui/store.js'
 import { buildStudio } from './ui/studio.js'
@@ -8107,7 +8109,14 @@ async function reprendreApresPaiement() {
 // porte ci-dessous n'a AUCUN pouvoir de retenue : `onSuite` — l'export réel —
 // part dans les deux branches, et si `porteExport` disparaissait, les trois
 // exports fonctionneraient exactement comme avant.
-const compte = compteInerte
+//
+// ⚠️ CETTE LIGNE NE COÛTE RIEN AU DÉMARRAGE. `creerCompteApp` relit une session
+// éventuelle dans `localStorage` (une lecture synchrone, sous try/catch) et
+// n'émet AUCUNE requête : la configuration des comptes ne part que si quelqu'un
+// ouvre la connexion (voir `configuration()` dans src/compte.js). Pour un
+// visiteur qui n'a pas de compte — l'immense majorité — rien ne change, pas une
+// requête de plus, pas un pixel de différent.
+const compte = creerCompteApp()
 
 // ⚠️ TROIS EXPORTS, TROIS MOMENTS, UNE SEULE PORTE.
 // L'image et la vidéo passent par `openExportUI` ; l'impression par
