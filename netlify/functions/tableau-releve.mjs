@@ -17,6 +17,11 @@
 // jeu n'en vaut pas la chandelle, mais il fallait que ce soit écrit.
 
 import { getStore } from '@netlify/blobs'
+// La forme d'une clé de carte, définie là où les clés se fabriquent. Compter
+// « tout sauf les préfixes que je connais » revenait à tenir une liste noire à
+// jour de mémoire : chaque nouveau préfixe posé par race.mjs (`owner/`, puis
+// `rlr_`) gonflait le chiffre en silence — une carte réelle en affichait trois.
+import { estCleDeCarte } from './race.mjs'
 
 // Compte les clés d'un magasin sous un préfixe, en suivant la pagination.
 //
@@ -34,15 +39,22 @@ async function compter(store, prefix = '') {
   return total
 }
 
+// Combien de CARTES dans cette liste de blobs. Liste blanche : seul ce qui a
+// EXACTEMENT la forme d'un identifiant de course compte. Les seaux (`rl_`,
+// `rlq_`, `rlr_`), les entrées d'index (`owner/…`) et tout ce qui viendra
+// ensuite portent un « _ » ou un « / » que ID_RE interdit — ils sont donc
+// écartés sans qu'on ait à les nommer.
+export const cartesPubliees = (blobs) => (blobs || []).filter((b) => estCleDeCarte(b?.key)).length
+
 export default async () => {
   const releve = { faitLe: new Date().toISOString(), erreurs: [] }
 
   try {
     const cartes = getStore({ name: 'race-payloads', consistency: 'strong' })
-    // Les seaux de débit vivent dans le même magasin sous `rl_` et `rlq_` :
+    // Les seaux de débit et les entrées d'index vivent dans le MÊME magasin :
     // les compter gonflerait le chiffre d'un facteur imprévisible.
     const toutes = await cartes.list()
-    releve.cartesPubliees = (toutes.blobs || []).filter((b) => !b.key.startsWith('rl_') && !b.key.startsWith('rlq_')).length
+    releve.cartesPubliees = cartesPubliees(toutes.blobs)
   } catch (err) {
     releve.erreurs.push(`cartes : ${err.message}`)
   }

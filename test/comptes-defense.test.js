@@ -6,17 +6,20 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   handleRace,
   cleSeauLecture,
   cleIndexProprietaire,
   cleSeauRattachement,
   normaliseIp,
+  estCleDeCarte,
   COUT_APPEL_LISTE,
   COUT_OPERATION_MAGASIN,
   LECTURE_CAP_OCTETS,
 } from '../netlify/functions/race.mjs'
 import { compteVerifie } from '../netlify/functions/_compte.mjs'
+import { cartesPubliees } from '../netlify/functions/tableau-releve.mjs'
 
 // Le magasin en mémoire, augmenté de `delete` — que la vraie API Blobs fournit
 // et dont le rattachement a désormais besoin pour retirer l'index du perdant.
@@ -349,4 +352,34 @@ test('une carte SANS propriétaire se rattache toujours normalement', async () =
   const r = await handleRace(req('POST', { claim: true, id: j.id, secret: j.secret, jeton: JETON }), store, session(UID_A))
   assert.equal(r.status, 200)
   assert.equal(store.raw(j.id).ownerId, UID_A)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. LE RELEVÉ COMPTE DES CARTES, PAS DES CLÉS DE SERVICE
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('le relevé ne compte QUE ce qui a la forme d’un identifiant de carte', () => {
+  const cles = [
+    'abcdefghij', // une vraie carte
+    'Ab3xY9', // une autre, au minimum de longueur
+    `owner/${UID_A}/abcdefghij`,
+    'rl_203.0.113.7',
+    'rlq_203.0.113.7',
+    'rlr_203.0.113.7',
+    'rlz_le-prefixe-de-demain', // ⚠️ celui que personne n'aura pensé à ajouter
+    'seau/quelque-chose',
+    'trop!court',
+  ]
+  assert.equal(cartesPubliees(cles.map((key) => ({ key }))), 2)
+  assert.equal(estCleDeCarte('abcdefghij'), true)
+  assert.equal(estCleDeCarte('rlz_demain'), false, 'une LISTE BLANCHE : le préfixe suivant est exclu d’office')
+  assert.equal(estCleDeCarte(''), false)
+  assert.equal(estCleDeCarte(undefined), false)
+})
+
+test('le relevé ne contient plus une seule liste de préfixes à tenir à jour', () => {
+  // Le défaut d'origine n'était pas « il manque rlr_ » : c'était la liste noire.
+  const source = readFileSync(new URL('../netlify/functions/tableau-releve.mjs', import.meta.url), 'utf8')
+  const code = source.replace(/^\s*(\/\/.*|\*.*|\/\*.*)$/gm, '')
+  assert.equal(/startsWith\(\s*['"]rl/.test(code), false, 'une liste noire de préfixes se périme au préfixe suivant')
 })

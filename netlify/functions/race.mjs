@@ -101,6 +101,14 @@ const ID_RE = /^[A-Za-z0-9]{6,16}$/
 const SECRET_RE = /^[A-Za-z0-9]{16,128}$/
 const SHA256_HEX_RE = /^[0-9a-f]{64}$/
 
+// LA FORME D'UNE CLÉ DE CARTE, EXPORTÉE — parce que ce magasin n'a pas qu'un
+// seul lecteur. Le relevé du tableau de bord comptait « tout sauf `rl_` et
+// `rlq_` », une LISTE NOIRE : chaque nouveau préfixe posé ici (`owner/`, puis
+// `rlr_`) est donc entré dans le chiffre sans un mot, et une carte réelle en
+// affichait trois. Une liste blanche n'a pas ce défaut — le préfixe de demain
+// en est exclu d'office, sans que personne ait à s'en souvenir.
+export const estCleDeCarte = (cle) => typeof cle === 'string' && ID_RE.test(cle)
+
 function makeToken(len) {
   const bytes = randomBytes(len)
   let out = ''
