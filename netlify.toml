@@ -52,7 +52,7 @@
 # miroir du script `deploy` de package.json, moins l'appel à la CLI Netlify.
 
 [build]
-  command = "npm run build:mapcells && npx vite build && npm run verifie:dist"
+  command = "npm run build:mapcells && npm run carte && npx vite build && npm run verifie:dist"
   publish = "dist"
 
 [functions]

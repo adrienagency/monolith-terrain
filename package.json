@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/carte-ecosysteme.mjs && vite build",
     "preview": "vite preview",
     "build:mapdata": "node scripts/build-mapdata.mjs",
     "build:places": "node scripts/build-places.mjs",
@@ -26,7 +26,8 @@
     "cuire:fixtures-relief": "node scripts/cuire-fixtures-relief.mjs",
     "controle:pdf": "node --max-old-space-size=4096 scripts/controle-pdf-affiche.mjs",
     "inspecte:pdf": "node --max-old-space-size=6144 scripts/inspecte-pdf-affiche.mjs",
-    "build:volcans": "node scripts/build-volcans.mjs"
+    "build:volcans": "node scripts/build-volcans.mjs",
+    "carte": "node scripts/carte-ecosysteme.mjs"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "^2.8.1",

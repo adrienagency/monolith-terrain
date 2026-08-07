@@ -1,0 +1,413 @@
+{
+  "genereLe": "2026-08-07",
+  "surfaces": [
+    {
+      "nom": "L'application",
+      "url": "shibumap.com",
+      "quoi": "le générateur de cartes trois dimensions",
+      "etat": "en ligne"
+    },
+    {
+      "nom": "Le site vitrine",
+      "url": "shibumap.com (pages)",
+      "quoi": "la présentation défilante, entièrement pré-rendue",
+      "etat": "en ligne",
+      "depot": "C:\\Dev\\shibumap-site"
+    },
+    {
+      "nom": "La boutique",
+      "url": "shibumap.com/?store=1",
+      "quoi": "les gabarits, dans l'application elle-même",
+      "etat": "en ligne, commerce caché"
+    },
+    {
+      "nom": "Le Race Studio",
+      "url": "shibumap.com/?studio=1",
+      "quoi": "la sous-application des organisateurs",
+      "etat": "en ligne"
+    },
+    {
+      "nom": "L'affiche imprimable",
+      "url": "dans l'application",
+      "quoi": "le PDF vendu, du rendu tuilé aux traits de coupe",
+      "etat": "en ligne, à 0 € pour l'instant"
+    }
+  ],
+  "prestataires": [
+    {
+      "nom": "Netlify",
+      "role": "hébergement, fonctions, magasin, diffusion mondiale",
+      "cout": "20 $/mois (Pro)",
+      "etat": "en service"
+    },
+    {
+      "nom": "Stripe",
+      "role": "encaissement, factures, fiches clients",
+      "cout": "à la commission",
+      "etat": "en service, mode réel"
+    },
+    {
+      "nom": "Resend",
+      "role": "courriels transactionnels",
+      "cout": "offre gratuite",
+      "etat": "en service, domaine authentifié"
+    },
+    {
+      "nom": "Supabase",
+      "role": "comptes et données utilisateurs",
+      "cout": "25 $/mois (Pro)",
+      "etat": "à ouvrir — bloque toute la Phase 1"
+    }
+  ],
+  "argent": [
+    "Le visiteur clique « Recevoir le fichier » dans l'application",
+    "La caisse (paiement.mjs) demande une session à Stripe — le prix vient du catalogue serveur, jamais du navigateur",
+    "Le visiteur paie sur une page hébergée par Stripe : aucune donnée de carte ne touche ce serveur",
+    "Stripe rappelle le webhook, dont la signature est vérifiée",
+    "La commande est écrite au journal AVANT tout envoi — si le courriel échoue, la vente reste tracée",
+    "Resend porte le lien de téléchargement"
+  ],
+  "chantiers": [
+    {
+      "quoi": "Comptes utilisateurs",
+      "ou": "Phase 0 faite et commitée",
+      "bloque": "ouverture du projet Supabase"
+    },
+    {
+      "quoi": "Conformité PDF/X",
+      "ou": "jamais validée",
+      "bloque": "un passage Acrobat Preflight — vérifier, ne pas convertir"
+    },
+    {
+      "quoi": "Impression en dropshipping",
+      "ou": "option grisée dans l'interface",
+      "bloque": "choix du prestataire"
+    }
+  ],
+  "code": {
+    "modules": 210,
+    "lignes": 74963,
+    "fonctions": 6,
+    "piliers": [
+      {
+        "chemin": "src/ui/kit.js",
+        "lignes": 272,
+        "dependants": 32
+      },
+      {
+        "chemin": "src/terrain.js",
+        "lignes": 3233,
+        "dependants": 16
+      },
+      {
+        "chemin": "src/geo.js",
+        "lignes": 158,
+        "dependants": 15
+      },
+      {
+        "chemin": "src/map/tile-index.js",
+        "lignes": 244,
+        "dependants": 10
+      },
+      {
+        "chemin": "src/ui/shell.js",
+        "lignes": 110,
+        "dependants": 10
+      },
+      {
+        "chemin": "src/print-page.js",
+        "lignes": 310,
+        "dependants": 9
+      },
+      {
+        "chemin": "src/fenetre-clip.js",
+        "lignes": 238,
+        "dependants": 7
+      },
+      {
+        "chemin": "src/viewport.js",
+        "lignes": 314,
+        "dependants": 6
+      },
+      {
+        "chemin": "src/palette.js",
+        "lignes": 516,
+        "dependants": 5
+      },
+      {
+        "chemin": "src/damier-carre.js",
+        "lignes": 325,
+        "dependants": 5
+      },
+      {
+        "chemin": "src/plinth.js",
+        "lignes": 948,
+        "dependants": 4
+      },
+      {
+        "chemin": "src/export.js",
+        "lignes": 727,
+        "dependants": 4
+      },
+      {
+        "chemin": "src/map/aerial-layer.js",
+        "lignes": 712,
+        "dependants": 4
+      },
+      {
+        "chemin": "src/palier-machine.js",
+        "lignes": 585,
+        "dependants": 4
+      }
+    ],
+    "env": [
+      "RESEND_API_KEY",
+      "SHIBU_CODE_ATELIER",
+      "SHIBU_MAIL_EXPEDITEUR",
+      "SHIBU_URL_SITE",
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET"
+    ],
+    "magasins": [
+      "paiements",
+      "race-payloads"
+    ]
+  },
+  "sources": [
+    {
+      "hote": "ags.cuzk.gov.cz",
+      "ou": [
+        "src/map/aerial-layer.js"
+      ]
+    },
+    {
+      "hote": "api.resend.com",
+      "ou": [
+        "netlify/functions/paiement-webhook.mjs"
+      ]
+    },
+    {
+      "hote": "api.stripe.com",
+      "ou": [
+        "netlify/functions/paiement-etat.mjs",
+        "netlify/functions/paiement.mjs"
+      ]
+    },
+    {
+      "hote": "basemap.nationalmap.gov",
+      "ou": [
+        "src/map/aerial-layer.js"
+      ]
+    },
+    {
+      "hote": "cyberjapandata.gsi.go.jp",
+      "ou": [
+        "src/map/aerial-layer.js"
+      ]
+    },
+    {
+      "hote": "data.geopf.fr",
+      "ou": [
+        "src/map/aerial-layer.js"
+      ]
+    },
+    {
+      "hote": "data.marine.copernicus.eu",
+      "ou": [
+        "src/bathy-sources.js"
+      ]
+    },
+    {
+      "hote": "doi.org",
+      "ou": [
+        "src/bathy-sources.js"
+      ]
+    },
+    {
+      "hote": "emodnet.ec.europa.eu",
+      "ou": [
+        "src/bathy-sources.js"
+      ]
+    },
+    {
+      "hote": "en.wikipedia.org",
+      "ou": [
+        "src/ground-info.js"
+      ]
+    },
+    {
+      "hote": "esa-worldcover.org",
+      "ou": [
+        "src/occupation-sol.js"
+      ]
+    },
+    {
+      "hote": "geo.api.gouv.fr",
+      "ou": [
+        "src/geo-fr.js"
+      ]
+    },
+    {
+      "hote": "geo.api.vlaanderen.be",
+      "ou": [
+        "src/map/aerial-layer.js"
+      ]
+    },
+    {
+      "hote": "gibs.earthdata.nasa.gov",
+      "ou": [
+        "src/map/aerial-layer.js",
+        "src/nuit.js"
+      ]
+    },
+    {
+      "hote": "github.com",
+      "ou": [
+        "src/vendor/MeshTransmissionMaterial.js"
+      ]
+    },
+    {
+      "hote": "langnico.github.io",
+      "ou": [
+        "src/canopee.js"
+      ]
+    },
+    {
+      "hote": "mapsneu.wien.gv.at",
+      "ou": [
+        "src/map/aerial-layer.js"
+      ]
+    },
+    {
+      "hote": "mapterhorn.com",
+      "ou": [
+        "src/changelog.js",
+        "src/dem-source.js",
+        "src/dem.js",
+        "src/ui/bars.js"
+      ]
+    },
+    {
+      "hote": "mapy.geoportal.gov.pl",
+      "ou": [
+        "src/map/aerial-layer.js"
+      ]
+    },
+    {
+      "hote": "nauticalcharts.noaa.gov",
+      "ou": [
+        "src/bathy-sources.js"
+      ]
+    },
+    {
+      "hote": "nominatim.openstreetmap.org",
+      "ou": [
+        "src/goto.js",
+        "src/ground-info.js",
+        "src/peak-mask.js",
+        "src/region-mask.js"
+      ]
+    },
+    {
+      "hote": "overpass-api.de",
+      "ou": [
+        "src/map/overpass.js",
+        "src/peak-mask.js",
+        "src/peaks.js",
+        "src/transports.js"
+      ]
+    },
+    {
+      "hote": "registry.opendata.aws",
+      "ou": [
+        "src/dem-source.js"
+      ]
+    },
+    {
+      "hote": "s3.amazonaws.com",
+      "ou": [
+        "src/dem-source.js",
+        "src/globe.js"
+      ]
+    },
+    {
+      "hote": "service.pdok.nl",
+      "ou": [
+        "src/map/aerial-layer.js"
+      ]
+    },
+    {
+      "hote": "tiles.maaamet.ee",
+      "ou": [
+        "src/map/aerial-layer.js"
+      ]
+    },
+    {
+      "hote": "tiles.mapterhorn.com",
+      "ou": [
+        "src/dem-source.js"
+      ]
+    },
+    {
+      "hote": "wmts.geo.admin.ch",
+      "ou": [
+        "src/map/aerial-layer.js"
+      ]
+    },
+    {
+      "hote": "wmts.geoportail.lu",
+      "ou": [
+        "src/map/aerial-layer.js"
+      ]
+    },
+    {
+      "hote": "wmts.nlsc.gov.tw",
+      "ou": [
+        "src/map/aerial-layer.js"
+      ]
+    },
+    {
+      "hote": "wmtsod1.bayernwolke.de",
+      "ou": [
+        "src/map/aerial-layer.js"
+      ]
+    },
+    {
+      "hote": "www.gebco.net",
+      "ou": [
+        "src/bathy-sources.js",
+        "src/ui/bars.js"
+      ]
+    },
+    {
+      "hote": "www.ign.es",
+      "ou": [
+        "src/map/aerial-layer.js"
+      ]
+    },
+    {
+      "hote": "www.openstreetmap.org",
+      "ou": [
+        "src/ui/bars.js"
+      ]
+    },
+    {
+      "hote": "www.wmts.nrw.de",
+      "ou": [
+        "src/map/aerial-layer.js"
+      ]
+    },
+    {
+      "hote": "zbgis.skgeodesy.sk",
+      "ou": [
+        "src/map/aerial-layer.js"
+      ]
+    }
+  ],
+  "tests": {
+    "listes": 166,
+    "surDisque": 166,
+    "orphelins": [],
+    "fantomes": []
+  }
+}

@@ -1,0 +1,383 @@
+<title>ShibuMap — la planche de l'écosystème</title>
+<style>
+:root {
+  /* Teintes prises dans le produit : le turquoise de la mer, le brun des
+     courbes de niveau, le papier légèrement verdi d'une carte d'état-major. */
+  --papier: #F1F3EF;
+  --papier-creux: #E7EAE4;
+  --encre: #16221F;
+  --encre-douce: #5C6862;
+  --trait: #CDD3CA;
+  --mer: #1F7A73;
+  --mer-pale: #D6E7E4;
+  --relief: #8A7550;
+  --bon: #3F7A4B;
+  --attente: #A85B22;
+  --tiede: #8A7550;
+  --ombre: 0 1px 2px rgba(22,34,31,.06), 0 8px 24px -12px rgba(22,34,31,.18);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --papier: #101917; --papier-creux: #16221F; --encre: #E8EDE9;
+    --encre-douce: #93A29B; --trait: #2A3833; --mer: #5FBDB2; --mer-pale: #1B302D;
+    --relief: #B79C6E; --bon: #6FB37C; --attente: #D98A45; --tiede: #B79C6E;
+    --ombre: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"] {
+  --papier: #101917; --papier-creux: #16221F; --encre: #E8EDE9;
+  --encre-douce: #93A29B; --trait: #2A3833; --mer: #5FBDB2; --mer-pale: #1B302D;
+  --relief: #B79C6E; --bon: #6FB37C; --attente: #D98A45; --tiede: #B79C6E;
+  --ombre: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+}
+:root[data-theme="light"] {
+  --papier: #F1F3EF; --papier-creux: #E7EAE4; --encre: #16221F;
+  --encre-douce: #5C6862; --trait: #CDD3CA; --mer: #1F7A73; --mer-pale: #D6E7E4;
+  --relief: #8A7550; --bon: #3F7A4B; --attente: #A85B22; --tiede: #8A7550;
+  --ombre: 0 1px 2px rgba(22,34,31,.06), 0 8px 24px -12px rgba(22,34,31,.18);
+}
+
+body {
+  background: var(--papier); color: var(--encre);
+  font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+  line-height: 1.6; margin: 0; padding: 0 clamp(1rem, 4vw, 3rem) 6rem;
+  -webkit-font-smoothing: antialiased;
+}
+.feuille { max-width: 68rem; margin: 0 auto; }
+
+/* L'en-tête porte le graticule — le quadrillage d'une carte. Nulle part
+   ailleurs : un fond texturé sous du texte dense le rend illisible. */
+header {
+  padding: clamp(2.5rem, 7vw, 5rem) 0 2.5rem; margin-bottom: 3rem;
+  border-bottom: 2px solid var(--encre); position: relative;
+}
+header::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+  background:
+    repeating-linear-gradient(to right, var(--trait) 0 1px, transparent 1px 4.5rem),
+    repeating-linear-gradient(to bottom, var(--trait) 0 1px, transparent 1px 4.5rem);
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,.5), transparent 78%);
+  mask-image: linear-gradient(to bottom, rgba(0,0,0,.5), transparent 78%);
+}
+header > * { position: relative; }
+
+h1 {
+  font-size: clamp(2.1rem, 6vw, 3.4rem); line-height: 1.04; margin: 0 0 .6rem;
+  letter-spacing: -.03em; font-weight: 620; text-wrap: balance;
+}
+h1 em { font-style: normal; color: var(--mer); }
+.sous { max-width: 46ch; color: var(--encre-douce); margin: 0; font-size: 1.05rem; }
+
+.cote {
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+  font-size: .68rem; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--encre-douce);
+}
+
+/* Le cartouche de chiffres : ce qu'on lit avant tout le reste. */
+.releve { display: flex; flex-wrap: wrap; gap: 2.5rem; margin-top: 2.2rem; }
+.releve div { display: flex; flex-direction: column; gap: .15rem; }
+.releve b {
+  font-size: 1.9rem; font-weight: 600; letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+
+section { margin-bottom: 3.5rem; }
+h2 {
+  font-size: 1.28rem; font-weight: 600; letter-spacing: -.015em;
+  margin: 0 0 .35rem; display: flex; align-items: baseline; gap: .8rem;
+}
+h2 .cote { flex: none; }
+.chapeau { color: var(--encre-douce); margin: 0 0 1.4rem; max-width: 62ch; }
+
+.grille { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); }
+
+.bloc {
+  background: var(--papier-creux); border: 1px solid var(--trait);
+  border-radius: 3px; padding: 1rem 1.1rem; box-shadow: var(--ombre);
+  display: flex; flex-direction: column; gap: .3rem;
+}
+.bloc h3 { margin: 0; font-size: .98rem; font-weight: 600; }
+.bloc p { margin: 0; color: var(--encre-douce); font-size: .89rem; }
+
+.jeton {
+  align-self: flex-start; font-family: ui-monospace, Consolas, monospace;
+  font-size: .68rem; letter-spacing: .05em; padding: .16rem .5rem;
+  border-radius: 2px; margin-top: .35rem;
+}
+.jeton.bon { background: color-mix(in srgb, var(--bon) 16%, transparent); color: var(--bon); }
+.jeton.attente { background: color-mix(in srgb, var(--attente) 18%, transparent); color: var(--attente); }
+.jeton.tiede { background: color-mix(in srgb, var(--tiede) 18%, transparent); color: var(--tiede); }
+
+/* L'échelle d'altitude : la barre dit de combien de modules dépend celui-ci. */
+.pile { display: flex; flex-direction: column; gap: 1px; }
+.strate {
+  display: grid; grid-template-columns: 1fr auto auto; align-items: center;
+  gap: 1rem; padding: .5rem .8rem; background: var(--papier-creux);
+  border-left: 3px solid var(--mer); position: relative; overflow: hidden;
+}
+.strate .fond {
+  position: absolute; inset: 0; background: var(--mer-pale);
+  transform-origin: left; z-index: 0;
+}
+.strate > * { position: relative; z-index: 1; }
+.strate code {
+  font-family: ui-monospace, Consolas, monospace; font-size: .84rem;
+  overflow-wrap: anywhere;
+}
+.strate .n { font-variant-numeric: tabular-nums; font-size: .82rem; color: var(--encre-douce); white-space: nowrap; }
+
+ol.chaine { counter-reset: e; list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .55rem; }
+ol.chaine li {
+  counter-increment: e; display: grid; grid-template-columns: auto 1fr;
+  gap: .9rem; align-items: start;
+}
+ol.chaine li::before {
+  content: counter(e, decimal-leading-zero);
+  font-family: ui-monospace, Consolas, monospace; font-size: .72rem;
+  color: var(--mer); padding-top: .28rem; font-variant-numeric: tabular-nums;
+}
+
+.nuage { display: flex; flex-wrap: wrap; gap: .3rem; }
+.nuage span {
+  font-family: ui-monospace, Consolas, monospace; font-size: .74rem;
+  background: var(--papier-creux); border: 1px solid var(--trait);
+  padding: .2rem .5rem; border-radius: 2px; color: var(--encre-douce);
+}
+
+.mermaid { background: var(--papier-creux); border: 1px solid var(--trait); border-radius: 3px; padding: 1rem; overflow-x: auto; }
+
+footer { border-top: 1px solid var(--trait); padding-top: 1.2rem; color: var(--encre-douce); font-size: .86rem; }
+footer code { font-family: ui-monospace, Consolas, monospace; background: var(--papier-creux); padding: .1rem .35rem; border-radius: 2px; }
+</style>
+
+<div class="feuille">
+<header>
+  <p class="cote">Planche de l'écosystème · relevée le 2026-08-07</p>
+  <h1>Tout ce qui fait vivre <em>ShibuMap</em></h1>
+  <p class="sous">Cette page n'est pas dessinée : elle est <strong>lue dans le code</strong> à chaque build. Les chiffres ci-dessous sont ceux du dépôt au moment du relevé, pas ceux dont on se souvient.</p>
+  <div class="releve">
+    <div><b>74 963</b><span class="cote">lignes, 210 modules</span></div>
+    <div><b>6</b><span class="cote">fonctions serveur</span></div>
+    <div><b>36</b><span class="cote">sources externes</span></div>
+    <div><b>166</b><span class="cote">fichiers de tests</span></div>
+  </div>
+</header>
+
+<section>
+  <h2><span class="cote">A</span> Les surfaces publiques</h2>
+  <p class="chapeau">Ce qu'un visiteur peut atteindre aujourd'hui. Tout part du même dépôt et du même déploiement.</p>
+  <div class="grille">
+    <article class="bloc">
+      <h3>L'application</h3>
+      <p class="cote">shibumap.com</p>
+      <p>le générateur de cartes trois dimensions</p>
+      <span class="jeton bon">en ligne</span>
+    </article>
+    <article class="bloc">
+      <h3>Le site vitrine</h3>
+      <p class="cote">shibumap.com (pages)</p>
+      <p>la présentation défilante, entièrement pré-rendue</p>
+      <span class="jeton bon">en ligne</span>
+    </article>
+    <article class="bloc">
+      <h3>La boutique</h3>
+      <p class="cote">shibumap.com/?store=1</p>
+      <p>les gabarits, dans l'application elle-même</p>
+      <span class="jeton bon">en ligne, commerce caché</span>
+    </article>
+    <article class="bloc">
+      <h3>Le Race Studio</h3>
+      <p class="cote">shibumap.com/?studio=1</p>
+      <p>la sous-application des organisateurs</p>
+      <span class="jeton bon">en ligne</span>
+    </article>
+    <article class="bloc">
+      <h3>L'affiche imprimable</h3>
+      <p class="cote">dans l'application</p>
+      <p>le PDF vendu, du rendu tuilé aux traits de coupe</p>
+      <span class="jeton tiede">en ligne, à 0 € pour l'instant</span>
+    </article>
+  </div>
+</section>
+
+<section>
+  <h2><span class="cote">B</span> Comment ça tient ensemble</h2>
+  <p class="chapeau">Le navigateur fait tout le rendu ; le serveur ne sert qu'à trois choses — garder les cartes publiées, encaisser, et envoyer des courriels. C'est ce qui permet à ShibuMap de tenir sur un hébergement à vingt dollars.</p>
+  <pre class="mermaid">
+flowchart TD
+  V["Le visiteur<br/>(navigateur)"] --> APP["L'application<br/>three.js / WebGL2"]
+  APP -->|"relief, images,<br/>lieux"| GEO[("36 sources<br/>géographiques publiques")]
+  APP -->|"publier / corriger<br/>une carte"| RACE["race.mjs"]
+  APP -->|"acheter<br/>une affiche"| CAISSE["paiement.mjs"]
+  RACE --> BLOB[("Magasin Netlify<br/>race-payloads")]
+  CAISSE --> STRIPE["Stripe<br/>page hébergée chez eux"]
+  STRIPE -->|"webhook signé"| HOOK["paiement-webhook.mjs"]
+  HOOK --> JOURNAL[("Magasin Netlify<br/>paiements")]
+  HOOK --> MAIL["Resend"]
+  MAIL --> V
+  COMPTE["Supabase — comptes<br/>à ouvrir"] -.-> RACE
+  COMPTE -.-> CAISSE
+  </pre>
+</section>
+
+<section>
+  <h2><span class="cote">C</span> Les prestataires</h2>
+  <p class="chapeau">Quatre, dont un pas encore ouvert. Aucune donnée de carte bancaire ne touche jamais ce serveur : c'est la seule raison pour laquelle un site sans compte peut encaisser.</p>
+  <div class="grille">
+    <article class="bloc">
+      <h3>Netlify</h3>
+      <p>hébergement, fonctions, magasin, diffusion mondiale</p>
+      <p class="cote">20 $/mois (Pro)</p>
+      <span class="jeton bon">en service</span>
+    </article>
+    <article class="bloc">
+      <h3>Stripe</h3>
+      <p>encaissement, factures, fiches clients</p>
+      <p class="cote">à la commission</p>
+      <span class="jeton bon">en service, mode réel</span>
+    </article>
+    <article class="bloc">
+      <h3>Resend</h3>
+      <p>courriels transactionnels</p>
+      <p class="cote">offre gratuite</p>
+      <span class="jeton bon">en service, domaine authentifié</span>
+    </article>
+    <article class="bloc">
+      <h3>Supabase</h3>
+      <p>comptes et données utilisateurs</p>
+      <p class="cote">25 $/mois (Pro)</p>
+      <span class="jeton attente">à ouvrir — bloque toute la Phase 1</span>
+    </article>
+  </div>
+</section>
+
+<section>
+  <h2><span class="cote">D</span> Le chemin de l'argent</h2>
+  <p class="chapeau">Six étapes, dans cet ordre exact. L'ordre n'est pas une commodité : écrire la commande avant d'envoyer le courriel est ce qui fait qu'un paiement ne se perd jamais.</p>
+  <ol class="chaine"><li><span>Le visiteur clique « Recevoir le fichier » dans l'application</span></li><li><span>La caisse (paiement.mjs) demande une session à Stripe — le prix vient du catalogue serveur, jamais du navigateur</span></li><li><span>Le visiteur paie sur une page hébergée par Stripe : aucune donnée de carte ne touche ce serveur</span></li><li><span>Stripe rappelle le webhook, dont la signature est vérifiée</span></li><li><span>La commande est écrite au journal AVANT tout envoi — si le courriel échoue, la vente reste tracée</span></li><li><span>Resend porte le lien de téléchargement</span></li></ol>
+</section>
+
+<section>
+  <h2><span class="cote">E</span> Les piliers du code</h2>
+  <p class="chapeau">Classés par ce qui dépend d'eux, pas par leur taille. La barre est l'emprise : plus elle est longue, plus casser ce module casse de choses ailleurs.</p>
+  <div class="pile">
+    <div class="strate">
+      <div class="fond" style="transform: scaleX(1.000)"></div>
+      <code>src/ui/kit.js</code>
+      <span class="n">32 dépendants</span>
+      <span class="n">272 l.</span>
+    </div>
+    <div class="strate">
+      <div class="fond" style="transform: scaleX(0.500)"></div>
+      <code>src/terrain.js</code>
+      <span class="n">16 dépendants</span>
+      <span class="n">3 233 l.</span>
+    </div>
+    <div class="strate">
+      <div class="fond" style="transform: scaleX(0.469)"></div>
+      <code>src/geo.js</code>
+      <span class="n">15 dépendants</span>
+      <span class="n">158 l.</span>
+    </div>
+    <div class="strate">
+      <div class="fond" style="transform: scaleX(0.313)"></div>
+      <code>src/map/tile-index.js</code>
+      <span class="n">10 dépendants</span>
+      <span class="n">244 l.</span>
+    </div>
+    <div class="strate">
+      <div class="fond" style="transform: scaleX(0.313)"></div>
+      <code>src/ui/shell.js</code>
+      <span class="n">10 dépendants</span>
+      <span class="n">110 l.</span>
+    </div>
+    <div class="strate">
+      <div class="fond" style="transform: scaleX(0.281)"></div>
+      <code>src/print-page.js</code>
+      <span class="n">9 dépendants</span>
+      <span class="n">310 l.</span>
+    </div>
+    <div class="strate">
+      <div class="fond" style="transform: scaleX(0.219)"></div>
+      <code>src/fenetre-clip.js</code>
+      <span class="n">7 dépendants</span>
+      <span class="n">238 l.</span>
+    </div>
+    <div class="strate">
+      <div class="fond" style="transform: scaleX(0.188)"></div>
+      <code>src/viewport.js</code>
+      <span class="n">6 dépendants</span>
+      <span class="n">314 l.</span>
+    </div>
+    <div class="strate">
+      <div class="fond" style="transform: scaleX(0.156)"></div>
+      <code>src/palette.js</code>
+      <span class="n">5 dépendants</span>
+      <span class="n">516 l.</span>
+    </div>
+    <div class="strate">
+      <div class="fond" style="transform: scaleX(0.156)"></div>
+      <code>src/damier-carre.js</code>
+      <span class="n">5 dépendants</span>
+      <span class="n">325 l.</span>
+    </div>
+    <div class="strate">
+      <div class="fond" style="transform: scaleX(0.125)"></div>
+      <code>src/plinth.js</code>
+      <span class="n">4 dépendants</span>
+      <span class="n">948 l.</span>
+    </div>
+    <div class="strate">
+      <div class="fond" style="transform: scaleX(0.125)"></div>
+      <code>src/export.js</code>
+      <span class="n">4 dépendants</span>
+      <span class="n">727 l.</span>
+    </div>
+    <div class="strate">
+      <div class="fond" style="transform: scaleX(0.125)"></div>
+      <code>src/map/aerial-layer.js</code>
+      <span class="n">4 dépendants</span>
+      <span class="n">712 l.</span>
+    </div>
+    <div class="strate">
+      <div class="fond" style="transform: scaleX(0.125)"></div>
+      <code>src/palier-machine.js</code>
+      <span class="n">4 dépendants</span>
+      <span class="n">585 l.</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="cote">F</span> Les sources géographiques</h2>
+  <p class="chapeau">Toutes publiques, toutes appelées depuis le navigateur du visiteur. Chacune est une dépendance qui peut tomber sans prévenir — et une licence à vérifier avant usage.</p>
+  <div class="nuage"><span>ags.cuzk.gov.cz</span><span>api.resend.com</span><span>api.stripe.com</span><span>basemap.nationalmap.gov</span><span>cyberjapandata.gsi.go.jp</span><span>data.geopf.fr</span><span>data.marine.copernicus.eu</span><span>doi.org</span><span>emodnet.ec.europa.eu</span><span>en.wikipedia.org</span><span>esa-worldcover.org</span><span>geo.api.gouv.fr</span><span>geo.api.vlaanderen.be</span><span>gibs.earthdata.nasa.gov</span><span>github.com</span><span>langnico.github.io</span><span>mapsneu.wien.gv.at</span><span>mapterhorn.com</span><span>mapy.geoportal.gov.pl</span><span>nauticalcharts.noaa.gov</span><span>nominatim.openstreetmap.org</span><span>overpass-api.de</span><span>registry.opendata.aws</span><span>s3.amazonaws.com</span><span>service.pdok.nl</span><span>tiles.maaamet.ee</span><span>tiles.mapterhorn.com</span><span>wmts.geo.admin.ch</span><span>wmts.geoportail.lu</span><span>wmts.nlsc.gov.tw</span><span>wmtsod1.bayernwolke.de</span><span>www.gebco.net</span><span>www.ign.es</span><span>www.openstreetmap.org</span><span>www.wmts.nrw.de</span><span>zbgis.skgeodesy.sk</span></div>
+</section>
+
+<section>
+  <h2><span class="cote">G</span> Ce qui est en chantier</h2>
+  <div class="grille">
+    <article class="bloc">
+      <h3>Comptes utilisateurs</h3>
+      <p>Phase 0 faite et commitée</p>
+      <span class="jeton attente">bloqué : ouverture du projet Supabase</span>
+    </article>
+    <article class="bloc">
+      <h3>Conformité PDF/X</h3>
+      <p>jamais validée</p>
+      <span class="jeton attente">bloqué : un passage Acrobat Preflight — vérifier, ne pas convertir</span>
+    </article>
+    <article class="bloc">
+      <h3>Impression en dropshipping</h3>
+      <p>option grisée dans l'interface</p>
+      <span class="jeton attente">bloqué : choix du prestataire</span>
+    </article>
+  </div>
+</section>
+
+<footer>
+  <p>Régénérée par <code>npm run carte</code>, et automatiquement à chaque <code>npm run build</code>. Les surfaces, les prestataires et le chemin de l'argent sont les seules parties tenues à la main — elles ne sont écrites nulle part dans le code. Tout le reste est relevé sur le dépôt.</p>
+  <p class="cote">Variables d'environnement attendues : RESEND_API_KEY · SHIBU_CODE_ATELIER · SHIBU_MAIL_EXPEDITEUR · SHIBU_URL_SITE · STRIPE_SECRET_KEY · STRIPE_WEBHOOK_SECRET</p>
+</footer>
+</div>
