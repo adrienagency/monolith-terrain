@@ -134,7 +134,7 @@ import { buildTemplatesPanel } from './ui/templates-panel.js'
 // ⚠️ LE JOUR OÙ `src/compte.js` ARRIVE (écrit en parallèle), c'est la seule
 // ligne à changer dans tout le fichier : remplacer `compteInerte` par l'objet
 // qu'il exporte. Le contrat attendu est écrit en tête de src/ui/compte.js.
-import { compteInerte, porteExport, buildMesCartesPanel } from './ui/compte.js'
+import { compteInerte, porteExport, buildMesCartesPanel, sectionMonCompte } from './ui/compte.js'
 import { buildFondsPanel, contributeTerrainSections, buildPaletteCreation } from './ui/create-panel.js'
 import { buildStore } from './ui/store.js'
 import { buildStudio } from './ui/studio.js'
@@ -9295,7 +9295,12 @@ if (!IS_EMBED) {
   perf.root.classList.add('open')
   const aide = aideSection()
   aide.root.classList.add('open')
-  box.append(perf.root, aide.root)
+  // « Mon compte » : un `append` de plus, et RIEN dans la barre du haut — sept
+  // emplacements y sont déjà denses. Déconnecté, la section ne montre qu'un
+  // bouton « Me connecter » ; elle ne réclame rien et ne bloque rien.
+  const monCompte = sectionMonCompte(panelCtx)
+  monCompte.root.classList.add('open')
+  box.append(perf.root, aide.root, monCompte.root)
   veil.append(box)
   document.body.append(veil)
   const closeSettings = () => veil.classList.remove('open')

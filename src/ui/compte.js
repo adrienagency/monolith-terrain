@@ -53,7 +53,7 @@
 // change dans main.js (l'import) — rien ici.
 
 import './compte.css'
-import { el, button, segmented } from './kit.js'
+import { el, button, section, segmented } from './kit.js'
 import { Panel } from './shell.js'
 import { mesurerPlancher } from '../plancher-ui.js'
 
@@ -488,5 +488,84 @@ export function buildMesCartesPanel(ctx) {
   ctx.registerCartesRefresh?.(recharger)
 
   return { panel, recharger }
+}
+
+// ═════════════════════════════════════════════════════════ D. MON COMPTE ═══
+//
+// Une section de plus dans la modale des Paramètres, qui existe déjà. La barre
+// du haut n'est pas touchée : sept emplacements y sont déjà denses.
+export function sectionMonCompte(ctx) {
+  const compte = ctx.compte ?? compteInerte
+  const s = section('Mon compte')
+  s.root.classList.add('ce-moncompte')
+  const corps = el('div', 'ce-moncompte-corps')
+  s.body.append(corps)
+
+  function rendre() {
+    corps.replaceChildren()
+    if (!compte.estConnecte?.()) {
+      // Déconnecté : une porte, pas un discours. Le bouton dit exactement ce
+      // qui va se passer, et rien d'autre n'est promis.
+      const b = button('Me connecter', () => ouvrirConnexion(compte, { onConnecte: rendre }))
+      b.classList.add('ce-compte-primaire')
+      corps.append(b)
+      return
+    }
+    const ident = el('p', 'ce-moncompte-ident')
+    ident.append(document.createTextNode('Connecté avec '), el('b', null, compte.adresse() || ''))
+    corps.append(ident)
+
+    const actions = el('div', 'ce-moncompte-actions')
+    actions.append(
+      button('Me déconnecter', async () => { await compte.deconnecter(); rendre() }),
+      button('Exporter mes données', () => { compte.exporterMesDonnees?.() })
+    )
+    // La suppression vit à distance des deux autres : elle est définitive, et
+    // un destructif rangé au milieu des gestes courants finit par se cliquer.
+    const suppr = el('button', 'ce-moncompte-suppr', 'Supprimer mon compte')
+    suppr.type = 'button'
+    suppr.addEventListener('click', () => confirmerSuppression(compte, { onFait: rendre }))
+    corps.append(actions, suppr)
+  }
+  rendre()
+  compte.surChangement?.(rendre)
+  return s
+}
+
+// ───────────────────────────────────────────────── la suppression, confirmée
+// ⚠️ ON DIT CE QUI NE DISPARAÎT PAS. Un organisateur qui a diffusé un lien à
+// trois cents coureurs doit savoir que sa suppression ne casse pas leur lien —
+// sinon il n'ose pas, et il écrit à Adrien.
+//
+// ⚠️ LES BOUTONS PORTENT L'ACTION, pas « OK » et « Annuler ». On doit pouvoir
+// lire les deux et savoir lequel fait quoi sans relire la question.
+export function confirmerSuppression(compte, { onFait } = {}) {
+  const m = modale('ce-suppr')
+  m.carte.append(
+    m.titre('Tu veux supprimer ton compte ?'),
+    el('p', 'ce-compte-corps', 'Tes cartes déjà publiées resteront en ligne — leurs liens continuent de fonctionner pour ceux qui les ont. Ce qui disparaît, c’est ton compte, tes gabarits enregistrés et le lien entre eux et toi. C’est définitif.')
+  )
+  const err = el('p', 'ce-compte-err')
+  err.setAttribute('role', 'alert')
+  const garder = button('Garder mon compte', () => m.close())
+  const supprimer = button('Supprimer mon compte', async () => {
+    err.textContent = ''
+    supprimer.disabled = true
+    supprimer.textContent = 'Suppression…'
+    try { await compte.supprimerMonCompte(); m.close(); onFait?.() }
+    catch (e) {
+      err.textContent = messageRefus(e)
+      supprimer.disabled = false
+      supprimer.textContent = 'Supprimer mon compte'
+    }
+  })
+  supprimer.classList.add('ce-moncompte-suppr-go')
+  const actions = el('div', 'ce-compte-actions ce-suppr-actions')
+  actions.append(garder, supprimer)
+  m.carte.append(err, actions)
+  // le focus se pose sur CELUI QUI NE DÉTRUIT RIEN : une touche Entrée réflexe
+  // sur un écran qu'on n'a pas fini de lire ne doit rien effacer
+  garder.focus()
+  return m
 }
 

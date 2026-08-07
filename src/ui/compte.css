@@ -405,3 +405,72 @@ a.ce-cartes-ligne:hover .ce-cartes-url {
   color: var(--ce-accent);
 }
 
+/* ─────────────────────────────────────────────────── D. « Mon compte » ─── */
+.ce-moncompte-corps {
+  padding: 2px 2px 4px;
+}
+.ce-moncompte-ident {
+  margin: 0 0 10px;
+  font-size: var(--ce-t-control);
+  color: var(--ce-muted);
+}
+.ce-moncompte-ident b {
+  color: var(--ce-ink);
+  font-weight: 600;
+  word-break: break-all;
+}
+.ce-moncompte-actions {
+  display: flex;
+  gap: 6px;
+}
+.ce-moncompte-actions .ce-btn {
+  flex: 1;
+}
+.ce-moncompte-corps > .ce-compte-primaire {
+  width: 100%;
+}
+/* le destructif se range LOIN des gestes courants : une ligne à part, discrète
+   au repos, franche au survol. Même retenue que « Réinitialiser la carte »
+   dans la Bibliothèque. */
+.ce-moncompte-suppr {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--ce-muted);
+  font-family: var(--ce-font);
+  font-size: var(--ce-t-control);
+  text-align: center;
+  cursor: pointer;
+}
+.ce-moncompte-suppr:hover {
+  color: var(--ce-accent);
+}
+
+/* la confirmation : deux boutons qui PORTENT L'ACTION, jamais « OK » et
+   « Annuler ». Ils ne sont pas de même poids, eux — l'un efface pour de bon —
+   mais les deux se lisent, et le focus se pose sur celui qui ne détruit rien. */
+.ce-modal.ce-suppr {
+  width: min(400px, calc(100vw - 72px));
+}
+.ce-suppr-actions {
+  gap: 8px;
+}
+.ce-suppr-actions .ce-btn {
+  height: 36px;
+}
+.ce-moncompte-suppr-go.ce-btn {
+  border-color: var(--ce-accent);
+  color: var(--ce-accent);
+}
+.ce-moncompte-suppr-go.ce-btn:hover:not(:disabled) {
+  background: var(--ce-accent);
+  color: #fff;
+}
+.ce-moncompte-suppr-go.ce-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
