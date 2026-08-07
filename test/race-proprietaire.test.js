@@ -73,7 +73,10 @@ function supabase(uid, statut = 200) {
   const appels = []
   const apporter = async (url, opts) => {
     appels.push({ url, entetes: opts?.headers })
-    return new Response(JSON.stringify({ id: uid || UID_A, email: 'coureur@example.com' }), { status: statut })
+    // `aud: 'authenticated'` : ce que GoTrue rend pour un vrai utilisateur, et
+    // ce que compteVerifie exige désormais. Sans lui, ce faux ne décrirait plus
+    // un compte — et tous les cas nominaux d'ici testeraient le refus.
+    return new Response(JSON.stringify({ id: uid || UID_A, aud: 'authenticated', role: 'authenticated', email: 'coureur@example.com' }), { status: statut })
   }
   apporter.appels = appels
   return apporter

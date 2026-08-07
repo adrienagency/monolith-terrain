@@ -26,7 +26,10 @@ function supabaseQuiRepond(uid = UID, statut = 200) {
   const appels = []
   const apporter = async (url, opts) => {
     appels.push({ url, entetes: opts?.headers })
-    return new Response(JSON.stringify({ id: uid || UID, email: 'coureur@example.com' }), { status: statut })
+    // `aud` fait partie de ce que GoTrue rend pour un vrai utilisateur, et
+    // c'est ce que compteVerifie exige : un faux qui l'omettrait ne testerait
+    // plus le cas nominal, seulement le refus.
+    return new Response(JSON.stringify({ id: uid || UID, aud: 'authenticated', role: 'authenticated', email: 'coureur@example.com' }), { status: statut })
   }
   apporter.appels = appels
   return apporter
@@ -102,7 +105,7 @@ test('un identifiant de forme aberrante est refusé', async () => {
   // Défense en profondeur : cet uid finit dans des clés de magasin
   // (`owner/<uid>/<id>`). Même venant de Supabase, on le borne.
   for (const id of ['', 'court', 'x'.repeat(65), 42, null, { id: 'objet' }]) {
-    const apporter = async () => new Response(JSON.stringify({ id }), { status: 200 })
+    const apporter = async () => new Response(JSON.stringify({ id, aud: 'authenticated' }), { status: 200 })
     assert.equal(await compteVerifie(req({ authorization: `Bearer ${JETON}` }), apporter, ENV), '', String(id))
   }
 })

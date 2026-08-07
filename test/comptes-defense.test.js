@@ -182,3 +182,23 @@ test('le prix d’une liste CROÎT avec le nombre d’entrées lues', async () =
   assert.ok(requetesAvantFrein * 206 < 100_000,
     `${(requetesAvantFrein * 206).toLocaleString()} lectures de magasin sur un seul budget — il en fallait des millions pour que ce soit grave`)
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3. L'IDENTITÉ : un 200 de Supabase ne suffit plus
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('compteVerifie exige `aud: authenticated`, pas seulement un 200 et un id', async () => {
+  const r = new Request('https://x/', { headers: { authorization: `Bearer ${JETON}` } })
+
+  assert.equal(await compteVerifie(r, supabase({ id: 'anonymous-role-x', role: 'anon', aud: 'anon' }), ENV), '',
+    'un corps « role: anon » n’est pas un compte')
+  assert.equal(await compteVerifie(r, supabase({ id: 'service-role-uid', role: 'service_role' }), ENV), '',
+    'ni une clé de service')
+  assert.equal(await compteVerifie(r, supabase({ id: UID_A }), ENV), '',
+    'un corps sans `aud` du tout n’est pas un compte non plus')
+  assert.equal(await compteVerifie(r, supabase({ id: UID_A, aud: ['authenticated'] }), ENV), '',
+    'un `aud` en tableau ne vaut pas la chaîne attendue')
+
+  // et le cas nominal continue de passer
+  assert.equal(await compteVerifie(r, supabase({ id: UID_A, aud: 'authenticated', role: 'authenticated' }), ENV), UID_A)
+})

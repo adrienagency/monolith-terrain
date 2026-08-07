@@ -102,7 +102,18 @@ export async function compteVerifie(req, apporter = fetch, env = process.env) {
     return ''
   }
 
-  // ⚠️ ON NE REND QUE L'IDENTIFIANT. Pas le courriel, pas les métadonnées.
+  // ⚠️ UN 200 DE SUPABASE N'EST PAS UNE IDENTITÉ. Entre « GoTrue a répondu
+  // 200 » et « cette requête possède des cartes », il n'y avait qu'une longueur
+  // de chaîne : un corps portant `role: 'anon'` ou `role: 'service_role'`
+  // devenait un `ownerId` et une clé d'index. Ce n'est pas exploitable
+  // aujourd'hui — GoTrue refuse ces jetons-là sur /auth/v1/user — mais la seule
+  // chose qui nous en séparait était le comportement d'un service tiers, à sa
+  // version d'aujourd'hui. `aud` est le destinataire du jeton, et le seul qui
+  // désigne un vrai utilisateur connecté vaut EXACTEMENT 'authenticated'. On le
+  // compare en strict : ni un tableau, ni une valeur approchante.
+  if (corps?.aud !== 'authenticated') return ''
+
+  // ON NE REND QUE L'IDENTIFIANT. Pas le courriel, pas les métadonnées.
   // Le courriel change ; l'identifiant, jamais. Et tout ce qu'on ne fait pas
   // circuler est une chose de moins à protéger, à exporter et à effacer.
   const uid = corps?.id
