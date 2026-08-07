@@ -78,6 +78,10 @@
 
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto'
 import { getStore } from '@netlify/blobs'
+// La seule source d'identité du serveur. Elle interroge Supabase et rend l'uid
+// d'une session vérifiée, ou '' — et '' est le cas NORMAL : ShibuMap s'utilise
+// sans compte. Voir _compte.mjs pour pourquoi on ne vérifie pas le JWT ici.
+import { compteVerifie } from './_compte.mjs'
 
 const MAX_GPX_CHARS = 2_000_000 // ~2 MB text — real headroom over an already-decimated track
 const MAX_LOGO_DATA_URL_CHARS = 2_000_000 // base64 data URL, ~1.5 MB decoded image
@@ -122,6 +126,48 @@ function secretMatches(sent, storedHash) {
   // timingSafeEqual ne peut pas lever sur des longueurs différentes — et la
   // comparaison ne devient jamais un oracle caractère par caractère
   return timingSafeEqual(Buffer.from(hashSecret(sent), 'hex'), Buffer.from(storedHash, 'hex'))
+}
+
+// La forme acceptable d'un uid, reprise mot pour mot de paiement.mjs. Ce n'est
+// pas de la redite décorative : cet identifiant finit dans une CLÉ DE MAGASIN
+// (`owner/<uid>/<raceId>`), donc ni « / » ni « _ » — l'espace de noms des index
+// et des seaux — ne doivent pouvoir y entrer. `compteVerifie` le borne déjà en
+// longueur ; ici on borne le jeu de caractères, à l'endroit où la clé se
+// fabrique. Défense en profondeur : le jour où Supabase émet autre chose qu'un
+// UUID, on ne veut pas l'apprendre par une clé traversée.
+const COMPTE_RE = /^[A-Za-z0-9-]{8,64}$/
+const identifiantCompte = (v) => (typeof v === 'string' && COMPTE_RE.test(v) ? v : '')
+
+// ═══════════════════════════════════════════════════════════════════════════
+// autorise() — LA fonction d'autorisation, et il n'y en aura jamais deux.
+// ═══════════════════════════════════════════════════════════════════════════
+//
+//   autorise = secretMatches(en-tête, blob.secretHash)
+//              || (blob.ownerId && blob.ownerId === session vérifiée)
+//
+// DEUX CHEMINS, JAMAIS TROIS. Rien venant du corps de la requête ou de l'URL ne
+// peut influencer une autorisation : ni un champ `ownerId` recopié par le
+// client, ni un paramètre de chaîne de requête. « Le client dit que c'est à
+// lui » n'est pas une preuve, et un troisième chemin est exactement ce que ce
+// système existe pour interdire.
+//
+// ⚠️ LE JETON N'EST PAS TOUCHÉ, ET LE COMPTE S'AJOUTE À CÔTÉ. Des organisateurs
+// ont déjà des liens et des secrets en circulation ; ils doivent continuer de
+// fonctionner exactement comme avant, y compris sur une carte qui a désormais
+// un propriétaire. C'est aussi ce qui fait que le produit survit à une panne
+// d'authentification : `secretMatches` ne dépend de personne.
+//
+// ⚠️ L'ORDRE COMPTE. Le jeton se vérifie EN PREMIER, localement, sans réseau —
+// on ne dérange Supabase que pour quelqu'un qui n'a pas présenté de secret.
+//
+// ⚠️ `blob.ownerId &&` N'EST PAS DE LA COQUETTERIE. Sans ce garde, une carte
+// anonyme (`ownerId` absent) comparée à une session absente ('' ou undefined)
+// pourrait faire de n'importe quel visiteur le propriétaire de tout.
+async function autorise(req, blob, verifieCompte) {
+  if (secretMatches(req.headers.get(SECRET_HEADER), blob?.secretHash)) return true
+  const proprietaire = identifiantCompte(blob?.ownerId)
+  if (!proprietaire) return false
+  return proprietaire === identifiantCompte(await verifieCompte(req))
 }
 
 // LES CHAMPS DE RÉGIE — posés par le serveur, jamais par le client.
@@ -191,7 +237,10 @@ function preflightResponse() {
     headers: {
       'access-control-allow-origin': '*',
       'access-control-allow-methods': 'GET, POST, PUT, OPTIONS',
-      'access-control-allow-headers': 'content-type, x-shibumap-secret',
+      // `authorization` porte le jeton de session : sans lui dans cette liste,
+      // un appel depuis une autre origine par quelqu'un de connecté serait
+      // refusé par le navigateur avant même de partir.
+      'access-control-allow-headers': 'content-type, x-shibumap-secret, authorization',
       'access-control-max-age': '86400',
       'x-content-type-options': 'nosniff',
     },
@@ -235,16 +284,35 @@ export function refillBucket(bucket, now, cap = RATE_CAP, windowMs = RATE_WINDOW
   return { tokens: Math.min(cap, tokens + gained), at: now }
 }
 
-async function takeToken(store, ip, now = Date.now()) {
+// ---- le seau du RATTACHEMENT, et pourquoi il est à part --------------------
+// ⚠️ RÉUTILISER LE SEAU D'ÉCRITURE (12 par 10 minutes) BLOQUERAIT UN
+// RATTACHEMENT LÉGITIME AU TREIZIÈME. Le stockage local d'un navigateur garde
+// jusqu'à 50 secrets (voir share-link.js) : quelqu'un qui crée son compte après
+// coup les remonte tous d'un seul geste, et ce geste ne doit pas être puni.
+//
+// Un rattachement ne crée rien et ne sert aucun octet — il pose un champ sur un
+// blob dont l'appelant détient déjà le secret. Le frein n'est donc là que pour
+// borner le travail (une lecture de blob par tentative), pas pour rationner un
+// usage normal.
+export const RATTACHEMENT_CAP = 120
+// Préfixe distinct de `rl_` (écriture) et `rlq_` (lecture) ; il contient un
+// « _ », que ID_RE interdit, donc aucune collision avec un identifiant possible.
+export const cleSeauRattachement = (ip) => `rlr_${String(ip).replace(/[^a-zA-Z0-9:._-]/g, '')}`.slice(0, 96)
+
+// `prefixe` et `cap` sont paramétrés parce qu'il y a maintenant deux seaux à
+// jetons de forme identique et de calibre différent. La valeur par défaut est
+// celle de l'écriture : un appelant qui ne dit rien tombe sur le comportement
+// d'avant, à l'octet près.
+async function takeToken(store, ip, now = Date.now(), prefixe = 'rl_', cap = RATE_CAP) {
   if (!ip) return true // pas d'IP lisible : on ne bloque pas un vrai visiteur
-  const key = `rl_${ip.replace(/[^a-zA-Z0-9:._-]/g, '')}`.slice(0, 96)
+  const key = `${prefixe}${ip.replace(/[^a-zA-Z0-9:._-]/g, '')}`.slice(0, 96)
   let bucket = null
   try {
     bucket = await store.get(key, { type: 'json' })
   } catch {
     return true // le magasin est en panne : on laisse passer plutôt que de fermer le site
   }
-  const next = refillBucket(bucket, now)
+  const next = refillBucket(bucket, now, cap, RATE_WINDOW_MS)
   if (next.tokens < 1) return false
   next.tokens -= 1
   try {
@@ -367,6 +435,24 @@ const CACHE_LECTURE = {
   'netlify-cdn-cache-control': 'public, s-maxage=30, must-revalidate',
 }
 
+// ⚠️ ET SON CONTRAIRE, POUR TOUT CE QUI DÉPEND D'UNE SESSION.
+//
+// Le chemin GET pose CACHE_LECTURE sans condition, et c'est parfaitement juste
+// tant qu'une réponse ne dépend que de l'identifiant demandé. « Mes cartes » et
+// le rattachement, eux, dépendent de QUI DEMANDE : greffés sur ce même
+// gestionnaire, ils feraient resservir la liste d'un compte au visiteur suivant
+// pendant trente secondes — sans attaquant, sans bruit, et sans que rien ne le
+// signale. Le refus 429 le fait déjà correctement ; on en fait une constante
+// plutôt qu'une ligne à ne pas oublier.
+//
+// Les DEUX en-têtes disent la même chose : le dialecte du CDN a priorité quand
+// il est présent, donc laisser `netlify-cdn-cache-control` absent reviendrait à
+// espérer que la valeur par défaut soit la bonne.
+const SANS_CACHE = {
+  'cache-control': 'no-store',
+  'netlify-cdn-cache-control': 'no-store',
+}
+
 // Netlify place l'IP du client dans x-nf-client-connection-ip ; x-forwarded-for
 // est un repli et sa PREMIÈRE entrée est celle du client.
 export function clientIp(headers) {
@@ -455,15 +541,232 @@ async function readWriteBody(req) {
 // journaux d'accès, ceux des relais, et dans le Referer de la page suivante.
 const SECRET_HEADER = 'x-shibumap-secret'
 
+// ═══════════════════════════════════════════════════════════════════════════
+// L'INDEX DES CARTES D'UN COMPTE — `owner/<uid>/<raceId>`
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ DOCTRINE, ET ELLE N'EST PAS NÉGOCIABLE :
+//        LE BLOB EST LA VÉRITÉ. L'INDEX N'EST QU'UN CACHE RECONSTRUCTIBLE.
+//
+// Publier une carte qui appartient à quelqu'un, c'est DEUX ÉCRITURES, et le
+// magasin n'offre aucune transaction. L'une des deux peut donc échouer seule, en
+// silence. Les deux modes de panne ne se valent pas :
+//   - le blob écrit, l'index manquant : la carte existe, son lien fonctionne,
+//     elle n'apparaît simplement pas dans « Mes cartes ». Rattrapable, et
+//     rattrapé tout seul — la correction suivante réécrit l'entrée.
+//   - l'index écrit, le blob manquant : « Mes cartes » promet une carte qui
+//     n'existe pas. On a menti à quelqu'un sur son propre travail.
+// D'où l'ordre, qui est la seule chose qui compte ici : L'INDEX S'ÉCRIT APRÈS
+// LE BLOB, JAMAIS AVANT. Et son échec ne fait jamais échouer la publication.
+//
+// LA LECTURE FILTRE LES ENTRÉES MORTES. Un index est un cache : il peut porter
+// une entrée illisible, tronquée, ou dont la clé ne veut plus rien dire. La
+// liste les saute au lieu de tomber — une carte de moins vaut mieux qu'un
+// panneau vide. Elle ne peut PAS, en revanche, aller vérifier chaque blob :
+// ouvrir N payloads est très exactement le piège que cet index existe pour
+// éviter (voir « limitation de débit en LECTURE » — un organisateur brûlerait
+// son propre budget d'octets en consultant sa liste).
+//
+// Le préfixe contient « / », que ID_RE interdit : aucune entrée d'index ne peut
+// entrer en collision avec un identifiant de course dans le même magasin.
+export const cleIndexProprietaire = (uid, raceId) => `owner/${uid}/${raceId}`
+
+// Ce que « Mes cartes » a besoin de savoir, et RIEN DE PLUS : de quoi afficher
+// une ligne et fabriquer un lien. Pas de trace, pas de logo, pas de condensat,
+// pas d'identifiant de compte (il est déjà dans la clé). Une entrée pèse
+// quelques centaines d'octets, contre plusieurs mégaoctets pour le payload.
+function entreeIndex(raceId, payload) {
+  const loc = payload?.state?.loc
+  const nombre = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  const lat = nombre(loc?.lat)
+  const lon = nombre(loc?.lon)
+  return {
+    id: raceId,
+    nom: typeof payload?.raceName === 'string' ? payload.raceName : '',
+    // Le lieu, c'est la position du bloc chargé — la seule notion de lieu que
+    // le serveur possède, l'application ne lui envoyant aucun nom de commune.
+    lieu: lat !== null && lon !== null ? { lat, lon, zoom: nombre(loc?.zoom) ?? 0 } : null,
+    creeLe: typeof payload?.createdAt === 'string' ? payload.createdAt : '',
+    majLe: typeof payload?.updatedAt === 'string' ? payload.updatedAt : '',
+  }
+}
+
+// Pose (ou rafraîchit) l'entrée d'index d'une carte. TOUJOURS après l'écriture
+// du blob, et TOUJOURS sans droit de veto : un index en panne ne doit pas faire
+// échouer une publication réussie.
+async function noterAuJournalDuCompte(store, uid, raceId, payload) {
+  if (!uid) return
+  try {
+    await store.setJSON(cleIndexProprietaire(uid, raceId), entreeIndex(raceId, payload))
+  } catch (err) {
+    console.error('[race] index de compte non écrit (la carte, elle, est sauve) :', err)
+  }
+}
+
+// Une entrée d'index exploitable, ou null. C'est ici que se filtrent les entrées
+// mortes : clé bricolée ou tronquée, contenu illisible, entrée qui ne parle pas
+// de sa propre clé. On ne fait confiance ni au magasin ni au passé.
+function entreeVivante(cle, prefixe, brut) {
+  const raceId = String(cle).slice(prefixe.length)
+  if (!ID_RE.test(raceId)) return null
+  if (!brut || typeof brut !== 'object' || Array.isArray(brut)) return null
+  if (brut.id !== raceId) return null
+  return {
+    id: raceId,
+    nom: typeof brut.nom === 'string' ? brut.nom : '',
+    lieu: brut.lieu && typeof brut.lieu === 'object' ? brut.lieu : null,
+    creeLe: typeof brut.creeLe === 'string' ? brut.creeLe : '',
+    majLe: typeof brut.majLe === 'string' ? brut.majLe : '',
+  }
+}
+
+// Borne de sortie. Une liste n'est pas un vidage de base : au-delà, l'écran
+// n'affiche plus rien d'utile et la réponse commence à peser.
+const MAX_CARTES_LISTEES = 500
+
+// Le refus de lecture, extrait pour être RIGOUREUSEMENT le même des deux côtés.
+// C'est lui qui traitait déjà correctement le cache — un refus vaut pour une IP
+// à un instant, et une copie partagée le servirait à des innocents.
+function refusLecture(seau) {
+  return jsonResponse({ error: 'trop de lectures depuis cette adresse, réessayez dans un instant' }, 429, {
+    'retry-after': String(delaiRecharge(seau.tokens)),
+    // sans cela le navigateur cache le délai à l'appelant d'une autre origine
+    'access-control-expose-headers': 'retry-after',
+    ...SANS_CACHE,
+  })
+}
+
+// ---- « Mes cartes » --------------------------------------------------------
+//
+// ⚠️ LE PIÈGE QUI COÛTE CHER, ET IL EST ENTIÈREMENT DANS CE QUE CETTE FONCTION
+// NE FAIT PAS. `debiterLecture` plafonne à 1 Gio par IP et par 10 minutes, un
+// chiffre dimensionné pour « un lien, mille lecteurs ». Ici le profil est
+// l'inverse — un lecteur, N cartes de plusieurs mégaoctets : un organisateur qui
+// ouvre sa liste de 40 cartes brûlerait 170 Mo de SON PROPRE budget, et se
+// verrait refuser la lecture de ses propres liens juste après. D'où les
+// métadonnées dans l'entrée d'index, et AUCUN payload ouvert ici — pas même
+// pour vérifier qu'une carte existe encore.
+async function mesCartes(req, store, verifieCompte) {
+  // Le seau de lecture s'applique quand même : cette liste reste des octets sur
+  // le fil, et elle coûte une lecture de magasin par entrée. Elle est
+  // simplement, par construction, mille fois moins chère qu'un payload.
+  const ip = clientIp(req.headers)
+  const seau = await creditLecture(store, ip)
+  if (seau && seau.tokens <= 0) return refusLecture(seau)
+
+  const uid = identifiantCompte(await verifieCompte(req))
+  // ⚠️ TOUT CE QUI SORT D'ICI PART EN no-store, Y COMPRIS CE REFUS. Une réponse
+  // qui dépend d'une session ne doit jamais tomber dans un cache partagé.
+  if (!uid) return jsonResponse({ error: 'connexion requise' }, 401, SANS_CACHE)
+
+  const prefixe = cleIndexProprietaire(uid, '')
+  let cles
+  try {
+    const { blobs } = await store.list({ prefix: prefixe })
+    cles = (blobs || []).map((b) => b.key).slice(0, MAX_CARTES_LISTEES)
+  } catch (err) {
+    console.error('race GET mine blobs error:', err)
+    return jsonResponse({ error: 'storage unavailable' }, 502, SANS_CACHE)
+  }
+
+  const cartes = []
+  for (const cle of cles) {
+    let brut = null
+    try {
+      brut = await store.get(cle, { type: 'json' })
+    } catch {
+      continue // une entrée illisible est une entrée morte, pas une panne
+    }
+    const vivante = entreeVivante(cle, prefixe, brut)
+    if (vivante) cartes.push(vivante)
+  }
+  // Ordre stable et utile par défaut, la plus récente d'abord ; le tri par lieu
+  // ou par date appartient à l'écran, qui a la liste entière sous la main.
+  cartes.sort((a, b) => String(b.creeLe).localeCompare(String(a.creeLe)))
+
+  const corps = JSON.stringify({ ok: true, cartes })
+  await debiterLecture(store, ip, seau, Buffer.byteLength(corps, 'utf8'))
+  return jsonResponse(corps, 200, SANS_CACHE)
+}
+
+// ---- le rattachement : POST /race?claim&id=<id> -----------------------------
+//
+// « J'ai publié cette carte avant d'avoir un compte, et j'ai toujours le jeton. »
+// Le secret voyage dans LE MÊME en-tête et se vérifie par LE MÊME
+// `secretMatches` : rattacher, c'est prouver qu'on pouvait déjà l'éditer.
+//
+// ⚠️ CE QU'IL PROUVE, ET CE QU'IL NE PROUVE PAS. Il prouve la possession d'un
+// JETON, pas une identité. Le courriel du dépôt vitrine contient le secret en
+// clair : quiconque a reçu ce message transféré peut revendiquer. PREMIER
+// ARRIVÉ, PREMIER PROPRIÉTAIRE — d'où le refus net quand la carte appartient
+// déjà à quelqu'un d'autre, plutôt qu'un écrasement silencieux.
+async function rattacher(req, store, url, verifieCompte) {
+  const id = url.searchParams.get('id') || ''
+  if (!ID_RE.test(id)) return jsonResponse({ error: 'bad id' }, 400, SANS_CACHE)
+
+  // Son propre seau : voir RATTACHEMENT_CAP.
+  if (!(await takeToken(store, clientIp(req.headers), Date.now(), 'rlr_', RATTACHEMENT_CAP))) {
+    return jsonResponse({ error: 'trop de rattachements, réessayez dans quelques minutes' }, 429, SANS_CACHE)
+  }
+
+  let blob
+  try {
+    blob = await store.get(id, { type: 'json' })
+  } catch (err) {
+    console.error('race claim blobs error:', err)
+    return jsonResponse({ error: 'storage unavailable' }, 502, SANS_CACHE)
+  }
+  if (!blob) return jsonResponse({ error: 'not found' }, 404, SANS_CACHE)
+
+  // Le jeton d'abord : inutile de déranger Supabase pour quelqu'un qui ne
+  // détient pas le secret. Et un blob d'avant les jetons n'a pas de condensat —
+  // `secretMatches` referme la porte, il ne l'ouvre jamais par défaut.
+  if (!secretMatches(req.headers.get(SECRET_HEADER), blob.secretHash)) {
+    return jsonResponse({ error: 'clé de modification invalide' }, 403, SANS_CACHE)
+  }
+
+  const uid = identifiantCompte(await verifieCompte(req))
+  if (!uid) return jsonResponse({ error: 'connexion requise' }, 401, SANS_CACHE)
+
+  const dejaA = identifiantCompte(blob.ownerId)
+  if (dejaA && dejaA !== uid) return jsonResponse({ error: 'carte déjà rattachée à un autre compte' }, 409, SANS_CACHE)
+
+  // Le blob d'abord, l'index ensuite — toujours (voir la doctrine plus haut).
+  // Rattacher une carte déjà à soi repasse par là sans dommage : c'est aussi ce
+  // qui répare un index perdu.
+  if (!dejaA) {
+    try {
+      await store.setJSON(id, { ...blob, ownerId: uid })
+    } catch (err) {
+      console.error('race claim blobs error:', err)
+      return jsonResponse({ error: 'storage unavailable' }, 502, SANS_CACHE)
+    }
+  }
+  await noterAuJournalDuCompte(store, uid, id, blob)
+
+  return jsonResponse({ ok: true, id }, 200, SANS_CACHE)
+}
+
 // Le magasin est injecté plutôt que construit ici — la fonction Netlify le
 // fournit juste en dessous, les tests un équivalent en mémoire. C'est ce qui
 // rend le chemin d'écriture entier (jeton compris) vérifiable sans réseau.
-export async function handleRace(req, store) {
+//
+// `verifieCompte` est injecté comme le magasin l'est, et pour la même raison :
+// c'est ce qui rend le chemin d'autorisation entier vérifiable sans réseau. En
+// production c'est `compteVerifie`, qui rend '' sans le moindre appel quand
+// aucun jeton n'est présenté — le cas de l'immense majorité des requêtes.
+export async function handleRace(req, store, verifieCompte = compteVerifie) {
   if (req.method === 'OPTIONS') return preflightResponse()
 
   const url = new URL(req.url)
 
   if (req.method === 'GET') {
+    // « MES CARTES » — la seule lecture qui dépend de QUI demande, et non de
+    // l'identifiant demandé. Elle est routée avant tout le reste parce qu'elle
+    // n'a pas d'`id`, et elle ne partage pas les en-têtes de cache du GET
+    // public : voir SANS_CACHE.
+    if (url.searchParams.has('mine')) return mesCartes(req, store, verifieCompte)
+
     const id = url.searchParams.get('id') || ''
     if (!ID_RE.test(id)) return jsonResponse({ error: 'bad id' }, 400)
 
@@ -472,16 +775,7 @@ export async function handleRace(req, store) {
     // refuser. Voir le bloc « limitation de débit en LECTURE » pour l'arbitrage.
     const ip = clientIp(req.headers)
     const seau = await creditLecture(store, ip)
-    if (seau && seau.tokens <= 0) {
-      return jsonResponse({ error: 'trop de lectures depuis cette adresse, réessayez dans un instant' }, 429, {
-        'retry-after': String(delaiRecharge(seau.tokens)),
-        // sans cela le navigateur cache le délai à l'appelant d'une autre origine
-        'access-control-expose-headers': 'retry-after',
-        // un refus ne se met JAMAIS en cache : il vaut pour cette IP à cet
-        // instant, et une copie partagée le servirait à des innocents
-        'cache-control': 'no-store',
-      })
-    }
+    if (seau && seau.tokens <= 0) return refusLecture(seau)
 
     let payload
     try {
@@ -510,6 +804,11 @@ export async function handleRace(req, store) {
 
   if (req.method !== 'POST' && req.method !== 'PUT') return jsonResponse({ error: 'method not allowed' }, 405)
 
+  // LE RATTACHEMENT SE ROUTE AVANT LE SEAU D'ÉCRITURE, et c'est tout l'objet de
+  // sa position ici : il a le sien (RATTACHEMENT_CAP), sans quoi remonter
+  // cinquante cartes s'arrêterait à la treizième.
+  if (req.method === 'POST' && url.searchParams.has('claim')) return rattacher(req, store, url, verifieCompte)
+
   // AVANT de lire le corps : inutile d'ingérer 4 Mo pour les jeter ensuite
   if (!(await takeToken(store, clientIp(req.headers)))) {
     return jsonResponse({ error: 'trop de publications, réessayez dans quelques minutes' }, 429)
@@ -533,7 +832,9 @@ export async function handleRace(req, store) {
     // id, et donc son propre secret, sur une course pas encore publiée.
     if (!existing) return jsonResponse({ error: 'not found' }, 404)
 
-    if (!secretMatches(req.headers.get(SECRET_HEADER), existing.secretHash)) {
+    // LE POINT D'APPEL UNIQUE DE L'AUTORISATION. Il n'y en avait qu'un, il n'y
+    // en a toujours qu'un ; seule la fonction appelée a gagné un second chemin.
+    if (!(await autorise(req, existing, verifieCompte))) {
       return jsonResponse({ error: 'clé de modification invalide' }, 403)
     }
 
@@ -555,6 +856,12 @@ export async function handleRace(req, store) {
       console.error('race PUT blobs error:', err)
       return jsonResponse({ error: 'storage unavailable' }, 502)
     }
+    // L'index se rafraîchit ici — le nom et le lieu ont pu changer — et c'est
+    // au passage ce qui RÉPARE une entrée que la publication n'avait pas réussi
+    // à écrire. Un cache reconstructible se reconstruit à la première occasion.
+    // ⚠️ Le propriétaire vient du BLOB, jamais de la session : corriger une
+    // carte anonyme ne se l'approprie pas.
+    await noterAuJournalDuCompte(store, identifiantCompte(payload.ownerId), id, payload)
     return jsonResponse({ ok: true, id }, 200)
   }
 
@@ -567,13 +874,23 @@ export async function handleRace(req, store) {
   // reconstituer. Au client de le conserver (voir share-link.js).
   const secret = makeSecret()
   const now = new Date().toISOString()
-  const payload = { ...fields, secretHash: hashSecret(secret), createdAt: now, updatedAt: now }
+  // La session, s'il y en a une. Consultée APRÈS la validation du corps : on ne
+  // fait pas payer un aller-retour Supabase à une requête qu'on va refuser.
+  // Publier sans compte reste le cas nominal, et rend '' sans appel réseau.
+  const proprietaire = identifiantCompte(await verifieCompte(req))
+  // `undefined` disparaît à la sérialisation : une carte sans compte sort du
+  // magasin exactement comme avant, sans champ `ownerId` vide qui traînerait.
+  const payload = { ...fields, secretHash: hashSecret(secret), createdAt: now, updatedAt: now, ownerId: proprietaire || undefined }
   try {
     await store.setJSON(id, payload)
   } catch (err) {
     console.error('race POST blobs error:', err)
     return jsonResponse({ error: 'storage unavailable' }, 502)
   }
+  // L'INDEX EN SECOND, ET SANS DROIT DE VETO. La carte est publiée, son lien
+  // est valide ; un index manquant ne coûte qu'une ligne absente d'un panneau,
+  // et se rattrape à la correction suivante.
+  await noterAuJournalDuCompte(store, proprietaire, id, payload)
 
   return jsonResponse({ ok: true, id, secret }, 201)
 }
