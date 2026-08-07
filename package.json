@@ -22,12 +22,13 @@
     "build:emodnet": "node scripts/fetch-emodnet.mjs",
     "build:bathyindex": "node scripts/build-bathy-index.mjs",
     "verifie:dist": "node scripts/verifie-dist.mjs",
-    "deploy": "node scripts/garde-deploiement.mjs && npm run build:mapcells && npm run carte && npx vite build && npm run verifie:dist && netlify deploy --prod --dir dist --site 74e18fe8-c86f-47ad-9807-479cd59f1d8c",
+    "deploy": "node scripts/garde-deploiement.mjs && npm run build:mapcells && npm run carte && npm run nettoie:dist && npx vite build && npm run verifie:dist && netlify deploy --prod --dir dist --site 74e18fe8-c86f-47ad-9807-479cd59f1d8c",
     "cuire:fixtures-relief": "node scripts/cuire-fixtures-relief.mjs",
     "controle:pdf": "node --max-old-space-size=4096 scripts/controle-pdf-affiche.mjs",
     "inspecte:pdf": "node --max-old-space-size=6144 scripts/inspecte-pdf-affiche.mjs",
     "build:volcans": "node scripts/build-volcans.mjs",
-    "carte": "node scripts/carte-ecosysteme.mjs"
+    "carte": "node scripts/carte-ecosysteme.mjs",
+    "nettoie:dist": "node scripts/nettoie-dist.mjs"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "^2.8.1",
