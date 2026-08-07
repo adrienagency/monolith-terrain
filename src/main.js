@@ -134,7 +134,7 @@ import { buildTemplatesPanel } from './ui/templates-panel.js'
 // ⚠️ LE JOUR OÙ `src/compte.js` ARRIVE (écrit en parallèle), c'est la seule
 // ligne à changer dans tout le fichier : remplacer `compteInerte` par l'objet
 // qu'il exporte. Le contrat attendu est écrit en tête de src/ui/compte.js.
-import { compteInerte, porteExport } from './ui/compte.js'
+import { compteInerte, porteExport, buildMesCartesPanel } from './ui/compte.js'
 import { buildFondsPanel, contributeTerrainSections, buildPaletteCreation } from './ui/create-panel.js'
 import { buildStore } from './ui/store.js'
 import { buildStudio } from './ui/studio.js'
@@ -8971,6 +8971,14 @@ const fondsPanel = buildFondsPanel(panelCtx)
 panelCtx.paletteCreation = (host, opts) => buildPaletteCreation(panelCtx, host, opts)
 const templatesPanel = buildTemplatesPanel(panelCtx)
 
+// « Mes cartes » — sous la Bibliothèque dans le rail droit. Le panneau
+// N'EXISTE PAS tant que personne n'est connecté (il se pose `hidden` lui-même),
+// donc pour un visiteur anonyme le rail droit est rigoureusement celui d'hier.
+// « Composer ma première carte » se contente de replier le panneau : composer,
+// c'est avoir la carte sous les yeux, et tous les outils sont déjà là.
+panelCtx.compte = compte
+const mesCartes = buildMesCartesPanel(panelCtx)
+void mesCartes
 
 const { elementsPanel, imagePanel } = buildEffectsPanel({
   params,

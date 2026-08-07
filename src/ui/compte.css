@@ -279,3 +279,129 @@
   cursor: default;
 }
 
+/* ─────────────────────────────────────────────────── C. « Mes cartes » ─── */
+/* Déconnecté, le panneau n'existe pas : `hidden` doit gagner contre le
+   display:flex de .ce-panel, sans quoi le rail droit garderait une carte vide
+   pour un visiteur qui n'a rien demandé. */
+.ce-panel.ce-cartes-panel[hidden] {
+  display: none;
+}
+.ce-cartes-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--ce-gap-control);
+}
+.ce-cartes-ligne {
+  display: block;
+  padding: 8px 9px;
+  border-radius: var(--ce-radius-s);
+  border: 1px solid transparent;
+  color: var(--ce-ink);
+  text-decoration: none;
+}
+a.ce-cartes-ligne:hover,
+a.ce-cartes-ligne:focus-visible {
+  background: var(--ce-hover);
+  border-color: var(--ce-hairline);
+}
+.ce-cartes-nom {
+  display: block;
+  font-size: var(--ce-t-body);
+  font-weight: 600;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* le lieu et la date restent en jeton muet : c'est exactement le rôle que
+   src/ui-theme.js lui garantit (secondaire, ≥ 3:1). Le nom, lui, porte
+   l'encre pleine — c'est par lui qu'on reconnaît sa carte. */
+.ce-cartes-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--ce-t-micro);
+  color: var(--ce-muted);
+}
+.ce-cartes-url {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--ce-mono);
+  font-size: var(--ce-t-micro);
+  color: var(--ce-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+a.ce-cartes-ligne:hover .ce-cartes-url {
+  color: var(--ce-accent);
+}
+
+/* le chargement : trois lignes grises À LA FORME DES VRAIES. Pas de roue —
+   le squelette dit déjà ce qui va arriver, le disque ne dit que « attends ». */
+.ce-cartes-fantome {
+  border-color: var(--ce-hairline);
+  pointer-events: none;
+}
+.ce-cartes-os {
+  display: block;
+  height: 9px;
+  border-radius: var(--ce-radius-xs);
+  background: var(--ce-track);
+  animation: ce-cartes-respire 1.5s ease-in-out infinite;
+}
+.ce-os-nom {
+  width: 68%;
+}
+.ce-os-meta {
+  width: 42%;
+  height: 7px;
+  margin-top: 7px;
+  opacity: 0.7;
+}
+.ce-cartes-fantome:nth-child(2) .ce-cartes-os {
+  animation-delay: 0.12s;
+}
+.ce-cartes-fantome:nth-child(3) .ce-cartes-os {
+  animation-delay: 0.24s;
+}
+@keyframes ce-cartes-respire {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ce-cartes-os {
+    animation: none;
+  }
+}
+
+/* L'ÉTAT VIDE — c'est ce que TOUT LE MONDE voit le premier jour, et il mérite
+   autant de soin que les autres. Il ne s'excuse pas d'être vide : il dit ce
+   qui viendra s'y ranger, et il donne le geste qui l'y met. */
+.ce-cartes-vide {
+  padding: 18px 10px 14px;
+  text-align: center;
+}
+.ce-cartes-vide-titre {
+  margin: 0;
+  font-size: var(--ce-t-body);
+  font-weight: 600;
+  color: var(--ce-ink);
+}
+.ce-cartes-vide-corps {
+  margin: 6px 0 14px;
+  font-size: var(--ce-t-control);
+  line-height: 1.45;
+  color: var(--ce-muted);
+}
+.ce-cartes-vide .ce-btn {
+  width: 100%;
+  height: 36px;
+  background: var(--ce-hover);
+  border-color: var(--ce-hairline);
+}
+.ce-cartes-vide .ce-btn:hover {
+  border-color: var(--ce-accent);
+  color: var(--ce-accent);
+}
+

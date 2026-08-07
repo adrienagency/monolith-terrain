@@ -53,7 +53,8 @@
 // change dans main.js (l'import) — rien ici.
 
 import './compte.css'
-import { el, button } from './kit.js'
+import { el, button, segmented } from './kit.js'
+import { Panel } from './shell.js'
 import { mesurerPlancher } from '../plancher-ui.js'
 
 // ─────────────────────────────────────────────────────── le socle sans compte
@@ -366,5 +367,126 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
 
   etapeAdresse()
   return m
+}
+
+// ═════════════════════════════════════════════════════════ C. MES CARTES ═══
+//
+// Panneau du rail droit. Il N'EXISTE PAS pour un visiteur déconnecté : il naît
+// à la connexion, disparaît à la déconnexion. Un panneau vide qui réclame une
+// identité serait le mur qu'on a promis de ne jamais construire.
+//
+// L'ÉTAT VIDE mérite autant de soin que les autres : c'est ce que TOUT LE
+// MONDE voit le premier jour.
+const ICON_CARTES =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z"/><path d="M9 4v13.5M15 6.5V20"/></svg>'
+
+const DATE_FR = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })
+const quand = (v) => {
+  const d = new Date(v)
+  return Number.isFinite(d.getTime()) ? DATE_FR.format(d) : ''
+}
+
+export function buildMesCartesPanel(ctx) {
+  const compte = ctx.compte ?? compteInerte
+  const panel = new Panel({
+    title: 'Mes cartes',
+    icon: ICON_CARTES,
+    side: 'right',
+    width: 268,
+    cls: 'ce-cartes-panel',
+    tip: 'Les cartes que tu as publiées, avec leur lien.',
+  })
+
+  let tri = 'date'
+  const barreTri = segmented({
+    options: [
+      { label: 'Par date', value: 'date' },
+      { label: 'Par lieu', value: 'lieu' },
+    ],
+    get: () => tri,
+    set: (v) => { tri = v; rendre() },
+  })
+  const liste = el('div', 'ce-cartes-liste')
+  panel.body.append(barreTri, liste)
+
+  let cartes = null // null = pas encore chargé ; [] = chargé et vide
+
+  // Trois lignes grises À LA FORME DES VRAIES, pas une roue qui tourne : le
+  // squelette dit déjà ce qui va arriver, le disque ne dit que « attends ».
+  function squelette() {
+    liste.replaceChildren(...[0, 1, 2].map(() => {
+      const l = el('div', 'ce-cartes-ligne ce-cartes-fantome')
+      l.append(el('span', 'ce-cartes-os ce-os-nom'), el('span', 'ce-cartes-os ce-os-meta'))
+      return l
+    }))
+  }
+
+  function vide() {
+    const bloc = el('div', 'ce-cartes-vide')
+    bloc.append(
+      el('p', 'ce-cartes-vide-titre', 'Tu n’as pas encore publié de carte'),
+      el('p', 'ce-cartes-vide-corps', 'Dès que tu publies une carte, elle apparaît ici — avec son lien, prête à partager.')
+    )
+    const b = button('Composer ma première carte', () => {
+      // composer, c'est avoir la carte sous les yeux : le panneau s'efface
+      panel.setCollapsed(true)
+      ctx.composerPremiereCarte?.()
+    })
+    b.classList.add('ce-compte-primaire')
+    bloc.append(b)
+    liste.replaceChildren(bloc)
+  }
+
+  function ligne(c) {
+    // la ligne ENTIÈRE est le lien : c'est ce qu'on vient y chercher, et un
+    // `<a>` donne gratuitement le clic droit « copier l'adresse du lien », le
+    // clic milieu, l'appui long — qu'un bouton ne donnerait pas
+    const a = el('a', 'ce-cartes-ligne')
+    a.href = c.url || '#'
+    a.target = '_blank'
+    a.rel = 'noopener'
+    a.append(el('span', 'ce-cartes-nom', c.nom || 'Carte sans nom'))
+    const meta = [c.lieu, quand(c.publieeLe)].filter(Boolean).join(' · ')
+    if (meta) a.append(el('span', 'ce-cartes-meta', meta))
+    if (c.url) a.append(el('span', 'ce-cartes-url', c.url.replace(/^https?:\/\//, '')))
+    return a
+  }
+
+  function rendre() {
+    // Trier zéro carte n'est pas un choix : la barre de tri ne s'affiche que
+    // lorsqu'il y a réellement quelque chose à ranger. Un contrôle qui ne
+    // change rien apprend à l'utilisateur que les contrôles ne changent rien.
+    barreTri.style.display = cartes?.length > 1 ? '' : 'none'
+    if (cartes === null) return squelette()
+    if (!cartes.length) return vide()
+    const rangees = [...cartes].sort(tri === 'lieu'
+      ? (a, b) => String(a.lieu ?? '').localeCompare(String(b.lieu ?? ''), 'fr')
+      // par date : la plus récente en tête, c'est celle qu'on vient de publier
+      : (a, b) => new Date(b.publieeLe ?? 0) - new Date(a.publieeLe ?? 0))
+    liste.replaceChildren(...rangees.map(ligne))
+  }
+
+  async function recharger() {
+    cartes = null
+    rendre()
+    try { cartes = (await compte.mesCartes()) ?? [] }
+    catch { cartes = [] } // une liste injoignable se lit comme une liste vide :
+    // l'état vide dit quoi faire, un message d'erreur dans un panneau ne dirait
+    // rien de plus et laisserait le squelette tourner à vide
+    rendre()
+  }
+
+  // présence : le panneau suit la session, sans que personne ait à le penser
+  function majPresence() {
+    const dedans = !!compte.estConnecte?.()
+    panel.root.hidden = !dedans
+    if (dedans) recharger()
+    else { cartes = null; liste.replaceChildren() }
+  }
+  majPresence()
+  compte.surChangement?.(majPresence)
+  ctx.registerCartesRefresh?.(recharger)
+
+  return { panel, recharger }
 }
 
