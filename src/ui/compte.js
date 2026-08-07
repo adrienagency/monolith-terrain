@@ -543,7 +543,13 @@ export function confirmerSuppression(compte, { onFait } = {}) {
   const m = modale('ce-suppr')
   m.carte.append(
     m.titre('Tu veux supprimer ton compte ?'),
-    el('p', 'ce-compte-corps', 'Tes cartes déjà publiées resteront en ligne — leurs liens continuent de fonctionner pour ceux qui les ont. Ce qui disparaît, c’est ton compte, tes gabarits enregistrés et le lien entre eux et toi. C’est définitif.')
+    // ⚠️ CE TEXTE A MENTI, ET C'EST CORRIGÉ. Il annonçait la disparition des
+    // « gabarits enregistrés » — or ils vivent dans le stockage local de CETTE
+    // machine, sans aucun lien avec le compte, et on a délibérément choisi de
+    // ne pas les détruire : effacer sans retour la bibliothèque de quelqu'un
+    // parce qu'il ferme un compte en ligne serait pire que la promesse tenue.
+    // Le texte dit donc maintenant ce que le code fait — dans les deux sens.
+    el('p', 'ce-compte-corps', 'Tes cartes déjà publiées resteront en ligne — leurs liens continuent de fonctionner pour ceux qui les ont. Tes gabarits, eux, sont enregistrés sur cet ordinateur et y restent. Ce qui disparaît, c’est ton compte et le lien entre tes cartes et toi. C’est définitif.')
   )
   const err = el('p', 'ce-compte-err')
   err.setAttribute('role', 'alert')

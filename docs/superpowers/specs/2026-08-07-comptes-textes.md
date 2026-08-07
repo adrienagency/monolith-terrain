@@ -105,7 +105,7 @@ Une section dans la modale de Paramètres, qui existe déjà.
 ### La suppression
 
 **Titre** — Tu veux supprimer ton compte ?
-**Corps** — Tes cartes déjà publiées resteront en ligne — leurs liens continuent de fonctionner pour ceux qui les ont. Ce qui disparaît, c'est ton compte, tes gabarits enregistrés et le lien entre eux et toi. C'est définitif.
+**Corps** — Tes cartes déjà publiées resteront en ligne — leurs liens continuent de fonctionner pour ceux qui les ont. Tes gabarits, eux, sont enregistrés sur cet ordinateur et y restent. Ce qui disparaît, c'est ton compte et le lien entre tes cartes et toi. C'est définitif.
 **Bouton de confirmation** — Supprimer mon compte
 **Bouton d'annulation** — Garder mon compte
 
