@@ -1707,16 +1707,36 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // ⚠️ ET C'EST LE MÊME TABLEAU POUR TOUS LES MATÉRIAUX : three.js compile une
   // variante de shader par NOMBRE de plans, pas par tableau, mais partager
   // l'objet évite de recréer huit `Plane` par matériau à chaque reconstruction.
+  // ⚠️ ET L'EXPOSANT DU COIN EN FAIT PARTIE — l'oublier COUPE LA MER.
+  //
+  // Le nuanceur dessine le coin en SUPERELLIPSE d'exposant `uSlabCornerN`
+  // (2 = arc de cercle, jusqu'à 6 = squircle ; réglage `slabCornerSmoothing`,
+  // 0,6 par défaut, donc 4,4). Un squircle est PLUS PLEIN qu'un cercle : sa
+  // bissectrice va jusqu'à `r·2^(1/2−1/n)` au lieu de `r`. `plansFenetre` sait
+  // le faire depuis le 2026-08-03 (c9b23f6) — mais on ne le lui disait pas, et
+  // son troisième paramètre retombait sur 2. Les quatre plans diagonaux
+  // tombaient donc à 38,670 quand le relief, lui, va jusqu'à 39,136 : le calque
+  // d'eau se faisait trancher d'une CORDE DROITE de 1,8 unité dans chacun des
+  // quatre coins, pendant que le socle et le relief allaient jusqu'au bord.
+  // C'est le défaut « la mer se découpe sans raison, en diagonale » — il ne suit
+  // aucun trait de côte parce que ce n'est pas de la donnée, c'est un plan.
+  // Le manque vaut `r·(2^(1/2−1/n) − 1)`, soit 0,47 unité au réglage par défaut
+  // et jusqu'à 5,8 sur un bloc très arrondi.
+  //
+  // ⚠️ ET IL VA DANS LA CLÉ DE MÉMOÏSATION, pas seulement dans l'appel : sans
+  // lui, bouger la tirette de lissage rendrait les plans d'AVANT, et le défaut
+  // ne se corrigerait qu'au prochain changement de rayon.
   plansFenetre() {
     const fp = this.empriseFootprint()
     if (!fp) return null
     const u = this.mapUniforms
     const half = u.uSlabHalf.value
     const corner = u.uRegionOn.value > 0.5 ? 0 : u.uSlabCorner.value
-    const cle = `${half}:${corner}`
+    const expo = u.uSlabCornerN.value
+    const cle = `${half}:${corner}:${expo}`
     if (this._plansCle !== cle) {
       this._plansCle = cle
-      this._plans = demiPlansFenetre(half, corner).map(
+      this._plans = demiPlansFenetre(half, corner, expo).map(
         (p) => new THREE.Plane(new THREE.Vector3(p.normal[0], p.normal[1], p.normal[2]), p.constant)
       )
     }
