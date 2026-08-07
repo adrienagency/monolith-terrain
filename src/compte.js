@@ -302,7 +302,13 @@ function sessionRelue(brut) {
  * @param {string}   [options.urlConfig]  la route qui rend { url, cle }
  */
 export function creerCompte({
-  apporter = globalThis.fetch,
+  // ⚠️ LIÉ TARD, PAS CAPTURÉ. `apporter = globalThis.fetch` prendrait la
+  // référence AU MOMENT DE LA CONSTRUCTION — c'est-à-dire au démarrage de
+  // l'application, avant tout le reste. Un `fetch` installé après coup (sonde
+  // d'erreurs, instrument de mesure, bouchon de vérification en console) serait
+  // alors contourné en silence par le seul module dont les pannes enferment
+  // quelqu'un dehors. La flèche va chercher le `fetch` du moment, à chaque appel.
+  apporter = (...args) => globalThis.fetch(...args),
   stockage = globalThis.localStorage,
   stockageSession = globalThis.sessionStorage,
   maintenant = Date.now,
