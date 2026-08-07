@@ -129,6 +129,12 @@ import { BlockGrid, GRID_R } from './block-grid.js'
 // la signature d'un carre du damier : ce qui decide si la mer doit se rebatir
 import { cleDuCarre } from './damier-carre.js'
 import { buildTemplatesPanel } from './ui/templates-panel.js'
+// L'interface du compte. `compteInerte` est le socle SANS session : il répond
+// « personne n'est connecté », et ShibuMap tourne exactement comme avant.
+// ⚠️ LE JOUR OÙ `src/compte.js` ARRIVE (écrit en parallèle), c'est la seule
+// ligne à changer dans tout le fichier : remplacer `compteInerte` par l'objet
+// qu'il exporte. Le contrat attendu est écrit en tête de src/ui/compte.js.
+import { compteInerte, porteExport } from './ui/compte.js'
 import { buildFondsPanel, contributeTerrainSections, buildPaletteCreation } from './ui/create-panel.js'
 import { buildStore } from './ui/store.js'
 import { buildStudio } from './ui/studio.js'
@@ -4315,16 +4321,41 @@ function deleteUserTemplate(id) {
   userTemplates = userTemplates.filter((t) => t.id !== id)
   persistUserTemplates()
 }
-function exportUserTemplate(id) {
-  const t = userTemplates.find((x) => x.id === id)
-  if (!t) return
+function telechargeGabarit(t) {
   const blob = new Blob([serializeTemplate(t)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `${t.name.replace(/[^a-z0-9-_]+/gi, '-')}.shibumap-template.json`
+  a.download = `${String(t.name || 'look').replace(/[^a-z0-9-_]+/gi, '-')}.shibumap-template.json`
   a.click()
   setTimeout(() => URL.revokeObjectURL(url), 4000)
+}
+function exportUserTemplate(id) {
+  const t = userTemplates.find((x) => x.id === id)
+  if (!t) return
+  telechargeGabarit(t)
+}
+// « Enregistrer mon gabarit », le bouton de l'avis « Continuer sans compte ».
+// ⚠️ IL NE RANGE RIEN DANS LA BIBLIOTHÈQUE. On a promis un fichier sur SA
+// machine, pas une entrée de plus dans « Mes créations » qu'il n'a pas
+// demandée : sans compte, le fichier EST la sauvegarde, et c'est tout ce qu'on
+// a dit qu'on ferait. Même contenu qu'un export de gabarit ordinaire.
+function telechargerGabaritCourant() {
+  majCarteOmbre()
+  composer.render() // frame fraîche : la vignette doit montrer l'écran
+  const look = captureLook(params)
+  const { strip, shaders } = stripFromLook(look)
+  const nom = String(params.demLocation || '').trim() || 'Mon gabarit'
+  telechargeGabarit({
+    id: `ut_${Date.now().toString(36)}`,
+    name: nom,
+    origine: ORIGINE_MOI,
+    thumb: captureThumbnail(),
+    strip,
+    shaders,
+    view: captureView(camera, controls),
+    look,
+  })
 }
 function importTemplateText(text) {
   const parsed = parseTemplate(text)
@@ -8068,6 +8099,31 @@ async function reprendreApresPaiement() {
   if (etat !== 'paye' && etat !== 'livree' && panier?.affiche) await openAfficheUI(panier.affiche)
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// LE COMPTE — et la porte à l'export
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠️ SHIBUMAP RESTE ENTIÈREMENT UTILISABLE SANS COMPTE. `race.mjs` l'écrit en
+// tête (« public and unauthenticated by design ») ; ici cela veut dire que la
+// porte ci-dessous n'a AUCUN pouvoir de retenue : `onSuite` — l'export réel —
+// part dans les deux branches, et si `porteExport` disparaissait, les trois
+// exports fonctionneraient exactement comme avant.
+const compte = compteInerte
+
+// ⚠️ TROIS EXPORTS, TROIS MOMENTS, UNE SEULE PORTE.
+// L'image et la vidéo passent par `openExportUI` ; l'impression par
+// `openAfficheUI`, qui traverse ensuite le paiement et REVIENT (retourPaiement
+// la rouvre pour pouvoir relancer). C'est pourquoi la porte n'est PAS posée
+// dans ces fonctions : elle est posée sur les entrées que l'utilisateur
+// déclenche (`panelCtx`, palette « K », raccourcis). Le retour de paiement
+// appelle la fonction nue et ne repose donc jamais la question au milieu d'un
+// achat déjà conclu.
+function avecPorteExport(suite) {
+  porteExport(compte, {
+    onSuite: () => { suite() },
+    onEnregistrerGabarit: telechargerGabaritCourant,
+  })
+}
+
 async function openExportUI() {
   const [{ openExportModal }, { Recorder }] = await Promise.all([
     import('./ui/export-modal.js'),
@@ -8334,8 +8390,9 @@ const topBar = buildTopBar({
     const { startTutorial } = await import('./ui/tutorial.js')
     startTutorial()
   },
-  openExport: openExportUI,
-  openAffiche: openAfficheUI,
+  // les deux entrées UTILISATEUR de l'export : elles passent par la porte
+  openExport: () => avecPorteExport(openExportUI),
+  openAffiche: () => avecPorteExport(() => openAfficheUI()),
   // "?" keyboard-shortcuts help — self-updating overlay, reads SHORTCUTS live
   toggleShortcuts: () => shortcutsOverlay.toggle(),
   // ALPHA chip → "What's new" changelog
@@ -8914,6 +8971,7 @@ const fondsPanel = buildFondsPanel(panelCtx)
 panelCtx.paletteCreation = (host, opts) => buildPaletteCreation(panelCtx, host, opts)
 const templatesPanel = buildTemplatesPanel(panelCtx)
 
+
 const { elementsPanel, imagePanel } = buildEffectsPanel({
   params,
   exposureFx, contrastFx, hueSat, vignette, grain,
@@ -9136,7 +9194,7 @@ if (!IS_EMBED) {
       { label: 'Ouvrir le Studio (habiller ma carte)', run: () => panelCtx.openAtelier?.() },
       { label: 'Ouvrir le Race Studio (ma course)', run: () => panelCtx.openStudio?.() },
       { label: 'Boutique de templates', run: () => panelCtx.openStore?.() },
-      { label: 'Exporter une image ou une vidéo', run: () => openExportUI() },
+      { label: 'Exporter une image ou une vidéo', run: () => avecPorteExport(openExportUI) },
       { label: 'Réinitialiser la carte', run: () => { resetAll(); refreshAll() } },
     ],
   })
@@ -9369,7 +9427,7 @@ const shortcutsCtx = {
   // un SEUL câblage pour les trois entrées (« / », hub, palette) : bars.js
   // détient le champ et sait le rouvrir quand il est replié (mode Parcours)
   focusSearch,
-  openExport: () => openExportUI(),
+  openExport: () => avecPorteExport(openExportUI),
   toggleLayer,
   toggleRegion,
 }

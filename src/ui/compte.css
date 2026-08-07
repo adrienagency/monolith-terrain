@@ -57,6 +57,129 @@
   height: 36px;
 }
 
+/* ─────────────────────────────────────────────────────── A. la porte ───── */
+/* 400 px plutôt que les 340 de l'export, et la valeur est MESURÉE, pas choisie.
+   ⚠️ `.ce-modal` est en `content-box` : `width` désigne le CONTENU, la marge
+   intérieure de 18 px s'ajoute par-dessus. « Continuer sans compte » réclame
+   186 px de contenu minimum à ce corps ; à 340 (× 2 + 8 de gouttière = 380) le
+   second bouton débordait de la carte par la droite — pile celui qui ne doit
+   surtout pas avoir l'air d'un rebut. À 400, chaque bouton reçoit 196 px et il
+   reste 10 px de jeu. Vu à l'écran, pas à la relecture. */
+.ce-modal.ce-porte {
+  width: min(400px, calc(100vw - 72px));
+}
+
+/* ⚠️ LE POINT LE PLUS IMPORTANT DE TOUT CET ÉCRAN.
+   Les deux sorties ont le MÊME poids visuel : même hauteur, même largeur (elles
+   se partagent la place à parts égales, la largeur ne suit donc PAS la longueur
+   du libellé), même fond, même bordure, même graisse, même rayon. Ni accent, ni
+   fantôme, ni lien gris. Seul le libellé distingue les deux — vérifié à
+   l'écran : 196 × 44 chacune, au pixel près.
+   Ne réintroduisez PAS `.accent` sur « Créer mon compte » : c'est le réflexe
+   du métier, et c'est exactement ce qu'Adrien interdit. */
+/* `wrap` + une base de 140 px : le filet de sécurité. Si un jour un libellé
+   s'allonge, une police tombe en repli plus large ou l'écran se resserre, les
+   deux boutons passent l'un SOUS l'autre en pleine largeur — toujours
+   identiques — au lieu de déborder de la carte. L'égalité survit à la casse. */
+.ce-porte-choix {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+.ce-porte-choix .ce-porte-btn {
+  flex: 1 1 140px;
+  height: 44px;
+  padding: 0 10px;
+  background: var(--ce-hover);
+  border-color: var(--ce-hairline);
+  text-align: center;
+  white-space: nowrap;
+}
+.ce-porte-choix .ce-porte-btn:hover {
+  border-color: var(--ce-accent);
+  color: var(--ce-accent);
+  background: var(--ce-hover);
+}
+/* ⚠️ LE FOCUS NE TEINTE PAS, IL ENTOURE. Un anneau d'accent sur « Créer mon
+   compte » à l'ouverture (le focus clavier s'y posait) désignait un gagnant
+   avant même qu'on ait lu la question — l'égalité durait le temps d'une
+   capture d'écran. L'anneau est donc en encre, neutre : il dit « le clavier
+   est ici », pas « c'est celui-là qu'il faut prendre ». Le survol, lui, peut
+   accentuer : c'est la main de l'utilisateur qui l'a provoqué. */
+.ce-porte-choix .ce-porte-btn:focus-visible {
+  outline: 2px solid var(--ce-ink);
+  outline-offset: 2px;
+}
+/* écran étroit : les deux boutons s'empilent, et restent identiques */
+@media (max-width: 420px) {
+  .ce-porte-choix {
+    flex-direction: column;
+  }
+}
+
+/* ── l'avis après « Continuer sans compte » ─────────────────────────────── */
+/* Un message, pas une modale de plus. Même plancher que le toast et la carte
+   de livraison (--ce-plancher-ui, mesuré à l'affichage), et il ATTEND : il
+   porte un bouton, donc il ne peut ni s'effacer seul ni ignorer les clics. */
+.ce-compte-avis {
+  position: fixed;
+  left: 50%;
+  bottom: var(--ce-plancher-ui, 34px);
+  transform: translate(-50%, 12px);
+  z-index: 96;
+  max-width: min(88vw, 380px);
+  padding: 14px 18px 12px;
+  border-radius: var(--ce-radius);
+  background: var(--ce-glass-strong);
+  border: 1px solid var(--ce-border);
+  box-shadow: var(--ce-shadow);
+  backdrop-filter: blur(16px);
+  font-family: var(--ce-font);
+  color: var(--ce-ink);
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.3s, transform 0.3s;
+}
+.ce-compte-avis.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.ce-compte-avis-texte {
+  margin: 0;
+  font-size: var(--ce-t-body);
+  line-height: 1.45;
+}
+.ce-compte-avis-btn.ce-btn {
+  height: 36px;
+  margin-top: 12px;
+  background: var(--ce-hover);
+  border-color: var(--ce-hairline);
+}
+.ce-compte-avis-btn.ce-btn:hover {
+  border-color: var(--ce-accent);
+  color: var(--ce-accent);
+}
+.ce-compte-avis-x {
+  display: block;
+  margin: 8px auto 0;
+  padding: 2px 8px;
+  border: 0;
+  background: none;
+  color: var(--ce-muted);
+  font-family: var(--ce-font);
+  font-size: var(--ce-t-micro);
+  cursor: pointer;
+}
+.ce-compte-avis-x:hover {
+  color: var(--ce-ink);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ce-compte-avis {
+    transition: none;
+  }
+}
+
 /* ─────────────────────────────────────────────────── B. la connexion ───── */
 /* `- 72px` et non `- 32px` : content-box, donc il faut défalquer les 36 px de
    marge intérieure et les 2 px de bordure en plus des 32 px de marge d'écran,

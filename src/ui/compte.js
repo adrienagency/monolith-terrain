@@ -54,6 +54,7 @@
 
 import './compte.css'
 import { el, button } from './kit.js'
+import { mesurerPlancher } from '../plancher-ui.js'
 
 // ─────────────────────────────────────────────────────── le socle sans compte
 // Un objet nul complet, pas un `null` : le reste du fichier n'a alors AUCUNE
@@ -136,6 +137,108 @@ function modale(cls, { onClose } = {}) {
     return h
   }
   return { veil, carte, close, titre }
+}
+
+// ═════════════════════════════════════════════════ A. LA PORTE À L'EXPORT ═══
+//
+// LE MOMENT LE PLUS DÉLICAT DU PRODUIT. Quelqu'un vient de passer vingt
+// minutes sur sa carte et veut son fichier. Ce n'est pas le moment de lui
+// présenter une facture déguisée.
+//
+// ⚠️ LES DEUX SORTIES ONT LE MÊME POIDS VISUEL, et c'est le point le plus
+// important de tout cet écran. D'où le choix de dessin : les deux boutons sont
+// LE MÊME bouton — même hauteur, même largeur (flex: 1), même fond, même
+// bordure, même graisse. Aucun n'est accentué, aucun n'est fantôme. Seul le
+// libellé les distingue, parce que c'est le libellé qui porte le choix.
+//
+// Le réflexe du métier serait de mettre l'accent orange sur « Créer mon
+// compte » et de laisser l'autre en lien gris. C'est précisément ce qu'Adrien
+// interdit : « quelqu'un qui passe outre ne doit pas se sentir puni ».
+//
+// `onSuite` part TOUJOURS. La porte informe, elle ne retient jamais.
+//
+// ⚠️ ELLE NE SE POSE QU'UNE FOIS PAR SESSION. Qui exporte cinq images d'affilée
+// a répondu à la question à la première : la reposer quatre fois de plus n'est
+// plus une invitation, c'est du harcèlement, et c'est ainsi qu'une porte
+// ouverte finit par se lire comme un mur. La réponse ne persiste pas d'une
+// visite à l'autre — on n'écrit rien sur la machine de quelqu'un pour ça.
+let porteRepondue = false
+export const reinitialisePorte = () => { porteRepondue = false } // pour les bancs d'essai
+
+export function porteExport(compte, { onSuite, onEnregistrerGabarit, onConnexion } = {}) {
+  // déjà connecté, ou déjà répondu : il n'y a rien à demander, l'export part
+  if (compte?.estConnecte?.() || porteRepondue) { onSuite?.(); return null }
+
+  // Échap ou clic à côté N'EST PAS une réponse : rien ne part, et la question
+  // reste posée pour la prochaine fois. Seuls les deux boutons répondent.
+  const m = modale('ce-porte')
+  m.carte.append(
+    m.titre('Tu veux qu’on garde ta carte ?'),
+    el('p', 'ce-compte-corps', 'Avec un compte, tu la retrouves ici la prochaine fois : ton tracé, tes couleurs, tes réglages. Sans compte, l’export part quand même — mais rien n’est gardé de notre côté.')
+  )
+
+  const choix = el('div', 'ce-porte-choix')
+  const creer = button('Créer mon compte', () => {
+    porteRepondue = true
+    m.close()
+    // La connexion est le MÊME écran que la création : un code à six chiffres
+    // sur une adresse inconnue crée le compte, sur une adresse connue ouvre la
+    // session. Il n'y a rien à distinguer, donc rien à choisir.
+    ouvrirConnexion(compte, {
+      onConnecte: () => onSuite?.(),
+      // renoncer à la connexion ne renonce pas à l'export : c'est le sens même
+      // de la porte, et l'oublier ici reconstruirait le mur par la bande
+      onAbandon: () => onSuite?.(),
+    })
+    onConnexion?.()
+  })
+  const sans = button('Continuer sans compte', () => {
+    porteRepondue = true
+    m.close()
+    onSuite?.()
+    avisSansCompte({ onEnregistrerGabarit })
+  })
+  for (const b of [creer, sans]) b.classList.add('ce-porte-btn')
+  choix.append(creer, sans)
+  m.carte.append(choix)
+  // ⚠️ ON POSE LE FOCUS SUR LA CARTE, PAS SUR UN BOUTON. Le mettre sur « Créer
+  // mon compte » désignait un gagnant avant même qu'on ait lu la question.
+  // Ici le clavier reste opérant (Échap ferme, Tab atteint les deux boutons
+  // dans l'ordre) sans que l'écran ait choisi à la place de personne.
+  m.carte.tabIndex = -1
+  m.carte.focus()
+  return m
+}
+
+// ────────────────────────────── l'avis après « Continuer sans compte »
+// « Un message, pas une modale de plus » (le document). Il se pose en bas, sur
+// le même plancher que le toast et la carte de livraison, et il ATTEND : il ne
+// s'efface pas tout seul, parce qu'il porte un bouton.
+//
+// ⚠️ CE BOUTON N'EST PAS DÉCORATIF. C'est la seule chose qui rende
+// l'avertissement honnête : prévenir sans donner le moyen d'agir, c'est se
+// couvrir, pas aider.
+export function avisSansCompte({ onEnregistrerGabarit } = {}) {
+  document.querySelector('.ce-compte-avis')?.remove()
+  mesurerPlancher()
+  const carte = el('div', 'ce-compte-avis')
+  carte.setAttribute('role', 'status')
+  carte.setAttribute('aria-live', 'polite')
+  carte.append(el('p', 'ce-compte-avis-texte', 'Ton export est en route. Pense à enregistrer ton gabarit sur ton ordinateur : sans compte, ShibuMap ne le garde pas.'))
+  const enregistrer = button('Enregistrer mon gabarit', () => {
+    onEnregistrerGabarit?.()
+    // le libellé change APRÈS le clic, comme la carte de livraison : la carte
+    // reste, pour un second enregistrement
+    enregistrer.textContent = 'Enregistrer à nouveau'
+  })
+  enregistrer.classList.add('ce-compte-avis-btn')
+  const fermer = el('button', 'ce-compte-avis-x', 'Fermer')
+  fermer.type = 'button'
+  fermer.addEventListener('click', () => carte.remove())
+  carte.append(enregistrer, fermer)
+  document.body.append(carte)
+  requestAnimationFrame(() => carte.classList.add('show'))
+  return carte
 }
 
 // ═══════════════════════════════════════════════════════ B. LA CONNEXION ═══
