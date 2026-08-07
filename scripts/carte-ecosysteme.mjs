@@ -93,7 +93,11 @@ const PRESTATAIRES = [
   { nom: 'Netlify', role: 'hébergement, fonctions, magasin, diffusion mondiale', cout: '20 $/mois (Pro)', etat: 'en service' },
   { nom: 'Stripe', role: 'encaissement, factures, fiches clients', cout: 'à la commission', etat: 'en service, mode réel' },
   { nom: 'Resend', role: 'courriels transactionnels', cout: 'offre gratuite', etat: 'en service, domaine authentifié' },
-  { nom: 'Supabase', role: 'comptes et données utilisateurs', cout: '25 $/mois (Pro)', etat: 'à ouvrir — bloque toute la Phase 1' },
+  // ⚠️ Le plan GRATUIT met un projet en pause après une semaine sans activité,
+  // et un projet en pause, c'est plus personne qui peut se connecter. Tant
+  // qu'on développe il ne dormira pas ; le passage en Pro doit être fait AVANT
+  // le premier vrai utilisateur, pas après.
+  { nom: 'Supabase', role: 'comptes et données utilisateurs — région Paris (eu-west-3)', cout: 'gratuit, à passer en Pro (25 $/mois) avant les vrais comptes', etat: 'projet ouvert, authentification à câbler' },
 ]
 
 const ARGENT = [

@@ -54,9 +54,9 @@
     },
     {
       "nom": "Supabase",
-      "role": "comptes et données utilisateurs",
-      "cout": "25 $/mois (Pro)",
-      "etat": "à ouvrir — bloque toute la Phase 1"
+      "role": "comptes et données utilisateurs — région Paris (eu-west-3)",
+      "cout": "gratuit, à passer en Pro (25 $/mois) avant les vrais comptes",
+      "etat": "projet ouvert, authentification à câbler"
     }
   ],
   "argent": [
@@ -407,8 +407,8 @@
     }
   ],
   "tests": {
-    "listes": 166,
-    "surDisque": 166,
+    "listes": 167,
+    "surDisque": 167,
     "orphelins": [],
     "fantomes": []
   }
