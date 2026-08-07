@@ -1,0 +1,158 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   L'INTERFACE DU COMPTE — habillage
+   ══════════════════════════════════════════════════════════════════════════
+
+   AUCUN JETON N'EST DÉCLARÉ ICI. Pas une couleur, pas une police, pas un
+   rayon : tout vient des variables --ce-* de v28.css, qui basculent déjà
+   toutes seules en mode sombre (body.dark). Un écran de compte qui ne
+   ressemble pas au reste de ShibuMap est un écran raté, même s'il est beau.
+
+   Les classes de base (.ce-modal, .ce-glassbox, .ce-btn, .ce-section,
+   .ce-panel) font le gros du travail. Ce fichier ne fait que trois choses :
+   élargir deux modales, poser les champs de saisie, et dessiner les lignes de
+   « Mes cartes ». */
+
+/* ─────────────────────────────────────────────────── la coquille commune ── */
+/* ⚠️ CHAQUE RÈGLE QUI REDÉFINIT UNE CLASSE DE v28.css EST DOUBLÉE DE SA CLASSE
+   D'ORIGINE (`.ce-modal-veil.ce-compte-veil`, et non `.ce-compte-veil` seul).
+   Ce n'est pas de la coquetterie : Vite injecte v28.css EN DERNIER, donc à
+   spécificité égale c'est lui qui gagne, toujours. Écrite simplement, la ligne
+   de z-index ci-dessous était muette — la confirmation de suppression naissait
+   DERRIÈRE la modale des Paramètres (z-index 235) et le clic ne montrait rien.
+   Trouvé à l'écran, pas à la relecture. Ne dé-doublez pas ces sélecteurs.
+
+   Le voile de l'export vit en 90 ; celui du compte passe au-dessus des panneaux
+   ET des Paramètres, puisque « Supprimer mon compte » s'ouvre depuis eux. */
+.ce-modal-veil.ce-compte-veil {
+  z-index: 240;
+}
+.ce-compte-veil .ce-modal {
+  color: var(--ce-ink);
+}
+/* ⚠️ `--ce-ink`, PAS `--ce-muted`, ET CE N'EST PAS UN CAPRICE.
+   src/ui-theme.js garantit deux planchers par construction, et les teste
+   (test/ui-theme.test.js) : l'encre pleine à 4,5:1 contre le verre, l'encre
+   muette à 3:1 — « texte secondaire / large », dit le fichier. Ce paragraphe
+   n'est pas secondaire : c'est l'argument entier de l'écran, celui sur lequel
+   se joue le choix entre les deux boutons. Il relève donc du jeton à 4,5:1.
+   Mesuré au passage sur la palette de La Réunion : le muet y tombait à 3,77,
+   soit sous le seuil AA du corps de texte. */
+.ce-compte-corps {
+  margin: 0;
+  font-size: var(--ce-t-body);
+  line-height: 1.5;
+  color: var(--ce-ink);
+}
+.ce-compte-corps b {
+  color: var(--ce-ink);
+  font-weight: 600;
+}
+.ce-compte-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+.ce-compte-primaire,
+.ce-compte-actions .ce-btn {
+  height: 36px;
+}
+
+/* ─────────────────────────────────────────────────── B. la connexion ───── */
+/* `- 72px` et non `- 32px` : content-box, donc il faut défalquer les 36 px de
+   marge intérieure et les 2 px de bordure en plus des 32 px de marge d'écran,
+   sinon la carte déborde du téléphone au lieu de s'y ranger. */
+.ce-modal.ce-cnx {
+  width: min(360px, calc(100vw - 72px));
+}
+/* libellé AU-DESSUS du champ (jamais un texte de substitution qui disparaît à
+   la saisie) — le <label> enveloppe l'entrée, donc le clic sur le mot donne
+   le focus sans qu'il faille apparier un `for` et un `id`. */
+.ce-compte-champ {
+  display: block;
+  margin-top: 14px;
+}
+.ce-compte-lab {
+  display: block;
+  margin-bottom: var(--ce-gap-tight);
+  font-size: var(--ce-t-micro);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ce-muted);
+}
+.ce-compte-input {
+  width: 100%;
+  height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--ce-hairline);
+  border-radius: var(--ce-radius-s);
+  background: var(--ce-hover);
+  color: var(--ce-ink);
+  font-family: var(--ce-font);
+  font-size: var(--ce-t-body);
+  outline: none;
+}
+/* l'exemple d'adresse ne porte AUCUNE information : le libellé au-dessus dit
+   déjà quoi taper. Il peut donc rester en jeton muet sans rien coûter. */
+.ce-compte-input::placeholder {
+  color: var(--ce-muted);
+}
+.ce-compte-input:focus {
+  border-color: var(--ce-accent);
+}
+/* les six chiffres se lisent un par un : mono, très espacé, gros. On les
+   recopie depuis un message reçu, souvent sur un autre appareil. */
+.ce-compte-code {
+  height: 48px;
+  font-family: var(--ce-mono);
+  font-size: var(--ce-t-num);
+  font-weight: 600;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  text-align: center;
+}
+/* UN REFUS SE LIT, IL NE CLIGNOTE PAS. Il dit ce qui s'est passé puis quoi
+   faire — donc deux lignes, en pleine encre.
+   ⚠️ L'accent NE PORTE PAS le texte : #ea580c sur le verre clair plafonne à
+   3,35:1, sous le seuil AA, et c'est le message qu'il faut lire le plus
+   sûrement de tout l'écran. Le signal passe par le FILET latéral et le fond
+   teinté — exactement la grammaire de `.ce-warn` (v28.css), rebranchée sur
+   --ce-accent pour qu'elle suive le thème. */
+.ce-compte-err {
+  margin: var(--ce-gap-tight) 0 0;
+  padding: 5px 0 5px 8px;
+  border-left: 2px solid var(--ce-accent);
+  border-radius: var(--ce-radius-xs);
+  background: color-mix(in srgb, var(--ce-accent) 8%, transparent);
+  font-size: var(--ce-t-control);
+  line-height: 1.4;
+  color: var(--ce-ink);
+}
+.ce-compte-err:empty {
+  display: none;
+}
+.ce-compte-liens {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 12px;
+}
+.ce-compte-lien {
+  border: 0;
+  background: none;
+  padding: 2px 0;
+  color: var(--ce-muted);
+  font-family: var(--ce-font);
+  font-size: var(--ce-t-control);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.ce-compte-lien:hover:not(:disabled) {
+  color: var(--ce-accent);
+}
+.ce-compte-lien:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
