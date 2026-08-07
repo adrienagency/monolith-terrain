@@ -111,7 +111,7 @@ test('un courriel invalide ne fait partir AUCUNE requête', async () => {
   const c = creerCompte({ apporter, stockage: stockage() })
   const r = await c.demanderCode('pas-une-adresse')
   assert.equal(r.ok, false)
-  assert.equal(r.raison, 'courriel')
+  assert.equal(r.raison, 'adresse-invalide')
   assert.ok(r.erreur.length > 10, 'un message prêt à afficher, en français')
   assert.equal(apporter.appels.length, 0)
 })
@@ -121,7 +121,9 @@ test('un code de mauvaise forme ne fait partir AUCUNE requête', async () => {
   const c = creerCompte({ apporter, stockage: stockage() })
   const r = await c.verifierCode(COURRIEL, '12')
   assert.equal(r.ok, false)
-  assert.equal(r.raison, 'code')
+  // Un code de mauvaise FORME et un code que Supabase refuse portent le même
+  // code de refus : c'est le même geste à l'écran, recompter les six chiffres.
+  assert.equal(r.raison, 'code-faux')
   assert.equal(apporter.appels.length, 0)
 })
 
@@ -157,7 +159,7 @@ test('une configuration absente donne un refus lisible, pas une exception', asyn
   const c = creerCompte({ apporter, stockage: stockage() })
   const r = await c.demanderCode(COURRIEL)
   assert.equal(r.ok, false)
-  assert.equal(r.raison, 'configuration')
+  assert.equal(r.raison, 'injoignable')
   assert.match(r.erreur, /connexion/i)
 })
 
@@ -168,7 +170,7 @@ test('⚠️ une configuration détournée vers un hôte non-https est refusée 
   const c = creerCompte({ apporter, stockage: stockage() })
   const r = await c.demanderCode(COURRIEL)
   assert.equal(r.ok, false)
-  assert.equal(r.raison, 'configuration')
+  assert.equal(r.raison, 'injoignable')
   assert.equal(apporter.vers('ailleurs.example').length, 0, 'rien ne doit partir là-bas')
 })
 
@@ -206,7 +208,8 @@ test('réseau coupé : un refus, jamais une exception', async () => {
   const c = creerCompte({ apporter, stockage: stockage() })
   const r = await c.demanderCode(COURRIEL)
   assert.equal(r.ok, false)
-  assert.equal(r.raison, 'reseau')
+  assert.equal(r.raison, 'injoignable')
+  assert.match(r.erreur, /connexion/i, 'le TEXTE nuance ce que le code ne dit pas')
 })
 
 // ═══════════ LA VÉRIFICATION DU CODE ════════════════════════════════════════
@@ -254,7 +257,7 @@ test('chaque refus a SON message : code faux, code expiré, trop d’essais', as
     [401, { error_code: 'invalid_credentials', msg: 'Invalid login credentials' }, 'code-faux'],
     [400, { msg: 'Invalid token' }, 'code-faux'],
     [429, { msg: 'Too many requests' }, 'trop-essais'],
-    [500, { msg: 'Internal error' }, 'indisponible'],
+    [500, { msg: 'Internal error' }, 'injoignable'],
   ]
   const vus = new Set()
   for (const [statut, erreur, raison] of cas) {
@@ -272,10 +275,27 @@ test('chaque refus a SON message : code faux, code expiré, trop d’essais', as
 
 test('messageRefus distingue l’envoi de la vérification', () => {
   const envoi = messageRefus(400, { msg: 'Unable to validate email address' }, 'envoi')
-  assert.equal(envoi.raison, 'courriel')
+  assert.equal(envoi.raison, 'envoi-impossible')
   const verif = messageRefus(400, { msg: 'Invalid token' }, 'verification')
   assert.equal(verif.raison, 'code-faux')
   assert.notEqual(envoi.erreur, verif.erreur)
+})
+
+// ⚠️ LE DÉFAUT CORRIGÉ LE 2026-08-08, ÉPINGLÉ ICI POUR QU'IL NE REVIENNE PAS.
+// Une adresse mal formée (aucun réseau) et un refus d'ENVOI (l'adresse est
+// bonne, le message n'est pas parti) partageaient le code `courriel`. Deux
+// gestes opposés sous un seul nom : l'écran ne pouvait plus choisir son texte,
+// et disait « vérifie ton adresse » à quelqu'un dont l'adresse était parfaite.
+test('⚠️ adresse mal formée et refus d’envoi ne portent PAS le même code', async () => {
+  const mal = await creerCompte({ apporter: faux(), stockage: stockage() }).demanderCode('pas-une-adresse')
+  const refuse = await creerCompte({
+    apporter: faux({ '/auth/v1/otp': () => [400, { msg: 'Error sending confirmation email' }] }),
+    stockage: stockage(),
+  }).demanderCode(COURRIEL)
+
+  assert.equal(mal.raison, 'adresse-invalide')
+  assert.equal(refuse.raison, 'envoi-impossible')
+  assert.notEqual(mal.raison, refuse.raison)
 })
 
 // ═══════════ LA SESSION SURVIT AU RECHARGEMENT ══════════════════════════════

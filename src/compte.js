@@ -143,17 +143,53 @@ function urlSupabaseValide(brut) {
 // D'INTERFACE : « Token has expired or is invalid » mélange deux causes qui
 // demandent deux gestes différents (redemander un code / recompter les
 // chiffres). C'est ici qu'on tranche, une fois, pour tout le monde.
+//
+// ═══════════════════════════════════════════════════════════════════════════
+// UN CODE, UN SENS — LA RÈGLE, ET LE DÉFAUT QU'ELLE VIENT DE CORRIGER
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Une version de cette table portait un code `courriel` émis pour DEUX choses
+// différentes : une adresse mal formée (détectée ici, sans réseau) et un refus
+// d'ENVOI venu de Supabase (l'adresse est bonne, le message n'est pas parti).
+// Ce sont deux gestes opposés — corriger sa saisie / attendre et réessayer — et
+// l'interface a bien DEUX textes pour eux (`adresse-invalide`,
+// `envoi-impossible`). Un seul code pour les deux rendait le choix impossible
+// depuis l'écran : quelqu'un lisait « vérifie ton adresse » alors que son
+// adresse était parfaite.
+//
+// D'où la règle, et elle vaut pour tout code ajouté ici plus tard :
+//   · un code désigne UNE cause et UN geste à faire ;
+//   · le TEXTE peut nuancer (voir MSG_RESEAU / MSG_CONFIGURATION plus bas) ;
+//   · l'ensemble des codes émis ici est EXACTEMENT celui de la table `REFUS`
+//     de src/ui/compte.js — test/comptes-cohesion.test.js échoue si l'un des
+//     deux déborde. Ajouter un code sans son texte n'est plus possible en
+//     silence.
+//
+// À l'inverse, `injoignable` couvre trois situations (réseau coupé, Supabase en
+// 5xx, comptes non configurés) et ce n'est PAS une entorse : c'est une seule
+// cause du point de vue de qui regarde l'écran — le service de comptes ne
+// répond pas — et un seul geste : réessayer plus tard. Le détail voyage dans le
+// message, pas dans le code.
 
 const MESSAGES = {
   'code-faux': 'Ce code ne correspond pas. Vérifie les six chiffres, ou demande-en un nouveau.',
   'code-expire': 'Ce code a expiré — ils ne valent qu’une heure. Demande-en un nouveau, il arrive dans la minute.',
   'trop-essais': 'Trop de tentatives d’affilée. Attends une minute avant d’en redemander un.',
-  courriel: 'Cette adresse a été refusée. Vérifie qu’elle est bien écrite.',
-  code: 'Le code fait six chiffres. Recopie-le tel qu’il est dans le courriel.',
-  reseau: 'Impossible de joindre le service pour l’instant. Vérifie ta connexion, puis réessaie.',
-  indisponible: 'Le service de comptes ne répond pas. Réessaie dans un moment — ShibuMap s’utilise sans compte en attendant.',
-  configuration: 'La connexion aux comptes n’est pas disponible pour l’instant. ShibuMap fonctionne sans, tout est là.',
+  'adresse-invalide': 'Cette adresse ne ressemble pas à une adresse de courriel.',
+  'envoi-impossible': 'Le code n’a pas pu partir. Réessaie dans un instant — ce n’est pas ton adresse qui est en cause.',
+  injoignable: 'Le service de comptes ne répond pas. Réessaie dans un moment — ShibuMap s’utilise sans compte en attendant.',
 }
+
+// Deux nuances d'`injoignable`. Elles vivent HORS de `MESSAGES` exprès : ce ne
+// sont pas des codes, et rien ne doit pouvoir les prendre pour tels — ni un
+// écran, ni le test de cohésion.
+const MSG_RESEAU = 'Impossible de joindre le service pour l’instant. Vérifie ta connexion, puis réessaie.'
+const MSG_CONFIGURATION = 'La connexion aux comptes n’est pas disponible pour l’instant. ShibuMap fonctionne sans, tout est là.'
+
+/** Les codes que ce module peut émettre — la liste, en toutes lettres.
+ *  Elle sert de garde de lecture ; le test de cohésion, lui, relit la SOURCE
+ *  (une constante exportée qu'on oublie de mettre à jour ne prouve rien). */
+export const CODES_REFUS = Object.freeze(Object.keys(MESSAGES))
 
 const refus = (raison, erreur) => ({ ok: false, raison, erreur: erreur || MESSAGES[raison] })
 
@@ -175,9 +211,12 @@ export function messageRefus(statut, corps, etape = 'verification') {
     const s = /after (\d+) second/i.exec(texte)
     return refus('trop-essais', s ? `Trop de demandes. Réessaie dans ${s[1]} secondes.` : MESSAGES['trop-essais'])
   }
-  if (statut >= 500) return refus('indisponible')
-  // Un refus à l'ENVOI ne parle jamais du code : il n'y en a pas encore.
-  if (etape === 'envoi') return refus('courriel')
+  if (statut >= 500) return refus('injoignable')
+  // ⚠️ UN REFUS À L'ENVOI NE PARLE JAMAIS DE L'ADRESSE. Il n'y a pas encore de
+  // code, et l'adresse a DÉJÀ passé `courrielValide` avant que cette requête ne
+  // parte : ce qui a échoué, c'est l'envoi. Dire « vérifie ton adresse » à
+  // quelqu'un dont l'adresse est bonne l'envoie corriger ce qui marche.
+  if (etape === 'envoi') return refus('envoi-impossible')
   if (/expired/i.test(`${code} ${texte}`)) return refus('code-expire')
   return refus('code-faux')
 }
@@ -315,7 +354,7 @@ export function creerCompte({
       try {
         rep = await apporter(urlConfig, { headers: { accept: 'application/json' } })
       } catch {
-        return refus('reseau')
+        return refus('injoignable', MSG_RESEAU)
       }
       let corps = null
       try {
@@ -323,12 +362,12 @@ export function creerCompte({
       } catch {
         corps = null
       }
-      if (!rep.ok || !corps?.ok) return refus('configuration')
+      if (!rep.ok || !corps?.ok) return refus('injoignable', MSG_CONFIGURATION)
       const url = String(corps.url || '').replace(/\/$/, '')
       const cle = String(corps.cle || '')
       // ⚠️ Défense en profondeur : la fonction serveur valide déjà, mais c'est
       // CE navigateur qui va poster un courriel à cette adresse.
-      if (!urlSupabaseValide(url) || !cle || cle.length > 512) return refus('configuration')
+      if (!urlSupabaseValide(url) || !cle || cle.length > 512) return refus('injoignable', MSG_CONFIGURATION)
       config = { url, cle }
       return { ok: true, url, cle }
     })().finally(() => {
@@ -365,13 +404,11 @@ export function creerCompte({
   // ── L'envoi du code ───────────────────────────────────────────────────────
   async function demanderCode(courrielBrut) {
     const courriel = normaliserCourriel(courrielBrut)
-    if (!courrielValide(courriel)) {
-      return refus('courriel', 'Cette adresse ne ressemble pas à une adresse de courriel.')
-    }
+    if (!courrielValide(courriel)) return refus('adresse-invalide')
     const cfg = await configuration()
     if (!cfg.ok) return cfg
     const r = await versSupabase('/auth/v1/otp', { email: courriel }, cfg)
-    if (r.reseau) return refus('reseau')
+    if (r.reseau) return refus('injoignable', MSG_RESEAU)
     if (!r.ok) return messageRefus(r.statut, r.corps, 'envoi')
     return { ok: true, courriel }
   }
@@ -380,20 +417,22 @@ export function creerCompte({
   async function verifierCode(courrielBrut, codeBrut) {
     const courriel = normaliserCourriel(courrielBrut)
     const code = normaliserCode(codeBrut)
-    if (!courrielValide(courriel)) {
-      return refus('courriel', 'Cette adresse ne ressemble pas à une adresse de courriel.')
-    }
-    if (!codeValide(code)) return refus('code')
+    if (!courrielValide(courriel)) return refus('adresse-invalide')
+    // Six chiffres ou pas six chiffres : pour qui regarde l'écran, c'est le
+    // MÊME refus qu'un code que Supabase rejette — « ce code ne va pas,
+    // recompte-les ». Un code de plus ici serait un texte de plus à écrire pour
+    // dire exactement la même chose.
+    if (!codeValide(code)) return refus('code-faux')
 
     const cfg = await configuration()
     if (!cfg.ok) return cfg
     const r = await versSupabase('/auth/v1/verify', { email: courriel, token: code, type: 'email' }, cfg)
-    if (r.reseau) return refus('reseau')
+    if (r.reseau) return refus('injoignable', MSG_RESEAU)
     if (!r.ok) return messageRefus(r.statut, r.corps, 'verification')
 
     const ouverte = sessionDepuisReponse(r.corps, maintenant, courriel)
     // Un 200 sans jeton lisible n'est pas une connexion. On ne range rien.
-    if (!ouverte) return refus('indisponible')
+    if (!ouverte) return refus('injoignable')
     session = ouverte
     ecrireStockage()
     return { ok: true, courriel: session.courriel }
