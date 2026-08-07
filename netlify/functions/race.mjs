@@ -124,6 +124,42 @@ function secretMatches(sent, storedHash) {
   return timingSafeEqual(Buffer.from(hashSecret(sent), 'hex'), Buffer.from(storedHash, 'hex'))
 }
 
+// LES CHAMPS DE RÉGIE — posés par le serveur, jamais par le client.
+//
+// Une correction reconstruit le blob à partir de `readWriteBody`, qui ne rend
+// QUE les champs venus du client. Tout ce qui vit sur l'ancien blob et n'est
+// pas repris ici DISPARAÎT, sans erreur, sans trace, à la première correction
+// de tracé. `secretHash` et `createdAt` étaient recopiés à la main ; le jour
+// où un troisième champ est arrivé, rien n'aurait signalé son absence.
+//
+// Cette liste est le seul endroit à tenir à jour, et `test/race-regie.test.js`
+// vérifie la règle générale — « une correction ne perd aucune clé » — plutôt
+// que la survie d'un champ nommé, qui serait verte et ne protégerait rien du
+// champ suivant.
+export const CHAMPS_DE_REGIE = ['secretHash', 'createdAt', 'ownerId']
+
+// CEUX QUI NE SORTENT JAMAIS. Le GET est public et sert précisément à donner
+// le payload à des inconnus — chaque champ de régie doit donc être classé ici
+// ou assumé public, et `test/race-regie.test.js` refuse un champ non classé.
+//
+// ⚠️ `ownerId` EST PRIVÉ, et ce n'est pas de la pudeur. Un lien /r/<id> est
+// fait pour être ouvert par des centaines de coureurs ; laisser sortir
+// l'identifiant de compte de l'organisateur, c'est distribuer à tous la seule
+// chose qu'il faut connaître pour se faire passer pour lui ailleurs.
+// `createdAt`, lui, est une date de publication : elle est publique sans
+// dommage, et « Mes cartes » en a besoin pour trier.
+export const CHAMPS_PRIVES = ['secretHash', 'ownerId']
+
+// Ce que l'ancien blob lègue au nouveau. Un champ absent de l'ancien reste
+// absent du nouveau : on reconduit, on n'invente pas.
+function regieConservee(ancien) {
+  const garde = {}
+  for (const champ of CHAMPS_DE_REGIE) {
+    if (ancien && ancien[champ] !== undefined) garde[champ] = ancien[champ]
+  }
+  return garde
+}
+
 // `obj` accepte AUSSI une chaîne déjà sérialisée : la lecture doit mesurer
 // exactement les octets qu'elle rend pour les débiter (voir le budget de
 // lecture plus bas), et sérialiser deux fois un payload de plusieurs mégaoctets
@@ -455,10 +491,16 @@ export async function handleRace(req, store) {
       return jsonResponse({ error: 'storage unavailable' }, 502)
     }
     if (!payload) return jsonResponse({ error: 'not found' }, 404)
-    // LE CONDENSAT NE SORT PAS. Ce GET est public et sert précisément à
-    // donner le payload à des inconnus ; il ne doit jamais leur donner en
-    // plus de quoi le réécrire.
-    const { secretHash, ...publicPayload } = payload
+    // LES CHAMPS PRIVÉS NE SORTENT PAS. Ce GET est public et sert précisément
+    // à donner le payload à des inconnus ; il ne doit jamais leur donner en
+    // plus de quoi le réécrire, ni l'identité de son auteur.
+    //
+    // ⚠️ ON RETIRE PAR LISTE, PAS À LA MAIN. `const { secretHash, ...reste }`
+    // ne protégeait que le champ qu'on avait pensé à nommer : tout champ de
+    // régie ajouté ensuite serait sorti tout seul, en silence, sur chaque lien
+    // déjà diffusé.
+    const publicPayload = { ...payload }
+    for (const champ of CHAMPS_PRIVES) delete publicPayload[champ]
     // Sérialisé une fois, pesé, débité, rendu : ce sont bien les octets qui
     // partent sur le fil qu'on compte, pas une estimation.
     const corps = JSON.stringify({ ok: true, payload: publicPayload })
@@ -500,9 +542,10 @@ export async function handleRace(req, store) {
 
     const payload = {
       ...fields,
-      // le jeton ne tourne pas : celui que l'organisateur a gardé doit encore
-      // ouvrir la porte à la correction suivante
-      secretHash: existing.secretHash,
+      // Tout ce que le serveur a posé et que le client ne renvoie pas — dont
+      // le jeton, qui ne tourne pas : celui que l'organisateur a gardé doit
+      // encore ouvrir la porte à la correction suivante.
+      ...regieConservee(existing),
       createdAt: existing.createdAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }

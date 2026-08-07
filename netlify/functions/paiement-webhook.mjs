@@ -218,6 +218,21 @@ export default async (req) => {
   // existe et se rattrape à la main. L'inverse perdrait la trace d'un paiement.
   await journal.setJSON(cle, commande)
 
+  // L'INDEX DES ACHATS D'UN COMPTE — pour que « Mes factures » se lise sans
+  // parcourir tout le journal des ventes.
+  //
+  // ⚠️ IL EST SECOND, ET DÉLIBÉRÉMENT. La commande est la vérité ; ceci n'est
+  // qu'un raccourci reconstructible. S'il échoue, la vente reste écrite et
+  // l'argent reste tracé — c'est le seul ordre acceptable. L'inverse
+  // échangerait une facture mal rangée contre un paiement perdu.
+  if (commande.compte) {
+    try {
+      await journal.setJSON(`client/${commande.compte}/${s.id}`, { session: s.id, payeLe: commande.payeLe })
+    } catch (err) {
+      console.error('[webhook] index compte non écrit (la commande, elle, est sauve) :', err)
+    }
+  }
+
   const resend = process.env.RESEND_API_KEY
   if (resend && bloque) {
     // Pas de mail client ici : la commande attend un arbitrage humain.

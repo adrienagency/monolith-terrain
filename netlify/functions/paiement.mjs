@@ -85,6 +85,50 @@ export function codeAtelierValide(propose, attendu = process.env.SHIBU_CODE_ATEL
   return timingSafeEqual(a, b)
 }
 
+/**
+ * L'IDENTIFIANT DE COMPTE — et il ne vient JAMAIS du corps de la requête.
+ *
+ * ⚠️ C'EST LA FAILLE QU'ON FERME ICI, AVANT QU'ELLE N'EXISTE. Poser
+ * `compte: corps.compte` serait la chose évidente à écrire, et elle serait
+ * grave : cette caisse n'a ni authentification ni seau de débit, et l'affiche
+ * est actuellement à 0 € — donc la session aboutit en `no_payment_required`
+ * sans qu'aucune carte soit présentée. N'importe qui pourrait écrire, sans
+ * limite et sans payer, dans l'historique d'achat du compte de quelqu'un
+ * d'autre, et y attacher SA fiche client Stripe. C'est exactement la confusion
+ * d'identités que ce système doit interdire, entrée par la porte de service.
+ *
+ * Le seul uid acceptable est celui d'une session vérifiée CÔTÉ SERVEUR. Tant
+ * que l'authentification n'existe pas, cette fonction rend une chaîne vide —
+ * et c'est délibéré : elle rend le câblage prématuré impossible plutôt que
+ * dangereux. Le jour où la session existe, on la branche ICI, à un seul
+ * endroit, et rien d'autre ne bouge.
+ *
+ * ⚠️ ET ON NE RÉSOUT JAMAIS UN UTILISATEUR PAR SON COURRIEL STRIPE. Celui-là,
+ * l'acheteur l'a tapé au moment de payer et personne ne l'a vérifié. S'y fier,
+ * c'est fabriquer deux identités qui divergent le jour où quelqu'un paie avec
+ * une autre adresse que celle de son compte — et ce jour arrive.
+ */
+const COMPTE_RE = /^[A-Za-z0-9-]{8,64}$/
+
+// La forme acceptable d'un uid. Le jeu de caractères couvre un UUID comme un
+// identifiant préfixé, sans laisser passer de quoi bricoler une clé de magasin
+// (`/` et `_` sont l'espace de noms des index).
+export const identifiantCompte = (v) => (typeof v === 'string' && COMPTE_RE.test(v) ? v : '')
+
+/**
+ * L'uid de la session vérifiée, ou '' s'il n'y en a pas.
+ *
+ * ⚠️ `req` EST LÀ EXPRÈS, ET `corps` N'Y EST PAS. La signature interdit
+ * physiquement de lire le corps de la requête : c'est le seul garde-fou qui
+ * survive à quelqu'un de pressé.
+ */
+export async function compteVerifie(_req) {
+  // Phase 1 — authentification. Tant qu'elle n'est pas là, aucun achat n'est
+  // rattaché à un compte, et c'est le comportement correct : mieux vaut une
+  // facture à rattacher plus tard qu'une facture rangée chez un inconnu.
+  return ''
+}
+
 // Stripe attend de l'`application/x-www-form-urlencoded` avec des clés en
 // crochets. Un petit encodeur vaut mieux qu'un SDK de 2 Mo.
 function encode(obj, prefixe = '', sortie = new URLSearchParams()) {
@@ -136,6 +180,8 @@ export function commandeAtelier(commandeDepuisSession, { id, art, corps }) {
         livrable: art.livrable,
         format: art.format || '',
         retour: String(corps.retour || '').slice(0, 200),
+        // Pas de `compte` : une commande d'atelier n'a pas d'acheteur, donc
+        // rien à rattacher.
       },
     }),
     // Le marqueur qui empêche à jamais de confondre un essai et une vente.
@@ -160,6 +206,10 @@ export default async (req) => {
   if (!art) return json({ ok: false, erreur: 'article inconnu' }, 400)
 
   const site = (process.env.SHIBU_URL_SITE || new URL(req.url).origin).replace(/\/$/, '')
+
+  // ⚠️ L'UID VIENT D'ICI, ET DE NULLE PART AILLEURS. On ne lit jamais
+  // `corps.compte` : voir compteVerifie() plus haut pour ce que ça coûterait.
+  const uidVerifie = await compteVerifie(req)
 
   // ── LE CONTOURNEMENT D'ATELIER (voir codeAtelierValide plus haut) ─────────
   //
@@ -328,6 +378,11 @@ export default async (req) => {
       format: art.format || '',
       // l'identifiant de la commande côté ShibuMap, s'il y en a un
       retour: String(corps.retour || '').slice(0, 200),
+      // Le fil vers le compte — venu de la SESSION VÉRIFIÉE, jamais du corps
+      // de la requête. Vide tant que l'authentification n'existe pas, et un
+      // achat sans compte reste alors au bit près ce qu'il était : c'est le
+      // seul cas qui existe aujourd'hui, et il tourne avec de l'argent réel.
+      compte: uidVerifie,
     },
     // Étiquette de suivi (guide Stripe, API ≥ 2026-03-25) : distingue ce
     // parcours des autres dans le Dashboard, pour comparer les taux de
