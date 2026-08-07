@@ -297,7 +297,9 @@ export function refillBucket(bucket, now, cap = RATE_CAP, windowMs = RATE_WINDOW
 export const RATTACHEMENT_CAP = 120
 // Préfixe distinct de `rl_` (écriture) et `rlq_` (lecture) ; il contient un
 // « _ », que ID_RE interdit, donc aucune collision avec un identifiant possible.
-export const cleSeauRattachement = (ip) => `rlr_${String(ip).replace(/[^a-zA-Z0-9:._-]/g, '')}`.slice(0, 96)
+// `normaliseIp` ramène une IPv6 à sa /64 et laisse tout le reste intact : voir
+// « CE QU'UN SEAU DÉSIGNE VRAIMENT » plus bas.
+export const cleSeauRattachement = (ip) => `rlr_${normaliseIp(ip).replace(/[^a-zA-Z0-9:._-]/g, '')}`.slice(0, 96)
 
 // `prefixe` et `cap` sont paramétrés parce qu'il y a maintenant deux seaux à
 // jetons de forme identique et de calibre différent. La valeur par défaut est
@@ -305,7 +307,7 @@ export const cleSeauRattachement = (ip) => `rlr_${String(ip).replace(/[^a-zA-Z0-
 // d'avant, à l'octet près.
 async function takeToken(store, ip, now = Date.now(), prefixe = 'rl_', cap = RATE_CAP) {
   if (!ip) return true // pas d'IP lisible : on ne bloque pas un vrai visiteur
-  const key = `${prefixe}${ip.replace(/[^a-zA-Z0-9:._-]/g, '')}`.slice(0, 96)
+  const key = `${prefixe}${normaliseIp(ip).replace(/[^a-zA-Z0-9:._-]/g, '')}`.slice(0, 96)
   let bucket = null
   try {
     bucket = await store.get(key, { type: 'json' })
@@ -373,7 +375,7 @@ export const LECTURE_FENETRE_MS = 10 * 60 * 1000 // rechargé en entier en 10 mi
 // empêcher un organisateur de corriger sa course, ni l'inverse. Le préfixe
 // contient un « _ », que ID_RE interdit — aucun seau ne peut donc entrer en
 // collision avec un identifiant de course dans le même magasin.
-export const cleSeauLecture = (ip) => `rlq_${String(ip).replace(/[^a-zA-Z0-9:._-]/g, '')}`.slice(0, 96)
+export const cleSeauLecture = (ip) => `rlq_${normaliseIp(ip).replace(/[^a-zA-Z0-9:._-]/g, '')}`.slice(0, 96)
 
 // Solde d'octets de cette IP, ou null quand il n'y a rien à compter (pas d'IP
 // lisible, magasin en panne). null veut dire « sers sans compter » : comme pour
@@ -451,6 +453,47 @@ const CACHE_LECTURE = {
 const SANS_CACHE = {
   'cache-control': 'no-store',
   'netlify-cdn-cache-control': 'no-store',
+}
+
+// ---- CE QU'UN SEAU DÉSIGNE VRAIMENT : UN ABONNÉ, PAS UNE ADRESSE -----------
+//
+// Les trois seaux étaient indexés sur l'IP ENTIÈRE. En IPv4 c'est juste : une
+// adresse publique, un abonné. En IPv6, non — un particulier reçoit une /64,
+// soit 18 milliards de milliards d'adresses, et changer d'adresse à l'intérieur
+// de sa propre /64 ne coûte rien. Mesuré par la passe d'attaque : 40 adresses
+// d'une même /64 = 40 seaux d'écriture, donc 480 publications au lieu de 12, et
+// autant de clés permanentes créées dans le magasin au passage.
+//
+// ⚠️ CE QUI NE DOIT PAS BOUGER. Les seaux `rl_203.0.113.7` déjà en circulation
+// gardent leur clé à l'octet près : tout ce qui n'est pas une IPv6 lisible
+// ressort d'ici INCHANGÉ. Une IPv4 déguisée (`::ffff:203.0.113.7`) aussi — elle
+// désigne un hôte, pas un réseau. Une IPv6 illisible également : on ne devine
+// pas, on garde la clé telle quelle plutôt que de fabriquer un préfixe faux qui
+// regrouperait des abonnés sans rapport sous un même seau.
+const GROUPES_PREFIXE = 4 // 4 groupes de 16 bits = /64
+
+export function normaliseIp(brut) {
+  const ip = String(brut ?? '').trim().replace(/^\[/, '').replace(/](:\d+)?$/, '').split('%')[0]
+  if (!ip) return ''
+  if (!ip.includes(':')) return ip
+  if (ip.includes('.')) return ip // ::ffff:203.0.113.7 — un hôte, pas un réseau
+  if (ip.indexOf('::') !== ip.lastIndexOf('::')) return ip // deux abréviations : illisible
+
+  const [gauche, droite] = ip.split('::')
+  const g = gauche ? gauche.split(':') : []
+  const d = droite === undefined ? null : droite ? droite.split(':') : []
+  let groupes
+  if (d === null) {
+    if (g.length !== 8) return ip // forme complète attendue, sinon on ne devine pas
+    groupes = g
+  } else {
+    if (g.length + d.length > 8) return ip
+    groupes = [...g, ...Array(8 - g.length - d.length).fill('0'), ...d]
+  }
+  if (!groupes.every((x) => /^[0-9A-Fa-f]{1,4}$/.test(x))) return ip
+  // Casse et zéros de tête normalisés : `2001:0DB8:…` et `2001:db8:…` sont la
+  // MÊME /64, et deux clés pour un seul abonné rendraient le seau décoratif.
+  return groupes.slice(0, GROUPES_PREFIXE).map((x) => x.replace(/^0+(?=.)/, '').toLowerCase()).join(':') + '::'
 }
 
 // Netlify place l'IP du client dans x-nf-client-connection-ip ; x-forwarded-for

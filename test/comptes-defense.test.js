@@ -10,6 +10,8 @@ import {
   handleRace,
   cleSeauLecture,
   cleIndexProprietaire,
+  cleSeauRattachement,
+  normaliseIp,
   COUT_APPEL_LISTE,
   COUT_OPERATION_MAGASIN,
   LECTURE_CAP_OCTETS,
@@ -261,4 +263,54 @@ test('un magasin sans `delete` ne fait pas échouer une reprise', async () => {
   const alice = await handleRace(req('POST', { claim: true, id: j.id, secret: j.secret, jeton: JETON }), store, session(UID_A))
   assert.equal(alice.status, 200)
   assert.equal(store.raw(j.id).ownerId, UID_A)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 5. LES SEAUX SUIVENT LA /64, PAS L'ADRESSE
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('normaliseIp ramène une IPv6 à sa /64 et ne touche à rien d’autre', () => {
+  assert.equal(normaliseIp('2001:db8:1234:5678::1'), '2001:db8:1234:5678::')
+  assert.equal(normaliseIp('2001:db8:1234:5678:9abc:def0:1234:5678'), '2001:db8:1234:5678::')
+  assert.equal(normaliseIp('2001:0db8:1234:5678::a'), '2001:db8:1234:5678::', 'les zéros de tête ne font pas deux seaux')
+  assert.equal(normaliseIp('2001:DB8:1234:5678::A'), '2001:db8:1234:5678::', 'ni la casse')
+  assert.equal(normaliseIp('[2001:db8:1234:5678::1]:443'), '2001:db8:1234:5678::')
+  assert.equal(normaliseIp('fe80::1%eth0'), 'fe80:0:0:0::')
+  assert.equal(normaliseIp('::1'), '0:0:0:0::')
+
+  // ⚠️ CE QUI NE DOIT PAS BOUGER : les seaux déjà en circulation.
+  assert.equal(normaliseIp('203.0.113.7'), '203.0.113.7')
+  assert.equal(normaliseIp('::ffff:203.0.113.7'), '::ffff:203.0.113.7', 'une IPv4 déguisée désigne UN hôte')
+  assert.equal(normaliseIp(''), '')
+  assert.equal(normaliseIp(undefined), '')
+  assert.equal(normaliseIp('n’importe:quoi:de:pas:lisible:du:tout:vraiment:trop:long'), 'n’importe:quoi:de:pas:lisible:du:tout:vraiment:trop:long')
+  assert.equal(cleSeauLecture('203.0.113.7'), 'rlq_203.0.113.7', 'la clé IPv4 reste octet pour octet celle d’avant')
+  assert.equal(cleSeauRattachement('203.0.113.7'), 'rlr_203.0.113.7')
+})
+
+test('40 adresses d’une même /64 partagent UN seul seau d’écriture', async () => {
+  const store = fakeStore()
+  let refuse = 0
+  for (let i = 0; i < 40; i++) {
+    const res = await handleRace(req('POST', { body: { gpx: GPX }, ip: `2001:db8:1234:5678::${i.toString(16)}` }), store, PERSONNE)
+    if (res.status === 429) refuse++
+  }
+  assert.equal(store.keys().filter((k) => k.startsWith('rl_')).length, 1, 'une /64 est UN abonné, donc UN seau')
+  assert.equal(refuse, 28, 'les 12 premières passent, les 28 suivantes sont refusées')
+})
+
+test('les seaux de lecture et de rattachement suivent la même /64', async () => {
+  const store = fakeStore()
+  const j = await publier(store)
+  for (let i = 0; i < 5; i++) {
+    const ip = `2001:db8:4321:8765::a${i}`
+    await handleRace(req('GET', { id: j.id, ip }), store, PERSONNE)
+    await handleRace(req('POST', { claim: true, id: j.id, secret: j.secret, jeton: JETON, ip }), store, session(UID_A))
+  }
+  assert.equal(store.keys().filter((k) => k.startsWith('rlq_')).length, 1)
+  assert.equal(store.keys().filter((k) => k.startsWith('rlr_')).length, 1)
+})
+
+test('deux /64 différentes gardent bien deux seaux', () => {
+  assert.notEqual(cleSeauLecture('2001:db8:1234:5678::1'), cleSeauLecture('2001:db8:1234:9999::1'))
 })
