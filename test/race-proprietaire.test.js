@@ -537,13 +537,26 @@ test('le rattachement sans session est refusé', async () => {
   assert.equal(store.raw(j.id).ownerId, undefined)
 })
 
-test('on ne rattache pas une carte déjà attachée à quelqu’un d’autre', async () => {
-  // Premier arrivé, premier propriétaire — et le second n'emporte rien, même
-  // s'il détient le secret (un courriel transféré le contient en clair).
+test('une carte déjà rattachée change de mains sur un secret valide', async () => {
+  // ⚠️ « Premier arrivé, premier propriétaire » a été RETIRÉ, et volontairement.
+  // Ce refus punissait la victime — qui reçoit un courriel transféré et crée un
+  // compte le premier gardait la carte à vie — sans rien protéger : le
+  // détenteur du secret pouvait de toute façon tout réécrire par un PUT.
+  // Le secret est l'autorité suprême partout ailleurs ; il l'est ici aussi.
   const store = fakeStore()
   const j = await publier(store, { verifie: session(UID_A), jeton: JETON })
   const res = await handleRace(req('POST', { claim: true, id: j.id, secret: j.secret, jeton: JETON }), store, session(UID_B))
-  assert.equal(res.status, 409)
+  assert.equal(res.status, 200)
+  assert.equal(store.raw(j.id).ownerId, UID_B, 'le dernier secret valide l’emporte')
+  assert.ok(store.raw(cleIndexProprietaire(UID_B, j.id)), 'et l’index suit')
+})
+
+test('sans le secret, être connecté ne rattache toujours rien', async () => {
+  // Le témoin de la règle : c'est LE SECRET qui transfère, jamais la session.
+  const store = fakeStore()
+  const j = await publier(store, { verifie: session(UID_A), jeton: JETON })
+  const res = await handleRace(req('POST', { claim: true, id: j.id, jeton: JETON }), store, session(UID_B))
+  assert.equal(res.status, 403)
   assert.equal(store.raw(j.id).ownerId, UID_A, 'le propriétaire en place ne bouge pas')
   assert.equal(store.raw(cleIndexProprietaire(UID_B, j.id)), null, 'et aucun index chez l’intrus')
 })

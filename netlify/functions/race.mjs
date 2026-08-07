@@ -603,6 +603,24 @@ async function noterAuJournalDuCompte(store, uid, raceId, payload) {
   }
 }
 
+// L'inverse, quand une carte change de mains : l'ancien propriétaire ne doit
+// plus la voir dans « Mes cartes ». MÊME DOCTRINE QUE L'ÉCRITURE — l'index
+// n'est qu'un cache, donc ce ménage n'a AUCUN droit de veto. Une suppression
+// qui échoue laisse une ligne périmée dans un panneau, pas une carte volée : le
+// blob, lui, porte déjà le nouveau propriétaire, et c'est lui la vérité.
+//
+// `store.delete` est optionnel à dessein : la vraie API Blobs le fournit, mais
+// un magasin de test ou une version antérieure peut ne pas l'avoir, et un
+// rattachement légitime ne doit pas échouer pour ça.
+async function effacerDuJournalDuCompte(store, uid, raceId) {
+  if (!uid) return
+  try {
+    await store.delete?.(cleIndexProprietaire(uid, raceId))
+  } catch (err) {
+    console.error('[race] index du precedent proprietaire non retiré :', err)
+  }
+}
+
 // Une entrée d'index exploitable, ou null. C'est ici que se filtrent les entrées
 // mortes : clé bricolée ou tronquée, contenu illisible, entrée qui ne parle pas
 // de sa propre clé. On ne fait confiance ni au magasin ni au passé.
@@ -750,9 +768,25 @@ async function mesCartes(req, store, verifieCompte) {
 //
 // ⚠️ CE QU'IL PROUVE, ET CE QU'IL NE PROUVE PAS. Il prouve la possession d'un
 // JETON, pas une identité. Le courriel du dépôt vitrine contient le secret en
-// clair : quiconque a reçu ce message transféré peut revendiquer. PREMIER
-// ARRIVÉ, PREMIER PROPRIÉTAIRE — d'où le refus net quand la carte appartient
-// déjà à quelqu'un d'autre, plutôt qu'un écrasement silencieux.
+// clair : quiconque a reçu ce message transféré peut revendiquer.
+//
+// ⚠️ LE DERNIER CLAIM PRÉSENTANT UN SECRET VALIDE L'EMPORTE, et l'entrée
+// d'index du perdant disparaît. « Premier arrivé, premier propriétaire »
+// paraissait prudent ; il punissait en réalité la victime. Qui reçoit un
+// courriel transféré et crée un compte le premier possédait la carte À VIE,
+// tandis que le vrai organisateur — secret en main — recevait un 409 définitif
+// et ne possédait jamais sa propre carte.
+//
+// Or ce 409 NE PROTÉGEAIT RIEN : le détenteur du secret pouvait de toute façon
+// réécrire tout le payload par un PUT. Il perdait la propriété, pas l'écriture.
+// Refuser le transfert n'ôtait donc aucun pouvoir au squatteur et en ôtait un
+// au légitime.
+//
+// La règle retenue est celle qui vaut déjà PARTOUT AILLEURS dans ce fichier :
+// le secret est l'autorité suprême. Il ouvre le PUT, il ouvre `autorise()`, il
+// ouvre le rattachement — et donc il reprend la propriété. Un secret fuité
+// reste un problème, mais c'en est UN SEUL, et il se règle là où il se règle
+// déjà : en republiant sous un nouvel id.
 async function rattacher(req, store, url, verifieCompte) {
   const id = url.searchParams.get('id') || ''
   if (!ID_RE.test(id)) return jsonResponse({ error: 'bad id' }, 400, SANS_CACHE)
@@ -782,12 +816,11 @@ async function rattacher(req, store, url, verifieCompte) {
   if (!uid) return jsonResponse({ error: 'connexion requise' }, 401, SANS_CACHE)
 
   const dejaA = identifiantCompte(blob.ownerId)
-  if (dejaA && dejaA !== uid) return jsonResponse({ error: 'carte déjà rattachée à un autre compte' }, 409, SANS_CACHE)
 
   // Le blob d'abord, l'index ensuite — toujours (voir la doctrine plus haut).
   // Rattacher une carte déjà à soi repasse par là sans dommage : c'est aussi ce
   // qui répare un index perdu.
-  if (!dejaA) {
+  if (dejaA !== uid) {
     try {
       await store.setJSON(id, { ...blob, ownerId: uid })
     } catch (err) {
@@ -796,6 +829,10 @@ async function rattacher(req, store, url, verifieCompte) {
     }
   }
   await noterAuJournalDuCompte(store, uid, id, blob)
+  // ⚠️ ET SEULEMENT ENSUITE le ménage chez le perdant : si cette suppression
+  // partait en premier et que la pose échouait, la carte ne serait plus listée
+  // NULLE PART. On préfère deux lignes une seconde à zéro ligne pour toujours.
+  if (dejaA && dejaA !== uid) await effacerDuJournalDuCompte(store, dejaA, id)
 
   return jsonResponse({ ok: true, id }, 200, SANS_CACHE)
 }

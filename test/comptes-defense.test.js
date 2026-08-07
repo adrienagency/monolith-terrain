@@ -9,6 +9,7 @@ import assert from 'node:assert/strict'
 import {
   handleRace,
   cleSeauLecture,
+  cleIndexProprietaire,
   COUT_APPEL_LISTE,
   COUT_OPERATION_MAGASIN,
   LECTURE_CAP_OCTETS,
@@ -201,4 +202,63 @@ test('compteVerifie exige `aud: authenticated`, pas seulement un 200 et un id', 
 
   // et le cas nominal continue de passer
   assert.equal(await compteVerifie(r, supabase({ id: UID_A, aud: 'authenticated', role: 'authenticated' }), ENV), UID_A)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4. LE RATTACHEMENT NE PUNIT PLUS LA VICTIME
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('le dernier claim présentant un secret valide l’emporte', async () => {
+  const store = fakeStore()
+  // Alice publie sans compte et garde son secret ; un message transféré met ce
+  // secret entre les mains de Mallory, qui a un compte et rattache le premier.
+  const j = await publier(store)
+  const vol = await handleRace(req('POST', { claim: true, id: j.id, secret: j.secret, jeton: JETON }), store, session(UID_B))
+  assert.equal(vol.status, 200)
+  assert.equal(store.raw(j.id).ownerId, UID_B)
+
+  // Alice se crée un compte et présente LE MÊME secret : elle reprend sa carte.
+  const alice = await handleRace(req('POST', { claim: true, id: j.id, secret: j.secret, jeton: JETON }), store, session(UID_A))
+  assert.equal(alice.status, 200, 'le détenteur du secret doit pouvoir reprendre sa carte')
+  assert.equal(store.raw(j.id).ownerId, UID_A)
+})
+
+test('l’index du perdant DISPARAÎT — sinon la carte est listée deux fois', async () => {
+  const store = fakeStore()
+  const j = await publier(store)
+  await handleRace(req('POST', { claim: true, id: j.id, secret: j.secret, jeton: JETON }), store, session(UID_B))
+  assert.ok(store.raw(cleIndexProprietaire(UID_B, j.id)), 'Mallory avait bien son entrée')
+
+  await handleRace(req('POST', { claim: true, id: j.id, secret: j.secret, jeton: JETON }), store, session(UID_A))
+  assert.equal(store.raw(cleIndexProprietaire(UID_B, j.id)), null, 'l’entrée du perdant doit être retirée')
+  assert.ok(store.raw(cleIndexProprietaire(UID_A, j.id)), 'et celle du gagnant posée')
+
+  const chezMallory = await (await handleRace(req('GET', { mine: true, jeton: JETON }), store, session(UID_B))).json()
+  assert.deepEqual(chezMallory.cartes, [], 'la carte ne doit plus figurer chez le perdant')
+  const chezAlice = await (await handleRace(req('GET', { mine: true, jeton: JETON }), store, session(UID_A))).json()
+  assert.deepEqual(chezAlice.cartes.map((c) => c.id), [j.id])
+})
+
+test('sans secret valide, aucun claim ne prend une carte à son propriétaire', async () => {
+  // La reprise passe par LE SECRET, jamais par le fait d'être connecté.
+  const store = fakeStore()
+  const j = await publier(store, { verifie: session(UID_A), jeton: JETON })
+  for (const s of [undefined, 'z'.repeat(32)]) {
+    const r = await handleRace(req('POST', { claim: true, id: j.id, secret: s, jeton: JETON }), store, session(UID_B))
+    assert.equal(r.status, 403, 'un claim sans preuve reste un refus')
+  }
+  assert.equal(store.raw(j.id).ownerId, UID_A)
+  assert.equal(store.raw(cleIndexProprietaire(UID_B, j.id)), null)
+})
+
+test('un magasin sans `delete` ne fait pas échouer une reprise', async () => {
+  // La suppression de l'index du perdant est un ménage, pas une condition :
+  // l'index n'est qu'un cache, et son échec n'a jamais de droit de veto.
+  const store = fakeStore()
+  const j = await publier(store)
+  await handleRace(req('POST', { claim: true, id: j.id, secret: j.secret, jeton: JETON }), store, session(UID_B))
+  delete store.delete
+  const alice = await handleRace(req('POST', { claim: true, id: j.id, secret: j.secret, jeton: JETON }), store, session(UID_A))
+  assert.equal(alice.status, 200)
+  assert.equal(store.raw(j.id).ownerId, UID_A)
 })
