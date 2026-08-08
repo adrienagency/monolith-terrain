@@ -8369,6 +8369,15 @@ async function shareCurrentView() {
       }
     }
   }
+  // ⚠️ ET LA LISTE « MES CARTES » SE RECHARGE ICI, SUR LE SUCCÈS.
+  // C'est le seul endroit du produit où une carte NAÎT côté serveur. Sans cette
+  // ligne, le panneau ne se rechargeait qu'au changement de session : un
+  // organisateur qui publiait puis ouvrait « Mes cartes » y lisait toujours
+  // « Tu n'as pas encore publié de carte ». On ne l'attend pas — le partage ne
+  // doit pas dépendre d'une liste, et un refus de liste se lit déjà comme une
+  // liste vide (voir ui/compte.js).
+  if (published) rechargerMesCartes?.()
+
   // ÉCHEC DUR (Adrien) : une course chargée + publication impossible ⇒ ON NE
   // COPIE RIEN. Le détail (statut HTTP/erreur serveur) remonte dans le toast
   // pour qu'un échec persistant soit diagnosticable, pas juste « réessayez ».
@@ -9016,6 +9025,14 @@ const templatesPanel = buildTemplatesPanel(panelCtx)
 // « Composer ma première carte » se contente de replier le panneau : composer,
 // c'est avoir la carte sous les yeux, et tous les outils sont déjà là.
 panelCtx.compte = compte
+// ⚠️ LE RECHARGEMENT DOIT ÊTRE BRANCHÉ AVANT LA CONSTRUCTION.
+// `buildMesCartesPanel` appelle `ctx.registerCartesRefresh?.(recharger)` à la
+// fin de son propre corps : posé après, le rappel n'existe pas encore et la
+// liste ne se recharge plus qu'au changement de session. Vu à l'écran : on
+// publie une carte, on ouvre le panneau, il dit toujours « Tu n'as pas encore
+// publié de carte » — jusqu'au prochain rechargement de page.
+let rechargerMesCartes = null
+panelCtx.registerCartesRefresh = (fn) => { rechargerMesCartes = fn }
 const mesCartes = buildMesCartesPanel(panelCtx)
 void mesCartes
 
