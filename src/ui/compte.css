@@ -278,6 +278,19 @@
 .ce-compte-err:empty {
   display: none;
 }
+/* UNE CONFIRMATION N'EST PAS UN REFUS. Le filet d'accent et le fond teinté
+   ci-dessus disent « quelque chose a raté » : les reprendre pour annoncer un
+   code reparti apprendrait à lire un signal d'alerte comme une bonne nouvelle.
+   Une ligne, en encre pleine, et rien d'autre. */
+.ce-compte-info {
+  margin: var(--ce-gap-tight) 0 0;
+  font-size: var(--ce-t-control);
+  line-height: 1.4;
+  color: var(--ce-ink);
+}
+.ce-compte-info:empty {
+  display: none;
+}
 .ce-compte-liens {
   display: flex;
   justify-content: center;

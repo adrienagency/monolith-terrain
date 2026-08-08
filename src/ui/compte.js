@@ -319,12 +319,18 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
     champ.append(inp)
     const err = el('p', 'ce-compte-err')
     err.setAttribute('role', 'alert')
+    // ⚠️ UN RENVOI RÉUSSI DOIT SE DIRE. Le champ se vidait, le focus revenait,
+    // et rien n'annonçait qu'un second code était parti : celui qui n'a rien
+    // reçu ne pouvait pas savoir si son clic avait servi, donc il recliquait.
+    const info = el('p', 'ce-compte-info')
+    info.setAttribute('role', 'status')
     const valider = button('Me connecter', () => verifier())
     valider.classList.add('ce-compte-primaire')
 
     async function verifier() {
       const code = inp.value.trim()
       err.textContent = ''
+      info.textContent = ''
       valider.disabled = true
       valider.textContent = 'Connexion…'
       try {
@@ -347,12 +353,42 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
     const liens = el('div', 'ce-compte-liens')
     const renvoyer = el('button', 'ce-compte-lien', 'Renvoyer un code')
     renvoyer.type = 'button'
+    // ⚠️ ET LE RENVOI SE REPOSE QUELQUES SECONDES. Rien n'empêchait d'enchaîner
+    // les clics : chacun invalide le code précédent, si bien qu'à trois renvois
+    // d'affilée les trois messages reçus portent des codes morts sauf le
+    // dernier. Le décompte est DANS le libellé — un bouton grisé sans raison
+    // visible se lit comme un bouton cassé.
+    let decompte = null
+    const reposer = (secondes) => {
+      clearInterval(decompte)
+      let reste = secondes
+      renvoyer.disabled = true
+      renvoyer.textContent = `Renvoyer un code (${reste} s)`
+      decompte = setInterval(() => {
+        // la modale a pu se fermer, ou l'écran repartir sur l'adresse : un
+        // minuteur qui survit à son bouton tourne jusqu'au rechargement
+        if (!renvoyer.isConnected) { clearInterval(decompte); return }
+        reste -= 1
+        if (reste > 0) { renvoyer.textContent = `Renvoyer un code (${reste} s)`; return }
+        clearInterval(decompte)
+        renvoyer.disabled = false
+        renvoyer.textContent = 'Renvoyer un code'
+      }, 1000)
+    }
     renvoyer.addEventListener('click', async () => {
       err.textContent = ''
+      info.textContent = ''
       renvoyer.disabled = true
-      try { await compte.demanderCode(adresse); inp.value = ''; inp.focus() }
-      catch (e) { err.textContent = messageRefus(e) }
-      renvoyer.disabled = false
+      try {
+        await compte.demanderCode(adresse)
+        inp.value = ''
+        inp.focus()
+        info.textContent = 'Un nouveau code est parti.'
+        reposer(15)
+      } catch (e) {
+        err.textContent = messageRefus(e)
+        renvoyer.disabled = false
+      }
     })
     const changer = el('button', 'ce-compte-lien', 'Changer d’adresse')
     changer.type = 'button'
@@ -361,7 +397,7 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
 
     const actions = el('div', 'ce-compte-actions')
     actions.append(valider)
-    m.carte.append(champ, err, actions, liens)
+    m.carte.append(champ, err, info, actions, liens)
     inp.focus()
   }
 
