@@ -495,6 +495,18 @@
   border-color: transparent;
   background: transparent;
 }
+/* ⚠️ 44 PX AU DOIGT, ET LA RÈGLE VIT ICI, APRÈS LA HAUTEUR DE SOURIS. Le
+   `min-height: 34px` que `v28.css` applique aux `.ce-btn` sous `pointer: coarse`
+   ne peut pas relever une `height` explicite, et à sélecteur de même poids c'est
+   l'ORDRE de la feuille qui tranche : posée dans le bloc tactile du haut, cette
+   règle serait écrasée par les 40 px ci-dessus. 44 px, pas 40 : c'est la cible
+   minimale que visent Apple et Google (v28.css), et c'est le bouton le plus
+   important du parcours. */
+@media (pointer: coarse) {
+  .ce-cnx-bulle .ce-compte-primaire.ce-btn {
+    height: 44px;
+  }
+}
 .ce-cnx-bulle .ce-compte-primaire.ce-btn:hover:not(:disabled) {
   color: var(--ce-accent);
   background: transparent;
