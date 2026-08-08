@@ -451,6 +451,44 @@
   gap: 16px;
   padding: 9px 16px;
 }
+
+/* ⚠️ LE FOND ARRIVE AVANT SON TEXTE, JAMAIS APRÈS — et c'est la règle que
+   `v28.css` énonce déjà pour les bulles : « UNE SEULE courbe pour tout — bulles
+   ET éléments HTML […] si les durées divergent, le fond décolle du texte
+   pendant le voyage ». Ici la durée du contenu valait ZÉRO : `replaceChildren`
+   pose la géométrie finale EN UNE IMAGE, alors que la bulle met 0,34 s à
+   voyager. Mesuré avant correctif : à l'étape 2 les deux liens étaient posés à
+   `[…,564,255,36]` dès la première image, leur bulle encore 60 px plus haut —
+   ils flottaient sur la carte floutée, SANS FOND, pendant ≈ 200 ms ; sur un
+   refus, c'était la bande teintée du message (fond à 8 % + filet d'accent,
+   392 px de large) qui PENDAIT sous la silhouette pendant ≈ 160 ms.
+   Le contenu attend donc que son fond soit arrivé : opacité tenue à 0 pendant
+   les 58 % du voyage qui précèdent le recouvrement (mesuré : la bulle des liens
+   couvre leur boîte à t ≈ 195 ms, celle du champ couvre le message à
+   t ≈ 160 ms), puis il se découvre pendant que la bulle finit son rebond.
+   ⚠️ OPACITÉ SEULE, PAS DE `transform` : liquid.js MESURE `.ce-cnx-liens` pour
+   placer sa bulle — un déplacement du contenu ferait courir la bulle après son
+   propre effet, avec une image de retard.
+   ⚠️ ET RIEN SUR LE CHEMIN RETOUR : quand la forme RÉTRÉCIT (étape 2 → étape 1),
+   le contenu disparaît d'un coup et le fond reste toujours plus grand que ce
+   qu'il porte. Le défaut n'existe qu'à la MONTÉE — les deux blocs ne s'animent
+   donc qu'à leur apparition (`:empty` → affiché relance l'animation, la règle
+   du display), et jamais à leur retrait. */
+.ce-cnx-liens,
+.ce-cnx-bulle .ce-compte-err,
+.ce-cnx-bulle .ce-compte-info {
+  animation: ce-cnx-venir 0.34s cubic-bezier(0.2, 0, 0, 1) both;
+}
+@keyframes ce-cnx-venir {
+  0%,
+  58% {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .ce-cnx-bulle .ce-compte-primaire.ce-btn {
   height: 40px;
   padding: 0 22px;
@@ -503,6 +541,15 @@
   }
   .ce-cnx-bulle .lq-blob {
     transition: none;
+  }
+  /* ⚠️ ET LE CONTENU NE S'ATTARDE PLUS NON PLUS. Ici la forme se pose en UNE
+     image : il n'y a plus de voyage à attendre, et tenir le texte à 0 pendant
+     200 ms le ferait arriver APRÈS son fond — le défaut à l'envers, inventé de
+     toutes pièces sur le seul chemin qui n'en avait pas. */
+  .ce-cnx-liens,
+  .ce-cnx-bulle .ce-compte-err,
+  .ce-cnx-bulle .ce-compte-info {
+    animation: none;
   }
 }
 
