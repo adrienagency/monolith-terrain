@@ -286,6 +286,30 @@
 .ce-panel.ce-cartes-panel[hidden] {
   display: none;
 }
+
+/* ⚠️ EN MODE PAR DÉFAUT, « MES CARTES » MESURAIT 0 × 0.
+   `body.ce-simple .ce-dock { display: none !important }` (v28.css) éteint les
+   DEUX rails : le panneau existait, n'était plus `hidden`, son `display` valait
+   `flex`… et sa colonne parente était absente. Connecté, l'écran était
+   rigoureusement identique à l'écran déconnecté — rien ne disait qu'une session
+   existait, et « reprendre un parcours créé précédemment » n'était atteignable
+   qu'en passant en mode Avancé.
+   La reprise ci-dessous est le CALQUE EXACT de celle du mode Explorer, deux
+   règles plus bas dans v28.css : le rail revient, et il ne montre QUE le
+   panneau qui le justifie — la Bibliothèque reste au mode Avancé, le mode
+   simple reste simple.
+   ⚠️ ET ELLE NE S'ARME QUE POUR UNE SESSION OUVERTE (`body.ce-connecte`, posée
+   par main.js sur `surChangement`). Déconnecté — l'immense majorité — pas une
+   règle ne s'applique et le rail droit est rigoureusement celui d'hier.
+   ⚠️ SPÉCIFICITÉ : v28.css est injecté EN DERNIER et sa règle est `!important`.
+   Il faut donc `!important` ET une classe de plus (`.ce-dock.ce-dock-right`
+   sous `body.ce-simple.ce-connecte`), sinon la ligne est muette. */
+body.ce-simple.ce-connecte .ce-dock.ce-dock-right {
+  display: flex !important;
+}
+body.ce-simple.ce-connecte .ce-dock.ce-dock-right > .ce-panel:not(.ce-cartes-panel) {
+  display: none;
+}
 .ce-cartes-liste {
   display: flex;
   flex-direction: column;

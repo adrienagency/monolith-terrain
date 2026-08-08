@@ -8118,6 +8118,21 @@ async function reprendreApresPaiement() {
 // requête de plus, pas un pixel de différent.
 const compte = creerCompteApp()
 
+// ⚠️ UNE SESSION DOIT SE VOIR — c'est cette classe qui le permet.
+// Le panneau « Mes cartes » vit dans le rail droit, et le rail droit est éteint
+// en mode par défaut (`body.ce-simple .ce-dock { display: none !important }`,
+// v28.css). Résultat mesuré : connecté, en mode par défaut, le panneau existait
+// mais mesurait 0 × 0 et l'écran était rigoureusement identique à l'écran
+// déconnecté — rien ne disait qu'une session existait. `body.ce-connecte` arme
+// la reprise écrite dans compte.css, calquée sur celle du mode Explorer.
+// ⚠️ RIEN NE BOUGE POUR UN VISITEUR DÉCONNECTÉ : `estConnecte()` est une
+// lecture synchrone, la classe n'est pas posée, et aucune règle ne s'applique.
+const majCorpsCompte = () => {
+  document.body.classList.toggle('ce-connecte', !!compte.estConnecte?.())
+}
+majCorpsCompte()
+compte.surChangement?.(majCorpsCompte)
+
 // ⚠️ LA PORTE SE POSE SUR L'EXPORT, PAS SUR LA BOÎTE QUI LE PRÉPARE.
 // Elle enveloppait `openExportUI` — c'est-à-dire l'OUVERTURE de la boîte de
 // dialogue. Vu à l'écran : on répondait « Continuer sans compte », la boîte
