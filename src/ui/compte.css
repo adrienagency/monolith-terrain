@@ -184,19 +184,29 @@
   border-color: var(--ce-accent);
   color: var(--ce-accent);
 }
+/* ⚠️ LA SORTIE D'UN AVIS QUI ATTEND DOIT ÊTRE UNE VRAIE CIBLE.
+   Mesurée avant correction : 53 × 17 px, en 11 px, à 55 % d'opacité — sous le
+   seuil AA pour un libellé interactif de cette taille, et bien en dessous de
+   toute cible tactile raisonnable. Cette carte ne s'efface pas seule tant que
+   personne n'a agi : son bouton de sortie est donc le SEUL moyen de la faire
+   partir, et c'est la dernière chose qu'on a le droit de rendre minuscule.
+   Encre pleine, corps de contrôle, 32 px de haut. */
 .ce-compte-avis-x {
   display: block;
-  margin: 8px auto 0;
-  padding: 2px 8px;
+  margin: 10px auto 0;
+  min-height: 32px;
+  padding: 6px 14px;
   border: 0;
   background: none;
-  color: var(--ce-muted);
+  color: var(--ce-ink);
   font-family: var(--ce-font);
-  font-size: var(--ce-t-micro);
+  font-size: var(--ce-t-control);
+  text-decoration: underline;
+  text-underline-offset: 3px;
   cursor: pointer;
 }
 .ce-compte-avis-x:hover {
-  color: var(--ce-ink);
+  color: var(--ce-accent);
 }
 @media (prefers-reduced-motion: reduce) {
   .ce-compte-avis {

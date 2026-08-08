@@ -226,19 +226,40 @@ export function avisSansCompte({ onEnregistrerGabarit } = {}) {
   carte.setAttribute('role', 'status')
   carte.setAttribute('aria-live', 'polite')
   carte.append(el('p', 'ce-compte-avis-texte', 'Ton export est en route. Pense à enregistrer ton gabarit sur ton ordinateur : sans compte, ShibuMap ne le garde pas.'))
+  // ⚠️ ELLE PART UNE FOIS QU'ELLE A SERVI, ET PAS AVANT. Tant que personne n'a
+  // enregistré son gabarit, l'avertissement tient et la carte attend : c'est
+  // tout son objet. Mais une fois le geste fait, il n'y a plus rien à
+  // avertir — et une carte qui campe indéfiniment en bas de l'écran finit par
+  // se lire comme un décor. Huit secondes laissent la place à un second
+  // enregistrement (le libellé le propose) avant qu'elle se retire seule.
+  let conge = null
   const enregistrer = button('Enregistrer mon gabarit', () => {
     onEnregistrerGabarit?.()
     // le libellé change APRÈS le clic, comme la carte de livraison : la carte
     // reste, pour un second enregistrement
     enregistrer.textContent = 'Enregistrer à nouveau'
+    clearTimeout(conge)
+    conge = setTimeout(() => {
+      carte.classList.remove('show')
+      setTimeout(() => carte.remove(), 320)
+    }, 8000)
   })
   enregistrer.classList.add('ce-compte-avis-btn')
   const fermer = el('button', 'ce-compte-avis-x', 'Fermer')
   fermer.type = 'button'
-  fermer.addEventListener('click', () => carte.remove())
+  fermer.addEventListener('click', () => { clearTimeout(conge); carte.remove() })
   carte.append(enregistrer, fermer)
   document.body.append(carte)
-  requestAnimationFrame(() => carte.classList.add('show'))
+  // ⚠️ UN REFLOW, PAS UN `requestAnimationFrame` — LA MÊME CORRECTION QUE
+  // `showLivraison` (ui/toast.js), ET POUR LA MÊME RAISON, VÉRIFIÉE ICI.
+  // Un rAF NE SE DÉCLENCHE PAS tant que le document n'est pas composité :
+  // onglet en arrière-plan, fenêtre réduite, ou simplement masquée. La carte
+  // restait alors à `opacity: 0` — mesuré, `document.visibilityState` valant
+  // « hidden ». Et c'est très exactement ce que fait quelqu'un qui lance un
+  // export : il va voir ailleurs pendant que ça tourne. L'avertissement le plus
+  // important de tout l'écran ne s'affichait pas au seul moment où il compte.
+  void carte.offsetWidth
+  carte.classList.add('show')
   return carte
 }
 
