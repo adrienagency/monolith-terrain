@@ -1,5 +1,5 @@
 {
-  "genereLe": "2026-08-07",
+  "genereLe": "2026-08-08",
   "surfaces": [
     {
       "nom": "L'application",
@@ -85,14 +85,14 @@
     }
   ],
   "code": {
-    "modules": 210,
-    "lignes": 74963,
-    "fonctions": 8,
+    "modules": 213,
+    "lignes": 76820,
+    "fonctions": 11,
     "piliers": [
       {
         "chemin": "src/ui/kit.js",
         "lignes": 272,
-        "dependants": 32
+        "dependants": 33
       },
       {
         "chemin": "src/terrain.js",
@@ -105,13 +105,13 @@
         "dependants": 15
       },
       {
-        "chemin": "src/map/tile-index.js",
-        "lignes": 244,
-        "dependants": 10
-      },
-      {
         "chemin": "src/ui/shell.js",
         "lignes": 110,
+        "dependants": 11
+      },
+      {
+        "chemin": "src/map/tile-index.js",
+        "lignes": 244,
         "dependants": 10
       },
       {
@@ -407,8 +407,8 @@
     }
   ],
   "tests": {
-    "listes": 167,
-    "surDisque": 167,
+    "listes": 176,
+    "surDisque": 176,
     "orphelins": [],
     "fantomes": []
   }
