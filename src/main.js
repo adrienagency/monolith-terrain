@@ -9022,8 +9022,6 @@ const templatesPanel = buildTemplatesPanel(panelCtx)
 // « Mes cartes » — sous la Bibliothèque dans le rail droit. Le panneau
 // N'EXISTE PAS tant que personne n'est connecté (il se pose `hidden` lui-même),
 // donc pour un visiteur anonyme le rail droit est rigoureusement celui d'hier.
-// « Composer ma première carte » se contente de replier le panneau : composer,
-// c'est avoir la carte sous les yeux, et tous les outils sont déjà là.
 panelCtx.compte = compte
 // ⚠️ LE RECHARGEMENT DOIT ÊTRE BRANCHÉ AVANT LA CONSTRUCTION.
 // `buildMesCartesPanel` appelle `ctx.registerCartesRefresh?.(recharger)` à la
@@ -9033,6 +9031,13 @@ panelCtx.compte = compte
 // publié de carte » — jusqu'au prochain rechargement de page.
 let rechargerMesCartes = null
 panelCtx.registerCartesRefresh = (fn) => { rechargerMesCartes = fn }
+// ⚠️ « COMPOSER MA PREMIÈRE CARTE » EMMÈNE QUELQUE PART, MAINTENANT.
+// Le rappel n'était fourni par personne : le seul bouton de l'écran que TOUT
+// LE MONDE voit le premier jour repliait le panneau où il se trouve, et rien
+// d'autre. Il ouvre le Studio — l'endroit où l'on habille sa carte, c'est-à-dire
+// où l'on en compose une. Closure paresseuse : `panelCtx.openAtelier` est posé
+// plus bas dans le module, il est lu AU CLIC.
+panelCtx.composerPremiereCarte = () => panelCtx.openAtelier?.()
 const mesCartes = buildMesCartesPanel(panelCtx)
 void mesCartes
 
