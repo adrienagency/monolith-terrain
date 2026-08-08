@@ -883,18 +883,27 @@ body.ce-hub .ce-elemwrap {
   position: fixed;
   inset: 0;
   z-index: 56;
-  /* ⚠️ FLOU RENFORCÉ (Adrien, 29/07 : « le fond est encore plus flouté »). Le
-     voile n'est pas là pour montrer la carte : il est là pour qu'on lise le
-     centre. La carte reste PRÉSENTE — on devine le socle et sa couleur — mais
-     elle ne dispute plus l'attention au titre. */
-  background: rgba(246, 244, 239, 0.52);
-  -webkit-backdrop-filter: blur(11px) saturate(1.12);
-  backdrop-filter: blur(11px) saturate(1.12);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.34s cubic-bezier(0.6, 0, 0.3, 1.3);
 }
-body.dark .ce-hubveil {
+/* ⚠️ FLOU RENFORCÉ (Adrien, 29/07 : « le fond est encore plus flouté »). Le
+   voile n'est pas là pour montrer la carte : il est là pour qu'on lise le
+   centre. La carte reste PRÉSENTE — on devine le socle et sa couleur — mais
+   elle ne dispute plus l'attention au titre.
+   ⚠️ DEUX VOILES PARTAGENT CETTE RECETTE, et c'est voulu : l'accueil, et
+   l'écran de connexion (`.ce-cnx-veil`, ui/compte.css) qu'Adrien a demandé
+   « comme celui quand on charge la page au démarrage ». Ils diffèrent par le
+   plan, le fondu et le déclencheur — jamais par le fond. Déclaré ici une seule
+   fois : deux jumeaux qui recopient leur rgba dérivent au premier réglage. */
+.ce-hubveil,
+.ce-cnx-veil {
+  background: rgba(246, 244, 239, 0.52);
+  -webkit-backdrop-filter: blur(11px) saturate(1.12);
+  backdrop-filter: blur(11px) saturate(1.12);
+}
+body.dark .ce-hubveil,
+body.dark .ce-cnx-veil {
   background: rgba(14, 15, 18, 0.5);
 }
 /* la croix de sortie de l'accueil — même géométrie et mêmes couleurs que la

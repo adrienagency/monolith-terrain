@@ -317,12 +317,180 @@
 }
 
 /* ─────────────────────────────────────────────────── B. la connexion ───── */
-/* `- 72px` et non `- 32px` : content-box, donc il faut défalquer les 36 px de
-   marge intérieure et les 2 px de bordure en plus des 32 px de marge d'écran,
-   sinon la carte déborde du téléphone au lieu de s'y ranger. */
-.ce-modal.ce-cnx {
-  width: min(360px, calc(100vw - 72px));
+/* UN ÉCRAN PLEIN, PAS UNE BOÎTE — « un panneau d'overlay complet comme celui
+   quand on charge la page au démarrage » (Adrien). Le voile emprunte donc sa
+   recette à l'accueil : le FOND et le FLOU sont déclarés une seule fois, dans
+   v28.css, sur le sélecteur partagé `.ce-hubveil, .ce-cnx-veil` — deux voiles
+   jumeaux qui recopient leur rgba dériveraient au premier réglage.
+   Ici : la place, le plan, et ce qui les distingue. */
+.ce-cnx-veil {
+  position: fixed;
+  inset: 0;
+  /* ⚠️ 240, LÀ OÙ L'ACCUEIL VIT EN 56, et ce n'est pas la même situation.
+     L'accueil passe SOUS la barre du haut parce que c'est son logo qui le
+     rappelle. Cet écran-ci s'ouvre DEPUIS la barre du haut : le laisser
+     dessous montrerait la pastille qu'on vient de cliquer par-dessus l'écran
+     qu'elle a ouvert. Même plan que la modale du compte (voir plus haut), pour
+     que « Supprimer mon compte » ne puisse pas naître derrière lui. */
+  z-index: 240;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  font-family: var(--ce-font);
+  color: var(--ce-ink);
+  opacity: 0;
+  transition: opacity 0.28s cubic-bezier(0.6, 0, 0.3, 1.3);
 }
+.ce-cnx-veil.show {
+  opacity: 1;
+}
+/* la croix garde la géométrie et les couleurs de celle de l'accueil
+   (`.ce-hubclose`, portée par le même bouton) : une croix reste une croix d'un
+   bout à l'autre du site. Elle n'a ici qu'à sortir du fondu de l'accueil, qui
+   la posait à `opacity: .55` au repos — sur cet écran-ci elle est la seule
+   sortie visible, elle se tient donc franche. */
+.ce-cnx-close.ce-hubclose {
+  opacity: 0.75;
+}
+.ce-cnx-scene {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* ⚠️ LA LARGEUR EST CELLE DES MOTS, PAS CELLE DE L'ÉCRAN. Sans plafond, le
+     corps de texte s'étale sur toute la fenêtre et la ligne devient
+     illisible ; 420 px tiennent la mesure de lecture et donnent à la bulle une
+     silhouette verticale, celle d'un formulaire. */
+  width: min(420px, 100%);
+  gap: 22px;
+  text-align: center;
+}
+.ce-cnx-mots {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ce-cnx-titre {
+  margin: 0;
+  font-size: var(--ce-t-title);
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  color: var(--ce-ink);
+}
+/* ⚠️ LE CORPS RESTE EN ENCRE PLEINE SUR LE VOILE. Il est posé sur un fond
+   translucide derrière lequel bouge un rendu 3D : le jeton muet, garanti à
+   3:1 seulement, n'y tient pas la promesse du corps de texte. Même arbitrage
+   que `.ce-compte-corps`, et pour la même raison. */
+.ce-cnx-veil .ce-compte-corps {
+  text-align: center;
+}
+
+/* ── LA ZONE DE SAISIE LIQUIDE ─────────────────────────────────────────────
+   Trois bulles fusionnées par le filtre goo (src/ui/liquid.js) : le champ, le
+   bouton, les liens. Elles n'ont PAS de fond propre — la bulle EST leur fond,
+   c'est la règle du moteur liquide, et un fond de plus l'écraserait.
+   ⚠️ L'ÉCART ENTRE LES BLOCS EST CE QUI FAIT LA FUSION. Les bulles débordent
+   de 8 px (GONFLE, dans compte.js) : à 20 px de gouttière il reste 4 px entre
+   deux bords de bulle, l'écart de référence de liquid.js — l'alpha au milieu
+   tombe à ~0,8 et le filtre creuse une taille concave au lieu de recoller deux
+   rectangles. Plus serré, la silhouette redevient un bloc ; plus large, le
+   pont casse et les trois blocs se détachent. */
+.ce-cnx-bulle {
+  --lq-radius: var(--ce-radius);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  width: 100%;
+}
+.ce-cnx-champ {
+  width: 100%;
+  text-align: left;
+}
+.ce-cnx-go,
+.ce-cnx-liens {
+  /* auto, pas 100 % : c'est ce qui donne à la silhouette sa forme de goutte —
+     une masse large en haut, deux bulbes plus étroits dessous. Étalés en pleine
+     largeur, les trois blocs redeviendraient un rectangle unique et il n'y
+     aurait plus rien à fusionner. */
+  width: auto;
+  max-width: 100%;
+}
+.ce-cnx-liens:empty {
+  display: none;
+}
+/* la marge intérieure de la bulle : le contenu ne doit pas toucher le bord de
+   la silhouette, sinon le flou du goo le mange */
+.ce-cnx-bulle .ce-compte-champ {
+  margin-top: 0;
+  padding: 12px 14px 13px;
+}
+.ce-cnx-bulle .ce-compte-err,
+.ce-cnx-bulle .ce-compte-info {
+  margin: 0 14px 12px;
+}
+.ce-cnx-bulle .ce-compte-liens {
+  margin-top: 0;
+  padding: 9px 16px;
+}
+.ce-cnx-bulle .ce-compte-primaire.ce-btn {
+  height: 40px;
+  padding: 0 22px;
+  border-color: transparent;
+  background: transparent;
+}
+.ce-cnx-bulle .ce-compte-primaire.ce-btn:hover:not(:disabled) {
+  color: var(--ce-accent);
+  background: transparent;
+  border-color: transparent;
+}
+/* ⚠️ SANS BORDURE NI FOND, IL N'Y A PLUS RIEN QUI DISE OÙ EST LE CLAVIER.
+   Le bouton et les deux liens ont perdu leur boîte au profit de la bulle : le
+   focus doit donc la redessiner lui-même. En ENCRE, jamais en accent — même
+   règle que sur la porte à l'export, où l'accent désignerait un gagnant. */
+.ce-cnx-bulle .ce-btn:focus-visible,
+.ce-cnx-bulle .ce-compte-lien:focus-visible {
+  outline: 2px solid var(--ce-ink);
+  outline-offset: 2px;
+  border-radius: var(--ce-radius-s);
+}
+/* ⚠️ LE CHAMP N'A PAS DE BOÎTE À LUI DANS LA BULLE. Une bordure et un fond de
+   champ posés à l'intérieur d'une silhouette qui EST déjà la boîte donnent deux
+   cadres emboîtés — le défaut que le moteur liquide demande explicitement
+   d'éviter. Reste la ligne du bas, qui dit où l'on écrit. */
+.ce-cnx-bulle .ce-compte-input {
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--ce-hairline);
+  border-radius: 0;
+  background: transparent;
+}
+.ce-cnx-bulle .ce-compte-input:focus {
+  border-bottom-color: var(--ce-accent);
+}
+.ce-cnx-bulle .ce-compte-code {
+  height: 42px;
+  text-align: center;
+}
+/* ⚠️ LA SILHOUETTE MORPHE, ELLE NE VOYAGE PAS. Sous `prefers-reduced-motion`,
+   une masse de la taille d'un formulaire qui se déforme au milieu de l'écran
+   est exactement le mouvement de grande surface que la préférence demande de
+   couper. Les deux étapes restent les deux étapes, la forme se pose d'un coup.
+   Les bulles de la barre du bas, elles, ne sont pas touchées : elles ont leur
+   propre règle, et elles occupent une fraction de l'écran. */
+@media (prefers-reduced-motion: reduce) {
+  .ce-cnx-veil {
+    transition: none;
+  }
+  .ce-cnx-bulle .lq-blob {
+    transition: none;
+  }
+}
+
+/* la modale étroite de la connexion N'EXISTE PLUS (l'écran est plein), mais le
+   champ et ses libellés servent aussi ailleurs — ils restent déclarés ici. */
 /* libellé AU-DESSUS du champ (jamais un texte de substitution qui disparaît à
    la saisie) — le <label> enveloppe l'entrée, donc le clic sur le mot donne
    le focus sans qu'il faille apparier un `for` et un `id`. */

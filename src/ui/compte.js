@@ -58,6 +58,7 @@
 
 import './compte.css'
 import { el, button, section, segmented } from './kit.js'
+import { liquidize } from './liquid.js'
 import { Panel } from './shell.js'
 import { mesurerPlancher } from '../plancher-ui.js'
 
@@ -106,6 +107,44 @@ function replierFocus() {
   cible?.focus?.()
 }
 
+// Le clavier d'une boîte de dialogue, posé UNE fois pour les deux coquilles
+// (la modale de carte, et le voile plein écran de la connexion). Il tient les
+// trois gestes qu'on doit à quelqu'un qui n'a pas de souris : Échap ferme, la
+// tabulation ne sort pas, et le focus revient d'où il venait.
+function clavierPiege(carte, close) {
+  const focusables = () =>
+    [...carte.querySelectorAll('button, [href], input, select, textarea')].filter((n) => !n.disabled && n.offsetParent !== null)
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.stopPropagation(); close(); return }
+    if (e.key !== 'Tab') return
+    const f = focusables()
+    if (!f.length) return
+    const [premier, dernier] = [f[0], f[f.length - 1]]
+    if (e.shiftKey && document.activeElement === premier) { e.preventDefault(); dernier.focus() }
+    else if (!e.shiftKey && document.activeElement === dernier) { e.preventDefault(); premier.focus() }
+  }
+  // en capture : les raccourcis clavier de l'application écoutent Échap eux
+  // aussi, et fermeraient autre chose derrière la boîte
+  window.addEventListener('keydown', onKey, true)
+  return () => window.removeEventListener('keydown', onKey, true)
+}
+
+// Le repli du focus à la fermeture — la même règle pour les deux coquilles.
+// ⚠️ ON VÉRIFIE QUE LE FOCUS A ATTERRI, plutôt que de vérifier qu'il POUVAIT
+// atterrir. Le test `isConnected` seul laissait passer les deux cas réels, tous
+// deux mesurés à l'écran : l'entrée de menu qui a ouvert la boîte est retirée du
+// DOM en même temps que le menu (isConnected faux), et une porte ouverte APRÈS
+// l'export part d'un `<body>` déjà actif — `body.focus()` ne fait rien, et il
+// est bel et bien `isConnected`. Dans les deux cas la tabulation repartait du
+// haut du document, c'est-à-dire exactement le défaut que cette ligne prétend
+// corriger. On regarde donc où le focus est VRAIMENT, et on se rabat sur la
+// première commande de l'interface, qui, elle, est toujours là.
+function rendreFocus(rendu) {
+  if (rendu?.isConnected) rendu.focus?.()
+  const pose = document.activeElement
+  if (!pose || pose === document.body || pose === document.documentElement) replierFocus()
+}
+
 function modale(cls, { onClose } = {}) {
   const rendu = document.activeElement
   const veil = el('div', 'ce-modal-veil ce-compte-veil')
@@ -119,40 +158,14 @@ function modale(cls, { onClose } = {}) {
   const close = () => {
     if (ferme) return
     ferme = true
-    window.removeEventListener('keydown', onKey, true)
+    detache()
     veil.remove()
     // rendre le focus est un geste d'accessibilité, pas une politesse : sans
     // lui, la tabulation repart du haut du document à chaque fermeture
-    //
-    // ⚠️ ET ON VÉRIFIE QUE LE FOCUS A ATTERRI, plutôt que de vérifier qu'il
-    // POUVAIT atterrir. Le test `isConnected` seul laissait passer les deux cas
-    // réels, tous deux mesurés à l'écran : l'entrée de menu qui a ouvert la
-    // modale est retirée du DOM en même temps que le menu (isConnected faux),
-    // et une porte ouverte APRÈS l'export part d'un `<body>` déjà actif —
-    // `body.focus()` ne fait rien, et il est bel et bien `isConnected`. Dans les
-    // deux cas la tabulation repartait du haut du document, c'est-à-dire
-    // exactement le défaut que cette ligne prétend corriger. On regarde donc où
-    // le focus est VRAIMENT, et on se rabat sur la première commande de
-    // l'interface, qui, elle, est toujours là.
-    if (rendu?.isConnected) rendu.focus?.()
-    const pose = document.activeElement
-    if (!pose || pose === document.body || pose === document.documentElement) replierFocus()
+    rendreFocus(rendu)
     onClose?.()
   }
-  const focusables = () =>
-    [...carte.querySelectorAll('button, [href], input, select, textarea')].filter((n) => !n.disabled && n.offsetParent !== null)
-  const onKey = (e) => {
-    if (e.key === 'Escape') { e.stopPropagation(); close(); return }
-    if (e.key !== 'Tab') return
-    const f = focusables()
-    if (!f.length) return
-    const [premier, dernier] = [f[0], f[f.length - 1]]
-    if (e.shiftKey && document.activeElement === premier) { e.preventDefault(); dernier.focus() }
-    else if (!e.shiftKey && document.activeElement === dernier) { e.preventDefault(); premier.focus() }
-  }
-  // en capture : les raccourcis clavier de l'application écoutent Échap eux
-  // aussi, et fermeraient autre chose derrière la modale
-  window.addEventListener('keydown', onKey, true)
+  const detache = clavierPiege(carte, close)
   veil.addEventListener('mousedown', (e) => { if (e.target === veil) close() })
 
   // titre + corps, montés par l'appelant via `titre()` — l'id relie le titre à
@@ -165,6 +178,64 @@ function modale(cls, { onClose } = {}) {
     return h
   }
   return { veil, carte, close, titre }
+}
+
+// ────────────────────────────────────────── la coquille PLEIN ÉCRAN
+// La grammaire est celle de l'accueil (`.ce-hubveil`) : un voile qui prend
+// toute la fenêtre, la carte floutée et vivante derrière, la croix de sortie au
+// coin haut-droit, et les mots au centre. Elle est reprise TELLE QUELLE
+// (compte.css n'ajoute que la place et le plan) parce que c'est exactement ce
+// qui a été demandé — « un panneau d'overlay complet comme celui quand on
+// charge la page au démarrage ».
+//
+// ⚠️ CE VOILE-LÀ PASSE AU-DESSUS DE TOUT, l'accueil non. `.ce-hubveil` vit en
+// z-index 56, SOUS la barre du haut, parce que c'est son logo qui le rappelle.
+// Celui-ci s'ouvre DEPUIS la barre du haut : le laisser dessous montrerait la
+// pastille qu'on vient de cliquer par-dessus l'écran qu'elle a ouvert.
+function voilePlein(cls, { onClose } = {}) {
+  const rendu = document.activeElement
+  const veil = el('div', `ce-cnx-veil ${cls}`)
+  veil.setAttribute('role', 'dialog')
+  veil.setAttribute('aria-modal', 'true')
+
+  // la croix REPREND LA CLASSE DE CELLE DE L'ACCUEIL, elle ne la recopie pas :
+  // une croix doit rester une croix d'un bout à l'autre du site, et deux
+  // géométries jumelles finissent toujours par diverger.
+  const croix = el('button', 'ce-hubclose ce-cnx-close', '✕')
+  croix.type = 'button'
+  croix.setAttribute('aria-label', 'Fermer')
+  const scene = el('div', 'ce-cnx-scene')
+  veil.append(croix, scene)
+  document.body.append(veil)
+
+  let ferme = false
+  const close = () => {
+    if (ferme) return
+    ferme = true
+    detache()
+    veil.remove()
+    rendreFocus(rendu)
+    onClose?.()
+  }
+  const detache = clavierPiege(veil, close)
+  croix.addEventListener('click', close)
+  veil.addEventListener('mousedown', (e) => { if (e.target === veil) close() })
+
+  // ⚠️ UN REFLOW, PAS UN `requestAnimationFrame` — la même correction que
+  // `showLivraison` (ui/toast.js) et `avisSansCompte` plus bas, pour la même
+  // raison : un rAF NE SE DÉCLENCHE PAS tant que le document n'est pas
+  // composité, et le voile resterait alors à `opacity: 0`.
+  void veil.offsetWidth
+  veil.classList.add('show')
+
+  let n = 0
+  const titre = (texte) => {
+    const h = el('h2', 'ce-cnx-titre', texte)
+    h.id = `ce-cnx-t${++n}-${Math.random().toString(36).slice(2, 7)}`
+    veil.setAttribute('aria-labelledby', h.id)
+    return h
+  }
+  return { veil, scene, close, titre }
 }
 
 // ═════════════════════════════════════════════════ A. LA PORTE À L'EXPORT ═══
@@ -292,17 +363,71 @@ export function avisSansCompte({ onEnregistrerGabarit } = {}) {
 
 // ═══════════════════════════════════════════════════════ B. LA CONNEXION ═══
 //
-// Deux étapes, deux écrans, DANS LA MÊME CARTE. Jamais les deux champs
-// ensemble : personne n'a le code avant de l'avoir demandé, et un champ vide
-// qu'on ne peut pas remplir est une impasse affichée.
+// UN ÉCRAN PLEIN, PAS UNE BOÎTE. C'est la demande, mot pour mot : « ça ouvre un
+// panneau d'overlay complet comme celui quand on charge la page au démarrage ».
+// La grammaire est donc celle de l'accueil — voile flouté, carte vivante
+// derrière, croix au coin, les mots au centre — et non celle d'une modale
+// posée sur l'interface.
+//
+// ⚠️ LES DEUX ÉTAPES RESTENT DEUX ÉTAPES. Jamais les deux champs ensemble :
+// personne n'a le code avant de l'avoir demandé, et un champ vide qu'on ne peut
+// pas remplir est une impasse affichée. Ce qui change ici, c'est le CONTENANT,
+// pas le parcours — et les textes sont ceux du document, au caractère près.
+//
+// ⚠️ LA ZONE DE SAISIE EST LIQUIDE, et c'est la seconde demande explicite :
+// « le même système de panneau liquide qui s'adapte à ce qu'il y a dedans que
+// pour la barre de menu liquide du bas ». Trois bulles fusionnées par le filtre
+// goo — le champ, le bouton, les liens — dont la géométrie est relue à chaque
+// changement. Comme les transitions des bulles passent PAR le filtre, la
+// silhouette MORPHE au lieu de sauter : entre l'adresse et le code, entre un
+// refus qui apparaît et un refus qui s'efface, entre deux libellés de longueurs
+// différentes.
+//
+// ⚠️ ET LA TROISIÈME BULLE NE SURGIT PAS DE NULLE PART. À l'étape de l'adresse
+// il n'y a pas de liens : plutôt que de la faire naître d'un coup à l'étape
+// suivante (une bulle qui apparaît, c'est un saut, pas un morphe), on la garde
+// vivante, RANGÉE SOUS CELLE DU BOUTON — une boîte analytique, la mécanique que
+// liquid.js prévoit exactement pour ça. Elle en coule donc à l'étape 2, comme
+// une goutte qui se détache de la masse, et y remonte au retour.
 export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
   let abouti = false
-  const m = modale('ce-cnx', { onClose: () => { if (!abouti) onAbandon?.() } })
+  const m = voilePlein('ce-cnx', { onClose: () => { if (!abouti) onAbandon?.() } })
   let adresse = ''
+
+  // les MOTS vivent sur le voile, la SAISIE dans la bulle — la répartition de
+  // l'accueil, où le titre est posé au-dessus de la barre et non dedans
+  const mots = el('div', 'ce-cnx-mots')
+  const bulle = el('div', 'ce-cnx-bulle ce-liquid')
+  const zoneChamp = el('div', 'ce-cnx-champ')
+  const zoneGo = el('div', 'ce-cnx-go')
+  const zoneLiens = el('div', 'ce-cnx-liens')
+  bulle.append(zoneChamp, zoneGo, zoneLiens)
+  m.scene.append(mots, bulle)
+
+  // La boîte d'un élément DANS le cluster (qui est en position:relative, donc
+  // son offsetParent), gonflée comme le fait `inflate`. Elle sert au repos des
+  // liens : rangés sous le bouton, ils n'ont pas de géométrie propre à mesurer.
+  const GONFLE = 8
+  const boiteDe = (n) => ({
+    x: n.offsetLeft - GONFLE,
+    y: n.offsetTop - GONFLE,
+    w: n.offsetWidth + GONFLE * 2,
+    h: n.offsetHeight + GONFLE * 2,
+  })
+  const lq = liquidize(bulle, {
+    inflate: GONFLE,
+    items: () => [
+      { key: '__champ', el: zoneChamp },
+      { key: '__go', el: zoneGo },
+      zoneLiens.childElementCount
+        ? { key: '__liens', el: zoneLiens }
+        : { key: '__liens', box: boiteDe(zoneGo) },
+    ],
+  })
 
   // ---- étape 1 : l'adresse ------------------------------------------------
   function etapeAdresse() {
-    m.carte.replaceChildren(
+    mots.replaceChildren(
       m.titre('On t’envoie un code'),
       el('p', 'ce-compte-corps', 'Pas de mot de passe à retenir. Tu reçois six chiffres, tu les recopies, c’est fini.')
     )
@@ -327,6 +452,9 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
       envoyer.disabled = true
       // le libellé dit ce qui se passe MAINTENANT, jamais « Veuillez patienter »
       envoyer.textContent = 'Envoi du code…'
+      // le libellé vient de changer de longueur : la bulle du bouton doit
+      // suivre le mot, pas le rattraper au prochain sondage
+      lq.refresh()
       try {
         await compte.demanderCode(adresse)
         etapeCode()
@@ -334,25 +462,26 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
         err.textContent = messageRefus(e)
         envoyer.disabled = false
         envoyer.textContent = 'Envoyer le code'
+        lq.refresh()
         inp.focus()
       }
     }
     inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') partir() })
-    const actions = el('div', 'ce-compte-actions')
-    actions.append(envoyer)
-    m.carte.append(champ, err, actions)
+    zoneChamp.replaceChildren(champ, err)
+    zoneGo.replaceChildren(envoyer)
+    zoneLiens.replaceChildren()
+    lq.refresh()
     inp.focus()
   }
 
   // ---- étape 2 : le code --------------------------------------------------
   function etapeCode() {
-    m.carte.replaceChildren(m.titre('Ton code est parti'))
     // l'adresse en gras DANS la phrase : c'est la seule information que
     // l'utilisateur doit pouvoir vérifier d'un coup d'œil avant d'aller
     // chercher son message
     const corps = el('p', 'ce-compte-corps')
     corps.append(document.createTextNode('On l’a envoyé à '), el('b', null, adresse), document.createTextNode('. Il arrive en quelques secondes et reste valable un quart d’heure.'))
-    m.carte.append(corps)
+    mots.replaceChildren(m.titre('Ton code est parti'), corps)
 
     const champ = el('label', 'ce-compte-champ')
     champ.append(el('span', 'ce-compte-lab', 'Les six chiffres'))
@@ -381,6 +510,7 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
       info.textContent = ''
       valider.disabled = true
       valider.textContent = 'Connexion…'
+      lq.refresh()
       try {
         await compte.verifierCode(adresse, code)
         abouti = true
@@ -390,6 +520,9 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
         err.textContent = messageRefus(e)
         valider.disabled = false
         valider.textContent = 'Me connecter'
+        // le refus vient d'ajouter deux lignes dans le champ : la bulle grandit
+        // avec lui, sinon le texte débordait d'une silhouette restée à sa taille
+        lq.refresh()
         inp.select()
       }
     }
@@ -398,7 +531,6 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
     inp.addEventListener('input', () => { inp.value = inp.value.replace(/\D+/g, '').slice(0, 6) })
     inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') verifier() })
 
-    const liens = el('div', 'ce-compte-liens')
     const renvoyer = el('button', 'ce-compte-lien', 'Renvoyer un code')
     renvoyer.type = 'button'
     // ⚠️ ET LE RENVOI SE REPOSE QUELQUES SECONDES. Rien n'empêchait d'enchaîner
@@ -413,8 +545,8 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
       renvoyer.disabled = true
       renvoyer.textContent = `Renvoyer un code (${reste} s)`
       decompte = setInterval(() => {
-        // la modale a pu se fermer, ou l'écran repartir sur l'adresse : un
-        // minuteur qui survit à son bouton tourne jusqu'au rechargement
+        // l'écran a pu se fermer, ou repartir sur l'adresse : un minuteur qui
+        // survit à son bouton tourne jusqu'au rechargement
         if (!renvoyer.isConnected) { clearInterval(decompte); return }
         reste -= 1
         if (reste > 0) { renvoyer.textContent = `Renvoyer un code (${reste} s)`; return }
@@ -437,15 +569,16 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
         err.textContent = messageRefus(e)
         renvoyer.disabled = false
       }
+      lq.refresh()
     })
     const changer = el('button', 'ce-compte-lien', 'Changer d’adresse')
     changer.type = 'button'
     changer.addEventListener('click', () => etapeAdresse())
-    liens.append(renvoyer, changer)
 
-    const actions = el('div', 'ce-compte-actions')
-    actions.append(valider)
-    m.carte.append(champ, err, info, actions, liens)
+    zoneChamp.replaceChildren(champ, err, info)
+    zoneGo.replaceChildren(valider)
+    zoneLiens.replaceChildren(renvoyer, changer)
+    lq.refresh()
     inp.focus()
   }
 
