@@ -84,8 +84,14 @@ export function liquidize(cluster, { items, inflate = 4, bumpFor, rim = false } 
     if (!b) { b = el('i', 'lq-blob'); goo.append(b); blobs.set(key, b) }
     return b
   }
+  // ⚠️ UN CLUSTER PEUT MOURIR, ET IL FAUT ALORS TOUT REPRENDRE (voir `detruire`
+  // en bas de fonction) : tant que la barre du bas était le seul appelant, le
+  // cluster était PERMANENT et la question ne se posait pas. L'écran de
+  // connexion, lui, naît et meurt à chaque ouverture.
+  let mort = false
   const sync = () => {
     raf = 0
+    if (mort) return
     const base = cluster.getBoundingClientRect()
     if (!base.width) return // cluster masqué (display:none) — rien à dessiner
     // un item peut être { key, el } : la bulle est alors keyée sur `key`, pas
@@ -161,27 +167,48 @@ export function liquidize(cluster, { items, inflate = 4, bumpFor, rim = false } 
   // rAF est SUSPENDU onglet caché (piège connu du projet) — fallback timeout
   // pour que les bulles suivent aussi quand la page tourne en arrière-plan
   const ask = () => {
-    if (raf) return
+    if (raf || mort) return
     raf = 1
     if (document.hidden) setTimeout(() => { raf = 0; sync() }, 16)
     else requestAnimationFrame(() => { raf = 0; sync() })
   }
   // ⚠️ sync écrit les styles des bulles → ignorer les mutations des calques
   // goo/liseré eux-mêmes, sinon boucle rAF infinie observer→sync→observer
-  new MutationObserver((recs) => {
+  const mutations = new MutationObserver((recs) => {
     if (recs.some((r) => !goo.contains(r.target) && !(rimLayer && rimLayer.contains(r.target)))) ask()
-  }).observe(cluster, { attributes: true, childList: true, subtree: true })
-  new ResizeObserver(ask).observe(cluster)
+  })
+  mutations.observe(cluster, { attributes: true, childList: true, subtree: true })
+  const tailles = new ResizeObserver(ask)
+  tailles.observe(cluster)
   window.addEventListener('resize', ask)
   document.fonts?.ready?.then(ask)
   // filet : un déplacement piloté par la FEUILLE DE STYLE seule (HMR CSS,
   // media query, thème) ne mute ni le DOM ni la taille du cluster — aucun
   // observer ne le voit. Un poll doux rattrape ces dérives (2-5 bulles, coût
   // négligeable ; les écritures identiques sont filtrées côté observer).
-  setInterval(ask, 600)
+  const sondage = setInterval(ask, 600)
   ask()
+
+  // ⚠️ LE DÉMONTAGE — RETIRER LE CLUSTER DU DOM NE SUFFIT PAS, ET C'EST MESURÉ.
+  // Le minuteur ci-dessus, les deux observateurs et l'écouteur `resize` vivent
+  // sur `window`, pas sur le cluster : ils lui survivent. Six ouvertures de
+  // l'écran de connexion laissaient six `setInterval` et six écouteurs derrière
+  // elles, zéro `clearInterval` — chacun sondant toutes les 600 ms un cluster
+  // détaché, et retenant tout son sous-arbre en mémoire. Invisible en
+  // démonstration, cumulatif sur une longue session.
+  // ⚠️ C'EST UN AJOUT, PAS UN CHANGEMENT DE CONTRAT : la barre du bas est
+  // permanente et n'appelle rien de tout ça — elle continue de n'utiliser que
+  // `refresh` et `sync`, exactement comme avant.
+  const detruire = () => {
+    if (mort) return
+    mort = true
+    clearInterval(sondage)
+    mutations.disconnect()
+    tailles.disconnect()
+    window.removeEventListener('resize', ask)
+  }
   // `sync` est le sync IMMÉDIAT (pas de rAF intercalé) : pendant un voyage
   // piloté frame par frame (barre d'accueil ⇄ barre du bas), passer par ask()
   // ajouterait une frame de retard entre le contenu et son fond.
-  return { refresh: ask, sync }
+  return { refresh: ask, sync, detruire }
 }

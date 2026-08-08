@@ -399,7 +399,12 @@ export function avisSansCompte({ onEnregistrerGabarit } = {}) {
 // une goutte qui se détache de la masse, et y remonte au retour.
 export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
   let abouti = false
-  const m = voilePlein('ce-cnx', { onClose: () => { if (!abouti) onAbandon?.() } })
+  // ⚠️ `lq.detruire()` À LA FERMETURE, ET C'EST OBLIGATOIRE. Le moteur liquide
+  // pose un minuteur, deux observateurs et un écouteur `resize` qui vivent sur
+  // `window` : retirer le voile du DOM ne les emporte pas. Sans cette ligne,
+  // chaque ouverture de l'écran laissait un sondage de 600 ms derrière elle,
+  // qui retenait au passage toute la zone de saisie.
+  const m = voilePlein('ce-cnx', { onClose: () => { lq?.detruire?.(); if (!abouti) onAbandon?.() } })
   let adresse = ''
 
   // les MOTS vivent sur le voile, la SAISIE dans la bulle — la répartition de
