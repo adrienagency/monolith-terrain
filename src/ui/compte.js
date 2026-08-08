@@ -219,7 +219,15 @@ function voilePlein(cls, { onClose } = {}) {
   }
   const detache = clavierPiege(veil, close)
   croix.addEventListener('click', close)
-  veil.addEventListener('mousedown', (e) => { if (e.target === veil) close() })
+  // ⚠️ `preventDefault` N'EST PAS UNE PRÉCAUTION, C'EST LA CORRECTION D'UN
+  // DÉFAUT MESURÉ. `close()` tourne sur `mousedown` et rend le focus à la
+  // pastille — puis l'action PAR DÉFAUT du `mousedown`, qui s'exécute APRÈS le
+  // gestionnaire, le reprend et le pose sur l'élément cliqué… qui vient d'être
+  // retiré du document : le focus atterrissait sur `<body>` et la tabulation
+  // repartait du haut de la page. Reproduit deux fois au vrai clic (un clic
+  // scripté, lui, ne déplace aucun focus et ne montre donc rien). Échap et la
+  // croix passaient, eux, parce qu'aucun geste par défaut ne les suit.
+  veil.addEventListener('mousedown', (e) => { if (e.target === veil) { e.preventDefault(); close() } })
 
   // ⚠️ UN REFLOW, PAS UN `requestAnimationFrame` — la même correction que
   // `showLivraison` (ui/toast.js) et `avisSansCompte` plus bas, pour la même
