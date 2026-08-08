@@ -501,6 +501,43 @@ export function buildMesCartesPanel(ctx) {
     tip: 'Les cartes que tu as publiées, avec leur lien.',
   })
 
+  // ⚠️ AU TÉLÉPHONE, CE PANNEAU CAMPAIT AU MILIEU DE LA CARTE.
+  // La reprise du rail droit (compte.css) est juste sur grand écran — mais le
+  // mode par défaut EST celui du téléphone : mesuré à 390 × 844, connecté, le
+  // panneau déplié occupait 270 × 376 en (106, 120), soit 69 % de la largeur et
+  // 30,8 % de la surface, planté sur la carte à CHAQUE chargement, sans que
+  // personne l'ait demandé.
+  // Sous 700 px il arrive donc REPLIÉ : sa pastille d'en-tête reste le chemin
+  // vers ses cartes — on ne retire pas la fonction, on lui rend la carte.
+  // ⚠️ ET LE GESTE EST RETENU, dans les deux sens. Le replier à chaque visite
+  // était l'autre moitié du défaut : un réglage qu'il faut refaire à chaque
+  // fois n'est pas un réglage.
+  // ⚠️ SUR GRAND ÉCRAN, SANS PRÉFÉRENCE ENREGISTRÉE, RIEN NE CHANGE : le
+  // panneau s'ouvre exactement comme avant.
+  // ⚠️ DÉCONNECTÉ, PAS UNE CLÉ N'EST ÉCRITE : on ne fait que LIRE au montage, et
+  // le panneau est `hidden` — il n'y a aucun clic à retenir.
+  const CLE_REPLI = 'shibumap.cartes.replie'
+  const repliVoulu = () => {
+    try {
+      const v = localStorage.getItem(CLE_REPLI)
+      if (v === 'oui') return true
+      if (v === 'non') return false
+    } catch {}
+    return !!window.matchMedia?.('(max-width: 699px)')?.matches
+  }
+  // On n'appelle setCollapsed QUE pour replier : `setCollapsed(false)` replie
+  // les voisins du rail (accordéon exclusif), et déplié est déjà l'état par
+  // défaut du panneau — l'appeler au montage changerait le rail des autres.
+  if (repliVoulu()) panel.setCollapsed(true)
+  const noterRepli = () => {
+    try { localStorage.setItem(CLE_REPLI, panel.collapsed ? 'oui' : 'non') } catch {}
+  }
+  // Les deux gestes de repli : le chevron (qui arrête sa propagation vers
+  // l'en-tête) et l'en-tête entier. Ces écouteurs sont posés APRÈS ceux du
+  // constructeur, donc `panel.collapsed` porte déjà le nouvel état.
+  panel.collapseBtn.addEventListener('click', noterRepli)
+  panel.head.addEventListener('click', noterRepli)
+
   let tri = 'date'
   const barreTri = segmented({
     options: [

@@ -88,6 +88,10 @@ C'est ce que **tout le monde** voit le premier jour. Cet écran-là mérite auta
 
 Trois lignes grises à la forme des vraies. Pas de roue qui tourne.
 
+### Au téléphone
+
+Sous 700 px, le panneau arrive **replié** : la carte est ce qu'on est venu voir, et 376 px de panneau au milieu de l'écran n'ont été demandés par personne. Sa pastille d'en-tête reste le chemin vers les cartes, et le geste de replier ou déplier est **retenu** d'une visite à l'autre — dans les deux sens.
+
 ---
 
 ## D. Mon compte
