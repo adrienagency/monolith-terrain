@@ -119,7 +119,11 @@ Sous 700 px, le panneau arrive **replié** : la carte est ce qu'on est venu voir
 
 ## D. Mon compte
 
-Une section dans la modale de Paramètres, qui existe déjà.
+**En pied du panneau « Mes créations »**, depuis le 2026-08-08.
+
+> *Il vivait dans la modale de Paramètres. C'est de là que part toute cette reprise : une roue crantée abrite des réglages d'application — la performance, la fenêtre continue, l'aide. Une identité n'est pas un réglage, et l'y cacher obligeait à ouvrir une modale de réglages pour se déconnecter.*
+
+**La porte est ailleurs** — une pastille dans la pill de droite de la barre du haut : un buste dans un cercle, cerclé d'accent quand personne n'est connecté, coché de vert quand quelqu'un l'est.
 
 **Titre** — Mon compte
 **Ligne d'identité** — Connecté avec **{adresse}**

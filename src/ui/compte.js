@@ -57,7 +57,7 @@
 // change dans main.js (l'import) — rien ici.
 
 import './compte.css'
-import { el, button, section, segmented } from './kit.js'
+import { el, button, segmented } from './kit.js'
 import { liquidize } from './liquid.js'
 import { Panel } from './shell.js'
 import { mesurerPlancher } from '../plancher-ui.js'
@@ -768,7 +768,12 @@ export function buildMesCartesPanel(ctx) {
     set: (v) => { tri = v; rendre() },
   })
   const liste = el('div', 'ce-cartes-liste')
-  panel.body.append(barreTri, liste)
+  // « MON COMPTE » VIT ICI, EN PIED DE PANNEAU — il a quitté les Paramètres,
+  // où le ranger obligeait à ouvrir une modale de réglages pour se déconnecter.
+  // Il se rend lui-même et suit la session : déconnecté, il est vide, et
+  // `:empty` le retire du flux.
+  const pied = piedMonCompte(compte)
+  panel.body.append(barreTri, liste, pied)
 
   let cartes = null // null = pas encore chargé ; [] = chargé et vide
   // ⚠️ LE TROISIÈME ÉTAT. « Chargé et vide » et « pas pu lire » ne sont pas la
@@ -922,28 +927,29 @@ export function buildMesCartesPanel(ctx) {
 
 // ═════════════════════════════════════════════════════════ D. MON COMPTE ═══
 //
-// Une section de plus dans la modale des Paramètres, qui existe déjà. La barre
-// du haut n'est pas touchée : sept emplacements y sont déjà denses.
-export function sectionMonCompte(ctx) {
-  const compte = ctx.compte ?? compteInerte
-  const s = section('Mon compte')
-  s.root.classList.add('ce-moncompte')
-  const corps = el('div', 'ce-moncompte-corps')
-  s.body.append(corps)
+// ⚠️ IL A QUITTÉ LES PARAMÈTRES, ET C'EST LE POINT DE DÉPART DE TOUTE CETTE
+// REPRISE. Une roue crantée abrite des réglages d'application — la performance,
+// la fenêtre continue, l'aide. Une identité n'est pas un réglage, et l'y cacher
+// obligeait à ouvrir une modale de réglages pour se déconnecter.
+//
+// Ses actions descendent donc AU BAS DU PANNEAU « MES CRÉATIONS » : là où l'on
+// est déjà quand on pense à son compte, sous les cartes dont on vient de
+// vérifier les liens. La pastille de la barre du haut y mène en un clic.
+//
+// ⚠️ ET IL N'A PLUS DE BRANCHE « DÉCONNECTÉ ». C'est le panneau entier qui la
+// porte maintenant (`invite()`, plus haut) : deux boutons « Me connecter » à
+// deux endroits d'un même panneau seraient une redite, pas une commodité.
+export function piedMonCompte(compte) {
+  const corps = el('div', 'ce-moncompte-corps ce-moncompte-pied')
 
   function rendre() {
     corps.replaceChildren()
-    if (!compte.estConnecte?.()) {
-      // Déconnecté : une porte, pas un discours. Le bouton dit exactement ce
-      // qui va se passer, et rien d'autre n'est promis.
-      const b = button('Me connecter', () => ouvrirConnexion(compte, { onConnecte: rendre }))
-      b.classList.add('ce-compte-primaire')
-      corps.append(b)
-      return
-    }
+    // Déconnecté, le pied n'a rien à dire : l'invitation du panneau tient déjà
+    // ce discours, et `:empty` le retire du flux (compte.css) — pas de trait de
+    // séparation flottant sous une invitation.
+    if (!compte.estConnecte?.()) return
     const ident = el('p', 'ce-moncompte-ident')
     ident.append(document.createTextNode('Connecté avec '), el('b', null, compte.adresse() || ''))
-    corps.append(ident)
 
     // ⚠️ DEUX BOUTONS QUI AVALAIENT TOUT — SUCCÈS COMME ÉCHEC.
     // « Exporter mes données » lançait la promesse sans l'attendre ni la
@@ -993,11 +999,11 @@ export function sectionMonCompte(ctx) {
     const suppr = el('button', 'ce-moncompte-suppr', 'Supprimer mon compte')
     suppr.type = 'button'
     suppr.addEventListener('click', () => confirmerSuppression(compte, { onFait: rendre }))
-    corps.append(actions, ecart, dit, suppr)
+    corps.append(el('p', 'ce-moncompte-titre', 'Mon compte'), ident, actions, ecart, dit, suppr)
   }
   rendre()
   compte.surChangement?.(rendre)
-  return s
+  return corps
 }
 
 // ───────────────────────────────────────────────── la suppression, confirmée

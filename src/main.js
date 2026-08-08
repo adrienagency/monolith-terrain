@@ -135,7 +135,7 @@ import { buildTemplatesPanel } from './ui/templates-panel.js'
 // et le contrat de référence, mais il n'est plus ce que l'application branche.
 // `creerCompteApp` compose src/compte.js et rend exactement ce contrat — voir
 // l'en-tête de src/compte-app.js.
-import { porteExport, buildMesCartesPanel, sectionMonCompte } from './ui/compte.js'
+import { porteExport, buildMesCartesPanel } from './ui/compte.js'
 import { creerCompteApp } from './compte-app.js'
 import { buildFondsPanel, contributeTerrainSections, buildPaletteCreation } from './ui/create-panel.js'
 import { buildStore } from './ui/store.js'
@@ -9370,12 +9370,13 @@ if (!IS_EMBED) {
   perf.root.classList.add('open')
   const aide = aideSection()
   aide.root.classList.add('open')
-  // « Mon compte » : un `append` de plus, et RIEN dans la barre du haut — sept
-  // emplacements y sont déjà denses. Déconnecté, la section ne montre qu'un
-  // bouton « Me connecter » ; elle ne réclame rien et ne bloque rien.
-  const monCompte = sectionMonCompte(panelCtx)
-  monCompte.root.classList.add('open')
-  box.append(perf.root, aide.root, monCompte.root)
+  // ⚠️ « MON COMPTE » N'EST PLUS ICI — c'est le point de départ de la reprise
+  // du 2026-08-08. Une roue crantée abrite des réglages d'application (la
+  // performance, la fenêtre continue, l'aide) ; une identité n'est pas un
+  // réglage, et l'y ranger obligeait à ouvrir une modale de réglages pour se
+  // déconnecter. Le compte a maintenant sa pastille dans la barre du haut, et
+  // ses actions vivent au bas du panneau « Mes créations ».
+  box.append(perf.root, aide.root)
   veil.append(box)
   document.body.append(veil)
   const closeSettings = () => veil.classList.remove('open')

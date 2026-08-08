@@ -767,8 +767,34 @@ a.ce-cartes-ligne:hover .ce-cartes-url {
 }
 
 /* ─────────────────────────────────────────────────── D. « Mon compte » ─── */
+/* IL A QUITTÉ LES PARAMÈTRES pour le pied du panneau « Mes créations » : on
+   pense à son compte là où l'on est déjà, sous les cartes dont on vient de
+   vérifier les liens — pas dans une modale de réglages d'application. */
 .ce-moncompte-corps {
   padding: 2px 2px 4px;
+}
+/* ⚠️ VIDE, LE PIED NE DOIT PAS LAISSER SA TRACE. Déconnecté il ne rend rien,
+   et sans cette ligne son trait de séparation flotterait quand même sous
+   l'invitation, annonçant une section qui n'existe pas. */
+.ce-moncompte-pied:empty {
+  display: none;
+}
+.ce-moncompte-pied {
+  margin-top: var(--ce-gap-group);
+  padding-top: var(--ce-gap-group);
+  border-top: 1px solid var(--ce-hairline);
+}
+/* le titre du pied : c'est un CHANGEMENT DE SUJET dans le panneau (on quitte
+   les cartes pour l'identité), et un changement de sujet se nomme. Même palier
+   de micro-libellé en capitales que les libellés de champ, pour qu'il se lise
+   comme une étiquette de section et non comme une ligne de plus. */
+.ce-moncompte-titre {
+  margin: 0 0 8px;
+  font-size: var(--ce-t-micro);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ce-muted);
 }
 .ce-moncompte-ident {
   margin: 0 0 10px;
