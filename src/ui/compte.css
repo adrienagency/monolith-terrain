@@ -253,6 +253,16 @@
    battement, rien qui bouge dans le coin de l'œil pendant qu'on travaille. */
 .ce-comptebtn.hors::after {
   box-shadow: 0 0 0 0 color-mix(in srgb, var(--ce-accent) 42%, transparent);
+}
+/* ⚠️ ET ELLE SE JOUE APRÈS QUE L'ÉCRAN EST DÉCOUVERT, PAS AU MONTAGE DU BOUTON.
+   Chronométré au démarrage : la pastille naissait à 5,5 s, le halo était
+   `finished` à 7,3 s — et le sas d'accueil, qui couvre TOUTE la fenêtre, barre
+   du haut comprise, ne s'effaçait qu'à 8,5 s. La seule respiration prévue était
+   donc intégralement dépensée derrière un voile opaque : quand le visiteur
+   arrivait enfin dans l'application, il ne restait que l'anneau statique.
+   `body.ce-devoile` est posée quand le sas tombe (ui/hub.js) — une seule fois,
+   jamais retirée : rouvrir l'accueil plus tard n'est plus une arrivée. */
+body.ce-devoile .ce-comptebtn.hors::after {
   animation: ce-compte-halo 1.05s cubic-bezier(0.2, 0, 0, 1) 0.7s 1 both;
 }
 @keyframes ce-compte-halo {
@@ -315,7 +325,11 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ce-comptebtn.hors::after {
+  /* ⚠️ LE SÉLECTEUR SUIT CELUI QUI ARME LE HALO. Depuis que la respiration est
+     déclarée sur `body.ce-devoile .ce-comptebtn.hors::after` (0,3,1), un
+     `.ce-comptebtn.hors::after` nu (0,2,1) ne pèse plus assez pour la couper —
+     la préférence serait ignorée en silence. */
+  body.ce-devoile .ce-comptebtn.hors::after {
     animation: none;
   }
 }

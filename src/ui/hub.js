@@ -18,9 +18,20 @@ import { TITRE_ACCUEIL } from './accueil.js'
 const BLOCKED = ['ce-noui', 'ce-embed', 'store-mode', 'studio-mode', 'atelier-mode', 'shibu-view']
 const blocked = () => BLOCKED.some((c) => document.body.classList.contains(c))
 
+// ⚠️ « L'ÉCRAN EST DÉCOUVERT » — un fait que personne ne disait, et qui manquait.
+// Le sas d'accueil couvre TOUTE la fenêtre, barre du haut comprise, jusqu'à ce
+// que le visiteur le ferme. Une arrivée qui s'anime au montage de son bouton se
+// joue donc SOUS le voile : mesuré au démarrage, la respiration de l'anneau du
+// compte était `finished` à 7,3 s alors que le sas ne s'effaçait qu'à 8,5 s —
+// personne ne l'a jamais vue. La classe est posée UNE FOIS, quand le sas tombe,
+// et c'est elle qui arme ce genre d'arrivée (compte.css). Elle ne se retire
+// jamais : rouvrir l'accueil plus tard n'est plus une première arrivée, et la
+// respiration ne doit pas se rejouer à chaque aller-retour.
+const devoiler = () => document.body.classList.add('ce-devoile')
+
 export function buildHub({ bar, bottomBar, onExplore }) {
   // pas de barre (mode embed) : un accueil sans son objet n'a pas de sens
-  if (!bar?.root) return { show() {}, hide() {}, toggle() {}, isOpen: () => false }
+  if (!bar?.root) { devoiler(); return { show() {}, hide() {}, toggle() {}, isOpen: () => false } }
 
   // le voile vit SOUS les barres (z-index 56 < topbar 60) : la topbar reste
   // nette et cliquable — c'est son logo qui fait remonter la barre au centre.
@@ -124,7 +135,10 @@ export function buildHub({ bar, bottomBar, onExplore }) {
   }
 
   function show() {
-    if (blocked() || isOpen()) return
+    // un contexte bloqué (boutique, Studio, viewer) n'aura JAMAIS de sas :
+    // l'écran y est découvert dès la première image, il faut le dire aussi.
+    if (blocked()) { devoiler(); return }
+    if (isOpen()) return
     sas.demander()
   }
   function hide() {
@@ -132,6 +146,9 @@ export function buildHub({ bar, bottomBar, onExplore }) {
     // demande en attente derrière un chargement remonterait sinon toute seule,
     // longtemps après qu'Adrien a appuyé sur Échap pour explorer librement.
     sas.annuler()
+    // le voile s'en va (ou ne viendra plus) : à partir d'ici, ce qui s'anime
+    // dans la barre est réellement regardé.
+    devoiler()
     if (!isOpen()) return
     if (input) input.placeholder = barPlaceholder
     bar.setHome(false)
