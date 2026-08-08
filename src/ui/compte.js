@@ -515,17 +515,55 @@ export function sectionMonCompte(ctx) {
     ident.append(document.createTextNode('Connecté avec '), el('b', null, compte.adresse() || ''))
     corps.append(ident)
 
+    // ⚠️ DEUX BOUTONS QUI AVALAIENT TOUT — SUCCÈS COMME ÉCHEC.
+    // « Exporter mes données » lançait la promesse sans l'attendre ni la
+    // rattraper : succès et échec rendaient exactement le même écran (rien),
+    // plus un rejet non géré dans la console. « Me déconnecter » attendait sans
+    // rattraper : une déconnexion en panne laissait l'écran affirmer qu'on est
+    // connecté, sans un mot. Les deux disent maintenant ce qui se passe pendant
+    // (le libellé, comme partout ailleurs dans ce fichier), puis ce qui s'est
+    // passé — un refus dans la même grammaire que les autres écrans.
+    const ecart = el('p', 'ce-compte-err')
+    ecart.setAttribute('role', 'alert')
+    const dit = el('p', 'ce-compte-info')
+    dit.setAttribute('role', 'status')
+
+    const sortir = button('Me déconnecter', async () => {
+      ecart.textContent = ''
+      dit.textContent = ''
+      sortir.disabled = true
+      sortir.textContent = 'Déconnexion…'
+      try {
+        await compte.deconnecter()
+        rendre() // l'écran entier est refait : rien à remettre en état ici
+      } catch (e) {
+        ecart.textContent = messageRefus(e)
+        sortir.disabled = false
+        sortir.textContent = 'Me déconnecter'
+      }
+    })
+    const exporter = button('Exporter mes données', async () => {
+      ecart.textContent = ''
+      dit.textContent = ''
+      exporter.disabled = true
+      exporter.textContent = 'Préparation…'
+      try {
+        await compte.exporterMesDonnees()
+        dit.textContent = 'Ton fichier est parti.'
+      } catch (e) {
+        ecart.textContent = messageRefus(e)
+      }
+      exporter.disabled = false
+      exporter.textContent = 'Exporter mes données'
+    })
     const actions = el('div', 'ce-moncompte-actions')
-    actions.append(
-      button('Me déconnecter', async () => { await compte.deconnecter(); rendre() }),
-      button('Exporter mes données', () => { compte.exporterMesDonnees?.() })
-    )
+    actions.append(sortir, exporter)
     // La suppression vit à distance des deux autres : elle est définitive, et
     // un destructif rangé au milieu des gestes courants finit par se cliquer.
     const suppr = el('button', 'ce-moncompte-suppr', 'Supprimer mon compte')
     suppr.type = 'button'
     suppr.addEventListener('click', () => confirmerSuppression(compte, { onFait: rendre }))
-    corps.append(actions, suppr)
+    corps.append(actions, ecart, dit, suppr)
   }
   rendre()
   compte.surChangement?.(rendre)
