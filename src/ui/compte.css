@@ -125,9 +125,20 @@
   outline-offset: 2px;
 }
 /* écran étroit : les deux boutons s'empilent, et restent identiques */
+/* ⚠️ ET `flex-basis` DOIT ÊTRE REPRIS, SINON L'EMPILEMENT PRODUIT DEUX PAVÉS.
+   En ligne, `flex: 1 1 140px` désigne la LARGEUR de base et `height: 44px`
+   règle la hauteur. Bascule la direction en `column` et l'axe principal change
+   de sens : les 140 px deviennent une HAUTEUR de base, qui l'emporte sur
+   `height`. Mesuré à 340 px avant correction : 268 × 140 par bouton, soit près
+   des deux tiers de la carte pour deux libellés d'une ligne. `0 0 44px` rend
+   aux deux la hauteur qu'ils ont partout ailleurs — et ils restent identiques,
+   ce qui est tout ce qui compte ici. */
 @media (max-width: 420px) {
   .ce-porte-choix {
     flex-direction: column;
+  }
+  .ce-porte-choix .ce-porte-btn {
+    flex: 0 0 44px;
   }
 }
 
