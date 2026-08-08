@@ -476,31 +476,45 @@ body.ce-devoile .ce-comptebtn.hors::after {
    ils flottaient sur la carte floutée, SANS FOND, pendant ≈ 200 ms ; sur un
    refus, c'était la bande teintée du message (fond à 8 % + filet d'accent,
    392 px de large) qui PENDAIT sous la silhouette pendant ≈ 160 ms.
-   Le contenu attend donc que son fond soit arrivé : opacité tenue à 0 pendant
-   les 58 % du voyage qui précèdent le recouvrement (mesuré : la bulle des liens
-   couvre leur boîte à t ≈ 195 ms, celle du champ couvre le message à
-   t ≈ 160 ms), puis il se découvre pendant que la bulle finit son rebond.
+   Le contenu attend donc que son fond soit arrivé.
+   ⚠️ MAIS L'ATTENTE EST GÉOMÉTRIQUE, JAMAIS TEMPORELLE — et c'est la deuxième
+   moitié de la leçon, payée une fois. Le premier correctif armait un MINUTEUR
+   FIXE (58 % de 0,34 s) par la règle du `display` : `:empty` → affiché relance
+   une animation, donc À CHAQUE remise du message. Or `verifier()` et le renvoi
+   commencent tous deux par VIDER le texte. Résultat mesuré sur un DEUXIÈME code
+   refusé (réseau à 350 ms) : la bulle avait rattrapé le message à t = 560 ms, la
+   première encre n'arrivait qu'à 595 et le plein à 737 — le fond à sa taille
+   définitive avec une bande vide dedans, la symétrie exacte du défaut qu'on
+   voulait corriger, retournée. Sur « Renvoyer un code » après un refus, pire
+   encore : la bulle RÉTRÉCIT et couvre la boîte de `.ce-compte-info` dès
+   l'image 0 — il n'y avait rien à attendre, et la confirmation était tenue
+   invisible 212 ms quand même.
+   L'attente est donc POSÉE PAR `compte.js` (classe `ce-cnx-attend`), et
+   seulement quand la bulle a réellement du chemin à faire : tant qu'elle ne
+   couvre pas la boîte du bloc, le bloc est à 0 ; à l'image où elle la couvre,
+   la classe tombe et cette transition le découvre. Quand elle couvre déjà, la
+   classe n'est jamais posée et le contenu est visible dès l'image 0.
    ⚠️ OPACITÉ SEULE, PAS DE `transform` : liquid.js MESURE `.ce-cnx-liens` pour
    placer sa bulle — un déplacement du contenu ferait courir la bulle après son
    propre effet, avec une image de retard.
    ⚠️ ET RIEN SUR LE CHEMIN RETOUR : quand la forme RÉTRÉCIT (étape 2 → étape 1),
    le contenu disparaît d'un coup et le fond reste toujours plus grand que ce
-   qu'il porte. Le défaut n'existe qu'à la MONTÉE — les deux blocs ne s'animent
-   donc qu'à leur apparition (`:empty` → affiché relance l'animation, la règle
-   du display), et jamais à leur retrait. */
-.ce-cnx-liens,
+   qu'il porte. Le retrait ne pose aucune classe, donc l'opacité y reste à 1 de
+   bout en bout. */
+.ce-cnx-bulle .ce-cnx-liens,
 .ce-cnx-bulle .ce-compte-err,
 .ce-cnx-bulle .ce-compte-info {
-  animation: ce-cnx-venir 0.34s cubic-bezier(0.2, 0, 0, 1) both;
+  transition: opacity 0.16s cubic-bezier(0.2, 0, 0, 1);
 }
-@keyframes ce-cnx-venir {
-  0%,
-  58% {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+/* ⚠️ `transition: none` ICI, ET CE N'EST PAS DÉCORATIF. Un bloc qui vient
+   d'être vidé garde une opacité calculée de 1 : poser la classe déclenchait
+   alors la transition À L'ENVERS — mesuré, le texte s'ÉTEIGNAIT en 160 ms
+   (1 → 0,8 → 0,45 → 0,27…) avant d'attendre son fond. La transition se lit sur
+   le style D'ARRIVÉE : coupée à la pose, elle ne joue qu'au retrait de la
+   classe, c'est-à-dire à la découverte. */
+.ce-cnx-bulle .ce-cnx-attend {
+  opacity: 0;
+  transition: none;
 }
 
 .ce-cnx-bulle .ce-compte-primaire.ce-btn {
@@ -571,11 +585,16 @@ body.ce-devoile .ce-comptebtn.hors::after {
   /* ⚠️ ET LE CONTENU NE S'ATTARDE PLUS NON PLUS. Ici la forme se pose en UNE
      image : il n'y a plus de voyage à attendre, et tenir le texte à 0 pendant
      200 ms le ferait arriver APRÈS son fond — le défaut à l'envers, inventé de
-     toutes pièces sur le seul chemin qui n'en avait pas. */
-  .ce-cnx-liens,
+     toutes pièces sur le seul chemin qui n'en avait pas.
+     `compte.js` ne pose déjà plus la classe sous cette préférence ; la règle la
+     désarme quand même, pour qu'une classe oubliée ne puisse pas éteindre un
+     texte sur le chemin qui n'a jamais eu de défaut. */
+  .ce-cnx-bulle .ce-cnx-liens,
   .ce-cnx-bulle .ce-compte-err,
-  .ce-cnx-bulle .ce-compte-info {
-    animation: none;
+  .ce-cnx-bulle .ce-compte-info,
+  .ce-cnx-bulle .ce-cnx-attend {
+    opacity: 1;
+    transition: none;
   }
 }
 

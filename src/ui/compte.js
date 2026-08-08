@@ -449,6 +449,62 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
     ],
   })
 
+  // ⚠️ LE CONTENU N'ATTEND QUE S'IL A UNE RAISON D'ATTENDRE, ET LA RAISON SE
+  // MESURE. Tenir un bloc à 0 le temps que sa bulle vienne le couvrir est juste
+  // à la MONTÉE ; c'est un défaut partout ailleurs. Un minuteur fixe ne sait pas
+  // faire la différence : sur un DEUXIÈME code refusé il tenait le message
+  // invisible 210 ms après que la bulle l'avait rattrapé, et sur « Renvoyer un
+  // code » il masquait 212 ms une confirmation que la bulle couvrait DÉJÀ à
+  // l'image 0 — le fond sans son texte, c'est-à-dire le défaut retourné.
+  // Le critère est donc GÉOMÉTRIQUE : la bulle couvre-t-elle la boîte du bloc ?
+  // ⚠️ ET PAS `transitionend` : il n'arrive jamais dans un onglet non composité.
+  // On échantillonne la géométrie réelle image par image, avec le même repli
+  // `setTimeout` que liquid.js pour l'onglet caché (où rAF est suspendu), et une
+  // butée de sécurité : un bloc ne peut JAMAIS rester invisible.
+  const TOLERANCE = 1
+  const couvre = (b, r) =>
+    !!b &&
+    b.left <= r.left + TOLERANCE &&
+    b.right >= r.right - TOLERANCE &&
+    b.top <= r.top + TOLERANCE &&
+    b.bottom >= r.bottom - TOLERANCE
+  const BUTEE = 600
+  const attentes = new Map()
+  function attendreFond(bloc, key) {
+    const encours = attentes.get(bloc)
+    if (encours) encours.stop = true
+    attentes.delete(bloc)
+    bloc.classList.remove('ce-cnx-attend')
+    // sous `prefers-reduced-motion` la forme se pose en UNE image : il n'y a
+    // aucun voyage à masquer, et une seule image à 0 serait déjà le défaut
+    // inverse. Onglet caché : rien à masquer non plus.
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    if (document.hidden) return
+    const boite = bloc.getBoundingClientRect()
+    if (!boite.width || couvre(lq.boite(key), boite)) return
+    bloc.classList.add('ce-cnx-attend')
+    const jeton = { stop: false }
+    attentes.set(bloc, jeton)
+    const limite = Date.now() + BUTEE
+    const decouvrir = () => {
+      jeton.stop = true
+      attentes.delete(bloc)
+      bloc.classList.remove('ce-cnx-attend')
+    }
+    const regarder = () => {
+      if (jeton.stop) return
+      // l'écran a pu se fermer, ou le bloc se vider (retour à l'étape 1)
+      if (!bloc.isConnected || bloc.offsetParent === null) { decouvrir(); return }
+      if (Date.now() >= limite || couvre(lq.boite(key), bloc.getBoundingClientRect())) { decouvrir(); return }
+      planifier()
+    }
+    const planifier = () => {
+      if (document.hidden) setTimeout(regarder, 16)
+      else requestAnimationFrame(regarder)
+    }
+    planifier()
+  }
+
   // ---- étape 1 : l'adresse ------------------------------------------------
   function etapeAdresse() {
     mots.replaceChildren(
@@ -486,6 +542,7 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
         err.textContent = messageRefus(e)
         envoyer.disabled = false
         envoyer.textContent = 'Envoyer le code'
+        attendreFond(err, '__champ')
         lq.refresh()
         inp.focus()
       }
@@ -546,6 +603,7 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
         valider.textContent = 'Me connecter'
         // le refus vient d'ajouter deux lignes dans le champ : la bulle grandit
         // avec lui, sinon le texte débordait d'une silhouette restée à sa taille
+        attendreFond(err, '__champ')
         lq.refresh()
         inp.select()
       }
@@ -588,10 +646,12 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
         inp.value = ''
         inp.focus()
         info.textContent = 'Un nouveau code est parti.'
+        attendreFond(info, '__champ')
         reposer(15)
       } catch (e) {
         err.textContent = messageRefus(e)
         renvoyer.disabled = false
+        attendreFond(err, '__champ')
       }
       lq.refresh()
     })
@@ -602,6 +662,9 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
     zoneChamp.replaceChildren(champ, err, info)
     zoneGo.replaceChildren(valider)
     zoneLiens.replaceChildren(renvoyer, changer)
+    // la troisième bulle est rangée sous le bouton : elle a 60 px à descendre
+    // avant de passer sous les deux liens — c'est le voyage du défaut A
+    attendreFond(zoneLiens, '__liens')
     lq.refresh()
     inp.focus()
   }

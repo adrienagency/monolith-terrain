@@ -207,8 +207,18 @@ export function liquidize(cluster, { items, inflate = 4, bumpFor, rim = false } 
     tailles.disconnect()
     window.removeEventListener('resize', ask)
   }
+  // ⚠️ OÙ EST LA BULLE *MAINTENANT* — la question que personne ne pouvait poser.
+  // Un appelant qui veut savoir si le fond d'un bloc est DÉJÀ arrivé sous lui
+  // n'a que deux recours : `transitionend`, qui n'arrive JAMAIS dans un onglet
+  // non composité (piège documenté trois fois dans ce dépôt), ou un minuteur
+  // fixe, qui ment dès que la bulle n'a pas de chemin à faire. La géométrie
+  // réelle, elle, ne ment pas : `getBoundingClientRect` sur la bulle rend sa
+  // position INTERPOLÉE, image par image, translate compris.
+  // ⚠️ AJOUT, PAS CHANGEMENT DE CONTRAT : la barre du bas n'appelle que
+  // `refresh` et `sync`, exactement comme avant.
+  const boite = (key) => blobs.get(key)?.getBoundingClientRect() || null
   // `sync` est le sync IMMÉDIAT (pas de rAF intercalé) : pendant un voyage
   // piloté frame par frame (barre d'accueil ⇄ barre du bas), passer par ask()
   // ajouterait une frame de retard entre le contenu et son fond.
-  return { refresh: ask, sync, detruire }
+  return { refresh: ask, sync, detruire, boite }
 }
