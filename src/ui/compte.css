@@ -476,6 +476,20 @@ a.ce-cartes-ligne:hover .ce-cartes-url {
   color: var(--ce-accent);
 }
 
+/* L'ÉTAT « PAS PU LIRE » — il emprunte la mise en page de l'état vide, parce
+   que c'est la même place et le même geste unique, mais il ne dit pas la même
+   chose : l'un invite, l'autre rassure.
+   ⚠️ SON CORPS RESTE EN PLEINE ENCRE. C'est lui qui porte « tes cartes n'ont
+   pas bougé » — la phrase qu'il faut lire le plus sûrement de tout le panneau,
+   celle qui répond à la première peur. Le gris muet de l'invitation
+   conviendrait mal à une nouvelle qu'on doit croire.
+   ⚠️ ET AUCUN FILET D'ACCENT NI FOND TEINTÉ : la grammaire du refus
+   (`.ce-compte-err`) annonce qu'un geste n'est pas passé. Ici personne n'a rien
+   demandé et rien n'est perdu — l'alarme serait un mensonge de plus. */
+.ce-cartes-panne .ce-cartes-vide-corps {
+  color: var(--ce-ink);
+}
+
 /* ─────────────────────────────────────────────────── D. « Mon compte » ─── */
 .ce-moncompte-corps {
   padding: 2px 2px 4px;

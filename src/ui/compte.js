@@ -551,6 +551,12 @@ export function buildMesCartesPanel(ctx) {
   panel.body.append(barreTri, liste)
 
   let cartes = null // null = pas encore chargé ; [] = chargé et vide
+  // ⚠️ LE TROISIÈME ÉTAT. « Chargé et vide » et « pas pu lire » ne sont pas la
+  // même chose, et les confondre faisait dire à l'écran quelque chose de FAUX
+  // sur les données de quelqu'un : un organisateur qui a douze courses en ligne
+  // lisait « Tu n'as pas encore publié de carte » dès que `race?mine=1`
+  // répondait 500, 401 sur session morte, 429, ou rien du tout hors ligne.
+  let panne = false
 
   // Trois lignes grises À LA FORME DES VRAIES, pas une roue qui tourne : le
   // squelette dit déjà ce qui va arriver, le disque ne dit que « attends ».
@@ -573,6 +579,24 @@ export function buildMesCartesPanel(ctx) {
       panel.setCollapsed(true)
       ctx.composerPremiereCarte?.()
     })
+    b.classList.add('ce-compte-primaire')
+    bloc.append(b)
+    liste.replaceChildren(bloc)
+  }
+
+  // ⚠️ ON RASSURE D'ABORD SUR CE QUI N'EST PAS PERDU — la règle qui a guidé
+  // tous les autres refus de ce module. La première peur, devant un panneau qui
+  // ne montre plus rien, c'est « mes cartes ont disparu ». Elles n'ont pas
+  // bougé : c'est la LISTE qui n'a pas pu être lue. On le dit dans cet ordre,
+  // puis on donne le geste — et pas « Composer ma première carte », qui était
+  // la mauvaise action proposée à quelqu'un qui en a déjà douze.
+  function pasPuLire() {
+    const bloc = el('div', 'ce-cartes-vide ce-cartes-panne')
+    bloc.append(
+      el('p', 'ce-cartes-vide-titre', 'Tes cartes sont toujours là'),
+      el('p', 'ce-cartes-vide-corps', 'C’est la liste qui n’a pas pu être lue — tes cartes publiées et leurs liens n’ont pas bougé. Réessaie dans un instant.')
+    )
+    const b = button('Réessayer', () => recharger())
     b.classList.add('ce-compte-primaire')
     bloc.append(b)
     liste.replaceChildren(bloc)
@@ -605,6 +629,7 @@ export function buildMesCartesPanel(ctx) {
     // lorsqu'il y a réellement quelque chose à ranger. Un contrôle qui ne
     // change rien apprend à l'utilisateur que les contrôles ne changent rien.
     barreTri.style.display = cartes?.length > 1 ? '' : 'none'
+    if (panne) return pasPuLire()
     if (cartes === null) return squelette()
     if (!cartes.length) return vide()
     const rangees = [...cartes].sort(tri === 'lieu'
@@ -616,11 +641,14 @@ export function buildMesCartesPanel(ctx) {
 
   async function recharger() {
     cartes = null
+    panne = false
     rendre()
+    // ⚠️ LE `catch` SAIT QU'IL A ÉCHOUÉ — il ne jette plus l'information.
+    // Il avalait l'échec dans `cartes = []`, et l'écran affirmait alors à un
+    // organisateur qu'il n'avait aucune carte, lui proposait la mauvaise action
+    // et ne lui laissait aucun moyen de réessayer sans recharger la page.
     try { cartes = (await compte.mesCartes()) ?? [] }
-    catch { cartes = [] } // une liste injoignable se lit comme une liste vide :
-    // l'état vide dit quoi faire, un message d'erreur dans un panneau ne dirait
-    // rien de plus et laisserait le squelette tourner à vide
+    catch { cartes = []; panne = true }
     rendre()
   }
 
@@ -629,7 +657,7 @@ export function buildMesCartesPanel(ctx) {
     const dedans = !!compte.estConnecte?.()
     panel.root.hidden = !dedans
     if (dedans) recharger()
-    else { cartes = null; liste.replaceChildren() }
+    else { cartes = null; panne = false; liste.replaceChildren() }
   }
   majPresence()
   compte.surChangement?.(majPresence)

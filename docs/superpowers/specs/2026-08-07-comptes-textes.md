@@ -84,6 +84,16 @@ C'est ce que **tout le monde** voit le premier jour. Cet écran-là mérite auta
 **Corps** — Dès que tu publies une carte, elle apparaît ici — avec son lien, prête à partager.
 **Bouton** — Composer ma première carte
 
+### Quand la liste n'a pas pu être lue
+
+**À ne surtout pas confondre avec l'état vide.** Le panneau avalait l'échec et affichait « Tu n'as pas encore publié de carte » : un organisateur qui a douze courses en ligne lisait que son compte était vide, se voyait proposer « Composer ma première carte », et n'avait aucun moyen de réessayer. C'est le cas d'un serveur en panne, d'une session morte, d'un forfait de lectures atteint, ou d'un téléphone hors réseau.
+
+⚠️ **On rassure d'abord sur ce qui n'est pas perdu** — la règle qui tient tous les refus de ce module. La première peur devant un panneau vide, c'est « mes cartes ont disparu ». Le titre y répond avant de parler de la panne.
+
+**Titre** — Tes cartes sont toujours là
+**Corps** — C'est la liste qui n'a pas pu être lue — tes cartes publiées et leurs liens n'ont pas bougé. Réessaie dans un instant.
+**Bouton** — Réessayer
+
 ### Quand une carte est en cours de chargement
 
 Trois lignes grises à la forme des vraies. Pas de roue qui tourne.
