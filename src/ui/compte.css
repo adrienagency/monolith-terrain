@@ -509,10 +509,14 @@ a.ce-cartes-ligne:hover .ce-cartes-url {
 .ce-suppr-actions .ce-btn {
   height: 36px;
 }
-.ce-moncompte-suppr-go.ce-btn {
-  border-color: var(--ce-accent);
-  color: var(--ce-accent);
-}
+/* ⚠️ L'ACCENT NE VA PAS AU BOUTON QUI EFFACE — IL N'ALLAIT NULLE PART AILLEURS.
+   Il portait bordure et texte d'accent pendant que « Garder mon compte »
+   restait neutre : à l'image, l'œil allait droit à l'orange, c'est-à-dire au
+   destructif. L'anneau de focus rattrapait le cas clavier, jamais le cas
+   souris. Au repos les deux boutons sont donc neutres — c'est le LIBELLÉ qui
+   distingue, comme sur la porte. L'accent ne revient qu'au SURVOL, provoqué
+   par la main de l'utilisateur : là il confirme ce qu'il est en train de
+   viser, il ne l'y attire pas. */
 .ce-moncompte-suppr-go.ce-btn:hover:not(:disabled) {
   background: var(--ce-accent);
   color: #fff;
