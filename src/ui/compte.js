@@ -166,7 +166,18 @@ function modale(cls, { onClose } = {}) {
     onClose?.()
   }
   const detache = clavierPiege(carte, close)
-  veil.addEventListener('mousedown', (e) => { if (e.target === veil) close() })
+  // ⚠️ MÊME `preventDefault` QUE DANS L'ÉCRAN DE CONNEXION, ET POUR LA MÊME
+  // RAISON MESURÉE : sans lui, l'action par défaut du `mousedown` s'exécute
+  // APRÈS le gestionnaire, reprend le focus que `close()` vient de rendre, et
+  // le pose sur un élément qu'on vient de retirer du document — donc sur
+  // `<body>`, d'où la tabulation repart du haut de la page.
+  //
+  // Le noteur n'avait relevé le défaut que sur l'autre voile ; le correcteur
+  // s'en est tenu à sa consigne, et l'a signalé. Or ce voile-ci ferme LA PORTE
+  // À L'EXPORT et la confirmation de suppression — les deux écrans où le
+  // clavier sert le plus. Un défaut identifié dans une fonction et laissé dans
+  // sa jumelle n'est pas corrigé : il est déplacé.
+  veil.addEventListener('mousedown', (e) => { if (e.target === veil) { e.preventDefault(); close() } })
 
   // titre + corps, montés par l'appelant via `titre()` — l'id relie le titre à
   // la boîte de dialogue pour les lecteurs d'écran
