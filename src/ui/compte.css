@@ -238,8 +238,12 @@
   border-radius: 999px;
   pointer-events: none;
 }
+/* ⚠️ 2 px, ET C'EST MESURÉ. À 1,5 px, Chrome calcule la bordure à 1 px — plus
+   fin que les 1,8 des traits d'icône de la barre, si bien que l'anneau se
+   lisait comme un détail de dessin au lieu de l'état qu'il annonce. À 2 il
+   tient le poids du picto qu'il entoure, et il se voit sans avoir à bouger. */
 .ce-comptebtn.hors::before {
-  border: 1.5px solid var(--ce-accent);
+  border: 2px solid var(--ce-accent);
 }
 /* ⚠️ UNE SEULE RESPIRATION, À L'ARRIVÉE, ET PLUS RIEN ENSUITE.
    « Il doit attirer l'œil sans clignoter ni s'agiter » (Adrien). Un anneau
@@ -340,6 +344,12 @@
   font-family: var(--ce-font);
   color: var(--ce-ink);
   opacity: 0;
+  /* ⚠️ C'EST LA COURBE DE LA MAISON, PAS UN CHOIX LOCAL — et un détecteur
+     générique la signale comme « bounce easing ». Elle est partagée par la
+     rangée liquide, les bulles, l'accueil et son voile (v28.css le dit :
+     « UNE SEULE courbe pour tout »). Ce voile-ci est le jumeau de celui du
+     démarrage : lui donner une autre courbe ferait diverger deux fondus que
+     l'œil compare directement. On garde donc la famille. */
   transition: opacity 0.28s cubic-bezier(0.6, 0, 0.3, 1.3);
 }
 .ce-cnx-veil.show {
@@ -430,8 +440,15 @@
 .ce-cnx-bulle .ce-compte-info {
   margin: 0 14px 12px;
 }
-.ce-cnx-bulle .ce-compte-liens {
-  margin-top: 0;
+/* ⚠️ LES DEUX LIENS SE TOUCHAIENT — « Renvoyer un codeChanger d'adresse ».
+   Vu à l'écran, pas à la relecture. L'écart de 16 px vivait sur
+   `.ce-compte-liens`, l'enveloppe de l'ancienne modale ; la bulle liquide
+   mesure ses blocs elle-même et cette enveloppe a disparu avec elle. C'est donc
+   `.ce-cnx-liens` — le bloc que la bulle mesure — qui porte la rangée. */
+.ce-cnx-liens {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
   padding: 9px 16px;
 }
 .ce-cnx-bulle .ce-compte-primaire.ce-btn {
@@ -806,12 +823,20 @@ a.ce-cartes-ligne:hover .ce-cartes-url {
   font-weight: 600;
   word-break: break-all;
 }
+/* ⚠️ CÔTE À CÔTE, LES DEUX ACTIONS SE CASSAIENT EN DEUX LIGNES CHACUNE.
+   Mesuré après le déménagement : le pied vit maintenant dans un panneau de
+   268 px, pas dans la modale des Paramètres. Deux boutons à parts égales y
+   reçoivent 118 px quand « Me déconnecter » en demande 123 — on lisait donc
+   « Me / déconnecter » et « Exporter mes / données », deux libellés hachés
+   pour gagner une ligne. Empilés, ils tiennent chacun sur une ligne et
+   gardent la pleine largeur du panneau, comme tous les autres boutons d'ici. */
 .ce-moncompte-actions {
   display: flex;
+  flex-direction: column;
   gap: 6px;
 }
 .ce-moncompte-actions .ce-btn {
-  flex: 1;
+  width: 100%;
 }
 .ce-moncompte-corps > .ce-compte-primaire {
   width: 100%;
