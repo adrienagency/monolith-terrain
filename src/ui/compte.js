@@ -422,6 +422,33 @@ const quand = (v) => {
   return Number.isFinite(d.getTime()) ? DATE_FR.format(d) : ''
 }
 
+// ⚠️ « PAR LIEU » TRIAIT UNE CHAÎNE, ET DONC PAS DES LIEUX.
+// `compte-app.js` fabrique le champ sous la forme « 45,92° N 6,87° E ».
+// Comparé avec `localeCompare`, « 9,50° N » se range APRÈS « 45,92° N » —
+// le tri paraissait juste tant que toutes les latitudes avaient deux chiffres,
+// et se trompait dès la première à un chiffre. On lit donc les NOMBRES, avec
+// leur hémisphère : sans le signe, une latitude sud se rangerait au milieu des
+// latitudes nord de même valeur absolue.
+const SIGNE = { N: 1, S: -1, E: 1, O: -1, W: -1 }
+export function coordonneesDuLieu(lieu) {
+  const trouve = [...String(lieu ?? '').matchAll(/(-?\d+(?:[.,]\d+)?)\s*°?\s*([NSEOW])?/gi)]
+    .map(([, n, c]) => Number(n.replace(',', '.')) * (SIGNE[String(c || '').toUpperCase()] ?? 1))
+    .filter(Number.isFinite)
+  return { lat: trouve[0], lon: trouve[1] }
+}
+// Une carte sans coordonnées lisibles ne se glisse pas au milieu des autres :
+// elle va en fin de liste, rangée entre semblables par son texte.
+const parLieu = (a, b) => {
+  const ca = coordonneesDuLieu(a?.lieu)
+  const cb = coordonneesDuLieu(b?.lieu)
+  const va = Number.isFinite(ca.lat)
+  const vb = Number.isFinite(cb.lat)
+  if (va !== vb) return va ? -1 : 1
+  if (!va) return String(a?.lieu ?? '').localeCompare(String(b?.lieu ?? ''), 'fr')
+  if (ca.lat !== cb.lat) return ca.lat - cb.lat
+  return (Number.isFinite(ca.lon) ? ca.lon : 0) - (Number.isFinite(cb.lon) ? cb.lon : 0)
+}
+
 export function buildMesCartesPanel(ctx) {
   const compte = ctx.compte ?? compteInerte
   const panel = new Panel({
@@ -503,7 +530,7 @@ export function buildMesCartesPanel(ctx) {
     if (cartes === null) return squelette()
     if (!cartes.length) return vide()
     const rangees = [...cartes].sort(tri === 'lieu'
-      ? (a, b) => String(a.lieu ?? '').localeCompare(String(b.lieu ?? ''), 'fr')
+      ? parLieu
       // par date : la plus récente en tête, c'est celle qu'on vient de publier
       : (a, b) => new Date(b.publieeLe ?? 0) - new Date(a.publieeLe ?? 0))
     liste.replaceChildren(...rangees.map(ligne))
