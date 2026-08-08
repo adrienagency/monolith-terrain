@@ -8118,15 +8118,14 @@ async function reprendreApresPaiement() {
 // requête de plus, pas un pixel de différent.
 const compte = creerCompteApp()
 
-// ⚠️ UNE SESSION DOIT SE VOIR — c'est cette classe qui le permet.
-// Le panneau « Mes cartes » vit dans le rail droit, et le rail droit est éteint
-// en mode par défaut (`body.ce-simple .ce-dock { display: none !important }`,
-// v28.css). Résultat mesuré : connecté, en mode par défaut, le panneau existait
-// mais mesurait 0 × 0 et l'écran était rigoureusement identique à l'écran
-// déconnecté — rien ne disait qu'une session existait. `body.ce-connecte` arme
-// la reprise écrite dans compte.css, calquée sur celle du mode Explorer.
-// ⚠️ RIEN NE BOUGE POUR UN VISITEUR DÉCONNECTÉ : `estConnecte()` est une
-// lecture synchrone, la classe n'est pas posée, et aucune règle ne s'applique.
+// L'ÉTAT DE LA SESSION, LISIBLE DEPUIS LA FEUILLE DE STYLE.
+// ⚠️ AUCUNE RÈGLE NE S'EN SERT PLUS AUJOURD'HUI, et c'est une bonne nouvelle :
+// elle armait la reprise du rail droit dans compte.css, du temps où « Mes
+// cartes » n'existait que pour une session ouverte. Le panneau — devenu « Mes
+// créations » — est là dans les deux états, la reprise n'a donc plus de
+// condition à vérifier. La classe reste posée parce qu'elle ne coûte rien et
+// qu'elle est la seule trace de la session dans le document : c'est par elle
+// qu'on stylera le jour où un écran devra se distinguer connecté.
 const majCorpsCompte = () => {
   document.body.classList.toggle('ce-connecte', !!compte.estConnecte?.())
 }
@@ -8372,7 +8371,7 @@ async function shareCurrentView() {
   // ⚠️ ET LA LISTE « MES CARTES » SE RECHARGE ICI, SUR LE SUCCÈS.
   // C'est le seul endroit du produit où une carte NAÎT côté serveur. Sans cette
   // ligne, le panneau ne se rechargeait qu'au changement de session : un
-  // organisateur qui publiait puis ouvrait « Mes cartes » y lisait toujours
+  // organisateur qui publiait puis ouvrait « Mes créations » y lisait toujours
   // « Tu n'as pas encore publié de carte ». On ne l'attend pas — le partage ne
   // doit pas dépendre d'une liste, et un refus de liste se lit déjà comme une
   // liste vide (voir ui/compte.js).
@@ -9031,7 +9030,7 @@ const fondsPanel = buildFondsPanel(panelCtx)
 panelCtx.paletteCreation = (host, opts) => buildPaletteCreation(panelCtx, host, opts)
 const templatesPanel = buildTemplatesPanel(panelCtx)
 
-// « Mes cartes » — sous la Bibliothèque dans le rail droit. Le panneau
+// « Mes créations » — sous la Bibliothèque dans le rail droit. Le panneau
 // N'EXISTE PAS tant que personne n'est connecté (il se pose `hidden` lui-même),
 // donc pour un visiteur anonyme le rail droit est rigoureusement celui d'hier.
 panelCtx.compte = compte

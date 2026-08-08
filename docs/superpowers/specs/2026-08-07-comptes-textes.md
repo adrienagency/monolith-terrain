@@ -69,12 +69,25 @@ Deux étapes, deux écrans. Jamais les deux champs ensemble : personne n'a le co
 
 ---
 
-## C. Mes cartes
+## C. Mes créations
 
-**Titre du panneau** — Mes cartes
+**Titre du panneau** — Mes créations
+
+> *Le panneau s'appelait « Mes cartes ». Il s'appelle « Mes créations » depuis le 2026-08-08 : on n'y range pas que des cartes publiées.*
 
 **Une ligne** — le nom de la course, le lieu, la date de publication, et le lien.
 **Tri** — Par date · Par lieu *(les deux, Adrien les demande explicitement)*
+
+### Quand personne n'est connecté
+
+**C'est ce que voit l'immense majorité des visiteurs.** Le panneau ne se cache plus : il naissait `hidden`, et l'intention était bonne — ne réclamer aucune identité — mais rien, nulle part, ne disait qu'un compte servait à quelque chose. Une porte qu'on ne voit pas n'est pas une absence de mur, c'est une absence de porte.
+
+**Corps** — Pour voir tes créations et tes cartes, connecte-toi.
+**Bouton** — Me connecter
+
+⚠️ **Le bouton ouvre l'écran de connexion SUR PLACE** — « un lien pour se connecter directement ici » (Adrien). Il n'envoie pas dans les Paramètres et ne déroule aucun sous-menu.
+
+⚠️ **Une ligne, un bouton, et rien d'autre.** Ni argumentaire, ni liste de promesses, ni compte à rebours : on ne vend pas une inscription au milieu d'une carte, on répond à la question « pourquoi ce panneau est-il là ».
 
 ### Quand la liste est vide
 

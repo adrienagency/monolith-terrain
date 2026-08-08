@@ -469,7 +469,7 @@ export function creerCompte({
    * Le renouvellement, DERRIÈRE UN VERROU.
    *
    * ⚠️ C'EST LE CŒUR DU MODULE. Au moment où le jeton expire, il est normal que
-   * plusieurs appels partent ensemble (« Mes cartes », les factures, une
+   * plusieurs appels partent ensemble (« Mes créations », les factures, une
    * publication). Sans verrou, chacun renouvellerait de son côté : Supabase
    * fait TOURNER le jeton de renouvellement, donc le premier retour invalide
    * ceux des neuf autres, qui échouent — et la session s'effondre en pleine

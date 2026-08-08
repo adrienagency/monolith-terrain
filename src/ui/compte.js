@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// L'INTERFACE DU COMPTE — la porte, la connexion, mes cartes, mon compte
+// L'INTERFACE DU COMPTE — la porte, la connexion, mes créations, mon compte
 // ═══════════════════════════════════════════════════════════════════════════
 //
 // Quatre écrans, une seule règle au-dessus de toutes les autres :
@@ -8,9 +8,9 @@
 // répète : jamais de mur, jamais de porte fermée. Concrètement, ici :
 //   · la porte à l'export propose DEUX sorties de même poids, et celle qui
 //     passe outre marche complètement ;
-//   · le panneau « Mes cartes » n'existe pas pour un visiteur déconnecté — il
-//     naît à la connexion et disparaît à la déconnexion, plutôt que de rester
-//     là en réclamant une identité ;
+//   · le panneau « Mes créations » informe le visiteur déconnecté au lieu de
+//     lui réclamer une identité : une ligne, un bouton, et aucune barrière —
+//     tout ce qui se trouve derrière lui reste atteignable sans compte ;
 //   · aucun de ces écrans ne s'ouvre tout seul. Ils répondent à un geste.
 //
 // Les TEXTES viennent de docs/superpowers/specs/2026-08-07-comptes-textes.md,
@@ -656,12 +656,24 @@ export function pastilleCompte(compte, { onOuvrirMesCreations } = {}) {
 
 // ═══════════════════════════════════════════════════════ C. MES CRÉATIONS ═══
 //
-// Panneau du rail droit. Il N'EXISTE PAS pour un visiteur déconnecté : il naît
-// à la connexion, disparaît à la déconnexion. Un panneau vide qui réclame une
-// identité serait le mur qu'on a promis de ne jamais construire.
+// Panneau du rail droit. Il s'appelait « Mes cartes » ; il s'appelle « Mes
+// créations », parce qu'on n'y range pas que des cartes publiées.
+//
+// ⚠️ IL EXISTE DÉSORMAIS AUSSI QUAND PERSONNE N'EST CONNECTÉ, et c'est un
+// renversement demandé mot pour mot : « si la personne n'est pas connectée,
+// elle verra une info type "pour voir tes créations et tes cartes, connecte
+// toi" + un lien pour se connecter directement ici ». Le panneau naissait
+// `hidden` — l'intention était bonne (ne pas réclamer d'identité), le résultat
+// l'était moins : rien, nulle part, ne disait qu'un compte servait à quelque
+// chose. Une porte qu'on ne voit pas n'est pas une absence de mur, c'est une
+// absence de porte.
+//
+// ⚠️ CE N'EST TOUJOURS PAS UN MUR. Le panneau INFORME et propose ; il ne
+// bloque rien, ne s'ouvre jamais tout seul, et tout ShibuMap reste utilisable
+// sans jamais le regarder.
 //
 // L'ÉTAT VIDE mérite autant de soin que les autres : c'est ce que TOUT LE
-// MONDE voit le premier jour.
+// MONDE voit le premier jour d'une session ouverte.
 const ICON_CARTES =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z"/><path d="M9 4v13.5M15 6.5V20"/></svg>'
 
@@ -701,12 +713,12 @@ const parLieu = (a, b) => {
 export function buildMesCartesPanel(ctx) {
   const compte = ctx.compte ?? compteInerte
   const panel = new Panel({
-    title: 'Mes cartes',
+    title: 'Mes créations',
     icon: ICON_CARTES,
     side: 'right',
     width: 268,
     cls: 'ce-cartes-panel',
-    tip: 'Les cartes que tu as publiées, avec leur lien.',
+    tip: 'Tes créations et les cartes que tu as publiées, avec leur lien.',
   })
 
   // ⚠️ AU TÉLÉPHONE, CE PANNEAU CAMPAIT AU MILIEU DE LA CARTE.
@@ -776,6 +788,23 @@ export function buildMesCartesPanel(ctx) {
     }))
   }
 
+  // ⚠️ L'ÉTAT DÉCONNECTÉ — CE QUE VOIT L'IMMENSE MAJORITÉ DES VISITEURS.
+  // Une ligne qui dit à quoi sert un compte, un bouton qui y mène. Rien de
+  // plus : ni argumentaire, ni liste de promesses, ni compte à rebours. On ne
+  // vend pas une inscription au milieu d'une carte, on répond à la question
+  // « pourquoi ce panneau est-il là ».
+  // ⚠️ ET LE BOUTON OUVRE LA CONNEXION SUR PLACE — « un lien pour se connecter
+  // directement ici ». Il n'envoie pas dans les Paramètres, il ne déroule pas
+  // un sous-menu : il ouvre l'écran de connexion, point.
+  function invite() {
+    const bloc = el('div', 'ce-cartes-vide ce-cartes-invite')
+    bloc.append(el('p', 'ce-cartes-invite-corps', 'Pour voir tes créations et tes cartes, connecte-toi.'))
+    const b = button('Me connecter', () => ouvrirConnexion(compte))
+    b.classList.add('ce-compte-primaire')
+    bloc.append(b)
+    liste.replaceChildren(bloc)
+  }
+
   function vide() {
     const bloc = el('div', 'ce-cartes-vide')
     bloc.append(
@@ -833,10 +862,12 @@ export function buildMesCartesPanel(ctx) {
   }
 
   function rendre() {
+    const dedans = !!compte.estConnecte?.()
     // Trier zéro carte n'est pas un choix : la barre de tri ne s'affiche que
     // lorsqu'il y a réellement quelque chose à ranger. Un contrôle qui ne
     // change rien apprend à l'utilisateur que les contrôles ne changent rien.
-    barreTri.style.display = cartes?.length > 1 ? '' : 'none'
+    barreTri.style.display = dedans && cartes?.length > 1 ? '' : 'none'
+    if (!dedans) return invite()
     if (panne) return pasPuLire()
     if (cartes === null) return squelette()
     if (!cartes.length) return vide()
@@ -860,12 +891,14 @@ export function buildMesCartesPanel(ctx) {
     rendre()
   }
 
-  // présence : le panneau suit la session, sans que personne ait à le penser
+  // présence : le panneau suit la session, sans que personne ait à le penser.
+  // ⚠️ IL NE SE CACHE PLUS. Il change de contenu — l'invitation, ou les
+  // cartes — mais il reste à sa place : c'est ce qui permet à quelqu'un de
+  // découvrir qu'un compte existe sans qu'on le lui ait mis en travers.
   function majPresence() {
     const dedans = !!compte.estConnecte?.()
-    panel.root.hidden = !dedans
     if (dedans) recharger()
-    else { cartes = null; panne = false; liste.replaceChildren() }
+    else { cartes = null; panne = false; rendre() }
   }
   majPresence()
   compte.surChangement?.(majPresence)

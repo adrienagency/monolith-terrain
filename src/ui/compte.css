@@ -10,7 +10,7 @@
    Les classes de base (.ce-modal, .ce-glassbox, .ce-btn, .ce-section,
    .ce-panel) font le gros du travail. Ce fichier ne fait que trois choses :
    élargir deux modales, poser les champs de saisie, et dessiner les lignes de
-   « Mes cartes ». */
+   « Mes créations ». */
 
 /* ─────────────────────────────────────────────────── la coquille commune ── */
 /* ⚠️ CHAQUE RÈGLE QUI REDÉFINIT UNE CLASSE DE v28.css EST DOUBLÉE DE SA CLASSE
@@ -596,36 +596,42 @@
   cursor: default;
 }
 
-/* ─────────────────────────────────────────────────── C. « Mes cartes » ─── */
-/* Déconnecté, le panneau n'existe pas : `hidden` doit gagner contre le
-   display:flex de .ce-panel, sans quoi le rail droit garderait une carte vide
-   pour un visiteur qui n'a rien demandé. */
-.ce-panel.ce-cartes-panel[hidden] {
-  display: none;
-}
-
-/* ⚠️ EN MODE PAR DÉFAUT, « MES CARTES » MESURAIT 0 × 0.
+/* ────────────────────────────────────────────────── C. « Mes créations » ─ */
+/* ⚠️ EN MODE PAR DÉFAUT, CE PANNEAU MESURAIT 0 × 0.
    `body.ce-simple .ce-dock { display: none !important }` (v28.css) éteint les
-   DEUX rails : le panneau existait, n'était plus `hidden`, son `display` valait
-   `flex`… et sa colonne parente était absente. Connecté, l'écran était
-   rigoureusement identique à l'écran déconnecté — rien ne disait qu'une session
-   existait, et « reprendre un parcours créé précédemment » n'était atteignable
-   qu'en passant en mode Avancé.
+   DEUX rails : le panneau existait, son `display` valait `flex`… et sa colonne
+   parente était absente. Connecté, l'écran était rigoureusement identique à
+   l'écran déconnecté — rien ne disait qu'une session existait, et « reprendre
+   un parcours créé précédemment » n'était atteignable qu'en passant en mode
+   Avancé.
    La reprise ci-dessous est le CALQUE EXACT de celle du mode Explorer, deux
    règles plus bas dans v28.css : le rail revient, et il ne montre QUE le
    panneau qui le justifie — la Bibliothèque reste au mode Avancé, le mode
    simple reste simple.
-   ⚠️ ET ELLE NE S'ARME QUE POUR UNE SESSION OUVERTE (`body.ce-connecte`, posée
-   par main.js sur `surChangement`). Déconnecté — l'immense majorité — pas une
-   règle ne s'applique et le rail droit est rigoureusement celui d'hier.
+   ⚠️ ELLE NE DEMANDE PLUS DE SESSION OUVERTE. Elle était gardée par
+   `body.ce-connecte` tant que le panneau n'existait pas sans compte ; il existe
+   maintenant dans les deux états (« si la personne n'est pas connectée, elle
+   verra une info… », Adrien), et une règle qui l'éteindrait pour les visiteurs
+   anonymes éteindrait très exactement le public à qui elle s'adresse.
    ⚠️ SPÉCIFICITÉ : v28.css est injecté EN DERNIER et sa règle est `!important`.
    Il faut donc `!important` ET une classe de plus (`.ce-dock.ce-dock-right`
-   sous `body.ce-simple.ce-connecte`), sinon la ligne est muette. */
-body.ce-simple.ce-connecte .ce-dock.ce-dock-right {
+   sous `body.ce-simple`), sinon la ligne est muette. */
+body.ce-simple .ce-dock.ce-dock-right {
   display: flex !important;
 }
-body.ce-simple.ce-connecte .ce-dock.ce-dock-right > .ce-panel:not(.ce-cartes-panel) {
+body.ce-simple .ce-dock.ce-dock-right > .ce-panel:not(.ce-cartes-panel) {
   display: none;
+}
+
+/* L'INVITATION — ce que voit l'immense majorité des visiteurs. Elle emprunte la
+   mise en page de l'état vide (même place, même geste unique) mais son texte
+   porte l'ENCRE PLEINE : c'est la seule phrase du panneau à ce moment-là, elle
+   n'est secondaire à rien. */
+.ce-cartes-invite-corps {
+  margin: 0 0 14px;
+  font-size: var(--ce-t-control);
+  line-height: 1.45;
+  color: var(--ce-ink);
 }
 .ce-cartes-liste {
   display: flex;

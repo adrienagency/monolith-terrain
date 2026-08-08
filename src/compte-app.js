@@ -34,7 +34,7 @@
 //
 // `race?mine=1` ne rend qu'un `id`, et c'est délibéré : un attaquant l'a
 // relevé. Une chaîne d'URL venue du réseau qu'on poserait telle quelle dans le
-// `href` d'un `<a>` — et « Mes cartes » en pose une par ligne — accepterait un
+// `href` d'un `<a>` — et « Mes créations » en pose une par ligne — accepterait un
 // `javascript:` ou un `data:` glissé dans un magasin de blobs. On ne recopie
 // donc RIEN : l'id passe par `ID_RE` (le miroir exact de celui de race.mjs) et
 // le lien est CONSTRUIT autour. Un id qui ne passe pas ne donne pas de ligne.
@@ -54,12 +54,12 @@ import { loadUserTemplates } from './templates-user.js'
 
 // ── Les routes, et la seule origine à laquelle un lien public a un sens ──────
 
-/** « Mes cartes » : l'index du compte, jamais les payloads (voir race.mjs). */
+/** « Mes créations » : l'index du compte, jamais les payloads (voir race.mjs). */
 export const URL_MES_CARTES = '/.netlify/functions/race?mine=1'
 export const URL_SUPPRESSION = '/.netlify/functions/compte-supprimer'
 
 /**
- * ⚠️ L'ORIGINE EST EN DUR, et ce n'est pas un oubli. Un lien de « Mes cartes »
+ * ⚠️ L'ORIGINE EST EN DUR, et ce n'est pas un oubli. Un lien de « Mes créations »
  * est fait pour être COPIÉ et envoyé à trois cents coureurs : construit sur
  * `location.origin`, il vaudrait `http://localhost:5173/#r=…` en développement
  * et `https://un-deploy-preview--….netlify.app/#r=…` sur une prévisualisation
@@ -227,7 +227,7 @@ export function creerCompteApp({
   // ⚠️ CE QU'IL NE COUVRE PAS, ET QUI EST ASSUMÉ : une session qui MEURT toute
   // seule (jeton de renouvellement révoqué côté Supabase) ne déclenche rien —
   // il n'y a aucun événement à écouter pour ça. L'écran s'en aperçoit au
-  // prochain geste, qui refuse. Le panneau « Mes cartes » resterait affiché et
+  // prochain geste, qui refuse. Le panneau « Mes créations » resterait affiché et
   // vide entre-temps ; c'est exactement ce qu'il montre déjà à quelqu'un qui
   // n'a rien publié, donc rien de trompeur.
   const ecouteurs = new Set()
@@ -268,7 +268,7 @@ export function creerCompteApp({
     prevenir()
   }
 
-  // ── « Mes cartes » ────────────────────────────────────────────────────────
+  // ── « Mes créations » ─────────────────────────────────────────────────────
 
   async function mesCartes() {
     const entetes = await session.entetes()
