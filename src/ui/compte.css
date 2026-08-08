@@ -222,60 +222,24 @@
   position: relative;
 }
 
-/* ⚠️ L'ANNEAU CERCLE L'ICÔNE, PAS LE BOUTON. Le bouton fait 32 px (44 au
-   doigt) et porte déjà un fond au survol : un anneau posé sur sa boîte se
-   confondrait avec cet état-là. Il fait donc 25 px, centré, à l'aplomb du
-   picto — c'est le compte qui est cerclé, pas la cible de clic. */
-.ce-comptebtn.hors::before,
-.ce-comptebtn.hors::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 25px;
-  height: 25px;
-  margin: -12.5px 0 0 -12.5px;
-  border-radius: 999px;
-  pointer-events: none;
-}
-/* ⚠️ 2 px, ET C'EST MESURÉ. À 1,5 px, Chrome calcule la bordure à 1 px — plus
-   fin que les 1,8 des traits d'icône de la barre, si bien que l'anneau se
-   lisait comme un détail de dessin au lieu de l'état qu'il annonce. À 2 il
-   tient le poids du picto qu'il entoure, et il se voit sans avoir à bouger. */
-.ce-comptebtn.hors::before {
-  border: 2px solid var(--ce-accent);
-}
-/* ⚠️ UNE SEULE RESPIRATION, À L'ARRIVÉE, ET PLUS RIEN ENSUITE.
-   « Il doit attirer l'œil sans clignoter ni s'agiter » (Adrien). Un anneau
-   d'accent au milieu de six pictos en encre se voit déjà tout seul : le halo
-   ne sert qu'à le faire REMARQUER une fois, au moment où la barre se pose.
-   `1` itération, `both` pour qu'il finisse effacé — aucune boucle, aucun
-   battement, rien qui bouge dans le coin de l'œil pendant qu'on travaille. */
-.ce-comptebtn.hors::after {
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--ce-accent) 42%, transparent);
-}
-/* ⚠️ ET ELLE SE JOUE APRÈS QUE L'ÉCRAN EST DÉCOUVERT, PAS AU MONTAGE DU BOUTON.
-   Chronométré au démarrage : la pastille naissait à 5,5 s, le halo était
-   `finished` à 7,3 s — et le sas d'accueil, qui couvre TOUTE la fenêtre, barre
-   du haut comprise, ne s'effaçait qu'à 8,5 s. La seule respiration prévue était
-   donc intégralement dépensée derrière un voile opaque : quand le visiteur
-   arrivait enfin dans l'application, il ne restait que l'anneau statique.
-   `body.ce-devoile` est posée quand le sas tombe (ui/hub.js) — une seule fois,
-   jamais retirée : rouvrir l'accueil plus tard n'est plus une arrivée. */
-body.ce-devoile .ce-comptebtn.hors::after {
-  animation: ce-compte-halo 1.05s cubic-bezier(0.2, 0, 0, 1) 0.7s 1 both;
-}
-@keyframes ce-compte-halo {
-  from {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ce-accent) 42%, transparent);
-  }
-  to {
-    box-shadow: 0 0 0 10px color-mix(in srgb, var(--ce-accent) 0%, transparent);
-  }
-}
-/* le survol et le focus n'ont pas à répéter l'anneau : ils gardent la grammaire
-   de tous les autres boutons de la barre (fond au survol), et l'anneau reste
-   ce qu'il est — l'état du compte, pas l'état du pointeur */
+/* ⚠️ IL N'Y A PLUS D'ANNEAU AUTOUR DE LA PASTILLE, ET C'EST UNE DÉCISION
+   D'ADRIEN : « retire juste le cercle jaune autour de l'icône de compte,
+   c'était une mauvaise idée » (2026-08-08).
+
+   Ce qu'il en reste, et qui suffit : l'ABSENCE de coche dit « pas connecté ».
+   Un état ne se signale pas forcément par un ajout — ici le repos est l'état
+   déconnecté, et la coche est la seule chose qui change. Une barre d'outils
+   n'a pas à réclamer une inscription à quelqu'un qui vient dessiner une carte.
+
+   Le halo d'arrivée part avec l'anneau : il n'existait que pour le faire
+   remarquer une fois, et `body.ce-devoile` n'était là que pour le retarder
+   jusqu'à ce que le sas d'accueil soit tombé. La classe `.hors` reste posée
+   par le JS — elle ne peint plus rien, mais elle dit l'état dans le DOM, et
+   c'est là que le prochain écran ira le lire. */
+
+/* Le survol et le focus gardent la grammaire de tous les autres boutons de la
+   barre (un fond au survol) : rien ne distingue plus cette pastille au repos,
+   et c'est voulu. */
 .ce-comptebtn.dedans {
   color: var(--ce-ink);
 }
@@ -308,15 +272,9 @@ body.ce-devoile .ce-comptebtn.hors::after {
 .ce-comptebtn.dedans .ce-compte-coche path {
   fill: none;
 }
-/* au doigt, le bouton passe à 44 px : l'anneau et la coche suivent, sinon le
-   picto flotte au milieu d'une cible deux fois trop grande pour lui */
+/* au doigt, le bouton passe à 44 px : la coche suit, sinon le picto flotte au
+   milieu d'une cible deux fois trop grande pour lui */
 @media (pointer: coarse) {
-  .ce-comptebtn.hors::before,
-  .ce-comptebtn.hors::after {
-    width: 30px;
-    height: 30px;
-    margin: -15px 0 0 -15px;
-  }
   .ce-comptebtn.dedans .ce-compte-coche {
     right: 7px;
     bottom: 7px;
@@ -324,15 +282,11 @@ body.ce-devoile .ce-comptebtn.hors::after {
     height: 12px;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  /* ⚠️ LE SÉLECTEUR SUIT CELUI QUI ARME LE HALO. Depuis que la respiration est
-     déclarée sur `body.ce-devoile .ce-comptebtn.hors::after` (0,3,1), un
-     `.ce-comptebtn.hors::after` nu (0,2,1) ne pèse plus assez pour la couper —
-     la préférence serait ignorée en silence. */
-  body.ce-devoile .ce-comptebtn.hors::after {
-    animation: none;
-  }
-}
+/* ⚠️ PLUS DE BLOC `prefers-reduced-motion` ICI, ET CE N'EST PAS UN OUBLI. Il
+   ne servait qu'à couper le halo de l'anneau. Le halo étant parti, une règle
+   qui éteint une animation inexistante n'est pas une précaution : c'est une
+   fausse piste pour qui la relira en cherchant ce qui bouge sur cette
+   pastille. Plus rien n'y bouge. */
 
 /* ─────────────────────────────────────────────────── B. la connexion ───── */
 /* UN ÉCRAN PLEIN, PAS UNE BOÎTE — « un panneau d'overlay complet comme celui

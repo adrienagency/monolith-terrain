@@ -24,9 +24,18 @@ const blocked = () => BLOCKED.some((c) => document.body.classList.contains(c))
 // joue donc SOUS le voile : mesuré au démarrage, la respiration de l'anneau du
 // compte était `finished` à 7,3 s alors que le sas ne s'effaçait qu'à 8,5 s —
 // personne ne l'a jamais vue. La classe est posée UNE FOIS, quand le sas tombe,
-// et c'est elle qui arme ce genre d'arrivée (compte.css). Elle ne se retire
-// jamais : rouvrir l'accueil plus tard n'est plus une première arrivée, et la
-// respiration ne doit pas se rejouer à chaque aller-retour.
+// et ne se retire jamais : rouvrir l'accueil plus tard n'est plus une première
+// arrivée.
+//
+// ⚠️ PLUS AUCUNE FEUILLE DE STYLE NE LA LIT AUJOURD'HUI. Elle armait la
+// respiration de l'anneau du compte ; Adrien a fait retirer cet anneau le
+// 2026-08-08 (« c'était une mauvaise idée »), et le halo est parti avec lui.
+//
+// Elle est gardée quand même, et c'est une décision : « l'écran vient d'être
+// découvert » est un moment réel, difficile à retrouver après coup, et le seul
+// endroit d'où l'on puisse déclencher une arrivée sans la dépenser derrière un
+// voile opaque. Mais elle est aujourd'hui SANS CONSOMMATEUR — qui la cherchera
+// dans le CSS ne trouvera rien, et c'est normal.
 const devoiler = () => document.body.classList.add('ce-devoile')
 
 export function buildHub({ bar, bottomBar, onExplore }) {
