@@ -68,6 +68,19 @@
 .ce-modal.ce-porte {
   width: min(400px, calc(100vw - 72px));
 }
+/* ⚠️ LE FOCUS ENTRE DANS LA CARTE, IL NE LA DESSINE PAS.
+   compte.js pose `tabIndex = -1` puis `focus()` sur la carte pour que le
+   clavier soit dedans SANS désigner de gagnant — l'intention est juste. Mais
+   une carte ainsi focalisée satisfait `:focus-visible`, et Chrome trace alors
+   son anneau par défaut (`outline: rgb(16,16,16) auto 1px`) AUTOUR DE TOUTE LA
+   BOÎTE : un cadre noir épais en clair, blanc en sombre. Vu à l'écran, mesuré,
+   puis comparé avec et sans focus. On neutralise l'anneau sur la CARTE SEULE :
+   les deux boutons gardent leur `:focus-visible` en encre, qui, lui, est
+   exactement ce qu'il faut. */
+.ce-compte-veil .ce-modal.ce-porte:focus,
+.ce-compte-veil .ce-modal.ce-porte:focus-visible {
+  outline: none;
+}
 
 /* ⚠️ LE POINT LE PLUS IMPORTANT DE TOUT CET ÉCRAN.
    Les deux sorties ont le MÊME poids visuel : même hauteur, même largeur (elles
