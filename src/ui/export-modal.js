@@ -1,5 +1,15 @@
 // Export modal — still image (PNG/JPEG) or live MP4 recording of the scene.
-// deps = { renderer, composer, camera, recorder }
+// deps = { renderer, composer, camera, recorder, apresExport }
+//
+// ⚠️ `apresExport` N'EST APPELÉ QUE SUR UN DÉPART RÉEL, ET APRÈS `close()`.
+// C'est la porte du compte (voir `porteApresExport` dans main.js). Posée à
+// l'OUVERTURE de cette boîte, elle mentait : elle annonçait « Ton export est en
+// route » pendant que l'utilisateur choisissait encore son format, son ratio et
+// sa taille, et son avis se superposait à la boîte encore ouverte. Pire, un
+// « Cancel » après coup avait déjà consommé la question — elle n'était plus
+// jamais reposée. Ici, l'image est téléchargée (ou l'enregistrement démarré) et
+// la boîte refermée : le message dit vrai et ne recouvre rien. Un export annulé
+// ou raté ne l'appelle pas.
 // `recorder` is a Recorder instance (src/export-recorder.js); MP4 export is
 // start/stop live capture — the modal closes on start and a REC pill
 // (top-center) shows elapsed time with a Stop button.
@@ -152,6 +162,7 @@ export function openExportModal(deps) {
       setBusy(false)
       close()
       showRecPill(deps.recorder)
+      deps.apresExport?.()
       return
     }
     const { width, height } = dims()
@@ -174,6 +185,7 @@ export function openExportModal(deps) {
       downloadBlob(blob, `shibumap-${width}x${height}.${png ? 'png' : 'jpg'}`)
       setBusy(false)
       close()
+      deps.apresExport?.()
     } catch (err) {
       console.error('Export failed:', err)
       setBusy(false)

@@ -8118,17 +8118,22 @@ async function reprendreApresPaiement() {
 // requête de plus, pas un pixel de différent.
 const compte = creerCompteApp()
 
-// ⚠️ TROIS EXPORTS, TROIS MOMENTS, UNE SEULE PORTE.
-// L'image et la vidéo passent par `openExportUI` ; l'impression par
-// `openAfficheUI`, qui traverse ensuite le paiement et REVIENT (retourPaiement
-// la rouvre pour pouvoir relancer). C'est pourquoi la porte n'est PAS posée
-// dans ces fonctions : elle est posée sur les entrées que l'utilisateur
-// déclenche (`panelCtx`, palette « K », raccourcis). Le retour de paiement
-// appelle la fonction nue et ne repose donc jamais la question au milieu d'un
-// achat déjà conclu.
-function avecPorteExport(suite) {
+// ⚠️ LA PORTE SE POSE SUR L'EXPORT, PAS SUR LA BOÎTE QUI LE PRÉPARE.
+// Elle enveloppait `openExportUI` — c'est-à-dire l'OUVERTURE de la boîte de
+// dialogue. Vu à l'écran : on répondait « Continuer sans compte », la boîte
+// s'ouvrait ENSUITE en demandant encore le format, le ratio et la taille, et
+// « Ton export est en route » s'affichait par-dessus. Trois conséquences, toutes
+// constatées : le message mentait ; on demandait un compte avant même de savoir
+// ce que la personne voulait exporter ; et une boîte annulée après coup avait
+// CONSOMMÉ la question (`porteRepondue`), qui n'était donc jamais reposée au
+// vrai moment.
+// Elle est désormais posée par `export-modal.js` à l'instant où l'export part
+// pour de bon — image téléchargée, ou enregistrement démarré — et la boîte est
+// alors refermée : l'avis ne recouvre plus rien, et il dit vrai.
+// `onSuite` n'a plus rien à déclencher : le fichier est déjà parti. La porte
+// informe, elle n'a jamais rien retenu — c'est toujours la même règle.
+function porteApresExport() {
   porteExport(compte, {
-    onSuite: () => { suite() },
     onEnregistrerGabarit: telechargerGabaritCourant,
   })
 }
@@ -8153,6 +8158,8 @@ async function openExportUI() {
     composer,
     camera,
     recorder,
+    // LA PORTE, AU MOMENT OÙ L'EXPORT PART VRAIMENT — voir `porteApresExport`.
+    apresExport: porteApresExport,
     // LA LIGNE DE CRÉDITS DE CET EXPORT-CI. Elle dépend de l'emprise, parce que
     // les sources bathymétriques fines imposent leur attribution mot pour mot
     // là où elles ont creusé, et nulle part ailleurs. Voir export.js.
@@ -8399,9 +8406,17 @@ const topBar = buildTopBar({
     const { startTutorial } = await import('./ui/tutorial.js')
     startTutorial()
   },
-  // les deux entrées UTILISATEUR de l'export : elles passent par la porte
-  openExport: () => avecPorteExport(openExportUI),
-  openAffiche: () => avecPorteExport(() => openAfficheUI()),
+  // ⚠️ PLUS DE PORTE ICI : elle est posée sur le déclenchement RÉEL de
+  // l'export (voir `porteApresExport`), pas sur l'ouverture de la boîte.
+  openExport: () => openExportUI(),
+  // ⚠️ ET L'AFFICHE N'EN A PLUS DU TOUT — C'EST UNE DÉCISION, PAS UN OUBLI.
+  // Son « export » réel, c'est un ACHAT : on rend le fichier, on le met au
+  // coffre, on quitte la page pour Stripe, on revient, et le PDF se prend dans
+  // une carte de livraison posée sur le MÊME plancher que l'avis du compte.
+  // Poser la porte avant la caisse interromprait un paiement ; la poser après
+  // empilerait deux cartes au même endroit. On ne met pas de porte dans une
+  // caisse : l'affiche reste sans compte, comme le reste du produit.
+  openAffiche: () => openAfficheUI(),
   // "?" keyboard-shortcuts help — self-updating overlay, reads SHORTCUTS live
   toggleShortcuts: () => shortcutsOverlay.toggle(),
   // ALPHA chip → "What's new" changelog
@@ -9211,7 +9226,7 @@ if (!IS_EMBED) {
       { label: 'Ouvrir le Studio (habiller ma carte)', run: () => panelCtx.openAtelier?.() },
       { label: 'Ouvrir le Race Studio (ma course)', run: () => panelCtx.openStudio?.() },
       { label: 'Boutique de templates', run: () => panelCtx.openStore?.() },
-      { label: 'Exporter une image ou une vidéo', run: () => avecPorteExport(openExportUI) },
+      { label: 'Exporter une image ou une vidéo', run: () => openExportUI() },
       { label: 'Réinitialiser la carte', run: () => { resetAll(); refreshAll() } },
     ],
   })
@@ -9449,7 +9464,7 @@ const shortcutsCtx = {
   // un SEUL câblage pour les trois entrées (« / », hub, palette) : bars.js
   // détient le champ et sait le rouvrir quand il est replié (mode Parcours)
   focusSearch,
-  openExport: () => avecPorteExport(openExportUI),
+  openExport: () => openExportUI(),
   toggleLayer,
   toggleRegion,
 }
