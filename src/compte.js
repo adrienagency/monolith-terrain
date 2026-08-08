@@ -173,7 +173,10 @@ function urlSupabaseValide(brut) {
 
 const MESSAGES = {
   'code-faux': 'Ce code ne correspond pas. Vérifie les six chiffres, ou demande-en un nouveau.',
-  'code-expire': 'Ce code a expiré — ils ne valent qu’une heure. Demande-en un nouveau, il arrive dans la minute.',
+  // Le cas AMBIGU : Supabase rend le même refus pour un code faux et un code
+  // périmé (voir messageRefus). Le texte couvre donc les deux causes et propose
+  // les deux gestes, plutôt que d'en affirmer une au hasard.
+  'code-refuse': 'Ce code ne passe pas — il est faux, ou il a expiré. Vérifie les six chiffres du dernier message, ou demande-en un nouveau.',
   'trop-essais': 'Trop de tentatives d’affilée. Attends une minute avant d’en redemander un.',
   'adresse-invalide': 'Cette adresse ne ressemble pas à une adresse de courriel.',
   'envoi-impossible': 'Le code n’a pas pu partir. Réessaie dans un instant — ce n’est pas ton adresse qui est en cause.',
@@ -217,8 +220,26 @@ export function messageRefus(statut, corps, etape = 'verification') {
   // parte : ce qui a échoué, c'est l'envoi. Dire « vérifie ton adresse » à
   // quelqu'un dont l'adresse est bonne l'envoie corriger ce qui marche.
   if (etape === 'envoi') return refus('envoi-impossible')
-  if (/expired/i.test(`${code} ${texte}`)) return refus('code-expire')
-  return refus('code-faux')
+
+  // ⚠️ SUPABASE NE DISTINGUE PAS UN CODE FAUX D'UN CODE EXPIRÉ, et cette
+  // branche a longtemps fait semblant du contraire.
+  //
+  // Vérifié contre le vrai service le 2026-08-08 : un code inexistant rend
+  // `403 { error_code: 'otp_expired', msg: 'Token has expired or is invalid' }`
+  // — le MÊME code et le MÊME message que pour un code périmé. Le test
+  // `/expired/i` correspondait donc TOUJOURS, et `code-faux` était
+  // inatteignable par ce chemin.
+  //
+  // Conséquence à l'écran : quelqu'un qui se trompe d'un chiffre — de loin le
+  // cas le plus fréquent — lisait « Ce code a expiré, demande-en un nouveau »,
+  // et redemandait un code dont il n'avait pas besoin. On lui faisait refaire
+  // le trajet complet à cause d'une faute de frappe.
+  //
+  // On ne peut pas trancher ce que le service ne dit pas. On rend donc le cas
+  // AMBIGU, dont le texte couvre honnêtement les deux causes et propose les
+  // deux gestes. `code-faux` reste émis, lui, quand NOUS savons — un code qui
+  // n'a pas six chiffres, vérifié sans réseau (voir `verifierCode`).
+  return refus('code-refuse')
 }
 
 // ══════════ LA SESSION ══════════════════════════════════════════════════════

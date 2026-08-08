@@ -250,12 +250,18 @@ test('⚠️ un REFUS garni de jetons plausibles n’ouvre AUCUNE session', asyn
   assert.equal(rangement.getItem(CLE_SESSION), null, 'rien ne doit être rangé sur un refus')
 })
 
-test('chaque refus a SON message : code faux, code expiré, trop d’essais', async () => {
+// ⚠️ CE TEST A ÉTÉ CORRIGÉ CONTRE LA RÉALITÉ, le 2026-08-08. Il affirmait que
+// « code faux » et « code expiré » étaient deux refus distincts. Sondé sur le
+// VRAI service : un code inexistant rend  avec « Token has
+// expired or is invalid » — le même code et le même texte qu'un code périmé.
+// Supabase ne fait pas cette distinction, et prétendre le contraire envoyait
+// quelqu'un qui s'est trompé d'un chiffre redemander un code inutile.
+test('chaque refus a SON message, sauf celui que Supabase refuse de distinguer', async () => {
   const cas = [
-    [400, { error_code: 'otp_disabled', msg: 'Token has expired or is invalid' }, 'code-expire'],
-    [403, { error_code: 'otp_expired', msg: 'Token has expired or is invalid' }, 'code-expire'],
-    [401, { error_code: 'invalid_credentials', msg: 'Invalid login credentials' }, 'code-faux'],
-    [400, { msg: 'Invalid token' }, 'code-faux'],
+    [400, { error_code: 'otp_disabled', msg: 'Token has expired or is invalid' }, 'code-refuse'],
+    [403, { error_code: 'otp_expired', msg: 'Token has expired or is invalid' }, 'code-refuse'],
+    [401, { error_code: 'invalid_credentials', msg: 'Invalid login credentials' }, 'code-refuse'],
+    [400, { msg: 'Invalid token' }, 'code-refuse'],
     [429, { msg: 'Too many requests' }, 'trop-essais'],
     [500, { msg: 'Internal error' }, 'injoignable'],
   ]
@@ -270,14 +276,14 @@ test('chaque refus a SON message : code faux, code expiré, trop d’essais', as
     assert.ok(!/[A-Za-z]+ (has expired|login credentials)/.test(r.erreur), 'jamais l’anglais de Supabase à l’écran')
     vus.add(r.erreur)
   }
-  assert.ok(vus.size >= 4, 'des messages DIFFÉRENTS, pas un « échec » unique')
+  assert.ok(vus.size >= 3, 'des messages DIFFÉRENTS, pas un « échec » unique')
 })
 
 test('messageRefus distingue l’envoi de la vérification', () => {
   const envoi = messageRefus(400, { msg: 'Unable to validate email address' }, 'envoi')
   assert.equal(envoi.raison, 'envoi-impossible')
   const verif = messageRefus(400, { msg: 'Invalid token' }, 'verification')
-  assert.equal(verif.raison, 'code-faux')
+  assert.equal(verif.raison, 'code-refuse')
   assert.notEqual(envoi.erreur, verif.erreur)
 })
 

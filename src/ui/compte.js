@@ -35,7 +35,11 @@
 //   demanderCode(adresse)    → Promise<void>   refus : { code: 'adresse-invalide'
 //                              | 'envoi-impossible' | 'injoignable' }
 //   verifierCode(adr, code)  → Promise<void>   refus : { code: 'code-faux'
-//                              | 'code-expire' | 'trop-essais' | 'injoignable' }
+//                              | 'code-refuse' | 'trop-essais' | 'injoignable' }
+//                              ⚠️ 'code-refuse' couvre À LA FOIS un code faux et
+//                              un code périmé : Supabase rend le même refus pour
+//                              les deux (vérifié sur le vrai service), et on ne
+//                              prétend pas trancher ce qu'il ne dit pas.
 //   deconnecter()            → Promise<void>
 //   mesCartes()              → Promise<Array<{ id, nom, lieu, publieeLe, url }>>
 //                              `publieeLe` : millisecondes epoch ou chaîne ISO
@@ -79,7 +83,10 @@ export const compteInerte = {
 // pour mot.
 const REFUS = {
   'code-faux': 'Ce code ne correspond pas. Vérifie les six chiffres du dernier message reçu.',
-  'code-expire': 'Ce code a expiré. Demande-en un nouveau, il arrive tout de suite.',
+  // Supabase ne distingue pas un code faux d'un code périmé : il rend le même
+  // `otp_expired` pour les deux. Ce texte-là est celui que la plupart des gens
+  // verront, et il doit donc rester vrai dans les deux cas.
+  'code-refuse': 'Ce code ne passe pas — il est faux, ou il a expiré. Vérifie les six chiffres du dernier message, ou demande-en un nouveau.',
   'trop-essais': 'Trop de tentatives. Attends une minute avant de réessayer.',
   'adresse-invalide': 'Cette adresse ne ressemble pas à une adresse mail. C’est le seul endroit où ton code sera envoyé.',
   'envoi-impossible': 'Le code n’a pas pu partir. Réessaie dans un instant — ce n’est pas ton adresse qui est en cause.',
