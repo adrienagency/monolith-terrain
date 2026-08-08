@@ -92,6 +92,13 @@ export const messageRefus = (err) => REFUS[err?.code] ?? REFUS.injoignable
 // deux ajouts près qui manquaient là-bas et qu'on ne va pas refaire manquer
 // ici : le focus entre dans la carte à l'ouverture et REVIENT d'où il venait à
 // la fermeture, et la tabulation ne sort pas de la carte tant qu'elle est là.
+// Le repli du focus : la première commande vivante de l'interface. Elle est
+// cherchée À LA FERMETURE, jamais gardée — les barres se reconstruisent.
+function replierFocus() {
+  const cible = document.querySelector('.ce-topbar button, .ce-elembar button, .ce-bottombar button')
+  cible?.focus?.()
+}
+
 function modale(cls, { onClose } = {}) {
   const rendu = document.activeElement
   const veil = el('div', 'ce-modal-veil ce-compte-veil')
@@ -109,7 +116,20 @@ function modale(cls, { onClose } = {}) {
     veil.remove()
     // rendre le focus est un geste d'accessibilité, pas une politesse : sans
     // lui, la tabulation repart du haut du document à chaque fermeture
+    //
+    // ⚠️ ET ON VÉRIFIE QUE LE FOCUS A ATTERRI, plutôt que de vérifier qu'il
+    // POUVAIT atterrir. Le test `isConnected` seul laissait passer les deux cas
+    // réels, tous deux mesurés à l'écran : l'entrée de menu qui a ouvert la
+    // modale est retirée du DOM en même temps que le menu (isConnected faux),
+    // et une porte ouverte APRÈS l'export part d'un `<body>` déjà actif —
+    // `body.focus()` ne fait rien, et il est bel et bien `isConnected`. Dans les
+    // deux cas la tabulation repartait du haut du document, c'est-à-dire
+    // exactement le défaut que cette ligne prétend corriger. On regarde donc où
+    // le focus est VRAIMENT, et on se rabat sur la première commande de
+    // l'interface, qui, elle, est toujours là.
     if (rendu?.isConnected) rendu.focus?.()
+    const pose = document.activeElement
+    if (!pose || pose === document.body || pose === document.documentElement) replierFocus()
     onClose?.()
   }
   const focusables = () =>
