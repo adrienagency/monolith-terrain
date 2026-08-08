@@ -214,6 +214,108 @@
   }
 }
 
+/* ──────────────────────────────────── B bis. la pastille de la barre ───── */
+/* Le compte a quitté les Paramètres pour la pill de droite. Deux états, et il
+   faut les lire SANS s'arrêter dessus : un anneau qui appelle, une coche qui
+   confirme. Jamais les deux. */
+.ce-comptebtn {
+  position: relative;
+}
+
+/* ⚠️ L'ANNEAU CERCLE L'ICÔNE, PAS LE BOUTON. Le bouton fait 32 px (44 au
+   doigt) et porte déjà un fond au survol : un anneau posé sur sa boîte se
+   confondrait avec cet état-là. Il fait donc 25 px, centré, à l'aplomb du
+   picto — c'est le compte qui est cerclé, pas la cible de clic. */
+.ce-comptebtn.hors::before,
+.ce-comptebtn.hors::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 25px;
+  height: 25px;
+  margin: -12.5px 0 0 -12.5px;
+  border-radius: 999px;
+  pointer-events: none;
+}
+.ce-comptebtn.hors::before {
+  border: 1.5px solid var(--ce-accent);
+}
+/* ⚠️ UNE SEULE RESPIRATION, À L'ARRIVÉE, ET PLUS RIEN ENSUITE.
+   « Il doit attirer l'œil sans clignoter ni s'agiter » (Adrien). Un anneau
+   d'accent au milieu de six pictos en encre se voit déjà tout seul : le halo
+   ne sert qu'à le faire REMARQUER une fois, au moment où la barre se pose.
+   `1` itération, `both` pour qu'il finisse effacé — aucune boucle, aucun
+   battement, rien qui bouge dans le coin de l'œil pendant qu'on travaille. */
+.ce-comptebtn.hors::after {
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--ce-accent) 42%, transparent);
+  animation: ce-compte-halo 1.05s cubic-bezier(0.2, 0, 0, 1) 0.7s 1 both;
+}
+@keyframes ce-compte-halo {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ce-accent) 42%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--ce-accent) 0%, transparent);
+  }
+}
+/* le survol et le focus n'ont pas à répéter l'anneau : ils gardent la grammaire
+   de tous les autres boutons de la barre (fond au survol), et l'anneau reste
+   ce qu'il est — l'état du compte, pas l'état du pointeur */
+.ce-comptebtn.dedans {
+  color: var(--ce-ink);
+}
+
+/* LA COCHE — en bas à droite du picto, comme partout où une pastille annote une
+   icône. Elle est masquée par défaut : c'est la classe `.dedans` qui la pose,
+   au même instant où l'anneau s'en va. */
+.ce-comptebtn .ce-compte-coche {
+  display: none;
+}
+.ce-comptebtn.dedans .ce-compte-coche {
+  display: block;
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 11px;
+  height: 11px;
+  /* le disque porte le vert, la coche est creusée dedans en couleur de barre :
+     à 11 px, une coche en trait vert sur fond translucide se perdrait dès que
+     le relief bouge derrière. */
+  fill: var(--ce-ok);
+  stroke: var(--ce-porcelain);
+  /* un liseré de la couleur de la barre détache le disque du picto qu'il
+     chevauche — sans lui, les deux traits se touchent et la coche se lit comme
+     une bavure du buste. */
+  outline: 1.5px solid var(--ce-porcelain);
+  outline-offset: -0.5px;
+  border-radius: 999px;
+}
+.ce-comptebtn.dedans .ce-compte-coche path {
+  fill: none;
+}
+/* au doigt, le bouton passe à 44 px : l'anneau et la coche suivent, sinon le
+   picto flotte au milieu d'une cible deux fois trop grande pour lui */
+@media (pointer: coarse) {
+  .ce-comptebtn.hors::before,
+  .ce-comptebtn.hors::after {
+    width: 30px;
+    height: 30px;
+    margin: -15px 0 0 -15px;
+  }
+  .ce-comptebtn.dedans .ce-compte-coche {
+    right: 7px;
+    bottom: 7px;
+    width: 12px;
+    height: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ce-comptebtn.hors::after {
+    animation: none;
+  }
+}
+
 /* ─────────────────────────────────────────────────── B. la connexion ───── */
 /* `- 72px` et non `- 32px` : content-box, donc il faut défalquer les 36 px de
    marge intérieure et les 2 px de bordure en plus des 32 px de marge d'écran,

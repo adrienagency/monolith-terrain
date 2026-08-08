@@ -453,7 +453,75 @@ export function ouvrirConnexion(compte, { onConnecte, onAbandon } = {}) {
   return m
 }
 
-// ═════════════════════════════════════════════════════════ C. MES CARTES ═══
+// ══════════════════════════════════════════ B bis. LA PASTILLE DE LA BARRE ═══
+//
+// LE COMPTE ÉTAIT RANGÉ DANS LES PARAMÈTRES, ET C'EST BIZARRE (Adrien).
+// Une roue crantée abrite des réglages d'application ; une identité n'est pas
+// un réglage. Le compte reprend donc sa place habituelle : une pastille dans la
+// pill de droite, à la fin de la famille des réglages, juste avant « Publier ».
+//
+// ⚠️ L'ICÔNE EST LA PLUS CONVENTIONNELLE QU'ON PUISSE DESSINER — un buste dans
+// un cercle. C'est une demande explicite : « choisis une icône habituelle pour
+// les comptes ». Un compte n'est pas l'endroit où l'on invente une métaphore :
+// il faut le reconnaître SANS le chercher, du premier coup d'œil, comme partout
+// ailleurs. Même facture que le reste du jeu de la barre (grille de 24, trait
+// de 1,8, `currentColor`, aucun remplissage).
+const ICON_COMPTE =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="10" r="2.9"/><path d="M6.6 18.9a5.6 5.6 0 0 1 10.8 0"/></svg>'
+
+// LA COCHE — un disque plein, la coche en creux dedans. Le disque est ce qui
+// rend la marque lisible sur n'importe quel fond : la barre est translucide, et
+// un rendu 3D bouge derrière elle. Une coche en trait seul y disparaîtrait la
+// moitié du temps.
+const ICON_COCHE =
+  '<svg class="ce-compte-coche" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="6"/><path d="M3.3 6.2 5.2 8l3.5-3.9" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+
+/**
+ * La pastille du compte, telle qu'elle vit dans la pill de droite.
+ *
+ * DEUX ÉTATS, LISIBLES D'UN COUP D'ŒIL — c'est tout l'objet de ce bouton :
+ *   · déconnecté : un ANNEAU d'accent autour de l'icône. Il ne clignote pas et
+ *     ne s'agite pas (consigne mot pour mot) : dans une rangée de six pictos en
+ *     encre, une seule pastille cerclée d'orange se voit sans avoir à bouger.
+ *     Une seule respiration de halo joue à l'arrivée, UNE fois, jamais en
+ *     boucle — et pas du tout sous `prefers-reduced-motion` (compte.css).
+ *   · connecté : une petite COCHE VERTE sur l'icône, et l'anneau s'en va.
+ *     Les deux ne cohabitent jamais : l'anneau appelle, la coche confirme.
+ *
+ * Le clic mène à l'endroit qui a du sens dans chaque état : l'écran de
+ * connexion quand il n'y a personne, « Mes créations » quand il y a quelqu'un —
+ * puisque c'est là que vivent désormais les actions du compte.
+ */
+export function pastilleCompte(compte, { onOuvrirMesCreations } = {}) {
+  const b = el('button', 'ce-icon-btn ce-comptebtn')
+  b.type = 'button'
+  b.innerHTML = ICON_COMPTE + ICON_COCHE
+
+  const rendre = () => {
+    const dedans = !!compte?.estConnecte?.()
+    b.classList.toggle('dedans', dedans)
+    b.classList.toggle('hors', !dedans)
+    // ⚠️ LE LIBELLÉ ACCESSIBLE PORTE L'ÉTAT, PAS SEULEMENT LE NOM. Un anneau et
+    // une coche sont deux informations purement visuelles : sans ces deux
+    // phrases, un lecteur d'écran annonce le même « Mon compte » dans les deux
+    // cas, et la seule chose que ce bouton avait à dire disparaît.
+    const adresse = dedans ? compte?.adresse?.() : null
+    b.setAttribute('aria-label', dedans ? `Mon compte — connecté${adresse ? ` avec ${adresse}` : ''}` : 'Mon compte — tu n’es pas connecté')
+    b.setAttribute('data-tip', dedans
+      ? 'Mon compte — tes créations, tes cartes publiées et leurs liens.'
+      : 'Mon compte — connecte-toi pour retrouver tes créations d’une visite à l’autre.')
+  }
+  rendre()
+  compte?.surChangement?.(rendre)
+
+  b.addEventListener('click', () => {
+    if (compte?.estConnecte?.()) { onOuvrirMesCreations?.(); return }
+    ouvrirConnexion(compte, { onConnecte: () => onOuvrirMesCreations?.() })
+  })
+  return b
+}
+
+// ═══════════════════════════════════════════════════════ C. MES CRÉATIONS ═══
 //
 // Panneau du rail droit. Il N'EXISTE PAS pour un visiteur déconnecté : il naît
 // à la connexion, disparaît à la déconnexion. Un panneau vide qui réclame une
@@ -670,7 +738,20 @@ export function buildMesCartesPanel(ctx) {
   compte.surChangement?.(majPresence)
   ctx.registerCartesRefresh?.(recharger)
 
-  return { panel, recharger }
+  // LA PORTE DEPUIS LA BARRE DU HAUT. La pastille de compte amène ici, et
+  // « amener » veut dire que le panneau est OUVERT à l'arrivée — au téléphone
+  // comme sur grand écran il naît replié, et un clic qui ne déplierait rien
+  // aurait l'air de n'avoir rien fait.
+  // ⚠️ ET LE DÉPLIAGE EST NOTÉ, comme s'il venait du chevron : sans ça, le
+  // panneau se refermerait à la visite suivante alors qu'on vient de demander à
+  // le voir — c'est très exactement le défaut que `CLE_REPLI` a corrigé.
+  const ouvrir = () => {
+    panel.setCollapsed(false)
+    noterRepli()
+    panel.root.scrollIntoView?.({ block: 'nearest' })
+  }
+
+  return { panel, recharger, ouvrir }
 }
 
 // ═════════════════════════════════════════════════════════ D. MON COMPTE ═══

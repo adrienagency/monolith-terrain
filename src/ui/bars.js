@@ -6,6 +6,7 @@ import { el, iconButton, refreshAll } from './kit.js'
 import { parseLatLon } from '../geo.js'
 import { showToast } from './toast.js'
 import { porteEnAccueil, actionBouton, LIBELLE_ACTION } from './accueil.js'
+import { pastilleCompte } from './compte.js'
 
 const I = {
   // objectif photo — la même icône que le panneau Caméra, pour qu'on la
@@ -339,10 +340,23 @@ export function buildTopBar(ctx) {
   const gearBtn = iconButton(I.gear, '', () => ctx.openSettings?.())
   gearBtn.setAttribute('data-tip', 'Paramètres — réglages globaux de l’application (performance…).')
 
-  // ordre du pill droit : réglages de VUE (sombre, œil) · aide · paramètres,
-  // puis la seule sortie — « Publier » — isolée à l'extrême droite (accent).
+  // LE COMPTE — sorti des Paramètres, où le ranger était bizarre (Adrien) :
+  // une roue crantée abrite des réglages d'application, pas une identité. Il
+  // prend la fin de la famille des réglages, juste avant le séparateur : c'est
+  // la place habituelle du compte dans une barre d'outil, et c'est la dernière
+  // chose qu'on lit avant la sortie.
+  //
+  // ⚠️ IL N'APPARAÎT QUE SI L'APPELANT A UN COMPTE À MONTRER. Les contextes
+  // embarqués (vitrine, viewer d'une shibu reçue) construisent la même barre
+  // sans jamais passer `compte` : ils gardent la barre d'hier, au bouton près.
+  const compteBtn = ctx.compte
+    ? pastilleCompte(ctx.compte, { onOuvrirMesCreations: () => ctx.ouvrirMesCreations?.() })
+    : null
+
+  // ordre du pill droit : réglages de VUE (sombre, œil) · aide · paramètres ·
+  // compte, puis la seule sortie — « Publier » — isolée à l'extrême droite.
   const sep = () => el('span', 'ce-topbar-sep')
-  barRight.append(dark, camBtn, hideBtn, helpBtn, gearBtn, sep(), exportBtn)
+  barRight.append(dark, camBtn, hideBtn, helpBtn, gearBtn, ...(compteBtn ? [compteBtn] : []), sep(), exportBtn)
 
   document.body.append(bar, barRight, eye)
   return {

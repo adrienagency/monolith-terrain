@@ -81,6 +81,17 @@
   --ce-radius-s: 8px;
   --ce-radius-xs: 4px;
 
+  /* LE VERT DU « C'EST BON » — la coche de la pastille de compte, et rien
+     d'autre. Sémantique comme la pente : il dit un ÉTAT, jamais une action —
+     l'action, c'est --ce-accent, et lui seul.
+     ⚠️ CE N'EST PAS UNE COULEUR NEUVE : ce sont exactement les deux valeurs de
+     --cc-douce, déjà à l'écran, déjà éprouvées sur les deux thèmes (5,1:1 sur
+     le verre clair, 8,2:1 sur le verre sombre). Elles sont RECOPIÉES plutôt
+     qu'aliasées parce que les deux sémantiques doivent pouvoir diverger : le
+     jour où une pente douce change de vert, une session ouverte n'a aucune
+     raison de changer avec elle. */
+  --ce-ok: #3f7a4f;
+
   /* pente sémantique (carnet-course.css) — séparée de --ce-accent, qui reste
      réservé à l'action. Sémantique et non décorative : elle ne suit donc PAS
      la palette du relief (une pente raide reste rouge sur une carte verte).
@@ -105,6 +116,9 @@ body.dark {
   --ce-track: rgba(231, 229, 228, 0.16);
   --ce-hover: rgba(231, 229, 228, 0.06);
   --ce-porcelain: #17191d;
+  /* même remontée que --cc-douce ci-dessous, et pour la même raison : un vert
+     forêt sur du verre presque noir ne se distingue plus d'un gris. */
+  --ce-ok: #6fbe83;
   /* pente sémantique, remontée en luminosité : les versions claires
      (#3f7a4f / #c98a2c / #b5432f) descendent sous le seuil de lisibilité sur
      le fond sombre de la barre course — un vert forêt sur un brun-noir ne se

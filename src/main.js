@@ -8409,6 +8409,10 @@ async function shareCurrentView() {
   }
 }
 
+// Ouvrir « Mes créations » — posé plus bas, avec le panneau lui-même (la barre
+// naît avant lui). Déclaré ici pour qu'on le voie depuis la closure qui le lit.
+let ouvrirMesCreations = null
+
 const topBar = buildTopBar({
   params,
   setDarkMode: (v) => {
@@ -8451,6 +8455,14 @@ const topBar = buildTopBar({
   hasCourse: () => !!gpxLayer.activeLayer?.gpx?.track,
   openStudioExport: () => studio.enterExport(),
   openSettings: () => panelCtx.openSettings?.(), // roue crantée (paramètres globaux)
+  // LA PASTILLE DU COMPTE, dans la pill de droite. Elle a besoin de la session
+  // (pour son anneau et sa coche) et d'une destination une fois connecté :
+  // « Mes créations », qui héberge désormais les actions du compte.
+  // ⚠️ CLOSURE PARESSEUSE POUR LA DESTINATION : le panneau se construit bien
+  // plus bas dans ce module, la barre bien plus haut. Lue au clic, la fonction
+  // est là ; copiée ici, elle vaudrait `undefined` pour toujours.
+  compte,
+  ouvrirMesCreations: () => ouvrirMesCreations?.(),
   // annuler / rétablir au clic — mêmes portes que Ctrl+Z, flush compris
   undo: undoNow,
   redo: redoNow,
@@ -9039,7 +9051,10 @@ panelCtx.registerCartesRefresh = (fn) => { rechargerMesCartes = fn }
 // plus bas dans le module, il est lu AU CLIC.
 panelCtx.composerPremiereCarte = () => panelCtx.openAtelier?.()
 const mesCartes = buildMesCartesPanel(panelCtx)
-void mesCartes
+// LA DESTINATION DE LA PASTILLE DE COMPTE (barre du haut). Elle est déclarée
+// ici, à côté du panneau, et lue AU CLIC par la closure posée dans buildTopBar
+// — la barre naît un millier de lignes plus haut que ce panneau.
+ouvrirMesCreations = () => mesCartes.ouvrir()
 
 const { elementsPanel, imagePanel } = buildEffectsPanel({
   params,
