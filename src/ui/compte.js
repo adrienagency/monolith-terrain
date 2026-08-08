@@ -481,7 +481,14 @@ export function buildMesCartesPanel(ctx) {
     a.href = c.url || '#'
     a.target = '_blank'
     a.rel = 'noopener'
-    a.append(el('span', 'ce-cartes-nom', c.nom || 'Carte sans nom'))
+    // ⚠️ LE NOM TRONQUÉ DOIT RESTER LISIBLE QUELQUE PART. Le panneau fait
+    // 268 px : « Ultra Tour du Beaufortain, boucle intégrale des cinq cols »
+    // demande 350 px pour 232 disponibles et s'arrête à « boucle in… ».
+    // Sans `title`, personne ne peut lire le nom entier de SA PROPRE carte —
+    // ni au survol, ni autrement.
+    const nom = el('span', 'ce-cartes-nom', c.nom || 'Carte sans nom')
+    nom.title = c.nom || 'Carte sans nom'
+    a.append(nom)
     const meta = [c.lieu, quand(c.publieeLe)].filter(Boolean).join(' · ')
     if (meta) a.append(el('span', 'ce-cartes-meta', meta))
     if (c.url) a.append(el('span', 'ce-cartes-url', c.url.replace(/^https?:\/\//, '')))
