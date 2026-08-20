@@ -108,6 +108,7 @@ Tranchées avec Adrien. Un agent que l'une d'elles gêne le **signale** ; il ne 
 11. **Cible : 60 images/s sur un portable récent.** Le téléphone dégrade portée et détail ; il ne rame pas.
 12. **Aucune cuisson mondiale nouvelle.** Le sol et la canopée ne se cuisent qu'à la composition ; **la canopée se streame** à l'activation de l'option.
 13. **Le flou pendant le mouvement est ACCEPTÉ**, et net dès l'arrêt.
+14. **L'EXAGÉRATION VERTICALE DEVIENT UNE COURBE CONTINUE DE L'ALTITUDE** — tranché par Adrien le 2026-08-20. Mêmes valeurs aux mêmes altitudes, **interpolées entre elles au lieu de sauter**. ⚠️ **Raison structurelle : la table actuelle est indexée par les niveaux de zoom, c'est-à-dire par la chose que ce pivot supprime.**
 
 ⚠️ **La décision 13 est un contrat, pas une tolérance.** Quelqu'un prendra ce flou pour un défaut de chargement et voudra afficher le niveau fin avant qu'il soit complet — **c'est précisément ce qui ramène les déchirures**. Le seul réglage légitime porte sur la vitesse de rattrapage à l'arrêt.
 
@@ -949,6 +950,17 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 ### Tâche 6 : `fenetre-bornee.js` — l'extraction
 
+
+⚠️ **CETTE TÂCHE PORTE LA DÉCISION 14 : L'EXAGÉRATION VERTICALE CONTINUE.** Elle ne peut être portée nulle part ailleurs, et voici pourquoi — vérifié au dépôt.
+
+**Aujourd'hui `params.demExaggeration` n'est pas un réglage d'affichage : c'est un facteur CUIT DANS LA GÉOMÉTRIE**, lu à douze endroits — `terrain.js:2136`, `:2203`, `:2237`, `:2433`, `:2598`, `ocean.js:1243`, `:1500`, `gpx.js:1527`, `main.js:3053`, `:3551`, `:3682`, `:5721`. **Le faire varier en continu sur l'architecture actuelle imposerait de reconstruire la géométrie à chaque image.**
+
+**Le geste juste, et il n'est possible qu'ici :** la fenêtre étant **rééchantillonnée** et non cuite, l'exagération s'applique **au rééchantillonnage**, en fonction de l'altitude de caméra. ⚠️ **La mer, le socle et les tracés GPX doivent lire la MÊME valeur au même instant** — c'est la famille de défauts déjà rencontrée deux fois sur ce dépôt : un réglage écrit d'un côté, jamais transmis à l'autre.
+
+⚠️ **LES VALEURS D'ANCRAGE SONT CELLES D'AUJOURD'HUI, ET ELLES SONT RÉGLABLES PAR L'UTILISATEUR :** `ZOOM_EXAG_DEFAULTS = {3: 2.5, 4: 2.5, 5: 5, 6: 4, 7: 3.2}` (`main.js:3129`), `BASE_EXAG = 2.8` (`main.js:3114`), **plus les surcharges d'Adrien stockées dans `localStorage` sous `monolith.zoomExag`** (`:3130-3138`). **La courbe doit passer par ces points ET honorer les surcharges** — les retirer casserait un réglage qu'il utilise.
+
+**Mesure de contrôle :** aujourd'hui, la largeur de sol visible saute de **×3,661** au passage des crans où l'exagération change ; le résidu se dérive exactement — `exagération(z) / pente = 2,5 / 0,6877 = 3,635`. **Après cette tâche, il doit valoir 1 à la tolérance du pas d'échantillonnage.**
+
 **Fichiers :** créer `src/monde/fenetre-bornee.js` · **modifier `src/plinth.js`, `src/ocean.js` et `src/fenetre-clip.js`** · tester `test/fenetre-bornee.test.js` **et les 13 `test/damier-*.test.js`**
 
 ⚠️ **AVANT D'ÉCRIRE UNE LIGNE, LISEZ CE QUI EXISTE.** `plinth.js:138` `computeSlab` et `plinth.js:232` `buildSlabWalls` (**douze options** — congé, chanfrein, AO de contact, liner, `masqueArrondi`, `bords`, `baseYFloor`) font déjà l'essentiel de ce que `construireFenetre` prétend faire ; `fenetre-clip.js` détient la forme des coins, dont `plinth.js` **et** `ocean.js` tirent la leur.
@@ -1050,6 +1062,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
   2. **le cran z4 → z5 rend ×4 de distance là où le budget du niveau n'en dépense que ×2**, et il dépasse la butée de 150 unités (×1,32 à ×1,81 selon la latitude et l'altitude de départ).
 
   **Trois issues, et Adrien seul peut trancher entre les deux premières** : (a) **exagération constante** — les deux discontinuités disparaissent d'un coup, le relief des blocs larges s'aplatit ; (b) **paliers conservés** — on garde le rendu et on assume les deux sauts ; (c) **retirer l'exagération de l'altitude de CADRAGE seulement** (elle resterait à l'affichage et au rendu) — cela ferme (1), mais **invalide les onze sauts mesurés à la Tâche 1a** et impose de refaire tout le relevé. ⚠️ **Ce n'est pas une question de goût seule : c'est aussi le seul nombre sur lequel la Tâche 1b bis et la Tâche 2 bis se croisent.**
+- ✅ **TRANCHÉ PAR ADRIEN LE 2026-08-20 — L'EXAGÉRATION VERTICALE DEVIENT UNE COURBE CONTINUE DE L'ALTITUDE** (décision 14). Portée par la **Tâche 6**, seule capable de la tenir : ailleurs, elle imposerait de reconstruire la géométrie à chaque image.
 - **L'effet de transition** globe → socle
 - **La récupération de GLOBathy** : Earth Engine impose un compte et des conditions commerciales à vérifier ; le dépôt de l'article est peut-être la meilleure porte.
 - **Le trait de côte au-delà de z15.** Mesuré : autour d'un bloc z16 à Brest, les polygones OSM pré-simplifiés à 30 m ne donnent que **51 segments pour 1,2 km de côté** *(le côté du bloc — ce plan écrivait « de côte », ce qui en faisait une longueur de rivage)* — médiane 123 m, pointes à 849 m. Rasterisés à 0,79 m la cellule, ils dessineraient un rivage à facettes. Soit on branche le champ processeur au-delà de z15, soit on raffine la donnée. **Le second est une décision de données, pas de code.**
