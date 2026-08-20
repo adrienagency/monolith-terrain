@@ -340,10 +340,10 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 ⚠️ **À TRANCHER AVEC ADRIEN AVANT DE COMMENCER.** Le commentaire de `:455` porte la mention *« Remplace la continuité d'altitude v42 »* : **une continuité d'altitude a déjà existé ici et Adrien l'a fait retirer.** Il faut savoir pourquoi avant de la rétablir. **C'est une question, pas une tâche.**
 
 - [ ] **Étape 0 — trancher la forme du test, comme la Tâche 1.** ⚠️ **Le test d'exécution prescrit ici n'est écrivable par aucune des deux voies que ce plan nomme lui-même** : `Modes` appelle `document.createElement`, il n'y a pas de jsdom, aucun test n'instancie `Modes`. **Module pur ou assertion de texte source : dites lequel avant l'Étape 1.** (Ce plan a corrigé ce défaut dans la Tâche 1 et l'a laissé ici.)
-- [ ] **Étape 0 bis — poser la question à Adrien** et écrire sa réponse ici.
 - [ ] **Étape 1 — le test qui échoue** : sur un changement de cran en mode surface, la caméra ne se téléporte pas et aucun rideau ne se pose.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
-- [ ] **Étape 3 — implémenter**, selon la réponse de l'Étape 0.
+- [ ] **Étape 3 — RETIRER LE RIDEAU ET LA TÉLÉPORTATION.** ⚠️ **Cette étape ne dépend d'aucune réponse d'Adrien** : le rideau de `_rescale` et le saut de caméra partent, quel que soit ce qui les remplace.
+- [ ] **Étape 3 bis — CE QUI LES REMPLACE. ⚠️ SEULE ÉTAPE QUI ATTEND ADRIEN** (voir §9 : pourquoi la « continuité d'altitude v42 » a été retirée). Tant que la réponse manque, **posez une transition neutre et laissez la case ouverte** — le reste de la tâche se termine sans elle.
 - [ ] **Étape 4 — mutation** : remettre la téléportation doit tuer le test.
 - [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
