@@ -248,8 +248,7 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 | `src/block-grid.js` **(modifier)** | `:768` appelle `buildSlabWalls` — 13 fichiers de test, empreintes bit à bit |
 | `src/fenetre-finesse.js` **(modifier ou remplacer)** | ⚠️ **il fait déjà la Tâche 7** |
 | `src/terrain.js` **(modifier)** | `resMaillage` (`:2016`), `RES_FENETRE_CONTINUE = 384` (`:61`) |
-| `src/modes.js` **(modifier)** | ⚠️ **la caméra et les paliers — `DIVE_TIERS`, `pickDiveTier`, `orbAlt`, `_dive`, `controls.minDistance`, `cruise`.** C'est lui qui fabrique la discontinuité |
-| `src/main.js` **(modifier)** | **le seul endroit qui lit `FLAGS`** pour le globe, **et les trois sites du voile de chargement** (`:927`, `:3423`, `:3447`) |
+| `src/main.js` **(modifier)** | **le seul endroit qui lit `FLAGS`** pour le globe, **et la carte `#loading`** — `showLoading` `:908`, `hideLoading` `:912`, `LOADING_MIN_MS` `:898`, l'appel `:3182`. ⚠️ **Les trois repères `:927`, `:3423`, `:3447` qu'une révision de ce plan citait sont des lignes de COMMENTAIRE — ne les cherchez pas.** |
 | `src/monde/descente-bornee.js` **(créer)** | borner la descente au débit réellement observé — règle R3 |
 | `src/flags.js` **(modifier)** | le drapeau qui isole le globe continu du globe orbital, **qui est en production** |
 | `src/globe.js` **(modifier)** | horizon géométrique, frustum, crédit ; puis rebranchement sur la vraie source |
@@ -267,7 +266,7 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 
 | la demande | qui la porte |
 |---|---|
-| « plus de pop-up de chargement » | ⚠️ **PERSONNE.** Le mot « voile » n'apparaissait qu'ici, dans la promesse. Dans le dépôt il est câblé sur le chemin du zoom (`main.js:927`, `:3423`, `:3447`). → **Tâche 2, écrite ci-dessous.** |
+| « plus de pop-up de chargement » | ✅ **Tâche 2** — ⚠️ **il y a DEUX rideaux** : la carte `#loading` (`main.js`/`style.css`, plancher de 2 000 ms, **et elle floute l'app à 16 px à l'arrêt**) et le fondu `.whiteout` de `Modes`. Une révision de ce plan avait fait sortir le premier du document en corrigeant les repères du second. |
 | « le déplacement totalement fluide, une seule caméra de l'orbite au sol » | ⚠️ **PERSONNE.** Le §6 s'appelle « le flux et **la caméra** » et ses cinq tâches parlent toutes du quadtree. La navigation par paliers vit dans `src/modes.js` (758 lignes : `orbAlt`, `DIVE_TIERS`, `pickDiveTier`, `controls.minDistance`, `cruise`), qui n'était **cité que deux fois, comme fournisseur de constantes pour un harnais**. → **Tâche 1, écrite ci-dessous.** |
 | « le crop n'apparaît que lorsque la Terre occupe une partie importante de l'écran » | ✅ **Tâche 3**, et elle est exécutable. |
 
@@ -279,7 +278,11 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 
 **Mesuré au banc, stable au dernier chiffre sur trois exécutions, descente orbite → z13 avec un réseau PARFAIT :**
 
-> **9 rideaux blancs · 261 images entièrement blanches (4,35 s) · 531 images d'entrée morte (8,85 s) · 27,2 % d'un vol de 16 secondes.**
+> **Descente orbite → z13 : 8 rideaux · 24,2 % d'écran blanc · 48,4 % d'entrée morte.**
+> **Remontée z13 → orbite : 11 rideaux · 35,3 % d'écran blanc · 70,8 % d'entrée morte.**
+> **Clic-plongée : 4 rideaux · 49,2 % d'entrée morte · 94,8 % de bandeau.**
+
+⚠️ **ET VOICI LE CHIFFRE QUI DOIT CADRER LES ATTENTES : MÊME TOUS LES RIDEAUX RETIRÉS** — plus que ce que ce plan livre — **avec un chargement réaliste d'une seconde par cran, il reste 7,88 s d'entrée morte et de caméra figée sur 30 s (26,3 %), et 11,18 s de bandeau (37,3 %)**, carte floutée à 16 px pendant tout ce temps. **Retirer les rideaux ne suffit pas : il faut supprimer l'attente qu'ils masquent, et c'est `this.busy` autant que le réseau.**
 
 ⚠️ **Et sept des neuf ne viennent PAS de `_dive` : ils viennent de l'escalier de surface** (`_rescale`, `modes.js:452`, appelé par `_refine` `:436` et `_coarsen` `:445`). **C'est la première source du pop-up d'Adrien, et aucune tâche ne la portait.** → **Tâche 2 bis.**
 
@@ -314,8 +317,13 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue, et **relever où** : la liste des sauts est la liste du travail.
 - [ ] **Étape 3 — le changement de repère, geste par geste.** `up`, `near`/`far`, pose, `minDistance` : chacun devient une fonction continue de l'altitude, ou disparaît.
 - [ ] **Étape 4 — la frontière `globe.js` / `terrain.js`.** ⚠️ **C'est le geste 1, et le plus lourd : aujourd'hui l'un s'éteint quand l'autre s'allume.** Dites ce qui les fait coexister — recouvrement, fondu, ou remise du globe au rang de fond lointain.
+- [ ] **Étape 4 bis — les trois mécanismes orphelins**, qu'aucune version de ce plan ne nommait et qui figent la caméra autant que les rideaux :
+  - **`this.busy`** (`modes.js:138`, `:203`, `:242`, `:296`, `:308`, `:386`…) — pendant qu'il est vrai, **la molette, `flyTo`, les steppers et la caméra sont tous gelés**. C'est lui qui produit l'« entrée morte », et elle dure plus longtemps que les rideaux.
+  - **`_loadDive` / `diveTo`** — le clic-plongée, un chemin distinct de `_dive`, avec un **recul de caméra mesuré de ×3,32 à ×24,25**.
+  - **`enterOrbit`** (`modes.js:296`) — la remontée, symétrique de `_dive` et tout aussi discontinue. ⚠️ **Mesuré : la remontée est PIRE que la descente — 11 rideaux contre 8, 35,3 % d'écran blanc, 70,8 % d'entrée morte.**
 - [ ] **Étape 5 — retirer le plancher orbital `:326`**, et unifier les quatre sites de `minDistance` en une seule dérivation.
 - [ ] **Étape 6 — sortir `dem.meanM` de `surfaceCamAltMeters`** (R1), ou dire pourquoi il peut rester.
+- [ ] **Étape 6 bis — poser le point d'appel de `zoomSoutenable`. ⚠️ SANS CETTE ÉTAPE, LA RÈGLE R3 N'A AUCUN PROPRIÉTAIRE.** La Tâche 4 ter fabrique la fonction mais délègue ici la moitié caméra — « la caméra ne descend pas plus vite que le zoom soutenable » — et cette tâche passe **avant** elle. **Posez le point d'appel maintenant, sur le chemin de descente, et laissez-le inerte** (`zoomSoutenable` renvoyant le zoom demandé) jusqu'à ce que la 4 ter le remplisse. Sinon personne ne le pose jamais.
 - [ ] **Étape 7 — mutation** : réintroduire un saut doit tuer le test de monotonie.
 - [ ] **Étape 8 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
@@ -323,11 +331,14 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 
 **Fichiers :** modifier `src/modes.js` (`_rescale` `:452`, `_refine` `:436`, `_coarsen` `:445`) · tester `test/escalier-surface.test.js` (créer)
 
-**C'est la première source du pop-up**, et elle n'était dans aucune tâche. Chaque cran de zoom en mode surface passe par `_rescale`, qui pose un rideau blanc **et téléporte la caméra** au point de présentation (`:455-457`).
+**C'est la première source du pop-up**, et elle n'était dans aucune tâche. Chaque cran de zoom en mode surface passe par `_rescale`, qui pose un rideau blanc **et téléporte la caméra** au point de présentation.
+
+⚠️ **CETTE TÂCHE ET LA TÂCHE 1 SE MARCHENT DESSUS, ET L'ORDRE COMPTE.** Elles partagent `_arrivalPose` (`modes.js:358`, appelée par `_dive` `:417` **et** par `_rescale` `:469`), `loadSurface` et `_whiteout`. **Faites la Tâche 1 d'abord** : elle rend la pose continue, et **le « vérifier qu'il échoue » de celle-ci pourrait alors ne plus échouer**. Si c'est le cas, **c'est une bonne nouvelle, pas un test cassé** — écrivez-le et passez à l'Étape 3.
 
 ⚠️ **À TRANCHER AVEC ADRIEN AVANT DE COMMENCER.** Le commentaire de `:455` porte la mention *« Remplace la continuité d'altitude v42 »* : **une continuité d'altitude a déjà existé ici et Adrien l'a fait retirer.** Il faut savoir pourquoi avant de la rétablir. **C'est une question, pas une tâche.**
 
-- [ ] **Étape 0 — poser la question à Adrien** et écrire sa réponse ici.
+- [ ] **Étape 0 — trancher la forme du test, comme la Tâche 1.** ⚠️ **Le test d'exécution prescrit ici n'est écrivable par aucune des deux voies que ce plan nomme lui-même** : `Modes` appelle `document.createElement`, il n'y a pas de jsdom, aucun test n'instancie `Modes`. **Module pur ou assertion de texte source : dites lequel avant l'Étape 1.** (Ce plan a corrigé ce défaut dans la Tâche 1 et l'a laissé ici.)
+- [ ] **Étape 0 bis — poser la question à Adrien** et écrire sa réponse ici.
 - [ ] **Étape 1 — le test qui échoue** : sur un changement de cran en mode surface, la caméra ne se téléporte pas et aucun rideau ne se pose.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
 - [ ] **Étape 3 — implémenter**, selon la réponse de l'Étape 0.
@@ -336,7 +347,14 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 
 ### Tâche 2 : retirer le voile de chargement ⚠️ EN DERNIER
 
-**Fichiers :** modifier `src/modes.js` (`_whiteout` `:282`, sa création `:271-273`, et ses **quatre** appelants `:312`, `:408`, `:468`, `:628`) · modifier `src/style.css` (`:535-547`) · tester `test/voile.test.js` (créer)
+**Fichiers :** modifier `src/main.js` (`showLoading` `:908`, `hideLoading` `:912`, `LOADING_MIN_MS` `:898`, l'appel de `fetchAndBuildDem` `:3182`) · modifier `src/style.css` (`#loading` `:19-`, **et le `filter: blur(16px)` de `:186`**) · modifier `src/modes.js` (`_whiteout` `:282`, sa création `:271-273`, ses **quatre** appelants `:312`, `:408`, `:468`, `:628`) · tester `test/voile.test.js` (créer)
+
+⚠️ **IL Y A DEUX RIDEAUX, PAS UN — ET C'EST LE SECOND QU'ADRIEN NOMME.**
+
+1. **`#loading`** — la carte de marque centrée (nom, baseline, orbe qui tourne), `#loading-bg` plein écran, **`LOADING_MIN_MS = 2000` : deux secondes minimum au premier affichage**. `showLoading()` est appelé **à chaque cran de zoom** par le chemin `loadSurface → fetchAndBuildDem`. ⚠️ **Et `style.css:186` floute l'application entière à 16 px pendant qu'il est là — À L'ARRÊT. C'est le contraire exact de la décision 13**, qui n'accepte le flou que **pendant** le mouvement.
+2. **`.whiteout`** — le fondu blanc de `Modes`, 480 ms + 480 ms.
+
+⚠️ **UNE RÉVISION DE CE PLAN A FAIT SORTIR `#loading` DU DOCUMENT.** Elle avait relevé, à juste titre, que trois repères de `main.js` étaient des lignes de commentaire — et elle a **remplacé** la liste au lieu de l'**élargir**. Les numéros étaient faux, la thèse était juste. **Les deux rideaux sont dans cette tâche.**
 
 ⚠️ **UNE PREMIÈRE VERSION DE CETTE TÂCHE DÉSIGNAIT TROIS LIGNES DE COMMENTAIRE** — `main.js:927`, `:3423`, `:3447`, trouvées en cherchant le mot « voile ». **Le rideau est fabriqué par `Modes` lui-même** : `_buildDom` crée le `div.whiteout` (`modes.js:271-273`), **il ne passe pas par le constructeur**, donc aucun `grep` de `main.js` ne pouvait le voir. `style.css:535-547` : `position: fixed; inset: 0; background: #fff`. `_whiteout` = **480 ms opaque + 480 ms de retour**.
 
@@ -351,7 +369,7 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 - [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 
-### Tâche 4 : rendre `MAX_Z` ATTEIGNABLE — et non le descendre ⚠️ EN PREMIER
+### Tâche 4 : rendre `MAX_Z` ATTEIGNABLE — et non le descendre ⚠️ LA PREMIÈRE DU BLOC QUADTREE
 
 **Fichiers :** modifier `src/globe.js` (`_traverse`, seuil d'horizon, crédit) · **modifier `src/main.js`** (le seul fichier qui lit `FLAGS` sur ce chemin) · modifier `src/flags.js` (poser `globeContinu`) · modifier `test/globe-eviction.test.js` (déverrouiller `:204` et `:208`, **et lui donner une caméra**) — ⚠️ **aucune des trois corrections ne touche `MAX_Z` ni `CACHE_MAX`**, contrairement à ce qu'annonçait ce plan.
 
@@ -401,7 +419,7 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 - [ ] **Étape 0 — POSER LE DRAPEAU `globeContinu`, ET LE BRANCHER.** ⚠️ **`src/globe.js` n'importe PAS `flags.js` — vérifié, zéro occurrence.** Les seuls lecteurs de `FLAGS` sont `main.js`, `fenetre-reglage.js` et `ui/effects-panel.js`. Un drapeau posé dans `flags.js` sans câbler sa lecture **ne protège rien** : les corrections atterrissent sur le globe de production. **Le lecteur est `src/main.js`**, qui construit le globe : il passe l'option au constructeur, et `globe.js` ne connaît qu'un booléen, pas `FLAGS`. Suivre le patron de `FLAGS.fenetreContinue`, déjà en place.
 - [ ] **Étape 1 — établir la base, et l'écrire. ⚠️ EN FIXANT L'ÉTAT DU CACHE À L'ENTRÉE, SANS QUOI LE CHIFFRE N'EST PAS REPRODUCTIBLE.** Le zoom atteint est une grandeur **à hystérésis** : même code, globe **neuf** à chaque station → **z9** ; globe **promené** sur les stations à la suite → z7 puis **z6, sans jamais remonter**. La cause est dans le fichier — une bouffée de crédit initiale, puis `tiles.size = CACHE_MAX`. ⚠️ **z6, z7 et z9 sont donc TROIS MESURES JUSTES de trois protocoles différents. N'en interdisez aucune : dites laquelle vous mesurez.**
 
-  Six altitudes **nommées** : **1 600 km · 800 km · 200 km · 60 km · 8 km · 2 km**, à **quatre latitudes** (0°, 30°, 45°, 60° N). Relever zoom effectif, tuiles dessinées, taille de cache et **requêtes par image caméra immobile**, **sur 20 images consécutives, en exigeant la stabilité** — un relevé à une seule image ne dit rien d'un système qui oscille, et c'est ce qui a produit trois chiffres contradictoires dans ce plan. **Faites les deux protocoles : globe neuf, et globe promené.**
+  Six altitudes **nommées** : **1 600 km · 800 km · 200 km · 60 km · 8 km · 2 km**, à **quatre latitudes** (0°, 30°, 45°, 60° N). Relever zoom effectif, tuiles dessinées, taille de cache et **requêtes par image caméra immobile**, **sur 20 images consécutives, en exigeant la stabilité**. ⚠️ **Et NE COMPTEZ PAS DEPUIS L'IMAGE 0 : un globe neuf met quatre images à se stabiliser.** Jetez les cinq premières, puis relevez les vingt suivantes. Sans cette précaution, « 20 images stables » est impossible à obtenir et l'Étape 1 ne se termine jamais.
 - [ ] **Étape 1 bis — DONNER UNE CAMÉRA AU HARNAIS. ⚠️ SANS ELLE, LES ÉTAPES 2 ET 4 SONT IMPOSSIBLES.** Le seul harnais qui fait voler le globe porte `{ position: new THREE.Vector3() }` (`test/globe-eviction.test.js:145` et `:225`) : **aucune orientation, aucune `projectionMatrix`** — zéro `PerspectiveCamera` dans tous les `test/globe-*.test.js`. Sans elle, l'Étape 4 n'a pas de frustum à tester et l'Étape 2 pas d'écran. Prescrivez `new THREE.PerspectiveCamera(30, 16/9, near, 1400)` avec **`near = clamp(orbAlt × 0,2, 0,01, 0,5)`** — ⚠️ **le `clamp` fait partie de la formule** (`modes.js:704`) ; sans lui, le plan proche part à zéro en orbite haute. Les trois valeurs sont dans le dépôt : `main.js:263`, `modes.js:704`, `modes.js:319`.
 - [ ] **Étape 2 — DÉVERROUILLER LES TESTS, avant toute correction.** `globe-eviction.test.js:204` (`zoomFinal >= 6`) et `:208` (`visiblesFinal > 200`) décrivent le défaut comme un contrat, et la seconde **fait échouer le bon correctif**.
 
@@ -673,7 +691,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 ### Tâche 7 : les deux résolutions et la zone morte
 
-⚠️ **CETTE TÂCHE RÉINVENTE `src/fenetre-finesse.js`, QUI EST EN PRODUCTION.** Module pur, testable sous node, il porte déjà `pasFinesse`, `resDeFinesse`, `REPOS_S = 0,4`, `V_REPOS = 2`, `RES_REPOS_MAX = 768` — plus `Terrain.resMaillage` (`terrain.js:2016`) et `RES_FENETRE_CONTINUE = 384` (`terrain.js:61`). **Trancher d'abord : étendre ou remplacer.**
+⚠️ **CETTE TÂCHE RÉINVENTE `src/fenetre-finesse.js`, QUI EXISTE DÉJÀ** — module pur, testable sous node : `pasFinesse`, `resDeFinesse`, `REPOS_S = 0,4`, `V_REPOS = 2`, `RES_REPOS_MAX = 768`, plus `Terrain.resMaillage` (`terrain.js:2016`) et `RES_FENETRE_CONTINUE = 384` (`terrain.js:61`). ⚠️ **Nuance que ce plan a écrite trop fort : il n'est PAS « en production » — `flags.js:25` porte `fenetreContinue: false`, et `terrain.js:2017` est court-circuité hors `?f3=1`.** Il est fusionné et testé, pas actif. **Trancher : étendre ou remplacer.**
 
 ⚠️ **Et ses chiffres sont faux contre le dépôt :** les résolutions `128 | 256` sont **trois fois sous la production** (384 / 768), et le budget « 1,7 / 8,3 ms » vient d'un prototype **sans socle**, alors que ce dépôt mesure **5,5 / 8,7 / 14,6 / 24,5 ms** (script rejouable cité en `plinth.js:876`).
 
@@ -695,7 +713,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 ⚠️ **RAPPEL DE LA DÉCISION 13, PARCE QUE C'EST ICI QU'ON EST TENTÉ DE L'ENFREINDRE.** Baisser à N=128 pendant le mouvement **rend l'image plus grossière pendant qu'on bouge**. C'est voulu, Adrien l'a validé, et c'est le contrat. **Ne compensez pas** en forçant N=256 dès que « ça a l'air lent » : vous reprendriez les 8,3 ms et les 12 % de dépassement que cette tâche existe pour éviter.
 
-- [ ] **Étape 1** — test : en mouvement `resolutionPour` rend **384**, au repos **768** (⚠️ **pas 128 et 256, qui sont trois fois sous la production** — c'est la case qu'on coche, et elle prescrivait encore les valeurs que cette tâche vient de réfuter) ; une dérive d'emprise sous le seuil ne déclenche **aucune** reconstruction. ⚠️ **Et l'invariant est un critère de cette étape, pas une remarque : socle et maillage à la même résolution** (`plinth.js:865-879`) — un test doit le vérifier.
+- [ ] **Étape 1** — test : en mouvement `resolutionPour` rend **384**, au repos **768** (⚠️ **pas 128 et 256, trois fois sous la production**). ⚠️ **ET LA SIGNATURE `resolutionPour({ enMouvement })` EST INSUFFISANTE : elle ne reçoit pas `params.resolution`, donc elle NE PEUT PAS le respecter** — alors que `resDeFinesse` porte en toutes lettres « ne pas servir `params.resolution` tel quel » et qu'un utilisateur qui choisit 256 doit obtenir 256. **La signature est `resolutionPour({ enMouvement, resVoulue })`.** Une dérive d'emprise sous le seuil ne déclenche **aucune** reconstruction. ⚠️ **Et l'invariant est un critère de cette étape : socle et maillage à la même résolution** (`plinth.js:865-879`).
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
 - [ ] **Étape 3** — implémenter.
 
@@ -717,20 +735,22 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 **Phase 5 — les données.** Canopée en flux à l'activation. **GLOBathy** (1,4 M de plans d'eau, 30 m, **CC0**). ⚠️ Profondeurs **modélisées**, validées sur 1 503 lacs sur 1,4 million : à mentionner si on les affiche.
 
-**Phase 6 — la dépose de l'ancien.** Retrait d'`escalier-zoom.js`, nouveau format de partage, reprise des gabarits. ⚠️ **Une partie des 3 062 tests verrouille les statistiques par cadre qu'on débranche. À relire un par un** — lent, ingrat, et que les agents n'accélèrent pas.
+**Phase 6 — la dépose de l'ancien.** ⚠️ **CELLE-CI NE DEVRAIT PAS ÊTRE REPORTÉE : elle est chiffrable aujourd'hui et ne dépend d'aucune mesure de la Phase 2.** « Une partie des 3 062 tests » se compte : **11 fichiers, 193 tests, environ 20 secondes.** ⚠️ **Et `escalier-zoom.js` ne se retire PAS** — voir le §5 : il exporte `intersectionGlobe` et `viseeArrivee`, importées par `main.js:31` et sans rapport avec les paliers. **Seuls `bornesEscalier`, `pasEscalier`, `paliersRetenus` et `palierDeClic` s'en vont.** Reste : nouveau format de partage, reprise des gabarits.
 
 ---
 
 ## 9. Ce qu'Adrien doit trancher en chemin
 
-- **L'effet de transition** globe → socle — Phase 4, en tenant compte du point MapLibre ci-dessus.
+- ⚠️ **CE QUE L'UTILISATEUR VOIT QUAND LE RÉSEAU REFUSE LA DESCENTE** (règle R3, Tâche 4 ter). La caméra cesse d'obéir : c'est exactement l'instant qu'occupait le pop-up. Flou assumé (décision 13), ralentissement progressif, ou indicateur discret ? **Aucune tâche ne peut trancher cela.**
+- ⚠️ **POURQUOI LA « CONTINUITÉ D'ALTITUDE v42 » A-T-ELLE ÉTÉ RETIRÉE ?** Le commentaire de `modes.js:455` porte la mention « Remplace la continuité d'altitude v42 » : **une continuité a déjà existé là, et elle a été retirée.** La Tâche 2 bis propose de la rétablir. **Il faut savoir ce qui n'allait pas avant de refaire le même geste.**
+- **L'effet de transition** globe → socle
 - **La récupération de GLOBathy** : Earth Engine impose un compte et des conditions commerciales à vérifier ; le dépôt de l'article est peut-être la meilleure porte.
 - **Le trait de côte au-delà de z15.** Mesuré : autour d'un bloc z16 à Brest, les polygones OSM pré-simplifiés à 30 m ne donnent que **51 segments pour 1,2 km de côté** *(le côté du bloc — ce plan écrivait « de côte », ce qui en faisait une longueur de rivage)* — médiane 123 m, pointes à 849 m. Rasterisés à 0,79 m la cellule, ils dessineraient un rivage à facettes. Soit on branche le champ processeur au-delà de z15, soit on raffine la donnée. **Le second est une décision de données, pas de code.**
 - **Le déploiement de la mer corrigée.** ⚠️ **Ce plan écrit ailleurs que « le gain n'est pas visuel aujourd'hui » : les deux ne peuvent pas être vrais.** Ce qui est établi : la correction ajoute 13 162 cellules de mer à Bergen sans en perdre aucune. **Qu'elle se voie ou non à l'écran est précisément ce qu'il faut regarder avant de déployer** — c'est la décision d'Adrien, pas une affirmation du plan.
 
 ## 10. Auto-revue
 
-**Couverture — et elle n'est pas complète, c'est écrit en tête du §6.** La **décision 1** (caméra continue) et la **suppression du voile** ont désormais leurs Tâches 1 et 2, ajoutées le 2026-08-20 après qu'une attaque a constaté qu'aucune tâche ne les portait. Restent sans tâche : la **décision 6** (format d'impression à l'export) et la **décision 11** (60 img/s sur portable) — ⚠️ **et `src/palier-machine.js`, le module qui fait déjà ce tri de matériel dans ce dépôt, n'est cité nulle part.**
+**Couverture — et elle n'est pas complète, c'est écrit en tête du §6.** La **décision 1** (caméra continue) et la **suppression du voile** ont désormais leurs Tâches 1, 2 bis et 2. ⚠️ **Restent QUATRE décisions sans porteur, pas deux** : la **5** (la gravure ne s'écrit qu'à l'arrêt), la **6** (format d'impression à l'export), la **7** (mer, météo, cycle du jour en mode socle uniquement) et la **11** (60 img/s sur portable) — **elles n'existent qu'à la ligne où on les a votées.** Et `src/palier-machine.js`, le module qui fait déjà ce tri de matériel dans ce dépôt, n'est cité nulle part.
 
 
 **Cohérence des noms** — employés à l'identique partout : `socleVisible`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `demanderEmprise`, `PLAFOND_FILE`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`, `debitObserve`.
