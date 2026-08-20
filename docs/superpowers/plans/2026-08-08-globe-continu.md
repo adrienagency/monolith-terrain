@@ -251,6 +251,40 @@ C'est exactement le comportement que décrit Hoppe (« rendering load actually d
 
 ⚠️ **L'audit topologique valide un solide RETOURNÉ.** Au premier jet, les parois et la dalle étaient enroulées à l'envers, le socle était grand ouvert — et l'audit d'arêtes annonçait « 0 bord libre », **à juste titre**. Seul un test de silhouette avant/arrière l'a vu. Puis ce test est passé **à vide**, l'objet étant hors cadre, et tout a dû être remesuré avec une preuve de non-vacuité. **Un audit d'arêtes ne prouve pas qu'un solide est fermé dans le bon sens, et un test de silhouette ne prouve rien s'il ne prouve pas d'abord qu'il regarde quelque chose.**
 
+### ⚠️ L'ATTAQUE DU VERDICT, 2026-08-20 — confiance 6/10, « tient sous conditions »
+
+Le « oui » **géométrique** est confirmé : huit trajets (antiméridien, pôle, archipel, côte découpée, rotation rapide, dézoom brutal, téléportation), **aucun NaN, aucun triangle dégénéré, aucun trou**. L'attaquant n'a pas réussi à déchirer l'objet et pense que c'est impossible.
+
+**Mais l'appareil de preuve du prototype ne valait presque rien, et trois de ses quatre chiffres étaient optimistes.**
+
+**A. Le geste le plus banal de l'application coince le flux, définitivement.**
+Un panoramique latéral à 4 km d'altitude, 90° de balayage : **2 943 tuiles bloquées en `loading`**, crédit à −2 551, **zoom effectif figé à z2**, et **aucune récupération après 30 s d'immobilité**. Une traversée suffit pour que le vol suivant reste à z2 pendant 45 s.
+
+Cause : requêtes **non plafonnées, jamais annulées**, et `_evictJusqua` n'évince que les tuiles `ready` — **une tuile `loading` occupe une entrée pour toujours**. ⚠️ **Et c'est l'interface que le prototype proposait telle quelle pour la Phase 2.** Le vol de référence ne l'avait jamais vu parce que c'est une descente lisse, où deux images consécutives demandent presque les mêmes tuiles.
+
+**B. Les 231 audits étaient un seul audit, et le test d'étanchéité était aveugle.**
+L'audit topologique porte sur `this.indices`, écrit **une fois** au constructeur : 231 exécutions valent 1. Le test d'espace écran n'utilisait **qu'un angle**, sous lequel il ne voit ni une dalle retournée — *le bug même que le rapport dit avoir attrapé* — ni une dalle absente, ni un mur entier manquant.
+
+Le chiffre qui accable : à l'arrivée au Mont-Blanc, **un trou de 128×128 mailles — 1,78 km de côté, la moitié de la fenêtre — rend 0 pixel de trou.** Parce qu'à l'exagération 18 le socle devient une aiguille 10,6:1 qui occupe 0,66 % du cadre. **Le défaut de mise en scène que le rapport signalait lui-même est ce qui aveuglait son instrument.**
+
+Remplacement validé : **volume signé recentré + dégénérés + NaN**, 6 sabotages détectés sur 6, environ 10 ms, **sans rendu**.
+
+**C. Les chiffres, corrigés.**
+
+| | annoncé | mesuré par l'attaque |
+|---|---|---|
+| reconstruction, médiane | 7,2 ms | **8,3 ms** — au-dessus du seuil **à la médiane**, pas « une image sur huit » |
+| retard de zoom, cache chaud | 45 % | **64 %** |
+| retard de zoom, **à froid** | non mesuré | **83 %**, retard moyen **3,67 niveaux**, p90 à **10** |
+| zoom effectif atteint | z13 | **z11 à 12 Mb/s, z9 à 4 Mb/s** |
+| battement d'éviction | « non observé » | **10 829 décodages complets** pour un cache de 420, en un vol |
+
+Les 7,2 ms excluaient **1,10 ms de téléversement des sommets** (1,54 Mo par image) et environ 2,5 ms de décodage de tuiles en microtâche.
+
+⚠️ **Conséquence produit, à dire à Adrien** : à z9, un texel vaut 213 m — **17 texels sur toute la largeur du socle**. Sur une connexion modeste, pendant le vol, on n'obtient pas « du flou », on obtient une autre carte.
+
+**Ce qui tient et qu'il faut garder :** l'antiméridien passe, le pôle ne casse pas (silencieusement faux au-delà de 85,05° N, mais fermé), la précision float32 est confirmée au chiffre près, et **N = 128 mesuré à 1,7 ms contre 6,8 — la stratégie à deux résolutions est la bonne.**
+
 ### Les tâches de la Phase 2, maintenant que la question est tranchée
 
 **Tâche 5 — `src/monde/fenetre-bornee.js`, l'extraction.**
@@ -260,6 +294,14 @@ Promouvoir le rééchantillonnage du prototype : une grille régulière propre �
 **Tâche 6 — les deux résolutions et la zone morte.**
 N = 128 pendant que la caméra bouge, N = 256 quand elle se pose. Plus un seuil sous lequel un changement d'emprise ne déclenche **aucune** reconstruction. ⚠️ Le prototype reconstruisait à chaque image : c'est le pire cas, et c'est ce qui donne les 12 % de dépassement. La zone morte est ce qui rend la décision 4 tenable sur la cible.
 **Interfaces produites :** `resolutionPour({ enMouvement })` → `128 | 256` · `empriseADerive(precedente, courante)` → `boolean`
+
+**Tâche 4 bis — LE FLUX QUI NE SE COINCE PAS. ⚠️ À FAIRE AVANT LA TÂCHE 5.**
+C'est la trouvaille A de l'attaque, et elle invalide l'interface que le prototype proposait. Trois corrections, toutes dans le flux de tuiles :
+1. **Plafonner** les requêtes en vol — il n'y a aujourd'hui aucune borne.
+2. **Annuler** celles qui ne servent plus quand le cadrage a changé.
+3. **Évincer aussi les tuiles `loading`**, pas seulement les `ready` — sinon une requête perdue occupe une entrée du cache **pour toujours**, et le cache se remplit de fantômes.
+
+⚠️ **Le test à écrire est un panoramique latéral à basse altitude**, pas une descente. C'est le geste le plus banal de l'application, et c'est celui que le vol de référence ne pouvait pas voir : dans une descente lisse, deux images consécutives demandent presque les mêmes tuiles.
 
 **Tâche 7 — l'audit qui ne se laisse pas berner.**
 ⚠️ **Reprendre l'audit du prototype en corrigeant ses deux failles connues**, qui sont documentées et reproductibles :
