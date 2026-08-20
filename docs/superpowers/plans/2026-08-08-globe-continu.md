@@ -528,6 +528,23 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 ⚠️ **CETTE TÂCHE PASSE AVANT TOUTES LES AUTRES DU BLOC.** Rebrancher la source (4 alpha) d'un quadtree qui n'atteint pas ses niveaux fins ne se verrait pas ; et calibrer un plafond de file (4 bis) avant elle, c'est le calibrer sur un trafic qui va tripler. **L'ordre est 4 → 4 alpha → 4 bis → 4 ter.**
 
 
+### Tâche 4 quater : PORTER `MAX_Z` AU-DELÀ DE 11 ⚠️ APRÈS LA TÂCHE 4, AVANT LA 4 ALPHA
+
+**Fichiers :** modifier `src/globe.js` (`MAX_Z`, `CACHE_MAX`) · tester `test/globe-profondeur.test.js` (créer)
+
+⚠️ **CETTE TÂCHE N'EXISTAIT PAS, ET C'ÉTAIT LE TROU LE PLUS GRAVE DU PLAN.** La Tâche 4 rend `MAX_Z = 11` **atteignable** ; **rien ne le dépassait.** Or ce plan fait du quadtree la **source unique de relief** : le socle vit à **z13-z16** et réclame de **27,0 à 1,7 m par échantillon**, quand z11 en fournit **27,0**. **Déficit de ×2 à ×16 au repos, ×64 contre le z17 servi aujourd'hui par Mapterhorn.** La décision 13 — « net dès l'arrêt » — est **infaisable** tant que cette tâche n'est pas faite.
+
+⚠️ **ET DEUX TÂCHES EN DÉPENDENT SANS L'AVOIR DIT :** la **4 alpha** (Mapterhorn commence à z12 : sans cette tâche, les deux intervalles ne se touchent pas et le rebranchement ne peut rien apporter) et la **4 ter** (dont le « z11 » de la règle R3 pourrait n'être que la constante, pas le réseau — **c'est ici qu'on le saura**).
+
+- [ ] **Étape 1 — le test qui échoue** : à une altitude de socle, le zoom effectif atteint **au moins z13**. Il échoue aujourd'hui **et après la Tâche 4** — c'est ce qui distingue « atteignable » de « suffisant ».
+- [ ] **Étape 2** — le lancer, vérifier qu'il échoue, et **relever le zoom réellement atteint** après la Tâche 4.
+- [ ] **Étape 3 — trancher la valeur, et la mesurer.** ⚠️ **Ce plan ne vous donne PAS de chiffre, et c'est délibéré : deux constantes posées sans mesure y ont déjà été réfutées.** Le besoin est z16 pour un socle fin ; le coût est **quadratique en tuiles** et le budget de cache est déjà le point fixe de la Tâche 4. **Balayez 12, 13, 14, 15, 16 en relevant à chaque fois : zoom effectif, tuiles dessinées, taille de cache, mémoire, et requêtes par image caméra immobile — sur 20 images stables.** Écrivez la table ici.
+- [ ] **Étape 4 — ajuster `CACHE_MAX` avec la profondeur, ou dire pourquoi il tient.** ⚠️ **Chaque niveau supplémentaire multiplie par quatre le nombre de feuilles d'une même emprise.** Sans révision du budget, la Tâche 4 se défait.
+- [ ] **Étape 5 — la sortie honnête, si la mesure la commande.** Si le coût mémoire interdit z16, **plafonnez à ce que la mesure permet et ÉCRIVEZ-LE ICI**, avec la conséquence en clair : *le socle sera plus grossier qu'aujourd'hui à tel zoom*. ⚠️ **C'est une décision produit — elle remonte à Adrien au §9, elle ne se prend pas en silence.**
+- [ ] **Étape 6 — mutation** : remettre `MAX_Z` à 11 doit tuer le test.
+- [ ] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
+
 ### Tâche 4 alpha : rebrancher le globe sur la vraie source de relief ⚠️ APRÈS LA TÂCHE 4, AVANT LA 4 BIS
 
 **Fichiers :** modifier `src/globe.js` · **modifier `src/bathy.js`** (`overzoomTile`, `:578`) · créer `test/globe-source.test.js` · ⚠️ **modifier les trois fichiers de test qui verrouillent le 256** : `test/globe-reseau.test.js:42-43` et `:97-98`, `test/globe-eviction.test.js:59-60`, `test/globe-precision.test.js:79` et `:83`.
@@ -846,6 +863,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 - ⚠️ **CE QUE L'UTILISATEUR VOIT QUAND LE RÉSEAU REFUSE LA DESCENTE** (règle R3, Tâche 4 ter). La caméra cesse d'obéir : c'est exactement l'instant qu'occupait le pop-up. Flou assumé (décision 13), ralentissement progressif, ou indicateur discret ? **Aucune tâche ne peut trancher cela.**
 - ⚠️ **ET QUE FAIT LE SOCLE QUAND LE RÉSEAU NE SUIT PAS ?** Il **naît sur une altitude** (R1) mais **se remplit à un zoom** que le réseau borne (R3). Si le débit ne soutient que z9 quand le seuil appelle un socle z13, **le socle naît grossier**. Attend-il ? Naît-il quand même ? Le seuil se décale-t-il ? **C'est la jonction des deux règles qui gouvernent son apparition, et elle n'a pas de réponse.**
+- ⚠️ **JUSQU'OÙ LE SOCLE A-T-IL LE DROIT D'ÊTRE GROSSIER ?** La Tâche 4 quater porte `MAX_Z` au-delà de 11, mais chaque niveau **quadruple** les feuilles d'une même emprise et le budget de cache est déjà le point fixe. **Si la mesure interdit z16, le socle sera plus grossier qu'aujourd'hui** — où placer la limite est une décision de produit, pas d'ingénierie.
 - ⚠️ **LE « POINT DE PRÉSENTATION » DOIT-IL DISPARAÎTRE ?** `modes.js:455-458` porte « **v48 (retour Adrien)** : à chaque traversée d'étage on arrive au point de présentation — la même distance que la vue iso 1, en gardant l'angle de l'utilisateur. **Remplace la continuité d'altitude v42.** » ⚠️ **C'est une demande explicite d'Adrien, avec sa raison écrite, et la Tâche 2 bis propose de la défaire.** Il faut savoir ce qui n'allait pas dans v42 avant de refaire le même geste. **Aucune tâche ne peut trancher cela.**
 - **L'effet de transition** globe → socle
 - **La récupération de GLOBathy** : Earth Engine impose un compte et des conditions commerciales à vérifier ; le dépôt de l'article est peut-être la meilleure porte.
@@ -859,7 +877,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 **Cohérence des noms** — employés à l'identique partout, ⚠️ **et cette liste était aveugle exactement aux cinq interfaces que la Tâche 4 bis déclarait sans jamais les fabriquer** : `socleVisible`, `empriseSocle`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `creerFlux`, `demanderEmprise`, `tuilesPretes`, `zoomEffectif`, `remplirHauteurs`, `PLAFOND_FILE`, `debitObserve`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`. ⚠️ **Un nom qui n'apparaît qu'à sa déclaration est une interface orpheline : cherchez-les avec `grep -c`, pas à l'œil.**
 
-**Ordre imposé, et il compte — les QUATORZE tâches, dans cet ordre.** ⚠️ **Bloc caméra d'abord** : **1a** (l'instrument, aucune correction), **1b** (le repère), **1c** (les verrous d'entrée), puis **2 bis** (l'escalier de surface). Ce sont elles qui suppriment l'attente. **Bloc quadtree ensuite** : **4 → 4 alpha → 3 → 4 bis → 4 ter** — la Tâche 3 avant la 4 bis, qui consomme son `emprise`. **Puis la Phase 2** : **5 (l'audit) avant 6 (l'extraction)** — sans instrument on ne saura pas si l'extraction marche — puis **7**. ⚠️ **ET LES DEUX RIDEAUX TOUT À LA FIN, dans cet ordre : Tâche 2 (`#loading`) puis Tâche 2 ter (`.whiteout`).** Une version de ce plan plaçait la Tâche 2 avant le bloc quadtree alors qu'elle exige elle-même que la Tâche 4 soit faite d'abord. **Ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up : il montre le trou qu'il cachait.**
+**Ordre imposé, et il compte — les QUINZE tâches, dans cet ordre.** ⚠️ **Bloc caméra d'abord** : **1a** (l'instrument, aucune correction), **1b** (le repère), **1c** (les verrous d'entrée), puis **2 bis** (l'escalier de surface). Ce sont elles qui suppriment l'attente. **Bloc quadtree ensuite** : **4 → 4 quater → 4 alpha → 3 → 4 bis → 4 ter** — la Tâche 3 avant la 4 bis, qui consomme son `emprise`. **Puis la Phase 2** : **5 (l'audit) avant 6 (l'extraction)** — sans instrument on ne saura pas si l'extraction marche — puis **7**. ⚠️ **ET LES DEUX RIDEAUX TOUT À LA FIN, dans cet ordre : Tâche 2 (`#loading`) puis Tâche 2 ter (`.whiteout`).** Une version de ce plan plaçait la Tâche 2 avant le bloc quadtree alors qu'elle exige elle-même que la Tâche 4 soit faite d'abord. **Ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up : il montre le trou qu'il cachait.**
 
 **Le risque principal n'est plus la géométrie** : l'attaque a confirmé qu'on ne peut pas la déchirer. **C'est le flux** — plafond, annulation, éviction — et **le réseau**, qui décide du zoom réellement atteint.
 
