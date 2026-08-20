@@ -253,9 +253,13 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 | `src/monde/descente-bornee.js` **(créer)** | borner la descente au débit réellement observé — règle R3 |
 | `src/flags.js` **(modifier)** | le drapeau qui isole le globe continu du globe orbital, **qui est en production** |
 | `src/globe.js` **(modifier)** | horizon géométrique, frustum, crédit ; puis rebranchement sur la vraie source |
-| `src/escalier-zoom.js` **(retirer en fin de parcours)** | les paliers n'existent plus |
+| `src/escalier-zoom.js` **(⚠️ NE PAS RETIRER — à découper)** | il exporte aussi `intersectionGlobe` et `viseeArrivee`, **importées par `main.js:31`** et sans rapport avec les paliers. Seuls `bornesEscalier`, `pasEscalier`, `paliersRetenus` et `palierDeClic` disparaissent avec eux |
+| `src/modes.js` **(modifier)** | ⚠️ **la caméra, les paliers ET le rideau blanc** — `_dive`, `_rescale`, `_whiteout`, `DIVE_TIERS`, `orbAlt`, `minDistance`. **C'est lui qui fabrique la discontinuité ET le pop-up** |
+| `src/style.css` **(modifier)** | `:535-547` — le rideau plein écran du voile |
 
 ---
+
+## 6. PHASE 1 — Le flux et la caméra
 
 ### ⚠️ CE QUE CE PLAN NE LIVRE PAS — À LIRE AVANT DE COMMENCER
 
@@ -271,34 +275,81 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 
 **Voilà pourquoi la numérotation commençait à 3.** Les deux tâches manquantes ne manquaient pas par accident : ce sont celles qui touchent au visible.
 
+### ⚠️ LE CHIFFRE QUI CADRE TOUTE LA PHASE 1
+
+**Mesuré au banc, stable au dernier chiffre sur trois exécutions, descente orbite → z13 avec un réseau PARFAIT :**
+
+> **9 rideaux blancs · 261 images entièrement blanches (4,35 s) · 531 images d'entrée morte (8,85 s) · 27,2 % d'un vol de 16 secondes.**
+
+⚠️ **Et sept des neuf ne viennent PAS de `_dive` : ils viennent de l'escalier de surface** (`_rescale`, `modes.js:452`, appelé par `_refine` `:436` et `_coarsen` `:445`). **C'est la première source du pop-up d'Adrien, et aucune tâche ne la portait.** → **Tâche 2 bis.**
+
+Le réseau étant parfait dans ce banc, **la production est pire que ces chiffres, jamais meilleure.**
+
 ### Tâche 1 : la caméra continue — `modes.js` ⚠️ LA DÉCISION 1 N'AVAIT AUCUNE TÂCHE
 
 **Fichiers :** modifier `src/modes.js` · modifier `src/main.js` · tester `test/camera-continue.test.js` (créer)
 
-**Ce qui existe et qu'il faut affronter**, lu dans le fichier : `DIVE_TIERS` (`:41`) et `pickDiveTier` (`:59`) — la table des paliers ; `orbAlt` / `orbAltTarget` (`:136-137`) — l'altitude orbitale et sa cible ; `_dive` (`:385`) qui **saute** à `tier.altM × 1,6` ; `controls.minDistance` réécrit à deux endroits (`:326` et `:420`) ; et le vol `cruise` (`:497-529`) qui interpole entre trois altitudes.
+⚠️ **UNE PREMIÈRE VERSION DE CETTE TÂCHE ACCUSAIT LE MAUVAIS CODE.** Elle désignait `modes.js:397` (`tier.altM × 1,6`) : cette ligne est **dans le `catch`** de `loadSurface` — le chemin d'échec, un filet anti-martèlement, pas la discontinuité. Elle avait été trouvée par `grep`, sans ouvrir la fonction. **C'est le §1 de `/threejs-optimisation` appliqué au plan lui-même.**
 
-⚠️ **C'est `_dive` qui fabrique la discontinuité qu'Adrien décrit comme insupportable.** Tant qu'il existe, tout le travail sur le quadtree ne se verra pas.
+**Le chemin nominal (`modes.js:407-429`) ne fait pas un saut d'altitude : il ÉCHANGE LE MOTEUR DE RENDU**, d'un bloc, derrière 960 ms de fondu au blanc. Sept gestes en une image :
 
-- [ ] **Étape 1 — le test qui échoue** : sur une descente de 1 600 km à 2 km en 600 images, **l'altitude est monotone et sa dérivée seconde bornée** — aucun saut. Il échoue aujourd'hui à chaque franchissement de palier.
+1. `globe.setVisible(false)` et `setSurfaceVisible(true)` — **on change de monde**
+2. `camera.near` / `camera.far` passent aux valeurs surface (`:414-415`)
+3. `camera.up.set(0, 1, 0)` — **le repère bascule du géocentrique au local** (`:417`)
+4. `camera.position` et `controls.target` sautent à `_arrivalPose` (`:419-420`)
+5. `controls.minDistance = 6` (`:420`) — l'échelle change d'ordre de grandeur
+6. `maxPolarAngle`, `rotateSpeed`, `enableZoom`, `enablePan` réécrits
+7. `this.mode = 'surface'`
+
+⚠️ **Le fondu au blanc n'est pas l'ornement du saut : il est là parce que le saut est invisible autrement.**
+
+⚠️ **ET UN PLANCHER ORBITAL INTERDIT PHYSIQUEMENT « DE L'ORBITE AU SOL » :** `controls.minDistance = R_GLOBE + DIVE_ALT_M × 0,85` (`modes.js:326`). Tant qu'il est là, la caméra **ne peut pas** descendre en mode orbital. **Quatre sites écrivent `minDistance`** : `modes.js:326`, `:420`, `:639`, `main.js:1215`.
+
+⚠️ **R1 EST DÉJÀ VIOLÉE EN PRODUCTION, ET CETTE TÂCHE HÉRITE DU DÉFAUT.** `surfaceCamAltMeters()` (`main.js:3594-3599`) rend `camera.position.y / scale + dem.meanM` — une quantité **dérivée du terrain**, lissée — et elle **pilote `enterOrbit`** (`modes.js:303`). Le gain de l'oscillateur est déjà câblé ; la Phase 3 y ajouterait le retard. **À traiter ici, pas à découvrir en Phase 3.**
+
+⚠️ **ET LE TEST NE PEUT PAS ÊTRE UN TEST D'EXÉCUTION.** `Modes` appelle `document.createElement`, **il n'y a pas de jsdom dans ce dépôt** (`grep -c jsdom package.json` → 0), aucun test n'instancie `Modes`. Deux issues, à trancher à l'Étape 0 : **extraire la loi d'altitude en module pur** — patron d'`escalier-zoom.js` et de `fenetre-finesse.js`, tous deux purs et testés sous node — ou **assertion de texte source**, convention employée par **onze fichiers de test** de ce dépôt. ⚠️ **L'extraction est préférable : elle seule donne un test qui mord.**
+
+- [ ] **Étape 0 — trancher la forme du test** (module pur ou texte source) et l'écrire ici. ⚠️ **La Tâche 4 consacre une étape entière à un harnais qui existait déjà ; celle-ci n'en a aucun. C'est ici que le travail commence.**
+- [ ] **Étape 1 — le test qui échoue.** Sur une descente de 1 600 km à 2 km, l'altitude est **monotone et sa dérivée seconde bornée**. ⚠️ **La grandeur échantillonnée doit être la MÊME de part et d'autre de la bascule de mode** — sinon on compare deux repères et l'assertion ne veut rien dire. C'est le piège de cette tâche.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue, et **relever où** : la liste des sauts est la liste du travail.
-- [ ] **Étape 3 — remplacer `_dive` par une consigne d'altitude continue.** `DIVE_TIERS` **reste**, mais comme table de correspondance altitude → zoom, plus comme destination.
-- [ ] **Étape 4 — unifier `controls.minDistance`** : une seule écriture, dérivée de l'altitude, jamais deux valeurs concurrentes.
-- [ ] **Étape 5 — mutation** : réintroduire un saut d'altitude doit tuer le test de monotonie.
-- [ ] **Étape 6 — LA CLÔTURE DU §0**, puis commit.
+- [ ] **Étape 3 — le changement de repère, geste par geste.** `up`, `near`/`far`, pose, `minDistance` : chacun devient une fonction continue de l'altitude, ou disparaît.
+- [ ] **Étape 4 — la frontière `globe.js` / `terrain.js`.** ⚠️ **C'est le geste 1, et le plus lourd : aujourd'hui l'un s'éteint quand l'autre s'allume.** Dites ce qui les fait coexister — recouvrement, fondu, ou remise du globe au rang de fond lointain.
+- [ ] **Étape 5 — retirer le plancher orbital `:326`**, et unifier les quatre sites de `minDistance` en une seule dérivation.
+- [ ] **Étape 6 — sortir `dem.meanM` de `surfaceCamAltMeters`** (R1), ou dire pourquoi il peut rester.
+- [ ] **Étape 7 — mutation** : réintroduire un saut doit tuer le test de monotonie.
+- [ ] **Étape 8 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
-### Tâche 2 : retirer le voile de chargement ⚠️ LA PROMESSE CENTRALE N'AVAIT AUCUNE TÂCHE
+### Tâche 2 bis : l'escalier de surface ⚠️ SEPT DES NEUF RIDEAUX BLANCS
 
-**Fichiers :** modifier `src/main.js` (`:927`, `:3423`, `:3447`) · tester `test/voile.test.js` (créer)
+**Fichiers :** modifier `src/modes.js` (`_rescale` `:452`, `_refine` `:436`, `_coarsen` `:445`) · tester `test/escalier-surface.test.js` (créer)
 
-⚠️ **NE LE RETIREZ PAS EN PREMIER.** Le voile masque aujourd'hui une attente réelle. L'ôter avant que la Tâche 1 et la Tâche 4 aient supprimé cette attente **ne supprime pas le pop-up : il montre le trou qu'il cachait.** L'ordre est **1 et 4 d'abord, 2 ensuite**.
+**C'est la première source du pop-up**, et elle n'était dans aucune tâche. Chaque cran de zoom en mode surface passe par `_rescale`, qui pose un rideau blanc **et téléporte la caméra** au point de présentation (`:455-457`).
 
-- [ ] **Étape 1 — le test qui échoue** : sur un déplacement continu, `voileVisible` reste faux du début à la fin.
+⚠️ **À TRANCHER AVEC ADRIEN AVANT DE COMMENCER.** Le commentaire de `:455` porte la mention *« Remplace la continuité d'altitude v42 »* : **une continuité d'altitude a déjà existé ici et Adrien l'a fait retirer.** Il faut savoir pourquoi avant de la rétablir. **C'est une question, pas une tâche.**
+
+- [ ] **Étape 0 — poser la question à Adrien** et écrire sa réponse ici.
+- [ ] **Étape 1 — le test qui échoue** : sur un changement de cran en mode surface, la caméra ne se téléporte pas et aucun rideau ne se pose.
+- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
+- [ ] **Étape 3 — implémenter**, selon la réponse de l'Étape 0.
+- [ ] **Étape 4 — mutation** : remettre la téléportation doit tuer le test.
+- [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
+### Tâche 2 : retirer le voile de chargement ⚠️ EN DERNIER
+
+**Fichiers :** modifier `src/modes.js` (`_whiteout` `:282`, sa création `:271-273`, et ses **quatre** appelants `:312`, `:408`, `:468`, `:628`) · modifier `src/style.css` (`:535-547`) · tester `test/voile.test.js` (créer)
+
+⚠️ **UNE PREMIÈRE VERSION DE CETTE TÂCHE DÉSIGNAIT TROIS LIGNES DE COMMENTAIRE** — `main.js:927`, `:3423`, `:3447`, trouvées en cherchant le mot « voile ». **Le rideau est fabriqué par `Modes` lui-même** : `_buildDom` crée le `div.whiteout` (`modes.js:271-273`), **il ne passe pas par le constructeur**, donc aucun `grep` de `main.js` ne pouvait le voir. `style.css:535-547` : `position: fixed; inset: 0; background: #fff`. `_whiteout` = **480 ms opaque + 480 ms de retour**.
+
+⚠️ **C'est la deuxième fois dans ce plan qu'une tâche accuse un fichier sans l'ouvrir.**
+
+⚠️ **NE LE RETIREZ PAS EN PREMIER.** Le voile masque une attente réelle **et un changement de repère**. L'ôter avant les Tâches 1, 2 bis et 4 **ne supprime pas le pop-up : il montre le saut qu'il cachait.**
+
+- [ ] **Étape 1 — le test qui échoue.** ⚠️ **Pas de test d'exécution** : aucun test n'importe `main.js` ni n'instancie `Modes`. Employez l'**assertion de texte source**, comme les onze fichiers qui le font déjà : *aucun appel à `_whiteout` ne subsiste sur le chemin du zoom continu*.
 - [ ] **Étape 2** — le lancer sur le code d'aujourd'hui, vérifier qu'il échoue.
-- [ ] **Étape 3 — trancher les trois sites**, un par un : lequel se supprime, lequel devient l'indicateur discret de la descente bornée (voir l'encart ci-dessus).
-- [ ] **Étape 4 — mutation** : remettre un site doit tuer le test.
-- [ ] **Étape 5 — LA CLÔTURE DU §0**, puis commit.
+- [ ] **Étape 3 — trancher les quatre appelants un par un.** Lesquels disparaissent, lequel devient l'indicateur discret de la descente bornée. ⚠️ **`:408` est celui de `_dive` et `:468` celui de `_rescale` : ils ne peuvent pas partir avant que les Tâches 1 et 2 bis aient fait leur travail.**
+- [ ] **Étape 4 — mutation** : remettre un appel doit tuer le test.
+- [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
-## 6. PHASE 1 — Le flux et la caméra
 
 ### Tâche 4 : rendre `MAX_Z` ATTEIGNABLE — et non le descendre ⚠️ EN PREMIER
 
@@ -332,7 +383,8 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 #### ⚠️ Ce que la mesure ne dit PAS, et qu'il faut établir
 
 - ⚠️ **LE CHAMP DE VISION N'EXPLIQUE RIEN DU DÉSACCORD DE BASE, ET CE PLAN A ÉCRIT LE CONTRAIRE.** Vérifié : `grep -ic fov src/globe.js` rend **0**, et `_traverse(t, camPos, camDir)` ne reçoit **que la position et la direction** de la caméra. **Le champ de vision ne peut pas influencer le zoom atteint dans le code d'aujourd'hui.** Il le pourra une fois le frustum de l'Étape 4 posé — c'est **à partir de là seulement** que toute mesure doit dire son fov (celui de production est **30°**, `main.js:263`).
-- ✅ **LE ZOOM DE BASE EST z6 — TRANCHÉ AU BANC, 44 RELEVÉS** : 11 altitudes de 1 600 km à 2 km × 4 latitudes, 304-306 tuiles dessinées, 420 en cache, **0,0 requête par image au repos**. Et **z5 à 60° N** sous 800 km (les tuiles Mercator rétrécissent, `chord/dist` passe sous le seuil un niveau plus tôt). ⚠️ **z7 et « z9 sous 200 km » n'apparaissent pas une seule fois — ne les recopiez pas.** L'altitude n'a **aucun** effet : le globe est aussi grossier à 2 km qu'à 1 600 km. **C'est le symptôme lui-même.**
+- ⚠️ **LE ZOOM DE BASE N'A PAS DE VALEUR UNIQUE, ET CE PLAN A EU TORT DE GRAVER z6.** Quatre bancs ont rendu **z5, z6, z7 et z9** — et l'arbitrage a montré pourquoi : **c'est une grandeur à hystérésis**, qui dépend de l'état du cache à l'entrée et du protocole de parcours. Le plus large relevé (44 mesures, 11 altitudes × 4 latitudes, globe promené) donne **z6, 304-306 dessinées, 420 en cache, 0,0 requête au repos** ; un globe **neuf** à chaque station donne **z9** ; un autre banc **z5, 278 dessinées, 408 en cache**. **Aucun n'est faux.** ⚠️ **N'en recopiez aucun : l'Étape 1 établit le vôtre, en disant son protocole.**
+- ✅ **Ce qui est vrai dans les quatre : l'altitude ne change rien.** Le globe est aussi grossier à 2 km qu'à 1 600 km, sur un facteur 800. **C'est le symptôme, et il ne dépend d'aucun banc.**
 - ⚠️ **« 124 tuiles dessinées après correction » vient du banc dont le zoom de base n'est pas reproductible. À re-mesurer, ne le prenez pas comme objectif.** Ce qui tient : ce n'est pas 74, qui recollait deux paliers.
 - ⚠️ **L'horizon SEUL ne débloque rien** : z7 → z7. Il ne devient utile qu'accompagné du frustum, **qui fait tout le travail**. Un audit lui a attribué un niveau de zoom : c'est faux.
 - **Le même relevé donne un cache de 824** — c'est-à-dire **le double de `CACHE_MAX`**. ⚠️ Or l'étape sur le cache ci-dessous propose `5 × visibles` ≈ 370, ce qui **défait** ce que les trois causes viennent de débloquer. **Cette contradiction se tranche par la mesure, pas par un arbitrage d'écriture.**
@@ -353,23 +405,25 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 - [ ] **Étape 1 bis — DONNER UNE CAMÉRA AU HARNAIS. ⚠️ SANS ELLE, LES ÉTAPES 2 ET 4 SONT IMPOSSIBLES.** Le seul harnais qui fait voler le globe porte `{ position: new THREE.Vector3() }` (`test/globe-eviction.test.js:145` et `:225`) : **aucune orientation, aucune `projectionMatrix`** — zéro `PerspectiveCamera` dans tous les `test/globe-*.test.js`. Sans elle, l'Étape 4 n'a pas de frustum à tester et l'Étape 2 pas d'écran. Prescrivez `new THREE.PerspectiveCamera(30, 16/9, near, 1400)` avec **`near = clamp(orbAlt × 0,2, 0,01, 0,5)`** — ⚠️ **le `clamp` fait partie de la formule** (`modes.js:704`) ; sans lui, le plan proche part à zéro en orbite haute. Les trois valeurs sont dans le dépôt : `main.js:263`, `modes.js:704`, `modes.js:319`.
 - [ ] **Étape 2 — DÉVERROUILLER LES TESTS, avant toute correction.** `globe-eviction.test.js:204` (`zoomFinal >= 6`) et `:208` (`visiblesFinal > 200`) décrivent le défaut comme un contrat, et la seconde **fait échouer le bon correctif**.
 
-  ⚠️ **ET L'ASSERTION DE REMPLACEMENT DOIT SORTIR ROUGE AUJOURD'HUI.** Une version de ce plan proposait « toute tuile a un ancêtre `ready` » : **vrai par construction** — les racines ne sont jamais évincées (`:869`) et la règle sans-trou l'impose (`:803`). Elle passe sur le globe gelé comme sur le corrigé, et c'était la **première case exécutable du plan**. Ce qu'il faut à la place : **le zoom effectif suit l'altitude** — au moins trois niveaux distincts sur la plage 1 600 km → 2 km. C'est faux aujourd'hui (un seul niveau, quelle que soit l'altitude) et vrai après correction. **Vérifiez le rouge avant d'aller plus loin ; le §0 l'exige.**
+  ⚠️ **ET L'ASSERTION DE REMPLACEMENT DOIT SORTIR ROUGE AUJOURD'HUI.** Une version de ce plan proposait « toute tuile a un ancêtre `ready` » : **vrai par construction** (racines jamais évincées, règle sans-trou). Une autre disait « le zoom effectif suit l'altitude, au moins trois niveaux distincts » — ⚠️ **ambiguë, et l'une des deux lectures est VERTE aujourd'hui** : les niveaux **dessinés** sur une descente sont {2,3,4,5,6}, soit cinq, et `zoomsDessines` est déjà rempli par `globe-eviction.test.js:159`.
+
+  **La lecture qui mord, et c'est celle-là qu'il faut écrire : `zmax`, relevé sur 20 images stables, prend au moins TROIS valeurs différentes entre les six altitudes nommées de l'Étape 1.** Aujourd'hui il n'en prend qu'une. ⚠️ **Vérifiez le rouge avant d'aller plus loin ; le §0 l'exige.** Et déverrouillez aussi `globe-eviction.test.js:202`.
 - [ ] **Étape 3 — l'horizon géométrique**, avec sa marge de corde et l'exemption des racines `z2`. `globe.js:770` : `dot < −0.35` est 110,5° en dur, au lieu de `R/|camPos|` — **2,87° à 8 km**, soit une calotte jusqu'à **×1 076 trop large**. ⚠️ **Seul, il ne débloque AUCUN niveau de zoom** — mesuré z7 → z7. Il réduit la calotte parcourue, ce qui rend l'étape 4 possible ; il ne se juge pas sur le zoom. Test : à basse altitude, le nombre de tuiles parcourues chute d'un ordre de grandeur **sans qu'aucune tuile visible ne disparaisse**. ⚠️ La seconde moitié est celle qui attrape l'écrêtage au limbe.
 - [ ] **Étape 4 — le test de frustum** dans `_traverse` (zéro occurrence aujourd'hui). ⚠️ **ET IL A UN PARAMÈTRE CACHÉ QUI VAUT TROIS NIVEAUX DE ZOOM : LA MARGE DU VOLUME ENGLOBANT.** À l'exagération 18 (`globe.js:278`), le relief sort de la sphère de **2,5 unités, soit 159 km**. Mesuré, 20 images stables : marge **0** → z11, cache 156, crédit 264 ; marge **2,5** (la correcte) → **z10, cache 420, crédit 0**. ⚠️ **Autrement dit, avec la bonne marge, le frustum seul NE SUFFIT PAS — et « 2 à 4 % des tuiles dans le champ » ne se reproduit pas : 55 % mesurés à 8 km.** Prenez la marge juste, mesurez, et n'espérez pas le chiffre facile.
 - [ ] **Étape 5 — le crédit. ⚠️ À OUVRIR PAR DÉFAUT, après l'Étape 4.** Ce plan a écrit « les deux premières corrections ont suffi » : **faux aux deux altitudes où le socle vit**, une fois donnée au frustum la marge de volume englobant qu'il lui faut. Le crédit reste donc à traiter — mais **après** la réduction d'emprise, jamais avant.
 
   ⚠️ **CE QUE CETTE ÉTAPE NE DOIT PAS FAIRE : ajouter un plancher constant.** Mesuré, tout plancher ≥ 16 installe un cycle limite de période 4 où la planète retombe à ses 16 racines une image sur quatre. **Le critère d'acceptation porte sur la stabilité image par image** — `zmax` et tuiles dessinées constants sur **20 images**, requêtes au repos à zéro — **jamais sur un relevé à une seule image.**
 
-  ⚠️ **CE QUE CETTE ÉTAPE NE DOIT PAS FAIRE : ajouter un plancher constant.** Si un réglage reste nécessaire, **le critère d'acceptation porte sur la stabilité image par image** — `zmax` et tuiles dessinées constants sur **20 images**, requêtes au repos à zéro — **jamais sur un relevé à une seule image. C'est exactement ce qui a produit les trois chiffres contradictoires de ce plan.**
 
   Le détail du défaut, pour mémoire : `globe.js:759`, `_credit = CACHE_MAX − tiles.size + marge`. En régime établi `marge = 0` et **54 à 91 raffinements sont refusés par image**. ⚠️ **Mais `marge` n'est PAS « vide par construction » — ce plan l'a écrit deux fois, et c'est faux** : à la discontinuité (téléport), elle vaut 280, 196, 24, puis 0 en quatre images, et finance 280 requêtes. **Le filet anti-gel du commentaire `743-752` tient ; il ne mord qu'aux discontinuités.**
   C'est le même point fixe, par une autre porte. ⚠️ **MAIS N'ÉVINCEZ PAS UNE TUILE `loading` SANS ANNULER SA REQUÊTE** : le `.then` de `_pump` (`globe.js:532`) ajouterait un maillage orphelin à la scène. Le garde est `if (!this.tiles.has(t.key)) return` au retour — **exigez-le dans le test**. (`_evictJusqua` est à `globe.js:863`.)
-- [ ] **Étape 7 — trancher le cache**, avec les chiffres de l'étape 1 et non par principe. ⚠️ Si les corrections réclament 824, une formule qui rend 370 est une régression déguisée en optimisation. **Mesurez avant de choisir.**
+- [ ] **Étape 6 — rendre évinçables les tuiles bloquées.** Une tuile en `error` ou en `loading` dont la requête ne revient jamais **occupe une place du budget définitivement**. C'est le même point fixe, par une autre porte. ⚠️ **Sans retourner l'ordre d'éviction** : ce plan a écrit trois fois « profondeur d'abord, récence ensuite » ; `globe.js` fait délibérément l'inverse — `a.lastUsed - b.lastUsed || parProfondeur(a, b)`, **récence au rang 1, profondeur au rang 2 seulement**, avec vingt lignes de commentaire et un test dédié vert. **C'est correct.** ⚠️ **ET N'ÉVINCEZ PAS UNE `loading` SANS ANNULER SA REQUÊTE** : le `.then` de `_pump` (`globe.js:532`) ajouterait un maillage orphelin. Garde : `if (!this.tiles.has(t.key)) return`.
+- [ ] **Étape 7 — trancher le cache**, avec les chiffres de l'Étape 1 et non par principe. ⚠️ Si les corrections réclament 824, une formule qui rend 370 est une régression déguisée en optimisation. **Mesurez avant de choisir.**
 - [ ] **Étape 8 — la mémoire retenue pour rien : ~210 Mo sur 327 Mo au cache plein.** `globe.js:238` — le canevas reste vivant via `CanvasTexture.image` après téléversement (**105 Mo**). Et `t.heights` (**105 Mo**) n'est relu que par `setExaggeration` (`:899`), **qui n'a aucun appelant dans tout le dépôt — vérifié**. ⚠️ Le commentaire de `:168` annonce « 380 Mo pour 1 500 tuiles » : la documentation **sous-estime d'un facteur 2,4**.
 - [ ] **Étape 9 — les normales de bord.** ⚠️ **l'écrêtage est à `globe.js:257-260`** (`Math.min(..., 254)` / `255`), et non à `:623-648` qui n'en est que le consommateur : `sampleHeights` écrête alors que `tileToLatLon` donne la position complète — pente **407 m au bord contre 853 m au centre**, soit **47,7 % de la vraie pente** — ⚠️ **et ce chiffre n'est pas seulement mesuré, il se DÉRIVE du dépôt** (`gridFor` = 24, plus l'écrêtage) : il vaut donc comme source, pas comme relevé, d'où un liseré d'éclairage autour de chaque tuile.
 - [ ] **Étape 10 — LA CLÔTURE DU §0**, puis commit.
 
-**Ce qui est établi :** la base est **z6**, l'altitude n'y change rien, et **le budget de cache est le point fixe** — 304 feuilles z6 pour 420 places. **Réduire l'emprise est donc le seul levier qui attaque la cause.** ⚠️ **Le gain chiffré des étapes 3+4 reste à établir par l'Étape 1 : les deux relevés existants viennent de bancs dont le zoom de base n'est pas reproductible.**
+**Ce qui est établi, et qui ne dépend d'aucun banc :** l'altitude ne change rien au zoom atteint, et **le budget de cache est le point fixe** — la couverture d'un hémisphère sature `CACHE_MAX` à elle seule. **Réduire l'emprise est donc le seul levier qui attaque la cause.** ⚠️ **Le gain chiffré des étapes 3+4 reste à établir par l'Étape 1**, avec le protocole que vous aurez écrit.
 
 ⚠️ **CETTE TÂCHE PASSE AVANT TOUTES LES AUTRES DU BLOC.** Rebrancher la source (4 alpha) d'un quadtree qui n'atteint pas ses niveaux fins ne se verrait pas ; et calibrer un plafond de file (4 bis) avant elle, c'est le calibrer sur un trafic qui va tripler. **L'ordre est 4 → 4 alpha → 4 bis → 4 ter.**
 
@@ -378,7 +432,7 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 
 **Fichiers :** modifier `src/globe.js` · **modifier `src/bathy.js`** (`overzoomTile`, `:578`) · créer `test/globe-source.test.js` · ⚠️ **modifier les trois fichiers de test qui verrouillent le 256** : `test/globe-reseau.test.js:42-43` et `:97-98`, `test/globe-eviction.test.js:59-60`, `test/globe-precision.test.js:79` et `:83`.
 
-⚠️ **LA LISTE DES VALEURS À CHANGER EST PLUS LARGE QUE `grep 256`, ET DEUX PIÈGES S'Y CACHENT.** À changer : les tailles de tuile, les deux `254` de `:259-260`, **le `heights[i + 257]` de `:267`** (c'est 256+1 : en 512 px il devient 513, et l'oublier donne des altitudes fausses **en silence**), et le `256.0` du GLSL `:112`. **À NE PAS TOUCHER** : les deux radix terrarium de `:66` et `:236` — `dem-source.js:3` dit que Mapterhorn utilise le même encodage — et le `255.0` de `:65`, qui est une plage d'octet.
+⚠️ **LA LISTE DES VALEURS À CHANGER EST PLUS LARGE QUE `grep 256`, ET LES PIÈGES SONT DES DEUX CÔTÉS.** À changer : les tailles de tuile, **`heights[i + 256]` de `:266` ET `heights[i + 257]` de `:267`** (c'est 256 et 256+1 ; en 512 px ils deviennent 512 et 513, et en oublier un donne des altitudes fausses **en silence, sans ligne mixte visible**), le littéral de `:263`, les deux `254` de `:259-260`, ⚠️ **les deux `255` de `:257-258`, qui sont des BORNES D'INDEX et doivent devenir 511**, et le `256.0` du GLSL `:112`. **À NE PAS TOUCHER** : les deux radix terrarium de `:66` et `:236` — `dem-source.js:3` dit que Mapterhorn utilise le même encodage — et le `255.0` de `:65`, qui est une plage d'octet. ⚠️ **Les `255` de `:257-258` et celui de `:65` ne sont donc PAS de la même famille : ne les traitez pas ensemble.**
 
 ⚠️ **C'EST LA FAILLE LA PLUS GRAVE DU PLAN, ET ELLE EST SILENCIEUSE.** Trouvée par l'attaque du 2026-08-20, vérifiée à la main.
 
@@ -446,6 +500,38 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 
 **Si cette tâche est jugée trop lourde**, l'alternative honnête est de **plafonner `MAX_Z` à 13 et de l'écrire** — mais alors la décision 1 (« de l'orbite au sol ») devient fausse, et il faut le dire à Adrien.
 
+### Tâche 3 : `seuil-socle.js` — quand le socle naît et meurt
+
+**Fichiers :** créer `src/monde/seuil-socle.js` · **lire `src/landmarks.js` et `src/dem-emprise.js` avant d'écrire** · tester `test/seuil-socle.test.js`
+
+**Interfaces produites :**
+- `socleVisible({ altitudeEllipsoideM, visibleAvant })` → `boolean`
+- `empriseSocle({ centre, zoom })` → `{ ouest, sud, est, nord }` — ⚠️ **CETTE TÂCHE EST LE PRODUCTEUR D'`emprise`, que les Tâches 4 bis, 6 et 7 consomment et que personne ne fabriquait.** Elle se dérive de `blockExtentMeters` (`landmarks.js:22`) une fois le zoom du socle tranché ci-dessous. **Regardez d'abord `originesEmprise` et `rectFenetre` de `dem-emprise.js` : ils font peut-être déjà le travail.**
+- `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M` — **À MESURER.**
+
+⚠️ **UNE VERSION DE CE PLAN AVAIT ÉCRIT 120 km ET 180 km, ET LES AVAIT RÉFUTÉES AVEC UN CHIFFRE QUI N'EXISTE PAS.** « Un socle de 3,56 km » : **cette valeur ne se trouve nulle part dans le dépôt**, et six chiffres de ce plan en descendaient. La vraie largeur vient de `blockExtentMeters(zoom, lat)` (`landmarks.js:22`, avec `BLOCK_TILES = 3`) et **dépend du zoom** — exécuté à 45° de latitude : **z13 = 10,4 km · z14 = 5,2 km · z15 = 2,6 km · z16 = 1,3 km**.
+
+⚠️ **ET CELA REND UNE QUESTION VISIBLE QUE CE PLAN NE TRANCHAIT NULLE PART : À QUEL ZOOM LE SOCLE SE POSE-T-IL ?** Tant qu'elle est ouverte, aucun seuil d'altitude ne peut se calculer — la largeur varie d'un facteur huit entre z13 et z16. **Tranchez-la ici, avant le protocole.**
+
+Pour mémoire, l'erreur d'origine : à un champ de 30°, un socle occupe **5,6 % de l'image** depuis 120 km — et le dépôt lui-même place 120 km au palier **z8** — ⚠️ ce plan écrivait z9, et c'est faux : `pickDiveTier(120000)` rend `{ altM: 200000, zoom: 8 }`, **exécuté** ; z9 couvre 50 à 100 km (`modes.js`, `DIVE_TIERS`), c'est-à-dire précisément l'altitude que la règle R3 qualifie d'« autre carte ».
+
+**Protocole :** partir de la demande d'Adrien — « le crop apparaît quand la Terre occupe une partie assez importante de l'écran » — la traduire en **fraction d'image occupée par le socle**, viser autour de **60 % de la HAUTEUR de l'image**, et en déduire l'altitude par la trigonométrie du champ de vision (**30°**, `main.js:263`). ⚠️ **La hauteur et non la largeur, parce que le champ de vision de three.js EST vertical** — se tromper d'axe déplace le seuil d'un facteur égal au rapport d'aspect, **1,7 en 16/9**. Et 60 % linéaire n'est pas 60 % surfacique : encore un facteur 1,3.
+
+⚠️ **ET LEVEZ LA CIRCULARITÉ AVANT DE CALCULER.** Si l'emprise suit le cadrage, la fraction d'écran est **constante par construction** et ne peut pas servir de seuil. Le calcul n'a de sens qu'avec **une largeur de socle FIXE** — celle du zoom que vous venez de trancher. ⚠️ **Puis convertir en altitude, et ne garder QUE l'altitude** : la fraction d'écran dépend du terrain chargé, ce que la règle R1 interdit.
+
+**Ce qui est non négociable**, en revanche : `SEUIL_MORT_M` strictement supérieur à `SEUIL_NAISSANCE_M`. C'est l'écart qui empêche le clignotement, quel que soit le couple retenu.
+
+⚠️ **L'ENTRÉE EST UNE ALTITUDE DE CAMÉRA AU-DESSUS DE L'ELLIPSOÏDE, PAS UNE FRACTION D'ÉCRAN.** Règle R1. Une fraction d'écran dépend de la distance au sol, donc du terrain chargé, donc de `meanM`, qui est lissé — on fabriquerait un oscillateur.
+
+⚠️ **Hystérésis obligatoire** : `SEUIL_MORT_M` strictement supérieur à `SEUIL_NAISSANCE_M`. Même patron que `SPLIT_RATIO` / `MERGE_RATIO` dans `globe.js`, éprouvé sur ce dépôt.
+
+- [ ] **Étape 1** — test : en descendant, le socle naît à `SEUIL_NAISSANCE_M` ; en remontant, il ne meurt qu'à `SEUIL_MORT_M`. Puis celui qui compte : **osciller cent fois autour du seuil de naissance ne produit qu'une seule bascule**.
+- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
+- [ ] **Étape 3** — implémenter `socleVisible` **et** `empriseSocle`, après avoir tranché le zoom du socle et vérifié ce que `dem-emprise.js` fournit déjà.
+
+- [ ] **Étape 4** — mutation : égaliser les deux seuils tue le test d'oscillation.
+- [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
 ### Tâche 4 bis : LE FLUX QUI NE SE COINCE PAS ⚠️ APRÈS LES TÂCHES 4 ET 4 ALPHA
 
 ⚠️ **CETTE TÂCHE PORTAIT « EN PREMIER ». C'ÉTAIT L'ORDRE INVERSE DE CE QUI EST MESURÉ.** La Tâche 4 change ce que cette tâche est censée calibrer : après horizon + frustum, le pic de `loading` passe de **0 à 246** et le trafic d'un panoramique de **596 à 1 786 requêtes**. `PLAFOND_FILE` ne peut pas se calibrer avant. Et la Tâche 4 alpha fait passer les tuiles de PNG 256 px à WebP 512 px : **le bouchon écrit ici serait périmé le jour où elle s'exécute.**
@@ -493,38 +579,6 @@ Une passe par tuile touchée, pas un appel par sommet.
 - [ ] **Étape 5** — mesurer le battement : nombre de décodages complets sur un vol de référence. ⚠️ L'attaque en a compté **10 829 pour un cache de 420** ; donner le chiffre après.
 - [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
-### Tâche 3 : `seuil-socle.js` — quand le socle naît et meurt
-
-**Fichiers :** créer `src/monde/seuil-socle.js` · **lire `src/landmarks.js` et `src/dem-emprise.js` avant d'écrire** · tester `test/seuil-socle.test.js`
-
-**Interfaces produites :**
-- `socleVisible({ altitudeEllipsoideM, visibleAvant })` → `boolean`
-- `empriseSocle({ centre, zoom })` → `{ ouest, sud, est, nord }` — ⚠️ **CETTE TÂCHE EST LE PRODUCTEUR D'`emprise`, que les Tâches 4 bis, 6 et 7 consomment et que personne ne fabriquait.** Elle se dérive de `blockExtentMeters` (`landmarks.js:22`) une fois le zoom du socle tranché ci-dessous. **Regardez d'abord `originesEmprise` et `rectFenetre` de `dem-emprise.js` : ils font peut-être déjà le travail.**
-- `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M` — **À MESURER.**
-
-⚠️ **UNE VERSION DE CE PLAN AVAIT ÉCRIT 120 km ET 180 km, ET LES AVAIT RÉFUTÉES AVEC UN CHIFFRE QUI N'EXISTE PAS.** « Un socle de 3,56 km » : **cette valeur ne se trouve nulle part dans le dépôt**, et six chiffres de ce plan en descendaient. La vraie largeur vient de `blockExtentMeters(zoom, lat)` (`landmarks.js:22`, avec `BLOCK_TILES = 3`) et **dépend du zoom** — exécuté à 45° de latitude : **z13 = 10,4 km · z14 = 5,2 km · z15 = 2,6 km · z16 = 1,3 km**.
-
-⚠️ **ET CELA REND UNE QUESTION VISIBLE QUE CE PLAN NE TRANCHAIT NULLE PART : À QUEL ZOOM LE SOCLE SE POSE-T-IL ?** Tant qu'elle est ouverte, aucun seuil d'altitude ne peut se calculer — la largeur varie d'un facteur huit entre z13 et z16. **Tranchez-la ici, avant le protocole.**
-
-Pour mémoire, l'erreur d'origine : à un champ de 30°, un socle occupe **5,6 % de l'image** depuis 120 km — et le dépôt lui-même place 120 km au palier **z8** — ⚠️ ce plan écrivait z9, et c'est faux : `pickDiveTier(120000)` rend `{ altM: 200000, zoom: 8 }`, **exécuté** ; z9 couvre 50 à 100 km (`modes.js`, `DIVE_TIERS`), c'est-à-dire précisément l'altitude que la règle R3 qualifie d'« autre carte ».
-
-**Protocole :** partir de la demande d'Adrien — « le crop apparaît quand la Terre occupe une partie assez importante de l'écran » — la traduire en **fraction d'image occupée par le socle**, viser autour de **60 % de la LARGEUR de l'image** (⚠️ **dites-le : 60 % linéaire ≠ 60 % surfacique**, l'écart est d'un facteur 1,3 sur l'altitude), et en déduire l'altitude par la trigonométrie du champ de vision (**30°**, `main.js:263`).
-
-⚠️ **ET LEVEZ LA CIRCULARITÉ AVANT DE CALCULER.** Si l'emprise suit le cadrage, la fraction d'écran est **constante par construction** et ne peut pas servir de seuil. Le calcul n'a de sens qu'avec **une largeur de socle FIXE** — celle du zoom que vous venez de trancher. ⚠️ **Puis convertir en altitude, et ne garder QUE l'altitude** : la fraction d'écran dépend du terrain chargé, ce que la règle R1 interdit.
-
-**Ce qui est non négociable**, en revanche : `SEUIL_MORT_M` strictement supérieur à `SEUIL_NAISSANCE_M`. C'est l'écart qui empêche le clignotement, quel que soit le couple retenu.
-
-⚠️ **L'ENTRÉE EST UNE ALTITUDE DE CAMÉRA AU-DESSUS DE L'ELLIPSOÏDE, PAS UNE FRACTION D'ÉCRAN.** Règle R1. Une fraction d'écran dépend de la distance au sol, donc du terrain chargé, donc de `meanM`, qui est lissé — on fabriquerait un oscillateur.
-
-⚠️ **Hystérésis obligatoire** : `SEUIL_MORT_M` strictement supérieur à `SEUIL_NAISSANCE_M`. Même patron que `SPLIT_RATIO` / `MERGE_RATIO` dans `globe.js`, éprouvé sur ce dépôt.
-
-- [ ] **Étape 1** — test : en descendant, le socle naît à `SEUIL_NAISSANCE_M` ; en remontant, il ne meurt qu'à `SEUIL_MORT_M`. Puis celui qui compte : **osciller cent fois autour du seuil de naissance ne produit qu'une seule bascule**.
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
-- [ ] **Étape 3** — implémenter `socleVisible` **et** `empriseSocle`, après avoir tranché le zoom du socle et vérifié ce que `dem-emprise.js` fournit déjà.
-
-- [ ] **Étape 4** — mutation : égaliser les deux seuils tue le test d'oscillation.
-- [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
-
 ### Tâche 4 ter : la descente bornée par le réseau — règle R3
 
 **Fichiers :** créer `src/monde/descente-bornee.js` · tester `test/descente-bornee.test.js` — ⚠️ **et ne touchez pas à `flux-terrain.js` : `debitObserve` est fabriqué par la Tâche 4 bis, qui passe avant.**
@@ -537,7 +591,7 @@ Pour mémoire, l'erreur d'origine : à un champ de 30°, un socle occupe **5,6 %
 
 Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/s**. À z9 un texel vaut 213 m — **dix-sept texels sur la largeur du socle**. Ce n'est pas le flou de la décision 13, **c'est une autre carte**.
 
-- [ ] **Étape 1** — test : à débit observé faible, `zoomSoutenable` rend un zoom inférieur au demandé, et la caméra ne descend pas plus vite que lui.
+- [ ] **Étape 1** — test : à débit observé faible, `zoomSoutenable` rend un zoom inférieur au demandé. ⚠️ **La seconde moitié de cette assertion — « et la caméra ne descend pas plus vite que lui » — est HORS DU PÉRIMÈTRE de cette tâche** : elle appartient à la Tâche 1, qui tient la caméra. **Dites ici qui appelle `zoomSoutenable` et où** (`modes.js`, sur le chemin de descente), et laissez l'assertion caméra à la Tâche 1.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
 - [ ] **Étape 3** — implémenter `zoomSoutenable`. ⚠️ **Le débit s'observe, il ne se devine pas** : il vient de `debitObserve(flux)` — octets réellement reçus par seconde — **jamais de `navigator.connection`**, qui ment et n'existe pas partout.
 
@@ -590,8 +644,8 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 ⚠️ **Collision de nom : `exposantCoin` est déjà un export de `fenetre-clip.js:71`. Renommez le paramètre.**
 
 **Interfaces produites :**
-- `construireFenetre({ emprise, n, rayonCoin, exposantCoin, profondeurDalle, exageration })` → `{ geometrie, indices, boiteEnglobante }`
-⚠️ **QUI PRODUIT `emprise` ? PERSONNE — et trois tâches la consomment (4 bis, 6, 7).** C'est le jumeau non signalé de `debitObserveMbs`. Deux issues, à trancher **avant** d'entamer la Tâche 6 : soit `seuil-socle.js` la rend en même temps que `socleVisible`, soit `dem-emprise.js` la fournit déjà sous un autre nom (`originesEmprise`, `rectFenetre`) — **allez voir avant d'en écrire une neuvième version**.
+- `construireFenetre({ emprise, n, rayonCoin, **puissanceCoin**, profondeurDalle, exageration })` → `{ geometrie, indices, boiteEnglobante }` — ⚠️ **`puissanceCoin` et non `exposantCoin` : ce dernier est déjà un export de `fenetre-clip.js:71`.** Ce plan demandait « renommez-le » sans donner le nom ; le voici.
+✅ **`emprise` est produite par la Tâche 3** (`empriseSocle`), qui passe avant celle-ci. ⚠️ **Ce plan a longtemps écrit que personne ne la produisait ; ce n'est plus vrai. Vérifiez que la Tâche 3 est faite avant de commencer.**
 
 - `emprise` = `{ ouest, sud, est, nord }` en degrés. ⚠️ **`ouest > est` signifie que l'emprise franchit l'antiméridien** — c'est légal et le test l'exige.
 - ⚠️ **Au-delà de 85,051° de latitude** (la limite de Mercator), l'emprise est **écrêtée** à cette valeur. Le prototype y était « silencieusement faux mais fermé » ; ici on tranche : on écrête, et un test le vérifie.
@@ -641,7 +695,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 ⚠️ **RAPPEL DE LA DÉCISION 13, PARCE QUE C'EST ICI QU'ON EST TENTÉ DE L'ENFREINDRE.** Baisser à N=128 pendant le mouvement **rend l'image plus grossière pendant qu'on bouge**. C'est voulu, Adrien l'a validé, et c'est le contrat. **Ne compensez pas** en forçant N=256 dès que « ça a l'air lent » : vous reprendriez les 8,3 ms et les 12 % de dépassement que cette tâche existe pour éviter.
 
-- [ ] **Étape 1** — test : en mouvement `resolutionPour` rend 128, à l'arrêt 256 ; une dérive d'emprise sous le seuil ne déclenche **aucune** reconstruction.
+- [ ] **Étape 1** — test : en mouvement `resolutionPour` rend **384**, au repos **768** (⚠️ **pas 128 et 256, qui sont trois fois sous la production** — c'est la case qu'on coche, et elle prescrivait encore les valeurs que cette tâche vient de réfuter) ; une dérive d'emprise sous le seuil ne déclenche **aucune** reconstruction. ⚠️ **Et l'invariant est un critère de cette étape, pas une remarque : socle et maillage à la même résolution** (`plinth.js:865-879`) — un test doit le vérifier.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
 - [ ] **Étape 3** — implémenter.
 
@@ -681,7 +735,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 **Cohérence des noms** — employés à l'identique partout : `socleVisible`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `demanderEmprise`, `PLAFOND_FILE`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`, `debitObserve`.
 
-**Ordre imposé, et il compte :** ⚠️ **La Tâche 1 (caméra) et la Tâche 4 (quadtree) d'abord — ce sont elles qui suppriment l'attente. La Tâche 2 (le voile) EN DERNIER : ôter le voile avant que l'attente ait disparu ne supprime pas le pop-up, il montre le trou qu'il cachait.** Puis **4 → 4 alpha → 4 bis → 4 ter**, l'amendement de la 4 bis réclamé par la 4 ter se faisant **dans** la 4 bis. La **Tâche 3** passe avant la 6, qui consomme son `emprise`. Enfin 4 bis (le flux) **avant** 6 (l'extraction)
+**Ordre imposé, et il compte :** ⚠️ **Tâche 1 (caméra), Tâche 2 bis (escalier de surface) et Tâche 4 (quadtree) d'abord — ce sont elles qui suppriment l'attente. La Tâche 2 (le voile) EN DERNIER : ôter le voile avant que l'attente ait disparu ne supprime pas le pop-up, il montre le saut qu'il cachait.** Puis **4 → 4 alpha → 4 bis → 4 ter**, l'amendement de la 4 bis réclamé par la 4 ter se faisant **dans** la 4 bis. La **Tâche 3 avant la 4 bis** (qui consomme son `emprise`) et **avant la 6**. Et **5 (l'audit) avant 6 (l'extraction)** — sans instrument on ne saura pas si l'extraction marche : le prototype s'est cru étanche pendant tout son vol.
 
 **Le risque principal n'est plus la géométrie** : l'attaque a confirmé qu'on ne peut pas la déchirer. **C'est le flux** — plafond, annulation, éviction — et **le réseau**, qui décide du zoom réellement atteint.
 
