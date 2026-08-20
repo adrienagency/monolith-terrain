@@ -28,7 +28,7 @@ import { warmupPrograms } from './warmup.js'
 import { activeDemSource, isFallbackActive } from './dem-source.js'
 import { Globe } from './globe.js'
 import { Modes, stepZoom } from './modes.js'
-import { altitudeSurfaceM } from './loi-altitude.js'
+import { altitudeSurfaceM, echelleBloc } from './loi-altitude.js'
 import { intersectionGlobe, viseeArrivee, ZOOM_PALIER_MIN } from './escalier-zoom.js'
 import { createGoto, geocode, mainParts } from './goto.js'
 import { frameTrack, viseLeCanevas3D } from './gpx.js'
@@ -3609,6 +3609,20 @@ modes = new Modes({
         )
       }
       return terrain.heightToFeet(camera.position.y) / 3.28084
+    },
+    // L'ÉCHELLE VERTICALE DU BLOC — unités de scène par mètre réel. C'est le
+    // facteur qui sépare la hauteur de caméra de l'altitude en mètres, et il
+    // change à CHAQUE cran de zoom pour deux raisons cumulées : l'emprise du
+    // bloc est divisée par deux, ET l'exagération verticale change de palier
+    // (`exagForZoom`). `_rescale` (modes.js) le lit AVANT et APRÈS le
+    // rechargement pour reposer la caméra à la même altitude métrique —
+    // l'escalier continu de la Tâche 2 bis.
+    //
+    // ⚠️ Rendu `null` hors source réelle : `modes.js` retombe alors sur la pose
+    // d'arrivée plutôt que sur une distance inventée.
+    echelleVerticaleBloc() {
+      if (params.source !== 'real' || !dem) return null
+      return echelleBloc({ extentMeters: dem.extentMeters, span: TERRAIN_SIZE, exageration: params.demExaggeration })
     },
     async loadSurface(lat, lon, zoom) {
       if (demBusy) throw new Error('terrain busy')

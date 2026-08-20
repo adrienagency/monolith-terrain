@@ -391,6 +391,8 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 #### Tâche 1b — le changement de repère
 
 - [ ] **Étape 1 — le test qui échoue**, sur l'instrument de la Tâche 1a : *l'altitude est **monotone et sa dérivée seconde bornée** sur une descente de 1 600 km à 2 km*. ⚠️ **C'est l'inverse du test de caractérisation de la 1a : celui-ci passe au rouge et celui-là devient faux. Retirez le test de caractérisation dans le même commit** — deux tests contradictoires verts sont pires qu'aucun.
+
+  ⚠️ **CETTE ÉTAPE A DÉJÀ ÉTÉ FAITE AUX TROIS QUARTS PAR LA TÂCHE 2 bis, ET LA MONOTONIE EST DÉJÀ VRAIE.** Il ne reste **qu'un seul saut** sur le profil, `_dive`, et **il DESCEND** (÷1,765) : la descente est monotone, elle n'est pas continue. **Reformulez donc l'assertion sur la CONTINUITÉ, pas sur la monotonie** — sans quoi elle est verte avant d'être écrite. ⚠️ **Et le test de caractérisation n'a PAS été supprimé** : il a été re-pointé sur la loi d'avant (`cranContinu: false`, `budgetNiveau: 1.2`), qui reste rejouable et prouve que la nouvelle assertion n'est pas une tautologie. **Ne le supprimez pas sans le remplacer par cette preuve-là.**
 - [ ] **Étape 1 bis — geste par geste.** `up`, `near`/`far`, pose, `minDistance` : chacun devient une fonction continue de l'altitude, ou disparaît.
 - [ ] **Étape 2 — la frontière `globe.js` / `terrain.js`.** ⚠️ **C'est le geste le plus lourd : aujourd'hui l'un s'éteint quand l'autre s'allume.** Dites ce qui les fait coexister — recouvrement, fondu, ou remise du globe au rang de fond lointain.
 
@@ -424,23 +426,45 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 - [ ] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 
-### Tâche 2 bis : l'escalier de surface ⚠️ 17 RIDEAUX SUR 25
+### Tâche 2 bis : l'escalier de surface ✅ FAITE LE 2026-08-20 — 17 RIDEAUX SUR 25 ET **DIX DES ONZE SAUTS D'ALTITUDE**
+
+⚠️ **ELLE EST PASSÉE AVANT LES TÂCHES 1b ET 1c, ET C'EST LA MESURE DE LA 1a QUI L'A DÉCIDÉ.** Le plan la rangeait après elles ; le relevé des onze sauts a montré que **dix** sont posés par `_rescale`, c'est-à-dire par cette tâche-ci, et **un seul** par `_dive`, qui reste à la 1b. Le §10 porte le nouvel ordre.
 
 **Fichiers :** modifier `src/modes.js` (`_rescale` `:452`, `_refine` `:436`, `_coarsen` `:445`) · tester `test/escalier-surface.test.js` (créer)
 
+⚠️ **LES REPÈRES DE LIGNE DE CETTE TÂCHE ONT GLISSÉ DE +14 À LA TÂCHE 1a** (les imports de `loi-altitude.js`) : `_rescale` était à `:466` et non `:452`, ses trois `_whiteout` frères à `:326`, `:422`, `:642`. **Cherchez les noms, pas les numéros.**
+
 **C'est la première source du pop-up**, et elle n'était dans aucune tâche. Chaque cran de zoom en mode surface passe par `_rescale`, qui pose un rideau blanc **et téléporte la caméra** au point de présentation.
 
-⚠️ **CETTE TÂCHE ET LA TÂCHE 1 SE MARCHENT DESSUS, ET L'ORDRE COMPTE.** Elles partagent `_arrivalPose` (`modes.js:358`, appelée par `_dive` `:417` **et** par `_rescale` `:469`), `loadSurface` et `_whiteout`. **Faites la Tâche 1 d'abord** : elle rend la pose continue, et **le « vérifier qu'il échoue » de celle-ci pourrait alors ne plus échouer**. Si c'est le cas, **c'est une bonne nouvelle, pas un test cassé** — écrivez-le et passez à l'Étape 3.
+⚠️ **CETTE TÂCHE ET LA TÂCHE 1 SE MARCHENT DESSUS, ET L'ORDRE COMPTE.** Elles partagent `_arrivalPose` (`modes.js:358`, appelée par `_dive` `:417` **et** par `_rescale` `:469`), `loadSurface` et `_whiteout`. ~~**Faites la Tâche 1 d'abord**~~ — **CONSIGNE INVERSÉE LE 2026-08-20 par la mesure de la Tâche 1a** : c'est `_rescale` qui porte dix des onze sauts, la Tâche 1b n'en porte qu'un. Faire la 1b d'abord aurait corrigé le petit avant le gros. `_arrivalPose` est resté intact : cette tâche ne lui prend que la CIBLE, pas la distance.
 
-⚠️ **À TRANCHER AVEC ADRIEN AVANT DE COMMENCER.** Le commentaire de `:455` porte la mention *« Remplace la continuité d'altitude v42 »* : **une continuité d'altitude a déjà existé ici et Adrien l'a fait retirer.** Il faut savoir pourquoi avant de la rétablir. **C'est une question, pas une tâche.**
+⚠️ **À TRANCHER AVEC ADRIEN AVANT DE COMMENCER.** Le commentaire de `:455` porte la mention *« Remplace la continuité d'altitude v42 »* : **une continuité d'altitude a déjà existé ici et Adrien l'a fait retirer.** Il faut savoir pourquoi avant de la rétablir. **C'est une question, pas une tâche.** → **RÉPONDUE PAR LA MESURE, voir « ce que v42 avait probablement contre lui » plus bas.**
 
-- [ ] **Étape 0 — trancher la forme du test, comme la Tâche 1a.** ⚠️ **Le test d'exécution n'est écrivable par aucune des deux voies que ce plan nomme** : `Modes` appelle `document.createElement`, pas de jsdom, aucun test ne l'instancie. **Module pur ou assertion de texte source : dites lequel avant l'Étape 1.**
-- [ ] **Étape 1 — le test qui échoue : LE RIDEAU, ET LUI SEUL.** *Un changement de cran en mode surface ne pose aucun `_whiteout`.* ⚠️ **N'y mettez PAS la téléportation** — une version de ce plan l'y avait mise tout en interdisant de la retirer, ce qui rendait la tâche insoluble.
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
-- [ ] **Étape 3 — retirer le rideau de `_rescale`.** ⚠️ **C'est l'appelant `modes.js:468`, et il appartient à CETTE tâche** — la Tâche 2 ter traite les trois autres.
-- [ ] **Étape 4 — mutation** : remettre le rideau doit tuer le test.
-- [ ] **Étape 5 — RETIRER LA TÉLÉPORTATION. ✅ ADRIEN A TRANCHÉ LE 2026-08-20 : zoom continu, « exactement comme Google Earth ou Google Maps ».** `modes.js:455-458` (v48) part, l'altitude redevient continue d'un cran à l'autre. ⚠️ **v48 remplaçait une continuité v42 retirée pour une raison qui n'est écrite nulle part** — le garde-fou est le test de la Tâche 1a-1b : altitude monotone, dérivée seconde bornée, arrivée au zoom demandé. **Si le défaut de v42 reparaît, ces trois assertions le montreront.**
-- [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [x] **Étape 0 — trancher la forme du test, comme la Tâche 1a.** ⚠️ **Le test d'exécution n'est écrivable par aucune des deux voies que ce plan nomme** : `Modes` appelle `document.createElement`, pas de jsdom, aucun test ne l'instancie. **Module pur ou assertion de texte source : dites lequel avant l'Étape 1.** → **LES DEUX, et c'est ce qui fait mordre les mutations** : l'instrument pur de la Tâche 1a (`src/loi-altitude.js`, `profilDescente`/`sautsDuProfil`) pour la géométrie, des assertions de texte source pour LIER cet instrument au code — `modes.js` **appelle** `poseCranContinu`, il ne le recopie pas.
+- [x] **Étape 1 — le test qui échoue : LE RIDEAU, ET LUI SEUL.** *Un changement de cran en mode surface ne pose aucun `_whiteout`.* ⚠️ **N'y mettez PAS la téléportation** — une version de ce plan l'y avait mise tout en interdisant de la retirer, ce qui rendait la tâche insoluble. → `test/escalier-surface.test.js`, **13 tests**.
+- [x] **Étape 2** — le lancer, vérifier qu'il échoue. → **9 tests sur 13 rouges** contre `src/modes.js` et `src/main.js` au niveau de `b88c935`, dont les deux assertions demandées.
+- [x] **Étape 3 — retirer le rideau de `_rescale`.** ⚠️ **C'est l'appelant `modes.js:468`, et il appartient à CETTE tâche** — la Tâche 2 ter traite les trois autres. → fait ; **les trois autres sont intacts et le test l'exige** (`enterOrbit`, `_dive`, `_loadDive`).
+- [x] **Étape 4 — mutation** : remettre le rideau doit tuer le test. → **tue** *« un changement de cran en mode surface ne pose aucun `_whiteout` »*.
+- [x] **Étape 5 — RETIRER LA TÉLÉPORTATION. ✅ ADRIEN A TRANCHÉ LE 2026-08-20 : zoom continu, « exactement comme Google Earth ou Google Maps ».** `modes.js:455-458` (v48) part, l'altitude redevient continue d'un cran à l'autre. ⚠️ **v48 remplaçait une continuité v42 retirée pour une raison qui n'est écrite nulle part** — le garde-fou est le test de la Tâche 1a-1b : altitude monotone, dérivée seconde bornée, arrivée au zoom demandé. **Si le défaut de v42 reparaît, ces trois assertions le montreront.** → fait, **et l'angle de vue de l'utilisateur est gardé** : c'est la moitié de v48 qui était bonne.
+- [x] **Étape 6 — mutation** : remettre la téléportation doit tuer le test. → **tue** *« `_rescale` conserve l'altitude métrique au lieu de téléporter »*.
+- [x] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
+#### Ce que v42 avait probablement contre lui — MESURÉ, PAS DEVINÉ
+
+⚠️ **CONSERVER L'ALTITUDE AU CRAN NE SUFFIT PAS, ET C'EST LE PIÈGE QUI A DÛ TUER v42.** Un cran divise l'emprise du bloc par deux : il rend **×2** de recul. Le budget de zoom du niveau valait **`STEP_IN = 1,2`, soit ×3,32**. Chaque étage consommait donc **×1,66 de plus** que le cran suivant ne rendait.
+
+Tant que `_rescale` téléportait au point de présentation, cet écart n'avait aucune conséquence — le cran effaçait tout, au prix des ×1,672 de remontée. Dès que l'altitude est conservée, il **s'accumule**. Mesuré sur la descente de référence (Mont-Blanc, z5 → z15) :
+
+| budget du niveau | sauts `_rescale` | distance de scène | arrivée z15 | ce qu'on voit |
+|---|---|---|---|---|
+| **1,2 (inchangé)** | 0 | s'écroule de 141 à **6,00** — le plancher `minDistance` — **dès z8** | 62 m | un neuvième du bloc dans le cadre, et de la donnée z9 (213 m le texel) regardée depuis 4 km |
+| **`ln 2` (un cran)** | 0 | se stabilise vers **77**, glisse à 38, le cran la ramène à 77 | **418 m** (487 m avant) | le cadrage ne bouge plus d'un étage à l'autre |
+
+**Et `STEP_OUT` devait suivre, sinon l'aller-retour CLIQUETTE :** avec 1,2 en entrée et 0,55 en sortie, un cran de zoom suivi d'un cran de dézoom rend **14 326 m** là où on était parti de **27 696 m** — on revient **deux fois plus bas** qu'avant d'avoir zoomé, et rien ne le signale. À budgets égaux : **×0,970**, le résidu venant du `y = −0,3` de la cible.
+
+**Le geste, donc :** `STEP_IN = STEP_OUT = Math.LN2`. ⚠️ **Et « au moins 20 crans » (Adrien) est désormais DÉRIVÉ du budget** — `ZOOM_IMPULSE = STEP_IN / (20 × ZOOM_TAU)` — au lieu d'être posé à côté de lui : la valeur littérale (0,05) aurait fait tomber le niveau à 11,5 crans de molette. **Les trois mutations sont gardées par le test** : remettre 1,2 écrase la caméra sur le plancher, remettre 0,55 fait cliqueter l'aller-retour, remettre la téléportation ramène les dix remontées.
+
+⚠️ **CE QUI RESTE À REGARDER À L'ÉCRAN, ET CE PLAN NE PEUT PAS LE TRANCHER :** l'exagération verticale change de palier à `z5→z6`, `z6→z7` et `z7→z8` (5 → 4 → 3,2 → 2,8, `ZOOM_EXAG_DEFAULTS`). L'altitude, elle, est continue — c'est le hook `echelleVerticaleBloc` qui absorbe le changement. Mais **le RELIEF, lui, change de forme à ces trois crans**, et le rideau blanc ne le masque plus. **À voir en vol avant de retirer la carte `#loading` (Tâche 2), qui le couvre encore aujourd'hui.**
 
 ### Tâche 2 : retirer la carte `#loading` ⚠️ C'EST LE POP-UP QU'ADRIEN NOMME
 
@@ -470,6 +494,8 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 ### Tâche 2 ter : retirer le fondu blanc `.whiteout` ⚠️ EN DERNIER
 
 **Fichiers :** modifier `src/modes.js` (`_whiteout` `:282`, sa création `:271-273`, ses **quatre** appelants `:312`, `:408`, `:468`, `:628`) · modifier `src/style.css` (`:535-547`) · tester `test/voile-whiteout.test.js` (créer)
+
+⚠️ **IL N'EN RESTE QUE TROIS DEPUIS LE 2026-08-20 : `:468` (`_rescale`) EST PARTI AVEC LA TÂCHE 2 bis**, comme ce plan le prescrivait. Les trois survivants sont `enterOrbit`, `_dive` et `_loadDive`, et **`test/escalier-surface.test.js` exige qu'ils soient encore là** — c'est cette tâche-ci qui les emportera, et c'est elle qui devra donc corriger cette assertion-là. **On élargit une liste, on ne la remplace pas : les repères ci-dessus restent, celui de `_rescale` porte sa date de mort.**
 
 ⚠️ **UNE PREMIÈRE VERSION DE CETTE TÂCHE DÉSIGNAIT TROIS LIGNES DE COMMENTAIRE** — `main.js:927`, `:3423`, `:3447`, trouvées en cherchant le mot « voile ». **Le rideau est fabriqué par `Modes` lui-même** : `_buildDom` crée le `div.whiteout` (`modes.js:271-273`) **sans passer par le constructeur**, donc aucun `grep` de `main.js` ne pouvait le voir. `_whiteout` = **480 ms opaque + 480 ms de retour**.
 
@@ -928,7 +954,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 **Cohérence des noms** — employés à l'identique partout, ⚠️ **et cette liste était aveugle exactement aux cinq interfaces que la Tâche 4 bis déclarait sans jamais les fabriquer** : `socleVisible`, `empriseSocle`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `creerFlux`, `demanderEmprise`, `tuilesPretes`, `zoomEffectif`, `remplirHauteurs`, `PLAFOND_FILE`, `debitObserve`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`. ⚠️ **Un nom qui n'apparaît qu'à sa déclaration est une interface orpheline : cherchez-les avec `grep -c`, pas à l'œil.**
 
-**Ordre imposé, et il compte — les QUINZE tâches, dans cet ordre.** ⚠️ **Bloc caméra d'abord** : **1a** (l'instrument, aucune correction), **1b** (le repère), **1c** (les verrous d'entrée), puis **2 bis** (l'escalier de surface). Ce sont elles qui suppriment l'attente. **Bloc quadtree ensuite** : **4 → 4 quater → 4 alpha → 3 → 4 bis → 4 ter** — la Tâche 3 avant la 4 bis, qui consomme son `emprise`. **Puis la Phase 2** : **5 (l'audit) avant 6 (l'extraction)** — sans instrument on ne saura pas si l'extraction marche — puis **7**. ⚠️ **ET LES DEUX RIDEAUX TOUT À LA FIN, dans cet ordre : Tâche 2 (`#loading`) puis Tâche 2 ter (`.whiteout`).** Une version de ce plan plaçait la Tâche 2 avant le bloc quadtree alors qu'elle exige elle-même que la Tâche 4 soit faite d'abord. **Ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up : il montre le trou qu'il cachait.**
+**Ordre imposé, et il compte — les QUINZE tâches, dans cet ordre.** ⚠️ **Bloc caméra d'abord** : **1a** (l'instrument, aucune correction), puis **2 bis** (l'escalier de surface), puis **1b** (le repère), **1c** (les verrous d'entrée). Ce sont elles qui suppriment l'attente. ⚠️ **L'ORDRE 1a → 1b → 1c → 2 bis A ÉTÉ CORRIGÉ LE 2026-08-20, ET C'EST LA MESURE DE LA 1a QUI L'A IMPOSÉ, PAS UN AVIS** : sur les onze sauts d'altitude relevés, **`_rescale` en pose dix** et `_dive` un seul. La 2 bis passe donc avant les deux autres, sans quoi on corrigeait le petit avant le gros — et le test de monotonie que la 1b devait écrire serait parti d'un profil encore dominé par l'escalier de surface. **Fait : 1a (`b88c935`), 2 bis.** **Bloc quadtree ensuite** : **4 → 4 quater → 4 alpha → 3 → 4 bis → 4 ter** — la Tâche 3 avant la 4 bis, qui consomme son `emprise`. **Puis la Phase 2** : **5 (l'audit) avant 6 (l'extraction)** — sans instrument on ne saura pas si l'extraction marche — puis **7**. ⚠️ **ET LES DEUX RIDEAUX TOUT À LA FIN, dans cet ordre : Tâche 2 (`#loading`) puis Tâche 2 ter (`.whiteout`).** Une version de ce plan plaçait la Tâche 2 avant le bloc quadtree alors qu'elle exige elle-même que la Tâche 4 soit faite d'abord. **Ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up : il montre le trou qu'il cachait.**
 
 **Le risque principal n'est plus la géométrie** : l'attaque a confirmé qu'on ne peut pas la déchirer. **C'est le flux** — plafond, annulation, éviction — et **le réseau**, qui décide du zoom réellement atteint.
 

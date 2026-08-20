@@ -96,7 +96,12 @@ test('main.js branche bien sa loi de surface sur le module pur', () => {
 test('modes.js branche bien ses poses et sa sortie d’orbite sur le module pur', () => {
   assert.match(SRC_MODES, /import \{[\s\S]*?\} from '\.\/loi-altitude\.js'/)
   assert.match(SRC_MODES, /distanceArrivee\(this\.hooks\.surfaceMaxDistance\(\)\)/)
-  assert.equal((SRC_MODES.match(/distancePresentation\(/g) ?? []).length, 2, '_rescale et _loadDive')
+  // ⚠️ IL Y EN AVAIT DEUX — `_rescale` et `_loadDive`. La Tâche 2 bis a retiré
+  // celui de `_rescale` : le cran de l'escalier de surface ne téléporte plus au
+  // point de présentation, il conserve l'altitude métrique (`poseCranContinu`).
+  // Le second, `_loadDive` (le clic-plongée), appartient à la Tâche 1c Étape 2.
+  assert.equal((SRC_MODES.match(/distancePresentation\(/g) ?? []).length, 1, '_loadDive seul')
+  assert.match(SRC_MODES, /poseCranContinu\(\{/, 'le cran continu de la Tâche 2 bis')
   assert.match(SRC_MODES, /altitudeSortieOrbiteM\(this\.hooks\.surfaceCamAltMeters\(\)\)/)
   assert.match(SRC_MODES, /this\.altM = altitudeOrbitaleM\(this\.orbAlt, ORBITAL_M_PER_UNIT\)/)
 })
@@ -189,7 +194,17 @@ test("l'altitude présente au moins un saut sur une descente de 1 600 km à 2 km
 test('le relevé du 2026-08-20 : onze sauts, un _dive et dix _rescale', () => {
   // ⚠️ C'est LE PLAN DE TRAVAIL des Tâches 1b et 1c. Les valeurs sont mesurées,
   // pas posées : Mont-Blanc (45,8326°), zoom fin 15, budget de niveau STEP_IN.
-  const sauts = sautsDuProfil(profilDescente(VOL))
+  //
+  // ⚠️ CE RELEVÉ DÉCRIT UNE LOI QUI N'EST PLUS CELLE DU CODE, ET C'EST VOULU.
+  // La Tâche 2 bis (2026-08-20) a emporté DIX de ces onze sauts en retirant la
+  // téléportation de `_rescale` et en ramenant le budget du niveau à un cran.
+  // Le relevé reste ici, REJOUABLE, parce qu'il est le plan de travail de la
+  // Tâche 1b et la seule trace exécutable de ce qu'on a corrigé — on ÉLARGIT
+  // une liste, on ne la remplace pas (§0 du plan). Il se rejoue donc contre la
+  // loi d'AVANT : téléportation (`cranContinu: false`) ET budget 1,2.
+  // Ce qu'il en reste dans le code d'aujourd'hui est asséré juste en dessous.
+  const AVANT_2BIS = { ...VOL, budgetNiveau: 1.2, cranContinu: false }
+  const sauts = sautsDuProfil(profilDescente(AVANT_2BIS))
   assert.equal(sauts.length, 11)
   assert.equal(sauts.filter((s) => s.cause === '_dive').length, 1)
   assert.equal(sauts.filter((s) => s.cause === '_rescale').length, 10)
@@ -231,14 +246,33 @@ test('le relevé du 2026-08-20 : onze sauts, un _dive et dix _rescale', () => {
   // et la somme des remontées, qui dit combien de mètres le zoom rend à l'envers
   const remontee = rescales.reduce((a, s) => a + s.ecartM, 0)
   assert.ok(Math.abs(remontee - 685623) < 400, `somme des remontées = ${Math.round(remontee)} m`)
+
+  // ── CE QU'IL EN RESTE AUJOURD'HUI, sur la loi RÉELLE du code ──────────────
+  // Dix des onze sauts sont partis avec la Tâche 2 bis. Le onzième, `_dive`,
+  // est le changement de repère orbital → surface : il appartient à la 1b.
+  const aujourdhui = sautsDuProfil(profilDescente(VOL))
+  assert.equal(aujourdhui.length, 1, `sauts restants : ${aujourdhui.map((s) => s.cause).join(', ')}`)
+  assert.equal(aujourdhui[0].cause, '_dive')
 })
 
-test("l'altitude n'est PAS monotone : zoomer d'un cran fait REMONTER la caméra", () => {
-  // C'est l'assertion que la Tâche 1b inversera.
+test("l'altitude ne remonte plus en zoomant — il ne reste que la CHUTE du _dive", () => {
+  // ⚠️ CETTE ASSERTION A ÉTÉ INVERSÉE PAR LA TÂCHE 2 bis, PAS PAR LA 1b.
+  // Elle disait « l'altitude n'est PAS monotone : zoomer d'un cran fait
+  // REMONTER la caméra », et comptait exactement dix remontées — les dix
+  // `_rescale`. Le plan attribuait cette inversion à la Tâche 1b ; la mesure de
+  // la 1a a montré que c'est l'escalier de SURFACE qui les portait toutes.
   const pts = profilDescente(VOL)
-  const remontees = pts.filter((p, i) => i > 0 && p.altM > pts[i - 1].altM)
-  assert.ok(remontees.length > 0, 'aucune remontée — la descente serait donc déjà monotone')
-  assert.equal(remontees.length, 10, 'exactement les dix `_rescale`')
+  const remontees = pts.filter((p, i) => i > 0 && p.altM > pts[i - 1].altM * 1.001)
+  assert.deepEqual(remontees, [], 'plus aucune remontée : la descente est monotone')
+  // la loi d'avant, elle, en comptait dix — la garder rejouable, c'est garder
+  // la preuve que l'assertion ci-dessus n'est pas une tautologie
+  const avant = profilDescente({ ...VOL, budgetNiveau: 1.2, cranContinu: false })
+  assert.equal(avant.filter((p, i) => i > 0 && p.altM > avant[i - 1].altM * 1.001).length, 10)
+  // ⚠️ IL RESTE UNE DISCONTINUITÉ, ET ELLE DESCEND : `_dive` divise l'altitude
+  // par 1,765 d'une image à l'autre. C'est la Tâche 1b qui la porte.
+  const chutes = sautsDuProfil(pts)
+  assert.equal(chutes.length, 1)
+  assert.ok(chutes[0].ecartM < 0, 'le saut restant descend')
 })
 
 test('la plongée orbitale non-stop a UN saut, et il est plus violent', () => {
@@ -259,12 +293,16 @@ test('la plongée orbitale non-stop a UN saut, et il est plus violent', () => {
 test('enterOrbit saute peu quand il calcule, énormément quand on lui dicte', () => {
   // (a) régime automatique : ×1,15 borné [15 km, 9 000 km]. Il n'est atteignable
   //     qu'à z3 (`getCoarsenTarget()` rend null au plancher de l'escalier).
-  const p = poseArrivee().pente
-  const dPres = posePresentation(p).distanceCible
-  const altA = (camY, z) =>
-    altitudeSurfaceM({ camY, extentMeters: empriseBlocM({ zoom: z, lat: LAT_REF }), span: TERRAIN_SIZE, exageration: exagPourZoom(z) })
-  const z3butee = altA(Y_CIBLE + dPres * Math.exp(-STEP_IN) * p, 3)
-  assert.ok(Math.abs(z3butee - 2235433) < 2000, `z3 en butée = ${Math.round(z3butee)} m`)
+  //
+  // ⚠️ LES DEUX ALTITUDES DE BUTÉE ONT CHANGÉ AVEC LA TÂCHE 2 bis, et il ne
+  // s'agit PAS d'un ajustement de tolérance. Elles se lisaient « point de
+  // présentation, moins le budget du niveau » — or il n'y a plus de point de
+  // présentation, et le budget du niveau vaut désormais un cran. On les prend
+  // donc là où elles se trouvent réellement : à la fin du profil de descente,
+  // c'est-à-dire à la butée basse de l'étage.
+  const buteeDe = (zoomFin, altDepartM) => profilDescente({ ...VOL, altDepartM, zoomFin }).at(-1).altM
+  const z3butee = buteeDe(3, 10000000) // pickDiveTier(10 000 km) → le palier z3
+  assert.ok(Math.abs(z3butee - 3615172) < 3000, `z3 en butée = ${Math.round(z3butee)} m`)
   assert.ok(Math.abs(altitudeSortieOrbiteM(z3butee) / z3butee - 1.15) < 1e-9)
   // les deux bornes, elles, sont des sauts francs
   assert.equal(altitudeSortieOrbiteM(400), 15000, 'plancher : 400 m au sol → 15 km d’orbite')
@@ -273,7 +311,7 @@ test('enterOrbit saute peu quand il calcule, énormément quand on lui dicte', (
   // (b) régime dicté : les deux autres appelants imposent une altitude.
   assert.match(SRC_MAIN, /modes\.enterOrbit\(16000000\)/, 'le bouton globe')
   assert.match(SRC_MODES, /await this\.enterOrbit\(1200000\)/, 'flyTo')
-  const z15butee = altA(Y_CIBLE + dPres * Math.exp(-STEP_IN) * p, 15)
-  assert.ok(Math.abs(z15butee - 487) < 2, `z15 en butée = ${Math.round(z15butee)} m`)
+  const z15butee = buteeDe(15, 1600000)
+  assert.ok(Math.abs(z15butee - 418) < 3, `z15 en butée = ${Math.round(z15butee)} m`) // 487 m avant la Tâche 2 bis
   assert.ok(16000000 / z15butee > 30000, `bouton globe : ×${Math.round(16000000 / z15butee)}`)
 })

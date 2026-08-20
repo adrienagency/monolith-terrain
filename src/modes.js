@@ -25,6 +25,7 @@ import {
   altitudeSortieOrbiteM,
   distanceArrivee,
   distancePresentation,
+  poseCranContinu,
 } from './loi-altitude.js'
 
 // Le pincement fabrique un faux événement de molette. _zoomGesture appelle
@@ -106,16 +107,54 @@ const MSG_MS = 3600
 // glide CLAMPS at the zone's near/far limit and never crosses a level on its
 // own — a FRESH scroll while already pinned at the limit steps to the next
 // level (Adrien: "le zoom s'arrête au max de la zone, on re-scroll pour passer").
-const ZOOM_IMPULSE = 0.05 // per wheel notch, added to the zoom velocity (log-dist/s)
 const ZOOM_TAU = 1.2 // s — velocity decay time constant; big → the coast stretches far
 const ZOOM_VEL_MAX = 1.3 // caps a fast burst
 const ZOOM_STOP = 0.015 // velocity below which the coast is considered spent
 const WHEEL_GAP_MS = 220 // a wheel event this long after the last starts a FRESH gesture
+
+// ══════════ LE BUDGET DU NIVEAU VAUT EXACTEMENT UN CRAN — Tâche 2 bis ═══════
+//
 // the zone's own zoom budget (log-distance) — the glide CLAMPS here, it does not
-// run to the physical near/far stop. ~STEP_IN of zoom-in ≈ the comfortable
-// "au moins 20 crans" span; a fresh re-scroll at the limit steps a level.
-export const STEP_IN = 1.2 // max zoom-IN per level (≈ 3.3×) before the in-limit
-export const STEP_OUT = 0.55 // max zoom-OUT per level (≈ 1.7×) before the out-limit
+// run to the physical near/far stop; a fresh re-scroll at the limit steps a level.
+//
+// ⚠️ **IL VALAIT 1,2 EN ENTRÉE ET 0,55 EN SORTIE, ET CES DEUX CHIFFRES SONT
+// DEVENUS FAUX LE JOUR OÙ `_rescale` A CESSÉ DE TÉLÉPORTER.** Tant que chaque
+// traversée d'étage reposait la caméra au point de présentation, le budget du
+// niveau n'avait aucune conséquence géométrique : le cran effaçait tout. Depuis
+// que l'altitude métrique est CONSERVÉE au cran (décision d'Adrien du
+// 2026-08-20, « exactement comme Google Earth »), le budget du niveau et le pas
+// de l'escalier doivent être LE MÊME NOMBRE, parce qu'un cran de zoom divise
+// l'emprise du bloc par deux — soit `ln 2` de distance, et rien d'autre.
+//
+// ⚠️ MESURÉ, ET C'EST LE DÉFAUT v42 QUI REVIENT SI ON L'OUBLIE (Mont-Blanc,
+// z5 → z15, `test/escalier-surface.test.js`) :
+//   · budget 1,2 conservé  → le niveau descend ×3,32 quand le cran ne rend que
+//     ×2 : la distance d'entrée s'écroule de 141 à 11,6 unités, la caméra vient
+//     se coller au plancher `minDistance = 6` DÈS z8 et n'en repart plus. On
+//     regarde alors de la donnée z9 (213 m le texel) depuis 4 km d'altitude,
+//     avec un neuvième du bloc dans le cadre.
+//   · budget `ln 2`        → la distance d'entrée se stabilise vers 77 unités,
+//     le glissé va de 77 à 38, le cran la ramène à 77. Rien ne touche le
+//     plancher, l'altitude est continue, et l'arrivée à z15 tombe à 418 m —
+//     contre 487 m par l'ancien escalier téléporté.
+//
+// ⚠️ ET L'ENTRÉE ET LA SORTIE DOIVENT ÊTRE ÉGALES, sinon l'aller-retour
+// CLIQUETTE. Mesuré : avec 1,2 en entrée et 0,55 en sortie, un cran de zoom
+// suivi d'un cran de dézoom rend 14 326 m là où on était parti de 27 696 m —
+// on revient DEUX FOIS PLUS BAS qu'avant d'avoir zoomé. À budgets égaux, le
+// même aller-retour rend 26 876 m (×0,970, le résidu venant du `y = −0,3` de la
+// cible). L'ancien escalier ne cliquettait pas parce que la téléportation
+// remettait les deux directions au même point de présentation.
+export const STEP_IN = Math.LN2 // max zoom-IN per level (= UN cran, ×2) before the in-limit
+export const STEP_OUT = Math.LN2 // idem en dézoom — l'aller-retour doit revenir au point de départ
+
+// ⚠️ « AU MOINS 20 CRANS » EST UNE CONTRAINTE D'ADRIEN, PAS UN EFFET DE BORD.
+// Un défilement continu délivre `N × ZOOM_IMPULSE × ZOOM_TAU` de distance
+// logarithmique : le niveau valait 1,2 / (0,05 × 1,2) = 20 crans de molette.
+// Le budget ayant changé, l'impulsion est désormais DÉRIVÉE de lui pour que ce
+// 20 ne bouge pas — la valeur littérale (0,05) l'aurait fait tomber à 11,5.
+const CRANS_PAR_NIVEAU = 20
+const ZOOM_IMPULSE = STEP_IN / (CRANS_PAR_NIVEAU * ZOOM_TAU) // ≈ 0,0289 log-dist/s par cran
 
 // task 30 Fix A: the isometric-ish viewing angle every dive/refine arrival
 // has always used (camera.position(0,18,19), looking at (0,-0.3,0)) — kept
@@ -463,14 +502,35 @@ export class Modes {
     await this._rescale(next, 'WIDENING')
   }
 
+  // LE CRAN DE L'ESCALIER DE SURFACE — ET IL NE TÉLÉPORTE PLUS.
+  //
+  // ✅ Adrien, 2026-08-20 : « on garde bien un zoom continu, exactement comme
+  // Google Earth ou Google Maps. » v48 posait la caméra au POINT DE
+  // PRÉSENTATION (maxDistance·0,97, le bloc entier cadré) à chaque traversée
+  // d'étage : mesuré, cela faisait REMONTER la caméra de ×1,672 à ×2,154 pendant
+  // que l'utilisateur zoomait — 685 623 m rendus à l'envers sur une descente de
+  // 1 600 km, et 960 ms de fondu au blanc pour que ça ne se voie pas.
+  //
+  // Ce qui reste de v48, et c'était sa bonne moitié : **l'angle de vue de
+  // l'utilisateur est gardé** (`prevDir`).
+  //
+  // Ce qui la remplace : **l'altitude MÉTRIQUE est conservée de part et d'autre
+  // du cran.** Elle vaut `camY / échelle du bloc`, et l'échelle change pour
+  // DEUX raisons à chaque cran — l'emprise du bloc est divisée par deux ET
+  // l'exagération verticale change de palier (5 à z5, 4 à z6, 3,2 à z7, 2,8
+  // ensuite). ⚠️ **Ne compenser que l'emprise laisserait trois crans
+  // discontinus.** On lit donc l'échelle RÉELLE du bloc des deux côtés du
+  // rechargement (`hooks.echelleVerticaleBloc`) : aucune constante recopiée,
+  // aucun palier à tenir à jour ici.
+  //
+  // ⚠️ ET IL N'Y A PLUS DE FONDU AU BLANC. Le rideau n'était pas l'ornement du
+  // saut, il était là parce que le saut était invisible autrement.
   async _rescale(next, verb) {
     this.busy = true
     this._resetZoom() // the new level starts its own scroll budget
-    // v48 (retour Adrien) : à CHAQUE traversée d'étage (zoom comme dézoom), on
-    // arrive au POINT DE PRÉSENTATION — la même distance que la vue iso 1
-    // (maxDistance·0.97, le bloc entier cadré) — mais en GARDANT l'angle de
-    // vue de l'utilisateur. Remplace la continuité d'altitude v42.
     const prevDir = this.camera.position.clone().sub(this.controls.target)
+    const camYAvant = this.camera.position.y
+    const echelleAvant = this.hooks.echelleVerticaleBloc?.() ?? null
     this.announce(`${verb} — ${next.lat.toFixed(4)}, ${next.lon.toFixed(4)} · Z${next.zoom}`)
     try {
       await this.hooks.loadSurface(next.lat, next.lon, next.zoom)
@@ -479,18 +539,26 @@ export class Modes {
       this.busy = false
       return
     }
-    await this._whiteout(() => {
-      const arrival = this._arrivalPose(next)
-      this.controls.target.copy(arrival.target)
-      const dist = distancePresentation(this.hooks.surfaceMaxDistance?.() ?? DISTANCE_MAX_SURFACE) // = distance de la vue iso 1
-      const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
-      const pos = this.controls.target.clone().addScaledVector(dir, dist)
-      // même garde de dégagement sol que _arrivalPose
-      const groundY = this.hooks.sampleGroundY ? this.hooks.sampleGroundY(arrival.target.x, arrival.target.z) : -Infinity
-      if (pos.y < groundY + 3) pos.y = groundY + 3
-      this.camera.position.copy(pos)
-      this.controls.update()
-    })
+    const echelleApres = this.hooks.echelleVerticaleBloc?.() ?? null
+    const arrival = this._arrivalPose(next)
+    this.controls.target.copy(arrival.target)
+    const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
+    // Sans le hook (banc de test, source procédurale), il n'y a pas d'échelle à
+    // comparer : on retombe sur la pose d'arrivée, qui est le comportement
+    // d'avant l'escalier continu — jamais sur une distance inventée.
+    const facteur = echelleAvant > 0 && echelleApres > 0 ? echelleApres / echelleAvant : null
+    const dist =
+      facteur && Math.abs(dir.y) > 1e-3
+        ? poseCranContinu({ camY: camYAvant, pente: dir.y, facteurEchelle: facteur, yCible: arrival.target.y })
+            .distanceCible
+        : arrival.pos.distanceTo(arrival.target)
+    const borne = THREE.MathUtils.clamp(dist, this.controls.minDistance, this.hooks.surfaceMaxDistance?.() ?? DISTANCE_MAX_SURFACE)
+    const pos = this.controls.target.clone().addScaledVector(dir, borne)
+    // même garde de dégagement sol que _arrivalPose
+    const groundY = this.hooks.sampleGroundY ? this.hooks.sampleGroundY(arrival.target.x, arrival.target.z) : -Infinity
+    if (pos.y < groundY + 3) pos.y = groundY + 3
+    this.camera.position.copy(pos)
+    this.controls.update()
     this.busy = false
   }
 

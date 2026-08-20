@@ -40,6 +40,14 @@ export const TUILES_PAR_BLOC = 3
 // (`surfaceMaxDistance: () => 150`), et le repli `?? 150` de `modes.js`.
 export const DISTANCE_MAX_SURFACE = 150
 
+// `controls.minDistance` en mode surface — `modes.js` la pose à 6 dans `_dive`
+// et dans `_loadDive`. ⚠️ CE N'EST PAS UN DÉTAIL DE CONFORT : c'est le PLANCHER
+// sur lequel l'escalier continu vient s'écraser si le budget de niveau ne vaut
+// pas exactement un cran. Mesuré à la Tâche 2 bis (2026-08-20) : à budget 1,2
+// inchangé, la caméra continue s'y colle dès z8 et n'en repart plus. Gardé par
+// une assertion de texte source dans `test/escalier-surface.test.js`.
+export const DISTANCE_MIN_SURFACE = 6
+
 // L'angle de vue isométrique de toute arrivée : `_ARRIVAL_DIR` de `modes.js`
 // vaut `new THREE.Vector3(0, 18, 19).normalize()`.
 export const PENTE_ARRIVEE = { y: 18, z: 19 }
@@ -136,6 +144,34 @@ export function posePresentation(pente, distanceMax = DISTANCE_MAX_SURFACE) {
   return { camY: Y_CIBLE + distanceCible * pente, distanceCible, pente }
 }
 
+// ══════════ 3 bis. LE CRAN CONTINU — LA POSE QUI REMPLACE LA TÉLÉPORTATION ══
+//
+// ✅ Décision d'Adrien du 2026-08-20 : « on garde bien un zoom continu,
+// exactement comme Google Earth ou Google Maps ». La téléportation au point de
+// présentation (v48, `posePresentation` ci-dessus) disparaît de `_rescale`.
+//
+// LE GESTE : conserver l'altitude MÉTRIQUE de part et d'autre du cran. Or
+// l'altitude métrique vaut `camY / échelle du bloc`, et l'échelle change à
+// CHAQUE cran pour DEUX raisons cumulées :
+//   · l'emprise du bloc est divisée par deux d'un zoom au suivant ;
+//   · l'exagération verticale change de palier (5 à z5, 4 à z6, 3,2 à z7,
+//     2,8 ensuite — `EXAG_PAR_ZOOM`).
+// ⚠️ **C'EST LE PIÈGE.** Ne prendre que l'emprise donne un facteur 2 constant
+// et laisse trois crans discontinus (z5→z6, z6→z7, z7→z8). On passe donc le
+// RAPPORT DES DEUX ÉCHELLES, lu sur le bloc réel des deux côtés.
+//
+// La moitié de v48 qui était BONNE survit : l'angle de vue de l'utilisateur est
+// gardé — `pente` est le `y` normalisé de la direction cible→caméra d'avant le
+// cran, et c'est le seul terme qui traverse.
+//
+// ⚠️ `modes.js` appelle CETTE fonction — ce n'est pas une recopie. Le test de la
+// Tâche 2 bis vérifie le lien : si `_rescale` se remet à calculer sa pose
+// lui-même, l'assertion tombe.
+export function poseCranContinu({ camY, pente, facteurEchelle, yCible = Y_CIBLE }) {
+  const camYApres = camY * facteurEchelle
+  return { camY: camYApres, distanceCible: (camYApres - yCible) / pente, pente }
+}
+
 // ══════════ 4. LE PROFIL DE DESCENTE ════════════════════════════════════════
 //
 // ⚠️ CE N'EST PAS UNE SIMULATION DE L'APPLICATION : c'est le REJEU de la loi
@@ -167,6 +203,17 @@ export function echelonsGeometriques(a, b, ratioMax = 1.02) {
  *
  * `paliers` et `choisirPalier` sont INJECTÉS (`DIVE_TIERS`, `pickDiveTier` de
  * `modes.js`) : le module reste pur et le test mord sur la vraie table.
+ *
+ * ⚠️ LE GLISSÉ DU NIVEAU EST BORNÉ PAR `distanceMin`, ET CE N'EST PAS UN
+ * ORNEMENT. `_zoomGesture` déclenche `_refine` dès que
+ * `dist <= minDistance × 1,02` — le plancher est donc une VRAIE fin de niveau,
+ * pas une garde théorique. Sans lui, le profil raconterait une descente que la
+ * caméra ne peut pas faire, et l'effondrement de la Tâche 2 bis (le défaut
+ * v42) resterait invisible à l'instrument.
+ *
+ * `cranContinu` : `true` rejoue le cran d'aujourd'hui (altitude métrique
+ * conservée, Tâche 2 bis) ; `false` rejoue la téléportation v48 au point de
+ * présentation, gardée pour la MUTATION de l'Étape 6.
  */
 export function profilDescente({
   choisirPalier,
@@ -176,16 +223,20 @@ export function profilDescente({
   zoomFin = 15, // `DEFAULT_FINE_ZOOM`, main.js:3090
   metresParUnite,
   distanceMax = DISTANCE_MAX_SURFACE,
+  distanceMin = DISTANCE_MIN_SURFACE,
   span,
   tuilesParBloc = TUILES_PAR_BLOC,
   exag = exagPourZoom,
   budgetNiveau, // `STEP_IN` de modes.js
+  cranContinu = true,
   ratioMax = 1.02,
 } = {}) {
   const plongee = altPlongeeM ?? altDepartM
   const pts = []
   const pousse = (p) => pts.push(p)
 
+  const echelle = (zoom) =>
+    echelleBloc({ extentMeters: empriseBlocM({ zoom, lat, tuilesParBloc }), span, exageration: exag(zoom) })
   const altSurface = (camY, zoom) =>
     altitudeSurfaceM({
       camY,
@@ -196,7 +247,7 @@ export function profilDescente({
 
   // ── 1. le glissé orbital, continu par construction (THREE.MathUtils.damp)
   for (const a of echelonsGeometriques(altDepartM, plongee, ratioMax)) {
-    pousse({ mode: 'orbital', zoom: null, altM: altitudeOrbitaleM(a / metresParUnite, metresParUnite), transition: null })
+    pousse({ mode: 'orbital', zoom: null, altM: altitudeOrbitaleM(a / metresParUnite, metresParUnite), transition: null, dist: null })
   }
 
   // ── 2. `_dive` — le changement de repère complet (modes.js, `_dive`)
@@ -206,24 +257,29 @@ export function profilDescente({
   let pente = arrivee.pente
   let camY = arrivee.camY
   let distanceCible = arrivee.distanceCible
-  pousse({ mode: 'surface', zoom, altM: altSurface(camY, zoom), transition: '_dive' })
+  pousse({ mode: 'surface', zoom, altM: altSurface(camY, zoom), transition: '_dive', dist: distanceCible })
 
   // ── 3. l'escalier de surface
   for (;;) {
     // le glissé inertiel du niveau : la distance à la cible est divisée par
-    // `exp(budgetNiveau)` avant que la butée ne rende la main
-    const dFin = distanceCible * Math.exp(-budgetNiveau)
+    // `exp(budgetNiveau)` avant que la butée ne rende la main — ou plus tôt, si
+    // le plancher `minDistance` arrive le premier (voir l'en-tête)
+    const dFin = Math.max(distanceCible * Math.exp(-budgetNiveau), distanceMin)
     for (const d of echelonsGeometriques(distanceCible, dFin, ratioMax).slice(1)) {
-      pousse({ mode: 'surface', zoom, altM: altSurface(Y_CIBLE + d * pente, zoom), transition: null })
+      pousse({ mode: 'surface', zoom, altM: altSurface(Y_CIBLE + d * pente, zoom), transition: null, dist: d })
     }
+    distanceCible = dFin
+    camY = Y_CIBLE + dFin * pente
     if (zoom >= zoomFin) break
-    // `_rescale` : téléportation au point de présentation de l'étage suivant
+    // `_rescale` — le cran
+    const pose = cranContinu
+      ? poseCranContinu({ camY, pente, facteurEchelle: echelle(zoom + 1) / echelle(zoom) })
+      : posePresentation(pente, distanceMax) // la téléportation v48, pour la mutation
     zoom += 1
-    const pose = posePresentation(pente, distanceMax)
-    camY = pose.camY
-    distanceCible = pose.distanceCible
+    distanceCible = Math.min(Math.max(pose.distanceCible, distanceMin), distanceMax)
     pente = pose.pente
-    pousse({ mode: 'surface', zoom, altM: altSurface(camY, zoom), transition: '_rescale' })
+    camY = Y_CIBLE + distanceCible * pente
+    pousse({ mode: 'surface', zoom, altM: altSurface(camY, zoom), transition: '_rescale', dist: distanceCible })
   }
 
   return pts
