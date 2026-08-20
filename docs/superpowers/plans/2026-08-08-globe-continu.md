@@ -70,6 +70,24 @@ Elle a été écrite **à partir de ce dépôt**, en observant ce que deux agent
 
 ⚠️ **Le résultat mesuré de la phase verte :** sans la compétence, l'audit conclut que le quadtree « est propre et bien commenté ». Avec elle, il découvre qu'**il ne fait pas son travail**. Elle a été décisive sur trois trouvailles sur cinq, et sans effet sur les autres — **c'est exactement ce qu'elle annonce**, et il ne faut pas en attendre plus.
 
+### ⚠️ LA SECONDE RÈGLE DU §0 : ON ÉLARGIT UNE LISTE, ON NE LA REMPLACE PAS
+
+**Ce document a été corrigé par lots successifs, et le même accident s'est produit cinq fois.** Il mérite sa règle, parce qu'il coûte plus cher que les erreurs qu'il prétend réparer :
+
+1. Un remplacement **global** a dupliqué deux blocs d'étapes dans quatre tâches à la fois — deux tâches se sont retrouvées sans aucune étape parlant de leur propre module.
+2. Une correction de repères a fait **sortir du document** le vrai pop-up de l'application : les numéros cités étaient faux, la thèse était juste, et la liste a été remplacée au lieu d'être élargie.
+3. Le commit écrit pour **réparer** cet accident l'a **reproduit** sur une autre liste.
+4. Un script écrit en ligne dans un terminal a fait interpréter des accents graves comme des commandes : deux noms ont été avalés au §10, laissant des parenthèses vides.
+5. Une assertion fausse a été remplacée par **une autre assertion fausse, aux mêmes valeurs**, faute d'avoir été rejouée contre le dépôt.
+
+**Les quatre règles qui en découlent, et elles valent pour l'agent qui exécutera ce plan :**
+
+- ⚠️ **On ÉLARGIT une liste de fichiers ou de repères, on ne la remplace jamais.** Un repère faux se corrige **en place** ; les justes qui l'entourent restent.
+- ⚠️ **Un remplacement de texte se borne à UNE section, et échoue bruyamment si le motif n'y apparaît pas exactement une fois.** Jamais de remplacement global sur ce document.
+- ⚠️ **Une assertion se rejoue contre le dépôt AVANT d'être écrite.** Deux versions successives d'une même étape ont été fausses aux mêmes valeurs parce que personne ne l'avait exécutée.
+- ⚠️ **Un script d'édition passe par un fichier, jamais par une ligne de commande.** Les accents graves de ce document sont innombrables et le shell les interprète.
+
+
 ## 1. Les treize décisions validées
 
 Tranchées avec Adrien. Un agent que l'une d'elles gêne le **signale** ; il ne la contourne pas.
