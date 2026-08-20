@@ -162,7 +162,7 @@ Ce n'est plus le flou accepté par la décision 13 : **c'est une autre carte**. 
 | `src/terrain.js` | `resMaillage` (`:2016`), `RES_FENETRE_CONTINUE = 384` (`:61`) | les deux résolutions de la Tâche 7 |
 | `src/mer-emprise.js`, `src/fenetre-course.js` | champ de mer sur emprise variable, déplacement élastique | — |
 
-Le tout derrière `FLAGS.fenetreContinue`, avec neuf fichiers de test dédiés.
+Le tout derrière `FLAGS.fenetreContinue` — ⚠️ **qui vaut `false` (`flags.js:25`) : ce sous-système est fusionné et testé, PAS actif.** Sept fichiers de test lui sont dédiés.
 
 ⚠️ **PREMIÈRE ACTION DE CE PLAN, AVANT TOUTE TÂCHE : lire ces modules et trancher, module par module, réutiliser ou remplacer — et l'écrire ici.** C'est exactement le §1 de `/threejs-optimisation` — « l'audit s'arrête au fichier ; zéro occurrence est un signal, pas un soulagement » — et ce plan y est tombé sur son propre sujet.
 
@@ -286,7 +286,7 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 
 ⚠️ **ET VOICI LE CHIFFRE QUI DOIT CADRER LES ATTENTES : MÊME TOUS LES RIDEAUX RETIRÉS** — plus que ce que ce plan livre — **avec un chargement réaliste d'une seconde par cran, il reste 7,88 s d'entrée morte et de caméra figée sur 30 s (26,3 %), et 11,18 s de bandeau (37,3 %)**, carte floutée à 16 px pendant tout ce temps. **Retirer les rideaux ne suffit pas : il faut supprimer l'attente qu'ils masquent, et c'est `this.busy` autant que le réseau.**
 
-⚠️ **Et sept des neuf ne viennent PAS de `_dive` : ils viennent de l'escalier de surface** (`_rescale`, `modes.js:452`, appelé par `_refine` `:436` et `_coarsen` `:445`). **C'est la première source du pop-up d'Adrien, et aucune tâche ne la portait.** → **Tâche 2 bis.**
+⚠️ **ET LA MAJORITÉ NE VIENT PAS DE `_dive` : ils viennent de l'escalier de surface** (`_rescale`, `modes.js:452`, appelé par `_refine` `:436` et `_coarsen` `:445`). **Sur les 25 rideaux des quatre trajets, 17 sont posés par `_rescale`.** **C'est la première source du pop-up d'Adrien, et aucune tâche ne la portait.** → **Tâche 2 bis.**
 
 Le réseau étant parfait dans ce banc, **la production est pire que ces chiffres, jamais meilleure.**
 
@@ -314,22 +314,37 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 
 ⚠️ **ET LE TEST NE PEUT PAS ÊTRE UN TEST D'EXÉCUTION.** `Modes` appelle `document.createElement`, **il n'y a pas de jsdom dans ce dépôt** (`grep -c jsdom package.json` → 0), aucun test n'instancie `Modes`. Deux issues, à trancher à l'Étape 0 : **extraire la loi d'altitude en module pur** — patron d'`escalier-zoom.js` et de `fenetre-finesse.js`, tous deux purs et testés sous node — ou **assertion de texte source**, convention employée par **onze fichiers de test** de ce dépôt. ⚠️ **L'extraction est préférable : elle seule donne un test qui mord.**
 
+⚠️ **CETTE TÂCHE EST TROP GROSSE POUR UN SEUL COMMIT, ET C'EST MESURÉ : onze cases sur `modes.js` (758 lignes) et `main.js` (~4 200 lignes), dont une décision d'architecture que ce plan qualifie lui-même de « geste le plus lourd ».** Toutes les autres tâches du document tiennent dans un commit ; celle-ci non. **Elle se fait en trois, dans cet ordre, chacune close par le §0 et son propre commit.**
+
+#### Tâche 1a — l'instrument, et la mesure
+
 - [ ] **Étape 0 — trancher la forme du test** (module pur ou texte source) et l'écrire ici. ⚠️ **La Tâche 4 consacre une étape entière à un harnais qui existait déjà ; celle-ci n'en a aucun. C'est ici que le travail commence.**
 - [ ] **Étape 1 — le test qui échoue.** Sur une descente de 1 600 km à 2 km, l'altitude est **monotone et sa dérivée seconde bornée**. ⚠️ **La grandeur échantillonnée doit être la MÊME de part et d'autre de la bascule de mode** — sinon on compare deux repères et l'assertion ne veut rien dire. C'est le piège de cette tâche.
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue, et **relever où** : la liste des sauts est la liste du travail.
-- [ ] **Étape 3 — le changement de repère, geste par geste.** `up`, `near`/`far`, pose, `minDistance` : chacun devient une fonction continue de l'altitude, ou disparaît.
-- [ ] **Étape 4 — la frontière `globe.js` / `terrain.js`.** ⚠️ **C'est le geste 1, et le plus lourd : aujourd'hui l'un s'éteint quand l'autre s'allume.** Dites ce qui les fait coexister — recouvrement, fondu, ou remise du globe au rang de fond lointain.
-- [ ] **Étape 4 bis — les trois mécanismes orphelins**, qu'aucune version de ce plan ne nommait et qui figent la caméra autant que les rideaux :
-  - **`this.busy`** (`modes.js:138`, `:203`, `:242`, `:296`, `:308`, `:386`…) — pendant qu'il est vrai, **la molette, `flyTo`, les steppers et la caméra sont tous gelés**. C'est lui qui produit l'« entrée morte », et elle dure plus longtemps que les rideaux.
-  - **`_loadDive` / `diveTo`** — le clic-plongée, un chemin distinct de `_dive`, avec un **recul de caméra mesuré de ×3,32 à ×24,25**.
-  - **`enterOrbit`** (`modes.js:296`) — la remontée, symétrique de `_dive` et tout aussi discontinue. ⚠️ **Mesuré : la remontée est PIRE que la descente — 11 rideaux contre 8, 35,3 % d'écran blanc, 70,8 % d'entrée morte.**
-- [ ] **Étape 5 — retirer le plancher orbital `:326`**, et unifier les quatre sites de `minDistance` en une seule dérivation.
-- [ ] **Étape 6 — sortir `dem.meanM` de `surfaceCamAltMeters`** (R1), ou dire pourquoi il peut rester.
-- [ ] **Étape 6 bis — poser le point d'appel de `zoomSoutenable`. ⚠️ SANS CETTE ÉTAPE, LA RÈGLE R3 N'A AUCUN PROPRIÉTAIRE.** La Tâche 4 ter fabrique la fonction mais délègue ici la moitié caméra — « la caméra ne descend pas plus vite que le zoom soutenable » — et cette tâche passe **avant** elle. **Posez le point d'appel maintenant, sur le chemin de descente, et laissez-le inerte** (`zoomSoutenable` renvoyant le zoom demandé) jusqu'à ce que la 4 ter le remplisse. Sinon personne ne le pose jamais.
-- [ ] **Étape 7 — mutation** : réintroduire un saut doit tuer le test de monotonie.
-- [ ] **Étape 8 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [ ] **Étape 2** — le lancer, vérifier qu'il échoue, et **relever où** : la liste des sauts est la liste du travail des Tâches 1b et 1c.
+- [ ] **Étape 3 — LA CLÔTURE DU §0**, puis commit. ⚠️ **Cette sous-tâche ne corrige RIEN, et c'est voulu : sans instrument, les deux suivantes ne sauraient pas si elles ont réussi.**
 
-### Tâche 2 bis : l'escalier de surface ⚠️ SEPT DES NEUF RIDEAUX BLANCS
+#### Tâche 1b — le changement de repère
+
+- [ ] **Étape 1 — geste par geste.** `up`, `near`/`far`, pose, `minDistance` : chacun devient une fonction continue de l'altitude, ou disparaît.
+- [ ] **Étape 2 — la frontière `globe.js` / `terrain.js`.** ⚠️ **C'est le geste le plus lourd : aujourd'hui l'un s'éteint quand l'autre s'allume.** Dites ce qui les fait coexister — recouvrement, fondu, ou remise du globe au rang de fond lointain.
+- [ ] **Étape 3 — retirer le plancher orbital `modes.js:326`**, et unifier les **quatre** sites de `minDistance` (`:326`, `:420`, `:639`, `main.js:1215`) en une seule dérivation.
+- [ ] **Étape 4 — mutation** : réintroduire un saut doit tuer le test de monotonie de la Tâche 1a.
+- [ ] **Étape 5 — LA CLÔTURE DU §0**, puis commit.
+
+#### Tâche 1c — les mécanismes qui figent l'entrée
+
+⚠️ **Aucune version de ce plan ne les nommait, et ils gèlent la caméra plus longtemps que les rideaux.**
+
+- [ ] **Étape 1 — `this.busy`** (`modes.js:138`, `:203`, `:242`, `:296`, `:308`, `:386`… **dix-huit sites**). Tant qu'il est vrai, **la molette, `flyTo`, les steppers et la caméra sont tous gelés**. ⚠️ **C'est lui qui produit l'« entrée morte » — et elle survit au retrait de tous les rideaux : 7,88 s sur 30 s, mesuré.**
+- [ ] **Étape 2 — `_loadDive` / `diveTo`** — le clic-plongée, **un second chemin de plongée entier**, distinct de `_dive`, avec un recul de caméra de **×3,32 à ×24,25** (le maximum se dérive du dépôt : `surfaceMaxDistance 150 × 0,97 / minDistance 6`).
+- [ ] **Étape 3 — `enterOrbit`** (`modes.js:296`) — la remontée. ⚠️ **Mesuré : elle est PIRE que la descente — 11 rideaux contre 8, 35,3 % d'écran blanc, 70,8 % d'entrée morte.**
+- [ ] **Étape 4 — sortir `dem.meanM` de `surfaceCamAltMeters`** (`main.js:3594-3599`, règle R1), ou dire pourquoi il peut rester.
+- [ ] **Étape 5 — poser le point d'appel de `zoomSoutenable`. ⚠️ SANS CETTE ÉTAPE, LA RÈGLE R3 N'A AUCUN PROPRIÉTAIRE.** La Tâche 4 ter fabrique la fonction mais délègue ici la moitié caméra, et cette tâche passe **avant** elle. **Posez le point d'appel sur le chemin de descente et laissez-le inerte** (`zoomSoutenable` renvoyant le zoom demandé) jusqu'à ce que la 4 ter le remplisse. Sinon personne ne le pose jamais.
+- [ ] **Étape 6 — mutation** : remettre un gel d'entrée doit tuer le test.
+- [ ] **Étape 7 — LA CLÔTURE DU §0**, puis commit.
+
+
+### Tâche 2 bis : l'escalier de surface ⚠️ 17 RIDEAUX SUR 25
 
 **Fichiers :** modifier `src/modes.js` (`_rescale` `:452`, `_refine` `:436`, `_coarsen` `:445`) · tester `test/escalier-surface.test.js` (créer)
 
@@ -347,26 +362,38 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 - [ ] **Étape 4 — mutation** : remettre la téléportation doit tuer le test.
 - [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
-### Tâche 2 : retirer le voile de chargement ⚠️ EN DERNIER
+### Tâche 2 : retirer la carte `#loading` ⚠️ C'EST LE POP-UP QU'ADRIEN NOMME
 
-**Fichiers :** modifier `src/main.js` (`showLoading` `:908`, `hideLoading` `:912`, `LOADING_MIN_MS` `:898`, l'appel de `fetchAndBuildDem` `:3182`) · modifier `src/style.css` (`#loading` `:19-`, **et le `filter: blur(16px)` de `:186`**) · modifier `src/modes.js` (`_whiteout` `:282`, sa création `:271-273`, ses **quatre** appelants `:312`, `:408`, `:468`, `:628`) · tester `test/voile.test.js` (créer)
+**Fichiers :** modifier `src/main.js` (`showLoading` `:908`, `hideLoading` `:912`, `LOADING_MIN_MS` `:898`, l'appel `:3182`, **et `:937` — voir le piège ci-dessous**) · modifier `src/style.css` (`#loading` `:19-`, `body.ld-warm #loading-bg` `:168`, **et le `filter: blur(16px)` de `:182`**) · modifier `index.html` (le balisage, le peintre en ligne, `__ldStart`) · lire `src/ui/loading-hints.js` et `src/ui/hub.js` · tester `test/voile-loading.test.js` (créer)
 
-⚠️ **IL Y A DEUX RIDEAUX, PAS UN — ET C'EST LE SECOND QU'ADRIEN NOMME.**
+⚠️ **CE PLAN A CRU QU'IL Y AVAIT TROIS FICHIERS : IL Y EN A SIX.** Cherchez `#loading` partout avant de commencer.
 
-1. **`#loading`** — la carte de marque centrée (nom, baseline, orbe qui tourne), `#loading-bg` plein écran, **`LOADING_MIN_MS = 2000` : deux secondes minimum au premier affichage**. `showLoading()` est appelé **à chaque cran de zoom** par le chemin `loadSurface → fetchAndBuildDem`. ⚠️ **Et `style.css:186` floute l'application entière à 16 px pendant qu'il est là — À L'ARRÊT. C'est le contraire exact de la décision 13**, qui n'accepte le flou que **pendant** le mouvement.
-2. **`.whiteout`** — le fondu blanc de `Modes`, 480 ms + 480 ms.
+**Ce que c'est :** une carte de marque centrée — nom, baseline, orbe qui tourne — avec `#loading-bg` plein écran et **`LOADING_MIN_MS = 2000`, deux secondes minimum au premier affichage**. `showLoading()` est appelé **à chaque cran de zoom** par `loadSurface → fetchAndBuildDem` (`main.js:3182`).
 
-⚠️ **UNE RÉVISION DE CE PLAN A FAIT SORTIR `#loading` DU DOCUMENT.** Elle avait relevé, à juste titre, que trois repères de `main.js` étaient des lignes de commentaire — et elle a **remplacé** la liste au lieu de l'**élargir**. Les numéros étaient faux, la thèse était juste. **Les deux rideaux sont dans cette tâche.**
+⚠️ **ET ELLE FLOUTE L'APPLICATION ENTIÈRE À 16 px PENDANT QU'ELLE EST LÀ — À L'ARRÊT** (`style.css:182`). **C'est le contraire exact de la décision 13**, qui n'accepte le flou que **pendant** le mouvement.
 
-⚠️ **UNE PREMIÈRE VERSION DE CETTE TÂCHE DÉSIGNAIT TROIS LIGNES DE COMMENTAIRE** — `main.js:927`, `:3423`, `:3447`, trouvées en cherchant le mot « voile ». **Le rideau est fabriqué par `Modes` lui-même** : `_buildDom` crée le `div.whiteout` (`modes.js:271-273`), **il ne passe pas par le constructeur**, donc aucun `grep` de `main.js` ne pouvait le voir. `style.css:535-547` : `position: fixed; inset: 0; background: #fff`. `_whiteout` = **480 ms opaque + 480 ms de retour**.
+⚠️ **PIÈGE DE RÉGRESSION, ET IL N'EST PROTÉGÉ PAR AUCUN TEST :** `hideLoading()` est le **seul endroit qui pose `ld-warm`** (`main.js:937`). Le supprimer sans le remplacer emporte tout le comportement de chargement à chaud. **Et aucun test ne charge `main.js`** — le filet n'existe pas.
 
-⚠️ **C'est la deuxième fois dans ce plan qu'une tâche accuse un fichier sans l'ouvrir.**
+⚠️ **NE FAITES PAS CETTE TÂCHE EN PREMIER.** La carte masque une attente réelle. L'ôter avant que les Tâches 1, 2 bis et 4 aient supprimé l'attente **ne supprime pas le pop-up : il montre le trou qu'il cachait.**
 
-⚠️ **NE LE RETIREZ PAS EN PREMIER.** Le voile masque une attente réelle **et un changement de repère**. L'ôter avant les Tâches 1, 2 bis et 4 **ne supprime pas le pop-up : il montre le saut qu'il cachait.**
+- [ ] **Étape 1 — le test qui échoue.** ⚠️ **Pas de test d'exécution** : aucun test n'importe `main.js`. **Assertion de texte source**, comme les onze fichiers de ce dépôt qui le font déjà : *`showLoading` n'est plus appelé sur le chemin du zoom*. ⚠️ **Et une seconde assertion sur le flou** : `style.css` ne floute plus `#app` à l'arrêt.
+- [ ] **Étape 2** — le lancer sur le code d'aujourd'hui, vérifier qu'il échoue **sur les deux assertions**.
+- [ ] **Étape 3 — retirer l'appel du chemin de zoom**, en gardant le premier affichage au démarrage — c'est le seul légitime.
+- [ ] **Étape 4 — reloger `ld-warm`** ailleurs que dans `hideLoading`, ou dire pourquoi il disparaît avec.
+- [ ] **Étape 5 — mutation** : remettre l'appel doit tuer le test.
+- [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
-- [ ] **Étape 1 — le test qui échoue.** ⚠️ **Pas de test d'exécution** : aucun test n'importe `main.js` ni n'instancie `Modes`. Employez l'**assertion de texte source**, comme les onze fichiers qui le font déjà : *aucun appel à `_whiteout` ne subsiste sur le chemin du zoom continu*.
+### Tâche 2 ter : retirer le fondu blanc `.whiteout` ⚠️ EN DERNIER
+
+**Fichiers :** modifier `src/modes.js` (`_whiteout` `:282`, sa création `:271-273`, ses **quatre** appelants `:312`, `:408`, `:468`, `:628`) · modifier `src/style.css` (`:535-547`) · tester `test/voile-whiteout.test.js` (créer)
+
+⚠️ **UNE PREMIÈRE VERSION DE CETTE TÂCHE DÉSIGNAIT TROIS LIGNES DE COMMENTAIRE** — `main.js:927`, `:3423`, `:3447`, trouvées en cherchant le mot « voile ». **Le rideau est fabriqué par `Modes` lui-même** : `_buildDom` crée le `div.whiteout` (`modes.js:271-273`) **sans passer par le constructeur**, donc aucun `grep` de `main.js` ne pouvait le voir. `_whiteout` = **480 ms opaque + 480 ms de retour**.
+
+⚠️ **C'EST LA DERNIÈRE TÂCHE DU BLOC.** Le fondu masque le changement de repère de la Tâche 1 et la téléportation de la Tâche 2 bis. **Tant qu'elles ne sont pas faites, l'ôter rend le saut visible au lieu de le supprimer.**
+
+- [ ] **Étape 1 — le test qui échoue** : **assertion de texte source** — aucun appel à `_whiteout` ne subsiste sur le chemin du zoom continu.
 - [ ] **Étape 2** — le lancer sur le code d'aujourd'hui, vérifier qu'il échoue.
-- [ ] **Étape 3 — trancher les quatre appelants un par un.** Lesquels disparaissent, lequel devient l'indicateur discret de la descente bornée. ⚠️ **`:408` est celui de `_dive` et `:468` celui de `_rescale` : ils ne peuvent pas partir avant que les Tâches 1 et 2 bis aient fait leur travail.**
+- [ ] **Étape 3 — trancher les quatre appelants un par un.** ⚠️ **`:408` est celui de `_dive` et `:468` celui de `_rescale`** : ils ne peuvent partir qu'après les Tâches 1 et 2 bis. ⚠️ **Et l'un d'eux devient peut-être « l'indicateur discret » de la descente bornée — c'est la PREMIÈRE QUESTION DU §9, à laquelle Adrien n'a pas répondu.** Si la réponse manque, **posez une transition neutre et signalez-le**.
 - [ ] **Étape 4 — mutation** : remettre un appel doit tuer le test.
 - [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
@@ -715,7 +742,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 ⚠️ **RAPPEL DE LA DÉCISION 13, PARCE QUE C'EST ICI QU'ON EST TENTÉ DE L'ENFREINDRE.** Baisser à N=128 pendant le mouvement **rend l'image plus grossière pendant qu'on bouge**. C'est voulu, Adrien l'a validé, et c'est le contrat. **Ne compensez pas** en forçant N=256 dès que « ça a l'air lent » : vous reprendriez les 8,3 ms et les 12 % de dépassement que cette tâche existe pour éviter.
 
-- [ ] **Étape 1** — test : en mouvement `resolutionPour` rend **384**, au repos **768** (⚠️ **pas 128 et 256, trois fois sous la production**). ⚠️ **ET LA SIGNATURE `resolutionPour({ enMouvement })` EST INSUFFISANTE : elle ne reçoit pas `params.resolution`, donc elle NE PEUT PAS le respecter** — alors que `resDeFinesse` porte en toutes lettres « ne pas servir `params.resolution` tel quel » et qu'un utilisateur qui choisit 256 doit obtenir 256. **La signature est `resolutionPour({ enMouvement, resVoulue })`.** Une dérive d'emprise sous le seuil ne déclenche **aucune** reconstruction. ⚠️ **Et l'invariant est un critère de cette étape : socle et maillage à la même résolution** (`plinth.js:865-879`).
+- [ ] **Étape 1** — test : `resolutionPour({ enMouvement, resVoulue })` rend **une résolution de mouvement strictement inférieure à celle de repos**, et **respecte `resVoulue`**. ⚠️ **N'ÉCRIVEZ PAS « rend 384 et 768 » : mesuré contre `resDeFinesse`, c'est FAUX à `resVoulue` 256 et 384** — le module existant plafonne au choix de l'utilisateur, et `resDeFinesse` porte en toutes lettres « ne pas servir `params.resolution` tel quel ». **Les 384 et 768 sont les valeurs par DÉFAUT (`RES_FENETRE_CONTINUE`, `RES_REPOS_MAX`), pas un contrat.** Une dérive d'emprise sous le seuil ne déclenche **aucune** reconstruction. ⚠️ **Et l invariant est un critère de cette étape : socle et maillage à la même résolution** (`plinth.js:865-879`).
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
 - [ ] **Étape 3** — implémenter.
 
