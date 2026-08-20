@@ -174,6 +174,7 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 **Interfaces produites :**
 - `demanderEmprise(flux, { emprise, zoom })` → `void`
 - `tuilesPretes(flux, emprise)` → `Map`
+- `zoomEffectif(flux, emprise)` → `number` — le zoom réellement COUVERT, distinct du zoom demandé
 - `PLAFOND_EN_VOL` → nombre maximal de requêtes simultanées
 
 **Le défaut, mesuré par l'attaque.** Un panoramique latéral à 4 km d'altitude, 90° de balayage : **2 943 tuiles bloquées en `loading`**, crédit à −2 551, **zoom effectif figé à z2**, **aucune récupération après 30 s d'immobilité**. Une traversée suffit pour que le vol suivant reste à z2.
@@ -187,6 +188,8 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 
 - [ ] **Étape 1** — écrire le test qui échoue : **un panoramique latéral à basse altitude**, pas une descente. ⚠️ C'est le geste le plus banal de l'application, et celui que le vol de référence ne pouvait pas voir : dans une descente lisse, deux images consécutives demandent presque les mêmes tuiles. Assertion : après 90° de balayage puis 5 s d'immobilité, le nombre de tuiles `loading` revient sous `PLAFOND_EN_VOL` et le zoom effectif rejoint le zoom demandé.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue (zoom figé, file saturée).
+
+⚠️ **LE HARNAIS DU DÉPÔT FERAIT PASSER CE TEST SUR DU CODE CASSÉ.** `test/globe-reseau.test.js:83-93` résout `fetch` en `setTimeout(0)` et rend la main entre les images : le compte de tuiles `loading` **retombe alors tout seul**, sans plafond, sans annulation, sans éviction. L'étape 2 échouerait à échouer. **Il faut un bouchon de `fetch` à résolution MANUELLE** — les requêtes ne se résolvent que lorsque le test le décide — sinon on ne mesure que l'ordonnanceur de node.
 - [ ] **Étape 3** — implémenter les trois corrections.
 - [ ] **Étape 4** — vérifier par mutation : retirer le plafond, puis l'annulation, puis l'éviction des `loading` — **chacune doit tuer un test**.
 - [ ] **Étape 5** — mesurer le battement : nombre de décodages complets sur un vol de référence. ⚠️ L'attaque en a compté **10 829 pour un cache de 420** ; donner le chiffre après.
@@ -210,6 +213,34 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 - [ ] **Étape 4** — mutation : égaliser les deux seuils tue le test d'oscillation.
 - [ ] **Étape 5** — `npm test`, audit, commit.
 
+### Tâche 4 alpha : rebrancher le globe sur la vraie source de relief ⚠️ AVANT LA TÂCHE 4
+
+**Fichiers :** modifier `src/globe.js` (`TILE_URL`) · tester `test/globe-source.test.js`
+
+⚠️ **C'EST LA FAILLE LA PLUS GRAVE DU PLAN, ET ELLE EST SILENCIEUSE.** Trouvée par l'attaque du 2026-08-20, vérifiée à la main.
+
+`src/globe.js:15` tape **en dur** `elevation-tiles-prod/terrarium` — et `globe.js` **n'importe rien** de `src/dem-source.js` (vérifié : zéro occurrence). Or ce module est la source réelle du produit :
+
+| | source du globe aujourd'hui | source du produit |
+|---|---|---|
+| jeu | **AWS terrarium** | **Mapterhorn** (`DEFAULT_SOURCE_ID`) |
+| résolution | **256 px** | **512 px WebP** |
+| contenu | figé à **novembre 2017** | agrège IGN RGE ALTI, swissALTI3D… |
+| zoom maximal | **15** | **17** |
+
+Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-delà de 6,6 m/pixel ».
+
+**Donc promouvoir ce quadtree en « seule source de relief » sans le rebrancher dégraderait toute la matière première du produit — et rendrait le z17 annoncé inatteignable — sans lever la moindre erreur.** Un problème de flux se voit et se mesure ; **une matière première dégradée se livre sans que personne ne s'en aperçoive.**
+
+- [ ] **Étape 1** — test : l'URL construite par le globe passe par `DEM_SOURCES[DEFAULT_SOURCE_ID]`, et la profondeur maximale du globe **n'excède jamais** le `maxZoom` de la source active.
+- [ ] **Étape 2** — le lancer, vérifier qu'il échoue (aujourd'hui l'URL est en dur).
+- [ ] **Étape 3** — rebrancher sur `dem-source.js`, en gardant le repli et la sonde.
+- [ ] **Étape 4** — ⚠️ **vérifier que le globe orbital reste identique** : c'est une fonction en production, et le passage de 256 à 512 px change la densité des tuiles. Mesurer la mémoire et le nombre de requêtes avant/après.
+- [ ] **Étape 5** — mutation : revenir à l'URL en dur doit tuer le test.
+- [ ] **Étape 6** — `npm test`, `node --check`, `npx vite build`, audit, commit.
+
+**Si cette tâche est jugée trop lourde**, l'alternative honnête est de **plafonner `MAX_Z` à 13 et de l'écrire** — mais alors la décision 1 (« de l'orbite au sol ») devient fausse, et il faut le dire à Adrien.
+
 ### Tâche 4 : descendre le globe sous z11
 
 **Fichiers :** modifier `src/globe.js` (`MAX_Z`, `CACHE_MAX`) · tester `test/globe-reseau.test.js`, `test/globe-eviction.test.js`
@@ -219,6 +250,8 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 ⚠️ **Vérifier jusqu'où les tuiles existent réellement** chez AWS terrarium et mapterhorn. Descendre au-delà ne produit pas une erreur : ça produit des tuiles vides, donc un terrain plat, **en silence**. Mesuré le 2026-08-08 : z17 à Chamonix chez Mapterhorn, z15 pour le repli AWS.
 
 ⚠️ **`CACHE_MAX = 420` ne doit pas devenir un autre nombre : il doit devenir une FORMULE.** MapLibre tient `niveaux_conservés × tuiles_visibles_dans_le_cadre`, cinq niveaux par défaut. La limite suit alors le cadrage au lieu d'être un chiffre à re-régler.
+
+⚠️ **ET LE CRÉDIT DE RAFFINEMENT DOIT SUIVRE LA MÊME FORMULE, AVEC UN PLANCHER.** `globe.js:757-763` calcule `_credit = CACHE_MAX − tiles.size + marge`, et le commentaire du dépôt dit déjà qu'un crédit nul **« GÈLERAIT le globe »**. Une formule qui suit le cadrage rend une valeur **plus petite sur un cadrage serré** — c'est-à-dire exactement en mode socle : crédit négatif, descente arrêtée. `TILE_MEMO_MAX = 128` est lui aussi calibré contre 420. **Un test « resserrement brutal du cadrage » doit prouver que le raffinement ne gèle pas.**
 
 ⚠️ **L'ordre d'éviction compte autant que la taille.** 3DTilesRendererJS a corrigé trois bugs d'éviction en cinq mois, dont un où « le LRU pouvait faire recharger les tuiles en boucle », et a dû passer à **« le plus profond d'abord, puis le moins récent »**.
 
@@ -278,7 +311,13 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 **Fichiers :** créer `src/monde/fenetre-bornee.js` · tester `test/fenetre-bornee.test.js`
 
 **Interfaces produites :**
-- `construireFenetre({ emprise, n })` → `{ geometrie, indices, boiteEnglobante }`
+- `construireFenetre({ emprise, n, rayonCoin, exposantCoin, profondeurDalle })` → `{ geometrie, indices, boiteEnglobante }`
+
+⚠️ **LE SOCLE N'EST PAS UNE BOÎTE, ET UNE VERSION DE CE PLAN L'AVAIT RÉDUIT À ÇA.** `src/plinth.js` porte un congé à normales analytiques, des **coins en superellipse** (`slabCorner` / `slabCornerSmoothing`, réglés par défaut dans `main.js:566`) et un liner. Les oublier ne casserait pas le maillage : ça donnerait **un pavé droit à la place de l'objet ShibuMap**.
+
+⚠️ **ET `ocean.js` DOIT ÊTRE INSCRIT DANS CETTE TÂCHE.** Il recalcule `uCornerR`, `uCornerN` et `buildRimGeometry` **sur les mêmes constantes** : si la fenêtre change de forme sans lui, la mer cesse d'épouser le socle. C'est la famille de défauts déjà rencontrée deux fois sur ce dépôt — un réglage écrit d'un côté, jamais transmis à l'autre.
+
+⚠️ **Le sort de `plinth.js` est à trancher explicitement** : modifié pour accepter une emprise variable, ou remplacé. Il n'est aujourd'hui dans aucune des trois listes du §5, et c'est un oubli.
 - `majHauteurs(fenetre, fluxTerrain)` → `void`
 
 ⚠️ **Par RÉÉCHANTILLONNAGE, jamais par découpe du maillage du quadtree.** C'est la décision d'architecture du §4.
@@ -286,7 +325,9 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 - [ ] **Étape 1** — test : une fenêtre construite puis auditée par `auditerSolide` est fermée, orientée, sans dégénéré ni NaN.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
 - [ ] **Étape 3** — implémenter : grille régulière propre à la fenêtre, hauteurs cherchées dans le cache en coordonnées de pixel global, parois dont les sommets hauts **sont** les sommets de bord, dalle en éventail sur le même anneau bas.
-- [ ] **Étape 4** — test : sur cent emprises tirées au hasard, dont l'antiméridien et au-delà de 85° de latitude, l'audit passe **cent fois**.
+- [ ] **Étape 4** — test : sur cent emprises tirées au hasard, dont l'antiméridien et au-delà de 85° de latitude, l'audit passe **cent fois** — ⚠️ **APRÈS `majHauteurs`, sur un flux bouchonné à relief CONNU.**
+
+⚠️ **SANS CETTE PRÉCISION, LE TEST AUDITE CENT PAVÉS DROITS.** `construireFenetre` seule rend une boîte à hauteurs nulles, fermée et orientée **par construction** : elle passerait l'audit cent fois sans que le rééchantillonnage — la raison d'être de la tâche — soit touché par une seule assertion. **Deux assertions qui mordent** : au moins un sommet intérieur diffère du bord, et la hauteur relevée en un point connu vaut celle du relief bouchonné.
 - [ ] **Étape 5** — mutation : inverser l'enroulement de la dalle doit tuer le test d'orientation.
 - [ ] **Étape 6** — `npm test`, `node --check`, `npx vite build`, audit, commit.
 
