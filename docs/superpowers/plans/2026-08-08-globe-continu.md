@@ -56,6 +56,20 @@ Elles viennent d'un prototype jetable et de son attaque, **tous deux hors dépô
 
 ---
 
+### ⚠️ LA COMPÉTENCE `/threejs-optimisation` EST OBLIGATOIRE SUR CE PLAN
+
+Elle a été écrite **à partir de ce dépôt**, en observant ce que deux agents ratent quand ils auditent `globe.js` sans aide. Ses cinq sections ne sont pas des généralités : chacune correspond à une erreur réellement commise dans ce plan.
+
+| section | ce qu'elle attrape | où elle mord dans ce plan |
+|---|---|---|
+| §1 — l'audit s'arrête au fichier | `globe.js` a réinventé sa source au lieu d'utiliser `dem-source.js` | **Tâche 4 alpha** — trouvée en trente secondes de `grep`, jamais par la lecture ligne à ligne |
+| §2 — ce qui rend une limite inatteignable | `MAX_Z = 11` est du code mort ; le point fixe `capacité − occupé` | **Tâche 4**, causes 1 et 3 — et l'obligation d'écrire le champ de vision |
+| §3 — ce qui ment quand on mesure | sonde posée après la fonction, chronomètre qui exclut le téléversement, **suite verte qui verrouille le défaut** | **§0**, et l'Étape 2 de la Tâche 4 |
+| §4 — le float32 à l'échelle planétaire | le pas représentable s'épuise avant la donnée | déjà corrigé (`150f817`) — sert ici à **vérifier**, pas à supposer |
+| §5 — le tri spatial avant le fin | l'horizon en dur, l'absence de frustum, **et l'ordre des correctifs** | **Tâche 4**, étapes 3-5 — c'est elle qui interdit d'ouvrir le crédit en premier |
+
+⚠️ **Le résultat mesuré de la phase verte :** sans la compétence, l'audit conclut que le quadtree « est propre et bien commenté ». Avec elle, il découvre qu'**il ne fait pas son travail**. Elle a été décisive sur trois trouvailles sur cinq, et sans effet sur les autres — **c'est exactement ce qu'elle annonce**, et il ne faut pas en attendre plus.
+
 ## 1. Les treize décisions validées
 
 Tranchées avec Adrien. Un agent que l'une d'elles gêne le **signale** ; il ne la contourne pas.
@@ -207,14 +221,144 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 | `src/monde/seuil-socle.js` **(créer)** | naissance et mort du socle, sur une **altitude de caméra** |
 | `src/plinth.js` **(modifier)** | accepter une emprise variable ; il garde le congé, les coins en superellipse et le liner |
 | `src/ocean.js` **(modifier)** | il recalcule `uCornerR`, `uCornerN`, `buildRimGeometry` sur les mêmes constantes — sans lui, la mer cesse d'épouser le socle |
-| `src/globe.js` **(modifier)** | descendre sous z11, cache en formule, rebranchement sur la vraie source |
+| `src/monde/descente-bornee.js` **(créer)** | borner la descente au débit réellement observé — règle R3 |
+| `src/flags.js` **(modifier)** | le drapeau qui isole le globe continu du globe orbital, **qui est en production** |
+| `src/globe.js` **(modifier)** | horizon géométrique, frustum, crédit ; puis rebranchement sur la vraie source |
 | `src/escalier-zoom.js` **(retirer en fin de parcours)** | les paliers n'existent plus |
 
 ---
 
 ## 6. PHASE 1 — Le flux et la caméra
 
-### Tâche 4 bis : LE FLUX QUI NE SE COINCE PAS ⚠️ EN PREMIER
+### Tâche 4 : rendre `MAX_Z` ATTEIGNABLE — et non le descendre ⚠️ EN PREMIER
+
+**Fichiers :** modifier `src/globe.js` (`_traverse`, seuil d'horizon, crédit) · modifier `test/globe-eviction.test.js` (déverrouiller `:204` et `:208`) · modifier `src/flags.js` (le drapeau) — ⚠️ **aucune des trois corrections ne touche `MAX_Z` ni `CACHE_MAX`**, contrairement à ce qu'annonçait ce plan.
+
+⚠️ **LA PRÉMISSE DE CETTE TÂCHE ÉTAIT FAUSSE.** Ce plan écrivait « le quadtree s'arrête à z11 ». Il n'y arrive **jamais** : mesuré, il plafonne à **z7**, et `MAX_Z = 11` est du code mort. Monter une constante qui n'est pas atteinte ne produit rien.
+
+⚠️ **ET LA PREMIÈRE VERSION DE CETTE RÉÉCRITURE ÉTAIT FAUSSE AUSSI** — elle annonçait z6, cinq niveaux débloqués, et proposait un plancher de crédit qui **aggrave** le défaut. Un validateur a rejoué la mesure. **Les chiffres ci-dessous sont les siens, pas ceux du premier audit.**
+
+#### Les trois causes — vérifiées dans le code, deux fois
+
+1. **Le crédit de raffinement est un point fixe arithmétique** (`globe.js:759`). `_credit = CACHE_MAX − tiles.size + marge` : à saturation `marge` s'annule **structurellement**, donc le crédit vaut 0, donc rien n'est créé, donc la taille ne bouge plus. ⚠️ Le commentaire des lignes 747-752 affirme que `marge` écarte ce gel — et qu'un crédit fondé sur la seule place libre « GÈLERAIT le globe ». **Il ne fait que le retarder.**
+2. **Le seuil d'horizon est une constante** (`globe.js:770`) : `dot < −0.35` (110°) au lieu du vrai horizon géométrique. À basse altitude, le code parcourt une calotte de plusieurs ordres de grandeur trop large.
+3. **Aucun test de frustum dans `_traverse`** — zéro occurrence dans le fichier.
+
+#### ⚠️ LE PLANCHER DE CRÉDIT — À MESURER, ET PEUT-ÊTRE À NE PAS TOUCHER DU TOUT
+
+**Le fait qui décide de cette tâche, mesuré au champ de vision de production (30°) :** les deux premières corrections — **horizon et frustum — suffisent à atteindre z11 sans toucher au crédit**. Relevé : **z11, 124 tuiles dessinées, zéro requête au repos.**
+
+⚠️ **Le crédit est donc une étape facultative, à n'ouvrir que si la mesure la réclame.** Et si vous l'ouvrez :
+
+- Ce plan avait écrit **64**. Mesuré : **z3, 17 tuiles, cache débordé à 571, et six requêtes par image caméra immobile, sans fin** — précisément le régime que `globe.js:743-752` documente comme déjà éliminé.
+- Une réécriture ultérieure a écrit **16**. Ce n'est pas mieux fondé : c'est le bord d'une **falaise mesurée entre 16 et 32**. Une valeur posée au bord d'une falaise est une valeur non sourcée.
+- **Protocole :** balayer le plancher de 8 à 64 par doublements, au fov de production, en relevant à chaque fois zoom effectif, tuiles dessinées, taille de cache **et requêtes par image caméra immobile**. Retenir une valeur qui laisse une marge des deux côtés de la falaise, ou **conclure qu'il ne faut pas y toucher**.
+
+⚠️ **C'est l'illustration exacte de la règle du §0, deux fois de suite.** 64 puis 16 ont été posés sans mesure, dans la tâche écrite juste **après** avoir interdit les chiffres non sourcés.
+
+#### ⚠️ Ce que la mesure ne dit PAS, et qu'il faut établir
+
+- **Le champ de vision de production est 30°.** Les deux premiers audits ont mesuré à **55°**, et c'est ce qui explique l'essentiel de leurs désaccords. ⚠️ **Toute mesure de cette tâche se fait au fov du produit, et l'écrit.**
+- **Les chiffres reproductibles au fov 30 sont : z7 à la base** (pas z6 — et **z9 sur un globe neuf sous 200 km**), **124 tuiles dessinées après correction** (pas 74), et **2 à 4 % des tuiles dessinées effectivement dans le champ** (pas les 10-20 % relevés au fov 55).
+- ⚠️ **L'horizon SEUL ne débloque rien** : z7 → z7. Il ne devient utile qu'accompagné du frustum, **qui fait tout le travail**. Un audit lui a attribué un niveau de zoom : c'est faux.
+- **Le même relevé donne un cache de 824** — c'est-à-dire **le double de `CACHE_MAX`**. ⚠️ Or l'étape sur le cache ci-dessous propose `5 × visibles` ≈ 370, ce qui **défait** ce que les trois causes viennent de débloquer. **Cette contradiction se tranche par la mesure, pas par un arbitrage d'écriture.**
+- **La formule d'horizon a besoin de sa marge de corde.** Transcrite nue, elle écrête au limbe et **crée des trous**. Et les racines `z2` doivent en être exemptées.
+
+#### ⚠️ L'ORDRE DES ÉTAPES EST LE SUJET — mesuré, pas déduit
+
+**Le correctif de crédit appliqué SEUL empire tout** : mesuré à **5 676 requêtes** (×14) et un zoom qui **retombe à 2**. Il ne devient bénéfique qu'une fois la calotte réduite. Le tri spatial d'abord, le budget ensuite. **Ne réordonnez pas ces étapes.**
+
+⚠️ **Et les tests verrouillent le défaut** — `test/globe-eviction.test.js:204` et `:208` : `zoomFinal >= 6` et `visiblesFinal > 200`, avec un commentaire qui explique que z6 est une limite de budget. Le plafond a été compris, puis **inscrit comme contrat**. Pire : `visiblesFinal > 200` **fait échouer le bon correctif**, qui descend à 17-30 tuiles. Les 17 tests passent pendant que le globe est gelé. **Si vous ne déverrouillez pas ces assertions d'abord, le rouge vous fera annuler la correction.**
+
+#### Les étapes
+
+- [ ] **Étape 0 — POSER LE DRAPEAU** dans `src/flags.js` (le fichier existe). ⚠️ Sans lui, tout ce qui suit s'applique au globe orbital, **qui est en production**.
+- [ ] **Étape 1 — établir la base, et l'écrire.** Champ de vision fixé, zoom effectif, tuiles dessinées, taille de cache, requêtes au repos — à six altitudes. **C'est la référence contre laquelle tout le reste se compare.** ⚠️ Deux relevés antérieurs se contredisent (z6 contre z7) : le vôtre fait foi, et il doit être reproductible.
+- [ ] **Étape 2 — DÉVERROUILLER LES TESTS, avant toute correction.** Les deux assertions de `globe-eviction.test.js` décrivent le défaut comme un contrat. Les réécrire pour qu'elles disent ce qu'on veut vraiment : **la couverture de l'écran ne se dégrade pas** — pas « plus de 200 tuiles dessinées », qui est la mesure du gaspillage, pas de la qualité. ⚠️ **Cette étape ne corrige rien et doit pourtant passer en premier.**
+- [ ] **Étape 3 — l'horizon géométrique**, avec sa marge de corde et l'exemption des racines `z2`. `globe.js:770` : `dot < −0.35` est 110,5° en dur, au lieu de `R/|camPos|` — **2,87° à 8 km**, soit une calotte jusqu'à **×1 076 trop large**. ⚠️ **Seul, il ne débloque AUCUN niveau de zoom** — mesuré z7 → z7. Il réduit la calotte parcourue, ce qui rend l'étape 4 possible ; il ne se juge pas sur le zoom. Test : à basse altitude, le nombre de tuiles parcourues chute d'un ordre de grandeur **sans qu'aucune tuile visible ne disparaisse**. ⚠️ La seconde moitié est celle qui attrape l'écrêtage au limbe.
+- [ ] **Étape 4 — le test de frustum** dans `_traverse` (zéro occurrence aujourd'hui). ⚠️ **C'EST CETTE ÉTAPE QUI FAIT TOUT LE TRAVAIL** : avec l'horizon, elle porte le zoom de **7 à 11** et les tuiles dessinées à **124**, avec **zéro requête au repos**. Au fov de production, **2 à 4 %** seulement des tuiles dessinées sont dans le champ. ⚠️ Les tuiles hors champ ne coûtent pas des appels de dessin — three les élimine au rendu — **elles consomment les 420 places du cache**, et c'est ce qui affame le crédit de l'étape 5. **Les deux défauts n'en font qu'un.**
+- [ ] **Étape 5 — le point fixe du crédit, MAINTENANT et pas avant.** `globe.js:759`, `_credit = CACHE_MAX − tiles.size + marge` : le prédicat de `marge` (l. 757) exige une tuile prête **ni traversée ni préparée** — ensemble **vide par construction**, puisque tout ce qui n'est ni l'un ni l'autre a déjà été évincé. `marge` vaut donc **0 dès la première image**, et **59 raffinements sont refusés par image, pour toujours**. ⚠️ Le commentaire des lignes 748-756 affirme le contraire, de façon convaincante. Si — et seulement si — l'étape 1 montre que les étapes 3 et 4 n'ont pas suffi : fondez le crédit sur le **récupérable réel**, avec le plancher **mesuré par le protocole ci-dessus**. ⚠️ **Au fov de production, elles ont suffi. Cette étape a de bonnes chances de ne pas devoir être ouverte.**
+- [ ] **Étape 6 — rendre évinçables les tuiles bloquées.** ⚠️ **Sans retourner l'ordre d'éviction.** Ce plan a écrit trois fois « profondeur d'abord, récence ensuite » : `globe.js` fait délibérément l'inverse — `a.lastUsed - b.lastUsed || parProfondeur(a, b)`, la **récence au rang 1**, la profondeur au **rang 2 seulement**, avec vingt lignes de commentaire et un test dédié vert (« à ancienneté égale, l'éviction sacrifie la PROFONDE et garde l'ancêtre »). **C'est correct.** Une tuile en `error` ou en `loading` dont la requête ne revient jamais **occupe une place du budget définitivement, sans reprise possible**. C'est le même point fixe, par une autre porte.
+- [ ] **Étape 7 — trancher le cache**, avec les chiffres de l'étape 1 et non par principe. ⚠️ Si les corrections réclament 824, une formule qui rend 370 est une régression déguisée en optimisation. **Mesurez avant de choisir.**
+- [ ] **Étape 8 — la mémoire retenue pour rien : ~210 Mo sur 327 Mo au cache plein.** `globe.js:238` — le canevas reste vivant via `CanvasTexture.image` après téléversement (**105 Mo**). Et `t.heights` (**105 Mo**) n'est relu que par `setExaggeration` (`:899`), **qui n'a aucun appelant dans tout le dépôt — vérifié**. ⚠️ Le commentaire de `:168` annonce « 380 Mo pour 1 500 tuiles » : la documentation **sous-estime d'un facteur 2,4**.
+- [ ] **Étape 9 — les normales de bord.** `:623-648` : `sampleHeights` écrête hors [0,1] alors que `tileToLatLon` donne la position complète — pente **407 m au bord contre 853 m au centre**, soit **47,7 % de la vraie pente**, d'où un liseré d'éclairage autour de chaque tuile.
+- [ ] **Étape 10 — LA CLÔTURE DU §0**, puis commit.
+
+**Preuve du couple étapes 3+4, mesurée au fov 30 de production :** zoom **7 → 11**, **124 tuiles dessinées**, **zéro requête au repos** — et **sans toucher au crédit**.
+
+⚠️ **CETTE TÂCHE PASSE AVANT TOUTES LES AUTRES DU BLOC.** Rebrancher la source (4 alpha) d'un quadtree qui n'atteint pas ses niveaux fins ne se verrait pas ; et calibrer un plafond de file (4 bis) avant elle, c'est le calibrer sur un trafic qui va tripler. **L'ordre est 4 → 4 alpha → 4 bis → 4 ter.**
+
+
+### Tâche 4 alpha : rebrancher le globe sur la vraie source de relief ⚠️ APRÈS LA TÂCHE 4, AVANT LA 4 BIS
+
+**Fichiers :** modifier `src/globe.js` (`TILE_URL` et les **neuf** `256` en dur) · créer `test/globe-source.test.js` · ⚠️ **modifier les trois fichiers de test qui verrouillent le 256** : `test/globe-reseau.test.js:42-43` et `:97-98`, `test/globe-eviction.test.js:59-60`, `test/globe-precision.test.js:79` et `:83`. **Ce plan disait « trois fichiers non déclarés » sans les nommer : les voici.**
+
+⚠️ **C'EST LA FAILLE LA PLUS GRAVE DU PLAN, ET ELLE EST SILENCIEUSE.** Trouvée par l'attaque du 2026-08-20, vérifiée à la main.
+
+`src/globe.js:14` tape **en dur** `elevation-tiles-prod/terrarium` — et `globe.js` **n'importe rien** de `src/dem-source.js` (vérifié : zéro occurrence). Or ce module est la source réelle du produit :
+
+| | source du globe aujourd'hui | source du produit |
+|---|---|---|
+| jeu | **AWS terrarium** | **Mapterhorn** (`DEFAULT_SOURCE_ID`) |
+| résolution | **256 px** | **512 px WebP** |
+| contenu | figé à **novembre 2017** | agrège IGN RGE ALTI, swissALTI3D… |
+| zoom maximal | **15** | **17** |
+
+Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-delà de 6,6 m/pixel ».
+
+**Donc promouvoir ce quadtree en « seule source de relief » sans le rebrancher dégraderait toute la matière première du produit — et rendrait le z17 annoncé inatteignable — sans lever la moindre erreur.** Un problème de flux se voit et se mesure ; **une matière première dégradée se livre sans que personne ne s'en aperçoive.**
+
+### ⚠️ La règle d'Adrien, et le vrai danger de cette tâche
+
+**« Privilégie toujours Mapterhorn où il est disponible. »** (Adrien, 2026-08-20.)
+
+**C'est déjà la politique implémentée**, et `dem-source.js` la décrit mieux que ce plan ne saurait le faire :
+
+- Mapterhorn est **la source par défaut** ; AWS est **le repli, pas le choix par défaut**.
+- La couverture de Mapterhorn est **variable** : z12 partout sur les terres émergées, **z13 à z17 selon les pays**, et rien au-dessus de z4 en pleine mer.
+- ⚠️ **« UN 404 N'EST PAS UNE PANNE. »** C'est Mapterhorn qui dit « je ne couvre pas ici, à ce zoom-là ». On ne bascule donc **jamais** sur un 404 : on surzoome depuis l'ancêtre, ou — si la zone n'est pas couverte du tout — **on prend AWS POUR CETTE ZONE SEULEMENT**.
+- Une sonde (`probeMaxZoom`) mémorise le zoom maximal **par zone**, et `fallbackToAws` ne se déclenche que sur une vraie panne — réseau, 5xx, DNS, WebP indécodable — retenue pour toute la session.
+
+⚠️ **LE VRAI DANGER DE CETTE TÂCHE N'EST DONC PAS DE CHOISIR LA MAUVAISE SOURCE : C'EST DE REMPLACER UNE POLITIQUE PAR UNE URL.** Un rebranchement naïf — `TILE_URL = DEM_SOURCES[actif].url` — semblerait juste et perdrait tout : la sonde par zone, le surzoom depuis l'ancêtre, le repli AWS **localisé**, et la distinction entre un 404 et une panne. On aurait alors une seule source pour la planète entière, choisie une fois, au lieu de la meilleure disponible à chaque endroit.
+
+**Ce qu'il faut reprendre, ce sont les fonctions de `dem-source.js`, pas ses URL.**
+
+⚠️ **ET LA POLITIQUE EST ÉCRITE DANS `src/dem.js:245-263`, PAS DANS `dem-source.js`.** Une version de ce plan ne citait pas ce fichier — c'est pourtant là que vivent les trois issues, commentées mot pour mot :
+
+> *« un zoom → on y va, en surzoomant au-delà · null → zone hors couverture (pleine mer) → **AWS POUR CE CHARGEMENT**, sans toucher au choix de session : le bloc d'à côté, sur la terre ferme, doit continuer à profiter de Mapterhorn · panne → repli AWS pour TOUTE la session »*
+
+**C'est ce bloc de dix-neuf lignes qu'il faut réutiliser**, avec `activeDemSource`, `resolveRegionMaxZoom`, `fallbackToAws` et `overzoomTile`. Une « zone » est une **tuile z8** (`REGION_ZOOM = 8`, `dem-source.js:139`).
+
+### ⚠️ LE FAIT QUI CHANGE LE CALCUL DE CETTE TÂCHE
+
+**Mapterhorn rend 404 au-dessus de z4 en pleine mer** (`dem-source.js`, en-tête). Or **la majorité des tuiles d'un globe sont océaniques**. Rebrancher le globe sur Mapterhorn signifie donc que **la plupart de ses tuiles retomberont sur AWS de toute façon** — ce qui est correct, mais change complètement le rapport bénéfice/coût de la tâche.
+
+**Conséquence à trancher avant de commencer :** le gain de Mapterhorn ne se manifeste qu'**en descente sur les terres émergées**. Il est peut-être plus sage de **ne rebrancher que sous un certain zoom** — là où le socle vit — et de laisser le globe orbital sur AWS, qu'il utilise déjà et qui lui suffit. ⚠️ **Cette question est ouverte : elle se tranche par une mesure, pas par une préférence.**
+
+⚠️ **ET LE PÉRIMÈTRE EST PLUS LARGE QU'IL N'Y PARAÎT — mesuré par l'attaque :**
+- **Neuf expressions à 256 en dur** dans `globe.js`, pas « plusieurs ».
+- **Trois fichiers de test non déclarés** par ce plan les verrouillent.
+- **La mémoire passerait de 242 Mo à 968 Mo** si l'on garde le même nombre de tuiles en 512 px. ⚠️ C'est un facteur quatre, pas un ajustement.
+- Les étapes 3 et 4 de cette tâche **se contredisent** — l'une demande de rebrancher, l'autre que rien ne change pour le globe orbital. **Elles ne peuvent pas être vraies ensemble tant que la question ci-dessus n'est pas tranchée.**
+- **256 est codé en dur** plusieurs fois dans `fetchTile` / `sampleTile` de `globe.js`. Mapterhorn sert du **512**. ⚠️ **Trancher explicitement** : soit le globe accepte les deux tailles, soit il rééchantillonne. **Ne pas laisser ce choix à l'improvisation.**
+- `TILE_MEMO_MAX` est calibré pour du 256 (≈ 32 Mo) ; en 512 la même valeur ferait **128 Mo**.
+- `resolveRegionMaxZoom` est **asynchrone**, et `_pump` de `globe.js` est **synchrone**. La jonction des deux est le vrai travail de cette tâche.
+
+- [ ] **Étape 1** — test : l'URL construite par le globe passe par `DEM_SOURCES[DEFAULT_SOURCE_ID]`, et la profondeur maximale du globe **n'excède jamais** le `maxZoom` de la source active.
+- [ ] **Étape 1 bis** — test : sur une zone **couverte** par Mapterhorn, le globe l'utilise ; sur une zone qui rend 404 à z12, il bascule sur AWS **pour cette zone**, et **continue d'utiliser Mapterhorn ailleurs dans la même session**. ⚠️ C'est l'assertion qui distingue une politique d'une URL.
+- [ ] **Étape 2** — le lancer, vérifier qu'il échoue (aujourd'hui l'URL est en dur).
+- [ ] **Étape 3** — rebrancher sur `dem-source.js`, en gardant le repli et la sonde.
+- [ ] **Étape 4** — ⚠️ **vérifier que le globe orbital reste identique** : c'est une fonction en production, et le passage de 256 à 512 px change la densité des tuiles. Mesurer la mémoire et le nombre de requêtes avant/après.
+- [ ] **Étape 5** — mutation : revenir à l'URL en dur doit tuer le test.
+- [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
+**Si cette tâche est jugée trop lourde**, l'alternative honnête est de **plafonner `MAX_Z` à 13 et de l'écrire** — mais alors la décision 1 (« de l'orbite au sol ») devient fausse, et il faut le dire à Adrien.
+
+### Tâche 4 bis : LE FLUX QUI NE SE COINCE PAS ⚠️ APRÈS LES TÂCHES 4 ET 4 ALPHA
+
+⚠️ **CETTE TÂCHE PORTAIT « EN PREMIER ». C'ÉTAIT L'ORDRE INVERSE DE CE QUI EST MESURÉ.** La Tâche 4 change ce que cette tâche est censée calibrer : après horizon + frustum, le pic de `loading` passe de **0 à 246** et le trafic d'un panoramique de **596 à 1 786 requêtes**. `PLAFOND_FILE` ne peut pas se calibrer avant. Et la Tâche 4 alpha fait passer les tuiles de PNG 256 px à WebP 512 px : **le bouchon écrit ici serait périmé le jour où elle s'exécute.**
+
+**L'ordre est donc : 4 → 4 alpha → 4 bis → 4 ter.**
 
 **Fichiers :** créer `src/monde/flux-terrain.js` · modifier `src/globe.js` · tester `test/flux-terrain.test.js`
 
@@ -279,116 +423,13 @@ Une passe par tuile touchée, pas un appel par sommet.
 - [ ] **Étape 4** — mutation : égaliser les deux seuils tue le test d'oscillation.
 - [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
-### Tâche 4 alpha : rebrancher le globe sur la vraie source de relief ⚠️ AVANT LA TÂCHE 4
-
-**Fichiers :** modifier `src/globe.js` (`TILE_URL`) · tester `test/globe-source.test.js`
-
-⚠️ **C'EST LA FAILLE LA PLUS GRAVE DU PLAN, ET ELLE EST SILENCIEUSE.** Trouvée par l'attaque du 2026-08-20, vérifiée à la main.
-
-`src/globe.js:14` tape **en dur** `elevation-tiles-prod/terrarium` — et `globe.js` **n'importe rien** de `src/dem-source.js` (vérifié : zéro occurrence). Or ce module est la source réelle du produit :
-
-| | source du globe aujourd'hui | source du produit |
-|---|---|---|
-| jeu | **AWS terrarium** | **Mapterhorn** (`DEFAULT_SOURCE_ID`) |
-| résolution | **256 px** | **512 px WebP** |
-| contenu | figé à **novembre 2017** | agrège IGN RGE ALTI, swissALTI3D… |
-| zoom maximal | **15** | **17** |
-
-Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-delà de 6,6 m/pixel ».
-
-**Donc promouvoir ce quadtree en « seule source de relief » sans le rebrancher dégraderait toute la matière première du produit — et rendrait le z17 annoncé inatteignable — sans lever la moindre erreur.** Un problème de flux se voit et se mesure ; **une matière première dégradée se livre sans que personne ne s'en aperçoive.**
-
-### ⚠️ La règle d'Adrien, et le vrai danger de cette tâche
-
-**« Privilégie toujours Mapterhorn où il est disponible. »** (Adrien, 2026-08-20.)
-
-**C'est déjà la politique implémentée**, et `dem-source.js` la décrit mieux que ce plan ne saurait le faire :
-
-- Mapterhorn est **la source par défaut** ; AWS est **le repli, pas le choix par défaut**.
-- La couverture de Mapterhorn est **variable** : z12 partout sur les terres émergées, **z13 à z17 selon les pays**, et rien au-dessus de z4 en pleine mer.
-- ⚠️ **« UN 404 N'EST PAS UNE PANNE. »** C'est Mapterhorn qui dit « je ne couvre pas ici, à ce zoom-là ». On ne bascule donc **jamais** sur un 404 : on surzoome depuis l'ancêtre, ou — si la zone n'est pas couverte du tout — **on prend AWS POUR CETTE ZONE SEULEMENT**.
-- Une sonde (`probeMaxZoom`) mémorise le zoom maximal **par zone**, et `fallbackToAws` ne se déclenche que sur une vraie panne — réseau, 5xx, DNS, WebP indécodable — retenue pour toute la session.
-
-⚠️ **LE VRAI DANGER DE CETTE TÂCHE N'EST DONC PAS DE CHOISIR LA MAUVAISE SOURCE : C'EST DE REMPLACER UNE POLITIQUE PAR UNE URL.** Un rebranchement naïf — `TILE_URL = DEM_SOURCES[actif].url` — semblerait juste et perdrait tout : la sonde par zone, le surzoom depuis l'ancêtre, le repli AWS **localisé**, et la distinction entre un 404 et une panne. On aurait alors une seule source pour la planète entière, choisie une fois, au lieu de la meilleure disponible à chaque endroit.
-
-**Ce qu'il faut reprendre, ce sont les fonctions de `dem-source.js`, pas ses URL.**
-
-⚠️ **ET LA POLITIQUE EST ÉCRITE DANS `src/dem.js:245-263`, PAS DANS `dem-source.js`.** Une version de ce plan ne citait pas ce fichier — c'est pourtant là que vivent les trois issues, commentées mot pour mot :
-
-> *« un zoom → on y va, en surzoomant au-delà · null → zone hors couverture (pleine mer) → **AWS POUR CE CHARGEMENT**, sans toucher au choix de session : le bloc d'à côté, sur la terre ferme, doit continuer à profiter de Mapterhorn · panne → repli AWS pour TOUTE la session »*
-
-**C'est ce bloc de dix-neuf lignes qu'il faut réutiliser**, avec `activeDemSource`, `resolveRegionMaxZoom`, `fallbackToAws` et `overzoomTile`. Une « zone » est une **tuile z8** (`REGION_ZOOM = 8`, `dem-source.js:139`).
-
-### ⚠️ LE FAIT QUI CHANGE LE CALCUL DE CETTE TÂCHE
-
-**Mapterhorn rend 404 au-dessus de z4 en pleine mer** (`dem-source.js`, en-tête). Or **la majorité des tuiles d'un globe sont océaniques**. Rebrancher le globe sur Mapterhorn signifie donc que **la plupart de ses tuiles retomberont sur AWS de toute façon** — ce qui est correct, mais change complètement le rapport bénéfice/coût de la tâche.
-
-**Conséquence à trancher avant de commencer :** le gain de Mapterhorn ne se manifeste qu'**en descente sur les terres émergées**. Il est peut-être plus sage de **ne rebrancher que sous un certain zoom** — là où le socle vit — et de laisser le globe orbital sur AWS, qu'il utilise déjà et qui lui suffit. ⚠️ **Cette question est ouverte : elle se tranche par une mesure, pas par une préférence.**
-
-⚠️ **ET LE PÉRIMÈTRE EST PLUS LARGE QU'IL N'Y PARAÎT — mesuré par l'attaque :**
-- **Neuf expressions à 256 en dur** dans `globe.js`, pas « plusieurs ».
-- **Trois fichiers de test non déclarés** par ce plan les verrouillent.
-- **La mémoire passerait de 242 Mo à 968 Mo** si l'on garde le même nombre de tuiles en 512 px. ⚠️ C'est un facteur quatre, pas un ajustement.
-- Les étapes 3 et 4 de cette tâche **se contredisent** — l'une demande de rebrancher, l'autre que rien ne change pour le globe orbital. **Elles ne peuvent pas être vraies ensemble tant que la question ci-dessus n'est pas tranchée.**
-- **256 est codé en dur** plusieurs fois dans `fetchTile` / `sampleTile` de `globe.js`. Mapterhorn sert du **512**. ⚠️ **Trancher explicitement** : soit le globe accepte les deux tailles, soit il rééchantillonne. **Ne pas laisser ce choix à l'improvisation.**
-- `TILE_MEMO_MAX` est calibré pour du 256 (≈ 32 Mo) ; en 512 la même valeur ferait **128 Mo**.
-- `resolveRegionMaxZoom` est **asynchrone**, et `_pump` de `globe.js` est **synchrone**. La jonction des deux est le vrai travail de cette tâche.
-
-- [ ] **Étape 1** — test : l'URL construite par le globe passe par `DEM_SOURCES[DEFAULT_SOURCE_ID]`, et la profondeur maximale du globe **n'excède jamais** le `maxZoom` de la source active.
-- [ ] **Étape 1 bis** — test : sur une zone **couverte** par Mapterhorn, le globe l'utilise ; sur une zone qui rend 404 à z12, il bascule sur AWS **pour cette zone**, et **continue d'utiliser Mapterhorn ailleurs dans la même session**. ⚠️ C'est l'assertion qui distingue une politique d'une URL.
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue (aujourd'hui l'URL est en dur).
-- [ ] **Étape 3** — rebrancher sur `dem-source.js`, en gardant le repli et la sonde.
-- [ ] **Étape 4** — ⚠️ **vérifier que le globe orbital reste identique** : c'est une fonction en production, et le passage de 256 à 512 px change la densité des tuiles. Mesurer la mémoire et le nombre de requêtes avant/après.
-- [ ] **Étape 5** — mutation : revenir à l'URL en dur doit tuer le test.
-- [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
-
-**Si cette tâche est jugée trop lourde**, l'alternative honnête est de **plafonner `MAX_Z` à 13 et de l'écrire** — mais alors la décision 1 (« de l'orbite au sol ») devient fausse, et il faut le dire à Adrien.
-
-### Tâche 4 : rendre `MAX_Z` ATTEIGNABLE — et non le descendre
-
-⚠️ **LA PRÉMISSE DE CETTE TÂCHE ÉTAIT FAUSSE.** Ce plan écrivait « le quadtree s'arrête à z11 ». Il n'y arrive **jamais** : mesuré, il plafonne à **z7**, et `MAX_Z = 11` est du code mort. Monter une constante qui n'est pas atteinte ne produit rien.
-
-⚠️ **ET LA PREMIÈRE VERSION DE CETTE RÉÉCRITURE ÉTAIT FAUSSE AUSSI** — elle annonçait z6, cinq niveaux débloqués, et proposait un plancher de crédit qui **aggrave** le défaut. Un validateur a rejoué la mesure. **Les chiffres ci-dessous sont les siens, pas ceux du premier audit.**
-
-#### Les trois causes — vérifiées dans le code, deux fois
-
-1. **Le crédit de raffinement est un point fixe arithmétique** (`globe.js:759`). `_credit = CACHE_MAX − tiles.size + marge` : à saturation `marge` s'annule **structurellement**, donc le crédit vaut 0, donc rien n'est créé, donc la taille ne bouge plus. ⚠️ Le commentaire des lignes 747-752 affirme que `marge` écarte ce gel — et qu'un crédit fondé sur la seule place libre « GÈLERAIT le globe ». **Il ne fait que le retarder.**
-2. **Le seuil d'horizon est une constante** (`globe.js:770`) : `dot < −0.35` (110°) au lieu du vrai horizon géométrique. À basse altitude, le code parcourt une calotte de plusieurs ordres de grandeur trop large.
-3. **Aucun test de frustum dans `_traverse`** — zéro occurrence dans le fichier.
-
-#### ⚠️ Le plancher de crédit : 16, et surtout PAS 64
-
-Ce plan avait proposé **64**. Mesuré par le validateur : à 8 km d'altitude, **64 fait tomber le globe à z4** — *pire qu'aujourd'hui* — et installe **six requêtes par image caméra immobile**, alors que le code actuel en fait **zéro** au repos.
-
-Avec **16** : **z11 atteint, et zéro requête au repos.**
-
-⚠️ **C'est l'illustration exacte de la règle du §0.** J'ai posé 64 sans le mesurer ; la valeur ne corrigeait pas le défaut, elle en fabriquait un pire. **Ne changez pas ce 16 sans refaire la mesure.**
-
-#### ⚠️ Ce que la mesure ne dit PAS, et qu'il faut établir
-
-- **Le champ de vision n'a jamais été donné** dans aucune des deux mesures. Le résultat en dépend. **Fixez-le et écrivez-le** avant de comparer quoi que ce soit.
-- **« 74 tuiles dessinées » recolle deux paliers différents.** Ne le citez pas comme un objectif.
-- **Le même relevé donne un cache de 824** — c'est-à-dire **le double de `CACHE_MAX`**. ⚠️ Or l'étape sur le cache ci-dessous propose `5 × visibles` ≈ 370, ce qui **défait** ce que les trois causes viennent de débloquer. **Cette contradiction se tranche par la mesure, pas par un arbitrage d'écriture.**
-- **La formule d'horizon a besoin de sa marge de corde.** Transcrite nue, elle écrête au limbe et **crée des trous**. Et les racines `z2` doivent en être exemptées.
-
-#### Les étapes
-
-- [ ] **Étape 0 — POSER LE DRAPEAU** dans `src/flags.js` (le fichier existe). ⚠️ Sans lui, tout ce qui suit s'applique au globe orbital, **qui est en production**.
-- [ ] **Étape 1 — établir la base, et l'écrire.** Champ de vision fixé, zoom effectif, tuiles dessinées, taille de cache, requêtes au repos — à six altitudes. **C'est la référence contre laquelle tout le reste se compare.** ⚠️ Deux relevés antérieurs se contredisent (z6 contre z7) : le vôtre fait foi, et il doit être reproductible.
-- [ ] **Étape 2 — le point fixe du crédit.** Test d'abord : à cache saturé, une caméra qui bouge doit créer au moins une tuile. Il échoue aujourd'hui. Puis le plancher **16**, avec le test qui vérifie **aussi** qu'au repos les requêtes retombent à zéro. ⚠️ **Ce second test est celui que 64 aurait fait échouer.**
-- [ ] **Étape 3 — l'horizon géométrique**, avec sa marge de corde et l'exemption des racines. Test : à basse altitude, le nombre de tuiles parcourues chute d'un ordre de grandeur **sans qu'aucune tuile visible ne disparaisse**. ⚠️ La seconde moitié est celle qui attrape l'écrêtage.
-- [ ] **Étape 4 — le test de frustum** dans `_traverse`. Test : la proportion de tuiles dessinées effectivement dans le champ passe au-dessus de 80 %.
-- [ ] **Étape 5 — trancher le cache**, avec les chiffres de l'étape 1 et non par principe. ⚠️ Si les trois corrections réclament 824, une formule qui rend 370 est une régression déguisée en optimisation. **Mesurez avant de choisir.**
-- [ ] **Étape 6 — les deux trouvailles annexes.** Libérer `t.heights` après maillage (trois copies de la même grille, **250 Mo mesurés pour 420 tuiles**, quand le commentaire de `:168` annonce « 380 Mo pour 1 500 » — sous-estimation d'un facteur 2,4). Et les normales de bord aplaties de moitié (`:623-648`) : `sampleHeights` écrête hors [0,1] alors que `tileToLatLon` donne la position complète — pente **407 m au bord contre 853 m au centre**, d'où un liseré d'éclairage autour de chaque tuile.
-- [ ] **Étape 7 — LA CLÔTURE DU §0**, puis commit.
-
-⚠️ **N'entamez la Tâche 4 alpha qu'après celle-ci.** Rebrancher la source d'un quadtree qui n'atteint pas ses niveaux fins ne se verrait pas.
-
 ### Tâche 4 ter : la descente bornée par le réseau — règle R3
 
 **Fichiers :** créer `src/monde/descente-bornee.js` · tester `test/descente-bornee.test.js`
 
 **Interfaces produites :** `zoomSoutenable({ debitObserveMbs, zoomDemande })` → `number`
+
+⚠️ **PERSONNE NE PRODUIT `debitObserveMbs` — signalé trois fois, jamais traité, et cette tâche ne peut pas commencer sans.** Il doit sortir de la Tâche 4 bis : ajouter `debitObserve(flux)` → `number` à ses interfaces, alimenté par les tailles et durées des réponses déjà passées par `flux-terrain.js`. **À inscrire là-bas avant d'entamer celle-ci.**
 
 **Les deux points mesurés** : **z11 à 12 Mb/s**, **z9 à 4 Mb/s**. ⚠️ **Deux points ne font pas une courbe.** Commencez par une interpolation logarithmique entre eux, **mesurez un troisième point** (par exemple à 30 Mb/s) et corrigez. Le plan ne peut pas vous donner la loi : il vous donne deux points et l'obligation d'en trouver un troisième.
 
@@ -435,20 +476,20 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 ### Tâche 6 : `fenetre-bornee.js` — l'extraction
 
-**Fichiers :** créer `src/monde/fenetre-bornee.js` · tester `test/fenetre-bornee.test.js`
+**Fichiers :** créer `src/monde/fenetre-bornee.js` · **modifier `src/plinth.js` et `src/ocean.js`** · tester `test/fenetre-bornee.test.js`
 
 **Interfaces produites :**
 - `construireFenetre({ emprise, n, rayonCoin, exposantCoin, profondeurDalle, exageration })` → `{ geometrie, indices, boiteEnglobante }`
 - `emprise` = `{ ouest, sud, est, nord }` en degrés. ⚠️ **`ouest > est` signifie que l'emprise franchit l'antiméridien** — c'est légal et le test l'exige.
 - ⚠️ **Au-delà de 85,051° de latitude** (la limite de Mercator), l'emprise est **écrêtée** à cette valeur. Le prototype y était « silencieusement faux mais fermé » ; ici on tranche : on écrête, et un test le vérifie.
-- `exageration` : sans elle, la dalle et les parois n'ont pas la bonne hauteur. Défaut de production : **18**.
+- `exageration` : sans elle, la dalle et les parois n'ont pas la bonne hauteur. ⚠️ **CE PLAN ÉCRIVAIT « défaut de production : 18 ». C'EST L'EXAGÉRATION DU GLOBE** (`globe.js:278`), **pas celle du socle.** Le socle vaut `BASE_EXAG = 2,8`, modulée par zoom — `{3: 2.5, 4: 2.5, 5: 5, 6: 4, 7: 3.2}` dans `main.js`. **À trancher explicitement : laquelle `construireFenetre` reçoit, et pourquoi.** Un facteur six d'écart entre les deux lectures.
 - `profondeurDalle` : défaut de production **7** (`main.js:540`, `plinthDepth`). Le socle calcule `baseY = pointLePlusBas − profondeurDalle`.
 
 ⚠️ **LE SOCLE N'EST PAS UNE BOÎTE, ET UNE VERSION DE CE PLAN L'AVAIT RÉDUIT À ÇA.** `src/plinth.js` porte un congé à normales analytiques, des **coins en superellipse** (`slabCorner` / `slabCornerSmoothing`, réglés par défaut dans `main.js:566`) et un liner. Les oublier ne casserait pas le maillage : ça donnerait **un pavé droit à la place de l'objet ShibuMap**.
 
 ⚠️ **ET `ocean.js` DOIT ÊTRE INSCRIT DANS CETTE TÂCHE.** Il recalcule `uCornerR`, `uCornerN` et `buildRimGeometry` **sur les mêmes constantes** : si la fenêtre change de forme sans lui, la mer cesse d'épouser le socle. C'est la famille de défauts déjà rencontrée deux fois sur ce dépôt — un réglage écrit d'un côté, jamais transmis à l'autre.
 
-⚠️ **Le sort de `plinth.js` est à trancher explicitement** : modifié pour accepter une emprise variable, ou remplacé. Il n'est aujourd'hui dans aucune des trois listes du §5, et c'est un oubli.
+⚠️ **Le sort de `plinth.js` est à trancher explicitement** : modifié pour accepter une emprise variable, ou remplacé. Il **est** au §5 depuis la révision du 2026-08-20 — une version antérieure de cette ligne affirmait le contraire, et c'était faux.
 - `majHauteurs(fenetre, fluxTerrain)` → `void`
 
 ⚠️ **Par RÉÉCHANTILLONNAGE, jamais par découpe du maillage du quadtree.** C'est la décision d'architecture du §4.
@@ -511,6 +552,8 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 ## 10. Auto-revue
 
 **Couverture :** les treize décisions et les trois règles ont chacune leur tâche ou leur phase.
+
+⚠️ **DEUX DÉCISIONS N'ONT TOUJOURS AUCUNE TÂCHE** — signalé deux fois : la **décision 6** (format d'impression à l'export) et la **décision 11** (60 img/s sur portable récent). Et `src/palier-machine.js`, **le module qui fait déjà ce tri de matériel dans ce dépôt**, n'est cité nulle part. Le §10 ne peut pas certifier « les treize décisions ont chacune leur tâche » tant que c'est vrai.
 
 **Cohérence des noms** — employés à l'identique partout : `socleVisible`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `demanderEmprise`, `PLAFOND_FILE`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`.
 
