@@ -12,6 +12,20 @@ import * as THREE from 'three'
 import { R_GLOBE, ORBITAL_M_PER_UNIT, sphereToLatLon, latLonToSphere } from './geo.js'
 import { PinchTracker } from './gestes.js'
 import { pasEscalier, paliersRetenus, palierDeClic } from './escalier-zoom.js'
+// LA LOI D'ALTITUDE vit dans un module PUR (voir son en-tête, et la Tâche 1 du
+// plan « globe continu »). Rien ne change ici : ces quatre fonctions sont
+// exactement les calculs qui étaient écrits en clair ci-dessous, sortis pour
+// être mesurables sous node — `Modes` appelle `document.createElement` et ce
+// dépôt n'a pas de jsdom.
+import {
+  PENTE_ARRIVEE,
+  Y_CIBLE,
+  DISTANCE_MAX_SURFACE,
+  altitudeOrbitaleM,
+  altitudeSortieOrbiteM,
+  distanceArrivee,
+  distancePresentation,
+} from './loi-altitude.js'
 
 // Le pincement fabrique un faux événement de molette. _zoomGesture appelle
 // preventDefault() sur plusieurs branches ; côté tactile, le vrai événement a
@@ -100,14 +114,14 @@ const WHEEL_GAP_MS = 220 // a wheel event this long after the last starts a FRES
 // the zone's own zoom budget (log-distance) — the glide CLAMPS here, it does not
 // run to the physical near/far stop. ~STEP_IN of zoom-in ≈ the comfortable
 // "au moins 20 crans" span; a fresh re-scroll at the limit steps a level.
-const STEP_IN = 1.2 // max zoom-IN per level (≈ 3.3×) before the in-limit
-const STEP_OUT = 0.55 // max zoom-OUT per level (≈ 1.7×) before the out-limit
+export const STEP_IN = 1.2 // max zoom-IN per level (≈ 3.3×) before the in-limit
+export const STEP_OUT = 0.55 // max zoom-OUT per level (≈ 1.7×) before the out-limit
 
 // task 30 Fix A: the isometric-ish viewing angle every dive/refine arrival
 // has always used (camera.position(0,18,19), looking at (0,-0.3,0)) — kept
 // as a fixed DIRECTION so the new far-standoff arrival (_arrivalPose()
 // below) still frames the block the same way, just from farther back.
-const _ARRIVAL_DIR = new THREE.Vector3(0, 18, 19).normalize()
+const _ARRIVAL_DIR = new THREE.Vector3(0, PENTE_ARRIVEE.y, PENTE_ARRIVEE.z).normalize()
 
 export class Modes {
   /**
@@ -300,7 +314,7 @@ export class Modes {
     if (entryAltM == null) {
       // pop out just above the block's own altitude; a coarse z4 continental
       // block (~7 500 km up) hands over above the 8 000 km globe gate
-      entryAltM = THREE.MathUtils.clamp(this.hooks.surfaceCamAltMeters() * 1.15, 15000, 9000000)
+      entryAltM = altitudeSortieOrbiteM(this.hooks.surfaceCamAltMeters())
     }
     // an explicit altitude must respect the orbit ceiling too, or the camera
     // would sit above controls.maxDistance and snap every frame
@@ -356,7 +370,7 @@ export class Modes {
   // surfaceMaxDistance() (that standoff already clears anything this app's
   // relief produces) but a real guarantee rather than an assumption.
   _arrivalPose(lieu = null) {
-    const dist = this.hooks.surfaceMaxDistance() * 0.94 // stay under the hard cap so controls.update() below doesn't immediately re-clamp it
+    const dist = distanceArrivee(this.hooks.surfaceMaxDistance()) // stay under the hard cap so controls.update() below doesn't immediately re-clamp it
     const target = this._cibleVisee(lieu)
     const pos = _ARRIVAL_DIR.clone().multiplyScalar(dist)
     const groundY = this.hooks.sampleGroundY ? this.hooks.sampleGroundY(target.x, target.z) : -Infinity
@@ -376,7 +390,7 @@ export class Modes {
   // l'ancienne pose : le centre du socle.
   _cibleVisee(lieu) {
     const p = lieu && this.hooks.viseeDuLieu ? this.hooks.viseeDuLieu(lieu.lat, lieu.lon) : null
-    return new THREE.Vector3(p?.x ?? 0, -0.3, p?.z ?? 0)
+    return new THREE.Vector3(p?.x ?? 0, Y_CIBLE, p?.z ?? 0)
   }
 
   // `lieu` : le lat/lon VOULU. Absent, on prend celui sous la caméra — c'est le
@@ -468,7 +482,7 @@ export class Modes {
     await this._whiteout(() => {
       const arrival = this._arrivalPose(next)
       this.controls.target.copy(arrival.target)
-      const dist = (this.hooks.surfaceMaxDistance?.() ?? 150) * 0.97 // = distance de la vue iso 1
+      const dist = distancePresentation(this.hooks.surfaceMaxDistance?.() ?? DISTANCE_MAX_SURFACE) // = distance de la vue iso 1
       const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
       const pos = this.controls.target.clone().addScaledVector(dir, dist)
       // même garde de dégagement sol que _arrivalPose
@@ -629,7 +643,7 @@ export class Modes {
       // le point cliqué EST ce que la caméra vise — pas le centre du bloc, qui
       // en est décalé de tout ce que le calage sur la grille de tuiles a pris
       const tgt = this._cibleVisee(target)
-      const dist = this.hooks.surfaceMaxDistance() * 0.97 // distance de la vue iso 1 (point de présentation)
+      const dist = distancePresentation(this.hooks.surfaceMaxDistance()) // distance de la vue iso 1 (point de présentation)
       const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
       const pos = tgt.clone().addScaledVector(dir, dist)
       const groundY = this.hooks.sampleGroundY ? this.hooks.sampleGroundY(tgt.x, tgt.z) : -Infinity
@@ -707,7 +721,7 @@ export class Modes {
         this.camera.updateProjectionMatrix()
       }
 
-      this.altM = this.orbAlt * ORBITAL_M_PER_UNIT
+      this.altM = altitudeOrbitaleM(this.orbAlt, ORBITAL_M_PER_UNIT)
       if (!this.busy && !this.travel && this._diveArmed) {
         // dive when an inward zoom SETTLES under a tier — never intercept a
         // fast zoom mid-flight; the landing scale matches where you stopped

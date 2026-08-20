@@ -28,6 +28,7 @@ import { warmupPrograms } from './warmup.js'
 import { activeDemSource, isFallbackActive } from './dem-source.js'
 import { Globe } from './globe.js'
 import { Modes, stepZoom } from './modes.js'
+import { altitudeSurfaceM } from './loi-altitude.js'
 import { intersectionGlobe, viseeArrivee, ZOOM_PALIER_MIN } from './escalier-zoom.js'
 import { createGoto, geocode, mainParts } from './goto.js'
 import { frameTrack, viseLeCanevas3D } from './gpx.js'
@@ -3593,8 +3594,19 @@ modes = new Modes({
     getSurfaceLatLon: () => ({ lat: params.demLat, lon: params.demLon }),
     surfaceCamAltMeters() {
       if (params.source === 'real' && dem) {
-        const scale = (TERRAIN_SIZE / dem.extentMeters) * params.demExaggeration
-        return camera.position.y / scale + dem.meanM
+        // ⚠️ `+ dem.meanM` EST UNE VIOLATION CONNUE DE LA RÈGLE R1 du plan
+        // « globe continu » : la quantité rendue devient DÉRIVÉE DU TERRAIN
+        // chargé. La Tâche 1c ordonne de l'en sortir. La moitié géométrique,
+        // elle, est désormais la loi pure de `loi-altitude.js` — c'est elle que
+        // l'instrument de la Tâche 1a mesure, et elle survivra au retrait.
+        return (
+          altitudeSurfaceM({
+            camY: camera.position.y,
+            extentMeters: dem.extentMeters,
+            span: TERRAIN_SIZE,
+            exageration: params.demExaggeration,
+          }) + dem.meanM
+        )
       }
       return terrain.heightToFeet(camera.position.y) / 3.28084
     },
