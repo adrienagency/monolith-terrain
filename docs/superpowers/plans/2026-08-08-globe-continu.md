@@ -28,6 +28,26 @@ Tranché avec Adrien le 2026-08-08. Un agent que l'une de ces lignes gêne le **
 11. **Cible : 60 images/s sur un portable récent.** Le téléphone dégrade la portée et le détail ; il ne rame pas.
 12. **Aucune cuisson mondiale nouvelle.** On navigue sur le relief, qui couvre déjà le monde en flux. Le sol et la canopée ne se cuisent qu'à la composition ; **la canopée se streame** quand l'utilisateur active l'option.
 
+## Deux règles ajoutées après l'état de l'art du 2026-08-08
+
+Elles ne viennent pas d'Adrien : elles viennent de ce que d'autres ont payé avant nous. **Elles priment sur le confort d'implémentation.**
+
+### R1 — Aucune décision de cadrage ne lit une grandeur dérivée du terrain chargé
+
+⚠️ **C'est le piège le plus probable de tout ce plan.** Le choix du niveau de détail et le seuil du socle doivent se calculer sur des grandeurs **de caméra** — altitude au-dessus de l'ellipsoïde, distance au centre de la Terre — **jamais** sur la hauteur du sol chargé, ni sur `meanM`, ni sur quoi que ce soit qui bouge avec les statistiques lissées.
+
+Sinon : `meanM` déplace le terrain verticalement → la distance caméra-sol change → la fraction d'écran change → le seuil et l'emprise changent → `meanM` change. Et comme les statistiques sont lissées, on ajoute un **retard**. Gain plus retard font un **oscillateur**, pas une boucle stable.
+
+Le précédent est exact : le fil le plus long de Cesium sur le rechargement en boucle s'est terminé sur une altitude de caméra dérivée du terrain, instable aux frontières de tuiles. Deux ingénieurs y avaient d'abord répondu « impossible à éviter » et « augmentez le cache » — **les deux mauvaises réponses**, et celles vers lesquelles on glissera naturellement.
+
+⚠️ L'hystérésis de la Tâche 3 protège d'**une** bascule qui clignote. Elle ne protège **pas** de cette boucle-là.
+
+### R2 — Aucune tuile Google, jamais, nulle part
+
+Les *Photorealistic 3D Tiles* de Google interdisent le cache, l'usage hors-ligne et la « geodata extraction or resale ». **Une affiche imprimée est une sortie hors-ligne dérivée et revendue.** Elles sont donc exclues de bout en bout, y compris pour un simple essai — parce qu'un essai finit par rester.
+
+Ce qui est utilisable, licences vérifiées : **Mapterhorn** (code BSD-3, données CC BY 4.0, attribution déjà en place dans `dem-source.js`), **AWS Terrain Tiles** (domaine public), **Natural Earth** (domaine public), **GLOBathy** (CC0), **3DTilesRendererJS** (Apache-2.0).
+
 ---
 
 ## L'état des lieux, vérifié le 2026-08-08
@@ -122,10 +142,16 @@ C'est le seul risque qui peut tuer le projet. Tout le reste est du travail.
 **Fichiers :** créer `src/monde/seuil-socle.js` · tester `test/seuil-socle.test.js`
 
 **Interfaces produites :**
-- `socleVisible({ fractionEcran, visibleAvant })` → `boolean`
-- `SEUIL_NAISSANCE`, `SEUIL_MORT` → les deux fractions
+- `socleVisible({ altitudeEllipsoideM, visibleAvant })` → `boolean`
+- `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M` → les deux altitudes, en mètres
 
-⚠️ **Le seuil DOIT avoir une hystérésis**, et `SEUIL_MORT` doit être strictement inférieur à `SEUIL_NAISSANCE`. Sans cet écart, une caméra posée pile sur la limite fait clignoter le socle. C'est le même défaut que `SPLIT_RATIO` / `MERGE_RATIO` a déjà résolu dans `globe.js` — reprendre ce patron, il est éprouvé sur ce dépôt.
+⚠️ **L'ENTRÉE EST UNE ALTITUDE DE CAMÉRA AU-DESSUS DE L'ELLIPSOÏDE, PAS UNE FRACTION D'ÉCRAN.** Une première version de ce plan prenait `fractionEcran` — c'était **faux**, et c'est la règle R1 qui l'interdit : la fraction d'écran dépend de la distance au sol, donc du terrain chargé, donc de `meanM`, qui est lissé. On aurait fabriqué un oscillateur.
+
+L'altitude au-dessus de l'ellipsoïde ne dépend **que** de la caméra. Elle est stable par construction, quel que soit l'état du chargement.
+
+⚠️ **Le seuil DOIT aussi avoir une hystérésis**, et `SEUIL_MORT_M` doit être strictement supérieur à `SEUIL_NAISSANCE_M` (on naît en descendant, on meurt en remontant plus haut). Sans cet écart, une caméra posée pile sur la limite fait clignoter le socle. C'est le même défaut que `SPLIT_RATIO` / `MERGE_RATIO` a déjà résolu dans `globe.js` — reprendre ce patron, il est éprouvé sur ce dépôt.
+
+⚠️ Mais l'hystérésis ne traite **que** le clignotement d'une bascule. Elle ne protège pas de la boucle R1 : seule l'entrée en altitude le fait.
 
 Module pur : ni DOM, ni three.js, testable sous node — même discipline qu'`escalier-zoom.js`, qu'il remplace.
 
@@ -135,6 +161,25 @@ Module pur : ni DOM, ni three.js, testable sous node — même discipline qu'`es
 - [ ] **Étape 4** — vérifier par mutation : égaliser les deux seuils doit tuer le test d'oscillation.
 - [ ] **Étape 5** — `npm test`, audit disque-vs-liste, commit.
 
+### Tâche 3 bis : le repère relatif, AVANT de descendre
+
+**Fichiers :** modifier `src/globe.js` (`_buildMesh`) · tester `test/globe-precision.test.js` (créer)
+
+⚠️ **CETTE TÂCHE PASSE OBLIGATOIREMENT AVANT LA TÂCHE 4.** La faire après, c'est descendre dans une zone où le terrain tremble, chercher pourquoi, et remonter.
+
+**Le chiffre.** `R_GLOBE = 100` (`src/geo.js:11`) place tous les sommets du globe à une magnitude où **le pas du float32 vaut 0,49 m au sol**. Or Mapterhorn sert du **0,42 m/pixel** à son zoom maximal — mesuré le 2026-08-08 : z17 à Chamonix, z15 pour le repli AWS. **Notre représentation s'épuise exactement là où la donnée s'arrête.**
+
+Le précédent : deck.gl #7527, « casse à partir de z17 à cause du float32 », toujours ouverte.
+
+**Le correctif :** un repère relatif au centre de la tuile (*relative-to-center*) dans `_buildMesh` — les positions des sommets sont exprimées depuis le centre de leur propre tuile, et la position mondiale vit dans la matrice de l'objet. Environ vingt lignes, **aucun changement de nuanceur**. La magnitude tombe de 100 à ~0,3, et le pas de 0,49 m à ~1 mm.
+
+- [ ] **Étape 1** — écrire le test : pour une tuile à un zoom fin, deux sommets voisins distants d'un mètre doivent avoir des positions **distinctes** en float32. ⚠️ Le test doit être écrit sur `Math.fround` pour reproduire vraiment la précision du GPU, pas sur les doubles de JavaScript.
+- [ ] **Étape 2** — le lancer, vérifier qu'il échoue aux zooms fins.
+- [ ] **Étape 3** — implémenter le repère relatif.
+- [ ] **Étape 4** — vérifier par mutation : revenir aux positions absolues doit tuer le test.
+- [ ] **Étape 5** — ⚠️ **regarder le globe de loin**, pas seulement de près : un repère relatif mal posé décale les tuiles les unes par rapport aux autres, et ça ne se voit qu'à l'échelle planétaire.
+- [ ] **Étape 6** — `npm test`, `node --check`, `npx vite build`, audit disque-vs-liste, commit.
+
 ### Tâche 4 : descendre le globe sous z11
 
 **Fichiers :** modifier `src/globe.js` (`MAX_Z`, `CACHE_MAX`) · tester `test/globe-reseau.test.js`, `test/globe-eviction.test.js`
@@ -143,7 +188,15 @@ Le quadtree s'arrête à z11 parce qu'il ne servait qu'à la vue orbitale. Il do
 
 ⚠️ **Vérifier d'abord jusqu'où les tuiles d'altitude existent réellement** chez AWS terrarium et chez mapterhorn. Descendre au-delà de la donnée disponible ne produit pas une erreur : ça produit des tuiles vides, donc un terrain plat, en silence. **Le mesurer, pas le supposer.**
 
-⚠️ **Et surveiller `CACHE_MAX = 420`.** Il a été calibré pour un globe ; à des zooms fins, la même limite couvre une surface bien plus petite et l'éviction se met à battre — on recharge en boucle ce qu'on vient de jeter. Mesurer la mémoire réelle avant de choisir un nouveau chiffre, et l'écrire dans le code.
+⚠️ **`CACHE_MAX = 420` ne doit pas devenir un autre nombre : il doit devenir une FORMULE.** Il a été calibré pour un globe ; à des zooms fins, la même limite couvre une surface bien plus petite et l'éviction se met à battre — on recharge en boucle ce qu'on vient de jeter.
+
+MapLibre ne tient pas un nombre mais une règle : **`niveaux_conservés × tuiles_visibles_dans_le_cadre`**, cinq niveaux par défaut. C'est ce qu'on reprend : la limite suit alors le cadrage au lieu d'être un chiffre à re-régler à chaque zoom.
+
+⚠️ **Et l'ordre d'éviction compte autant que la taille.** 3DTilesRendererJS a corrigé trois bugs d'éviction en cinq mois, dont un où « le LRU pouvait faire recharger les tuiles en boucle », et a dû passer à **« le plus profond d'abord, puis le moins récent »**. Un LRU nu ne suffit pas.
+
+⚠️ **Troisième piège, spécifique aux tuiles terrarium** : un bit du canal rouge vaut **256 mètres**. deck.gl #10400 (2025) rapporte des pics verticaux aléatoires **uniquement en http**, parce que le décodage passait alors par un worker ; ni `premultiplyAlpha:'none'` ni `colorSpaceConversion:'none'` n'ont suffi, il a fallu décoder le PNG à la main. **Si on déporte un jour le décodage dans un worker, c'est exactement là que ça mordra.**
+
+⚠️ **Un dernier point sur le raffinement.** `globe.js` n'affiche un enfant que lorsque ses quatre frères sont prêts — c'est ce qui le rend sans trous, et c'est très bien à l'échelle du globe. Mais **Cesium a chiffré ce choix et l'a abandonné en profondeur** : il oblige à charger quatre tuiles quand on n'en a besoin que d'une. Leur remplacement (rendre le parent et découper au fragment ce qui déborde de l'enfant, plus le saut de niveaux) leur a rendu **32 % de vitesse et 33 % de données**. À garder en tête si le prototype montre que le chargement traîne en descente rapide — ne pas le changer avant.
 
 ---
 
@@ -156,6 +209,10 @@ Le quadtree s'arrête à z11 parce qu'il ne servait qu'à la vue orbitale. Il do
 **Phase 3 — les statistiques lissées** (`src/monde/statistiques-lissees.js`). Les quatre restantes après la Tâche 1 : `meanM`, `globalMin`, les quantiles de rampe, `robustScale`. ⚠️ **C'est de l'auto-exposition**, exactement comme sur un appareil photo — et comme elle, il lui faut une **zone morte**, sinon la vue dérive en permanence sur des variations insignifiantes.
 
 **Phase 4 — la transition et le vol.** La bascule globe → socle avec son effet, à dessiner avec Adrien. Le vol de la caméra vers un GPX déposé. ⚠️ **Le vol ne doit pas devenir le nouveau temps de chargement** : c'est précisément ce qu'on supprime. Le mesurer comme tel.
+
+⚠️ **ET LA TRANSITION N'EST PEUT-ÊTRE PAS QU'UN EFFET.** C'est la trouvaille la plus utile de l'état de l'art : il n'existe aucune source primaire sur le mécanisme globe → terrain de Google Earth, mais **MapLibre publie le sien**. Ils **changent de projection vers z12**, et cachent la bascule dans une zone où globe et Mercator coïncident, pilotée par un unique uniforme `globeness` — **précisément parce que le float32 ne donne qu'une valeur tous les 2,5 mètres**.
+
+Autrement dit : chez eux, le fondu n'est pas une décoration, **c'est le mécanisme**. Si notre transition doit elle aussi masquer un changement de repère, elle doit être conçue avec cette contrainte, pas dessinée d'abord et branchée ensuite.
 
 **Phase 5 — les données.** La canopée en flux à l'activation de l'option, plus **GLOBathy** pour la profondeur des lacs (1,4 million de plans d'eau, pixel de 30 m, licence **CC0**). ⚠️ Ces profondeurs sont **modélisées**, validées sur 1 503 lacs sur 1,4 million : à mentionner quelque part si on les affiche.
 
