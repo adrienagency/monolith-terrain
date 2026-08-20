@@ -57,7 +57,7 @@ import { PeaksLayer } from './peaks.js'
 import { Clouds2 } from './clouds2.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
-import { FLAGS, suiviHelicoActif, portionPoursuite } from './flags.js'
+import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif } from './flags.js'
 // `fractionSurTrace` : le pont d'indices qui remet la tête de course sous
 // l'objectif de la poursuite (voir son commentaire dans poursuite.js).
 import { fractionSurTrace } from './poursuite.js'
@@ -3554,7 +3554,11 @@ function altitudeCadrageM() {
   return terrain.heightToFeet(camera.position.y) / 3.28084
 }
 
-globe = new Globe(params)
+// ⚠️ LE SEUL LECTEUR DE `FLAGS.globeContinu` EST ICI (plan « globe continu »,
+// Tâche 4 Étape 0). `src/globe.js` n'importe pas `flags.js` : il ne connaît
+// qu'un booléen, passé par le constructeur. Sans cette ligne, le drapeau ne
+// protégerait rien et le tri spatial atterrirait sur le globe de production.
+globe = new Globe({ ...params, globeContinu: globeContinuActif() })
 
 // ══════════ LES SEIZE TUILES RACINES — LE TROISIÈME APPELANT ════════════════
 //

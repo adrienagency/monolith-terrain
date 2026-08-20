@@ -612,7 +612,7 @@ Tant que `_rescale` téléportait au point de présentation, cet écart n'avait 
 - [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 
-### Tâche 4 : rendre `MAX_Z` ATTEIGNABLE — et non le descendre ⚠️ LA PREMIÈRE DU BLOC QUADTREE
+### Tâche 4 : rendre `MAX_Z` ATTEIGNABLE — et non le descendre ✅ FAITE LE 2026-08-20 (étapes 0 à 6 et 10) — ⚠️ **ÉTAPES 7, 8 ET 9 REPORTÉES, VOIR LA TÂCHE 4 SEXIES**
 
 **Fichiers :** modifier `src/globe.js` (`_traverse`, seuil d'horizon, crédit) · **modifier `src/main.js`** (le seul fichier qui lit `FLAGS` sur ce chemin) · modifier `src/flags.js` (poser `globeContinu`) · modifier `test/globe-eviction.test.js` (déverrouiller `:204` et `:208`, **et lui donner une caméra**) — ⚠️ **aucune des trois corrections ne touche `MAX_Z` ni `CACHE_MAX`**, contrairement à ce qu'annonçait ce plan.
 
@@ -663,33 +663,128 @@ Tant que `_rescale` téléportait au point de présentation, cet écart n'avait 
 
 #### Les étapes
 
-- [ ] **Étape 0 — POSER LE DRAPEAU `globeContinu`, ET LE BRANCHER.** ⚠️ **`src/globe.js` n'importe PAS `flags.js` — vérifié, zéro occurrence.** Les seuls lecteurs de `FLAGS` sont `main.js`, `fenetre-reglage.js` et `ui/effects-panel.js`. Un drapeau posé dans `flags.js` sans câbler sa lecture **ne protège rien** : les corrections atterrissent sur le globe de production. **Le lecteur est `src/main.js`**, qui construit le globe : il passe l'option au constructeur, et `globe.js` ne connaît qu'un booléen, pas `FLAGS`. Suivre le patron de `FLAGS.fenetreContinue`, déjà en place.
-- [ ] **Étape 1 — établir la base, et l'écrire. ⚠️ EN FIXANT L'ÉTAT DU CACHE À L'ENTRÉE, SANS QUOI LE CHIFFRE N'EST PAS REPRODUCTIBLE.** Le zoom atteint est une grandeur **à hystérésis** : même code, globe **neuf** à chaque station → **z9** ; globe **promené** sur les stations à la suite → z7 puis **z6, sans jamais remonter**. La cause est dans le fichier — une bouffée de crédit initiale, puis `tiles.size = CACHE_MAX`. ⚠️ **z6, z7 et z9 sont donc TROIS MESURES JUSTES de trois protocoles différents. N'en interdisez aucune : dites laquelle vous mesurez.**
+- [x] **Étape 0 — POSER LE DRAPEAU `globeContinu`, ET LE BRANCHER.** ⚠️ **`src/globe.js` n'importe PAS `flags.js` — vérifié, zéro occurrence.** Les seuls lecteurs de `FLAGS` sont `main.js`, `fenetre-reglage.js` et `ui/effects-panel.js`. Un drapeau posé dans `flags.js` sans câbler sa lecture **ne protège rien** : les corrections atterrissent sur le globe de production. **Le lecteur est `src/main.js`**, qui construit le globe : il passe l'option au constructeur, et `globe.js` ne connaît qu'un booléen, pas `FLAGS`. Suivre le patron de `FLAGS.fenetreContinue`, déjà en place.
+- [x] **Étape 1 — établir la base, et l'écrire. ⚠️ EN FIXANT L'ÉTAT DU CACHE À L'ENTRÉE, SANS QUOI LE CHIFFRE N'EST PAS REPRODUCTIBLE.** Le zoom atteint est une grandeur **à hystérésis** : même code, globe **neuf** à chaque station → **z9** ; globe **promené** sur les stations à la suite → z7 puis **z6, sans jamais remonter**. La cause est dans le fichier — une bouffée de crédit initiale, puis `tiles.size = CACHE_MAX`. ⚠️ **z6, z7 et z9 sont donc TROIS MESURES JUSTES de trois protocoles différents. N'en interdisez aucune : dites laquelle vous mesurez.**
 
   Six altitudes **nommées** : **1 600 km · 800 km · 200 km · 60 km · 8 km · 2 km**, à **quatre latitudes** (0°, 30°, 45°, 60° N). Relever zoom effectif, tuiles dessinées, taille de cache et **requêtes par image caméra immobile**, **sur 20 images consécutives, en exigeant la stabilité**. ⚠️ **Et NE COMPTEZ PAS DEPUIS L'IMAGE 0 : un globe neuf met quatre images à se stabiliser.** Jetez les cinq premières, puis relevez les vingt suivantes. Sans cette précaution, « 20 images stables » est impossible à obtenir et l'Étape 1 ne se termine jamais.
-- [ ] **Étape 1 bis — DONNER UNE CAMÉRA AU HARNAIS. ⚠️ SANS ELLE, LES ÉTAPES 2 ET 4 SONT IMPOSSIBLES.** Le seul harnais qui fait voler le globe porte `{ position: new THREE.Vector3() }` (`test/globe-eviction.test.js:145` et `:225`) : **aucune orientation, aucune `projectionMatrix`** — zéro `PerspectiveCamera` dans tous les `test/globe-*.test.js`. Sans elle, l'Étape 4 n'a pas de frustum à tester et l'Étape 2 pas d'écran. Prescrivez `new THREE.PerspectiveCamera(30, 16/9, near, 1400)` avec **`near = clamp(orbAlt × 0,2, 0,01, 0,5)`** — ⚠️ **le `clamp` fait partie de la formule** (`modes.js:704`) ; sans lui, le plan proche part à zéro en orbite haute. Les trois valeurs sont dans le dépôt : `main.js:263`, `modes.js:704`, `modes.js:319`.
-- [ ] **Étape 2 — DÉVERROUILLER LES TESTS, avant toute correction.** `globe-eviction.test.js:204` (`zoomFinal >= 6`) et `:208` (`visiblesFinal > 200`) décrivent le défaut comme un contrat, et la seconde **fait échouer le bon correctif**.
+- [x] **Étape 1 bis — DONNER UNE CAMÉRA AU HARNAIS. ⚠️ SANS ELLE, LES ÉTAPES 2 ET 4 SONT IMPOSSIBLES.** Le seul harnais qui fait voler le globe porte `{ position: new THREE.Vector3() }` (`test/globe-eviction.test.js:145` et `:225`) : **aucune orientation, aucune `projectionMatrix`** — zéro `PerspectiveCamera` dans tous les `test/globe-*.test.js`. Sans elle, l'Étape 4 n'a pas de frustum à tester et l'Étape 2 pas d'écran. Prescrivez `new THREE.PerspectiveCamera(30, 16/9, near, 1400)` avec **`near = clamp(orbAlt × 0,2, 0,01, 0,5)`** — ⚠️ **le `clamp` fait partie de la formule** (`modes.js:704`) ; sans lui, le plan proche part à zéro en orbite haute. Les trois valeurs sont dans le dépôt : `main.js:263`, `modes.js:704`, `modes.js:319`.
+- [x] **Étape 2 — DÉVERROUILLER LES TESTS, avant toute correction.** `globe-eviction.test.js:204` (`zoomFinal >= 6`) et `:208` (`visiblesFinal > 200`) décrivent le défaut comme un contrat, et la seconde **fait échouer le bon correctif**.
 
   ⚠️ **ET L'ASSERTION DE REMPLACEMENT DOIT SORTIR ROUGE AUJOURD'HUI.** Une version de ce plan proposait « toute tuile a un ancêtre `ready` » : **vrai par construction** (racines jamais évincées, règle sans-trou). Une autre disait « le zoom effectif suit l'altitude, au moins trois niveaux distincts » — ⚠️ **ambiguë, et l'une des deux lectures est VERTE aujourd'hui** : les niveaux **dessinés** sur une descente sont {2,3,4,5,6}, soit cinq, et `zoomsDessines` est déjà rempli par `globe-eviction.test.js:159`.
 
   **La lecture qui mord, et c'est celle-là qu'il faut écrire : `zmax`, relevé sur 20 images stables, prend au moins TROIS valeurs différentes entre les six altitudes nommées de l'Étape 1.** Aujourd'hui il n'en prend qu'une. ⚠️ **Vérifiez le rouge avant d'aller plus loin ; le §0 l'exige.** Et déverrouillez aussi `globe-eviction.test.js:202`.
-- [ ] **Étape 3 — l'horizon géométrique**, avec sa marge de corde et l'exemption des racines `z2`. `globe.js:770` : `dot < −0.35` est 110,5° en dur, au lieu de `R/|camPos|` — **2,87° à 8 km**, soit une calotte jusqu'à **×1 076 trop large**. ⚠️ **Seul, il ne débloque AUCUN niveau de zoom** — mesuré z7 → z7. Il réduit la calotte parcourue, ce qui rend l'étape 4 possible ; il ne se juge pas sur le zoom. Test : à basse altitude, le nombre de tuiles parcourues chute d'un ordre de grandeur **sans qu'aucune tuile visible ne disparaisse**. ⚠️ La seconde moitié est celle qui attrape l'écrêtage au limbe.
-- [ ] **Étape 4 — le test de frustum** dans `_traverse` (zéro occurrence aujourd'hui). ⚠️ **ET IL A UN PARAMÈTRE CACHÉ QUI VAUT TROIS NIVEAUX DE ZOOM : LA MARGE DU VOLUME ENGLOBANT.** À l'exagération 18 (`globe.js:278`), le relief sort de la sphère de **2,5 unités, soit 159 km**. Mesuré, 20 images stables : marge **0** → z11, cache 156, crédit 264 ; marge **2,5** (la correcte) → **z10, cache 420, crédit 0**. ⚠️ **Autrement dit, avec la bonne marge, le frustum seul NE SUFFIT PAS — et « 2 à 4 % des tuiles dans le champ » ne se reproduit pas : 55 % mesurés à 8 km.** Prenez la marge juste, mesurez, et n'espérez pas le chiffre facile.
-- [ ] **Étape 5 — le crédit. ⚠️ À OUVRIR PAR DÉFAUT, après l'Étape 4.** Ce plan a écrit « les deux premières corrections ont suffi » : **faux aux deux altitudes où le socle vit**, une fois donnée au frustum la marge de volume englobant qu'il lui faut. Le crédit reste donc à traiter — mais **après** la réduction d'emprise, jamais avant.
+- [x] **Étape 3 — l'horizon géométrique**, avec sa marge de corde et l'exemption des racines `z2`. `globe.js:770` : `dot < −0.35` est 110,5° en dur, au lieu de `R/|camPos|` — **2,87° à 8 km**, soit une calotte jusqu'à **×1 076 trop large**. ⚠️ **Seul, il ne débloque AUCUN niveau de zoom** — mesuré z7 → z7. Il réduit la calotte parcourue, ce qui rend l'étape 4 possible ; il ne se juge pas sur le zoom. Test : à basse altitude, le nombre de tuiles parcourues chute d'un ordre de grandeur **sans qu'aucune tuile visible ne disparaisse**. ⚠️ La seconde moitié est celle qui attrape l'écrêtage au limbe.
+- [x] **Étape 4 — le test de frustum** dans `_traverse` (zéro occurrence aujourd'hui). ⚠️ **ET IL A UN PARAMÈTRE CACHÉ QUI VAUT TROIS NIVEAUX DE ZOOM : LA MARGE DU VOLUME ENGLOBANT.** À l'exagération 18 (`globe.js:278`), le relief sort de la sphère de **2,5 unités, soit 159 km**. Mesuré, 20 images stables : marge **0** → z11, cache 156, crédit 264 ; marge **2,5** (la correcte) → **z10, cache 420, crédit 0**. ⚠️ **Autrement dit, avec la bonne marge, le frustum seul NE SUFFIT PAS — et « 2 à 4 % des tuiles dans le champ » ne se reproduit pas : 55 % mesurés à 8 km.** Prenez la marge juste, mesurez, et n'espérez pas le chiffre facile.
+- [x] **Étape 5 — le crédit. ⚠️ À OUVRIR PAR DÉFAUT, après l'Étape 4.** Ce plan a écrit « les deux premières corrections ont suffi » : **faux aux deux altitudes où le socle vit**, une fois donnée au frustum la marge de volume englobant qu'il lui faut. Le crédit reste donc à traiter — mais **après** la réduction d'emprise, jamais avant.
 
   ⚠️ **CE QUE CETTE ÉTAPE NE DOIT PAS FAIRE : ajouter un plancher constant.** Mesuré, tout plancher ≥ 16 installe un cycle limite de période 4 où la planète retombe à ses 16 racines une image sur quatre. **Le critère d'acceptation porte sur la stabilité image par image** — `zmax` et tuiles dessinées constants sur **20 images**, requêtes au repos à zéro — **jamais sur un relevé à une seule image.**
 
 
   Le détail du défaut, pour mémoire : `globe.js:759`, `_credit = CACHE_MAX − tiles.size + marge`. En régime établi `marge = 0` et **54 à 91 raffinements sont refusés par image**. ⚠️ **Mais `marge` n'est PAS « vide par construction » — ce plan l'a écrit deux fois, et c'est faux** : à la discontinuité (téléport), elle vaut 280, 196, 24, puis 0 en quatre images, et finance 280 requêtes. **Le filet anti-gel du commentaire `743-752` tient ; il ne mord qu'aux discontinuités.**
-- [ ] **Étape 6 — rendre évinçables les tuiles bloquées.** Une tuile en `error` ou en `loading` dont la requête ne revient jamais **occupe une place du budget définitivement**. C'est le même point fixe, par une autre porte. ⚠️ **Sans retourner l'ordre d'éviction** : `globe.js` classe par **récence au rang 1, profondeur au rang 2 seulement**, délibérément, avec vingt lignes de commentaire et un test dédié vert. **C'est correct.** ⚠️ **ET N'ÉVINCEZ PAS UNE `loading` SANS ANNULER SA REQUÊTE** : le `.then` de `_pump` (`globe.js:532`) ajouterait un maillage orphelin. Garde : `if (!this.tiles.has(t.key)) return` — **et EXIGEZ-LE DANS LE TEST** (une révision de ce plan avait supprimé cette exigence en retirant un doublon). ⚠️ **Deux pièges de plus, mesurés :** une tuile remise à `empty` est **redemandée à l'image suivante** (`globe.js:799`), et **annuler une requête déclenche le réessai automatique** du `.catch` de `_pump`. **Le test doit vérifier qu'une tuile évincée ne revient pas d'elle-même.**
-- [ ] **Étape 7 — trancher le cache**, avec les chiffres de l'Étape 1 et non par principe. ⚠️ Si les corrections réclament 824, une formule qui rend 370 est une régression déguisée en optimisation. **Mesurez avant de choisir.**
-- [ ] **Étape 8 — la mémoire retenue pour rien : ~210 Mo sur 327 Mo au cache plein.** `globe.js:238` — le canevas reste vivant via `CanvasTexture.image` après téléversement (**105 Mo**). Et `t.heights` (**105 Mo**) n'est relu que par `setExaggeration` (`:899`), **qui n'a aucun appelant dans tout le dépôt — vérifié**. ⚠️ Le commentaire de `:168` annonce « 380 Mo pour 1 500 tuiles » : la documentation **sous-estime d'un facteur 2,4**.
-- [ ] **Étape 9 — les normales de bord.** ⚠️ **l'écrêtage est à `globe.js:257-260`** (`Math.min(..., 254)` / `255`), et non à `:623-648` qui n'en est que le consommateur : `sampleHeights` écrête alors que `tileToLatLon` donne la position complète — pente **407 m au bord contre 853 m au centre**, soit **47,7 % de la vraie pente** — ⚠️ **et ce chiffre n'est pas seulement mesuré, il se DÉRIVE du dépôt** (`gridFor` = 24, plus l'écrêtage) : il vaut donc comme source, pas comme relevé, d'où un liseré d'éclairage autour de chaque tuile.
-- [ ] **Étape 10 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [x] **Étape 6 — rendre évinçables les tuiles bloquées.** Une tuile en `error` ou en `loading` dont la requête ne revient jamais **occupe une place du budget définitivement**. C'est le même point fixe, par une autre porte. ⚠️ **Sans retourner l'ordre d'éviction** : `globe.js` classe par **récence au rang 1, profondeur au rang 2 seulement**, délibérément, avec vingt lignes de commentaire et un test dédié vert. **C'est correct.** ⚠️ **ET N'ÉVINCEZ PAS UNE `loading` SANS ANNULER SA REQUÊTE** : le `.then` de `_pump` (`globe.js:532`) ajouterait un maillage orphelin. Garde : `if (!this.tiles.has(t.key)) return` — **et EXIGEZ-LE DANS LE TEST** (une révision de ce plan avait supprimé cette exigence en retirant un doublon). ⚠️ **Deux pièges de plus, mesurés :** une tuile remise à `empty` est **redemandée à l'image suivante** (`globe.js:799`), et **annuler une requête déclenche le réessai automatique** du `.catch` de `_pump`. **Le test doit vérifier qu'une tuile évincée ne revient pas d'elle-même.**
+- [~] **Étape 7 — trancher le cache** ⚠️ **MESURÉE, PAS APPLIQUÉE — voir la Tâche 4 sexies**, avec les chiffres de l'Étape 1 et non par principe. ⚠️ Si les corrections réclament 824, une formule qui rend 370 est une régression déguisée en optimisation. **Mesurez avant de choisir.**
+- [ ] **Étape 8 — la mémoire retenue pour rien ⚠️ REPORTÉE (Tâche 4 sexies)** : : ~210 Mo sur 327 Mo au cache plein.** `globe.js:238` — le canevas reste vivant via `CanvasTexture.image` après téléversement (**105 Mo**). Et `t.heights` (**105 Mo**) n'est relu que par `setExaggeration` (`:899`), **qui n'a aucun appelant dans tout le dépôt — vérifié**. ⚠️ Le commentaire de `:168` annonce « 380 Mo pour 1 500 tuiles » : la documentation **sous-estime d'un facteur 2,4**.
+- [ ] **Étape 9 — les normales de bord.** ⚠️ **REPORTÉE (Tâche 4 sexies)** ⚠️ **l'écrêtage est à `globe.js:257-260`** (`Math.min(..., 254)` / `255`), et non à `:623-648` qui n'en est que le consommateur : `sampleHeights` écrête alors que `tileToLatLon` donne la position complète — pente **407 m au bord contre 853 m au centre**, soit **47,7 % de la vraie pente** — ⚠️ **et ce chiffre n'est pas seulement mesuré, il se DÉRIVE du dépôt** (`gridFor` = 24, plus l'écrêtage) : il vaut donc comme source, pas comme relevé, d'où un liseré d'éclairage autour de chaque tuile.
+- [x] **Étape 10 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
+#### ✅ CE QUI A ÉTÉ FAIT, ET CE QUE ÇA MESURE (2026-08-20)
+
+**Le drapeau et son câblage.** `FLAGS.globeContinu` (`src/flags.js`, `false`), échappatoire d'adresse `?globe=continu` / `?globe=crans` via `globeContinuActif()`, sur le patron de `suiviHelicoActif`. **Le seul lecteur est `src/main.js`** — `new Globe({ ...params, globeContinu: globeContinuActif() })` — et `globe.js` ne connaît qu'un booléen, `this.continu`. ⚠️ **Drapeau BAISSÉ, donc la production est inchangée :** les trois tris vivent dans des branches `if (this.continu)`, et la suite entière (3 111 verts) le vérifie sur l'ancien chemin.
+
+**MON PROTOCOLE DE BASE — « GLOBE NEUF À CHAQUE STATION » (protocole A).** ⚠️ **Il est dit ici parce que le zoom atteint est à hystérésis et que le chiffre n'a aucun sens sans lui.** Un `new Globe` par station, `_tileMemo` vidée, aucune histoire de cache héritée d'une station voisine ; caméra `PerspectiveCamera(30, 16/9, clamp(orbAlt × 0,2 ; 0,01 ; 0,5), 1400)` posée sur la station et regardant le centre de la planète ; à chaque image `update()` puis attente que la file se vide ; **les douze premières images jetées, les vingt suivantes relevées, stabilité exigée.**
+
+⚠️ **ET « JETEZ LES CINQ PREMIÈRES » NE SUFFIT PLUS — ce chiffre datait du globe GELÉ.** La règle sans-trou ne descend que d'**un niveau par image** (une tuile ne se refend qu'une fois ses quatre enfants prêts) : le globe corrigé met donc une image par niveau. Mesuré image par image : convergence à l'image **8** à 200 km, à l'image **9** à 8 km, puis plus un seul changement pendant vingt images. Douze, c'est ce chiffre plus trois de marge.
+
+**LA BASE, AVANT TOUTE CORRECTION** — six altitudes × quatre latitudes (0°, 30°, 45°, 60° N), longitude 6,25° :
+
+| altitude | zmax (lat 0 / 30 / 45 / 60) | dessinées | cache | crédit | req/img au repos |
+|---|---|---|---|---|---|
+| 1 600 km | z6 / z6 / z6 / z6 | 303-306 | 420 | 0 | 0,0 |
+| 800 km | z6 / z6 / z6 / **z5** | 303-307 | 420 | 0 | 0,0 |
+| 200 km | z6 / z6 / z6 / **z5** | 303-306 | 420 | 0 | 0,0 |
+| 60 km | z6 / z6 / z6 / **z5** | 303-306 | 420 | 0 | 0,0 |
+| 8 km | z6 / z6 / z6 / **z5** | 303-306 | 420 | 0 | 0,0 |
+| 2 km | z6 / z6 / z6 / **z5** | 303-306 | 420 | 0 | 0,0 |
+
+**À latitude fixée, `zmax` prend UNE seule valeur sur un facteur 800 d'altitude.** C'est le symptôme, reproduit à l'identique.
+
+**APRÈS LES ÉTAPES 3 À 6**, même protocole, latitude 45° :
+
+| altitude | zmax | dessinées | parcourues | refus/img | cache | crédit | req/img au repos | stable sur 20 images |
+|---|---|---|---|---|---|---|---|---|
+| 1 600 km | **z7** | 57 | 216 | 0 | 216 | 204 | 0,0 | oui |
+| 800 km | **z8** | 76 | 252 | 0 | 252 | 168 | 0,0 | oui |
+| 200 km | **z10** | 117 | 312 | 0 | 312 | 108 | 0,0 | oui |
+| 60 km | **z11** | 168 | 420 | 27 | 420 | 0 | 0,0 | oui |
+| 8 km | **z11** | 172 | 420 | 28 | 420 | 0 | 0,0 | oui |
+| 2 km | **z11** | 163 | 420 | 28 | 420 | 0 | 0,0 | oui |
+
+**`zmax` prend QUATRE valeurs distinctes (z7, z8, z10, z11), et `MAX_Z = 11` cesse d'être du code mort : il est ATTEINT.** Les tuiles dessinées tombent de ~304 à 57-172, la stabilité est exacte (zmax et dessinées constants à la tuile près sur les vingt images), et **la caméra immobile ne demande plus rien.**
+
+**LE PANORAMIQUE LATÉRAL À BASSE ALTITUDE** — 90° en 60 images à 4 km, le geste que le vol de référence ne voit pas :
+
+| | zoom stabilisé | requêtes / img | **raffinements refusés / img** |
+|---|---|---|---|
+| avant | z6, 304 dessinées | 3,5 | **66,3, indéfiniment** |
+| après | z11, 167 dessinées | 81,5 | **0,5** |
+
+⚠️ **CE 66,3 EST LA CAUSE 1 DU PLAN, REPRODUITE** (« 54 à 91 raffinements refusés par image, indéfiniment »). **Et il montre que l'Étape 5 n'avait rien à écrire :** le crédit n'est pas le plafond, il en est le marqueur. Une fois l'emprise réduite, `CACHE_MAX − tiles.size + marge` redevient positif tout seul (204, 168, 108 aux trois altitudes hautes) et les refus tombent d'eux-mêmes. ⚠️ **AUCUN PLANCHER DE CRÉDIT N'A ÉTÉ AJOUTÉ, et c'est le résultat de l'étape, pas son abandon** — le critère demandé par le plan (stabilité sur 20 images, requêtes au repos à zéro) est vert sans lui, et tout plancher l'aurait cassé.
+
+⚠️ **ET LE FILET ANTI-GEL EST INTACT :** le test « cache saturé puis la planète TOURNE » passe, sur l'ancien chemin comme sur le nouveau.
+
+**CE QUE L'HORIZON SEUL FAIT, SUR MON PROTOCOLE** — il déplace z6 → z7 en haut et z6 → z8 en bas, **mais avec une instabilité résiduelle** (plage z7-z8, 1,8 à 2,0 requête par image au repos à 8 km) : **il ne s'achève qu'avec le frustum.** ⚠️ **Le plan écrivait « z7 → z7, il ne débloque AUCUN niveau » : c'est vrai de SON protocole, faux du mien, et les deux mesures sont justes.** Ce qui ne dépend d'aucun protocole : **seul, il ne donne pas un état stable.**
+
+**LES DEUX FORMULES, ET LEURS MARGES.**
+
+- **Horizon** : `cos limite = R² / ((R + marge_relief) × D)`, plus le demi-angle `theta` de la tuile au centre de la planète — la **marge de corde**, sans laquelle la formule écrête au limbe. Racines `z2` **exemptées**.
+- **Volume englobant** : la nappe déplacée occupe la coquille `[R − 0,9 ; R + 2,545]` unités à l'exagération 18 (9 000 m × R_GLOBE/EARTH_RADIUS_M × 18 = **2,545 unités, soit 162 km**, et `skirtDrop` plafonne à 0,9). La sphère est donc centrée **dans** la coquille — `R + (marge − 0,9)/2` — et son rayon vaut `rayon_tuile × ce facteur + (marge + 0,9)/2`, ce qui divise l'épaisseur portée par deux (3,4 → 1,72) sans jamais sortir du volume réel.
+- ⚠️ **`t.rayon` n'est PAS la demi-corde diagonale** : c'est la distance maximale du centre aux **quatre coins**, et c'est exact — vérifié numériquement, `max(surface) / max(coins) = 1,00000` sur z2→z11 avec 21×21 échantillons par tuile. La demi-corde sous-estime dès que le carreau n'est pas plat.
+
+⚠️ **LES DEUX MARGES SURVIVENT AU VOL DE RÉFÉRENCE — MESURÉ.** Mises à zéro, **les treize assertions du vol restent vertes** : le bouchon de test vaut 812 m partout (aucun sommet à faire dépasser) et aux six altitudes nommées la planète remplit l'écran (le limbe n'y est jamais). Elles sont donc testées **en géométrie pure**, où leur mutation tue le test sur-le-champ — `test/globe-eviction.test.js`, deux tests dédiés, mutation vérifiée dans les deux sens.
+
+**LES TUILES BLOQUÉES (Étape 6).** Rang 0 d'éviction : `error`, et `loading` de plus de `IMAGES_BLOQUEE = 600` images (10 s à 60 Hz). ⚠️ **L'ordre des deux rangs existants n'est pas touché.** Trois gardes, toutes exigées par le plan et toutes testées :
+
+1. **le maillage orphelin** — `_pump` compare l'OBJET (`this.tiles.get(t.key) !== t`), pas la clé, et jette la texture ;
+2. **la quarantaine** — une clé qui a épuisé son réessai renaît directement `error`, jamais `empty`, donc elle ne repart pas sur le réseau à l'image suivante ;
+3. ⚠️ **et la quarantaine EXPIRE au bout de `IMAGES_QUARANTAINE = 600` images.** Une quarantaine perpétuelle **casse un contrat écrit ailleurs dans le dépôt** — `test/globe-reseau.test.js` : « la mémoire ne garde aucun souvenir de l'échec qui l'en empêcherait ». Une coupure de trois secondes ne doit pas coûter la session. **La première version était perpétuelle et a fait rougir ce test ; c'est lui qui a tranché.**
+
+**LE BANC ET LES TESTS.** `test/globe-eviction.test.js` passe de 6 à 16 tests (3 098 → **3 111** dans la suite), sans nouveau fichier — donc `audit:tests` reste à zéro écart (181 listés, 181 sur disque). Le harnais a désormais une **vraie caméra** (Étape 1 bis) et les trois assertions qui verrouillaient le défaut (`:202`, `:204`, `:208`) sont devenues des **planchers larges** (`z4`, `zoomFinal > 3`, `visiblesFinal > 12`) avec, en commentaire, la raison de leur desserrage. **L'assertion qui mord a été vérifiée ROUGE avant correction** : « zmax ne prend que **1** valeur sur les six altitudes nommées ».
+
+⚠️ **UNE LIMITE DU BANC, ET ELLE SE DÉRIVE DU DÉPÔT.** Le test « sans trou » (cinq rayons d'écran contre les tuiles allumées) ne tourne qu'aux **quatre altitudes hautes** : la dalle bouchon vaut 812 m partout et l'exagération vaut 18, donc la nappe dessinée est un plateau à **14 616 m**, et une caméra à 8 km ou 2 km est **dessous**. ⚠️ **C'est une propriété du globe de PRODUCTION, pas du bouchon** — c'est exactement ce que la décision 14 (« l'exagération devient une courbe continue de l'altitude ») a pour objet de corriger.
+
 
 **Ce qui est établi, et qui ne dépend d'aucun banc :** l'altitude ne change rien au zoom atteint, et **le budget de cache est le point fixe** — la couverture d'un hémisphère sature `CACHE_MAX` à elle seule. **Réduire l'emprise est donc le seul levier qui attaque la cause.** ⚠️ **Le gain chiffré des étapes 3+4 reste à établir par l'Étape 1**, avec le protocole que vous aurez écrit.
 
 ⚠️ **CETTE TÂCHE PASSE AVANT TOUTES LES AUTRES DU BLOC.** Rebrancher la source (4 alpha) d'un quadtree qui n'atteint pas ses niveaux fins ne se verrait pas ; et calibrer un plafond de file (4 bis) avant elle, c'est le calibrer sur un trafic qui va tripler. **L'ordre est 4 → 4 quater → 4 alpha → 3 → 4 bis → 4 ter.**
+
+
+### Tâche 4 sexies : LE BUDGET DU CACHE ET LA MÉMOIRE QUI LE PAIE ⚠️ DÉCOUPÉE DE LA TÂCHE 4 — À FAIRE AVANT TOUTE HAUSSE DE `CACHE_MAX`
+
+**Fichiers :** modifier `src/globe.js` (`CACHE_MAX`, la rétention du canevas, `t.heights`, `setExaggeration`, l'écrêtage de `sampleHeights`) · modifier `test/globe-eviction.test.js`
+
+⚠️ **CE SONT LES ÉTAPES 7, 8 ET 9 DE LA TÂCHE 4, SORTIES DE LEUR TÂCHE ET NON ABANDONNÉES.** La raison est mesurée, pas de confort : **l'Étape 7 est une hausse de mémoire, et c'est l'Étape 8 qui la paie.** Les faire dans le même commit que le tri spatial aurait mélangé un changement vérifiable sous node (le parcours) avec un changement qui ne se vérifie qu'au GPU (la rétention de texture, le réenvoi après perte de contexte). L'Étape 9 (les normales de bord) est orthogonale aux deux.
+
+#### ⚠️ L'ÉTAPE 7 EST DÉJÀ MESURÉE — LA CONTRADICTION « 824 CONTRE 370 » EST TRANCHÉE, ET AUCUN DES DEUX N'AVAIT RAISON
+
+Balayage de `CACHE_MAX` sur le globe **corrigé** (protocole A de la Tâche 4, latitude 45°, 25 images puis 20 relevées) :
+
+| `CACHE_MAX` | 200 km | 60 km | 8 km | 2 km |
+|---|---|---|---|---|
+| **420** (aujourd'hui) | z10, 117 dess., cache 312 | z11, 168 dess., **28 refus/img** | z11, 172 dess., **28 refus/img** | z11, 163 dess., **28 refus/img** |
+| **600** | z10, 117, cache 312 | z11, **249**, 0 refus | z11, **250**, cache **532**, 0 refus | z11, **235**, 0 refus |
+| **824** | identique à 600 | identique à 600 | identique à 600 | identique à 600 |
+| **1 200** | identique à 600 | identique à 600 | identique à 600 | identique à 600 |
+
+**L'ensemble de travail du globe corrigé SATURE À 532 TUILES.** Donc : **370 serait une régression** (le plan avait raison de s'en méfier), **824 n'achète rien** (le plan avait tort de le craindre), et **600 est la valeur juste, avec 13 % de marge.** ⚠️ **Et le gain n'est pas un niveau de zoom — c'est la COMPLÉTUDE du niveau atteint** : à 420, 28 sous-arbres par image restent grossiers faute de budget, et 172 tuiles couvrent l'écran là où il en faudrait 250.
+
+#### Les étapes
+
+- [ ] **Étape 1 — l'Étape 8 D'ABORD : la mémoire retenue pour rien, ~210 Mo sur 327 Mo au cache plein.** `globe.js` — le canevas reste vivant via `CanvasTexture.image` après téléversement (**105 Mo**) ; et `t.heights` (**105 Mo**) n'est relu que par `setExaggeration`, **qui n'a aucun appelant dans tout le dépôt**. ⚠️ Le commentaire de `TILE_MEMO_MAX` annonce « 380 Mo pour 1 500 tuiles » : la documentation **sous-estime d'un facteur 2,4**. ⚠️ **ET CETTE ÉTAPE NE SE VÉRIFIE PAS SOUS NODE** : libérer `CanvasTexture.image` change ce que three réenvoie après une perte de contexte WebGL. **Preuve à l'écran exigée, pas seulement `npm test`.**
+- [ ] **Étape 2 — porter `CACHE_MAX` à 600**, et rejouer le balayage ci-dessus sur votre banc. ⚠️ **Si l'Étape 1 n'a pas été faite, ne faites pas celle-ci** : +27 % de tuiles sur un budget de 327 Mo, c'est +88 Mo sur un tas déjà mesuré à 1,7-1,9 Go.
+- [ ] **Étape 3 — l'Étape 9 : les normales de bord.** ⚠️ **L'écrêtage est dans `sampleHeights`** (`Math.min(..., 254)` / `255`), et non dans `_buildMesh` qui n'en est que le consommateur : `sampleHeights` écrête alors que `tileToLatLon` donne la position complète — pente **407 m au bord contre 853 m au centre**, soit **47,7 % de la vraie pente**. ⚠️ **Ce chiffre se DÉRIVE du dépôt** (`gridFor` = 24, plus l'écrêtage) : il vaut comme source, pas comme relevé. D'où un liseré d'éclairage autour de chaque tuile.
+- [ ] **Étape 4 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
+⚠️ **ORDRE PROPOSÉ, ET C'EST UN ARBITRAGE À CONFIRMER :** cette tâche gagne à passer **avant la 4 quater**, parce que la 4 quater porte `MAX_Z` à 15 et annonce elle-même **448 Mo à z15** — c'est-à-dire au-dessus du budget d'aujourd'hui avant même de toucher à `CACHE_MAX`. L'ordre du plan deviendrait **4 → 4 sexies → 4 quater → 4 alpha → 3 → 4 bis → 4 ter**. **Si Adrien préfère voir les niveaux fins tout de suite, la 4 quater peut passer d'abord — mais alors sans hausse de `CACHE_MAX`.**
 
 
 ### Tâche 4 quater : LEVER LE PLANCHER DE `dist`, PUIS PORTER `MAX_Z` À 15 ⚠️ APRÈS LA TÂCHE 4, AVANT LA 4 ALPHA

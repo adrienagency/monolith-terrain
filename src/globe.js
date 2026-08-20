@@ -19,6 +19,39 @@ const CACHE_MAX = 420 // ready tiles kept before LRU eviction
 const SPLIT_RATIO = 0.38 // tile chord / camera distance beyond which we refine
 const MERGE_RATIO = SPLIT_RATIO * 0.8 // hysteresis: refined tiles only coarsen below this
 
+// LE TRI SPATIAL (plan « globe continu », Tâche 4) — derrière `globeContinu`.
+//
+// ⚠️ LE VOLUME ENGLOBANT D'UNE TUILE N'EST PAS SA CALOTTE DE SPHÈRE : le relief
+// en SORT, et à l'exagération 18 il en sort énormément. Un sommet de 9 000 m
+// déplacé de `R_GLOBE / EARTH_RADIUS_M × 18` monte à **2,5 unités de scène,
+// soit 159 km** au-dessus de la sphère nue ; la jupe, elle, descend jusqu'à
+// 0,9 unité en dessous (voir `skirtDrop` dans `_buildMesh`). Un frustum posé
+// sur la sphère nue écrête donc les crêtes au bord de l'écran — et un horizon
+// posé sur la sphère nue les fait disparaître au limbe.
+//
+// ⚠️ CE PARAMÈTRE VAUT TROIS NIVEAUX DE ZOOM, et c'est mesuré : marge 0 rend un
+// zoom plus profond et un cache à moitié vide — sur un globe qui a des trous.
+// La marge JUSTE coûte des niveaux ; elle ne se négocie pas contre eux.
+const ALT_MAX_M = 9000 // Everest 8 849 m, arrondi au-dessus
+const JUPE_MAX = 0.9 // le plafond de `skirtDrop`, en unités de scène
+
+// UNE TUILE QUI NE REVIENDRA JAMAIS OCCUPE UNE PLACE DU BUDGET POUR TOUJOURS.
+// C'est le point fixe du cache par une autre porte : `error` et `loading` ne
+// sont candidates à aucun rang d'éviction, donc une requête perdue retire une
+// place définitivement. 10 s à 60 Hz est large : la requête a été réessayée une
+// fois entre-temps.
+const IMAGES_BLOQUEE = 600
+
+// ⚠️ ET LA QUARANTAINE EST TEMPORAIRE, JAMAIS DÉFINITIVE. Rendre une tuile en
+// erreur évinçable ouvre une boucle : évincée, elle est recréée `empty` au
+// parcours suivant, redemandée, échoue, et le réseau repart pour un tour. La
+// quarantaine ferme cette boucle — mais une quarantaine PERPÉTUELLE perdrait la
+// tuile pour toute la session sur une coupure réseau de trois secondes, et
+// `test/globe-reseau.test.js` tient ce contrat noir sur blanc : « la mémoire ne
+// garde aucun souvenir de l'échec qui l'en empêcherait ». Dix secondes, donc :
+// assez pour tuer la boucle, assez peu pour qu'un réseau revenu soit réessayé.
+const IMAGES_QUARANTAINE = 600
+
 // segments per patch edge — low zooms form the planet silhouette in the full
 // view, so they get denser grids: a z3 tile spans 45 degrees of longitude and
 // 24 segments there leaves visibly flat facets (and jagged exaggerated relief)
@@ -282,6 +315,21 @@ export class Globe {
     this.frame = 0
     this.enabled = false
 
+    // LE TRI SPATIAL, DERRIÈRE SON DRAPEAU. ⚠️ `globe.js` n'importe pas
+    // `flags.js` — délibérément : le lecteur de `FLAGS.globeContinu` est
+    // `src/main.js`, qui ne passe ici qu'un booléen.
+    this.continu = params.globeContinu ?? false
+    this._frustum = new THREE.Frustum()
+    this._matVue = new THREE.Matrix4()
+    this._sphereTuile = new THREE.Sphere()
+    this._angleHorizon = 0
+    this._rayonCentre = 1
+    this._demiEpaisseur = 0
+    this._visites = 0 // tuiles PARCOURUES à la dernière image (mesure de l'emprise)
+    this._refus = 0 // raffinements REFUSÉS faute de crédit à la dernière image
+    // clé → image du dernier abandon. Voir IMAGES_QUARANTAINE.
+    this._echoue = new Map()
+
     this.uniforms = {
       uSunDir: { value: new THREE.Vector3(0.5, 0.6, 0.5).normalize() },
       uShadowColor: { value: new THREE.Color(params.bgColorA ?? '#dfe3ea') },
@@ -499,6 +547,16 @@ export class Globe {
     const se = tileToLatLon(x + 1, y + 1, z)
     const center = latLonToSphere((nw.lat + se.lat) / 2, (nw.lon + se.lon) / 2)
     const corner = latLonToSphere(nw.lat, nw.lon)
+    // RAYON ENGLOBANT de la nappe NUE, vérifié numériquement : les QUATRE COINS
+    // sont exactement les points extrêmes du carreau (rapport max/coins = 1,000
+    // sur z2→z11, 21×21 échantillons par tuile). Une demi-corde diagonale ne
+    // l'est pas — elle sous-estime dès que le carreau n'est pas plat.
+    const rayon = Math.max(
+      center.distanceTo(corner),
+      center.distanceTo(latLonToSphere(nw.lat, se.lon)),
+      center.distanceTo(latLonToSphere(se.lat, nw.lon)),
+      center.distanceTo(latLonToSphere(se.lat, se.lon))
+    )
     t = {
       key,
       z,
@@ -511,14 +569,33 @@ export class Globe {
       lastUsed: 0,
       center,
       chord: corner.distanceTo(latLonToSphere(se.lat, se.lon)),
+      rayon,
+      // demi-angle au centre de la planète : la MARGE DE CORDE de l'horizon.
+      // Sans elle la formule écrête au limbe et ouvre des trous — une tuile
+      // dont le CENTRE passe derrière l'horizon a encore la moitié de sa
+      // surface devant.
+      theta: 2 * Math.asin(Math.min(rayon / (2 * R_GLOBE), 1)),
     }
+    // ⚠️ UNE CLÉ EN QUARANTAINE RENAÎT DIRECTEMENT `error`, jamais `empty` : une
+    // tuile évincée ne doit pas revenir d'elle-même sur le réseau. (Le tri
+    // spatial seul rend les tuiles bloquées évinçables — hors de lui, la
+    // question ne se pose pas et le chemin reste celui d'avant, au bit près.)
+    if (this.continu && this._enQuarantaine(key)) t.state = 'error'
     this.tiles.set(key, t)
     return t
   }
 
+  // la clé a-t-elle épuisé son réessai il y a MOINS de IMAGES_QUARANTAINE images ?
+  _enQuarantaine(key) {
+    const f = this._echoue.get(key)
+    return f !== undefined && this.frame - f < IMAGES_QUARANTAINE
+  }
+
   _request(t, priority) {
     if (t.state !== 'empty') return
+    if (this.continu && this._enQuarantaine(t.key)) return
     t.state = 'loading'
+    t.demandee = this.frame // l'image de DÉPART : c'est elle qui date un blocage
     this.queue.push({ t, priority })
     this._pump()
   }
@@ -530,21 +607,33 @@ export class Globe {
       this.inFlight++
       fetchTile(t.z, t.x, t.y)
         .then(({ texture, heights }) => {
+          // ⚠️ LA GARDE DU MAILLAGE ORPHELIN. Rendre les tuiles bloquées
+          // évinçables veut dire qu'une `loading` peut disparaître de la Map
+          // pendant que sa requête est encore en vol. Sans cette ligne, le
+          // retour construirait un maillage, l'ajouterait au groupe, et plus
+          // rien ne le retrouverait jamais : ni `_evict`, ni `dispose`.
+          // On compare l'OBJET, pas la clé : la tuile peut avoir été recréée.
+          if (this.tiles.get(t.key) !== t) {
+            texture.dispose()
+            return
+          }
           t.texture = texture
           t.heights = heights
           t.state = 'ready'
           this._buildMesh(t)
         })
         .catch((err) => {
+          const vivante = this.tiles.get(t.key) === t
           // one retry, then give up — the parent keeps covering this area
-          if (!t.retried) {
+          if (!t.retried && vivante) {
             t.retried = true
             t.state = 'empty'
             this._request(t, 0)
-          } else {
-            t.state = 'error'
-            console.warn('globe tile failed:', err.message)
+            return
           }
+          t.state = 'error'
+          this._echoue.set(t.key, this.frame) // quarantaine, datée
+          if (vivante) console.warn('globe tile failed:', err.message)
         })
         .finally(() => {
           this.inFlight--
@@ -739,6 +828,9 @@ export class Globe {
     const camPos = camera.position
     const camDir = camPos.clone().normalize()
     this._drawn = 0
+    this._visites = 0
+    this._refus = 0
+    if (this.continu) this._preparerTriSpatial(camera, camPos)
 
     // CRÉDIT DE CRÉATION de la frame. Un raffinement fait naître quatre tuiles ;
     // n'en lancer que ce qu'on pourra garder, sinon elles s'évincent l'une
@@ -764,10 +856,88 @@ export class Globe {
     return this._drawn
   }
 
+  // LE TRI SPATIAL, UNE FOIS PAR IMAGE. Deux grandeurs en sortent, toutes deux
+  // consommées par `_traverse` : l'angle d'horizon et le frustum de la caméra.
+  //
+  // ⚠️ L'HORIZON EST GÉOMÉTRIQUE, PLUS UNE CONSTANTE. `dot < −0,35` valait
+  // 110,5° en dur — une calotte de deux tiers de planète, quelle que soit
+  // l'altitude. Le vrai horizon d'un point à la distance D du centre est à
+  // `acos(R/D)` : **2,87° à 8 km**, soit une calotte jusqu'à ×1 076 trop large.
+  // On ne prend PAS `R/D` nu pour autant : un point à l'altitude `h` reste
+  // visible tant que `P·camPos ≥ R²`, donc le cosinus limite est
+  // `R² / ((R + marge) × D)` — c'est ce qui garde les crêtes exagérées visibles
+  // par-dessus le limbe au lieu de les faire clignoter.
+  //
+  // ⚠️ SEUL, L'HORIZON NE DÉBLOQUE AUCUN NIVEAU DE ZOOM — mesuré. Il réduit
+  // l'emprise parcourue, ce qui rend le frustum possible ; il ne se juge pas au
+  // zoom atteint mais au nombre de tuiles PARCOURUES (`_visites`).
+  _preparerTriSpatial(camera, camPos) {
+    const R = this.radius
+    // le déplacement radial maximal du relief, dans les unités de la scène —
+    // même formule que `dispScale` dans `_buildMesh`
+    const marge = ALT_MAX_M * (R_GLOBE / EARTH_RADIUS_M) * this.exaggeration
+    const D = Math.max(camPos.length(), R * 1.0000001)
+    const cos = (R * R) / ((R + marge) * D)
+    this._angleHorizon = Math.acos(Math.min(Math.max(cos, -1), 1))
+    // la nappe déplacée occupe la coquille [R − JUPE_MAX, R + marge] : on centre
+    // la sphère englobante DEDANS plutôt que sur la sphère nue, ce qui divise
+    // par deux l'épaisseur à porter (2,5 + 0,9 → 1,72 à l'exagération 18).
+    this._rayonCentre = (R + (marge - JUPE_MAX) / 2) / R
+    this._demiEpaisseur = (marge + JUPE_MAX) / 2
+
+    // ⚠️ `matrixWorld` de la caméra est mise à jour par le RENDU, qui passe
+    // après nous : sans ce rappel le frustum aurait une image de retard, et le
+    // retard se voit — les tuiles clignoteraient au bord de l'écran.
+    camera.updateMatrixWorld()
+    if (!camera.projectionMatrix || !camera.matrixWorld) {
+      // ⚠️ ÉCHEC BRUYANT, ET C'EST VOULU. Un repli silencieux « pas de matrice,
+      // pas de frustum » rendrait le drapeau inopérant sans que rien ne rougisse
+      // — exactement le défaut que cette tâche corrige.
+      throw new Error('globe continu : update() exige une vraie caméra (projectionMatrix + matrixWorld)')
+    }
+    this._matVue.copy(camera.matrixWorld).invert().premultiply(camera.projectionMatrix)
+    this._frustum.setFromProjectionMatrix(this._matVue)
+  }
+
+  // La tuile est-elle ENTIÈREMENT derrière l'horizon ? ⚠️ `t.theta` — son
+  // demi-angle au centre de la planète — n'est pas un raffinement : sans lui la
+  // formule écrête au limbe, parce qu'une tuile dont le CENTRE vient de passer
+  // derrière l'horizon a encore la moitié de sa surface devant.
+  _horsHorizon(t, camDir) {
+    const dot = t.center.dot(camDir) / this.radius
+    return dot < Math.cos(this._angleHorizon + t.theta)
+  }
+
+  // La sphère englobante de la tuile, relief et jupe compris. Réutilise un seul
+  // objet : `_traverse` tourne des centaines de fois par image.
+  _sphereDe(t) {
+    this._sphereTuile.center.copy(t.center).multiplyScalar(this._rayonCentre)
+    this._sphereTuile.radius = t.rayon * this._rayonCentre + this._demiEpaisseur
+    return this._sphereTuile
+  }
+
   _traverse(t, camPos, camDir) {
-    // horizon cull: skip tiles fully on the far side of the planet
-    const toTile = t.center.clone().normalize()
-    if (toTile.dot(camDir) < -0.35 && t.z > ROOT_Z) return
+    this._visites++
+    // ⚠️ LES RACINES z2 SONT EXEMPTÉES DES DEUX TRIS, et ce n'est pas une
+    // faveur : elles portent la couverture de toute la planète, ce sont elles
+    // qui dessinent tant que leurs enfants ne sont pas au complet. Les écarter
+    // du parcours ouvrirait un trou à chaque bord d'écran.
+    if (t.z > ROOT_Z) {
+      // `t.center` est SUR la sphère de rayon `this.radius` (voir `_ensureTile`),
+      // donc ce quotient est exactement le cosinus cherché — sans allocation.
+      const dot = t.center.dot(camDir) / this.radius
+      if (this.continu) {
+        // horizon géométrique + marge de corde de la tuile
+        if (this._horsHorizon(t, camDir)) return
+        // ⚠️ ET C'EST CETTE LIGNE QUI FAIT LE TRAVAIL. Sans elle, réduire la
+        // calotte ne fait que déplacer le point fixe du budget : le zoom reste
+        // le même, quelle que soit l'altitude.
+        if (!this._frustum.intersectsSphere(this._sphereDe(t))) return
+      } else if (dot < -0.35) {
+        // horizon cull: skip tiles fully on the far side of the planet
+        return
+      }
+    }
 
     t.lastUsed = this.frame
     // PORTEUSE de la couverture courante. `lastUsed` ne suffit pas à distinguer
@@ -788,8 +958,10 @@ export class Globe {
     // peut payer les quatre enfants qu'il fait naître. Quand ils sont déjà là,
     // descendre ne coûte rien — ni crédit ni réseau : on passe sans débiter.
     if (wantSplit && !this._enfantsPresents(t)) {
-      if (this._credit < 4) wantSplit = false
-      else this._credit -= 4
+      if (this._credit < 4) {
+        wantSplit = false
+        this._refus++
+      } else this._credit -= 4
     }
 
     if (wantSplit) {
@@ -860,15 +1032,30 @@ export class Globe {
   //      seulement si le rang 1 n'a pas suffi. Sacrifier une porteuse profonde
   //      ne fait pas de trou : la règle sans-trou de `_traverse` fait remonter
   //      le parent, qui couvre le quad entier.
+  //
+  // ⚠️ ET UN RANG 0, AJOUTÉ PAR LA TÂCHE 4 : LES TUILES BLOQUÉES. Une `error`,
+  // ou une `loading` dont la requête n'est jamais revenue, ne dessinera JAMAIS
+  // et n'était candidate à AUCUN des deux rangs — elle retenait donc une place
+  // du budget pour de bon. C'est le même point fixe que le crédit nul, par une
+  // autre porte. ⚠️ L'ORDRE DES DEUX RANGS EXISTANTS N'EST PAS TOUCHÉ : ce rang
+  // passe AVANT eux parce qu'il ne coûte rien (aucune de ces tuiles ne porte de
+  // donnée ni de pixel), pas parce que le classement serait à revoir.
+  _bloquee(t) {
+    return t.state === 'error' || (t.state === 'loading' && this.frame - (t.demandee ?? 0) > IMAGES_BLOQUEE)
+  }
+
   _evictJusqua(max) {
     const excess = this.tiles.size - max
     if (excess <= 0) return
     const porte = (t) => t.coverFrame === this.frame
     const parProfondeur = (a, b) => b.z - a.z
-    const candidates = [...this.tiles.values()].filter(
-      (t) => t.z > ROOT_Z && t.state === 'ready' && !(t.mesh && t.mesh.visible)
-    )
+    const vivantes = [...this.tiles.values()].filter((t) => t.z > ROOT_Z)
+    const bloquees = this.continu
+      ? vivantes.filter((t) => this._bloquee(t)).sort((a, b) => a.lastUsed - b.lastUsed || parProfondeur(a, b))
+      : []
+    const candidates = vivantes.filter((t) => t.state === 'ready' && !(t.mesh && t.mesh.visible))
     const victimes = [
+      ...bloquees,
       ...candidates.filter((t) => !porte(t)).sort((a, b) => a.lastUsed - b.lastUsed || parProfondeur(a, b)),
       ...candidates.filter(porte).sort((a, b) => parProfondeur(a, b) || a.lastUsed - b.lastUsed),
     ]

@@ -41,6 +41,33 @@ export const FLAGS = {
   // `?suivi=helico` essaie le nouveau sans toucher au code ; passer cette
   // ligne à `true` le rend définitif.
   suiviHelico: false,
+
+  // LE GLOBE CONTINU — le tri spatial du quadtree (plan « globe continu »,
+  // Tâche 4). OFF par défaut, et ce n'est pas une précaution de style : les
+  // trois corrections qu'il ouvre (horizon géométrique, frustum, crédit)
+  // changent l'emprise parcourue par `_traverse` d'un ordre de grandeur, donc
+  // le trafic et le contenu de l'écran. Elles atterrissent dans le dépôt
+  // derrière ce drapeau le temps que le bloc quadtree (4 quater, 4 alpha) soit
+  // complet.
+  //
+  // ⚠️ `src/globe.js` N'IMPORTE PAS CE FICHIER — délibérément. Le lecteur est
+  // `src/main.js`, qui construit le globe et lui passe un simple booléen
+  // (`params.globeContinu`). Un drapeau posé ici sans ce câblage ne
+  // protégerait rien.
+  //
+  // S'essaie par l'adresse sans rien reconstruire : `?globe=continu`. Et
+  // `?globe=crans` le coupe, pour le jour où le défaut passera à true.
+  globeContinu: false,
+}
+
+// Le drapeau ci-dessus, avec l'échappatoire d'adresse — même patron que
+// `suiviHelicoActif`. Isolé dans une fonction parce que `location` n'existe pas
+// sous node.
+export function globeContinuActif() {
+  const v = paramAdresse('globe')
+  if (v === 'crans' || v === '0') return false
+  if (v === 'continu' || v === '1') return true
+  return FLAGS.globeContinu
 }
 
 // Le drapeau ci-dessus, avec l'échappatoire d'adresse. Isolé dans une fonction

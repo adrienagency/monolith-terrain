@@ -112,7 +112,7 @@ function serve() {
 }
 
 const { Globe, _resetTileMemo } = await import('../src/globe.js')
-const { latLonToSphere } = await import('../src/geo.js')
+const { latLonToSphere, R_GLOBE } = await import('../src/geo.js')
 
 // les constantes du module, redites ici pour que le test échoue si elles bougent
 const CACHE_MAX = 420
@@ -129,6 +129,48 @@ const LON = 6.25
 const R_HAUT = 350 // ≈ z3 en feuilles
 const R_BAS = 105 // ≈ z9 en feuilles
 
+// ─────────────────────────────────────────── LA CAMÉRA DU HARNAIS (Étape 1 bis)
+//
+// ⚠️ CE HARNAIS N'AVAIT PAS DE CAMÉRA — il portait `{ position: Vector3 }`, sans
+// orientation ni `projectionMatrix`. Un globe qui trie par le champ de vision
+// n'a alors RIEN à tester, et le tri passerait inaperçu : la suite resterait
+// verte en mesurant l'ancien parcours. Les trois valeurs viennent du dépôt :
+//   · fov 30°                       → src/main.js (params.fov)
+//   · far 1400                      → src/modes.js (`this.camera.far = 1400`)
+//   · near = clamp(orbAlt×0,2 ; 0,01 ; 0,5) → src/loi-altitude.js (`planProche`)
+// ⚠️ Le `clamp` FAIT PARTIE de la formule : sans lui le plan proche part à zéro
+// en orbite haute et la matrice de projection devient inutilisable.
+const FOV = 30
+const FAR = 1400
+const planProche = (orbAlt) => Math.min(Math.max(orbAlt * 0.2, 0.01), 0.5)
+
+function nouvelleCamera() {
+  return new THREE.PerspectiveCamera(FOV, 16 / 9, 0.5, FAR)
+}
+
+// `rayon` en unités de scène depuis le CENTRE de la planète (R_GLOBE = 100).
+function poseCamera(camera, lat, lon, rayon) {
+  latLonToSphere(lat, lon, rayon, camera.position)
+  camera.near = planProche(rayon - R_GLOBE)
+  camera.up.set(0, 1, 0)
+  camera.lookAt(0, 0, 0)
+  camera.updateMatrixWorld(true)
+  camera.updateProjectionMatrix()
+  return camera
+}
+
+// l'état d'une image : ce que l'Étape 1 du plan demande de relever
+function etat(globe) {
+  let zmax = 0
+  let dessinees = 0
+  for (const t of globe.tiles.values()) {
+    if (!t.mesh?.visible) continue
+    dessinees++
+    if (t.z > zmax) zmax = t.z
+  }
+  return { zmax, dessinees, cache: globe.tiles.size, visites: globe._visites }
+}
+
 // vide la file du globe : tant qu'il reste des requêtes en vol ou en attente,
 // on rend la main à la boucle d'événements (MAX_CONCURRENT = 6, il faut donc
 // plusieurs tours pour drainer un palier)
@@ -142,7 +184,7 @@ async function calme(globe, max = 4000) {
 
 async function vol(globe, { paliers = 40, tours = 8 } = {}) {
   globe.setVisible(true)
-  const camera = { position: new THREE.Vector3() }
+  const camera = nouvelleCamera()
   const zoomsDessines = new Set()
   let picTuiles = 0
   let frames = 0
@@ -150,7 +192,7 @@ async function vol(globe, { paliers = 40, tours = 8 } = {}) {
   for (let p = 0; p < paliers; p++) {
     const f = paliers === 1 ? 0 : p / (paliers - 1)
     const r = R_HAUT * (R_BAS / R_HAUT) ** f // descente géométrique
-    latLonToSphere(LAT, LON, r, camera.position)
+    poseCamera(camera, LAT, LON, r)
     for (let k = 0; k < tours; k++) {
       globe.update(camera, 0.016)
       frames++
@@ -192,20 +234,27 @@ async function volDeReference() {
 test('le vol descend et raffine vraiment — sans quoi le banc ne mesure rien', async () => {
   const { globe, mesures } = await volDeReference()
   const zooms = [...mesures.zoomsDessines].sort((a, b) => a - b)
-  // z2 (les racines) jusqu'à z6 : le plafond n'est pas une limite de politique
-  // mais de BUDGET — à 420 tuiles, les ~300 feuilles visibles d'un hémisphère
-  // consomment déjà tout, il ne reste rien pour descendre plus bas. Ce que ce
-  // test verrouille, c'est que la descente a bien lieu ET qu'elle TIENT : le
-  // défaut d'éviction faisait retomber le globe à z3 en plongée (19 tuiles
-  // dessinées au lieu de 300), c'est-à-dire plus grossier de PRÈS que de loin.
+  // ⚠️ CE TEST DÉCRIVAIT LE DÉFAUT COMME UN CONTRAT — déverrouillé par la
+  // Tâche 4 du plan « globe continu ». Il exigeait `zooms.includes(6)`,
+  // `zoomFinal >= 6` et `visiblesFinal > 200`, en expliquant que z6 était une
+  // limite de BUDGET : ~300 feuilles d'hémisphère à 420 tuiles de cache. C'est
+  // exact — et c'est précisément l'emprise que le tri spatial supprime. La
+  // seconde assertion faisait échouer le BON correctif, qui descend beaucoup
+  // plus bas en dessinant beaucoup moins de tuiles.
+  //
+  // Ce qui reste verrouillé, et qui est le vrai contenu de ce test : la
+  // descente a bien lieu ET elle TIENT. Le défaut d'éviction faisait retomber
+  // le globe à z3 en plongée (19 tuiles dessinées), c'est-à-dire plus grossier
+  // de PRÈS que de loin. Les bornes sont donc devenues des PLANCHERS larges,
+  // pas des égalités déguisées.
   assert.ok(zooms.includes(3), `z3 jamais dessiné (niveaux vus : ${zooms})`)
-  assert.ok(zooms.includes(6), `z6 jamais atteint (niveaux vus : ${zooms})`)
+  assert.ok(zooms.includes(4), `z4 jamais atteint (niveaux vus : ${zooms})`)
   assert.ok(
-    mesures.zoomFinal >= 6,
+    mesures.zoomFinal > 3,
     `à l'altitude la plus basse le globe retombe à z${mesures.zoomFinal} — c'est la régression d'origine`
   )
   assert.ok(
-    mesures.visiblesFinal > 200,
+    mesures.visiblesFinal > 12,
     `${mesures.visiblesFinal} tuiles dessinées en plongée : la couverture s'est effondrée`
   )
   globe.dispose()
@@ -222,10 +271,10 @@ test('cache saturé puis la planète TOURNE : le globe charge encore', async () 
   serve()
   const globe = new Globe({})
   globe.setVisible(true)
-  const camera = { position: new THREE.Vector3() }
+  const camera = nouvelleCamera()
 
   // 1. saturer au-dessus du Var
-  latLonToSphere(LAT, LON, 120, camera.position)
+  poseCamera(camera, LAT, LON, 120)
   for (let k = 0; k < 30; k++) {
     globe.update(camera, 0.016)
     await calme(globe)
@@ -233,7 +282,7 @@ test('cache saturé puis la planète TOURNE : le globe charge encore', async () 
   assert.ok(globe.tiles.size >= CACHE_MAX, `cache à ${globe.tiles.size} : le montage doit saturer`)
 
   // 2. l'autre bout du monde (Nouvelle-Zélande) : plus une seule tuile commune
-  latLonToSphere(-41, 174, 120, camera.position)
+  poseCamera(camera, -41, 174, 120)
   const avant = total()
   for (let k = 0; k < 30; k++) {
     globe.update(camera, 0.016)
@@ -323,5 +372,364 @@ test('à ancienneté égale, l éviction sacrifie la PROFONDE et garde l ancêtr
   globe._evictJusqua(avant - 1)
   assert.equal(globe.tiles.size, avant - 1, 'le budget est dur : un porteur finit par céder')
   assert.ok(ROOT_Z === 2, 'les racines restent hors jeu')
+  globe.dispose()
+})
+
+// ══════════ LE ZOOM SUIT-IL L'ALTITUDE ? (plan « globe continu », Tâche 4) ═══
+//
+// ⚠️ C'EST LE SYMPTÔME, ET IL NE DÉPEND D'AUCUN BANC : le globe est aussi
+// grossier à 2 km qu'à 1 600 km, sur un facteur 800. Mesuré avant correction,
+// protocole ci-dessous, six altitudes × quatre latitudes : `zmax` vaut z6
+// partout (z5 à 60° N), 303-307 tuiles dessinées, cache 420, crédit 0,
+// 0,0 requête par image caméra immobile. UNE seule valeur de zoom.
+//
+// ⚠️ LE ZOOM ATTEINT EST UNE GRANDEUR À HYSTÉRÉSIS — quatre bancs ont rendu z5,
+// z6, z7 et z9 et aucun n'est faux. Le protocole DOIT donc être dit, et c'est
+// celui-ci :
+//
+//   PROTOCOLE A — « GLOBE NEUF À CHAQUE STATION ».
+//   · un `new Globe({ globeContinu: true })` par altitude, mémoire de tuiles
+//     vidée (`serve()`), aucune histoire de cache héritée d'une station voisine ;
+//   · caméra posée à la station, puis 25 tours `update` + attente que la file se
+//     vide ; les CINQ PREMIÈRES images sont JETÉES (un globe neuf met quatre
+//     images à se stabiliser — sans cette précaution « 20 images stables » est
+//     impossible à obtenir) ;
+//   · les VINGT suivantes sont relevées, et la stabilité y est EXIGÉE.
+//
+// La lecture qui mord n'est pas « les niveaux dessinés sont nombreux » (vrai par
+// construction : une descente en dessine cinq), c'est : **`zmax`, relevé sur ces
+// 20 images stables, prend au moins TROIS valeurs différentes entre les six
+// altitudes nommées.**
+
+const ALTITUDES_NOMMEES = [
+  ['1600 km', 1_600_000],
+  ['800 km', 800_000],
+  ['200 km', 200_000],
+  ['60 km', 60_000],
+  ['8 km', 8_000],
+  ['2 km', 2_000],
+]
+const LAT_STATION = 45
+const M_PAR_UNITE = 63_710 // EARTH_RADIUS_M / R_GLOBE — src/geo.js
+// ⚠️ LE PLAN DISAIT « JETEZ LES CINQ PREMIÈRES », ET CINQ NE SUFFIT PLUS — le
+// chiffre datait du globe GELÉ, qui atteignait son plafond z6 en quatre images.
+// La règle sans-trou ne descend que d'UN NIVEAU PAR IMAGE (une tuile ne se
+// refend qu'une fois ses quatre enfants prêts), donc un globe neuf met
+// désormais une image par niveau : mesuré, la convergence tombe à l'image 8 à
+// 200 km et à l'image 9 à 8 km, puis l'état ne bouge plus d'un seul tuile
+// pendant les vingt suivantes. Douze, c'est ce chiffre plus trois images de
+// marge. ⚠️ Ce n'est PAS un pansement sur une oscillation : la stabilité est
+// exigée juste après, et elle est exacte.
+const JETEES = 12
+const RELEVEES = 20
+
+async function station(altM) {
+  serve()
+  const globe = new Globe({ globeContinu: true })
+  globe.setVisible(true)
+  const camera = poseCamera(nouvelleCamera(), LAT_STATION, LON, R_GLOBE + altM / M_PAR_UNITE)
+  for (let i = 0; i < JETEES; i++) {
+    globe.update(camera, 0.016)
+    await calme(globe)
+  }
+  const serie = []
+  const avant = total()
+  for (let i = 0; i < RELEVEES; i++) {
+    globe.update(camera, 0.016)
+    await calme(globe)
+    serie.push(etat(globe))
+  }
+  const requetes = total() - avant
+  globe.dispose()
+  return { serie, requetes }
+}
+
+// le balayage coûte une poignée de secondes : il est fait UNE fois et partagé
+// par les trois assertions qui suivent (une par test, comme le reste du fichier)
+let _balayage = null
+function balayage() {
+  _balayage ??= (async () => {
+    const out = []
+    for (const [nom, altM] of ALTITUDES_NOMMEES) out.push({ nom, ...(await station(altM)) })
+    return out
+  })()
+  return _balayage
+}
+
+const ligne = (r) =>
+  `${r.nom} : z${r.serie[r.serie.length - 1].zmax}, ${r.serie[r.serie.length - 1].dessinees} dessinées, ` +
+  `cache ${r.serie[r.serie.length - 1].cache}, ${r.requetes} requêtes sur ${RELEVEES} images`
+
+test('le zoom effectif SUIT l altitude : au moins trois valeurs de zmax sur les six altitudes nommées', async () => {
+  const stations = await balayage()
+  const zmax = stations.map((r) => r.serie[r.serie.length - 1].zmax)
+  const distincts = new Set(zmax)
+  assert.ok(
+    distincts.size >= 3,
+    `zmax ne prend que ${distincts.size} valeur(s) sur les six altitudes nommées ` +
+      `— le globe est aussi grossier à 2 km qu'à 1 600 km · ${stations.map(ligne).join(' · ')}`
+  )
+})
+
+test('… et il est STABLE : zmax et tuiles dessinées constants sur 20 images', async () => {
+  const stations = await balayage()
+  for (const r of stations) {
+    const z = r.serie.map((e) => e.zmax)
+    const d = r.serie.map((e) => e.dessinees)
+    assert.ok(
+      z.every((v) => v === z[0]),
+      `${r.nom} : zmax oscille sur 20 images (${[...new Set(z)].sort().join(', ')}) — ` +
+        `c'est le cycle limite que tout plancher de crédit constant installe`
+    )
+    assert.ok(
+      d.every((v) => v === d[0]),
+      `${r.nom} : les tuiles dessinées oscillent sur 20 images (min ${Math.min(...d)}, max ${Math.max(...d)})`
+    )
+  }
+})
+
+test('… et la caméra IMMOBILE ne demande plus rien au réseau', async () => {
+  const stations = await balayage()
+  for (const r of stations) {
+    assert.equal(r.requetes, 0, `${r.nom} : ${r.requetes} requêtes caméra strictement immobile — ${ligne(r)}`)
+  }
+})
+
+// ══════════ LA COUVERTURE RESTE SANS TROU (Étapes 3 et 4) ═══════════════════
+//
+// ⚠️ C'EST LE SEUL CRITÈRE QUI JUGE VRAIMENT LE TRI SPATIAL, et ni le zoom ni le
+// compte de tuiles ne le remplacent. Les deux tris se paient au même endroit :
+// l'horizon transcrit nu ÉCRÊTE AU LIMBE, et un frustum posé sur la sphère nue
+// écrête les crêtes au bord de l'écran — dans les deux cas le globe gagne des
+// niveaux de zoom en ouvrant des trous, et toutes les autres assertions de ce
+// fichier passent au vert pendant ce temps.
+//
+// On tire donc de VRAIS RAYONS : centre de l'écran et quatre coins à 90 % de
+// l'étendue, contre les seules tuiles allumées. Cinq touches, six altitudes.
+const ECRAN = [
+  [0, 0],
+  [-0.9, -0.9],
+  [0.9, -0.9],
+  [-0.9, 0.9],
+  [0.9, 0.9],
+]
+
+// ⚠️ ET LES DEUX ALTITUDES BASSES SONT HORS DE PORTÉE DE CE TEST — pas par
+// commodité, par géométrie, et le chiffre se dérive du harnais : la dalle
+// bouchon vaut 812 m PARTOUT, l'exagération du globe vaut 18, donc la nappe
+// dessinée est un plateau à `812 × 18 = 14 616 m` d'altitude. Une caméra à
+// 8 km ou à 2 km est DESSOUS : aucun rayon ne peut toucher une surface qui
+// est au-dessus de lui. C'est une propriété du globe de production, pas du
+// bouchon — c'est exactement ce que la décision 14 du plan (« l'exagération
+// devient une courbe continue de l'altitude ») a pour objet de corriger, et
+// elle ne relève pas de cette tâche-ci.
+const ALTITUDES_AU_DESSUS_DU_RELIEF = ALTITUDES_NOMMEES.filter(([, m]) => m > 812 * 18)
+
+test('… et la couverture reste SANS TROU : les cinq rayons d écran touchent tous une tuile allumée', async () => {
+  assert.equal(ALTITUDES_AU_DESSUS_DU_RELIEF.length, 4, 'quatre des six altitudes nommées sont au-dessus du plateau bouchon')
+  for (const [nom, altM] of ALTITUDES_AU_DESSUS_DU_RELIEF) {
+    serve()
+    const globe = new Globe({ globeContinu: true })
+    globe.setVisible(true)
+    const camera = poseCamera(nouvelleCamera(), LAT_STATION, LON, R_GLOBE + altM / M_PAR_UNITE)
+    for (let i = 0; i < JETEES + 3; i++) {
+      globe.update(camera, 0.016)
+      await calme(globe)
+    }
+    globe.group.updateMatrixWorld(true)
+    const allumees = [...globe.tiles.values()].filter((t) => t.mesh?.visible).map((t) => t.mesh)
+    const rc = new THREE.Raycaster()
+    for (const [x, y] of ECRAN) {
+      rc.setFromCamera(new THREE.Vector2(x, y), camera)
+      const touches = rc.intersectObjects(allumees, false)
+      assert.ok(
+        touches.length > 0,
+        `${nom} : le rayon d'écran (${x}, ${y}) ne touche AUCUNE tuile allumée — ` +
+          `${allumees.length} dessinées, c'est un TROU dans la couverture`
+      )
+    }
+    globe.dispose()
+  }
+})
+
+// ══════════ LES TUILES BLOQUÉES (Étape 6) ═══════════════════════════════════
+//
+// Une tuile en `error`, ou une `loading` dont la requête n'est jamais revenue,
+// ne dessinera JAMAIS et n'était candidate à AUCUN des deux rangs d'éviction :
+// elle retenait une place du budget pour de bon. C'est le même point fixe que
+// le crédit nul, par une autre porte.
+
+test('une tuile BLOQUÉE part avant tout le reste — et le classement des deux autres rangs ne bouge pas', async () => {
+  serve()
+  const globe = new Globe({ globeContinu: true })
+  await calme(globe)
+  globe.frame = 100
+  const pret = (z, x, y, lastUsed) => {
+    const t = globe._ensureTile(z, x, y)
+    t.state = 'ready'
+    t.mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial())
+    t.mesh.visible = false
+    t.lastUsed = lastUsed
+    return t
+  }
+  // la plus ANCIENNE de toutes est prête : sans le rang 0 c'est elle qui part
+  const vieille = pret(7, 65, 47, 10)
+  const bloquee = globe._ensureTile(8, 130, 94)
+  bloquee.state = 'error'
+  bloquee.lastUsed = 99 // toute récente, et pourtant elle passe devant
+
+  globe._evictJusqua(globe.tiles.size - 1)
+  const restantes = () => [...globe.tiles.keys()]
+  assert.ok(!restantes().includes(bloquee.key), `la tuile bloquée doit partir la première (${restantes()})`)
+  assert.ok(restantes().includes(vieille.key), `… et pas à la place de la plus ancienne (${restantes()})`)
+  globe.dispose()
+})
+
+test('… et une tuile ÉVINCÉE ne revient pas d elle-même sur le réseau', async () => {
+  serve()
+  const globe = new Globe({ globeContinu: true })
+  await calme(globe)
+  const t = globe._ensureTile(8, 130, 94)
+  t.state = 'error'
+  globe.frame = 1000
+  globe._echoue.set(t.key, globe.frame) // ce que fait `_pump` quand le réessai est épuisé
+  globe.tiles.delete(t.key) // … et ce que fait le rang 0
+
+  const avant = total()
+  // le parcours la recrée : elle DOIT renaître bloquée, et rester muette
+  const recree = globe._ensureTile(8, 130, 94)
+  assert.equal(recree.state, 'error', 'une clé en quarantaine renaît bloquée, jamais `empty`')
+  globe._request(recree, 1)
+  await calme(globe)
+  assert.equal(total(), avant, 'une tuile en quarantaine ne repart pas sur le réseau à l image suivante')
+  globe.dispose()
+})
+
+test('… mais la quarantaine EXPIRE : une coupure réseau ne perd pas la tuile pour la session', async () => {
+  serve()
+  const globe = new Globe({ globeContinu: true })
+  await calme(globe)
+  globe.frame = 1000
+  globe._echoue.set('8/130/94', globe.frame)
+  globe.tiles.delete('8/130/94')
+
+  // dix secondes à 60 Hz plus tard, le réseau est peut-être revenu
+  globe.frame = 1000 + 600
+  const recree = globe._ensureTile(8, 130, 94)
+  assert.equal(recree.state, 'empty', 'la quarantaine doit expirer, sinon un incident de trois secondes coûte la session')
+  const avant = total()
+  globe._request(recree, 1)
+  await calme(globe)
+  assert.equal(total(), avant + 1, 'la tuile guérie doit pouvoir repartir sur le réseau')
+  globe.dispose()
+})
+
+test('… et une tuile évincée EN VOL ne pose pas de maillage orphelin', async () => {
+  serve()
+  let debloque = null
+  const enVol = new Promise((r) => (debloque = r))
+  globalThis.fetch = async (url) => {
+    appels.set(url, (appels.get(url) || 0) + 1)
+    await enVol
+    return { ok: true, status: 200, blob: async () => ({ width: 256, height: 256 }) }
+  }
+  const globe = new Globe({ globeContinu: true })
+  const t = globe._ensureTile(8, 130, 94)
+  globe._request(t, 1)
+  assert.equal(t.state, 'loading', 'le montage doit laisser la tuile EN VOL')
+
+  const enfants = globe.group.children.length
+  globe.tiles.delete(t.key) // le rang 0 l'emporte pendant que la requête vole
+  debloque()
+  for (let i = 0; i < 50 && globe.inFlight; i++) await new Promise((r) => setTimeout(r, 0))
+
+  assert.equal(t.mesh, null, 'le retour ne doit RIEN construire pour une tuile sortie du cache')
+  assert.equal(
+    globe.group.children.length,
+    enfants,
+    'un maillage orphelin a été ajouté au groupe : plus rien ne le retrouvera, ni `_evict` ni `dispose`'
+  )
+  globe.dispose()
+})
+
+// ══════════ LES DEUX MARGES, TESTÉES POUR ELLES-MÊMES ═══════════════════════
+//
+// ⚠️ LE VOL NE LES VOIT PAS, ET C'EST MESURÉ : les deux marges survivent à leur
+// mutation (marge de relief mise à 0, `theta` mis à 0) sans qu'aucune des
+// treize assertions ci-dessus ne rougisse. La raison est dans le bouchon — la
+// dalle vaut 812 m partout, donc il n'y a aucun sommet à faire dépasser — et
+// dans le cadrage : aux six altitudes nommées la planète remplit l'écran, donc
+// le limbe n'y est jamais. Ces deux marges se testent donc en GÉOMÉTRIE PURE,
+// où elles sont exactes et où leur mutation tue le test sur-le-champ.
+
+const EXAGERATION = 18 // src/globe.js — `params.globeExaggeration ?? 18`
+const ALT_MAX_M = 9000 // src/globe.js
+const M_PAR_UNITE_EXACT = 6_371_000 / 100 // EARTH_RADIUS_M / R_GLOBE
+
+test('la MARGE DE CORDE de l horizon : une tuile à cheval sur l horizon n est pas écrêtée', async () => {
+  serve()
+  const globe = new Globe({ globeContinu: true })
+  const camera = poseCamera(nouvelleCamera(), 0, 0, R_GLOBE + 200_000 / M_PAR_UNITE_EXACT)
+  globe.setVisible(true)
+  globe.update(camera, 0.016)
+  const camDir = camera.position.clone().normalize()
+  assert.ok(globe._angleHorizon > 0, 'l angle d horizon doit être posé par update()')
+
+  // une tuile SYNTHÉTIQUE, placée à un angle choisi de la direction caméra.
+  const theta = 0.02 // rad — l ordre de grandeur d une tuile z6
+  const aLAngle = (angle) => {
+    const axe = new THREE.Vector3(0, 1, 0).cross(camDir).normalize()
+    const centre = camDir.clone().applyAxisAngle(axe, angle).multiplyScalar(R_GLOBE)
+    return { z: 6, center: centre, theta, rayon: 2 * R_GLOBE * Math.sin(theta / 2) }
+  }
+  // centre DERRIÈRE l horizon d un demi-demi-angle : la moitié de la tuile est
+  // encore devant, elle doit être parcourue
+  assert.equal(
+    globe._horsHorizon(aLAngle(globe._angleHorizon + theta * 0.5), camDir),
+    false,
+    'une tuile à cheval sur l horizon est écrêtée : c est le trou au limbe'
+  )
+  // entièrement derrière : elle doit tomber
+  assert.equal(
+    globe._horsHorizon(aLAngle(globe._angleHorizon + theta * 1.5), camDir),
+    true,
+    'une tuile entièrement derrière l horizon doit être écartée'
+  )
+  globe.dispose()
+})
+
+test('la MARGE DE RELIEF du volume englobant : la sphère contient le sommet exagéré ET la jupe', async () => {
+  serve()
+  const globe = new Globe({ globeContinu: true })
+  const camera = poseCamera(nouvelleCamera(), 45, 6.25, R_GLOBE + 60_000 / M_PAR_UNITE_EXACT)
+  globe.setVisible(true)
+  globe.update(camera, 0.016)
+
+  // le déplacement radial d un sommet de 9 000 m à l exagération 18 :
+  // 9 000 × (100 / 6 371 000) × 18 = 2,54 unités de scène, soit 162 km
+  const monte = (ALT_MAX_M / M_PAR_UNITE_EXACT) * EXAGERATION
+  assert.ok(monte > 2.5, `le relief exagéré sort de la sphère de ${monte.toFixed(2)} unités`)
+
+  for (const z of [3, 6, 9, 11]) {
+    const t = globe._ensureTile(z, 2 ** (z - 1), 2 ** (z - 1))
+    const sphere = globe._sphereDe(t).clone()
+    // le COIN de la tuile, hissé au sommet exagéré : c est le point le plus
+    // éloigné que le maillage peut atteindre
+    const coin = t.center.clone().normalize().multiplyScalar(R_GLOBE)
+    coin.add(t.center.clone().normalize().multiplyScalar(monte))
+    // (le coin le plus défavorable : à `t.rayon` du centre ET hissé)
+    const lateral = new THREE.Vector3(0, 1, 0).cross(t.center).normalize().multiplyScalar(t.rayon)
+    const pire = coin.clone().add(lateral)
+    assert.ok(
+      sphere.containsPoint(pire),
+      `z${z} : le sommet exagéré sort du volume englobant (|p−c| = ${sphere.center.distanceTo(pire).toFixed(3)} > r = ${sphere.radius.toFixed(3)})`
+    )
+    // et la JUPE, qui descend jusqu à 0,9 unité SOUS la sphère nue
+    const dessous = t.center.clone().normalize().multiplyScalar(R_GLOBE - 0.9).add(lateral)
+    assert.ok(
+      sphere.containsPoint(dessous),
+      `z${z} : la jupe sort du volume englobant (|p−c| = ${sphere.center.distanceTo(dessous).toFixed(3)} > r = ${sphere.radius.toFixed(3)})`
+    )
+  }
   globe.dispose()
 })
