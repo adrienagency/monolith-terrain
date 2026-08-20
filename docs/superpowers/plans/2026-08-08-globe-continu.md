@@ -28,6 +28,12 @@ Tranché avec Adrien le 2026-08-08. Un agent que l'une de ces lignes gêne le **
 11. **Cible : 60 images/s sur un portable récent.** Le téléphone dégrade la portée et le détail ; il ne rame pas.
 12. **Aucune cuisson mondiale nouvelle.** On navigue sur le relief, qui couvre déjà le monde en flux. Le sol et la canopée ne se cuisent qu'à la composition ; **la canopée se streame** quand l'utilisateur active l'option.
 
+13. **Le flou pendant le mouvement est ACCEPTÉ.** Tranché par Adrien le 2026-08-20, après la mesure du prototype : « on garde le flou pendant qu'on bouge ».
+
+⚠️ **Ce n'est pas une tolérance, c'est le contrat.** Pour ne jamais déchirer, la fenêtre attend une couverture complète au même zoom ; elle passe donc une partie du vol avec un niveau de retard — mesuré à **45 % du temps, cache réseau chaud**, donc dans le meilleur cas. Le rendu est net dès l'arrêt.
+
+**Conséquence pour les agents : ne « corrigez » jamais ce flou.** C'est le comportement de Google Earth et celui que décrit Hoppe (« la charge de rendu diminue quand on va plus vite »). Quelqu'un le prendra pour un défaut de chargement et voudra forcer l'affichage du niveau fin avant qu'il soit complet — **c'est précisément ce qui ramène les déchirures**. Le seul réglage légitime porte sur la vitesse de rattrapage à l'arrêt, jamais sur l'attente pendant le mouvement.
+
 ## Deux règles ajoutées après l'état de l'art du 2026-08-08
 
 Elles ne viennent pas d'Adrien : elles viennent de ce que d'autres ont payé avant nous. **Elles priment sur le confort d'implémentation.**
@@ -232,6 +238,23 @@ La topologie devient alors **fixe** : les indices sont calculés une fois, les s
 C'est exactement le comportement que décrit Hoppe (« rendering load actually decreases as the viewer moves faster ») et celui de Google Earth. **Mais il faut qu'Adrien sache que « fluide » voudra dire « flou pendant qu'on bouge », et net à l'arrêt.** Ce n'est pas un défaut à corriger, c'est le contrat à annoncer.
 
 ⚠️ **L'audit topologique valide un solide RETOURNÉ.** Au premier jet, les parois et la dalle étaient enroulées à l'envers, le socle était grand ouvert — et l'audit d'arêtes annonçait « 0 bord libre », **à juste titre**. Seul un test de silhouette avant/arrière l'a vu. Puis ce test est passé **à vide**, l'objet étant hors cadre, et tout a dû être remesuré avec une preuve de non-vacuité. **Un audit d'arêtes ne prouve pas qu'un solide est fermé dans le bon sens, et un test de silhouette ne prouve rien s'il ne prouve pas d'abord qu'il regarde quelque chose.**
+
+### Les tâches de la Phase 2, maintenant que la question est tranchée
+
+**Tâche 5 — `src/monde/fenetre-bornee.js`, l'extraction.**
+Promouvoir le rééchantillonnage du prototype : une grille régulière propre à la fenêtre, alimentée par le cache de tuiles en coordonnées de pixel global. ⚠️ **Ne pas repartir du découpage du maillage du quadtree** — c'est le chemin que le prototype a écarté, et c'est celui qui ramène la jonction en T.
+**Interfaces produites :** `construireFenetre({ emprise, n })` → `{ geometrie, indices, boiteEnglobante }` · `majHauteurs(fenetre, cacheTuiles)` → `void`
+
+**Tâche 6 — les deux résolutions et la zone morte.**
+N = 128 pendant que la caméra bouge, N = 256 quand elle se pose. Plus un seuil sous lequel un changement d'emprise ne déclenche **aucune** reconstruction. ⚠️ Le prototype reconstruisait à chaque image : c'est le pire cas, et c'est ce qui donne les 12 % de dépassement. La zone morte est ce qui rend la décision 4 tenable sur la cible.
+**Interfaces produites :** `resolutionPour({ enMouvement })` → `128 | 256` · `empriseADerive(precedente, courante)` → `boolean`
+
+**Tâche 7 — l'audit qui ne se laisse pas berner.**
+⚠️ **Reprendre l'audit du prototype en corrigeant ses deux failles connues**, qui sont documentées et reproductibles :
+1. Un audit d'arêtes annonce « 0 bord libre » sur un **solide retourné** — parois enroulées à l'envers, socle grand ouvert. Il faut donc un test d'**orientation**, pas seulement de fermeture.
+2. Un test de silhouette passe **à vide** si l'objet est hors cadre. Il faut donc **prouver d'abord qu'on regarde quelque chose** — une assertion de non-vacuité avant toute assertion d'étanchéité.
+
+**Ces deux failles ont réellement trompé le prototype.** Un test qui ne peut pas échouer ne prouve rien, et ces deux-là passaient en beauté.
 
 ### Ce que le prototype n'a PAS pu vérifier
 
