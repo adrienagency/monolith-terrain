@@ -15,7 +15,9 @@
 
 ## 0. Comment on vérifie — à lire AVANT toute tâche
 
-**Ces commandes sont la fin obligatoire de chaque tâche.** Elles ne sont plus répétées ensuite.
+**Ces commandes sont la fin obligatoire de chaque tâche.** La dernière étape de chaque tâche dit « **la clôture du §0** » et ne les recopie pas.
+
+⚠️ **UNE VERSION DE CE PLAN LES RECOPIAIT EN PLUS COURT dans quatre tâches** — `npx vite build` nu, sans redirection, sans `nettoie:dist`, avec un « audit » qui ne nommait pas sa commande. Un agent lisant la version courte aurait sauté les gardes en toute bonne foi. **C'est exactement le reproche que ce plan fait à sa propre décision 13** : un avertissement qu'on ne relit pas ne protège de rien.
 
 ```
 npm test              # la suite entière — 3 062 verts au 2026-08-20
@@ -29,6 +31,14 @@ npm run nettoie:dist && npx vite build > /tmp/build.log 2>&1
 ⚠️ **NE PIPEZ JAMAIS `vite build` DANS `tail`.** Le processus survit au shell, et le build suivant entre en collision sur `dist/` (`ENOTEMPTY`, 150 000 fichiers). **Redirigez vers un fichier.** `npm run nettoie:dist` vide `dist/` avec obstination — sept tentatives — parce qu'un antivirus tient régulièrement un fichier au mauvais moment.
 
 ⚠️ **AUCUN TEST NE CHARGE `src/main.js`.** `node --check` et `vite build` sont le seul filet sur ce fichier.
+
+### Le « vol de référence », défini une fois
+
+Plusieurs tâches demandent de mesurer « sur un vol de référence ». **C'est celui-ci, et il ne s'improvise pas** :
+
+**45 secondes, de l'Atlantique (260 km d'altitude) au Mont-Blanc (2,2 km), l'emprise suivant la caméra, à 60 Hz.** C'est le trajet du prototype, et c'est ce qui rend les chiffres comparables d'une tâche à l'autre.
+
+⚠️ **Il ne suffit PAS à lui seul.** L'attaque a montré qu'il ne voit pas le défaut le plus courant : c'est une **descente lisse**, où deux images consécutives demandent presque les mêmes tuiles. **Ajoutez toujours un panoramique latéral à basse altitude** — 90° de balayage à 4 km — qui est le geste le plus banal de l'application et celui qui a révélé les 2 943 tuiles bloquées.
 
 ### Les mesures citées dans ce plan
 
@@ -218,14 +228,14 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 
 ⚠️ **C'est l'interface que le prototype proposait telle quelle pour la Phase 2.**
 
-- [ ] **Étape 1** — écrire le test qui échoue : **un panoramique latéral à basse altitude**, pas une descente. ⚠️ C'est le geste le plus banal de l'application, et celui que le vol de référence ne pouvait pas voir : dans une descente lisse, deux images consécutives demandent presque les mêmes tuiles. Assertion : après 90° de balayage puis 5 s d'immobilité, le nombre de tuiles `loading` revient sous `PLAFOND_EN_VOL` et le zoom effectif rejoint le zoom demandé.
+- [ ] **Étape 1** — écrire le test qui échoue : **un panoramique latéral à basse altitude**, pas une descente. ⚠️ C'est le geste le plus banal de l'application, et celui que le vol de référence ne pouvait pas voir : dans une descente lisse, deux images consécutives demandent presque les mêmes tuiles. Assertion : après 90° de balayage puis 5 s d'immobilité, le nombre de tuiles `loading` revient sous `PLAFOND_FILE` et le zoom effectif rejoint le zoom demandé.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue (zoom figé, file saturée).
 
 ⚠️ **LE HARNAIS DU DÉPÔT FERAIT PASSER CE TEST SUR DU CODE CASSÉ.** `test/globe-reseau.test.js:83-93` résout `fetch` en `setTimeout(0)` et rend la main entre les images : le compte de tuiles `loading` **retombe alors tout seul**, sans plafond, sans annulation, sans éviction. L'étape 2 échouerait à échouer. **Il faut un bouchon de `fetch` à résolution MANUELLE** — les requêtes ne se résolvent que lorsque le test le décide — sinon on ne mesure que l'ordonnanceur de node.
 - [ ] **Étape 3** — implémenter les trois corrections.
 - [ ] **Étape 4** — vérifier par mutation : retirer le plafond, puis l'annulation, puis l'éviction des `loading` — **chacune doit tuer un test**.
 - [ ] **Étape 5** — mesurer le battement : nombre de décodages complets sur un vol de référence. ⚠️ L'attaque en a compté **10 829 pour un cache de 420** ; donner le chiffre après.
-- [ ] **Étape 6** — `npm test`, `node --check`, `npx vite build`, audit disque-vs-liste, commit.
+- [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 ### Tâche 3 : `seuil-socle.js` — quand le socle naît et meurt
 
@@ -246,7 +256,7 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
 - [ ] **Étape 3** — implémenter.
 - [ ] **Étape 4** — mutation : égaliser les deux seuils tue le test d'oscillation.
-- [ ] **Étape 5** — `npm test`, audit, commit.
+- [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 ### Tâche 4 alpha : rebrancher le globe sur la vraie source de relief ⚠️ AVANT LA TÂCHE 4
 
@@ -282,13 +292,24 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 
 **Ce qu'il faut reprendre, ce sont les fonctions de `dem-source.js`, pas ses URL.**
 
+⚠️ **ET LA POLITIQUE EST ÉCRITE DANS `src/dem.js:245-263`, PAS DANS `dem-source.js`.** Une version de ce plan ne citait pas ce fichier — c'est pourtant là que vivent les trois issues, commentées mot pour mot :
+
+> *« un zoom → on y va, en surzoomant au-delà · null → zone hors couverture (pleine mer) → **AWS POUR CE CHARGEMENT**, sans toucher au choix de session : le bloc d'à côté, sur la terre ferme, doit continuer à profiter de Mapterhorn · panne → repli AWS pour TOUTE la session »*
+
+**C'est ce bloc de dix-neuf lignes qu'il faut réutiliser**, avec `activeDemSource`, `resolveRegionMaxZoom`, `fallbackToAws` et `overzoomTile`. Une « zone » est une **tuile z8** (`REGION_ZOOM = 8`, `dem-source.js:139`).
+
+⚠️ **LE PÉRIMÈTRE EST PLUS LARGE QU'IL N'Y PARAÎT, ET C'EST CE QUI PEUT FAIRE DÉRAILLER LA TÂCHE :**
+- **256 est codé en dur** plusieurs fois dans `fetchTile` / `sampleTile` de `globe.js`. Mapterhorn sert du **512**. ⚠️ **Trancher explicitement** : soit le globe accepte les deux tailles, soit il rééchantillonne. **Ne pas laisser ce choix à l'improvisation.**
+- `TILE_MEMO_MAX` est calibré pour du 256 (≈ 32 Mo) ; en 512 la même valeur ferait **128 Mo**.
+- `resolveRegionMaxZoom` est **asynchrone**, et `_pump` de `globe.js` est **synchrone**. La jonction des deux est le vrai travail de cette tâche.
+
 - [ ] **Étape 1** — test : l'URL construite par le globe passe par `DEM_SOURCES[DEFAULT_SOURCE_ID]`, et la profondeur maximale du globe **n'excède jamais** le `maxZoom` de la source active.
 - [ ] **Étape 1 bis** — test : sur une zone **couverte** par Mapterhorn, le globe l'utilise ; sur une zone qui rend 404 à z12, il bascule sur AWS **pour cette zone**, et **continue d'utiliser Mapterhorn ailleurs dans la même session**. ⚠️ C'est l'assertion qui distingue une politique d'une URL.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue (aujourd'hui l'URL est en dur).
 - [ ] **Étape 3** — rebrancher sur `dem-source.js`, en gardant le repli et la sonde.
 - [ ] **Étape 4** — ⚠️ **vérifier que le globe orbital reste identique** : c'est une fonction en production, et le passage de 256 à 512 px change la densité des tuiles. Mesurer la mémoire et le nombre de requêtes avant/après.
 - [ ] **Étape 5** — mutation : revenir à l'URL en dur doit tuer le test.
-- [ ] **Étape 6** — `npm test`, `node --check`, `npx vite build`, audit, commit.
+- [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 **Si cette tâche est jugée trop lourde**, l'alternative honnête est de **plafonner `MAX_Z` à 13 et de l'écrire** — mais alors la décision 1 (« de l'orbite au sol ») devient fausse, et il faut le dire à Adrien.
 
@@ -298,7 +319,7 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 
 ⚠️ **`test/globe-eviction.test.js:118` RECOPIE `CACHE_MAX = 420` et l'asserte.** Passer à une formule le casse mécaniquement. **Ne l'affaiblissez pas : remplacez l'invariant** — ce n'est plus « le cache vaut 420 » mais « le cache suit le cadrage, et ne descend jamais sous le plancher ».
 
-⚠️ **Cinq fichiers touchent `MAX_Z`**, et ce plan n'en citait que deux. `grep -rn "MAX_Z" src/ test/` avant de commencer.
+⚠️ **`MAX_Z` ne vit que dans `src/globe.js`** — vérifié le 2026-08-20. Une version de ce plan annonçait « cinq fichiers » : c'était faux, et un lecteur qui vérifiait y perdait sa confiance dans les autres avertissements.
 
 ⚠️ **Le repère relatif (`150f817`) est un préalable, et il est fait.** Sans lui, on descendrait dans une zone où le terrain tremble.
 
@@ -306,7 +327,7 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 
 ⚠️ **`CACHE_MAX = 420` ne doit pas devenir un autre nombre : il doit devenir une FORMULE.** MapLibre tient `niveaux_conservés × tuiles_visibles_dans_le_cadre`, cinq niveaux par défaut. La limite suit alors le cadrage au lieu d'être un chiffre à re-régler.
 
-⚠️ **ET LE CRÉDIT DE RAFFINEMENT DOIT SUIVRE LA MÊME FORMULE, AVEC UN PLANCHER.** `globe.js:757-763` calcule `_credit = CACHE_MAX − tiles.size + marge`, et le commentaire du dépôt dit déjà qu'un crédit nul **« GÈLERAIT le globe »**. Une formule qui suit le cadrage rend une valeur **plus petite sur un cadrage serré** — c'est-à-dire exactement en mode socle : crédit négatif, descente arrêtée. `TILE_MEMO_MAX = 128` est lui aussi calibré contre 420. **Un test « resserrement brutal du cadrage » doit prouver que le raffinement ne gèle pas.**
+⚠️ **ET LE CRÉDIT DE RAFFINEMENT DOIT SUIVRE LA MÊME FORMULE, AVEC UN PLANCHER — proposé à 64 tuiles**, soit de quoi couvrir un cadrage serré sans jamais tomber à zéro. `globe.js:757-763` calcule `_credit = CACHE_MAX − tiles.size + marge`, et le commentaire du dépôt dit déjà qu'un crédit nul **« GÈLERAIT le globe »**. Une formule qui suit le cadrage rend une valeur **plus petite sur un cadrage serré** — c'est-à-dire exactement en mode socle : crédit négatif, descente arrêtée. `TILE_MEMO_MAX = 128` est lui aussi calibré contre 420. **Un test « resserrement brutal du cadrage » doit prouver que le raffinement ne gèle pas.**
 
 ⚠️ **L'ordre d'éviction compte autant que la taille.** 3DTilesRendererJS a corrigé trois bugs d'éviction en cinq mois, dont un où « le LRU pouvait faire recharger les tuiles en boucle », et a dû passer à **« le plus profond d'abord, puis le moins récent »**.
 
@@ -314,12 +335,13 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 
 ⚠️ **Le raffinement sans trous coûte cher en profondeur.** Cesium l'a chiffré et abandonné : il oblige à charger quatre tuiles quand on n'en a besoin que d'une. Leur remplacement — rendre le parent, découper au fragment, sauter des niveaux — leur a rendu **32 % de vitesse et 33 % de données**. À garder en réserve ; **ne pas le changer avant que la Tâche 4 bis ait mesuré**.
 
+- [ ] **Étape 0 — POSER LE DRAPEAU.** Ajouter l'entrée à `FLAGS` dans `src/flags.js` (le fichier existe, 4 057 octets) **avant** de toucher `MAX_Z` ou `CACHE_MAX` : sans lui, ces deux changements s'appliquent à tout le monde, y compris au globe orbital qui est **en production**.
 - [ ] **Étape 1** — mesurer la profondeur réelle des deux sources, et l'écrire dans le code.
 - [ ] **Étape 2** — test : à `MAX_Z`, une tuile demandée hors de la couverture rend un état explicite, **jamais un terrain plat silencieux**.
 - [ ] **Étape 3** — remplacer `CACHE_MAX` par la formule ; test sur un cadrage large puis serré.
 - [ ] **Étape 4** — tri d'éviction : profondeur d'abord, récence ensuite. Test : un vol de référence ne redécode pas une tuile déjà décodée dans la même seconde.
 - [ ] **Étape 5** — mutation sur les trois.
-- [ ] **Étape 6** — `npm test`, `node --check`, `npx vite build`, audit, commit.
+- [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 ### Tâche 4 ter : la descente bornée par le réseau — règle R3
 
@@ -335,7 +357,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
 - [ ] **Étape 3** — implémenter. ⚠️ **Le débit s'observe, il ne se devine pas** : mesurer les octets réellement reçus par seconde, pas `navigator.connection`, qui ment et n'existe pas partout.
 - [ ] **Étape 4** — mutation.
-- [ ] **Étape 5** — `npm test`, audit, commit.
+- [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 ---
 
@@ -357,14 +379,18 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 - une **dalle absente**, un **mur entier manquant** ;
 - un **trou de 128×128 mailles** — 1,78 km, la moitié de la fenêtre.
 
-**Méthode validée par l'attaque :** volume signé recentré, plus dégénérés, plus NaN. **Sans rendu**, environ 10 ms.
+**Méthode validée par l'attaque**, et elle tient en trois mesures, **sans aucun rendu**, environ 10 ms :
+
+1. **Volume signé recentré.** Somme sur tous les triangles du produit mixte de leurs sommets ramenés au centre de la boîte englobante, divisée par six. **Un solide fermé et bien orienté rend un volume positif ; retourné, il rend le même volume au signe près.** C'est ce qui attrape le solide inversé qu'un audit d'arêtes déclare sain.
+2. **Dégénérés.** Un triangle dont l'aire est sous un epsilon relatif à la taille du solide.
+3. **NaN.** Un seul suffit à empoisonner la boîte englobante, donc le volume, donc le verdict — **le chercher en premier**.
 
 - [ ] **Étape 1** — écrire **six sabotages** et le test qui les attend tous : solide retourné, dalle absente, mur manquant, trou central, triangle dégénéré, NaN.
 - [ ] **Étape 2** — les lancer, vérifier que **chacun** échoue.
 - [ ] **Étape 3** — implémenter.
 - [ ] **Étape 4** — ⚠️ **le test de non-vacuité** : l'audit doit refuser de rendre un verdict sur une géométrie vide, au lieu de la déclarer saine. **C'est ainsi que le test de silhouette du prototype passait à vide.**
 - [ ] **Étape 5** — mutation sur chacune des trois détections.
-- [ ] **Étape 6** — `npm test`, audit disque-vs-liste, commit.
+- [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 ### Tâche 6 : `fenetre-bornee.js` — l'extraction
 
@@ -375,6 +401,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 - `emprise` = `{ ouest, sud, est, nord }` en degrés. ⚠️ **`ouest > est` signifie que l'emprise franchit l'antiméridien** — c'est légal et le test l'exige.
 - ⚠️ **Au-delà de 85,051° de latitude** (la limite de Mercator), l'emprise est **écrêtée** à cette valeur. Le prototype y était « silencieusement faux mais fermé » ; ici on tranche : on écrête, et un test le vérifie.
 - `exageration` : sans elle, la dalle et les parois n'ont pas la bonne hauteur. Défaut de production : **18**.
+- `profondeurDalle` : défaut de production **7** (`main.js:540`, `plinthDepth`). Le socle calcule `baseY = pointLePlusBas − profondeurDalle`.
 
 ⚠️ **LE SOCLE N'EST PAS UNE BOÎTE, ET UNE VERSION DE CE PLAN L'AVAIT RÉDUIT À ÇA.** `src/plinth.js` porte un congé à normales analytiques, des **coins en superellipse** (`slabCorner` / `slabCornerSmoothing`, réglés par défaut dans `main.js:566`) et un liner. Les oublier ne casserait pas le maillage : ça donnerait **un pavé droit à la place de l'objet ShibuMap**.
 
@@ -392,7 +419,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 ⚠️ **SANS CETTE PRÉCISION, LE TEST AUDITE CENT PAVÉS DROITS.** `construireFenetre` seule rend une boîte à hauteurs nulles, fermée et orientée **par construction** : elle passerait l'audit cent fois sans que le rééchantillonnage — la raison d'être de la tâche — soit touché par une seule assertion. **Deux assertions qui mordent** : au moins un sommet intérieur diffère du bord, et la hauteur relevée en un point connu vaut celle du relief bouchonné.
 - [ ] **Étape 5** — mutation : inverser l'enroulement de la dalle doit tuer le test d'orientation.
-- [ ] **Étape 6** — `npm test`, `node --check`, `npx vite build`, audit, commit.
+- [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 ### Tâche 7 : les deux résolutions et la zone morte
 
@@ -400,7 +427,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 **Interfaces produites :**
 - `resolutionPour({ enMouvement })` → `128 | 256`
-- `empriseADerive(precedente, courante)` → `boolean`
+- `empriseADerive(precedente, courante)` → `boolean` — vrai si le cadrage a bougé assez pour justifier une reconstruction. **Seuil de départ : 2 % de la diagonale de l'emprise.** ⚠️ À régler en mesurant les reconstructions par seconde, pas à l'œil.
 
 **Mesuré :** N=256 coûte **8,3 ms de médiane** — au-dessus du budget d'une image à 60 Hz, sur une machine très au-dessus de la cible, et **sans mer ni palette ni gravure**. N=128 coûte **1,7 ms**.
 
@@ -413,7 +440,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 - [ ] **Étape 3** — implémenter.
 - [ ] **Étape 4** — mutation : supprimer la zone morte doit tuer le test de non-reconstruction.
 - [ ] **Étape 5** — ⚠️ **mesurer sur un vol, et donner les deux chiffres** : reconstructions par seconde avant et après la zone morte.
-- [ ] **Étape 6** — `npm test`, audit, commit.
+- [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 ⚠️ **Chargez `anthropic-skills:three-doctor` avant de commiter cette tâche** : c'est celle qui touche le plus la boucle de rendu, et le téléversement de 1,54 Mo de sommets par image en fait partie.
 
@@ -444,7 +471,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 **Couverture :** les treize décisions et les trois règles ont chacune leur tâche ou leur phase.
 
-**Cohérence des noms** — employés à l'identique partout : `socleVisible`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `demanderEmprise`, `PLAFOND_EN_VOL`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`.
+**Cohérence des noms** — employés à l'identique partout : `socleVisible`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `demanderEmprise`, `PLAFOND_FILE`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`.
 
 **Ordre imposé, et il compte :** 4 bis (le flux) **avant** 6 (l'extraction), parce que l'extraction s'appuie sur une interface qui se coince aujourd'hui. Et 5 (l'audit) **avant** 6, parce que sans instrument on ne saura pas si l'extraction marche — le prototype s'est cru étanche pendant tout son vol.
 
