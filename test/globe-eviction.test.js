@@ -425,7 +425,18 @@ const M_PAR_UNITE = 63_710 // EARTH_RADIUS_M / R_GLOBE — src/geo.js
 // pendant les vingt suivantes. Douze, c'est ce chiffre plus trois images de
 // marge. ⚠️ Ce n'est PAS un pansement sur une oscillation : la stabilité est
 // exigée juste après, et elle est exacte.
-const JETEES = 12
+//
+// ⚠️ **ET DOUZE NE SUFFIT PLUS NON PLUS — la Tâche 4 quater a rendu le globe
+// QUATRE NIVEAUX PLUS PROFOND** (plancher de `dist` en mètres, `MAX_Z = 15`).
+// La règle « un niveau par image » n'a pas changé, mais il y a quatre niveaux
+// de plus à descendre : relevé image par image sur ce dépôt, la convergence
+// tombe à l'image 12 à 8 km et à l'image 13 à 2 km, puis l'état ne bouge plus
+// d'une seule tuile. Dix-sept, c'est ce chiffre plus quatre images de marge.
+// ⚠️ Le symptôme d'un JETEES trop court n'est PAS un test qui traîne : c'est
+// une fausse OSCILLATION (« 2 km : zmax oscille (14, 15) ») et de fausses
+// requêtes au repos — exactement la signature du défaut que les deux
+// assertions suivantes cherchent. Le banc mentirait dans le sens du soupçon.
+const JETEES = 17
 const RELEVEES = 20
 
 async function station(altM) {

@@ -847,7 +847,7 @@ Le correctif ne touche pas `sampleHeights` : il **borne la fenêtre à la tuile 
 ⚠️ **ORDRE CONFIRMÉ LE 2026-08-21, ET APPLIQUÉ :** cette tâche est passée **avant la 4 quater**, parce que la 4 quater porte `MAX_Z` à 15 et annonce elle-même **448 Mo à z15** — c'est-à-dire au-dessus du budget d'aujourd'hui avant même de toucher à `CACHE_MAX`. L'ordre du plan est donc **4 → 4 sexies → 4 quater → 4 alpha → 3 → 4 bis → 4 ter**. ⚠️ **ET LA 4 QUATER HÉRITE D'UN BUDGET QUI A CHANGÉ SOUS ELLE :** elle chiffre 448 Mo à z15 sur une tuile qui coûtait ~793 Kio ; la tuile en coûte maintenant ~281 Kio hors canevas non téléversé, et le cache vaut 600 et non 420. **Ses deux lignes de mémoire sont à re-mesurer, pas à recopier.**
 
 
-### Tâche 4 quater : LEVER LE PLANCHER DE `dist`, PUIS PORTER `MAX_Z` À 15 ⚠️ APRÈS LA TÂCHE 4, AVANT LA 4 ALPHA
+### Tâche 4 quater : LEVER LE PLANCHER DE `dist`, PUIS PORTER `MAX_Z` À 15 ✅ **FAITE LE 2026-08-21** — ⚠️ **SES DEUX LIGNES DE MÉMOIRE ÉTAIENT FAUSSES, VOIR LE BILAN**
 
 **Fichiers :** modifier `src/globe.js` (`:780` le plancher de `dist`, puis `MAX_Z`) · tester `test/globe-profondeur.test.js` (créer)
 
@@ -861,24 +861,92 @@ const dist = Math.max(camPos.distanceTo(t.center) - t.chord * 0.5, 1)
 
 `R_GLOBE = 100` (`geo.js:11`) pour 6 371 000 m : **une unité de scène vaut 63 710 m, donc ce `1` vaut 63,7 km.** Sous cette altitude, `dist` est constant, **le ratio `chord/dist` cesse de dépendre de l'altitude**, et le raffinement s'arrête — **z11 à froid, z12 avec hystérésis, à TOUTE altitude.** `MAX_Z = 11` n'est pas une politique : **c'est exactement la valeur que le critère atteint déjà.**
 
-⚠️ **ET LE COÛT N'EST PAS CELUI QUE CE PLAN ANNONÇAIT.** Une version écrivait « chaque niveau **quadruple** les feuilles » : **faux d'un facteur 175** — le critère `chord/dist` fixe la taille **angulaire** d'une feuille, donc chaque niveau n'ajoute **qu'un anneau**. Mesuré après horizon + frustum, en tuiles 512 px :
+⚠️ **ET LE COÛT N'EST CELUI D'AUCUNE DES DEUX VERSIONS QUE CE PLAN A ÉCRITES.** La première disait « chaque niveau **quadruple** les feuilles » ; la seconde, qui la corrigeait, disait « chaque niveau n'ajoute **qu'un anneau** » de 22 tuiles, et chiffrait **120 → 208 tuiles, 261 → 448 Mo**. **LES DEUX SONT FAUSSES**, et la seconde d'un facteur 8.
 
-| | tuiles dessinées | mémoire |
-|---|---|---|
-| z11 (aujourd'hui) | 120 | 261 Mo |
-| **z15** | **208** | **448 Mo** |
+**Ce qui est vrai, et il se lit dans le relevé par niveau :** le critère `chord / dist` fixe bien la taille **angulaire** d'une feuille, donc chaque niveau pose un **anneau d'écran complet** — et un anneau d'écran, à fov 30° en 16/9, ce n'est pas 22 tuiles, **c'est ~185**. Relevé à 2 km, protocole A : `z10:15 z11:152 z12:195 z13:184 z14:182 z15:232`. Le coût est donc **LINÉAIRE EN NOMBRE DE NIVEAUX**, à ~185 tuiles dessinées par niveau.
 
-**`CACHE_MAX = 420` tient, avec deux fois la marge.** ⚠️ **Il n'y a donc AUCUN arbitrage à faire remonter à Adrien sur la finesse du socle : la question n'existe pas.**
+**Mesuré sur ce dépôt, tuiles 256 px (la 4 alpha n'est pas passée), protocole A, lat 45° :**
+
+| | tuiles dessinées | ensemble de travail | tas JS + tampons |
+|---|---|---|---|
+| z11 à 8 km (avant) | 250 | 532 | 32,1 Mo |
+| **z14 à 8 km** (après) | **748** | **1 196** | **59,8 Mo** |
+| **z15 à 2 km** (après) | **964** | **1 504** | **72,6 Mo** |
+
+⚠️ **`CACHE_MAX = 420` NE TIENT PAS, ET 600 NON PLUS.** À 600, le globe s'arrête à z12 avec **58 raffinements refusés par image** à 8 km : le plancher levé rendrait les niveaux fins ATTEIGNABLES sans les rendre ATTEINTS. **Le budget du chemin continu passe donc à 1 700** (saturation mesurée à 1 504, plus 13 % de marge — la règle même de la Tâche 4 sexies), **et il n'est PAS partagé avec la production** : voir le bilan.
 
 **Et la destination se dérive en une ligne**, à 45° de latitude en tuiles 512 px : z12 = 13,51 m · z13 = 6,76 m · z14 = 3,38 m · **z15 = 1,69 m** — **exactement le besoin du socle à ses quatre niveaux.** ⚠️ **La destination est `MAX_Z = 15`. Ce plan disait « pas de chiffre, délibérément » alors qu'il était gratuit.**
 
-- [ ] **Étape 1 — le test qui échoue** : **à 8 km d'altitude**, le zoom effectif atteint **au moins z13**. ⚠️ **Altitude de travail explicite, parce que « une altitude de socle » est produite par la Tâche 3, qui passe APRÈS** — elle pourra la déplacer. Le test échoue aujourd'hui **et après la Tâche 4**.
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue, **et vérifier aussi qu'il échoue encore avec `MAX_Z = 16`** : c'est ce qui prouve que la constante n'est pas le verrou.
-- [ ] **Étape 3 — LEVER LE PLANCHER DE `dist`.** Le `1` de `:780` doit descendre à ce que l'échelle justifie, ou disparaître au profit d'une borne exprimée en mètres. ⚠️ **C'est ce geste, et lui seul, qui débloque les niveaux fins.**
-- [ ] **Étape 4 — porter `MAX_Z` à 15**, et relever la table ci-dessus sur votre banc — **20 images stables, après en avoir jeté cinq.** ⚠️ **Si vos chiffres s'écartent de ceux du tableau, ce sont les vôtres qui font foi : écrivez-les ici.**
-- [ ] **Étape 5 — la borne AWS.** AWS s'arrête à **z15** (`dem-source.js:51`) : au-delà les tuiles reviennent en `error`, **et une tuile `error` est inévinçable tant que la Tâche 4 Étape 6 n'est pas faite.** z15 est donc la destination **et** la limite tant que la 4 alpha n'a pas rebranché Mapterhorn.
-- [ ] **Étape 6 — mutation** : remettre le plancher de `dist` à 1 doit tuer le test. ⚠️ **Remettre `MAX_Z` à 11 doit AUSSI le tuer** — les deux gestes sont nécessaires, le test doit le prouver.
-- [ ] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [x] **Étape 1 — le test qui échoue** : **à 8 km d'altitude**, le zoom effectif atteint **au moins z13**. ⚠️ **Altitude de travail explicite, parce que « une altitude de socle » est produite par la Tâche 3, qui passe APRÈS** — elle pourra la déplacer. Le test échoue aujourd'hui **et après la Tâche 4**.
+- [x] **Étape 2** — le lancer, vérifier qu'il échoue, **et vérifier aussi qu'il échoue encore avec `MAX_Z = 16`** : c'est ce qui prouve que la constante n'est pas le verrou.
+- [x] **Étape 3 — LEVER LE PLANCHER DE `dist`.** Le `1` de `:780` doit descendre à ce que l'échelle justifie, ou disparaître au profit d'une borne exprimée en mètres. ⚠️ **C'est ce geste, et lui seul, qui débloque les niveaux fins.**
+- [x] **Étape 4 — porter `MAX_Z` à 15**, et relever la table ci-dessus sur votre banc — **20 images stables, après en avoir jeté DIX-SEPT.** ⚠️ **CINQ ÉTAIT FAUX, ET DOUZE L'EST DEVENU** : la règle sans-trou ne descend que d'un niveau par image, et cette tâche en ajoute quatre. Mesuré image par image, la convergence tombe à l'image **12 à 8 km** et **13 à 2 km**. ⚠️ **Un banc trop court n'est pas lent, il MENT** : il rend « zmax oscille 14/15 » et « 232 requêtes caméra immobile », c'est-à-dire la signature exacte du défaut cherché. ⚠️ **Si vos chiffres s'écartent de ceux du tableau, ce sont les vôtres qui font foi : écrivez-les ici.**
+- [x] **Étape 5 — la borne AWS.** AWS s'arrête à **z15** (`dem-source.js:51`) : au-delà les tuiles reviennent en `error`, **et une tuile `error` est inévinçable tant que la Tâche 4 Étape 6 n'est pas faite.** z15 est donc la destination **et** la limite tant que la 4 alpha n'a pas rebranché Mapterhorn.
+- [x] **Étape 6 — mutation** : remettre le plancher de `dist` à 1 doit tuer le test. ⚠️ **Remettre `MAX_Z` à 11 doit AUSSI le tuer** — les deux gestes sont nécessaires, le test doit le prouver.
+- [x] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
+#### ✅ CE QUI A ÉTÉ FAIT, ET CE QUE ÇA MESURE (2026-08-21)
+
+**LE TEST ROUGE, ET LA PREUVE QUE LA CONSTANTE N'EST PAS LE VERROU.** `test/globe-profondeur.test.js` (créé, 5 tests, ajouté à la ligne `test` de `package.json` — 182 listés, 182 sur disque, `audit:tests` sans écart). L'assertion qui mord : **à 8 km, `zmax` ≥ z13**, protocole A, 20 images stables.
+
+| état du dépôt | `zmax` à 8 km |
+|---|---|
+| avant (le `1` d'origine) | **z11**, 250 dessinées, cache 532 |
+| `MAX_Z = 16` seul | **z11**, 250 dessinées, cache 532 |
+| `MAX_Z = 16` **et** `CACHE_MAX = 8 000` (13× le budget) | **z11**, 250 dessinées, **cache 532** |
+
+⚠️ **LA MESURE DU PLAN SE REPRODUIT À LA TUILE PRÈS.** Le cache sature à 532 quel que soit le budget : le point fixe n'était ni la constante ni le budget, **c'était le critère lui-même**, gelé sous 63,7 km.
+
+**LE GESTE.** `PLANCHER_DIST_M = 1` mètre, converti par `R_GLOBE / EARTH_RADIUS_M`, à la place du `1` en unités de scène. Le plancher ne sert plus qu'à empêcher la division par zéro quand la caméra touche la nappe (`dist` devient négatif dès qu'elle entre dans la demi-corde d'une grosse tuile). Puis `MAX_Z = 11 → 15`, **exporté** pour que le test le confronte au plafond déclaré de `dem-source.js` au lieu d'un littéral recopié.
+
+⚠️ **ET LES DEUX GESTES SONT NÉCESSAIRES, LE BANC LE PROUVE :** plancher levé avec `MAX_Z = 11` rend **exactement** la table d'avant (z10/117/312, z11/249/528, z11/250/532, z11/235/532) — pas une tuile de différence. C'est la mutation de l'Étape 6, dans un sens ; dans l'autre, remettre le plancher à 1 avec `MAX_Z = 15` rend z11. **Chacun des deux, seul, ne produit rien.**
+
+**LA TABLE, SUR MON BANC** — protocole A de la Tâche 4 : globe **neuf** par station, `_tileMemo` vidée, `PerspectiveCamera(30, 16/9, clamp(orbAlt × 0,2 ; 0,01 ; 0,5), 1400)` regardant le centre, `update()` puis attente que la file se vide, **dix-sept images jetées, vingt relevées, stabilité exigée**, latitude 45°, longitude 6,25°, `CACHE_MAX_CONTINU = 1 700`. ⚠️ **Ce banc a d'abord été validé contre la table de la Tâche 4 sexies : il la reproduit chiffre pour chiffre** avant toute modification — c'est ce qui autorise à croire ce qu'il dit ensuite.
+
+| altitude | zmax | dessinées | parcourues | refus/img | cache | req/img au repos | stable | tas + tampons |
+|---|---|---|---|---|---|---|---|---|
+| 1 600 km | **z7** | 57 | 216 | 0 | 216 | 0,0 | oui | 19,9 Mo |
+| 800 km | **z8** | 76 | 252 | 0 | 252 | 0,0 | oui | 20,0 Mo |
+| 200 km | **z10** | 117 | 312 | 0 | 312 | 0,0 | oui | 22,8 Mo |
+| 60 km | **z12** | 255 | 536 | 0 | 536 | 0,0 | oui | 32,3 Mo |
+| 8 km | **z14** | 748 | 1 196 | 0 | 1 196 | 0,0 | oui | 59,8 Mo |
+| 2 km | **z15** | 964 | 1 504 | 0 | 1 504 | 0,0 | oui | 72,6 Mo |
+
+**`zmax` prend SIX valeurs distinctes sur les six altitudes nommées — une par station.** La Tâche 4 en avait quatre ; avant elle, une seule. **C'est ça, « pas des crans ».**
+
+⚠️ **ET z15 N'EST PAS ATTEINT À 8 km, CE N'EST PAS UN MANQUE DE BUDGET — C'EST LE CRITÈRE QUI A RAISON.** À 8 km il ne refuse **aucun** raffinement (0 refus, cache non saturé à 1 196 sur 1 700) : une tuile z14 mesure 1 729 m à 45°, et le critère `chord > 0,319 × distance` demande 2 555 m pour se refendre. **Le zoom suit l'altitude, il ne court pas après une constante.**
+
+**LE BUDGET — RE-MESURÉ, ET IL A DOUBLÉ.** Balayage de `CACHE_MAX` sur le globe corrigé, même protocole :
+
+| `CACHE_MAX` | 60 km | 8 km | 2 km |
+|---|---|---|---|
+| **600** (celui de la 4 sexies) | z12, 255 dess. | z12, 301, **58 refus/img** | z12, 286, **59 refus** |
+| **900** | z12, 255 | z13, 526, **49 refus** | z13, 511, **55 refus** |
+| **1 200** | z12, 255 | z14, 748, 0 refus | z14, 736, **73 refus** |
+| **1 700** (posé) | z12, 255 | z14, 748, 0 refus | **z15, 964, 0 refus** |
+| **2 400** | identique à 1 700 | identique à 1 700 | identique à 1 700 |
+
+**L'ensemble de travail SATURE À 1 504 TUILES**, contre 532 à z11 : **2,8 fois plus.** 2 400 n'achète rien, 1 700 laisse 13 % de marge. ⚠️ **À 600, lever le plancher n'aurait acheté qu'UN niveau** (z11 → z12) et laissé 58 sous-arbres grossiers par image : **la tâche aurait été livrée verte et à moitié faite.**
+
+⚠️ **CE BUDGET N'EST PAS PARTAGÉ AVEC LA PRODUCTION, ET C'EST MESURÉ, PAS PRUDENTIEL.** Posé pour tout le monde, `CACHE_MAX = 1 700` fait gonfler l'ancien chemin — qui parcourt encore une calotte de deux tiers de planète — **de 600 à 1 700 tuiles, de 439 à 1 264 dessinées, et de 72 à 153 Mo** (station 8 km, mêmes sondes). Il lui offrirait au passage un zoom que personne n'a demandé (z6 → z11) pour une facture que personne n'a arbitrée. Le budget devient donc `this.cacheMax`, posé au constructeur : **600 sans le drapeau, 1 700 avec.** Le plancher de `dist` est gardé de la même façon — la production garde son `1`.
+
+**LA PRODUCTION EST INCHANGÉE, VÉRIFIÉE ET NON ESPÉRÉE.** Même banc, drapeau baissé, avant et après le commit : **z6, 439 dessinées, 600 en cache, 71-75 refus/img, 0,0 requête au repos** — identique à la tuile près aux quatre altitudes basses.
+
+**CE QUI A ÉTÉ VU AU NAVIGATEUR** (`http://localhost:5503/?globe=continu` **et** sans le paramètre, vraie donnée AWS, vrai réseau) :
+
+- ✅ **les deux pages chargent et tournent**, zéro erreur JS, zéro avertissement `THREE.*`. Le drapeau se lit : `globe.continu === true` et `globe.cacheMax === 1700` avec `?globe=continu`, `false` / `600` sans.
+- ✅ **le banc de node se retrouve dans le vrai navigateur** : caméra posée à 8 km sur la même station, sur vraie donnée AWS, le globe se stabilise à **z14, 589 dessinées, 1 192 en cache, 0 refus** (contre z14 / 748 / 1 196 sous node — l'écart de tuiles dessinées vient du rapport d'écran réel et du relief réel, qui n'est pas le plateau du bouchon). Tas JS : **373 → 410 Mo** pour 748 tuiles de plus, soit **~50 Kio par tuile**, exactement ce que node mesure.
+
+⚠️ **CE QUE LE NAVIGATEUR A MONTRÉ ET QUE LE BANC NE PEUT PAS VOIR — ET C'EST LA VRAIE LIMITE DE CETTE TÂCHE.** Le banc a un réseau **instantané** ; le vrai n'en a pas. Caméra en orbite, en mouvement, à 15 km : relevé **568 tuiles en `loading` simultanément** et le cache collé à 1 700. Quatre niveaux de plus, c'est quatre fois plus de tuiles à faire venir pendant que la caméra bouge, et `MAX_CONCURRENT = 6` ne fait pas de miracle. **Aucune tuile en `error`, `_echoue` vide** — ce n'est pas une panne, c'est une file. ⚠️ **C'est exactement l'objet de la Tâche 4 bis (« le flux qui ne se coince pas ») et de la règle R3, et le plan a raison de les placer APRÈS celle-ci : elles se calibrent maintenant sur le bon trafic.** **Ne promettez donc pas encore la fluidité : ce commit rend le globe FIN, il ne le rend pas encore FLUIDE.**
+
+**LA BORNE AWS (Étape 5).** `MAX_Z = 15` est la limite du jeu AWS (`dem-source.js`, `aws.maxZoom`), et le test la **lit** au lieu de la recopier : il échouera le jour où la Tâche 4 alpha rebranchera Mapterhorn (z17) sans relever la borne avec elle. Un second test vérifie la borne **à l'exécution** — à 2 km, la station la plus profonde, **aucune tuile z16 ne part sur le réseau, et z15 est bien demandé**. La quarantaine des tuiles en échec (`IMAGES_QUARANTAINE = 600`) n'est pas touchée : les 21 tests de la Tâche 4 et de la 4 sexies restent verts.
+
+**LA MUTATION (Étape 6), DANS LES DEUX SENS.** Remettre `PLANCHER_DIST_M` à 63 710 (soit le `1` d'origine) tue le test — z11. Remettre `MAX_Z` à 11 le tue aussi — z11. **Aucun des deux gestes ne suffit seul, et le test le prouve dans les deux sens.**
+
+**LES TESTS.** `test/globe-profondeur.test.js` créé (5 tests) ; `test/globe-eviction.test.js` inchangé sauf `JETEES` (12 → 17), **corrigé en place avec sa raison**. Suite : **3 116 → 3 121 verts**, `audit:tests` sans écart, `node --check` sur les trois fichiers, `nettoie:dist` + `build:mapcells` + `vite build` + `verifie:dist` — `dist` complet, déploiement autorisé.
+
+⚠️ **CE QUI N'A PAS PU ÊTRE VÉRIFIÉ, ET IL FAUT LE DIRE.** Le volet navigateur **ne composite toujours pas** : aucune capture d'écran n'a pu être prise, et `renderer.info.render.calls` rend `1` (le dernier passage plein écran du compositeur), donc **le nombre réel d'appels de dessin à z14/z15 n'a pas été mesuré**. Tout ce qui est écrit ci-dessus vient de l'état du quadtree et de `performance.memory`, pas d'un œil. **Et la VRAM n'a pas été mesurée du tout** : à 256 Kio par texture de tuile sans mipmap, 964 tuiles dessinées plafonnent à ~241 Mo de textures contre ~60 Mo aujourd'hui — **c'est une projection arithmétique, pas un relevé.** ⚠️ **Le drapeau est baissé en production, donc rien de tout cela n'est encore livré à personne — mais il faudra un vrai relevé GPU avant de le lever.**
+
 
 
 ### Tâche 4 alpha : rebrancher le globe sur la vraie source de relief ⚠️ APRÈS LA 4 QUATER, ET SEULEMENT SI ELLE A PORTÉ `MAX_Z` AU-DELÀ DE 11
@@ -953,7 +1021,7 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 - [ ] **Étape 8** — mutation : revenir à l'URL en dur doit tuer le test.
 - [ ] **Étape 9 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
-⚠️ **UNE VERSION DE CE PLAN PROPOSAIT ICI « plafonner `MAX_Z` à 13 » COMME ALTERNATIVE HONNÊTE : LA MESURE L'A RENDUE SANS OBJET.** La Tâche 4 quater établit que le verrou n'est pas `MAX_Z` mais le plancher de `dist`, et que z15 tient dans le budget actuel avec deux fois la marge. **Il n'y a plus d'arbitrage à faire ici.** Ce qui reste vrai en revanche
+⚠️ **UNE VERSION DE CE PLAN PROPOSAIT ICI « plafonner `MAX_Z` à 13 » COMME ALTERNATIVE HONNÊTE : LA MESURE L'A RENDUE SANS OBJET.** La Tâche 4 quater établit que le verrou n'est pas `MAX_Z` mais le plancher de `dist`. ⚠️ **EN REVANCHE « z15 TIENT DANS LE BUDGET ACTUEL AVEC DEUX FOIS LA MARGE » EST FAUX, ET C'EST MESURÉ :** l'ensemble de travail passe de 532 à **1 504** tuiles, et il a fallu porter le budget du chemin continu de 600 à **1 700**. **L'arbitrage n'a pas disparu, il a été tranché — et il coûte 40 Mo de tas et le TRIPLE de tuiles à l'écran.** Ce qui reste vrai en revanche
 
 ### Tâche 3 : `seuil-socle.js` — quand le socle naît et meurt
 

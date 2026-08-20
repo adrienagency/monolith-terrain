@@ -1,5 +1,7 @@
 // MONOLITH EARTH — the orbital globe. A quadtree of curved patches streams
-// the same AWS terrarium elevation tiles the terrain uses (z2 → z11) and a
+// the same AWS terrarium elevation tiles the terrain uses (z2 → z15, la borne
+// du jeu AWS ; le chemin de PRODUCTION n'y descend pas — son plancher de
+// `dist` l'arrête à z11, voir `PLANCHER_DIST`) and a
 // custom shader re-creates the vintage-topo recipe at planet scale:
 // hypsometric ramp, bathymetric blues, contour lines, 10° graticule, paper
 // noise. Refinement is hole-free: a tile only subdivides once all four
@@ -13,7 +15,10 @@ import { GlobeClouds } from './globe-clouds.js'
 
 const TILE_URL = (z, x, y) => `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`
 const ROOT_Z = 2
-const MAX_Z = 11
+// ⚠️ EXPORTÉ POUR QUE LE TEST LE CONFRONTE À LA SOURCE, ET NON À UN LITTÉRAL
+// RECOPIÉ (`test/globe-profondeur.test.js`) : un chiffre recopié dans un test
+// ne rougit pas quand la source change sous lui.
+export const MAX_Z = 15
 const MAX_CONCURRENT = 6
 // ⚠️ 600, ET C'EST L'ENSEMBLE DE TRAVAIL MESURÉ QUI LE DIT (plan « globe
 // continu », Tâche 4 sexies, Étape 2 — balayage rejoué sur ce dépôt, protocole
@@ -36,6 +41,40 @@ const MAX_CONCURRENT = 6
 // auraient fait 465 Mo sur un tas déjà mesuré à 1,7-1,9 Go. Après elle, la
 // facture au cache plein DESCEND malgré les 43 % de tuiles en plus.
 const CACHE_MAX = 600 // ready tiles kept before LRU eviction
+// ⚠️ ET LE CHEMIN CONTINU A SON PROPRE BUDGET, PARCE QU'IL A SON PROPRE
+// ENSEMBLE DE TRAVAIL (plan « globe continu », Tâche 4 quater). Une fois le
+// plancher de `dist` levé et `MAX_Z` porté à 15, le globe descend de quatre
+// niveaux de plus, et **chaque niveau ajoute ~185 tuiles dessinées** — le
+// critère `chord / dist` fixe la taille ANGULAIRE d'une feuille, donc chaque
+// niveau pose un anneau d'écran complet, pas « quatre fois plus de feuilles »
+// (ce que ce plan avait écrit) ni « un anneau de 22 tuiles » (ce qu'il avait
+// écrit ensuite). Balayage rejoué, protocole A, lat 45°, 17 images jetées puis
+// 20 relevées :
+//
+//     CACHE_MAX   60 km                 8 km                    2 km
+//       600       z12, 255 dess.        z12, 301, 58 refus/img  z12, 286, 59 refus
+//       900       z12, 255              z13, 526, 49 refus      z13, 511, 55 refus
+//     1 200       z12, 255              z14, 748, 0 refus       z14, 736, 73 refus
+//     1 700       z12, 255              z14, 748, 0 refus       z15, **964**, 0 refus
+//     2 400       identique à 1 700     identique à 1 700       identique à 1 700
+//
+// **L'ensemble de travail SATURE À 1 504 TUILES** (à 2 km, la station la plus
+// basse des six nommées) : 2 400 n'achète rien de plus, et 1 700 laisse 13 % de
+// marge — la même règle que la Tâche 4 sexies avait appliquée à 532.
+//
+// ⚠️ ET CE BUDGET N'EST PAS PARTAGÉ AVEC LA PRODUCTION, C'EST MESURÉ ET NON
+// PRUDENTIEL. Posé pour TOUT LE MONDE, il fait gonfler l'ancien chemin — qui
+// parcourt encore une calotte de deux tiers de planète — de 600 à 1 700 tuiles
+// et de 439 à 1 264 tuiles dessinées, soit 153 Mo au lieu de 72 (mêmes sondes,
+// station 8 km). L'ancien chemin n'en tirerait qu'un zoom que personne n'a
+// demandé, au prix d'une facture que personne n'a arbitrée. **La production
+// garde donc exactement le budget que la Tâche 4 sexies lui a mesuré.**
+const CACHE_MAX_CONTINU = 1700
+// Plancher de `dist` dans `_traverse`, EXPRIMÉ EN MÈTRES puis converti — voir
+// le long commentaire à son point d'usage. L'ancien plancher valait `1` unité
+// de scène, c'est-à-dire 63 710 m, et c'est lui qui plafonnait le globe à z11.
+const PLANCHER_DIST_M = 1
+const PLANCHER_DIST = PLANCHER_DIST_M * (R_GLOBE / EARTH_RADIUS_M)
 const SPLIT_RATIO = 0.38 // tile chord / camera distance beyond which we refine
 const MERGE_RATIO = SPLIT_RATIO * 0.8 // hysteresis: refined tiles only coarsen below this
 
@@ -369,6 +408,8 @@ export class Globe {
     // `flags.js` — délibérément : le lecteur de `FLAGS.globeContinu` est
     // `src/main.js`, qui ne passe ici qu'un booléen.
     this.continu = params.globeContinu ?? false
+    // le budget de cache SUIT le chemin : voir CACHE_MAX_CONTINU
+    this.cacheMax = this.continu ? CACHE_MAX_CONTINU : CACHE_MAX
     this._frustum = new THREE.Frustum()
     this._matVue = new THREE.Matrix4()
     this._sphereTuile = new THREE.Sphere()
@@ -931,11 +972,11 @@ export class Globe {
       if (t.mesh) t.mesh.visible = false
       if (t.z > ROOT_Z && t.state === 'ready' && t.coverFrame !== prev && t.lastUsed !== prev) marge++
     }
-    this._credit = CACHE_MAX - this.tiles.size + marge
+    this._credit = this.cacheMax - this.tiles.size + marge
 
     for (const root of this.roots) this._traverse(root, camPos, camDir)
 
-    if (this.tiles.size > CACHE_MAX) this._evict()
+    if (this.tiles.size > this.cacheMax) this._evict()
     return this._drawn
   }
 
@@ -1030,7 +1071,34 @@ export class Globe {
     // Les premières seront reparcourues à la frame suivante ; les évincer,
     // c'est les redemander au réseau immédiatement. `coverFrame` les marque.
     t.coverFrame = this.frame
-    const dist = Math.max(camPos.distanceTo(t.center) - t.chord * 0.5, 1)
+    // ⚠️ LE PLANCHER DE `dist` ÉTAIT LE VRAI PLAFOND DE ZOOM DU GLOBE, ET CE
+    // N'ÉTAIT PAS `MAX_Z` (plan « globe continu », Tâche 4 quater).
+    //
+    // Ce `1` est un plancher exprimé en UNITÉS DE SCÈNE, et `R_GLOBE = 100`
+    // vaut 6 371 000 m : **une unité pèse 63 710 m, donc ce plancher valait
+    // 63,7 km.** Sous cette altitude `dist` est CONSTANT : le ratio
+    // `chord / dist` cesse de dépendre de l'altitude et le raffinement s'arrête
+    // net, exactement à z11 — **quelle que soit la valeur de `MAX_Z`**.
+    //
+    // ⚠️ MESURÉ SUR CE DÉPÔT AVANT LA CORRECTION, protocole A, 8 km :
+    // `MAX_Z = 16` avec `CACHE_MAX = 8 000` (treize fois le budget) rend
+    // TOUJOURS z11, cache saturé à 532. Monter la constante ne produit rien —
+    // c'est le §2 de `/threejs-optimisation` mot pour mot.
+    //
+    // Le plancher devient donc une borne en MÈTRES. Il ne sert qu'à empêcher la
+    // division par zéro quand la caméra touche la nappe (et `dist` devient
+    // négatif dès qu'elle entre dans la demi-corde d'une grosse tuile) : un
+    // mètre suffit, et un mètre ne borne plus rien d'observable.
+    //
+    // ⚠️ ET LA BAISSE EST RÉSERVÉE AU CHEMIN CONTINU. Sans le tri spatial de la
+    // Tâche 4 (horizon géométrique + frustum), le globe parcourt une calotte de
+    // deux tiers de planète : lui ouvrir les niveaux fins ne ferait pas un
+    // globe plus net, il ferait une tempête de requêtes sur un cache déjà
+    // saturé — mesuré sur l'ancien chemin, 439 tuiles dessinées, 600 en cache,
+    // 75 raffinements refusés par image, z6. **La production garde son
+    // plancher, et la mesure ci-dessous le vérifie plutôt que de l'espérer.**
+    const plancher = this.continu ? PLANCHER_DIST : 1
+    const dist = Math.max(camPos.distanceTo(t.center) - t.chord * 0.5, plancher)
     // hysteresis: a tile that already refined only coarsens once the ratio
     // falls well below the split point, so hovering at the threshold no
     // longer flickers between parent and children every few frames
@@ -1093,7 +1161,7 @@ export class Globe {
   }
 
   _evict() {
-    this._evictJusqua(CACHE_MAX)
+    this._evictJusqua(this.cacheMax)
   }
 
   // Budget DUR, mais des victimes CHOISIES. Le tri d'origine était le seul
