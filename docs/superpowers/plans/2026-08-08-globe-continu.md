@@ -346,49 +346,43 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 
 ### Tâche 4 : rendre `MAX_Z` ATTEIGNABLE — et non le descendre
 
-⚠️ **LA PRÉMISSE DE CETTE TÂCHE ÉTAIT FAUSSE, ET C'EST UN AUDIT DU 2026-08-20 QUI L'A MESURÉ.**
+⚠️ **LA PRÉMISSE DE CETTE TÂCHE ÉTAIT FAUSSE.** Ce plan écrivait « le quadtree s'arrête à z11 ». Il n'y arrive **jamais** : mesuré, il plafonne à **z7**, et `MAX_Z = 11` est du code mort. Monter une constante qui n'est pas atteinte ne produit rien.
 
-Ce plan écrivait « le quadtree s'arrête à z11 ». **Il s'arrête à z6.** Mesuré sur les six paliers de `DIVE_TIERS`, de 1 600 km d'altitude jusqu'à 8 km : **cinq lignes de résultats strictement identiques** — cache 420, 305 tuiles dessinées, zoom effectif **6**. Un facteur 200 d'altitude qui ne change rien à l'écran, et **`MAX_Z = 11` est du code mort depuis toujours.**
+⚠️ **ET LA PREMIÈRE VERSION DE CETTE RÉÉCRITURE ÉTAIT FAUSSE AUSSI** — elle annonçait z6, cinq niveaux débloqués, et proposait un plancher de crédit qui **aggrave** le défaut. Un validateur a rejoué la mesure. **Les chiffres ci-dessous sont les siens, pas ceux du premier audit.**
 
-**Trois causes, mesurées, et aucune n'est « descendre une constante » :**
+#### Les trois causes — vérifiées dans le code, deux fois
 
-1. **Le crédit de raffinement est un point fixe arithmétique** (`globe.js:759`). `_credit = CACHE_MAX − tiles.size + marge` : à saturation, `marge` tombe à **0**, donc le crédit vaut **0**, donc aucune tuile n'est créée, donc la taille ne bouge plus. ⚠️ **Le commentaire des lignes 747-752 affirme que `marge` écarte ce gel** — et dit même qu'un crédit fondé sur la seule place libre « GÈLERAIT le globe ». **Il ne fait que le retarder.** Un commentaire juste sur l'intention et faux sur le résultat.
-2. **Le seuil d'horizon est une constante** (`globe.js:770`) : `dot < −0.35`, soit 110°, au lieu du vrai horizon géométrique `R_GLOBE / |camPos|`. À 8 km d'altitude le vrai seuil vaut **0,99893** : le code parcourt et raffine une calotte **environ 1 800 fois trop large**.
-3. **Aucun test de frustum dans `_traverse`.** En orbite basse, **10 à 20 % seulement** des tuiles dessinées sont dans le champ.
+1. **Le crédit de raffinement est un point fixe arithmétique** (`globe.js:759`). `_credit = CACHE_MAX − tiles.size + marge` : à saturation `marge` s'annule **structurellement**, donc le crédit vaut 0, donc rien n'est créé, donc la taille ne bouge plus. ⚠️ Le commentaire des lignes 747-752 affirme que `marge` écarte ce gel — et qu'un crédit fondé sur la seule place libre « GÈLERAIT le globe ». **Il ne fait que le retarder.**
+2. **Le seuil d'horizon est une constante** (`globe.js:770`) : `dot < −0.35` (110°) au lieu du vrai horizon géométrique. À basse altitude, le code parcourt une calotte de plusieurs ordres de grandeur trop large.
+3. **Aucun test de frustum dans `_traverse`** — zéro occurrence dans le fichier.
 
-**Le gain mesuré des trois corrections réunies : de z6 / 305 tuiles dessinées à z11 / 74 tuiles dessinées.** Estimé à une heure de travail. ⚠️ **C'est un facteur qu'aucune micro-optimisation n'approche — et c'est disponible avant même le pivot.**
+#### ⚠️ Le plancher de crédit : 16, et surtout PAS 64
 
-⚠️ **Deux autres trouvailles du même audit, à traiter ici :**
-- **Chaque tuile retient trois copies de la même grille de hauteurs** — `t.heights` (lu une seule fois, `:590`), le canevas retenu par la `CanvasTexture`, et la texture GPU. **250 Mo mesurés pour 420 tuiles**, quand le commentaire de la ligne 168 annonce « 380 Mo pour 1 500 » : la documentation sous-estime d'un facteur **2,4**.
-- **Les normales du bord de tuile sont aplaties de moitié** (`:623-648`) : `sampleHeights` écrête les échantillons hors [0,1] alors que `tileToLatLon` fournit la position complète. Pente mesurée **407 m au bord contre 853 m au centre**, d'où un liseré d'éclairage discontinu autour de chaque tuile.
+Ce plan avait proposé **64**. Mesuré par le validateur : à 8 km d'altitude, **64 fait tomber le globe à z4** — *pire qu'aujourd'hui* — et installe **six requêtes par image caméra immobile**, alors que le code actuel en fait **zéro** au repos.
 
-**Fichiers :** modifier `src/globe.js` (`MAX_Z`, `CACHE_MAX`) · tester `test/globe-reseau.test.js`, `test/globe-eviction.test.js`
+Avec **16** : **z11 atteint, et zéro requête au repos.**
 
-⚠️ **`test/globe-eviction.test.js:118` RECOPIE `CACHE_MAX = 420` et l'asserte.** Passer à une formule le casse mécaniquement. **Ne l'affaiblissez pas : remplacez l'invariant** — ce n'est plus « le cache vaut 420 » mais « le cache suit le cadrage, et ne descend jamais sous le plancher ».
+⚠️ **C'est l'illustration exacte de la règle du §0.** J'ai posé 64 sans le mesurer ; la valeur ne corrigeait pas le défaut, elle en fabriquait un pire. **Ne changez pas ce 16 sans refaire la mesure.**
 
-⚠️ **`MAX_Z` ne vit que dans `src/globe.js`** — vérifié le 2026-08-20. Une version de ce plan annonçait « cinq fichiers » : c'était faux, et un lecteur qui vérifiait y perdait sa confiance dans les autres avertissements.
+#### ⚠️ Ce que la mesure ne dit PAS, et qu'il faut établir
 
-⚠️ **Le repère relatif (`150f817`) est un préalable, et il est fait.** Sans lui, on descendrait dans une zone où le terrain tremble.
+- **Le champ de vision n'a jamais été donné** dans aucune des deux mesures. Le résultat en dépend. **Fixez-le et écrivez-le** avant de comparer quoi que ce soit.
+- **« 74 tuiles dessinées » recolle deux paliers différents.** Ne le citez pas comme un objectif.
+- **Le même relevé donne un cache de 824** — c'est-à-dire **le double de `CACHE_MAX`**. ⚠️ Or l'étape sur le cache ci-dessous propose `5 × visibles` ≈ 370, ce qui **défait** ce que les trois causes viennent de débloquer. **Cette contradiction se tranche par la mesure, pas par un arbitrage d'écriture.**
+- **La formule d'horizon a besoin de sa marge de corde.** Transcrite nue, elle écrête au limbe et **crée des trous**. Et les racines `z2` doivent en être exemptées.
 
-⚠️ **Vérifier jusqu'où les tuiles existent réellement** chez AWS terrarium et mapterhorn. Descendre au-delà ne produit pas une erreur : ça produit des tuiles vides, donc un terrain plat, **en silence**. Mesuré le 2026-08-08 : z17 à Chamonix chez Mapterhorn, z15 pour le repli AWS.
+#### Les étapes
 
-⚠️ **`CACHE_MAX = 420` ne doit pas devenir un autre nombre : il doit devenir une FORMULE.** MapLibre tient `niveaux_conservés × tuiles_visibles_dans_le_cadre`, cinq niveaux par défaut. La limite suit alors le cadrage au lieu d'être un chiffre à re-régler.
+- [ ] **Étape 0 — POSER LE DRAPEAU** dans `src/flags.js` (le fichier existe). ⚠️ Sans lui, tout ce qui suit s'applique au globe orbital, **qui est en production**.
+- [ ] **Étape 1 — établir la base, et l'écrire.** Champ de vision fixé, zoom effectif, tuiles dessinées, taille de cache, requêtes au repos — à six altitudes. **C'est la référence contre laquelle tout le reste se compare.** ⚠️ Deux relevés antérieurs se contredisent (z6 contre z7) : le vôtre fait foi, et il doit être reproductible.
+- [ ] **Étape 2 — le point fixe du crédit.** Test d'abord : à cache saturé, une caméra qui bouge doit créer au moins une tuile. Il échoue aujourd'hui. Puis le plancher **16**, avec le test qui vérifie **aussi** qu'au repos les requêtes retombent à zéro. ⚠️ **Ce second test est celui que 64 aurait fait échouer.**
+- [ ] **Étape 3 — l'horizon géométrique**, avec sa marge de corde et l'exemption des racines. Test : à basse altitude, le nombre de tuiles parcourues chute d'un ordre de grandeur **sans qu'aucune tuile visible ne disparaisse**. ⚠️ La seconde moitié est celle qui attrape l'écrêtage.
+- [ ] **Étape 4 — le test de frustum** dans `_traverse`. Test : la proportion de tuiles dessinées effectivement dans le champ passe au-dessus de 80 %.
+- [ ] **Étape 5 — trancher le cache**, avec les chiffres de l'étape 1 et non par principe. ⚠️ Si les trois corrections réclament 824, une formule qui rend 370 est une régression déguisée en optimisation. **Mesurez avant de choisir.**
+- [ ] **Étape 6 — les deux trouvailles annexes.** Libérer `t.heights` après maillage (trois copies de la même grille, **250 Mo mesurés pour 420 tuiles**, quand le commentaire de `:168` annonce « 380 Mo pour 1 500 » — sous-estimation d'un facteur 2,4). Et les normales de bord aplaties de moitié (`:623-648`) : `sampleHeights` écrête hors [0,1] alors que `tileToLatLon` donne la position complète — pente **407 m au bord contre 853 m au centre**, d'où un liseré d'éclairage autour de chaque tuile.
+- [ ] **Étape 7 — LA CLÔTURE DU §0**, puis commit.
 
-⚠️ **ET LE CRÉDIT DE RAFFINEMENT DOIT SUIVRE LA MÊME FORMULE, AVEC UN PLANCHER — proposé à 64 tuiles**, soit de quoi couvrir un cadrage serré sans jamais tomber à zéro. `globe.js:757-763` calcule `_credit = CACHE_MAX − tiles.size + marge`, et le commentaire du dépôt dit déjà qu'un crédit nul **« GÈLERAIT le globe »**. Une formule qui suit le cadrage rend une valeur **plus petite sur un cadrage serré** — c'est-à-dire exactement en mode socle : crédit négatif, descente arrêtée. `TILE_MEMO_MAX = 128` est lui aussi calibré contre 420. **Un test « resserrement brutal du cadrage » doit prouver que le raffinement ne gèle pas.**
-
-⚠️ **L'ordre d'éviction compte autant que la taille.** 3DTilesRendererJS a corrigé trois bugs d'éviction en cinq mois, dont un où « le LRU pouvait faire recharger les tuiles en boucle », et a dû passer à **« le plus profond d'abord, puis le moins récent »**.
-
-⚠️ **Piège terrarium** : un bit du canal rouge vaut **256 mètres**. deck.gl #10400 rapporte des pics verticaux aléatoires **uniquement en http**, parce que le décodage passait par un worker ; ni `premultiplyAlpha:'none'` ni `colorSpaceConversion:'none'` n'ont suffi, il a fallu décoder le PNG à la main.
-
-⚠️ **Le raffinement sans trous coûte cher en profondeur.** Cesium l'a chiffré et abandonné : il oblige à charger quatre tuiles quand on n'en a besoin que d'une. Leur remplacement — rendre le parent, découper au fragment, sauter des niveaux — leur a rendu **32 % de vitesse et 33 % de données**. À garder en réserve ; **ne pas le changer avant que la Tâche 4 bis ait mesuré**.
-
-- [ ] **Étape 0 — POSER LE DRAPEAU.** Ajouter l'entrée à `FLAGS` dans `src/flags.js` (le fichier existe, 4 057 octets) **avant** de toucher `MAX_Z` ou `CACHE_MAX` : sans lui, ces deux changements s'appliquent à tout le monde, y compris au globe orbital qui est **en production**.
-- [ ] **Étape 1** — mesurer la profondeur réelle des deux sources, et l'écrire dans le code.
-- [ ] **Étape 2** — test : à `MAX_Z`, une tuile demandée hors de la couverture rend un état explicite, **jamais un terrain plat silencieux**.
-- [ ] **Étape 3** — remplacer `CACHE_MAX` par la formule ; test sur un cadrage large puis serré.
-- [ ] **Étape 4** — tri d'éviction : profondeur d'abord, récence ensuite. Test : un vol de référence ne redécode pas une tuile déjà décodée dans la même seconde.
-- [ ] **Étape 5** — mutation sur les trois.
-- [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+⚠️ **N'entamez la Tâche 4 alpha qu'après celle-ci.** Rebrancher la source d'un quadtree qui n'atteint pas ses niveaux fins ne se verrait pas.
 
 ### Tâche 4 ter : la descente bornée par le réseau — règle R3
 
