@@ -13,6 +13,31 @@
 
 ---
 
+## 0. Comment on vérifie — à lire AVANT toute tâche
+
+**Ces commandes sont la fin obligatoire de chaque tâche.** Elles ne sont plus répétées ensuite.
+
+```
+npm test              # la suite entière — 3 062 verts au 2026-08-20
+npm run audit:tests   # disque contre liste
+node --check <fichier>  # sur CHAQUE fichier modifié
+npm run nettoie:dist && npx vite build > /tmp/build.log 2>&1
+```
+
+⚠️ **`npm test` N'EST PAS UN MOTIF DE FICHIERS : c'est une LISTE de 178 chemins écrite à la main dans `package.json`.** Un test ajouté au disque et oublié dans la liste **ne tourne jamais**, et la suite affiche fièrement ses milliers de verts. **Ajoutez votre fichier à la ligne `test`, puis lancez `npm run audit:tests`** — il sort en erreur s'il trouve un orphelin.
+
+⚠️ **NE PIPEZ JAMAIS `vite build` DANS `tail`.** Le processus survit au shell, et le build suivant entre en collision sur `dist/` (`ENOTEMPTY`, 150 000 fichiers). **Redirigez vers un fichier.** `npm run nettoie:dist` vide `dist/` avec obstination — sept tentatives — parce qu'un antivirus tient régulièrement un fichier au mauvais moment.
+
+⚠️ **AUCUN TEST NE CHARGE `src/main.js`.** `node --check` et `vite build` sont le seul filet sur ce fichier.
+
+### Les mesures citées dans ce plan
+
+Elles viennent d'un prototype jetable et de son attaque, **tous deux hors dépôt et gitignorés** (`prototype/`, `.superpowers/sdd/`). ⚠️ **Elles ne survivront pas à un worktree neuf.** Elles sont donc recopiées dans ce document là où elles servent, et **c'est ce document qui fait foi**.
+
+**À refaire soi-même** — le plan le dit à chaque fois : tout chiffre qui **décide** d'une tâche (le budget d'image, le zoom soutenable, le battement d'éviction). **À croire sur parole** : les chiffres géométriques, vérifiés deux fois et cohérents entre eux.
+
+---
+
 ## 1. Les treize décisions validées
 
 Tranchées avec Adrien. Un agent que l'une d'elles gêne le **signale** ; il ne la contourne pas.
@@ -67,11 +92,13 @@ Ce n'est plus le flou accepté par la décision 13 : **c'est une autre carte**. 
 
 ### Les cinq statistiques calculées sur le cadre
 
-⚠️ **Les repères de l'étude du 2026-07-29 avaient bougé.** Ceux-ci ont été relevés le 2026-08-08.
+⚠️ **LES REPÈRES DE LIGNE PÉRIMENT VITE — Y COMPRIS CEUX-CI.** Ceux de l'étude du 2026-07-29 avaient tous bougé ; ceux de la première version de ce plan ont bougé de **29 lignes en six heures**, invalidés par `e73de50`, l'un des commits que ce document revendique lui-même comme faits.
+
+**Relevés le 2026-08-20. Vérifiez-les avant de vous y fier** — `grep -n` coûte trois secondes, une fausse piste coûte une heure.
 
 | ce qui est décidé en regardant tout le cadre | où |
 |---|---|
-| le zéro vertical (`meanM`) | `src/terrain.js:2108`, `:2175` |
+| le zéro vertical (`meanM`) | `src/terrain.js:2137`, `:2204`, `:2238` |
 | le niveau de la dalle (`globalMin`) | `src/plinth.js:143`, `:148`, `:196` |
 | où est la mer | `src/sea-mask.js:50` — **traitée, voir §4** |
 | la rampe de couleurs (p08/p50/p92) | `src/relief-grade.js:80`, `:127` |
@@ -84,7 +111,7 @@ Ce n'est plus le flou accepté par la décision 13 : **c'est une autre carte**. 
 - `src/globe.js` — quadtree z2→z11, `SPLIT_RATIO` 0,38 avec hystérésis, raffinement sans trous, LRU, six requêtes concurrentes.
 - `src/coast-mask.js` — rasterise les polygones Natural Earth du z4 au z15.
 - Les pyramides : `sol` et `canopee` (z8/z9 **mondiaux**, ~3 Ko/tuile), `bathy` z4→z10, `lake-tiles` (`world: true`), `coast-z6` (grille complète).
-- `src/flags.js` — le drapeau qui isolera les deux moteurs.
+- `src/flags.js` — **existe** (4 057 octets, `export const FLAGS`), et portera le drapeau qui isole les deux moteurs. ⚠️ Un rapport de validation l'a cru absent : il est bien là.
 - Toute la chaîne d'export, les comptes, la boutique, le Race Studio.
 
 ---
@@ -174,15 +201,20 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 **Interfaces produites :**
 - `demanderEmprise(flux, { emprise, zoom })` → `void`
 - `tuilesPretes(flux, emprise)` → `Map`
+- `creerFlux({ globe })` → `flux` — la fabrique ; **aucune autre tâche ne la définit, elle appartient à celle-ci**
 - `zoomEffectif(flux, emprise)` → `number` — le zoom réellement COUVERT, distinct du zoom demandé
-- `PLAFOND_EN_VOL` → nombre maximal de requêtes simultanées
+- `lireHauteur(flux, { x, y, z })` → `number | null` — hauteur en mètres à un pixel global, `null` si la tuile n'est pas prête. ⚠️ **C'est l'interface dont la Tâche 6 a besoin pour rééchantillonner ; sans elle elle est bloquée.**
+- `PLAFOND_FILE` = **512** — longueur maximale de `this.queue`. ⚠️ **Ce n'est PAS le plafond de requêtes simultanées**, qui existe déjà (`MAX_CONCURRENT = 6`) et qu'on ne touche pas.
 
 **Le défaut, mesuré par l'attaque.** Un panoramique latéral à 4 km d'altitude, 90° de balayage : **2 943 tuiles bloquées en `loading`**, crédit à −2 551, **zoom effectif figé à z2**, **aucune récupération après 30 s d'immobilité**. Une traversée suffit pour que le vol suivant reste à z2.
 
-**Trois causes, trois corrections :**
-1. Les requêtes ne sont **pas plafonnées**.
-2. Elles ne sont **jamais annulées** quand le cadrage a changé.
-3. `_evictJusqua` n'évince que les tuiles `ready` — **une tuile `loading` occupe une entrée pour toujours**, et le cache se remplit de fantômes.
+**Trois causes, trois corrections.**
+
+⚠️ **UNE VERSION DE CE PLAN SE TROMPAIT SUR LA PREMIÈRE, ET UN AGENT L'AURAIT CHERCHÉE EN VAIN.** Elle disait « les requêtes ne sont pas plafonnées ». **C'est faux** : `globe.js:17` porte `MAX_CONCURRENT = 6`, et `:527` le respecte. Le vrai défaut est ailleurs.
+
+1. **La FILE n'est pas bornée.** `_request` marque une tuile `loading` **AVANT** de l'enfiler : le nombre de requêtes en vol est bien plafonné à six, mais rien ne borne `this.queue`, et chaque entrée y est déjà comptée comme `loading`. D'où les 2 943.
+2. Aucune requête n'est **annulée** quand le cadrage a changé — il n'y a pas un seul `AbortController` dans le fichier.
+3. `_evictJusqua` (`globe.js:869`) ne filtre que sur `ready` — **une tuile `loading` occupe une entrée pour toujours**, et le cache se remplit de fantômes.
 
 ⚠️ **C'est l'interface que le prototype proposait telle quelle pour la Phase 2.**
 
@@ -201,7 +233,10 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 
 **Interfaces produites :**
 - `socleVisible({ altitudeEllipsoideM, visibleAvant })` → `boolean`
-- `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`
+- `SEUIL_NAISSANCE_M` = **120 000** (le socle naît en descendant sous 120 km)
+- `SEUIL_MORT_M` = **180 000** (il meurt en remontant au-dessus de 180 km)
+
+⚠️ **Ces deux valeurs sont un POINT DE DÉPART à régler à l'œil**, pas une mesure. Ce qui est non négociable, c'est l'écart entre elles — le rapport de 1,5 est ce qui empêche le clignotement.
 
 ⚠️ **L'ENTRÉE EST UNE ALTITUDE DE CAMÉRA AU-DESSUS DE L'ELLIPSOÏDE, PAS UNE FRACTION D'ÉCRAN.** Règle R1. Une fraction d'écran dépend de la distance au sol, donc du terrain chargé, donc de `meanM`, qui est lissé — on fabriquerait un oscillateur.
 
@@ -219,7 +254,7 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 
 ⚠️ **C'EST LA FAILLE LA PLUS GRAVE DU PLAN, ET ELLE EST SILENCIEUSE.** Trouvée par l'attaque du 2026-08-20, vérifiée à la main.
 
-`src/globe.js:15` tape **en dur** `elevation-tiles-prod/terrarium` — et `globe.js` **n'importe rien** de `src/dem-source.js` (vérifié : zéro occurrence). Or ce module est la source réelle du produit :
+`src/globe.js:14` tape **en dur** `elevation-tiles-prod/terrarium` — et `globe.js` **n'importe rien** de `src/dem-source.js` (vérifié : zéro occurrence). Or ce module est la source réelle du produit :
 
 | | source du globe aujourd'hui | source du produit |
 |---|---|---|
@@ -244,6 +279,10 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 ### Tâche 4 : descendre le globe sous z11
 
 **Fichiers :** modifier `src/globe.js` (`MAX_Z`, `CACHE_MAX`) · tester `test/globe-reseau.test.js`, `test/globe-eviction.test.js`
+
+⚠️ **`test/globe-eviction.test.js:118` RECOPIE `CACHE_MAX = 420` et l'asserte.** Passer à une formule le casse mécaniquement. **Ne l'affaiblissez pas : remplacez l'invariant** — ce n'est plus « le cache vaut 420 » mais « le cache suit le cadrage, et ne descend jamais sous le plancher ».
+
+⚠️ **Cinq fichiers touchent `MAX_Z`**, et ce plan n'en citait que deux. `grep -rn "MAX_Z" src/ test/` avant de commencer.
 
 ⚠️ **Le repère relatif (`150f817`) est un préalable, et il est fait.** Sans lui, on descendrait dans une zone où le terrain tremble.
 
@@ -272,6 +311,8 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 
 **Interfaces produites :** `zoomSoutenable({ debitObserveMbs, zoomDemande })` → `number`
 
+**Les deux points mesurés** : **z11 à 12 Mb/s**, **z9 à 4 Mb/s**. ⚠️ **Deux points ne font pas une courbe.** Commencez par une interpolation logarithmique entre eux, **mesurez un troisième point** (par exemple à 30 Mb/s) et corrigez. Le plan ne peut pas vous donner la loi : il vous donne deux points et l'obligation d'en trouver un troisième.
+
 Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/s**. À z9 un texel vaut 213 m — **dix-sept texels sur la largeur du socle**. Ce n'est pas le flou de la décision 13, **c'est une autre carte**.
 
 - [ ] **Étape 1** — test : à débit observé faible, `zoomSoutenable` rend un zoom inférieur au demandé, et la caméra ne descend pas plus vite que lui.
@@ -288,7 +329,10 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 **Fichiers :** créer `src/monde/audit-solide.js` · tester `test/audit-solide.test.js`
 
-**Interfaces produites :** `auditerSolide(geometrie)` → `{ ferme, oriente, degeneres, nan }`
+**Interfaces produites :** `auditerSolide({ geometrie, indices })` → `{ ferme, oriente, degeneres, nan, vide }`
+
+⚠️ **Deux arguments, pas un** : `construireFenetre` rend `geometrie` et `indices` **séparément**, et une version de ce plan en demandait un seul — l'agent aurait dû deviner.
+⚠️ **`vide` est un verdict, pas un détail** : sur une géométrie sans sommet, l'audit rend `vide: true` et **refuse de se prononcer sur le reste**. C'est ainsi que le test de silhouette du prototype passait à vide en se croyant vert.
 
 ⚠️ **Il passe en premier parce que sans lui, on n'a aucun moyen de savoir si la Tâche 6 marche.** Le prototype s'est cru étanche pendant tout son vol avec un instrument aveugle.
 
@@ -311,7 +355,10 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 **Fichiers :** créer `src/monde/fenetre-bornee.js` · tester `test/fenetre-bornee.test.js`
 
 **Interfaces produites :**
-- `construireFenetre({ emprise, n, rayonCoin, exposantCoin, profondeurDalle })` → `{ geometrie, indices, boiteEnglobante }`
+- `construireFenetre({ emprise, n, rayonCoin, exposantCoin, profondeurDalle, exageration })` → `{ geometrie, indices, boiteEnglobante }`
+- `emprise` = `{ ouest, sud, est, nord }` en degrés. ⚠️ **`ouest > est` signifie que l'emprise franchit l'antiméridien** — c'est légal et le test l'exige.
+- ⚠️ **Au-delà de 85,051° de latitude** (la limite de Mercator), l'emprise est **écrêtée** à cette valeur. Le prototype y était « silencieusement faux mais fermé » ; ici on tranche : on écrête, et un test le vérifie.
+- `exageration` : sans elle, la dalle et les parois n'ont pas la bonne hauteur. Défaut de production : **18**.
 
 ⚠️ **LE SOCLE N'EST PAS UNE BOÎTE, ET UNE VERSION DE CE PLAN L'AVAIT RÉDUIT À ÇA.** `src/plinth.js` porte un congé à normales analytiques, des **coins en superellipse** (`slabCorner` / `slabCornerSmoothing`, réglés par défaut dans `main.js:566`) et un liner. Les oublier ne casserait pas le maillage : ça donnerait **un pavé droit à la place de l'objet ShibuMap**.
 
@@ -342,6 +389,8 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 **Mesuré :** N=256 coûte **8,3 ms de médiane** — au-dessus du budget d'une image à 60 Hz, sur une machine très au-dessus de la cible, et **sans mer ni palette ni gravure**. N=128 coûte **1,7 ms**.
 
 ⚠️ **Le prototype reconstruisait à CHAQUE image** — le pire cas imaginable. La zone morte est ce qui rend la décision 4 tenable.
+
+⚠️ **RAPPEL DE LA DÉCISION 13, PARCE QUE C'EST ICI QU'ON EST TENTÉ DE L'ENFREINDRE.** Baisser à N=128 pendant le mouvement **rend l'image plus grossière pendant qu'on bouge**. C'est voulu, Adrien l'a validé, et c'est le contrat. **Ne compensez pas** en forçant N=256 dès que « ça a l'air lent » : vous reprendriez les 8,3 ms et les 12 % de dépassement que cette tâche existe pour éviter.
 
 - [ ] **Étape 1** — test : en mouvement `resolutionPour` rend 128, à l'arrêt 256 ; une dérive d'emprise sous le seuil ne déclenche **aucune** reconstruction.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.

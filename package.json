@@ -28,7 +28,8 @@
     "inspecte:pdf": "node --max-old-space-size=6144 scripts/inspecte-pdf-affiche.mjs",
     "build:volcans": "node scripts/build-volcans.mjs",
     "carte": "node scripts/carte-ecosysteme.mjs",
-    "nettoie:dist": "node scripts/nettoie-dist.mjs"
+    "nettoie:dist": "node scripts/nettoie-dist.mjs",
+    "audit:tests": "node scripts/audit-tests.mjs"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "^2.8.1",
