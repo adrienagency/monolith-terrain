@@ -96,6 +96,29 @@ export const BASIN_RADIUS = 6.6 // flat excavation floor
 export const BASIN_BLEND = 9.0 // where flat floor blends back into mountains
 export const FLOOR_Y = -0.35
 
+// ══════════ L'AUTORITÉ DU TRAIT DE CÔTE — UN PRÉDICAT, DEUX LECTEURS ════════
+//
+// Le fragment tranche `underwater` sur « le trait de côte fait-il autorité ? »,
+// et il ne lit `seaMask` QUE dans l'autre branche — c'est l'unique
+// échantillonnage de ce champ dans tout le nuanceur. Le CPU doit donc décider
+// de le CUIRE sur exactement la même condition (voir `_buildFields`).
+//
+// ⚠️ POURQUOI UNE CONSTANTE ET NON DEUX ÉCRITURES JUMELLES. Le jour où elles
+// divergeraient, le bloc s'afficherait SANS MER ET SANS ERREUR : le champ
+// simplement jamais cuit, `uSeaMaskOn` resté à zéro, aucune exception nulle
+// part, aucun nuanceur en défaut. C'est la panne la plus chère à trouver —
+// celle qui ne fait pas de bruit. D'où la source unique : le GLSL du fragment
+// INTERPOLE cette chaîne, `coteFaitAutorite` relit le même uniforme au même
+// seuil, et il n'y a qu'une ligne à changer pour bouger les deux.
+//
+// ⚠️ `toFixed(1)` n'est pas cosmétique : un entier nu (« 1 ») ne compile pas
+// comme flottant en GLSL, et c'est tout le nuanceur qui tomberait.
+// (test/mer-cuisson.test.js verrouille les deux bouts sur le fragment ASSEMBLÉ,
+// pas sur une relecture du texte source.)
+const SEUIL_AUTORITE_COTE = 0.5
+export const COTE_AUTORITE_GLSL = `uCoastMaskOn > ${SEUIL_AUTORITE_COTE.toFixed(1)}`
+export const coteFaitAutorite = (uniformes) => (uniformes?.uCoastMaskOn?.value ?? 0) > SEUIL_AUTORITE_COTE
+
 // CPU-generated terrain: multi-scale FBM + ridged multifractal + domain warping,
 // with real vertex normals so PBR lighting and DOF read the actual relief.
 export class Terrain {
@@ -977,7 +1000,13 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   // v42: le masque cotier ne peut JAMAIS declarer sous-marine une terre
   // au-dessus du niveau de la mer - la rampe ocean (fond marin choisi) se
   // peignait sur des montagnes quand le masque etait faux (retour Adrien)
-  bool underwater = uCoastMaskOn > 0.5
+  // ⚠️ LE PRÉDICAT VIENT DE LA CONSTANTE PARTAGÉE, il n'est PAS réécrit ici :
+  // la branche ELSE est la SEULE lecture de seaMask du nuanceur, et c'est elle
+  // que _buildFields interroge pour décider de CUIRE le champ. Deux écritures
+  // jumelles finiraient par diverger, et un bloc sans mer ne lève rien.
+  // ⚠️ PAS DE BACKTICK ICI NON PLUS — voir l'avertissement quinze lignes plus
+  // haut : un accent grave ferme le gabarit et casse tout le module.
+  bool underwater = ${COTE_AUTORITE_GLSL}
     ? (landness < 0.5 && vWorldPos.y < uSeaY + 0.02)
     : (vWorldPos.y < uSeaY && seaMask > 0.5);
   float hNorm = clamp((vWorldPos.y - uHeightRange.x) / max(uHeightRange.y - uHeightRange.x, 1e-4), 0.0, 1.0);
@@ -2766,12 +2795,42 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // `_applyAnalysis` vient de poser `_analysisFor` et `uAnalysisOn` : la même
     // question qu'au-dessus répond maintenant « non, plus rien à cuire ».
     const analyse = demandee && !(this._analysisFor === dem && this.mapUniforms.uAnalysisOn.value)
+    // ══════════ LE MASQUE DE MER NE SE CUIT QUE S'IL SERA LU ════════════════
+    //
+    // Sa lecture UNIQUE, dans le fragment, est la branche ELSE de
+    // `COTE_AUTORITE_GLSL` : dès que le trait de côte fait autorité, le champ
+    // était construit et JAMAIS ÉCHANTILLONNÉ. Or il fait autorité PARTOUT
+    // entre z4 et z15 (COAST_ZOOM_MIN/MAX, coast-mask.js) — c'est-à-dire sur
+    // presque tout le chemin de chargement. Mesuré sur l'atlas 3×3 : 113 ms de
+    // travailleur et jusqu'à 5,3 Mo par bloc, à chaque cuisson, pour rien.
+    //
+    // ⚠️ ET C'EST BIEN LE MÊME PRÉDICAT QUE LE NUANCEUR, pas une copie
+    // approchante : `coteFaitAutorite` et le GLSL sortent de la même constante
+    // (voir son en-tête, plus haut dans ce fichier). Deux écritures jumelles
+    // finiraient par diverger, et un bloc sans mer ne lève AUCUNE erreur.
+    //
+    // ⚠️ IL N'EST PAS MORT PARTOUT. Aux zooms fins (z16–z17, Suisse et France)
+    // le masque côtier n'est pas servi, `uCoastMaskOn` vaut 0, et le masque de
+    // mer redevient LA SEULE SOURCE de la mer. Il s'y cuit exactement comme
+    // avant. C'est aussi vrai pendant l'ATTENTE du masque côtier, et sur un
+    // fetch en échec : tant que l'autorité n'est pas là, le champ est lu.
+    const mer = !coteFaitAutorite(this.mapUniforms)
+    // Rien à cuire → NE RIEN POSTER. C'est le cas nominal du trait de côte qui
+    // arrive (`setCoastMask` relance les champs) alors que l'analyse est déjà
+    // en place : le travail posté recopiait le MNT au travailleur — 9 Mo pour
+    // un bloc — pour en rapporter un champ mort.
+    // ⚠️ On ne touche NI à `_fieldsEnVol` NI à `_fieldKey` : un travail encore
+    // en vol reste le sien, et le périmer ici jetterait un résultat juste.
+    // ⚠️ Et `fieldsReady` GARDE la promesse en cours quand il y en a une — la
+    // remplacer par une promesse déjà résolue lèverait le voile de chargement
+    // sur un relief inachevé.
+    if (!analyse && !mer) return (this.fieldsReady ??= Promise.resolve(null))
     // ⚠️ LE MÊME TRAVAIL EST DEMANDÉ DEUX FOIS À LA NAISSANCE D'UNE DALLE :
     // rebuild() lance les champs, puis setColorMode les relance parce que
     // uAnalysisOn vaut encore 0 — l'uniforme ne monte qu'à l'ARRIVÉE. On rend
     // alors la promesse EN COURS au lieu de reposter (voir jobCouvertParEnVol,
     // qui garde ouverte la porte du recalcul légitime).
-    const demande = { dem, cote, maxSize, seaMax, analyse }
+    const demande = { dem, cote, maxSize, seaMax, analyse, mer }
     if (jobCouvertParEnVol(this._fieldsEnVol, demande)) return this.fieldsReady
     this._fieldsEnVol = demande
     this._fieldKey = { dem, cote, maxSize, seaMax }
@@ -2794,6 +2853,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
         seaMax,
         coteMondiale: cote,
         withAnalysis: analyse,
+        avecMer: mer,
         // les deux options de l'atlas — voir l'en-tête. Hors mode continu elles
         // valent `false` et `undefined`, et computeTerrainJob est alors
         // bit-à-bit ce qu'il était (test/terrain-jobs.test.js le verrouille).
@@ -2802,7 +2862,9 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       },
       current: () => this._fieldKey,
       apply: (r, actuel) => {
-        if (jobStillValid(cleMer, actuel)) this._applySeaMask(r.sea, r.seaSize)
+        // `r.sea` est nul quand le champ n'a pas été demandé (voir `mer`) —
+        // le même garde-fou que l'analyse juste en dessous.
+        if (r.sea && jobStillValid(cleMer, actuel)) this._applySeaMask(r.sea, r.seaSize)
         if (r.analysis && jobStillValid(cleAnalyse, actuel)) {
           this._applyAnalysis(r.analysis, r.analysisSize, dem)
           // ⚠️ mémorisé APRÈS le verdict de péremption, et seulement là : une

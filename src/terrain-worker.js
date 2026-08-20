@@ -22,7 +22,12 @@ self.onmessage = (e) => {
   const r = computeTerrainJob(job)
   // les deux tableaux de résultat sont TRANSFÉRÉS (le Worker n'en a plus
   // l'usage) — contrairement au MNT de l'aller, qui est copié.
-  const transfert = [r.sea.buffer]
+  // ⚠️ LES DEUX SONT FACULTATIFS : le masque de mer ne se cuit que s'il sera lu
+  // (`avecMer`, voir terrain-jobs.js). Un `null.buffer` ferait JETER la boîte
+  // aux lettres, et le travail entier se perdrait — sans rien à l'écran qu'un
+  // relief resté en l'état.
+  const transfert = []
+  if (r.sea) transfert.push(r.sea.buffer)
   if (r.analysis) transfert.push(r.analysis.buffer)
   self.postMessage({ id, ...r }, transfert)
 }

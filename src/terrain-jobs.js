@@ -58,6 +58,18 @@ import { detectLakes } from './lake.js'
  * moyenne : ses quatre champs sont des DÉRIVÉES du relief, un minimum y
  * replierait le bruit du MNT au lieu de le filtrer (voir `coarsenField`).
  *
+ * ⚠️ `avecMer: false` — LE MASQUE DE MER NE SE CUIT QUE S'IL SERA LU. Dans le
+ * nuanceur, `seaMask` n'est échantillonné QUE lorsque le trait de côte ne fait
+ * pas autorité ; entre z4 et z15 il fait autorité partout, et le champ était
+ * alors construit sans jamais être lu (113 ms de travailleur, jusqu'à 5,3 Mo
+ * par bloc). C'est terrain.js qui tranche, sur LE MÊME prédicat que le fragment
+ * (`coteFaitAutorite` / `COTE_AUTORITE_GLSL`) — pas sur une copie approchante.
+ * Le rendu est alors `sea: null`, et l'appelant ne pose rien.
+ *
+ * ⚠️ LE DÉFAUT RESTE LA CUISSON, et ce n'est pas de la politesse : aux zooms
+ * fins (z16–z17) le masque de mer est la SEULE source de la mer. Un défaut
+ * inversé y peindrait l'océan en terre.
+ *
  * CONTRAT : sans `seaMax`, résultat bit-à-bit identique à avant.
  */
 export function computeTerrainJob({
@@ -69,6 +81,7 @@ export function computeTerrainJob({
   landMask = null,
   coteMondiale = null,
   withAnalysis = true,
+  avecMer = true,
   merMinPool = false,
   minBasinFrac = undefined,
 }) {
@@ -77,14 +90,26 @@ export function computeTerrainJob({
   // (buildSeaMask est topologique : il ne lit ni metersPerPixel ni aucune
   // longueur en mètres — son seuil est en mètres d'ALTITUDE et son critère de
   // bassin est une FRACTION de la dalle. Le plafond ne dérègle donc rien.)
-  const mer = merMinPool ? minPoolField(data, size, seaMax) : resampleField(data, size, seaMax)
+  // ⚠️ LE SOUS-ÉCHANTILLONNAGE EST DANS LA MÊME GARDE que le masque : c'est le
+  // poste le plus lourd des deux sur l'atlas 3×3 (93 ms de min-pooling contre
+  // 113 ms de masque). Le laisser dehors rendrait la garde à moitié inutile.
   // `minBasinFrac: undefined` laisse le DÉFAUT de buildSeaMask s'appliquer —
   // c'est ce qui rend l'ajout invisible hors mode continu.
-  const m = blurMask(
-    buildSeaMask({ data: mer.data, size: mer.size }, { landMask, coteMondiale, minBasinFrac }),
-    1
-  )
-  return { analysis: a ? a.rgba : null, analysisSize: a ? a.size : 0, sea: m.mask, seaSize: m.size }
+  const m = avecMer ? cuisMasqueDeMer({ data, size, seaMax, landMask, coteMondiale, minBasinFrac, merMinPool }) : null
+  return {
+    analysis: a ? a.rgba : null,
+    analysisSize: a ? a.size : 0,
+    sea: m ? m.mask : null,
+    seaSize: m ? m.size : 0,
+  }
+}
+
+// Le masque de mer, mot pour mot ce que `computeTerrainJob` écrivait en ligne —
+// sorti dans sa propre fonction pour que la garde `avecMer` tienne sur UNE
+// expression au lieu d'entourer quatre lignes.
+function cuisMasqueDeMer({ data, size, seaMax, landMask, coteMondiale, minBasinFrac, merMinPool }) {
+  const mer = merMinPool ? minPoolField(data, size, seaMax) : resampleField(data, size, seaMax)
+  return blurMask(buildSeaMask({ data: mer.data, size: mer.size }, { landMask, coteMondiale, minBasinFrac }), 1)
 }
 
 // ─────────────────────────── LES LACS, HORS DU FIL ──────────────────────────
@@ -186,7 +211,7 @@ export function jobStillValid(lance, actuel) {
 
 /**
  * Le travail encore EN VOL rend-il inutile celui qu'on s'apprête à poster ?
- * @param {{dem:object, landMask:object|null, maxSize:number, seaMax:number, analyse:boolean}|null} enVol
+ * @param {{dem:object, landMask:object|null, maxSize:number, seaMax:number, analyse:boolean, mer?:boolean}|null} enVol
  * @param {typeof enVol} neuf
  */
 export function jobCouvertParEnVol(enVol, neuf) {
@@ -194,7 +219,12 @@ export function jobCouvertParEnVol(enVol, neuf) {
   for (const champ of ['dem', 'landMask', 'cote', 'maxSize', 'seaMax']) {
     if (enVol[champ] !== neuf[champ]) return false
   }
-  return !neuf.analyse || !!enVol.analyse
+  // ⚠️ LA MÊME ASYMÉTRIE POUR LA MER QUE POUR L'ANALYSE, et pour la même
+  // raison : un travail « sans masque de mer » en vol NE COUVRE PAS une demande
+  // qui le réclame. C'est le cas du trait de côte LÂCHÉ (sortie de la bande
+  // z4–z15, ou fetch en échec) pendant qu'un travail allégé vole encore — sans
+  // cette ligne le bloc resterait sans mer jusqu'au prochain changement de MNT.
+  return (!neuf.analyse || !!enVol.analyse) && (!neuf.mer || !!enVol.mer)
 }
 
 /**
