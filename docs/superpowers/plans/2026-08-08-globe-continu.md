@@ -284,7 +284,15 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 > **Remontée z13 → orbite : 11 rideaux · 35,3 % d'écran blanc · 70,8 % d'entrée morte.**
 > **Clic-plongée : 4 rideaux · 49,2 % d'entrée morte · 94,8 % de bandeau.**
 
-⚠️ **ET VOICI LE CHIFFRE QUI DOIT CADRER LES ATTENTES : MÊME TOUS LES RIDEAUX RETIRÉS** — plus que ce que ce plan livre — **avec un chargement réaliste d'une seconde par cran, il reste 7,88 s d'entrée morte et de caméra figée sur 30 s (26,3 %), et 11,18 s de bandeau (37,3 %)**, carte floutée à 16 px pendant tout ce temps. **Retirer les rideaux ne suffit pas : il faut supprimer l'attente qu'ils masquent, et c'est `this.busy` autant que le réseau.**
+⚠️ **ET VOICI LA DÉCOMPOSITION QUI DIT CE QUE CE PLAN FERME — ET CE QU'IL NE FERME PAS.** L'entrée morte vaut **15,62 s sur 30 s (52,1 %)**, et elle se coupe en deux parts :
+
+| | aujourd'hui | tous rideaux retirés |
+|---|---|---|
+| pendant le **rideau** | 7,73 s | **0 s** ✅ |
+| pendant **`await loadSurface`** | 7,88 s | **7,88 s** ⚠️ |
+| autre | 0 s | 0 s |
+
+⚠️ **LES TÂCHES 1a-1c, 2, 2 bis ET 2 ter FERMENT 7,73 s SUR 15,62 s — LA MOITIÉ, ET PAS DAVANTAGE.** L'autre moitié est le verrou pendant le chargement, et **la Tâche 4 ne peut pas aider : `loadSurface → fetchAndBuildDem → loadDem` ne passe pas par `globe.js`** (vérifié). **C'est l'Étape 1 de la Tâche 1c qui doit la fermer, et c'est son seuil chiffré.** Et il reste encore, hors de tout périmètre actuel : `.fui-msg`/`announce` (**11,18 s de bandeau**) et les **1 516 ms de cuisson** de la Tâche 7.
 
 ⚠️ **ET LA MAJORITÉ NE VIENT PAS DE `_dive` : ils viennent de l'escalier de surface** (`_rescale`, `modes.js:452`, appelé par `_refine` `:436` et `_coarsen` `:445`). **Sur les 25 rideaux des quatre trajets, 17 sont posés par `_rescale`.** **C'est la première source du pop-up d'Adrien, et aucune tâche ne la portait.** → **Tâche 2 bis.**
 
@@ -321,7 +329,7 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 - [ ] **Étape 0 — trancher la forme du test** (module pur ou texte source) et l'écrire ici. ⚠️ **La Tâche 4 consacre une étape entière à un harnais qui existait déjà ; celle-ci n'en a aucun. C'est ici que le travail commence.**
 - [ ] **Étape 1 — le test qui échoue.** Sur une descente de 1 600 km à 2 km, l'altitude est **monotone et sa dérivée seconde bornée**. ⚠️ **La grandeur échantillonnée doit être la MÊME de part et d'autre de la bascule de mode** — sinon on compare deux repères et l'assertion ne veut rien dire. C'est le piège de cette tâche.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue, et **relever où** : la liste des sauts est la liste du travail des Tâches 1b et 1c.
-- [ ] **Étape 3 — LA CLÔTURE DU §0**, puis commit. ⚠️ **Cette sous-tâche ne corrige RIEN, et c'est voulu : sans instrument, les deux suivantes ne sauraient pas si elles ont réussi.**
+- [ ] **Étape 3 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit. ⚠️ **Cette sous-tâche ne corrige RIEN, et c'est voulu : sans instrument, les deux suivantes ne sauraient pas si elles ont réussi.**
 
 #### Tâche 1b — le changement de repère
 
@@ -329,19 +337,24 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 - [ ] **Étape 2 — la frontière `globe.js` / `terrain.js`.** ⚠️ **C'est le geste le plus lourd : aujourd'hui l'un s'éteint quand l'autre s'allume.** Dites ce qui les fait coexister — recouvrement, fondu, ou remise du globe au rang de fond lointain.
 - [ ] **Étape 3 — retirer le plancher orbital `modes.js:326`**, et unifier les **quatre** sites de `minDistance` (`:326`, `:420`, `:639`, `main.js:1215`) en une seule dérivation.
 - [ ] **Étape 4 — mutation** : réintroduire un saut doit tuer le test de monotonie de la Tâche 1a.
-- [ ] **Étape 5 — LA CLÔTURE DU §0**, puis commit.
+- [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 #### Tâche 1c — les mécanismes qui figent l'entrée
 
 ⚠️ **Aucune version de ce plan ne les nommait, et ils gèlent la caméra plus longtemps que les rideaux.**
 
-- [ ] **Étape 1 — `this.busy`** (`modes.js:138`, `:203`, `:242`, `:296`, `:308`, `:386`… **dix-huit sites**). Tant qu'il est vrai, **la molette, `flyTo`, les steppers et la caméra sont tous gelés**. ⚠️ **C'est lui qui produit l'« entrée morte » — et elle survit au retrait de tous les rideaux : 7,88 s sur 30 s, mesuré.**
+- [ ] **Étape 1 — DÉVERROUILLER `this.busy` ET `demBusy`. ⚠️ CE PLAN N'AVAIT ICI QUE DES CONSTATS, SANS UN SEUL VERBE À L'IMPÉRATIF.**
+  - `this.busy` — **dix-huit sites** dans `modes.js` (`:138`, `:203`, `:242`, `:296`, `:308`, `:386`…). Tant qu'il est vrai, **la molette, `flyTo`, les steppers et la caméra sont gelés**.
+  - ⚠️ **`demBusy` — SECOND VERROU, ZÉRO MENTION DANS TOUTES LES VERSIONS DE CE PLAN.** Six sites dans `main.js` (`:3057`, `:3384-3385`, `:3413`, `:3602-3603`, `:3619`), il garde `canStep` **avec** `modes.busy`, et `:3602` lève `throw new Error('terrain busy')` → **bandeau « FAILED » à l'écran**.
+  - **Le geste :** remplacer le verrou qui **interdit** le geste par un verrou qui **le met en file et le rejoue** à la fin de l'opération en cours. ⚠️ **Un verrou qui refuse est indistinguable d'une application qui a planté.**
+  - **Le seuil :** l'entrée morte tombe **sous 1 s sur un vol de 30 s**, mesurée comme la 7ᵉ attaque l'a mesurée (`busy || demBusy` vrai, image par image).
 - [ ] **Étape 2 — `_loadDive` / `diveTo`** — le clic-plongée, **un second chemin de plongée entier**, distinct de `_dive`, avec un recul de caméra de **×3,32 à ×24,25** (le maximum se dérive du dépôt : `surfaceMaxDistance 150 × 0,97 / minDistance 6`).
 - [ ] **Étape 3 — `enterOrbit`** (`modes.js:296`) — la remontée. ⚠️ **Mesuré : elle est PIRE que la descente — 11 rideaux contre 8, 35,3 % d'écran blanc, 70,8 % d'entrée morte.**
+- [ ] **Étape 3 bis — le bandeau `announce` / `.fui-msg`. ⚠️ 11,18 s SUR 30, ET AUCUNE VERSION DE CE PLAN NE LE NOMMAIT.** Ce plan a longtemps cité le chiffre sans jamais citer le mécanisme. Le bandeau annonce « ACQUIRING SURFACE DATA », « FX ONLINE », « SURFACE DATA UNAVAILABLE — HOLDING ORBIT » : il **raconte les paliers** que ce chantier supprime. **Dites ce qu'il devient** — il disparaît avec eux, ou il change de propos.
 - [ ] **Étape 4 — sortir `dem.meanM` de `surfaceCamAltMeters`** (`main.js:3594-3599`, règle R1), ou dire pourquoi il peut rester.
 - [ ] **Étape 5 — poser le point d'appel de `zoomSoutenable`. ⚠️ SANS CETTE ÉTAPE, LA RÈGLE R3 N'A AUCUN PROPRIÉTAIRE.** La Tâche 4 ter fabrique la fonction mais délègue ici la moitié caméra, et cette tâche passe **avant** elle. **Posez le point d'appel sur le chemin de descente et laissez-le inerte** (`zoomSoutenable` renvoyant le zoom demandé) jusqu'à ce que la 4 ter le remplisse. Sinon personne ne le pose jamais.
 - [ ] **Étape 6 — mutation** : remettre un gel d'entrée doit tuer le test.
-- [ ] **Étape 7 — LA CLÔTURE DU §0**, puis commit.
+- [ ] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 
 ### Tâche 2 bis : l'escalier de surface ⚠️ 17 RIDEAUX SUR 25
@@ -357,24 +370,29 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 - [ ] **Étape 0 — trancher la forme du test, comme la Tâche 1.** ⚠️ **Le test d'exécution prescrit ici n'est écrivable par aucune des deux voies que ce plan nomme lui-même** : `Modes` appelle `document.createElement`, il n'y a pas de jsdom, aucun test n'instancie `Modes`. **Module pur ou assertion de texte source : dites lequel avant l'Étape 1.** (Ce plan a corrigé ce défaut dans la Tâche 1 et l'a laissé ici.)
 - [ ] **Étape 1 — le test qui échoue** : sur un changement de cran en mode surface, la caméra ne se téléporte pas et aucun rideau ne se pose.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
-- [ ] **Étape 3 — RETIRER LE RIDEAU ET LA TÉLÉPORTATION.** ⚠️ **Cette étape ne dépend d'aucune réponse d'Adrien** : le rideau de `_rescale` et le saut de caméra partent, quel que soit ce qui les remplace.
+- [ ] **Étape 3 — RETIRER LE RIDEAU.** ⚠️ **Le rideau de `_rescale` part sans attendre personne.**
+- [ ] **Étape 3 bis — LA TÉLÉPORTATION : ⚠️ NE LA RETIREZ PAS SANS ADRIEN.** Une version de ce plan écrivait qu'elle « ne dépend d'aucune réponse ». **C'est faux, et le code le dit** : `modes.js:455-458` porte « **v48 (retour Adrien)** : à CHAQUE traversée d'étage on arrive au POINT DE PRÉSENTATION… **Remplace la continuité d'altitude v42** ». **C'est une demande explicite d'Adrien, avec sa raison écrite.** La retirer, c'est défaire v48 pour revenir à v42. **Voir §9.** En attendant, **laissez-la et signalez-le**.
 - [ ] **Étape 3 bis — CE QUI LES REMPLACE. ⚠️ SEULE ÉTAPE QUI ATTEND ADRIEN** (voir §9 : pourquoi la « continuité d'altitude v42 » a été retirée). Tant que la réponse manque, **posez une transition neutre et laissez la case ouverte** — le reste de la tâche se termine sans elle.
 - [ ] **Étape 4 — mutation** : remettre la téléportation doit tuer le test.
 - [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 ### Tâche 2 : retirer la carte `#loading` ⚠️ C'EST LE POP-UP QU'ADRIEN NOMME
 
-**Fichiers :** modifier `src/main.js` (`showLoading` `:908`, `hideLoading` `:912`, `LOADING_MIN_MS` `:898`, l'appel `:3182`, **et `:937` — voir le piège ci-dessous**) · modifier `src/style.css` (`#loading` `:19-`, `body.ld-warm #loading-bg` `:168`, **et le `filter: blur(16px)` de `:182`**) · modifier `index.html` (le balisage, le peintre en ligne, `__ldStart`) · lire `src/ui/loading-hints.js` et `src/ui/hub.js` · tester `test/voile-loading.test.js` (créer)
+**Fichiers :** modifier `src/main.js` (`showLoading` `:908`, `hideLoading` `:912` **et ses trois appelants**, `LOADING_MIN_MS` `:898`, les appels `:3182` et `:3421`, **et `:937` — voir le piège**) · modifier `src/style.css` (`#loading` `:19-`, `body.ld-warm #loading-bg` `:168`, `body.ld-warm #app` `:182`, **et le `filter: blur(16px)` de `:186` sous le sélecteur `:has()` de `:185`**) · modifier `index.html` (le balisage, le peintre en ligne, `__ldStart`) · lire `src/ui/loading-hints.js` et `src/ui/hub.js` · tester `test/voile-loading.test.js` (créer)
+
+⚠️ **ÉLARGISSEZ CETTE LISTE, NE LA REMPLACEZ PAS.** Ce plan a commis deux fois la même faute — corriger un repère faux en supprimant les justes qui l'entouraient. **Faites `grep -rn "loading\|ld-warm" src/ index.html` avant de commencer, et ajoutez ce que vous trouvez.**
 
 ⚠️ **CE PLAN A CRU QU'IL Y AVAIT TROIS FICHIERS : IL Y EN A SIX.** Cherchez `#loading` partout avant de commencer.
 
 **Ce que c'est :** une carte de marque centrée — nom, baseline, orbe qui tourne — avec `#loading-bg` plein écran et **`LOADING_MIN_MS = 2000`, deux secondes minimum au premier affichage**. `showLoading()` est appelé **à chaque cran de zoom** par `loadSurface → fetchAndBuildDem` (`main.js:3182`).
 
-⚠️ **ET ELLE FLOUTE L'APPLICATION ENTIÈRE À 16 px PENDANT QU'ELLE EST LÀ — À L'ARRÊT** (`style.css:182`). **C'est le contraire exact de la décision 13**, qui n'accepte le flou que **pendant** le mouvement.
+⚠️ **ET ELLE FLOUTE L'APPLICATION ENTIÈRE À 16 px PENDANT QU'ELLE EST LÀ — À L'ARRÊT** (`style.css:185-186`). **C'est le contraire exact de la décision 13**, qui n'accepte le flou que **pendant** le mouvement.
 
 ⚠️ **PIÈGE DE RÉGRESSION, ET IL N'EST PROTÉGÉ PAR AUCUN TEST :** `hideLoading()` est le **seul endroit qui pose `ld-warm`** (`main.js:937`). Le supprimer sans le remplacer emporte tout le comportement de chargement à chaud. **Et aucun test ne charge `main.js`** — le filet n'existe pas.
 
-⚠️ **NE FAITES PAS CETTE TÂCHE EN PREMIER.** La carte masque une attente réelle. L'ôter avant que les Tâches 1, 2 bis et 4 aient supprimé l'attente **ne supprime pas le pop-up : il montre le trou qu'il cachait.**
+⚠️ **CETTE TÂCHE ET LA TÂCHE 7 SE CONTREDISENT, ET AUCUNE DES DEUX NE LE SAIT.** `fenetre-finesse.js:135-149` mesure **1 516 ms de gel** pour la bascule vers 768 à champ non cuit, déclare la cuisson **incompressible** (285 ns le point, 5,31 M points), et dit que **ce qui est déplaçable, c'est le MOMENT : « sous le voile de chargement, où l'on attend déjà, plutôt qu'en pleine contemplation »** — le voile que cette tâche retire. **Tranchez-le explicitement : où va la seconde et demie une fois le voile parti ?**
+
+⚠️ **NE FAITES PAS CETTE TÂCHE EN PREMIER.** La carte masque une attente réelle. L'ôter avant que les Tâches 1a-1c, 2 bis et 4 aient supprimé l'attente **ne supprime pas le pop-up : il montre le trou qu'il cachait.**
 
 - [ ] **Étape 1 — le test qui échoue.** ⚠️ **Pas de test d'exécution** : aucun test n'importe `main.js`. **Assertion de texte source**, comme les onze fichiers de ce dépôt qui le font déjà : *`showLoading` n'est plus appelé sur le chemin du zoom*. ⚠️ **Et une seconde assertion sur le flou** : `style.css` ne floute plus `#app` à l'arrêt.
 - [ ] **Étape 2** — le lancer sur le code d'aujourd'hui, vérifier qu'il échoue **sur les deux assertions**.
@@ -463,12 +481,11 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 
 
   Le détail du défaut, pour mémoire : `globe.js:759`, `_credit = CACHE_MAX − tiles.size + marge`. En régime établi `marge = 0` et **54 à 91 raffinements sont refusés par image**. ⚠️ **Mais `marge` n'est PAS « vide par construction » — ce plan l'a écrit deux fois, et c'est faux** : à la discontinuité (téléport), elle vaut 280, 196, 24, puis 0 en quatre images, et finance 280 requêtes. **Le filet anti-gel du commentaire `743-752` tient ; il ne mord qu'aux discontinuités.**
-  C'est le même point fixe, par une autre porte. ⚠️ **MAIS N'ÉVINCEZ PAS UNE TUILE `loading` SANS ANNULER SA REQUÊTE** : le `.then` de `_pump` (`globe.js:532`) ajouterait un maillage orphelin à la scène. Le garde est `if (!this.tiles.has(t.key)) return` au retour — **exigez-le dans le test**. (`_evictJusqua` est à `globe.js:863`.)
 - [ ] **Étape 6 — rendre évinçables les tuiles bloquées.** Une tuile en `error` ou en `loading` dont la requête ne revient jamais **occupe une place du budget définitivement**. C'est le même point fixe, par une autre porte. ⚠️ **Sans retourner l'ordre d'éviction** : ce plan a écrit trois fois « profondeur d'abord, récence ensuite » ; `globe.js` fait délibérément l'inverse — `a.lastUsed - b.lastUsed || parProfondeur(a, b)`, **récence au rang 1, profondeur au rang 2 seulement**, avec vingt lignes de commentaire et un test dédié vert. **C'est correct.** ⚠️ **ET N'ÉVINCEZ PAS UNE `loading` SANS ANNULER SA REQUÊTE** : le `.then` de `_pump` (`globe.js:532`) ajouterait un maillage orphelin. Garde : `if (!this.tiles.has(t.key)) return`.
 - [ ] **Étape 7 — trancher le cache**, avec les chiffres de l'Étape 1 et non par principe. ⚠️ Si les corrections réclament 824, une formule qui rend 370 est une régression déguisée en optimisation. **Mesurez avant de choisir.**
 - [ ] **Étape 8 — la mémoire retenue pour rien : ~210 Mo sur 327 Mo au cache plein.** `globe.js:238` — le canevas reste vivant via `CanvasTexture.image` après téléversement (**105 Mo**). Et `t.heights` (**105 Mo**) n'est relu que par `setExaggeration` (`:899`), **qui n'a aucun appelant dans tout le dépôt — vérifié**. ⚠️ Le commentaire de `:168` annonce « 380 Mo pour 1 500 tuiles » : la documentation **sous-estime d'un facteur 2,4**.
 - [ ] **Étape 9 — les normales de bord.** ⚠️ **l'écrêtage est à `globe.js:257-260`** (`Math.min(..., 254)` / `255`), et non à `:623-648` qui n'en est que le consommateur : `sampleHeights` écrête alors que `tileToLatLon` donne la position complète — pente **407 m au bord contre 853 m au centre**, soit **47,7 % de la vraie pente** — ⚠️ **et ce chiffre n'est pas seulement mesuré, il se DÉRIVE du dépôt** (`gridFor` = 24, plus l'écrêtage) : il vaut donc comme source, pas comme relevé, d'où un liseré d'éclairage autour de chaque tuile.
-- [ ] **Étape 10 — LA CLÔTURE DU §0**, puis commit.
+- [ ] **Étape 10 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 **Ce qui est établi, et qui ne dépend d'aucun banc :** l'altitude ne change rien au zoom atteint, et **le budget de cache est le point fixe** — la couverture d'un hémisphère sature `CACHE_MAX` à elle seule. **Réduire l'emprise est donc le seul levier qui attaque la cause.** ⚠️ **Le gain chiffré des étapes 3+4 reste à établir par l'Étape 1**, avec le protocole que vous aurez écrit.
 
@@ -675,7 +692,9 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 - [ ] **Étape 2** — les lancer, vérifier que **chacun** échoue. ⚠️ **CE PLAN A ANNONCÉ « 6 SUR 6 » COMME MESURÉ, ET C'ÉTAIT FAUX** : avec les trois mesures qu'il prescrivait, **trois passaient pour sains**. Si vos six échouent du premier coup, **c'est votre banc qu'il faut suspecter**, pas votre chance.
 - [ ] **Étape 3** — implémenter. ⚠️ **L'AUDIT PRESCRIT LAISSE PASSER TROIS SABOTAGES SUR SIX — MESURÉ AU BANC, PAS DÉDUIT.** Dalle absente (+7,35), mur manquant (+7,95) et **trou couvrant un quart de la surface** (+9,18 contre 9,568 pour le sain, soit **−4 % seulement**) rendent tous un volume positif et **passent pour sains**. Le plan annonçait « 6 sur 6 » : c'est faux.
 
-  **Le correctif tient en une ligne : calculer le volume signé autour de DEUX origines.** Ce n'est pas le signe qui prouve la fermeture, c'est son **indépendance à l'origine**. Écart mesuré : **0,00 % sur le solide sain, 58 à 296 % sur les trois ratés**. ⚠️ Gardez la première origine : elle seule attrape le **solide retourné**, qu'aucun comptage d'arêtes ne voit. Et chiffrez l'epsilon de dégénérescence au lieu de le laisser à l'agent.
+  **Le correctif : calculer le volume signé autour de DEUX origines — et ⚠️ CE PLAN NE DISAIT PAS LESQUELLES, CE QUI SUFFIT À LE FAIRE ÉCHOUER.** Mesuré au banc sur une fenêtre fermée : **l'origine du monde laisse passer deux sabotages sur trois** (mur manquant 0,0 %, trou de dessus 0,3 %). La raison est exacte et se démontre : `V(O₂) − V(O₁) = −(O₂ − O₁) · Ā`, donc **un décalage vertical est aveugle au mur, un décalage horizontal est aveugle à la dalle. Seule une origine OBLIQUE — décalée sur les trois axes — les attrape toutes.**
+
+  ⚠️ **Et l'écart « 58 à 296 % » n'est pas un seuil : il est proportionnel à l'aire du trou** (68,4 % pour un trou de 25 % de la surface, **1,3 % pour 0,4 %**). **Fixez le seuil sur le plus petit défaut que vous voulez attraper, et écrivez-le.** ✅ L'epsilon `1e-12 × côté²` est bon : six ordres de marge à n=768.
 - [ ] **Étape 4** — ⚠️ **le test de non-vacuité** : l'audit doit refuser de rendre un verdict sur une géométrie vide, au lieu de la déclarer saine. **C'est ainsi que le test de silhouette du prototype passait à vide.**
 - [ ] **Étape 5** — mutation sur chacune des trois détections.
 - [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
@@ -724,7 +743,11 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 ⚠️ **Et ses chiffres sont faux contre le dépôt :** les résolutions `128 | 256` sont **trois fois sous la production** (384 / 768), et le budget « 1,7 / 8,3 ms » vient d'un prototype **sans socle**, alors que ce dépôt mesure **5,5 / 8,7 / 14,6 / 24,5 ms** (script rejouable cité en `plinth.js:876`).
 
-⚠️ **L'invariant que ce dépôt a payé pour apprendre, et que cette tâche perdait : socle et maillage à la même résolution, sinon ils se décollent** (`plinth.js:865-879`).
+⚠️ **ET IL Y A 1 516 ms DE GEL QUE CETTE TÂCHE IGNORAIT.** `fenetre-finesse.js:135-149` les mesure : bascule vers 768 **à champ non cuit**, 1,5 s de gel arrivant 0,4 s après que la carte s'est posée, **sans que l'utilisateur ait touché à quoi que ce soit**. La cuisson est **incompressible** (285 ns le point, 5,31 M points) ; **ce qui est déplaçable, c'est le moment** — et le fichier dit lequel : « sous le voile de chargement ». ⚠️ **Or la Tâche 2 retire ce voile. Les deux tâches se contredisent : tranchez.**
+
+⚠️ **ET LE MÊME COMMENTAIRE PRÉVIENT QUE « UN BANC SYNTHÉTIQUE NE L'AURAIT PAS VU — le module pur bascule en zéro milliseconde ».** Cette tâche prescrit précisément un module pur. **Le test de résolution ne verra donc pas le défaut le plus visible de la fonctionnalité.** Prévoyez-en un second, sur le chemin réel.
+
+⚠️ **L'invariant que ce dépôt a payé pour apprendre : socle et maillage à la même résolution, sinon ils se décollent** (`plinth.js:865-879`).
 
 **Fichiers :** ⚠️ **modifier `src/fenetre-finesse.js` et `src/terrain.js` — PAS créer un module neuf** (ou écrire ici pourquoi on les remplace) · modifier `src/monde/fenetre-bornee.js` · tester `test/fenetre-resolution.test.js` **et les 9 tests de la fenêtre continue**
 
@@ -742,7 +765,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 ⚠️ **RAPPEL DE LA DÉCISION 13, PARCE QUE C'EST ICI QU'ON EST TENTÉ DE L'ENFREINDRE.** Baisser à N=128 pendant le mouvement **rend l'image plus grossière pendant qu'on bouge**. C'est voulu, Adrien l'a validé, et c'est le contrat. **Ne compensez pas** en forçant N=256 dès que « ça a l'air lent » : vous reprendriez les 8,3 ms et les 12 % de dépassement que cette tâche existe pour éviter.
 
-- [ ] **Étape 1** — test : `resolutionPour({ enMouvement, resVoulue })` rend **une résolution de mouvement strictement inférieure à celle de repos**, et **respecte `resVoulue`**. ⚠️ **N'ÉCRIVEZ PAS « rend 384 et 768 » : mesuré contre `resDeFinesse`, c'est FAUX à `resVoulue` 256 et 384** — le module existant plafonne au choix de l'utilisateur, et `resDeFinesse` porte en toutes lettres « ne pas servir `params.resolution` tel quel ». **Les 384 et 768 sont les valeurs par DÉFAUT (`RES_FENETRE_CONTINUE`, `RES_REPOS_MAX`), pas un contrat.** Une dérive d'emprise sous le seuil ne déclenche **aucune** reconstruction. ⚠️ **Et l invariant est un critère de cette étape : socle et maillage à la même résolution** (`plinth.js:865-879`).
+- [ ] **Étape 1** — test : `resolutionPour({ enMouvement, resVoulue })` rend **une résolution de mouvement strictement inférieure à celle de repos**, et **respecte `resVoulue`**. ⚠️ **N'ÉCRIVEZ PAS « rend 384 et 768 » : mesuré contre `resDeFinesse`, c'est FAUX à `resVoulue` 256 et 384** — le module existant plafonne au choix de l'utilisateur, et `resDeFinesse` porte en toutes lettres « ne pas servir `params.resolution` tel quel ». **Les 384 et 768 sont les valeurs par DÉFAUT (`RES_FENETRE_CONTINUE`, `RES_REPOS_MAX`), pas un contrat.** Une dérive d'emprise sous le seuil ne déclenche **aucune** reconstruction. ⚠️ **Et l'invariant est un critère de cette étape : socle et maillage à la même résolution** (`plinth.js:865-879`).
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
 - [ ] **Étape 3** — implémenter.
 
@@ -771,7 +794,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 ## 9. Ce qu'Adrien doit trancher en chemin
 
 - ⚠️ **CE QUE L'UTILISATEUR VOIT QUAND LE RÉSEAU REFUSE LA DESCENTE** (règle R3, Tâche 4 ter). La caméra cesse d'obéir : c'est exactement l'instant qu'occupait le pop-up. Flou assumé (décision 13), ralentissement progressif, ou indicateur discret ? **Aucune tâche ne peut trancher cela.**
-- ⚠️ **POURQUOI LA « CONTINUITÉ D'ALTITUDE v42 » A-T-ELLE ÉTÉ RETIRÉE ?** Le commentaire de `modes.js:455` porte la mention « Remplace la continuité d'altitude v42 » : **une continuité a déjà existé là, et elle a été retirée.** La Tâche 2 bis propose de la rétablir. **Il faut savoir ce qui n'allait pas avant de refaire le même geste.**
+- ⚠️ **LE « POINT DE PRÉSENTATION » DOIT-IL DISPARAÎTRE ?** `modes.js:455-458` porte « **v48 (retour Adrien)** : à chaque traversée d'étage on arrive au point de présentation — la même distance que la vue iso 1, en gardant l'angle de l'utilisateur. **Remplace la continuité d'altitude v42.** » ⚠️ **C'est une demande explicite d'Adrien, avec sa raison écrite, et la Tâche 2 bis propose de la défaire.** Il faut savoir ce qui n'allait pas dans v42 avant de refaire le même geste. **Aucune tâche ne peut trancher cela.**
 - **L'effet de transition** globe → socle
 - **La récupération de GLOBathy** : Earth Engine impose un compte et des conditions commerciales à vérifier ; le dépôt de l'article est peut-être la meilleure porte.
 - **Le trait de côte au-delà de z15.** Mesuré : autour d'un bloc z16 à Brest, les polygones OSM pré-simplifiés à 30 m ne donnent que **51 segments pour 1,2 km de côté** *(le côté du bloc — ce plan écrivait « de côte », ce qui en faisait une longueur de rivage)* — médiane 123 m, pointes à 849 m. Rasterisés à 0,79 m la cellule, ils dessineraient un rivage à facettes. Soit on branche le champ processeur au-delà de z15, soit on raffine la donnée. **Le second est une décision de données, pas de code.**
@@ -784,7 +807,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 **Cohérence des noms** — employés à l'identique partout : `socleVisible`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `demanderEmprise`, `PLAFOND_FILE`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`, `debitObserve`.
 
-**Ordre imposé, et il compte.** ⚠️ **Bloc caméra d'abord — 1a (l'instrument), 1b (le repère), 1c (l'entrée figée), puis 2 bis (l'escalier de surface).** Ce sont elles qui suppriment l'attente. ⚠️ **Puis les deux rideaux, dans cet ordre : Tâche 2 (, le pop-up qu'Adrien nomme) et Tâche 2 ter () EN DERNIER — ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up, il montre le trou qu'il cachait.** Bloc quadtree : **4 → 4 alpha → 4 bis → 4 ter**, l'amendement de la 4 bis réclamé par la 4 ter se faisant **dans** la 4 bis. La **Tâche 3 avant la 4 bis** (qui consomme son `emprise`) et **avant la 6**. Et **5 (l'audit) avant 6 (l'extraction)** — sans instrument on ne saura pas si l'extraction marche : le prototype s'est cru étanche pendant tout son vol.
+**Ordre imposé, et il compte.** ⚠️ **Bloc caméra d'abord — 1a (l'instrument), 1b (le repère), 1c (l'entrée figée), puis 2 bis (l'escalier de surface).** Ce sont elles qui suppriment l'attente. ⚠️ **Puis les deux rideaux, dans cet ordre : Tâche 2 (`#loading`, le pop-up qu'Adrien nomme) et Tâche 2 ter (`.whiteout`) EN DERNIER — ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up, il montre le trou qu'il cachait.** Bloc quadtree : **4 → 4 alpha → 4 bis → 4 ter**, l'amendement de la 4 bis réclamé par la 4 ter se faisant **dans** la 4 bis. La **Tâche 3 avant la 4 bis** (qui consomme son `emprise`) et **avant la 6**. Et **5 (l'audit) avant 6 (l'extraction)** — sans instrument on ne saura pas si l'extraction marche : le prototype s'est cru étanche pendant tout son vol.
 
 **Le risque principal n'est plus la géométrie** : l'attaque a confirmé qu'on ne peut pas la déchirer. **C'est le flux** — plafond, annulation, éviction — et **le réseau**, qui décide du zoom réellement atteint.
 
