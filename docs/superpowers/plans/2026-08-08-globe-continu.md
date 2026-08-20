@@ -166,6 +166,8 @@ Le tout derrière `FLAGS.fenetreContinue`, avec neuf fichiers de test dédiés.
 
 ⚠️ **PREMIÈRE ACTION DE CE PLAN, AVANT TOUTE TÂCHE : lire ces modules et trancher, module par module, réutiliser ou remplacer — et l'écrire ici.** C'est exactement le §1 de `/threejs-optimisation` — « l'audit s'arrête au fichier ; zéro occurrence est un signal, pas un soulagement » — et ce plan y est tombé sur son propre sujet.
 
+⚠️ **C'est la SEULE « première action » du document.** Les tâches portent ensuite des marqueurs d'ordre **relatif** (« LA PREMIÈRE DU BLOC », « EN DERNIER », « APRÈS LA TÂCHE 4 ») : ils se lisent **à l'intérieur de leur bloc**, jamais contre celui-ci. **L'ordre complet est au §10.**
+
 ## 4. Ce qui est DÉJÀ FAIT
 
 ### ✅ La côte mondiale fait autorité — `1465731`
