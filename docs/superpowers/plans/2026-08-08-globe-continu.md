@@ -33,6 +33,7 @@ npm run audit:tests   # disque contre liste
 node --check <fichier>  # sur CHAQUE fichier modifié
 npm run nettoie:dist && npm run build:mapcells && npx vite build > /tmp/build.log 2>&1 && npm run verifie:dist
 ```
+⚠️ **`nettoie:dist` N'EST PAS UN LUXE, ET SES QUATRE FAITS SONT DANS `scripts/nettoie-dist.mjs` :** `dist/` contient environ **150 000 fichiers**, Windows rend `ENOTEMPTY` quand l'antivirus tient encore un descripteur, et le script réessaie **`TENTATIVES = 7`** fois avec des pauses croissantes. **Un `rm -rf` simple échoue une fois sur deux sur cette machine.**
 
 ⚠️ **`npm test` N'EST PAS UN MOTIF DE FICHIERS : c'est une LISTE de 178 chemins écrite à la main dans `package.json`.** Un test ajouté au disque et oublié dans la liste **ne tourne jamais**, et la suite affiche fièrement ses milliers de verts. **Ajoutez votre fichier à la ligne `test`, puis lancez `npm run audit:tests`** — il sort en erreur s'il trouve un orphelin.
 
@@ -273,7 +274,7 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 | `src/main.js` **(modifier)** | **le seul endroit qui lit `FLAGS`** pour le globe, **et la carte `#loading`** — `showLoading` `:908`, `hideLoading` `:912`, `LOADING_MIN_MS` `:898`, l'appel `:3182`. ⚠️ **Les trois repères `:927`, `:3423`, `:3447` qu'une révision de ce plan citait sont des lignes de COMMENTAIRE — ne les cherchez pas.** |
 | `src/monde/descente-bornee.js` **(créer)** | borner la descente au débit réellement observé — règle R3 |
 | `src/flags.js` **(modifier)** | le drapeau qui isole le globe continu du globe orbital, **qui est en production** |
-| `src/globe.js` **(modifier)** | horizon géométrique, frustum, crédit ; puis rebranchement sur la vraie source |
+| `src/globe.js` **(modifier)** | horizon géométrique, frustum, crédit (Tâche 4) ; **le plancher de `dist` à `:780` et `MAX_Z` (Tâche 4 quater)** ; `CACHE_MAX` si la mesure le réclame ; puis rebranchement sur la vraie source (Tâche 4 alpha) |
 | `src/escalier-zoom.js` **(⚠️ NE PAS RETIRER — à découper)** | `main.js:31` en importe **trois** symboles — `intersectionGlobe`, `viseeArrivee`, `ZOOM_PALIER_MIN` — sans rapport avec les paliers. ⚠️ **Et `pasEscalier` survit par `modes.js:80` : il fait tourner l'escalier de surface que la Tâche 2 bis CONSERVE.** Seuls `bornesEscalier`, `paliersRetenus` et `palierDeClic` s'en vont, et **seulement si rien d'autre ne les appelle** |
 | `src/modes.js` **(modifier)** | ⚠️ **la caméra, les paliers ET le rideau blanc** — `_dive`, `_rescale`, `_whiteout`, `DIVE_TIERS`, `orbAlt`, `minDistance`. **C'est lui qui fabrique la discontinuité ET le pop-up** |
 | `src/style.css` **(modifier)** | `:535-547` — le rideau plein écran du voile |
@@ -375,10 +376,12 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
   - `this.busy` — **vingt-huit sites** dans `modes.js` (`:138`, `:203`, `:242`, `:296`, `:308`, `:386`…). Tant qu'il est vrai, **la molette, `flyTo`, les steppers et la caméra sont gelés**.
   - ⚠️ **`demBusy` — DEUXIÈME VERROU, ET IL EN VAUT DEUX À LUI SEUL.** Six sites dans `main.js` (`:3057`, `:3384-3385`, `:3413`, `:3602-3603`, `:3619`), **avec deux contrats opposés sur deux chemins** : `:3384` fait un `return` silencieux, `:3602` lève `throw new Error('terrain busy')` → **bandeau « FAILED » à l'écran**. Il garde aussi `canStep` (`main.js:9475`) **avec** `modes.busy`. **Traitez les deux chemins séparément.**
   - ⚠️ **`rebuildPending` — TROISIÈME VERROU, ZÉRO OCCURRENCE DANS TOUTES LES VERSIONS DE CE PLAN, ET IL MENT À SON APPELANT.** `main.js:3417-3420` : quand une reconstruction est déjà en cours, il rend **`Promise.resolve()`** — l'appelant croit son geste exécuté alors qu'il a été jeté. ⚠️ **Et la cible coalescée le rend DANGEREUX** : elle retire la sérialisation qui l'endormait aujourd'hui. **Traitez-le dans la même étape, ou vous échangerez un gel visible contre une perte silencieuse.**
+  - ⚠️ **ET UN QUATRIÈME MÉCANISME, INVISIBLE À TOUS LES BANCS PARCE QU'IL NE LÈVE AUCUN DRAPEAU : `setTimeout(hideLoading, 2600)` DANS LE `catch` DE `loadRealTerrain`** (`main.js:3408-3411`). Quand le chargement échoue, le voile reste **2,6 secondes de plus** alors que `demBusy` est **déjà relâché** — l'application est libre et l'écran ne le dit pas. ⚠️ **Et c'est la réponse, déjà écrite dans le code, à la question du §9 « ce que l'utilisateur voit quand le réseau refuse » : aujourd'hui il voit le voile, deux secondes six.** **Nommez-le, et dites ce qu'il devient.**
   - ⚠️ **LE GESTE : UNE CIBLE COALESCÉE, ET SURTOUT PAS UNE FILE.** Ce plan a écrit « un verrou qui met en file et rejoue » : **mesuré, c'est PIRE que le verrou d'aujourd'hui.** Sur une rafale de six crans en une seconde, l'entrée morte passe de **1,95 s à 11,70 s** ; sur vingt crans hésitants, à **29,75 s sur 30 (99,2 %)**, avec une latence médiane de **896 images** et quatre gestes encore en file à la fin. La file **rejoue l'oscillation littérale** `9→8→9→8` quinze fois de suite. **Sur le trajet de référence, elle ne change l'entrée morte de rien du tout.**
   - **Ce qui marche, mesuré :** garder **le DERNIER geste seulement** — une cible, pas une file. **3,90 s d'entrée morte, latence 4 images, et c'est le seul régime qui atterrit au bon zoom.**
-  - **Le seuil, et ⚠️ CE PLAN EN A ÉCRIT TROIS QUI NE MORDENT PAS.** « `busy || demBusy` vrai » : un verrou qui met en file reste vrai. « Zéro geste refusé » : les trois régimes marquent zéro. **Et « latence médiane sous 10 images, traîne sous 0,5 s » est HORS D'ATTEINTE** — mesuré, avec `_whiteout` (960 ms) et `loadSurface` (≈1 s), l'opération dure 1 960 ms à la place de cette tâche dans l'ordre, et **aucun régime ne rend les deux seuils verts** ; ils ne passent ensemble qu'en dessous de **~700 ms d'opération**, sur un chemin qu'aucune des quatorze tâches ne touche.
-  - ⚠️ **ET LISEZ LE CRITÈRE DANS LE BON SENS, SANS QUOI IL ARRÊTE CETTE TÂCHE À TORT.** Mesuré : **sur la descente soutenue, la cible coalescée ne gagne que 0,06 s** — son bénéfice n'y est **pas** le temps, mais **la latence et le fait d'atterrir au bon zoom**. C'est sur la **rafale** et l'**hésitation** qu'elle doit battre le verrou d'aujourd'hui, largement. **Descente soutenue : jugez la latence. Rafale et hésitation : jugez le temps ET la latence.** Si elle perd sur la rafale ou l'hésitation, alors seulement, dites-le et arrêtez-vous.
+  - **Le seuil, et ⚠️ CE PLAN EN A ÉCRIT TROIS QUI NE MORDENT PAS.** « `busy || demBusy` vrai » : un verrou qui met en file reste vrai. « Zéro geste refusé » : les trois régimes marquent zéro. **Et « latence médiane sous 10 images, traîne sous 0,5 s » est HORS D'ATTEINTE** — mesuré, avec `_whiteout` (960 ms) et `loadSurface` (≈1 s), l'opération dure 1 960 ms à la place de cette tâche dans l'ordre, et **aucun régime ne rend les deux seuils verts** ; ils ne passent ensemble qu'en dessous de **~700 ms d'opération**, sur un chemin qu'aucune des quinze tâches ne touche.
+  - ⚠️ **ET LE CRITÈRE NE PEUT PAS ÊTRE L'ENTRÉE MORTE : LE DÉFAUT LA GAGNE. C'EST LA QUATRIÈME FORMULATION, ET LES TROIS PREMIÈRES ÉTAIENT FAUSSES.** Mesuré : sur la **rafale**, la cible coalescée fait **3,93 s contre 1,97 s** au verrou d'aujourd'hui ; sur l'**hésitation**, **9,83 contre 7,87 s**. **Le verrou gagne parce qu'il JETTE cinq gestes sur six** — minimiser le temps bloqué récompense précisément le défaut qu'on veut supprimer.
+  - ⚠️ **LA GRANDEUR QUI DISCRIMINE EST L'HONNÊTETÉ DU GESTE, ET ELLE EST BINAIRE : LE ZOOM D'ARRIVÉE EST-IL CELUI QUE L'UTILISATEUR A DEMANDÉ ?** Assertion : **après une rafale de six crans, le zoom final est celui du sixième cran** — aujourd'hui il ne l'est pas, la cible coalescée l'obtient. **C'est le seul régime qui atterrit au bon zoom, et c'est cela qu'il faut tester.** Ajoutez la **latence médiane** comme second critère (elle doit rester bornée), et **ne mesurez plus l'entrée morte comme un succès** : elle sert à décrire, pas à juger.
   - ⚠️ **ET N'ANNONCEZ PAS DE TOTAL EN SECONDES : `_whiteout` FAIT 480 + 480 ms ET IL EST ATTENDU AVANT QUE LE VERROU SE LÈVE.** Sur la descente de référence, ses **sept rideaux encore posés à ce stade** valent **≈6,7 s à eux seuls, réseau instantané compris** — et le §10 ne les retire qu'en toute fin de parcours (Tâche 2 ter). **Tant qu'ils sont là, aucun seuil absolu d'entrée morte n'est atteignable, et c'est arithmétique, pas une question d'effort.**
 - [ ] **Étape 2 — `_loadDive` / `diveTo`** — le clic-plongée, **un second chemin de plongée entier**, distinct de `_dive`, avec un recul de caméra de **×3,32 à ×24,25** (le maximum se dérive du dépôt : `surfaceMaxDistance 150 × 0,97 / minDistance 6`).
 - [ ] **Étape 3 — `enterOrbit`** (`modes.js:296`) — la remontée. ⚠️ **Mesuré : elle est PIRE que la descente — 11 rideaux contre 8, 35,3 % d'écran blanc, 70,8 % d'entrée morte.**
@@ -420,7 +423,7 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 
 ⚠️ **ET ELLE FLOUTE L'APPLICATION ENTIÈRE À 16 px PENDANT QU'ELLE EST LÀ — À L'ARRÊT** (`style.css:185-186`). **C'est le contraire exact de la décision 13**, qui n'accepte le flou que **pendant** le mouvement.
 
-⚠️ **PIÈGE DE RÉGRESSION, ET IL N'EST PROTÉGÉ PAR AUCUN TEST :** `hideLoading()` est le **seul endroit qui pose `ld-warm`** (`main.js:937`). Le supprimer sans le remplacer emporte tout le comportement de chargement à chaud. **Et aucun test ne charge `main.js`** — le filet n'existe pas.
+⚠️ **`hideLoading` PORTE QUATRE EFFETS DE BORD, ET AUCUN N'EST PROTÉGÉ PAR UN TEST — `main.js` n'est chargé par aucun.** Avant d'y toucher, sachez ce qui part avec lui : **(1)** il est **le seul endroit qui pose `ld-warm`** (`:937`) ; **(2)** il appelle **`globe.chargeRacines()`** (`:928`) — l'un des deux seuls chemins qui demandent les seize tuiles racines, **et la Tâche 1b dissout l'autre** ; **(3)** il applique le plancher `LOADING_MIN_MS = 2000` au premier affichage ; **(4)** il est réarmé **2,6 s plus tard** par le `catch` de `loadRealTerrain` (`:3408-3411`). **Traitez les quatre, un par un, et dites-le dans cette case.**
 
 ⚠️ **CETTE TÂCHE ET LA TÂCHE 7 SE CONTREDISENT, ET AUCUNE DES DEUX NE LE SAIT.** `fenetre-finesse.js:135-149` mesure **1 516 ms de gel** pour la bascule vers 768 à champ non cuit, déclare la cuisson **incompressible** (285 ns le point, 5,31 M points), et dit que **ce qui est déplaçable, c'est le MOMENT : « sous le voile de chargement, où l'on attend déjà, plutôt qu'en pleine contemplation »** — le voile que cette tâche retire. **Tranchez-le explicitement : où va la seconde et demie une fois le voile parti ?**
 
@@ -454,7 +457,7 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 
 ⚠️ **LA PRÉMISSE DE CETTE TÂCHE ÉTAIT FAUSSE.** Ce plan écrivait « le quadtree s'arrête à z11 ». Il n'y arrive **jamais** : mesuré, il plafonne à **z7**, et `MAX_Z = 11` est du code mort. Monter une constante qui n'est pas atteinte ne produit rien.
 
-⚠️ **ET PERSONNE NE LE MONTE — C'EST LE TROU LE PLUS GRAVE DU PLAN, ET IL EST STRUCTUREL.** Cette tâche rend `MAX_Z = 11` **atteignable** ; **aucune tâche ne le dépasse.** Or le socle vit à **z13-z16** et réclame de **27,0 à 1,7 m par échantillon**, quand un quadtree plafonné à z11 en fournit **27,0** — un déficit de **×2 à ×16 au repos**, et de **×64** contre le z17 que Mapterhorn sert en production. ⚠️ **La décision 13 — « net dès l'arrêt » — devient donc infaisable dès z14, et ce plan promet le contraire.**
+⚠️ **ET IL NE SUFFIT PAS DE LE RENDRE ATTEIGNABLE : LA TÂCHE 4 QUATER, JUSTE APRÈS, LÈVE LE VRAI VERROU** — le plancher de `dist` à `:780`, qui arrête le raffinement à z11 **quelle que soit l'altitude et quelle que soit la valeur de `MAX_Z`**. **Cette tâche-ci ne suffit pas seule ; ne vous arrêtez pas à sa clôture.**
 
 ⚠️ **Et le `z11` de la règle R3 coïncide avec la constante sans que ce plan dise lequel des deux il mesure** : le débit borne-t-il vraiment à z11, ou bute-t-on simplement sur `MAX_Z` ? **À trancher au banc avant d'écrire la Tâche 4 ter.** **Une tâche doit porter `MAX_Z` au-delà de 11 — ou le plan doit assumer, par écrit, un socle plus grossier que la production actuelle.**
 
@@ -525,23 +528,40 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 
 **Ce qui est établi, et qui ne dépend d'aucun banc :** l'altitude ne change rien au zoom atteint, et **le budget de cache est le point fixe** — la couverture d'un hémisphère sature `CACHE_MAX` à elle seule. **Réduire l'emprise est donc le seul levier qui attaque la cause.** ⚠️ **Le gain chiffré des étapes 3+4 reste à établir par l'Étape 1**, avec le protocole que vous aurez écrit.
 
-⚠️ **CETTE TÂCHE PASSE AVANT TOUTES LES AUTRES DU BLOC.** Rebrancher la source (4 alpha) d'un quadtree qui n'atteint pas ses niveaux fins ne se verrait pas ; et calibrer un plafond de file (4 bis) avant elle, c'est le calibrer sur un trafic qui va tripler. **L'ordre est 4 → 4 alpha → 4 bis → 4 ter.**
+⚠️ **CETTE TÂCHE PASSE AVANT TOUTES LES AUTRES DU BLOC.** Rebrancher la source (4 alpha) d'un quadtree qui n'atteint pas ses niveaux fins ne se verrait pas ; et calibrer un plafond de file (4 bis) avant elle, c'est le calibrer sur un trafic qui va tripler. **L'ordre est 4 → 4 quater → 4 alpha → 3 → 4 bis → 4 ter.**
 
 
-### Tâche 4 quater : PORTER `MAX_Z` AU-DELÀ DE 11 ⚠️ APRÈS LA TÂCHE 4, AVANT LA 4 ALPHA
+### Tâche 4 quater : LEVER LE PLANCHER DE `dist`, PUIS PORTER `MAX_Z` À 15 ⚠️ APRÈS LA TÂCHE 4, AVANT LA 4 ALPHA
 
-**Fichiers :** modifier `src/globe.js` (`MAX_Z`, `CACHE_MAX`) · tester `test/globe-profondeur.test.js` (créer)
+**Fichiers :** modifier `src/globe.js` (`:780` le plancher de `dist`, puis `MAX_Z`) · tester `test/globe-profondeur.test.js` (créer)
 
-⚠️ **CETTE TÂCHE N'EXISTAIT PAS, ET C'ÉTAIT LE TROU LE PLUS GRAVE DU PLAN.** La Tâche 4 rend `MAX_Z = 11` **atteignable** ; **rien ne le dépassait.** Or ce plan fait du quadtree la **source unique de relief** : le socle vit à **z13-z16** et réclame de **27,0 à 1,7 m par échantillon**, quand z11 en fournit **27,0**. **Déficit de ×2 à ×16 au repos, ×64 contre le z17 servi aujourd'hui par Mapterhorn.** La décision 13 — « net dès l'arrêt » — est **infaisable** tant que cette tâche n'est pas faite.
+⚠️ **UNE PREMIÈRE VERSION DE CETTE TÂCHE ATTAQUAIT UNE CONSTANTE QUI N'EST PAS LE VERROU — ET LA TÂCHE 4 LA RÉFUTAIT D'AVANCE : « monter une constante qui n'est pas atteinte ne produit rien ».** Preuve mesurée : **`MAX_Z = 16` avec `CACHE_MAX = 8 000` — dix-neuf fois le budget — rend toujours z11.**
 
-⚠️ **ET DEUX TÂCHES EN DÉPENDENT SANS L'AVOIR DIT :** la **4 alpha** (Mapterhorn commence à z12 : sans cette tâche, les deux intervalles ne se touchent pas et le rebranchement ne peut rien apporter) et la **4 ter** (dont le « z11 » de la règle R3 pourrait n'être que la constante, pas le réseau — **c'est ici qu'on le saura**).
+**Le vrai plafond est le plancher de `dist`, à `globe.js:780` :**
 
-- [ ] **Étape 1 — le test qui échoue** : à une altitude de socle, le zoom effectif atteint **au moins z13**. Il échoue aujourd'hui **et après la Tâche 4** — c'est ce qui distingue « atteignable » de « suffisant ».
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue, et **relever le zoom réellement atteint** après la Tâche 4.
-- [ ] **Étape 3 — trancher la valeur, et la mesurer.** ⚠️ **Ce plan ne vous donne PAS de chiffre, et c'est délibéré : deux constantes posées sans mesure y ont déjà été réfutées.** Le besoin est z16 pour un socle fin ; le coût est **quadratique en tuiles** et le budget de cache est déjà le point fixe de la Tâche 4. **Balayez 12, 13, 14, 15, 16 en relevant à chaque fois : zoom effectif, tuiles dessinées, taille de cache, mémoire, et requêtes par image caméra immobile — sur 20 images stables.** Écrivez la table ici.
-- [ ] **Étape 4 — ajuster `CACHE_MAX` avec la profondeur, ou dire pourquoi il tient.** ⚠️ **Chaque niveau supplémentaire multiplie par quatre le nombre de feuilles d'une même emprise.** Sans révision du budget, la Tâche 4 se défait.
-- [ ] **Étape 5 — la sortie honnête, si la mesure la commande.** Si le coût mémoire interdit z16, **plafonnez à ce que la mesure permet et ÉCRIVEZ-LE ICI**, avec la conséquence en clair : *le socle sera plus grossier qu'aujourd'hui à tel zoom*. ⚠️ **C'est une décision produit — elle remonte à Adrien au §9, elle ne se prend pas en silence.**
-- [ ] **Étape 6 — mutation** : remettre `MAX_Z` à 11 doit tuer le test.
+```
+const dist = Math.max(camPos.distanceTo(t.center) - t.chord * 0.5, 1)
+```
+
+`R_GLOBE = 100` (`geo.js:11`) pour 6 371 000 m : **une unité de scène vaut 63 710 m, donc ce `1` vaut 63,7 km.** Sous cette altitude, `dist` est constant, **le ratio `chord/dist` cesse de dépendre de l'altitude**, et le raffinement s'arrête — **z11 à froid, z12 avec hystérésis, à TOUTE altitude.** `MAX_Z = 11` n'est pas une politique : **c'est exactement la valeur que le critère atteint déjà.**
+
+⚠️ **ET LE COÛT N'EST PAS CELUI QUE CE PLAN ANNONÇAIT.** Une version écrivait « chaque niveau **quadruple** les feuilles » : **faux d'un facteur 175** — le critère `chord/dist` fixe la taille **angulaire** d'une feuille, donc chaque niveau n'ajoute **qu'un anneau**. Mesuré après horizon + frustum, en tuiles 512 px :
+
+| | tuiles dessinées | mémoire |
+|---|---|---|
+| z11 (aujourd'hui) | 120 | 261 Mo |
+| **z15** | **208** | **448 Mo** |
+
+**`CACHE_MAX = 420` tient, avec deux fois la marge.** ⚠️ **Il n'y a donc AUCUN arbitrage à faire remonter à Adrien sur la finesse du socle : la question n'existe pas.**
+
+**Et la destination se dérive en une ligne**, à 45° de latitude en tuiles 512 px : z12 = 13,51 m · z13 = 6,76 m · z14 = 3,38 m · **z15 = 1,69 m** — **exactement le besoin du socle à ses quatre niveaux.** ⚠️ **La destination est `MAX_Z = 15`. Ce plan disait « pas de chiffre, délibérément » alors qu'il était gratuit.**
+
+- [ ] **Étape 1 — le test qui échoue** : **à 8 km d'altitude**, le zoom effectif atteint **au moins z13**. ⚠️ **Altitude de travail explicite, parce que « une altitude de socle » est produite par la Tâche 3, qui passe APRÈS** — elle pourra la déplacer. Le test échoue aujourd'hui **et après la Tâche 4**.
+- [ ] **Étape 2** — le lancer, vérifier qu'il échoue, **et vérifier aussi qu'il échoue encore avec `MAX_Z = 16`** : c'est ce qui prouve que la constante n'est pas le verrou.
+- [ ] **Étape 3 — LEVER LE PLANCHER DE `dist`.** Le `1` de `:780` doit descendre à ce que l'échelle justifie, ou disparaître au profit d'une borne exprimée en mètres. ⚠️ **C'est ce geste, et lui seul, qui débloque les niveaux fins.**
+- [ ] **Étape 4 — porter `MAX_Z` à 15**, et relever la table ci-dessus sur votre banc — **20 images stables, après en avoir jeté cinq.** ⚠️ **Si vos chiffres s'écartent de ceux du tableau, ce sont les vôtres qui font foi : écrivez-les ici.**
+- [ ] **Étape 5 — la borne AWS.** AWS s'arrête à **z15** (`dem-source.js:51`) : au-delà les tuiles reviennent en `error`, **et une tuile `error` est inévinçable tant que la Tâche 4 Étape 6 n'est pas faite.** z15 est donc la destination **et** la limite tant que la 4 alpha n'a pas rebranché Mapterhorn.
+- [ ] **Étape 6 — mutation** : remettre le plancher de `dist` à 1 doit tuer le test. ⚠️ **Remettre `MAX_Z` à 11 doit AUSSI le tuer** — les deux gestes sont nécessaires, le test doit le prouver.
 - [ ] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 
@@ -617,7 +637,7 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 - [ ] **Étape 8** — mutation : revenir à l'URL en dur doit tuer le test.
 - [ ] **Étape 9 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
-**Si cette tâche est jugée trop lourde**, l'alternative honnête est de **plafonner `MAX_Z` à 13 et de l'écrire** — mais alors la décision 1 (« de l'orbite au sol ») devient fausse, et il faut le dire à Adrien.
+⚠️ **UNE VERSION DE CE PLAN PROPOSAIT ICI « plafonner `MAX_Z` à 13 » COMME ALTERNATIVE HONNÊTE : LA MESURE L'A RENDUE SANS OBJET.** La Tâche 4 quater établit que le verrou n'est pas `MAX_Z` mais le plancher de `dist`, et que z15 tient dans le budget actuel avec deux fois la marge. **Il n'y a plus d'arbitrage à faire ici.** Ce qui reste vrai en revanche
 
 ### Tâche 3 : `seuil-socle.js` — quand le socle naît et meurt
 
@@ -657,7 +677,7 @@ Pour mémoire, l'erreur d'origine : à un champ de 30°, un socle occupe **5,6 %
 
 ⚠️ **CETTE TÂCHE PORTAIT « EN PREMIER ». C'ÉTAIT L'ORDRE INVERSE DE CE QUI EST MESURÉ.** La Tâche 4 change ce que cette tâche est censée calibrer : après horizon + frustum, le pic de `loading` passe de **0 à 246** et le trafic d'un panoramique de **596 à 1 786 requêtes**. `PLAFOND_FILE` ne peut pas se calibrer avant. Et la Tâche 4 alpha fait passer les tuiles de PNG 256 px à WebP 512 px : **le bouchon écrit ici serait périmé le jour où elle s'exécute.**
 
-**L'ordre est donc : 4 → 4 alpha → 4 bis → 4 ter.**
+**L'ordre est donc : 4 → 4 quater → 4 alpha → 3 → 4 bis → 4 ter.**
 
 **Fichiers :** créer `src/monde/flux-terrain.js` · modifier `src/globe.js` · tester `test/flux-terrain.test.js` — ⚠️ **LISEZ `src/dem-emprise.js` AVANT DE CRÉER** : `originesEmprise`, `recollerEmprise`, `enVolBorne` et `EMPRISE_EN_VOL_MAX` font déjà une partie de ce travail, en production, derrière `FLAGS.fenetreContinue`.
 
@@ -702,6 +722,7 @@ Une passe par tuile touchée, pas un appel par sommet.
   - `zoomEffectif(flux, emprise)` — **inférieur au zoom demandé tant que la couverture est incomplète**, égal ensuite. C'est l'assertion qui distingue « demandé » de « couvert ».
   - `remplirHauteurs(flux, { emprise, n, sortie })` — remplit `(n+1)²` hauteurs **en une passe**, et rend le compte des manquants. ⚠️ **Par lot, jamais par pixel : mesuré, l'interface par pixel coûtait +3,5 ms par reconstruction à N=256.**
   ⚠️ **Et ajoutez-les à l'audit de noms du §10, qui leur était aveugle.**
+- [ ] **Étape 3 — implémenter les trois corrections du flux** (plafond de file, annulation, éviction des `loading`) **et les cinq interfaces ci-dessus.** ⚠️ **CETTE CASE AVAIT DISPARU : une correction destinée à détailler les interfaces avait emporté la seule case d'implémentation de la tâche, et la numérotation sautait de 2 à 4.** Sixième occurrence de l'accident que le §0 documente.
 - [ ] **Étape 4** — vérifier par mutation : retirer le plafond, puis l'annulation, puis l'éviction des `loading` — **chacune doit tuer un test**.
 - [ ] **Étape 5** — mesurer le battement : nombre de décodages complets sur un vol de référence. ⚠️ L'attaque en a compté **10 829 pour un cache de 420** ; donner le chiffre après.
 - [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
@@ -716,7 +737,7 @@ Une passe par tuile touchée, pas un appel par sommet.
 
 **Les deux points mesurés** : **z11 à 12 Mb/s**, **z9 à 4 Mb/s**. ⚠️ **Deux points ne font pas une courbe.** Commencez par une interpolation logarithmique entre eux, **mesurez un troisième point** (par exemple à 30 Mb/s) et corrigez. Le plan ne peut pas vous donner la loi : il vous donne deux points et l'obligation d'en trouver un troisième.
 
-Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/s**. À z9 un texel vaut 213 m. ⚠️ **CE PLAN ÉCRIVAIT « 48 texels sur la largeur d'un socle z13 ⚠️ (ce plan écrivait « dix-sept », reste du fantôme des 3,56 km). La vraie largeur vient de `blockExtentMeters` et dépend du zoom : à **z13 (10,4 km), cela fait 48 texels**, pas dix-sept. Ce n'est pas le flou de la décision 13, **c'est une autre carte**.
+Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/s**. À z9 un texel vaut 213 m. ⚠️ **CE PLAN ÉCRIVAIT « dix-sept texels sur la largeur du socle » — c'était le fantôme des 3,56 km que la Tâche 3 a réfuté** (17 × 213 = 3 621 m). La vraie largeur vient de `blockExtentMeters` et dépend du zoom : sur un socle **z13 (10,4 km à 45°), cela fait 48 texels**. Ce n'est pas le flou de la décision 13, **c'est une autre carte.**
 
 - [ ] **Étape 1** — test : à débit observé faible, `zoomSoutenable` rend un zoom inférieur au demandé. ⚠️ **La seconde moitié de cette assertion — « et la caméra ne descend pas plus vite que lui » — est HORS DU PÉRIMÈTRE de cette tâche** : elle appartient à la Tâche 1, qui tient la caméra. **Dites ici qui appelle `zoomSoutenable` et où** (`modes.js`, sur le chemin de descente), et laissez l'assertion caméra à la Tâche 1.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
@@ -863,7 +884,6 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 - ⚠️ **CE QUE L'UTILISATEUR VOIT QUAND LE RÉSEAU REFUSE LA DESCENTE** (règle R3, Tâche 4 ter). La caméra cesse d'obéir : c'est exactement l'instant qu'occupait le pop-up. Flou assumé (décision 13), ralentissement progressif, ou indicateur discret ? **Aucune tâche ne peut trancher cela.**
 - ⚠️ **ET QUE FAIT LE SOCLE QUAND LE RÉSEAU NE SUIT PAS ?** Il **naît sur une altitude** (R1) mais **se remplit à un zoom** que le réseau borne (R3). Si le débit ne soutient que z9 quand le seuil appelle un socle z13, **le socle naît grossier**. Attend-il ? Naît-il quand même ? Le seuil se décale-t-il ? **C'est la jonction des deux règles qui gouvernent son apparition, et elle n'a pas de réponse.**
-- ⚠️ **JUSQU'OÙ LE SOCLE A-T-IL LE DROIT D'ÊTRE GROSSIER ?** La Tâche 4 quater porte `MAX_Z` au-delà de 11, mais chaque niveau **quadruple** les feuilles d'une même emprise et le budget de cache est déjà le point fixe. **Si la mesure interdit z16, le socle sera plus grossier qu'aujourd'hui** — où placer la limite est une décision de produit, pas d'ingénierie.
 - ⚠️ **LE « POINT DE PRÉSENTATION » DOIT-IL DISPARAÎTRE ?** `modes.js:455-458` porte « **v48 (retour Adrien)** : à chaque traversée d'étage on arrive au point de présentation — la même distance que la vue iso 1, en gardant l'angle de l'utilisateur. **Remplace la continuité d'altitude v42.** » ⚠️ **C'est une demande explicite d'Adrien, avec sa raison écrite, et la Tâche 2 bis propose de la défaire.** Il faut savoir ce qui n'allait pas dans v42 avant de refaire le même geste. **Aucune tâche ne peut trancher cela.**
 - **L'effet de transition** globe → socle
 - **La récupération de GLOBathy** : Earth Engine impose un compte et des conditions commerciales à vérifier ; le dépôt de l'article est peut-être la meilleure porte.
