@@ -142,7 +142,7 @@ Ce n'est plus le flou accepté par la décision 13 : **c'est une autre carte**. 
 
 - `src/globe.js` — quadtree z2→z11, `SPLIT_RATIO` 0,38 avec hystérésis, raffinement sans trous, LRU, six requêtes concurrentes.
 - `src/coast-mask.js` — rasterise les polygones Natural Earth du z4 au z15.
-- Les pyramides : `sol` et `canopee` (z8/z9 **mondiaux**, ~3 Ko/tuile), `bathy` z4→z10, `lake-tiles` (`world: true`), `coast-z6` (grille complète).
+- Les pyramides : `sol` et `canopee` (z8/z9 **mondiaux**, **3,8 Ko/tuile** — mesuré sur 16 234 et 59 826 fichiers ; ce plan écrivait « ~3 Ko »), `bathy` z4→z10, `lake-tiles` (`world: true`), `coast-z6` (grille complète).
 - `src/flags.js` — **existe** (4 057 octets, `export const FLAGS`), et portera le drapeau qui isole les deux moteurs. ⚠️ Un rapport de validation l'a cru absent : il est bien là.
 - Toute la chaîne d'export, les comptes, la boutique, le Race Studio.
 
@@ -286,8 +286,9 @@ Zéro occurrence, vérifié. La numérotation commence à 3 et passe par 4, 4 al
 
 #### ⚠️ Ce que la mesure ne dit PAS, et qu'il faut établir
 
-- **Le champ de vision de production est 30°.** Les deux premiers audits ont mesuré à **55°**, et c'est ce qui explique l'essentiel de leurs désaccords. ⚠️ **Toute mesure de cette tâche se fait au fov du produit, et l'écrit.**
-- **Les chiffres reproductibles au fov 30 sont : z7 à la base** (pas z6 — et **z9 sur un globe neuf sous 200 km**), **124 tuiles dessinées après correction** (pas 74), et **2 à 4 % des tuiles dessinées effectivement dans le champ** (pas les 10-20 % relevés au fov 55).
+- ⚠️ **LE CHAMP DE VISION N'EXPLIQUE RIEN DU DÉSACCORD DE BASE, ET CE PLAN A ÉCRIT LE CONTRAIRE.** Vérifié : `grep -ic fov src/globe.js` rend **0**, et `_traverse(t, camPos, camDir)` ne reçoit **que la position et la direction** de la caméra. **Le champ de vision ne peut pas influencer le zoom atteint dans le code d'aujourd'hui.** Il le pourra une fois le frustum de l'Étape 4 posé — c'est **à partir de là seulement** que toute mesure doit dire son fov (celui de production est **30°**, `main.js:263`).
+- ⚠️ **LE ZOOM DE BASE EST DONC ENCORE EN LITIGE : z6, z7 et « z9 sous 200 km » ont chacun été affirmés, et l'explication qui les réconciliait est fausse.** **L'Étape 1 doit trancher, et son relevé fait foi.** Ne recopiez aucun des trois.
+- **124 tuiles dessinées après correction** (et non 74, qui recollait deux paliers), **2 à 4 % des tuiles dessinées effectivement dans le champ**.
 - ⚠️ **L'horizon SEUL ne débloque rien** : z7 → z7. Il ne devient utile qu'accompagné du frustum, **qui fait tout le travail**. Un audit lui a attribué un niveau de zoom : c'est faux.
 - **Le même relevé donne un cache de 824** — c'est-à-dire **le double de `CACHE_MAX`**. ⚠️ Or l'étape sur le cache ci-dessous propose `5 × visibles` ≈ 370, ce qui **défait** ce que les trois causes viennent de débloquer. **Cette contradiction se tranche par la mesure, pas par un arbitrage d'écriture.**
 - **La formule d'horizon a besoin de sa marge de corde.** Transcrite nue, elle écrête au limbe et **crée des trous**. Et les racines `z2` doivent en être exemptées.
@@ -310,7 +311,7 @@ Zéro occurrence, vérifié. La numérotation commence à 3 et passe par 4, 4 al
 - [ ] **Étape 6 — rendre évinçables les tuiles bloquées.** ⚠️ **Sans retourner l'ordre d'éviction.** Ce plan a écrit trois fois « profondeur d'abord, récence ensuite » : `globe.js` fait délibérément l'inverse — `a.lastUsed - b.lastUsed || parProfondeur(a, b)`, la **récence au rang 1**, la profondeur au **rang 2 seulement**, avec vingt lignes de commentaire et un test dédié vert (« à ancienneté égale, l'éviction sacrifie la PROFONDE et garde l'ancêtre »). **C'est correct.** Une tuile en `error` ou en `loading` dont la requête ne revient jamais **occupe une place du budget définitivement, sans reprise possible**. C'est le même point fixe, par une autre porte. ⚠️ **MAIS N'ÉVINCEZ PAS UNE TUILE `loading` SANS ANNULER SA REQUÊTE** : le `.then` de `_pump` (`globe.js:726`) ajouterait un maillage orphelin à la scène. Le garde est `if (!this.tiles.has(t.key)) return` au retour — **exigez-le dans le test**. (`_evictJusqua` est à `globe.js:863`.)
 - [ ] **Étape 7 — trancher le cache**, avec les chiffres de l'étape 1 et non par principe. ⚠️ Si les corrections réclament 824, une formule qui rend 370 est une régression déguisée en optimisation. **Mesurez avant de choisir.**
 - [ ] **Étape 8 — la mémoire retenue pour rien : ~210 Mo sur 327 Mo au cache plein.** `globe.js:238` — le canevas reste vivant via `CanvasTexture.image` après téléversement (**105 Mo**). Et `t.heights` (**105 Mo**) n'est relu que par `setExaggeration` (`:899`), **qui n'a aucun appelant dans tout le dépôt — vérifié**. ⚠️ Le commentaire de `:168` annonce « 380 Mo pour 1 500 tuiles » : la documentation **sous-estime d'un facteur 2,4**.
-- [ ] **Étape 9 — les normales de bord.** `:623-648` : `sampleHeights` écrête hors [0,1] alors que `tileToLatLon` donne la position complète — pente **407 m au bord contre 853 m au centre**, soit **47,7 % de la vraie pente**, d'où un liseré d'éclairage autour de chaque tuile.
+- [ ] **Étape 9 — les normales de bord.** ⚠️ **l'écrêtage est à `globe.js:257-260`** (`Math.min(..., 254)` / `255`), et non à `:623-648` qui n'en est que le consommateur : `sampleHeights` écrête alors que `tileToLatLon` donne la position complète — pente **407 m au bord contre 853 m au centre**, soit **47,7 % de la vraie pente** — ⚠️ **et ce chiffre n'est pas seulement mesuré, il se DÉRIVE du dépôt** (`gridFor` = 24, plus l'écrêtage) : il vaut donc comme source, pas comme relevé, d'où un liseré d'éclairage autour de chaque tuile.
 - [ ] **Étape 10 — LA CLÔTURE DU §0**, puis commit.
 
 **Preuve du couple étapes 3+4, mesurée au fov 30 de production :** zoom **7 → 11**, **124 tuiles dessinées**, **zéro requête au repos** — et **sans toucher au crédit**.
@@ -442,7 +443,11 @@ Une passe par tuile touchée, pas un appel par sommet.
 - `socleVisible({ altitudeEllipsoideM, visibleAvant })` → `boolean`
 - `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M` — **À MESURER.**
 
-⚠️ **UNE VERSION DE CE PLAN AVAIT ÉCRIT 120 km ET 180 km. C'EST FAUX D'UN FACTEUR ~18.** À un champ de 30°, un socle de 3,56 km occupe **5,6 % de l'image** depuis 120 km — et le dépôt lui-même place 120 km au palier **z8** — ⚠️ ce plan écrivait z9, et c'est faux : `pickDiveTier(120000)` rend `{ altM: 200000, zoom: 8 }`, **exécuté** ; z9 couvre 50 à 100 km (`modes.js`, `DIVE_TIERS`), c'est-à-dire précisément l'altitude que la règle R3 qualifie d'« autre carte ».
+⚠️ **UNE VERSION DE CE PLAN AVAIT ÉCRIT 120 km ET 180 km, ET LES AVAIT RÉFUTÉES AVEC UN CHIFFRE QUI N'EXISTE PAS.** « Un socle de 3,56 km » : **cette valeur ne se trouve nulle part dans le dépôt**, et six chiffres de ce plan en descendaient. La vraie largeur vient de `blockExtentMeters(zoom, lat)` (`landmarks.js:22`, avec `BLOCK_TILES = 3`) et **dépend du zoom** — exécuté à 45° de latitude : **z13 = 10,4 km · z14 = 5,2 km · z15 = 2,6 km · z16 = 1,3 km**.
+
+⚠️ **ET CELA REND UNE QUESTION VISIBLE QUE CE PLAN NE TRANCHAIT NULLE PART : À QUEL ZOOM LE SOCLE SE POSE-T-IL ?** Tant qu'elle est ouverte, aucun seuil d'altitude ne peut se calculer — la largeur varie d'un facteur huit entre z13 et z16. **Tranchez-la ici, avant le protocole.**
+
+Pour mémoire, l'erreur d'origine : à un champ de 30°, un socle occupe **5,6 % de l'image** depuis 120 km — et le dépôt lui-même place 120 km au palier **z8** — ⚠️ ce plan écrivait z9, et c'est faux : `pickDiveTier(120000)` rend `{ altM: 200000, zoom: 8 }`, **exécuté** ; z9 couvre 50 à 100 km (`modes.js`, `DIVE_TIERS`), c'est-à-dire précisément l'altitude que la règle R3 qualifie d'« autre carte ».
 
 **Protocole :** partir de la demande d'Adrien — « le crop apparaît quand la Terre occupe une partie assez importante de l'écran » — la traduire en **fraction d'image occupée par le socle**, viser autour de 60 %, et en déduire l'altitude par la trigonométrie du champ de vision. ⚠️ **Puis convertir en altitude, et ne garder QUE l'altitude** : la fraction d'écran dépend du terrain chargé, ce que la règle R1 interdit.
 
@@ -567,7 +572,11 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 **Interfaces produites :**
 - `resolutionPour({ enMouvement })` → `128 | 256`
-- `empriseADerive(precedente, courante)` → `boolean` — vrai si le cadrage a bougé assez pour justifier une reconstruction. **Seuil de départ : 2 % de la diagonale de l'emprise.** ⚠️ À régler en mesurant les reconstructions par seconde, pas à l'œil.
+- `empriseADerive(precedente, courante)` → `boolean` — vrai si le cadrage a bougé assez pour justifier une reconstruction. **Seuil de départ : 2 % de la diagonale de l'emprise.** ⚠️ **Non sourcé — mais le vrai défaut n'est pas là.**
+
+⚠️ **UN POURCENTAGE DE DIAGONALE CHANGE DE SENS À CHAQUE ZOOM** : 2 % valent **200 m sur z13 et 51 m sur z15**, alors qu'une maille à N=128 vaut environ **80 m**. Le même seuil est donc tantôt plus grossier, tantôt plus fin que la maille qu'il est censé protéger. **Exprimez-le en MAILLES, pas en pourcentage** — c'est la seule unité qui garde le même sens à tous les zooms.
+
+**Protocole :** balayer de **0,25 à 4 mailles**, relever les reconstructions par seconde (médiane et p90) **et le retard de l'emprise à l'arrêt de la caméra** — c'est ce second chiffre qui borne par le haut.
 
 **Mesuré :** N=256 coûte **8,3 ms de médiane** — au-dessus du budget d'une image à 60 Hz, sur une machine très au-dessus de la cible, et **sans mer ni palette ni gravure**. N=128 coûte **1,7 ms**.
 
@@ -607,7 +616,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 - **L'effet de transition** globe → socle — Phase 4, en tenant compte du point MapLibre ci-dessus.
 - **La récupération de GLOBathy** : Earth Engine impose un compte et des conditions commerciales à vérifier ; le dépôt de l'article est peut-être la meilleure porte.
-- **Le trait de côte au-delà de z15.** Mesuré : autour d'un bloc z16 à Brest, les polygones OSM pré-simplifiés à 30 m ne donnent que **51 segments pour 1,2 km de côte** — médiane 123 m, pointes à 849 m. Rasterisés à 0,79 m la cellule, ils dessineraient un rivage à facettes. Soit on branche le champ processeur au-delà de z15, soit on raffine la donnée. **Le second est une décision de données, pas de code.**
+- **Le trait de côte au-delà de z15.** Mesuré : autour d'un bloc z16 à Brest, les polygones OSM pré-simplifiés à 30 m ne donnent que **51 segments pour 1,2 km de côté** *(le côté du bloc — ce plan écrivait « de côte », ce qui en faisait une longueur de rivage)* — médiane 123 m, pointes à 849 m. Rasterisés à 0,79 m la cellule, ils dessineraient un rivage à facettes. Soit on branche le champ processeur au-delà de z15, soit on raffine la donnée. **Le second est une décision de données, pas de code.**
 - **Le déploiement de la mer corrigée**, qui change l'image de manière visible et n'a pas encore été regardée.
 
 ## 10. Auto-revue
