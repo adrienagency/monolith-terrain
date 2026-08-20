@@ -98,7 +98,7 @@ test('les TROIS autres appelants de _whiteout sont intacts — ils sont à la T�
   // tombe à cause d'un appelant en moins, c'est que quelqu'un a fait la
   // Tâche 2 ter en passant — pas que ce fichier a tort.
   assert.equal((SRC_MODES.match(/this\._whiteout\(/g) ?? []).length, 3, 'exactement trois appelants restants')
-  for (const entete of ['async enterOrbit(entryAltM = null) {', 'async _dive(tier = DIVE_TIERS[0], lieu = null) {', 'async _loadDive(target) {']) {
+  for (const entete of ['async enterOrbit(entryAltM = null) {', 'async _dive(tier = DIVE_TIERS[0], lieu = null, { zoomImpose = false } = {}) {', 'async _loadDive(target) {']) {
     assert.ok(corpsDe(SRC_MODES, entete).includes('this._whiteout('), `${entete} devrait encore poser son rideau`)
   }
   // et le rideau lui-même existe toujours : c'est la Tâche 2 ter qui le retire
@@ -143,12 +143,13 @@ test('main.js expose l’échelle verticale du bloc, et elle porte l’exagérat
 test('sautsDuProfil ne relève plus AUCUN saut de cause _rescale', () => {
   const sauts = sautsDuProfil(profilDescente(VOL))
   assert.deepEqual(sauts.filter((s) => s.cause === '_rescale'), [], 'un cran saute encore')
-  // ⚠️ IL EN RESTE UN, ET IL N'EST PAS À CETTE TÂCHE : `_dive`, le changement
-  // de repère complet orbital → surface. C'est le seul des onze sauts relevés
-  // à la Tâche 1a que la Tâche 2 bis ne porte pas — il appartient à la 1b.
-  assert.equal(sauts.length, 1, `sauts restants : ${sauts.map((s) => s.cause).join(', ')}`)
-  assert.equal(sauts[0].cause, '_dive')
-  assert.equal(sauts[0].modeAvant, 'orbital')
+  // ⚠️ CETTE ASSERTION A ÉTÉ CORRIGÉE EN PLACE PAR LA TÂCHE 1b, ET LE SENS DE
+  // LA CORRECTION COMPTE. Elle disait « il en reste UN, `_dive`, et il n'est
+  // pas à cette tâche » : la Tâche 1b l'a emporté à son tour en déduisant le
+  // niveau ET la distance de la plongée de l'altitude quittée. Il n'en reste
+  // donc plus aucun sur la descente de référence. Le détail, la mutation et la
+  // borne d'exagération qui subsiste vivent dans test/camera-continue.test.js.
+  assert.deepEqual(sauts, [], `sauts restants : ${sauts.map((s) => s.cause).join(', ')}`)
 })
 
 test('zoomer ne fait plus JAMAIS remonter la caméra', () => {
@@ -157,10 +158,14 @@ test('zoomer ne fait plus JAMAIS remonter la caméra', () => {
   const pts = surface(profilDescente(VOL))
   const remontees = pts.filter((p, i) => i > 0 && p.altM > pts[i - 1].altM * 1.001)
   assert.deepEqual(remontees, [], 'la descente doit être monotone en mode surface')
-  // départ et arrivée, mesurés le 2026-08-20 : 1 600 km → 418 m au Mont-Blanc
+  // Départ et arrivée, mesurés le 2026-08-20 : 1 600 km → 363,1 m au Mont-Blanc.
+  // ⚠️ C'ÉTAIT 418 m AVANT LA TÂCHE 1b, et l'écart n'est pas un réglage : la
+  // plongée entre désormais dans le niveau z4 à 62,6 unités (l'altitude qu'elle
+  // avait en orbite) au lieu du niveau z5 à 141 — un étage de plus, donc une
+  // butée basse plus basse.
   const tout = profilDescente(VOL)
   assert.ok(tout[0].altM >= 1600000)
-  assert.ok(Math.abs(tout.at(-1).altM - 418) < 3, `arrivée à ${tout.at(-1).altM.toFixed(1)} m`)
+  assert.ok(Math.abs(tout.at(-1).altM - 363.1) < 3, `arrivée à ${tout.at(-1).altM.toFixed(1)} m`)
 })
 
 test('MUTATION — remettre la téléportation v48 ramène les sauts', () => {
@@ -171,7 +176,9 @@ test('MUTATION — remettre la téléportation v48 ramène les sauts', () => {
   assert.ok(rescales.length > 0, 'la mutation ne mord pas — le test ③ ne prouverait rien')
   const surf = surface(pts)
   const remontees = surf.filter((p, i) => i > 0 && p.altM > surf[i - 1].altM * 1.001)
-  assert.equal(remontees.length, 10, 'les dix crans de la descente de référence remontent')
+  // ⚠️ ONZE, ET NON DIX, DEPUIS LA TÂCHE 1b : la plongée entre un étage plus
+  // haut (z4 au lieu de z5), il y a donc un cran de plus à remonter.
+  assert.equal(remontees.length, 11, 'les onze crans de la descente de référence remontent')
 })
 
 // ══════════ ④ LE GARDE-FOU v42 — LE BUDGET DU NIVEAU VAUT UN CRAN ═══════════
@@ -195,16 +202,28 @@ test('le budget du niveau vaut exactement un cran, dans les deux sens', () => {
 })
 
 test('la caméra ne vient JAMAIS se coller au plancher de distance', () => {
-  // Mesuré le 2026-08-20 : la distance de scène reste dans [37,64 ; 141,21]
+  // Mesuré le 2026-08-20 : la distance de scène reste dans [31,32 ; 123,99]
   // unités, plancher `minDistance` = 6. Le rapport au plancher ne descend pas
-  // sous ×6.
-  assert.match(SRC_MODES, /this\.controls\.minDistance = 6/, 'la recopie de DISTANCE_MIN_SURFACE')
+  // sous ×5.
+  //
+  // ⚠️ DEUX CHIFFRES ONT CHANGÉ AVEC LA TÂCHE 1b, ET CE N'EST PAS UN RÉGLAGE DE
+  // TOLÉRANCE. La plongée entre maintenant dans z4 à 62,6 unités (l'altitude
+  // qu'elle avait en orbite) au lieu de z5 à 141 : le premier glissé descend
+  // donc à 31,3 et non à 70,6, et le cran z4 → z5 — le seul qui vaille ×4, à
+  // cause de l'exagération — remonte à 124. La marge au plancher est passée de
+  // ×6,3 à ×5,2, et c'est le point le plus serré de toute la descente.
+  //
+  // ⚠️ ET LA RECOPIE LITTÉRALE A DISPARU : `modes.js` n'écrit plus `6`, il
+  // écrit `DISTANCE_MIN_SURFACE`, en UN SEUL site (`_poseButees`). Les quatre
+  // écritures de `minDistance` sont vérifiées dans test/camera-continue.test.js.
+  assert.match(SRC_MODES, /c\.minDistance = DISTANCE_MIN_SURFACE/, 'le site unique de la Tâche 1b')
+  assert.equal(SRC_MODES.includes('this.controls.minDistance = 6'), false, 'la recopie littérale est revenue')
   assert.equal(DISTANCE_MIN_SURFACE, 6)
   const pts = surface(profilDescente(VOL))
   const dmin = Math.min(...pts.map((p) => p.dist))
   const dmax = Math.max(...pts.map((p) => p.dist))
   assert.ok(dmin > DISTANCE_MIN_SURFACE * 5, `distance minimale ${dmin.toFixed(2)} — trop près du plancher`)
-  assert.ok(Math.abs(dmin - 37.64) < 0.1, `distance minimale mesurée = ${dmin.toFixed(2)}`)
+  assert.ok(Math.abs(dmin - 31.32) < 0.1, `distance minimale mesurée = ${dmin.toFixed(2)}`)
   assert.ok(dmax <= DISTANCE_MAX_SURFACE, `distance maximale ${dmax.toFixed(2)} au-dessus de la butée`)
 })
 
@@ -215,10 +234,12 @@ test("la distance d'entrée d'étage ne DÉRIVE pas d'un cran au suivant", () =>
   const entrees = profilDescente(VOL)
     .filter((p) => p.transition === '_rescale')
     .map((p) => p.dist)
-  assert.equal(entrees.length, 10, 'dix crans du z5 de la plongée au z15 fin')
-  // les trois premiers portent le changement d'exagération (5 → 4 → 3,2 → 2,8)
-  // et se resserrent ; à partir de z9 le régime est stable à 0,6 % près par cran
-  const stables = entrees.slice(3)
+  // ⚠️ ONZE DEPUIS LA TÂCHE 1b : la plongée entre à z4, pas à z5.
+  assert.equal(entrees.length, 11, 'onze crans du z4 de la plongée au z15 fin')
+  // les trois premiers portent le changement d'exagération (2,5 → 5 → 4 → 3,2
+  // → 2,8) et se resserrent ; à partir de z9 le régime est stable à 0,7 % près
+  // par cran
+  const stables = entrees.slice(4)
   for (let i = 1; i < stables.length; i++) {
     const f = stables[i] / stables[i - 1]
     assert.ok(f > 0.99 && f < 1.01, `l'entrée d'étage dérive de ×${f.toFixed(4)} au cran ${i + 4}`)

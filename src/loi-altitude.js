@@ -123,6 +123,17 @@ export function altitudeSortieOrbiteM(altSurfaceM) {
 export const distanceArrivee = (distanceMax = DISTANCE_MAX_SURFACE) => distanceMax * FRAC_ARRIVEE
 export const distancePresentation = (distanceMax = DISTANCE_MAX_SURFACE) => distanceMax * FRAC_PRESENTATION
 
+// LA PENTE DE LA DIRECTION D'ARRIVÉE — le `y` de `_ARRIVAL_DIR` normalisé.
+// ⚠️ CE N'EST PAS TOUT À FAIT `poseArrivee().pente`, ET L'ÉCART EST DÉLIBÉRÉ.
+// `_arrivalPose` pose une position ABSOLUE (`_ARRIVAL_DIR × dist`) alors que la
+// cible est à `y = Y_CIBLE` : la direction cible→caméra n'est donc pas
+// exactement `_ARRIVAL_DIR`, et sa pente vaut 0,688 94 au lieu de 0,687 747 —
+// 0,17 % d'écart. La plongée continue de la Tâche 1b pose, elle, RELATIVEMENT à
+// la cible (comme `_rescale` le fait déjà depuis la Tâche 2 bis), donc sa pente
+// est celle de `_ARRIVAL_DIR`, exactement, et elle ne dépend plus de la
+// distance. C'est ce qui permet d'INVERSER la relation altitude → distance.
+export const PENTE_ARRIVEE_Y = PENTE_ARRIVEE.y / Math.hypot(PENTE_ARRIVEE.y, PENTE_ARRIVEE.z)
+
 // `_arrivalPose` : `pos = _ARRIVAL_DIR × dist` — une position ABSOLUE, pas un
 // décalage depuis la cible. La cible, elle, est à `y = Y_CIBLE`. On rend donc
 // aussi la direction cible→caméra, parce que c'est ELLE que `_rescale`
@@ -172,6 +183,135 @@ export function poseCranContinu({ camY, pente, facteurEchelle, yCible = Y_CIBLE 
   return { camY: camYApres, distanceCible: (camYApres - yCible) / pente, pente }
 }
 
+// ══════════ 3 ter. LA PLONGÉE CONTINUE — Tâche 1b ═══════════════════════════
+//
+// ⚠️ CE QUE CETTE SECTION SUPPRIME, ET CE QU'ELLE NE SUPPRIME PAS.
+//
+// `_dive` posait la caméra à une distance FIXE — `distanceArrivee(150)` = 141
+// unités — quelle que soit l'altitude quittée en orbite. Mesuré à la Tâche 1a :
+// 1 600,0 km → 906,6 km d'une image à l'autre (÷1,765). C'était le dernier des
+// onze sauts du profil de descente.
+//
+// LE GESTE EST CELUI DE LA TÂCHE 2 bis, TRANSPOSÉ : au lieu de poser la caméra
+// et de subir l'altitude qui en résulte, on part de l'ALTITUDE et on en déduit
+// la distance. Deux inconnues au lieu d'une, parce que la plongée choisit AUSSI
+// son niveau de zoom : `niveauDePlongee` les résout ensemble.
+//
+// ⚠️ CE QU'IL RESTE APRÈS, ET IL EST MESURÉ (voir le §6 du plan, Tâche 1b) :
+// le CHAMP VISUEL, lui, saute encore d'un facteur `exagération(z)`. La raison
+// est arithmétique et elle tient en une ligne : la grandeur que la Tâche 1a a
+// nommée « altitude » divise `camY` par une échelle qui porte l'exagération
+// VERTICALE, alors que la largeur de sol vue au travers du champ dépend de
+// l'échelle HORIZONTALE, qui ne la porte pas. Conserver l'une fait varier
+// l'autre de `exagération(z)`. Ce n'est PAS réparable ici : ou bien on retire
+// l'exagération de l'altitude de cadrage — et les onze sauts mesurés à la
+// Tâche 1a changent tous de valeur —, ou bien Adrien renonce aux paliers
+// d'exagération. **C'est une question, pas un oubli.**
+
+// La distance à la cible qui donne EXACTEMENT l'altitude `altM` sur un bloc
+// d'échelle verticale `echelleV`, le long d'une direction de pente `pente`.
+// C'est l'inverse de `altitudePourDistance` ci-dessous, et rien d'autre.
+export function distancePourAltitude({ altM, echelleV, pente = PENTE_ARRIVEE_Y, yCible = Y_CIBLE }) {
+  return (altM * echelleV - yCible) / pente
+}
+
+// … et le sens direct, celui que `profilDescente` rejoue le long du glissé.
+export function altitudePourDistance({ distance, echelleV, pente = PENTE_ARRIVEE_Y, yCible = Y_CIBLE }) {
+  return (yCible + distance * pente) / echelleV
+}
+
+/**
+ * LE NIVEAU QUI ACCUEILLE UNE ALTITUDE SANS SAUT — et la distance qui va avec.
+ *
+ * `echelleAuZoom(z)` rend l'échelle verticale du bloc à ce zoom (unités de
+ * scène par mètre) SANS l'avoir chargé : c'est le seul terme que ce module ne
+ * peut pas calculer seul, parce que l'exagération vit dans `main.js`. Il est
+ * donc INJECTÉ, comme `choisirPalier` l'était à la Tâche 1a.
+ *
+ * L'échelle CROÎT avec le zoom (l'emprise du bloc est divisée par deux d'un
+ * cran au suivant), donc la distance croît elle aussi : on prend **le niveau le
+ * plus FIN dont la distance tient encore sous le plafond d'arrivée**. C'est
+ * celui qui montre le plus de détail sans reculer la caméra au-delà de sa
+ * butée.
+ *
+ * ⚠️ DEUX BORNES, ET ELLES SONT DES SAUTS ASSUMÉS :
+ *   · `borne: 'haut'` — aucun niveau ne tient : l'altitude est au-dessus du
+ *     plafond du bloc le plus large. C'est la vraie porte orbitale, et elle est
+ *     GÉOMÉTRIQUE (7 252 km au Mont-Blanc, 10 407 km à l'équateur) là où
+ *     `DIVE_TIERS` la posait à 16 000 km à la main.
+ *   · `borne: 'bas'` — le niveau le plus fin met la caméra sous le plancher.
+ *     Inatteignable sur la descente de référence (la distance minimale mesurée
+ *     y vaut 34,9 unités contre un plancher de 6), gardé parce qu'un zoom fin
+ *     imposé par l'utilisateur peut l'atteindre.
+ */
+export function niveauDePlongee({
+  altM,
+  echelleAuZoom,
+  zoomMin = 3,
+  zoomMax = 15,
+  pente = PENTE_ARRIVEE_Y,
+  yCible = Y_CIBLE,
+  distanceMin = DISTANCE_MIN_SURFACE,
+  distanceMax = DISTANCE_MAX_SURFACE,
+} = {}) {
+  const plafond = distanceArrivee(distanceMax) // sous la butée dure, comme _arrivalPose
+  let choisi = null
+  for (let z = zoomMin; z <= zoomMax; z++) {
+    const echelleV = echelleAuZoom(z)
+    if (!(echelleV > 0)) continue
+    const distanceCible = distancePourAltitude({ altM, echelleV, pente, yCible })
+    if (distanceCible <= plafond) choisi = { zoom: z, distanceCible, echelleV, borne: null }
+  }
+  if (!choisi) {
+    const echelleV = echelleAuZoom(zoomMin)
+    return { zoom: zoomMin, distanceCible: plafond, echelleV, borne: 'haut' }
+  }
+  if (choisi.distanceCible < distanceMin) return { ...choisi, distanceCible: distanceMin, borne: 'bas' }
+  return choisi
+}
+
+// ══════════ 3 quater. LES BUTÉES DE LA CAMÉRA — Tâche 1b, Étape 3 ═══════════
+//
+// ⚠️ `controls.minDistance` ÉTAIT ÉCRIT À QUATRE ENDROITS, avec deux valeurs
+// littérales et une formule (`modes.js` ×3, `main.js` ×1). L'une des trois
+// INTERDISAIT PHYSIQUEMENT « de l'orbite au sol » : en mode orbital le plancher
+// valait `R_GLOBE + DIVE_ALT_M × 0,85 / ORBITAL_M_PER_UNIT`, c'est-à-dire la
+// porte de plongée elle-même — la caméra ne pouvait pas descendre plus bas SANS
+// changer de monde.
+//
+// ⚠️ ET IL Y AVAIT UN SECOND PLANCHER, QUE LE PLAN NE NOMMAIT PAS : le clamp de
+// `orbAltTarget` dans `_zoomGesture` et `_orbitNotch`, à `DIVE_ALT_M × 0,9`
+// (7 200 m). C'est LUI qui mord en premier — 0,9 > 0,85 — et le retirer sans
+// lui n'aurait rien changé. On élargit une liste, on ne la remplace pas.
+//
+// Les deux valeurs qui restent ne sont pas la même grandeur et ne peuvent pas
+// fusionner tant que les deux mondes sont distincts (voir l'Étape 2 du plan) :
+// en surface, le plancher est une distance à la CIBLE sur un bloc de 56 unités ;
+// en orbite, c'est une distance au CENTRE d'une sphère de rayon `R_GLOBE`. La
+// dérivation commune est donc « rayon du sol + garde », et le seul chiffre qui
+// change est le rayon du sol.
+export const ALT_PLANCHER_ORBITALE_M = 0 // ⚠️ PLUS DE PORTE : la caméra descend jusqu'à la sphère
+
+export function distanceMinOrbitale({ rayonGlobe, metresParUnite, altPlancherM = ALT_PLANCHER_ORBITALE_M }) {
+  return rayonGlobe + altPlancherM / metresParUnite
+}
+
+// ══════════ 3 quinquies. LE PLAN DE COUPE PROCHE ════════════════════════════
+//
+// ⚠️ CE GESTE-CI ÉTAIT DÉJÀ CONTINU, ET LE PLAN LE COMPTAIT PARMI LES SAUTS.
+// Rejoué contre le dépôt : `modes.js` pose `near = clamp(orbAlt × 0,2 ; 0,01 ;
+// 0,5)` à chaque image en orbite, et repose `_surfCam.near = 0,5` en surface.
+// Or en surface la caméra est à ~97 unités au-dessus du bloc : la MÊME formule
+// y rend `clamp(19,4 ; 0,01 ; 0,5) = 0,5`, c'est-à-dire exactement la valeur
+// reposée. **Les deux modes appliquaient déjà la même loi, l'un par formule et
+// l'autre par constante.** Elle est écrite ici une fois, et les deux l'appellent.
+export const NEAR_MIN = 0.01
+export const NEAR_MAX = 0.5
+export const NEAR_FRACTION = 0.2
+export function planProche(hauteurAuDessusDuSol) {
+  return Math.min(Math.max(hauteurAuDessusDuSol * NEAR_FRACTION, NEAR_MIN), NEAR_MAX)
+}
+
 // ══════════ 4. LE PROFIL DE DESCENTE ════════════════════════════════════════
 //
 // ⚠️ CE N'EST PAS UNE SIMULATION DE L'APPLICATION : c'est le REJEU de la loi
@@ -214,6 +354,12 @@ export function echelonsGeometriques(a, b, ratioMax = 1.02) {
  * `cranContinu` : `true` rejoue le cran d'aujourd'hui (altitude métrique
  * conservée, Tâche 2 bis) ; `false` rejoue la téléportation v48 au point de
  * présentation, gardée pour la MUTATION de l'Étape 6.
+ *
+ * `plongeeContinue` : `true` rejoue la plongée d'aujourd'hui (niveau et
+ * distance DÉDUITS de l'altitude, Tâche 1b) ; `false` rejoue la pose fixe
+ * d'avant — `choisirPalier` pour le niveau, `poseArrivee` pour la distance —
+ * gardée pour la MUTATION de l'Étape 4. ⚠️ `choisirPalier` n'est lu QUE dans ce
+ * second régime : la plongée continue n'a plus de table de paliers.
  */
 export function profilDescente({
   choisirPalier,
@@ -221,6 +367,7 @@ export function profilDescente({
   altPlongeeM = null, // null → on plonge dès le départ (le cas le plus courant)
   lat = 45.8326, // Mont-Blanc — le vol de référence du §0 du plan
   zoomFin = 15, // `DEFAULT_FINE_ZOOM`, main.js:3090
+  zoomMin = 3, // le plancher d'Adrien (« Z1 et Z2 ne doivent pas exister »)
   metresParUnite,
   distanceMax = DISTANCE_MAX_SURFACE,
   distanceMin = DISTANCE_MIN_SURFACE,
@@ -229,6 +376,7 @@ export function profilDescente({
   exag = exagPourZoom,
   budgetNiveau, // `STEP_IN` de modes.js
   cranContinu = true,
+  plongeeContinue = true,
   ratioMax = 1.02,
 } = {}) {
   const plongee = altPlongeeM ?? altDepartM
@@ -250,13 +398,36 @@ export function profilDescente({
     pousse({ mode: 'orbital', zoom: null, altM: altitudeOrbitaleM(a / metresParUnite, metresParUnite), transition: null, dist: null })
   }
 
-  // ── 2. `_dive` — le changement de repère complet (modes.js, `_dive`)
-  const palier = choisirPalier(plongee)
-  let zoom = palier?.zoom ?? zoomFin
-  const arrivee = poseArrivee(distanceMax)
-  let pente = arrivee.pente
-  let camY = arrivee.camY
-  let distanceCible = arrivee.distanceCible
+  // ── 2. `_dive` — LA TRAVERSÉE ORBITE → SURFACE
+  //
+  // `plongeeContinue: true` (Tâche 1b) : le niveau ET la distance se DÉDUISENT
+  // de l'altitude quittée, donc l'altitude ne bouge pas d'une image à l'autre.
+  // `false` rejoue la pose fixe d'avant — c'est la mutation de l'Étape 4.
+  let zoom
+  let pente
+  let camY
+  let distanceCible
+  if (plongeeContinue) {
+    const niveau = niveauDePlongee({
+      altM: plongee,
+      echelleAuZoom: echelle,
+      zoomMin,
+      zoomMax: zoomFin,
+      distanceMin,
+      distanceMax,
+    })
+    zoom = niveau.zoom
+    pente = PENTE_ARRIVEE_Y
+    distanceCible = niveau.distanceCible
+    camY = Y_CIBLE + distanceCible * pente
+  } else {
+    const palier = choisirPalier(plongee)
+    zoom = palier?.zoom ?? zoomFin
+    const arrivee = poseArrivee(distanceMax)
+    pente = arrivee.pente
+    camY = arrivee.camY
+    distanceCible = arrivee.distanceCible
+  }
   pousse({ mode: 'surface', zoom, altM: altSurface(camY, zoom), transition: '_dive', dist: distanceCible })
 
   // ── 3. l'escalier de surface

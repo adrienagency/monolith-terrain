@@ -21,10 +21,16 @@ import {
   PENTE_ARRIVEE,
   Y_CIBLE,
   DISTANCE_MAX_SURFACE,
+  DISTANCE_MIN_SURFACE,
+  ALT_PLANCHER_ORBITALE_M,
   altitudeOrbitaleM,
   altitudeSortieOrbiteM,
   distanceArrivee,
+  distanceMinOrbitale,
+  distancePourAltitude,
   distancePresentation,
+  niveauDePlongee,
+  planProche,
   poseCranContinu,
 } from './loi-altitude.js'
 
@@ -99,6 +105,23 @@ const DIVE_ALT_M = DIVE_TIERS[0].altM
 // l'ancien plafond (16 000 km, planète pleine trame) était trop court.
 const MAX_ALT_M = 60000000
 const MSG_MS = 3600
+
+// ══════════ LE PLANCHER ORBITAL — RETIRÉ (Tâche 1b, Étape 3) ════════════════
+//
+// ⚠️ IL Y EN AVAIT DEUX, ET LE PLAN N'EN NOMMAIT QU'UN.
+//   · `controls.minDistance = R_GLOBE + DIVE_ALT_M × 0,85 / ORBITAL_M_PER_UNIT`
+//     dans `enterOrbit` — celui que le plan désignait ;
+//   · le clamp de `orbAltTarget` à `DIVE_ALT_M × 0,9` (7 200 m), dans
+//     `_zoomGesture` ET dans `_orbitNotch` — **celui qui mordait EN PREMIER**,
+//     puisque 0,9 > 0,85. Retirer l'autre sans lui n'aurait rien changé.
+// Tant que l'un des deux était là, la caméra ne pouvait PAS descendre en mode
+// orbital : « de l'orbite au sol » était interdit par construction, pas par
+// manque de code.
+//
+// La valeur vaut zéro et le zoom orbital est MULTIPLICATIF (`× exp(deltaY·k)`) :
+// le plancher est donc asymptotique, jamais atteint, et `controls.update()`
+// tient la caméra au-dessus de la sphère par `minDistance = R_GLOBE`.
+const ORB_ALT_MIN = ALT_PLANCHER_ORBITALE_M / ORBITAL_M_PER_UNIT
 
 // surface zoom is a CUSTOM inertial dolly (OrbitControls zoom is off): each
 // wheel notch adds to a log-space velocity that decays slowly, so the élan
@@ -297,7 +320,7 @@ export class Modes {
     const f = Math.exp(e.deltaY * 0.0011)
     this.orbAltTarget = THREE.MathUtils.clamp(
       this.orbAltTarget * f,
-      (DIVE_ALT_M * 0.9) / ORBITAL_M_PER_UNIT,
+      ORB_ALT_MIN, // le plancher orbital est parti — voir ORB_ALT_MIN
       MAX_ALT_M / ORBITAL_M_PER_UNIT
     )
   }
@@ -353,7 +376,11 @@ export class Modes {
     if (entryAltM == null) {
       // pop out just above the block's own altitude; a coarse z4 continental
       // block (~7 500 km up) hands over above the 8 000 km globe gate
-      entryAltM = altitudeSortieOrbiteM(this.hooks.surfaceCamAltMeters())
+      // ⚠️ RÈGLE R1 : c'est une décision de CADRAGE, elle lit donc l'altitude
+      // GÉOMÉTRIQUE — celle qui ne contient ni `dem.meanM` ni l'exagération
+      // verticale. `surfaceCamAltMeters()` (l'altimètre) porte les deux ; le
+      // hook de cadrage, lui, n'en porte aucun. Voir main.js et le §2 du plan.
+      entryAltM = altitudeSortieOrbiteM(this._altitudeCadrageM())
     }
     // an explicit altitude must respect the orbit ceiling too, or the camera
     // would sit above controls.maxDistance and snap every frame
@@ -376,8 +403,7 @@ export class Modes {
       this._diveArmed = false // require an inward zoom before re-diving
       latLonToSphere(lat, lon, R_GLOBE + this.orbAlt, this.camera.position)
       this.controls.target.set(0, 0, 0)
-      this.controls.minDistance = R_GLOBE + (DIVE_ALT_M * 0.85) / ORBITAL_M_PER_UNIT
-      this.controls.maxDistance = R_GLOBE + MAX_ALT_M / ORBITAL_M_PER_UNIT
+      this._poseButees('orbital') // ⚠️ UN SEUL SITE écrit minDistance — Tâche 1b
       this.controls.maxPolarAngle = Math.PI
       this.controls.enableZoom = false // wheel handled by us
       this.controls.enablePan = false
@@ -407,15 +433,117 @@ export class Modes {
   // sample the ground height directly under the landing target and refuse
   // to land below it (+ margin) — a formality at ~94% of
   // surfaceMaxDistance() (that standoff already clears anything this app's
+  // ══════════ LES BUTÉES DE LA CAMÉRA — UN SEUL SITE (Tâche 1b, Étape 3) ════
+  //
+  // ⚠️ `controls.minDistance` ÉTAIT ÉCRIT À QUATRE ENDROITS : `enterOrbit`,
+  // `_dive`, `_loadDive` et `main.js` (la pose initiale). Deux littéraux `6` et
+  // une formule qui portait la porte de plongée. Ici, un seul site, et les deux
+  // valeurs viennent de `loi-altitude.js` — donc le test les voit.
+  //
+  // ⚠️ ELLES NE FUSIONNENT PAS, ET CE N'EST PAS UN RENONCEMENT : en surface le
+  // plancher est une distance à la CIBLE sur un bloc de 56 unités ; en orbite,
+  // une distance au CENTRE d'une sphère de rayon `R_GLOBE`. Une seule valeur
+  // suppose un seul monde — c'est l'Étape 2, et elle n'est pas faite.
+  _poseButees(mode) {
+    const c = this.controls
+    if (mode === 'orbital') {
+      c.minDistance = distanceMinOrbitale({ rayonGlobe: R_GLOBE, metresParUnite: ORBITAL_M_PER_UNIT })
+      c.maxDistance = R_GLOBE + MAX_ALT_M / ORBITAL_M_PER_UNIT
+    } else {
+      c.minDistance = DISTANCE_MIN_SURFACE
+      c.maxDistance = this.hooks.surfaceMaxDistance()
+    }
+  }
+
+  // L'ALTITUDE QUI DÉCIDE DU CADRAGE — règle R1 du plan.
+  //
+  // ⚠️ CE N'EST PAS `this.altM`, ET LA DIFFÉRENCE EST LA RÈGLE ELLE-MÊME.
+  // `this.altM` est ce que l'ALTIMÈTRE affiche : en surface il porte
+  // `dem.meanM` (dérivé du terrain chargé, donc lissé) et l'exagération
+  // verticale. Les deux sont interdits à une décision de cadrage — le premier
+  // par R1 textuellement, le second parce que c'est un curseur d'affichage :
+  // bouger l'exagération déplacerait la porte orbitale.
+  //
+  // Sans le hook (banc de test, source procédurale) on retombe sur l'altimètre,
+  // qui est alors la seule grandeur disponible.
+  _altitudeCadrageM() {
+    return this.hooks.surfaceCamAltCadrageM?.() ?? this.hooks.surfaceCamAltMeters()
+  }
+
+  // ══════════ LE NIVEAU DE LA PLONGÉE — DÉDUIT, PLUS LU DANS UNE TABLE ══════
+  //
+  // ⚠️ C'EST LE CŒUR DE LA TÂCHE 1b. `_dive` posait la caméra à une distance
+  // FIXE (`distanceArrivee`, 141 unités) quelle que soit l'altitude quittée :
+  // mesuré à la Tâche 1a, 1 600,0 km → 906,6 km d'une image à l'autre, ÷1,765.
+  // C'était le dernier des onze sauts du profil de descente.
+  //
+  // Le geste est celui de la Tâche 2 bis, transposé : on ne pose plus la caméra
+  // pour subir l'altitude qui en sort, on part de l'ALTITUDE. La plongée ayant
+  // DEUX inconnues (le niveau et la distance), `niveauDePlongee` les résout
+  // ensemble — le niveau le plus fin dont la distance tient sous le plafond.
+  //
+  // `zoomImpose` : un zoom DÉSIGNÉ par l'utilisateur (clic sur le globe, cadrage
+  // GPX de `flyTo`) reste imposé. Le geste choisit un cadrage, il ne le déduit
+  // pas — et sa distance est alors bornée, donc le saut peut subsister. C'est
+  // assumé et écrit dans le plan.
+  _niveauDePlongee(altM, zoomImpose = null) {
+    const echelleAuZoom = this.hooks.echelleVerticaleAuZoom
+    const zoomFin = this.hooks.getFineZoom()
+    if (typeof echelleAuZoom !== 'function' || !(altM > 0)) {
+      // pas d'échelle à lire : on retombe sur la pose d'arrivée d'avant, jamais
+      // sur une distance inventée (même garde que `_rescale`).
+      return { zoom: zoomImpose ?? zoomFin, distanceCible: null }
+    }
+    if (zoomImpose != null) return { zoom: zoomImpose, distanceCible: null }
+    return niveauDePlongee({
+      altM,
+      echelleAuZoom,
+      zoomMax: zoomFin,
+      distanceMin: DISTANCE_MIN_SURFACE,
+      distanceMax: this.hooks.surfaceMaxDistance?.() ?? DISTANCE_MAX_SURFACE,
+    })
+  }
+
   // relief produces) but a real guarantee rather than an assumption.
   _arrivalPose(lieu = null) {
     const dist = distanceArrivee(this.hooks.surfaceMaxDistance()) // stay under the hard cap so controls.update() below doesn't immediately re-clamp it
     const target = this._cibleVisee(lieu)
     const pos = _ARRIVAL_DIR.clone().multiplyScalar(dist)
-    const groundY = this.hooks.sampleGroundY ? this.hooks.sampleGroundY(target.x, target.z) : -Infinity
-    const minY = groundY + 3 // clearance margin, world units
+    const minY = this._solSous(target) + 3 // clearance margin, world units
     if (pos.y < minY) pos.y = minY
     return { pos, target }
+  }
+
+  // LA POSE D'ARRIVÉE DE LA PLONGÉE — celle qui CONSERVE l'altitude.
+  //
+  // ⚠️ L'ÉCHELLE SE LIT APRÈS LE CHARGEMENT, exactement comme `_rescale` le
+  // fait depuis la Tâche 2 bis. `_niveauDePlongee` a choisi le niveau sur une
+  // ESTIMATION (l'emprise théorique du zoom au lat/lon demandé) ; le bloc réel
+  // est calé sur la grille de tuiles et son emprise en diffère un peu. La
+  // distance, elle, se calcule sur l'échelle VRAIE — sinon on rendrait un saut
+  // de quelques pour cent au lieu d'un saut de ×1,765.
+  //
+  // Sans le hook (banc de test, source procédurale) : la pose fixe d'avant,
+  // jamais une distance inventée.
+  _posePlongee(arrival, altDepartM) {
+    const echelleV = this.hooks.echelleVerticaleBloc?.() ?? null
+    if (!(echelleV > 0) || !(altDepartM > 0)) return arrival.pos
+    const brute = distancePourAltitude({ altM: altDepartM, echelleV, yCible: arrival.target.y })
+    const dist = THREE.MathUtils.clamp(
+      brute,
+      this.controls.minDistance,
+      this.hooks.surfaceMaxDistance?.() ?? DISTANCE_MAX_SURFACE
+    )
+    const pos = arrival.target.clone().addScaledVector(_ARRIVAL_DIR, dist)
+    const minY = this._solSous(arrival.target) + 3 // même garde de dégagement qu'`_arrivalPose`
+    if (pos.y < minY) pos.y = minY
+    return pos
+  }
+
+  // La hauteur du sol sous un point visé — `-Infinity` sans le hook, ce qui
+  // neutralise les gardes de dégagement au lieu de les faire mentir.
+  _solSous(target) {
+    return this.hooks.sampleGroundY ? this.hooks.sampleGroundY(target.x, target.z) : -Infinity
   }
 
   // OÙ LA CAMÉRA VISE EN ARRIVANT — et c'est ce qui a supprimé la dérive du
@@ -435,11 +563,15 @@ export class Modes {
   // `lieu` : le lat/lon VOULU. Absent, on prend celui sous la caméra — c'est le
   // cas de la plongée à la molette, qui vise le centre de l'écran. Le clic sur
   // le globe, lui, en fournit un (voir plongeDepuisGlobe).
-  async _dive(tier = DIVE_TIERS[0], lieu = null) {
+  async _dive(tier = DIVE_TIERS[0], lieu = null, { zoomImpose = false } = {}) {
     if (this.mode !== 'orbital' || this.busy) return
     this.busy = true
     this._resetZoom()
-    const zoom = tier.zoom ?? this.hooks.getFineZoom()
+    // ⚠️ L'ALTITUDE QUITTÉE SE LIT AVANT TOUT LE RESTE : c'est elle que la pose
+    // d'arrivée doit conserver. En orbite `this.altM` EST l'altitude
+    // géométrique (`orbAlt × ORBITAL_M_PER_UNIT`), donc R1 est déjà satisfaite.
+    const altDepartM = this.altM
+    const { zoom } = this._niveauDePlongee(altDepartM, zoomImpose ? (tier.zoom ?? this.hooks.getFineZoom()) : null)
     const { lat, lon } = lieu ?? sphereToLatLon(this.camera.position)
     this.announce(`ACQUIRING SURFACE DATA — ${lat.toFixed(4)}, ${lon.toFixed(4)} · Z${zoom}`)
     this.controls.enabled = false
@@ -463,15 +595,23 @@ export class Modes {
       this.hooks.setSurfaceVisible(true)
       this.hooks.setEffectsEnabled(true)
 
-      this.camera.near = this._surfCam.near
       this.camera.far = this._surfCam.far
-      this.camera.updateProjectionMatrix()
-      this.camera.up.set(0, 1, 0)
+      // ⚠️ `camera.up` NE BASCULE PAS, ET LE PLAN SE TROMPAIT. Rejoué contre le
+      // dépôt : `enterOrbit` écrit `camera.up.set(0, 1, 0)` lui aussi. Les deux
+      // modes ont toujours eu le MÊME repère vertical — la ligne était un
+      // no-op, elle disparaît. (Le repère de POSITION, lui, change bel et bien ;
+      // c'est l'Étape 2, la frontière globe/terrain, et elle n'est pas faite.)
       const arrival = this._arrivalPose({ lat, lon })
-      this.camera.position.copy(arrival.pos)
       this.controls.target.copy(arrival.target)
-      this.controls.minDistance = 6
-      this.controls.maxDistance = this.hooks.surfaceMaxDistance()
+      this._poseButees('surface') // ⚠️ UN SEUL SITE écrit minDistance — Tâche 1b
+      this.camera.position.copy(this._posePlongee(arrival, altDepartM))
+      // `near` DÉRIVÉ, plus restauré : c'est la même loi qu'en orbite
+      // (`planProche`), appliquée à la hauteur au-dessus du sol du bloc. Elle
+      // sature à NEAR_MAX = 0,5 dès 2,5 unités de dégagement — c'est-à-dire
+      // toujours, à la distance d'arrivée — donc la valeur est celle que
+      // `_surfCam.near` reposait, mais elle est maintenant DÉDUITE.
+      this.camera.near = planProche(this.camera.position.y - this._solSous(arrival.target))
+      this.camera.updateProjectionMatrix()
       this.controls.maxPolarAngle = Math.PI * 0.49
       this.controls.rotateSpeed = 1 // orbital update scales it down to ~0.015
       this.controls.enableZoom = false // surface zoom is our inertial dolly
@@ -608,7 +748,7 @@ export class Modes {
       this.controls.update()
       // a glide lands on its pinned zoom (GPX framing) or the FINE scale,
       // explicitly (dive arming is for manual zooms only)
-      this._dive(tr.zoom ? { altM: DIVE_ALT_M, zoom: tr.zoom } : DIVE_TIERS[0])
+      this._dive(tr.zoom ? { altM: DIVE_ALT_M, zoom: tr.zoom } : DIVE_TIERS[0], null, { zoomImpose: !!tr.zoom })
     }
   }
 
@@ -641,7 +781,7 @@ export class Modes {
     const f = dir > 0 ? 1 / 1.7 : 1.7
     this.orbAltTarget = THREE.MathUtils.clamp(
       this.orbAltTarget * f,
-      (DIVE_ALT_M * 0.9) / ORBITAL_M_PER_UNIT,
+      ORB_ALT_MIN, // le plancher orbital est parti — voir ORB_ALT_MIN
       MAX_ALT_M / ORBITAL_M_PER_UNIT
     )
   }
@@ -670,7 +810,7 @@ export class Modes {
     if (this.locked) return false
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false
     this._diveArmed = false // le clic consomme l'intention ; la molette ne doit pas re-plonger derrière
-    this._dive(palierDeClic(DIVE_TIERS, this.altM) ?? DIVE_TIERS[0], { lat, lon })
+    this._dive(palierDeClic(DIVE_TIERS, this.altM) ?? DIVE_TIERS[0], { lat, lon }, { zoomImpose: true })
     return true
   }
 
@@ -714,12 +854,10 @@ export class Modes {
       const dist = distancePresentation(this.hooks.surfaceMaxDistance()) // distance de la vue iso 1 (point de présentation)
       const dir = prevDir.lengthSq() > 1e-6 ? prevDir.normalize() : _ARRIVAL_DIR.clone()
       const pos = tgt.clone().addScaledVector(dir, dist)
-      const groundY = this.hooks.sampleGroundY ? this.hooks.sampleGroundY(tgt.x, tgt.z) : -Infinity
-      if (pos.y < groundY + 3) pos.y = groundY + 3 // same clearance guard as _arrivalPose
+      if (pos.y < this._solSous(tgt) + 3) pos.y = this._solSous(tgt) + 3 // same clearance guard as _arrivalPose
       this.camera.position.copy(pos)
       this.controls.target.copy(tgt)
-      this.controls.minDistance = 6
-      this.controls.maxDistance = this.hooks.surfaceMaxDistance()
+      this._poseButees('surface') // ⚠️ UN SEUL SITE écrit minDistance — Tâche 1b
       this.controls.update()
     })
     this.busy = false
@@ -782,8 +920,11 @@ export class Modes {
         this.controls.update()
       }
 
-      // keep the near plane tight to the ground so low passes don't clip
-      const near = THREE.MathUtils.clamp(this.orbAlt * 0.2, 0.01, 0.5)
+      // keep the near plane tight to the ground so low passes don't clip.
+      // ⚠️ MÊME LOI QU'EN SURFACE depuis la Tâche 1b : `planProche` vit dans
+      // `loi-altitude.js` et les deux modes l'appellent. Elle sature à 0,5,
+      // c'est-à-dire exactement la valeur que le mode surface posait en dur.
+      const near = planProche(this.orbAlt)
       if (Math.abs(near - this.camera.near) > near * 0.2) {
         this.camera.near = near
         this.camera.updateProjectionMatrix()

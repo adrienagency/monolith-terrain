@@ -351,15 +351,17 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 
 1. `globe.setVisible(false)` et `setSurfaceVisible(true)` — **on change de monde**
 2. `camera.near` / `camera.far` passent aux valeurs surface (`:414-415`)
-3. `camera.up.set(0, 1, 0)` — **le repère bascule du géocentrique au local** (`:417`)
-4. `camera.position` et `controls.target` sautent à `_arrivalPose` (`:419-420`)
-5. `controls.minDistance = 6` (`:420`) — l'échelle change d'ordre de grandeur
-6. `maxPolarAngle`, `rotateSpeed`, `enableZoom`, `enablePan` réécrits
-7. `this.mode = 'surface'`
+3. ~~`camera.up.set(0, 1, 0)` — **le repère bascule du géocentrique au local** (`:417`)~~ ⚠️ **CE GESTE N'EXISTAIT PAS, ET LA TÂCHE 1b L'A REJOUÉ CONTRE LE DÉPÔT : `enterOrbit` écrivait la MÊME ligne.** Les deux modes ont toujours partagé le repère vertical `(0, 1, 0)` ; la ligne était un **no-op** et elle est partie. **Ce qui change bel et bien de repère, c'est la POSITION** — sphère de rayon `R_GLOBE` centrée à l'origine d'un côté, dalle de 56 unités à l'origine de l'autre — et c'est l'Étape 2, pas celle-ci.
+4. `camera.position` et `controls.target` sautent à `_arrivalPose` (`:419-420`) — ✅ **c'est LUI qui portait le saut de ÷1,765, et la Tâche 1b l'a supprimé** : la distance d'arrivée se DÉDUIT désormais de l'altitude quittée.
+5. `controls.minDistance = 6` (`:420`) — l'échelle change d'ordre de grandeur — ✅ **unifié par la Tâche 1b** (`Modes._poseButees`, site unique).
+6. `maxPolarAngle`, `rotateSpeed`, `enableZoom`, `enablePan` réécrits — ⚠️ **INTACTS**, et ils sont de vraies différences de mode (on ne survole pas une sphère comme une dalle) : ils tomberont avec la frontière, pas avant.
+7. `this.mode = 'surface'` — ⚠️ **INTACT**, c'est la frontière elle-même.
 
 ⚠️ **Le fondu au blanc n'est pas l'ornement du saut : il est là parce que le saut est invisible autrement.**
 
 ⚠️ **ET UN PLANCHER ORBITAL INTERDIT PHYSIQUEMENT « DE L'ORBITE AU SOL » :** `controls.minDistance = R_GLOBE + DIVE_ALT_M × 0,85` (`modes.js:326`). Tant qu'il est là, la caméra **ne peut pas** descendre en mode orbital. **Quatre sites écrivent `minDistance`** : `modes.js:326`, `:420`, `:639`, `main.js:1215`.
+
+⚠️ **IL Y EN AVAIT DEUX, ET CE PLAN N'EN NOMMAIT QU'UN — trouvé à la Tâche 1b, on ÉLARGIT la liste ci-dessus, on ne la remplace pas.** Le second est le clamp de `orbAltTarget` à **`DIVE_ALT_M × 0,9` (7 200 m)**, écrit **deux fois** — dans `_zoomGesture` **et** dans `_orbitNotch`. **C'est LUI qui mordait en premier**, puisque 0,9 > 0,85 : retirer celui de `minDistance` sans lui n'aurait strictement rien changé. **Les deux sont partis** (`ALT_PLANCHER_ORBITALE_M = 0`, `loi-altitude.js`) ; le plancher est désormais la sphère elle-même (`minDistance = R_GLOBE`), et il est asymptotique parce que le zoom orbital est multiplicatif.
 
 ⚠️ **R1 EST DÉJÀ VIOLÉE EN PRODUCTION, ET CETTE TÂCHE HÉRITE DU DÉFAUT.** `surfaceCamAltMeters()` (`main.js:3594-3599`) rend `camera.position.y / scale + dem.meanM` — une quantité **dérivée du terrain**, lissée — et elle **pilote `enterOrbit`** (`modes.js:303`). Le gain de l'oscillateur est déjà câblé ; la Phase 3 y ajouterait le retard. **À traiter ici, pas à découvrir en Phase 3.**
 
@@ -408,18 +410,99 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 
 
 
-#### Tâche 1b — le changement de repère
+#### Tâche 1b — le changement de repère ✅ FAITE LE 2026-08-20 (PREMIÈRE MOITIÉ) — **LE DERNIER SAUT D'ALTITUDE EST PARTI, LA FRONTIÈRE DE RENDU RESTE**
 
-- [ ] **Étape 1 — le test qui échoue**, sur l'instrument de la Tâche 1a : *l'altitude est **monotone et sa dérivée seconde bornée** sur une descente de 1 600 km à 2 km*. ⚠️ **C'est l'inverse du test de caractérisation de la 1a : celui-ci passe au rouge et celui-là devient faux. Retirez le test de caractérisation dans le même commit** — deux tests contradictoires verts sont pires qu'aucun.
+⚠️ **ELLE A ÉTÉ COUPÉE EN DEUX, ET LE PLAN L'AVAIT ANNONCÉ (« le geste le plus lourd »).** Ce qui est livré : **la LOI de la caméra** — l'altitude est continue de l'orbite au sol, les butées sont unifiées, les deux planchers orbitaux sont partis, R1 est réparée, et le troisième appelant de `chargeRacines()` est posé. Ce qui ne l'est pas : **la FRONTIÈRE DE RENDU** — `globe.setVisible(false)` / `setSurfaceVisible(true)` sont intacts, l'un s'éteint toujours quand l'autre s'allume. → **Tâche 1b bis**, écrite juste après, avec sa raison chiffrée.
+
+**Fichiers livrés :** `src/loi-altitude.js` (+ `niveauDePlongee`, `distancePourAltitude`, `altitudePourDistance`, `distanceMinOrbitale`, `planProche`, `PENTE_ARRIVEE_Y`, `ALT_PLANCHER_ORBITALE_M` ; `profilDescente` prend `plongeeContinue`) · `src/modes.js` (`_dive`, `_niveauDePlongee`, `_posePlongee`, `_poseButees`, `_altitudeCadrageM`, `_solSous`) · `src/main.js` (`altitudeCadrageM`, hooks `surfaceCamAltCadrageM` et `echelleVerticaleAuZoom`, `assureRacinesGlobe`) · `test/camera-continue.test.js` (**inversé**, 14 → 23 tests) · `test/escalier-surface.test.js` (six assertions corrigées **en place**). **`npm test` : 3 098 verts** (3 089 avant) · `audit:tests` : 180 / 180, aucun écart.
+
+**LE RÉSULTAT, MESURÉ SUR L'INSTRUMENT DE LA TÂCHE 1a** (Mont-Blanc 45,8326°, zoom fin 15, budget `STEP_IN = ln 2`) :
+
+| | avant la 1b | après |
+|---|---|---|
+| sauts sur la descente 1 600 km → sol | **1** (`_dive`, ÷1,765) | **0** |
+| seuil du détecteur | ×1,15 | **×1,0201** — le pas d'échantillonnage lui-même |
+| pas le plus gros du profil entier | ÷1,765 | **×1,019 715** |
+| `max │Δ² log altitude│` | 0,927 | **0,019 523** (= `log 1,02`, la borne) |
+| altitude d'arrivée à z15 | 418 m | **363,1 m** |
+| plongée non-stop depuis 7 200 m | 1 saut, ÷4,554 | **0** |
+
+**LE GESTE, EN UNE PHRASE : `_dive` ne pose plus la caméra pour subir l'altitude qui en résulte — il part de l'altitude.** La plongée ayant DEUX inconnues (le niveau de zoom et la distance), `niveauDePlongee` les résout ensemble : **le niveau le plus fin dont la distance tient sous le plafond d'arrivée**. `DIVE_TIERS` cesse d'être la table qui décide du niveau (elle reste le déclencheur et sert au clic) ; le niveau est **dérivé**, comme la Tâche 2 bis a dérivé le cran. Au Mont-Blanc, plonger depuis 1 600 km atterrit donc sur **z4 à 62,6 unités** et non plus sur z5 à 141.
+
+⚠️ **ET LA TABLE `DIVE_TIERS` ÉTAIT DÉJÀ GÉOMÉTRIQUE SANS LE SAVOIR, DE z8 À z11 :** ses seuils (200 000 · 100 000 · 50 000 · 25 000 m) valent à **1,2 % près** les plafonds calculés (201 740 · 100 870 · 50 435 · 25 217 m). Elle ne divergeait que là où l'exagération change de palier — z3 à z7 — et à la porte fine.
+
+- [x] **Étape 1 — le test qui échoue**, sur l'instrument de la Tâche 1a : *l'altitude est **monotone et sa dérivée seconde bornée** sur une descente de 1 600 km à 2 km*. ⚠️ **C'est l'inverse du test de caractérisation de la 1a : celui-ci passe au rouge et celui-là devient faux. Retirez le test de caractérisation dans le même commit** — deux tests contradictoires verts sont pires qu'aucun.
 
   ⚠️ **CETTE ÉTAPE A DÉJÀ ÉTÉ FAITE AUX TROIS QUARTS PAR LA TÂCHE 2 bis, ET LA MONOTONIE EST DÉJÀ VRAIE.** Il ne reste **qu'un seul saut** sur le profil, `_dive`, et **il DESCEND** (÷1,765) : la descente est monotone, elle n'est pas continue. **Reformulez donc l'assertion sur la CONTINUITÉ, pas sur la monotonie** — sans quoi elle est verte avant d'être écrite. ⚠️ **Et le test de caractérisation n'a PAS été supprimé** : il a été re-pointé sur la loi d'avant (`cranContinu: false`, `budgetNiveau: 1.2`), qui reste rejouable et prouve que la nouvelle assertion n'est pas une tautologie. **Ne le supprimez pas sans le remplacer par cette preuve-là.**
-- [ ] **Étape 1 bis — geste par geste.** `up`, `near`/`far`, pose, `minDistance` : chacun devient une fonction continue de l'altitude, ou disparaît.
-- [ ] **Étape 2 — la frontière `globe.js` / `terrain.js`.** ⚠️ **C'est le geste le plus lourd : aujourd'hui l'un s'éteint quand l'autre s'allume.** Dites ce qui les fait coexister — recouvrement, fondu, ou remise du globe au rang de fond lointain.
+
+  → **FAIT, ET LE FICHIER N'A PAS ÉTÉ SUPPRIMÉ : IL A ÉTÉ INVERSÉ.** L'assertion dangereuse était « il reste un saut », pas le fichier ; elle est devenue « il n'en reste aucun », au seuil **×1,0201** — c'est-à-dire le pas d'échantillonnage du profil lui-même, et non un seuil de confort. **Le relevé des onze sauts reste rejouable** contre la loi d'avant (`budgetNiveau: 1,2`, `cranContinu: false`, `plongeeContinue: false`) : c'est lui qui prouve que la nouvelle assertion n'est pas une tautologie, et le supprimer aurait emporté la preuve avec le défaut. `package.json` est donc inchangé et `audit:tests` sans écart. **Le fichier ne porte plus aucune mention « temporaire ».**
+- [x] **Étape 1 bis — geste par geste.** `up`, `near`/`far`, pose, `minDistance` : chacun devient une fonction continue de l'altitude, ou disparaît.
+
+  - **`up` — DISPARAÎT, et le plan avait tort** : `enterOrbit` écrivait la même ligne. Voir la correction en place plus haut.
+  - **`near` — UNE SEULE LOI, et elle était déjà partagée sans qu'on le sache.** `planProche(hauteur) = clamp(hauteur × 0,2 ; 0,01 ; 0,5)` est la formule que le mode orbital appliquait par image. **Rejouée en surface, elle rend exactement 0,5** — la constante que le mode surface reposait en dur — parce qu'elle SATURE dès 2,5 unités de dégagement. `modes.js` l'appelle maintenant des deux côtés. ⚠️ **Bénéfice inattendu, et il répare un défaut écrit dans `main.js:8451` :** `near` n'est plus RESTAURÉ depuis `_surfCam`, il est DÉDUIT — une valeur déduite ne peut plus transporter le `near` desserré à ≈122 que le cadrage du damier empruntait et qui tranchait la moitié proche de la carte au retour de plongée.
+  - **`far` — RESTE À DEUX VALEURS, et c'est arithmétique, pas un renoncement.** Surface 290, orbite 1 400. Une loi unique `far = distance × k` bornée exige `far ≥ distance + 2 × R_GLOBE` en orbite : à `distance = 200` (orbite basse) il faut **400** là où la surface veut **290**, et aucun `k` unique ne satisfait les deux sans desserrer le plan lointain de la surface de 290 à ≈500 — c'est-à-dire dégrader la précision du tampon de profondeur du bloc pour rien. **`far` ne fusionne que si les deux mondes fusionnent** : il appartient à l'Étape 2.
+  - **pose — FAIT**, c'est le cœur de la tâche (voir le tableau ci-dessus).
+  - **`minDistance` — FAIT**, voir l'Étape 3.
+- [x] **Étape 2 — la frontière `globe.js` / `terrain.js`.** ⚠️ **C'est le geste le plus lourd : aujourd'hui l'un s'éteint quand l'autre s'allume.** Dites ce qui les fait coexister — recouvrement, fondu, ou remise du globe au rang de fond lointain.
+
+  ### ⚠️ LA DÉCISION, ÉCRITE : **LE GLOBE DEVIENT UN FOND LOINTAIN RENDU DANS SA PROPRE PASSE — ET LES DEUX AUTRES OPTIONS SONT IMPOSSIBLES, C'EST CALCULÉ**
+
+  Le globe est une **sphère de rayon 100 unités centrée à l'origine** (`R_GLOBE`, `geo.js:11`) ; le bloc est une **dalle de 56 unités, centrée à l'origine elle aussi** (`TERRAIN_SIZE`, `terrain.js:57`). **La dalle est donc ENTIÈREMENT À L'INTÉRIEUR de la sphère.** Les allumer ensemble ne montre pas deux mondes qui se recouvrent : cela montre une planète opaque avec la carte enterrée dedans. **Ni le recouvrement ni le fondu ne peuvent exister tant que les deux objets partagent l'espace.**
+
+  **Et on ne peut pas les remettre à la même échelle.** Le facteur horizontal du bloc vaut `56 / empriseMètres` ; poser le globe à cette échelle demanderait un rayon de `6 371 000 × 56 / emprise` :
+
+  | niveau | emprise du bloc | rayon du globe à cette échelle | verdict |
+  |---|---|---|---|
+  | z4 | 5 235 km | **68 unités** | la dalle (56) est plus grande que la planète |
+  | z5 | 2 618 km | 136 unités | plausible |
+  | z10 | 81,8 km | 4 362 unités | déjà tendu |
+  | **z15** | **2,56 km** | **139 600 unités** | ⚠️ **float32 mort** — exactement le défaut que le repère relatif `150f817` a corrigé pour le bloc, réintroduit pour le globe |
+
+  **Donc : deux passes de rendu, pas une scène.** Le globe se dessine en **fond**, avec sa propre caméra placée sur une réplique à son échelle et **orientée comme la caméra principale**, sans écriture de profondeur ; le bloc se dessine par-dessus. C'est la solution classique des frustums emboîtés, et **la seule qui survive à z15**.
+
+  ⚠️ **CE QUE ÇA COÛTE, ET POURQUOI CE N'EST PAS DANS CE COMMIT :** cela touche `composer` (`main.js`), le brouillard, le DOF, l'atmosphère, les nuages et l'ordre de rendu — **et aucun test de ce dépôt ne charge `main.js`.** Le seul filet serait de le regarder tourner, ce que ce chantier n'a **jamais** pu faire (« aucune image en mouvement n'a jamais été vue », §10). **Le livrer à l'aveugle dans le même commit que la loi d'altitude, c'est rendre les deux invérifiables à la fois.** → **Tâche 1b bis.**
+
+  ⚠️ **ET LE PIÈGE DE `chargeRacines()` EST DÉSAMORCÉ D'AVANCE, COMME LE PLAN L'EXIGE.** Le troisième appelant est **posé** : `assureRacinesGlobe()` dans `main.js`, idempotent, armé par un `setTimeout` de **20 s** au démarrage — **hors de `hideLoading`**, donc il survit à la Tâche 2, et hors de `setVisible`, donc il survit à l'Étape 2. Le délai n'est pas un réglage de confort : l'A/B qui a créé le chargement différé mesure **la carte visible à 16,2 s dans le pire cas à 3 Mb/s**, donc un filet à 20 s ne tire jamais le premier en usage normal et ne rend pas les 3 730 ms gagnés. **`test/camera-continue.test.js` l'exige, et exige qu'il soit hors de `hideLoading`.**
 
   ⚠️ **PIÈGE SILENCIEUX, ET IL SE REFERME SUR DEUX TÂCHES À LA FOIS : `chargeRacines()` PERD SES DEUX APPELANTS.** `globe.js:326-336` énumère lui-même son filet — **(1)** `main.js:928`, appelé quand le voile de chargement se lève, **que la Tâche 2 supprime** ; **(2)** `globe.js:893`, `if (v) this.chargeRacines()` dans `setVisible`, **que cette étape-ci dissout**. Les deux partis, **les seize tuiles racines ne sont plus jamais demandées — sans erreur, sans test rouge, sans rien à l'écran.** ⚠️ **Posez le troisième appelant AVANT de retirer l'un des deux, et exigez-le dans le test.**
-- [ ] **Étape 3 — retirer le plancher orbital `modes.js:326`**, et unifier les **quatre** sites de `minDistance` (`:326`, `:420`, `:639`, `main.js:1215`) en une seule dérivation.
-- [ ] **Étape 4 — mutation** : réintroduire un saut doit tuer le test de monotonie de la Tâche 1a.
-- [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [x] **Étape 3 — retirer le plancher orbital `modes.js:326`**, et unifier les **quatre** sites de `minDistance` (`:326`, `:420`, `:639`, `main.js:1215`) en une seule dérivation.
+
+  **Les trois sites de `modes.js` sont devenus `Modes._poseButees(mode)`**, appelé par `enterOrbit`, `_dive` et `_loadDive` ; **le quatrième (`main.js`) importe `DISTANCE_MIN_SURFACE`.** Plus aucun littéral `6`, plus aucune formule recopiée, et les deux constantes vivent dans `loi-altitude.js` — donc le test les voit. ⚠️ **Les deux VALEURS ne fusionnent pas en une, et il faut le dire :** en surface c'est une distance à la CIBLE sur une dalle, en orbite une distance au CENTRE d'une sphère. **Une valeur unique suppose un monde unique — encore l'Étape 2.** Ce qui est unifié, c'est le SITE et la SOURCE.
+
+  ⚠️ **ET LES DEUX PLANCHERS SONT PARTIS**, pas seulement celui que ce plan nommait : voir la liste élargie plus haut.
+- [x] **Étape 4 — mutation** : réintroduire un saut doit tuer le test de monotonie de la Tâche 1a.
+
+  `profilDescente({ plongeeContinue: false })` rejoue **exactement** l'ancien `_dive` — niveau lu dans `DIVE_TIERS`, distance fixe `poseArrivee` — et **remet le saut 1 600,0 km → 906,6 km, ÷1,765**, au chiffre près du relevé de la Tâche 1a. Elle tue *« LA DESCENTE DE RÉFÉRENCE EST CONTINUE »*. Trois autres mutations restent armées depuis la Tâche 2 bis (`cranContinu: false`, `budgetNiveau: 1,2`, `STEP_OUT` asymétrique).
+- [x] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
+#### ⚠️ CE QUI SAUTE ENCORE — TROIS CHOSES, TOUTES MESURÉES, AUCUNE CACHÉE
+
+**1. LE CHAMP VISUEL SAUTE ENCORE DE `exagération(z)` À LA PLONGÉE, ET CE N'EST PAS UN OUBLI : C'EST LA GRANDEUR ELLE-MÊME.** La Tâche 1a a nommé « altitude » la quantité `camY ÷ échelle du bloc`, et cette échelle porte l'exagération **verticale**. Or la largeur de sol vue dans le champ dépend de l'échelle **horizontale**, qui ne la porte pas. **Conserver l'une fait varier l'autre d'exactement `exagération(z)`.** Mesuré au Mont-Blanc, champ de 30° :
+
+| | largeur de sol vue | rapport à l'orbite |
+|---|---|---|
+| orbite, 1 600 km | 857 km | 1 |
+| surface **avant** la 1b (z5, d = 141) | 3 537 km | **×4,125** |
+| surface **après** la 1b (z4, d = 62,6) | 3 139 km | **×3,661** |
+
+Le résidu se dérive : **`exagération(z) ÷ pente d'arrivée` = 2,5 / 0,6877 = 3,635**. Le facteur `1 / 0,6877` est LÉGITIME (une vue oblique à 43° voit plus large qu'une vue au nadir) ; **c'est `exagération(z)` qui ne l'est pas.** ⚠️ **Autrement dit : l'ALTIMÈTRE est devenu continu, le CADRAGE ne l'est qu'à moitié — il s'améliore de 11 %, il ne se ferme pas.** Deux issues, et **aucune n'est du code seul** : ou bien l'altitude de cadrage cesse de porter l'exagération — **et les onze sauts mesurés à la Tâche 1a changent tous de valeur**, il faut refaire le relevé —, ou bien **Adrien renonce aux paliers d'exagération** (`{3: 2,5 · 4: 2,5 · 5: 5 · 6: 4 · 7: 3,2 · 2,8 ensuite}`). **→ §9.**
+
+**2. LE CRAN z4 → z5 PEUT ENCORE SAUTER, ET C'EST LA MÊME TABLE QUI EN EST CAUSE.** Un cran divise l'emprise par deux, donc rend ×2 de distance — **sauf de z4 à z5, où l'exagération passe de 2,5 à 5 et où le cran rend ×4**. Le glissé n'ayant dépensé que `ln 2`, la distance d'après vaut le double de celle d'avant le niveau et **dépasse la butée de 150 unités dès qu'on entre dans z4 au-dessus de 75**. Mesuré : **×1,316 à 64° de latitude, ×1,554 en plongeant de 3 000 km, ×1,808 de 7 000 km**. **Le vol de référence du §0 n'en rencontre aucun** (il entre dans z4 à 62,6). L'assertion de borne de `test/camera-continue.test.js` dit **où il peut y en avoir un et nulle part ailleurs** — elle rougit dans les deux sens. **Le remède : `STEP_IN = ln(facteur d'échelle du cran)` au lieu de `ln 2` — c'est le territoire de la Tâche 2 bis, pas celui-ci.**
+
+**3. AU-DESSUS DE 7 230 km LA PLONGÉE EST BORNÉE** (`borne: 'haut'`) : aucun niveau ne peut héberger l'altitude, la caméra atterrit à la distance plafond sur z3, et l'altitude saute. **La vraie porte orbitale est donc GÉOMÉTRIQUE** — 7 230 km au Mont-Blanc, 10 407 km à l'équateur — là où `DIVE_TIERS` la posait à 16 000 km à la main. ⚠️ **Le DÉCLENCHEUR n'a PAS été changé** (`pickDiveTier` décide encore *quand* plonger) : déplacer une porte que l'utilisateur voit sans l'avoir regardée tourner aurait été exactement ce que ce plan reproche à ses propres constantes.
+
+#### Tâche 1b bis — LA FRONTIÈRE DE RENDU ⚠️ LA SECONDE MOITIÉ DE LA 1b, ET ELLE EST VISUELLE
+
+**Fichiers :** modifier `src/main.js` (la passe de composition), `src/modes.js` (`setSurfaceVisible` / `globe.setVisible`), `src/globe.js` · tester : ⚠️ **rien sous node ne peut le faire.**
+
+⚠️ **ELLE NE PEUT PAS ÊTRE LIVRÉE À L'AVEUGLE, ET C'EST LA SEULE TÂCHE DU PLAN DONT ON PUISSE LE DIRE AVEC UN CHIFFRE :** `main.js` n'est chargé par **aucun** test (§0), la scène ne se rend pas sous node, et le §10 constate qu'**aucune image en mouvement n'a jamais été vue** dans tout ce chantier. Les treize autres tâches ont un instrument pur ; celle-ci n'en a pas.
+
+- [ ] **Étape 1 — poser la seconde passe** : le globe rendu en fond, caméra répliquée à son échelle, orientation partagée, sans écriture de profondeur.
+- [ ] **Étape 2 — le raccord d'échelle** : la réplique doit voir la planète sous le MÊME angle apparent que le bloc montre son emprise. **C'est là que le facteur `exagération(z)` du point 1 ci-dessus se paiera ou se réglera** — les deux tâches se croisent sur ce seul nombre.
+- [ ] **Étape 3 — `setVisible` cesse d'être l'interrupteur.** ⚠️ **`globe.js:893` (`if (v) this.chargeRacines()`) se dissout ici — le troisième appelant est DÉJÀ posé et exigé par le test, ne le retirez pas.**
+- [ ] **Étape 4 — brouillard, atmosphère, nuages, DOF, et `camera.far`** : dire lesquels appartiennent à quelle passe. `far` fusionne ici, ou nulle part (voir l'Étape 1 bis de la 1b).
+- [ ] **Étape 5 — REGARDER TOURNER, avec Adrien.** Il n'y a pas d'autre garde-fou et il ne faut pas prétendre le contraire.
+- [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 #### Tâche 1c — les mécanismes qui figent l'entrée
 
@@ -962,6 +1045,11 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 - ✅ **TRANCHÉ PAR ADRIEN LE 2026-08-20 — CE QUE L'UTILISATEUR VOIT QUAND LE RÉSEAU NE SUIT PAS : UN INDICATEUR DISCRET.** Pas de voile, pas de message bloquant, pas de silence total : un signe non bloquant qui dit que le détail arrive. ⚠️ **Il remplace les 2,6 s de voile que `main.js:3408-3411` pose aujourd'hui alors que l'application est déjà libre.** À dessiner dans la Tâche 2, et à réutiliser par la Tâche 4 ter.
 - ⚠️ **ET QUE FAIT LE SOCLE QUAND LE RÉSEAU NE SUIT PAS ?** Il **naît sur une altitude** (R1) mais **se remplit à un zoom** que le réseau borne (R3). Si le débit ne soutient que z9 quand le seuil appelle un socle z13, **le socle naît grossier**. Attend-il ? Naît-il quand même ? Le seuil se décale-t-il ? **C'est la jonction des deux règles qui gouvernent son apparition, et elle n'a pas de réponse.**
 - ✅ **TRANCHÉ PAR ADRIEN LE 2026-08-20 — LE ZOOM EST CONTINU, « exactement comme Google Earth ou Google Maps ».** La téléportation au point de présentation de `modes.js:455-458` (v48) **disparaît** : l'altitude redevient continue d'un cran à l'autre. ⚠️ **v48 remplaçait une continuité v42 qui avait été retirée, et la raison de ce retrait n'est pas écrite dans le code.** Le garde-fou est donc le test de la Tâche 1a-1b : **altitude monotone, dérivée seconde bornée, et arrivée au zoom demandé.** Si le défaut de v42 reparaît, il sera visible à ces trois assertions — **et non plus masqué par un rideau blanc.**
+- ⚠️ **LES PALIERS D'EXAGÉRATION VERTICALE — NOUVELLE QUESTION, OUVERTE PAR LA MESURE DE LA TÂCHE 1b, ET ELLE COÛTE DEUX CHOSES À LA FOIS.** La table `{3: 2,5 · 4: 2,5 · 5: 5 · 6: 4 · 7: 3,2 · 2,8 ensuite}` (`ZOOM_EXAG_DEFAULTS`, `main.js`) existe pour que le relief reste visible sur un bloc large. Elle facture deux discontinuités, mesurées :
+  1. **le champ visuel saute de `exagération(z)` à la plongée** (×3,66 au lieu de ×1 au Mont-Blanc) — l'altimètre est continu, le CADRAGE ne l'est qu'à moitié ;
+  2. **le cran z4 → z5 rend ×4 de distance là où le budget du niveau n'en dépense que ×2**, et il dépasse la butée de 150 unités (×1,32 à ×1,81 selon la latitude et l'altitude de départ).
+
+  **Trois issues, et Adrien seul peut trancher entre les deux premières** : (a) **exagération constante** — les deux discontinuités disparaissent d'un coup, le relief des blocs larges s'aplatit ; (b) **paliers conservés** — on garde le rendu et on assume les deux sauts ; (c) **retirer l'exagération de l'altitude de CADRAGE seulement** (elle resterait à l'affichage et au rendu) — cela ferme (1), mais **invalide les onze sauts mesurés à la Tâche 1a** et impose de refaire tout le relevé. ⚠️ **Ce n'est pas une question de goût seule : c'est aussi le seul nombre sur lequel la Tâche 1b bis et la Tâche 2 bis se croisent.**
 - **L'effet de transition** globe → socle
 - **La récupération de GLOBathy** : Earth Engine impose un compte et des conditions commerciales à vérifier ; le dépôt de l'article est peut-être la meilleure porte.
 - **Le trait de côte au-delà de z15.** Mesuré : autour d'un bloc z16 à Brest, les polygones OSM pré-simplifiés à 30 m ne donnent que **51 segments pour 1,2 km de côté** *(le côté du bloc — ce plan écrivait « de côte », ce qui en faisait une longueur de rivage)* — médiane 123 m, pointes à 849 m. Rasterisés à 0,79 m la cellule, ils dessineraient un rivage à facettes. Soit on branche le champ processeur au-delà de z15, soit on raffine la donnée. **Le second est une décision de données, pas de code.**
@@ -974,7 +1062,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 **Cohérence des noms** — employés à l'identique partout, ⚠️ **et cette liste était aveugle exactement aux cinq interfaces que la Tâche 4 bis déclarait sans jamais les fabriquer** : `socleVisible`, `empriseSocle`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `creerFlux`, `demanderEmprise`, `tuilesPretes`, `zoomEffectif`, `remplirHauteurs`, `PLAFOND_FILE`, `debitObserve`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`. ⚠️ **Un nom qui n'apparaît qu'à sa déclaration est une interface orpheline : cherchez-les avec `grep -c`, pas à l'œil.**
 
-**Ordre imposé, et il compte — révisé le 2026-08-20 pour aller au pivot, pas au palliatif.** ✅ **Faites : 1a** (l'instrument, *livrée*) **→ 2 bis** (l'escalier, *livrée, et elle sera jetée au pivot*). ⚠️ **Ensuite, et dans cet ordre : 1b** (la caméra continue — **c'est du pivot**), **puis le bloc quadtree — 4 → 4 quater → 4 alpha → 3 → 4 bis → 4 ter** (la Tâche 3 avant la 4 bis, qui consomme son `emprise`), **puis le bloc fenêtre — 5 avant 6, puis 7** (sans l'audit on ne saura pas si l'extraction marche : le prototype s'est cru étanche pendant tout son vol). ⚠️ **Enfin seulement les rideaux : Tâche 2 (`#loading`) puis Tâche 2 ter (`.whiteout`)** — ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up, il montre le trou qu'il cachait. ⚠️ **La Tâche 1c est ABANDONNÉE** : elle déverrouille une reconstruction que le pivot supprime.
+**Ordre imposé, et il compte — révisé le 2026-08-20 pour aller au pivot, pas au palliatif.** ✅ **Faites : 1a** (l'instrument, *livrée*) **→ 2 bis** (l'escalier, *livrée, et elle sera jetée au pivot*). ✅ **1b** (la loi de la caméra — *livrée le 2026-08-20 : plus aucun saut d'altitude sur la descente de référence*). ⚠️ **Ensuite, et dans cet ordre : 1b bis** (la frontière de rendu — **c'est la moitié visuelle de la 1b, et elle exige de regarder tourner**), **puis le bloc quadtree — 4 → 4 quater → 4 alpha → 3 → 4 bis → 4 ter** (la Tâche 3 avant la 4 bis, qui consomme son `emprise`), **puis le bloc fenêtre — 5 avant 6, puis 7** (sans l'audit on ne saura pas si l'extraction marche : le prototype s'est cru étanche pendant tout son vol). ⚠️ **Enfin seulement les rideaux : Tâche 2 (`#loading`) puis Tâche 2 ter (`.whiteout`)** — ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up, il montre le trou qu'il cachait. ⚠️ **La Tâche 1c est ABANDONNÉE** : elle déverrouille une reconstruction que le pivot supprime.
 
 **Le risque principal n'est plus la géométrie** : l'attaque a confirmé qu'on ne peut pas la déchirer. **C'est le flux** — plafond, annulation, éviction — et **le réseau**, qui décide du zoom réellement atteint.
 

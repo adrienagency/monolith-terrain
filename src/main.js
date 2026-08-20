@@ -28,7 +28,7 @@ import { warmupPrograms } from './warmup.js'
 import { activeDemSource, isFallbackActive } from './dem-source.js'
 import { Globe } from './globe.js'
 import { Modes, stepZoom } from './modes.js'
-import { altitudeSurfaceM, echelleBloc } from './loi-altitude.js'
+import { DISTANCE_MIN_SURFACE, altitudeSurfaceM, echelleBloc, empriseBlocM } from './loi-altitude.js'
 import { intersectionGlobe, viseeArrivee, ZOOM_PALIER_MIN } from './escalier-zoom.js'
 import { createGoto, geocode, mainParts } from './goto.js'
 import { frameTrack, viseLeCanevas3D } from './gpx.js'
@@ -926,7 +926,7 @@ function hideLoading() {
     // mesure et pour le filet de `setVisible(true)`.
     // Enveloppé : le globe est construit après ce module, et une visite qui
     // échouerait à le bâtir ne doit pas perdre son voile de chargement.
-    try { globe?.chargeRacines() } catch { /* le filet de setVisible reste */ }
+    assureRacinesGlobe()
     // …et le catalogue de palettes de la boutique, qui n'alimente que le mode
     // aléatoire — inatteignable tant que le voile est là. Voir plus bas.
     try { chargeCataloguePalettes() } catch { /* la réserve procédurale suffit */ }
@@ -1213,7 +1213,11 @@ controls.enableDamping = true
 // une rotation à la souris a de la lancée au lieu de s'arrêter net. τ ≈ 0.35 s
 controls.dampingFactor = 0.03
 controls.maxPolarAngle = Math.PI * 0.49
-controls.minDistance = 6
+// ⚠️ QUATRIÈME ET DERNIER SITE DE `minDistance` — Tâche 1b, Étape 3. Les trois
+// autres vivaient dans `modes.js` et sont devenus `Modes._poseButees()` ; celui-ci
+// est la pose de DÉPART, avant qu'aucun mode n'ait parlé. La valeur ne se recopie
+// plus : elle vient de `loi-altitude.js`, donc les tests la voient.
+controls.minDistance = DISTANCE_MIN_SURFACE
 controls.maxDistance = 150 // room to frame the whole slab before the orbit gate
 controls.update()
 // a share link's camera pose overrides the default HOME framing — world-space
@@ -3535,7 +3539,52 @@ function regenerateTerrain() {
 
 // ------------------------------------------------------------------ orbital globe + modes
 
+// L'ALTITUDE GÉOMÉTRIQUE DE LA CAMÉRA SUR LE BLOC, EN MÈTRES — sans `dem.meanM`.
+// C'est la grandeur de cadrage de la règle R1 (voir le hook
+// `surfaceCamAltCadrageM` plus bas, qui explique pourquoi il y en a deux).
+function altitudeCadrageM() {
+  if (params.source === 'real' && dem) {
+    return altitudeSurfaceM({
+      camY: camera.position.y,
+      extentMeters: dem.extentMeters,
+      span: TERRAIN_SIZE,
+      exageration: params.demExaggeration,
+    })
+  }
+  return terrain.heightToFeet(camera.position.y) / 3.28084
+}
+
 globe = new Globe(params)
+
+// ══════════ LES SEIZE TUILES RACINES — LE TROISIÈME APPELANT ════════════════
+//
+// ⚠️ PIÈGE SILENCIEUX, ET IL SE REFERME SUR DEUX TÂCHES À LA FOIS (plan
+// « globe continu », Tâche 1b Étape 2). `globe.chargeRacines()` n'avait QUE
+// DEUX appelants, et les deux sont condamnés :
+//   1. `hideLoading` ci-dessus — **que la Tâche 2 supprime** ;
+//   2. `globe.setVisible(true)` — **que la frontière globe/terrain dissout**.
+// Les deux partis, les seize tuiles racines ne seraient plus jamais demandées :
+// pas d'erreur, pas de test rouge, pas de sphère nue à l'écran non plus —
+// simplement un globe qui ne se peuple jamais. Le troisième appelant est donc
+// posé AVANT que l'un des deux ne parte, comme le plan l'exige.
+//
+// ⚠️ IL NE DOIT PAS DÉFAIRE LA MESURE QUI A CRÉÉ LE DIFFÉRÉ. A/B mesuré
+// (dist de production, Chrome, cache vidé, 3 runs, 3 Mb/s) : partir du
+// constructeur coûtait 3 730 ms sur l'affichage de la carte. Ce troisième
+// appelant est donc un FILET DE SÉCURITÉ à retardement — 20 s après le
+// démarrage, bien après que la carte soit à l'écran dans tous les cas mesurés
+// (16,2 s dans le pire) — et il ne tire jamais le premier en usage normal.
+let racinesGlobeDemandees = false
+function assureRacinesGlobe() {
+  if (racinesGlobeDemandees) return
+  racinesGlobeDemandees = true
+  // Enveloppé : une visite qui échouerait à bâtir le globe ne doit rien casser
+  // ici — ni le voile de chargement, ni le filet de `setVisible`.
+  try { globe?.chargeRacines() } catch { /* le filet de setVisible reste */ }
+}
+const DELAI_FILET_RACINES_MS = 20000
+setTimeout(assureRacinesGlobe, DELAI_FILET_RACINES_MS)
+
 syncGlobeShadow(bgDayMul()) // l'ombre du terminateur part accordée au fond
 globe.setVisible(false)
 scene.add(globe.group)
@@ -3592,23 +3641,31 @@ modes = new Modes({
       if (v) aq?.reassert()
     },
     getSurfaceLatLon: () => ({ lat: params.demLat, lon: params.demLon }),
+    // ══════ DEUX ALTITUDES, ET LA RÈGLE R1 EST TOUTE LA DIFFÉRENCE ═════════
+    //
+    // Il n'y en avait qu'UNE, et elle servait aux deux usages — c'est cela, la
+    // violation. `surfaceCamAltMeters()` ajoutait `dem.meanM`, une quantité
+    // **dérivée du terrain chargé** et lissée, et elle **pilotait `enterOrbit`**
+    // (`modes.js`). Le gain de l'oscillateur que R1 décrit était déjà câblé ;
+    // la Phase 3 n'aurait eu qu'à y ajouter le retard. Tâche 1b, R1.
+    //
+    //   · `surfaceCamAltCadrageM()` — ce qui DÉCIDE : porte orbitale, niveau de
+    //     plongée, pose d'arrivée. GÉOMÉTRIQUE PURE, **sans `meanM`**.
+    //   · `surfaceCamAltMeters()` — ce qui S'AFFICHE : l'altimètre, qui doit
+    //     rester une altitude au-dessus du niveau de la mer et garde donc
+    //     `meanM`. Un afficheur n'est pas une décision de cadrage : R1 ne parle
+    //     pas de lui, et l'en priver aurait fait lire 418 m à une caméra qui est
+    //     à 2 918 m au-dessus de la mer.
+    //
+    // ⚠️ L'EXAGÉRATION VERTICALE, ELLE, RESTE DANS LES DEUX, et ce n'est pas un
+    // oubli : c'est la grandeur que la Tâche 1a a nommée et mesurée, celle que
+    // `_dive` et `_rescale` conservent de part et d'autre d'une traversée. La
+    // sortir d'ici seule rendrait l'aller-retour surface → orbite → surface
+    // asymétrique d'un facteur `exagération(z)`. Ce qu'elle laisse encore
+    // sauter — le CHAMP visuel — est mesuré et écrit dans le plan.
+    surfaceCamAltCadrageM: altitudeCadrageM,
     surfaceCamAltMeters() {
-      if (params.source === 'real' && dem) {
-        // ⚠️ `+ dem.meanM` EST UNE VIOLATION CONNUE DE LA RÈGLE R1 du plan
-        // « globe continu » : la quantité rendue devient DÉRIVÉE DU TERRAIN
-        // chargé. La Tâche 1c ordonne de l'en sortir. La moitié géométrique,
-        // elle, est désormais la loi pure de `loi-altitude.js` — c'est elle que
-        // l'instrument de la Tâche 1a mesure, et elle survivra au retrait.
-        return (
-          altitudeSurfaceM({
-            camY: camera.position.y,
-            extentMeters: dem.extentMeters,
-            span: TERRAIN_SIZE,
-            exageration: params.demExaggeration,
-          }) + dem.meanM
-        )
-      }
-      return terrain.heightToFeet(camera.position.y) / 3.28084
+      return altitudeCadrageM() + (params.source === 'real' && dem ? dem.meanM : 0)
     },
     // L'ÉCHELLE VERTICALE DU BLOC — unités de scène par mètre réel. C'est le
     // facteur qui sépare la hauteur de caméra de l'altitude en mètres, et il
@@ -3623,6 +3680,27 @@ modes = new Modes({
     echelleVerticaleBloc() {
       if (params.source !== 'real' || !dem) return null
       return echelleBloc({ extentMeters: dem.extentMeters, span: TERRAIN_SIZE, exageration: params.demExaggeration })
+    },
+    // L'ÉCHELLE VERTICALE D'UN NIVEAU **QU'ON N'A PAS ENCORE CHARGÉ**.
+    //
+    // ⚠️ LA PLONGÉE A UN PROBLÈME DE POULE ET D'ŒUF que le cran n'a pas :
+    // `_rescale` connaît son niveau d'arrivée (c'est le cran suivant) et peut
+    // donc lire l'échelle APRÈS le chargement ; `_dive`, lui, doit CHOISIR le
+    // niveau, donc connaître l'échelle de chacun AVANT. Elle se calcule sans
+    // charger quoi que ce soit : l'emprise vient de la formule de `dem.js`
+    // (recopiée dans `loi-altitude.js` et gardée par un test de texte source) et
+    // l'exagération de `exagForZoom`, qui vit ici.
+    //
+    // ⚠️ C'EST UNE ESTIMATION, ET `_dive` LE SAIT : le bloc réel est calé sur la
+    // grille de tuiles, donc son emprise diffère de quelques pour cent. Elle
+    // sert à CHOISIR le niveau ; la distance, elle, se recalcule ensuite sur
+    // `echelleVerticaleBloc()`, l'échelle vraie.
+    echelleVerticaleAuZoom(zoom, lat = params.demLat) {
+      return echelleBloc({
+        extentMeters: empriseBlocM({ zoom, lat }),
+        span: TERRAIN_SIZE,
+        exageration: exagForZoom(zoom),
+      })
     },
     async loadSurface(lat, lon, zoom) {
       if (demBusy) throw new Error('terrain busy')
