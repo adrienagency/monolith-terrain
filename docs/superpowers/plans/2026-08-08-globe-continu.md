@@ -545,7 +545,7 @@ Le réseau étant parfait dans ce banc, **la production est pire que ces chiffre
 - [ ] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 
-### Tâche 4 alpha : rebrancher le globe sur la vraie source de relief ⚠️ APRÈS LA TÂCHE 4, AVANT LA 4 BIS
+### Tâche 4 alpha : rebrancher le globe sur la vraie source de relief ⚠️ APRÈS LA 4 QUATER, ET SEULEMENT SI ELLE A PORTÉ `MAX_Z` AU-DELÀ DE 11
 
 **Fichiers :** modifier `src/globe.js` · **modifier `src/bathy.js`** (`overzoomTile`, `:578`) · créer `test/globe-source.test.js` · ⚠️ **modifier les trois fichiers de test qui verrouillent le 256** : `test/globe-reseau.test.js:42-43` et `:97-98`, `test/globe-eviction.test.js:59-60`, `test/globe-precision.test.js:79` et `:83`.
 
@@ -653,7 +653,7 @@ Pour mémoire, l'erreur d'origine : à un champ de 30°, un socle occupe **5,6 %
 - [ ] **Étape 4** — mutation : égaliser les deux seuils tue le test d'oscillation.
 - [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
-### Tâche 4 bis : LE FLUX QUI NE SE COINCE PAS ⚠️ APRÈS LES TÂCHES 4 ET 4 ALPHA
+### Tâche 4 bis : LE FLUX QUI NE SE COINCE PAS ⚠️ APRÈS LES TÂCHES 4, 4 QUATER, 4 ALPHA ET 3
 
 ⚠️ **CETTE TÂCHE PORTAIT « EN PREMIER ». C'ÉTAIT L'ORDRE INVERSE DE CE QUI EST MESURÉ.** La Tâche 4 change ce que cette tâche est censée calibrer : après horizon + frustum, le pic de `loading` passe de **0 à 246** et le trafic d'un panoramique de **596 à 1 786 requêtes**. `PLAFOND_FILE` ne peut pas se calibrer avant. Et la Tâche 4 alpha fait passer les tuiles de PNG 256 px à WebP 512 px : **le bouchon écrit ici serait périmé le jour où elle s'exécute.**
 
