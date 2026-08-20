@@ -553,10 +553,30 @@ export class Globe {
     }
   }
 
+  // REPÈRE RELATIF AU CENTRE DE LA TUILE (relative-to-center).
+  //
+  // ⚠️ `pos2` — le seul tampon que le GPU lira — reçoit l'écart AU CENTRE DE LA
+  // TUILE, jamais la position mondiale. Celle-ci part vivre dans
+  // `mesh.position`, donc dans la matrice de l'objet, que three compose sur le
+  // CPU en doubles avant de n'en envoyer que la modelView (dont la translation
+  // est déjà relative à la caméra).
+  //
+  // Le chiffre : R_GLOBE = 100 posait les sommets à une magnitude où le pas
+  // représentable du float32 vaut **0,486 m au sol**, et il ne descend JAMAIS,
+  // quel que soit le zoom. Or mapterhorn sert du 0,42 m/pixel à son maximum :
+  // la représentation s'épuisait exactement là où la donnée s'arrête (deck.gl
+  // #7527 décrit la même casse à z17). En relatif, la magnitude tombe à la
+  // taille d'une TUILE — 0,3 unité à z11 — et le pas à ~1 mm.
+  //
+  // ⚠️ Écrire un double dans un Float32Array l'arrondit sur-le-champ : il faut
+  // donc soustraire l'origine AVANT l'écriture. D'où `positions` en DOUBLES,
+  // et pas de `pos2.set(positions)` — un tampon absolu recopié n'aurait rien
+  // gagné. C'est aussi pour ça que `positions` reste ABSOLU : la jupe s'y
+  // appuie pour descendre vers le centre de la PLANÈTE, pas de la tuile.
   _buildMesh(t) {
     const G = gridFor(t.z)
     const nV = (G + 1) * (G + 1)
-    const positions = new Float32Array(nV * 3)
+    const positions = new Float64Array(nV * 3) // absolues, en doubles : voir ci-dessus
     const normals = new Float32Array(nV * 3)
     const uvs = new Float32Array(nV * 2)
     const latlons = new Float32Array(nV * 2)
@@ -570,6 +590,13 @@ export class Globe {
       const h = Math.max(sampleHeights(t.heights, u, v), 0) // oceans stay on the sphere
       return latLonToSphere(lat, lon, R_GLOBE + h * dispScale, out)
     }
+
+    // L'ORIGINE DU REPÈRE : le centre de la tuile, pris SUR LA SURFACE DÉPLACÉE
+    // et non sur la sphère nue. `t.center` ferait presque l'affaire, mais il
+    // ignore le relief : à l'exagération 18 des vues orbitales, un sommet à
+    // 8 848 m est à 2,5 unités du centre non déplacé, ce qui remonterait le pas
+    // à 1,5 cm. Passer par `posAt` coûte une ligne et supprime le terme.
+    const origine = posAt(0.5, 0.5, new THREE.Vector3())
 
     let k = 0
     for (let j = 0; j <= G; j++) {
@@ -649,16 +676,23 @@ export class Globe {
     const nrm2 = new Float32Array(total * 3)
     const uv2 = new Float32Array(total * 2)
     const ll2 = new Float32Array(total * 2)
-    pos2.set(positions)
+    // la nappe : absolu (doubles) − origine → float32
+    for (let s = 0; s < nV; s++) {
+      pos2[s * 3] = positions[s * 3] - origine.x
+      pos2[s * 3 + 1] = positions[s * 3 + 1] - origine.y
+      pos2[s * 3 + 2] = positions[s * 3 + 2] - origine.z
+    }
     nrm2.set(normals)
     uv2.set(uvs)
     ll2.set(latlons)
     border.forEach((src, bi) => {
       const dst = nV + bi
       const inv = 1 - skirtDrop / Math.hypot(positions[src * 3], positions[src * 3 + 1], positions[src * 3 + 2])
-      pos2[dst * 3] = positions[src * 3] * inv
-      pos2[dst * 3 + 1] = positions[src * 3 + 1] * inv
-      pos2[dst * 3 + 2] = positions[src * 3 + 2] * inv
+      // ⚠️ `* inv` sur l'ABSOLU (le rabattement est radial depuis le centre de
+      // la planète), puis seulement ensuite le passage au repère de la tuile
+      pos2[dst * 3] = positions[src * 3] * inv - origine.x
+      pos2[dst * 3 + 1] = positions[src * 3 + 1] * inv - origine.y
+      pos2[dst * 3 + 2] = positions[src * 3 + 2] * inv - origine.z
       // skirts inherit the rim normal so the wall shades exactly like the edge
       nrm2[dst * 3] = normals[src * 3]
       nrm2[dst * 3 + 1] = normals[src * 3 + 1]
@@ -685,6 +719,7 @@ export class Globe {
     geo.computeBoundingSphere()
 
     const mesh = new THREE.Mesh(geo, this._materialFor(t.texture))
+    mesh.position.copy(origine) // la position mondiale vit ICI, plus dans les sommets
     mesh.visible = false
     mesh.name = t.key
     t.mesh = mesh
