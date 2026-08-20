@@ -148,6 +148,24 @@ Ce n'est plus le flou accepté par la décision 13 : **c'est une autre carte**. 
 
 ---
 
+### ⚠️ CE PLAN A COMMIS L'ERREUR QUE SA PROPRE COMPÉTENCE DÉCRIT AU §1
+
+**Un sous-système « fenêtre continue 3×3 » existe déjà dans ce dépôt, fusionné sur main le 2026-08-01, et ce plan ne le déclarait nulle part.** Vérifié sur disque, module par module :
+
+| module existant | ce qu'il fait déjà | ce que ce plan proposait de créer |
+|---|---|---|
+| `src/dem-emprise.js` | `originesEmprise`, `recollerEmprise`, `rectFenetre`, `statsRect`, `enVolBorne`, `EMPRISE_COTE = 3` | `flux-terrain.js`, et une partie de `fenetre-bornee.js` |
+| `src/fenetre-clip.js` | `exposantCoin`, `pointCoin`, `arcCoin`, `plansFenetre`, `dansFenetre` | ⚠️ **`exposantCoin` (`:71`) est DÉJÀ un export** — le paramètre du même nom de `construireFenetre` est une **collision** |
+| `src/plinth.js` | `computeSlab` (`:138`), `buildSlabWalls` (`:232`, **douze options**) | `construireFenetre`, dont la signature n'en couvre que **cinq** |
+| `src/block-grid.js:768` | le damier appelle `buildSlabWalls` — **13 fichiers `test/damier-*.test.js`, empreintes bit à bit** | rien : le mot « damier » n'apparaissait pas une fois dans ce plan |
+| `src/fenetre-finesse.js` | `pasFinesse`, `resDeFinesse`, `REPOS_S = 0,4`, `V_REPOS = 2`, `RES_REPOS_MAX = 768` | ⚠️ **toute la Tâche 7** |
+| `src/terrain.js` | `resMaillage` (`:2016`), `RES_FENETRE_CONTINUE = 384` (`:61`) | les deux résolutions de la Tâche 7 |
+| `src/mer-emprise.js`, `src/fenetre-course.js` | champ de mer sur emprise variable, déplacement élastique | — |
+
+Le tout derrière `FLAGS.fenetreContinue`, avec neuf fichiers de test dédiés.
+
+⚠️ **PREMIÈRE ACTION DE CE PLAN, AVANT TOUTE TÂCHE : lire ces modules et trancher, module par module, réutiliser ou remplacer — et l'écrire ici.** C'est exactement le §1 de `/threejs-optimisation` — « l'audit s'arrête au fichier ; zéro occurrence est un signal, pas un soulagement » — et ce plan y est tombé sur son propre sujet.
+
 ## 4. Ce qui est DÉJÀ FAIT
 
 ### ✅ La côte mondiale fait autorité — `1465731`
@@ -221,12 +239,22 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 | `src/monde/seuil-socle.js` **(créer)** | naissance et mort du socle, sur une **altitude de caméra** |
 | `src/plinth.js` **(modifier)** | accepter une emprise variable ; il garde le congé, les coins en superellipse et le liner |
 | `src/ocean.js` **(modifier)** | il recalcule `uCornerR`, `uCornerN`, `buildRimGeometry` sur les mêmes constantes — sans lui, la mer cesse d'épouser le socle |
+| `src/dem.js` **(lire)** | la politique à trois voies Mapterhorn / AWS / 404, `:245-263` |
+| `src/dem-source.js` **(lire)** | `DEFAULT_SOURCE_ID`, `tilePx`, `maxZoom`, `REGION_ZOOM` |
+| `src/block-grid.js` **(modifier)** | `:768` appelle `buildSlabWalls` — 13 fichiers de test, empreintes bit à bit |
+| `src/fenetre-finesse.js` **(modifier ou remplacer)** | ⚠️ **il fait déjà la Tâche 7** |
+| `src/terrain.js` **(modifier)** | `resMaillage` (`:2016`), `RES_FENETRE_CONTINUE = 384` (`:61`) |
+| `src/main.js` **(modifier)** | **le seul endroit qui lit `FLAGS`** pour le globe |
 | `src/monde/descente-bornee.js` **(créer)** | borner la descente au débit réellement observé — règle R3 |
 | `src/flags.js` **(modifier)** | le drapeau qui isole le globe continu du globe orbital, **qui est en production** |
 | `src/globe.js` **(modifier)** | horizon géométrique, frustum, crédit ; puis rebranchement sur la vraie source |
 | `src/escalier-zoom.js` **(retirer en fin de parcours)** | les paliers n'existent plus |
 
 ---
+
+### ⚠️ IL N'Y A NI TÂCHE 1 NI TÂCHE 2 DANS CE DOCUMENT
+
+Zéro occurrence, vérifié. La numérotation commence à 3 et passe par 4, 4 alpha, 4 bis, 4 ter. **Soit elles existent ailleurs et il faut dire où, soit la numérotation est un vestige et il faut la reprendre.** Un agent qui cherche par où commencer ne peut pas le deviner.
 
 ## 6. PHASE 1 — Le flux et la caméra
 
@@ -240,7 +268,7 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 
 #### Les trois causes — vérifiées dans le code, deux fois
 
-1. **Le crédit de raffinement est un point fixe arithmétique** (`globe.js:759`). `_credit = CACHE_MAX − tiles.size + marge` : à saturation `marge` s'annule **structurellement**, donc le crédit vaut 0, donc rien n'est créé, donc la taille ne bouge plus. ⚠️ Le commentaire des lignes 747-752 affirme que `marge` écarte ce gel — et qu'un crédit fondé sur la seule place libre « GÈLERAIT le globe ». **Il ne fait que le retarder.**
+1. **Le crédit de raffinement est un point fixe arithmétique** (`globe.js:759`). `_credit = CACHE_MAX − tiles.size + marge` : à saturation `marge` s'annule **structurellement**, donc le crédit vaut 0, donc rien n'est créé, donc la taille ne bouge plus. ⚠️ Le commentaire des lignes **743-752** affirme que `marge` écarte ce gel — et qu'un crédit fondé sur la seule place libre « GÈLERAIT le globe ». **Il ne fait que le retarder.**
 2. **Le seuil d'horizon est une constante** (`globe.js:770`) : `dot < −0.35` (110°) au lieu du vrai horizon géométrique. À basse altitude, le code parcourt une calotte de plusieurs ordres de grandeur trop large.
 3. **Aucun test de frustum dans `_traverse`** — zéro occurrence dans le fichier.
 
@@ -272,13 +300,14 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 
 #### Les étapes
 
-- [ ] **Étape 0 — POSER LE DRAPEAU** dans `src/flags.js` (le fichier existe). ⚠️ Sans lui, tout ce qui suit s'applique au globe orbital, **qui est en production**.
+- [ ] **Étape 0 — POSER LE DRAPEAU, ET LE BRANCHER.** ⚠️ **`src/globe.js` n'importe PAS `flags.js` — vérifié, zéro occurrence.** Les seuls lecteurs de `FLAGS` sont `main.js`, `fenetre-reglage.js` et `ui/effects-panel.js`. Un drapeau posé dans `flags.js` sans câbler sa lecture **ne protège rien** : les corrections atterrissent sur le globe de production. Nommez-le, dites **quel fichier le lit**, et faites entrer `src/main.js` au §5 et dans les *Fichiers* de cette tâche.
 - [ ] **Étape 1 — établir la base, et l'écrire.** Champ de vision fixé, zoom effectif, tuiles dessinées, taille de cache, requêtes au repos — à six altitudes. **C'est la référence contre laquelle tout le reste se compare.** ⚠️ Deux relevés antérieurs se contredisent (z6 contre z7) : le vôtre fait foi, et il doit être reproductible.
+- [ ] **Étape 1 bis — DONNER UNE CAMÉRA AU HARNAIS. ⚠️ SANS ELLE, LES ÉTAPES 2 ET 4 SONT IMPOSSIBLES.** Le seul harnais qui fait voler le globe porte `{ position: new THREE.Vector3() }` (`test/globe-eviction.test.js:145` et `:225`) : **aucune orientation, aucune `projectionMatrix`** — zéro `PerspectiveCamera` dans tous les `test/globe-*.test.js`. Sans elle, l'Étape 4 n'a pas de frustum à tester et l'Étape 2 n'a pas d'écran dont mesurer la couverture. Prescrivez `new THREE.PerspectiveCamera(30, 16/9, orbAlt × 0,2, 1400)` — **les trois valeurs sont dans le dépôt** : `main.js:263`, `modes.js:704`, `modes.js:319`.
 - [ ] **Étape 2 — DÉVERROUILLER LES TESTS, avant toute correction.** Les deux assertions de `globe-eviction.test.js` décrivent le défaut comme un contrat. Les réécrire pour qu'elles disent ce qu'on veut vraiment : **la couverture de l'écran ne se dégrade pas** — pas « plus de 200 tuiles dessinées », qui est la mesure du gaspillage, pas de la qualité. ⚠️ **Cette étape ne corrige rien et doit pourtant passer en premier.**
 - [ ] **Étape 3 — l'horizon géométrique**, avec sa marge de corde et l'exemption des racines `z2`. `globe.js:770` : `dot < −0.35` est 110,5° en dur, au lieu de `R/|camPos|` — **2,87° à 8 km**, soit une calotte jusqu'à **×1 076 trop large**. ⚠️ **Seul, il ne débloque AUCUN niveau de zoom** — mesuré z7 → z7. Il réduit la calotte parcourue, ce qui rend l'étape 4 possible ; il ne se juge pas sur le zoom. Test : à basse altitude, le nombre de tuiles parcourues chute d'un ordre de grandeur **sans qu'aucune tuile visible ne disparaisse**. ⚠️ La seconde moitié est celle qui attrape l'écrêtage au limbe.
 - [ ] **Étape 4 — le test de frustum** dans `_traverse` (zéro occurrence aujourd'hui). ⚠️ **C'EST CETTE ÉTAPE QUI FAIT TOUT LE TRAVAIL** : avec l'horizon, elle porte le zoom de **7 à 11** et les tuiles dessinées à **124**, avec **zéro requête au repos**. Au fov de production, **2 à 4 %** seulement des tuiles dessinées sont dans le champ. ⚠️ Les tuiles hors champ ne coûtent pas des appels de dessin — three les élimine au rendu — **elles consomment les 420 places du cache**, et c'est ce qui affame le crédit de l'étape 5. **Les deux défauts n'en font qu'un.**
-- [ ] **Étape 5 — le point fixe du crédit, MAINTENANT et pas avant.** `globe.js:759`, `_credit = CACHE_MAX − tiles.size + marge` : le prédicat de `marge` (l. 757) exige une tuile prête **ni traversée ni préparée** — ensemble **vide par construction**, puisque tout ce qui n'est ni l'un ni l'autre a déjà été évincé. `marge` vaut donc **0 dès la première image**, et **59 raffinements sont refusés par image, pour toujours**. ⚠️ Le commentaire des lignes 748-756 affirme le contraire, de façon convaincante. Si — et seulement si — l'étape 1 montre que les étapes 3 et 4 n'ont pas suffi : fondez le crédit sur le **récupérable réel**, avec le plancher **mesuré par le protocole ci-dessus**. ⚠️ **Au fov de production, elles ont suffi. Cette étape a de bonnes chances de ne pas devoir être ouverte.**
-- [ ] **Étape 6 — rendre évinçables les tuiles bloquées.** ⚠️ **Sans retourner l'ordre d'éviction.** Ce plan a écrit trois fois « profondeur d'abord, récence ensuite » : `globe.js` fait délibérément l'inverse — `a.lastUsed - b.lastUsed || parProfondeur(a, b)`, la **récence au rang 1**, la profondeur au **rang 2 seulement**, avec vingt lignes de commentaire et un test dédié vert (« à ancienneté égale, l'éviction sacrifie la PROFONDE et garde l'ancêtre »). **C'est correct.** Une tuile en `error` ou en `loading` dont la requête ne revient jamais **occupe une place du budget définitivement, sans reprise possible**. C'est le même point fixe, par une autre porte.
+- [ ] **Étape 5 — le point fixe du crédit, MAINTENANT et pas avant.** `globe.js:759`, `_credit = CACHE_MAX − tiles.size + marge` : le prédicat de `marge` (l. 757) exige une tuile prête **ni traversée ni préparée** — ensemble **vide par construction**, puisque tout ce qui n'est ni l'un ni l'autre a déjà été évincé. `marge` vaut donc **0 dès la première image**, et **59 raffinements sont refusés par image, pour toujours**. ⚠️ Le commentaire des lignes **743-752** affirme le contraire, de façon convaincante. Si — et seulement si — l'étape 1 montre que les étapes 3 et 4 n'ont pas suffi : fondez le crédit sur le **récupérable réel**, avec le plancher **mesuré par le protocole ci-dessus**. ⚠️ **Au fov de production, elles ont suffi. Cette étape a de bonnes chances de ne pas devoir être ouverte.**
+- [ ] **Étape 6 — rendre évinçables les tuiles bloquées.** ⚠️ **Sans retourner l'ordre d'éviction.** Ce plan a écrit trois fois « profondeur d'abord, récence ensuite » : `globe.js` fait délibérément l'inverse — `a.lastUsed - b.lastUsed || parProfondeur(a, b)`, la **récence au rang 1**, la profondeur au **rang 2 seulement**, avec vingt lignes de commentaire et un test dédié vert (« à ancienneté égale, l'éviction sacrifie la PROFONDE et garde l'ancêtre »). **C'est correct.** Une tuile en `error` ou en `loading` dont la requête ne revient jamais **occupe une place du budget définitivement, sans reprise possible**. C'est le même point fixe, par une autre porte. ⚠️ **MAIS N'ÉVINCEZ PAS UNE TUILE `loading` SANS ANNULER SA REQUÊTE** : le `.then` de `_pump` (`globe.js:726`) ajouterait un maillage orphelin à la scène. Le garde est `if (!this.tiles.has(t.key)) return` au retour — **exigez-le dans le test**. (`_evictJusqua` est à `globe.js:863`.)
 - [ ] **Étape 7 — trancher le cache**, avec les chiffres de l'étape 1 et non par principe. ⚠️ Si les corrections réclament 824, une formule qui rend 370 est une régression déguisée en optimisation. **Mesurez avant de choisir.**
 - [ ] **Étape 8 — la mémoire retenue pour rien : ~210 Mo sur 327 Mo au cache plein.** `globe.js:238` — le canevas reste vivant via `CanvasTexture.image` après téléversement (**105 Mo**). Et `t.heights` (**105 Mo**) n'est relu que par `setExaggeration` (`:899`), **qui n'a aucun appelant dans tout le dépôt — vérifié**. ⚠️ Le commentaire de `:168` annonce « 380 Mo pour 1 500 tuiles » : la documentation **sous-estime d'un facteur 2,4**.
 - [ ] **Étape 9 — les normales de bord.** `:623-648` : `sampleHeights` écrête hors [0,1] alors que `tileToLatLon` donne la position complète — pente **407 m au bord contre 853 m au centre**, soit **47,7 % de la vraie pente**, d'où un liseré d'éclairage autour de chaque tuile.
@@ -336,7 +365,9 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 **Conséquence à trancher avant de commencer :** le gain de Mapterhorn ne se manifeste qu'**en descente sur les terres émergées**. Il est peut-être plus sage de **ne rebrancher que sous un certain zoom** — là où le socle vit — et de laisser le globe orbital sur AWS, qu'il utilise déjà et qui lui suffit. ⚠️ **Cette question est ouverte : elle se tranche par une mesure, pas par une préférence.**
 
 ⚠️ **ET LE PÉRIMÈTRE EST PLUS LARGE QU'IL N'Y PARAÎT — mesuré par l'attaque :**
-- **Neuf expressions à 256 en dur** dans `globe.js`, pas « plusieurs ».
+- **Une dizaine d'expressions à 256 en dur** dans `globe.js`, sur huit lignes — ⚠️ **le compte « neuf » n'était pas reproductible : établissez-le et écrivez la liste.** Et il y a deux `255` que `grep 256` ne voit pas (`:257-260`).
+
+⚠️ **DEUX 256 NE DOIVENT PAS ÊTRE TOUCHÉS : `globe.js:66` et `:236`** — c'est le radix de l'encodage terrarium, pas une taille de tuile. `dem-source.js:3` dit que Mapterhorn utilise **le même encodage**. Les confondre casse toutes les altitudes en silence.
 - **Trois fichiers de test non déclarés** par ce plan les verrouillent.
 - **La mémoire passerait de 242 Mo à 968 Mo** si l'on garde le même nombre de tuiles en 512 px. ⚠️ C'est un facteur quatre, pas un ajustement.
 - Les étapes 3 et 4 de cette tâche **se contredisent** — l'une demande de rebrancher, l'autre que rien ne change pour le globe orbital. **Elles ne peuvent pas être vraies ensemble tant que la question ci-dessus n'est pas tranchée.**
@@ -347,10 +378,13 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 - [ ] **Étape 1** — test : l'URL construite par le globe passe par `DEM_SOURCES[DEFAULT_SOURCE_ID]`, et la profondeur maximale du globe **n'excède jamais** le `maxZoom` de la source active.
 - [ ] **Étape 1 bis** — test : sur une zone **couverte** par Mapterhorn, le globe l'utilise ; sur une zone qui rend 404 à z12, il bascule sur AWS **pour cette zone**, et **continue d'utiliser Mapterhorn ailleurs dans la même session**. ⚠️ C'est l'assertion qui distingue une politique d'une URL.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue (aujourd'hui l'URL est en dur).
-- [ ] **Étape 3** — rebrancher sur `dem-source.js`, en gardant le repli et la sonde.
-- [ ] **Étape 4** — ⚠️ **vérifier que le globe orbital reste identique** : c'est une fonction en production, et le passage de 256 à 512 px change la densité des tuiles. Mesurer la mémoire et le nombre de requêtes avant/après.
-- [ ] **Étape 5** — mutation : revenir à l'URL en dur doit tuer le test.
-- [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [ ] **Étape 3 — TRANCHER LA QUESTION OUVERTE, en une ligne écrite ici.** ⚠️ Ce plan écrivait que ses étapes 3 et 4 « ne peuvent pas être vraies ensemble » et laissait l'agent avec l'instruction de le signaler. **Ce n'est pas une tâche, c'est un renvoi.** La question : rebranche-t-on le globe **entier**, ou seulement **sous un zoom donné**, là où le socle vit ? La mesure qui tranche est celle de l'étape 6 — mémoire et requêtes du globe orbital avant/après. **Décidez sur elle, et écrivez la décision dans cette case.**
+- [ ] **Étape 4 — la jonction `resolveRegionMaxZoom` async contre `_pump` synchrone.** ⚠️ **C'est le vrai travail de cette tâche, et aucune étape ne le portait.** La sonde par zone est asynchrone ; la pompe qui décide quelle tuile demander ne l'est pas. Dites ce que `_pump` fait pendant que la sonde n'a pas répondu : attendre (et geler), supposer AWS (et perdre Mapterhorn au premier passage), ou demander quand même et corriger après.
+- [ ] **Étape 5 — les tailles.** Établir puis remplacer **la liste** des `256` de taille de tuile — ⚠️ **sans toucher aux deux radix terrarium (`globe.js:66` et `:236`)** — et traiter les deux `255` de `:257-260`. Puis `TILE_MEMO_MAX`, dont le budget est exprimé en tuiles et non en octets.
+- [ ] **Étape 6 — la mémoire, mesurée avant de décider.** Le passage de 256 à 512 px **multiplie par quatre** l'occupation par tuile : 242 Mo → 968 Mo à nombre de tuiles constant. **Mesurez, puis ajustez le nombre de tuiles — pas l'inverse.**
+- [ ] **Étape 7** — ⚠️ **vérifier que le globe orbital reste identique** sur ce que l'étape 3 a décidé de ne pas changer. C'est une fonction en production.
+- [ ] **Étape 8** — mutation : revenir à l'URL en dur doit tuer le test.
+- [ ] **Étape 9 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 **Si cette tâche est jugée trop lourde**, l'alternative honnête est de **plafonner `MAX_Z` à 13 et de l'écrire** — mais alors la décision 1 (« de l'orbite au sol ») devient fausse, et il faut le dire à Adrien.
 
@@ -367,6 +401,7 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 - `tuilesPretes(flux, emprise)` → `Map`
 - `creerFlux({ globe })` → `flux` — la fabrique ; **aucune autre tâche ne la définit, elle appartient à celle-ci**
 - `zoomEffectif(flux, emprise)` → `number` — le zoom réellement COUVERT, distinct du zoom demandé
+- `debitObserve(flux)` → `number` — le débit en Mb/s déduit des tailles et durées des réponses déjà passées par ce flux. ⚠️ **SANS LUI LA TÂCHE 4 TER NE PEUT PAS COMMENCER** : elle consomme `debitObserveMbs`, et personne ne le produisait — signalé quatre fois. **Il se fabrique ici, dans une case à cocher de cette tâche.**
 - `remplirHauteurs(flux, { emprise, n, sortie })` → `{ remplis, manquants }` — remplit **en une passe** un `Float32Array` de (n+1)² hauteurs pour l'emprise donnée.
 
 ⚠️ **PAR LOT, PAS PAR PIXEL, ET C'EST MESURÉ.** Une version de ce plan proposait `lireHauteur(flux, {x, y, z})`, appelée une fois par sommet. L'attaque l'a chronométrée : **+3,5 ms par reconstruction à N=256** (de 0,11 à 3,65 ms), **sans même l'interpolation bilinéaire** — sur un budget déjà déclaré dépassé à 8,3 ms. L'interface commode aurait mangé à elle seule la moitié de ce qui reste.
@@ -407,7 +442,7 @@ Une passe par tuile touchée, pas un appel par sommet.
 - `socleVisible({ altitudeEllipsoideM, visibleAvant })` → `boolean`
 - `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M` — **À MESURER.**
 
-⚠️ **UNE VERSION DE CE PLAN AVAIT ÉCRIT 120 km ET 180 km. C'EST FAUX D'UN FACTEUR ~18.** À un champ de 30°, un socle de 3,56 km occupe **5,6 % de l'image** depuis 120 km — et le dépôt lui-même place 120 km au palier **z9** (`modes.js`, `DIVE_TIERS`), c'est-à-dire précisément l'altitude que la règle R3 qualifie d'« autre carte ».
+⚠️ **UNE VERSION DE CE PLAN AVAIT ÉCRIT 120 km ET 180 km. C'EST FAUX D'UN FACTEUR ~18.** À un champ de 30°, un socle de 3,56 km occupe **5,6 % de l'image** depuis 120 km — et le dépôt lui-même place 120 km au palier **z8** — ⚠️ ce plan écrivait z9, et c'est faux : `pickDiveTier(120000)` rend `{ altM: 200000, zoom: 8 }`, **exécuté** ; z9 couvre 50 à 100 km (`modes.js`, `DIVE_TIERS`), c'est-à-dire précisément l'altitude que la règle R3 qualifie d'« autre carte ».
 
 **Protocole :** partir de la demande d'Adrien — « le crop apparaît quand la Terre occupe une partie assez importante de l'écran » — la traduire en **fraction d'image occupée par le socle**, viser autour de 60 %, et en déduire l'altitude par la trigonométrie du champ de vision. ⚠️ **Puis convertir en altitude, et ne garder QUE l'altitude** : la fraction d'écran dépend du terrain chargé, ce que la règle R1 interdit.
 
@@ -418,8 +453,11 @@ Une passe par tuile touchée, pas un appel par sommet.
 ⚠️ **Hystérésis obligatoire** : `SEUIL_MORT_M` strictement supérieur à `SEUIL_NAISSANCE_M`. Même patron que `SPLIT_RATIO` / `MERGE_RATIO` dans `globe.js`, éprouvé sur ce dépôt.
 
 - [ ] **Étape 1** — test : en descendant, le socle naît à `SEUIL_NAISSANCE_M` ; en remontant, il ne meurt qu'à `SEUIL_MORT_M`. Puis celui qui compte : **osciller cent fois autour du seuil de naissance ne produit qu'une seule bascule**.
+- [ ] **Étape 1 ter** — test : après trois réponses de tailles et durées connues, `debitObserve` rend leur débit agrégé ; sur un flux neuf, il rend `null` et **non zéro** — zéro se propagerait en « réseau mort » dans `zoomSoutenable`, `debitObserve`.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
-- [ ] **Étape 3** — implémenter.
+- [ ] **Étape 3** — implémenter. ⚠️ **L'AUDIT PRESCRIT LAISSE PASSER TROIS SABOTAGES SUR SIX — MESURÉ AU BANC, PAS DÉDUIT.** Dalle absente (+7,35), mur manquant (+7,95) et **trou couvrant un quart de la surface** (+9,18 contre 9,568 pour le sain, soit **−4 % seulement**) rendent tous un volume positif et **passent pour sains**. Le plan annonçait « 6 sur 6 » : c'est faux.
+
+  **Le correctif tient en une ligne : calculer le volume signé autour de DEUX origines.** Ce n'est pas le signe qui prouve la fermeture, c'est son **indépendance à l'origine**. Écart mesuré : **0,00 % sur le solide sain, 58 à 296 % sur les trois ratés**. ⚠️ Gardez la première origine : elle seule attrape le **solide retourné**, qu'aucun comptage d'arêtes ne voit. Et chiffrez l'epsilon de dégénérescence au lieu de le laisser à l'agent.
 - [ ] **Étape 4** — mutation : égaliser les deux seuils tue le test d'oscillation.
 - [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
@@ -436,8 +474,11 @@ Une passe par tuile touchée, pas un appel par sommet.
 Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/s**. À z9 un texel vaut 213 m — **dix-sept texels sur la largeur du socle**. Ce n'est pas le flou de la décision 13, **c'est une autre carte**.
 
 - [ ] **Étape 1** — test : à débit observé faible, `zoomSoutenable` rend un zoom inférieur au demandé, et la caméra ne descend pas plus vite que lui.
+- [ ] **Étape 1 ter** — test : après trois réponses de tailles et durées connues, `debitObserve` rend leur débit agrégé ; sur un flux neuf, il rend `null` et **non zéro** — zéro se propagerait en « réseau mort » dans `zoomSoutenable`, `debitObserve`.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
-- [ ] **Étape 3** — implémenter. ⚠️ **Le débit s'observe, il ne se devine pas** : mesurer les octets réellement reçus par seconde, pas `navigator.connection`, qui ment et n'existe pas partout.
+- [ ] **Étape 3** — implémenter. ⚠️ **L'AUDIT PRESCRIT LAISSE PASSER TROIS SABOTAGES SUR SIX — MESURÉ AU BANC, PAS DÉDUIT.** Dalle absente (+7,35), mur manquant (+7,95) et **trou couvrant un quart de la surface** (+9,18 contre 9,568 pour le sain, soit **−4 % seulement**) rendent tous un volume positif et **passent pour sains**. Le plan annonçait « 6 sur 6 » : c'est faux.
+
+  **Le correctif tient en une ligne : calculer le volume signé autour de DEUX origines.** Ce n'est pas le signe qui prouve la fermeture, c'est son **indépendance à l'origine**. Écart mesuré : **0,00 % sur le solide sain, 58 à 296 % sur les trois ratés**. ⚠️ Gardez la première origine : elle seule attrape le **solide retourné**, qu'aucun comptage d'arêtes ne voit. Et chiffrez l'epsilon de dégénérescence au lieu de le laisser à l'agent. ⚠️ **Le débit s'observe, il ne se devine pas** : mesurer les octets réellement reçus par seconde, pas `navigator.connection`, qui ment et n'existe pas partout.
 - [ ] **Étape 4** — mutation.
 - [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
@@ -469,17 +510,27 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 - [ ] **Étape 1** — écrire **six sabotages** et le test qui les attend tous : solide retourné, dalle absente, mur manquant, trou central, triangle dégénéré, NaN.
 - [ ] **Étape 2** — les lancer, vérifier que **chacun** échoue.
-- [ ] **Étape 3** — implémenter.
+- [ ] **Étape 3** — implémenter. ⚠️ **L'AUDIT PRESCRIT LAISSE PASSER TROIS SABOTAGES SUR SIX — MESURÉ AU BANC, PAS DÉDUIT.** Dalle absente (+7,35), mur manquant (+7,95) et **trou couvrant un quart de la surface** (+9,18 contre 9,568 pour le sain, soit **−4 % seulement**) rendent tous un volume positif et **passent pour sains**. Le plan annonçait « 6 sur 6 » : c'est faux.
+
+  **Le correctif tient en une ligne : calculer le volume signé autour de DEUX origines.** Ce n'est pas le signe qui prouve la fermeture, c'est son **indépendance à l'origine**. Écart mesuré : **0,00 % sur le solide sain, 58 à 296 % sur les trois ratés**. ⚠️ Gardez la première origine : elle seule attrape le **solide retourné**, qu'aucun comptage d'arêtes ne voit. Et chiffrez l'epsilon de dégénérescence au lieu de le laisser à l'agent.
 - [ ] **Étape 4** — ⚠️ **le test de non-vacuité** : l'audit doit refuser de rendre un verdict sur une géométrie vide, au lieu de la déclarer saine. **C'est ainsi que le test de silhouette du prototype passait à vide.**
 - [ ] **Étape 5** — mutation sur chacune des trois détections.
 - [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 ### Tâche 6 : `fenetre-bornee.js` — l'extraction
 
-**Fichiers :** créer `src/monde/fenetre-bornee.js` · **modifier `src/plinth.js` et `src/ocean.js`** · tester `test/fenetre-bornee.test.js`
+**Fichiers :** créer `src/monde/fenetre-bornee.js` · **modifier `src/plinth.js`, `src/ocean.js` et `src/fenetre-clip.js`** · tester `test/fenetre-bornee.test.js` **et les 13 `test/damier-*.test.js`**
+
+⚠️ **AVANT D'ÉCRIRE UNE LIGNE, LISEZ CE QUI EXISTE.** `plinth.js:138` `computeSlab` et `plinth.js:232` `buildSlabWalls` (**douze options** — congé, chanfrein, AO de contact, liner, `masqueArrondi`, `bords`, `baseYFloor`) font déjà l'essentiel de ce que `construireFenetre` prétend faire ; `fenetre-clip.js` détient la forme des coins, dont `plinth.js` **et** `ocean.js` tirent la leur.
+
+⚠️ **ET LE DAMIER APPELLE `buildSlabWalls` (`block-grid.js:768`)** — 13 fichiers de test, 243 tests, **empreintes bit à bit** (`damier-bords.test.js:351`). Ce plan ne prononçait pas une fois le mot « damier ». **Dites ce qu'il advient de `bords`, `masqueArrondi`, `baseYFloor`, `bordsHero`** — et portez la signature de `construireFenetre` aux douze options, ou écrivez pourquoi les sept autres se perdent.
+
+⚠️ **Collision de nom : `exposantCoin` est déjà un export de `fenetre-clip.js:71`. Renommez le paramètre.**
 
 **Interfaces produites :**
 - `construireFenetre({ emprise, n, rayonCoin, exposantCoin, profondeurDalle, exageration })` → `{ geometrie, indices, boiteEnglobante }`
+⚠️ **QUI PRODUIT `emprise` ? PERSONNE — et trois tâches la consomment (4 bis, 6, 7).** C'est le jumeau non signalé de `debitObserveMbs`. Deux issues, à trancher **avant** d'entamer la Tâche 6 : soit `seuil-socle.js` la rend en même temps que `socleVisible`, soit `dem-emprise.js` la fournit déjà sous un autre nom (`originesEmprise`, `rectFenetre`) — **allez voir avant d'en écrire une neuvième version**.
+
 - `emprise` = `{ ouest, sud, est, nord }` en degrés. ⚠️ **`ouest > est` signifie que l'emprise franchit l'antiméridien** — c'est légal et le test l'exige.
 - ⚠️ **Au-delà de 85,051° de latitude** (la limite de Mercator), l'emprise est **écrêtée** à cette valeur. Le prototype y était « silencieusement faux mais fermé » ; ici on tranche : on écrête, et un test le vérifie.
 - `exageration` : sans elle, la dalle et les parois n'ont pas la bonne hauteur. ⚠️ **CE PLAN ÉCRIVAIT « défaut de production : 18 ». C'EST L'EXAGÉRATION DU GLOBE** (`globe.js:278`), **pas celle du socle.** Le socle vaut `BASE_EXAG = 2,8`, modulée par zoom — `{3: 2.5, 4: 2.5, 5: 5, 6: 4, 7: 3.2}` dans `main.js`. **À trancher explicitement : laquelle `construireFenetre` reçoit, et pourquoi.** Un facteur six d'écart entre les deux lectures.
@@ -495,6 +546,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 ⚠️ **Par RÉÉCHANTILLONNAGE, jamais par découpe du maillage du quadtree.** C'est la décision d'architecture du §4.
 
 - [ ] **Étape 1** — test : une fenêtre construite puis auditée par `auditerSolide` est fermée, orientée, sans dégénéré ni NaN.
+- [ ] **Étape 1 ter** — test : après trois réponses de tailles et durées connues, `debitObserve` rend leur débit agrégé ; sur un flux neuf, il rend `null` et **non zéro** — zéro se propagerait en « réseau mort » dans `zoomSoutenable`, `debitObserve`.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
 - [ ] **Étape 3** — implémenter : grille régulière propre à la fenêtre, hauteurs cherchées dans le cache en coordonnées de pixel global, parois dont les sommets hauts **sont** les sommets de bord, dalle en éventail sur le même anneau bas.
 - [ ] **Étape 4** — test : sur cent emprises tirées au hasard, dont l'antiméridien et au-delà de 85° de latitude, l'audit passe **cent fois** — ⚠️ **APRÈS `majHauteurs`, sur un flux bouchonné à relief CONNU.**
@@ -504,6 +556,12 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 - [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 ### Tâche 7 : les deux résolutions et la zone morte
+
+⚠️ **CETTE TÂCHE RÉINVENTE `src/fenetre-finesse.js`, QUI EST EN PRODUCTION.** Module pur, testable sous node, il porte déjà `pasFinesse`, `resDeFinesse`, `REPOS_S = 0,4`, `V_REPOS = 2`, `RES_REPOS_MAX = 768` — plus `Terrain.resMaillage` (`terrain.js:2016`) et `RES_FENETRE_CONTINUE = 384` (`terrain.js:61`). **Trancher d'abord : étendre ou remplacer.**
+
+⚠️ **Et ses chiffres sont faux contre le dépôt :** les résolutions `128 | 256` sont **trois fois sous la production** (384 / 768), et le budget « 1,7 / 8,3 ms » vient d'un prototype **sans socle**, alors que ce dépôt mesure **5,5 / 8,7 / 14,6 / 24,5 ms** (script rejouable cité en `plinth.js:876`).
+
+⚠️ **L'invariant que ce dépôt a payé pour apprendre, et que cette tâche perdait : socle et maillage à la même résolution, sinon ils se décollent** (`plinth.js:865-879`).
 
 **Fichiers :** modifier `src/monde/fenetre-bornee.js` · tester `test/fenetre-resolution.test.js`
 
@@ -518,8 +576,11 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 ⚠️ **RAPPEL DE LA DÉCISION 13, PARCE QUE C'EST ICI QU'ON EST TENTÉ DE L'ENFREINDRE.** Baisser à N=128 pendant le mouvement **rend l'image plus grossière pendant qu'on bouge**. C'est voulu, Adrien l'a validé, et c'est le contrat. **Ne compensez pas** en forçant N=256 dès que « ça a l'air lent » : vous reprendriez les 8,3 ms et les 12 % de dépassement que cette tâche existe pour éviter.
 
 - [ ] **Étape 1** — test : en mouvement `resolutionPour` rend 128, à l'arrêt 256 ; une dérive d'emprise sous le seuil ne déclenche **aucune** reconstruction.
+- [ ] **Étape 1 ter** — test : après trois réponses de tailles et durées connues, `debitObserve` rend leur débit agrégé ; sur un flux neuf, il rend `null` et **non zéro** — zéro se propagerait en « réseau mort » dans `zoomSoutenable`, `debitObserve`.
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
-- [ ] **Étape 3** — implémenter.
+- [ ] **Étape 3** — implémenter. ⚠️ **L'AUDIT PRESCRIT LAISSE PASSER TROIS SABOTAGES SUR SIX — MESURÉ AU BANC, PAS DÉDUIT.** Dalle absente (+7,35), mur manquant (+7,95) et **trou couvrant un quart de la surface** (+9,18 contre 9,568 pour le sain, soit **−4 % seulement**) rendent tous un volume positif et **passent pour sains**. Le plan annonçait « 6 sur 6 » : c'est faux.
+
+  **Le correctif tient en une ligne : calculer le volume signé autour de DEUX origines.** Ce n'est pas le signe qui prouve la fermeture, c'est son **indépendance à l'origine**. Écart mesuré : **0,00 % sur le solide sain, 58 à 296 % sur les trois ratés**. ⚠️ Gardez la première origine : elle seule attrape le **solide retourné**, qu'aucun comptage d'arêtes ne voit. Et chiffrez l'epsilon de dégénérescence au lieu de le laisser à l'agent.
 - [ ] **Étape 4** — mutation : supprimer la zone morte doit tuer le test de non-reconstruction.
 - [ ] **Étape 5** — ⚠️ **mesurer sur un vol, et donner les deux chiffres** : reconstructions par seconde avant et après la zone morte.
 - [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
@@ -555,9 +616,9 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 ⚠️ **DEUX DÉCISIONS N'ONT TOUJOURS AUCUNE TÂCHE** — signalé deux fois : la **décision 6** (format d'impression à l'export) et la **décision 11** (60 img/s sur portable récent). Et `src/palier-machine.js`, **le module qui fait déjà ce tri de matériel dans ce dépôt**, n'est cité nulle part. Le §10 ne peut pas certifier « les treize décisions ont chacune leur tâche » tant que c'est vrai.
 
-**Cohérence des noms** — employés à l'identique partout : `socleVisible`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `demanderEmprise`, `PLAFOND_FILE`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`.
+**Cohérence des noms** — employés à l'identique partout : `socleVisible`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `demanderEmprise`, `PLAFOND_FILE`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`, `debitObserve`.
 
-**Ordre imposé, et il compte :** 4 bis (le flux) **avant** 6 (l'extraction), parce que l'extraction s'appuie sur une interface qui se coince aujourd'hui. Et 5 (l'audit) **avant** 6, parce que sans instrument on ne saura pas si l'extraction marche — le prototype s'est cru étanche pendant tout son vol.
+**Ordre imposé, et il compte :** **4 → 4 alpha → 4 bis → 4 ter** d'abord (voir la Tâche 4). ⚠️ **L'amendement de la Tâche 4 bis réclamé par la 4 ter — l'ajout de `debitObserve(flux)` — se fait DANS la 4 bis, à son tour, pas après.** ⚠️ **Et la Tâche 3 n'apparaît dans aucun énoncé d'ordre : elle passe avant 6, qui consomme son `emprise`.** Puis 4 bis (le flux) **avant** 6 (l'extraction), parce que l'extraction s'appuie sur une interface qui se coince aujourd'hui. Et 5 (l'audit) **avant** 6, parce que sans instrument on ne saura pas si l'extraction marche — le prototype s'est cru étanche pendant tout son vol.
 
 **Le risque principal n'est plus la géométrie** : l'attaque a confirmé qu'on ne peut pas la déchirer. **C'est le flux** — plafond, annulation, éviction — et **le réseau**, qui décide du zoom réellement atteint.
 
