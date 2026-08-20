@@ -179,12 +179,24 @@ Le précédent : deck.gl #7527, « casse à partir de z17 à cause du float32 »
 
 **Le correctif :** un repère relatif au centre de la tuile (*relative-to-center*) dans `_buildMesh` — les positions des sommets sont exprimées depuis le centre de leur propre tuile, et la position mondiale vit dans la matrice de l'objet. Environ vingt lignes, **aucun changement de nuanceur**. La magnitude tombe de 100 à ~0,3, et le pas de 0,49 m à ~1 mm.
 
-- [ ] **Étape 1** — écrire le test : pour une tuile à un zoom fin, deux sommets voisins distants d'un mètre doivent avoir des positions **distinctes** en float32. ⚠️ Le test doit être écrit sur `Math.fround` pour reproduire vraiment la précision du GPU, pas sur les doubles de JavaScript.
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue aux zooms fins.
-- [ ] **Étape 3** — implémenter le repère relatif.
-- [ ] **Étape 4** — vérifier par mutation : revenir aux positions absolues doit tuer le test.
-- [ ] **Étape 5** — ⚠️ **regarder le globe de loin**, pas seulement de près : un repère relatif mal posé décale les tuiles les unes par rapport aux autres, et ça ne se voit qu'à l'échelle planétaire.
-- [ ] **Étape 6** — `npm test`, `node --check`, `npx vite build`, audit disque-vs-liste, commit.
+**FAIT le 2026-08-20, commit `150f817`.** Pas représentable : **0,486 m → 3,8 mm à z11, 1,9 mm à z13, 0,48 mm de z15 à z20**. Trois mutants sur quatre tués.
+
+- [x] **Étape 1** — écrire le test.
+- [x] **Étape 2** — le lancer, vérifier qu'il échoue.
+- [x] **Étape 3** — implémenter le repère relatif.
+- [x] **Étape 4** — vérifier par mutation.
+- [x] **Étape 5** — regarder le globe de loin.
+- [x] **Étape 6** — suite complète, build, audit, commit.
+
+⚠️ **DEUX CORRECTIONS À CE PLAN, TROUVÉES EN L'EXÉCUTANT.**
+
+**1. Le test que j'avais écrit ne mordait pas.** Je demandais : « deux sommets distants d'un mètre doivent avoir des positions distinctes en float32 ». Mesuré sur **33 345 paires** réparties sur le globe : **zéro** ne s'effondre — un écart de norme 1 m a toujours au moins une composante valant 1,19 pas représentable. **Cette assertion passe toujours, avant comme après, et ne prouve rien.**
+
+Celle qui mord est l'écart **RESTITUÉ** : avant le correctif, un mètre était relu entre **0,687 m et 1,458 m** selon l'endroit du globe ; après, à 2·10⁻⁴ m près. **C'est la quantité qu'il faut mesurer — pas la distinction des positions, mais l'erreur sur la distance qu'on en relit.**
+
+**2. L'origine se prend sur la surface DÉPLACÉE, pas sur le centre de la tuile.** À l'exagération 18 de production, un sommet à 8 848 m d'altitude se trouve à 2,5 unités du centre non déplacé — prendre `t.center` aurait laissé le pas à 1,5 cm au lieu de 0,48 mm. Le facteur mille se perd sur ce seul choix.
+
+**Ce qui reste non vérifié :** aucune image en mouvement (le volet navigateur ne composite pas), rien au-delà de z11 à l'œil puisque `MAX_Z` tient toujours, et rien sur portable. Les gains z15–z20 sont prouvés par le calcul et le test, pas par l'œil.
 
 ### Tâche 4 : descendre le globe sous z11
 
