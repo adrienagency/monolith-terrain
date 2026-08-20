@@ -344,7 +344,23 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 
 **Si cette tâche est jugée trop lourde**, l'alternative honnête est de **plafonner `MAX_Z` à 13 et de l'écrire** — mais alors la décision 1 (« de l'orbite au sol ») devient fausse, et il faut le dire à Adrien.
 
-### Tâche 4 : descendre le globe sous z11
+### Tâche 4 : rendre `MAX_Z` ATTEIGNABLE — et non le descendre
+
+⚠️ **LA PRÉMISSE DE CETTE TÂCHE ÉTAIT FAUSSE, ET C'EST UN AUDIT DU 2026-08-20 QUI L'A MESURÉ.**
+
+Ce plan écrivait « le quadtree s'arrête à z11 ». **Il s'arrête à z6.** Mesuré sur les six paliers de `DIVE_TIERS`, de 1 600 km d'altitude jusqu'à 8 km : **cinq lignes de résultats strictement identiques** — cache 420, 305 tuiles dessinées, zoom effectif **6**. Un facteur 200 d'altitude qui ne change rien à l'écran, et **`MAX_Z = 11` est du code mort depuis toujours.**
+
+**Trois causes, mesurées, et aucune n'est « descendre une constante » :**
+
+1. **Le crédit de raffinement est un point fixe arithmétique** (`globe.js:759`). `_credit = CACHE_MAX − tiles.size + marge` : à saturation, `marge` tombe à **0**, donc le crédit vaut **0**, donc aucune tuile n'est créée, donc la taille ne bouge plus. ⚠️ **Le commentaire des lignes 747-752 affirme que `marge` écarte ce gel** — et dit même qu'un crédit fondé sur la seule place libre « GÈLERAIT le globe ». **Il ne fait que le retarder.** Un commentaire juste sur l'intention et faux sur le résultat.
+2. **Le seuil d'horizon est une constante** (`globe.js:770`) : `dot < −0.35`, soit 110°, au lieu du vrai horizon géométrique `R_GLOBE / |camPos|`. À 8 km d'altitude le vrai seuil vaut **0,99893** : le code parcourt et raffine une calotte **environ 1 800 fois trop large**.
+3. **Aucun test de frustum dans `_traverse`.** En orbite basse, **10 à 20 % seulement** des tuiles dessinées sont dans le champ.
+
+**Le gain mesuré des trois corrections réunies : de z6 / 305 tuiles dessinées à z11 / 74 tuiles dessinées.** Estimé à une heure de travail. ⚠️ **C'est un facteur qu'aucune micro-optimisation n'approche — et c'est disponible avant même le pivot.**
+
+⚠️ **Deux autres trouvailles du même audit, à traiter ici :**
+- **Chaque tuile retient trois copies de la même grille de hauteurs** — `t.heights` (lu une seule fois, `:590`), le canevas retenu par la `CanvasTexture`, et la texture GPU. **250 Mo mesurés pour 420 tuiles**, quand le commentaire de la ligne 168 annonce « 380 Mo pour 1 500 » : la documentation sous-estime d'un facteur **2,4**.
+- **Les normales du bord de tuile sont aplaties de moitié** (`:623-648`) : `sampleHeights` écrête les échantillons hors [0,1] alors que `tileToLatLon` fournit la position complète. Pente mesurée **407 m au bord contre 853 m au centre**, d'où un liseré d'éclairage discontinu autour de chaque tuile.
 
 **Fichiers :** modifier `src/globe.js` (`MAX_Z`, `CACHE_MAX`) · tester `test/globe-reseau.test.js`, `test/globe-eviction.test.js`
 
