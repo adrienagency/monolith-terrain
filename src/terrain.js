@@ -6,7 +6,7 @@ import { gridTemplate } from './grid-template.js'
 import { gridNormals } from './grid-normals.js'
 import { detailField, detailFieldEmprise, accordeDetailScale, tintField } from './detail-noise.js'
 import { analyseMemoLire, analyseMemoEcrire } from './dem-memo.js'
-import { landMaskFromField, BASSIN_FRAC_DEFAUT } from './sea-mask.js'
+import { coteMondialeDepuisChamp, rayonIncertitude, BASSIN_FRAC_DEFAUT } from './sea-mask.js'
 import { ATLAS_ANALYSE, ATLAS_MER, fracBassinEmprise } from './dem-emprise.js'
 // les huit demi-plans de la fenêtre, purs et testés — voir src/fenetre-clip.js
 // ⚠️ ALIASÉ : la méthode `Terrain.plansFenetre()` rend des `THREE.Plane`, la
@@ -1771,8 +1771,8 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const img = texture ? coastImage || null : null
     if (img !== this._coastImage) {
       this._coastImage = img
-      this._coastLand = null // cache landMask (dépend de dem.size) — invalidé
-      // ⚠️ withAnalysis: false — la landMask ne change QUE la mer. Recuire les
+      this._coastLand = null // cache de la côte mondiale (dépend de dem.size) — invalidé
+      // ⚠️ withAnalysis: false — la côte ne change QUE la mer. Recuire les
       // ~10 flous de l'analyse ici coûterait 387 ms pour un résultat identique.
       if (rebuildFields && this.dem?.data) this._buildFields({ withAnalysis: false })
     }
@@ -2598,7 +2598,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // ⚠️ Ces deux fonctions rendent un PLAFOND, `_seaSize` rend la TAILLE OBTENUE.
   // La distinction n'est pas cosmétique : `resampleField` ne grossit jamais, donc
   // un atlas de 2 304 demandé à un MNT de 2 304 rend 2 304, et à un MNT de 1 536
-  // (emprise en tuiles 256 px, zooms grossiers) rend 1 536. La landMask est
+  // (emprise en tuiles 256 px, zooms grossiers) rend 1 536. La côte mondiale est
   // indexée CELLULE POUR CELLULE par buildSeaMask : la cuire à la taille
   // DEMANDÉE pendant que le champ sort à la taille SOURCE rendrait des polders
   // décalés — un défaut muet, pas une erreur.
@@ -2612,30 +2612,42 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
 
   // Le côté du masque de mer de CE bloc : le MNT au centre, le plafond sur une
   // dalle voisine (voir seaMax). Une seule source de vérité, parce que deux
-  // consommateurs doivent tomber d'accord au pixel près — la landMask ci-dessous
+  // consommateurs doivent tomber d'accord au pixel près — la côte ci-dessous
   // et le travail posté au Worker.
   _seaSize(dem) {
     const max = this._seaMax(dem)
     return max > 0 && dem.size > max ? max : dem.size
   }
 
-  // landMask depuis le masque côtier (si reçu) : rééchantillonné à la grille
-  // du MASQUE DE MER et mis en cache — recalculé seulement si l'image ou cette
-  // taille change.
+  // La CÔTE MONDIALE depuis le masque côtier (si reçu) : rééchantillonnée à la
+  // grille du MASQUE DE MER, en trois états, et mise en cache — recalculée
+  // seulement si l'image, cette taille ou le rayon d'incertitude changent.
   // ⚠️ L'IDENTITÉ de ce tableau sert de clé de péremption (voir _buildFields) :
   // le remplacer par un tableau neuf au même contenu périmerait pour rien un
   // calcul encore juste.
   // ⚠️ ET LA TAILLE EST CELLE DU MASQUE DE MER, PAS CELLE DU MNT. buildSeaMask
-  // indexe la landMask cellule pour cellule : la caler sur le MNT pendant que le
-  // masque est plafonné rendrait des polders décalés — un défaut MUET, pas une
-  // erreur. (landMaskFromField rééchantillonne depuis le masque côtier 1024²,
-  // il ne perd donc rien à cuire directement à la bonne taille.)
-  _landMaskFor(dem) {
+  // l'indexe cellule pour cellule : la caler sur le MNT pendant que le masque
+  // est plafonné rendrait des polders décalés — un défaut MUET, pas une erreur.
+  // (le rééchantillonnage part du masque côtier 2048², il ne perd donc rien à
+  // cuire directement à la bonne taille.)
+  // ⚠️ LE RAYON D'INCERTITUDE SE MESURE SUR LA GRILLE DU MASQUE, pas sur celle
+  // du MNT : `_seaSize` peut plafonner, et une cellule de masque vaut alors
+  // plusieurs cellules de MNT. Le calculer sur le MNT donnerait une bande neuf
+  // fois trop large sur l'atlas 3×3 — muet, là encore.
+  _coteMondialeFor(dem) {
     if (!this._coastImage) return null
     const taille = this._seaSize(dem)
-    if (!this._coastLand || this._coastLand.img !== this._coastImage || this._coastLand.size !== taille)
-      this._coastLand = { img: this._coastImage, size: taille, mask: landMaskFromField(this._coastImage, taille) }
-    return this._coastLand.mask
+    const metresParCellule = (dem.metersPerPixel * dem.size) / taille
+    const rayon = rayonIncertitude(metresParCellule)
+    const c = this._coastLand
+    if (!c || c.img !== this._coastImage || c.size !== taille || c.rayon !== rayon)
+      this._coastLand = {
+        img: this._coastImage,
+        size: taille,
+        rayon,
+        cote: coteMondialeDepuisChamp(this._coastImage, taille, { rayonIncertain: rayon }),
+      }
+    return this._coastLand.cote
   }
 
   // ------------------------------------------------------- CHAMPS DÉPORTÉS
@@ -2658,7 +2670,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // visible (zoom, exagération, template) l'utilisateur ne voit jamais l'état
   // intermédiaire. Il voit le voile, puis la carte finie — comme avant.
   //
-  // ⚠️ PÉREMPTION : la clé ne porte QUE le MNT, la landMask et les deux plafonds
+  // ⚠️ PÉREMPTION : la clé ne porte QUE le MNT, la côte et les deux plafonds
   // — les seules entrées du calcul. Une invalidation plus large (un compteur
   // bumpé à chaque rebuild) jetterait des résultats encore justes à chaque coup
   // de curseur d'exagération. Voir jobStillValid.
@@ -2727,7 +2739,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       this._fieldsEnVol = null
       return (this.fieldsReady = Promise.resolve(null))
     }
-    const landMask = this._landMaskFor(dem)
+    const cote = this._coteMondialeFor(dem)
     // L'analyse ne dépend QUE des altitudes brutes : ni de l'exagération, ni de
     // la résolution du maillage, ni de la palette. On la mémorise donc sur
     // l'identité du DEM — sans ça, allumer le mode puis régénérer la recalcule
@@ -2759,18 +2771,18 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // uAnalysisOn vaut encore 0 — l'uniforme ne monte qu'à l'ARRIVÉE. On rend
     // alors la promesse EN COURS au lieu de reposter (voir jobCouvertParEnVol,
     // qui garde ouverte la porte du recalcul légitime).
-    const demande = { dem, landMask, maxSize, seaMax, analyse }
+    const demande = { dem, cote, maxSize, seaMax, analyse }
     if (jobCouvertParEnVol(this._fieldsEnVol, demande)) return this.fieldsReady
     this._fieldsEnVol = demande
-    this._fieldKey = { dem, landMask, maxSize, seaMax }
+    this._fieldKey = { dem, cote, maxSize, seaMax }
     // ⚠️ DEUX CLÉS, PAS UNE — et c'est un bug vu à l'écran, pas une précaution.
-    // Le masque de mer dépend de la landMask ; l'analyse de relief n'en dépend
+    // Le masque de mer dépend de la côte mondiale ; l'analyse de relief n'en dépend
     // PAS (elle ne lit que les altitudes). Sur une dalle voisine, le trait de
     // côte arrive ~300 ms après le lancement, donc AVANT la fin de l'analyse :
     // avec une clé commune, l'arrivée du trait de côte périmait une analyse
     // parfaitement juste et la dalle restait sans peigné à côté d'un centre
     // peigné. L'invalidation trop large coûte aussi cher que la trop laxiste.
-    const cleMer = { dem, landMask, seaMax }
+    const cleMer = { dem, cote, seaMax }
     const cleAnalyse = { dem, maxSize }
     return (this.fieldsReady = scheduleTerrainJob({
       key: { dem }, // le MNT périme TOUT ; le reste se juge champ par champ
@@ -2780,7 +2792,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
         metersPerPixel: dem.metersPerPixel,
         maxSize,
         seaMax,
-        landMask,
+        coteMondiale: cote,
         withAnalysis: analyse,
         // les deux options de l'atlas — voir l'en-tête. Hors mode continu elles
         // valent `false` et `undefined`, et computeTerrainJob est alors
@@ -2822,7 +2834,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     this._fieldKey = null
     this._fieldsOff = true
     // ⚠️ et on lâche la trace du travail en vol : elle RETIENT le MNT et la
-    // landMask de la dalle qu'on détruit (9 Mo pour le premier). Le damier
+    // côte mondiale de la dalle qu'on détruit (9 Mo pour le premier). Le damier
     // churn à chaque zoom — ce serait une fuite de tas par dalle détruite.
     this._fieldsEnVol = null
   }

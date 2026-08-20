@@ -47,16 +47,25 @@
 // (dem-emprise.js). Le DÉFAUT, lui, ne bouge pas — deux tests en dépendent.
 export const BASSIN_FRAC_DEFAUT = 0.02
 
-export function buildSeaMask(dem, { seaLevelM = 0.5, minBasinFrac = BASSIN_FRAC_DEFAUT, landMask = null } = {}) {
+export function buildSeaMask(
+  dem,
+  { seaLevelM = 0.5, minBasinFrac = BASSIN_FRAC_DEFAUT, landMask = null, coteMondiale = null } = {}
+) {
   const { data, size } = dem
   const n = size * size
   const isLow = new Uint8Array(n) // 1 = at/below sea level (et pas terre du masque)
-  for (let i = 0; i < n; i++) isLow[i] = data[i] <= seaLevelM && !(landMask && landMask[i]) ? 1 : 0
+  // TERRE, dans les deux masques, est un VETO : ni mer, ni chemin pour le flood.
+  // C'est ce qui sauve les polders, et `coteMondiale` le fait exactement comme
+  // `landMask` — les deux peuvent coexister, aucun ne relâche l'autre.
+  for (let i = 0; i < n; i++) {
+    const terre = (landMask && landMask[i]) || (coteMondiale && coteMondiale[i] === TERRE)
+    isLow[i] = data[i] <= seaLevelM && !terre ? 1 : 0
+  }
 
   const label = new Int32Array(n).fill(-1)
   const stack = new Int32Array(n)
   const areas = [] // per-component cell count
-  const touchesBorder = [] // per-component: reachable from an edge
+  const touchesBorder = [] // per-component: amorcée par un bord OU par la côte
   let comp = 0
 
   for (let start = 0; start < n; start++) {
@@ -72,6 +81,12 @@ export function buildSeaMask(dem, { seaLevelM = 0.5, minBasinFrac = BASSIN_FRAC_
       const x = i % size
       const y = (i / size) | 0
       if (x === 0 || y === 0 || x === size - 1 || y === size - 1) border = true
+      // ⚠️ LA SECONDE AMORCE, ET C'EST TOUT LE CORRECTIF : une composante basse
+      // dont la côte vectorielle déclare mer ne serait-ce qu'UNE cellule EST la
+      // mer, qu'un chemin bas la relie ou non au bord du cadre. Sans cette
+      // ligne, le verdict dépend d'où passe le cadre — la même cuvette bleue
+      // quand elle touche le bord du socle, verte cent pixels plus loin.
+      if (coteMondiale && coteMondiale[i] === MER) border = true
       // 4-neighbourhood flood over connected low cells
       if (x > 0 && isLow[i - 1] && label[i - 1] === -1) (label[i - 1] = comp), (stack[top++] = i - 1)
       if (x < size - 1 && isLow[i + 1] && label[i + 1] === -1) (label[i + 1] = comp), (stack[top++] = i + 1)
@@ -106,6 +121,12 @@ export function buildSeaMask(dem, { seaLevelM = 0.5, minBasinFrac = BASSIN_FRAC_
 // même contenu, indexé sans le facteur 4 — trois copies de 16,78 Mo devenues
 // une de 4,19 sur le bloc central.
 export function landMaskFromField(field, size) {
+  return reechantillonne(field, size, (v) => (v > 127 ? 255 : 0))
+}
+
+// Le rééchantillonnage, nu — partagé par la landMask et la côte mondiale pour
+// qu'aucune des deux ne puisse dériver de l'autre d'un demi-texel.
+function reechantillonne(field, size, classe) {
   const { data, width, height } = field
   const out = new Uint8Array(size * size)
   for (let y = 0; y < size; y++) {
@@ -113,7 +134,98 @@ export function landMaskFromField(field, size) {
     const row = py * width
     for (let x = 0; x < size; x++) {
       const px = Math.min(width - 1, ((x * width) / size) | 0)
-      out[y * size + x] = data[row + px] > 127 ? 255 : 0
+      out[y * size + x] = classe(data[row + px])
+    }
+  }
+  return out
+}
+
+// ══════════ LA CÔTE MONDIALE, ET SES TROIS ÉTATS ════════════════════════════
+//
+// La `landMask` ci-dessus ne sait dire qu'une chose : « ici c'est la TERRE ».
+// C'est une autorité à SENS UNIQUE, et le prix se mesure : à Bergen z10, sur le
+// bloc vivant, 11 025 cellules sur les 739 591 que le trait de côte déclare mer
+// ET qui sont sous le niveau de la mer sont peintes en terre par la diffusion,
+// parce qu'aucun chemin bas ne les relie au bord du cadre — fjords, chenaux
+// derrière un seuil, mouillages. La côte le sait ; elle n'avait pas le droit de
+// le dire.
+//
+// D'où trois états au lieu de deux. La côte vectorielle tranche MER et TERRE ;
+// la diffusion depuis les bords du cadre ne décide plus que d'INDECIS, c'est-à-
+// dire de ce dont la côte n'a rien à dire. C'est la seule des statistiques
+// calculées sur le cadre qui soit BINAIRE — un bassin se remplit ou ne se
+// remplit pas — donc la seule qu'un lissage dans le temps ne pourra pas
+// rattraper : lissée, elle donnerait un lac en fondu, pire qu'un saut.
+export const INDECIS = 0
+export const MER = 1
+export const TERRE = 2
+
+// ⚠️ ET LA CÔTE NE VAUT PAS PLUS QUE SA PRÉCISION. Les polygones OSM de
+// `public/data/coast-z6` sont pré-simplifiés à 30 m (Visvalingam, voir
+// coast-z6.README.md). Mesuré autour d'un bloc z16 à Brest : 51 segments pour
+// 1,2 km de côté, longueur MÉDIANE 123 m, jusqu'à 849 m. Rasterisée telle
+// quelle à 0,79 m la cellule, cette côte-là dessinerait un polygone à facettes
+// là où le MNT donne un rivage fin — exactement la famille de défauts
+// (« une ligne droite qui ne suit aucune côte ») déjà relevée deux fois.
+//
+// La bande d'incertitude est la réponse : à moins de `TOLERANCE_COTE_M` du
+// trait, la côte se TAIT (INDECIS) et le MNT garde la main sur la forme du
+// rivage ; au-delà, elle tranche la topologie. Chacun ce qu'il sait faire.
+export const TOLERANCE_COTE_M = 30
+// Plafond : au-delà, la bande mangerait le bloc entier au lieu de border un
+// trait (et le coût du filtre, lui, reste linéaire — voir bandeIncertaine).
+export const RAYON_INCERTAIN_MAX = 64
+
+export function rayonIncertitude(metresParCellule, tolerance = TOLERANCE_COTE_M) {
+  if (!(metresParCellule > 0)) return 0
+  return Math.min(RAYON_INCERTAIN_MAX, Math.round(tolerance / metresParCellule))
+}
+
+/**
+ * Champ côtier rasterisé ({data,width,height}, >127 = terre) → la côte mondiale
+ * à la grille du masque de mer, en trois états.
+ *
+ * `rayonIncertain` est en CELLULES de cette grille (voir rayonIncertitude) : 0
+ * rend le complément strict — TERRE/MER, aucun INDECIS — c'est-à-dire
+ * exactement la landMask d'avant, plus le droit de dire la mer.
+ */
+export function coteMondialeDepuisChamp(field, size, { rayonIncertain = 0 } = {}) {
+  const brut = reechantillonne(field, size, (v) => (v > 127 ? TERRE : MER))
+  return rayonIncertain > 0 ? bandeIncertaine(brut, size, rayonIncertain) : brut
+}
+
+// Une cellule ne reste tranchée que si TOUT son voisinage carré de rayon r
+// dit la même chose ; sinon elle passe INDECIS. Séparable et à fenêtre
+// glissante — deux passes en O(n), indépendantes de r : à z16 le rayon vaut 38
+// cellules, un voisinage naïf coûterait 77² lectures par cellule.
+// Bords : clamp-to-edge, la convention de blurMask.
+function bandeIncertaine(brut, size, r) {
+  const n = size * size
+  const w = 2 * r + 1
+  const pince = (v) => (v < 0 ? 0 : v > size - 1 ? size - 1 : v)
+  const ligne = new Int32Array(n) // nombre de TERRE dans la fenêtre horizontale
+  for (let y = 0; y < size; y++) {
+    const o = y * size
+    let s = 0
+    for (let dx = -r; dx <= r; dx++) s += brut[o + pince(dx)] === TERRE ? 1 : 0
+    ligne[o] = s
+    for (let x = 1; x < size; x++) {
+      s -= brut[o + pince(x - 1 - r)] === TERRE ? 1 : 0
+      s += brut[o + pince(x + r)] === TERRE ? 1 : 0
+      ligne[o + x] = s
+    }
+  }
+  const out = new Uint8Array(n)
+  const total = w * w
+  const verdict = (s) => (s === total ? TERRE : s === 0 ? MER : INDECIS)
+  for (let x = 0; x < size; x++) {
+    let s = 0
+    for (let dy = -r; dy <= r; dy++) s += ligne[pince(dy) * size + x]
+    out[x] = verdict(s)
+    for (let y = 1; y < size; y++) {
+      s -= ligne[pince(y - 1 - r) * size + x]
+      s += ligne[pince(y + r) * size + x]
+      out[y * size + x] = verdict(s)
     }
   }
   return out

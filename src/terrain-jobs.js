@@ -33,11 +33,16 @@ import { detectLakes } from './lake.js'
  * champ en UV MONDE : sa taille lui est indifférente, exactement comme
  * l'analyse.
  *
- * ⚠️ ET LA landMask DOIT ARRIVER À LA TAILLE DU MASQUE, pas à celle du MNT :
+ * ⚠️ ET LA CÔTE DOIT ARRIVER À LA TAILLE DU MASQUE, pas à celle du MNT :
  * `buildSeaMask` l'indexe cellule pour cellule. C'est terrain.js qui la
- * rasterise (`_landMaskFor`), donc c'est lui qui applique le même plafond —
+ * rasterise (`_coteMondialeFor`), donc c'est lui qui applique le même plafond —
  * un tableau à la mauvaise taille rendrait des polders au hasard, pas une
  * erreur bruyante.
+ *
+ * ⚠️ `coteMondiale` est la côte vectorielle en TROIS états (sea-mask.js) et
+ * c'est elle que la production passe désormais ; `landMask`, qui ne savait dire
+ * que la terre, reste accepté et se combine avec elle (aucun des deux ne
+ * relâche l'autre). Sans l'une ni l'autre, résultat bit-à-bit identique.
  *
  * ⚠️ `merMinPool` et `minBasinFrac` sont LES DEUX RÉGLAGES DE L'ATLAS 3×3, et
  * ils sont strictement OPT-IN. Le premier échange la moyenne contre un minimum
@@ -62,6 +67,7 @@ export function computeTerrainJob({
   maxSize = 0,
   seaMax = 0,
   landMask = null,
+  coteMondiale = null,
   withAnalysis = true,
   merMinPool = false,
   minBasinFrac = undefined,
@@ -74,7 +80,10 @@ export function computeTerrainJob({
   const mer = merMinPool ? minPoolField(data, size, seaMax) : resampleField(data, size, seaMax)
   // `minBasinFrac: undefined` laisse le DÉFAUT de buildSeaMask s'appliquer —
   // c'est ce qui rend l'ajout invisible hors mode continu.
-  const m = blurMask(buildSeaMask({ data: mer.data, size: mer.size }, { landMask, minBasinFrac }), 1)
+  const m = blurMask(
+    buildSeaMask({ data: mer.data, size: mer.size }, { landMask, coteMondiale, minBasinFrac }),
+    1
+  )
   return { analysis: a ? a.rgba : null, analysisSize: a ? a.size : 0, sea: m.mask, seaSize: m.size }
 }
 
@@ -145,7 +154,7 @@ export function computeLakeJob({ data, size }) {
  */
 export function jobStillValid(lance, actuel) {
   if (!lance || !actuel) return false
-  for (const champ of ['dem', 'landMask', 'maxSize', 'seaMax']) {
+  for (const champ of ['dem', 'landMask', 'cote', 'maxSize', 'seaMax']) {
     if (champ in lance && lance[champ] !== actuel[champ]) return false
   }
   return true
@@ -182,7 +191,7 @@ export function jobStillValid(lance, actuel) {
  */
 export function jobCouvertParEnVol(enVol, neuf) {
   if (!enVol || !neuf) return false
-  for (const champ of ['dem', 'landMask', 'maxSize', 'seaMax']) {
+  for (const champ of ['dem', 'landMask', 'cote', 'maxSize', 'seaMax']) {
     if (enVol[champ] !== neuf[champ]) return false
   }
   return !neuf.analyse || !!enVol.analyse
