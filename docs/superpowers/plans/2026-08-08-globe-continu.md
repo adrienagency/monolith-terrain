@@ -283,6 +283,26 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 
 ## 6. PHASE 1 — Le flux et la caméra
 
+### ⚠️ PALLIATIF OU PIVOT : LE TRI QUI MANQUAIT À CE PLAN
+
+**Adrien, le 2026-08-20 :** « *ce que je veux au niveau de la navigation, c'est un Google Maps like, **pas des crans**.* »
+
+⚠️ **CE PLAN CONTIENT DEUX FAMILLES DE TÂCHES, ET IL NE LE DISAIT PAS.** Les unes suppriment les **symptômes** du cran — le rideau, le saut, le pop-up, le gel. Les autres suppriment **le cran lui-même**. Les premières travaillent sur un mécanisme que les secondes effacent.
+
+| tâche | après le pivot |
+|---|---|
+| **1a** — l'instrument d'altitude | ✅ **survit** — c'est lui qui mesure la continuité |
+| **1b** — la caméra continue | ✅ **CŒUR DU PIVOT** : une seule caméra exige que le globe et le terrain coexistent |
+| **2** — la carte `#loading` | ✅ **survit** : elle doit partir de toute façon |
+| **2 bis** — l'escalier de surface | ⚠️ **JETÉE** : `_rescale` disparaît avec les crans |
+| **1c** — les verrous d'entrée | ⚠️ **en grande partie jetée** : ils gardent une reconstruction qui n'existera plus |
+| **2 ter** — le fondu blanc | ⚠️ **partielle** : ses appelants partent avec leurs fonctions |
+
+⚠️ **CE QUI SUPPRIME LES CRANS, C'EST LE BLOC QUADTREE PUIS LE BLOC FENÊTRE** : le quadtree devient une source **continue** et assez fine, et le socle est **rééchantillonné** depuis son cache au lieu d'être rechargé. Alors il n'y a plus rien à reconstruire quand la caméra descend — c'est la phrase fondatrice de ce plan : **on ne coud pas les tuiles, il n'y a pas de jonction parce qu'il n'y a pas de couture.**
+
+**Décision du 2026-08-20 : on arrête le palliatif.** La Tâche 2 bis est livrée (elle améliore l'existant en attendant) ; la Tâche 1c est **abandonnée en cours** ; **on enchaîne 1b, puis le bloc quadtree, puis le bloc fenêtre.**
+
+
 ### ⚠️ CE QUE CE PLAN NE LIVRE PAS — À LIRE AVANT DE COMMENCER
 
 **Adrien a demandé trois choses. La cinquième attaque a vérifié, tâche par tâche, ce que le plan en porte :**
@@ -954,7 +974,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 **Cohérence des noms** — employés à l'identique partout, ⚠️ **et cette liste était aveugle exactement aux cinq interfaces que la Tâche 4 bis déclarait sans jamais les fabriquer** : `socleVisible`, `empriseSocle`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `creerFlux`, `demanderEmprise`, `tuilesPretes`, `zoomEffectif`, `remplirHauteurs`, `PLAFOND_FILE`, `debitObserve`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`. ⚠️ **Un nom qui n'apparaît qu'à sa déclaration est une interface orpheline : cherchez-les avec `grep -c`, pas à l'œil.**
 
-**Ordre imposé, et il compte — les QUINZE tâches, dans cet ordre.** ⚠️ **Bloc caméra d'abord** : **1a** (l'instrument, aucune correction), puis **2 bis** (l'escalier de surface), puis **1b** (le repère), **1c** (les verrous d'entrée). Ce sont elles qui suppriment l'attente. ⚠️ **L'ORDRE 1a → 1b → 1c → 2 bis A ÉTÉ CORRIGÉ LE 2026-08-20, ET C'EST LA MESURE DE LA 1a QUI L'A IMPOSÉ, PAS UN AVIS** : sur les onze sauts d'altitude relevés, **`_rescale` en pose dix** et `_dive` un seul. La 2 bis passe donc avant les deux autres, sans quoi on corrigeait le petit avant le gros — et le test de monotonie que la 1b devait écrire serait parti d'un profil encore dominé par l'escalier de surface. **Fait : 1a (`b88c935`), 2 bis.** **Bloc quadtree ensuite** : **4 → 4 quater → 4 alpha → 3 → 4 bis → 4 ter** — la Tâche 3 avant la 4 bis, qui consomme son `emprise`. **Puis la Phase 2** : **5 (l'audit) avant 6 (l'extraction)** — sans instrument on ne saura pas si l'extraction marche — puis **7**. ⚠️ **ET LES DEUX RIDEAUX TOUT À LA FIN, dans cet ordre : Tâche 2 (`#loading`) puis Tâche 2 ter (`.whiteout`).** Une version de ce plan plaçait la Tâche 2 avant le bloc quadtree alors qu'elle exige elle-même que la Tâche 4 soit faite d'abord. **Ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up : il montre le trou qu'il cachait.**
+**Ordre imposé, et il compte — révisé le 2026-08-20 pour aller au pivot, pas au palliatif.** ✅ **Faites : 1a** (l'instrument, *livrée*) **→ 2 bis** (l'escalier, *livrée, et elle sera jetée au pivot*). ⚠️ **Ensuite, et dans cet ordre : 1b** (la caméra continue — **c'est du pivot**), **puis le bloc quadtree — 4 → 4 quater → 4 alpha → 3 → 4 bis → 4 ter** (la Tâche 3 avant la 4 bis, qui consomme son `emprise`), **puis le bloc fenêtre — 5 avant 6, puis 7** (sans l'audit on ne saura pas si l'extraction marche : le prototype s'est cru étanche pendant tout son vol). ⚠️ **Enfin seulement les rideaux : Tâche 2 (`#loading`) puis Tâche 2 ter (`.whiteout`)** — ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up, il montre le trou qu'il cachait. ⚠️ **La Tâche 1c est ABANDONNÉE** : elle déverrouille une reconstruction que le pivot supprime.
 
 **Le risque principal n'est plus la géométrie** : l'attaque a confirmé qu'on ne peut pas la déchirer. **C'est le flux** — plafond, annulation, éviction — et **le réseau**, qui décide du zoom réellement atteint.
 
