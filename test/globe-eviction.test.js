@@ -115,7 +115,12 @@ const { Globe, _resetTileMemo } = await import('../src/globe.js')
 const { latLonToSphere, R_GLOBE } = await import('../src/geo.js')
 
 // les constantes du module, redites ici pour que le test échoue si elles bougent
-const CACHE_MAX = 420
+// ⚠️ 420 → 600 (plan « globe continu », Tâche 4 sexies, Étape 2) : l'ensemble de
+// travail du globe corrigé SATURE À 532 TUILES, mesuré au balayage, donc 420
+// laissait 28 raffinements refusés par image aux altitudes de socle et 824
+// n'achetait rien de plus que 600. Ce n'est PAS un desserrage de confort : sans
+// l'Étape 1 (canevas et hauteurs relâchés) la hausse aurait coûté 88 Mo.
+const CACHE_MAX = 600
 const ROOT_Z = 2
 
 // ------------------------------------------------------------------- le vol
@@ -729,6 +734,181 @@ test('la MARGE DE RELIEF du volume englobant : la sphère contient le sommet exa
     assert.ok(
       sphere.containsPoint(dessous),
       `z${z} : la jupe sort du volume englobant (|p−c| = ${sphere.center.distanceTo(dessous).toFixed(3)} > r = ${sphere.radius.toFixed(3)})`
+    )
+  }
+  globe.dispose()
+})
+
+// ═══════════════ LA MÉMOIRE QUE LE CACHE NE PAIE PLUS (Tâche 4 sexies) ═══════
+//
+// Le globe retenait ~210 Mo sur 327 au cache plein POUR RIEN, en deux parts
+// égales et de natures différentes :
+//   · `t.heights`, un `Float32Array(256 × 256)` = 256 Kio par tuile, consommé
+//     une seule fois par `_buildMesh` puis gardé au cas où — le seul autre
+//     lecteur du dépôt, `setExaggeration`, n'avait AUCUN appelant ;
+//   · le canevas de décodage, gardé vivant par `CanvasTexture.image` bien après
+//     que le GPU en ait pris copie.
+//
+// ⚠️ ET LES DEUX NE SE TESTENT PAS DE LA MÊME FAÇON. Le premier est du
+// JavaScript pur et se vérifie ici. Le second dépend de
+// `WebGLTextures.uploadTexture`, qui n'existe pas sous node : ce qui se teste
+// ici, c'est le CONTRAT (le rappel `onUpdate` est posé, et il relâche) ; que
+// three l'appelle vraiment, et que le globe survive à une perte de contexte, a
+// été prouvé au navigateur.
+
+test('les hauteurs ne survivent pas au maillage : le tampon de construction est rendu', async () => {
+  serve()
+  const globe = new Globe({})
+  const mesures = await vol(globe, { paliers: 6, tours: 4 })
+  let pretes = 0
+  let retenues = 0
+  for (const t of globe.tiles.values()) {
+    if (t.state !== 'ready') continue
+    pretes++
+    if (t.heights) retenues++
+  }
+  assert.ok(pretes > 100, `${pretes} tuiles prêtes : le vol n'a rien construit, le test ne mesure rien`)
+  assert.equal(
+    retenues,
+    0,
+    `${retenues} tuiles sur ${pretes} retiennent leurs hauteurs — ${((retenues * 256 * 256 * 4) / 1048576).toFixed(1)} Mo pour personne`
+  )
+  // …et le maillage, lui, EXISTE : on n'a pas gagné la mémoire en ne bâtissant rien
+  assert.ok(mesures.visiblesFinal > 12, `${mesures.visiblesFinal} tuiles dessinées : rien n'a été bâti`)
+  globe.dispose()
+})
+
+test('le canevas de tuile est relâché au téléversement, et pas avant', async () => {
+  serve()
+  const globe = new Globe({})
+  await vol(globe, { paliers: 3, tours: 4 })
+  const t = [...globe.tiles.values()].find((x) => x.state === 'ready' && x.texture)
+  assert.ok(t, 'aucune tuile prête : le test ne mesure rien')
+  // AVANT le téléversement le canevas est là — sinon three n'aurait rien à
+  // envoyer au GPU la première fois, et la tuile serait vide à l'écran.
+  assert.ok(t.texture.image, 'le canevas a disparu AVANT le téléversement : la première image serait vide')
+  assert.equal(
+    typeof t.texture.onUpdate,
+    'function',
+    'aucun rappel de téléversement : le canevas ne sera jamais rendu'
+  )
+  // `uploadTexture` appelle `onUpdate` après coup ; sous node on joue son rôle.
+  t.texture.onUpdate(t.texture)
+  assert.equal(t.texture.image, null, 'le canevas est toujours accroché après le téléversement')
+  globe.dispose()
+})
+
+test('contexte WebGL rendu : les tuiles repartent sur le réseau, RACINES COMPRISES', async () => {
+  serve()
+  const globe = new Globe({})
+  await vol(globe, { paliers: 6, tours: 4 })
+  const avant = total()
+  const pretesAvant = [...globe.tiles.values()].filter((t) => t.state === 'ready').length
+  assert.ok(pretesAvant > 100, `${pretesAvant} tuiles prêtes avant : le test ne mesure rien`)
+
+  globe.rechargeApresContexte()
+
+  // plus une seule tuile ne prétend être prête : three n'a plus de pixels à
+  // réenvoyer, une tuile « prête » serait une tuile VIDE à l'écran
+  assert.equal(
+    [...globe.tiles.values()].filter((t) => t.state === 'ready').length,
+    0,
+    'des tuiles se disent encore prêtes alors que leur texture est perdue'
+  )
+  // ⚠️ ET LES RACINES DOIVENT ÊTRE REDEMANDÉES : `_traverse` ne demande que des
+  // ENFANTS. Sans `chargeRacines`, tout resterait bloqué derrière elles, sans
+  // erreur ni trace — le globe ne se remplirait simplement jamais.
+  assert.ok(
+    globe.roots.every((t) => t.state !== 'empty'),
+    'les seize racines z2 sont restées `empty` : plus personne ne les demandera'
+  )
+  await calme(globe)
+  assert.ok(total() > avant, 'aucune requête après le retour du contexte : le globe reste vide')
+
+  // …et il se REMPLIT à nouveau
+  const camera = nouvelleCamera()
+  poseCamera(camera, LAT, LON, 120)
+  for (let k = 0; k < 40; k++) {
+    globe.update(camera, 0.016)
+    await calme(globe)
+  }
+  let vis = 0
+  for (const t of globe.tiles.values()) if (t.mesh?.visible) vis++
+  assert.ok(vis > 12, `${vis} tuiles dessinées après le retour du contexte : le globe ne s'est pas repeuplé`)
+  globe.dispose()
+})
+
+test('setExaggeration reste utilisable une fois les hauteurs rendues', async () => {
+  serve()
+  const globe = new Globe({})
+  await vol(globe, { paliers: 4, tours: 4 })
+  // il ne doit ni lever (les hauteurs ne sont plus là) ni faire semblant
+  globe.setExaggeration(9)
+  assert.equal(globe.exaggeration, 9, "l'exagération n'a pas été prise en compte")
+  assert.equal(
+    [...globe.tiles.values()].filter((t) => t.state === 'ready').length,
+    0,
+    "des maillages bâtis à l'ancienne exagération survivent"
+  )
+  const camera = nouvelleCamera()
+  poseCamera(camera, LAT, LON, 120)
+  for (let k = 0; k < 40; k++) {
+    globe.update(camera, 0.016)
+    await calme(globe)
+  }
+  let vis = 0
+  for (const t of globe.tiles.values()) if (t.mesh?.visible) vis++
+  assert.ok(vis > 12, `${vis} tuiles dessinées : le globe ne se rebâtit pas après un changement d'exagération`)
+  globe.dispose()
+})
+
+// ══════════════ LES NORMALES DE BORD (Tâche 4 sexies, Étape 3) ══════════════
+//
+// `posAt` mélangeait deux conventions au bord de la tuile : `tileToLatLon` suit
+// `u` hors de [0,1] et rend la position du VOISIN, tandis que `sampleHeights`
+// l'ÉCRÊTE et rend la hauteur du pixel de bord. La différence centrée portait
+// donc un dénivelé lu sur une fenêtre deux fois trop courte.
+//
+// ⚠️ LE CHIFFRE SE DÉRIVE DU DÉPÔT, il n'a pas besoin d'un banc : `G = gridFor(z)
+// = 24` et une tuile de 256 px donnent `x(u+ε) − x(u−ε)` = 21,333 px au centre
+// contre 10,167 px au bord, soit **47,7 %**. Mesuré sur ce banc : 48,3 % avant
+// le correctif, 96,6 % après. D'où un liseré d'éclairage autour de chaque tuile.
+test("sur une pente CONSTANTE, le bord de tuile s'éclaire comme le centre", async () => {
+  serve()
+  const globe = new Globe({})
+  // ⚠️ LA TUILE PASSE PAR `_ensureTile` : `chord`, `center`, `rayon` et `theta`
+  // viennent de là, et sans `chord` la jupe part en NaN.
+  const t = globe._ensureTile(8, 40, 60)
+  t.state = 'ready'
+  t.texture = new THREE.Texture()
+  // rampe est-ouest parfaitement régulière : toutes les normales de la nappe
+  // doivent faire le MÊME angle avec la verticale locale
+  t.heights = new Float32Array(256 * 256)
+  for (let y = 0; y < 256; y++) {
+    for (let x = 0; x < 256; x++) t.heights[y * 256 + x] = 1000 + x * 40
+  }
+  globe._buildMesh(t)
+
+  const G = 24 // gridFor(8)
+  const nrm = t.mesh.geometry.getAttribute('normal')
+  const pos = t.mesh.geometry.getAttribute('position')
+  const j = Math.floor(G / 2) // la ligne médiane, loin des bords nord et sud
+  const pente = (i) => {
+    const k = j * (G + 1) + i
+    const p = new THREE.Vector3(pos.getX(k), pos.getY(k), pos.getZ(k)).add(t.mesh.position).normalize()
+    const n = new THREE.Vector3(nrm.getX(k), nrm.getY(k), nrm.getZ(k))
+    return Math.tan(Math.acos(Math.min(Math.max(n.dot(p), -1), 1)))
+  }
+  const centre = pente(j)
+  assert.ok(centre > 1, `pente au centre ${centre.toFixed(3)} : le MNT de test ne penche pas, rien n'est mesuré`)
+  for (const [nom, i] of [
+    ['ouest', 0],
+    ['est', G],
+  ]) {
+    const part = pente(i) / centre
+    assert.ok(
+      part > 0.9,
+      `bord ${nom} : ${(100 * part).toFixed(1)} % de la pente du centre — l'écrêtage de sampleHeights aplatit le pourtour (47,7 % attendu SANS le correctif)`
     )
   }
   globe.dispose()

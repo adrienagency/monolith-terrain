@@ -15,7 +15,27 @@ const TILE_URL = (z, x, y) => `https://s3.amazonaws.com/elevation-tiles-prod/ter
 const ROOT_Z = 2
 const MAX_Z = 11
 const MAX_CONCURRENT = 6
-const CACHE_MAX = 420 // ready tiles kept before LRU eviction
+// ⚠️ 600, ET C'EST L'ENSEMBLE DE TRAVAIL MESURÉ QUI LE DIT (plan « globe
+// continu », Tâche 4 sexies, Étape 2 — balayage rejoué sur ce dépôt, protocole
+// A, lat 45°, 12 images jetées puis 20 relevées, stabilité exigée) :
+//
+//     CACHE_MAX   200 km            60 km             8 km              2 km
+//       420       z10, 117 dess.    z11, 168, 27 refus  z11, 172, 28    z11, 163, 28
+//       600       z10, 117          z11, **249**, 0     z11, **250**, 0 z11, **235**, 0
+//       824       identique à 600   identique à 600   identique à 600   identique à 600
+//     1 200       identique à 600   identique à 600   identique à 600   identique à 600
+//
+// **L'ensemble de travail SATURE À 532 TUILES** : 824 et 1 200 n'achètent
+// strictement rien, et 600 laisse 13 % de marge. ⚠️ **ET CE QUE 600 ACHÈTE
+// N'EST PAS UN NIVEAU DE ZOOM, C'EST LA COMPLÉTUDE DU NIVEAU ATTEINT** : à 420
+// le zoom est déjà z11, mais 28 sous-arbres par image restent grossiers faute
+// de budget et 172 tuiles couvrent l'écran là où il en faut 250.
+//
+// ⚠️ CETTE HAUSSE NE SE POSE QU'APRÈS L'ÉTAPE 1 (le canevas et les hauteurs
+// relâchés). Avant elle, une tuile en cache coûtait ~793 Kio — 600 tuiles
+// auraient fait 465 Mo sur un tas déjà mesuré à 1,7-1,9 Go. Après elle, la
+// facture au cache plein DESCEND malgré les 43 % de tuiles en plus.
+const CACHE_MAX = 600 // ready tiles kept before LRU eviction
 const SPLIT_RATIO = 0.38 // tile chord / camera distance beyond which we refine
 const MERGE_RATIO = SPLIT_RATIO * 0.8 // hysteresis: refined tiles only coarsen below this
 
@@ -269,6 +289,36 @@ async function fetchTile(z, x, y) {
     heights[i] = rgba[i * 4] * 256 + rgba[i * 4 + 1] + rgba[i * 4 + 2] / 256 - 32768
   }
   const texture = new THREE.CanvasTexture(c)
+  // ⚠️ LE CANEVAS EST RELÂCHÉ DÈS QUE LE GPU L'A REÇU (plan « globe continu »,
+  // Tâche 4 sexies, Étape 1). `CanvasTexture` garde son canevas vivant via
+  // `texture.image` pour toute la vie de la texture : 256×256×4 = 256 Kio par
+  // tuile, soit **105 Mo à 420 tuiles en cache** — une copie de ce que le GPU
+  // détient déjà, que plus personne ne relit. `onUpdate` est appelé par
+  // `WebGLTextures.uploadTexture` APRÈS le téléversement (three r172,
+  // `three.module.js:11257`) : c'est le premier instant où le lâcher est sûr.
+  //
+  // ⚠️ ET CE N'EST PAS 105 Mo QUI SONT RENDUS, C'EST MOINS — MESURÉ, pas
+  // déduit. three ne téléverse une texture qu'au premier DESSIN qui l'utilise,
+  // et il élimine au frustum : relevé au navigateur, `?globe=continu` stabilisé
+  // à 300 km rend **132 canevas sur 420 (31 %, ~33 Mo)**, et le globe de
+  // production **36 sur 420 (~9 Mo)** — là, 307 tuiles sont marquées visibles
+  // pour **12 appels de dessin**, tout le reste étant hors champ.
+  // ⚠️ **N'EN FAITES PAS UN DÉFAUT À CORRIGER** : forcer le téléversement
+  // (`renderer.initTexture`) rendrait bien les 105 Mo, mais en les déplaçant
+  // dans la mémoire VIDÉO pour des tuiles que personne ne regarde. Tel quel,
+  // une tuile paie soit la RAM (pas encore montrée), soit la VRAM (montrée),
+  // **jamais les deux** — c'est la bonne propriété, gardez-la.
+  //
+  // ⚠️ ET CE LÂCHER A UN PRIX, IL EST NOMMÉ : three ne sait plus RÉENVOYER
+  // cette texture après une perte de contexte WebGL — il avertit « Texture
+  // marked for update but no image data found » et la tuile reste vide. La
+  // contrepartie est `rechargeApresContexte()`, branchée sur
+  // `webglcontextrestored` dans `src/main.js`. **Retirer l'un sans l'autre
+  // laisse un globe noir après une réinitialisation de pilote.**
+  texture.onUpdate = (tex) => {
+    tex.image = null // = `tex.source.data = null` : le canevas devient collectable
+    tex.onUpdate = null
+  }
   // NO mipmaps: terrarium packs meters into r*256 + g + b/256, and mip
   // generation rounds each channel to 8 bits independently — a half-unit
   // rounding of the r channel alone injects up to ~128 m of elevation noise
@@ -715,15 +765,35 @@ export class Globe {
       const pW = new THREE.Vector3()
       const pN = new THREE.Vector3()
       const pS = new THREE.Vector3()
+      // ⚠️ LA FENÊTRE DOIT ÊTRE LA MÊME POUR LA POSITION ET POUR LA HAUTEUR
+      // (plan « globe continu », Tâche 4 sexies, Étape 3). `posAt` mélangeait
+      // deux conventions au BORD de la tuile : `tileToLatLon(t.x + u, …)` suit
+      // `u` hors de [0,1] et rend la position du voisin, tandis que
+      // `sampleHeights` l'ÉCRÊTE (`clamp(u × 256 − 0,5 ; 0 ; 255)`) et rend la
+      // hauteur du pixel de bord. La différence centrée portait donc un
+      // dénivelé lu sur une fenêtre deux fois trop courte.
+      //
+      // ⚠️ ET LE CHIFFRE SE DÉRIVE DU DÉPÔT, il n'a pas eu besoin d'un banc :
+      // `G = gridFor(z) = 24`, tuile de 256 px, donc la fenêtre vaut
+      // `x(u+ε) − x(u−ε)` = **21,333 px au centre contre 10,167 px au bord**,
+      // soit **47,7 %** — 407 m de pente lus sur 853 m de pente vraie. D'où un
+      // liseré d'éclairage : chaque tuile s'aplatit sur son pourtour.
+      //
+      // Le correctif garde la fenêtre DANS la tuile pour les deux grandeurs :
+      // au centre, la différence reste centrée et rien ne change ; au bord, elle
+      // devient unilatérale, mais position et hauteur parcourent enfin le même
+      // terrain. ⚠️ **On n'extrapole pas au-delà du bord** : la donnée du voisin
+      // n'est pas là, et l'inventer ferait un relief qui n'existe nulle part.
+      const dansLaTuile = (x) => Math.min(Math.max(x, 0), 1)
       let m = 0
       for (let j = 0; j <= G; j++) {
         for (let i = 0; i <= G; i++) {
           const u = i / G
           const v = j / G
-          posAt(u + eps, v, pE)
-          posAt(u - eps, v, pW)
-          posAt(u, v - eps, pN)
-          posAt(u, v + eps, pS)
+          posAt(dansLaTuile(u + eps), v, pE)
+          posAt(dansLaTuile(u - eps), v, pW)
+          posAt(u, dansLaTuile(v - eps), pN)
+          posAt(u, dansLaTuile(v + eps), pS)
           // dv points south, du points east: south x east faces outward
           pS.sub(pN)
           pE.sub(pW)
@@ -813,6 +883,19 @@ export class Globe {
     mesh.name = t.key
     t.mesh = mesh
     this.group.add(mesh)
+
+    // ⚠️ LES HAUTEURS SONT RELÂCHÉES ICI, ET C'EST LEUR DERNIER LECTEUR (plan
+    // « globe continu », Tâche 4 sexies, Étape 1). `t.heights` est un
+    // `Float32Array(256 × 256)` = 256 Kio par tuile, soit **105 Mo à 420 tuiles
+    // en cache**. Le maillage vient de le consommer en entier ; le seul autre
+    // lecteur du dépôt était `setExaggeration`, qui n'avait AUCUN appelant
+    // (vérifié sur tout `src/` et `test/`).
+    //
+    // ⚠️ CE N'EST PAS UN CACHE QU'ON JETTE : c'est un tampon de construction
+    // qu'on cessait de rendre. `setExaggeration` reste utilisable — il passe
+    // désormais par `_rechargeTuiles()`, qui redemande la donnée au lieu de la
+    // retenir 105 Mo durant au cas où.
+    t.heights = null
   }
 
   // --------------------------------------------------------------- per-frame
@@ -1082,17 +1165,61 @@ export class Globe {
     this.group.visible = v
   }
 
-  // relief exaggeration is baked into vertex positions — rebuild ready meshes
+  // ═══════════ REDEMANDER PLUTÔT QUE RETENIR (Tâche 4 sexies, Étape 1) ═══════
+  //
+  // Rend au réseau les tuiles PRÊTES : maillage, texture et état repartent à
+  // zéro, `_traverse` les redemandera à la prochaine image. C'est le prix — et
+  // le seul — du relâchement du canevas et des hauteurs : ni l'un ni l'autre
+  // n'est reconstructible sur place, donc tout ce qui doit refaire un maillage
+  // ou réenvoyer une texture passe par ici.
+  //
+  // ⚠️ CE N'EST PAS AUSSI CHER QU'IL Y PARAÎT : `_tileMemo` garde les 128
+  // dernières images décodées, et les racines z2 ne sont jamais touchées, donc
+  // la planète ne disparaît pas — elle redevient grossière le temps du
+  // rechargement. ⚠️ MAIS CE N'EST PAS GRATUIT NON PLUS, et la décision 14 du
+  // plan (« l'exagération devient une courbe continue de l'altitude ») ne doit
+  // PAS s'appuyer dessus image par image : à ce rythme-là il faudra déplacer le
+  // relief dans le nuanceur de sommets, pas rebâtir la géométrie.
+  _rechargeTuiles() {
+    for (const t of this.tiles.values()) {
+      if (t.state !== 'ready') continue
+      if (t.mesh) {
+        this.group.remove(t.mesh)
+        t.mesh.geometry.dispose()
+        t.mesh.material.dispose()
+        t.mesh = null
+      }
+      t.texture?.dispose()
+      t.texture = null
+      t.heights = null
+      t.refined = false
+      t.retried = false // le rechargement n'est pas un échec : il rend son essai
+      t.state = 'empty'
+    }
+    // ⚠️ SANS CETTE LIGNE LE GLOBE NE REVIENT JAMAIS. `_traverse` ne demande
+    // que des ENFANTS : les seize racines z2 n'ont d'autre demandeur que
+    // `chargeRacines`. Remises à `empty` sans lui, elles ne repartiraient sur le
+    // réseau pour personne, et toute la descente resterait bloquée derrière
+    // elles — sans erreur, sans test rouge, sans rien à l'écran.
+    this.chargeRacines()
+  }
+
+  // relief exaggeration is baked into vertex positions — rebuild ready meshes.
+  // ⚠️ Les hauteurs ne survivent plus au maillage (voir `_buildMesh`) : la
+  // reconstruction passe donc par le réseau, pas par un tampon retenu.
   setExaggeration(v) {
     this.exaggeration = v
-    for (const t of this.tiles.values()) {
-      if (t.state !== 'ready' || !t.mesh) continue
-      this.group.remove(t.mesh)
-      t.mesh.geometry.dispose()
-      t.mesh.material.dispose()
-      t.mesh = null
-      this._buildMesh(t)
-    }
+    this._rechargeTuiles()
+  }
+
+  // ⚠️ LE CONTEXTE WebGL EST REVENU. Les textures du globe ont relâché leur
+  // canevas au téléversement (voir `fetchTile`) : three n'a plus rien à
+  // réenvoyer et les afficherait vides. On les redemande, ce qui est le seul
+  // moyen de les repeupler — et le bon marché, puisqu'une perte de contexte
+  // est rare et que `_tileMemo` évite une bonne part du réseau.
+  // Branché sur `webglcontextrestored` par `src/main.js`.
+  rechargeApresContexte() {
+    this._rechargeTuiles()
   }
 
   dispose() {

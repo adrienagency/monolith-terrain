@@ -3560,6 +3560,21 @@ function altitudeCadrageM() {
 // protégerait rien et le tri spatial atterrirait sur le globe de production.
 globe = new Globe({ ...params, globeContinu: globeContinuActif() })
 
+// ══════ LE CONTEXTE WebGL PERDU, PUIS RENDU (plan « globe continu », 4 sexies)
+//
+// ⚠️ CE BRANCHEMENT EST LA CONTREPARTIE D'UNE ÉCONOMIE DE 105 Mo, PAS UN
+// CONFORT. Les textures du globe relâchent leur canevas dès que le GPU les a
+// reçues (`fetchTile`, src/globe.js) : three n'a alors plus de copie CPU à
+// réenvoyer et, après une réinitialisation de pilote, il avertirait « Texture
+// marked for update but no image data found » en laissant les tuiles vides.
+// `rechargeApresContexte()` les redemande — c'est le seul chemin qui les
+// repeuple. **Supprimer ces lignes rend le globe vide après une perte de
+// contexte, sans qu'aucun test ne rougisse.**
+renderer.domElement.addEventListener('webglcontextrestored', () => {
+  // enveloppé : une perte de contexte ne doit pas emporter le reste de la scène
+  try { globe?.rechargeApresContexte() } catch (e) { console.warn('globe : rechargement après contexte', e) }
+})
+
 // ══════════ LES SEIZE TUILES RACINES — LE TROISIÈME APPELANT ════════════════
 //
 // ⚠️ PIÈGE SILENCIEUX, ET IL SE REFERME SUR DEUX TÂCHES À LA FOIS (plan

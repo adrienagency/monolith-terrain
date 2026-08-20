@@ -28,7 +28,7 @@ Trois révisions de ce document ont posé des constantes **à l'instinct**, pré
 ⚠️ **UNE VERSION DE CE PLAN LES RECOPIAIT EN PLUS COURT dans quatre tâches** — `npx vite build` nu, sans redirection, sans `nettoie:dist`, avec un « audit » qui ne nommait pas sa commande. Un agent lisant la version courte aurait sauté les gardes en toute bonne foi. **C'est exactement le reproche que ce plan fait à sa propre décision 13** : un avertissement qu'on ne relit pas ne protège de rien.
 
 ```
-npm test              # la suite entière — 3 062 verts au 2026-08-20
+npm test              # la suite entière — 3 116 verts au 2026-08-21
 npm run audit:tests   # disque contre liste
 node --check <fichier>  # sur CHAQUE fichier modifié
 npm run nettoie:dist && npm run build:mapcells && npx vite build > /tmp/build.log 2>&1 && npm run verifie:dist
@@ -682,9 +682,9 @@ Tant que `_rescale` téléportait au point de présentation, cet écart n'avait 
 
   Le détail du défaut, pour mémoire : `globe.js:759`, `_credit = CACHE_MAX − tiles.size + marge`. En régime établi `marge = 0` et **54 à 91 raffinements sont refusés par image**. ⚠️ **Mais `marge` n'est PAS « vide par construction » — ce plan l'a écrit deux fois, et c'est faux** : à la discontinuité (téléport), elle vaut 280, 196, 24, puis 0 en quatre images, et finance 280 requêtes. **Le filet anti-gel du commentaire `743-752` tient ; il ne mord qu'aux discontinuités.**
 - [x] **Étape 6 — rendre évinçables les tuiles bloquées.** Une tuile en `error` ou en `loading` dont la requête ne revient jamais **occupe une place du budget définitivement**. C'est le même point fixe, par une autre porte. ⚠️ **Sans retourner l'ordre d'éviction** : `globe.js` classe par **récence au rang 1, profondeur au rang 2 seulement**, délibérément, avec vingt lignes de commentaire et un test dédié vert. **C'est correct.** ⚠️ **ET N'ÉVINCEZ PAS UNE `loading` SANS ANNULER SA REQUÊTE** : le `.then` de `_pump` (`globe.js:532`) ajouterait un maillage orphelin. Garde : `if (!this.tiles.has(t.key)) return` — **et EXIGEZ-LE DANS LE TEST** (une révision de ce plan avait supprimé cette exigence en retirant un doublon). ⚠️ **Deux pièges de plus, mesurés :** une tuile remise à `empty` est **redemandée à l'image suivante** (`globe.js:799`), et **annuler une requête déclenche le réessai automatique** du `.catch` de `_pump`. **Le test doit vérifier qu'une tuile évincée ne revient pas d'elle-même.**
-- [~] **Étape 7 — trancher le cache** ⚠️ **MESURÉE, PAS APPLIQUÉE — voir la Tâche 4 sexies**, avec les chiffres de l'Étape 1 et non par principe. ⚠️ Si les corrections réclament 824, une formule qui rend 370 est une régression déguisée en optimisation. **Mesurez avant de choisir.**
-- [ ] **Étape 8 — la mémoire retenue pour rien ⚠️ REPORTÉE (Tâche 4 sexies)** : : ~210 Mo sur 327 Mo au cache plein.** `globe.js:238` — le canevas reste vivant via `CanvasTexture.image` après téléversement (**105 Mo**). Et `t.heights` (**105 Mo**) n'est relu que par `setExaggeration` (`:899`), **qui n'a aucun appelant dans tout le dépôt — vérifié**. ⚠️ Le commentaire de `:168` annonce « 380 Mo pour 1 500 tuiles » : la documentation **sous-estime d'un facteur 2,4**.
-- [ ] **Étape 9 — les normales de bord.** ⚠️ **REPORTÉE (Tâche 4 sexies)** ⚠️ **l'écrêtage est à `globe.js:257-260`** (`Math.min(..., 254)` / `255`), et non à `:623-648` qui n'en est que le consommateur : `sampleHeights` écrête alors que `tileToLatLon` donne la position complète — pente **407 m au bord contre 853 m au centre**, soit **47,7 % de la vraie pente** — ⚠️ **et ce chiffre n'est pas seulement mesuré, il se DÉRIVE du dépôt** (`gridFor` = 24, plus l'écrêtage) : il vaut donc comme source, pas comme relevé, d'où un liseré d'éclairage autour de chaque tuile.
+- [x] **Étape 7 — trancher le cache** ✅ **APPLIQUÉE LE 2026-08-21 PAR LA TÂCHE 4 SEXIES — `CACHE_MAX` vaut 600**, avec les chiffres de l'Étape 1 et non par principe. ⚠️ Si les corrections réclament 824, une formule qui rend 370 est une régression déguisée en optimisation. **Mesurez avant de choisir.**
+- [x] **Étape 8 — la mémoire retenue pour rien ✅ FAITE LE 2026-08-21 (Tâche 4 sexies) — ⚠️ 105 Mo rendus à coup sûr, PAS 210 : voir le bilan là-bas** : : ~210 Mo sur 327 Mo au cache plein.** `globe.js:238` — le canevas reste vivant via `CanvasTexture.image` après téléversement (**105 Mo**). Et `t.heights` (**105 Mo**) n'est relu que par `setExaggeration` (`:899`), **qui n'a aucun appelant dans tout le dépôt — vérifié**. ⚠️ Le commentaire de `:168` annonce « 380 Mo pour 1 500 tuiles » : la documentation **sous-estime d'un facteur 2,4**.
+- [x] **Étape 9 — les normales de bord.** ✅ **FAITE LE 2026-08-21 (Tâche 4 sexies) — 48,3 % → 96,6 % de la pente du centre** ⚠️ **l'écrêtage est à `globe.js:257-260`** (`Math.min(..., 254)` / `255`), et non à `:623-648` qui n'en est que le consommateur : `sampleHeights` écrête alors que `tileToLatLon` donne la position complète — pente **407 m au bord contre 853 m au centre**, soit **47,7 % de la vraie pente** — ⚠️ **et ce chiffre n'est pas seulement mesuré, il se DÉRIVE du dépôt** (`gridFor` = 24, plus l'écrêtage) : il vaut donc comme source, pas comme relevé, d'où un liseré d'éclairage autour de chaque tuile.
 - [x] **Étape 10 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 #### ✅ CE QUI A ÉTÉ FAIT, ET CE QUE ÇA MESURE (2026-08-20)
@@ -758,7 +758,7 @@ Tant que `_rescale` téléportait au point de présentation, cet écart n'avait 
 ⚠️ **CETTE TÂCHE PASSE AVANT TOUTES LES AUTRES DU BLOC.** Rebrancher la source (4 alpha) d'un quadtree qui n'atteint pas ses niveaux fins ne se verrait pas ; et calibrer un plafond de file (4 bis) avant elle, c'est le calibrer sur un trafic qui va tripler. **L'ordre est 4 → 4 quater → 4 alpha → 3 → 4 bis → 4 ter.**
 
 
-### Tâche 4 sexies : LE BUDGET DU CACHE ET LA MÉMOIRE QUI LE PAIE ⚠️ DÉCOUPÉE DE LA TÂCHE 4 — À FAIRE AVANT TOUTE HAUSSE DE `CACHE_MAX`
+### Tâche 4 sexies : LE BUDGET DU CACHE ET LA MÉMOIRE QUI LE PAIE ✅ FAITE LE 2026-08-21 — ⚠️ **ELLE EST PASSÉE AVANT LA 4 QUATER, ARBITRAGE CONFIRMÉ**
 
 **Fichiers :** modifier `src/globe.js` (`CACHE_MAX`, la rétention du canevas, `t.heights`, `setExaggeration`, l'écrêtage de `sampleHeights`) · modifier `test/globe-eviction.test.js`
 
@@ -779,12 +779,72 @@ Balayage de `CACHE_MAX` sur le globe **corrigé** (protocole A de la Tâche 4, l
 
 #### Les étapes
 
-- [ ] **Étape 1 — l'Étape 8 D'ABORD : la mémoire retenue pour rien, ~210 Mo sur 327 Mo au cache plein.** `globe.js` — le canevas reste vivant via `CanvasTexture.image` après téléversement (**105 Mo**) ; et `t.heights` (**105 Mo**) n'est relu que par `setExaggeration`, **qui n'a aucun appelant dans tout le dépôt**. ⚠️ Le commentaire de `TILE_MEMO_MAX` annonce « 380 Mo pour 1 500 tuiles » : la documentation **sous-estime d'un facteur 2,4**. ⚠️ **ET CETTE ÉTAPE NE SE VÉRIFIE PAS SOUS NODE** : libérer `CanvasTexture.image` change ce que three réenvoie après une perte de contexte WebGL. **Preuve à l'écran exigée, pas seulement `npm test`.**
-- [ ] **Étape 2 — porter `CACHE_MAX` à 600**, et rejouer le balayage ci-dessus sur votre banc. ⚠️ **Si l'Étape 1 n'a pas été faite, ne faites pas celle-ci** : +27 % de tuiles sur un budget de 327 Mo, c'est +88 Mo sur un tas déjà mesuré à 1,7-1,9 Go.
-- [ ] **Étape 3 — l'Étape 9 : les normales de bord.** ⚠️ **L'écrêtage est dans `sampleHeights`** (`Math.min(..., 254)` / `255`), et non dans `_buildMesh` qui n'en est que le consommateur : `sampleHeights` écrête alors que `tileToLatLon` donne la position complète — pente **407 m au bord contre 853 m au centre**, soit **47,7 % de la vraie pente**. ⚠️ **Ce chiffre se DÉRIVE du dépôt** (`gridFor` = 24, plus l'écrêtage) : il vaut comme source, pas comme relevé. D'où un liseré d'éclairage autour de chaque tuile.
-- [ ] **Étape 4 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [x] **Étape 1 — l'Étape 8 D'ABORD : la mémoire retenue pour rien, ~210 Mo sur 327 Mo au cache plein.** `globe.js` — le canevas reste vivant via `CanvasTexture.image` après téléversement (**105 Mo**) ; et `t.heights` (**105 Mo**) n'est relu que par `setExaggeration`, **qui n'a aucun appelant dans tout le dépôt**. ⚠️ Le commentaire de `TILE_MEMO_MAX` annonce « 380 Mo pour 1 500 tuiles » : la documentation **sous-estime d'un facteur 2,4**. ⚠️ **ET CETTE ÉTAPE NE SE VÉRIFIE PAS SOUS NODE** : libérer `CanvasTexture.image` change ce que three réenvoie après une perte de contexte WebGL. **Preuve à l'écran exigée, pas seulement `npm test`.**
+- [x] **Étape 2 — porter `CACHE_MAX` à 600**, et rejouer le balayage ci-dessus sur votre banc. ⚠️ **Si l'Étape 1 n'a pas été faite, ne faites pas celle-ci** : +27 % de tuiles sur un budget de 327 Mo, c'est +88 Mo sur un tas déjà mesuré à 1,7-1,9 Go.
+- [x] **Étape 3 — l'Étape 9 : les normales de bord.** ⚠️ **L'écrêtage est dans `sampleHeights`** (`Math.min(..., 254)` / `255`), et non dans `_buildMesh` qui n'en est que le consommateur : `sampleHeights` écrête alors que `tileToLatLon` donne la position complète — pente **407 m au bord contre 853 m au centre**, soit **47,7 % de la vraie pente**. ⚠️ **Ce chiffre se DÉRIVE du dépôt** (`gridFor` = 24, plus l'écrêtage) : il vaut comme source, pas comme relevé. D'où un liseré d'éclairage autour de chaque tuile.
+- [x] **Étape 4 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
-⚠️ **ORDRE PROPOSÉ, ET C'EST UN ARBITRAGE À CONFIRMER :** cette tâche gagne à passer **avant la 4 quater**, parce que la 4 quater porte `MAX_Z` à 15 et annonce elle-même **448 Mo à z15** — c'est-à-dire au-dessus du budget d'aujourd'hui avant même de toucher à `CACHE_MAX`. L'ordre du plan deviendrait **4 → 4 sexies → 4 quater → 4 alpha → 3 → 4 bis → 4 ter**. **Si Adrien préfère voir les niveaux fins tout de suite, la 4 quater peut passer d'abord — mais alors sans hausse de `CACHE_MAX`.**
+
+#### ✅ CE QUI A ÉTÉ FAIT, ET CE QUE ÇA MESURE (2026-08-21)
+
+**L'ARBITRAGE D'ORDRE EST CONFIRMÉ, ET CETTE TÂCHE EST PASSÉE AVANT LA 4 QUATER.** L'ordre du bloc devient **4 → 4 sexies → 4 quater → 4 alpha → 3 → 4 bis → 4 ter**.
+
+**LE BANC.** Protocole A de la Tâche 4, à l'identique — globe **neuf** par station, `_tileMemo` vidée, `PerspectiveCamera(30, 16/9, clamp(orbAlt × 0,2 ; 0,01 ; 0,5), 1400)` regardant le centre, `update()` puis attente que la file se vide, **douze images jetées, vingt relevées, stabilité exigée**, latitude 45°, longitude 6,25°. ⚠️ **Ce banc a d'abord été validé contre la table de la Tâche 4 : il la reproduit à la tuile près** (z7/57/216, z8/76/252, z10/117/312, puis z11 avec 27-28 refus). C'est ce qui autorise à croire ce qu'il dit ensuite.
+
+**LE BALAYAGE, REJOUÉ — il confirme la table du plan, chiffre pour chiffre :**
+
+| `CACHE_MAX` | 200 km | 60 km | 8 km | 2 km |
+|---|---|---|---|---|
+| **370** | z10, 117 dess., cache 312 | z11, 129, **40 refus/img** | z11, 137, **41 refus/img** | z11, 136, **41 refus/img** |
+| **420** (avant) | z10, 117, cache 312 | z11, 168, **27 refus** | z11, 172, **28 refus** | z11, 163, **28 refus** |
+| **600** (posé) | z10, 117, cache 312 | z11, **249**, cache 528, 0 refus | z11, **250**, cache **532**, 0 refus | z11, **235**, cache 532, 0 refus |
+| **824** | identique à 600 | identique à 600 | identique à 600 | identique à 600 |
+| **1 200** | identique à 600 | identique à 600 | identique à 600 | identique à 600 |
+
+**Toutes les stations stables sur les vingt images, 0,0 requête par image au repos.** ⚠️ **Et 370 n'est pas seulement « moins bien » : il est PIRE que l'existant** — 41 refus par image contre 28, et 137 tuiles à l'écran contre 172. La méfiance du plan envers la formule `5 × visibles` était fondée, et elle se chiffre.
+
+**LA MÉMOIRE — L'ÉTAPE 1 A ÉTÉ FAITE AVANT L'ÉTAPE 2, comme le plan l'exige.**
+
+| | tuiles en cache | `t.heights` retenues | canevas retenus | tas JS + tampons |
+|---|---|---|---|---|
+| **avant** (`3c9e736`) | 420 | **105,0 Mo** | **420** | **142,0 Mo** |
+| **après** | **532** | **0** | **0** | **41,8 Mo** |
+
+⚠️ **`heapUsed` SEUL RÉPOND « AUCUN CHANGEMENT » À CETTE MESURE, ET C'EST UN PIÈGE DU §3 DE LA COMPÉTENCE.** V8 range les tampons de `Float32Array` **hors du tas**, dans `arrayBuffers` : la première version de la sonde a rendu « 12,3 Mo → 12,3 Mo » sur une économie de 105 Mo. La ligne ci-dessus est `heapUsed + arrayBuffers`.
+
+**−100,2 Mo mesurés, avec 27 % de tuiles EN PLUS dans le cache.**
+
+**CE QUI A ÉTÉ PROUVÉ AU NAVIGATEUR** (serveur de développement, `?globe=continu` et sans le drapeau, lecture du tampon de dessin par `readPixels` après `composer.render()`) :
+
+- ✅ **les hauteurs ne sont plus retenues, sur les DEUX chemins** : `420 tuiles → 285 hauteurs retenues` sur `3c9e736`, **0 sur 600** après. Mesuré dans le navigateur, pas déduit.
+- ✅ **la perte de contexte WebGL est survécue**, drapeau levé **et** drapeau baissé : `WEBGL_lose_context.loseContext()` puis `restoreContext()`, les deux évènements observés, puis le globe **se repeuple** (511 tuiles prêtes, 373 dessinées, z8, **0 % de pixels noirs, 52 teintes distinctes**) et **zéro avertissement** « Texture marked for update but no image data found ».
+- ✅ **le contrôle NÉGATIF, qui rend la contrepartie non négociable** : une `CanvasTexture` téléversée puis privée de son image et remarquée `needsUpdate` fait sortir de three, mot pour mot, `THREE.WebGLRenderer: Texture marked for update but no image data found.` **Sans `rechargeApresContexte()`, le globe reviendrait donc vide d'une réinitialisation de pilote — et aucun test ne rougirait.**
+
+**CE QUE LE NAVIGATEUR A CONTREDIT — ET C'EST LE CHIFFRE DU PLAN QUI ÉTAIT TROP BEAU.** Le plan annonçait **105 Mo de canevas** rendus. **On n'en rend qu'une part, parce que three ne téléverse une texture qu'au premier DESSIN qui l'utilise** et qu'il élimine au frustum juste après. Relevé :
+
+| | tuiles en cache | textures prêtes | canevas rendus | appels de dessin |
+|---|---|---|---|---|
+| `?globe=continu`, stabilisé à 300 km | 420 | 420 | **132 (31 %, ~33 Mo)** | 41 |
+| production (sans drapeau), 400 km | 420 | 420 | **36 (9 %, ~9 Mo)** | **12 pour 307 tuiles marquées visibles** |
+
+⚠️ **N'EN FAITES PAS UN DÉFAUT À CORRIGER.** Forcer le téléversement (`renderer.initTexture`) rendrait bien les 105 Mo — **en les déplaçant dans la mémoire VIDÉO, pour des tuiles que personne ne regarde**. Tel quel, une tuile paie **soit** la RAM (pas encore montrée), **soit** la VRAM (montrée), **jamais les deux**. **Le total honnête de l'Étape 1 est donc : 105 Mo rendus à coup sûr (les hauteurs) + 9 à 33 Mo selon le regard (les canevas), et non 210.**
+
+**LES NORMALES DE BORD (Étape 3) — LA DÉRIVATION A ÉTÉ REJOUÉE AVANT LA CORRECTION, et elle tombe juste.** `G = gridFor(z) = 24`, tuile de 256 px, `x(u) = clamp(u × 256 − 0,5 ; 0 ; 255)` : la fenêtre de hauteur vaut **21,333 px au centre contre 10,167 px au bord**, soit **47,7 %** — donc 407 m lus sur 853 m. **Les deux chiffres du plan sont exacts.**
+
+Le correctif ne touche pas `sampleHeights` : il **borne la fenêtre à la tuile pour la position AUSSI**, de sorte que les deux grandeurs parcourent enfin le même terrain (différence centrée au centre, unilatérale au bord). ⚠️ **On n'extrapole pas au-delà du bord** — la donnée du voisin n'est pas là, et l'inventer ferait un relief qui n'existe nulle part. Mesuré sur un MNT à pente **constante** (40 m/pixel, z8) :
+
+| | pente au bord ouest | pente au centre | bord / centre |
+|---|---|---|---|
+| avant | 1,5208 | 3,1477 | **48,3 %** |
+| après | 3,0396 | 3,1477 | **96,6 %** |
+
+**LES TESTS.** `test/globe-eviction.test.js` passe de 16 à **21 tests** (3 111 → **3 116** dans la suite), sans nouveau fichier — `audit:tests` reste donc à zéro écart. La constante miroir `CACHE_MAX` du harnais suit le module (420 → 600), **en place**. ⚠️ **LES QUATRE CORRECTIFS ONT ÉTÉ VÉRIFIÉS PAR MUTATION, et chacun tue son test et lui seul** : retenir à nouveau les hauteurs, retenir à nouveau le canevas, oublier `chargeRacines()` dans le rechargement, remettre l'écrêtage de la fenêtre. **Un test qui survit à la mutation décore ; aucun de ces quatre ne survit.**
+
+⚠️ **LE PIÈGE QUE `_rechargeTuiles` A FAILLI POSER, et il ne rougissait nulle part :** `_traverse` ne demande que des **enfants**. Des racines z2 remises à `empty` sans `chargeRacines()` ne repartent sur le réseau **pour personne** — pas d'erreur, pas de test rouge, simplement un globe qui ne se remplit plus jamais. C'est le même piège que le « troisième appelant » de la Tâche 1b, à un autre endroit.
+
+**CE QUI N'A PAS PU ÊTRE PROUVÉ, ET IL FAUT LE DIRE.** Le volet navigateur **ne composite pas** : `requestAnimationFrame` n'y est pas cadencé et **aucune capture d'écran n'a pu être prise** (c'est exactement le piège du §3 de `/threejs-optimisation`). Tout ce qui est écrit ci-dessus vient donc de `readPixels` sur le tampon de dessin après un `composer.render()` explicite — **ce qui prouve ce qui est DESSINÉ, pas ce qu'un œil humain voit**. ⚠️ **Le liseré d'éclairage de l'Étape 3 n'a donc PAS été constaté à l'œil, ni avant ni après : il est dérivé, mesuré sur les normales, et corrigé — mais personne ne l'a encore regardé.** Et les 404 et `ERR_CONNECTION_TIMED_OUT` de la console **sont antérieurs** : vérifié en rejouant la même séquence sur `3c9e736`.
+
+⚠️ **ORDRE CONFIRMÉ LE 2026-08-21, ET APPLIQUÉ :** cette tâche est passée **avant la 4 quater**, parce que la 4 quater porte `MAX_Z` à 15 et annonce elle-même **448 Mo à z15** — c'est-à-dire au-dessus du budget d'aujourd'hui avant même de toucher à `CACHE_MAX`. L'ordre du plan est donc **4 → 4 sexies → 4 quater → 4 alpha → 3 → 4 bis → 4 ter**. ⚠️ **ET LA 4 QUATER HÉRITE D'UN BUDGET QUI A CHANGÉ SOUS ELLE :** elle chiffre 448 Mo à z15 sur une tuile qui coûtait ~793 Kio ; la tuile en coûte maintenant ~281 Kio hors canevas non téléversé, et le cache vaut 600 et non 420. **Ses deux lignes de mémoire sont à re-mesurer, pas à recopier.**
 
 
 ### Tâche 4 quater : LEVER LE PLANCHER DE `dist`, PUIS PORTER `MAX_Z` À 15 ⚠️ APRÈS LA TÂCHE 4, AVANT LA 4 ALPHA
@@ -1170,7 +1230,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 **Cohérence des noms** — employés à l'identique partout, ⚠️ **et cette liste était aveugle exactement aux cinq interfaces que la Tâche 4 bis déclarait sans jamais les fabriquer** : `socleVisible`, `empriseSocle`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `creerFlux`, `demanderEmprise`, `tuilesPretes`, `zoomEffectif`, `remplirHauteurs`, `PLAFOND_FILE`, `debitObserve`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`. ⚠️ **Un nom qui n'apparaît qu'à sa déclaration est une interface orpheline : cherchez-les avec `grep -c`, pas à l'œil.**
 
-**Ordre imposé, et il compte — révisé le 2026-08-20 pour aller au pivot, pas au palliatif.** ✅ **Faites : 1a** (l'instrument, *livrée*) **→ 2 bis** (l'escalier, *livrée, et elle sera jetée au pivot*). ✅ **1b** (la loi de la caméra — *livrée le 2026-08-20 : plus aucun saut d'altitude sur la descente de référence*). ⚠️ **Ensuite, et dans cet ordre : 1b bis** (la frontière de rendu — **c'est la moitié visuelle de la 1b, et elle exige de regarder tourner**), **puis le bloc quadtree — 4 → 4 quater → 4 alpha → 3 → 4 bis → 4 ter** (la Tâche 3 avant la 4 bis, qui consomme son `emprise`), **puis le bloc fenêtre — 5 avant 6, puis 7** (sans l'audit on ne saura pas si l'extraction marche : le prototype s'est cru étanche pendant tout son vol). ⚠️ **Enfin seulement les rideaux : Tâche 2 (`#loading`) puis Tâche 2 ter (`.whiteout`)** — ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up, il montre le trou qu'il cachait. ⚠️ **La Tâche 1c est ABANDONNÉE** : elle déverrouille une reconstruction que le pivot supprime.
+**Ordre imposé, et il compte — révisé le 2026-08-20 pour aller au pivot, pas au palliatif.** ✅ **Faites : 1a** (l'instrument, *livrée*) **→ 2 bis** (l'escalier, *livrée, et elle sera jetée au pivot*). ✅ **1b** (la loi de la caméra — *livrée le 2026-08-20 : plus aucun saut d'altitude sur la descente de référence*). ⚠️ **Ensuite, et dans cet ordre : 1b bis** (la frontière de rendu — **c'est la moitié visuelle de la 1b, et elle exige de regarder tourner**), **puis le bloc quadtree — 4 ✅ → 4 sexies ✅ → 4 quater → 4 alpha → 3 → 4 bis → 4 ter** (la Tâche 3 avant la 4 bis, qui consomme son `emprise`) — ⚠️ **la 4 sexies s'intercale AVANT la 4 quater, et c'est mesuré, pas préféré** : la 4 quater annonce 448 Mo à z15, au-dessus du budget d'alors, et la 4 sexies rend 105 Mo à coup sûr avant qu'on y touche, **puis le bloc fenêtre — 5 avant 6, puis 7** (sans l'audit on ne saura pas si l'extraction marche : le prototype s'est cru étanche pendant tout son vol). ⚠️ **Enfin seulement les rideaux : Tâche 2 (`#loading`) puis Tâche 2 ter (`.whiteout`)** — ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up, il montre le trou qu'il cachait. ⚠️ **La Tâche 1c est ABANDONNÉE** : elle déverrouille une reconstruction que le pivot supprime.
 
 **Le risque principal n'est plus la géométrie** : l'attaque a confirmé qu'on ne peut pas la déchirer. **C'est le flux** — plafond, annulation, éviction — et **le réseau**, qui décide du zoom réellement atteint.
 
