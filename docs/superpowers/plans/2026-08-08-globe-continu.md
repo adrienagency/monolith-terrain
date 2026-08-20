@@ -15,6 +15,14 @@
 
 ## 0. Comment on vérifie — à lire AVANT toute tâche
 
+### ⚠️ AUCUN CHIFFRE DE CE PLAN N'EST À CROIRE S'IL N'EST PAS SOURCÉ
+
+Trois révisions de ce document ont posé des constantes **à l'instinct**, présentées comme des valeurs : `PLAFOND_FILE = 512`, des seuils de socle à 120 et 180 km. Un attaquant les a mesurées. **Les deux étaient fausses** — 512 dépassait le budget entier du cache, et les seuils l'étaient d'un facteur dix-huit.
+
+**Règle, désormais :** un chiffre de ce plan porte soit **sa mesure et sa source**, soit la mention **« À MESURER »** avec le protocole. Il n'y a pas de troisième cas, et **une valeur non sourcée est un bogue du plan**, pas un détail à régler plus tard.
+
+
+
 **Ces commandes sont la fin obligatoire de chaque tâche.** La dernière étape de chaque tâche dit « **la clôture du §0** » et ne les recopie pas.
 
 ⚠️ **UNE VERSION DE CE PLAN LES RECOPIAIT EN PLUS COURT dans quatre tâches** — `npx vite build` nu, sans redirection, sans `nettoie:dist`, avec un « audit » qui ne nommait pas sa commande. Un agent lisant la version courte aurait sauté les gardes en toute bonne foi. **C'est exactement le reproche que ce plan fait à sa propre décision 13** : un avertissement qu'on ne relit pas ne protège de rien.
@@ -197,7 +205,9 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 | `src/monde/audit-solide.js` **(créer)** | volume signé, dégénérés, NaN — l'audit qui ne se laisse pas berner |
 | `src/monde/statistiques-lissees.js` **(créer)** | les quatre statistiques restantes, amorties, avec zone morte |
 | `src/monde/seuil-socle.js` **(créer)** | naissance et mort du socle, sur une **altitude de caméra** |
-| `src/globe.js` **(modifier)** | descendre sous z11, cache en formule |
+| `src/plinth.js` **(modifier)** | accepter une emprise variable ; il garde le congé, les coins en superellipse et le liner |
+| `src/ocean.js` **(modifier)** | il recalcule `uCornerR`, `uCornerN`, `buildRimGeometry` sur les mêmes constantes — sans lui, la mer cesse d'épouser le socle |
+| `src/globe.js` **(modifier)** | descendre sous z11, cache en formule, rebranchement sur la vraie source |
 | `src/escalier-zoom.js` **(retirer en fin de parcours)** | les paliers n'existent plus |
 
 ---
@@ -213,10 +223,18 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 - `tuilesPretes(flux, emprise)` → `Map`
 - `creerFlux({ globe })` → `flux` — la fabrique ; **aucune autre tâche ne la définit, elle appartient à celle-ci**
 - `zoomEffectif(flux, emprise)` → `number` — le zoom réellement COUVERT, distinct du zoom demandé
-- `lireHauteur(flux, { x, y, z })` → `number | null` — hauteur en mètres à un pixel global, `null` si la tuile n'est pas prête. ⚠️ **C'est l'interface dont la Tâche 6 a besoin pour rééchantillonner ; sans elle elle est bloquée.**
-- `PLAFOND_FILE` = **512** — longueur maximale de `this.queue`. ⚠️ **Ce n'est PAS le plafond de requêtes simultanées**, qui existe déjà (`MAX_CONCURRENT = 6`) et qu'on ne touche pas.
+- `remplirHauteurs(flux, { emprise, n, sortie })` → `{ remplis, manquants }` — remplit **en une passe** un `Float32Array` de (n+1)² hauteurs pour l'emprise donnée.
 
-**Le défaut, mesuré par l'attaque.** Un panoramique latéral à 4 km d'altitude, 90° de balayage : **2 943 tuiles bloquées en `loading`**, crédit à −2 551, **zoom effectif figé à z2**, **aucune récupération après 30 s d'immobilité**. Une traversée suffit pour que le vol suivant reste à z2.
+⚠️ **PAR LOT, PAS PAR PIXEL, ET C'EST MESURÉ.** Une version de ce plan proposait `lireHauteur(flux, {x, y, z})`, appelée une fois par sommet. L'attaque l'a chronométrée : **+3,5 ms par reconstruction à N=256** (de 0,11 à 3,65 ms), **sans même l'interpolation bilinéaire** — sur un budget déjà déclaré dépassé à 8,3 ms. L'interface commode aurait mangé à elle seule la moitié de ce qui reste.
+
+Une passe par tuile touchée, pas un appel par sommet.
+- `PLAFOND_FILE` — longueur maximale de `this.queue`. ⚠️ **Ce n'est PAS le plafond de requêtes simultanées**, qui existe déjà (`MAX_CONCURRENT = 6`) et qu'on ne touche pas.
+
+⚠️ **À MESURER — et une valeur inventée a déjà été réfutée ici.** Ce plan a écrit **512**. Mesuré par l'attaque : sur un panoramique, `loading` **plafonne à 286 à toutes les latences essayées** — l'assertion passait donc sur le code cassé, et la mutation ne pouvait rien tuer. Et **512 dépasse `CACHE_MAX` = 420** : la file seule aurait pu occuper plus que le budget entier du cache, provoquant le gel qu'elle prétend empêcher.
+
+**Protocole :** mesurer le maximum de `loading` atteint sur le panoramique de référence à trois latences (nominale, ×4, ×24), puis choisir **strictement en dessous de ce maximum ET strictement en dessous du budget de cache**. La valeur n'a de sens que si l'assertion **échoue** sur le code d'aujourd'hui : le vérifier avant de la retenir.
+
+**Le défaut, mesuré par l'attaque.** Un panoramique latéral à 4 km d'altitude, 90° de balayage : **2 943 tuiles bloquées en `loading`** *(⚠️ mesuré sur le PROTOTYPE modifié ; dans `src/globe.js` tel quel le crédit plafonne autour de 840, donc attendez-vous à un chiffre plus bas — le défaut est le même, son ampleur non)*, crédit à −2 551, **zoom effectif figé à z2**, **aucune récupération après 30 s d'immobilité**. Une traversée suffit pour que le vol suivant reste à z2.
 
 **Trois causes, trois corrections.**
 
@@ -243,10 +261,13 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 
 **Interfaces produites :**
 - `socleVisible({ altitudeEllipsoideM, visibleAvant })` → `boolean`
-- `SEUIL_NAISSANCE_M` = **120 000** (le socle naît en descendant sous 120 km)
-- `SEUIL_MORT_M` = **180 000** (il meurt en remontant au-dessus de 180 km)
+- `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M` — **À MESURER.**
 
-⚠️ **Ces deux valeurs sont un POINT DE DÉPART à régler à l'œil**, pas une mesure. Ce qui est non négociable, c'est l'écart entre elles — le rapport de 1,5 est ce qui empêche le clignotement.
+⚠️ **UNE VERSION DE CE PLAN AVAIT ÉCRIT 120 km ET 180 km. C'EST FAUX D'UN FACTEUR ~18.** À un champ de 30°, un socle de 3,56 km occupe **5,6 % de l'image** depuis 120 km — et le dépôt lui-même place 120 km au palier **z9** (`modes.js`, `DIVE_TIERS`), c'est-à-dire précisément l'altitude que la règle R3 qualifie d'« autre carte ».
+
+**Protocole :** partir de la demande d'Adrien — « le crop apparaît quand la Terre occupe une partie assez importante de l'écran » — la traduire en **fraction d'image occupée par le socle**, viser autour de 60 %, et en déduire l'altitude par la trigonométrie du champ de vision. ⚠️ **Puis convertir en altitude, et ne garder QUE l'altitude** : la fraction d'écran dépend du terrain chargé, ce que la règle R1 interdit.
+
+**Ce qui est non négociable**, en revanche : `SEUIL_MORT_M` strictement supérieur à `SEUIL_NAISSANCE_M`. C'est l'écart qui empêche le clignotement, quel que soit le couple retenu.
 
 ⚠️ **L'ENTRÉE EST UNE ALTITUDE DE CAMÉRA AU-DESSUS DE L'ELLIPSOÏDE, PAS UNE FRACTION D'ÉCRAN.** Règle R1. Une fraction d'écran dépend de la distance au sol, donc du terrain chargé, donc de `meanM`, qui est lissé — on fabriquerait un oscillateur.
 
@@ -298,7 +319,17 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 
 **C'est ce bloc de dix-neuf lignes qu'il faut réutiliser**, avec `activeDemSource`, `resolveRegionMaxZoom`, `fallbackToAws` et `overzoomTile`. Une « zone » est une **tuile z8** (`REGION_ZOOM = 8`, `dem-source.js:139`).
 
-⚠️ **LE PÉRIMÈTRE EST PLUS LARGE QU'IL N'Y PARAÎT, ET C'EST CE QUI PEUT FAIRE DÉRAILLER LA TÂCHE :**
+### ⚠️ LE FAIT QUI CHANGE LE CALCUL DE CETTE TÂCHE
+
+**Mapterhorn rend 404 au-dessus de z4 en pleine mer** (`dem-source.js`, en-tête). Or **la majorité des tuiles d'un globe sont océaniques**. Rebrancher le globe sur Mapterhorn signifie donc que **la plupart de ses tuiles retomberont sur AWS de toute façon** — ce qui est correct, mais change complètement le rapport bénéfice/coût de la tâche.
+
+**Conséquence à trancher avant de commencer :** le gain de Mapterhorn ne se manifeste qu'**en descente sur les terres émergées**. Il est peut-être plus sage de **ne rebrancher que sous un certain zoom** — là où le socle vit — et de laisser le globe orbital sur AWS, qu'il utilise déjà et qui lui suffit. ⚠️ **Cette question est ouverte : elle se tranche par une mesure, pas par une préférence.**
+
+⚠️ **ET LE PÉRIMÈTRE EST PLUS LARGE QU'IL N'Y PARAÎT — mesuré par l'attaque :**
+- **Neuf expressions à 256 en dur** dans `globe.js`, pas « plusieurs ».
+- **Trois fichiers de test non déclarés** par ce plan les verrouillent.
+- **La mémoire passerait de 242 Mo à 968 Mo** si l'on garde le même nombre de tuiles en 512 px. ⚠️ C'est un facteur quatre, pas un ajustement.
+- Les étapes 3 et 4 de cette tâche **se contredisent** — l'une demande de rebrancher, l'autre que rien ne change pour le globe orbital. **Elles ne peuvent pas être vraies ensemble tant que la question ci-dessus n'est pas tranchée.**
 - **256 est codé en dur** plusieurs fois dans `fetchTile` / `sampleTile` de `globe.js`. Mapterhorn sert du **512**. ⚠️ **Trancher explicitement** : soit le globe accepte les deux tailles, soit il rééchantillonne. **Ne pas laisser ce choix à l'improvisation.**
 - `TILE_MEMO_MAX` est calibré pour du 256 (≈ 32 Mo) ; en 512 la même valeur ferait **128 Mo**.
 - `resolveRegionMaxZoom` est **asynchrone**, et `_pump` de `globe.js` est **synchrone**. La jonction des deux est le vrai travail de cette tâche.
