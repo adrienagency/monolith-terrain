@@ -206,6 +206,40 @@ MapLibre ne tient pas un nombre mais une règle : **`niveaux_conservés × tuile
 
 **Phase 2 — la fenêtre bornée** (`src/monde/fenetre-bornee.js`). L'extraction du maillage fermé, promue du prototype vers le dépôt, **derrière un drapeau de `src/flags.js`**. ⚠️ Les deux moteurs devront **coexister à l'écran** pour être comparés : le drapeau reste en place longtemps, ce n'est pas un interrupteur temporaire.
 
+### Ce que le prototype a tranché, le 2026-08-20
+
+**Verdict : l'objet tient.** Zéro déchirure sur 45 s de vol de z6 à z13, prouvée par 231 audits topologiques et 231 tests d'étanchéité en espace écran.
+
+⚠️ **ET LA RAISON COMPTE PLUS QUE LE VERDICT : ON NE COUD PAS LES TUILES.** Le plan nommait « la couture » comme point dur — le T-junction, deux tuiles voisines de densités différentes. **Cette difficulté n'existe que si l'on essaie de DÉCOUPER le maillage du quadtree à l'emprise.** Le prototype fait autre chose : il construit une grille régulière propre à la fenêtre et va **chercher** la hauteur dans le cache de tuiles, en coordonnées de pixel global.
+
+La topologie devient alors **fixe** : les indices sont calculés une fois, les sommets hauts des parois **sont** les sommets de bord de la surface, la dalle s'appuie sur le même anneau bas. Un trou devient topologiquement impossible — **il n'y a pas de T-junction parce qu'il n'y a pas de jonction.** C'est la décision d'architecture de toute la Phase 2 ; ne pas la reperdre.
+
+### Le budget, et la stratégie à deux résolutions
+
+| résolution | médiane | images > 8 ms |
+|---|---|---|
+| N = 256 (celle de `plinth.js`) | **7,2 ms** | **12 %** |
+| N = 128 | **2,2 ms** | 3,9 % |
+
+⚠️ **Mesuré sur RTX 3080 et 24 cœurs — très au-dessus de la cible « portable récent ».** Et c'est un **plancher** : ni mer, ni palette, ni gravure, ni statistiques lissées.
+
+**Donc N = 256 à chaque image ne tient pas sur la cible.** La décision 4 d'Adrien — « le socle complet tout de suite » — reste tenable, mais **à deux résolutions** : N = 128 tant que la caméra bouge, N = 256 quand elle se pose. Plus une **zone morte** sur l'emprise : le prototype reconstruisait à *chaque* image, ce qui est le pire cas ; en pratique le cadrage ne change pas assez pour le justifier.
+
+### Les deux pièges que le prototype a découverts
+
+⚠️ **La règle sans trous n'échoue pas en déchirant : elle échoue en RETARDANT.** Pour ne pas déchirer, la fenêtre attend une couverture complète au même zoom — elle passe **45 % du vol avec un niveau de retard** (retard moyen 1,08), **cache réseau chaud**, donc dans le meilleur cas. Ce n'est pas un artefact, c'est du **flou**.
+
+C'est exactement le comportement que décrit Hoppe (« rendering load actually decreases as the viewer moves faster ») et celui de Google Earth. **Mais il faut qu'Adrien sache que « fluide » voudra dire « flou pendant qu'on bouge », et net à l'arrêt.** Ce n'est pas un défaut à corriger, c'est le contrat à annoncer.
+
+⚠️ **L'audit topologique valide un solide RETOURNÉ.** Au premier jet, les parois et la dalle étaient enroulées à l'envers, le socle était grand ouvert — et l'audit d'arêtes annonçait « 0 bord libre », **à juste titre**. Seul un test de silhouette avant/arrière l'a vu. Puis ce test est passé **à vide**, l'objet étant hors cadre, et tout a dû être remesuré avec une preuve de non-vacuité. **Un audit d'arêtes ne prouve pas qu'un solide est fermé dans le bon sens, et un test de silhouette ne prouve rien s'il ne prouve pas d'abord qu'il regarde quelque chose.**
+
+### Ce que le prototype n'a PAS pu vérifier
+
+- **Aucune image en mouvement n'a été vue** : le volet navigateur ne composite pas. On ne sait donc pas si le changement de zoom effectif — toute la surface bascule d'un coup — se lit comme un saut désagréable. ⚠️ **À regarder en premier en Phase 2.**
+- Rien n'a été mesuré sur un portable.
+- Le cache est resté saturé à 420 du début à la fin : le battement d'éviction que redoute la Tâche 4 n'est pas chiffré.
+- **La précision confirme la Tâche 3 bis** : float32 va bien à z13 (0,34 m pour un texel de 13,3 m), mais le quantum est fixe à 0,49 m — à z15 il vaut 15 % d'un texel, **et les tuiles existent jusque-là**.
+
 **Phase 3 — les statistiques lissées** (`src/monde/statistiques-lissees.js`). Les quatre restantes après la Tâche 1 : `meanM`, `globalMin`, les quantiles de rampe, `robustScale`. ⚠️ **C'est de l'auto-exposition**, exactement comme sur un appareil photo — et comme elle, il lui faut une **zone morte**, sinon la vue dérive en permanence sur des variations insignifiantes.
 
 **Phase 4 — la transition et le vol.** La bascule globe → socle avec son effet, à dessiner avec Adrien. Le vol de la caméra vers un GPX déposé. ⚠️ **Le vol ne doit pas devenir le nouveau temps de chargement** : c'est précisément ce qu'on supprime. Le mesurer comme tel.

@@ -42,3 +42,6 @@ _staging/
 
 # bancs de mesure jetables (captures, dumps de normales : ~40 Mo)
 .banc/
+
+# banc de mesure jetable de la Tâche 2 (fenêtre bornée) — hors dépôt par décision du plan
+prototype/
