@@ -1023,7 +1023,7 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 
 ⚠️ **UNE VERSION DE CE PLAN PROPOSAIT ICI « plafonner `MAX_Z` à 13 » COMME ALTERNATIVE HONNÊTE : LA MESURE L'A RENDUE SANS OBJET.** La Tâche 4 quater établit que le verrou n'est pas `MAX_Z` mais le plancher de `dist`. ⚠️ **EN REVANCHE « z15 TIENT DANS LE BUDGET ACTUEL AVEC DEUX FOIS LA MARGE » EST FAUX, ET C'EST MESURÉ :** l'ensemble de travail passe de 532 à **1 504** tuiles, et il a fallu porter le budget du chemin continu de 600 à **1 700**. **L'arbitrage n'a pas disparu, il a été tranché — et il coûte 40 Mo de tas et le TRIPLE de tuiles à l'écran.** Ce qui reste vrai en revanche
 
-### Tâche 3 : `seuil-socle.js` — quand le socle naît et meurt
+### Tâche 3 : `seuil-socle.js` — quand le socle naît et meurt ✅ **FAITE LE 2026-08-21** — ⚠️ **`ZOOM_SOCLE = 13`, ET C'EST LA RÈGLE R3 QUI L'A TRANCHÉ**
 
 **Fichiers :** créer `src/monde/seuil-socle.js` · **lire `src/landmarks.js` et `src/dem-emprise.js` avant d'écrire** · tester `test/seuil-socle.test.js`
 
@@ -1050,12 +1050,68 @@ Pour mémoire, l'erreur d'origine : à un champ de 30°, un socle occupe **5,6 %
 
 ⚠️ **Hystérésis obligatoire** : `SEUIL_MORT_M` strictement supérieur à `SEUIL_NAISSANCE_M`. Même patron que `SPLIT_RATIO` / `MERGE_RATIO` dans `globe.js`, éprouvé sur ce dépôt.
 
-- [ ] **Étape 1** — test : en descendant, le socle naît à `SEUIL_NAISSANCE_M` ; en remontant, il ne meurt qu'à `SEUIL_MORT_M`. Puis celui qui compte : **osciller cent fois autour du seuil de naissance ne produit qu'une seule bascule**.
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
-- [ ] **Étape 3** — implémenter `socleVisible` **et** `empriseSocle`, après avoir tranché le zoom du socle et vérifié ce que `dem-emprise.js` fournit déjà.
+- [x] **Étape 1** — test : en descendant, le socle naît à `SEUIL_NAISSANCE_M` ; en remontant, il ne meurt qu'à `SEUIL_MORT_M`. Puis celui qui compte : **osciller cent fois autour du seuil de naissance ne produit qu'une seule bascule**. — `test/seuil-socle.test.js`, **25 tests**, DEUX oscillations (naissance **et** mort).
+- [x] **Étape 2** — le lancer, vérifier qu'il échoue. — `ERR_MODULE_NOT_FOUND` sur `src/monde/seuil-socle.js`.
+- [x] **Étape 3** — implémenter `socleVisible` **et** `empriseSocle`, après avoir tranché le zoom du socle et vérifié ce que `dem-emprise.js` fournit déjà.
+- [x] **Étape 4** — mutation : égaliser les deux seuils tue le test d'oscillation. — **trois mutations, toutes mordantes** (tableau ⑥ ci-dessous).
+- [x] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
-- [ ] **Étape 4** — mutation : égaliser les deux seuils tue le test d'oscillation.
-- [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+#### ✅ CE QUI A ÉTÉ FAIT, ET CE QUE ÇA MESURE (2026-08-21)
+
+**Fichiers :** `src/monde/seuil-socle.js` (créé) · `test/seuil-socle.test.js` (créé, **inscrit à la ligne `test` de `package.json`** — 183 fichiers, `audit:tests` sans écart).
+
+**① LE ZOOM DU SOCLE : `ZOOM_SOCLE = 13`.** La question n'était tranchée nulle part, et sans elle aucun seuil n'existe — la largeur varie d'un facteur huit de z13 à z16. ⚠️ **C'est la règle R3 qui tranche, pas le goût.** R3 mesure le plafond du zoom effectif (**z11 à 12 Mb/s**, **z9 à 4 Mb/s**) et pose son propre chiffre de disqualification : **48 texels sur la largeur du socle**, « ce n'est plus le flou accepté par la décision 13, c'est une autre carte ». Rejoué (`metersPerPixel`, 45°) :
+
+| socle | rempli à z11 (12 Mb/s) | rempli à z9 (4 Mb/s) |
+|---|---|---|
+| **z13** | **192 texels — du flou** ✅ | 48 texels — refusé |
+| z15 | **48 texels — refusé** ❌ | 12 texels — refusé |
+
+⚠️ **Un socle z15 tombe EXACTEMENT sur le chiffre que R3 disqualifie, et il y tombe dès 12 Mb/s** — un réseau ordinaire, pas un cas dégradé. **z13 est le zoom le plus fin dont la dégradation au plafond mesuré reste du flou.** Deux encadrements, tous deux au dépôt : `MAX_Z = 15` (`globe.js:21`) laisse **deux niveaux de marge** au rééchantillonnage ; et `DEFAULT_FINE_ZOOM = 15` (`main.js:3095`) n'est **pas** un argument contraire — le bloc d'aujourd'hui est **cuit** à son zoom, la fenêtre bornée est **rééchantillonnée** : le socle z13 est plus **large**, pas plus grossier.
+
+**② LES DEUX SEUILS, ET LEUR DÉRIVATION.** ⚠️ **Ils ne sont pas écrits en chiffres dans le module : ils s'y RECALCULENT** depuis `blockExtentMeters(13, 45)`, le champ de vision de `main.js:263` et le rapport d'hystérésis de `globe.js:79`. Valeurs d'aujourd'hui :
+
+> **`LARGEUR_SOCLE_M` = 10 377,4 m** (z13 à 45°, `blockExtentMeters`)
+> **`SEUIL_NAISSANCE_M` = 32 274,3 m** — 60 % de la **hauteur** de l'image, **linéaire**
+> **`SEUIL_MORT_M` = 40 342,8 m** — 48 % de la hauteur, soit **×1,25**
+
+⚠️ **60 % DE LA HAUTEUR, ET LINÉAIRE — LES DEUX MOITIÉS SONT DITES.** Le champ de three.js **est vertical** (`fov: 30`, `main.js:263`) : prendre la largeur déplacerait le seuil du rapport d'aspect, **1,7 en 16/9**. Et le linéaire n'est pas le surfacique : « 60 % des pixels » vaudrait √0,6 = 0,775 en linéaire, soit **1,29 fois plus**. Pour mémoire, ce socle-ci couvre **20 % de la SURFACE** d'une image 16/9. **Le linéaire est retenu**, parce que c'est la grandeur qu'un œil juge.
+
+⚠️ **L'HYSTÉRÉSIS N'EST PAS UN CHIFFRE NEUF :** `RAPPORT_HYSTERESIS = 0,8`, le rapport exact de `MERGE_RATIO = SPLIT_RATIO × 0,8` (`globe.js:79`), appliqué à la même grandeur — une taille angulaire relative. Un test garde la **ligne source** de `globe.js` : si elle bouge, le socle le sait.
+
+⚠️ **LA CIRCULARITÉ EST LEVÉE AVANT LE CALCUL.** La largeur du socle est **FIXE** (celle de `ZOOM_SOCLE`) ; la décision 3 (« le socle suit le cadrage ») porte sur la **position** de l'emprise, pas sur sa largeur. Puis **on ne garde QUE l'altitude** — R1.
+
+**Pour situer — et cela corrige aussi la réfutation elle-même :** le plan avait écrit **120 km / 180 km**. À 120 km, le vrai socle z13 occupe **16,1 %** de la hauteur ; le socle fantôme de 3,56 km n'en occupait que **5,5 %**. Les seuils d'origine étaient donc trop hauts d'un facteur **≈ 3,7** — et non « d'un facteur dix-huit », chiffre qui descendait lui aussi de la largeur fantôme.
+
+**③ LE LIEN R1 / R3 — LA QUESTION DU §9, TRANCHÉE : LE SOCLE NAÎT QUAND MÊME, À LA RÉSOLUTION DISPONIBLE.** Les deux autres issues sont refusées, et pour des raisons vérifiables :
+- **il n'attend pas** — attendre est un voile de chargement **sans le voile**, c'est-à-dire le pop-up d'Adrien déguisé en absence ;
+- **le seuil ne se décale pas** — le zoom soutenable se déduit du débit **observé**, qui se dégrade quand le socle demande ses tuiles. Un seuil qui en dépendrait fermerait la boucle « socle → trafic → débit → seuil → socle » : ⚠️ **c'est mot pour mot l'oscillateur que R1 interdit**, retard compris. **R1 ne parle pas que de `meanM`** : elle parle de toute grandeur dérivée du chargé, et `zoomEffectif` en est une ;
+- **ce qui varie est le REMPLISSAGE, jamais l'EMPRISE.** `empriseSocle` rend toujours la largeur de `ZOOM_SOCLE` ; l'appelant remplit à `min(ZOOM_SOCLE, zoomSoutenable(...))`. Une emprise qui rétrécirait avec la bande passante ferait changer le socle **de taille à l'écran** — le cran, revenu par la porte du réseau ;
+- ce que l'utilisateur voit alors est déjà tranché (§9, 2026-08-20) : **un indicateur discret**.
+
+⚠️ **ET LE SOCLE NAÎT DE TOUTE FAÇON UN CRAN GROSSIER, RÉSEAU PARFAIT COMPRIS — DÉRIVÉ DES CONSTANTES DE `globe.js`, PAS MESURÉ À L'EXÉCUTION.** Avec `SPLIT_RATIO = 0,38`, `dist = |cam − centre| − corde/2` et corde = diagonale de tuile : à l'altitude de naissance, le rapport de la tuile `ZOOM_SOCLE` vaut **0,164** et celui de `ZOOM_SOCLE − 1` vaut **0,357 — 6 % sous le seuil de division**. Le quadtree dessine donc **z12** à la naissance et atteint **z13 à 30 639 m, soit 94,9 % de l'altitude de naissance**. ⚠️ **Le calcul est invariant d'échelle** : il ne dépend pas du zoom choisi, seulement du couple (fraction d'écran, `SPLIT_RATIO`) — **il ne pouvait donc PAS servir à trancher le zoom**, seulement à vérifier que 60 % est bien accordé à `SPLIT_RATIO`. **Cinq pour cent de descente entre les deux : un fondu, pas un cran.**
+
+**④ CE QUI A ÉTÉ REPRIS DE `dem-emprise.js` — ET POURQUOI SI PEU.** Les trois candidates ont été rejouées contre le dépôt :
+- `originesEmprise` (`dem-emprise.js:183`) rend **neuf origines de tuile ENTIÈRES**. C'est un calage sur la grille : d'un cadrage au suivant, l'emprise saute d'un **tiers de socle**. ⚠️ **C'est un cran, c'est-à-dire exactement ce que ce pivot supprime.** Juste pour ce qu'elle fait — monter un 3×3 de blocs cuits — inutilisable ici.
+- `rectFenetre` (`dem-emprise.js:424`) travaille en **pixels de MNT** dans un champ déjà chargé, pas en degrés : c'est un **consommateur** d'emprise, pas son producteur.
+- `patchLatLonBBox` (`coast-mask.js:81`) rend bien `{west, south, east, north}` en degrés — mais **d'un `dem` DÉJÀ CHARGÉ**, donc d'une origine entière, donc calée elle aussi ; et elle tire three.js.
+
+**Réutilisé pour de bon :** `blockExtentMeters` / `BLOCK_TILES` (`landmarks.js`), **seul import du module** — et un test verrouille l'emprise **numériquement contre `latLonToTile` / `tileToLatLon` de `geo.js`**, la source de vérité du géoréférencement. La recopie des deux conversions suit le précédent **explicite** de `dem-emprise.js:428`.
+
+**⑤ L'EMPRISE EST CONTINUE, ET C'EST LE PIVOT LUI-MÊME.** `empriseSocle({ centre, zoom = ZOOM_SOCLE })` ne se cale sur aucune grille : un test rejoue **400 déplacements d'un cent-millième de degré** et exige que l'emprise suive **au même pas**. Conventions tenues : `ouest > est` signale l'antiméridien, les latitudes sont **écrêtées** à 85,051 128 78°, et à zoom 0-1 (trois tuiles font le tour du monde) l'emprise rend `-180 … 180` — la convention de `bathy-sources.js:268`.
+
+**⑥ LES TROIS MUTATIONS, TOUTES MORDANTES.**
+
+| mutation | ce qui tombe |
+|---|---|
+| `RAPPORT_HYSTERESIS = 1` (seuils égalisés) | **8 tests**, dont **les DEUX oscillations** — 200 bascules au lieu d'une |
+| `ZOOM_SOCLE = 15` | **2 tests**, dont **R3 à 48 texels** et la garde anti-fantôme des 3,56 km |
+| emprise calée sur la grille (`Math.floor`) | **3 tests**, dont **la continuité** et le verrou contre `geo.js` |
+
+**⑦ CE QUI N'A PAS ÉTÉ VÉRIFIÉ — À LIRE AVANT DE S'APPUYER DESSUS.**
+- ⚠️ **LA VISÉE EST SUPPOSÉE AU NADIR** — `2 · h · tan(fov/2)`. La caméra d'arrivée est **oblique** (pente 18/19, `loi-altitude.js`), ce qui raccourcit le socle à l'image : **la fraction réelle est un peu SOUS 60 %, donc le socle naît un peu plus tard qu'annoncé.** Aucun test ne rend une image. **C'est la première chose à regarder à l'écran.**
+- ⚠️ **LA LATITUDE N'EST PAS DANS LA SIGNATURE**, et c'est un choix. Les seuils sont ancrés à 45°. Conséquence exacte, à seuil constant : le socle occupe **84,9 % de la hauteur à l'équateur** et **42,4 % à 60°** au lieu de 60 %. La rendre variable est une ligne de code — mais c'est une grandeur de plus à faire coïncider entre quatre modules. **À rouvrir si l'écart se voit.**
+- **Rien n'est branché.** `socleVisible` et `empriseSocle` ne sont lus par **aucun** module de `src/` : ce sont les Tâches 4 bis, 6 et 7 qui les consommeront.
 
 ### Tâche 4 bis : LE FLUX QUI NE SE COINCE PAS ⚠️ APRÈS LES TÂCHES 4, 4 QUATER, 4 ALPHA ET 3
 
@@ -1278,7 +1334,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 ## 9. Ce qu'Adrien doit trancher en chemin
 
 - ✅ **TRANCHÉ PAR ADRIEN LE 2026-08-20 — CE QUE L'UTILISATEUR VOIT QUAND LE RÉSEAU NE SUIT PAS : UN INDICATEUR DISCRET.** Pas de voile, pas de message bloquant, pas de silence total : un signe non bloquant qui dit que le détail arrive. ⚠️ **Il remplace les 2,6 s de voile que `main.js:3408-3411` pose aujourd'hui alors que l'application est déjà libre.** À dessiner dans la Tâche 2, et à réutiliser par la Tâche 4 ter.
-- ⚠️ **ET QUE FAIT LE SOCLE QUAND LE RÉSEAU NE SUIT PAS ?** Il **naît sur une altitude** (R1) mais **se remplit à un zoom** que le réseau borne (R3). Si le débit ne soutient que z9 quand le seuil appelle un socle z13, **le socle naît grossier**. Attend-il ? Naît-il quand même ? Le seuil se décale-t-il ? **C'est la jonction des deux règles qui gouvernent son apparition, et elle n'a pas de réponse.**
+- ✅ **TRANCHÉ PAR LA TÂCHE 3 LE 2026-08-21 — LE SOCLE NAÎT QUAND MÊME, À LA RÉSOLUTION DISPONIBLE.** Il **naît sur une altitude** (R1) et **se remplit à un zoom** que le réseau borne (R3) ; **ce qui varie est le remplissage, jamais l'emprise.** Il n'attend pas — attendre est le pop-up déguisé en absence — et **le seuil ne se décale pas** : le débit observé se dégrade quand le socle demande ses tuiles, donc un seuil qui en dépendrait fermerait la boucle « socle → trafic → débit → seuil → socle », ⚠️ **l'oscillateur que R1 interdit, mot pour mot.** Ce que l'utilisateur voit reste l'indicateur discret ci-dessus. **Dérivation et chiffres dans le bilan de la Tâche 3.**
 - ✅ **TRANCHÉ PAR ADRIEN LE 2026-08-20 — LE ZOOM EST CONTINU, « exactement comme Google Earth ou Google Maps ».** La téléportation au point de présentation de `modes.js:455-458` (v48) **disparaît** : l'altitude redevient continue d'un cran à l'autre. ⚠️ **v48 remplaçait une continuité v42 qui avait été retirée, et la raison de ce retrait n'est pas écrite dans le code.** Le garde-fou est donc le test de la Tâche 1a-1b : **altitude monotone, dérivée seconde bornée, et arrivée au zoom demandé.** Si le défaut de v42 reparaît, il sera visible à ces trois assertions — **et non plus masqué par un rideau blanc.**
 - ⚠️ **LES PALIERS D'EXAGÉRATION VERTICALE — NOUVELLE QUESTION, OUVERTE PAR LA MESURE DE LA TÂCHE 1b, ET ELLE COÛTE DEUX CHOSES À LA FOIS.** La table `{3: 2,5 · 4: 2,5 · 5: 5 · 6: 4 · 7: 3,2 · 2,8 ensuite}` (`ZOOM_EXAG_DEFAULTS`, `main.js`) existe pour que le relief reste visible sur un bloc large. Elle facture deux discontinuités, mesurées :
   1. **le champ visuel saute de `exagération(z)` à la plongée** (×3,66 au lieu de ×1 au Mont-Blanc) — l'altimètre est continu, le CADRAGE ne l'est qu'à moitié ;
@@ -1296,9 +1352,9 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 **Couverture — et elle n'est pas complète, c'est écrit en tête du §6.** La **décision 1** (caméra continue) et la **suppression du voile** ont désormais leurs Tâches 1, 2 bis et 2. ⚠️ **Restent QUATRE décisions sans porteur, pas deux** : la **5** (la gravure ne s'écrit qu'à l'arrêt), la **6** (format d'impression à l'export), la **7** (mer, météo, cycle du jour en mode socle uniquement) et la **11** (60 img/s sur portable) — **elles n'existent qu'à la ligne où on les a votées.** Et `src/palier-machine.js`, le module qui fait déjà ce tri de matériel dans ce dépôt, n'est cité nulle part.
 
 
-**Cohérence des noms** — employés à l'identique partout, ⚠️ **et cette liste était aveugle exactement aux cinq interfaces que la Tâche 4 bis déclarait sans jamais les fabriquer** : `socleVisible`, `empriseSocle`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `creerFlux`, `demanderEmprise`, `tuilesPretes`, `zoomEffectif`, `remplirHauteurs`, `PLAFOND_FILE`, `debitObserve`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`. ⚠️ **Un nom qui n'apparaît qu'à sa déclaration est une interface orpheline : cherchez-les avec `grep -c`, pas à l'œil.**
+**Cohérence des noms** — employés à l'identique partout, ⚠️ **et cette liste était aveugle exactement aux cinq interfaces que la Tâche 4 bis déclarait sans jamais les fabriquer** : `socleVisible`, `empriseSocle`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `creerFlux`, `demanderEmprise`, `tuilesPretes`, `zoomEffectif`, `remplirHauteurs`, `PLAFOND_FILE`, `debitObserve`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`, **et les cinq que la Tâche 3 a réellement fabriqués en chemin** : `ZOOM_SOCLE`, `LARGEUR_SOCLE_M`, `LAT_REFERENCE`, `fractionEcran`, `altitudePourFraction`. ⚠️ **Un nom qui n'apparaît qu'à sa déclaration est une interface orpheline : cherchez-les avec `grep -c`, pas à l'œil.** ⚠️ **`socleVisible` et `empriseSocle` ne sont plus orphelins EN AMONT — fabriqués et testés le 2026-08-21 — mais ils le restent EN AVAL : aucun module de `src/` ne les lit encore.** Ce sont les Tâches 4 bis, 6 et 7 qui les branchent.
 
-**Ordre imposé — révisé le 2026-08-21 par la mesure.** ✅ **Livrées : 1a · 2 bis · 1b · 4 · 4 sexies · 4 quater.** ⚠️ **Puis, et l'ordre a changé : 3 → 4 bis → 4 ter → 4 alpha.** La Tâche 3 produit l'`emprise` que la 4 bis consomme. **Et la 4 bis passe désormais AVANT la 4 alpha** : la Tâche 4 quater a laissé le flux mesuré à **568 tuiles en `loading` simultanément** caméra en mouvement, avec `MAX_CONCURRENT = 6` — or la 4 alpha multiplie par quatre le poids d'une tuile (256 → 512 px). **Calibrer le flux avant de l'alourdir, comme on a dimensionné le cache avant d'approfondir.** Ensuite le **bloc fenêtre — 5 avant 6, puis 7** : c'est lui qui supprime les crans. Puis **1b bis** (la frontière de rendu). ⚠️ **Enfin seulement les rideaux : 2 (`#loading`) puis 2 ter (`.whiteout`)** — ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up, il montre le trou qu'il cachait. ⚠️ **La Tâche 1c est ABANDONNÉE** : elle déverrouille une reconstruction que le pivot supprime.
+**Ordre imposé — révisé le 2026-08-21 par la mesure.** ✅ **Livrées : 1a · 2 bis · 1b · 4 · 4 sexies · 4 quater · 3.** ⚠️ **Puis, et l'ordre a changé : ~~3~~ → 4 bis → 4 ter → 4 alpha.** La Tâche 3 produit l'`emprise` que la 4 bis consomme — **et elle est produite depuis le 2026-08-21 : `empriseSocle`, `src/monde/seuil-socle.js`.** **Et la 4 bis passe désormais AVANT la 4 alpha** : la Tâche 4 quater a laissé le flux mesuré à **568 tuiles en `loading` simultanément** caméra en mouvement, avec `MAX_CONCURRENT = 6` — or la 4 alpha multiplie par quatre le poids d'une tuile (256 → 512 px). **Calibrer le flux avant de l'alourdir, comme on a dimensionné le cache avant d'approfondir.** Ensuite le **bloc fenêtre — 5 avant 6, puis 7** : c'est lui qui supprime les crans. Puis **1b bis** (la frontière de rendu). ⚠️ **Enfin seulement les rideaux : 2 (`#loading`) puis 2 ter (`.whiteout`)** — ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up, il montre le trou qu'il cachait. ⚠️ **La Tâche 1c est ABANDONNÉE** : elle déverrouille une reconstruction que le pivot supprime.
 
 **Le risque principal n'est plus la géométrie** : l'attaque a confirmé qu'on ne peut pas la déchirer. **C'est le flux** — plafond, annulation, éviction — et **le réseau**, qui décide du zoom réellement atteint.
 
