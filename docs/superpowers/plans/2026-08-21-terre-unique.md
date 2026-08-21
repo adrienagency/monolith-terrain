@@ -218,7 +218,30 @@ Le globe passe de **18** à la **courbe continue** partagée (décision 14). ⚠
 
 ⚠️ **Le pilote a déjà échoué deux fois** : piloté par l'altitude de cadrage il **diverge** (gain 1,44) ; piloté par la grandeur que le cran conserve il **gèle** à 2,8. **La forme retenue est `zc = demZoom + f`, bornée à `[z, z+1]` par construction.**
 
-- [ ] Test → rouge → implémenter → mutation → écran → clôture.
+- [x] Test → rouge → implémenter → mutation → écran → clôture. ✅ **FAIT le 2026-08-21.** `test/exageration-globe.test.js` (13 tests) · `src/monde/exageration-continue.js` §4 bis · `src/globe.js` (`majExageration`) · `src/modes.js` (`zoomNiveau()`) · `src/main.js` (`cranCourant`).
+
+**LE PILOTE — et il a été rejoué AVANT d'être écrit.** ⚠️ **`f = log2(dRef / d)`, la forme la plus évidente, a été ÉCARTÉE PAR LA MESURE** : au cran, `poseCranContinu` repose la caméra à `camY × facteurEchelle`, et `facteurEchelle = 2 × exagAprès / exagAvant` — **toute grandeur tirée de la pose d'après-cran porte l'exagération.** Rejouée à la main, la boucle s'écarte de la table dès le premier cran (5 au lieu de 2,5) puis se fige sur `EXAG_BASE` pour les six derniers : **c'est exactement le gel mesuré à l'écran**, et sa cause n'était pas la signature de `zoomCadrage`, qui est propre. **Le pilote retenu est `f = -_levelZoom / STEP_IN`** (`modes.js`) : `_rescale` l'écrase à zéro AVANT de reposer la caméra, et `_applyZoom` ne lui ajoute que `log(newDist / dist)`. La boucle est **coupée**, pas amortie. Il est déjà borné à `[-ln2, +ln2]`, donc `zc ∈ [z-1, z+1]` sans garde-fou ajouté — **et la borne est symétrique, pas `[z, z+1]`** : le dézoom doit glisser vers `z-1`, sinon le cran de sortie redevient un saut. **Continuité EXACTE au cran** : à la butée `zc = z+1`, puis `demZoom = z+1` et `_levelZoom = 0` donnent encore `z+1`.
+
+**LA TABLE D'ADRIEN, RETROUVÉE À L'ÉCRAN** (La Réunion, neuf `_coarsen()` enchaînés, lu sur `exagPartage` **et** sur `globe.exaggeration`) : Z12→Z8 ×2,8 · **Z7 ×3,2** · **Z6 ×4** · **Z5 ×5** · **Z4 ×2,5** · Z3 ×2,5 — là où l'ancien pilote rendait ×2,8 partout. Les surcharges `localStorage` traversent (tests ②c, ③c). Et `f` glisse pour de vrai : douze images de glissé mesurées, `zc` de **3,043 à 3,417**, monotone.
+
+**LA MESURE DE CONTRÔLE — un bloc est redevenu un bloc.** Solide livré, base comprise, couverture 1,0 :
+
+| | hauteur | largeur | rapport |
+|---|---|---|---|
+| **La Réunion ×18** (avant) | 0,70338 | 0,21539 | **3,27** |
+| **La Réunion ×2,8** (après) | **0,13208** | 0,21463 | **0,615** |
+| relief alpin de synthèse ×18 | 0,80843 | 0,16398 | **4,930** |
+| relief alpin de synthèse ×2,8 | **0,14293** | 0,16295 | **0,877** |
+
+⚠️ **LA LARGEUR N'EST PAS TOUT À FAIT CONSTANTE, ET L'ASSERTION QUI LE SUPPOSAIT A ÉCHOUÉ CONTRE LE DÉPÔT** : l'anneau est posé sur la surface DÉPLACÉE et le déplacement est RADIAL, donc un relief plus haut **évase** le bloc — **+0,6305 %, soit 1,027·10⁻³ unité (19 cm au sol)** entre ×18 et ×2,8. Deux ordres sous la variation de hauteur (×5,656) : le rapport mesure bien la hauteur. ⚠️ **Et le chiffre « 0,23 » de la Tâche B ne s'est pas reproduit** : même largeur (0,2154 contre 0,216, le crop est identique) mais une hauteur trois fois plus grande, parce que ce relevé-ci a **neuf tuiles z12 à 512 px et une couverture de 1,0**, sur une emprise qui monte à **2 607 m**. Le relevé de la Tâche B décrivait un crop bien moins chargé.
+
+**LE GLOBE ENTIER — ACCEPTABLE, ET C'EST MESURÉ, PAS JUGÉ.** Même pose orbitale (alt 420, océan Indien), mêmes 29 tuiles, image redimensionnée à 200×180 : l'écart moyen entre ×18 et ×2,8 vaut **5,098 unités de couleur**. ⚠️ **MAIS LE TÉMOIN LE NOIE** : deux images prises à ×2,8 **inchangée**, à 31 s d'intervalle, rendent **5,532** — les nuages en orbite déplacent plus de pixels que l'exagération. **Sans ce témoin j'aurais conclu « 27 % des pixels changent », ce qui est vrai et ne veut rien dire.** La courbe n'a donc PAS besoin de remonter aux altitudes orbitales. ⚠️ **Ce qui reste vrai géométriquement** : un sommet à 8 848 m sort de **2,50 % du rayon** à ×18 contre **0,39 %** à ×2,8 — sur ce cadrage (disque ~558 px), **≈7 px de silhouette contre ≈1 px**. ⚠️ **Et le relevé est fait à UNE pose, dont le limbe ne passe par aucune grande chaîne** : un limbe himalayen dirait peut-être autre chose.
+
+⚠️ **LE COÛT, ET IL N'EST PAS PAYABLE TEL QUEL.** Le relief du globe est cuit dans les sommets : chaque changement de valeur passe par `setExaggeration` → `_rechargeTuiles`, qui rend au réseau **toutes** les tuiles prêtes. Mesuré deux fois, aller et retour, La Réunion z12 : **4,8 et 6,5 ms de travail synchrone** (868 maillages relâchés), puis **12 s et 21 s** pour retrouver ~900 tuiles prêtes. **À chaque cran.** La sortie est nommée par `_rechargeTuiles` lui-même — déplacer le relief dans le nuanceur de sommets — et ce n'est pas cette tâche. ⚠️ **CONSÉQUENCE : `syncExagToZoom` n'est appelé qu'AU CRAN**, donc la courbe est juste et continue mais encore **ÉCHANTILLONNÉE aux crans** ; le glissement de la décision 14 ne se voit pas encore à l'écran entre deux crans. **C'est la vraie limite de cette tâche.**
+
+⚠️ **CE QUI EST LAID, ET IL FAUT LE DIRE.** Le bloc tient enfin dans le cadre et se lit comme un bloc. Mais **les JUPES des tuiles du globe pendent sous lui comme des rideaux** — cinq à six languettes qui descendent bien plus bas que la base. Le `discard` du crop est en lat/lon, et une jupe partage le (lat, lon) du bord de sa tuile : **elle n'est donc jamais coupée.** Aucune tâche du plan ne couvre ce défaut. Et la couleur du dessus reste la rampe du globe (vert/tan) contre des parois beige-gris : c'est la Tâche C.
+
+⚠️ **CE QUI N'A PAS PU ÊTRE VÉRIFIÉ** : le crop n'a **pas** été vu sous `frontiere=0` (la Tâche B le demandait) ; sous `frontiere=1` il a fallu **masquer le socle à la main** pour le voir, parce qu'il est dessiné par-dessus. Et `globe.enabled` valait `false` en mode surface pendant tout le relevé.
 
 ### Tâche F — LA MER, PARTOUT ET DÉGRADÉE AVEC LA DISTANCE (décision 5)
 
@@ -269,6 +292,8 @@ Retirer `monde/fenetre-bornee.js`, le chemin « bloc » de `terrain.js`, et les 
 - **L'indicateur affiche encore un numéro de zoom** quand il n'y a plus de socle.
 - **Le raccord de palette au bord du crop** — la Tâche D doit le supprimer ; s'il subsiste, c'est un arbitrage de goût.
 - **Les crops continentaux** que la sphère rend enfin possibles : les veut-il, et à quelle largeur maximale ?
+- **LES JUPES DES TUILES PENDENT SOUS LE BLOC** (relevé par la Tâche E, à l'écran) — cinq à six languettes qui descendent sous la base. Le `discard` du crop est en **lat/lon**, et une jupe partage le (lat, lon) du bord de sa tuile : elle n'est **jamais** coupée. Aucune tâche du plan ne la couvre. Deux sorties possibles, aucune mesurée : couper la jupe par sa hauteur radiale plutôt que par sa position, ou ne pas bâtir de jupe sur une tuile qui touche la frontière.
+- **LE COÛT DE L'EXAGÉRATION DU GLOBE** (Tâche E) — **12 à 21 s de rechargement réseau à chaque cran**, parce que le relief est cuit dans les sommets. Tant qu'il n'est pas déplacé dans le nuanceur de sommets, `?exag=continu` ne peut pas devenir le défaut, et la courbe reste échantillonnée aux crans au lieu de glisser.
 
 ---
 

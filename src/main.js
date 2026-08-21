@@ -29,7 +29,7 @@ import { warmupPrograms } from './warmup.js'
 import { activeDemSource, isFallbackActive } from './dem-source.js'
 import { Globe } from './globe.js'
 import { Modes, stepZoom } from './modes.js'
-import { DISTANCE_MIN_SURFACE, altitudeSurfaceM, echelleBloc, empriseBlocM, distanceArrivee } from './loi-altitude.js'
+import { DISTANCE_MIN_SURFACE, altitudeSurfaceM, echelleBloc, empriseBlocM } from './loi-altitude.js'
 import { intersectionGlobe, viseeArrivee, ZOOM_PALIER_MIN } from './escalier-zoom.js'
 import { createGoto, geocode, mainParts } from './goto.js'
 import { frameTrack, viseLeCanevas3D } from './gpx.js'
@@ -68,7 +68,7 @@ import { creerVeilleSocle } from './monde/veille-socle.js'
 // ⚠️ `exageration-continue.js` N'IMPORTE RIEN — voir son en-tête : passer par
 // `fenetre-bornee.js` fermerait le cycle terrain.js → fenetre-bornee.js →
 // terrain.js, et AUCUN TEST NE CHARGE `main.js` pour l'attraper.
-import { lireExageration, poserExageration, creerExagerationPartagee, majExagerationCadrage, surchargesStockees, courbeExageration, EXAG_BASE } from './monde/exageration-continue.js'
+import { lireExageration, poserExageration, creerExagerationPartagee, majExagerationCran, surchargesStockees, courbeExageration, EXAG_BASE } from './monde/exageration-continue.js'
 // LA FENÊTRE BORNÉE — Tâche 6 ter. ⚠️ Importée ICI et pas dans `terrain.js` :
 // `fenetre-bornee.js` importe `TERRAIN_SIZE` de `terrain.js`, donc l'import
 // inverse fermerait le cycle. `main.js` est en bout de chaîne, il n'en ouvre
@@ -3334,27 +3334,33 @@ function saveZoomExag(z, v) {
   exagPartage.courbe = courbeExageration({ surcharges: zoomExagStore })
 }
 
-// LE ZOOM DE CADRAGE — la grandeur qui pilote la courbe continue.
+// LE CRAN ET SA FRACTION — la grandeur qui pilote la courbe continue.
 //
-// ⚠️ **ELLE EST HORIZONTALE, ET C'EST TOUT SON INTÉRÊT.** `altitudeCadrageM()`
-// (plus bas) divise par `echelleBloc()`, qui CONTIENT l'exagération : s'en
-// servir ici fermerait la boucle `exag → altitude → zoom → exag`, dont le gain
-// mesuré vaut **1,44 entre z4 et z5** — elle DIVERGE. `zoomCadrage` ne lit que
-// la distance caméra→cible et l'emprise au sol du bloc, deux grandeurs que
-// l'exagération verticale ne touche pas. Le test ③ le garde des deux côtés : la
-// fonction n'a aucune entrée d'exagération, et la boucle qu'on évite diverge
-// pour de vrai.
+// ⚠️ **C'EST LE TROISIÈME PILOTE, ET LES DEUX PREMIERS ONT ÉTÉ MESURÉS
+// DÉFAILLANTS.** Piloté par `altitudeCadrageM()` il DIVERGE — cette fonction
+// divise par `echelleBloc()`, qui CONTIENT l'exagération, gain mesuré **1,44**
+// entre z4 et z5. Piloté par `zoomCadrage` (la largeur de sol visible) il GÈLE
+// à **×2,8 sur toute la descente Z12 → Z4** : la signature est propre, mais la
+// boucle repasse par la CAMÉRA, que `poseCranContinu` repose à
+// `camY × facteurEchelle` — et `facteurEchelle` porte le rapport des
+// exagérations. **Aucune grandeur tirée de la pose d'après-cran n'est propre.**
+//
+// ⚠️ **`_levelZoom` L'EST, LUI, ET C'EST STRUCTUREL** : `_rescale` l'écrase à
+// zéro (`_resetZoom`) AVANT de reposer la caméra, et `_applyZoom` ne lui ajoute
+// que `log(newDist / dist)`, le rapport du glissé de molette. Il est déjà borné
+// à `[-ln2, +ln2]`, donc `zc = demZoom + f` vit dans `[z-1, z+1]` **par
+// construction**, sans garde-fou ajouté. Voir le §4 bis de
+// `monde/exageration-continue.js` et `test/exageration-globe.test.js`.
 //
 // Rend `null` hors relief réel : l'appelant retombe alors sur le palier.
-function zoomCadrageCourant() {
-  if (params.source !== 'real' || !dem?.extentMeters) return null
-  const d = camera.position.distanceTo(controls.target)
-  if (!(d > 0)) return null
+function cranCourant() {
+  if (params.source !== 'real') return null
   return {
-    distance: d,
-    distanceReference: distanceArrivee(150), // `surfaceMaxDistance()` — voir le hook plus bas
-    extentMeters: dem.extentMeters,
-    lat: params.demLat,
+    demZoom: params.demZoom,
+    // ⚠️ **ZÉRO HORS MODE SURFACE, ET CE N'EST PAS UN TROU** : en orbite le
+    // budget de niveau n'a pas de sens, et `f = 0` rend exactement
+    // `courbe(demZoom)`, c'est-à-dire le palier d'aujourd'hui.
+    zoomNiveau: modes?.mode === 'surface' ? (modes.zoomNiveau?.() ?? 0) : 0,
   }
 }
 
@@ -3362,14 +3368,20 @@ function zoomCadrageCourant() {
 //
 // ⚠️ **C'EST L'UNIQUE ÉCRIVAIN DE L'EXAGÉRATION DE ZOOM, ET IL A DEUX RÉGIMES.**
 // Drapeau éteint (production) : le palier d'aujourd'hui, au bit près — c'est
-// `exagForZoom`, inchangé. Drapeau `?globe=continu` : la courbe de la décision
-// 14, lue au zoom que la caméra CADRE réellement. Au repos (pose d'arrivée) les
-// deux rendent **la même valeur, surcharges comprises** — c'est le test ②b, et
-// c'est ce qui fait que le réglage d'Adrien survit au pivot.
+// `exagForZoom`, inchangé. Drapeau `?exag=continu` : la courbe de la décision
+// 14, lue au cran que l'escalier occupe et à la fraction de niveau dépensée. Au
+// repos (`_levelZoom = 0`) les deux rendent **la même valeur, surcharges
+// comprises** — c'est le test ②b de `exageration-globe.test.js`, et c'est ce qui
+// fait que le réglage d'Adrien survit au pivot.
+//
+// ⚠️ **ET LE GLOBE LIT ICI, PAS AILLEURS** (Tâche E). Il est le quatorzième
+// lecteur du partage ; sans drapeau `majExageration` rend la main sans rien
+// faire et le globe reste à 18.
 function syncExagToZoom() {
-  const cadrage = exagContinueActive() ? zoomCadrageCourant() : null
-  if (cadrage) majExagerationCadrage(exagPartage, cadrage)
+  const cran = exagContinueActive() ? cranCourant() : null
+  if (cran) majExagerationCran(exagPartage, cran)
   else params.demExaggeration = exagForZoom(params.demZoom)
+  globe?.majExageration(params)
   refreshAll()
 }
 
@@ -3975,7 +3987,11 @@ function altitudeCadrageM() {
 // Tâche 4 Étape 0). `src/globe.js` n'importe pas `flags.js` : il ne connaît
 // qu'un booléen, passé par le constructeur. Sans cette ligne, le drapeau ne
 // protégerait rien et le tri spatial atterrirait sur le globe de production.
-globe = new Globe({ ...params, globeContinu: globeContinuActif() })
+// ⚠️ **MÊME CÂBLAGE POUR `exagContinue` (Tâche E)** : `globe.js` n'importe pas
+// `flags.js` non plus, et sans cette ligne le globe garderait son exagération 18
+// pour toujours — le facteur 6,4 contre le socle, et le bloc DEBOUT que la
+// Tâche B a relevé à l'écran.
+globe = new Globe({ ...params, globeContinu: globeContinuActif(), exagContinue: exagContinueActive() })
 
 // ══════════ LA FENÊTRE LIT LE QUADTREE — Tâche 6 quinquies ═════════════════
 //

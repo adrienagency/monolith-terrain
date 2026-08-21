@@ -22,6 +22,11 @@ import { repereCrop, coinNormalise, zoomCropPrescrit, mercX, mercY } from './mon
 // LES PAROIS ET LA BASE — Tâche B. Pur lui aussi : il ne rend que des nombres,
 // c'est ce fichier-ci qui en fait une géométrie three.
 import { construireSolideCrop } from './monde/parois-crop.js'
+// L'EXAGÉRATION PARTAGÉE — Tâche E. ⚠️ **UN ÉCRIVAIN, N LECTEURS, ET LE GLOBE
+// EST LE QUATORZIÈME** (`terrain.js` ×5, `ocean.js` ×2, `gpx.js` ×1,
+// `main.js` ×5). ⚠️ Ce module n'importe RIEN — c'est sa seule règle, et elle est
+// gardée par un test —, donc aucun cycle n'est ouvert ici.
+import { lireExageration } from './monde/exageration-continue.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -776,7 +781,21 @@ export class Globe {
     this.group = new THREE.Group()
     this.group.name = 'globe'
     this.radius = R_GLOBE
-    this.exaggeration = params.globeExaggeration ?? 18
+    // L'EXAGÉRATION VERTICALE — Tâche E, « UNE SEULE TERRE ».
+    //
+    // ⚠️ **`exagSuivie` EST UN DRAPEAU, ET SANS LUI RIEN NE CHANGE.** Le défaut
+    // de production reste **18** : c'est la valeur des vues orbitales, celle qui
+    // fait exister les crêtes vues de 1 600 km. Sous `?exag=continu`, le globe
+    // cesse d'avoir sa propre échelle verticale et LIT le partage
+    // (`majExageration` plus bas) — le socle passait le même relief à 2,8, et
+    // c'est ce facteur 6,4 (§3 du plan) qui faisait « deux Terres ».
+    //
+    // ⚠️ `globe.js` N'IMPORTE PAS `flags.js` — même règle que `globeContinu` :
+    // le lecteur du drapeau est `src/main.js`, qui ne passe ici qu'un booléen.
+    this.exagSuivie = params.exagContinue ?? false
+    this.exaggeration = this.exagSuivie
+      ? lireExageration(params)
+      : (params.globeExaggeration ?? 18)
     this.tiles = new Map() // key → { z,x,y, state, mesh, texture, heights, lastUsed, center, chord }
     this.queue = []
     this.inFlight = 0
@@ -2249,6 +2268,34 @@ export class Globe {
   setExaggeration(v) {
     this.exaggeration = v
     this._rechargeTuiles()
+  }
+
+  // ═══════════ LE QUATORZIÈME LECTEUR — Tâche E, « UNE SEULE TERRE » ═════════
+  //
+  // ⚠️ **LE GLOBE NE CALCULE PLUS SON EXAGÉRATION : IL LA LIT.** C'est la
+  // décision 14 et son partage (`monde/exageration-continue.js`) — un écrivain,
+  // N lecteurs. Un lecteur ne peut pas fabriquer sa propre valeur : il n'a pas
+  // la courbe. Appelé par `syncExagToZoom` (`main.js`), l'unique écrivain.
+  //
+  // ⚠️ **ET IL NE SE RECHARGE QUE SI LA VALEUR A BOUGÉ.** `setExaggeration`
+  // rend au réseau TOUTES les tuiles prêtes (le relief est cuit dans les
+  // sommets, et `_buildMesh` relâche les hauteurs) : l'appeler pour une valeur
+  // identique coûterait une planète entière à chaque rafraîchissement d'IHM.
+  //
+  // ⚠️ **CE QUE ÇA COÛTE, ET LE PLAN L'AVAIT ÉCRIT** : le commentaire de
+  // `_rechargeTuiles` prévient que la décision 14 « ne doit PAS s'appuyer dessus
+  // image par image ». Elle ne le fait pas — `syncExagToZoom` n'est appelé qu'au
+  // CRAN, au chargement et au relâchement d'un curseur, jamais par image. Le
+  // jour où la valeur devra glisser par image, il faudra déplacer le relief dans
+  // le nuanceur de sommets ; ce n'est pas cette tâche.
+  //
+  // @returns {number} l'exagération en vigueur après l'appel
+  majExageration(params) {
+    if (!this.exagSuivie) return this.exaggeration
+    const v = lireExageration(params)
+    if (!Number.isFinite(v) || !(v > 0) || v === this.exaggeration) return this.exaggeration
+    this.setExaggeration(v)
+    return this.exaggeration
   }
 
   // ⚠️ LE CONTEXTE WebGL EST REVENU. Les textures du globe ont relâché leur

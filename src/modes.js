@@ -872,6 +872,19 @@ export class Modes {
     this._levelZoom = 0
   }
 
+  // LE BUDGET DE ZOOM DÉPENSÉ DANS LE NIVEAU — le pilote de l'exagération
+  // continue (Tâche E, §4 bis de `monde/exageration-continue.js`).
+  //
+  // ⚠️ **NÉGATIF EN ZOOM AVANT**, nul au repos et à chaque cran, borné à
+  // `[-STEP_IN, STEP_OUT]` par `_applyZoom`. C'est la SEULE grandeur de cette
+  // classe que le repositionnement du cran ne contamine pas : `_rescale`
+  // l'écrase par `_resetZoom()` AVANT d'appeler `poseCranContinu`, dont le
+  // facteur d'échelle porte le rapport des exagérations. Un accesseur plutôt
+  // qu'une lecture directe du champ privé, pour que le lien soit cherchable.
+  zoomNiveau() {
+    return this._levelZoom
+  }
+
   _applyZoom(dt) {
     const c = this.controls
     const cam = this.camera

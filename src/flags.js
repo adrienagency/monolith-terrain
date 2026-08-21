@@ -267,6 +267,41 @@ export function socleQuadtreeActif() {
 // de trajet entre deux crans, bornée à `[z, z+1]` par construction, qui ne peut
 // pas geler), `?globe=continu` garde les paliers d'aujourd'hui. `?exag=continu`
 // rejoue le régime mesuré ci-dessus pour qui veut le voir de ses yeux.
+//
+// ══════════ LE PILOTE EST REPRIS — Tâche E, 2026-08-21 ══════════════════════
+//
+// ⚠️ **LE TABLEAU DU HAUT RESTE : IL DIT POURQUOI CE DRAPEAU EXISTE.** Voici
+// celui d'après, relevé **dans le navigateur** sur la MÊME descente et au même
+// endroit (La Réunion, `?globe=continu&socle=quadtree&f3=0&frontiere=1&seuil=1`
+// `&exag=continu`, neuf `_coarsen()` enchaînés, valeurs lues sur `exagPartage`
+// et sur `globe.exaggeration`) :
+//
+//   | zoom | production | ANCIEN pilote (cadrage) | NOUVEAU pilote (cran + f) |
+//   |------|------------|-------------------------|---------------------------|
+//   | Z12  | ×2,8       | ×2,8                    | **×2,8**                  |
+//   | Z8   | ×2,8       | ×2,8                    | **×2,8**                  |
+//   | Z7   | ×3,2       | ×2,8 ✗                  | **×3,2** ✓                |
+//   | Z6   | ×4         | ×2,8 ✗                  | **×4** ✓                  |
+//   | Z5   | ×5         | ×2,8 ✗                  | **×5** ✓                  |
+//   | Z4   | ×2,5       | ×2,8 ✗                  | **×2,5** ✓                |
+//   | Z3   | ×2,5       | —                       | **×2,5**                  |
+//
+// **Le gel est levé, et la table d'Adrien est intégralement retrouvée.** La
+// cause du gel n'était pas la signature de `zoomCadrage` — elle était propre —
+// mais la CAMÉRA : `poseCranContinu` repose `camY × facteurEchelle`, et ce
+// facteur porte le rapport des exagérations. Le nouveau pilote lit `_levelZoom`,
+// que `_rescale` écrase à zéro AVANT ce repositionnement. Voir le §4 bis de
+// `monde/exageration-continue.js` et `test/exageration-globe.test.js`.
+//
+// ⚠️ **CE DRAPEAU RESTE ÉTEINT, ET POUR UNE RAISON NEUVE : LE COÛT.** Il porte
+// désormais AUSSI l'exagération du GLOBE (Tâche E), dont le relief est cuit dans
+// les sommets : chaque changement de valeur rend au réseau toutes les tuiles
+// prêtes (`setExaggeration` → `_rechargeTuiles`). **Mesuré sur cette machine, La
+// Réunion z12 : 4,8 à 6,5 ms de travail synchrone (868 maillages relâchés), puis
+// 12 à 21 s pour retrouver ~900 tuiles prêtes** — deux mesures, aller et retour.
+// C'est le prix d'un cran, et il n'est pas payable tel quel. La sortie est
+// nommée par `_rechargeTuiles` lui-même : déplacer le relief dans le nuanceur de
+// sommets. **Ce n'est pas la Tâche E.**
 export function exagContinueActive() {
   const v = paramAdresse('exag')
   if (v === 'paliers' || v === '0') return false

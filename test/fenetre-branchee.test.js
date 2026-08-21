@@ -112,7 +112,12 @@ function lecturesDirectes (rel) {
   return lecturesDansCode(sansCommentaires(lire(rel)), rel)
 }
 
-const LES_QUATRE = ['src/terrain.js', 'src/ocean.js', 'src/gpx.js', 'src/main.js']
+// ⚠️ **ON ÉLARGIT CETTE LISTE, ON NE LA REMPLACE JAMAIS.** Elle s'appelle
+// `LES_QUATRE` parce qu'elle en portait quatre ; la Tâche E (plan « UNE SEULE
+// TERRE ») y ajoute `src/globe.js`, qui cesse d'avoir sa propre exagération
+// verticale. **Le nom reste** : le renommer ferait sortir du document les
+// références qui le citent, et c'est l'accident que le §0 du plan interdit.
+const LES_QUATRE = ['src/terrain.js', 'src/ocean.js', 'src/gpx.js', 'src/main.js', 'src/globe.js']
 
 // ══════════ ① LE PIÈGE PRINCIPAL : UN SEUL RÉGLAGE, DOUZE LECTEURS ═════════
 
@@ -150,7 +155,15 @@ test('①b les treize passent par `lireExageration`, et le compte est celui du p
   // fois. Deux listes de réglages ne peuvent plus diverger au premier réglage
   // ajouté. Le compte de `main.js` revient donc de 6 à 5, EN PLACE ; les trois
   // autres lignes n'ont toujours pas bougé d'un caractère.
-  const attendu = { 'src/terrain.js': 5, 'src/ocean.js': 2, 'src/gpx.js': 1, 'src/main.js': 5 }
+  // ⚠️ **ET LE QUATORZIÈME ET LE QUINZIÈME SONT ARRIVÉS AVEC LA TÂCHE E, DANS
+  // `src/globe.js`, ET ILS SONT LÉGITIMES.** Le globe portait sa PROPRE échelle
+  // verticale — `params.globeExaggeration ?? 18` contre `BASE_EXAG = 2,8` pour
+  // le socle, **facteur 6,4** — et c'est ce qui faisait « deux Terres » (§3 du
+  // plan « UNE SEULE TERRE »). Il en a **deux** : le constructeur, qui doit
+  // naître à la bonne échelle plutôt que sauter à la première image, et
+  // `majExageration`, l'entrée que `syncExagToZoom` appelle. Les quatre autres
+  // lignes n'ont pas bougé d'un caractère.
+  const attendu = { 'src/terrain.js': 5, 'src/ocean.js': 2, 'src/gpx.js': 1, 'src/main.js': 5, 'src/globe.js': 2 }
   const vus = {}
   for (const f of LES_QUATRE) {
     const code = sansCommentaires(lire(f))

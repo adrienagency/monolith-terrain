@@ -216,7 +216,28 @@ export function zoomDepuisAltitude (altitudeM, { lat = 45, fovDeg = FOV_DEG, fra
   return Math.log2((MPP_Z0 * Math.cos(lat * D2R) * PX_BLOC) / largeur)
 }
 
-// ══════════ 4. LE ZOOM DE CADRAGE — LE PILOTE, ET IL EST HORIZONTAL ═════════
+// ══════════ 4. LE ZOOM DE CADRAGE — LE DEUXIÈME PILOTE, ET IL A ÉCHOUÉ ══════
+//
+// ⚠️ **CE QUI SUIT N'EST PLUS APPELÉ PAR AUCUN CHEMIN DE PRODUCTION. ON LE GARDE
+// PARCE QUE C'EST LA MESURE, ET QU'ELLE VAUT MIEUX QU'UN COMMENTAIRE.** Le §4 de
+// ce fichier a été écrit comme « la parade au point fixe » ; l'écran a dit non.
+// Descente Z12 → Z4 sur la Réunion, valeur lue dans le cartouche « Relief » :
+// **×2,8 à tous les crans**, au lieu de 3,2 / 4 / 5 / 2,5 (le tableau vit sous
+// `exagContinueActive()`, `flags.js`). Le pilote NE DIVERGEAIT PAS — il GELAIT,
+// et c'est le jumeau du défaut qu'il prétendait éviter.
+//
+// ⚠️ **LA CAUSE A ÉTÉ TROUVÉE ET REJOUÉE** (`test/exageration-globe.test.js`,
+// ②b) : la boucle ne passe pas par la SIGNATURE de `zoomCadrage` — qui, elle,
+// est bien propre — mais par la CAMÉRA. Au cran, `poseCranContinu`
+// (`loi-altitude.js`) repose la caméra à `camY × facteurEchelle`, et
+// `facteurEchelle` vaut `2 × exagAprès / exagAvant` : **la distance d'après-cran
+// PORTE l'exagération.** Rejouée à la main, la suite s'écarte de la table dès le
+// premier cran (5 au lieu de 2,5) puis se fige sur `EXAG_BASE` pour les six
+// derniers. **Aucune grandeur tirée de la pose d'après-cran n'est propre** — ni
+// la distance, ni `camY`, ni la distance horizontale.
+//
+// **Le pilote qui l'a remplacé est au §4 bis.** Celui-ci reste ici comme témoin
+// mesuré, et ses tests (② à ⑤b de `test/fenetre-branchee.test.js`) avec lui.
 
 /**
  * Le zoom RÉEL que la caméra cadre, **sans jamais lire l'exagération**.
@@ -257,6 +278,58 @@ export function zoomCadrage ({ distance, distanceReference, extentMeters, lat = 
   const ext = Number(extentMeters)
   if (!(d > 0) || !(dRef > 0) || !(ext > 0)) return NaN
   return Math.log2((MPP_Z0 * Math.cos(lat * D2R) * PX_BLOC * dRef) / (d * ext))
+}
+
+// ══════════ 4 bis. LE CRAN ET SA FRACTION — LE PILOTE RETENU ════════════════
+//
+// **`zc = demZoom + f`**, et les deux termes sont choisis pour ce qu'ils ne
+// peuvent PAS faire.
+//
+//   · **`demZoom` ne peut pas geler.** C'est le cran de l'escalier, un entier
+//     d'état, posé par `pasEscalier` / `niveauDePlongee` — jamais calculé depuis
+//     le terrain ni depuis l'exagération. Il change de 1 à chaque cran, donc
+//     `zc` aussi : le défaut du §4 (une valeur constante sur dix crans) est
+//     impossible par construction.
+//   · **`f` ne peut pas diverger.** C'est `-_levelZoom / STEP_IN`
+//     (`modes.js:222`), le budget de zoom DÉPENSÉ DANS LE NIVEAU, et
+//     `_applyZoom` le borne déjà à `[-STEP_IN, STEP_OUT] = [-ln2, +ln2]`. Donc
+//     `f ∈ [-1, +1]` **sans qu'on ajoute de garde-fou**, et `zc ∈ [z-1, z+1]`.
+//
+// ⚠️ **ET IL EST PROPRE, LÀ OÙ AUCUNE GRANDEUR DE CAMÉRA NE L'EST.** `_rescale`
+// appelle `_resetZoom()` — donc `_levelZoom` est écrasé à zéro AVANT que
+// `poseCranContinu` ne repose la caméra : le facteur d'échelle du cran, qui
+// porte le rapport des exagérations, n'entre jamais dedans. `_applyZoom`, lui,
+// n'ajoute que `log(newDist / dist)`, un RAPPORT du glissé de molette. La boucle
+// `exag → pose → f → zc → exag` est **coupée à la source**, pas amortie.
+//
+// ⚠️ **LA CONTINUITÉ AU CRAN EST EXACTE, PAS APPROCHÉE.** À la butée d'entrée
+// `_levelZoom = -ln2` donne `zc = z + 1` ; le cran tombe, `demZoom` devient
+// `z + 1` et `_levelZoom` repart de zéro : `zc = z + 1`. **La même valeur des
+// deux côtés.** Et au repos (`_levelZoom = 0`) `zc = demZoom`, donc la courbe
+// rend **la table d'Adrien au bit près, surcharges comprises** — c'est la
+// décision 14 mot pour mot : « mêmes valeurs aux mêmes altitudes, interpolées au
+// lieu de sauter ».
+
+/** `STEP_IN` / `STEP_OUT` — `modes.js:171-172`. Un niveau vaut un facteur 2. */
+export const PAS_NIVEAU = Math.LN2
+
+/**
+ * Le zoom RÉEL du cran courant : `demZoom + f`.
+ *
+ * @param {object} arg
+ * @param {number} arg.demZoom le cran de l'escalier (`params.demZoom`)
+ * @param {number} [arg.zoomNiveau] `_levelZoom` de `modes.js` — NÉGATIF en zoom
+ *   avant, positif en zoom arrière, nul au repos
+ * @param {number} [arg.pasNiveau] la butée du niveau, `STEP_IN`
+ * @returns {number} dans `[demZoom - 1, demZoom + 1]`, ou `NaN` sans cran
+ */
+export function zoomCran ({ demZoom, zoomNiveau = 0, pasNiveau = PAS_NIVEAU } = {}) {
+  const z = Number(demZoom)
+  if (!Number.isFinite(z)) return NaN
+  const l = Number(zoomNiveau)
+  const p = Number(pasNiveau)
+  if (!Number.isFinite(l) || !(p > 0)) return z
+  return z + Math.min(Math.max(-l / p, -1), 1)
 }
 
 // ══════════ 5. LA VALEUR PARTAGÉE — UN ÉCRIVAIN, N LECTEURS ═════════════════
@@ -306,6 +379,21 @@ export function majExageration (partage, altitudeM) {
  */
 export function majExagerationCadrage (partage, { distance, distanceReference, extentMeters, lat = null } = {}) {
   const z = zoomCadrage({ distance, distanceReference, extentMeters, lat: lat ?? partage.lat })
+  if (!Number.isFinite(z)) return partage.valeur
+  return majExageration(partage, altitudeDepuisZoom(z, partage))
+}
+
+/**
+ * L'écrivain « cran » — **celui que la Tâche E retient**, piloté par le cran de
+ * l'escalier et la fraction de niveau dépensée. Voir le §4 bis.
+ *
+ * ⚠️ **IL PASSE PAR `majExageration`, COMME SON AÎNÉ** — un seul chemin
+ * d'écriture, jamais deux. L'aller-retour `zoom → altitude → zoom` a été mesuré
+ * avant d'être écrit : **écart maximal 8,9·10⁻¹⁶** sur `z ∈ [3 ; 15]`, donc la
+ * table d'Adrien ressort au bit près (test ②b).
+ */
+export function majExagerationCran (partage, { demZoom, zoomNiveau = 0, pasNiveau = PAS_NIVEAU } = {}) {
+  const z = zoomCran({ demZoom, zoomNiveau, pasNiveau })
   if (!Number.isFinite(z)) return partage.valeur
   return majExageration(partage, altitudeDepuisZoom(z, partage))
 }
