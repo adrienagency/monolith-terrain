@@ -28,7 +28,7 @@ Trois révisions de ce document ont posé des constantes **à l'instinct**, pré
 ⚠️ **UNE VERSION DE CE PLAN LES RECOPIAIT EN PLUS COURT dans quatre tâches** — `npx vite build` nu, sans redirection, sans `nettoie:dist`, avec un « audit » qui ne nommait pas sa commande. Un agent lisant la version courte aurait sauté les gardes en toute bonne foi. **C'est exactement le reproche que ce plan fait à sa propre décision 13** : un avertissement qu'on ne relit pas ne protège de rien.
 
 ```
-npm test              # la suite entière — 3 116 verts au 2026-08-21
+npm test              # la suite entière — 3 168 verts au 2026-08-21 (Tâche 4 ter incluse)
 npm run audit:tests   # disque contre liste
 node --check <fichier>  # sur CHAQUE fichier modifié
 npm run nettoie:dist && npm run build:mapcells && npx vite build > /tmp/build.log 2>&1 && npm run verifie:dist
@@ -1239,7 +1239,7 @@ La Tâche 4 sexies (Étape 1) **relâche `t.heights` dans `_buildMesh`** — 256
 - **Le battement au navigateur n'a pas été mesuré**, seulement au banc.
 - **Aucun test ne rend une image** : rien ici ne prouve ce que l'œil verra.
 
-### Tâche 4 ter : la descente bornée par le réseau — règle R3
+### Tâche 4 ter : la descente bornée par le réseau — règle R3 ✅ **FAITE LE 2026-08-21** — ⚠️ **LES DEUX POINTS DU PLAN ONT SURVÉCU AUX QUATRE TÂCHES, ET LE TROISIÈME EST MESURÉ**
 
 **Fichiers :** créer `src/monde/descente-bornee.js` · tester `test/descente-bornee.test.js` — ⚠️ **et ne touchez pas à `flux-terrain.js` : `debitObserve` est fabriqué par la Tâche 4 bis, qui passe avant.**
 
@@ -1251,12 +1251,87 @@ La Tâche 4 sexies (Étape 1) **relâche `t.heights` dans `_buildMesh`** — 256
 
 Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/s**. À z9 un texel vaut 213 m. ⚠️ **CE PLAN ÉCRIVAIT « dix-sept texels sur la largeur du socle » — c'était le fantôme des 3,56 km que la Tâche 3 a réfuté** (17 × 213 = 3 621 m). La vraie largeur vient de `blockExtentMeters` et dépend du zoom : sur un socle **z13 (10,4 km à 45°), cela fait 48 texels**. Ce n'est pas le flou de la décision 13, **c'est une autre carte.**
 
-- [ ] **Étape 1** — test : à débit observé faible, `zoomSoutenable` rend un zoom inférieur au demandé. ⚠️ **La seconde moitié de cette assertion — « et la caméra ne descend pas plus vite que lui » — est HORS DU PÉRIMÈTRE de cette tâche** : elle appartient à la Tâche 1, qui tient la caméra. **Dites ici qui appelle `zoomSoutenable` et où** (`modes.js`, sur le chemin de descente), et laissez l'assertion caméra à la Tâche 1.
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
-- [ ] **Étape 3** — implémenter `zoomSoutenable`. ⚠️ **Le débit s'observe, il ne se devine pas** : il vient de `debitObserve(flux)` — octets réellement reçus par seconde — **jamais de `navigator.connection`**, qui ment et n'existe pas partout.
+- [x] **Étape 1** — test : à débit observé faible, `zoomSoutenable` rend un zoom inférieur au demandé. ⚠️ **La seconde moitié de cette assertion — « et la caméra ne descend pas plus vite que lui » — est HORS DU PÉRIMÈTRE de cette tâche** : elle appartient à la Tâche 1, qui tient la caméra. **Dites ici qui appelle `zoomSoutenable` et où** (`modes.js`, sur le chemin de descente), et laissez l'assertion caméra à la Tâche 1.
+- [x] **Étape 2** — le lancer, vérifier qu'il échoue.
+- [x] **Étape 3** — implémenter `zoomSoutenable`. ⚠️ **Le débit s'observe, il ne se devine pas** : il vient de `debitObserve(flux)` — octets réellement reçus par seconde — **jamais de `navigator.connection`**, qui ment et n'existe pas partout.
 
-- [ ] **Étape 4** — mutation : **rendre `zoomSoutenable` constant (toujours le zoom demandé) doit tuer le test**. ⚠️ Ce plan écrivait le mot « mutation » nu — une mutation qui n'est pas nommée n'est pas exécutable.
-- [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [x] **Étape 4** — mutation : **rendre `zoomSoutenable` constant (toujours le zoom demandé) doit tuer le test**. ⚠️ Ce plan écrivait le mot « mutation » nu — une mutation qui n'est pas nommée n'est pas exécutable.
+- [x] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
+#### ✅ CE QUI A ÉTÉ FAIT, ET CE QUE ÇA MESURE (2026-08-21)
+
+**Fichiers :** `src/monde/descente-bornee.js` (créé) · `test/descente-bornee.test.js` (créé, **ajouté à la ligne `test`**, `audit:tests` sans écart : 185 listés · 185 sur disque) · bancs `.banc/zoom-soutenable.mjs`, `.banc/mutation-4ter.py` (hors dépôt). ⚠️ **`flux-terrain.js` n'a pas été touché**, comme la tâche l'exige.
+
+##### ⚠️ LES DEUX POINTS DU PLAN ONT ÉTÉ RE-MESURÉS — ET ILS TIENNENT
+
+Le risque annoncé était réel : « z11 à 12 Mb/s, z9 à 4 Mb/s » avait été relevé sur l'ancien quadtree, avant que `MAX_Z` passe de 11 à 15, le cache de 420 à 1 700, le plancher de `dist` de 63,7 km à 1 m et la file à 256. **Les deux points sont retrouvés à l'identique.** Ce n'étaient pas des artefacts de `MAX_Z = 11`.
+
+**Banc `.banc/zoom-soutenable.mjs`** — même modèle de latence que `.banc/pano-latence.mjs` (celui qui reproduit le navigateur à 2 % près : 558 contre 568). Vol de référence du §0 — 45 s, Atlantique 260 km → Mont-Blanc 2,2 km, 60 Hz, **cache froid** — puis la caméra reste en place, **17 images jetées** (protocole de banc du §0) et **médiane du zoom dessiné sur 300 images**.
+
+| débit | z soutenu | requêtes | cache | file | `debitObserve` |
+|---|---|---|---|---|---|
+| 2 Mb/s | **z7** | 144 | 216/1 700 | 54 | 1,99 |
+| **4 Mb/s** | **z9** ✅ *point du plan* | 282 | 564/1 700 | 140 | 3,97 |
+| 8 Mb/s | **z11** | 552 | 1 456/1 700 | 246 | 7,83 |
+| **12 Mb/s** | **z11** ✅ *point du plan* | 828 | 1 700/1 700 | 212 | 11,38 |
+| **30 Mb/s** | **z13** ⚠️ *le troisième point, exigé par la tâche* | 2 016 | 1 700/1 700 | 256 | 27,82 |
+| 64 Mb/s | **z14** | 3 624 | 1 700/1 700 | 256 | 50,08 |
+
+⚠️ **ET LE PROTOCOLE DE BANC N'EST PAS UN DÉTAIL ICI.** Trois grandeurs différentes se disputaient le nom de « zoom soutenu », et elles ne disent pas la même chose : le zoom **en mouvement à basse altitude** (7, 9, 9, 11, 11, 12), le zoom **au repos** (7, 9, 11, 11, 13, 14) et le **maximum atteint** (7, 10, 13, 12, 13, 15). C'est le zoom **au repos, médiane sur 5 s** qui retrouve les deux points du plan à l'identique — donc c'est celui que le plan mesurait, et c'est celui qui fait foi. **Les deux autres sont notés ici pour que personne n'ait à les redécouvrir.**
+
+##### LA LOI : `z = ⌊6,2 + 1,4 × log₂(débit en Mb/s)⌋`
+
+⚠️ **UNE INTERPOLATION LOGARITHMIQUE ENTRE LES DEUX SEULS POINTS DU PLAN AURAIT ÉTÉ FAUSSE**, et c'est exactement ce que la tâche redoutait : entre (4 ; z9) et (12 ; z11) la pente vaut 1,26 niveau par doublement, et elle prédit **z12** à 30 Mb/s là où le banc mesure **z13**. Les quatre points supplémentaires bornent la pente à `]1 ; 1,667[`.
+
+La loi n'est **pas** ajustée aux moindres carrés, et la raison est mesurable : les six relevés sont des **planchers** (un z11 mesuré dit « la grandeur continue est dans [11, 12) »), et un ajustement au centre des points sort des bandes. Les deux coefficients sont pris dans le **polytope des six bandes**.
+
+| débit | mesuré | la loi | |
+|---|---|---|---|
+| 2 | z7 | 7 | ✅ |
+| 4 | z9 | 9 | ✅ |
+| 8 | z11 | 10 | ⚠️ −1, le seul écart |
+| 12 | z11 | 11 | ✅ |
+| 30 | z13 | 13 | ✅ |
+| 64 | z14 | 14 | ✅ |
+
+⚠️ **L'ÉCART EST DU BON CÔTÉ, ET C'EST DÉLIBÉRÉ.** 8 Mb/s est aussi le point le plus dispersé des six (médiane 11, mais 9 en mouvement et 13 au maximum). **Sous-estimer d'un niveau donne du flou — ce que la décision 13 accepte. Surestimer donne « une autre carte » — ce que R3 interdit.** Deux tests gardent cette asymétrie : la loi ne dépasse **jamais** un point mesuré, et ne le rate **jamais** de plus d'un niveau.
+
+⚠️ **ET LA LOI CESSE D'ÊTRE UNE LOI DE RÉSEAU AU-DESSUS DE ~30 Mb/s — mesuré.** À 30 et 64 Mb/s la file colle à `PLAFOND_FILE = 256` et le cache à 1 700 : **ce n'est plus le réseau qui borne, c'est le budget.** La loi suit le bon chiffre par accident, elle ne l'explique pas. **Le jour où le budget bouge, ces deux points-là sont à reprendre ; les quatre premiers non.**
+
+##### `null` N'EST PAS ZÉRO — et c'est le piège que la tâche annonçait
+
+`debitObserve` rend `null` sur un flux neuf. Traité comme zéro, il ferait passer un réseau **inconnu** pour un réseau **mort** et clouerait la descente au plancher au tout premier instant, c'est-à-dire quand on n'a encore rien à reprocher au réseau. **Débit inconnu ⇒ zoom demandé, sans rognage.** Un débit mesuré **à** zéro, lui, cloue bien au plancher : les deux cas sont testés séparément.
+
+##### ⚠️ LE POINT D'APPEL — R3 A DÉSORMAIS UN PROPRIÉTAIRE, ET IL EN A UN SEUL SUR DEUX
+
+La Tâche 1c, qui devait poser ce point, a été abandonnée avec le pivot. R3 a **deux moitiés** :
+
+1. **LE REMPLISSAGE — posé ici, et testé.** `remplirBorne(flux, { emprise, zoomDemande })` (`src/monde/descente-bornee.js`) lit `debitObserve(flux)`, le passe à `zoomSoutenable`, et appelle `demanderEmprise` au zoom rogné. ⚠️ **L'EMPRISE NE BOUGE PAS** — contrat de la Tâche 3, « ce qui varie est le remplissage, jamais l'emprise » : une assertion le vérifie octet par octet, et une mutation qui ignore la borne meurt.
+2. **LA CAMÉRA — pas posée, et elle appartient à la Tâche 1.** Le chemin de descente est `src/modes.js` : `_dive` (`:566`), `pickDiveTier` (`:80`), `DIVE_TIERS` (`:62`) — relevés le 2026-08-21. ⚠️ **Tant que la Tâche 1 n'est pas faite, R3 borne CE QU'ON DEMANDE, pas la VITESSE à laquelle on le demande.** C'est écrit plutôt que sous-entendu, dans le §4 de `descente-bornee.js`.
+
+##### L'INDICATEUR DISCRET — son ÉTAT est fait, son DESSIN ne l'est pas
+
+Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande })` rend `{ enRetard, niveaux, zoom }` — **`niveaux`, pas un pourcentage** : un niveau vaut un facteur deux de résolution. ⚠️ **Éteint quand le débit est inconnu** : allumer « ça rame » avant la première réponse serait le même bogue que confondre `null` et zéro, appliqué au visible.
+
+⚠️ **CE MODULE NE LE DESSINE PAS, ET NE PEUT PAS** : il est appelé depuis un module pur, sans DOM. **La place est laissée, et elle est vérifiée sur le dépôt :** `src/main.js:3413-3416`, le `setTimeout(…, 2600)` qui garde la carte de chargement 2,6 s alors que `demBusy` est relâché à la ligne **3418**, dans le `finally` qui s'exécute tout de suite. Le dessin appartient à la **Tâche 2**, comme le §9 le dit.
+
+##### La vérification par mutation (Étape 4) — `.banc/mutation-4ter.py`
+
+| mutation | résultat | test tué |
+|---|---|---|
+| **`zoomSoutenable` constant (toujours le zoom demandé)** — celle que le plan nomme | **TUÉE** | R3 à débit faible · les six points · `remplirBorne` · l'indicateur |
+| `null` lu comme zéro | **TUÉE** | débit inconnu · `remplirBorne` sur flux neuf · indicateur éteint |
+| la borne devient une consigne (plus de `min`) | **TUÉE** | « c'est une borne, pas une consigne » |
+| `remplirBorne` ignore la borne | **TUÉE** | le point d'appel demande au zoom rogné |
+
+##### ⚠️ CE QUI N'A PAS ÉTÉ VÉRIFIÉ
+
+- **Rien n'a été mesuré au NAVIGATEUR pour cette tâche.** Les six points viennent du banc. Le modèle de latence est validé à 2 % près par la Tâche 4 bis, mais **sur le pic de file, pas sur le zoom soutenu**.
+- **`descente-bornee.js` n'a aucun appelant hors de `src/monde/`**, donc `vite build` ne le bundle pas : `node --check` et les tests sont son seul filet, exactement comme `flux-terrain.js`.
+- **La moitié caméra de R3 n'est pas posée** (Tâche 1) : la borne existe, personne ne ralentit encore la descente.
+- **L'indicateur discret n'est pas dessiné** (Tâche 2) : aujourd'hui, quand le réseau ne suit pas, l'utilisateur voit toujours les 2,6 s de voile de `main.js`.
+- **La loi n'est mesurée qu'entre 2 et 64 Mb/s.** En dessous de 2 et au-dessus de 64, elle extrapole — et au-dessus de 30 elle décrit déjà le budget plutôt que le réseau.
+- **Aucun test ne rend une image** : rien ici ne prouve ce que l'œil verra.
 
 ---
 
@@ -1405,7 +1480,7 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 ## 9. Ce qu'Adrien doit trancher en chemin
 
-- ✅ **TRANCHÉ PAR ADRIEN LE 2026-08-20 — CE QUE L'UTILISATEUR VOIT QUAND LE RÉSEAU NE SUIT PAS : UN INDICATEUR DISCRET.** Pas de voile, pas de message bloquant, pas de silence total : un signe non bloquant qui dit que le détail arrive. ⚠️ **Il remplace les 2,6 s de voile que `main.js:3408-3411` pose aujourd'hui alors que l'application est déjà libre.** À dessiner dans la Tâche 2, et à réutiliser par la Tâche 4 ter.
+- ✅ **TRANCHÉ PAR ADRIEN LE 2026-08-20 — CE QUE L'UTILISATEUR VOIT QUAND LE RÉSEAU NE SUIT PAS : UN INDICATEUR DISCRET.** Pas de voile, pas de message bloquant, pas de silence total : un signe non bloquant qui dit que le détail arrive. ⚠️ **Il remplace les 2,6 s de voile que `main.js:3413-3416` pose aujourd'hui alors que l'application est déjà libre** *(⚠️ le plan écrivait « 3408-3411 » ; vérifié le 2026-08-21, le `setTimeout(…, 2600)` est aux lignes 3413-3416 et `demBusy = false` à la ligne 3418, dans le `finally` qui s'exécute tout de suite — le repère a bougé, la thèse est exacte)*. À dessiner dans la Tâche 2, et à réutiliser par la Tâche 4 ter : **son ÉTAT est fabriqué et testé** (`etatIndicateur`, `src/monde/descente-bornee.js`), **son DESSIN reste à faire**.
 - ✅ **TRANCHÉ PAR LA TÂCHE 3 LE 2026-08-21 — LE SOCLE NAÎT QUAND MÊME, À LA RÉSOLUTION DISPONIBLE.** Il **naît sur une altitude** (R1) et **se remplit à un zoom** que le réseau borne (R3) ; **ce qui varie est le remplissage, jamais l'emprise.** Il n'attend pas — attendre est le pop-up déguisé en absence — et **le seuil ne se décale pas** : le débit observé se dégrade quand le socle demande ses tuiles, donc un seuil qui en dépendrait fermerait la boucle « socle → trafic → débit → seuil → socle », ⚠️ **l'oscillateur que R1 interdit, mot pour mot.** Ce que l'utilisateur voit reste l'indicateur discret ci-dessus. **Dérivation et chiffres dans le bilan de la Tâche 3.**
 - ✅ **TRANCHÉ PAR ADRIEN LE 2026-08-20 — LE ZOOM EST CONTINU, « exactement comme Google Earth ou Google Maps ».** La téléportation au point de présentation de `modes.js:455-458` (v48) **disparaît** : l'altitude redevient continue d'un cran à l'autre. ⚠️ **v48 remplaçait une continuité v42 qui avait été retirée, et la raison de ce retrait n'est pas écrite dans le code.** Le garde-fou est donc le test de la Tâche 1a-1b : **altitude monotone, dérivée seconde bornée, et arrivée au zoom demandé.** Si le défaut de v42 reparaît, il sera visible à ces trois assertions — **et non plus masqué par un rideau blanc.**
 - ⚠️ **LES PALIERS D'EXAGÉRATION VERTICALE — NOUVELLE QUESTION, OUVERTE PAR LA MESURE DE LA TÂCHE 1b, ET ELLE COÛTE DEUX CHOSES À LA FOIS.** La table `{3: 2,5 · 4: 2,5 · 5: 5 · 6: 4 · 7: 3,2 · 2,8 ensuite}` (`ZOOM_EXAG_DEFAULTS`, `main.js`) existe pour que le relief reste visible sur un bloc large. Elle facture deux discontinuités, mesurées :
@@ -1426,7 +1501,9 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 **Cohérence des noms** — employés à l'identique partout, ⚠️ **et cette liste était aveugle exactement aux cinq interfaces que la Tâche 4 bis déclarait sans jamais les fabriquer** : `socleVisible`, `empriseSocle`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `creerFlux`, `demanderEmprise`, `tuilesPretes`, `zoomEffectif`, `remplirHauteurs`, `PLAFOND_FILE`, `debitObserve`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`, **et les cinq que la Tâche 3 a réellement fabriqués en chemin** : `ZOOM_SOCLE`, `LARGEUR_SOCLE_M`, `LAT_REFERENCE`, `fractionEcran`, `altitudePourFraction`. ⚠️ **Un nom qui n'apparaît qu'à sa déclaration est une interface orpheline : cherchez-les avec `grep -c`, pas à l'œil.** ⚠️ **`socleVisible` et `empriseSocle` ne sont plus orphelins EN AMONT — fabriqués et testés le 2026-08-21 — mais ils le restent EN AVAL : aucun module de `src/` ne les lit encore.** Ce sont les Tâches 4 bis, 6 et 7 qui les branchent.
 
-⚠️ **MISE À JOUR DU 2026-08-21 — la Tâche 4 bis a fabriqué ses SIX interfaces, et elles ne sont plus orphelines en amont :** `creerFlux`, `demanderEmprise`, `tuilesPretes`, `zoomEffectif`, `remplirHauteurs` et `debitObserve` vivent dans `src/monde/flux-terrain.js`, testées une par une dans `test/flux-terrain.test.js` ; `PLAFOND_FILE` vit dans `src/globe.js`. **`empriseSocle` a désormais un lecteur** — `demanderEmprise` la consomme. **Quatre noms s'ajoutent à surveiller**, produits en chemin par la 4 bis : `tuilesEmprise` (`flux-terrain.js`), `gardeHauteurs`, `_purgerFile` et `_annuler` (`globe.js`). ⚠️ **Restent orphelins EN AVAL — aucun module de `src/` ne les lit** : les six interfaces du flux, `socleVisible`, et tout ce que les Tâches 5, 6, 7 et 4 ter déclarent (`auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`).
+⚠️ **MISE À JOUR DU 2026-08-21 — la Tâche 4 bis a fabriqué ses SIX interfaces, et elles ne sont plus orphelines en amont :** `creerFlux`, `demanderEmprise`, `tuilesPretes`, `zoomEffectif`, `remplirHauteurs` et `debitObserve` vivent dans `src/monde/flux-terrain.js`, testées une par une dans `test/flux-terrain.test.js` ; `PLAFOND_FILE` vit dans `src/globe.js`. **`empriseSocle` a désormais un lecteur** — `demanderEmprise` la consomme. **Quatre noms s'ajoutent à surveiller**, produits en chemin par la 4 bis : `tuilesEmprise` (`flux-terrain.js`), `gardeHauteurs`, `_purgerFile` et `_annuler` (`globe.js`). ⚠️ **Restent orphelins EN AVAL — aucun module de `src/` ne les lit** : les six interfaces du flux, `socleVisible`, et tout ce que les Tâches 5, 6 et 7 déclarent (`auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`).
+
+⚠️ **MISE À JOUR DU 2026-08-21 — la Tâche 4 ter a fabriqué `zoomSoutenable`, et il a un LECTEUR :** `remplirBorne`, dans le même fichier `src/monde/descente-bornee.js`, qui est le **point d'appel de R3 côté remplissage**. **Quatre noms s'ajoutent à surveiller** : `remplirBorne`, `etatIndicateur`, `ZOOM_PLANCHER`, `NIVEAUX_PAR_DOUBLEMENT`. ⚠️ **Ils restent orphelins EN AVAL comme tout le bloc : aucun module de `src/` hors `src/monde/` ne les lit encore** — ce sont les Tâches 1, 2, 6 et 7 qui les brancheront, et la Tâche 4 ter dit précisément où (§4 de `descente-bornee.js`).
 
 **Ordre imposé — révisé le 2026-08-21 par la mesure.** ✅ **Livrées : 1a · 2 bis · 1b · 4 · 4 sexies · 4 quater · 3 · 4 bis.** ⚠️ **Puis, et l'ordre a changé : ~~3~~ → ~~4 bis~~ → 4 ter → 4 alpha.** La Tâche 3 produit l'`emprise` que la 4 bis consomme — **et elle est produite depuis le 2026-08-21 : `empriseSocle`, `src/monde/seuil-socle.js`.** **Et la 4 bis passe désormais AVANT la 4 alpha** : la Tâche 4 quater a laissé le flux mesuré à **568 tuiles en `loading` simultanément** caméra en mouvement, avec `MAX_CONCURRENT = 6` — or la 4 alpha multiplie par quatre le poids d'une tuile (256 → 512 px). **Calibrer le flux avant de l'alourdir, comme on a dimensionné le cache avant d'approfondir.** Ensuite le **bloc fenêtre — 5 avant 6, puis 7** : c'est lui qui supprime les crans. Puis **1b bis** (la frontière de rendu). ⚠️ **Enfin seulement les rideaux : 2 (`#loading`) puis 2 ter (`.whiteout`)** — ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up, il montre le trou qu'il cachait. ⚠️ **La Tâche 1c est ABANDONNÉE** : elle déverrouille une reconstruction que le pivot supprime.
 
