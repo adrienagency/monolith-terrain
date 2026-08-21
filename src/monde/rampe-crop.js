@@ -271,9 +271,20 @@ export function echelleRampe(mesure, { plancherM = 0 } = {}) {
     throw new TypeError('echelleRampe : il faut une mesure (mesurerRelief)')
   }
   const p = Number.isFinite(plancherM) && plancherM > 0 ? plancherM : 0
-  const terreBas = Number.isFinite(mesure.minTerreM) ? mesure.minTerreM : 0
-  const brut = Number.isFinite(mesure.maxTerreM) ? mesure.maxTerreM : terreBas
-  const terreHaut = Math.max(brut, terreBas + p)
+  // ⚠️ **PAS DE REPLI ICI — TOUR DE CORRECTION 1, D-2.** `minTerreM`/`maxTerreM`
+  // portaient chacun un repli (`: 0`, `: terreBas`) qui SEMBLAIT défensif mais
+  // ne l'était pas : le seul appelant du dépôt (`poserRampe` → `mesurerRelief`)
+  // NORMALISE DÉJÀ ces deux champs à une valeur finie avant de les rendre
+  // (`mesurerRelief`, fin de fonction, § « le prédicat de terre »), exactement
+  // comme `mesure.minM` ci-dessous, qui n'a JAMAIS eu de repli. Les replis
+  // étaient donc inatteignables dans la chaîne réelle — la campagne de
+  // mutation l'a prouvé (S3, S9 : survivantes) — sans défendre un appelant qui
+  // existe. Un repli qu'aucun appelant réel ne peut déclencher ment sur ses
+  // garanties (§2 de `/threejs-optimisation`) ; il est retiré, pas maquillé en
+  // « couvert » par un test qui violerait le contrat documenté ci-dessus pour
+  // le seul plaisir d'exercer la ligne.
+  const terreBas = mesure.minTerreM
+  const terreHaut = Math.max(mesure.maxTerreM, terreBas + p)
   const profondeur = Math.max(-Math.min(0, mesure.minM), p)
   return { terreBas, terreHaut, profondeur, plancherM: p }
 }
