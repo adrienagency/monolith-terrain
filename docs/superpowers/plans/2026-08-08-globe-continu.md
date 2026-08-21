@@ -1530,6 +1530,33 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
 - [x] **Étape 5** — mutation : inverser l'enroulement de la dalle doit tuer le test d'orientation. ✅ **Elle tue la FERMETURE** (`Ā` voit la dalle retournée). ⚠️ **Et la mutation jumelle que ce plan proposait — « un anneau décalé d'un sommet » — NE MORD PAS**, mesuré : `‖Ā‖` relative 1,61e-19. Voir le bilan : cette propriété-là est tenue par la construction, pas par l'audit.
 - [x] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
+### Tâche 6 bis : LE BRANCHEMENT ⚠️ C'EST ELLE QUI SUPPRIME LES CRANS À L'ÉCRAN
+
+**Fichiers :** modifier `src/main.js`, `src/terrain.js`, `src/ocean.js`, `src/gpx.js` · tester `test/fenetre-branchee.test.js` (créer)
+
+⚠️ **TOUTES LES BRIQUES SONT LIVRÉES ET AUCUNE N'EST BRANCHÉE.** `src/monde/` porte cinq modules complets, prouvés, mutés — et **importés par aucun fichier de production**. Tant que ce branchement n'est pas fait, **Adrien ne voit rien changer à l'écran** : le bloc est toujours reconstruit à chaque cran, et l'exagération saute toujours.
+
+**Ce que le branchement doit produire, et c'est le but de tout ce plan :**
+
+1. **Le socle cesse d'être RECONSTRUIT et devient RÉÉCHANTILLONNÉ.** `majHauteurs` met à jour les hauteurs **en place** — aucune allocation, aucune retriangulation, aucun sommet déplacé. Mesuré **2,367 ms/image à n=384** contre **8,7 ms** pour la reconstruction du dépôt. ⚠️ **Ce n'est pas seulement 3,7 fois moins cher : c'est une mise à jour au lieu d'une cuisson, donc il n'y a plus rien à attendre quand la caméra descend.**
+2. **L'exagération verticale devient continue** (décision 14). Mesuré : **×2,0000 au cran z4→z5 aujourd'hui, ×1,003966 après**.
+3. **Le cran disparaît** : `_refine` / `_coarsen` / `_rescale` n'ont plus de bloc à recharger.
+
+⚠️ **LE PIÈGE PRINCIPAL, ET IL A DÉJÀ MORDU DEUX FOIS SUR CE DÉPÔT : UN RÉGLAGE ÉCRIT D'UN CÔTÉ ET JAMAIS TRANSMIS À L'AUTRE.** `params.demExaggeration` est lu à **douze endroits** — `terrain.js` ×5, `ocean.js` ×2, `gpx.js`, `main.js` ×4. **Les douze doivent lire `partage.valeur` du même partage, au même instant.** La Tâche 6 a livré `creerExagerationPartagee` / `majExageration` exactement pour ça : **un écrivain, N lecteurs.**
+
+⚠️ **ET LES SURCHARGES D'ADRIEN DOIVENT SURVIVRE** : `localStorage` sous `monolith.zoomExag` (`main.js:3130-3138`). La courbe passe par les ancres **et** honore les surcharges — les retirer casserait un réglage qu'il utilise.
+
+⚠️ **NE TOUCHE PAS AU DAMIER.** `block-grid.js:768` appelle `buildSlabWalls`, avec **13 fichiers `test/damier-*.test.js` et 243 tests à empreintes bit à bit**. La Tâche 6 a délibérément laissé `plinth.js` et `ocean.js` intacts pour cette raison. `contourSocle(fenetre)` est le pont prévu vers `buildSlabWalls` **à l'arrêt** (décision 5 : la gravure ne s'écrit qu'à l'arrêt).
+
+- [ ] **Étape 1 — le test qui échoue** : un changement de cran en mode surface **ne reconstruit aucune géométrie** — l'identité des tampons de position est conservée. ⚠️ **Rejoue-la contre le dépôt AVANT de l'écrire.**
+- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
+- [ ] **Étape 3 — le partage d'exagération**, ses douze lecteurs, et un test qui **échoue si un seul lit encore `params.demExaggeration`**.
+- [ ] **Étape 4 — brancher la fenêtre** derrière `FLAGS.globeContinu`, en gardant le chemin du bloc pour la production.
+- [ ] **Étape 5 — mutation** : remettre un lecteur sur `params.demExaggeration` doit tuer le test ; réintroduire une reconstruction doit tuer celui de l'Étape 1.
+- [ ] **Étape 6 — REGARDER L'ÉCRAN.** ⚠️ **C'est la première tâche de ce plan dont le résultat est VISIBLE. Charge la page, descends du globe au socle, et dis ce que tu vois** — y compris si c'est laid.
+- [ ] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
+
 ### Tâche 7 : les deux résolutions et la zone morte
 
 ⚠️ **CETTE TÂCHE RÉINVENTE `src/fenetre-finesse.js`, QUI EXISTE DÉJÀ** — module pur, testable sous node : `pasFinesse`, `resDeFinesse`, `REPOS_S = 0,4`, `V_REPOS = 2`, `RES_REPOS_MAX = 768`, plus `Terrain.resMaillage` (`terrain.js:2016`) et `RES_FENETRE_CONTINUE = 384` (`terrain.js:61`). ⚠️ **Nuance que ce plan a écrite trop fort : il n'est PAS « en production » — `flags.js:25` porte `fenetreContinue: false`, et `terrain.js:2017` est court-circuité hors `?f3=1`.** Il est fusionné et testé, pas actif. **Trancher : étendre ou remplacer.**
