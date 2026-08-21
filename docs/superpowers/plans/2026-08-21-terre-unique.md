@@ -113,7 +113,7 @@ npm run nettoie:dist && npm run build:mapcells && npx vite build && npm run veri
 | ce qui existe | où | ce qu'il fait |
 |---|---|---|
 | **La projection sphérique exacte** | `globe.js`, `_buildMesh` / `posAt` | chaque sommet **posé sur la sphère** puis déplacé le long du rayon — **jamais interpolé sur un quad plat** |
-| **`dansFenetre(x, z, half, corner, expo)`** | `fenetre-clip.js:232` | ⚠️ **le test de forme du crop, coins en superellipse compris — déjà utilisé par `plinth.js` ET `ocean.js`** |
+| **`dansDalle(x, z, demi, rayon, exposant, facteurs)`** | `damier-bords.js:181` | ⚠️ **LA SUPERELLIPSE EXACTE, et c'est elle qu'il faut.** Le §4 de ce plan prescrivait `dansFenetre` (`fenetre-clip.js:232`) en le décrivant faux **deux fois** : il n'est utilisé ni par `plinth.js` ni par `ocean.js` (mais par `gpx.js`, `main.js`, `peaks.js`), et **ce n'est pas la superellipse mais son OCTOGONE CIRCONSCRIT** — son propre en-tête le dit. ⚠️ **Écart mesuré : NUL à 45°** (le plan diagonal y est tangent, 1,4e-14 — **un test posé là ne les aurait pas distinguées**), **maximal à 44,3° où il vaut 0,129 unité = 23,9 m au sol.** Sur l'octogone, la surface aurait débordé les parois : un liseré |
 | `plansFenetre`, `pointCoin`, `arcCoin`, `exposantCoin` | `fenetre-clip.js` | la loi de coin, accord mesuré à **1,1e-16** avec la fenêtre |
 | **`buildSlabWalls`** | `plinth.js:232` | **douze options** : congé, chanfrein, AO de contact, liner, masque d'arrondi, bords, `baseYFloor` |
 | Le flux et sa réserve | `monde/flux-terrain.js` | `remplirHauteurs` **par lot**, `gardeHauteurs`, `debitObserve`, `PLAFOND_FILE = 256` |
@@ -147,7 +147,7 @@ Les tuiles du globe cessent d'être dessinées entières : **elles sont découp�
 - [ ] **Étape 1 — le test qui échoue** : à l'intérieur du crop, la surface est dessinée ; **à un texel dehors, elle ne l'est pas**, et la frontière suit la superellipse. ⚠️ **Rejoue-le contre le dépôt avant de l'écrire.**
 - [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
 - [ ] **Étape 3 — implémenter.** ⚠️ **Le test se fait en lat/lon, pas en coordonnées de scène** : une tuile chevauche la frontière, et sa position mondiale est relative à son propre centre (RTC).
-- [ ] **Étape 4 — le raffinement dans le crop.** ⚠️ **Le critère `chord/dist` refend par DISTANCE ; le crop a besoin d'une résolution UNIFORME sur toute son emprise.** Prescris : **à `ZOOM_SOCLE` partout dans le crop**, par distance dehors. **Mesure ce que ça ajoute en tuiles.**
+- [x] **Étape 4 — le raffinement dans le crop. ✅ MESURÉ, ET IL RETIRE AU LIEU D'AJOUTER.** **16 tuiles z13 à toutes les altitudes** — uniforme et stable dans la descente. Il n'ajoute qu'**au seuil de naissance** (+18 dessinées, +24 cache, +0,1 Mo — c'est le plancher, et il confirme *à l'exécution* ce que `seuil-socle.js` n'avait que dérivé) et **retire partout en dessous** : à 2 km, **−210 dessinées (−21,8 %), −280 en cache (−18,6 %), −1,9 Mo**. ⚠️ **CONTREPARTIE ASSUMÉE : le crop cesse de descendre à z15 et se cale à z13** — c'est la résolution du socle d'aujourd'hui, mais le globe savait faire plus fin.
 - [ ] **Étape 5 — mutation** : retirer le `discard` doit tuer le test.
 - [ ] **Étape 6 — REGARDER L'ÉCRAN** et dire ce qu'on voit.
 - [ ] **Étape 7 — LA CLÔTURE DU §0**, puis commit.
@@ -155,6 +155,11 @@ Les tuiles du globe cessent d'être dessinées entières : **elles sont découp�
 ### Tâche B — LES PAROIS ET LA BASE ⚠️ VERTICALES ET PARALLÈLES (décision 2)
 
 **Fichiers :** modifier `src/globe.js` · lire `src/plinth.js` · tester `test/crop-parois.test.js` (créer)
+
+
+⚠️ **LE BORD DU `discard` N'EST PAS ANTIALIASÉ, ET C'EST MESURÉ, PAS JUGÉ À L'ŒIL** : `gl.getContextAttributes().antialias === false`. Un `discard` donne une frontière binaire, donc les coins vont créneler.
+
+**Décision, et elle est d'ingénierie, pas de goût : la paroi et la surface partagent EXACTEMENT la même courbe, et la surface passe d'un `discard` binaire à une COUVERTURE DOUCE** — `smoothstep` sur la distance signée à la frontière, sur une largeur d'environ un pixel écran. ⚠️ **Le `discard` reste au-delà d'un pixel**, sinon on paie le mélange sur toute la tuile. **Mesure la largeur en unités-monde à partir de la dérivée d'écran (`fwidth`), jamais une constante** — une constante serait juste à une seule altitude.
 
 Des parois tombent depuis la frontière du crop jusqu'à une base. ⚠️ **Verticales et parallèles, pas radiales — c'est la décision d'Adrien, et elle prime sur la justesse physique.**
 
@@ -222,6 +227,9 @@ La mer cesse d'être un plan à hauteur fixe cuit sur une grille plate : elle de
 ### Tâche G — L'ESTOMPAGE DE LA TERRE AUTOUR (décision 3)
 
 **Fichiers :** modifier `src/main.js` (la passe de fond) · tester
+
+⚠️ **ET C'EST ELLE QUI RÉPARE CE QUE LA TÂCHE A A RENDU BIZARRE.** Relevé à l'écran après la découpe : **l'atmosphère et les nuages ne sont PAS coupés** (matériaux séparés), donc la planète reste « une grosse boule laiteuse avec un timbre-poste dessus ». Les calottes polaires non plus — sans effet à l'échelle du socle. **Tant que cette tâche n'est pas faite, l'image ne peut pas être jugée.**
+
 
 La planète autour du crop **se fond progressivement vers le fond** à mesure qu'on descend, pour que le bloc se détache. ⚠️ **La Tâche 1b bis a laissé la porte ouverte : « un fondu croisé en espace-écran est trivial avec deux passes ».** Ici il n'y a plus deux mondes, mais le fondu reste en espace-écran.
 
