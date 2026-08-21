@@ -1629,6 +1629,26 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
 - [x] **Étape 6 — REGARDER L'ÉCRAN**, descendre du globe au socle, et dire ce qu'on voit, y compris si c'est laid. ✅ **Elle a dit oui**, et c'est la première fois de ce plan : quatorze crans sans une seule reconstruction, socle indiscernable de la production. Voir le bilan.
 - [x] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
+### Tâche 6 quinquies : LA FENÊTRE LIT LE QUADTREE ⚠️ **C'EST ELLE QUI TUE L'ATTENTE**
+
+**Fichiers :** modifier `src/main.js`, `src/terrain.js` · tester `test/fenetre-branchee.test.js`
+
+⚠️ **LA TÂCHE 6 ter A SUPPRIMÉ LA RECONSTRUCTION, PAS L'ATTENTE — ET ELLE L'A DIT.** Quatorze crans sur quatorze gardent le même tampon de positions, mesuré à l'écran, et le coût par image tombe de **30 %**. Mais **`terrain.js` remplit encore les hauteurs depuis le MNT avec son propre échantillonneur**, donc `loadSurface` garde la main : **les ~7,9 s sur 30 que le §6 impute à `loadSurface` restent entières.**
+
+**`majHauteurs(fenetre, flux)` est prêt, mesuré in situ à 3,5 ms à n=384 — et appelé par personne en production.** C'est la dernière marche.
+
+⚠️ **CE QUE ÇA CHANGE, ET C'EST TOUT L'OBJET DU PIVOT :** aujourd'hui le socle attend qu'un **bloc de MNT** soit téléchargé et décodé pour lui seul. Après cette tâche, il lit **le cache du quadtree**, qui est déjà là, déjà rempli par la descente, et qui se raffine tout seul. **Il n'y a plus rien à attendre : le socle se remplit à la résolution disponible et s'affine ensuite.** C'est la décision 13 (« le flou pendant le mouvement est accepté, net dès l'arrêt ») appliquée au socle.
+
+- [ ] **Étape 1 — le test qui échoue** : sur un changement de cran, **aucun appel à `loadSurface`** n'est nécessaire pour que le socle affiche du relief. ⚠️ **Rejoue-le contre le dépôt AVANT de l'écrire.**
+- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
+- [ ] **Étape 3 — brancher `majHauteurs` sur `flux-terrain.js`**, avec `remplirBorne` pour le débit (Tâche 4 ter) et `gardeHauteurs` pour la réserve (Tâche 4 bis). ⚠️ **`remplirHauteurs` rend le compte des MANQUANTS : le socle se dessine quand même, à la résolution disponible.**
+- [ ] **Étape 4 — le raffinement**, quand les tuiles fines arrivent : rappeler `majHauteurs`, **sans reconstruire**.
+- [ ] **Étape 5 — mutation** : remettre le remplissage sur le MNT doit tuer le test de l'Étape 1.
+- [ ] **Étape 6 — MESURER L'ATTENTE, avant et après**, sur le vol de référence. ⚠️ **C'est le chiffre qu'Adrien attend depuis le début : combien reste-t-il des 7,9 s ?**
+- [ ] **Étape 7 — REGARDER L'ÉCRAN**, et dire ce qu'on voit — y compris si le socle est grossier au premier instant.
+- [ ] **Étape 8 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
+
 ### Tâche 6 quater : LE PILOTE DE L'EXAGÉRATION CONTINUE ⚠️ **UNE MESURE À L'ÉCRAN L'A OUVERTE**
 
 **Fichiers :** modifier `src/main.js`, `src/monde/exageration-continue.js`, `src/flags.js` · tester `test/fenetre-branchee.test.js` (élargir)
