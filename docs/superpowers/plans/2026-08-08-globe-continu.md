@@ -494,18 +494,132 @@ Le résidu se dérive : **`exagération(z) ÷ pente d'arrivée` = 2,5 / 0,6877 =
 
 **3. AU-DESSUS DE 7 230 km LA PLONGÉE EST BORNÉE** (`borne: 'haut'`) : aucun niveau ne peut héberger l'altitude, la caméra atterrit à la distance plafond sur z3, et l'altitude saute. **La vraie porte orbitale est donc GÉOMÉTRIQUE** — 7 230 km au Mont-Blanc, 10 407 km à l'équateur — là où `DIVE_TIERS` la posait à 16 000 km à la main. ⚠️ **Le DÉCLENCHEUR n'a PAS été changé** (`pickDiveTier` décide encore *quand* plonger) : déplacer une porte que l'utilisateur voit sans l'avoir regardée tourner aurait été exactement ce que ce plan reproche à ses propres constantes.
 
-#### Tâche 1b bis — LA FRONTIÈRE DE RENDU ⚠️ LA SECONDE MOITIÉ DE LA 1b, ET ELLE EST VISUELLE
+#### Tâche 1b bis — LA FRONTIÈRE DE RENDU ✅ **FAITE LE 2026-08-21** — ⚠️ **LE GLOBE NE S'ÉTEINT PLUS ; LE SAUT DE POSE RESTE, ET LES TROIS RIDEAUX AVEC**
 
 **Fichiers :** modifier `src/main.js` (la passe de composition), `src/modes.js` (`setSurfaceVisible` / `globe.setVisible`), `src/globe.js` · tester : ⚠️ **rien sous node ne peut le faire.**
 
 ⚠️ **ELLE NE PEUT PAS ÊTRE LIVRÉE À L'AVEUGLE, ET C'EST LA SEULE TÂCHE DU PLAN DONT ON PUISSE LE DIRE AVEC UN CHIFFRE :** `main.js` n'est chargé par **aucun** test (§0), la scène ne se rend pas sous node, et le §10 constate qu'**aucune image en mouvement n'a jamais été vue** dans tout ce chantier. Les treize autres tâches ont un instrument pur ; celle-ci n'en a pas.
 
-- [ ] **Étape 1 — poser la seconde passe** : le globe rendu en fond, caméra répliquée à son échelle, orientation partagée, sans écriture de profondeur.
-- [ ] **Étape 2 — le raccord d'échelle** : la réplique doit voir la planète sous le MÊME angle apparent que le bloc montre son emprise. **C'est là que le facteur `exagération(z)` du point 1 ci-dessus se paiera ou se réglera** — les deux tâches se croisent sur ce seul nombre.
-- [ ] **Étape 3 — `setVisible` cesse d'être l'interrupteur.** ⚠️ **`globe.js:893` (`if (v) this.chargeRacines()`) se dissout ici — le troisième appelant est DÉJÀ posé et exigé par le test, ne le retirez pas.**
-- [ ] **Étape 4 — brouillard, atmosphère, nuages, DOF, et `camera.far`** : dire lesquels appartiennent à quelle passe. `far` fusionne ici, ou nulle part (voir l'Étape 1 bis de la 1b).
-- [ ] **Étape 5 — REGARDER TOURNER, avec Adrien.** Il n'y a pas d'autre garde-fou et il ne faut pas prétendre le contraire.
-- [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [x] **Étape 1 — poser la seconde passe** : le globe rendu en fond, caméra répliquée à son échelle, orientation partagée, sans écriture de profondeur.
+- [x] **Étape 2 — le raccord d'échelle** : la réplique doit voir la planète sous le MÊME angle apparent que le bloc montre son emprise. **C'est là que le facteur `exagération(z)` du point 1 ci-dessus se paiera ou se réglera** — les deux tâches se croisent sur ce seul nombre.
+- [x] **Étape 3 — `setVisible` cesse d'être l'interrupteur.** ⚠️ **`globe.js:893` (`if (v) this.chargeRacines()`) se dissout ici — le troisième appelant est DÉJÀ posé et exigé par le test, ne le retirez pas.**
+- [x] **Étape 4 — brouillard, atmosphère, nuages, DOF, et `camera.far`** : dire lesquels appartiennent à quelle passe. `far` fusionne ici, ou nulle part (voir l'Étape 1 bis de la 1b).
+- [ ] **Étape 5 — REGARDER TOURNER, avec Adrien.** Il n'y a pas d'autre garde-fou et il ne faut pas prétendre le contraire. ⚠️ **PAS FAITE, ET ELLE NE PEUT PAS L'ÊTRE PAR UN AGENT.** Ce qui a été fait à la place est écrit au bilan : `composer.render()` forcé puis `readPixels`, qui prouve **ce qui est dessiné**, pas ce qu'un œil voit.
+- [x] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
+#### ✅ CE QUI A ÉTÉ FAIT, ET CE QUE ÇA MESURE (2026-08-21)
+
+**Fichiers :** `src/monde/frontiere-rendu.js` (créer) · `test/frontiere-rendu.test.js` (créer, **14 tests**, ajouté à la ligne `test`) · `src/main.js` (la seconde passe, `majCameraFond`, `latLonOrigineBloc`, `PasseFond`) · `src/globe.js` (`frontiereFond`) · `src/flags.js` (`frontiereRendu`, `frontiereRenduActive`) · `src/export-effets.js` (classer les deux passes neuves). **`npm test` : 3 341 verts** (3 327 avant) · `audit:tests` : 192 / 192, aucun écart · `node --check` sur les six fichiers · `nettoie:dist` + `build:mapcells` + `vite build` (4 min 7 s, exit 0) + `verifie:dist` : **dist complet**.
+
+##### ⚠️ LE VERROU DU §10 EST LEVÉ : CE CHANTIER A VU DES IMAGES
+
+Le §10 écrit qu'**« aucune image en mouvement n'a jamais été vue »** — c'est toujours vrai, et ça le reste. Mais **des images FIXES, oui** : `composer.render()` appelé à la main puis `readPixels` sur le tampon par défaut rend de vrais pixels sur cette machine. Vérifié : **`readPixels` sort `gl.NO_ERROR`**, et rendre deux fois le même état rend des octets **strictement identiques**. ⚠️ **`composer.render()` lève un `INVALID_OPERATION` (1282) à chaque appel — il est PRÉEXISTANT** (mesuré avant toute modification), il ne vient pas de la sonde, et il n'empêche pas la lecture.
+
+##### LA DÉCISION DE LA TÂCHE 1b EST VÉRIFIÉE, ET UNE DE SES PHRASES EST FAUSSE
+
+`R_GLOBE = 100` (`geo.js:11`) et `TERRAIN_SIZE = 56` (`terrain.js:61`) : **la dalle est bien dans la sphère**, les deux à l'origine. Les rayons à l'échelle du bloc sont rejoués dans le test ⑤ : **68 unités à z4, 139 590 à z15**, à la latitude du Mont-Blanc — c'est là que la table du plan est calculée (`cos(lat)`), et elle vaut 7 514 km à l'équateur.
+
+⚠️ **MAIS le commentaire « la dalle (56) est plus grande que la planète » est FAUX À LA LETTRE** : 68 > 56. Ce qui est vrai, et que le test mesure : **posée tangente à une sphère de rayon 68, une dalle de 56 a ses bords EN DEHORS de la sphère** — le bloc dépasserait de la silhouette de sa propre planète. **La conclusion tient, la phrase non.**
+
+##### ⚠️ ET LE PLAN SE TROMPE AUSSI SUR UN AUTRE POINT : RECOUVREMENT ET FONDU NE SONT PAS IMPOSSIBLES — ILS LE SONT **DANS UNE SEULE SCÈNE**
+
+L'énoncé dit « recouvrement et fondu sont IMPOSSIBLES, pas coûteux ». C'est vrai **en espace-monde**. Une fois les deux passes posées, **un fondu croisé en espace-écran entre elles est trivial et sans coût géométrique** — les deux images existent, il n'y a qu'à les mélanger. **Ce n'est pas fait ici** (rien ne le demandait), mais l'option cesse d'être fermée, et c'est elle qu'il faudra si Adrien veut une transition douce plutôt qu'un basculement.
+
+##### CE QUE LA FRONTIÈRE EST : **UNE SIMILITUDE, PAS UNE SCÈNE COMMUNE**
+
+`src/monde/frontiere-rendu.js` ne fabrique qu'une chose — la similitude qui envoie l'espace du bloc sur celui du globe : `M = translation(P₀) ∘ rotation(R) ∘ homothétie(k)`. **Le repère du bloc est (est, haut, sud) = l'identité** (`geo.js` : *« +x east, +z south, y up »*), donc `R` se réduit à la base locale de la sphère ; c'est vérifié dans le test, pas supposé.
+
+**Ce que la similitude donne gratuitement, et qui ÉTAIT l'Étape 2 :** la caméra de fond a le même champ et le même rapport d'image, et une similitude conserve les angles. **La planète est donc vue sous exactement le même angle apparent que le bloc montre son emprise, sans facteur à régler.**
+
+##### ⚠️ LE FACTEUR `exagération(z)` EST TRANCHÉ : LE FOND PREND L'ÉCHELLE **HORIZONTALE**
+
+L'Étape 2 annonçait que le résidu `×3,635` du « point 1 » se paierait ou se réglerait ici. **Il se règle, et c'est arithmétique.** `echelleBloc = (span / extent) × exagération` est l'échelle **verticale** — c'est elle qui fait que l'altimètre de la Tâche 1a porte l'exagération. Ce que le fond doit reproduire est une **largeur de sol**, qui ne dépend que de l'horizontale :
+
+> `k = (extent / span) / ORBITAL_M_PER_UNIT` · `altitudeFond = altitudeSurfaceM × exagération`
+
+⚠️ **Prendre l'altitude de l'ALTIMÈTRE à la place rétrécirait la planète d'exactement `exagération(z)` — de ×2,5 à ×5 selon le palier.** La mutation est armée dans le test et elle tue. **L'exagération est un parti pris VERTICAL sur le relief du bloc ; elle n'a aucune raison de déformer la planète.**
+
+##### ⚠️ LA SONDE À PIXELS A ATTRAPÉ UN DÉFAUT QU'AUCUNE LECTURE N'AURAIT VU : L'ANCRE
+
+Première mesure du raccord : **28 pixels d'écart sur 562, CONSTANTS sur tout l'écran.** Un décalage constant est la signature d'une mauvaise **ancre**, pas d'une mauvaise échelle — et c'est ça qui l'a fait trouver. **`params.demLat/demLon` n'est PAS à l'origine du bloc** : le MNT est un carré de trois tuiles, et son centre tombe où il tombe. Mesuré à La Réunion z12 : `latLonToWorld(dem, dem.lat, dem.lon)` rend **(−5,65 · 2,64)** et non (0 · 0), soit **1 289 m au nord et 2 760 m à l'est**. L'ancre est donc `latLonOrigineBloc()`, le miroir de `viseeAuSol()` pris en (0 · 0) — **et il respecte la fenêtre bornée**, comme lui.
+
+##### LE RACCORD, MESURÉ AU PIXEL — `?globe=crans&frontiere=1`, La Réunion z12, écran 562 × 414, fov 33°
+
+Un même lat/lon projeté par les DEUX caméras. Emprise du bloc : **27,4 km**.
+
+| distance au sol depuis l'ancre | écart bloc ↔ fond |
+|---|---|
+| 0 (l'ancre) | **0,03 px** |
+| 5,2 km | **0,01 px** |
+| 7,6 km | 0,16 px |
+| 18,3 km | 0,21 px |
+| 25,9 km (le coin le plus lointain visible) | **0,58 px** |
+| 60,8 km (hors bloc, hors écran) | 9,73 px |
+
+**Le raccord est sous le pixel sur tout le bloc.** Ce qui croît au-delà est la courbure, et elle croît en `d²`.
+
+##### CE QUI EST DESSINÉ, PROUVÉ PAR DIFFÉRENCE DE PIXELS
+
+⚠️ **On ne DÉSACTIVE PAS la passe de fond pour mesurer** — elle est la seule à effacer la couleur, l'image d'après serait un reste de la précédente, et la première tentative a produit exactement ce faux. **On cache la PLANÈTE et on laisse la passe peindre le ciel** : le diff est alors exactement « la planète ».
+
+> **En mode surface, drapeau allumé : 160 578 pixels sur 232 668 — 69,0 % de l'image — sont la planète de fond**, écart maximal 142 niveaux. La carte du diff montre la planète PARTOUT sauf un trou au milieu, et **ce trou a exactement la silhouette du bloc**. Rejeu identique à l'octet près.
+
+**Les deux mondes coexistent dans une seule image. C'est la frontière, et c'est fait.**
+
+##### LE RÉSIDU D'ORIENTATION EST LA COURBURE, ET IL EST ÉGAL À `d / R` AU DEMI-POUR-CENT
+
+Élévation de la visée sous l'horizon locale : **30,6704° dans le bloc, 31,2171° sur le fond, soit 0,547° d'écart** ; roulis **0,0000° des deux côtés**. La caméra est décalée de **61,1 km** de l'ancre, et `61 127 / 6 371 000 = 0,5497°`. ⚠️ **Ce n'est donc pas un défaut de raccord : c'est l'angle au centre de la Terre entre l'ancre et la trace au sol de la caméra**, et aucune similitude ne peut l'annuler — le bloc est plat.
+
+##### ⚠️ CE QUI SE VERRA, ET QUI EST UN ARBITRAGE D'ADRIEN, PAS UN RÉGLAGE
+
+Le bloc est **plat**, la planète est **ronde**. Le bord du bloc surplombe donc la sphère de `d² / 2R` (calculé et re-mesuré par le test ⑦, à la latitude du Mont-Blanc) :
+
+| niveau | demi-emprise | le bloc plat surplombe la sphère de |
+|---|---|---|
+| z4 | 2 618 km | **538 km** |
+| z8 | 164 km | **2,1 km** |
+| z10 | 41 km | **132 m** |
+| z13 | 5,1 km | **2,0 m** |
+| z15 | 1,3 km | **0,13 m** |
+
+**Aux zooms où le bloc occupe l'écran (z10 et plus fin) l'écart est sous le mètre-texel du globe. Aux zooms continentaux, le bord du bloc surplombe la planète et ça se verra à l'horizon.** C'est écrit dans le module pour qu'on ne le prenne pas pour un bogue de raccord. **→ §9.**
+
+##### CE QUE DEVIENNENT LES EFFETS — L'ÉTAPE 4, POINT PAR POINT
+
+- ⚠️ **BROUILLARD — IL N'Y EN A PLUS DU TOUT, ET L'ÉNONCÉ DE LA TÂCHE LE CROYAIT VIVANT.** `THREE.Fog` a été **retiré du dépôt le 2026-08-02** (`main.js` : *« PLUS DE `THREE.Fog` DU TOUT, et pas seulement plus de réglage »*), `scene.fog` n'est plus jamais posé — **vérifié au navigateur : `scene.fog === null`** — et `params.fogColor` n'est, malgré son nom, que la teinte du FOND. **Il n'y avait rien à répartir.**
+- **DOF et occlusion ambiante — INCHANGÉS, et c'est arithmétique.** Ils lisent le tampon de profondeur. La `ClearPass` l'efface entre les deux passes, donc les pixels du globe y valent **1,0 — exactement la valeur qu'y avait le CIEL avant**, un fond n'écrivant pas de profondeur. **Le globe prend la place du ciel, à la profondeur du ciel : les deux passes d'écran le traitent à l'identique.**
+- **ATMOSPHÈRE ET NUAGES DU GLOBE — ils vivent DANS `globe.group`** (`globe.js` : *« lives inside group so globe.setVisible rules it »*), donc ils suivent le globe dans sa passe sans une ligne de plus.
+- **NUAGES VOLUMÉTRIQUES DE SURFACE — dans `scene`**, passe de surface, intouchés.
+- **LE CIEL D'ADRIEN NE BOUGE PAS D'UN PIXEL.** `sceneGlobe.background` est **le même OBJET** que `scene.background` (relu à chaque image, parce qu'`applyBackground()` le remplace), et three dessine un fond de type `Texture` en quad plein écran, donc **indépendant de la caméra**. Il est peint par la passe de fond au lieu de celle de surface, à l'identique.
+- ⚠️ **`camera.far` NE FUSIONNE PAS, ET IL N'Y A PLUS RIEN À FUSIONNER.** Le plan disait « ici ou nulle part » : c'est **nulle part**. Avec deux caméras, chacune porte ses plans — le bloc garde **290**, le fond prend `distance + R_GLOBE + 1`. ⚠️ **Et le plancher de `planProche` ne pouvait pas servir au fond** : il cale `near` à **0,01 unité-globe = 637 m**, donc à 500 m d'altitude la caméra de fond aurait **clippé le sol qu'elle survole**. Le fond prend un plancher mille fois plus bas ; le prix est un rapport `far/near` large, **sans conséquence ici** puisque ce tampon ne sépare que l'avant de la sphère de son arrière et n'est **jamais** composé avec celui du bloc.
+
+##### ⚠️ DEUX PIÈGES SILENCIEUX TROUVÉS EN CHEMIN, ET AUCUN N'AURAIT LEVÉ D'ERREUR
+
+1. **LA CARTE D'OMBRE.** L'application pose `renderer.shadowMap.autoUpdate = false` et redessine en levant `needsUpdate`. Or `WebGLRenderer.render` **CONSOMME** ce drapeau : la passe de fond, qui rend une scène sans aucun projeteur d'ombre, l'aurait avalé et **le bloc n'aurait plus jamais reçu sa carte** — pas d'erreur, pas de test rouge, des ombres figées. `skipShadowMapUpdate` de `RenderPass` **ne suffit pas** (il ne touche qu'`autoUpdate`) : la classe `PasseFond` sauve et repose `needsUpdate` autour de la passe.
+2. **LE DÉCALAGE DE VUE DE L'EXPORT.** Le tirage pavé découpe l'image avec `camera.setViewOffset` (`composeDecalage`), qui ne connaît **que** la caméra principale : sans recopie, **la planète se serait répétée en entier derrière chaque tuile de l'affiche**. ⚠️ **C'est `test/export-effets.test.js` qui l'a trouvé** — il exige qu'une passe nouvelle de la chaîne soit classée dans `src/export-effets.js`, et il a rougi sur `PasseFond` et `ClearPass`. **Un test de ce dépôt a donc bel et bien mordu sur `main.js`**, contrairement à ce que le §0 laisse croire : il ne le CHARGE pas, il le LIT.
+
+##### ⚠️ CE QUE LA TÂCHE NE FAIT PAS — ET POURQUOI LES TROIS RIDEAUX RESTENT
+
+**Le globe ne s'éteint plus. La caméra saute toujours.** Mesuré sous `?globe=crans&frontiere=1`, La Réunion, `enterOrbit` depuis la pose (88,49 · 72,72 · 88,49) :
+
+| | avant `enterOrbit` | après |
+|---|---|---|
+| le globe est allumé | **oui** | **oui** ✅ |
+| altitude de la caméra de fond | **35,81 km** | 15,00 km (**÷2,39**) |
+| position sur la sphère | (77,66 · −37,08 · 52,03) | (84,52 · −36,35 · 39,78) |
+| **saut** | | **14,06 unités = 896 km** |
+
+⚠️ **`enterOrbit` et `_dive` REPOSENT toujours la caméra, et c'est `modes.js`, pas la frontière.** Les trois `_whiteout` masquent donc encore quelque chose de réel — **un saut de POSE, plus un échange de monde.** **Le cliquet de la Tâche 2 ter reste vert, et c'est juste :** il épingle `globe.setVisible` dans `enterOrbit` et `_dive` **par le texte source**, ces lignes sont toujours là, et **sans drapeau elles font toujours exactement ce qu'elles faisaient**. Il tombera le jour où le drapeau deviendra le défaut et où ces lignes partiront. **Ce jour-là seulement.**
+
+##### ⚠️ CE QUI N'A PAS PU ÊTRE VÉRIFIÉ, ET C'EST LA MOITIÉ DU COMPTE RENDU
+
+- **L'Étape 5 — regarder tourner avec Adrien — N'EST PAS FAITE**, et aucune sonde ne la remplace. Ce qui est prouvé, c'est **ce qui est dessiné dans une image fixe**, pas ce qu'un œil voit en mouvement.
+- ⚠️ **AUCUNE PREUVE BIT À BIT QUE LE DRAPEAU ÉTEINT NE CHANGE RIEN — ET LE CHIFFRE DIT POURQUOI.** Tentée : somme des pixels sur une pose FIXE, soleil figé à `timeOfDay = 15`, grain à zéro. Dans une même page, le rendu est **strictement reproductible**. **Mais d'un rechargement à l'autre, le MÊME code varie de 1,39 % puis de 9,1 %** (l'état de raffinement du terrain n'est pas le même au moment de la prise) — alors que l'écart entre le code d'avant et le code modifié drapeau éteint vaut **0,064 %**, soit **vingt fois moins que le bruit**. **La comparaison à l'identique n'est donc PAS disponible sur cette machine**, et il faut le dire ainsi plutôt que de brandir les 0,064 %. Ce qui tient est **structurel, et vérifié au navigateur** : drapeau éteint, la chaîne du compositeur est `[RenderPass, EffectPass]` — la même qu'avant —, `globe.group` est dans `scene`, invisible, et `frontiereFond` est faux, donc `setVisible` redevient `group.visible = v` au caractère près.
+- ⚠️ **LE TRAFIC N'EST PAS MESURÉ.** Sous le drapeau, `globe.update(camGlobe)` tourne **aussi en mode surface** : sans lui le fond reste à ses seize racines et montre une planète floue. **Ce que ça ouvre comme trafic sur un vol complet n'a pas été mesuré**, et sous `?globe=crans` le quadtree n'a ni horizon géométrique ni frustum (Tâche 4). **C'est l'une des raisons du drapeau.**
+- ⚠️ **LES RACINES SONT DEMANDÉES TOUT DE SUITE sous le drapeau**, contrairement à la production : le globe est le fond dès la première image, et le filet à 20 s laisserait vingt secondes de sphère nue. **Le prix est connu : l'A/B qui a créé le chargement différé compte 3 730 ms sur l'affichage de la carte à 3 Mb/s.** C'est un coût du drapeau, pas une régression de production.
+- ⚠️ **UNE OBSERVATION QUI N'EST PAS DE CETTE TÂCHE, ET QU'IL FAUT VÉRIFIER.** `enterOrbit` demande la longitude du bloc (**55,74°**) et la caméra atterrit à **64,80°** — 8,6° à côté, soit les 896 km ci-dessus. **Le même écart a été relevé AVANT toute modification** (caméra orbitale à 62,9° pour un bloc à ≈55,7°), donc il est **préexistant** ; mais l'échantillon d'avant a été pris sans noter la longitude du bloc, **donc ce n'est pas prouvé**. Le suspect est `controls.update()` appelé après l'écriture de `camera.position`. **À rejouer avant d'en faire quoi que ce soit.**
+- **Rien n'a été mesuré sur un portable**, comme pour tout le reste du chantier.
+- **Le régime `?socle=quadtree` n'a pas été essayé avec la frontière** : `latLonOrigineBloc()` passe par `mondeVersLatLonEmprise` dans ce cas, la branche est écrite et cohérente avec `viseeAuSol()`, **mais elle n'a pas été vue à l'écran.**
 
 #### Tâche 1c — les mécanismes qui figent l'entrée
 
@@ -2140,6 +2254,7 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
   **Trois issues, et Adrien seul peut trancher entre les deux premières** : (a) **exagération constante** — les deux discontinuités disparaissent d'un coup, le relief des blocs larges s'aplatit ; (b) **paliers conservés** — on garde le rendu et on assume les deux sauts ; (c) **retirer l'exagération de l'altitude de CADRAGE seulement** (elle resterait à l'affichage et au rendu) — cela ferme (1), mais **invalide les onze sauts mesurés à la Tâche 1a** et impose de refaire tout le relevé. ⚠️ **Ce n'est pas une question de goût seule : c'est aussi le seul nombre sur lequel la Tâche 1b bis et la Tâche 2 bis se croisent.**
 - ✅ **TRANCHÉ PAR ADRIEN LE 2026-08-20 — L'EXAGÉRATION VERTICALE DEVIENT UNE COURBE CONTINUE DE L'ALTITUDE** (décision 14). Portée par la **Tâche 6**, seule capable de la tenir : ailleurs, elle imposerait de reconstruire la géométrie à chaque image.
 - ⚠️ **LA POSE D'ARRIVÉE DU CLIC-PLONGÉE — NOUVELLE QUESTION, OUVERTE PAR LA MESURE DE LA TÂCHE 2 ter, ET SEUL ADRIEN PEUT LA TRANCHER.** `_loadDive` (`src/modes.js`) téléporte au point de présentation, comme `_rescale` avant la Tâche 2 bis. **Mesuré le 2026-08-21, La Réunion, z12 → z13 : l'altitude passe de 3 622 m à 6 680 m — ×1,844, la caméra MONTE pendant que l'utilisateur clique pour descendre** (cadrage ×1,984, distance ×5,34). C'est le même défaut que les dix remontées de `_rescale`, et il est masqué par les 960 ms de `.whiteout`. **Mais sa pose est une demande d'Adrien citée dans le code** — « dézoomé quasiment au max de ce niveau, même axe de vue » — alors que la décision du 2026-08-20 dit « zoom continu, exactement comme Google Earth ou Google Maps ». **Les deux ne peuvent pas être vraies en même temps.** Tant qu'elle n'est pas tranchée, **le rideau de `_loadDive` ne peut pas partir** : il ne masque pas une attente, il masque ce saut.
+- ⚠️ **LE BORD DU BLOC SURPLOMBE LA PLANÈTE AUX ZOOMS CONTINENTAUX — NOUVELLE QUESTION, OUVERTE PAR LA TÂCHE 1b bis, ET CE N'EST PAS UN RÉGLAGE À TROUVER.** La frontière de rendu fait coexister le bloc et la planète (mesuré : **69,0 % de l'image de surface est le globe de fond**, raccord **sous le pixel** sur tout le bloc). Mais **le bloc est PLAT et la planète est RONDE** : à la latitude du Mont-Blanc, le bord du bloc passe au-dessus de la sphère de **538 km à z4**, **2,1 km à z8**, **132 m à z10**, **2,0 m à z13**. ⚠️ **Aucune similitude ne peut réconcilier une dalle plate de 5 235 km avec une sphère** — c'est la dalle qui est plate. **Aux zooms où le bloc occupe l'écran (z10 et plus fin) ça ne se voit pas ; aux zooms continentaux, ça se verra à l'horizon.** Trois issues, et Adrien seul tranche : (a) **la frontière ne s'allume qu'à partir d'un zoom** et les crans continentaux gardent le ciel d'aujourd'hui ; (b) **on assume le surplomb** — c'est un parti pris graphique, pas un bogue ; (c) **on courbe le bloc** aux zooms larges, ce qui est un chantier à part entière. ⚠️ **Et une option que le plan croyait fermée est rouverte :** « recouvrement et fondu sont impossibles » n'est vrai qu'**en espace-monde** ; avec deux passes, **un fondu croisé en espace-écran entre elles est trivial**.
 - **L'effet de transition** globe → socle
 - **La récupération de GLOBathy** : Earth Engine impose un compte et des conditions commerciales à vérifier ; le dépôt de l'article est peut-être la meilleure porte.
 - **Le trait de côte au-delà de z15.** Mesuré : autour d'un bloc z16 à Brest, les polygones OSM pré-simplifiés à 30 m ne donnent que **51 segments pour 1,2 km de côté** *(le côté du bloc — ce plan écrivait « de côte », ce qui en faisait une longueur de rivage)* — médiane 123 m, pointes à 849 m. Rasterisés à 0,79 m la cellule, ils dessineraient un rivage à facettes. Soit on branche le champ processeur au-delà de z15, soit on raffine la donnée. **Le second est une décision de données, pas de code.**
@@ -2156,14 +2271,20 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
 
 ⚠️ **MISE À JOUR DU 2026-08-21 — la Tâche 6 ter a sorti `construireFenetre` de l'orphelinat EN AVAL, et lui seul.** `src/main.js` l'importe et pose la fenêtre sur `terrain.js` (`adopterFenetre`) : c'est le PREMIER module de `src/monde/` hors `exageration-continue.js` qu'un fichier de production lit vraiment. **Trois noms s'ajoutent à surveiller**, produits en chemin : `adopterFenetre` et `fabriqueFenetre` (`terrain.js`), `trianglesNappe` (`fenetre-bornee.js`). ⚠️ **Restent orphelins EN AVAL** — aucun module de `src/` hors `src/monde/` ne les lit : `majHauteurs`, `contourSocle`, `auditerSolide`, `socleVisible`, `empriseSocle` *(⚠️ celui-ci est lu par `main.js` depuis la 6 ter, mais seulement pour NOMMER l'emprise de la fenêtre — pas encore pour la remplir)*, les six interfaces du flux, `remplirBorne`, `etatIndicateur`, `resolutionPour`, `empriseADerive`.
 
+⚠️ **MISE À JOUR DU 2026-08-21 — la Tâche 1b bis a produit ONZE noms, et ILS SONT LUS EN AVAL DÈS LE PREMIER JOUR.** `repereGlobe`, `rotationVersGlobe`, `facteurEchelle`, `altitudeFondM`, `poseFond` et `plansFond` vivent dans `src/monde/frontiere-rendu.js` et sont testés un par un dans `test/frontiere-rendu.test.js` ; **`poseFond` et `plansFond` sont importés par `src/main.js`**, ce qui en fait le **deuxième** module de `src/monde/` à sortir de l'orphelinat en aval après `fenetre-bornee.js`. **Cinq noms s'ajoutent à surveiller**, produits en chemin : `frontiereRenduActive` (`flags.js`), `latLonOrigineBloc`, `majCameraFond` et `PasseFond` (`main.js`), `frontiereFond` (`globe.js`). ⚠️ **`repereGlobe` et `rotationVersGlobe` ne sont lus QUE par le test** — ils sont la décomposition de `poseFond`, gardée séparée pour être vérifiable contre three ; **c'est un orphelinat délibéré, pas un oubli.**
+
 ⚠️ **MISE À JOUR DU 2026-08-21 — la Tâche 2 a produit DEUX noms de plus, et `etatIndicateur` reste orphelin EN AVAL DÉLIBÉRÉMENT.** `texteRetard` et `initIndicateurRetard` (`src/ui/indicateur-retard.js`) sont lus par `src/main.js` et testés **en exécution** dans `test/voile-loading.test.js`. **`zoomEffectif` sort de l'orphelinat en aval** : `main.js` le lit pour nourrir l'indicateur. ⚠️ **`etatIndicateur`, lui, n'est branché nulle part ET NE DOIT PAS L'ÊTRE SUR LE CHEMIN DU SOCLE** — le débit observé y vaut 0,787 Mb/s sur un lien oisif, ce qui allumerait l'indicateur en permanence. **Son point d'appel est la Tâche 1** (R3 côté caméra), pas ailleurs ; c'est écrit dans `indicateur-retard.js` et gardé par une assertion.
 
 ⚠️ **MISE À JOUR DU 2026-08-21 — la Tâche 4 ter a fabriqué `zoomSoutenable`, et il a un LECTEUR :** `remplirBorne`, dans le même fichier `src/monde/descente-bornee.js`, qui est le **point d'appel de R3 côté remplissage**. **Quatre noms s'ajoutent à surveiller** : `remplirBorne`, `etatIndicateur`, `ZOOM_PLANCHER`, `NIVEAUX_PAR_DOUBLEMENT`. ⚠️ **Ils restent orphelins EN AVAL comme tout le bloc : aucun module de `src/` hors `src/monde/` ne les lit encore** — ce sont les Tâches 1, 2, 6 et 7 qui les brancheront, et la Tâche 4 ter dit précisément où (§4 de `descente-bornee.js`).
 
-**Ordre imposé — révisé le 2026-08-21 par la mesure.** ✅ **Livrées : 1a · 2 bis · 1b · 4 · 4 sexies · 4 quater · 3 · 4 bis · 4 ter · 4 alpha · 5 · 6 · 6 bis A · 6 ter · 6 quinquies · 6 sexies · 6 septies · 2 · 2 ter.** ⚠️ **Puis, et l'ordre a changé : ~~3~~ → ~~4 bis~~ → 4 ter → 4 alpha.** La Tâche 3 produit l'`emprise` que la 4 bis consomme — **et elle est produite depuis le 2026-08-21 : `empriseSocle`, `src/monde/seuil-socle.js`.** **Et la 4 bis passe désormais AVANT la 4 alpha** : la Tâche 4 quater a laissé le flux mesuré à **568 tuiles en `loading` simultanément** caméra en mouvement, avec `MAX_CONCURRENT = 6` — or la 4 alpha multiplie par quatre le poids d'une tuile (256 → 512 px). **Calibrer le flux avant de l'alourdir, comme on a dimensionné le cache avant d'approfondir.** Ensuite le **bloc fenêtre — 5 avant 6, puis 7** : c'est lui qui supprime les crans. Puis **1b bis** (la frontière de rendu). ⚠️ ~~**Enfin seulement les rideaux : 2 (`#loading`) puis 2 ter (`.whiteout`)**~~ — **FAITS LE 2026-08-21, ET LA PHRASE A TENU JUSQU'AU BOUT** : « ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up, il montre le trou qu'il cachait ». C'est elle qui a décidé les deux tâches. **La 2 ne retire la carte que SOUS LE DRAPEAU** — en production `loadSurface` bloque encore 2 605 ms (mesuré), donc le rideau y reste. **La 2 ter ne retire rien du tout** : le seul appelant qui était sur le chemin du zoom était déjà parti avec la 2 bis, et les trois survivants masquent des sauts encore présents (frontière de rendu non faite, clic-plongée non tranché). ⚠️ **IL RESTE DONC DEUX RIDEAUX À OUVRIR, ET ILS DÉPENDENT DE 1b bis ET D'ADRIEN, PAS D'UNE TÂCHE DE RIDEAU.** ⚠️ **La Tâche 1c est ABANDONNÉE** : elle déverrouille une reconstruction que le pivot supprime.
+**Ordre imposé — révisé le 2026-08-21 par la mesure.** ✅ **Livrées : 1a · 2 bis · 1b · 4 · 4 sexies · 4 quater · 3 · 4 bis · 4 ter · 4 alpha · 5 · 6 · 6 bis A · 6 ter · 6 quinquies · 6 sexies · 6 septies · 2 · 2 ter · 1b bis.** ⚠️ **Puis, et l'ordre a changé : ~~3~~ → ~~4 bis~~ → 4 ter → 4 alpha.** La Tâche 3 produit l'`emprise` que la 4 bis consomme — **et elle est produite depuis le 2026-08-21 : `empriseSocle`, `src/monde/seuil-socle.js`.** **Et la 4 bis passe désormais AVANT la 4 alpha** : la Tâche 4 quater a laissé le flux mesuré à **568 tuiles en `loading` simultanément** caméra en mouvement, avec `MAX_CONCURRENT = 6` — or la 4 alpha multiplie par quatre le poids d'une tuile (256 → 512 px). **Calibrer le flux avant de l'alourdir, comme on a dimensionné le cache avant d'approfondir.** Ensuite le **bloc fenêtre — 5 avant 6, puis 7** : c'est lui qui supprime les crans. Puis **1b bis** (la frontière de rendu). ⚠️ ~~**Enfin seulement les rideaux : 2 (`#loading`) puis 2 ter (`.whiteout`)**~~ — **FAITS LE 2026-08-21, ET LA PHRASE A TENU JUSQU'AU BOUT** : « ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up, il montre le trou qu'il cachait ». C'est elle qui a décidé les deux tâches. **La 2 ne retire la carte que SOUS LE DRAPEAU** — en production `loadSurface` bloque encore 2 605 ms (mesuré), donc le rideau y reste. **La 2 ter ne retire rien du tout** : le seul appelant qui était sur le chemin du zoom était déjà parti avec la 2 bis, et les trois survivants masquent des sauts encore présents (frontière de rendu non faite, clic-plongée non tranché). ⚠️ **IL RESTE DONC DEUX RIDEAUX À OUVRIR, ET ILS DÉPENDENT DE 1b bis ET D'ADRIEN, PAS D'UNE TÂCHE DE RIDEAU.** ⚠️ **La Tâche 1c est ABANDONNÉE** : elle déverrouille une reconstruction que le pivot supprime.
 
 **Le risque principal n'est plus la géométrie** : l'attaque a confirmé qu'on ne peut pas la déchirer. **C'est le flux** — plafond, annulation, éviction — et **le réseau**, qui décide du zoom réellement atteint.
 
 ⚠️ **MISE À JOUR DU 2026-08-21 : le flux est calibré, le RÉSEAU reste entier.** Le pic de `loading` passe de 568 à **141 au navigateur**, et la file ne dépasse plus `PLAFOND_FILE = 256`. Mais la mesure a montré autre chose de plus dur : **le pic de file ne dépendait pas du débit** (558 / 554 / 546 sur un facteur 24) alors que **le zoom atteint, lui, n'en dépend que de lui** — à 12 Mb/s, cinq secondes après un balayage de 90°, le globe est à z6 et il lui faut une minute pour revenir à z15. **La 4 ter n'est donc pas un raffinement : c'est la moitié qui reste**, et `debitObserve` l'attend.
 
 **Ce qui n'est toujours pas vérifié :** aucune image en mouvement n'a jamais été vue (le volet navigateur ne composite pas), et rien n'a été mesuré sur un portable. Les deux valent pour le prototype comme pour son attaque.
+
+⚠️ **MISE À JOUR DU 2026-08-21 — LA MOITIÉ DE CETTE LIGNE EST TOMBÉE, ET IL FAUT DIRE LAQUELLE.** La Tâche 1b bis a obtenu de **vraies images fixes** : `composer.render()` appelé à la main puis `readPixels` sur le tampon par défaut, `gl.NO_ERROR`, reproductible à l'octet dans une même page. C'est ainsi qu'elle a prouvé que **69,0 % de l'image de surface est la planète de fond** et que le raccord tient **sous le pixel** sur tout le bloc, et c'est ainsi qu'elle a **trouvé une ancre fausse de 28 px** qu'aucune lecture n'aurait vue. ⚠️ **CE QUI RESTE ENTIÈREMENT VRAI : rien n'a été vu EN MOUVEMENT**, `requestAnimationFrame` est toujours gelé, et **une comparaison bit à bit entre deux CHARGEMENTS reste hors de portée** — le même code varie de **1,39 % puis 9,1 %** d'un rechargement à l'autre selon l'état de raffinement du terrain. Toujours rien sur portable.
+
+⚠️ **ET UN TEST DE CE DÉPÔT MORD BIEN SUR `main.js`, CONTRAIREMENT À CE QUE LE §0 LAISSE CROIRE.** `test/export-effets.test.js` ne le CHARGE pas, il le LIT : il dérive la chaîne du compositeur par expression régulière et exige que **toute passe nouvelle soit classée** dans `src/export-effets.js`. Il a rougi sur `PasseFond` et `ClearPass`, et **c'est lui qui a fait trouver** que le décalage de vue du tirage pavé (`composeDecalage`) n'était pas propagé à la caméra de fond — la planète se serait répétée en entier derrière chaque tuile de l'affiche. **Le filet de `main.js` n'est pas vide : il est étroit, et il faut savoir où il est.**

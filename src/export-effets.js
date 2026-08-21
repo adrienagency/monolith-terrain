@@ -92,6 +92,20 @@ export const CLASSEMENT_EFFETS = {
       'Ce n\'est pas un effet d\'écran : c\'est le rendu de la tuile. Son cadrage est déjà traité par composeDecalage (export-cadrage.js).',
   },
 
+  // LA FRONTIÈRE DE RENDU — Tâche 1b bis du plan « globe continu ». Le globe
+  // est dessiné en FOND, dans sa propre passe et avec sa propre caméra, pour
+  // qu'il cesse d'être éteint quand le socle s'allume.
+  PasseFond: {
+    categorie: RENDU,
+    raison:
+      "Ce n'est pas un effet d'écran non plus : c'est le rendu de la PLANÈTE derrière la tuile, avec sa propre caméra. Son cadrage suit celui de la caméra principale — `majCameraFond` recopie `camera.view` (le décalage posé par composeDecalage) sur `camGlobe`, sans quoi chaque tuile de l'affiche rendrait la vue entière du globe.",
+  },
+  ClearPass: {
+    categorie: RENDU,
+    raison:
+      "Elle n'écrit aucune couleur : elle efface la seule PROFONDEUR entre la passe de fond et celle de la surface, pour que le bloc se dessine par-dessus la planète sans que leurs tampons de profondeur — qui ne sont pas dans le même espace — se mélangent. Rien à recouvrir, rien à neutraliser : elle est identique d'une tuile à l'autre par construction.",
+  },
+
   // ── ① Par pixel : rien à faire ──────────────────────────────────────────
   ExposureEffect: {
     categorie: SUR,

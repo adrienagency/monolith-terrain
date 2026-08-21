@@ -88,6 +88,42 @@ export const FLAGS = {
   // `socleQuadtreeActif()`, à côté de ceux d'avant. **Le drapeau reste éteint
   // pour d'autres raisons, et elles y sont écrites** — ce n'est plus la mer.
   socleQuadtree: false,
+
+  // LA FRONTIÈRE DE RENDU — Tâche 1b bis du plan « globe continu ».
+  //
+  // Le globe cesse d'être ÉTEINT quand le socle s'allume : il est dessiné dans
+  // sa PROPRE passe, en fond, avec sa propre caméra placée par la similitude de
+  // `src/monde/frontiere-rendu.js`. Le bloc se dessine par-dessus, sur une
+  // profondeur effacée.
+  //
+  // ⚠️ **SON PROPRE DRAPEAU, ET IL N'EST PAS ADOSSÉ À `globeContinu` :** la
+  // frontière est orthogonale au tri spatial du quadtree, et on veut pouvoir la
+  // regarder tourner sous `?globe=crans` — c'est-à-dire contre le régime de
+  // PRODUCTION, seul point de comparaison honnête.
+  //
+  // ⚠️ **OFF, ET LA RAISON EST ÉCRITE DANS LE PLAN AVANT DE L'ÊTRE ICI :** c'est
+  // la seule tâche du chantier dont le plan dise qu'*elle ne peut pas être
+  // livrée à l'aveugle*. `src/main.js` n'est chargé par aucun test, et l'Étape 5
+  // de la tâche — **regarder tourner, avec Adrien** — n'est pas faite. Ce qui
+  // est prouvé l'est par `readPixels` sur une image forcée, pas par un œil.
+  //
+  // ⚠️ **CE QUI RESTE VISIBLEMENT OUVERT, MESURÉ (voir `frontiere-rendu.js`) :**
+  // le bloc est PLAT, la planète est ronde ; à z4 le bord du bloc surplombe la
+  // sphère de **538 km**. Aux zooms où le bloc occupe l'écran (z10 et plus fin)
+  // l'écart tombe sous **132 m** et ne se voit pas. **C'est un arbitrage
+  // d'Adrien, pas un réglage à trouver.**
+  //
+  // `?frontiere=1` l'essaie, `?frontiere=0` le coupe.
+  frontiereRendu: false,
+}
+
+// LA FRONTIÈRE DE RENDU — Tâche 1b bis. Même patron d'échappatoire que les
+// autres ; volontairement INDÉPENDANT de `globeContinuActif()`, voir le drapeau.
+export function frontiereRenduActive() {
+  const v = paramAdresse('frontiere')
+  if (v === '0' || v === 'crans') return false
+  if (v === '1' || v === 'fond') return true
+  return FLAGS.frontiereRendu
 }
 
 // Le drapeau ci-dessus, avec l'échappatoire d'adresse — même patron que

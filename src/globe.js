@@ -700,6 +700,11 @@ export class Globe {
     // `flags.js` — délibérément : le lecteur de `FLAGS.globeContinu` est
     // `src/main.js`, qui ne passe ici qu'un booléen.
     this.continu = params.globeContinu ?? false
+    // LA FRONTIÈRE DE RENDU — Tâche 1b bis. Posé par `main.js` quand le globe
+    // passe dans sa propre scène de fond ; voir `setVisible`, qui cesse alors
+    // d'être l'interrupteur. Déclaré ici pour qu'il ne naisse pas `undefined`
+    // au détour d'une lecture.
+    this.frontiereFond = false
     // le budget de cache SUIT le chemin : voir CACHE_MAX_CONTINU
     this.cacheMax = this.continu ? CACHE_MAX_CONTINU : CACHE_MAX
     this._frustum = new THREE.Frustum()
@@ -1744,7 +1749,27 @@ export class Globe {
     // du voile — ce qui est le cas normal.
     if (v) this.chargeRacines()
     this.enabled = v
-    this.group.visible = v
+    // ══════ LA FRONTIÈRE DE RENDU — Tâche 1b bis ══════════════════════
+    //
+    // ⚠️ **`setVisible` CESSE D'ÊTRE L'INTERRUPTEUR — mais SEULEMENT sous le
+    // drapeau, et c'est pour ça que les appels restent dans `modes.js`.** Quand
+    // le globe est dessiné dans sa propre passe de fond (`main.js`), l'éteindre
+    // à l'entrée en surface reviendrait à effacer le fond de l'image : c'est
+    // exactement l'échange de monde que les trois derniers fondus blancs
+    // masquent. `enabled` continue de basculer — il dit le MODE, pas le dessin.
+    //
+    // ⚠️ **CE QUE ÇA VEUT DIRE POUR LE CLIQUET DE LA TÂCHE 2 ter :** son test
+    // épingle `globe.setVisible` dans `enterOrbit` et `_dive` par le TEXTE
+    // SOURCE, et ces lignes sont toujours là — en production, sans drapeau,
+    // elles font toujours exactement ce qu'elles faisaient. **Le cliquet reste
+    // donc vert, et c'est juste : rien n'a changé pour l'utilisateur.** Il
+    // tombera le jour où le drapeau deviendra le défaut et où ces lignes
+    // partiront pour de bon — ce sera ce jour-là le signal, pas aujourd'hui.
+    //
+    // ⚠️ **Ce drapeau est posé PAR `main.js`, pas lu depuis `flags.js`** — même
+    // règle que `globeContinu` : `src/globe.js` n'importe pas `flags.js`, il ne
+    // connaît qu'un booléen. Un drapeau lu ici ne protégerait rien.
+    this.group.visible = this.frontiereFond ? true : v
   }
 
   // ═══════════ REDEMANDER PLUTÔT QUE RETENIR (Tâche 4 sexies, Étape 1) ═══════

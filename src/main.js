@@ -5,6 +5,7 @@ import {
   EffectComposer,
   RenderPass,
   EffectPass,
+  ClearPass, // Tache 1b bis : l'effacement de PROFONDEUR entre les deux passes
   DepthOfFieldEffect,
   VignetteEffect,
   NoiseEffect,
@@ -57,7 +58,10 @@ import { PeaksLayer } from './peaks.js'
 import { Clouds2 } from './clouds2.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
-import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagContinueActive, socleQuadtreeActif } from './flags.js'
+import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagContinueActive, socleQuadtreeActif, frontiereRenduActive } from './flags.js'
+// LA FRONTIERE DE RENDU — Tache 1b bis. Toute la geometrie de la frontiere vit
+// la-bas, et elle y est TESTEE sous node ; ici il ne reste que le branchement.
+import { poseFond, plansFond } from './monde/frontiere-rendu.js'
 // ⚠️ `exageration-continue.js` N'IMPORTE RIEN — voir son en-tête : passer par
 // `fenetre-bornee.js` fermerait le cycle terrain.js → fenetre-bornee.js →
 // terrain.js, et AUCUN TEST NE CHARGE `main.js` pour l'attraper.
@@ -2066,7 +2070,12 @@ const evenSize = () => {
 }
 
 const composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType })
-composer.addPass(new RenderPass(scene, camera))
+// ⚠️ LA RÉFÉRENCE EST GARDÉE — Tâche 1b bis (« la frontière de rendu »). La
+// passe était anonyme ; la frontière a besoin de lui couper son effacement et
+// son fond quand le globe passe DEVANT elle dans la chaîne. Sans drapeau, elle
+// reste exactement ce qu'elle était : `clear` vrai, fond dessiné.
+const passeSurface = new RenderPass(scene, camera)
+composer.addPass(passeSurface)
 
 // AMBIENT OCCLUSION — N8AO (screen-space GTAO, purpose-built library).
 // postprocessing's own SSAOEffect never bit in this pipeline at ANY setting
@@ -4172,11 +4181,197 @@ setTimeout(assureRacinesGlobe, DELAI_FILET_RACINES_MS)
 
 syncGlobeShadow(bgDayMul()) // l'ombre du terminateur part accordée au fond
 globe.setVisible(false)
-scene.add(globe.group)
 globe.setSunDir(sun.position)
 // soleil orbital lié à la caméra (voir tick) — scratch vectors hors boucle
 const _orbSun = new THREE.Vector3()
 const _upY = new THREE.Vector3(0, 1, 0)
+
+// ══════════ LA FRONTIÈRE DE RENDU — Tâche 1b bis ═══════════════════════════
+//
+// ⚠️ **CE BLOC EST LE SEUL DU CHANTIER QU'AUCUN TEST NE PEUT CHARGER** (§0 :
+// « aucun test ne charge `src/main.js` »). Toute la géométrie a donc été sortie
+// dans `src/monde/frontiere-rendu.js`, qui est testé sous node ; ce qui reste
+// ici est le BRANCHEMENT, et il s'est prouvé au navigateur — `composer.render()`
+// forcé puis `readPixels`, comme les Tâches 4 sexies et 6 ter.
+//
+// ── CE QUE ÇA CHANGE, ET POURQUOI CE N'EST PAS UNE SCÈNE COMMUNE ────────────
+//
+// Le globe est une sphère de rayon 100 à l'origine, le bloc une dalle de 56 à la
+// MÊME origine : **la dalle est dans la sphère.** Les allumer ensemble montre
+// une planète opaque avec la carte enterrée dedans, et les remettre à la même
+// échelle demande un rayon de 139 600 unités à z15 — float32 mort. **Donc deux
+// passes, et le globe garde son espace.**
+//
+// ── L'ORDRE, ET CE QU'IL PRÉSERVE ──────────────────────────────────────────
+//
+//   ① `passeFond`  — rend `sceneGlobe` et **PEINT LE FOND** (le ciel d'Adrien) ;
+//   ② `effaceProfondeur` — efface la PROFONDEUR seule, pas la couleur ;
+//   ③ le `RenderPass` d'origine — `clear` coupé et `ignoreBackground` posé, donc
+//      il dessine le bloc PAR-DESSUS sans repeindre le ciel ni écraser le globe.
+//
+// ⚠️ **LE CIEL D'ADRIEN NE BOUGE PAS D'UN PIXEL, ET C'EST DÉLIBÉRÉ :**
+// `sceneGlobe.background` est **le même objet** que `scene.background`, et
+// three dessine un fond de type `Texture` en quad plein écran — donc
+// indépendant de la caméra. Le ciel est peint par ① au lieu de ③, à l'identique.
+//
+// ── CE QUE DEVIENNENT LES EFFETS (Étape 4 de la tâche) ─────────────────────
+//
+//   · **BROUILLARD — IL N'Y EN A PLUS DU TOUT, et il faut le dire :** `THREE.Fog`
+//     a été retiré du dépôt le 2026-08-02 (voir plus haut, « PLUS DE `THREE.Fog`
+//     DU TOUT »), `scene.fog` n'est plus jamais posé, et `params.fogColor` n'est
+//     malgré son nom que la teinte du FOND. **Il n'y a donc rien à répartir
+//     entre les deux passes**, et l'inquiétude du plan est sans objet ici.
+//   · **DOF et occlusion ambiante — INCHANGÉS, et c'est arithmétique :** ils
+//     lisent le tampon de profondeur. ② l'efface, donc les pixels du globe y
+//     valent 1,0 — **exactement la valeur qu'y avait le CIEL avant**, un fond
+//     n'écrivant pas de profondeur. Le globe prend la place du ciel, à la même
+//     profondeur : les deux passes d'écran le traitent donc à l'identique.
+//   · **ATMOSPHÈRE ET NUAGES DU GLOBE — ils vivent DANS `globe.group`**
+//     (`globe.js` : « lives inside group so globe.setVisible rules it »), donc ils
+//     suivent le globe dans sa passe sans une ligne de plus.
+//   · **NUAGES VOLUMÉTRIQUES DE SURFACE — ils restent dans `scene`**, passe ③,
+//     intouchés.
+//   · **`camera.far` — IL NE FUSIONNE PAS, ET IL N'Y A PLUS RIEN À FUSIONNER.**
+//     Le plan disait « ici ou nulle part » ; la réponse est nulle part : avec
+//     deux caméras, chacune porte ses plans. Le bloc garde 290, le fond prend de
+//     quoi contenir la sphère (`plansFond`).
+//
+// ── LES DEUX RÉGIMES DE LA CAMÉRA DE FOND ──────────────────────────────────
+//
+//   · **surface** — `poseFond()` : la similitude bloc → globe. C'est le régime
+//     neuf, celui qui fait coexister les deux mondes.
+//   · **orbital** — la caméra de fond RECOPIE la principale. La passe ① redevient
+//     alors mot pour mot le rendu orbital d'aujourd'hui, et ③ ne dessine rien
+//     (tout le décor de surface est masqué). **C'est ce qui rend le drapeau
+//     réversible sans brancher de second chemin.**
+const frontiereActive = frontiereRenduActive()
+const sceneGlobe = frontiereActive ? new THREE.Scene() : null
+const camGlobe = frontiereActive ? new THREE.PerspectiveCamera(camera.fov, camera.aspect, 0.01, 1400) : null
+if (frontiereActive) {
+  sceneGlobe.add(globe.group)
+  globe.frontiereFond = true // `setVisible` cesse d'éteindre — voir globe.js
+  globe.setVisible(false) // rejoué : `enabled` retombe, `group.visible` non
+  // ⚠️ **LE FOND EST LE MÊME OBJET, PAS UNE COPIE.** `applyBackground()` réécrit
+  // `scene.background` à chaque changement de palette : un clone se serait
+  // désynchronisé en silence. On relit donc la référence à chaque image (voir
+  // `majCameraFond`), et rien ici ne la fige.
+  // ⚠️ **ET LES RACINES SONT DEMANDÉES TOUT DE SUITE, contrairement au régime de
+  // production.** Sous ce drapeau le globe est le FOND dès la première image :
+  // le filet à 20 s laisserait vingt secondes de sphère nue. **Le prix est
+  // connu et mesuré — l'A/B qui a créé le chargement différé compte 3 730 ms
+  // sur l'affichage de la carte à 3 Mb/s** ; c'est un coût du drapeau, pas une
+  // régression de production, et c'est écrit pour qu'on ne le découvre pas.
+  assureRacinesGlobe()
+} else {
+  scene.add(globe.group)
+}
+
+// ⚠️ **LE PIÈGE DE LA CARTE D'OMBRE, ET IL EST SILENCIEUX.** L'application pose
+// `renderer.shadowMap.autoUpdate = false` et redessine la carte d'ombre en
+// levant `needsUpdate` (voir `majCarteOmbre` et `setEffectsEnabled`). Or
+// `WebGLRenderer.render` CONSOMME ce drapeau : la passe de fond, qui rend une
+// scène SANS aucun projeteur d'ombre, l'aurait avalé et le bloc n'aurait plus
+// jamais reçu sa carte — sans erreur, sans test rouge, juste des ombres figées.
+// `skipShadowMapUpdate` de `RenderPass` ne suffit pas : il ne touche
+// qu'`autoUpdate`. On sauve et on repose `needsUpdate` autour de la passe.
+class PasseFond extends RenderPass {
+  render(renderer, inputBuffer, outputBuffer, deltaTime, stencilTest) {
+    const enAttente = renderer.shadowMap.needsUpdate
+    super.render(renderer, inputBuffer, outputBuffer, deltaTime, stencilTest)
+    renderer.shadowMap.needsUpdate = enAttente
+  }
+}
+
+if (frontiereActive) {
+  const passeFond = new PasseFond(sceneGlobe, camGlobe)
+  passeFond.skipShadowMapUpdate = true
+  // ① le fond : il efface (couleur ET profondeur) et peint le ciel + la planète
+  composer.addPass(passeFond, 0)
+  // ② la profondeur seule — la couleur du fond survit, la profondeur repart à 1
+  composer.addPass(new ClearPass(false, true, false), 1)
+  // ③ la surface n'efface plus rien et ne repeint plus le ciel
+  passeSurface.clearPass.enabled = false
+  passeSurface.ignoreBackground = true
+}
+
+// LE LAT/LON QUI EST À L'ORIGINE DU BLOC — le miroir de `viseeAuSol()`, pris en
+// (0 · 0) au lieu de la cible. **C'est l'ancre de la similitude**, et ce n'est
+// PAS le lieu demandé : voir la mesure citée dans `majCameraFond`.
+function latLonOrigineBloc() {
+  const f = terrain.fenetreBornee
+  if (f?.emprise) return mondeVersLatLonEmprise(f.emprise, 0, 0, TERRAIN_SIZE)
+  if (!dem) return null
+  const fen = fenetreContinueActive() && dem?.empriseCote > 1 ? terrain.fenetre : null
+  return worldToLatLon(dem, fen?.x ?? 0, fen?.z ?? 0)
+}
+
+// La caméra de fond, remise à jour AVANT chaque dessin. Deux régimes, décrits
+// en tête du bloc ci-dessus.
+const _qBloc = new THREE.Quaternion()
+function majCameraFond() {
+  if (!frontiereActive) return
+  // le fond suit la palette : même OBJET que la scène principale, relu à chaque
+  // image parce qu'`applyBackground()` le remplace
+  sceneGlobe.background = scene.background
+  sceneGlobe.environment = scene.environment
+  camGlobe.fov = camera.fov
+  camGlobe.aspect = camera.aspect
+  // ⚠️ **LE DÉCALAGE DE VUE DE L'EXPORT SE PROPAGE, ET SANS ÇA L'AFFICHE SORT
+  // FAUSSE.** Le tirage pavé découpe l'image en tuiles avec
+  // `camera.setViewOffset` (`composeDecalage`, export-cadrage.js) — qui ne
+  // connaît QUE la caméra principale. Sans cette recopie, la passe de fond
+  // dessinerait la vue ENTIÈRE dans chaque tuile : la planète se répéterait au
+  // complet derrière chaque morceau du bloc. Trouvé par
+  // `test/export-effets.test.js`, qui exige qu'une passe nouvelle soit classée.
+  // ⚠️ **APRÈS `aspect`, jamais avant** : `setViewOffset` REPOSE `aspect` à
+  // `fullWidth / fullHeight` (voir la note de `composeDecalage` dans ce fichier).
+  const vueP = camera.view
+  if (vueP?.enabled) camGlobe.setViewOffset(vueP.fullWidth, vueP.fullHeight, vueP.offsetX, vueP.offsetY, vueP.width, vueP.height)
+  else camGlobe.clearViewOffset()
+  if (modes?.mode === 'orbital') {
+    // RÉGIME ORBITAL — recopie. La passe ① redevient le rendu d'aujourd'hui.
+    camGlobe.position.copy(camera.position)
+    camGlobe.quaternion.copy(camera.quaternion)
+    camGlobe.near = camera.near
+    camGlobe.far = camera.far
+    camGlobe.updateProjectionMatrix()
+    camGlobe.updateMatrixWorld()
+    return
+  }
+  // RÉGIME SURFACE — la similitude. `largeurBlocM()` est l'emprise RÉELLE du
+  // bloc affiché (fenêtre bornée comprise), pas une constante de zoom : R1.
+  const largeur = largeurBlocM()
+  if (!(largeur > 0)) return
+  // ⚠️ **`params.demLat/demLon` SERAIT FAUX, ET LA SONDE À PIXELS L'A ATTRAPÉ.**
+  // Le point demandé n'est PAS à l'origine du bloc : le MNT est un carré de trois
+  // tuiles, et le centre de ces tuiles tombe où il tombe. **Mesuré à La Réunion,
+  // z12 : `latLonToWorld(dem, dem.lat, dem.lon)` rend (−5,65 · 2,64) et non
+  // (0 · 0) — soit 1 289 m au nord et 2 760 m à l'est**, ce qui décalait la
+  // planète de fond de **28 pixels sur 562**, constants sur tout l'écran. Un
+  // décalage CONSTANT est la signature d'une mauvaise ANCRE, pas d'une mauvaise
+  // échelle : c'est ça qui l'a fait trouver.
+  const ancre = latLonOrigineBloc()
+  if (!ancre) return
+  const pose = poseFond({
+    lat: ancre.lat,
+    lon: ancre.lon,
+    positionBloc: [camera.position.x, camera.position.y, camera.position.z],
+    quaternionBloc: camera.getWorldQuaternion(_qBloc).toArray(),
+    extentMeters: largeur,
+    // ⚠️ `TERRAIN_SIZE` ET PAS `terrain._span()` : c'est le couple qu'emploie
+    // déjà `altitudeCadrageM()` vingt lignes plus haut (`largeurBlocM()` avec
+    // `TERRAIN_SIZE`). Deux conventions d'échelle dans le même fichier
+    // divergeraient en silence — on suit celle qui existe.
+    span: TERRAIN_SIZE,
+  })
+  camGlobe.position.set(pose.position[0], pose.position[1], pose.position[2])
+  camGlobe.quaternion.set(pose.quaternion[0], pose.quaternion[1], pose.quaternion[2], pose.quaternion[3])
+  const plans = plansFond({ position: pose.position })
+  camGlobe.near = plans.near
+  camGlobe.far = plans.far
+  camGlobe.updateProjectionMatrix()
+  camGlobe.updateMatrixWorld()
+}
 
 modes = new Modes({
   camera,
@@ -10327,6 +10522,12 @@ window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, sce
   // INTERRUPTEUR de la teinte d'interface : __exp.setUiTint(false) rend
   // l'interface neutre de v28.css, true la raccorde à la palette.
   setUiTint: (v) => { params.uiTint = v !== false; syncUiTheme() }, renderer, composer, realWater, waterRebuild, traffic, mapLayers, rebuildMapLayers, get scan() { return scan }, get labels() { return labels }, get aq() { return aq }, get recorder() { return recorder }, history,
+  // LA FRONTIÈRE DE RENDU — Tâche 1b bis. Exposée pour la même raison que le
+  // reste de `__exp` : c'est le SEUL moyen de vérifier cette tâche, `main.js`
+  // n'étant chargé par aucun test. `majCameraFond` est appelable à la main pour
+  // forcer une image hors de la boucle rAF — c'est ainsi que la tâche a prouvé
+  // ce qu'elle dessine (`composer.render()` puis `readPixels`).
+  frontiereActive, sceneGlobe, camGlobe, majCameraFond,
   // mode aléatoire + ombrage auto : de quoi sonder l'état depuis la console
   shuffleLook,
   // ⚠️ À APPELER AVANT DE COUPER LA BOUCLE rAF pour un tournage hors ligne
@@ -10634,10 +10835,28 @@ function tick() {
   // which is why six rewrites changed nothing on screen.
   if (!(drone.active && params.gpxFollow && gpxLayer.isPlaying())) modes.update(dt)
   zoomStepper.update()
+  // ══════ LA FRONTIÈRE DE RENDU — Tâche 1b bis ════════════════════════
+  //
+  // La caméra de fond se repose AVANT le dessin, et **avant `globe.update`** :
+  // en mode surface c'est elle, et pas la caméra principale, qui dit au quadtree
+  // où il est regardé. Sans drapeau, `majCameraFond` rend la main tout de suite.
+  majCameraFond()
+  if (frontiereActive && modes.mode === 'surface') {
+    // ⚠️ **LE GLOBE STREAME MAINTENANT EN MODE SURFACE, ET C'EST UN COÛT
+    // RÉEL, PAS UN EFFET DE BORD GRATUIT.** Il est le fond : sans cet appel il
+    // reste à ses seize racines et le raccord montre une planète floue. Le
+    // trafic que ça ouvre n'a PAS été mesuré sur un vol complet — c'est écrit
+    // dans le compte rendu de la tâche, et c'est l'une des raisons du drapeau.
+    globe.update(camGlobe, dtAmb)
+    // le soleil du fond suit la même loi qu'en orbite (voir juste dessous) :
+    // un soleil de scène laisserait la moitié du fond dans la nuit
+    _orbSun.copy(camGlobe.position).normalize().applyAxisAngle(_upY, -0.73)
+    globe.setSunDir(_orbSun)
+  }
   if (modes.mode === 'orbital') {
     // dtAmb : seule la coquille de nuages qui orbite la planète (globe-clouds.js)
     // lit ce delta — le reste de globe.update() suit la caméra, pas l'horloge.
-    globe.update(camera, dtAmb)
+    globe.update(frontiereActive ? camGlobe : camera, dtAmb)
     // En orbite le soleil SUIT LA CAMÉRA (validé avec Adrien : un soleil fixe
     // à la scène n'éclairait qu'un hémisphère — la moitié des continents
     // restait à jamais dans la nuit). Décalé de ~42° pour que la face visible
