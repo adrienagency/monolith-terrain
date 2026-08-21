@@ -490,8 +490,18 @@ test('LE `discard` BINAIRE EST DEVENU UNE COUVERTURE DOUCE', () => {
   // ⚠️ MESURÉ, PAS JUGÉ À L ŒIL : `gl.getContextAttributes().antialias === false`
   // (relevé de la Tâche A, reproduit par la Tâche B sur ce contexte). Un
   // `discard` donne une frontière binaire, donc les coins crénellent.
-  assert.ok(/couvertureCrop\s*=\s*1\.0\s*-\s*smoothstep\(/.test(BLOC),
+  // ⚠️ **LA TÂCHE G A INTERCALÉ DES NOMS, PAS UNE AUTRE LOI.** La couverture
+  // douce s appelle désormais `dedans` et passe par `couvertureTuile` avant
+  // d atteindre `couvertureCrop`, parce que l estompage doit pouvoir interpoler
+  // ENTRE la planète entière et le crop seul. **On vérifie donc la CHAÎNE
+  // ENTIÈRE, ce qui est plus fort que l assertion d avant** : n importe lequel
+  // des trois maillons coupé tombe ici, alors qu une seule ligne était gardée.
+  assert.ok(/dedans\s*=\s*1\.0\s*-\s*smoothstep\(/.test(BLOC),
     'la couverture n est pas un `smoothstep` de la distance signée')
+  assert.ok(/couvertureTuile\s*=\s*mix\(\s*1\.0\s*,\s*dedans\s*,/.test(BLOC),
+    'la couverture douce n alimente plus la couverture de la tuile')
+  assert.ok(/couvertureCrop\s*=\s*couvertureTuile\s*;/.test(BLOC),
+    'la couverture de la tuile n atteint plus `couvertureCrop`')
   // ⚠️ ET ELLE DOIT SORTIR DU NUANCEUR : une couverture calculée puis jetée
   // serait exactement le `discard` binaire d avant, avec un `smoothstep` mort à
   // côté pour rassurer le lecteur.
@@ -513,8 +523,30 @@ test('LE `discard` RESTE — au-delà d un demi-pixel, on ne paie pas le mélang
   // ⚠️ Le plan est explicite : « Le `discard` reste au-delà d un pixel, sinon on
   // paie le mélange sur toute la tuile. » L assertion porte donc sur la GARDE,
   // pas sur la présence du mot : `discard` était là avant.
-  assert.ok(/if\s*\(\s*d\s*>\s*0\.5\s*\*\s*w\s*\)\s*discard\s*;/.test(BLOC),
-    'le `discard` n est plus gardé par la largeur mesurée')
+  //
+  // ⚠️ **LA TÂCHE G A DÛ DÉPLACER CETTE GARDE, ET SON ÉQUIVALENCE EST PROUVÉE,
+  // PAS AFFIRMÉE.** L estompage doit pouvoir GARDER les fragments du dehors
+  // pendant le fondu ; le `discard` ne peut donc plus lire `d` seul, il lit la
+  // couverture. Les deux formes coupent le même ensemble : `dedans` est un
+  // `smoothstep` qui sature à EXACTEMENT 0 dès `d >= 0.5 * w`, et à estompage
+  // plein `couvertureCrop` vaut `dedans` (`mix(a, b, 1.0) === b`). Le seul écart
+  // est le fragment où `d` vaut exactement `0.5 * w` : il était gardé avec une
+  // couverture NULLE, il est désormais coupé. Invisible, et moins cher.
+  assert.ok(/if\s*\(\s*couvertureCrop\s*<=\s*0\.0\s*\)\s*discard\s*;/.test(BLOC),
+    'le `discard` n est plus gardé par la couverture')
+  // et la couverture, elle, descend bien de la largeur mesurée — sans ce
+  // maillon la garde ci-dessus ne prouverait plus rien sur `fwidth`
+  assert.ok(/dedans\s*=\s*1\.0\s*-\s*smoothstep\(\s*-\s*0\.5\s*\*\s*w\s*,\s*0\.5\s*\*\s*w\s*,\s*d\s*\)/.test(BLOC),
+    'la couverture qui garde le `discard` ne descend plus de la largeur mesurée')
+  // LE REJEU NUMÉRIQUE DE L ÉQUIVALENCE — à estompage plein, la nouvelle garde
+  // coupe exactement là où l ancienne coupait.
+  const SS = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
+  const MIX = (a, b, t) => a * (1 - t) + b * t
+  const w = 0.004
+  for (const d of [-1, -w, -0.5 * w, 0, 0.25 * w, 0.499 * w, 0.5 * w, 0.5001 * w, w, 1]) {
+    const couverture = MIX(1, 1 - SS(-0.5 * w, 0.5 * w, d), 1)
+    assert.equal(couverture <= 0, d >= 0.5 * w, `les deux gardes divergent à d = ${d}`)
+  }
 })
 
 test('SANS CROP, L ALPHA VAUT EXACTEMENT 1 — la production est intouchée', () => {

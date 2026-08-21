@@ -529,6 +529,29 @@ uniform float uCropDemi; // demi-côté du crop, même unité
 uniform float uCropCoin; // rayon d'arrondi, en FRACTION du demi-côté
 uniform float uCropCoinN; // exposant de superellipse (2 = cercle, 4,4 = défaut)
 
+// ══════════ L'ESTOMPAGE DE LA TERRE AUTOUR — Tache G, decision 3 ═══════════
+//
+// Adrien : « la planete autour du crop se fond progressivement vers le fond a
+// mesure qu'on descend, pour que le bloc se detache ». La loi vit dans
+// src/monde/estompage-terre.js et se verifie sous node — ce bloc-ci n'en est
+// que le point d'application.
+//
+// (Pas d'accent grave dans ce bloc non plus : template literal.)
+//
+// ⚠️ SANS CETTE TACHE, LA TACHE A N'ESTOMPE PAS LA PLANETE AUTOUR : ELLE
+// L'EFFACE TOUT COURT. Releve par la Tache D a y = 900 — le discard emporte
+// tout ce qui est hors du crop, a toutes les altitudes. uEstompage = 1 est
+// exactement ce comportement-la ; uEstompage = 0 rend la planete ENTIERE ; et
+// c'est l'ALTITUDE qui glisse entre les deux (regle R1).
+//
+// ⚠️ uEstompageOn VAUT ZERO PAR DEFAUT, comme uCropOn, uHabOn et uMerRampeOn.
+// Ce n'est pas un doublon de uEstompage : les trois sites qui les lisent (les
+// tuiles ici, l'atmosphere, les calottes) n'ont PAS la meme valeur neutre — 1
+// pour les tuiles (« le crop seul », la Tache A), 0 pour les deux autres
+// (« intouches »). Une seule valeur par defaut ne peut pas servir les deux.
+uniform float uEstompageOn;
+uniform float uEstompage; // 0 = planete entiere, 1 = le crop seul
+
 // ══════════ L'HABILLAGE — Tache C, « le globe prend le rendu du socle » ═════
 //
 // Adrien, decision 6 : « je veux le meme rendu que la qualite de rendu des
@@ -716,8 +739,28 @@ void main() {
     // reste de la tuile.
     float d = pn - uCropCoin; // > 0 = dehors
     float w = max(fwidth(d), 1e-12); // un pixel, en unites de crop
-    if (d > 0.5 * w) discard;
-    couvertureCrop = 1.0 - smoothstep(-0.5 * w, 0.5 * w, d);
+    float dedans = 1.0 - smoothstep(-0.5 * w, 0.5 * w, d);
+
+    // ══════ L'ESTOMPAGE — Tache G ══════════════════════════════════════════
+    //
+    // ⚠️ ETEINT, CETTE LIGNE REND 1.0, DONC couvertureCrop VAUT dedans : c'est
+    // la Tache A au bit pres, et smoothstep sature EXACTEMENT a 0 des que
+    // d >= 0.5 w, donc le discard ci-dessous coupe le meme ensemble de
+    // fragments que le « if (d > 0.5 * w) discard » qu'il remplace. Le seul
+    // ecart est le fragment ou d vaut exactement 0.5 w : il etait garde avec
+    // une couverture nulle, il est desormais coupe. Invisible, et moins cher.
+    float estompeTuile = uEstompageOn > 0.5 ? uEstompage : 1.0;
+
+    // HORS du crop l'opacite vaut 1 - estompage ; DEDANS elle reste 1, quelle
+    // que soit l'altitude — le crop ne s'estompe jamais, c'est le sujet.
+    float couvertureTuile = mix(1.0, dedans, estompeTuile);
+    couvertureCrop = couvertureTuile;
+
+    // ⚠️ LE discard RESTE, ET IL RESTE ICI. A estompage plein il economise tout
+    // le corps du nuanceur sur les tuiles du dehors, exactement comme avant. En
+    // cours de fondu il ne coupe plus rien : c'est le prix de dessiner la Terre
+    // autour, et c'est le sujet meme de la tache.
+    if (couvertureCrop <= 0.0) discard;
   }
 
   float h = decodeMetersAA(vUv);
@@ -1426,6 +1469,23 @@ export class Globe {
       uCropCoin: { value: 0 },
       uCropCoinN: { value: 2 },
 
+      // L'ESTOMPAGE DE LA TERRE AUTOUR — Tâche G, décision 3.
+      //
+      // ⚠️ `uEstompageOn: 0` : sans `poserEstompage`, RIEN NE CHANGE — même
+      // garde et même raison que `uCropOn`. Ces deux-là sont PARTAGÉS au sens
+      // le plus fort du chantier : ils vivent dans `this.uniforms`, que
+      // `_materialFor` étale dans chaque matériau de tuile, **et les deux
+      // MÊMES OBJETS sont passés à l'atmosphère et aux deux calottes**. Une
+      // seule écriture couvre les trois nuanceurs — il ne peut pas y avoir de
+      // désaccord entre le ciel et le sol.
+      //
+      // ⚠️ **ET `uEstompage` PART À 1, PAS À 0.** C'est le comportement de la
+      // Tâche A — « les tuiles cessent d'être dessinées hors du crop » — et
+      // c'est ce que `retirerEstompage` remet. Le zéro (la planète entière) est
+      // l'état NEUF, celui qu'une descente doit quitter.
+      uEstompageOn: { value: 0 },
+      uEstompage: { value: 1 },
+
       // L'HABILLAGE — Tâche C, « le globe prend le rendu du socle ».
       //
       // ⚠️ `uHabOn: 0` : sans `poserHabillage`, RIEN NE CHANGE — même garde et
@@ -1578,6 +1638,54 @@ export class Globe {
     this.retirerHabillage()
     this.retirerRampe()
     this.retirerMer()
+    this.retirerEstompage()
+  }
+
+  // ═══════════ L'ESTOMPAGE DE LA TERRE AUTOUR — Tâche G, décision 3 ══════════
+  //
+  // ⚠️ **CETTE MÉTHODE EST LE SEUL INTERRUPTEUR**, comme `poserCrop` l'est pour
+  // la découpe. Tant que personne ne l'appelle, `uEstompageOn` vaut 0 et les
+  // trois nuanceurs rendent ce qu'ils rendaient avant la Tâche G, au bit près.
+  //
+  // ⚠️ **LA LOI N'EST PAS ICI.** Elle vit dans `src/monde/estompage-terre.js`,
+  // qui la dérive des seuils du socle et ne lit qu'une ALTITUDE (règle R1). Le
+  // globe ne décide pas quand s'estomper : il applique. C'est `main.js` qui
+  // porte la veille, comme pour le seuil du socle.
+
+  /**
+   * Pose l'estompage de la Terre autour du crop.
+   *
+   * @param {number} estompage — 0 = la planète entière, 1 = le crop seul.
+   *   Écrêté : un `NaN` dans un uniforme éteint la moitié d'un GPU sans un mot.
+   */
+  poserEstompage(estompage) {
+    const e = Number(estompage)
+    const v = Number.isFinite(e) ? Math.min(1, Math.max(0, e)) : 0
+    const u = this.uniforms
+    u.uEstompage.value = v
+    u.uEstompageOn.value = 1
+    // ⚠️ **UN ALPHA NE VEUT RIEN DIRE SUR UN MATÉRIAU OPAQUE.** Les calottes
+    // sont opaques en production ; sans cette bascule leur `1.0 - estompage`
+    // serait ignoré par le moteur et un bandeau blanc resterait au pôle.
+    this._melangeCalottes(true)
+    return v
+  }
+
+  /** Retire l'estompage — on revient au crop SEUL, le comportement de la Tâche A. */
+  retirerEstompage() {
+    const u = this.uniforms
+    u.uEstompageOn.value = 0
+    u.uEstompage.value = 1
+    this._melangeCalottes(false)
+  }
+
+  /** Les calottes passent (ou non) dans la liste triée du moteur. */
+  _melangeCalottes(actif) {
+    for (const cap of this._calottes || []) {
+      if (cap.material.transparent === actif) continue
+      cap.material.transparent = actif
+      cap.material.needsUpdate = true
+    }
   }
 
   // ═══════════ L'HABILLAGE — Tâche C, « le globe prend le rendu du socle » ═══
@@ -2440,6 +2548,11 @@ export class Globe {
   // --------------------------------------------------------------- caps & halo
 
   _buildPoleCaps() {
+    // ⚠️ LES MATÉRIAUX SONT GARDÉS, ET C'EST L'ESTOMPAGE QUI L'EXIGE (Tâche G) :
+    // un alpha ne veut rien dire sur un matériau opaque, il faut basculer
+    // `transparent` — et le rebasculer en partant. Même patron que
+    // `_melangeCrop` pour les tuiles.
+    this._calottes = []
     for (const north of [true, false]) {
       const geo = new THREE.SphereGeometry(
         R_GLOBE * 1.0005,
@@ -2457,6 +2570,9 @@ export class Globe {
           uSunDir: this.uniforms.uSunDir,
           uShadowColor: this.uniforms.uShadowColor,
           uCol: { value: new THREE.Color(north ? '#dfe7ea' : '#f4f1ec') },
+          // les MÊMES objets que les tuiles — une seule écriture les couvre
+          uEstompageOn: this.uniforms.uEstompageOn,
+          uEstompage: this.uniforms.uEstompage,
         },
         vertexShader: /* glsl */ `
           varying vec3 vN;
@@ -2469,15 +2585,23 @@ export class Globe {
           uniform vec3 uSunDir;
           uniform vec3 uShadowColor;
           uniform vec3 uCol;
+          uniform float uEstompageOn;
+          uniform float uEstompage;
           void main() {
             float diff = max(dot(normalize(vN), uSunDir), 0.0);
             vec3 col = uCol * (0.74 + 0.30 * diff);
             float day = smoothstep(-0.22, 0.16, dot(normalize(vN), uSunDir));
-            gl_FragColor = vec4(mix(uShadowColor, col, 0.10 + 0.90 * day), 1.0);
+            // L'ESTOMPAGE — Tache G. ETEINT il vaut 0, donc l'alpha vaut 1.0 :
+            // la calotte d'avant, au bit pres. Sans lui, un bandeau blanc
+            // OPAQUE resterait au pole pendant que la Terre autour s'efface.
+            float estompeCalotte = uEstompageOn > 0.5 ? uEstompage : 0.0;
+            float voileCalotte = 1.0 - estompeCalotte;
+            gl_FragColor = vec4(mix(uShadowColor, col, 0.10 + 0.90 * day), voileCalotte);
           }`,
       })
       const cap = new THREE.Mesh(geo, mat)
       cap.name = north ? 'cap-n' : 'cap-s'
+      this._calottes.push(cap)
       this.group.add(cap)
     }
   }
@@ -2498,7 +2622,16 @@ export class Globe {
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       side: THREE.BackSide,
-      uniforms: { uSunDir: this.uniforms.uSunDir },
+      uniforms: {
+        uSunDir: this.uniforms.uSunDir,
+        // ⚠️ LES MÊMES OBJETS QUE LES TUILES — c'est ELLE, « la grosse boule
+        // laiteuse » (Tâche G) : cette coquille est à `R_GLOBE × 1,04`, soit
+        // 255 km d'altitude, et la caméra est DEDANS sur toute la bande
+        // d'estompage (19 → 40 km). Vue de l'intérieur, une coquille BackSide
+        // additive remplit le cadre entier.
+        uEstompageOn: this.uniforms.uEstompageOn,
+        uEstompage: this.uniforms.uEstompage,
+      },
       vertexShader: /* glsl */ `
         varying vec3 vN;
         varying vec3 vV;
@@ -2512,6 +2645,8 @@ export class Globe {
         varying vec3 vN;
         varying vec3 vV;
         uniform vec3 uSunDir;
+        uniform float uEstompageOn;
+        uniform float uEstompage;
         void main() {
           vec3 N = normalize(vN);
           vec3 V = normalize(vV);
@@ -2530,7 +2665,12 @@ export class Globe {
           col += vec3(1.0, 0.88, 0.62) * fwd * halo * 2.6;
           float a = band * (0.50 + 0.75 * day + 0.90 * dusk)
                   + halo * (0.05 + 0.26 * day + 0.34 * dusk);
-          gl_FragColor = vec4(col * a, 1.0); // additif : l'alpha est dans col
+          // L'ESTOMPAGE — Tache G. ETEINT il vaut 0, donc le facteur vaut 1.0
+          // et la ligne est celle d'avant, au bit pres. C'est le SEUL poste du
+          // globe qui remplissait le cadre aux altitudes du socle.
+          float estompeCiel = uEstompageOn > 0.5 ? uEstompage : 0.0;
+          float voileCiel = 1.0 - estompeCiel;
+          gl_FragColor = vec4(col * a * voileCiel, 1.0); // additif : l'alpha est dans col
         }`,
     })
     this.group.add(new THREE.Mesh(geo, mat))

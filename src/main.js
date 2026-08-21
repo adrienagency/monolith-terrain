@@ -65,6 +65,10 @@ import { poseFond, plansFond } from './monde/frontiere-rendu.js'
 // LE SEUIL DU SOCLE — Tâche 3 branchée. L'automate qui tient l'hystérésis
 // d'une image à l'autre ; la LOI (les deux seuils) vit dans `seuil-socle.js`.
 import { creerVeilleSocle } from './monde/veille-socle.js'
+// L'ESTOMPAGE DE LA TERRE AUTOUR — Tâche G. ⚠️ **PUR, ET C'EST LA CONDITION DE
+// SA VÉRIFICATION** : la loi ne peut pas vivre ici, aucun test ne charge
+// `main.js`. Voir `majEstompage` plus bas.
+import { creerVeilleEstompage } from './monde/estompage-terre.js'
 // ⚠️ `exageration-continue.js` N'IMPORTE RIEN — voir son en-tête : passer par
 // `fenetre-bornee.js` fermerait le cycle terrain.js → fenetre-bornee.js →
 // terrain.js, et AUCUN TEST NE CHARGE `main.js` pour l'attraper.
@@ -4537,6 +4541,40 @@ function majSeuilSocle() {
   veilleSocle.maj(altitudeCadrageM())
 }
 
+// ══════════ L'ESTOMPAGE DE LA TERRE AUTOUR — Tâche G, décision 3 ═══════════
+//
+// « La planète autour du crop se fond progressivement vers le fond à mesure
+// qu'on descend, pour que le bloc se détache. »
+//
+// ⚠️ **C'EST LA TÂCHE QUI REND L'IMAGE JUGEABLE.** Avant elle, poser le crop ne
+// creusait pas un trou dans la planète : il effaçait la planète et gardait le
+// trou (Tâche A, vérifié par la Tâche D à `y = 900`), pendant que l'atmosphère —
+// un matériau SÉPARÉ, que le `discard` ne touche pas — continuait de remplir le
+// cadre. D'où « une grosse boule laiteuse avec un timbre-poste dessus ».
+//
+// ⚠️ **DERRIÈRE `frontiere=1`, ET C'EST LE BON DRAPEAU.** L'estompage n'a de
+// sens que là où le globe EST le fond, c'est-à-dire dans la passe de fond de la
+// Tâche 1b bis. Sans le drapeau, `poserEstompage` n'est jamais appelée et
+// `uEstompageOn` reste à 0 : les trois nuanceurs du globe rendent ce qu'ils
+// rendaient avant, au bit près.
+//
+// ⚠️ **LA VEILLE VIT DANS UN MODULE**, comme celle du socle et pour la même
+// raison : aucun test ne charge ce fichier, et l'état inter-images est
+// précisément ce qui se casse en silence.
+const veilleEstompage = creerVeilleEstompage({ appliquer: (f) => globe?.poserEstompage(f) })
+
+// ⚠️ **LES DEUX GARDES SONT CELLES DE `majSeuilSocle`, MOT POUR MOT, ET ELLES
+// VALENT ICI POUR LA MÊME RAISON MESURÉE.** Pendant un cran, `largeurBlocM()`
+// est divisée par deux UNE IMAGE avant que `_rescale` ne double
+// `camera.position.y` : `altitudeCadrageM()` rend alors exactement la MOITIÉ de
+// la vraie altitude. Sur le seuil du socle cela faisait onze bascules au lieu
+// d'une ; ici cela ferait clignoter la planète entière à chaque cran.
+function majEstompage() {
+  if (!frontiereActive) return
+  if (modes?.busy || !(largeurBlocM() > 0)) return
+  veilleEstompage.maj(altitudeCadrageM())
+}
+
 modes = new Modes({
   camera,
   controls,
@@ -4556,6 +4594,12 @@ modes = new Modes({
       // quelle que soit l'altitude. Et c'est la veille qui applique, pour que
       // les deux chemins (le mode et le seuil) ne puissent pas se contredire.
       veilleSocle.poserMode(v)
+      // ⚠️ **ET LE MODE PRIME AUSSI SUR L'ESTOMPAGE, MAIS DANS L'AUTRE SENS.**
+      // La veille du socle GÈLE en orbite ; celle de l'estompage FORCE ZÉRO.
+      // Geler y laisserait la valeur de la dernière image de surface — donc une
+      // planète effacée au moment précis où elle redevient le sujet, c'est-à-dire
+      // un écran vide. Voir le §6 de `monde/estompage-terre.js`.
+      veilleEstompage.poserMode(v)
     },
     setEffectsEnabled(v) {
       setDofEnabled(v && params.bokehEnabled && params.bokehScale > 0)
@@ -10683,6 +10727,11 @@ window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, sce
   // par aucun test, et `veilleSocle.auSeuil` / `.bascules` sont ce qui se lit à
   // l'écran pour vérifier qu'une descente ne fait QU'UNE bascule.
   veilleSocle, seuilSocleBranche, altitudeCadrageM,
+  // L'ESTOMPAGE DE LA TERRE AUTOUR — Tâche G, exposé pour la même raison que
+  // les deux lignes ci-dessus : `main.js` n'est chargé par aucun test, et
+  // `veilleEstompage.valeur` est ce qui se lit à l'écran pour vérifier qu'une
+  // descente estompe la planète au lieu de la faire clignoter.
+  veilleEstompage,
   // mode aléatoire + ombrage auto : de quoi sonder l'état depuis la console
   shuffleLook,
   // ⚠️ À APPELER AVANT DE COUPER LA BOUCLE rAF pour un tournage hors ligne
@@ -10998,6 +11047,15 @@ function tick() {
   // — c'est elle qui fait que la Terre apparaît exactement là où le socle
   // était, sans saut, quand le seuil le retire.
   majSeuilSocle()
+  // ══════ L'ESTOMPAGE DE LA TERRE AUTOUR — Tâche G ════════════════════
+  //
+  // ⚠️ **ENTRE LES DEUX, ET LES DEUX BORNES COMPTENT.** Après `majSeuilSocle`,
+  // parce que les deux lisent la MÊME altitude à la même image et qu'un socle
+  // qui naîtrait sur une altitude et une planète qui s'effacerait sur une autre
+  // se contrediraient à l'écran. Avant `majCameraFond`, parce que c'est elle qui
+  // pose la caméra dont la passe de fond va se servir : l'uniforme doit être
+  // écrit avant le dessin, pas après.
+  majEstompage()
   // ══════ LA FRONTIÈRE DE RENDU — Tâche 1b bis ════════════════════════
   //
   // La caméra de fond se repose AVANT le dessin, et **avant `globe.update`** :
