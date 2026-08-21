@@ -62,6 +62,74 @@ export function latLonToWorld(dem, lat, lon) {
   }
 }
 
+// ══════════ LA MÊME CONVERSION, MAIS SANS LE MNT — Tâche 6 septies ═════════
+//
+// ⚠️ **C'EST `latLonToWorld` MOT POUR MOT, LU SUR L'EMPRISE AU LIEU DU BLOC —
+// ET CE N'EST PAS UNE SECONDE LOI.** `latLonToWorld` a besoin de
+// `dem.originTileX/Y`, `dem.size` et `dem.tilePx`, c'est-à-dire d'un MNT
+// TÉLÉCHARGÉ. Or l'emprise, elle, est connue AVANT (`empriseBlocMNT`), et le
+// test ⑩e verrouille bit à bit qu'elle est la même que `patchLatLonBBox(dem)`.
+// Tout ce qui manquait était la conversion.
+//
+// ⚠️ **LINÉAIRE EN LONGITUDE, LINÉAIRE EN MERCATOR — PAS EN LATITUDE.** La
+// coordonnée de tuile `y` est linéaire dans `ln(tan φ + sec φ)`, pas dans φ.
+// Interpoler la latitude directement rendrait un décalage nul aux bords et
+// maximal au milieu du bloc, c'est-à-dire exactement là où personne ne regarde
+// les bords : un défaut MUET.
+//
+// **Vérifié contre `latLonToWorld` sur toute l'empreinte** (grille 9 × 9, cinq
+// lieux dont l'antiméridien, z11 à z13) : écart maximal **1,2e-12 à 8,5e-12
+// unité de scène**, c'est-à-dire l'arrondi float64 et rien d'autre. Le test ⑪d
+// exige moins de 1e-9 et balaie, il ne se contente pas du centre.
+//
+// @param {{ouest:number, sud:number, est:number, nord:number}} emprise
+// @param {number} lat @param {number} lon
+// @param {number} [span] la largeur MONDE de la nappe (56 unités)
+// @returns {{x:number, z:number}}
+export function latLonVersMondeEmprise(emprise, lat, lon, span = TERRAIN_SIZE) {
+  // ⚠️ `ouest > est` signifie que l'emprise franchit l'antiméridien : la largeur
+  // se lit modulo 360, comme `latLonToWorld` ramène `dtx` dans [−n/2, n/2).
+  let large = emprise.est - emprise.ouest
+  if (large <= 0) large += 360
+  let dLon = lon - emprise.ouest
+  dLon -= Math.round((dLon - large / 2) / 360) * 360
+  const mN = mercatorY(emprise.nord)
+  const mS = mercatorY(emprise.sud)
+  return {
+    x: (dLon / large - 0.5) * span,
+    z: ((mercatorY(lat) - mN) / (mS - mN) - 0.5) * span,
+  }
+}
+
+// LA RÉCIPROQUE — `worldToLatLon` sans le MNT.
+//
+// ⚠️ **ELLE EST AUSSI NÉCESSAIRE QUE L'ALLER, ET LE PLAN NE LA LISTAIT PAS.**
+// `viseeAuSol()` (main.js) rend le lat/lon sous la visée de la caméra, et c'est
+// LUI que `getRefineTarget` / `getCoarsenTarget` interrogent pour savoir OÙ
+// recharger. Laissé sur `worldToLatLon(dem, …)`, l'escalier de zoom refuse tout
+// simplement de cranter tant qu'aucun MNT n'est là — c'est-à-dire exactement
+// pendant le vol qu'on cherche à rendre vivant.
+//
+// @returns {{lat:number, lon:number}}
+export function mondeVersLatLonEmprise(emprise, x, z, span = TERRAIN_SIZE) {
+  let large = emprise.est - emprise.ouest
+  if (large <= 0) large += 360
+  let lon = emprise.ouest + (x / span + 0.5) * large
+  lon = ((((lon + 180) % 360) + 360) % 360) - 180
+  const mN = mercatorY(emprise.nord)
+  const mS = mercatorY(emprise.sud)
+  const m = mN + (z / span + 0.5) * (mS - mN)
+  return { lat: Math.atan(Math.sinh(m)) * R2D, lon }
+}
+
+// `ln(tan φ + sec φ)` — l'ordonnée de Mercator, à un facteur près. C'est
+// exactement ce que `latLonToTile` calcule avant de le mettre à l'échelle des
+// tuiles ; l'isoler ici évite d'en écrire une SECONDE version.
+function mercatorY(lat) {
+  const r = lat * D2R
+  return Math.log(Math.tan(r) + 1 / Math.cos(r))
+}
+
 // ══════════ L'EMPRISE DU BLOC, SANS AVOIR À LE CHARGER — Tâche 6 quinquies ══
 //
 // ⚠️ **`empriseSocle` (seuil-socle.js) N'EST PAS L'EMPREINTE DU BLOC, ET L'ÉCART

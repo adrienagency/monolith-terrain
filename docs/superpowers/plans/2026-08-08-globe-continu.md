@@ -338,6 +338,8 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 
 ⚠️ **CE QUI RESTE — 23,7 % du vol, une image sur quatre — EST EXACTEMENT SEPT FOIS `loadSurface`, ET AUCUNE DES QUATORZE TÂCHES NE LE TOUCHE.** La Tâche 4 le change de **0,00 s** : `globe.js` n'est pas sur le chemin `loadSurface → fetchAndBuildDem → loadDem`. **Ne promettez donc pas la fluidité totale : promettez la moitié, et dites où est l'autre.** Il reste encore, hors périmètre : le bandeau `.fui-msg` et les **1 516 ms** de cuisson de la Tâche 7.
 
+> ⚠️ **CETTE LIGNE A ÉTÉ DÉMENTIE LE 2026-08-21, ET ELLE RESTE ÉCRITE TELLE QUELLE.** La **Tâche 6 septies** touche `loadSurface` : il rend la main dès que la fenêtre bornée est posée (**163 à 213 ms** au lieu de **992 à 5 817 ms**) et `fetchAndBuildDem` continue en tâche de fond. Sur un banc de **huit crans z5 → z13**, l'entrée morte passe de **25,41 s et 25,50 s** à **0,21 / 0,09 / 0,16 s**, rideaux compris. ⚠️ **Le banc n'est PAS le vol de référence du §0** (il n'est fait que de crans) : les 52,1 % ci-dessus ne se comparent donc pas à ses 5 %, et la seule quantité comparable est l'attente absolue sur les mêmes crans. ⚠️ **Et il reste deux images longues par cran — 352 ms et 296 ms mesurées** : ce n'est pas la fluidité totale, c'est deux hoquets au lieu d'un gel. **Le drapeau reste éteint** (le vol exige `?socle=quadtree`, dont la mer est plate — Tâche 6 sexies). Voir le bilan de la 6 septies.
+
 ⚠️ **ET LA MAJORITÉ NE VIENT PAS DE `_dive` : ils viennent de l'escalier de surface** (`_rescale`, `modes.js:452`, appelé par `_refine` `:436` et `_coarsen` `:445`). **Sur les 25 rideaux des quatre trajets, 17 sont posés par `_rescale`.** **C'est la première source du pop-up d'Adrien, et aucune tâche ne la portait.** → **Tâche 2 bis.**
 
 Le réseau étant parfait dans ce banc, **la production est pire que ces chiffres, jamais meilleure.**
@@ -1722,33 +1724,98 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
 - [ ] **Étape 6** — allumer `FLAGS.socleQuadtree` **seulement si la mer est revenue**, et pas avant.
 - [ ] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
-### Tâche 6 septies : LE BLOC CESSE D'ÊTRE GÉORÉFÉRENCÉ PAR LE MNT ⚠️ **C'EST ELLE, ET ELLE SEULE, QUI RETIRE L'ATTENTE**
+### Tâche 6 septies : LE BLOC CESSE D'ÊTRE GÉORÉFÉRENCÉ PAR LE MNT ✅ **FAITE LE 2026-08-21** — ⚠️ **L'ATTENTE EST PARTIE : 25,4 s → 0,16 s SUR HUIT CRANS**
 
-**Fichiers :** modifier `src/main.js`, `src/modes.js` · tester `test/fenetre-branchee.test.js` (élargir)
+> **Bilan mesuré** (banc `test/fenetre-branchee.test.js` ⑪ ×6 et ⑫ ×7 ; `npm test` **3 298 verts**) :
+>
+> · ⚠️ **L'ENTRÉE MORTE, IMAGE PAR IMAGE, SOUS LA VRAIE CAMÉRA — ET LE BANC EST DÉCRIT.** Descente **z5 → z13 au Mont-Blanc**, huit crans déclenchés par `modes._refine()` (le chemin de la molette, `_applyZoom` l'appelle) ; sonde posée à **chaque `requestAnimationFrame` de la page**, une image est « morte » quand l'application refuserait le geste (`modes.busy`, `controls.enabled === false`, la carte `#loading` levée, le fondu `.whiteout` allumé) ; 250 ms de pause entre deux crans ; réseau de cette machine.
+>
+> | | avant (2 passes) | après (3 passes) |
+> |---|---|---|
+> | **entrée morte** | **25,41 s** · **25,50 s** | **0,21 s** · **0,09 s** · **0,16 s** |
+> | fraction du temps | 88,3 % · 83,1 % | **5,1 %** · **2,4 %** · **5,1 %** |
+> | images mortes | 1 185/1 332 · 1 219/1 361 | 6/79 · 3/91 · 4/60 |
+> | dont **rideau** | 25,41 s · 25,50 s | **0 s** |
+> | par cran | **992 à 5 817 ms** | **124 à 173 ms** |
+> | durée du banc | 28,78 s · 30,69 s | 4,01 s · 3,62 s · 4,13 s |
+>
+> ⚠️ **LES DEUX COLONNES NE COUVRENT PAS LA MÊME FENÊTRE DE TEMPS** — le banc entier tombe de 28,8 s à 4,0 s. Ce qui se compare est **l'attente absolue sur les mêmes huit crans** (25,4 s contre 0,16 s) et la fraction ; pas le nombre d'images. ⚠️ **Et ce banc n'est PAS le vol de référence du §0** : il n'est fait QUE de crans, sans vol libre entre eux, donc sa fraction d'entrée morte est mécaniquement plus haute que les 52,1 % du §6 des deux côtés. Il est comparable **à lui-même**, ce qui est tout ce qu'on lui demande.
+>
+> · ⚠️ **CE QUI RESTE, ET IL FAUT LE DIRE : DEUX IMAGES LONGUES PAR CRAN.** Un cran isolé mesuré à part : `loadSurface` rend la main en **213 ms**, et le burst contient **une image de 352 ms puis une de 296 ms** (la reconstruction d'`entrerEnVol`, puis celle de l'atterrissage du MNT), la troisième étant déjà à 104 ms ; **médiane au repos 17,5 ms**, et **57,5 img/s** une fois posé. **Ce n'est donc pas « totalement fluide » : c'est deux hoquets de trois dixièmes au lieu d'un gel de une à six secondes.** Sur la descente enchaînée, le banc rend 14,5 à 25,1 img/s pendant les quatre secondes de rafale.
+>
+> · **PANORAMIQUE LATÉRAL 90° À BASSE ALTITUDE** (z13, le geste que le §0 exige EN PLUS de la descente lisse) : **180 images, 56,9 img/s, pire image 19 ms, zéro image morte.**
+>
+> · ⚠️ **LE REJEU A CONTREDIT LE PLAN, ET C'EST LA TROUVAILLE DE LA TÂCHE.** Le plan prescrivait `terrain.fenetreBornee.echelleVerticale`, « l'échelle RÉELLE de la géométrie affichée ». **Elle ne l'est pas.** Trois crans z12 → z13 → z14 sous `?globe=continu` SEUL : l'amplitude des `y` de la nappe vaut **9,1989 → 18,3978 → 36,7955** (×2 par cran, exact) pendant que `fenetre.echelleVerticale` reste à **0,007667 07**, la valeur du premier cran, pour toujours — `appliquerHauteurs` en est le seul écrivain et ne tourne que sur le chemin du quadtree. **`recadrerFenetre` ne l'écrit pas non plus.** La suivre aurait rendu `echelleApres / echelleAvant = 1` à `_rescale`, c'est-à-dire une caméra reposée à la moitié puis au quart de la bonne distance : **la régression exacte que le §5 de `/threejs-optimisation` décrit.** La grandeur portée par la fenêtre est **`largeurM`**, et l'échelle s'en dérive par `echelleBloc` avec l'exagération lue vivante — mot pour mot la formule d'`appliquerHauteurs` et de `_makeDemSampler`. **Une seule loi**, et le test ⑪a garde le constat en TÉMOIN pour qu'on ne « corrige » pas la tâche en relisant `echelleVerticale`.
+>
+> · ⚠️ **ET LE RECADRAGE MANQUAIT SUR UN DES DEUX RÉGIMES.** `_geometrieRebuild` GARDE la fenêtre tant que sa résolution est bonne : `fabriqueFenetre` — qui pose l'emprise — n'est appelée **qu'une fois**. La 6 quinquies avait posé `recadrerFenetre` dans `hauteursDeFlux`, donc sous `?socle=quadtree` seulement ; sous `?globe=continu` seul, `fenetre.largeurM` restait à **20 451 m** quand le bloc en faisait 10 226 puis 5 113. Muet tant que personne ne s'y géoréférençait, un facteur deux par cran dès la Tâche 6 septies. Correctif : un crochet `terrain.recadreFenetre`, appelé par `_geometrieRebuild`, et **un seul écrivain de réglages, `cadrageFenetre()`**, partagé avec `hauteursDeFlux`.
+>
+> · **LE REPLI SANS MNT EST BORNÉ, ET C'EST MESURÉ** (rejeu, cinq lieux) : la largeur tirée de l'emprise et `dem.extentMeters` diffèrent de **6,9e-5 à 4,8e-4 en relatif à z12–z14**, et **jusqu'à 3,5 % à z5** — `dem.js` prend le cosinus de la latitude DEMANDÉE, l'emprise celui de son centre calé sur la grille de tuiles. Le socle vit à z13 (`ZOOM_SOCLE`), donc du bon côté. **Le rapport d'un cran, lui, vaut 2,000 ± 0,0014** sur cinq lieux, et c'est ce que `_rescale` lit. ⚠️ **`dem.extentMeters` garde donc la main dès qu'il est là** — vérifié in situ : `largeurFen === extentDem` au mètre près à chaque atterrissage (27 354 / 27 354 puis 10 361 / 10 361).
+>
+> · **LES DEUX CONVERSIONS SANS MNT SONT EXACTES.** `latLonVersMondeEmprise` et sa réciproque `mondeVersLatLonEmprise` (`geo.js`) sont `latLonToWorld` / `worldToLatLon` lues sur l'emprise. Balayées sur TOUTE l'empreinte (grille 9 × 9, cinq lieux dont l'antiméridien, z9 à z13) : **écart maximal 1,2e-12 à 8,5e-12 unité de scène**, et **7,1e-15 à 8,5e-14 degré** relevé in situ dans le navigateur sur le MNT réel. L'aller-retour est l'identité à 1e-9 près.
+>
+> · ⚠️ **LE PLAN NE LISTAIT NI `viseeAuSol` NI LES DEUX PORTES DE L'ESCALIER, ET SANS ELLES TOUT LE RESTE NE SERT À RIEN.** `getRefineTarget` / `getCoarsenTarget` refusaient de cranter sans `dem` : pendant le vol, la molette n'aurait tout simplement plus rien fait — **le gel qu'on retire, déplacé d'un cran**, et sans une erreur. Elles acceptent désormais « MNT **ou** fenêtre ».
+>
+> #### ⚠️ CE QUE CETTE TÂCHE FAIT AUTREMENT QUE LE PLAN NE LE DEMANDAIT
+>
+> **L'Étape 4 disait « migrer la moitié basse, une couche à la fois ». Elle ne l'a pas fait, et voici pourquoi et ce qui la remplace.** Le relevé du dépôt donne **une soixantaine de sites** qui lisent `dem` dans `main.js` seul — étiquettes, lacs, rivières, cartouche, mer, GPX, damier, bateaux, POI de course, lumières nocturnes, occupation du sol, canopée, photo aérienne, mode région. Les migrer un par un est une tâche entière, pas une étape.
+>
+> **Ce qui la remplace : `entrerEnVol()` LÂCHE le MNT (`dem = null`) au lieu de le laisser mentir**, et repasse par `regenerateTerrain({ sansRideau: true })` — **la MÊME liste de calques qu'à l'atterrissage**. Chaque calque se rebâtit alors **vide** au lieu de se poser au mauvais endroit, et revient entier quand le MNT atterrit.
+>
+> ⚠️ **LE CHIFFRE QUI JUSTIFIE CE CHOIX** : un `dem` périmé d'UN SEUL palier place un point à **2,37 unités du centre au lieu de 0, et jusqu'à 9,62 unités** sur un bloc qui en fait 56 — **jusqu'à un sixième du socle** (rejeu, Q5). Garder les calques serait une carte FAUSSE, pas une carte fluide.
+>
+> **Ce que ça coûte, relevé à l'écran ET par sonde, La Réunion / Vercors :**
+>
+> | | avant le cran | **pendant le vol** | après |
+> |---|---|---|---|
+> | `dem` | ✓ | **null** | ✓ |
+> | calque eau (rivières, lacs) | 1 objet | **0** | 1 |
+> | étiquettes de lieux | 12 | **0** | 12 |
+> | cartouche gravé | visible | **caché** | visible |
+> | masque de mer | 1 | **0** | 1 |
+> | analyse de relief | 1 | **0** | 1 |
+> | trait de côte (`uCoastMaskOn`) | 1 | **0** | 1 |
+>
+> **Vu à l'écran, La Réunion Z12 → Z13 :** pendant le vol le socle porte **le vrai relief du nouveau palier**, parois comprises, caméra reposée, **aucun rideau** — mais **la mer n'a plus de trait de côte et se lit comme une plaine pâle**, et le cartouche a disparu. À l'atterrissage, deux secondes plus tard, la mer, la côte, les étiquettes et le cartouche reviennent d'un coup. **C'est la décision 13 appliquée aux calques ; c'est ce qu'Adrien doit regarder avant qu'on ouvre le drapeau, et c'est le seul vrai point de goût de cette tâche.**
+>
+> · ⚠️ **LA SUPERSESSION, ET ELLE EST NÉCESSAIRE.** `demBusy` ne sérialise plus rien : un second cran part pendant que le premier MNT vole, et **le plus LENT des deux gagnerait**. Un compteur `_generationMNT`, deux points de contrôle dans `fetchAndBuildDem` (après `loadDem` et après `regenerateTerrain`, car celui-ci attend les champs déportés ~470 ms). **Vérifié in situ : quatre crans enchaînés à 60 ms d'intervalle, `dem.zoom` final = 13 = zoom final, `largeurFen === extentDem`, masque de mer revenu, aucun rideau.**
+>
+> · **LA MOITIÉ DE LA TÂCHE 2 EST FAITE, ET L'AUTRE PAS.** Le rideau ne se lève plus **par-dessus une application vivante** (`regenerateTerrain({sansRideau})`, `fetchAndBuildDem({enVol})`) : c'est ce que le plan appelait « la Tâche 2 devient bloquante ici ». **La carte `#loading` existe toujours** et garde le PREMIER chargement, celui où il n'y a rien à regarder. **La Tâche 2 reste donc à faire**, et le test ⑫f dit exactement où on en est.
+>
+> · **LE NaN DE `_ecrireRelief` : IL N'A PAS SU ÊTRE REPRODUIT, ET LA BORNE EST POSÉE QUAND MÊME.** Le bilan de la 6 ter annonçait trois composantes de `color` NaN « des DEUX côtés » (`Math.pow(hn, 0.85)` avec `hn < 0`). Rejoué le 2026-08-21 sur SON banc exact et sur une emprise 3×3 : **zéro composante NaN sur 12 675 et 13 446**, `hn` minimal 0,0015. Le chemin restait néanmoins **atteignable** — la branche `empriseCote > 1` remplace `minH`/`maxH` par `dem.minM/maxM`, **quantifiés au demi-mètre**, qui ne connaissent pas le grain FBM ajouté aux `y`. `hn` est donc borné à zéro, **le même idiome que `Math.max(0, ny)` de la ligne suivante**, et c'est **l'identité bit à bit partout où `hn ≥ 0`**. Le test ⑫g fabrique le cas (extrema relevés d'un mètre) et **meurt si la borne part**. La tolérance au NaN de ⑧c est corrigée EN PLACE.
+>
+> · **SEPT MUTATIONS, SIX MORDENT** (`.banc/mutation-6septies.mjs`, hors dépôt) : retirer le recadrage du rebuild tue ⑪b/⑪c/⑪e ; remettre l'`await` sur le MNT tue ⑫c ; retirer le premier point de supersession tue ⑫c ; garder le MNT dans `entrerEnVol` tue ⑫c ; refuser de cranter sans MNT tue ⑫e ; rallumer le masque de mer sans MNT tue ⑫b ; retirer la borne de `hn` tue ⑫g. ⚠️ **LA SEPTIÈME SURVIT, ET C'EST NORMAL** : faire lire `dem.extentMeters` AVANT la fenêtre dans `largeurBlocM` ne tue rien — parce que **les deux sont provablement égales quand le MNT est là** (⑪c, égalité stricte) et que la fenêtre est le seul recours quand il ne l'est pas. Les deux ordres sont équivalents ; ce n'est pas un test faible. ⚠️ **Et il a fallu normaliser les fins de ligne : trois mutations ont d'abord rendu « MOTIF INTROUVABLE » pour la seule raison que ce dépôt est en CRLF — ce qui se lit exactement comme un test qui ne mord pas.**
+>
+> · **LA PHASE ROUGE A EU LIEU POUR ⑪, PAS POUR ⑫.** ⑪a à ⑪e ont été écrits AVANT l'implémentation et **cinq des six étaient rouges** au premier lancement (⑪f, la mutation, était verte des deux côtés, ce qui est son contrat). ⑫ a été écrit après, comme aux Tâches 6, 6 ter et 6 quinquies ; **ce qui le remplace est la table de mutations ci-dessus**, rejouée et publiée.
+>
+> · ⚠️ **DEUX ASSERTIONS EXISTANTES ONT DÛ ÊTRE CORRIGÉES EN PLACE, ET LES DEUX AVAIENT RAISON DE MORDRE.** ① `escalier-surface.test.js:137` épinglait `extentMeters: dem.extentMeters` dans `echelleVerticaleBloc` — c'est-à-dire l'obligation d'avoir téléchargé un MNT pour connaître l'échelle du bloc : **le §3 de `/threejs-optimisation` mot pour mot**. ② `fenetre-branchee.test.js` ①b comptait **six** lecteurs de `lireExageration` dans `main.js` et en voit **cinq** : c'est **la seule baisse de ce compte**, et elle a sa raison — les deux listes de réglages de fenêtre (6 ter et 6 quinquies) passent désormais par `cadrageFenetre()`, l'écrivain unique. Dans les deux cas le motif seul a bougé, la raison est écrite au-dessus, **les assertions voisines n'ont pas bougé d'un caractère**.
+>
+> · **PRODUCTION ET `?globe=continu` INTACTS, VÉRIFIÉS À L'ÉCRAN.** Sous `?globe=crans` il n'y a **pas de fenêtre** (`fenetreBornee === null`) : les trois grandeurs retombent sur `dem`, `volPossible()` est faux, `loadSurface` attend toujours (**1 100 ms mesuré**) et **le rideau se lève toujours**. Sous `?globe=continu` seul, `largeurFen === extentDem` (27 354 / 27 354) et **la mer garde sa bathymétrie** — canyons et bleus profonds, indiscernable de la production. **La descente z5 → z13 sous `?globe=continu` et sous `?globe=continu&socle=quadtree` rend la MÊME trace géographique**, cran par cran, emprise par emprise.
+>
+> · **`npm test` 3 298 verts** (3 285 + 13), `audit:tests` **189 listés / 189 sur disque**, `node --check` sur les cinq fichiers modifiés, construction complète verte (`nettoie:dist` → `build:mapcells` → `vite build` → `verifie:dist`, 5 139 fichiers, 10,17 Mo gzip). **Aucune erreur JS neuve dans aucun des trois régimes** : seuls les `ERR_CONNECTION_TIMED_OUT` du bucket d'altitude injoignable depuis cette machine et une poignée de 404, **mesurés des deux côtés**. Descentes refaites **trois fois**.
+>
+> #### ⚠️ CE QUE CETTE TÂCHE NE FAIT PAS
+>
+> 1. ⚠️ **ELLE NE MIGRE PAS LES CALQUES, ELLE LES FAIT TAIRE PENDANT LE VOL.** Voir le tableau ci-dessus. Les faire SUIVRE le palier — les géoréférencer sur `fenetre.emprise` au lieu de `dem` — reste entier, et c'est la vraie « moitié basse » du tableau du plan. **Ce qui la rendrait presque inutile : la Tâche 6 sexies**, car le seul calque vraiment gênant à l'écran est la mer.
+> 2. ⚠️ **LA TÂCHE 2 N'EST FAITE QU'À MOITIÉ** — la carte `#loading` garde le premier chargement.
+> 3. ⚠️ **LE DRAPEAU RESTE ÉTEINT**, et il est celui de la 6 quinquies : le vol exige `?socle=quadtree`, parce que sans le quadtree un bloc sans MNT se peindrait au relief **procédural** (témoin ⑩a). **La mer y est donc toujours plate** → Tâche 6 sexies. Aucun drapeau neuf n'a été créé.
+> 4. ⚠️ **HUIT `fetchAndBuildDem` PEUVENT ÊTRE EN VOL À LA FOIS** sur une rafale de crans. La supersession garantit qu'un seul écrit ; elle ne les **annule** pas. Le total d'octets est le même qu'avant (les mêmes huit blocs), mais le pic de mémoire, lui, n'a **pas été mesuré** — chacun tient au passage son ImageData et son Float32Array (voir `EMPRISE_EN_VOL_MAX`, `dem-emprise.js`, qui a déjà payé exactement ce piège sur l'emprise 3×3). **À mesurer avant d'ouvrir le drapeau.**
+> 5. **Le tracé GPX pendant le vol n'a pas été regardé** : aucun banc n'en portait. `gpxLayer.rebuildAll()` est bien dans la liste de `regenerateTerrain`, donc il se redrape à l'atterrissage, mais son état PENDANT le vol n'est pas vérifié à l'écran.
+> 6. **Rien n'a été mesuré sur un portable**, et **le pic mémoire des vols concurrents non plus** — les manques que le §10 traîne depuis le prototype, plus un neuf.
+> 7. **L'emprise 3×3 (`?f3=1`) est refusée** par `volPossible()` (`!fenetreContinueActive()`), comme elle l'était déjà par `empriseDuSocle`. Écrit plutôt que sous-entendu.
 
-⚠️ **CE QUI RESTE DES 7,9 s, ET POURQUOI LA 6 quinquies NE POUVAIT PAS LE PRENDRE.** Le socle n'a plus besoin du MNT pour son relief (**1 à 2 ms contre 0,9 à 5,3 s**, mesuré). Mais `loadSurface` reste attendu parce que **tout le reste du bloc est géoréférencé par `dem`**, et un `dem` périmé d'un palier décale tout d'un facteur deux. Liste **relevée sur le dépôt le 2026-08-21**, à traiter une par une :
+**Fichiers :** modifier `src/main.js`, **`src/terrain.js`** *(le crochet `recadreFenetre`, l'extinction des champs sans MNT, la borne de `hn`)*, **`src/geo.js`** *(`latLonVersMondeEmprise`, `mondeVersLatLonEmprise`)* · tester `test/fenetre-branchee.test.js` (élargir, ⑪ ×6 et ⑫ ×7) et `test/escalier-surface.test.js` (une assertion, en place)
 
-| ce qui lit `dem` | ce qu'il faut à la place |
-|---|---|
-| `echelleVerticaleBloc()` (`main.js`) | `terrain.fenetreBornee.echelleVerticale` — c'est l'échelle RÉELLE de la géométrie affichée |
-| `altitudeCadrageM()` | `fenetre.largeurM` |
-| `viseeDuLieu(lat, lon)` → `latLonToWorld(dem, …)` | la même conversion sur `fenetre.emprise` (linéaire en Mercator) |
-| `sampleGroundY` → `terrain.sample` | ✅ **déjà fait** par la 6 quinquies (`_makeFenetreSampler`) |
-| `_buildFields()` — masque de mer, analyse, côte | ✅ **déjà gardé** : sauté sans MNT. Le socle sort alors sans masque de mer ni trait de côte — **à regarder à l'écran avant de promettre** |
-| étiquettes, lacs, routes, cartouche, `ocean.js`, `gpx.js`, `blockGrid` | **le gros morceau, et il n'est pas commencé** |
-| `showLoading()` dans `fetchAndBuildDem` | ⚠️ **le rideau reviendrait par-dessus une application vivante** — c'est la Tâche 2, et elle devient bloquante ici |
+⚠️ **LE PLAN DISAIT `src/modes.js` : IL N'A PAS ÉTÉ TOUCHÉ D'UN CARACTÈRE, ET C'EST LE SIGNE QUE LE DIAGNOSTIC ÉTAIT BON.** `modes.js` n'attendait pas parce qu'il le voulait, il attendait parce que `loadSurface` ne rendait la main qu'une fois le bloc géoréférencé. Le corriger côté `modes.js` aurait été le palliatif ; il est corrigé **là où était la cause**.
 
-⚠️ **NE PAS COMMENCER PAR RETIRER L'`await`.** C'est le §5 de `/threejs-optimisation` : un correctif juste dans le mauvais ordre se mesure comme une régression. Tant que la moitié basse du tableau lit `dem`, retirer l'attente donne un relief au bon palier sous des étiquettes, des lacs et une mer restés au palier précédent — **une carte fausse, pas une carte fluide.**
-
-- [ ] **Étape 1** — test : après un cran, `echelleVerticaleBloc()` et `viseeDuLieu()` rendent les valeurs de la FENÊTRE, sans lire `dem`. ⚠️ **Rejoue-le contre le dépôt AVANT de l'écrire.**
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
-- [ ] **Étape 3** — migrer la moitié haute du tableau (échelle, cadrage, visée).
-- [ ] **Étape 4** — migrer la moitié basse, **une couche à la fois, en regardant l'écran entre chaque**.
-- [ ] **Étape 5** — la Tâche 2 (retirer la carte `#loading`), qui devient bloquante.
-- [ ] **Étape 6** — alors seulement, `loadSurface` rend la main dès que la fenêtre est posée, et `fetchAndBuildDem` continue en tâche de fond.
-- [ ] **Étape 7 — MESURER L'ENTRÉE MORTE image par image**, sur le vol de référence, et la comparer aux **8,04 / 14,63 / 24,94 s** relevés par la 6 quinquies.
-- [ ] **Étape 8 — REGARDER L'ÉCRAN**, et dire ce qu'on voit pendant que le MNT est en vol.
-- [ ] **Étape 9 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [x] **Étape 1 — test** : après un cran, `echelleVerticaleBloc()` et `viseeDuLieu()` rendent les valeurs de la FENÊTRE, sans lire `dem`. ✅ ⑪a à ⑪f. ⚠️ **REJOUÉ CONTRE LE DÉPÔT AVANT D'ÊTRE ÉCRIT** (`.banc/rejeu-6septies.mjs` et `-b.mjs`, hors dépôt) — **et le rejeu a contredit le plan** : voir le bilan, `echelleVerticale` ne suit PAS le cran.
+- [x] **Étape 2** — le lancer, vérifier qu'il échoue. ✅ **CINQ SUR SIX ÉTAIENT ROUGES**, et le sixième (⑪f) est la mutation, verte des deux côtés par contrat.
+- [x] **Étape 3** — migrer la moitié haute (échelle, cadrage, visée). ✅ **Plus `viseeAuSol` et les deux portes de l'escalier, que le plan ne listait pas** — sans elles la molette ne faisait plus rien pendant le vol.
+- [x] **Étape 4** — migrer la moitié basse. ⚠️ **FAITE AUTREMENT, ET C'EST ÉCRIT EN TOUTES LETTRES** : les calques ne sont pas migrés, ils **se taisent** pendant le vol parce que `entrerEnVol` lâche le MNT. Voir « CE QUE CETTE TÂCHE FAIT AUTREMENT ».
+- [x] **Étape 5** — la Tâche 2. ⚠️ **À MOITIÉ** : le rideau ne se lève plus sur une application vivante ; la carte `#loading` garde le premier chargement.
+- [x] **Étape 6** — `loadSurface` rend la main dès que la fenêtre est posée. ✅ **163 à 213 ms au lieu de 992 à 5 817 ms**, `fetchAndBuildDem` continue en tâche de fond avec supersession.
+- [x] **Étape 7 — MESURER L'ENTRÉE MORTE image par image.** ✅ **25,41 / 25,50 s → 0,21 / 0,09 / 0,16 s.** Tableau et description du banc dans le bilan.
+- [x] **Étape 8 — REGARDER L'ÉCRAN.** ✅ Et l'écran a dit **oui pour le relief, non pour la mer** : voir le tableau des calques et la note à l'écran.
+- [x] **Étape 9 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 ### Tâche 6 quater : LE PILOTE DE L'EXAGÉRATION CONTINUE ⚠️ **UNE MESURE À L'ÉCRAN L'A OUVERTE**
 

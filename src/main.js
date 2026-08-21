@@ -40,7 +40,7 @@ import { buildCourseBar } from './ui/course-bar.js'
 import { snapToKm, ascentStats, parseRace } from './race-model.js'
 import { carnetALaLigne, resumeParcours } from './carnet-course.js'
 import { lisserChamps, decroissant } from './lissage.js'
-import { worldToLatLon, latLonToWorld, parseLatLon, sphereToLatLon, R_GLOBE, empriseBlocMNT } from './geo.js'
+import { worldToLatLon, latLonToWorld, parseLatLon, sphereToLatLon, R_GLOBE, empriseBlocMNT, latLonVersMondeEmprise, mondeVersLatLonEmprise } from './geo.js'
 import { fetchTransports } from './transports.js'
 import { TERRAIN_SIZE, RES_FENETRE_CONTINUE } from './terrain.js'
 import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
@@ -1636,17 +1636,45 @@ function empriseDuSocle() {
   return empriseBlocMNT({ lat, lon, zoom: params.demZoom })
 }
 
-terrain.fabriqueFenetre = (n) => {
+// LES QUATRE RÉGLAGES QUI CADRENT LA FENÊTRE — un seul endroit qui les écrit.
+// `construireFenetre` les prend à la naissance, `recadrerFenetre` les remet à
+// chaque cran ; deux listes divergeraient au premier réglage ajouté.
+function cadrageFenetre() {
   const emprise = empriseDuSocle()
   if (!emprise) return null
-  return construireFenetre({
+  return {
     emprise,
-    n,
-    rayonCoin: 0,
+    // ⚠️ `dem.extentMeters` GARDE LA MAIN QUAND LE MNT EST LÀ, et c'est mesuré :
+    // la largeur tirée de l'emprise prend le cosinus de la latitude de son
+    // centre CALÉ SUR LA GRILLE DE TUILES, quand `dem.js` prend celui de la
+    // latitude demandée. Écart relevé le 2026-08-21 sur cinq lieux : 6,9e-5 à
+    // 4,8e-4 à z12–z14, et jusqu'à **3,5 % à z5**. Le repli sur l'emprise n'est
+    // donc pas un équivalent, c'est ce qu'on a **avant** que le MNT arrive.
     largeurM: dem?.extentMeters || null,
     profondeurDalle: params.plinthDepth ?? 7,
     exageration: lireExageration(params),
-  })
+  }
+}
+
+terrain.fabriqueFenetre = (n) => {
+  const c = cadrageFenetre()
+  if (!c) return null
+  return construireFenetre({ ...c, n, rayonCoin: 0 })
+}
+
+// ══════════ LE RECADRAGE À CHAQUE CRAN — Tâche 6 septies ═══════════════════
+//
+// ⚠️ **IL ÉTAIT POSÉ DANS `hauteursDeFlux` SEULEMENT, DONC SOUS UN SEUL DES DEUX
+// RÉGIMES — ET SOUS L'AUTRE L'EMPRISE GELAIT.** `_geometrieRebuild` garde la
+// fenêtre tant que sa résolution est bonne : `fabriqueFenetre` n'est appelée
+// qu'une fois, et c'est elle qui pose l'emprise. Rejeu du 2026-08-21, trois
+// crans z12 → z13 → z14 sous `?globe=continu` seul : `fenetre.largeurM` restait
+// à **20 451 m** quand le bloc en faisait 10 226 puis 5 113. Muet tant que
+// personne ne s'y géoréférençait ; un facteur deux par cran dès que l'échelle
+// verticale, l'altitude de cadrage et la visée s'y lisent.
+terrain.recadreFenetre = (fenetre) => {
+  const c = cadrageFenetre()
+  if (c) recadrerFenetre(fenetre, c)
 }
 scene.add(terrain.mesh)
 
@@ -3046,7 +3074,21 @@ function chargeCartouche() {
 // `géométrie + fenêtre`. Rendre l'un pour l'autre est l'erreur qui ramenait
 // l'escalier de zoom au centre du bloc après un défilement. Hors mode continu
 // la fenêtre est (0, 0) : la valeur rendue est celle d'avant, au bit près.
+//
+// ══════════ ET ELLE NON PLUS N'A PLUS BESOIN DU MNT — Tâche 6 septies ══════
+//
+// ⚠️ **LE PLAN NE LA LISTAIT PAS, ET SANS ELLE LE RESTE NE SERT À RIEN.**
+// `getRefineTarget` / `getCoarsenTarget` l'appellent pour savoir OÙ recharger :
+// laissée sur `worldToLatLon(dem, …)`, l'escalier de zoom rend `null` dès que
+// `dem` manque, c'est-à-dire exactement pendant le vol qu'on cherche à rendre
+// vivant — la molette ne ferait alors plus rien, en silence. C'est le miroir
+// exact de `viseeDuLieu`, et `mondeVersLatLonEmprise` est la réciproque de
+// `latLonVersMondeEmprise` (`geo.js`), vérifiée contre `worldToLatLon`.
 function viseeAuSol() {
+  const f = terrain.fenetreBornee
+  if (f?.emprise) {
+    return mondeVersLatLonEmprise(f.emprise, controls.target.x, controls.target.z, TERRAIN_SIZE)
+  }
   const fen = fenetreContinueActive() && dem?.empriseCote > 1 ? terrain.fenetre : null
   const x = controls.target.x + (fen?.x ?? 0)
   const z = controls.target.z + (fen?.z ?? 0)
@@ -3336,15 +3378,35 @@ function syncDetailToZoom() {
 // quelle — et c'est voulu : un simple rechargement de zone (changement
 // d'exagération, retour de palette) ne doit pas ramener le visiteur au centre
 // du bloc alors qu'il a défilé pour aller ailleurs.
-async function fetchAndBuildDem({ centreSur = null } = {}) {
+async function fetchAndBuildDem({ centreSur = null, enVol = false } = {}) {
   syncExagToZoom() // this zoom's saved (or default) vertical exaggeration
   syncDetailToZoom() // fine-detail off at continental scale (z<=6)
   loadingStatus.textContent = 'fetching elevation tiles…'
-  showLoading()
+  // ⚠️ **EN VOL, PAS DE RIDEAU — ET C'EST LA TÂCHE 2 QUI DEVENAIT BLOQUANTE
+  // ICI.** Ce chargement-là court DERRIÈRE une application vivante : lever le
+  // voile reviendrait à remettre le pop-up d'Adrien par-dessus une carte qui
+  // répond déjà au doigt. La carte `#loading` n'est pas supprimée pour autant
+  // (c'est bien la Tâche 2, et elle reste à faire) : elle garde le PREMIER
+  // chargement, celui où il n'y a encore rien à regarder.
+  if (!enVol) showLoading()
+  // le numéro du vol courant, capturé AVANT le premier `await`
+  const gen = _generationMNT
+  const perime = () => enVol && gen !== _generationMNT
   // `memo` : le bloc central est le seul à revenir (aller-retour de zoom), donc
   // le seul à mémoriser — voir dem-memo.js pour la facture et pour la raison
   // d'en tenir le damier à l'écart.
-  dem = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, memo: true })
+  const arrive = await loadDem({ lat: params.demLat, lon: params.demLon, zoom: params.demZoom, memo: true })
+  // ══════════ LA SUPERSESSION — Tâche 6 septies ═════════════════════════════
+  //
+  // ⚠️ **SANS ELLE, DEUX CRANS RAPIDES ÉCRIVENT `dem` DANS LE DÉSORDRE.** Depuis
+  // que `loadSurface` rend la main tout de suite, `demBusy` ne sérialise plus
+  // rien : un second cran part pendant que le premier MNT est encore en vol, et
+  // le plus LENT des deux gagne. Le bloc afficherait alors le relief d'un palier
+  // sous les repères d'un autre — précisément la carte fausse que le §5 de
+  // `/threejs-optimisation` décrit. Un compteur, incrémenté par `entrerEnVol`,
+  // et le retardataire se retire sans rien toucher.
+  if (perime()) return
+  dem = arrive
   // ══════════ MODE CONTINU : ON ÉLARGIT À L'EMPRISE 3×3 ═════════════════════
   // Le bloc central vient d'arriver ; on lui adjoint ses huit voisins et on
   // recolle le tout en UN champ. `terrain` ne voit ensuite qu'un `dem` de forme
@@ -3412,12 +3474,22 @@ async function fetchAndBuildDem({ centreSur = null } = {}) {
   loadingStatus.textContent = 'generating terrain…'
   applyTimeOfDay(params.timeOfDay ?? 10) // the sun is location-true — re-aim it for the new place
   await regenerateTerrain()
+  // ⚠️ **SECOND POINT DE SUPERSESSION, ET IL EN FAUT DEUX** : `regenerateTerrain`
+  // attend les champs déportés (~470 ms sur un MNT 1536²), et un cran peut très
+  // bien tomber pendant. Tout ce qui suit — cartouche, trait de côte, damier,
+  // flotte — est cuit sur `params.demZoom` : le laisser courir poserait les
+  // repères d'un palier qu'on vient de quitter.
+  if (perime()) return
   // Les calques du sol sont reconstruits en coordonnées de CHAMP ; leur groupe
   // porte −fenêtre. La reconstruction ne le sait pas — elle rebâtit la
   // géométrie, pas la translation. Sans cette ligne, un lieu centré affichait
   // son relief au bon endroit et ses NOMS à l'ancien.
   if (aCentre) f3CalquesSuivent()
   // pull the cartouche info for the new zone (async, non-blocking)
+  // ⚠️ **ET IL SE RALLUME ICI** — `entrerEnVol` l'avait éteint le temps du vol
+  // (voir la note là-bas). La condition est celle de `setSurfaceVisible`, mot
+  // pour mot : le cartouche n'existe qu'en mode surface.
+  groundInfo.setVisible(!!params.groundInfo && modes?.mode !== 'orbital')
   if (params.groundInfo) chargeCartouche()
   // real coastline (Natural Earth) at coarse zoom — async, non-blocking; the
   // shader falls back to the elevation isoline until it arrives / if it fails.
@@ -3541,6 +3613,84 @@ async function fetchAndBuildDem({ centreSur = null } = {}) {
   syncBoats()
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// LE VOL DU MNT — Tâche 6 septies
+// ══════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ **C'EST CE QUI RETIRE L'ATTENTE, ET IL FALLAIT TOUT LE RESTE DE CE FICHIER
+// AVANT.** Jusqu'ici, `loadSurface` n'avait le droit de rendre la main qu'une
+// fois le MNT téléchargé, décodé et cuit — 0,87 à 5,3 s par cran, mesuré — parce
+// que TOUT le bloc était géoréférencé par lui. Désormais l'échelle verticale,
+// l'altitude de cadrage, la visée et sa réciproque se lisent sur la fenêtre
+// bornée, qui connaît son emprise sans rien charger.
+//
+// **Ce que fait `entrerEnVol` :** poser le palier d'arrivée, LÂCHER le MNT du
+// palier qu'on quitte, et repeindre le bloc à ce que le quadtree sait déjà.
+//
+// ⚠️ **LÂCHER LE MNT N'EST PAS UNE PROPRETÉ, C'EST LA CORRECTION ELLE-MÊME.**
+// Un `dem` périmé d'un seul palier place un point à **2,37 unités du centre au
+// lieu de 0, et jusqu'à 9,62 unités** sur un bloc qui en fait 56 — mesuré au
+// rejeu (`.banc/rejeu-6septies.mjs`, Q5), soit **jusqu'à un sixième du socle**.
+// Le garder pendant le vol donnerait un relief au bon palier sous des
+// étiquettes, des lacs, une mer et un tracé restés au précédent : une carte
+// FAUSSE, pas une carte fluide. `dem = null` fait tomber d'un coup les ~soixante
+// gardes `if (!dem) return` de ce fichier, et chaque calque se REBÂTIT vide au
+// lieu de mentir. Ils reviennent tous à l'atterrissage.
+//
+// ⚠️ **CE QUE ÇA COÛTE, ET IL FAUT LE DIRE** : pendant le vol le socle n'a ni
+// masque de mer, ni trait de côte, ni étiquettes, ni cartouche, ni tracé drapé.
+// C'est la décision 13 appliquée aux calques — grossier d'abord, net ensuite —
+// et c'est ce qu'Adrien doit regarder avant qu'on ouvre le drapeau.
+let _generationMNT = 0
+function entrerEnVol() {
+  _generationMNT++
+  // le palier d'arrivée AVANT le recadrage : `cadrageFenetre()` lit
+  // l'exagération de CE zoom, et `syncExagToZoom` est ce qui la pose.
+  syncExagToZoom()
+  syncDetailToZoom()
+  dem = null
+  terrain.setDem(null)
+  terrain.setCoastMask(null, null, { rebuildFields: false })
+  realWater?.setCoastMask(null, false)
+  coastMaskImage = null
+  traffic.setZone(null)
+  // ⚠️ **LE CARTOUCHE SE CACHE, IL NE SE RECHARGE PAS.** `groundInfo.load`
+  // interroge un géocodeur : l'appeler sans lat/lon partirait chercher le nom de
+  // « NaN, NaN ». Et le laisser tel quel graverait sur le socle le nom et la
+  // plage d'altitude du palier qu'on vient de quitter — juste sur un cran (le
+  // lieu ne bouge pas), FAUX sur une plongée vers un autre continent.
+  // `fetchAndBuildDem` le rallume à l'atterrissage, à côté de `chargeCartouche`.
+  groundInfo.setVisible(false)
+  // ══════════ ET LE DAMIER PART AVEC LE MNT ═════════════════════════════════
+  //
+  // ⚠️ **`test/damier-uniformes.test.js` A ATTRAPÉ CETTE LIGNE MANQUANTE À LA
+  // PREMIÈRE EXÉCUTION, ET IL AVAIT RAISON.** Les dalles voisines portent le
+  // relief RÉEL du palier qu'on vient de quitter : laissées autour d'un centre
+  // qui vient de changer d'échelle, elles donnent une carte coupée en deux à la
+  // jointure — plage hypsométrique, mer et masques d'un côté, l'autre palier de
+  // l'autre. C'est exactement ce que `loadRealTerrain` fait déjà quand le réseau
+  // lâche (`blockGrid?.clear()`), et pour la même raison. `sync` avec `dem` nul
+  // rend un besoin vide, donc il NETTOIE ; le prochain atterrissage les fait
+  // renaître.
+  blockGrid?.sync(allGpxPoints())
+  // ⚠️ **`sansRideau`, ET C'EST LA MOITIÉ DE LA TÂCHE 2 QUI DEVENAIT BLOQUANTE**
+  // — voir `regenerateTerrain`. C'est la MÊME liste de calques qu'à
+  // l'atterrissage : une seconde liste aurait divergé au premier calque ajouté,
+  // et ce fichier raconte déjà cinq fois cet accident-là.
+  return regenerateTerrain({ sansRideau: true })
+}
+
+// Le vol est-il possible ? ⚠️ **IL EXIGE LE SOCLE QUADTREE, ET CE N'EST PAS UNE
+// PRUDENCE** : sans lui `_remplirDepuisFlux` rend `null`, donc un bloc sans MNT
+// se peindrait au relief PROCÉDURAL — du bruit qui n'a rien à voir avec le lieu
+// (c'est le témoin ⑩a). Le drapeau `?socle=quadtree` reste éteint tant que la
+// bathymétrie n'est pas dans le flux (Tâche 6 sexies) ; ce vol part donc avec
+// lui, pas sous `?globe=continu` seul.
+const VOL_SANS_ATTENTE = socleQuadtreeActif()
+function volPossible() {
+  return VOL_SANS_ATTENTE && params.source === 'real' && !!terrain.fenetreBornee && !fenetreContinueActive()
+}
+
 async function loadRealTerrain(opts = {}) {
   if (demBusy) return
   demBusy = true
@@ -3576,10 +3726,20 @@ async function loadRealTerrain(opts = {}) {
 }
 
 let rebuildPending = false
-function regenerateTerrain() {
+// ══════════ `sansRideau` — Tâche 6 septies ═════════════════════════════════
+//
+// ⚠️ **C'EST LA MÊME LISTE DE CALQUES, ET C'EST TOUT L'INTÉRÊT.** Le vol du MNT
+// (`entrerEnVol`) et son atterrissage repassent tous les deux par ICI : une
+// seconde fonction « qui rafraîchit les calques » aurait divergé de celle-ci au
+// premier calque ajouté — et ce fichier porte déjà, écrit noir sur blanc, le
+// récit de **cinq** couches drapées oubliées une par une dans exactement cette
+// situation (voir `refreshAerial` / `refreshSol` / `refreshCanopee` /
+// `refreshNuit` plus bas). Le seul écart est le RIDEAU : le lever sur une
+// application vivante remettrait le pop-up qu'Adrien demande de retirer.
+function regenerateTerrain({ sansRideau = false } = {}) {
   if (rebuildPending) return Promise.resolve()
   rebuildPending = true
-  showLoading()
+  if (!sansRideau) showLoading()
   // LE DÉLAI NE SERT QU'À LAISSER LE VOILE SE PEINDRE, et il ne se paie donc
   // qu'une fois. Sur le chemin d'un ZOOM, le voile est levé par
   // fetchAndBuildDem et peint depuis ~170 ms quand on arrive ici : les 50 ms
@@ -3686,7 +3846,7 @@ function regenerateTerrain() {
       // à true pour toujours et l'application voilée — pire que le gel supprimé.
       ;(terrain.fieldsReady || Promise.resolve()).catch(() => null).then(() => {
         rebuildPending = false
-        hideLoading()
+        if (!sansRideau) hideLoading()
         resolve()
       })
     }, delai)
@@ -3695,14 +3855,44 @@ function regenerateTerrain() {
 
 // ------------------------------------------------------------------ orbital globe + modes
 
+// ══════════ LA LARGEUR AU SOL DU BLOC — Tâche 6 septies ════════════════════
+//
+// ⚠️ **C'EST LA SEULE GRANDEUR QUI GÉORÉFÉRENCE VERTICALEMENT LE BLOC, ET ELLE
+// N'A PLUS QU'UN LECTEUR DE `dem` : CELUI-CI.** L'échelle verticale, l'altitude
+// de cadrage et — par elles — la porte orbitale, le niveau de plongée et la pose
+// d'arrivée en descendent toutes. Tant qu'elle venait de `dem.extentMeters`,
+// `modes.js` devait ATTENDRE `loadSurface` avant de pouvoir bouger la caméra.
+//
+// ⚠️ **LA FENÊTRE PASSE EN PREMIER, ET LES DEUX RENDENT LE MÊME CHIFFRE QUAND
+// LE MNT EST LÀ** : `recadrerFenetre` pose `largeurM = dem.extentMeters` (voir
+// `recadreLaFenetre` plus bas), donc le passage est EXACT — test ⑪c, égalité
+// stricte sur trois crans. Ce que la fenêtre ajoute, c'est le cas où le MNT
+// n'est PAS encore là : sa `largeurM` vient alors de l'emprise du bloc, qu'on
+// connaît sans rien charger (`empriseBlocMNT`).
+//
+// ⚠️ **ET L'ÉCART DE CE REPLI EST MESURÉ, PAS SUPPOSÉ** (rejeu du 2026-08-21,
+// cinq lieux) : la largeur tirée de l'emprise et `dem.extentMeters` diffèrent de
+// **6,9e-5 à 4,8e-4 en relatif à z12–z14**, parce que `dem.js` prend le cosinus
+// de la latitude DEMANDÉE quand l'emprise prend celle de son centre calé sur la
+// grille de tuiles. **À z5 l'écart monte à 3,5 %** — c'est-à-dire aux échelles
+// continentales, où le socle n'existe pas (`ZOOM_SOCLE = 13`). Le rapport d'un
+// cran, lui, vaut **2,000 ± 0,0014** sur cinq lieux : c'est ce que `_rescale`
+// lit, et c'est ce qui compte.
+function largeurBlocM() {
+  const f = terrain.fenetreBornee
+  if (f?.largeurM > 0) return f.largeurM
+  return dem?.extentMeters || 0
+}
+
 // L'ALTITUDE GÉOMÉTRIQUE DE LA CAMÉRA SUR LE BLOC, EN MÈTRES — sans `dem.meanM`.
 // C'est la grandeur de cadrage de la règle R1 (voir le hook
 // `surfaceCamAltCadrageM` plus bas, qui explique pourquoi il y en a deux).
 function altitudeCadrageM() {
-  if (params.source === 'real' && dem) {
+  const largeur = largeurBlocM()
+  if (params.source === 'real' && largeur > 0) {
     return altitudeSurfaceM({
       camY: camera.position.y,
-      extentMeters: dem.extentMeters,
+      extentMeters: largeur,
       span: TERRAIN_SIZE,
       exageration: lireExageration(params),
     })
@@ -3786,12 +3976,13 @@ if (socleQuadtreeActif()) terrain.hauteursDeFlux = (fenetre, p) => {
   // tant que sa résolution est bonne, et son emprise était figée à la
   // construction. C'est la décision 3 (« le socle suit le cadrage en continu »),
   // et elle ne coûte pas un sommet : voir `recadrerFenetre`.
-  recadrerFenetre(fenetre, {
-    emprise,
-    largeurM: dem?.extentMeters || null,
-    exageration: lireExageration(params),
-    profondeurDalle: params.plinthDepth ?? 7,
-  })
+  //
+  // ⚠️ **DEPUIS LA TÂCHE 6 septies, `_geometrieRebuild` L'APPELLE DÉJÀ** (voir
+  // `terrain.recadreFenetre`) : le garder ici n'est pas un doublon inutile, car
+  // `rafraichirFenetre` — le raffinement par image — ne passe PAS par
+  // `_geometrieRebuild`. Les deux appellent le même écrivain, `cadrageFenetre`,
+  // et c'est ce qui interdit aux deux listes de réglages de diverger.
+  recadrerFenetre(fenetre, cadrageFenetre() ?? { emprise })
   // ══════════ POURQUOI PAS `remplirBorne` ICI — ET C'EST MESURÉ ═════════════
   //
   // ⚠️ **LA TÂCHE 6 quinquies PRESCRIVAIT `remplirBorne` (règle R3). L'ÉCRAN A
@@ -3982,9 +4173,27 @@ modes = new Modes({
     //
     // ⚠️ Rendu `null` hors source réelle : `modes.js` retombe alors sur la pose
     // d'arrivée plutôt que sur une distance inventée.
+    //
+    // ══════════ ET IL NE LIT PLUS `dem` — Tâche 6 septies ═══════════════════
+    //
+    // ⚠️ **LE PLAN PRESCRIVAIT `terrain.fenetreBornee.echelleVerticale`. LE
+    // REJEU A DIT NON, ET C'EST CHIFFRÉ.** Ce champ n'a qu'un écrivain,
+    // `appliquerHauteurs`, qui ne tourne que sur le chemin du quadtree : sous
+    // `?globe=continu` seul il reste à la valeur du PREMIER cran pour toujours
+    // (0,00766707 sur trois crans, pendant que la nappe, elle, quadruplait —
+    // mesuré, test ⑪a). Le lire ici aurait rendu `echelleApres / echelleAvant`
+    // = 1 à `_rescale`, c'est-à-dire une caméra reposée à la moitié puis au
+    // quart de la bonne distance à chaque cran : la régression exacte que le §5
+    // de `/threejs-optimisation` décrit.
+    //
+    // La grandeur portée par la fenêtre est **`largeurM`**, et l'échelle s'en
+    // dérive par `echelleBloc` avec l'exagération LUE VIVANTE — mot pour mot la
+    // formule d'`appliquerHauteurs` et de `_makeDemSampler`. **Une seule loi,
+    // et le test ⑪c exige que les deux régimes tombent dessus.**
     echelleVerticaleBloc() {
-      if (params.source !== 'real' || !dem) return null
-      return echelleBloc({ extentMeters: dem.extentMeters, span: TERRAIN_SIZE, exageration: lireExageration(params) })
+      const largeur = largeurBlocM()
+      if (params.source !== 'real' || !(largeur > 0)) return null
+      return echelleBloc({ extentMeters: largeur, span: TERRAIN_SIZE, exageration: lireExageration(params) })
     },
     // L'ÉCHELLE VERTICALE D'UN NIVEAU **QU'ON N'A PAS ENCORE CHARGÉ**.
     //
@@ -4007,6 +4216,19 @@ modes = new Modes({
         exageration: exagForZoom(zoom),
       })
     },
+    // ══════════ ELLE REND LA MAIN DÈS QUE LA FENÊTRE EST POSÉE ══════════════
+    //
+    // ⚠️ **C'EST LA DERNIÈRE MARCHE DU PIVOT, ET ELLE ARRIVE EN DERNIER POUR UNE
+    // RAISON** : le §5 de `/threejs-optimisation` — un correctif juste appliqué
+    // dans le mauvais ordre se mesure comme une régression. Tant que l'échelle
+    // verticale, l'altitude de cadrage, la visée et sa réciproque lisaient
+    // `dem`, rendre la main tôt aurait donné un relief au bon palier sous des
+    // repères restés au précédent. Elles lisent toutes la fenêtre maintenant.
+    //
+    // ⚠️ **`demBusy` NE SÉRIALISE PLUS RIEN, ET C'EST VOULU.** Il retombe dès que
+    // la fenêtre est posée, donc un second cran peut partir pendant que le
+    // premier MNT est encore en vol. C'est `_generationMNT` (voir `entrerEnVol`)
+    // qui garantit que le retardataire ne pose rien.
     async loadSurface(lat, lon, zoom) {
       if (demBusy) throw new Error('terrain busy')
       demBusy = true
@@ -4020,6 +4242,19 @@ modes = new Modes({
         // plongée depuis l'orbite (une recherche), l'escalier de zoom, et le
         // clic pour plonger. Dans les trois cas, ce lieu doit atterrir au
         // centre du socle et pas à un sixième de côté (voir `f3CentreSur`).
+        if (volPossible()) {
+          // le socle prend le palier d'arrivée à la résolution DISPONIBLE —
+          // 1 à 2 ms, mesuré (Tâche 6 quinquies) — puis le MNT le rejoint.
+          await entrerEnVol()
+          // ⚠️ **PAS D'`await` ICI, ET C'EST TOUT L'OBJET DE LA TÂCHE.** Le MNT
+          // continue en tâche de fond et enrichit un bloc qui est DÉJÀ à
+          // l'écran. Le `catch` n'est pas décoratif : une promesse rejetée sans
+          // preneur remonterait en `unhandledrejection`.
+          fetchAndBuildDem({ centreSur: { lat, lon }, enVol: true }).catch((err) => {
+            console.warn('[vol MNT] le relief de détail n\'est pas arrivé :', err?.message || err)
+          })
+          return
+        }
         await fetchAndBuildDem({ centreSur: { lat, lon } })
       } catch (err) {
         hideLoading()
@@ -4051,8 +4286,29 @@ modes = new Modes({
     //     En mode continu `f3CentreSur` vient de poser la fenêtre SUR le lieu :
     //     la soustraction rend (0, 0), et la visée reste au milieu du socle —
     //     l'ancien comportement, au bit près, puisque ce mode-là centrait déjà.
+    //
+    // ══════════ ET ELLE PEUT SE PASSER DU MNT — Tâche 6 septies ═════════════
+    //
+    // ⚠️ **LA FENÊTRE D'ABORD, ET CE N'EST PAS UNE SECONDE LOI.**
+    // `latLonVersMondeEmprise` (`geo.js`) est `latLonToWorld` lue sur l'emprise
+    // au lieu du bloc — vérifiée contre elle sur une grille 9 × 9 couvrant toute
+    // l'empreinte, cinq lieux dont l'antiméridien : **écart maximal 8,5e-12
+    // unité de scène**, l'arrondi float64 (test ⑪d). L'emprise, elle, est connue
+    // sans rien charger (`empriseBlocMNT`), et le test ⑩e la verrouille bit à
+    // bit contre `patchLatLonBBox(dem)`.
+    //
+    // ⚠️ **L'EMPRISE 3×3 (`?f3=1`) RESTE SUR LE MNT, ET C'EST VOULU** : là son
+    // champ fait 168 unités quand la géométrie en fait 56, `demSpan` porte ce
+    // facteur trois, et `empriseDuSocle` refuse déjà de fabriquer une fenêtre.
+    // Sans `terrain.fenetreBornee`, cette branche est celle d'avant, au bit près.
     viseeDuLieu(lat, lon) {
-      if (params.source !== 'real' || !dem || !Number.isFinite(lat) || !Number.isFinite(lon)) return null
+      if (params.source !== 'real' || !Number.isFinite(lat) || !Number.isFinite(lon)) return null
+      const f = terrain.fenetreBornee
+      if (f?.emprise) {
+        const w = latLonVersMondeEmprise(f.emprise, lat, lon, TERRAIN_SIZE)
+        return viseeArrivee(w, TERRAIN_SIZE / 2, 2)
+      }
+      if (!dem) return null
       const w = latLonToWorld(dem, lat, lon)
       const fen = fenetreContinueActive() && dem.empriseCote > 1 ? terrain.fenetre : null
       return viseeArrivee({ x: w.x - (fen?.x ?? 0), z: w.z - (fen?.z ?? 0) }, TERRAIN_SIZE / 2, 2)
@@ -4102,8 +4358,14 @@ modes = new Modes({
     // silencieusement. `chargeCartouche` fait déjà exactement cette addition
     // (voir plus haut) ; l'escalier de zoom l'avait oubliée.
     // Hors mode continu, `fenetre` est (0, 0) et l'expression est inchangée.
+    //
+    // ⚠️ **`!dem` A ÉTÉ REMPLACÉ PAR « NI MNT NI FENÊTRE » — Tâche 6 septies.**
+    // Pendant qu'un MNT est EN VOL, `dem` vaut `null` (voir `entrerEnVol`) : la
+    // condition d'avant aurait rendu `null` ici, donc la molette n'aurait plus
+    // rien fait pendant toute la durée du vol — le gel qu'on retire, déplacé
+    // d'un cran. La fenêtre bornée, elle, porte l'emprise du palier COURANT.
     getRefineTarget() {
-      if (params.source !== 'real' || !dem || params.demZoom >= userFineZoom) return null
+      if (params.source !== 'real' || (!dem && !terrain.fenetreBornee) || params.demZoom >= userFineZoom) return null
       const { lat, lon } = viseeAuSol()
       return { lat, lon, zoom: stepZoom(params.demZoom, 1, userFineZoom) }
     },
@@ -4111,7 +4373,8 @@ modes = new Modes({
       // on s'élargit jusqu'au bloc régional z6 ; au-delà c'est la porte orbitale
       // qui s'ouvre — les deux paliers plus larges n'existent plus (Adrien,
       // « Z1 et Z2 ne doivent pas exister », cf. escalier-zoom.js)
-      if (params.source !== 'real' || !dem || params.demZoom <= ZOOM_PALIER_MIN) return null
+      // ⚠️ même correction que `getRefineTarget` : voir la note au-dessus.
+      if (params.source !== 'real' || (!dem && !terrain.fenetreBornee) || params.demZoom <= ZOOM_PALIER_MIN) return null
       const { lat, lon } = viseeAuSol()
       return { lat, lon, zoom: stepZoom(params.demZoom, -1) }
     },

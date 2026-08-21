@@ -134,7 +134,16 @@ test('main.js expose l’échelle verticale du bloc, et elle porte l’exagérat
   assert.ok(i > 0, 'le hook echelleVerticaleBloc a disparu de main.js')
   const bloc = SRC_MAIN.slice(i, i + 400)
   assert.match(bloc, /echelleBloc\(\{/, 'il passe par la loi pure')
-  assert.match(bloc, /extentMeters: dem\.extentMeters/, "l'emprise RÉELLE du bloc")
+  // ⚠️ **LE MOTIF A CHANGÉ, PAS LA PROPRIÉTÉ** (Tâche 6 septies) — et c'est le §3
+  // de `/threejs-optimisation`, « la suite verte verrouille le défaut » : cette
+  // ligne épinglait `dem.extentMeters`, c'est-à-dire l'obligation d'avoir
+  // TÉLÉCHARGÉ un MNT avant de connaître l'échelle du bloc. Elle passe désormais
+  // par `largeurBlocM()`, qui lit la largeur de la fenêtre bornée quand elle
+  // existe et **retombe sur `dem.extentMeters` sinon** — les deux rendent le MÊME
+  // chiffre quand le MNT est là (égalité stricte, `fenetre-branchee.test.js` ⑪c).
+  // Ce que ce test garde est intact : l'emprise RÉELLE du bloc, pas une constante.
+  assert.match(bloc, /extentMeters: largeur\b/, "l'emprise RÉELLE du bloc")
+  assert.match(SRC_MAIN, /function largeurBlocM/, "la largeur du bloc a perdu son écrivain unique")
   // ⚠️ **LE MOTIF A CHANGÉ, PAS LA PROPRIÉTÉ** (Tâche 6 bis). L'exagération est
   // toujours passée au hook ; elle vient désormais du PARTAGE unique
   // (`lireExageration`) au lieu d'une des douze lectures directes de

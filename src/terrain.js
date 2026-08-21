@@ -1560,6 +1560,20 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // même pas.
     this.fenetreBornee = null
     this.fabriqueFenetre = null
+    // ══════════ LE RECADRAGE — Tâche 6 septies ══════════════════════════════
+    //
+    // ⚠️ **SANS LUI, L'EMPRISE ET LA LARGEUR AU SOL DE LA FENÊTRE RESTENT CELLES
+    // DU PREMIER CRAN — MESURÉ, PAS SUPPOSÉ.** `_geometrieRebuild` GARDE la
+    // fenêtre tant que sa résolution est bonne : `fabriqueFenetre`, qui pose
+    // l'emprise, n'est donc appelée qu'une fois. Rejeu du 2026-08-21, trois
+    // crans z12 → z13 → z14 sous `?globe=continu` : `fenetre.largeurM` restait à
+    // **20 451 m** pendant que le bloc en faisait 10 226 puis 5 113.
+    //
+    // Tant que rien ne lisait la fenêtre pour se géoréférencer, c'était muet ;
+    // dès que l'échelle verticale, l'altitude de cadrage et la visée s'y lisent,
+    // c'est un facteur deux par cran. Contrat : `(fenetre, params) => void`,
+    // posé par `main.js` — même raison de cycle d'import que `fabriqueFenetre`.
+    this.recadreFenetre = null
     // ══════════ LA FENÊTRE LIT LE QUADTREE — Tâche 6 quinquies ══════════════
     //
     // ⚠️ **UN CROCHET, PAS UN IMPORT — ET POUR LA MÊME RAISON QUE
@@ -2548,8 +2562,25 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     for (let i = 0; i < count; i++) {
       const h = arr[i * 3 + 1]
       const ny = normals[i * 3 + 1]
+      // ⚠️ **`Math.max(0, …)` — LE MÊME IDIOME QUE LA LIGNE SUIVANTE, ET POUR LA
+      // MÊME RAISON.** `Math.pow(x, 0.85)` rend **NaN** pour `x < 0`, et un NaN
+      // dans l'attribut `color` ne lève rien : il peint un sommet noir ou
+      // transparent selon le pilote. `hn` est dans [0, 1] tant que `minH`/`maxH`
+      // sont les extrema des sommets — mais la branche `empriseCote > 1`
+      // quelques lignes plus haut les REMPLACE par `dem.minM/maxM`, QUANTIFIÉS
+      // au demi-mètre (`quantizeElevation`, dem.js) et qui ne connaissent pas le
+      // grain FBM ajouté aux `y` : un sommet du fond de champ plus un grain
+      // négatif passe alors sous `minH`.
+      //
+      // ⚠️ **HONNÊTEMENT : LE NaN N'A PAS SU ÊTRE REPRODUIT.** Le bilan de la
+      // Tâche 6 ter en annonce trois composantes « des DEUX côtés » ; rejoué le
+      // 2026-08-21 sur SON banc exact (`demBouchon(64, 20)`, res 64, les deux
+      // chemins) et sur une emprise 3×3 quantifiée : **zéro composante NaN sur
+      // 12 675 et 13 446**, `hn` minimal 0,0015. Cette borne n'est donc pas la
+      // correction d'un défaut mesuré, c'est la fermeture d'un chemin
+      // ATTEIGNABLE — et elle est l'identité BIT À BIT partout où `hn ≥ 0`.
       const hn = (h - minH) / span
-      let v = lerp(0.62, 0.95, Math.pow(hn, 0.85))
+      let v = lerp(0.62, 0.95, Math.pow(Math.max(0, hn), 0.85))
       v *= lerp(0.78, 1.0, Math.pow(Math.max(0, ny), 0.6))
       v += tint[i] * 0.05
       colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = v
@@ -2833,6 +2864,12 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const f = this.fenetreBornee
     if (!params?.globeContinu) return null
     if (f && f.n === res && this.mesh.geometry?.attributes?.position?.array === f.geometrie) {
+      // ⚠️ **LA FENÊTRE EST GARDÉE, MAIS PAS SON CADRAGE** — voir
+      // `this.recadreFenetre`. C'est la seule ligne qui fait suivre l'emprise, la
+      // largeur au sol et l'exagération au cran qu'on vient de franchir, et elle
+      // ne touche **pas un seul sommet** (`recadrerFenetre`, fenetre-bornee.js).
+      // Sans elle, un socle sans MNT lirait les tuiles du palier PRÉCÉDENT.
+      this.recadreFenetre?.(f, params)
       return this.mesh.geometry
     }
     if (typeof this.fabriqueFenetre === 'function') {
@@ -2914,7 +2951,21 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       // les champs (masque de mer, analyse, côte) restent ceux du MNT : ils sont
       // cuits sur SON empreinte, et `hauteursDeFlux` remplit exactement la même
       // (voir `empriseDuSocle` dans main.js). Sans MNT il n'y a rien à cuire.
+      // ══════════ ET SANS MNT, ON LES ÉTEINT — Tâche 6 septies ══════════════
+      //
+      // ⚠️ **LES LAISSER ALLUMÉS SERAIT PIRE QUE DE NE PAS LES AVOIR.** Le
+      // masque de mer et le champ d'analyse sont des TEXTURES lues en UV de
+      // bloc : sur le palier suivant, la même UV couvre deux fois moins de sol,
+      // donc le trait de côte se retrouve à mi-chemin de son vrai lieu. Le socle
+      // sort donc sans masque de mer ni analyse pendant que le MNT est en vol —
+      // c'est la décision 13, et c'est ce qu'il faut regarder à l'écran.
       if (this.dem) this._buildFields()
+      else {
+        this.mapUniforms.uSeaMaskOn.value = 0
+        this.mapUniforms.uAnalysisOn.value = 0
+        this._fieldKey = null
+        this.fieldsReady = Promise.resolve(null)
+      }
     } else if (params.source === 'real' && this.dem) {
       const demScale = (this._span() / this.dem.extentMeters) * lireExageration(params)
       // fine-zoom tiles carry NO bathymetry: their sea is a flat plain at

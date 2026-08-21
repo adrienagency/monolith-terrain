@@ -142,7 +142,15 @@ test('①b les treize passent par `lireExageration`, et le compte est celui du p
   // cran (`syncExagToZoom`). Sans elle, le socle garderait l'échelle verticale
   // du premier zoom pour toujours. Le compte de `main.js` passe de 5 à 6, EN
   // PLACE ; les trois autres lignes n'ont toujours pas bougé d'un caractère.
-  const attendu = { 'src/terrain.js': 5, 'src/ocean.js': 2, 'src/gpx.js': 1, 'src/main.js': 6 }
+  // ⚠️ **ET LA TÂCHE 6 septies EN A RETIRÉ UN, PAS AJOUTÉ — C'EST LA SEULE
+  // BAISSE DE CE COMPTE, ET ELLE A SA RAISON.** Les deux lectures nées avec les
+  // Tâches 6 ter et 6 quinquies (`fabriqueFenetre` et `hauteursDeFlux`) posaient
+  // CHACUNE sa liste de réglages de fenêtre ; elles passent désormais toutes
+  // deux par `cadrageFenetre()`, l'écrivain unique, qui lit l'exagération UNE
+  // fois. Deux listes de réglages ne peuvent plus diverger au premier réglage
+  // ajouté. Le compte de `main.js` revient donc de 6 à 5, EN PLACE ; les trois
+  // autres lignes n'ont toujours pas bougé d'un caractère.
+  const attendu = { 'src/terrain.js': 5, 'src/ocean.js': 2, 'src/gpx.js': 1, 'src/main.js': 5 }
   const vus = {}
   for (const f of LES_QUATRE) {
     const code = sansCommentaires(lire(f))
@@ -524,10 +532,16 @@ test('⑧c LES DEUX CHEMINS PEIGNENT LE MÊME BLOC — attribut par attribut', a
   const nb = (PARAMS_TERRAIN.resolution + 1) ** 2
   for (const [nom, k] of [['position', 3], ['normal', 3], ['color', 3], ['uv', 2]]) {
     for (let i = 0; i < nb * k; i++) {
-      // ⚠️ Des composantes de `color` sortent NaN des DEUX côtés sur ce MNT
-      // bouchon (`Math.pow(hn, 0.85)` avec `hn < 0`, `terrain.js:_ecrireRelief`).
-      // C'est un défaut PRÉEXISTANT, mesuré identique sur les deux chemins : on
-      // le constate ici au lieu de le masquer.
+      // ⚠️ **CETTE TOLÉRANCE DÉCRIVAIT UN NaN QUI N'A PAS SU ÊTRE REPRODUIT —
+      // CORRIGÉ EN PLACE, Tâche 6 septies.** Le bilan de la Tâche 6 ter annonçait
+      // « trois composantes de `color` NaN des DEUX côtés » (`Math.pow(hn, 0.85)`
+      // avec `hn < 0`, `terrain.js:_ecrireRelief`). Rejoué le 2026-08-21 sur CE
+      // banc exact : **zéro composante NaN sur 12 675 (production) et 13 446
+      // (fenêtre)**, `hn` minimal 0,0015. Le chemin restait ATTEIGNABLE par la
+      // branche `empriseCote > 1`, dont les extrema sont QUANTIFIÉS ; `terrain.js`
+      // borne donc désormais `hn` à zéro — l'identité bit à bit partout où il
+      // était déjà positif. La branche ci-dessous est devenue morte : on la garde
+      // parce qu'elle ne coûte rien, et ⑫g exige, lui, l'absence totale de NaN.
       if (!Number.isFinite(A[nom][i]) || !Number.isFinite(B[nom][i])) {
         assert.equal(Number.isFinite(A[nom][i]), Number.isFinite(B[nom][i]), `${nom}[${i}] : un NaN d'un seul côté`)
         continue
@@ -901,4 +915,445 @@ test('⑩i LE DRAPEAU EST ÉTEINT, ET IL EXIGE `?globe=continu`', async () => {
   // `?globe=continu` perdrait la bathymétrie sans que personne l'ait demandé.
   const code = sansCommentaires(lire('src/main.js'))
   assert.ok(/if \(socleQuadtreeActif\(\)\) terrain\.hauteursDeFlux\s*=/.test(code), 'le crochet n\'est plus derrière son drapeau')
+})
+
+// ════════════════════════════════════════════════════════════════════════════
+// ⑪ LE BLOC CESSE D'ÊTRE GÉORÉFÉRENCÉ PAR LE MNT — Tâche 6 septies
+// ════════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ **REJOUÉ CONTRE LE DÉPÔT AVANT D'ÊTRE ÉCRIT** (`.banc/rejeu-6septies.mjs`
+// et `-b.mjs`, hors dépôt), et **le rejeu a CONTREDIT le plan** :
+//
+//   · le plan prescrivait `terrain.fenetreBornee.echelleVerticale` comme
+//     « l'échelle RÉELLE de la géométrie affichée ». **Elle ne l'est pas.**
+//     Trois crans z12 → z13 → z14 sous `?globe=continu` SEUL : l'amplitude des
+//     `y` de la nappe vaut **9,1989 → 18,3978 → 36,7955** (×2 par cran, exact),
+//     pendant que `fenetre.echelleVerticale` reste à **0,00766707** — la valeur
+//     du PREMIER cran, pour toujours. `appliquerHauteurs` est le seul écrivain
+//     de ce champ, et il n'est appelé que sur le chemin du quadtree.
+//   · **`recadrerFenetre` ne l'écrit pas non plus** : elle met `largeurM` à
+//     jour (20 451 → 10 226 → 5 113 m, mesuré) et laisse `echelleVerticale`
+//     intacte. Le contrat est en DEUX temps, et le plan n'en lisait qu'un.
+//
+// **Ce que ⑪ verrouille donc, et c'est UNE SEULE LOI** : la grandeur portée par
+// la fenêtre est `largeurM`, et l'échelle s'en dérive avec l'exagération LUE
+// VIVANTE (`echelleBloc`) — exactement la formule qu'`appliquerHauteurs` et
+// `_makeDemSampler` posent tous les deux. Les deux régimes tombent alors sur le
+// même chiffre, et le socle SANS MNT aussi.
+
+const LIEU_ALPES = { lat: 45.8326, lon: 6.8652 }
+
+/** Le `Terrain` de `main.js`, avec ses DEUX crochets de fenêtre. */
+async function terrainRecadrable ({ avecMNT, avecFlux }) {
+  const { Terrain } = await import('../src/terrain.js')
+  const { construireFenetre, recadrerFenetre, majHauteurs } = await import('../src/monde/fenetre-bornee.js')
+  const { empriseBlocMNT } = await import('../src/geo.js')
+  const { empriseBlocM } = await import('../src/loi-altitude.js')
+  const { tuilesEmprise } = await import('../src/monde/flux-terrain.js')
+
+  const p = {
+    ...PARAMS_TERRAIN, globeContinu: true,
+    demLat: LIEU_ALPES.lat, demLon: LIEU_ALPES.lon, demZoom: 12,
+    amplitude: 6, scale: 0.05, octaves: 4, lacunarity: 2.1, gain: 0.5, warp: 2, detailScale: 0.5,
+  }
+  const t = new Terrain(p)
+  const emprise = () => empriseBlocMNT({ lat: p.demLat, lon: p.demLon, zoom: p.demZoom })
+  // le MNT de `loadDem`, réduit à ce que le géoréférencement lui demande
+  const poseMNT = () => {
+    if (!avecMNT) return
+    const size = 768
+    const extentMeters = empriseBlocM({ zoom: p.demZoom, lat: p.demLat })
+    const d = demBouchon(size, extentMeters / size)
+    const n = 2 ** p.demZoom
+    const la = (p.demLat * Math.PI) / 180
+    d.zoom = p.demZoom
+    d.originTileX = Math.floor(((p.demLon + 180) / 360) * n) - 1
+    d.originTileY = Math.floor(((1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2) * n) - 1
+    d.tilePx = 256
+    d.extentMeters = extentMeters
+    t.setDem(d)
+  }
+  const opts = () => ({
+    emprise: emprise(),
+    largeurM: t.dem?.extentMeters || null,
+    exageration: p.demExaggeration,
+  })
+  t.fabriqueFenetre = (n) => construireFenetre({ ...opts(), n, rayonCoin: 0 })
+  t.recadreFenetre = (f) => recadrerFenetre(f, opts())
+  if (avecFlux) {
+    t.hauteursDeFlux = (f) => {
+      const liste = tuilesEmprise(f.emprise, p.demZoom)
+      majHauteurs(f, fluxBouchon(liste.map(({ z, x, y }) => tuileBouchon(z, x, y))))
+      return { remplis: f.remplis, manquants: f.manquants, zoom: p.demZoom }
+    }
+  }
+  const cran = (zoom) => { p.demZoom = zoom; poseMNT(); t.rebuild(p) }
+  return { t, p, cran, emprise }
+}
+
+/** L'amplitude des `y` de la NAPPE — l'échelle réellement dessinée. */
+function amplitudeNappe (t, res) {
+  const pos = t.mesh.geometry.attributes.position.array
+  let min = Infinity
+  let max = -Infinity
+  for (let i = 0; i < (res + 1) ** 2; i++) {
+    const y = pos[i * 3 + 1]
+    if (y < min) min = y
+    if (y > max) max = y
+  }
+  return max - min
+}
+
+test('⑪a TÉMOIN — `fenetre.echelleVerticale` NE SUIT PAS le cran, et le chiffre est celui du rejeu', async () => {
+  const { t, cran, p } = await terrainRecadrable({ avecMNT: true, avecFlux: false })
+  cran(12)
+  const e0 = t.fenetreBornee.echelleVerticale
+  const a12 = amplitudeNappe(t, p.resolution)
+  cran(13)
+  cran(14)
+  // ⚠️ Ce test CONSTATE le défaut au lieu de le supposer : c'est lui qui
+  // interdit de « corriger » la Tâche 6 septies en lisant `echelleVerticale`.
+  assert.equal(t.fenetreBornee.echelleVerticale, e0,
+    '`echelleVerticale` suit desormais le cran : re-mesurer avant de s\'en servir')
+  // pendant que la nappe, elle, a bien quadruplé. ⚠️ **3,9337 et pas 4,0000, et
+  // l'écart est EXPLIQUÉ, pas toléré** : le grain FBM que `_ecrireRelief` ajoute
+  // aux `y` après l'échelle ne se divise pas par deux avec le bloc. C'est le
+  // résidu du grain — mesuré au rejeu, pas une marge de confort.
+  const a14 = amplitudeNappe(t, p.resolution)
+  const r = a14 / a12
+  assert.ok(r > 3.9 && r < 4.01, `la nappe n'a pas quadruple sur deux crans (${r.toFixed(4)})`)
+})
+
+test('⑪b LE RECADRAGE A LIEU À CHAQUE CRAN — l\'emprise et la largeur suivent SANS le quadtree', async () => {
+  const { empriseBlocMNT } = await import('../src/geo.js')
+  const { t, p, cran } = await terrainRecadrable({ avecMNT: false, avecFlux: false })
+  cran(12)
+  const f = t.fenetreBornee
+  const largeur12 = f.largeurM
+  for (const zoom of [13, 14]) {
+    cran(zoom)
+    assert.equal(t.fenetreBornee, f, 'la fenetre a ete REMPLACEE : le cran reconstruit a nouveau')
+    const attendue = empriseBlocMNT({ lat: p.demLat, lon: p.demLon, zoom })
+    assert.equal(f.emprise.ouest, attendue.ouest, `l'emprise est restee au cran precedent (z${zoom})`)
+    assert.equal(f.emprise.nord, attendue.nord, `l'emprise est restee au cran precedent (z${zoom})`)
+  }
+  // la largeur au sol a été divisée par quatre — à la latitude du centre près,
+  // qui bouge avec le calage sur la grille de tuiles (rejeu Q6 : ±0,14 %).
+  const r = largeur12 / f.largeurM
+  assert.ok(Math.abs(r - 4) < 4 * 0.005, `la largeur au sol ne suit pas le cran (rapport ${r.toFixed(5)})`)
+})
+
+test('⑪c UNE SEULE LOI — l\'échelle se dérive de `largeurM`, et les deux régimes tombent dessus', async () => {
+  const { echelleBloc } = await import('../src/loi-altitude.js')
+  const { TERRAIN_SIZE } = await import('../src/terrain.js')
+
+  // ① avec MNT (`?globe=continu` seul) : la loi de la fenêtre EST celle du MNT
+  const a = await terrainRecadrable({ avecMNT: true, avecFlux: false })
+  for (const zoom of [12, 13, 14]) {
+    a.cran(zoom)
+    const f = a.t.fenetreBornee
+    const parLaFenetre = echelleBloc({ extentMeters: f.largeurM, span: TERRAIN_SIZE, exageration: a.p.demExaggeration })
+    const parLeMNT = echelleBloc({ extentMeters: a.t.dem.extentMeters, span: TERRAIN_SIZE, exageration: a.p.demExaggeration })
+    assert.equal(parLaFenetre, parLeMNT, `z${zoom} : la fenetre et le MNT ne rendent plus la meme echelle`)
+  }
+
+  // ② sans MNT, sur le quadtree : la loi rend ce qu'`appliquerHauteurs` a écrit
+  const b = await terrainRecadrable({ avecMNT: false, avecFlux: true })
+  for (const zoom of [12, 13, 14]) {
+    b.cran(zoom)
+    const f = b.t.fenetreBornee
+    assert.ok(f.remplis > 0, `z${zoom} : le quadtree bouchon n'a rien rempli`)
+    const parLaFenetre = echelleBloc({ extentMeters: f.largeurM, span: TERRAIN_SIZE, exageration: b.p.demExaggeration })
+    assert.ok(Math.abs(parLaFenetre / f.echelleVerticale - 1) < 1e-12,
+      `z${zoom} : la loi (${parLaFenetre}) et appliquerHauteurs (${f.echelleVerticale}) divergent`)
+  }
+})
+
+test('⑪d LA VISÉE SE LIT SUR L\'EMPRISE — et elle rend `latLonToWorld` au bit de flottant près', async () => {
+  const geo = await import('../src/geo.js')
+  const { latLonVersMondeEmprise, latLonToWorld, empriseBlocMNT } = geo
+  assert.equal(typeof latLonVersMondeEmprise, 'function', '`geo.js` n\'exporte pas la conversion depuis l\'emprise')
+  const { patchLatLonBBox } = await import('../src/coast-mask.js')
+  const lieux = [
+    ['Chamonix', 45.8326, 6.8652, 12],
+    ['La Reunion', -21.1151, 55.5364, 12],
+    ['Everest', 27.9881, 86.925, 13],
+    ['Nice', 43.7102, 7.262, 11],
+    ['antimeridien', -16.5, 179.94, 11],
+  ]
+  for (const [nom, lat, lon, zoom] of lieux) {
+    const n = 2 ** zoom
+    const la = (lat * Math.PI) / 180
+    const dem = {
+      zoom, size: 768, tilePx: 256,
+      originTileX: Math.floor(((lon + 180) / 360) * n) - 1,
+      originTileY: Math.floor(((1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2) * n) - 1,
+    }
+    const b = patchLatLonBBox(dem)
+    const emprise = { ouest: b.west, sud: b.south, est: b.east, nord: b.north }
+    // ① l'emprise SANS MNT est la même — c'est déjà ⑩e, on s'y adosse
+    const e = empriseBlocMNT({ lat, lon, zoom })
+    assert.equal(e.ouest, emprise.ouest, `${nom} : les deux emprises ont diverge`)
+    // ② et la conversion balayée sur TOUTE l'empreinte, pas au seul centre
+    let pire = 0
+    for (let i = 0; i <= 8; i++) {
+      for (let j = 0; j <= 8; j++) {
+        const la2 = emprise.sud + ((emprise.nord - emprise.sud) * i) / 8
+        let lo2 = emprise.ouest + (((emprise.est - emprise.ouest + 360) % 360) * j) / 8
+        if (lo2 > 180) lo2 -= 360
+        const w1 = latLonToWorld(dem, la2, lo2)
+        const w2 = latLonVersMondeEmprise(emprise, la2, lo2)
+        pire = Math.max(pire, Math.abs(w1.x - w2.x), Math.abs(w1.z - w2.z))
+      }
+    }
+    // rejeu : 1,2e-12 à 8,5e-12 unité sur quatre lieux — c'est l'arrondi float64
+    assert.ok(pire < 1e-9, `${nom} : ecart max ${pire.toExponential(3)} unite, au-dela de l'arrondi`)
+  }
+})
+
+test('⑪e `main.js` — les grandeurs de cadrage LISENT LA FENÊTRE, pas `dem`', () => {
+  const code = sansCommentaires(lire('src/main.js'))
+  // ① l'échelle verticale et l'altitude de cadrage se dérivent d'UNE largeur
+  assert.ok(/function largeurBlocM/.test(code), '`largeurBlocM` a disparu : la loi n\'a plus d\'ecrivain unique')
+  const i = code.indexOf('function altitudeCadrageM')
+  assert.ok(i > 0)
+  assert.ok(/largeurBlocM\(\)/.test(code.slice(i, i + 700)), '`altitudeCadrageM` ne passe plus par la largeur du bloc')
+  const j = code.indexOf('echelleVerticaleBloc()')
+  assert.ok(j > 0)
+  assert.ok(/largeurBlocM\(\)/.test(code.slice(j, j + 400)), '`echelleVerticaleBloc` ne passe plus par la largeur du bloc')
+  // ⚠️ **ET NI L'UNE NI L'AUTRE NE LIT PLUS `dem.extentMeters`** — c'est ça,
+  // « cesser d'être géoréférencé par le MNT ». Il en reste cinq lectures dans
+  // `main.js` (le plancher du mode région, le cartouche, la note de relief,
+  // l'échelle de nuit, les bateaux) : elles ne décident **pas** du cadrage de la
+  // caméra, et les migrer est le reste de la Tâche 6 septies, pas celle-ci.
+  assert.equal(/dem\.extentMeters/.test(code.slice(i, i + 700)), false, '`altitudeCadrageM` lit encore le MNT')
+  assert.equal(/dem\.extentMeters/.test(code.slice(j, j + 400)), false, '`echelleVerticaleBloc` lit encore le MNT')
+  // et l'unique lecteur de `dem.extentMeters` pour cette loi-là est `largeurBlocM`
+  const k = code.indexOf('function largeurBlocM')
+  assert.ok(/dem\?\.extentMeters/.test(code.slice(k, k + 300)), '`largeurBlocM` ne retombe plus sur le MNT quand il est là')
+  // ② la visée passe par l'emprise de la fenêtre quand elle existe
+  assert.ok(/latLonVersMondeEmprise\(/.test(code), '`viseeDuLieu` ne lit plus l\'emprise de la fenetre')
+  // ③ et le recadrage est branché sur le rebuild, pas seulement sur le flux
+  assert.ok(/terrain\.recadreFenetre\s*=/.test(code), '`main.js` ne pose plus le crochet de recadrage')
+  const t = sansCommentaires(lire('src/terrain.js'))
+  assert.ok(/this\.recadreFenetre\?\.\(/.test(t), '`_geometrieRebuild` ne recadre plus la fenetre qu\'il conserve')
+})
+
+test('⑪f MUTATION — retirer le recadrage du rebuild tue ⑪b', async () => {
+  const { empriseBlocMNT } = await import('../src/geo.js')
+  const { t, p, cran } = await terrainRecadrable({ avecMNT: false, avecFlux: false })
+  cran(12)
+  const gele = { ...t.fenetreBornee.emprise }
+  t.recadreFenetre = null // la mutation : le rebuild garde la fenêtre telle quelle
+  cran(13)
+  const attendue = empriseBlocMNT({ lat: p.demLat, lon: p.demLon, zoom: 13 })
+  assert.equal(t.fenetreBornee.emprise.ouest, gele.ouest, 'l\'emprise a suivi sans le crochet : la mutation ne mord pas')
+  assert.notEqual(attendue.ouest, gele.ouest, 'le cran ne change pas l\'emprise : le banc ne prouve rien')
+})
+
+// ════════════════════════════════════════════════════════════════════════════
+// ⑫ LE VOL DU MNT — Tâche 6 septies, la moitié qui retire vraiment l'attente
+// ════════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ **CE QUE MESURE LA TÂCHE, ET IL FAUT LIRE LES DEUX CHIFFRES ENSEMBLE.**
+// Banc navigateur, descente z5 → z13 au Mont-Blanc (huit crans par
+// `modes._refine()`, c'est-à-dire le chemin de la molette), sonde posée à CHAQUE
+// `requestAnimationFrame`, réseau de cette machine :
+//
+//   | | avant | après |
+//   |---|---|---|
+//   | entrée morte | **25,41 s** et **25,50 s** | **0,21 / 0,09 / 0,16 s** |
+//   | fraction du temps | 88,3 % et 83,1 % | **5,1 / 2,4 / 4,0 %** |
+//   | dont rideau | 25,41 s et 25,50 s | **0 s** |
+//   | par cran | 992 à 5 817 ms | **124 à 270 ms** |
+//
+// ⚠️ **ET LA DURÉE TOTALE DU BANC TOMBE DE 28,8 s À 4,0 s**, donc les deux
+// colonnes ne couvrent PAS la même fenêtre de temps : ce qui se compare est
+// l'attente absolue (25,4 s contre 0,16 s sur les mêmes huit crans), et la
+// fraction, pas le nombre d'images.
+
+test('⑫a LA RÉCIPROQUE — `mondeVersLatLonEmprise` rend `worldToLatLon` au bit de flottant près', async () => {
+  const { mondeVersLatLonEmprise, worldToLatLon, latLonVersMondeEmprise } = await import('../src/geo.js')
+  const { patchLatLonBBox } = await import('../src/coast-mask.js')
+  assert.equal(typeof mondeVersLatLonEmprise, 'function', '`geo.js` n\'exporte pas la réciproque')
+  const lieux = [
+    ['Chamonix', 45.8326, 6.8652, 12],
+    ['La Reunion', -21.1151, 55.5364, 12],
+    ['Everest', 27.9881, 86.925, 13],
+    ['Reykjavik', 64.1466, -21.9426, 9],
+  ]
+  for (const [nom, lat, lon, zoom] of lieux) {
+    const n = 2 ** zoom
+    const la = (lat * Math.PI) / 180
+    const dem = {
+      zoom, size: 768, tilePx: 256,
+      originTileX: Math.floor(((lon + 180) / 360) * n) - 1,
+      originTileY: Math.floor(((1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2) * n) - 1,
+    }
+    const b = patchLatLonBBox(dem)
+    const emprise = { ouest: b.west, sud: b.south, est: b.east, nord: b.north }
+    let pireDeg = 0
+    let pireBoucle = 0
+    for (let i = -4; i <= 4; i++) {
+      for (let j = -4; j <= 4; j++) {
+        const X = (i / 4) * 28
+        const Z = (j / 4) * 28
+        const a = worldToLatLon(dem, X, Z)
+        const c = mondeVersLatLonEmprise(emprise, X, Z)
+        pireDeg = Math.max(pireDeg, Math.abs(c.lat - a.lat), Math.abs(c.lon - a.lon))
+        // ② et l'aller-retour est l'identité — sinon l'escalier de zoom dérive
+        const w = latLonVersMondeEmprise(emprise, c.lat, c.lon)
+        pireBoucle = Math.max(pireBoucle, Math.abs(w.x - X), Math.abs(w.z - Z))
+      }
+    }
+    // relevé in situ (navigateur, MNT réel, La Réunion z13) : 7,1e-15 à 8,5e-14 °
+    assert.ok(pireDeg < 1e-9, `${nom} : ecart max ${pireDeg.toExponential(3)} °, au-dela de l'arrondi`)
+    assert.ok(pireBoucle < 1e-9, `${nom} : l'aller-retour derive de ${pireBoucle.toExponential(3)} unite`)
+  }
+})
+
+test('⑫b SANS MNT, LE SOCLE N\'AFFICHE NI MASQUE DE MER NI ANALYSE — et c\'est voulu', async () => {
+  // ⚠️ **LES LAISSER ALLUMÉS SERAIT PIRE QUE DE NE PAS LES AVOIR** : ce sont des
+  // TEXTURES lues en UV de bloc, et sur le palier suivant la même UV couvre deux
+  // fois moins de sol — le trait de côte se retrouverait à mi-chemin de son vrai
+  // lieu, sans une erreur. C'est ce que le vol du MNT rend visible, et c'est la
+  // décision 13 : grossier d'abord, net ensuite.
+  const { t, p } = await terrainSurFlux(-21.1151, 55.5364, 12)
+  // on ALLUME les deux à la main, comme le ferait un MNT du palier précédent
+  t.mapUniforms.uSeaMaskOn.value = 1
+  t.mapUniforms.uAnalysisOn.value = 1
+  t.rebuild(p)
+  assert.equal(t.dem, null, 'ce banc ne doit charger AUCUN MNT')
+  assert.ok(t.fenetreBornee?.remplis > 0, 'le quadtree bouchon n\'a rien rempli : le banc ne prouve rien')
+  assert.equal(t.mapUniforms.uSeaMaskOn.value, 0, 'le masque de mer du palier precedent survit au vol')
+  assert.equal(t.mapUniforms.uAnalysisOn.value, 0, 'le champ d\'analyse du palier precedent survit au vol')
+  // et la ligne d'eau, elle, vient bien de la fenêtre (elle ne peut pas venir
+  // d'un `dem.meanM` qui n'existe pas)
+  assert.ok(Number.isFinite(t.mapUniforms.uSeaY.value) && t.mapUniforms.uSeaY.value > -9999,
+    'la ligne d\'eau est retombee sur le cas « pas de source »')
+})
+
+test('⑫c `main.js` — `loadSurface` N\'ATTEND PLUS le MNT, et le MNT continue derrière', () => {
+  const code = sansCommentaires(lire('src/main.js'))
+  // ① le vol existe, et il lâche le MNT du palier qu'on quitte
+  const i = code.indexOf('function entrerEnVol')
+  assert.ok(i > 0, '`entrerEnVol` a disparu')
+  const vol = code.slice(i, i + 900)
+  assert.ok(/_generationMNT\+\+/.test(vol), '`entrerEnVol` n\'incremente plus le numero de vol')
+  assert.ok(/\bdem = null\b/.test(vol), '`entrerEnVol` garde le MNT du palier precedent : la carte serait fausse')
+  assert.ok(/terrain\.setDem\(null\)/.test(vol), '`terrain` garde le MNT du palier precedent')
+  assert.ok(/sansRideau: true/.test(vol), 'le vol leve le rideau par-dessus une application vivante')
+  assert.ok(/blockGrid\?\.sync\(/.test(vol), 'les dalles voisines restent au palier precedent : la jointure serait coupee')
+  // ② et `loadSurface` prend cette branche SANS `await` sur le MNT
+  const j = code.indexOf('async loadSurface(')
+  assert.ok(j > 0)
+  const ls = code.slice(j, j + 1200)
+  assert.ok(/await entrerEnVol\(\)/.test(ls), '`loadSurface` n\'attend plus que la fenetre soit posee')
+  assert.ok(/\n\s*fetchAndBuildDem\(\{ centreSur: \{ lat, lon \}, enVol: true \}\)\.catch\(/.test(ls),
+    'le MNT est de nouveau ATTENDU — ou bien sa promesse n\'a plus de preneur')
+  // ③ la supersession, aux DEUX points d'attente
+  const k = code.indexOf('async function fetchAndBuildDem')
+  const fb = code.slice(k)
+  const perimes = fb.match(/if \(perime\(\)\) return/g) || []
+  assert.equal(perimes.length, 2, `${perimes.length} point(s) de supersession au lieu de 2 : deux crans rapides ecriraient dans le desordre`)
+  assert.ok(/const gen = _generationMNT/.test(fb), 'le numero de vol n\'est plus capture avant le premier await')
+})
+
+test('⑫d LE VOL EXIGE LE SOCLE QUADTREE, ET SON DRAPEAU EST ÉTEINT', async () => {
+  const { FLAGS, socleQuadtreeActif } = await import('../src/flags.js')
+  // ⚠️ **SANS LE QUADTREE, UN BLOC SANS MNT SE PEINDRAIT AU RELIEF PROCÉDURAL**
+  // — du bruit qui n'a rien à voir avec le lieu (c'est le témoin ⑩a). Le vol ne
+  // part donc pas sous `?globe=continu` seul, et le drapeau du quadtree reste
+  // fermé tant que la mer y est plate (Tâche 6 sexies).
+  assert.equal(FLAGS.socleQuadtree, false)
+  assert.equal(socleQuadtreeActif(), false)
+  const code = sansCommentaires(lire('src/main.js'))
+  assert.ok(/const VOL_SANS_ATTENTE = socleQuadtreeActif\(\)/.test(code), 'le vol ne depend plus du drapeau du socle quadtree')
+  const i = code.indexOf('function volPossible')
+  assert.ok(i > 0, '`volPossible` a disparu')
+  const vp = code.slice(i, i + 300)
+  assert.ok(/VOL_SANS_ATTENTE/.test(vp), 'le vol a perdu sa garde de drapeau')
+  assert.ok(/terrain\.fenetreBornee/.test(vp), 'le vol ne verifie plus qu\'une fenetre porte le maillage')
+  // ⚠️ l'emprise 3×3 est hors périmètre : son champ fait 168 unités quand la
+  // géométrie en fait 56, et `empriseDuSocle` refuse déjà d'y fabriquer une
+  // fenêtre. On l'écrit plutôt que de le sous-entendre (comme la 6 quinquies).
+  assert.ok(/!fenetreContinueActive\(\)/.test(vp), 'le vol accepte l\'emprise 3x3, qui n\'a pas de fenetre a remplir')
+})
+
+test('⑫e L\'ESCALIER DE ZOOM CRANTE ENCORE PENDANT LE VOL — sinon la molette ne fait plus rien', () => {
+  // ⚠️ **LE PLAN NE LISTAIT NI `viseeAuSol` NI CES DEUX PORTES**, et sans elles
+  // tout le reste ne sert à rien : pendant le vol `dem` vaut `null`, donc
+  // `getRefineTarget` aurait rendu `null` et le geste aurait été refusé en
+  // silence — le gel qu'on retire, déplacé d'un cran.
+  const code = sansCommentaires(lire('src/main.js'))
+  for (const porte of ['getRefineTarget', 'getCoarsenTarget']) {
+    const i = code.indexOf(porte + '()')
+    assert.ok(i > 0, `${porte} a disparu`)
+    const bloc = code.slice(i, i + 320)
+    assert.ok(/\(!dem && !terrain\.fenetreBornee\)/.test(bloc), `${porte} refuse encore de cranter sans MNT`)
+  }
+  const j = code.indexOf('function viseeAuSol')
+  assert.ok(j > 0, '`viseeAuSol` a disparu')
+  assert.ok(/mondeVersLatLonEmprise\(/.test(code.slice(j, j + 500)), '`viseeAuSol` lit encore le MNT en priorite')
+})
+
+test('⑫f LE RIDEAU NE SE LÈVE PAS SUR UNE APPLICATION VIVANTE', () => {
+  // ⚠️ **C'EST LA MOITIÉ DE LA TÂCHE 2 QUI DEVENAIT BLOQUANTE ICI** — le plan le
+  // dit mot pour mot : « le rideau reviendrait par-dessus une application
+  // vivante ». La carte `#loading` n'est PAS supprimée pour autant : elle garde
+  // le PREMIER chargement, celui où il n'y a encore rien à regarder. La Tâche 2
+  // reste donc à faire, et ce test dit exactement où on en est.
+  const code = sansCommentaires(lire('src/main.js'))
+  assert.ok(/function regenerateTerrain\(\{ sansRideau = false \} = \{\}\)/.test(code),
+    '`regenerateTerrain` n\'a plus son mode sans rideau')
+  assert.ok(/if \(!sansRideau\) showLoading\(\)/.test(code), 'le rideau se leve de nouveau sans condition')
+  assert.ok(/if \(!sansRideau\) hideLoading\(\)/.test(code), 'le rideau se baisse de nouveau sans condition')
+  assert.ok(/if \(!enVol\) showLoading\(\)/.test(code), '`fetchAndBuildDem` leve de nouveau le rideau en vol')
+  // et le rideau existe TOUJOURS pour le premier chargement — la Tâche 2 n'est
+  // pas faite, et prétendre le contraire serait le pire des deux
+  assert.ok(/showLoading\(\)/.test(code), 'la carte `#loading` a disparu : c\'est la Tache 2, pas celle-ci')
+})
+
+test('⑫g AUCUNE COMPOSANTE DE COULEUR N\'EST NaN — sur les DEUX chemins et sur l\'emprise 3×3', async () => {
+  // ⚠️ **CE TEST DIT CE QUE ⑧c NE POUVAIT PAS DIRE.** ⑧c compare les deux
+  // chemins : il passe si les deux rendent NaN au même endroit. Celui-ci exige
+  // qu'il n'y en ait AUCUN. Rejoué avant d'être écrit : sur le banc de ⑧c il
+  // passait DÉJÀ (zéro NaN sur 12 675 et 13 446 composantes) — le NaN annoncé
+  // par la Tâche 6 ter n'a pas su être reproduit, et c'est écrit là-bas aussi.
+  // Ce qu'il verrouille, c'est la borne `Math.max(0, hn)` de `_ecrireRelief`,
+  // qui ferme le chemin ATTEIGNABLE par la branche `empriseCote > 1`.
+  const { Terrain } = await import('../src/terrain.js')
+  const nbNaN = (t) => {
+    const c = t.mesh.geometry.attributes.color.array
+    let n = 0
+    for (let i = 0; i < c.length; i++) if (!Number.isFinite(c[i])) n++
+    return n
+  }
+  // ① les deux chemins de ⑧c
+  for (const continu of [false, true]) {
+    const { t, p } = await terrainDeBanc(continu)
+    t.setDem(demBouchon(64, 20))
+    t.rebuild(p)
+    assert.equal(nbNaN(t), 0, `${continu ? 'fenetre' : 'production'} : des couleurs NaN`)
+  }
+  // ② et l'emprise 3×3, dont les extrema viennent d'un `dem.minM/maxM`
+  //    QUANTIFIÉ au demi-mètre — c'est la seule branche où `hn` peut être < 0.
+  const p3 = {
+    ...PARAMS_TERRAIN, detailScale: 0.5,
+    amplitude: 6, scale: 0.05, octaves: 4, lacunarity: 2.1, gain: 0.5, warp: 2,
+  }
+  const d = demBouchon(192, 20)
+  d.empriseCote = 3
+  // la quantification de `dem.js`, et un plancher DÉLIBÉRÉMENT relevé d'un mètre
+  // au-dessus du vrai minimum : c'est exactement l'état que produit un grain FBM
+  // qui descend sous des extrema arrondis.
+  d.minM = Math.round((d.minM + 1) * 2) / 2
+  d.maxM = Math.round(d.maxM * 2) / 2
+  const t3 = new Terrain(p3)
+  t3.setDem(d)
+  t3.rebuild(p3)
+  assert.equal(nbNaN(t3), 0, 'emprise 3x3 a extrema quantifies : des couleurs NaN')
+  // et la borne est bien dans le code, pas seulement dans le résultat
+  const src = sansCommentaires(lire('src/terrain.js'))
+  assert.ok(/Math\.pow\(Math\.max\(0, hn\), 0\.85\)/.test(src), 'la borne de `hn` a disparu de `_ecrireRelief`')
 })
