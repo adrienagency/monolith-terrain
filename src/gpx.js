@@ -16,6 +16,7 @@ import { loadLayerForBounds, patchBounds } from './map/geo-data.js'
 import { makeLabelTexture, labelPlate, labelPlateInk, labelFontReady } from './map/text-label.js'
 import { computeArchSpecs, buildArchMesh, disposeArchGroup } from './arch.js'
 import { animationsActives } from './animations.js'
+import { lireExageration } from './monde/exageration-continue.js' // un seul partage, douze lecteurs
 import { survolVientDeLaSouris } from './clic-ruban.js'
 
 const MAX_POINTS = 2400 // decimation budget — hover & profile stay O(small)
@@ -1524,7 +1525,7 @@ export class GpxLayer {
   // altitudes drapées sur le relief d'avant.
   _elevations() {
     const dem = this.getDem()
-    const exag = this.params.demExaggeration
+    const exag = lireExageration(this.params)
     if (this.track && this._elesCache && this._elesTrack === this.track
         && this._elesDem === dem && this._elesExag === exag) return this._elesCache
     const mPerUnit = dem ? surfaceMetersPerUnit(dem) / exag : 1

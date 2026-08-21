@@ -1530,7 +1530,73 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
 - [x] **Étape 5** — mutation : inverser l'enroulement de la dalle doit tuer le test d'orientation. ✅ **Elle tue la FERMETURE** (`Ā` voit la dalle retournée). ⚠️ **Et la mutation jumelle que ce plan proposait — « un anneau décalé d'un sommet » — NE MORD PAS**, mesuré : `‖Ā‖` relative 1,61e-19. Voir le bilan : cette propriété-là est tenue par la construction, pas par l'audit.
 - [x] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
-### Tâche 6 bis : LE BRANCHEMENT ⚠️ C'EST ELLE QUI SUPPRIME LES CRANS À L'ÉCRAN
+### Tâche 6 bis : LE BRANCHEMENT ⚠️ **DÉCOUPÉE EN DEUX LE 2026-08-21 — 6 bis A FAITE, LA SUITE ÉCRITE EN 6 ter ET 6 quater**
+
+> **Bilan mesuré de la 6 bis A — LE PARTAGE D'EXAGÉRATION** (banc `test/fenetre-branchee.test.js`, 20 tests ; `npm test` **3 264 verts**) :
+> · **LES DOUZE LECTEURS SONT BRANCHÉS, ET UN TEST ÉCHOUE SI UN SEUL REVIENT EN ARRIÈRE.** `terrain.js` ×5 (`_makeDemSampler`, `sampleChamp`, `_makeGridSampler`, la plage de palette, `uSeaY`), `ocean.js` ×2, `gpx.js` (`_elevations`), `main.js` ×4 (`socleEmprise`, `altitudeCadrageM`, `echelleVerticaleBloc`, `getEchelle`) passent tous par `lireExageration(params)`. Le détecteur **dépouille les commentaires** — sans quoi il aurait compté comme lecteurs les phrases qui expliquent qu'on ne lit plus, et on aurait fini par supprimer des commentaires pour faire passer un test. ⚠️ **Il a mordu une TREIZIÈME fois, sur mon propre code** : l'initialisation du partage lisait `params.demExaggeration` ; elle lit `EXAG_BASE`, et l'accord des deux valeurs (2,8) est lui-même une assertion.
+> · ⚠️ **`params.demExaggeration` EST DEVENU UN ACCESSEUR, PAS UN CHAMP** — un seul emplacement de stockage, `exagPartage.valeur`. Ce n'est pas de l'élégance : les écrivains sont **au moins cinq et dispersés** (`syncExagToZoom`, le curseur `ui/create-panel.js:419`, les `Object.assign(params, look)` des gabarits, la restauration de lien partagé, `SHIBU_START`). Une fonction de synchronisation « à appeler partout où il faut » aurait rendu exactement la classe de défaut qu'on ferme.
+> · ⚠️ **UN CYCLE D'IMPORT A OBLIGÉ À DÉMÉNAGER LA COURBE, ET IL NE SE SERAIT VU QU'EN PRODUCTION.** `fenetre-bornee.js` importe `TERRAIN_SIZE` de `terrain.js` ; brancher les cinq lecteurs de `terrain.js` dessus fermait `terrain.js → fenetre-bornee.js → terrain.js`, et `export const COTE_MONDE = TERRAIN_SIZE` se serait évalué en zone morte — **`ReferenceError` au chargement**. Les 29 tests de la Tâche 6 importent `fenetre-bornee.js` en PREMIER : ils ne l'auraient jamais vu, et **aucun test ne charge `main.js`**. Les §6, §7 et §8 vivent donc dans `src/monde/exageration-continue.js`, **au caractère près**, ré-exportés par `fenetre-bornee.js` : ses 29 tests passent sans qu'une ligne y change, et un test exige que le nouveau module **n'importe rien du tout**.
+> · ⚠️ **LE POINT FIXE, TROUVÉ AVANT D'ÊTRE ÉCRIT.** La première rédaction pilotait la courbe par `altitudeCadrageM()`, qui **divise par l'exagération** : `exag → altitude → zoom → exag` est une boucle fermée dont le gain vaut **1,44 entre z4 et z5** (mesuré sur la vraie courbe : `courbe'(z) / (ln2 · exag)`), donc elle **DIVERGE**. Le pilote retenu est donc **horizontal** — la largeur de sol visible, que l'exagération verticale ne touche pas. Le test le garde des deux côtés : la fonction n'a aucune entrée d'exagération, et l'itération de la boucle qu'on évite s'écarte pour de vrai.
+> · **`zoomCadrage` rend EXACTEMENT le zoom du bloc à la pose d'arrivée**, à 1e-12, pour z de 3 à 15 et cinq latitudes. La dérivation fait tomber `tan(fov/2)` et `span` d'eux-mêmes : `zoomCadrage = log2(mpp0 · cos(lat) · 768 · dRef / (d · extentMeters))`. **Ce n'est donc pas une constante posée à l'instinct** (règle 1 du §0) : c'est une identité.
+> · **Décision 14, mesure de contrôle refaite : ×2,0000 au cran z4 → z5, ×1 à 1e-12 après.** Et le plus gros saut d'une image à l'autre sur la descente z4 → z5 (270 images) vaut **×1,00466** — non nul, sinon la courbe serait plate.
+> · **Coût du branchement, par image : 0,88 ns par lecture** (médiane de 5 × 2e7 appels, `lireExageration` contre l'accès direct). Deux lectures par image sur le chemin chaud (`altitudeCadrageM`, `getEchelle`) → **0,0000018 ms/image**. ⚠️ **Banc node, pas navigateur, et les deux mesures sont enveloppées dans une fonction fléchée qui pèse 11,85 ns à elle seule** : c'est l'ÉCART qui vaut, pas les valeurs absolues.
+>
+> ⚠️ **ET VOICI CE QUE L'ÉCRAN A DIT — c'était la première tâche visible de ce plan, et elle a dit non.** Descente Z12 → Z4 sur la Réunion, les deux chemins joués le même soir, tampon de mesure vidé de part et d'autre, valeur lue dans le cartouche « Relief » :
+>
+> | zoom | production (`?globe=crans`) | régime continu calibré au cadrage |
+> |---|---|---|
+> | Z12 → Z8 | ×2,8 | ×2,8 |
+> | Z7 | **×3,2** | ×2,8 |
+> | Z6 | **×4** | ×2,8 |
+> | Z5 | **×5** | ×2,8 |
+> | Z4 | **×2,5** | ×2,8 |
+>
+> **Le cran disparaît — et la table d'Adrien avec lui.** La cause est structurelle et elle mérite d'être écrite : **le pilote est la grandeur même que `_rescale` CONSERVE d'un cran à l'autre** depuis la Tâche 2 bis (« reposer la caméra à la même altitude métrique »). Toute exagération qui en dépend est donc continue **et constante**. Ce n'est pas la boucle divergente du §2 de `/threejs-optimisation` : c'est sa jumelle, **un point fixe qui GÈLE au lieu de diverger**, et qui se serait vu comme « le relief ne change plus jamais ».
+>
+> **Décision, conservatrice exprès :** le régime continu prend **son propre drapeau**, `FLAGS.exagContinue` (`?exag=continu`), **éteint**. `?globe=continu` garde donc les paliers d'aujourd'hui — revérifié à l'écran après la correction : **Z7 ×3,2, Z6 ×4, Z5 ×5, Z4 ×2,5, identiques à la production**, zéro erreur JS. ⚠️ **Un régime mesuré faux ne part pas sous le drapeau qu'on demande à Adrien d'ouvrir.**
+>
+> **Ce que l'écran montre par ailleurs, à `?globe=continu` :** le socle est intact — parois, chanfrein, coins en superellipse, mer qui l'épouse, ligne de côte, tampon de la Réunion. **Aucune erreur JS neuve dans les deux régimes.** Les seuls défauts réseau sont préexistants et **mesurés des deux côtés** : 2 × `ERR_CONNECTION_TIMED_OUT` (bucket d'altitude injoignable depuis cette machine) et **23 × 404 sur la descente Z12 → Z4, sur le chemin de PRODUCTION comme sur l'autre**. J'ai refait la descente deux fois plutôt que de prendre un défaut d'avant pour ma régression.
+>
+> · `npm test` **3 264 verts** (3 244 + 20), `audit:tests` **189 listés / 189 sur disque**, `node --check` sur les neuf fichiers modifiés, construction complète verte (`nettoie:dist` → `build:mapcells` → `vite build` → `verifie:dist`).
+> · ⚠️ **DEUX ASSERTIONS EXISTANTES ÉPINGLAIENT L'ANCIEN TEXTE** (`escalier-surface.test.js:138`, `mer-emprise.test.js:128`) — c'est le §3 de `/threejs-optimisation` mot pour mot, « la suite verte verrouille le défaut ». Elles sont corrigées **EN PLACE**, le motif seul, avec la raison écrite au-dessus ; **les assertions voisines n'ont pas bougé d'un caractère**.
+
+⚠️ **CE QUE LA 6 bis A NE FAIT PAS, ET IL FAUT LE LIRE AVANT DE CROIRE LA TÂCHE FINIE.** `construireFenetre` / `majHauteurs` **ne sont toujours importés par aucun fichier de production** : le socle est encore RECONSTRUIT à chaque cran, pas rééchantillonné. Les Étapes 1, 2, 4 et 5 de l'énoncé d'origine portent sur ce branchement-là. → **Tâche 6 ter.**
+
+### Tâche 6 ter : LA FENÊTRE À LA PLACE DU BLOC ⚠️ **CE N'EST PAS UN BRANCHEMENT, ET LE PLAN SE TROMPAIT**
+
+**Fichiers :** modifier `src/monde/fenetre-bornee.js`, `src/terrain.js` · tester `test/fenetre-branchee.test.js` (élargir) et `test/fenetre-bornee.test.js` (élargir)
+
+⚠️ **LE PLAN APPELAIT ÇA « LE BRANCHEMENT », COMME S'IL SUFFISAIT D'IMPORTER. C'EST FAUX, ET C'EST VÉRIFIABLE EN TRENTE SECONDES :** `construireFenetre` rend `{ geometrie, indices }` — **des positions et des index, rien d'autre**. Pas de `normal`, pas de `uv`, pas de `color`. Or le maillage de production porte les quatre, et son matériau lit `uHeightRange`, `uSeaY`, les masques et l'emprise. **Poser la fenêtre à la place du bloc aujourd'hui donnerait une forme sans relief éclairé ni palette** — et le module n'est pas en cause : la Tâche 6 avait pour périmètre la COQUE, et elle l'a livrée, prouvée et mutée.
+
+⚠️ **ET LES NORMALES NE SE RATTRAPENT PAS PAR `computeVertexNormals()`** : `terrain.js` les écrit à la main précisément parce que cet appel pesait **81 % de la fabrication d'une dalle — 83,8 ms mesurés à Chamonix** (in situ, commentaire de `terrain.js`). L'appeler par image coûterait plus de **cinq fois** le budget d'une image à 60 Hz : il remettrait le cran qu'on enlève. **`src/grid-normals.js` (`gridNormals`) existe et fait ce travail sur une grille régulière — c'est lui qu'il faut brancher, pas three.js.**
+
+- [ ] **Étape 1** — test : `majHauteurs` met à jour **normales comprises**, toujours **sans réallouer** — comparaison des tampons par IDENTITÉ DE RÉFÉRENCE, comme la Tâche 6.
+- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
+- [ ] **Étape 3** — implémenter : `uv` posées une fois par `construireFenetre` (elles ne dépendent que des `x`/`z`, qui ne bougent jamais), normales rafraîchies par `gridNormals` dans `appliquerHauteurs`.
+- [ ] **Étape 4** — brancher derrière `FLAGS.globeContinu`, le chemin du bloc intact pour la production, et **mesurer le coût par image BOUT EN BOUT, `render()` compris** — ⚠️ §3 de `/threejs-optimisation` : le téléversement des sommets au GPU est HORS d'un chronomètre posé autour du calcul, et il pèse 1,54 Mo par image.
+- [ ] **Étape 5 — mutation** : réintroduire une reconstruction doit tuer le test de l'Étape 1.
+- [ ] **Étape 6 — REGARDER L'ÉCRAN**, descendre du globe au socle, et dire ce qu'on voit, y compris si c'est laid.
+- [ ] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
+### Tâche 6 quater : LE PILOTE DE L'EXAGÉRATION CONTINUE ⚠️ **UNE MESURE À L'ÉCRAN L'A OUVERTE**
+
+**Fichiers :** modifier `src/main.js`, `src/monde/exageration-continue.js`, `src/flags.js` · tester `test/fenetre-branchee.test.js` (élargir)
+
+⚠️ **LE DÉFAUT EST MESURÉ, PAS SUPPOSÉ** — voir le tableau Z12 → Z4 du bilan ci-dessus, recopié dans `flags.js` à côté du drapeau. Le pilote actuel (la largeur de sol visible) est **conservé par `_rescale`**, donc l'exagération gèle à ×2,8 partout.
+
+**La piste, et elle ne peut pas geler par construction :** piloter par **la fraction de trajet entre deux crans** — `zc = params.demZoom + f`, avec `f ∈ [0,1[` mesurée sur ce qui DÉCLENCHE le cran (`_levelZoom`, `STEP_OUT`, `modes.js`), et non sur une grandeur que le cran remet en place. Au déclenchement `f → 1` pendant que `demZoom → demZoom+1` : **continu par construction**, et **borné à `[z, z+1]`**, donc il traverse les ancres au lieu de se garer dessus.
+
+⚠️ **À VÉRIFIER AVANT D'ÉCRIRE UNE LIGNE, ET LE §0 L'EXIGE :** que `f` atteigne bien 1 au déclenchement. Si le cran part à `f = 0,8`, il reste un saut de `courbe(z+1) − courbe(z+0,8)` — plus petit que ×2, mais un saut quand même. **Mesurez-le sur le vol de référence avant de conclure.**
+
+- [ ] **Étape 1** — test : sur une descente z3 → z13 échantillonnée à 60 Hz, **aucun rapport d'une image à l'autre ne dépasse la tolérance du pas**, ET la courbe **passe par les ancres**. ⚠️ **Les deux moitiés, sinon le test se contente d'une constante** — c'est exactement ce qui vient d'arriver.
+- [ ] **Étape 2** — le lancer, vérifier qu'il échoue (le pilote d'aujourd'hui rend une constante : c'est la SECONDE moitié qui doit mordre).
+- [ ] **Étape 3** — implémenter, puis **rejouer la descente Z12 → Z4 à l'écran** et remplir la troisième colonne du tableau.
+- [ ] **Étape 4** — allumer `FLAGS.exagContinue` **seulement si la colonne est juste**, et pas avant.
+- [ ] **Étape 5 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
+### Tâche 6 bis — L'ÉNONCÉ D'ORIGINE, CONSERVÉ ⚠️ C'EST ELLE QUI SUPPRIME LES CRANS À L'ÉCRAN
+
+⚠️ **CET ÉNONCÉ EST GARDÉ ENTIER PARCE QUE SA MOITIÉ NON FAITE EST TOUJOURS JUSTE.** Ce qui est livré est en tête de section (6 bis A) ; ce qui reste est en 6 ter et 6 quater. **On élargit, on ne remplace pas.**
 
 **Fichiers :** modifier `src/main.js`, `src/terrain.js`, `src/ocean.js`, `src/gpx.js` · tester `test/fenetre-branchee.test.js` (créer)
 
@@ -1548,13 +1614,13 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
 
 ⚠️ **NE TOUCHE PAS AU DAMIER.** `block-grid.js:768` appelle `buildSlabWalls`, avec **13 fichiers `test/damier-*.test.js` et 243 tests à empreintes bit à bit**. La Tâche 6 a délibérément laissé `plinth.js` et `ocean.js` intacts pour cette raison. `contourSocle(fenetre)` est le pont prévu vers `buildSlabWalls` **à l'arrêt** (décision 5 : la gravure ne s'écrit qu'à l'arrêt).
 
-- [ ] **Étape 1 — le test qui échoue** : un changement de cran en mode surface **ne reconstruit aucune géométrie** — l'identité des tampons de position est conservée. ⚠️ **Rejoue-la contre le dépôt AVANT de l'écrire.**
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
-- [ ] **Étape 3 — le partage d'exagération**, ses douze lecteurs, et un test qui **échoue si un seul lit encore `params.demExaggeration`**.
-- [ ] **Étape 4 — brancher la fenêtre** derrière `FLAGS.globeContinu`, en gardant le chemin du bloc pour la production.
-- [ ] **Étape 5 — mutation** : remettre un lecteur sur `params.demExaggeration` doit tuer le test ; réintroduire une reconstruction doit tuer celui de l'Étape 1.
-- [ ] **Étape 6 — REGARDER L'ÉCRAN.** ⚠️ **C'est la première tâche de ce plan dont le résultat est VISIBLE. Charge la page, descends du globe au socle, et dis ce que tu vois** — y compris si c'est laid.
-- [ ] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [ ] **Étape 1 — le test qui échoue** ⚠️ **REPORTÉE À LA 6 ter** — elle porte sur la géométrie, qui n'est pas encore branchée : un changement de cran en mode surface **ne reconstruit aucune géométrie** — l'identité des tampons de position est conservée. ⚠️ **Rejoue-la contre le dépôt AVANT de l'écrire.**
+- [x] **Étape 2** — le lancer, vérifier qu'il échoue.
+- [x] **Étape 3 — le partage d'exagération** ✅ **FAITE** — douze lecteurs, un accesseur, un cycle d'import évité, ses douze lecteurs, et un test qui **échoue si un seul lit encore `params.demExaggeration`**.
+- [ ] **Étape 4 — brancher la fenêtre** ⚠️ **REPORTÉE À LA 6 ter** : ce n'est pas un import, il manque normales et `uv` derrière `FLAGS.globeContinu`, en gardant le chemin du bloc pour la production.
+- [x] **Étape 5 — mutation** ✅ **FAITE POUR L'EXAGÉRATION** (①d, ②c, ③) ; la moitié « reconstruction » part avec la 6 ter : remettre un lecteur sur `params.demExaggeration` doit tuer le test ; réintroduire une reconstruction doit tuer celui de l'Étape 1.
+- [x] **Étape 6 — REGARDER L'ÉCRAN.** ✅ **FAITE, ET ELLE A DIT NON** — voir le tableau Z12 → Z4 du bilan ⚠️ **C'est la première tâche de ce plan dont le résultat est VISIBLE. Charge la page, descends du globe au socle, et dis ce que tu vois** — y compris si c'est laid.
+- [x] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 
 ### Tâche 7 : les deux résolutions et la zone morte

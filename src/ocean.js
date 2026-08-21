@@ -24,6 +24,7 @@ import { exposantCoin, pointCoin, arcCoin } from './fenetre-clip.js' // le coin 
 // le bloc »). Pas de cycle : plinth.js n'importe pas ocean.js.
 import { rayonEauDansSocle, rayonCoinEau } from './plinth.js'
 import { runLakeJob } from './terrain-jobs.js'
+import { lireExageration } from './monde/exageration-continue.js' // un seul partage, douze lecteurs
 import { lacsMemoLire, lacsMemoEcrire } from './dem-memo.js'
 import { plansEauRetenus } from './plan-eau.js'
 // LE CHAMP SUIT LE RELIEF — règles pures et testées, voir src/mer-emprise.js
@@ -1240,7 +1241,7 @@ export class RealWater {
     // ⚠️ `_spanDem` ET NON `_span` DEPUIS LE DAMIER : `extentMeters` suit le MNT,
     // qui ne grandit PAS avec le carré du damier (voir la note en tête de
     // méthode). Les deux valeurs coïncident partout ailleurs.
-    const demScale = (this._spanDem / terrain.dem.extentMeters) * params.demExaggeration
+    const demScale = (this._spanDem / terrain.dem.extentMeters) * lireExageration(params)
     // wave amplitude follows the VIEW SCALE: at a 20 km bay the swell reads,
     // at a 500 km continental view the same scene-unit swell would be a
     // 30 m monster — the sea (and the lakes) calm as you zoom out
@@ -1497,7 +1498,7 @@ export class RealWater {
     // le MNT ne grandit PAS avec le carré du damier (voir `rebuild`). Servir le
     // span du champ ici étirerait chaque lac du bloc central au format du
     // damier — un lac trois fois trop grand, posé trois fois trop loin.
-    const scale = (this._spanDem / dem.extentMeters) * params.demExaggeration
+    const scale = (this._spanDem / dem.extentMeters) * lireExageration(params)
     const cellM = dem.extentMeters / (dem.size - 1)
     // ⚠️ LA LARGEUR D'UN BLOC, PAS CELLE DE L'EMPRISE. En mode continu
     // `extentMeters` est déjà multiplié par `empriseCote` (dem-emprise.js) :

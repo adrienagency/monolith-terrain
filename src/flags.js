@@ -58,6 +58,15 @@ export const FLAGS = {
   // S'essaie par l'adresse sans rien reconstruire : `?globe=continu`. Et
   // `?globe=crans` le coupe, pour le jour où le défaut passera à true.
   globeContinu: false,
+
+  // L'EXAGÉRATION VERTICALE CONTINUE — décision 14, Tâche 6 bis.
+  //
+  // ⚠️ OFF, et **une mesure à l'écran le justifie** : voir `exagContinueActive()`
+  // plus bas, qui porte le tableau des deux descentes Z12 → Z4. En deux mots :
+  // la calibration actuelle supprime bien le cran (×2,0000 → ×1) mais **aplatit
+  // la table d'Adrien à ×2,8 partout**, parce que le pilote est la grandeur que
+  // `_rescale` conserve d'un cran à l'autre. `?exag=continu` pour la revoir.
+  exagContinue: false,
 }
 
 // Le drapeau ci-dessus, avec l'échappatoire d'adresse — même patron que
@@ -68,6 +77,39 @@ export function globeContinuActif() {
   if (v === 'crans' || v === '0') return false
   if (v === 'continu' || v === '1') return true
   return FLAGS.globeContinu
+}
+
+// L'EXAGÉRATION VERTICALE CONTINUE — décision 14, Tâche 6 bis.
+//
+// ⚠️ **SON PROPRE DRAPEAU, ET CE N'EST PAS DE LA PRUDENCE DE STYLE : C'EST UNE
+// MESURE À L'ÉCRAN QUI L'A EXIGÉ.** Le régime continu était d'abord adossé à
+// `globeContinu`. Descente Z12 → Z4 sur la Réunion, les deux chemins mesurés le
+// même soir, valeur lue dans le cartouche « Relief » :
+//
+//   | zoom | production (`?globe=crans`) | régime continu, calibré au cadrage |
+//   |------|------------------------------|------------------------------------|
+//   | Z12  | ×2,8                         | ×2,8                               |
+//   | Z8   | ×2,8                         | ×2,8                               |
+//   | Z7   | **×3,2**                     | ×2,8                               |
+//   | Z6   | **×4**                       | ×2,8                               |
+//   | Z5   | **×5**                       | ×2,8                               |
+//   | Z4   | **×2,5**                     | ×2,8                               |
+//
+// **Le cran disparaît — et la table d'Adrien avec lui.** Le pilote (la largeur
+// de sol visible) est la grandeur même que `_rescale` CONSERVE d'un cran à
+// l'autre depuis la Tâche 2 bis : toute exagération qui en dépend est donc
+// continue **et constante**. C'est un POINT FIXE, la famille de défauts que le
+// §2 de `/threejs-optimisation` décrit — il ne diverge pas, il gèle.
+//
+// Tant que le pilote n'est pas repris (piste écrite dans le plan : la fraction
+// de trajet entre deux crans, bornée à `[z, z+1]` par construction, qui ne peut
+// pas geler), `?globe=continu` garde les paliers d'aujourd'hui. `?exag=continu`
+// rejoue le régime mesuré ci-dessus pour qui veut le voir de ses yeux.
+export function exagContinueActive() {
+  const v = paramAdresse('exag')
+  if (v === 'paliers' || v === '0') return false
+  if (v === 'continu' || v === '1') return true
+  return FLAGS.exagContinue
 }
 
 // Le drapeau ci-dessus, avec l'échappatoire d'adresse. Isolé dans une fonction

@@ -28,7 +28,7 @@ import { warmupPrograms } from './warmup.js'
 import { activeDemSource, isFallbackActive } from './dem-source.js'
 import { Globe } from './globe.js'
 import { Modes, stepZoom } from './modes.js'
-import { DISTANCE_MIN_SURFACE, altitudeSurfaceM, echelleBloc, empriseBlocM } from './loi-altitude.js'
+import { DISTANCE_MIN_SURFACE, altitudeSurfaceM, echelleBloc, empriseBlocM, distanceArrivee } from './loi-altitude.js'
 import { intersectionGlobe, viseeArrivee, ZOOM_PALIER_MIN } from './escalier-zoom.js'
 import { createGoto, geocode, mainParts } from './goto.js'
 import { frameTrack, viseLeCanevas3D } from './gpx.js'
@@ -57,7 +57,11 @@ import { PeaksLayer } from './peaks.js'
 import { Clouds2 } from './clouds2.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
-import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif } from './flags.js'
+import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagContinueActive } from './flags.js'
+// ⚠️ `exageration-continue.js` N'IMPORTE RIEN — voir son en-tête : passer par
+// `fenetre-bornee.js` fermerait le cycle terrain.js → fenetre-bornee.js →
+// terrain.js, et AUCUN TEST NE CHARGE `main.js` pour l'attraper.
+import { lireExageration, poserExageration, creerExagerationPartagee, majExagerationCadrage, surchargesStockees, courbeExageration, EXAG_BASE } from './monde/exageration-continue.js'
 // `fractionSurTrace` : le pont d'indices qui remet la tête de course sous
 // l'objectif de la poursuite (voir son commentaire dans poursuite.js).
 import { fractionSurTrace } from './poursuite.js'
@@ -709,6 +713,42 @@ const params = {
   fillElevation: 20,
   fillColor: '#ffcf9a', // chaud : c'est la chaleur méditerranéenne qu'on cherchait
 }
+
+// ══════════ L'EXAGÉRATION VERTICALE : UN SEUL ÉCRIVAIN, DOUZE LECTEURS ══════
+// Tâche 6 bis du plan « globe continu ».
+//
+// ⚠️ **LE PIÈGE QUE CECI FERME A DÉJÀ MORDU DEUX FOIS SUR CE DÉPÔT** : un
+// réglage écrit d'un côté et jamais transmis à l'autre. `demExaggeration` était
+// lu à DOUZE endroits (`terrain.js` ×5, `ocean.js` ×2, `gpx.js`, `main.js` ×4)
+// — douze occasions de diverger dès que la valeur bouge. Les douze passent
+// désormais par `lireExageration(params)`, et `test/fenetre-branchee.test.js`
+// **échoue si un seul relit `params.demExaggeration` en direct**.
+//
+// ⚠️ **ET `params.demExaggeration` DEVIENT UN ACCESSEUR SUR LE PARTAGE, PAS UN
+// CHAMP.** Ce n'est pas de l'élégance : c'est la seule façon MÉCANIQUE de
+// garantir qu'aucun écrivain n'est oublié. Il y en a au moins cinq, dispersés —
+// `syncExagToZoom` ici, le curseur de `ui/create-panel.js:419`, les
+// `Object.assign(params, look)` des gabarits, la restauration de lien partagé,
+// et `SHIBU_START`. Une fonction de synchronisation à appeler « partout où il
+// faut » aurait redonné exactement la classe de défaut qu'on ferme. Il n'y a
+// donc **qu'un seul emplacement de stockage** : `exagPartage.valeur`.
+//
+// ⚠️ `exagPartage` est ÉNUMÉRABLE, et c'est voulu : `block-grid.js:1133`
+// fabrique ses voisins par `{ ...params }`, et un damier qui perdrait le
+// partage lirait une valeur figée à l'instant de la copie.
+const exagPartage = creerExagerationPartagee({ surcharges: surchargesStockees() })
+params.exagPartage = exagPartage
+// ⚠️ `EXAG_BASE` ET NON `params.demExaggeration` : ce serait un TREIZIÈME
+// lecteur direct, et le test ①a le compterait comme tel — à juste titre, parce
+// qu'il n'y a pas de « lecture innocente » de cette valeur. L'accord entre les
+// deux (2,8 de part et d'autre) est vérifié par `test/fenetre-branchee.test.js`.
+poserExageration(exagPartage, EXAG_BASE)
+Object.defineProperty(params, 'demExaggeration', {
+  get: () => exagPartage.valeur,
+  set: (v) => { poserExageration(exagPartage, v) },
+  enumerable: true,
+  configurable: true,
+})
 
 // ------------------------------------------------------------------ share-link restore
 // The reference every share link diffs against (see share-link.js) — captured
@@ -3050,7 +3090,7 @@ function f3SuitAuSol(group, f) {
 // `plinth.rebuild` son comportement d'origine au caractère près.
 function socleEmprise() {
   if (!(dem?.empriseCote > 1)) return null
-  const scale = (TERRAIN_SIZE * dem.empriseCote / dem.extentMeters) * params.demExaggeration
+  const scale = (TERRAIN_SIZE * dem.empriseCote / dem.extentMeters) * lireExageration(params)
   return (dem.minM - dem.meanM) * scale - (params.plinthDepth ?? 7)
 }
 
@@ -3141,10 +3181,49 @@ function saveZoomExag(z, v) {
   try {
     localStorage.setItem(ZOOM_EXAG_KEY, JSON.stringify(zoomExagStore))
   } catch {}
+  // ⚠️ **LA COURBE CONTINUE DOIT SUIVRE LA SURCHARGE, SINON ELLE LA PERD.**
+  // La décision 14 dit « mêmes valeurs aux mêmes altitudes » : ces valeurs-là
+  // SONT les surcharges d'Adrien. Rebâtir la courbe coûte seize évaluations, et
+  // ça n'arrive qu'au relâchement d'un curseur.
+  exagPartage.courbe = courbeExageration({ surcharges: zoomExagStore })
 }
+
+// LE ZOOM DE CADRAGE — la grandeur qui pilote la courbe continue.
+//
+// ⚠️ **ELLE EST HORIZONTALE, ET C'EST TOUT SON INTÉRÊT.** `altitudeCadrageM()`
+// (plus bas) divise par `echelleBloc()`, qui CONTIENT l'exagération : s'en
+// servir ici fermerait la boucle `exag → altitude → zoom → exag`, dont le gain
+// mesuré vaut **1,44 entre z4 et z5** — elle DIVERGE. `zoomCadrage` ne lit que
+// la distance caméra→cible et l'emprise au sol du bloc, deux grandeurs que
+// l'exagération verticale ne touche pas. Le test ③ le garde des deux côtés : la
+// fonction n'a aucune entrée d'exagération, et la boucle qu'on évite diverge
+// pour de vrai.
+//
+// Rend `null` hors relief réel : l'appelant retombe alors sur le palier.
+function zoomCadrageCourant() {
+  if (params.source !== 'real' || !dem?.extentMeters) return null
+  const d = camera.position.distanceTo(controls.target)
+  if (!(d > 0)) return null
+  return {
+    distance: d,
+    distanceReference: distanceArrivee(150), // `surfaceMaxDistance()` — voir le hook plus bas
+    extentMeters: dem.extentMeters,
+    lat: params.demLat,
+  }
+}
+
 // pull the current zoom's exaggeration into params + refresh the UI controls
+//
+// ⚠️ **C'EST L'UNIQUE ÉCRIVAIN DE L'EXAGÉRATION DE ZOOM, ET IL A DEUX RÉGIMES.**
+// Drapeau éteint (production) : le palier d'aujourd'hui, au bit près — c'est
+// `exagForZoom`, inchangé. Drapeau `?globe=continu` : la courbe de la décision
+// 14, lue au zoom que la caméra CADRE réellement. Au repos (pose d'arrivée) les
+// deux rendent **la même valeur, surcharges comprises** — c'est le test ②b, et
+// c'est ce qui fait que le réglage d'Adrien survit au pivot.
 function syncExagToZoom() {
-  params.demExaggeration = exagForZoom(params.demZoom)
+  const cadrage = exagContinueActive() ? zoomCadrageCourant() : null
+  if (cadrage) majExagerationCadrage(exagPartage, cadrage)
+  else params.demExaggeration = exagForZoom(params.demZoom)
   refreshAll()
 }
 
@@ -3548,7 +3627,7 @@ function altitudeCadrageM() {
       camY: camera.position.y,
       extentMeters: dem.extentMeters,
       span: TERRAIN_SIZE,
-      exageration: params.demExaggeration,
+      exageration: lireExageration(params),
     })
   }
   return terrain.heightToFeet(camera.position.y) / 3.28084
@@ -3698,7 +3777,7 @@ modes = new Modes({
     // d'arrivée plutôt que sur une distance inventée.
     echelleVerticaleBloc() {
       if (params.source !== 'real' || !dem) return null
-      return echelleBloc({ extentMeters: dem.extentMeters, span: TERRAIN_SIZE, exageration: params.demExaggeration })
+      return echelleBloc({ extentMeters: dem.extentMeters, span: TERRAIN_SIZE, exageration: lireExageration(params) })
     },
     // L'ÉCHELLE VERTICALE D'UN NIVEAU **QU'ON N'A PAS ENCORE CHARGÉ**.
     //
@@ -5737,7 +5816,7 @@ const pilote = new PiloteCam({
   // l'hélicoptère volerait à 120 unités du sol au lieu de 120 mètres.
   getEchelle: () => ({
     metresParUnite: dem ? dem.extentMeters / TERRAIN_SIZE : 1,
-    exagerationV: params.demExaggeration || 1,
+    exagerationV: lireExageration(params) || 1,
   }),
   // Le tronçon couvert — 'reine' par défaut, `?troncon=tout` pour tout voir.
   // Le pourquoi (202 °/s de balayage sur 47 km comprimés) est dans flags.js.

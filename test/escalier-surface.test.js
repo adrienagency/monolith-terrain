@@ -135,7 +135,13 @@ test('main.js expose l’échelle verticale du bloc, et elle porte l’exagérat
   const bloc = SRC_MAIN.slice(i, i + 400)
   assert.match(bloc, /echelleBloc\(\{/, 'il passe par la loi pure')
   assert.match(bloc, /extentMeters: dem\.extentMeters/, "l'emprise RÉELLE du bloc")
-  assert.match(bloc, /exageration: params\.demExaggeration/, "⚠️ l'exagération, sinon trois crans restent discontinus")
+  // ⚠️ **LE MOTIF A CHANGÉ, PAS LA PROPRIÉTÉ** (Tâche 6 bis). L'exagération est
+  // toujours passée au hook ; elle vient désormais du PARTAGE unique
+  // (`lireExageration`) au lieu d'une des douze lectures directes de
+  // `params.demExaggeration` — et `test/fenetre-branchee.test.js` échoue si une
+  // seule d'entre elles revient. Ce que ce test garde est intact : sans
+  // exagération ici, trois crans restent discontinus.
+  assert.match(bloc, /exageration: lireExageration\(params\)/, "⚠️ l'exagération, sinon trois crans restent discontinus")
 })
 
 // ══════════ ③ L'ALTITUDE CONTINUE — LA MESURE (Étapes 1, 2 et 6) ════════════

@@ -14,6 +14,10 @@ import { ATLAS_ANALYSE, ATLAS_MER, fracBassinEmprise } from './dem-emprise.js'
 // une récursion qui n'existe pas.
 import { plansFenetre as demiPlansFenetre, exposantCoin } from './fenetre-clip.js'
 import { facteursCoins } from './damier-bords.js' // module pur, aucune importation
+// ⚠️ `exageration-continue.js` N'IMPORTE RIEN, et c'est ce qui rend cette ligne
+// possible : passer par `fenetre-bornee.js` fermerait le cycle terrain.js →
+// fenetre-bornee.js → terrain.js et jetterait un ReferenceError EN PRODUCTION.
+import { lireExageration } from './monde/exageration-continue.js'
 // L'analyse de relief et le masque de mer ne sont plus calcules ici : ils
 // partent dans un Worker (terrain-jobs.js). ~470 ms de fil principal fige par
 // reconstruction, sur MNT 1536². Le calcul est identique octet pour octet.
@@ -2133,7 +2137,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const span = this._span()
     const fen = this.fenetre // lu par référence : le drag le bouge sans refaire le sampler
     // demExaggeration is the per-zoom value chosen in the UI (coarse blocks big)
-    const scale = (span / dem.extentMeters) * params.demExaggeration
+    const scale = (span / dem.extentMeters) * lireExageration(params)
     const meanM = dem.meanM
     this._h2ft = (h) => Math.round((h / scale + meanM) * 3.28084)
 
@@ -2200,7 +2204,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     if (params.source !== 'real' || !this.dem) return null
     const dem = this.dem
     const span = this._span()
-    const scale = (span / dem.extentMeters) * params.demExaggeration
+    const scale = (span / dem.extentMeters) * lireExageration(params)
     const meanM = dem.meanM
     const { size } = dem
     return (x, z) => (sampleDem(dem, (x / span + 0.5) * (size - 1), (z / span + 0.5) * (size - 1)) - meanM) * scale
@@ -2234,7 +2238,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const dem = this.dem
     const span = this._span()
     const fen = this.fenetre
-    const scale = (span / dem.extentMeters) * params.demExaggeration
+    const scale = (span / dem.extentMeters) * lireExageration(params)
     const meanM = dem.meanM
     const { size } = dem
     const detail = this._detailEffectif(params)
@@ -2430,7 +2434,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // unités monde par la même échelle — ils ne dépendent d'aucun décalage, donc
     // la palette est rigoureusement stable pendant tout le geste.
     if (this.dem?.empriseCote > 1 && params.source === 'real') {
-      const scale = (this._span() / this.dem.extentMeters) * params.demExaggeration
+      const scale = (this._span() / this.dem.extentMeters) * lireExageration(params)
       minH = (this.dem.minM - this.dem.meanM) * scale
       maxH = (this.dem.maxM - this.dem.meanM) * scale
     }
@@ -2595,7 +2599,7 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // template gets a clear shoreline and consistent bathymetry, even where the
     // patch has no sub-sea data (then uSeaY simply sits below the terrain).
     if (params.source === 'real' && this.dem) {
-      const demScale = (this._span() / this.dem.extentMeters) * params.demExaggeration
+      const demScale = (this._span() / this.dem.extentMeters) * lireExageration(params)
       // fine-zoom tiles carry NO bathymetry: their sea is a flat plain at
       // exactly 0 m, which lands exactly ON uSeaY and paints as LAND (the
       // "black grainy sea" the dark templates expose). Lift the waterline a
