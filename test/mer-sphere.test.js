@@ -32,6 +32,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { registerHooks } from 'node:module'
 
 import {
   fleche,
@@ -55,10 +56,25 @@ import {
   RAMPE_NAUTIQUE,
   abscisseNautique,
 } from '../src/monde/mer-sphere.js'
+// ⚠️ L'ALIAS QUE VITE POSE (`vite.config.js`), RÉSOLU SANS VITE — le patron de
+// `test/damier-mer-runtime.test.js` : la copie vendorée fait foi ici, et cinq
+// lignes suffisent. Sans ce hook, `Globe.prototype.poserMer` ne peut être
+// exercée QUE jusqu'à sa clause de refus (`await import('./ocean.js')` lève),
+// ce qui est exactement le trou du Tour de correction 1 (constat I1/F-3) :
+// ~150 lignes de corps de méthode — la dérivation de portée, la cuisson du
+// champ, la construction du maillage — n'étaient exercées par PERSONNE.
+registerHooks({
+  resolve(spec, ctx, suivant) {
+    if (spec === 'ocean-waves') {
+      return { url: new URL('../src/vendor/ocean-waves/index.js', import.meta.url).href, shortCircuit: true }
+    }
+    return suivant(spec, ctx)
+  },
+})
 import { Globe } from '../src/globe.js'
 import { repereCrop, latLonDeLocal } from '../src/monde/crop-sphere.js'
 import { repereLocalCrop, construireSolideCrop } from '../src/monde/parois-crop.js'
-import { empriseSocle } from '../src/monde/seuil-socle.js'
+import { empriseSocle, FOV_DEG } from '../src/monde/seuil-socle.js'
 import { largeurCropM, EXAG_SOCLE_NOMINALE } from '../src/monde/habillage-crop.js'
 
 const SRC_OCEAN = new URL('../src/ocean.js', import.meta.url)
@@ -693,6 +709,51 @@ test('⑧b le nuanceur SAUTE le travail quand la richesse est nulle', () => {
 })
 
 
+test('⑧c la rampe nautique du FOND, dans le nuanceur du globe, transcrit le MÊME exposant', () => {
+  // ⚠️ Tour de correction 1 (constat I2) : `pow(…, 0.55)` de la transcription
+  // dans `globe.js` (la ligne qui peint le fond marin sous `uMerRampeOn`)
+  // n'était protégée par AUCUN test — seule `abscisseNautique`, la loi PURE
+  // du module, l'était (⑨d). Une mutation qui change cet exposant en `1.0`
+  // survivait à 44/44. Même patron que ⑧a : on extrait le texte, on le
+  // confronte À LA FONCTION PURE sur un balayage.
+  const expr = extraitGlsl('dMer01')
+  const js = expr
+    .replace(/pow\(/g, 'POW(')
+    .replace(/clamp\(/g, 'CLAMP(')
+    .replace(/max\(/g, 'MAX(')
+    .replace(/uMerFondBudgetM/g, 'budget')
+    .replace(/uPlancherRampeM/g, 'plancher')
+  // eslint-disable-next-line no-new-func
+  const f = new Function('h', 'budget', 'plancher', 'POW', 'CLAMP', 'MAX', `return ${js}`)
+  const CLAMP = (x, a, b) => Math.min(b, Math.max(a, x))
+  let vus = 0
+  for (let prof = 0; prof <= 1000; prof += 5) {
+    const attendu = abscisseNautique(prof, 1000)
+    const rendu = f(-prof, 1000, 1e-6, Math.pow, CLAMP, Math.max)
+    assert.ok(Math.abs(rendu - attendu) < 1e-9, `profondeur ${prof} : ${rendu} contre ${attendu}`)
+    vus++
+  }
+  assert.ok(vus > 150, `le balayage doit être dense : ${vus} points`)
+  // un exposant de 1,0 rendrait 0,1 à 10 % de profondeur — c'est la mutation
+  // que ce test tue, comme ⑨d le fait déjà pour la loi pure.
+  assert.ok(Math.abs(f(-100, 1000, 1e-6, Math.pow, CLAMP, Math.max) - Math.pow(0.1, 0.55)) < 1e-9)
+})
+
+test('⑧d le fondu de rivage du nuanceur GARDE son seuil de 0,10, pas approximatif', () => {
+  // ⚠️ Tour de correction 1 (constat I3) : `smoothstep(0.0, 0.10, vRive)`
+  // n'était protégé par aucun test — muté à `0.40`, 44/44 restait vert. On
+  // vérifie la VALEUR exacte du seuil, pas seulement la présence du nom
+  // `fade` — le même défaut que le §0 met en garde contre une assertion qui
+  // cherche une CHAÎNE plutôt qu'un COMPORTEMENT.
+  const src = readFileSync(SRC_GLOBE, 'utf8')
+  const bloc = src.match(/\/\/ ══════ LA MER[\s\S]*?\n\}\n`/)
+  assert.ok(bloc, 'le bloc de la mer est absent de globe.js')
+  const m = bloc[0].match(/float fade = smoothstep\(([^,]+), ([^,]+), vRive\) \* richesseMer;/)
+  assert.ok(m, 'le fondu de rivage est absent ou d une autre forme')
+  assert.equal(m[1].trim(), '0.0')
+  assert.equal(m[2].trim(), '0.10')
+})
+
 // ══════════ ⑨ LES QUATRE CONSTANTES DU SOCLE, CONVERTIES ═══════════════════
 //
 // ⚠️ **CES QUATRE-LÀ N'ONT PAS ÉTÉ TROUVÉES PAR LE RAISONNEMENT, MAIS À
@@ -837,4 +898,132 @@ test('⑩d le nuanceur du globe garde la rampe nautique DERRIÈRE son interrupte
   assert.match(bloc[0], /pow\(clamp\(-h \/ max\(uMerFondBudgetM/)
   // et l uniforme part À ZÉRO : sans `poserMer`, la production est intouchée
   assert.match(src, /uMerRampeOn: \{ value: 0 \}/)
+})
+
+// ══════════ ⑩bis `poserMer` EXERCÉ AU-DELÀ DE SA CLAUSE DE REFUS ═══════════
+//
+// ⚠️ **TOUR DE CORRECTION 1 (constat I1/F-3).** `poserMer` mesure ~150
+// lignes ; jusqu'ici SEULE sa clause de refus (`!this._crop`, ⑩c) était
+// exercée — tout le reste (dérivation de la portée, cuisson du champ,
+// construction du maillage, matrice de pose) ne l'était par PERSONNE. Le
+// relecteur l'a démontré en direct : échanger `Math.min`/`Math.max` dans le
+// bornage de portée survit à 44/44 verts.
+//
+// ⚠️ **L'ALIAS `ocean-waves` EST LA SEULE RAISON POUR LAQUELLE ⑩c S'ARRÊTAIT
+// LÀ.** `poserMer` fait `await import('./ocean.js')` en COURS de route
+// (après la portée, la calotte et le champ, mais avant le matériau) ; sous
+// node nu cet import lève, parce qu'`ocean.js` tire `ocean-waves` par un
+// alias que seul Vite résout. Le `registerHooks` en tête de ce fichier —
+// le patron exact de `test/damier-mer-runtime.test.js` — le résout aussi
+// sous node : tout ce qui précède cet import est du vrai three.js
+// (`BufferGeometry`, `DataTexture`, `ShaderMaterial`), et aucune de ces
+// classes n'a besoin d'un contexte WebGL pour être CONSTRUITE.
+
+function globeAvecCrop(overrides = {}) {
+  // Un `Globe` minimal qui porte exactement ce que `poserMer` lit et écrit —
+  // même discipline que `globeMinimal()` ci-dessus, élargie au corps de la
+  // méthode : `_crop` un VRAI repère, `exaggeration`, un `group` qui accepte
+  // vraiment un maillage, et les uniformes que le matériau referme dessus.
+  const val = (v) => ({ value: v })
+  return {
+    _crop: REPERE,
+    exaggeration: EXAG_SOCLE_NOMINALE,
+    group: {
+      children: [],
+      add(m) { this.children.push(m) },
+      remove(m) { this.children = this.children.filter((x) => x !== m) },
+    },
+    _mer: null,
+    _merEtat: null,
+    uniforms: {
+      uSunDir: val({}),
+      uCropCoin: val(0),
+      uCropCoinN: val(2),
+      uMerRampeOn: val(0),
+      uMerFondBudgetM: val(6000),
+      uOceanShallow: val({ set() {} }),
+      uOceanMid: val({ set() {} }),
+      uOceanDeep: val({ set() {} }),
+    },
+    retirerMer: Globe.prototype.retirerMer,
+    _cuireChampMer: Globe.prototype._cuireChampMer,
+    ...overrides,
+  }
+}
+
+// un fond marin de synthèse, uniformément à −500 m : ces tests n'ont rien à
+// prouver sur la bathymétrie (§3 de la tâche, déjà couvert ailleurs),
+// seulement sur ce que `poserMer` FAIT du résultat de `remplir`.
+const remplirBouchon = (emprise, n, sortie) => {
+  sortie.fill(-500)
+  return { remplis: sortie.length }
+}
+
+test('⑩e `poserMer` DÉRIVE la portée par l horizon géométrique — le bornage que le relecteur a trouvé NON gardé', () => {
+  const g = globeAvecCrop()
+  return Globe.prototype.poserMer.call(g, { remplir: remplirBouchon }).then((r) => {
+    // ⚠️ C'EST L'ASSERTION QUI TUE L'ÉCHANGE `Math.min`/`Math.max` : à
+    // l'altitude par défaut (32 274 m, le seuil de naissance du socle) la
+    // portée non bornée vaut 93,68 — ni 1 (le plancher) ni 256 (le
+    // plafond). La mutation qui échange les deux bornes rend TOUJOURS 256,
+    // quelle que soit l'altitude : elle ne peut pas passer ce test.
+    const attendu = porteeHorizon(REPERE, 32274, R_TERRE_M)
+    assert.ok(attendu > 1 && attendu < PORTEE_DEFAUT, `le témoin doit être au milieu de la plage : ${attendu}`)
+    assert.ok(Math.abs(r.portee - attendu) < 1e-9, `portée ${r.portee} contre ${attendu}`)
+  })
+})
+
+test('⑩f la portée s écrête au PLAFOND, pas au plancher, à haute altitude', () => {
+  const g = globeAvecCrop()
+  return Globe.prototype.poserMer.call(g, { remplir: remplirBouchon, altitudeM: 400000 }).then((r) => {
+    // à 400 km, l horizon géométrique vaut largement plus de 256 demi-côtés
+    assert.ok(porteeHorizon(REPERE, 400000, R_TERRE_M) > PORTEE_DEFAUT)
+    assert.equal(r.portee, PORTEE_DEFAUT, `la portée doit s écrêter à ${PORTEE_DEFAUT}`)
+  })
+})
+
+test('⑩g la portée s écrête au PLANCHER, pas au plafond, à altitude quasi nulle', () => {
+  const g = globeAvecCrop()
+  return Globe.prototype.poserMer.call(g, { remplir: remplirBouchon, altitudeM: 0.1 }).then((r) => {
+    assert.ok(porteeHorizon(REPERE, 0.1, R_TERRE_M) < 1)
+    assert.equal(r.portee, 1, 'la portée doit s écrêter au plancher de 1')
+  })
+})
+
+test('⑩h `poserMer` POSE vraiment : maillage ajouté, rampe nautique allumée, budget écrit', () => {
+  const g = globeAvecCrop()
+  return Globe.prototype.poserMer.call(g, { remplir: remplirBouchon }).then((r) => {
+    assert.equal(g.group.children.length, 1, 'un maillage doit être ajouté au groupe')
+    assert.equal(g._mer, g.group.children[0])
+    assert.equal(g.uniforms.uMerRampeOn.value, 1)
+    // le budget vient du champ MESURÉ (−500 m partout ⇒ 500), pas du monde (6000)
+    assert.equal(g.uniforms.uMerFondBudgetM.value, 500)
+    assert.equal(r.bathy, true)
+  })
+})
+
+test('⑩i la bascule de `poserMer` emploie le fov CANONIQUE, pas une valeur recopiée', () => {
+  // ⚠️ Tour de correction 1 (constat C1/F-1). Le défaut de `fovDeg` vaut
+  // maintenant `FOV_DEG` (30°, `seuil-socle.js`) — le fov qui alimente aussi
+  // `SEUIL_NAISSANCE_M`. On recalcule `distanceBascule` depuis `r.lambda`,
+  // INDÉPENDAMMENT de `poserMer`, pour qu'un futur défaut recopié diverge de
+  // ce test sans avoir besoin de connaître sa propre valeur.
+  const g = globeAvecCrop()
+  return Globe.prototype.poserMer.call(g, { remplir: remplirBouchon }).then((r) => {
+    const attendu = distanceBascule({ lambda: r.lambda, hauteurPx: 900, fovDeg: FOV_DEG })
+    assert.ok(Math.abs(r.bascule - attendu) < 1e-9, `bascule ${r.bascule} contre ${attendu}`)
+    assert.notEqual(FOV_DEG, 33, 'le fov canonique n est PAS 33 — la faute du Tour 1')
+  })
+})
+
+test('⑩j retirer une mer POSÉE la fait vraiment disparaître du groupe', () => {
+  const g = globeAvecCrop()
+  return Globe.prototype.poserMer.call(g, { remplir: remplirBouchon }).then(() => {
+    assert.equal(g.group.children.length, 1)
+    Globe.prototype.retirerMer.call(g)
+    assert.equal(g.group.children.length, 0)
+    assert.equal(g._mer, null)
+    assert.equal(g.uniforms.uMerRampeOn.value, 0)
+    assert.equal(g.uniforms.uMerFondBudgetM.value, 6000)
+  })
 })

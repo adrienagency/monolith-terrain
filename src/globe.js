@@ -51,6 +51,12 @@ import {
   porteeHorizon,
   PORTEE_DEFAUT,
 } from './monde/mer-sphere.js'
+// ⚠️ **LE FOV CANONIQUE, PAS UNE CONSTANTE RECOPIÉE.** Tour de correction 1 de
+// la Tâche F : le défaut de `poserMer` portait `33`, une valeur qui n'existe
+// nulle part ailleurs dans le dépôt. `FOV_DEG` est LA source — `main.js:263`
+// pose `params.fov` dessus, et c'est elle qui alimente `SEUIL_NAISSANCE_M`
+// (32 274 m), le chiffre même auquel la bascule de la mer se compare.
+import { FOV_DEG } from './monde/seuil-socle.js'
 // L'EXAGÉRATION PARTAGÉE — Tâche E. ⚠️ **UN ÉCRIVAIN, N LECTEURS, ET LE GLOBE
 // EST LE QUATORZIÈME** (`terrain.js` ×5, `ocean.js` ×2, `gpx.js` ×1,
 // `main.js` ×5). ⚠️ Ce module n'importe RIEN — c'est sa seule règle, et elle est
@@ -1898,7 +1904,11 @@ export class Globe {
    * @param {number} [arg.portee] en demi-côtés de crop ; défaut : l'horizon
    * @param {number} [arg.pas] segments par côté de la calotte
    * @param {number} [arg.hauteurPx] hauteur de la fenêtre, pour la bascule
-   * @param {number} [arg.fovDeg]
+   * @param {number} [arg.fovDeg] ⚠️ défaut `FOV_DEG` — le fov CANONIQUE de
+   *   l'application (`main.js:263`), pas une valeur recopiée. Tour de
+   *   correction 1 : le défaut portait `33`, introuvable ailleurs dans le
+   *   dépôt, alors que `SEUIL_NAISSANCE_M` (`seuil-socle.js`, 32 274 m) — la
+   *   valeur même à laquelle la bascule se compare — est déjà calculée à `30`.
    * @param {number} [arg.largeurBande] largeur de la transition, en octaves
    * @returns {Promise<object|null>}
    */
@@ -1907,7 +1917,7 @@ export class Globe {
     portee = null,
     pas = 192,
     hauteurPx = 900,
-    fovDeg = 33,
+    fovDeg = FOV_DEG,
     largeurBande = 4,
     altitudeM = 32274,
     couleurs = null,
