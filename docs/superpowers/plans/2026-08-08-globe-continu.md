@@ -28,7 +28,7 @@ Trois révisions de ce document ont posé des constantes **à l'instinct**, pré
 ⚠️ **UNE VERSION DE CE PLAN LES RECOPIAIT EN PLUS COURT dans quatre tâches** — `npx vite build` nu, sans redirection, sans `nettoie:dist`, avec un « audit » qui ne nommait pas sa commande. Un agent lisant la version courte aurait sauté les gardes en toute bonne foi. **C'est exactement le reproche que ce plan fait à sa propre décision 13** : un avertissement qu'on ne relit pas ne protège de rien.
 
 ```
-npm test              # la suite entière — 3 244 verts au 2026-08-21 (Tâche 6 incluse)
+npm test              # la suite entière — 3 276 verts au 2026-08-21 (Tâche 6 ter incluse)
 npm run audit:tests   # disque contre liste
 node --check <fichier>  # sur CHAQUE fichier modifié
 npm run nettoie:dist && npm run build:mapcells && npx vite build > /tmp/build.log 2>&1 && npm run verifie:dist
@@ -1562,21 +1562,72 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
 
 ⚠️ **CE QUE LA 6 bis A NE FAIT PAS, ET IL FAUT LE LIRE AVANT DE CROIRE LA TÂCHE FINIE.** `construireFenetre` / `majHauteurs` **ne sont toujours importés par aucun fichier de production** : le socle est encore RECONSTRUIT à chaque cran, pas rééchantillonné. Les Étapes 1, 2, 4 et 5 de l'énoncé d'origine portent sur ce branchement-là. → **Tâche 6 ter.**
 
-### Tâche 6 ter : LA FENÊTRE À LA PLACE DU BLOC ⚠️ **CE N'EST PAS UN BRANCHEMENT, ET LE PLAN SE TROMPAIT**
+> ⚠️ **MISE À JOUR DU 2026-08-21 — LA 6 ter A FAIT CE BRANCHEMENT, ET LA PHRASE CI-DESSUS N'EST PLUS VRAIE QU'À MOITIÉ.** `construireFenetre` est importé par `src/main.js` et **la fenêtre tient le maillage affiché** derrière `?globe=continu` : **quatorze crans sur quatorze ne reconstruisent plus aucune géométrie**, mesuré à l'écran. **`majHauteurs`, lui, n'est toujours appelé par personne en production** — les hauteurs viennent encore du MNT via l'échantillonneur de `terrain.js`, donc `loadSurface` garde la main sur l'attente réseau. Voir le bilan de la 6 ter.
 
-**Fichiers :** modifier `src/monde/fenetre-bornee.js`, `src/terrain.js` · tester `test/fenetre-branchee.test.js` (élargir) et `test/fenetre-bornee.test.js` (élargir)
+### Tâche 6 ter : LA FENÊTRE À LA PLACE DU BLOC ✅ **FAITE LE 2026-08-21** — ⚠️ **LE CRAN NE RECONSTRUIT PLUS RIEN, ET LE RESTE DE L'ATTENTE EST AILLEURS**
+
+> **Bilan mesuré** (bancs `test/fenetre-bornee.test.js` ⑨ ×6 et `test/fenetre-branchee.test.js` ⑧ ×6 ; `npm test` **3 276 verts**) :
+>
+> · ⚠️ **LA PREUVE QU'ADRIEN ATTENDAIT, RELEVÉE À L'ÉCRAN ET PAS AU BANC.** Descente Z12 → Z5 puis remontée Z5 → Z12 sur La Réunion, sonde posée sur `terrain.rebuild` : **quatorze crans sur quatorze gardent le MÊME tampon de positions** (`memeTampon: true` ×14). Le témoin, même geste sur `?globe=crans` : **sept sur sept le reconstruisent** (`memeTampon: false` ×7). **C'est le cran qui disparaît, et il disparaît sur l'écran, pas dans un test.**
+>
+> · **LE COÛT PAR IMAGE, BOUT EN BOUT — `render()` ET `gl.finish()` COMPRIS**, les deux chemins sur LA MÊME PAGE (⚠️ `?globe=continu` allume aussi le tri spatial du globe : d'un chargement à l'autre `renderer.render` ne dessine pas la même scène, et deux relevés de pages différentes ne se comparent pas). La Réunion z12, 11 répétitions, médiane :
+>
+> | résolution | production | fenêtre bornée | gain |
+> |---|---|---|---|
+> | res 384 | **16,5 ms** (15,6–18,6) | **11,5 ms** (11,1–12,5) | **−5,0 ms, −30,3 %** |
+> | res 768 | **64,7 ms** (62,5–67,3) | **44,6 ms** (43,9–46,5) | **−20,1 ms, −31,1 %** |
+>
+> ⚠️ **ET LE CHRONOMÈTRE POSÉ AUTOUR DU SEUL CALCUL NE VOIT RIEN DE CE GAIN** — §3 de `/threejs-optimisation`, mot pour mot. `terrain.rebuild` seul coûte **39–51 ms** sous la fenêtre contre **44–55 ms** en production : à peine distinguable. **Tout l'écart est dans le téléversement** d'un tampon neuf contre un tampon marqué sale, et il ne se lit qu'en encadrant jusqu'à `render()`.
+>
+> · **`majHauteurs` REJOUÉ IN SITU, SUR LE VRAI FLUX** (navigateur, quadtree réel, La Réunion, `zoomEffectif` 13, **0 manquant**, 15 répétitions, médiane) — et ⚠️ **le chiffre du banc node de la Tâche 6 était optimiste** :
+>
+> | | banc node (Tâche 6) | in situ, navigateur | dont `remplirHauteurs` | dont `appliquerHauteurs` | dont `gridNormals` |
+> |---|---|---|---|---|---|
+> | n = 256 | 1,040 ms | **2,5 ms** | — | — | — |
+> | n = 384 | 2,367 ms | **3,5 ms** | 1,8 ms | 1,7 ms | **1,2 ms** |
+> | n = 768 | 9,094 ms | **13,7 ms** | 7,0 ms | 6,5 ms | **4,5 ms** |
+>
+> **×1,48 à n = 384**, et les normales — qui n'existaient pas quand la Tâche 6 a mesuré — en sont **1,2 ms sur 3,5**. ⚠️ **Le contrôle croisé tombe juste, et il est indépendant** : `grid-normals.js` annonce **4,6 ms à res 768** mesurés sur la géométrie affichée ; ce banc-ci rend **4,5 ms** sur une fenêtre, par un tout autre chemin. **Et `computeVertexNormals()` aurait coûté 83,8 à 120,5 ms au même endroit** — le cran remis, en un appel.
+>
+> · ⚠️ **`rayonCoin = 0` AU BRANCHEMENT, ET C'EST UNE MESURE QUI L'A DÉCIDÉ, PAS UN GOÛT.** La forme fermée de `gridNormals` suppose un pas RÉGULIER ; `versEmpreinte` contracte la grille sur la superellipse dans les quatre pavés de coin. Écart à `computeVertexNormals`, réglage de PRODUCTION du coin (2,24 / 4,4) : **63,1° au pire et 4,49° en moyenne sur 1 024 sommets à n = 384** (27,9° / 3,55° à n = 64), et **1,47° même hors des pavés**, sur leurs voisins immédiats. À coins vifs : **0,022 °** — l'arrondi Float32, rien d'autre. **Le test ⑨d MESURE ce défaut au lieu de le supposer**, et exige qu'il reste grand : le jour où quelqu'un branchera la fenêtre à coins arrondis, il faudra l'avoir lu. La forme du coin reste donc celle de `plinth.js`, exactement comme aujourd'hui.
+>
+> · **À `rayonCoin = 0`, LA NAPPE DE LA FENÊTRE EST LE GABARIT DE `gridTemplate`, BIT POUR BIT** — `x`, `z`, `uv` ET index. ⚠️ **L'assertion a MORDU à la première exécution** : la fenêtre émettait son second triangle en `d,b,c` là où `grid-template.js:114` écrit `b,c,d` — même triangle, même enroulement, même normale, **mais pas le même tampon d'index**. Corrigé dans le module. C'est exactement le « deux tampons équivalents qui divergent sans bruit » que ce plan poursuit.
+>
+> · **ET LES DEUX CHEMINS PEIGNENT LE MÊME BLOC, VÉRIFIÉ ATTRIBUT PAR ATTRIBUT** (test ⑧c, et banc `.banc/compare-chemins.mjs`) : `position`, `normal`, `color`, `uv` et l'index **identiques à zéro d'écart**, `uHeightRange` et `uSeaY` identiques. ⚠️ **Trois composantes de `color` sortent NaN — des DEUX côtés** : `Math.pow(hn, 0.85)` avec `hn < 0` dans `terrain.js:_ecrireRelief`, un défaut **préexistant** que ce branchement n'a ni créé ni corrigé. Le test le constate au lieu de le masquer.
+>
+> · **`uv` posée UNE FOIS** (elle ne dépend que des `x`/`z`, qui ne bougent jamais), **normales réécrites EN PLACE**, `assert.equal` par identité de référence. ⚠️ **Et une découverte à écrire** : sur le chemin de production, `uv` était **déjà** partagé d'un cran à l'autre — `gridTemplate` mémorise son gabarit. Le test ⑧a le dit, pour qu'on ne croie pas que la 6 ter l'a gagné.
+>
+> · ⚠️ **LA JUPE PARTAGE SES SOMMETS, DONC SES NORMALES.** Le sommet haut d'une paroi **est** le sommet de bord de la nappe (c'est ce qui rend la couture exacte au bit près) : il porte la normale de la nappe, et la paroi se lirait comme un congé. **Sous ce branchement la jupe n'est pas dessinée du tout** — `setDrawRange` borne le tirage aux `trianglesNappe`, et `plinth.js` continue de fournir le socle affiché. **Le damier n'est pas touché** : `block-grid.js:768` appelle toujours `buildSlabWalls`, les 13 fichiers `damier-*.test.js` sont verts.
+>
+> · **CE QUE L'ÉCRAN A DIT, DEUX CHARGEMENTS PLUS TARD** : le socle de La Réunion à Z12 sous `?globe=continu` est **indiscernable** de celui de `?globe=crans` — relief éclairé, palette, courbes de niveau, grain, trait de côte, bathymétrie, parois, chanfrein, **coins en superellipse**, mer qui épouse le socle, tampon « RÉUNION ». **Rien de laid, rien de neuf.** C'est ce qu'on voulait : le cran part, l'image ne bouge pas. Vérifié aussi que ce qui est à l'écran EST bien la fenêtre — `position.array === fenetre.geometrie`, 594 434 sommets (769² + 4×768 + 1), `drawRange` 3 538 944 = 768²×6.
+>
+> · **Les défauts réseau sont préexistants et mesurés des DEUX côtés**, comme la 6 bis A l'exige : `ERR_CONNECTION_TIMED_OUT` (le bucket d'altitude injoignable depuis cette machine) et une vingtaine de 404 par descente, **identiques sur `?globe=crans`**. **Aucune erreur JS neuve, sur aucun des deux chemins.** J'ai refait la descente deux fois.
+>
+> · `npm test` **3 276 verts** (3 264 + 6 + 6), `audit:tests` **189 listés / 189 sur disque**, `node --check` sur les cinq fichiers modifiés, construction complète verte (`nettoie:dist` → `build:mapcells` → `vite build` → `verifie:dist`).
+>
+> · ⚠️ **UNE ASSERTION EXISTANTE A DÛ ÊTRE CORRIGÉE EN PLACE, ET ELLE AVAIT RAISON DE MORDRE** : `fenetre-branchee.test.js` ①b comptait **douze** lecteurs de l'exagération et en a vu **treize**. Le treizième est `terrain.fabriqueFenetre` dans `main.js`, qui passe `lireExageration(params)` à `construireFenetre` — **sans lui la fenêtre aurait sa PROPRE échelle verticale**, c'est-à-dire exactement le réglage écrit d'un côté et jamais transmis à l'autre que ce test existe pour interdire. Le compte de `main.js` passe de 4 à 5 ; **les trois autres lignes n'ont pas bougé d'un caractère**.
+>
+> #### ⚠️ CE QUE CETTE TÂCHE NE FAIT PAS, ET IL FAUT LE LIRE AVANT DE CROIRE LE CRAN MORT
+>
+> 1. ⚠️ **LES HAUTEURS NE VIENNENT PAS ENCORE DU FLUX.** Sous le branchement, `terrain.js` remplit les `y` avec SON échantillonneur, depuis `this.dem` — donc **`loadSurface` garde la main sur le moment où un cran aboutit**. Ce que la 6 ter supprime, c'est la **reconstruction de géométrie** (et son téléversement) ; ce qu'elle ne touche pas, c'est l'attente réseau du MNT — les **7,88 s sur 30** que le §6 chiffre depuis le début et qu'aucune des quatorze tâches ne prend. `majHauteurs(fenetre, flux)` est prêt, mesuré in situ ci-dessus, et **appelé par personne en production**. → tâche suivante.
+> 2. **Le grain, la palette et `uHeightRange` restent à `terrain.js`**, et c'est un arbitrage écrit (§10 de `fenetre-bornee.js`) : les recopier dans la fenêtre ferait une SECONDE source de vérité pour la couleur.
+> 3. **`majResFenetre` (mode 3×3, `?f3=1`) alloue toujours** une géométrie neuve : hors périmètre, et son drapeau est éteint.
+> 4. **Rien n'a été mesuré sur un portable**, et **aucune image EN MOUVEMENT** n'a été chronométrée — les deux manques que le §10 traîne depuis le prototype.
+> 5. **La décision 5 n'est pas exécutée** : `contourSocle` existe, `optionsSocle` transporte les sept options, mais personne n'appelle `buildSlabWalls` à l'arrêt sur le contour de la fenêtre. Le socle affiché reste celui de `plinth.js`, et c'est très bien tant que la nappe est identique.
+
+**Fichiers :** modifier `src/monde/fenetre-bornee.js`, `src/terrain.js`, **`src/main.js`** *(⚠️ le plan l'oubliait : `terrain.js` NE PEUT PAS importer `fenetre-bornee.js` — ce serait le cycle `terrain.js → fenetre-bornee.js → terrain.js`, celui que la 6 bis A a déjà payé. La fenêtre est donc fabriquée et posée depuis `main.js`, et `Terrain` ne connaît d'elle que la forme de ses champs.)* · tester `test/fenetre-branchee.test.js` (élargir) et `test/fenetre-bornee.test.js` (élargir)
 
 ⚠️ **LE PLAN APPELAIT ÇA « LE BRANCHEMENT », COMME S'IL SUFFISAIT D'IMPORTER. C'EST FAUX, ET C'EST VÉRIFIABLE EN TRENTE SECONDES :** `construireFenetre` rend `{ geometrie, indices }` — **des positions et des index, rien d'autre**. Pas de `normal`, pas de `uv`, pas de `color`. Or le maillage de production porte les quatre, et son matériau lit `uHeightRange`, `uSeaY`, les masques et l'emprise. **Poser la fenêtre à la place du bloc aujourd'hui donnerait une forme sans relief éclairé ni palette** — et le module n'est pas en cause : la Tâche 6 avait pour périmètre la COQUE, et elle l'a livrée, prouvée et mutée.
 
 ⚠️ **ET LES NORMALES NE SE RATTRAPENT PAS PAR `computeVertexNormals()`** : `terrain.js` les écrit à la main précisément parce que cet appel pesait **81 % de la fabrication d'une dalle — 83,8 ms mesurés à Chamonix** (in situ, commentaire de `terrain.js`). L'appeler par image coûterait plus de **cinq fois** le budget d'une image à 60 Hz : il remettrait le cran qu'on enlève. **`src/grid-normals.js` (`gridNormals`) existe et fait ce travail sur une grille régulière — c'est lui qu'il faut brancher, pas three.js.**
 
-- [ ] **Étape 1** — test : `majHauteurs` met à jour **normales comprises**, toujours **sans réallouer** — comparaison des tampons par IDENTITÉ DE RÉFÉRENCE, comme la Tâche 6.
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
-- [ ] **Étape 3** — implémenter : `uv` posées une fois par `construireFenetre` (elles ne dépendent que des `x`/`z`, qui ne bougent jamais), normales rafraîchies par `gridNormals` dans `appliquerHauteurs`.
-- [ ] **Étape 4** — brancher derrière `FLAGS.globeContinu`, le chemin du bloc intact pour la production, et **mesurer le coût par image BOUT EN BOUT, `render()` compris** — ⚠️ §3 de `/threejs-optimisation` : le téléversement des sommets au GPU est HORS d'un chronomètre posé autour du calcul, et il pèse 1,54 Mo par image.
-- [ ] **Étape 5 — mutation** : réintroduire une reconstruction doit tuer le test de l'Étape 1.
-- [ ] **Étape 6 — REGARDER L'ÉCRAN**, descendre du globe au socle, et dire ce qu'on voit, y compris si c'est laid.
-- [ ] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [x] **Étape 1** — test : `majHauteurs` met à jour **normales comprises**, toujours **sans réallouer** — comparaison des tampons par IDENTITÉ DE RÉFÉRENCE, comme la Tâche 6. ✅ `fenetre-bornee.test.js` ⑨b, et `fenetre-branchee.test.js` ⑧b pour le maillage AFFICHÉ.
+- [x] **Étape 2** — le lancer, vérifier qu'il échoue. ✅ ⚠️ **REJOUÉ CONTRE LE DÉPÔT AVANT D'ÊTRE ÉCRIT** (`.banc/rejeu-cran.mjs`, hors dépôt) : sur un `Terrain` réel sous node, après un cran, `geometry`, `position.array` et `normal.array` sont **tous les trois des objets neufs**. ⑧a garde ce constat comme TÉMOIN, pour que ⑧b ne puisse pas passer sur un dépôt où plus rien ne se reconstruirait. ⚠️ **HONNÊTEMENT, la phase rouge n'a pas eu lieu sur ⑨** — le module a été écrit avant ses tests, comme à la Tâche 6. **Ce qui la remplace vaut mieux qu'une case cochée : ⑨a a MORDU à la première exécution** et a forcé une vraie correction du module (l'ordre des index, `d,b,c` → `b,c,d`).
+- [x] **Étape 3** — implémenter : `uv` posées une fois par `construireFenetre` (elles ne dépendent que des `x`/`z`, qui ne bougent jamais), normales rafraîchies par `gridNormals` dans `appliquerHauteurs`. ✅ Plus les normales de la JUPE, posées une fois elles aussi (§10 du module).
+- [x] **Étape 4** — brancher derrière `FLAGS.globeContinu`, le chemin du bloc intact pour la production, et **mesurer le coût par image BOUT EN BOUT, `render()` compris** — ⚠️ §3 de `/threejs-optimisation` : le téléversement des sommets au GPU est HORS d'un chronomètre posé autour du calcul, et il pèse 1,54 Mo par image. ✅ **−30,3 % à res 384, −31,1 % à res 768**, et **le chronomètre posé autour du seul calcul ne voit rien de ce gain** — voir le bilan.
+- [x] **Étape 5 — mutation** : réintroduire une reconstruction doit tuer le test de l'Étape 1. ✅ Deux mutations, une par étage : ⑨f réalloue le tampon de normales, ⑧e fait rendre `null` au point de décision du branchement (« remettre le gabarit »).
+- [x] **Étape 6 — REGARDER L'ÉCRAN**, descendre du globe au socle, et dire ce qu'on voit, y compris si c'est laid. ✅ **Elle a dit oui**, et c'est la première fois de ce plan : quatorze crans sans une seule reconstruction, socle indiscernable de la production. Voir le bilan.
+- [x] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 ### Tâche 6 quater : LE PILOTE DE L'EXAGÉRATION CONTINUE ⚠️ **UNE MESURE À L'ÉCRAN L'A OUVERTE**
 
@@ -1614,11 +1665,11 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
 
 ⚠️ **NE TOUCHE PAS AU DAMIER.** `block-grid.js:768` appelle `buildSlabWalls`, avec **13 fichiers `test/damier-*.test.js` et 243 tests à empreintes bit à bit**. La Tâche 6 a délibérément laissé `plinth.js` et `ocean.js` intacts pour cette raison. `contourSocle(fenetre)` est le pont prévu vers `buildSlabWalls` **à l'arrêt** (décision 5 : la gravure ne s'écrit qu'à l'arrêt).
 
-- [ ] **Étape 1 — le test qui échoue** ⚠️ **REPORTÉE À LA 6 ter** — elle porte sur la géométrie, qui n'est pas encore branchée : un changement de cran en mode surface **ne reconstruit aucune géométrie** — l'identité des tampons de position est conservée. ⚠️ **Rejoue-la contre le dépôt AVANT de l'écrire.**
+- [x] **Étape 1 — le test qui échoue** ✅ **FAITE PAR LA 6 ter LE 2026-08-21** — un changement de cran en mode surface **ne reconstruit aucune géométrie**, l'identité des tampons de position est conservée (`fenetre-branchee.test.js` ⑧b, témoin ⑧a). ⚠️ **Rejouée contre le dépôt AVANT d'être écrite** — `.banc/rejeu-cran.mjs` : les trois tampons étaient neufs.
 - [x] **Étape 2** — le lancer, vérifier qu'il échoue.
 - [x] **Étape 3 — le partage d'exagération** ✅ **FAITE** — douze lecteurs, un accesseur, un cycle d'import évité, ses douze lecteurs, et un test qui **échoue si un seul lit encore `params.demExaggeration`**.
-- [ ] **Étape 4 — brancher la fenêtre** ⚠️ **REPORTÉE À LA 6 ter** : ce n'est pas un import, il manque normales et `uv` derrière `FLAGS.globeContinu`, en gardant le chemin du bloc pour la production.
-- [x] **Étape 5 — mutation** ✅ **FAITE POUR L'EXAGÉRATION** (①d, ②c, ③) ; la moitié « reconstruction » part avec la 6 ter : remettre un lecteur sur `params.demExaggeration` doit tuer le test ; réintroduire une reconstruction doit tuer celui de l'Étape 1.
+- [x] **Étape 4 — brancher la fenêtre** ✅ **FAITE PAR LA 6 ter LE 2026-08-21** — normales et `uv` ajoutées au module, fenêtre posée derrière `FLAGS.globeContinu` depuis `main.js` (⚠️ **pas depuis `terrain.js` : le cycle d'import**), chemin du bloc intact pour la production. ⚠️ **Les hauteurs viennent encore du MNT, pas du flux** — voir « ce que cette tâche ne fait pas » dans le bilan de la 6 ter.
+- [x] **Étape 5 — mutation** ✅ **FAITE POUR L'EXAGÉRATION** (①d, ②c, ③) ; ✅ **et la moitié « reconstruction » est faite par la 6 ter** — ⑨f réalloue le tampon de normales, ⑧e fait rendre `null` au point de décision du branchement.
 - [x] **Étape 6 — REGARDER L'ÉCRAN.** ✅ **FAITE, ET ELLE A DIT NON** — voir le tableau Z12 → Z4 du bilan ⚠️ **C'est la première tâche de ce plan dont le résultat est VISIBLE. Charge la page, descends du globe au socle, et dis ce que tu vois** — y compris si c'est laid.
 - [x] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
@@ -1702,6 +1753,8 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
 **Cohérence des noms** — employés à l'identique partout, ⚠️ **et cette liste était aveugle exactement aux cinq interfaces que la Tâche 4 bis déclarait sans jamais les fabriquer** : `socleVisible`, `empriseSocle`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `creerFlux`, `demanderEmprise`, `tuilesPretes`, `zoomEffectif`, `remplirHauteurs`, `PLAFOND_FILE`, `debitObserve`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`, **et les cinq que la Tâche 3 a réellement fabriqués en chemin** : `ZOOM_SOCLE`, `LARGEUR_SOCLE_M`, `LAT_REFERENCE`, `fractionEcran`, `altitudePourFraction`. ⚠️ **Un nom qui n'apparaît qu'à sa déclaration est une interface orpheline : cherchez-les avec `grep -c`, pas à l'œil.** ⚠️ **`socleVisible` et `empriseSocle` ne sont plus orphelins EN AMONT — fabriqués et testés le 2026-08-21 — mais ils le restent EN AVAL : aucun module de `src/` ne les lit encore.** Ce sont les Tâches 4 bis, 6 et 7 qui les branchent.
 
 ⚠️ **MISE À JOUR DU 2026-08-21 — la Tâche 4 bis a fabriqué ses SIX interfaces, et elles ne sont plus orphelines en amont :** `creerFlux`, `demanderEmprise`, `tuilesPretes`, `zoomEffectif`, `remplirHauteurs` et `debitObserve` vivent dans `src/monde/flux-terrain.js`, testées une par une dans `test/flux-terrain.test.js` ; `PLAFOND_FILE` vit dans `src/globe.js`. **`empriseSocle` a désormais un lecteur** — `demanderEmprise` la consomme. **Quatre noms s'ajoutent à surveiller**, produits en chemin par la 4 bis : `tuilesEmprise` (`flux-terrain.js`), `gardeHauteurs`, `_purgerFile` et `_annuler` (`globe.js`). ⚠️ **Restent orphelins EN AVAL — aucun module de `src/` ne les lit** : les six interfaces du flux, `socleVisible`, et tout ce que les Tâches 5, 6 et 7 déclarent (`auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`).
+
+⚠️ **MISE À JOUR DU 2026-08-21 — la Tâche 6 ter a sorti `construireFenetre` de l'orphelinat EN AVAL, et lui seul.** `src/main.js` l'importe et pose la fenêtre sur `terrain.js` (`adopterFenetre`) : c'est le PREMIER module de `src/monde/` hors `exageration-continue.js` qu'un fichier de production lit vraiment. **Trois noms s'ajoutent à surveiller**, produits en chemin : `adopterFenetre` et `fabriqueFenetre` (`terrain.js`), `trianglesNappe` (`fenetre-bornee.js`). ⚠️ **Restent orphelins EN AVAL** — aucun module de `src/` hors `src/monde/` ne les lit : `majHauteurs`, `contourSocle`, `auditerSolide`, `socleVisible`, `empriseSocle` *(⚠️ celui-ci est lu par `main.js` depuis la 6 ter, mais seulement pour NOMMER l'emprise de la fenêtre — pas encore pour la remplir)*, les six interfaces du flux, `remplirBorne`, `etatIndicateur`, `resolutionPour`, `empriseADerive`.
 
 ⚠️ **MISE À JOUR DU 2026-08-21 — la Tâche 4 ter a fabriqué `zoomSoutenable`, et il a un LECTEUR :** `remplirBorne`, dans le même fichier `src/monde/descente-bornee.js`, qui est le **point d'appel de R3 côté remplissage**. **Quatre noms s'ajoutent à surveiller** : `remplirBorne`, `etatIndicateur`, `ZOOM_PLANCHER`, `NIVEAUX_PAR_DOUBLEMENT`. ⚠️ **Ils restent orphelins EN AVAL comme tout le bloc : aucun module de `src/` hors `src/monde/` ne les lit encore** — ce sont les Tâches 1, 2, 6 et 7 qui les brancheront, et la Tâche 4 ter dit précisément où (§4 de `descente-bornee.js`).
 

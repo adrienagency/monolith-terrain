@@ -62,6 +62,12 @@ import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagConti
 // `fenetre-bornee.js` fermerait le cycle terrain.js → fenetre-bornee.js →
 // terrain.js, et AUCUN TEST NE CHARGE `main.js` pour l'attraper.
 import { lireExageration, poserExageration, creerExagerationPartagee, majExagerationCadrage, surchargesStockees, courbeExageration, EXAG_BASE } from './monde/exageration-continue.js'
+// LA FENÊTRE BORNÉE — Tâche 6 ter. ⚠️ Importée ICI et pas dans `terrain.js` :
+// `fenetre-bornee.js` importe `TERRAIN_SIZE` de `terrain.js`, donc l'import
+// inverse fermerait le cycle. `main.js` est en bout de chaîne, il n'en ouvre
+// aucun. Voir `terrain.adopterFenetre`.
+import { construireFenetre } from './monde/fenetre-bornee.js'
+import { empriseSocle } from './monde/seuil-socle.js'
 // `fractionSurTrace` : le pont d'indices qui remet la tête de course sous
 // l'objectif de la poursuite (voir son commentaire dans poursuite.js).
 import { fractionSurTrace } from './poursuite.js'
@@ -1570,7 +1576,44 @@ function setFillEnabled(v) {
 
 // ------------------------------------------------------------------ world
 
+// ══════════ LA FENÊTRE BORNÉE À LA PLACE DU BLOC — Tâche 6 ter ═════════════
+//
+// ⚠️ **LE SECOND ET DERNIER LECTEUR DE `FLAGS.globeContinu` EST ICI**, et c'est
+// le même patron que le globe trois mille lignes plus bas : `terrain.js`
+// n'importe PAS `flags.js`, il ne connaît qu'un booléen posé sur `params`.
+// **Et il n'importe pas non plus `fenetre-bornee.js`** — ce serait le cycle
+// `terrain.js → fenetre-bornee.js → terrain.js`, celui que la Tâche 6 bis A a
+// déjà payé une fois et qui ne se serait vu qu'en production. C'est donc d'ICI
+// que la fenêtre est fabriquée et posée.
+//
+// **Ce que ça change, et c'est tout le plan :** aujourd'hui chaque cran passe
+// par `terrain.rebuild()`, qui alloue une géométrie NEUVE et quatre tampons
+// neufs. Avec la fenêtre, les quatre tampons survivent au cran et `rebuild()`
+// n'écrit plus que des `y`, des normales et des couleurs, **en place**.
+params.globeContinu = globeContinuActif()
+
 const terrain = new Terrain(params)
+// ⚠️ **`rayonCoin = 0`, MESURÉ ET NON PRÉFÉRÉ** : la formule fermée de
+// `gridNormals` suppose un pas régulier, et les coins en superellipse le
+// cassent — 63,1° d'écart de normale au pire à n = 384 (`fenetre-bornee.test.js`
+// ⑨d). À coins vifs la nappe est le gabarit de `gridTemplate` bit pour bit. La
+// forme du coin reste celle de `plinth.js`, exactement comme aujourd'hui.
+// ⚠️ `largeurM` vient du MNT, pas de l'emprise : c'est `dem.extentMeters` qui
+// fait foi pour l'échelle verticale (32 m d'écart entre les deux conventions de
+// circonférence, soit 8,0e-7 en relatif — assez pour diverger en silence).
+terrain.fabriqueFenetre = (n) => {
+  const lat = Number(params.demLat)
+  const lon = Number(params.demLon)
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
+  return construireFenetre({
+    emprise: empriseSocle({ centre: { lat, lon }, zoom: params.demZoom }),
+    n,
+    rayonCoin: 0,
+    largeurM: dem?.extentMeters || null,
+    profondeurDalle: params.plinthDepth ?? 7,
+    exageration: lireExageration(params),
+  })
+}
 scene.add(terrain.mesh)
 
 // the 3D slab the relief sits on (walls + shadow-catching base)

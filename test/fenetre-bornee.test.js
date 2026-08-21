@@ -28,6 +28,10 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
+// ⚠️ three N'EST LÀ QUE COMME RÉFÉRENCE (§⑨) : `computeVertexNormals` est la
+// vérité contre laquelle on mesure `grid-normals.js`. Le module, lui, ne
+// l'importe pas — c'est tout l'intérêt, 83,8 ms contre 4,6.
+import * as THREE from 'three'
 
 import {
   construireFenetre,
@@ -55,6 +59,7 @@ import { auditerSolide } from '../src/monde/audit-solide.js'
 import { pointCoin, exposantCoin } from '../src/fenetre-clip.js'
 import { rayonEauDansSocle, rayonCoinEau } from '../src/plinth.js'
 import { TERRAIN_SIZE } from '../src/terrain.js'
+import { gridTemplate } from '../src/grid-template.js'
 import { blockExtentMeters } from '../src/landmarks.js'
 import { empriseSocle, ZOOM_SOCLE, SEUIL_NAISSANCE_M } from '../src/monde/seuil-socle.js'
 import { tuilesEmprise } from '../src/monde/flux-terrain.js'
@@ -663,4 +668,172 @@ test('⑧ l\'exagération agit AU RÉÉCHANTILLONNAGE, pas à la construction', 
   for (let g = 0; g < a.nbGrille; g++) {
     assert.ok(Math.abs(a.geometrie[g * 3 + 1] - b.geometrie[g * 3 + 1]) < 1e-6, `sommet ${g}`)
   }
+})
+
+// ════════════════════════════════════════════════════════════════════════════
+// ⑨ LES QUATRE ATTRIBUTS — Tâche 6 ter
+// ════════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ **LA TÂCHE 6 LIVRAIT UNE COQUE, PAS UN MAILLAGE AFFICHABLE.** Le maillage
+// de production porte QUATRE attributs — relevé à l'exécution sur un `Terrain`
+// réel : `['position', 'uv', 'normal', 'color']`. La fenêtre n'en avait qu'un.
+// Ces tests gardent les deux que la 6 ter ajoute (`uv` posée une fois,
+// `normales` réécrites en place), **et MESURENT ce que la formule fermée coûte
+// dans les pavés de coin** au lieu de le supposer.
+
+/** Les normales de three sur la NAPPE SEULE — mêmes sommets, mêmes triangles. */
+function normalesDeThree (f, n) {
+  const nb = (n + 1) * (n + 1)
+  const g = new THREE.BufferGeometry()
+  g.setAttribute('position', new THREE.BufferAttribute(f.geometrie.slice(0, nb * 3), 3))
+  g.setIndex(new THREE.BufferAttribute(f.indices.slice(0, n * n * 6), 1))
+  g.computeVertexNormals()
+  return g.attributes.normal.array
+}
+
+/** L'écart angulaire, en degrés, entre deux normales de même index. */
+function ecartDegres (a, b, g) {
+  const d = a[g * 3] * b[g * 3] + a[g * 3 + 1] * b[g * 3 + 1] + a[g * 3 + 2] * b[g * 3 + 2]
+  return (Math.acos(Math.min(1, Math.max(-1, d))) * 180) / Math.PI
+}
+
+/** Un relief AVEC son bruit de Nyquist — celui qui trompait la différence
+ *  centrée de 3,2° en moyenne (`grid-normals.js`). */
+function reliefBruite (n) {
+  const h = new Float32Array((n + 1) * (n + 1))
+  for (let j = 0; j <= n; j++) {
+    for (let i = 0; i <= n; i++) {
+      h[j * (n + 1) + i] = 1200 + 800 * Math.sin(i / 7.3) * Math.cos(j / 5.1) + 40 * Math.sin(i * 2.1 + j * 3.7)
+    }
+  }
+  return h
+}
+
+test('⑨a les `uv` sont posées UNE FOIS — et c\'est la convention de `gridTemplate`', () => {
+  const n = 16
+  const f = construireFenetre({ emprise: EMPRISE, n, rayonCoin: 0 })
+  const tpl = gridTemplate(n, TERRAIN_SIZE)
+  // ⚠️ BIT À BIT contre le gabarit de production : `u = i/n`, `v = 1 − j/n`.
+  // Inverser `v` retournerait la rampe et les masques du haut en bas, sans une
+  // seule erreur nulle part.
+  for (let g = 0; g < f.nbGrille; g++) {
+    assert.equal(f.uv[g * 2], tpl.uv[g * 2], `u du sommet ${g}`)
+    assert.equal(f.uv[g * 2 + 1], tpl.uv[g * 2 + 1], `v du sommet ${g}`)
+    assert.equal(f.geometrie[g * 3], tpl.position[g * 3], `x du sommet ${g}`)
+    assert.equal(f.geometrie[g * 3 + 2], tpl.position[g * 3 + 2], `z du sommet ${g}`)
+  }
+  // …et la topologie de la nappe est celle du gabarit, index pour index
+  assert.equal(f.trianglesNappe, n * n * 2)
+  for (let k = 0; k < n * n * 6; k++) assert.equal(f.indices[k], tpl.index[k], `index ${k}`)
+})
+
+test('⑨b `majHauteurs` met à jour les NORMALES, et ne réalloue toujours rien', () => {
+  const f = fenetreDeBanc({ n: 24 })
+  const tamponN = f.normales
+  const tamponUV = f.uv
+  const uvAvant = Float32Array.from(f.uv)
+  const nAvant = Float32Array.from(f.normales)
+
+  majHauteurs(f, fluxBouchon(EMPRISE, RELIEF))
+
+  // ⚠️ IDENTITÉ DE RÉFÉRENCE — la seule assertion qui distingue « mis à jour »
+  // de « reconstruit à l'identique ».
+  assert.equal(f.normales, tamponN, 'les normales ont été réallouées')
+  assert.equal(f.uv, tamponUV, 'les `uv` ont été réallouées')
+  // les `uv` ne dépendent que des x/z : elles n'ont pas bougé d'un bit
+  assert.deepEqual(Array.from(f.uv), Array.from(uvAvant), 'les `uv` ont bougé')
+  // les normales, elles, suivent le relief
+  let bougees = 0
+  for (let g = 0; g < f.nbGrille; g++) if (f.normales[g * 3] !== nAvant[g * 3]) bougees++
+  assert.ok(bougees > f.nbGrille / 2, `${bougees} normales sur ${f.nbGrille} seulement ont suivi le relief`)
+  // et elles sont unitaires, jupe comprise
+  for (let s = 0; s < f.nbSommets; s++) {
+    const l = Math.hypot(f.normales[s * 3], f.normales[s * 3 + 1], f.normales[s * 3 + 2])
+    assert.ok(Math.abs(l - 1) < 1e-6, `normale ${s} de longueur ${l}`)
+  }
+})
+
+test('⑨c à coins vifs, les normales sont celles de three — bord et coins compris', () => {
+  // ⚠️ CE N'EST PAS UNE APPROXIMATION. `grid-normals.js` est la forme fermée de
+  // la somme des six faces sur une grille régulière : à `rayonCoin = 0` la
+  // nappe EST une grille régulière, donc le résultat est celui de
+  // `computeVertexNormals` à l'arrondi Float32 près.
+  const n = 32
+  const f = construireFenetre({ emprise: EMPRISE, n, rayonCoin: 0 })
+  majHauteurs(f, reliefBruite(n))
+  const ref = normalesDeThree(f, n)
+  let pire = 0
+  for (let g = 0; g < f.nbGrille; g++) pire = Math.max(pire, ecartDegres(f.normales, ref, g))
+  // mesuré : 0,0226° à n = 64, 0,0221° à n = 384 — le seuil de 0,05° est celui
+  // que `terrain.js` annonce déjà pour le chemin de production.
+  assert.ok(pire < 0.05, `écart maximal ${pire.toFixed(4)}°`)
+})
+
+test('⑨d ⚠️ CE QUE LA FORME FERMÉE COÛTE DANS LES PAVÉS DE COIN — mesuré', () => {
+  // ⚠️ **L'HYPOTHÈSE DE `gridNormals` EST LE PAS RÉGULIER, ET `versEmpreinte`
+  // LA CASSE DANS LES QUATRE COINS.** Ce test ne garde pas une propriété : il
+  // MESURE le défaut, pour qu'il ne se découvre pas à l'écran. C'est aussi ce
+  // qui justifie `rayonCoin = 0` au branchement de la 6 ter — la forme du coin
+  // restant celle de `plinth.js`, exactement comme aujourd'hui.
+  const n = 64
+  const f = construireFenetre({ emprise: EMPRISE, n, rayonCoin: RAYON_COIN, puissanceCoin: PUISSANCE_COIN })
+  majHauteurs(f, reliefBruite(n))
+  const ref = normalesDeThree(f, n)
+  const interieur = DEMI_MONDE - RAYON_COIN
+  let pireCoin = 0
+  let pireHors = 0
+  let nCoin = 0
+  for (let g = 0; g < f.nbGrille; g++) {
+    const d = ecartDegres(f.normales, ref, g)
+    const dansCoin = Math.abs(f.geometrie[g * 3]) > interieur && Math.abs(f.geometrie[g * 3 + 2]) > interieur
+    if (dansCoin) { nCoin++; pireCoin = Math.max(pireCoin, d) } else pireHors = Math.max(pireHors, d)
+  }
+  // Mesuré au réglage de PRODUCTION du coin (`rayonCoin` 2,24, `puissanceCoin`
+  // 4,4), sur ce même relief :
+  //   n =  64 → coin : 27,95° au pire, 3,55° en moyenne sur 36 sommets (0,85 %)
+  //   n = 384 → coin : 63,14° au pire, 4,49° en moyenne sur 1 024 (0,69 %)
+  //   hors coin : 1,26° et 1,47° — les sommets voisins du pavé, pas plus loin.
+  // ⚠️ Le seuil ci-dessous n'est PAS un contrat de qualité : il verrouille le
+  // FAIT que l'écart existe et qu'il est grand, pour que personne ne branche la
+  // fenêtre à coins arrondis en croyant les normales exactes.
+  assert.ok(nCoin > 0, 'aucun sommet dans les pavés de coin — le banc ne prouve rien')
+  assert.ok(pireCoin > 10, `l'écart de coin n'est plus que ${pireCoin.toFixed(2)}° : re-mesurer avant de conclure`)
+  assert.ok(pireHors < 2, `hors coin ${pireHors.toFixed(2)}° — la grille régulière devrait rester exacte`)
+})
+
+test('⑨e la JUPE porte ses propres normales, posées une fois', () => {
+  const f = fenetreDeBanc({ n: 12 })
+  majHauteurs(f, fluxBouchon(EMPRISE, RELIEF))
+  for (let s = 0; s < f.anneau.length; s++) {
+    const b = (f.iBas + s) * 3
+    // l'anneau bas : sortante HORIZONTALE (la paroi l'emporte sur la dalle, qui
+    // regarde le sol et n'est jamais vue)
+    assert.equal(f.normales[b + 1], 0, `la normale du bas ${s} n'est pas horizontale`)
+    const x = f.geometrie[b]
+    const z = f.geometrie[b + 2]
+    assert.ok(f.normales[b] * x + f.normales[b + 2] * z > 0, `la normale du bas ${s} rentre au lieu de sortir`)
+    // les `uv` du bas doublent celles du sommet de bord qu'il prolonge
+    assert.equal(f.uv[(f.iBas + s) * 2], f.uv[f.anneau[s] * 2])
+    assert.equal(f.uv[(f.iBas + s) * 2 + 1], f.uv[f.anneau[s] * 2 + 1])
+  }
+  // le centre de l'éventail regarde le sol
+  assert.deepEqual(
+    [f.normales[f.iCentre * 3], f.normales[f.iCentre * 3 + 1], f.normales[f.iCentre * 3 + 2]],
+    [0, -1, 0],
+  )
+  // ⚠️ et le sommet HAUT d'une paroi EST le sommet de bord de la nappe : il
+  // porte donc la normale de la NAPPE, pas celle de la paroi. Écrit noir sur
+  // blanc parce que ça se voit à l'écran — la paroi se lit comme un congé.
+  assert.ok(f.normales[f.anneau[3] * 3 + 1] > 0.5, 'le sommet de bord devrait regarder vers le haut')
+})
+
+test('⑨f MUTATION — réallouer les normales tue ⑨b', () => {
+  // c'est la mutation de l'Étape 5 : « réintroduire une reconstruction ».
+  const f = fenetreDeBanc({ n: 8 })
+  const tamponN = f.normales
+  f.normales = new Float32Array(f.normales.length) // la reconstruction, en un geste
+  appliquerHauteurs(f)
+  assert.notEqual(f.normales, tamponN, 'le banc de mutation ne mute rien')
+  // …et l'assertion de ⑨b, rejouée telle quelle, doit tomber
+  assert.throws(() => assert.equal(f.normales, tamponN, 'les normales ont été réallouées'))
 })

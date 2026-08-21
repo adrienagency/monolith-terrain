@@ -172,9 +172,68 @@
 // (`COTE_MONDE = TERRAIN_SIZE`) et EXACTEMENT la même loi de coin : la mer
 // épouse le socle sans qu'une seule constante ait été recopiée. C'est vérifié
 // par test (`la mer et la fenêtre lisent la même forme`), pas affirmé.
+//
+// ══════════ 10. LES QUATRE ATTRIBUTS — Tâche 6 ter ══════════════════════════
+//
+// ⚠️ **LA TÂCHE 6 AVAIT POUR PÉRIMÈTRE LA COQUE, ET LA COQUE N'EST PAS UN
+// MAILLAGE AFFICHABLE.** `construireFenetre` rendait `{ geometrie, indices }` —
+// des positions et des index, rien d'autre. Le maillage de production porte
+// QUATRE attributs (`position`, `uv`, `normal`, `color`, vérifié à l'exécution
+// sur un `Terrain` réel). Posée telle quelle à la place du bloc, la fenêtre
+// aurait donné **une forme sans relief éclairé ni palette**.
+//
+// **Ce que la 6 ter ajoute, et pourquoi chacun est là où il est :**
+//
+//   · **`uv` — POSÉE UNE FOIS, dans `construireFenetre`.** Elle ne dépend que
+//     des `x`/`z`, et les `x`/`z` ne bougent JAMAIS (§4). La recalculer par
+//     image serait payer un parcours complet pour réécrire les mêmes nombres.
+//     ⚠️ Convention `grid-template.js:102-103` — `u = i/n`, **`v = 1 − j/n`** :
+//     un test exige l'égalité BIT À BIT avec `gridTemplate` à `rayonCoin = 0`,
+//     sans quoi la rampe et les masques se retourneraient en silence.
+//
+//   · **`normales` — RÉÉCRITES EN PLACE, dans `appliquerHauteurs`.** Elles
+//     suivent les hauteurs, donc elles changent à chaque passe.
+//     ⚠️ **ET PAS PAR `computeVertexNormals()` :** `terrain.js` mesure **83,8 ms
+//     à Chamonix et 120,5 ms à La Réunion** pour cet appel de three, soit **81 %
+//     de la fabrication d'une dalle** — plus de cinq fois le budget d'une image
+//     à 60 Hz. `src/grid-normals.js` fait le même travail en **4,6 ms** sur une
+//     grille régulière, en forme fermée, **bord et coins compris** (ce n'est pas
+//     un schéma dégradé au bord : le nombre de faces présentes EST le `Y` du
+//     vecteur). C'est lui qu'on branche.
+//     ⚠️ **SA SEULE HYPOTHÈSE EST LE PAS RÉGULIER**, et elle tombe dans les
+//     quatre pavés de coin quand `rayonCoin > 0` : `versEmpreinte` y contracte
+//     la grille sur la superellipse. Le test ⑨ MESURE cet écart au lieu de le
+//     supposer, et le branchement de la Tâche 6 ter prend `rayonCoin = 0` — la
+//     forme du coin restant celle de `plinth.js`, exactement comme aujourd'hui.
+//
+//   · **`color` — NON, ET C'EST UN ARBITRAGE ÉCRIT.** La teinte par sommet de
+//     `terrain.js:_ecrireRelief` est le produit de trois choses qui n'existent
+//     pas ici : `uHeightRange` (l'amplitude de l'EMPRISE, pas de la fenêtre —
+//     le piège n° 1 de l'étude 3×3, « la vallée se repeint quand un sommet plus
+//     haut entre dans le cadre »), le champ de grain pré-cuit `tintField(seed)`,
+//     et la palette. Les recopier ici en ferait une SECONDE source de vérité
+//     pour la couleur du terrain — la famille de défauts que ce plan poursuit.
+//     La fenêtre fournit donc la GÉOMÉTRIE ; `terrain.js` garde la couleur et
+//     l'écrit dans le tampon qu'il alloue, comme il le fait déjà.
+//
+// ⚠️ **LA JUPE PARTAGE SES SOMMETS, DONC SES NORMALES — dit ici pour que
+// personne ne le découvre à l'écran.** Le sommet HAUT d'une paroi **est** le
+// sommet de bord de la nappe (c'est ce qui rend la couture exacte au bit près,
+// §3) : il ne peut donc pas porter à la fois « vers le haut » pour la nappe et
+// « vers l'extérieur » pour la paroi. Il porte celle de la nappe, et la paroi se
+// lit comme un congé qui bascule vers l'horizontale en descendant. De même,
+// l'anneau BAS sert à la fois la paroi et la dalle : il porte la sortante de la
+// paroi, la dalle regardant le sol. **Sous le branchement de la 6 ter la jupe
+// n'est même pas dessinée** — `trianglesNappe` borne le tirage à la nappe et
+// `plinth.js` continue de fournir les parois, chanfrein et congé compris.
 
 import { TERRAIN_SIZE } from '../terrain.js'
 import { pointCoin } from '../fenetre-clip.js'
+// ⚠️ **PAS `computeVertexNormals()`, ET CE N'EST PAS UN GOÛT DE STYLE** — voir
+// le §10 ci-dessous : 83,8 ms mesurés in situ à Chamonix pour l'appel de three,
+// contre 4,6 ms pour celui-ci. `grid-normals.js` n'importe RIEN, donc aucun
+// cycle n'est ouvert ici.
+import { gridNormals } from '../grid-normals.js'
 import { remplirHauteurs } from './flux-terrain.js'
 // ⚠️ Importé EN PLUS d'être ré-exporté : un `export … from` ne crée aucune
 // liaison locale, et `construireFenetre` s'en sert comme valeur par défaut.
@@ -389,18 +448,33 @@ export function construireFenetre ({
   const iCentre = nbGrille + nbAnneau
   const nbSommets = iCentre + 1
   const geometrie = new Float32Array(nbSommets * 3)
+  // ⚠️ **LES `uv` NE DÉPENDENT QUE DES `x`/`z`, QUI NE BOUGENT JAMAIS** — voir
+  // le §10 : elles se posent ici, une fois, et `majHauteurs` n'y touche plus.
+  const uv = new Float32Array(nbSommets * 2)
+  // Les normales, elles, suivent les hauteurs : `appliquerHauteurs` réécrit la
+  // NAPPE à chaque passe (`gridNormals`), et la JUPE — anneau bas et centre de
+  // dalle — est posée ici une fois pour toutes, parce qu'elle ne dépend que des
+  // `x`/`z`. Voir le §10.
+  const normales = new Float32Array(nbSommets * 3)
 
   // ── les x/z, posés une fois : ils ne bougent plus jamais ──────────────────
   const pas = COTE_MONDE / mailles
   const tampon = [0, 0]
   for (let j = 0; j < parCote; j++) {
     const z0 = -DEMI_MONDE + j * pas
+    // ⚠️ `v = 1 − j/n`, PAS `j/n` : c'est la convention de `grid-template.js:103`,
+    // donc celle de toutes les textures du bloc. L'inverser retournerait la
+    // rampe et les masques du haut en bas, sans une seule erreur.
+    const v = 1 - j / mailles
     for (let i = 0; i < parCote; i++) {
       const x0 = -DEMI_MONDE + i * pas
       versEmpreinte(x0, z0, interieur, rayon, expo, tampon)
-      const t = (j * parCote + i) * 3
+      const g = j * parCote + i
+      const t = g * 3
       geometrie[t] = tampon[0]
       geometrie[t + 2] = tampon[1]
+      uv[g * 2] = i / mailles
+      uv[g * 2 + 1] = v
     }
   }
   for (let s = 0; s < nbAnneau; s++) {
@@ -408,10 +482,42 @@ export function construireFenetre ({
     const bas = (iBas + s) * 3
     geometrie[bas] = geometrie[haut]
     geometrie[bas + 2] = geometrie[haut + 2]
+    // le sommet bas d'une paroi porte les `uv` du sommet de bord qu'il double :
+    // la paroi est ainsi peinte dans le prolongement exact du bord de la nappe.
+    uv[(iBas + s) * 2] = uv[anneau[s] * 2]
+    uv[(iBas + s) * 2 + 1] = uv[anneau[s] * 2 + 1]
   }
   // le centre de l'éventail : sur l'axe, par construction
   geometrie[iCentre * 3] = 0
   geometrie[iCentre * 3 + 2] = 0
+  uv[iCentre * 2] = 0.5
+  uv[iCentre * 2 + 1] = 0.5
+
+  // ── les normales de la JUPE, posées une fois : elles ne dépendent que des x/z
+  //
+  // ⚠️ **L'ANNEAU BAS EST PARTAGÉ ENTRE LA PAROI ET LA DALLE**, et un sommet n'a
+  // qu'une normale : on lui donne celle de la PAROI (horizontale, vers
+  // l'extérieur), parce que la dalle regarde le sol et n'est jamais vue. Le
+  // sommet HAUT de la paroi, lui, EST le sommet de bord de la nappe (§3) : il
+  // porte donc la normale de la nappe, et la paroi se lit comme un congé — c'est
+  // la conséquence assumée de la couture exacte, pas un oubli.
+  //
+  // La direction sortante se prend sur la TANGENTE de l'anneau (`suivant −
+  // précédent`), pas sur la position : elle reste juste sur les coins en
+  // superellipse, où « vers l'extérieur » n'est ni `±x` ni `±z`.
+  for (let s = 0; s < nbAnneau; s++) {
+    const av = anneau[(s + 1) % nbAnneau] * 3
+    const ar = anneau[(s - 1 + nbAnneau) % nbAnneau] * 3
+    const tx = geometrie[av] - geometrie[ar]
+    const tz = geometrie[av + 2] - geometrie[ar + 2]
+    // l'anneau tourne dans le sens de `anneauDeBord` : la sortante est (tz, 0, −tx)
+    const inv = 1 / Math.max(1e-12, Math.hypot(tz, tx))
+    const b = (iBas + s) * 3
+    normales[b] = tz * inv
+    normales[b + 1] = 0
+    normales[b + 2] = -tx * inv
+  }
+  normales[iCentre * 3 + 1] = -1
 
   // ── les indices, posés une fois : la topologie ne bouge plus jamais ───────
   const nbTriangles = mailles * mailles * 2 + nbAnneau * 2 + nbAnneau
@@ -421,8 +527,14 @@ export function construireFenetre ({
   // la nappe : deux triangles par maille, normale vers +Y
   for (let j = 0; j < mailles; j++) {
     for (let i = 0; i < mailles; i++) {
+      // ⚠️ **L'ORDRE EST CELUI DE `grid-template.js:113-114`, AU BIT PRÈS** —
+      // `a,b,d` puis `b,c,d`. La 6 ter écrivait `d,b,c` : même triangle, même
+      // enroulement, même normale, mais **pas le même tampon d'index**. Or le
+      // branchement remplace le gabarit de production par celui-ci : deux
+      // tampons « équivalents » se comparent mal et divergent sans bruit. Un
+      // test les compare index pour index (⑨a).
       indices[k++] = T(i, j); indices[k++] = T(i, j + 1); indices[k++] = T(i + 1, j)
-      indices[k++] = T(i + 1, j); indices[k++] = T(i, j + 1); indices[k++] = T(i + 1, j + 1)
+      indices[k++] = T(i, j + 1); indices[k++] = T(i + 1, j + 1); indices[k++] = T(i + 1, j)
     }
   }
   // les parois : pour l'arête p → q de l'anneau, [p, q, p_bas] et [q, q_bas, p_bas]
@@ -444,6 +556,16 @@ export function construireFenetre ({
   const fenetre = {
     geometrie,
     indices,
+    // ⚠️ **LES TROIS ATTRIBUTS QUI MANQUAIENT AU MAILLAGE DE PRODUCTION.**
+    // `uv` est posée une fois (elle ne dépend que des `x`/`z`) ; `normales` est
+    // réécrite EN PLACE par `appliquerHauteurs`. La quatrième, `color`, reste
+    // celle de `terrain.js` — voir le §10, ce n'est pas un oubli.
+    uv,
+    normales,
+    // le nombre de TRIANGLES de la seule nappe, pour qui ne veut dessiner
+    // qu'elle et laisser les parois à `plinth.js` (§10)
+    trianglesNappe: mailles * mailles * 2,
+    nbSommets,
     boiteEnglobante: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } },
     // ── ce dont `majHauteurs` a besoin, et rien de décoratif ──────────────
     emprise: { ouest: emp.ouest, sud: emp.sud, est: emp.est, nord: emp.nord },
@@ -532,6 +654,27 @@ export function appliquerHauteurs (fenetre) {
 
   for (let s = 0; s < anneau.length; s++) geometrie[(iBas + s) * 3 + 1] = baseY
   geometrie[iCentre * 3 + 1] = baseY
+
+  // ── LES NORMALES, RÉÉCRITES EN PLACE ─────────────────────────────────────
+  //
+  // ⚠️ **JAMAIS `computeVertexNormals()`** — 83,8 ms mesurés in situ à Chamonix
+  // contre 4,6 ms ici (`grid-normals.js`), soit **cinq fois le budget d'une
+  // image à 60 Hz** pour le seul appel de three : il remettrait le cran qu'on
+  // enlève. `gridNormals` n'écrit QUE les `nbGrille` premiers sommets et ne lit
+  // que ceux-là : la jupe, posée une fois par `construireFenetre`, n'est pas
+  // touchée. Et `out` est le tampon existant : **zéro allocation**.
+  //
+  // ⚠️ **CE QU'ELLE SUPPOSE, ET CE QUE ÇA COÛTE AUX COINS — MESURÉ, PAS ESTIMÉ.**
+  // La formule fermée est écrite pour un pas RÉGULIER `COTE_MONDE / n`. C'est
+  // exact partout sauf dans les quatre pavés de coin, où `versEmpreinte`
+  // contracte les `x`/`z` sur la superellipse. Écart à `computeVertexNormals`
+  // au réglage de PRODUCTION du coin (`rayonCoin` 2,24, `puissanceCoin` 4,4) :
+  // **63,1° au pire et 4,49° en moyenne sur 1 024 sommets à n = 384**, et
+  // **1,47° même hors des pavés**, sur leurs voisins immédiats (test ⑨d).
+  // À coins vifs : **0,022°**, l'arrondi Float32 et rien d'autre — c'est
+  // pourquoi le branchement de la Tâche 6 ter prend `rayonCoin = 0` et laisse la
+  // forme du coin à `plinth.js`, exactement comme aujourd'hui.
+  gridNormals(geometrie, fenetre.n, COTE_MONDE, fenetre.normales)
 
   fenetre.moyenneM = moyenneM
   fenetre.minM = minM

@@ -1554,6 +1554,12 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // est local), c'est la POSITION du mesh qui porte le décalage monde
     this.mesh.position.set(this.blockOffset.x, 0, this.blockOffset.z)
     this.dem = null // real-world heightfield, set via setDem()
+    // LA FENÊTRE BORNÉE — Tâche 6 ter du plan « globe continu ». Voir
+    // `adopterFenetre` : posée par main.js derrière `params.globeContinu`,
+    // laissée nulle partout ailleurs, donc le chemin de production ne la voit
+    // même pas.
+    this.fenetreBornee = null
+    this.fabriqueFenetre = null
     // ⚠️ CE SEUL rebuild a droit au maillage de brouillon (voir `_resAmorce`) :
     // c'est l'unique appel dont on sait qu'il sera remplacé tout de suite par
     // `loadRealTerrain()`. Le drapeau retombe juste après, donc tous les rebuilds
@@ -2406,7 +2412,14 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // @returns {{minH:number,maxH:number}} l'amplitude EFFECTIVEMENT écrite
   _ecrireRelief(geo, params, res, sample, gridSample) {
     const pos = geo.attributes.position
-    const count = pos.count
+    // ⚠️ **LA NAPPE, PAS LE TAMPON.** `gridTemplate` n'alloue QUE la nappe, donc
+    // `(res+1)²` a toujours valu `pos.count` sur le chemin de production — c'est
+    // le même nombre, bit pour bit, et rien ne change pour lui. La fenêtre
+    // bornée, elle, porte en plus sa JUPE (anneau bas + centre de dalle) dans le
+    // même tampon : la parcourir ici lèverait les parois à hauteur de terrain,
+    // et `tintField` / `gridNormals`, tous deux indexés par `(res+1)²`, ne les
+    // couvrent de toute façon pas. On borne donc explicitement.
+    const count = (res + 1) * (res + 1)
     const arr = pos.array
     let minH = Infinity
     let maxH = -Infinity
@@ -2466,7 +2479,11 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // Bit-identique, verrouillé par test/detail-noise.test.js.
     const tint = tintField(params.seed + 101, res, TERRAIN_SIZE)
     const cAtt = geo.attributes.color
-    const colors = cAtt ? cAtt.array : new Float32Array(count * 3)
+    // ⚠️ `pos.count` ET NON `count` : un attribut plus court que `position` est
+    // une erreur WebGL, pas un dessin partiel. Sur le chemin de production les
+    // deux valent `(res+1)²` ; sous la fenêtre bornée, `pos.count` porte la jupe
+    // en plus, et ses trois valeurs restent à zéro — elle n'est pas dessinée.
+    const colors = cAtt ? cAtt.array : new Float32Array(pos.count * 3)
     const span = Math.max(1e-5, maxH - minH)
     for (let i = 0; i < count; i++) {
       const h = arr[i * 3 + 1]
@@ -2497,6 +2514,16 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // @returns {boolean} vrai si quelque chose a été réécrit
   tickFenetre(params) {
     if (!(this.dem?.empriseCote > 1) || params.source !== 'real') return false
+    // ⚠️ **LE SEUL POINT OÙ LES DEUX MODES EXPÉRIMENTAUX SE CROISENT** :
+    // `?f3=1` fait varier `resMaillage` (384 en mouvement, 768 au repos) pendant
+    // que `?globe=continu` tient le maillage avec une fenêtre bâtie à un `n`
+    // fixe. Écrire un relief de résolution `res` dans une grille de résolution
+    // `n` lirait HORS des bornes (NaN silencieux) ou n'en peindrait qu'un
+    // morceau. On refuse le pas plutôt que de rendre du faux ; `rebuild()`
+    // refabriquera la fenêtre à la bonne résolution.
+    if (this.fenetreBornee
+      && this.mesh.geometry?.attributes?.position?.array === this.fenetreBornee.geometrie
+      && this.fenetreBornee.n !== this.resMaillage(params)) return false
     const geo = this.mesh.geometry
     if (!geo?.attributes?.position) return false
     const res = this.resMaillage(params)
@@ -2564,6 +2591,75 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     return Math.min(res, Terrain.RES_AMORCE)
   }
 
+  // ══════════ LA FENÊTRE BORNÉE À LA PLACE DU BLOC — Tâche 6 ter ════════════
+  //
+  // ⚠️ **CE QUE ÇA SUPPRIME, ET C'EST LE BUT DE TOUT LE PLAN : LE CRAN.**
+  // Aujourd'hui chaque changement de zoom passe par `rebuild()`, qui alloue une
+  // `BufferGeometry` NEUVE et quatre tampons neufs. Rejoué contre le dépôt avant
+  // d'écrire une ligne (`.banc/rejeu-cran.mjs`) : après un cran,
+  // `geometry === geometry` faux, `position.array === position.array` faux,
+  // `normal.array === normal.array` faux. **C'est ça, la seconde d'attente.**
+  // Avec la fenêtre, les quatre tampons sont ceux de `construireFenetre` et ils
+  // survivent au cran : `rebuild()` n'écrit plus que des `y`, des normales et
+  // des couleurs, EN PLACE.
+  //
+  // ⚠️ **TERRAIN N'IMPORTE PAS `fenetre-bornee.js`, ET CE N'EST PAS UN DÉTAIL DE
+  // STYLE.** `fenetre-bornee.js` importe `TERRAIN_SIZE` d'ici : l'import inverse
+  // fermerait le cycle `terrain.js → fenetre-bornee.js → terrain.js` et jetterait
+  // un `ReferenceError` **en production seulement** — c'est le piège que la
+  // Tâche 6 bis A a déjà payé une fois. La fenêtre est donc POSÉE de l'extérieur
+  // (main.js), et `Terrain` ne connaît d'elle que la forme de ses champs.
+  //
+  // ⚠️ **`rayonCoin = 0`, ET C'EST MESURÉ, PAS PRÉFÉRÉ.** La formule fermée de
+  // `gridNormals` suppose un pas régulier ; les coins en superellipse de la
+  // fenêtre le cassent, et l'écart de normale y monte à **63,1° au pire à
+  // n = 384** (test ⑨d de `fenetre-bornee.test.js`). À coins vifs la nappe EST
+  // le gabarit de `gridTemplate`, bit pour bit, et l'écart retombe à **0,022°**.
+  // La forme du coin reste donc celle de `plinth.js`, exactement comme
+  // aujourd'hui — et `ocean.js` n'a rien à apprendre.
+  //
+  // ⚠️ **SEULE LA NAPPE EST DESSINÉE.** `setDrawRange` borne le tirage aux
+  // `trianglesNappe` de la fenêtre : les parois et la dalle vivent dans le même
+  // tampon (c'est ce qui permettra la décision 5, la gravure à l'arrêt sur
+  // `contourSocle`) mais `plinth.js` continue de fournir le socle affiché,
+  // chanfrein, congé et AO de contact compris. **Le damier n'est pas touché.**
+  //
+  // @param {object|null} fenetre — une fenêtre de `construireFenetre`. `null`
+  //   OUBLIE la fenêtre sans toucher au maillage en place : c'est le prochain
+  //   `rebuild()` qui remet le gabarit, parce que lui seul sait à quelle
+  //   résolution et avec quel relief.
+  adopterFenetre(fenetre) {
+    if (!fenetre) { this.fenetreBornee = null; return null }
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(fenetre.geometrie, 3))
+    geo.setAttribute('uv', new THREE.BufferAttribute(fenetre.uv, 2))
+    geo.setAttribute('normal', new THREE.BufferAttribute(fenetre.normales, 3))
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(fenetre.nbSommets * 3), 3))
+    geo.setIndex(new THREE.BufferAttribute(fenetre.indices, 1))
+    geo.setDrawRange(0, fenetre.trianglesNappe * 3)
+    this.fenetreBornee = fenetre
+    this.mesh.geometry.dispose()
+    this.mesh.geometry = geo
+    return geo
+  }
+
+  // La géométrie que `rebuild()` doit remplir : celle qui est déjà là quand la
+  // fenêtre bornée tient le maillage à la bonne résolution, une neuve sinon.
+  // ⚠️ C'est le SEUL point de décision du branchement, et il est fermé par
+  // défaut : sans `params.globeContinu`, il n'existe pas.
+  _geometrieRebuild(params, res) {
+    const f = this.fenetreBornee
+    if (!params?.globeContinu) return null
+    if (f && f.n === res && this.mesh.geometry?.attributes?.position?.array === f.geometrie) {
+      return this.mesh.geometry
+    }
+    if (typeof this.fabriqueFenetre === 'function') {
+      const neuve = this.fabriqueFenetre(res)
+      if (neuve) return this.adopterFenetre(neuve)
+    }
+    return null
+  }
+
   rebuild(params) {
     const res = this._resAmorce(params)
     // GABARIT MÉMORISÉ au lieu de `new THREE.PlaneGeometry` : celui-ci mettait
@@ -2575,11 +2671,20 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // ⚠️ `position` est COPIÉ (on va y écrire les Y, et le gabarit est partagé
     // entre blocs) ; `uv` et `index` sont branchés TELS QUELS parce que personne
     // ne les écrit — voir l'avertissement en tête de grid-template.js.
-    const tpl = gridTemplate(res, TERRAIN_SIZE)
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(tpl.position), 3))
-    geo.setAttribute('uv', new THREE.BufferAttribute(tpl.uv, 2))
-    geo.setIndex(new THREE.BufferAttribute(tpl.index, 1))
+    //
+    // ⚠️ **LA FENÊTRE BORNÉE COURT-CIRCUITE TOUT CE BLOC — voir
+    // `adopterFenetre`.** Quand elle tient le maillage, `geo` est CELUI QUI EST
+    // DÉJÀ LÀ : aucun gabarit, aucune allocation, aucun tampon neuf. C'est le
+    // cran qui disparaît. Sans `params.globeContinu`, `_geometrieRebuild` rend
+    // `null` et la production ne voit pas la différence.
+    let geo = this._geometrieRebuild(params, res)
+    if (!geo) {
+      const tpl = gridTemplate(res, TERRAIN_SIZE)
+      geo = new THREE.BufferGeometry()
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(tpl.position), 3))
+      geo.setAttribute('uv', new THREE.BufferAttribute(tpl.uv, 2))
+      geo.setIndex(new THREE.BufferAttribute(tpl.index, 1))
+    }
 
     const sample = this._makeSampler(params)
     this.sample = sample
@@ -2617,8 +2722,15 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       this.fieldsReady = Promise.resolve(null)
     }
 
-    this.mesh.geometry.dispose()
-    this.mesh.geometry = geo
+    // ⚠️ **NE JAMAIS `dispose()` LA GÉOMÉTRIE QU'ON GARDE.** Sur le chemin de la
+    // fenêtre bornée, `geo` EST `this.mesh.geometry` : la séquence
+    // « dispose puis réassigne » libérerait les tampons GPU vivants et rendrait
+    // un bloc noir à la première image suivante — un défaut qui ne se voit qu'à
+    // l'écran, jamais sous node.
+    if (geo !== this.mesh.geometry) {
+      this.mesh.geometry.dispose()
+      this.mesh.geometry = geo
+    }
   }
 
   // ══════════ LES DEUX PLAFONDS DE CHAMPS, EN UN SEUL ENDROIT ══════════════

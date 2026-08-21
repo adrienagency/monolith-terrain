@@ -125,11 +125,17 @@ test('①a aucun des douze lecteurs ne lit encore `params.demExaggeration`', () 
   )
 })
 
-test('①b les douze passent par `lireExageration`, et le compte est celui du plan', () => {
-  // ⚠️ **LE COMPTE EST UNE ASSERTION, PAS UNE STATISTIQUE.** Le plan dit douze
-  // (`terrain.js` ×5, `ocean.js` ×2, `gpx.js` ×1, `main.js` ×4) ; si un
-  // treizième apparaît sans passer par ici, ce test le dit.
-  const attendu = { 'src/terrain.js': 5, 'src/ocean.js': 2, 'src/gpx.js': 1, 'src/main.js': 4 }
+test('①b les treize passent par `lireExageration`, et le compte est celui du plan', () => {
+  // ⚠️ **LE COMPTE EST UNE ASSERTION, PAS UNE STATISTIQUE.** Le plan disait
+  // douze (`terrain.js` ×5, `ocean.js` ×2, `gpx.js` ×1, `main.js` ×4) ; si un
+  // de plus apparaît sans passer par ici, ce test le dit.
+  // ⚠️ **LE TREIZIÈME EST ARRIVÉ AVEC LA TÂCHE 6 ter, ET IL EST LÉGITIME** :
+  // `terrain.fabriqueFenetre` (`main.js`) passe l'exagération à
+  // `construireFenetre`, sans quoi la fenêtre bornée aurait sa PROPRE échelle
+  // verticale — exactement le réglage écrit d'un côté et jamais transmis à
+  // l'autre que ce fichier existe pour interdire. Le compte de `main.js` passe
+  // donc de 4 à 5, EN PLACE : les trois autres n'ont pas bougé d'un caractère.
+  const attendu = { 'src/terrain.js': 5, 'src/ocean.js': 2, 'src/gpx.js': 1, 'src/main.js': 5 }
   const vus = {}
   for (const f of LES_QUATRE) {
     const code = sansCommentaires(lire(f))
@@ -389,4 +395,189 @@ test('⑦b et `fenetre-bornee.js` ré-exporte la même chose, donc rien n\'est p
   for (const nom of ['exagPalier', 'courbeExageration', 'exagerationContinue', 'altitudeDepuisZoom', 'zoomDepuisAltitude', 'creerExagerationPartagee', 'majExageration', 'surchargesStockees', 'EXAG_BASE', 'EXAG_ANCRES', 'CLE_EXAG', 'FOV_DEG', 'FRACTION_REFERENCE', 'ZOOM_EXAG_MAX']) {
     assert.equal(fb[nom], ec[nom], `${nom} doit être LE MÊME objet des deux côtés`)
   }
+})
+
+// ════════════════════════════════════════════════════════════════════════════
+// ⑧ LA FENÊTRE À LA PLACE DU BLOC — Tâche 6 ter
+// ════════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ **C'EST LE TEST QUI COMPTE POUR ADRIEN : un changement de cran ne
+// reconstruit AUCUNE géométrie.** Il a été REJOUÉ CONTRE LE DÉPÔT avant d'être
+// écrit (`.banc/rejeu-cran.mjs`, hors dépôt) : sur le chemin de production,
+// après un cran, `geometry`, `position.array`, `normal.array` et `color.array`
+// sont TOUS des objets neufs. ⑧a garde ce constat comme témoin — sans lui, ⑧b
+// pourrait passer sur un dépôt où plus rien ne se reconstruirait, et personne ne
+// le saurait.
+//
+// ⚠️ **ET ⑧c EST L'AUTRE MOITIÉ** : ne rien réallouer ne sert à rien si l'image
+// change. Les deux chemins doivent peindre le MÊME bloc, attribut par attribut.
+
+const PARAMS_TERRAIN = {
+  color: '#888888', envMapIntensity: 1, mapTint: 1, contourInterval: 100,
+  contourOpacity: 0.3, contourWeight: 0.7, gridStep: 10, gridOpacity: 0.2,
+  heightContrast: 1, heightPivot: 0.5, slopeTint: 0.3, contourColor: '#000000',
+  gradLow: '#eeeecc', gradMid1: '#88aa66', gradMid2: '#aa8855', gradHigh: '#ffffff',
+  source: 'real', resolution: 64, seed: 7, demExaggeration: 2.8, detail: 0.5,
+}
+
+/** Un MNT bouchon — le CRAN, c'est le même centre à un `metersPerPixel` plus fin. */
+function demBouchon (size, mpp) {
+  const data = new Float32Array(size * size)
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) data[y * size + x] = 700 * Math.sin(x / 9) + 400 * Math.cos(y / 7) + 30 * Math.sin(x * 2.3 + y * 1.7)
+  }
+  let min = Infinity
+  let max = -Infinity
+  let s = 0
+  for (const v of data) { if (v < min) min = v; if (v > max) max = v; s += v }
+  return { data, size, metersPerPixel: mpp, extentMeters: mpp * size, minM: min, maxM: max, meanM: s / data.length, empriseCote: 1 }
+}
+
+async function terrainDeBanc (globeContinu) {
+  const { Terrain } = await import('../src/terrain.js')
+  const { construireFenetre } = await import('../src/monde/fenetre-bornee.js')
+  const { empriseSocle } = await import('../src/monde/seuil-socle.js')
+  const p = { ...PARAMS_TERRAIN, globeContinu }
+  const t = new Terrain(p)
+  // ⚠️ EXACTEMENT la fabrique de `main.js` — `rayonCoin: 0`, et rien d'autre.
+  t.fabriqueFenetre = (n) => construireFenetre({
+    emprise: empriseSocle({ centre: { lat: 45.8326, lon: 6.8652 }, zoom: 12 }),
+    n,
+    rayonCoin: 0,
+    largeurM: t.dem?.extentMeters || null,
+    exageration: p.demExaggeration,
+  })
+  return { t, p }
+}
+
+/** Les quatre tampons et l'index, par RÉFÉRENCE. */
+const tampons = (g) => ({
+  geo: g,
+  position: g.attributes.position.array,
+  normal: g.attributes.normal.array,
+  color: g.attributes.color.array,
+  uv: g.attributes.uv.array,
+  index: g.index.array,
+})
+
+test('⑧a TÉMOIN — sur le chemin de PRODUCTION, un cran reconstruit tout', async () => {
+  const { t, p } = await terrainDeBanc(false)
+  t.setDem(demBouchon(64, 30)); t.rebuild(p)
+  const avant = tampons(t.mesh.geometry)
+  t.setDem(demBouchon(64, 15)); t.rebuild(p) // LE CRAN
+  const apres = tampons(t.mesh.geometry)
+  // ⚠️ Rejoué contre le dépôt AVANT d'être écrit : les quatre sont neufs.
+  assert.notEqual(apres.geo, avant.geo, 'la géométrie n\'est plus reconstruite : re-mesurer avant de conclure')
+  assert.notEqual(apres.position, avant.position)
+  assert.notEqual(apres.normal, avant.normal)
+  assert.notEqual(apres.color, avant.color)
+  // ⚠️ `uv`, en revanche, était DÉJÀ partagé — `gridTemplate` mémorise son
+  // gabarit. Le dire ici évite de croire que la 6 ter l'a gagné.
+  assert.equal(apres.uv, avant.uv, 'le gabarit de `gridTemplate` partage déjà ses `uv`')
+})
+
+test('⑧b SOUS LA FENÊTRE BORNÉE — un cran ne réalloue RIEN', async () => {
+  const { t, p } = await terrainDeBanc(true)
+  t.setDem(demBouchon(64, 30)); t.rebuild(p)
+  const avant = tampons(t.mesh.geometry)
+  const f = t.fenetreBornee
+  assert.ok(f, 'la fenêtre n\'a pas été adoptée')
+  assert.equal(avant.position, f.geometrie, 'le maillage ne porte pas les tampons DE LA FENÊTRE')
+  assert.equal(avant.normal, f.normales)
+  assert.equal(avant.uv, f.uv)
+  assert.equal(avant.index, f.indices)
+
+  t.setDem(demBouchon(64, 15)); t.rebuild(p) // LE CRAN
+  const apres = tampons(t.mesh.geometry)
+  // ⚠️ IDENTITÉ DE RÉFÉRENCE — la seule assertion qui distingue « mis à jour »
+  // de « reconstruit à l'identique ». C'est le cran qui disparaît.
+  assert.equal(apres.geo, avant.geo, 'la géométrie a été reconstruite')
+  assert.equal(apres.position, avant.position, 'les positions ont été réallouées')
+  assert.equal(apres.normal, avant.normal, 'les normales ont été réallouées')
+  assert.equal(apres.color, avant.color, 'les couleurs ont été réallouées')
+  assert.equal(apres.uv, avant.uv)
+  assert.equal(apres.index, avant.index, 'la topologie a été refaite')
+  assert.equal(t.fenetreBornee, f, 'la fenêtre elle-même a été refaite')
+  // …et le relief a bien été écrit, sinon on garderait des tampons morts
+  let bouges = 0
+  const nb = (PARAMS_TERRAIN.resolution + 1) ** 2
+  for (let i = 0; i < nb; i++) if (apres.position[i * 3 + 1] !== 0) bouges++
+  assert.ok(bouges > nb / 2, `${bouges} sommets sur ${nb} portent un relief`)
+})
+
+test('⑧c LES DEUX CHEMINS PEIGNENT LE MÊME BLOC — attribut par attribut', async () => {
+  // ⚠️ Ne rien réallouer ne vaut rien si l'image change. À `rayonCoin = 0` la
+  // nappe de la fenêtre EST le gabarit de `gridTemplate` : l'égalité doit être
+  // BIT À BIT, pas « à une tolérance près ».
+  const a = await terrainDeBanc(false)
+  const b = await terrainDeBanc(true)
+  for (const { t, p } of [a, b]) { t.setDem(demBouchon(64, 20)); t.rebuild(p) }
+  const A = tampons(a.t.mesh.geometry)
+  const B = tampons(b.t.mesh.geometry)
+  const nb = (PARAMS_TERRAIN.resolution + 1) ** 2
+  for (const [nom, k] of [['position', 3], ['normal', 3], ['color', 3], ['uv', 2]]) {
+    for (let i = 0; i < nb * k; i++) {
+      // ⚠️ Des composantes de `color` sortent NaN des DEUX côtés sur ce MNT
+      // bouchon (`Math.pow(hn, 0.85)` avec `hn < 0`, `terrain.js:_ecrireRelief`).
+      // C'est un défaut PRÉEXISTANT, mesuré identique sur les deux chemins : on
+      // le constate ici au lieu de le masquer.
+      if (!Number.isFinite(A[nom][i]) || !Number.isFinite(B[nom][i])) {
+        assert.equal(Number.isFinite(A[nom][i]), Number.isFinite(B[nom][i]), `${nom}[${i}] : un NaN d'un seul côté`)
+        continue
+      }
+      assert.equal(A[nom][i], B[nom][i], `${nom}[${i}]`)
+    }
+  }
+  for (let i = 0; i < PARAMS_TERRAIN.resolution ** 2 * 6; i++) {
+    assert.equal(A.index[i], B.index[i], `index[${i}]`)
+  }
+  assert.deepEqual(a.t.mapUniforms.uHeightRange.value.toArray(), b.t.mapUniforms.uHeightRange.value.toArray())
+  assert.equal(a.t.mapUniforms.uSeaY.value, b.t.mapUniforms.uSeaY.value)
+})
+
+test('⑧d SEULE LA NAPPE EST DESSINÉE — la jupe est dans le tampon, pas à l\'écran', async () => {
+  // ⚠️ Sans cette borne, le matériau du terrain peindrait les parois de la
+  // fenêtre PAR-DESSUS le socle de `plinth.js`. Le damier n'est pas touché :
+  // `block-grid.js` continue d'appeler `buildSlabWalls`.
+  const { t, p } = await terrainDeBanc(true)
+  t.setDem(demBouchon(64, 20)); t.rebuild(p)
+  const res = PARAMS_TERRAIN.resolution
+  const f = t.fenetreBornee
+  assert.equal(t.mesh.geometry.drawRange.count, f.trianglesNappe * 3)
+  assert.equal(f.trianglesNappe, res * res * 2)
+  // la jupe existe bel et bien — c'est elle qui portera la gravure à l'arrêt
+  assert.ok(f.nbSommets > (res + 1) ** 2, 'la fenêtre n\'a plus de parois')
+  assert.ok(f.indices.length > f.trianglesNappe * 3, 'la fenêtre n\'a plus de dalle')
+  // …et elle n'est PAS levée à hauteur de terrain par `_ecrireRelief`
+  for (let s = 0; s < f.anneau.length; s++) {
+    assert.equal(f.geometrie[(f.iBas + s) * 3 + 1], f.baseY, `le sommet bas ${s} a été soulevé`)
+  }
+})
+
+test('⑧e MUTATION — réintroduire une reconstruction tue ⑧b', async () => {
+  const { t, p } = await terrainDeBanc(true)
+  t.setDem(demBouchon(64, 30)); t.rebuild(p)
+  const avant = t.mesh.geometry.attributes.position.array
+  // la mutation : le point de décision du branchement rend `null`, comme s'il
+  // n'existait pas — c'est exactement « remettre le gabarit »
+  t._geometrieRebuild = () => null
+  t.setDem(demBouchon(64, 15)); t.rebuild(p)
+  assert.notEqual(t.mesh.geometry.attributes.position.array, avant, 'la mutation ne mute rien')
+  assert.throws(() => assert.equal(t.mesh.geometry.attributes.position.array, avant))
+})
+
+test('⑧f LE DRAPEAU EST ÉTEINT, et sans lui la fenêtre n\'existe même pas', async () => {
+  const { FLAGS } = await import('../src/flags.js')
+  assert.equal(FLAGS.globeContinu, false, 'le branchement ne part pas en production tant qu\'Adrien ne l\'a pas vu')
+  const { t, p } = await terrainDeBanc(false)
+  t.setDem(demBouchon(64, 20)); t.rebuild(p)
+  assert.equal(t.fenetreBornee, null, 'la fenêtre a été fabriquée sans le drapeau')
+  assert.equal(t.mesh.geometry.drawRange.count, Infinity, 'le chemin de production ne borne rien')
+  // ⚠️ et `main.js` pose bien ce booléen — sinon le drapeau ne protégerait rien
+  const code = sansCommentaires(lire('src/main.js'))
+  assert.ok(/params\.globeContinu\s*=\s*globeContinuActif\(\)/.test(code), '`main.js` ne pose plus `params.globeContinu`')
+  assert.ok(/terrain\.fabriqueFenetre\s*=/.test(code), '`main.js` ne pose plus la fabrique de fenêtre')
+  // ⚠️ et `terrain.js` n'importe TOUJOURS pas `fenetre-bornee.js` — le cycle
+  // `terrain.js → fenetre-bornee.js → terrain.js` ne se verrait qu'en production.
+  assert.equal(/from ['"]\.\/monde\/fenetre-bornee\.js['"]/.test(sansCommentaires(lire('src/terrain.js'))), false)
 })
