@@ -135,7 +135,14 @@ test('①b les treize passent par `lireExageration`, et le compte est celui du p
   // verticale — exactement le réglage écrit d'un côté et jamais transmis à
   // l'autre que ce fichier existe pour interdire. Le compte de `main.js` passe
   // donc de 4 à 5, EN PLACE : les trois autres n'ont pas bougé d'un caractère.
-  const attendu = { 'src/terrain.js': 5, 'src/ocean.js': 2, 'src/gpx.js': 1, 'src/main.js': 5 }
+  // ⚠️ **ET LE QUATORZIÈME EST ARRIVÉ AVEC LA TÂCHE 6 quinquies, POUR LA MÊME
+  // RAISON, ET CE TEST L'A ATTRAPÉ À LA PREMIÈRE EXÉCUTION** : `recadrerFenetre`
+  // (`terrain.hauteursDeFlux`, `main.js`) repose la fenêtre sur l'emprise du
+  // cadrage courant, et l'exagération en fait partie — elle change à CHAQUE
+  // cran (`syncExagToZoom`). Sans elle, le socle garderait l'échelle verticale
+  // du premier zoom pour toujours. Le compte de `main.js` passe de 5 à 6, EN
+  // PLACE ; les trois autres lignes n'ont toujours pas bougé d'un caractère.
+  const attendu = { 'src/terrain.js': 5, 'src/ocean.js': 2, 'src/gpx.js': 1, 'src/main.js': 6 }
   const vus = {}
   for (const f of LES_QUATRE) {
     const code = sansCommentaires(lire(f))
@@ -580,4 +587,318 @@ test('⑧f LE DRAPEAU EST ÉTEINT, et sans lui la fenêtre n\'existe même pas',
   // ⚠️ et `terrain.js` n'importe TOUJOURS pas `fenetre-bornee.js` — le cycle
   // `terrain.js → fenetre-bornee.js → terrain.js` ne se verrait qu'en production.
   assert.equal(/from ['"]\.\/monde\/fenetre-bornee\.js['"]/.test(sansCommentaires(lire('src/terrain.js'))), false)
+})
+
+// ════════════════════════════════════════════════════════════════════════════
+// ⑩ LA FENÊTRE LIT LE QUADTREE — Tâche 6 quinquies
+// ════════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ **C'EST L'ÉTAPE QUI TUE L'ATTENTE, ET LE TEST DIT EXACTEMENT ÇA** : sur un
+// changement de cran, **aucun appel à `loadSurface`** n'est nécessaire pour que
+// le socle affiche le relief DU LIEU. La Tâche 6 ter avait supprimé la
+// RECONSTRUCTION ; les hauteurs, elles, venaient encore du MNT, donc de
+// `loadSurface` — les ~7,9 s sur 30 que le §6 chiffre depuis le début.
+//
+// ⚠️ **REJOUÉ CONTRE LE DÉPÔT AVANT D'ÊTRE ÉCRIT** (`.banc/rejeu-6quinquies.mjs`,
+// hors dépôt) : un `Terrain` sous `?globe=continu` **sans aucun `setDem`**
+// adoptait bien la fenêtre et écrivait des `y` — mais **du relief PROCÉDURAL**,
+// c'est-à-dire du bruit qui n'a rien à voir avec le lieu. ⑩a garde ce constat
+// comme TÉMOIN : sans lui, ⑩b passerait sur un dépôt où le MNT reviendrait par
+// une autre porte, et personne ne le saurait.
+
+/** Une tuile de quadtree bouchon — `heights` en mètres, comme `_buildMesh`. */
+function tuileBouchon (z, x, y, size = 256, f = (u, v) => 900 * Math.sin(u * 6.1) + 500 * Math.cos(v * 4.3)) {
+  const heights = new Float32Array(size * size)
+  for (let j = 0; j < size; j++) {
+    for (let i = 0; i < size; i++) heights[j * size + i] = f(x + (i + 0.5) / size, y + (j + 0.5) / size)
+  }
+  return { z, x, y, size, heights, state: 'ready', key: `${z}/${x}/${y}` }
+}
+
+/**
+ * Un flux bouchon : le cache du quadtree, sans réseau ni globe.
+ *
+ * ⚠️ `remplirHauteurs` ne lit du flux que `globe.tiles` — c'est tout ce qu'il
+ * faut, et c'est ce qui permet de prouver le contrat SANS toucher au réseau.
+ */
+function fluxBouchon (tuiles) {
+  const tiles = new Map()
+  for (const t of tuiles) tiles.set(t.key, t)
+  return { globe: { tiles }, demande: { zoom: tuiles[0].z }, reclamees: tiles }
+}
+
+/** Les tuiles qui couvrent l'emprise d'un bloc centré sur `lat`/`lon`. */
+async function fluxDuBloc (lat, lon, zoom) {
+  const { empriseBlocMNT } = await import('../src/geo.js')
+  const { tuilesEmprise } = await import('../src/monde/flux-terrain.js')
+  const emprise = empriseBlocMNT({ lat, lon, zoom })
+  const liste = tuilesEmprise(emprise, zoom)
+  return { emprise, flux: fluxBouchon(liste.map(({ z, x, y }) => tuileBouchon(z, x, y))) }
+}
+
+/** Le `Terrain` du branchement, SANS MNT — c'est-à-dire sans `loadSurface`. */
+async function terrainSurFlux (lat, lon, zoom, { avecCrochet = true } = {}) {
+  const { Terrain } = await import('../src/terrain.js')
+  const { construireFenetre, majHauteurs } = await import('../src/monde/fenetre-bornee.js')
+  const { emprise, flux } = await fluxDuBloc(lat, lon, zoom)
+  // ⚠️ les paramètres du relief procédural sont COMPLETS : sans eux le témoin
+  // rendrait des NaN et prouverait la mauvaise chose (mesuré au rejeu).
+  const p = {
+    ...PARAMS_TERRAIN, globeContinu: true, demZoom: zoom,
+    amplitude: 6, scale: 0.05, octaves: 4, lacunarity: 2.1, gain: 0.5, warp: 2, detailScale: 0.5,
+  }
+  const t = new Terrain(p)
+  t.fabriqueFenetre = (n) => construireFenetre({ emprise, n, rayonCoin: 0, exageration: p.demExaggeration })
+  if (avecCrochet) {
+    // ⚠️ **EXACTEMENT LE CROCHET DE `main.js`** : `majHauteurs` écrit les `y` et
+    // les normales, et rend le compte des remplis / manquants.
+    t.hauteursDeFlux = (fenetre) => {
+      majHauteurs(fenetre, flux)
+      return { remplis: fenetre.remplis, manquants: fenetre.manquants, zoom }
+    }
+  }
+  return { t, p, flux, emprise }
+}
+
+/** L'écart maximal entre les `y` écrits et le relief NU du quadtree. */
+function ecartAuQuadtree (pos, attendu, echelle) {
+  let moy = 0
+  for (const h of attendu) moy += h
+  moy /= attendu.length
+  let pire = 0
+  for (let i = 0; i < attendu.length; i++) {
+    const d = Math.abs(pos[i * 3 + 1] - (attendu[i] - moy) * echelle)
+    if (d > pire) pire = d
+  }
+  return pire
+}
+
+test('⑩a TÉMOIN — sans le crochet, un socle sans MNT n\'affiche PAS le relief du lieu', async () => {
+  const { t, p, emprise } = await terrainSurFlux(45.8326, 6.8652, 12, { avecCrochet: false })
+  t.rebuild(p)
+  assert.ok(t.fenetreBornee, 'la fenêtre n\'a pas été adoptée')
+  const { remplirHauteurs } = await import('../src/monde/flux-terrain.js')
+  const { flux } = await fluxDuBloc(45.8326, 6.8652, 12)
+  const attendu = remplirHauteurs(flux, { emprise, n: t.fenetreBornee.n }).sortie
+  const pire = ecartAuQuadtree(t.mesh.geometry.attributes.position.array, attendu, t.fenetreBornee.echelleVerticale)
+  // ⚠️ le relief écrit N'EST PAS celui du quadtree : c'est du bruit procédural.
+  assert.ok(pire > 1.5, `écart max ${pire.toFixed(3)} : le quadtree est déjà lu sans crochet, re-mesurer avant de conclure`)
+})
+
+test('⑩b SANS `loadSurface` — le socle porte le relief DU QUADTREE', async () => {
+  const { t, p, emprise } = await terrainSurFlux(45.8326, 6.8652, 12)
+  assert.equal(t.dem, null, 'ce banc ne doit charger AUCUN MNT — c\'est toute la question')
+  t.rebuild(p)
+  const f = t.fenetreBornee
+  assert.ok(f, 'la fenêtre n\'a pas été adoptée')
+  assert.ok(f.remplis > 0, 'aucune hauteur lue dans le quadtree')
+  assert.equal(f.manquants, 0, 'l\'emprise bouchon est couverte en entier : un manquant serait un défaut de tuilage')
+  const pos = t.mesh.geometry.attributes.position.array
+  assert.equal(pos, f.geometrie, 'le maillage ne porte pas le tampon DE LA FENÊTRE')
+  const { remplirHauteurs } = await import('../src/monde/flux-terrain.js')
+  const { flux } = await fluxDuBloc(45.8326, 6.8652, 12)
+  const attendu = remplirHauteurs(flux, { emprise, n: f.n }).sortie
+  let moy = 0
+  for (const h of attendu) moy += h
+  moy /= attendu.length
+  assert.ok(Math.abs(moy - f.moyenneM) < 1e-3, 'la fenêtre n\'a pas lu les mêmes hauteurs')
+  // ⚠️ ÉCART BORNÉ PAR LE GRAIN, PAS NUL : `_ecrireRelief` ajoute le FBM de
+  // détail par-dessus — voir ⑩g, qui exige justement qu'il soit là.
+  const pire = ecartAuQuadtree(pos, attendu, f.echelleVerticale)
+  assert.ok(pire < 1.5, `écart max ${pire.toFixed(3)} unité : ce n'est plus le relief du quadtree`)
+})
+
+test('⑩c LE RAFFINEMENT — une tuile plus fine arrive, RIEN n\'est réalloué', async () => {
+  const { Terrain } = await import('../src/terrain.js')
+  const { construireFenetre, majHauteurs } = await import('../src/monde/fenetre-bornee.js')
+  const { empriseBlocMNT } = await import('../src/geo.js')
+  const { tuilesEmprise } = await import('../src/monde/flux-terrain.js')
+  const zoom = 12
+  const emprise = empriseBlocMNT({ lat: 45.8326, lon: 6.8652, zoom })
+  // grossier d'abord : les tuiles z10 qui couvrent tout, plates ; les z12 après.
+  const grossieres = tuilesEmprise(emprise, 10).map(({ z, x, y }) => tuileBouchon(z, x, y, 256, () => 1200))
+  const fines = tuilesEmprise(emprise, zoom).map(({ z, x, y }) => tuileBouchon(z, x, y))
+  const tiles = new Map()
+  for (const g of grossieres) tiles.set(g.key, g)
+  const flux = { globe: { tiles }, demande: { zoom }, reclamees: tiles }
+  const p = {
+    ...PARAMS_TERRAIN, globeContinu: true, demZoom: zoom, detail: 0,
+    amplitude: 6, scale: 0.05, octaves: 4, lacunarity: 2.1, gain: 0.5, warp: 2, detailScale: 0.5,
+  }
+  const t = new Terrain(p)
+  t.fabriqueFenetre = (n) => construireFenetre({ emprise, n, rayonCoin: 0, exageration: p.demExaggeration })
+  t.hauteursDeFlux = (fenetre) => {
+    majHauteurs(fenetre, flux)
+    return { remplis: fenetre.remplis, manquants: fenetre.manquants, zoom }
+  }
+  t.rebuild(p)
+  const avant = tampons(t.mesh.geometry)
+  const fenetreAvant = t.fenetreBornee
+  // ⚠️ à hauteurs CONSTANTES la nappe est plate : c'est bien « le socle se
+  // dessine à la résolution disponible », et c'est exactement ce qu'on affine.
+  assert.equal(new Set(t.fenetreBornee.hauteursM).size, 1, 'le socle grossier devrait être uniforme ici')
+
+  for (const f of fines) tiles.set(f.key, f) // LES TUILES FINES ARRIVENT
+  const rapport = t.rafraichirFenetre(p)
+  assert.ok(rapport, 'le raffinement n\'a rien lu')
+  const apres = tampons(t.mesh.geometry)
+  // ⚠️ IDENTITÉ DE RÉFÉRENCE — la seule assertion qui distingue « affiné » de
+  // « reconstruit ». C'est toute la décision 13.
+  assert.equal(apres.geo, avant.geo, 'la géométrie a été reconstruite au raffinement')
+  assert.equal(apres.position, avant.position, 'les positions ont été réallouées')
+  assert.equal(apres.normal, avant.normal, 'les normales ont été réallouées')
+  assert.equal(apres.color, avant.color, 'les couleurs ont été réallouées')
+  assert.equal(apres.index, avant.index, 'la topologie a été refaite')
+  assert.equal(t.fenetreBornee, fenetreAvant, 'la fenêtre elle-même a été refaite')
+  // …et le relief a VRAIMENT changé, sinon on aurait affiné du vide
+  assert.ok(new Set(t.fenetreBornee.hauteursM).size > 1000, 'le raffinement n\'a pas apporté de détail')
+})
+
+test('⑩d MUTATION — remettre le remplissage sur le MNT tue ⑩b', async () => {
+  const { t, p, emprise } = await terrainSurFlux(45.8326, 6.8652, 12)
+  // la mutation : le point de décision refuse le flux — c'est exactement l'état
+  // de la Tâche 6 ter, où `terrain.js` remplissait depuis son propre MNT.
+  t._remplirDepuisFlux = () => null
+  t.rebuild(p)
+  const { remplirHauteurs } = await import('../src/monde/flux-terrain.js')
+  const { flux } = await fluxDuBloc(45.8326, 6.8652, 12)
+  const attendu = remplirHauteurs(flux, { emprise, n: t.fenetreBornee.n }).sortie
+  const pire = ecartAuQuadtree(t.mesh.geometry.attributes.position.array, attendu, t.fenetreBornee.echelleVerticale)
+  assert.ok(pire > 1.5, 'le relief est encore celui du quadtree : la mutation ne mord pas')
+})
+
+test('⑩e L\'EMPRISE EST CELLE DU BLOC, PAS CELLE D\'`empriseSocle` — et l\'écart est mesuré', async () => {
+  const { empriseBlocMNT } = await import('../src/geo.js')
+  const { patchLatLonBBox } = await import('../src/coast-mask.js')
+  const { empriseSocle } = await import('../src/monde/seuil-socle.js')
+  const lieux = [[45.8326, 6.8652, 12], [-21.115, 55.536, 12], [45.9237, 6.8694, 13], [35.36, 138.72, 14]]
+  for (const [lat, lon, zoom] of lieux) {
+    // ① UNE SEULE LOI : ce que `empriseBlocMNT` calcule sans rien charger est
+    //    EXACTEMENT l'empreinte que `patchLatLonBBox` lit sur le MNT chargé.
+    const n = 2 ** zoom
+    const la = (lat * Math.PI) / 180
+    const cx = Math.floor(((lon + 180) / 360) * n)
+    const cy = Math.floor(((1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2) * n)
+    const demBidon = { zoom, size: 768, tilePx: 256, originTileX: cx - 1, originTileY: cy - 1 }
+    const b = patchLatLonBBox(demBidon)
+    const e = empriseBlocMNT({ lat, lon, zoom })
+    assert.equal(e.ouest, b.west, 'ouest')
+    assert.equal(e.est, b.east, 'est')
+    assert.equal(e.nord, b.north, 'nord')
+    assert.equal(e.sud, b.south, 'sud')
+    // ② ET `empriseSocle` EN DIFFÈRE — c'est la mesure qui a décidé la tâche.
+    const s = empriseSocle({ centre: { lat, lon }, zoom })
+    const largeurTuile = 360 / n
+    const decalage = Math.abs(s.ouest - e.ouest) / largeurTuile
+    assert.ok(Math.abs((s.est - s.ouest) - (e.est - e.ouest)) < 1e-9, 'les deux emprises ont bien la MÊME largeur')
+    assert.ok(decalage > 1e-6, '`empriseSocle` coïncide avec l\'empreinte du bloc : re-mesurer avant de conclure')
+    assert.ok(decalage < 0.5 + 1e-9, `décalage de ${decalage.toFixed(3)} tuile — au-delà d'une demi-tuile, la règle a changé`)
+  }
+})
+
+test('⑩f `terrain.sample` LIT LA FENÊTRE — sinon le socle et la nappe divergent', async () => {
+  const { t, p } = await terrainSurFlux(45.8326, 6.8652, 12)
+  t.rebuild(p)
+  const f = t.fenetreBornee
+  const pos = f.geometrie
+  const parCote = f.n + 1
+  const demi = 28 // TERRAIN_SIZE / 2
+  const pas = 56 / f.n
+  // sur les NŒUDS de la grille, l'échantillonneur doit rendre le `y` du sommet,
+  // à l'arrondi près : c'est ce que `plinth.js:computeSlab` lit pour ses parois.
+  let pire = 0
+  for (const [i, j] of [[0, 0], [1, 1], [17, 5], [f.n, f.n], [f.n - 1, 3], [32, 61]]) {
+    const y = t.sample(-demi + i * pas, -demi + j * pas)
+    pire = Math.max(pire, Math.abs(y - pos[(j * parCote + i) * 3 + 1]))
+  }
+  assert.ok(pire < 1e-4, `écart max ${pire} : \`terrain.sample\` ne lit pas la nappe affichée`)
+  // ⚠️ **ET CETTE NAPPE EST BIEN CELLE DU QUADTREE.** Sans cette moitié le test
+  // ne prouve qu'une COHÉRENCE — vraie des deux côtés, donc muette : mesuré, il
+  // passait encore avec le point de décision neutralisé.
+  const { remplirHauteurs } = await import('../src/monde/flux-terrain.js')
+  const { flux } = await fluxDuBloc(45.8326, 6.8652, 12)
+  const attendu = remplirHauteurs(flux, { emprise: f.emprise, n: f.n }).sortie
+  let moy = 0
+  for (const h of attendu) moy += h
+  moy /= attendu.length
+  let pireQ = 0
+  for (const [i, j] of [[0, 0], [1, 1], [17, 5], [f.n, f.n], [f.n - 1, 3], [32, 61]]) {
+    const y = t.sample(-demi + i * pas, -demi + j * pas)
+    pireQ = Math.max(pireQ, Math.abs(y - (attendu[j * parCote + i] - moy) * f.echelleVerticale))
+  }
+  assert.ok(pireQ < 1.5, `écart max ${pireQ.toFixed(3)} au quadtree : \`terrain.sample\` décrit un AUTRE relief`)
+  const code = sansCommentaires(lire('src/terrain.js'))
+  assert.ok(/if \(depuisFlux\) this\.sample = this\._makeFenetreSampler\(/.test(code), 'le sampler de fenêtre n\'est plus posé par `rebuild`')
+})
+
+test('⑩g LE GRAIN FBM SURVIT AU CHEMIN DU FLUX', async () => {
+  const { t, p, emprise } = await terrainSurFlux(45.8326, 6.8652, 12)
+  t.rebuild(p)
+  const avecGrain = Float32Array.from(t.mesh.geometry.attributes.position.array)
+  const avecNormales = Float32Array.from(t.mesh.geometry.attributes.normal.array)
+  const { t: t2, p: p2 } = await terrainSurFlux(45.8326, 6.8652, 12)
+  t2.rebuild({ ...p2, detail: 0 })
+  const sansGrain = t2.mesh.geometry.attributes.position.array
+  const sansNormales = t2.mesh.geometry.attributes.normal.array
+  const nb = (t.fenetreBornee.n + 1) ** 2
+  // ⚠️ **LE SOCLE À GRAIN NUL EST EXACTEMENT LE QUADTREE**, et sans cette
+  // assertion le test se contenterait d'un grain posé sur n'importe quel relief
+  // — mesuré : il passait encore avec le point de décision neutralisé.
+  const { remplirHauteurs } = await import('../src/monde/flux-terrain.js')
+  const { flux } = await fluxDuBloc(45.8326, 6.8652, 12)
+  const attendu = remplirHauteurs(flux, { emprise, n: t2.fenetreBornee.n }).sortie
+  const nu = ecartAuQuadtree(sansGrain, attendu, t2.fenetreBornee.echelleVerticale)
+  assert.ok(nu < 1e-3, `écart max ${nu} : à grain nul le socle devrait ÊTRE le quadtree`)
+  let differents = 0
+  for (let i = 0; i < nb; i++) if (avecGrain[i * 3 + 1] !== sansGrain[i * 3 + 1]) differents++
+  assert.ok(differents > nb * 0.5, `${differents} sommets sur ${nb} portent le grain : il a disparu du chemin du flux`)
+  // ⚠️ ET LES NORMALES SUIVENT LE GRAIN. Garder celles d'`appliquerHauteurs`
+  // (qui écrit AVANT le grain) décrirait une surface qui n'est plus dessinée.
+  let normDiff = 0
+  for (let i = 0; i < nb * 3; i++) if (avecNormales[i] !== sansNormales[i]) normDiff++
+  assert.ok(normDiff > nb, 'les normales ne suivent pas le grain')
+})
+
+test('⑩h `main.js` BRANCHE LE CROCHET, ET IL PASSE PAR R3 ET PAR `majHauteurs`', () => {
+  const code = sansCommentaires(lire('src/main.js'))
+  assert.ok(/terrain\.hauteursDeFlux\s*=/.test(code), '`main.js` ne pose plus le crochet des hauteurs')
+  assert.ok(/creerFlux\(\{\s*globe\s*\}\)/.test(code), 'le flux n\'est plus créé sur le globe')
+  // ⚠️ **ON DEMANDE LE ZOOM DU BLOC, ET `remplirBorne` A ÉTÉ RETIRÉ D'ICI SUR
+  // UNE MESURE**, pas sur un goût : `debitObserve` rendait **0,787 Mb/s** sur un
+  // lien OISIF, donc `zoomSoutenable` rendait **z5**, donc le socle réservait
+  // **UNE tuile** (`5/16/11`) au lieu des neuf de son emprise — et rien ne le
+  // rattrapait tant que la caméra ne bougeait pas. Voir la note dans `main.js`.
+  assert.ok(/demanderEmprise\(flux, \{ emprise, zoom: params\.demZoom \}\)/.test(code), 'le socle ne demande plus le zoom du bloc')
+  assert.equal(/remplirBorne\(/.test(code), false, '`remplirBorne` est revenu sur le chemin du socle : relire la mesure avant de le remettre')
+  assert.ok(/majHauteurs\(fenetre, flux\)/.test(code), '`majHauteurs` n\'est plus appelé en production')
+  // ⚠️ et le recadrage passe AVANT le remplissage, sinon le socle reste collé
+  // au premier lieu chargé (mesuré à l'écran sur quatre lieux).
+  const iRecadre = code.indexOf('recadrerFenetre(fenetre')
+  const iRemplit = code.indexOf('demanderEmprise(flux')
+  assert.ok(iRecadre > 0 && iRecadre < iRemplit, 'le recadrage ne passe plus avant le remplissage')
+  // ⚠️ et le raffinement existe, sinon le socle resterait grossier pour toujours
+  assert.ok(/socleRaffine\(\)/.test(code), 'le raffinement n\'est plus appelé par image')
+  // ⚠️ ni `terrain.js` ni `main.js` ne ferment le cycle d'import
+  const t = sansCommentaires(lire('src/terrain.js'))
+  assert.equal(/from ['"]\.\/monde\/flux-terrain\.js['"]/.test(t), false, '`terrain.js` importe le flux : c\'est le cycle qui ne casse qu\'en production')
+})
+
+test('⑩i LE DRAPEAU EST ÉTEINT, ET IL EXIGE `?globe=continu`', async () => {
+  const { FLAGS, socleQuadtreeActif } = await import('../src/flags.js')
+  // ⚠️ **UN RÉGIME MESURÉ FAUX NE PART PAS SOUS LE DRAPEAU QU'ON DEMANDE À
+  // ADRIEN D'OUVRIR** — c'est la discipline de la Tâche 6 bis A, et la mesure
+  // qui l'exige ici est la BATHYMÉTRIE : 642 m (Nice) à 961 m (La Réunion)
+  // d'écart moyen en mer, le fond marin lu à zéro. Voir `flags.js`.
+  assert.equal(FLAGS.socleQuadtree, false, 'le socle quadtree ne part pas en production tant que la mer est plate')
+  assert.equal(FLAGS.globeContinu, false)
+  // sans `globe=continu` il n'y a pas de fenêtre à remplir : la fonction le dit
+  // elle-même, et pas seulement par convention.
+  assert.equal(typeof socleQuadtreeActif, 'function')
+  assert.equal(socleQuadtreeActif(), false, 'les deux drapeaux sont éteints : la fonction doit rendre faux sous node')
+  const src = lire('src/flags.js')
+  assert.ok(/socleQuadtreeActif\(\)\s*\{\s*\n?\s*if \(!globeContinuActif\(\)\) return false/.test(src), 'le socle quadtree ne dépend plus de la fenêtre bornée')
+  // ⚠️ et `main.js` ne pose le crochet QUE derrière ce drapeau — sinon
+  // `?globe=continu` perdrait la bathymétrie sans que personne l'ait demandé.
+  const code = sansCommentaires(lire('src/main.js'))
+  assert.ok(/if \(socleQuadtreeActif\(\)\) terrain\.hauteursDeFlux\s*=/.test(code), 'le crochet n\'est plus derrière son drapeau')
 })

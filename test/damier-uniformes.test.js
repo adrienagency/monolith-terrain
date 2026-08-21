@@ -91,6 +91,16 @@ const PORTES_SANS_PEAGE = {
   f3Tick: 'fenêtre continue : le 3×3 y est UN SEUL champ porté par le terrain central, le damier n\'a alors aucune cellule (voir shibumap-fenetre-continue) — il n\'y a personne à prévenir',
   f3PoseFenetre: 'fenêtre continue, même raison que f3Tick',
   f3Fige: 'fenêtre continue, même raison que f3Tick',
+  // ⚠️ **EXEMPTION ÉCRITE, ET ELLE PORTE UNE CONTRAINTE ASSUMÉE** (Tâche 6
+  // quinquies du plan « globe continu »). `socleRaffine` réécrit le relief de la
+  // FENÊTRE BORNÉE quand des tuiles fines du quadtree atterrissent. Elle
+  // n'existe que derrière `?globe=continu` (`FLAGS.globeContinu`, ÉTEINT) et ne
+  // touche qu'au bloc central. Les dalles voisines, elles, continuent de lire le
+  // MNT : sous ce drapeau le centre lit le quadtree et les voisines le MNT, donc
+  // la jointure ne tient que parce que les deux servent la MÊME source depuis
+  // z12 (Tâche 4 alpha). C'est une contrainte du régime expérimental, pas du
+  // produit — et elle est écrite ici plutôt que découverte à l'écran.
+  socleRaffine: 'globe continu (drapeau éteint) : la fenêtre bornée est le bloc CENTRAL et elle seule ; les voisines gardent le MNT, et les deux servent la même source depuis z12',
 }
 
 // ③ Sites où `terrain.mapUniforms` est cédé en bloc. La clé est un fragment

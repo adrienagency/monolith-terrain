@@ -688,6 +688,53 @@ export function appliquerHauteurs (fenetre) {
 }
 
 /**
+ * Repose la fenêtre sur une AUTRE emprise — **sans toucher à un seul sommet**.
+ *
+ * ⚠️ **SANS ELLE, LE SOCLE RESTE COLLÉ AU PREMIER LIEU CHARGÉ, ET ÇA A ÉTÉ
+ * MESURÉ À L'ÉCRAN** (Tâche 6 quinquies, Étape 7) : quatre lieux chargés à la
+ * suite — Réunion, Chamonix, Nice, Everest — rendaient les MÊMES `minM`, `maxM`
+ * et `moyenneM`, au mètre près, parce que `_geometrieRebuild` garde la fenêtre
+ * en place tant que sa résolution est bonne et que `fenetre.emprise` était figée
+ * à la CONSTRUCTION. Tant que les hauteurs venaient du MNT (Tâche 6 ter),
+ * l'emprise ne servait à rien — à `rayonCoin = 0` la nappe est le gabarit de
+ * `gridTemplate`, et seule `largeurM` portait quelque chose. Dès qu'elle décide
+ * QUELLES TUILES on lit, elle devient porteuse, et elle doit suivre le cadrage.
+ * **C'est la décision 3 du plan** (« le socle suit le cadrage en continu »).
+ *
+ * ⚠️ **AUCUNE ALLOCATION, AUCUNE RETRIANGULATION.** Les `x`/`z`, les `uv` et les
+ * index ne dépendent QUE de `n` : ils survivent au recadrage tels quels. Ce qui
+ * change est ce qui décide des `y` — l'emprise lue, la largeur au sol, et
+ * l'exagération du palier où l'on vient d'arriver.
+ *
+ * ⚠️ **L'EXAGÉRATION EN FAIT PARTIE, ET L'OUBLIER SE VOIT.** Elle change à
+ * chaque cran (`syncExagToZoom`) : figée à la construction, le socle garderait
+ * l'échelle verticale du premier zoom pour toujours.
+ *
+ * @param {object} fenetre la fenêtre rendue par `construireFenetre`
+ * @param {object} arg — les seuls champs passés sont mis à jour
+ * @returns {object} la même fenêtre
+ */
+export function recadrerFenetre (fenetre, { emprise, largeurM, exageration, profondeurDalle, baseYFloor } = {}) {
+  if (!fenetre || !fenetre.hauteursM) {
+    throw new TypeError('recadrerFenetre : il faut une fenêtre de `construireFenetre`')
+  }
+  if (emprise) {
+    const emp = normaliserEmprise(emprise)
+    fenetre.emprise = { ouest: emp.ouest, sud: emp.sud, est: emp.est, nord: emp.nord }
+    fenetre.empriseNormalisee = emp
+    // ⚠️ La largeur au sol suit l'emprise par DÉFAUT : sans ça, un recadrage
+    // vers un autre zoom garderait l'échelle verticale de l'ancien, et le relief
+    // doublerait ou se tasserait de moitié en silence.
+    fenetre.largeurM = emp.largeurM
+  }
+  if (Number.isFinite(largeurM) && largeurM > 0) fenetre.largeurM = largeurM
+  if (Number.isFinite(exageration) && exageration > 0) fenetre.exageration = exageration
+  if (Number.isFinite(profondeurDalle)) fenetre.profondeurDalle = profondeurDalle
+  if (baseYFloor !== undefined) fenetre.baseYFloor = baseYFloor
+  return fenetre
+}
+
+/**
  * Met à jour les hauteurs de la fenêtre depuis le flux du quadtree —
  * **sans reconstruire la géométrie**. ⚠️ **C'est toute sa raison d'être.**
  *

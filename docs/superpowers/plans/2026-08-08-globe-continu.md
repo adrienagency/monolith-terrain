@@ -28,7 +28,7 @@ Trois révisions de ce document ont posé des constantes **à l'instinct**, pré
 ⚠️ **UNE VERSION DE CE PLAN LES RECOPIAIT EN PLUS COURT dans quatre tâches** — `npx vite build` nu, sans redirection, sans `nettoie:dist`, avec un « audit » qui ne nommait pas sa commande. Un agent lisant la version courte aurait sauté les gardes en toute bonne foi. **C'est exactement le reproche que ce plan fait à sa propre décision 13** : un avertissement qu'on ne relit pas ne protège de rien.
 
 ```
-npm test              # la suite entière — 3 276 verts au 2026-08-21 (Tâche 6 ter incluse)
+npm test              # la suite entière — 3 285 verts au 2026-08-21 (Tâche 6 quinquies incluse ; 3 276 à la 6 ter)
 npm run audit:tests   # disque contre liste
 node --check <fichier>  # sur CHAQUE fichier modifié
 npm run nettoie:dist && npm run build:mapcells && npx vite build > /tmp/build.log 2>&1 && npm run verifie:dist
@@ -1562,6 +1562,8 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
 
 ⚠️ **CE QUE LA 6 bis A NE FAIT PAS, ET IL FAUT LE LIRE AVANT DE CROIRE LA TÂCHE FINIE.** `construireFenetre` / `majHauteurs` **ne sont toujours importés par aucun fichier de production** : le socle est encore RECONSTRUIT à chaque cran, pas rééchantillonné. Les Étapes 1, 2, 4 et 5 de l'énoncé d'origine portent sur ce branchement-là. → **Tâche 6 ter.**
 
+> ⚠️ **MISE À JOUR DU 2026-08-21 (bis) — LA 6 quinquies APPELLE `majHauteurs` EN PRODUCTION**, derrière `?socle=quadtree` (drapeau ÉTEINT : la mer y est plate, voir son bilan). Les phrases ci-dessous restent vraies pour `?globe=continu` seul.
+>
 > ⚠️ **MISE À JOUR DU 2026-08-21 — LA 6 ter A FAIT CE BRANCHEMENT, ET LA PHRASE CI-DESSUS N'EST PLUS VRAIE QU'À MOITIÉ.** `construireFenetre` est importé par `src/main.js` et **la fenêtre tient le maillage affiché** derrière `?globe=continu` : **quatorze crans sur quatorze ne reconstruisent plus aucune géométrie**, mesuré à l'écran. **`majHauteurs`, lui, n'est toujours appelé par personne en production** — les hauteurs viennent encore du MNT via l'échantillonneur de `terrain.js`, donc `loadSurface` garde la main sur l'attente réseau. Voir le bilan de la 6 ter.
 
 ### Tâche 6 ter : LA FENÊTRE À LA PLACE DU BLOC ✅ **FAITE LE 2026-08-21** — ⚠️ **LE CRAN NE RECONSTRUIT PLUS RIEN, ET LE RESTE DE L'ATTENTE EST AILLEURS**
@@ -1629,9 +1631,65 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
 - [x] **Étape 6 — REGARDER L'ÉCRAN**, descendre du globe au socle, et dire ce qu'on voit, y compris si c'est laid. ✅ **Elle a dit oui**, et c'est la première fois de ce plan : quatorze crans sans une seule reconstruction, socle indiscernable de la production. Voir le bilan.
 - [x] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
-### Tâche 6 quinquies : LA FENÊTRE LIT LE QUADTREE ⚠️ **C'EST ELLE QUI TUE L'ATTENTE**
+### Tâche 6 quinquies : LA FENÊTRE LIT LE QUADTREE ✅ **FAITE LE 2026-08-21** — ⚠️ **SOUS SON PROPRE DRAPEAU ÉTEINT : LA MER Y EST PLATE**
 
-**Fichiers :** modifier `src/main.js`, `src/terrain.js` · tester `test/fenetre-branchee.test.js`
+> **Bilan mesuré** (banc `test/fenetre-branchee.test.js` ⑩ ×9 ; `npm test` **3 285 verts**) :
+>
+> · ⚠️ **LE SOCLE N'A PLUS BESOIN DE `loadSurface`, ET LE CHIFFRE LE DIT.** Descente z5 → z13 au Mont-Blanc, chaque niveau mesuré **quadtree D'ABORD** (sinon `loadDem` réchaufferait le cache HTTP des mêmes tuiles et flatterait la mesure), trois exécutions :
+>
+> | | 1ʳᵉ passe (caches froids) | 2ᵉ passe | 3ᵉ passe |
+> |---|---|---|---|
+> | **`await loadSurface` — l'attente d'aujourd'hui** | **24,94 s** (0,9 à 5,3 s par cran) | **8,04 s** | **14,63 s** |
+> | **quadtree : du relief à l'écran** | **0,07 s** | **0,42 s** | **0,46 s** |
+> | **quadtree : la résolution du palier atteinte** | — | **2,45 s** | **2,65 s** |
+>
+> **Par cran, après le premier niveau : `loadSurface` met 0,87 à 5,3 s ; le quadtree rend du relief en 1 à 2 ms**, et atteint la résolution du palier en **0,26 s**. ⚠️ **Et il rend d'abord le niveau du DESSUS** (`zPremierInstant` = z−1 à chaque palier) : c'est la décision 13 au pied de la lettre — grossier au premier instant, net ensuite, **sans rien reconstruire**.
+>
+> · ⚠️ **MAIS L'ATTENTE, ELLE, N'A PAS BOUGÉ D'UNE SECONDE AUJOURD'HUI — ET IL FAUT LE DIRE EN PREMIER.** `modes.js` attend toujours `hooks.loadSurface`, donc `busy` reste posé et l'entrée reste morte : **les ~7,9 s sur 30 du §6 sont entières.** Ce que cette tâche prouve, c'est que **le socle n'en a plus besoin** (1 à 2 ms contre 0,9 à 5,3 s). Retirer l'attente est une AUTRE tâche, et la raison est écrite plus bas : **le bloc est encore géoréférencé par le MNT**, pas par sa fenêtre. → **Tâche 6 septies.**
+>
+> · ⚠️ **CE QUI BLOQUE L'OUVERTURE DU DRAPEAU : LA BATHYMÉTRIE.** Écart entre les hauteurs du quadtree et celles du MNT, **même grille de 769² nœuds** (un point sur quatre), MNT chargé, les neuf tuiles z12 du socle prêtes :
+>
+> | lieu | terre (moy / max) | mer (moy / max) |
+> |---|---|---|
+> | Chamonix | **2,4 m** / 71 m | — (pas de mer dans l'emprise) |
+> | Nice | **1,1 m** / 26 m | **642 m** / 1 410 m |
+> | La Réunion (côte) | **1,4 m** / 39 m | **961 m** / 2 116 m |
+>
+> **Sur la TERRE les deux sources sont d'accord** — 1,1 à 2,4 m de moyenne, c'est l'écart de deux interpolations sur le même relevé. **En MER le maximum vaut EXACTEMENT `|dem.minM|`** (1 411 m à Nice, 2 116 m à La Réunion) : le quadtree rend **zéro** au point le plus profond. **Cause trouvée hors du fichier, et c'est le §1 de `/threejs-optimisation` mot pour mot :** `src/dem.js` FUSIONNE la bathymétrie GEBCO (`fuseBathymetry`, tuiles `data/bathy/`) avant de rendre son champ ; `src/globe.js` sert le terrarium nu. **Le cache du quadtree n'est donc pas un substitut du MNT sur une côte** — et le socle des côtes est le produit.
+>
+> **Vu à l'écran, deux chargements, La Réunion Z12 :** sous `?socle=quadtree` la mer est **une plaine pâle uniforme** — aucun relief sous-marin, aucun dégradé de profondeur ; sous `?globe=continu` seul, elle retrouve ses canyons et ses bleus profonds, **identique à la production**. La terre, elle, est indiscernable des deux côtés : relief, palette, courbes de niveau, grain, trait de côte, parois, chanfrein, coins en superellipse, cartouche.
+>
+> · **Décision, et c'est la discipline de la 6 bis A :** le régime prend **son propre drapeau, `FLAGS.socleQuadtree` (`?socle=quadtree`), ÉTEINT**, et il **exige `?globe=continu`** (sans la fenêtre bornée il n'y a pas de nappe à remplir). **`?globe=continu` garde donc EXACTEMENT l'image de la Tâche 6 ter**, bathymétrie comprise — vérifié à l'écran après la correction. ⚠️ **Un régime qui aplatit la mer ne part pas sous le drapeau qu'on demande à Adrien d'ouvrir.**
+>
+> · ⚠️ **DEUX DÉFAUTS TROUVÉS PAR L'ÉCRAN, ET AUCUN DES DEUX N'ÉTAIT VISIBLE AU BANC.**
+>
+>   1. **LE SOCLE RESTAIT COLLÉ AU PREMIER LIEU CHARGÉ.** Réunion, Chamonix, Nice et Everest chargés à la suite rendaient les **mêmes** `minM`, `maxM` et `moyenneM` **au mètre près**. Cause : `_geometrieRebuild` garde la fenêtre tant que sa résolution est bonne, et `fenetre.emprise` était figée à la CONSTRUCTION. Tant que les hauteurs venaient du MNT (6 ter), l'emprise était **décorative** — à `rayonCoin = 0` la nappe est le gabarit de `gridTemplate`, seule `largeurM` portait quelque chose. Dès qu'elle décide QUELLES TUILES on lit, elle devient porteuse. **Correctif : `recadrerFenetre(fenetre, {emprise, largeurM, exageration, profondeurDalle})`** — mise à jour EN PLACE, **aucune allocation, aucune retriangulation** : les `x`/`z`, les `uv` et les index ne dépendent que de `n`. **C'est la décision 3** (« le socle suit le cadrage en continu »). ⚠️ **Et l'exagération en fait partie** : elle change à chaque cran (`syncExagToZoom`) — figée, le socle garderait l'échelle verticale du premier zoom pour toujours. **Le test ①b l'a attrapé à la première exécution** : `main.js` passe de 5 à 6 lecteurs de `lireExageration`, corrigé EN PLACE.
+>
+>   2. ⚠️ **`remplirBorne` (RÈGLE R3) RENDAIT LE SOCLE INATTEIGNABLE — c'est le §2 de `/threejs-optimisation`, en vrai.** Relevé à Chamonix, MNT chargé, socle posé : `debitObserve(flux)` = **0,787 Mb/s**, donc `zoomSoutenable({0,787 ; demandé 12})` = **z5**, donc le socle réservait **UNE tuile, `5/16/11`**, au lieu des **neuf tuiles z12** de son emprise — deux texels d'une tuile continentale étirés sur toute la largeur du bloc. **Et rien ne le rattrapait tant que la caméra ne bougeait pas.** Avant ce correctif, l'écart au MNT valait **64 à 70 m sur la terre** à Chamonix ; après, **2,4 m**. ⚠️ **La cause n'est pas un réseau lent, c'est un réseau OISIF** : `debitObserve` divise des octets par du TEMPS MURAL, et quelques petites tuiles étalées sur cinq secondes rendent un débit minuscule. C'est exactement la distinction que `flux-terrain.js` §2 fait déjà pour un flux NEUF (« le manque de mesure et la mesure d'un manque sont deux choses ») — **elle vaut aussi pour un flux au repos, et personne ne l'avait écrite.** ⚠️ **Et R3 n'a rien à économiser ici :** ces neuf tuiles sont EXACTEMENT celles que `loadDem` télécharge pour le même bloc — la même charge, prise à l'autre bout. **Rogner ce chiffre ne rend pas le socle moins cher, il le rend faux.** Le socle demande donc `params.demZoom` ; R3 garde sa moitié « descente » (Tâche 4 ter). **Le test ⑩h échoue si `remplirBorne` revient ici.**
+>
+> · ⚠️ **`empriseSocle` N'EST PAS L'EMPREINTE DU BLOC, ET L'ÉCART EST MESURÉ.** Elle centre l'emprise EXACTEMENT sur le lieu ; `loadDem` CALE la sienne sur la grille de tuiles entières (`cx = Math.floor(tuileX)`, `dem.js:242`). Même largeur — trois tuiles — mais pas la même position : **−0,389 / +0,376 / −0,183 tuile** sur trois lieux, soit **jusqu'à un sixième de socle** en longitude comme en latitude. Remplir la nappe sur l'une pendant que le masque de mer, le trait de côte, les étiquettes et le drapage GPX sont cuits sur l'autre déplacerait la carte sous ses propres repères — **un défaut MUET**. La fenêtre lit donc l'empreinte du bloc : `patchLatLonBBox(dem)` quand le MNT est là, **`empriseBlocMNT` (`geo.js`) sinon** — et le test ⑩e exige que les deux coïncident **au bit près** sur quatre lieux.
+>
+> · **`terrain.sample` LIT LA FENÊTRE, ET PAS LE MNT.** C'est ce que lisent `plinth.js:computeSlab` (donc les parois), les bateaux, le drapage GPX, les étiquettes et le rayon de mise au point : laissé sur le MNT pendant que la nappe porte le quadtree, il décrirait une AUTRE surface et **les parois du socle ne rejoindraient plus la nappe**. ⚠️ **Il lit la GÉOMÉTRIE, pas `hauteursM`** : le grain FBM est ajouté APRÈS `majHauteurs`. Une seule source, et c'est celle qui est dessinée (test ⑩f).
+>
+> · **LE GRAIN FBM SURVIT, ET IL A FALLU LE REMETTRE À LA MAIN.** `appliquerHauteurs` écrit le relief NU ; c'est `_makeGridSampler` qui portait le FBM de détail sur le chemin du MNT. Il est réappliqué dans `_ecrireRelief`, **lu dans le MÊME champ pré-cuit** (`detailField`) et avec la MÊME formule — `landFactor · (detail·g0 + detail·0,35·g1)`, `landFactor` mesuré **en mètres** sur `hauteursM` pour éteindre le grain sous la ligne d'eau. **Et les normales sont refaites après**, sinon elles décriraient une surface qui n'est plus dessinée (test ⑩g).
+>
+> · **LA LIGNE D'EAU SE LIT SUR LA FENÊTRE.** `appliquerHauteurs` centre les `y` sur `fenetre.moyenneM` quand le chemin du MNT les centre sur `dem.meanM` : garder `dem.meanM` pour `uSeaY` poserait la mer à l'altitude d'un autre relevé, et la côte monterait ou descendrait de l'écart des deux moyennes, en silence.
+>
+> · **LA PHASE ROUGE, HONNÊTEMENT.** Le module a été écrit avant ses tests, comme aux Tâches 6 et 6 ter. **Ce qui la remplace est rejoué et publié** : le point de décision `_remplirDepuisFlux` neutralisé (`.banc/mutation.py`, hors dépôt), **⑩b, ⑩c, ⑩f et ⑩g tombent** ; ⑩a (le témoin), ⑩d, ⑩e, ⑩h et ⑩i restent verts, ce qui est le contrat. ⚠️ **Deux d'entre eux ne mordaient PAS au premier jet** — ⑩f et ⑩g prouvaient une COHÉRENCE, vraie des deux côtés donc muette ; ils portent désormais chacun une moitié qui compare **au quadtree**.
+>
+> · **`node --check`** sur les six fichiers modifiés, `npm test` **3 285 verts** (3 276 + 9), `audit:tests` **189 listés / 189 sur disque**, construction complète verte (`nettoie:dist` → `build:mapcells` → `vite build` → `verifie:dist`). **Aucune erreur JS neuve dans aucun des trois régimes** (`?globe=crans`, `?globe=continu`, `?globe=continu&socle=quadtree`) : seuls les `ERR_CONNECTION_TIMED_OUT` préexistants du bucket d'altitude injoignable depuis cette machine, **mesurés des deux côtés**. Les descentes ont été refaites **trois fois** plutôt que d'en conclure une.
+>
+> · **`socleRaffine` EST EXEMPTÉE DANS `damier-uniformes.test.js`, AVEC SA RAISON** — et l'exemption porte une contrainte assumée : sous ce drapeau **le centre lit le quadtree et les dalles voisines lisent le MNT**. La jointure ne tient que parce que les deux servent la même source depuis z12 (Tâche 4 alpha) — **et elle ne tient PAS en mer**, pour la même raison que ci-dessus.
+>
+> #### ⚠️ CE QUE CETTE TÂCHE NE FAIT PAS
+>
+> 1. ⚠️ **ELLE NE RETIRE PAS L'ATTENTE.** `modes.js` attend toujours `loadSurface`. → **Tâche 6 septies.**
+> 2. ⚠️ **LA MER EST PLATE SOUS LE DRAPEAU.** → **Tâche 6 sexies.**
+> 3. **L'emprise 3×3 (`?f3=1`) est refusée** par `empriseDuSocle` : son champ fait 168 unités quand la géométrie en fait 56, et la fenêtre n'a pas de décalage à opposer à ça. `tickFenetre` refusait déjà la combinaison ; c'est écrit plutôt que sous-entendu.
+> 4. **Rien n'a été mesuré sur un portable**, et **aucune image EN MOUVEMENT** n'a été chronométrée — les deux manques que le §10 traîne depuis le prototype.
+> 5. **Le coût par image du raffinement n'a pas été chronométré bout en bout** (`render()` compris) : il ne se déclenche que quand une tuile atterrit, et il appelle `plinth.rebuild` derrière. À mesurer avant d'ouvrir le drapeau.
+
+**Fichiers :** modifier `src/main.js`, `src/terrain.js`, **`src/geo.js`** *(`empriseBlocMNT`)*, **`src/flags.js`** *(`socleQuadtree`)*, **`src/monde/fenetre-bornee.js`** *(`recadrerFenetre`)* · tester `test/fenetre-branchee.test.js` (élargir) et `test/damier-uniformes.test.js` (une exemption, en place)
 
 ⚠️ **LA TÂCHE 6 ter A SUPPRIMÉ LA RECONSTRUCTION, PAS L'ATTENTE — ET ELLE L'A DIT.** Quatorze crans sur quatorze gardent le même tampon de positions, mesuré à l'écran, et le coût par image tombe de **30 %**. Mais **`terrain.js` remplit encore les hauteurs depuis le MNT avec son propre échantillonneur**, donc `loadSurface` garde la main : **les ~7,9 s sur 30 que le §6 impute à `loadSurface` restent entières.**
 
@@ -1639,15 +1697,58 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
 
 ⚠️ **CE QUE ÇA CHANGE, ET C'EST TOUT L'OBJET DU PIVOT :** aujourd'hui le socle attend qu'un **bloc de MNT** soit téléchargé et décodé pour lui seul. Après cette tâche, il lit **le cache du quadtree**, qui est déjà là, déjà rempli par la descente, et qui se raffine tout seul. **Il n'y a plus rien à attendre : le socle se remplit à la résolution disponible et s'affine ensuite.** C'est la décision 13 (« le flou pendant le mouvement est accepté, net dès l'arrêt ») appliquée au socle.
 
-- [ ] **Étape 1 — le test qui échoue** : sur un changement de cran, **aucun appel à `loadSurface`** n'est nécessaire pour que le socle affiche du relief. ⚠️ **Rejoue-le contre le dépôt AVANT de l'écrire.**
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
-- [ ] **Étape 3 — brancher `majHauteurs` sur `flux-terrain.js`**, avec `remplirBorne` pour le débit (Tâche 4 ter) et `gardeHauteurs` pour la réserve (Tâche 4 bis). ⚠️ **`remplirHauteurs` rend le compte des MANQUANTS : le socle se dessine quand même, à la résolution disponible.**
-- [ ] **Étape 4 — le raffinement**, quand les tuiles fines arrivent : rappeler `majHauteurs`, **sans reconstruire**.
-- [ ] **Étape 5 — mutation** : remettre le remplissage sur le MNT doit tuer le test de l'Étape 1.
-- [ ] **Étape 6 — MESURER L'ATTENTE, avant et après**, sur le vol de référence. ⚠️ **C'est le chiffre qu'Adrien attend depuis le début : combien reste-t-il des 7,9 s ?**
-- [ ] **Étape 7 — REGARDER L'ÉCRAN**, et dire ce qu'on voit — y compris si le socle est grossier au premier instant.
-- [ ] **Étape 8 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [x] **Étape 1 — le test qui échoue** : sur un changement de cran, **aucun appel à `loadSurface`** n'est nécessaire pour que le socle affiche du relief. ✅ ⑩b, et ⑩a garde le témoin. ⚠️ **REJOUÉ CONTRE LE DÉPÔT AVANT D'ÊTRE ÉCRIT** (`.banc/rejeu-6quinquies.mjs`, hors dépôt) : un `Terrain` sous `?globe=continu` **sans aucun `setDem`** adoptait bien la fenêtre et écrivait des `y` — **du relief PROCÉDURAL**, sans rapport avec le lieu.
+- [x] **Étape 2** — le lancer, vérifier qu'il échoue. ⚠️ **HONNÊTEMENT : L'ORDRE N'A PAS ÉTÉ TENU**, comme aux Tâches 6 et 6 ter. Ce qui la remplace est rejoué et publié — voir le bilan (quatre tests tombent sous mutation, dont deux qui ne mordaient pas au premier jet et qu'il a fallu renforcer).
+- [x] **Étape 3 — brancher `majHauteurs` sur `flux-terrain.js`**, avec `gardeHauteurs` pour la réserve (Tâche 4 bis). ✅ ⚠️ **ET SANS `remplirBorne`, SUR UNE MESURE** — voir le défaut n° 2 du bilan : il rognait le socle à z5 et à UNE tuile. ⚠️ `remplirHauteurs` rend le compte des MANQUANTS : le socle se dessine quand même, à la résolution disponible (`zPremierInstant` = z−1 à chaque palier, mesuré).
+- [x] **Étape 4 — le raffinement**, quand les tuiles fines arrivent : rappeler `majHauteurs`, **sans reconstruire**. ✅ `socleRaffine()` par image, déclenché par le compte de tuiles LISIBLES (une boucle sur ~16 entrées, pas un parcours du cache). Tampons identiques par référence (⑩c). **Et `plinth.rebuild` suit**, sinon le haut des murs resterait à l'ancienne altitude.
+- [x] **Étape 5 — mutation** : remettre le remplissage sur le MNT doit tuer le test de l'Étape 1. ✅ ⑩d, **en test permanent**, plus la mutation du point de décision lui-même.
+- [x] **Étape 6 — MESURER L'ATTENTE, avant et après**, sur le vol de référence. ✅ **Et la réponse est décevante d'un côté, nette de l'autre : les 7,9 s sont ENTIÈRES aujourd'hui**, parce que `modes.js` attend toujours ; mais le socle n'en a plus besoin que de **1 à 2 ms**. Trois passes, tableau dans le bilan.
+- [x] **Étape 7 — REGARDER L'ÉCRAN**, et dire ce qu'on voit — y compris si le socle est grossier au premier instant. ✅ **Il a dit non, et deux fois** : le socle collé au premier lieu, puis la mer plate. Les deux sont dans le bilan, le premier corrigé, le second sous drapeau.
+- [x] **Étape 8 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
+### Tâche 6 sexies : LA BATHYMÉTRIE DANS LE FLUX ⚠️ **C'EST ELLE QUI OUVRE LE DRAPEAU DE LA 6 quinquies**
+
+**Fichiers :** modifier `src/monde/flux-terrain.js` · tester `test/flux-terrain.test.js` (élargir) et `test/fenetre-branchee.test.js` (élargir)
+
+⚠️ **LE DÉFAUT EST MESURÉ, PAS SUPPOSÉ** — voir le tableau terre/mer du bilan de la 6 quinquies : **642 m (Nice) à 961 m (La Réunion) d'écart moyen en mer**, maximum **exactement égal à `|dem.minM|`. Le quadtree rend zéro au point le plus profond.** `src/dem.js` fusionne GEBCO (`fuseBathymetry`, `data/bathy/`, index `bathy-sources.js`) ; `src/globe.js` sert le terrarium nu.
+
+⚠️ **À VÉRIFIER AVANT D'ÉCRIRE UNE LIGNE :** ces tuiles `data/bathy/` sont **locales et déjà servies** (21 557 fichiers dans `dist`, `verifie:dist` les compte). La fusion ne rouvre donc **aucune** attente réseau lointaine — mais elle en rouvre une locale, et il faut la mesurer avant de promettre quoi que ce soit.
+
+- [ ] **Étape 1** — test : sur une emprise côtière, `remplirHauteurs` rend le fond marin à moins de N mètres du MNT. ⚠️ **Rejoue-le contre le dépôt AVANT de l'écrire** — le chiffre d'aujourd'hui est 642 et 961 m.
+- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
+- [ ] **Étape 3** — fusionner, **en réutilisant `fuseBathymetry` et non une seconde loi** (§1 de `/threejs-optimisation`).
+- [ ] **Étape 4** — mesurer le coût par remplissage, `render()` compris, et le comparer aux 3,5 ms de `majHauteurs` à n = 384.
+- [ ] **Étape 5 — REGARDER L'ÉCRAN** à La Réunion et à Nice, `?socle=quadtree`, et comparer à `?globe=crans`.
+- [ ] **Étape 6** — allumer `FLAGS.socleQuadtree` **seulement si la mer est revenue**, et pas avant.
+- [ ] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
+### Tâche 6 septies : LE BLOC CESSE D'ÊTRE GÉORÉFÉRENCÉ PAR LE MNT ⚠️ **C'EST ELLE, ET ELLE SEULE, QUI RETIRE L'ATTENTE**
+
+**Fichiers :** modifier `src/main.js`, `src/modes.js` · tester `test/fenetre-branchee.test.js` (élargir)
+
+⚠️ **CE QUI RESTE DES 7,9 s, ET POURQUOI LA 6 quinquies NE POUVAIT PAS LE PRENDRE.** Le socle n'a plus besoin du MNT pour son relief (**1 à 2 ms contre 0,9 à 5,3 s**, mesuré). Mais `loadSurface` reste attendu parce que **tout le reste du bloc est géoréférencé par `dem`**, et un `dem` périmé d'un palier décale tout d'un facteur deux. Liste **relevée sur le dépôt le 2026-08-21**, à traiter une par une :
+
+| ce qui lit `dem` | ce qu'il faut à la place |
+|---|---|
+| `echelleVerticaleBloc()` (`main.js`) | `terrain.fenetreBornee.echelleVerticale` — c'est l'échelle RÉELLE de la géométrie affichée |
+| `altitudeCadrageM()` | `fenetre.largeurM` |
+| `viseeDuLieu(lat, lon)` → `latLonToWorld(dem, …)` | la même conversion sur `fenetre.emprise` (linéaire en Mercator) |
+| `sampleGroundY` → `terrain.sample` | ✅ **déjà fait** par la 6 quinquies (`_makeFenetreSampler`) |
+| `_buildFields()` — masque de mer, analyse, côte | ✅ **déjà gardé** : sauté sans MNT. Le socle sort alors sans masque de mer ni trait de côte — **à regarder à l'écran avant de promettre** |
+| étiquettes, lacs, routes, cartouche, `ocean.js`, `gpx.js`, `blockGrid` | **le gros morceau, et il n'est pas commencé** |
+| `showLoading()` dans `fetchAndBuildDem` | ⚠️ **le rideau reviendrait par-dessus une application vivante** — c'est la Tâche 2, et elle devient bloquante ici |
+
+⚠️ **NE PAS COMMENCER PAR RETIRER L'`await`.** C'est le §5 de `/threejs-optimisation` : un correctif juste dans le mauvais ordre se mesure comme une régression. Tant que la moitié basse du tableau lit `dem`, retirer l'attente donne un relief au bon palier sous des étiquettes, des lacs et une mer restés au palier précédent — **une carte fausse, pas une carte fluide.**
+
+- [ ] **Étape 1** — test : après un cran, `echelleVerticaleBloc()` et `viseeDuLieu()` rendent les valeurs de la FENÊTRE, sans lire `dem`. ⚠️ **Rejoue-le contre le dépôt AVANT de l'écrire.**
+- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
+- [ ] **Étape 3** — migrer la moitié haute du tableau (échelle, cadrage, visée).
+- [ ] **Étape 4** — migrer la moitié basse, **une couche à la fois, en regardant l'écran entre chaque**.
+- [ ] **Étape 5** — la Tâche 2 (retirer la carte `#loading`), qui devient bloquante.
+- [ ] **Étape 6** — alors seulement, `loadSurface` rend la main dès que la fenêtre est posée, et `fetchAndBuildDem` continue en tâche de fond.
+- [ ] **Étape 7 — MESURER L'ENTRÉE MORTE image par image**, sur le vol de référence, et la comparer aux **8,04 / 14,63 / 24,94 s** relevés par la 6 quinquies.
+- [ ] **Étape 8 — REGARDER L'ÉCRAN**, et dire ce qu'on voit pendant que le MNT est en vol.
+- [ ] **Étape 9 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 ### Tâche 6 quater : LE PILOTE DE L'EXAGÉRATION CONTINUE ⚠️ **UNE MESURE À L'ÉCRAN L'A OUVERTE**
 

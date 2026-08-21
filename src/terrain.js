@@ -1560,6 +1560,20 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // même pas.
     this.fenetreBornee = null
     this.fabriqueFenetre = null
+    // ══════════ LA FENÊTRE LIT LE QUADTREE — Tâche 6 quinquies ══════════════
+    //
+    // ⚠️ **UN CROCHET, PAS UN IMPORT — ET POUR LA MÊME RAISON QUE
+    // `fabriqueFenetre`** : `terrain.js` ne peut importer ni `fenetre-bornee.js`
+    // ni `flux-terrain.js` (celui-ci importe `globe.js`, qui importe `terrain.js`
+    // — le cycle que la Tâche 6 bis A a déjà payé, et qui ne casse **qu'en
+    // production**). Le crochet est posé par `main.js`, derrière
+    // `params.globeContinu`.
+    //
+    // Contrat : `(fenetre, params) => {remplis, manquants, zoom} | null`. Il a
+    // DÉJÀ écrit les `y` et les normales de la fenêtre (`majHauteurs`) quand il
+    // rend un objet ; `null` veut dire « rien à lire », et le chemin du MNT
+    // reprend la main sans que personne n'ait à le savoir.
+    this.hauteursDeFlux = null
     // ⚠️ CE SEUL rebuild a droit au maillage de brouillon (voir `_resAmorce`) :
     // c'est l'unique appel dont on sait qu'il sera remplacé tout de suite par
     // `loadRealTerrain()`. Le drapeau retombe juste après, donc tous les rebuilds
@@ -2410,7 +2424,14 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // juillet : « ce sont les pics qui la tuent, pas le régime permanent »).
   //
   // @returns {{minH:number,maxH:number}} l'amplitude EFFECTIVEMENT écrite
-  _ecrireRelief(geo, params, res, sample, gridSample) {
+  //
+  // @param {object|null} [depuisFlux] le compte rendu de `_remplirDepuisFlux`
+  //   quand les `y` ET les normales VIENNENT D'ÊTRE ÉCRITS par la fenêtre
+  //   (Tâche 6 quinquies). ⚠️ **Dans ce cas on ne les réécrit pas** : les
+  //   repasser au MNT rendrait la lecture du quadtree parfaitement inutile, et
+  //   le défaut serait muet — le socle afficherait le bon relief une image sur
+  //   deux, celle où la fenêtre a écrit en dernier.
+  _ecrireRelief(geo, params, res, sample, gridSample, depuisFlux = null) {
     const pos = geo.attributes.position
     // ⚠️ **LA NAPPE, PAS LE TAMPON.** `gridTemplate` n'alloue QUE la nappe, donc
     // `(res+1)²` a toujours valu `pos.count` sur le chemin de production — c'est
@@ -2423,13 +2444,46 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     const arr = pos.array
     let minH = Infinity
     let maxH = -Infinity
-    for (let i = 0; i < count; i++) {
-      const x = arr[i * 3]
-      const z = arr[i * 3 + 2]
-      const h = gridSample ? gridSample(i, x, z) : sample(x, z)
-      arr[i * 3 + 1] = h
-      if (h < minH) minH = h
-      if (h > maxH) maxH = h
+    if (depuisFlux) {
+      // ⚠️ **LES `y` SONT DÉJÀ LÀ** — `majHauteurs` vient de les écrire depuis le
+      // cache du quadtree. On ne fait que RELEVER l'amplitude, qui décide de la
+      // rampe de couleurs et d'`uHeightRange`.
+      //
+      // ⚠️ **MAIS LE GRAIN, LUI, N'Y EST PAS — ET SANS CES LIGNES IL DISPARAÎT
+      // DE L'IMAGE.** `appliquerHauteurs` écrit le relief NU : c'est le chemin du
+      // MNT qui ajoutait le FBM de détail, dans `_makeGridSampler`. On le remet
+      // ici, LU DANS LE MÊME CHAMP PRÉ-CUIT (`detailField`) et avec la MÊME
+      // formule — `landFactor · (detail·g0 + detail·0,35·g1)` — plutôt qu'une
+      // seconde loi de grain qui divergerait au premier réglage touché.
+      // ⚠️ **`landFactor` SE MESURE EN MÈTRES**, sur `hauteursM`, exactement
+      // comme le chemin du MNT le mesure sur `raw` : c'est ce qui éteint le grain
+      // sous la ligne d'eau et empêche des îles fantômes.
+      const detail = this._detailEffectif(params)
+      const hM = depuisFlux.hauteursM
+      const grain = detail > 0 && hM ? detailField(params.seed, params.detailScale, res, TERRAIN_SIZE) : null
+      if (grain) {
+        for (let i = 0; i < count; i++) {
+          const landFactor = smoothstep(0, 90, hM[i])
+          arr[i * 3 + 1] += landFactor * (detail * grain[i * 2] + detail * 0.35 * grain[i * 2 + 1])
+        }
+      }
+      // ⚠️ Le grain déplace les sommets : les normales de `appliquerHauteurs` ne
+      // décrivent plus la surface. On note qu'il faut les refaire.
+      depuisFlux.normalesAFaire = !!grain
+      for (let i = 0; i < count; i++) {
+        const h = arr[i * 3 + 1]
+        if (h < minH) minH = h
+        if (h > maxH) maxH = h
+      }
+    } else {
+      for (let i = 0; i < count; i++) {
+        const x = arr[i * 3]
+        const z = arr[i * 3 + 2]
+        const h = gridSample ? gridSample(i, x, z) : sample(x, z)
+        arr[i * 3 + 1] = h
+        if (h < minH) minH = h
+        if (h > maxH) maxH = h
+      }
     }
     pos.needsUpdate = true
 
@@ -2466,8 +2520,14 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // `iy·(res+1) + ix`, pas de côté 56 : c'est l'hypothèse de la formule.
     // ⚠️ TERRAIN_SIZE et pas `_span()` : c'est le pas de la GÉOMÉTRIE, qui fait
     // toujours 56 unités de côté quelle que soit la taille du champ qu'elle lit.
+    // ⚠️ **SOUS LE FLUX, `appliquerHauteurs` VIENT DE LES ÉCRIRE — avec CETTE
+    // fonction-ci** (`grid-normals.js`, même formule fermée, même pas régulier
+    // `COTE_MONDE / n`). Les recalculer rendrait exactement les mêmes nombres
+    // pour 1,2 ms de plus par image à n = 384 (mesure de la Tâche 6 ter).
     const nAtt = geo.attributes.normal
-    const normals = gridNormals(arr, res, TERRAIN_SIZE, nAtt?.array)
+    const normals = depuisFlux && nAtt && !depuisFlux.normalesAFaire
+      ? nAtt.array
+      : gridNormals(arr, res, TERRAIN_SIZE, nAtt?.array)
     if (nAtt) nAtt.needsUpdate = true
     else geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
 
@@ -2647,6 +2707,128 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
   // fenêtre bornée tient le maillage à la bonne résolution, une neuve sinon.
   // ⚠️ C'est le SEUL point de décision du branchement, et il est fermé par
   // défaut : sans `params.globeContinu`, il n'existe pas.
+  // ══════════ LA FENÊTRE LIT LE QUADTREE — Tâche 6 quinquies ════════════════
+  //
+  // ⚠️ **CE QUE ÇA SUPPRIME : L'ATTENTE.** La Tâche 6 ter a fait disparaître la
+  // RECONSTRUCTION du maillage ; les hauteurs, elles, venaient encore de
+  // `this.dem`, donc d'un bloc de MNT téléchargé et décodé **pour le seul
+  // socle**. Ici elles viennent du cache du quadtree, qui est déjà là, déjà
+  // rempli par la descente, et qui se raffine tout seul.
+  //
+  // ⚠️ **`remplirHauteurs` REND LE COMPTE DES MANQUANTS, ET C'EST LA DÉCISION 13
+  // APPLIQUÉE AU SOCLE** : on dessine à la résolution DISPONIBLE, et on s'affine
+  // ensuite. Un socle qui attendrait la couverture complète serait le rideau
+  // qu'on retire, déguisé en garde de qualité.
+  //
+  // ⚠️ **QUATRE GARDES, ET IL LES FAUT TOUTES LES QUATRE :**
+  //   1. `params.globeContinu` — sans lui ce chemin n'existe pas (production) ;
+  //   2. le crochet posé par `main.js` — sous node et sur les bancs, il n'y en
+  //      a pas, et le chemin du MNT reprend la main sans rien savoir ;
+  //   3. `f.n === res` — écrire `(res+1)²` hauteurs dans une grille de `n`
+  //      autres lirait HORS des bornes en silence (même raison qu'au
+  //      `tickFenetre`) ;
+  //   4. **le maillage AFFICHÉ doit être celui de la fenêtre** — sinon on
+  //      remplirait une fenêtre que personne ne regarde et l'écran garderait
+  //      l'ancien relief, sans une erreur.
+  //
+  // @returns {object|null} `{remplis, manquants, zoom}` si la fenêtre porte
+  //   désormais le relief du quadtree, `null` si le MNT doit reprendre la main.
+  _remplirDepuisFlux(params, geo, res) {
+    if (!params?.globeContinu) return null
+    if (typeof this.hauteursDeFlux !== 'function') return null
+    const f = this.fenetreBornee
+    if (!f || f.n !== res) return null
+    if (geo?.attributes?.position?.array !== f.geometrie) return null
+    let r = null
+    try {
+      r = this.hauteursDeFlux(f, params)
+    } catch (e) {
+      // ⚠️ **UN FLUX QUI TOMBE NE DOIT PAS EMPORTER LE RELIEF.** Le chemin du
+      // MNT est encore là, entier : on y retombe, bruyamment mais sans trou.
+      console.warn('[globe continu] hauteurs du quadtree indisponibles :', e?.message || e)
+      return null
+    }
+    // ⚠️ **`remplis === 0` N'EST PAS UNE ERREUR, C'EST UN SOCLE VIDE** — aucune
+    // tuile prête ne couvre encore l'emprise. On rend `null` : le MNT écrit ce
+    // qu'il a (au pire le relief procédural), plutôt qu'un pavé rigoureusement
+    // plat qui se lirait comme une panne.
+    if (!r || !(r.remplis > 0)) return null
+    // les hauteurs EN MÈTRES voyagent avec le compte rendu : `_ecrireRelief` en
+    // a besoin pour éteindre le grain sous la ligne d'eau (`landFactor`).
+    r.hauteursM = f.hauteursM
+    return r
+  }
+
+  // ══════════ LE RAFFINEMENT — Tâche 6 quinquies, Étape 4 ══════════════════
+  //
+  // ⚠️ **LA DÉCISION 13 APPLIQUÉE AU SOCLE.** Le socle se dessine à la
+  // résolution DISPONIBLE, puis s'affine quand les tuiles fines arrivent — et il
+  // s'affine **sans reconstruire quoi que ce soit** : ni géométrie, ni tampon,
+  // ni champ, ni masque. C'est `rebuild()` moins tout ce qui coûte cher.
+  //
+  // ⚠️ **CE QU'IL NE REFAIT PAS, ET POURQUOI :** `_buildFields()` (masque de mer,
+  // analyse, côte) poste un travail de travailleur sur ~9 Mo de MNT ; le
+  // relancer à chaque tuile qui atterrit remettrait exactement le gel qu'on
+  // retire. Les champs sont cuits sur l'empreinte du MNT, qui ne bouge pas
+  // pendant un raffinement : ils restent justes.
+  //
+  // @returns {object|null} le compte rendu du flux, `null` si rien n'a été lu
+  rafraichirFenetre(params) {
+    const geo = this.mesh.geometry
+    const res = this.resMaillage(params)
+    const depuisFlux = this._remplirDepuisFlux(params, geo, res)
+    if (!depuisFlux) return null
+    const { minH, maxH } = this._ecrireRelief(geo, params, res, null, null, depuisFlux)
+    this.sample = this._makeFenetreSampler(this.fenetreBornee)
+    this.mapUniforms.uHeightRange.value.set(minH, maxH)
+    return depuisFlux
+  }
+
+  // ══════════ L'ÉCHANTILLONNEUR DE LA FENÊTRE — Tâche 6 quinquies ═══════════
+  //
+  // ⚠️ **IL LIT LA GÉOMÉTRIE, PAS LE MNT, ET C'EST TOUT L'INTÉRÊT.** `this.sample`
+  // est ce que lisent le SOCLE (`plinth.js:computeSlab`, qui en tire ses parois),
+  // les bateaux, le drapage GPX, les étiquettes et le rayon de mise au point.
+  // Laissé sur `_makeDemSampler` pendant que la nappe porte le relief du
+  // quadtree, il décrirait une AUTRE surface : les parois du socle ne
+  // rejoindraient plus la nappe, et les objets posés au sol flotteraient.
+  //
+  // ⚠️ **ET IL LIT LA GÉOMÉTRIE PLUTÔT QUE `hauteursM`** : le grain FBM est
+  // ajouté APRÈS `majHauteurs`, dans `_ecrireRelief`. Lire les mètres rendrait
+  // une surface sans grain — c'est-à-dire, encore une fois, une seconde source
+  // de vérité. Ici il n'y en a qu'une, et c'est celle qui est dessinée.
+  //
+  // ⚠️ Il se pose donc APRÈS `_ecrireRelief`, jamais avant.
+  _makeFenetreSampler(fenetre) {
+    const arr = fenetre.geometrie
+    const n = fenetre.n
+    const parCote = n + 1
+    const demi = TERRAIN_SIZE / 2
+    const pas = TERRAIN_SIZE / n
+    const ech = fenetre.echelleVerticale
+    const moy = fenetre.moyenneM
+    this._h2ft = (h) => Math.round((h / Math.max(1e-12, ech) + moy) * 3.28084)
+    return (x, z) => {
+      let u = (x + demi) / pas
+      let v = (z + demi) / pas
+      if (!(u > 0)) u = 0
+      else if (u > n) u = n
+      if (!(v > 0)) v = 0
+      else if (v > n) v = n
+      const i0 = u < n ? u | 0 : n - 1
+      const j0 = v < n ? v | 0 : n - 1
+      const fx = u - i0
+      const fz = v - j0
+      const a = j0 * parCote + i0
+      const b = a + parCote
+      const y00 = arr[a * 3 + 1]
+      const y10 = arr[(a + 1) * 3 + 1]
+      const y01 = arr[b * 3 + 1]
+      const y11 = arr[(b + 1) * 3 + 1]
+      return (y00 * (1 - fx) + y10 * fx) * (1 - fz) + (y01 * (1 - fx) + y11 * fx) * fz
+    }
+  }
+
   _geometrieRebuild(params, res) {
     const f = this.fenetreBornee
     if (!params?.globeContinu) return null
@@ -2695,7 +2877,18 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // `sample` quand il n'y a rien à mémoriser (relief procédural).
     const gridSample = this._makeGridSampler(params, res)
 
-    const { minH, maxH } = this._ecrireRelief(geo, params, res, sample, gridSample)
+    // ⚠️ **LA LECTURE DU QUADTREE PASSE AVANT L'ÉCRITURE DU RELIEF**, et l'ordre
+    // est le sujet : `majHauteurs` écrit les `y` et les normales, `_ecrireRelief`
+    // n'a plus qu'à relever l'amplitude et peindre. L'inverse repasserait le MNT
+    // par-dessus le quadtree — voir `_remplirDepuisFlux`.
+    const depuisFlux = this._remplirDepuisFlux(params, geo, res)
+
+    const { minH, maxH } = this._ecrireRelief(geo, params, res, sample, gridSample, depuisFlux)
+
+    // ⚠️ **APRÈS `_ecrireRelief`, JAMAIS AVANT** — le grain vient d'y être ajouté
+    // aux `y`, et c'est cette surface-là que le socle et les objets posés au sol
+    // doivent lire. Voir `_makeFenetreSampler`.
+    if (depuisFlux) this.sample = this._makeFenetreSampler(this.fenetreBornee)
 
     this.mapUniforms.uHeightRange.value.set(minH, maxH)
     this._pousseFenetre()
@@ -2703,7 +2896,26 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
     // georeferenced sea level (elevation 0) — ALWAYS active in real mode so every
     // template gets a clear shoreline and consistent bathymetry, even where the
     // patch has no sub-sea data (then uSeaY simply sits below the terrain).
-    if (params.source === 'real' && this.dem) {
+    // ══════════ LA LIGNE D'EAU SOUS LE FLUX — Tâche 6 quinquies ═════════════
+    //
+    // ⚠️ **LA MOYENNE N'EST PAS LA MÊME DES DEUX CÔTÉS, ET C'EST CE QUI DÉPLACE
+    // LE TRAIT DE CÔTE.** `appliquerHauteurs` centre les `y` sur
+    // `fenetre.moyenneM` — la moyenne des hauteurs LUES DANS LE QUADTREE — quand
+    // le chemin du MNT les centre sur `dem.meanM`. Garder `dem.meanM` ici
+    // poserait la mer à l'altitude d'un autre relevé : la côte remonterait ou
+    // descendrait de l'écart des deux moyennes, en silence. On lit donc la
+    // fenêtre, qui est la surface réellement dessinée.
+    if (depuisFlux && this.fenetreBornee) {
+      const f = this.fenetreBornee
+      const demScale = f.echelleVerticale
+      const seaEps = Math.max(0.6 * demScale, 0.004)
+      this.mapUniforms.uSeaY.value = (0 - f.moyenneM) * demScale + seaEps
+      this.mapUniforms.uSeaRange.value = Math.max((0 - f.minM) * demScale, 1e-3)
+      // les champs (masque de mer, analyse, côte) restent ceux du MNT : ils sont
+      // cuits sur SON empreinte, et `hauteursDeFlux` remplit exactement la même
+      // (voir `empriseDuSocle` dans main.js). Sans MNT il n'y a rien à cuire.
+      if (this.dem) this._buildFields()
+    } else if (params.source === 'real' && this.dem) {
       const demScale = (this._span() / this.dem.extentMeters) * lireExageration(params)
       // fine-zoom tiles carry NO bathymetry: their sea is a flat plain at
       // exactly 0 m, which lands exactly ON uSeaY and paints as LAND (the

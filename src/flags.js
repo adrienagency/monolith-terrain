@@ -67,6 +67,22 @@ export const FLAGS = {
   // la table d'Adrien à ×2,8 partout**, parce que le pilote est la grandeur que
   // `_rescale` conserve d'un cran à l'autre. `?exag=continu` pour la revoir.
   exagContinue: false,
+
+  // LE SOCLE LIT LE QUADTREE — Tâche 6 quinquies.
+  //
+  // ⚠️ **SON PROPRE DRAPEAU, ET C'EST UNE MESURE QUI L'A EXIGÉ — voir
+  // `socleQuadtreeActif()` plus bas, qui porte les chiffres.** En deux mots : sur
+  // la TERRE le quadtree et le MNT s'accordent à **1,1 à 2,4 m de moyenne**,
+  // mais **EN MER l'écart vaut 642 m (Nice) à 961 m (La Réunion)**, avec un
+  // maximum exactement égal à la profondeur du MNT — le quadtree lit **zéro** là
+  // où le bloc a un fond marin. `src/dem.js` FUSIONNE la bathymétrie GEBCO
+  // (`fuseBathymetry`, `data/bathy/`) ; `src/globe.js` ne la fusionne pas.
+  //
+  // Le socle des côtes est le produit : un régime qui aplatit la mer ne part pas
+  // sous `?globe=continu`, qui est le drapeau qu'on demande à Adrien d'ouvrir.
+  // `?socle=quadtree` pour l'essayer (il exige `?globe=continu` : sans la
+  // fenêtre bornée, il n'y a pas de nappe à remplir).
+  socleQuadtree: false,
 }
 
 // Le drapeau ci-dessus, avec l'échappatoire d'adresse — même patron que
@@ -77,6 +93,40 @@ export function globeContinuActif() {
   if (v === 'crans' || v === '0') return false
   if (v === 'continu' || v === '1') return true
   return FLAGS.globeContinu
+}
+
+// LE SOCLE LIT LE QUADTREE — Tâche 6 quinquies.
+//
+// ⚠️ **SON PROPRE DRAPEAU, ET POUR LA MÊME RAISON QUE `exagContinue` : UNE
+// MESURE.** Écart entre les hauteurs du quadtree et celles du MNT, relevé le
+// 2026-08-21 sur la MÊME grille (769² nœuds, un point sur quatre), MNT chargé et
+// les neuf tuiles z12 du socle prêtes :
+//
+//   | lieu         | terre (moy / max) | mer (moy / max)   |
+//   |--------------|-------------------|-------------------|
+//   | Chamonix     | **2,4 m** / 71 m  | — (pas de mer)    |
+//   | Nice         | **1,1 m** / 26 m  | **642 m** / 1410 m|
+//   | La Réunion   | **1,4 m** / 39 m  | **961 m** / 2116 m|
+//
+// ⚠️ **LE MAXIMUM EN MER EST EXACTEMENT `|dem.minM|`** (1 411 m à Nice, 2 116 m
+// à La Réunion) : le quadtree rend **zéro** au point le plus profond. La cause
+// est hors du fichier, et c'est le §1 de `/threejs-optimisation` mot pour mot —
+// `src/dem.js` FUSIONNE la bathymétrie GEBCO (`fuseBathymetry`, tuiles
+// `data/bathy/`) avant de rendre son champ ; `src/globe.js` sert le terrarium
+// nu. Le cache du quadtree n'est donc PAS un substitut du MNT sur une côte.
+//
+// **Ce qu'il faudra pour ouvrir ce drapeau :** fusionner la bathymétrie dans le
+// remplissage (`remplirHauteurs`), ou renoncer au socle côtier — et ce n'est pas
+// une option.
+//
+// ⚠️ **ET IL EXIGE `?globe=continu`** : sans la fenêtre bornée, il n'y a pas de
+// nappe rééchantillonnable à remplir. Le crochet n'est même pas posé.
+export function socleQuadtreeActif() {
+  if (!globeContinuActif()) return false
+  const v = paramAdresse('socle')
+  if (v === 'mnt' || v === '0') return false
+  if (v === 'quadtree' || v === '1') return true
+  return FLAGS.socleQuadtree
 }
 
 // L'EXAGÉRATION VERTICALE CONTINUE — décision 14, Tâche 6 bis.

@@ -40,7 +40,7 @@ import { buildCourseBar } from './ui/course-bar.js'
 import { snapToKm, ascentStats, parseRace } from './race-model.js'
 import { carnetALaLigne, resumeParcours } from './carnet-course.js'
 import { lisserChamps, decroissant } from './lissage.js'
-import { worldToLatLon, latLonToWorld, parseLatLon, sphereToLatLon, R_GLOBE } from './geo.js'
+import { worldToLatLon, latLonToWorld, parseLatLon, sphereToLatLon, R_GLOBE, empriseBlocMNT } from './geo.js'
 import { fetchTransports } from './transports.js'
 import { TERRAIN_SIZE, RES_FENETRE_CONTINUE } from './terrain.js'
 import { FX_LIST, FX_META, defaultFxParams } from './fx-meta.js'
@@ -57,7 +57,7 @@ import { PeaksLayer } from './peaks.js'
 import { Clouds2 } from './clouds2.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
-import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagContinueActive } from './flags.js'
+import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagContinueActive, socleQuadtreeActif } from './flags.js'
 // ⚠️ `exageration-continue.js` N'IMPORTE RIEN — voir son en-tête : passer par
 // `fenetre-bornee.js` fermerait le cycle terrain.js → fenetre-bornee.js →
 // terrain.js, et AUCUN TEST NE CHARGE `main.js` pour l'attraper.
@@ -66,8 +66,11 @@ import { lireExageration, poserExageration, creerExagerationPartagee, majExagera
 // `fenetre-bornee.js` importe `TERRAIN_SIZE` de `terrain.js`, donc l'import
 // inverse fermerait le cycle. `main.js` est en bout de chaîne, il n'en ouvre
 // aucun. Voir `terrain.adopterFenetre`.
-import { construireFenetre } from './monde/fenetre-bornee.js'
-import { empriseSocle } from './monde/seuil-socle.js'
+import { construireFenetre, majHauteurs, recadrerFenetre } from './monde/fenetre-bornee.js'
+// ⚠️ **LE FLUX EST LE CACHE DU QUADTREE, PAS UN SECOND CHARGEUR** (Tâche 6
+// quinquies) : `creerFlux` ne demande RIEN à sa naissance, et `remplirBorne`
+// borne le remplissage au débit RÉELLEMENT observé (règle R3, Tâche 4 ter).
+import { creerFlux, zoomEffectif, demanderEmprise, debitObserve } from './monde/flux-terrain.js'
 // `fractionSurTrace` : le pont d'indices qui remet la tête de course sous
 // l'objectif de la poursuite (voir son commentaire dans poursuite.js).
 import { fractionSurTrace } from './poursuite.js'
@@ -93,7 +96,7 @@ import { makeDraggable, reclampDraggables } from './drag.js'
 import { ScanController } from './scan.js'
 import { fetchRegionMask, regionMaskFromParts, frameRegion, rasterizeMask } from './region-mask.js'
 import { peakMask, findPeak } from './peak-mask.js'
-import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX } from './coast-mask.js'
+import { fetchCoastMask, COAST_ZOOM_MIN, COAST_ZOOM_MAX, patchLatLonBBox } from './coast-mask.js'
 import { buildRegionSkirt, traceSkirt, skirtFloor, regionBaseLevel } from './region-skirt.js'
 import { makeSocleEnvMap } from './socle-env.js'
 import { GLASS_BY_ID, PBR_BY_ID } from './material-presets.js'
@@ -1601,12 +1604,43 @@ const terrain = new Terrain(params)
 // ⚠️ `largeurM` vient du MNT, pas de l'emprise : c'est `dem.extentMeters` qui
 // fait foi pour l'échelle verticale (32 m d'écart entre les deux conventions de
 // circonférence, soit 8,0e-7 en relatif — assez pour diverger en silence).
-terrain.fabriqueFenetre = (n) => {
+// ══════════ L'EMPRISE QUE LA FENÊTRE REMPLIT — Tâche 6 quinquies ═══════════
+//
+// ⚠️ **ET CE N'EST PAS `empriseSocle`, C'EST MESURÉ.** Tant que les hauteurs
+// venaient du MNT (Tâche 6 ter), l'emprise passée à `construireFenetre` était
+// DÉCORATIVE : à `rayonCoin = 0` la nappe est le gabarit de `gridTemplate`, et
+// seule `largeurM` — reprise de `dem.extentMeters` — portait quelque chose.
+// Maintenant qu'elle décide QUELLES TUILES on lit, elle devient porteuse, et
+// l'écart d'`empriseSocle` à l'empreinte du bloc se voit : **jusqu'à un sixième
+// de socle** (−0,389 / +0,376 / −0,183 tuile mesurés sur trois lieux le
+// 2026-08-21 — voir `empriseBlocMNT` dans `geo.js`). La nappe glisserait sous le
+// masque de mer, le trait de côte, les étiquettes et le tracé GPX, qui sont tous
+// cuits sur l'empreinte du MNT.
+//
+// ⚠️ **UNE SEULE LOI, DEUX CHEMINS, ET LE PREMIER FAIT AUTORITÉ** : quand le MNT
+// est là, on lui demande son empreinte ; sinon `empriseBlocMNT` rend celle qu'il
+// aurait — c'est le chemin qui permettra au socle de se peupler AVANT lui.
+function empriseDuSocle() {
+  // ⚠️ **L'EMPRISE 3×3 (`?f3=1`) EST HORS PÉRIMÈTRE, ET C'EST ÉCRIT.** Son champ
+  // fait 168 unités quand la géométrie en fait 56 : la fenêtre n'a pas encore de
+  // décalage à opposer à ça, et `tickFenetre` refuse déjà la combinaison. On
+  // retombe sur le MNT plutôt que de peindre un relief au tiers de sa distance.
+  if (dem?.empriseCote > 1) return null
+  if (dem) {
+    const b = patchLatLonBBox(dem)
+    return { ouest: b.west, sud: b.south, est: b.east, nord: b.north }
+  }
   const lat = Number(params.demLat)
   const lon = Number(params.demLon)
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
+  return empriseBlocMNT({ lat, lon, zoom: params.demZoom })
+}
+
+terrain.fabriqueFenetre = (n) => {
+  const emprise = empriseDuSocle()
+  if (!emprise) return null
   return construireFenetre({
-    emprise: empriseSocle({ centre: { lat, lon }, zoom: params.demZoom }),
+    emprise,
     n,
     rayonCoin: 0,
     largeurM: dem?.extentMeters || null,
@@ -3681,6 +3715,136 @@ function altitudeCadrageM() {
 // qu'un booléen, passé par le constructeur. Sans cette ligne, le drapeau ne
 // protégerait rien et le tri spatial atterrirait sur le globe de production.
 globe = new Globe({ ...params, globeContinu: globeContinuActif() })
+
+// ══════════ LA FENÊTRE LIT LE QUADTREE — Tâche 6 quinquies ═════════════════
+//
+// ⚠️ **C'EST CE CROCHET QUI TUE L'ATTENTE.** Jusqu'ici le socle attendait qu'un
+// bloc de MNT soit téléchargé et décodé POUR LUI SEUL (`loadSurface` →
+// `fetchAndBuildDem` → `loadDem`) ; ici il lit le cache du quadtree, qui est
+// déjà là, déjà rempli par la descente, et qui se raffine tout seul.
+//
+// ⚠️ **IL EST POSÉ ICI ET PAS DANS `terrain.js`, POUR LA MÊME RAISON QUE
+// `fabriqueFenetre`** : `flux-terrain.js` importe `globe.js`, qui importe
+// `terrain.js`. L'import inverse fermerait le cycle et jetterait un
+// `ReferenceError` **en production seulement** — le piège que la Tâche 6 bis A a
+// déjà payé une fois, invisible aux tests comme à `node --check`.
+//
+// ⚠️ **UN SEUL FLUX PAR GLOBE**, et `flux-terrain.js` l'écrit : `gardeHauteurs`
+// est REMPLACÉE à chaque `demanderEmprise`, donc deux flux se reprendraient
+// leurs réservations et chacun verrait ses hauteurs disparaître.
+let fluxSocle = null
+function fluxDuSocle() {
+  if (!fluxSocle && globe) fluxSocle = creerFlux({ globe })
+  return fluxSocle
+}
+
+// Le nombre de tuiles RÉCLAMÉES qui portent des hauteurs lisibles. ⚠️ **C'est le
+// seul signal de raffinement qui ne coûte rien** : une boucle sur les ~16
+// entrées de `flux.reclamees`, contre un parcours de tout le cache du globe
+// (des centaines d'entrées) pour `zoomEffectif`.
+function tuilesLisiblesDuSocle(flux) {
+  let n = 0
+  for (const t of flux.reclamees.values()) if (t.state === 'ready' && t.heights) n++
+  return n
+}
+
+// ══════════ LE RAFFINEMENT — Tâche 6 quinquies, Étape 4 ═══════════════════
+//
+// ⚠️ **C'EST LA DÉCISION 13 APPLIQUÉE AU SOCLE.** Le socle se dessine à la
+// résolution disponible — grossier au premier instant, et c'est attendu — puis
+// il s'affine **sans reconstruire quoi que ce soit** dès que les tuiles fines
+// atterrissent. Ni géométrie, ni tampon, ni champ, ni masque : seulement des
+// `y`, des normales et des couleurs réécrits en place.
+//
+// ⚠️ **LE SOCLE SUIT, ET SANS LUI ON VERRAIT LE JOUR SOUS LA CARTE.**
+// `plinth.js` tire ses parois de `terrain.sample`, qui lit la nappe : raffiner
+// l'une sans l'autre laisserait le haut des murs à l'ancienne altitude.
+let _socleLisibles = -1
+function socleRaffine() {
+  if (!params.globeContinu || !fluxSocle || !terrain.fenetreBornee) return
+  const lisibles = tuilesLisiblesDuSocle(fluxSocle)
+  if (lisibles === _socleLisibles) return
+  _socleLisibles = lisibles
+  if (!terrain.rafraichirFenetre(params)) return
+  plinth.rebuild(terrain, params)
+}
+
+// ⚠️ **LE CROCHET NE SE POSE QUE SI LE DRAPEAU EST OUVERT, ET C'EST LA GARDE
+// LA PLUS SÛRE QU'ON PUISSE ÉCRIRE** : sans lui `_remplirDepuisFlux` rend `null`
+// à sa deuxième ligne, et `?globe=continu` garde EXACTEMENT l'image de la
+// Tâche 6 ter — le MNT, bathymétrie comprise. Voir `socleQuadtreeActif()`.
+if (socleQuadtreeActif()) terrain.hauteursDeFlux = (fenetre, p) => {
+  if (!p?.globeContinu) return null
+  const flux = fluxDuSocle()
+  if (!flux) return null
+  const emprise = empriseDuSocle()
+  if (!emprise) return null
+  // ⚠️ **LE RECADRAGE PASSE AVANT LE REMPLISSAGE, ET SANS LUI LE SOCLE RESTE
+  // COLLÉ AU PREMIER LIEU CHARGÉ.** Mesuré à l'écran (Étape 7) : Réunion,
+  // Chamonix, Nice et Everest chargés à la suite rendaient les mêmes `minM`,
+  // `maxM` et `moyenneM` au mètre près — `_geometrieRebuild` garde la fenêtre
+  // tant que sa résolution est bonne, et son emprise était figée à la
+  // construction. C'est la décision 3 (« le socle suit le cadrage en continu »),
+  // et elle ne coûte pas un sommet : voir `recadrerFenetre`.
+  recadrerFenetre(fenetre, {
+    emprise,
+    largeurM: dem?.extentMeters || null,
+    exageration: lireExageration(params),
+    profondeurDalle: params.plinthDepth ?? 7,
+  })
+  // ══════════ POURQUOI PAS `remplirBorne` ICI — ET C'EST MESURÉ ═════════════
+  //
+  // ⚠️ **LA TÂCHE 6 quinquies PRESCRIVAIT `remplirBorne` (règle R3). L'ÉCRAN A
+  // DIT NON, ET LE CHIFFRE EST SANS APPEL.** Relevé le 2026-08-21 à Chamonix,
+  // `?globe=continu`, MNT chargé, socle posé :
+  //
+  //   · `debitObserve(flux)` = **0,787 Mb/s** ;
+  //   · `zoomSoutenable({ debitObserveMbs: 0,787, zoomDemande: 12 })` = **z5** ;
+  //   · le socle réservait donc **UNE tuile, `5/16/11`**, au lieu des **neuf
+  //     tuiles z12** que son emprise demande — c'est-à-dire qu'il lisait deux
+  //     texels d'une tuile continentale sur toute la largeur du bloc.
+  //
+  // **Écart mesuré au MNT sur la même grille, avant ce correctif :** 64 à 70 m
+  // de moyenne sur la TERRE à Chamonix, et **572 m (Nice) à 961 m (La Réunion)
+  // en MER** — le fond marin lu à zéro. Et il ne se corrigeait jamais : rien ne
+  // redemandait plus fin tant que la caméra ne bougeait pas.
+  //
+  // ⚠️ **LA CAUSE N'EST PAS UN RÉSEAU LENT, C'EST UN RÉSEAU OISIF.**
+  // `debitObserve` divise des octets par du TEMPS MURAL : sur un lien au repos,
+  // quelques petites tuiles étalées sur cinq secondes rendent un débit
+  // minuscule. C'est exactement la distinction que `flux-terrain.js` fait déjà
+  // pour un flux NEUF (« le manque de mesure et la mesure d'un manque sont deux
+  // choses ») — elle vaut aussi pour un flux au repos, et personne ne l'avait
+  // écrite.
+  //
+  // ⚠️ **ET R3 N'A RIEN À ÉCONOMISER ICI :** ces neuf tuiles sont EXACTEMENT
+  // celles que `loadDem` télécharge pour le même bloc. Les demander au quadtree
+  // ne coûte pas une requête de plus — c'est la MÊME charge, prise à l'autre
+  // bout. Rogner ce chiffre ne rend pas le socle moins cher, il le rend faux.
+  //
+  // R3 garde donc sa moitié « descente » (Tâche 4 ter, `zoomSoutenable` sur les
+  // paliers de caméra) ; ici on demande le zoom DU BLOC, et c'est
+  // `remplirHauteurs` — du plus grossier au plus fin — qui porte la décision 13.
+  demanderEmprise(flux, { emprise, zoom: params.demZoom })
+  const borne = { zoom: params.demZoom, zoomDemande: params.demZoom, debitObserveMbs: debitObserve(flux) }
+  // ⚠️ **`majHauteurs` NE RECONSTRUIT RIEN** : une passe par TUILE (jamais par
+  // pixel — l'interface par pixel coûtait +3,5 ms par reconstruction), puis les
+  // `y` et les normales réécrits EN PLACE. 3,5 ms à n = 384, mesuré in situ.
+  majHauteurs(fenetre, flux)
+  // ⚠️ **LE COMPTEUR SE RECALE ICI, ET PAS AILLEURS.** Un cran change d'emprise
+  // donc de tuiles réclamées : laissé sur la valeur d'avant, le raffinement
+  // pourrait retomber sur le même compte et ne jamais repartir — un socle qui
+  // resterait grossier pour toujours, sans une erreur.
+  _socleLisibles = tuilesLisiblesDuSocle(flux)
+  return {
+    remplis: fenetre.remplis,
+    manquants: fenetre.manquants,
+    zoom: borne.zoom,
+    zoomDemande: borne.zoomDemande,
+    debitObserveMbs: borne.debitObserveMbs,
+    zoomCouvert: zoomEffectif(flux, emprise),
+  }
+}
 
 // ══════ LE CONTEXTE WebGL PERDU, PUIS RENDU (plan « globe continu », 4 sexies)
 //
@@ -10072,6 +10236,9 @@ function tick() {
   // droit doit redevenir un déplacement de caméra.
   appliqueBoutonsSouris()
   f3Tick(dt)
+  // Le raffinement du socle, juste après la fenêtre continue : les deux écrivent
+  // le relief, et écrire deux fois dans la même image serait payer deux fois.
+  socleRaffine()
 
   // PLUS DE RENORMALISATION DE BRUME PAR IMAGE. Elle existait parce que Début
   // et Fin étaient exprimés pour un cadrage de référence (~40 unités) alors que

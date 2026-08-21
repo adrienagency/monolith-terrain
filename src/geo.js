@@ -62,6 +62,38 @@ export function latLonToWorld(dem, lat, lon) {
   }
 }
 
+// ══════════ L'EMPRISE DU BLOC, SANS AVOIR À LE CHARGER — Tâche 6 quinquies ══
+//
+// ⚠️ **`empriseSocle` (seuil-socle.js) N'EST PAS L'EMPREINTE DU BLOC, ET L'ÉCART
+// EST MESURÉ.** Elle centre l'emprise EXACTEMENT sur le lieu ; `loadDem`, lui,
+// CALE son bloc sur la grille de tuiles entières (`cx = Math.floor(tuileX)`,
+// `dem.js:242`). Les deux ont la même LARGEUR — trois tuiles — mais pas la même
+// position : décalage mesuré le 2026-08-21 sur trois lieux, **−0,389 / +0,376 /
+// −0,183 tuile**, soit jusqu'à **un sixième de socle** en longitude comme en
+// latitude. Remplir la nappe sur l'une pendant que le masque de mer, le trait de
+// côte, les étiquettes et le drapage GPX sont cuits sur l'autre déplacerait la
+// carte sous ses propres repères — un défaut MUET, pas une erreur.
+//
+// Cette fonction rend l'emprise que `loadDem` chargerait, **sans rien charger**.
+// ⚠️ **UNE SEULE LOI :** quand le MNT est là, on lui demande son empreinte
+// (`patchLatLonBBox`, coast-mask.js) ; celle-ci n'existe que pour l'instant où il
+// n'est PAS là, et `test/fenetre-branchee.test.js` verrouille leur accord.
+//
+// @param {{lat:number, lon:number, zoom:number, tuiles?:number}} arg
+// @returns {{ouest:number, sud:number, est:number, nord:number}} en degrés
+export function empriseBlocMNT({ lat, lon, zoom, tuiles = 3 }) {
+  const n = 2 ** zoom
+  const demi = Math.floor(tuiles / 2)
+  const t = latLonToTile(lat, lon, zoom)
+  const cx = Math.floor(t.x)
+  const cy = Math.floor(t.y)
+  const ox = cx - demi
+  const oy = cy - demi
+  const nw = tileToLatLon(ox, oy, zoom)
+  const se = tileToLatLon(ox + tuiles, oy + tuiles, zoom)
+  return { ouest: nw.lon, sud: se.lat, est: se.lon, nord: nw.lat }
+}
+
 // LA LARGEUR MONDE DU CHAMP — et pourquoi ce n'est plus toujours 56.
 //
 // ⚠️ UNE EMPRISE 3×3 FAIT 168 UNITÉS, PAS 56. `TERRAIN_SIZE` écrit en dur dans
