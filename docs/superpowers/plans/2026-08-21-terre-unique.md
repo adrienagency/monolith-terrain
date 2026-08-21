@@ -265,13 +265,85 @@ Des parois tombent depuis la frontière du crop jusqu'à une base. ⚠️ **Vert
 
 L'échelle mondiale fixe (`uLandMax = 5600`) disparaît. La rampe se calcule sur **le relief du crop**, et **toute la Terre visible l'applique**.
 
-- [ ] **Étape 1 — le test qui échoue** : sur un crop à faible relief, la rampe **s'étale sur l'amplitude locale** ; et **le bord du crop ne montre aucune discontinuité de couleur**.
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
-- [ ] **Étape 3 — implémenter.** ⚠️ **R1 : la rampe est une décision de RENDU, pas de cadrage — elle a le droit de lire le relief.** Mais **rien qui décide d'un cadrage ne doit la lire en retour**, sous peine d'oscillateur.
-- [ ] **Étape 4 — la conséquence acceptée** : mesure la saturation des zones lointaines, **et écris-la**. Adrien l'a acceptée en connaissance de cause.
-- [ ] **Étape 5 — mutation** : revenir à l'échelle mondiale doit tuer le test.
-- [ ] **Étape 6 — REGARDER L'ÉCRAN.**
-- [ ] **Étape 7 — LA CLÔTURE DU §0**, puis commit.
+- [x] **Étape 1 — le test qui échoue.** ✅ `test/crop-rampe.test.js`, **35 tests**. ⚠️ **NEUF CANDIDATES REJOUÉES AVANT D'ÊTRE ÉCRITES** (`.banc/rejoue-D.mjs`, laissé sur le disque) contre **cinq** lois : le dépôt (`82e8b87`), une rampe locale **naïve** (sans plancher, sans partage mer/terre), une rampe locale **bridée au crop** (le monde garderait 5 600 — la couture que la décision 4 interdit), une rampe mesurée sur la **BOÎTE** au lieu de la forme, et la cible. **Neuf sur neuf distinguent au moins une loi.** ⚠️ **Le banc n'estime pas la rampe du dépôt, il l'EXÉCUTE** : il EXTRAIT `float t = sousEau ? … ;` de `git show 82e8b87:src/globe.js` et l'évalue — `t(828 m) = 0,4429`, soit **14,3 %** du bas de la rampe. Le chiffre du §3 est donc confirmé, pas repris de confiance.
+- [x] **Étape 2** — le lancer, vérifier qu'il échoue. ✅ Rouge sur les six assertions du nuanceur, puis 35 verts.
+- [x] **Étape 3 — implémenter.** ✅ `src/monde/rampe-crop.js` (pur) + deux uniformes PARTAGÉS de plus (`uLandBas`, `uPlancherRampeM`) + `poserRampe` / `retirerRampe`. ⚠️ **R1 VÉRIFIÉE OUVERTE AVANT D'ÉCRIRE UNE LIGNE** : `grep -rn` sur `uLandMax` et `uOceanDepth` ne rend **aucune** occurrence hors `globe.js` ; les quatre sorties ne vont que dans des uniformes de COULEUR, et le test ⑥a échoue si `seuil-socle`, `descente-bornee`, `exageration-continue`, `veille-socle` ou `flux-terrain` se met à les lire. **La boucle est coupée, pas amortie.**
+- [x] **Étape 4 — la conséquence acceptée, MESURÉE.** ✅ Voir le bilan ci-dessous.
+- [x] **Étape 5 — mutation.** ✅ **19 posées, 19 tuées** (`.banc/mutations-D.py`, remise vérifiée par empreinte SHA-256 avant chaque suivante). ⚠️ **DEUX SURVIVAIENT au premier tour, et les deux ont trouvé quelque chose.**
+- [x] **Étape 6 — REGARDER L'ÉCRAN**, côte à côte avec l'ancien socle. ✅ **Et le verdict est mitigé — voir « CE QUE J'AI VU ».**
+- [x] **Étape 7 — LA CLÔTURE DU §0**, puis commit. ✅
+
+> **BILAN DE LA TÂCHE D — 2026-08-21.**
+>
+> **CE QUE LA RAMPE VAUT MAINTENANT** (La Réunion, crop z13 de 3 tuiles, neuf tuiles z12 à 512 px, couverture **1,0**, 16 380 points balayés, `.banc/pose-D.js`) :
+>
+> | | avant (mondiale) | après (le crop) |
+> |---|---|---|
+> | ancre basse de la terre | 0 m | 0 m *(crop côtier)* |
+> | ancre haute | **5 600 m** | **2 613,6 m** |
+> | profondeur | **6 000 m** | **223,1 m** |
+> | `t` au sommet du crop | **0,6534** | **1,0000** |
+> | texels du LUT occupés par le crop *(sur 512)* | **163** | **368** — ×2,26 |
+>
+> **CE QUE ÇA CHANGE À L'IMAGE** (`readPixels` après un rendu EXPLICITE de `sceneGlobe` avec `camGlobe`, boucle rAF gelée, cible 512², socle caché) — ⚠️ **et le témoin vaut EXACTEMENT ZÉRO**, deux prises au réglage inchangé, bit à bit identiques :
+>
+> | banc | écart moyen | max | pixels touchés |
+> |---|---|---|---|
+> | **témoin** | **0** | **0** | **0 %** |
+> | crop au nadir *(parois cachées)* | 2,586 | 136 | **7,73 %** de l'image — **28,8 % des pixels du crop** |
+> | la Terre AUTOUR *(crop éteint, vue orbitale)* | **11,08** | 151 | **37,44 %** |
+>
+> ⚠️ **À COMPARER AUX 1,01 % DE LA TÂCHE C, QUI CONCLUAIT « UNE FINITION, PAS UNE TRANSFORMATION ».** L'écart moyen sur les seuls pixels du crop vaut **9,64 unités** contre **0,080** pour ses quatre postes d'habillage : **cent vingt fois plus.** Elle avait raison de désigner cette tâche.
+>
+> ⚠️ **ET LA PREUVE DE COUVERTURE N'EST PAS VIDE, CETTE FOIS-CI POUR DE BON.** La première version comptait les pixels d'alpha non nul et rendait **262 144 sur 262 144** — `getClearAlpha()` vaut 1 dans cette application, exactement le piège que la Tâche C a payé deux fois. On CACHE donc `globe.group` et on compte ce qui CHANGE : **26,8 %** de l'image au nadir, **99,996 %** en orbite. ⚠️ **Et une seconde erreur du même banc a rendu un « témoin » de zéro qui n'en était pas un** : il rendait `x.scene`, la scène du SOCLE, quand le globe vit dans `sceneGlobe` (`main.js:4280`). Un écart de zéro partout, qui ressemblait à une réussite.
+>
+> **LA SATURATION DES ZONES LOINTAINES — L'ÉTAPE 4, ET ELLE EST ÉCRITE, PAS CORRIGÉE.** Protocole : toutes les tuiles du globe dont les hauteurs vivent encore, classées **point par point** par `dansCrop`, 147 456 échantillons, LUT de 512 texels.
+>
+> | les alentours, sous… | texels occupés | aux extrémités | saturés |
+> |---|---|---|---|
+> | la rampe **mondiale** | 153 *(29,9 %)* | **0,00 %** | 35,63 % |
+> | la rampe **du crop** *(La Réunion, 0–2 614 m)* | **348** *(68,0 %)* | **0,00 %** | 35,63 % |
+> | une rampe **ALPINE** de synthèse *(402–4 808 m)* | 158 *(30,9 %)* | **2,24 %** | **53,15 %** |
+>
+> ⚠️ **LE CAS QU'ADRIEN A NOMMÉ EST LE TROISIÈME, ET C'EST LUI QUI MORD** : « une plaine à côté d'un crop alpin sera monochrome ». Sous une rampe alpine, **50,9 % des alentours s'écrasent sur la PREMIÈRE teinte de terre** — tout ce qui est sous 402 m, c'est-à-dire toutes les plaines du monde — et **2 473 échantillons de mer butent sur l'abysse**, la profondeur locale d'un crop intérieur étant nulle. Sous la rampe de La Réunion, en revanche, **rien ne sature par le haut** : rien de chargé alentour ne dépasse 2 614 m.
+>
+> ⚠️ **ET LE VRAI EFFET N'EST PAS LA MONOCHROMIE, C'EST LE DURCISSEMENT.** Le comptage de couleurs distinctes le dit contre l'intuition : la rampe locale en rend **PLUS**, pas moins — 13 778 → **19 792** en orbite, **+43,6 %**. La rampe est plus RAIDE : elle traverse plus de texels par mètre en bas et écrête en haut. À l'écran, Madagascar passe d'un rose pâle lisible à une masse orange soutenue. **C'est visible, c'est accepté, et ce n'est pas ce que le mot « monochrome » laissait attendre.**
+>
+> ⚠️ **LA PORTÉE DE CETTE MESURE EST LIMITÉE, ET IL FAUT LE DIRE** : seules **neuf tuiles** gardent leurs hauteurs (`gardeHauteurs`, la réservation du flux), les autres les relâchent dès le maillage bâti — 256 Kio la tuile, 435 Mo au cache plein, décision de la Tâche 4 sexies. « Les alentours » désigne donc les **27 km** autour du crop, pas la planète. La planète, elle, n'est mesurable qu'à l'image, et c'est la ligne « la Terre AUTOUR » ci-dessus.
+>
+> **CE QUE LA CAMPAGNE DE MUTATION A TROUVÉ — DEUX SURVIVANTES, DEUX DÉFAUTS RÉELS.**
+> - ⚠️ **M3 — LE PLANCHER DE DIVISION DU NUANCEUR ÉTAIT UNE CONSTANTE INATTEIGNABLE.** Le retirer ne tuait rien : `echelleRampe` applique déjà le plancher, donc le `max` valait **toujours** son premier terme. C'est le §2 de `/threejs-optimisation` mot pour mot — « une constante peut être du code mort sans que rien ne le signale ». La garde est maintenant ATTEIGNABLE : le balayage de ②b comprend une échelle **dégénérée** telle qu'un appelant peut en poser une à la main par `poserRampe({ echelle })`. ⚠️ **Et il a fallu deux essais** : au pas régulier de 18 m, `h = terreBas` était **SAUTÉ** (l'indice valait 566,67), et c'est là, et là seulement, que 0/0 se produit. Les ancres sont désormais dans le balayage.
+> - ⚠️ **M11 — MON COMMENTAIRE PRÊTAIT AUX CENTRES DE CELLULE UNE VERTU QU'ILS N'ONT PAS.** Il affirmait qu'aux nœuds « la couverture tomberait sous 1 par construction » : **c'est faux**, un point hors forme est écarté par `continue` AVANT d'être compté manquant. La vraie propriété — aucun échantillon exactement SUR la frontière, et un jeu de points symétrique en u comme en v — est maintenant vérifiée **sur les points réellement visités**, relevés dans le rappel `hauteur`. Une mutation de plus (`M11 bis`, le `pas` de l'appelant ignoré) a été ajoutée : elle tue trois assertions.
+>
+> **CE QUE J'AI VU À L'ÉCRAN — ET LE VERDICT EST MITIGÉ.** Trois vues au même cadrage (nadir, `y = 110`, IHM masquée, exagération forcée à **×2,8** parce qu'à ×18 la vue est injugeable, `?exag=continu` étant éteint) :
+> - **A, le socle seul** — une aquarelle **pâle** : crèmes et blancs sur presque toute l'île, ravines rosées et grises, mer turquoise à l'est.
+> - **B, le crop du globe, rampe mondiale** — **une masse plate et orange**, exactement le grief de la Tâche C.
+> - **C, le crop du globe, rampe du crop** — **la mer change du tout au tout** : le mauve sombre devient un bleu franc, et une frange turquoise apparaît le long de la côte. **La terre, elle, devient PLUS SOMBRE, pas plus claire** : 1 400 m passe de `t = 0,513` (sable) à `t = 0,698` (orange), et 2 000 m à `0,847` (brun rouge). ⚠️ **CE N'EST PAS CE QUE J'ATTENDAIS, ET C'EST LE RÉSULTAT.**
+>
+> ⚠️ **NON, LE CROP NE RESSEMBLE TOUJOURS PAS AU SOCLE, ET LA CAUSE EST MESURÉE.** Ce ne sont pas deux réglages de la même rampe, ce sont **deux rampes qui n'ont ni la même table ni la même loi** :
+>
+> | | globe | socle |
+> |---|---|---|
+> | table | `uRamp`, **512 × 1**, mer dans `[0 ; 0,35]`, terre dans `[0,35 ; 1]` | `uRampTex`, **512 × 64** *(2ᵉ axe : humidité)*, **ENTIÈREMENT TERRE** |
+> | loi terre | `0,35 + 0,65 · (h − bas)/(haut − bas)` | `0,5 + (hNorm − pivot) · contraste`, **pivot 0,65, contraste 2,5** |
+> | mer | le bas de la même table | une rampe nautique à **TROIS** couleurs (`uOceanShallow/Mid/Deep`) |
+> | `hNorm` porte sur… | la terre seule | **le relief ENTIER, fond marin compris** |
+>
+> **Les `t` du socle, relevés sur ses propres uniformes** (`uHeightRange = (−14,64 ; 12,50)` unités, `uSeaY = −2,52`, pivot 0,65, contraste 2,5, `meanM = 440,8`, 488,47 m/unité) : **0 m → 0,000 · 200 m → 0,097 · 600 m → 0,308 · 1 000 m → 0,519 · 1 400 m → 0,730 · 2 000 m → 1,000.** Le socle **sature en blanc dès 2 000 m** ; le globe n'y arrive qu'à 2 614.
+>
+> ⚠️ **ET PORTER `pivot` / `contraste` N'EST PAS UN GESTE MÉCANIQUE — C'EST UNE DÉCISION PRODUIT, ET JE NE L'AI PAS PRISE.** Rejoué à la main : `contraste = 2,5` est calibré sur l'amplitude du SOCLE (4 734 m, fond marin à −2 116 m compris) ; appliqué à celle du CROP (2 837 m), il fait passer **tout ce qui est sous ~1 740 m** au premier ton de la rampe. Pour le porter juste il faudrait **rééchelonner le contraste avec l'amplitude** — 2,5 × 2 613/4 734 = **1,38** — et déplacer le pivot : 0,65 sur le socle vaut **964 m**, soit 0,369 sur une normalisation terre seule. **Et cela ne suffirait toujours pas, parce que les deux tables n'ont pas le même contenu** et que celle du socle est land-only. La réconcilier suppose de toucher à la mer, **c'est-à-dire la Tâche F**, que le §7 place explicitement après. Les chiffres sont là pour qu'Adrien tranche.
+>
+> ⚠️ **« AUCUNE COUTURE AU BORD » EST TENU PAR CONSTRUCTION, ET N'EST PAS OBSERVABLE AUJOURD'HUI.** Les quatre uniformes sont PARTAGÉS (`this.uniforms`, que `_materialFor` étale dans chaque matériau) et le nuanceur ne calcule `t` **qu'une fois, hors de toute branche** — ②c l'exige : une seule occurrence de `float t = `, une seule de `texture2D(uRamp`, et l'expression ne mentionne ni `uCrop` ni `qCrop`. Pour fabriquer une couture il faudrait un SECOND calcul de `t` sous une garde par fragment, les uniformes étant posés par appel de dessin et ne sachant rien de l'appartenance au crop. ⚠️ **Mais à l'écran il n'y a rien à coudre** : la Tâche A `discard` tout ce qui est hors du crop, donc la Terre autour **n'est pas dessinée** — vérifié à `y = 900`, le bloc flotte seul sur le fond. **La propriété ne deviendra visible qu'avec la Tâche G.**
+>
+> **LES TESTS.** 35 tests, **19 mutations posées, 19 tuées**. ⚠️ **UNE SEULE ASSERTION EST VERTE CONTRE LE DÉPÔT, ET ELLE EST DÉCLARÉE COMME TELLE** : ①c (« les alentours suivent »), verte parce que la rampe mondiale est sans couture elle aussi — c'est ①d qui porte la preuve. On la garde parce qu'elle est **ROUGE contre la loi bridée**, le contresens le plus probable de la décision 4. ⚠️ **`poserRampe` EST EXERCÉE, PAS SEULEMENT NOMMÉE** (`.call` sur un objet minimal, patron de la Tâche B) : sans ②h, le refus de couverture n'aurait été qu'une intention de commentaire — **et il s'est déclenché en conditions réelles**, deux fois, quand le rebâtissage d'exagération relâche les hauteurs (`couverture: 0`, `refus: 'couverture'`, uniformes intouchés).
+>
+> **LA CLÔTURE.** `npm test` **3 491** (3 456 + 35) · `audit:tests` 198/198 · `node --check` sur les quatre fichiers · `nettoie:dist` + `build:mapcells` + `vite build` + `verifie:dist`.
+>
+> **CE QUE JE N'AI PAS PU VÉRIFIER.**
+> - **La saturation à l'échelle de la PLANÈTE**, faute de hauteurs : neuf tuiles seulement les gardent. Le chiffre publié porte sur 27 km autour du crop.
+> - **Le `pas` sur un crop dont la mer compte** : la convergence du fond marin n'est pas atteinte à 128 (erreur ~7 %, treize texels de la rampe bathymétrique), et la suite n'est pas monotone parce que les points profonds sont rares. La table complète est dans l'en-tête de `PAS_MESURE`.
+> - **Aucun branchement de production**, exactement comme A, B et C : `poserRampe` n'est appelé par personne dans `src/`. Tout ce qui précède vient de la console (`.banc/pose-D.js`).
+> - **Un seul crop, une seule machine.** La Réunion, RTX 3080. Le cas alpin n'a été mesuré que par une échelle de **SYNTHÈSE** appliquée au relief de La Réunion, pas par un vrai crop alpin chargé.
 
 ### Tâche E — L'EXAGÉRATION UNIQUE
 
@@ -397,13 +469,16 @@ Retirer `monde/fenetre-bornee.js`, le chemin « bloc » de `terrain.js`, et les 
 - **Le bord de la PAROI n'est pas antialiasé** (relevé par la Tâche B) — la couverture douce ne couvre que la surface ; la silhouette du bloc, elle, est de la géométrie, et `antialias === false`. Reste à trancher : on vit avec, ou on paie une passe.
 - **La transition d'apparition du crop** (décision 4 du plan précédent : « le socle complet apparaît d'un coup, **avec une transition à dessiner** ») — elle n'est toujours pas dessinée, et le rideau qui la masquait est parti.
 - **L'indicateur affiche encore un numéro de zoom** quand il n'y a plus de socle.
-- **Le raccord de palette au bord du crop** — la Tâche D doit le supprimer ; s'il subsiste, c'est un arbitrage de goût.
+- **Le raccord de palette au bord du crop** — la Tâche D doit le supprimer ; s'il subsiste, c'est un arbitrage de goût. ⚠️ **RÉPONDU PAR LA TÂCHE D, ET LA RÉPONSE EST À MOITIÉ VIDE** : il n'y a plus qu'UNE rampe, calculée une seule fois hors de toute branche et portée par des uniformes PARTAGÉS — un raccord ne peut pas naître. **Mais rien ne le montre à l'écran** : la Tâche A `discard` tout ce qui est hors du crop, donc il n'y a pas d'alentours à raccorder tant que la Tâche G n'a pas rendu la Terre autour.
 - **Les crops continentaux** que la sphère rend enfin possibles : les veut-il, et à quelle largeur maximale ?
 - **LES JUPES DES TUILES PENDENT SOUS LE BLOC** (relevé par la Tâche E, à l'écran) — cinq à six languettes qui descendent sous la base. Le `discard` du crop est en **lat/lon**, et une jupe partage le (lat, lon) du bord de sa tuile : elle n'est **jamais** coupée. Aucune tâche du plan ne la couvre. Deux sorties possibles, aucune mesurée : couper la jupe par sa hauteur radiale plutôt que par sa position, ou ne pas bâtir de jupe sur une tuile qui touche la frontière.
 - **LE RELIEF DU GLOBE VU DE LOIN, À TRANCHER** (Tâche E, tour 1) — à ×2,8 la silhouette du limbe passe de **≈7 px à ≈1 px** sur un cadrage plein disque. **La métrique employée (écart moyen absolu sur l'image) ne sait pas distinguer cet effet du bruit des nuages** — elle n'autorise donc pas à conclure « acceptable ». Il faudrait un critère LOCAL (limbe seul, chaîne montagneuse dans le cadre, nuages figés) pour trancher ; il n'a pas été fait. **Si Adrien veut du relief à l'orbite, la courbe doit remonter aux hautes altitudes — et c'est une mesure à faire, pas un goût.**
 - **L'OCCUPATION DU SOL DU CROP N'A JAMAIS ÉTÉ VUE** (Tâche C) — la couche est éteinte dans l'application, son coût est mesuré (0,093 ms pour 0,81 Mpx, le poste le plus cher des quatre) mais son image ne l'est pas. **À rallumer et à regarder.**
 - **LE PEIGNÉ (analyse de relief) RESTE AU SOCLE, ET C'EST LUI QU'ON VOIT** (Tâche C) — les quatre postes portés ne déplacent que **1,01 % des pixels**, témoin à zéro. Ce qui fait la richesse de l'image du socle, c'est le texture shading et la rampe locale. **Le porter coûterait 1,94 ms/Mpx au tarif complet ; sa part seule reste à mesurer.**
 - **LA VUE AU NADIR DU CROP EST INJUGEABLE À ×18** (Tâche C, à l'écran) — le relief de La Réunion fait 0,86 unité de haut pour 0,21 de large, la montagne passe au-dessus de la caméra. `?exag=continu` (Tâche E) le corrige, mais il est éteint.
+- **LE GLOBE ET LE SOCLE N'ONT NI LA MÊME TABLE DE COULEURS NI LA MÊME LOI DE RAMPE** (Tâche D, mesuré) — `uRamp` fait 512 × 1 et réserve 35 % à la mer ; `uRampTex` fait 512 × **64** (2ᵉ axe d'humidité) et est **entièrement terre**, la mer étant peinte par une rampe nautique à trois couleurs. Et la loi diffère : `0,35 + 0,65 · u` contre `0,5 + (hNorm − 0,65) · 2,5`. **Porter le pivot et le contraste suppose de rééchelonner le contraste avec l'amplitude du crop (2,5 → 1,38 ici) ET de changer de table — donc de toucher à la mer, c'est-à-dire la Tâche F.** C'est une décision produit, pas un portage : à trancher, avec les chiffres du bilan de D.
+- **LA RAMPE LOCALE REND LE CROP PLUS SOMBRE, PAS PLUS CLAIR** (Tâche D, à l'écran) — sur la table du globe, occuper 100 % du segment terre pousse les moyennes altitudes de La Réunion du sable (`t = 0,513`) au brun rouge (`t = 0,847`), et place une « ligne de neige » vers 2 090 m sur une île tropicale. C'est la contrepartie de « couleurs stables et reproductibles », et elle se voit.
+- **LA TERRE AUTOUR DU CROP N'EST PAS DESSINÉE DU TOUT** (Tâche D, vérifié à `y = 900`) — la Tâche A `discard` tout ce qui est hors du crop, donc « les alentours la suivent » n'a rien à montrer aujourd'hui. La propriété est tenue par construction (uniformes partagés, un seul calcul de `t`) mais **ne deviendra visible qu'avec la Tâche G**.
 - **LE COÛT DE L'EXAGÉRATION DU GLOBE** (Tâche E) — **12 à 21 s de rechargement réseau à chaque cran**, parce que le relief est cuit dans les sommets. Tant qu'il n'est pas déplacé dans le nuanceur de sommets, `?exag=continu` ne peut pas devenir le défaut, et la courbe reste échantillonnée aux crans au lieu de glisser.
 
 ---

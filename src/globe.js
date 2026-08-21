@@ -23,6 +23,13 @@ import { repereCrop, coinNormalise, zoomCropPrescrit, mercX, mercY } from './mon
 // c'est ce fichier-ci qui en fait une géométrie three.
 import { construireSolideCrop } from './monde/parois-crop.js'
 import { margeCoteDuCrop, intervalleCourbes } from './monde/habillage-crop.js'
+import {
+  RAMPE_MONDE,
+  PAS_MESURE,
+  mesurerRelief,
+  echelleRampe,
+  plancherRampeDuCrop,
+} from './monde/rampe-crop.js'
 // L'EXAGÉRATION PARTAGÉE — Tâche E. ⚠️ **UN ÉCRIVAIN, N LECTEURS, ET LE GLOBE
 // EST LE QUATORZIÈME** (`terrain.js` ×5, `ocean.js` ×2, `gpx.js` ×1,
 // `main.js` ×5). ⚠️ Ce module n'importe RIEN — c'est sa seule règle, et elle est
@@ -219,6 +226,29 @@ uniform float uContourOpacity;
 uniform float uGraticuleOpacity;
 uniform float uOceanDepth;
 uniform float uLandMax;
+
+// ══════════ LA RAMPE CALCULEE SUR LE CROP — Tache D, « UNE SEULE TERRE » ════
+//
+// Adrien, decision 4 : « la rampe de couleur se calcule SUR LE CROP, et les
+// alentours la suivent ». La loi vit dans src/monde/rampe-crop.js et se verifie
+// sous node ; ce bloc-ci en est la TRANSCRIPTION, et test/crop-rampe.test.js
+// l'EXTRAIT puis l'EXECUTE au lieu d'y chercher un nom.
+//
+// (Pas d'accent grave dans ce bloc : il vit dans un template literal JS, il le
+// terminerait — le piege que terrain.js et ocean.js documentent tous les deux.)
+//
+// ⚠️ CES DEUX-LA SONT PARTAGES, COMME uLandMax ET uOceanDepth, ET C'EST TOUTE
+// LA MECANIQUE DE « les alentours la suivent » : ils vivent dans this.uniforms,
+// que _materialFor etale dans CHAQUE materiau de tuile. Une tuile a l'autre bout
+// de la planete peint donc avec l'echelle du crop. Il n'y a pas de seconde
+// rampe a raccorder, donc pas de couture a dessiner : la couture ne peut pas
+// naitre.
+//
+// ⚠️ ET LEURS VALEURS PAR DEFAUT SONT L'ECHELLE MONDIALE (RAMPE_MONDE) : sans
+// poserRampe, le globe peint au bit pres comme avant la Tache D. Meme garde que
+// uCropOn (Tache A) et uHabOn (Tache C).
+uniform float uLandBas; // l ancre BASSE de la rampe terre, en metres
+uniform float uPlancherRampeM; // garde de division, en metres — voir le module
 // côté de la tuile en texels — 256 (AWS) ou 512 (Mapterhorn), voir planTuile
 uniform float uTilePx;
 
@@ -478,9 +508,22 @@ void main() {
   // ⚠️ sousEau VAUT h < 0.0 QUAND L'HABILLAGE EST ETEINT : la production est
   // intouchee au bit pres, et une mutation qui eteint le masque doit rendre
   // exactement l'image d'avant, sinon elle ne prouve rien.
+  // ⚠️ DEUX ANCRES POUR LA TERRE, PAS UNE. « La rampe s'etale sur l'AMPLITUDE
+  // locale » (Etape 1 de la tache) : l'amplitude, c'est max - min. Ne caler que
+  // le haut laisserait le fond de vallee d'un crop alpin a 8 % de la rampe au
+  // lieu de 0. Le socle pose bien les deux (uHeightRange, terrain.js:2084).
+  //
+  // ⚠️ ET LE PARTAGE MER / TERRE A 0,35 NE BOUGE PAS : c'est lui qui garantit
+  // qu'un littoral reste un littoral d'un crop a l'autre.
+  //
+  // ⚠️ AUX VALEURS PAR DEFAUT (uLandBas = 0, uPlancherRampeM = 0), ces deux
+  // lignes rendent EXACTEMENT h / uLandMax et -h / uOceanDepth : max(5600-0, 0)
+  // vaut 5600, max(6000, 0) vaut 6000, et h - 0.0 vaut h. La production est
+  // intouchee au bit pres, et test/crop-rampe.test.js le prouve par un Object.is
+  // sur 2 001 hauteurs.
   float t = sousEau
-    ? 0.35 * (1.0 - clamp(-h / uOceanDepth, 0.0, 1.0))
-    : 0.35 + 0.65 * clamp(h / uLandMax, 0.0, 1.0);
+    ? 0.35 * (1.0 - clamp(-h / max(uOceanDepth, uPlancherRampeM), 0.0, 1.0))
+    : 0.35 + 0.65 * clamp((h - uLandBas) / max(uLandMax - uLandBas, uPlancherRampeM), 0.0, 1.0);
   vec3 col = texture2D(uRamp, vec2(t, 0.5)).rgb;
 
   // ══════ POSTE ④ — L'OCCUPATION DU SOL ══════════════════════════════════════
@@ -1063,8 +1106,20 @@ export class Globe {
       uContourInterval: { value: 500 },
       uContourOpacity: { value: 0.55 },
       uGraticuleOpacity: { value: 0.16 },
-      uOceanDepth: { value: 6000 },
-      uLandMax: { value: 5600 },
+      // LA RAMPE — Tâche D, « la rampe se calcule sur le crop ». ⚠️ **LES QUATRE
+      // VALEURS VIENNENT DE `RAMPE_MONDE`, PAS DE QUATRE LITTÉRAUX** : `5600` et
+      // `6000` étaient écrits ici et nulle part ailleurs ; `retirerRampe` en
+      // aurait fait une seconde copie, et une constante dupliquée diverge en
+      // silence (§1 de `/threejs-optimisation`, question 2).
+      //
+      // ⚠️ **ET CES QUATRE-LÀ SONT PARTAGÉS**, comme les cinq du crop et les
+      // quatorze de l'habillage : ils vivent dans `this.uniforms`, que
+      // `_materialFor` étale dans chaque matériau. C'est LA mécanique de « les
+      // alentours la suivent » — il n'y a qu'une rampe, donc pas de couture.
+      uOceanDepth: { value: RAMPE_MONDE.profondeur },
+      uLandMax: { value: RAMPE_MONDE.terreHaut },
+      uLandBas: { value: RAMPE_MONDE.terreBas },
+      uPlancherRampeM: { value: RAMPE_MONDE.plancherM },
       uRamp: { value: null },
       // LE CROP — Tâche A, « UNE SEULE TERRE ». ⚠️ `uCropOn: 0` : sans
       // `poserCrop`, RIEN NE CHANGE. Ces cinq-là sont PARTAGÉS (ils vivent dans
@@ -1227,6 +1282,7 @@ export class Globe {
     this._melangeCrop(false)
     this.retirerParoisCrop()
     this.retirerHabillage()
+    this.retirerRampe()
   }
 
   // ═══════════ L'HABILLAGE — Tâche C, « le globe prend le rendu du socle » ═══
@@ -1335,6 +1391,91 @@ export class Globe {
     u.uCoastMaskOn.value = 0
     u.uSolOn.value = 0
     u.uGrainForceM.value = 0
+  }
+
+  // ═══════════ LA RAMPE — Tâche D, « calculée sur le crop, suivie par les
+  //             alentours » ══════════════════════════════════════════════════
+  //
+  // **Décision 4 d'Adrien, mot pour mot :** « La rampe se calcule SUR LE CROP,
+  // et les alentours la suivent. » Couleurs stables et reproductibles pour
+  // l'affiche, **aucune couture au bord**.
+  //
+  // ⚠️ **C'EST LE DÉFAUT QUE SES CAPTURES MONTRENT, ET IL EST CHIFFRÉ** : à
+  // l'île Maurice, qui culmine à 828 m, la rampe mondiale (`uLandMax = 5600`)
+  // n'utilise que **14,3 % du bas de sa rampe** — le vert — quand le socle
+  // l'étale sur 100 % jusqu'aux blancs. Le chiffre est rejoué contre le dépôt
+  // par `.banc/rejoue-D.mjs`, qui ÉVALUE l'expression extraite de
+  // `git show 82e8b87:src/globe.js` : `t(828 m) = 0,4429`.
+  //
+  // ⚠️ **R1 — LA BOUCLE EST COUPÉE, ET ELLE A ÉTÉ VÉRIFIÉE AVANT D'ÉCRIRE UNE
+  // LIGNE.** La rampe est une décision de RENDU : elle a le droit de LIRE le
+  // relief. Ce qui est interdit, c'est qu'une décision de CADRAGE la relise —
+  // R1 a mordu trois fois sur ce chantier, dont un pilote d'exagération de gain
+  // mesuré 1,44, donc divergent. Les quatre sorties de cette méthode ne vont que
+  // dans des uniformes de COULEUR, et `test/crop-rampe.test.js` (⑥a) échoue si
+  // `seuil-socle.js`, `descente-bornee.js`, `exageration-continue.js`,
+  // `veille-socle.js` ou `flux-terrain.js` se met à les lire.
+  //
+  // ⚠️ **ELLE NE TOURNE PAS PAR IMAGE.** Comme `construireParoisCrop`, elle
+  // balaie le crop entier : décision 5 du plan précédent, « la gravure ne
+  // s'écrit qu'à l'arrêt ». L'appelant décide quand.
+  //
+  // ⚠️ **CETTE MÉTHODE EST LE SEUL INTERRUPTEUR.** Tant que personne ne
+  // l'appelle, les quatre uniformes valent `RAMPE_MONDE` et le globe est celui
+  // d'avant, au bit près.
+
+  /**
+   * Calcule la rampe sur le relief du crop, et la pose pour TOUTE la planète.
+   *
+   * @param {object} [arg]
+   * @param {{terreBas:number,terreHaut:number,profondeur:number,plancherM:number}} [arg.echelle]
+   *   impose l'échelle au lieu de la mesurer (bancs, tests, réglage manuel)
+   * @param {number} [arg.pas] finesse du balayage — voir `PAS_MESURE`
+   * @param {number} [arg.couvertureMin] ⚠️ **1 par défaut, et c'est le §7 de
+   *   `parois-crop.js` appliqué à la rampe** : une tuile manquante rend `null`,
+   *   et prendre `null` pour zéro repeindrait tout le crop.
+   * @returns {{refus:string|null, echelle:object|null, mesure:object|null}}
+   */
+  poserRampe({ echelle = null, pas = PAS_MESURE, couvertureMin = 1 } = {}) {
+    const u = this.uniforms
+    let e = echelle
+    let mesure = null
+    if (!e) {
+      if (!this._crop) return { refus: 'crop', echelle: null, mesure: null }
+      // ⚠️ LA LISTE EST PRÉ-FILTRÉE UNE FOIS, comme pour les parois : le balayage
+      // fait `pas²` points, et reparcourir `this.tiles` (jusqu'à 1 700 entrées)
+      // à chacun ferait des dizaines de millions d'itérations.
+      const liste = this.tuilesAvecHauteurs()
+      mesure = mesurerRelief({
+        repere: this._crop,
+        forme: { coin: u.uCropCoin.value, expo: u.uCropCoinN.value },
+        hauteur: (lat, lon) => this.hauteurSurface(lat, lon, liste),
+        pas,
+        couvertureMin,
+      })
+      // ⚠️ **LE REFUS NE TOUCHE PAS À LA RAMPE EN PLACE.** C'est ce qui le rend
+      // acceptable : les couleurs précédentes restent à l'écran jusqu'à ce que
+      // la donnée arrive, et l'appelant n'a rien à défaire. Même discipline que
+      // le refus de couverture des parois.
+      if (mesure.refus) return { refus: mesure.refus, echelle: null, mesure }
+      e = echelleRampe(mesure, { plancherM: plancherRampeDuCrop(this._crop) })
+    }
+    u.uLandBas.value = e.terreBas
+    u.uLandMax.value = e.terreHaut
+    u.uOceanDepth.value = e.profondeur
+    u.uPlancherRampeM.value = e.plancherM
+    this._rampe = e
+    return { refus: null, echelle: e, mesure }
+  }
+
+  /** Rend la rampe MONDIALE — le globe reprend ses couleurs d'avant, au bit près. */
+  retirerRampe() {
+    const u = this.uniforms
+    u.uLandBas.value = RAMPE_MONDE.terreBas
+    u.uLandMax.value = RAMPE_MONDE.terreHaut
+    u.uOceanDepth.value = RAMPE_MONDE.profondeur
+    u.uPlancherRampeM.value = RAMPE_MONDE.plancherM
+    this._rampe = null
   }
 
   // ═══════════ LES PAROIS ET LA BASE — Tâche B ═══════════════════════════════

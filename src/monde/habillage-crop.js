@@ -121,12 +121,33 @@ export const EXAG_SOCLE_NOMINALE = 2.8
  * sur chaque lagune et chaque estuaire.
  */
 export function margeCoteM(metresParUnite, exageration = EXAG_SOCLE_NOMINALE) {
+  return unitesEnMetres(MARGE_COTE_UNITES, metresParUnite, exageration)
+}
+
+/**
+ * Une longueur en UNITÉS DE SCÈNE du socle → la même longueur en MÈTRES BRUTS.
+ *
+ * ⚠️ **AJOUTÉE PAR LA TÂCHE D, ET ELLE NE REMPLACE RIEN** — c'est la règle des
+ * listes du §0 : « on élargit une liste, on ne la remplace jamais ». La
+ * conversion était déjà écrite, à l'intérieur de `margeCoteM` ; la Tâche D en a
+ * besoin pour un SECOND nombre (le plancher d'amplitude `1e-4` de
+ * `terrain.js:1016`). On la sort donc, et `margeCoteM` l'appelle — **son
+ * comportement est inchangé au bit près, et `test/crop-habillage.test.js` le
+ * tient déjà** (④, la marge convertie et non recopiée).
+ *
+ * ⚠️ **LE `/ exagération` N'EST PAS DÉCORATIF** : les unités de scène du socle
+ * mesurent un relief DÉJÀ exagéré, les mètres du globe sont bruts. L'oublier
+ * gonflerait chaque longueur du facteur d'exagération — 2,8 côté socle, 18 côté
+ * globe.
+ */
+export function unitesEnMetres(unites, metresParUnite, exageration = EXAG_SOCLE_NOMINALE) {
+  const x = Number(unites)
   const m = Number(metresParUnite)
   const k = Number(exageration)
-  if (!Number.isFinite(m) || !Number.isFinite(k) || k <= 0) {
-    throw new TypeError('margeCoteM : mètres par unité fini, exagération finie et > 0')
+  if (!Number.isFinite(x) || !Number.isFinite(m) || !Number.isFinite(k) || k <= 0) {
+    throw new TypeError('unitesEnMetres : unités et mètres par unité finis, exagération finie et > 0')
   }
-  return (MARGE_COTE_UNITES * m) / k
+  return (x * m) / k
 }
 
 /** La circonférence équatoriale Web-Mercator, en mètres (celle des tuiles). */
