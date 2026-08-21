@@ -22,6 +22,7 @@ import { repereCrop, coinNormalise, zoomCropPrescrit, mercX, mercY } from './mon
 // LES PAROIS ET LA BASE — Tâche B. Pur lui aussi : il ne rend que des nombres,
 // c'est ce fichier-ci qui en fait une géométrie three.
 import { construireSolideCrop } from './monde/parois-crop.js'
+import { margeCoteDuCrop, intervalleCourbes } from './monde/habillage-crop.js'
 // L'EXAGÉRATION PARTAGÉE — Tâche E. ⚠️ **UN ÉCRIVAIN, N LECTEURS, ET LE GLOBE
 // EST LE QUATORZIÈME** (`terrain.js` ×5, `ocean.js` ×2, `gpx.js` ×1,
 // `main.js` ×5). ⚠️ Ce module n'importe RIEN — c'est sa seule règle, et elle est
@@ -240,6 +241,45 @@ uniform float uCropDemi; // demi-côté du crop, même unité
 uniform float uCropCoin; // rayon d'arrondi, en FRACTION du demi-côté
 uniform float uCropCoinN; // exposant de superellipse (2 = cercle, 4,4 = défaut)
 
+// ══════════ L'HABILLAGE — Tache C, « le globe prend le rendu du socle » ═════
+//
+// Adrien, decision 6 : « je veux le meme rendu que la qualite de rendu des
+// tuiles a plat qui vont donc disparaitre ». Quatre postes sont dans le
+// perimetre de cette tache — courbes calees sur le local, grain, masque de
+// cote, occupation du sol. La loi vit dans src/monde/habillage-crop.js et se
+// verifie sous node ; ce bloc-ci en est la TRANSCRIPTION.
+//
+// (Pas d'accent grave dans ce bloc : il vit dans un template literal JS, il le
+// terminerait — le piege que terrain.js et ocean.js documentent tous les deux.)
+//
+// ⚠️ uHabOn VAUT ZERO PAR DEFAUT, exactement comme uCropOn, et pour la meme
+// raison : le nuanceur est PARTAGE par toutes les tuiles du globe, y compris
+// celles qui ne verront jamais de crop. Sans poserHabillage, rien ne change.
+uniform float uHabOn;
+
+// ⚠️ POURQUOI CES TROIS SAMPLERS NE SONT PAS DERRIERE UN #ifdef, ALORS QUE LEURS
+// JUMEAUX DE terrain.js LE SONT. Le defaut du 2026-08-03 (test/plafond-unites-
+// texture.test.js) etait un DEPASSEMENT : 12 samplers du nuanceur de carte + 4
+// du materiau de surface + environnement + carte d'ombre = 18, pour un plafond
+// de 16, et le terrain disparaissait. Le nuanceur du globe, lui, est un
+// ShaderMaterial NU : il n'a ni materiau de surface, ni environnement, ni carte
+// d'ombre. Le compte y passe de DEUX (uTex, uRamp) a CINQ. Le #ifdef aurait
+// coute une recompilation de chaque materiau de tuile a chaque bascule de
+// couche, pour economiser une unite sur onze disponibles.
+uniform sampler2D uCoastMask;
+uniform float uCoastMaskOn;
+uniform float uMargeCoteM; // la marge du socle (0,02 unite), CONVERTIE en metres
+uniform sampler2D uSol;
+uniform sampler2D uSolLut;
+uniform float uSolOn;
+uniform float uSolOpacite;
+uniform vec2 uSolOffset;
+uniform vec2 uSolScale;
+uniform vec2 uSolTexel;
+uniform float uGrainForceM; // amplitude du grain, en METRES de relief
+uniform float uGrainEchelle;
+uniform float uContourWeight; // le poids de trait du socle (uContourWeight)
+
 float decodeMeters(vec2 uv) {
   vec3 t = texture2D(uTex, uv).rgb * 255.0;
   return t.r * 256.0 + t.g + t.b / 256.0 - 32768.0;
@@ -266,10 +306,72 @@ float hash12(vec2 p) {
   return fract((p3.x + p3.y) * p3.z);
 }
 
+// ══════════ CE QUI EST PORTE DU SOCLE, ET RIEN N'EST REECRIT ────────────────
+//
+// ⚠️ MOT POUR MOT DEPUIS terrain.js. Une seconde ecriture de ces formules
+// finirait par diverger de la premiere — terrain.js porte deja cette cicatrice
+// (« Deux ecritures jumelles finiraient par diverger »), et le crop et le socle
+// doivent rendre LA MEME IMAGE, pas une image ressemblante.
+
+// mnHash / mnNoise — terrain.js:459. Le bruit de valeur du grain.
+float mnHash(vec2 p){ p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
+float mnNoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(mnHash(i), mnHash(i+vec2(1.0,0.0)), f.x), mix(mnHash(i+vec2(0.0,1.0)), mnHash(i+vec2(1.0,1.0)), f.x), f.y); }
+
+// blLum / blClip / blSetLum — terrain.js:886. L'occupation du sol MODULE la
+// couleur, elle n'en pose pas une : blSetLum prend la TEINTE de la classe et lui
+// impose une LUMINANCE tiree de la rampe, ce qui laisse le relief, les courbes
+// et la rampe hypsometrique se lire a travers. C'est toute la difference entre
+// une carte et un aplat colorie.
+float blLum(vec3 c) { return dot(c, vec3(0.3, 0.59, 0.11)); }
+vec3 blClip(vec3 c) { float l = blLum(c); float mn = min(min(c.r, c.g), c.b); float mx = max(max(c.r, c.g), c.b);
+  if (mn < 0.0) c = l + (c - l) * l / (l - mn + 1e-5);
+  if (mx > 1.0) c = l + (c - l) * (1.0 - l) / (mx - l + 1e-5);
+  return clamp(c, 0.0, 1.0); }
+vec3 blSetLum(vec3 c, float l) { return blClip(c + (l - blLum(c))); }
+
+// solEn / lavisSol — terrain.js. ⚠️ uSol NE TRANSPORTE PAS UNE IMAGE : chaque
+// octet EST un code de classe ESA WorldCover (10 arbres, 30 prairie, 80 eau).
+// Entre 10 et 80 il n'y a pas 45, il n'y a RIEN — et tout, dans une chaine
+// graphique, est fait pour interpoler. Les trois precautions du socle sont donc
+// portees telles quelles : le +0,5 avant le floor (un octet valant 40 peut
+// ressortir a 39,997 en precision moyenne), la visee du CENTRE du texel de la
+// table, et la conversion sRVB vers lineaire a la main (la table est choisie a
+// l'oeil donc ecrite en sRVB, et elle doit rester en NoColorSpace sous peine que
+// ce soit le CODE, dans l'autre texture, qui se fasse convertir).
+vec4 solEn(vec2 p) {
+  float code = floor(texture2D(uSol, p).r * 255.0 + 0.5);
+  vec4 e = texture2D(uSolLut, vec2((code + 0.5) / 256.0, 0.5));
+  vec3 lin = mix(e.rgb / 12.92, pow((e.rgb + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), e.rgb));
+  return vec4(lin, e.a);
+}
+// Le melange des quatre voisins se fait sur la COULEUR deja decodee, jamais sur
+// le code : c'est la meme famille de defaut que le terrarium interpole, qui a
+// coute +128 m la ou il fallait lire -0,5 m.
+vec4 lavisSol(vec2 uv) {
+  vec2 tc = uv / uSolTexel - 0.5;
+  vec2 f = fract(tc);
+  vec2 b = (floor(tc) + 0.5) * uSolTexel;
+  vec4 c00 = solEn(b);
+  vec4 c10 = solEn(b + vec2(uSolTexel.x, 0.0));
+  vec4 c01 = solEn(b + vec2(0.0, uSolTexel.y));
+  vec4 c11 = solEn(b + uSolTexel);
+  c00.rgb *= c00.a; c10.rgb *= c10.a; c01.rgb *= c01.a; c11.rgb *= c11.a;
+  vec4 s = mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+  return vec4(s.rgb / max(s.a, 1e-4), s.a);
+}
+
 void main() {
   // La couverture du crop : 1 partout ailleurs, donc la production est
   // rigoureusement intouchée (uCropOn vaut 0 et ce bloc ne s'exécute pas).
   float couvertureCrop = 1.0;
+
+  // ⚠️ qCrop EST HISSE HORS DU BLOC DE DECOUPE, ET C'EST OBLIGATOIRE : tout
+  // l'habillage se lit en coordonnees LOCALES DU CROP (masque de cote,
+  // occupation du sol, grain), et ces coordonnees sont calculees par la decoupe.
+  // Les recalculer plus bas aurait pose une seconde ecriture de la projection de
+  // Mercator, avec son ecretage et son repli d'antimeridien — deux ecritures qui
+  // divergent, la cicatrice que terrain.js documente deja.
+  vec2 qCrop = vec2(0.0);
 
   // ══════ LA DÉCOUPE, AVANT TOUT LE RESTE ══════════════════════════════════
   //
@@ -291,6 +393,7 @@ void main() {
     float du = mx - uCropCentre.x;
     du -= floor(du + 0.5); // antiméridien : le mercator x est de période 1
     vec2 q = vec2(du, my - uCropCentre.y) / uCropDemi; // local au crop, dans [-1, 1]
+    qCrop = q;
     // la superellipse du socle, transcrite de terrain.js : les côtés droits
     // restent exacts (une composante est nulle), seuls les coins sont formés.
     vec2 cq = max(abs(q) - (1.0 - uCropCoin), 0.0);
@@ -331,20 +434,119 @@ void main() {
 
   float h = decodeMetersAA(vUv);
 
+  // ══════ L'HABILLAGE, POSTES ③ ET ② — Tache C ═══════════════════════════════
+  //
+  // ⚠️ AVANT LA RAMPE ET AVANT LES COURBES, ET CE N'EST PAS UN RANGEMENT : le
+  // grain modifie h, donc la rampe ET les courbes doivent le voir. C'est ce que
+  // fait le socle, qui cuit son grain dans la GEOMETRIE : sa couleur et ses
+  // courbes le portent parce qu'elles lisent vWorldPos.y. Pose apres, le grain
+  // ne serait qu'un bruit de teinte, et les courbes resteraient lisses.
+  float landness = 1.0;
+  bool sousEau = h < 0.0;
+  if (uHabOn > 0.5) {
+    // ③ LE GRAIN. ⚠️ INDEXE SUR LE CROP, JAMAIS SUR vUv NI SUR L'ECRAN. vUv est
+    // local a la TUILE : lu la, le grain se repeterait a chaque tuile — seize
+    // grains au lieu d'un. Et evalue en coordonnees d'ecran il resterait COLLE
+    // A L'ECRAN pendant que le relief defile, le moirage qu'Adrien a attrape a
+    // l'oeil (terrain.js, etude 5.4).
+    //
+    // ⚠️ ET IL NE MORD QUE SUR LA TERRE (h > 0), comme le landFactor du socle :
+    // sans cela le fond marin se couvrirait d'une rugosite que la bathymetrie ne
+    // porte pas, et les courbes bathymetriques se mettraient a onduler.
+    if (uGrainForceM > 0.0 && h > 0.0) {
+      vec2 gp = qCrop * uGrainEchelle;
+      float g1 = mnNoise(gp);
+      float g2 = mnNoise(gp * 2.17 + vec2(19.3, -7.1));
+      h += uGrainForceM * ((g1 - 0.5) * 2.0 + (g2 - 0.5) * 0.7);
+    }
+    // ② LE MASQUE DE COTE. La lecture tombe au MEME TEXEL que celle du socle —
+    // la demonstration est en tete de src/monde/habillage-crop.js, et
+    // test/crop-habillage.test.js la rejoue contre latLonToWorld du depot.
+    //
+    // ⚠️ LE MASQUE DECIDE, LA HAUTEUR NE FAIT QUE L'EMPECHER DE MENTIR. C'est le
+    // correctif v42 de terrain.js : la rampe ocean se peignait sur des montagnes
+    // quand le masque etait faux. Et uMargeCoteM est le 0,02 UNITE du socle
+    // CONVERTI en metres — le recopier tel quel aurait donne deux centimetres.
+    if (uCoastMaskOn > 0.5) {
+      vec2 cmUv = qCrop * 0.5 + 0.5;
+      landness = texture2D(uCoastMask, cmUv).r;
+      sousEau = landness < 0.5 && h < uMargeCoteM;
+    }
+  }
+
   // hypsometric ramp: bathymetry occupies [0, 0.35], land [0.35, 1]
-  float t = h < 0.0
+  // ⚠️ sousEau VAUT h < 0.0 QUAND L'HABILLAGE EST ETEINT : la production est
+  // intouchee au bit pres, et une mutation qui eteint le masque doit rendre
+  // exactement l'image d'avant, sinon elle ne prouve rien.
+  float t = sousEau
     ? 0.35 * (1.0 - clamp(-h / uOceanDepth, 0.0, 1.0))
     : 0.35 + 0.65 * clamp(h / uLandMax, 0.0, 1.0);
   vec3 col = texture2D(uRamp, vec2(t, 0.5)).rgb;
+
+  // ══════ POSTE ④ — L'OCCUPATION DU SOL ══════════════════════════════════════
+  //
+  // ⚠️ ELLE MODULE LA COULEUR, ELLE N'EN POSE PAS UNE (terrain.js) : blSetLum
+  // prend la TEINTE de la classe et lui impose une LUMINANCE tiree de la rampe,
+  // ce qui laisse l'ombrage, les courbes et la rampe se lire a travers.
+  //
+  // ⚠️ ET L'UV EST L'AUTRE, CELUI QUI RETOURNE Y. Les champs cuits (masque de
+  // cote) se lisent en xz direct ; les couches en tuiles Web Mercator, elles,
+  // ont leurs lignes nord vers sud — c'est uvSolDrape, et lui seul, qui retourne.
+  // Confondre les deux pose la foret a l'envers, et rien ne leve d'erreur.
+  if (uHabOn > 0.5 && uSolOn > 0.5 && uSolOpacite > 0.001) {
+    vec2 sUv = vec2(qCrop.x * 0.5 + 0.5, 1.0 - (qCrop.y * 0.5 + 0.5));
+    sUv = uSolOffset + sUv * uSolScale;
+    vec4 lavis = lavisSol(sUv);
+    // ⚠️ LE PLAFOND A 1 N'EST PAS DECORATIF : la tirette « Force » monte a 2, et
+    // mix() au-dela de 1 EXTRAPOLE — il fabriquerait des verts fluorescents sur
+    // les forets denses, exactement l'atlas scolaire qu'on refuse.
+    float k = min(1.0, lavis.a * uSolOpacite);
+    if (k > 0.001) {
+      col = mix(col, blSetLum(lavis.rgb, mix(blLum(col), blLum(lavis.rgb), 0.55)), k);
+    }
+  }
+
+  // ══════ POSTE ② (suite) — LE TRAIT DE COTE ═════════════════════════════════
+  //
+  // ⚠️ POSE AVANT LES COURBES, COMME DANS LE SOCLE. L'ordre est un argument :
+  // une courbe de niveau doit passer PAR-DESSUS le trait de cote, sinon la
+  // courbe zero disparait sous lui sur toute la longueur du littoral.
+  //
+  // ⚠️ fwidth(landness) EST LEGAL ICI parce que la garde est un UNIFORME : tous
+  // les fragments d'un quad prennent la meme branche. Sous une garde qui
+  // dependrait de la donnee, la derivee serait indefinie.
+  if (uHabOn > 0.5 && uCoastMaskOn > 0.5) {
+    float caa = max(fwidth(landness), 1e-4);
+    float cote = 1.0 - smoothstep(0.0, caa * 1.5, abs(landness - 0.5));
+    col = mix(col, uInk, cote * 0.55);
+  }
 
   // contour lines with the terrain's crowd-fade so they only appear when
   // the tile resolution can actually carry them
   float ch = h / uContourInterval;
   float dch = fwidth(ch);
-  float minor = 1.0 - smoothstep(0.0, dch * 1.5, abs(fract(ch + 0.5) - 0.5));
+  // ══════ POSTE ① — LES COURBES PRENNENT LA LOI DE TRAIT DU SOCLE ═══════════
+  //
+  // ⚠️ TROIS CONSTANTES, ET ELLES DIFFERAIENT TOUTES LES TROIS. Le globe posait
+  // 1.5 / 0.5 / 0.30, le socle pose 1.4 x uContourWeight / 0.55 / 0.22
+  // (terrain.js, bloc « contour lines »). Un trait plus fin, un mineur plus
+  // marque, et un evanouissement de foule plus tardif : c'est ce qui fait que
+  // les courbes du socle se lisent la ou celles du globe s'effacent.
+  //
+  // ⚠️ ET LA VALEUR ETEINTE EST L'ANCIENNE, AU BIT PRES : uHabOn a 0 rend
+  // exactement 1.5 / 0.5 / 0.30, donc la production est intouchee.
+  //
+  // ⚠️ L'INTERVALLE, LUI, NE SE DECIDE PAS ICI. Il arrive par uContourInterval,
+  // que poserHabillage cale sur l'amplitude du crop (intervalleCourbes) : c'est
+  // la ligne « echelle » du plan appliquee aux lignes. A l'ile Maurice, qui
+  // culmine a 800 m, les 500 m codes en dur du globe ne tracent qu'UNE courbe.
+  float poidsC = uHabOn > 0.5 ? 1.4 * uContourWeight : 1.5;
+  float minorK = uHabOn > 0.5 ? 0.55 : 0.5;
+  float crowdK = uHabOn > 0.5 ? 0.22 : 0.30;
+  float minor = 1.0 - smoothstep(0.0, dch * poidsC, abs(fract(ch + 0.5) - 0.5));
   float ch5 = ch / 5.0;
-  float major = 1.0 - smoothstep(0.0, fwidth(ch5) * 1.5, abs(fract(ch5 + 0.5) - 0.5));
-  float crowd = clamp(1.0 - dch * 0.30, 0.0, 1.0);
+  float major = 1.0 - smoothstep(0.0, fwidth(ch5) * poidsC, abs(fract(ch5 + 0.5) - 0.5));
+  float crowd = clamp(1.0 - dch * crowdK, 0.0, 1.0);
   // MINIFICATION fade (Adrien : scintillement de la map en orbite) — the height
   // texture carries no mipmaps (they corrupt the packed metres), so when the
   // tile shrinks in the orbital/travel view the sampled height aliases and the
@@ -352,7 +554,7 @@ void main() {
   // pixel > ~1) so the far globe reads clean; they return in full up close.
   float texel = max(fwidth(vUv).x, fwidth(vUv).y) * uTilePx;
   float minFade = clamp(1.6 - texel * 0.55, 0.0, 1.0);
-  float contour = max(minor * 0.5, major) * uContourOpacity * crowd * minFade;
+  float contour = max(minor * minorK, major) * uContourOpacity * crowd * minFade;
   contour *= h < 0.0 ? 0.35 : 1.0; // bathymetric contours read lighter
   col = mix(col, uInk, contour);
 
@@ -874,6 +1076,37 @@ export class Globe {
       uCropDemi: { value: 1 },
       uCropCoin: { value: 0 },
       uCropCoinN: { value: 2 },
+
+      // L'HABILLAGE — Tâche C, « le globe prend le rendu du socle ».
+      //
+      // ⚠️ `uHabOn: 0` : sans `poserHabillage`, RIEN NE CHANGE — même garde et
+      // même raison que `uCropOn`. Ces quatorze-là sont PARTAGÉS (ils vivent
+      // dans `this.uniforms`, que `_materialFor` étale dans chaque matériau) :
+      // l'habillage est une propriété du CROP, pas de la tuile.
+      //
+      // ⚠️ **LES TROIS SAMPLERS SONT DÉCLARÉS MÊME À VIDE, ET C'EST MESURÉ, PAS
+      // NÉGLIGÉ.** `test/plafond-unites-texture.test.js` raconte le jour où le
+      // terrain a disparu : 18 samplers pour un plafond de 16, parce qu'un
+      // `if (uSolOn > 0.5)` ne supprime pas un sampler — le compilateur ne
+      // connaît la valeur d'un uniform qu'à l'exécution. Le nuanceur du globe
+      // est un `ShaderMaterial` NU : ni matériau de surface, ni environnement,
+      // ni carte d'ombre. Le compte y passe de **deux** (uTex, uRamp) à
+      // **cinq**, sur seize. Le `#ifdef` du socle aurait coûté une
+      // recompilation de chaque matériau de tuile à chaque bascule de couche.
+      uHabOn: { value: 0 },
+      uCoastMask: { value: null },
+      uCoastMaskOn: { value: 0 },
+      uMargeCoteM: { value: 0 },
+      uSol: { value: null },
+      uSolLut: { value: null },
+      uSolOn: { value: 0 },
+      uSolOpacite: { value: 1 },
+      uSolOffset: { value: new THREE.Vector2(0, 0) },
+      uSolScale: { value: new THREE.Vector2(1, 1) },
+      uSolTexel: { value: new THREE.Vector2(1 / 2048, 1 / 2048) },
+      uGrainForceM: { value: 0 },
+      uGrainEchelle: { value: 96 },
+      uContourWeight: { value: 0.7 },
     }
     this.rebuildRamp(params)
 
@@ -993,6 +1226,115 @@ export class Globe {
     this.uniforms.uCropOn.value = 0
     this._melangeCrop(false)
     this.retirerParoisCrop()
+    this.retirerHabillage()
+  }
+
+  // ═══════════ L'HABILLAGE — Tâche C, « le globe prend le rendu du socle » ═══
+  //
+  // **Décision 6 d'Adrien, mot pour mot :** « je veux le même rendu que la
+  // qualité de rendu des tuiles à plat qui vont donc disparaître ».
+  //
+  // ⚠️ **QUATRE POSTES, ET PAS UN DE PLUS.** Le plan les nomme : courbes de
+  // niveau calées sur le local, grain, masque de côte, occupation du sol. La
+  // rampe est la Tâche D, la mer la Tâche F, les étiquettes ne sont pas du
+  // nuanceur. **Ce qui n'est PAS porté est écrit dans le compte rendu de la
+  // tâche**, pas caché ici : l'analyse de relief (peigné), la perspective
+  // aérienne, les caustiques de fond, la photo aérienne, les lumières de nuit,
+  // l'ombre des nuages, les effets de surface et le balayage restent au socle.
+  //
+  // ⚠️ **ET LE COÛT DE CE QU'ON NE PORTE PAS EST MESURÉ** (RTX 3080, cible
+  // 900×900 hors écran, boucle rAF gelée, 4 tours × 20 images, couverture 1,0) :
+  // le nuanceur COMPLET du socle coûte **3,566 ms** contre **1,997 ms** pour le
+  // même PBR sans une ligne d'habillage — soit **1,569 ms pour 0,81 Mpx**, quand
+  // le nuanceur ENTIER du globe en coûte **0,112**. Porter tout l'habillage,
+  // c'était multiplier le coût par pixel du globe par **quatorze**.
+  //
+  // ⚠️ **CETTE MÉTHODE EST LE SEUL INTERRUPTEUR.** Tant que personne ne
+  // l'appelle, `uHabOn` vaut 0 et le globe est celui d'avant, au bit près.
+
+  /**
+   * Pose l'habillage du socle sur le crop.
+   *
+   * ⚠️ **LES TEXTURES NE SONT PAS RECUITES : CE SONT CELLES DU SOCLE.** Le
+   * masque de côte, la mosaïque d'occupation du sol et sa table sont déjà cuits
+   * sur l'emprise du bloc, et l'emprise du bloc EST celle du crop — la
+   * démonstration est en tête de `src/monde/habillage-crop.js`, et
+   * `test/crop-habillage.test.js` la rejoue contre `latLonToWorld` du dépôt.
+   * Le globe les lit au même texel, sans rééchantillonnage : c'est le §5 du
+   * plan, « le dépôt doit avoir MAIGRI ».
+   *
+   * @param {object} arg
+   * @param {THREE.Texture|null} arg.coastMask - `terrain.mapUniforms.uCoastMask`
+   * @param {THREE.Texture|null} arg.sol - la mosaïque de classes ESA WorldCover
+   * @param {THREE.Texture|null} arg.solLut - sa table 256×1
+   * @param {number} arg.solOpacite
+   * @param {{x:number,y:number}|null} arg.solOffset
+   * @param {{x:number,y:number}|null} arg.solScale
+   * @param {{x:number,y:number}|null} arg.solTexel
+   * @param {number|null} arg.amplitudeM - amplitude du relief du crop, en mètres
+   * @param {number|null} arg.contourIntervalM - impose l'intervalle (sinon calé)
+   * @param {number} arg.contourOpacity
+   * @param {number} arg.contourWeight
+   * @param {number} arg.grainForceM - amplitude du grain, en MÈTRES de relief
+   * @param {number} arg.grainEchelle
+   */
+  poserHabillage({
+    coastMask = null,
+    sol = null,
+    solLut = null,
+    solOpacite = 1,
+    solOffset = null,
+    solScale = null,
+    solTexel = null,
+    amplitudeM = null,
+    contourIntervalM = null,
+    contourOpacity = null,
+    contourWeight = 0.7,
+    grainForceM = 0,
+    grainEchelle = 96,
+  } = {}) {
+    const u = this.uniforms
+    u.uHabOn.value = 1
+
+    u.uCoastMask.value = coastMask
+    u.uCoastMaskOn.value = coastMask ? 1 : 0
+    // ⚠️ **LA MARGE EST CONVERTIE, PAS RECOPIÉE.** Le socle écrit
+    // `vWorldPos.y < uSeaY + 0.02` en UNITÉS DE SCÈNE, sur un relief déjà
+    // exagéré ; le globe tient sa hauteur en MÈTRES BRUTS. Recopier « 0.02 »
+    // aurait donné deux centimètres — cinquante fois trop court, donc un liseré
+    // de terre sur chaque lagune. Sans crop posé, il n'y a pas d'emprise d'où la
+    // tirer : la marge reste alors nulle et le masque décide seul.
+    u.uMargeCoteM.value = this._crop ? margeCoteDuCrop(this._crop) : 0
+
+    u.uSol.value = sol
+    u.uSolLut.value = solLut
+    u.uSolOn.value = sol && solLut ? 1 : 0
+    u.uSolOpacite.value = solOpacite
+    if (solOffset) u.uSolOffset.value.set(solOffset.x, solOffset.y)
+    if (solScale) u.uSolScale.value.set(solScale.x, solScale.y)
+    if (solTexel) u.uSolTexel.value.set(solTexel.x, solTexel.y)
+
+    // ⚠️ **L'INTERVALLE SE CALE SUR LE RELIEF DU CROP.** Le globe posait 500 m
+    // en dur, valables pour le monde entier : à l'île Maurice, qui culmine à
+    // 800 m, cela ne trace qu'UNE courbe. C'est la ligne « échelle » du §3 du
+    // plan, appliquée aux lignes au lieu du dégradé.
+    if (contourIntervalM > 0) u.uContourInterval.value = contourIntervalM
+    else if (amplitudeM > 0) u.uContourInterval.value = intervalleCourbes(amplitudeM)
+    if (contourOpacity != null) u.uContourOpacity.value = contourOpacity
+    u.uContourWeight.value = contourWeight
+
+    u.uGrainForceM.value = grainForceM
+    u.uGrainEchelle.value = grainEchelle
+    return u
+  }
+
+  /** Retire l'habillage — le globe reprend son propre rendu, au bit près. */
+  retirerHabillage() {
+    const u = this.uniforms
+    u.uHabOn.value = 0
+    u.uCoastMaskOn.value = 0
+    u.uSolOn.value = 0
+    u.uGrainForceM.value = 0
   }
 
   // ═══════════ LES PAROIS ET LA BASE — Tâche B ═══════════════════════════════
