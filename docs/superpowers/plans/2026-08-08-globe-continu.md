@@ -248,7 +248,7 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 - Un audit d'arêtes annonce « 0 bord libre » sur un **solide retourné**, à juste titre.
 - Un test de silhouette passe **à vide** si l'objet est hors cadre.
 
-**Remplacement validé par l'attaque :** volume signé recentré + dégénérés + NaN. ⚠️ **CE PLAN A ÉCRIT « 6 SABOTAGES DÉTECTÉS SUR 6 » ET C'EST FAUX** : rejoué au banc, **trois passent pour sains** — dalle absente, mur manquant, et un trou couvrant un quart de la surface (qui ne coûte que 4 % de volume). Il faut le volume signé autour de **deux** origines. Voir la Tâche 5.
+**Remplacement validé par l'attaque :** volume signé recentré + dégénérés + NaN. ⚠️ **CE PLAN A ÉCRIT « 6 SABOTAGES DÉTECTÉS SUR 6 » ET C'EST FAUX** : rejoué au banc, **trois passent pour sains** — dalle absente, mur manquant, et un trou couvrant un quart de la surface (qui ne coûte que 4 % de volume). Il faut **mesurer `Ā` directement** — la somme des vecteurs-aires orientés, nulle sur un solide fermé quelle que soit l'origine. ⚠️ **« Deux origines » était la réponse de la révision précédente, et elle était fausse elle aussi** : `V(O₂) − V(O₁) = −(O₂ − O₁) · Ā` s'annule quand le décalage est orthogonal à `Ā`. ✅ **Tranché et mesuré par la Tâche 5, faite le 2026-08-21.**
 
 ---
 
@@ -258,7 +258,7 @@ Les 7,2 ms excluaient 1,10 ms de téléversement de sommets (1,54 Mo/image) et ~
 |---|---|
 | `src/monde/flux-terrain.js` **(créer — ⚠️ après avoir lu `dem-emprise.js`)** | le quadtree en source unique : demander une emprise, recevoir les tuiles — **avec plafond, annulation et éviction des `loading`** |
 | `src/monde/fenetre-bornee.js` **(créer — ⚠️ après avoir lu `plinth.js` et `fenetre-clip.js`)** | extraire un maillage fermé par **rééchantillonnage**, jamais par découpe |
-| `src/monde/audit-solide.js` **(créer)** | volume signé, dégénérés, NaN — l'audit qui ne se laisse pas berner |
+| `src/monde/audit-solide.js` ✅ **CRÉÉ LE 2026-08-21** | **aire orientée `Ā`** (la fermeture), volume signé recentré (le retournement), dégénérés, NaN, **vacuité**, et `hauteurs.distinctes` — le discriminant pavé/relief de la Tâche 6. ⚠️ **Une coque à la fois** |
 | `src/monde/statistiques-lissees.js` **(créer)** | les quatre statistiques restantes, amorties, avec zone morte |
 | `src/monde/seuil-socle.js` **(créer)** | naissance et mort du socle sur une **altitude de caméra**, **et le producteur d'`emprise`** |
 | `src/dem-emprise.js` **(lire, peut-être réutiliser)** | ⚠️ `originesEmprise`, `recollerEmprise`, `rectFenetre`, `statsRect`, `enVolBorne` — **il fait déjà une partie du flux et de l'emprise** |
@@ -1416,7 +1416,17 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
 
 ## 7. PHASE 2 — La fenêtre bornée
 
-### Tâche 5 : `audit-solide.js` ⚠️ AVANT `fenetre-bornee.js`
+### Tâche 5 : `audit-solide.js` ✅ **FAITE LE 2026-08-21** — ⚠️ **`Ā` TIENT, ET TROIS MUTATIONS ONT SURVÉCU AU PREMIER TOUR**
+
+> **Bilan mesuré** (banc de `test/audit-solide.test.js`, côté 56 = `TERRAIN_SIZE`, profondeur 7 = `plinthDepth`) :
+> · **6 sabotages sur 6 refusés**, et le test ③ verrouille la contre-mesure : **le volume SEUL en laisse passer trois** — dalle absente (−21,5 % de volume), mur manquant (−17,6 %), trou de 25 % (**−4,1 %**, exactement les « −4 % » annoncés par le plan), tous à volume POSITIF. `Ā` les voit à 5,75e-1 · 7,05e-2 · 1,01e-1 contre un seuil de 1e-9.
+> · **Seuil de fermeture `EPS_FERMETURE = 1e-9` × aire totale, fixé sur UN SEUL TRIANGLE de la fenêtre la plus fine** (n = 768) : mesuré 3,22e-7, soit **322 fois le seuil** ; une maille entière, 665 fois. Le solide sain rend 1,73e-19 — **dix ordres sous le seuil**.
+> · ✅ **L'epsilon de dégénérescence `1e-12 × côté²` est confirmé, PAS deviné** : à n = 768 le plus petit triangle sain mesure 2,66e-3 pour un seuil de 3,14e-9, soit **5,93 ordres de marge** — les « six ordres » du plan.
+> · ⚠️ **« environ 10 ms » ÉTAIT DEUX FOIS TROP OPTIMISTE** : mesuré **22,8 ms à n = 384** et **118 ms à n = 768**. C'est un instrument de test, pas un contrôle par image.
+> · ⚠️ **LA QUESTION POSÉE TROIS FOIS PAR LES ATTAQUES EST TRANCHÉE — ON AUDITE UNE COQUE À LA FOIS.** Concaténées, `Ā` et V s'additionnent : un test démontre que deux coques trouées peuvent se déclarer fermées ensemble.
+> · ⚠️ **LE DISCRIMINANT QUE LA TÂCHE 6 ATTEND EST LIVRÉ** : `hauteurs.distinctes`. Un pavé droit à hauteurs nulles en rend **2** ; un maillage rééchantillonné davantage. C'est l'assertion qui empêche la Tâche 6 d'auditer cent pavés.
+> · **Mutation : 12 passées, 12 tuées** — mais **trois ont survécu au premier tour** (volume non recentré, sommation naïve, aire au facteur 2). Il a fallu **trois assertions à valeur fermée** pour les tuer : aire totale = 2·côté² + 4·côté·profondeur exactement, volume du solide plat = côté²·profondeur exactement, et un solide **translaté de 1e9** qui rend le même volume à 1e-13 près (sans recentrage : 1,4e-9).
+> · `npm test` **3 215 verts** (3 186 + 29), `audit:tests` 187 listés / 187 sur disque, build complet vert, page chargée avec et sans `?globe=continu` — aucune erreur JS neuve.
 
 **Fichiers :** créer `src/monde/audit-solide.js` · tester `test/audit-solide.test.js`
 
@@ -1438,9 +1448,9 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
 2. **Dégénérés.** Un triangle dont l'aire est sous un epsilon relatif à la taille du solide. ⚠️ **Valeur de départ : `1e-12 × (côté de la boîte englobante)²`**, à confirmer en vérifiant qu'un triangle sain de la fenêtre la plus fine (N=768) reste **trois ordres de grandeur au-dessus**. Ce plan laissait l'epsilon à l'agent : c'est un chiffre qui décide d'un verdict.
 3. **NaN.** Un seul suffit à empoisonner la boîte englobante, donc le volume, donc le verdict — **le chercher en premier**.
 
-- [ ] **Étape 1** — écrire **six sabotages** et le test qui les attend tous : solide retourné, dalle absente, mur manquant, trou central, triangle dégénéré, NaN.
-- [ ] **Étape 2** — les lancer, vérifier que **chacun** échoue. ⚠️ **CE PLAN A ANNONCÉ « 6 SUR 6 » COMME MESURÉ, ET C'ÉTAIT FAUX** : avec les trois mesures qu'il prescrivait, **trois passaient pour sains**. Si vos six échouent du premier coup, **c'est votre banc qu'il faut suspecter**, pas votre chance.
-- [ ] **Étape 3** — implémenter. ⚠️ **L'AUDIT PRESCRIT LAISSE PASSER TROIS SABOTAGES SUR SIX — MESURÉ AU BANC, PAS DÉDUIT.** Dalle absente (+7,35), mur manquant (+7,95) et **trou couvrant un quart de la surface** (+9,18 contre 9,568 pour le sain, soit **−4 % seulement**) rendent tous un volume positif et **passent pour sains**. Le plan annonçait « 6 sur 6 » : c'est faux.
+- [x] **Étape 1** — écrire **six sabotages** et le test qui les attend tous : solide retourné, dalle absente, mur manquant, trou central, triangle dégénéré, NaN.
+- [x] **Étape 2** — les lancer, vérifier que **chacun** échoue. ⚠️ **CE PLAN A ANNONCÉ « 6 SUR 6 » COMME MESURÉ, ET C'ÉTAIT FAUX** : avec les trois mesures qu'il prescrivait, **trois passaient pour sains**. Si vos six échouent du premier coup, **c'est votre banc qu'il faut suspecter**, pas votre chance.
+- [x] **Étape 3** — implémenter. ⚠️ **L'AUDIT PRESCRIT LAISSE PASSER TROIS SABOTAGES SUR SIX — MESURÉ AU BANC, PAS DÉDUIT.** Dalle absente (+7,35), mur manquant (+7,95) et **trou couvrant un quart de la surface** (+9,18 contre 9,568 pour le sain, soit **−4 % seulement**) rendent tous un volume positif et **passent pour sains**. Le plan annonçait « 6 sur 6 » : c'est faux.
 
   **Le correctif, et ⚠️ CE PLAN EN A PROPOSÉ DEUX VERSIONS INSUFFISANTES DE SUITE.** « Le volume signé autour de deux origines » d'abord sans dire lesquelles — l'origine du monde laisse passer **deux sabotages sur trois** ; puis « une origine oblique », qui **reste exactement aveugle** à un trou de 25 % dès que le décalage est mal orienté. **La raison est structurelle et se démontre : `V(O₂) − V(O₁) = −(O₂ − O₁) · Ā`.** L'écart s'annule **quand le décalage est orthogonal à `Ā`**, et **aucune amplitude ne répare une mauvaise direction.**
 
@@ -1449,9 +1459,9 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
   ⚠️ **Gardez le volume signé autour d'UNE origine en plus** : lui seul attrape le **solide retourné**, dont la `Ā` est nulle. ✅ L'epsilon de dégénérescence `1e-12 × côté²` est bon : six ordres de marge à n=768.
 
   ⚠️ **Et l'écart « 58 à 296 % » n'est pas un seuil : il est proportionnel à l'aire du trou** (68,4 % pour un trou de 25 % de la surface, **1,3 % pour 0,4 %**). **Fixez le seuil sur le plus petit défaut que vous voulez attraper, et écrivez-le.** ✅ L'epsilon `1e-12 × côté²` est bon : six ordres de marge à n=768.
-- [ ] **Étape 4** — ⚠️ **le test de non-vacuité** : l'audit doit refuser de rendre un verdict sur une géométrie vide, au lieu de la déclarer saine. **C'est ainsi que le test de silhouette du prototype passait à vide.**
-- [ ] **Étape 5** — mutation sur chacune des trois détections.
-- [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [x] **Étape 4** — ⚠️ **le test de non-vacuité** : l'audit doit refuser de rendre un verdict sur une géométrie vide, au lieu de la déclarer saine. **C'est ainsi que le test de silhouette du prototype passait à vide.**
+- [x] **Étape 5** — mutation sur chacune des trois détections. ✅ **12 mutations, 12 tuées ; 3 ont survécu au premier tour** — voir le bilan.
+- [x] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 ### Tâche 6 : `fenetre-bornee.js` — l'extraction
 
