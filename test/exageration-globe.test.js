@@ -78,12 +78,25 @@ test('① au repos (`_levelZoom = 0`) le pilote rend EXACTEMENT le cran', () => 
   }
 })
 
-test('①b aux deux butées du niveau il rend EXACTEMENT le cran voisin', () => {
-  // ⚠️ **C'EST LA CONTINUITÉ DU CRAN, ET ELLE EST EXACTE, PAS APPROCHÉE.** À la
-  // butée d'entrée `_levelZoom = -ln2` : `zc = z + 1`. Le cran tombe alors,
-  // `demZoom` devient `z + 1` et `_resetZoom()` remet `_levelZoom` à zéro :
-  // `zc = (z + 1) + 0 = z + 1`. **La même valeur des deux côtés** — l'exagération
-  // ne saute pas, ce qui est la décision 14 mot pour mot.
+test('①b SUR LA VOIE DU BUDGET, et sur elle seule, la butée rend le cran voisin', () => {
+  // ⚠️ **CET INVARIANT AVAIT ÉTÉ ÉCRIT TROP LARGE — « continuité EXACTE au
+  // cran » — ET LA MESURE L'A RÉDUIT.** Le cran ne se déclenche PAS qu'à la
+  // butée du budget : le gestionnaire de molette de `modes.js` porte **trois**
+  // voies, et deux tombent à un `_levelZoom` ARBITRAIRE —
+  //
+  //     atInLimit = _levelZoom <= -STEP_IN + 0.03
+  //              || dist <= minDistance * 1.02
+  //              || nearGround()
+  //
+  // Le saut y est réel : **jusqu'à 100 % au cran z4 → z5**, et c'est ①e qui le
+  // mesure. ⚠️ **Ce test-ci est posé exactement là où les deux formes
+  // coïncident** — le même piège que la Tâche A avait retourné en assertion
+  // (superellipse contre octogone, écart NUL à 45°) — donc il ne prouve QUE
+  // l'invariant restreint, et ①e existe pour couvrir le reste.
+  //
+  // L'invariant restreint : à la butée exacte `_levelZoom = ∓ln2`, `zc = z ± 1`
+  // des deux côtés du cran, parce que `_resetZoom()` remet `_levelZoom` à zéro
+  // pendant que `demZoom` avance de 1.
   for (let z = 3; z <= 14; z++) {
     assert.equal(zoomCran({ demZoom: z, zoomNiveau: -PAS_NIVEAU }), z + 1, `butée IN z=${z}`)
     assert.equal(zoomCran({ demZoom: z, zoomNiveau: +PAS_NIVEAU }), z - 1, `butée OUT z=${z}`)
@@ -114,10 +127,56 @@ test('①d `_levelZoom` est bien remis à zéro à CHAQUE cran — sinon la born
   const corps = src.slice(debut, src.indexOf('\n  }', debut))
   assert.ok(/this\._resetZoom\s*\(\s*\)/.test(corps),
     '`_rescale` ne remet plus `_levelZoom` à zéro — la borne du pilote tombe')
-  assert.ok(/_levelZoom\s*=\s*0/.test(src), '`_resetZoom` n\'écrase plus `_levelZoom`')
+  // ⚠️ **CETTE ASSERTION-CI A ÉTÉ ÉCRITE FAUSSE, PUIS REJOUÉE.** Cherchée sur
+  // TOUT `modes.js`, `/_levelZoom = 0/` tombait sur la ligne 222 — la
+  // DÉCLARATION du champ dans le constructeur — et **vider entièrement
+  // `_resetZoom()` la laissait verte**, alors que c'est exactement la propriété
+  // dont dépend toute la borne. On la borne donc au CORPS de `_resetZoom`.
+  const rz = src.indexOf('_resetZoom() {')
+  assert.ok(rz > 0, '`_resetZoom` a disparu de `modes.js`')
+  const corpsRz = src.slice(rz, src.indexOf('\n  }', rz))
+  assert.ok(/this\._levelZoom\s*=\s*0/.test(corpsRz),
+    '`_resetZoom` n\'écrase plus `_levelZoom` — la borne du pilote tombe en silence')
   // …et la butée du niveau est bien celle qu'on recopie.
   assert.ok(/export const STEP_IN = Math\.LN2/.test(src), '`STEP_IN` a changé de valeur')
   assert.ok(/export const STEP_OUT = Math\.LN2/.test(src), '`STEP_OUT` a changé de valeur')
+})
+
+test('①e LÀ OÙ L\'INVARIANT NE TIENT PAS — le saut est MESURÉ, pas nié', () => {
+  const val = (z, f) => courbe(zoomCran({ demZoom: z, zoomNiveau: -f * PAS_NIVEAU }))
+  const saut = (z, f) => Math.abs(val(z + 1, 0) - val(z, f)) / val(z, f)
+
+  // (a) LA VOIE DU BUDGET, à la butée EXACTE : écart NUL, à tous les zooms.
+  let pireExact = 0
+  for (let z = 3; z <= 14; z++) pireExact = Math.max(pireExact, saut(z, 1))
+  assert.equal(pireExact, 0, `la butée exacte devrait être continue : ${pireExact}`)
+
+  // (b) …MAIS `atInLimit` TOLÈRE 0,03, donc la voie du budget elle-même n'est
+  //     continue qu'À 1,017 % PRÈS. Chiffre mesuré, pas posé.
+  const fMin = (PAS_NIVEAU - 0.03) / PAS_NIVEAU
+  let pireBudget = 0
+  for (let z = 3; z <= 14; z++) pireBudget = Math.max(pireBudget, saut(z, fMin))
+  assert.ok(pireBudget > 0.005 && pireBudget < 0.02,
+    `tolérance du budget mesurée ${(pireBudget * 100).toFixed(3)} % — hors de la fourchette connue`)
+
+  // (c) LES DEUX AUTRES VOIES — `nearGround()` et `minDistance` — tombent à un
+  //     `f` arbitraire, et LÀ le saut est massif. **Le pire est au cran
+  //     z4 → z5, où la table d'Adrien double : 2,5 → 5.**
+  assert.ok(saut(4, 0) > 0.99, `z4, f=0 : saut mesuré ${(saut(4, 0) * 100).toFixed(1)} %`)
+  assert.ok(saut(4, 0.5) > 0.3, `z4, f=0,5 : saut mesuré ${(saut(4, 0.5) * 100).toFixed(1)} %`)
+  // …et il s'éteint en approchant de la butée : c'est bien `f` qui le porte.
+  assert.ok(saut(4, 0.97) < 0.01, `z4, f=0,97 : ${(saut(4, 0.97) * 100).toFixed(2)} %`)
+
+  // (d) LA GARDE DE SOURCE — les trois voies sont bien celles de `modes.js`. Si
+  //     l'une disparaît ou s'ajoute, cet invariant doit être relu.
+  const src = sansCommentaires(lire('src/modes.js'))
+  const ligne = /const atInLimit = ([^\n]+)/.exec(src)
+  assert.ok(ligne, '`atInLimit` a disparu — les voies de déclenchement ont changé')
+  assert.equal((ligne[1].match(/\|\|/g) || []).length, 2,
+    `\`atInLimit\` n'a plus trois voies : ${ligne[1]}`)
+  assert.ok(/minDistance/.test(ligne[1]), '`atInLimit` ne lit plus `minDistance`')
+  assert.ok(/nearGround/.test(ligne[1]), '`atInLimit` ne lit plus `nearGround`')
+  assert.ok(/STEP_IN\s*\+\s*0\.03/.test(ligne[1]), 'la tolérance de 0,03 a changé — (b) est à refaire')
 })
 
 // ══════════ ② IL NE REFERME AUCUNE BOUCLE — ET C'EST MESURÉ ═════════════════
@@ -129,6 +188,61 @@ test('② le nouveau pilote ne voit ni exagération, ni échelle, ni distance', 
   const corps = src.slice(debut, src.indexOf('\n}', debut))
   for (const interdit of [/exag/i, /echelle/i, /distance/i, /camY/]) {
     assert.equal(interdit.test(corps), false, `\`zoomCran\` lit ${interdit} — la boucle se referme`)
+  }
+})
+
+test('②a bis ET LE GARDE EST POSÉ OÙ VIT LE RISQUE — `cranCourant`, dans `main.js`', () => {
+  // ⚠️ **CE TEST EXISTE PARCE QUE LE GARDE ÉTAIT AU MAUVAIS ENDROIT.** `zoomCran`
+  // est un module PUR : il ne peut pas lire l'exagération, il ne reçoit que ce
+  // qu'on lui donne. **Le vrai risque est dans ce qu'on lui DONNE**, et ça vit
+  // dans `main.js` — le seul fichier qu'aucun test ne peut charger. C'est
+  // exactement le trou que le §0 du plan nomme (« aucun test de ce dépôt ne
+  // charge `src/main.js` »), et il se bouche par la source.
+  const src = sansCommentaires(lire('src/main.js'))
+  const debut = src.indexOf('function cranCourant()')
+  assert.ok(debut > 0, '`cranCourant` a disparu de `main.js`')
+  const corps = src.slice(debut, src.indexOf('\n}', debut))
+
+  // (a) il ne lit RIEN qui porte l'exagération, ni directement ni par la caméra
+  for (const interdit of [/exag/i, /echelleBloc/, /altitudeCadrage/, /camera/i, /controls/, /\bdem\b/]) {
+    assert.equal(interdit.test(corps), false,
+      `\`cranCourant\` lit ${interdit} — c'est par là que les deux pilotes précédents ont échoué`)
+  }
+  // (b) …et il ne lit QUE les deux grandeurs propres.
+  assert.ok(/params\.demZoom/.test(corps), '`cranCourant` ne lit plus le cran de l\'escalier')
+  assert.ok(/zoomNiveau/.test(corps), '`cranCourant` ne lit plus le budget de niveau')
+
+  // (c) LA MUTATION, rejouée sur une source SABOTÉE — sans elle (a) ne prouve
+  //     rien. C'est le patron de ①d de `fenetre-branchee.test.js`.
+  const sabote = 'function cranCourant() {\n  const d = camera.position.distanceTo(controls.target)\n  return { demZoom: params.demZoom, distance: d }\n}'
+  const corpsSabote = sabote.slice(0, sabote.indexOf('\n}'))
+  assert.ok(/camera/i.test(corpsSabote), 'le détecteur ne mord pas sur une caméra réintroduite')
+})
+
+test('②a ter `f` EST NUL À CHAQUE CRAN EN PRODUCTION — et il faut le dire', () => {
+  // ⚠️ **CE N'EST PAS UN DÉFAUT CACHÉ, C'EST UNE LIMITE MESURÉE ET ASSUMÉE.**
+  // La chaîne du cran est : molette → `_resetZoom()` → `_refine()` →
+  // `_rescale()` → `_resetZoom()` **encore** → `loadSurface` →
+  // `fetchAndBuildDem` → `syncExagToZoom`. Quand le pilote lit `_levelZoom`, il
+  // vaut donc **toujours zéro**. La courbe est juste et continue, mais elle est
+  // **ÉCHANTILLONNÉE AUX CRANS** : `zc = demZoom` exactement, c'est-à-dire la
+  // table d'Adrien en escalier. **Le glissement de la décision 14 ne se voit pas
+  // encore à l'écran**, et le faire glisser par image exige de sortir le relief
+  // du maillage (voir `_rechargeTuiles`, `globe.js`).
+  const src = sansCommentaires(lire('src/modes.js'))
+  const debut = src.indexOf('async _rescale(')
+  const corps = src.slice(debut, src.indexOf('\n  }', debut))
+  const posReset = corps.indexOf('_resetZoom()')
+  const posCharge = corps.indexOf('loadSurface')
+  assert.ok(posReset > -1 && posCharge > -1, 'la chaîne du cran a changé de forme')
+  assert.ok(posReset < posCharge,
+    '`_resetZoom()` ne précède plus `loadSurface` — `f` cesserait d\'être nul au cran, et ①e devient la règle')
+
+  // …et la conséquence, en clair : au cran, le pilote rend le palier, au bit près.
+  for (let z = 3; z <= 15; z++) {
+    assert.equal(zoomCran({ demZoom: z, zoomNiveau: 0 }), z)
+    const partage = creerExagerationPartagee()
+    assert.ok(Math.abs(majExagerationCran(partage, { demZoom: z, zoomNiveau: 0 }) - exagPalier(z)) < 1e-9)
   }
 })
 

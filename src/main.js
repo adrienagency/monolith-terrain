@@ -3349,8 +3349,21 @@ function saveZoomExag(z, v) {
 // zéro (`_resetZoom`) AVANT de reposer la caméra, et `_applyZoom` ne lui ajoute
 // que `log(newDist / dist)`, le rapport du glissé de molette. Il est déjà borné
 // à `[-ln2, +ln2]`, donc `zc = demZoom + f` vit dans `[z-1, z+1]` **par
-// construction**, sans garde-fou ajouté. Voir le §4 bis de
-// `monde/exageration-continue.js` et `test/exageration-globe.test.js`.
+// construction**, sans garde-fou ajouté.
+//
+// ⚠️ **DEUX LIMITES MESURÉES, ÉCRITES ICI PARCE QU'ELLES VIVENT ICI.**
+//   (1) Quand ce code s'exécute, `_levelZoom` vaut **toujours zéro** :
+//       `_rescale` appelle `_resetZoom()` AVANT `loadSurface`, donc avant
+//       `fetchAndBuildDem`, donc avant nous. **`f` est structurellement nul au
+//       cran** — la courbe est juste, mais elle est ÉCHANTILLONNÉE aux crans et
+//       rend donc exactement la table en escalier d'Adrien. Le glissement de la
+//       décision 14 n'est pas encore visible à l'écran.
+//   (2) Le cran a **trois** voies de déclenchement (`atInLimit`, `modes.js`) et
+//       la continuité n'est acquise que sur celle du budget ; sur `nearGround()`
+//       et `minDistance` le saut atteint **100 % au cran z4 → z5**.
+// Les deux sont gardées par `test/exageration-globe.test.js` (②a ter et ①e).
+//
+// Voir le §4 bis de `monde/exageration-continue.js`.
 //
 // Rend `null` hors relief réel : l'appelant retombe alors sur le palier.
 function cranCourant() {

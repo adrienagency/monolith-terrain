@@ -220,9 +220,9 @@ Le globe passe de **18** à la **courbe continue** partagée (décision 14). ⚠
 
 - [x] Test → rouge → implémenter → mutation → écran → clôture. ✅ **FAIT le 2026-08-21.** `test/exageration-globe.test.js` (13 tests) · `src/monde/exageration-continue.js` §4 bis · `src/globe.js` (`majExageration`) · `src/modes.js` (`zoomNiveau()`) · `src/main.js` (`cranCourant`).
 
-**LE PILOTE — et il a été rejoué AVANT d'être écrit.** ⚠️ **`f = log2(dRef / d)`, la forme la plus évidente, a été ÉCARTÉE PAR LA MESURE** : au cran, `poseCranContinu` repose la caméra à `camY × facteurEchelle`, et `facteurEchelle = 2 × exagAprès / exagAvant` — **toute grandeur tirée de la pose d'après-cran porte l'exagération.** Rejouée à la main, la boucle s'écarte de la table dès le premier cran (5 au lieu de 2,5) puis se fige sur `EXAG_BASE` pour les six derniers : **c'est exactement le gel mesuré à l'écran**, et sa cause n'était pas la signature de `zoomCadrage`, qui est propre. **Le pilote retenu est `f = -_levelZoom / STEP_IN`** (`modes.js`) : `_rescale` l'écrase à zéro AVANT de reposer la caméra, et `_applyZoom` ne lui ajoute que `log(newDist / dist)`. La boucle est **coupée**, pas amortie. Il est déjà borné à `[-ln2, +ln2]`, donc `zc ∈ [z-1, z+1]` sans garde-fou ajouté — **et la borne est symétrique, pas `[z, z+1]`** : le dézoom doit glisser vers `z-1`, sinon le cran de sortie redevient un saut. **Continuité EXACTE au cran** : à la butée `zc = z+1`, puis `demZoom = z+1` et `_levelZoom = 0` donnent encore `z+1`.
+**LE PILOTE — et il a été rejoué AVANT d'être écrit.** ⚠️ **`f = log2(dRef / d)`, la forme la plus évidente, a été ÉCARTÉE PAR LA MESURE** : au cran, `poseCranContinu` repose la caméra à `camY × facteurEchelle`, et `facteurEchelle = 2 × exagAprès / exagAvant` — **toute grandeur tirée de la pose d'après-cran porte l'exagération.** Rejouée à la main, la boucle s'écarte de la table dès le premier cran (5 au lieu de 2,5) puis se fige sur `EXAG_BASE` pour les six derniers : **c'est exactement le gel mesuré à l'écran**, et sa cause n'était pas la signature de `zoomCadrage`, qui est propre. **Le pilote retenu est `f = -_levelZoom / STEP_IN`** (`modes.js`) : `_rescale` l'écrase à zéro AVANT de reposer la caméra, et `_applyZoom` ne lui ajoute que `log(newDist / dist)`. La boucle est **coupée**, pas amortie. Il est déjà borné à `[-ln2, +ln2]`, donc `zc ∈ [z-1, z+1]` sans garde-fou ajouté — **et la borne est symétrique, pas `[z, z+1]`** : le dézoom doit glisser vers `z-1`, sinon le cran de sortie redevient un saut. **Continuité EXACTE au cran** : à la butée `zc = z+1`, puis `demZoom = z+1` et `_levelZoom = 0` donnent encore `z+1`. ⚠️ **CETTE DERNIÈRE PHRASE EST FAUSSE ET RETIRÉE — voir « Tour 1 » plus bas, R-1.**
 
-**LA TABLE D'ADRIEN, RETROUVÉE À L'ÉCRAN** (La Réunion, neuf `_coarsen()` enchaînés, lu sur `exagPartage` **et** sur `globe.exaggeration`) : Z12→Z8 ×2,8 · **Z7 ×3,2** · **Z6 ×4** · **Z5 ×5** · **Z4 ×2,5** · Z3 ×2,5 — là où l'ancien pilote rendait ×2,8 partout. Les surcharges `localStorage` traversent (tests ②c, ③c). Et `f` glisse pour de vrai : douze images de glissé mesurées, `zc` de **3,043 à 3,417**, monotone.
+**LA TABLE D'ADRIEN, RETROUVÉE À L'ÉCRAN** (La Réunion, neuf `_coarsen()` enchaînés, lu sur `exagPartage` **et** sur `globe.exaggeration`) : Z12→Z8 ×2,8 · **Z7 ×3,2** · **Z6 ×4** · **Z5 ×5** · **Z4 ×2,5** · Z3 ×2,5 — là où l'ancien pilote rendait ×2,8 partout. Les surcharges `localStorage` traversent (tests ②c, ③c). Et `f` glisse pour de vrai : douze images de glissé mesurées, `zc` de **3,043 à 3,417**, monotone. ⚠️ **CE GLISSEMENT N'ATTEINT JAMAIS L'EXAGÉRATION — voir « Tour 1 » plus bas, R-3.**
 
 **LA MESURE DE CONTRÔLE — un bloc est redevenu un bloc.** Solide livré, base comprise, couverture 1,0 :
 
@@ -235,13 +235,57 @@ Le globe passe de **18** à la **courbe continue** partagée (décision 14). ⚠
 
 ⚠️ **LA LARGEUR N'EST PAS TOUT À FAIT CONSTANTE, ET L'ASSERTION QUI LE SUPPOSAIT A ÉCHOUÉ CONTRE LE DÉPÔT** : l'anneau est posé sur la surface DÉPLACÉE et le déplacement est RADIAL, donc un relief plus haut **évase** le bloc — **+0,6305 %, soit 1,027·10⁻³ unité (19 cm au sol)** entre ×18 et ×2,8. Deux ordres sous la variation de hauteur (×5,656) : le rapport mesure bien la hauteur. ⚠️ **Et le chiffre « 0,23 » de la Tâche B ne s'est pas reproduit** : même largeur (0,2154 contre 0,216, le crop est identique) mais une hauteur trois fois plus grande, parce que ce relevé-ci a **neuf tuiles z12 à 512 px et une couverture de 1,0**, sur une emprise qui monte à **2 607 m**. Le relevé de la Tâche B décrivait un crop bien moins chargé.
 
-**LE GLOBE ENTIER — ACCEPTABLE, ET C'EST MESURÉ, PAS JUGÉ.** Même pose orbitale (alt 420, océan Indien), mêmes 29 tuiles, image redimensionnée à 200×180 : l'écart moyen entre ×18 et ×2,8 vaut **5,098 unités de couleur**. ⚠️ **MAIS LE TÉMOIN LE NOIE** : deux images prises à ×2,8 **inchangée**, à 31 s d'intervalle, rendent **5,532** — les nuages en orbite déplacent plus de pixels que l'exagération. **Sans ce témoin j'aurais conclu « 27 % des pixels changent », ce qui est vrai et ne veut rien dire.** La courbe n'a donc PAS besoin de remonter aux altitudes orbitales. ⚠️ **Ce qui reste vrai géométriquement** : un sommet à 8 848 m sort de **2,50 % du rayon** à ×18 contre **0,39 %** à ×2,8 — sur ce cadrage (disque ~558 px), **≈7 px de silhouette contre ≈1 px**. ⚠️ **Et le relevé est fait à UNE pose, dont le limbe ne passe par aucune grande chaîne** : un limbe himalayen dirait peut-être autre chose.
+**LE GLOBE ENTIER — ACCEPTABLE, ET C'EST MESURÉ, PAS JUGÉ.** ⚠️ **« ACCEPTABLE » EST UNE CONCLUSION QUE CETTE MESURE NE PORTE PAS — voir « Tour 1 » plus bas, R-4.** Même pose orbitale (alt 420, océan Indien), mêmes 29 tuiles, image redimensionnée à 200×180 : l'écart moyen entre ×18 et ×2,8 vaut **5,098 unités de couleur**. ⚠️ **MAIS LE TÉMOIN LE NOIE** : deux images prises à ×2,8 **inchangée**, à 31 s d'intervalle, rendent **5,532** — les nuages en orbite déplacent plus de pixels que l'exagération. **Sans ce témoin j'aurais conclu « 27 % des pixels changent », ce qui est vrai et ne veut rien dire.** La courbe n'a donc PAS besoin de remonter aux altitudes orbitales. ⚠️ **Ce qui reste vrai géométriquement** : un sommet à 8 848 m sort de **2,50 % du rayon** à ×18 contre **0,39 %** à ×2,8 — sur ce cadrage (disque ~558 px), **≈7 px de silhouette contre ≈1 px**. ⚠️ **Et le relevé est fait à UNE pose, dont le limbe ne passe par aucune grande chaîne** : un limbe himalayen dirait peut-être autre chose.
 
 ⚠️ **LE COÛT, ET IL N'EST PAS PAYABLE TEL QUEL.** Le relief du globe est cuit dans les sommets : chaque changement de valeur passe par `setExaggeration` → `_rechargeTuiles`, qui rend au réseau **toutes** les tuiles prêtes. Mesuré deux fois, aller et retour, La Réunion z12 : **4,8 et 6,5 ms de travail synchrone** (868 maillages relâchés), puis **12 s et 21 s** pour retrouver ~900 tuiles prêtes. **À chaque cran.** La sortie est nommée par `_rechargeTuiles` lui-même — déplacer le relief dans le nuanceur de sommets — et ce n'est pas cette tâche. ⚠️ **CONSÉQUENCE : `syncExagToZoom` n'est appelé qu'AU CRAN**, donc la courbe est juste et continue mais encore **ÉCHANTILLONNÉE aux crans** ; le glissement de la décision 14 ne se voit pas encore à l'écran entre deux crans. **C'est la vraie limite de cette tâche.**
 
 ⚠️ **CE QUI EST LAID, ET IL FAUT LE DIRE.** Le bloc tient enfin dans le cadre et se lit comme un bloc. Mais **les JUPES des tuiles du globe pendent sous lui comme des rideaux** — cinq à six languettes qui descendent bien plus bas que la base. Le `discard` du crop est en lat/lon, et une jupe partage le (lat, lon) du bord de sa tuile : **elle n'est donc jamais coupée.** Aucune tâche du plan ne couvre ce défaut. Et la couleur du dessus reste la rampe du globe (vert/tan) contre des parois beige-gris : c'est la Tâche C.
 
 ⚠️ **CE QUI N'A PAS PU ÊTRE VÉRIFIÉ** : le crop n'a **pas** été vu sous `frontiere=0` (la Tâche B le demandait) ; sous `frontiere=1` il a fallu **masquer le socle à la main** pour le voir, parce qu'il est dessiné par-dessus. Et `globe.enabled` valait `false` en mode surface pendant tout le relevé.
+
+
+#### Tour de correction 1 — ce que la relecture a trouvé, et ce que la mesure a tranché
+
+⚠️ **CETTE SECTION S'AJOUTE AU BILAN CI-DESSUS, ELLE NE LE REMPLACE PAS.** Les phrases corrigées restent en place avec un renvoi ici : c'est la règle des listes du §0, appliquée à un compte rendu.
+
+**R-1 — L'INVARIANT « CONTINUITÉ EXACTE AU CRAN » ÉTAIT FAUX, ET LE TEST QUI LE GARDAIT ÉTAIT POSÉ LÀ OÙ IL NE POUVAIT PAS MORDRE.** Le cran ne se déclenche pas qu'à la butée du budget : `atInLimit` (`modes.js`) porte **trois** voies — `_levelZoom <= -STEP_IN + 0.03`, `dist <= minDistance × 1.02`, et `nearGround()` — et **les deux dernières tombent à un `_levelZoom` arbitraire**. Balayage complet, `f` de 0 à 1 sur z3→z12 :
+
+| voie | `f` au déclenchement | saut d'exagération |
+|---|---|---|
+| budget, butée **exacte** | 1 | **0 %** (tous zooms, écart nul) |
+| budget, **avec sa tolérance réelle** de 0,03 | 0,95672 | **≤ 1,017 %** (pire : z5, 4,0411 → 4) |
+| `nearGround()` / `minDistance` | 0,5 | **33,3 %** (z4, 3,750 → 5) |
+| `nearGround()` / `minDistance` | 0 | **100 %** (z4, 2,5 → 5) |
+
+⚠️ **Et mon test ①b était posé exactement à `f = ±1`, l'endroit où les deux formes coïncident** — le piège que la Tâche A avait su retourner en assertion (superellipse contre octogone, écart NUL à 45°). Il est **restreint et renommé** (« sur la voie du budget, et sur elle seule »), et **①e est ajouté** : il mesure les trois lignes du tableau et garde par la source que `atInLimit` a toujours ses trois voies et sa tolérance de 0,03. ⚠️ **Ce n'est pas une régression** : la table en escalier d'aujourd'hui saute de 100 % à ce cran-là sur **toutes** les voies ; le pilote l'annule sur celle du budget et laisse les deux autres intactes.
+
+**R-2 — UNE ASSERTION NE DISTINGUAIT RIEN.** `/_levelZoom\s*=\s*0/` était cherché sur **tout `modes.js`** et tombait sur la **déclaration du champ, ligne 222**. **Vider entièrement `_resetZoom()` la laissait verte** — alors que c'est la propriété dont dépend toute la borne du pilote. Elle est désormais bornée au **corps de `_resetZoom`**, et la mutation M5 la tue.
+
+**R-3 — `f` EST STRUCTURELLEMENT MORT EN PRODUCTION, ET JE L'AVAIS LAISSÉ CROIRE AUTREMENT.** La chaîne du cran est : molette → `_resetZoom()` → `_refine()` → `_rescale()` → **`_resetZoom()` encore** → `loadSurface` → `fetchAndBuildDem` → `syncExagToZoom`. **Quand le pilote lit `_levelZoom`, il vaut donc toujours zéro.** Mon relevé « `zc` de 3,043 à 3,417 » est vrai pour le PILOTE — je l'ai obtenu en appelant `_applyZoom` à la main — mais **cette valeur n'atteint jamais l'exagération**. Sur les quatre sites d'appel de `syncExagToZoom`, **un seul** peut voir un `_levelZoom` non nul : le bouton « réinitialiser l'exagération » de l'IHM. **Ce que la Tâche E livre est donc la table d'Adrien, juste, à chaque cran — pas une courbe qui glisse.** Nouveau test ②a ter : il garde l'ordre `_resetZoom()` avant `loadSurface` et échoue si quelqu'un le change sans relire ①e.
+
+**R-4 — « ACCEPTABLE » N'EST PAS CE QUE MA MESURE DIT.** L'écart moyen absolu (5,098 contre un témoin à 5,532) **ne sait pas distinguer** le passage de ×18 à ×2,8 du bruit des nuages ; ce n'est pas la même chose que « l'écart est négligeable ». Une moyenne sur toute l'image **noie par construction** une perte localisée et structurée — et mon propre chiffre géométrique en décrit une : la silhouette du limbe passe de **≈7 px à ≈1 px**. **La conclusion honnête est : « la métrique employée ne sépare pas l'effet du bruit », et la question reste ouverte pour Adrien.** Il faudrait un critère perceptif local (limbe seul, chaîne montagneuse dans le cadre, nuages figés) pour trancher ; **je ne l'ai pas fait**.
+
+**R-5 — LA CAMPAGNE DE MUTATION N'AVAIT AUCUNE SOURCE.** Le test citait `.banc/mutations-E.mjs` : **je l'avais supprimé au nettoyage**, alors que la Tâche B avait laissé le sien. Il est reposé, **élargi de 5 à 11**, et chacune nomme l'assertion qu'elle tue :
+
+| mutation | fichier | assertion tuée |
+|---|---|---|
+| M1 — le constructeur revient à 18 | `globe.js` | ③d |
+| M1b — `majExageration` ignore le partage | `globe.js` | ③, ③c |
+| M1c — le globe se recharge pour rien | `globe.js` | ③ |
+| M2 — la courbe perd les surcharges | `exageration-continue.js` | ②c, ③c |
+| M3 — `f` non borné | `exageration-continue.js` | ①c |
+| M4 — le pilote ignore `f` | `exageration-continue.js` | ①b, ①e |
+| M4b — borne `[z, z+1]` au lieu de `[z-1, z+1]` | `exageration-continue.js` | ①b |
+| M5 — `_resetZoom()` vidé | `modes.js` | ①d |
+| M6 — `atInLimit` perd `nearGround()` | `modes.js` | ①e |
+| M7 — `_resetZoom()` après `loadSurface` | `modes.js` | ①d, ②a ter |
+| M8 — `cranCourant` repilote par la caméra | `main.js` | ②a bis |
+
+⚠️ **M1 ET M5 NE TUAIENT RIEN AVANT CE TOUR** — c'est ce qui a fait naître ③d puis corriger ①d. **Les onze tuent maintenant leur assertion nommée.**
+
+**R-6 — LE GARDE ANTI-BOUCLE ÉTAIT AU MAUVAIS ENDROIT.** Il portait sur `zoomCran`, un module **pur** qui ne peut pas lire l'exagération : il ne reçoit que ce qu'on lui donne. **Le risque est dans ce qu'on lui DONNE**, c'est-à-dire `cranCourant`, qui vit dans `main.js` — le seul fichier qu'aucun test ne charge. Nouveau test ②a bis : `cranCourant` ne lit ni `exag`, ni `echelleBloc`, ni `altitudeCadrage`, ni `camera`, ni `controls`, ni `dem`, et **ne lit que** `params.demZoom` et `zoomNiveau`. Mutation M8.
+
+**Bilan du tour : 13 tests → 16**, et la campagne passe de 5 mutations sans source à **11 rejouables**, dont deux qui ne tuaient rien.
 
 ### Tâche F — LA MER, PARTOUT ET DÉGRADÉE AVEC LA DISTANCE (décision 5)
 
@@ -293,6 +337,7 @@ Retirer `monde/fenetre-bornee.js`, le chemin « bloc » de `terrain.js`, et les 
 - **Le raccord de palette au bord du crop** — la Tâche D doit le supprimer ; s'il subsiste, c'est un arbitrage de goût.
 - **Les crops continentaux** que la sphère rend enfin possibles : les veut-il, et à quelle largeur maximale ?
 - **LES JUPES DES TUILES PENDENT SOUS LE BLOC** (relevé par la Tâche E, à l'écran) — cinq à six languettes qui descendent sous la base. Le `discard` du crop est en **lat/lon**, et une jupe partage le (lat, lon) du bord de sa tuile : elle n'est **jamais** coupée. Aucune tâche du plan ne la couvre. Deux sorties possibles, aucune mesurée : couper la jupe par sa hauteur radiale plutôt que par sa position, ou ne pas bâtir de jupe sur une tuile qui touche la frontière.
+- **LE RELIEF DU GLOBE VU DE LOIN, À TRANCHER** (Tâche E, tour 1) — à ×2,8 la silhouette du limbe passe de **≈7 px à ≈1 px** sur un cadrage plein disque. **La métrique employée (écart moyen absolu sur l'image) ne sait pas distinguer cet effet du bruit des nuages** — elle n'autorise donc pas à conclure « acceptable ». Il faudrait un critère LOCAL (limbe seul, chaîne montagneuse dans le cadre, nuages figés) pour trancher ; il n'a pas été fait. **Si Adrien veut du relief à l'orbite, la courbe doit remonter aux hautes altitudes — et c'est une mesure à faire, pas un goût.**
 - **LE COÛT DE L'EXAGÉRATION DU GLOBE** (Tâche E) — **12 à 21 s de rechargement réseau à chaque cran**, parce que le relief est cuit dans les sommets. Tant qu'il n'est pas déplacé dans le nuanceur de sommets, `?exag=continu` ne peut pas devenir le défaut, et la courbe reste échantillonnée aux crans au lieu de glisser.
 
 ---

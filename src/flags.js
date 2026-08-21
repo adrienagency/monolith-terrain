@@ -302,6 +302,14 @@ export function socleQuadtreeActif() {
 // C'est le prix d'un cran, et il n'est pas payable tel quel. La sortie est
 // nommée par `_rechargeTuiles` lui-même : déplacer le relief dans le nuanceur de
 // sommets. **Ce n'est pas la Tâche E.**
+//
+// ⚠️ **ET CE QUE CE DRAPEAU LIVRE AUJOURD'HUI EST LA TABLE, PAS UNE COURBE QUI
+// GLISSE.** `_rescale` appelle `_resetZoom()` AVANT `loadSurface`, donc avant
+// `syncExagToZoom` : quand le pilote lit `_levelZoom`, il vaut **toujours
+// zéro**. `zc = demZoom` exactement, et la courbe rend le palier d'Adrien au bit
+// près. Le pilote EST continu (mesuré : `zc` de 3,043 à 3,417 sur douze images de
+// glissé), mais **cette valeur n'atteint jamais l'exagération**. Gardé par
+// `test/exageration-globe.test.js` ②a ter.
 export function exagContinueActive() {
   const v = paramAdresse('exag')
   if (v === 'paliers' || v === '0') return false

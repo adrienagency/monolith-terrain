@@ -302,13 +302,34 @@ export function zoomCadrage ({ distance, distanceReference, extentMeters, lat = 
 // n'ajoute que `log(newDist / dist)`, un RAPPORT du glissé de molette. La boucle
 // `exag → pose → f → zc → exag` est **coupée à la source**, pas amortie.
 //
-// ⚠️ **LA CONTINUITÉ AU CRAN EST EXACTE, PAS APPROCHÉE.** À la butée d'entrée
-// `_levelZoom = -ln2` donne `zc = z + 1` ; le cran tombe, `demZoom` devient
-// `z + 1` et `_levelZoom` repart de zéro : `zc = z + 1`. **La même valeur des
-// deux côtés.** Et au repos (`_levelZoom = 0`) `zc = demZoom`, donc la courbe
-// rend **la table d'Adrien au bit près, surcharges comprises** — c'est la
-// décision 14 mot pour mot : « mêmes valeurs aux mêmes altitudes, interpolées au
-// lieu de sauter ».
+// ⚠️ **LA CONTINUITÉ AU CRAN N'EST PAS GÉNÉRALE, ET LA PREMIÈRE RÉDACTION DE CE
+// PARAGRAPHE L'AFFIRMAIT — À TORT.** Elle disait « exacte, pas approchée ».
+// Elle ne l'est que sur **UNE des trois voies** qui déclenchent un cran. Le
+// gestionnaire de molette de `modes.js` les porte toutes les trois :
+//
+//     atInLimit = _levelZoom <= -STEP_IN + 0.03      ← la voie du BUDGET
+//              || dist <= minDistance * 1.02         ← le plancher de caméra
+//              || nearGround()                       ← la garde de sol
+//
+//   · **Voie du BUDGET** — `f` vaut 1 à la butée, `zc = z + 1` ; le cran tombe,
+//     `demZoom` devient `z + 1`, `_levelZoom` repart de zéro, `zc = z + 1`.
+//     **La même valeur des deux côtés — écart mesuré NUL, tous zooms.** ⚠️ Mais
+//     `atInLimit` tolère `0,03`, donc `f` peut valoir 0,9567 au lieu de 1 :
+//     l'écart réel de cette voie est **≤ 1,017 %**, pas zéro.
+//   · **Les deux autres voies tombent à un `_levelZoom` ARBITRAIRE**, et là le
+//     saut est réel : **jusqu'à 100 % au cran z4 → z5**, où la table d'Adrien
+//     double (2,5 → 5). C'est mesuré par `test/exageration-globe.test.js` ①e,
+//     qui existe précisément parce que ①b est posé à l'endroit où les deux
+//     formes coïncident.
+//
+// ⚠️ **CE N'EST PAS UNE RÉGRESSION : C'EST LA BORNE HONNÊTE DE CE PILOTE.** La
+// table en escalier d'aujourd'hui saute de 100 % à ce cran-là sur TOUTES les
+// voies ; ce pilote-ci l'annule sur la voie du budget et la laisse intacte sur
+// les deux autres. Le supprimer partout demanderait de faire écrire
+// l'exagération par la voie de déclenchement elle-même, pas par le cran.
+//
+// Au repos (`_levelZoom = 0`) `zc = demZoom`, donc la courbe rend **la table
+// d'Adrien au bit près, surcharges comprises** — décision 14 mot pour mot.
 
 /** `STEP_IN` / `STEP_OUT` — `modes.js:171-172`. Un niveau vaut un facteur 2. */
 export const PAS_NIVEAU = Math.LN2
