@@ -18,7 +18,10 @@ import { GlobeClouds } from './globe-clouds.js'
 import { overzoomTile } from './bathy.js'
 // LA FORME DU CROP — Tâche A, « UNE SEULE TERRE ». Module PUR : il n'apporte ni
 // three ni DOM, et c'est lui qui lit `empriseSocle`, pas ce fichier.
-import { repereCrop, coinNormalise, zoomCropPrescrit } from './monde/crop-sphere.js'
+import { repereCrop, coinNormalise, zoomCropPrescrit, mercX, mercY } from './monde/crop-sphere.js'
+// LES PAROIS ET LA BASE — Tâche B. Pur lui aussi : il ne rend que des nombres,
+// c'est ce fichier-ci qui en fait une géométrie three.
+import { construireSolideCrop } from './monde/parois-crop.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -259,6 +262,10 @@ float hash12(vec2 p) {
 }
 
 void main() {
+  // La couverture du crop : 1 partout ailleurs, donc la production est
+  // rigoureusement intouchée (uCropOn vaut 0 et ce bloc ne s'exécute pas).
+  float couvertureCrop = 1.0;
+
   // ══════ LA DÉCOUPE, AVANT TOUT LE RESTE ══════════════════════════════════
   //
   // ⚠️ EN PREMIER, ET C'EST UNE ÉCONOMIE, PAS UN STYLE : un fragment coupé ne
@@ -283,7 +290,38 @@ void main() {
     // restent exacts (une composante est nulle), seuls les coins sont formés.
     vec2 cq = max(abs(q) - (1.0 - uCropCoin), 0.0);
     float pn = pow(pow(cq.x, uCropCoinN) + pow(cq.y, uCropCoinN), 1.0 / uCropCoinN);
-    if (pn > uCropCoin) discard;
+
+    // ══════ LA COUVERTURE DOUCE — Tâche B, Étape 5 ════════════════════════
+    //
+    // (Aucun accent GRAVE dans ce bloc : il vit dans un template literal JS et
+    // le terminerait — le piège que terrain.js et ocean.js documentent tous les
+    // deux, et que le bloc du dessus rappelle déjà.)
+    //
+    // ⚠️ MESURÉ, PAS JUGÉ À L OEIL : gl.getContextAttributes().antialias vaut
+    // false sur ce contexte. Un discard donne une frontière BINAIRE, donc les
+    // coins du crop créneleraient, et personne ne les lisserait derrière.
+    //
+    // On garde donc EXACTEMENT la même courbe — pn, la superellipse de
+    // dansDalle, celle que les parois de parois-crop.js suivent au bit près — et
+    // on remplace le verdict binaire par une COUVERTURE : la distance signée à
+    // la frontière, fondue sur un pixel d écran.
+    //
+    // ⚠️ LA LARGEUR SE MESURE, ELLE NE SE POSE PAS. fwidth(d) rend la variation
+    // de d entre deux pixels voisins : c est UN PIXEL, exprimé en unités de
+    // crop. Une constante n aurait été juste qu à une seule altitude, et
+    // l amplitude se dérive du dépôt : le crop naît en occupant 60 % de la
+    // HAUTEUR d image (seuil-socle.js, §2) et couvre 9,7 fois cette hauteur à la
+    // station 2 km (10 377 m de large contre 2 x 2 000 x tan 15° = 1 072 m de
+    // sol visible, fov 30° de main.js:263). Soit un facteur SEIZE sur la même
+    // frontière, sans compter les crops continentaux du §8.
+    //
+    // ⚠️ ET LE discard RESTE AU-DELÀ D UN PIXEL. Sans lui, chaque fragment de la
+    // tuile paierait le mélange : on veut le fondu SUR LE BORD, pas sur tout le
+    // reste de la tuile.
+    float d = pn - uCropCoin; // > 0 = dehors
+    float w = max(fwidth(d), 1e-12); // un pixel, en unites de crop
+    if (d > 0.5 * w) discard;
+    couvertureCrop = 1.0 - smoothstep(-0.5 * w, 0.5 * w, d);
   }
 
   float h = decodeMetersAA(vUv);
@@ -338,7 +376,7 @@ void main() {
   // faint paper grain
   col += (hash12(vUv * 941.7 + vLatLon) - 0.5) * 0.02 * (0.2 + 0.8 * day);
 
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = vec4(col, couvertureCrop);
 }
 `
 
@@ -758,6 +796,9 @@ export class Globe {
     // Écrit par `poserCrop`, lu par `_traverse` (le raffinement uniforme) ; la
     // découpe elle-même se fait au fragment, par les uniformes `uCrop*`.
     this._crop = null
+    // LES PAROIS — Tâche B. `null` = le crop est une peau flottante, et c'est
+    // l'état d'après la Tâche A. Écrit par `construireParoisCrop`.
+    this._parois = null
     // le budget de cache SUIT le chemin : voir CACHE_MAX_CONTINU
     this.cacheMax = this.continu ? CACHE_MAX_CONTINU : CACHE_MAX
     this._frustum = new THREE.Frustum()
@@ -830,6 +871,18 @@ export class Globe {
           uTex: { value: texture },
           uTilePx: { value: tilePx },
         },
+        // LE MÉLANGE SUIT LE CROP — Tâche B, Étape 5. ⚠️ **PAS TOUJOURS VRAI, ET
+        // C'EST LA PRODUCTION QU'ON PROTÈGE** : `transparent` fait passer l'objet
+        // dans la liste TRIÉE du moteur, derrière les opaques. Sans crop, la
+        // couverture vaut 1 partout et le mélange ne servirait qu'à changer
+        // l'ordre de dessin de 750 tuiles pour rien.
+        transparent: !!this._crop,
+        // ⚠️ **ET LA PROFONDEUR RESTE ÉCRITE.** C'est ce qui rend le régime
+        // transparent indolore ici : à l'intérieur du crop l'alpha vaut
+        // exactement 1, donc le mélange est l'identité, et le tri arrière-avant
+        // du moteur dessine le lointain d'abord — c'est justement l'ordre qu'il
+        // faut pour que le liseré du bord se fonde sur ce qui est derrière.
+        depthWrite: true,
       })
 
     this._buildPoleCaps()
@@ -910,13 +963,208 @@ export class Globe {
     u.uCropCoin.value = coinNormalise(corner, half)
     u.uCropCoinN.value = Math.max(2, expo)
     u.uCropOn.value = 1
+    // la couverture douce du bord ne veut rien dire sans mélange — Tâche B
+    this._melangeCrop(true)
     return rep
   }
 
-  /** Retire le crop — le globe redevient entier. */
+  /** Retire le crop — le globe redevient entier, parois comprises. */
   retirerCrop() {
     this._crop = null
     this.uniforms.uCropOn.value = 0
+    this._melangeCrop(false)
+    this.retirerParoisCrop()
+  }
+
+  // ═══════════ LES PAROIS ET LA BASE — Tâche B ═══════════════════════════════
+  //
+  // La Tâche A a coupé la surface ; le crop est devenu une PEAU FLOTTANTE. Ces
+  // trois méthodes lui donnent son épaisseur. La loi vit dans
+  // `src/monde/parois-crop.js`, qui est pur et testé (`test/crop-parois.test.js`) ;
+  // ici il n'y a que du three.js.
+
+  /**
+   * La hauteur de la SURFACE au point EXACT (lat, lon), en mètres — ou `null`
+   * si aucune tuile chargée ne couvre ce point.
+   *
+   * ⚠️ **AU POINT EXACT, ET C'EST TOUT L'ENJEU DE LA TÂCHE.** La frontière du
+   * crop tombe au MILIEU des tuiles : un sommet de paroi accroché au nœud de
+   * tuile le plus proche serait à une autre hauteur que la surface dessinée
+   * juste à côté — un liseré, mesuré à plus de 20 m au banc du test. On
+   * interpole donc bilinéairement dans la tuile la PLUS FINE qui couvre le
+   * point, exactement comme `remplirHauteurs` le fait pour une grille.
+   *
+   * ⚠️ **LES HAUTEURS NE SURVIVENT QUE SOUS RÉSERVATION** : `_buildMesh` relâche
+   * `t.heights` dès le maillage bâti, sauf pour les clés de `gardeHauteurs` —
+   * que le flux (`demanderEmprise`) pose précisément sur l'emprise du socle.
+   * Sans flux, cette méthode rend `null` et les parois le disent (`couverture`).
+   *
+   * @param {number} lat
+   * @param {number} lon
+   * @param {Array} [candidates] la liste pré-filtrée, pour ne pas reparcourir
+   *   `this.tiles` à chacun des mille points de l'anneau
+   * @returns {number|null}
+   */
+  hauteurSurface(lat, lon, candidates = null) {
+    const liste = candidates || this.tuilesAvecHauteurs()
+    const mx = mercX(lon)
+    const my = mercY(lat)
+    let best = null
+    for (const t of liste) {
+      const n = 2 ** t.z
+      // l'antiméridien : le mercator x est de période 1, donc de période `n` en
+      // coordonnées de tuile — même repli que `localCrop` et `tuileDansCrop`.
+      let tx = mx * n - t.x
+      tx -= Math.round(tx / n) * n
+      const ty = my * n - t.y
+      if (tx < 0 || tx >= 1 || ty < 0 || ty >= 1) continue
+      if (!best || t.z > best.t.z) best = { t, tx, ty }
+    }
+    return best ? sampleHeights(best.t.heights, best.tx, best.ty, best.t.size) : null
+  }
+
+  /** Les tuiles dont les hauteurs sont encore là, du plus fin au plus grossier. */
+  tuilesAvecHauteurs() {
+    const out = []
+    for (const t of this.tiles.values()) if (t.heights) out.push(t)
+    out.sort((a, b) => b.z - a.z)
+    return out
+  }
+
+  /**
+   * Bâtit les parois et la base du crop, et les pose dans le groupe du globe.
+   *
+   * ⚠️ **ELLE RECONSTRUIT TOUT, ET ELLE N'EST PAS FAITE POUR TOURNER PAR IMAGE.**
+   * Décision 5 du plan précédent, toujours en vigueur : « la gravure ne s'écrit
+   * qu'à l'arrêt ». L'appelant décide quand.
+   *
+   * @param {object} [arg]
+   * @param {number} [arg.profondeur] en unités de scène ; défaut : la proportion
+   *   du socle (7 sur 56), voir `FRACTION_PROFONDEUR`
+   * @param {number} [arg.baseYFloor] fond imposé, jamais plus haut
+   * @returns {{mesh: object, couverture: number, solide: object}|null}
+   */
+  construireParoisCrop({ profondeur = null, baseYFloor = null } = {}) {
+    if (!this._crop) return null
+    const liste = this.tuilesAvecHauteurs()
+    let vus = 0
+    let manquants = 0
+    const hauteur = (lat, lon) => {
+      const h = this.hauteurSurface(lat, lon, liste)
+      if (h == null) { manquants++; return 0 }
+      vus++
+      return h
+    }
+    const solide = construireSolideCrop({
+      repere: this._crop,
+      forme: {
+        coin: this.uniforms.uCropCoin.value,
+        expo: this.uniforms.uCropCoinN.value,
+      },
+      hauteur,
+      rayon: R_GLOBE,
+      echelle: (R_GLOBE / EARTH_RADIUS_M) * this.exaggeration,
+      profondeur,
+      baseYFloor,
+    })
+
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(solide.positions, 3))
+    // l'occlusion de contact, cuite par sommet. ⚠️ NOM PROPRE, pas `color` : le
+    // `vertexColors` de three ne déclare `attribute vec3 color` que sous son
+    // propre `#define`, et ce nuanceur-ci n'a pas à en dépendre.
+    geo.setAttribute('aoCrop', new THREE.BufferAttribute(solide.couleurs, 3, true))
+    geo.setIndex(new THREE.BufferAttribute(solide.indices, 1))
+    // ⚠️ DÉ-INDEXÉ PUIS NORMALES DE FACE. Des normales moyennées auraient lissé
+    // l'arête entre le mur et le fond, et `plinth.js` explique pourquoi ce serait
+    // faux : « c'est elle qui donne au liseré d'arête sa cassure nette ». Le coût
+    // est de trois sommets par triangle au lieu d'un — 9 180 au lieu de 2 042 sur
+    // le contour par défaut, soit 110 Kio.
+    const plate = geo.toNonIndexed()
+    plate.computeVertexNormals()
+    plate.computeBoundingSphere()
+    geo.dispose()
+
+    this.retirerParoisCrop()
+    const mesh = new THREE.Mesh(plate, this._materiauParois())
+    mesh.name = 'crop-parois'
+    // le repère local du crop : (est, haut, sud) posé à l'origine du crop. C'est
+    // lui qui rend le RTC gratuit et la verticale UNIQUE (§2 de parois-crop.js).
+    const M = new THREE.Matrix4().makeBasis(
+      new THREE.Vector3(solide.base.est.x, solide.base.est.y, solide.base.est.z),
+      new THREE.Vector3(solide.base.haut.x, solide.base.haut.y, solide.base.haut.z),
+      new THREE.Vector3(solide.base.sud.x, solide.base.sud.y, solide.base.sud.z)
+    )
+    M.setPosition(solide.origine.x, solide.origine.y, solide.origine.z)
+    M.decompose(mesh.position, mesh.quaternion, mesh.scale)
+    this.group.add(mesh)
+    this._parois = mesh
+    return { mesh, solide, couverture: vus + manquants > 0 ? vus / (vus + manquants) : 0 }
+  }
+
+  /** Retire les parois — le crop redevient une peau flottante. */
+  retirerParoisCrop() {
+    if (!this._parois) return
+    this.group.remove(this._parois)
+    this._parois.geometry.dispose()
+    this._parois.material.dispose()
+    this._parois = null
+  }
+
+  // La matière du bloc : la recette d'éclairage des calottes polaires, mot pour
+  // mot (`_buildPoleCaps`) — même terminateur, même fondu vers `uShadowColor`.
+  // ⚠️ UNE SEULE RECETTE, N LECTEURS : un mur éclairé autrement que la surface
+  // qu'il porte se lirait comme un objet rapporté, et c'est exactement le défaut
+  // qu'`Adrien` a signalé une fois sur le congé du socle (« la base du socle est
+  // traitée comme un objet séparé »).
+  _materiauParois() {
+    return new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      uniforms: {
+        uSunDir: this.uniforms.uSunDir,
+        uShadowColor: this.uniforms.uShadowColor,
+        uCol: { value: new THREE.Color('#d8d4cc') }, // `params.plinthColor` par défaut
+      },
+      vertexShader: /* glsl */ `
+        attribute vec3 aoCrop;
+        varying vec3 vN;
+        varying float vAo;
+        void main() {
+          vN = normalize(mat3(modelMatrix) * normal);
+          vAo = aoCrop.r;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: /* glsl */ `
+        varying vec3 vN;
+        varying float vAo;
+        uniform vec3 uSunDir;
+        uniform vec3 uShadowColor;
+        uniform vec3 uCol;
+        void main() {
+          vec3 N = normalize(vN) * (gl_FrontFacing ? 1.0 : -1.0);
+          float diff = max(dot(N, uSunDir), 0.0);
+          vec3 col = uCol * (0.74 + 0.30 * diff) * vAo;
+          float day = smoothstep(-0.22, 0.16, dot(N, uSunDir));
+          gl_FragColor = vec4(mix(uShadowColor, col, 0.10 + 0.90 * day), 1.0);
+        }`,
+    })
+  }
+
+  /**
+   * Le mélange des tuiles suit le crop — Tâche B, Étape 5.
+   *
+   * ⚠️ **IL FAUT LE POSER SUR LES MATÉRIAUX DÉJÀ CRÉÉS**, pas seulement dans
+   * `_materialFor` : le globe porte jusqu'à 1 700 tuiles quand `poserCrop`
+   * arrive, et chacune a le sien (`uTex` et `uTilePx` sont propres à la tuile).
+   */
+  _melangeCrop(actif) {
+    for (const t of this.tiles.values()) {
+      const m = t.mesh?.material
+      if (!m || m.transparent === actif) continue
+      m.transparent = actif
+      m.depthWrite = true
+      m.needsUpdate = true
+    }
   }
 
   // The globe ramp reuses the user's land gradient (the map's identity) and

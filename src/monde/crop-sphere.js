@@ -123,6 +123,31 @@ export function localCrop(lat, lon, repere) {
   return { u: du / repere.demi, v: (mercY(lat) - repere.cy) / repere.demi }
 }
 
+/**
+ * L'INVERSE de `localCrop` : coordonnées locales du crop (±1) → (lat, lon).
+ *
+ * ⚠️ **AJOUTÉE PAR LA TÂCHE B, ET ELLE NE REMPLACE RIEN.** Les parois ont besoin
+ * de savoir QUEL point de la planète tombe sur la frontière du crop, pour y lire
+ * la hauteur EXACTE de la surface — `localCrop` ne répond qu'à la question
+ * inverse. `test/crop-sphere.test.js` porte depuis la Tâche A une copie privée
+ * de cette formule (`latLonDeLocal`, en bas de fichier) : elle y reste, comme
+ * témoin indépendant, et `test/crop-parois.test.js` vérifie que les deux
+ * conversions se composent bien en l'identité.
+ *
+ * ⚠️ **LE REPLI DE LONGITUDE EST OBLIGATOIRE**, pour la raison jumelle de celui
+ * de `localCrop` : un crop à cheval sur 180° a un `cx + u·demi` hors de [0, 1[,
+ * et une longitude de 187° n'existe pas.
+ */
+export function latLonDeLocal(u, v, repere) {
+  const mx = repere.cx + u * repere.demi
+  const my = repere.cy + v * repere.demi
+  const mxr = mx - Math.floor(mx)
+  return {
+    lat: (Math.atan(Math.sinh(Math.PI * (1 - 2 * my))) * 180) / Math.PI,
+    lon: mxr * 360 - 180,
+  }
+}
+
 /** Le rayon d'arrondi, en fraction du demi-côté — l'unité du nuanceur. */
 export function coinNormalise(corner, half) {
   return Math.max(0, Math.min(1, corner / half))
