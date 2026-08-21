@@ -61,6 +61,9 @@ import {
   PAS_CONTOUR,
 } from '../src/monde/parois-crop.js'
 import { repereCrop, coinNormalise, latLonDeLocal, localCrop } from '../src/monde/crop-sphere.js'
+// ⚠️ ON APPELLE LES MÉTHODES DU GLOBE PAR `.call` SUR UN OBJET MINIMAL, patron
+// de `test/globe-precision.test.js` : monter un `Globe` réclamerait le DOM.
+import { Globe, sampleHeights } from '../src/globe.js'
 import { auditerSolide } from '../src/monde/audit-solide.js'
 import { dansDalle } from '../src/damier-bords.js'
 import { dansFenetre, exposantCoin } from '../src/fenetre-clip.js'
@@ -170,6 +173,15 @@ test('MUTATION — les parois RETOURNÉES passent la fermeture et tombent sur le
   // ⚠️ LA DÉMONSTRATION DU §1 D'`audit-solide.js`, rejouée sur CE solide :
   // retourner toutes les faces change le signe de chaque terme d'une somme déjà
   // nulle. Ā ne bouge pas ; seul le volume signé le voit.
+  //
+  // ⚠️ **ET IL FAUT DIRE CE QUE CET INVARIANT NE DÉFEND PAS : LE RENDU LE
+  // NEUTRALISE.** `globe.js` pose les parois en `DoubleSide` et retourne la
+  // normale par `gl_FrontFacing` — un solide retourné se dessine donc **au pixel
+  // près comme le bon**. `DoubleSide` est voulu (la caméra entre dans le bloc
+  // pendant la descente) et le motif est écrit devant `_materiauParois`.
+  // L invariant garde son sens ailleurs : la carte d ombre (`castShadow` sur le
+  // socle) et l export de fichiers d impression consomment le sens de parcours,
+  // et surtout **un audit qui accepte un solide retourné n est pas un audit**.
   const s = SOLIDE
   const tout = new Uint32Array(s.indices.length + s.indicesCouvercle.length)
   tout.set(s.indices)
@@ -289,9 +301,12 @@ test('hauteurs.distinctes > 2 — l assertion du plan, ET LA MESURE QUI DIT QU E
   )
   // CE QUI MORD : l'amplitude. Le relief du banc couvre 3 200 m ; la sphère
   // seule, sur 10,4 km de crop, ne couvre que sa sagitta (2,1 m, §3 du plan).
-  // MESURE SUR CE BANC : **38,9**. Le seuil est pose a 20, entre le solide a
-  // relief (38,9) et le pave du test suivant (**1,003**) — un ordre de grandeur
-  // de marge de chaque cote, et les deux chiffres sont dans les messages.
+  // MESURÉ SUR CE BANC : **38,9**. Le seuil est posé à 20, entre le solide à
+  // relief (38,9) et le pavé du test suivant (**1,003**). ⚠️ **ET LA MARGE N EST
+  // PAS SYMÉTRIQUE, contrairement à ce que la première version de ce commentaire
+  // affirmait** : 38,9 / 20 = **1,95 au-dessus**, 20 / 1,003 = **19,9 en
+  // dessous**. C est le côté RELIEF qui est serré, et c est lui qui casserait
+  // d abord si le champ du banc changeait d amplitude.
   const rapport = avecRelief.hauteurs.amplitude / sansRelief.hauteurs.amplitude
   assert.ok(rapport > 20, `le relief n ajoute qu un facteur ${rapport} à l amplitude`)
 })
@@ -441,53 +456,94 @@ test('les couleurs de sommet portent l occlusion, et elles sont SOMBRES au pied'
 })
 
 // ══════════ ⑧ LE NUANCEUR — LA COUVERTURE DOUCE, VÉRIFIÉE COMME TEXTE ═══════
+//
+// ⚠️ **QUATRE ASSERTIONS DE LA PREMIÈRE VERSION ÉTAIENT VERTES DES DEUX CÔTÉS,
+// ET C'EST MESURÉ** (`.banc/rejoue-B.mjs`, rejoué contre `git show 69b32e5`) :
+//   · `/smoothstep/` sur tout ce qui suit la garde du crop — le nuanceur en
+//     portait **déjà deux**, pour les courbes de niveau et le graticule ;
+//   · `/discard;/`, `/uCropOn > 0.5/` et `/uCropOn: { value: 0/` — vraies avant,
+//     et **déjà posées mot pour mot** par `crop-sphere.test.js:236,244,245`.
+// **Une assertion qui ne distingue rien coûte de la confiance sans en donner.**
+// Les huit qui suivent ont toutes été rejouées : **fausses avant, vraies
+// après**, et le banc les rejoue à la demande.
+//
+// ⚠️ **ET LE BLOC EST BORNÉ DES DEUX CÔTÉS.** L'ancienne tranche courait jusqu'à
+// la fin du fichier ; c'est elle qui laissait passer les `smoothstep` du reste
+// du nuanceur.
 
 const GLOBE_SRC = readFileSync(new URL('../src/globe.js', import.meta.url), 'utf8')
-const CORPS = GLOBE_SRC.slice(GLOBE_SRC.indexOf('uCropOn > 0.5'))
+const DEBUT_CROP = GLOBE_SRC.indexOf('if (uCropOn > 0.5) {')
+const FIN_CROP = GLOBE_SRC.indexOf('float h = decodeMetersAA', DEBUT_CROP)
+const BLOC = GLOBE_SRC.slice(DEBUT_CROP, FIN_CROP)
+
+test('le bloc de découpe est BORNÉ — sans quoi tout le reste du nuanceur y entre', () => {
+  assert.ok(DEBUT_CROP > 0, 'la garde `if (uCropOn > 0.5) {` a disparu du nuanceur')
+  assert.ok(FIN_CROP > DEBUT_CROP, 'la borne basse du bloc a disparu')
+  // le témoin de ce qui rendait l'ancienne assertion inutile : hors du bloc, le
+  // nuanceur porte d'autres `smoothstep` (contours, graticule, terminateur).
+  const dehors = GLOBE_SRC.slice(FIN_CROP)
+  assert.ok((dehors.match(/smoothstep/g) || []).length >= 2,
+    'plus aucun `smoothstep` hors du bloc : le piège a disparu, ce commentaire est à revoir')
+})
 
 test('LE `discard` BINAIRE EST DEVENU UNE COUVERTURE DOUCE', () => {
   // ⚠️ MESURÉ, PAS JUGÉ À L ŒIL : `gl.getContextAttributes().antialias === false`
-  // (relevé de la Tâche A). Un `discard` donne une frontière binaire, donc les
-  // coins crénellent. La surface passe à un `smoothstep` sur la distance signée.
-  assert.ok(/smoothstep/.test(CORPS), 'aucun `smoothstep` après la garde du crop')
-  assert.ok(/couvertureCrop/.test(GLOBE_SRC), 'la couverture n est pas nommée')
+  // (relevé de la Tâche A, reproduit par la Tâche B sur ce contexte). Un
+  // `discard` donne une frontière binaire, donc les coins crénellent.
+  assert.ok(/couvertureCrop\s*=\s*1\.0\s*-\s*smoothstep\(/.test(BLOC),
+    'la couverture n est pas un `smoothstep` de la distance signée')
   // ⚠️ ET ELLE DOIT SORTIR DU NUANCEUR : une couverture calculée puis jetée
   // serait exactement le `discard` binaire d avant, avec un `smoothstep` mort à
   // côté pour rassurer le lecteur.
   assert.ok(/gl_FragColor\s*=\s*vec4\(\s*col\s*,\s*couvertureCrop\s*\)/.test(GLOBE_SRC),
     'la couverture ne part pas dans l alpha du fragment')
-  // ⚠️ ET L ALPHA NE VEUT RIEN DIRE SANS MÉLANGE : il faut que le matériau des
-  // tuiles passe en `transparent` quand le crop est posé — et SEULEMENT alors.
-  assert.ok(/transparent:\s*!!this\._crop/.test(GLOBE_SRC), 'le mélange ne suit pas le crop')
-  assert.ok(/_melangeCrop\s*\(/.test(GLOBE_SRC), 'les matériaux déjà créés ne sont pas repris')
-  // ⚠️ ET LA PROFONDEUR RESTE ÉCRITE : sans elle, 750 tuiles transparentes se
-  // mélangeraient les unes aux autres au lieu de s occulter.
-  assert.ok(/depthWrite:\s*true/.test(GLOBE_SRC), 'la profondeur n est plus écrite')
 })
 
 test('LA LARGEUR DU FONDU VIENT DE `fwidth`, JAMAIS D UNE CONSTANTE', () => {
   // ⚠️ **UNE CONSTANTE NE SERAIT JUSTE QU À UNE SEULE ALTITUDE.** La largeur se
-  // mesure en unités-monde à partir de la dérivée d écran.
-  const fondu = CORPS.slice(0, CORPS.indexOf('float h = decodeMetersAA'))
-  assert.ok(/fwidth\s*\(/.test(fondu), 'la largeur du fondu n est pas dérivée de `fwidth`')
-  assert.ok(/smoothstep\([^)]*w[^)]*\)/.test(fondu) || /smoothstep\(\s*-\s*\w+/.test(fondu),
-    'le `smoothstep` ne s appuie pas sur la largeur mesurée')
+  // mesure en unités-monde à partir de la dérivée d écran. Mesuré à l écran :
+  // 1 à 2 px à `dist` 2,0 ET à 1,05 — un zoom de ×2,76 qui ne l élargit pas.
+  assert.ok(/float\s+w\s*=\s*max\(\s*fwidth\(\s*d\s*\)/.test(BLOC),
+    'la largeur du fondu n est pas dérivée de `fwidth`')
+  assert.ok(/smoothstep\(\s*-\s*0\.5\s*\*\s*w\s*,\s*0\.5\s*\*\s*w\s*,\s*d\s*\)/.test(BLOC),
+    'le `smoothstep` ne s appuie pas sur la largeur mesurée, des deux côtés de la frontière')
 })
 
-test('LE `discard` RESTE — au-delà d un pixel, on ne paie pas le mélange', () => {
+test('LE `discard` RESTE — au-delà d un demi-pixel, on ne paie pas le mélange', () => {
   // ⚠️ Le plan est explicite : « Le `discard` reste au-delà d un pixel, sinon on
-  // paie le mélange sur toute la tuile. »
-  assert.ok(/\bdiscard\s*;/.test(CORPS), 'le `discard` a disparu : toute la tuile paierait le fondu')
-  // et il reste GARDÉ par l interrupteur — la production est intouchée
-  assert.ok(/uCropOn\s*>\s*0\.5/.test(GLOBE_SRC), 'le discard n est plus gardé par uCropOn')
-  assert.ok(/uCropOn:\s*\{\s*value:\s*0\b/.test(GLOBE_SRC), 'uCropOn ne naît plus à zéro')
+  // paie le mélange sur toute la tuile. » L assertion porte donc sur la GARDE,
+  // pas sur la présence du mot : `discard` était là avant.
+  assert.ok(/if\s*\(\s*d\s*>\s*0\.5\s*\*\s*w\s*\)\s*discard\s*;/.test(BLOC),
+    'le `discard` n est plus gardé par la largeur mesurée')
+})
+
+test('SANS CROP, L ALPHA VAUT EXACTEMENT 1 — la production est intouchée', () => {
+  // ⚠️ L ASSERTION QUI PROTÈGE LA PRODUCTION, et elle ne se contente pas de
+  // constater que `uCropOn` naît à zéro (`crop-sphere.test.js` le fait déjà) :
+  // elle vérifie que la couverture est DÉCLARÉE à 1 avant la garde, et qu elle
+  // n est affectée qu à un seul autre endroit — dedans.
+  const dec = GLOBE_SRC.indexOf('float couvertureCrop = 1.0;')
+  assert.ok(dec > 0, 'la couverture n est pas déclarée')
+  assert.ok(dec < DEBUT_CROP, 'la couverture est déclarée APRÈS la garde : hors crop elle serait indéfinie')
+  assert.equal((GLOBE_SRC.match(/couvertureCrop\s*=/g) || []).length, 2,
+    'la couverture est affectée ailleurs que dans le bloc de découpe')
+})
+
+test('LE MÉLANGE SUIT LE CROP, ET SEULEMENT LUI', () => {
+  // ⚠️ L ALPHA NE VEUT RIEN DIRE SANS MÉLANGE — et le mélange coûte : il fait
+  // passer les tuiles dans la liste TRIÉE arrière-avant, donc leur surdessin
+  // perd le rejet Z précoce. Il ne doit s armer que sous crop.
+  assert.ok(/transparent:\s*!!this\._crop/.test(GLOBE_SRC), 'le mélange ne suit pas le crop')
+  assert.ok(/_melangeCrop\s*\(/.test(GLOBE_SRC), 'les matériaux déjà créés ne sont pas repris')
+  // ⚠️ ET LA PROFONDEUR RESTE ÉCRITE : sans elle, les tuiles se mélangeraient
+  // les unes aux autres au lieu de s occulter.
+  assert.ok(/depthWrite:\s*true/.test(GLOBE_SRC), 'la profondeur n est plus écrite')
 })
 
 test('le globe expose la pose ET LE RETRAIT des parois', () => {
   assert.ok(/construireParoisCrop\s*\(/.test(GLOBE_SRC), 'pas de `construireParoisCrop`')
   assert.ok(/retirerParoisCrop\s*\(/.test(GLOBE_SRC), 'pas de `retirerParoisCrop` — les parois seraient irréversibles')
   assert.ok(/from '\.\/monde\/parois-crop\.js'/.test(GLOBE_SRC), 'globe.js ne lit pas la loi des parois')
-  assert.ok(/hauteurSurface\s*\(/.test(GLOBE_SRC), 'pas de lecture de la surface exacte au point de coupe')
 })
 
 // ══════════ ⑨ LE CONTOUR, ET SON COÛT ═══════════════════════════════════════
@@ -508,6 +564,186 @@ test('un coin VIF (rayon nul) reste un carré, et le solide reste sain', () => {
     assert.ok(Math.abs(Math.abs(u) - 1) < 1e-12 || Math.abs(Math.abs(v) - 1) < 1e-12,
       `le point (${u}, ${v}) n est sur aucun côté du carré`)
   }
+})
+
+// ══════════ ⑩ `globe.hauteurSurface` — TESTÉE, PAS JUSTE NOMMÉE ═════════════
+//
+// ⚠️ **LA PREMIÈRE VERSION DE CE FICHIER NE LA VÉRIFIAIT QUE PAR UN `grep` DE
+// SON NOM.** L'interpolation bilinéaire, le choix de la tuile la plus fine et le
+// repli d'antiméridien n'étaient démontrés par rien — et le « 29,96 m » du
+// compte rendu avait été mesuré à travers `construireSolideCrop`, pas à travers
+// elle. Les quatre tests qui suivent l'exercent directement.
+//
+// ⚠️ **ON L'APPELLE PAR `.call` SUR UN OBJET MINIMAL**, patron de
+// `test/globe-precision.test.js` : monter un `Globe` entier réclamerait le DOM
+// (rampe de couleurs, calottes, atmosphère, coquille de nuages).
+
+/** Une tuile factice : `size²` hauteurs, et rien d'autre que ce que la méthode lit. */
+function tuile(z, x, y, size, f) {
+  const heights = new Float32Array(size * size)
+  for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) heights[j * size + i] = f(i, j)
+  return { z, x, y, size, heights, key: `${z}/${x}/${y}` }
+}
+
+/** (mercator normalisé) → (lat, lon). Le repère unité rend `latLonDeLocal` direct. */
+const UNITE = { cx: 0, cy: 0, demi: 1 }
+const deMerc = (mx, my) => latLonDeLocal(mx, my, UNITE)
+
+const lisSurface = (liste, lat, lon) =>
+  Globe.prototype.hauteurSurface.call({ tuilesAvecHauteurs: () => liste }, lat, lon)
+
+test('hauteurSurface INTERPOLE — elle ne s accroche pas au nœud le plus proche', () => {
+  // une rampe franche sur 4 texels : le nœud voisin vaut 300 m de plus
+  const t = tuile(13, 4300, 4600, 4, (i) => 100 * i)
+  const n = 2 ** 13
+  // un point choisi ENTRE deux nœuds : (u, v) = (0,3125 ; 0,5625)
+  const u = 0.3125
+  const v = 0.5625
+  const { lat, lon } = deMerc((4300 + u) / n, (4600 + v) / n)
+  const vu = lisSurface([t], lat, lon)
+  // la valeur EXACTE que rend l échantillonnage bilinéaire du dépôt
+  const attendu = sampleHeights(t.heights, u, v, 4)
+  assert.ok(Math.abs(vu - attendu) < 1e-9, `${vu} au lieu de ${attendu}`)
+  // ⚠️ ET LE TÉMOIN : le nœud le plus proche donne autre chose. Sans lui,
+  // l assertion passerait aussi sur une méthode qui accroche.
+  const noeud = sampleHeights(t.heights, (Math.round(u * 4 - 0.5) + 0.5) / 4, (Math.round(v * 4 - 0.5) + 0.5) / 4, 4)
+  assert.ok(Math.abs(vu - noeud) > 10, `l accrochage rendrait ${noeud}, l interpolation ${vu} : trop proche pour prouver quoi que ce soit`)
+})
+
+test('hauteurSurface prend LA PLUS FINE des tuiles qui couvrent le point', () => {
+  // ⚠️ C EST LE REPLI SUR L ANCÊTRE, celui qui rend le §7 de `parois-crop.js`
+  // tenable : quand la fine n est pas là, la grossière répond ; quand elle est
+  // là, elle gagne.
+  const n = 2 ** 13
+  const { lat, lon } = deMerc((4300 + 0.5) / n, (4600 + 0.5) / n)
+  const grossiere = tuile(6, 4300 >> 7, 4600 >> 7, 4, () => 111)
+  const fine = tuile(13, 4300, 4600, 4, () => 999)
+  assert.equal(lisSurface([grossiere], lat, lon), 111, 'la grossière seule doit répondre')
+  assert.equal(lisSurface([grossiere, fine], lat, lon), 999, 'la fine doit gagner')
+  assert.equal(lisSurface([fine, grossiere], lat, lon), 999, 'et l ordre de la liste ne doit rien y faire')
+})
+
+test('hauteurSurface rend `null` quand PERSONNE ne couvre — jamais zéro', () => {
+  // ⚠️ **ZÉRO EST LE NIVEAU DE LA MER.** Le confondre avec « je ne sais pas »
+  // creuse une encoche dans la paroi, exactement à la hauteur de la mer. C est
+  // le défaut que le §7 de `parois-crop.js` raconte.
+  const n = 2 ** 13
+  const loin = deMerc((4300 + 0.5) / n, (4600 + 0.5) / n)
+  const ailleurs = tuile(13, 1, 1, 4, () => 500)
+  assert.equal(lisSurface([ailleurs], loin.lat, loin.lon), null)
+  assert.equal(lisSurface([], loin.lat, loin.lon), null)
+})
+
+test('LE REPLI D ANTIMÉRIDIEN DE hauteurSurface — le `round` avait un trou, le modulo non', () => {
+  // ⚠️ **REJOUÉ AVANT D ÊTRE ÉCRIT** (`.banc/repli-B.mjs`) : la forme
+  // `tx -= round(tx / n) * n` replie dans `(−n/2, n/2]`, ce qui est FAUX dès que
+  // `n` vaut 1 — la tuile unique d un z0 rejette alors tout point au-delà de
+  // mx = 0,5, soit la moitié de la planète. Ce test tombe sur cette forme-là.
+  const z0 = tuile(0, 0, 0, 4, () => 777)
+  const est = deMerc(0.7, 0.5) // mx > 0,5 : c est là que le `round` cassait
+  assert.equal(lisSurface([z0], est.lat, est.lon), 777, 'la tuile unique d un z0 doit couvrir TOUTE la planète')
+  const ouest = deMerc(0.2, 0.5)
+  assert.equal(lisSurface([z0], ouest.lat, ouest.lon), 777)
+  // ⚠️ ET UNE TUILE D INDICE HORS BORNES est la même que son repli : c est la
+  // convention que `remplirHauteurs` emploie déjà (sa boucle `dxMonde`).
+  const n = 4
+  const p = deMerc((0 + 0.5) / n, (1 + 0.5) / n)
+  assert.equal(lisSurface([tuile(2, 4, 1, 4, () => 42)], p.lat, p.lon), 42, 'x = 4 à z2 est la tuile x = 0')
+  const q = deMerc((3 + 0.5) / n, (1 + 0.5) / n)
+  assert.equal(lisSurface([tuile(2, -1, 1, 4, () => 43)], q.lat, q.lon), 43, 'x = −1 à z2 est la tuile x = 3')
+})
+
+// ══════════ ⑪ LA TUILE ABSENTE — LE REFUS, ET SON MOTIF (§7) ════════════════
+
+test('UN SEUL TROU ET LA PAROI REFUSE DE SE BÂTIR', () => {
+  // ⚠️ **LE DÉFAUT QUE CE TEST FERME** : la première version rendait `0` sur un
+  // point non couvert — le niveau de la mer — et creusait une encoche muette
+  // dans le flanc du bloc. `couverture` sortait bien de la fonction, et personne
+  // ne la lisait.
+  let appels = 0
+  const troue = (lat, lon) => (++appels === 40 ? null : relief(lat, lon))
+  const s = construireSolideCrop({ ...commun, hauteur: troue })
+  assert.equal(s.refus, 'couverture', 'un trou est passé sans que rien ne le dise')
+  assert.equal(s.positions, undefined, 'le refus a quand même posé des sommets')
+  assert.ok(s.couverture > 0.99 && s.couverture < 1, `couverture rendue : ${s.couverture}`)
+  assert.equal(s.manquants, 1)
+})
+
+test('le seuil s ABAISSE, et l appelant achète alors les encoches', () => {
+  let appels = 0
+  const troue = (lat, lon) => (++appels === 40 ? null : relief(lat, lon))
+  const s = construireSolideCrop({ ...commun, hauteur: troue, couvertureMin: 0.9 })
+  assert.equal(s.refus, null, 'le seuil abaissé devrait laisser passer')
+  assert.equal(s.manquants, 1)
+  // le solide reste FERMÉ — l encoche est une encoche, pas un trou
+  assert.equal(auditer(s).sain, true)
+})
+
+test('un solide COMPLET rend une couverture de 1 et aucun refus', () => {
+  assert.equal(SOLIDE.refus, null)
+  assert.equal(SOLIDE.couverture, 1)
+  assert.equal(SOLIDE.manquants, 0)
+})
+
+// ══════════ ⑫ LES DEUX CONVERSIONS SE COMPOSENT — ET LE TÉMOIN EST CONFRONTÉ ═
+//
+// ⚠️ **`crop-sphere.js` AFFIRMAIT QUE CE FICHIER VÉRIFIAIT LA COMPOSITION EN
+// IDENTITÉ. IL NE LE FAISAIT PAS.** Et le « témoin indépendant » de
+// `crop-sphere.test.js:284` **n'a pas le repli de longitude** : les deux
+// formules divergent exactement là où ça compte — sur un crop à cheval sur 180°
+// — sans avoir jamais été confrontées. Les deux tests qui suivent ferment ça.
+
+/** La copie privée de `crop-sphere.test.js:284`, SANS repli. Recopiée telle quelle. */
+function latLonDeLocalSansRepli(u, v, rep) {
+  const mx = rep.cx + u * rep.demi
+  const my = rep.cy + v * rep.demi
+  return {
+    lat: (Math.atan(Math.sinh(Math.PI * (1 - 2 * my))) * 180) / Math.PI,
+    lon: mx * 360 - 180,
+  }
+}
+
+test('`latLonDeLocal` ∘ `localCrop` = l identité, sur 2 500 points', () => {
+  let pireLat = 0
+  let pireLon = 0
+  for (let i = 0; i < 50; i++) {
+    for (let j = 0; j < 50; j++) {
+      const u = -1 + (2 * (i + 0.5)) / 50
+      const v = -1 + (2 * (j + 0.5)) / 50
+      const { lat, lon } = latLonDeLocal(u, v, REPERE)
+      const r = localCrop(lat, lon, REPERE)
+      pireLon = Math.max(pireLon, Math.abs(r.u - u))
+      pireLat = Math.max(pireLat, Math.abs(r.v - v))
+    }
+  }
+  assert.ok(pireLon < 1e-12, `écart en u : ${pireLon}`)
+  assert.ok(pireLat < 1e-12, `écart en v : ${pireLat}`)
+})
+
+test('SUR L ANTIMÉRIDIEN, LE REPLI EST LOAD-BEARING — et le témoin de la Tâche A ne l a pas', () => {
+  // ⚠️ **C EST LA CONFRONTATION.** À lon 6,25 les deux formules coïncident au
+  // bit ; à cheval sur 180°, celle sans repli rend une longitude qui n existe
+  // pas. Un témoin qu on ne confronte jamais n est pas un témoin.
+  const rep = repereCrop({ centre: { lat: 0, lon: 179.99 } })
+  let vus = 0
+  let divergents = 0
+  let pire = 0
+  for (let i = 0; i < 200; i++) {
+    const u = -1 + (2 * (i + 0.5)) / 200
+    const avec = latLonDeLocal(u, 0, rep)
+    const sans = latLonDeLocalSansRepli(u, 0, rep)
+    assert.ok(avec.lon >= -180 && avec.lon < 180, `longitude hors bornes : ${avec.lon}`)
+    // la composition tient AVEC le repli
+    assert.ok(Math.abs(localCrop(avec.lat, avec.lon, rep).u - u) < 1e-12, 'la composition casse sur l antiméridien')
+    vus++
+    const ecart = Math.abs(sans.lon - avec.lon)
+    if (ecart > 1e-9) { divergents++; pire = Math.max(pire, ecart) }
+  }
+  assert.equal(vus, 200)
+  // sur ce crop, la moitié ouest passe la ligne : la formule sans repli y sort
+  // de [−180, 180[ de 360° EXACTEMENT.
+  assert.ok(divergents > 0, 'les deux formules ne divergent nulle part : le repli ne servirait à rien')
+  assert.ok(Math.abs(pire - 360) < 1e-9, `divergence maximale ${pire}° au lieu de 360`)
 })
 
 // ── outils du fichier ──────────────────────────────────────────────────────

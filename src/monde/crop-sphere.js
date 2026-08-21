@@ -129,14 +129,22 @@ export function localCrop(lat, lon, repere) {
  * ⚠️ **AJOUTÉE PAR LA TÂCHE B, ET ELLE NE REMPLACE RIEN.** Les parois ont besoin
  * de savoir QUEL point de la planète tombe sur la frontière du crop, pour y lire
  * la hauteur EXACTE de la surface — `localCrop` ne répond qu'à la question
- * inverse. `test/crop-sphere.test.js` porte depuis la Tâche A une copie privée
- * de cette formule (`latLonDeLocal`, en bas de fichier) : elle y reste, comme
- * témoin indépendant, et `test/crop-parois.test.js` vérifie que les deux
- * conversions se composent bien en l'identité.
+ * inverse.
  *
- * ⚠️ **LE REPLI DE LONGITUDE EST OBLIGATOIRE**, pour la raison jumelle de celui
- * de `localCrop` : un crop à cheval sur 180° a un `cx + u·demi` hors de [0, 1[,
- * et une longitude de 187° n'existe pas.
+ * ⚠️ **LE REPLI DE LONGITUDE EST OBLIGATOIRE, ET IL EST MESURÉ**, pour la raison
+ * jumelle de celui de `localCrop` : un crop à cheval sur 180° a un `cx + u·demi`
+ * hors de [0, 1[, et une longitude de 187° n'existe pas.
+ *
+ * ⚠️ **ET `test/crop-sphere.test.js` PORTE UNE COPIE PRIVÉE DE CETTE FORMULE QUI,
+ * ELLE, N'A PAS LE REPLI** (`latLonDeLocal`, en bas de ce fichier-là, écrite par
+ * la Tâche A). Ce n'est pas un défaut chez elle : son crop de test est à
+ * lon 6,25, très loin de 180°, et les deux formules y coïncident au bit. Mais un
+ * témoin qu'on ne confronte jamais n'est pas un témoin — la première version de
+ * ce commentaire affirmait que `test/crop-parois.test.js` vérifiait la
+ * composition en identité, **et c'était faux, il ne le faisait pas.**
+ * `test/crop-parois.test.js` le fait maintenant, et il fait mieux : il **oppose**
+ * les deux formules sur un crop à cheval sur l'antiméridien, là où elles
+ * divergent de 360° exactement.
  */
 export function latLonDeLocal(u, v, repere) {
   const mx = repere.cx + u * repere.demi

@@ -172,6 +172,37 @@
 // prouve pas, c'est que le GPU dessine bien la surface là où l'anneau l'attend —
 // **et rien ne le prouve sous node.** C'est l'affaire de l'Étape 7.
 
+// ══════════ 7. LA TUILE ABSENTE — LA DÉCISION, ET SON MOTIF ════════════════
+//
+// ⚠️ **LA PREMIÈRE VERSION DE CE MODULE RENDAIT `0` SUR UN POINT NON COUVERT,
+// ET C'ÉTAIT UN DÉFAUT SILENCIEUX.** Zéro n'est pas « pas de donnée » : c'est
+// **le niveau de la mer**. Une tuile qui manque au bord du crop creusait donc
+// une ENCOCHE dans la paroi, exactement à la hauteur de la mer, sans qu'aucun
+// appelant ne puisse le voir — `couverture` sortait bien de la fonction, et
+// personne ne la lisait.
+//
+// **DÉCISION : la paroi REFUSE de se bâtir sous `couvertureMin`, qui vaut 1.**
+// Trois raisons, dans l'ordre de leur poids :
+//
+//   ① **Le repli sur un ancêtre plus grossier existe DÉJÀ, et il est gratuit.**
+//      `globe.hauteurSurface` prend la tuile **la plus fine qui couvre le
+//      point** : si la z13 n'est pas là mais la z8 oui, elle rend la z8. Le cas
+//      « pas assez fin » est donc traité en amont et ne remonte jamais ici.
+//      `null` ne veut pas dire « grossier », il veut dire **rien du tout** —
+//      et `globe.js` ne purge jamais ses seize racines z2. En pratique cela
+//      n'arrive qu'AVANT que les racines soient chargées.
+//   ② **Une paroi à encoches est pire que pas de paroi.** Le crop est un objet
+//      d'affiche ; une encoche au niveau de la mer se lit comme un défaut du
+//      produit, pas comme un chargement en cours. Ne rien dessiner se lit,
+//      lui, comme un chargement.
+//   ③ **Le refus est RÉVERSIBLE et sans effet de bord** : `globe.js` ne touche
+//      pas aux parois déjà en place quand il refuse. Le bloc précédent reste à
+//      l'écran jusqu'à ce que la donnée arrive.
+//
+// ⚠️ **ET SI L'APPELANT ABAISSE LE SEUIL, IL ACHÈTE LES ENCOCHES** : les points
+// manquants se posent alors au plancher de mer. C'est écrit ici pour que ce ne
+// soit jamais une surprise.
+
 import { arcCoin } from '../fenetre-clip.js' // pur : aucune importation
 import { latLonDeLocal } from './crop-sphere.js'
 
@@ -286,6 +317,9 @@ function surSphere(lat, lon, rayon) {
  * @param {number} [arg.profondeur] - en unités ; défaut `FRACTION_PROFONDEUR × largeur`
  * @param {number|null} [arg.baseYFloor] - fond IMPOSÉ, jamais plus haut
  * @param {number} [arg.plancherMer] - le plancher du globe (§4), 0 par défaut
+ * @param {number} [arg.couvertureMin] - fraction de points qui doivent avoir
+ *   une hauteur connue ; **1 par défaut : un seul trou et la paroi REFUSE de
+ *   se bâtir** (§7). Rend alors `{ refus: 'couverture', couverture }`.
  * @param {number} [arg.aoForce] - profondeur de l'occlusion de contact
  * @param {number|null} [arg.aoBande] - la bande IMPOSÉE, en unités monde
  */
@@ -299,6 +333,7 @@ export function construireSolideCrop({
   profondeur = null,
   baseYFloor = null,
   plancherMer = 0,
+  couvertureMin = 1,
   aoForce = FORCE_AO,
   aoBande = null,
 } = {}) {
@@ -339,10 +374,35 @@ export function construireSolideCrop({
   ]
   const sud = [-nord[0], -nord[1], -nord[2]]
 
-  /** Un point de la surface DÉPLACÉE, en coordonnées locales (doubles). */
+  // ─── LA COUVERTURE : CE QU'ON FAIT QUAND PERSONNE NE SAIT (§7) ───────────
+  let vus = 0
+  let manquants = 0
+
+  /**
+   * La hauteur au point EXACT, plancher de mer appliqué — ou `null` quand la
+   * source ne sait pas.
+   *
+   * ⚠️ **`null` EST UNE RÉPONSE, PAS UNE PANNE, ET CE N'EST PAS ZÉRO.** La
+   * première version de ce module rendait `0` sur un point non couvert, c'est-à-
+   * dire **le niveau de la mer** : une tuile absente creusait une ENCOCHE dans
+   * la paroi, à la hauteur exacte de la mer, sans que rien ne le dise. Voir le
+   * §7 pour la décision et son motif.
+   */
+  const lire = (lat, lon) => {
+    const h = hauteur(lat, lon)
+    if (h == null || !Number.isFinite(h)) { manquants++; return null }
+    vus++
+    return Math.max(h, plancherMer) // le plancher du globe, §4
+  }
+
+  /**
+   * Un point de la surface DÉPLACÉE, en coordonnées locales (doubles).
+   * Rend `null` si la hauteur manque ET que l'appelant tolère les trous ; sinon
+   * le point se pose au plancher de mer et le compteur s'en souvient.
+   */
   const surface = (u, v) => {
     const { lat, lon } = latLonDeLocal(u, v, repere)
-    const h = Math.max(hauteur(lat, lon), plancherMer) // le plancher du globe, §4
+    const h = lire(lat, lon) ?? plancherMer
     const P = surSphere(lat, lon, rayon + h * echelle)
     const d = [P[0] - O[0], P[1] - O[1], P[2] - O[2]]
     return [
@@ -384,6 +444,16 @@ export function construireSolideCrop({
   const baseBrut = minY - prof
   const baseY = baseYFloor != null ? Math.min(baseYFloor, baseBrut) : baseBrut
   const bande = Number.isFinite(aoBande) ? Math.max(0, aoBande) : FRACTION_BANDE_AO * Math.max(0, hautMax - baseY)
+
+  // ─── LE VERDICT DE COUVERTURE — voir le §7 ───────────────────────────────
+  //
+  // ⚠️ **AVANT DE POSER LE MOINDRE SOMMET.** Une paroi à trous n'est pas une
+  // paroi dégradée, c'est une paroi FAUSSE : les points manquants tombent au
+  // niveau de la mer et découpent des encoches dans le flanc du bloc.
+  const couverture = vus + manquants > 0 ? vus / (vus + manquants) : 0
+  if (couverture < couvertureMin) {
+    return { refus: 'couverture', couverture, vus, manquants, anneau, compte: { anneau: n } }
+  }
 
   // ─── ③ LES SOMMETS ───────────────────────────────────────────────────────
   //
@@ -446,6 +516,10 @@ export function construireSolideCrop({
   }
 
   return {
+    refus: null,
+    couverture,
+    vus,
+    manquants,
     positions,
     indices,
     indicesCouvercle,

@@ -1012,14 +1012,24 @@ export class Globe {
     let best = null
     for (const t of liste) {
       const n = 2 ** t.z
-      // l'antiméridien : le mercator x est de période 1, donc de période `n` en
-      // coordonnées de tuile — même repli que `localCrop` et `tuileDansCrop`.
-      let tx = mx * n - t.x
-      tx -= Math.round(tx / n) * n
+      // ⚠️ **LE REPLI D'ANTIMÉRIDIEN SE FAIT AU MODULO, PAS AU `round`, ET LA
+      // DIFFÉRENCE EST MESURÉE** (`.banc/repli-B.mjs`, huit cas). Le mercator x
+      // est de période 1, donc de période `n` en coordonnées de tuile. La forme
+      // `tx -= round(tx / n) * n` replie dans `(−n/2, n/2]`, ce qui est FAUX dès
+      // que `n` vaut 1 : la tuile unique d'un z0 rejette alors tout point au-delà
+      // de mx = 0,5, c'est-à-dire la moitié de la planète. `ROOT_Z = 2` fait qu'on
+      // ne rencontre pas ce cas aujourd'hui — raison de plus pour le corriger
+      // avant qu'il ne devienne un défaut vivant. Le modulo replie dans `[0, n)`,
+      // l'intervalle où la question « suis-je dans cette tuile ? » se pose, et il
+      // est juste pour tout `n` **et pour un `t.x` hors bornes**.
+      const tx = (((mx * n - t.x) % n) + n) % n
       const ty = my * n - t.y
       if (tx < 0 || tx >= 1 || ty < 0 || ty >= 1) continue
       if (!best || t.z > best.t.z) best = { t, tx, ty }
     }
+    // ⚠️ **`null`, JAMAIS `0`** : zéro est le NIVEAU DE LA MER, et le confondre
+    // avec « je ne sais pas » creuse une encoche dans la paroi (§7 de
+    // `parois-crop.js`). C'est l'appelant qui décide, pas cette méthode.
     return best ? sampleHeights(best.t.heights, best.tx, best.ty, best.t.size) : null
   }
 
@@ -1044,29 +1054,33 @@ export class Globe {
    * @param {number} [arg.baseYFloor] fond imposé, jamais plus haut
    * @returns {{mesh: object, couverture: number, solide: object}|null}
    */
-  construireParoisCrop({ profondeur = null, baseYFloor = null } = {}) {
+  construireParoisCrop({ profondeur = null, baseYFloor = null, couvertureMin = 1 } = {}) {
     if (!this._crop) return null
+    // ⚠️ LA LISTE EST PRÉ-FILTRÉE UNE FOIS : l'anneau fait plus de mille points,
+    // et reparcourir `this.tiles` (jusqu'à 1 700 entrées) à chacun ferait deux
+    // millions d'itérations pour une géométrie qu'on ne bâtit qu'à l'arrêt.
     const liste = this.tuilesAvecHauteurs()
-    let vus = 0
-    let manquants = 0
-    const hauteur = (lat, lon) => {
-      const h = this.hauteurSurface(lat, lon, liste)
-      if (h == null) { manquants++; return 0 }
-      vus++
-      return h
-    }
+    // ⚠️ **ON PASSE `hauteurSurface` TELLE QUELLE, `null` COMPRIS.** L'ancienne
+    // version rattrapait le `null` en `0` — le niveau de la mer — et fabriquait
+    // une encoche muette. La décision et son motif sont au §7 de `parois-crop.js`.
     const solide = construireSolideCrop({
+      couvertureMin,
       repere: this._crop,
       forme: {
         coin: this.uniforms.uCropCoin.value,
         expo: this.uniforms.uCropCoinN.value,
       },
-      hauteur,
+      hauteur: (lat, lon) => this.hauteurSurface(lat, lon, liste),
       rayon: R_GLOBE,
       echelle: (R_GLOBE / EARTH_RADIUS_M) * this.exaggeration,
       profondeur,
       baseYFloor,
     })
+
+    // ⚠️ **LE REFUS NE TOUCHE PAS AUX PAROIS DÉJÀ POSÉES.** C'est ce qui le rend
+    // acceptable : le bloc précédent reste à l'écran jusqu'à ce que la donnée
+    // arrive, et l'appelant n'a rien à défaire.
+    if (solide.refus) return { mesh: null, solide, couverture: solide.couverture, refus: solide.refus }
 
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(solide.positions, 3))
@@ -1079,7 +1093,9 @@ export class Globe {
     // l'arête entre le mur et le fond, et `plinth.js` explique pourquoi ce serait
     // faux : « c'est elle qui donne au liseré d'arête sa cassure nette ». Le coût
     // est de trois sommets par triangle au lieu d'un — 9 180 au lieu de 2 042 sur
-    // le contour par défaut, soit 110 Kio.
+    // le contour par défaut. ⚠️ **ET LE CHIFFRE SE RECONSTITUE** : 9 180 sommets ×
+    // (12 o de position + 12 o de normale + 3 o d'occlusion) = **247 860 o, soit
+    // 242,1 Kio** — la valeur que rend `byteLength` sur la géométrie posée.
     const plate = geo.toNonIndexed()
     plate.computeVertexNormals()
     plate.computeBoundingSphere()
@@ -1099,7 +1115,7 @@ export class Globe {
     M.decompose(mesh.position, mesh.quaternion, mesh.scale)
     this.group.add(mesh)
     this._parois = mesh
-    return { mesh, solide, couverture: vus + manquants > 0 ? vus / (vus + manquants) : 0 }
+    return { mesh, solide, couverture: solide.couverture, refus: null }
   }
 
   /** Retire les parois — le crop redevient une peau flottante. */
@@ -1117,6 +1133,30 @@ export class Globe {
   // qu'il porte se lirait comme un objet rapporté, et c'est exactement le défaut
   // qu'`Adrien` a signalé une fois sur le congé du socle (« la base du socle est
   // traitée comme un objet séparé »).
+  // ⚠️ **`DoubleSide` EST VOULU, ET IL REND UN SOLIDE RETOURNÉ VISUELLEMENT
+  // IDENTIQUE — IL FAUT DONC DIRE CE QUE L'INVARIANT D'ORIENTATION GARDE COMME
+  // SENS.** Avec `DoubleSide` et le retournement de la normale par
+  // `gl_FrontFacing`, retourner toutes les faces ne change pas un pixel : le
+  // rendu NEUTRALISE l'invariant que la mutation de `test/crop-parois.test.js`
+  // défend. Les deux choix restent bons, et voici pourquoi :
+  //
+  //   · **`DoubleSide` est nécessaire, et c'est relevé à l'écran** : la caméra
+  //     ENTRE dans le bloc pendant la descente — à 0,62 unité au-dessus du centre
+  //     du crop on est déjà dans sa boîte englobante, le bloc faisant 0,23 unité
+  //     de haut pour 0,216 de large à l'exagération 18. En `FrontSide`, on verrait
+  //     à travers la paroi depuis l'intérieur — le défaut « on voit sous la
+  //     carte » que `plinth.js` passe son fichier à éviter, et pour lequel il a
+  //     pris `DoubleSide` lui aussi.
+  //   · **L'invariant garde son sens parce que la surface ÉCLAIRÉE n'est pas le
+  //     seul consommateur du sens de parcours.** Le socle porte
+  //     `walls.castShadow = true` (`plinth.js`), et une carte d'ombre écarte
+  //     couramment les faces avant ; et ce dépôt EXPORTE des fichiers
+  //     d'impression (plan `2026-08-06-fichiers-impression.md`), où un maillage
+  //     retourné est un défaut franc. ⚠️ **Et surtout : un audit qui accepte un
+  //     solide retourné n'est pas un audit.** Ā est nulle sur un solide retourné
+  //     — c'est le §1 d'`audit-solide.js` — et le volume signé est la seule chose
+  //     qui l'attrape. Le désarmer parce que « ça se voit pareil aujourd'hui »
+  //     reviendrait à retirer le seul instrument qui le voit.
   _materiauParois() {
     return new THREE.ShaderMaterial({
       side: THREE.DoubleSide,
