@@ -294,10 +294,51 @@ export function contourCrop(coin = 0, expo = 2, pas = PAS_CONTOUR) {
 }
 
 /** (lat, lon, rayon) → position sphérique. Recopie de `geo.js:209`, qui tire three. */
-function surSphere(lat, lon, rayon) {
+export function surSphere(lat, lon, rayon) {
   const la = lat * D2R
   const lo = lon * D2R
   return [rayon * Math.cos(la) * Math.sin(lo), rayon * Math.sin(la), rayon * Math.cos(la) * Math.cos(lo)]
+}
+
+/**
+ * Le repère LOCAL du crop : origine au centre, sur la SPHÈRE NUE, base
+ * orthonormée directe **(est, haut, sud)**.
+ *
+ * ⚠️ **EXTRAITE DE `construireSolideCrop` PAR LA TÂCHE F, ET C'EST TOUT LE
+ * POINT.** La mer de la Tâche F vit dans CE repère, et pas dans un jumeau :
+ * si la calotte et les parois n'avaient pas exactement la même base, la
+ * surface de l'eau ne rencontrerait pas le mur — c'est le liseré que le §3 de
+ * ce fichier passe déjà son temps à éviter, à une dimension de plus.
+ * La question 2 du §1 de `/threejs-optimisation` dit la même chose : une
+ * constante — ici une base — recopiée diverge en silence.
+ *
+ * ⚠️ **SUR LA SPHÈRE NUE, ET PAS SUR LA SURFACE DÉPLACÉE** — à l'inverse de
+ * `_buildMesh`, qui prend son origine sur la surface déplacée pour le RTC. La
+ * raison est ici différente : `y = 0` doit vouloir dire « le niveau de la mer »
+ * pour que `hauteurs` reste lisible et que `baseY` se compare d'un crop à
+ * l'autre. Le gain de précision est le même à 10⁻⁴ près (le relief exagéré ne
+ * décale l'origine que d'une fraction de la largeur du crop).
+ *
+ * @param {{cx:number,cy:number,demi:number}} repere - `repereCrop`
+ * @param {number} rayon - rayon de la sphère, en unités de scène
+ * @returns {{origine:number[], est:number[], haut:number[], sud:number[], centre:{lat:number,lon:number}}}
+ */
+export function repereLocalCrop(repere, rayon) {
+  const centre = latLonDeLocal(0, 0, repere)
+  const O = surSphere(centre.lat, centre.lon, rayon)
+  const haut = [O[0] / rayon, O[1] / rayon, O[2] / rayon]
+  // le nord local : la composante du pôle orthogonale au rayon
+  const nord = [-haut[1] * haut[0], 1 - haut[1] * haut[1], -haut[1] * haut[2]]
+  const ln = Math.hypot(nord[0], nord[1], nord[2])
+  if (!(ln > 1e-12)) throw new Error('repereLocalCrop : crop au pôle, le nord local est indéfini')
+  nord[0] /= ln; nord[1] /= ln; nord[2] /= ln
+  // est = nord × haut ; sud = −nord. (est, haut, sud) est DIRECT : est × haut = sud
+  const est = [
+    nord[1] * haut[2] - nord[2] * haut[1],
+    nord[2] * haut[0] - nord[0] * haut[2],
+    nord[0] * haut[1] - nord[1] * haut[0],
+  ]
+  return { origine: O, est, haut, sud: [-nord[0], -nord[1], -nord[2]], centre }
 }
 
 /**
@@ -358,21 +399,11 @@ export function construireSolideCrop({
   // pour que `hauteurs` reste lisible et que `baseY` se compare d'un crop à
   // l'autre. Le gain de précision est le même à 10⁻⁴ près (le relief exagéré ne
   // décale l'origine que d'une fraction de la largeur du crop).
-  const centre = latLonDeLocal(0, 0, repere)
-  const O = surSphere(centre.lat, centre.lon, rayon)
-  const haut = [O[0] / rayon, O[1] / rayon, O[2] / rayon]
-  // le nord local : la composante du pôle orthogonale au rayon
-  const nord = [-haut[1] * haut[0], 1 - haut[1] * haut[1], -haut[1] * haut[2]]
-  const ln = Math.hypot(nord[0], nord[1], nord[2])
-  if (!(ln > 1e-12)) throw new Error('construireSolideCrop : crop au pôle, le nord local est indéfini')
-  nord[0] /= ln; nord[1] /= ln; nord[2] /= ln
-  // est = nord × haut ; sud = −nord. (est, haut, sud) est DIRECT : est × haut = sud
-  const est = [
-    nord[1] * haut[2] - nord[2] * haut[1],
-    nord[2] * haut[0] - nord[0] * haut[2],
-    nord[0] * haut[1] - nord[1] * haut[0],
-  ]
-  const sud = [-nord[0], -nord[1], -nord[2]]
+  // ⚠️ **APPELÉE, PAS RECOPIÉE** : depuis la Tâche F, la mer sphérique lit LE
+  // MÊME repère (`repereLocalCrop`, plus haut dans ce fichier). Deux bases
+  // écrites deux fois auraient fini par diverger, et la mer ne rencontrerait
+  // plus le mur.
+  const { origine: O, est, haut, sud, centre } = repereLocalCrop(repere, rayon)
 
   // ─── LA COUVERTURE : CE QU'ON FAIT QUAND PERSONNE NE SAIT (§7) ───────────
   let vus = 0

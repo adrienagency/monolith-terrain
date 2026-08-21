@@ -505,13 +505,117 @@ Le globe passe de **18** à la **courbe continue** partagée (décision 14). ⚠
 
 La mer cesse d'être un plan à hauteur fixe cuit sur une grille plate : elle devient une **calotte sphérique** au niveau de la mer, avec ses vagues, son écume et sa profondeur. ⚠️ **Complète près de la caméra, simplifiée au loin — et la bascule ne doit pas se voir.**
 
-- [ ] **Étape 1 — MESURER le coût de la mer riche** à trois distances. **Écris la table.**
-- [ ] **Étape 2 — le test qui échoue** : la mer suit la sphère (un point à 100 km du centre du crop est **plus bas** qu'au centre, de la sagitta), et **le raccord au bord du crop est continu**.
-- [ ] **Étape 3 — implémenter la calotte**, en réutilisant la fusion bathymétrique déjà dans le flux.
-- [ ] **Étape 4 — la dégradation** : **À MESURER** — où placer la bascule pour qu'elle ne se voie pas. **Protocole : comparer deux images à la bascule, exiger un écart de couleur sous le seuil de perception.**
-- [ ] **Étape 5 — mutation** : figer la mer à un plan doit tuer le test de sagitta.
-- [ ] **Étape 6 — REGARDER L'ÉCRAN**, sur une côte franche.
-- [ ] **Étape 7 — LA CLÔTURE DU §0**, puis commit.
+- [x] **Étape 1 — MESURER le coût de la mer riche** à trois distances. ✅ **Table ci-dessous, et elle dit l'inverse de ce qu'on attendait : le coût par pixel NE BAISSE PAS avec la distance, il MONTE.**
+- [x] **Étape 2 — le test qui échoue.** ✅ `test/mer-sphere.test.js`, **44 tests**. ⚠️ **DIX CANDIDATES REJOUÉES CONTRE SEPT LOIS AVANT D'ÊTRE ÉCRITES** (`.banc/rejoue-F.mjs`).
+- [x] **Étape 3 — implémenter la calotte**, bathymétrie fusionnée comprise. ✅ `src/monde/mer-sphere.js` (pur) + `poserMer` / `retirerMer`.
+- [x] **Étape 4 — la dégradation, MESURÉE.** ✅ Bascule **dérivée** de la loi d'échantillonnage, et sa position vérifiée indécelable en ΔE*ab. Voir le bilan.
+- [x] **Étape 5 — mutation.** ✅ **30 posées, 30 tuées**, dans un `git worktree` à part. ⚠️ **DEUX ASSERTIONS ÉTAIENT AVEUGLES, ET C'EST LA CAMPAGNE QUI L'A DIT.**
+- [x] **Étape 6 — REGARDER L'ÉCRAN.** ✅ **Et c'est là que cinq défauts sur six ont été trouvés.**
+- [x] **Étape 7 — LA CLÔTURE DU §0**, puis commit. ✅
+
+> **BILAN DE LA TÂCHE F — 2026-08-21.**
+>
+> **⚠️ L'ÉTAPE 1 DIT L'INVERSE DE CE QU'ON ATTENDAIT.** Banc `.banc/mesure-F.js`,
+> sorties brutes dans `.banc/F1-brut.json`. Mer du socle, nadir en plein océan à
+> l'est de La Réunion, maille 55,888 unités / 256 segments / 66 049 sommets,
+> cible 900², **9 tours × 25 images, 12 jetées, 40 de chauffe**, `uTime` figé,
+> **un seul appel de dessin PROUVÉ**, couverture comptée au magenta :
+>
+> | station | alt. caméra | `uViewCalm` | `uSurfCalm` | couverture | mer riche | témoin | riche − témoin | par Mpx COUVERT |
+> |---|---|---|---|---|---|---|---|---|
+> | 12 unités | 2 093 m | 1,000 | **1,000** | 100,0 % (0,810 Mpx) | 0,0553 ms | 0,0092 | 0,0461 | **0,0569** |
+> | 40 unités | 6 978 m | 1,000 | 0,717 | 78,4 % (0,635 Mpx) | 0,0573 ms | 0,0154 | 0,0419 | **0,0660** |
+> | 90 unités | 15 701 m | 0,605 | **0,080** | 33,7 % (0,273 Mpx) | 0,0471 ms | 0,0205 | 0,0266 | **0,0974** |
+> | **témoin de dérive** *(rejeu de la station 12)* | 2 093 m | 1,000 | 1,000 | 100,0 % | 0,0563 ms | 0,0102 | 0,0461 | 0,0569 |
+>
+> **Dérive : +0,0010 ms sur 0,0553, soit 1,8 %.** p10–p90 sur neuf tours : **≤ 0,001 ms**, un tic du chronomètre GPU.
+>
+> **AJUSTEMENT AFFINE SUR LES TROIS STATIONS : `0,0372 ms/Mpx + 0,0169 ms de FIXE`** (résidus ≤ 0,0014 ms). Le fixe vaut **36 %** du total à 0,81 Mpx et **62 %** à 0,27 Mpx.
+>
+> ⚠️ **LE FAIT, ET IL FONDE TOUTE LA TÂCHE : `uViewCalm` ET `uSurfCalm` MULTIPLIENT LE RÉSULTAT AU LIEU DE SAUTER LE CALCUL.** De 2 093 m à 15 701 m la richesse visible s'éteint (`uSurfCalm` 1,000 → 0,080) pendant que le coût par pixel de mer **monte** de 0,0569 à 0,0974 ms/Mpx — parce que la part fixe s'amortit sur moins de pixels. **Dégrader la mer telle qu'`ocean.js` la dégrade ne fait rien gagner.** D'où la loi de ce module : une richesse qui atteint **exactement zéro**, pour qu'on puisse SAUTER.
+>
+> **LE BAGAGE DE TEXTURES, COMPTÉ.** La mer du socle porte **trois** liens de texture (`uField`, `uCoastMask`, `uSceneTex`) **et une copie de tampon d'image** par appel de dessin. Portée par tuile sur les **986 tuiles** du globe, cela ferait **2 958 liens et 986 copies** — c'est le fait que le Tour 1 de la Tâche C désignait comme le plus utile. **Portée par une calotte UNIQUE : un lien, zéro copie.** ⚠️ **Contrepartie assumée et dite : la RÉFRACTION n'est pas portée** (elle exige la copie de tampon) ; la lame d'eau est simplement transparente, et ce qui se perd est la torsion du fond sous les vagues.
+>
+> **CE QUE LE BANC A RENDU DE FAUX AVANT DE RENDRE CETTE TABLE — SIX FOIS.** ① couverture 1,0 aux trois distances, `scene.background` peint par-dessus l'effacement ; ② couverture 1,0 de nouveau, cette fois sur un tampon **jamais effacé** (noir) ; ③ **0,8868 ms à 480² contre 0,1413 à 900²** — la compilation du nuanceur prise DANS le chronomètre ; ④ un « ms/Mpx : NaN » — un tour entier rejeté (`GPU_DISJOINT`) ; ⑤ deux couvertures différentes aux mêmes distances, le DAMIER ayant posé des cases entre-temps ; ⑥ un désaccord jamais expliqué entre le banc et sa réplication à la main, **clos par un compteur d'APPELS DE DESSIN qui refuse tout relevé où un objet étranger entre dans le cadre**. ⚠️ **Aucune de ces six n'aurait été vue sans témoin.**
+>
+> ---
+>
+> **OÙ EST LA BASCULE, ET COMMENT JE PROUVE QU'ELLE NE SE VOIT PAS.**
+>
+> **Elle est DÉRIVÉE, pas choisie** : `d = λ · hauteurPx / (2 · parDetail · tan(fov/2))`, avec `parDetail = 2`, **la borne de Nyquist** — en dessous, un détail n'est plus représenté mais REPLIÉ. Pour la calotte livrée (portée 12, pas 256, λ = 688 m, 414 px, fov 33°) elle vaut **3,77 unités de scène, soit 240 km**, bande **[1,89 ; 7,55] unités = [120 ; 481] km**. ⚠️ **Le socle naît à 32 274 m et meurt à 40 343 m : toute sa plage de vie est du côté RICHE, avec un facteur trois de marge.** La dégradation ne s'engage donc qu'en vue orbitale — exactement là où « dégradée avec la distance » doit s'engager.
+>
+> **LA PREUVE — et le protocole du plan a dû être RAFFINÉ, ce qui est dit.** Le plan demande « comparer deux images à la bascule et exiger un écart de couleur sous le seuil de perception ». Comparer la mer riche à la mer dégradée dit ce que la dégradation ENLÈVE ; **cela ne dit pas si la BASCULE se voit.** La bascule se voit si l'on peut la SITUER — donc si la DÉPLACER change l'image. On rend donc deux images au même cadrage et au même instant, l'une avec la bande à `B`, l'autre à `2B` (`.banc/pose-F.js`, `deplacement()`, sorties brutes dans `.banc/F4-brut.json`) :
+>
+> | altitude caméra | cadre | ΔE*ab moyen en déplaçant la bascule d'une OCTAVE | p99 | *(borne : la même image contre la mer entièrement riche)* |
+> |---|---|---|---|---|
+> | 6,4 km | 3,8 km | **0** | **0** | 0 / 0 |
+> | 12,7 km | 7,5 km | **0,102** | 3,19 | 0,105 / 3,43 |
+> | 25,5 km | 15,1 km | **0,957** | 34,7 | 0,968 / 35,1 |
+> | 51 km | 30,2 km | 4,41 | 69,5 | 4,42 / 69,7 |
+> | 102 km | 60 km | **2,35** | 58,5 | 2,36 / 58,6 |
+> | 204 km | 121 km | **1,31** | 42,4 | 1,31 / 42,4 |
+>
+> **Seuil déclaré : ΔE\*ab = 2,3, la juste différence perceptible de CIE76** — calculé en L\*a\*b\*, pas en RGB, parce qu'un écart de deux unités RGB ne se voit pas dans les ombres et se voit dans les clairs. ⚠️ **C'est la réponse au grief R-4 de la Tâche E** (« un écart moyen n'est pas un critère perceptif »).
+>
+> ⚠️ **TÉMOIN : deux prises au réglage inchangé rendent EXACTEMENT ZÉRO sur 102 400 pixels.** Tout écart non nul est donc l'effet.
+>
+> **CE QUE LA TABLE AUTORISE À DIRE, ET RIEN DE PLUS :** sur la MOYENNE, déplacer la bascule d'une octave entière reste sous la juste différence perceptible **jusqu'à 25,5 km** (0,957) et à la limite à **204 km** (1,31) ; elle la dépasse à 51 km (4,41). **Sur toute la plage de vie du socle (≤ 40 km), la position de la bascule est indécelable.**
+>
+> ⚠️ **ET CE QUE LA TABLE NE PERMET PAS DE DIRE : le p99 ne descend JAMAIS sous le seuil.** Il vaut 34 à 70 unités. **Ce n'est pas la transition** — la colonne de droite montre la MÊME valeur pour la borne totale — c'est la dégradation elle-même, concentrée sur 1 % des pixels : les crêtes d'écume, qui **crénellent** parce que `gl.getContextAttributes().antialias` vaut `false` sur ce contexte (mesuré par la Tâche B). **Un critère sur le p99 n'est pas atteignable avec ce rendu, et je le dis plutôt que de choisir la statistique qui passe.**
+>
+> ---
+>
+> **CE QUE J'AI VU À L'ÉCRAN, CÔTE À CÔTE AVEC L'ANCIEN SOCLE.** ⚠️ **L'onglet ne COMPOSE pas** (page pilotée en arrière-plan) : aucune capture n'est possible et `requestAnimationFrame` ne se déclenche jamais. Les images sont donc des rendus EXPLICITES hors écran, sortis par un petit récepteur HTTP (`.banc/recois-images.mjs`), et elles sont sur le disque (`.banc/vues/`). **Ce n'est pas « la capture de l'application », et il fallait l'écrire.**
+>
+> - **`W-socle-bloc.jpg` — LE SOCLE, la référence.** Aquarelle riche ; et sa mer est **presque NOIRE au large avec une frange TURQUOISE étroite au littoral**. ⚠️ **Cette frange n'est PAS la lame d'eau : c'est le FOND MARIN, vu au travers.** C'est ce constat qui a fait porter la rampe nautique (voir plus bas).
+> - **`N-mer-seule-large.jpg` — LA CALOTTE SEULE, au bloc.** Océan navy, **anneau d'écume blanc qui suit tout le littoral de La Réunion**, île découpée au trait. **C'est le résultat visuel le plus net de la tâche** : le globe n'avait aucune écume, aucun ressac, aucun trait d'eau.
+> - **`L-champ-large.jpg` — LE CHAMP, en fausses couleurs.** La forme exacte de l'île, le liseré jaune du zéro, et **le plateau puis la fosse en dégradé de bleu**. **La bathymétrie fusionnée est là, et elle se voit.** Le globe seul (`hauteurSurface`) lit **zéro** partout où le terrarium n'a pas de fond marin, et la mer y serait d'un bleu uniforme de bord à bord.
+> - **`AA-crop-mer.jpg` — le crop avec sa mer.** Dégradé de profondeur correct, pâle au littoral, bleu au large, contre une terre olive à courbes de niveau.
+>
+> ⚠️ **ET IL FAUT LE DIRE FRANCHEMENT : ÇA NE RESSEMBLE PAS ENCORE AU SOCLE.** La frange côtière de la calotte reste **nettement plus large et plus pâle** que celle du socle, et **aux altitudes du socle la houle et l'écume ne se lisent pas** — c'est la même chose que dit la première ligne de la table de la bascule (ΔE = 0 à 6,4 km). Ce qui manque n'est pas identifié avec certitude ; ce que je peux affirmer, c'est que **la loi de couleur, elle, est juste** : forcée à rouge/bleu (`X-peu-rouge-fond-bleu.jpg`), la mer prend bien la couleur PROFONDE là où le champ dit profond.
+>
+> ---
+>
+> **LES SIX DÉFAUTS TROUVÉS EN CHEMIN — CINQ SUR SIX À L'ŒIL, PAS AU RAISONNEMENT.**
+>
+> 1. ⚠️ **LE CHANFREIN DE DISTANCE AU RIVAGE D'`ocean.js` EST INCOMPLET, ET SON ERREUR VAUT +41,4 %.** Son demi-masque ne lit que TROIS voisins par passe au lieu de quatre : les anti-diagonales manquent. Mesuré sur une grille 65² à une seule cellule de terre : **(+8, 0) → 0,0 % · (+8, +8) → −0,02 % · (+8, −8) → +41,42 %**. Ce champ pilote la houle de côte, les bandes d'écume et le ressac : **la frange de ressac du socle meurt 41 % trop tôt sur deux orientations de côte sur quatre.** Personne ne l'avait vu parce que rien ne comparait ce champ à une référence indépendante. ⚠️ **NON CORRIGÉ dans `ocean.js`** (le socle est en production, le damier hors périmètre) : la fonction est ÉLARGIE d'une option `completes`, le défaut par défaut est celui du dépôt **au bit près** (⑤e le prouve case par case), et la calotte prend le juste.
+> 2. ⚠️ **`empriseCalotte` RENDAIT UN PÔLE.** À grande portée, `latLonDeLocal` passe par `sinh(π · 36,5)` qui déborde en `Infinity` : `atan` rendait **exactement 90°**, donc `tuileY(90) = ∞` dans `remplirHauteurs`. Écrêté à la couverture de Mercator.
+> 3. ⚠️ **LE SPECTRE DE HOULE N'ÉTAIT PAS POSÉ, ET LA MER ÉTAIT UN MIROIR.** `GERSTNER_GLSL` déclare `uWaveA[16]` / `uWaveB[16]` et **saute tout train d'amplitude nulle**. Sans `seaStateToUniforms`, `disp` et `nAcc` valent zéro. **Le relevé rendait ZÉRO pixel de différence entre la mer riche et la mer dégradée, à toutes les distances** — et c'est ce zéro trop propre qui l'a dénoncé.
+> 4. ⚠️ **QUATRE CONSTANTES DU SOCLE, RECOPIÉES, AURAIENT ÉTÉ RUINEUSES**, et chacune porte le chiffre de sa faute :
+>
+>    | constante | valeur du socle | recopiée telle quelle | convertie |
+>    |---|---|---|---|
+>    | epsilon de coplanarité | 0,003 unité | **68,3 m de marée** | **0,26 m** |
+>    | budget de profondeur | 2,2 unités | *(la profondeur RÉELLE : 4 310 m, glacis de lagon jusqu'à 646 m)* | **192 m** |
+>    | seuil du trait d'eau | 0,02 unité | **455 m d'eau semi-transparente** | **1,75 m** |
+>    | échelle de houle | 0,42 unité/m de spectre | *(le pas de maille : houles de 8 à 16 km)* | **102,7 m/m, houle de 1,23 km** |
+>
+>    ⚠️ **ET LA QUATRIÈME EST HORIZONTALE, DONC PAS DIVISÉE PAR L'EXAGÉRATION** — à la différence des trois autres, qui sont des hauteurs. Le test ⑨c garde cette distinction.
+> 5. ⚠️ **L'ÉCUME N'AVAIT NI TAVELURE NI FACTEUR D'ÉCHELLE**, les deux que porte `ocean.js` : la côte vue de 7,6 km était **une masse BLANCHE trouée de bleu** (`M-mer-seule-cote.jpg`). Les deux sont remis.
+> 6. ⚠️ **LA RAMPE NAUTIQUE DU FOND — LA PIÈCE QUE LA TÂCHE D AVAIT NOMMÉE SANS LA PRENDRE.** Son bilan écrit : « le socle peint la mer par une rampe nautique à TROIS couleurs (`uOceanShallow/Mid/Deep`) […] la réconcilier suppose de toucher à la mer, c'est-à-dire la Tâche F ». **Elle est portée** : `terrain.js:1019-1023` transcrit au bit près — exposant 0,55, coude à 0,45, les trois mêmes couleurs — derrière `uMerRampeOn`, à **zéro par défaut**. ⚠️ **Et son budget n'est PAS `uOceanDepth`** : celui-ci vaut encore 6 000 m (la valeur mondiale) tant que `poserRampe` est refusée faute de couverture ; le budget vient du champ de la calotte, où il est **mesuré à 4 310 m**.
+>
+> ---
+>
+> **LA CAMPAGNE DE MUTATION : 30 POSÉES, 30 TUÉES**, `.banc/mutations-F.mjs`, **dans un `git worktree` à part** (`../wt-mutF-mer`, retiré en partant), remise vérifiée par empreinte SHA-256 avant chaque suivante. **Chacune change un COMPORTEMENT et nomme l'assertion qu'elle doit tuer**, et le banc SIGNALE quand ce n'est pas celle-là qui rougit.
+>
+> ⚠️ **ET C'EST CE SIGNAL QUI A TROUVÉ DEUX ASSERTIONS AVEUGLES.**
+> - **③c** (« la mer du crop et celle du large sont la même surface ») comparait le coin du crop à `u = 1` **exactement** — l'endroit où la loi `CHORDE` (la calotte dans le crop, un plan dehors) coïncide avec la cible. M5 passait. C'est le piège que la Tâche A avait su retourner (écart NUL à 45° entre la superellipse et son octogone) et que la Tâche E a repayé (①b posé pile à `f = ±1`). **L'assertion regarde maintenant AU-DELÀ du crop** et exige que la mer continue de descendre, quadratiquement.
+> - **③d** (« le repère de la calotte est celui des parois ») comparait deux appelants de **la même fonction** : M6, qui échange EST et SUD dans `repereLocalCrop`, les faisait mentir ENSEMBLE. **L'assertion recalcule maintenant la base à la main**, depuis la seule latitude du centre, et vérifie qu'elle est DIRECTE.
+>
+> **LES TESTS.** **44 tests** (`test/mer-sphere.test.js`). ⚠️ **DIX CANDIDATES REJOUÉES CONTRE SEPT LOIS AVANT D'ÊTRE ÉCRITES** (`.banc/rejoue-F.mjs`, laissé sur le disque) : le dépôt (`PLAN`), `NAIVE` (la flèche en `1 − cos`), `CHORDE`, `PLANCHER` (la loi que `ocean.js` applique aujourd'hui), `DURE`, `TOT`, et la cible. **Dix sur dix distinguent au moins une loi** — ⚠️ **et F7 n'en distinguait AUCUNE au premier rejeu** (`0,08 + 0,92 · 1` vaut exactement 1 en double) : c'est la loi `TOT` qui a été AJOUTÉE pour lui donner prise, pas l'assertion qui a été affaiblie.
+>
+> ⚠️ **`poserMer` ET `retirerMer` SONT EXERCÉES, PAS GREPÉES** (`Globe.prototype.X.call` sur un objet minimal — le patron de la Tâche B). C'est le grief C-2 pris d'avance, **et il y avait bien un défaut à trouver** : `uMerRampeOn`, `uMerFondBudgetM` et les trois couleurs du fond sont des uniformes **PARTAGÉS par toutes les tuiles** — les laisser allumés après `retirerMer` repeindrait **tous les océans du monde** avec le budget d'un crop. C'est exactement le défaut C-3 de la Tâche C ; il est gardé par ⑩a et par les mutations M23 et M24.
+>
+> **LA CLÔTURE.** `npm test` **3 555** (3 511 + 44) · `audit:tests` 199/199 · `node --check` sur les quatre fichiers · `nettoie:dist` + `build:mapcells` + `vite build` + `verifie:dist` → « dist est complet ». **Page rechargée avant le commit** : les cinq drapeaux éteints, `uCropOn = 0`, `uHabOn = 0`, `uMerRampeOn = 0`, `uMerFondBudgetM = 6000`, `uLandMax = 5600` — **la production est intouchée**, et aucune erreur nouvelle en console (seuls les 404 et le `ERR_CONNECTION_TIMED_OUT` du bucket AWS, déjà connus).
+>
+> **CE QUE JE N'AI PAS PU VÉRIFIER.**
+> - ⚠️ **LA CALOTTE N'EST PAS BRANCHÉE EN PRODUCTION**, exactement comme A, B, C, D et E : `poserMer` n'est appelé par personne dans `src/`. Tout ce qui précède vient de la console (`.banc/pose-F.js`).
+> - ⚠️ **LA FRANGE CÔTIÈRE RESTE PLUS LARGE ET PLUS PÂLE QUE CELLE DU SOCLE, ET JE N'AI PAS ÉTABLI POURQUOI.** Le champ est juste (`L-champ-large.jpg`), la loi de couleur est juste (`X-peu-rouge-fond-bleu.jpg`), le budget est converti — et pourtant l'image ne rejoint pas celle du socle. **C'est la réserve principale de cette tâche.**
+> - ⚠️ **AUX ALTITUDES DU SOCLE, LA HOULE ET L'ÉCUME NE SE LISENT PAS** : ΔE = 0 à 6,4 km, 0,10 à 12,7 km. La mer y est une nappe de couleur. **La richesse ne commence à se voir qu'au-dessus de ~25 km**, c'est-à-dire au seuil de naissance du socle, pas en dessous.
+> - **LA RÉFRACTION N'EST PAS PORTÉE** (elle exige une copie de tampon d'image par appel de dessin).
+> - **LE COÛT DE LA CALOTTE ELLE-MÊME N'A PAS ÉTÉ MESURÉ** au protocole de l'Étape 1. La table mesure la mer DU SOCLE ; la calotte a une autre géométrie (66 049 sommets à pas 256, un appel de dessin, un lien de texture) et son coût par image reste à relever.
+> - **LE CHAMP EST À UN SEUL ZOOM.** `remplirHauteurs` ne remplit que les nœuds couverts par une tuile dont les hauteurs vivent encore : demandé à z12 sur une calotte de 164 km, la couverture tombe à **0,193** ; à z10 elle atteint **1,0** pour 25 tuiles. **Une calotte fine près du crop et grossière au loin reste à faire** — c'est elle qui rendrait la houle lisible aux basses altitudes.
+> - **UN SEUL CROP, UNE SEULE MACHINE.** La Réunion, RTX 3080.
 
 ### Tâche G — L'ESTOMPAGE DE LA TERRE AUTOUR (décision 3)
 
@@ -536,6 +640,8 @@ Retirer `monde/fenetre-bornee.js`, le chemin « bloc » de `terrain.js`, et les 
 
 **A** (la découpe) → **B** (les parois) → **C** (l'habillage) → **D** (la rampe) → **E** (l'exagération) → **F** (la mer) → **G** (l'estompage) → **H** (la dépose).
 
+**A, B, C, D, E et F sont faites.** ⚠️ **Et le §9 avait raison sur un point que la Tâche F confirme** : ce plan devait RETIRER du code, et il en ajoute encore — `monde/fenetre-bornee.js` (818 lignes) et le chemin « bloc » de `terrain.js` attendent toujours la Tâche H.
+
 ⚠️ **C avant D** : la rampe est un poste de l'habillage, mais elle a sa tâche parce qu'elle porte une décision produit. ⚠️ **F après C** : la mer réutilise le nuanceur unifié. ⚠️ **H en dernier, toujours.**
 
 ---
@@ -558,6 +664,12 @@ Retirer `monde/fenetre-bornee.js`, le chemin « bloc » de `terrain.js`, et les 
 - **LE GLOBE ET LE SOCLE N'ONT NI LA MÊME TABLE DE COULEURS NI LA MÊME LOI DE RAMPE** (Tâche D, mesuré) — `uRamp` fait 512 × 1 et réserve 35 % à la mer ; `uRampTex` fait 512 × **64** (2ᵉ axe d'humidité) et est **entièrement terre**, la mer étant peinte par une rampe nautique à trois couleurs. Et la loi diffère : `0,35 + 0,65 · u` contre `0,5 + (hNorm − 0,65) · 2,5`. **Porter le pivot et le contraste suppose de rééchelonner le contraste avec l'amplitude du crop (2,5 → 1,38 ici) ET de changer de table — donc de toucher à la mer, c'est-à-dire la Tâche F.** C'est une décision produit, pas un portage : à trancher, avec les chiffres du bilan de D.
 - **LA RAMPE LOCALE REND LE CROP PLUS SOMBRE, PAS PLUS CLAIR** (Tâche D, à l'écran) — sur la table du globe, occuper 100 % du segment terre pousse les moyennes altitudes de La Réunion du sable (`t = 0,513`) au brun rouge (`t = 0,847`), et place une « ligne de neige » vers 2 090 m sur une île tropicale. C'est la contrepartie de « couleurs stables et reproductibles », et elle se voit.
 - **LA TERRE AUTOUR DU CROP N'EST PAS DESSINÉE DU TOUT** (Tâche D, vérifié à `y = 900`) — la Tâche A `discard` tout ce qui est hors du crop, donc « les alentours la suivent » n'a rien à montrer aujourd'hui. La propriété est tenue par construction (uniformes partagés, un seul calcul de `t`) mais **ne deviendra visible qu'avec la Tâche G**.
+- **LE CHANFREIN DE DISTANCE AU RIVAGE DU SOCLE EST INCOMPLET, ET SON ERREUR VAUT +41,4 %** (Tâche F, mesuré) — `ocean.js` (`_bakeField`) ne lit que TROIS voisins par passe au lieu de quatre : les anti-diagonales manquent. Sur une grille 65² à une seule cellule de terre, la direction (+8, −8) rend **16,00 au lieu de 11,31**, soit `√2 − 1` d'erreur, tandis que (+8, 0) et (+8, +8) sont exacts. Ce champ pilote la houle de côte, les bandes d'écume et le ressac : **la frange de ressac meurt 41 % trop tôt sur deux orientations de côte sur quatre.** ⚠️ **NON CORRIGÉ, DÉLIBÉRÉMENT** — le socle est en production et le damier hors périmètre. `distanceRivage` a été ÉLARGIE d'une option `completes` ; le défaut par défaut reproduit le dépôt **au bit près**, et c'est la calotte qui prend le juste. **Un mot d'Adrien suffit à basculer le socle dessus** ; la ligne à changer est unique.
+- **LA FRANGE CÔTIÈRE DE LA CALOTTE RESTE PLUS LARGE ET PLUS PÂLE QUE CELLE DU SOCLE** (Tâche F, à l'écran) — le champ est juste, la loi de couleur est juste (forcée à rouge/bleu elle prend bien la teinte PROFONDE là où le champ dit profond), le budget est converti — **et pourtant l'image ne rejoint pas celle du socle**. C'est la réserve principale de la Tâche F, et sa cause n'est pas établie.
+- **AUX ALTITUDES DU SOCLE, LA HOULE ET L'ÉCUME DE LA CALOTTE NE SE LISENT PAS** (Tâche F, mesuré) — écart de couleur **ΔE = 0 à 6,4 km** et **0,10 à 12,7 km** entre la mer riche et la mer plate. Le socle naît à 32 km : la richesse ne commence à se voir qu'au-dessus de ~25 km. ⚠️ **La sortie est nommée et non faite : une calotte à maille GRADUÉE**, fine près du crop et grossière au loin. Aujourd'hui la maille est uniforme (688 m à portée 12), et le champ est rempli à un SEUL zoom — z12 sur 164 km ne couvre que **19,3 %** des nœuds, z10 en couvre **100 %** pour 25 tuiles.
+- **LE COÛT DE LA CALOTTE ELLE-MÊME N'EST PAS MESURÉ** (Tâche F) — la table de l'Étape 1 mesure la mer DU SOCLE (`0,0372 ms/Mpx + 0,0169 ms de fixe`, part fixe de 36 % à 0,81 Mpx). La calotte a une autre géométrie (66 049 sommets, **un** appel de dessin, **un** lien de texture contre trois, **zéro** copie de tampon contre une) : son coût par image reste à relever au même protocole.
+- **LA RÉFRACTION N'EST PAS PORTÉE SUR LA CALOTTE** (Tâche F) — elle exige `copyFramebufferToTexture` à chaque dessin. La lame d'eau est simplement transparente : le fond se lit à travers, mais **sans la torsion de Snell sous les vagues**.
+- **LES QUATRE CONSTANTES DU SOCLE QUE LA MER A DÛ CONVERTIR** (Tâche F) sont maintenant nommées et testées, mais **elles disent aussi que le socle et le globe n'ont toujours pas d'unité commune** : epsilon de coplanarité (0,003 unité → 68,3 m si recopié), budget de profondeur (2,2 → 4 310 m si pris sur le réel), seuil du trait d'eau (0,02 → **455 m d'eau semi-transparente** si recopié), échelle de houle (0,42, **horizontale donc non divisée par l'exagération**). ⚠️ **Une cinquième dort encore dans `ocean.js` : `SHORE_SURF_GLSL` porte `1.0 / 384.0` EN DUR** pour son pas de gradient, alors que `resChamp` rend 1 152 sur une emprise 3×3 — **le pas de la houle de côte y est trois fois trop grand.** Hors périmètre (c'est le damier), non corrigé, écrit ici pour qu'on puisse le retrouver.
 - **LE COÛT DE L'EXAGÉRATION DU GLOBE** (Tâche E) — **12 à 21 s de rechargement réseau à chaque cran**, parce que le relief est cuit dans les sommets. Tant qu'il n'est pas déplacé dans le nuanceur de sommets, `?exag=continu` ne peut pas devenir le défaut, et la courbe reste échantillonnée aux crans au lieu de glisser.
 
 ---

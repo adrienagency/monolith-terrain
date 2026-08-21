@@ -30,6 +30,12 @@ import { plansEauRetenus } from './plan-eau.js'
 // LE CHAMP SUIT LE RELIEF — règles pures et testées, voir src/mer-emprise.js
 // pour la mesure d'avant/après et le pourquoi de chaque choix.
 import { resChamp, spanChamp } from './mer-emprise.js'
+// LA DISTANCE AU RIVAGE — une seule loi, deux lecteurs (voir _bakeField).
+// ⚠️ AUCUN CYCLE : `monde/mer-sphere.js` est PUR (ni three ni DOM) et n'importe
+// que `crop-sphere`, `parois-crop` et `habillage-crop`, dont aucun ne remonte
+// jusqu'ici. Vérifié : `grep -rn "from '.*ocean" src/monde/` ne rend RIEN (le nom
+// du fichier n'y apparaît que dans des commentaires).
+import { distanceRivage } from './monde/mer-sphere.js'
 // L'emprise du DAMIER — même machinerie, autre cause : ici la mer s'étend parce
 // que des cases voisines sont posées, pas parce que le relief défile.
 import { empriseDeMer, coteGeometrique, geometrieDeMer } from './damier-carre.js'
@@ -78,7 +84,10 @@ const _v2 = new THREE.Vector2()
 // croisent », sans aucune interaction avec les terres.
 // Renvoie vec3(dy, pente·x, pente·z) ; crestS ressort pour le déferlement.
 
-const SHORE_SURF_GLSL = /* glsl */ `
+// ⚠️ EXPORTÉ DEPUIS LA TÂCHE F : la calotte du globe emploie CE morceau, elle
+// n'en écrit pas un second. C'est la même règle que `GERSTNER_GLSL`, réexporté
+// juste en dessous — une seule mer, deux surfaces.
+export const SHORE_SURF_GLSL = /* glsl */ `
 vec3 shoreSurf(vec2 uvF, sampler2D field, float t, float waveH, float chop, float speedMul, float lenScale, float viewCalm, out float crestS) {
   float dShore = texture2D(field, uvF).g; // 0..1 sur ~15 unités monde
   // bande de ressac : morte à la ligne d'eau, éteinte au large
@@ -103,6 +112,24 @@ vec3 shoreSurf(vec2 uvF, sampler2D field, float t, float waveH, float chop, floa
 `
 
 // choppiness → the shading knobs the old Beaufort scale used to derive
+// ⚠️ RÉEXPORTÉ POUR LA TÂCHE F. `src/globe.js` ne peut pas importer
+// `ocean-waves` : c'est un ALIAS de Vite, que node ne résout pas, et
+// `test/crop-rampe.test.js` charge `Globe` sous node. Il passe donc par une
+// importation DYNAMIQUE de ce fichier, qui lui sert le morceau partagé.
+// ⚠️ ET LES DEUX FABRIQUES DE SPECTRE AVEC LUI, ET C'EST UNE MESURE QUI L'A
+// EXIGÉ : `GERSTNER_GLSL` déclare `uniform vec4 uWaveA[16]` / `uWaveB[16]` et
+// ne fait RIEN quand ils valent zéro (`if (a < 1e-7) continue`). La première
+// mer sphérique était donc une nappe rigoureusement PLATE, et rien ne le
+// signalait — même couleur, même normale, zéro pixel de différence entre la mer
+// riche et la mer dégradée. Le morceau de nuanceur ne se porte pas sans son
+// spectre.
+export { GERSTNER_GLSL, makeSeaState, seaStateToUniforms }
+
+// ⚠️ EXPORTÉE POUR LA TÂCHE F : la calotte du globe prend les MÊMES deux
+// couleurs d'eau que le socle. Deux dérivations jumelles auraient fini par
+// donner deux bleus différents pour la même mer.
+export { waterColors as couleursEau }
+
 function chopLook(c) {
   return { detail: 0.25 + 0.5 * c, foam: 1.9 * c * c, gloss: 240 - 130 * c } // quadratique : mer d'huile 0, agite genereux
 }
@@ -996,24 +1023,16 @@ export class RealWater {
       }
     }
     // two-pass chamfer distance to the nearest land cell, in world units
+    // ⚠️ LA BOUCLE N'EST PLUS ICI, ET C'EST LA TÂCHE F QUI L'A DÉPLACÉE — voir
+    // `distanceRivage` dans src/monde/mer-sphere.js. Motif : la mer de la
+    // Tâche F, sur la sphère, a besoin de la MÊME frange de ressac que celle du
+    // socle. Deux écritures jumelles de la même distance auraient fini par
+    // diverger, et le lecteur n'aurait vu la divergence qu'à l'écran, sur la
+    // frange de ressac d'une côte — c'est-à-dire trop tard. Une seule loi, deux
+    // lecteurs. Le corps est déplacé À L'IDENTIQUE, et test/mer-sphere.test.js
+    // le rejoue contre la version d'origine EXTRAITE de `git show`, au bit près.
     const cell = span / (n - 1)
-    const INF = 1e9
-    const dist = new Float32Array(n * n)
-    for (let k = 0; k < n * n; k++) dist[k] = water[k] ? INF : 0
-    for (let j = 0; j < n; j++)
-      for (let i = 0; i < n; i++) {
-        const k = j * n + i
-        if (i > 0) dist[k] = Math.min(dist[k], dist[k - 1] + cell)
-        if (j > 0) dist[k] = Math.min(dist[k], dist[k - n] + cell)
-        if (i > 0 && j > 0) dist[k] = Math.min(dist[k], dist[k - n - 1] + cell * 1.414)
-      }
-    for (let j = n - 1; j >= 0; j--)
-      for (let i = n - 1; i >= 0; i--) {
-        const k = j * n + i
-        if (i < n - 1) dist[k] = Math.min(dist[k], dist[k + 1] + cell)
-        if (j < n - 1) dist[k] = Math.min(dist[k], dist[k + n] + cell)
-        if (i < n - 1 && j < n - 1) dist[k] = Math.min(dist[k], dist[k + n + 1] + cell * 1.414)
-      }
+    const dist = distanceRivage(water, n, cell)
     // half float: linear filtering is core WebGL2 (full float linear is an
     // optional extension); the ±20-unit height range fits half precision fine
     // v41: declin cotier x6 (Adrien) - le halo peint qui interdisait un grand
