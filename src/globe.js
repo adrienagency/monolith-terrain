@@ -22,7 +22,7 @@ import { repereCrop, coinNormalise, zoomCropPrescrit, mercX, mercY } from './mon
 // LES PAROIS ET LA BASE — Tâche B. Pur lui aussi : il ne rend que des nombres,
 // c'est ce fichier-ci qui en fait une géométrie three.
 import { construireSolideCrop } from './monde/parois-crop.js'
-import { margeCoteDuCrop, intervalleCourbes } from './monde/habillage-crop.js'
+import { margeCoteDuCrop, intervalleCourbes, HABILLAGE_MONDE } from './monde/habillage-crop.js'
 import {
   RAMPE_MONDE,
   PAS_MESURE,
@@ -1103,8 +1103,14 @@ export class Globe {
       uSunDir: { value: new THREE.Vector3(0.5, 0.6, 0.5).normalize() },
       uShadowColor: { value: new THREE.Color(params.bgColorA ?? '#dfe3ea') },
       uInk: { value: new THREE.Color(params.contourColor ?? '#000000') },
-      uContourInterval: { value: 500 },
-      uContourOpacity: { value: 0.55 },
+      // ⚠️ **CES DEUX-LÀ VIENNENT DE `HABILLAGE_MONDE`, ET C'EST UN CORRECTIF DU
+      // TOUR 1.** Ils sont PARTAGÉS et le bloc des courbes les lit **SANS
+      // GARDE** : `uHabOn` à 0 ne les neutralise pas. `poserHabillage` les
+      // écrasait et `retirerHabillage` ne les rendait pas — la planète entière
+      // gardait l'intervalle du crop. Une seule écriture, lue par le
+      // constructeur ET par `retirerHabillage`.
+      uContourInterval: { value: HABILLAGE_MONDE.contourIntervalM },
+      uContourOpacity: { value: HABILLAGE_MONDE.contourOpacite },
       uGraticuleOpacity: { value: 0.16 },
       // LA RAMPE — Tâche D, « la rampe se calcule sur le crop ». ⚠️ **LES QUATRE
       // VALEURS VIENNENT DE `RAMPE_MONDE`, PAS DE QUATRE LITTÉRAUX** : `5600` et
@@ -1151,17 +1157,17 @@ export class Globe {
       uHabOn: { value: 0 },
       uCoastMask: { value: null },
       uCoastMaskOn: { value: 0 },
-      uMargeCoteM: { value: 0 },
+      uMargeCoteM: { value: HABILLAGE_MONDE.margeCoteM },
       uSol: { value: null },
       uSolLut: { value: null },
       uSolOn: { value: 0 },
-      uSolOpacite: { value: 1 },
+      uSolOpacite: { value: HABILLAGE_MONDE.solOpacite },
       uSolOffset: { value: new THREE.Vector2(0, 0) },
       uSolScale: { value: new THREE.Vector2(1, 1) },
       uSolTexel: { value: new THREE.Vector2(1 / 2048, 1 / 2048) },
-      uGrainForceM: { value: 0 },
-      uGrainEchelle: { value: 96 },
-      uContourWeight: { value: 0.7 },
+      uGrainForceM: { value: HABILLAGE_MONDE.grainForceM },
+      uGrainEchelle: { value: HABILLAGE_MONDE.grainEchelle },
+      uContourWeight: { value: HABILLAGE_MONDE.contourPoids },
     }
     this.rebuildRamp(params)
 
@@ -1298,15 +1304,72 @@ export class Globe {
   // aérienne, les caustiques de fond, la photo aérienne, les lumières de nuit,
   // l'ombre des nuages, les effets de surface et le balayage restent au socle.
   //
-  // ⚠️ **ET LE COÛT DE CE QU'ON NE PORTE PAS EST MESURÉ** (RTX 3080, cible
-  // 900×900 hors écran, boucle rAF gelée, 4 tours × 20 images, couverture 1,0) :
-  // le nuanceur COMPLET du socle coûte **3,566 ms** contre **1,997 ms** pour le
-  // même PBR sans une ligne d'habillage — soit **1,569 ms pour 0,81 Mpx**, quand
-  // le nuanceur ENTIER du globe en coûte **0,112**. Porter tout l'habillage,
-  // c'était multiplier le coût par pixel du globe par **quatorze**.
+  // ⚠️ **ET LE COÛT DE CE QU'ON NE PORTE PAS EST MESURÉ — TABLE CORRIGÉE AU
+  // TOUR 1, DANS UNE SEULE MONNAIE.**
+  //
+  // ⚠️ **LA PREMIÈRE VERSION DE CE PAVÉ ANNONÇAIT « QUATORZE », ET CE CHIFFRE
+  // NE TIENT PAS.** Il comparait la pente du socle à un « nuanceur du globe »
+  // relevé sur un TOUT AUTRE cadrage — et deux « coût du globe » cohabitaient
+  // au même 900² sans être réconciliés, d'un facteur 3,9. Une relecture
+  // indépendante l'a vu. Tout est refait sur un seul banc
+  // (`.banc/mesure-C5.js`), une seule préparation de scène, un seul protocole
+  // écrit dans `PROTOCOLE`, et les sorties brutes sont sur le disque
+  // (`.banc/C5-brut.json`, `.banc/C5-postes-brut.json`).
+  //
+  // **Protocole : RTX 3080 · cibles 480² et 900² hors écran · 5 tours de 25
+  // images, 12 jetées · boucle rAF GELÉE · `autoClear` FORCÉ · atmosphère,
+  // calottes et nuages MASQUÉS des deux côtés · fond de scène retiré ·
+  // couverture PROUVÉE à 1,0.**
+  //
+  // **MONNAIE UNIQUE — ms par mégapixel de FRAGMENT** (pente entre les deux
+  // tailles, témoin au nuanceur constant déduit sur la MÊME géométrie) :
+  //
+  //     habillage COMPLET du socle ........ 0,527 ms/Mpx
+  //     nuanceur ENTIER du globe .......... 0,277 ms/Mpx
+  //     les quatre postes de cette tâche .. 0,094 ms/Mpx
+  //
+  // Soit : porter tout l'habillage aurait coûté **1,9 fois le nuanceur entier du
+  // globe** — pas quatorze. Les quatre postes retenus en coûtent **0,34 fois**,
+  // c'est-à-dire **+34 %**, et **5,6 fois moins que le portage complet**.
+  //
+  // ⚠️ **ET LE COÛT DU SOCLE EST SURTOUT FIXE, PAS PAR PIXEL.** À 0,81 Mpx
+  // l'habillage complet coûte **1,087 ms** dont seulement 0,427 varie avec la
+  // surface : **0,660 ms sont fixes** — les douze liens de texture et les
+  // uniformes, payés une fois par appel de dessin. Les quatre postes, eux,
+  // coûtent 0,091 ms dont **0,015 seulement** de fixe.
+  //
+  // ⚠️ **ET LE TÉMOIN DU SOCLE REND UNE PENTE NÉGATIVE** (−0,035 ms/Mpx) : un
+  // nuanceur à couleur constante sur 1,18 million de triangles coûte le même
+  // temps à 480² et à 900². **Le plancher du socle est lié au SOMMET, pas au
+  // pixel** — c'est un fait, pas du bruit qu'on écarte.
   //
   // ⚠️ **CETTE MÉTHODE EST LE SEUL INTERRUPTEUR.** Tant que personne ne
   // l'appelle, `uHabOn` vaut 0 et le globe est celui d'avant, au bit près.
+
+  // ⚠️ **LE COÛT POSTE PAR POSTE, AU MÊME PROTOCOLE** (cible 900², donc 0,81 Mpx,
+  // sur le crop de La Réunion, 172 tuiles z13 ; `.banc/C5-postes-brut.json`) :
+  //
+  //     globe SANS habillage .................. 0,4157 ms
+  //     + courbes calées sur le local ......... 0,4291   (+0,0134)
+  //     + grain ............................... 0,4905   (+0,0614)
+  //     + masque de côte ...................... 0,5059   (+0,0154)
+  //     + occupation du sol (tout) ............ 0,6840   (+0,1781)
+  //     témoin, sans habillage, à la fin ...... 0,4209   (dérive +0,0052)
+  //
+  // ⚠️ **LE PLANCHER DE BRUIT VAUT 0,0297 ms, ET DEUX POSTES TOMBENT DESSOUS** —
+  // les courbes (+0,0134) et le masque de côte (+0,0154). **Leur coût n'est pas
+  // mesuré, il est BORNÉ** : ce banc dit qu'ils coûtent moins de 0,03 ms, il ne
+  // dit pas combien.
+  //
+  // ⚠️ **ET L'OCCUPATION DU SOL EST BIEN LE POSTE LE PLUS CHER, PAR UN FACTEUR
+  // ONZE** — huit accès de texture par fragment (`lavisSol` lit quatre voisins,
+  // `solEn` en fait deux chacun). **La table livrée disait la même chose sur des
+  // chiffres qui ne le permettaient pas** : le masque de côte y dépassait
+  // l'occupation du sol de 0,0061 ms, très en dessous du bruit. C'est corrigé.
+  //
+  // ⚠️ **LE TOTAL DÉPEND DE L'ÉTAT DE LA COUCHE** : **+0,2683 ms** avec
+  // l'occupation du sol allumée, **+0,0911 ms** avec elle éteinte — c'est-à-dire
+  // telle qu'elle est dans l'application aujourd'hui.
 
   /**
    * Pose l'habillage du socle sur le crop.
@@ -1384,13 +1447,40 @@ export class Globe {
     return u
   }
 
-  /** Retire l'habillage — le globe reprend son propre rendu, au bit près. */
+  /**
+   * Retire l'habillage — le globe reprend son propre rendu, au bit près.
+   *
+   * ⚠️ **CETTE PROMESSE ÉTAIT FAUSSE, ET LE TOUR 1 L'A CORRIGÉE.** La version
+   * livrée ne rendait que quatre uniformes sur seize. Or `uContourInterval` et
+   * `uContourOpacity` sont **PARTAGÉS par toutes les tuiles** et le bloc des
+   * courbes les lit **SANS GARDE** — `uHabOn` à 0 ne les neutralise pas. Après
+   * `poserHabillage` puis `retirerCrop`, **la planète entière gardait
+   * l'intervalle du crop** : 250 m à La Réunion au lieu de 500.
+   *
+   * ⚠️ **ET LES TEXTURES SONT LÂCHÉES**, pas seulement débranchées : gardées
+   * dans un uniforme partagé, le masque de côte et la mosaïque d'occupation du
+   * sol du crop précédent restaient joignables par le ramasse-miettes.
+   * `test/crop-habillage.test.js` (⑨) exige l'aller-retour bit à bit sur les
+   * SEIZE.
+   */
   retirerHabillage() {
     const u = this.uniforms
     u.uHabOn.value = 0
+    u.uCoastMask.value = null
     u.uCoastMaskOn.value = 0
+    u.uMargeCoteM.value = HABILLAGE_MONDE.margeCoteM
+    u.uSol.value = null
+    u.uSolLut.value = null
     u.uSolOn.value = 0
-    u.uGrainForceM.value = 0
+    u.uSolOpacite.value = HABILLAGE_MONDE.solOpacite
+    u.uSolOffset.value.set(0, 0)
+    u.uSolScale.value.set(1, 1)
+    u.uSolTexel.value.set(1 / 2048, 1 / 2048)
+    u.uContourInterval.value = HABILLAGE_MONDE.contourIntervalM
+    u.uContourOpacity.value = HABILLAGE_MONDE.contourOpacite
+    u.uContourWeight.value = HABILLAGE_MONDE.contourPoids
+    u.uGrainForceM.value = HABILLAGE_MONDE.grainForceM
+    u.uGrainEchelle.value = HABILLAGE_MONDE.grainEchelle
   }
 
   // ═══════════ LA RAMPE — Tâche D, « calculée sur le crop, suivie par les

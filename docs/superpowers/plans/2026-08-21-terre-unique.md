@@ -198,6 +198,8 @@ Des parois tombent depuis la frontière du crop jusqu'à une base. ⚠️ **Vert
 
 > **BILAN DE LA TÂCHE C — 2026-08-21, commit `dc89f01`.**
 >
+> ⚠️ **UN TOUR DE CORRECTION SUIT CE BILAN — voir « Tour de correction 1 » plus bas.** Une relecture indépendante a rendu **conformité ❌** : mes vingt mutations déplaçaient la chaîne que l'assertion cherche, pas le comportement, et **douze mutations sémantiques survivaient**. Les chiffres de ce bilan sont refaits en monnaie unique ; **les phrases fautives restent ici, avec leur renvoi.**
+>
 > **⚠️ L'ÉTAPE 1 A TRANCHÉ, ET ELLE INTERDIT LE PORTAGE COMPLET.** Cible 900×900 hors écran, **boucle rAF gelée**, `autoClear` forcé, couverture 1,0 **prouvée**, 5 tours de 25 images **entrelacés**, RTX 3080 :
 >
 > | variante | ms pour 0,81 Mpx | ce que dit l'écart |
@@ -209,6 +211,8 @@ Des parois tombent depuis la frontière du crop jusqu'à une base. ⚠️ **Vert
 > | globe témoin | 0,0604 | **le nuanceur ENTIER du globe = 0,112 ms**, soit **0,138 ms/Mpx** |
 >
 > **Porter tout l'habillage du socle, c'était multiplier le coût par pixel du globe par QUATORZE.** ⚠️ **C'est la réponse à la question du §9**, et elle est négative pour le portage intégral.
+>
+> ⚠️ **CE « QUATORZE » NE TIENT PAS, ET IL EST RETIRÉ — voir « Tour de correction 1 », C-4.** Il comparait la pente du socle à un nuanceur du globe relevé sur un TOUT AUTRE cadrage : deux « coût du globe » cohabitaient au même 900² d'un facteur 3,9. En monnaie unique, le portage complet vaut **×1,90**. ⚠️ **Et la couverture annoncée dans la ligne de protocole ci-dessus n'était pas prouvée** : `autoClear` vaut `false` dans cette application, côté globe comme côté socle — voir I-1. **La conclusion — le portage intégral est refusé — ne change pas ; son ampleur, si.**
 >
 > **LES QUATRE POSTES DU PLAN, EUX, TIENNENT — et c'est mesuré sur le crop lui-même**, témoin de dérive **0,003 ms**, tours à ±0,01 ms :
 >
@@ -222,6 +226,8 @@ Des parois tombent depuis la frontière du crop jusqu'à une base. ⚠️ **Vert
 > | **témoin — sans habillage, à la fin** | 0,6758 | dérive **+0,0030** |
 >
 > **+0,215 ms pour 0,81 Mpx, soit +32 % du coût du globe et SEPT FOIS MOINS que l'habillage complet.** ⚠️ **L'occupation du sol est le poste le plus cher** (huit accès de texture par fragment : `lavisSol` lit quatre voisins, `solEn` en fait deux chacun) — mais **elle ne coûte rien quand la couche est éteinte**, la branche étant gardée par un uniforme.
+>
+> ⚠️ **CETTE LIGNE EST FAUSSE SUR DEUX POINTS, ET ELLE EST CORRIGÉE PLUS BAS — voir « Tour de correction 1 », C-4 et I-3.** Le « +32 % » est calculé sur un dénominateur qui contient l'atmosphère et les nuages ; en monnaie unique il vaut **+34 %**. Et « le poste le plus cher » était **contredit par ma propre table** — le masque de côte y coûtait 0,0993 contre 0,0932 — d'un écart lui-même **sous le bruit** : cette table ne pouvait pas trancher. Le relevé du Tour 1 tranche, et il donne raison à la phrase pour de mauvaises raisons.
 >
 > **CE QUI EST PORTÉ, ET CE QUI NE L'EST PAS.** Porté : **courbes calées sur l'amplitude du crop** (pas cartographique — 250 m à La Réunion contre 500 m codés en dur), **grain** indexé sur le crop, **masque de côte** (trait d'encre + autorité sur la décision mer/terre), **occupation du sol**. ⚠️ **PAS porté, et il faut le dire** : analyse de relief (le peigné), perspective aérienne, caustiques de fond, photo aérienne, lumières de nuit, ombre des nuages, effets de surface, balayage. **Le plan ne les met pas dans cette tâche, et la mesure ci-dessus dit ce qu'ils coûteraient.**
 >
@@ -258,6 +264,77 @@ Des parois tombent depuis la frontière du crop jusqu'à une base. ⚠️ **Vert
 > - **L'Étape 2 telle que le plan la formule — « le globe et l'ancien socle rendent la même image à quelques unités de couleur près » — N'EST PAS ATTEIGNABLE À LA TÂCHE C SEULE**, et ce n'est pas un échec de la tâche : la rampe (Tâche D) et l'exagération (Tâche E, drapeau éteint) diffèrent **par construction**. J'ai donc mesuré ce qui est mesurable — l'écart entre le globe **avec** et **sans** habillage, témoin à zéro — et je le dis plutôt que de maquiller le critère.
 > - **Aucun branchement de production.** `poserHabillage` n'est appelé par personne dans `src/`, exactement comme `poserCrop` de la Tâche A. Tout ce qui précède a été obtenu depuis la console.
 > - **Le coût sur une machine modeste.** Tout est mesuré sur une RTX 3080. Le +32 % pourrait mordre autrement sur un portable — et le tampon 4K multiplierait les 0,215 ms par dix.
+
+
+#### Tour de correction 1 — ce qu'une relecture indépendante a trouvé, et ce que la mesure a tranché
+
+⚠️ **CETTE SECTION S'AJOUTE AU BILAN CI-DESSUS, ELLE NE LE REMPLACE PAS.** Les phrases fautives restent en place avec un renvoi ici : c'est la règle des listes du §0, appliquée à un compte rendu.
+
+**Verdict de la relecture : conformité ❌, qualité approuvée sous réserve — 3 Critiques, 8 Importants, 9 Mineurs.** Elle a en revanche vérifié et validé, point par point : que les 20 mutations tuaient bien leur assertion et remettaient les fichiers octet par octet, que les 14 assertions vertes contre `6b8ca66` étaient justifiées **une par une** (12 sur le module pur, 2 garde-fous sur `terrain.js`), que les drapeaux étaient éteints et le damier intouché, et que mon constat sur l'Étape 2 était honnête.
+
+**C-1 — MES VINGT MUTATIONS DÉPLAÇAIENT LA CHAÎNE CHERCHÉE, PAS LE COMPORTEMENT. C'est le grief central, et c'est lui qui vaut la non-conformité.** Le relecteur a monté sa propre campagne — **15 mutations sémantiques, 12 ONT SURVÉCU** : la garde v42 supprimée du GLSL, le grain réindexé sur `vUv`, **le grain qui mord sous l'eau**, **la marge jamais convertie (`uMargeCoteM = 0`)**, **l'intervalle jamais calé (retour à 500)**, **`poserHabillage` qui n'allume rien**, **`retirerHabillage` qui ALLUME**. **On pouvait casser l'habillage de six façons sans qu'un test rougisse : l'Étape 4 n'était remplie que dans sa lettre.**
+
+**La parade — et elle est structurelle, pas cosmétique.** Deux sections neuves, **⑨** et **⑩** :
+- **⑨ exerce `poserHabillage` et `retirerHabillage`** au lieu de les greper (`Globe.prototype.X.call` sur un objet minimal, le patron de la Tâche B). Dix tests.
+- **⑩ EXTRAIT le GLSL et l'EXÉCUTE** au lieu de le décrire (le patron de `test/crop-rampe.test.js`, Tâche D) : on prend le texte du nuanceur, on le traduit en JS, on l'appelle, et **on confronte son verdict à celui du module pur** — `sousEauCrop`, `uvChampCrop`, `uvDrapeCrop`, `grainCrop` servent d'oracle. La garde v42 est ainsi rejouée sur **5 043 cas**, les deux UV sur **441 points** chacun. Dix tests.
+
+**Nouvelle campagne : `.banc/mutations-habC-semantiques.mjs`, 31 mutations SÉMANTIQUES, 31 TUÉES**, dont les sept que le relecteur nommait. ⚠️ **Et elle tourne dans une COPIE du dépôt** (`git worktree add ../wt-mutC-habillage`), pas dans l'arbre partagé — son propre passage avait muté `src/` pendant qu'un autre implémenteur travaillait. ⚠️ **L'ancienne campagne reste sur le disque** : elle documente ce qui ne suffisait pas.
+
+⚠️ **ET LA SECTION ⑩ A TROUVÉ DEUX DÉFAUTS DANS ELLE-MÊME AVANT DE TROUVER QUOI QUE CE SOIT D'AUTRE** : ⑩a capturait `bool sousEau = h < 0.0;` au lieu de l'affectation sous le masque — le motif « sousEau = » est CONTENU dans « bool sousEau = », et `String.match` rend la première occurrence ; l'assertion aurait été rouge sur du code juste et verte sur la mutation qu'elle vise. Et ⑩e trouvait `vUv` dans un **commentaire** du bloc. Les deux sont corrigés, et le motif de la correction est écrit dans le test.
+
+**C-2 — `poserHabillage` N'ÉTAIT PAS TESTÉE DU TOUT.** Quarante lignes derrière un grep de nom — mot pour mot ce que la relecture de la Tâche B avait déjà remonté sur `hauteurSurface`. **Elle l'est maintenant, et comme là-bas, la poser a révélé un vrai défaut** (C-3).
+
+**C-3 — UN VRAI DÉFAUT : `retirerHabillage` NE REMETTAIT PAS `uContourInterval`.** `uContourInterval` et `uContourOpacity` sont **PARTAGÉS** par toutes les tuiles, et le bloc des courbes les lit **SANS GARDE** — `uHabOn` à 0 ne les neutralise pas. `poserHabillage` les écrasait ; `retirerHabillage` n'en rendait que quatre sur seize. **Après `retirerCrop`, la planète entière gardait l'intervalle du crop** : 250 m à La Réunion au lieu de 500. Ma docstring promettait « le globe reprend son propre rendu, **au bit près** ». **Corrigé** : une constante unique `HABILLAGE_MONDE` (gelée) dans le module pur, lue **par le constructeur ET par `retirerHabillage`** — c'est `RAMPE_MONDE` de la Tâche D repris tel quel. `retirerHabillage` rend maintenant **les seize**, textures comprises (elles étaient retenues par un uniforme partagé). Tests ⑨h, ⑨i, ⑨j ; mutations S19, S22, S23.
+
+---
+
+**C-4 — LA TABLE VALAIT COMME INTERDICTION, PAS COMME AUTORISATION.** Deux « coût du globe » cohabitaient au même 900² **sans être réconciliés** — **0,1720 ms** (Étape 1, cadrage sur une tuile z13) et **0,6728 ms** (Étape 3, cadrage sur le crop, atmosphère comprise), **facteur 3,9**. Le « ×14 » était en ms/Mpx de nuanceur ; le « +32 % » était calculé sur le dénominateur le plus large, **celui qui contient l'atmosphère et les nuages que mon propre banc d'image avait dû masquer parce qu'ils remplissent le cadre.**
+
+**I-1 — ET UNE QUATRIÈME MESURE MENTAIT, celle-là même que j'avais présentée comme la version qui tient.** `mesure-C3.prepareGlobe()` ne posait aucun calque, rendait `sceneGlobe` **entière**, et l'atmosphère remplit le cadre : la « preuve de couverture » rendait **1,0 quelle que soit la présence des tuiles**. Et **le filtre `t.mesh.visible !== false` de `mesure-C.js:94` avait été PERDU** dans la réécriture vers `mesure-C3.js:53`.
+
+**TOUT EST REFAIT SUR UN SEUL BANC — `.banc/mesure-C5.js`** : une seule préparation de scène (atmosphère, calottes et nuages masqués **des deux côtés**, fond de scène retiré, filtre `visible` remis), **un seul protocole écrit dans `PROTOCOLE`** (cibles 480² et 900², 5 tours de 25 images, 12 jetées, boucle rAF gelée, `autoClear` forcé), couverture **prouvée** à 1,0 partout, et **les sorties brutes sont sur le disque** (`.banc/C5-brut.json`, `.banc/C5-postes-brut.json`) — le relecteur a eu raison de relever qu'aucune ne l'était : sans elles, personne ne peut confronter mes valeurs, seulement les refaire.
+
+**LA MONNAIE UNIQUE — ms par mégapixel de FRAGMENT** (pente entre les deux tailles, témoin au nuanceur constant déduit sur la **même** géométrie) :
+
+| | ms/Mpx | rapport au nuanceur du globe |
+|---|---|---|
+| **habillage COMPLET du socle** | **0,527** | **×1,90** |
+| **nuanceur ENTIER du globe** | **0,277** | ×1 |
+| **les quatre postes de la Tâche C** | **0,094** | **×0,34, soit +34 %** |
+
+⚠️ **« QUATORZE » NE TIENT PAS, ET JE LE RETIRE.** En monnaie unique, porter tout l'habillage aurait coûté **1,9 fois le nuanceur entier du globe**, pas quatorze. ⚠️ **« SEPT FOIS MOINS » NE TIENT PAS NON PLUS** — le relecteur me l'accordait, mais il ne survit pas à la réconciliation : le rapport est **5,6** en per-pixel (et 11,9 en total à 0,81 Mpx). ⚠️ **« +32 % » devient +34 %** — proche par accident, calculé faux.
+
+⚠️ **ET LE COÛT DU SOCLE EST SURTOUT FIXE, PAS PAR PIXEL — c'est le fait le plus utile de ce tour.** À 0,81 Mpx l'habillage complet coûte **1,087 ms**, dont **0,660 ms sont FIXES** : les douze liens de texture et les uniformes, payés une fois par appel de dessin. Les quatre postes, eux, coûtent 0,091 ms dont **0,015 seulement** de fixe. ⚠️ **Cela change la lecture du refus** : ce n'est pas tant le calcul du socle qui serait insoutenable sur une sphère de tuiles, **c'est son bagage de textures — répété à chaque tuile au lieu d'une fois par bloc.**
+
+⚠️ **ET LE TÉMOIN DU SOCLE REND UNE PENTE NÉGATIVE** (−0,035 ms/Mpx) : un nuanceur à couleur constante sur 1,18 million de triangles coûte le même temps à 480² et à 900². **Le plancher du socle est lié au SOMMET, pas au pixel.** Ce n'est pas du bruit qu'on écarte, c'est un fait — et il interdit de lire le coût par pixel du socle sur son témoin.
+
+**LE COÛT POSTE PAR POSTE, AU MÊME PROTOCOLE** (cible 900², crop de La Réunion, 172 tuiles z13) :
+
+| état | ms | ajout |
+|---|---|---|
+| globe SANS habillage | 0,4157 | — |
+| + courbes calées sur le local | 0,4291 | **+0,0134** ⚠️ |
+| + grain | 0,4905 | +0,0614 |
+| + masque de côte | 0,5059 | **+0,0154** ⚠️ |
+| + occupation du sol (tout) | 0,6840 | **+0,1781** |
+| témoin, sans habillage, à la fin | 0,4209 | dérive **+0,0052** |
+
+**I-2 — LE PLANCHER DE BRUIT VAUT 0,0297 ms, ET DEUX POSTES TOMBENT DESSOUS.** Les courbes (+0,0134) et le masque de côte (+0,0154) : **leur coût n'est pas mesuré, il est BORNÉ.** Ce banc dit qu'ils coûtent moins de 0,03 ms ; il ne dit pas combien. Le relecteur demandait de le dire pour un poste — il y en a **deux**.
+
+**I-3 — « L'OCCUPATION DU SOL EST LE POSTE LE PLUS CHER » ÉTAIT CONTREDIT PAR MA PROPRE TABLE, et l'erreur était répétée au §8.** Dans la table livrée, le masque de côte la dépassait (+0,0993 contre +0,0932) — **de 0,0061 ms, très en dessous du bruit : cette table-là ne pouvait pas trancher, et j'ai tranché quand même.** La nouvelle tranche, et **elle donne raison à la phrase pour de mauvaises raisons** : l'occupation du sol coûte **+0,1781 ms contre +0,0154**, soit **onze fois plus**. ⚠️ **Le §8 est corrigé.**
+
+⚠️ **ET LE TOTAL DÉPEND DE L'ÉTAT DE LA COUCHE** : **+0,2683 ms** avec l'occupation du sol allumée, **+0,0911 ms** avec elle éteinte — c'est-à-dire **telle qu'elle est dans l'application aujourd'hui**. Le chiffre de la monnaie unique (0,094 ms/Mpx) est celui de la couche éteinte, le seul relevé aux deux tailles.
+
+**I-4 — TROIS PROTOCOLES DÉCRIVAIENT LA MÊME TABLE** (« 5 tours de 25 » au plan, « 4 tours × 20 » dans `globe.js`, 7×30 par défaut du banc). **Il n'y en a plus qu'un**, exporté sous le nom `PROTOCOLE`, et les deux tables ci-dessus en sortent.
+
+**I-5 — LE SEUIL DE « 1,01 % DES PIXELS » N'ÉTAIT PAS DÉCLARÉ.** C'est `d > 2` unités de couleur sur 255. Il est maintenant exporté (`SEUIL_TOUCHE`) et motivé dans `.banc/image-C.js`.
+
+---
+
+**CE QUE CE TOUR N'A PAS FAIT, ET QU'IL FAUT DIRE.**
+- **Le relevé d'image (1,01 % des pixels, témoin à zéro) N'A PAS ÉTÉ REFAIT** sur le banc unifié. Il reste juste — son témoin vaut exactement zéro — mais il tourne sur son propre cadrage et son propre masquage. **Deux protocoles subsistent donc : celui des temps, unifié ; celui des couleurs, non.**
+- **L'occupation du sol n'a toujours pas été VUE.** Son coût est mesuré deux fois, son image jamais.
+- **Rien n'a été remesuré sur une machine modeste.**
 
 ### Tâche D — LA RAMPE : CALCULÉE SUR LE CROP, SUIVIE PAR LES ALENTOURS (décision 4)
 
@@ -473,7 +550,9 @@ Retirer `monde/fenetre-bornee.js`, le chemin « bloc » de `terrain.js`, et les 
 - **Les crops continentaux** que la sphère rend enfin possibles : les veut-il, et à quelle largeur maximale ?
 - **LES JUPES DES TUILES PENDENT SOUS LE BLOC** (relevé par la Tâche E, à l'écran) — cinq à six languettes qui descendent sous la base. Le `discard` du crop est en **lat/lon**, et une jupe partage le (lat, lon) du bord de sa tuile : elle n'est **jamais** coupée. Aucune tâche du plan ne la couvre. Deux sorties possibles, aucune mesurée : couper la jupe par sa hauteur radiale plutôt que par sa position, ou ne pas bâtir de jupe sur une tuile qui touche la frontière.
 - **LE RELIEF DU GLOBE VU DE LOIN, À TRANCHER** (Tâche E, tour 1) — à ×2,8 la silhouette du limbe passe de **≈7 px à ≈1 px** sur un cadrage plein disque. **La métrique employée (écart moyen absolu sur l'image) ne sait pas distinguer cet effet du bruit des nuages** — elle n'autorise donc pas à conclure « acceptable ». Il faudrait un critère LOCAL (limbe seul, chaîne montagneuse dans le cadre, nuages figés) pour trancher ; il n'a pas été fait. **Si Adrien veut du relief à l'orbite, la courbe doit remonter aux hautes altitudes — et c'est une mesure à faire, pas un goût.**
-- **L'OCCUPATION DU SOL DU CROP N'A JAMAIS ÉTÉ VUE** (Tâche C) — la couche est éteinte dans l'application, son coût est mesuré (0,093 ms pour 0,81 Mpx, le poste le plus cher des quatre) mais son image ne l'est pas. **À rallumer et à regarder.**
+- **L'OCCUPATION DU SOL DU CROP N'A JAMAIS ÉTÉ VUE** (Tâche C) — la couche est éteinte dans l'application, son coût est mesuré (**+0,1781 ms pour 0,81 Mpx au relevé du Tour 1**, et c'est bien le poste le plus cher des quatre, par un facteur **onze**) mais son image ne l'est pas. ⚠️ **Le chiffre « 0,093 ms, le poste le plus cher » de la première version était contredit par sa propre table** — voir « Tour de correction 1 », I-3. **À rallumer et à regarder.**
+- **DEUX DES QUATRE POSTES COÛTENT MOINS QUE LE BRUIT DU BANC** (Tâche C, Tour 1) — les courbes (**+0,0134 ms**) et le masque de côte (**+0,0154 ms**) contre un plancher de **0,0297 ms**. ⚠️ **Leur coût est BORNÉ, pas mesuré** : le banc dit qu'ils valent moins de 0,03 ms, il ne dit pas combien. Il faudrait un banc plus fin, ou une machine plus lente, pour les séparer.
+- **LE COÛT DE L'HABILLAGE DU SOCLE EST SURTOUT FIXE** (Tâche C, Tour 1) — **0,660 ms sur 1,087** à 0,81 Mpx sont des **liens de texture**, pas du calcul. ⚠️ **Cela déplace la question du portage** : ce qui coûterait cher sur une sphère de tuiles n'est pas le calcul du socle, **c'est son bagage de douze textures, payé par TUILE au lieu d'une fois par bloc.** Personne n'a mesuré ce que ce bagage devient à 700 tuiles.
 - **LE PEIGNÉ (analyse de relief) RESTE AU SOCLE, ET C'EST LUI QU'ON VOIT** (Tâche C) — les quatre postes portés ne déplacent que **1,01 % des pixels**, témoin à zéro. Ce qui fait la richesse de l'image du socle, c'est le texture shading et la rampe locale. **Le porter coûterait 1,94 ms/Mpx au tarif complet ; sa part seule reste à mesurer.**
 - **LA VUE AU NADIR DU CROP EST INJUGEABLE À ×18** (Tâche C, à l'écran) — le relief de La Réunion fait 0,86 unité de haut pour 0,21 de large, la montagne passe au-dessus de la caméra. `?exag=continu` (Tâche E) le corrige, mais il est éteint.
 - **LE GLOBE ET LE SOCLE N'ONT NI LA MÊME TABLE DE COULEURS NI LA MÊME LOI DE RAMPE** (Tâche D, mesuré) — `uRamp` fait 512 × 1 et réserve 35 % à la mer ; `uRampTex` fait 512 × **64** (2ᵉ axe d'humidité) et est **entièrement terre**, la mer étant peinte par une rampe nautique à trois couleurs. Et la loi diffère : `0,35 + 0,65 · u` contre `0,5 + (hNorm − 0,65) · 2,5`. **Porter le pivot et le contraste suppose de rééchelonner le contraste avec l'amplitude du crop (2,5 → 1,38 ici) ET de changer de table — donc de toucher à la mer, c'est-à-dire la Tâche F.** C'est une décision produit, pas un portage : à trancher, avec les chiffres du bilan de D.

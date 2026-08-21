@@ -49,6 +49,34 @@
 // « deux Terres qui se ressemblent ». `test/crop-habillage.test.js` rejoue cette
 // égalité contre `latLonToWorld` DU DÉPÔT, qui sert d'oracle indépendant.
 
+// ══════════ ⓪ L'HABILLAGE ÉTEINT — ce que le globe peint sans crop ══════════
+
+/**
+ * Les réglages du globe SANS habillage — ceux d'avant la Tâche C.
+ *
+ * ⚠️ **AJOUTÉE AU TOUR 1, ET ELLE RÉPARE UN VRAI DÉFAUT.** `uContourInterval` et
+ * `uContourOpacity` sont des uniformes **PARTAGÉS** par toutes les tuiles, et le
+ * bloc des courbes les lit **SANS GARDE** : `uHabOn` à 0 ne les neutralise pas.
+ * `poserHabillage` les écrasait, `retirerHabillage` ne les remettait pas —
+ * **après un `retirerCrop`, la planète entière gardait l'intervalle du crop**
+ * (250 m à La Réunion au lieu de 500). La docstring promettait « au bit près ».
+ *
+ * ⚠️ **UNE SEULE ÉCRITURE, LUE DES DEUX CÔTÉS** — c'est `RAMPE_MONDE` de la
+ * Tâche D, repris tel quel : le constructeur du globe pose ces valeurs, et
+ * `retirerHabillage` les rend. Deux littéraux jumeaux auraient divergé en
+ * silence (§1 de `/threejs-optimisation`, question 2), et c'est exactement ce
+ * qui venait de se produire.
+ */
+export const HABILLAGE_MONDE = Object.freeze({
+  contourIntervalM: 500,
+  contourOpacite: 0.55,
+  contourPoids: 0.7,
+  grainForceM: 0,
+  grainEchelle: 96,
+  solOpacite: 1,
+  margeCoteM: 0,
+})
+
 // ══════════ ① LES CHAMPS CUITS — masque de côte, masque de mer, analyse ═════
 
 /**

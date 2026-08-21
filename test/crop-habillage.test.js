@@ -472,3 +472,449 @@ test('⑧ le décodage de classe garde les trois précautions du socle', () => {
   // et le mélange des quatre voisins se fait sur la COULEUR, jamais sur le code
   assert.match(FRAG, /c00\.rgb \*= c00\.a; c10\.rgb \*= c10\.a;/)
 })
+
+// ════════════════════════════════════════════════════════════════════════════
+//  TOUR 1 — CE QUI MANQUAIT, ET C'EST UNE RELECTURE INDÉPENDANTE QUI L'A VU
+// ════════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ **LE GRIEF CENTRAL, ET IL ÉTAIT JUSTE : MES VINGT MUTATIONS DÉPLAÇAIENT LA
+// CHAÎNE DE CARACTÈRES QUE L'ASSERTION CHERCHE, PAS LE COMPORTEMENT DU POSTE.**
+// Le relecteur a monté sa propre campagne — **15 mutations SÉMANTIQUES, 12 ont
+// SURVÉCU** : la garde v42 supprimée du GLSL, le grain réindexé sur `vUv`, le
+// grain qui mord sous l'eau, la marge jamais convertie, l'intervalle jamais
+// calé, `poserHabillage` qui n'allume rien, `retirerHabillage` qui ALLUME.
+// **On pouvait casser l'habillage de six façons sans qu'un test rougisse.**
+//
+// Les deux parades de cette section :
+//   ⑨ `poserHabillage` et `retirerHabillage` sont EXERCÉES, pas grepées. C'est
+//     le patron de la Tâche B (`Globe.prototype.X.call` sur un objet minimal) —
+//     et là-bas, poser de vrais tests avait révélé un vrai défaut. **Ici aussi :
+//     `retirerHabillage` ne remettait pas `uContourInterval`.**
+//   ⑩ le nuanceur est EXTRAIT PUIS EXÉCUTÉ, pas décrit. C'est le patron de la
+//     Tâche D (`test/crop-rampe.test.js`) : on prend le TEXTE du GLSL, on le
+//     traduit en JS et on l'appelle. Une garde retirée du nuanceur change alors
+//     une VALEUR, et l'assertion tombe.
+
+import { Globe } from '../src/globe.js'
+import { HABILLAGE_MONDE } from '../src/monde/habillage-crop.js'
+
+// ══════════ ⑨ poserHabillage / retirerHabillage, EXERCÉES ══════════════════
+//
+// ⚠️ LA VERSION LIVRÉE NE LES COUVRAIT QUE PAR UN GREP DE NOM — quarante lignes
+// derrière `assert.ok(/poserHabillage/)`. C'est mot pour mot ce que la relecture
+// de la Tâche B avait déjà remonté sur `hauteurSurface`.
+
+const val = (v) => ({ value: v })
+const vec2 = (x, y) => ({ x, y, set(a, b) { this.x = a; this.y = b } })
+
+/** Un globe minimal : rien que les uniformes et le repère du crop. */
+function globeStub(crop = REPERE) {
+  return {
+    _crop: crop,
+    uniforms: {
+      uHabOn: val(0),
+      uCoastMask: val(null),
+      uCoastMaskOn: val(0),
+      uMargeCoteM: val(HABILLAGE_MONDE.margeCoteM),
+      uSol: val(null),
+      uSolLut: val(null),
+      uSolOn: val(0),
+      uSolOpacite: val(HABILLAGE_MONDE.solOpacite),
+      uSolOffset: val(vec2(0, 0)),
+      uSolScale: val(vec2(1, 1)),
+      uSolTexel: val(vec2(1 / 2048, 1 / 2048)),
+      uContourInterval: val(HABILLAGE_MONDE.contourIntervalM),
+      uContourOpacity: val(HABILLAGE_MONDE.contourOpacite),
+      uContourWeight: val(HABILLAGE_MONDE.contourPoids),
+      uGrainForceM: val(HABILLAGE_MONDE.grainForceM),
+      uGrainEchelle: val(HABILLAGE_MONDE.grainEchelle),
+    },
+  }
+}
+const poserHab = (g, arg) => Globe.prototype.poserHabillage.call(g, arg)
+const retirerHab = (g) => Globe.prototype.retirerHabillage.call(g)
+const lireHab = (g) => {
+  const o = {}
+  for (const [k, u] of Object.entries(g.uniforms)) {
+    o[k] = u.value && typeof u.value === 'object' && 'x' in u.value ? [u.value.x, u.value.y] : u.value
+  }
+  return o
+}
+const TEX = { nom: 'une texture, peu importe laquelle' }
+
+test('⑨a poserHabillage ALLUME l’habillage — sinon elle ne fait rien du tout', () => {
+  // ⚠️ MUTATION QUI SURVIVAIT : `poserHabillage` qui n'allume rien. Aucune
+  // assertion ne tombait, et pourtant plus un seul poste ne s'exécutait.
+  const g = globeStub()
+  assert.equal(g.uniforms.uHabOn.value, 0)
+  poserHab(g, {})
+  assert.equal(g.uniforms.uHabOn.value, 1, 'poserHabillage n’allume pas uHabOn')
+})
+
+test('⑨b retirerHabillage ÉTEINT — et une mutation qui ALLUME tombe ici', () => {
+  const g = globeStub()
+  poserHab(g, { coastMask: TEX })
+  assert.equal(g.uniforms.uHabOn.value, 1)
+  retirerHab(g)
+  assert.equal(g.uniforms.uHabOn.value, 0, 'retirerHabillage n’éteint pas uHabOn')
+})
+
+test('⑨c la marge de côte est CALCULÉE sur le crop — pas laissée à zéro', () => {
+  // ⚠️ MUTATION QUI SURVIVAIT : `uMargeCoteM = 0`. Le masque redevenait seul
+  // juge, et une lagune que le MNT croit émergée repassait en terre.
+  const g = globeStub()
+  poserHab(g, { coastMask: TEX })
+  const attendu = margeCoteDuCrop(REPERE)
+  assert.ok(Math.abs(g.uniforms.uMargeCoteM.value - attendu) < 1e-12, `marge ${g.uniforms.uMargeCoteM.value} au lieu de ${attendu}`)
+  assert.ok(g.uniforms.uMargeCoteM.value > 1, 'la marge doit valoir plus d’un mètre, pas zéro')
+  // et sans crop il n'y a pas d'emprise d'où la tirer : elle reste nulle
+  const sansCrop = globeStub(null)
+  poserHab(sansCrop, { coastMask: TEX })
+  assert.equal(sansCrop.uniforms.uMargeCoteM.value, 0)
+})
+
+test('⑨d l’intervalle des courbes est CALÉ sur l’amplitude — pas laissé à 500', () => {
+  // ⚠️ MUTATION QUI SURVIVAIT : l'intervalle jamais calé. C'est LE grief des
+  // captures d'Adrien, et il repassait sans qu'un test bronche.
+  const g = globeStub()
+  poserHab(g, { amplitudeM: 828 }) // l'île Maurice
+  assert.equal(g.uniforms.uContourInterval.value, 50)
+  assert.notEqual(g.uniforms.uContourInterval.value, HABILLAGE_MONDE.contourIntervalM)
+  // un intervalle imposé gagne sur l'amplitude
+  const h = globeStub()
+  poserHab(h, { amplitudeM: 828, contourIntervalM: 123 })
+  assert.equal(h.uniforms.uContourInterval.value, 123)
+  // et sans amplitude ni intervalle, on ne touche à rien
+  const i = globeStub()
+  poserHab(i, {})
+  assert.equal(i.uniforms.uContourInterval.value, HABILLAGE_MONDE.contourIntervalM)
+})
+
+test('⑨e le masque de côte ne s’allume QUE s’il y a une texture', () => {
+  const g = globeStub()
+  poserHab(g, {})
+  assert.equal(g.uniforms.uCoastMaskOn.value, 0)
+  poserHab(g, { coastMask: TEX })
+  assert.equal(g.uniforms.uCoastMaskOn.value, 1)
+  assert.equal(g.uniforms.uCoastMask.value, TEX)
+})
+
+test('⑨f l’occupation du sol exige LES DEUX textures — le code ET sa table', () => {
+  // ⚠️ `uSol` porte un CODE de classe, `uSolLut` la couleur. Allumer sans la
+  // table ferait lire `solEn` dans une table vide : toutes les classes en noir.
+  for (const [sol, lut, attendu] of [[TEX, TEX, 1], [TEX, null, 0], [null, TEX, 0], [null, null, 0]]) {
+    const g = globeStub()
+    poserHab(g, { sol, solLut: lut })
+    assert.equal(g.uniforms.uSolOn.value, attendu, `sol=${!!sol} lut=${!!lut}`)
+  }
+})
+
+test('⑨g le grain passe, et les vecteurs sont COPIÉS, pas partagés', () => {
+  const g = globeStub()
+  const offset = { x: 0.25, y: 0.75 }
+  poserHab(g, { grainForceM: 3.5, grainEchelle: 64, solOffset: offset, solScale: { x: 2, y: 3 }, solTexel: { x: 0.5, y: 0.25 } })
+  assert.equal(g.uniforms.uGrainForceM.value, 3.5)
+  assert.equal(g.uniforms.uGrainEchelle.value, 64)
+  assert.deepEqual([g.uniforms.uSolOffset.value.x, g.uniforms.uSolOffset.value.y], [0.25, 0.75])
+  // ⚠️ COPIÉS : si l'uniforme partageait l'objet de l'appelant, modifier
+  // l'argument après coup changerait le rendu à distance.
+  offset.x = 99
+  assert.equal(g.uniforms.uSolOffset.value.x, 0.25)
+})
+
+test('⑨h L’ALLER-RETOUR EST BIT À BIT — c’est le défaut que ce tour a corrigé', () => {
+  // ⚠️ **UN VRAI DÉFAUT, TROUVÉ PAR LA RELECTURE.** `uContourInterval` et
+  // `uContourOpacity` sont PARTAGÉS par toutes les tuiles et le bloc des courbes
+  // les lit **SANS GARDE** : `uHabOn` à 0 ne les neutralise pas. La version
+  // livrée ne rendait que quatre uniformes sur seize — **après `retirerCrop`, la
+  // planète entière gardait l'intervalle du crop.**
+  const g = globeStub()
+  const avant = lireHab(g)
+  poserHab(g, {
+    coastMask: TEX, sol: TEX, solLut: TEX, solOpacite: 1.7,
+    solOffset: { x: 0.3, y: 0.4 }, solScale: { x: 2, y: 2 }, solTexel: { x: 0.01, y: 0.02 },
+    amplitudeM: 828, contourOpacity: 0.9, contourWeight: 1.3,
+    grainForceM: 7, grainEchelle: 12,
+  })
+  // la pose change bien QUELQUE CHOSE — sinon l'aller-retour serait vrai par
+  // construction, et c'est le premier des sept pièges du plan
+  assert.notDeepEqual(lireHab(g), avant, 'poserHabillage n’a rien changé')
+  retirerHab(g)
+  assert.deepEqual(lireHab(g), avant, 'retirerHabillage ne rend pas l’état d’avant')
+  // et l'intervalle nommément, parce que c'est LUI qui fuyait
+  assert.equal(g.uniforms.uContourInterval.value, HABILLAGE_MONDE.contourIntervalM)
+})
+
+test('⑨i le constructeur PREND ses valeurs dans HABILLAGE_MONDE — une seule écriture', () => {
+  // ⚠️ La question 2 du §1 de /threejs-optimisation : une constante recopiée
+  // diverge en silence. Le constructeur et `retirerHabillage` doivent lire la MÊME
+  // source, sinon l'aller-retour ci-dessus devient faux sans prévenir.
+  for (const [cle, champ] of [
+    ['uContourInterval', 'contourIntervalM'],
+    ['uContourOpacity', 'contourOpacite'],
+    ['uContourWeight', 'contourPoids'],
+    ['uGrainForceM', 'grainForceM'],
+    ['uGrainEchelle', 'grainEchelle'],
+    ['uSolOpacite', 'solOpacite'],
+    ['uMargeCoteM', 'margeCoteM'],
+  ]) {
+    assert.ok(
+      new RegExp(cle + ':\\s*\\{\\s*value:\\s*HABILLAGE_MONDE\\.' + champ + '\\s*\\}').test(GLOBE_SRC),
+      'le constructeur ne prend pas ' + cle + ' dans HABILLAGE_MONDE.' + champ
+    )
+  }
+})
+
+// ══════════ ⑩ LE NUANCEUR EXTRAIT PUIS EXÉCUTÉ ═════════════════════════════
+//
+// ⚠️ **C'EST LA PARADE AU GRIEF CENTRAL DU TOUR 1.** Mes assertions de la
+// version livrée DÉCRIVAIENT le nuanceur ; on pouvait donc en changer le SENS
+// sans changer la chaîne qu'elles cherchaient — le relecteur l'a démontré avec
+// 15 mutations sémantiques dont 12 ont survécu. Ici on prend le TEXTE du GLSL,
+// on le traduit en JS, et **on l'appelle**. Une garde retirée du nuanceur change
+// alors une VALEUR, et l'assertion tombe. C'est le patron de
+// test/crop-rampe.test.js (Tâche D), repris tel quel.
+//
+// ⚠️ **ET LE VERDICT DU NUANCEUR EST CONFRONTÉ À CELUI DU MODULE PUR**, pas à ma
+// propre arithmétique : sousEauCrop, uvChampCrop, uvDrapeCrop et grainCrop
+// servent d'oracle. Si les deux divergent, l'un des deux a tort — le test ne dit
+// pas lequel, mais il dit qu'il faut regarder.
+
+/** Le corps d'un bloc à accolades équilibrées, à partir d'une ancre. */
+function blocApres(src, ancre) {
+  const i = src.indexOf(ancre)
+  assert.ok(i >= 0, 'ancre introuvable dans le nuanceur : ' + ancre)
+  const o = src.indexOf('{', i)
+  assert.ok(o >= 0, 'pas d’accolade après ' + ancre)
+  let n = 0
+  for (let k = o; k < src.length; k++) {
+    if (src[k] === '{') n++
+    else if (src[k] === '}') { n--; if (n === 0) return src.slice(o + 1, k) }
+  }
+  assert.fail('accolades déséquilibrées après ' + ancre)
+  return ''
+}
+
+/** Une expression GLSL SCALAIRE du nuanceur, rendue appelable. */
+function loi(glsl, noms) {
+  const js = glsl
+    .replace(/\/\/[^\n]*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\bclamp\s*\(/g, 'CLAMP(')
+    .replace(/\bmax\s*\(/g, 'Math.max(')
+    .replace(/\bmin\s*\(/g, 'Math.min(')
+    .trim()
+  const CLAMP = (x, a, b) => Math.min(Math.max(x, a), b)
+  // eslint-disable-next-line no-new-func
+  const f = new Function(...noms, 'CLAMP', 'return (' + js + ');')
+  return { js, appel: (...a) => f(...a, CLAMP) }
+}
+
+/** Capture OBLIGATOIRE : rend le groupe 1, et échoue si le motif a disparu. */
+function capture(src, re, quoi) {
+  const m = src.match(re)
+  assert.ok(m, 'le nuanceur ne porte plus ' + quoi)
+  return m
+}
+
+/** Découpe « A, B » au niveau de parenthèses zéro. */
+function deuxArgs(txt) {
+  let n = 0
+  for (let i = 0; i < txt.length; i++) {
+    if (txt[i] === '(') n++
+    else if (txt[i] === ')') n--
+    else if (txt[i] === ',' && n === 0) return [txt.slice(0, i).trim(), txt.slice(i + 1).trim()]
+  }
+  assert.fail('pas de virgule de premier niveau dans : ' + txt)
+  return ['', '']
+}
+
+// ---- ⑩a la garde v42, EXÉCUTÉE -------------------------------------------
+
+test('⑩a la garde v42 du nuanceur rend le MÊME verdict que la loi — sur 5 043 cas', () => {
+  // ⚠️ **MUTATION QUI SURVIVAIT** : retirer « && h < uMargeCoteM » du GLSL.
+  // Aucune assertion ne tombait, et la rampe océan se remettait à peindre les
+  // montagnes — le défaut que le correctif v42 de terrain.js avait réparé.
+  // ⚠️ LA RECHERCHE ARRIÈRE N'EST PAS UNE COQUETTERIE : « sousEau = » est
+  // CONTENU dans « bool sousEau = », et String.match rend la PREMIÈRE
+  // occurrence. Sans elle, ce test évaluait la valeur par défaut en croyant
+  // évaluer la garde v42 — rouge sur du code juste, vert sur la mutation visée.
+  const m = capture(FRAG, /(?<!bool )sousEau = ([^;]+);/, 'l’affectation de sousEau sous le masque')
+  const f = loi(m[1], ['landness', 'h', 'uMargeCoteM'])
+  let vus = 0
+  for (const marge of [0, 1.745, 12]) {
+    for (let i = 0; i <= 40; i++) {
+      const landness = i / 40
+      for (let j = -20; j <= 20; j++) {
+        const h = j * 137.3
+        const attendu = sousEauCrop({ masqueActif: true, landness, hM: h, margeM: marge })
+        assert.equal(!!f.appel(landness, h, marge), attendu, 'landness=' + landness + ' h=' + h + ' marge=' + marge)
+        vus++
+      }
+    }
+  }
+  assert.ok(vus > 5000, 'le balayage doit être large, sinon il ne prouve rien')
+  // les trois cas nommés du correctif v42, en clair
+  assert.equal(f.appel(0, 2000, 1.745), false, 'un sommet à 2 000 m que le masque croit en mer doit rester TERRE')
+  assert.equal(f.appel(0, 1.7, 1.745), true)
+  assert.equal(f.appel(1, -50, 1.745), false)
+})
+
+test('⑩b sans masque, le nuanceur retombe sur le prédicat d’avant — exécuté, pas décrit', () => {
+  const m = capture(FRAG, /bool sousEau = ([^;]+);/, 'la valeur par défaut de sousEau')
+  const f = loi(m[1], ['h'])
+  for (let j = -60; j <= 60; j++) {
+    const h = j * 91.7
+    assert.equal(!!f.appel(h), sousEauCrop({ masqueActif: false, landness: 0, hM: h, margeM: 1.745 }), 'h=' + h)
+  }
+})
+
+test('⑩c la rampe est pilotée par le jeton sousEau — CAPTURÉ, pas cherché', () => {
+  // Un retour à « h < 0.0 » change la capture, et le masque de côte ne
+  // déciderait plus que du trait, plus de la couleur.
+  const m = capture(FRAG, /float t = ([A-Za-z_][A-Za-z0-9_]*)\s*\n/, 'la ternaire de la rampe')
+  assert.equal(m[1], 'sousEau', 'la rampe est pilotée par ' + m[1] + ' et non par sousEau')
+})
+
+// ---- ⑩d le grain, EXÉCUTÉ -------------------------------------------------
+
+test('⑩d la garde du grain REFUSE de mordre sous l’eau — exécutée', () => {
+  // ⚠️ **MUTATION QUI SURVIVAIT** : « if (uGrainForceM > 0.0) » sans
+  // « && h > 0.0 ». Le fond marin se couvrait d'une rugosité que la bathymétrie
+  // ne porte pas, et les courbes bathymétriques se mettaient à onduler.
+  const m = capture(FRAG, /if \((uGrainForceM[^)]*)\) \{\s*\n\s*vec2 gp/, 'la garde du grain')
+  const f = loi(m[1], ['uGrainForceM', 'h'])
+  for (const [force, h, attendu] of [
+    [3.489, -1000, false], [3.489, -0.001, false], [3.489, 0, false],
+    [3.489, 0.001, true], [3.489, 3000, true],
+    [0, 3000, false], [0, -3000, false],
+  ]) {
+    assert.equal(!!f.appel(force, h), attendu, 'force=' + force + ' h=' + h)
+  }
+  // et la garde du nuanceur dit la MÊME chose que la loi pure : sous l'eau, zéro
+  for (const h of [-500, -1, 0, 1, 500]) {
+    const nuanceurMord = !!f.appel(3.489, h)
+    const loiMord = grainCrop({ u: 0.21, v: -0.13, force: 3.489, echelle: 96, surTerre: h > 0 }) !== 0
+    assert.equal(nuanceurMord, loiMord, 'h=' + h)
+  }
+})
+
+test('⑩e le grain est indexé sur qCrop — le nom est CAPTURÉ, pas cherché', () => {
+  // ⚠️ **MUTATION QUI SURVIVAIT** : « vec2 gp = vUv * uGrainEchelle; ». Le grain
+  // se répétait à chaque tuile — seize grains au lieu d'un — et se décalait avec
+  // la tuile au lieu de rester solidaire du sol.
+  const m = capture(FRAG, /vec2 gp = ([A-Za-z_][A-Za-z0-9_]*) \* uGrainEchelle;/, 'l’index du grain')
+  assert.equal(m[1], 'qCrop', 'le grain est indexé sur ' + m[1] + ' au lieu de qCrop')
+  // et AUCUN uv de tuile ne se lit dans tout le bloc de l’habillage
+  // ⚠️ LES COMMENTAIRES SONT RETIRÉS D'ABORD : le bloc en porte un qui dit
+  // « INDEXE SUR LE CROP, JAMAIS SUR vUv », et un commentaire n'est pas du code.
+  const bloc = blocApres(FRAG, 'if (uHabOn > 0.5) {').replace(/\/\/[^\n]*/g, ' ')
+  assert.ok(!/\bvUv\b/.test(bloc), 'le bloc de l’habillage lit vUv — il serait solidaire de la TUILE')
+})
+
+test('⑩f la composition des deux octaves du nuanceur EST celle de la loi pure', () => {
+  // On extrait le terme ajouté à h, on l'appelle avec deux valeurs de bruit
+  // connues, et on exige le même nombre que grainCrop calculé sur les mêmes deux
+  // valeurs. Un poids changé d'un seul côté tombe ici.
+  const m = capture(FRAG, /h \+= (uGrainForceM \* \([^;]+\));/, 'le terme de grain')
+  const f = loi(m[1], ['uGrainForceM', 'g1', 'g2'])
+  const p = 96
+  for (const [u, v] of [[0.21, -0.13], [-0.77, 0.4], [0, 0], [0.99, 0.99]]) {
+    const g1 = bruitValeur(u * p, v * p)
+    const g2 = bruitValeur(u * p * 2.17 + 19.3, v * p * 2.17 - 7.1)
+    const attendu = grainCrop({ u, v, force: 3.489, echelle: p })
+    assert.ok(Math.abs(f.appel(3.489, g1, g2) - attendu) < 1e-12, 'u=' + u + ' v=' + v)
+  }
+})
+
+// ---- ⑩g les deux UV, ÉVALUÉS ---------------------------------------------
+
+test('⑩g l’UV du champ cuit du nuanceur ÉGALE uvChampCrop — sur 441 points', () => {
+  const m = capture(FRAG, /vec2 cmUv = ([A-Za-z_][A-Za-z0-9_]*) \* ([\d.]+) \+ ([\d.]+);/, 'l’UV du masque de côte')
+  assert.equal(m[1], 'qCrop', 'le champ est lu en ' + m[1])
+  const a = Number(m[2])
+  const b = Number(m[3])
+  for (let i = -10; i <= 10; i++) {
+    for (let j = -10; j <= 10; j++) {
+      const u = i / 10
+      const v = j / 10
+      const attendu = uvChampCrop(u, v)
+      assert.ok(Math.abs(u * a + b - attendu.x) < 1e-15, 'x en (' + u + ',' + v + ')')
+      assert.ok(Math.abs(v * a + b - attendu.y) < 1e-15, 'y en (' + u + ',' + v + ')')
+    }
+  }
+})
+
+test('⑩h l’UV drapé du nuanceur ÉGALE uvDrapeCrop — le retournement compris', () => {
+  // ⚠️ **MUTATION QUI SURVIVAIT** : le retournement en y perdu. La forêt à
+  // l'envers, et rien qui lève d'erreur.
+  const m = capture(FRAG, /vec2 sUv = vec2\(([^;]+)\);/, 'l’UV drapé de l’occupation du sol')
+  const [ax, ay] = deuxArgs(m[1])
+  const fx = loi(ax, ['qCrop'])
+  const fy = loi(ay, ['qCrop'])
+  for (let i = -10; i <= 10; i++) {
+    for (let j = -10; j <= 10; j++) {
+      const q = { x: i / 10, y: j / 10 }
+      const attendu = uvDrapeCrop(q.x, q.y)
+      assert.ok(Math.abs(fx.appel(q) - attendu.x) < 1e-15, 'x en (' + q.x + ',' + q.y + ')')
+      assert.ok(Math.abs(fy.appel(q) - attendu.y) < 1e-15, 'y en (' + q.x + ',' + q.y + ')')
+    }
+  }
+  // et les deux familles ne se confondent pas : hors du centre du crop, l’UV
+  // drapé et l’UV cuit DIFFÈRENT en y
+  assert.notEqual(fy.appel({ x: 0, y: 0.6 }), uvChampCrop(0, 0.6).y)
+})
+
+// ---- ⑩i la loi de trait, ÉVALUÉE -----------------------------------------
+
+test('⑩i les trois constantes de trait sont ÉVALUÉES aux deux états, pas lues', () => {
+  // ⚠️ Éteint, le nuanceur doit rendre EXACTEMENT les trois valeurs d’avant la
+  // Tâche C ; allumé, celles de terrain.js. Une mutation qui fige l’un ou
+  // l’autre côté tombe ici — celle qui figeait poidsC à 1.5 survivait avant.
+  const lois = {}
+  for (const [nom, defaut, socle] of [
+    ['poidsC', 1.5, 1.4 * 0.7],
+    ['minorK', 0.5, 0.55],
+    ['crowdK', 0.3, 0.22],
+  ]) {
+    const m = capture(FRAG, new RegExp('float ' + nom + ' = ([^;]+);'), 'la constante ' + nom)
+    const f = loi(m[1], ['uHabOn', 'uContourWeight'])
+    lois[nom] = f
+    assert.ok(Math.abs(f.appel(0, 0.7) - defaut) < 1e-12, nom + ' éteint vaut ' + f.appel(0, 0.7) + ' au lieu de ' + defaut)
+    assert.ok(Math.abs(f.appel(1, 0.7) - socle) < 1e-12, nom + ' allumé vaut ' + f.appel(1, 0.7) + ' au lieu de ' + socle)
+  }
+  // ⚠️ ET LE POIDS SUIT VRAIMENT LA TIRETTE DU SOCLE — sinon elle serait morte
+  // côté globe, et rien ne le dirait.
+  assert.ok(Math.abs(lois.poidsC.appel(1, 1.4) - 1.4 * 1.4) < 1e-12)
+  assert.notEqual(lois.poidsC.appel(1, 1.4), lois.poidsC.appel(1, 0.7))
+  // éteint, la tirette ne doit RIEN changer : la production est intouchée
+  assert.equal(lois.poidsC.appel(0, 1.4), lois.poidsC.appel(0, 0.7))
+})
+
+test('⑩j le trait de côte et l’occupation du sol gardent la FORCE du socle', () => {
+  // Les deux nombres sont capturés des DEUX fichiers et comparés entre eux : si
+  // le socle change sa force, le globe doit suivre, et ce test le dit.
+  const g = capture(FRAG, /col = mix\(col, uInk, cote \* ([\d.]+)\);/, 'la force du trait de côte')
+  const s = capture(TERRAIN_SRC, /uContourColor, coast \* ([\d.]+)\)/, 'la force du trait de côte du socle')
+  assert.equal(Number(g[1]), Number(s[1]), 'le globe pose ' + g[1] + ' là où le socle pose ' + s[1])
+  const gl = capture(FRAG, /blSetLum\(lavis\.rgb, mix\(blLum\(col\), blLum\(lavis\.rgb\), ([\d.]+)\)\)/, 'le dosage de luminance du sol')
+  const sl = capture(TERRAIN_SRC, /blSetLum\(lavis\.rgb, mix\(lumFond, blLum\(lavis\.rgb\), ([\d.]+)\)\)/, 'le dosage du socle')
+  assert.equal(Number(gl[1]), Number(sl[1]), 'le globe dose à ' + gl[1] + ' là où le socle dose à ' + sl[1])
+})
+
+test('⑨j HABILLAGE_MONDE porte bien les valeurs D’AVANT la Tâche C', () => {
+  // ⚠️ SANS CETTE ASSERTION, CHANGER LA CONSTANTE PASSE INAPERÇU : le
+  // constructeur et `retirerHabillage` la lisent tous les deux, donc
+  // l'aller-retour de ⑨h resterait vert alors que le globe peindrait la planète
+  // entière avec un autre intervalle. Les trois valeurs sont celles que
+  // `globe.js` posait en dur avant cette tâche — 500 m d'équidistance à
+  // l'échelle du monde, 0,55 d'opacité, et le poids de trait du socle.
+  assert.equal(HABILLAGE_MONDE.contourIntervalM, 500)
+  assert.equal(HABILLAGE_MONDE.contourOpacite, 0.55)
+  assert.equal(HABILLAGE_MONDE.contourPoids, 0.7)
+  assert.equal(HABILLAGE_MONDE.grainForceM, 0)
+  assert.equal(HABILLAGE_MONDE.margeCoteM, 0)
+  // ⚠️ et l'objet est GELÉ : un uniforme partagé qu'on peut réécrire à distance
+  // ne serait plus une référence, juste une variable de plus.
+  assert.ok(Object.isFrozen(HABILLAGE_MONDE))
+})
