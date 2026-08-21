@@ -53,9 +53,17 @@ import {
 } from './monde/mer-sphere.js'
 // ⚠️ **LE FOV CANONIQUE, PAS UNE CONSTANTE RECOPIÉE.** Tour de correction 1 de
 // la Tâche F : le défaut de `poserMer` portait `33`, une valeur qui n'existe
-// nulle part ailleurs dans le dépôt. `FOV_DEG` est LA source — `main.js:263`
-// pose `params.fov` dessus, et c'est elle qui alimente `SEUIL_NAISSANCE_M`
-// (32 274 m), le chiffre même auquel la bascule de la mer se compare.
+// nulle part ailleurs dans le dépôt. `FOV_DEG` est LA source du DÉFAUT — la
+// ligne `fov: 30` des réglages de `main.js` (⚠️ **PAS `main.js:263`, qui parle du
+// maillage du bloc central : citation fausse dans le commentaire même qui
+// réparait une source fausse, corrigée le 2026-08-21 par la Tâche I**), et c'est
+// elle qui alimente `SEUIL_NAISSANCE_M` (32 274 m), le chiffre auquel la bascule
+// de la mer se compare.
+// ⚠️ **ET CE N'EST QU'UN DÉFAUT.** Relevé sur l'application VIVANTE le
+// 2026-08-21 : `params.fov = 33`, `camera.fov = 33`, `camGlobe.fov = 33` —
+// `templates-user.js` sauvegarde `'fov'`, donc un template appliqué au démarrage
+// repose `params.fov`. « 33 n'existe nulle part dans le dépôt » était vrai de la
+// SOURCE et faux de ce qui tourne : **l'appelant doit passer le fov vivant.**
 import { FOV_DEG } from './monde/seuil-socle.js'
 // L'EXAGÉRATION PARTAGÉE — Tâche E. ⚠️ **UN ÉCRIVAIN, N LECTEURS, ET LE GLOBE
 // EST LE QUATORZIÈME** (`terrain.js` ×5, `ocean.js` ×2, `gpx.js` ×1,
@@ -731,7 +739,9 @@ void main() {
     // l amplitude se dérive du dépôt : le crop naît en occupant 60 % de la
     // HAUTEUR d image (seuil-socle.js, §2) et couvre 9,7 fois cette hauteur à la
     // station 2 km (10 377 m de large contre 2 x 2 000 x tan 15° = 1 072 m de
-    // sol visible, fov 30° de main.js:263). Soit un facteur SEIZE sur la même
+    // sol visible, fov 30° — la ligne "fov: 30" des reglages de main.js, et NON
+    // main.js:263, qui parle du maillage du bloc central ; c est de plus un
+    // DEFAUT, un template peut poser 33). Soit un facteur SEIZE sur la même
     // frontière, sans compter les crops continentaux du §8.
     //
     // ⚠️ ET LE discard RESTE AU-DELÀ D UN PIXEL. Sans lui, chaque fragment de la
@@ -2012,11 +2022,16 @@ export class Globe {
    * @param {number} [arg.portee] en demi-côtés de crop ; défaut : l'horizon
    * @param {number} [arg.pas] segments par côté de la calotte
    * @param {number} [arg.hauteurPx] hauteur de la fenêtre, pour la bascule
-   * @param {number} [arg.fovDeg] ⚠️ défaut `FOV_DEG` — le fov CANONIQUE de
-   *   l'application (`main.js:263`), pas une valeur recopiée. Tour de
-   *   correction 1 : le défaut portait `33`, introuvable ailleurs dans le
-   *   dépôt, alors que `SEUIL_NAISSANCE_M` (`seuil-socle.js`, 32 274 m) — la
-   *   valeur même à laquelle la bascule se compare — est déjà calculée à `30`.
+   * @param {number} [arg.fovDeg] ⚠️ défaut `FOV_DEG` — le fov par DÉFAUT de
+   *   l'application (la ligne `fov: 30` des réglages de `main.js` ; **pas**
+   *   `main.js:263`, qui parle du maillage du bloc central). Tour de correction
+   *   1 : le défaut portait `33`, introuvable ailleurs dans le dépôt, alors que
+   *   `SEUIL_NAISSANCE_M` (`seuil-socle.js`, 32 274 m) — la valeur même à
+   *   laquelle la bascule se compare — est déjà calculée à `30`.
+   *   ⚠️ **MAIS UN DÉFAUT N'EST PAS CE QUI TOURNE.** Relevé le 2026-08-21 sur
+   *   l'application vivante : `camGlobe.fov = 33`, posé par un template
+   *   (`templates-user.js` sauvegarde `'fov'`). **L'appelant doit passer le fov
+   *   VIVANT** — `main.js` le fait, voir `contexteCrop`.
    * @param {number} [arg.largeurBande] largeur de la transition, en octaves
    * @returns {Promise<object|null>}
    */

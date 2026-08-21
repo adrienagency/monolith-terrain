@@ -58,7 +58,7 @@ import { PeaksLayer } from './peaks.js'
 import { Clouds2 } from './clouds2.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
-import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagContinueActive, socleQuadtreeActif, frontiereRenduActive, seuilSocleActif } from './flags.js'
+import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagContinueActive, socleQuadtreeActif, frontiereRenduActive, seuilSocleActif, terreUniqueActive } from './flags.js'
 // LA FRONTIERE DE RENDU — Tache 1b bis. Toute la geometrie de la frontiere vit
 // la-bas, et elle y est TESTEE sous node ; ici il ne reste que le branchement.
 import { poseFond, plansFond } from './monde/frontiere-rendu.js'
@@ -69,6 +69,16 @@ import { creerVeilleSocle } from './monde/veille-socle.js'
 // SA VÉRIFICATION** : la loi ne peut pas vivre ici, aucun test ne charge
 // `main.js`. Voir `majEstompage` plus bas.
 import { creerVeilleEstompage } from './monde/estompage-terre.js'
+// UNE SEULE TERRE — Tâche I, LE BRANCHEMENT. ⚠️ **C'EST LE TROU DU PLAN**, et
+// c'est Adrien qui l'a trouvé : les Tâches A à G posaient six méthodes sur le
+// globe que PERSONNE n'appelait. La chaîne et son automate vivent dans un module
+// pour la même raison que les deux veilles ci-dessus — aucun test ne charge
+// `main.js`, et l'état inter-images est ce qui se casse en silence.
+import { creerVeilleCrop } from './monde/branchement-crop.js'
+// ⚠️ `landmarks.js` N'IMPORTE RIEN — c'est ce qui en fait « la seule source de
+// la largeur du socle » (`seuil-socle.js`, §0), et ce qui rend cet import sans
+// risque de cycle depuis `main.js`, qui est en bout de chaîne.
+import { BLOCK_TILES } from './landmarks.js'
 // ⚠️ `exageration-continue.js` N'IMPORTE RIEN — voir son en-tête : passer par
 // `fenetre-bornee.js` fermerait le cycle terrain.js → fenetre-bornee.js →
 // terrain.js, et AUCUN TEST NE CHARGE `main.js` pour l'attraper.
@@ -4008,7 +4018,46 @@ function altitudeCadrageM() {
 // `flags.js` non plus, et sans cette ligne le globe garderait son exagération 18
 // pour toujours — le facteur 6,4 contre le socle, et le bloc DEBOUT que la
 // Tâche B a relevé à l'écran.
-globe = new Globe({ ...params, globeContinu: globeContinuActif(), exagContinue: exagContinueActive() })
+// ══════════ UNE SEULE TERRE — Tâche I, LE BRANCHEMENT ══════════════════════
+//
+// ⚠️ **LU ICI ET NULLE PART AILLEURS.** Le drapeau décide de quatre choses qui
+// doivent s'accorder au caractère près, et un second appel à `terreUniqueActive()`
+// ailleurs dans ce fichier pourrait diverger (l'adresse ne change pas, mais le
+// patron, lui, se recopie) :
+//   1. le bloc plat ne se rallume plus (`poserVisibiliteSocle`, `socleAffiche`) ;
+//   2. l'état de départ de `veilleSocle` dit « pas de bloc », pour que la
+//      première image sous le seuil APPLIQUE l'extinction ;
+//   3. `majSeuilSocle` nourrit `veilleCrop` au lieu de `veilleSocle`, sur la
+//      MÊME altitude et à la MÊME image ;
+//   4. **le globe devient le quatorzième lecteur de l'exagération** — la ligne
+//      juste dessous, et le §ci-après dit pourquoi ce n'est pas un raccourci.
+//
+// ⚠️ **IL EXIGE `?frontiere=1`, et `flags.js` le garde** : sans la passe de fond
+// le globe n'est pas dessiné en mode surface, et creuser un crop dans une
+// planète qu'on ne dessine pas ne montrerait rien.
+//
+// ⚠️ **IL EST DÉCLARÉ ICI, AVANT LE GLOBE, PARCE QUE LE GLOBE LE LIT.** Un `const`
+// déclaré plus bas serait dans sa zone morte au moment de cette ligne : une
+// `ReferenceError` au démarrage, que ni un test ni `node --check` ne voient.
+const terreUniqueBranchee = terreUniqueActive()
+
+// ⚠️ **`terre unique` ENTRAÎNE `exagSuivie`, ET C'EST UNE MESURE À L'ÉCRAN QUI
+// L'A EXIGÉ, PAS UN GOÛT DE SYMÉTRIE.** La Tâche E fait du globe « le
+// quatorzième lecteur » de l'exagération partagée — mais derrière SON drapeau.
+// Le crop branché sans elle garde l'exagération du globe, **18**, contre les
+// **2,8** du socle qu'il remplace : facteur **6,4**. Relevé à La Réunion z12 le
+// 2026-08-21, deux captures au même cadrage (`.banc/vues-I/`) : sans elle un
+// champ d'aiguilles où l'île n'est plus reconnaissable, avec elle le bloc
+// qu'Adrien attend. **Un crop qui remplace le socle doit avoir sa loi de
+// relief** — sinon on ne branche pas le chantier, on le montre cassé.
+//
+// ⚠️ **CE QUE ÇA NE FAIT PAS :** `exagContinueActive()` a un SECOND lecteur, la
+// courbe continue de `syncExagToZoom` — celui-là n'est pas touché. Sous
+// `?terre=unique` seul, le globe lit la valeur du socle, **table d'Adrien
+// comprise** ; c'est exactement ce que « quatorzième lecteur » veut dire.
+// ⚠️ Conséquence à connaître : `?terre=unique&exag=paliers` NE rend PAS son
+// exagération 18 au globe. Pour la revoir, il faut baisser `?terre`.
+globe = new Globe({ ...params, globeContinu: globeContinuActif(), exagContinue: exagContinueActive() || terreUniqueBranchee })
 
 // ══════════ LA FENÊTRE LIT LE QUADTREE — Tâche 6 quinquies ═════════════════
 //
@@ -4445,7 +4494,17 @@ function majCameraFond() {
 // donc rien à leur sort — ni en bien ni en mal —, et l'orbite d'aujourd'hui a
 // exactement le même angle mort.** Il est écrit ici pour qu'on ne le
 // redécouvre pas.
+//
+// ⚠️ **SOUS `terre unique`, `v` EST BORNÉ À FAUX, ET C'EST TOUT LE GESTE DE LA
+// TÂCHE I.** Le bloc plat ne revient jamais : c'est un CROP dans la planète qui
+// prend sa place. **On ne fabrique PAS une seconde liste** — ce fichier raconte
+// cinq fois l'accident de la liste dupliquée —, on borne l'ENTRÉE de celle-ci,
+// et `socleAffiche()` dit la même chose aux dix-sept sites qui la ré-affirment.
+// Sans ça il y aurait encore DEUX Terres : le bloc plat est opaque et se dessine
+// dans la passe de surface, donc APRÈS la passe de fond — il recouvrirait le
+// crop en entier, et l'écran serait rigoureusement celui d'avant le chantier.
 function poserVisibiliteSocle(v) {
+  if (terreUniqueBranchee) v = false
   terrain.mesh.visible = v
   labels.visible = v && params.labels
   hud3.group.visible = v
@@ -4470,7 +4529,18 @@ function poserVisibiliteSocle(v) {
 // de départ décrit l'application au chargement — socle posé, mode surface —,
 // donc **rien n'est appliqué tant que rien ne bouge** et un drapeau éteint
 // laisse la production intacte.
-const veilleSocle = creerVeilleSocle({ appliquer: poserVisibiliteSocle })
+//
+// ⚠️ **SOUS `terre unique`, L'ÉTAT DE DÉPART DIT « PAS DE BLOC PLAT », ET C'EST
+// LA SEULE FAÇON D'EN OBTENIR UNE APPLICATION.** L'automate n'appelle
+// `appliquer` que sur CHANGEMENT : en partant de « posé », la première image
+// sous le seuil ne changerait rien et le bloc plat resterait à l'écran pour
+// toujours, par-dessus le crop. En partant de « absent », cette première image
+// applique — et `poserVisibiliteSocle` borne son `v` à faux, de sorte que la
+// seule chose qu'elle puisse poser est l'extinction.
+const veilleSocle = creerVeilleSocle({
+  appliquer: poserVisibiliteSocle,
+  socleAuDepart: !terreUniqueBranchee,
+})
 
 // LE SOCLE EST-IL À L'ÉCRAN ? — LA RÉPONSE UNIQUE, POUR TOUS LES CALQUES.
 //
@@ -4488,7 +4558,13 @@ const veilleSocle = creerVeilleSocle({ appliquer: poserVisibiliteSocle })
 // donc `modes?.mode !== 'orbital'` est le même prédicat que le
 // `modes.mode === 'surface'` des dix-sept sites, et le `?.` couvre le
 // `!modes ||` que `regenerateLabels` et `regenerateHud` écrivaient en plus.
+//
+// ⚠️ **ET SOUS `terre unique`, LA RÉPONSE EST NON, TOUJOURS.** Le bloc plat a
+// cédé la place au crop : laisser l'un des dix-sept sites le rallumer remettrait
+// une seconde Terre par-dessus la première. La ligne d'après est celle d'avant,
+// au caractère près, pour les deux autres régimes.
 function socleAffiche() {
+  if (terreUniqueBranchee) return false
   return seuilSocleBranche ? veilleSocle.visible : modes?.mode !== 'orbital'
 }
 
@@ -4504,7 +4580,12 @@ function socleAffiche() {
 // ⚠️ **SANS DRAPEAU, CETTE FONCTION REND LA MAIN TOUT DE SUITE**, et le socle
 // reste à tous les zooms — le comportement d'aujourd'hui, celui de la
 // production. Le drapeau exige `?frontiere=1` : voir `seuilSocleActif()`.
-const seuilSocleBranche = seuilSocleActif()
+// ⚠️ **`terre unique` L'ENTRAÎNE, ET CE N'EST PAS UN RACCOURCI.** Sous ce
+// drapeau, `socleAffiche()` doit lire `veilleSocle.visible` et non le mode : le
+// bloc plat n'a plus à exister du tout, et la branche « mode » le rallumerait à
+// chaque retour en surface. Les deux drapeaux décrivent la même bascule, l'un en
+// retirant le bloc plat, l'autre en le remplaçant.
+const seuilSocleBranche = seuilSocleActif() || terreUniqueBranchee
 function majSeuilSocle() {
   if (!seuilSocleBranche) return
   // ══════ ⚠️ ON NE DÉCIDE PAS PENDANT UN CRAN, ET C'EST MESURÉ ══════════════
@@ -4538,6 +4619,12 @@ function majSeuilSocle() {
   // `entrerEnVol` ouvre en posant `dem = null`. Une altitude d'une autre échelle
   // ferait naître le socle au milieu d'un vol.
   if (modes?.busy || !(largeurBlocM() > 0)) return
+  // ⚠️ **SOUS `terre unique`, C'EST LE CROP QUI DÉCIDE, SUR LA MÊME ALTITUDE ET
+  // À LA MÊME IMAGE.** Les deux automates portent la même loi (`socleVisible`) ;
+  // les faire tourner tous les deux ne changerait rien à l'écran — le bloc plat
+  // est éteint pour de bon — mais ferait deux compteurs de bascules pour un seul
+  // geste, et c'est exactement le genre d'écart qu'on met des soirées à lire.
+  if (terreUniqueBranchee) { veilleCrop.maj(altitudeCadrageM()); return }
   veilleSocle.maj(altitudeCadrageM())
 }
 
@@ -4569,11 +4656,178 @@ const veilleEstompage = creerVeilleEstompage({ appliquer: (f) => globe?.poserEst
 // `camera.position.y` : `altitudeCadrageM()` rend alors exactement la MOITIÉ de
 // la vraie altitude. Sur le seuil du socle cela faisait onze bascules au lieu
 // d'une ; ici cela ferait clignoter la planète entière à chaque cran.
+//
+// ⚠️ **ET SOUS `terre unique`, ELLE REND LA MAIN : C'EST `veilleCrop` QUI
+// NOURRIT L'ESTOMPAGE.** Un seul point d'alimentation, sinon deux lois — un crop
+// qui naîtrait sur une altitude et une planète qui s'effacerait sur une autre se
+// contrediraient à l'écran, et c'est mot pour mot l'argument écrit trois lignes
+// plus haut pour l'ordre des deux appels dans `tick()`.
 function majEstompage() {
   if (!frontiereActive) return
+  if (terreUniqueBranchee) return
   if (modes?.busy || !(largeurBlocM() > 0)) return
   veilleEstompage.maj(altitudeCadrageM())
 }
+
+// ══════════ UNE SEULE TERRE — Tâche I, LE CONTEXTE ET LA VEILLE ════════════
+//
+// ⚠️ **LE CROP DOIT TOMBER EXACTEMENT SUR LE BLOC, ET LA SIMILITUDE NE PARDONNE
+// PAS.** `majCameraFond` pose la caméra de fond en ancrant le globe sur
+// `latLonOrigineBloc()` — le lat/lon qui est à l'origine du bloc, PAS le lieu
+// demandé (`params.demLat/demLon` décalait la planète de 28 px sur 562, mesuré).
+// Le crop prend donc **la même ancre**, sans quoi la découpe et le bloc qu'elle
+// remplace ne seraient pas au même endroit à l'écran.
+//
+// ⚠️ **ET LA LARGEUR SE DÉDUIT DE L'EMPRISE, PAS DE `params.demZoom`.** Le
+// `zoom` de `repereCrop` ne sert qu'à `demi = tuilesParBloc / 2 / 2^zoom` : ce
+// qu'on veut, c'est que `demi` vaille exactement la demi-largeur du bloc en
+// mercator. La déduire de l'emprise RÉELLE rend ça vrai par construction, y
+// compris pendant l'image où `params.demZoom` a déjà changé et où l'emprise
+// n'a pas suivi — le désaccord d'une image qui a valu onze bascules au seuil.
+//
+// ⚠️ **CE QUE CE CONTEXTE NE PORTE PAS, ET IL FAUT LE DIRE :**
+//   · **`remplir` pour la mer, donc PAS DE BATHYMÉTRIE.** `poserMer` remplirait
+//     son champ par `remplirHauteurs(flux, …)` sur l'emprise de la CALOTTE, qui
+//     couvre jusqu'à 256 demi-largeurs de crop. Or `demanderEmprise` REMPLACE
+//     `gardeHauteurs` à chaque appel (`flux-terrain.js`, « un seul flux par
+//     globe ») : la demander ici reprendrait au bloc ses réservations, et le
+//     socle perdrait ses hauteurs. On retombe donc sur `hauteurSurface`, qui lit
+//     les tuiles du globe — lesquelles n'ont **aucun fond marin**. **La mer sera
+//     d'un bleu uniforme**, et `poserMer` le dit lui-même par `bathy: false`.
+//   · **le grain** reste à zéro : `HABILLAGE_MONDE.grainForceM` vaut 0 et rien
+//     dans les réglages du socle ne s'y traduit en mètres de relief sans une
+//     mesure qu'on n'a pas faite.
+function contexteCrop() {
+  const centre = latLonOrigineBloc()
+  if (!Number.isFinite(centre?.lat) || !Number.isFinite(centre?.lon)) return null
+  const emprise = terrain.fenetreBornee?.emprise || empriseDuSocle()
+  if (!emprise) return null
+  let large = emprise.est - emprise.ouest
+  if (large <= 0) large += 360 // franchissement de l'antiméridien — convention de `seuil-socle.js`
+  if (!(large > 0)) return null
+  const zoom = Math.log2((360 * BLOCK_TILES) / large)
+  if (!Number.isFinite(zoom)) return null
+
+  // ⚠️ **LES UNIFORMES SE LISENT UN PAR UN, JAMAIS EN BLOC.** `terrain.mapUniforms`
+  // cédé à une variable est une poignée sur le bloc central, et
+  // `test/damier-uniformes.test.js` (③) l'exige déclarée : ce qu'un porteur de
+  // poignée écrit n'atteint jamais les dalles voisines. Ici on ne fait que LIRE,
+  // et le plus simple est de ne pas prendre la poignée du tout.
+  const cote = terrain.mapUniforms.uCoastMaskOn.value > 0.5 ? terrain.mapUniforms.uCoastMask.value : null
+  const sol = terrain.mapUniforms.uSolOn.value > 0.5 ? terrain.mapUniforms.uSol.value : null
+  // l'amplitude du relief du crop : elle CALE l'intervalle des courbes de niveau
+  // (le globe posait 500 m en dur, ce qui ne trace qu'une courbe à l'île Maurice)
+  const f = terrain.fenetreBornee
+  const amplitudeM = Number.isFinite(f?.maxM) && Number.isFinite(f?.minM)
+    ? f.maxM - f.minM
+    : (Number.isFinite(dem?.maxM) && Number.isFinite(dem?.minM) ? dem.maxM - dem.minM : null)
+
+  return {
+    centre,
+    zoom,
+    tuilesParBloc: BLOCK_TILES,
+    habillage: {
+      coastMask: cote,
+      sol,
+      solLut: sol ? terrain.mapUniforms.uSolLut.value : null,
+      solOpacite: terrain.mapUniforms.uSolOpacite.value,
+      solOffset: terrain.mapUniforms.uSolOffset.value,
+      solScale: terrain.mapUniforms.uSolScale.value,
+      solTexel: terrain.mapUniforms.uSolTexel.value,
+      amplitudeM: amplitudeM > 0 ? amplitudeM : null,
+      contourOpacity: terrain.mapUniforms.uContourOpacity.value,
+      contourWeight: terrain.mapUniforms.uContourWeight.value,
+    },
+    mer: {
+      altitudeM: altitudeCadrageM(),
+      // ⚠️ **LE FOV VIVANT, PAS LE DÉFAUT DU MODULE — ET C'EST UN RELEVÉ, PAS
+      // UNE PRÉCAUTION.** Le 2026-08-21 sur l'application qui tourne :
+      // `params.fov = 33`, `camera.fov = 33`, `camGlobe.fov = 33`, alors que le
+      // défaut du code est 30 et que `FOV_DEG` vaut 30. L'écart vient des
+      // TEMPLATES — `templates-user.js` sauvegarde `'fov'`, et un template
+      // appliqué au démarrage repose `params.fov`. « 33 n'existe nulle part dans
+      // le dépôt » était vrai de la SOURCE et faux de l'application.
+      fovDeg: camGlobe?.fov ?? camera.fov,
+      hauteurPx: renderer.domElement?.clientHeight || undefined,
+    },
+  }
+}
+
+// ⚠️ **`globe` EST DONNÉ PAR UNE FONCTION, PAS PAR SA VALEUR.** Il est assigné
+// plus haut dans ce fichier mais réassigné à la perte de contexte WebGL ; une
+// référence figée survivrait à la réassignation et poserait le crop sur un globe
+// mort, sans une erreur.
+//
+// ⚠️ **`masquerSocle` EST CE QUI FAIT QU'IL N'Y A PLUS QU'UNE TERRE — ET SANS
+// LUI IL Y EN AVAIT ENCORE DEUX, RELEVÉ À L'ÉCRAN.** Première image du drapeau
+// levé, La Réunion z12 : `uCropOn = 1`, `uHabOn = 1`, la mer posée… et
+// `terrain.mesh.visible = true`. Le bloc plat est opaque et se dessine dans la
+// passe de SURFACE, donc après la passe de fond : il recouvrait le crop en
+// entier, et l'écran était exactement celui d'avant le chantier. **C'est la même
+// classe d'erreur que celle qui a créé cette tâche** — du code qui tourne,
+// personne qui le voit. ⚠️ **Il rappelle LA LISTE, il n'en fabrique pas une
+// seconde**, et il ne tourne qu'une fois par entrée en surface.
+const veilleCrop = creerVeilleCrop({
+  globe: () => globe,
+  contexte: contexteCrop,
+  estompage: veilleEstompage,
+  masquerSocle: () => poserVisibiliteSocle(false),
+  // ⚠️ **SANS CETTE RÉSERVATION, LES PAROIS ET LA RAMPE REFUSENT POUR TOUJOURS,
+  // ET C'EST MESURÉ À L'ÉCRAN.** La Réunion z12, drapeau levé, **600 tuiles** de
+  // globe en cache : `globe.tuilesAvecHauteurs().length` rendait **0**, donc
+  // `couverture = 0`, donc `refus: 'couverture'` à chaque tentative. Ce n'est pas
+  // le réseau : `_buildMesh` RELÂCHE `t.heights` dès le maillage bâti (Tâche
+  // 4 sexies), **sauf pour les clés de `gardeHauteurs`** — et personne ne
+  // réservait l'emprise du crop. Les Tâches B, D et F ont toutes été vérifiées
+  // sur des hauteurs posées à la main : le manque ne pouvait se voir qu'ici.
+  //
+  // ⚠️ **MÊME APPEL, MÊMES ARGUMENTS QUE `hauteursDeFlux`**, et c'est ce qui les
+  // rend compatibles : `demanderEmprise` REMPLACE `gardeHauteurs` à chaque appel
+  // (« un seul flux par globe »), donc deux réservations différentes se
+  // reprendraient leurs tuiles. Le crop et le bloc ont la MÊME emprise et le
+  // MÊME zoom — c'est toute l'idée du chantier —, donc la même réservation.
+  //
+  // ⚠️ **ET ON RÉSERVE UNE TUILE DE PLUS TOUT AUTOUR, POUR UNE RAISON QUI N'EST
+  // PAS UN CONFORT.** Avec la réservation exacte du bloc, `couverture` des
+  // parois plafonnait à **0,552** — mesuré — et le refus ne partait jamais. La
+  // cause tient en une ligne d'échantillonnage : **le contour des parois court
+  // sur la FRONTIÈRE du crop**, et la frontière est la borne EXCLUE des neuf
+  // tuiles. Sondé à la main sur les treize points du repère, à La Réunion z12 :
+  // `u = −1` rend 1 220 m, `u = +1` rend **null** ; `v = −1` rend 134 m,
+  // `v = +1` rend **null**. Les arêtes est et sud tombent sur la première
+  // colonne et la première ligne de la tuile SUIVANTE.
+  //
+  // ⚠️ **ET LE REPLI QUE `parois-crop.js` §7 ① PROMET N'EXISTE PAS ICI.** Il dit
+  // « `globe.js` ne purge jamais ses seize racines z2 », donc un point non
+  // couvert retombe sur un ancêtre grossier. C'est vrai des TUILES et faux de
+  // leurs HAUTEURS : `_buildMesh` les relâche pour tout ce que `gardeHauteurs`
+  // ne retient pas, et `gardeHauteurs` ne retient que l'emprise réservée. Le
+  // repli n'a donc rien à quoi retomber. **Abaisser `couvertureMin` n'est pas la
+  // sortie** — le même §7 prévient qu'on achèterait des encoches au niveau de la
+  // mer, tout le long des deux arêtes.
+  //
+  // ⚠️ **CE QUE ÇA COÛTE, DIT EN ENTIER :** 25 tuiles réservées au lieu de 9,
+  // donc **16 tuiles de plus** par position de bloc. Et sous
+  // `?globe=continu&socle=quadtree`, `hauteursDeFlux` réserve les 9 de son côté :
+  // les deux réservations ALTERNENT tant que les parois refusent. C'est borné —
+  // la reprise s'arrête dès que le refus part, et une géométrie bâtie ne se
+  // défait pas — mais ce n'est pas gratuit, et ça n'a pas été chronométré.
+  reserverHauteurs: () => {
+    const flux = fluxDuSocle()
+    const emprise = terrain.fenetreBornee?.emprise || empriseDuSocle()
+    if (!flux || !emprise) return
+    // ⚠️ **LES DEUX CONVERSIONS SONT CELLES DE `geo.js`, PAS UNE TROISIÈME.**
+    // `mondeVersLatLonEmprise` interpole la longitude linéairement et la latitude
+    // en MERCATOR — c'est exactement la grille de tuiles. Une marge calculée en
+    // degrés de latitude serait fausse dès qu'on quitte l'équateur.
+    const D = 5 / 6 // une tuile de marge sur un bloc de trois : (1,5 + 1) / 3
+    const n = mondeVersLatLonEmprise(emprise, 0, -D, 1).lat
+    const s = mondeVersLatLonEmprise(emprise, 0, D, 1).lat
+    const o = mondeVersLatLonEmprise(emprise, -D, 0, 1).lon
+    const e = mondeVersLatLonEmprise(emprise, D, 0, 1).lon
+    demanderEmprise(flux, { emprise: { ouest: o, sud: s, est: e, nord: n }, zoom: params.demZoom })
+  },
+})
 
 modes = new Modes({
   camera,
@@ -10732,6 +10986,12 @@ window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, sce
   // `veilleEstompage.valeur` est ce qui se lit à l'écran pour vérifier qu'une
   // descente estompe la planète au lieu de la faire clignoter.
   veilleEstompage,
+  // UNE SEULE TERRE — Tâche I, exposée pour la même raison que les trois blocs
+  // ci-dessus : `main.js` n'est chargé par aucun test, et `veilleCrop.pose`,
+  // `.refus`, `.bascules` et `.signature` sont **la seule façon de vérifier à
+  // l'écran que la chaîne est réellement appelée** — et, quand le bloc ne
+  // ressemble pas au socle, de dire QUEL maillon a refusé plutôt que de deviner.
+  veilleCrop, terreUniqueBranchee, contexteCrop,
   // mode aléatoire + ombrage auto : de quoi sonder l'état depuis la console
   shuffleLook,
   // ⚠️ À APPELER AVANT DE COUPER LA BOUCLE rAF pour un tournage hors ligne
@@ -10996,6 +11256,11 @@ function tick() {
   // Le raffinement du socle, juste après la fenêtre continue : les deux écrivent
   // le relief, et écrire deux fois dans la même image serait payer deux fois.
   socleRaffine()
+  // ⚠️ **LA MER DU CROP EST LA SEULE CHOSE DE LA CHAÎNE QUI SE PAIE PAR IMAGE**,
+  // et elle est CINQ lignes de plus : `poserMer` construit une calotte figée, et
+  // sans cette avance du temps ses vagues de Gerstner ne bougent pas d'un pouce.
+  // Le globe sort tout de suite s'il n'y a pas de mer posée.
+  if (terreUniqueBranchee) globe?.animerMer(dtAmb)
 
   // PLUS DE RENORMALISATION DE BRUME PAR IMAGE. Elle existait parce que Début
   // et Fin étaient exprimés pour un cadrage de référence (~40 unités) alors que

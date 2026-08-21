@@ -688,6 +688,56 @@ La planète autour du crop **se fond progressivement vers le fond** à mesure qu
 
 - [ ] Test → rouge → implémenter → mutation → écran → clôture.
 
+### Tâche I — LE BRANCHEMENT ⚠️ LE TROU DU PLAN, TROUVÉ PAR ADRIEN À L'ÉCRAN
+
+**Fichiers :** modifier `src/main.js` · `src/flags.js` · tester
+
+⚠️ **CE PLAN N'AVAIT AUCUNE TÂCHE QUI BRANCHE CE QU'IL CONSTRUIT.** Les tâches A à G posent
+`poserCrop`, `construireParoisCrop`, `poserHabillage`, `poserRampe`, `poserMer` — et
+**personne ne les appelle**. Compté le 2026-08-21 dans `src/` hors `globe.js` :
+
+| | appelants de production |
+|---|---|
+| `poserCrop` | **0** *(1 mention, en commentaire)* |
+| `poserHabillage` | **0** *(1 mention, en commentaire)* |
+| `poserRampe` | **0** *(2 mentions, en commentaire)* |
+| `poserMer` | **0** |
+| `construireParoisCrop` | **0** |
+| `poserEstompage` | **1**, derrière le drapeau de la Tâche G |
+
+**Conséquence, et Adrien l'a vue avant moi :** l'application se comporte exactement comme
+avant le chantier. Crans au zoom, bascule sur le socle vers Z11, **les deux Terres
+superposées en transparence**, exagération démesurée. Ce n'est pas un mauvais serveur, ce
+n'est pas un drapeau oublié : **c'est une tâche qui manque au plan.**
+
+⚠️ **Et la Tâche H ne peut pas passer avant.** « Retirer le chemin bloc de `terrain.js` »
+retirerait le seul socle qui existe, sans rien pour le remplacer.
+
+- [ ] **Étape 1 — le test qui échoue.** Il doit exiger que, sous le drapeau, **la descente
+      appelle réellement la chaîne** : crop posé aux bonnes bornes, parois bâties, habillage,
+      rampe, mer, estompage suivi de l'altitude. ⚠️ **Un test qui vérifie qu'une fonction
+      EXISTE ne mord pas** — ce chantier a déjà vu un corps de 150 lignes passer 44 tests
+      verts sans être exercé une seule fois.
+- [ ] **Étape 2** — le lancer, le voir rouge.
+- [ ] **Étape 3 — implémenter, DERRIÈRE UN DRAPEAU.** `terreUnique`, défaut **false**, essayable
+      par l'adresse (`?terre=unique`). ⚠️ **Le socle actuel est EN PRODUCTION sur shibumap.com :
+      le défaut ne bascule pas dans cette tâche.**
+- [ ] **Étape 4 — la reprise de `seuil-socle.js`.** `socleVisible` / `empriseSocle` décident
+      aujourd'hui quand le socle plat naît et meurt (32 274 m / 40 343 m). C'est la même
+      décision pour le crop : **réutiliser, ne pas refaire.**
+- [ ] **Étape 5 — mutation.** Sémantiques, dans un worktree à part.
+- [ ] **Étape 6 — REGARDER L'ÉCRAN, et c'est l'objet de la tâche.** Descendre de l'orbite au
+      sol **sans toucher à la console**, drapeau levé. ⚠️ **Dire franchement ce qu'on voit** :
+      trois tâches de ce chantier ont écrit « non, ça ne ressemble pas encore au socle »
+      plutôt que de conclure au succès, et c'est ce qui a rendu leurs rapports utilisables.
+- [ ] **Étape 7 — la clôture du §0**, page chargée drapeau levé ET baissé, puis commit.
+
+⚠️ **CE QUI RESTERA FAUX APRÈS CETTE TÂCHE, ET QU'ELLE NE DOIT PAS MAQUILLER** : le crop ne
+ressemble toujours pas au socle (Tâches C, D, F), les arêtes du bloc sont vives (Tâche B),
+**les jupes des tuiles pendent sous le bloc** (Tâche E), et **les raccords de niveaux du
+quadtree font des arêtes droites dans les alentours** (Tâche G). Le branchement les rend
+**visibles ensemble pour la première fois** — c'est son intérêt, pas son échec.
+
 ### Tâche H — LA DÉPOSE ⚠️ EN DERNIER
 
 Retirer `monde/fenetre-bornee.js`, le chemin « bloc » de `terrain.js`, et les drapeaux devenus inutiles. ⚠️ **Ne commence pas avant que tout le reste soit vert à l'écran.** **Le dépôt doit avoir MAIGRI.**

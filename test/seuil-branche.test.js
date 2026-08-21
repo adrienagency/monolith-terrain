@@ -343,9 +343,17 @@ test("`socleAffiche()` rend l'expression d'avant quand le drapeau est éteint", 
   // ⚠️ C'est ce qui garantit qu'aucune de ces dix-sept lignes ne change en
   // production : il n'y a que DEUX modes, donc `!== 'orbital'` est le même
   // prédicat que `=== 'surface'`, et le `?.` couvre le `!modes ||` d'origine.
+  // ⚠️ **AMENDÉ PAR LA TÂCHE I (« UNE SEULE TERRE »), ET L'INTENTION EST
+  // INTACTE.** Le prédicat porte désormais une garde de plus AVANT lui —
+  // `if (terreUniqueBranchee) return false`, parce que sous ce drapeau-là le bloc
+  // plat a cédé la place à un crop dans la planète et qu'aucun des dix-sept sites
+  // ne doit le rallumer. **Ce que ce test garde n'a pas bougé** : le chemin
+  // DRAPEAU ÉTEINT reste l'expression d'avant, au caractère près, et c'est elle
+  // qui est exigée ici. La garde ajoutée est gardée, elle, par
+  // `test/crop-branche.test.js` (⑧ quater).
   assert.match(
     SRC_MAIN,
-    /function socleAffiche\(\)\s*\{\s*return seuilSocleBranche \? veilleSocle\.visible : modes\?\.mode !== 'orbital'\s*\}/,
+    /function socleAffiche\(\)\s*\{[^}]*?\breturn seuilSocleBranche \? veilleSocle\.visible : modes\?\.mode !== 'orbital'\s*\}/,
   )
   const modesPoses = [...new Set(SRC_MODES.match(/this\.mode = '[a-z]+'/g) || [])].sort()
   assert.deepEqual(modesPoses, ["this.mode = 'orbital'", "this.mode = 'surface'"],

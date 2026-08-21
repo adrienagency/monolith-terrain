@@ -48,8 +48,9 @@
 //
 // ⚠️ **ET LES DEUX BORNES NE SONT PAS POSÉES : ELLES SE DÉRIVENT.** Le §0 du
 // plan interdit un chiffre sans sa source ; ici la source est le calcul de
-// `seuil-socle.js`, donc le champ de vision canonique (`FOV_DEG = 30`, tiré de
-// `main.js:263`) et la largeur du socle à `ZOOM_SOCLE`. Un test refuse toute
+// `seuil-socle.js`, donc le champ de vision par défaut (`FOV_DEG = 30`, tiré de
+// la ligne `fov: 30` des réglages de `main.js` — **pas** `main.js:263`, citation
+// corrigée le 2026-08-21) et la largeur du socle à `ZOOM_SOCLE`. Un test refuse toute
 // altitude écrite en dur dans ce fichier.
 //
 // ══════════ 2. OÙ LE FONDU COMMENCE, OÙ IL FINIT ═══════════════════════════

@@ -81,7 +81,9 @@
 //
 // ⚠️ **60 % DE LA HAUTEUR, ET LINÉAIREMENT.** Deux facteurs se cachent là :
 //   · le champ de vision de three.js **EST VERTICAL** (`PerspectiveCamera.fov`),
-//     et `main.js:263` le pose à **30°**. Prendre la largeur déplacerait le
+//     et la ligne `fov: 30` des réglages de `main.js` le pose à **30°**
+//     (⚠️ **PAS** `main.js:263` : citation fausse, corrigée le 2026-08-21).
+//     Prendre la largeur déplacerait le
 //     seuil du rapport d'aspect — **1,7 en 16/9** ;
 //   · 60 % LINÉAIRE n'est pas 60 % SURFACIQUE. Si l'on avait voulu dire
 //     « 60 % des pixels », la fraction linéaire vaudrait √0,6 = 0,775, soit
@@ -170,7 +172,24 @@ export const ZOOM_SOCLE = 13
 // La latitude d'ancrage des deux seuils — celle du plan, « exécuté à 45° ».
 export const LAT_REFERENCE = 45
 
-// `params.fov` — `main.js:263`. ⚠️ VERTICAL : c'est le champ de three.js.
+// `params.fov` — la ligne `fov: 30` des réglages de `main.js` (⚠️ **pas**
+// `main.js:263`, qui parle du maillage du bloc central ; citation corrigée le
+// 2026-08-21). ⚠️ VERTICAL : c'est le champ de three.js.
+//
+// ⚠️ **C'EST UN DÉFAUT, PAS UNE CONSTANTE DE L'APPLICATION.** Relevé le
+// 2026-08-21 dans la console, session réelle : `params.fov = 33`,
+// `camera.fov = 33`, `camGlobe.fov = 33` — `templates-user.js` sauvegarde
+// `'fov'`, donc un template appliqué au démarrage repose `params.fov`. Les deux
+// seuils ci-dessous sont donc dérivés à 30° pendant que la caméra en fait 33.
+// **Conséquence exacte, calculée et non supposée :** à `SEUIL_NAISSANCE_M`, un
+// socle vu à 33° occupe `0,6 × tan(15°)/tan(16,5°)` = **54,3 % de la hauteur**
+// au lieu de 60 %. C'est le MÊME sens que l'obliquité de la caméra d'arrivée et
+// que la latitude (les deux écrits plus haut) : **les trois écarts vont dans la
+// même direction — le socle est plus petit à l'écran qu'annoncé quand il naît.**
+// Non corrigé ici : un seuil qui suivrait le fov en vol serait une grandeur de
+// plus à faire coïncider entre modules, et la signature qu'attendent les Tâches
+// 4 bis, 6 et 7 est `{ altitudeEllipsoideM, visibleAvant }`. **À rouvrir avec
+// les deux autres, quand Adrien regardera.**
 export const FOV_DEG = 30
 
 // La demande d'Adrien, traduite : « une partie assez importante de l'écran ».

@@ -144,6 +144,47 @@ export const FLAGS = {
   //
   // `?seuil=1` l'essaie, `?seuil=0` le coupe.
   seuilSocle: false,
+
+  // UNE SEULE TERRE — Tâche I du plan « terre unique », LE BRANCHEMENT.
+  //
+  // ⚠️ **CE DRAPEAU EXISTE PARCE QUE LE PLAN N'AVAIT AUCUNE TÂCHE QUI BRANCHE.**
+  // Les Tâches A à G ont posé `poserCrop`, `construireParoisCrop`,
+  // `poserHabillage`, `poserRampe`, `poserMer` — et **personne ne les
+  // appelait**. Compté le 2026-08-21 dans `src/` hors `globe.js` : zéro appelant
+  // de production pour les cinq. Adrien a ouvert le serveur et vu l'application
+  // d'avant le chantier : « j'ai l'impression de ne pas être sur le bon
+  // serveur ». Il était sur le bon serveur.
+  //
+  // Ce que le drapeau fait, et rien de plus : sous le seuil du socle
+  // (`seuil-socle.js`, 32 274 m), **le bloc plat cède la place à un CROP dans la
+  // planète** — découpe, parois, habillage, rampe, mer — et l'estompage suit la
+  // même altitude. Au-dessus du seuil, le crop est retiré et on voit la Terre.
+  //
+  // ⚠️ **OFF, ET LE DÉFAUT NE BASCULE PAS DANS CETTE TÂCHE : LE SOCLE ACTUEL EST
+  // EN PRODUCTION SUR shibumap.com.** Ce que le crop montre aujourd'hui est
+  // encore loin du socle, et c'est écrit dans le compte rendu de la tâche plutôt
+  // que caché ici : les arêtes du bloc sont vives (Tâche B), les jupes des tuiles
+  // pendent sous lui (Tâche E), les raccords de niveaux du quadtree font des
+  // arêtes droites dans les alentours (Tâche G), et la mer part SANS bathymétrie
+  // (voir `contexteCrop` dans `main.js`, qui dit pourquoi).
+  //
+  // ⚠️ **IL EXIGE `?frontiere=1`, ET C'EST LA MÊME RAISON QUE `seuilSocle`** :
+  // sans la passe de fond, le globe n'est PAS dessiné en mode surface. Creuser
+  // un crop dans une planète qu'on ne dessine pas ne montrerait rien du tout.
+  //
+  // `?terre=unique` l'essaie, `?terre=deux` (ou `?terre=0`) le coupe.
+  terreUnique: false,
+}
+
+// UNE SEULE TERRE — Tâche I. ⚠️ **ELLE EXIGE LA FRONTIÈRE DE RENDU**, même
+// patron et même motif que `seuilSocleActif()` : sans la passe de fond, le globe
+// n'est pas dessiné en mode surface et le crop serait creusé dans le vide.
+export function terreUniqueActive() {
+  if (!frontiereRenduActive()) return false
+  const v = paramAdresse('terre')
+  if (v === '0' || v === 'deux') return false
+  if (v === '1' || v === 'unique') return true
+  return FLAGS.terreUnique
 }
 
 // LE SEUIL DU SOCLE — Tâche 3 branchée. ⚠️ **IL EXIGE LA FRONTIÈRE DE RENDU**,
