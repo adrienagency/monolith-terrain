@@ -532,16 +532,19 @@ test('⑧c LES DEUX CHEMINS PEIGNENT LE MÊME BLOC — attribut par attribut', a
   const nb = (PARAMS_TERRAIN.resolution + 1) ** 2
   for (const [nom, k] of [['position', 3], ['normal', 3], ['color', 3], ['uv', 2]]) {
     for (let i = 0; i < nb * k; i++) {
-      // ⚠️ **CETTE TOLÉRANCE DÉCRIVAIT UN NaN QUI N'A PAS SU ÊTRE REPRODUIT —
-      // CORRIGÉ EN PLACE, Tâche 6 septies.** Le bilan de la Tâche 6 ter annonçait
-      // « trois composantes de `color` NaN des DEUX côtés » (`Math.pow(hn, 0.85)`
-      // avec `hn < 0`, `terrain.js:_ecrireRelief`). Rejoué le 2026-08-21 sur CE
-      // banc exact : **zéro composante NaN sur 12 675 (production) et 13 446
-      // (fenêtre)**, `hn` minimal 0,0015. Le chemin restait ATTEIGNABLE par la
-      // branche `empriseCote > 1`, dont les extrema sont QUANTIFIÉS ; `terrain.js`
-      // borne donc désormais `hn` à zéro — l'identité bit à bit partout où il
-      // était déjà positif. La branche ci-dessous est devenue morte : on la garde
-      // parce qu'elle ne coûte rien, et ⑫g exige, lui, l'absence totale de NaN.
+      // ⚠️ **CETTE TOLÉRANCE DÉCRIVAIT UN NaN QUE CE BANC-CI NE PRODUIT PAS —
+      // ET IL A FALLU DEUX PASSES POUR LE DIRE JUSTE.** Le bilan de la Tâche 6
+      // ter annonçait « trois composantes de `color` NaN des DEUX côtés »
+      // (`Math.pow(hn, 0.85)` avec `hn < 0`, `terrain.js:_ecrireRelief`).
+      // Rejoué le 2026-08-21 sur CE banc exact : **zéro composante NaN sur
+      // 12 675 (production) et 13 446 (fenêtre)**, `hn` minimal 0,0015 — parce
+      // que le point le plus bas de `demBouchon` est à −1 130 m, où
+      // `landFactor = smoothstep(0, 90, raw)` éteint le grain qui aurait pu
+      // faire passer un sommet sous `minH`. **Le défaut, lui, est bien réel :
+      // sur un champ ALPIN il tombe, et ⑫h le mesure — 421 sommets sous
+      // `minH`.** `terrain.js` borne donc `hn` à zéro. La branche ci-dessous
+      // est devenue morte : on la garde parce qu'elle ne coûte rien, et ⑫g
+      // comme ⑫h exigent, eux, l'absence totale de NaN.
       if (!Number.isFinite(A[nom][i]) || !Number.isFinite(B[nom][i])) {
         assert.equal(Number.isFinite(A[nom][i]), Number.isFinite(B[nom][i]), `${nom}[${i}] : un NaN d'un seul côté`)
         continue
@@ -1318,10 +1321,14 @@ test('⑫g AUCUNE COMPOSANTE DE COULEUR N\'EST NaN — sur les DEUX chemins et s
   // ⚠️ **CE TEST DIT CE QUE ⑧c NE POUVAIT PAS DIRE.** ⑧c compare les deux
   // chemins : il passe si les deux rendent NaN au même endroit. Celui-ci exige
   // qu'il n'y en ait AUCUN. Rejoué avant d'être écrit : sur le banc de ⑧c il
-  // passait DÉJÀ (zéro NaN sur 12 675 et 13 446 composantes) — le NaN annoncé
-  // par la Tâche 6 ter n'a pas su être reproduit, et c'est écrit là-bas aussi.
-  // Ce qu'il verrouille, c'est la borne `Math.max(0, hn)` de `_ecrireRelief`,
-  // qui ferme le chemin ATTEIGNABLE par la branche `empriseCote > 1`.
+  // passait DÉJÀ (zéro NaN sur 12 675 et 13 446 composantes).
+  //
+  // ⚠️ **ET C'EST POURQUOI IL NE SUFFIT PAS : IL NE MORD PAS.** Vérifié le
+  // 2026-08-21, la borne `Math.max(0, hn)` retirée de `_ecrireRelief` : ses
+  // deux bancs restent VERTS, et seule la lecture de source de sa dernière
+  // ligne rougit. **C'est ⑫h qui garde le COMPORTEMENT** — un champ alpin,
+  // 421 sommets sous `minH`, et un rouge sur la couleur. Celui-ci garde ce
+  // qu'il sait garder : qu'aucun des deux chemins n'introduit de NaN seul.
   const { Terrain } = await import('../src/terrain.js')
   const nbNaN = (t) => {
     const c = t.mesh.geometry.attributes.color.array
@@ -1356,4 +1363,252 @@ test('⑫g AUCUNE COMPOSANTE DE COULEUR N\'EST NaN — sur les DEUX chemins et s
   // et la borne est bien dans le code, pas seulement dans le résultat
   const src = sansCommentaires(lire('src/terrain.js'))
   assert.ok(/Math\.pow\(Math\.max\(0, hn\), 0\.85\)/.test(src), 'la borne de `hn` a disparu de `_ecrireRelief`')
+})
+
+// ══════════ ⑫h — LE BANC QUI MORD ══════════════════════════════════════════
+//
+// ⚠️ **⑫g NE MORDAIT PAS, ET C'EST MESURÉ.** Le 2026-08-21 la borne
+// `Math.max(0, hn)` a été retirée de `_ecrireRelief` et ⑫g relancé : ses DEUX
+// bancs sont restés VERTS, et seule sa dernière ligne — une lecture de la
+// source — rougissait. Un test qui ne tient plus que par un `grep` ne garde
+// rien : il s'éteint au premier renommage, et il annonce une couverture qu'il
+// n'a pas.
+//
+// Ce qui protégeait ⑫g, c'est `landFactor = smoothstep(0, 90, raw)` de
+// `_makeGridSampler` : sur `demBouchon`, le point le plus bas du champ est à
+// −1 130 m, le grain FBM y est donc multiplié par ZÉRO, et le sommet du fond de
+// champ vaut EXACTEMENT `minH`. Relever `dem.minM` d'un mètre — ce que fait
+// ⑫g ② — n'y change rien : le grain qui devait franchir cet écart n'existe pas
+// à cet endroit-là.
+//
+// **Le banc ci-dessous retire cette protection sans rien truquer** : un champ
+// ALPIN, dont aucun point n'est sous 90 m — la situation de toute emprise de
+// montagne, c'est-à-dire du cas d'usage principal de l'application. `landFactor`
+// y vaut 1 PARTOUT, grain compris au minimum du champ. Et comme la branche
+// `empriseCote > 1` remplace `minH` par `(dem.minM − meanM)·échelle` — le
+// minimum du champ SANS grain — tout sommet posé sur le fond plat de la cuvette
+// et tiré vers le bas par le grain passe SOUS `minH`.
+//
+// Mesuré le 2026-08-21 : **421 à 433 sommets sur 4 225** selon la graine,
+// `hn` minimal −2,9·10⁻⁴, sur les DEUX chemins. Sans la borne, autant de
+// `Math.pow(négatif, 0.85)`, donc autant de sommets NaN.
+
+/**
+ * Un MNT ALPIN — cuvette à fond PLAT, et **aucun point sous 90 m**.
+ *
+ * ⚠️ Le fond plat n'est pas une commodité : c'est ce qui rend le banc
+ * insensible à la graine. Un minimum PONCTUEL ne mordrait que si le grain y est
+ * négatif — une chance sur deux, mesurée (graines 7 et 11 : rien ; 42 et 101 :
+ * un sommet). Le plateau met ~800 pixels à l'altitude minimale exacte, dont
+ * quatre cents et quelques sous le grain, quelle que soit la graine.
+ *
+ * ⚠️ `size = 193` et non 192 : à `empriseCote = 3`, la géométrie de res 64 lit
+ * les pixels `64…128` PAR PAS D'UN PIXEL EXACTEMENT (`(size − 1) / 3 = 64`).
+ * Un sommet tombe donc SUR le pixel, sans interpolation qui remonterait
+ * doucement au-dessus du minimum.
+ */
+function demAlpin (size, mpp) {
+  const data = new Float32Array(size * size)
+  const c = (size - 1) / 2
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const r = Math.hypot(x - c, y - c) / (c * Math.SQRT2)
+      const m = Math.max(0, r - 0.12) / 0.88 // 0 sur le fond plat
+      data[y * size + x] = 300 + 1200 * m + 40 * m * Math.sin(x * 2.3 + y * 1.7)
+    }
+  }
+  let min = Infinity
+  let max = -Infinity
+  let s = 0
+  for (const v of data) { if (v < min) min = v; if (v > max) max = v; s += v }
+  return { data, size, metersPerPixel: mpp, extentMeters: mpp * size, minM: min, maxM: max, meanM: s / data.length, empriseCote: 3 }
+}
+
+test('⑫h UN SOMMET SOUS `minH` REND UNE COULEUR FINIE — le banc qui MORD', async () => {
+  const res = PARAMS_TERRAIN.resolution
+  const nappe = (res + 1) ** 2
+  for (const continu of [false, true]) {
+    const { t } = await terrainDeBanc(continu)
+    // ⚠️ `detailScale` EST OBLIGATOIRE ICI, et ⑫g ② le savait sans le dire : à
+    // `empriseCote > 1` le grain passe par `accordeDetailScale`, qui rendrait
+    // NaN sur un `detailScale` absent — un NaN de RELIEF, pas de couleur, et le
+    // banc mesurerait le mauvais défaut.
+    const p = { ...PARAMS_TERRAIN, globeContinu: continu, detailScale: 0.5 }
+    t.setDem(demAlpin(193, 20))
+    t.rebuild(p)
+
+    // ① LE BANC MORD-IL ENCORE ? Sans cette ligne, un jour où `landFactor`,
+    //    l'échelle ou le grain changent, le test ci-dessous resterait vert en
+    //    ne prouvant plus rien — c'est exactement ce qui est arrivé à ⑫g.
+    const minH = t.mapUniforms.uHeightRange.value.x
+    const pos = t.mesh.geometry.attributes.position.array
+    let sous = 0
+    for (let i = 0; i < nappe; i++) if (pos[i * 3 + 1] < minH) sous++
+    assert.ok(sous > 0,
+      `${continu ? 'fenetre' : 'production'} : plus aucun sommet sous minH — ce banc ne prouve plus rien`)
+
+    // ② ET LA COULEUR RESTE FINIE. `Math.pow(x, 0.85)` rend NaN pour x < 0, et
+    //    un NaN dans l'attribut `color` ne lève RIEN : il peint le sommet noir
+    //    ou transparent selon le pilote, sans une ligne de journal.
+    const col = t.mesh.geometry.attributes.color.array
+    for (let i = 0; i < col.length; i++) {
+      assert.ok(Number.isFinite(col[i]),
+        `${continu ? 'fenetre' : 'production'} : color[${i}] vaut ${col[i]} — ${sous} sommets sont sous minH`)
+    }
+  }
+})
+
+// ══════════ ⑬ LA BATHYMÉTRIE DANS LE FLUX — Tâche 6 sexies ══════════════════
+//
+// ⚠️ **CE QUI MANQUAIT AU SOCLE, MESURÉ ET NON SUPPOSÉ.** Le bilan de la
+// Tâche 6 quinquies : sur la TERRE le quadtree et le MNT s'accordent à 1,1–2,4 m
+// de moyenne ; **en MER l'écart valait 642 m (Nice) à 961 m (La Réunion), et son
+// maximum EXACTEMENT `|dem.minM|`** — le quadtree rendait zéro au point le plus
+// profond. Rejoué le 2026-08-21 avec les VRAIES données
+// (`.banc/rejeu-6sexies.mjs`, hors dépôt : tuiles AWS + `public/data/bathy/`) :
+// **485,7 m à La Réunion, 615,0 m à Nice, 0,00 m sur la terre**, maximum égal à
+// `|minM|` des deux côtés.
+//
+// ⚠️ **ET LE TEST VA JUSQU'À LA NAPPE, PAS SEULEMENT JUSQU'AU FLUX.** `⑬a` prouve
+// que `majHauteurs` écrit des `y` NÉGATIFS, c'est-à-dire que la mer arrive
+// jusqu'à la géométrie que `plinth.js`, les bateaux et le drapage GPX lisent par
+// `terrain.sample`. Un flux juste dont la fenêtre ne verrait rien serait un
+// défaut MUET, exactement comme celui que ⑩f et ⑩g gardent.
+
+/**
+ * Un bouchon DOM + réseau minimal, le temps d'une nappe bathymétrique.
+ *
+ * ⚠️ **LE FOND EST EN PENTE, ET CE N'EST PAS DÉCORATIF.** `appliquerHauteurs`
+ * centre les `y` sur `fenetre.moyenneM` : un fond UNIFORME rendrait une nappe
+ * strictement plate à `y = 0`, exactement comme une mer plate — le test
+ * passerait sur `minM` et ne prouverait rien sur la géométrie. Mesuré : première
+ * version de ⑬a, zéro sommet sous le niveau avec un fond à −1800 m partout.
+ */
+async function avecBathyBouchon (profondeurDe, fn) {
+  const { encodeTerrarium } = await import('../src/bathy.js')
+  const dalle = new Uint8ClampedArray(256 * 256 * 4)
+  for (let j = 0; j < 256; j++) {
+    for (let i = 0; i < 256; i++) {
+      const [er, eg, eb] = encodeTerrarium(profondeurDe(i, j))
+      const k = (j * 256 + i) * 4
+      dalle[k] = er; dalle[k + 1] = eg; dalle[k + 2] = eb; dalle[k + 3] = 255
+    }
+  }
+  const avant = {
+    document: globalThis.document,
+    fetch: globalThis.fetch,
+    createImageBitmap: globalThis.createImageBitmap,
+  }
+  globalThis.document = {
+    createElement: () => {
+      const c = { width: 0, height: 0 }
+      c.getContext = () => ({ drawImage () {}, getImageData: () => ({ data: dalle }) })
+      return c
+    },
+  }
+  globalThis.createImageBitmap = async (b) => b
+  globalThis.fetch = async (url) => {
+    if (!String(url).startsWith('data/bathy/')) return { ok: false, status: 404 }
+    if (String(url).endsWith('index.json')) return { ok: false, status: 404 } // z8 partout
+    return { ok: true, status: 200, blob: async () => ({ url, width: 256, height: 256 }) }
+  }
+  try {
+    return await fn()
+  } finally {
+    globalThis.document = avant.document
+    globalThis.fetch = avant.fetch
+    globalThis.createImageBitmap = avant.createImageBitmap
+  }
+}
+
+test('⑬a LA MER ARRIVE JUSQU\'À LA NAPPE — le socle porte des `y` sous le niveau', async () => {
+  const { construireFenetre, majHauteurs } = await import('../src/monde/fenetre-bornee.js')
+  const { demanderBathy } = await import('../src/monde/flux-terrain.js')
+  const { _resetTileCaches } = await import('../src/dem.js')
+
+  // ⚠️ **UNE EMPRISE OCÉANIQUE, ET LE TERRARIUM Y VAUT ZÉRO EXACT** — c'est ce
+  // que `dem.js` a mesuré au large de Toulon (« la tuile est à 100 % à zéro
+  // exact »), et c'est ce que `fuseBathymetry` lit comme une ABSENCE DE MESURE.
+  const LAT = 42.5
+  const LON = 6.0
+  const ZOOM = 12
+  const { emprise, flux } = await fluxDuBloc(LAT, LON, ZOOM)
+  for (const t of flux.globe.tiles.values()) t.heights.fill(0)
+
+  const n = 64
+  const fenetre = construireFenetre({ emprise, n, rayonCoin: 0, exageration: 2.8 })
+
+  // ① AVANT LA NAPPE — la mer est PLATE, et c'est le régime d'aujourd'hui.
+  majHauteurs(fenetre, flux)
+  assert.equal(fenetre.minM, 0, `minM ${fenetre.minM} : le témoin n'est pas une mer plate`)
+  const platY = fenetre.geometrie.slice()
+  const tampon = fenetre.geometrie
+
+  // ② LA NAPPE ARRIVE — et elle est LOCALE : aucune attente réseau lointaine.
+  await avecBathyBouchon((i, j) => -400 - 2400 * ((i + j) / 510), async () => {
+    _resetTileCaches()
+    const t0 = performance.now()
+    const peinte = await demanderBathy(flux, { emprise, zoom: ZOOM })
+    const msNappe = performance.now() - t0
+    assert.ok(peinte, 'aucune tuile bathy peinte : le bouchon ne sert rien')
+    assert.ok(msNappe < 500, `${msNappe.toFixed(0)} ms pour une nappe LOCALE de 9 tuiles`)
+    const t1 = performance.now()
+    majHauteurs(fenetre, flux)
+    fenetre.msRemplissage = performance.now() - t1
+  })
+
+  // ③ ET LE FOND EST LÀ, DANS LA GÉOMÉTRIE — pas seulement dans `hauteursM`.
+  assert.ok(fenetre.minM < -1000, `minM ${fenetre.minM} m : la mer est restée plate`)
+  let sousZero = 0
+  for (let i = 0; i < (n + 1) ** 2; i++) if (fenetre.geometrie[i * 3 + 1] < 0) sousZero++
+  assert.ok(sousZero > 0, 'aucun sommet sous le niveau : la mer n\'atteint pas la géométrie')
+  let bouge = 0
+  for (let i = 0; i < (n + 1) ** 2; i++) if (fenetre.geometrie[i * 3 + 1] !== platY[i * 3 + 1]) bouge++
+  assert.ok(bouge > (n + 1) ** 2 * 0.9, `${bouge} sommets sur ${(n + 1) ** 2} ont bougé : la fusion n'a touché qu'un coin`)
+
+  // ④ ET SANS RECONSTRUIRE : le tampon de la fenêtre est le MÊME, PAR
+  //    RÉFÉRENCE, avant et après l'arrivée de la mer. ⚠️ La nappe ne fait PAS
+  //    (n+1)²·3 flottants — elle porte aussi l'anneau de jupe (12 675 contre
+  //    13 446 relevés) : comparer une longueur au lieu d'une identité aurait
+  //    échoué pour la mauvaise raison, et c'est arrivé.
+  assert.equal(fenetre.geometrie, tampon, 'la fusion a réalloué la géométrie')
+})
+
+test('⑬c `main.js` LIT `revisionFlux` — il ne recompte pas les tuiles lui-même', () => {
+  // ⚠️ **SANS CETTE ASSERTION, LA MUTATION VIT DANS UN ANGLE MORT.** Aucun test
+  // ne charge `main.js` (le §0 le dit), donc remettre le signal de raffinement
+  // sur le seul COMPTE de tuiles d'altitude n'aurait rougi nulle part : la mer
+  // serait chargée, fusionnable, et jamais redessinée. Mesuré au banc de
+  // mutation du 2026-08-21 : la mutation n° 6 SURVIVAIT à toute la suite.
+  const src = sansCommentaires(lire('src/main.js'))
+  assert.ok(/revisionFlux/.test(src), '`main.js` n\'importe plus `revisionFlux`')
+  assert.ok(
+    /tuilesLisiblesDuSocle\s*=\s*\(flux\)\s*=>\s*revisionFlux\(flux\)/.test(src),
+    'le signal de raffinement du socle ne passe plus par `revisionFlux` : la mer n\'atteindra pas l\'écran'
+  )
+  assert.ok(
+    !/for\s*\(const t of flux\.reclamees\.values\(\)\)/.test(src),
+    '`main.js` recompte les tuiles lui-même : deux lois pour un seul signal'
+  )
+})
+
+test('⑬b MUTATION PERMANENTE — un flux SANS nappe rend exactement le relief nu', async () => {
+  // ⚠️ **C'EST LA MUTATION QUE LE PLAN DEMANDE, EN TEST PERMANENT** : retirer la
+  // fusion doit ramener la mer plate. Un flux dont `bathy` est absent est
+  // littéralement le dépôt d'avant la Tâche 6 sexies, et c'est aussi l'état
+  // d'une emprise sans une seule tuile bathy cuite — le cas NORMAL en pleine
+  // terre. Les deux doivent rendre le terrarium au bit près.
+  const { construireFenetre, majHauteurs } = await import('../src/monde/fenetre-bornee.js')
+  const { emprise, flux } = await fluxDuBloc(45.8326, 6.8652, 12)
+  const n = 48
+  const a = construireFenetre({ emprise, n, rayonCoin: 0, exageration: 2.8 })
+  majHauteurs(a, flux)
+  const ref = a.hauteursM.slice()
+
+  flux.bathy = { prete: true, peintes: 0 } // nappe demandée, RIEN de peint
+  const b = construireFenetre({ emprise, n, rayonCoin: 0, exageration: 2.8 })
+  majHauteurs(b, flux)
+  for (let k = 0; k < ref.length; k++) {
+    assert.equal(b.hauteursM[k], ref[k], `hauteur ${k} : une nappe VIDE a modifié le relief`)
+  }
 })

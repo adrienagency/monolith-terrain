@@ -193,6 +193,62 @@ function loadBathyTile(url) {
   return p
 }
 
+// ══════════ LA LOI DE SÉLECTION BATHY, EXTRAITE — Tâche 6 sexies ════════════
+//
+// ⚠️ **ELLE EST EXTRAITE, PAS RECOPIÉE, ET C'EST LE §1 DE `/threejs-optimisation`
+// AU PIED DE LA LETTRE.** `src/monde/flux-terrain.js` doit peindre la même
+// bathymétrie que `loadDem`, sur une emprise qui n'est pas un damier de blocs.
+// Écrire là-bas une seconde descente « de la tuile la plus fine vers le
+// plancher » ferait DEUX lois à faire coïncider — le plafond par zone, le
+// plancher `min(BATHY_ZMIN, zoom)`, la mémoire des absences, la sous-fenêtre de
+// surzoom mesurée en pixels BATHY et non en pixels d'altitude. Chacune de ces
+// quatre subtilités a déjà coûté un défaut visible à l'écran (voir les encarts
+// ci-dessus). Il n'y en a donc qu'une, et `loadBathyPatch` l'appelle aussi.
+//
+// ⚠️ **`index` EST PASSÉ, PAS RELU** : `loadBathyPatch` fait UN aller-retour
+// pour tout son damier, et l'appelant du flux fait le sien. Le relire ici, une
+// fois par case, rendrait la même promesse mémorisée — mais transformerait une
+// fonction synchrone-après-index en une fonction qui `await` toujours.
+//
+// @returns {Promise<number>} le zoom de la tuile réellement peinte, ou -1
+export async function peindreBathyTuile({ zoom, tx, ty, index, dst, dstStride, dx, dy, dw, dh }) {
+  const plancher = Math.min(BATHY_ZMIN, zoom)
+  // Le plafond se lit AU CENTRE DE CETTE TUILE, pas au centre du bloc : une
+  // emprise peut chevaucher la limite d'une source fine, et chaque case doit
+  // alors chercher au niveau qui la concerne.
+  for (let zt = Math.min(zoom, tileMaxZoom(index, zoom, tx, ty)); zt >= plancher; zt--) {
+    const t = overzoomTile(zoom, tx, ty, zt)
+    const url = BATHY_URL(t.z, t.x, t.y)
+    if (bathyMisses.has(url)) continue
+    try {
+      // TROUVÉE ⇒ MÉMORISÉE (`loadBathyTile`). Les 9 cases d'un damier lisent le
+      // même ancêtre z8, et les 25 dalles du damier de blocs aussi : sans cette
+      // mémoire, une seule tuile partait 2 070 fois.
+      const g = await loadBathyTile(url)
+      // surzoom : on n'agrandit qu'une SOUS-FENÊTRE de l'ancêtre — elle se
+      // mesure sur la tuile BATHY (256 px), la case de destination sur la tuile
+      // d'altitude (256 ou 512 px). La sous-fenêtre borne ce qu'on AGRANDIT, pas
+      // ce qu'on LIT : les voisins hors fenêtre restent de la vraie donnée, donc
+      // deux cases servies par le même ancêtre se raccordent sans couture.
+      resampleCatmullRom({
+        src: g.m, srcW: g.w, srcH: g.h,
+        sx: t.ox * g.w, sy: t.oy * g.h, sw: g.w / t.scale, sh: g.h / t.scale,
+        dst, dstStride, dx, dy, dw, dh,
+      })
+      return t.z
+    } catch {
+      bathyMisses.add(url)
+    }
+  }
+  return -1
+}
+
+/**
+ * L'index des sources bathymétriques, mémorisé — UN aller-retour par session.
+ * ⚠️ **EXPORTÉ POUR LE FLUX** (`peindreBathyTuile` le prend en paramètre).
+ */
+export const indexBathy = bathyIndex
+
 /** Remise à zéro des mémoires de tuiles — tests uniquement. */
 export function _resetTileCaches() {
   tilesEnVol.clear()
@@ -624,40 +680,13 @@ async function loadBathyPatch({ zoom, cx, cy, half, n, sizePx, tilePx }) {
       // On descend de la tuile la plus fine disponible vers le plancher : la
       // première qui répond gagne. Une absence reste le cas NORMAL à un niveau
       // donné, mais elle ne doit plus laisser la case à plat.
+      // ⚠️ **LA DESCENTE « FIN → PLANCHER » VIT DANS `peindreBathyTuile`**
+      // (Tâche 6 sexies) : le flux du socle la partage mot pour mot.
       jobs.push(
-        (async () => {
-          const plancher = Math.min(BATHY_ZMIN, zoom)
-          // Le plafond se lit AU CENTRE DE CETTE TUILE, pas au centre du bloc :
-          // un bloc peut chevaucher la limite d'une source fine, et chaque case
-          // du damier doit alors chercher au niveau qui la concerne.
-          for (let zt = Math.min(zoom, tileMaxZoom(index, zoom, tx, ty)); zt >= plancher; zt--) {
-            const t = overzoomTile(zoom, tx, ty, zt)
-            const url = BATHY_URL(t.z, t.x, t.y)
-            if (bathyMisses.has(url)) continue
-            try {
-              // TROUVÉE ⇒ MÉMORISÉE. Les 9 cases de ce damier lisent le même
-              // ancêtre z8, et les 25 dalles du damier de blocs aussi : sans
-              // cette mémoire, une seule tuile partait 2 070 fois.
-              const g = await loadBathyTile(url)
-              // surzoom : on n'agrandit qu'une SOUS-FENÊTRE de l'ancêtre — elle
-              // se mesure sur la tuile BATHY (256 px), la case de destination
-              // sur la tuile d'altitude (256 ou 512 px).
-              //
-              // La sous-fenêtre borne ce qu'on AGRANDIT, pas ce qu'on LIT : les
-              // voisins hors fenêtre restent de la vraie donnée, donc deux cases
-              // servies par le même ancêtre se raccordent sans couture.
-              resampleCatmullRom({
-                src: g.m, srcW: g.w, srcH: g.h,
-                sx: t.ox * g.w, sy: t.oy * g.h, sw: g.w / t.scale, sh: g.h / t.scale,
-                dst: patch, dstStride: sizePx, dx: ox, dy: oy, dw: tilePx, dh: tilePx,
-              })
-              painted++
-              return
-            } catch {
-              bathyMisses.add(url)
-            }
-          }
-        })()
+        peindreBathyTuile({
+          zoom, tx, ty, index,
+          dst: patch, dstStride: sizePx, dx: ox, dy: oy, dw: tilePx, dh: tilePx,
+        }).then((z) => { if (z >= 0) painted++ })
       )
     }
   }

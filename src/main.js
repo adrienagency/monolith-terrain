@@ -70,7 +70,7 @@ import { construireFenetre, majHauteurs, recadrerFenetre } from './monde/fenetre
 // ⚠️ **LE FLUX EST LE CACHE DU QUADTREE, PAS UN SECOND CHARGEUR** (Tâche 6
 // quinquies) : `creerFlux` ne demande RIEN à sa naissance, et `remplirBorne`
 // borne le remplissage au débit RÉELLEMENT observé (règle R3, Tâche 4 ter).
-import { creerFlux, zoomEffectif, demanderEmprise, debitObserve } from './monde/flux-terrain.js'
+import { creerFlux, zoomEffectif, demanderEmprise, debitObserve, revisionFlux } from './monde/flux-terrain.js'
 // `fractionSurTrace` : le pont d'indices qui remet la tête de course sous
 // l'objectif de la poursuite (voir son commentaire dans poursuite.js).
 import { fractionSurTrace } from './poursuite.js'
@@ -3928,15 +3928,19 @@ function fluxDuSocle() {
   return fluxSocle
 }
 
-// Le nombre de tuiles RÉCLAMÉES qui portent des hauteurs lisibles. ⚠️ **C'est le
-// seul signal de raffinement qui ne coûte rien** : une boucle sur les ~16
+// Ce que le socle peut dessiner MAINTENANT : les tuiles RÉCLAMÉES qui portent
+// des hauteurs lisibles, **et les nappes bathymétriques atterries**. ⚠️ **C'est
+// le seul signal de raffinement qui ne coûte rien** : une boucle sur les ~16
 // entrées de `flux.reclamees`, contre un parcours de tout le cache du globe
 // (des centaines d'entrées) pour `zoomEffectif`.
-function tuilesLisiblesDuSocle(flux) {
-  let n = 0
-  for (const t of flux.reclamees.values()) if (t.state === 'ready' && t.heights) n++
-  return n
-}
+//
+// ⚠️ **IL PORTE LA MER DEPUIS LA TÂCHE 6 sexies**, et la loi vit dans
+// `flux-terrain.js` (`revisionFlux`) parce que c'est lui qui sait quand une
+// nappe atterrit. Sur le seul compte de tuiles d'ALTITUDE, une bathymétrie
+// arrivée APRÈS la dernière tuile ne déclenchait rien : le fond marin était
+// chargé, fusionnable, et **jamais affiché**. Un défaut parfaitement muet, que
+// seul l'écran aurait rattrapé — le banc le garde désormais.
+const tuilesLisiblesDuSocle = (flux) => revisionFlux(flux)
 
 // ══════════ LE RAFFINEMENT — Tâche 6 quinquies, Étape 4 ═══════════════════
 //
@@ -3949,7 +3953,10 @@ function tuilesLisiblesDuSocle(flux) {
 // ⚠️ **LE SOCLE SUIT, ET SANS LUI ON VERRAIT LE JOUR SOUS LA CARTE.**
 // `plinth.js` tire ses parois de `terrain.sample`, qui lit la nappe : raffiner
 // l'une sans l'autre laisserait le haut des murs à l'ancienne altitude.
-let _socleLisibles = -1
+// ⚠️ `null` ET NON `-1` DEPUIS LA TÂCHE 6 sexies : le signal est désormais une
+// SIGNATURE (`revisionFlux`), pas un compte. Un sentinelle numérique à côté
+// d'une chaîne se lit comme un bogue au premier coup d'œil suivant.
+let _socleLisibles = null
 function socleRaffine() {
   if (!params.globeContinu || !fluxSocle || !terrain.fenetreBornee) return
   const lisibles = tuilesLisiblesDuSocle(fluxSocle)

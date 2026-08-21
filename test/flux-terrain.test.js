@@ -50,12 +50,55 @@ globalThis.performance = { now: () => horloge }
 
 export const elevationDe = (z, x, y) => 100 * ((x + 3 * y + 7 * z) % 40)
 
+// ══════════ LE MONDE OCÉANIQUE DU BANC — Tâche 6 sexies ═════════════════════
+//
+// ⚠️ **`elevationDe` NE REND QUE DES VALEURS ≥ 0 : SUR CE MONDE-LÀ, LA FUSION NE
+// DOIT RIEN CREUSER.** « La terre ne bouge jamais » est la règle fondatrice de
+// `src/bathy.js` depuis la session polders, et le banc doit pouvoir la vérifier
+// des deux côtés. Pour éprouver la fusion il faut donc un monde OCÉANIQUE — et
+// c'est celui que `dem.js` a mesuré au large de Toulon : « la tuile terrarium
+// est à 100 % à zéro exact, 0 % de valeurs négatives ». `banc.mer` bascule le
+// bouchon d'altitude sur ce monde-là.
+//
+// ⚠️ **ET LA PROFONDEUR EST PAR TUILE**, pour la même raison que l'élévation :
+// un fond uniforme ne prouverait pas qu'on lit la BONNE tuile bathy à la BONNE
+// place. `banc.bathyPlate` la rend uniforme quand — et seulement quand — le test
+// compare au MNT et ne veut pas dépendre d'un alignement au demi-pixel.
+export const banc = { mer: false, bathyPlate: false, bathy: true, porte: null }
+
+// ⚠️ **UNE PORTE POUR RETENIR LA MER, ET ELLE EST NÉCESSAIRE AU TEST DU
+// SIGNAL DE RAFFINEMENT.** Les fichiers de `data/bathy/` sont LOCAUX : dans ce
+// banc ils reviennent en un tour de boucle, donc la nappe a déjà atterri quand
+// les tuiles d'altitude arrivent. Sans porte, un test du signal lirait deux fois
+// l'état d'APRÈS et resterait vert même si le signal ne portait pas la mer.
+// **Mesuré : la mutation « ne pas incrémenter `bathyRevision` » y SURVIVAIT.**
+export function retenirLaMer () {
+  let ouvrir
+  banc.porte = new Promise((r) => { ouvrir = r })
+  return () => { banc.porte = null; ouvrir() }
+}
+export const profondeurDe = (z, x, y) => (banc.bathyPlate ? -1200 : -(200 + 100 * ((x + 3 * y + 7 * z) % 20)))
+
+const RE_TERRARIUM = /terrarium\/(\d+)\/(\d+)\/(\d+)\.png$/
+const RE_BATHY = /^data\/bathy\/(\d+)\/(\d+)\/(\d+)\.png$/
+
 const dalles = new Map()
 function dallePour(url) {
-  let d = dalles.get(url)
+  // ⚠️ LA CLÉ PORTE L'ÉTAT DU BANC : sans lui, une dalle « terre » cuite par un
+  // test resterait servie au test « mer » suivant, et les deux mesureraient la
+  // même chose sans qu'aucune assertion ne bouge.
+  const cle = `${banc.mer ? 'M' : 'T'}${banc.bathyPlate ? 'P' : 'V'}|${url}`
+  let d = dalles.get(cle)
   if (d) return d
-  const m = /terrarium\/(\d+)\/(\d+)\/(\d+)\.png$/.exec(url) || [0, 2, 0, 0]
-  const [er, eg, eb] = encodeTerrarium(elevationDe(+m[1], +m[2], +m[3]))
+  const b = RE_BATHY.exec(url)
+  const m = RE_TERRARIUM.exec(url) || [0, 2, 0, 0]
+  const metres = b
+    ? profondeurDe(+b[1], +b[2], +b[3])
+    : banc.mer
+      // ⚠️ ZÉRO EXACT = ABSENCE DE MESURE, et non de la terre plate (bathy.js)
+      ? 0
+      : elevationDe(+m[1], +m[2], +m[3])
+  const [er, eg, eb] = encodeTerrarium(metres)
   d = new Uint8ClampedArray(256 * 256 * 4)
   for (let i = 0; i < 256 * 256; i++) {
     d[i * 4] = er
@@ -63,7 +106,7 @@ function dallePour(url) {
     d[i * 4 + 2] = eb
     d[i * 4 + 3] = 255
   }
-  dalles.set(url, d)
+  dalles.set(cle, d)
   return d
 }
 
@@ -112,9 +155,35 @@ let DEBIT_MBS = DEBIT_RAPIDE
 const attentes = []
 export const compteur = { requetes: 0, parUrl: new Map() }
 
+// ⚠️ **L'INDEX BATHY DU BANC DONNE z13 SUR LA ZONE D'ESSAI, ET C'EST DÉLIBÉRÉ.**
+// Sous le plafond `base.zmax = 8` de la production, les neuf tuiles z13 d'un
+// socle tombent dans UNE SEULE tuile bathy z8 : le fond y serait uniforme et le
+// banc ne pourrait plus prouver qu'il lit la bonne tuile à la bonne place.
+// La zone couvre l'emprise d'essai, le reste du monde reste à z8 — donc le
+// chemin de SURZOOM est exercé partout ailleurs, y compris par `loadDem`.
+export const INDEX_BATHY = {
+  version: 1,
+  base: { source: 'gebco', zmax: 8 },
+  zmin: 4,
+  zones: [{ id: 'banc', source: 'banc', zmax: 13, bbox: [4, 40, 8, 44] }],
+}
+
+const OCTETS_BATHY = 4096
+
 globalThis.fetch = async (url) => {
   compteur.requetes++
   compteur.parUrl.set(url, (compteur.parUrl.get(url) || 0) + 1)
+  // ⚠️ **LA BATHYMÉTRIE NE PASSE PAS PAR LE MODÈLE DE LATENCE, ET C'EST LE FAIT
+  // QUI REND LA TÂCHE 6 sexies POSSIBLE** : `data/bathy/` est servi PAR LE SITE
+  // (21 557 fichiers comptés par `verifie:dist`), pas par un bucket lointain.
+  // Le modèle de latence, lui, décrit `s3.amazonaws.com`. Les confondre ferait
+  // payer à la mer une attente qu'elle n'a pas.
+  if (url.startsWith('data/bathy/')) {
+    if (url.endsWith('index.json')) return { ok: true, status: 200, json: async () => INDEX_BATHY }
+    if (!banc.bathy) return { ok: false, status: 404 }
+    if (banc.porte) await banc.porte
+    return { ok: true, status: 200, blob: async () => ({ size: OCTETS_BATHY, url }) }
+  }
   const duree = ((OCTETS_TUILE * 8) / ((DEBIT_MBS * 1e6) / MAX_CONCURRENT)) * 1000
   await new Promise((r) => attentes.push({ du: horloge + duree, r }))
   return { ok: true, status: 200, blob: async () => ({ size: OCTETS_TUILE, url }) }
@@ -147,15 +216,19 @@ const { empriseSocle, ZOOM_SOCLE } = await import('../src/monde/seuil-socle.js')
 const {
   creerFlux,
   demanderEmprise,
+  demanderBathy,
   tuilesPretes,
   zoomEffectif,
   remplirHauteurs,
+  revisionFlux,
   debitObserve,
   tuilesEmprise,
   MERCATOR_LAT_MAX,
 } = await import('../src/monde/flux-terrain.js')
 
 const { _resetDemSource, DEM_SOURCES } = await import('../src/dem-source.js')
+const { loadDem, _resetTileCaches } = await import('../src/dem.js')
+const { empriseBlocMNT } = await import('../src/geo.js')
 
 // ⚠️ CE FICHIER ÉPINGLE LA SOURCE SUR AWS, ET C'EST UN CHOIX MOTIVÉ (plan
 // « globe continu », Tâche 4 alpha). Son sujet est le FLUX — la file, la
@@ -201,6 +274,11 @@ function etat(globe) {
 function neuf(params = {}) {
   _resetTileMemo()
   _resetDemSource(DEM_SOURCES.aws.id) // voir l'encart au-dessus de `url`
+  // ⚠️ **ET LES MÉMOIRES BATHY AUSSI** (Tâche 6 sexies) : `bathyMisses` retient
+  // les absences POUR TOUTE LA SESSION — un test qui coupe la bathymétrie
+  // laisserait tous les suivants sans mer, en silence et sans qu'une assertion
+  // ne bouge tant que personne ne la regarde.
+  _resetTileCaches()
   _resetJournalReseau()
   attentes.length = 0
   horloge = 0
@@ -342,6 +420,305 @@ test('remplirHauteurs : (n+1)² hauteurs EN UNE PASSE, et le compte des manquant
   }
   assert.ok(vues.size > 1, 'toutes les hauteurs sont identiques : le banc ne distingue pas les tuiles')
   g.dispose()
+})
+
+// ══════════ LA BATHYMÉTRIE DANS LE FLUX — Tâche 6 sexies ════════════════════
+//
+// ⚠️ **LE DÉFAUT EST MESURÉ, PAS SUPPOSÉ, ET LE REJEU EST PUBLIÉ.**
+// `.banc/rejeu-6sexies.mjs` (hors dépôt) charge les VRAIES tuiles d'altitude
+// d'AWS et les VRAIS fichiers de `public/data/bathy/`, puis compare `loadDem`
+// avec et sans fusion sur la même grille de 768². Relevé le 2026-08-21 :
+//
+//   lieu                     | nœuds en mer | écart moyen | écart max | |minM|
+//   La Réunion (côte ouest)  |      315 809 |     485,7 m |   1 324 m | 1 324 m
+//   Nice                     |      285 580 |     615,0 m |   1 411 m | 1 411 m
+//   Chamonix (témoin)        |            0 |           — |       0 m |   805 m
+//
+// **Sur la TERRE l'écart est de 0,00 m partout** — la fusion ne la touche pas.
+// **En MER l'écart maximal vaut EXACTEMENT `|minM|`** : le terrarium nu rend
+// zéro au point le plus profond. Et `remplirHauteurs` rend le MÊME écart que le
+// terrarium nu (485,5 m contre 485,7 m à La Réunion) : le quadtree ne sert pas
+// une troisième chose, il sert le terrarium sans sa mer.
+
+// ⚠️ DANS LA BBOX DE `INDEX_BATHY` — voir l'encart de l'index.
+const OCEAN = { lat: 42.5, lon: 6.0 }
+
+/** L'emprise du socle, ses tuiles demandées, chargées, et sa bathymétrie. */
+async function socleOceanique({ centre = OCEAN, zoom = ZOOM_SOCLE, emprise: imposee = null } = {}) {
+  const g = neuf()
+  const flux = creerFlux({ globe: g })
+  const emprise = imposee ?? empriseSocle({ centre })
+  demanderEmprise(flux, { emprise, zoom })
+  for (let i = 0; i < 60; i++) await avancer(MS_PAR_IMAGE)
+  // ⚠️ ON L'ATTEND EXPLICITEMENT, ET C'EST TOUTE LA MESURE : la bathymétrie est
+  // LOCALE, donc son attente se compte en tours de boucle, pas en aller-retours
+  // réseau. `demanderEmprise` l'a déjà lancée ; ce `await` ne fait que rendre le
+  // banc déterministe.
+  await demanderBathy(flux, { emprise, zoom })
+  return { g, flux, emprise }
+}
+
+test('remplirHauteurs FUSIONNE la bathymétrie : sur une emprise OCÉANIQUE, le fond descend sous zéro', async () => {
+  banc.mer = true
+  banc.bathyPlate = false
+  try {
+    const { g, flux, emprise } = await socleOceanique()
+    const n = 32
+    const r = remplirHauteurs(flux, { emprise, n })
+    assert.equal(r.manquants, 0, `${r.manquants} hauteurs manquantes : le banc ne couvre pas l emprise`)
+
+    let min = Infinity
+    let moy = 0
+    for (const h of r.sortie) {
+      moy += h
+      if (h < min) min = h
+    }
+    moy /= r.sortie.length
+
+    // ⚠️ **L'ASSERTION QUI ÉCHOUE CONTRE LE DÉPÔT D'AUJOURD'HUI.** Le terrarium
+    // du banc est à zéro exact partout (monde océanique) : sans fusion, `min` et
+    // `moy` valent zéro, c'est-à-dire la « plaine pâle uniforme » vue à l'écran
+    // à La Réunion sous `?socle=quadtree`.
+    assert.ok(min <= -200, `fond le plus profond ${min.toFixed(1)} m : la mer est PLATE`)
+    assert.ok(moy <= -200, `profondeur moyenne ${moy.toFixed(1)} m : la mer est PLATE`)
+
+    // ET C'EST LA BONNE TUILE À LA BONNE PLACE — même forme d'assertion que
+    // pour les élévations ci-dessus : chaque profondeur lue doit être celle
+    // d'une tuile bathy de l'emprise. ⚠️ Au-delà de 25 m de fond, la sortie de
+    // `fuseBathymetry` vaut EXACTEMENT la source fine (le fondu sature), et le
+    // banc est très au-delà.
+    const attendues = tuilesEmprise(emprise, ZOOM_SOCLE).map((t) => profondeurDe(t.z, t.x, t.y))
+    const vues = new Set()
+    for (const h of r.sortie) vues.add(Math.round(h))
+    for (const v of vues) {
+      assert.ok(
+        attendues.some((a) => Math.abs(a - v) < 1),
+        `profondeur ${v} lue alors que l emprise ne porte que ${[...new Set(attendues)].join(', ')}`
+      )
+    }
+    assert.ok(vues.size > 1, 'toutes les profondeurs sont identiques : le banc ne distingue pas les tuiles bathy')
+
+    // ⚠️ **ET LA FUSION S'ARRÊTE À (n+1)², MÊME SUR UN TAMPON PLUS GRAND.**
+    // `remplirHauteurs` accepte une `sortie` plus longue que la grille (c'est
+    // écrit dans son `RangeError`, qui ne refuse que le trop COURT). Fusionner
+    // le tampon entier écrirait dans la queue de l'appelant — une écriture hors
+    // grille, muette, et que seul un tampon partagé révélerait un jour.
+    const total = (n + 1) ** 2
+    const large = new Float32Array(total + 7).fill(12345)
+    remplirHauteurs(flux, { emprise, n, sortie: large })
+    for (let k = total; k < large.length; k++) {
+      assert.equal(large[k], 12345, `la fusion a débordé de la grille au rang ${k}`)
+    }
+    g.dispose()
+  } finally {
+    banc.mer = false
+  }
+})
+
+test('un TROU du relief ne devient PAS une fosse — la mer ne remplit que ce qui est couvert', async () => {
+  // ⚠️ **UN NŒUD HORS COUVERTURE VAUT ZÉRO DANS `sortie`, ET ZÉRO EST UNE
+  // ABSENCE DE MESURE POUR `fuseBathymetry`.** Fusionner sans regarder la
+  // couverture creuserait donc les TROUS du socle jusqu au fond marin, pendant
+  // que `manquants` continuerait de dire zéro et que `zoomEffectif` n en
+  // saurait rien : un socle troué se peindrait en fosse abyssale, en silence.
+  banc.mer = true
+  try {
+    const { g, flux, emprise } = await socleOceanique()
+    // ⚠️ **LE TROU SE FABRIQUE À LA MAIN, ET C'EST LE SEUL MOYEN.** Attendre
+    // moins longtemps ne rend pas une couverture partielle : soit rien n'est
+    // prêt (mesuré, 0/1089 après deux images), soit les RACINES du quadtree
+    // sont là et recouvrent l'emprise entière, grossièrement mais sans trou.
+    // On retire donc la moitié des tuiles du cache après coup.
+    const fines = [...tuilesPretes(flux, emprise).values()].filter((t) => t.z === ZOOM_SOCLE)
+    const gardees = new Map()
+    for (const t of fines.slice(0, Math.floor(fines.length / 2))) gardees.set(t.key, t)
+    const troue = { ...flux, globe: { tiles: gardees } }
+    const n = 32
+    const { sortie, remplis, manquants } = remplirHauteurs(troue, { emprise, n })
+    assert.ok(manquants > 0 && remplis > 0,
+      `couverture ${remplis}/${remplis + manquants} : le banc doit être PARTIEL pour prouver quoi que ce soit`)
+    let zeros = 0
+    for (const h of sortie) if (h === 0) zeros++
+    assert.equal(zeros, manquants,
+      `${zeros} nœuds à zéro pour ${manquants} manquants : la mer a rempli des trous`)
+    g.dispose()
+  } finally {
+    banc.mer = false
+  }
+})
+
+test('une nappe SUPERSÉDÉE n incrémente pas le signal — le plus lent ne gagne pas', async () => {
+  // ⚠️ **MÊME IDIOME QUE LA SUPERSESSION DE `fetchAndBuildDem`** (Tâche 6
+  // septies) : un cran change l emprise pendant qu une nappe vole. Sans le point
+  // de contrôle, la nappe périmée poserait `prete` et bousculerait le signal —
+  // donc une reconstruction du socle pour une mer qui n est plus la sienne.
+  banc.mer = true
+  const ouvrir = retenirLaMer()
+  try {
+    const g = neuf()
+    const flux = creerFlux({ globe: g })
+    const a = empriseSocle({ centre: OCEAN })
+    const b = empriseSocle({ centre: { lat: OCEAN.lat + 1.5, lon: OCEAN.lon + 1.5 } })
+    const volA = demanderBathy(flux, { emprise: a, zoom: ZOOM_SOCLE })
+    const volB = demanderBathy(flux, { emprise: b, zoom: ZOOM_SOCLE })
+    assert.notEqual(volA, volB, 'les deux emprises partagent la même nappe : le banc ne mesure rien')
+    ouvrir()
+    await Promise.all([volA, volB])
+    assert.equal(flux.bathyRevision, 1, `${flux.bathyRevision} arrivées pour une seule nappe vivante`)
+    g.dispose()
+  } finally {
+    banc.mer = false
+  }
+})
+
+/**
+ * L'emprise d'UNE tuile, en degrés — l'inverse exact de `mercX`/`mercY`.
+ *
+ * ⚠️ **UNE SEULE TUILE, ET C'EST UNE CONTRAINTE DU BANC, PAS UN CHOIX.** Le
+ * `FakeCtx` de ce fichier rend une dalle de 256² quel que soit le canevas
+ * demandé — il a été écrit pour les tuiles du globe, qui n'ont pas d'autre
+ * taille. `loadDem` avec `tilesAcross = 3` peint un canevas de 768² et relirait
+ * donc **65 536 pixels sur 589 824**, le reste en `undefined` : `dem.data` y
+ * vaudrait zéro alors que `dem.minM` dirait −1200. **Mesuré, et c'est ce qui a
+ * fait échouer la première version de ce test — pas le code.** `tilesAcross = 1`
+ * met le MNT exactement à la taille que le bouchon sait rendre.
+ */
+function empriseTuile(z, x, y) {
+  const n = 2 ** z
+  const lat = (my) => (Math.atan(Math.sinh(Math.PI * (1 - 2 * my))) * 180) / Math.PI
+  return {
+    ouest: (x / n) * 360 - 180,
+    est: ((x + 1) / n) * 360 - 180,
+    nord: lat(y / n),
+    sud: lat((y + 1) / n),
+  }
+}
+
+test('la mer du flux s ACCORDE au MNT de `loadDem` — les deux chemins, la même fusion', async () => {
+  banc.mer = true
+  banc.bathyPlate = true // fond uniforme : l accord ne dépend d aucun alignement au demi-pixel
+  try {
+    const zoom = ZOOM_SOCLE
+    const nz = 2 ** zoom
+    const tx = Math.floor(((OCEAN.lon + 180) / 360) * nz)
+    const laRad = (OCEAN.lat * Math.PI) / 180
+    const ty = Math.floor(
+      ((1 - Math.log(Math.tan(laRad) + 1 / Math.cos(laRad)) / Math.PI) / 2) * nz
+    )
+    const emprise = empriseTuile(zoom, tx, ty)
+    const { g, flux } = await socleOceanique({ zoom, emprise })
+
+    // ⚠️ `loadDem` PASSE PAR LE MODÈLE DE LATENCE pour ses tuiles d altitude :
+    // on le lance, puis on avance l horloge virtuelle jusqu à ce qu il rende.
+    const promesse = loadDem({ lat: OCEAN.lat, lon: OCEAN.lon, zoom, tilesAcross: 1 })
+    for (let i = 0; i < 60; i++) await avancer(MS_PAR_IMAGE)
+    const dem = await promesse
+    assert.equal(dem.size, 256, 'le MNT du banc doit tenir dans la dalle de 256² du bouchon')
+    assert.ok(dem.minM < -200, `le MNT du banc n a pas de mer (minM = ${dem.minM}) : il ne mesure rien`)
+
+    const n = 64
+    const { sortie } = remplirHauteurs(flux, { emprise, n })
+    let pire = 0
+    for (let j = 0; j <= n; j++) {
+      for (let i = 0; i <= n; i++) {
+        const di = Math.min(dem.size - 1, Math.round((i / n) * (dem.size - 1)))
+        const dj = Math.min(dem.size - 1, Math.round((j / n) * (dem.size - 1)))
+        const d = Math.abs(sortie[j * (n + 1) + i] - dem.data[dj * dem.size + di])
+        if (d > pire) pire = d
+      }
+    }
+    // `dem.data` est quantifié au mètre entier (`dem-quant.js`) : la tolérance
+    // borne l arrondi, pas un désaccord de fond.
+    assert.ok(pire <= 1.5, `écart maximal ${pire.toFixed(2)} m entre le flux et le MNT sur la même emprise`)
+    g.dispose()
+  } finally {
+    banc.mer = false
+    banc.bathyPlate = false
+  }
+})
+
+test('la TERRE ne bouge JAMAIS : sur un monde émergé, la fusion est l identité BIT À BIT', async () => {
+  // Le monde par défaut du banc est ÉMERGÉ (`elevationDe` ≥ 0) et la
+  // bathymétrie, elle, est servie : c est exactement la situation où une fusion
+  // trop bavarde remettrait le trait de côte entre les mains de la source fine.
+  //
+  // ⚠️ **ET LE TÉMOIN SE PREND SANS BATHYMÉTRIE, PAS SUR UNE LISTE DE VALEURS
+  // ATTENDUES.** `elevationDe` rend ZÉRO sur une tuile de l emprise
+  // (`(x + 3y + 7z) % 40 === 0`), et un zéro EXACT est — à juste titre — une
+  // ABSENCE DE MESURE pour `fuseBathymetry`, pas de la terre plate. La règle
+  // « la terre ne bouge jamais » porte donc sur ce qui est MESURÉ, c est-à-dire
+  // les nœuds strictement positifs. Ce test l a d abord ignoré, et il avait tort.
+  const n = 32
+  banc.bathy = false
+  const temoin = await socleOceanique()
+  const avant = Float32Array.from(remplirHauteurs(temoin.flux, { emprise: temoin.emprise, n }).sortie)
+  temoin.g.dispose()
+  banc.bathy = true
+
+  const { g, flux, emprise } = await socleOceanique()
+  const { sortie } = remplirHauteurs(flux, { emprise, n })
+  let positifs = 0
+  for (let k = 0; k < avant.length; k++) {
+    if (!(avant[k] > 0)) continue
+    positifs++
+    assert.equal(sortie[k], avant[k], `la fusion a creusé une TERRE mesurée à ${avant[k]} m`)
+  }
+  assert.ok(positifs > 0, 'le banc n a pas une seule terre mesurée : il ne prouve rien')
+  g.dispose()
+})
+
+test('sans une seule tuile bathy, la sortie est celle d avant — le repli est MUET', async () => {
+  banc.mer = true
+  banc.bathy = false
+  try {
+    const { g, flux, emprise } = await socleOceanique()
+    const { sortie, manquants } = remplirHauteurs(flux, { emprise, n: 32 })
+    assert.equal(manquants, 0, 'le banc ne couvre pas l emprise')
+    for (const h of sortie) {
+      assert.equal(h, 0, `hauteur ${h} sans une seule tuile bathy : le repli invente du relief`)
+    }
+    g.dispose()
+  } finally {
+    banc.mer = false
+    banc.bathy = true
+  }
+})
+
+test('revisionFlux CHANGE quand la mer atterrit — sinon le raffinement ne repart jamais', async () => {
+  // ⚠️ **CE TEST GARDE LE SEUL FIL QUI RAMÈNE LA MER À L ÉCRAN.** `socleRaffine`
+  // (main.js) ne redessine que lorsque le signal du flux change. Si ce signal ne
+  // comptait que les tuiles d ALTITUDE lisibles, une bathymétrie arrivée APRÈS
+  // la dernière tuile ne déclencherait rien : le fond marin serait chargé,
+  // fusionnable, et jamais affiché — un défaut parfaitement MUET.
+  banc.mer = true
+  try {
+    // ⚠️ **LA MER EST RETENUE PENDANT QUE LES TUILES D ALTITUDE ARRIVENT.**
+    // Sans cette porte, le signal aurait DE TOUTE FAÇON changé — parce que le
+    // compte de tuiles lisibles passe de 0 à 16 dans le même intervalle — et le
+    // test serait resté vert même sur un signal aveugle à la mer. **Mesuré : la
+    // mutation « ne pas incrémenter `bathyRevision` » y survivait.**
+    const ouvrir = retenirLaMer()
+    const g = neuf()
+    const flux = creerFlux({ globe: g })
+    const emprise = empriseSocle({ centre: OCEAN })
+    demanderEmprise(flux, { emprise, zoom: ZOOM_SOCLE })
+    for (let i = 0; i < 60; i++) await avancer(MS_PAR_IMAGE)
+    const avant = revisionFlux(flux)
+    assert.equal(flux.bathy.prete, false, 'la nappe a déjà atterri : ce banc ne mesure plus l arrivée')
+    ouvrir()
+    await demanderBathy(flux, { emprise, zoom: ZOOM_SOCLE })
+    assert.equal(flux.bathy.prete, true, 'la nappe n a jamais atterri')
+    // ⚠️ ET LES TUILES D ALTITUDE, ELLES, N ONT PAS BOUGÉ ENTRE LES DEUX MESURES.
+    assert.equal(avant.split('/')[0], revisionFlux(flux).split('/')[0],
+      'le compte de tuiles a changé : ce n est pas la mer que le test mesure')
+    assert.notEqual(revisionFlux(flux), avant, 'la mer est arrivée sans que le signal de raffinement ne bouge')
+    // et il est STABLE une fois posé : un signal qui change à chaque appel
+    // ferait reconstruire le socle à chaque image.
+    assert.equal(revisionFlux(flux), revisionFlux(flux), 'le signal de raffinement n est pas stable')
+    g.dispose()
+  } finally {
+    banc.mer = false
+  }
 })
 
 test('debitObserve : null sur un flux neuf, le débit agrégé après trois réponses connues', async () => {

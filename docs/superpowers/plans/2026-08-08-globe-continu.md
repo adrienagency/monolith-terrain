@@ -1708,7 +1708,177 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
 - [x] **Étape 7 — REGARDER L'ÉCRAN**, et dire ce qu'on voit — y compris si le socle est grossier au premier instant. ✅ **Il a dit non, et deux fois** : le socle collé au premier lieu, puis la mer plate. Les deux sont dans le bilan, le premier corrigé, le second sous drapeau.
 - [x] **Étape 8 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
-### Tâche 6 sexies : LA BATHYMÉTRIE DANS LE FLUX ⚠️ **C'EST ELLE QUI OUVRE LE DRAPEAU DE LA 6 quinquies**
+### Tâche 6 sexies : LA BATHYMÉTRIE DANS LE FLUX ✅ **FAITE LE 2026-08-21** — ⚠️ **LA MER EST REVENUE : 485,7 m D'ÉCART → 2,1 m**
+
+> **Bilan mesuré** (`npm test` **3 309 verts**, `audit:tests` 189/189) :
+>
+> · ⚠️ **LE DÉFAUT A ÉTÉ REJOUÉ AVANT D'ÊTRE CORRIGÉ, SUR LES VRAIES DONNÉES.**
+> `.banc/rejeu-6sexies.mjs` (hors dépôt) charge les tuiles d'altitude du **vrai
+> bucket AWS** — joignable depuis cette machine **en node**, contrairement au
+> navigateur — et les **vrais fichiers de `public/data/bathy/`**, puis compare
+> `loadDem` avec et sans fusion sur la même grille de 768². Le seul bouchon est
+> le DOM (canevas, `createImageBitmap`), décodé à la main.
+>
+> | lieu | nœuds en mer | écart moyen | écart max | `\|minM\|` |
+> |---|---|---|---|---|
+> | La Réunion (côte ouest) | 315 809 | **485,7 m** | 1 324 m | 1 324 m |
+> | Nice | 285 580 | **615,0 m** | 1 411 m | 1 411 m |
+> | Chamonix (témoin) | 0 | — | **0 m** | 805 m |
+>
+> **Sur la TERRE l'écart est de 0,00 m partout** — la fusion n'y touche pas.
+> **En mer le maximum vaut EXACTEMENT `|minM|`.** Et `remplirHauteurs` rend le
+> MÊME écart que le terrarium nu (485,5 contre 485,7 m) : **le quadtree ne sert
+> pas une troisième chose, il sert le terrarium sans sa mer.** ⚠️ Les valeurs
+> diffèrent de celles de la 6 quinquies (642 / 961 m) parce que ce sont d'autres
+> points ; l'ordre de grandeur et la propriété du maximum sont les mêmes.
+>
+> · **APRÈS, SUR LES MÊMES EMPRISES** (`.banc/accord-6sexies.mjs`, AWS des deux
+> côtés, grille 769², flux contre `loadDem({bathy: true})`) :
+>
+> | lieu, zoom | mer avant | **mer après** | min flux / min MNT | terre après |
+> |---|---|---|---|---|
+> | Nice z13 | — | **1,7 m** | −1 136 / −1 136 m | 0,72 m |
+> | Nice z12 | 615,0 m | **3,2 m** | −1 410 / −1 411 m | 2,74 m |
+> | La Réunion z13 | — | **0,9 m** | −588 / −588 m | 1,15 m |
+> | La Réunion z12 | 485,7 m | **2,1 m** | −1 323 / −1 324 m | 3,13 m |
+>
+> · ⚠️ **ET DANS LE NAVIGATEUR, SUR LE VRAI CHEMIN** (`?globe=continu&socle=quadtree&f3=0`,
+> MNT **Mapterhorn 512 px des deux côtés**, La Réunion z12) : `fenetre.minM` =
+> **−2 115,1 m** contre `dem.minM` = **−2 116 m** ; écart moyen **2,25 m en mer**
+> (179 195 nœuds) et **2,65 m sur la terre** ; **32,5 % des nœuds du socle sont
+> sous le niveau de la mer**. ⚠️ **`?f3=0` EST OBLIGATOIRE** — `empriseDuSocle`
+> refuse l'emprise 3×3, qui est le défaut de ce dépôt : sans lui,
+> `fenetreBornee` reste `null` et le régime ne s'essaie même pas. La 6 quinquies
+> l'avait écrit ; il valait la peine de le redire ici, on y a perdu du temps.
+>
+> · **CE QUE ÇA COÛTE, ET C'EST BORNÉ** (`.banc/cout-6sexies.mjs`, médiane de 20
+> relevés après chauffe, données réelles) :
+>
+> | | n = 384 | n = 768 (**la production**) |
+> |---|---|---|
+> | fichiers bathy LOCAUX ouverts | **1** | **1** |
+> | poids | 13,7 Ko (Nice) à 42,3 Ko (La Réunion) | idem |
+> | la nappe, une fois par emprise | **4,4 à 8,4 ms** | **4,1 à 8,3 ms** |
+> | `remplirHauteurs` sans la mer | 1,8 à 2,9 ms | 6,9 à 11,4 ms |
+> | `remplirHauteurs` avec la mer | 3,9 à 6,0 ms | 15,4 à 23,3 ms |
+> | **ajout** | **+2,1 à +3,1 ms** | **+8,4 à +13,6 ms** |
+> | en pleine terre (Chamonix) | +0,04 ms | **+0,18 ms** |
+>
+> ⚠️ **UN SEUL FICHIER, ET C'EST LE CHIFFRE QUI DÉCIDE.** À z12 les neuf tuiles
+> du socle partagent le même ancêtre bathy z8 (ou z10 en France) : la nappe
+> entière coûte **une lecture locale**, pas neuf. **Aucune attente réseau
+> lointaine n'est rouverte** — et l'attente locale, elle, est mesurée à **4 à
+> 8 ms**, contre les 124 à 173 ms par cran que la Tâche 6 septies a laissés.
+> **Le premier relief à l'écran n'attend pas la mer** : `remplirHauteurs` reste
+> synchrone et fusionne ce qui est déjà décodé (décision 13).
+>
+> · ⚠️ **LES TROIS QUARTS DU COÛT ÉTAIENT DANS L'INTERFACE, PAS DANS LE TRAVAIL —
+> ET C'EST LE §3 DE `flux-terrain.js` APPLIQUÉ À LUI-MÊME.** La première version
+> échantillonnait la nappe par une fonction `echantillonNappe(e, mx, my)` **par
+> nœud** : **+4,3 à +5,8 ms à n = 384 et +21,0 à +29,5 ms à n = 768**, alors que
+> `fuseBathymetry` seule n'en coûte que **1,3 et 4,9** (`.banc/profil-6sexies.mjs`).
+> Réécrite **par lot et par ligne**, tout hissé hors des boucles, la position
+> dans la nappe étant affine : le coût est tombé de moitié. C'est mot pour mot
+> ce que le §3 avait déjà mesuré pour `lireHauteur(flux, {x, y, z})`.
+>
+> · **VU À L'ÉCRAN, LES TROIS RÉGIMES, Pointe des Aigrettes (La Réunion) Z16.**
+> Le cartouche rend `ELEV −64 – −0 m · mean −57 m` sous `?globe=crans`, sous
+> `?globe=continu` **et** sous `?globe=continu&socle=quadtree` — **le même, au
+> mètre.** Les trois images sont indiscernables : même bleu, même moutonnement,
+> même trait de côte, même cartouche, mêmes parois. **La côte se lit.** Sous
+> `?globe=continu` seul, `fenetre.minM` vaut 0 et c'est normal : le crochet
+> `hauteursDeFlux` n'y est pas posé, le relief vient du MNT — **le régime n'a pas
+> bougé d'un mètre**, ce qui est le contrat.
+>
+> · **NEUF MUTATIONS, HUIT MORDENT** (`.banc/mutation-6sexies.mjs`, hors dépôt) :
+> retirer la fusion tue 4 tests ; ne rien échantillonner dans la nappe en tue 4 ;
+> ne pas incrémenter `bathyRevision` en tue 2 ; remplir la mer là où le relief
+> MANQUE en tue 1 ; ne plus lancer la nappe depuis `demanderEmprise` en tue 1 ;
+> faire retomber `main.js` sur le seul compte de tuiles en tue 1 ; laisser une
+> nappe supersédée écraser la suivante en tue 1 ; couper la descente vers le
+> plancher de surzoom en tue 2 (dont un de `dem-load.test.js`, ce qui prouve que
+> la loi est bien PARTAGÉE). ⚠️ **LA NEUVIÈME SURVIT, ET ELLE A ÉTÉ CORRIGÉE
+> PLUTÔT QU'EXCUSÉE** : fusionner tout le tampon fourni au lieu de le borner à
+> (n+1)² ne rougissait nulle part, parce qu'aucun test ne passait de `sortie`
+> plus longue que la grille. Une assertion a été ajoutée ; les neuf mordent.
+>
+> · ⚠️ **DEUX TESTS NE MORDAIENT PAS AU PREMIER JET, ET LES DEUX AVAIENT LA MÊME
+> CAUSE — UN BANC OÙ L'ÉTAT D'AVANT ÉTAIT DÉJÀ L'ÉTAT D'APRÈS.** ① Le test du
+> signal de raffinement lisait `revisionFlux` avant et après l'arrivée de la mer,
+> mais **le compte de tuiles d'altitude changeait dans le même intervalle** : il
+> serait resté vert sur un signal aveugle à la mer. Il passe désormais par une
+> PORTE (`retenirLaMer`) qui retient la nappe pendant que les tuiles arrivent, et
+> il exige que le compte de tuiles, lui, n'ait **pas** bougé entre les deux
+> mesures. ② Le test « la terre ne bouge jamais » comparait à une liste de
+> valeurs attendues : `elevationDe` rend **zéro** sur une tuile de l'emprise, et
+> un zéro EXACT est — à juste titre — une ABSENCE DE MESURE pour
+> `fuseBathymetry`. Il prend maintenant son témoin **sans bathymétrie** et exige
+> l'égalité **bit à bit** sur les nœuds strictement positifs.
+>
+> · ⚠️ **ET UN BANC A MENTI POUR UNE RAISON QUI N'EST PAS DANS LE CODE TESTÉ.**
+> La première version du test d'accord au MNT appelait `loadDem` avec
+> `tilesAcross = 3` dans `test/flux-terrain.test.js` : son `FakeCtx` rend une
+> dalle de **256²** quel que soit le canevas demandé, donc `dem.data` valait zéro
+> sur **524 288 pixels sur 589 824** pendant que `dem.minM` disait −1 200. Le
+> test rougissait sur un écart de 1 200 m — **du bouchon, pas du code**.
+> `tilesAcross = 1` met le MNT à la taille que le bouchon sait rendre. C'est le
+> §3 de `/threejs-optimisation` : le banc se décrit, ou il ne se compare à rien.
+>
+> · **CE QUI A ÉTÉ ÉCRIT, ET OÙ.** La loi de sélection bathy — « de la tuile la
+> plus fine vers le plancher `min(BATHY_ZMIN, zoom)`, plafond par zone lu **au
+> centre de CETTE tuile**, mémoire des absences, sous-fenêtre de surzoom mesurée
+> en pixels BATHY » — est **extraite** de `loadBathyPatch` vers
+> `peindreBathyTuile` (`dem.js`), et `loadBathyPatch` l'appelle. **Une seule
+> loi** : chacune de ses quatre subtilités a déjà coûté un défaut visible à
+> l'écran, et la mutation n° 9 prouve que le partage est réel.
+>
+> · **LA FUSION SE FAIT EN UNE FOIS SUR TOUTE L'EMPRISE, JAMAIS PAR TUILE**, et
+> c'est `detectFillLevels` qui l'impose : elle constate les APLATS DE REMPLISSAGE
+> du champ entier (Mapterhorn cale sa mer sur une constante par dalle : −0,094,
+> −0,344, −0,406, −2,781 m). Neuf histogrammes de neuf fois moins de sondes
+> passeraient sous `FILL_MIN_SONDES`, les aplats ne seraient plus vus, et le
+> liseré de bord de dalle reviendrait.
+>
+> · **UN NŒUD SANS RELIEF RESTE SANS RELIEF.** Hors couverture, `sortie` vaut
+> zéro — que `fuseBathymetry` lirait comme une absence de mesure et creuserait
+> jusqu'au fond : **un socle troué se peindrait en fosse abyssale** pendant que
+> `manquants` continuerait de dire zéro. La nappe y est mise à NaN, et un test
+> le garde sur une couverture volontairement partielle.
+>
+> · **`revisionFlux` EXISTE POUR UNE SEULE RAISON, ET ELLE EST MUETTE SANS LUI.**
+> `socleRaffine` (`main.js`) ne redessine que si le signal du flux change. Sur le
+> seul compte de tuiles d'ALTITUDE, une bathymétrie arrivée **après** la dernière
+> tuile ne déclenchait rien : le fond marin était chargé, fusionnable, et
+> **jamais affiché**. `main.js` lit désormais `revisionFlux`, et un test de
+> SOURCE l'exige — sinon la mutation vivait dans un angle mort (aucun test ne
+> charge `main.js`).
+>
+> #### ⚠️ CE QUE CETTE TÂCHE NE FAIT PAS
+>
+> 1. ⚠️ **ELLE N'OUVRE AUCUN DRAPEAU.** `FLAGS.socleQuadtree` reste `false`, et
+>    `flags.js` porte maintenant les deux tableaux, avant et après.
+> 2. ⚠️ **UNE LECTURE AU LARGE DE NICE N'A PAS SU ÊTRE REPRODUITE.** Dans le
+>    navigateur, après **quatre `_coarsen()` enchaînés** de z16 à z13, la fenêtre
+>    s'écartait du MNT de **523 m en mer — mais AUSSI de 37,6 m sur la terre**.
+>    La moitié « terre » ne peut pas venir de la fusion (elle ne touche jamais un
+>    relief mesuré : 0,00 m d'écart au rejeu, et un test bit à bit) : ce relevé
+>    dit que **le socle n'avait pas convergé sur cette emprise**, pas que la mer
+>    est fausse. Toutes les tentatives de revenir à Nice ont été refusées par la
+>    navigation de l'application, et l'une a fait tomber l'onglet. **Non
+>    reproduit, non expliqué, et il faut le savoir avant d'ouvrir le drapeau.**
+> 3. **Le coût par image du raffinement n'est toujours pas chronométré bout en
+>    bout** (`render()` et `plinth.rebuild` compris) : la 6 quinquies le demandait
+>    déjà avant d'ouvrir le drapeau. Ce qui est mesuré ici, c'est
+>    `remplirHauteurs` seul.
+> 4. **Le pic mémoire des `fetchAndBuildDem` concurrents** (jusqu'à huit en vol,
+>    Tâche 6 septies) n'est toujours pas mesuré. La nappe y ajoute **2,4 Mo** de
+>    tampon de travail à n = 768, gardés sur le flux et non réalloués.
+> 5. **Rien n'a été mesuré sur un portable.**
+> 6. **`?f3=1` reste hors périmètre** : `empriseDuSocle` refuse l'emprise 3×3.
+
+**Fichiers :** modifier **`src/monde/flux-terrain.js`** *(`demanderBathy`, `revisionFlux`, la fusion dans `remplirHauteurs`, `rectangleTuiles`)*, **`src/dem.js`** *(`peindreBathyTuile` et `indexBathy`, extraits de `loadBathyPatch`)*, **`src/main.js`** *(le signal de raffinement passe par `revisionFlux`)*, **`src/flags.js`** *(les deux tableaux, avant et après)* · tester `test/flux-terrain.test.js` (élargir, 7 cas) et `test/fenetre-branchee.test.js` (élargir, ⑬a à ⑬c)
+
+⚠️ **LE PLAN NE LISTAIT NI `dem.js` NI `main.js`, ET SANS EUX LA TÂCHE NE MARCHE PAS.** `dem.js` parce que la loi de sélection bathy doit être PARTAGÉE et non recopiée (§1 de `/threejs-optimisation`) ; `main.js` parce que sans `revisionFlux` la mer arrive et ne se dessine jamais.
 
 **Fichiers :** modifier `src/monde/flux-terrain.js` · tester `test/flux-terrain.test.js` (élargir) et `test/fenetre-branchee.test.js` (élargir)
 
@@ -1716,13 +1886,13 @@ Décision d'Adrien du 2026-08-20. `etatIndicateur({ debitObserveMbs, zoomDemande
 
 ⚠️ **À VÉRIFIER AVANT D'ÉCRIRE UNE LIGNE :** ces tuiles `data/bathy/` sont **locales et déjà servies** (21 557 fichiers dans `dist`, `verifie:dist` les compte). La fusion ne rouvre donc **aucune** attente réseau lointaine — mais elle en rouvre une locale, et il faut la mesurer avant de promettre quoi que ce soit.
 
-- [ ] **Étape 1** — test : sur une emprise côtière, `remplirHauteurs` rend le fond marin à moins de N mètres du MNT. ⚠️ **Rejoue-le contre le dépôt AVANT de l'écrire** — le chiffre d'aujourd'hui est 642 et 961 m.
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue.
-- [ ] **Étape 3** — fusionner, **en réutilisant `fuseBathymetry` et non une seconde loi** (§1 de `/threejs-optimisation`).
-- [ ] **Étape 4** — mesurer le coût par remplissage, `render()` compris, et le comparer aux 3,5 ms de `majHauteurs` à n = 384.
-- [ ] **Étape 5 — REGARDER L'ÉCRAN** à La Réunion et à Nice, `?socle=quadtree`, et comparer à `?globe=crans`.
-- [ ] **Étape 6** — allumer `FLAGS.socleQuadtree` **seulement si la mer est revenue**, et pas avant.
-- [ ] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [x] **Étape 1** — test : sur une emprise côtière, `remplirHauteurs` rend le fond marin à moins de N mètres du MNT. ✅ **REJOUÉ CONTRE LE DÉPÔT AVANT D'ÊTRE ÉCRIT** (`.banc/rejeu-6sexies.mjs`, hors dépôt, VRAIES tuiles AWS + VRAIS fichiers `public/data/bathy/`) : **485,7 m (La Réunion) et 615,0 m (Nice)** de moyenne en mer, **0,00 m sur la terre**, maximum exactement `|minM|`.
+- [x] **Étape 2** — le lancer, vérifier qu'il échoue. ✅ **CINQ CAS ROUGES** sur les cinq écrits d'abord.
+- [x] **Étape 3** — fusionner, **en réutilisant `fuseBathymetry` et non une seconde loi**. ✅ Et la descente « fin → plancher » est **extraite** de `loadBathyPatch` vers `peindreBathyTuile` plutôt que recopiée — la mutation n° 9 prouve que les deux chemins la partagent.
+- [x] **Étape 4** — mesurer le coût. ✅ **1 fichier local (13,7 à 42,3 Ko), 4 à 8 ms la nappe, +8,4 à +13,6 ms par remplissage à n = 768.** ⚠️ **PAS `render()` compris** — voir « ce que cette tâche ne fait pas ». Et la première écriture coûtait **le double** : elle échantillonnait par pixel, ce que le §3 du module interdit.
+- [x] **Étape 5 — REGARDER L'ÉCRAN**, les trois régimes. ✅ `ELEV −64 – −0 m · mean −57 m` **dans les trois**, images indiscernables. Plus le relevé chiffré dans le navigateur : **2,25 m d'écart moyen en mer** à La Réunion z12.
+- [x] **Étape 6** — allumer `FLAGS.socleQuadtree` **seulement si la mer est revenue**. ⚠️ **NON ALLUMÉ, ET C'EST DÉLIBÉRÉ** : la mer est revenue, mais trois conditions posées par la 6 quinquies elle-même ne sont toujours pas levées (coût `render()` compris, pic mémoire des vols concurrents, portable), et une lecture au large de Nice n'a pas su être reproduite. **C'est à Adrien de trancher, pas à l'agent.**
+- [x] **Étape 7 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
 
 ### Tâche 6 septies : LE BLOC CESSE D'ÊTRE GÉORÉFÉRENCÉ PAR LE MNT ✅ **FAITE LE 2026-08-21** — ⚠️ **L'ATTENTE EST PARTIE : 25,4 s → 0,16 s SUR HUIT CRANS**
 

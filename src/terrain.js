@@ -2572,13 +2572,24 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       // grain FBM ajouté aux `y` : un sommet du fond de champ plus un grain
       // négatif passe alors sous `minH`.
       //
-      // ⚠️ **HONNÊTEMENT : LE NaN N'A PAS SU ÊTRE REPRODUIT.** Le bilan de la
-      // Tâche 6 ter en annonce trois composantes « des DEUX côtés » ; rejoué le
-      // 2026-08-21 sur SON banc exact (`demBouchon(64, 20)`, res 64, les deux
-      // chemins) et sur une emprise 3×3 quantifiée : **zéro composante NaN sur
-      // 12 675 et 13 446**, `hn` minimal 0,0015. Cette borne n'est donc pas la
-      // correction d'un défaut mesuré, c'est la fermeture d'un chemin
-      // ATTEIGNABLE — et elle est l'identité BIT À BIT partout où `hn ≥ 0`.
+      // ⚠️ **CE COMMENTAIRE A ANNONCÉ LE CONTRAIRE PENDANT UN COMMIT, ET LA
+      // CORRECTION VAUT D'ÊTRE LUE.** Il disait « le NaN n'a pas su être
+      // reproduit » : c'était vrai du banc sur lequel il avait cherché, et faux
+      // de la fonction. Ce qui manquait, c'est `landFactor = smoothstep(0, 90,
+      // raw)` (`_makeGridSampler`) — sur `demBouchon`, le point le plus bas du
+      // champ est à −1 130 m, **le grain y est donc multiplié par ZÉRO**, et le
+      // sommet du fond de champ vaut exactement `minH`. Aucun banc dont le
+      // minimum est sous la ligne d'eau ne peut faire descendre `hn` sous zéro.
+      //
+      // ⚠️ **SUR UN CHAMP ALPIN, IL Y DESCEND — MESURÉ LE 2026-08-21.** Aucun
+      // point sous 90 m (toute emprise de montagne), donc `landFactor = 1`
+      // PARTOUT, grain compris au minimum du champ : **421 à 433 sommets sur
+      // 4 225 passent sous `minH`**, `hn` minimal −2,9·10⁻⁴, sur les DEUX
+      // chemins et pour cinq graines. Sans cette borne, autant de sommets NaN.
+      // Le banc est `test/fenetre-branchee.test.js`, ⑫h — et il MORD : la borne
+      // retirée, il rougit sur la couleur, pas sur une lecture de la source.
+      //
+      // Elle reste l'identité BIT À BIT partout où `hn ≥ 0`.
       const hn = (h - minH) / span
       let v = lerp(0.62, 0.95, Math.pow(Math.max(0, hn), 0.85))
       v *= lerp(0.78, 1.0, Math.pow(Math.max(0, ny), 0.6))

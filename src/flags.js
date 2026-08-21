@@ -82,6 +82,11 @@ export const FLAGS = {
   // sous `?globe=continu`, qui est le drapeau qu'on demande à Adrien d'ouvrir.
   // `?socle=quadtree` pour l'essayer (il exige `?globe=continu` : sans la
   // fenêtre bornée, il n'y a pas de nappe à remplir).
+  //
+  // ⚠️ **CE BLOCAGE-LÀ EST LEVÉ DEPUIS LA TÂCHE 6 sexies (2026-08-21) :
+  // `remplirHauteurs` FUSIONNE la bathymétrie.** Les chiffres d'après sont sous
+  // `socleQuadtreeActif()`, à côté de ceux d'avant. **Le drapeau reste éteint
+  // pour d'autres raisons, et elles y sont écrites** — ce n'est plus la mer.
   socleQuadtree: false,
 }
 
@@ -118,6 +123,37 @@ export function globeContinuActif() {
 // **Ce qu'il faudra pour ouvrir ce drapeau :** fusionner la bathymétrie dans le
 // remplissage (`remplirHauteurs`), ou renoncer au socle côtier — et ce n'est pas
 // une option.
+//
+// ══════════ FAIT — Tâche 6 sexies, 2026-08-21 ═══════════════════════════════
+//
+// ⚠️ **`remplirHauteurs` FUSIONNE MAINTENANT `fuseBathymetry`, ET L'ÉCART
+// CI-DESSUS EST TOMBÉ.** Le tableau du haut reste : il dit pourquoi ce drapeau
+// existe. Voici celui d'après, mesuré sur les MÊMES emprises et avec les VRAIES
+// données (`.banc/accord-6sexies.mjs`, hors dépôt : tuiles d'altitude AWS des
+// deux côtés, tuiles bathy de `public/data/bathy/`, grille de 769²) :
+//
+//   | lieu, zoom        | mer AVANT | mer APRÈS | min flux / min MNT |
+//   |-------------------|-----------|-----------|--------------------|
+//   | Nice z13          |         — |   1,7 m   | −1 136 / −1 136 m  |
+//   | Nice z12          |   615,0 m |   3,2 m   | −1 410 / −1 411 m  |
+//   | La Réunion z13    |         — |   0,9 m   |   −588 /   −588 m  |
+//   | La Réunion z12    |   485,7 m |   2,1 m   | −1 323 / −1 324 m  |
+//
+// **Relevé DANS LE NAVIGATEUR** (`?globe=continu&socle=quadtree&f3=0`, réseau de
+// cette machine, MNT **Mapterhorn 512 px des deux côtés**, La Réunion z12) :
+// `fenetre.minM` = **−2 115,1 m** contre `dem.minM` = **−2 116 m**, écart moyen
+// en mer **2,25 m** sur 179 195 nœuds, sur la terre **2,65 m**, et **32,5 % des
+// nœuds du socle sont sous le niveau de la mer**. Au cran Z16 sur la Pointe des
+// Aigrettes, le cartouche rend `ELEV −64 – −0 m · mean −57 m` — **le même, au
+// mètre, que `?globe=crans` et que `?globe=continu`**.
+//
+// ⚠️ **CE QUI RESTE, ET CE N'EST PLUS LA MER** (voir la Tâche 6 sexies du plan) :
+// le coût par image du raffinement n'est pas chronométré `render()` compris ; le
+// pic mémoire des `fetchAndBuildDem` concurrents (Tâche 6 septies, jusqu'à huit
+// en vol) n'est pas mesuré ; rien n'a été mesuré sur un portable ; et une
+// lecture au large de Nice, obtenue après quatre `_coarsen()` enchaînés, montrait
+// un socle NON convergé (écart de 37,6 m **sur la terre**, donc étranger à la
+// fusion) qu'on n'a pas su reproduire.
 //
 // ⚠️ **ET IL EXIGE `?globe=continu`** : sans la fenêtre bornée, il n'y a pas de
 // nappe rééchantillonnable à remplir. Le crochet n'est même pas posé.

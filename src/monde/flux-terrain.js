@@ -93,6 +93,52 @@
 // ⚠️ **DE LA PLUS GROSSIÈRE À LA PLUS FINE**, pour que le fin écrase le
 // grossier là où les deux existent. Le tri est sur `z` croissant, et il n'est
 // pas décoratif : sans lui une z9 périmée effacerait une z13 fraîche.
+//
+// ══════════ 4. LA BATHYMÉTRIE — Tâche 6 sexies ══════════════════════════════
+//
+// ⚠️ **LE QUADTREE SERT LE TERRARIUM NU, ET LA MER Y EST PLATE.** Mesuré par la
+// Tâche 6 quinquies puis rejoué avec les VRAIES données le 2026-08-21
+// (`.banc/rejeu-6sexies.mjs`, hors dépôt : tuiles d'altitude d'AWS, fichiers de
+// `public/data/bathy/`, `loadDem` avec et sans fusion sur la même grille 768²) :
+//
+//   lieu                     | nœuds en mer | écart moyen | écart max | |minM|
+//   La Réunion (côte ouest)  |      315 809 |     485,7 m |   1 324 m | 1 324 m
+//   Nice                     |      285 580 |     615,0 m |   1 411 m | 1 411 m
+//   Chamonix (témoin)        |            0 |           — |       0 m |   805 m
+//
+// **Sur la TERRE l'écart est de 0,00 m** — `fuseBathymetry` n'y touche pas.
+// **En MER l'écart maximal vaut EXACTEMENT `|minM|`** : le terrarium rend ZÉRO
+// au point le plus profond. À l'écran, une plaine pâle uniforme là où la
+// production a ses canyons.
+//
+// **TROIS CHOIX, ET CHACUN A SA RAISON :**
+//
+//   1. ⚠️ **`fuseBathymetry` EST RÉUTILISÉE, PAS RÉÉCRITE**, et la descente
+//      « tuile fine → plancher » l'est aussi (`peindreBathyTuile`, extraite de
+//      `dem.js` pour l'occasion). C'est le §1 de `/threejs-optimisation` : une
+//      seconde loi, ce serait quatre subtilités à faire coïncider — le plafond
+//      par zone, le plancher `min(BATHY_ZMIN, zoom)`, la mémoire des absences,
+//      et la sous-fenêtre de surzoom mesurée en pixels BATHY. Chacune a déjà
+//      coûté un défaut visible à l'écran.
+//   2. ⚠️ **LA FUSION SE FAIT EN UNE FOIS SUR TOUTE L'EMPRISE, JAMAIS PAR
+//      TUILE.** `detectFillLevels` constate les APLATS DE REMPLISSAGE du champ
+//      (Mapterhorn cale sa mer sur une constante par dalle : −0,094, −0,344,
+//      −0,406, −2,781 m selon la dalle). Fusionner tuile par tuile lui donnerait
+//      neuf histogrammes de neuf fois moins de sondes, sous le seuil
+//      `FILL_MIN_SONDES` : les aplats ne seraient plus vus, et le liseré de bord
+//      de dalle reviendrait. `dem.js` fusionne le bloc entier ; on fait pareil.
+//   3. ⚠️ **LE CHARGEMENT EST ASYNCHRONE, LE REMPLISSAGE RESTE SYNCHRONE.**
+//      `remplirHauteurs` est sur le chemin du raffinement par image : y mettre
+//      un `await` rouvrirait exactement l'attente que la Tâche 6 septies vient
+//      de fermer. La mer se charge donc à côté, et `remplirHauteurs` fusionne ce
+//      qui est déjà décodé — décision 13 au pied de la lettre : la mer est plate
+//      au premier instant, creusée dès que le fichier local atterrit.
+//
+// ⚠️ **ET C'EST POUR ÇA QUE `revisionFlux` EXISTE.** `socleRaffine` (`main.js`)
+// ne redessine que lorsque le signal du flux change. S'il ne comptait que les
+// tuiles d'ALTITUDE lisibles, une bathymétrie arrivée APRÈS la dernière tuile ne
+// déclencherait rien : le fond marin serait chargé, fusionnable, et **jamais
+// affiché**. Un défaut parfaitement muet, et le test du banc le garde.
 
 import {
   MAX_Z,
@@ -102,6 +148,13 @@ import {
 } from '../globe.js'
 import { ZOOM_SOCLE } from './seuil-socle.js'
 import { MERCATOR_MAX_LAT } from '../geo.js'
+// ⚠️ **CET IMPORT NE FERME AUCUN CYCLE, ET C'EST VÉRIFIÉ PLUTÔT QUE SUPPOSÉ.**
+// `dem.js` n'importe que `bathy.js`, `bathy-sources.js` (→ `map/tile-index.js`),
+// `dem-memo.js`, `dem-quant.js` et `dem-source.js` — aucun des six ne remonte
+// vers `globe.js`, `terrain.js` ou ce module. Le piège que la Tâche 6 bis A a
+// payé (un cycle qui ne casse **qu'en production**) ne se referme donc pas ici.
+import { peindreBathyTuile, indexBathy } from '../dem.js'
+import { fuseBathymetry } from '../bathy.js'
 
 // ⚠️ **IMPORTÉE, PAS RECOPIÉE — et c'est la différence avec `seuil-socle.js`.**
 // Là-bas la recopie se justifie : ce module-là est PUR (ni DOM, ni three, ni
@@ -168,6 +221,27 @@ function boiteMerc(emprise) {
  * (BLOCK_TILES + 1)² tuiles au lieu de BLOCK_TILES².
  */
 export function tuilesEmprise(emprise, zoom) {
+  const r = rectangleTuiles(emprise, zoom)
+  const out = []
+  for (let y = r.iy0; y <= r.iy1; y++) {
+    for (let x = r.ix0; x <= r.ix1; x++) {
+      out.push({ z: r.z, x: ((x % r.n) + r.n) % r.n, y })
+    }
+  }
+  return out
+}
+
+/**
+ * Le RECTANGLE de tuiles qui couvre l'emprise, **en indices NON repliés**.
+ *
+ * ⚠️ **UNE SEULE LOI, ET `tuilesEmprise` L'APPELLE AUSSI** (Tâche 6 sexies). La
+ * bathymétrie a besoin du rectangle CONTIGU pour peindre une nappe d'un seul
+ * tenant ; `tuilesEmprise` a besoin de la liste repliée modulo le monde. Les
+ * deux se déduisent des mêmes quatre bornes, et deux copies de ce
+ * `Math.ceil(...) - 1` seraient deux occasions de désaccorder la nappe de la
+ * liste — au bord de l'antiméridien, en silence.
+ */
+function rectangleTuiles(emprise, zoom) {
   const z = Math.max(0, Math.min(MAX_Z, Math.floor(zoom)))
   const n = 2 ** z
   const b = boiteMerc(emprise)
@@ -175,13 +249,7 @@ export function tuilesEmprise(emprise, zoom) {
   const ix1 = Math.max(ix0, Math.ceil(b.x1 * n) - 1)
   const iy0 = Math.max(0, Math.floor(b.y0 * n))
   const iy1 = Math.max(iy0, Math.min(n - 1, Math.ceil(b.y1 * n) - 1))
-  const out = []
-  for (let y = iy0; y <= iy1; y++) {
-    for (let x = ix0; x <= ix1; x++) {
-      out.push({ z, x: ((x % n) + n) % n, y })
-    }
-  }
-  return out
+  return { z, n, ix0, ix1, iy0, iy1, colonnes: ix1 - ix0 + 1, lignes: iy1 - iy0 + 1 }
 }
 
 /** La tuile `(z,x,y)` intersecte-t-elle la boîte Mercator ? (bord exclu) */
@@ -226,7 +294,34 @@ export function creerFlux({ globe } = {}) {
     demande: null,
     // clé → tuile, pour les tuiles RÉCLAMÉES à la dernière demande
     reclamees: new Map(),
+    // la nappe bathymétrique de l'emprise courante — voir le §4. `null` tant
+    // que personne n'a demandé : un flux neuf ne charge RIEN, la mer comprise.
+    bathy: null,
+    // combien de nappes ont atterri. ⚠️ C'est le SEUL fil qui ramène la mer à
+    // l'écran (`revisionFlux`), et il compte des ARRIVÉES, pas des demandes.
+    bathyRevision: 0,
   }
+}
+
+// ══════════ 6 bis. LE SIGNAL DE RAFFINEMENT ════════════════════════════════
+
+/**
+ * La signature de ce que le socle peut dessiner **maintenant** : le nombre de
+ * tuiles réclamées lisibles, et le nombre de nappes bathymétriques atterries.
+ *
+ * ⚠️ **C'EST UNE BOUCLE SUR ~16 ENTRÉES, PAS UN PARCOURS DU CACHE** (des
+ * centaines) : c'est le seul signal de raffinement qui ne coûte rien, et c'est
+ * `main.js` (`socleRaffine`) qui le compare d'une image à l'autre.
+ *
+ * ⚠️ **ET IL PORTE LA MER**, sinon une bathymétrie arrivée après la dernière
+ * tuile d'altitude ne redessinerait jamais rien — voir le §4.
+ *
+ * @returns {string} stable tant que rien n'a bougé
+ */
+export function revisionFlux(flux) {
+  let n = 0
+  for (const t of flux.reclamees.values()) if (t.state === 'ready' && t.heights) n++
+  return `${n}/${flux.bathyRevision ?? 0}`
 }
 
 // ══════════ 6. DEMANDER ═════════════════════════════════════════════════════
@@ -306,6 +401,155 @@ export function demanderEmprise(flux, { emprise, zoom = ZOOM_SOCLE } = {}) {
 
   flux.reclamees = apres
   flux.demande = { zoom: z }
+
+  // 4. et la MER, à côté. ⚠️ **SANS `await`, ET C'EST LE POINT** : cette
+  //    fonction est appelée depuis le crochet `hauteursDeFlux`, sur le chemin
+  //    que la Tâche 6 septies vient de rendre instantané. La nappe se peint
+  //    pendant ce temps-là ; `remplirHauteurs` fusionnera ce qui est prêt.
+  //    Le rejet est absorbé ici : une bathymétrie absente est le cas NORMAL
+  //    (on ne cuit pas de tuile là où il n'y a pas de mer), pas une panne.
+  demanderBathy(flux, { emprise, zoom: z }).catch(() => {})
+}
+
+// ══════════ 6 ter. LA MER — Tâche 6 sexies ══════════════════════════════════
+
+// ⚠️ **256 PX PAR TUILE, COMME `dem.js`.** C'est la résolution NATIVE de nos
+// tuiles bathy (`BATHY_TILE_PX`), et c'est aussi l'ordre de grandeur de ce que
+// le socle échantillonne par tuile : une nappe 3×3 fait 768², pour une fenêtre
+// de n = 384 ou 768. Monter plus haut ne peindrait que de l'interpolation ;
+// descendre plus bas rendrait au fond marin les facettes que le Catmull-Rom
+// vient précisément de supprimer.
+const BATHY_PX = 256
+
+/**
+ * Charge la nappe bathymétrique qui couvre `emprise`, et la garde sur le flux.
+ *
+ * ⚠️ **MÉMOÏSÉE PAR RECTANGLE DE TUILES** : `demanderEmprise` l'appelle à chaque
+ * image du crochet, et l'emprise ne change qu'au cran. Sans cette clé, chaque
+ * image relancerait neuf lectures de fichier et une allocation de 2,4 Mo.
+ *
+ * ⚠️ **ET ELLE N'ÉCRASE PAS LA NAPPE SUIVANTE.** Un cran pendant le vol change
+ * l'emprise : la nappe partie avant peut atterrir après. Le point de contrôle
+ * `flux.bathy !== etat` est le même idiome que la supersession de
+ * `fetchAndBuildDem` (Tâche 6 septies), pour la même raison — **le plus LENT des
+ * deux gagnerait**.
+ *
+ * @returns {Promise<boolean>} `true` si au moins une tuile a été peinte
+ */
+export function demanderBathy(flux, { emprise, zoom = ZOOM_SOCLE } = {}) {
+  const r = rectangleTuiles(emprise, zoom)
+  const cle = `${r.z}/${r.ix0}/${r.iy0}/${r.colonnes}x${r.lignes}`
+  if (flux.bathy?.cle === cle) return flux.bathy.promesse
+  const largeurPx = r.colonnes * BATHY_PX
+  const hauteurPx = r.lignes * BATHY_PX
+  // NaN = case non peinte, que `fuseBathymetry` ignore comme n'importe quelle
+  // valeur non finie — exactement la convention de `loadBathyPatch`.
+  const patch = new Float32Array(largeurPx * hauteurPx).fill(NaN)
+  const etat = {
+    cle, patch, largeurPx, hauteurPx,
+    n: r.n, ix0: r.ix0, iy0: r.iy0, colonnes: r.colonnes, lignes: r.lignes,
+    peintes: 0, prete: false, promesse: null,
+  }
+  flux.bathy = etat
+  etat.promesse = (async () => {
+    // UN SEUL aller-retour d'index pour toute la session : `indexBathy` mémorise
+    // sa promesse, et un échec y rend `normalizeIndex(null)` — z8 partout,
+    // c'est-à-dire le comportement d'avant les zones.
+    const index = await indexBathy()
+    const jobs = []
+    for (let j = 0; j < r.lignes; j++) {
+      for (let i = 0; i < r.colonnes; i++) {
+        const ty = r.iy0 + j
+        if (ty < 0 || ty >= r.n) continue
+        const tx = (((r.ix0 + i) % r.n) + r.n) % r.n
+        jobs.push(
+          peindreBathyTuile({
+            zoom: r.z, tx, ty, index,
+            dst: patch, dstStride: largeurPx,
+            dx: i * BATHY_PX, dy: j * BATHY_PX, dw: BATHY_PX, dh: BATHY_PX,
+          }).then((zt) => { if (zt >= 0) etat.peintes++ })
+        )
+      }
+    }
+    await Promise.all(jobs)
+    if (flux.bathy !== etat) return false // supersédée par un cran plus récent
+    etat.prete = true
+    flux.bathyRevision = (flux.bathyRevision ?? 0) + 1
+    return etat.peintes > 0
+  })()
+  return etat.promesse
+}
+
+/**
+ * Écrit la nappe échantillonnée dans `mer`, **par LOT et par LIGNE**, avec la
+ * convention de demi-pixel de `sampleHeights` — les centres de texels à
+ * `(i + 0,5)/taille`.
+ *
+ * ⚠️ **PAR LOT, JAMAIS PAR PIXEL — ET C'EST LE §3 DE CE MODULE, APPLIQUÉ À
+ * LUI-MÊME.** La première version appelait une fonction `echantillonNappe(e, mx,
+ * my)` par nœud, avec deux divisions et une dizaine de lectures de propriété
+ * dedans. **Mesuré** (`.banc/cout-6sexies.mjs`, médiane de 20, données réelles
+ * de La Réunion et Nice) : la fusion ajoutait **+4,3 à +5,8 ms à n = 384 et
+ * +21,0 à +29,5 ms à n = 768**, alors que `fuseBathymetry` elle-même n'en coûte
+ * que **1,3 et 4,9** (`.banc/profil-6sexies.mjs`). **Les trois quarts du coût
+ * étaient dans l'interface commode, pas dans le travail** — exactement le
+ * constat que le §3 avait déjà fait pour `lireHauteur(flux, {x, y, z})`.
+ *
+ * Ici tout est hissé hors des boucles : la position dans la nappe est AFFINE en
+ * `i` et en `j`, donc elle s'incrémente au lieu de se diviser.
+ *
+ * ⚠️ **UN VOISIN NON PEINT RETOMBE SUR LE PLUS PROCHE, ET NE CONTAMINE PAS.**
+ * Sans ce repli, un seul NaN dans les quatre coins rendrait NaN, donc une frange
+ * de la largeur d'un texel **sans mer** tout autour de chaque tuile absente —
+ * précisément le liseré que `detectFillLevels` a été écrit pour supprimer.
+ *
+ * ⚠️ **ET UN NŒUD SANS RELIEF RESTE SANS RELIEF** (`vues`). Hors couverture,
+ * `out` vaut zéro — que `fuseBathymetry` lirait comme une ABSENCE DE MESURE et
+ * creuserait donc jusqu'au fond. Un socle troué se peindrait en fosse abyssale
+ * au lieu de rester manquant, et `manquants` continuerait de dire zéro.
+ */
+function ecrireNappe(e, mer, vues, b, cote, dx, dy) {
+  const patch = e.patch
+  const largeurPx = e.largeurPx
+  const hauteurPx = e.hauteurPx
+  // pixels de nappe par unité de Mercator, sur chaque axe
+  const kx = (largeurPx * e.n) / e.colonnes
+  const ky = (hauteurPx * e.n) / e.lignes
+  const xBase = (b.x0 - e.ix0 / e.n) * kx - 0.5
+  const yBase = (b.y0 - e.iy0 / e.n) * ky - 0.5
+  const xPas = dx * kx
+  const yPas = dy * ky
+  const xMax = largeurPx - 1
+  const yMax = hauteurPx - 1
+  for (let j = 0; j < cote; j++) {
+    const base = j * cote
+    let y = yBase + j * yPas
+    y = y < 0 ? 0 : y > yMax ? yMax : y
+    let y0 = Math.floor(y)
+    if (y0 > hauteurPx - 2) y0 = hauteurPx - 2
+    if (y0 < 0) y0 = 0
+    const fy = y - y0
+    const ligne = y0 * largeurPx
+    const ligneBas = ligne + largeurPx
+    const ligneProche = (y - y0 < 0.5 ? y0 : y0 + 1) * largeurPx
+    for (let i = 0; i < cote; i++) {
+      if (!vues[base + i]) { mer[base + i] = NaN; continue }
+      let x = xBase + i * xPas
+      x = x < 0 ? 0 : x > xMax ? xMax : x
+      let x0 = Math.floor(x)
+      if (x0 > largeurPx - 2) x0 = largeurPx - 2
+      if (x0 < 0) x0 = 0
+      const fx = x - x0
+      const a = patch[ligne + x0]
+      const c = patch[ligne + x0 + 1]
+      const d = patch[ligneBas + x0]
+      const f = patch[ligneBas + x0 + 1]
+      const s = a + (c - a) * fx + (d - a) * fy + (a - c - d + f) * fx * fy
+      if (s === s) { mer[base + i] = s; continue }
+      const proche = patch[ligneProche + (x - x0 < 0.5 ? x0 : x0 + 1)]
+      mer[base + i] = proche === proche ? proche : NaN
+    }
+  }
 }
 
 // ══════════ 7. CE QUI EST PRÊT ══════════════════════════════════════════════
@@ -422,7 +666,38 @@ export function remplirHauteurs(flux, { emprise, n, sortie } = {}) {
 
   let remplis = 0
   for (let k = 0; k < total; k++) if (vues[k]) remplis++
+
+  // ══════════ ET LA MER PAR-DESSUS — Tâche 6 sexies, voir le §4 ═════════════
+  //
+  // ⚠️ **EN UNE FOIS SUR TOUTE L'EMPRISE, ET APRÈS LE RELIEF.** `fuseBathymetry`
+  // constate les aplats de remplissage du champ ENTIER (`detectFillLevels`), et
+  // « la fusion ne peut que CREUSER la mer : la terre et le trait de côte
+  // restent ceux du terrarium ». L'appeler par tuile lui retirerait les
+  // neuf dixièmes de ses sondes.
+  const e = flux.bathy
+  if (e?.prete && e.peintes > 0) {
+    const mer = merDeTravail(flux, total)
+    ecrireNappe(e, mer, vues, b, cote, dx, dy)
+    // `fuseBathymetry` rend un NOUVEAU tableau (elle ne mute pas ses entrées) :
+    // on le recopie dans `out`, qui peut être un tampon fourni par l'appelant et
+    // dont l'identité est un contrat (`sortie`, testé). ⚠️ **`subarray` BORNE LA
+    // FUSION À LA GRILLE** : `remplirHauteurs` accepte une `sortie` plus longue
+    // (son `RangeError` ne refuse que le trop COURT), et fusionner le tampon
+    // entier écrirait dans la queue de l'appelant, en silence.
+    const champ = out.length === total ? out : out.subarray(0, total)
+    champ.set(fuseBathymetry(champ, mer))
+  }
+
   return { remplis, manquants: total - remplis, sortie: out }
+}
+
+// Le tampon de travail de la mer, gardé sur le flux. ⚠️ **2,4 Mo À n = 768 :
+// le réallouer à chaque raffinement serait une allocation majeure par image
+// pendant les rafales de crans.** La taille de la fenêtre ne change qu'à un
+// changement de résolution, donc ce tampon vit aussi longtemps que le flux.
+function merDeTravail(flux, total) {
+  if (flux._mer?.length !== total) flux._mer = new Float32Array(total)
+  return flux._mer
 }
 
 // ══════════ 10. LE DÉBIT OBSERVÉ ════════════════════════════════════════════
