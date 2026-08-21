@@ -1,0 +1,559 @@
+// LE FLUX QUI NE SE COINCE PAS — Tâche 4 bis du plan « globe continu ».
+//
+// ══════════ CE QUE CE FICHIER MESURE, ET POURQUOI IL FALLAIT UN BANC NEUF ════
+//
+// Le défaut n'est pas une panne : c'est une FILE. `globe.js` plafonne bien ses
+// requêtes SIMULTANÉES (`MAX_CONCURRENT = 6`), mais `_request` marque une tuile
+// `loading` **avant** de l'enfiler, et rien ne bornait `this.queue`. Mesuré au
+// navigateur, caméra en mouvement en orbite : **568 tuiles en `loading`**, cache
+// collé à 1 700, aucune erreur nulle part.
+//
+// ⚠️ **LE HARNAIS DU DÉPÔT FAIT PASSER CE TEST SUR DU CODE CASSÉ.**
+// `test/globe-reseau.test.js:83-93` résout `fetch` en `setTimeout(0)`, et
+// `test/globe-eviction.test.js` appelle `calme(globe)` entre deux images — il
+// VIDE la file avant l'image suivante. Le compte de `loading` retombe alors tout
+// seul, sans plafond, sans annulation et sans éviction.
+//
+// ⚠️ **ET UN BOUCHON À RÉSOLUTION 100 % MANUELLE NE VAUT PAS MIEUX — mesuré.**
+// Si rien ne se résout tant que le test ne le décide pas, aucune tuile n'atteint
+// `ready`, la règle sans-trou ne descend jamais, le zoom reste figé à z2, et
+// l'assertion ne mesure rien du tout.
+//
+// D'où le **MODÈLE DE LATENCE** ci-dessous : une horloge virtuelle, et une
+// requête qui se résout au bout de `octets × 8 / (débit / MAX_CONCURRENT)`. La
+// file se remplit et se vide comme sur un vrai réseau, sans qu'aucune horloge
+// murale n'entre dans la mesure.
+//
+// ⚠️ **ET LE GESTE EST UN PANORAMIQUE LATÉRAL, PAS UNE DESCENTE.** C'est le plus
+// banal de l'application et celui que le vol de référence ne peut pas voir :
+// dans une descente lisse, deux images consécutives demandent presque les mêmes
+// tuiles.
+
+import { test, before } from 'node:test'
+import assert from 'node:assert/strict'
+import * as THREE from 'three'
+import { encodeTerrarium } from '../src/bathy.js'
+
+// ═══════════════════════════════════════════════ 1. L'HORLOGE VIRTUELLE ══════
+//
+// ⚠️ POSÉE AVANT L'IMPORT DE `globe.js` — il lit `globalThis.performance.now`
+// **à l'appel** et non à l'import (voir `maintenant()`), mais le journal réseau
+// n'aurait aucun sens si les deux horloges se mélangeaient.
+let horloge = 0
+globalThis.performance = { now: () => horloge }
+
+// ═══════════════════════════════════════════════ 2. LES BOUCHONS DOM ═════════
+//
+// Une élévation PAR TUILE, et non une dalle unique : `remplirHauteurs` doit
+// pouvoir prouver qu'il lit la BONNE tuile à la BONNE place. La valeur est
+// dérivée de la clé, et le test la recalcule.
+
+export const elevationDe = (z, x, y) => 100 * ((x + 3 * y + 7 * z) % 40)
+
+const dalles = new Map()
+function dallePour(url) {
+  let d = dalles.get(url)
+  if (d) return d
+  const m = /terrarium\/(\d+)\/(\d+)\/(\d+)\.png$/.exec(url) || [0, 2, 0, 0]
+  const [er, eg, eb] = encodeTerrarium(elevationDe(+m[1], +m[2], +m[3]))
+  d = new Uint8ClampedArray(256 * 256 * 4)
+  for (let i = 0; i < 256 * 256; i++) {
+    d[i * 4] = er
+    d[i * 4 + 1] = eg
+    d[i * 4 + 2] = eb
+    d[i * 4 + 3] = 255
+  }
+  dalles.set(url, d)
+  return d
+}
+
+class FakeCtx {
+  createLinearGradient() {
+    return { addColorStop() {} }
+  }
+  fillRect() {}
+  drawImage(img) {
+    this._url = img?.url ?? null
+  }
+  getImageData() {
+    return { data: this._url ? dallePour(this._url) : dallePour('terrarium/0/0/0.png') }
+  }
+}
+
+globalThis.document = {
+  createElement() {
+    const c = { width: 0, height: 0 }
+    c.getContext = () => (c._ctx ??= new FakeCtx())
+    return c
+  },
+}
+globalThis.createImageBitmap = async (blob) => blob
+
+// ═══════════════════════════════════════════════ 3. LE MODÈLE DE LATENCE ═════
+//
+// `octets` : 87,6 Kio, c'est-à-dire les 1 401 Ko mesurés chez AWS pour les seize
+// tuiles racines (voir le constructeur de `globe.js`).
+// `DEBIT_MBS` : volontairement GÉNÉREUX ici (le banc `.banc/pano-latence.mjs`
+// couvre 12, 3 et 0,5 Mb/s). ⚠️ **Un test doit pouvoir constater la
+// RÉCUPÉRATION**, et cinq secondes à 12 Mb/s ne suffisent physiquement pas à
+// reconstruire mille tuiles — ce serait mesurer la bande passante, pas la file.
+
+// ⚠️ LE DÉBIT PAR DÉFAUT EST **RAPIDE**, ET C'EST DÉLIBÉRÉ. Les huit premiers
+// tests éprouvent une LOGIQUE (couverture, états, comptes) : les faire attendre
+// un réseau réaliste ne mesurerait que l'attente. Le panoramique, lui, pose son
+// débit lui-même — et il en pose deux, voir sa section.
+const DEBIT_RAPIDE = 1200
+
+const MAX_CONCURRENT = 6
+const OCTETS_TUILE = Math.round((1401 * 1024) / 16)
+const MS_PAR_IMAGE = 1000 / 60
+let DEBIT_MBS = DEBIT_RAPIDE
+
+const attentes = []
+export const compteur = { requetes: 0, parUrl: new Map() }
+
+globalThis.fetch = async (url) => {
+  compteur.requetes++
+  compteur.parUrl.set(url, (compteur.parUrl.get(url) || 0) + 1)
+  const duree = ((OCTETS_TUILE * 8) / ((DEBIT_MBS * 1e6) / MAX_CONCURRENT)) * 1000
+  await new Promise((r) => attentes.push({ du: horloge + duree, r }))
+  return { ok: true, status: 200, blob: async () => ({ size: OCTETS_TUILE, url }) }
+}
+
+// ⚠️ `setImmediate` ET NON `setTimeout(0)` : node borne un `setTimeout(0)` à
+// ~1 ms, et ce banc a besoin de centaines d'images. Même sémantique (un tour de
+// boucle d'événements), sans le plancher.
+async function souffler(tours) {
+  for (let i = 0; i < tours; i++) await new Promise((r) => setImmediate(r))
+}
+
+async function avancer(ms) {
+  horloge += ms
+  for (;;) {
+    const i = attentes.findIndex((e) => e.du <= horloge)
+    if (i < 0) break
+    attentes.splice(i, 1)[0].r()
+    await souffler(4)
+  }
+  await souffler(6)
+}
+
+// ═══════════════════════════════════════════════ 4. LE DÉPÔT ═════════════════
+
+const globeMod = await import('../src/globe.js')
+const { Globe, PLAFOND_FILE, _resetTileMemo, _resetJournalReseau, noterReponse } = globeMod
+const { latLonToSphere, R_GLOBE, ORBITAL_M_PER_UNIT, MERCATOR_MAX_LAT } = await import('../src/geo.js')
+const { empriseSocle, ZOOM_SOCLE } = await import('../src/monde/seuil-socle.js')
+const {
+  creerFlux,
+  demanderEmprise,
+  tuilesPretes,
+  zoomEffectif,
+  remplirHauteurs,
+  debitObserve,
+  tuilesEmprise,
+  MERCATOR_LAT_MAX,
+} = await import('../src/monde/flux-terrain.js')
+
+const url = (z, x, y) => `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`
+
+// la caméra du dépôt : fov 30 (`main.js`), far 1400 (`modes.js`),
+// near = clamp(orbAlt × 0,2 ; 0,01 ; 0,5) (`loi-altitude.js`)
+function nouvelleCamera() {
+  return new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 1400)
+}
+
+function poseCamera(camera, lat, lon, altM) {
+  const orbAlt = altM / ORBITAL_M_PER_UNIT
+  latLonToSphere(lat, lon, R_GLOBE + orbAlt, camera.position)
+  camera.near = Math.min(Math.max(orbAlt * 0.2, 0.01), 0.5)
+  camera.up.set(0, 1, 0)
+  camera.lookAt(0, 0, 0)
+  camera.updateMatrixWorld(true)
+  camera.updateProjectionMatrix()
+  return camera
+}
+
+function etat(globe) {
+  let loading = 0
+  let zmax = 0
+  for (const t of globe.tiles.values()) {
+    if (t.state === 'loading') loading++
+    if (t.mesh?.visible && t.z > zmax) zmax = t.z
+  }
+  return { loading, zmax, cache: globe.tiles.size, file: globe.queue.length }
+}
+
+function neuf(params = {}) {
+  _resetTileMemo()
+  _resetJournalReseau()
+  attentes.length = 0
+  horloge = 0
+  compteur.requetes = 0
+  compteur.parUrl.clear()
+  const g = new Globe({ globeContinu: true, ...params })
+  g.setVisible(true)
+  return g
+}
+
+const CENTRE = { lat: 45, lon: 6.25 }
+
+before(() => {
+  assert.equal(MERCATOR_LAT_MAX, MERCATOR_MAX_LAT, 'la recopie de MERCATOR_MAX_LAT a divergé de geo.js')
+})
+
+// ═══════════════════════════════════════════ UNE CASE PAR INTERFACE ══════════
+
+test('creerFlux : un flux neuf rend un cache vide et zéro requête', async () => {
+  const g = neuf()
+  const avant = compteur.requetes // les 16 racines partent au `setVisible`
+  const flux = creerFlux({ globe: g })
+  assert.equal(tuilesPretes(flux, empriseSocle({ centre: CENTRE })).size, 0, 'le cache du flux neuf n est pas vide')
+  assert.equal(compteur.requetes, avant, 'le flux neuf a lancé des requêtes')
+  assert.equal(debitObserve(flux), null, 'un flux neuf doit rendre null, pas zéro')
+  assert.throws(() => creerFlux({}), TypeError, 'creerFlux sans globe doit refuser bruyamment')
+  g.dispose()
+})
+
+test('demanderEmprise : les tuiles de l emprise sont demandées, ET AUCUNE AUTRE', async () => {
+  const g = neuf()
+  const flux = creerFlux({ globe: g })
+  const emprise = empriseSocle({ centre: CENTRE })
+  const attendues = tuilesEmprise(emprise, ZOOM_SOCLE)
+  // ⚠️ L'ASSERTION SE REJOUE CONTRE LA GÉOMÉTRIE, pas contre un littéral :
+  // `BLOCK_TILES = 3`, donc 3×3 alignée et 4×4 au pire quand elle chevauche.
+  assert.ok(attendues.length >= 9 && attendues.length <= 16, `${attendues.length} tuiles pour un socle 3×3`)
+
+  demanderEmprise(flux, { emprise, zoom: ZOOM_SOCLE })
+
+  // ⚠️ « DEMANDÉE » SE LIT SUR L'ÉTAT DE LA TUILE, PAS SUR `fetch`. Le vol est
+  // plafonné à six (`MAX_CONCURRENT`) : compter les appels à `fetch` ne verrait
+  // que les six premières et ferait échouer un code parfaitement sain. Une tuile
+  // demandée est `loading` (en file ou en vol) ou déjà `ready`.
+  for (const { z, x, y } of attendues) {
+    const t = g.tiles.get(`${z}/${x}/${y}`)
+    assert.ok(t, `la tuile ${z}/${x}/${y} de l emprise n existe même pas`)
+    assert.ok(['loading', 'ready'].includes(t.state), `la tuile ${z}/${x}/${y} est restée « ${t.state} »`)
+  }
+  // ET AUCUNE AUTRE : au niveau du socle, le cache ne contient QUE l'emprise.
+  const auNiveau = [...g.tiles.values()].filter((t) => t.z === ZOOM_SOCLE)
+  assert.equal(
+    auNiveau.length,
+    attendues.length,
+    `${auNiveau.length} tuiles z${ZOOM_SOCLE} en cache pour ${attendues.length} couvrantes`
+  )
+  g.dispose()
+})
+
+test('tuilesPretes : que des `ready`, et que celles qui intersectent l emprise', async () => {
+  const g = neuf()
+  const flux = creerFlux({ globe: g })
+  const emprise = empriseSocle({ centre: CENTRE })
+  demanderEmprise(flux, { emprise, zoom: ZOOM_SOCLE })
+  // à mi-chemin : il reste des `loading`
+  await avancer(MS_PAR_IMAGE)
+  for (const t of tuilesPretes(flux, emprise).values()) assert.equal(t.state, 'ready')
+
+  for (let i = 0; i < 30; i++) await avancer(MS_PAR_IMAGE)
+  const pretes = tuilesPretes(flux, emprise)
+  assert.ok(pretes.size >= 9, `${pretes.size} tuiles prêtes sur l emprise`)
+  for (const t of pretes.values()) assert.equal(t.state, 'ready', 'une tuile non prête est sortie de tuilesPretes')
+
+  // ⚠️ LES ANTIPODES NE RENDENT AUCUNE TUILE DU SOCLE — mais elles en rendent
+  // de GROSSIÈRES, et c'est juste : une racine z2 couvre un quart de planète,
+  // donc elle intersecte vraiment l'emprise d'en face. `tuilesPretes` répond à
+  // « qu'est-ce qui recouvre ce rectangle », pas à « qu'est-ce qui est fin ».
+  // C'est `zoomEffectif` qui juge la finesse, et il rendra z2 là-bas.
+  const loin = empriseSocle({ centre: { lat: -41, lon: -173 } })
+  const pretesLoin = tuilesPretes(flux, loin)
+  for (const t of pretesLoin.values()) {
+    assert.ok(t.z <= 3, `une tuile z${t.z} rendue à l autre bout du monde`)
+  }
+  assert.ok((zoomEffectif(flux, loin) ?? 99) < ZOOM_SOCLE, 'l autre bout du monde se croit couvert au zoom du socle')
+  g.dispose()
+})
+
+test('zoomEffectif : SOUS le zoom demandé tant que la couverture est incomplète', async () => {
+  const g = neuf()
+  const flux = creerFlux({ globe: g })
+  const emprise = empriseSocle({ centre: CENTRE })
+
+  assert.equal(zoomEffectif(flux, emprise), null, 'sans une seule tuile, zoomEffectif doit rendre null')
+
+  demanderEmprise(flux, { emprise, zoom: ZOOM_SOCLE })
+  // une seule tuile prête : la couverture est incomplète, donc le zoom AUSSI
+  await avancer(MS_PAR_IMAGE * 2)
+  const partiel = zoomEffectif(flux, emprise)
+  assert.ok(partiel === null || partiel < ZOOM_SOCLE, `zoom effectif ${partiel} alors que la couverture est partielle`)
+
+  for (let i = 0; i < 60; i++) await avancer(MS_PAR_IMAGE)
+  assert.equal(zoomEffectif(flux, emprise), ZOOM_SOCLE, 'couverture complète : le zoom effectif doit rejoindre le demandé')
+  g.dispose()
+})
+
+test('remplirHauteurs : (n+1)² hauteurs EN UNE PASSE, et le compte des manquants', async () => {
+  const g = neuf()
+  const flux = creerFlux({ globe: g })
+  const emprise = empriseSocle({ centre: CENTRE })
+
+  // 1. rien de chargé : tout est manquant, et rien n'a été écrit
+  const n = 32
+  const vide = remplirHauteurs(flux, { emprise, n })
+  assert.equal(vide.sortie.length, (n + 1) ** 2, 'la sortie ne fait pas (n+1)²')
+  assert.equal(vide.remplis, 0)
+  assert.equal(vide.manquants, (n + 1) ** 2)
+
+  demanderEmprise(flux, { emprise, zoom: ZOOM_SOCLE })
+  for (let i = 0; i < 60; i++) await avancer(MS_PAR_IMAGE)
+
+  // 2. couverture complète : plus un seul manquant, et la sortie fournie est
+  //    celle qu'on récupère (une passe, pas une allocation par sommet)
+  const sortie = new Float32Array((n + 1) ** 2)
+  const r = remplirHauteurs(flux, { emprise, n, sortie })
+  assert.equal(r.sortie, sortie, 'remplirHauteurs a alloué au lieu d écrire dans `sortie`')
+  assert.equal(r.manquants, 0, `${r.manquants} hauteurs manquantes sur ${(n + 1) ** 2}`)
+  assert.equal(r.remplis, (n + 1) ** 2)
+
+  // 3. et ce sont les BONNES hauteurs : chaque sommet porte l'élévation de la
+  //    tuile sous lui, celle que le bouchon a encodée.
+  const attendues = new Set([...tuilesEmprise(emprise, ZOOM_SOCLE)].map((t) => elevationDe(t.z, t.x, t.y)))
+  const vues = new Set()
+  for (const h of r.sortie) vues.add(Math.round(h))
+  for (const v of vues) {
+    assert.ok(
+      [...attendues].some((a) => Math.abs(a - v) < 1),
+      `hauteur ${v} lue alors que l emprise ne porte que ${[...attendues].join(', ')}`
+    )
+  }
+  assert.ok(vues.size > 1, 'toutes les hauteurs sont identiques : le banc ne distingue pas les tuiles')
+  g.dispose()
+})
+
+test('debitObserve : null sur un flux neuf, le débit agrégé après trois réponses connues', async () => {
+  const g = neuf()
+  const flux = creerFlux({ globe: g })
+  assert.equal(debitObserve(flux), null, 'zéro se propagerait en « réseau mort » dans zoomSoutenable')
+
+  // trois réponses de tailles et durées CONNUES, posées bout à bout : le débit
+  // agrégé en temps mural vaut alors Σoctets×8 / Σdurées.
+  horloge = 1000
+  noterReponse({ octets: 100_000, debut: 1000, fin: 1200 }) // 200 ms
+  noterReponse({ octets: 200_000, debut: 1200, fin: 1600 }) // 400 ms
+  noterReponse({ octets: 300_000, debut: 1600, fin: 2000 }) // 400 ms
+  const attendu = (600_000 * 8) / 1.0 / 1e6 // 4,8 Mb/s sur une seconde de mur
+  const vu = debitObserve(flux)
+  assert.ok(Math.abs(vu - attendu) < 1e-9, `débit ${vu} Mb/s au lieu de ${attendu}`)
+
+  // ⚠️ ET IL EST EN TEMPS MURAL : six transferts SIMULTANÉS de 400 ms font
+  // 400 ms, pas 2 400. Sommer les durées diviserait le débit par six.
+  _resetJournalReseau()
+  const f2 = creerFlux({ globe: g })
+  for (let i = 0; i < 6; i++) noterReponse({ octets: 100_000, debut: 0, fin: 400 })
+  assert.ok(Math.abs(debitObserve(f2) - (600_000 * 8) / 0.4 / 1e6) < 1e-9, 'le débit ignore le parallélisme')
+  g.dispose()
+})
+
+// ═══════════════════════════════════════════ LE PIÈGE MESURÉ ═════════════════
+
+test('une tuile annulée redevient `empty` — jamais `idle` — et NE REVIENT PAS d elle-même', async () => {
+  const g = neuf()
+  // on remplit la file sans la laisser partir : le vol est plafonné à six,
+  // donc à partir de la septième les entrées attendent.
+  const cibles = []
+  for (let i = 0; i < 40; i++) {
+    const t = g._ensureTile(9, 260 + i, 180)
+    g._request(t, 1)
+    cibles.push(t)
+  }
+  const enFile = cibles.filter((t) => g.queue.some((e) => e.t === t))
+  assert.ok(enFile.length > 20, `${enFile.length} entrées en file : le banc ne remplit pas la file`)
+
+  const victime = enFile[enFile.length - 1]
+  const cle = url(victime.z, victime.x, victime.y)
+  const avant = compteur.parUrl.get(cle) || 0
+  assert.equal(g._annuler(victime), true, 'l annulation n a pas trouvé la tuile en file')
+  assert.equal(victime.state, 'empty', `état « ${victime.state} » après annulation : seul « empty » rouvre _request`)
+
+  // 60 images ailleurs : rien ne doit la redemander, et surtout pas le réessai
+  // automatique du `.catch` de `_pump`.
+  const camera = poseCamera(nouvelleCamera(), -41, 174, 300_000)
+  for (let i = 0; i < 60; i++) {
+    g.update(camera, 0.016)
+    await avancer(MS_PAR_IMAGE)
+  }
+  assert.equal(compteur.parUrl.get(cle) || 0, avant, 'la tuile annulée est repartie sur le réseau toute seule')
+
+  // et AUCUNE tuile du globe ne porte un état inventé
+  for (const t of g.tiles.values()) {
+    assert.ok(['empty', 'loading', 'ready', 'error'].includes(t.state), `état inventé : ${t.state}`)
+  }
+  g.dispose()
+})
+
+test('une requête refusée par PLAFOND_FILE reste `empty`, elle ne devient pas un fantôme', async () => {
+  const g = neuf()
+  let refusees = 0
+  for (let i = 0; i < PLAFOND_FILE + 200; i++) {
+    const t = g._ensureTile(10, 520 + i, 360)
+    g._request(t, 1)
+    if (t.state === 'empty') refusees++
+  }
+  assert.ok(refusees > 0, `aucun refus alors que ${PLAFOND_FILE + 200} tuiles ont été demandées`)
+  assert.ok(g.queue.length <= PLAFOND_FILE, `file à ${g.queue.length} pour un plafond de ${PLAFOND_FILE}`)
+  assert.equal(g._refusFile, refusees, 'le compteur de refus ne suit pas')
+  g.dispose()
+})
+
+
+test('l éviction reprend les `empty` PÉRIMÉES avant de toucher aux tuiles prêtes', async () => {
+  // ⚠️ LA TROISIÈME CORRECTION DE LA TÂCHE, ET ELLE A SON PROPRE TEST PARCE QUE
+  // LE PANORAMIQUE NE LA VOIT PAS — mesuré : au balayage de référence le cache
+  // culmine à 836 tuiles pour un budget de 1 700, donc `_evictJusqua` ne se
+  // déclenche jamais et la correction reste invisible. Un test qui ne peut pas
+  // échouer ne garde rien.
+  //
+  // Le fait : le plafond de file et la purge rendent des tuiles à `empty`. Or
+  // les deux rangs d'éviction filtrent tous deux sur `ready` — une `empty`
+  // n'était donc candidate à AUCUN, et retenait une entrée du budget pour
+  // toujours. C'est le fantôme qu'on croyait avoir chassé, revenu par la porte
+  // d'à côté.
+  const g = neuf()
+  const PRETES = 12
+  const FANTOMES = 30
+
+  const pretes = []
+  for (let i = 0; i < PRETES; i++) {
+    const t = g._ensureTile(9, 300 + i, 180)
+    g._request(t, 1)
+    pretes.push(t)
+  }
+  for (let i = 0; i < 40; i++) await avancer(MS_PAR_IMAGE)
+  assert.ok(
+    pretes.every((t) => t.state === 'ready'),
+    'le banc n a pas réussi à charger ses tuiles prêtes'
+  )
+
+  // les tuiles prêtes PORTENT la couverture de l'image courante ; les fantômes
+  // sont `empty` et n'ont été touchés par aucun parcours
+  g.frame = 5
+  for (const t of pretes) {
+    t.lastUsed = g.frame
+    t.coverFrame = g.frame
+  }
+  const fantomes = []
+  for (let i = 0; i < FANTOMES; i++) fantomes.push(g._ensureTile(9, 400 + i, 180))
+  assert.ok(
+    fantomes.every((t) => t.state === 'empty' && t.lastUsed !== g.frame),
+    'les fantômes du banc ne sont pas des `empty` périmées'
+  )
+
+  g._evictJusqua(g.tiles.size - FANTOMES)
+
+  for (const t of fantomes) {
+    assert.equal(g.tiles.has(t.key), false, `le fantôme ${t.key} occupe encore une entrée du budget`)
+  }
+  for (const t of pretes) {
+    assert.equal(g.tiles.has(t.key), true, `la tuile prête ${t.key} a été sacrifiée à la place d un fantôme`)
+  }
+  g.dispose()
+})
+// ═══════════════════════════════════ LE PANORAMIQUE — LE TEST QUI COMPTE ═════
+//
+// ⚠️ **DEUX TESTS, ET LE PARTAGE N'EST PAS UN CONFORT : C'EST LA PHYSIQUE.**
+// Le geste est le même — 90° de balayage latéral à 4 km puis cinq secondes
+// d'immobilité — mais les deux moitiés de l'assertion du plan ne se mesurent pas
+// au même réseau :
+//
+//   · **le PIC de `loading` et le retour sous le plafond** se mesurent à un
+//     réseau RÉALISTE (12 Mb/s, le point haut de la règle R3). C'est là que la
+//     file sature, donc c'est là que le plafond mord : sans lui, le banc
+//     `.banc/pano-latence.mjs` relève **558 tuiles au pic**.
+//   · **le retour du globe à sa profondeur** ne se mesure qu'à réseau RAPIDE.
+//     Après 90° de balayage, la totalité du cache est périmée : reconstruire un
+//     millier de tuiles demande, à 12 Mb/s et six requêtes simultanées de
+//     359 ms, une bonne minute. Exiger le retour en cinq secondes à ce débit-là
+//     mesurerait la **bande passante**, pas la file — et le test échouerait sur
+//     un code parfaitement corrigé. ⚠️ **Mesuré, et c'est ce qui a fait scinder
+//     ce test** : à 12 Mb/s le globe revient à z6 depuis z14 en cinq secondes,
+//     et aucune correction de file n'y peut quoi que ce soit.
+//
+// ⚠️ **LE ZOOM EFFECTIF DE L'EMPRISE, LUI, REVIENT AUX DEUX DÉBITS**, et c'est
+// exactement ce que le flux apporte : le socle est demandé À PRIORITÉ MAXIMALE
+// sur seize tuiles, pas mille. C'est la différence entre « le globe est fin » et
+// « le socle est prêt », et c'est pour cela que `zoomEffectif` existe.
+
+const ALT_PANO = 4000
+
+async function panoramique({ debit, stabilisation, repos = 300 }) {
+  DEBIT_MBS = debit
+  const g = neuf()
+  const flux = creerFlux({ globe: g })
+  const camera = nouvelleCamera()
+  let lon = CENTRE.lon
+
+  const image = async () => {
+    poseCamera(camera, CENTRE.lat, lon, ALT_PANO)
+    g.update(camera, 0.016)
+    demanderEmprise(flux, { emprise: empriseSocle({ centre: { lat: CENTRE.lat, lon } }), zoom: ZOOM_SOCLE })
+    await avancer(MS_PAR_IMAGE)
+  }
+
+  // ⚠️ **PROTOCOLE : AU MOINS 17 IMAGES JETÉES AVANT DE RELEVER.** La règle
+  // sans-trou ne descend que d'un niveau par image (convergence mesurée à
+  // l'image 12 à 8 km, 13 à 2 km) — et avec un modèle de latence, il faut en
+  // plus le temps que les tuiles arrivent. Un banc trop court n'est pas
+  // seulement imprécis : **il IMITE le défaut cherché**, puisqu'une file basse
+  // parce que rien n'a encore été demandé se lit comme une file saine.
+  for (let i = 0; i < stabilisation; i++) await image()
+  const stable = etat(g)
+
+  let pic = stable.loading
+  for (let i = 1; i <= 60; i++) {
+    lon = CENTRE.lon + (90 * i) / 60
+    await image()
+    pic = Math.max(pic, etat(g).loading)
+  }
+  const balayage = etat(g)
+
+  for (let i = 0; i < repos; i++) await image()
+  const apres = etat(g)
+  const emprise = empriseSocle({ centre: { lat: CENTRE.lat, lon } })
+  return { g, flux, stable, pic, balayage, apres, zoomFlux: zoomEffectif(flux, emprise) }
+}
+
+test('panoramique à 12 Mb/s : la file ne dépasse plus le plafond, et elle redescend', async () => {
+  const m = await panoramique({ debit: 12, stabilisation: 900 })
+  assert.ok(m.stable.zmax >= 10, `le banc ne descend qu à z${m.stable.zmax} : il ne mesure rien`)
+
+  // ⚠️ L'ASSERTION QUI ÉCHOUE SUR LE CODE D'AVANT. Banc `.banc/pano-latence.mjs`
+  // sans les corrections : **558** tuiles `loading` au pic à 12 Mb/s, 554 à
+  // 3 Mb/s, 546 à 0,5 Mb/s — le pic ne dépend pas du débit, c'est la frontière
+  // du quadtree qui le fixe. Et le navigateur en relevait **568**.
+  assert.ok(
+    m.pic <= PLAFOND_FILE + 6,
+    `pic de ${m.pic} tuiles en \`loading\` pendant le balayage, pour ${PLAFOND_FILE} en file + 6 en vol`
+  )
+  assert.ok(
+    m.apres.loading < PLAFOND_FILE,
+    `${m.apres.loading} tuiles encore \`loading\` après 5 s d immobilité (plafond ${PLAFOND_FILE})`
+  )
+  // le zoom EFFECTIF rejoint le zoom demandé — l'assertion qui distingue
+  // « demandé » de « couvert »
+  assert.equal(m.zoomFlux, ZOOM_SOCLE, `zoom effectif ${m.zoomFlux} au lieu de ${ZOOM_SOCLE} après 5 s`)
+  assert.ok(m.g.tiles.size <= m.g.cacheMax, `${m.g.tiles.size} tuiles en cache pour ${m.g.cacheMax}`)
+  m.g.dispose()
+})
+
+test('panoramique à réseau rapide : le globe RETROUVE sa profondeur après le balayage', async () => {
+  const m = await panoramique({ debit: 1200, stabilisation: 240 })
+  assert.ok(m.stable.zmax >= 12, `le banc ne descend qu à z${m.stable.zmax} : il ne mesure rien`)
+  // le balayage périme tout : c'est le geste, pas un accident
+  assert.ok(m.balayage.zmax < m.stable.zmax, 'le balayage ne périme rien : le banc ne bouge pas assez')
+  assert.ok(
+    m.apres.zmax >= m.stable.zmax,
+    `le globe reste à z${m.apres.zmax} depuis z${m.stable.zmax} : la file est encore coincée`
+  )
+  assert.equal(m.zoomFlux, ZOOM_SOCLE, `zoom effectif ${m.zoomFlux} au lieu de ${ZOOM_SOCLE}`)
+  assert.ok(m.apres.loading < PLAFOND_FILE, `${m.apres.loading} tuiles encore \`loading\``)
+  m.g.dispose()
+})

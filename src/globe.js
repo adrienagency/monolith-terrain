@@ -70,6 +70,49 @@ const CACHE_MAX = 600 // ready tiles kept before LRU eviction
 // demandé, au prix d'une facture que personne n'a arbitrée. **La production
 // garde donc exactement le budget que la Tâche 4 sexies lui a mesuré.**
 const CACHE_MAX_CONTINU = 1700
+
+// ⚠️ LE PLAFOND DE LA **FILE**, ET CE N'EST PAS LE PLAFOND DE REQUÊTES
+// SIMULTANÉES (plan « globe continu », Tâche 4 bis). Celui-là existe déjà et ne
+// bouge pas : `MAX_CONCURRENT = 6`. Celui-ci borne `this.queue`, c'est-à-dire
+// les tuiles marquées `loading` qui **attendent leur tour** — et c'est là que le
+// flux se coinçait, parce que `_request` marque `loading` AVANT d'enfiler.
+//
+// ⚠️ MESURÉ, ET UNE VALEUR INVENTÉE A DÉJÀ ÉTÉ RÉFUTÉE ICI (ce plan avait écrit
+// 512, au-dessus du budget de cache de l'époque). Banc `.banc/pano-latence.mjs`
+// — panoramique de référence (90° à 4 km, 60 images), MODÈLE DE LATENCE : une
+// requête se résout au bout de `octets × 8 / (débit / MAX_CONCURRENT)`, la tuile
+// pesant 87,6 Kio (les 1 401 Ko des seize racines, mesurés chez AWS, voir le
+// constructeur). Stabilisation jusqu'à z15, puis balayage :
+//
+//     débit       pic de `loading`   zoom après 5 s d'immobilité   cache
+//     12   Mb/s   **558**            z7                            1 588
+//      3   Mb/s   **554**            z3                            1 548
+//      0,5 Mb/s   **546**            z3                            1 548
+//
+// ⚠️ **LE PIC NE DÉPEND PAS DU DÉBIT — 558, 554, 546 sur un facteur 24.** C'est
+// la FRONTIÈRE du quadtree qui le fixe, pas le réseau : la règle sans-trou
+// n'ouvre un niveau que lorsque les quatre enfants sont prêts, donc le nombre de
+// tuiles demandables à une image est borné par la géométrie. Le débit ne change
+// que la vitesse à laquelle la file se vide, jamais sa hauteur. L'attaque avait
+// vu le même fait à une autre profondeur (« plafonne à 286 à toutes les latences
+// essayées ») et en avait tiré la mauvaise conclusion.
+//
+// ⚠️ **ET LE NAVIGATEUR DIT LA MÊME CHOSE** : la mesure qui a déclenché cette
+// tâche relevait **568 tuiles en `loading`**, caméra en mouvement en orbite,
+// cache collé à 1 700. Le banc en trouve 558 — le modèle est bon.
+//
+// **256, et les deux bornes du protocole sont tenues** : strictement sous le pic
+// mesuré le plus BAS (546, donc 47 %) et strictement sous le budget de cache
+// (`CACHE_MAX_CONTINU` = 1 700, donc 15 %). ⚠️ **L'assertion échoue bien sur le
+// code d'avant** — 546 à 558 tuiles en file contre 256 — ce que le §0 exige
+// avant de retenir une valeur.
+//
+// Pourquoi 256 et pas 512 : une file de 512 à six requêtes simultanées et
+// 359 ms la tuile (12 Mb/s) met **trente secondes** à se vider — elle travaille
+// encore une demi-minute après que la caméra s'est arrêtée ailleurs. À 256 c'est
+// quinze secondes dans le pire cas, et la purge d'obsolescence (`_purgerFile`)
+// la ramène en pratique à la frontière de l'image courante.
+export const PLAFOND_FILE = 256
 // Plancher de `dist` dans `_traverse`, EXPRIMÉ EN MÈTRES puis converti — voir
 // le long commentaire à son point d'usage. L'ancien plancher valait `1` unité
 // de scène, c'est-à-dire 63 710 m, et c'est lui qui plafonnait le globe à z11.
@@ -279,6 +322,63 @@ const TILE_MEMO_MAX = 128 // 128 × 256² × 4 o = 32 Mo d'ImageBitmap décodé
 /** url → Promise<ImageBitmap>, LRU bornée. Exportée pour les tests. */
 export const _tileMemo = new Map()
 
+// ═══════════ LE JOURNAL RÉSEAU — la source de `debitObserve` (Tâche 4 bis) ════
+//
+// ⚠️ **IL SE POSE ICI ET NULLE PART AILLEURS**, parce qu'ici est le seul endroit
+// du fichier où l'on sait qu'une requête est réellement PARTIE : `tileBitmap`
+// dédoublonne par URL, et une tuile servie par `_tileMemo` arrive en zéro
+// milliseconde sans avoir rien téléchargé. Chronométrer `fetchTile` compterait
+// ces zéros et rendrait un débit infini — c'est le piège « le chronomètre qui
+// mesure autre chose » du §3 de `/threejs-optimisation`.
+//
+// Une entrée par réponse REÇUE : `octets` (la taille du blob), `debut` et `fin`
+// (l'horloge à l'émission et à la réception complète). ⚠️ **Les trois sont
+// nécessaires** : `debitObserve` agrège en temps mural, donc il lui faut les
+// bornes des intervalles et pas seulement leur durée — six transferts
+// simultanés de 359 ms font 359 ms de mur, pas 2 154.
+//
+// Module-level et exporté, comme `_tileMemo` juste au-dessus : c'est le
+// précédent du fichier, et le journal est une propriété du RÉSEAU, pas d'une
+// instance de globe.
+const JOURNAL_MAX = 64 // deux fenêtres de `MAX_CONCURRENT` × dix — voir flux-terrain.js
+
+/** Les dernières réponses reçues, les plus anciennes en tête. Exporté pour les tests. */
+export const _journalReseau = []
+
+/** Le compteur monotone des réponses — un flux neuf s'en sert de repère. */
+let _sequenceReseau = 0
+
+/** Le rang de la dernière réponse journalisée. `creerFlux` le lit à sa naissance. */
+export function sequenceReseau() {
+  return _sequenceReseau
+}
+
+/**
+ * Journalise une réponse reçue. ⚠️ **Exportée pour que le test de
+ * `debitObserve` puisse poser des tailles et des durées CONNUES** au lieu de les
+ * arracher à un bouchon de `fetch` — une réponse dont on ne connaît pas la
+ * taille ne prouve rien d'un débit.
+ */
+export function noterReponse({ octets, debut, fin }) {
+  if (!(octets > 0) || !Number.isFinite(debut) || !Number.isFinite(fin) || fin < debut) return
+  _journalReseau.push({ octets, debut, fin, seq: ++_sequenceReseau })
+  while (_journalReseau.length > JOURNAL_MAX) _journalReseau.shift()
+}
+
+/** Remise à zéro du journal — tests uniquement. */
+export function _resetJournalReseau() {
+  _journalReseau.length = 0
+  _sequenceReseau = 0
+}
+
+// `performance.now` quand il existe (navigateur et node ≥ 16), `Date.now`
+// sinon. ⚠️ Une fonction, pas une valeur capturée : le banc pose une horloge
+// VIRTUELLE sur `globalThis.performance`, et une référence figée à l'import ne
+// la verrait pas.
+function maintenant() {
+  return globalThis.performance?.now?.() ?? Date.now()
+}
+
 /** Remise à zéro de la mémoire de tuiles — tests uniquement. */
 export function _resetTileMemo() {
   _tileMemo.clear()
@@ -294,9 +394,15 @@ function tileBitmap(url) {
     return memo
   }
   const p = (async () => {
+    const debut = maintenant()
     const r = await fetch(url)
     if (!r.ok) throw new Error(`tile ${url} → HTTP ${r.status}`)
-    return createImageBitmap(await r.blob())
+    const blob = await r.blob()
+    // ⚠️ ON JOURNALISE APRÈS `blob()`, PAS APRÈS `fetch()` : `fetch` rend dès les
+    // en-têtes, le corps arrive après. Chronométrer l'en-tête mesurerait la
+    // latence d'aller-retour et l'appellerait « débit ».
+    noterReponse({ octets: blob?.size, debut, fin: maintenant() })
+    return createImageBitmap(blob)
   })()
   _tileMemo.set(url, p)
   // Un ÉCHEC ne se mémorise pas : `_pump` réessaie une fois, et une panne figée
@@ -371,7 +477,13 @@ async function fetchTile(z, x, y) {
   return { texture, heights }
 }
 
-function sampleHeights(heights, u, v) {
+/**
+ * Échantillon bilinéaire d'une tuile terrarium. ⚠️ **EXPORTÉE POUR LE FLUX**
+ * (`src/monde/flux-terrain.js`, `remplirHauteurs`) : la recopier là-bas ferait
+ * deux conventions de demi-pixel à faire coïncider, et le §1 de
+ * `/threejs-optimisation` dit exactement ce qu'il faut en penser.
+ */
+export function sampleHeights(heights, u, v) {
   // bilinear sample, u/v in [0,1], row 0 = north. Pixel CENTERS sit at
   // (i + 0.5)/256 — the same convention the GPU uses when the fragment shader
   // reads uTex — so vertex relief and shaded texture stay registered instead
@@ -418,6 +530,25 @@ export class Globe {
     this._demiEpaisseur = 0
     this._visites = 0 // tuiles PARCOURUES à la dernière image (mesure de l'emprise)
     this._refus = 0 // raffinements REFUSÉS faute de crédit à la dernière image
+    this._refusFile = 0 // requêtes REFUSÉES par PLAFOND_FILE à la dernière image
+    this._purgees = 0 // entrées de file PÉRIMÉES retirées à la dernière image
+    // ⚠️ LES CLÉS DONT ON GARDE LES HAUTEURS (Tâche 4 bis). `_buildMesh` relâche
+    // `t.heights` dès que le maillage est bâti — 256 Kio la tuile, 435 Mo à
+    // `CACHE_MAX_CONTINU`, c'est l'Étape 1 de la Tâche 4 sexies et elle ne se
+    // rediscute pas. Mais `remplirHauteurs` a besoin de LIRE ces hauteurs sur la
+    // seule emprise du socle : `BLOCK_TILES = 3` tuiles de côté, donc **seize
+    // tuiles au pire** (4 × 4 quand l'emprise chevauche la grille), soit 4 Mo.
+    // C'est le flux qui remplit cet ensemble, personne d'autre.
+    //
+    // ⚠️ **ET CE N'EST PAS QU'UNE GARDE DE HAUTEURS : C'EST LA RÉSERVATION DU
+    // FLUX.** Les tuiles du socle ne sont demandées par PERSONNE dans
+    // `_traverse` — le quadtree ne descend à `ZOOM_SOCLE` que si la caméra l'y
+    // amène, et le socle, lui, doit se remplir tout de suite (décision du §3 de
+    // `seuil-socle.js` : « il n'ATTEND pas »). Elles n'ont donc jamais
+    // `lastUsed === frame`, et sans réservation la purge de file les jetterait à
+    // l'image suivante, l'éviction juste après. Trois mécanismes la respectent :
+    // `_purgerFile`, `_evictJusqua` et `_buildMesh`.
+    this.gardeHauteurs = new Set()
     // clé → image du dernier abandon. Voir IMAGES_QUARANTAINE.
     this._echoue = new Map()
 
@@ -685,10 +816,100 @@ export class Globe {
   _request(t, priority) {
     if (t.state !== 'empty') return
     if (this.continu && this._enQuarantaine(t.key)) return
+    // ⚠️ LE PLAFOND DE FILE SE TESTE **AVANT** LA MARQUE `loading`, ET C'EST TOUT
+    // LE SUJET (plan « globe continu », Tâche 4 bis, correction 1). `_request`
+    // marquait `loading` puis enfilait : un refus posé après la marque aurait
+    // laissé la tuile `loading` SANS requête — le fantôme permanent que cette
+    // tâche chasse. En testant avant, la tuile RESTE `empty`, l'état d'où
+    // `_request` sait repartir. ⚠️ **Et surtout pas un état `idle` inventé** :
+    // les états sont `empty | loading | ready | error`, et rien d'autre n'ouvre.
+    //
+    // ⚠️ ET OUI, `_traverse` LA REDEMANDERA À L'IMAGE SUIVANTE. C'est voulu :
+    // c'est de la contre-pression, pas un abandon. La tuile repart dès que la
+    // file redescend, sans que personne ait à tenir une liste d'attente
+    // parallèle — laquelle serait une seconde file, non bornée celle-là.
+    if (this.continu && this.queue.length >= PLAFOND_FILE) {
+      this._refusFile++
+      return
+    }
     t.state = 'loading'
     t.demandee = this.frame // l'image de DÉPART : c'est elle qui date un blocage
     this.queue.push({ t, priority })
     this._pump()
+  }
+
+  // ═══════════ L'ANNULATION (Tâche 4 bis, correction 2) ═══════════════════
+  //
+  // Sort une tuile de la file et la rend à `empty`. Rend `true` si elle y était.
+  //
+  // ⚠️ **ON N'ANNULE QUE CE QUI N'EST PAS PARTI, ET C'EST UN CHOIX MESURÉ, PAS
+  // UNE FACILITÉ.** Une entrée présente dans `this.queue` n'a pas encore été
+  // tirée par `_pump` : aucune promesse n'existe, donc aucun `.catch` ne peut se
+  // déclencher. C'est exactement ce qu'il faut, parce que le `.catch` de `_pump`
+  // RÉESSAIE une fois (`t.retried`) : annuler une requête en vol relancerait
+  // donc la tuile qu'on voulait abandonner. Le piège est mesuré, il est nommé
+  // ici, et la seule façon de ne pas y tomber est de ne pas toucher au vol.
+  //
+  // ⚠️ **ET L'`AbortController` EST REFUSÉ POUR UNE SECONDE RAISON, ÉCRITE DANS
+  // CE FICHIER** : `fetchTile` porte « pas de `signal` : la promesse est partagée
+  // entre tous les demandeurs de la même URL, l'abandon de l'un annulerait la
+  // tuile des autres ». `_tileMemo` dédoublonne par URL ; un `signal` y ferait
+  // tomber la tuile d'un globe parce qu'un autre a tourné la tête.
+  //
+  // ⚠️ **ET LE GAIN EST DANS LA FILE, PAS DANS LE VOL** : le vol est plafonné à
+  // six (`MAX_CONCURRENT`), la file montait à 558 (voir `PLAFOND_FILE`). Annuler
+  // six requêtes ne rachète rien ; vider la file rachète tout.
+  _annuler(t) {
+    const i = this.queue.findIndex((e) => e.t === t)
+    if (i < 0) return false
+    this.queue.splice(i, 1)
+    if (t.state === 'loading') t.state = 'empty'
+    return true
+  }
+
+  // ═══════════ LA PURGE DES ENTRÉES PÉRIMÉES (Tâche 4 bis) ════════════════════
+  //
+  // Une fois par image, après le parcours : ce que la file contient encore et
+  // que l'image courante n'a PAS demandé ne sera jamais utile — la caméra a
+  // tourné. Sans cette purge, le plafond seul ne suffirait pas : la file
+  // resterait pleine de la vue d'avant et refuserait la vue d'après (mesuré :
+  // 546 tuiles encore `loading` cinq secondes après l'arrêt du panoramique, zoom
+  // effectif retombé de z15 à z3).
+  //
+  // ⚠️ **LES RACINES z2 NE SE PURGENT JAMAIS.** `_traverse` ne demande que des
+  // ENFANTS : une racine rendue à `empty` ne repartirait sur le réseau pour
+  // personne, et toute la descente resterait bloquée derrière elle — sans
+  // erreur, sans test rouge, sans rien à l'écran. C'est le rappel explicite que
+  // la Tâche 4 sexies a posé sur `_rechargeTuiles`, et il vaut ici mot pour mot.
+  _purgerFile() {
+    if (!this.continu || !this.queue.length) return 0
+    const garde = []
+    let n = 0
+    for (const e of this.queue) {
+      const t = e.t
+      if (t.z <= ROOT_Z) {
+        garde.push(e)
+        continue
+      }
+      // orpheline : la tuile a été évincée pendant que son entrée attendait.
+      // On la retire SANS toucher à son état — l'objet n'est plus la tuile de
+      // cette clé, et la garde du maillage orphelin de `_pump` s'en charge.
+      if (this.tiles.get(t.key) !== t) {
+        n++
+        continue
+      }
+      // ⚠️ RÉSERVÉE PAR LE FLUX : voir `gardeHauteurs` au constructeur. Le socle
+      // n'est demandé par aucun parcours, donc son `lastUsed` ne bouge pas.
+      if (t.lastUsed === this.frame || this.gardeHauteurs.has(t.key)) {
+        garde.push(e)
+        continue
+      }
+      if (t.state === 'loading') t.state = 'empty'
+      n++
+    }
+    this.queue = garde
+    this._purgees = n
+    return n
   }
 
   _pump() {
@@ -936,7 +1157,21 @@ export class Globe {
     // qu'on cessait de rendre. `setExaggeration` reste utilisable — il passe
     // désormais par `_rechargeTuiles()`, qui redemande la donnée au lieu de la
     // retenir 105 Mo durant au cas où.
-    t.heights = null
+    //
+    // ⚠️ **SAUF POUR L'EMPRISE QUE LE FLUX A NOMMÉE** (Tâche 4 bis). La Phase 2
+    // rééchantillonne le socle DEPUIS ce cache : `remplirHauteurs` a besoin des
+    // hauteurs, et elles n'existaient plus nulle part — c'est la contradiction
+    // entre les Tâches 4 sexies et 4 bis, et elle se tranche par la PORTÉE, pas
+    // par le retour en arrière. `gardeHauteurs` ne contient que les tuiles de
+    // l'emprise du socle : seize au pire, 4 Mo, contre 435 Mo si on gardait tout.
+    //
+    // ⚠️ `?.` ET NON `.` : `test/globe-precision.test.js` EMPRUNTE cette
+    // méthode (`Globe.prototype._buildMesh.call(faux, …)`) avec un `this` qui
+    // n'est pas un globe — il n'a ni `gardeHauteurs` ni cache. Un point nu y
+    // lève `Cannot read properties of undefined`, et ce test vérifie la
+    // précision des sommets à l'échelle planétaire : il ne doit pas payer pour
+    // une réservation de hauteurs.
+    if (!this.gardeHauteurs?.has(t.key)) t.heights = null
   }
 
   // --------------------------------------------------------------- per-frame
@@ -954,6 +1189,8 @@ export class Globe {
     this._drawn = 0
     this._visites = 0
     this._refus = 0
+    this._refusFile = 0
+    this._purgees = 0
     if (this.continu) this._preparerTriSpatial(camera, camPos)
 
     // CRÉDIT DE CRÉATION de la frame. Un raffinement fait naître quatre tuiles ;
@@ -976,6 +1213,10 @@ export class Globe {
 
     for (const root of this.roots) this._traverse(root, camPos, camDir)
 
+    // ⚠️ LA PURGE PASSE AVANT L'ÉVICTION, et l'ordre porte du sens : elle rend
+    // des tuiles à `empty`, ce que l'éviction sait reprendre (rang 0), alors
+    // qu'une `loading` fantôme lui échappe pendant IMAGES_BLOQUEE images.
+    this._purgerFile()
     if (this.tiles.size > this.cacheMax) this._evict()
     return this._drawn
   }
@@ -1191,8 +1432,19 @@ export class Globe {
   // autre porte. ⚠️ L'ORDRE DES DEUX RANGS EXISTANTS N'EST PAS TOUCHÉ : ce rang
   // passe AVANT eux parce qu'il ne coûte rien (aucune de ces tuiles ne porte de
   // donnée ni de pixel), pas parce que le classement serait à revoir.
+  // ⚠️ ET UNE TROISIÈME POPULATION, AJOUTÉE PAR LA TÂCHE 4 BIS : LES `empty`
+  // PÉRIMÉES. Le plafond de file et la purge rendent des tuiles à `empty` — le
+  // seul état d'où `_request` sait repartir. Mais une `empty` n'est candidate ni
+  // au rang 1 ni au rang 2 (tous deux filtrent sur `ready`) : sans cette ligne,
+  // chaque refus de file laisserait une entrée de cache immortelle, c'est-à-dire
+  // le fantôme qu'on vient de chasser, revenu par la porte d'à côté. Elle ne
+  // coûte rien à jeter : pas de maillage, pas de texture, pas de hauteurs.
+  // ⚠️ « Périmée » = pas touchée par le parcours de CETTE image ; une `empty`
+  // fraîche est un enfant qui vient de naître et que l'on va demander.
   _bloquee(t) {
-    return t.state === 'error' || (t.state === 'loading' && this.frame - (t.demandee ?? 0) > IMAGES_BLOQUEE)
+    if (t.state === 'error') return true
+    if (t.state === 'loading') return this.frame - (t.demandee ?? 0) > IMAGES_BLOQUEE
+    return t.state === 'empty' && t.lastUsed !== this.frame
   }
 
   _evictJusqua(max) {
@@ -1200,7 +1452,12 @@ export class Globe {
     if (excess <= 0) return
     const porte = (t) => t.coverFrame === this.frame
     const parProfondeur = (a, b) => b.z - a.z
-    const vivantes = [...this.tiles.values()].filter((t) => t.z > ROOT_Z)
+    // ⚠️ LES TUILES RÉSERVÉES PAR LE FLUX SORTENT DU JEU, au même titre que les
+    // racines. Elles sont seize au pire sur un budget de 1 700 (moins de 1 %) et
+    // ce sont les seules dont on garde les hauteurs : les évincer rendrait le
+    // socle intrinsèquement irremplissable — il redemanderait à chaque image ce
+    // que l'éviction lui reprend à chaque image.
+    const vivantes = [...this.tiles.values()].filter((t) => t.z > ROOT_Z && !this.gardeHauteurs.has(t.key))
     const bloquees = this.continu
       ? vivantes.filter((t) => this._bloquee(t)).sort((a, b) => a.lastUsed - b.lastUsed || parProfondeur(a, b))
       : []
@@ -1212,6 +1469,12 @@ export class Globe {
     ]
     for (let i = 0; i < Math.min(excess, victimes.length); i++) {
       const t = victimes[i]
+      // ⚠️ UNE VICTIME `loading` DOIT AUSSI SORTIR DE LA FILE (Tâche 4 bis,
+      // correction 3). Sans cette ligne, `_pump` finirait par tirer son entrée,
+      // téléchargerait la tuile, et la garde du maillage orphelin la jetterait à
+      // l'arrivée : de la bande passante dépensée pour rien, prise sur les six
+      // requêtes simultanées dont le globe a réellement besoin.
+      this._annuler(t)
       if (t.mesh) {
         this.group.remove(t.mesh)
         t.mesh.geometry.dispose()

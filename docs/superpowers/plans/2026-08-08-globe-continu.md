@@ -1113,7 +1113,7 @@ Pour mémoire, l'erreur d'origine : à un champ de 30°, un socle occupe **5,6 %
 - ⚠️ **LA LATITUDE N'EST PAS DANS LA SIGNATURE**, et c'est un choix. Les seuils sont ancrés à 45°. Conséquence exacte, à seuil constant : le socle occupe **84,9 % de la hauteur à l'équateur** et **42,4 % à 60°** au lieu de 60 %. La rendre variable est une ligne de code — mais c'est une grandeur de plus à faire coïncider entre quatre modules. **À rouvrir si l'écart se voit.**
 - **Rien n'est branché.** `socleVisible` et `empriseSocle` ne sont lus par **aucun** module de `src/` : ce sont les Tâches 4 bis, 6 et 7 qui les consommeront.
 
-### Tâche 4 bis : LE FLUX QUI NE SE COINCE PAS ⚠️ APRÈS LES TÂCHES 4, 4 QUATER, 4 ALPHA ET 3
+### Tâche 4 bis : LE FLUX QUI NE SE COINCE PAS ✅ **FAITE LE 2026-08-21** — ⚠️ **ELLE EST PASSÉE AVANT LA 4 ALPHA, ET `PLAFOND_FILE = 256`**
 
 ⚠️ **CETTE TÂCHE PORTAIT « EN PREMIER ». C'ÉTAIT L'ORDRE INVERSE DE CE QUI EST MESURÉ.** La Tâche 4 change ce que cette tâche est censée calibrer : après horizon + frustum, le pic de `loading` passe de **0 à 246** et le trafic d'un panoramique de **596 à 1 786 requêtes**. `PLAFOND_FILE` ne peut pas se calibrer avant. Et la Tâche 4 alpha fait passer les tuiles de PNG 256 px à WebP 512 px : **le bouchon écrit ici serait périmé le jour où elle s'exécute.**
 
@@ -1150,9 +1150,9 @@ Une passe par tuile touchée, pas un appel par sommet.
 
 ⚠️ **C'est l'interface que le prototype proposait telle quelle pour la Phase 2.**
 
-- [ ] **Étape 1** — écrire le test qui échoue : **un panoramique latéral à basse altitude**, pas une descente. ⚠️ C'est le geste le plus banal de l'application, et celui que le vol de référence ne pouvait pas voir : dans une descente lisse, deux images consécutives demandent presque les mêmes tuiles. Assertion : après 90° de balayage puis 5 s d'immobilité, le nombre de tuiles `loading` revient sous `PLAFOND_FILE` et le zoom effectif rejoint le zoom demandé.
-- [ ] **Étape 1 ter — FABRIQUER `debitObserve(flux)`. ⚠️ SANS CETTE CASE, LA TÂCHE 4 TER NE PEUT PAS COMMENCER** — signalé cinq fois. Test : après trois réponses de tailles et durées connues, `debitObserve` rend leur débit agrégé ; sur un flux neuf il rend `null` et **non zéro** — zéro se propagerait en « réseau mort » dans `zoomSoutenable`.
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue (zoom figé, file saturée).
+- [x] **Étape 1** — écrire le test qui échoue : **un panoramique latéral à basse altitude**, pas une descente. ⚠️ C'est le geste le plus banal de l'application, et celui que le vol de référence ne pouvait pas voir : dans une descente lisse, deux images consécutives demandent presque les mêmes tuiles. Assertion : après 90° de balayage puis 5 s d'immobilité, le nombre de tuiles `loading` revient sous `PLAFOND_FILE` et le zoom effectif rejoint le zoom demandé.
+- [x] **Étape 1 ter — FABRIQUER `debitObserve(flux)`. ⚠️ SANS CETTE CASE, LA TÂCHE 4 TER NE PEUT PAS COMMENCER** — signalé cinq fois. Test : après trois réponses de tailles et durées connues, `debitObserve` rend leur débit agrégé ; sur un flux neuf il rend `null` et **non zéro** — zéro se propagerait en « réseau mort » dans `zoomSoutenable`.
+- [x] **Étape 2** — le lancer, vérifier qu'il échoue (zoom figé, file saturée).
 
 ⚠️ **LE HARNAIS DU DÉPÔT FERAIT PASSER CE TEST SUR DU CODE CASSÉ.** `test/globe-reseau.test.js:83-93` résout `fetch` en `setTimeout(0)` et rend la main entre les images : le compte de tuiles `loading` **retombe alors tout seul**, sans plafond, sans annulation, sans éviction. L'étape 2 échouerait à échouer. **Il faut un bouchon de `fetch` à résolution MANUELLE** — les requêtes ne se résolvent que lorsque le test le décide — sinon on ne mesure que l'ordonnanceur de node.
   ⚠️ **Une case par interface, chacune avec SON assertion** — la version précédente les avait regroupées dans une seule case sans aucune assertion, ce qui ne vaut guère mieux :
@@ -1162,10 +1162,82 @@ Une passe par tuile touchée, pas un appel par sommet.
   - `zoomEffectif(flux, emprise)` — **inférieur au zoom demandé tant que la couverture est incomplète**, égal ensuite. C'est l'assertion qui distingue « demandé » de « couvert ».
   - `remplirHauteurs(flux, { emprise, n, sortie })` — remplit `(n+1)²` hauteurs **en une passe**, et rend le compte des manquants. ⚠️ **Par lot, jamais par pixel : mesuré, l'interface par pixel coûtait +3,5 ms par reconstruction à N=256.**
   ⚠️ **Et ajoutez-les à l'audit de noms du §10, qui leur était aveugle.**
-- [ ] **Étape 3 — implémenter les trois corrections du flux** (plafond de file, annulation, éviction des `loading`) **et les cinq interfaces ci-dessus.** ⚠️ **CETTE CASE AVAIT DISPARU : une correction destinée à détailler les interfaces avait emporté la seule case d'implémentation de la tâche, et la numérotation sautait de 2 à 4.** Sixième occurrence de l'accident que le §0 documente.
-- [ ] **Étape 4** — vérifier par mutation : retirer le plafond, puis l'annulation, puis l'éviction des `loading` — **chacune doit tuer un test**.
-- [ ] **Étape 5** — mesurer le battement : nombre de décodages complets sur un vol de référence. ⚠️ L'attaque en a compté **10 829 pour un cache de 420** ; donner le chiffre après.
-- [ ] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [x] **Étape 3 — implémenter les trois corrections du flux** (plafond de file, annulation, éviction des `loading`) **et les cinq interfaces ci-dessus.** ⚠️ **CETTE CASE AVAIT DISPARU : une correction destinée à détailler les interfaces avait emporté la seule case d'implémentation de la tâche, et la numérotation sautait de 2 à 4.** Sixième occurrence de l'accident que le §0 documente.
+- [x] **Étape 4** — vérifier par mutation : retirer le plafond, puis l'annulation, puis l'éviction des `loading` — **chacune doit tuer un test**.
+- [x] **Étape 5** — mesurer le battement : nombre de décodages complets sur un vol de référence. ⚠️ L'attaque en a compté **10 829 pour un cache de 420** ; donner le chiffre après.
+- [x] **Étape 6 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+
+#### ✅ CE QUI A ÉTÉ FAIT, ET CE QUE ÇA MESURE (2026-08-21)
+
+**Fichiers :** `src/monde/flux-terrain.js` (créé) · `src/globe.js` · `test/flux-terrain.test.js` (créé, ajouté à la ligne `test`) · bancs `.banc/pano-latence.mjs`, `.banc/battement.mjs`, `.banc/mutation-4bis.py` (hors dépôt).
+
+##### `PLAFOND_FILE = 256`, et voici sa mesure
+
+Banc `.banc/pano-latence.mjs` — **modèle de latence**, pas bouchon manuel : horloge virtuelle à 16,67 ms l'image, une requête se résout au bout de `octets × 8 / (débit / MAX_CONCURRENT)`, la tuile pesant 87,6 Kio (les 1 401 Ko des seize racines mesurés chez AWS). Stabilisation jusqu'à z15, puis 90° de balayage à 4 km en 60 images, puis 5 s d'immobilité.
+
+| débit | pic de `loading` (avant) | zoom après 5 s (avant) | pic (après) | `loading` après 5 s (après) |
+|---|---|---|---|---|
+| 12 Mb/s (R3) | **558** | z7 (parti de z15) | **262** | 64 |
+| 3 Mb/s (×4) | **554** | z3 | — | — |
+| 0,5 Mb/s (×24) | **546** | z3 | — | — |
+
+⚠️ **LE PIC NE DÉPEND PAS DU DÉBIT — 558, 554, 546 sur un facteur 24.** C'est la **frontière du quadtree** qui le fixe, pas le réseau : la règle sans-trou n'ouvre un niveau que lorsque les quatre enfants sont prêts. Le débit ne change que la vitesse à laquelle la file se vide, jamais sa hauteur. L'attaque avait vu le même fait à une autre profondeur (« plafonne à 286 à toutes les latences ») et en avait tiré la mauvaise conclusion.
+
+**256 tient les deux bornes du protocole** : strictement sous le pic mesuré le plus BAS (546, donc 47 %) et strictement sous `CACHE_MAX_CONTINU = 1700` (15 %). Pourquoi pas 512 : une file de 512 à six requêtes de 359 ms met **trente secondes** à se vider — elle travaille encore une demi-minute après que la caméra s'est arrêtée ailleurs.
+
+##### Le navigateur, avant et après — `?globe=continu`, caméra en mouvement en orbite
+
+| | pic de `loading` | file | cache |
+|---|---|---|---|
+| avant (la mesure qui a motivé la tâche) | **568** | — | collé à 1 700 |
+| après (900 images d'orbite, `autoRotate`) | **141** | 9 à 31 | 1 700, dont 1 079 `ready` |
+
+Le banc en trouvait 558 là où le navigateur en trouvait 568 : **le modèle de latence est bon**, et c'est lui qui rend la mesure rejouable.
+
+##### Les trois corrections, et ce que chacune est vraiment
+
+1. **`PLAFOND_FILE`** — testé **AVANT** la marque `loading`, donc une requête refusée **reste `empty`** (jamais un `idle` inventé : les états sont `empty | loading | ready | error`). Elle repart d'elle-même à l'image suivante — c'est de la contre-pression, pas un abandon.
+2. **L'annulation** — ⚠️ **elle ne touche PAS au vol, et c'est un choix.** Une entrée encore dans `this.queue` n'a pas de promesse, donc pas de `.catch`, donc **pas de réessai automatique** : c'est exactement le piège mesuré. Et l'`AbortController` reste refusé par la raison déjà écrite dans `fetchTile` — la promesse est partagée par URL, l'abandon de l'un annulerait la tuile des autres. Le gain est dans la file (558) et non dans le vol (6).
+   S'y ajoute **`_purgerFile`**, une fois par image : ce que la file contient encore et que l'image courante n'a pas demandé sort. Sans elle, le plafond seul refuse la vue d'après pour garder la vue d'avant.
+3. **L'éviction des `loading`** — ⚠️ **le plan la décrivait sur un état du code qui n'existe plus** : la Tâche 4 avait déjà ajouté le rang 0 (`_bloquee`), qui reprend les `error` et les `loading` bloquées depuis plus de `IMAGES_BLOQUEE`. Ce qui manquait vraiment : (a) une victime `loading` ne sortait pas de la file, donc `_pump` finissait par télécharger une orpheline ; (b) les `empty` **périmées** que le plafond et la purge produisent n'étaient candidates à **aucun** des deux rangs — le fantôme chassé, revenu par la porte d'à côté.
+
+##### Les six interfaces, une case et une assertion chacune
+
+`creerFlux` · `demanderEmprise` · `tuilesPretes` · `zoomEffectif` · `remplirHauteurs` · `debitObserve`. **`debitObserve` existe : la Tâche 4 ter peut commencer.** Il rend `null` sur un flux neuf, jamais `0`, et il agrège **en temps mural** (six transferts simultanés de 400 ms font 400 ms, pas 2 400 — sommer les durées diviserait le débit par six). `zoomEffectif` rend lui aussi `null` quand rien ne couvre l'emprise, pour la même raison : `0` est un vrai niveau de zoom.
+
+##### ⚠️ LA CONTRADICTION QUE CETTE TÂCHE A DÛ TRANCHER : `remplirHauteurs` N'AVAIT PLUS DE HAUTEURS À LIRE
+
+La Tâche 4 sexies (Étape 1) **relâche `t.heights` dans `_buildMesh`** — 256 Kio la tuile, 435 Mo à `CACHE_MAX_CONTINU`. Or la Phase 2 rééchantillonne le socle **depuis ce cache**. Les deux tâches se contredisaient, et aucune des deux ne le disait.
+
+**Tranché par la PORTÉE, pas par le retour en arrière** : `globe.gardeHauteurs` est la **réservation du flux** — les seules tuiles de l'emprise du socle (`BLOCK_TILES = 3`, donc **seize au pire**, 4 Mo). Trois mécanismes la respectent : `_buildMesh` garde leurs hauteurs, `_purgerFile` ne les purge pas, `_evictJusqua` ne les évince pas. ⚠️ **Et cette réservation était NÉCESSAIRE au-delà des hauteurs** : les tuiles du socle ne sont demandées par personne dans `_traverse` (le quadtree n'y descend que si la caméra l'y amène), donc leur `lastUsed` ne bouge jamais et la purge les aurait jetées à l'image suivante.
+
+##### Le battement (Étape 5) — vol de référence, 45 s, Atlantique 260 km → Mont-Blanc 2,2 km
+
+| réseau | décodages | requêtes | URL distinctes | rapport |
+|---|---|---|---|---|
+| 12 Mb/s | **732** | 738 | 738 | **×1,00** |
+| réseau rapide (modèle à 1 200 Mb/s) | **11 758** | 11 764 | 11 764 | **×1,00** |
+
+⚠️ **Le rapport est de UN : aucune tuile n'est demandée deux fois sur le vol entier.** L'attaque comptait 10 829 décodages « pour un cache de 420 » — le chiffre à retenir n'est pas leur nombre (il suit mécaniquement la bande passante disponible) mais **leur redondance, qui est nulle**. À 12 Mb/s le vol ne peut de toute façon livrer que 738 tuiles en 45 s : c'est le réseau qui plafonne, pas le cache.
+
+##### La vérification par mutation (Étape 4) — `.banc/mutation-4bis.py`
+
+| mutation | résultat | test tué |
+|---|---|---|
+| sans le plafond de file | **TUÉE** | le refus reste `empty` · panoramique à 12 Mb/s |
+| sans l'annulation | **TUÉE** | la tuile annulée ne revient pas d'elle-même |
+| sans la purge de file | **TUÉE** | panoramique à 12 Mb/s |
+| sans l'éviction des `empty` périmées | **TUÉE** | l'éviction reprend les `empty` avant les prêtes |
+
+⚠️ **Les deux dernières ont SURVÉCU au premier tour**, et c'est la mesure qui l'a dit : au balayage de référence le cache culmine à 836 tuiles pour un budget de 1 700, donc `_evictJusqua` **ne se déclenche jamais** et la correction restait invisible. Elle a désormais son test dédié, déterministe.
+
+##### ⚠️ CE QUI N'A PAS ÉTÉ FAIT, ET CE QUI RESTE OUVERT
+
+- **Le test du panoramique est SCINDÉ EN DEUX, et la physique l'exige.** Le pic et le retour sous le plafond se mesurent à 12 Mb/s (c'est là que la file sature) ; le retour du globe à sa profondeur ne se mesure qu'à réseau rapide, parce qu'après 90° de balayage tout le cache est périmé et que reconstruire mille tuiles demande une minute à 12 Mb/s. **Mesuré : à 12 Mb/s le globe revient à z6 depuis z14 en cinq secondes, et aucune correction de file n'y peut rien.** Le **zoom effectif de l'emprise**, lui, rejoint `ZOOM_SOCLE` **aux deux débits** — c'est précisément ce que le flux apporte : seize tuiles à priorité maximale, pas mille.
+- ⚠️ **LA PRODUCTION PORTE LE MÊME DÉFAUT, ET IL N'EST PAS CORRIGÉ.** Mesuré au navigateur **sans** `?globe=continu`, caméra en mouvement en orbite : **473 tuiles `loading`, file à 462, pour un `CACHE_MAX` de 600** — la file seule occupe 77 % du budget du cache, proportionnellement bien pire que le chemin continu. Toutes les corrections de cette tâche sont derrière `this.continu`, comme le plancher de `dist`, la quarantaine et le rang 0 avant elles. **C'est délibéré** (la production ne prend pas un changement non arbitré), **mais ce n'est pas une raison de l'oublier** : à trancher avec Adrien.
+- **`flux-terrain.js` n'a AUCUN appelant dans `src/`.** Il est produit ici, consommé par les Tâches 6 et 7. `vite build` ne le bundle donc pas encore — seuls `node --check` et les tests le couvrent.
+- **Le battement au navigateur n'a pas été mesuré**, seulement au banc.
+- **Aucun test ne rend une image** : rien ici ne prouve ce que l'œil verra.
 
 ### Tâche 4 ter : la descente bornée par le réseau — règle R3
 
@@ -1354,8 +1426,12 @@ Mesuré : à froid, le zoom effectif plafonne à **z11 sur 12 Mb/s, z9 sur 4 Mb/
 
 **Cohérence des noms** — employés à l'identique partout, ⚠️ **et cette liste était aveugle exactement aux cinq interfaces que la Tâche 4 bis déclarait sans jamais les fabriquer** : `socleVisible`, `empriseSocle`, `SEUIL_NAISSANCE_M`, `SEUIL_MORT_M`, `creerFlux`, `demanderEmprise`, `tuilesPretes`, `zoomEffectif`, `remplirHauteurs`, `PLAFOND_FILE`, `debitObserve`, `auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`, **et les cinq que la Tâche 3 a réellement fabriqués en chemin** : `ZOOM_SOCLE`, `LARGEUR_SOCLE_M`, `LAT_REFERENCE`, `fractionEcran`, `altitudePourFraction`. ⚠️ **Un nom qui n'apparaît qu'à sa déclaration est une interface orpheline : cherchez-les avec `grep -c`, pas à l'œil.** ⚠️ **`socleVisible` et `empriseSocle` ne sont plus orphelins EN AMONT — fabriqués et testés le 2026-08-21 — mais ils le restent EN AVAL : aucun module de `src/` ne les lit encore.** Ce sont les Tâches 4 bis, 6 et 7 qui les branchent.
 
-**Ordre imposé — révisé le 2026-08-21 par la mesure.** ✅ **Livrées : 1a · 2 bis · 1b · 4 · 4 sexies · 4 quater · 3.** ⚠️ **Puis, et l'ordre a changé : ~~3~~ → 4 bis → 4 ter → 4 alpha.** La Tâche 3 produit l'`emprise` que la 4 bis consomme — **et elle est produite depuis le 2026-08-21 : `empriseSocle`, `src/monde/seuil-socle.js`.** **Et la 4 bis passe désormais AVANT la 4 alpha** : la Tâche 4 quater a laissé le flux mesuré à **568 tuiles en `loading` simultanément** caméra en mouvement, avec `MAX_CONCURRENT = 6` — or la 4 alpha multiplie par quatre le poids d'une tuile (256 → 512 px). **Calibrer le flux avant de l'alourdir, comme on a dimensionné le cache avant d'approfondir.** Ensuite le **bloc fenêtre — 5 avant 6, puis 7** : c'est lui qui supprime les crans. Puis **1b bis** (la frontière de rendu). ⚠️ **Enfin seulement les rideaux : 2 (`#loading`) puis 2 ter (`.whiteout`)** — ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up, il montre le trou qu'il cachait. ⚠️ **La Tâche 1c est ABANDONNÉE** : elle déverrouille une reconstruction que le pivot supprime.
+⚠️ **MISE À JOUR DU 2026-08-21 — la Tâche 4 bis a fabriqué ses SIX interfaces, et elles ne sont plus orphelines en amont :** `creerFlux`, `demanderEmprise`, `tuilesPretes`, `zoomEffectif`, `remplirHauteurs` et `debitObserve` vivent dans `src/monde/flux-terrain.js`, testées une par une dans `test/flux-terrain.test.js` ; `PLAFOND_FILE` vit dans `src/globe.js`. **`empriseSocle` a désormais un lecteur** — `demanderEmprise` la consomme. **Quatre noms s'ajoutent à surveiller**, produits en chemin par la 4 bis : `tuilesEmprise` (`flux-terrain.js`), `gardeHauteurs`, `_purgerFile` et `_annuler` (`globe.js`). ⚠️ **Restent orphelins EN AVAL — aucun module de `src/` ne les lit** : les six interfaces du flux, `socleVisible`, et tout ce que les Tâches 5, 6, 7 et 4 ter déclarent (`auditerSolide`, `construireFenetre`, `majHauteurs`, `resolutionPour`, `empriseADerive`, `zoomSoutenable`).
+
+**Ordre imposé — révisé le 2026-08-21 par la mesure.** ✅ **Livrées : 1a · 2 bis · 1b · 4 · 4 sexies · 4 quater · 3 · 4 bis.** ⚠️ **Puis, et l'ordre a changé : ~~3~~ → ~~4 bis~~ → 4 ter → 4 alpha.** La Tâche 3 produit l'`emprise` que la 4 bis consomme — **et elle est produite depuis le 2026-08-21 : `empriseSocle`, `src/monde/seuil-socle.js`.** **Et la 4 bis passe désormais AVANT la 4 alpha** : la Tâche 4 quater a laissé le flux mesuré à **568 tuiles en `loading` simultanément** caméra en mouvement, avec `MAX_CONCURRENT = 6` — or la 4 alpha multiplie par quatre le poids d'une tuile (256 → 512 px). **Calibrer le flux avant de l'alourdir, comme on a dimensionné le cache avant d'approfondir.** Ensuite le **bloc fenêtre — 5 avant 6, puis 7** : c'est lui qui supprime les crans. Puis **1b bis** (la frontière de rendu). ⚠️ **Enfin seulement les rideaux : 2 (`#loading`) puis 2 ter (`.whiteout`)** — ôter un rideau avant que l'attente ait disparu ne supprime pas le pop-up, il montre le trou qu'il cachait. ⚠️ **La Tâche 1c est ABANDONNÉE** : elle déverrouille une reconstruction que le pivot supprime.
 
 **Le risque principal n'est plus la géométrie** : l'attaque a confirmé qu'on ne peut pas la déchirer. **C'est le flux** — plafond, annulation, éviction — et **le réseau**, qui décide du zoom réellement atteint.
+
+⚠️ **MISE À JOUR DU 2026-08-21 : le flux est calibré, le RÉSEAU reste entier.** Le pic de `loading` passe de 568 à **141 au navigateur**, et la file ne dépasse plus `PLAFOND_FILE = 256`. Mais la mesure a montré autre chose de plus dur : **le pic de file ne dépendait pas du débit** (558 / 554 / 546 sur un facteur 24) alors que **le zoom atteint, lui, n'en dépend que de lui** — à 12 Mb/s, cinq secondes après un balayage de 90°, le globe est à z6 et il lui faut une minute pour revenir à z15. **La 4 ter n'est donc pas un raffinement : c'est la moitié qui reste**, et `debitObserve` l'attend.
 
 **Ce qui n'est toujours pas vérifié :** aucune image en mouvement n'a jamais été vue (le volet navigateur ne composite pas), et rien n'a été mesuré sur un portable. Les deux valent pour le prototype comme pour son attaque.
