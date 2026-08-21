@@ -1,19 +1,31 @@
 // MONOLITH EARTH — the orbital globe. A quadtree of curved patches streams
-// the same AWS terrarium elevation tiles the terrain uses (z2 → z15, la borne
-// du jeu AWS ; le chemin de PRODUCTION n'y descend pas — son plancher de
-// `dist` l'arrête à z11, voir `PLANCHER_DIST`) and a
+// terrarium elevation tiles (z2 → z15 ; le chemin de PRODUCTION n'y descend
+// pas — son plancher de `dist` l'arrête à z11, voir `PLANCHER_DIST`) and a
 // custom shader re-creates the vintage-topo recipe at planet scale:
 // hypsometric ramp, bathymetric blues, contour lines, 10° graticule, paper
 // noise. Refinement is hole-free: a tile only subdivides once all four
 // children have their data, so the parent keeps rendering until then.
 // A slowly orbiting cloud shell (globe-clouds.js) dresses the planet view.
+//
+// ⚠️ LA SOURCE N'EST PLUS UNE URL EN DUR, C'EST LA POLITIQUE DE `dem-source.js`
+// (plan « globe continu », Tâche 4 alpha) — voir `planTuile` plus bas, et sa
+// borne `SEUIL_SOURCE_FINE`.
 
 import * as THREE from 'three'
 import { R_GLOBE, MERCATOR_MAX_LAT, EARTH_RADIUS_M, tileToLatLon, latLonToSphere } from './geo.js'
 import { rampColorStops } from './palette.js'
 import { GlobeClouds } from './globe-clouds.js'
+import { overzoomTile } from './bathy.js'
+import {
+  DEM_SOURCES,
+  DemSourceError,
+  activeDemSource,
+  fallbackToAws,
+  peekRegionMaxZoom,
+  regionKey,
+  resolveRegionMaxZoom,
+} from './dem-source.js'
 
-const TILE_URL = (z, x, y) => `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`
 const ROOT_Z = 2
 // ⚠️ EXPORTÉ POUR QUE LE TEST LE CONFRONTE À LA SOURCE, ET NON À UN LITTÉRAL
 // RECOPIÉ (`test/globe-profondeur.test.js`) : un chiffre recopié dans un test
@@ -195,6 +207,8 @@ uniform float uContourOpacity;
 uniform float uGraticuleOpacity;
 uniform float uOceanDepth;
 uniform float uLandMax;
+// côté de la tuile en texels — 256 (AWS) ou 512 (Mapterhorn), voir planTuile
+uniform float uTilePx;
 
 float decodeMeters(vec2 uv) {
   vec3 t = texture2D(uTex, uv).rgb * 255.0;
@@ -244,7 +258,7 @@ void main() {
   // tile shrinks in the orbital/travel view the sampled height aliases and the
   // contour lines CRAWL. Fade them out as the tile minifies (texels per screen
   // pixel > ~1) so the far globe reads clean; they return in full up close.
-  float texel = max(fwidth(vUv).x, fwidth(vUv).y) * 256.0;
+  float texel = max(fwidth(vUv).x, fwidth(vUv).y) * uTilePx;
   float minFade = clamp(1.6 - texel * 0.55, 0.0, 1.0);
   float contour = max(minor * 0.5, major) * uContourOpacity * crowd * minFade;
   contour *= h < 0.0 ? 0.35 : 1.0; // bathymetric contours read lighter
@@ -317,10 +331,21 @@ function tileKey(z, x, y) {
 // budget que le damier s'accorde déjà pour ses MNT (src/dem.js) — 1,7 % du tas
 // mesuré. Le contrat « une requête par URL » coûterait, lui, 128 Mo : hors de
 // question sur ce tas-là.
-const TILE_MEMO_MAX = 128 // 128 × 256² × 4 o = 32 Mo d'ImageBitmap décodé
+// ⚠️ LE BUDGET EST EN OCTETS DEPUIS QUE LES TUILES N'ONT PLUS TOUTES LA MÊME
+// TAILLE (plan « globe continu », Tâche 4 alpha, Étape 5). Il valait 128
+// ENTRÉES, ce qui n'a plus de sens quand une entrée pèse 256 Kio (AWS, 256 px)
+// ou 1 Mio (Mapterhorn, 512 px) selon la zone : la même borne aurait laissé le
+// cache osciller entre 32 et 128 Mo sans que rien ne le dise. La VALEUR, elle,
+// ne bouge pas d'un octet — 32 Mo, le coude mesuré ci-dessus — et sur un globe
+// entièrement AWS le comportement est identique au bit près (128 × 256 Kio =
+// exactement 32 Mo, donc exactement 128 entrées retenues).
+const TILE_MEMO_OCTETS_MAX = 128 * 256 * 256 * 4 // 32 Mo d'ImageBitmap décodé
 
 /** url → Promise<ImageBitmap>, LRU bornée. Exportée pour les tests. */
 export const _tileMemo = new Map()
+// coût de chaque entrée, en octets — même clé, même ordre que `_tileMemo`
+const _tileMemoCout = new Map()
+let _tileMemoOctets = 0
 
 // ═══════════ LE JOURNAL RÉSEAU — la source de `debitObserve` (Tâche 4 bis) ════
 //
@@ -382,11 +407,82 @@ function maintenant() {
 /** Remise à zéro de la mémoire de tuiles — tests uniquement. */
 export function _resetTileMemo() {
   _tileMemo.clear()
+  _tileMemoCout.clear()
+  _tileMemoOctets = 0
+}
+
+// ═══════════ LA SOURCE DE RELIEF — UNE POLITIQUE, PAS UNE URL ═══════════════
+//
+// (Plan « globe continu », Tâche 4 alpha.) Ce fichier tapait
+// `elevation-tiles-prod/terrarium` en dur et n'importait rien de
+// `dem-source.js`. Le produit, lui, sert du Mapterhorn 512 px — qui agrège
+// l'IGN RGE ALTI, swissALTI3D… — et ne garde AWS que comme REPLI.
+//
+// ⚠️ **LE DANGER N'ÉTAIT PAS DE CHOISIR LA MAUVAISE SOURCE, C'ÉTAIT DE
+// REMPLACER UNE POLITIQUE PAR UNE URL.** `TILE_URL = DEM_SOURCES[actif].url`
+// aurait semblé juste et aurait perdu les quatre choses qui font le travail :
+// la sonde de couverture PAR ZONE, le surzoom depuis l'ancêtre, le repli AWS
+// **localisé**, et la distinction entre un 404 et une panne. On aurait eu une
+// seule source pour la planète entière, choisie une fois, au lieu de la
+// meilleure disponible à chaque endroit. Ce sont donc les FONCTIONS de
+// `dem-source.js` qui sont reprises ici, pas ses URL.
+//
+// ⚠️ **ET LE GLOBE NE CONSULTE CETTE POLITIQUE QU'À PARTIR DE
+// `SEUIL_SOURCE_FINE` — C'EST L'ÉTAPE 3 DE LA TÂCHE, ET ELLE EST TRANCHÉE PAR
+// TROIS FAITS DU DÉPÔT, PAS PAR UNE PRÉFÉRENCE :**
+//
+//   1. `dem-source.js` donne `baseZoom: 12` à Mapterhorn : c'est son PLANCHER
+//      DE COUVERTURE. Sous z12 la sonde n'a rien à répondre, et l'en-tête du
+//      module ajoute que Mapterhorn rend 404 **au-dessus de z4 en pleine mer**.
+//      Or la majorité des tuiles d'un globe sont océaniques : rebrancher la
+//      bande z5–z11 ouvrirait des trous sur les deux tiers de la planète pour
+//      remplacer une donnée qu'AWS sert déjà correctement à ces échelles.
+//   2. Le chemin de PRODUCTION plafonne à z11 — c'est `plancher = 1` dans
+//      `_traverse`, mesuré par la Tâche 4 quater (`MAX_Z = 16` et treize fois
+//      le budget de cache rendent toujours z11). La bande z2–z11 EST le globe
+//      de production. En n'y touchant pas, l'Étape 7 (« vérifier que le globe
+//      orbital reste identique ») est tenue PAR CONSTRUCTION, pas par un banc.
+//   3. La sonde coûte six requêtes HEAD par zone z8, HORS `MAX_CONCURRENT`.
+//      Payée sur une vue orbitale, elle renseignerait un intervalle que
+//      personne ne demande. Bornée à z12+, elle n'est payée que sur les zones
+//      où la caméra descend réellement — et la mémoire est PARTAGÉE avec le
+//      damier (`src/dem.js`), qui a souvent déjà payé la même sonde.
+//
+// C'est aussi ce qui lève la contradiction que le plan signalait entre ses
+// étapes 3 et 4 : elles ne s'opposaient que tant que « rebrancher » voulait
+// dire « partout ».
+export const SEUIL_SOURCE_FINE = DEM_SOURCES.mapterhorn.baseZoom
+
+/**
+ * Quelle source et quelle tuile pour ce nœud du quadtree — ⚠️ **SANS ATTENDRE**.
+ *
+ * Trois issues, exactement celles de `src/dem.js` (« un zoom → on y va, en
+ * surzoomant au-delà · null → zone hors couverture → AWS POUR CE CHARGEMENT,
+ * sans toucher au choix de session · panne → repli AWS pour TOUTE la
+ * session »), plus une quatrième que le damier n'a pas à connaître parce qu'il
+ * est asynchrone et que la pompe du globe ne l'est pas :
+ *
+ *   `null` rendu ici = **la zone n'est pas encore sondée**. L'appelant ne
+ *   devine pas : il laisse la tuile `empty` et la redemandera à l'image
+ *   suivante. Voir `_request`.
+ *
+ * @returns {{source: object, tile: object}|null}
+ */
+export function planTuile(z, x, y, source = activeDemSource()) {
+  const aws = DEM_SOURCES.aws
+  const surAws = { source: aws, tile: overzoomTile(z, x, y, aws.maxZoom) }
+  // sous le plancher de couverture de la source fine, la question ne se pose
+  // pas — et au-dessus de son plafond de sondage non plus, elle n'a plus rien.
+  if (source.id === aws.id || z < SEUIL_SOURCE_FINE) return surAws
+  const connu = peekRegionMaxZoom(regionKey(source.id, z, x, y))
+  if (connu === undefined) return null // pas encore sondé
+  if (connu === null) return surAws // hors couverture ICI — la session garde Mapterhorn
+  return { source, tile: overzoomTile(z, x, y, connu) }
 }
 
 // Une SEULE entrée par URL, promesse comprise : deux demandes qui se
 // chevauchent partagent la requête au lieu d'en lancer deux.
-function tileBitmap(url) {
+function tileBitmap(url, octets = 256 * 256 * 4) {
   const memo = _tileMemo.get(url)
   if (memo) {
     _tileMemo.delete(url)
@@ -395,8 +491,23 @@ function tileBitmap(url) {
   }
   const p = (async () => {
     const debut = maintenant()
-    const r = await fetch(url)
-    if (!r.ok) throw new Error(`tile ${url} → HTTP ${r.status}`)
+    let r
+    try {
+      r = await fetch(url)
+    } catch (err) {
+      // réseau, DNS, CORS : c'est une PANNE de source, pas un trou de couverture
+      throw new DemSourceError(`tile ${url} → ${err?.message || err}`)
+    }
+    if (!r.ok) {
+      // ⚠️ UN 404 N'EST PAS UNE PANNE — c'est « je ne couvre pas ici ».
+      // `fetchTile` le rattrape sur AWS pour CETTE tuile ; tout autre statut
+      // est une panne de source, et remonte comme telle.
+      const err = r.status === 404
+        ? new Error(`tile ${url} → HTTP 404`)
+        : new DemSourceError(`tile ${url} → HTTP ${r.status}`)
+      err.status = r.status
+      throw err
+    }
     const blob = await r.blob()
     // ⚠️ ON JOURNALISE APRÈS `blob()`, PAS APRÈS `fetch()` : `fetch` rend dès les
     // en-têtes, le corps arrive après. Chronométrer l'en-tête mesurerait la
@@ -405,31 +516,75 @@ function tileBitmap(url) {
     return createImageBitmap(blob)
   })()
   _tileMemo.set(url, p)
+  _tileMemoCout.set(url, octets)
+  _tileMemoOctets += octets
   // Un ÉCHEC ne se mémorise pas : `_pump` réessaie une fois, et une panne figée
   // priverait la session de la tuile pour de bon.
   // ⚠️ `p.then(null, …)` et pas `p.catch(…)` en tête de chaîne : cette branche
   // de surveillance ABSORBE le rejet, sinon chaque tuile en panne lèverait un
   // unhandledrejection à côté de `_pump` qui, lui, l'a bien traité.
   p.then(null, () => {
-    if (_tileMemo.get(url) === p) _tileMemo.delete(url)
+    if (_tileMemo.get(url) === p) oublieTuile(url)
   })
   // les entrées EN VOL viennent d'être insérées, elles sont donc en tête de
   // fraîcheur : la purge par la queue ne peut pas casser la déduplication
-  while (_tileMemo.size > TILE_MEMO_MAX) _tileMemo.delete(_tileMemo.keys().next().value)
+  while (_tileMemoOctets > TILE_MEMO_OCTETS_MAX && _tileMemo.size > 1) {
+    oublieTuile(_tileMemo.keys().next().value)
+  }
   return p
 }
 
-// terrarium PNG → { texture, heights Float32Array(256*256) }
+function oublieTuile(url) {
+  if (!_tileMemo.has(url)) return
+  _tileMemoOctets -= _tileMemoCout.get(url) ?? 0
+  _tileMemoCout.delete(url)
+  _tileMemo.delete(url)
+}
+
+// terrarium PNG/WebP → { texture, heights Float32Array(px*px), size }
 // (pas de `signal` : la promesse est partagée entre tous les demandeurs de la
 // même URL, l'abandon de l'un annulerait la tuile des autres)
-async function fetchTile(z, x, y) {
-  const img = await tileBitmap(TILE_URL(z, x, y))
+//
+// ⚠️ `plan` VIENT DE `planTuile` : il porte la source ET la tuile à demander,
+// laquelle n'est PAS forcément (z, x, y) — au-delà du zoom que la zone couvre,
+// `overzoomTile` renvoie vers l'ANCÊTRE et la sous-fenêtre à y lire.
+async function fetchTile(z, x, y, plan) {
+  let { source, tile } = plan
+  let img
+  try {
+    img = await tileBitmap(source.url(tile.z, tile.x, tile.y), source.tilePx * source.tilePx * 4)
+  } catch (err) {
+    // ⚠️ 404 SUR LA SOURCE FINE = « pas couvert ICI », pas une panne. On prend
+    // AWS POUR CETTE TUILE, et le choix de session ne bouge pas : la tuile
+    // d'à côté, sur la terre ferme, continue de profiter de Mapterhorn. C'est
+    // la réparation par dalle de `src/dem.js`, à l'échelle d'un nœud.
+    //
+    // ⚠️ ON TESTE LA CLASSE, PAS `err.status`, ET C'EST UNE MUTATION QUI L'A
+    // EXIGÉ (Étape 8). Les deux marchaient — donc la classification 404/panne
+    // était écrite DEUX FOIS, ici et dans `tileBitmap`. Un mutant qui rendait
+    // `DemSourceError` sur un 404 survivait à toute la suite : `err.status`
+    // valait toujours 404, ce branchement gagnait le premier, et l'erreur de
+    // classification restait invisible. `tileBitmap` est désormais le SEUL
+    // endroit qui décide ce qu'est une panne ; `err.status` ne sert plus qu'au
+    // diagnostic.
+    if (err instanceof DemSourceError || source.id === DEM_SOURCES.aws.id) throw err
+    source = DEM_SOURCES.aws
+    tile = overzoomTile(z, x, y, source.maxZoom)
+    img = await tileBitmap(source.url(tile.z, tile.x, tile.y), source.tilePx * source.tilePx * 4)
+  }
+  const px = source.tilePx
   const c = document.createElement('canvas')
-  c.width = c.height = 256
+  c.width = c.height = px
   const ctx = c.getContext('2d', { willReadFrequently: true })
-  ctx.drawImage(img, 0, 0)
-  const rgba = ctx.getImageData(0, 0, 256, 256).data
-  const heights = new Float32Array(256 * 256)
+  if (tile.scale === 1) ctx.drawImage(img, 0, 0)
+  else {
+    // SURZOOM : on n'agrandit qu'une SOUS-FENÊTRE de l'ancêtre, exactement
+    // comme le damier (`src/dem.js`). Agrandir un fond lisse n'invente rien.
+    const s = px / tile.scale
+    ctx.drawImage(img, tile.ox * px, tile.oy * px, s, s, 0, 0, px, px)
+  }
+  const rgba = ctx.getImageData(0, 0, px, px).data
+  const heights = new Float32Array(px * px)
   for (let i = 0; i < heights.length; i++) {
     heights[i] = rgba[i * 4] * 256 + rgba[i * 4 + 1] + rgba[i * 4 + 2] / 256 - 32768
   }
@@ -474,7 +629,18 @@ async function fetchTile(z, x, y) {
   texture.minFilter = THREE.LinearFilter
   texture.magFilter = THREE.LinearFilter
   texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping
-  return { texture, heights }
+  // ⚠️ `size` RESSORT AVEC LA TUILE, ET CE N'EST PAS DÉCORATIF : le globe
+  // accepte désormais les DEUX tailles (256 AWS, 512 Mapterhorn) au lieu de
+  // rééchantillonner. Rééchantillonner aurait coûté une seconde passe de
+  // canevas par tuile pour, au choix, jeter la finesse de Mapterhorn (512 → 256)
+  // ou payer quatre fois la mémoire sur des tuiles AWS qui n'ont rien de plus à
+  // dire (256 → 512). Et surtout : la politique elle-même PRODUIT les deux
+  // tailles dans la même session — une zone hors couverture retombe sur AWS
+  // pendant que sa voisine reste sur Mapterhorn. Il n'y avait donc pas de
+  // taille unique à choisir. Tout ce qui lit les hauteurs prend la taille en
+  // paramètre : `sampleHeights`, `_materialFor` (uniforme `uTilePx`) et
+  // `remplirHauteurs` (`src/monde/flux-terrain.js`).
+  return { texture, heights, size: px }
 }
 
 /**
@@ -483,22 +649,36 @@ async function fetchTile(z, x, y) {
  * deux conventions de demi-pixel à faire coïncider, et le §1 de
  * `/threejs-optimisation` dit exactement ce qu'il faut en penser.
  */
-export function sampleHeights(heights, u, v) {
+export function sampleHeights(heights, u, v, size = 256) {
   // bilinear sample, u/v in [0,1], row 0 = north. Pixel CENTERS sit at
-  // (i + 0.5)/256 — the same convention the GPU uses when the fragment shader
+  // (i + 0.5)/size — the same convention the GPU uses when the fragment shader
   // reads uTex — so vertex relief and shaded texture stay registered instead
   // of sliding half a pixel apart.
-  const x = Math.min(Math.max(u * 256 - 0.5, 0), 255)
-  const y = Math.min(Math.max(v * 256 - 0.5, 0), 255)
-  const x0 = Math.min(Math.floor(x), 254)
-  const y0 = Math.min(Math.floor(y), 254)
+  //
+  // ⚠️ `size` EST LA TAILLE DE TUILE, ET SON DÉFAUT DE 256 EST LOAD-BEARING :
+  // les hauteurs factices des tests (et `_buildMesh` emprunté avec un `this`
+  // qui n'est pas un globe) arrivent en 256 sans champ `size`.
+  //
+  // ⚠️ ET LES QUATRE BORNES CI-DESSOUS SONT DES INDEX, PAS DES OCTETS. Elles
+  // valaient 255 et 254 en dur, et `grep 256` ne les voyait pas ; en 512 px
+  // elles valent 511 et 510. Ce ne sont PAS de la même famille que le `255.0`
+  // du nuanceur (une plage d'octet) ni que le radix 256 du terrarium — que
+  // Mapterhorn partage, et qui ne bouge donc jamais.
+  const max = size - 1
+  const x = Math.min(Math.max(u * size - 0.5, 0), max)
+  const y = Math.min(Math.max(v * size - 0.5, 0), max)
+  const x0 = Math.min(Math.floor(x), size - 2)
+  const y0 = Math.min(Math.floor(y), size - 2)
   const fx = x - x0
   const fy = y - y0
-  const i = y0 * 256 + x0
+  // ⚠️ `i + size` ET `i + size + 1` : c'était `i + 256` et `i + 257`, soit la
+  // ligne du dessous et son voisin de droite. En oublier UN SEUL donne des
+  // altitudes fausses EN SILENCE — pas de ligne mixte, pas d'erreur, rien.
+  const i = y0 * size + x0
   const a = heights[i]
   const b = heights[i + 1]
-  const c = heights[i + 256]
-  const d = heights[i + 257]
+  const c = heights[i + size]
+  const d = heights[i + size + 1]
   return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy
 }
 
@@ -532,6 +712,10 @@ export class Globe {
     this._refus = 0 // raffinements REFUSÉS faute de crédit à la dernière image
     this._refusFile = 0 // requêtes REFUSÉES par PLAFOND_FILE à la dernière image
     this._purgees = 0 // entrées de file PÉRIMÉES retirées à la dernière image
+    // zones z8 dont la sonde de couverture est EN VOL — voir `_sonder`
+    this._sondes = new Set()
+    // tuiles laissées `empty` faute de sonde à la dernière image (Tâche 4 alpha)
+    this._attentesSonde = 0
     // ⚠️ LES CLÉS DONT ON GARDE LES HAUTEURS (Tâche 4 bis). `_buildMesh` relâche
     // `t.heights` dès que le maillage est bâti — 256 Kio la tuile, 435 Mo à
     // `CACHE_MAX_CONTINU`, c'est l'Étape 1 de la Tâche 4 sexies et elle ne se
@@ -565,13 +749,18 @@ export class Globe {
     }
     this.rebuildRamp(params)
 
-    this._materialFor = (texture) =>
+    // ⚠️ `uTilePx` EST PROPRE À LA TUILE, comme `uTex` : deux tuiles voisines
+    // peuvent venir de deux sources de tailles différentes (voir `planTuile`).
+    // Le mettre dans `this.uniforms`, partagé, aurait fait juger la minification
+    // de toutes les tuiles sur la taille de la dernière chargée.
+    this._materialFor = (texture, tilePx = 256) =>
       new THREE.ShaderMaterial({
         vertexShader: VERT,
         fragmentShader: FRAG,
         uniforms: {
           ...this.uniforms,
           uTex: { value: texture },
+          uTilePx: { value: tilePx },
         },
       })
 
@@ -788,6 +977,9 @@ export class Globe {
       mesh: null,
       texture: null,
       heights: null,
+      // taille de tuile EFFECTIVE, connue seulement une fois la source résolue
+      size: 0,
+      plan: null, // { source, tile } — voir `planTuile`
       lastUsed: 0,
       center,
       chord: corner.distanceTo(latLonToSphere(se.lat, se.lon)),
@@ -832,10 +1024,59 @@ export class Globe {
       this._refusFile++
       return
     }
+    // ═══ LA JONCTION : `resolveRegionMaxZoom` EST ASYNCHRONE, `_pump` NE L'EST
+    // PAS (plan « globe continu », Tâche 4 alpha, Étape 4) ═══════════════════
+    //
+    // Trois réponses étaient possibles, et deux sont mauvaises :
+    //   · **attendre** la sonde → on gèle la pompe sur un aller-retour réseau,
+    //     et `_pump` cesse d'être synchrone pour tout le monde ;
+    //   · **supposer AWS** → au premier passage sur chaque zone on charge la
+    //     mauvaise source, et il faut ensuite recharger ce qu'on vient de
+    //     poser : Mapterhorn est perdu exactement là où il sert.
+    //
+    // La troisième est celle-ci, et elle ne coûte AUCUN mécanisme neuf : on
+    // décide avec la mémoire **synchrone** (`peekRegionMaxZoom`), et quand elle
+    // n'a pas encore de réponse on laisse la tuile `empty` en lançant la sonde
+    // à côté. `_traverse` la redemandera à l'image suivante — c'est mot pour
+    // mot la contre-pression de `PLAFOND_FILE` juste au-dessus, et l'état
+    // `empty` est exactement celui d'où `_request` sait repartir.
+    //
+    // ⚠️ Ce que le visiteur voit pendant ce temps : l'ANCÊTRE, qui continue de
+    // dessiner. C'est la règle sans-trou du quadtree, déjà en place — rien de
+    // neuf à l'écran, pas une image gelée, pas une tuile de la mauvaise source.
+    // Le délai vaut UN aller-retour de six HEAD parallèles, une fois par zone
+    // z8 et par session, et la mémoire est partagée avec le damier.
+    const plan = planTuile(t.z, t.x, t.y)
+    if (!plan) {
+      this._sonder(t.z, t.x, t.y)
+      this._attentesSonde++
+      return
+    }
+    t.plan = plan
     t.state = 'loading'
     t.demandee = this.frame // l'image de DÉPART : c'est elle qui date un blocage
     this.queue.push({ t, priority })
     this._pump()
+  }
+
+  // Lance la sonde de couverture d'une zone, sans attendre et sans la relancer.
+  // ⚠️ LE GARDE-FOU N'EST PAS DÉCORATIF : `_traverse` repasse sur les mêmes
+  // tuiles à chaque image. `resolveRegionMaxZoom` dédoublonne déjà le RÉSEAU
+  // (`inFlight`, par clé de zone), mais pas la chaîne de promesses : sans ce
+  // Set, une zone non sondée en allouerait une par tuile et par image.
+  _sonder(z, x, y) {
+    const source = activeDemSource()
+    const cle = regionKey(source.id, z, x, y)
+    if (this._sondes.has(cle)) return
+    this._sondes.add(cle)
+    resolveRegionMaxZoom(source, z, x, y)
+      .catch((err) => {
+        // ⚠️ CE CHEMIN N'EST PAS LE 404. `probeMaxZoom` ne lève que sur une
+        // vraie PANNE (5xx, réseau, DNS) ; les 404 partout rendent `null`, qui
+        // est une réponse et se mémorise. Une panne, elle, replie la session.
+        fallbackToAws(err)
+      })
+      .finally(() => this._sondes.delete(cle))
   }
 
   // ═══════════ L'ANNULATION (Tâche 4 bis, correction 2) ═══════════════════
@@ -917,8 +1158,8 @@ export class Globe {
       this.queue.sort((a, b) => b.priority - a.priority)
       const { t } = this.queue.shift()
       this.inFlight++
-      fetchTile(t.z, t.x, t.y)
-        .then(({ texture, heights }) => {
+      fetchTile(t.z, t.x, t.y, t.plan)
+        .then(({ texture, heights, size }) => {
           // ⚠️ LA GARDE DU MAILLAGE ORPHELIN. Rendre les tuiles bloquées
           // évinçables veut dire qu'une `loading` peut disparaître de la Map
           // pendant que sa requête est encore en vol. Sans cette ligne, le
@@ -931,6 +1172,7 @@ export class Globe {
           }
           t.texture = texture
           t.heights = heights
+          t.size = size
           t.state = 'ready'
           this._buildMesh(t)
         })
@@ -940,9 +1182,17 @@ export class Globe {
           if (!t.retried && vivante) {
             t.retried = true
             t.state = 'empty'
+            t.plan = null // la source se REDEMANDE : la session a pu se replier
             this._request(t, 0)
             return
           }
+          // ⚠️ LE REPLI DE SESSION SE DÉCIDE ICI, ET SEULEMENT APRÈS LE RÉESSAI.
+          // Le globe tire des centaines de requêtes par image : replier toute
+          // la session au premier hoquet réseau dégraderait AUSSI le damier,
+          // qui partage `dem-source.js`. Une tuile qui échoue DEUX FOIS sur une
+          // panne de source (pas un 404 — celui-là est déjà rattrapé par
+          // `fetchTile`) est un signal, pas un bruit.
+          if (err instanceof DemSourceError) fallbackToAws(err)
           t.state = 'error'
           this._echoue.set(t.key, this.frame) // quarantaine, datée
           if (vivante) console.warn('globe tile failed:', err.message)
@@ -988,7 +1238,7 @@ export class Globe {
     // radius) — never interpolated across a flat quad
     const posAt = (u, v, out) => {
       const { lat, lon } = tileToLatLon(t.x + u, t.y + v, t.z)
-      const h = Math.max(sampleHeights(t.heights, u, v), 0) // oceans stay on the sphere
+      const h = Math.max(sampleHeights(t.heights, u, v, t.size), 0) // oceans stay on the sphere
       return latLonToSphere(lat, lon, R_GLOBE + h * dispScale, out)
     }
 
@@ -1031,8 +1281,8 @@ export class Globe {
       // (plan « globe continu », Tâche 4 sexies, Étape 3). `posAt` mélangeait
       // deux conventions au BORD de la tuile : `tileToLatLon(t.x + u, …)` suit
       // `u` hors de [0,1] et rend la position du voisin, tandis que
-      // `sampleHeights` l'ÉCRÊTE (`clamp(u × 256 − 0,5 ; 0 ; 255)`) et rend la
-      // hauteur du pixel de bord. La différence centrée portait donc un
+      // `sampleHeights` l'ÉCRÊTE (`clamp(u × size − 0,5 ; 0 ; size − 1)`) et rend
+      // la hauteur du pixel de bord. La différence centrée portait donc un
       // dénivelé lu sur une fenêtre deux fois trop courte.
       //
       // ⚠️ ET LE CHIFFRE SE DÉRIVE DU DÉPÔT, il n'a pas eu besoin d'un banc :
@@ -1139,7 +1389,7 @@ export class Globe {
     geo.setIndex(indices)
     geo.computeBoundingSphere()
 
-    const mesh = new THREE.Mesh(geo, this._materialFor(t.texture))
+    const mesh = new THREE.Mesh(geo, this._materialFor(t.texture, t.size))
     mesh.position.copy(origine) // la position mondiale vit ICI, plus dans les sommets
     mesh.visible = false
     mesh.name = t.key
@@ -1191,6 +1441,7 @@ export class Globe {
     this._refus = 0
     this._refusFile = 0
     this._purgees = 0
+    this._attentesSonde = 0
     if (this.continu) this._preparerTriSpatial(camera, camPos)
 
     // CRÉDIT DE CRÉATION de la frame. Un raffinement fait naître quatre tuiles ;
@@ -1523,6 +1774,11 @@ export class Globe {
       t.texture?.dispose()
       t.texture = null
       t.heights = null
+      t.size = 0
+      // ⚠️ LE PLAN SE REDEMANDE AUSSI. Entre-temps la sonde a pu répondre, ou
+      // la session a pu se replier sur AWS : rejouer l'ancien plan rechargerait
+      // une source qui n'est plus la bonne, sans que rien ne le signale.
+      t.plan = null
       t.refined = false
       t.retried = false // le rechargement n'est pas un échec : il rend son essai
       t.state = 'empty'

@@ -28,7 +28,7 @@ Trois révisions de ce document ont posé des constantes **à l'instinct**, pré
 ⚠️ **UNE VERSION DE CE PLAN LES RECOPIAIT EN PLUS COURT dans quatre tâches** — `npx vite build` nu, sans redirection, sans `nettoie:dist`, avec un « audit » qui ne nommait pas sa commande. Un agent lisant la version courte aurait sauté les gardes en toute bonne foi. **C'est exactement le reproche que ce plan fait à sa propre décision 13** : un avertissement qu'on ne relit pas ne protège de rien.
 
 ```
-npm test              # la suite entière — 3 168 verts au 2026-08-21 (Tâche 4 ter incluse)
+npm test              # la suite entière — 3 186 verts au 2026-08-21 (Tâche 4 alpha incluse)
 npm run audit:tests   # disque contre liste
 node --check <fichier>  # sur CHAQUE fichier modifié
 npm run nettoie:dist && npm run build:mapcells && npx vite build > /tmp/build.log 2>&1 && npm run verifie:dist
@@ -949,7 +949,7 @@ const dist = Math.max(camPos.distanceTo(t.center) - t.chord * 0.5, 1)
 
 
 
-### Tâche 4 alpha : rebrancher le globe sur la vraie source de relief ⚠️ APRÈS LA 4 QUATER, ET SEULEMENT SI ELLE A PORTÉ `MAX_Z` AU-DELÀ DE 11
+### Tâche 4 alpha : rebrancher le globe sur la vraie source de relief ✅ **FAITE LE 2026-08-21** — ⚠️ **REBRANCHÉE À PARTIR DE z12 SEULEMENT, ET LE GLOBE ORBITAL N'A PAS BOUGÉ**
 
 **Fichiers :** modifier `src/globe.js` · **modifier `src/bathy.js`** (`overzoomTile`, `:578`) · créer `test/globe-source.test.js` · ⚠️ **modifier les trois fichiers de test qui verrouillent le 256** : `test/globe-reseau.test.js:42-43` et `:97-98`, `test/globe-eviction.test.js:59-60`, `test/globe-precision.test.js:79` et `:83`.
 
@@ -1008,20 +1008,99 @@ Le dépôt écrit lui-même qu'AWS n'a « plus aucune information réelle au-del
 - `TILE_MEMO_MAX` est calibré pour du 256 (≈ 32 Mo) ; en 512 la même valeur ferait **128 Mo**.
 - `resolveRegionMaxZoom` est **asynchrone**, et `_pump` de `globe.js` est **synchrone**. La jonction des deux est le vrai travail de cette tâche.
 
-- [ ] **Étape 1** — test : l'URL construite par le globe passe par `DEM_SOURCES[DEFAULT_SOURCE_ID]`, et la profondeur maximale du globe **n'excède jamais** le `maxZoom` de la source active.
-- [ ] **Étape 1 bis** — test : sur une zone **couverte** par Mapterhorn, le globe l'utilise ; sur une zone qui rend 404 à z12, il bascule sur AWS **pour cette zone**, et **continue d'utiliser Mapterhorn ailleurs dans la même session**. ⚠️ C'est l'assertion qui distingue une politique d'une URL.
-- [ ] **Étape 2** — le lancer, vérifier qu'il échoue (aujourd'hui l'URL est en dur).
+- [x] **Étape 1** ✅ — `test/globe-source.test.js` : l'URL vient de `DEM_SOURCES[DEFAULT_SOURCE_ID]`, et `MAX_Z` est confronté au `maxZoom` des DEUX sources. ⚠️ **Et une assertion de plus, que le plan ne demandait pas** : `src/globe.js` ne doit contenir AUCUN gabarit d'URL littéral **dans son code** (les commentaires ont le droit de nommer AWS). Elle remplace celle de `test/globe-profondeur.test.js` qui cherchait `elevation-tiles-prod/terrarium` dans le TEXTE du fichier — après le rebranchement le motif ne survivait plus que dans un commentaire, et **l'assertion serait restée verte sur la foi d'une phrase**.
+- [x] **Étape 1 bis** ✅ — deux zones z8 **voisines et opposées** dans le même banc : la couverte est servie par Mapterhorn, celle qui rend 404 bascule sur AWS **pour elle seule**, `activeDemSource()` ne bouge pas, et **les deux sources servent dans la même session** (assertion sur les octets réellement demandés). ⚠️ **Trois cas de 404 et non un** : 404 de SONDE (zone entière non couverte), 404 sur UNE tuile d'une zone couverte — le bord d'un jeu national, que la sonde ne peut pas voir puisqu'elle échantillonne le centre — et **5xx, qui lui replie toute la session**.
+- [x] **Étape 2** ✅ — vérifié : les mutations de l'Étape 8 rejouent le défaut d'origine, et il tue les tests.
+- [x] **Étape 3 ✅ TRANCHÉE LE 2026-08-21 : ON REBRANCHE À PARTIR DE z12, ET SEULEMENT LÀ. `SEUIL_SOURCE_FINE = DEM_SOURCES.mapterhorn.baseZoom` (`src/globe.js`).**
+
+  ⚠️ **SA CONDITION D'ENTRÉE ÉTAIT REMPLIE, ET ELLE NE L'ÉTAIT PAS QUAND LA CASE A ÉTÉ ÉCRITE.** La Tâche 4 quater a porté `MAX_Z` à 15 et levé le plancher de `dist` : le globe atteint **z15 mesuré** sur le chemin continu. La bande z12–z15 existe, et c'est exactement celle que Mapterhorn sert. La question pouvait donc enfin se trancher.
+
+  **Les trois faits qui la tranchent, chacun rejoué contre le dépôt :**
+
+  1. **`dem-source.js` donne `baseZoom: 12` à Mapterhorn** — son plancher de couverture. Sous z12 la sonde n'a rien à répondre, et l'en-tête du module ajoute que Mapterhorn rend **404 au-dessus de z4 en pleine mer**. La majorité des tuiles d'un globe étant océaniques, rebrancher la bande z5–z11 remplacerait une donnée qu'AWS sert correctement à ces échelles par des trous sur les deux tiers de la planète.
+  2. **Le chemin de PRODUCTION plafonne à z11** (`plancher = 1` dans `_traverse`, mesuré par la 4 quater : `MAX_Z = 16` et treize fois le budget rendent toujours z11). La bande z2–z11 **EST** le globe de production. En n'y touchant pas, **l'Étape 7 est tenue par construction et non par un banc** — et c'est ce que le test « LE GLOBE ORBITAL EST INCHANGÉ » vérifie : zéro sonde, zéro URL non-AWS, zmax sous le seuil.
+  3. **Le coût de la sonde, mesuré ici et pas estimé.** Le plan annonçait « de l'ordre de 2 520 requêtes HEAD pour une vue orbitale ». Bornée à z12+, la sonde a coûté **24 HEAD** — quatre zones z8 × six zooms candidats — sur une descente complète à 8 km comme à 2 km (`.banc/memoire-4alpha.mjs`). Et la mémoire est **partagée avec le damier** (`src/dem.js`) : une zone déjà sondée par la carte ne coûte rien au globe.
+
+  ⚠️ **ET C'EST CE QUI LÈVE LA CONTRADICTION QUE CE PLAN SIGNALAIT ENTRE SES ÉTAPES 3 ET 4** (« l'une demande de rebrancher, l'autre que rien ne change pour le globe orbital »). Elles ne s'opposaient que tant que « rebrancher » voulait dire « partout ».
+
+  ⚠️ **CE QUE `coast-mask.js` PEUT ET NE PEUT PAS**, puisque cette case l'invoquait : il répond bien terre/mer, mais **ce n'est pas une fonction synchrone et gratuite**. `fetchCoastMask` est asynchrone, exige un `dem`, three.js et le DOM, et va chercher `data/coast-z6/{x}/{y}.json` sur le réseau. La question ne se pose plus une fois la bande bornée à z12+ — mais **l'argument tel qu'il était écrit ne tenait pas**, et il ne faut pas le réutiliser ailleurs sans le vérifier.
+
 - [ ] **Étape 3 — TRANCHER LA QUESTION OUVERTE, et ⚠️ LE FAIT QUI LA TRANCHE EST DÉJÀ DANS LE DÉPÔT — MAIS CE PLAN EN A TIRÉ LA CONCLUSION INVERSE.** `dem-source.js:39` donne `baseZoom: 12` à Mapterhorn : **son plancher de couverture est z12, et le globe plafonne à z11. Les deux intervalles ne se touchent même pas.** Une version de ce plan concluait « rebrancher seulement sous z12 » — **cela désigne une bande que le globe n'atteint jamais.** ⚠️ **La conclusion juste est plus dure : TANT QUE `MAX_Z` RESTE À 11, CETTE TÂCHE NE PEUT RIEN APPORTER AU GLOBE, et la sonde par zone coûterait six requêtes HEAD par zone z8 hors `MAX_CONCURRENT` — de l'ordre de 2 520 pour une vue orbitale — pour renseigner un intervalle que personne ne demande.** `coast-mask.js` répond gratuitement à la seule question utile à ces zooms : terre ou mer.
 
   **Donc : ou bien cette tâche attend qu'une tâche porte `MAX_Z` au-delà de 11, ou bien elle est reportée. Écrivez la décision dans cette case, et ne la commencez pas avant.**
-- [ ] **Étape 4 — la jonction `resolveRegionMaxZoom` async contre `_pump` synchrone.** ⚠️ **C'est le vrai travail de cette tâche, et aucune étape ne le portait.** La sonde par zone est asynchrone ; la pompe qui décide quelle tuile demander ne l'est pas. Dites ce que `_pump` fait pendant que la sonde n'a pas répondu : attendre (et geler), supposer AWS (et perdre Mapterhorn au premier passage), ou demander quand même et corriger après.
-- [ ] **Étape 5 — les tailles.** Établir puis remplacer **la liste** des `256` de taille de tuile — ⚠️ **sans toucher aux deux radix terrarium (`globe.js:66` et `:236`)** — et traiter les deux `255` de `:257-260`. Puis `TILE_MEMO_MAX`, dont le budget est exprimé en tuiles et non en octets.
-- [ ] **Étape 6 — la mémoire, mesurée avant de décider.** Le passage de 256 à 512 px **multiplie par quatre** l'occupation par tuile. ⚠️ **Relevez le cache plein en 256 px vous-même** — ce plan en donne deux valeurs contradictoires — **puis projetez, puis ajustez le nombre de tuiles. Pas l'inverse.**
-- [ ] **Étape 7** — ⚠️ **vérifier que le globe orbital reste identique** sur ce que l'étape 3 a décidé de ne pas changer. C'est une fonction en production.
-- [ ] **Étape 8** — mutation : revenir à l'URL en dur doit tuer le test.
-- [ ] **Étape 9 — LA CLÔTURE DU §0**, les quatre commandes dans l'ordre, puis commit.
+- [x] **Étape 4 ✅ LA JONCTION — ET C'ÉTAIT BIEN LE VRAI TRAVAIL. Réponse retenue : NI attendre, NI supposer, NI corriger après — on DÉCIDE AVEC LA MÉMOIRE SYNCHRONE ET ON LAISSE LA TUILE `empty`.**
 
-⚠️ **UNE VERSION DE CE PLAN PROPOSAIT ICI « plafonner `MAX_Z` à 13 » COMME ALTERNATIVE HONNÊTE : LA MESURE L'A RENDUE SANS OBJET.** La Tâche 4 quater établit que le verrou n'est pas `MAX_Z` mais le plancher de `dist`. ⚠️ **EN REVANCHE « z15 TIENT DANS LE BUDGET ACTUEL AVEC DEUX FOIS LA MARGE » EST FAUX, ET C'EST MESURÉ :** l'ensemble de travail passe de 532 à **1 504** tuiles, et il a fallu porter le budget du chemin continu de 600 à **1 700**. **L'arbitrage n'a pas disparu, il a été tranché — et il coûte 40 Mo de tas et le TRIPLE de tuiles à l'écran.** Ce qui reste vrai en revanche
+  `_request` appelle `planTuile(z, x, y)`, qui lit `peekRegionMaxZoom` — **synchrone**. Trois issues, plus une quatrième que le damier n'a pas à connaître :
+  - un zoom → on y va, en surzoomant au-delà (`overzoomTile`) ;
+  - `null` → zone hors couverture → **AWS pour cette tuile**, choix de session intact ;
+  - panne → repli AWS pour toute la session ;
+  - **`planTuile` rend `null`** → la zone n'est **pas encore sondée**. `_request` lance la sonde à côté (`_sonder`, dédoublonnée par un `Set` de clés de zone) et **rend la main sans rien enfiler**. La tuile reste `empty` — l'état d'où `_request` sait repartir — et `_traverse` la redemandera à l'image suivante.
+
+  ⚠️ **CE N'EST PAS UN MÉCANISME NEUF : c'est mot pour mot la contre-pression de `PLAFOND_FILE`** (Tâche 4 bis), et l'écran ne change pas — **l'ancêtre continue de dessiner**, c'est la règle sans-trou du quadtree. Un test le prouve en gelant les sondes : la tuile reste `empty`, la file reste vide, **zéro octet ne part**, et `_drawn` ne tombe pas à zéro. Les deux mauvaises réponses ont chacune leur mutation, et les deux tuent des tests.
+
+  ⚠️ **ET LE BANC A FAILLI IMITER LE DÉFAUT.** Les helpers `calme()` des tests attendaient « ni en vol, ni en file » — or une tuile qui attend sa sonde n'est ni l'un ni l'autre. La boucle ne rendait donc la main qu'aux MICRO-tâches, les `setTimeout` des sondes n'obtenaient jamais leur tour, et **le globe mesuré restait figé à z11 au milieu de son premier sondage**. Les trois `calme()` du dépôt (`globe-profondeur`, `globe-eviction`, `globe-source`) et celui du harnais testent désormais aussi `globe._sondes.size`.
+
+- [x] **Étape 5 ✅ LES TAILLES — ET LE GLOBE ACCEPTE LES DEUX, IL NE RÉÉCHANTILLONNE PAS.** Le choix était à trancher explicitement : il l'est, et **c'est la politique elle-même qui le force** — une zone hors couverture retombe sur AWS 256 px pendant que sa voisine reste sur Mapterhorn 512 px, dans la même session. Il n'y avait donc pas de taille unique à choisir. `t.size` sort de `fetchTile` et traverse tout : `sampleHeights(heights, u, v, size = 256)`, l'uniforme `uTilePx` (par tuile, pas partagé), et `remplirHauteurs` (`src/monde/flux-terrain.js`).
+
+  **Les littéraux CHANGÉS, la liste exacte** (les repères du plan étaient périmés de quatre tâches ; ceux-ci sont ceux du fichier livré) :
+  - `fetchTile` : `c.width = c.height = px` · `getImageData(0, 0, px, px)` · `new Float32Array(px * px)` — trois expressions, plus le `drawImage` de sous-fenêtre qu'exige le surzoom ;
+  - `sampleHeights` : `u * size` et `v * size` (2) · les deux **bornes d'index** `255` → `size - 1` · les deux `254` → `size - 2` · `i = y0 * size + x0` · **`heights[i + 256]` → `heights[i + size]`** et **`heights[i + 257]` → `heights[i + size + 1]`** ;
+  - le nuanceur : `fwidth(vUv) * 256.0` → `* uTilePx`, avec la déclaration d'uniforme qui va avec ;
+  - `TILE_MEMO_MAX = 128` (entrées) → `TILE_MEMO_OCTETS_MAX = 128 * 256 * 256 * 4` (**octets**), et `src/gardien.js` a suivi.
+
+  **Les littéraux ÉPARGNÉS, et pourquoi :**
+  - **les deux radix terrarium** — `rgba[i*4] * 256 + … / 256 - 32768` en JS, `t.r * 256.0 + t.g + t.b / 256.0` en GLSL. Mapterhorn utilise **le même encodage** ; les confondre avec une taille de tuile casse toutes les altitudes en silence ;
+  - **le `* 255.0` du nuanceur**, qui est une **plage d'octet** et n'a rien à voir avec les `255` d'index de `sampleHeights` ;
+  - `PLAFOND_FILE = 256`, qui est une profondeur de FILE ;
+  - les `512` de `rebuildRamp` (`c.width = 512`, `fillRect(0, 0, 512, 1)`), qui sont le dégradé hypsométrique.
+
+  ⚠️ **`bathy.js`/`overzoomTile` N'A PAS EU BESOIN D'ÊTRE MODIFIÉ** — le plan l'annonçait « à modifier ». Vérifié : sa signature `(z, x, y, maxZoom)` et sa sortie `{z, x, y, scale, ox, oy}` conviennent telles quelles, et `globe.js` l'importe (module pur, aucun cycle).
+
+- [x] **Étape 6 ✅ LA MÉMOIRE, MESURÉE — ET LES DEUX CHIFFRES DU PLAN ÉTAIENT PÉRIMÉS.** `.banc/memoire-4alpha.mjs`, A/B dans le même binaire (« avant » = source épinglée AWS, ce qui reproduit exactement l'ancien comportement), globe continu, lat 45, **17 images jetées puis 20 relevées, stabilité exigée** :
+
+  | source | alt | zmax | dessinées | cache | **tas JS** | `_tileMemo` | textures des tuiles visibles | GET | HEAD |
+  |---|---|---|---|---|---|---|---|---|---|
+  | aws | 200 km | z10 | 117 | 312 | 2,2 Mo | 128 / **32,0 Mo** | 29,3 Mo | 312 | 0 |
+  | mapterhorn | 200 km | z10 | 117 | 312 | 2,5 Mo | 128 / **32,0 Mo** | 29,3 Mo | 312 | **0** |
+  | aws | 8 km | z14 | 748 | 1 196 | 8,8 Mo | 128 / **32,0 Mo** | 187,0 Mo | 1 196 | 0 |
+  | mapterhorn | 8 km | z14 | 748 | 1 196 | **8,7 Mo** | 32 / **32,0 Mo** | 607,8 Mo | 1 196 | **24** |
+  | aws | 2 km | z15 | 964 | 1 504 | 10,9 Mo | 128 / **32,0 Mo** | 241,0 Mo | 1 504 | 0 |
+  | mapterhorn | 2 km | z15 | 964 | 1 504 | **10,8 Mo** | 32 / **32,0 Mo** | 835,8 Mo | 1 504 | **24** |
+
+  ⚠️ **« 242 → 968 Mo » ET « ×4 PAR TUILE » SONT MORTS, ET LA TÂCHE 4 SEXIES LES A TUÉS.** Les deux supposaient que le cache de 1 700 tuiles retient des pixels. Il n'en retient plus : le canevas est relâché au téléversement et `t.heights` à la construction du maillage. **Le tas JS ne bouge pas — 10,8 contre 10,9 Mo à 2 km, cache plein à 1 504 tuiles.**
+
+  ⚠️ **ET LE `_tileMemo` EST INVARIANT PAR CONSTRUCTION : 32 Mo dans les six lignes.** C'est ce que le budget en OCTETS achète — 128 entrées de 256 px, ou 32 de 512 px, **jamais 128 Mo**. Un test le verrouille, et la mutation « revenir à 128 entrées » le tue.
+
+  ⚠️ **CE QUI QUADRUPLE VRAIMENT, C'EST LA TEXTURE — ET C'EST UN MAJORANT, PAS UNE MESURE DE VRAM.** 241 → 836 Mo à 2 km, mais ce total compte les tuiles **marquées `visible`**, et `globe.js` documente que three ne téléverse qu'au premier DESSIN et élimine au frustum : relevé au navigateur dans ce même fichier, **132 canevas téléversés sur 420 (31 %)** à 300 km. **Le vrai chiffre n'a pas été mesuré au navigateur — voir « ce qui n'a pas été vérifié » ci-dessous, et la tâche de suite qui en découle.**
+
+- [x] **Étape 7 ✅ LE GLOBE ORBITAL EST INCHANGÉ, ET C'EST VÉRIFIÉ DEUX FOIS.** Par construction (z2–z11 est sous `SEUIL_SOURCE_FINE`, `planTuile` rend AWS sans une seule requête), par test (`LE GLOBE ORBITAL EST INCHANGÉ` : zéro HEAD, que des URL AWS, zmax sous le seuil), et par le banc — la ligne « 200 km » est **identique au chiffre près** entre les deux sources.
+
+- [x] **Étape 8 ✅ LES MUTATIONS — HUIT, TOUTES TUÉES** (`.banc/mutation-4alpha.py`) : l'URL en dur · `i + size + 1` redevenu `i + 257` · `i + size` redevenu `i + 256` · les bornes d'index redevenues `255`/`254` · la jonction qui suppose AWS · le 404 redevenu une panne · le budget du `_tileMemo` redevenu 128 entrées · la disparition de `SEUIL_SOURCE_FINE`.
+
+  ⚠️ **ET LA SIXIÈME A SURVÉCU AU PREMIER PASSAGE — DEUX FOIS, POUR DEUX RAISONS DIFFÉRENTES, ET LES DEUX ÉTAIENT DES DÉFAUTS RÉELS.** D'abord parce qu'aucun test n'exerçait le 404 **d'une tuile dans une zone couverte** (les autres n'exercent que le 404 de sonde) : test ajouté. Ensuite parce que la classification 404/panne était écrite **deux fois** — `err.status` dans `fetchTile` et la classe `DemSourceError` dans `tileBitmap` — et que la première gagnait, rendant la seconde inobservable. `fetchTile` branche désormais sur la **classe**, et `tileBitmap` est le seul endroit qui décide ce qu'est une panne. **Un mutant équivalent est une redondance qui se cache.**
+
+- [x] **Étape 9 ✅ LA CLÔTURE DU §0** — `npm test` **3 186 verts**, `audit:tests` 186/186 sans écart, `node --check` sur les six fichiers modifiés, `nettoie:dist` + `build:mapcells` + `vite build` + `verifie:dist`. Page chargée avec ET sans `?globe=continu`.
+
+⚠️ **UNE VERSION DE CE PLAN PROPOSAIT ICI « plafonner `MAX_Z` à 13 » COMME ALTERNATIVE HONNÊTE : LA MESURE L'A RENDUE SANS OBJET.** La Tâche 4 quater établit que le verrou n'est pas `MAX_Z` mais le plancher de `dist`. ⚠️ **EN REVANCHE « z15 TIENT DANS LE BUDGET ACTUEL AVEC DEUX FOIS LA MARGE » EST FAUX, ET C'EST MESURÉ :** l'ensemble de travail passe de 532 à **1 504** tuiles, et il a fallu porter le budget du chemin continu de 600 à **1 700**. **L'arbitrage n'a pas disparu, il a été tranché — et il coûte 40 Mo de tas et le TRIPLE de tuiles à l'écran.** Ce qui reste vrai en revanche, et la Tâche 4 alpha l'a mesuré à son tour : **le budget qui compte n'est plus le tas mais la TEXTURE**, et c'est la tâche de suite ci-dessous.
+
+#### ⚠️ CE QUE LA TÂCHE 4 ALPHA N'A PAS PU VÉRIFIER, ET CE QU'ELLE A DÉCOUPÉ
+
+**Non vérifié :** le globe n'a **jamais chargé une seule tuile dans un navigateur** pendant cette tâche. Le bucket AWS (`s3.amazonaws.com/elevation-tiles-prod`) est **injoignable depuis cette machine** — `ERR_CONNECTION_TIMED_OUT` puis blocage CORS — et le voile `#loading` reste levé **avec comme sans la modification** (vérifié en remisant le travail : comportement identique avant/après, donc pré-existant à l'environnement). Ce qui **a** été vérifié au navigateur, en important `src/globe.js` directement dans la page servie par vite :
+- le graphe de modules charge sans exception (l'import de `dem-source.js` et `bathy.js` n'ouvre aucun cycle) ;
+- `planTuile(8, 132, 92)` rend **AWS, scale 1** — le globe orbital ;
+- `planTuile(12, 2119, 1473)` rend **`null`** avant la sonde, puis **Mapterhorn z12** après ;
+- la **vraie** sonde sur la région du Mont-Blanc rend **17** : Mapterhorn y sert bien jusqu'à z17 ;
+- une **vraie** tuile `tiles.mapterhorn.com/12/2119/1473.webp` fait bien **512×512**, se décode entre **1 899 et 3 978 m**, et `sampleHeights(h, 0,99 ; 0,99 ; 512)` rend **3 419 m** contre **3 251 m** avec le défaut de 256 — **168 m d'écart silencieux**, le piège du plan, démontré sur de la donnée réelle.
+
+**Restent donc à voir de vos yeux :** un globe continu qui descend réellement à z15 sur Mapterhorn, et la mémoire VIDÉO que cela coûte.
+
+#### Tâche 4 septies : LE CRITÈRE DE REFENTE IGNORE LA TAILLE DE TUILE ⚠️ **DÉCOUPÉE DE LA 4 ALPHA, ET MESURÉE**
+
+**Le fait :** `_traverse` refend sur `chord / dist`, un critère **ANGULAIRE** — il fixe la taille à l'ÉCRAN d'une feuille, et ne sait rien du nombre de texels qu'elle porte. Une tuile de 512 px occupe donc la même surface d'écran qu'une tuile de 256 px **en portant quatre fois plus de texels**. Mesuré à 2 km (`.banc/memoire-4alpha.mjs`) : mêmes **964** tuiles dessinées dans les deux cas, **241 Mo** de texture en 256 px contre **836 Mo** en 512 px, pour un écran qui ne peut pas montrer la différence.
+
+**Ce qu'il faudrait :** que le seuil de refente tienne compte de `tilePx` — en pratique, s'arrêter **un niveau plus tôt** sur une tuile de 512 px, ce qui rend la même densité de texels par pixel d'écran pour ~un quart des feuilles. `planTuile` connaît la taille de façon **synchrone** dès que la zone est sondée, donc l'information est disponible au bon endroit.
+
+⚠️ **POURQUOI CE N'EST PAS DANS LA 4 ALPHA :** c'est un changement du critère de refente, c'est-à-dire du cœur du quadtree, et il rejouerait tous les chiffres de la 4 quater et de la 4 sexies. **Et il n'est pas urgent** : la bande z12+ n'est atteinte que sous `?globe=continu`, qui n'est **pas** le défaut (`src/flags.js`, `globeContinu: false`). **La production ne paie rien de ce majorant.**
 
 ### Tâche 3 : `seuil-socle.js` — quand le socle naît et meurt ✅ **FAITE LE 2026-08-21** — ⚠️ **`ZOOM_SOCLE = 13`, ET C'EST LA RÈGLE R3 QUI L'A TRANCHÉ**
 

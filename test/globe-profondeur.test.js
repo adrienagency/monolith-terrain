@@ -43,12 +43,25 @@ import { encodeTerrarium } from '../src/bathy.js'
 
 const ELEV = 812
 const [ER, EG, EB] = encodeTerrarium(ELEV)
-const DALLE = new Uint8ClampedArray(256 * 256 * 4)
-for (let i = 0; i < 256 * 256; i++) {
-  DALLE[i * 4] = ER
-  DALLE[i * 4 + 1] = EG
-  DALLE[i * 4 + 2] = EB
-  DALLE[i * 4 + 3] = 255
+// ⚠️ UNE DALLE PAR TAILLE DE TUILE, ET C'EST LA TÂCHE 4 ALPHA QUI L'EXIGE : le
+// globe accepte désormais les deux tailles (256 px AWS, 512 px Mapterhorn) et
+// `fetchTile` lit `getImageData(0, 0, px, px)`. Une dalle 256 rendue à un
+// canevas 512 donnerait des hauteurs NaN sur les trois quarts de la tuile —
+// EN SILENCE, sans rien de rouge.
+const dalles = new Map()
+function dalleDe(cote) {
+  let d = dalles.get(cote)
+  if (!d) {
+    d = new Uint8ClampedArray(cote * cote * 4)
+    for (let i = 0; i < cote * cote; i++) {
+      d[i * 4] = ER
+      d[i * 4 + 1] = EG
+      d[i * 4 + 2] = EB
+      d[i * 4 + 3] = 255
+    }
+    dalles.set(cote, d)
+  }
+  return d
 }
 
 class FakeCtx {
@@ -57,8 +70,8 @@ class FakeCtx {
   }
   fillRect() {}
   drawImage() {}
-  getImageData() {
-    return { data: DALLE }
+  getImageData(x, y, w) {
+    return { data: dalleDe(w) }
   }
 }
 
@@ -73,6 +86,7 @@ globalThis.createImageBitmap = async (blob) => blob
 
 const { Globe, _resetTileMemo } = await import('../src/globe.js')
 const { latLonToSphere, R_GLOBE } = await import('../src/geo.js')
+const { _resetDemSource } = await import('../src/dem-source.js')
 
 let requetes = 0
 
@@ -81,11 +95,23 @@ function serve() {
   // ⚠️ La mémoire de tuiles est vidée à chaque montage : sans ça, une station
   // héritant du cache d'une autre mesurerait l'hystérésis et non le critère.
   _resetTileMemo()
+  // ⚠️ ET LA SOURCE AUSSI (Tâche 4 alpha) : `regionZooms` et le drapeau de repli
+  // sont de la mémoire de MODULE. Un test qui provoque une panne laisserait le
+  // suivant sur AWS sans que rien ne le dise.
+  _resetDemSource()
   globalThis.fetch = async (url) => {
     requetes++
     await new Promise((r) => setTimeout(r, 0))
     return { ok: true, status: 200, blob: async () => ({ width: 256, height: 256 }) }
   }
+}
+
+// Le zoom d'une URL de tuile, quelle que soit la source. ⚠️ Les deux ne se
+// découpent pas pareil : `…/terrarium/{z}/{x}/{y}.png` chez AWS,
+// `…mapterhorn.com/{z}/{x}/{y}.webp` chez Mapterhorn.
+function zoomDeLUrl(url) {
+  const m = /\/(\d+)\/(\d+)\/(\d+)\.(png|webp)$/.exec(url)
+  return m ? Number(m[1]) : null
 }
 
 // ───────────────────────────── LE PROTOCOLE A, celui de la Tâche 4 ────────────
@@ -140,8 +166,15 @@ function etat(globe) {
 }
 
 async function calme(globe, max = 60_000) {
+  // ⚠️ UNE SONDE DE COUVERTURE EN VOL EST UN TRAVAIL EN COURS, ET L'OUBLIER
+  // GELAIT LE GLOBE À z11 (plan « globe continu », Tâche 4 alpha). Une tuile qui
+  // attend sa sonde n'est NI en vol NI dans la file : elle est restée `empty`,
+  // exprès — c'est la contre-pression décrite dans `_request`. Sans `_sondes` ici,
+  // la boucle ne rendait la main qu'aux MICRO-tâches, les `setTimeout` des sondes
+  // n'obtenaient jamais leur tour, et le globe mesuré était un globe figé au
+  // milieu de son premier sondage.
   for (let i = 0; i < max; i++) {
-    if (!globe.inFlight && !globe.queue.length) return
+    if (!globe.inFlight && !globe.queue.length && !globe._sondes.size) return
     await new Promise((r) => setTimeout(r, 0))
   }
   throw new Error('le globe ne se calme pas')
@@ -242,8 +275,12 @@ test('aucune tuile au-delà de MAX_Z ne part sur le réseau, même à 2 km', asy
   const { MAX_Z } = await import('../src/globe.js')
   const vus = new Set()
   _resetTileMemo()
-  globalThis.fetch = async (url) => {
-    vus.add(Number(url.split('terrarium/')[1].split('/')[0]))
+  _resetDemSource()
+  globalThis.fetch = async (url, opts) => {
+    // ⚠️ ON NE COMPTE PAS LES SONDES DE COUVERTURE : ce sont des HEAD, elles ne
+    // rapportent aucune tuile et leurs zooms candidats montent jusqu'au plafond
+    // de SONDAGE de la source (z17), qui n'est pas un zoom demandé.
+    if (opts?.method !== 'HEAD') vus.add(zoomDeLUrl(url))
     await new Promise((r) => setTimeout(r, 0))
     return { ok: true, status: 200, blob: async () => ({ width: 256, height: 256 }) }
   }
@@ -266,21 +303,51 @@ test('aucune tuile au-delà de MAX_Z ne part sur le réseau, même à 2 km', asy
   assert.ok(vus.has(MAX_Z), `z${MAX_Z} jamais demandé à 2 km : la borne n'est toujours pas atteinte`)
 })
 
+// ⚠️ CETTE ASSERTION A CHANGÉ DE NATURE AVEC LA TÂCHE 4 ALPHA, ET SON ANCIENNE
+// VERSION LE DEMANDAIT ELLE-MÊME (« le globe ne tape plus AWS en dur — la Tâche
+// 4 alpha est passée, relevez cette borne avec elle »). Elle lisait le TEXTE de
+// `src/globe.js` pour y trouver `elevation-tiles-prod/terrarium` ; le
+// rebranchement a retiré l'URL en dur, et le motif ne survivait plus que dans un
+// commentaire — l'assertion serait donc restée verte sur la foi d'une phrase.
+// Elle interroge maintenant la SOURCE, comme le §0 l'exige.
 test('MAX_Z ne dépasse pas ce que la source de relief porte réellement', async () => {
-  const { DEM_SOURCES } = await import('../src/dem-source.js')
+  const { DEM_SOURCES, DEFAULT_SOURCE_ID } = await import('../src/dem-source.js')
   const { MAX_Z } = await import('../src/globe.js')
-  const urlDuGlobe = (await import('node:fs')).readFileSync(
-    new URL('../src/globe.js', import.meta.url),
-    'utf8'
-  )
-  // le globe tape encore AWS en dur : c'est ce constat qui borne MAX_Z
-  assert.ok(
-    urlDuGlobe.includes('elevation-tiles-prod/terrarium'),
-    'le globe ne tape plus AWS en dur — la Tâche 4 alpha est passée, relevez cette borne avec elle'
-  )
+  // le REPLI est la borne basse : c'est lui qui sert quand rien d'autre ne
+  // répond, et une tuile au-delà de son plafond reviendrait en error
   assert.ok(
     MAX_Z <= DEM_SOURCES.aws.maxZoom,
     `MAX_Z = ${MAX_Z} au-dessus du z${DEM_SOURCES.aws.maxZoom} d'AWS : les tuiles reviendront en error, ` +
       `et une tuile error occupe une place du cache jusqu'à son éviction`
+  )
+  assert.ok(
+    MAX_Z <= DEM_SOURCES[DEFAULT_SOURCE_ID].maxZoom,
+    `MAX_Z = ${MAX_Z} au-dessus du z${DEM_SOURCES[DEFAULT_SOURCE_ID].maxZoom} de ${DEFAULT_SOURCE_ID}`
+  )
+})
+
+// ⚠️ ET L'URL NE S'ÉCRIT PLUS DANS `globe.js` — Étape 1 de la Tâche 4 alpha.
+// Un rebranchement naïf aurait remplacé une URL en dur par une autre ; ce test
+// exige que l'URL vienne de `DEM_SOURCES`, et la MUTATION qui le tue est de
+// remettre un gabarit d'URL littéral dans le fichier.
+test("l'URL des tuiles du globe vient de DEM_SOURCES, jamais d'un littéral", async () => {
+  const texte = (await import('node:fs')).readFileSync(
+    new URL('../src/globe.js', import.meta.url),
+    'utf8'
+  )
+  // on ne regarde que le CODE : les commentaires ont le droit de nommer AWS
+  const code = texte
+    .split('\n')
+    .filter((l) => !l.trimStart().startsWith('//'))
+    .join('\n')
+  for (const motif of ['elevation-tiles-prod', 'tiles.mapterhorn.com']) {
+    assert.ok(
+      !code.includes(motif),
+      `src/globe.js écrit « ${motif} » en dur — la source doit venir de DEM_SOURCES, pas d'un gabarit recopié`
+    )
+  }
+  assert.ok(
+    /from '\.\/dem-source\.js'/.test(code),
+    "src/globe.js n'importe rien de dem-source.js : il a donc sa propre idée de la source de relief"
   )
 })

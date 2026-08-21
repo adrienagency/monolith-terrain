@@ -54,15 +54,28 @@ import { encodeTerrarium } from '../src/bathy.js'
 const ELEV = 812
 const [ER, EG, EB] = encodeTerrarium(ELEV)
 
-// une seule dalle RGBA, partagée : le décodage lit toujours les mêmes octets,
-// ce qu'on mesure ici c'est COMBIEN DE FOIS il les relit
-const DALLE = new Uint8ClampedArray(256 * 256 * 4)
-for (let i = 0; i < 256 * 256; i++) {
-  DALLE[i * 4] = ER
-  DALLE[i * 4 + 1] = EG
-  DALLE[i * 4 + 2] = EB
-  DALLE[i * 4 + 3] = 255
+// une dalle RGBA PAR TAILLE DE TUILE, partagée : le décodage lit toujours les
+// mêmes octets, ce qu'on mesure ici c'est COMBIEN DE FOIS il les relit.
+// ⚠️ DEUX TAILLES DEPUIS LA TÂCHE 4 ALPHA — 256 px chez AWS, 512 px chez
+// Mapterhorn — et `fetchTile` lit `getImageData(0, 0, px, px)`. Rendre une dalle
+// 256 à un canevas 512 donnerait des hauteurs NaN sur les trois quarts de la
+// tuile, EN SILENCE.
+const dalles = new Map()
+function dalleDe(cote) {
+  let d = dalles.get(cote)
+  if (!d) {
+    d = new Uint8ClampedArray(cote * cote * 4)
+    for (let i = 0; i < cote * cote; i++) {
+      d[i * 4] = ER
+      d[i * 4 + 1] = EG
+      d[i * 4 + 2] = EB
+      d[i * 4 + 3] = 255
+    }
+    dalles.set(cote, d)
+  }
+  return d
 }
+const DALLE = dalleDe(256)
 
 let decodages = 0
 
@@ -73,8 +86,12 @@ class FakeCtx {
   fillRect() {}
   drawImage() {}
   getImageData(x, y, w) {
-    if (w === 256) decodages++ // une tuile dépaquetée = un décodage payé
-    return { data: DALLE }
+    // ⚠️ LE CRITÈRE EST « CARRÉ », PLUS « 256 ». Il distinguait la tuile
+    // (getImageData 256×256) de la rampe hypsométrique (dégradé 512×1) par la
+    // largeur ; une tuile Mapterhorn fait 512 de large elle aussi, et le compte
+    // des décodages serait retombé à zéro sans qu'aucune assertion ne rougisse.
+    if (w === arguments[3]) decodages++ // une tuile dépaquetée = un décodage payé
+    return { data: dalleDe(w) }
   }
 }
 
@@ -103,6 +120,9 @@ function serve() {
   // soit réparée. Les deux fichiers testent deux étages distincts du même
   // trajet : là-bas ce qui est racheté, ici ce qui n'est plus redemandé.
   _resetTileMemo()
+  // ⚠️ ET LA SOURCE AUSSI (Tâche 4 alpha) : `regionZooms` et le drapeau de repli
+  // sont de la mémoire de MODULE, pas d'instance.
+  _resetDemSource()
   globalThis.fetch = async (url) => {
     appels.set(url, (appels.get(url) || 0) + 1)
     // un aller-retour réseau n'est jamais synchrone
@@ -113,6 +133,7 @@ function serve() {
 
 const { Globe, _resetTileMemo } = await import('../src/globe.js')
 const { latLonToSphere, R_GLOBE } = await import('../src/geo.js')
+const { _resetDemSource } = await import('../src/dem-source.js')
 
 // les constantes du module, redites ici pour que le test échoue si elles bougent
 // ⚠️ 420 → 600 (plan « globe continu », Tâche 4 sexies, Étape 2) : l'ensemble de
@@ -180,8 +201,15 @@ function etat(globe) {
 // on rend la main à la boucle d'événements (MAX_CONCURRENT = 6, il faut donc
 // plusieurs tours pour drainer un palier)
 async function calme(globe, max = 4000) {
+  // ⚠️ UNE SONDE DE COUVERTURE EN VOL EST UN TRAVAIL EN COURS, ET L'OUBLIER
+  // GELAIT LE GLOBE À z11 (plan « globe continu », Tâche 4 alpha). Une tuile qui
+  // attend sa sonde n'est NI en vol NI dans la file : elle est restée `empty`,
+  // exprès — c'est la contre-pression décrite dans `_request`. Sans `_sondes` ici,
+  // la boucle ne rendait la main qu'aux MICRO-tâches, les `setTimeout` des sondes
+  // n'obtenaient jamais leur tour, et le globe mesuré était un globe figé au
+  // milieu de son premier sondage.
   for (let i = 0; i < max; i++) {
-    if (!globe.inFlight && !globe.queue.length) return
+    if (!globe.inFlight && !globe.queue.length && !globe._sondes.size) return
     await new Promise((r) => setTimeout(r, 0))
   }
   throw new Error('le globe ne se calme pas')
@@ -895,6 +923,12 @@ test("sur une pente CONSTANTE, le bord de tuile s'éclaire comme le centre", asy
   // rampe est-ouest parfaitement régulière : toutes les normales de la nappe
   // doivent faire le MÊME angle avec la verticale locale
   t.heights = new Float32Array(256 * 256)
+  // ⚠️ `t.size` EST OBLIGATOIRE DEPUIS LA TÂCHE 4 ALPHA. La tuile est montée à
+  // la main ici : elle doit déclarer sa taille comme elle déclare déjà son état
+  // et sa texture. Sans elle, `sampleHeights` reçoit le `size: 0` que
+  // `_ensureTile` pose avant tout chargement, et rend NaN — bruyamment, ce qui
+  // est le comportement voulu.
+  t.size = 256
   for (let y = 0; y < 256; y++) {
     for (let x = 0; x < 256; x++) t.heights[y * 256 + x] = 1000 + x * 40
   }

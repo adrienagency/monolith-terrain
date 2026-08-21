@@ -155,6 +155,20 @@ const {
   MERCATOR_LAT_MAX,
 } = await import('../src/monde/flux-terrain.js')
 
+const { _resetDemSource, DEM_SOURCES } = await import('../src/dem-source.js')
+
+// ⚠️ CE FICHIER ÉPINGLE LA SOURCE SUR AWS, ET C'EST UN CHOIX MOTIVÉ (plan
+// « globe continu », Tâche 4 alpha). Son sujet est le FLUX — la file, la
+// couverture de l'emprise, le rééchantillonnage des hauteurs — et tout son banc
+// est bâti autour d'un monde à URL AWS et d'une HORLOGE VIRTUELLE : les tuiles
+// ne se débloquent que quand `avancer()` les libère. Y faire entrer la sonde de
+// couverture de Mapterhorn ferait dépendre chacune de ses mesures d'un
+// aller-retour de six HEAD qu'il faudrait libérer à la main, et ce fichier
+// mesurerait alors la sonde au lieu de la file.
+//
+// ⚠️ **CE QU'IL NE COUVRE DONC PAS EST COUVERT AILLEURS, ET NOMMÉMENT** :
+// `test/globe-source.test.js` exerce la politique de source, les deux tailles
+// de tuile, et le fait que `remplirHauteurs` lise bien une tuile de 512 px.
 const url = (z, x, y) => `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`
 
 // la caméra du dépôt : fov 30 (`main.js`), far 1400 (`modes.js`),
@@ -186,6 +200,7 @@ function etat(globe) {
 
 function neuf(params = {}) {
   _resetTileMemo()
+  _resetDemSource(DEM_SOURCES.aws.id) // voir l'encart au-dessus de `url`
   _resetJournalReseau()
   attentes.length = 0
   horloge = 0

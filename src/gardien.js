@@ -929,10 +929,11 @@ export const PROTECTIONS = [
   {
     cle: 'globe-tuiles',
     module: 'src/globe.js',
-    identifiant: 'TILE_MEMO_MAX',
+    identifiant: 'TILE_MEMO_OCTETS_MAX',
     protege: 'la mémoire des tuiles du globe',
     contre: 'un cache d’ImageBitmap décodés sans fin',
-    critere: '128 tuiles, éviction LRU (128 × 256² × 4 o = 32 Mo) ; 6 chargements simultanés au plus',
+    critere:
+      '32 Mo d’ImageBitmap décodé, éviction LRU — un budget en OCTETS et non en entrées depuis que les tuiles font 256 px (AWS) ou 512 px (Mapterhorn) ; 6 chargements simultanés au plus',
     pur: false,
   },
   {

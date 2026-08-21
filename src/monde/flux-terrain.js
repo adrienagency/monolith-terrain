@@ -409,7 +409,11 @@ export function remplirHauteurs(flux, { emprise, n, sortie } = {}) {
         const base = j * cote
         for (let i = i0; i <= i1; i++) {
           const u = (b.x0 + i * dx - tx0) / (tx1 - tx0)
-          out[base + i] = sampleHeights(t.heights, u, v)
+          // ⚠️ `t.size` EST OBLIGATOIRE ICI DEPUIS LA TÂCHE 4 ALPHA : une tuile
+          // du globe fait 256 px (AWS) ou 512 px (Mapterhorn) selon la zone.
+          // L'omettre retomberait sur le défaut 256 et lirait le QUART
+          // nord-ouest d'une tuile fine, en silence.
+          out[base + i] = sampleHeights(t.heights, u, v, t.size)
           vues[base + i] = 1
         }
       }
