@@ -471,7 +471,14 @@ test('setCoastMask : lâcher le trait de côte AVANT une reconstruction ne poste
 test('main.js : le trait de côte périmé est lâché AVANT la reconstruction du relief', () => {
   const src = fs.readFileSync(path.join(ROOT, 'src/main.js'), 'utf8')
   const lache = src.indexOf('rebuildFields: false')
-  const rebuild = src.indexOf('await regenerateTerrain()')
+  // ⚠️ **LE MOTIF CHERCHE L'APPEL, PAS SES ARGUMENTS** — il lisait
+  // `await regenerateTerrain()` mot pour mot, et la Tâche 2 du plan « globe
+  // continu » lui a donné un argument (`{ sansRideau: enVol }`, le second
+  // rideau du chemin de zoom). Le repère est corrigé EN PLACE : ce que ce test
+  // garde est l'ORDRE des deux, jamais la forme de l'appel. `await` reste dans
+  // le motif parce qu'il n'y a qu'UN `await regenerateTerrain(` dans main.js —
+  // les quatre autres appels ne sont pas attendus.
+  const rebuild = src.indexOf('await regenerateTerrain(')
   assert.ok(lache > 0, 'le lâcher sans recuisson a disparu de main.js')
   assert.ok(rebuild > 0)
   assert.ok(lache < rebuild, 'lâché après la reconstruction, il repaie un travail de travailleur entier')

@@ -162,29 +162,84 @@ body {
    Le relief de fond n'a de sens qu'une fois : c'est la première image du site.
    Aux chargements suivants (changement de lieu, zoom, recherche), le remettre
    effaçait d'un coup la carte que le visiteur était en train de regarder. Il
-   reste donc éteint, et c'est cette carte qui se floute le temps du calcul.
+   reste donc éteint.
    On l'ÉTEINT, on ne le déplace pas : son z-index reste 59 — relire
    l'avertissement ci-dessus avant d'y toucher. */
 body.ld-warm #loading-bg {
   opacity: 0;
 }
-/* La transition vit sur #app en permanence : c'est elle qui porte le fondu
-   dans les DEUX sens, entrée du flou comme sortie.
-   Le `scale` accompagne le flou parce que `blur()` échantillonne au-delà des
-   bords de l'élément : sans lui, les quatre côtés se dégradent vers le gris de
-   la page et dessinent un cadre. 4 % suffisent à pousser cette frange dehors.
-   POURQUOI un filtre CSS et pas une passe de post-traitement : la chaîne n'a
-   qu'un flou de PROFONDEUR de champ (DepthOfFieldEffect, six cibles = 136 Mo,
-   construit à la demande), qui floute selon la distance et non uniformément.
-   Surtout, la reconstruction du terrain BLOQUE le thread principal — une passe
-   WebGL ne pourrait pas animer son fondu pendant ce temps, alors que le
-   compositeur, lui, continue de flouter la dernière image déjà livrée. */
-body.ld-warm #app {
-  transition: filter 0.45s ease, transform 0.45s ease;
+
+/* ══════════ LE FLOU À L'ARRÊT EST PARTI — Tâche 2 du plan « globe continu »
+   Deux règles vivaient ici : `body.ld-warm #app { transition: filter…, transform… }`
+   et `body.ld-warm:has(#loading:not(.hidden)) #app { filter: blur(16px);
+   transform: scale(1.04) }`.
+   ⚠️ **C'EST LE CONTRAIRE EXACT DE LA DÉCISION 13**, qui accepte le flou
+   PENDANT le mouvement et l'exige net dès l'arrêt. Ici l'application ne bougeait
+   pas — elle attendait — et elle était floutée à 16 px, zoomée de 4 %.
+   MESURÉ le 2026-08-21, pas déduit : application vivante sur le port 5503,
+   `?globe=crans` (le régime de PRODUCTION), La Réunion z12, transitions
+   neutralisées pour lire l'état d'arrivée. Avec `body.ld-warm` posée et
+   `#loading` visible, `getComputedStyle(#app)` rendait `filter: blur(16px)` et
+   `transform: matrix(1.04, 0, 0, 1.04, 0, 0)` — pendant les **1 177 ms** qu'a
+   duré un simple rechargement de terrain, et pendant les **9,7 s et plus** d'un
+   cran sous `?globe=continu&socle=quadtree`.
+   Les deux règles partent ENSEMBLE, et ce n'est pas un raccourci : la transition
+   n'existait que pour animer ce flou-là, dans les deux sens. Sans lui elle
+   n'anime plus rien. ⚠️ Aucune autre feuille de ce dépôt ne pose `filter` sur
+   `#app` (vérifié : `grep -n "#app" src/style.css src/ui/*.css`).
+   ⚠️ **`body.ld-warm` RESTE** — c'est la règle juste au-dessus qui la lit, et
+   c'est son emploi d'origine.
+   ⚠️ **CE QUI N'EST PAS UN ARGUMENT POUR LE REMETTRE** : le flou masquait le gel
+   du thread principal pendant la reconstruction. Ce gel se traite là où il est
+   (Tâches 6 septies et 7), pas en le cachant. */
+
+/* ══════════ L'INDICATEUR DISCRET — src/ui/indicateur-retard.js ══════════════
+   Ce que voit l'utilisateur quand le réseau ne suit pas (décision d'Adrien,
+   2026-08-20) : « un indicateur discret », jamais un voile.
+   ⚠️ POSÉ AU-DESSUS DES CRÉDITS (`.ce-credits`, left 18 / bottom 64 dans
+   v28.css) et non par-dessus : les attributions sont obligatoires, elles ne se
+   recouvrent pas. Même famille visuelle que `.ce-toast` plus bas — papier, flou
+   léger, ombre douce — pour que ce soit la même application qui parle.
+   ⚠️ `pointer-events: none` : il ne s'interpose JAMAIS entre le doigt et la
+   carte. C'est exactement ce qui le sépare d'un pop-up. */
+.ce-retard {
+  position: fixed;
+  left: 18px;
+  bottom: 96px;
+  z-index: 45;
+  max-width: min(60vw, 260px);
+  padding: 6px 11px;
+  border-radius: 8px;
+  background: rgba(252, 251, 248, 0.86);
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  box-shadow: 0 6px 18px rgba(20, 24, 28, 0.1);
+  backdrop-filter: blur(10px);
+  font-family: 'Bricolage Grotesque', system-ui, sans-serif;
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+  color: #23201a;
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition: opacity 0.28s ease, transform 0.28s ease;
 }
-body.ld-warm:has(#loading:not(.hidden)) #app {
-  filter: blur(16px);
-  transform: scale(1.04);
+.ce-retard.on {
+  opacity: 1;
+  transform: translateY(0);
+}
+body.dark .ce-retard {
+  background: rgba(18, 19, 22, 0.86);
+  border-color: rgba(255, 255, 255, 0.09);
+  color: #e8e4da;
+}
+/* Il se tait partout où l'interface se tait déjà — capture, boutique, studio,
+   atelier, accueil. Même liste que `.ce-credits` dans v28.css. */
+body.ce-noui .ce-retard,
+body.store-mode .ce-retard,
+body.studio-mode .ce-retard,
+body.atelier-mode .ce-retard,
+body.ce-hub .ce-retard {
+  display: none;
 }
 
 /* transient toast (Share button feedback) — bottom-centre, matches the

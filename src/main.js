@@ -189,6 +189,7 @@ import { initTips } from './ui/tips.js'
 import { initAides, evalue as evalueAide, aideSection } from './ui/aides.js'
 import { boutonsSouris, versTroisJs } from './boutons-camera.js'
 import { initLoadingHints } from './ui/loading-hints.js'
+import { initIndicateurRetard } from './ui/indicateur-retard.js'
 import { createAdaptiveQuality } from './perf.js'
 import { detailForZoom } from './zoom-detail.js'
 import { applyRenderSize, screenPixelRatio } from './viewport.js'
@@ -3230,6 +3231,20 @@ let demBusy = false
 // premier tirage (le boot, loader déjà à l'écran) ne tombe pas dans sa TDZ.
 initLoadingHints(loadingEl, () => ({ lat: params.demLat, lon: params.demLon, dem }))
 
+// ══════════ L'INDICATEUR DISCRET — Tâche 2, et le §9 l'attendait ════════════
+//
+// ⚠️ **CE QUI PART, IL FAUT QUE QUELQUE CHOSE LE DISE — MAIS PAS UN VOILE.**
+// Adrien, le 2026-08-20 : « quand le réseau ne suit pas, l'utilisateur voit UN
+// INDICATEUR DISCRET ». Son ÉTAT était fabriqué et testé depuis la Tâche 4 ter
+// (`etatIndicateur`, `src/monde/descente-bornee.js`) ; son DESSIN n'existait
+// nulle part. Il est ici, et il n'a que deux lecteurs pour l'instant, tous deux
+// documentés à leur point d'appel : la panne réseau de `loadRealTerrain`, et la
+// couverture du socle sous `?socle=quadtree`.
+//
+// ⚠️ Posé APRÈS les indices de chargement, dans la même région du fichier : les
+// deux sont le même sujet — ce que l'écran raconte pendant qu'on attend.
+const indicateurRetard = initIndicateurRetard()
+
 // patch key → Promise<{maskTexture}|null>. Memoises the in-flight fetch (dedupes
 // A→B→A within one fetch) and is LRU-bounded (Map keeps insertion order; a hit
 // re-inserts to mark it most-recently-used). Evicted masks are disposed unless
@@ -3407,6 +3422,11 @@ async function fetchAndBuildDem({ centreSur = null, enVol = false } = {}) {
   // et le retardataire se retire sans rien toucher.
   if (perime()) return
   dem = arrive
+  // Le réseau a répondu : ce que l'indicateur annonçait est arrivé. Il s'éteint
+  // ICI et pas à la fin — c'est l'arrivée du MNT qui est le fait, pas la fin de
+  // la reconstruction. (Le socle le rallumera quelques lignes plus loin s'il est
+  // encore couvert plus grossièrement que son emprise ne le demande.)
+  indicateurRetard.eteint()
   // ══════════ MODE CONTINU : ON ÉLARGIT À L'EMPRISE 3×3 ═════════════════════
   // Le bloc central vient d'arriver ; on lui adjoint ses huit voisins et on
   // recolle le tout en UN champ. `terrain` ne voit ensuite qu'un `dem` de forme
@@ -3473,7 +3493,31 @@ async function fetchAndBuildDem({ centreSur = null, enVol = false } = {}) {
   refreshAll()
   loadingStatus.textContent = 'generating terrain…'
   applyTimeOfDay(params.timeOfDay ?? 10) // the sun is location-true — re-aim it for the new place
-  await regenerateTerrain()
+  // ══════════ LA SECONDE LEVÉE DU RIDEAU — Tâche 2 ══════════════════════════
+  //
+  // ⚠️ **IL Y AVAIT DEUX LEVÉES SUR CE CHEMIN, ET LE PLAN N'EN NOMMAIT QU'UNE.**
+  // `if (!enVol) showLoading()` en tête de cette fonction est la première ;
+  // celle-ci en est une seconde, à travers `regenerateTerrain`, et elle
+  // ignorait complètement le vol. Retirer l'une sans l'autre n'aurait rien
+  // retiré du tout.
+  //
+  // **MESURÉ à l'écran le 2026-08-21** (port 5503, `?globe=continu&socle=quadtree&f3=0`,
+  // La Réunion, cran z12 → z13, observateur de mutations sur la classe de
+  // `#loading`) : `loadSurface` rend la main en **468 ms**, et la carte de
+  // chargement remonte **326 ms PLUS TARD** — par-dessus une application déjà
+  // libre, déjà en train de répondre au doigt — pour n'être encore toujours pas
+  // redescendue **9,7 s** après. C'est le pop-up d'Adrien posé exactement sur le
+  // trou qu'il ne cache plus.
+  //
+  // ⚠️ **ET HORS VOL, LE RIDEAU RESTE — C'EST DÉLIBÉRÉ, PAS UN OUBLI.** Le
+  // drapeau `socleQuadtree` est ÉTEINT en production : `volPossible()` y rend
+  // faux, `loadSurface` y attend encore le MNT entier (992 à 5 817 ms mesurés à
+  // la Tâche 6 septies), et l'attente n'a donc PAS disparu de ce côté-là. Le §10
+  // du plan l'écrit mot pour mot : « ôter un rideau avant que l'attente ait
+  // disparu ne supprime pas le pop-up, il montre le trou qu'il cachait ».
+  // Le rideau tombera en production le jour où le drapeau s'allumera, et pas
+  // avant — c'est la même ligne de code qui décidera.
+  await regenerateTerrain({ sansRideau: enVol })
   // ⚠️ **SECOND POINT DE SUPERSESSION, ET IL EN FAUT DEUX** : `regenerateTerrain`
   // attend les champs déportés (~470 ms sur un MNT 1536²), et un cran peut très
   // bien tomber pendant. Tout ce qui suit — cartouche, trait de côte, damier,
@@ -3716,10 +3760,25 @@ async function loadRealTerrain(opts = {}) {
     // chargements encore en vol atterrissent sans bâtir personne), et le
     // prochain chargement réussi les fait renaître par `sync()`.
     blockGrid?.clear()
-    setTimeout(() => {
-      hideLoading()
-      loadingStatus.textContent = 'generating terrain…'
-    }, 2600)
+    // ══════════ 2,6 s DE VOILE SUR UNE APPLICATION LIBRE — Tâche 2 ══════════
+    //
+    // ⚠️ **CE `setTimeout(…, 2600)` GARDAIT LA CARTE `#loading` DEUX SECONDES ET
+    // DEMIE DE PLUS ALORS QUE `demBusy` EST RELÂCHÉ JUSTE EN DESSOUS**, dans un
+    // `finally` qui s'exécute tout de suite. L'application était rendue, et
+    // l'écran ne le disait pas — il disait le contraire. Le §9 du plan désigne
+    // précisément cet endroit comme la place de l'indicateur discret.
+    //
+    // Ce qui change : le voile tombe MAINTENANT, et l'indicateur prend le relais
+    // — non bloquant, sans flou, sans centre d'écran. Le message d'erreur qui
+    // vivait dans `.ld-status` part avec lui, donc c'est l'indicateur qui le
+    // porte : sans ça, une panne réseau redeviendrait silencieuse.
+    //
+    // ⚠️ **`niveaux` N'EST PAS RENSEIGNÉ ICI, ET C'EST EXACT** : on ne sait pas
+    // de combien de niveaux on est en retard, on sait que le détail n'est pas
+    // arrivé du tout. Inventer un chiffre serait la faute que le §0 interdit.
+    hideLoading()
+    loadingStatus.textContent = 'generating terrain…'
+    indicateurRetard.maj({ enRetard: true, texte: 'relief de détail indisponible — vérifiez la connexion' })
   } finally {
     demBusy = false
   }
@@ -4034,13 +4093,36 @@ if (socleQuadtreeActif()) terrain.hauteursDeFlux = (fenetre, p) => {
   // pourrait retomber sur le même compte et ne jamais repartir — un socle qui
   // resterait grossier pour toujours, sans une erreur.
   _socleLisibles = tuilesLisiblesDuSocle(flux)
+  // ══════════ L'INDICATEUR DISCRET, NOURRI PAR UNE COUVERTURE OBSERVÉE ══════
+  //
+  // ⚠️ **ON NE PASSE PAS `etatIndicateur` ICI, ET C'EST LA MÊME MESURE QUI
+  // L'INTERDIT que celle du long avertissement ci-dessus.** `etatIndicateur`
+  // PRÉDIT le retard depuis `debitObserve` ; sur un lien OISIF ce débit valait
+  // **0,787 Mb/s** et `zoomSoutenable` en tirait **z5** pour une demande de z12.
+  // L'indicateur serait donc resté ALLUMÉ en permanence sur une connexion
+  // parfaite — précisément le « ça rame » mensonger que le §5 de
+  // `descente-bornee.js` interdit d'afficher.
+  //
+  // Ce qu'on lui donne à la place est un FAIT : `zoomEffectif` rend le pire
+  // niveau réellement disponible sur l'emprise (ou `null` s'il reste un trou).
+  // La différence avec le zoom demandé est le retard, EN NIVEAUX — l'unité
+  // qu'Adrien a tranchée, jamais un pourcentage.
+  //
+  // ⚠️ **`null` ÉTEINT L'INDICATEUR, IL NE L'ALLUME PAS.** Une couverture qu'on
+  // ne sait pas encore lire est un manque de mesure, pas la mesure d'un manque.
+  const zoomCouvert = zoomEffectif(flux, emprise)
+  indicateurRetard.maj(
+    Number.isFinite(zoomCouvert)
+      ? { enRetard: zoomCouvert < borne.zoomDemande, niveaux: Math.max(0, borne.zoomDemande - zoomCouvert) }
+      : { enRetard: false }
+  )
   return {
     remplis: fenetre.remplis,
     manquants: fenetre.manquants,
     zoom: borne.zoom,
     zoomDemande: borne.zoomDemande,
     debitObserveMbs: borne.debitObserveMbs,
-    zoomCouvert: zoomEffectif(flux, emprise),
+    zoomCouvert,
   }
 }
 
