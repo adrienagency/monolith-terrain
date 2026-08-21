@@ -252,6 +252,32 @@ function rectangleTuiles(emprise, zoom) {
   return { z, n, ix0, ix1, iy0, iy1, colonnes: ix1 - ix0 + 1, lignes: iy1 - iy0 + 1 }
 }
 
+/**
+ * Le zoom le plus FIN dont le rectangle de tuiles tienne dans `tuilesMax`.
+ *
+ * ⚠️ **LE ZOOM SE CHOISIT DEPUIS L'EMPRISE, IL NE SE POSE PAS — ET C'EST MESURÉ.**
+ * La Tâche F a relevé qu'un champ de mer de 164 km rempli au zoom du BLOC (z12)
+ * ne couvrait que **19,3 %** de ses nœuds, quand **z10 en couvre 100 %** pour
+ * **25 tuiles**. Le zoom du bloc est juste pour le bloc ; sur une emprise dix
+ * fois plus large il demande cent fois plus de tuiles, et le budget les refuse.
+ *
+ * ⚠️ **ET `rectangleTuiles`, PAS `tuilesEmprise`** : la seconde ÉNUMÈRE, donc un
+ * essai à z12 sur 164 km construirait des milliers d'objets pour être jeté.
+ *
+ * @param {object} emprise `{ouest, sud, est, nord}` en degrés
+ * @param {{zoomMax?:number, zoomMin?:number, tuilesMax?:number}} [opt]
+ * @returns {number} un zoom entier dans `[zoomMin, zoomMax]`
+ */
+export function zoomPourEmprise(emprise, { zoomMax = ZOOM_SOCLE, zoomMin = 0, tuilesMax = 25 } = {}) {
+  const haut = Math.max(0, Math.min(MAX_Z, Math.floor(zoomMax)))
+  const bas = Math.max(0, Math.min(haut, Math.floor(zoomMin)))
+  for (let z = haut; z > bas; z--) {
+    const r = rectangleTuiles(emprise, z)
+    if (r.colonnes * r.lignes <= tuilesMax) return z
+  }
+  return bas
+}
+
 /** La tuile `(z,x,y)` intersecte-t-elle la boîte Mercator ? (bord exclu) */
 function intersecte(b, z, x, y) {
   const n = 2 ** z
@@ -342,10 +368,30 @@ export function revisionFlux(flux) {
  * n'est pas une limite gênante — il y a un socle, donc un flux — mais elle est
  * ÉCRITE plutôt que sous-entendue.
  *
+ * ══════════ `aussi` — LA SECONDE EMPRISE, ET POURQUOI ELLE ENTRE ICI ═══════
+ *
+ * ⚠️ **ON ÉLARGIT, ON NE REMPLACE PAS : `aussi` À `null` REPRODUIT LE DÉPÔT AU
+ * BIT PRÈS**, et c'est le patron que la Tâche F a posé avec `distanceRivage`.
+ *
+ * ⚠️ **ET ELLE NE POUVAIT PAS ÊTRE UN SECOND APPEL.** C'est tout le §« un seul
+ * flux par globe » : `gardeHauteurs` est REMPLACÉE à chaque appel, donc deux
+ * appels — l'un pour le bloc, l'autre pour la mer — se reprendraient leurs
+ * réservations d'une image à l'autre, et `_buildMesh` relâcherait les hauteurs
+ * de celui qui vient de perdre la main. **Une seule réservation, donc un seul
+ * appel qui connaît les deux emprises.** C'est aussi pour ça que les DEUX
+ * appelants de `main.js` (`hauteursDeFlux` et `reserverHauteurs`) doivent passer
+ * le MÊME `aussi` : un seul qui l'oublierait annulerait les tuiles de l'autre.
+ *
+ * ⚠️ **LA BATHYMÉTRIE SUIT LA PLUS LARGE DES DEUX**, parce qu'il n'y a qu'une
+ * nappe par flux (`flux.bathy`) et que l'emprise de la mer CONTIENT celle du
+ * bloc. La nappe est donc cuite au zoom de la mer : c'est plus grossier au
+ * centre, et sans conséquence — `bathy-sources.js` plafonne ses sources à
+ * `BATHY_BASE_ZMAX = 8`, bien au-dessous des zooms de socle.
+ *
  * @param {object} flux
- * @param {{emprise: object, zoom?: number}} arg
+ * @param {{emprise: object, zoom?: number, aussi?: {emprise:object, zoom:number}|null}} arg
  */
-export function demanderEmprise(flux, { emprise, zoom = ZOOM_SOCLE } = {}) {
+export function demanderEmprise(flux, { emprise, zoom = ZOOM_SOCLE, aussi = null } = {}) {
   const g = flux.globe
   const liste = tuilesEmprise(emprise, zoom)
   const z = liste.length ? liste[0].z : Math.floor(zoom)
@@ -355,6 +401,16 @@ export function demanderEmprise(flux, { emprise, zoom = ZOOM_SOCLE } = {}) {
   for (const { z: tz, x, y } of liste) {
     const t = g._ensureTile(tz, x, y)
     apres.set(t.key, t)
+  }
+  // ⚠️ **APRÈS LA PREMIÈRE, ET LA COLLISION DE CLÉS EST SANS EFFET** : une même
+  // tuile réclamée par les deux emprises n'entre qu'une fois dans la `Map`.
+  const secondes = new Set()
+  if (aussi?.emprise) {
+    for (const { z: tz, x, y } of tuilesEmprise(aussi.emprise, aussi.zoom ?? zoom)) {
+      const t = g._ensureTile(tz, x, y)
+      if (!apres.has(t.key)) secondes.add(t.key)
+      apres.set(t.key, t)
+    }
   }
 
   // 1. la réservation d'abord : `_buildMesh` la consulte pour GARDER les
@@ -396,10 +452,16 @@ export function demanderEmprise(flux, { emprise, zoom = ZOOM_SOCLE } = {}) {
       t.retried = false
       t.state = 'empty'
     }
-    if (t.state === 'empty') g._request(t, 1e9)
+    // ⚠️ **LA SECONDE EMPRISE PASSE APRÈS, ET C'EST LA MÊME RAISON QUE LE
+    // `1e9`** : le bloc est ce que l'utilisateur regarde ; le fond marin de la
+    // mer lointaine ne doit pas lui passer devant dans la file.
+    if (t.state === 'empty') g._request(t, secondes.has(t.key) ? 9e8 : 1e9)
   }
 
   flux.reclamees = apres
+  // ⚠️ **LE ZOOM DEMANDÉ RESTE CELUI DU BLOC.** `zoomEffectif` s'en sert pour
+  // dire ce que le SOCLE couvre : y glisser le zoom (plus grossier) de la mer
+  // rendrait un socle « complet » qui ne l'est pas.
   flux.demande = { zoom: z }
 
   // 4. et la MER, à côté. ⚠️ **SANS `await`, ET C'EST LE POINT** : cette
@@ -408,7 +470,10 @@ export function demanderEmprise(flux, { emprise, zoom = ZOOM_SOCLE } = {}) {
   //    pendant ce temps-là ; `remplirHauteurs` fusionnera ce qui est prêt.
   //    Le rejet est absorbé ici : une bathymétrie absente est le cas NORMAL
   //    (on ne cuit pas de tuile là où il n'y a pas de mer), pas une panne.
-  demanderBathy(flux, { emprise, zoom: z }).catch(() => {})
+  const pourBathy = aussi?.emprise
+    ? { emprise: aussi.emprise, zoom: aussi.zoom ?? z }
+    : { emprise, zoom: z }
+  demanderBathy(flux, pourBathy).catch(() => {})
 }
 
 // ══════════ 6 ter. LA MER — Tâche 6 sexies ══════════════════════════════════
@@ -614,9 +679,17 @@ export function zoomEffectif(flux, emprise) {
  * La grille est régulière en MERCATOR (comme le socle lui-même, qui est un carré
  * de Mercator), sommet 0 au coin nord-ouest, ligne-major.
  *
+ * ⚠️ **`bathy` DIT SI LA FUSION A RÉELLEMENT EU LIEU, ET C'EST UN AJOUT DE LA
+ * TÂCHE J.** La nappe arrive de façon ASYNCHRONE : sans ce drapeau, un appelant
+ * qui passe cette fonction à `poserMer` verrait `bathy: true` dès le premier
+ * essai, c'est-à-dire **avant** que la moindre tuile de fond marin ait atterri —
+ * et la mer resterait d'un bleu uniforme pour toujours, en se croyant remplie.
+ * C'est l'exacte classe d'erreur que `revisionFlux` a déjà corrigée une fois
+ * (« un fond marin chargé, fusionnable, et jamais affiché »).
+ *
  * @param {object} flux
  * @param {{emprise: object, n: number, sortie?: Float32Array}} arg
- * @returns {{remplis: number, manquants: number, sortie: Float32Array}}
+ * @returns {{remplis: number, manquants: number, bathy: boolean, sortie: Float32Array}}
  */
 export function remplirHauteurs(flux, { emprise, n, sortie } = {}) {
   const cote = Math.max(1, Math.floor(n)) + 1
@@ -675,7 +748,9 @@ export function remplirHauteurs(flux, { emprise, n, sortie } = {}) {
   // restent ceux du terrarium ». L'appeler par tuile lui retirerait les
   // neuf dixièmes de ses sondes.
   const e = flux.bathy
+  let bathy = false
   if (e?.prete && e.peintes > 0) {
+    bathy = true
     const mer = merDeTravail(flux, total)
     ecrireNappe(e, mer, vues, b, cote, dx, dy)
     // `fuseBathymetry` rend un NOUVEAU tableau (elle ne mute pas ses entrées) :
@@ -688,7 +763,7 @@ export function remplirHauteurs(flux, { emprise, n, sortie } = {}) {
     champ.set(fuseBathymetry(champ, mer))
   }
 
-  return { remplis, manquants: total - remplis, sortie: out }
+  return { remplis, manquants: total - remplis, bathy, sortie: out }
 }
 
 // Le tampon de travail de la mer, gardé sur le flux. ⚠️ **2,4 Mo À n = 768 :

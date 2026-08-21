@@ -629,3 +629,90 @@ export function empriseCalotte(repere, portee = PORTEE_DEFAUT) {
   }
   return { ouest, sud, est, nord }
 }
+
+// ══════════ ⑦ LE BORD DE LA MER — Tâche J ══════════════════════════════════
+//
+// ⚠️ **CE QUE CETTE SECTION RÉPARE, ET IL A ÉTÉ VU À L'ÉCRAN** : « la mer
+// déborde de ~400 km sur un bloc de 10 km, et l'estompage ne la touche pas ».
+// La calotte partait jusqu'à l'HORIZON GÉOMÉTRIQUE (`porteeHorizon`), ce qui est
+// juste tant que la planète est entière — et faux dès que l'estompage l'efface :
+// il reste alors un grand rectangle bleu flottant sur un fond vide.
+//
+// ⚠️ **LA GÉOMÉTRIE NE BOUGE PAS, C'EST LE FONDU QUI SUIT.** La calotte se cuit
+// à l'arrêt (§« la gravure ne s'écrit qu'à l'arrêt ») : faire varier `portee`
+// par image la reconstruirait — 385² de champ et 193² de sommets. Le bord vit
+// donc dans le FRAGMENT, sur la même mesure de superellipse que la découpe
+// (`globe.js`, `uCropCoin` / `uCropCoinN`), et ne coûte que deux flottants.
+
+/**
+ * La portée de la calotte, en demi-côtés de crop.
+ *
+ * ⚠️ **TROIS, ET C'EST L'EMPRISE 3×3 DU MODE PLAT, PAS UN GOÛT.** La calotte
+ * couvre `u ∈ [−portee, +portee]`, soit **`portee` largeurs de crop** : 3 est
+ * donc exactement l'emprise sur laquelle `mer-emprise.js` cuit le champ du mode
+ * continu (**168 unités = 3 × 56**, `resChamp(3)`). C'est le plus large que le
+ * mode plat considère pour sa mer, et il n'y a aucune raison que la sphère aille
+ * plus loin — sa géométrie à LUI s'arrête même à un seul bloc
+ * (`coteGeometrique`, `damier-carre.js`).
+ *
+ * ⚠️ **ELLE REMPLACE `PORTEE_DEFAUT` POUR LE CROP, ELLE NE L'ABROGE PAS.**
+ * `porteeHorizon` reste juste pour ce qu'elle calcule (une mer qui va jusqu'à
+ * l'horizon d'une planète ENTIÈRE) ; ce n'est simplement plus ce qu'on veut sous
+ * `?terre=unique`, où la planète autour s'efface.
+ */
+export const PORTEE_CROP = 3
+
+/**
+ * Le retrait de l'eau du mode plat, converti en demi-côtés de crop.
+ *
+ * ⚠️ **RECOPIÉ DE `plinth.js`, PAS RÉINVENTÉ — et recopié parce qu'il ne peut
+ * PAS être importé** : `plinth.js` tire three.js, ce module doit rester
+ * chargeable sous node. `test/mer-sphere.test.js` RELIT `src/plinth.js` sur le
+ * disque pour confronter les deux, exactement comme `mer-emprise.test.js` le
+ * fait déjà pour `CHAMP_RES` — un chiffre recopié sans garde diverge en silence.
+ *
+ * Là-bas : `rayonEauDansSocle() = HALF − SOCLE_CHANFREIN − SOCLE_MARGE_EAU`,
+ * soit `28 − 0,16 − 0,06`. Le retrait vaut donc `0,22` unité sur un demi-côté de
+ * `COTE_CROP_UNITES / 2 = 28`.
+ */
+export const RETRAIT_EAU_CROP = (0.16 + 0.06) / (COTE_CROP_UNITES / 2)
+
+/**
+ * La part de l'anneau extérieur sur laquelle le fondu court.
+ *
+ * ⚠️ **UN CHOIX, ET IL EST DIT COMME TEL** — aucune mesure ne le fonde. La
+ * moitié : assez long pour qu'aucune arête ne se lise, assez court pour que la
+ * mer garde sa pleine richesse au contact du bloc, qui est ce qu'on regarde.
+ */
+export const FRACTION_BANDE_BORD = 0.5
+
+/**
+ * Où la mer s'éteint, en fonction de l'estompage de la Terre autour.
+ *
+ * Les deux bornes sont exprimées dans la MESURE DE LA DÉCOUPE : `0` est
+ * exactement la frontière du crop, `portee − 1` le bord de la calotte. C'est la
+ * grandeur que `globe.js` calcule déjà par fragment (`pn − uCropCoin`), donc
+ * aucune seconde écriture de la superellipse.
+ *
+ * ⚠️ **LE SENS N'EST PAS INTERCHANGEABLE.** `estompage = 0` = la planète est
+ * ENTIÈRE : la mer peut aller jusqu'au bord de la calotte, elle repose sur des
+ * océans dessinés. `estompage = 1` = il ne reste que le crop : la mer doit
+ * s'arrêter **au bloc**, sinon c'est le rectangle bleu flottant qu'Adrien a vu.
+ *
+ * ⚠️ **ET LE PLANCHER N'EST PAS ZÉRO** : à estompage plein, la mer s'éteint sur
+ * `RETRAIT_EAU_CROP`, c'est-à-dire sur la largeur exacte du chanfrein et de la
+ * marge d'eau du mode plat. Un plancher à zéro ferait une arête dure.
+ *
+ * @param {number} estompage dans [0, 1] — `estompage-terre.js`
+ * @param {number} [portee] en demi-côtés de crop
+ * @returns {{debut:number, fin:number}} en demi-côtés de crop, mesurés depuis
+ *   la frontière du crop (0 = la frontière)
+ */
+export function bordDeMer(estompage, portee = PORTEE_CROP) {
+  const brut = Number(estompage)
+  const e = Number.isFinite(brut) ? Math.min(1, Math.max(0, brut)) : 0
+  const p = Number.isFinite(portee) && portee > 1 ? portee : PORTEE_CROP
+  const fin = Math.max(RETRAIT_EAU_CROP, (p - 1) * (1 - e))
+  const bande = Math.max(RETRAIT_EAU_CROP, fin * FRACTION_BANDE_BORD)
+  return { debut: Math.max(0, fin - bande), fin }
+}

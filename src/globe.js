@@ -37,6 +37,8 @@ import {
 // `test/crop-rampe.test.js` charge `Globe` sous node. Les morceaux de nuanceur
 // partagés arrivent donc par une importation DYNAMIQUE, dans `poserMer`.
 import {
+  bordDeMer,
+  PORTEE_CROP,
   construireCalotte,
   richesseMer,
   distanceBascule,
@@ -208,6 +210,15 @@ uniform float uMerPortee;
 uniform float uMerLambda;
 uniform float uCropCoin;
 uniform float uCropCoinN;
+// LE BORD DE LA MER — Tache J. (debut, fin) du fondu, en demi-cotes de crop,
+// MESURES DEPUIS LA FRONTIERE DE LA DECOUPE : 0 = la frontiere. La loi vit dans
+// src/monde/mer-sphere.js (bordDeMer) et SUIT L'ESTOMPAGE de la Terre autour.
+// ⚠️ uCropCoin et uCropCoinN etaient DECLARES ICI ET LUS PAR PERSONNE depuis la
+// Tache F — deux uniformes morts, exactement ce que le §Q du plan traque. Ils
+// portent desormais la mesure du bord, la MEME que celle de la decoupe
+// (globe.js, cq / pn du nuanceur des tuiles) : pas une seconde ecriture de la
+// superellipse, la meme, appliquee a une autre surface.
+uniform vec2 uMerBord;
 varying vec2 vCrop;
 varying vec2 vLocal;
 varying float vProfondeur;
@@ -231,6 +242,21 @@ float bruitMer(vec2 q) {
 void main() {
   // la TERRE ne porte jamais la mer : le fond au-dessus du niveau zéro discarde
   if (vProfondeur <= 0.0) discard;
+
+  // ══════ LE BORD — LA MER S ARRETE OU IL FAUT, ET ELLE SUIT L ESTOMPAGE ════
+  //
+  // ⚠️ AVANT TOUT LE RESTE, ET C EST UNE ECONOMIE, PAS UN STYLE : au-dela du
+  // bord il n y a ni ecume, ni bruit, ni Fresnel a calculer. Meme geste que la
+  // sortie anticipee de richesseMer dans le vertex.
+  //
+  // ⚠️ ET LA MESURE EST CELLE DE LA DECOUPE, PAS UN CARRE. Un max(|u|,|v|)
+  // laisserait la mer deborder aux QUATRE COINS arrondis du crop, la ou il n y a
+  // plus de bloc dessous. (Aucun accent grave dans ce bloc : template literal.)
+  vec2 cq = max(abs(vCrop) - (1.0 - uCropCoin), 0.0);
+  float pn = pow(pow(cq.x, uCropCoinN) + pow(cq.y, uCropCoinN), 1.0 / uCropCoinN);
+  float dBord = pn - uCropCoin; // 0 = la frontiere du crop, > 0 = dehors
+  float bord = 1.0 - smoothstep(uMerBord.x, uMerBord.y, dBord);
+  if (bord <= 0.0) discard;
 
   float d01 = clamp(vProfondeur / max(uMerProfMax, 1e-9), 0.0, 1.0);
   // le dégradé lagon vit sur les premiers 15 % du budget — une baie de 30 m est
@@ -271,10 +297,10 @@ void main() {
     float lisere = (1.0 - smoothstep(0.0, 0.02, vRive)) * smoothstep(0.25, 0.6, n1 + 0.2);
     float ecume = clamp((moutons + ressac * 1.8 + lisere * 1.1) * vRichesse, 0.0, 1.0);
     col = mix(col, vec3(0.96), ecume);
-    gl_FragColor = vec4(col, max(smoothstep(0.0, uMerSeuilEau, vProfondeur) * mix(0.45, 0.95, pow(dLagon, 0.55)), ecume * 0.85));
+    gl_FragColor = vec4(col, bord * max(smoothstep(0.0, uMerSeuilEau, vProfondeur) * mix(0.45, 0.95, pow(dLagon, 0.55)), ecume * 0.85));
     return;
   }
-  gl_FragColor = vec4(col, smoothstep(0.0, uMerSeuilEau, vProfondeur) * mix(0.45, 0.95, pow(dLagon, 0.55)));
+  gl_FragColor = vec4(col, bord * smoothstep(0.0, uMerSeuilEau, vProfondeur) * mix(0.45, 0.95, pow(dLagon, 0.55)));
 }
 `
 
@@ -1678,6 +1704,12 @@ export class Globe {
     // sont opaques en production ; sans cette bascule leur `1.0 - estompage`
     // serait ignoré par le moteur et un bandeau blanc resterait au pôle.
     this._melangeCalottes(true)
+    // ⚠️ **ET LA MER SUIT, SINON ELLE FLOTTE.** Tâche J : sans cette ligne, la
+    // planète s'efface et il reste un rectangle bleu de plusieurs centaines de
+    // kilomètres au-dessus du vide — relevé à l'écran, « la mer déborde de
+    // ~400 km sur un bloc de 10 km ». C'est le SEUL appel par image du bord, et
+    // `creerVeilleEstompage` ne le déclenche que sur changement de valeur.
+    this._majBordMer()
     return v
   }
 
@@ -1687,6 +1719,7 @@ export class Globe {
     u.uEstompageOn.value = 0
     u.uEstompage.value = 1
     this._melangeCalottes(false)
+    this._majBordMer()
   }
 
   /** Les calottes passent (ou non) dans la liste triée du moteur. */
@@ -2033,11 +2066,23 @@ export class Globe {
    *   (`templates-user.js` sauvegarde `'fov'`). **L'appelant doit passer le fov
    *   VIVANT** — `main.js` le fait, voir `contexteCrop`.
    * @param {number} [arg.largeurBande] largeur de la transition, en octaves
+   * @param {number} [arg.couvertureMin] ⚠️ **DÉFAUT 0 : LE DÉPÔT AU BIT PRÈS.**
+   *   Au-dessus de zéro, un champ moins couvert que ça rend `refus: 'champ'`, et
+   *   c'est la reprise de `branchement-crop.js` qui rejoue la mer. **Sans ce
+   *   refus, la première cuisson — celle qui tombe AVANT que les tuiles de fond
+   *   marin aient atterri — est aussi la dernière**, et la mer reste d'un bleu
+   *   uniforme pour toujours. Mesuré à l'écran : couverture **0,7 %**.
+   * @param {boolean} [arg.exigerBathy] même contrat, pour la fusion
+   *   bathymétrique : `remplir` peut réussir tout en n'ayant AUCUNE nappe à
+   *   fusionner (elle arrive de façon asynchrone). ⚠️ **Défaut `false` :
+   *   le dépôt au bit près.**
    * @returns {Promise<object|null>}
    */
   async poserMer({
     remplir = null,
     portee = null,
+    couvertureMin = 0,
+    exigerBathy = false,
     pas = 192,
     hauteurPx = 900,
     fovDeg = FOV_DEG,
@@ -2065,11 +2110,23 @@ export class Globe {
     // disputent le même plan. CONVERTI, pas recopié : `0,003` unité de socle
     // vaudrait 68,3 m de marée ici.
     const epsUnites = epsilonMerDuCrop(rep, exag) * echelle
-    const cal = construireCalotte({ repere: rep, rayon: R_GLOBE, portee: p, pas, hauteur: epsUnites })
 
     // ─── LE CHAMP : altitude du fond et distance au rivage ───────────────────
+    //
+    // ⚠️ **AVANT LA CALOTTE DEPUIS LA TÂCHE J, ET PAS PAR GOÛT DE L'ORDRE** :
+    // c'est lui qui peut REFUSER, et bâtir 193² sommets pour les jeter aussitôt
+    // se paierait à chaque reprise — une toutes les trente images tant que le
+    // fond marin n'a pas atterri.
     const champ = this._cuireChampMer({ repere: rep, portee: p, remplir, echelle })
     if (!champ) return { refus: 'champ', portee: p }
+    // ⚠️ **LE REFUS N'EFFACE RIEN**, et c'est le contrat des maillons écrit dans
+    // `branchement-crop.js` : « le refus ne touche pas à ce qui est en place ».
+    // Une mer déjà posée survit donc à une reprise qui échoue.
+    if (champ.couverture < couvertureMin || (exigerBathy && !champ.bathy)) {
+      champ.texture.dispose()
+      return { refus: 'champ', portee: p, couverture: champ.couverture, bathy: champ.bathy }
+    }
+    const cal = construireCalotte({ repere: rep, rayon: R_GLOBE, portee: p, pas, hauteur: epsUnites })
 
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(cal.positions, 3))
@@ -2146,6 +2203,11 @@ export class Globe {
         uMerBrillance: { value: 240 - 130 * chop },
         uCropCoin: u.uCropCoin,
         uCropCoinN: u.uCropCoinN,
+        // ⚠️ **PROPRE À LA MER, PAS PARTAGÉ** : les deux bornes sont exprimées
+        // dans la mesure de la découpe, mais leur AMPLITUDE dépend de `portee`,
+        // qui est une grandeur de la calotte. Posé juste après, par
+        // `_majBordMer` — un seul écrivain, celui que `poserEstompage` rappelle.
+        uMerBord: { value: new THREE.Vector2(0, 1) },
       },
       vertexShader: MER_VERT
         .replace('__GERSTNER__', mod.GERSTNER_GLSL)
@@ -2182,7 +2244,30 @@ export class Globe {
       couverture: champ.couverture, profMaxUnites: champ.profMaxUnites,
       bathy: champ.bathy,
     }
+    this._majBordMer()
     return this._merEtat
+  }
+
+  /**
+   * Recale le bord de la mer sur l'estompage courant — Tâche J.
+   *
+   * ⚠️ **DEUX FLOTTANTS, PAS UNE RECUISSON.** La calotte se bâtit à l'arrêt ;
+   * faire varier sa `portee` avec l'estompage la reconstruirait par image
+   * (385² de champ, 193² de sommets). La géométrie reste donc à sa portée, et
+   * c'est le FONDU qui bouge.
+   *
+   * ⚠️ **ET LA VALEUR NEUTRE EST ZÉRO, COMME POUR LES CALOTTES POLAIRES.** Les
+   * trois sites qui lisent `uEstompage` n'ont pas la même : les tuiles prennent
+   * `1.0` quand l'interrupteur est éteint (le crop seul), les calottes `0.0`
+   * (la planète entière). La mer est du second groupe — sans `poserEstompage`,
+   * la planète est entière, donc la mer peut aller jusqu'au bord de la calotte.
+   */
+  _majBordMer() {
+    if (!this._mer) return
+    const u = this.uniforms
+    const estompage = u.uEstompageOn.value > 0.5 ? u.uEstompage.value : 0
+    const b = bordDeMer(estompage, this._merEtat?.portee ?? PORTEE_CROP)
+    this._mer.material.uniforms.uMerBord.value.set(b.debut, b.fin)
   }
 
   /**
@@ -2207,7 +2292,12 @@ export class Globe {
     if (typeof remplir === 'function') {
       const r = remplir(emprise, N, brut)
       couverture = r && Number.isFinite(r.remplis) ? r.remplis / brut.length : 1
-      bathy = true
+      // ⚠️ **ON CROIT `remplir` QUAND IL RÉPOND, ET ON LE SUPPOSE SINON.**
+      // `remplirHauteurs` rend désormais un `bathy` qui dit si la fusion a
+      // RÉELLEMENT eu lieu (la nappe arrive de façon asynchrone) ; un `remplir`
+      // muet — les bouchons des tests, tout appelant d'avant la Tâche J — garde
+      // le `true` optimiste d'origine. **On élargit, on ne remplace pas.**
+      bathy = r && typeof r.bathy === 'boolean' ? r.bathy : true
     } else {
       // ⚠️ LE REPLI, ET IL EST DÉGRADÉ — `hauteurSurface` lit les tuiles du
       // globe, qui n'ont AUCUNE bathymétrie : zéro partout en mer. La mer y sera

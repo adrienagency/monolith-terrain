@@ -898,7 +898,18 @@ test('⑩h `main.js` BRANCHE LE CROCHET, ET IL PASSE PAR R3 ET PAR `majHauteurs`
   // lien OISIF, donc `zoomSoutenable` rendait **z5**, donc le socle réservait
   // **UNE tuile** (`5/16/11`) au lieu des neuf de son emprise — et rien ne le
   // rattrapait tant que la caméra ne bougeait pas. Voir la note dans `main.js`.
-  assert.ok(/demanderEmprise\(flux, \{ emprise, zoom: params\.demZoom \}\)/.test(code), 'le socle ne demande plus le zoom du bloc')
+  // ⚠️ **ÉLARGI PAR LA TÂCHE J, PAS DÉPLACÉ** : `demanderEmprise` accepte une
+  // SECONDE emprise (`aussi`, celle de la mer) parce que `gardeHauteurs` est
+  // remplacée à chaque appel et que deux appels se reprendraient leurs tuiles.
+  // Le zoom du BLOC reste celui-ci, et c'est ce que cette ligne défend.
+  assert.ok(/demanderEmprise\(flux, \{ emprise, zoom: params\.demZoom[,\s}]/.test(code), 'le socle ne demande plus le zoom du bloc')
+  // ⚠️ **ET LES DEUX APPELANTS PASSENT LE MÊME `aussi`.** Celui des deux qui
+  // l'oublierait ANNULERAIT, à chaque image, les tuiles que l'autre vient de
+  // demander (`demanderEmprise` rend à `empty` ce qui sort de `reclamees`) —
+  // c'est-à-dire un fond marin qui ne se charge jamais, sans une erreur.
+  const appels = code.match(/demanderEmprise\(flux, \{[^}]*\}(?:[^)]*)\)/g) || []
+  assert.equal(appels.length, 2, `deux appelants attendus, ${appels.length} trouvés`)
+  for (const a of appels) assert.ok(/aussi: empriseZoomMer\(\)/.test(a), `appel sans \`aussi\` : ${a}`)
   assert.equal(/remplirBorne\(/.test(code), false, '`remplirBorne` est revenu sur le chemin du socle : relire la mesure avant de le remettre')
   assert.ok(/majHauteurs\(fenetre, flux\)/.test(code), '`majHauteurs` n\'est plus appelé en production')
   // ⚠️ et le recadrage passe AVANT le remplissage, sinon le socle reste collé

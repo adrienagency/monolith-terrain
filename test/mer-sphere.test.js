@@ -55,7 +55,12 @@ import {
   echelleHouleM,
   RAMPE_NAUTIQUE,
   abscisseNautique,
+  PORTEE_CROP,
+  RETRAIT_EAU_CROP,
+  FRACTION_BANDE_BORD,
+  bordDeMer,
 } from '../src/monde/mer-sphere.js'
+import { zoomPourEmprise } from '../src/monde/flux-terrain.js'
 // ⚠️ L'ALIAS QUE VITE POSE (`vite.config.js`), RÉSOLU SANS VITE — le patron de
 // `test/damier-mer-runtime.test.js` : la copie vendorée fait foi ici, et cinq
 // lignes suffisent. Sans ce hook, `Globe.prototype.poserMer` ne peut être
@@ -75,7 +80,7 @@ import { Globe } from '../src/globe.js'
 import { repereCrop, latLonDeLocal } from '../src/monde/crop-sphere.js'
 import { repereLocalCrop, construireSolideCrop } from '../src/monde/parois-crop.js'
 import { empriseSocle, FOV_DEG } from '../src/monde/seuil-socle.js'
-import { largeurCropM, EXAG_SOCLE_NOMINALE } from '../src/monde/habillage-crop.js'
+import { largeurCropM, EXAG_SOCLE_NOMINALE, COTE_CROP_UNITES } from '../src/monde/habillage-crop.js'
 
 const SRC_OCEAN = new URL('../src/ocean.js', import.meta.url)
 const SRC_GLOBE = new URL('../src/globe.js', import.meta.url)
@@ -944,9 +949,16 @@ function globeAvecCrop(overrides = {}) {
       uOceanShallow: val({ set() {} }),
       uOceanMid: val({ set() {} }),
       uOceanDeep: val({ set() {} }),
+      // Tâche J : le bord de la mer les lit — VRAIS uniformes, pas des bouchons,
+      // pour que `poserEstompage` et `_majBordMer` s'exercent l'un sur l'autre.
+      uEstompageOn: val(0),
+      uEstompage: val(1),
     },
     retirerMer: Globe.prototype.retirerMer,
     _cuireChampMer: Globe.prototype._cuireChampMer,
+    _majBordMer: Globe.prototype._majBordMer,
+    _melangeCalottes() {},
+    _calottes: [],
     ...overrides,
   }
 }
@@ -1025,5 +1037,157 @@ test('⑩j retirer une mer POSÉE la fait vraiment disparaître du groupe', () =
     assert.equal(g._mer, null)
     assert.equal(g.uniforms.uMerRampeOn.value, 0)
     assert.equal(g.uniforms.uMerFondBudgetM.value, 6000)
+  })
+})
+
+// ══════════ ⑪ LE BORD DE LA MER — Tâche J ═══════════════════════════════════
+//
+// ⚠️ **CE QUE CETTE SECTION DÉFEND EST UN DÉFAUT VU À L'ÉCRAN** : « la mer
+// déborde de ~400 km sur un bloc de 10 km, et l'estompage ne la touche pas ».
+// Deux choses doivent tenir ensemble : la calotte est BORNÉE sur l'emprise du
+// crop, et son extinction SUIT l'estompage de la Terre autour.
+
+test('⑪a `RETRAIT_EAU_CROP` est bien celui de `plinth.js`, relu sur le DISQUE', () => {
+  // ⚠️ **UN CHIFFRE RECOPIÉ SANS GARDE DIVERGE EN SILENCE.** `plinth.js` tire
+  // three.js et ne peut pas être importé par un module pur ; on relit donc sa
+  // source, exactement comme `mer-emprise.test.js` le fait pour `CHAMP_RES`.
+  const src = readFileSync(new URL('../src/plinth.js', import.meta.url), 'utf8')
+  const chanfrein = Number(/export const SOCLE_CHANFREIN = ([\d.]+)/.exec(src)?.[1])
+  const marge = Number(/export const SOCLE_MARGE_EAU = ([\d.]+)/.exec(src)?.[1])
+  assert.ok(Number.isFinite(chanfrein) && Number.isFinite(marge), 'les deux constantes doivent être relues')
+  const attendu = (chanfrein + marge) / (COTE_CROP_UNITES / 2)
+  assert.ok(Math.abs(RETRAIT_EAU_CROP - attendu) < 1e-12, `${RETRAIT_EAU_CROP} contre ${attendu}`)
+})
+
+test('⑪b la mer S ARRÊTE AU BLOC quand la Terre autour est effacée', () => {
+  // estompage = 1 : il ne reste que le crop. Le fondu doit finir SUR la
+  // frontière, à la largeur du chanfrein près — c'est là que `plinth.js`
+  // arrête l'eau du mode plat (`rayonEauDansSocle`).
+  const b = bordDeMer(1)
+  assert.equal(b.debut, 0, 'le fondu commence exactement à la frontière du crop')
+  assert.ok(Math.abs(b.fin - RETRAIT_EAU_CROP) < 1e-12, `fin ${b.fin}`)
+  // ⚠️ **ET LE TÉMOIN QUI COMPTE** : la mer d'avant la Tâche J allait à
+  // l'horizon géométrique, soit ~93 demi-côtés à l'altitude de naissance du
+  // socle. Trois ordres de grandeur.
+  assert.ok(b.fin < porteeHorizon(REPERE, 32274, R_TERRE_M) / 1000)
+})
+
+test('⑪c la mer VA JUSQU AU BORD DE LA CALOTTE quand la planète est entière', () => {
+  const b = bordDeMer(0)
+  assert.ok(Math.abs(b.fin - (PORTEE_CROP - 1)) < 1e-12, `fin ${b.fin} contre ${PORTEE_CROP - 1}`)
+  // la bande de fondu couvre la fraction annoncée de l'anneau extérieur
+  assert.ok(Math.abs(b.debut - (PORTEE_CROP - 1) * (1 - FRACTION_BANDE_BORD)) < 1e-12)
+})
+
+test('⑪d le bord est MONOTONE en estompage — c est ce qui interdit un à-coup', () => {
+  // ⚠️ **UNE MUTATION DE SIGNE SURVIT À DEUX BORNES SEULES.** On balaie.
+  let precedent = Infinity
+  for (let i = 0; i <= 40; i++) {
+    const b = bordDeMer(i / 40)
+    assert.ok(b.fin <= precedent + 1e-12, `la mer ne doit jamais S ÉTENDRE en descendant (${i})`)
+    assert.ok(b.debut >= 0 && b.debut <= b.fin, `bornes incohérentes à ${i} : ${b.debut} / ${b.fin}`)
+    precedent = b.fin
+  }
+  // et le SENS n'est pas interchangeable : effacer la Terre RÉTRÉCIT la mer
+  assert.ok(bordDeMer(1).fin < bordDeMer(0).fin)
+})
+
+test('⑪e une valeur non finie ne peut pas faire disparaître la mer', () => {
+  // même contrat que `poserEstompage` : un NaN dans un uniforme éteint la
+  // moitié d'un GPU sans un mot. Ici il retombe sur « la planète est entière ».
+  for (const mauvais of [NaN, undefined, null, 'x', {}]) {
+    assert.deepEqual(bordDeMer(mauvais), bordDeMer(0), `${String(mauvais)}`)
+  }
+  // et l'écrêtage tient des deux côtés
+  assert.deepEqual(bordDeMer(-5), bordDeMer(0))
+  assert.deepEqual(bordDeMer(12), bordDeMer(1))
+})
+
+test('⑪f `PORTEE_CROP` rend l emprise de la mer RÉSERVABLE — les trous 2 et 3 sont le même', () => {
+  // ⚠️ **C'EST LE LIEN ENTRE LES DEUX TROUS, ET IL EST ARITHMÉTIQUE.** Une
+  // calotte à l'horizon (`PORTEE_DEFAUT`) couvre une emprise qu'AUCUN budget de
+  // tuiles ne peut réserver au zoom du bloc : c'est de là que venait la
+  // couverture de 0,7 %. Bornée à `PORTEE_CROP`, elle tient dans 25 tuiles à
+  // quelques niveaux du bloc, ce qui est ce que la Tâche F avait mesuré.
+  const emprise = empriseCalotte(REPERE, PORTEE_CROP)
+  const z = zoomPourEmprise(emprise, { zoomMax: 12, tuilesMax: 25 })
+  assert.ok(z >= 9 && z <= 12, `zoom ${z} : la mer du crop doit rester dans les niveaux du bloc`)
+  // le témoin : à l'horizon, le même budget fait tomber le zoom bien plus bas
+  const large = empriseCalotte(REPERE, PORTEE_DEFAUT)
+  assert.ok(zoomPourEmprise(large, { zoomMax: 12, tuilesMax: 25 }) < z,
+    'une calotte à l horizon doit exiger un zoom PLUS GROSSIER — sinon le bornage ne sert à rien')
+})
+
+test('⑪g le nuanceur de la mer LIT vraiment le bord, et sur la mesure de la DÉCOUPE', () => {
+  // ⚠️ **PAS UN `grep` DE NOM.** On extrait le corps du fragment et on vérifie
+  // que l'alpha des DEUX sorties est multiplié par le facteur de bord — la
+  // Tâche C a payé une fois un uniforme posé et lu par personne, et cette
+  // tâche-ci vient d'en réveiller deux (`uCropCoin`, `uCropCoinN`).
+  const src = readFileSync(SRC_GLOBE, 'utf8')
+  const frag = /const MER_FRAG = \/\* glsl \*\/ `([\s\S]*?)`\n/.exec(src)?.[1]
+  assert.ok(frag, 'le fragment de la mer doit être extractible')
+  assert.ok(/uniform vec2 uMerBord;/.test(frag), 'le bord doit être déclaré')
+  // la mesure est celle de la découpe : cq / pn / uCropCoinN, comme le nuanceur
+  // des tuiles — pas un max(abs(u), abs(v))
+  assert.ok(/pow\(pow\(cq\.x, uCropCoinN\) \+ pow\(cq\.y, uCropCoinN\), 1\.0 \/ uCropCoinN\)/.test(frag),
+    'la superellipse de la découpe doit être celle du bord')
+  const sorties = frag.match(/gl_FragColor = vec4\([^;]*;/g) || []
+  assert.equal(sorties.length, 2, 'le fragment a exactement deux sorties')
+  for (const s of sorties) assert.ok(/\bbord \*/.test(s), `sortie sans bord : ${s}`)
+  // et le rejet anticipé : au-delà du bord, rien n'est calculé
+  assert.ok(/if \(bord <= 0\.0\) discard;/.test(frag))
+})
+
+test('⑪h `poserMer` POSE le bord, et `poserEstompage` le RECALE', () => {
+  const g = globeAvecCrop()
+  return Globe.prototype.poserMer.call(g, { remplir: remplirBouchon, portee: PORTEE_CROP }).then(() => {
+    const u = g._mer.material.uniforms.uMerBord.value
+    // sans estompage posé, la planète est ENTIÈRE : la mer va au bord
+    assert.ok(Math.abs(u.y - (PORTEE_CROP - 1)) < 1e-9, `fin ${u.y}`)
+    Globe.prototype.poserEstompage.call(g, 1)
+    assert.ok(Math.abs(u.y - RETRAIT_EAU_CROP) < 1e-9, `après estompage plein : ${u.y}`)
+    assert.equal(u.x, 0)
+    // et le retour : `retirerEstompage` rend la planète entière, donc la mer
+    Globe.prototype.retirerEstompage.call(g)
+    assert.ok(Math.abs(u.y - (PORTEE_CROP - 1)) < 1e-9, `après retrait : ${u.y}`)
+  })
+})
+
+test('⑪i `poserMer` REFUSE un champ vide, et le refus N EFFACE PAS la mer en place', () => {
+  const g = globeAvecCrop()
+  const presqueVide = (emprise, n, sortie) => ({ remplis: Math.round(sortie.length * 0.007) })
+  return Globe.prototype.poserMer.call(g, { remplir: remplirBouchon, portee: PORTEE_CROP }).then(() => {
+    assert.equal(g.group.children.length, 1)
+    // le champ mesuré à 0,7 % de couverture — celui de l'aplat gris
+    return Globe.prototype.poserMer.call(g, { remplir: presqueVide, portee: PORTEE_CROP, couvertureMin: 0.99 })
+  }).then((r) => {
+    assert.equal(r.refus, 'champ', 'un champ à 0,7 % doit refuser')
+    assert.ok(r.couverture < 0.01, `couverture rendue : ${r.couverture}`)
+    assert.equal(g.group.children.length, 1, 'la mer en place ne doit pas avoir bougé')
+    // ⚠️ **ET LE DÉFAUT RESTE CELUI DU DÉPÔT** : sans `couvertureMin`, le même
+    // champ presque vide POSE, exactement comme avant la Tâche J.
+    return Globe.prototype.poserMer.call(g, { remplir: presqueVide, portee: PORTEE_CROP })
+  }).then((r) => {
+    assert.equal(r.refus, undefined, 'le défaut `couvertureMin = 0` ne refuse rien')
+  })
+})
+
+test('⑪j `exigerBathy` attend la nappe, et un `remplir` MUET garde le défaut du dépôt', () => {
+  const g = globeAvecCrop()
+  const sansNappe = (emprise, n, sortie) => { sortie.fill(-500); return { remplis: sortie.length, bathy: false } }
+  return Globe.prototype.poserMer.call(g, { remplir: sansNappe, portee: PORTEE_CROP, exigerBathy: true }).then((r) => {
+    assert.equal(r.refus, 'champ')
+    assert.equal(r.bathy, false, 'le refus doit DIRE que la bathymétrie manque')
+    assert.equal(g.group.children.length, 0, 'rien ne doit être posé')
+    // le même champ sans exigence : posé, et `bathy` dit la vérité
+    return Globe.prototype.poserMer.call(g, { remplir: sansNappe, portee: PORTEE_CROP })
+  }).then((r) => {
+    assert.equal(r.bathy, false)
+    assert.equal(g.group.children.length, 1)
+    // et un `remplir` MUET — tout appelant d'avant la Tâche J — garde `true`
+    return Globe.prototype.poserMer.call(g, { remplir: remplirBouchon, portee: PORTEE_CROP, exigerBathy: true })
+  }).then((r) => {
+    assert.equal(r.refus, undefined, 'un remplir muet ne doit pas se mettre à refuser')
+    assert.equal(r.bathy, true)
   })
 })

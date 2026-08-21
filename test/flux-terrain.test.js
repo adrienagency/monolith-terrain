@@ -220,6 +220,7 @@ const {
   tuilesPretes,
   zoomEffectif,
   remplirHauteurs,
+  zoomPourEmprise,
   revisionFlux,
   debitObserve,
   tuilesEmprise,
@@ -948,4 +949,123 @@ test('panoramique à réseau rapide : le globe RETROUVE sa profondeur après le 
   assert.equal(m.zoomFlux, ZOOM_SOCLE, `zoom effectif ${m.zoomFlux} au lieu de ${ZOOM_SOCLE}`)
   assert.ok(m.apres.loading < PLAFOND_FILE, `${m.apres.loading} tuiles encore \`loading\``)
   m.g.dispose()
+})
+
+// ══════════ LE ZOOM SE CHOISIT DEPUIS L'EMPRISE — Tâche J, trou n° 2 ════════
+//
+// ⚠️ **CE QUE CETTE SECTION DÉFEND EST UN CHIFFRE MESURÉ PAR LA TÂCHE F** : sur
+// un champ de mer de 164 km, « z12 ne couvre que 19,3 % des nœuds ; z10 en
+// couvre 100 % pour 25 tuiles ». Un zoom POSÉ à la valeur du bloc ne peut pas
+// remplir une emprise dix fois plus large — c'est de là que venait l'aplat gris.
+
+test('zoomPourEmprise : le zoom le plus FIN qui tienne dans le budget, et il est MAXIMAL', async () => {
+  const emprise = empriseSocle({ centre: CENTRE })
+  for (const tuilesMax of [4, 9, 16, 25, 64]) {
+    const z = zoomPourEmprise(emprise, { zoomMax: 14, tuilesMax })
+    assert.ok(tuilesEmprise(emprise, z).length <= tuilesMax,
+      `z${z} dépasse le budget de ${tuilesMax}`)
+    // ⚠️ **LA MAXIMALITÉ EST L'ASSERTION QUI COMPTE** : rendre `zoomMin` tout
+    // de suite tiendrait toujours dans le budget et serait toujours faux. Le
+    // niveau suivant doit VRAIMENT déborder — sauf si on est déjà au plafond.
+    if (z < 14) {
+      assert.ok(tuilesEmprise(emprise, z + 1).length > tuilesMax,
+        `z${z + 1} tiendrait aussi dans ${tuilesMax} : le zoom n est pas maximal`)
+    }
+  }
+})
+
+test('zoomPourEmprise : une emprise PLUS LARGE rend un zoom PLUS GROSSIER', async () => {
+  // le sens, et il n'est pas interchangeable : une mutation qui échange les
+  // bornes de la boucle rendrait un zoom constant.
+  const etroite = empriseSocle({ centre: CENTRE })
+  const large = { ouest: -40, sud: -40, est: 40, nord: 40 }
+  const zE = zoomPourEmprise(etroite, { zoomMax: 14, tuilesMax: 25 })
+  const zL = zoomPourEmprise(large, { zoomMax: 14, tuilesMax: 25 })
+  assert.ok(zL < zE, `large z${zL} doit être plus grossier qu étroite z${zE}`)
+  // et les bornes sont respectées des deux côtés
+  assert.ok(zoomPourEmprise(large, { zoomMax: 3, tuilesMax: 1 }) <= 1)
+  assert.equal(zoomPourEmprise(etroite, { zoomMax: 6, zoomMin: 6, tuilesMax: 1 }), 6)
+  assert.ok(zoomPourEmprise(etroite, { zoomMax: 20, tuilesMax: 1e9 }) <= 15, 'jamais au-delà de MAX_Z')
+})
+
+// ══════════ LA SECONDE EMPRISE — Tâche J, `aussi` ══════════════════════════
+//
+// ⚠️ **ELLE NE POUVAIT PAS ÊTRE UN SECOND APPEL**, et c'est tout le §« un seul
+// flux par globe » : `gardeHauteurs` est REMPLACÉE à chaque appel. Ces trois
+// tests défendent les trois propriétés qui rendent l'élargissement sûr.
+
+test('`aussi: null` reproduit le dépôt : mêmes tuiles, même réservation', async () => {
+  const g = neuf()
+  const flux = creerFlux({ globe: g })
+  const emprise = empriseSocle({ centre: CENTRE })
+  demanderEmprise(flux, { emprise, zoom: ZOOM_SOCLE, aussi: null })
+  const attendues = tuilesEmprise(emprise, ZOOM_SOCLE)
+  assert.equal(flux.reclamees.size, attendues.length)
+  assert.equal(g.gardeHauteurs.size, attendues.length)
+  for (const { z, x, y } of attendues) assert.ok(g.gardeHauteurs.has(`${z}/${x}/${y}`))
+  g.dispose()
+})
+
+test('`aussi` réserve les DEUX emprises À LA FOIS — sinon chacune reprend l autre', async () => {
+  const g = neuf()
+  const flux = creerFlux({ globe: g })
+  const emprise = empriseSocle({ centre: CENTRE })
+  // trois fois plus large, deux niveaux plus grossier : l'emprise de la mer
+  const merEmprise = empriseSocle({ centre: CENTRE, tuilesParBloc: 9 })
+  const zMer = zoomPourEmprise(merEmprise, { zoomMax: ZOOM_SOCLE, tuilesMax: 25 })
+  assert.ok(zMer < ZOOM_SOCLE, `le témoin n a de sens que si le zoom de la mer diffère (z${zMer})`)
+
+  demanderEmprise(flux, { emprise, zoom: ZOOM_SOCLE, aussi: { emprise: merEmprise, zoom: zMer } })
+
+  const duBloc = tuilesEmprise(emprise, ZOOM_SOCLE)
+  const deLaMer = tuilesEmprise(merEmprise, zMer)
+  for (const { z, x, y } of duBloc) {
+    assert.ok(g.gardeHauteurs.has(`${z}/${x}/${y}`), `le bloc a perdu ${z}/${x}/${y}`)
+  }
+  for (const { z, x, y } of deLaMer) {
+    assert.ok(g.gardeHauteurs.has(`${z}/${x}/${y}`), `la mer a perdu ${z}/${x}/${y}`)
+    const t = g.tiles.get(`${z}/${x}/${y}`)
+    assert.ok(t && ['loading', 'ready'].includes(t.state), `la tuile de mer ${z}/${x}/${y} n est pas demandée`)
+  }
+  // ⚠️ **ET LE ZOOM DEMANDÉ RESTE CELUI DU BLOC** : `zoomEffectif` s'en sert
+  // pour dire ce que le SOCLE couvre, et le zoom de la mer est plus grossier.
+  assert.equal(flux.demande.zoom, ZOOM_SOCLE)
+  g.dispose()
+})
+
+test('deux appels avec le MÊME `aussi` n annulent rien — c est la garde de la reprise', async () => {
+  const g = neuf()
+  const flux = creerFlux({ globe: g })
+  const emprise = empriseSocle({ centre: CENTRE })
+  const merEmprise = empriseSocle({ centre: CENTRE, tuilesParBloc: 9 })
+  const zMer = zoomPourEmprise(merEmprise, { zoomMax: ZOOM_SOCLE, tuilesMax: 25 })
+  const arg = { emprise, zoom: ZOOM_SOCLE, aussi: { emprise: merEmprise, zoom: zMer } }
+  demanderEmprise(flux, arg)
+  const apresUn = new Set(g.gardeHauteurs)
+  demanderEmprise(flux, arg)
+  assert.deepEqual([...g.gardeHauteurs].sort(), [...apresUn].sort(),
+    'un second appel identique doit rendre exactement la même réservation')
+
+  // ⚠️ **ET LE TÉMOIN NÉGATIF** : celui qui OUBLIE `aussi` reprend les tuiles de
+  // la mer. C'est la raison pour laquelle `main.js` doit le passer aux DEUX
+  // appelants — sans ce test, la règle serait un commentaire.
+  demanderEmprise(flux, { emprise, zoom: ZOOM_SOCLE })
+  const perdues = tuilesEmprise(merEmprise, zMer)
+    .filter(({ z, x, y }) => !g.gardeHauteurs.has(`${z}/${x}/${y}`))
+  assert.ok(perdues.length > 0, 'un appel sans `aussi` DOIT reprendre les tuiles de la mer')
+  g.dispose()
+})
+
+test('remplirHauteurs DIT si la fusion a eu lieu — sans quoi la mer se croit remplie', async () => {
+  // ⚠️ **LE DÉFAUT MUET QUE CE DRAPEAU FERME** : la nappe arrive de façon
+  // asynchrone, et `poserMer` ne cuit son champ qu'une fois. Sans un `bathy`
+  // honnête, la première cuisson — celle d'avant la nappe — se déclarerait
+  // bathymétrique et la mer resterait d'un bleu uniforme pour toujours.
+  const g = neuf()
+  const flux = creerFlux({ globe: g })
+  const emprise = empriseSocle({ centre: CENTRE })
+  // aucune nappe demandée : `flux.bathy` est vide
+  const sansNappe = remplirHauteurs(flux, { emprise, n: 8 })
+  assert.equal(sansNappe.bathy, false, 'sans nappe, la fusion n a PAS eu lieu')
+  g.dispose()
 })

@@ -91,7 +91,11 @@ import { construireFenetre, majHauteurs, recadrerFenetre } from './monde/fenetre
 // ⚠️ **LE FLUX EST LE CACHE DU QUADTREE, PAS UN SECOND CHARGEUR** (Tâche 6
 // quinquies) : `creerFlux` ne demande RIEN à sa naissance, et `remplirBorne`
 // borne le remplissage au débit RÉELLEMENT observé (règle R3, Tâche 4 ter).
-import { creerFlux, zoomEffectif, demanderEmprise, debitObserve, revisionFlux } from './monde/flux-terrain.js'
+import { creerFlux, zoomEffectif, demanderEmprise, debitObserve, revisionFlux, remplirHauteurs, zoomPourEmprise } from './monde/flux-terrain.js'
+// LA MER DU CROP — Tâche J. ⚠️ **`empriseCalotte` ET `repereCrop` SONT PURS** :
+// ils ne tirent ni three.js ni le DOM, donc les importer ici n'ouvre aucun cycle.
+import { empriseCalotte, PORTEE_CROP } from './monde/mer-sphere.js'
+import { repereCrop } from './monde/crop-sphere.js'
 // `fractionSurTrace` : le pont d'indices qui remet la tête de course sous
 // l'objectif de la poursuite (voir son commentaire dans poursuite.js).
 import { fractionSurTrace } from './poursuite.js'
@@ -4176,7 +4180,13 @@ if (socleQuadtreeActif()) terrain.hauteursDeFlux = (fenetre, p) => {
   // R3 garde donc sa moitié « descente » (Tâche 4 ter, `zoomSoutenable` sur les
   // paliers de caméra) ; ici on demande le zoom DU BLOC, et c'est
   // `remplirHauteurs` — du plus grossier au plus fin — qui porte la décision 13.
-  demanderEmprise(flux, { emprise, zoom: params.demZoom })
+  // ⚠️ **`aussi` : LES DEUX APPELANTS DOIVENT PASSER LE MÊME, ET C'EST UNE
+  // OBLIGATION, PAS UNE SYMÉTRIE.** `demanderEmprise` ANNULE les tuiles qui
+  // sortent de `flux.reclamees` : celui des deux qui oublierait la mer
+  // annulerait, à chaque image, les tuiles que l'autre vient de demander. Hors
+  // `?terre=unique`, `empriseZoomMer()` rend `null` et l'appel est celui du
+  // dépôt, au bit près.
+  demanderEmprise(flux, { emprise, zoom: params.demZoom, aussi: empriseZoomMer() })
   const borne = { zoom: params.demZoom, zoomDemande: params.demZoom, debitObserveMbs: debitObserve(flux) }
   // ⚠️ **`majHauteurs` NE RECONSTRUIT RIEN** : une passe par TUILE (jamais par
   // pixel — l'interface par pixel coûtait +3,5 ms par reconstruction), puis les
@@ -4686,18 +4696,25 @@ function majEstompage() {
 // n'a pas suivi — le désaccord d'une image qui a valu onze bascules au seuil.
 //
 // ⚠️ **CE QUE CE CONTEXTE NE PORTE PAS, ET IL FAUT LE DIRE :**
-//   · **`remplir` pour la mer, donc PAS DE BATHYMÉTRIE.** `poserMer` remplirait
-//     son champ par `remplirHauteurs(flux, …)` sur l'emprise de la CALOTTE, qui
-//     couvre jusqu'à 256 demi-largeurs de crop. Or `demanderEmprise` REMPLACE
-//     `gardeHauteurs` à chaque appel (`flux-terrain.js`, « un seul flux par
-//     globe ») : la demander ici reprendrait au bloc ses réservations, et le
-//     socle perdrait ses hauteurs. On retombe donc sur `hauteurSurface`, qui lit
-//     les tuiles du globe — lesquelles n'ont **aucun fond marin**. **La mer sera
-//     d'un bleu uniforme**, et `poserMer` le dit lui-même par `bathy: false`.
+//   · ~~**`remplir` pour la mer, donc PAS DE BATHYMÉTRIE.**~~ ✅ **RÉPARÉ PAR LA
+//     TÂCHE J**, et il faut dire comment, parce que l'obstacle écrit ici était
+//     réel : `demanderEmprise` REMPLACE `gardeHauteurs` à chaque appel (« un seul
+//     flux par globe »), donc un SECOND appel pour la mer aurait repris au bloc
+//     ses réservations. La sortie n'est pas un second appel, c'est **une seule
+//     réservation qui connaît les deux emprises** — `demanderEmprise` a été
+//     ÉLARGIE d'un `aussi` dont le défaut (`null`) reproduit le dépôt au bit
+//     près. Et la portée de la calotte n'est plus l'horizon (256 demi-largeurs)
+//     mais `PORTEE_CROP = 3`, l'emprise 3×3 du mode plat : c'est ce qui rend
+//     l'emprise de la mer réservable.
 //   · **le grain** reste à zéro : `HABILLAGE_MONDE.grainForceM` vaut 0 et rien
 //     dans les réglages du socle ne s'y traduit en mètres de relief sans une
 //     mesure qu'on n'a pas faite.
-function contexteCrop() {
+// Le LIEU et la LARGEUR du crop, seuls — extraits de `contexteCrop` par la
+// Tâche J. ⚠️ **PARCE QUE DEUX APPELANTS EN ONT BESOIN, ET QU'UNE SECONDE
+// ÉCRITURE DIVERGERAIT** : `contexteCrop` (ce que la chaîne reçoit) et
+// `empriseZoomMer` (ce que la réservation doit couvrir) doivent tomber sur
+// EXACTEMENT le même repère, sinon la mer se remplirait à côté du bloc.
+function assietteCrop() {
   const centre = latLonOrigineBloc()
   if (!Number.isFinite(centre?.lat) || !Number.isFinite(centre?.lon)) return null
   const emprise = terrain.fenetreBornee?.emprise || empriseDuSocle()
@@ -4707,6 +4724,51 @@ function contexteCrop() {
   if (!(large > 0)) return null
   const zoom = Math.log2((360 * BLOCK_TILES) / large)
   if (!Number.isFinite(zoom)) return null
+  return { centre, zoom }
+}
+
+// ══════════ LA MER DEMANDE SON PROPRE ZOOM — Tâche J, trou n° 2 ════════════
+//
+// ⚠️ **VINGT-CINQ, ET C'EST LA MESURE DE LA TÂCHE F QUI LE DIT** : sur un champ
+// de mer de 164 km, « z12 ne couvre que 19,3 % des nœuds ; **z10 en couvre
+// 100 % pour 25 tuiles** ». Le budget est donc celui-là, et le zoom s'en déduit
+// (`zoomPourEmprise`) au lieu d'être posé.
+const TUILES_MER_MAX = 25
+
+// ⚠️ **LE SEUIL DE REFUS DE LA MER, ET IL N'EST PAS À 1 COMME CELUI DES PAROIS.**
+// Les parois et la rampe échantillonnent la FRONTIÈRE du crop, où un point
+// manquant fait une encoche visible ; le champ de la mer est une texture de 385²
+// lue en interpolation linéaire, où quelques nœuds de bord manquants ne se lisent
+// pas. Ce qu'il faut interdire est le champ VIDE — celui qui a été mesuré à
+// **0,7 %** de couverture et qui rendait un aplat gris.
+const COUVERTURE_MER_MIN = 0.99
+
+/**
+ * L'emprise que la MER doit couvrir, et le zoom auquel la demander.
+ *
+ * `null` hors `?terre=unique` : la réservation retombe alors exactement sur
+ * celle du dépôt, et `demanderEmprise` reçoit `aussi: null`.
+ */
+// Le flux est-il là pour nourrir la mer ? ⚠️ **`fluxDuSocle()` FABRIQUE LE FLUX
+// AU PREMIER APPEL** et rend `null` tant que `globe` n'existe pas : sans cette
+// garde, `remplir` serait posé sur un `null` et `_cuireChampMer` compterait sa
+// couverture à **1** par son repli (`r && Number.isFinite(...) ? … : 1`),
+// c'est-à-dire un champ vide déclaré plein.
+const fluxMerPret = () => terreUniqueBranchee && !!fluxDuSocle()
+
+function empriseZoomMer() {
+  if (!terreUniqueBranchee) return null
+  const a = assietteCrop()
+  if (!a) return null
+  const rep = repereCrop({ centre: a.centre, zoom: a.zoom, tuilesParBloc: BLOCK_TILES })
+  const emprise = empriseCalotte(rep, PORTEE_CROP)
+  return { emprise, zoom: zoomPourEmprise(emprise, { zoomMax: params.demZoom, tuilesMax: TUILES_MER_MAX }) }
+}
+
+function contexteCrop() {
+  const a = assietteCrop()
+  if (!a) return null
+  const { centre, zoom } = a
 
   // ⚠️ **LES UNIFORMES SE LISENT UN PAR UN, JAMAIS EN BLOC.** `terrain.mapUniforms`
   // cédé à une variable est une poignée sur le bloc central, et
@@ -4740,6 +4802,28 @@ function contexteCrop() {
     },
     mer: {
       altitudeM: altitudeCadrageM(),
+      // ══════════ LA BATHYMÉTRIE — Tâche J, trou n° 1 ═══════════════════════
+      //
+      // ⚠️ **C'EST LA PORTE D'ENTRÉE, ET ELLE ÉTAIT MURÉE.** Sans `remplir`,
+      // `_cuireChampMer` retombe sur `hauteurSurface`, qui lit les tuiles du
+      // globe — lesquelles n'ont AUCUN fond marin : **zéro partout en mer**,
+      // donc un aplat. Mesuré : champ couvert à **0,7 %**, `bathy: false`.
+      // `remplirHauteurs` appelle `fuseBathymetry` sur l'emprise ENTIÈRE en une
+      // fois, ce qui est la raison d'être de cette fonction.
+      remplir: fluxMerPret()
+        ? (empriseMer, n, sortie) => remplirHauteurs(fluxDuSocle(), { emprise: empriseMer, n, sortie })
+        : null,
+      // ⚠️ **BORNÉE SUR L'EMPRISE DU CROP, PLUS SUR L'HORIZON** — trou n° 3.
+      portee: PORTEE_CROP,
+      couvertureMin: COUVERTURE_MER_MIN,
+      // ⚠️ **TANT QUE LA NAPPE N'A PAS ATTERRI, ON REFUSE — ET PAS AU-DELÀ.**
+      // `demanderBathy` est ASYNCHRONE : la première cuisson tombe avant elle, et
+      // sans ce refus elle serait aussi la dernière (rien ne redemande une mer
+      // posée). ⚠️ **Mais une nappe VIDE est le cas NORMAL** — `flux-terrain.js`
+      // l'écrit : « on ne cuit pas de tuile là où il n'y a pas de mer ». Exiger la
+      // fusion une fois la nappe RÉGLÉE ferait boucler la reprise pour toujours
+      // à Chamonix, en recuisant un champ de 385² toutes les trente images.
+      exigerBathy: fluxMerPret() && !fluxDuSocle()?.bathy?.prete,
       // ⚠️ **LE FOV VIVANT, PAS LE DÉFAUT DU MODULE — ET C'EST UN RELEVÉ, PAS
       // UNE PRÉCAUTION.** Le 2026-08-21 sur l'application qui tourne :
       // `params.fov = 33`, `camera.fov = 33`, `camGlobe.fov = 33`, alors que le
@@ -4825,7 +4909,9 @@ const veilleCrop = creerVeilleCrop({
     const s = mondeVersLatLonEmprise(emprise, 0, D, 1).lat
     const o = mondeVersLatLonEmprise(emprise, -D, 0, 1).lon
     const e = mondeVersLatLonEmprise(emprise, D, 0, 1).lon
-    demanderEmprise(flux, { emprise: { ouest: o, sud: s, est: e, nord: n }, zoom: params.demZoom })
+    // ⚠️ **LE MÊME `aussi` QUE `hauteursDeFlux`** — voir là-bas : deux
+    // réservations qui ne s'accordent pas s'annulent l'une l'autre par image.
+    demanderEmprise(flux, { emprise: { ouest: o, sud: s, est: e, nord: n }, zoom: params.demZoom, aussi: empriseZoomMer() })
   },
 })
 
