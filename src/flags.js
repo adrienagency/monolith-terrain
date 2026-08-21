@@ -115,6 +115,46 @@ export const FLAGS = {
   //
   // `?frontiere=1` l'essaie, `?frontiere=0` le coupe.
   frontiereRendu: false,
+
+  // LE SEUIL DU SOCLE — Tâche 3 du plan « globe continu », BRANCHÉE.
+  //
+  // Le socle cesse d'exister à tous les zooms : il naît sous
+  // `SEUIL_NAISSANCE_M` (32 274 m) et meurt au-dessus de `SEUIL_MORT_M`
+  // (40 343 m, l'hystérésis ×1,25) — voir `src/monde/seuil-socle.js`, dont
+  // c'est la loi, et `src/monde/veille-socle.js`, qui en tient l'état.
+  //
+  // ⚠️ **C'EST LA DEMANDE D'ADRIEN, MOT POUR MOT** : « le crop n'apparaît que
+  // lorsque la Terre que l'on zoome occupe une partie assez importante de
+  // l'écran ». Il a signalé le défaut à l'écran le 2026-08-21, capture à
+  // l'appui : à Z5, un socle posé devant la Terre entière.
+  //
+  // ⚠️ **IL EXIGE `?frontiere=1`, ET CE N'EST PAS UNE PRUDENCE DE STYLE.** Sans
+  // la passe de fond (Tâche 1b bis), le globe est ÉTEINT en mode surface :
+  // retirer le socle au-dessus du seuil ne montrerait pas la Terre, ça
+  // montrerait le ciel vide. Le seuil n'a de sens que là où les deux mondes
+  // coexistent. Même patron que `socleQuadtree`, qui exige `?globe=continu`.
+  //
+  // ⚠️ **CE QUE ÇA CHANGE, MESURÉ** (`.banc/rejeu-arrivee.mjs`) : l'altitude de
+  // cadrage des poses d'arrivée vaut **51,3 km à z10** et **25,7 km à z11**. La
+  // bascule tombe donc entre les deux, à mi-chemin des deux seuils — **aucune
+  // pose d'arrivée ne les frôle**. En pratique : le socle vit à z11 et plus
+  // fin ; de z10 à z4 on voit la planète. Dans un même palier il peut naître ou
+  // mourir au dolly (à z10 : naissance à 88,6 unités de distance, mort à
+  // 110,8), et c'est exactement le geste continu qu'Adrien décrit.
+  //
+  // `?seuil=1` l'essaie, `?seuil=0` le coupe.
+  seuilSocle: false,
+}
+
+// LE SEUIL DU SOCLE — Tâche 3 branchée. ⚠️ **IL EXIGE LA FRONTIÈRE DE RENDU**,
+// et la raison est écrite au drapeau : sans la passe de fond, au-dessus du seuil
+// il n'y aurait pas la Terre derrière le socle, il n'y aurait rien.
+export function seuilSocleActif() {
+  if (!frontiereRenduActive()) return false
+  const v = paramAdresse('seuil')
+  if (v === '0' || v === 'toujours') return false
+  if (v === '1' || v === 'altitude') return true
+  return FLAGS.seuilSocle
 }
 
 // LA FRONTIÈRE DE RENDU — Tâche 1b bis. Même patron d'échappatoire que les

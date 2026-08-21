@@ -58,10 +58,13 @@ import { PeaksLayer } from './peaks.js'
 import { Clouds2 } from './clouds2.js'
 import { Traffic } from './traffic.js'
 import { RealWater } from './ocean.js'
-import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagContinueActive, socleQuadtreeActif, frontiereRenduActive } from './flags.js'
+import { FLAGS, suiviHelicoActif, portionPoursuite, globeContinuActif, exagContinueActive, socleQuadtreeActif, frontiereRenduActive, seuilSocleActif } from './flags.js'
 // LA FRONTIERE DE RENDU — Tache 1b bis. Toute la geometrie de la frontiere vit
 // la-bas, et elle y est TESTEE sous node ; ici il ne reste que le branchement.
 import { poseFond, plansFond } from './monde/frontiere-rendu.js'
+// LE SEUIL DU SOCLE — Tâche 3 branchée. L'automate qui tient l'hystérésis
+// d'une image à l'autre ; la LOI (les deux seuils) vit dans `seuil-socle.js`.
+import { creerVeilleSocle } from './monde/veille-socle.js'
 // ⚠️ `exageration-continue.js` N'IMPORTE RIEN — voir son en-tête : passer par
 // `fenetre-bornee.js` fermerait le cycle terrain.js → fenetre-bornee.js →
 // terrain.js, et AUCUN TEST NE CHARGE `main.js` pour l'attraper.
@@ -1813,7 +1816,7 @@ function regenerateLabels() {
   disposeLabels(labels)
   labels = createLabels(terrain.sample, params.seed, labelOpts())
   // a rebuild can run while in orbit (dive preload, GUI) — stay hidden there
-  labels.visible = params.labels && (!modes || modes.mode === 'surface')
+  labels.visible = params.labels && socleAffiche()
   f3AncreAuSol(labels) // mode continu : les cotes s'accrochent à leur point du sol
   scene.add(labels)
 }
@@ -2047,7 +2050,7 @@ function regenerateHud() {
   hud3.platform.visible = params.source !== 'real' // FUI dial only on generated terrain
   // same orbital guard as labels — GUI color changes rebuild the HUD and the
   // fresh group must not appear over the globe
-  hud3.group.visible = !modes || modes.mode === 'surface'
+  hud3.group.visible = socleAffiche()
   f3AncreAuSol(hud3.pois) // mode continu : les repères restent plantés dans leur crête
   scene.add(hud3.group)
   applySourceMode()
@@ -3542,7 +3545,7 @@ async function fetchAndBuildDem({ centreSur = null, enVol = false } = {}) {
   // ⚠️ **ET IL SE RALLUME ICI** — `entrerEnVol` l'avait éteint le temps du vol
   // (voir la note là-bas). La condition est celle de `setSurfaceVisible`, mot
   // pour mot : le cartouche n'existe qu'en mode surface.
-  groundInfo.setVisible(!!params.groundInfo && modes?.mode !== 'orbital')
+  groundInfo.setVisible(!!params.groundInfo && socleAffiche())
   if (params.groundInfo) chargeCartouche()
   // real coastline (Natural Earth) at coarse zoom — async, non-blocking; the
   // shader falls back to the elevation isoline until it arrives / if it fails.
@@ -4373,6 +4376,138 @@ function majCameraFond() {
   camGlobe.updateMatrixWorld()
 }
 
+// ══════════ LE SEUIL DU SOCLE — Tâche 3 du plan, BRANCHÉE ══════════════════
+//
+// ⚠️ **ADRIEN L'A VU AVANT NOUS, CAPTURE À L'APPUI (2026-08-21) :** à Z5 — la
+// pose d'arrivée y vaut **920 km** d'altitude de cadrage à 45° (rejeu), et **847
+// à 1 024 km** relevés au navigateur à La Réunion — un socle posé devant la Terre
+// entière. « J'ai l'impression que tu calcules 2 fois la map, l'une avec la
+// terre complète en arrière-plan et l'autre avec le socle. » **Il avait raison,
+// et la cause était un oubli de BRANCHEMENT, pas le rendu** : `socleVisible`
+// existait, testé et muté depuis la Tâche 3, et `grep -rn 'socleVisible'
+// src/main.js` ne rendait rien.
+//
+// ── LA LISTE DES CALQUES EST SORTIE DU HOOK, ET C'EST TOUT LE GESTE ────────
+//
+// ⚠️ **UNE SEULE LISTE, JAMAIS DEUX.** Ce fichier raconte cinq fois l'accident
+// de la liste dupliquée (voir `entrerEnVol` : « une seconde liste aurait divergé
+// au premier calque ajouté »). Le seuil ne fabrique donc pas la sienne : il
+// rappelle celle-ci, au caractère près, et un test COMPTE dans ce fichier les
+// écritures de visibilité du maillage de surface — il doit y en avoir UNE.
+//
+// ── CE QUI DISPARAÎT AVEC LE SOCLE, ET CE QUI N'Y EST PAS ─────────────────
+//
+// Tout ce que la liste touche part ensemble : le maillage, les **étiquettes**,
+// le HUD, les **tracés GPX** (ils dessinent avec `depthTest:false` — restés
+// seuls, ils flotteraient SUR la planète), les nuages, le **socle et son
+// liner** (`plinth`), la jupe de région, le **cartouche** (`groundInfo`), le
+// trafic, la **mer** (`realWater`), les calques de carte, et les trois boutons
+// de surface — dont le **coin cartographie** (`mapCorner`).
+//
+// ⚠️ **CE QUI N'EST PAS DANS LA LISTE, ET NE L'ÉTAIT PAS DAVANTAGE AVANT :
+// LE DAMIER.** `block-grid.js` ajoute ses dalles voisines directement à
+// `scene`, sans groupe ni interrupteur. Elles ne naissent que sous un tracé GPX
+// qui déborde du bloc, et `entrerEnVol` les efface à chaque changement de
+// palier (`blockGrid?.sync(...)` avec `dem` nul NETTOIE). **Le seuil ne change
+// donc rien à leur sort — ni en bien ni en mal —, et l'orbite d'aujourd'hui a
+// exactement le même angle mort.** Il est écrit ici pour qu'on ne le
+// redécouvre pas.
+function poserVisibiliteSocle(v) {
+  terrain.mesh.visible = v
+  labels.visible = v && params.labels
+  hud3.group.visible = v
+  // GPX sprites draw with depthTest:false — hidden with the surface or
+  // they'd float on top of the planet
+  gpxLayer.setVisible(v && params.gpxVisible)
+  clouds.setVisible(v)
+  plinth.setVisible(v && params.plinth && !params.regionMode)
+  if (regionSkirt) regionSkirt.mesh.visible = v
+  groundInfo.setVisible(v && params.groundInfo)
+  traffic.setVisible(v)
+  realWater?.setVisible(v && params.seaEnabled !== false) // cf. setSeaEnabled
+  mapLayers.setSurfaceVisible(v)
+  isoBtn?.setVisible(v) // the isometric shortcut only makes sense over the block
+  cineBtn?.setVisible(v)
+  mapCorner?.setVisible(v) // cartography corner is surface-only too
+  refreshOsmCredit() // GeoNames credit only applies in surface mode — resync on mode change
+}
+
+// L'AUTOMATE, ET SA MÉMOIRE. ⚠️ `appliquer` n'est rappelé QUE sur changement :
+// sans cette garde, quatorze calques seraient repassés à chaque image. L'état
+// de départ décrit l'application au chargement — socle posé, mode surface —,
+// donc **rien n'est appliqué tant que rien ne bouge** et un drapeau éteint
+// laisse la production intacte.
+const veilleSocle = creerVeilleSocle({ appliquer: poserVisibiliteSocle })
+
+// LE SOCLE EST-IL À L'ÉCRAN ? — LA RÉPONSE UNIQUE, POUR TOUS LES CALQUES.
+//
+// ⚠️ **IL EN FALLAIT UNE, ET C'EST L'ÉCRAN QUI L'A DIT.** `poserVisibiliteSocle`
+// n'est PAS le seul écrivain de la visibilité des calques : **dix-sept sites de
+// ce fichier la ré-affirment avec leur propre condition**, toujours la même —
+// `modes.mode === 'surface'` — qui ne connaît que le MODE. Le pire est
+// `fetchAndBuildDem` : il rallume le cartouche à CHAQUE palier. Mesuré au
+// navigateur (`?globe=crans&frontiere=1&seuil=1`, La Réunion dézoomée à z5,
+// altitude de cadrage 1 172 km) : socle retiré, **le cartouche `ground-info` et
+// ses huit mailles restaient dessinés SUR la planète**. Un orphelin, et le seul.
+//
+// ⚠️ **SANS DRAPEAU, CETTE FONCTION EST L'EXPRESSION D'AVANT, AU CARACTÈRE
+// PRÈS.** Il n'y a que deux modes (`modes.js` : `'surface'` et `'orbital'`),
+// donc `modes?.mode !== 'orbital'` est le même prédicat que le
+// `modes.mode === 'surface'` des dix-sept sites, et le `?.` couvre le
+// `!modes ||` que `regenerateLabels` et `regenerateHud` écrivaient en plus.
+function socleAffiche() {
+  return seuilSocleBranche ? veilleSocle.visible : modes?.mode !== 'orbital'
+}
+
+// ⚠️ **L'ENTRÉE EST UNE ALTITUDE GÉOMÉTRIQUE, PAS UNE FRACTION D'ÉCRAN — RÈGLE
+// R1**, et c'est la seule ligne de ce branchement qui ne se rattrape pas.
+// `altitudeCadrageM()` est l'instrument que la Tâche 1b a purgé de `dem.meanM`
+// exprès (voir le hook `surfaceCamAltCadrageM` juste dessous, qui explique
+// pourquoi il y a DEUX altitudes dans ce fichier). Une fraction d'écran
+// dépendrait de la distance au sol, donc du terrain chargé, donc de `meanM`,
+// qui est lissé : gain plus retard font un oscillateur, et le précédent Cesium
+// est exact.
+//
+// ⚠️ **SANS DRAPEAU, CETTE FONCTION REND LA MAIN TOUT DE SUITE**, et le socle
+// reste à tous les zooms — le comportement d'aujourd'hui, celui de la
+// production. Le drapeau exige `?frontiere=1` : voir `seuilSocleActif()`.
+const seuilSocleBranche = seuilSocleActif()
+function majSeuilSocle() {
+  if (!seuilSocleBranche) return
+  // ══════ ⚠️ ON NE DÉCIDE PAS PENDANT UN CRAN, ET C'EST MESURÉ ══════════════
+  //
+  // ⚠️ **LE CRAN EST UN OSCILLATEUR, ET IL S'EST VU À L'ÉCRAN AVANT DE SE
+  // COMPRENDRE.** Relevé le 2026-08-21 (`?globe=crans&frontiere=1&seuil=1`, La
+  // Réunion, sept crans z5 → z12) : **onze bascules** au lieu d'une. Le journal
+  // par image dit pourquoi, et ce n'est pas le seuil qui est en cause :
+  //
+  //   | alt lue | socle | zoom | busy | largeur | camY  |
+  //   | 40 751  |   1   |  9   |  0   | 219 km  | 29,19 |  ← avant le cran
+  //   | 20 375  |   0   |  10  |  1   | 109 km  | 29,19 |  ← largeur ÷2, camY PAS ENCORE
+  //   | 40 751  |   1   |  10  |  0   | 109 km  | 58,38 |  ← camY ×2, l'altitude revient
+  //
+  // **`largeurBlocM()` est divisée par deux UNE IMAGE AVANT que `_rescale` ne
+  // double `camera.position.y`.** Entre les deux, `altitudeCadrageM()` rend
+  // exactement LA MOITIÉ de la vraie altitude — et la moitié de 40 751 tombe de
+  // l'autre côté des deux seuils. Le socle naissait et mourait à chaque cran.
+  //
+  // ⚠️ **CE N'EST PAS UNE VIOLATION DE R1, C'EST SA CONFIRMATION.** R1 interdit
+  // de décider sur une grandeur dérivée du chargé ; `largeurBlocM()` est
+  // l'emprise du bloc CHARGÉ, et pendant un cran elle est désaccordée de la
+  // caméra. Le remède n'est pas de changer d'instrument — `altitudeCadrageM()`
+  // reste le seul sans `meanM` — c'est de **ne pas décider pendant que les deux
+  // moitiés sont désaccordées**. `modes.busy` marque exactement cet intervalle :
+  // il est vrai sur TOUTES les images du transitoire, mesuré.
+  //
+  // ⚠️ **ET LA SECONDE GARDE VAUT LA PREMIÈRE.** Sans MNT ni fenêtre bornée,
+  // `largeurBlocM()` rend 0 et `altitudeCadrageM()` bascule sur un TOUT AUTRE
+  // calcul (`terrain.heightToFeet`, le relief procédural) : c'est l'instant que
+  // `entrerEnVol` ouvre en posant `dem = null`. Une altitude d'une autre échelle
+  // ferait naître le socle au milieu d'un vol.
+  if (modes?.busy || !(largeurBlocM() > 0)) return
+  veilleSocle.maj(altitudeCadrageM())
+}
+
 modes = new Modes({
   camera,
   controls,
@@ -4388,23 +4523,10 @@ modes = new Modes({
         tween.active = false
         camera.up.set(0, 1, 0)
       }
-      terrain.mesh.visible = v
-      labels.visible = v && params.labels
-      hud3.group.visible = v
-      // GPX sprites draw with depthTest:false — hidden with the surface or
-      // they'd float on top of the planet
-      gpxLayer.setVisible(v && params.gpxVisible)
-      clouds.setVisible(v)
-      plinth.setVisible(v && params.plinth && !params.regionMode)
-      if (regionSkirt) regionSkirt.mesh.visible = v
-      groundInfo.setVisible(v && params.groundInfo)
-      traffic.setVisible(v)
-      realWater?.setVisible(v && params.seaEnabled !== false) // cf. setSeaEnabled
-      mapLayers.setSurfaceVisible(v)
-      isoBtn?.setVisible(v) // the isometric shortcut only makes sense over the block
-      cineBtn?.setVisible(v)
-      mapCorner?.setVisible(v) // cartography corner is surface-only too
-      refreshOsmCredit() // GeoNames credit only applies in surface mode — resync on mode change
+      // ⚠️ **LE MODE PRIME SUR LE SEUIL** : en orbite le socle n'existe pas,
+      // quelle que soit l'altitude. Et c'est la veille qui applique, pour que
+      // les deux chemins (le mode et le seuil) ne puissent pas se contredire.
+      veilleSocle.poserMode(v)
     },
     setEffectsEnabled(v) {
       setDofEnabled(v && params.bokehEnabled && params.bokehScale > 0)
@@ -5061,12 +5183,12 @@ function applyLook(k) {
   if (k.clouds != null) {
     params.cloudsEnabled = k.clouds
     if (k.clouds) clouds.build(params) // no point rebuilding just to hide them
-    clouds.setVisible(k.clouds && modes.mode === 'surface')
+    clouds.setVisible(k.clouds && socleAffiche())
   }
   if (k.plinth != null) {
     params.plinth = k.plinth
     // region-isolate drops the slab — a template must never re-show it under the cut
-    plinth.setVisible(k.plinth && modes.mode === 'surface' && !params.regionMode)
+    plinth.setVisible(k.plinth && socleAffiche() && !params.regionMode)
   }
 }
 function applyTemplate(t) {
@@ -5184,7 +5306,7 @@ function applyUserTemplate(tmpl) {
   if (terrain.setColorMode(params.colorMode || 'classic', params) && params.source === 'real') regenerateTerrain()
   if (clouds) {
     if (params.cloudsEnabled) clouds.build(params)
-    clouds.setVisible(params.cloudsEnabled && modes.mode === 'surface')
+    clouds.setVisible(params.cloudsEnabled && socleAffiche())
   }
   shadersRefreshFn() // rebuild the relief-material sub-controls (Scale/Bump/Roughness/Noise) for the applied look
   bgRefreshFn() // resync the Background HDRI-sky highlight to the applied look
@@ -5554,7 +5676,7 @@ function shuffleLook() {
     windDir: Math.round(rnd(0, 359)),
     windSpeed: +rnd(0.3, 1.6).toFixed(2),
   })
-  if (clouds) { if (params.cloudsEnabled) clouds.build(params); clouds.setVisible(params.cloudsEnabled && modes.mode === 'surface') }
+  if (clouds) { if (params.cloudsEnabled) clouds.build(params); clouds.setVisible(params.cloudsEnabled && socleAffiche()) }
   params.aerialEnabled = chance(0.3)
   refreshAerial()
 
@@ -6797,7 +6919,7 @@ const waterRebuild = () => {
 // la clé, et ils avaient bien une mer.
 function setSeaEnabled(v) {
   params.seaEnabled = v !== false
-  realWater?.setVisible(params.seaEnabled && modes.mode === 'surface')
+  realWater?.setVisible(params.seaEnabled && socleAffiche())
 }
 
 // OSM attribution + loading status for the Map layers (ODbL requires the credit).
@@ -6809,7 +6931,7 @@ function refreshOsmCredit() {
   const loading = mapLayers.isLoading()
   const parts = []
   if (loading) parts.push('OSM · chargement…')
-  if (params.placesEnabled && params.source === 'real' && modes.mode === 'surface') parts.push('© GeoNames (CC BY 4.0)')
+  if (params.placesEnabled && params.source === 'real' && socleAffiche()) parts.push('© GeoNames (CC BY 4.0)')
   // IGN's Licence Ouverte requires visible attribution while its imagery is on
   // screen — and only while it is: aerialAttribution is null the moment the
   // layer is off OR the patch leaves the covered area.
@@ -7690,7 +7812,7 @@ function rebuildRegionSkirt() {
     })
     if (!s) continue
     s.mesh.position.set(d.x, 0, d.z)
-    s.mesh.visible = modes.mode === 'surface'
+    s.mesh.visible = socleAffiche()
     scene.add(s.mesh)
     if (d.centre) regionSkirt = s
     else regionCellSkirts.push(s.mesh)
@@ -7881,7 +8003,7 @@ async function applyRegionMode() {
     plinth.rebuild(terrain, params) // et la dalle redescend : setSlabOnly l'avait remontée au zéro
     groundInfo.setFrameScale(1) // et le cartouche retrouve les bords du bloc
     syncRegionPlaceFilter() // toutes les villes reviennent
-    plinth.setVisible(params.plinth && modes.mode === 'surface')
+    plinth.setVisible(params.plinth && socleAffiche())
     waterRebuild() // restore the open-sea surface once the region clip is gone
     // RETOUR À LA VUE D'ORIGINE — recharge le relief là où l'utilisateur était
     // avant d'isoler, pour que décocher revienne exactement sur ses pas.
@@ -9801,7 +9923,7 @@ const panelCtx = {
     syncUiTheme()
   },
   peaksLayer,
-  setLabelsVisible: (v) => (labels.visible = v && modes.mode === 'surface'),
+  setLabelsVisible: (v) => (labels.visible = v && socleAffiche()),
   saveZoomExag,
   saveZoomDetail,
   resetZoomExag: () => {
@@ -9834,7 +9956,7 @@ const panelCtx = {
   applyPlinthMaterial, // socle PBR / glass material picker (Block panel)
   setGroundInfo: (v) => {
     groundInfo.enabled = v
-    groundInfo.setVisible(v && modes.mode === 'surface')
+    groundInfo.setVisible(v && socleAffiche())
     if (v && dem && !groundInfo.lastInfo) chargeCartouche()
     else if (v) groundInfo.rerender()
   },
@@ -10018,7 +10140,7 @@ const { elementsPanel, imagePanel } = buildEffectsPanel({
   clouds,
   // la chip « Épars/Couvert/… » doit aussi rétablir la visibilité : resetLook
   // masque le groupe au chargement d'une carte, build() seul ne le remontre pas
-  syncCloudsVisible: () => clouds.setVisible(params.cloudsEnabled && modes.mode === 'surface'),
+  syncCloudsVisible: () => clouds.setVisible(params.cloudsEnabled && socleAffiche()),
   // `aoPass` en accesseur : il naît à la première demande d'occlusion, donc une
   // copie prise ici au démarrage vaudrait `null` pour toujours.
   // (plus de `bloom` ni `bloomPass` : la passe a été retirée le 2026-08-02)
@@ -10091,7 +10213,7 @@ const mapPanel = buildMapPanel({
   terrain,
   refreshAerial,
   peaksLayer,
-  setLabelsVisible: (v) => (labels.visible = v && modes.mode === 'surface'),
+  setLabelsVisible: (v) => (labels.visible = v && socleAffiche()),
 })
 
 // L'onglet « Couches » — la vitrine du Gardien. Il ne calcule rien : il
@@ -10528,6 +10650,10 @@ window.__exp = { boats, raceLabels, raceState, courseBar, syncCourseBarMode, sce
   // forcer une image hors de la boucle rAF — c'est ainsi que la tâche a prouvé
   // ce qu'elle dessine (`composer.render()` puis `readPixels`).
   frontiereActive, sceneGlobe, camGlobe, majCameraFond,
+  // LE SEUIL DU SOCLE — Tâche 3 branchée, même raison : `main.js` n'est chargé
+  // par aucun test, et `veilleSocle.auSeuil` / `.bascules` sont ce qui se lit à
+  // l'écran pour vérifier qu'une descente ne fait QU'UNE bascule.
+  veilleSocle, seuilSocleBranche, altitudeCadrageM,
   // mode aléatoire + ombrage auto : de quoi sonder l'état depuis la console
   shuffleLook,
   // ⚠️ À APPELER AVANT DE COUPER LA BOUCLE rAF pour un tournage hors ligne
@@ -10835,6 +10961,14 @@ function tick() {
   // which is why six rewrites changed nothing on screen.
   if (!(drone.active && params.gpxFollow && gpxLayer.isPlaying())) modes.update(dt)
   zoomStepper.update()
+  // ══════ LE SEUIL DU SOCLE — Tâche 3, branchée ══════════════════════
+  //
+  // ⚠️ **APRÈS `modes.update(dt)`, ET AVANT `majCameraFond()`.** Après, parce
+  // que c'est `modes` qui vient de poser la caméra de cette image et le mode ;
+  // avant, parce que la caméra de fond se pose sur la MÊME emprise que le bloc
+  // — c'est elle qui fait que la Terre apparaît exactement là où le socle
+  // était, sans saut, quand le seuil le retire.
+  majSeuilSocle()
   // ══════ LA FRONTIÈRE DE RENDU — Tâche 1b bis ════════════════════════
   //
   // La caméra de fond se repose AVANT le dessin, et **avant `globe.update`** :
@@ -10930,7 +11064,7 @@ function tick() {
     terrain.tickSurfaceMaterial(dtAmb) // drifting sand (relief material flow)
     gpxLayer.tick?.(dt) // shimmer: flowing dashOffset highlight along the route line
   }
-  peaksLayer.update(camera, window.innerWidth, window.innerHeight, modes.mode === 'surface')
+  peaksLayer.update(camera, window.innerWidth, window.innerHeight, socleAffiche())
 
   // city-label declutter is screen-space (depends on camera projection), so it
   // goes stale as soon as the camera moves — re-run the visibility-only pass
@@ -11196,7 +11330,7 @@ const atelier = buildAtelier({
   refreshAerial,
   refreshAll,
   // ⑤ Météo — exactement les leviers du panneau Éléments
-  rebuildClouds: () => { clouds.build(params); clouds.setVisible(params.cloudsEnabled && modes.mode === 'surface') },
+  rebuildClouds: () => { clouds.build(params); clouds.setVisible(params.cloudsEnabled && socleAffiche()) },
   setWaves: (w) => realWater?.setWaves?.(w),
   setSeaEnabled: (v) => setSeaEnabled(v),
   openStore: () => store.enter(),

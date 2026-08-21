@@ -1436,7 +1436,27 @@ export class Globe {
   // dt (seconds, optional — callers passing only the camera keep working)
   // drives the orbiting cloud cover.
   update(camera, dt = 0.016) {
-    if (!this.enabled) return 0
+    // ══════ LA FRONTIÈRE DE RENDU — Tâche 1b bis, LE GARDE QUI MANQUAIT ════
+    //
+    // ⚠️ **`setVisible` ÉCRIT `enabled = v` ET DIT, EN COMMENTAIRE, QU'IL « dit le
+    // MODE, pas le dessin ». C'ÉTAIT FAUX ICI, ET ÇA SE VOYAIT À L'ÉCRAN.** En
+    // mode surface `main.js` appelle `globe.update(camGlobe, dtAmb)` — il l'a
+    // écrit exprès, avec un commentaire qui prévient que « sans cet appel il reste
+    // à ses seize racines et le raccord montre une planète floue ». Or
+    // `_dive` avait posé `enabled = false`, donc l'appel sortait ICI, ligne un :
+    // **il ne faisait rien du tout.**
+    //
+    // Mesuré au navigateur le 2026-08-21 (`?globe=crans&frontiere=1`, La Réunion
+    // dézoomée à z5, altitude de cadrage 847 km) : **le cache du quadtree tenait
+    // 16 tuiles — ses seules racines** ; `update()` rendait **0** ; l'écran
+    // montrait une **boule blanche sans continent**. Le seul fait de lever
+    // `enabled` faisait passer le cache à **52 tuiles en une image**, et la Terre
+    // retrouvait Madagascar, l'Afrique et ses nuages, au même cadrage.
+    //
+    // ⚠️ **`frontiereFond` N'EST VRAI QUE SOUS LE DRAPEAU** (`main.js` le pose,
+    // `globe.js` n'importe pas `flags.js`) : sans drapeau, ce garde est
+    // exactement celui d'avant, au caractère près.
+    if (!this.enabled && !this.frontiereFond) return 0
     this.clouds.update(camera, dt)
     this.frame++
     const camPos = camera.position
