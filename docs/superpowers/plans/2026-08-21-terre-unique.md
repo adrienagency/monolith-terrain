@@ -189,12 +189,75 @@ Des parois tombent depuis la frontière du crop jusqu'à une base. ⚠️ **Vert
 
 ⚠️ **C'EST LE SEUL POINT DONT LE COÛT EST INCONNU. Mesure-le AVANT d'implémenter**, et si le budget ne tient pas, **dis-le et propose une dégradation** plutôt que de livrer une image lente.
 
-- [ ] **Étape 1 — MESURER D'ABORD.** Coût par image du nuanceur du socle contre celui du globe, à même nombre de pixels. **Écris la table.**
-- [ ] **Étape 2 — le test qui échoue** : sur une même emprise, le globe et l'ancien socle rendent **la même image à quelques unités de couleur près**. ⚠️ **Sers-toi de `readPixels` après un `composer.render()` explicite** — c'est ce qu'ont fait trois tâches du plan précédent.
-- [ ] **Étape 3 — implémenter, poste par poste**, en mesurant à chaque ajout.
-- [ ] **Étape 4 — mutation** : retirer un poste doit tuer une assertion identifiée.
-- [ ] **Étape 5 — REGARDER L'ÉCRAN**, côte à côte avec l'ancien socle.
-- [ ] **Étape 6 — LA CLÔTURE DU §0**, puis commit.
+- [x] **Étape 1 — MESURER D'ABORD.** Coût par image du nuanceur du socle contre celui du globe, à même nombre de pixels. **Écris la table.** ✅ **Table ci-dessous — et elle INTERDIT le portage complet (×14) tout en AUTORISANT les quatre postes (+32 %).**
+- [x] **Étape 2 — le test qui échoue** : sur une même emprise, le globe et l'ancien socle rendent **la même image à quelques unités de couleur près**. ⚠️ **Sers-toi de `readPixels` après un `composer.render()` explicite** — c'est ce qu'ont fait trois tâches du plan précédent. ⚠️ **CE CRITÈRE N'EST PAS ATTEIGNABLE À LA TÂCHE C SEULE, et c'est dit dans le bilan** : la rampe (Tâche D) et l'exagération (Tâche E, drapeau éteint) diffèrent par construction. Ce qui a été mesuré à la place : l'écart **avec / sans habillage**, `readPixels` après rendu explicite, **témoin exactement nul**.
+- [x] **Étape 3 — implémenter, poste par poste**, en mesurant à chaque ajout. ✅ Quatre postes, quatre ajouts mesurés.
+- [x] **Étape 4 — mutation** : retirer un poste doit tuer une assertion identifiée. ✅ **20 posées, 20 tuées**, dont une qui survivait.
+- [x] **Étape 5 — REGARDER L'ÉCRAN**, côte à côte avec l'ancien socle. ✅ **Et il a fallu forcer ×2,8 pour que la vue soit lisible.**
+- [x] **Étape 6 — LA CLÔTURE DU §0**, puis commit. ✅ Commit **`dc89f01`**.
+
+> **BILAN DE LA TÂCHE C — 2026-08-21, commit `dc89f01`.**
+>
+> **⚠️ L'ÉTAPE 1 A TRANCHÉ, ET ELLE INTERDIT LE PORTAGE COMPLET.** Cible 900×900 hors écran, **boucle rAF gelée**, `autoClear` forcé, couverture 1,0 **prouvée**, 5 tours de 25 images **entrelacés**, RTX 3080 :
+>
+> | variante | ms pour 0,81 Mpx | ce que dit l'écart |
+> |---|---|---|
+> | **socle habillé** | **3,5656** | — |
+> | **socle PBR nu** *(le même matériau, `onBeforeCompile` retiré)* | **1,9968** | **l'habillage COMPLET = 1,569 ms**, soit **1,94 ms/Mpx** |
+> | socle témoin *(nuanceur constant)* | 1,1151 | le plancher de rastérisation du maillage |
+> | **globe actuel** | **0,1720** | — |
+> | globe témoin | 0,0604 | **le nuanceur ENTIER du globe = 0,112 ms**, soit **0,138 ms/Mpx** |
+>
+> **Porter tout l'habillage du socle, c'était multiplier le coût par pixel du globe par QUATORZE.** ⚠️ **C'est la réponse à la question du §9**, et elle est négative pour le portage intégral.
+>
+> **LES QUATRE POSTES DU PLAN, EUX, TIENNENT — et c'est mesuré sur le crop lui-même**, témoin de dérive **0,003 ms**, tours à ±0,01 ms :
+>
+> | état | ms | ajout |
+> |---|---|---|
+> | globe SANS habillage | 0,6728 | — |
+> | + courbes calées sur le local | 0,6769 | **+0,0041** |
+> | + grain | 0,6953 | **+0,0184** |
+> | + masque de côte | 0,7946 | **+0,0993** |
+> | + occupation du sol *(tout)* | 0,8878 | **+0,0932** |
+> | **témoin — sans habillage, à la fin** | 0,6758 | dérive **+0,0030** |
+>
+> **+0,215 ms pour 0,81 Mpx, soit +32 % du coût du globe et SEPT FOIS MOINS que l'habillage complet.** ⚠️ **L'occupation du sol est le poste le plus cher** (huit accès de texture par fragment : `lavisSol` lit quatre voisins, `solEn` en fait deux chacun) — mais **elle ne coûte rien quand la couche est éteinte**, la branche étant gardée par un uniforme.
+>
+> **CE QUI EST PORTÉ, ET CE QUI NE L'EST PAS.** Porté : **courbes calées sur l'amplitude du crop** (pas cartographique — 250 m à La Réunion contre 500 m codés en dur), **grain** indexé sur le crop, **masque de côte** (trait d'encre + autorité sur la décision mer/terre), **occupation du sol**. ⚠️ **PAS porté, et il faut le dire** : analyse de relief (le peigné), perspective aérienne, caustiques de fond, photo aérienne, lumières de nuit, ombre des nuages, effets de surface, balayage. **Le plan ne les met pas dans cette tâche, et la mesure ci-dessus dit ce qu'ils coûteraient.**
+>
+> **LE FAIT QUI REND LE PORTAGE GRATUIT, ET IL EST DÉMONTRÉ.** Le bloc du socle est une fenêtre **mercator alignée sur les tuiles** : `latLonToWorld` (`geo.js:47`) plus `empriseSocle` (`seuil-socle.js:337-345`, qui prend `tuileX(lon,z) − tuilesParBloc/2` **sans arrondi**) donnent **`x = 28·u`**. Le globe lit donc les champs cuits du socle **AU MÊME TEXEL**, sans rééchantillonner : `cmUv = qCrop · 0,5 + 0,5`. ⚠️ **Aucune texture n'est recuite** — c'est le §5 appliqué : le dépôt ne grossit que de la loi et de sa transcription.
+>
+> **⚠️ TROIS TÉMOINS ONT REJETÉ TROIS TABLES AVANT CELLE-CI.** Les trois bancs sont sur le disque (`.banc/`, hors dépôt) :
+> - **boucle rAF laissée tourner** : dérive **−1,589 ms** sur une référence à 3,455, et des postes **DÉJÀ ÉTEINTS** (`uSolOn = 0`) crédités de **3,235 ms d'économie** — couper ce qui est déjà coupé ne fait rien gagner. Table jetée, `gelePage()` écrit.
+> - **`autoClear` vaut `false` dans cette application** : la cible n'est jamais effacée, donc la « preuve de couverture » ne trouvait **aucun** pixel magenta et rendait **1,0 quoi qu'il arrive** — une preuve vide, le piège « un test de silhouette passe à vide » du §3 de `/threejs-optimisation`. ⚠️ **Les couvertures des deux premiers bancs ne prouvaient donc rien.**
+> - **un écart d'image de 1,867 unités qui ne s'est pas reproduit** : deux relances ont rendu **0,070**. Publié tel quel, il aurait décrit l'habillage comme quatre fois plus visible qu'il ne l'est.
+>
+> **CE QUE L'HABILLAGE CHANGE VRAIMENT À L'IMAGE** (`readPixels` après un rendu explicite, nadir sur le crop, 512², atmosphère/calottes/nuages masqués, fond de scène retiré ; **230 603 pixels dessinés**) — ⚠️ **et le témoin vaut EXACTEMENT ZÉRO**, réglage inchangé, deux prises bit à bit identiques : **tout écart non nul est donc l'effet, pas le bruit.**
+>
+> | | écart moyen | max | % de pixels touchés |
+> |---|---|---|---|
+> | **témoin (réglage inchangé)** | **0** | **0** | **0 %** |
+> | habillage complet | 0,080 | 46 | **1,01 %** |
+> | masque de côte | 0,029 | **46** | 0,37 % |
+> | grain | 0,051 | 17 | 0,60 % |
+> | courbes locales (250 m contre 500) | 0,023 | 18 | 0,34 % |
+> | occupation du sol | 0 | 0 | 0 % — **couche éteinte dans l'application, poste non démontrable ici** |
+>
+> ⚠️ **UN POUR CENT DES PIXELS. IL FAUT LE DIRE COMME ÇA.** Les quatre postes de cette tâche sont une **finition**, pas une transformation. **Ce qui sépare encore l'image du globe de celle du socle, ce sont les deux termes que cette tâche n'a pas le droit de toucher : la RAMPE (Tâche D) et l'ANALYSE DE RELIEF (hors périmètre).**
+>
+> **CE QUE J'AI VU À L'ÉCRAN** (La Réunion, crop posé à la main depuis `.banc/pose-habC.js`, nadir, ×2,8 forcé pour que l'image soit lisible) : **les courbes sont deux fois plus nombreuses** et suivent le relief local ; **le littoral specké du MNT est remplacé par un trait franc**, et la mer cesse d'être un pointillé. ⚠️ **ET CE QUI EST LAID** : à l'exagération ×18 du globe **la vue au nadir est INJUGEABLE** — le relief de La Réunion fait **0,86 unité de haut pour 0,21 de large**, la montagne passe au-dessus de la caméra. Il a fallu forcer ×2,8 à la main (`?exag=continu` est éteint). ⚠️ **Et le crop reste une masse plate et brune tant que la rampe est mondiale** : `uLandMax = 5600` écrase les 3 000 m de La Réunion dans une seule bande. **C'est la Tâche D, et elle est plus urgente que tout ce que cette tâche a livré.**
+>
+> **LES TESTS.** 28 tests, dont **14 rejoués ROUGES contre `6b8ca66`** (`.banc/rejoue-habC.mjs`, laissé sur le disque). ⚠️ **Les 14 autres sont VERTES là-bas et c'est justifié** : elles portent sur le module pur (qui n'existait pas) ou sur `terrain.js` — ce sont des garde-fous contre une dérive **du socle**, pas des preuves du globe, et le fichier le dit. ⚠️ **Deux assertions candidates ont été jetées parce qu'elles ne distinguaient rien** : « le nuanceur porte `smoothstep` » (il en portait déjà quatre) et « il porte `texture2D(uRamp` ».
+>
+> **LA CAMPAGNE DE MUTATION : 20 posées, 20 TUÉES** (`.banc/mutations-habC.mjs`, laissé sur le disque, remise vérifiée octet par octet). ⚠️ **UNE SURVIVAIT** — M20 fige le PREMIER octave du grain, et les trois `notEqual` restaient verts parce que le second suffit à faire varier la somme. L'assertion a été renforcée : on retranche le second octave et on exige que le reste porte encore du signal.
+>
+> **LA CLÔTURE.** `npm test` **3 456** (3 428 + 28) · `audit:tests` 197/197 · `node --check` sur les trois fichiers · `nettoie:dist` + `build:mapcells` + `vite build` + `verifie:dist` — « dist est complet ». Page rechargée après commit, aucune erreur nouvelle en console.
+>
+> **CE QUE JE N'AI PAS PU VÉRIFIER.**
+> - **L'occupation du sol n'a jamais été vue.** La couche est éteinte dans l'application (`uSolOn = 0`) et je n'ai pas trouvé son interrupteur ; son **coût** est mesuré (0,093 ms, texture bouchon), son **image** ne l'est pas.
+> - **L'Étape 2 telle que le plan la formule — « le globe et l'ancien socle rendent la même image à quelques unités de couleur près » — N'EST PAS ATTEIGNABLE À LA TÂCHE C SEULE**, et ce n'est pas un échec de la tâche : la rampe (Tâche D) et l'exagération (Tâche E, drapeau éteint) diffèrent **par construction**. J'ai donc mesuré ce qui est mesurable — l'écart entre le globe **avec** et **sans** habillage, témoin à zéro — et je le dis plutôt que de maquiller le critère.
+> - **Aucun branchement de production.** `poserHabillage` n'est appelé par personne dans `src/`, exactement comme `poserCrop` de la Tâche A. Tout ce qui précède a été obtenu depuis la console.
+> - **Le coût sur une machine modeste.** Tout est mesuré sur une RTX 3080. Le +32 % pourrait mordre autrement sur un portable — et le tampon 4K multiplierait les 0,215 ms par dix.
 
 ### Tâche D — LA RAMPE : CALCULÉE SUR LE CROP, SUIVIE PAR LES ALENTOURS (décision 4)
 
@@ -338,6 +401,9 @@ Retirer `monde/fenetre-bornee.js`, le chemin « bloc » de `terrain.js`, et les 
 - **Les crops continentaux** que la sphère rend enfin possibles : les veut-il, et à quelle largeur maximale ?
 - **LES JUPES DES TUILES PENDENT SOUS LE BLOC** (relevé par la Tâche E, à l'écran) — cinq à six languettes qui descendent sous la base. Le `discard` du crop est en **lat/lon**, et une jupe partage le (lat, lon) du bord de sa tuile : elle n'est **jamais** coupée. Aucune tâche du plan ne la couvre. Deux sorties possibles, aucune mesurée : couper la jupe par sa hauteur radiale plutôt que par sa position, ou ne pas bâtir de jupe sur une tuile qui touche la frontière.
 - **LE RELIEF DU GLOBE VU DE LOIN, À TRANCHER** (Tâche E, tour 1) — à ×2,8 la silhouette du limbe passe de **≈7 px à ≈1 px** sur un cadrage plein disque. **La métrique employée (écart moyen absolu sur l'image) ne sait pas distinguer cet effet du bruit des nuages** — elle n'autorise donc pas à conclure « acceptable ». Il faudrait un critère LOCAL (limbe seul, chaîne montagneuse dans le cadre, nuages figés) pour trancher ; il n'a pas été fait. **Si Adrien veut du relief à l'orbite, la courbe doit remonter aux hautes altitudes — et c'est une mesure à faire, pas un goût.**
+- **L'OCCUPATION DU SOL DU CROP N'A JAMAIS ÉTÉ VUE** (Tâche C) — la couche est éteinte dans l'application, son coût est mesuré (0,093 ms pour 0,81 Mpx, le poste le plus cher des quatre) mais son image ne l'est pas. **À rallumer et à regarder.**
+- **LE PEIGNÉ (analyse de relief) RESTE AU SOCLE, ET C'EST LUI QU'ON VOIT** (Tâche C) — les quatre postes portés ne déplacent que **1,01 % des pixels**, témoin à zéro. Ce qui fait la richesse de l'image du socle, c'est le texture shading et la rampe locale. **Le porter coûterait 1,94 ms/Mpx au tarif complet ; sa part seule reste à mesurer.**
+- **LA VUE AU NADIR DU CROP EST INJUGEABLE À ×18** (Tâche C, à l'écran) — le relief de La Réunion fait 0,86 unité de haut pour 0,21 de large, la montagne passe au-dessus de la caméra. `?exag=continu` (Tâche E) le corrige, mais il est éteint.
 - **LE COÛT DE L'EXAGÉRATION DU GLOBE** (Tâche E) — **12 à 21 s de rechargement réseau à chaque cran**, parce que le relief est cuit dans les sommets. Tant qu'il n'est pas déplacé dans le nuanceur de sommets, `?exag=continu` ne peut pas devenir le défaut, et la courbe reste échantillonnée aux crans au lieu de glisser.
 
 ---
