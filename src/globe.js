@@ -16,6 +16,9 @@ import { R_GLOBE, MERCATOR_MAX_LAT, EARTH_RADIUS_M, tileToLatLon, latLonToSphere
 import { rampColorStops } from './palette.js'
 import { GlobeClouds } from './globe-clouds.js'
 import { overzoomTile } from './bathy.js'
+// LA FORME DU CROP — Tâche A, « UNE SEULE TERRE ». Module PUR : il n'apporte ni
+// three ni DOM, et c'est lui qui lit `empriseSocle`, pas ce fichier.
+import { repereCrop, coinNormalise, zoomCropPrescrit } from './monde/crop-sphere.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -210,6 +213,25 @@ uniform float uLandMax;
 // côté de la tuile en texels — 256 (AWS) ou 512 (Mapterhorn), voir planTuile
 uniform float uTilePx;
 
+// ══════════ LE CROP DÉCOUPÉ DANS LA SPHÈRE — Tâche A, « UNE SEULE TERRE » ═══
+//
+// Adrien, le 2026-08-21 : « Le crop doit se faire dans la terre arrondie. » Les
+// tuiles cessent d'être dessinées entières ; elles sont coupées à la forme du
+// socle. La loi vit dans src/monde/crop-sphere.js et se vérifie sous node
+// (test/crop-sphere.test.js) ; ce bloc-ci en est la TRANSCRIPTION.
+//
+// (Pas d'accent grave dans ce bloc : il vit dans un template literal JS, il le
+// terminerait — le piège que terrain.js et ocean.js documentent tous les deux,
+// et il a coûté une suite entière la fois précédente.)
+//
+// ⚠️ uCropOn VAUT ZÉRO PAR DÉFAUT. Le nuanceur est partagé par TOUTES les
+// tuiles : sans cette garde le globe se découperait de lui-même, drapeau baissé.
+uniform float uCropOn;
+uniform vec2 uCropCentre; // centre du crop, en mercator normalisé
+uniform float uCropDemi; // demi-côté du crop, même unité
+uniform float uCropCoin; // rayon d'arrondi, en FRACTION du demi-côté
+uniform float uCropCoinN; // exposant de superellipse (2 = cercle, 4,4 = défaut)
+
 float decodeMeters(vec2 uv) {
   vec3 t = texture2D(uTex, uv).rgb * 255.0;
   return t.r * 256.0 + t.g + t.b / 256.0 - 32768.0;
@@ -237,6 +259,33 @@ float hash12(vec2 p) {
 }
 
 void main() {
+  // ══════ LA DÉCOUPE, AVANT TOUT LE RESTE ══════════════════════════════════
+  //
+  // ⚠️ EN PREMIER, ET C'EST UNE ÉCONOMIE, PAS UN STYLE : un fragment coupé ne
+  // paie ni les cinq décodages de decodeMetersAA, ni la rampe, ni les contours.
+  // Le discard posé en fin de main les aurait tous payés d'avance.
+  //
+  // ⚠️ ET LE TEST SE FAIT EN LAT/LON, PAS EN COORDONNÉES DE SCÈNE. Les sommets
+  // du globe sont en RTC (_buildMesh : positions relatives au centre de LEUR
+  // tuile) — une tuile chevauche la frontière, donc position n'a pas le même
+  // sens d'une tuile à l'autre. vLatLon est absolu, et il était déjà là pour le
+  // graticule.
+  if (uCropOn > 0.5) {
+    float mx = (vLatLon.y + 180.0) / 360.0;
+    // écrêtage de Mercator : sans lui un pôle rend un infini, donc un NaN, donc
+    // une comparaison FAUSSE, donc un fragment GARDÉ — le contraire du but.
+    float la = clamp(vLatLon.x, -85.05112878, 85.05112878) * 0.017453292519943295;
+    float my = 0.5 - log(tan(0.78539816339744831 + la * 0.5)) / 6.2831853071795865;
+    float du = mx - uCropCentre.x;
+    du -= floor(du + 0.5); // antiméridien : le mercator x est de période 1
+    vec2 q = vec2(du, my - uCropCentre.y) / uCropDemi; // local au crop, dans [-1, 1]
+    // la superellipse du socle, transcrite de terrain.js : les côtés droits
+    // restent exacts (une composante est nulle), seuls les coins sont formés.
+    vec2 cq = max(abs(q) - (1.0 - uCropCoin), 0.0);
+    float pn = pow(pow(cq.x, uCropCoinN) + pow(cq.y, uCropCoinN), 1.0 / uCropCoinN);
+    if (pn > uCropCoin) discard;
+  }
+
   float h = decodeMetersAA(vUv);
 
   // hypsometric ramp: bathymetry occupies [0, 0.35], land [0.35, 1]
@@ -705,6 +754,10 @@ export class Globe {
     // d'être l'interrupteur. Déclaré ici pour qu'il ne naisse pas `undefined`
     // au détour d'une lecture.
     this.frontiereFond = false
+    // LE CROP — Tâche A. `null` = pas de découpe, et c'est l'état de production.
+    // Écrit par `poserCrop`, lu par `_traverse` (le raffinement uniforme) ; la
+    // découpe elle-même se fait au fragment, par les uniformes `uCrop*`.
+    this._crop = null
     // le budget de cache SUIT le chemin : voir CACHE_MAX_CONTINU
     this.cacheMax = this.continu ? CACHE_MAX_CONTINU : CACHE_MAX
     this._frustum = new THREE.Frustum()
@@ -751,6 +804,16 @@ export class Globe {
       uOceanDepth: { value: 6000 },
       uLandMax: { value: 5600 },
       uRamp: { value: null },
+      // LE CROP — Tâche A, « UNE SEULE TERRE ». ⚠️ `uCropOn: 0` : sans
+      // `poserCrop`, RIEN NE CHANGE. Ces cinq-là sont PARTAGÉS (ils vivent dans
+      // `this.uniforms`, que `_materialFor` étale dans chaque matériau) : le
+      // crop est une propriété du monde, pas de la tuile — contrairement à
+      // `uTex` et `uTilePx`, qui sont propres à chacune.
+      uCropOn: { value: 0 },
+      uCropCentre: { value: new THREE.Vector2(0, 0) },
+      uCropDemi: { value: 1 },
+      uCropCoin: { value: 0 },
+      uCropCoinN: { value: 2 },
     }
     this.rebuildRamp(params)
 
@@ -814,6 +877,46 @@ export class Globe {
    */
   chargeRacines() {
     for (const t of this.roots) this._request(t, 1e9)
+  }
+
+  // ═══════════ LE CROP — Tâche A du plan « UNE SEULE TERRE » ═════════════════
+  //
+  // Adrien, le 2026-08-21, après avoir vu DEUX Terres à l'écran : « ta
+  // recommandation me dit qu'il vaut mieux calculer 2 terres qu'une seule, au
+  // niveau ressources ça me paraît aberrant ». Il a raison, et c'est mesuré : à
+  // 2 km on dessine 964 tuiles de globe ET une fenêtre de 594 000 sommets,
+  // montrant le même endroit.
+  //
+  // ⚠️ **CETTE MÉTHODE EST LE SEUL INTERRUPTEUR.** Tant que personne ne
+  // l'appelle, `uCropOn` vaut 0 et le globe est celui d'avant, au bit près —
+  // c'est ce que vérifie `test/crop-sphere.test.js`.
+
+  /**
+   * Pose le crop : les tuiles cesseront d'être dessinées hors de sa forme.
+   *
+   * ⚠️ **LE REPÈRE VIENT DE `crop-sphere.js`, QUI LIT `empriseSocle`.** Le globe
+   * ne calcule pas l'emprise : il l'applique. Deux producteurs d'emprise, c'est
+   * un socle et une découpe qui divergent d'un pixel puis d'un mètre.
+   *
+   * @param {{centre:{lat:number,lon:number}, zoom?:number, tuilesParBloc?:number,
+   *          half?:number, corner?:number, expo?:number}} arg
+   */
+  poserCrop({ centre, zoom, tuilesParBloc, half = 28, corner = 0, expo = 2 } = {}) {
+    const rep = repereCrop({ centre, zoom, tuilesParBloc })
+    this._crop = rep
+    const u = this.uniforms
+    u.uCropCentre.value.set(rep.cx, rep.cy)
+    u.uCropDemi.value = rep.demi
+    u.uCropCoin.value = coinNormalise(corner, half)
+    u.uCropCoinN.value = Math.max(2, expo)
+    u.uCropOn.value = 1
+    return rep
+  }
+
+  /** Retire le crop — le globe redevient entier. */
+  retirerCrop() {
+    this._crop = null
+    this.uniforms.uCropOn.value = 0
   }
 
   // The globe ramp reuses the user's land gradient (the map's identity) and
@@ -1620,7 +1723,23 @@ export class Globe {
     // falls well below the split point, so hovering at the threshold no
     // longer flickers between parent and children every few frames
     const ratio = t.chord / dist
-    let wantSplit = t.z < MAX_Z && ratio > (t.refined ? MERGE_RATIO : SPLIT_RATIO)
+    // ══════ LE RAFFINEMENT UNIFORME DANS LE CROP — Tâche A, Étape 4 ═════════
+    //
+    // ⚠️ **`chord / dist` REFEND PAR DISTANCE ; LE CROP A BESOIN D'UNE
+    // RÉSOLUTION UNIFORME SUR TOUTE SON EMPRISE.** C'est une affiche : un bord
+    // proche à z15 et un bord lointain à z13 se raccorderaient VISIBLEMENT au
+    // milieu du bloc. On prescrit donc `ZOOM_SOCLE` partout dans l'emprise —
+    // plancher ET plafond — et la distance ne décide plus que dehors.
+    //
+    // ⚠️ **PLAFOND COMPRIS, ET C'EST LE POINT QUI SE VOIT** : sous ce régime le
+    // crop cesse de descendre à z15. C'est le zoom auquel le socle est
+    // rééchantillonné aujourd'hui (`ZOOM_SOCLE = 13`), donc l'image ne perd rien
+    // de ce que le produit montre — mais le globe, lui, savait faire plus fin.
+    // Le coût est mesuré au compte rendu de la tâche, pas supposé.
+    const zCrop = this._crop ? zoomCropPrescrit(t.z, t.x, t.y, this._crop) : 0
+    let wantSplit = zCrop
+      ? t.z < zCrop
+      : t.z < MAX_Z && ratio > (t.refined ? MERGE_RATIO : SPLIT_RATIO)
 
     // ADMISSION : on ne commence un raffinement que si le crédit de la frame
     // peut payer les quatre enfants qu'il fait naître. Quand ils sont déjà là,
