@@ -83,6 +83,66 @@ export function declinRivage(profondeur, distance) {
   return Math.max(profondeur * POIDS_PROFONDEUR, distance)
 }
 
+/**
+ * Le poids du repli distance-au-rivage. `ocean.js` : `f.g * 1.6`.
+ * ⚠️ **UNE SEULE ÉCRITURE, ET `test/ecume-mer.test.js` VA LA RELIRE DANS
+ * `ocean.js`** — le jour où le socle change d'avis, le test rougit.
+ */
+export const REPLI_RIVAGE = 1.6
+
+/**
+ * ⛔ **LE REPLI DISTANCE-AU-RIVAGE — LA DEMI-LIGNE QUE LE CROP N'AVAIT PAS.**
+ * Tâche P8, manque n° 4 du noteur (« la frange côtière quantifiée en marches »).
+ *
+ * `ocean.js` (FRAG), en toutes lettres :
+ *
+ *     // real bathymetry when the tiles carry it; distance-to-shore as the
+ *     // stand-in where the sea floor is a flat 0 m plain (fine zooms)
+ *     float depth = max(uWaterY - f.r, f.g * 1.6);
+ *
+ * La calotte du crop écrivait `vProfondeur = max(-champ.r, 0.0)` — **la
+ * bathymétrie SEULE, sans le secours**. Or son champ n'en porte presque pas.
+ *
+ * ⚡ **MESURÉ SUR LE CHAMP VIVANT** (2026-08-22, La Réunion z12,
+ * `.banc/P8/S13-donnee-P8.json`) : le tableau fait 385 nœuds, soit **128 par
+ * largeur de bloc** — mais l'autocorrélation de sa DÉRIVÉE SECONDE le long
+ * d'une ligne pique à **3 nœuds** (force 0,261), et **25,8 %** des nœuds d'eau
+ * ont une dérivée seconde négligeable. **La donnée vraie est donc trois fois
+ * plus grossière que la grille : ~43 échantillons en travers de 10,4 km, un
+ * tous les 240 m.** Le commentaire de `CHAMP_FOND` (`globe.js`) l'annonçait
+ * déjà — « la bathymétrie plafonne à `BATHY_BASE_ZMAX = 8` — soit 48 pixels de
+ * donnée vraie en travers ».
+ *
+ * **Le glacis de lagon, qui vit sur les 15 % premiers du budget de profondeur,
+ * était donc peint sur un plateau à paliers : d'où les dents.** Mesuré à
+ * l'écran, cadrage côte, masques appariés à +0,52 % : le crop rendait un glacis
+ * de **11,7 %** de sa mer contre **7,97 %** au socle, et l'autocorrélation de
+ * sa dérivée seconde piquait à **12 px** avec une force de **0,22** quand celle
+ * du socle n'a **aucun pic**.
+ *
+ * ⚠️ **ET J'ÉTENDS LE REPLI PLUS LOIN QU'`ocean.js` — JE LE DIS, ET JE DIS
+ * POURQUOI.** `ocean.js` réserve `depth` à l'ALPHA et garde la bathymétrie
+ * SEULE pour le corps de l'eau, avec un avertissement : *« profondeur reelle
+ * (bathymetrie seule - pas le proxy distance-au-rivage, c'etait lui le halo) »*.
+ * **Sur le crop, le repli posé sur la seule alpha ne déplace RIEN** — A/B à
+ * aller-retour, même page, même seconde : glacis **11,72 %** contre 11,71 % au
+ * départ, force périodique **0,24**. Posé sur le GLACIS, il rend **9,69 %** et
+ * **0,048** ; sur les deux, **9,68 %** et **0,021**. ➡️ **Les dents vivent dans
+ * le glacis, pas dans l'alpha.** Le socle peut s'en passer parce que son champ
+ * couvre le bloc à 384 texels et lit la vraie descente du relief au rivage ; le
+ * crop, non. **Le halo qu'`ocean.js` redoute reste un risque DÉCLARÉ : il ne
+ * s'est pas montré à mes deux cadrages, et je ne l'ai pas cherché ailleurs.**
+ *
+ * @param {number} profondeur en unités de SCÈNE (celle de la calotte)
+ * @param {number} distance canal G du champ, normalisé sur ~15 unités de socle
+ * @param {number} unite `uMerUnite` — unités de scène par unité de socle
+ */
+export function profondeurEau(profondeur, distance, unite) {
+  const p = Math.max(0, profondeur)
+  if (!(unite > 0)) return p
+  return Math.max(p, Math.max(0, distance) * REPLI_RIVAGE * unite)
+}
+
 /** Le repère côtier LARGE que l'écume lit. `ocean.js:270`. */
 export function fonduRessac(declin) {
   return pas0a1(0, FONDU_RESSAC_FIN, declin)
@@ -436,6 +496,12 @@ export const GLSL_ECUME = /* glsl */ `
 // ── ecume-mer.js — INJECTÉ, PAS RECOPIÉ ────────────────────────────────────
 float declinRivageMer(float profondeur, float distance) {
   return max(profondeur * ${POIDS_PROFONDEUR.toFixed(1)}, distance);
+}
+// Le repli distance-au-rivage d'ocean.js, dans la monnaie de l'appelant.
+// Tache P8 : voir profondeurEau, le jumeau JS, pour la mesure qui l'exige.
+float profondeurEauMer(float profondeur, float distance, float unite) {
+  float p = max(profondeur, 0.0);
+  return max(p, max(distance, 0.0) * ${REPLI_RIVAGE.toFixed(1)} * unite);
 }
 float fonduRessacMer(float declin) {
   return smoothstep(0.0, ${FONDU_RESSAC_FIN.toFixed(2)}, declin);

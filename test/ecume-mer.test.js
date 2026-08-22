@@ -27,6 +27,8 @@ import {
   FONDU_RESSAC_FIN,
   FONDU_HOULE_FIN,
   declinRivage,
+  REPLI_RIVAGE,
+  profondeurEau,
   fonduRessac,
   fonduHoule,
   ACCALMIE_NEUTRE,
@@ -1125,4 +1127,94 @@ test('⑧l l ORDRE de `opaciteEau` est celui d ocean.js, et le clamp N EST PAS m
     }
   }
   assert.equal(mord, 0, 'l ecretage ne doit jamais mordre la ou le glacis est plein')
+})
+
+// ══════════ ⑦ LE REPLI DISTANCE-AU-RIVAGE — Tâche P8, manque n° 4 ══════════
+//
+// ⛔ **« LA FRANGE CÔTIÈRE QUANTIFIÉE EN MARCHES » TENAIT DANS UNE DEMI-LIGNE.**
+// `ocean.js` : `float depth = max(uWaterY - f.r, f.g * 1.6);` — la bathymétrie,
+// **et la distance au rivage en secours là où le fond marin est une plaine
+// plate**. La calotte du crop n'avait que la bathymétrie, et son champ ne porte
+// qu'un échantillon VRAI tous les 240 m (mesuré : autocorrélation de la dérivée
+// seconde du champ vivant, pic à 3 nœuds sur une grille de 128 par largeur de
+// bloc). Le glacis de lagon était donc peint sur un plateau à paliers.
+
+test('⑦a `profondeurEau` est le `max(bathymétrie, distance × 1,6)` d ocean.js', () => {
+  // ⚠️ **LA MONNAIE FAIT PARTIE DE LA LOI** : `f.g` est normalisé sur ~15 unités
+  // de SOCLE, `vProfondeur` est en unités de SCÈNE. C'est `uMerUnite` qui les
+  // réconcilie, et c'est la cinquième fois que ce chantier voit une valeur juste
+  // dans la mauvaise monnaie.
+  const unite = 0.008226960014635628 // relevé dans la page vivante, La Réunion z12
+  // la bathymétrie domine : le repli ne fait rien
+  assert.equal(profondeurEau(1, 0.001, unite), 1)
+  // le repli domine : 0,5 × 1,6 × unité
+  assert.equal(profondeurEau(0, 0.5, unite), 0.5 * REPLI_RIVAGE * unite)
+  // ⛔ **LE TÉMOIN DE MONNAIE** : sans la conversion, le repli vaudrait 0,8 —
+  // quarante-neuf fois la profondeur maximale mesurée du crop (0,0169 unité).
+  assert.ok(0.5 * REPLI_RIVAGE > 48 * profondeurEau(0, 0.5, unite))
+  // les gardes : une unité absente ou nulle rend la bathymétrie SEULE, jamais NaN
+  assert.equal(profondeurEau(0.3, 0.9, 0), 0.3)
+  assert.equal(profondeurEau(0.3, 0.9, NaN), 0.3)
+  assert.equal(profondeurEau(-2, 0.9, 0), 0)
+  assert.equal(profondeurEau(0.2, -5, unite), 0.2)
+  // monotone en distance, jamais sous la bathymétrie
+  let prec = -1
+  for (let d = 0; d <= 1.0001; d += 0.01) {
+    const v = profondeurEau(0.004, d, unite)
+    assert.ok(v >= 0.004 - 1e-12, 'jamais sous la bathymetrie')
+    assert.ok(v >= prec - 1e-12, 'monotone')
+    prec = v
+  }
+})
+
+test('⑦b `REPLI_RIVAGE` remonte à `ocean.js`, et le test le RELIT là-bas', () => {
+  // ⚠️ **PAS UN LITTÉRAL RECOPIÉ DANS UN TEST** : un chiffre recopié ne rougit
+  // pas quand la source change sous lui. On lit la ligne d'`ocean.js`.
+  const o = sansCommentaires(ocean())
+  const m = /max\(uWaterY - f\.r, f\.g \* ([0-9.]+)\)/.exec(o)
+  assert.ok(m, 'la ligne de repli d ocean.js a disparu ou changé de forme')
+  assert.equal(Number(m[1]), REPLI_RIVAGE)
+})
+
+test('⑦c le GLSL `profondeurEauMer` calcule ce que le jumeau JS calcule', () => {
+  const g = sansCommentaires(GLSL_ECUME)
+  assert.match(g, /float profondeurEauMer\(float profondeur, float distance, float unite\)/)
+  assert.match(g, /max\(p, max\(distance, 0\.0\) \* 1\.6 \* unite\)/)
+  // une seule écriture du corps, dans le morceau injecté
+  assert.equal((g.match(/\* 1\.6 \* unite/g) || []).length, 1)
+})
+
+test('⑦d le nuanceur de la calotte BRANCHE le repli, et SEULEMENT là où il faut', () => {
+  const src = globe()
+  const vert = sansCommentaires(blocGlsl(src, 'MER_VERT'))
+  const frag = sansCommentaires(blocGlsl(src, 'MER_FRAG'))
+  // ① le sommet calcule les DEUX, et le repli passe par la fonction injectée
+  assert.match(vert, /vProfondeur = max\(-champ\.r, 0\.0\);/)
+  assert.match(vert, /vProfondeurEau = profondeurEauMer\(vProfondeur, champ\.g, uMerUnite\);/)
+  // ② le GLACIS le lit — c'est LUI qui portait les dents (mesuré : le repli posé
+  //    sur la seule alpha ne déplace rien, 11,72 % contre 11,71 % au départ)
+  assert.match(frag, /float dLagon = clamp\(vProfondeurEau \/ max\(uMerProfMax \* 0\.15/)
+  // ③ l'ALPHA le lit aussi — c'est le `shoreAA` d'ocean.js, sur `depth`
+  assert.equal((frag.match(/smoothstep\(0\.0, uMerSeuilEau, vProfondeurEau\)/g) || []).length, 2)
+  assert.equal((frag.match(/smoothstep\(0\.0, uMerSeuilEau, vProfondeur\)/g) || []).length, 0)
+  // ⛔ **ET LA TERRE RESTE DÉCIDÉE PAR LA BATHYMÉTRIE NUE.** Une mutation qui
+  // ferait discarder sur `vProfondeurEau` NOIERAIT LA CÔTE : le repli est > 0
+  // partout où la distance au rivage l'est, c'est-à-dire sur la terre aussi.
+  assert.match(frag, /if \(vProfondeur <= 0\.0\) discard;/)
+  assert.equal(/if \(vProfondeurEau <= 0\.0\) discard;/.test(frag), false)
+  // ⛔ **ET LE DÉCLIN CÔTIER AUSSI** : `declinRivageMer` compare DÉJÀ la
+  // profondeur à la distance (`max(prof × 2, distance)`). Lui passer le repli
+  // ferait entrer la distance deux fois, et le ressac d'`ocean.js` n'est pas ça.
+  assert.match(vert, /declinRivageMer\(vProfondeur \/ max\(uMerUnite, 1e-9\), champ\.g\)/)
+  assert.equal(/declinRivageMer\(vProfondeurEau/.test(vert), false)
+  // ⛔ **ET LE DÉFERLEMENT** : `cap = 0,78 × profondeur` est un critère PHYSIQUE
+  // (la hauteur qu'une vague tient sur un fond). Le repli n'est pas une hauteur
+  // d'eau, c'est un pis-aller de teinte.
+  assert.match(vert, /float cap = 0\.78 \* vProfondeur;/)
+  // ④ les deux varyings sont déclarés des DEUX côtés — sans quoi le programme
+  //    ne lie pas, et trois campagnes de ce chantier ont payé un varying muet
+  for (const bloc of [vert, frag]) {
+    assert.match(bloc, /varying float vProfondeur;/)
+    assert.match(bloc, /varying float vProfondeurEau;/)
+  }
 })

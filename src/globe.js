@@ -205,6 +205,13 @@ ${GLSL_ECUME}
 varying vec2 vCrop;
 varying vec2 vLocal;
 varying float vProfondeur;
+// ⛔ LA PROFONDEUR AVEC LE REPLI DISTANCE-AU-RIVAGE — Tache P8. vProfondeur
+// est la bathymetrie NUE (elle decide de la terre, du deferlement et du declin
+// cotier) ; celle-ci porte en plus le secours d ocean.js, et c est elle que le
+// GLACIS DE LAGON et l alpha lisent. La mesure qui l exige est a profondeurEau
+// (monde/ecume-mer.js) : le champ du crop ne porte qu un echantillon vrai tous
+// les 240 m, et le glacis y etait peint sur un plateau a paliers.
+varying float vProfondeurEau;
 // ⚠️ CE N EST PLUS LA DISTANCE BRUTE, ET LE NOM LE DIT — Tache P4. Elle portait
 // champ.g tel quel pendant que les seuils qui la lisent (0,002 / 0,03 / 0,10 /
 // 0,75) sont ceux d ocean.js, cales sur vFade, c est-a-dire sur le declin
@@ -229,6 +236,8 @@ void main() {
   vec2 uvF = aCrop / (2.0 * uMerPortee) + 0.5;
   vec2 champ = texture2D(uMerChamp, uvF).rg;
   vProfondeur = max(-champ.r, 0.0);
+  // le repli d ocean.js, converti dans la monnaie de la calotte par uMerUnite
+  vProfondeurEau = profondeurEauMer(vProfondeur, champ.g, uMerUnite);
   // ⚠️ LA PROFONDEUR EN UNITÉS DE SOCLE, PUIS LE DÉCLIN D'ocean.js. Les deux
   // grandeurs qu'il compare — deux fois la profondeur, et la distance au rivage
   // normalisée sur quinze unités de socle — doivent vivre dans la MÊME monnaie.
@@ -383,6 +392,7 @@ uniform vec2 uMerBord;
 varying vec2 vCrop;
 varying vec2 vLocal;
 varying float vProfondeur;
+varying float vProfondeurEau;
 varying float vFonduRive;
 varying float vCrete;
 varying vec3 vNormMer;
@@ -452,7 +462,15 @@ void main() {
   // la famille que le §Q du plan traque et que uCropCoin a deja illustree.
   // le dégradé lagon vit sur les premiers 15 % du budget — une baie de 30 m est
   // un lagon, le budget couvre des colonnes de mille mètres (ocean.js)
-  float dLagon = clamp(vProfondeur / max(uMerProfMax * 0.15, 1e-9), 0.0, 1.0);
+  //
+  // ⛔ ET IL LIT LA PROFONDEUR AVEC LE REPLI, LA OU ocean.js LIT LA BATHYMETRIE
+  // NUE — Tache P8. C est un ECART au socle, mesure et assume : sur le crop, le
+  // repli pose sur la seule alpha ne deplace RIEN (glacis 11,72 % contre 11,71 %
+  // au depart, force periodique 0,24), pose sur le glacis il rend 9,69 % et
+  // 0,048. LES DENTS VIVENT DANS LE GLACIS. Le pourquoi — un echantillon vrai
+  // de bathymetrie tous les 240 m dans le champ du crop — est a profondeurEau
+  // (monde/ecume-mer.js), avec le halo qu ocean.js redoute, declare comme risque.
+  float dLagon = clamp(vProfondeurEau / max(uMerProfMax * 0.15, 1e-9), 0.0, 1.0);
   // ══════ LE CORPS DE L EAU — Tache P6 ═════════════════════════════════════
   // Il portait mix(uMerPeu, uMerFond, pow(dLagon, 0.7)) : le corps d ocean.js
   // AMPUTE de son glacis de lagon (donc de la tirette de transparence) et de sa
@@ -519,10 +537,10 @@ void main() {
     // vec3(0.96) NU : l ecume du crop restait blanche a minuit quand celle du
     // socle tombe a 0,14 de sa valeur.
     col = blanchirEcume(col, ecume, uMerJour);
-    gl_FragColor = vec4(col, bord * max(smoothstep(0.0, uMerSeuilEau, vProfondeur) * opac, ecume * 0.85));
+    gl_FragColor = vec4(col, bord * max(smoothstep(0.0, uMerSeuilEau, vProfondeurEau) * opac, ecume * 0.85));
     return;
   }
-  gl_FragColor = vec4(col, bord * smoothstep(0.0, uMerSeuilEau, vProfondeur) * opac);
+  gl_FragColor = vec4(col, bord * smoothstep(0.0, uMerSeuilEau, vProfondeurEau) * opac);
 }
 `
 
