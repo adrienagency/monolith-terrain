@@ -353,9 +353,22 @@ test('③c le module est PUR : aucune importation, donc chargeable sous node', (
 test('④a `accalmieDuSocle` LIT les uniformes vivants, et rend le neutre sinon', () => {
   assert.deepEqual(accalmieDuSocle({ uViewCalm: { value: 0.4039 }, uSurfCalm: { value: 0.08 } }),
     { vue: 0.4039, surface: 0.08 })
-  for (const mauvais of [null, undefined, {}, { uViewCalm: { value: NaN }, uSurfCalm: { value: 0.08 } }]) {
+  // ⚠️ **LES DEUX CÔTÉS DU COUPLE, ET SÉPARÉMENT.** Une campagne de mutation a
+  // survécu ici : le cas ne portait un NaN que sur `uViewCalm`, et la faute
+  // symétrique sur `uSurfCalm` passait. **Un guet-apens de test qui ne teste
+  // qu'une moitié d'un couple est un guet-apens qui ne teste rien.**
+  const cas = [
+    null, undefined, {},
+    { uViewCalm: { value: NaN }, uSurfCalm: { value: 0.08 } },
+    { uViewCalm: { value: 0.4 }, uSurfCalm: { value: NaN } },
+    { uViewCalm: { value: NaN }, uSurfCalm: { value: NaN } },
+    { uViewCalm: { value: Infinity }, uSurfCalm: { value: null } },
+    { uViewCalm: {}, uSurfCalm: {} },
+  ]
+  for (const mauvais of cas) {
     const a = accalmieDuSocle(mauvais)
-    assert.ok(Number.isFinite(a.vue) && Number.isFinite(a.surface), `${String(mauvais)}`)
+    assert.ok(Number.isFinite(a.vue), `vue non finie pour ${JSON.stringify(mauvais)}`)
+    assert.ok(Number.isFinite(a.surface), `surface non finie pour ${JSON.stringify(mauvais)}`)
   }
   // ⚠️ **LE NEUTRE EST 1, ET C'EST LA CALOTTE D'AVANT P4 AU BIT PRÈS** — la
   // vertu d'instrument de banc que D13 §① demande de garder.
