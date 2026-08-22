@@ -60,6 +60,8 @@ import {
   FRACTION_BANDE_BORD,
   bordDeMer,
   couleursFondDuSocle,
+  // ⚠️ **Tache P6** : les deux couleurs de la LAME, la meme faute un cran plus haut.
+  couleursEauDuSocle,
   profondeurMaxDuCrop,
 } from '../src/monde/mer-sphere.js'
 // ⚠️ **Tâche P4** : le fondu de rivage n'est plus écrit dans `globe.js`, il est
@@ -2076,4 +2078,41 @@ test('⑭k `ocean.js` REMONTE son échelle de spectre, en unités de SOCLE', asy
   assert.match(src, /echelleSpectre: Number\.isFinite\(u\?\.uLenScale\?\.value\) \? u\.uLenScale\.value : null,/)
   assert.equal(d.get.call({ materials: [{ uniforms: {} }] }).echelleSpectre, null)
   assert.equal(d.get.call({ materials: [{ uniforms: { uLenScale: { value: NaN } } }] }).echelleSpectre, null)
+})
+
+test('⑭l la MER partage le soleil du BLOC avec les tuiles — pas une copie', () => {
+  // ⛔ **SURVIVANTE N° 03 DU PREMIER TOUR, ET ELLE VISAIT UN VRAI TROU.**
+  // Sans ce partage, le soleil de la mer serait figé à la naissance du crop :
+  // la tirette d'heure déplacerait l'ombrage du relief et pas le glint de l'eau.
+  return merPosee().then(({ g, u }) => {
+    assert.equal(u.uSoleilDir, g.uniforms.uSoleilDir, 'uSoleilDir doit être PARTAGÉ')
+    assert.equal(u.uEclairageOn, g.uniforms.uEclairageOn, 'uEclairageOn doit être PARTAGÉ')
+    assert.equal(u.uSunDir, g.uniforms.uSunDir, 'le repli de planète reste partagé lui aussi')
+    // ⚠️ **LE TÉMOIN** : la couleur du soleil, elle, est PROPRE à la mer —
+    // `majReglagesMer` y COPIE celle du socle. Un matériau qui partagerait tout
+    // passerait la boucle ci-dessus sans rien prouver.
+    assert.notEqual(u.uSunColor, g.uniforms.uSunDir)
+    assert.equal(g.uniforms.uSunColor, undefined, 'le globe n a pas de uSunColor à lui')
+  })
+})
+
+test('⑭m `couleursEauDuSocle` LIT deux couleurs, dans cet ordre, et refuse un demi-couple', () => {
+  // ⛔ **SURVIVANTES N° 26 ET 27 DU PREMIER TOUR.** ⑭c exerçait
+  // `majReglagesMer` ; personne n'exerçait le module lui-même, donc ni sa garde
+  // ni son ORDRE. Deux couleurs échangées rendent une mer claire au large et
+  // sombre au rivage — l'inverse exact d'un lagon.
+  const peu = { isColor: true, r: 0.53, g: 0.82, b: 0.88 }
+  const fond = { isColor: true, r: 0.09, g: 0.27, b: 0.4 }
+  const r = couleursEauDuSocle(peu, fond)
+  assert.equal(r.peu, peu, 'le glacis clair doit rester le PREMIER argument')
+  assert.equal(r.fond, fond, 'le bleu du large doit rester le SECOND')
+  // ⚠️ **ET LES DEUX SONT DISTINCTS** : un test sur deux couleurs égales ne
+  // distinguerait pas un échange.
+  assert.notEqual(peu, fond)
+  // le demi-couple, dans les deux sens, et l'absence
+  assert.equal(couleursEauDuSocle(peu, null), null)
+  assert.equal(couleursEauDuSocle(null, fond), null)
+  assert.equal(couleursEauDuSocle(null, null), null)
+  assert.equal(couleursEauDuSocle(undefined, undefined), null)
+  assert.equal(couleursEauDuSocle({ r: 1 }, fond), null, 'un objet sans isColor n est pas une couleur')
 })

@@ -53,6 +53,8 @@ import {
 import { GLSL_MELANGE, APPARENCE_MONDE } from '../src/monde/melange-crop.js'
 import { LUMA_709 } from '../src/monde/naturel-crop.js'
 import { CHAMPS_HABILLAGE, habillageDifferent } from '../src/monde/branchement-crop.js'
+// ⚠️ **Tache P6** : le morceau d irradiance DETACHE, pour les parois.
+import { GLSL_IRRADIANCE } from '../src/monde/eclairage-crop.js'
 
 // ⚠️ **`new Globe()` NE TIENT PAS SOUS NODE SANS CE POSTICHE** : `rebuildRamp`
 // appelle `document.createElement('canvas')` au constructeur. C'est le patron de
@@ -756,4 +758,79 @@ test('⑤g les défauts MONDE sont ceux des modules, pas des nombres recopiés',
   assert.equal(APPARENCE_MONDE.surfaceFx, 0)
   assert.equal(APPARENCE_MONDE.fxOpacity, 0)
   assert.equal(ECLAIRAGE_MONDE.albedoTeinte, 1)
+})
+
+// ══════════ ⑥ LES PAROIS SONT ÉCLAIRÉES COMME LES TUILES — Tâche P6 ════════
+//
+// ⛔ **P3 A ÉCLAIRÉ LES TUILES ET A LAISSÉ LES PAROIS SUR LE SOLEIL DE LA
+// PLANÈTE, C'EST-À-DIRE SUR LA CAMÉRA.** Elle l'écrit noir sur blanc pour les
+// tuiles — *« uSunDir n'est pas le soleil de la scène : en mode surface,
+// main.js le repose À CHAQUE IMAGE sur camGlobe.position tournée de 42 degrés »*
+// — et n'a pas refait le geste sur `_materiauParois`. Relevé le 2026-08-22 au
+// même instant dans la même page : `uSunDir = (0,2305 · −0,3687 · 0,9005)`,
+// **sous l'horizon**, contre `(0,4392 · 0,5629 · −0,7001)` pour le soleil de la
+// scène, et `uShadowColor = #c8a881`, **un beige**. Un flanc que ce faux soleil
+// laisse à `day ≈ 0` rendait donc **exactement `uShadowColor`** : c'est le grand
+// aplat beige de la réserve n° 1 de P5, et ce n'était pas une paroi éclairée.
+//
+// ⚠️ **CES SIX TESTS SONT NÉS D'UNE CAMPAGNE DE MUTATION.** Premier tour de P6 :
+// **60 / 72**, et CINQ des onze survivantes visaient ce seul nuanceur — il
+// n'était gardé par rien du tout. On EXÉCUTE ce qui s'exécute (l'identité des
+// uniformes partagés) et on DÉCLARE ce qui ne s'exécute pas (le texte GLSL).
+
+test('⑥a `_materiauParois` PARTAGE les uniformes du bloc — pas des copies', () => {
+  const g = new Globe({ radius: 100 })
+  const m = g._materiauParois()
+  // ⚠️ **PARTAGÉS, ET C'EST CE QUI FAIT QUE LA TIRETTE D'HEURE LES DÉPLACE.**
+  // `poserHabillage` écrit dans `this.uniforms` ; les parois ne sont rebâties
+  // qu'à l'arrêt. Des copies figeraient leur soleil à la naissance du bloc.
+  for (const nom of ['uSoleilDir', 'uHemiHaut', 'uSoleilIrr', 'uCielIrr', 'uSolIrr', 'uEclairageOn']) {
+    assert.equal(m.uniforms[nom], g.uniforms[nom], `${nom} doit être PARTAGÉ avec les tuiles`)
+  }
+  // les trois d'avant P6 le restent — le repli de planète existe encore
+  for (const nom of ['uSunDir', 'uShadowColor']) {
+    assert.equal(m.uniforms[nom], g.uniforms[nom], `${nom} doit rester partagé`)
+  }
+  assert.equal(m.uniforms.uCol, g.uniforms.uParoiCouleur, 'la couleur de paroi vit dans this.uniforms')
+  // ⚠️ **LE TÉMOIN** : un uniforme qui n'a rien à faire là ne doit PAS être
+  // partagé, sinon la boucle ci-dessus passerait sur n'importe quel matériau.
+  assert.equal(m.uniforms.uRamp, undefined)
+})
+
+test('⑥b le nuanceur des parois porte la loi d IRRADIANCE, et son albédo est couleur × occlusion', () => {
+  // ⚠️ **ASSERTION DE SOURCE, DÉCLARÉE TELLE** : ce nuanceur ne se compile pas
+  // sous node. Ce qu'elle garde est la STRUCTURE de la loi, pas une valeur.
+  const i = GLOBE_SRC.indexOf('_materiauParois() {')
+  assert.ok(i > 0, '_materiauParois doit rester lisible')
+  const bloc = GLOBE_SRC.slice(i, GLOBE_SRC.indexOf('\n  /**', i)).replace(/\/\/[^\n]*/g, '')
+  // l'albédo : la couleur de paroi FOIS l'occlusion de contact par sommet —
+  // c'est ce que le socle fait avec `material.color` et son attribut `color`.
+  assert.match(bloc, /vec3 colBloc = uCol \* vAo/)
+  // l'irradiance : la MÊME fonction que les tuiles, avec les MÊMES cinq entrées
+  assert.match(bloc, /irradianceCrop\(dot\(N, uSoleilDir\), dot\(N, uHemiHaut\), uSoleilIrr, uCielIrr, uSolIrr\)/)
+  // …et son 1 / π, interpolé depuis le module et non écrit à la main
+  assert.match(bloc, /\* \$\{RECIPROQUE_PI\};/)
+  // ⛔ **ET LE TERMINATEUR NE FRANCHIT PAS LA FRONTIÈRE DU BLOC** — P3 le dit
+  // déjà pour les tuiles : « le socle n'a pas de nuit, c'est un objet de studio ».
+  assert.match(bloc, /gl_FragColor = vec4\(uEclairageOn > 0\.5 \? colBloc : colPlanete, 1\.0\);/)
+  // le repli de planète reste, AU BIT PRÈS : c'est lui qu'un globe sans crop rend
+  assert.match(bloc, /vec3 colPlanete = uCol \* \(0\.74 \+ 0\.30 \* diff\) \* vAo;/)
+  assert.match(bloc, /colPlanete = mix\(uShadowColor, colPlanete, 0\.10 \+ 0\.90 \* day\);/)
+})
+
+test('⑥c `GLSL_IRRADIANCE` est INJECTÉ dans `GLSL_ECLAIRAGE`, jamais réécrit', () => {
+  // ⛔ **DEUX ÉCRITURES DE LA MÊME LOI, C'EST LA FAUTE QUE D13 §③ NOMME**, et ce
+  // chantier l'a déjà payée sur `blLum`, sur l'écume et sur `chopLook`. Le
+  // morceau est détaché parce que le nuanceur des parois est NU — ni rampe, ni
+  // peinture, donc pas de `natLuminance` dont `GLSL_ECLAIRAGE` dépend.
+  const src = readFileSync(new URL('../src/monde/eclairage-crop.js', import.meta.url), 'utf8')
+  assert.match(src, /\$\{GLSL_IRRADIANCE\}\nvec3 eclairerCrop/)
+  // une seule écriture du corps, dans le morceau détaché
+  const nCorps = (src.match(/soleil \* max\(ndl, 0\.0\) \+ mix\(sol, ciel, 0\.5 \* ndu \+ 0\.5\)/g) || []).length
+  assert.equal(nCorps, 1, `la loi doit être écrite UNE fois, pas ${nCorps}`)
+  // …et le texte assemblé la porte quand même
+  assert.match(GLSL_ECLAIRAGE, /vec3 irradianceCrop\(float ndl, float ndu, vec3 soleil, vec3 ciel, vec3 sol\)/)
+  // ⚠️ **ET LE GLOBE INJECTE LE MORCEAU DÉTACHÉ DANS LES PAROIS**, une fois.
+  assert.equal((GLOBE_NU.match(/\$\{GLSL_IRRADIANCE\}/g) || []).length, 1)
+  assert.match(GLOBE_NU, /GLSL_IRRADIANCE,/)
 })

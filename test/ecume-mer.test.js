@@ -895,3 +895,88 @@ test('⑧j `ocean.js` REMONTE la lame, les couleurs, le soleil et le spectre', (
   // pas la lampe lue une seconde fois : une grandeur, un écrivain.
   assert.match(src, /if \(sun && mat\.uniforms\.uSunColor\) mat\.uniforms\.uSunColor\.value\.copy\(sun\.color\)/)
 })
+
+test('⑧k les trois lois `vec3` de la lame gardent leur STRUCTURE, terme par terme', () => {
+  // ⛔ **SURVIVANTES N° 30 ET 38 DU PREMIER TOUR.** `corpsEau`, `clapotNormale`
+  // et `blanchirEcume` rendent des `vec3` : le traducteur de ⑧f ne prend que
+  // les `float`, et rien ne les gardait. ⚠️ **ASSERTIONS DE SOURCE, DÉCLARÉES
+  // TELLES** — elles gardent la STRUCTURE de la loi ; les VALEURS, elles, sont
+  // gardées par ⑧g, qui les confronte au module.
+  //
+  // ⚠️ **ET LES BORNES SONT INTERPOLÉES DEPUIS LES CONSTANTES DU MODULE, PAS
+  // RECOPIÉES** : `GLSL_LAME_EAU` est le texte RÉSOLU (le gabarit est évalué au
+  // chargement), donc un motif qui porterait `0.7` en dur cesserait de suivre
+  // `LAGON_EXPO`. C'est la leçon de la mutation survivante de P2.
+  const e = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const corps = new RegExp(
+    'vec3 corpsEau\\(vec3 peu, vec3 fond, float dLagon, float lagon, float jour\\) \\{\\s*\\n'
+    + '\\s*vec3 c = mix\\(fond, mix\\(peu, fond, pow\\(dLagon, ' + e(LAGON_EXPO.toFixed(1)) + '\\)\\), lagon\\);\\s*\\n'
+    + '\\s*return c \\* mix\\(vec3\\(' + e(NUIT_EAU[0].toFixed(2)) + ', ' + e(NUIT_EAU[1].toFixed(2)) + ', '
+    + e(NUIT_EAU[2].toFixed(2)) + '\\), vec3\\(1\\.0\\), jour\\);')
+  assert.match(GLSL_LAME_EAU, corps, 'le glacis de lagon doit encadrer le dégradé, et la nuit multiplier le tout')
+  // ⚠️ **LE TÉMOIN QUI DIT QUE CE MOTIF DISTINGUE QUELQUE CHOSE** : privé du
+  // glacis — c'est mot pour mot ce que faisait la survivante n° 30 — il doit
+  // rougir. Sans ce témoin, un motif trop lâche « passerait » sans rien garder.
+  assert.ok(!corps.test(GLSL_LAME_EAU.replace('mix(fond, mix(peu, fond,', 'mix(peu, fond,')),
+    'le motif du corps doit rougir si le glacis disparaît')
+
+  // le clapot porte l'accalmie de vue ET le réglage de clapot — survivante n° 38
+  const clapot = new RegExp(
+    'vec3 clapotNormale\\(vec3 normale, float detail, float calmeVue, float b1, float b2\\) \\{\\s*\\n'
+    + '\\s*return normalize\\(normale \\+ detail \\* ' + e(CLAPOT_NORMALE.gain.toFixed(1))
+    + ' \\* calmeVue \\* vec3\\(b1 - 0\\.5, ' + e(CLAPOT_NORMALE.haut.toFixed(1)) + ', b2 - 0\\.5\\)\\);')
+  assert.match(GLSL_LAME_EAU, clapot, 'le clapot doit porter le réglage ET l accalmie de vue')
+  assert.ok(!clapot.test(GLSL_LAME_EAU.replace(' * calmeVue * vec3(b1', ' * vec3(b1')),
+    'le motif du clapot doit rougir si l accalmie disparaît')
+
+  // l'écume se blanchit VERS un blanc qui tombe la nuit
+  const blanc = new RegExp(
+    'return mix\\(col, vec3\\(' + e(BLANC_ECUME.toFixed(2)) + '\\) \\* mix\\('
+    + e(NUIT_ECUME.toFixed(2)) + ', 1\\.0, jour\\), ecume\\);')
+  assert.match(GLSL_LAME_EAU, blanc)
+  assert.ok(!blanc.test(GLSL_LAME_EAU.replace(' * mix(' + NUIT_ECUME.toFixed(2) + ', 1.0, jour)', '')),
+    'le motif du blanchiment doit rougir si la nuit disparaît')
+})
+
+test('⑧l l ORDRE de `opaciteEau` est celui d ocean.js, et le clamp N EST PAS mort', () => {
+  // ⚠️ **UNE MUTATION DE MON PREMIER TOUR ÉTAIT NEUTRE, ET JE LE DIS PLUTÔT QUE
+  // DE LA COMPTER.** « le plancher de Fresnel tombe AVANT l'écrêtage » —
+  // `max(clamp(x), y)` contre `clamp(max(x, y))` — est mathématiquement
+  // IDENTIQUE tant que `y` reste entre les deux bornes. Or `fresnel` est écrêté
+  // à 0,5 dans les deux nuanceurs, donc `y = fresnel × 0,5 ≤ 0,25`, et
+  // 0,05 ≤ 0,25 ≤ 0,97. **Ce n'était pas un trou de test : la permutation ne
+  // change rien.** Ce test le DÉMONTRE au lieu de l'affirmer.
+  let n = 0
+  for (let d = 0; d <= 1.0001; d += 0.01) {
+    for (let t = 0; t <= 1.0001; t += 0.01) {
+      for (const f of [0, 0.1, 0.25, 0.5]) {
+        const lagon = poidsLagon(t)
+        const brut = OPACITE_EAU.bas + (OPACITE_EAU.haut - OPACITE_EAU.bas) * Math.pow(d, OPACITE_EAU.expo)
+        const x = brut * (TIRETTE_EAU.opaque + (TIRETTE_EAU.clair - TIRETTE_EAU.opaque) * t)
+        const y = f * 0.5
+        const ordreA = Math.max(Math.min(OPACITE_ECRETAGE.haut, Math.max(OPACITE_ECRETAGE.bas, x)), y)
+        const ordreB = Math.min(OPACITE_ECRETAGE.haut, Math.max(OPACITE_ECRETAGE.bas, Math.max(x, y)))
+        assert.equal(ordreA, ordreB, `les deux ordres divergent a d=${d} t=${t} f=${f}`)
+        assert.ok(Math.abs(opaciteEau(d, t, f) - (1 + (ordreA - 1) * lagon)) < 1e-15)
+        n++
+      }
+    }
+  }
+  assert.ok(n > 40000, `${n} points seulement`)
+  // ⛔ **ET LE CLAMP LUI-MÊME EST INERTE DANS LA PLAGE VISIBLE, C'EST MESURÉ.**
+  // Là où le glacis est plein (`transparence >= 0,35`), le facteur de tirette
+  // vaut au plus 0,8385 et l'opacité brute au plus 0,95 : le produit plafonne à
+  // 0,7966, sous les 0,97 de l'écrêtage haut ; et au plus bas 0,45 × 0,26 =
+  // 0,117, au-dessus des 0,05 de l'écrêtage bas. **Il ne mord que là où
+  // `mix(1, w, lagon)` l'efface.** Dit ici plutôt que découvert par une
+  // survivante de plus.
+  let mord = 0
+  for (let d = 0; d <= 1.0001; d += 0.01) {
+    for (let t = LAGON_FIN; t <= 1.0001; t += 0.01) {
+      const brut = OPACITE_EAU.bas + (OPACITE_EAU.haut - OPACITE_EAU.bas) * Math.pow(d, OPACITE_EAU.expo)
+      const x = brut * (TIRETTE_EAU.opaque + (TIRETTE_EAU.clair - TIRETTE_EAU.opaque) * t)
+      if (x > OPACITE_ECRETAGE.haut || x < OPACITE_ECRETAGE.bas) mord++
+    }
+  }
+  assert.equal(mord, 0, 'l ecretage ne doit jamais mordre la ou le glacis est plein')
+})
