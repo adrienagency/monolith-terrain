@@ -64,7 +64,11 @@ import {
 } from '../src/monde/mer-sphere.js'
 // ⚠️ **Tâche P4** : le fondu de rivage n'est plus écrit dans `globe.js`, il est
 // INJECTÉ depuis le module partagé — le test suit donc la valeur à sa source.
-import { FONDU_HOULE_FIN, GLSL_ECUME, accalmieDuSocle, ETAT_MER_NEUTRE, etatMerDuSocle } from '../src/monde/ecume-mer.js'
+import {
+  FONDU_HOULE_FIN, GLSL_ECUME, accalmieDuSocle, ETAT_MER_NEUTRE, etatMerDuSocle,
+  // ⚠️ **Tâche P6** : la lame d'eau, quatre réglages de plus par le même maillon.
+  LAME_EAU_NEUTRE, lameEauDuSocle,
+} from '../src/monde/ecume-mer.js'
 import { zoomPourEmprise } from '../src/monde/flux-terrain.js'
 // ⚠️ L'ALIAS QUE VITE POSE (`vite.config.js`), RÉSOLU SANS VITE — le patron de
 // `test/damier-mer-runtime.test.js` : la copie vendorée fait foi ici, et cinq
@@ -633,7 +637,10 @@ test('⑤d `ocean.js` A CESSÉ de porter sa propre boucle — garde-fou de SOURC
   // ⚠️ **Tâche P4** : l'importation en porte maintenant DEUX — `GLSL_JUPE_MER`
   // est la couleur du rideau d'eau, extraite de `SKIRT_FRAG` pour que le crop
   // lise les mêmes six lignes. Le garde-fou reste le même : une seule écriture.
-  assert.match(src, /import \{ distanceRivage, GLSL_JUPE_MER \} from '\.\/monde\/mer-sphere\.js'/)
+  // ⚠️ **Tâche P6** : elle en porte TROIS — `couleursEauDuSocle` remonte les
+  // deux couleurs de la LAME d'eau, celles que `poserMer` prenait sur son propre
+  // défaut faute d'appelant pour son paramètre `couleurs`.
+  assert.match(src, /import \{ distanceRivage, GLSL_JUPE_MER, couleursEauDuSocle \} from '\.\/monde\/mer-sphere\.js'/)
   assert.ok(!/float alpha = mix\(0\.55, 0\.94, uFrost\)/.test(src),
     'la couleur du rideau est encore ecrite dans ocean.js')
   assert.match(src, /gl_FragColor = couleurJupeMer\(uDeep, uSky, g, uFrost, uDayLight, grain\);/)
@@ -1320,6 +1327,11 @@ test('⑫a `majReglagesMer` pose les DEUX accalmies, le givre et le ciel', () =>
       // mer doit pouvoir lire dans le résultat qu'il a hérité du neutre.
       etat: ETAT_MER_NEUTRE,
       fond: false,
+      // ⚠️ **Tâche P6, MÊME RÈGLE POUR LA LAME D'EAU** : sans `eau`, le neutre
+      // d'`ocean.js`, et le retour le dit au lieu de le taire.
+      eau: LAME_EAU_NEUTRE,
+      couleurs: false,
+      spectre: false,
     })
   })
 })
@@ -1471,10 +1483,19 @@ test('⑫j `reglagesMer` d `ocean.js` LIT vraiment ses trois réglages — exéc
     // ⚠️ **Tâche P5** : le faux socle ci-dessus ne porte AUCUN des six uniformes
     // d'état de mer, donc l'accesseur doit rendre le neutre — champ par champ.
     etat: ETAT_MER_NEUTRE,
+    // ⚠️ **Tâche P6, MÊME RÈGLE** : ni `uTransp`, ni `uSunFx`, ni `uDayLight`,
+    // ni `uDetail`, ni `uShallowT`/`uDeep`, ni `uSunColor` — donc le neutre, un
+    // `null` de couleurs (jamais un demi-couple) et un spectre à deux `null`.
+    eau: LAME_EAU_NEUTRE,
+    couleurs: null,
+    soleilCouleur: null,
+    spectre: { a: null, b: null },
   })
   // sans mer construite : le NEUTRE, c'est-à-dire la calotte d'avant P4
-  assert.deepEqual(d.get.call({ materials: [] }),
-    { vue: 1, surface: 1, givre: 0, ciel: null, etat: ETAT_MER_NEUTRE })
+  assert.deepEqual(d.get.call({ materials: [] }), {
+    vue: 1, surface: 1, givre: 0, ciel: null, etat: ETAT_MER_NEUTRE,
+    eau: LAME_EAU_NEUTRE, couleurs: null, soleilCouleur: null, spectre: null,
+  })
   // un givre non fini ne remonte pas
   assert.equal(d.get.call({ materials: [{ uniforms: { uFrost: { value: NaN } } }] }).givre, 0)
   // ⛔ **ET L'ÉTAT DE MER REMONTE VRAIMENT — la réserve n° 1 de P4, exécutée.**

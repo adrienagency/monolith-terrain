@@ -35,10 +35,18 @@ import { resChamp, spanChamp } from './mer-emprise.js'
 // que `crop-sphere`, `parois-crop` et `habillage-crop`, dont aucun ne remonte
 // jusqu'ici. Vérifié : `grep -rn "from '.*ocean" src/monde/` ne rend RIEN (le nom
 // du fichier n'y apparaît que dans des commentaires).
-import { distanceRivage, GLSL_JUPE_MER } from './monde/mer-sphere.js'
+import { distanceRivage, GLSL_JUPE_MER, couleursEauDuSocle } from './monde/mer-sphere.js'
 // L'ÉCUME — une seule loi, deux lecteurs (Tâche P4). Même motif, même absence
 // de cycle : `monde/ecume-mer.js` n'importe RIEN du tout.
-import { GLSL_ECUME, FREQ_TAVELURE, accalmieDuSocle, etatMerDuSocle } from './monde/ecume-mer.js'
+// ⚠️ **ET LA LAME D'EAU DEPUIS LA TÂCHE P6**, pour exactement la même raison :
+// les trois lois de `corpsEau` / `opaciteEau` / `clapotNormale` ne vivaient QUE
+// dans le fragment ci-dessous, et la calotte du globe en portait une version
+// TRONQUÉE — sans la tirette de transparence, sans le glacis de lagon, sans la
+// nuit. Le texte est le même des deux côtés parce qu'il n'y en a qu'un.
+import {
+  GLSL_ECUME, GLSL_LAME_EAU, FREQ_TAVELURE,
+  accalmieDuSocle, etatMerDuSocle, lameEauDuSocle,
+} from './monde/ecume-mer.js'
 // L'emprise du DAMIER — même machinerie, autre cause : ici la mer s'étend parce
 // que des cases voisines sont posées, pas parce que le relief défile.
 import { empriseDeMer, coteGeometrique, geometrieDeMer } from './damier-carre.js'
@@ -424,6 +432,7 @@ float vnoise(vec2 p) {
              mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
 }
 ${GLSL_ECUME}
+${GLSL_LAME_EAU}
 
 // sun caustics — the classic iterated-phase shimmer (Hoskins-style), cheap
 // and convincing where the water is clear
@@ -496,10 +505,14 @@ void main() {
   float dpow = pow(d01, 0.65);
 
   // ripple micro-normals on top of the Gerstner normal
+  // ⚠️ **clapotNormale VIENT DE monde/ecume-mer.js DEPUIS LA TACHE P6** — la
+  // calotte du globe n'avait AUCUN clapot de normale, et c'est ce qui faisait
+  // que sa lame d'eau RETIRAIT de la variation la ou celle-ci en AJOUTE
+  // (reserve n° 2 de P5). Le texte est injecte, pas recopie (GLSL_LAME_EAU).
   vec2 rp = xz * 6.0;
   float n1 = vnoise(rp + vec2(uTime * 0.9, 0.0));
   float n2 = vnoise(rp * 1.9 - vec2(0.0, uTime * 1.2));
-  vec3 N = normalize(vNorm + uDetail * 0.6 * uViewCalm * vec3(n1 - 0.5, 0.9, n2 - 0.5));
+  vec3 N = clapotNormale(vNorm, uDetail, uViewCalm, n1, n2);
 
   vec3 V = normalize(cameraPosition - vWorld);
   vec3 L = normalize(uSunDir);
@@ -532,9 +545,9 @@ void main() {
 #endif
   // transp 0 -> teinte pleine uDeep (peinture opaque, eau foncee possible) ;
   // en montant le slider, le glacis clair des faibles profondeurs s'installe
-  float lagoonW = smoothstep(0.0, 0.35, uTransp);
-  vec3 body = mix(uDeep, mix(uShallowT, uDeep, pow(dRt, 0.7)), lagoonW);
-  body *= mix(vec3(0.10, 0.16, 0.30), vec3(1.0), uDayLight);
+  // ⚠️ **corpsEau ET poidsLagonEau VIENNENT DE monde/ecume-mer.js — Tache P6.**
+  float lagoonW = poidsLagonEau(uTransp);
+  vec3 body = corpsEau(uShallowT, uDeep, dRt, lagoonW, uDayLight);
 
   // large-scale patchiness: without it the glitter and the whitecaps line up
   // in parallel rows along the dominant swell — the "repeating waves" flag
@@ -575,11 +588,11 @@ void main() {
   // v45 : la tirette couvre une VRAIE plage — à fond, l'eau du large garde
   // ~25 % de teinte (le fond se lit clairement) au lieu du plancher 47 % qui
   // rendait la transparence indiscernable (retour Adrien)
-  float wOp = mix(0.45, 0.95, pow(dRt, 0.55));
-  wOp = clamp(wOp * mix(1.15, 0.26, uTransp), 0.05, 0.97);
-  wOp = max(wOp, fres * 0.5);
-  // sous ~0.35 de transparence : PEINTURE pleine (eau foncee comme avant)
-  wOp = mix(1.0, wOp, lagoonW);
+  // ⚠️ **opaciteEau VIENT DE monde/ecume-mer.js — Tache P6.** Sous ~0.35 de
+  // transparence la lame redevient une PEINTURE pleine ; la calotte du globe
+  // n'avait ni ce palier ni le facteur de tirette, donc une eau 1,556 fois trop
+  // opaque au reglage vivant du 2026-08-22.
+  float wOp = opaciteEau(dRt, uTransp, fres);
   vec2 screenUv = gl_FragCoord.xy / uResolution;
   // v45 : la réfraction reste ACTIVE près des côtes (0.3 plancher) — c'est là
   // que le fond a du détail à tordre ; au large un fond uniforme ne montre
@@ -589,8 +602,11 @@ void main() {
   col = mix(through, col, wOp);
   // reflets de surface : jamais attenues par la transparence
   col = mix(col, uSky, fres * 0.35);
-  col += uSunColor * spec * uSunFx * (0.35 + 0.85 * patchy);
-  col = mix(col, vec3(0.96) * mix(0.14, 1.0, uDayLight), foam);
+  // ⚠️ **glintTavelureMer ET blanchirEcume VIENNENT DE monde/ecume-mer.js —
+  // Tache P6.** La calotte du globe ne dosait pas son glint (uSunFx) et ne
+  // faisait pas tomber son ecume la nuit : deux entrees, jamais branchees.
+  col += uSunColor * spec * uSunFx * glintTavelureMer(patchy);
+  col = blanchirEcume(col, foam, uDayLight);
   float alpha = max(shoreAA, foam * 0.85);
 #ifndef IS_LAKE
   alpha *= 1.0 - smoothstep(0.35, 0.65, coastLand); // la lame d'eau meurt en douceur sur la terre du masque
@@ -1846,6 +1862,31 @@ export class RealWater {
       // **Six sur six différents**, dont la VITESSE, que P4 n'avait pas nommée
       // et qui faisait défiler la houle du crop 2,5 fois trop vite.
       etat: etatMerDuSocle(u),
+      // ══════ LA LAME D'EAU — Tâche P6, la réserve n° 2 de P5 ═══════════════
+      //
+      // ⛔ **QUATRE RÉGLAGES DE PLUS QUE LA CALOTTE N'A JAMAIS REÇUS**, et
+      // aucun n'avait de paramètre pour les porter : `uTransp` (0,57 au relevé
+      // du 2026-08-22), `uSunFx` (0,72), `uDayLight`, `uDetail` (0,75). C'est
+      // la NAPPE, celle dont P5 a mesuré qu'elle portait « presque tout
+      // l'écart » sans pouvoir l'attribuer.
+      eau: lameEauDuSocle(u),
+      // ⚠️ **ET LES DEUX COULEURS DE LA LAME.** `poserMer` porte un paramètre
+      // `couleurs` que **personne n'a jamais passé** : la calotte vit sur
+      // `couleursEau({})`, donc sur `params.lakeColor ?? '#8fc6e8'`. Le témoin
+      // du 2026-08-22 (lakeColor posé à `#c81e1e`) : le socle bouge, la
+      // calotte non. Même faute que `couleursFond` (P5) et `uSky` (P4).
+      couleurs: couleursEauDuSocle(u?.uShallowT?.value ?? null, u?.uDeep?.value ?? null),
+      // ⚠️ **LA COULEUR DU SOLEIL, LUE SUR LA MER DU SOCLE ET NON SUR LA
+      // LAMPE.** `update(dt, sun)` y recopie `sun.color` par image ; la calotte
+      // portait `new THREE.Color(0xffffff)` **codé en dur** contre `#fff7e6`
+      // vivant. Passer par la lampe aurait fait un second chemin pour une
+      // grandeur dont `update` est déjà l'unique écrivain.
+      soleilCouleur: u?.uSunColor?.value ?? null,
+      // ⚠️ **LE SPECTRE, PAR RÉFÉRENCE — Tâche P6.** `_applySea` assigne déjà
+      // `u.a` / `u.b` à TOUS les matériaux du socle sans les cloner ; la calotte
+      // du globe entre dans la même liste de lecteurs. Un seul écrivain,
+      // `_applySea`, et plus deux mers tirées séparément au hasard.
+      spectre: u ? { a: u.uWaveA?.value ?? null, b: u.uWaveB?.value ?? null } : null,
     }
   }
 

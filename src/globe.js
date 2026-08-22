@@ -122,6 +122,11 @@ import { GLSL_MELANGE, APPARENCE_MONDE } from './monde/melange-crop.js'
 // pas deux écritures de l'éclairage à garder d'accord.
 import {
   GLSL_ECLAIRAGE,
+  // ⚠️ **LE MORCEAU DÉTACHÉ, POUR LES PAROIS — Tâche P6.** Leur nuanceur est
+  // NU : ni rampe, ni peinture, donc pas de `natLuminance`, dont
+  // `GLSL_ECLAIRAGE` dépend. C'est la MÊME loi, injectée seule.
+  GLSL_IRRADIANCE,
+  RECIPROQUE_PI,
   ECLAIRAGE_MONDE,
   directionSoleilLocale,
   hautLocal,
@@ -135,7 +140,15 @@ import {
 // Même patron encore : la loi vit une seule fois dans un module PUR, `ocean.js`
 // et ce fichier injectent le MÊME texte. L'en-tête d'`ecume-mer.js` nomme les
 // quatre entrées qui manquaient et donne leur mesure.
-import { GLSL_ECUME, FREQ_TAVELURE, BLANC_ECUME, ACCALMIE_NEUTRE, ETAT_MER_NEUTRE } from './monde/ecume-mer.js'
+// ⚠️ **ET LA LAME D'EAU DEPUIS LA TÂCHE P6**, pour la même raison et par le même
+// chemin : `corpsEau`, `opaciteEau`, `clapotNormale`, `glintTavelureMer` et
+// `blanchirEcume` vivaient UNIQUEMENT dans `ocean.js`, et ce fichier n'en
+// portait qu'une version tronquée — sans la tirette de transparence, sans le
+// glacis de lagon, sans la nuit, et sans le moindre clapot de normale.
+import {
+  GLSL_ECUME, GLSL_LAME_EAU, FREQ_TAVELURE,
+  ACCALMIE_NEUTRE, ETAT_MER_NEUTRE, LAME_EAU_NEUTRE, CLAPOT_NORMALE,
+} from './monde/ecume-mer.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -323,6 +336,25 @@ uniform float uMerUnite;      // unites de scene par unite de socle — Tache P4
 uniform float uMerCalmeVue;
 uniform float uMerCalmeSurf;
 uniform float uMerGivre;   // le socle de verre du mode plat (uFrost) — 0 = pas de verre
+// ══════ LA LAME D'EAU — Tache P6, la reserve n° 2 de P5 ═══════════════════
+// QUATRE reglages d'ocean.js que la calotte n'avait JAMAIS recus, et aucun
+// parametre ne les portait. Releves le 2026-08-22 dans la page vivante :
+// uTransp = 0,57 (la lame du crop etait 1,556 fois trop opaque), uSunFx = 0,72
+// (28 % de glint de trop), uDetail = 0,75 (la calotte n'avait AUCUN clapot de
+// normale), uDayLight (la mer du crop ne s'eteint pas la nuit).
+uniform float uMerTransp;
+uniform float uMerSoleilFx;
+uniform float uMerJour;
+uniform float uMerDetail;
+// ══════ LE SOLEIL DU BLOC, PAS CELUI DE LA PLANETE — Tache P6 ════════════
+// uSunDir est repose A CHAQUE IMAGE sur camGlobe.position tournee de 42° : le
+// glint de la mer du crop suivait la CAMERA. Releve le meme jour :
+// uSunDir = (0,2305 -0,3687 0,9005) — SOUS l'horizon — pendant que le soleil de
+// la scene pointait (0,4392 0,5629 -0,7001). uSoleilDir, lui, est deja le
+// soleil du socle place dans le repere du globe (Tache P3) ; il n'est valable
+// que sous uEclairageOn, et sans lui la calotte reprend la loi de planete.
+uniform vec3 uSoleilDir;
+uniform float uEclairageOn;
 uniform float uCropCoin;
 uniform float uCropCoinN;
 // LE BORD DE LA MER — Tache J. (debut, fin) du fondu, en demi-cotes de crop,
@@ -344,6 +376,7 @@ varying vec3 vMonde;
 varying float vRichesse;
 varying float vJupe;
 ${GLSL_ECUME}
+${GLSL_LAME_EAU}
 ${GLSL_JUPE_MER}
 
 float bruitMer(vec2 q) {
@@ -401,19 +434,41 @@ void main() {
   float bord = 1.0 - smoothstep(uMerBord.x, uMerBord.y, dBord);
   if (bord <= 0.0) discard;
 
-  float d01 = clamp(vProfondeur / max(uMerProfMax, 1e-9), 0.0, 1.0);
+  // ⛔ ICI VIVAIT UN d01 QUE PERSONNE NE LISAIT — un uniforme mort de plus, de
+  // la famille que le §Q du plan traque et que uCropCoin a deja illustree.
   // le dégradé lagon vit sur les premiers 15 % du budget — une baie de 30 m est
   // un lagon, le budget couvre des colonnes de mille mètres (ocean.js)
   float dLagon = clamp(vProfondeur / max(uMerProfMax * 0.15, 1e-9), 0.0, 1.0);
-  vec3 col = mix(uMerPeu, uMerFond, pow(dLagon, 0.7));
+  // ══════ LE CORPS DE L EAU — Tache P6 ═════════════════════════════════════
+  // Il portait mix(uMerPeu, uMerFond, pow(dLagon, 0.7)) : le corps d ocean.js
+  // AMPUTE de son glacis de lagon (donc de la tirette de transparence) et de sa
+  // nuit. corpsEau est la loi entiere, injectee depuis monde/ecume-mer.js.
+  vec3 col = corpsEau(uMerPeu, uMerFond, dLagon, poidsLagonEau(uMerTransp), uMerJour);
 
   vec3 V = normalize(cameraPosition - vMonde);
-  vec3 N = normalize(vNormMer);
-  vec3 L = normalize(uSunDir);
+  // ══════ LE CLAPOT DE NORMALE — Tache P6, ET LA CALOTTE N EN AVAIT AUCUN ══
+  // ocean.js : rp = xz * 6.0, ou xz est en UNITES DE SOCLE. On convertit par
+  // uMerUnite, exactement comme la tavelure depuis P4 — la meme monnaie, pas
+  // une seconde. C est ce terme qui fait qu une lame d eau AJOUTE de la
+  // variation au lieu d en retirer (mesure de la reserve n° 2 de P5).
+  vec2 rp = vLocal / max(uMerUnite, 1e-9) * ${CLAPOT_NORMALE.freq.toFixed(1)};
+  float r1 = bruitMer(rp + vec2(uMerTemps * 0.9, 0.0));
+  float r2 = bruitMer(rp * 1.9 - vec2(0.0, uMerTemps * 1.2));
+  vec3 N = clapotNormale(normalize(vNormMer), uMerDetail, uMerCalmeVue, r1, r2);
+  // ══════ LE SOLEIL DU BLOC, PAS CELUI DE LA PLANETE — Tache P6 ════════════
+  // uSunDir suit la CAMERA (main.js le repose par image sur camGlobe.position
+  // tournee de 42°). Releve le 2026-08-22 : il pointait SOUS l horizon
+  // (y = -0,3687) pendant que le soleil de la scene etait a +0,5629. Le glint de
+  // la mer du crop ne venait donc pas du soleil. uSoleilDir est le meme soleil
+  // que celui des tuiles depuis P3 — pas un second, LE meme uniforme.
+  vec3 L = normalize(uEclairageOn > 0.5 ? uSoleilDir : uSunDir);
   float fres = min(pow(1.0 - max(dot(N, V), 0.0), 5.0), 0.5);
+  // ⚠️ APRES fres, COMME DANS ocean.js : le plancher de Fresnel en fait partie.
+  float opac = opaciteEau(dLagon, uMerTransp, fres);
   col = mix(col, uSky, fres * 0.35);
   vec3 H = normalize(L + V);
-  col += uSunColor * pow(max(dot(N, H), 0.0), uMerBrillance) * (0.5 + 1.6 * fres) * vRichesse;
+  // ⚠️ uMerSoleilFx : la tirette « soleil sur l eau » du socle, jamais branchee.
+  col += uSunColor * pow(max(dot(N, H), 0.0), uMerBrillance) * (0.5 + 1.6 * fres) * uMerSoleilFx * vRichesse;
 
   // ══════ L'ÉCUME — ET ELLE NE COÛTE RIEN AU-DELÀ DE LA BANDE ═══════════════
   if (vRichesse > 0.0) {
@@ -446,11 +501,14 @@ void main() {
     // presentes — c est exactement ce qui manquait.
     float ecume = clamp(ecumeMer(vCrete, vFonduRive, n1, n2, tavelure, uMerTemps,
       uMerEcume, uMerEcumeEchelle, uMerCalmeVue, uMerCalmeSurf) * vRichesse, 0.0, 1.0);
-    col = mix(col, vec3(${BLANC_ECUME.toFixed(2)}), ecume);
-    gl_FragColor = vec4(col, bord * max(smoothstep(0.0, uMerSeuilEau, vProfondeur) * mix(0.45, 0.95, pow(dLagon, 0.55)), ecume * 0.85));
+    // ⚠️ blanchirEcume PORTE LA NUIT — Tache P6. La ligne d avant ecrivait
+    // vec3(0.96) NU : l ecume du crop restait blanche a minuit quand celle du
+    // socle tombe a 0,14 de sa valeur.
+    col = blanchirEcume(col, ecume, uMerJour);
+    gl_FragColor = vec4(col, bord * max(smoothstep(0.0, uMerSeuilEau, vProfondeur) * opac, ecume * 0.85));
     return;
   }
-  gl_FragColor = vec4(col, bord * smoothstep(0.0, uMerSeuilEau, vProfondeur) * mix(0.45, 0.95, pow(dLagon, 0.55)));
+  gl_FragColor = vec4(col, bord * smoothstep(0.0, uMerSeuilEau, vProfondeur) * opac);
 }
 `
 
@@ -3401,9 +3459,21 @@ export class Globe {
     fovDeg = FOV_DEG,
     largeurBande = 4,
     altitudeM = 32274,
-    couleurs = null,
-    graine = 0,
   } = {}) {
+    // ⛔ **`couleurs` ET `graine` NE SONT PLUS DES PARAMÈTRES — Tâche P6, ET
+    // C'EST LE MÊME GESTE QUE P5 SUR LES QUATRE PRÉCÉDENTS.** Ils l'étaient
+    // depuis la Tâche F, et **aucun appelant ne les a jamais passés** : la lame
+    // d'eau du crop vivait sur `couleursEau({})` — donc sur
+    // `params.lakeColor ?? '#8fc6e8'`, le DÉFAUT — et son spectre sur un tirage
+    // au hasard, pendant que le socle vit sur sa palette et sur
+    // `params.seaSeed`. ⚡ **Et la coïncidence a failli les cacher** : au relevé
+    // du 2026-08-22 les deux couleurs étaient IDENTIQUES au caractère près,
+    // parce que `params.lakeColor` valait justement le défaut du module. C'est
+    // le témoin (lakeColor posé à `#c81e1e` dans la page vivante) qui a montré
+    // que la calotte ne bougeait pas. Les deux arrivent désormais par
+    // `majReglagesMer`, **par image, depuis les uniformes VIVANTS du socle** —
+    // et le spectre par RÉFÉRENCE, parce que `setSeed`/`reseed` le remplacent
+    // en cours de session sans rebâtir quoi que ce soit.
     // ⛔ **`couleursFond`, `houle`, `chop` ET `ecumeEchelle` NE SONT PLUS DES
     // PARAMÈTRES — Tâche P5.** Ils l'étaient depuis les Tâches F et M, et
     // **aucun appelant ne les a jamais passés** : le fond marin et l'état de mer
@@ -3513,23 +3583,54 @@ export class Globe {
     const bande = bandeDegradation(bascule, largeurBande)
 
     const mod = await import('./ocean.js')
-    const cols = couleurs || mod.couleursEau({})
+    // ⚠️ **LE NEUTRE, ET IL EST BRANCHÉ DÈS LA PREMIÈRE IMAGE.** `couleursEau({})`
+    // rend le défaut du module (`params.lakeColor ?? '#8fc6e8'`) ; c'est ce que
+    // voit un crop SANS mer de socle à lire, et rien d'autre.
+    const cols = mod.couleursEau({})
     // ⚠️ LE SPECTRE, ET SANS LUI LA MER EST UNE NAPPE PLATE — MESURÉ. Le morceau
     // `GERSTNER_GLSL` déclare `uWaveA[16]` / `uWaveB[16]` et saute tout train
     // dont l'amplitude est nulle : à uniformes vides, `disp` et `nAcc` valent
     // zéro et la surface est un miroir. Le premier relevé de l'Étape 4 rendait
     // **zéro pixel de différence** entre la mer riche et la mer dégradée, à
     // toutes les distances, et c'est ce zéro trop propre qui l'a dénoncé.
-    const spectre = mod.seaStateToUniforms(mod.makeSeaState(graine || undefined))
+    // ⚠️ **UN TIRAGE NEUF, ET C'EST LE NEUTRE.** `majReglagesMer` remplace ces
+    // deux tableaux par CEUX DU SOCLE (par référence) dès la première image où
+    // il y a une mer de socle à lire — donc le tirage ne survit qu'aux crops
+    // sans socle (banc, test, mer coupée).
+    const spectre = mod.seaStateToUniforms(mod.makeSeaState())
     const u = this.uniforms
     const mat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
       side: THREE.FrontSide,
       uniforms: {
+        // ⚠️ **LES TROIS PREMIERS SONT PARTAGÉS AVEC LES TUILES — Tâche P6.**
+        // `uSunDir` reste le soleil de PLANÈTE (le repli quand il n'y a pas
+        // d'éclairage de bloc) ; `uSoleilDir` et `uEclairageOn` sont les MÊMES
+        // objets que ceux de `poserHabillage`, pas des copies : le soleil de la
+        // mer et celui du relief ne peuvent donc pas diverger, et une tirette
+        // d'heure les déplace ensemble sans reposer la mer.
         uSunDir: u.uSunDir,
+        uSoleilDir: u.uSoleilDir,
+        uEclairageOn: u.uEclairageOn,
+        // ⛔ **`0xffffff` CODÉ EN DUR CONTRE `#fff7e6` VIVANT.** Posé au NEUTRE
+        // ici et branché par `majReglagesMer` (`Ocean.update` recopie
+        // `sun.color` par image) — même famille que `uSky`, que P4 a trouvé
+        // codé en dur au même endroit du même objet.
         uSunColor: { value: new THREE.Color(0xffffff) },
         uSky: { value: new THREE.Color('#bcd8ea') },
+        // ══════ LA LAME D'EAU — Tâche P6, la réserve n° 2 de P5 ═════════════
+        //
+        // ⚠️ **AU NEUTRE D'`ocean.js` À LA NAISSANCE, BRANCHÉS PAR IMAGE.**
+        // `LAME_EAU_NEUTRE` porte les quatre `??` de `waterMaterial`, pas des
+        // nombres choisis ici — et l'en-tête d'`ecume-mer.js` dit pourquoi
+        // AUCUNE valeur ne pouvait reproduire le nuanceur d'avant : il portait
+        // le `mix(0,45 ; 0,95)` **sans** la tirette et le glacis de lagon **à
+        // plein régime**, deux choses qu'aucun `uTransp` ne rend ensemble.
+        uMerTransp: { value: LAME_EAU_NEUTRE.transparence },
+        uMerSoleilFx: { value: LAME_EAU_NEUTRE.soleilFx },
+        uMerJour: { value: LAME_EAU_NEUTRE.jour },
+        uMerDetail: { value: LAME_EAU_NEUTRE.detail },
         uMerTemps: { value: 0 },
         uMerHoule: { value: houle },
         uMerChop: { value: chop },
@@ -3960,11 +4061,21 @@ export class Globe {
    * `retirerMer` éteint `uMerRampeOn` et remet `RAMPE_NAUTIQUE`, donc sans mer
    * ces trois-là ne peignent rien et ne doivent pas bouger.
    *
+   * ⚠️ **ET DEPUIS LA TÂCHE P6, LA LAME D'EAU ELLE-MÊME PASSE PAR ICI** : ses
+   * quatre réglages (`uTransp`, `uSunFx`, `uDayLight`, `uDetail`), ses deux
+   * couleurs, la couleur du soleil et le SPECTRE de houle. Tous LUS sur les
+   * uniformes vivants du socle, aucun redérivé — et tous par image, parce que
+   * la tirette de transparence, celle d'heure et `reseed` changent SANS
+   * déplacer le crop.
+   *
    * @param {{vue:number, surface:number, givre?:number, ciel?:object,
    *   etat?:{houle:number,chop:number,ecume:number,ecumeEchelle:number,brillance:number,vitesse:number},
-   *   fond?:{peu:object,moyen:object,fond:object}}|null} [reglages]
-   * @returns {{vue:number, surface:number, givre:number, etat:object, fond:boolean}|null}
-   *   ce qui a été posé
+   *   fond?:{peu:object,moyen:object,fond:object},
+   *   eau?:{transparence:number,soleilFx:number,jour:number,detail:number},
+   *   couleurs?:{peu:object,fond:object}, soleilCouleur?:object,
+   *   spectre?:{a:Array,b:Array}}|null} [reglages]
+   * @returns {{vue:number, surface:number, givre:number, etat:object, fond:boolean,
+   *   eau:object, couleurs:boolean, spectre:boolean}|null} ce qui a été posé
    */
   majReglagesMer(reglages = null) {
     if (!this._mer) return null
@@ -4007,7 +4118,60 @@ export class Globe {
       this.uniforms.uOceanMid.value.copy(f.moyen)
       this.uniforms.uOceanDeep.value.copy(f.fond)
     }
-    return { vue: a.vue, surface: a.surface, givre, etat, fond }
+
+    // ══════ LA LAME D'EAU — Tâche P6, la réserve n° 2 de P5 ═════════════════
+    //
+    // ⚠️ **TOUT OU RIEN, ET LE TOUT EST QUATRE** — même raisonnement que les six
+    // de l'état de mer juste au-dessus : une transparence du socle avec un
+    // clapot du module serait la mer de personne. `lameEauDuSocle` rend quatre
+    // nombres finis par construction, et sans socle à lire il rend
+    // `LAME_EAU_NEUTRE`, c'est-à-dire les `??` d'`ocean.js`.
+    const l = reglages?.eau
+    const eau = l && [l.transparence, l.soleilFx, l.jour, l.detail].every(Number.isFinite)
+      ? l
+      : LAME_EAU_NEUTRE
+    u.uMerTransp.value = eau.transparence
+    u.uMerSoleilFx.value = eau.soleilFx
+    u.uMerJour.value = eau.jour
+    u.uMerDetail.value = eau.detail
+
+    // ══════ LES DEUX COULEURS DE LA LAME — Tâche P6 ═════════════════════════
+    //
+    // ⚠️ **`copy`, PAS `set`, ET POUR LA MÊME RAISON QUE LES TROIS DU FOND** :
+    // ce sont les `Color` VIVANTS du socle, et partager l'objet ferait qu'un
+    // `retirerMer`… ne les touche pas — mais `_applySea` du socle, si, et deux
+    // matériaux qui partagent une couleur finissent par se la disputer.
+    const c = reglages?.couleurs
+    const couleurs = !!(c?.peu?.isColor && c?.fond?.isColor)
+    if (couleurs) {
+      u.uMerPeu.value.copy(c.peu)
+      u.uMerFond.value.copy(c.fond)
+    }
+    // ⚠️ **LA COULEUR DU SOLEIL, MÊME PATRON** : `#ffffff` était codé en dur
+    // dans `poserMer` contre `#fff7e6` vivant.
+    if (reglages?.soleilCouleur?.isColor) u.uSunColor.value.copy(reglages.soleilCouleur)
+
+    // ══════ LE SPECTRE DE HOULE — Tâche P6, PAR RÉFÉRENCE ═══════════════════
+    //
+    // ⛔ **LE CROP TIRAIT SA PROPRE MER AU HASARD.** `poserMer` faisait
+    // `makeSeaState(graine || undefined)` avec une `graine` que personne n'a
+    // jamais passée, pendant que le socle vit sur `makeSeaState(params.seaSeed)`
+    // — relevé le 2026-08-22 : `params.seaSeed = 9879`, et le premier train de
+    // houle valait `(0,230 · 0,973 · …)` côté crop contre `(0,659 · −0,753 · …)`
+    // côté socle. **Deux houles de directions différentes.**
+    //
+    // ⚠️ **PAR RÉFÉRENCE, ET C'EST CE QUE FAIT DÉJÀ `_applySea`** : lui aussi
+    // assigne `u.a` / `u.b` à TOUS ses matériaux sans les cloner. Un `graine`
+    // sur `poserMer` n'aurait pas suffi — `setSeed`/`reseed` remplacent les deux
+    // tableaux en cours de session sans rien rebâtir, et la calotte serait
+    // restée sur l'ancienne mer.
+    const sp = reglages?.spectre
+    const spectre = !!(Array.isArray(sp?.a) && Array.isArray(sp?.b) && sp.a.length && sp.b.length)
+    if (spectre) {
+      u.uWaveA.value = sp.a
+      u.uWaveB.value = sp.b
+    }
+    return { vue: a.vue, surface: a.surface, givre, etat, fond, eau, couleurs, spectre }
   }
 
   /** Retire la mer — le globe redevient une planète sans eau animée. */
@@ -4251,6 +4415,36 @@ export class Globe {
         // pendant que la paroi vivante du socle rendait `c06a44`. Le pourquoi
         // du partage est écrit à la déclaration de `uParoiCouleur`.
         uCol: this.uniforms.uParoiCouleur,
+        // ══════ LES CINQ DE L'ÉCLAIRAGE — Tâche P6 ═══════════════════════════
+        //
+        // ⛔ **P3 A ÉCLAIRÉ LES TUILES ET A LAISSÉ LES PAROIS SUR LE SOLEIL DE
+        // LA PLANÈTE, C'EST-À-DIRE SUR LA CAMÉRA.** Elle l'écrit noir sur blanc
+        // pour les tuiles — *« uSunDir n'est pas le soleil de la scène : en mode
+        // surface, main.js le repose À CHAQUE IMAGE sur camGlobe.position
+        // tournée de 42 degrés »* — et n'a pas refait le geste ici. Les parois
+        // gardaient donc `0,74 + 0,30 × diff` **contre une direction de caméra**,
+        // PLUS le terminateur jour/nuit de la planète.
+        //
+        // ⚡ **ET C'EST LE GRAND APLAT BEIGE DE LA RÉSERVE N° 1 DE P5.** Relevé
+        // le 2026-08-22, La Réunion, au même instant dans la même page :
+        // `uSunDir = (0,2305 · −0,3687 · 0,9005)` — **sous l'horizon** — pendant
+        // que le soleil de la scène pointait `(0,4392 · 0,5629 · −0,7001)`, et
+        // `uShadowColor = #c8a881`, **un beige**. Un flanc que ce faux soleil
+        // laisse à `day ≈ 0` rend donc **exactement `uShadowColor`** : c'est un
+        // aplat de la couleur du fond, pas une paroi éclairée.
+        //
+        // ⚠️ **ET LE TERMINATEUR N'A RIEN À FAIRE SUR UN BLOC** — P3 le dit déjà
+        // pour les tuiles : *« Le socle n'a pas de nuit : il est un objet de
+        // studio, éclairé par trois sources. »* La paroi du socle est un
+        // `MeshPhysicalMaterial` rugosité 0,95, métal 0, occlusion par sommet :
+        // un diffus pur. `irradianceCrop` est cette loi-là, et c'est la MÊME
+        // fonction, les MÊMES uniformes que les tuiles — pas une seconde.
+        uSoleilDir: this.uniforms.uSoleilDir,
+        uHemiHaut: this.uniforms.uHemiHaut,
+        uSoleilIrr: this.uniforms.uSoleilIrr,
+        uCielIrr: this.uniforms.uCielIrr,
+        uSolIrr: this.uniforms.uSolIrr,
+        uEclairageOn: this.uniforms.uEclairageOn,
       },
       vertexShader: /* glsl */ `
         attribute vec3 aoCrop;
@@ -4267,12 +4461,27 @@ export class Globe {
         uniform vec3 uSunDir;
         uniform vec3 uShadowColor;
         uniform vec3 uCol;
+        uniform vec3 uSoleilDir;
+        uniform vec3 uHemiHaut;
+        uniform vec3 uSoleilIrr;
+        uniform vec3 uCielIrr;
+        uniform vec3 uSolIrr;
+        uniform float uEclairageOn;
+        ${GLSL_IRRADIANCE}
         void main() {
           vec3 N = normalize(vN) * (gl_FrontFacing ? 1.0 : -1.0);
+          // ⚠️ SANS ECLAIRAGE, LA LOI DE PLANETE — AU BIT PRES. C'est le repli
+          // exact d'avant P6, et c'est ce que rend un globe sans crop pose.
           float diff = max(dot(N, uSunDir), 0.0);
-          vec3 col = uCol * (0.74 + 0.30 * diff) * vAo;
+          vec3 colPlanete = uCol * (0.74 + 0.30 * diff) * vAo;
           float day = smoothstep(-0.22, 0.16, dot(N, uSunDir));
-          gl_FragColor = vec4(mix(uShadowColor, col, 0.10 + 0.90 * day), 1.0);
+          colPlanete = mix(uShadowColor, colPlanete, 0.10 + 0.90 * day);
+          // L ALBEDO DE LA PAROI : sa couleur x son occlusion de contact, tout
+          // comme le socle multiplie material.color par son attribut color.
+          vec3 colBloc = uCol * vAo
+            * irradianceCrop(dot(N, uSoleilDir), dot(N, uHemiHaut), uSoleilIrr, uCielIrr, uSolIrr)
+            * ${RECIPROQUE_PI};
+          gl_FragColor = vec4(uEclairageOn > 0.5 ? colBloc : colPlanete, 1.0);
         }`,
     })
   }

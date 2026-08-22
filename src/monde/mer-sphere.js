@@ -323,6 +323,36 @@ export function couleursFondDuSocle(peu, moyen, fond) {
 }
 
 /**
+ * Les deux couleurs de la LAME D'EAU du socle — Tâche P6.
+ *
+ * ⛔ **LA MÊME FAUTE QUE `couleursFond` CI-DESSUS, UN CRAN PLUS HAUT, ET ELLE A
+ * SURVÉCU À P5 PARCE QUE LE DÉFAUT COÏNCIDAIT.** `poserMer` porte un paramètre
+ * `couleurs` depuis la Tâche F ; **aucun appelant ne l'a jamais passé**, donc la
+ * calotte vit sur `couleursEau({})`, c'est-à-dire sur
+ * `params.lakeColor ?? '#8fc6e8'` — **le DÉFAUT, pas la palette.**
+ *
+ * ⚡ **ET LE RELEVÉ DU 2026-08-22 A FAILLI DIRE « BRANCHÉ »** : les deux côtés
+ * rendaient `#88d2e1` / `#184465`, au caractère près… parce que
+ * `params.lakeColor` valait justement `#8fc6e8`. **Le témoin l'a dit** : posé à
+ * `#c81e1e` dans la page VIVANTE, le socle est passé à `#a77572` / `#1e3350` et
+ * **la calotte n'a pas bougé d'un bit** ; le retour rend les deux valeurs de
+ * départ. ➡️ **Une concordance au défaut n'est PAS un branchement**, et c'est la
+ * leçon de méthode de la Tâche P6.
+ *
+ * ⚠️ **DEUX COULEURS, PAS LA POIGNÉE** — même règle que `couleursFondDuSocle`,
+ * et même refus du demi-couple : une couleur du socle et une du défaut seraient
+ * pires que les deux du défaut.
+ *
+ * @param {object|null} peu le glacis clair (`uShallowT` d'`ocean.js`)
+ * @param {object|null} fond le bleu du large (`uDeep` d'`ocean.js`)
+ * @returns {{peu:object, fond:object}|null}
+ */
+export function couleursEauDuSocle(peu, fond) {
+  if (!peu?.isColor || !fond?.isColor) return null
+  return { peu, fond }
+}
+
+/**
  * La profondeur maximale du champ **DANS LE CROP**, en mètres — Tâche P5.
  *
  * ⛔ **LE BUDGET DU FOND ÉTAIT CELUI DE LA CALOTTE, ET LE SOCLE PREND CELUI DE

@@ -46,6 +46,22 @@ import {
   // ⚠️ **Tâche P5** : l'état de mer, LU sur le socle et jamais recalculé.
   ETAT_MER_NEUTRE,
   etatMerDuSocle,
+  // ⚠️ **Tâche P6** : la LAME D'EAU — quatre réglages de plus, même patron.
+  GLSL_LAME_EAU,
+  LAME_EAU_NEUTRE,
+  lameEauDuSocle,
+  detailClapot,
+  poidsLagon,
+  opaciteEau,
+  LAGON_FIN,
+  LAGON_EXPO,
+  OPACITE_EAU,
+  TIRETTE_EAU,
+  OPACITE_ECRETAGE,
+  NUIT_EAU,
+  NUIT_ECUME,
+  CLAPOT_NORMALE,
+  GLINT_TAVELURE,
 } from '../src/monde/ecume-mer.js'
 import {
   construireJupeMer,
@@ -108,7 +124,15 @@ test('①c les poids, le blanc et la tavelure remontent à ocean.js', () => {
   assert.equal(POIDS_RESSAC, 1.8)
   assert.equal(POIDS_LISERE, 1.1)
   assert.equal(BLANC_ECUME, 0.96)
-  assert.match(s, /col = mix\(col, vec3\(0\.96\) \* mix\(0\.14, 1\.0, uDayLight\), foam\)/)
+  // ⚠️ **LE BLANCHIMENT A DÉMÉNAGÉ DANS LE MODULE — Tâche P6.** `ocean.js`
+  // portait `mix(col, vec3(0.96) * mix(0.14, 1.0, uDayLight), foam)` et le
+  // globe portait `mix(col, vec3(0.96), ecume)` : la MÊME loi, amputée de sa
+  // nuit d'un côté. Elle vit maintenant une seule fois, dans `GLSL_LAME_EAU`,
+  // et les deux fichiers l'APPELLENT.
+  assert.match(GLSL_LAME_EAU, /mix\(col, vec3\(0\.96\) \* mix\(0\.14, 1\.0, jour\), ecume\)/)
+  assert.match(s, /col = blanchirEcume\(col, foam, uDayLight\);/)
+  assert.ok(!/vec3\(0\.96\) \* mix\(0\.14, 1\.0, uDayLight\), foam\)/.test(s),
+    'ocean.js ne doit plus porter sa propre ecriture du blanchiment')
   assert.equal(FREQ_TAVELURE, 0.33)
   assert.equal(TAVELURE_SEUIL.bas, 0.32)
   assert.equal(TAVELURE_SEUIL.haut, 0.72)
@@ -337,12 +361,19 @@ test('③b les deux fichiers INJECTENT le texte partagé, ils ne le recopient pa
   const importGlobe = g.match(/import \{([^}]*)\} from '\.\/monde\/ecume-mer\.js'/)
   assert.ok(importOcean, "ocean.js doit importer monde/ecume-mer.js")
   assert.ok(importGlobe, "globe.js doit importer monde/ecume-mer.js")
-  for (const nom of ['GLSL_ECUME', 'FREQ_TAVELURE', 'accalmieDuSocle', 'etatMerDuSocle']) {
+  for (const nom of ['GLSL_ECUME', 'GLSL_LAME_EAU', 'FREQ_TAVELURE', 'accalmieDuSocle', 'etatMerDuSocle', 'lameEauDuSocle']) {
     assert.ok(importOcean[1].includes(nom), `ocean.js doit importer ${nom}`)
   }
-  for (const nom of ['GLSL_ECUME', 'FREQ_TAVELURE', 'BLANC_ECUME', 'ACCALMIE_NEUTRE', 'ETAT_MER_NEUTRE']) {
+  for (const nom of ['GLSL_ECUME', 'GLSL_LAME_EAU', 'FREQ_TAVELURE', 'ACCALMIE_NEUTRE', 'ETAT_MER_NEUTRE', 'LAME_EAU_NEUTRE', 'CLAPOT_NORMALE']) {
     assert.ok(importGlobe[1].includes(nom), `globe.js doit importer ${nom}`)
   }
+  // ⚠️ **UNE SEULE ÉCRITURE DE LA LAME D'EAU, ET ELLE EST INJECTÉE DES DEUX
+  // CÔTÉS — Tâche P6.** Le texte vit dans `GLSL_LAME_EAU` ; `ocean.js` et
+  // `globe.js` l'interpolent une fois chacun, dans leur fragment de mer.
+  assert.equal((o.match(/\$\{GLSL_LAME_EAU\}/g) || []).length, 1,
+    'ocean.js doit injecter GLSL_LAME_EAU une fois')
+  assert.equal((g.match(/\$\{GLSL_LAME_EAU\}/g) || []).length, 1,
+    'globe.js doit injecter GLSL_LAME_EAU une fois')
   // injecté dans les DEUX nuanceurs de chaque fichier
   // ⚠️ **TROIS, ET LE TROISIÈME EST LE VERTEX DE LA JUPE DU SOCLE** : il portait
   // lui aussi sa propre copie du déclin côtier (`max((uWaterY − f.r) * 2.0, f.g)`

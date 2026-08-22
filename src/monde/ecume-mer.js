@@ -194,6 +194,135 @@ export function etatMerDuSocle(uniformes) {
   }
 }
 
+// ── ②ter LA LAME D'EAU — Tâche P6, la réserve n° 2 de P5 ───────────────────
+//
+// ⛔ **QUATRE RÉGLAGES D'`ocean.js` QUE LA CALOTTE N'A JAMAIS REÇUS, ET AUCUN
+// PARAMÈTRE NE LES PORTAIT.** P5 avait mesuré le symptôme sans pouvoir
+// l'attribuer : *« la concentration de luminance vaut 80,97 % côté crop contre
+// 30,33 % au socle ; sur le fond marin NU, 40,14 % contre 38,73 %. Presque tout
+// l'écart vit dans la NAPPE. »* Relevé le 2026-08-22 **au même instant, dans la
+// même page** (La Réunion z12) :
+//
+//   ① **`uTransp = 0,57`** (`params.waterTransparency`) — le nuanceur de la
+//      calotte n'a **aucun terme de transparence**. `ocean.js` multiplie son
+//      opacité d'eau par `mix(1,15 ; 0,26 ; uTransp)`, soit **0,6427** ici : la
+//      lame du crop est **1,556 fois trop opaque**, et à tirette pleine elle le
+//      serait **3,85 fois**. ⚡ **C'est le « plus sombre et plus opaque » de la
+//      réserve n° 2 de P5, chiffré et attribué.**
+//   ② **`uSunFx = 0,72`** (`params.waterSunFx`) — la calotte ne dose pas son
+//      reflet solaire : **28 % de glint de trop**.
+//   ③ **`uDetail = 0,75`** (`chopLook(seaChop).detail`) — `ocean.js` perturbe la
+//      normale de sa surface par deux bruits (`vNorm + uDetail × 0,6 ×
+//      uViewCalm × …`). **La calotte n'en avait pas un seul.** ⚡ **C'est la
+//      mesure que P5 laissait ouverte** : « la mer du socle AJOUTE de la
+//      variation (2,46 → 3,36) ; celle du crop en RETIRE (1,55 → 1,37) ».
+//   ④ **`uDayLight`** — la mer du socle S'ÉTEINT la nuit (corps multiplié par
+//      `(0,10 · 0,16 · 0,30)`, écume par 0,14). Celle du crop reste en plein
+//      jour à minuit. Vaut 1 au relevé, donc **invisible aujourd'hui et faux
+//      dès qu'on touche la tirette d'heure**.
+//
+// ⚠️ **LE NEUTRE EST CELUI D'`ocean.js`, PAS « LA CALOTTE D'AVANT ».** Il
+// n'existe AUCUNE valeur de `transparence` qui reproduise le nuanceur d'avant :
+// il portait `mix(0,45 ; 0,95)` **sans le facteur de tirette** (donc
+// `transparence ≈ 0,1685`) **et** le glacis de lagon à plein régime (donc
+// `transparence ≥ 0,35`). Les deux ne peuvent pas être vraies ensemble — **c'est
+// la signature d'une loi tronquée, pas d'un réglage.** Le neutre retenu est donc
+// celui des `??` de `waterMaterial` : `0,4`, `1`, `1` et `chopLook(0,7).detail`,
+// exactement la famille d'`ETAT_MER_NEUTRE`. ⚠️ **Et il ne touche pas la
+// production** : `poserMer` n'est appelée que sous `?terre=unique` ; drapeau
+// baissé il n'y a pas de mer de crop du tout.
+
+/** Le `detail` de `chopLook(c)` d'`ocean.js` : `0,25 + 0,5 c`. */
+export function detailClapot(chop) {
+  return 0.25 + 0.5 * chop
+}
+
+/**
+ * La lame d'eau NEUTRE : les défauts de `waterMaterial` d'`ocean.js`.
+ *
+ * ⚠️ **LES QUATRE SONT DES `??` DU DÉPÔT**, pas des nombres choisis ici :
+ * `params.waterTransparency ?? 0.4`, `params.waterSunFx ?? 1`,
+ * `uDayLight: { value: 1 }`, `chopLook(params.seaChop ?? 0.7).detail`.
+ */
+export const LAME_EAU_NEUTRE = Object.freeze({
+  transparence: 0.4,
+  soleilFx: 1,
+  jour: 1,
+  detail: detailClapot(0.7),
+})
+
+/**
+ * La lame d'eau VIVANTE du socle, ou le neutre s'il n'y en a pas.
+ *
+ * ⚠️ **ELLE NE CALCULE RIEN** : elle LIT, champ par champ, exactement comme
+ * `etatMerDuSocle` juste au-dessus et pour la même raison — un uniforme absent
+ * rend SA valeur neutre, jamais celle du voisin.
+ *
+ * @param {object|null} uniformes les uniformes du matériau de mer du socle
+ * @returns {{transparence:number, soleilFx:number, jour:number, detail:number}}
+ */
+export function lameEauDuSocle(uniformes) {
+  const lire = (nom, neutre) => {
+    const v = uniformes?.[nom]?.value
+    return Number.isFinite(v) ? v : neutre
+  }
+  return {
+    transparence: lire('uTransp', LAME_EAU_NEUTRE.transparence),
+    soleilFx: lire('uSunFx', LAME_EAU_NEUTRE.soleilFx),
+    jour: lire('uDayLight', LAME_EAU_NEUTRE.jour),
+    detail: lire('uDetail', LAME_EAU_NEUTRE.detail),
+  }
+}
+
+/** Le seuil du glacis de lagon. `ocean.js` : `smoothstep(0.0, 0.35, uTransp)`. */
+export const LAGON_FIN = 0.35
+
+/** Le poids du glacis de lagon, tiré de la tirette de transparence. */
+export function poidsLagon(transparence) {
+  return pas0a1(0, LAGON_FIN, transparence)
+}
+
+/** L'exposant du dégradé de lagon. `ocean.js` : `pow(dRt, 0.7)`. */
+export const LAGON_EXPO = 0.7
+
+/** Les trois bornes de l'opacité d'eau brute. `ocean.js` : `mix(0.45, 0.95, pow(d, 0.55))`. */
+export const OPACITE_EAU = Object.freeze({ bas: 0.45, haut: 0.95, expo: 0.55 })
+
+/** Les deux bornes du facteur de tirette. `ocean.js` : `mix(1.15, 0.26, uTransp)`. */
+export const TIRETTE_EAU = Object.freeze({ opaque: 1.15, clair: 0.26 })
+
+/** L'écrêtage de l'opacité d'eau. `ocean.js` : `clamp(…, 0.05, 0.97)`. */
+export const OPACITE_ECRETAGE = Object.freeze({ bas: 0.05, haut: 0.97 })
+
+/**
+ * L'opacité de la lame d'eau — `wOp` d'`ocean.js`, transcrite terme pour terme.
+ *
+ * ⚠️ **LES QUATRE LIGNES SONT DANS L'ORDRE D'`ocean.js`, ET L'ORDRE COMPTE** :
+ * l'écrêtage tombe AVANT le plancher de Fresnel, et le glacis de lagon ferme la
+ * marche. Les intervertir change le résultat sur les bords et sur les eaux
+ * peintes (`transparence < 0,35`, où la lame redevient une PEINTURE pleine).
+ */
+export function opaciteEau(dLagon, transparence, fresnel) {
+  const lagon = poidsLagon(transparence)
+  let w = OPACITE_EAU.bas + (OPACITE_EAU.haut - OPACITE_EAU.bas) * Math.pow(Math.max(dLagon, 0), OPACITE_EAU.expo)
+  w *= TIRETTE_EAU.opaque + (TIRETTE_EAU.clair - TIRETTE_EAU.opaque) * transparence
+  w = Math.min(OPACITE_ECRETAGE.haut, Math.max(OPACITE_ECRETAGE.bas, w))
+  w = Math.max(w, fresnel * 0.5)
+  return 1 + (w - 1) * lagon
+}
+
+/** L'assombrissement nocturne du corps de l'eau. `ocean.js` : `vec3(0.10, 0.16, 0.30)`. */
+export const NUIT_EAU = Object.freeze([0.1, 0.16, 0.3])
+
+/** L'assombrissement nocturne de l'écume. `ocean.js` : `mix(0.14, 1.0, uDayLight)`. */
+export const NUIT_ECUME = 0.14
+
+/** Le facteur et le biais du clapot de normale. `ocean.js` : `uDetail * 0.6 * uViewCalm * vec3(n1-0.5, 0.9, n2-0.5)`. */
+export const CLAPOT_NORMALE = Object.freeze({ gain: 0.6, haut: 0.9, freq: 6 })
+
+/** La modulation du glint par la tavelure. `ocean.js` : `(0.35 + 0.85 * patchy)`. */
+export const GLINT_TAVELURE = Object.freeze({ base: 0.35, gain: 0.85 })
+
 // ── ③ LA TAVELURE ET LE BRUIT ──────────────────────────────────────────────
 
 /**
@@ -268,6 +397,41 @@ export function ecumeMer(a) {
 // (Une campagne de mutation de P2 a survécu parce que ses motifs cherchaient
 // `0.35` dans un texte qui portait `${PART_OMBRAGE.toFixed(2)}` : les motifs de
 // ce module-ci visent les NOMS, pas les chiffres.)
+// ══════════ LA LAME D'EAU EN GLSL — Tâche P6, UNE ÉCRITURE, DEUX LECTEURS ══
+//
+// ⚠️ **MÊME PATRON QUE `GLSL_ECUME` JUSTE DESSOUS, ET POUR LA MÊME RAISON.**
+// Ces trois lois vivaient **uniquement** dans `ocean.js` ; la calotte du globe
+// n'en portait qu'un fragment tronqué (`mix(uMerPeu, uMerFond, pow(d, 0.7))` et
+// `mix(0.45, 0.95, pow(d, 0.55))`, sans la tirette, sans le glacis, sans la
+// nuit). Les recopier aurait fait une seconde écriture de plus ; **on les
+// extrait, et `ocean.js` INJECTE le même texte.**
+export const GLSL_LAME_EAU = /* glsl */ `
+// ── ecume-mer.js — INJECTÉ, PAS RECOPIÉ ────────────────────────────────────
+float poidsLagonEau(float transparence) {
+  return smoothstep(0.0, ${LAGON_FIN.toFixed(2)}, transparence);
+}
+vec3 corpsEau(vec3 peu, vec3 fond, float dLagon, float lagon, float jour) {
+  vec3 c = mix(fond, mix(peu, fond, pow(dLagon, ${LAGON_EXPO.toFixed(1)})), lagon);
+  return c * mix(vec3(${NUIT_EAU[0].toFixed(2)}, ${NUIT_EAU[1].toFixed(2)}, ${NUIT_EAU[2].toFixed(2)}), vec3(1.0), jour);
+}
+float opaciteEau(float dLagon, float transparence, float fresnel) {
+  float lagon = poidsLagonEau(transparence);
+  float w = mix(${OPACITE_EAU.bas.toFixed(2)}, ${OPACITE_EAU.haut.toFixed(2)}, pow(dLagon, ${OPACITE_EAU.expo.toFixed(2)}));
+  w = clamp(w * mix(${TIRETTE_EAU.opaque.toFixed(2)}, ${TIRETTE_EAU.clair.toFixed(2)}, transparence), ${OPACITE_ECRETAGE.bas.toFixed(2)}, ${OPACITE_ECRETAGE.haut.toFixed(2)});
+  w = max(w, fresnel * 0.5);
+  return mix(1.0, w, lagon);
+}
+vec3 clapotNormale(vec3 normale, float detail, float calmeVue, float b1, float b2) {
+  return normalize(normale + detail * ${CLAPOT_NORMALE.gain.toFixed(1)} * calmeVue * vec3(b1 - 0.5, ${CLAPOT_NORMALE.haut.toFixed(1)}, b2 - 0.5));
+}
+float glintTavelureMer(float tavelure) {
+  return ${GLINT_TAVELURE.base.toFixed(2)} + ${GLINT_TAVELURE.gain.toFixed(2)} * tavelure;
+}
+vec3 blanchirEcume(vec3 col, float ecume, float jour) {
+  return mix(col, vec3(${BLANC_ECUME.toFixed(2)}) * mix(${NUIT_ECUME.toFixed(2)}, 1.0, jour), ecume);
+}
+`
+
 export const GLSL_ECUME = /* glsl */ `
 // ── ecume-mer.js — INJECTÉ, PAS RECOPIÉ ────────────────────────────────────
 float declinRivageMer(float profondeur, float distance) {

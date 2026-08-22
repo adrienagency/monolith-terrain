@@ -336,6 +336,22 @@ float natOmbrePeinture(float lum) {
 }
 `
 
+/**
+ * L'IRRADIANCE SEULE, détachable — Tâche P6.
+ *
+ * ⚠️ **PARCE QUE LES PAROIS N'ONT NI RAMPE NI PEINTURE, DONC PAS
+ * `natLuminance`.** `GLSL_ECLAIRAGE` ci-dessous en dépend (`GLSL_NATUREL` est
+ * injecté avant lui dans le nuanceur des tuiles) ; celui des parois est un
+ * `ShaderMaterial` NU qui n'a aucune des deux. Extraire ce seul morceau leur
+ * donne **LA MÊME LOI, PAS UNE SECONDE** — et `GLSL_ECLAIRAGE` l'INTERPOLE au
+ * lieu de la réécrire, donc il n'y a toujours qu'une écriture.
+ */
+export const GLSL_IRRADIANCE = /* glsl */ `
+vec3 irradianceCrop(float ndl, float ndu, vec3 soleil, vec3 ciel, vec3 sol) {
+  return soleil * max(ndl, 0.0) + mix(sol, ciel, 0.5 * ndu + 0.5);
+}
+`
+
 export const GLSL_ECLAIRAGE = /* glsl */ `
 // ═══ L'ECLAIRAGE DU CROP — src/monde/eclairage-crop.js, Tache P3 ═══════════
 // Le texte ci-dessous est INJECTE depuis le module : il n'y a pas deux
@@ -350,9 +366,7 @@ vec3 albedoCrop(vec3 mapCol, vec3 base, float gris, float teinte) {
   vec3 fond = base * gris;
   return mix(fond, mapCol * natOmbrePeinture(natLuminance(fond)), teinte);
 }
-vec3 irradianceCrop(float ndl, float ndu, vec3 soleil, vec3 ciel, vec3 sol) {
-  return soleil * max(ndl, 0.0) + mix(sol, ciel, 0.5 * ndu + 0.5);
-}
+${GLSL_IRRADIANCE}
 vec3 eclairerCrop(vec3 mapCol, vec3 base, float teinte, float hn, float ndu, float ndl,
                   vec3 soleil, vec3 ciel, vec3 sol) {
   vec3 albedo = albedoCrop(mapCol, base, natGris(hn, ndu), teinte);
