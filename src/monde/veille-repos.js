@@ -50,10 +50,15 @@
 // `fov = 33` lu en direct). Données brutes : `.banc/vues-N/AV-trace-*.json`,
 // dépouillement : `.banc/hysterese-N.mjs` → `.banc/vues-N/hysterese-brut.json`.
 //
-//   · **AU REPOS STRICT, L'ÉCART VAUT EXACTEMENT ZÉRO** : 3 216 images de suite
-//     (53 s), `altitudeCadrageM()` bit pour bit identique, caméra immobile au
-//     bit près. **Mais « non nul » n'est PAS un critère utilisable**, et c'est
-//     la mesure qui le dit : après un geste d'orbite, la traîne d'amortissement
+//   · **AU REPOS STRICT, L'ÉCART VAUT EXACTEMENT ZÉRO** — pas mesuré dans
+//     l'application vivante, ÉTABLI PAR CONSTRUCTION : deux altitudes
+//     identiques donnent `ln(1) = 0`. `test/veille-repos.test.js` ③ (« au repos
+//     STRICT ») rejoue ce raisonnement 3 216 fois de suite sur la MÊME constante
+//     (une boucle synthétique, pas un relevé de 53 s à l'écran) — ce qui
+//     prouve que la loi ne dérive pas d'elle-même sur une entrée immobile,
+//     rien de plus. **Mais « non nul » n'est PAS un critère utilisable**, et
+//     c'est la mesure, elle, réellement relevée dans l'application vivante qui
+//     le dit : après un geste d'orbite, la traîne d'amortissement
 //     est ASYMPTOTIQUE — encore `7,7 × 10⁻¹¹` par image **603 images (10 s)
 //     après la fin du geste**, en décroissance géométrique de rapport ≈ 0,970.
 //     Un seuil « strictement positif » laisserait donc les alentours allumés

@@ -479,6 +479,42 @@ test('⑤g la hauteur est celle du TAMPON DE DESSIN, pas du CSS', () => {
   assert.ok(!/clientHeight|innerHeight/.test(corps))
 })
 
+test('⑤g bis C’EST LA HAUTEUR DU TAMPON, PAS SA LARGEUR', () => {
+  // ⚠️ **MUTATION SURVIVANTE TROUVÉE PAR LA RELECTURE K, HORS `.banc/mutations-K.mjs`** :
+  // `hauteurPx: _tailleDessin.y` → `_tailleDessin.x` (la LARGEUR) survivait aux
+  // 33/33 tests d'alors, parce qu'aucun ne vérifiait QUEL axe du tampon est lu —
+  // seulement que `getDrawingBufferSize` est appelé (⑤g) et que le CSS ne
+  // l'est pas. Sur un cadre non carré (le cas général), cette mutation
+  // fausserait `mppEcran` d'un facteur largeur/hauteur, silencieusement.
+  const i = MAIN.indexOf('function majLoiTextureMonde()')
+  const corps = MAIN.slice(i, MAIN.indexOf('\n}', i))
+  assert.ok(
+    /hauteurPx:\s*_tailleDessin\.y\b/.test(corps),
+    `la hauteur ne vient pas de \`_tailleDessin.y\` : ${corps}`,
+  )
+  assert.ok(
+    !/hauteurPx:\s*_tailleDessin\.x\b/.test(corps),
+    'la hauteur lit la LARGEUR du tampon de dessin',
+  )
+})
+
+test('⑤g ter LA LATITUDE DE L’ANCRE EST TRANSMISE, JAMAIS FORCÉE À L’ÉQUATEUR', () => {
+  // ⚠️ **DEUXIÈME MUTATION SURVIVANTE DE LA RELECTURE K** : `lat:
+  // Number.isFinite(ancre?.lat) ? ancre.lat : 0` → `lat: 0` (toujours
+  // l'équateur) survivait aux 33/33 tests d'alors — aucun ne vérifiait que
+  // `ancre.lat` est effectivement lu. Le `cos(lat)` de `resolutionRefM`
+  // deviendrait silencieusement faux à toute latitude non nulle (La Réunion,
+  // −21,115° comprise).
+  const i = MAIN.indexOf('function majLoiTextureMonde()')
+  const corps = MAIN.slice(i, MAIN.indexOf('\n}', i))
+  assert.ok(
+    /lat:\s*Number\.isFinite\(ancre\?\.lat\)\s*\?\s*ancre\.lat\s*:\s*0/.test(corps),
+    `la latitude n'est pas lue sur l'ancre en direct : ${corps}`,
+  )
+  assert.ok(!/lat:\s*0\s*[,}]/.test(corps.replace(/lat:\s*Number\.isFinite\(ancre\?\.lat\)\s*\?\s*ancre\.lat\s*:\s*0/, '')),
+    'une seconde écriture force la latitude à 0 ailleurs dans le branchement')
+})
+
 test('⑤h HORS DRAPEAU, la loi est RETIRÉE — la production ne bouge pas', () => {
   const i = MAIN.indexOf('function majLoiTextureMonde()')
   const corps = MAIN.slice(i, MAIN.indexOf('\n}', i))

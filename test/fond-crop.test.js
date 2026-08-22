@@ -80,6 +80,23 @@ test('② bis un champ qui dit « terre » là où la tuile dit « mer » ne fai
   assert.equal(altitudeSonde(-2, 37.5), 0)
 })
 
+test('② ter LA BORNE `h > 0` D’`altitudeMaillage` — un vrai champ de fond, entre 0 et ~100 m', () => {
+  // ⚠️ **TROU DE COUVERTURE TROUVÉ PAR LA RELECTURE J bis (constat groupé ⑦).**
+  // Test ① ne combine `h` proche de zéro qu'à un fond ABSENT (`null`) — la
+  // branche `h > 0` n'y joue aucun rôle, `Math.max(h, 0)` la rend de toute
+  // façon. Test ② ne combine un fond FINI qu'à `h = 1234,5`, très loin de la
+  // frontière. Résultat : élargir `h > 0` en `h > 100` dans
+  // `src/monde/fond-crop.js` survivait à tous les tests d'alors — un défaut de
+  // COUVERTURE, pas un défaut livré : le code de production est juste.
+  for (const h of [0.0007, 12.5, 99.999]) {
+    assert.equal(
+      altitudeMaillage(h, -900), h,
+      `h=${h} avec un fond posé à −900 : la TERRE doit garder la tuile, pas basculer sur le fond`,
+    )
+    assert.equal(altitudeSonde(h, -900), h, `altitudeSonde : même contrat pour h=${h}`)
+  }
+})
+
 // ══════════ ③ LA LECTURE DU CHAMP ═══════════════════════════════════════════
 
 test('③ `uvFond` EST la formule du nuanceur de la mer, mot pour mot', () => {

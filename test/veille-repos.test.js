@@ -233,8 +233,13 @@ test('③ le geste de molette le plus DOUX mesuré réveille bien la vue', () =>
   assert.equal(v.auRepos, false, 'une molette ne réveille pas la vue')
 })
 
-test('③ au repos STRICT, l’écart mesuré vaut zéro et la vue ne bouge pas', () => {
-  // Relevé : 3 216 images de suite, `altitudeCadrageM()` bit pour bit identique.
+test('③ au repos STRICT, l’écart calculé vaut zéro et la vue ne bouge pas', () => {
+  // ⚠️ **BOUCLE SYNTHÉTIQUE, PAS UN RELEVÉ.** 3 216 images de la MÊME altitude
+  // rejouée — ce n'est pas une mesure de 53 s dans l'application vivante (ce
+  // nombre n'existe nulle part dans `.banc/vues-N/*.json`, constat groupé ③).
+  // Ce que ça prouve : `ln(1) = 0` par construction, donc la loi ne dérive pas
+  // d'elle-même sur une entrée immobile — une propriété de la fonction, pas un
+  // fait relevé à l'écran.
   const v = creerVeilleRepos()
   for (let i = 0; i < 3216; i++) v.maj(ALT_BLOC)
   assert.equal(v.dernierEcart, 0)
@@ -343,7 +348,7 @@ test('⑥ le repos atteint SES DEUX destinataires, et sur la même image', () =>
   // moitiés du défaut que la tâche répare.
   const g = globeDePapier()
   const est = veilleEstompageFactice()
-  const veille = creerVeilleCrop({ globe: g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
+  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
   veille.maj(ALT_BLOC)
   assert.equal(veille.pose, true, 'le crop n’est pas posé à l’altitude de test')
   assert.equal(veille.repos, true, 'le repos n’est pas relayé')
@@ -356,7 +361,7 @@ test('⑥ SANS CROP POSÉ, le repos n’est relayé à personne', () => {
   // plein efface la planète et ne met rien à la place — un écran vide.
   const g = globeDePapier()
   const est = veilleEstompageFactice()
-  const veille = creerVeilleCrop({ globe: g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
+  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
   // très au-dessus du seuil de mort : le socle, donc le crop, n'existe pas
   veille.maj(SEUIL_MORT_M * 4)
   assert.equal(veille.pose, false)
@@ -368,7 +373,7 @@ test('⑥ SANS CROP POSÉ, le repos n’est relayé à personne', () => {
 test('⑥ un mouvement RETIRE le crop seul, et le retour au calme le remet', () => {
   const g = globeDePapier()
   const est = veilleEstompageFactice()
-  const veille = creerVeilleCrop({ globe: g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
+  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est, repos: creerVeilleRepos() })
   veille.maj(ALT_BLOC)
   assert.equal(g.cropSeul, true)
   // un geste : une seule image suffit
@@ -383,7 +388,7 @@ test('⑥ un mouvement RETIRE le crop seul, et le retour au calme le remet', () 
 
 test('⑥ le relais ne réécrit RIEN tant que l’état ne change pas', () => {
   const g = globeDePapier()
-  const veille = creerVeilleCrop({ globe: g, contexte: ctxFactice, repos: creerVeilleRepos() })
+  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, repos: creerVeilleRepos() })
   for (let i = 0; i < 200; i++) veille.maj(ALT_BLOC)
   assert.equal(g.posesCropSeul, 1, `${g.posesCropSeul} appels de \`poserCropSeul\` pour un seul état`)
 })
@@ -393,7 +398,7 @@ test('⑥ l’ORBITE éteint le crop seul et fait OUBLIER l’altitude de réfé
   const oublis = []
   const repos = creerVeilleRepos()
   const espion = { maj: (a) => repos.maj(a), oublier: () => { oublis.push(1); repos.oublier() } }
-  const veille = creerVeilleCrop({ globe: g, contexte: ctxFactice, repos: espion })
+  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, repos: espion })
   veille.maj(ALT_BLOC)
   assert.equal(g.cropSeul, true)
   veille.poserMode(false)
@@ -412,7 +417,7 @@ test('⑥ l’ORBITE ne POLLUE PAS les compteurs de la veille du repos', () => {
   // — la classe d'erreur que le §0 du plan énumère huit fois.
   const g = globeDePapier()
   const repos = creerVeilleRepos()
-  const veille = creerVeilleCrop({ globe: g, contexte: ctxFactice, repos })
+  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, repos })
   veille.maj(ALT_BLOC)
   const avant = repos.bascules
   veille.poserMode(false)
@@ -427,7 +432,7 @@ test('⑥ SANS veille de repos, le comportement est celui d’AVANT la tâche', 
   // dans ce dépôt, et c'est la consigne D5 (le mode plat ne bouge pas).
   const g = globeDePapier()
   const est = veilleEstompageFactice()
-  const veille = creerVeilleCrop({ globe: g, contexte: ctxFactice, estompage: est })
+  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, estompage: est })
   for (let i = 0; i < 100; i++) veille.maj(ALT_BLOC)
   assert.equal(veille.repos, false)
   assert.equal(g.cropSeul, null, '`poserCropSeul` appelée sans veille de repos')
@@ -443,9 +448,15 @@ test('⑥ le globe est LU à chaque image, jamais figé à la construction', () 
   // d'avant, ou (si `globe` est la fonction elle-même) à personne.
   //
   // ⚠️ **CETTE MUTATION A SURVÉCU AU PREMIER TOUR DE CAMPAGNE**, et pour une
-  // raison instructive : tous les autres tests passent le globe PAR SA VALEUR,
-  // où `lireGlobe()` et `globe` sont le même objet. La faute était invisible
-  // sous la seule forme que la production n'emploie pas.
+  // raison instructive : à l'époque, tous les autres tests de ce fichier
+  // passaient le globe PAR SA VALEUR, où `lireGlobe()` et `globe` étaient le
+  // même objet — la faute était invisible sous la seule forme que la
+  // production n'emploie pas. ⚠️ **CE N'EST PLUS LE CAS** (relecture P2/N,
+  // constat groupé ⑤) : les huit autres appels à `creerVeilleCrop` de ce
+  // fichier passent désormais eux aussi `globe: () => g`, la forme réelle —
+  // ce test-ci reste le SEUL à faire vivre le globe DEUX FOIS (perte de
+  // contexte WebGL comprise), donc le seul indispensable, mais il n'est plus
+  // le seul rempart : n'importe lequel des neuf peut désormais mordre.
   let vivant = globeDePapier()
   const veille = creerVeilleCrop({ globe: () => vivant, contexte: ctxFactice, repos: creerVeilleRepos() })
   veille.maj(ALT_BLOC)
@@ -461,12 +472,40 @@ test('⑥ le globe est LU à chaque image, jamais figé à la construction', () 
   assert.equal(mort.posesCropSeul, 1, 'le globe mort a reçu un ordre après sa mort')
 })
 
+test('⑥ bis LA DÉRIVATION DE `lireGlobe` NE FIGE RIEN — structurel, indépendant du test ci-dessus', () => {
+  // ⚠️ **CE TEST NE DÉPEND PAS DE CELUI D'AU-DESSUS.** Le constat groupé ⑤
+  // (`.superpowers/sdd/2026-08-22-globe-studio/constats-groupes.md`) relève
+  // qu'un seul test comportemental gardait « le globe est lu à chaque image » —
+  // fragile au premier refactor de CE test précis. Celui-ci lit le TEXTE de
+  // `creerVeilleCrop` (même patron que `test/loi-texture-monde.test.js` ⑤f/⑤g
+  // pour du code que node ne peut pas exécuter en contexte réel) et interdit
+  // STRUCTURELLEMENT la forme fautive : appeler `globe()` DÈS LA DÉRIVATION
+  // fige sa valeur pour la vie du closure, exactement la faute qui a survécu
+  // au premier tour de mutation avant d'être détectée par la forme réelle.
+  const src = readFileSync(new URL('../src/monde/branchement-crop.js', import.meta.url), 'utf8')
+  const i = src.indexOf('const lireGlobe =')
+  assert.ok(i >= 0, '`lireGlobe` a disparu ou changé de nom dans branchement-crop.js')
+  const ligne = src.slice(i, src.indexOf('\n', i))
+  assert.ok(
+    !/\bglobe\(\)/.test(ligne),
+    `la dérivation appelle \`globe()\` à la construction — la valeur serait figée pour toujours : ${ligne}`,
+  )
+  assert.ok(
+    /typeof globe === 'function' \? globe : \(\) => globe/.test(ligne),
+    `la dérivation a changé de forme, à revérifier : ${ligne}`,
+  )
+  // et les trois points d'usage connus rappellent bien `lireGlobe()` — pas une
+  // variable qui l'aurait mis en cache entre-temps
+  const appels = src.match(/lireGlobe\(\)/g) || []
+  assert.ok(appels.length >= 3, `\`lireGlobe()\` n'est rappelé que ${appels.length} fois dans le fichier`)
+})
+
 test('⑥ un globe SANS `poserCropSeul` n’est pas une panne', () => {
   // Même contrat que `poserFondCrop` (Tâche J bis) : ce module se vérifie sous
   // node contre un globe de papier, qui ne porte que ce qu'il exerce.
   const g = globeDePapier()
   delete g.poserCropSeul
-  const veille = creerVeilleCrop({ globe: g, contexte: ctxFactice, repos: creerVeilleRepos() })
+  const veille = creerVeilleCrop({ globe: () => g, contexte: ctxFactice, repos: creerVeilleRepos() })
   assert.doesNotThrow(() => veille.maj(ALT_BLOC))
   assert.equal(veille.repos, true)
 })
@@ -520,7 +559,7 @@ function servir() {
 const { Globe, _resetTileMemo } = await import('../src/globe.js')
 const { latLonToSphere, R_GLOBE } = await import('../src/geo.js')
 const { _resetDemSource } = await import('../src/dem-source.js')
-const { tuileDansCrop } = await import('../src/monde/crop-sphere.js')
+const { tuileDansCrop, zoomCropPrescrit } = await import('../src/monde/crop-sphere.js')
 
 const LAT = -21.115
 const LON = 55.53
@@ -645,6 +684,56 @@ test('⑦ un quart au BORD n’attend pas les enfants qu’il ne créera jamais'
   }
   assert.ok(bord, 'le harnais ne produit aucun quart à cheval sur le bord du crop')
   assert.equal(globe._enfantsPresents(bord.t), true, 'le quart attend des enfants qui ne naîtront pas')
+})
+
+test('⑦ MI-CHARGEMENT : UN SEUL enfant manquant sur quatre garde le parent dessiné (règle sans-trou)', async () => {
+  // ⚠️ **CE QUE CE TEST MORD, ET RIEN D'AUTRE NE LE MORDAIT** : `_traverse`
+  // ne descend que si `kids.every((k) => k.state === 'ready' && k.mesh)` — LES
+  // QUATRE, PAS « AU MOINS UN ». Une mutation en `kids.some(...)` passait les
+  // 181 tests de ce fichier ET des cinq autres qui touchent `_traverse`, parce
+  // qu'aucun d'eux n'inspecte l'état à MI-CHARGEMENT (avant que `calme()` n'ait
+  // laissé le réseau tout terminer) : ils comparent tous un état de REPOS à un
+  // autre état de REPOS, jamais l'instant où 1 à 3 enfants sur 4 sont prêts.
+  // C'est justement l'instant où `every` et `some` divergent : sous `some`, le
+  // parent se raffine (`t.refined = true`, il ARRÊTE de se dessiner) alors que
+  // l'enfant manquant, encore `state !== 'ready'`, ne dessine rien non plus —
+  // une encoche d'exactement une tuile s'ouvre dans le crop, précisément ce que
+  // le commentaire du code invoque pour justifier le retrait du `kids.length >
+  // 0 &&` voisin.
+  const { globe, camera } = await globeAuBloc({ cropSeulDesLeDepart: true })
+  let cible = null
+  for (const t of globe.tiles.values()) {
+    if (globe._horsCropSeul(t.z, t.x, t.y)) continue
+    if (t.state !== 'ready' || !t.mesh) continue
+    const zCrop = zoomCropPrescrit(t.z, t.x, t.y, globe._crop)
+    if (!zCrop || t.z >= zCrop) continue
+    const enfants = globe._children(t)
+    if (enfants.length === 4) { cible = { t, enfants }; break }
+  }
+  assert.ok(cible, 'le harnais ne produit aucune tuile candidate sous le zoom prescrit du crop')
+  const { t, enfants } = cible
+
+  // trois enfants prêts, LE QUATRIÈME ENCORE EN CHARGEMENT — l'état de
+  // mi-chargement exact que `every` distingue de `some`.
+  for (let i = 0; i < 3; i++) {
+    enfants[i].state = 'ready'
+    enfants[i].mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial())
+  }
+  enfants[3].state = 'loading'
+  enfants[3].mesh = null
+  t.refined = false
+  t.mesh.visible = false // simule : pas encore redessiné à cette image
+
+  const camPos = camera.position
+  const camDir = camPos.clone().normalize()
+  globe._traverse(t, camPos, camDir)
+
+  assert.equal(t.refined, false, 'un enfant manquant ne doit pas déclencher le raffinement du parent')
+  assert.equal(
+    t.mesh.visible, true,
+    'le parent doit rester dessiné tant que les 4 enfants ne sont pas TOUS prêts — sinon la tuile ' +
+      'manquante ouvre un trou d’une tuile dans le crop',
+  )
 })
 
 test('⑦ APRÈS : plus une seule URL hors crop n’est demandée', async () => {
