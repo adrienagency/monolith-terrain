@@ -212,6 +212,39 @@ le palliatif et son prix » vaut mieux qu'une tâche qui maquille.
 
 #### Tâche M — LA MORT DES PALIERS (D1)
 
+⚡ **D9 — LA LOI DE ZOOM EST MESURÉE, ELLE NE SE CHOISIT PLUS.**
+
+⚠️ **DEUXIÈME RELEVÉ D'ADRIEN, CRAN PAR CRAN, QUI REMPLACE LE PREMIER.** Dix-neuf altitudes
+de caméra lues dans Google Earth, de **63 170 km à 126 km**, soit **18 intervalles** :
+
+| | |
+|---|---|
+| rapport global | **501,35** sur 18 crans |
+| **moyenne géométrique** | **×1,41256** = **0,49832 octave** · `ln = 0,34541` |
+| écart-type des rapports | **0,0126** (min 1,4032 · max 1,4600) |
+| **√2 = 1,41421** | **0,5 octave exactement** · `ln = 0,34657` |
+| **écart à √2** | **0,12 %** |
+
+➡️ **LA LOI EST UNE DEMI-OCTAVE PAR CRAN : `STEP = Math.LN2 / 2`.** Le rapport est
+**constant sur toute la descente** — 1,40 à 63 000 km comme à 126 km.
+
+⛔ **CORRECTION D'UNE ERREUR DU CONTRÔLEUR.** J'avais dérivé **×1,39288** d'un comptage
+approximatif (« ≈ 37 crans ») et **écrit que ce n'était PAS `Math.LN2 / 2`, à 4,4 % près**.
+**La série mesurée dit l'inverse : l'écart réel est de 1,4 %, et la valeur juste EST la
+demi-octave.** *Un comptage de crans à la main ne vaut pas une série d'altitudes lues.*
+
+⚠️ **ET LA LECTURE D'ADRIEN — « le zoom est de moins en moins important » — DÉCRIT UN EFFET
+RÉEL AVEC UNE MAUVAISE CAUSE.** Ce qui rétrécit est **l'écart en kilomètres** (18 153 km au
+premier cran, **51 km au dernier**) ; **le rapport, lui, ne bouge pas.** C'est la signature
+d'une loi géométrique lue en valeurs absolues. **Implémenter une loi « décroissante » serait
+une faute** : c'est la constance du rapport qui produit la stabilité qu'il admire.
+
+⛔ **Le dépôt pose `STEP_IN = STEP_OUT = Math.LN2` (`src/modes.js`), soit un FACTEUR 2 par
+cran — DEUX FOIS TROP.** ➡️ **C'est une cause mesurée de la sensation de saut.**
+⚠️ **Le réglage porte sur le CRAN, pas sur le tour de molette** — le nombre de crans par tour
+dépend de la souris.
+
+
 **Fichiers :** `src/modes.js`, `src/escalier-zoom.js`, `src/ui/zoom-stepper.js`,
 `src/loi-altitude.js`, `src/main.js`. ⛔ **Derrière `?terre=unique` uniquement — le mode plat
 garde ses paliers intacts.**
