@@ -60,6 +60,9 @@ import {
   FRACTION_BANDE_BORD,
   bordDeMer,
 } from '../src/monde/mer-sphere.js'
+// ⚠️ **Tâche P4** : le fondu de rivage n'est plus écrit dans `globe.js`, il est
+// INJECTÉ depuis le module partagé — le test suit donc la valeur à sa source.
+import { FONDU_HOULE_FIN, GLSL_ECUME } from '../src/monde/ecume-mer.js'
 import { zoomPourEmprise } from '../src/monde/flux-terrain.js'
 // ⚠️ L'ALIAS QUE VITE POSE (`vite.config.js`), RÉSOLU SANS VITE — le patron de
 // `test/damier-mer-runtime.test.js` : la copie vendorée fait foi ici, et cinq
@@ -625,7 +628,13 @@ test('⑤d `ocean.js` A CESSÉ de porter sa propre boucle — garde-fou de SOURC
   // l'exécuter — c'est la limite de ce fichier, et elle est écrite en tête.
   const src = readFileSync(SRC_OCEAN, 'utf8')
   assert.ok(!/dist\[k - n - 1\]/.test(src), 'la boucle de chanfrein est encore dans ocean.js')
-  assert.match(src, /import \{ distanceRivage \} from '\.\/monde\/mer-sphere\.js'/)
+  // ⚠️ **Tâche P4** : l'importation en porte maintenant DEUX — `GLSL_JUPE_MER`
+  // est la couleur du rideau d'eau, extraite de `SKIRT_FRAG` pour que le crop
+  // lise les mêmes six lignes. Le garde-fou reste le même : une seule écriture.
+  assert.match(src, /import \{ distanceRivage, GLSL_JUPE_MER \} from '\.\/monde\/mer-sphere\.js'/)
+  assert.ok(!/float alpha = mix\(0\.55, 0\.94, uFrost\)/.test(src),
+    'la couleur du rideau est encore ecrite dans ocean.js')
+  assert.match(src, /gl_FragColor = couleurJupeMer\(uDeep, uSky, g, uFrost, uDayLight, grain\);/)
 })
 
 // ══════════ ⑥ L'EMPRISE ════════════════════════════════════════════════════
@@ -775,10 +784,16 @@ test('⑧d le fondu de rivage du nuanceur GARDE son seuil de 0,10, pas approxima
   const src = readFileSync(SRC_GLOBE, 'utf8')
   const bloc = src.match(/\/\/ ══════ LA MER[\s\S]*?\n\}\n`/)
   assert.ok(bloc, 'le bloc de la mer est absent de globe.js')
-  const m = bloc[0].match(/float fade = smoothstep\(([^,]+), ([^,]+), vRive\) \* richesseMer;/)
-  assert.ok(m, 'le fondu de rivage est absent ou d une autre forme')
-  assert.equal(m[1].trim(), '0.0')
-  assert.equal(m[2].trim(), '0.10')
+  // ⚠️ **DEPUIS LA TÂCHE P4 LE SEUIL VIT DANS `monde/ecume-mer.js`** — c'est le
+  // MÊME que celui d'`ocean.js`, et il n'est plus écrit qu'une fois. Le test
+  // garde sa raison d'être (une mutation du seuil doit rougir) mais suit la
+  // valeur à sa source. **Et il exige que le nuanceur appelle la fonction
+  // partagée sur le DÉCLIN, pas sur le fondu** : c'était toute la faute de P4.
+  assert.ok(/float fade = fonduHouleMer\(declin\) \* richesseMer;/.test(bloc[0]),
+    'le fondu de rivage est absent ou d une autre forme')
+  assert.equal(FONDU_HOULE_FIN, 0.1)
+  assert.ok(new RegExp(`smoothstep\\(0\\.0, ${FONDU_HOULE_FIN.toFixed(2)}, declin\\)`).test(GLSL_ECUME),
+    'le seuil du GLSL partagé a bougé')
 })
 
 // ══════════ ⑨ LES QUATRE CONSTANTES DU SOCLE, CONVERTIES ═══════════════════
@@ -1089,12 +1104,23 @@ test('⑪a `RETRAIT_EAU_CROP` est bien celui de `plinth.js`, relu sur le DISQUE'
 })
 
 test('⑪b la mer S ARRÊTE AU BLOC quand la Terre autour est effacée', () => {
-  // estompage = 1 : il ne reste que le crop. Le fondu doit finir SUR la
-  // frontière, à la largeur du chanfrein près — c'est là que `plinth.js`
-  // arrête l'eau du mode plat (`rayonEauDansSocle`).
+  // estompage = 1 : il ne reste que le crop. Le fondu doit finir DANS le crop,
+  // en RETRAIT de la largeur du chanfrein — c'est là que `plinth.js` arrête
+  // l'eau du mode plat (`rayonEauDansSocle = HALF − chanfrein − marge`).
+  //
+  // ⛔ **CE TEST ENCODAIT LE SIGNE INVERSE, ET C'EST CE QUI L'A LAISSÉ PASSER.**
+  // Avant la Tâche P4 il exigeait `fin = +RETRAIT_EAU_CROP`, c'est-à-dire l'eau
+  // 0,22 unité de socle DEHORS, pleine opacité sur l'arête, fondu au-dessus du
+  // vide. Le socle fait exactement l'inverse. **Un test peut verrouiller un
+  // défaut : celui-ci l'a fait pendant tout le chantier.**
   const b = bordDeMer(1)
-  assert.equal(b.debut, 0, 'le fondu commence exactement à la frontière du crop')
-  assert.ok(Math.abs(b.fin - RETRAIT_EAU_CROP) < 1e-12, `fin ${b.fin}`)
+  assert.ok(Math.abs(b.fin + RETRAIT_EAU_CROP) < 1e-12, `fin ${b.fin} : la mer doit RENTRER`)
+  assert.ok(b.fin < 0, 'à estompage plein la mer s éteint DANS le crop, pas dehors')
+  assert.ok(Math.abs(b.debut + 2 * RETRAIT_EAU_CROP) < 1e-12,
+    `debut ${b.debut} : la bande vaut le retrait, du bon côté de l arête`)
+  // et le témoin de la faute : elle vaut 0,44 unité de socle d'écart avec ce
+  // que le code d'avant posait, dans le sens qui compte
+  assert.ok(Math.abs((RETRAIT_EAU_CROP - b.fin) * (COTE_CROP_UNITES / 2) - 0.44) < 1e-9)
   // ⚠️ **ET LE TÉMOIN QUI COMPTE** : la mer d'avant la Tâche J allait à
   // l'horizon géométrique, soit ~93 demi-côtés à l'altitude de naissance du
   // socle. Trois ordres de grandeur.
@@ -1103,9 +1129,12 @@ test('⑪b la mer S ARRÊTE AU BLOC quand la Terre autour est effacée', () => {
 
 test('⑪c la mer VA JUSQU AU BORD DE LA CALOTTE quand la planète est entière', () => {
   const b = bordDeMer(0)
-  assert.ok(Math.abs(b.fin - (PORTEE_CROP - 1)) < 1e-12, `fin ${b.fin} contre ${PORTEE_CROP - 1}`)
+  // ⚠️ **LE RETRAIT S APPLIQUE AUSSI ICI, ET IL EST NÉGLIGEABLE ICI** : 0,22
+  // unité de socle sur deux demi-côtés de calotte, soit 0,4 %. On l'écrit
+  // plutôt que de faire deux lois selon l'estompage.
+  assert.ok(Math.abs(b.fin - (PORTEE_CROP - 1 - RETRAIT_EAU_CROP)) < 1e-12, `fin ${b.fin}`)
   // la bande de fondu couvre la fraction annoncée de l'anneau extérieur
-  assert.ok(Math.abs(b.debut - (PORTEE_CROP - 1) * (1 - FRACTION_BANDE_BORD)) < 1e-12)
+  assert.ok(Math.abs(b.debut - ((PORTEE_CROP - 1) * (1 - FRACTION_BANDE_BORD) - RETRAIT_EAU_CROP)) < 1e-12)
 })
 
 test('⑪d le bord est MONOTONE en estompage — c est ce qui interdit un à-coup', () => {
@@ -1114,7 +1143,10 @@ test('⑪d le bord est MONOTONE en estompage — c est ce qui interdit un à-cou
   for (let i = 0; i <= 40; i++) {
     const b = bordDeMer(i / 40)
     assert.ok(b.fin <= precedent + 1e-12, `la mer ne doit jamais S ÉTENDRE en descendant (${i})`)
-    assert.ok(b.debut >= 0 && b.debut <= b.fin, `bornes incohérentes à ${i} : ${b.debut} / ${b.fin}`)
+    assert.ok(b.debut <= b.fin, `bornes incohérentes à ${i} : ${b.debut} / ${b.fin}`)
+    // la bande a une largeur STRICTEMENT positive à tout estompage : une bande
+    // nulle serait une arête dure, et c'est ce que le plancher interdit
+    assert.ok(b.fin - b.debut >= RETRAIT_EAU_CROP - 1e-12, `bande nulle à ${i}`)
     precedent = b.fin
   }
   // et le SENS n'est pas interchangeable : effacer la Terre RÉTRÉCIT la mer
@@ -1171,14 +1203,16 @@ test('⑪h `poserMer` POSE le bord, et `poserEstompage` le RECALE', () => {
   const g = globeAvecCrop()
   return Globe.prototype.poserMer.call(g, { remplir: remplirBouchon, portee: PORTEE_CROP }).then(() => {
     const u = g._mer.material.uniforms.uMerBord.value
+    const attendu = bordDeMer(0, PORTEE_CROP)
     // sans estompage posé, la planète est ENTIÈRE : la mer va au bord
-    assert.ok(Math.abs(u.y - (PORTEE_CROP - 1)) < 1e-9, `fin ${u.y}`)
+    assert.ok(Math.abs(u.y - attendu.fin) < 1e-9, `fin ${u.y}`)
     Globe.prototype.poserEstompage.call(g, 1)
-    assert.ok(Math.abs(u.y - RETRAIT_EAU_CROP) < 1e-9, `après estompage plein : ${u.y}`)
-    assert.equal(u.x, 0)
+    assert.ok(Math.abs(u.y + RETRAIT_EAU_CROP) < 1e-9, `après estompage plein : ${u.y}`)
+    assert.ok(u.y < 0, 'la mer doit RENTRER dans le crop, pas déborder — Tâche P4')
+    assert.ok(Math.abs(u.x + 2 * RETRAIT_EAU_CROP) < 1e-9, `debut ${u.x}`)
     // et le retour : `retirerEstompage` rend la planète entière, donc la mer
     Globe.prototype.retirerEstompage.call(g)
-    assert.ok(Math.abs(u.y - (PORTEE_CROP - 1)) < 1e-9, `après retrait : ${u.y}`)
+    assert.ok(Math.abs(u.y - attendu.fin) < 1e-9, `après retrait : ${u.y}`)
   })
 })
 

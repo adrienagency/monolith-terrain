@@ -11913,6 +11913,17 @@ function tick() {
     cell.terrain.mapUniforms.uLmFlow.value = terrain.mapUniforms.uLmFlow.value
   }
   realWater?.setView(camera.position.y, controls.getDistance?.() ?? camera.position.distanceTo(controls.target)) // accalmie altitude + taille des remous de côte selon la distance d'affichage
+  // ══════════ LES DEUX ACCALMIES PASSENT AU CROP — Tâche P4 ═══════════════════
+  //
+  // ⚠️ **JUSTE APRÈS `setView`, ET C'EST TOUT LE POINT** : `setView` est le SEUL
+  // écrivain des deux facteurs, et le crop les LIT à la même image. Les
+  // recalculer côté globe aurait fait deux lois pour une seule grandeur — la
+  // faute que D13 §③ nomme et que ce chantier a déjà payée sur `hNorm` (P2 §3).
+  //
+  // ⚠️ **SANS MER DE SOCLE, `accalmie` REND LE NEUTRE (1, 1)**, c'est-à-dire la
+  // calotte d'avant cette tâche au bit près. Un crop continental ne s'en plaint
+  // pas : il n'a pas de mer à calmer.
+  if (terreUniqueBranchee) globe?.majReglagesMer(realWater?.reglagesMer)
   // PRÉCHAUFFAGE DES SHADERS — voir warmup.js et le rendez-vous en bas de tick.
   // Tant que les programmes ne sont pas compilés on fait tourner TOUTE la
   // logique de l'image (caméra, tweens, nuages, mer, dalles voisines) mais on

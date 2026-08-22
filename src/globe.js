@@ -22,7 +22,7 @@ import { repereCrop, coinNormalise, zoomCropPrescrit, tuileDansCrop, mercX, merc
 // LES PAROIS ET LA BASE — Tâche B. Pur lui aussi : il ne rend que des nombres,
 // c'est ce fichier-ci qui en fait une géométrie three.
 import { construireSolideCrop } from './monde/parois-crop.js'
-import { margeCoteDuCrop, intervalleCourbes, HABILLAGE_MONDE, CIRCONFERENCE_M } from './monde/habillage-crop.js'
+import { margeCoteDuCrop, intervalleCourbes, HABILLAGE_MONDE, CIRCONFERENCE_M, COTE_CROP_UNITES } from './monde/habillage-crop.js'
 import {
   RAMPE_MONDE,
   PAS_MESURE,
@@ -64,6 +64,8 @@ import {
   empriseCalotte,
   porteeHorizon,
   PORTEE_DEFAUT,
+  construireJupeMer,
+  GLSL_JUPE_MER,
 } from './monde/mer-sphere.js'
 // ⚠️ **LE FOV CANONIQUE, PAS UNE CONSTANTE RECOPIÉE.** Tour de correction 1 de
 // la Tâche F : le défaut de `poserMer` portait `33`, une valeur qui n'existe
@@ -118,6 +120,15 @@ import {
   hautLocal,
   irradianceAmbiante,
 } from './monde/eclairage-crop.js'
+// ══════════ L'ÉCUME DE LA MER — Tâche P4 ═══════════════════════════════════
+//
+// > **Le noteur, 2026-08-22 :** « l'écume est 7,7 fois trop étendue — et elle
+// > est en PLAQUES. »
+//
+// Même patron encore : la loi vit une seule fois dans un module PUR, `ocean.js`
+// et ce fichier injectent le MÊME texte. L'en-tête d'`ecume-mer.js` nomme les
+// quatre entrées qui manquaient et donne leur mesure.
+import { GLSL_ECUME, FREQ_TAVELURE, BLANC_ECUME, ACCALMIE_NEUTRE } from './monde/ecume-mer.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -144,6 +155,12 @@ import {
 // (c'est le damier), non corrigé, écrit ici pour qu'on puisse le trouver.
 const MER_VERT = /* glsl */ `
 attribute vec2 aCrop;      // (u, v) en demi-côtés de crop — porté par la géométrie
+// LE RIDEAU D EAU — Tache P4. 0 sur la calotte et en haut du ruban, 1 tout en
+// bas : c est A LA FOIS le drapeau du rideau et la profondeur relative que le
+// socle appelle g. Le ruban est CONCATENE a la calotte, donc ses sommets du
+// haut portent le meme aCrop et recoivent la MEME houle, au bit pres.
+attribute float aJupe;
+uniform float uMerBasY;    // le fond du bloc, en Y local — construireSolideCrop
 uniform float uMerTemps;
 uniform float uMerHoule;   // amplitude de houle, en mètres de spectre
 uniform float uMerChop;
@@ -153,25 +170,45 @@ uniform float uMerPortee;
 uniform float uMerDebut;   // début de la bande de dégradation, en unités de scène
 uniform float uMerFin;     // fin de la bande : au-delà, on ne calcule PLUS RIEN
 uniform sampler2D uMerChamp; // R : altitude du fond (unités locales), G : rivage
+// ⚠️ UNITÉS DE SCÈNE PAR UNITÉ DE SOCLE — Tâche P4. C'est le facteur qui rend
+// la profondeur du crop comparable à celle du socle, la SEULE monnaie dans
+// laquelle le déclin côtier d'ocean.js a un sens. Un seul écrivain : poserMer.
+uniform float uMerUnite;
 __GERSTNER__
 __SHORE_SURF__
+${GLSL_ECUME}
 varying vec2 vCrop;
 varying vec2 vLocal;
 varying float vProfondeur;
-varying float vRive;
+// ⚠️ CE N EST PLUS LA DISTANCE BRUTE, ET LE NOM LE DIT — Tache P4. Elle portait
+// champ.g tel quel pendant que les seuils qui la lisent (0,002 / 0,03 / 0,10 /
+// 0,75) sont ceux d ocean.js, cales sur vFade, c est-a-dire sur le declin
+// FONDU. C etait ca, l ecume 7,7 fois trop etendue. (Aucun accent grave ni
+// apostrophe dans ce bloc : template literal.)
+varying float vFonduRive;
 varying float vCrete;
 varying vec3 vNormMer;
 varying vec3 vMonde;
 varying float vRichesse;
+varying float vJupe;
 
 void main() {
   vec3 p = position;
+  vJupe = aJupe;
+  // le BAS du rideau tient au fond du bloc et ne suit aucune vague : c est lui
+  // qui soude la nappe a la levre de la paroi, laquelle plonge au fond marin.
+  bool basDuRideau = aJupe > 0.5;
+  if (basDuRideau) p.y = uMerBasY;
   vCrop = aCrop;
   vLocal = vec2(position.x, position.z);
   vec2 uvF = aCrop / (2.0 * uMerPortee) + 0.5;
   vec2 champ = texture2D(uMerChamp, uvF).rg;
   vProfondeur = max(-champ.r, 0.0);
-  vRive = champ.g;
+  // ⚠️ LA PROFONDEUR EN UNITÉS DE SOCLE, PUIS LE DÉCLIN D'ocean.js. Les deux
+  // grandeurs qu'il compare — deux fois la profondeur, et la distance au rivage
+  // normalisée sur quinze unités de socle — doivent vivre dans la MÊME monnaie.
+  float declin = declinRivageMer(vProfondeur / max(uMerUnite, 1e-9), champ.g);
+  vFonduRive = fonduRessacMer(declin);
   vec3 monde = (modelMatrix * vec4(p, 1.0)).xyz;
 
   // ══════ LA MER — LA DÉGRADATION, ET ELLE ATTEINT ZÉRO ═════════════════════
@@ -201,7 +238,9 @@ void main() {
   // le fondu de rivage : la houle meurt AVANT le trait d'eau, sinon un creux
   // traverse le fond et le relief sous-marin ressort en peignes (ocean.js, les
   // captures d'Ibiza et de Toulon)
-  float fade = smoothstep(0.0, 0.10, vRive) * richesseMer;
+  // ⚠️ SUR LE DECLIN, PAS SUR LE FONDU — ocean.js lit shoreD ici et vFade dans
+  // le fragment : deux rampes sur la MEME grandeur, pas l une sur l autre.
+  float fade = fonduHouleMer(declin) * richesseMer;
   vec3 nAcc = vec3(0.0);
   float crete = 0.0;
   // ⚠️ ON PASSE uMerLambda EN lenScale, ET LES COORDONNÉES TELLES QUELLES —
@@ -229,9 +268,11 @@ void main() {
   // ecriture ajoutait normalize(monde), c'est-a-dire un vecteur du repere du
   // MONDE, a une position du repere LOCAL du crop : la houle poussait la
   // surface de travers, d'un angle egal a la latitude du crop.
-  p.x += disp.x;
-  p.z += disp.z;
-  p.y += dy;
+  if (!basDuRideau) {
+    p.x += disp.x;
+    p.z += disp.z;
+    p.y += dy;
+  }
 
   vCrete = crete;
   vNormMer = normalize(vec3(-nAcc.x, 1.0 - nAcc.y, -nAcc.z));
@@ -254,6 +295,14 @@ uniform float uMerEcumeEchelle;
 uniform float uMerBrillance;
 uniform float uMerPortee;
 uniform float uMerLambda;
+uniform float uMerUnite;      // unites de scene par unite de socle — Tache P4
+// ══════ LES DEUX ACCALMIES D'ocean.js, LUES ET NON RECALCULEES — Tache P4 ══
+// Elles pesent 0,4039 et 0,08 dans la page vivante du 2026-08-22 : le ressac du
+// socle y est multiplie par 0,0323 quand la calotte le multipliait par 1. Un
+// seul ecrivain, Ocean.setView ; la calotte prend ses valeurs. Neutre : 1.
+uniform float uMerCalmeVue;
+uniform float uMerCalmeSurf;
+uniform float uMerGivre;   // le socle de verre du mode plat (uFrost) — 0 = pas de verre
 uniform float uCropCoin;
 uniform float uCropCoinN;
 // LE BORD DE LA MER — Tache J. (debut, fin) du fondu, en demi-cotes de crop,
@@ -268,11 +317,14 @@ uniform vec2 uMerBord;
 varying vec2 vCrop;
 varying vec2 vLocal;
 varying float vProfondeur;
-varying float vRive;
+varying float vFonduRive;
 varying float vCrete;
 varying vec3 vNormMer;
 varying vec3 vMonde;
 varying float vRichesse;
+varying float vJupe;
+${GLSL_ECUME}
+${GLSL_JUPE_MER}
 
 float bruitMer(vec2 q) {
   vec2 i = floor(q);
@@ -289,6 +341,19 @@ void main() {
   // la TERRE ne porte jamais la mer : le fond au-dessus du niveau zéro discarde
   if (vProfondeur <= 0.0) discard;
 
+  // ══════ LE RIDEAU D EAU — Tache P4 ═══════════════════════════════════════
+  //
+  // ⚠️ AVANT LE BORD, ET C EST OBLIGATOIRE : le ruban vit EN RETRAIT de la
+  // frontiere, exactement la ou bordDeMer eteint la nappe. Le passer au test du
+  // bord le ferait disparaitre entierement — ce qui est arrive au premier essai.
+  // ⚠️ ET IL N A PAS D ECUME : le socle n en met pas non plus sur sa jupe.
+  if (vJupe > 0.0) {
+    float grain = bruitMer(vMonde.xz * 6.0 + vMonde.y * 4.0) * 0.5
+                + bruitMer(vMonde.xz * 17.0 - vMonde.y * 9.0) * 0.5;
+    gl_FragColor = couleurJupeMer(uMerFond, uSky, clamp(vJupe, 0.0, 1.0), uMerGivre, 1.0, grain);
+    return;
+  }
+
   // ══════ LE BORD — LA MER S ARRETE OU IL FAUT, ET ELLE SUIT L ESTOMPAGE ════
   //
   // ⚠️ AVANT TOUT LE RESTE, ET C EST UNE ECONOMIE, PAS UN STYLE : au-dela du
@@ -298,9 +363,21 @@ void main() {
   // ⚠️ ET LA MESURE EST CELLE DE LA DECOUPE, PAS UN CARRE. Un max(|u|,|v|)
   // laisserait la mer deborder aux QUATRE COINS arrondis du crop, la ou il n y a
   // plus de bloc dessous. (Aucun accent grave dans ce bloc : template literal.)
-  vec2 cq = max(abs(vCrop) - (1.0 - uCropCoin), 0.0);
+  //
+  // ⛔ ET ELLE ETAIT MUETTE A L INTERIEUR — Tache P4, et c est LA cause du
+  // porte-a-faux, pas un signe inverse dans bordDeMer. Le terme cq est un
+  // max(.., 0) : DEDANS il vaut zero, donc pn vaut zero et dBord se fige a
+  // -uCropCoin. Releve sur la page vivante du 2026-08-22 : uCropCoin vaut ZERO.
+  // dBord valait donc 0 sur TOUT l interieur du crop, et la mesure ne portait
+  // que le dehors. Le fondu de la mer ne pouvait structurellement pas RENTRER :
+  // il ne savait que sortir, et c est ce qu on voit passer par-dessus l arete
+  // haute de la paroi. Le terme min(max(q.x, q.y), 0.0) est la distance
+  // interieure de la boite arrondie (la forme close usuelle) : il vaut ZERO
+  // dehors, donc le dehors reste au bit pres ce qu il etait.
+  vec2 q = abs(vCrop) - (1.0 - uCropCoin);
+  vec2 cq = max(q, 0.0);
   float pn = pow(pow(cq.x, uCropCoinN) + pow(cq.y, uCropCoinN), 1.0 / uCropCoinN);
-  float dBord = pn - uCropCoin; // 0 = la frontiere du crop, > 0 = dehors
+  float dBord = pn - uCropCoin + min(max(q.x, q.y), 0.0); // 0 = frontiere, < 0 = DEDANS
   float bord = 1.0 - smoothstep(uMerBord.x, uMerBord.y, dBord);
   if (bord <= 0.0) discard;
 
@@ -335,14 +412,21 @@ void main() {
     // cote a 7,6 km d altitude etait une masse BLANCHE trouee de bleu. Les deux
     // sont remis. (Le nom « patchy » d ocean.js vient de ce que « patch » est un
     // mot reserve du GLSL et tue la compilation.)
-    float tavelure = smoothstep(0.32, 0.72, bruitMer(vLocal * 0.33 / max(uMerLambda, 1e-9) * 0.08 + vec2(uMerTemps * 0.015, -uMerTemps * 0.011)));
-    float moutons = uMerEcume * uMerEcumeEchelle * smoothstep(0.30, 0.60, vCrete) * smoothstep(0.35, 0.75, n2) * (0.5 + 0.5 * tavelure);
-    float bande = 0.5 + 0.5 * sin(vRive * 14.0 - uMerTemps * 1.6 + n1 * 4.0);
-    float largeurRessac = (1.0 - smoothstep(0.10, 0.75, vRive)) * smoothstep(0.002, 0.03, vRive);
-    float ressac = largeurRessac * smoothstep(0.22, 0.55, n1 * 0.6 + bande * 0.4);
-    float lisere = (1.0 - smoothstep(0.0, 0.02, vRive)) * smoothstep(0.25, 0.6, n1 + 0.2);
-    float ecume = clamp((moutons + ressac * 1.8 + lisere * 1.1) * vRichesse, 0.0, 1.0);
-    col = mix(col, vec3(0.96), ecume);
+    // ⛔ ET ELLE ETAIT INDEXEE DANS LA MAUVAISE MONNAIE — Tache P4. ocean.js
+    // ecrit vnoise(xz * 0.33) ou xz est en UNITES DE SOCLE ; cette ligne
+    // divisait par uMerLambda (espace de spectre) puis remultipliait par un
+    // 0.08 qui n existe nulle part chez lui. Mesure sur la page vivante : la
+    // cellule de tavelure faisait 28,4 % de la largeur du bloc contre 5,41 %
+    // sur le socle. CINQ FOIS UN QUART trop large — ce sont LES PLAQUES.
+    float tavelure = tavelureMer(bruitMer(vLocal / max(uMerUnite, 1e-9) * ${FREQ_TAVELURE} + vec2(uMerTemps * 0.015, -uMerTemps * 0.011)));
+    // ⚠️ LA MEME FONCTION QUE LE SOCLE, INJECTEE ET NON RECOPIEE. vRichesse
+    // reste en facteur : c est l echelle d ECHANTILLONNAGE de la calotte (elle
+    // atteint zero et fait sortir le vertex), la ou uMerCalmeVue/Surf sont les
+    // deux echelles de LOOK d ocean.js. Deux echelles, deux roles, toutes deux
+    // presentes — c est exactement ce qui manquait.
+    float ecume = clamp(ecumeMer(vCrete, vFonduRive, n1, n2, tavelure, uMerTemps,
+      uMerEcume, uMerEcumeEchelle, uMerCalmeVue, uMerCalmeSurf) * vRichesse, 0.0, 1.0);
+    col = mix(col, vec3(${BLANC_ECUME.toFixed(2)}), ecume);
     gl_FragColor = vec4(col, bord * max(smoothstep(0.0, uMerSeuilEau, vProfondeur) * mix(0.45, 0.95, pow(dLagon, 0.55)), ecume * 0.85));
     return;
   }
@@ -3337,10 +3421,49 @@ export class Globe {
     }
     const cal = construireCalotte({ repere: rep, rayon: R_GLOBE, portee: p, pas, hauteur: epsUnites })
 
+    // ══════ LE RIDEAU D'EAU, CONCATÉNÉ À LA CALOTTE — Tâche P4 ═══════════════
+    //
+    // ⚠️ **CONCATÉNÉ, PAS POSÉ À CÔTÉ.** Un second maillage aurait eu son propre
+    // nuanceur de sommets, donc une seconde écriture du déplacement de houle —
+    // et `ocean.js` dit lui-même ce que ça coûte : « si les deux divergeaient
+    // d'un millimètre, un jour s'ouvrirait entre la jupe et la mer sur tout le
+    // périmètre du bloc ». Ici, le haut du ruban porte le MÊME `aCrop` que la
+    // nappe et traverse les MÊMES lignes : la soudure est structurelle.
+    //
+    // ⚠️ **SANS PAROIS, PAS DE RIDEAU** — et c'est dit dans `_merEtat.jupe`
+    // plutôt que posé sur un fond deviné. `MAILLONS` met `parois` avant `mer`.
+    const basY = this._baseYCrop
+    const rideau = Number.isFinite(basY)
+      ? construireJupeMer({
+        repere: rep,
+        rayon: R_GLOBE,
+        forme: { coin: this.uniforms.uCropCoin.value, expo: this.uniforms.uCropCoinN.value },
+        basY,
+        hauteur: epsUnites,
+      })
+      : null
+
+    const nCal = cal.positions.length / 3
+    const nJup = rideau ? rideau.positions.length / 3 : 0
+    const positions = new Float32Array((nCal + nJup) * 3)
+    const uvs = new Float32Array((nCal + nJup) * 2)
+    const jupes = new Float32Array(nCal + nJup)
+    positions.set(cal.positions, 0)
+    uvs.set(cal.uv, 0)
+    const indices = new Uint32Array(cal.indices.length + (rideau ? rideau.indices.length : 0))
+    indices.set(cal.indices, 0)
+    if (rideau) {
+      positions.set(rideau.positions, nCal * 3)
+      uvs.set(rideau.uv, nCal * 2)
+      jupes.set(rideau.jupe, nCal)
+      for (let i = 0; i < rideau.indices.length; i++) indices[cal.indices.length + i] = rideau.indices[i] + nCal
+    }
+
     const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(cal.positions, 3))
-    geo.setAttribute('aCrop', new THREE.BufferAttribute(cal.uv, 2))
-    geo.setIndex(new THREE.BufferAttribute(cal.indices, 1))
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geo.setAttribute('aCrop', new THREE.BufferAttribute(uvs, 2))
+    geo.setAttribute('aJupe', new THREE.BufferAttribute(jupes, 1))
+    geo.setIndex(new THREE.BufferAttribute(indices, 1))
     geo.computeBoundingSphere()
 
     // ─── DEUX ÉCHELLES, ET LES CONFONDRE SE VOIT ─────────────────────────────
@@ -3384,6 +3507,21 @@ export class Globe {
         uMerLambda: { value: echelleH },
         uMerMaille: { value: maille },
         uMerPortee: { value: p },
+        // ⚠️ **LA MÊME VALEUR QUE CELLE QUI A NORMALISÉ LE CANAL G** — elle sort
+        // de `_cuireChampMer`, elle n'est pas recalculée ici (Tâche P4).
+        uMerUnite: { value: champ.unite },
+        // ⚠️ **LE FOND DU BLOC, PAS UNE PROFONDEUR À PART** — le rideau descend
+        // jusqu'à `baseY` des parois. Sans parois, aucun sommet de rideau n'est
+        // bâti et cette valeur ne sert à personne : elle vaut alors 0.
+        uMerBasY: { value: Number.isFinite(basY) ? basY : 0 },
+        // ⚠️ **LES DEUX ACCALMIES D'`ocean.js`, AU NEUTRE À LA NAISSANCE.**
+        // `majAccalmieMer` les pose par image depuis les uniformes VIVANTS de la
+        // mer du socle. Laissées au neutre, la mer est celle d'avant P4 au bit
+        // près — c'est l'instrument de banc que D13 §① demande de garder.
+        uMerCalmeVue: { value: ACCALMIE_NEUTRE.vue },
+        uMerCalmeSurf: { value: ACCALMIE_NEUTRE.surface },
+        // le givre du socle de verre — 0 = pas de verre, le neutre exact
+        uMerGivre: { value: 0 },
         uMerDebut: { value: bande.debut },
         uMerFin: { value: bande.fin },
         uMerChamp: { value: champ.texture },
@@ -3470,6 +3608,9 @@ export class Globe {
     this._merEtat = {
       portee: p, pas, lambda, maille, echelleH, bascule, bande, epsUnites,
       flecheMax: cal.flecheMax, compte: cal.compte,
+      // ⚠️ **ON DIT SI LE RIDEAU EST LÀ.** Un `false` silencieux serait
+      // exactement le genre d'absence que ce chantier met des soirées à lire.
+      jupe: rideau ? { basY, ...rideau.compte } : null,
       couverture: champ.couverture, profMaxUnites: champ.profMaxUnites,
       bathy: champ.bathy,
     }
@@ -3557,6 +3698,14 @@ export class Globe {
     // la cellule, en unités de scène : la largeur de la calotte divisée par N
     const largeurUnites = 2 * portee * repere.demi * CIRCONFERENCE_MERCATOR * (R_GLOBE / EARTH_RADIUS_M)
     const cellule = largeurUnites / N
+    // ⚠️ **L'UNITÉ DE SOCLE, ET IL N'Y EN A QU'UNE ÉCRITURE — Tâche P4.** Elle
+    // servait déjà, en ligne, à normaliser le canal G ; le déclin côtier
+    // d'`ocean.js` en a besoin AUSSI pour rendre la profondeur comparable à
+    // cette distance. Deux écritures de ce facteur remettraient les deux
+    // grandeurs dans deux monnaies, ce qui est exactement le défaut réparé.
+    // ⚠️ **EN MÈTRES MERCATOR, PAS EN MÈTRES VRAIS** : `largeurCropM` porte un
+    // `cos φ` que `largeurUnites` n'a pas. À La Réunion l'écart vaut 6,8 %.
+    const unite = largeurUnites / (COTE_CROP_UNITES * portee)
     const dist = distanceRivage(eau, cote, cellule, { completes: true })
 
     // ⚠️ DEMI-FLOTTANTS ÉCRITS DIRECTEMENT, comme `_bakeField` : à 385² un
@@ -3567,7 +3716,7 @@ export class Globe {
       // ⚠️ NORMALISÉE SUR 15 UNITÉS DE SOCLE, CONVERTIES — c'est le déclin
       // côtier d'`ocean.js` (`dist / 15`), et le recopier tel quel aurait donné
       // une frange de ressac quinze fois trop large sur le globe.
-      demi[k * 2 + 1] = THREE.DataUtils.toHalfFloat(Math.min(1, dist[k] / (15 * (largeurUnites / (56 * portee)))))
+      demi[k * 2 + 1] = THREE.DataUtils.toHalfFloat(Math.min(1, dist[k] / (15 * unite)))
     }
     const tex = new THREE.DataTexture(demi, cote, cote, THREE.RGFormat, THREE.HalfFloatType)
     tex.magFilter = THREE.LinearFilter
@@ -3577,6 +3726,7 @@ export class Globe {
       texture: tex,
       couverture,
       bathy,
+      unite,
       profMaxUnites: Math.max(profMaxM * echelle, 1e-6),
       profMaxM,
     }
@@ -3729,6 +3879,40 @@ export class Globe {
   animerMer(dt) {
     if (!this._mer) return
     this._mer.material.uniforms.uMerTemps.value += dt
+  }
+
+  /**
+   * Pose les deux accalmies d'`ocean.js` sur l'écume de la calotte — Tâche P4.
+   *
+   * ⚠️ **ELLE NE CALCULE RIEN, ELLE POSE.** La loi vit dans `Ocean.setView` et
+   * nulle part ailleurs ; `accalmieDuSocle` (`monde/ecume-mer.js`) ne fait que
+   * lire ses deux uniformes. **Relevé le 2026-08-22 dans la page vivante,
+   * La Réunion z12 : `uViewCalm = 0,4039`, `uSurfCalm = 0,08`** — le ressac du
+   * socle est donc multiplié par **0,0323** là où la calotte le multipliait par
+   * **1**. Trente et une fois.
+   *
+   * ⚠️ **UN ARGUMENT ABSENT OU INCOMPLET REND LE NEUTRE**, c'est-à-dire la mer
+   * d'avant cette tâche au bit près : un demi-couple (une accalmie posée,
+   * l'autre pas) serait pire que pas d'accalmie du tout.
+   *
+   * ⚠️ **ET LE GIVRE ET LE CIEL PASSENT PAR LÀ AUSSI**, pour la même raison :
+   * `poserMer` codait `uSky` en dur (`#bcd8ea` contre `#85c2eb` vivant) et le
+   * rideau d'eau n'avait aucun givre alors que le socle vit à **0,56**.
+   *
+   * @param {{vue:number, surface:number, givre?:number, ciel?:object}|null} [reglages]
+   * @returns {{vue:number, surface:number, givre:number}|null} ce qui a été posé
+   */
+  majReglagesMer(reglages = null) {
+    if (!this._mer) return null
+    const ok = reglages && Number.isFinite(reglages.vue) && Number.isFinite(reglages.surface)
+    const a = ok ? reglages : ACCALMIE_NEUTRE
+    const u = this._mer.material.uniforms
+    u.uMerCalmeVue.value = a.vue
+    u.uMerCalmeSurf.value = a.surface
+    const givre = Number.isFinite(reglages?.givre) ? reglages.givre : 0
+    u.uMerGivre.value = givre
+    if (reglages?.ciel?.isColor) u.uSky.value.copy(reglages.ciel)
+    return { vue: a.vue, surface: a.surface, givre }
   }
 
   /** Retire la mer — le globe redevient une planète sans eau animée. */
@@ -3912,6 +4096,13 @@ export class Globe {
     M.decompose(mesh.position, mesh.quaternion, mesh.scale)
     this.group.add(mesh)
     this._parois = mesh
+    // ⚠️ **LE FOND DU BLOC EST RETENU POUR LE RIDEAU D'EAU — Tâche P4.** Le
+    // ruban de mer descend jusqu'à LUI, pas jusqu'à une profondeur à part : deux
+    // fonds auraient laissé un jour ou un chevauchement sur tout le périmètre.
+    // `MAILLONS` met `parois` AVANT `mer`, donc la valeur est là quand `poserMer`
+    // la lit ; si les parois ont refusé, elle est nulle et le rideau n'est pas
+    // bâti (dit dans `_merEtat.jupe`) plutôt que posé sur un fond deviné.
+    this._baseYCrop = solide.baseY
     return { mesh, solide, couverture: solide.couverture, refus: null }
   }
 

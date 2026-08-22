@@ -119,7 +119,7 @@
 
 import { latLonDeLocal } from './crop-sphere.js'
 import { MERCATOR_LAT_MAX } from './seuil-socle.js'
-import { repereLocalCrop, surSphere } from './parois-crop.js'
+import { repereLocalCrop, surSphere, contourCrop, PAS_CONTOUR } from './parois-crop.js'
 import {
   unitesEnMetres,
   largeurCropM,
@@ -433,6 +433,132 @@ export function construireCalotte({ repere, rayon, portee = PORTEE_DEFAUT, pas =
   }
 }
 
+// ══════════ ③bis LE RIDEAU D'EAU — Tâche P4 ════════════════════════════════
+//
+// ⛔ **LA PIÈCE QUE LE SOCLE A ET QUE LE CROP N'AVAIT PAS.** Le noteur (manque
+// n° 4) : *« la nappe de mer et le dessus du bloc ne sont pas la même surface —
+// deux niveaux, un porte-à-faux »*. Le brief l'attribuait à un désaccord entre
+// `poserMer` et `construireParoisCrop`. **Ce n'en est pas un : les deux
+// s'accordent parfaitement.** L'anneau haut de la paroi suit la SURFACE, et sous
+// l'eau la surface est le FOND MARIN : au bord mouillé, la lèvre du bloc plonge
+// à la bathymétrie (−2 116 m relevés à La Réunion) pendant que la nappe reste au
+// niveau zéro. Elle flotte donc au-dessus du vide, et par le trou on voit la
+// face interne de la paroi et le fond du bloc.
+//
+// ⚡ **LE SOCLE A EXACTEMENT LE MÊME BLOC ET PAS LE DÉFAUT, PARCE QU'IL A UN
+// RIDEAU D'EAU** : `ocean.js` bâtit DEUX maillages, la surface (66 049 sommets,
+// renderOrder 18) et une jupe (1 474 sommets, renderOrder 16). **A/B relevé dans
+// la même page le 2026-08-22 : cacher la jupe du socle change 30 453 px (2,97 %
+// du cadre) et fait apparaître le MÊME porte-à-faux au flanc est**
+// (`.banc/vues-P4/Z4-SOCLE-sans-jupe-est.png` contre `-avec-jupe-`).
+//
+// ⚠️ **ELLE EST EN RETRAIT, ET C'EST LE MÊME RETRAIT QUE `bordDeMer`** :
+// `plinth.js` pose l'eau du mode plat à `HALF − chanfrein − marge`, donc DANS le
+// mur. Le rideau du crop vit sur le même anneau, rentré de `RETRAIT_EAU_CROP`.
+//
+// ⚠️ **UN SEUL MAILLAGE, UN SEUL MATÉRIAU, UNE SEULE LOI DE HOULE.** Le ruban
+// est CONCATÉNÉ à la calotte : ses sommets du haut portent le même `aCrop`, donc
+// le nuanceur de sommets leur applique la MÊME houle, au bit près. Un second
+// maillage aurait fallu une seconde écriture du déplacement — et `ocean.js`
+// écrit lui-même ce que ça coûte : « si les deux divergeaient d'un millimètre,
+// un jour s'ouvrirait entre la jupe et la mer sur tout le périmètre du bloc ».
+
+/**
+ * Le rideau d'eau du pourtour du crop, dans le repère LOCAL de la calotte.
+ *
+ * @param {object} arg
+ * @param {{cx:number,cy:number,demi:number}} arg.repere
+ * @param {number} arg.rayon rayon de la sphère (unités de scène)
+ * @param {{coin:number,expo:number}} [arg.forme] la MÊME que la découpe
+ * @param {number} arg.basY le fond du bloc, en Y local — `construireSolideCrop`
+ * @param {number} [arg.hauteur] décalage radial de la surface (epsilon)
+ * @param {number} [arg.retrait] en demi-côtés de crop
+ * @param {number} [arg.pas] espacement de l'anneau
+ * @returns {{positions:Float32Array, uv:Float32Array, jupe:Float32Array,
+ *            indices:Uint32Array, compte:object}}
+ */
+export function construireJupeMer({
+  repere,
+  rayon,
+  forme = { coin: 0, expo: 2 },
+  basY,
+  hauteur = 0,
+  retrait = RETRAIT_EAU_CROP,
+  pas = PAS_CONTOUR,
+} = {}) {
+  if (!repere || !Number.isFinite(repere.demi)) {
+    throw new TypeError('construireJupeMer : il faut un `repere` (repereCrop)')
+  }
+  if (!(rayon > 0)) throw new TypeError('construireJupeMer : `rayon` doit être fini et > 0')
+  if (!Number.isFinite(basY)) throw new TypeError('construireJupeMer : `basY` est obligatoire')
+  const { origine: O, est, haut, sud } = repereLocalCrop(repere, rayon)
+  const anneau = contourCrop(forme.coin ?? 0, forme.expo ?? 2, pas)
+  const n = anneau.length
+  const k = 1 - Math.min(1, Math.max(0, retrait))
+  const R = rayon + hauteur
+
+  const positions = new Float32Array(n * 2 * 3)
+  const uv = new Float32Array(n * 2 * 2)
+  // ⚠️ **0 EN HAUT, 1 EN BAS, ET LA CALOTTE PORTE 0** : le fragment reconnaît le
+  // rideau à `vJupe > 0`, et la valeur EST la profondeur relative que le socle
+  // appelle `g`. Deux usages, une grandeur — pas un drapeau plus un dégradé.
+  const jupe = new Float32Array(n * 2)
+  for (let i = 0; i < n; i++) {
+    const u = anneau[i].u * k
+    const v = anneau[i].v * k
+    const { lat, lon } = latLonDeLocal(u, v, repere)
+    const P = surSphere(lat, lon, R)
+    const d = [P[0] - O[0], P[1] - O[1], P[2] - O[2]]
+    const x = d[0] * est[0] + d[1] * est[1] + d[2] * est[2]
+    const y = d[0] * haut[0] + d[1] * haut[1] + d[2] * haut[2]
+    const z = d[0] * sud[0] + d[1] * sud[1] + d[2] * sud[2]
+    positions[i * 3] = x; positions[i * 3 + 1] = y; positions[i * 3 + 2] = z
+    positions[(n + i) * 3] = x; positions[(n + i) * 3 + 1] = basY; positions[(n + i) * 3 + 2] = z
+    uv[i * 2] = u; uv[i * 2 + 1] = v
+    uv[(n + i) * 2] = u; uv[(n + i) * 2 + 1] = v
+    jupe[i] = 0
+    jupe[n + i] = 1
+  }
+
+  // ⚠️ **`DoubleSide` N'EST PAS UNE OPTION ICI** : le rideau se regarde de
+  // l'extérieur, mais un crop vu de l'autre bord montre sa face interne. Le sens
+  // de parcours suit celui des parois (l'anneau est horaire vu du dessus, donc
+  // haut → bas → suivant sort vers le DEHORS).
+  const indices = new Uint32Array(n * 6)
+  let m = 0
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n
+    indices[m++] = i; indices[m++] = n + i; indices[m++] = j
+    indices[m++] = j; indices[m++] = n + i; indices[m++] = n + j
+  }
+  return { positions, uv, jupe, indices, compte: { anneau: n, sommets: n * 2, triangles: n * 2 } }
+}
+
+/**
+ * La couleur du rideau d'eau — **UNE SEULE ÉCRITURE, DEUX LECTEURS.**
+ *
+ * Ce sont les six lignes de `SKIRT_FRAG` (`ocean.js`), extraites plutôt que
+ * recopiées : la calotte du crop en a besoin mot pour mot, et ce chantier a déjà
+ * payé quatre fois une loi de mer écrite deux fois.
+ *
+ * ⚠️ **`givre` EST LE SOCLE DE VERRE, ET LE CROP N'EN A PAS.** Il passe `0`, ce
+ * qui rend `mix(col, …, 0)` et `mix(0.55, 0.94, 0)` exacts : la branche givre
+ * est neutre, pas approximée. Le jour où le crop portera un socle de verre, il
+ * aura le terme sans qu'on l'écrive une seconde fois.
+ * ⚠️ **`jour` VAUT 1 SUR LE CROP** : sa mer n'a pas encore de loi jour/nuit —
+ * `MER_FRAG` n'en porte aucune non plus. Dit ici plutôt que découvert de nuit.
+ */
+export const GLSL_JUPE_MER = /* glsl */ `
+vec4 couleurJupeMer(vec3 fond, vec3 ciel, float g, float givre, float jour, float grain) {
+  vec3 col = fond * mix(1.05, 0.45, g);
+  col *= mix(vec3(0.10, 0.16, 0.30), vec3(1.0), jour);
+  col = mix(col, col * 0.75 + ciel * 0.30 * (0.5 + 0.5 * grain), givre * 0.65);
+  float a = mix(0.55, 0.94, givre);
+  a *= 1.0 - 0.15 * (1.0 - givre) * grain;
+  return vec4(col, a);
+}
+`
+
 // ══════════ ④ LA DÉGRADATION ═══════════════════════════════════════════════
 
 const lissage = (a, b, x) => {
@@ -699,20 +825,31 @@ export const FRACTION_BANDE_BORD = 0.5
  * océans dessinés. `estompage = 1` = il ne reste que le crop : la mer doit
  * s'arrêter **au bloc**, sinon c'est le rectangle bleu flottant qu'Adrien a vu.
  *
- * ⚠️ **ET LE PLANCHER N'EST PAS ZÉRO** : à estompage plein, la mer s'éteint sur
- * `RETRAIT_EAU_CROP`, c'est-à-dire sur la largeur exacte du chanfrein et de la
- * marge d'eau du mode plat. Un plancher à zéro ferait une arête dure.
+ * ⛔ **ET LE RETRAIT ALLAIT DANS LE MAUVAIS SENS — Tâche P4.** Il portait
+ * `fin = max(RETRAIT_EAU_CROP, …)`, donc à estompage plein la mer allait
+ * **JUSQU'À `+RETRAIT`, c'est-à-dire 0,22 unité de socle EN DEHORS du crop** :
+ * pleine opacité sur la frontière elle-même, puis un fondu au-dessus du vide.
+ * Or le mode plat fait l'INVERSE — `plinth.js` :
+ * `rayonEauDansSocle() = HALF − SOCLE_CHANFREIN − SOCLE_MARGE_EAU`, l'eau
+ * **RENTRE** de 0,22 unité. Les deux se trompaient donc de **0,44 unité**, dans
+ * des sens opposés, et c'est **le débordement en porte-à-faux** que le noteur a
+ * vu au flanc est (`.banc/vues-P4/Z1-CROP-est.png` : la nappe passe par-dessus
+ * l'arête haute de la paroi, avec le mur qui reparaît dessous).
+ *
+ * ➡️ **À estompage plein, la mer s'éteint donc à `−RETRAIT_EAU_CROP`**, sur une
+ * bande d'une même largeur : exactement le chanfrein et la marge d'eau du socle,
+ * du bon côté de l'arête. Et pas un plancher à zéro : ce serait une arête dure.
  *
  * @param {number} estompage dans [0, 1] — `estompage-terre.js`
  * @param {number} [portee] en demi-côtés de crop
  * @returns {{debut:number, fin:number}} en demi-côtés de crop, mesurés depuis
- *   la frontière du crop (0 = la frontière)
+ *   la frontière du crop (0 = la frontière, négatif = DEDANS)
  */
 export function bordDeMer(estompage, portee = PORTEE_CROP) {
   const brut = Number(estompage)
   const e = Number.isFinite(brut) ? Math.min(1, Math.max(0, brut)) : 0
   const p = Number.isFinite(portee) && portee > 1 ? portee : PORTEE_CROP
-  const fin = Math.max(RETRAIT_EAU_CROP, (p - 1) * (1 - e))
-  const bande = Math.max(RETRAIT_EAU_CROP, fin * FRACTION_BANDE_BORD)
-  return { debut: Math.max(0, fin - bande), fin }
+  const fin = (p - 1) * (1 - e) - RETRAIT_EAU_CROP
+  const bande = Math.max(RETRAIT_EAU_CROP, (fin + RETRAIT_EAU_CROP) * FRACTION_BANDE_BORD)
+  return { debut: fin - bande, fin }
 }

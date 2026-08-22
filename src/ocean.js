@@ -35,7 +35,10 @@ import { resChamp, spanChamp } from './mer-emprise.js'
 // que `crop-sphere`, `parois-crop` et `habillage-crop`, dont aucun ne remonte
 // jusqu'ici. Vérifié : `grep -rn "from '.*ocean" src/monde/` ne rend RIEN (le nom
 // du fichier n'y apparaît que dans des commentaires).
-import { distanceRivage } from './monde/mer-sphere.js'
+import { distanceRivage, GLSL_JUPE_MER } from './monde/mer-sphere.js'
+// L'ÉCUME — une seule loi, deux lecteurs (Tâche P4). Même motif, même absence
+// de cycle : `monde/ecume-mer.js` n'importe RIEN du tout.
+import { GLSL_ECUME, FREQ_TAVELURE, accalmieDuSocle } from './monde/ecume-mer.js'
 // L'emprise du DAMIER — même machinerie, autre cause : ici la mer s'étend parce
 // que des cases voisines sont posées, pas parce que le relief défile.
 import { empriseDeMer, coteGeometrique, geometrieDeMer } from './damier-carre.js'
@@ -202,6 +205,7 @@ uniform float uSurfCalm; // 1 en vue rapprochee -> ~0 en vue large : efface les
                          // remous de cote grossiers quand on s'eloigne
 ${GERSTNER_GLSL}
 ${SHORE_SURF_GLSL}
+${GLSL_ECUME}
 uniform sampler2D uField;   // R ground Y, G shore distance (slab-wide)
 uniform sampler2D uCoastMask; // OSM land/sea (R : 1 land, 0 sea) — the REAL shore
 uniform float uCoastMaskOn;   // 1 when the coast mask is loaded for this patch
@@ -252,7 +256,7 @@ void main() {
   vec2 m = (xz - uMaskMin) / uMaskSize;
   float shoreD = texture2D(uMask, m).g;
 #else
-  float shoreD = max((uWaterY - f.r) * 2.0, f.g);
+  float shoreD = declinRivageMer(uWaterY - f.r, f.g);
   // masque côtier : sur la vraie terre (polders sous 0 compris) houle, ressac
   // et lift meurent — le fragment y discarde le plan, laisser des vagues au
   // bord dessinerait des artefacts de silhouette le long du trait de côte
@@ -265,9 +269,9 @@ void main() {
   // toute la frange côtière : plus aucune interaction mer/îles. Le niveau
   // moyen (uLift) garde lui sa longue rampe : pas de mur d'eau. vFade reste
   // le repère côtier LARGE du fragment (écume, réfraction).
-  float fade = smoothstep(0.0, 0.10, shoreD);
+  float fade = fonduHouleMer(shoreD);
   float fadeLift = smoothstep(0.0, 0.55, shoreD);
-  vFade = smoothstep(0.0, 0.35, shoreD);
+  vFade = fonduRessacMer(shoreD);
 
   // shared 16-wave random spectrum (ocean-waves lib): two crossed systems
   // (narrow swell + spread wind sea), energy-weighted Gerstner steepness,
@@ -419,6 +423,7 @@ float vnoise(vec2 p) {
   return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x),
              mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
 }
+${GLSL_ECUME}
 
 // sun caustics — the classic iterated-phase shimmer (Hoskins-style), cheap
 // and convincing where the water is clear
@@ -534,7 +539,7 @@ void main() {
   // large-scale patchiness: without it the glitter and the whitecaps line up
   // in parallel rows along the dominant swell — the "repeating waves" flag
   // (named patchy: "patch" is a reserved word in GLSL and kills the compile)
-  float patchy = smoothstep(0.32, 0.72, vnoise(xz * 0.33 + vec2(uTime * 0.015, -uTime * 0.011)));
+  float patchy = tavelureMer(vnoise(xz * ${FREQ_TAVELURE} + vec2(uTime * 0.015, -uTime * 0.011)));
 
   // v44: les reflets (ciel + glint solaire) sont des reflets DE SURFACE :
   // ils s'appliquent APRES le composite de transparence, sinon ils sont
@@ -550,19 +555,13 @@ void main() {
   float foamNoise = vnoise(sm * 0.55 + vec2(uTime * 0.25, -uTime * 0.18));
   float foamNoise2 = foamNoise * vnoise(sm * 1.35 - vec2(uTime * 0.15, uTime * 0.2)) * 1.6;
   // moutons : vCrest est le jacobien de déferlement normalisé du spectre
-  // (~1 quand une crête se replie) — intermittent, seules certaines cassent
-  float crestFoam = uFoam * uFoamScale * uViewCalm * smoothstep(0.30, 0.60, vCrest) * smoothstep(0.35, 0.75, foamNoise2) * (0.5 + 0.5 * patchy);
-  // écume de bord : bande étroite là où les vagues meurent (vFade), avec des
-  // fronts qui arrivent vers la côte — l'écume « contact terre/hauts-fonds »
-  // de la version originale, sans le halo du proxy de profondeur
-  float bands = 0.5 + 0.5 * sin(vFade * 14.0 - uTime * 1.6 + foamNoise * 4.0);
-  // v45 : jonction mer-côte des photos de référence — une bande de ressac
-  // texturée qui ourle le trait de côte, plus un LISERÉ net à la ligne d'eau
-  float shoreW = (1.0 - smoothstep(0.10, 0.75, vFade)) * smoothstep(0.002, 0.03, vFade);
-  float shoreFoam = shoreW * smoothstep(0.22, 0.55, foamNoise * 0.6 + bands * 0.4) * (0.5 + 0.5 * uFoamScale) * uViewCalm * uSurfCalm;
-  // liseré de ressac : blanc franc au contact exact, bord cassé par le bruit
-  float swash = (1.0 - smoothstep(0.0, 0.02, vFade)) * smoothstep(0.25, 0.6, foamNoise + 0.2) * uViewCalm * uSurfCalm;
-  float foam = clamp(crestFoam + shoreFoam * 1.8 + swash * 1.1, 0.0, 1.0);
+  // (~1 quand une crête se replie) — intermittent, seules certaines cassent.
+  // Écume de bord : bande étroite là où les vagues meurent (vFade), avec des
+  // fronts qui arrivent vers la côte. Plus un LISERÉ net à la ligne d'eau.
+  // ⚠️ **LES TROIS TERMES VIVENT DANS monde/ecume-mer.js DEPUIS LA TACHE P4** —
+  // la calotte du globe en avait une seconde ecriture qui avait diverge sur
+  // QUATRE points. Le texte est injecte, pas recopie (GLSL_ECUME).
+  float foam = ecumeMer(vCrest, vFade, foamNoise, foamNoise2, patchy, uTime, uFoam, uFoamScale, uViewCalm, uSurfCalm);
 #ifndef IS_LAKE
   // anti-aliasing du trait de côte : le masque est déjà blurré 1.5px, on fond
   // l'eau (couleur ET écume) autour de l'iso 0.5 au lieu d'un bord crénelé
@@ -628,6 +627,7 @@ uniform vec2 uCentre;   // centre du carre du damier (0 sinon) — voir FRAG
 ${MASQUE_UV_GLSL}
 ${GERSTNER_GLSL}
 ${SHORE_SURF_GLSL}
+${GLSL_ECUME}
 varying vec3 vWorld;
 varying float vV;
 #include <fog_pars_vertex>
@@ -644,14 +644,14 @@ void main() {
   // lumière sur tout le périmètre du bloc.
   vec2 uvF = (p.xz + uFenetre - uCentre) / uSpan + 0.5; // champ centré sur le carré
   vec2 f = texture2D(uField, uvF).rg;
-  float shoreD = max((uWaterY - f.r) * 2.0, f.g);
+  float shoreD = declinRivageMer(uWaterY - f.r, f.g);
   // même règle que la surface : les vagues du haut de jupe meurent sur la
   // terre du masque (le fragment discarde ces colonnes, pas de houle au bord)
   if (uCoastMaskOn > 0.5) {
     vec2 uvM = uvMasqueCotier(p.xz + uFenetre);
     if (uvM.x >= 0.0) shoreD *= 1.0 - texture2D(uCoastMask, uvM).r;
   }
-  float fade = smoothstep(0.0, 0.10, shoreD); // v45 : même déclin serré que la surface
+  float fade = fonduHouleMer(shoreD); // v45 : meme declin serre que la surface
   float fadeLift = smoothstep(0.0, 0.55, shoreD);
   float y = uBottomY;
   if (p.y > 0.5) {
@@ -707,6 +707,7 @@ float vnoise(vec2 p) {
   return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x),
              mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
 }
+${GLSL_JUPE_MER}
 
 void main() {
   // pas de jupe devant la terre (côte qui touche le bord du bloc)
@@ -724,17 +725,13 @@ void main() {
   }
 
   float g = clamp((uWaterY - vWorld.y) / max(uWaterY - uBottomY, 1e-3), 0.0, 1.0);
-  vec3 col = uDeep * mix(1.05, 0.45, g); // s'assombrit vers le fond
-  col *= mix(vec3(0.10, 0.16, 0.30), vec3(1.0), uDayLight);
-
-  // verre poli → dépoli : grain + éclaircissement laiteux avec uFrost
+  // verre poli -> depoli : grain + eclaircissement laiteux avec uFrost.
+  // ⚠️ La COULEUR et l ALPHA vivent dans monde/mer-sphere.js (GLSL_JUPE_MER)
+  // depuis la Tache P4 : le rideau d eau du crop lit les MEMES six lignes.
   float grain = vnoise(vWorld.xz * 6.0 + vWorld.y * 4.0) * 0.5
               + vnoise(vWorld.xz * 17.0 - vWorld.y * 9.0) * 0.5;
-  col = mix(col, col * 0.75 + uSky * 0.30 * (0.5 + 0.5 * grain), uFrost * 0.65);
-  float alpha = mix(0.55, 0.94, uFrost);
-  alpha *= 1.0 - 0.15 * (1.0 - uFrost) * grain;
 
-  gl_FragColor = vec4(col, alpha);
+  gl_FragColor = couleurJupeMer(uDeep, uSky, g, uFrost, uDayLight, grain);
   #include <fog_fragment>
 }
 `
@@ -1813,6 +1810,34 @@ export class RealWater {
     for (const mat of this.materials) {
       if (mat.uniforms.uViewCalm) mat.uniforms.uViewCalm.value = 0.08 + 0.92 * calm
       if (mat.uniforms.uSurfCalm) mat.uniforms.uSurfCalm.value = surfCalm
+    }
+  }
+
+  /**
+   * Les deux accalmies VIVANTES — Tâche P4.
+   *
+   * ⚠️ **ELLES SONT LUES SUR L'UNIFORME, PAS RECOPIÉES DANS UN CHAMP.**
+   * `setView` reste le seul écrivain ; un second stockage aurait pu diverger de
+   * l'uniforme sans que rien ne le dise. La calotte du globe s'en sert pour
+   * doser SON écume, et c'est ce qui fait qu'il n'y a qu'une loi d'accalmie.
+   *
+   * ⚠️ **AUCUN MATÉRIAU → LE NEUTRE.** Pas de mer, pas d'accalmie : la calotte
+   * retrouve alors le globe d'avant P4, au bit près.
+   */
+  get reglagesMer() {
+    const u = this.materials[0]?.uniforms ?? null
+    // ⚠️ **LE GIVRE VIT SUR LE MATÉRIAU DE LA JUPE, PAS SUR CELUI DE LA
+    // SURFACE** — et il vaut **0,56** dans la page vivante du 2026-08-22, pas 0.
+    // Le rideau du crop bâti sans lui rendait un voile PÂLE sur la paroi
+    // terracotta (alpha 0,55 au lieu de 0,768) : vu à l'écran, pas déduit.
+    const j = this.materials.find((m) => m?.uniforms?.uFrost)?.uniforms ?? null
+    return {
+      ...accalmieDuSocle(u),
+      givre: Number.isFinite(j?.uFrost?.value) ? j.uFrost.value : 0,
+      // ⚠️ **ET LE CIEL AUSSI** : `poserMer` codait `#bcd8ea` en dur là où le
+      // socle vit à `#85c2eb`. Même faute que la couleur des parois du crop
+      // (manque n° 2 du noteur), au même endroit du même objet.
+      ciel: u?.uSky?.value ?? null,
     }
   }
 
