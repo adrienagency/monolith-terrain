@@ -219,9 +219,24 @@ export function margeCoteDuCrop(repere, exageration = EXAG_SOCLE_NOMINALE) {
  * ⚠️ **ET SANS MASQUE, ON RETOMBE EXACTEMENT SUR LE PRÉDICAT DU GLOBE
  * D'AUJOURD'HUI (`h < 0`), PAS SUR UN TROISIÈME COMPORTEMENT.** Un poste éteint
  * doit rendre l'image d'avant, sinon la mutation qui l'éteint ne prouve rien.
+ *
+ * ══════════ `zeroSousEau` — TÂCHE K bis, ET IL EST À `false` PAR DÉFAUT ══════
+ *
+ * ⛔ **`h == 0` PRENAIT LA BRANCHE TERRE, ET C'EST LE GRAND APLAT VERT.** Zéro
+ * est la hauteur la PLUS FRÉQUENTE du globe — c'est la surface de la mer. Avec
+ * `h < 0`, elle rend `t = 0,35` exactement, c'est-à-dire le premier texel de
+ * TERRE de `uRamp` : relevé dans l'application vivante, texel 179 sur 512,
+ * `rgb(147, 160, 116)`, un olive vert. Et le fragment d'à côté, à `h = −1 m`,
+ * passe par la rampe NAUTIQUE et rend un bleu pâle. **Un mètre d'écart, deux
+ * familles de couleur.**
+ *
+ * ⚠️ **AVEC LE MASQUE ACTIF, RIEN NE CHANGE, ET CE N'EST PAS UN OUBLI** : la
+ * branche du masque compare déjà `hM < margeM` avec `margeM > 0`, donc `h == 0`
+ * y est DÉJÀ sous l'eau quand le masque dit « mer ». Le défaut ne vivait que
+ * dans le prédicat de repli.
  */
-export function sousEauCrop({ masqueActif, landness, hM, margeM }) {
-  if (!masqueActif) return hM < 0
+export function sousEauCrop({ masqueActif, landness, hM, margeM, zeroSousEau = false }) {
+  if (!masqueActif) return zeroSousEau ? hM <= 0 : hM < 0
   return landness < 0.5 && hM < margeM
 }
 

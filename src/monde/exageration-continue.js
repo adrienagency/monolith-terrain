@@ -107,8 +107,16 @@ export function exagPalier (zoom, { surcharges = null, ancres = EXAG_ANCRES, bas
  * exactement ce que la décision 14 refuse. Fritsch–Carlson est C¹, passe
  * exactement par les ancres, et ne peut pas dépasser : entre 2,5 et 5 la courbe
  * reste dans [2,5 ; 5], ce qu'un Catmull-Rom nu ne garantit pas.
+ *
+ * ⚠️ **EXPORTÉE POUR LA TÂCHE K bis, ET C'EST POUR NE PAS L'ÉCRIRE DEUX FOIS.**
+ * `src/monde/echelle-continue.js` a besoin de la MÊME cubique monotone pour son
+ * échelle de couleur ; la recopier aurait fait deux Fritsch–Carlson à maintenir,
+ * dont un sans la correction d'extremum ci-dessous — celle qu'un test a
+ * attrapée. ⚠️ **Ce fichier, lui, n'importe toujours RIEN** : la règle porte sur
+ * ce qu'il IMPORTE, pas sur qui le lit, et le test qui la garde le vérifie bien
+ * dans ce sens-là.
  */
-function pentesMonotones (ys) {
+export function pentesMonotones (ys) {
   const m = ys.length
   const d = new Array(m - 1)
   for (let i = 0; i < m - 1; i++) d[i] = ys[i + 1] - ys[i] // pas = 1 zoom

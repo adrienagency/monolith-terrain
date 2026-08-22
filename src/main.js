@@ -4634,7 +4634,22 @@ function majSeuilSocle() {
   // les faire tourner tous les deux ne changerait rien à l'écran — le bloc plat
   // est éteint pour de bon — mais ferait deux compteurs de bascules pour un seul
   // geste, et c'est exactement le genre d'écart qu'on met des soirées à lire.
-  if (terreUniqueBranchee) { veilleCrop.maj(altitudeCadrageM()); return }
+  if (terreUniqueBranchee) {
+    // ⚠️ **UNE SEULE LECTURE D'ALTITUDE, DEUX CONSOMMATEURS — Tâche K bis.** La
+    // veille du crop et l'échelle de couleur continue doivent décider sur la
+    // MÊME altitude à la MÊME image. Deux appels à `altitudeCadrageM()` seraient
+    // deux valeurs (la caméra bouge entre les deux dans la boucle de rendu ? non
+    // — mais le patron se recopie, et c'est ainsi que naissent les désaccords
+    // que ce chantier a payés trois fois). Une variable, deux lecteurs.
+    const alt = altitudeCadrageM()
+    veilleCrop.maj(alt)
+    // ⚠️ **L'ÉCHELLE GLISSE ICI, ET NULLE PART AILLEURS.** `poserRampe` ANCRE
+    // (à l'arrêt, `pas²` points) ; cet appel-ci ÉVALUE la courbe (quatre
+    // cubiques) et pose les uniformes. Sans ancre il ne fait rien, donc rien
+    // tant que la chaîne du crop n'a pas pris.
+    globe?.majEchelleRampe(alt)
+    return
+  }
   veilleSocle.maj(altitudeCadrageM())
 }
 
@@ -4878,6 +4893,19 @@ function contexteCrop() {
   // ⚠️ **PAS DE `fovDeg` NI D'`altitudeM` ICI** : le fond ne décide d'aucune
   // bascule, il ne fait que cuire un champ sur une emprise. Les lui passer
   // laisserait croire qu'il en dépend.
+  // ══════════ L'ÉCHELLE DE COULEUR CONTINUE — Tâche K bis ═══════════════════
+  //
+  // ⚠️ **DÉRIVÉE DE `ctx.mer`, PAS RECOPIÉE**, exactement comme `ctx.fond` juste
+  // dessous et pour la même raison : la rampe, le fond et la mer doivent ancrer
+  // sous le MÊME cran d'altitude. Deux `altitudeCadrageM()` écrits côte à côte
+  // finiraient par diverger, et une échelle ancrée à un cran pendant que le
+  // budget du fond l'est à un autre rouvrirait le désaccord que la Tâche J bis
+  // a fermé.
+  //
+  // ⚠️ **`zeroSousEau: true` EST LE SEUL SITE QUI ALLUME `uMerZeroSousEau`.**
+  // Hors `?terre=unique` ce contexte n'existe pas, donc l'uniforme reste à 0 et
+  // la vue orbitale en production rend son plan de mer comme avant, au bit près.
+  ctx.rampe = { altitudeM: ctx.mer.altitudeM, zeroSousEau: true }
   ctx.fond = {
     remplir: ctx.mer.remplir,
     portee: ctx.mer.portee,

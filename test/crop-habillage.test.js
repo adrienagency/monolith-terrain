@@ -298,15 +298,55 @@ test('⑤ le masque décide, mais il ne peut JAMAIS noyer une terre au-dessus de
   assert.equal(sousEauCrop({ masqueActif: true, landness: 0, hM: 3, margeM: 1.33 }), false)
   // une terre franche reste terre quelle que soit sa hauteur
   assert.equal(sousEauCrop({ masqueActif: true, landness: 1, hM: -50, margeM: 1.33 }), false)
+  // ⚠️ **ET `zeroSousEau` NE TOUCHE PAS À CETTE BRANCHE — Tâche K bis.** Le
+  // défaut du zéro ne vivait que dans le prédicat de REPLI : sous le masque, la
+  // comparaison est `hM < margeM` avec `margeM > 0`, donc `h == 0` y est DÉJÀ
+  // sous l'eau quand le masque dit « mer ». Étendre l'option ici déplacerait la
+  // marge d'un cran et noierait la ligne d'eau exacte de la côte.
+  // (La campagne de mutation a laissé survivre cette extension : ce bloc la tue.)
+  for (const [landness, hM] of [[0, 1.33], [0, 0], [0, -50], [1, 1.33], [1, 0], [0, 2000]]) {
+    assert.equal(
+      sousEauCrop({ masqueActif: true, landness, hM, margeM: 1.33, zeroSousEau: true }),
+      sousEauCrop({ masqueActif: true, landness, hM, margeM: 1.33 }),
+      'sous le masque, l’option ne doit RIEN changer — landness=' + landness + ' hM=' + hM
+    )
+  }
+  // et le point exact que l'extension déplacerait : h == margeM reste de la TERRE
+  assert.equal(sousEauCrop({ masqueActif: true, landness: 0, hM: 1.33, margeM: 1.33, zeroSousEau: true }), false)
 })
 
-test('⑤ le nuanceur pose bien `sousEau = h < 0.0` avant toute garde', () => {
-  const i = FRAG.indexOf('bool sousEau = h < 0.0;')
-  assert.ok(i > 0, 'le nuanceur ne pose pas la valeur d’avant comme défaut')
+test('⑤ le nuanceur pose `sousEau` AVANT la garde, et son défaut est celui d’avant', () => {
+  const i = FRAG.indexOf('bool sousEau =')
+  assert.ok(i > 0, 'le nuanceur ne pose pas de défaut pour `sousEau`')
   assert.ok(i < FRAG.indexOf('if (uHabOn > 0.5) {'), 'la valeur d’avant est posée APRÈS la garde')
+  // ⚠️ **CE TEST NE CHERCHE PLUS LA CHAÎNE `h < 0.0`, IL L'EXÉCUTE — Tâche K
+  // bis.** La ligne porte maintenant une ternaire sur `uMerZeroSousEau`, et une
+  // assertion de PRÉSENCE serait verte sur n'importe quelle ternaire, y compris
+  // sur celle qui échange ses deux branches. On CAPTURE donc l'expression et on
+  // la fait tourner aux DEUX valeurs de l'uniforme.
+  const m = capture(FRAG, /bool sousEau = ([^;]+);/, 'le défaut de sousEau')
+  const f = loi(m[1], ['uMerZeroSousEau', 'h'])
+  // uniforme à 0 : le prédicat du dépôt, au bit près — c'est la garde de
+  // production, la même que `uCropOn: 0` et `uMppFacteur: 0`
+  assert.equal(!!f.appel(0, -0.001), true)
+  assert.equal(!!f.appel(0, 0), false, 'à 0, h == 0 doit RESTER sur la branche terre')
+  assert.equal(!!f.appel(0, 0.001), false)
+  // uniforme à 1 : zéro passe sous l'eau, et RIEN D'AUTRE ne bouge
+  assert.equal(!!f.appel(1, -0.001), true)
+  assert.equal(!!f.appel(1, 0), true, 'à 1, h == 0 doit quitter la branche terre')
+  assert.equal(!!f.appel(1, 0.001), false, 'à 1, un millimètre de terre reste de la terre')
   // et la rampe lit `sousEau`, pas `h < 0.0` — sinon le masque ne servirait
   // qu'au trait de côte et la couleur resterait celle du MNT
   assert.match(FRAG, /float t = sousEau\s*\n/, 'la rampe ne lit pas `sousEau`')
+})
+
+test('⑤ bis l’uniforme du zéro de la mer est DÉCLARÉ, et son défaut est 0', () => {
+  // ⚠️ **LA GARDE DE PRODUCTION SE VÉRIFIE DES DEUX CÔTÉS** : le nuanceur doit
+  // DÉCLARER l'uniforme (sans quoi la ternaire ne compile pas) ET `globe.js`
+  // doit le faire naître à 0 (sans quoi la vue orbitale en ligne changerait de
+  // couleur sans que personne l'ait demandé). Même patron que `uMerRampeOn`.
+  assert.match(FRAG, /uniform float uMerZeroSousEau;/)
+  assert.match(GLOBE_SRC, /uMerZeroSousEau: \{ value: 0 \}/)
 })
 
 // ══════════ ⑥ LE GRAIN — sur le sol, sur la terre, et borné ════════════════
@@ -766,10 +806,21 @@ test('⑩a la garde v42 du nuanceur rend le MÊME verdict que la loi — sur 5 0
 
 test('⑩b sans masque, le nuanceur retombe sur le prédicat d’avant — exécuté, pas décrit', () => {
   const m = capture(FRAG, /bool sousEau = ([^;]+);/, 'la valeur par défaut de sousEau')
-  const f = loi(m[1], ['h'])
-  for (let j = -60; j <= 60; j++) {
-    const h = j * 91.7
-    assert.equal(!!f.appel(h), sousEauCrop({ masqueActif: false, landness: 0, hM: h, margeM: 1.745 }), 'h=' + h)
+  const f = loi(m[1], ['uMerZeroSousEau', 'h'])
+  // ⚠️ **LES DEUX BRANCHES SONT CONFRONTÉES À LA LOI PURE — Tâche K bis.** Le
+  // nuanceur et `sousEauCrop` doivent dire la même chose aux DEUX valeurs de
+  // l'uniforme, zéro compris : c'est là, et seulement là, qu'elles diffèrent.
+  for (const zero of [0, 1]) {
+    for (let j = -60; j <= 60; j++) {
+      const h = j * 91.7
+      assert.equal(
+        !!f.appel(zero, h),
+        sousEauCrop({ masqueActif: false, landness: 0, hM: h, margeM: 1.745, zeroSousEau: zero > 0.5 }),
+        'zero=' + zero + ' h=' + h
+      )
+    }
+    // et le point qui SÉPARE les deux lois, en propre
+    assert.equal(!!f.appel(zero, 0), zero > 0.5, 'h == 0, uMerZeroSousEau=' + zero)
   }
 })
 

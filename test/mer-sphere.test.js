@@ -77,6 +77,8 @@ registerHooks({
   },
 })
 import { Globe } from '../src/globe.js'
+import { creerEchelleContinue } from '../src/monde/echelle-continue.js'
+import { RAMPE_MONDE } from '../src/monde/rampe-crop.js'
 import { repereCrop, latLonDeLocal } from '../src/monde/crop-sphere.js'
 // LA LOI DE SURFACE — Tache J bis : l'epsilon de coplanarite depend de son DEFAUT.
 import { altitudeMaillage } from '../src/monde/fond-crop.js'
@@ -966,6 +968,12 @@ function globeAvecCrop(overrides = {}) {
       uCropCoinN: val(2),
       uMerRampeOn: val(0),
       uMerFondBudgetM: val(6000),
+      // ⚠️ **AJOUTÉS PAR LA TÂCHE K bis** : `poserMer` n'écrit plus le budget du
+      // fond en direct, il l'ANCRE dans l'échelle continue puis lit la courbe.
+      // Le faux globe porte donc le plancher de division et le partage — même
+      // discipline que le reste de ce bâtisseur : ce que la méthode exerce, il
+      // le porte pour de vrai.
+      uPlancherRampeM: val(0),
       uOceanShallow: val({ set() {} }),
       uOceanMid: val({ set() {} }),
       uOceanDeep: val({ set() {} }),
@@ -974,6 +982,7 @@ function globeAvecCrop(overrides = {}) {
       uEstompageOn: val(0),
       uEstompage: val(1),
     },
+    _echelleContinue: creerEchelleContinue(RAMPE_MONDE),
     retirerMer: Globe.prototype.retirerMer,
     _cuireChampMer: Globe.prototype._cuireChampMer,
     _majBordMer: Globe.prototype._majBordMer,

@@ -611,12 +611,37 @@ test('⑧ `main.js` importe le drapeau et la veille du crop', () => {
   assert.match(SRC_MAIN, /import\s*\{[^}]*creerVeilleCrop[^}]*\}\s*from\s*'\.\/monde\/branchement-crop\.js'/)
 })
 
-test('⑧ bis la veille du crop est nourrie par `altitudeCadrageM()`, et par elle seule', () => {
+test('⑧ bis la veille du crop ET l’échelle de couleur lisent LA MÊME altitude', () => {
   // ⚠️ **RÈGLE R1**, et c'est la seule chose que ce fichier ne peut pas prouver
   // autrement : `altitudeCadrageM()` est l'instrument SANS `dem.meanM`.
-  assert.match(SRC_MAIN, /veilleCrop\.maj\(\s*altitudeCadrageM\(\)\s*\)/)
-  const appels = SRC_MAIN.match(/veilleCrop\.maj\(/g) || []
-  assert.equal(appels.length, 1, 'un seul point d’alimentation, sinon deux lois')
+  //
+  // ⚠️ **ET DEPUIS LA TÂCHE K bis IL Y A DEUX CONSOMMATEURS**, donc la question
+  // n'est plus seulement « lit-on le bon instrument » mais « les deux
+  // lisent-ils LA MÊME VALEUR à LA MÊME IMAGE ». Deux appels à
+  // `altitudeCadrageM()` côte à côte seraient verts sur l'ancienne assertion et
+  // rouvriraient exactement le désaccord que ce chantier a payé trois fois.
+  const i = SRC_MAIN.indexOf('function majSeuilSocle()')
+  assert.ok(i > 0)
+  const corps = SRC_MAIN.slice(i, SRC_MAIN.indexOf('\n}', i))
+  const m = corps.match(/const (\w+) = altitudeCadrageM\(\)/)
+  assert.ok(m, 'l’altitude doit être lue UNE fois, dans une variable')
+  const v = m[1]
+  assert.match(corps, new RegExp('veilleCrop\\.maj\\(' + v + '\\)'),
+    'la veille du crop doit recevoir la variable, pas une seconde lecture')
+  assert.match(corps, new RegExp('majEchelleRampe\\(' + v + '\\)'),
+    'l’échelle de couleur doit recevoir LA MÊME variable')
+  // un seul point d'alimentation pour chacun, sinon deux lois
+  assert.equal((SRC_MAIN.match(/veilleCrop\.maj\(/g) || []).length, 1)
+  assert.equal((SRC_MAIN.match(/majEchelleRampe\(/g) || []).length, 1)
+  // ⚠️ **ET LA BRANCHE `terre unique` NE LIT L'INSTRUMENT QU'UNE FOIS.** On
+  // retire les commentaires avant de compter — le corps en cite le nom, et une
+  // assertion qui compterait les citations serait rouge sur une correction de
+  // prose et verte sur une seconde lecture. (L'autre appel du corps est celui
+  // de `veilleSocle`, le chemin SANS drapeau, qui n'est pas de cette tâche.)
+  const code = corps.replace(/\/\/[^\n]*/g, '')
+  const branche = code.slice(code.indexOf('if (terreUniqueBranchee)'), code.indexOf('veilleSocle.maj('))
+  assert.equal((branche.match(/altitudeCadrageM\(\)/g) || []).length, 1,
+    'la branche `terre unique` doit lire l’altitude UNE seule fois')
 })
 
 test('⑧ ter le crop se décide APRÈS `modes.update` et AVANT le dessin', () => {

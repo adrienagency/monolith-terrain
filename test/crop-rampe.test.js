@@ -55,6 +55,7 @@ import {
 import { unitesEnMetres, margeCoteM, MARGE_COTE_UNITES } from '../src/monde/habillage-crop.js'
 import { repereCrop, latLonDeLocal, localCrop, dansCrop } from '../src/monde/crop-sphere.js'
 import { Globe } from '../src/globe.js'
+import { creerEchelleContinue } from '../src/monde/echelle-continue.js'
 
 const SRC_GLOBE = new URL('../src/globe.js', import.meta.url)
 const SRC_TERRAIN = new URL('../src/terrain.js', import.meta.url)
@@ -359,7 +360,19 @@ function faussGlobe(crop, hauteur) {
       uPlancherRampeM: val(RAMPE_MONDE.plancherM),
       uCropCoin: val(FORME.coin),
       uCropCoinN: val(FORME.expo),
+      // ⚠️ **AJOUTÉS PAR LA TÂCHE K bis, ET CE SONT DES MÉTHODES QU'IL EXERCE.**
+      // Ce faux globe porte exactement ce que `poserRampe` lit et écrit ; la
+      // tâche lui a donné un uniforme de plus (le zéro de la mer), un poseur
+      // d'uniformes unique et le partage de l'échelle continue. Les emprunter
+      // au VRAI prototype plutôt que les bricoler est ce qui rend ce banc utile
+      // — un bouchon de `_poserUniformesRampe` laisserait passer une pose qui
+      // n'écrit rien.
+      uMerZeroSousEau: val(0),
+      uMerRampeOn: val(0),
+      uMerFondBudgetM: val(RAMPE_MONDE.profondeur),
     },
+    _echelleContinue: creerEchelleContinue(RAMPE_MONDE),
+    _poserUniformesRampe: Globe.prototype._poserUniformesRampe,
     tuilesAvecHauteurs: () => [],
     hauteurSurface: (lat, lon) => hauteur(lat, lon),
   }

@@ -30,6 +30,18 @@ import {
   echelleRampe,
   plancherRampeDuCrop,
 } from './monde/rampe-crop.js'
+// L'ÉCHELLE DE COULEUR CONTINUE — Tâche K bis. Pur lui aussi : il ne rend que
+// des nombres. ⚠️ **C'EST LUI QUI TIENT LES QUATRE NOMBRES DE RAMPE, ET PLUS
+// `poserRampe`** — les mesures y sont ANCRÉES par cran d'altitude, la valeur
+// posée est celle d'une courbe monotone. Sans ancre, il rend `RAMPE_MONDE` :
+// la production est intouchée au bit près.
+import {
+  creerEchelleContinue,
+  ancrerMesure,
+  majEchelle,
+  lireEchelle,
+  oublierAncres,
+} from './monde/echelle-continue.js'
 // LA MER — Tâche F, « partout et dégradée avec la distance ». Pur lui aussi :
 // il rend des nombres et des tampons, c'est ce fichier-ci qui en fait une
 // géométrie three. ⚠️ **`ocean.js` N'EST PAS IMPORTÉ ICI, ET C'EST DÉLIBÉRÉ** :
@@ -585,6 +597,10 @@ uniform vec3 uOceanShallow;
 uniform vec3 uOceanMid;
 uniform vec3 uOceanDeep;
 uniform float uPlancherRampeM; // garde de division, en metres — voir le module
+// ══════════ LE ZERO DE LA MER — Tache K bis ════════════════════════════════
+// 0 : sousEau vaut h < 0, la production au bit pres. 1 : h <= 0, et le plan de
+// mer cesse de peindre la premiere teinte de terre. Voir le corps du nuanceur.
+uniform float uMerZeroSousEau;
 // côté de la tuile en texels — 256 (AWS) ou 512 (Mapterhorn), voir planTuile
 uniform float uTilePx;
 
@@ -908,7 +924,22 @@ void main() {
   // courbes le portent parce qu'elles lisent vWorldPos.y. Pose apres, le grain
   // ne serait qu'un bruit de teinte, et les courbes resteraient lisses.
   float landness = 1.0;
-  bool sousEau = h < 0.0;
+  // ══════ h == 0 NE PREND PLUS LA BRANCHE TERRE — Tache K bis ══════════════
+  //
+  // ⚠️ uMerZeroSousEau A 0 : RIEN NE CHANGE. Meme garde et meme raison que
+  // uCropOn, uHabOn, uMerRampeOn et uMppFacteur — la vue orbitale en production
+  // rend exactement ce qu'elle rendait, au bit pres, tant que poserRampe n'a pas
+  // recu zeroSousEau.
+  //
+  // ⚠️ ET LE DEFAUT REPARE EST MESURE, PAS SUPPOSE. h == 0 est la surface de la
+  // mer, c'est-a-dire la valeur la PLUS FREQUENTE du globe. Avec h < 0.0 elle
+  // prend la branche TERRE, donc t = 0,35 exactement, donc uRamp au texel 179 —
+  // LA PREMIERE TEINTE DE TERRE. Releve dans l'application vivante, palette du
+  // jour : rgb(147, 160, 116), un olive vert. Et la mer d'a cote, a h = -1 m,
+  // prend la rampe NAUTIQUE (uMerRampeOn = 1) sur uOceanShallow, un bleu pale.
+  // Un metre d'ecart, deux familles de couleur : c'est le grand aplat vert
+  // qu'Adrien voit au nadir.
+  bool sousEau = uMerZeroSousEau > 0.5 ? h <= 0.0 : h < 0.0;
   if (uHabOn > 0.5) {
     // ③ LE GRAIN. ⚠️ INDEXE SUR LE CROP, JAMAIS SUR vUv NI SUR L'ECRAN. vUv est
     // local a la TUILE : lu la, le grain se repeterait a chaque tuile — seize
@@ -1634,6 +1665,10 @@ export class Globe {
       // trois couleurs sont celles de `terrain.js:376-378`, au caractère près.
       uMerRampeOn: { value: 0 },
       uMerFondBudgetM: { value: RAMPE_MONDE.profondeur },
+      // LE ZÉRO DE LA MER — Tâche K bis. ⚠️ **`uMerZeroSousEau: 0` : sans
+      // `poserRampe({ zeroSousEau: true })`, RIEN NE CHANGE** — même garde et
+      // même raison que `uCropOn`, `uHabOn`, `uMerRampeOn` et `uMppFacteur`.
+      uMerZeroSousEau: { value: 0 },
       uOceanShallow: { value: new THREE.Color(RAMPE_NAUTIQUE.peu) },
       uOceanMid: { value: new THREE.Color(RAMPE_NAUTIQUE.moyen) },
       uOceanDeep: { value: new THREE.Color(RAMPE_NAUTIQUE.fond) },
@@ -1726,6 +1761,12 @@ export class Globe {
     // `hauteurSurface` —, pas une texture. `null` = pas de fond, et toute la
     // chaîne le sait (voir `src/monde/fond-crop.js`).
     this._fondCrop = null
+    // L'ÉCHELLE DE COULEUR CONTINUE — Tâche K bis. ⚠️ **UN ÉCRIVAIN, N
+    // LECTEURS**, et le repli est `RAMPE_MONDE` : tant que personne n'ancre de
+    // mesure, `lireEchelle` rend l'échelle mondiale et les quatre uniformes
+    // valent ce qu'ils valaient. `poserRampe` et `poserMer` ANCRENT ;
+    // `majEchelleRampe` évalue la courbe et POSE. Personne d'autre n'écrit.
+    this._echelleContinue = creerEchelleContinue(RAMPE_MONDE)
     this._cleFondPosee = ''
     this.rebuildRamp(params)
 
@@ -1827,6 +1868,22 @@ export class Globe {
    */
   poserCrop({ centre, zoom, tuilesParBloc, half = 28, corner = 0, expo = 2 } = {}) {
     const rep = repereCrop({ centre, zoom, tuilesParBloc })
+    // ⚠️ **UN DÉMÉNAGEMENT EFFACE LES ANCRES, UN CRAN DE ZOOM NON — Tâche K
+    // bis.** Les ancres de l'échelle continue disent « à ce lieu, à ce cran
+    // d'altitude, le relief vaut ceci » : les garder après un saut à l'autre
+    // bout du monde peindrait la Corse avec l'amplitude de l'Himalaya. Mais les
+    // EFFACER à chaque cran de zoom rouvrirait exactement le défaut que la
+    // tâche ferme — la re-mesure par saut. Le test est donc géométrique : le
+    // nouveau centre tombe-t-il DANS l'ancien crop, à la plus large des deux
+    // demi-largeurs ? Une descente reste dedans (les deux repères sont
+    // concentriques à la maille de tuile près), un `flyTo` ailleurs en sort.
+    const avant = this._crop
+    if (avant) {
+      const marge = Math.max(avant.demi, rep.demi)
+      if (Math.abs(rep.cx - avant.cx) > marge || Math.abs(rep.cy - avant.cy) > marge) {
+        oublierAncres(this._echelleContinue)
+      }
+    }
     this._crop = rep
     const u = this.uniforms
     u.uCropCentre.value.set(rep.cx, rep.cy)
@@ -2179,7 +2236,7 @@ export class Globe {
    *   et prendre `null` pour zéro repeindrait tout le crop.
    * @returns {{refus:string|null, echelle:object|null, mesure:object|null}}
    */
-  poserRampe({ echelle = null, pas = PAS_MESURE, couvertureMin = 1 } = {}) {
+  poserRampe({ echelle = null, pas = PAS_MESURE, couvertureMin = 1, altitudeM = null, zeroSousEau = false } = {}) {
     const u = this.uniforms
     let e = echelle
     let mesure = null
@@ -2203,12 +2260,88 @@ export class Globe {
       if (mesure.refus) return { refus: mesure.refus, echelle: null, mesure }
       e = echelleRampe(mesure, { plancherM: plancherRampeDuCrop(this._crop) })
     }
+    // ⚠️ **LE ZÉRO DE LA MER SUIT LA RAMPE, ET IL EST OPTIONNEL** — Tâche K
+    // bis. `false` par défaut : un appelant qui ne le demande pas retrouve le
+    // globe d'avant au bit près, et les bancs de la Tâche D continuent de poser
+    // une échelle sans changer la couleur du plan de mer.
+    if (zeroSousEau) u.uMerZeroSousEau.value = 1
+
+    // ══════ L'ÉCHELLE CONTINUE — Tâche K bis ═══════════════════════════════
+    //
+    // ⚠️ **AVEC UNE ALTITUDE, LA MESURE N'EST PLUS POSÉE : ELLE EST ANCRÉE.**
+    // C'est toute la tâche. Ce qui atteint les uniformes est la valeur d'une
+    // courbe monotone évaluée à l'altitude de l'image, et `majEchelleRampe` la
+    // réévalue par image — donc l'échelle GLISSE au lieu de sauter.
+    //
+    // ⚠️ **SANS ALTITUDE, LE CHEMIN EST CELUI DU DÉPÔT, AU BIT PRÈS.** Ce n'est
+    // pas une politesse envers les tests : `poserRampe({ echelle })` est le
+    // point d'entrée des bancs et du réglage manuel, et leur imposer un cran
+    // d'altitude leur ferait mesurer autre chose que ce qu'ils demandent.
+    if (Number.isFinite(altitudeM)) {
+      ancrerMesure(this._echelleContinue, altitudeM, e)
+      const v = majEchelle(this._echelleContinue, altitudeM)
+      this._poserUniformesRampe(v)
+      this._rampe = e
+      return { refus: null, echelle: e, mesure, posee: v }
+    }
+
+    this._poserUniformesRampe(e)
+    this._rampe = e
+    return { refus: null, echelle: e, mesure }
+  }
+
+  /**
+   * ⚠️ **LE SEUL SITE QUI ÉCRIT LES QUATRE UNIFORMES DE RAMPE.** Il y en avait
+   * DEUX (`poserRampe` et `retirerRampe`), plus un troisième pour le budget du
+   * fond dans `poserMer` : trois écritures qui pouvaient diverger, et deux
+   * l'avaient déjà fait — c'est le relevé `uOceanDepth = 130,36 m` sous
+   * 2 116,3 m de fond que la Tâche J bis a corrigé par une LISTE de lecteurs.
+   *
+   * ⚠️ **`fondBudget` EST BORNÉ À 1 m COMME AVANT** (`Math.max(profMaxM, 1)`,
+   * ligne d'origine de `poserMer`) : ce n'est pas un plancher neuf, c'est celui
+   * du dépôt, déplacé ici pour qu'il n'y en ait qu'un.
+   */
+  _poserUniformesRampe(e) {
+    const u = this.uniforms
     u.uLandBas.value = e.terreBas
     u.uLandMax.value = e.terreHaut
     u.uOceanDepth.value = e.profondeur
     u.uPlancherRampeM.value = e.plancherM
-    this._rampe = e
-    return { refus: null, echelle: e, mesure }
+    // ⚠️ **LE BUDGET DU FOND NE S'ÉCRIT QUE SI LA RAMPE NAUTIQUE EST ALLUMÉE.**
+    // Éteinte, `uMerFondBudgetM` ne peint rien (le nuanceur le garde derrière
+    // `uMerRampeOn > 0.5`) et `retirerMer` est le seul à devoir le rendre à
+    // `RAMPE_MONDE`. L'écrire ici de toute façon ferait deux écrivains pour un
+    // uniforme éteint — le genre de code mort que ce chantier a trouvé quatre
+    // fois.
+    if (u.uMerRampeOn.value > 0.5 && Number.isFinite(e.fondBudget)) {
+      u.uMerFondBudgetM.value = Math.max(e.fondBudget, 1)
+    }
+  }
+
+  /**
+   * **L'ÉVALUATION PAR IMAGE — Tâche K bis.** Réévalue la courbe à l'altitude
+   * courante et pose les uniformes. Sans ancre, elle rend `RAMPE_MONDE` et
+   * n'écrit donc rien de neuf.
+   *
+   * ⚠️ **ELLE NE MESURE RIEN.** `poserRampe` balaie `pas²` points et ne tourne
+   * qu'à l'arrêt (décision 5) ; celle-ci évalue quatre cubiques et a le droit de
+   * tourner à chaque image. C'est la séparation que la tâche installe : la
+   * MESURE est rare, la POSE est continue.
+   *
+   * ⚠️ **ET ELLE NE FAIT RIEN SANS ANCRE**, donc rien tant que `poserRampe` n'a
+   * pas reçu d'altitude : la production est intouchée au bit près.
+   */
+  majEchelleRampe(altitudeM) {
+    const partage = this._echelleContinue
+    if (!partage || partage.ancres.size === 0) return null
+    const v = majEchelle(partage, altitudeM)
+    this._poserUniformesRampe(v)
+    return v
+  }
+
+  /** L'échelle que le nuanceur porte en ce moment — pour les sondes et les bancs. */
+  echelleRampePosee() {
+    return lireEchelle(this._echelleContinue)
   }
 
   /** Rend la rampe MONDIALE — le globe reprend ses couleurs d'avant, au bit près. */
@@ -2218,6 +2351,16 @@ export class Globe {
     u.uLandMax.value = RAMPE_MONDE.terreHaut
     u.uOceanDepth.value = RAMPE_MONDE.profondeur
     u.uPlancherRampeM.value = RAMPE_MONDE.plancherM
+    // ⚠️ **LE ZÉRO DE LA MER S'ÉTEINT AVEC LA RAMPE, ET C'EST LE DÉFAUT C-3 DE
+    // LA TÂCHE C APPLIQUÉ D'AVANCE** : là-bas `retirerHabillage` ne rendait que
+    // quatre uniformes sur seize et la planète entière gardait l'intervalle du
+    // crop. Ici l'uniforme est PARTAGÉ par toutes les tuiles.
+    u.uMerZeroSousEau.value = 0
+    // ⚠️ **LES ANCRES TOMBENT AUSSI.** Sans cela, `majEchelleRampe` les
+    // reposerait à l'image suivante et `retirerRampe` ne retirerait rien — une
+    // méthode qui ment sur ce qu'elle fait. Le lieu, lui, est déjà parti : ce
+    // site n'est appelé que par `retirerCrop`.
+    oublierAncres(this._echelleContinue)
     this._rampe = null
   }
 
@@ -2432,7 +2575,27 @@ export class Globe {
     // ⚠️ LE FOND MARIN AUSSI, ET C'EST LE MEME GESTE : la mer, ce n'est pas
     // seulement la lame d'eau, c'est le fond qu'on voit au travers.
     u.uMerRampeOn.value = 1
-    u.uMerFondBudgetM.value = Math.max(champ.profMaxM, 1)
+    // ══════ LE BUDGET DU FOND ENTRE PAR LA COURBE — Tâche K bis ═════════════
+    //
+    // ⚠️ **C'EST LUI QUI PEINT LA MER, ET IL BOUGEAIT AUTANT QUE LES AUTRES.**
+    // Relevé sur la descente de La Réunion (`.banc/vues-Kbis/AV-descente.json`) :
+    // 6 000 → 6 228 → 6 028 → 6 028 → **4 415,2 m**. Sur `dMer01`, qui indexe la
+    // rampe nautique, cela déplace la couleur d'une profondeur donnée de
+    // **0,248** au maximum — plus que tout le reste de la mer réuni. Le laisser
+    // hors de la courbe aurait laissé le turquoise d'Adrien intact.
+    //
+    // ⚠️ **ET IL EST ANCRÉ SOUS LA MÊME ALTITUDE QUE LA RAMPE**, pas sous une
+    // seconde : `poserMer` et `poserRampe` reçoivent tous deux `altitudeM` du
+    // MÊME `contexteCrop`, et deux crans qui divergeraient rouvriraient le
+    // désaccord que la Tâche J bis a fermé (`LECTEURS_DU_FOND`).
+    ancrerMesure(this._echelleContinue, altitudeM, {
+      fondBudget: Math.max(champ.profMaxM, 1),
+      plancherM: u.uPlancherRampeM.value,
+    })
+    const _v = majEchelle(this._echelleContinue, altitudeM)
+    u.uMerFondBudgetM.value = Number.isFinite(_v?.fondBudget)
+      ? Math.max(_v.fondBudget, 1)
+      : Math.max(champ.profMaxM, 1)
     if (couleursFond) {
       u.uOceanShallow.value.set(couleursFond.peu ?? RAMPE_NAUTIQUE.peu)
       u.uOceanMid.value.set(couleursFond.moyen ?? RAMPE_NAUTIQUE.moyen)
