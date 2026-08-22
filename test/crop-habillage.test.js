@@ -554,6 +554,8 @@ test('⑧ le décodage de classe garde les trois précautions du socle', () => {
 import { Globe } from '../src/globe.js'
 import { HABILLAGE_MONDE } from '../src/monde/habillage-crop.js'
 import { NATUREL_MONDE } from '../src/monde/naturel-crop.js'
+import { ECLAIRAGE_MONDE } from '../src/monde/eclairage-crop.js'
+import { APPARENCE_MONDE } from '../src/monde/melange-crop.js'
 
 // ══════════ ⑨ poserHabillage / retirerHabillage, EXERCÉES ══════════════════
 //
@@ -567,7 +569,22 @@ const vec2 = (x, y) => ({ x, y, set(a, b) { this.x = a; this.y = b } })
 // `THREE.Color` que `poserHabillage` emploie (`u.uHazeColor.value.set(...)`), et
 // c'est aussi ce qui rend la couleur de brume INSURVEILLABLE par identité : le
 // contexte en transmet donc la valeur hexadécimale (voir `CHAMPS_HABILLAGE`).
-const couleurStub = (hex) => ({ hex, set(v) { this.hex = v } })
+const couleurStub = (hex) => ({
+  hex,
+  set(v) { this.hex = v },
+  // ⚠️ **`setStyle` EST L'AUTRE MUTATEUR, ET la Tâche P3 L'EMPLOIE** : c'est
+  // lui qui fait le passage sRVB → linéaire de three sur une chaîne '#rrggbb'.
+  setStyle(v) { this.hex = v },
+})
+// ⚠️ **UN VECTEUR À TROIS COMPOSANTES POUR LES IRRADIANCES — Tâche P3.** Elles
+// ne sont ni des couleurs (elles dépassent 1) ni des `vec2` : les poster dans
+// un stub à deux composantes aurait laissé le canal bleu invisible à ⑨h.
+const vec3 = (x, y, z) => ({
+  x, y, z,
+  set(a, b, c) { this.x = a; this.y = b; this.z = c; return this },
+  fromArray(t) { this.x = t[0]; this.y = t[1]; this.z = t[2]; return this },
+  normalize() { const n = Math.hypot(this.x, this.y, this.z) || 1; this.x /= n; this.y /= n; this.z /= n; return this },
+})
 
 /** Un globe minimal : rien que les uniformes et le repère du crop. */
 function globeStub(crop = REPERE) {
@@ -611,6 +628,33 @@ function globeStub(crop = REPERE) {
       uHazeAlt: val(NATUREL_MONDE.hazeAlt),
       uHazeDist: val(NATUREL_MONDE.hazeDist),
       uHazeColor: val(couleurStub(NATUREL_MONDE.hazeColor)),
+      // ══════ L'ÉCLAIRAGE ET LA COUCHE APPARENCE — Tâche P3 ═══════════════
+      //
+      // ⚠️ **AUX MÊMES VALEURS QUE LE CONSTRUCTEUR**, pour la raison écrite
+      // dix lignes plus haut : c'est ce qui rend ⑨h capable de voir un
+      // uniforme que `retirerHabillage` oublierait de rendre.
+      uEclairageOn: val(0),
+      uSoleilDir: val(vec3(0, 1, 0)),
+      uSoleilIrr: val(vec3(...ECLAIRAGE_MONDE.soleilIrr)),
+      uHemiHaut: val(vec3(0, 1, 0)),
+      uCielIrr: val(vec3(...ECLAIRAGE_MONDE.cielIrr)),
+      uSolIrr: val(vec3(...ECLAIRAGE_MONDE.solIrr)),
+      uAlbedoBase: val(vec3(...ECLAIRAGE_MONDE.albedoBase)),
+      uAlbedoTeinte: val(ECLAIRAGE_MONDE.albedoTeinte),
+      uParoiCouleur: val(couleurStub('#d8d4cc')),
+      uSurfaceFx: val(APPARENCE_MONDE.surfaceFx),
+      uFxBlend: val(APPARENCE_MONDE.fxBlend),
+      uFxOpacite: val(APPARENCE_MONDE.fxOpacity),
+      uFxScale: val(APPARENCE_MONDE.fxScale),
+      uFxTime: val(APPARENCE_MONDE.fxTime),
+      uFxColA: val(couleurStub(APPARENCE_MONDE.fxColA)),
+      uFxColB: val(couleurStub(APPARENCE_MONDE.fxColB)),
+      uFxColC: val(couleurStub(APPARENCE_MONDE.fxColC)),
+      uFxP1: val(APPARENCE_MONDE.fxP1),
+      uFxP2: val(APPARENCE_MONDE.fxP2),
+      uFxP3: val(APPARENCE_MONDE.fxP3),
+      uFxDemiBloc: val(APPARENCE_MONDE.fxDemiBloc),
+      uFxFenetre: val(vec2(APPARENCE_MONDE.fxFenetreX, APPARENCE_MONDE.fxFenetreY)),
     },
   }
 }
@@ -619,7 +663,14 @@ const retirerHab = (g) => Globe.prototype.retirerHabillage.call(g)
 const lireHab = (g) => {
   const o = {}
   for (const [k, u] of Object.entries(g.uniforms)) {
-    o[k] = u.value && typeof u.value === 'object' && 'x' in u.value ? [u.value.x, u.value.y] : u.value
+    if (!u.value || typeof u.value !== 'object') { o[k] = u.value; continue }
+    // ⚠️ **LE TROISIÈME CANAL COMPTE — Tâche P3.** La lecture ne prenait que
+    // `x` et `y` : une irradiance dont seul le BLEU serait mal rendu par
+    // `retirerHabillage` serait passée inaperçue à ⑨h.
+    if ('z' in u.value) { o[k] = [u.value.x, u.value.y, u.value.z]; continue }
+    if ('x' in u.value) { o[k] = [u.value.x, u.value.y]; continue }
+    if ('hex' in u.value) { o[k] = `couleur:${u.value.hex}`; continue }
+    o[k] = u.value
   }
   return o
 }

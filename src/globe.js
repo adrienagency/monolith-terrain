@@ -96,6 +96,28 @@ import { altitudeMaillage, altitudeSonde, echantillonnerFond, cleFond } from './
 // qu'une seule écriture du peigné, de l'humidité, du pivot et du voile aérien.
 // `test/crop-naturel.test.js` interdit qu'une de ces formules soit réécrite ici.
 import { GLSL_NATUREL, NATUREL_MONDE } from './monde/naturel-crop.js'
+// ══════ LA COUCHE APPARENCE — Tâche P3 ══════════════════════════════
+// `FX_GLSL` était déjà partagé entre `terrain.js` et les vignettes du panneau ;
+// le crop en est le troisième lecteur. `GLSL_MELANGE` ferme une dette plus
+// ancienne : `blLum`/`blClip`/`blSetLum` étaient écrits DEUX fois, ici et dans
+// `terrain.js`, chacun avec un commentaire annonçant la divergence.
+import { FX_GLSL } from './fx-glsl.js'
+import { GLSL_MELANGE, APPARENCE_MONDE } from './monde/melange-crop.js'
+// ══════════ L'ÉCLAIRAGE DU CROP — Tâche P3 ═════════════════════════════════
+//
+// > **L'agent noteur, 2026-08-22 :** « Le socle est un matériau ÉCLAIRÉ. La
+// > tuile du globe est une COULEUR NUE. »
+//
+// Même patron que `naturel-crop.js` juste au-dessus : la loi vit dans un module
+// PUR qui porte son propre texte GLSL, et ce fichier l'INJECTE. Il n'y a donc
+// pas deux écritures de l'éclairage à garder d'accord.
+import {
+  GLSL_ECLAIRAGE,
+  ECLAIRAGE_MONDE,
+  directionSoleilLocale,
+  hautLocal,
+  irradianceAmbiante,
+} from './monde/eclairage-crop.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -772,6 +794,58 @@ uniform float uHazeAlt;
 uniform float uHazeDist;
 uniform vec3 uHazeColor;
 
+// ══════ L'ECLAIRAGE DU CROP — Tache P3 ═════════════════════════════════════
+//
+// ⚠️ uEclairageOn VAUT ZERO PAR DEFAUT, comme uCropOn, uHabOn, uMerRampeOn,
+// uMerZeroSousEau et uMppFacteur : sans poserEclairage, la vue orbitale en
+// production rend exactement ce qu'elle rendait, AU BIT PRES. Le bloc qui les
+// lit est garde par un uniforme, donc par un branchement uniforme, donc les
+// derivees d'ecran du reste du nuanceur restent definies.
+//
+// ⚠️ CE SONT DES IRRADIANCES, PAS DES COULEURS. three multiplie deja la couleur
+// d'une lampe par son intensite avant de la pousser (WebGLLights) ; l'appelant
+// fait le meme produit une seule fois, et le nuanceur n'a pas a savoir qu'une
+// intensite existe. Toutes sont LINEAIRES.
+uniform float uEclairageOn;
+uniform vec3 uSoleilDir;   // le soleil de la SCENE, replace dans le repere du crop
+uniform vec3 uSoleilIrr;   // sun.color x sun.intensity
+uniform vec3 uHemiHaut;    // la verticale locale du crop, dans le repere du globe
+// ⚠️ ET LES DEUX PORTENT AUSSI L'ENVIRONNEMENT. L'irradiance de
+// scene.environment est MESUREE (src/sonde-ambiante.js) puis ramenee a un ciel
+// et un sol, parce qu'elle depend de la normale — ecart-type 17,7 % releve sur
+// le socle. mix(sol, ciel, 0.5 ndu + 0.5) est deja la loi de three pour une
+// lampe hemispherique, et c'est l'approximation du premier ordre d'un
+// environnement : les additionner evite un troisieme terme ET garde une loi.
+uniform vec3 uCielIrr;     // hemi.color x hemi.intensity + ambiante zenith
+uniform vec3 uSolIrr;      // hemi.groundColor x hemi.intensity + ambiante nadir
+uniform vec3 uAlbedoBase;  // params.color du socle, en lineaire
+uniform float uAlbedoTeinte; // mapTint — il retrouve un sens des qu'il y a une lumiere
+
+// ══════ LA COUCHE APPARENCE — Tache P3 ═════════════════════════════
+// ⚠️ uSurfaceFx VAUT ZERO PAR DEFAUT, comme uCropOn / uHabOn / uEclairageOn.
+// Ces noms sont ceux que FX_GLSL LIT : les renommer casserait le module
+// partage, et test/crop-eclairage.test.js compte ce qu'il exige.
+uniform int uSurfaceFx;
+uniform int uFxBlend;
+uniform float uFxOpacite;
+uniform float uFxScale;
+uniform float uFxTime;
+uniform vec3 uFxColA;
+uniform vec3 uFxColB;
+uniform vec3 uFxColC;
+uniform float uFxP1;
+uniform float uFxP2;
+uniform float uFxP3;
+// ⚠️ LE MOTIF EST PEINT SUR LE SOL, PAS SUR L'ECRAN NI SUR LA TUILE. terrain.js
+// l'indexe sur champXZ() = vWorldPos.xz + uFenetre, et son commentaire dit
+// pourquoi : indexe sur la geometrie il resterait colle a l'ecran pendant que
+// le relief defile — le moirage qu'Adrien a attrape a l'oeil. Ici la meme
+// grandeur est qCrop x uFxDemiBloc + uFxFenetre : l'en-tete de
+// habillage-crop.js DEMONTRE x = 28 u avec uSlabHalf = 28, donc les deux
+// nuanceurs echantillonnent le meme point du sol.
+uniform float uFxDemiBloc;
+uniform vec2 uFxFenetre;
+
 float decodeMeters(vec2 uv) {
   vec3 t = texture2D(uTex, uv).rgb * 255.0;
   return t.r * 256.0 + t.g + t.b / 256.0 - 32768.0;
@@ -809,23 +883,38 @@ float hash12(vec2 p) {
 float mnHash(vec2 p){ p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
 float mnNoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(mnHash(i), mnHash(i+vec2(1.0,0.0)), f.x), mix(mnHash(i+vec2(0.0,1.0)), mnHash(i+vec2(1.0,1.0)), f.x), f.y); }
 
-// blLum / blClip / blSetLum — terrain.js:886. L'occupation du sol MODULE la
-// couleur, elle n'en pose pas une : blSetLum prend la TEINTE de la classe et lui
-// impose une LUMINANCE tiree de la rampe, ce qui laisse le relief, les courbes
-// et la rampe hypsometrique se lire a travers. C'est toute la difference entre
-// une carte et un aplat colorie.
-float blLum(vec3 c) { return dot(c, vec3(0.3, 0.59, 0.11)); }
-vec3 blClip(vec3 c) { float l = blLum(c); float mn = min(min(c.r, c.g), c.b); float mx = max(max(c.r, c.g), c.b);
-  if (mn < 0.0) c = l + (c - l) * l / (l - mn + 1e-5);
-  if (mx > 1.0) c = l + (c - l) * (1.0 - l) / (mx - l + 1e-5);
-  return clamp(c, 0.0, 1.0); }
-vec3 blSetLum(vec3 c, float l) { return blClip(c + (l - blLum(c))); }
 
 // ⚠️ INJECTE, PAS RECOPIE — Tache P2. Ce meme texte entre dans le fragment de
 // terrain.js. C'est la seule ecriture du peigne, de l'humidite, du pivot et du
 // voile aerien ; les recopier ici aurait fait exactement les « deux ecritures
 // jumelles » dont terrain.js porte la cicatrice.
 ${GLSL_NATUREL}
+
+// ⚠️ INJECTE, PAS RECOPIE — Tache P3, et il vient APRES GLSL_NATUREL parce
+// qu'il APPELLE natLuminance. La loi d'eclairage n'est pas maison : c'est celle
+// de three.js (BRDF_Lambert, getHemisphereLightIrradiance) et de terrain.js
+// (fxShade, la valeur par sommet). test/crop-eclairage.test.js va la relire
+// dans node_modules/three plutot que de croire ce commentaire.
+${GLSL_ECLAIRAGE}
+
+// ══════ LA COUCHE APPARENCE — Tache P3, et le gabarit d'ouverture l'ALLUME ══
+//
+// ⛔ PERSONNE NE L'AVAIT NOMMEE, ET ELLE PESE PLUS QUE mapTint.
+// public/templates/defaults/shibustart.json pose look.surfaceFx = 9. Releve
+// dans l'application vivante : uSurfaceFx = 9, uFxOpacity = 0,44,
+// uFxBlend = 2 (Multiply), uFxColA = #14161d. Mesure : socle rendu avec un
+// albedo force a BLANC sous un hemisphere blanc d'irradiance 1 (le pixel
+// devrait valoir 1/PI) — couche allumee 0,591 / 0,575 / 0,571, couche eteinte
+// 0,997 / 0,997 / 0,997. ELLE MULTIPLIE L'ALBEDO DU SOCLE PAR 0,59.
+//
+// ⚠️ FX_GLSL EST DEJA UN MODULE PARTAGE (src/fx-glsl.js), et son en-tete dit
+// pourquoi : fx-thumbs.js en avait fait une copie a la main, et « une copie est
+// un menteur silencieux ». Le troisieme lecteur passe donc par la meme porte.
+// Il ne declare aucun uniforme : il LIT uFxScale, uFxTime, uFxColA/B/C,
+// uFxP1/P2/P3, que son hote doit declarer.
+${FX_GLSL}
+// ⚠️ APRES GLSL_NATUREL, parce que fxBlend mode 10 appelle natSoftLight.
+${GLSL_MELANGE}
 
 // solEn / lavisSol — terrain.js. ⚠️ uSol NE TRANSPORTE PAS UNE IMAGE : chaque
 // octet EST un code de classe ESA WorldCover (10 arbres, 30 prairie, 80 eau).
@@ -870,6 +959,22 @@ void main() {
   // Mercator, avec son ecretage et son repli d'antimeridien — deux ecritures qui
   // divergent, la cicatrice que terrain.js documente deja.
   vec2 qCrop = vec2(0.0);
+
+  // ⚠️ HISSE POUR LA MEME RAISON QUE qCrop, ET C'EST L'ECLAIRAGE QUI L'EXIGE
+  // (Tache P3). dedans est la couverture douce de la SUPERELLIPSE du crop — la
+  // silhouette du bloc, au pixel pres, celle que les parois suivent. C'est
+  // exactement la frontiere ou l'eclairage doit passer de la loi de PLANETE
+  // (un terminateur jour/nuit, un soleil qui suit la camera) a la loi du SOCLE
+  // (un vrai soleil, un hemisphere, une ambiante).
+  //
+  // ⛔ ET CE N'EST PAS LE CARRE dansCrop QUE L'ANALYSE EMPLOIE. Le carre est la
+  // borne de la TEXTURE d'analyse ; la silhouette du bloc est la superellipse.
+  // Les confondre poserait une arete d'eclairage droite dans les coins arrondis
+  // du bloc, la ou il n'y a deja plus de bloc.
+  //
+  // ⚠️ ZERO PAR DEFAUT : hors decoupe (uCropOn = 0) il n'y a pas de bloc, donc
+  // pas de socle a imiter, donc la planete garde sa loi.
+  float dedansCrop = 0.0;
 
   // ══════ LA DÉCOUPE, AVANT TOUT LE RESTE ══════════════════════════════════
   //
@@ -943,6 +1048,7 @@ void main() {
     float d = pn + dInterieur - uCropCoin; // > 0 = dehors, < 0 DEDANS
     float w = max(fwidth(d), 1e-12); // un pixel, en unites de crop
     float dedans = 1.0 - smoothstep(-0.5 * w, 0.5 * w, d);
+    dedansCrop = dedans; // Tache P3 — la frontiere de l'eclairage, voir la declaration
 
     // ══════ L'ESTOMPAGE — Tache G ══════════════════════════════════════════
     //
@@ -1204,6 +1310,63 @@ void main() {
     }
   }
 
+  // ══════ LE BLOC DEVIENT UN ALBEDO — Tache P3 ══════════════════════
+  //
+  // > L'agent noteur, 2026-08-22 : « Le socle est un materiau ECLAIRE. La tuile
+  // > du globe est une COULEUR NUE. »
+  //
+  // ⛔ ET LA CONVERSION SE FAIT ICI, PAS A LA FIN, PARCE QUE C'EST ICI QUE
+  // terrain.js LA FAIT. Sa ligne 1146 melange la peinture dans diffuseColor
+  // AVANT l'apparence, le trait de cote, les courbes et le graticule : tous ces
+  // postes peignent donc sur un ALBEDO. Poser le melange APRES eux — ce que la
+  // premiere version de cette tache faisait — fait passer le motif de
+  // l'apparence une seconde fois dans mix(fond, x, teinte), et le motif ressort
+  // delave. MESURE : l'apparence assombrit l'albedo du socle a 0,58 et celui du
+  // crop a 0,73 seulement, pour un motif pourtant CALE au meme endroit du sol
+  // (vues P3-MOTIF-SOCLE.png et P3-MOTIF-CROP.png : memes points, meme phase).
+  //
+  // ⚠️ partBloc VAUT ZERO SANS ECLAIRAGE, et alors rien de tout ce qui suit ne
+  // s'applique : la production est intouchee au bit pres.
+  vec3 nMonde = normalize(vNormalW);
+  float nduCrop = dot(nMonde, uHemiHaut);
+  float partBloc = uEclairageOn > 0.5 ? dedansCrop : 0.0;
+  vec3 fondCrop = uAlbedoBase * natGris(hNormRelief, max(nduCrop, 0.0));
+  if (partBloc > 0.0) {
+    col = mix(col, albedoCrop(col, uAlbedoBase, natGris(hNormRelief, max(nduCrop, 0.0)), uAlbedoTeinte), partBloc);
+  }
+
+  // ══════ LA COUCHE APPARENCE — Tache P3, le gabarit d'ouverture l'ALLUME ════
+  //
+  // ⛔ PERSONNE NE L'AVAIT NOMMEE, ET ELLE PESE PLUS QUE mapTint.
+  // public/templates/defaults/shibustart.json pose look.surfaceFx = 9.
+  //
+  // ⚠️ ICI ET PAS AILLEURS, ET L'ORDRE EST UN ARGUMENT. terrain.js la pose
+  // APRES la peinture hypsometrique et l'occupation du sol, et AVANT le trait de
+  // cote, les courbes et le graticule : « Materials sit BELOW the shaders, so a
+  // shader shows on top of whatever the relief is wearing », et les traits de la
+  // carte passent par-dessus tout. La poser apres les courbes les repeindrait ;
+  // la poser avant le sol la ferait recouvrir par la foret.
+  //
+  // ⚠️ ET ELLE OPERE SUR L'ALBEDO, DONC AVANT L'ECLAIRAGE. C'est ce qui la rend
+  // mesurable : socle albedo force a BLANC sous un hemisphere blanc d'irradiance
+  // 1 — le pixel devrait valoir 1/PI ; couche allumee il vaut 0,591 / 0,575 /
+  // 0,571, couche eteinte 0,997 / 0,997 / 0,997.
+  //
+  // ⚠️ fxShade EST LE MEME natOmbrePeinture QUE LA PEINTURE, ET SUR LA MEME
+  // ENTREE : terrain.js multiplie surfaceFx par clamp(luma x 2,4 ; 0,2 ; 1,4) de
+  // la luminance du FOND (params.color x la valeur par sommet). Lui donner autre
+  // chose aurait fabrique une seconde loi.
+  //
+  // ⚠️ ELLE NE PEINT QUE LE BLOC (partBloc), ET C'EST LE MEME BORD QUE
+  // L'ECLAIRAGE : la superellipse du crop. Etaler le motif du socle sur la
+  // planete entiere autour aurait fait d'une matiere de bloc une matiere de
+  // monde — et le socle, lui, s'arrete a son propre carre.
+  if (uSurfaceFx > 0 && uFxOpacite > 0.001 && partBloc > 0.0) {
+    vec2 champFx = qCrop * uFxDemiBloc + uFxFenetre;
+    vec3 fxc = surfaceFx(uSurfaceFx, champFx * 0.15, uFxTime) * natOmbrePeinture(natLuminance(fondCrop));
+    col = mix(col, fxBlend(col, fxc, uFxBlend), uFxOpacite * partBloc);
+  }
+
   // ══════ POSTE ② (suite) — LE TRAIT DE COTE ═════════════════════════════════
   //
   // ⚠️ POSE AVANT LES COURBES, COMME DANS LE SOCLE. L'ordre est un argument :
@@ -1290,16 +1453,62 @@ void main() {
   col = mix(col, uInk, gl * uGraticuleOpacity);
 
   // soft sun shading — the map stays readable, light only models the sphere
-  float diff = max(dot(normalize(vNormalW), uSunDir), 0.0);
-  col *= 0.74 + 0.30 * diff;
+  float diff = max(dot(nMonde, uSunDir), 0.0);
+  vec3 colPlanete = col * (0.74 + 0.30 * diff);
 
   // terminateur jour/nuit (demande Adrien, façon Google Earth) : la face à
   // l'ombre FOND VERS LA COULEUR DU FOND (uShadowColor — poussée par
   // applyBackground, elle suit donc le fond ET le cycle jour/nuit) — la
   // planète s'éteint dans son propre décor, pas dans un noir générique.
   // Bande de crépuscule douce, 10 % de carte résiduelle en pleine nuit.
-  float day = smoothstep(-0.22, 0.16, dot(normalize(vNormalW), uSunDir));
-  col = mix(uShadowColor, col, 0.10 + 0.90 * day);
+  float day = smoothstep(-0.22, 0.16, dot(nMonde, uSunDir));
+  colPlanete = mix(uShadowColor, colPlanete, 0.10 + 0.90 * day);
+
+  // ══════ LE BLOC EST UN MATERIAU ECLAIRE, PLUS UNE COULEUR NUE — Tache P3 ══
+  //
+  // > L'agent noteur, 2026-08-22 : « Le socle est un materiau ECLAIRE. La tuile
+  // > du globe est une COULEUR NUE. »
+  //
+  // ⛔ ET LES DEUX LIGNES AU-DESSUS NE SONT PAS UN ECLAIRAGE, C'EST MESURE.
+  // uSunDir n'est pas le soleil de la scene : en mode surface, main.js le repose
+  // A CHAQUE IMAGE sur camGlobe.position tournee de 42 degres, « pour que la
+  // face visible ne soit pas dans la nuit ». Releve le 2026-08-22, La Reunion :
+  // uSunDir = (0,2282 -0,3679 0,9014) pendant que le soleil de la scene pointait
+  // (0,4392 0,5631 -0,7002). L'ombrage du bloc suivait donc la CAMERA, pas
+  // l'heure. Et son amplitude, 0,74 a 1,04, est de toute facon un rapport de
+  // 1,4:1 la ou un vrai Lambert va de 0 a 1.
+  //
+  // ⚠️ LA FRONTIERE EST LA SILHOUETTE DU BLOC, PAS UN CARRE. dedansCrop est la
+  // couverture douce de la superellipse — celle que les parois suivent au bit
+  // pres. A estompage plein (la vue du bloc) rien n'est dessine dehors, donc il
+  // n'y a aucune couture a voir ; en cours de fondu, la loi change exactement la
+  // ou le bloc commence, ce qui est la definition d'un bloc decoupe.
+  //
+  // ⚠️ ET LE TERMINATEUR NE FRANCHIT PAS CETTE FRONTIERE. Le socle n'a pas de
+  // nuit : il est un objet de studio, eclaire par trois sources. Laisser le
+  // fondu vers uShadowColor mordre sur le bloc l'aurait eteint vers la couleur
+  // du fond selon l'angle de la CAMERA — le defaut d'au-dessus, en pire.
+  //
+  // ⚠️ uAlbedoTeinte EST mapTint, ET LA TACHE P2 AVAIT RAISON DE LE LAISSER.
+  // Elle ecrivait « il n'y a rien contre quoi doser » : c'etait vrai d'un
+  // nuanceur sans lumiere. Des qu'il y en a une, col DEVIENT un albedo, et
+  // mapTint retrouve mot pour mot le sens qu'il a dans terrain.js:1137 —
+  // verifie dans l'application vivante a 7,5e-5 pres sur 182 997 pixels.
+  // ⚠️ ndu N'EST PAS BORNE, ET C'EST TOUT L'INTERET D'UNE LAMPE HEMISPHERIQUE :
+  // sa face basse recoit la couleur du SOL. La borne ne vit que dans natGris,
+  // ou un exposant fractionnaire rendrait NaN sur un negatif.
+  //
+  // ⚠️ col EST DEJA UN ALBEDO ICI quand partBloc > 0 (voir le bloc « LE BLOC
+  // DEVIENT UN ALBEDO » plus haut) : il ne reste qu'a le multiplier par
+  // l'irradiance et par 1/PI, ce que fait BRDF_Lambert dans three.
+  //
+  // ⚠️ ET AU PIXEL DE FRONTIERE, partBloc VAUT ENTRE 0 ET 1 : colPlanete y est
+  // donc calculee sur une couleur a demi convertie. C'est UN pixel, sur une
+  // silhouette de bloc, et le prix de l'alternative serait de porter DEUX
+  // couleurs dans tout le nuanceur — donc de peindre deux fois l'apparence, le
+  // trait de cote, les courbes et le graticule.
+  vec3 colBloc = col * irradianceCrop(dot(nMonde, uSoleilDir), nduCrop, uSoleilIrr, uCielIrr, uSolIrr) * 0.3183098861837907;
+  col = mix(colPlanete, colBloc, partBloc);
 
   // faint paper grain
   // ⛔ LE GRAIN ETAIT INDEXE SUR vUv, DONC SUR LA TUILE. vUv va de 0 a 1 quelle
@@ -1333,6 +1542,24 @@ void main() {
 
 function tileKey(z, x, y) {
   return `${z}/${x}/${y}`
+}
+
+// ══════════ L'IRRADIANCE D'UNE LAMPE — Tâche P3 ════════════════════════════
+//
+// ⚠️ **`WebGLLights` FAIT EXACTEMENT CE PRODUIT, ET IL LE FAIT UNE FOIS** :
+// `uniforms.color.copy(light.color).multiplyScalar(light.intensity)` pour une
+// directionnelle, `skyColor`/`groundColor` de même pour une hémisphérique. Le
+// nuanceur des tuiles reçoit donc une IRRADIANCE, jamais un couple
+// couleur × intensité — sans quoi il y aurait deux endroits où l'oublier.
+//
+// ⚠️ **ET LA CONVERSION sRVB → LINÉAIRE EST CELLE DE three, PAS UNE FORMULE
+// ÉCRITE ICI.** `setStyle` la fait (ColorManagement est actif par défaut depuis
+// r152), exactement comme `sun.color.set(s.sunColor)` la fait côté socle.
+const _couleurTampon = /* @__PURE__ */ new THREE.Color()
+function poserIrradiance(cible, couleurHex, intensite) {
+  if (couleurHex == null || !Number.isFinite(intensite)) return
+  _couleurTampon.setStyle(couleurHex, THREE.SRGBColorSpace)
+  cible.set(_couleurTampon.r * intensite, _couleurTampon.g * intensite, _couleurTampon.b * intensite)
 }
 
 // LE GLOBE REDEMANDAIT AU RÉSEAU LA TUILE QU'IL VENAIT DE JETER.
@@ -1971,6 +2198,52 @@ export class Globe {
       uHazeAlt: { value: NATUREL_MONDE.hazeAlt },
       uHazeDist: { value: NATUREL_MONDE.hazeDist },
       uHazeColor: { value: new THREE.Color(NATUREL_MONDE.hazeColor) },
+      // ══════ L'ÉCLAIRAGE DU CROP — Tâche P3 ═══════════════════════════════
+      //
+      // ⚠️ **LES DÉFAUTS SONT CEUX DU MODULE, PAS DES NOMBRES RECOPIÉS ICI** —
+      // même discipline que `NATUREL_MONDE` et `HABILLAGE_MONDE` : deux jeux de
+      // défauts qui divergeraient, c'est un aller-retour bit-à-bit qui ment.
+      uEclairageOn: { value: 0 },
+      uSoleilDir: { value: new THREE.Vector3(0, 1, 0) },
+      uSoleilIrr: { value: new THREE.Vector3().fromArray(ECLAIRAGE_MONDE.soleilIrr) },
+      uHemiHaut: { value: new THREE.Vector3(0, 1, 0) },
+      uCielIrr: { value: new THREE.Vector3().fromArray(ECLAIRAGE_MONDE.cielIrr) },
+      uSolIrr: { value: new THREE.Vector3().fromArray(ECLAIRAGE_MONDE.solIrr) },
+      uAlbedoBase: { value: new THREE.Vector3().fromArray(ECLAIRAGE_MONDE.albedoBase) },
+      uAlbedoTeinte: { value: ECLAIRAGE_MONDE.albedoTeinte },
+      // ══════ LA COUCHE APPARENCE — Tâche P3 ════════════════════════
+      uSurfaceFx: { value: APPARENCE_MONDE.surfaceFx },
+      uFxBlend: { value: APPARENCE_MONDE.fxBlend },
+      uFxOpacite: { value: APPARENCE_MONDE.fxOpacity },
+      uFxScale: { value: APPARENCE_MONDE.fxScale },
+      uFxTime: { value: APPARENCE_MONDE.fxTime },
+      uFxColA: { value: new THREE.Color(APPARENCE_MONDE.fxColA) },
+      uFxColB: { value: new THREE.Color(APPARENCE_MONDE.fxColB) },
+      uFxColC: { value: new THREE.Color(APPARENCE_MONDE.fxColC) },
+      uFxP1: { value: APPARENCE_MONDE.fxP1 },
+      uFxP2: { value: APPARENCE_MONDE.fxP2 },
+      uFxP3: { value: APPARENCE_MONDE.fxP3 },
+      uFxDemiBloc: { value: APPARENCE_MONDE.fxDemiBloc },
+      uFxFenetre: { value: new THREE.Vector2(APPARENCE_MONDE.fxFenetreX, APPARENCE_MONDE.fxFenetreY) },
+      // ══════ LA COULEUR DES PAROIS DU BLOC — Tâche P3, manque n° 2 ═════════
+      //
+      // ⛔ **ELLE ÉTAIT CODÉE EN DUR DANS `_materiauParois`, ET C'ÉTAIT FAUX PAR
+      // CONSTRUCTION.** `#d8d4cc` est le DÉFAUT de `params.plinthColor` ; la
+      // paroi vivante du socle, elle, vaut ce que `plinth.setColors` a posé —
+      // et `setColors` ne prend `params.plinthColor` QUE si le socle n'est ni en
+      // verre ni sur un préréglage PBR. Relevé le 2026-08-22 **au même instant,
+      // dans la même page** (c'est le protocole du noteur, et il compte : deux
+      // chargements n'ont pas la même palette) : `params.plinthColor = #d8d4cc`,
+      // `plinth.wallMat.color = c06a44` — un terracotta. Écart RGB (24, 106,
+      // 136). **Le crop peignait une couleur que le socle n'utilise plus.**
+      //
+      // ⚠️ **ET ELLE VIT DANS `this.uniforms`, PAS DANS LE MATÉRIAU DES PAROIS,
+      // POUR DEUX RAISONS QUI SE CUMULENT** : le matériau est REFAIT à chaque
+      // reconstruction des parois (donc une couleur posée dessus se perdrait au
+      // prochain déplacement), et la palette change sans que les parois soient
+      // rebâties (`applyPalette` → `plinth.setColors`). C'est le patron de
+      // `rampe2D`, qui change d'identité à chaque palette.
+      uParoiCouleur: { value: new THREE.Color('#d8d4cc') },
     }
     // ⚠️ **LE FOND VIT À CÔTÉ DES UNIFORMES, PAS DEDANS** : c'est un
     // `Float32Array` de 148 225 valeurs (593 Kio) que le CPU lit — `posAt` et
@@ -2475,6 +2748,57 @@ export class Globe {
     hazeAlt = NATUREL_MONDE.hazeAlt,
     hazeDist = NATUREL_MONDE.hazeDist,
     hazeColor = null,
+    // ══════ L'ÉCLAIRAGE ET LA PAROI — Tâche P3 ═══════════════════════════════
+    //
+    // ⚠️ **ILS ENTRENT PAR L'HABILLAGE, ET C'EST LE SEUL ENDROIT QUI MARCHE.**
+    // `construireParoisCrop` ne tourne qu'à l'arrêt (elle balaie plus de mille
+    // points du contour) et `poserCrop` qu'au changement de lieu ; or le soleil
+    // bouge à chaque dixième d'heure de la tirette, et la couleur des parois à
+    // chaque palette. `poserHabillage`, elle, est rejouée dès qu'un des champs
+    // de `CHAMPS_HABILLAGE` change — c'est la seule veille par image de la
+    // chaîne. Un soleil posé à la naissance du crop serait figé sur l'heure de
+    // ce moment-là, et personne ne le verrait bouger.
+    //
+    // ⚠️ **DOUZE CHAMPS PLATS, ET PAS UN OBJET `eclairage`.** `habillageDifferent`
+    // compare par `Object.is` les champs de `CHAMPS_HABILLAGE` : un objet
+    // reconstruit à chaque image différerait TOUJOURS de lui-même, et la veille
+    // reposerait l'habillage entier soixante fois par seconde. C'est la remarque
+    // que `CHAMPS_HABILLAGE` porte déjà pour `solOffset`/`solScale` et pour
+    // `hazeColor`, appliquée AVANT de payer le défaut.
+    centreLat = null,
+    centreLon = null,
+    soleilAzimut = null,
+    soleilElevation = null,
+    soleilCouleur = null,
+    soleilIntensite = null,
+    hemiCiel = null,
+    hemiSol = null,
+    hemiIntensite = null,
+    ambianteCoef = null,
+    ambianteIntensite = null,
+    albedoBase = null,
+    albedoTeinte = null,
+    // ══════ LA COUCHE APPARENCE — Tâche P3 ════════════════════════════
+    //
+    // ⚠️ **`fxTime` N'EST PAS DANS CETTE LISTE, ET C'EST DÉLIBÉRÉ** : il avance
+    // À CHAQUE IMAGE (`terrain.js` : `uFxTime.value += dt * speed`). Le faire
+    // entrer par ici mettrait `habillageDifferent` à vrai soixante fois par
+    // seconde, donc reposerait l'habillage ENTIER — textures comprises — à
+    // chaque image. Il passe par `poserTempsApparence`.
+    surfaceFx = null,
+    fxBlend = null,
+    fxOpacity = null,
+    fxScale = null,
+    fxColA = null,
+    fxColB = null,
+    fxColC = null,
+    fxP1 = null,
+    fxP2 = null,
+    fxP3 = null,
+    fxDemiBloc = null,
+    fxFenetreX = null,
+    fxFenetreY = null,
+    paroiCouleur = null,
   } = {}) {
     const u = this.uniforms
     u.uHabOn.value = 1
@@ -2534,6 +2858,78 @@ export class Globe {
     u.uHazeAlt.value = hazeAlt
     u.uHazeDist.value = hazeDist
     if (hazeColor != null) u.uHazeColor.value.set(hazeColor)
+
+    // ══════ L'ÉCLAIRAGE — Tâche P3 ═══════════════════════════════════════════
+    //
+    // ⚠️ **UN SEUL INTERRUPTEUR, ET IL EST L'ABSENCE DE DONNÉE.** Pas de second
+    // booléen à tenir d'accord : l'appelant qui n'a pas de lumière à donner n'en
+    // donne pas, et le bloc reprend la loi de planète. C'est le patron de
+    // `coastMask` et de `sol`, plus haut.
+    //
+    // ⛔ **ET LE LIEU EN FAIT PARTIE, PARCE QUE SANS LUI IL N'Y A PAS DE
+    // REPÈRE.** L'azimut et l'élévation sont exprimés dans le repère du SOCLE
+    // (est / haut / nord) ; les replacer dans celui du globe demande la
+    // latitude et la longitude du centre du crop. Éclairer sans elles
+    // reviendrait à poser le soleil du golfe de Guinée sur La Réunion.
+    const aLumiere = soleilCouleur != null && hemiCiel != null && hemiSol != null
+      && Number.isFinite(centreLat) && Number.isFinite(centreLon)
+      && Number.isFinite(soleilAzimut) && Number.isFinite(soleilElevation)
+    u.uEclairageOn.value = aLumiere ? 1 : 0
+    if (aLumiere) {
+      u.uSoleilDir.value.fromArray(directionSoleilLocale(soleilAzimut, soleilElevation, centreLat, centreLon))
+      u.uHemiHaut.value.fromArray(hautLocal(centreLat, centreLon))
+      poserIrradiance(u.uSoleilIrr.value, soleilCouleur, soleilIntensite)
+      poserIrradiance(u.uCielIrr.value, hemiCiel, hemiIntensite)
+      poserIrradiance(u.uSolIrr.value, hemiSol, hemiIntensite)
+      // ⚠️ **L'ENVIRONNEMENT S'AJOUTE À L'HÉMISPHÈRE, IL NE S'ÉCRIT PAS À
+      // CÔTÉ.** Les deux sont des irradiances INDIRECTES que le socle accumule
+      // dans le même `irradiance` avant de le passer au même `BRDF_Lambert`
+      // (`lights_fragment_begin`). Les séparer en deux termes du nuanceur
+      // aurait fabriqué une troisième loi pour un total identique.
+      const amb = irradianceAmbiante(ambianteCoef, ambianteIntensite)
+      u.uCielIrr.value.set(
+        u.uCielIrr.value.x + amb.ciel[0],
+        u.uCielIrr.value.y + amb.ciel[1],
+        u.uCielIrr.value.z + amb.ciel[2]
+      )
+      u.uSolIrr.value.set(
+        u.uSolIrr.value.x + amb.sol[0],
+        u.uSolIrr.value.y + amb.sol[1],
+        u.uSolIrr.value.z + amb.sol[2]
+      )
+      if (albedoBase != null) {
+        // ⚠️ **`setStyle`, PAS `set`** : `set` accepte aussi un nombre, et une
+        // chaîne '#rrggbb' est ce que le contexte transporte (une chaîne se
+        // compare par `Object.is`, un `THREE.Color` muté en place ne se compare
+        // pas — la remarque que `CHAMPS_HABILLAGE` porte déjà pour `hazeColor`).
+        // Le passage sRVB → linéaire est celui de three, pas une formule écrite ici.
+        _couleurTampon.setStyle(albedoBase, THREE.SRGBColorSpace)
+        u.uAlbedoBase.value.set(_couleurTampon.r, _couleurTampon.g, _couleurTampon.b)
+      }
+      if (Number.isFinite(albedoTeinte)) u.uAlbedoTeinte.value = albedoTeinte
+    }
+
+    // ══════ LA COUCHE APPARENCE — Tâche P3 ════════════════════════════
+    //
+    // ⚠️ **`| 0` SUR LES DEUX ENTIERS, ET CE N'EST PAS DE LA COQUETTERIE** :
+    // `uSurfaceFx` et `uFxBlend` sont des `int` GLSL. Un flottant y arrive
+    // tronqué ou pas du tout selon le pilote, sans qu'aucune erreur soit levée
+    // — et `terrain.js` fait déjà `this.mapUniforms.uSurfaceFx.value = id | 0`.
+    u.uSurfaceFx.value = Number.isFinite(surfaceFx) ? surfaceFx | 0 : APPARENCE_MONDE.surfaceFx
+    u.uFxBlend.value = Number.isFinite(fxBlend) ? fxBlend | 0 : APPARENCE_MONDE.fxBlend
+    u.uFxOpacite.value = Number.isFinite(fxOpacity) ? fxOpacity : APPARENCE_MONDE.fxOpacity
+    if (Number.isFinite(fxScale)) u.uFxScale.value = fxScale
+    if (fxColA != null) u.uFxColA.value.setStyle(fxColA, THREE.SRGBColorSpace)
+    if (fxColB != null) u.uFxColB.value.setStyle(fxColB, THREE.SRGBColorSpace)
+    if (fxColC != null) u.uFxColC.value.setStyle(fxColC, THREE.SRGBColorSpace)
+    if (Number.isFinite(fxP1)) u.uFxP1.value = fxP1
+    if (Number.isFinite(fxP2)) u.uFxP2.value = fxP2
+    if (Number.isFinite(fxP3)) u.uFxP3.value = fxP3
+    if (Number.isFinite(fxDemiBloc) && fxDemiBloc > 0) u.uFxDemiBloc.value = fxDemiBloc
+    if (Number.isFinite(fxFenetreX) && Number.isFinite(fxFenetreY)) u.uFxFenetre.value.set(fxFenetreX, fxFenetreY)
+
+    // ══════ LA COULEUR DES PAROIS — Tâche P3, manque n° 2 ════════════════════
+    if (paroiCouleur != null) u.uParoiCouleur.value.setStyle(paroiCouleur, THREE.SRGBColorSpace)
     return u
   }
 
@@ -2601,6 +2997,53 @@ export class Globe {
     u.uHazeAlt.value = NATUREL_MONDE.hazeAlt
     u.uHazeDist.value = NATUREL_MONDE.hazeDist
     u.uHazeColor.value.set(NATUREL_MONDE.hazeColor)
+    // ══════ L'ÉCLAIRAGE ET LA PAROI — Tâche P3 ═══════════════════════════════
+    //
+    // ⚠️ **RENDUS AUSSI, POUR LA RAISON QUE CE BLOC PORTE DÉJÀ POUR LES DIX
+    // CURSEURS DU NATUREL** : l'aller-retour bit-à-bit que
+    // `test/crop-habillage.test.js` exige porte sur les VALEURS, pas sur leur
+    // effet. Un uniforme resté sur le soleil d'un crop mort est un état qui
+    // traîne, et ce fichier en a déjà payé un (`uContourInterval`, la planète
+    // entière à 250 m).
+    u.uEclairageOn.value = 0
+    u.uSoleilDir.value.set(0, 1, 0)
+    u.uHemiHaut.value.set(0, 1, 0)
+    u.uSoleilIrr.value.fromArray(ECLAIRAGE_MONDE.soleilIrr)
+    u.uCielIrr.value.fromArray(ECLAIRAGE_MONDE.cielIrr)
+    u.uSolIrr.value.fromArray(ECLAIRAGE_MONDE.solIrr)
+    u.uAlbedoBase.value.fromArray(ECLAIRAGE_MONDE.albedoBase)
+    u.uAlbedoTeinte.value = ECLAIRAGE_MONDE.albedoTeinte
+    u.uParoiCouleur.value.set('#d8d4cc')
+    u.uSurfaceFx.value = APPARENCE_MONDE.surfaceFx
+    u.uFxBlend.value = APPARENCE_MONDE.fxBlend
+    u.uFxOpacite.value = APPARENCE_MONDE.fxOpacity
+    u.uFxScale.value = APPARENCE_MONDE.fxScale
+    u.uFxTime.value = APPARENCE_MONDE.fxTime
+    u.uFxColA.value.set(APPARENCE_MONDE.fxColA)
+    u.uFxColB.value.set(APPARENCE_MONDE.fxColB)
+    u.uFxColC.value.set(APPARENCE_MONDE.fxColC)
+    u.uFxP1.value = APPARENCE_MONDE.fxP1
+    u.uFxP2.value = APPARENCE_MONDE.fxP2
+    u.uFxP3.value = APPARENCE_MONDE.fxP3
+    u.uFxDemiBloc.value = APPARENCE_MONDE.fxDemiBloc
+    u.uFxFenetre.value.set(APPARENCE_MONDE.fxFenetreX, APPARENCE_MONDE.fxFenetreY)
+  }
+
+  /**
+   * L'horloge de la couche Apparence — Tâche P3.
+   *
+   * ⚠️ **ELLE EST À PART DE `poserHabillage`, ET C'EST UNE OBLIGATION, PAS UN
+   * RANGEMENT.** `uFxTime` avance à chaque image (`terrain.js` :
+   * `uFxTime.value += dt * speed`) ; passé par `CHAMPS_HABILLAGE`, il mettrait
+   * `habillageDifferent` à vrai soixante fois par seconde et reposerait
+   * l'habillage entier — textures comprises — à chaque image.
+   *
+   * ⚠️ **ET ON RECOPIE L'HORLOGE DU SOCLE PLUTÔT QUE D'EN AVANCER UNE
+   * SECONDE** : deux compteurs sur deux `dt` finiraient déphasés, et le motif du
+   * crop ne serait plus celui du bloc à la même seconde.
+   */
+  poserTempsApparence(t) {
+    if (Number.isFinite(t)) this.uniforms.uFxTime.value = t
   }
 
   // ═══════════ LA RAMPE — Tâche D, « calculée sur le crop, suivie par les
@@ -3517,7 +3960,11 @@ export class Globe {
       uniforms: {
         uSunDir: this.uniforms.uSunDir,
         uShadowColor: this.uniforms.uShadowColor,
-        uCol: { value: new THREE.Color('#d8d4cc') }, // `params.plinthColor` par défaut
+        // ⚠️ **PARTAGÉ, PAS PROPRE AU MATÉRIAU — Tâche P3.** Il valait
+        // `new THREE.Color('#d8d4cc')`, le DÉFAUT de `params.plinthColor`,
+        // pendant que la paroi vivante du socle rendait `c06a44`. Le pourquoi
+        // du partage est écrit à la déclaration de `uParoiCouleur`.
+        uCol: this.uniforms.uParoiCouleur,
       },
       vertexShader: /* glsl */ `
         attribute vec3 aoCrop;

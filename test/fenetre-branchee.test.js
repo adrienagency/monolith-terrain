@@ -1385,8 +1385,24 @@ test('⑫g AUCUNE COMPOSANTE DE COULEUR N\'EST NaN — sur les DEUX chemins et s
   t3.rebuild(p3)
   assert.equal(nbNaN(t3), 0, 'emprise 3x3 a extrema quantifies : des couleurs NaN')
   // et la borne est bien dans le code, pas seulement dans le résultat
+  //
+  // ⚠️ **LA LOI A DÉMÉNAGÉ — Tâche P3, et l'assertion la suit.** La valeur par
+  // sommet vit désormais dans `src/monde/eclairage-crop.js` (`natGris`), que le
+  // crop du globe INJECTE en GLSL et que `terrain.js` APPELLE : une écriture,
+  // deux lecteurs. On exige donc les DEUX faits — la borne dans le module, et la
+  // délégation dans `terrain.js` — sans quoi il suffirait de réécrire la formule
+  // sur place pour que cette ligne reste verte.
   const src = sansCommentaires(lire('src/terrain.js'))
-  assert.ok(/Math\.pow\(Math\.max\(0, hn\), 0\.85\)/.test(src), 'la borne de `hn` a disparu de `_ecrireRelief`')
+  assert.ok(/let v = natGris\(hn, ny\)/.test(src), '`_ecrireRelief` ne délègue plus à `natGris`')
+  const loi = sansCommentaires(lire('src/monde/eclairage-crop.js'))
+  assert.ok(
+    /Math\.pow\(Math\.max\(0, hn\), GRIS_EXPO\)/.test(loi),
+    'la borne de `hn` a disparu de `natGris`'
+  )
+  assert.ok(
+    /pow\(max\(hn, 0\.0\), \$\{GRIS_EXPO\}\)/.test(loi),
+    'la borne de `hn` a disparu du GLSL de `natGris`'
+  )
 })
 
 // ══════════ ⑫h — LE BANC QUI MORD ══════════════════════════════════════════

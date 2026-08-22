@@ -75,6 +75,18 @@ import { creerVeilleEstompage } from './monde/estompage-terre.js'
 // pour la même raison que les deux veilles ci-dessus — aucun test ne charge
 // `main.js`, et l'état inter-images est ce qui se casse en silence.
 import { creerVeilleCrop } from './monde/branchement-crop.js'
+// ══════ L'ÉCLAIRAGE DU BLOC — Tâche P3 ════════════════════════════════
+//
+// > **L'agent noteur, 2026-08-22 :** « Le socle est un matériau ÉCLAIRÉ. La
+// > tuile du globe est une COULEUR NUE. »
+//
+// `irradianceAmbiante` est la LOI (module pur, vérifiable sous node) ;
+// `coefAmbiante` est la MESURE (elle a besoin du renderer, donc elle vit à
+// côté). ⚠️ **L'ambiante n'est pas une constante** : elle pèse 47 % de
+// l'irradiance du socle et `applyBackground` peut remplacer
+// `scene.environment` par un ciel HDRI — un nombre en dur serait devenu faux
+// sans que rien ne le dise.
+import { coefAmbiante } from './sonde-ambiante.js'
 // LE REPOS DE LA VUE — Tâche N. ⚠️ **PUR, POUR LA MÊME RAISON QUE LES TROIS
 // VEILLES CI-DESSUS** : c'est un SEUIL, et le seuil du socle a produit onze
 // bascules là où il en fallait une. Ses deux nombres sont MESURÉS sur des traces
@@ -4676,6 +4688,18 @@ function majSeuilSocle() {
     // cubiques) et pose les uniformes. Sans ancre il ne fait rien, donc rien
     // tant que la chaîne du crop n'a pas pris.
     globe?.majEchelleRampe(alt)
+    // ══════ L'HORLOGE DE LA COUCHE APPARENCE — Tâche P3 ═══════════════════
+    //
+    // ⚠️ **ELLE NE PASSE PAS PAR `CHAMPS_HABILLAGE`, ET C'EST UNE OBLIGATION** :
+    // `uFxTime` avance à chaque image (`terrain.js` : `uFxTime.value += dt ×
+    // speed`). Dans la liste surveillée, il mettrait `habillageDifferent` à vrai
+    // soixante fois par seconde et reposerait l'habillage ENTIER — textures
+    // comprises — à chaque image.
+    //
+    // ⚠️ **ET ON RECOPIE L'HORLOGE DU SOCLE PLUTÔT QUE D'EN AVANCER UNE
+    // SECONDE** : deux compteurs sur deux `dt` finiraient déphasés, et le motif
+    // du crop ne serait plus celui du bloc à la même seconde.
+    globe?.poserTempsApparence(terrain.mapUniforms.uFxTime.value)
     return
   }
   veilleSocle.maj(altitudeCadrageM())
@@ -4947,6 +4971,94 @@ function contexteCrop() {
       // remarque que `CHAMPS_HABILLAGE` porte déjà pour `solOffset`/`solScale`,
       // sauf qu'ici la parade est possible (une chaîne se compare).
       hazeColor: `#${terrain.mapUniforms.uHazeColor.value.getHexString()}`,
+      // ══════ L'ÉCLAIRAGE DU BLOC — Tâche P3, manque n° 1 du noteur ═════════
+      //
+      // ⛔ **LE CROP N'AVAIT PAS L'ÉCLAIRAGE DU SOCLE : IL AVAIT CELUI DE LA
+      // PLANÈTE, ET LA PLANÈTE EST ÉCLAIRÉE PAR SA CAMÉRA.** La boucle d'image
+      // repose `globe.setSunDir(_orbSun)` à chaque tour, sur
+      // `camGlobe.position` tournée de 42°, pour qu'aucune face visible du
+      // globe ne soit dans la nuit. Bon pour une planète, faux pour un bloc :
+      // l'ombrage du crop suivait le point de vue, pas l'heure.
+      //
+      // ⚠️ **ON LIT LES LAMPES, PAS `params` — MÊME RÈGLE QUE POUR LES DIX
+      // CURSEURS D'ATLAS JUSTE AU-DESSUS.** `placeSun` porte deux règles que
+      // `params` ne porte pas : l'atténuation d'un soleil rasant
+      // (`0,35 + 0,65 · sin(el)^0,7`, normalisée sur 16°) et l'interrupteur
+      // `sunOn`, qui met l'intensité à zéro SANS retirer la lampe. Passer par
+      // `params.sunIntensity` aurait donné un bloc encore éclairé la nuit,
+      // soleil coupé.
+      //
+      // ⚠️ **L'AZIMUT ET L'ÉLÉVATION, EUX, VIENNENT DE `params`, ET C'EST LE BON
+      // CHOIX** : `sun.position` porte en plus le rayon 34, et `applyTimeOfDay`
+      // est le SEUL écrivain de ces deux angles (il les dérive de l'heure et du
+      // lieu, `daycycle.js`). Une grandeur, une source.
+      centreLat: centre.lat,
+      centreLon: centre.lon,
+      soleilAzimut: params.sunAzimuth,
+      soleilElevation: params.sunElevation,
+      soleilCouleur: `#${sun.color.getHexString()}`,
+      soleilIntensite: sun.intensity,
+      hemiCiel: `#${hemi.color.getHexString()}`,
+      hemiSol: `#${hemi.groundColor.getHexString()}`,
+      hemiIntensite: hemi.intensity,
+      // ⚠️ **LES DEUX INTENSITÉS MULTIPLIENT, ET three LES APPLIQUE TOUTES LES
+      // DEUX** : `scene.environmentIntensity` (le cycle horaire la réécrit à
+      // chaque heure) et `material.envMapIntensity` (0,15 relevé sur le
+      // matériau du relief). En oublier une donnait un facteur 6,7.
+      // ⛔ **UNE SEULE INTENSITÉ, ET LA PREMIÈRE VERSION EN METTAIT DEUX.**
+      // `material.envMapIntensity` (0,15 sur le relief) est du CODE MORT ici :
+      // `three` l'écrase par `scene.environmentIntensity` quand le matériau n'a
+      // pas d'`envMap` à lui (`WebGLRenderer.js`, r172), et
+      // `terrain.material.envMap === null`. Le facteur 6,7 que ça donnait a été
+      // attrapé par la mesure du socle, pas par la lecture du code.
+      //
+      // ⚠️ **`coefAmbiante` REND UN OBJET GELÉ MIS EN CACHE PAR TEXTURE** : son
+      // identité ne bouge pas, donc `Object.is` le voit égal et l'habillage ne
+      // se repose pas à chaque image. C'est la contrainte que
+      // `CHAMPS_HABILLAGE` impose à tout ce qui n'est ni scalaire ni chaîne.
+      ambianteCoef: coefAmbiante(renderer, scene.environment),
+      ambianteIntensite: scene.environmentIntensity,
+      // le fond contre lequel `mapTint` dose la peinture — `terrain.js:1137`
+      albedoBase: `#${terrain.material.color.getHexString()}`,
+      albedoTeinte: terrain.mapUniforms.uTint.value,
+      // ══════ LA COULEUR DES PAROIS — Tâche P3, manque n° 2 ═══════════════
+      //
+      // ⛔ **`params.plinthColor` EST LE MAUVAIS NOMBRE, ET LE NOTEUR L'A MESURÉ
+      // AU MÊME INSTANT DANS LA MÊME PAGE** : `params.plinthColor = #d8d4cc`,
+      // `plinth.wallMat.color = c06a44`. `setColors` ne retient
+      // `params.plinthColor` que si le socle n'est ni en verre ni sur un
+      // préréglage PBR ; c'est donc le MATÉRIAU qui dit la vérité, jamais
+      // `params`. Même règle que pour les curseurs d'Atlas.
+      paroiCouleur: `#${plinth.wallMat.color.getHexString()}`,
+      // ══════ LA COUCHE APPARENCE — Tâche P3 ══════════════════════════
+      //
+      // ⛔ **LE GABARIT D'OUVERTURE L'ALLUME** (`shibustart.json` :
+      // `look.surfaceFx = 9`), et elle multiplie l'albédo du socle par **0,59**
+      // — mesuré, socle albédo BLANC sous hémisphère blanc d'irradiance 1 :
+      // **0,591** couche allumée contre **0,997** couche éteinte. Aucune tâche
+      // de ce chantier ne l'avait nommée, et sans elle le crop éclairé sortait
+      // 1,7 fois trop clair.
+      //
+      // ⚠️ **ON LIT LES UNIFORMES DU SOCLE, PAS `params`** — même règle que
+      // pour les dix curseurs d'Atlas : `applyFxParams` porte les défauts par
+      // effet (`fx-meta.js`) que `params.fx[id]` ne porte pas toujours.
+      surfaceFx: terrain.mapUniforms.uSurfaceFx.value,
+      fxBlend: terrain.mapUniforms.uFxBlend.value,
+      fxOpacity: terrain.mapUniforms.uFxOpacity.value,
+      fxScale: terrain.mapUniforms.uFxScale.value,
+      fxColA: `#${terrain.mapUniforms.uFxColA.value.getHexString()}`,
+      fxColB: `#${terrain.mapUniforms.uFxColB.value.getHexString()}`,
+      fxColC: `#${terrain.mapUniforms.uFxColC.value.getHexString()}`,
+      fxP1: terrain.mapUniforms.uFxP1.value,
+      fxP2: terrain.mapUniforms.uFxP2.value,
+      fxP3: terrain.mapUniforms.uFxP3.value,
+      // ⚠️ **`uSlabHalf` VIVANT, PAS 28 EN DUR** : c'est lui qui convertit
+      // `qCrop` en la coordonnée de sol que `champXZ()` donne à `terrain.js`,
+      // et la fenêtre continue le déplace. Un 28 recopié aurait fait glisser le
+      // motif du crop par rapport à celui du bloc dès le premier déplacement.
+      fxDemiBloc: terrain.mapUniforms.uSlabHalf?.value ?? 28,
+      fxFenetreX: terrain.mapUniforms.uFenetre?.value?.x ?? 0,
+      fxFenetreY: terrain.mapUniforms.uFenetre?.value?.y ?? 0,
     },
     mer: {
       altitudeM: altitudeCadrageM(),

@@ -195,6 +195,72 @@ export const CHAMPS_HABILLAGE = Object.freeze([
   // identité ne bouge jamais. `contexteCrop` en transmet donc la valeur
   // hexadécimale, qui, elle, se compare par `Object.is`.
   'hazeColor',
+  // ══════ L'ÉCLAIRAGE DU BLOC — Tâche P3 ════════════════════════════
+  //
+  // ⚠️ **C'EST LA SEULE VEILLE PAR IMAGE DE LA CHAÎNE, ET LE SOLEIL BOUGE À
+  // CHAQUE DIXIÈME D'HEURE.** `poserCrop` ne tourne qu'au changement de lieu et
+  // `construireParoisCrop` qu'à l'arrêt (elle balaie plus de mille points du
+  // contour) : un soleil posé par l'une des deux resterait figé sur l'heure de
+  // sa naissance, et la tirette de 24 h n'aurait plus aucun effet sur le bloc.
+  //
+  // ⚠️ **ET TOUS SONT DES SCALAIRES OU DES CHAÎNES**, parce que `Object.is` est
+  // la seule comparaison de ce module : un objet `eclairage` reconstruit à
+  // chaque image différerait toujours de lui-même et reposerait l'habillage
+  // entier soixante fois par seconde.
+  'centreLat',
+  'centreLon',
+  'soleilAzimut',
+  'soleilElevation',
+  'soleilCouleur',
+  'soleilIntensite',
+  'hemiCiel',
+  'hemiSol',
+  'hemiIntensite',
+  // ⚠️ **L'AMBIANTE EST UN NOMBRE MESURÉ, PAS UNE CONSTANTE** : c'est
+  // l'irradiance que `scene.environment` verse sur une surface diffuse
+  // (`src/sonde-ambiante.js`), multipliée par les deux intensités vivantes. Elle
+  // pèse **47 %** de l'irradiance totale du socle et suit le cycle horaire —
+  // absente d'ici, le bloc s'éclairerait à l'ambiante de son premier instant.
+  'ambianteCoef',
+  'ambianteIntensite',
+  'albedoBase',
+  'albedoTeinte',
+  // ⚠️ **`paroiCouleur` N'EST PAS `params.plinthColor`, ET C'EST TOUT LE
+  // DÉFAUT** : `plinth.setColors` ne retient `params.plinthColor` que si le socle
+  // n'est ni en verre ni sur un préréglage PBR. Relevé au même instant dans la
+  // même page : `params.plinthColor = #d8d4cc`, paroi vivante `c06a44`. La
+  // valeur qui compte est celle du matériau, et elle change avec la palette
+  // sans que les parois du crop soient rebâties — d'où sa place ICI.
+  'paroiCouleur',
+  // ══════ LA COUCHE APPARENCE — Tâche P3 ════════════════════════════
+  //
+  // ⛔ **LE GABARIT D'OUVERTURE L'ALLUME, ET PERSONNE NE L'AVAIT VUE.**
+  // `public/templates/defaults/shibustart.json` pose `look.surfaceFx = 9`.
+  // Mesuré le 2026-08-22 : elle multiplie l'albédo du socle par **0,59** (socle
+  // rendu albédo BLANC sous un hémisphère blanc d'irradiance 1 : 0,591 couche
+  // allumée contre 0,997 couche éteinte). Sans elle, le crop éclairé sortait
+  // **1,7 fois trop clair**.
+  //
+  // ⚠️ **`fxTime` N'Y EST PAS**, et c'est une obligation : il avance à chaque
+  // image, donc il mettrait cette liste à « différent » soixante fois par
+  // seconde. Il passe par `globe.poserTempsApparence`, hors de cette veille.
+  'surfaceFx',
+  'fxBlend',
+  'fxOpacity',
+  'fxScale',
+  'fxColA',
+  'fxColB',
+  'fxColC',
+  'fxP1',
+  'fxP2',
+  'fxP3',
+  'fxDemiBloc',
+  // ⚠️ **DEUX NOMBRES ET NON UN `Vector2`** : `uFenetre` est muté EN PLACE par
+  // le socle, donc son identité ne bouge jamais et `Object.is` ne verrait
+  // jamais la fenêtre bouger — la remarque que cette liste porte déjà pour
+  // `solOffset` / `solScale`, sauf qu'ici la parade est possible.
+  'fxFenetreX',
+  'fxFenetreY',
 ])
 
 /**

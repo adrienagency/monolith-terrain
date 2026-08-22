@@ -409,6 +409,9 @@ test('③b AUCUNE des formules ne reparaît dans terrain.js ni dans globe.js', (
   for (const f of FORMULES) assert.ok(f.present.test(GLSL_NATUREL), `formule absente du module : ${f.quoi}`)
 })
 
+/** Le texte d'un fichier, commentaires de ligne retires. */
+const sansComm = (t) => t.replace(/\/\/[^\n]*/g, ' ')
+
 test('③c le socle APPELLE les fonctions partagées — il ne les a pas juste importées', () => {
   const sansCommentaires = TERRAIN_SRC.replace(/\/\/[^\n]*/g, ' ')
   for (const appel of ['natPlancherPivot(', 'natRampT(', 'natHumiditeY(', 'natPeigne(', 'natVoile(', 'natBrume(', 'natLuminance(']) {
@@ -416,7 +419,16 @@ test('③c le socle APPELLE les fonctions partagées — il ne les a pas juste i
   }
   // ⚠️ ET `fxBlend` mode 10 DÉLÈGUE au soft light partagé plutôt que de le
   // réécrire : c'était la SEULE autre écriture du soft light du dépôt.
-  assert.match(sansCommentaires, /if \(m == 10\) return natSoftLight\(b, s\);/)
+  //
+  // ⚠️ **`fxBlend` A DÉMÉNAGÉ — Tâche P3, et l'assertion le suit.** Les modes de
+  // mélange vivent désormais dans `src/monde/melange-crop.js`, que `terrain.js`
+  // ET `globe.js` injectent : le crop porte la couche Apparence, et cette couche
+  // EST un mode de mélange. On exige les DEUX faits — la délégation dans le
+  // module, et l'injection dans le socle — sans quoi une seconde écriture sur
+  // place laisserait cette ligne verte.
+  const melange = sansComm(readFileSync(new URL('../src/monde/melange-crop.js', import.meta.url), 'utf8'))
+  assert.match(melange, /if \(m == 10\) return natSoftLight\(b, s\);/)
+  assert.match(sansCommentaires, /\$\{GLSL_MELANGE\}/)
 })
 
 // ══════════ ④ LE BRANCHEMENT — LA FAIBLESSE RÉCURRENTE DU CHANTIER ═════════
@@ -623,6 +635,8 @@ test('⑤d le pivot, la limite des arbres et le voile lisent hNormRelief — l�
 // --- le stub, en fin de fichier : il n'est utile qu'aux tests ④
 
 const val = (v) => ({ value: v })
+const vecStub = () => ({ x: 0, y: 0, z: 0, set() { return this }, fromArray() { return this }, normalize() { return this } })
+const couleurStub = () => ({ set() {}, setStyle() {} })
 function globeStub() {
   return {
     _crop: null,
@@ -641,6 +655,19 @@ function globeStub() {
       uHazeAmt: val(NATUREL_MONDE.hazeAmt), uHazeAlt: val(NATUREL_MONDE.hazeAlt),
       uHazeDist: val(NATUREL_MONDE.hazeDist),
       uHazeColor: val({ hex: NATUREL_MONDE.hazeColor, set(v) { this.hex = v } }),
+      // ══════ L'ÉCLAIRAGE ET LA COUCHE APPARENCE — Tâche P3 ═══════════════
+      // Ce stub n'exerce que ④ : il lui suffit de PORTER les uniformes que
+      // `poserHabillage` écrit. Leur aller-retour bit à bit est vérifié par
+      // `crop-habillage` ⑨h et par `crop-eclairage` ④d.
+      uEclairageOn: val(0),
+      uSoleilDir: val(vecStub()), uSoleilIrr: val(vecStub()),
+      uHemiHaut: val(vecStub()), uCielIrr: val(vecStub()), uSolIrr: val(vecStub()),
+      uAlbedoBase: val(vecStub()), uAlbedoTeinte: val(1),
+      uParoiCouleur: val(couleurStub()),
+      uSurfaceFx: val(0), uFxBlend: val(0), uFxOpacite: val(0), uFxScale: val(1), uFxTime: val(0),
+      uFxColA: val(couleurStub()), uFxColB: val(couleurStub()), uFxColC: val(couleurStub()),
+      uFxP1: val(0), uFxP2: val(0), uFxP3: val(0),
+      uFxDemiBloc: val(28), uFxFenetre: val({ set() {} }),
     },
   }
 }

@@ -27,6 +27,21 @@ import { lireExageration } from './monde/exageration-continue.js'
 // **qu'une seule écriture** de la loi, et `test/crop-naturel.test.js` interdit
 // qu'une seule de ces formules réapparaisse ici.
 import { GLSL_NATUREL } from './monde/naturel-crop.js'
+// ⚠️ **MÊME GESTE, DEUX LOIS DE PLUS — Tâche P3.** `natGris` (la valeur par
+// sommet : dégradé d'altitude × assombrissement de pente) et `natOmbrePeinture`
+// (le `fxShade` qui dose la peinture contre la matière) vivaient ICI, et le
+// crop en a besoin dès qu'il est éclairé : ce fond presque neutre pèse **32 %**
+// de l'albédo du socle, et c'est lui, avec l'environnement, qui fabrique les
+// neutres que le noteur trouve **5,7 fois** trop rares sur le crop.
+// `test/crop-eclairage.test.js` interdit que l'une des deux réapparaisse ici.
+import { natGris, GLSL_OMBRE_PEINTURE } from './monde/eclairage-crop.js'
+// ⚠️ **ET LES MODES DE MÉLANGE AUSSI — Tâche P3.** `blLum`/`blClip`/`blSetLum`
+// étaient écrits ICI **et** dans `globe.js`, chacun avec un commentaire disant
+// que deux écritures finiraient par diverger. Le crop doit porter la couche
+// Apparence (le gabarit d'ouverture l'allume : `surfaceFx = 9`), donc il lui
+// faut `fxBlend` : c'était l'occasion de fermer la dette au lieu d'en créer une
+// troisième. Le texte est identique au bit près à celui qui vivait ici.
+import { GLSL_MELANGE } from './monde/melange-crop.js'
 // L'analyse de relief et le masque de mer ne sont plus calcules ici : ils
 // partent dans un Worker (terrain-jobs.js). ~470 ms de fil principal fige par
 // reconstruction, sur MNT 1536². Le calcul est identique octet pour octet.
@@ -890,39 +905,8 @@ float ombreLisiere(vec2 p) {
 }
 #endif // SHIBU_CANOPEE
 ${GLSL_NATUREL}
-// --- Appearance blend modes (Figma / W3C compositing set) — b = backdrop map,
-// s = the shader colour. Separable ops are channel-wise; the last four are the
-// non-separable HSL modes. ---
-float blLum(vec3 c) { return dot(c, vec3(0.3, 0.59, 0.11)); }
-vec3 blClip(vec3 c) { float l = blLum(c); float mn = min(min(c.r, c.g), c.b); float mx = max(max(c.r, c.g), c.b);
-  if (mn < 0.0) c = l + (c - l) * l / (l - mn + 1e-5);
-  if (mx > 1.0) c = l + (c - l) * (1.0 - l) / (mx - l + 1e-5);
-  return clamp(c, 0.0, 1.0); }
-vec3 blSetLum(vec3 c, float l) { return blClip(c + (l - blLum(c))); }
-float blSat(vec3 c) { return max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b); }
-vec3 blSetSat(vec3 c, float s) { float mn = min(min(c.r, c.g), c.b), mx = max(max(c.r, c.g), c.b);
-  return mx > mn ? (c - mn) / (mx - mn) * s : vec3(0.0); }
-vec3 blHard(vec3 b, vec3 s) { return mix(b + s - b * s - (1.0 - 2.0 * s) * b, b * 2.0 * s, step(s, vec3(0.5))); }
-vec3 fxBlend(vec3 b, vec3 s, int m) {
-  if (m == 1) return min(b, s);                                  // Darken
-  if (m == 2) return b * s;                                      // Multiply
-  if (m == 3) return max(vec3(0.0), b + s - 1.0);                // Plus darker (linear burn)
-  if (m == 4) return 1.0 - min(vec3(1.0), (1.0 - b) / max(s, 1e-4)); // Colour burn
-  if (m == 5) return max(b, s);                                  // Lighten
-  if (m == 6) return b + s - b * s;                              // Screen
-  if (m == 7) return min(vec3(1.0), b + s);                      // Plus lighter (linear dodge)
-  if (m == 8) return min(vec3(1.0), b / max(1.0 - s, 1e-4));     // Colour dodge
-  if (m == 9) return blHard(s, b);                               // Overlay (hard-light swapped)
-  if (m == 10) return natSoftLight(b, s);                        // Soft light — voir naturel-crop.js
-  if (m == 11) return blHard(b, s);                              // Hard light
-  if (m == 12) return abs(b - s);                                // Difference
-  if (m == 13) return b + s - 2.0 * b * s;                       // Exclusion
-  if (m == 14) return blSetLum(blSetSat(s, blSat(b)), blLum(b)); // Hue
-  if (m == 15) return blSetLum(blSetSat(b, blSat(s)), blLum(b)); // Saturation
-  if (m == 16) return blSetLum(s, blLum(b));                     // Colour
-  if (m == 17) return blSetLum(b, blLum(s));                     // Luminosity
-  return s;                                                      // Normal
-}`
+${GLSL_OMBRE_PEINTURE}
+${GLSL_MELANGE}`
         )
         .replace(
           '#include <color_fragment>',
@@ -1112,7 +1096,7 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
       mapCol = mix(mapCol, vec3(0.42, 0.31, 0.21), smoothstep(0.3, 0.8, slope) * uSlopeTint);
     }
   }
-  float fxShade = clamp(luma * 2.4, 0.2, 1.4);
+  float fxShade = natOmbrePeinture(luma);
   // material noise reveal: where the noise is below the (soft) cut, push the tint
   // back toward 1 so the map paint shows through the relief material — a diffuse,
   // holeless dissolve that lets you see the layer underneath. The revealed map is
@@ -2570,8 +2554,12 @@ if (uLmOn > 0.5 && uLmFlowAmt > 0.0) {
       //
       // Elle reste l'identité BIT À BIT partout où `hn ≥ 0`.
       const hn = (h - minH) / span
-      let v = lerp(0.62, 0.95, Math.pow(Math.max(0, hn), 0.85))
-      v *= lerp(0.78, 1.0, Math.pow(Math.max(0, ny), 0.6))
+      // ⚠️ **LA LOI EST DANS `monde/eclairage-crop.js`, ET LE CROP L'ÉVALUE EN
+      // GLSL** — même patron que `natRampT` et le peigné : une écriture, deux
+      // lecteurs. Le `tint[i] * 0.05` reste ici parce qu'il lit un champ de
+      // bruit PRÉ-CUIT sur la grille du bloc (`detail-noise.js`), que le crop
+      // n'a pas ; c'est ±0,05 sur un terme qui pèse 0,32 de l'albédo.
+      let v = natGris(hn, ny)
       v += tint[i] * 0.05
       colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = v
     }
