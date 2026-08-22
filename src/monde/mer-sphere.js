@@ -280,6 +280,92 @@ export const RAMPE_NAUTIQUE = Object.freeze({
 })
 
 /**
+ * Les trois couleurs VIVANTES du fond marin du socle — Tâche P5.
+ *
+ * ⛔ **`RAMPE_NAUTIQUE` CI-DESSUS N'EST PAS LA PALETTE : C'EST LE DÉFAUT DE
+ * `terrain.js`** (`params.oceanShallow ?? '#dce8ec'`). Le socle ne vit JAMAIS
+ * dessus en production : `main.js` y écrit `params.ocean*` à chaque palette, et
+ * le panneau « Sea » y écrit en plus un fond de `SEABEDS` (le gabarit
+ * d'ouverture pose « lagoon »). Relevé le 2026-08-22 dans la page vivante, La
+ * Réunion z12 : le socle porte **`#c8f2e4` / `#62cfc1` / `#136e7d`**, la calotte
+ * **`#dce8ec` / `#7fa8b8` / `#31576b`** — les défauts.
+ *
+ * ⚠️ **C'EST LA MÊME FAUTE QUE LA COULEUR DES PAROIS (manque n° 2 du noteur) ET
+ * QUE `uSky` (Tâche P4), AU MÊME ENDROIT DU MÊME OBJET** : un défaut de module
+ * gelé dans un uniforme que personne ne repose. `poserMer` portait bien un
+ * paramètre `couleursFond` — **aucun appelant ne l'a jamais passé**, et c'est
+ * pourquoi il disparaît au profit d'un écrivain unique par image.
+ *
+ * ⚠️ **ELLE NE CALCULE RIEN, ELLE LIT.** Les seuls écrivains de ces trois
+ * valeurs restent `applyPalette` et le panneau « Sea » ; les redériver ici
+ * ferait deux palettes à garder d'accord — la faute que D13 §③ nomme, et celle
+ * que P2 a évitée en prenant `terrain.mapUniforms.uRampTex` tel quel.
+ *
+ * @param {{uOceanShallow?:{value:object}, uOceanMid?:{value:object}, uOceanDeep?:{value:object}}|null} uniformes
+ *   `terrain.mapUniforms`
+ * @returns {{peu:object, moyen:object, fond:object}|null} les objets `Color`
+ *   VIVANTS du socle, ou `null` si l'un des trois manque — **on ne pose jamais
+ *   un demi-triplet** : deux couleurs du socle et une du défaut seraient pires
+ *   que les trois du défaut, exactement comme le demi-couple d'accalmies de P4.
+ */
+export function couleursFondDuSocle(uniformes) {
+  const peu = uniformes?.uOceanShallow?.value
+  const moyen = uniformes?.uOceanMid?.value
+  const fond = uniformes?.uOceanDeep?.value
+  if (!peu?.isColor || !moyen?.isColor || !fond?.isColor) return null
+  return { peu, moyen, fond }
+}
+
+/**
+ * La profondeur maximale du champ **DANS LE CROP**, en mètres — Tâche P5.
+ *
+ * ⛔ **LE BUDGET DU FOND ÉTAIT CELUI DE LA CALOTTE, ET LE SOCLE PREND CELUI DE
+ * SON BLOC.** `terrain.js` pose `uSeaRange = (0 − dem.minM) × demScale`, et
+ * `dem` couvre EXACTEMENT le bloc. `poserMer`, lui, posait `champ.profMaxM`,
+ * mesuré sur la calotte — trois fois plus large. Relevé le 2026-08-22, La
+ * Réunion z12 : **3 510,49 m contre 2 116 m**, soit **×1,658**.
+ *
+ * ⚠️ **ET CE N'EST PAS UN DÉTAIL DE NORMALISATION : ÇA DOUBLE LA FRANGE PÂLE.**
+ * Le segment clair de la rampe nautique (`d01 < 0,45`, `uOceanShallow` →
+ * `uOceanMid`) couvrait **38,89 %** des 5 449 nœuds d'eau du crop avec le budget
+ * de la calotte, et **19,82 %** avec celui du crop. Ce sont les « gradins pâles »
+ * de la Tâche P4.
+ *
+ * ⚠️ **MESURÉE SUR LE CHAMP DÉJÀ CUIT, PAS SUR UN SECOND BALAYAGE, ET PAS SUR
+ * `uOceanDepth`.** `poserRampe` mesure la même grandeur sur SA grille (relevé à
+ * 2 106,77 m, soit 0,44 % du socle) — mais elle peut REFUSER faute de
+ * couverture, et son refus laisse le défaut MONDIAL de 6 000 m, c'est-à-dire une
+ * frange encore plus pâle qu'aujourd'hui. C'est le piège que l'en-tête de
+ * `uMerFondBudgetM` nomme déjà. On mesure donc sur le champ de la mer, qui est
+ * là par construction.
+ *
+ * @param {Float32Array|Array<number>} valeurs - le champ, ligne-major
+ * @param {number} cote - côté du champ, en nœuds
+ * @param {number} portee - demi-largeur du champ, en demi-côtés de crop
+ * @returns {number} la profondeur maximale (positive) dans `|q| <= 1`, ou 0
+ */
+export function profondeurMaxDuCrop(valeurs, cote, portee) {
+  if (!valeurs || !(cote > 1) || !(portee > 0)) return 0
+  const n = cote - 1
+  let max = 0
+  for (let j = 0; j < cote; j++) {
+    // ⚠️ **LA MÊME CONVENTION QUE `uvFond` ET QUE `MER_VERT`, À L'ENVERS** : le
+    // nœud `i` porte `q = (2 i / (cote − 1) − 1) × portee`. Une seconde
+    // convention ici, et le budget serait mesuré ailleurs que là où il sert.
+    const qv = (2 * j) / n - 1
+    if (Math.abs(qv * portee) > 1) continue
+    const base = j * cote
+    for (let i = 0; i < cote; i++) {
+      const qu = (2 * i) / n - 1
+      if (Math.abs(qu * portee) > 1) continue
+      const h = valeurs[base + i]
+      if (h < 0 && -h > max) max = -h
+    }
+  }
+  return max
+}
+
+/**
  * La loi de couleur du fond marin — la transcription de `terrain.js:1019-1023`.
  *
  * ⚠️ **EXPOSANT 0,55 ET COUDE À 0,45 : LES DEUX VIENNENT DU SOCLE.** L'exposant

@@ -66,6 +66,13 @@ import {
   PORTEE_DEFAUT,
   construireJupeMer,
   GLSL_JUPE_MER,
+  // ⚠️ **TÂCHE P5 — LES DEUX ENTRÉES DU FOND MARIN QUE PERSONNE NE POSAIT.**
+  // `couleursFondDuSocle` LIT la palette vivante du socle (la calotte gelait le
+  // défaut de `terrain.js`) ; `profondeurMaxDuCrop` mesure le budget sur le
+  // CROP et non sur la calotte (×1,658 à La Réunion). Les deux en-têtes portent
+  // les relevés bruts.
+  couleursFondDuSocle,
+  profondeurMaxDuCrop,
 } from './monde/mer-sphere.js'
 // ⚠️ **LE FOV CANONIQUE, PAS UNE CONSTANTE RECOPIÉE.** Tour de correction 1 de
 // la Tâche F : le défaut de `poserMer` portait `33`, une valeur qui n'existe
@@ -128,7 +135,7 @@ import {
 // Même patron encore : la loi vit une seule fois dans un module PUR, `ocean.js`
 // et ce fichier injectent le MÊME texte. L'en-tête d'`ecume-mer.js` nomme les
 // quatre entrées qui manquaient et donne leur mesure.
-import { GLSL_ECUME, FREQ_TAVELURE, BLANC_ECUME, ACCALMIE_NEUTRE } from './monde/ecume-mer.js'
+import { GLSL_ECUME, FREQ_TAVELURE, BLANC_ECUME, ACCALMIE_NEUTRE, ETAT_MER_NEUTRE } from './monde/ecume-mer.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -174,6 +181,11 @@ uniform sampler2D uMerChamp; // R : altitude du fond (unités locales), G : riva
 // la profondeur du crop comparable à celle du socle, la SEULE monnaie dans
 // laquelle le déclin côtier d'ocean.js a un sens. Un seul écrivain : poserMer.
 uniform float uMerUnite;
+// ⚠️ L ACCALMIE DE VUE, ET ELLE SERT DES DEUX COTES — Tache P5. Le fragment la
+// lit deja pour l ecume (Tache P4) ; le vertex en a besoin pour la HOULE, parce
+// qu ocean.js multiplie son amplitude par uViewCalm avant d appeler Gerstner.
+// C est le MEME uniforme, pas un second : un seul ecrivain, majReglagesMer.
+uniform float uMerCalmeVue;
 __GERSTNER__
 __SHORE_SURF__
 ${GLSL_ECUME}
@@ -249,7 +261,15 @@ void main() {
   // pendant que le critere de deferlement ci-dessous compare a une profondeur en
   // UNITES DE SCENE. Deux unites dans la meme soustraction, et rien ne l'aurait
   // dit. (Aucun accent grave dans ce bloc : template literal.)
-  vec3 disp = oceanGerstner(vec2(p.x, p.z), uMerTemps, uMerHoule, uMerChop, uMerVitesse, uMerLambda, fade, nAcc, crete);
+  // ⚠️ LA HOULE PORTE L ACCALMIE DE VUE, ET C EST L EXPRESSION D ocean.js —
+  // Tache P5. La-bas : oceanGerstner(xz, t, uWaveH * uViewCalm, ...) au vertex,
+  // et shoreSurf recoit uWaveH BRUT. Ici uMerCalmeVue EST uViewCalm, pose par
+  // majReglagesMer depuis l uniforme vivant du socle. Sans ce facteur, brancher
+  // uMerHoule sur uWaveH aurait rendu une houle 2,5 fois trop haute (uWaveH = 2,
+  // uViewCalm = 0,4039 releves le meme instant). ⚠️ Le NEUTRE de l accalmie vaut
+  // 1 (ACCALMIE_NEUTRE), donc sans socle a lire ce facteur ne change rien.
+  // (Aucun accent grave ni apostrophe dans ce bloc : template literal.)
+  vec3 disp = oceanGerstner(vec2(p.x, p.z), uMerTemps, uMerHoule * uMerCalmeVue, uMerChop, uMerVitesse, uMerLambda, fade, nAcc, crete);
   float creteS = 0.0;
   vec3 surf = shoreSurf(uvF, uMerChamp, uMerTemps, uMerHoule, uMerChop, uMerVitesse, uMerLambda, richesseMer, creteS);
   disp.y += surf.x;
@@ -3383,11 +3403,21 @@ export class Globe {
     altitudeM = 32274,
     couleurs = null,
     graine = 0,
-    couleursFond = null,
-    houle = 0.5,
-    chop = 0.7,
-    ecumeEchelle = 0.35,
   } = {}) {
+    // ⛔ **`couleursFond`, `houle`, `chop` ET `ecumeEchelle` NE SONT PLUS DES
+    // PARAMÈTRES — Tâche P5.** Ils l'étaient depuis les Tâches F et M, et
+    // **aucun appelant ne les a jamais passés** : le fond marin et l'état de mer
+    // du crop vivaient donc sur les défauts de ce module pendant que le socle
+    // vivait sur sa palette et sur les curseurs de l'utilisateur. Deux
+    // écrivains pour une grandeur, dont un muet, c'est la faute que D13 §③
+    // nomme ; la mer prend désormais ses six réglages et ses trois couleurs de
+    // fond par `majReglagesMer`, **par image, depuis les uniformes VIVANTS du
+    // socle** — le maillon que la Tâche P4 a posé pour les deux accalmies.
+    // `ETAT_MER_NEUTRE` porte les valeurs d'avant, au bit près.
+    const etat = ETAT_MER_NEUTRE
+    const houle = etat.houle
+    const chop = etat.chop
+    const ecumeEchelle = etat.ecumeEchelle
     if (!this._crop) return null
     const rep = this._crop
     const exag = this.exaggeration
@@ -3579,19 +3609,24 @@ export class Globe {
     // seconde : `poserMer` et `poserRampe` reçoivent tous deux `altitudeM` du
     // MÊME `contexteCrop`, et deux crans qui divergeraient rouvriraient le
     // désaccord que la Tâche J bis a fermé (`LECTEURS_DU_FOND`).
+    //
+    // ⛔ **ET IL SE MESURE SUR LE CROP, PLUS SUR LA CALOTTE — Tâche P5.** Le
+    // socle pose `uSeaRange = −dem.minM`, mesuré sur SON BLOC ; on prenait
+    // `champ.profMaxM`, mesuré sur une calotte trois fois plus large.
+    // **3 510,49 m contre 2 116 m** au même instant, et le segment clair de la
+    // rampe passait de 19,82 % à **38,89 %** des nœuds d'eau du crop : la frange
+    // pâle en doublait de largeur. ⚠️ **Le repli reste `profMaxM`** — un crop
+    // dont le champ n'aurait aucune eau à l'intérieur (lagune hors frontière,
+    // banc) rendrait sinon un budget nul, donc une mer d'un seul bleu.
+    const budgetFond = Math.max(champ.profMaxCropM || champ.profMaxM, 1)
     ancrerMesure(this._echelleContinue, altitudeM, {
-      fondBudget: Math.max(champ.profMaxM, 1),
+      fondBudget: budgetFond,
       plancherM: u.uPlancherRampeM.value,
     })
     const _v = majEchelle(this._echelleContinue, altitudeM)
     u.uMerFondBudgetM.value = Number.isFinite(_v?.fondBudget)
       ? Math.max(_v.fondBudget, 1)
-      : Math.max(champ.profMaxM, 1)
-    if (couleursFond) {
-      u.uOceanShallow.value.set(couleursFond.peu ?? RAMPE_NAUTIQUE.peu)
-      u.uOceanMid.value.set(couleursFond.moyen ?? RAMPE_NAUTIQUE.moyen)
-      u.uOceanDeep.value.set(couleursFond.fond ?? RAMPE_NAUTIQUE.fond)
-    }
+      : budgetFond
     const mesh = new THREE.Mesh(geo, mat)
     mesh.name = 'crop-mer'
     mesh.frustumCulled = false // les vagues la déplacent, et elle est immense
@@ -3729,6 +3764,13 @@ export class Globe {
       unite,
       profMaxUnites: Math.max(profMaxM * echelle, 1e-6),
       profMaxM,
+      // ⚠️ **LA PROFONDEUR DU CROP, PAS CELLE DE LA CALOTTE — Tâche P5.** Le
+      // socle normalise sa rampe nautique sur l'amplitude de SON BLOC
+      // (`uSeaRange = −dem.minM`) ; `poserMer` prenait `profMaxM`, mesuré sur
+      // une calotte trois fois plus large. **3 510,49 m contre 2 116 m** à La
+      // Réunion, et la frange pâle en doublait de largeur. L'en-tête de
+      // `profondeurMaxDuCrop` porte les deux relevés.
+      profMaxCropM: profondeurMaxDuCrop(brut, cote, portee),
     }
   }
 
@@ -3899,8 +3941,25 @@ export class Globe {
    * `poserMer` codait `uSky` en dur (`#bcd8ea` contre `#85c2eb` vivant) et le
    * rideau d'eau n'avait aucun givre alors que le socle vit à **0,56**.
    *
-   * @param {{vue:number, surface:number, givre?:number, ciel?:object}|null} [reglages]
-   * @returns {{vue:number, surface:number, givre:number}|null} ce qui a été posé
+   * ⚠️ **ET DEPUIS LA TÂCHE P5, L'ÉTAT DE MER ET LE FOND MARIN PASSENT PAR ICI
+   * AUSSI**, pour exactement la même raison, et parce qu'ils changent SANS que
+   * la mer soit rebâtie : une palette, un fond de `SEABEDS`, un curseur du
+   * panneau « Sea ». Re-poser la mer à chaque fois coûterait un champ de 385².
+   * **Six réglages** (`etatMerDuSocle`, `monde/ecume-mer.js`) et **trois
+   * couleurs** (`couleursFondDuSocle`, `monde/mer-sphere.js`) — tous LUS sur les
+   * uniformes vivants du socle, aucun redérivé.
+   *
+   * ⚠️ **LES TROIS COULEURS DE FOND VIVENT SUR `this.uniforms`, PAS SUR LA
+   * MER** : elles peignent les TUILES (la rampe nautique du fragment), pas la
+   * lame d'eau. Elles restent malgré tout derrière la garde `this._mer` :
+   * `retirerMer` éteint `uMerRampeOn` et remet `RAMPE_NAUTIQUE`, donc sans mer
+   * ces trois-là ne peignent rien et ne doivent pas bouger.
+   *
+   * @param {{vue:number, surface:number, givre?:number, ciel?:object,
+   *   etat?:{houle:number,chop:number,ecume:number,ecumeEchelle:number,brillance:number,vitesse:number},
+   *   fond?:{peu:object,moyen:object,fond:object}}|null} [reglages]
+   * @returns {{vue:number, surface:number, givre:number, etat:object, fond:boolean}|null}
+   *   ce qui a été posé
    */
   majReglagesMer(reglages = null) {
     if (!this._mer) return null
@@ -3912,7 +3971,38 @@ export class Globe {
     const givre = Number.isFinite(reglages?.givre) ? reglages.givre : 0
     u.uMerGivre.value = givre
     if (reglages?.ciel?.isColor) u.uSky.value.copy(reglages.ciel)
-    return { vue: a.vue, surface: a.surface, givre }
+
+    // ══════ L'ÉTAT DE MER — Tâche P5, la réserve n° 1 de P4 ═════════════════
+    //
+    // ⚠️ **TOUT OU RIEN, ET LE TOUT EST SIX.** Un état incomplet — la houle du
+    // socle avec le chop du module — serait la mer de personne : c'est le
+    // raisonnement du demi-couple d'accalmies, appliqué à six. `etatMerDuSocle`
+    // rend déjà six nombres finis par construction, et sans socle à lire il rend
+    // `ETAT_MER_NEUTRE`, c'est-à-dire ce que `poserMer` posait.
+    const e = reglages?.etat
+    const etat = e && [e.houle, e.chop, e.ecume, e.ecumeEchelle, e.brillance, e.vitesse].every(Number.isFinite)
+      ? e
+      : ETAT_MER_NEUTRE
+    u.uMerHoule.value = etat.houle
+    u.uMerChop.value = etat.chop
+    u.uMerEcume.value = etat.ecume
+    u.uMerEcumeEchelle.value = etat.ecumeEchelle
+    u.uMerBrillance.value = etat.brillance
+    u.uMerVitesse.value = etat.vitesse
+
+    // ══════ LES TROIS COULEURS DU FOND — Tâche P5 ═══════════════════════════
+    //
+    // ⚠️ **`copy`, PAS `set`** : ce sont les objets `Color` VIVANTS du socle, et
+    // les recopier plutôt que les partager est délibéré. Partager l'objet
+    // ferait qu'un `retirerMer` remettant `RAMPE_NAUTIQUE` REPEINDRAIT le socle.
+    const f = reglages?.fond
+    const fond = !!(f?.peu?.isColor && f?.moyen?.isColor && f?.fond?.isColor)
+    if (fond) {
+      this.uniforms.uOceanShallow.value.copy(f.peu)
+      this.uniforms.uOceanMid.value.copy(f.moyen)
+      this.uniforms.uOceanDeep.value.copy(f.fond)
+    }
+    return { vue: a.vue, surface: a.surface, givre, etat, fond }
   }
 
   /** Retire la mer — le globe redevient une planète sans eau animée. */

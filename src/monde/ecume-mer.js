@@ -127,6 +127,73 @@ export function accalmieDuSocle(uniformes) {
   }
 }
 
+// ── ②bis L'ÉTAT DE MER — Tâche P5 ──────────────────────────────────────────
+//
+// ⛔ **LA RÉSERVE N° 1 DE LA TÂCHE P4, FERMÉE.** Elle l'avait relevé au même
+// instant dans la page vivante et n'avait pas refermé le trou : *« le socle vit
+// à `uChop = 1`, `uWaveH = 2`, `uFoam = 1,9`, `uFoamScale = 1` ; la calotte
+// prend les défauts de `poserMer` — `chop = 0,7`, `houle = 0,5`,
+// `ecumeEchelle = 0,35` — parce que `contexteCrop().mer` ne passe aucun des
+// cinq. Ce sont deux MERS différentes. »*
+//
+// ⚡ **ET IL Y EN AVAIT UN SIXIÈME, QUE P4 N'AVAIT PAS NOMMÉ** : la VITESSE.
+// `ocean.js` pose `uSpeedMul = (params.seaSpeed ?? 1) × 0,4` — relevé à **0,4**
+// — et `poserMer` codait `uMerVitesse: { value: 1 }` **en dur**. La houle du
+// crop défilait **2,5 fois trop vite**, ce qui ne se voit pas sur une capture au
+// repos et se voit tout de suite en mouvement.
+//
+// ⚠️ **ON LIT `uFoam` ET `uGloss`, ON NE LES RECALCULE PAS.** `poserMer`
+// transcrivait `chopLook` (`1,9 × chop²` et `240 − 130 × chop`) : avec le chop
+// du socle la transcription rend le même nombre, mais elle resterait une SECONDE
+// écriture d'une loi qui vit dans `ocean.js`, et le panneau « Effets » peut y
+// écrire autre chose (`ocean.js` repose `uFoam`/`uGloss` sur un changement de
+// look). On prend donc les uniformes vivants — le patron des deux accalmies.
+
+/**
+ * L'état de mer NEUTRE : ce que `poserMer` posait avant la Tâche P5.
+ *
+ * ⚠️ **CES SIX NOMBRES SONT LE DÉPÔT AU BIT PRÈS**, et c'est ce qui rend l'A/B à
+ * témoin nul possible (D13 §①) : sans mer de socle à lire — crop continental,
+ * banc, test — la calotte rend exactement l'image d'avant. `ecume` et
+ * `brillance` sont `chopLook(0,7)`, la transcription qui vivait dans `poserMer`.
+ */
+export const ETAT_MER_NEUTRE = Object.freeze({
+  houle: 0.5,
+  chop: 0.7,
+  ecume: 1.9 * 0.7 * 0.7,
+  ecumeEchelle: 0.35,
+  brillance: 240 - 130 * 0.7,
+  vitesse: 1,
+})
+
+/**
+ * L'état de mer VIVANT du socle, ou le neutre s'il n'y en a pas.
+ *
+ * ⚠️ **ELLE NE CALCULE RIEN** : elle LIT. Les écrivains restent `ocean.js`
+ * (`_applySea`, `setSeaLook`, `_refreshWaveScale`) et personne d'autre.
+ *
+ * ⚠️ **TOUT OU RIEN, CHAMP PAR CHAMP.** Un uniforme absent rend SA valeur
+ * neutre, pas celle du voisin : un socle qui n'exposerait que la moitié de son
+ * état de mer donnerait sinon une mer hybride, qui n'est celle de personne.
+ *
+ * @param {object|null} uniformes les uniformes du matériau de mer du socle
+ * @returns {{houle:number, chop:number, ecume:number, ecumeEchelle:number, brillance:number, vitesse:number}}
+ */
+export function etatMerDuSocle(uniformes) {
+  const lire = (nom, neutre) => {
+    const v = uniformes?.[nom]?.value
+    return Number.isFinite(v) ? v : neutre
+  }
+  return {
+    houle: lire('uWaveH', ETAT_MER_NEUTRE.houle),
+    chop: lire('uChop', ETAT_MER_NEUTRE.chop),
+    ecume: lire('uFoam', ETAT_MER_NEUTRE.ecume),
+    ecumeEchelle: lire('uFoamScale', ETAT_MER_NEUTRE.ecumeEchelle),
+    brillance: lire('uGloss', ETAT_MER_NEUTRE.brillance),
+    vitesse: lire('uSpeedMul', ETAT_MER_NEUTRE.vitesse),
+  }
+}
+
 // ── ③ LA TAVELURE ET LE BRUIT ──────────────────────────────────────────────
 
 /**

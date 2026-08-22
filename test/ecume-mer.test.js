@@ -326,8 +326,20 @@ test('③a aucune des formules d écume ne reparaît dans ocean.js ni dans globe
 test('③b les deux fichiers INJECTENT le texte partagé, ils ne le recopient pas', () => {
   const o = ocean()
   const g = globe()
-  assert.match(o, /import \{ GLSL_ECUME, FREQ_TAVELURE, accalmieDuSocle \} from '\.\/monde\/ecume-mer\.js'/)
-  assert.match(g, /import \{ GLSL_ECUME, FREQ_TAVELURE, BLANC_ECUME, ACCALMIE_NEUTRE \} from '\.\/monde\/ecume-mer\.js'/)
+  // ⚠️ **LA LISTE EXACTE N'EST PLUS EXIGÉE, LES NOMS LE SONT — Tâche P5.**
+  // Cette assertion cassait à chaque nom ajouté au module sans rien prouver de
+  // plus : ce qui compte est qu'il n'y ait qu'UNE importation, et qu'elle porte
+  // ce dont chaque fichier se sert.
+  const importOcean = o.match(/import \{([^}]*)\} from '\.\/monde\/ecume-mer\.js'/)
+  const importGlobe = g.match(/import \{([^}]*)\} from '\.\/monde\/ecume-mer\.js'/)
+  assert.ok(importOcean, "ocean.js doit importer monde/ecume-mer.js")
+  assert.ok(importGlobe, "globe.js doit importer monde/ecume-mer.js")
+  for (const nom of ['GLSL_ECUME', 'FREQ_TAVELURE', 'accalmieDuSocle', 'etatMerDuSocle']) {
+    assert.ok(importOcean[1].includes(nom), `ocean.js doit importer ${nom}`)
+  }
+  for (const nom of ['GLSL_ECUME', 'FREQ_TAVELURE', 'BLANC_ECUME', 'ACCALMIE_NEUTRE', 'ETAT_MER_NEUTRE']) {
+    assert.ok(importGlobe[1].includes(nom), `globe.js doit importer ${nom}`)
+  }
   // injecté dans les DEUX nuanceurs de chaque fichier
   // ⚠️ **TROIS, ET LE TROISIÈME EST LE VERTEX DE LA JUPE DU SOCLE** : il portait
   // lui aussi sa propre copie du déclin côtier (`max((uWaterY − f.r) * 2.0, f.g)`
@@ -389,10 +401,16 @@ test('④b `ocean.js` expose ses réglages vivants, GIVRE et CIEL compris', () =
 test('④c `main.js` pose les réglages à CHAQUE image, juste après `setView`', () => {
   const s = readFileSync(SRC_MAIN, 'utf8')
   const i = s.indexOf('realWater?.setView(')
-  const j = s.indexOf('globe?.majReglagesMer(realWater?.reglagesMer)')
+  const j = s.indexOf('globe?.majReglagesMer(')
   assert.ok(i > 0 && j > i, 'l appel doit suivre setView, seul écrivain des deux accalmies')
   // ⚠️ et il est GARDÉ par le drapeau : sans `terre unique`, rien n'est posé
-  assert.match(s.slice(i, j + 80), /if \(terreUniqueBranchee\) globe\?\.majReglagesMer/)
+  assert.match(s.slice(i, j + 200), /if \(terreUniqueBranchee\) \{\s+globe\?\.majReglagesMer\(/)
+  // ⚠️ **ET IL PORTE LES RÉGLAGES VIVANTS DES DEUX SOURCES — Tâche P5** : la mer
+  // du socle (`reglagesMer`, qui contient l'état de mer) ET les trois couleurs
+  // de fond, qui vivent sur `terrain.mapUniforms` et non sur `realWater`.
+  const appel = s.slice(j, j + 200)
+  assert.match(appel, /\.\.\.realWater\?\.reglagesMer/)
+  assert.match(appel, /fond: couleursFondDuSocle\(terrain\.mapUniforms\)/)
   // ⚠️ **ET IL N'Y EN A QU'UN** : deux sites poseraient deux valeurs d'une même
   // image, et c'est le genre d'écart qu'on met des soirées à lire.
   assert.equal((s.match(/majReglagesMer\(/g) || []).length, 1)

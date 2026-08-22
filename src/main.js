@@ -112,7 +112,9 @@ import { construireFenetre, majHauteurs, recadrerFenetre } from './monde/fenetre
 import { creerFlux, zoomEffectif, demanderEmprise, debitObserve, revisionFlux, remplirHauteurs, zoomPourEmprise } from './monde/flux-terrain.js'
 // LA MER DU CROP — Tâche J. ⚠️ **`empriseCalotte` ET `repereCrop` SONT PURS** :
 // ils ne tirent ni three.js ni le DOM, donc les importer ici n'ouvre aucun cycle.
-import { empriseCalotte, PORTEE_CROP } from './monde/mer-sphere.js'
+// ⚠️ **`couleursFondDuSocle` EST PURE ELLE AUSSI — Tâche P5** : elle LIT trois
+// uniformes et n'en écrit aucun. C'est `majReglagesMer` qui pose.
+import { empriseCalotte, PORTEE_CROP, couleursFondDuSocle } from './monde/mer-sphere.js'
 import { repereCrop } from './monde/crop-sphere.js'
 // `fractionSurTrace` : le pont d'indices qui remet la tête de course sous
 // l'objectif de la poursuite (voir son commentaire dans poursuite.js).
@@ -11923,7 +11925,30 @@ function tick() {
   // ⚠️ **SANS MER DE SOCLE, `accalmie` REND LE NEUTRE (1, 1)**, c'est-à-dire la
   // calotte d'avant cette tâche au bit près. Un crop continental ne s'en plaint
   // pas : il n'a pas de mer à calmer.
-  if (terreUniqueBranchee) globe?.majReglagesMer(realWater?.reglagesMer)
+  // ══════════ ET LE FOND MARIN AVEC — Tâche P5 ═══════════════════════════════
+  //
+  // ⛔ **LES TROIS COULEURS DE LA RAMPE NAUTIQUE NE VENAIENT DE NULLE PART.**
+  // `poserMer` portait un paramètre `couleursFond` que **personne n'a jamais
+  // passé** : la calotte gelait donc le défaut de `terrain.js` (`#dce8ec` /
+  // `#7fa8b8` / `#31576b`) pendant que le socle vit sur la palette ET sur le
+  // fond de `SEABEDS` choisi dans le panneau « Sea » — relevé le 2026-08-22 à
+  // `#c8f2e4` / `#62cfc1` / `#136e7d`. Même faute que la couleur des parois
+  // (manque n° 2 du noteur) et que `uSky` (P4).
+  //
+  // ⚠️ **ICI ET PAS DANS `contexteCrop`, ET C'EST UNE QUESTION DE FRAÎCHEUR** :
+  // une palette ou un fond de mer changent SANS déplacer le crop, donc sans
+  // rejouer `poserMer`. Passer par le contexte aurait laissé la mer sur
+  // l'ancienne palette jusqu'au prochain déplacement — c'est exactement ce que
+  // `rampe2D` a coûté à la Tâche P2. Par image, c'est trois `Color.copy`.
+  //
+  // ⚠️ **`terrain.mapUniforms` SE LIT SANS EN PRENDRE LA POIGNÉE** (même règle
+  // que `contexteCrop` : `test/damier-uniformes.test.js` ③ l'exige).
+  if (terreUniqueBranchee) {
+    globe?.majReglagesMer({
+      ...realWater?.reglagesMer,
+      fond: couleursFondDuSocle(terrain.mapUniforms),
+    })
+  }
   // PRÉCHAUFFAGE DES SHADERS — voir warmup.js et le rendez-vous en bas de tick.
   // Tant que les programmes ne sont pas compilés on fait tourner TOUTE la
   // logique de l'image (caméra, tweens, nuages, mer, dalles voisines) mais on

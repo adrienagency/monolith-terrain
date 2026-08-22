@@ -38,7 +38,7 @@ import { resChamp, spanChamp } from './mer-emprise.js'
 import { distanceRivage, GLSL_JUPE_MER } from './monde/mer-sphere.js'
 // L'ÉCUME — une seule loi, deux lecteurs (Tâche P4). Même motif, même absence
 // de cycle : `monde/ecume-mer.js` n'importe RIEN du tout.
-import { GLSL_ECUME, FREQ_TAVELURE, accalmieDuSocle } from './monde/ecume-mer.js'
+import { GLSL_ECUME, FREQ_TAVELURE, accalmieDuSocle, etatMerDuSocle } from './monde/ecume-mer.js'
 // L'emprise du DAMIER — même machinerie, autre cause : ici la mer s'étend parce
 // que des cases voisines sont posées, pas parce que le relief défile.
 import { empriseDeMer, coteGeometrique, geometrieDeMer } from './damier-carre.js'
@@ -1838,6 +1838,14 @@ export class RealWater {
       // socle vit à `#85c2eb`. Même faute que la couleur des parois du crop
       // (manque n° 2 du noteur), au même endroit du même objet.
       ciel: u?.uSky?.value ?? null,
+      // ⚠️ **ET L'ÉTAT DE MER — Tâche P5, la réserve n° 1 de P4.** Six nombres,
+      // LUS ici et recalculés nulle part. Relevé le 2026-08-22 dans la page
+      // vivante : le socle vit à `uWaveH = 2`, `uChop = 1`, `uFoam = 1,9`,
+      // `uFoamScale = 1`, `uGloss = 110`, `uSpeedMul = 0,4` ; la calotte vivait
+      // sur les défauts de `poserMer` — `0,5 / 0,7 / 0,931 / 0,35 / 149 / 1`.
+      // **Six sur six différents**, dont la VITESSE, que P4 n'avait pas nommée
+      // et qui faisait défiler la houle du crop 2,5 fois trop vite.
+      etat: etatMerDuSocle(u),
     }
   }
 

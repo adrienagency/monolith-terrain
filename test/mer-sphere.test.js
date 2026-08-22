@@ -59,10 +59,12 @@ import {
   RETRAIT_EAU_CROP,
   FRACTION_BANDE_BORD,
   bordDeMer,
+  couleursFondDuSocle,
+  profondeurMaxDuCrop,
 } from '../src/monde/mer-sphere.js'
 // ⚠️ **Tâche P4** : le fondu de rivage n'est plus écrit dans `globe.js`, il est
 // INJECTÉ depuis le module partagé — le test suit donc la valeur à sa source.
-import { FONDU_HOULE_FIN, GLSL_ECUME, accalmieDuSocle } from '../src/monde/ecume-mer.js'
+import { FONDU_HOULE_FIN, GLSL_ECUME, accalmieDuSocle, ETAT_MER_NEUTRE, etatMerDuSocle } from '../src/monde/ecume-mer.js'
 import { zoomPourEmprise } from '../src/monde/flux-terrain.js'
 // ⚠️ L'ALIAS QUE VITE POSE (`vite.config.js`), RÉSOLU SANS VITE — le patron de
 // `test/damier-mer-runtime.test.js` : la copie vendorée fait foi ici, et cinq
@@ -1284,7 +1286,14 @@ test('⑫a `majReglagesMer` pose les DEUX accalmies, le givre et le ciel', () =>
     assert.equal(u.uMerCalmeSurf.value, 0.08, 'la seconde accalmie doit être posée AUSSI')
     assert.equal(u.uMerGivre.value, 0.56, 'le givre du socle de verre doit être posé')
     assert.equal(cible.recu, ciel, 'le ciel doit être COPIÉ, pas remplacé')
-    assert.deepEqual(pose, { vue: 0.4039, surface: 0.08, givre: 0.56 })
+    assert.deepEqual(pose, {
+      vue: 0.4039, surface: 0.08, givre: 0.56,
+      // ⚠️ **SANS `etat`, LE NEUTRE — la mer d'avant P5 au bit près.** Le retour
+      // le DIT plutôt que de le taire : un appelant qui ne passe pas d'état de
+      // mer doit pouvoir lire dans le résultat qu'il a hérité du neutre.
+      etat: ETAT_MER_NEUTRE,
+      fond: false,
+    })
   })
 })
 
@@ -1430,9 +1439,39 @@ test('⑫j `reglagesMer` d `ocean.js` LIT vraiment ses trois réglages — exéc
       { uniforms: { uFrost: { value: 0.56 } } },
     ],
   }
-  assert.deepEqual(d.get.call(socle), { vue: 0.4039, surface: 0.08, givre: 0.56, ciel })
+  assert.deepEqual(d.get.call(socle), {
+    vue: 0.4039, surface: 0.08, givre: 0.56, ciel,
+    // ⚠️ **Tâche P5** : le faux socle ci-dessus ne porte AUCUN des six uniformes
+    // d'état de mer, donc l'accesseur doit rendre le neutre — champ par champ.
+    etat: ETAT_MER_NEUTRE,
+  })
   // sans mer construite : le NEUTRE, c'est-à-dire la calotte d'avant P4
-  assert.deepEqual(d.get.call({ materials: [] }), { vue: 1, surface: 1, givre: 0, ciel: null })
+  assert.deepEqual(d.get.call({ materials: [] }),
+    { vue: 1, surface: 1, givre: 0, ciel: null, etat: ETAT_MER_NEUTRE })
   // un givre non fini ne remonte pas
   assert.equal(d.get.call({ materials: [{ uniforms: { uFrost: { value: NaN } } }] }).givre, 0)
+  // ⛔ **ET L'ÉTAT DE MER REMONTE VRAIMENT — la réserve n° 1 de P4, exécutée.**
+  // Les six valeurs sont celles RELEVÉES le 2026-08-22 sur la page vivante.
+  const agite = {
+    materials: [
+      {
+        uniforms: {
+          uViewCalm: { value: 0.4039 }, uSurfCalm: { value: 0.08 },
+          uWaveH: { value: 2 }, uChop: { value: 1 }, uFoam: { value: 1.9 },
+          uFoamScale: { value: 1 }, uGloss: { value: 110 }, uSpeedMul: { value: 0.4 },
+        },
+      },
+    ],
+  }
+  assert.deepEqual(d.get.call(agite).etat,
+    { houle: 2, chop: 1, ecume: 1.9, ecumeEchelle: 1, brillance: 110, vitesse: 0.4 })
+  // ⚠️ **ET CHACUN DES SIX SÉPARÉMENT** : un accesseur qui n'en lirait que cinq
+  // rendrait une mer hybride, et un `deepEqual` global ne dirait pas lequel.
+  for (const [nom, champ, valeur] of [
+    ['uWaveH', 'houle', 2], ['uChop', 'chop', 1], ['uFoam', 'ecume', 1.9],
+    ['uFoamScale', 'ecumeEchelle', 1], ['uGloss', 'brillance', 110], ['uSpeedMul', 'vitesse', 0.4],
+  ]) {
+    const un = { materials: [{ uniforms: { [nom]: { value: valeur } } }] }
+    assert.equal(d.get.call(un).etat[champ], valeur, `${nom} n atteint pas ${champ}`)
+  }
 })
