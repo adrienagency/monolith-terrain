@@ -1346,6 +1346,9 @@ test('⑫a `majReglagesMer` pose les DEUX accalmies, le givre et le ciel', () =>
       eau: LAME_EAU_NEUTRE,
       couleurs: false,
       spectre: false,
+      // ⚠️ **Tâche P6** : sans échelle de spectre à lire, la calotte garde celle
+      // que `poserMer` a posée — et le retour le DIT.
+      echelleSpectre: false,
     })
   })
 })
@@ -1504,11 +1507,12 @@ test('⑫j `reglagesMer` d `ocean.js` LIT vraiment ses trois réglages — exéc
     couleurs: null,
     soleilCouleur: null,
     spectre: { a: null, b: null },
+    echelleSpectre: null,
   })
   // sans mer construite : le NEUTRE, c'est-à-dire la calotte d'avant P4
   assert.deepEqual(d.get.call({ materials: [] }), {
     vue: 1, surface: 1, givre: 0, ciel: null, etat: ETAT_MER_NEUTRE,
-    eau: LAME_EAU_NEUTRE, couleurs: null, soleilCouleur: null, spectre: null,
+    eau: LAME_EAU_NEUTRE, couleurs: null, soleilCouleur: null, spectre: null, echelleSpectre: null,
   })
   // un givre non fini ne remonte pas
   assert.equal(d.get.call({ materials: [{ uniforms: { uFrost: { value: NaN } } }] }).givre, 0)
@@ -1756,8 +1760,20 @@ test('⑬j la HOULE porte l accalmie de vue — l expression d `ocean.js`, pas u
   // … et uWaveH BRUT dans shoreSurf.
   assert.match(ocean, /shoreSurf\(uvF, uField, uTime, uWaveH, uChop, uSpeedMul, uLenScale, uViewCalm/)
   // la calotte fait le MÊME partage, avec ses propres noms
-  assert.match(src, /oceanGerstner\(vec2\(p\.x, p\.z\), uMerTemps, uMerHoule \* uMerCalmeVue, uMerChop, uMerVitesse, uMerLambda/)
-  assert.match(src, /shoreSurf\(uvF, uMerChamp, uMerTemps, uMerHoule, uMerChop, uMerVitesse, uMerLambda, richesseMer/)
+  // ⛔ **ET AVEC LA CONVERSION DE MONNAIE — Tâche P6, VU À L'ÉCRAN.**
+  // `uMerHoule` vaut ce que vaut `uWaveH`, c'est-à-dire des UNITÉS DE SOCLE ;
+  // `oceanGerstner` ajoute cette amplitude à un maillage en UNITÉS DE SCÈNE.
+  // Relevé le 2026-08-22 : `uMerUnite = 0,008227`, donc `uMerHoule = 2` valait
+  // **121,6 fois** l'amplitude du socle, et le déplacement HORIZONTAL — que
+  // l'écrêtage de déferlement ne borne pas — repliait le maillage sur lui-même.
+  // Même faute que la tavelure (P4) et que le budget du fond (P5) : une valeur
+  // juste, branchée dans la mauvaise unité.
+  assert.match(src, /oceanGerstner\(vec2\(p\.x, p\.z\), uMerTemps, uMerHoule \* uMerCalmeVue \* uMerUnite, uMerChop, uMerVitesse, uMerLambda/)
+  assert.match(src, /shoreSurf\(uvF, uMerChamp, uMerTemps, uMerHoule \* uMerUnite, uMerChop, uMerVitesse, uMerLambda, richesseMer/)
+  // ⚠️ **ET `uMerUnite` EST DÉCLARÉ DANS LE VERTEX, UNE SEULE FOIS** — deux
+  // déclarations ne compilent pas, et le banc ne le dirait qu'à l'écran.
+  const v0 = src.slice(src.indexOf('const MER_VERT'), src.indexOf('const MER_FRAG'))
+  assert.equal((v0.match(/uniform float uMerUnite;/g) || []).length, 1)
   // ⚠️ **ET L UNIFORME EST DÉCLARÉ DANS LE VERTEX**, sinon la compilation tombe.
   const vert = src.slice(src.indexOf('const MER_VERT'), src.indexOf('const MER_FRAG'))
   assert.match(vert, /uniform float uMerCalmeVue;/)
@@ -2022,4 +2038,42 @@ test('⑭i `construireParoisCrop` TRANSMET la fraction, et `contexteCrop` la cal
   assert.match(main, /corner: terrain\.mapUniforms\.uSlabCorner\?\.value \?\? 0/)
   assert.match(main, /expo: terrain\.mapUniforms\.uSlabCornerN\?\.value \?\? 2/)
   assert.ok(!/corner: params\.slabCorner/.test(main), 'la forme ne doit pas passer par params')
+})
+
+test('⑭j l ÉCHELLE DE SPECTRE arrive du socle, CONVERTIE par `uMerUnite` — réserve n° 3 de P5', () => {
+  return merPosee().then(({ g, u }) => {
+    // ⛔ **`ECHELLE_HOULE_UNITES = 0,42` ÉTAIT ÉCRIT EN DUR** pendant que le
+    // socle vit sur `LEN_SCALE × clamp(waveScale)`. P5 avait mesuré l'écart
+    // (« le spectre du crop est 1,818 fois plus étiré ») et ne l'avait pas
+    // fermé « parce que les deux vivent dans des systèmes d'unités différents ».
+    // **Le système de conversion existe : c'est `uMerUnite`.**
+    const avant = u.uMerLambda.value
+    const unite = u.uMerUnite.value
+    assert.ok(unite > 0, 'témoin : le champ doit rendre son unité')
+    const pose = Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, echelleSpectre: 0.231 })
+    assert.equal(pose.echelleSpectre, true)
+    assert.ok(Math.abs(u.uMerLambda.value - 0.231 * unite) < 1e-15, `${u.uMerLambda.value}`)
+    assert.notEqual(u.uMerLambda.value, avant, 'le témoin : la valeur du module n était PAS celle du socle')
+    // ⛔ sans échelle à lire — ou avec une échelle absurde — on garde celle du
+    // module : une longueur de houle nulle rendrait la mer étale sans un mot.
+    for (const mauvaise of [null, undefined, 0, -1, NaN]) {
+      u.uMerLambda.value = avant
+      const p = Globe.prototype.majReglagesMer.call(g, { vue: 1, surface: 1, echelleSpectre: mauvaise })
+      assert.equal(p.echelleSpectre, false, `${mauvaise} ne doit pas passer`)
+      assert.equal(u.uMerLambda.value, avant)
+    }
+  })
+})
+
+test('⑭k `ocean.js` REMONTE son échelle de spectre, en unités de SOCLE', async () => {
+  const { RealWater } = await import('../src/ocean.js')
+  const d = Object.getOwnPropertyDescriptor(RealWater.prototype, 'reglagesMer')
+  const socle = { materials: [{ uniforms: { uLenScale: { value: 0.231 } } }] }
+  assert.equal(d.get.call(socle).echelleSpectre, 0.231)
+  // ⚠️ **PAS DE CONVERSION CÔTÉ SOCLE** : `ocean.js` n'a pas à savoir ce qu'est
+  // un crop. La seule conversion vit dans `majReglagesMer`, avec `uMerUnite`.
+  const src = readFileSync(SRC_OCEAN, 'utf8')
+  assert.match(src, /echelleSpectre: Number\.isFinite\(u\?\.uLenScale\?\.value\) \? u\.uLenScale\.value : null,/)
+  assert.equal(d.get.call({ materials: [{ uniforms: {} }] }).echelleSpectre, null)
+  assert.equal(d.get.call({ materials: [{ uniforms: { uLenScale: { value: NaN } } }] }).echelleSpectre, null)
 })

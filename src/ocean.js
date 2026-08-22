@@ -1887,6 +1887,19 @@ export class RealWater {
       // du globe entre dans la même liste de lecteurs. Un seul écrivain,
       // `_applySea`, et plus deux mers tirées séparément au hasard.
       spectre: u ? { a: u.uWaveA?.value ?? null, b: u.uWaveB?.value ?? null } : null,
+      // ⛔ **L'ÉCHELLE DE LONGUEUR DE HOULE — la réserve n° 3 de P5, fermée.**
+      // Elle l'avait mesurée sans la refermer : *« le socle vit à
+      // `lenSea = LEN_SCALE × clamp(waveScale) = 0,231` pendant que le crop
+      // dérive la sienne de `ECHELLE_HOULE_UNITES = 0,42` EN DUR. Le spectre du
+      // crop est donc 1,818 fois plus étiré. »* Relevé le 2026-08-22 :
+      // `uLenScale = 0,231` contre un `uMerLambda` de 0,003220 pour un
+      // `uMerUnite` de 0,008227, soit **1,695 fois** — le rapport bouge avec
+      // `waveScale`, ce qui est précisément pourquoi il doit être LU et non posé.
+      //
+      // ⚠️ **EN UNITÉS DE SOCLE ICI** : la conversion en unités de scène se fait
+      // du côté du crop, qui est le seul à connaître `uMerUnite`. Une conversion
+      // faite ici demanderait à `ocean.js` de savoir ce qu'est un crop.
+      echelleSpectre: Number.isFinite(u?.uLenScale?.value) ? u.uLenScale.value : null,
     }
   }
 

@@ -282,9 +282,23 @@ void main() {
   // uViewCalm = 0,4039 releves le meme instant). ⚠️ Le NEUTRE de l accalmie vaut
   // 1 (ACCALMIE_NEUTRE), donc sans socle a lire ce facteur ne change rien.
   // (Aucun accent grave ni apostrophe dans ce bloc : template literal.)
-  vec3 disp = oceanGerstner(vec2(p.x, p.z), uMerTemps, uMerHoule * uMerCalmeVue, uMerChop, uMerVitesse, uMerLambda, fade, nAcc, crete);
+  // ⛔ ET L AMPLITUDE ETAIT DANS LA MAUVAISE MONNAIE — Tache P6, VU A L ECRAN.
+  // uMerHoule vaut ce que vaut uWaveH du socle, c est-a-dire des UNITES DE
+  // SOCLE ; oceanGerstner ajoute cette amplitude aux coordonnees du maillage,
+  // qui sont ici en UNITES DE SCENE. Releve le 2026-08-22 a La Reunion :
+  // uMerUnite = 0,008227, donc uMerHoule = 2 valait 121,6 FOIS l amplitude du
+  // socle. Le deplacement HORIZONTAL (disp.xz, que l ecretage de deferlement ne
+  // borne pas) atteignait plusieurs fois la largeur du bloc : le maillage se
+  // repliait sur lui-meme et la nappe rendait de grands rubans pales a bords en
+  // escalier. A/B a temoin nul dans la meme page, boucle coupee : uMerHoule mis
+  // a zero les fait DISPARAITRE, uMerHoule x uMerUnite aussi
+  // (.banc/P6/D2-CROP-mer-sans-houle.png et D4-CROP-mer-houle-convertie.png).
+  // C EST LA MEME FAUTE QUE LA TAVELURE DE P4 ET QUE LE BUDGET DE FOND DE P5 :
+  // une valeur juste, branchee dans la mauvaise unite. uMerLambda, lui, etait
+  // deja converti — l asymetrie est ce qui l a rendue invisible.
+  vec3 disp = oceanGerstner(vec2(p.x, p.z), uMerTemps, uMerHoule * uMerCalmeVue * uMerUnite, uMerChop, uMerVitesse, uMerLambda, fade, nAcc, crete);
   float creteS = 0.0;
-  vec3 surf = shoreSurf(uvF, uMerChamp, uMerTemps, uMerHoule, uMerChop, uMerVitesse, uMerLambda, richesseMer, creteS);
+  vec3 surf = shoreSurf(uvF, uMerChamp, uMerTemps, uMerHoule * uMerUnite, uMerChop, uMerVitesse, uMerLambda, richesseMer, creteS);
   disp.y += surf.x;
   nAcc.x += surf.y;
   nAcc.z += surf.z;
@@ -4185,7 +4199,25 @@ export class Globe {
       u.uWaveA.value = sp.a
       u.uWaveB.value = sp.b
     }
-    return { vue: a.vue, surface: a.surface, givre, etat, fond, eau, couleurs, spectre }
+
+    // ══════ L'ÉCHELLE DE LONGUEUR DE HOULE — Tâche P6, réserve n° 3 de P5 ═══
+    //
+    // ⛔ **`ECHELLE_HOULE_UNITES = 0,42` ÉTAIT ÉCRIT EN DUR** pendant que le
+    // socle vit sur `LEN_SCALE × clamp(waveScale)` — relevé à `0,231`. P5 avait
+    // mesuré l'écart (« le spectre du crop est 1,818 fois plus étiré ») et ne
+    // l'avait pas fermé « parce que les deux vivent dans des systèmes d'unités
+    // différents ». **Le système de conversion existe : c'est `uMerUnite`**, la
+    // même monnaie que la tavelure (P4) et que l'amplitude de houle.
+    //
+    // ⚠️ **CONVERTI ICI ET NULLE PART AILLEURS** : `ocean.js` remonte des unités
+    // de SOCLE, le crop est le seul à savoir ce que vaut une unité de socle chez
+    // lui. Sans échelle à lire, `poserMer` garde celle du module.
+    const es = reglages?.echelleSpectre
+    const unite = u.uMerUnite?.value
+    const echelleSpectre = Number.isFinite(es) && es > 0 && Number.isFinite(unite) && unite > 0
+    if (echelleSpectre) u.uMerLambda.value = es * unite
+
+    return { vue: a.vue, surface: a.surface, givre, etat, fond, eau, couleurs, spectre, echelleSpectre }
   }
 
   /** Retire la mer — le globe redevient une planète sans eau animée. */
