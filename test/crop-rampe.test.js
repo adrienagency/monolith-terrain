@@ -80,20 +80,47 @@ function expressionRampe(src) {
     .trim()
 }
 
+// ⚠️ **`hNorm` EST DÉSORMAIS UNE LIGNE À PART — Tâche P2, ET LE TEST LA SUIT.**
+// La branche TERRE de `float t` s'écrivait en toutes lettres ; la colorisation
+// naturelle a besoin de la MÊME amplitude locale quatre fois de plus (pivot,
+// limite des arbres, voile aérien), et l'écrire deux fois aurait donné deux
+// amplitudes à garder d'accord. La loi n'a pas bougé d'un bit — c'est pourquoi
+// on l'EXTRAIT ELLE AUSSI et qu'on l'exécute, au lieu de la supposer.
+function expressionHNorm(src) {
+  const i = src.indexOf('float hNorm = clamp(')
+  assert.ok(i >= 0, 'le nuanceur doit porter « float hNorm = clamp( »')
+  const j = src.indexOf(';', i)
+  return src
+    .slice(i + 'float hNorm = '.length, j)
+    .replace(/\/\/[^\n]*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function CLAMP(x, a, b) {
   return Math.min(Math.max(x, a), b)
 }
 
-/** Le TEXTE du nuanceur, rendu exécutable. */
-function loiDuNuanceur(src) {
-  const js = expressionRampe(src)
+const enJs = (glsl) =>
+  glsl
     .replace(/\bclamp\s*\(/g, 'CLAMP(')
     .replace(/\bmax\s*\(/g, 'Math.max(')
     .replace(/\bmin\s*\(/g, 'Math.min(')
-  const noms = [...new Set(js.match(/\bu[A-Z][A-Za-z0-9]*/g) || [])]
+
+/** Le TEXTE du nuanceur, rendu exécutable. */
+function loiDuNuanceur(src) {
+  const hn = enJs(expressionHNorm(src))
+  const js = enJs(expressionRampe(src))
+  const noms = [...new Set(`${hn} ${js}`.match(/\bu[A-Z][A-Za-z0-9]*/g) || [])]
   // eslint-disable-next-line no-new-func
-  const f = new Function('h', 'sousEau', 'u', 'CLAMP', `const {${noms.join(',')}} = u; return (${js});`)
-  return { js, noms, t: (h, sousEau, u) => f(h, sousEau, u, CLAMP) }
+  const f = new Function(
+    'h',
+    'sousEau',
+    'u',
+    'CLAMP',
+    `const {${noms.join(',')}} = u; const hNorm = (${hn}); return (${js});`
+  )
+  return { js, hNorm: hn, noms, t: (h, sousEau, u) => f(h, sousEau, u, CLAMP) }
 }
 
 /** Les uniformes de rampe que `poserRampe` posera, pour une échelle donnée. */
@@ -252,10 +279,23 @@ test("②c la rampe est calculée UNE SEULE FOIS, hors de toute branche", () => 
   // naître.
   const frag = globeSrc.slice(globeSrc.indexOf('const FRAG'))
   assert.equal((frag.match(/\bfloat t = /g) || []).length, 1)
-  assert.equal((frag.match(/texture2D\(uRamp/g) || []).length, 1)
-  // ... et l'expression ne consulte NI le crop NI la couverture
+  assert.equal((frag.match(/texture2D\(uRamp,/g) || []).length, 1)
+  // ⚠️ **LA TABLE DU SOCLE EST UNE SECONDE LECTURE, ET ELLE NE ROUVRE PAS LA
+  // COUTURE — Tâche P2.** `uRampCrop` EST le LUT 2D du bloc, lu une seule fois,
+  // sous une garde qui est un UNIFORME (`uRampCropOn`) : les uniformes sont
+  // posés par appel de dessin et valent la même chose pour TOUTES les tuiles de
+  // la planète. La loi bridée que ce test tue demanderait au contraire une garde
+  // par FRAGMENT — l'appartenance au crop —, et c'est exactement ce que
+  // l'assertion suivante interdit dans les deux expressions de rampe.
+  assert.equal((frag.match(/texture2D\(uRampCrop,/g) || []).length, 1)
+  // ... et NI L'UNE NI L'AUTRE ne consulte le crop ou la couverture
   const expr = expressionRampe(globeSrc)
   assert.ok(!/uCrop|couvertureCrop|qCrop|dedans/.test(expr), expr)
+  assert.ok(!/uCrop|couvertureCrop|qCrop|dedans/.test(expressionHNorm(globeSrc)), expressionHNorm(globeSrc))
+  const iRampT = frag.indexOf('float rampT = natRampT(')
+  assert.ok(iRampT > 0, 'le nuanceur doit dériver rampT de natRampT (module partagé)')
+  const exprRampT = frag.slice(iRampT, frag.indexOf(';', iRampT))
+  assert.ok(!/couvertureCrop|qCrop|dedans/.test(exprRampT), exprRampT)
 })
 
 /**

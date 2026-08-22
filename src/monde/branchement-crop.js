@@ -164,6 +164,37 @@ export const CHAMPS_HABILLAGE = Object.freeze([
   'contourWeight',
   'grainForceM',
   'grainEchelle',
+  // ══════ LA COLORISATION NATURELLE — Tâche P2 ═══════════════════════════════
+  //
+  // ⚠️ **`analyse` EST LE CHAMP LE PLUS EN RETARD DE TOUTE LA LISTE, ET C'EST
+  // POURQUOI IL DOIT Y ÊTRE.** Le masque de côte arrive du réseau ; l'analyse,
+  // elle, arrive d'un TRAVAILLEUR après une dizaine de flous sur le MNT entier —
+  // `terrain.js` mesure **464 ms** rien que pour La Réunion sur un retour de
+  // zoom. Elle ne peut donc pas être là quand le crop naît. Sans cette ligne, le
+  // peigné n'apparaîtrait qu'au prochain changement de LIEU : c'est la course
+  // que la Tâche K ter a nommée, aggravée d'un demi-seconde de retard garanti.
+  //
+  // ⚠️ **ET `rampe2D` CHANGE D'IDENTITÉ À CHAQUE PALETTE** : `rebuildRamp`
+  // DISPOSE l'ancienne texture et en fabrique une neuve. Absent d'ici, le globe
+  // aurait gardé un `THREE.Texture` disposé — une table morte, et le rendu qui
+  // va avec, jusqu'au prochain déplacement.
+  'analyse',
+  'rampe2D',
+  'texShade',
+  'wetK',
+  'expoK',
+  'hemi',
+  'treeLine',
+  'heightContrast',
+  'heightPivot',
+  'hazeAmt',
+  'hazeAlt',
+  'hazeDist',
+  // ⚠️ **UNE CHAÎNE, ET C'EST CE QUI LA REND SURVEILLABLE.** `uHazeColor` est un
+  // `THREE.Color` MUTÉ EN PLACE par le socle, comme `solOffset`/`solScale` : son
+  // identité ne bouge jamais. `contexteCrop` en transmet donc la valeur
+  // hexadécimale, qui, elle, se compare par `Object.is`.
+  'hazeColor',
 ])
 
 /**

@@ -18,6 +18,15 @@ import { facteursCoins } from './damier-bords.js' // module pur, aucune importat
 // possible : passer par `fenetre-bornee.js` fermerait le cycle terrain.js →
 // fenetre-bornee.js → terrain.js et jetterait un ReferenceError EN PRODUCTION.
 import { lireExageration } from './monde/exageration-continue.js'
+// ⚠️ **LA COLORISATION NATURELLE N'EST PLUS ÉCRITE ICI — Tâche P2.** Ses
+// formules vivaient dans le corps du fragment ci-dessous, hors d'atteinte du
+// nuanceur du globe : c'est LA raison pour laquelle le crop rendait « une rampe
+// lisse » là où le socle rend un relief peigné. Elles sont désormais dans un
+// module PUR (`monde/naturel-crop.js`, aucune importation) que les DEUX
+// nuanceurs INJECTENT. Ce n'est pas un rangement : c'est ce qui fait qu'il n'y a
+// **qu'une seule écriture** de la loi, et `test/crop-naturel.test.js` interdit
+// qu'une seule de ces formules réapparaisse ici.
+import { GLSL_NATUREL } from './monde/naturel-crop.js'
 // L'analyse de relief et le masque de mer ne sont plus calcules ici : ils
 // partent dans un Worker (terrain-jobs.js). ~470 ms de fil principal fige par
 // reconstruction, sur MNT 1536². Le calcul est identique octet pour octet.
@@ -880,6 +889,7 @@ float ombreLisiere(vec2 p) {
   return clamp((hNO - h) * 3.2, 0.0, 1.0);
 }
 #endif // SHIBU_CANOPEE
+${GLSL_NATUREL}
 // --- Appearance blend modes (Figma / W3C compositing set) — b = backdrop map,
 // s = the shader colour. Separable ops are channel-wise; the last four are the
 // non-separable HSL modes. ---
@@ -903,8 +913,7 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   if (m == 7) return min(vec3(1.0), b + s);                      // Plus lighter (linear dodge)
   if (m == 8) return min(vec3(1.0), b / max(1.0 - s, 1e-4));     // Colour dodge
   if (m == 9) return blHard(s, b);                               // Overlay (hard-light swapped)
-  if (m == 10) { vec3 d = mix(((16.0 * b - 12.0) * b + 4.0) * b, sqrt(b), step(vec3(0.25), b));
-    return mix(b - (1.0 - 2.0 * s) * b * (1.0 - b), b + (2.0 * s - 1.0) * (d - b), step(vec3(0.5), s)); } // Soft light
+  if (m == 10) return natSoftLight(b, s);                        // Soft light — voir naturel-crop.js
   if (m == 11) return blHard(b, s);                              // Hard light
   if (m == 12) return abs(b - s);                                // Difference
   if (m == 13) return b + s - 2.0 * b * s;                       // Exclusion
@@ -1047,11 +1056,15 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
   } else {
     // the pivot can never sink below sea level: with a low pivot the whole
     // coastal band rides the top of the ramp and land loses its low tints
+    // ⚠️ LA LOI EST DANS src/monde/naturel-crop.js, PAS ICI — Tâche P2. Le
+    // nuanceur du globe injecte le MÊME texte : deux écritures de ce pivot
+    // auraient donné deux rampes de terre à faire coïncider, ce qui est
+    // exactement le désaccord que le chantier « une seule Terre » ferme.
     float pivotFloor = uSeaY > -9000.0
-      ? clamp((uSeaY - uHeightRange.x) / max(uHeightRange.y - uHeightRange.x, 1e-4), 0.0, 0.95) + 0.02
+      ? natPlancherPivot((uSeaY - uHeightRange.x) / max(uHeightRange.y - uHeightRange.x, 1e-4))
       : 0.0;
     float pivot = max(uHeightPivot, pivotFloor);
-    float rampT = clamp(0.5 + (hNorm - pivot) * uHeightContrast, 0.0, 1.0);
+    float rampT = natRampT(hNorm, pivot, uHeightContrast);
     // --- SECOND AXE DU LUT : l'humidité. X reste l'altitude, Y devient
     // l'humidité topographique — deux points à la MÊME altitude, l'un au fond
     // d'un vallon, l'autre sur une croupe, cessent de recevoir la même couleur.
@@ -1067,67 +1080,33 @@ vec3 fxBlend(vec3 b, vec3 s, int m) {
       }
       // au-dessus de la limite des arbres il n'y a plus de végétation à
       // différencier : humidité et exposition s'éteignent, sinon les pierriers
-      // et les névés prendraient des verts de prairie
-      float veg = 1.0 - smoothstep(uTreeLine, uTreeLine + 0.18, hNorm);
-      float wet = (anl.b - 0.5) * 2.0;  // > 0 = creux qui collecte l'eau
-      float expo = (anl.a - 0.5) * 2.0; // > 0 = versant tourné au nord
-      // uHemi : au NORD de l'équateur l'ubac (face nord) est la face à l'ombre,
-      // donc la fraîche et l'humide. Au sud tout s'inverse.
-      // GAIN 1.62, et ce n'est pas une constante de confort. Les canaux B et A
-      // sortent d'encodeTextureShade, dont le soft-clip place le 95e centile à
-      // 0.808 — soit 0.616 une fois ramené en ±1. Le facteur 0.5 qui se trouvait
-      // ici rabotait encore de moitié : au réglage 1 on ne balayait que 31 % du
-      // LUT. Mesuré sur une carte réelle, la couleur ne bougeait alors que de
-      // 3 unités de RVB sur 255 — les tirettes semblaient mortes. 1/0.616 fait
-      // qu'au réglage 1 une anomalie au 95e centile atteint le bord de la rampe.
-      // ×3 SUR DEMANDE D'ADRIEN, par-dessus la compensation de 1.62 : à 1.62 le
-      // réglage 1 amenait tout juste le 95e centile au bord du LUT, ce qui est
-      // « juste » au sens statistique mais trop sage à l'écran. 4.86 fait mordre
-      // les tirettes dès le milieu de leur course ; les extrêmes saturent, et
-      // c'est assumé — un fond de vallon doit être franchement plus vert.
-      wetY = clamp(0.5 + 4.86 * veg * (wet * uWetK + expo * uHemi * uExpoK), 0.0, 1.0);
+      // et les névés prendraient des verts de prairie. uHemi : au NORD de
+      // l'équateur l'ubac (face nord) est la face à l'ombre, donc la fraîche et
+      // l'humide ; au sud tout s'inverse.
+      // ⚠️ LE GAIN 4,86 ET SA JUSTIFICATION SONT DANS naturel-crop.js
+      // (GAIN_HUMIDITE) — Tâche P2. Ils y sont écrits UNE fois, et le nuanceur du
+      // globe lit le même nombre par le même texte.
+      wetY = natHumiditeY(anl.b, anl.a, hNorm, uWetK, uExpoK, uHemi, uTreeLine);
     }
     mapCol = texture2D(uRampTex, vec2(rampT, wetY)).rgb;
     if (uColorMode == 1) {
+      // ⚠️ LE PEIGNÉ ET L'OMBRAGE VIVENT DANS naturel-crop.js (natPeigne) —
+      // Tâche P2, et c'est CE bloc-là qu'Adrien voyait manquer sur la sphère :
+      // « plus aucune texture sur la terre ». Le SOFT LIGHT et le ×3 sur le
+      // contraste y sont justifiés ; le globe injecte la même fonction.
       if (uAnalysisOn > 0.5 && uTexShade > 0.001) {
-        // SOFT LIGHT, jamais une multiplication : multiplier (ou mixer vers le
-        // blanc) tire la couleur vers le gris et DÉSATURE — on gagne du modelé
-        // et on perd la palette. Le soft light du W3C éclaircit/assombrit en
-        // gardant la chroma. fxBlend(b, s, 10) EST ce soft light, déjà défini
-        // plus haut pour les shaders de surface : on le réutilise tel quel.
-        // ×3 sur le PEIGNÉ, lui aussi (demande d'Adrien). On ne peut pas monter
-        // le mix au-delà de 1 : on écarte donc le signal de son neutre AVANT le
-        // soft light. C'est le contraste du peigné qui triple, pas son dosage —
-        // la palette reste intacte, seule l'amplitude du modelé change.
-        float comb = clamp(0.5 + (anl.r - 0.5) * 3.0, 0.0, 1.0);
-        mapCol = mix(mapCol, fxBlend(mapCol, vec3(comb), 10), uTexShade);
-        // l'ombrage classique par-dessus, au tiers : au dézoom les bandes fines
-        // du peigné tombent sous la taille du pixel et se moyennent en gris,
-        // c'est lui qui garde alors le massif lisible
-        float hs = clamp(0.5 + (anl.g - 0.5) * 3.0, 0.0, 1.0);
-        mapCol = mix(mapCol, fxBlend(mapCol, vec3(hs), 10), uTexShade * 0.35);
+        mapCol = natPeigne(mapCol, anl.r, anl.g, uTexShade);
       }
       // --- PERSPECTIVE AÉRIENNE (Imhof) — entièrement en fragment, zéro tap.
+      // La loi (deux composantes, désaturation puis virage, et le rehaussement
+      // indissociable) est dans naturel-crop.js : natVoile + natBrume.
       if (uHazeAmt > 0.001) {
-        // 1. DISTANCE : le lointain se voile.
+        // ⚠️ fd EST EN DEMI-CÔTÉS DE BLOC, et c'est la grandeur que le globe
+        // nomme length(qCrop) : l'en-tête de habillage-crop.js démontre
+        // x = 28 · u avec uSlabHalf = 28. Même nombre, deux chemins.
         float fd = clamp(length(vWorldPos.xz - uBlockOffset) / max(uSlabHalf, 1e-3), 0.0, 1.0);
-        // 2. ALTITUDE (Hoehenmodulation) : les basses terres se voilent MÊME
-        // proches. C'est cette composante-là, pas la distance, qui donne le
-        // bleu-gris des plaines sur les planches de référence — l'air épais du
-        // fond de vallée est devant elles quelle que soit la distance.
-        float fa = 1.0 - smoothstep(0.0, max(uHazeAlt, 1e-3), hNorm);
-        float veil = clamp(uHazeAmt * (0.6 * fa + uHazeDist * fd), 0.0, 0.9);
-        // DÉSATURER D'ABORD, virer vers la brume ensuite : l'air diffuse la
-        // lumière, il ne repeint pas le sol en bleu. Un mix direct vers
-        // uHazeColor donne une carte teintée, pas une carte lointaine.
-        float lum = dot(mapCol, vec3(0.2126, 0.7152, 0.0722));
-        mapCol = mix(mapCol, vec3(lum), veil * 0.65);
-        mapCol = mix(mapCol, uHazeColor, veil);
-        // CONTREPARTIE INDISSOCIABLE : sans elle le voile aplatit toute la
-        // carte. On remonte le contraste là où le voile est nul — donc sur les
-        // sommets, qui reprennent le mordant que les plaines viennent de perdre.
-        float lift = (1.0 - veil) * uHazeAmt * 0.35;
-        mapCol = clamp((mapCol - 0.5) * (1.0 + lift) + 0.5, 0.0, 1.0);
+        float veil = natVoile(hNorm, fd, uHazeAmt, uHazeAlt, uHazeDist);
+        mapCol = natBrume(mapCol, natLuminance(mapCol), veil, uHazeColor, uHazeAmt);
       }
     } else {
       mapCol = mix(mapCol, vec3(0.42, 0.31, 0.21), smoothstep(0.3, 0.8, slope) * uSlopeTint);

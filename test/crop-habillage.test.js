@@ -132,9 +132,21 @@ test('① le compte de samplers du nuanceur du globe reste sous le plafond de 16
   // rampe lit pour savoir qu'elle peint une mer et non un pré. Le compte reste
   // très en dessous du plafond, mais il est ÉCRIT — un sampler ajouté sans que
   // ce chiffre bouge, c'est un chiffre qui ne garde plus rien.
+  // ⚠️ **HUIT DEPUIS LA TÂCHE P2** : `uAnalysis` porte le peigné des crêtes
+  // (`terrain-analysis.js`) et `uRampCrop` EST le LUT 2D du socle
+  // (`terrain.mapUniforms.uRampTex`) — c'est par ce second lien que `rampDry`,
+  // `rampWet` et `rampOklab` atteignent la sphère sans une seule couleur
+  // recalculée. Le chiffre est REFAIT, pas cru : le commentaire de `globe.js`
+  // qui l'annonce est vérifié juste en dessous.
   const n = (FRAG.match(/uniform\s+sampler2D\s+\w+\s*;/g) || []).length
   assert.ok(n <= 16, `le nuanceur du globe déclare ${n} samplers`)
-  assert.equal(n, 6, `le compte attendu est 6 (uTex, uRamp, uCoastMask, uSol, uSolLut, uFondChamp), pas ${n}`)
+  assert.equal(n, 8, `le compte attendu est 8 (uTex, uRamp, uCoastMask, uSol, uSolLut, uFondChamp, uAnalysis, uRampCrop), pas ${n}`)
+  // ⚠️ **ET LE COMMENTAIRE QUI ANNONCE LE COMPTE DOIT DIRE LE MÊME NOMBRE.** Le
+  // brief de la Tâche P2 le demandait nommément (« `globe.js:714` compte les
+  // samplers — vérifie où en est ce compte avant d'ajouter ») : un pavé qui
+  // annonce six pendant que le nuanceur en déclare huit est précisément le genre
+  // de prose que le tour de mutation de la Tâche K ter a trouvée verte à tort.
+  assert.match(GLOBE_SRC, /uAnalysis et uRampCrop font HUIT/)
 })
 
 // ══════════ ② LES DEUX FAMILLES D'UV NE SE CONFONDENT PAS ══════════════════
@@ -541,6 +553,7 @@ test('⑧ le décodage de classe garde les trois précautions du socle', () => {
 
 import { Globe } from '../src/globe.js'
 import { HABILLAGE_MONDE } from '../src/monde/habillage-crop.js'
+import { NATUREL_MONDE } from '../src/monde/naturel-crop.js'
 
 // ══════════ ⑨ poserHabillage / retirerHabillage, EXERCÉES ══════════════════
 //
@@ -550,6 +563,11 @@ import { HABILLAGE_MONDE } from '../src/monde/habillage-crop.js'
 
 const val = (v) => ({ value: v })
 const vec2 = (x, y) => ({ x, y, set(a, b) { this.x = a; this.y = b } })
+// ⚠️ **UNE COULEUR SE MUTE, ELLE NE SE REMPLACE PAS** — c'est le contrat de
+// `THREE.Color` que `poserHabillage` emploie (`u.uHazeColor.value.set(...)`), et
+// c'est aussi ce qui rend la couleur de brume INSURVEILLABLE par identité : le
+// contexte en transmet donc la valeur hexadécimale (voir `CHAMPS_HABILLAGE`).
+const couleurStub = (hex) => ({ hex, set(v) { this.hex = v } })
 
 /** Un globe minimal : rien que les uniformes et le repère du crop. */
 function globeStub(crop = REPERE) {
@@ -572,6 +590,27 @@ function globeStub(crop = REPERE) {
       uContourWeight: val(HABILLAGE_MONDE.contourPoids),
       uGrainForceM: val(HABILLAGE_MONDE.grainForceM),
       uGrainEchelle: val(HABILLAGE_MONDE.grainEchelle),
+      // ══════ LA COLORISATION NATURELLE — Tâche P2 ═══════════════════════════
+      //
+      // ⚠️ **LE STUB PORTE LES SEIZE UNIFORMES DE L'HABILLAGE PLUS LES QUATORZE
+      // DE LA COLORISATION**, et il les part aux MÊMES valeurs que le
+      // constructeur : c'est ce qui rend ⑨h (l'aller-retour bit à bit) capable de
+      // voir un uniforme que `retirerHabillage` oublierait de rendre.
+      uAnalysis: val(null),
+      uAnalysisOn: val(0),
+      uTexShade: val(NATUREL_MONDE.texShade),
+      uWetK: val(NATUREL_MONDE.wetK),
+      uExpoK: val(NATUREL_MONDE.expoK),
+      uHemi: val(NATUREL_MONDE.hemi),
+      uTreeLine: val(NATUREL_MONDE.treeLine),
+      uRampCrop: val(null),
+      uRampCropOn: val(0),
+      uHeightContrast: val(NATUREL_MONDE.heightContrast),
+      uHeightPivot: val(NATUREL_MONDE.heightPivot),
+      uHazeAmt: val(NATUREL_MONDE.hazeAmt),
+      uHazeAlt: val(NATUREL_MONDE.hazeAlt),
+      uHazeDist: val(NATUREL_MONDE.hazeDist),
+      uHazeColor: val(couleurStub(NATUREL_MONDE.hazeColor)),
     },
   }
 }

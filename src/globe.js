@@ -89,6 +89,13 @@ import { loiTextureMonde, GRAIN_PAR_PIXEL, METRES_PAR_DEGRE } from './monde/loi-
 // `crop-sphere.js`, pur) : il ne rend que des nombres, et c'est ce fichier-ci
 // qui décide QUAND les lire. Son en-tête porte les mesures qui le fondent.
 import { altitudeMaillage, altitudeSonde, echantillonnerFond, cleFond } from './monde/fond-crop.js'
+// ══════════ LA COLORISATION NATURELLE — Tâche P2 ═══════════════════════════
+//
+// ⚠️ **CE N'EST PAS UNE COPIE DU SOCLE, C'EST LE MÊME TEXTE.** `terrain.js`
+// injecte `GLSL_NATUREL` dans SON fragment et ce fichier dans LE SIEN : il n'y a
+// qu'une seule écriture du peigné, de l'humidité, du pivot et du voile aérien.
+// `test/crop-naturel.test.js` interdit qu'une de ces formules soit réécrite ici.
+import { GLSL_NATUREL, NATUREL_MONDE } from './monde/naturel-crop.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -718,6 +725,53 @@ uniform float uFondOn;
 uniform float uFondPortee;     // en demi-cotes de crop — la demi-largeur du champ
 uniform float uFondMetres;     // metres par unite locale : l'inverse de l'echelle
 
+// ══════ LA COLORISATION NATURELLE DU SOCLE — Tache P2 ══════════════════════
+//
+// > Adrien, 2026-08-22 : « Plus aucune texture sur la terre. » · « Je voudrais
+// > qu'on arrive a retrouver la texture comme elle etait avant de faire la
+// > modification vers la sphere. Pour l'instant le detail est trop basique. »
+//
+// ⚠️ CE QUI MANQUAIT N'ETAIT PAS UN REGLAGE, C'ETAIT LE FIL. La Tache C avait
+// porte l'EMBALLAGE de l'habillage (courbes, grain, cote, occupation du sol) et
+// mesure qu'il ne deplace que 1,01 % des pixels ; son bilan nommait ce qui
+// restait : « ce qui fait la richesse de l'image du socle, c'est le TEXTURE
+// SHADING et la rampe locale ». Or terrain-analysis.js n'a AUCUNE importation :
+// la texture d'analyse EXISTE deja, cuite pour le bloc, et personne ne la
+// passait au globe. contexteCrop la transmet desormais, comme uCoastMask et
+// uSol — meme patron, meme loi d'UV, demontree en tete de habillage-crop.js.
+//
+// ⚠️ SEPTIEME ET HUITIEME SAMPLERS, ET LE COMPTE EST REFAIT. Le bloc du masque
+// de cote comptait CINQ liens (uTex, uRamp, uCoastMask, uSol, uSolLut) ; le fond
+// du crop a fait SIX. uAnalysis et uRampCrop font HUIT, pour un plafond de
+// seize. Le raisonnement de ce bloc-la (ShaderMaterial NU : ni materiau de
+// surface, ni environnement, ni carte d'ombre) tient tel quel, et
+// test/crop-naturel.test.js COMPTE les sampler2D de ce fragment plutot que de
+// croire ce commentaire.
+//
+// R = peigne des cretes (0,5 = plat)   G = ombrage classique
+// B = humidite topographique           A = exposition (1 = plein nord)
+uniform sampler2D uAnalysis;
+uniform float uAnalysisOn;
+uniform float uTexShade;   // intensite du peigne
+uniform float uWetK;       // poids de l'humidite sur l'axe Y du LUT
+uniform float uExpoK;      // poids de l'exposition (adret / ubac)
+uniform float uHemi;       // +1 hemisphere nord, -1 sud : l'ubac change de cote
+uniform float uTreeLine;   // en hNorm : au-dessus, plus de vegetation
+// ⚠️ LA TABLE DU SOCLE, PAS UNE SECONDE TABLE. uRamp (512 x 1) est la rampe du
+// globe ; uRampCrop est LE MEME OBJET THREE que terrain.mapUniforms.uRampTex,
+// c'est-a-dire le LUT 2D du socle (X = altitude, Y = humidite), cuit par
+// buildRamp2D avec rampDry / rampWet / rampOklab. En rebatir un jumeau ici
+// aurait redonne deux tables a garder d'accord — et c'est par ce lien que
+// rampDry, rampWet et rampOklab arrivent sur la sphere SANS un seul uniforme.
+uniform sampler2D uRampCrop;
+uniform float uRampCropOn;
+uniform float uHeightContrast; // le contraste de rampe du socle
+uniform float uHeightPivot;    // son pivot, en hNorm
+uniform float uHazeAmt;        // perspective aerienne (Imhof) — force globale
+uniform float uHazeAlt;
+uniform float uHazeDist;
+uniform vec3 uHazeColor;
+
 float decodeMeters(vec2 uv) {
   vec3 t = texture2D(uTex, uv).rgb * 255.0;
   return t.r * 256.0 + t.g + t.b / 256.0 - 32768.0;
@@ -766,6 +820,12 @@ vec3 blClip(vec3 c) { float l = blLum(c); float mn = min(min(c.r, c.g), c.b); fl
   if (mx > 1.0) c = l + (c - l) * (1.0 - l) / (mx - l + 1e-5);
   return clamp(c, 0.0, 1.0); }
 vec3 blSetLum(vec3 c, float l) { return blClip(c + (l - blLum(c))); }
+
+// ⚠️ INJECTE, PAS RECOPIE — Tache P2. Ce meme texte entre dans le fragment de
+// terrain.js. C'est la seule ecriture du peigne, de l'humidite, du pivot et du
+// voile aerien ; les recopier ici aurait fait exactement les « deux ecritures
+// jumelles » dont terrain.js porte la cicatrice.
+${GLSL_NATUREL}
 
 // solEn / lavisSol — terrain.js. ⚠️ uSol NE TRANSPORTE PAS UNE IMAGE : chaque
 // octet EST un code de classe ESA WorldCover (10 arbres, 30 prairie, 80 eau).
@@ -1002,10 +1062,107 @@ void main() {
   // vaut 5600, max(6000, 0) vaut 6000, et h - 0.0 vaut h. La production est
   // intouchee au bit pres, et test/crop-rampe.test.js le prouve par un Object.is
   // sur 2 001 hauteurs.
+  // ⚠️ hNorm EST NOMME, PAS DUPLIQUE — Tache P2. Il etait deja calcule, en
+  // toutes lettres, dans la branche TERRE de float t ; la colorisation naturelle
+  // en a besoin quatre fois de plus (pivot, limite des arbres, voile aerien).
+  // L'ecrire une seconde fois plus bas aurait donne deux amplitudes locales a
+  // garder d'accord. La branche terre le REUTILISE : 0.35 + 0.65 * hNorm est
+  // l'expression du depot au bit pres, et test/crop-rampe.test.js l'evalue.
+  float hNorm = clamp((h - uLandBas) / max(uLandMax - uLandBas, uPlancherRampeM), 0.0, 1.0);
   float t = sousEau
     ? 0.35 * (1.0 - clamp(-h / max(uOceanDepth, uPlancherRampeM), 0.0, 1.0))
-    : 0.35 + 0.65 * clamp((h - uLandBas) / max(uLandMax - uLandBas, uPlancherRampeM), 0.0, 1.0);
+    : 0.35 + 0.65 * hNorm;
   vec3 col = texture2D(uRamp, vec2(t, 0.5)).rgb;
+
+  // ══════ LA TERRE PREND LA TABLE ET LA LOI DE RAMPE DU SOCLE — Tache P2 ═════
+  //
+  // ⚠️ CE N'EST PAS UNE SECONDE PALETTE : uRampCrop EST l'objet uRampTex du
+  // socle. La table 2D porte deja rampDry, rampWet et l'interpolation Oklab du
+  // mode Naturel — trois reglages qui arrivent donc sur la sphere sans un seul
+  // uniforme de plus, et sans qu'aucune couleur ne soit recalculee ici.
+  //
+  // ⚠️ ET LES DEUX CURSEURS QUE rampe-crop.js NE LISAIT PAS SONT ICI :
+  // uHeightContrast et uHeightPivot. Le gabarit d'ouverture pose 1,5 et 0,6 ;
+  // « realistic » pose 5,1 et 0,53. Aux defauts (1 et 0,5) natRampT rend hNorm
+  // AU BIT PRES, donc uRampCropOn a 0 n'est pas la seule garde : la loi elle-meme
+  // est neutre. Le pivot ne peut jamais descendre sous le niveau de la mer, qui
+  // sur le globe est h = 0, donc hNorm = (0 - uLandBas) / amplitude.
+  //
+  // ⚠️ LES ALENTOURS SUIVENT, exactement comme uLandBas / uLandMax (decision 4
+  // d'Adrien) : ces uniformes vivent dans this.uniforms, que _materialFor etale
+  // dans chaque materiau de tuile. Hors du crop l'analyse rend son neutre (voir
+  // plus bas), donc la ligne mediane du LUT, donc la rampe historique.
+  // ⛔ ET hNorm N'EST PAS LE MEME DES DEUX COTES — MESURE, PAS SUPPOSE.
+  //
+  // Le socle normalise sur uHeightRange, qui est l'amplitude COMPLETE de son
+  // MNT, FOND MARIN COMPRIS (dem.minM / dem.maxM). Releve dans l'application
+  // vivante, La Reunion z12 : uHeightRange couvre -2 116 a 2 626 m, donc le
+  // NIVEAU DE LA MER y tombe a hNorm = 0,4466 — pas a zero. Le hNorm de la
+  // Tache D, lui, part de uLandBas (le minimum de la TERRE), donc la mer y est a
+  // zero : c'est le bon choix pour float t, ou la mer a son propre segment
+  // [0 ; 0,35], et le MAUVAIS pour uHeightPivot et uTreeLine, qui sont des
+  // reglages d'utilisateur exprimes dans l'echelle du socle.
+  //
+  // ⛔ CE QUE CA DONNAIT, CHIFFRE : avec pivot 0,65 et contraste 2,5 (les valeurs
+  // vivantes), natRampT rendait ZERO pour TOUT ce qui est sous 1 163 m — un aplat
+  // olive sur toute l'ile — la ou le socle etale deja 0 a 0,78 sur la meme
+  // tranche. La limite des arbres tombait a 2 378 m au lieu de 2 247 m.
+  //
+  // ➡️ LA CONVERSION EST EXACTE, ET ELLE NE DEMANDE AUCUNE MESURE NEUVE : le
+  // minimum du relief du crop EST -uOceanDepth (rampe-crop.js : profondeur =
+  // -min(0, minM)) et son maximum uLandMax. Releve le meme jour : -2 106,8 et
+  // 2 584,4 contre -2 116 et 2 626 cote socle, soit un ecart de 0,0029 sur le
+  // hNorm du niveau de la mer. C'est la MEME grandeur, mesuree par deux
+  // balayages de finesse differente.
+  float hNormRelief = clamp((h + uOceanDepth) / max(uLandMax + uOceanDepth, uPlancherRampeM), 0.0, 1.0);
+
+  vec4 anl = vec4(0.5);
+  if (uAnalysisOn > 0.5) {
+    // ⛔ LA BORNE N'EST PAS DECORATIVE, ET C'EST LE MEME PIEGE QUE uFondChamp.
+    // La texture d'analyse est cuite pour le CROP ; en ClampToEdge, sa derniere
+    // ligne se prolongerait sur toute la planete estompee et peignerait les
+    // Andes avec le peigne de La Reunion, sans qu'aucune erreur ne soit levee.
+    // On fond donc vers le NEUTRE (0,5) hors du crop, ce qui est exactement
+    // « pas d'analyse ici » — et sans branche dependante de la donnee, dont les
+    // derivees de mipmap seraient indefinies.
+    float dansCrop = step(max(abs(qCrop.x), abs(qCrop.y)), 1.0);
+    anl = mix(vec4(0.5), texture2D(uAnalysis, qCrop * 0.5 + 0.5), dansCrop);
+  }
+  if (uRampCropOn > 0.5 && !sousEau) {
+    // ⚠️ hNormRelief PARTOUT DANS CE BLOC, ET JAMAIS hNorm : uHeightPivot,
+    // uTreeLine et uHazeAlt sont des reglages POSES PAR L'UTILISATEUR dans
+    // l'echelle du socle, et l'echelle du socle porte le fond marin. Voir la
+    // demonstration chiffree juste au-dessus.
+    float pivot = max(uHeightPivot, natPlancherPivot(uOceanDepth / max(uLandMax + uOceanDepth, uPlancherRampeM)));
+    float rampT = natRampT(hNormRelief, pivot, uHeightContrast);
+    float wetY = natHumiditeY(anl.b, anl.a, hNormRelief, uWetK, uExpoK, uHemi, uTreeLine);
+    col = texture2D(uRampCrop, vec2(rampT, wetY)).rgb;
+  }
+
+  // ══════ LE PEIGNE DES CRETES — LA DEMANDE D'ADRIEN, ET RIEN D'AUTRE ════════
+  //
+  // « Plus aucune texture sur la terre. » C'est CE bloc qui manquait. Le socle le
+  // pose depuis terrain.js ; il vit desormais dans naturel-crop.js et les deux
+  // nuanceurs l'appellent. uTexShade vaut 1 dans le gabarit d'ouverture.
+  //
+  // ⚠️ TERRE SEULE, comme dans le socle : la branche sous-marine de terrain.js
+  // ne voit jamais ce bloc. Le poser sur le fond marin peignerait des cretes
+  // dans une bathymetrie qui n'en porte pas.
+  if (uAnalysisOn > 0.5 && uTexShade > 0.001 && !sousEau) {
+    col = natPeigne(col, anl.r, anl.g, uTexShade);
+  }
+
+  // ══════ LA PERSPECTIVE AERIENNE (Imhof) — Tache P2 ═════════════════════════
+  //
+  // ⚠️ fd EST length(qCrop), ET C'EST LA MEME GRANDEUR QUE CELLE DU SOCLE, PAS
+  // UNE APPROXIMATION : terrain.js divise par uSlabHalf = 28 une distance en
+  // unites de scene, et l'en-tete de habillage-crop.js DEMONTRE x = 28 * u. Le
+  // quotient est donc qCrop, terme a terme.
+  if (uRampCropOn > 0.5 && uHazeAmt > 0.001 && !sousEau) {
+    float fd = clamp(length(qCrop), 0.0, 1.0);
+    float veil = natVoile(hNormRelief, fd, uHazeAmt, uHazeAlt, uHazeDist);
+    col = natBrume(col, natLuminance(col), veil, uHazeColor, uHazeAmt);
+  }
 
   // ══════ LE FOND MARIN PREND LA RAMPE NAUTIQUE DU SOCLE ════════════════════
   //
@@ -1781,6 +1938,39 @@ export class Globe {
       uFondOn: { value: 0 },
       uFondPortee: { value: PORTEE_CROP },
       uFondMetres: { value: 1 },
+
+      // LA COLORISATION NATURELLE — Tâche P2.
+      //
+      // ⚠️ **`uAnalysisOn: 0` ET `uRampCropOn: 0` : sans `poserHabillage`, RIEN
+      // NE CHANGE** — même garde et même raison que `uCropOn`, `uHabOn`,
+      // `uMerRampeOn` et `uFondOn`. Le nuanceur est PARTAGÉ par toutes les
+      // tuiles de la planète, y compris celles qui ne verront jamais de crop.
+      //
+      // ⚠️ **ET LES CURSEURS LISENT `NATUREL_MONDE`, ILS NE RECOPIENT PAS SES
+      // NOMBRES.** C'est la discipline de `HABILLAGE_MONDE` et de `RAMPE_MONDE` :
+      // une seule écriture, lue par le constructeur ET par `retirerHabillage`.
+      // Deux littéraux jumeaux avaient déjà divergé en silence une fois sur ce
+      // chantier (`uContourInterval`, réparé par la Tâche C au tour 1).
+      //
+      // ⚠️ **`heightContrast: 1` ET `heightPivot: 0,5` NE SONT PAS UN GOÛT** :
+      // `natRampT(hNorm, 0.5, 1.0)` rend `hNorm` **au bit près**, donc la loi
+      // elle-même est neutre au repos — la garde `uRampCropOn` n'est pas le seul
+      // filet, et `test/crop-naturel.test.js` le prouve sur un balayage.
+      uAnalysis: { value: null },
+      uAnalysisOn: { value: 0 },
+      uTexShade: { value: NATUREL_MONDE.texShade },
+      uWetK: { value: NATUREL_MONDE.wetK },
+      uExpoK: { value: NATUREL_MONDE.expoK },
+      uHemi: { value: NATUREL_MONDE.hemi },
+      uTreeLine: { value: NATUREL_MONDE.treeLine },
+      uRampCrop: { value: null },
+      uRampCropOn: { value: 0 },
+      uHeightContrast: { value: NATUREL_MONDE.heightContrast },
+      uHeightPivot: { value: NATUREL_MONDE.heightPivot },
+      uHazeAmt: { value: NATUREL_MONDE.hazeAmt },
+      uHazeAlt: { value: NATUREL_MONDE.hazeAlt },
+      uHazeDist: { value: NATUREL_MONDE.hazeDist },
+      uHazeColor: { value: new THREE.Color(NATUREL_MONDE.hazeColor) },
     }
     // ⚠️ **LE FOND VIT À CÔTÉ DES UNIFORMES, PAS DEDANS** : c'est un
     // `Float32Array` de 148 225 valeurs (593 Kio) que le CPU lit — `posAt` et
@@ -2223,6 +2413,40 @@ export class Globe {
    * @param {number} arg.contourWeight
    * @param {number} arg.grainForceM - amplitude du grain, en MÈTRES de relief
    * @param {number} arg.grainEchelle
+   *
+   * ══════════ LA COLORISATION NATURELLE — Tâche P2 ═══════════════════════════
+   *
+   * ⚠️ **ELLE ENTRE PAR L'HABILLAGE, ET PAS PAR `poserRampe` — C'EST UNE
+   * DÉCISION.** `poserRampe` REFUSE quand la couverture du crop est incomplète
+   * (`refus: 'couverture'`), et un refus « ne touche pas à ce qui est en place ».
+   * L'analyse, elle, n'est jamais mesurée : c'est une texture déjà cuite par le
+   * socle. La faire dépendre d'une mesure l'aurait rendue absente exactement
+   * quand la Tâche K ter a montré qu'elle manque — pendant la course de
+   * chargement. Et l'habillage est le SEUL maillon que la veille rafraîchit par
+   * image dès qu'un champ change (`CHAMPS_HABILLAGE`), ce dont l'analyse a
+   * besoin : elle arrive du travailleur, longtemps après la naissance du crop.
+   *
+   * @param {THREE.Texture|null} arg.analyse - `terrain.mapUniforms.uAnalysis`,
+   *   la RGBA de `terrain-analysis.js` (R peigné, G ombrage, B humidité,
+   *   A exposition). `null` = pas d'analyse, l'uniforme s'éteint.
+   * @param {THREE.Texture|null} arg.rampe2D - `terrain.mapUniforms.uRampTex`,
+   *   le LUT 2D du socle. ⚠️ **C'EST LE MÊME OBJET, PAS UNE COPIE** : c'est par
+   *   lui que `rampDry`, `rampWet` et `rampOklab` arrivent sur la sphère.
+   * @param {number} arg.texShade
+   * @param {number} arg.wetK
+   * @param {number} arg.expoK
+   * @param {number} arg.hemi
+   * @param {number} arg.treeLine
+   * @param {number} arg.heightContrast
+   * @param {number} arg.heightPivot
+   * @param {number} arg.hazeAmt
+   * @param {number} arg.hazeAlt
+   * @param {number} arg.hazeDist
+   * @param {string|number|null} arg.hazeColor - ⚠️ **UNE VALEUR, PAS L'OBJET
+   *   `THREE.Color` DU SOCLE.** Le socle le MUTE en place (`.set(...)`), donc son
+   *   identité ne bouge jamais : partagé, il aurait fait de `this.uniforms` un
+   *   porteur de poignée sur l'état du bloc, et `habillageDifferent` n'aurait
+   *   jamais vu la couleur changer.
    */
   poserHabillage({
     coastMask = null,
@@ -2238,6 +2462,19 @@ export class Globe {
     contourWeight = 0.7,
     grainForceM = 0,
     grainEchelle = 96,
+    analyse = null,
+    rampe2D = null,
+    texShade = NATUREL_MONDE.texShade,
+    wetK = NATUREL_MONDE.wetK,
+    expoK = NATUREL_MONDE.expoK,
+    hemi = NATUREL_MONDE.hemi,
+    treeLine = NATUREL_MONDE.treeLine,
+    heightContrast = NATUREL_MONDE.heightContrast,
+    heightPivot = NATUREL_MONDE.heightPivot,
+    hazeAmt = NATUREL_MONDE.hazeAmt,
+    hazeAlt = NATUREL_MONDE.hazeAlt,
+    hazeDist = NATUREL_MONDE.hazeDist,
+    hazeColor = null,
   } = {}) {
     const u = this.uniforms
     u.uHabOn.value = 1
@@ -2271,6 +2508,32 @@ export class Globe {
 
     u.uGrainForceM.value = grainForceM
     u.uGrainEchelle.value = grainEchelle
+
+    // ══════ LA COLORISATION NATURELLE — Tâche P2 ═════════════════════════════
+    //
+    // ⚠️ **DEUX INTERRUPTEURS ET NON UN, PARCE QUE LES DEUX ARRIVENT SÉPARÉMENT
+    // ET QUE LEUR ABSENCE NE VEUT PAS LA MÊME CHOSE.** Le LUT 2D existe TOUJOURS
+    // (le socle le cuit dès la première palette, en Classique comme en Naturel :
+    // en Classique il est constant en Y et sa ligne médiane EST la rampe
+    // historique) ; l'analyse, elle, n'existe qu'en mode Naturel et seulement une
+    // fois le travailleur revenu. Un seul interrupteur aurait donc éteint le
+    // pivot et le contraste de rampe — qui, eux, valent dans les DEUX modes —
+    // pendant toute l'attente de l'analyse.
+    u.uAnalysis.value = analyse
+    u.uAnalysisOn.value = analyse ? 1 : 0
+    u.uTexShade.value = texShade
+    u.uWetK.value = wetK
+    u.uExpoK.value = expoK
+    u.uHemi.value = hemi
+    u.uTreeLine.value = treeLine
+    u.uRampCrop.value = rampe2D
+    u.uRampCropOn.value = rampe2D ? 1 : 0
+    u.uHeightContrast.value = heightContrast
+    u.uHeightPivot.value = heightPivot
+    u.uHazeAmt.value = hazeAmt
+    u.uHazeAlt.value = hazeAlt
+    u.uHazeDist.value = hazeDist
+    if (hazeColor != null) u.uHazeColor.value.set(hazeColor)
     return u
   }
 
@@ -2308,6 +2571,36 @@ export class Globe {
     u.uContourWeight.value = HABILLAGE_MONDE.contourPoids
     u.uGrainForceM.value = HABILLAGE_MONDE.grainForceM
     u.uGrainEchelle.value = HABILLAGE_MONDE.grainEchelle
+    // ══════ LA COLORISATION NATURELLE — Tâche P2 ═════════════════════════════
+    //
+    // ⚠️ **LES DEUX TEXTURES SONT LÂCHÉES, PAS SEULEMENT DÉBRANCHÉES** — même
+    // raison que le masque de côte deux lignes plus haut : gardées dans un
+    // uniforme PARTAGÉ, l'analyse et le LUT du crop précédent restaient
+    // joignables par le ramasse-miettes, et l'analyse d'un MNT 1536² pèse 12 Mo
+    // mipmaps comprises (`terrain.js`, `_analysisMax`).
+    //
+    // ⚠️ **ET LES CURSEURS SONT RENDUS AUSSI, ALORS QU'ILS SONT DÉJÀ GARDÉS.**
+    // Ce n'est pas du code mort : `uHeightContrast` et `uHeightPivot` entrent
+    // dans `natRampT` **sous la seule garde `uRampCropOn`**, et l'aller-retour
+    // bit-à-bit que `test/crop-habillage.test.js` (⑨) exige des seize uniformes
+    // de l'habillage porte sur les VALEURS, pas sur leur effet — un uniforme
+    // resté au réglage d'un crop mort est un état qui traîne, et ce fichier en a
+    // déjà payé un (`uContourInterval`, la planète entière à 250 m).
+    u.uAnalysis.value = null
+    u.uAnalysisOn.value = 0
+    u.uTexShade.value = NATUREL_MONDE.texShade
+    u.uWetK.value = NATUREL_MONDE.wetK
+    u.uExpoK.value = NATUREL_MONDE.expoK
+    u.uHemi.value = NATUREL_MONDE.hemi
+    u.uTreeLine.value = NATUREL_MONDE.treeLine
+    u.uRampCrop.value = null
+    u.uRampCropOn.value = 0
+    u.uHeightContrast.value = NATUREL_MONDE.heightContrast
+    u.uHeightPivot.value = NATUREL_MONDE.heightPivot
+    u.uHazeAmt.value = NATUREL_MONDE.hazeAmt
+    u.uHazeAlt.value = NATUREL_MONDE.hazeAlt
+    u.uHazeDist.value = NATUREL_MONDE.hazeDist
+    u.uHazeColor.value.set(NATUREL_MONDE.hazeColor)
   }
 
   // ═══════════ LA RAMPE — Tâche D, « calculée sur le crop, suivie par les

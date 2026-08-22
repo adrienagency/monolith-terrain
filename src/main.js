@@ -4869,6 +4869,28 @@ function contexteCrop() {
   // et le plus simple est de ne pas prendre la poignée du tout.
   const cote = terrain.mapUniforms.uCoastMaskOn.value > 0.5 ? terrain.mapUniforms.uCoastMask.value : null
   const sol = terrain.mapUniforms.uSolOn.value > 0.5 ? terrain.mapUniforms.uSol.value : null
+  // ══════════ LA COLORISATION NATURELLE — Tâche P2 ═══════════════════════════
+  //
+  // ⛔ **LE TROU QUI FAISAIT DIRE À ADRIEN « PLUS AUCUNE TEXTURE SUR LA TERRE ».**
+  // Ce contexte ne transmettait AUCUNE texture d'analyse. Or `terrain-analysis.js`
+  // en cuit une, empaquetée en RGBA (R peigné, G ombrage, B humidité,
+  // A exposition), et le gabarit d'ouverture (`shibustart.json`) la demande à
+  // fond : `colorMode: "natural"`, `texShade: 1`, `wetK: 0,96`. **Elle existait,
+  // elle était payée, et personne ne la passait au globe.**
+  //
+  // ⚠️ **MÊME PATRON QUE `cote` ET `sol` JUSTE AU-DESSUS, ET CE N'EST PAS UN
+  // STYLE** : l'interrupteur du socle décide, la texture suit. `uAnalysisOn` vaut
+  // déjà 0 hors du mode Naturel (`terrain.js`, `setColorMode`) et tant que le
+  // travailleur n'a pas rendu son champ — le lire ici, c'est hériter des deux
+  // gardes sans en écrire une troisième.
+  const analyse = terrain.mapUniforms.uAnalysisOn.value > 0.5 ? terrain.mapUniforms.uAnalysis.value : null
+  // ⚠️ **LE LUT 2D PASSE TOUJOURS, MODE NATUREL OU PAS.** En Classique
+  // `rebuildRamp` le cuit constant en Y, et sa ligne médiane EST la rampe
+  // historique (`terrain.js` : « aucune palette du catalogue n'a besoin d'être
+  // ré-éditée ») ; ce qui compte alors, ce sont `heightContrast` et
+  // `heightPivot`, qui valent dans les DEUX modes et que le gabarit « realistic »
+  // pousse à 5,1. Le conditionner au mode Naturel les aurait laissés morts.
+  const rampe2D = terrain.mapUniforms.uRampTex.value || null
   // l'amplitude du relief du crop : elle CALE l'intervalle des courbes de niveau
   // (le globe posait 500 m en dur, ce qui ne trace qu'une courbe à l'île Maurice)
   const f = terrain.fenetreBornee
@@ -4891,6 +4913,40 @@ function contexteCrop() {
       amplitudeM: amplitudeM > 0 ? amplitudeM : null,
       contourOpacity: terrain.mapUniforms.uContourOpacity.value,
       contourWeight: terrain.mapUniforms.uContourWeight.value,
+      // ══════ LA COLORISATION NATURELLE — Tâche P2 ═════════════════════════
+      //
+      // ⚠️ **LES SEPT SOUS-RÉGLAGES D'ATLAS PASSENT ICI, ET LES DEUX CURSEURS DE
+      // RAMPE AVEC EUX.** L'inventaire les comptait morts : `texShade`, `wetK`,
+      // `expoK`, `treeLine`, `hazeAmt` **ne traversaient pas** ; `rampDry`,
+      // `rampWet` et `rampOklab` non plus. Les cinq premiers sont des uniformes ;
+      // les trois derniers arrivent **cuits dans `rampe2D`**, ce qui est
+      // précisément pourquoi on partage la table du socle au lieu d'en rebâtir
+      // une. `heightContrast` et `heightPivot` ferment les deux derniers.
+      //
+      // ⚠️ **ON LIT LES UNIFORMES DU SOCLE, PAS `params`.** `applyColorParams`
+      // est la seule écriture de ces valeurs, et elle porte deux règles que
+      // `params` ne porte pas : les défauts (`?? 0`, `?? 0.62`) et surtout
+      // `uHemi`, que le socle dérive de la LATITUDE du MNT et non d'un réglage.
+      // Passer par `params` aurait fait diverger le globe du bloc le jour où
+      // l'une de ces règles change — le défaut que la Tâche K ter a payé.
+      analyse,
+      rampe2D,
+      texShade: terrain.mapUniforms.uTexShade.value,
+      wetK: terrain.mapUniforms.uWetK.value,
+      expoK: terrain.mapUniforms.uExpoK.value,
+      hemi: terrain.mapUniforms.uHemi.value,
+      treeLine: terrain.mapUniforms.uTreeLine.value,
+      heightContrast: terrain.mapUniforms.uHeightContrast.value,
+      heightPivot: terrain.mapUniforms.uHeightPivot.value,
+      hazeAmt: terrain.mapUniforms.uHazeAmt.value,
+      hazeAlt: terrain.mapUniforms.uHazeAlt.value,
+      hazeDist: terrain.mapUniforms.uHazeDist.value,
+      // ⚠️ **UNE VALEUR, PAS L'OBJET.** `uHazeColor` est un `THREE.Color` que le
+      // socle MUTE en place : partagé, son identité ne bougerait jamais et
+      // `habillageDifferent` ne verrait pas la couleur changer — exactement la
+      // remarque que `CHAMPS_HABILLAGE` porte déjà pour `solOffset`/`solScale`,
+      // sauf qu'ici la parade est possible (une chaîne se compare).
+      hazeColor: `#${terrain.mapUniforms.uHazeColor.value.getHexString()}`,
     },
     mer: {
       altitudeM: altitudeCadrageM(),
