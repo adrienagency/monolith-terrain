@@ -46,19 +46,29 @@ const SRC_FLAGS = fs.readFileSync(path.join(RACINE, 'src/flags.js'), 'utf8')
 // ══════════ LE GLOBE FACTICE — IL REFUSE, IL NE FAIT PAS SEMBLANT ═══════════
 //
 // Il porte exactement ce que la chaîne lit et écrit, et **il se comporte comme
-// le vrai sur le seul point qui compte pour l'ordre** : les quatre maillons qui
+// le vrai sur le seul point qui compte pour l'ordre** : les cinq maillons qui
 // suivent la découpe rendent `null` ou un refus tant que `_crop` est nul, comme
-// `construireParoisCrop`, `poserRampe` et `poserMer` le font en tête de corps.
+// `poserFondCrop`, `construireParoisCrop`, `poserRampe` et `poserMer` le font en
+// tête de corps.
 function globeFactice({ refuse = {} } = {}) {
   const j = []
   const g = {
     _crop: null,
     journal: j,
-    refuse: { parois: false, rampe: false, mer: false, ...refuse },
+    refuse: { fond: false, parois: false, rampe: false, mer: false, ...refuse },
     poserCrop(a) {
       j.push({ quoi: 'crop', centre: a?.centre, zoom: a?.zoom, tuilesParBloc: a?.tuilesParBloc })
       g._crop = { cx: 0.5, cy: 0.35, demi: a.tuilesParBloc / 2 / 2 ** a.zoom, zoom: a.zoom }
       return g._crop
+    },
+    // LE FOND DU CROP — Tâche J bis. ⚠️ **IL REFUSE SANS CROP, comme le vrai** :
+    // `poserFondCrop` sort à sa première ligne quand `_crop` est nul.
+    poserFondCrop(a) {
+      j.push({ quoi: 'fond', arg: a })
+      if (!g._crop) return { refus: 'crop', couverture: 0, bathy: false }
+      return g.refuse.fond
+        ? { refus: 'champ', couverture: 0.3, bathy: false }
+        : { refus: null, couverture: 1, bathy: true, profMaxM: 2116.3, rebati: 50 }
     },
     construireParoisCrop(a) {
       j.push({ quoi: 'parois', arg: a })
@@ -96,6 +106,7 @@ function contexteFactice(centre = { lat: 45.9, lon: 6.87 }, zoom = 12) {
     zoom,
     tuilesParBloc: 3,
     habillage: { coastMask: 'masque', amplitudeM: 2400 },
+    fond: { portee: 3, couvertureMin: 0.99 },
     mer: { altitudeM: 12_000, fovDeg: 33, hauteurPx: 900 },
   })
 }
@@ -109,19 +120,19 @@ function estompageFactice() {
 
 // ══════════ ① LA CHAÎNE ENTIÈRE, APPELÉE — ET DANS UN ORDRE QUI TIENT ═══════
 
-test('① `poserChaineCrop` appelle les CINQ maillons, la découpe en premier', async () => {
+test('① `poserChaineCrop` appelle les SIX maillons, la découpe en premier', async () => {
   const g = globeFactice()
   const r = poserChaineCrop({ globe: g, ...contexteFactice()() })
-  assert.deepEqual(quoi(g), ['crop', 'parois', 'habillage', 'rampe', 'mer'],
-    'les cinq maillons doivent être appelés, et la découpe AVANT les quatre autres')
+  assert.deepEqual(quoi(g), ['crop', 'fond', 'parois', 'habillage', 'rampe', 'mer'],
+    'les six maillons doivent être appelés, et la découpe AVANT les cinq autres')
   // ⚠️ et le comportement le prouve : aucun des quatre suivants n'a refusé
   assert.deepEqual(r.refus, [], 'un maillon appelé avant la découpe aurait refusé')
-  assert.ok(g.journal[2].avecCrop, 'l’habillage doit trouver le crop posé — il en tire `uMargeCoteM`')
+  assert.ok(g.journal[3].avecCrop, 'l’habillage doit trouver le crop posé — il en tire `uMargeCoteM`')
   await r.mer
 })
 
 test('① bis la liste des maillons est celle que le globe expose', () => {
-  assert.deepEqual(MAILLONS, ['crop', 'parois', 'habillage', 'rampe', 'mer'])
+  assert.deepEqual(MAILLONS, ['crop', 'fond', 'parois', 'habillage', 'rampe', 'mer'])
 })
 
 test('① ter les bornes du crop sont CELLES DU CONTEXTE, pas des constantes locales', () => {
@@ -140,10 +151,14 @@ test('① quater ce que chaque maillon reçoit vient du contexte, pas d’un dé
   const g = globeFactice()
   const ctx = contexteFactice()()
   poserChaineCrop({ globe: g, ...ctx })
-  assert.equal(g.journal[2].arg.coastMask, 'masque', 'l’habillage doit recevoir le masque de côte du socle')
-  assert.equal(g.journal[2].arg.amplitudeM, 2400)
-  assert.equal(g.journal[4].arg.fovDeg, 33, 'la mer doit recevoir le fov VIVANT, pas le défaut du module')
-  assert.equal(g.journal[4].arg.altitudeM, 12_000)
+  assert.equal(g.journal[3].arg.coastMask, 'masque', 'l’habillage doit recevoir le masque de côte du socle')
+  assert.equal(g.journal[3].arg.amplitudeM, 2400)
+  assert.equal(g.journal[5].arg.fovDeg, 33, 'la mer doit recevoir le fov VIVANT, pas le défaut du module')
+  assert.equal(g.journal[5].arg.altitudeM, 12_000)
+  // ⚠️ **LE FOND ET LA MER DOIVENT LIRE LA MÊME PORTÉE — Tâche J bis.** Deux
+  // portées qui divergent rouvriraient exactement le désaccord que cette tâche
+  // ferme : la mer s'arrêterait où le fond ne va pas, ou l'inverse.
+  assert.equal(g.journal[1].arg.portee, 3, 'le fond doit recevoir la portée du contexte')
 })
 
 test('① quinquies un refus est RENDU, jamais avalé', () => {
@@ -187,11 +202,11 @@ test('② de l’orbite au sol : rien au-dessus du seuil, la chaîne entière en
   assert.deepEqual(quoi(g), [], 'de z4 à z10 on regarde la planète : rien ne doit être posé')
 
   assert.equal(veille.maj(ALT_ARRIVEE_M[11]), true, 'le crop doit naître à z11')
-  assert.deepEqual(quoi(g), ['crop', 'parois', 'habillage', 'rampe', 'mer'])
+  assert.deepEqual(quoi(g), ['crop', 'fond', 'parois', 'habillage', 'rampe', 'mer'])
 
   // et il ne se repose pas à chaque palier plus fin
   for (const z of [12, 13, 14, 15]) assert.equal(veille.maj(ALT_ARRIVEE_M[z]), true)
-  assert.deepEqual(quoi(g), ['crop', 'parois', 'habillage', 'rampe', 'mer'],
+  assert.deepEqual(quoi(g), ['crop', 'fond', 'parois', 'habillage', 'rampe', 'mer'],
     'la chaîne ne doit pas être rejouée tant que le lieu ne bouge pas')
   assert.equal(veille.bascules, 1)
   await veille.enVol()
@@ -231,7 +246,7 @@ test('② quater mille images stables : la chaîne est posée UNE fois, et plus 
   const g = globeFactice()
   const veille = creerVeilleCrop({ globe: g, contexte: contexteFactice() })
   for (let i = 0; i < 1000; i++) veille.maj(2_200) // le Mont-Blanc du vol de référence
-  assert.deepEqual(quoi(g), ['crop', 'parois', 'habillage', 'rampe', 'mer'])
+  assert.deepEqual(quoi(g), ['crop', 'fond', 'parois', 'habillage', 'rampe', 'mer'])
   await veille.enVol()
 })
 
@@ -414,6 +429,88 @@ test('⑥ un maillon qui REFUSE est repris plus tard, et la découpe n’est pas
   await veille.enVol()
 })
 
+test('⑥ ter QUAND LE FOND FINIT PAR PRENDRE, SES LECTEURS SONT REJOUÉS — Tâche J bis', async () => {
+  // ⚠️ **CE TEST N'EXISTE QUE PARCE QU'ON A REGARDÉ, ET C'EST UN CHIFFRE.** La
+  // nappe bathymétrique est ASYNCHRONE : au premier passage le fond REFUSE
+  // pendant que `parois` et `rampe` PRENNENT, sur une surface encore plate.
+  // `reprendre` ne rejoue que ce qui a refusé — donc, quand le fond prenait
+  // enfin, la rampe gardait la profondeur de la surface d'avant. Relevé dans
+  // l'application, La Réunion z12 : **`uOceanDepth = 130,36 m`** avec un fond de
+  // **2 116 m** sous les pieds.
+  const g = globeFactice({ refuse: { fond: true } })
+  const veille = creerVeilleCrop({ globe: g, contexte: contexteFactice(), periodeReprise: 2 })
+  veille.maj(2_000)
+  assert.deepEqual(veille.refus, ['fond'], 'le fond refuse seul : les autres ont pris')
+  const paroisAvant = g.journal.filter((e) => e.quoi === 'parois').length
+  const rampeAvant = g.journal.filter((e) => e.quoi === 'rampe').length
+
+  // la nappe atterrit : la reprise suivante pose le fond, ET rejoue ses lecteurs
+  g.refuse.fond = false
+  veille.maj(2_000); veille.maj(2_000)
+  assert.deepEqual(veille.refus, [])
+  assert.equal(g.journal.filter((e) => e.quoi === 'parois').length, paroisAvant + 1,
+    'les parois se posent sur `hauteurSurface` : sans rejeu, leur base reste au niveau de la mer')
+  assert.equal(g.journal.filter((e) => e.quoi === 'rampe').length, rampeAvant + 1,
+    'la rampe mesure la profondeur : sans rejeu, elle garde celle d’une surface qui n’existe plus')
+  assert.equal(g.journal.filter((e) => e.quoi === 'habillage').length, 1,
+    'l’habillage ne lit AUCUNE hauteur — le rejouer serait du travail pour rien')
+
+  // et un fond INCHANGÉ ne rejoue rien : `rebati` vaut alors zéro
+  await veille.enVol()
+})
+
+test('⑥ ter bis un fond qui PREND sans RIEN changer ne rejoue pas ses lecteurs', async () => {
+  // ⚠️ **CE TEST A ÉTÉ RÉÉCRIT PARCE QU'IL NE PROUVAIT RIEN.** Sa première
+  // version faisait prendre le fond DÈS LA POSE : `refus` ne contenait donc
+  // jamais `'fond'`, la reprise ne rappelait jamais le maillon, et une mutation
+  // qui rendait `neuf: true` à chaque fois survivait tranquillement. Il faut que
+  // le fond REFUSE d'abord, PUIS prenne sans rien rebâtir.
+  //
+  // ⚠️ L'enjeu : `poserFondCrop` est rappelé à chaque reprise ; s'il se disait
+  // `neuf` à chaque fois, le contour des parois (plus de mille points) et le
+  // balayage de la rampe (`pas²`) repartiraient toutes les deux images.
+  const g = globeFactice({ refuse: { fond: true, mer: true } })
+  const veille = creerVeilleCrop({ globe: g, contexte: contexteFactice(), periodeReprise: 2 })
+  veille.maj(2_000)
+  await veille.enVol()
+  assert.ok(veille.refus.includes('fond'), 'le fond doit AVOIR refusé, sinon la reprise ne le rappelle pas')
+  const paroisAvant = g.journal.filter((e) => e.quoi === 'parois').length
+  const rampeAvant = g.journal.filter((e) => e.quoi === 'rampe').length
+
+  // le fond prend à la reprise suivante, mais le champ est IDENTIQUE : rien à rebâtir
+  g.poserFondCrop = (a) => {
+    g.journal.push({ quoi: 'fond', arg: a })
+    return { refus: null, couverture: 1, bathy: true, profMaxM: 2116.3, rebati: 0 }
+  }
+  veille.maj(2_000); veille.maj(2_000)
+  await veille.enVol()
+  assert.ok(!veille.refus.includes('fond'), 'le fond a bien pris')
+  assert.equal(g.journal.filter((e) => e.quoi === 'parois').length, paroisAvant,
+    'un fond identique ne doit entraîner personne')
+  assert.equal(g.journal.filter((e) => e.quoi === 'rampe').length, rampeAvant)
+})
+
+test('⑥ ter ter un lecteur DÉJÀ rejoué ne l’est pas DEUX FOIS dans la même reprise', async () => {
+  // ⚠️ Quand `fond` ET `parois` ont refusé, la reprise rejoue `parois` parce
+  // qu'il est dans `refus` — et le fond, en prenant, voudrait le rejouer AUSSI.
+  // Le balayage du contour fait plus de mille points : le payer deux fois par
+  // reprise est exactement ce que la garde de `reprendre` évite.
+  const g = globeFactice({ refuse: { fond: true, parois: true, mer: true } })
+  const veille = creerVeilleCrop({ globe: g, contexte: contexteFactice(), periodeReprise: 2 })
+  veille.maj(2_000)
+  await veille.enVol()
+  assert.deepEqual(veille.refus.slice().sort(), ['fond', 'mer', 'parois'])
+  const avant = g.journal.filter((e) => e.quoi === 'parois').length
+
+  // tout arrive d'un coup : le fond prend ET rebâtit, les parois prennent aussi
+  g.refuse.fond = false
+  g.refuse.parois = false
+  veille.maj(2_000); veille.maj(2_000)
+  await veille.enVol()
+  assert.equal(g.journal.filter((e) => e.quoi === 'parois').length, avant + 1,
+    'les parois doivent être rejouées UNE fois, pas deux')
+})
+
 test('⑥ bis la mer qui refuse est reprise elle aussi — son refus arrive PLUS TARD', async () => {
   // ⚠️ `poserMer` est la seule asynchrone de la chaîne : son refus n'existe pas
   // encore quand `poserChaineCrop` rend la main. Une reprise qui ne lirait que
@@ -562,6 +659,20 @@ test('⑧ quinquies l’estompage n’a QU’UN nourrisseur, drapeau levé ou ba
   assert.match(corps, /terreUniqueBranchee/)
   assert.ok(corps.indexOf('terreUniqueBranchee') < corps.indexOf('veilleEstompage.maj('))
   assert.match(SRC_MAIN, /creerVeilleCrop\(\{[\s\S]{0,900}?estompage: veilleEstompage/)
+})
+
+test('⑧ nonies le FOND et la MER lisent le MÊME champ, par les MÊMES arguments — Tâche J bis', () => {
+  // ⚠️ **ASSERTION DE SOURCE, DÉCLARÉE COMME TELLE** : `main.js` n'est chargé par
+  // aucun test (three.js, le DOM, WebGL). Ce qu'elle garde n'est pas une chaîne
+  // décorative : deux jeux d'arguments qui divergeraient — une portée ici, une
+  // autre là — rouvriraient EXACTEMENT le désaccord que la Tâche J bis ferme,
+  // et l'écran montrerait une mer qui s'arrête où le fond ne va pas.
+  const bloc = SRC_MAIN.slice(SRC_MAIN.indexOf('ctx.fond = {'), SRC_MAIN.indexOf('ctx.fond = {') + 400)
+  assert.ok(bloc.length > 20, '`contexteCrop` ne construit pas de section `fond`')
+  for (const champ of ['remplir', 'portee', 'couvertureMin', 'exigerBathy']) {
+    assert.match(bloc, new RegExp(champ + ':\\s*ctx\\.mer\\.' + champ),
+      `fond.${champ} doit être DÉRIVÉ de mer.${champ}, pas recopié`)
+  }
 })
 
 test('⑧ sexies la mer reçoit le fov VIVANT, pas le défaut du module', () => {

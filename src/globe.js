@@ -72,6 +72,10 @@ import { FOV_DEG } from './monde/seuil-socle.js'
 // `main.js` ×5). ⚠️ Ce module n'importe RIEN — c'est sa seule règle, et elle est
 // gardée par un test —, donc aucun cycle n'est ouvert ici.
 import { lireExageration } from './monde/exageration-continue.js'
+// LE FOND DU CROP — Tâche J bis. Pur lui aussi (il n'importe que
+// `crop-sphere.js`, pur) : il ne rend que des nombres, et c'est ce fichier-ci
+// qui décide QUAND les lire. Son en-tête porte les mesures qui le fondent.
+import { altitudeMaillage, altitudeSonde, echantillonnerFond, cleFond } from './monde/fond-crop.js'
 import {
   DEM_SOURCES,
   DemSourceError,
@@ -310,6 +314,20 @@ void main() {
 // IMPORTÉE, pas recopiée : une constante dupliquée diverge en silence (§1 de
 // /threejs-optimisation, question 2).
 const CIRCONFERENCE_MERCATOR = CIRCONFERENCE_M
+
+// LA RÉSOLUTION DU CHAMP — celui de la mer (Tâche F) et celui du fond du crop
+// (Tâche J bis), qui est le MÊME champ lu deux fois.
+//
+// ⚠️ **384, ET CE N'EST PAS UN CHOIX DE CONFORT** : `SHORE_SURF_GLSL` porte
+// `1.0 / 384.0` EN DUR pour son pas de gradient (voir `_cuireChampMer`). Une
+// autre résolution déformerait la houle de côte sans que rien ne le signale.
+//
+// ⚠️ **ET C'EST DÉJÀ PLUS FIN QUE LA SOURCE.** 385 nœuds sur `PORTEE_CROP = 3`
+// largeurs de crop font 128 nœuds en travers du bloc, quand la bathymétrie
+// plafonne à `BATHY_BASE_ZMAX = 8` — soit, pour trois tuiles z12, **48 pixels de
+// donnée vraie** en travers. Monter plus haut ne peindrait que de
+// l'interpolation, pour quatre fois la mémoire.
+const CHAMP_FOND = 384
 
 const ROOT_Z = 2
 // ⚠️ EXPORTÉ POUR QUE LE TEST LE CONFRONTE À LA SOURCE, ET NON À UN LITTÉRAL
@@ -625,6 +643,23 @@ uniform float uGrainForceM; // amplitude du grain, en METRES de relief
 uniform float uGrainEchelle;
 uniform float uContourWeight; // le poids de trait du socle (uContourWeight)
 
+// ══════ LE FOND DU CROP — Tache J bis ══════════════════════════════════════
+//
+// ⚠️ LA COULEUR AUSSI LIT LE FOND, ET SANS CA LA GEOMETRIE SEULE NE SUFFIT PAS.
+// La rampe se calcule sur h = decodeMetersAA(vUv), c'est-a-dire sur le
+// TERRARIUM, qui rend zero sur 51,1 % des echantillons du bloc (mesure). Or
+// sousEau vaut h < 0.0 : a h == 0 exactement, la rampe prend la branche TERRE
+// et sort son vert le plus bas. C'est le plateau vert uniforme de la Tache J, et
+// c'est aussi la moitie verte du marbrage.
+//
+// ⚠️ SIXIEME SAMPLER. Le bloc ci-dessus compte CINQ liens (uTex, uRamp,
+// uCoastMask, uSol, uSolLut) pour un plafond de seize : celui-ci fait six, et le
+// raisonnement de ce bloc-la tient tel quel.
+uniform sampler2D uFondChamp;  // R : altitude du fond du crop, en unites locales
+uniform float uFondOn;
+uniform float uFondPortee;     // en demi-cotes de crop — la demi-largeur du champ
+uniform float uFondMetres;     // metres par unite locale : l'inverse de l'echelle
+
 float decodeMeters(vec2 uv) {
   vec3 t = texture2D(uTex, uv).rgb * 255.0;
   return t.r * 256.0 + t.g + t.b / 256.0 - 32768.0;
@@ -800,6 +835,28 @@ void main() {
   }
 
   float h = decodeMetersAA(vUv);
+
+  // ══════ LE FOND DU CROP — Tache J bis ══════════════════════════════════════
+  //
+  // ⚠️ AVANT L'HABILLAGE, ET POUR LA MEME RAISON QUE LE GRAIN EST AVANT LA RAMPE
+  // (voir le bloc suivant) : ce qui change h doit passer avant tout ce qui LIT h
+  // — la rampe, les courbes de niveau, et le test sousEau qui les commande.
+  //
+  // ⚠️ C'EST LA TRANSCRIPTION DE altitudeSonde (src/monde/fond-crop.js), PAS UNE
+  // SECONDE LOI : la mer prend min(fond, 0), la terre garde la tuile. Le CPU
+  // (posAt, hauteurSurface) et le GPU lisent le meme tableau par la meme
+  // formule d'uv, et test/fond-crop.test.js confronte les deux ecritures.
+  //
+  // ⚠️ ET LA BORNE N'EST PAS DECORATIVE. Le champ ne couvre que uFondPortee
+  // demi-cotes ; au-dela, une texture en ClampToEdge prolongerait sa derniere
+  // ligne sur toute la planete estompee, sans qu'aucune erreur ne soit levee.
+  // C'est le meme garde que echantillonnerFond, ecrit deux fois parce que le
+  // GPU ne sait pas rendre null.
+  if (uFondOn > 0.5 && uCropOn > 0.5
+      && max(abs(qCrop.x), abs(qCrop.y)) <= uFondPortee && h <= 0.0) {
+    float hFond = texture2D(uFondChamp, qCrop / (2.0 * uFondPortee) + 0.5).r * uFondMetres;
+    h = min(hFond, 0.0);
+  }
 
   // ══════ L'HABILLAGE, POSTES ③ ET ② — Tache C ═══════════════════════════════
   //
@@ -1552,7 +1609,28 @@ export class Globe {
       uGrainForceM: { value: HABILLAGE_MONDE.grainForceM },
       uGrainEchelle: { value: HABILLAGE_MONDE.grainEchelle },
       uContourWeight: { value: HABILLAGE_MONDE.contourPoids },
+
+      // LE FOND DU CROP — Tâche J bis.
+      //
+      // ⚠️ `uFondOn: 0` : sans `poserFondCrop`, RIEN NE CHANGE — même garde et
+      // même raison que `uCropOn`, `uEstompageOn` et `uHabOn`. Partagés eux
+      // aussi : le fond est une propriété du CROP, pas de la tuile.
+      //
+      // ⚠️ **`uFondMetres` PART À 1 ET NON À 0** : c'est un DIVISEUR déguisé (le
+      // champ est cuit en unités locales, `brut × echelle`), et un zéro par
+      // défaut rendrait un fond marin plat au niveau de la mer le jour où
+      // quelqu'un allumerait `uFondOn` sans poser l'échelle.
+      uFondChamp: { value: null },
+      uFondOn: { value: 0 },
+      uFondPortee: { value: PORTEE_CROP },
+      uFondMetres: { value: 1 },
     }
+    // ⚠️ **LE FOND VIT À CÔTÉ DES UNIFORMES, PAS DEDANS** : c'est un
+    // `Float32Array` de 148 225 valeurs (593 Kio) que le CPU lit — `posAt` et
+    // `hauteurSurface` —, pas une texture. `null` = pas de fond, et toute la
+    // chaîne le sait (voir `src/monde/fond-crop.js`).
+    this._fondCrop = null
+    this._cleFondPosee = ''
     this.rebuildRamp(params)
 
     // ⚠️ `uTilePx` EST PROPRE À LA TUILE, comme `uTex` : deux tuiles voisines
@@ -1675,6 +1753,10 @@ export class Globe {
     this.retirerRampe()
     this.retirerMer()
     this.retirerEstompage()
+    // ⚠️ **APRÈS `_crop = null`, ET C'EST L'ORDRE QUI COMPTE** : `retirerFondCrop`
+    // rebâtit les maillages, et un fond encore posé les rebâtirait AVEC le fond
+    // marin — la mer resterait creusée sur un globe qui n'a plus de crop.
+    this.retirerFondCrop()
   }
 
   // ═══════════ L'ESTOMPAGE DE LA TERRE AUTOUR — Tâche G, décision 3 ══════════
@@ -2284,7 +2366,7 @@ export class Globe {
    * — on élargit, on ne remplace pas.
    */
   _cuireChampMer({ repere, portee, remplir, echelle }) {
-    const N = 384
+    const N = CHAMP_FOND
     const emprise = empriseCalotte(repere, portee)
     const brut = new Float32Array((N + 1) * (N + 1))
     let couverture = 0
@@ -2351,6 +2433,149 @@ export class Globe {
       profMaxUnites: Math.max(profMaxM * echelle, 1e-6),
       profMaxM,
     }
+  }
+
+  // ═══════════ LE FOND DU CROP — Tâche J bis ════════════════════════════════
+  //
+  // **Ce que ce maillon ferme, et il a été établi PAR ÉLIMINATION, pas supposé**
+  // (Tâche J, §6) : « le champ de la mer a un fond ; la SURFACE du crop n'en a
+  // pas ». Les chiffres sont dans l'en-tête de `src/monde/fond-crop.js` et leurs
+  // relevés bruts sur le disque (`.banc/vues-Jbis/Jbis-releves-bruts.json`) :
+  // **920,7 m d'écart moyen**, **2 116,27 m au maximum**, contre **73 m** de
+  // houle. Ce n'était donc pas la mer qui débordait, c'était le sol qui manquait.
+  //
+  // ⚠️ **CE MAILLON PASSE AVANT LES PAROIS ET LA RAMPE, ET C'EST STRUCTUREL.**
+  // Les deux se posent sur `hauteurSurface` : posé après elles, le fond aurait
+  // donné un bloc dont le flanc commence deux kilomètres au-dessus de sa propre
+  // surface, et une rampe calée sur 130,36 m là où il y en a 2 116,3 (les deux
+  // relevés). C'est pour ça que `MAILLONS` en compte SIX (`branchement-crop.js`).
+  //
+  // ⚠️ **ET IL CUIT SON PROPRE CHAMP, IL N'EMPRUNTE PAS CELUI DE LA MER.** La
+  // mer est le DERNIER maillon et son `poserMer` est asynchrone : lui prendre
+  // son champ obligerait à mémoïser un tableau dont la fraîcheur dépend de
+  // l'arrivée — asynchrone, elle aussi — de la nappe bathymétrique. Deux
+  // cuissons de 385² valent mieux qu'un cache dont personne ne sait dire s'il
+  // est à jour. ⚠️ **Le prix est mesuré, pas supposé** : voir le §« ce que ça
+  // coûte » du rapport de la tâche.
+
+  /**
+   * Cuit le fond du crop et le pose : la surface du globe porte le relief
+   * sous-marin sur l'emprise de la calotte.
+   *
+   * ⚠️ **`remplir` EST OBLIGATOIRE ICI, ET IL N'Y A PAS DE REPLI.** Le repli de
+   * `_cuireChampMer` (lire `hauteurSurface`) serait CIRCULAIRE : la sonde rend
+   * déjà le fond posé. Sans `remplir`, ce maillon refuse — et refuser laisse la
+   * surface du dépôt, ce qui est exactement le comportement d'avant.
+   *
+   * @param {object} arg
+   * @param {(emprise:object, n:number, sortie:Float32Array) => object} arg.remplir
+   * @param {number} [arg.portee] en demi-côtés de crop
+   * @param {number} [arg.couvertureMin] au-dessous, on refuse (0 = jamais)
+   * @param {boolean} [arg.exigerBathy] refuse tant que la nappe n'a pas fusionné
+   * @returns {{refus:string|null, couverture:number, bathy:boolean, profMaxM:number, rebati:number}}
+   */
+  poserFondCrop({ remplir = null, portee = PORTEE_CROP, couvertureMin = 0, exigerBathy = false } = {}) {
+    const vide = { refus: null, couverture: 0, bathy: false, profMaxM: 0, rebati: 0 }
+    if (!this._crop) return { ...vide, refus: 'crop' }
+    if (typeof remplir !== 'function') return { ...vide, refus: 'remplir' }
+    const p = Number.isFinite(portee) && portee > 0 ? portee : PORTEE_CROP
+    const N = CHAMP_FOND // 384, comme le champ de la mer — voir la constante
+    const cote = N + 1
+    const emprise = empriseCalotte(this._crop, p)
+    const valeurs = new Float32Array(cote * cote)
+    const r = remplir(emprise, N, valeurs)
+    const couverture = r && Number.isFinite(r.remplis) ? r.remplis / valeurs.length : 1
+    const bathy = r && typeof r.bathy === 'boolean' ? r.bathy : true
+    let profMaxM = 0
+    for (let k = 0; k < valeurs.length; k++) if (-valeurs[k] > profMaxM) profMaxM = -valeurs[k]
+    // ⚠️ **LE MÊME REFUS QUE LA MER, ET AVEC LES MÊMES SEUILS.** Poser un fond
+    // à moitié rempli creuserait des marches là où la donnée manque, et poser un
+    // fond SANS bathymétrie ne ferait que recopier le zéro du terrarium — du
+    // travail pour rien, et une reconstruction de cinquante maillages avec.
+    if (couverture < couvertureMin || (exigerBathy && !bathy)) {
+      return { refus: 'champ', couverture, bathy, profMaxM, rebati: 0 }
+    }
+    const fond = { valeurs, cote, repere: this._crop, portee: p, emprise, bathy, profMaxM }
+    const cle = cleFond(fond)
+    this._fondCrop = fond
+    this._poserTextureFond(fond)
+    // ⚠️ **ON NE REBÂTIT QUE SI LA SURFACE A CHANGÉ.** `poserFondCrop` est
+    // rappelé à chaque cran ET à chaque reprise ; reconstruire cinquante
+    // maillages pour un champ identique coûterait une planète par reprise.
+    let rebati = 0
+    if (cle !== this._cleFondPosee) {
+      this._cleFondPosee = cle
+      rebati = this._refaireMaillagesDuFond()
+    }
+    return { refus: null, couverture, bathy, profMaxM, rebati }
+  }
+
+  /** Rend au globe sa surface d'avant : la mer remonte sur la sphère. */
+  retirerFondCrop() {
+    if (!this._fondCrop) return 0
+    this._fondCrop = null
+    this._cleFondPosee = ''
+    const u = this.uniforms
+    u.uFondChamp.value?.dispose()
+    u.uFondChamp.value = null
+    u.uFondOn.value = 0
+    u.uFondMetres.value = 1
+    return this._refaireMaillagesDuFond()
+  }
+
+  /**
+   * La texture que le FRAGMENT lit — la couleur, pas la géométrie.
+   *
+   * ⚠️ **UN SEUL CANAL, ET EN UNITÉS LOCALES COMME LA MER.** `_cuireChampMer`
+   * écrit `brut × echelle` dans son canal R ; on écrit exactement la même chose,
+   * pour que `uFondMetres` (l'inverse de l'échelle) soit la seule conversion du
+   * chemin et que les deux nuanceurs lisent la même grandeur.
+   *
+   * ⚠️ **LA PRÉCISION EST MESURÉE, PAS SUPPOSÉE** : un demi-flottant vaut ici
+   * 2^-15 près de 0,218 unité (la profondeur maximale relevée × l'échelle), soit
+   * **2,8 m au sol**. La houle qui traversait le fond en faisait 73.
+   */
+  _poserTextureFond(fond) {
+    const u = this.uniforms
+    const echelle = (R_GLOBE / EARTH_RADIUS_M) * this.exaggeration
+    const n = fond.cote * fond.cote
+    const demi = new Uint16Array(n)
+    for (let k = 0; k < n; k++) demi[k] = THREE.DataUtils.toHalfFloat(fond.valeurs[k] * echelle)
+    const tex = new THREE.DataTexture(demi, fond.cote, fond.cote, THREE.RedFormat, THREE.HalfFloatType)
+    tex.magFilter = THREE.LinearFilter
+    tex.minFilter = THREE.LinearFilter
+    tex.needsUpdate = true
+    u.uFondChamp.value?.dispose()
+    u.uFondChamp.value = tex
+    u.uFondOn.value = 1
+    u.uFondPortee.value = fond.portee
+    u.uFondMetres.value = 1 / echelle
+  }
+
+  /**
+   * Rebâtit les maillages dont la surface dépend du fond.
+   *
+   * ⚠️ **SEULEMENT CEUX QUI ONT ENCORE LEURS HAUTEURS, ET C'EST UNE LIMITE
+   * ASSUMÉE.** `_buildMesh` relâche `t.heights` sauf pour les clés de
+   * `gardeHauteurs` — c'est-à-dire l'emprise que le flux réserve, bloc et mer
+   * comprises (Tâche J, `aussi`). Une tuile hors réservation ne peut pas être
+   * rebâtie sur place : il faudrait la redemander au réseau, ce que
+   * `_rechargeTuiles` fait pour TOUTE la planète. Le fond ne couvre que la
+   * calotte, et la calotte est réservée : le cas ne se pose pas aujourd'hui,
+   * mais **il se posera si la portée du champ dépasse un jour la réservation**.
+   */
+  _refaireMaillagesDuFond() {
+    let n = 0
+    for (const t of this.tiles.values()) {
+      if (t.state !== 'ready' || !t.heights || !t.mesh) continue
+      this.group.remove(t.mesh)
+      t.mesh.geometry.dispose()
+      t.mesh.material.dispose()
+      t.mesh = null
+      this._buildMesh(t)
+      n++
+    }
+    return n
   }
 
   /** Avance le temps de la mer — l'appelant décide de la cadence. */
@@ -2435,7 +2660,14 @@ export class Globe {
     // ⚠️ **`null`, JAMAIS `0`** : zéro est le NIVEAU DE LA MER, et le confondre
     // avec « je ne sais pas » creuse une encoche dans la paroi (§7 de
     // `parois-crop.js`). C'est l'appelant qui décide, pas cette méthode.
-    return best ? sampleHeights(best.t.heights, best.tx, best.ty, best.t.size) : null
+    // ⚠️ **ET LE FOND DU CROP PASSE PAR ICI AUSSI — Tâche J bis.** Les parois et
+    // la rampe se posent sur CETTE sonde ; si le maillage descendait au fond
+    // marin sans elles, le bloc aurait un flanc qui commence deux kilomètres
+    // au-dessus de sa propre surface. Sans fond posé, `altitudeSonde` rend la
+    // valeur BRUTE — le dépôt au bit près, négatifs du terrarium compris.
+    const brut = best ? sampleHeights(best.t.heights, best.tx, best.ty, best.t.size) : null
+    const fond = this._fondCrop ?? null
+    return altitudeSonde(brut, fond ? echantillonnerFond(fond, lat, lon) : null)
   }
 
   /** Les tuiles dont les hauteurs sont encore là, du plus fin au plus grossier. */
@@ -2480,6 +2712,19 @@ export class Globe {
       echelle: (R_GLOBE / EARTH_RADIUS_M) * this.exaggeration,
       profondeur,
       baseYFloor,
+      // ⚠️ **LE PLANCHER SUIT LA SURFACE — Tâche J bis, ET SANS LUI LE BLOC EST
+      // FAUX.** Le §4 de `parois-crop.js` écrit pourquoi il valait zéro : « le
+      // globe pose ses sommets à `Math.max(sampleHeights(...), 0)`, une paroi
+      // qui suivrait la bathymétrie brute passerait SOUS la surface dessinée ».
+      // C'est exactement l'inverse depuis qu'un fond est posé : c'est un
+      // plancher à zéro qui ferait passer la paroi AU-DESSUS de sa propre
+      // surface. Relevé à l'écran avant ce correctif : `baseY` identique au
+      // millionième avec et sans fond (−0,054 132 4 unité), pour une surface
+      // descendue de **2 116,3 m**. Avec, il vaut −0,147 117 — **2,718 fois plus
+      // profond**, et c'est le bloc entier qui change de silhouette.
+      // ⚠️ **ET IL EST FINI, PAS `-Infinity`** : `construireSolideCrop` s'en sert
+      // aussi de repli, et un infini y produirait des sommets `NaN`.
+      plancherMer: this._fondCrop ? -Math.max(this._fondCrop.profMaxM, 0) : 0,
     })
 
     // ⚠️ **LE REFUS NE TOUCHE PAS AUX PAROIS DÉJÀ POSÉES.** C'est ce qui le rend
@@ -3069,9 +3314,22 @@ export class Globe {
 
     // every vertex is projected EXACTLY onto the sphere (+ displaced along the
     // radius) — never interpolated across a flat quad
+    // ⚠️ **LE FOND DU CROP — Tâche J bis.** Sans fond posé (`this._fondCrop`
+    // nul), `altitudeMaillage` EST `Math.max(h, 0)` : « oceans stay on the
+    // sphere », le dépôt AU BIT PRÈS, et c'est le cas de toute la planète hors
+    // crop comme de `?globe=continu` tout entier. Avec un fond, la MER prend la
+    // profondeur du CHAMP — celui-là même que la mer lit —, et le désaccord de
+    // **920,7 m en moyenne** se ferme (il retombe à 2,85 m, mesuré).
+    // ⚠️ `?.`/`??` DEVANT `_fondCrop` : `test/globe-precision.test.js` emprunte
+    // cette méthode avec un `this` qui n'est pas un globe — même raison que le
+    // `?.` de `gardeHauteurs`, en bas de cette fonction.
+    const fond = this._fondCrop ?? null
     const posAt = (u, v, out) => {
       const { lat, lon } = tileToLatLon(t.x + u, t.y + v, t.z)
-      const h = Math.max(sampleHeights(t.heights, u, v, t.size), 0) // oceans stay on the sphere
+      const h = altitudeMaillage(
+        sampleHeights(t.heights, u, v, t.size),
+        fond ? echantillonnerFond(fond, lat, lon) : null,
+      )
       return latLonToSphere(lat, lon, R_GLOBE + h * dispScale, out)
     }
 

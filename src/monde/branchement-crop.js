@@ -79,9 +79,35 @@ import { socleVisible } from './seuil-socle.js'
 
 /**
  * Les maillons de la chaîne, dans l'ordre où ils doivent être posés.
- * ⚠️ `crop` en tête : les quatre autres refusent sans lui (voir le §2).
+ * ⚠️ `crop` en tête : les cinq autres refusent sans lui (voir le §2).
+ *
+ * ⚠️ **`fond` EST EN DEUXIÈME, ET CE N'EST PAS UN RANGEMENT — Tâche J bis.** Il
+ * donne au globe le relief SOUS-MARIN du crop, et les deux maillons qui le
+ * suivent le LISENT : `parois` pose la base du bloc sous le point le plus bas de
+ * la surface (le « basin guard » de `parois-crop.js`), `rampe` cale ses couleurs
+ * sur la profondeur mesurée. Posé après eux, le fond aurait donné un bloc dont
+ * le flanc commence deux kilomètres au-dessus de sa propre surface et une rampe
+ * calée sur 130,36 m là où il y en a 2 116,3 (les deux chiffres sont relevés dans
+ * l'application vivante — `.banc/vues-Jbis/Jbis-releves-bruts.json`).
  */
-export const MAILLONS = Object.freeze(['crop', 'parois', 'habillage', 'rampe', 'mer'])
+export const MAILLONS = Object.freeze(['crop', 'fond', 'parois', 'habillage', 'rampe', 'mer'])
+
+/**
+ * Les maillons qui LISENT le fond, dans l'ordre de `MAILLONS`.
+ *
+ * ⚠️ **SANS CETTE LISTE, LA REPRISE LAISSE UN BLOC INCOHÉRENT, ET ÇA A ÉTÉ VU À
+ * L'ÉCRAN.** La nappe bathymétrique est ASYNCHRONE : au premier passage le fond
+ * REFUSE (couverture ou bathymétrie absente) pendant que `parois` et `rampe`,
+ * eux, PRENNENT — sur une surface encore plate. `reprendre` ne rejoue que ce qui
+ * a refusé : quand le fond finit par prendre, la rampe garde sa profondeur d'une
+ * surface qui n'existe plus. Relevé dans l'application, La Réunion z12 :
+ * `uOceanDepth = 130,36 m` avec un fond de **2 116,3 m** sous les pieds.
+ *
+ * ⚠️ **ET L'HABILLAGE N'EN EST PAS**, ce n'est pas un oubli : il recopie quatre
+ * postes du socle et ne mesure aucune hauteur. La mer non plus — elle cuit son
+ * propre champ.
+ */
+export const LECTEURS_DU_FOND = Object.freeze(['parois', 'rampe'])
 
 // Un maillon rend `{ refus }` — `null` s'il a pris, une chaîne sinon — et,
 // pour la mer seule, une `promesse` dont le refus n'arrive que plus tard.
@@ -89,6 +115,20 @@ const POSEURS = {
   crop({ globe, centre, zoom, tuilesParBloc }) {
     const rep = globe.poserCrop({ centre, zoom, tuilesParBloc })
     return { refus: rep ? null : 'crop' }
+  },
+  fond({ globe, fond }) {
+    // ⚠️ **UN GLOBE SANS `poserFondCrop` N'EST PAS UNE PANNE.** Ce module est
+    // vérifiable sous node contre un globe de papier (`test/crop-branche.test.js`), et
+    // il a toujours accepté les faux globes qui portent les méthodes qu'ils
+    // exercent. Un fond absent laisse la surface du dépôt — c'est exactement le
+    // comportement d'avant la Tâche J bis, et il ne se signale pas par un refus
+    // qui bloquerait la reprise pour toujours.
+    if (typeof globe.poserFondCrop !== 'function') return { refus: null }
+    const r = globe.poserFondCrop(fond || {})
+    // ⚠️ **`neuf` DIT QUE LA SURFACE A CHANGÉ, ET LA REPRISE EN A BESOIN** — voir
+    // `LECTEURS_DU_FOND`. `rebati` compte les maillages reconstruits : zéro veut
+    // dire « le même fond qu'avant », donc rien à rejouer derrière.
+    return { refus: r ? (r.refus ?? null) : 'crop', neuf: !!(r && r.rebati > 0) }
   },
   parois({ globe, parois }) {
     const r = globe.construireParoisCrop(parois || undefined)
@@ -266,10 +306,23 @@ export function creerVeilleCrop({
     // qu'elle protège ; retirée plutôt que testée à vide. **Si la découpe venait
     // un jour à refuser, la rejouer serait de toute façon le bon geste.**
     const restant = []
+    // ⚠️ **LE FOND ENTRAÎNE SES LECTEURS — Tâche J bis, voir `LECTEURS_DU_FOND`.**
+    let fondNeuf = false
     for (const nom of refus) {
       const r = POSEURS[nom]({ globe: g, ...ctx })
+      if (nom === 'fond' && !r.refus && r.neuf) fondNeuf = true
       if (nom === 'mer') { const j = ++jeton; suivreMer(r.promesse, j); continue }
       if (r.refus) restant.push(nom)
+    }
+    if (fondNeuf) {
+      for (const nom of LECTEURS_DU_FOND) {
+        // ⚠️ **CELUI QUI VIENT D'ÊTRE REJOUÉ NE L'EST PAS DEUX FOIS** : le
+        // balayage de la rampe fait `pas²` points et le contour des parois plus
+        // de mille — les rejouer pour rien serait payer deux fois la reprise.
+        if (refus.includes(nom)) continue
+        const r = POSEURS[nom]({ globe: g, ...ctx })
+        if (r.refus) restant.push(nom)
+      }
     }
     refus = restant
   }

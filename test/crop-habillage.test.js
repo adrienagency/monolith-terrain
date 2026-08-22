@@ -128,9 +128,13 @@ test('① le compte de samplers du nuanceur du globe reste sous le plafond de 16
   // « FRAGMENT shader texture image units count exceeds MAX_TEXTURE_IMAGE_UNITS
   // (16) », 18 samplers pour 16 (voir `test/plafond-unites-texture.test.js`).
   // Sa mutation nommée est M9 (`.banc/mutations-habC.mjs`).
+  // ⚠️ **SIX DEPUIS LA TÂCHE J bis** : `uFondChamp` porte le fond du crop, que la
+  // rampe lit pour savoir qu'elle peint une mer et non un pré. Le compte reste
+  // très en dessous du plafond, mais il est ÉCRIT — un sampler ajouté sans que
+  // ce chiffre bouge, c'est un chiffre qui ne garde plus rien.
   const n = (FRAG.match(/uniform\s+sampler2D\s+\w+\s*;/g) || []).length
   assert.ok(n <= 16, `le nuanceur du globe déclare ${n} samplers`)
-  assert.equal(n, 5, `le compte attendu est 5 (uTex, uRamp, uCoastMask, uSol, uSolLut), pas ${n}`)
+  assert.equal(n, 6, `le compte attendu est 6 (uTex, uRamp, uCoastMask, uSol, uSolLut, uFondChamp), pas ${n}`)
 })
 
 // ══════════ ② LES DEUX FAMILLES D'UV NE SE CONFONDENT PAS ══════════════════

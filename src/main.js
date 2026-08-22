@@ -4784,7 +4784,7 @@ function contexteCrop() {
     ? f.maxM - f.minM
     : (Number.isFinite(dem?.maxM) && Number.isFinite(dem?.minM) ? dem.maxM - dem.minM : null)
 
-  return {
+  const ctx = {
     centre,
     zoom,
     tuilesParBloc: BLOCK_TILES,
@@ -4835,6 +4835,25 @@ function contexteCrop() {
       hauteurPx: renderer.domElement?.clientHeight || undefined,
     },
   }
+
+  // ══════════ LE FOND DU CROP — Tâche J bis ═══════════════════════════════════
+  //
+  // ⚠️ **IL LIT LE MÊME CHAMP QUE LA MER, ET IL LE LIT PAR LES MÊMES ARGUMENTS.**
+  // Ce n'est pas une économie de frappe : la Tâche J a fermé le désaccord entre
+  // la mer et le fond du crop, et deux jeux d'arguments qui divergeraient — une
+  // portée ici, une autre là — le rouvriraient exactement. On DÉRIVE donc de
+  // `ctx.mer` au lieu de recopier, et une mutation qui les désaccorde rougit.
+  //
+  // ⚠️ **PAS DE `fovDeg` NI D'`altitudeM` ICI** : le fond ne décide d'aucune
+  // bascule, il ne fait que cuire un champ sur une emprise. Les lui passer
+  // laisserait croire qu'il en dépend.
+  ctx.fond = {
+    remplir: ctx.mer.remplir,
+    portee: ctx.mer.portee,
+    couvertureMin: ctx.mer.couvertureMin,
+    exigerBathy: ctx.mer.exigerBathy,
+  }
+  return ctx
 }
 
 // ⚠️ **`globe` EST DONNÉ PAR UNE FONCTION, PAS PAR SA VALEUR.** Il est assigné

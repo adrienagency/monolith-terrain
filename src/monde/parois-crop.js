@@ -95,6 +95,14 @@
 // un liseré, et celui-là ferait le tour de chaque côte. `plancherMer` porte donc
 // la valeur 0 par défaut, et le test la verrouille.
 //
+// ⚠️ **ET DEPUIS LA TÂCHE J bis, LA PHRASE CI-DESSUS N'EST VRAIE QUE DU DÉFAUT.**
+// Le globe pose désormais un FOND sur le crop (`src/monde/fond-crop.js`) : sa
+// surface descend à −2 116,3 m à La Réunion, et c'est alors un plancher à zéro
+// qui ferait passer la paroi AU-DESSUS de sa propre surface. `globe.js` descend
+// donc `plancherMer` à la profondeur du champ quand un fond est posé, et le
+// laisse à zéro sinon. **Le raisonnement du dessus n'a pas changé : la paroi
+// suit la surface DESSINÉE. C'est la surface dessinée qui a changé.**
+//
 // ══════════ 5. CE QU'ON A PORTÉ DE `buildSlabWalls`, ET CE QUI SE PERD ══════
 //
 // `buildSlabWalls` (`plinth.js:232`) offre **douze options**. L'Étape 4 de la
@@ -429,11 +437,20 @@ export function construireSolideCrop({
   /**
    * Un point de la surface DÉPLACÉE, en coordonnées locales (doubles).
    * Rend `null` si la hauteur manque ET que l'appelant tolère les trous ; sinon
-   * le point se pose au plancher de mer et le compteur s'en souvient.
+   * le point se pose au NIVEAU DE LA MER et le compteur s'en souvient.
+   *
+   * ⚠️ **LE REPLI D'UN POINT INCONNU EST ZÉRO, PAS `plancherMer` — ET DEPUIS LA
+   * TÂCHE J bis CE N'EST PLUS LA MÊME CHOSE.** `plancherMer` valait 0 tant que
+   * le globe écrêtait sa mer sur la sphère : les deux écritures rendaient donc
+   * le même nombre, au bit près. Maintenant que le crop porte son fond marin,
+   * l'appelant descend `plancherMer` à la profondeur du champ (−2 116,3 m relevés
+   * à La Réunion) — et poser là un point INCONNU l'enverrait au fond de la
+   * fosse. `couvertureMin = 1` refuse avant que ça n'atteigne la géométrie, mais
+   * un repli qui ne tient que par la garde du dessus n'est pas un repli.
    */
   const surface = (u, v) => {
     const { lat, lon } = latLonDeLocal(u, v, repere)
-    const h = lire(lat, lon) ?? plancherMer
+    const h = lire(lat, lon) ?? 0
     const P = surSphere(lat, lon, rayon + h * echelle)
     const d = [P[0] - O[0], P[1] - O[1], P[2] - O[2]]
     return [

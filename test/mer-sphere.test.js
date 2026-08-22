@@ -78,6 +78,8 @@ registerHooks({
 })
 import { Globe } from '../src/globe.js'
 import { repereCrop, latLonDeLocal } from '../src/monde/crop-sphere.js'
+// LA LOI DE SURFACE — Tache J bis : l'epsilon de coplanarite depend de son DEFAUT.
+import { altitudeMaillage } from '../src/monde/fond-crop.js'
 import { repereLocalCrop, construireSolideCrop } from '../src/monde/parois-crop.js'
 import { empriseSocle, FOV_DEG } from '../src/monde/seuil-socle.js'
 import { largeurCropM, EXAG_SOCLE_NOMINALE, COTE_CROP_UNITES } from '../src/monde/habillage-crop.js'
@@ -168,12 +170,30 @@ test('②c le 0,003 vient bien d `ocean.js` — garde-fou de SOURCE, déclaré',
   assert.equal(EPS_COPLANARITE_UNITES, 0.003)
 })
 
-test('②d le fond marin du globe est SUR la sphère — c est ce qui rend l epsilon obligatoire', () => {
-  // ⚠️ LE MOTIF DE L'EPSILON EST DANS `globe.js`, ET ON LE VÉRIFIE. Si un jour
-  // `_buildMesh` cessait d'écrêter à zéro, le fond descendrait sous la sphère et
-  // l'epsilon perdrait sa raison d'être — ce test rougirait, et c'est voulu.
+test('②d le fond marin du globe est SUR la sphère TANT QU AUCUN FOND N EST POSÉ', () => {
+  // ⚠️ LE MOTIF DE L'EPSILON EST DANS `globe.js`, ET ON LE VÉRIFIE — mais il a
+  // CHANGÉ DE PORTÉE à la Tâche J bis, et ce test dit lequel.
+  //
+  // Avant : `posAt` écrêtait à zéro EN TOUTES CIRCONSTANCES, donc le fond marin
+  // était partout coplanaire à la calotte, et l'epsilon était obligatoire PARTOUT.
+  // Depuis : la surface porte le relief sous-marin **là où un fond est posé**
+  // (`altitudeMaillage`, `src/monde/fond-crop.js`) — l'écart mesuré y vaut 920,7 m
+  // en moyenne, donc l'epsilon n'y décide plus rien. **Il reste obligatoire
+  // partout ailleurs** : hors du champ, sur toute la planète estompée, dans
+  // `?globe=continu`, et sur les lagons que le champ laisse à zéro.
+  //
+  // Ce qui se garde ici est donc le DÉFAUT : sans fond, `altitudeMaillage` EST
+  // `Math.max(h, 0)`. Si quelqu'un retirait cet écrêtage-là, l'epsilon perdrait
+  // sa raison d'être — ce test rougirait, et c'est voulu.
   const src = readFileSync(SRC_GLOBE, 'utf8')
-  assert.match(src, /Math\.max\(sampleHeights\(t\.heights, u, v, t\.size\), 0\)/)
+  assert.match(src, /altitudeMaillage\([\s\S]{0,12}sampleHeights\(t\.heights, u, v, t\.size\)/,
+    '`posAt` doit passer par la loi partagée, pas par un écrêtage à lui')
+  const srcFond = readFileSync(new URL('../src/monde/fond-crop.js', import.meta.url), 'utf8')
+  assert.match(srcFond, /if \(!Number\.isFinite\(hFond\)\) return Math\.max\(h, 0\)/,
+    'sans fond, la surface doit rester celle d’« oceans stay on the sphere »')
+  // et le comportement, pas seulement la chaîne
+  assert.equal(altitudeMaillage(-4297, null), 0)
+  assert.equal(altitudeMaillage(-4297, -4297), -4297)
 })
 
 // ══════════ ③ LA CALOTTE ═══════════════════════════════════════════════════
