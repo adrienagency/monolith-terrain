@@ -126,6 +126,10 @@ import {
   // NU : ni rampe, ni peinture, donc pas de `natLuminance`, dont
   // `GLSL_ECLAIRAGE` dépend. C'est la MÊME loi, injectée seule.
   GLSL_IRRADIANCE,
+  // ⚠️ **LA NORMALE PAR FRAGMENT — Tâche P9.** Même patron : la loi (celle de
+  // Mikkelsen, que `three` porte) et sa dérivation vivent dans le module PUR ;
+  // ce fichier n'en injecte que le texte.
+  GLSL_NORMALE_FINE,
   RECIPROQUE_PI,
   ECLAIRAGE_MONDE,
   directionSoleilLocale,
@@ -745,6 +749,18 @@ varying vec2 vLatLon;
 // ⚠️ ET C'EST UN varying, PAS UN ATTRIBUT : aucun octet de geometrie en plus,
 // contrairement a la cible de morphing chiffree a +23 % par l'etude.
 varying float vProfCam;
+// LA POSITION EN ESPACE DE VUE — Tache P9, la normale par fragment.
+//
+// ⚠️ EN ESPACE DE VUE, ET C'EST LA MEME RAISON QUE vProfCam JUSTE AU-DESSUS :
+// la normale fine a besoin de dFdx(P) et dFdy(P), c'est-a-dire de la TANGENTE
+// d'ecran de la surface. Une coordonnee MONDE de magnitude 100 a un ulp
+// float32 de 0,38 m quand cette tangente vaut quelques dizaines de metres par
+// pixel : la derivee serait bruitee de plusieurs pour cent. mv.xyz est relatif
+// a la CAMERA — quelques unites — et sa derivee est nette.
+//
+// ⚠️ ET C'EST UN varying DE PLUS, PAS UN ATTRIBUT : aucun octet de geometrie
+// en plus, et mv est deja calcule ci-dessous pour vProfCam et gl_Position.
+varying vec3 vVue;
 attribute vec2 latlon;
 void main() {
   vUv = uv;
@@ -752,6 +768,7 @@ void main() {
   vNormalW = normalize(mat3(modelMatrix) * normal);
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   vProfCam = -mv.z;
+  vVue = mv.xyz;
   gl_Position = projectionMatrix * mv;
 }
 `
@@ -761,6 +778,21 @@ precision highp float;
 varying vec2 vUv;
 varying vec3 vNormalW;
 varying vec2 vLatLon;
+// ══════════ LA NORMALE PAR FRAGMENT — Tache P9 ═════════════════════════════
+//
+// ⚠️ uNormaleFineOn VAUT ZERO PAR DEFAUT, exactement comme uCropOn, uHabOn,
+// uMerRampeOn, uEclairageOn et uMppFacteur : sans poserHabillage la vue
+// orbitale en production rend au bit pres ce qu'elle rendait.
+//
+// Ce que ce poste repare est mesure et decompose dans l'en-tete §6 de
+// src/monde/eclairage-crop.js : la COULEUR du crop porte deja plus de detail
+// que celle du socle (10,250 contre 8,723 en energie, lumiere coupee des deux
+// cotes), et c'est son OMBRAGE qui manque en entier — parce que ses normales
+// viennent d'une grille de 5 625 sommets sur le bloc contre 594 434 au socle.
+varying vec3 vVue;
+uniform float uNormaleFineOn;
+// unites de scene par METRE de relief : (R_GLOBE / EARTH_RADIUS_M) x exageration
+uniform float uUnitesParMetre;
 uniform sampler2D uTex;
 uniform sampler2D uRamp;
 uniform vec3 uSunDir;
@@ -1090,6 +1122,12 @@ ${GLSL_NATUREL}
 // (fxShade, la valeur par sommet). test/crop-eclairage.test.js va la relire
 // dans node_modules/three plutot que de croire ce commentaire.
 ${GLSL_ECLAIRAGE}
+
+// ⚠️ INJECTE, PAS RECOPIE — Tache P9. La loi de Mikkelsen, celle que porte
+// three (bumpmap_pars_fragment.glsl.js), moins la normalisation de sigma que
+// son propre commentaire dit etre une convention d'artiste. La derivation et
+// l'ecart sont ecrits dans src/monde/eclairage-crop.js, §6 de l'en-tete.
+${GLSL_NORMALE_FINE}
 
 // ══════ LA COUCHE APPARENCE — Tache P3, et le gabarit d'ouverture l'ALLUME ══
 //
@@ -1522,6 +1560,37 @@ void main() {
   // ⚠️ partBloc VAUT ZERO SANS ECLAIRAGE, et alors rien de tout ce qui suit ne
   // s'applique : la production est intouchee au bit pres.
   vec3 nMonde = normalize(vNormalW);
+  // ══════ LA NORMALE PAR FRAGMENT — Tache P9 ═══════════════════════════════
+  //
+  // ⛔ CE QUI MANQUAIT N'ETAIT PAS DU DETAIL DE PEINTURE, C'ETAIT DE L'OMBRAGE.
+  // Mesure, cadrage interieur, masques apparies a -0,155 % : lumiere coupee des
+  // deux cotes, le crop rend 10,250 d'energie de detail contre 8,723 au socle —
+  // sa COULEUR est deja PLUS riche. Allumes, il rend 10,972 contre 16,086 : la
+  // lumiere fabrique 45,8 % du modele du socle et 6,6 % du sien.
+  //
+  // ⚠️ ET LA CAUSE EST ARITHMETIQUE, PAS ESTHETIQUE : vNormalW vient de
+  // _buildMesh, qui pose gridFor(z) = 24 quads par tuile — 5 625 sommets sur un
+  // bloc de 3 x 3 tuiles, contre 594 434 au socle (releve). La texture de
+  // hauteur, elle, fait 256 x 256 par tuile et le fragment la lit DEJA
+  // (decodeMetersAA, quelques lignes plus haut) : la couleur voyait le relief
+  // fin, la lumiere ne le voyait pas.
+  //
+  // ⚠️ h EST DEJA LE BON h : le fond marin (Tache J bis) et le grain (Tache C)
+  // l'ont modifie au-dessus, et c'est la surface REELLE qu'on veut deriver.
+  //
+  // ⚠️ ET LA BASE EST LA SPHERE NUE, JAMAIS vNormalW : ce dernier PORTE deja la
+  // pente de la grille, et le perturber par le gradient COMPLET de h compterait
+  // deux fois la composante grossiere. Le globe est « une sphere de rayon
+  // R_GLOBE = 100 centree a l'origine » (monde/frontiere-rendu.js), donc le
+  // centre de la planete en espace de vue est viewMatrix x (0, 0, 0, 1).
+  if (uNormaleFineOn > 0.5) {
+    vec3 nSphere = normalize(vVue - vec3(viewMatrix[3]));
+    nMonde = nMondeDepuisVue(
+      mat3(viewMatrix),
+      normaleFineCrop(dFdx(vVue), dFdy(vVue), nSphere,
+                      dFdx(h) * uUnitesParMetre, dFdy(h) * uUnitesParMetre)
+    );
+  }
   float nduCrop = dot(nMonde, uHemiHaut);
   float partBloc = uEclairageOn > 0.5 ? dedansCrop : 0.0;
   vec3 fondCrop = uAlbedoBase * natGris(hNormRelief, max(nduCrop, 0.0));
@@ -2349,6 +2418,17 @@ export class Globe {
       uGrainForceM: { value: HABILLAGE_MONDE.grainForceM },
       uGrainEchelle: { value: HABILLAGE_MONDE.grainEchelle },
       uContourWeight: { value: HABILLAGE_MONDE.contourPoids },
+      // LA NORMALE PAR FRAGMENT — Tâche P9. ⚠️ **`uNormaleFineOn: 0` : sans
+      // `poserHabillage`, RIEN ne change** — même garde et même raison que
+      // `uCropOn`, `uHabOn`, `uMerRampeOn`, `uEclairageOn` et `uMppFacteur`.
+      // ⚠️ **ET `uUnitesParMetre` N'A PAS DE « NEUTRE » : c'est une ÉCHELLE, pas
+      // un réglage.** Elle est juste dès la construction et suit l'exagération
+      // (`setExaggeration`), parce qu'une échelle fausse ne se voit pas — elle
+      // rend juste des pentes fausses, et c'est exactement la faute que
+      // `uMerHoule` (121,6× trop haute) et `skirtDrop` (10× trop long) ont
+      // coûtée à ce chantier.
+      uNormaleFineOn: { value: 0 },
+      uUnitesParMetre: { value: (R_GLOBE / EARTH_RADIUS_M) * this.exaggeration },
 
       // LE FOND DU CROP — Tâche J bis.
       //
@@ -2914,6 +2994,11 @@ export class Globe {
    * @param {number} arg.contourWeight
    * @param {number} arg.grainForceM - amplitude du grain, en MÈTRES de relief
    * @param {number} arg.grainEchelle
+   * @param {boolean} arg.normaleFine - la normale du bloc est-elle reconstruite
+   *   AU FRAGMENT depuis la texture de hauteur ? ⚠️ **Faux = le dépôt au bit
+   *   près** : la normale reste celle des sommets, c'est-à-dire d'une grille de
+   *   24 quads par tuile. Voir le §6 de `monde/eclairage-crop.js` pour la
+   *   décomposition qui a nommé ce manque.
    *
    * ══════════ LA COLORISATION NATURELLE — Tâche P2 ═══════════════════════════
    *
@@ -2963,6 +3048,7 @@ export class Globe {
     contourWeight = 0.7,
     grainForceM = 0,
     grainEchelle = 96,
+    normaleFine = false,
     analyse = null,
     rampe2D = null,
     texShade = NATUREL_MONDE.texShade,
@@ -3069,6 +3155,16 @@ export class Globe {
 
     u.uGrainForceM.value = grainForceM
     u.uGrainEchelle.value = grainEchelle
+
+    // ══════ LA NORMALE PAR FRAGMENT — Tâche P9 ═══════════════════════════════
+    //
+    // ⚠️ **ELLE ENTRE PAR L'HABILLAGE, ET C'EST LE MÊME ARGUMENT QUE
+    // L'ÉCLAIRAGE (Tâche P3) :** `poserHabillage` est le SEUL maillon que la
+    // veille rejoue par image (`CHAMPS_HABILLAGE`). Posée à la naissance du
+    // crop, la normale fine s'éteindrait au premier changement de palette qui
+    // rejoue l'habillage sans la repasser.
+    u.uNormaleFineOn.value = normaleFine ? 1 : 0
+
 
     // ══════ LA COLORISATION NATURELLE — Tâche P2 ═════════════════════════════
     //
@@ -3233,6 +3329,13 @@ export class Globe {
     u.uContourWeight.value = HABILLAGE_MONDE.contourPoids
     u.uGrainForceM.value = HABILLAGE_MONDE.grainForceM
     u.uGrainEchelle.value = HABILLAGE_MONDE.grainEchelle
+    // ⚠️ **ET LA NORMALE FINE S'ÉTEINT — Tâche P9.** Sans crop il n'y a plus de
+    // bloc à modeler, et `HABILLAGE_MONDE.normaleFine` vaut faux : c'est
+    // l'aller-retour bit-à-bit que `test/crop-habillage.test.js` (⑨) exige.
+    // ⚠️ **`uUnitesParMetre` N'EST PAS RENDU, ET C'EST DÉLIBÉRÉ** : ce n'est pas
+    // un réglage d'habillage mais l'échelle verticale DU GLOBE, qui vaut pour
+    // toute la planète et que `setExaggeration` tient à jour.
+    u.uNormaleFineOn.value = HABILLAGE_MONDE.normaleFine ? 1 : 0
     // ══════ LA COLORISATION NATURELLE — Tâche P2 ═════════════════════════════
     //
     // ⚠️ **LES DEUX TEXTURES SONT LÂCHÉES, PAS SEULEMENT DÉBRANCHÉES** — même
@@ -5907,6 +6010,14 @@ export class Globe {
   // reconstruction passe donc par le réseau, pas par un tampon retenu.
   setExaggeration(v) {
     this.exaggeration = v
+    // ⚠️ **L'ÉCHELLE DE RELIEF SUIT, ET C'EST OBLIGATOIRE — Tâche P9.** Le
+    // relief est cuit dans les SOMMETS, mais la normale par fragment le dérive
+    // de la texture de hauteur : elle a besoin du même facteur mètre → unité de
+    // scène que `_buildMesh`. Laissée en arrière, elle rendrait des pentes
+    // fausses d'un facteur `exagAvant / exagApres` — invisible à l'œil nu, et
+    // c'est précisément la famille de fautes (`uMerHoule`, `skirtDrop`) que ce
+    // chantier a payée quatre fois.
+    this.uniforms.uUnitesParMetre.value = (R_GLOBE / EARTH_RADIUS_M) * v
     this._rechargeTuiles()
   }
 

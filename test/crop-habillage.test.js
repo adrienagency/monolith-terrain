@@ -609,6 +609,10 @@ function globeStub(crop = REPERE) {
       uContourWeight: val(HABILLAGE_MONDE.contourPoids),
       uGrainForceM: val(HABILLAGE_MONDE.grainForceM),
       uGrainEchelle: val(HABILLAGE_MONDE.grainEchelle),
+      // ⚠️ **LA NORMALE PAR FRAGMENT — Tâche P9**, au même défaut que le
+      // constructeur : c'est ce qui rend ⑨h (l'aller-retour bit à bit) capable
+      // de voir un `retirerHabillage` qui l'oublierait.
+      uNormaleFineOn: val(HABILLAGE_MONDE.normaleFine ? 1 : 0),
       // ══════ LA COLORISATION NATURELLE — Tâche P2 ═══════════════════════════
       //
       // ⚠️ **LE STUB PORTE LES SEIZE UNIFORMES DE L'HABILLAGE PLUS LES QUATORZE

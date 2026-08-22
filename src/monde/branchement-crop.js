@@ -164,6 +164,14 @@ export const CHAMPS_HABILLAGE = Object.freeze([
   'contourWeight',
   'grainForceM',
   'grainEchelle',
+  // ⚠️ **`normaleFine` — Tâche P9, ET SANS CETTE LIGNE ELLE S'ÉTEINDRAIT SEULE.**
+  // La veille ne repose l'habillage que lorsqu'un champ SURVEILLÉ change ; un
+  // champ absent d'ici n'est jamais comparé, donc jamais reposé — mais il est
+  // bel et bien PASSÉ à chaque pose déclenchée par un autre champ. Le défaut
+  // serait donc muet tant que rien d'autre ne bouge, et se réparerait tout seul
+  // au premier changement de palette : exactement la course que la Tâche K ter
+  // a nommée, et qui rend un défaut invisible un chargement sur deux.
+  'normaleFine',
   // ══════ LA COLORISATION NATURELLE — Tâche P2 ═══════════════════════════════
   //
   // ⚠️ **`analyse` EST LE CHAMP LE PLUS EN RETARD DE TOUTE LA LISTE, ET C'EST

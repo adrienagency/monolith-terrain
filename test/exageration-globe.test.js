@@ -318,6 +318,13 @@ function fauxGlobe({ exagSuivie, exaggeration = 18 }) {
     exaggeration,
     tiles: new Map(),
     recharges: 0,
+    // ⚠️ **L'ÉCHELLE DE RELIEF FAIT PARTIE DU CONTRAT DEPUIS LA TÂCHE P9**, et
+    // ce faux la porte plutôt que la source ne l'esquive par un `?.` : la
+    // normale par fragment dérive la hauteur de la TEXTURE, donc elle a besoin
+    // du même facteur mètre → unité de scène que `_buildMesh`. Un
+    // `setExaggeration` qui ne le mettrait pas à jour rendrait des pentes
+    // fausses d'un facteur `exagAvant / exagAprès` — invisible à l'œil nu.
+    uniforms: { uUnitesParMetre: { value: (100 / 6371000) * exaggeration } },
     chargeRacines() { this.recharges++ },
     setExaggeration: Globe.prototype.setExaggeration,
     _rechargeTuiles: Globe.prototype._rechargeTuiles,
@@ -335,6 +342,12 @@ test('③ le globe LIT le partage — il ne calcule plus sa propre valeur', () =
   assert.equal(g.majExageration({ exagPartage: partage }), 3.2)
   assert.equal(g.exaggeration, 3.2)
   assert.equal(g.recharges, 1, 'la géométrie est cuite : elle doit être redemandée')
+  // ⚠️ **ET L'ÉCHELLE DE RELIEF A SUIVI — Tâche P9.** Le relief est cuit dans
+  // les SOMMETS, mais la normale par fragment le dérive de la TEXTURE : elle a
+  // besoin du même facteur mètre → unité de scène. Restée à 18 pendant que
+  // l'exagération tombe à 3,2, elle rendrait des pentes 5,6 fois trop raides.
+  assert.ok(Math.abs(g.uniforms.uUnitesParMetre.value - (100 / 6371000) * 3.2) < 1e-15,
+    `uUnitesParMetre vaut ${g.uniforms.uUnitesParMetre.value} : l'échelle de relief n'a pas suivi l'exagération`)
   // …et une valeur INCHANGÉE ne redemande rien.
   g.majExageration({ exagPartage: partage })
   assert.equal(g.recharges, 1, 'le globe se recharge pour rien')

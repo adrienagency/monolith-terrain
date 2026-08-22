@@ -645,7 +645,7 @@ function globeStub() {
       uSol: val(null), uSolLut: val(null), uSolOn: val(0), uSolOpacite: val(1),
       uSolOffset: val({ set() {} }), uSolScale: val({ set() {} }), uSolTexel: val({ set() {} }),
       uContourInterval: val(500), uContourOpacity: val(0.55), uContourWeight: val(0.7),
-      uGrainForceM: val(0), uGrainEchelle: val(96),
+      uGrainForceM: val(0), uGrainEchelle: val(96), uNormaleFineOn: val(0),
       uAnalysis: val(null), uAnalysisOn: val(0),
       uTexShade: val(NATUREL_MONDE.texShade), uWetK: val(NATUREL_MONDE.wetK),
       uExpoK: val(NATUREL_MONDE.expoK), uHemi: val(NATUREL_MONDE.hemi),

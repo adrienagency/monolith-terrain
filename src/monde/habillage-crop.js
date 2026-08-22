@@ -73,6 +73,11 @@ export const HABILLAGE_MONDE = Object.freeze({
   contourPoids: 0.7,
   grainForceM: 0,
   grainEchelle: 96,
+  // ⚠️ **FAUX, ET C'EST LE DÉPÔT AU BIT PRÈS — Tâche P9.** Sans crop, la normale
+  // du globe reste celle des SOMMETS : c'est ce que la vue orbitale rend depuis
+  // toujours. Le §6 de `eclairage-crop.js` explique pourquoi le BLOC, lui, ne
+  // peut pas s'en contenter — 5 625 sommets sur le bloc contre 594 434 au socle.
+  normaleFine: false,
   solOpacite: 1,
   margeCoteM: 0,
 })

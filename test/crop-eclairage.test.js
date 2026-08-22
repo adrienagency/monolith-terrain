@@ -50,10 +50,14 @@ import {
   environnementEffectif,
   GLSL_ECLAIRAGE,
   GLSL_OMBRE_PEINTURE,
+  // ⚠️ **La normale par fragment — Tache P9.**
+  normaleParDeplacement,
+  GLSL_NORMALE_FINE,
 } from '../src/monde/eclairage-crop.js'
 import { GLSL_MELANGE, APPARENCE_MONDE } from '../src/monde/melange-crop.js'
 import { LUMA_709 } from '../src/monde/naturel-crop.js'
 import { CHAMPS_HABILLAGE, habillageDifferent } from '../src/monde/branchement-crop.js'
+import { HABILLAGE_MONDE } from '../src/monde/habillage-crop.js'
 // ⚠️ **Tache P6** : le morceau d irradiance DETACHE, pour les parois.
 import { GLSL_IRRADIANCE } from '../src/monde/eclairage-crop.js'
 
@@ -990,4 +994,213 @@ test('⑦c SANS donnée de paroi, la paroi retombe sur les tuiles — AU BIT PR�
   g.poserHabillage({ ...base, paroiAmbianteCoef: null, paroiAmbianteIntensite: 0 })
   assert.ok(u.uParoiCielIrr.value.x < u.uCielIrr.value.x, 'ambiante nulle, pas repli')
   assert.ok(u.uParoiCielIrr.value.x > 0.18, 'la lampe hemispherique reste')
+})
+
+// ══════════ ⑧ LA NORMALE PAR FRAGMENT — Tâche P9 ════════════════════════════
+//
+// ⚠️ **CE QUE CE BLOC VÉRIFIE, ET DANS QUEL ORDRE** :
+//   ⑧a la loi PURE, contre un oracle INDÉPENDANT — la surface déplacée est
+//      construite point par point et sa normale obtenue par un vrai produit
+//      vectoriel de différences finies. Le jumeau JS n'est donc pas comparé à
+//      lui-même ;
+//   ⑧b l'INVARIANCE D'ÉCHELLE D'ÉCRAN, qui est la propriété pour laquelle on
+//      s'écarte de `three` — et le contre-exemple, la version de `three`, est
+//      rejoué à côté pour montrer qu'elle, elle ne l'a pas ;
+//   ⑧c la RÉFÉRENCE, LUE DANS `node_modules/three` : les quatre termes y sont,
+//      et le `normalize( dFdx( surf_pos` aussi. Notre écart est donc réel,
+//      nommé, et pas un oubli ;
+//   ⑧d la TRANSCRIPTION GLSL, terme à terme, sur le texte SANS SES COMMENTAIRES ;
+//   ⑧e le BRANCHEMENT dans le nuanceur — la faiblesse récurrente du chantier ;
+//   ⑧f le BRANCHEMENT dans la chaîne : `poserHabillage`, `retirerHabillage`,
+//      `CHAMPS_HABILLAGE`, `contexteCrop` et `setExaggeration`.
+
+/** Le produit vectoriel et le produit scalaire, une fois pour tout ce bloc. */
+const CROIX = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+const NORME = (v) => Math.hypot(v[0], v[1], v[2])
+const UNITE = (v) => { const l = NORME(v); return [v[0] / l, v[1] / l, v[2] / l] }
+
+/**
+ * L'ORACLE INDÉPENDANT — il ne connaît pas `normaleParDeplacement`.
+ *
+ * La surface déplacée est `S(x, y) = P(x, y) + N · h(x, y)`. On la CONSTRUIT en
+ * trois points (l'origine et un pas dans chaque direction d'écran) et on prend
+ * le produit vectoriel des deux différences finies. C'est la définition, pas la
+ * formule de Mikkelsen.
+ */
+function normaleOracle(sx, sy, n, dhx, dhy) {
+  // ⚠️ **LE DÉPLACEMENT SE FAIT DEPUIS LE PLAN DE `n`**, parce que c'est la
+  // surface qu'on décrit : la sphère nue, plus `h` le long de son rayon. Les
+  // tangentes d'écran portent déjà la pente du maillage ; leur composante
+  // radiale n'est pas un déplacement au sol.
+  const proj = (v) => { const d = v[0] * n[0] + v[1] * n[1] + v[2] * n[2]; return [v[0] - n[0] * d, v[1] - n[1] * d, v[2] - n[2] * d] }
+  const tx = proj(sx)
+  const ty = proj(sy)
+  const a = [tx[0] + n[0] * dhx, tx[1] + n[1] * dhx, tx[2] + n[2] * dhx]
+  const b = [ty[0] + n[0] * dhy, ty[1] + n[1] * dhy, ty[2] + n[2] * dhy]
+  const c = CROIX(a, b)
+  // le produit vectoriel donne la normale au SIGNE de l'orientation près : on la
+  // remet du côté de la normale de base, comme le fait `sign(fDet)`.
+  const s = c[0] * n[0] + c[1] * n[1] + c[2] * n[2] >= 0 ? 1 : -1
+  return UNITE([c[0] * s, c[1] * s, c[2] * s])
+}
+
+test('⑧a la normale par déplacement suit la DÉFINITION — oracle indépendant', () => {
+  // ① gradient nul : la normale ne bouge pas d'un bit.
+  assert.deepEqual(normaleParDeplacement([1, 0, 0], [0, 0, 1], [0, 1, 0], 0, 0), [0, 1, 0])
+  // ② un cas à la main, vérifiable de tête : pente 1/2 vers l'est.
+  const n2 = normaleParDeplacement([1, 0, 0], [0, 0, 1], [0, 1, 0], 0.5, 0)
+  const attendu = UNITE([-0.5, 1, 0])
+  for (let i = 0; i < 3; i++) assert.ok(Math.abs(n2[i] - attendu[i]) < 1e-12, `${n2} contre ${attendu}`)
+  // ⚠️ **ET LE SENS EST LE BON** : le sol MONTE vers l'est, donc la normale se
+  // penche vers l'OUEST. Une mutation de signe passerait l'égalité de norme.
+  assert.ok(n2[0] < 0, 'la normale se penche du mauvais cote')
+  // ③ ⚡ **LE BALAYAGE CONTRE L'ORACLE**, sur des repères et des pentes variés —
+  // y compris un repère NON orthogonal et une base inclinée, où une formule
+  // approchée « (−hx, 1, −hy) » tomberait.
+  const bases = [
+    { sx: [1, 0, 0], sy: [0, 0, 1], n: [0, 1, 0] },
+    { sx: [0.7, 0.1, 0], sy: [0.2, -0.05, 0.9], n: UNITE([0.2, 0.95, -0.1]) },
+    { sx: [3, -1, 2], sy: [-1, 0.5, 4], n: UNITE([1, 2, 3]) },
+    { sx: [0.001, 0, 0], sy: [0, 0, 0.001], n: [0, 1, 0] },
+  ]
+  let compares = 0
+  for (const b of bases) {
+    for (const t of balayage(11)) {
+      const dhx = (t - 0.5) * 0.9
+      const dhy = (0.5 - t) * 0.4
+      const a = normaleParDeplacement(b.sx, b.sy, b.n, dhx, dhy)
+      const o = normaleOracle(b.sx, b.sy, b.n, dhx, dhy)
+      for (let i = 0; i < 3; i++) assert.ok(Math.abs(a[i] - o[i]) < 1e-9, `${a} contre l'oracle ${o}`)
+      compares++
+    }
+  }
+  assert.ok(compares >= 48, `banc vide : ${compares} comparaisons`)
+})
+
+test('⑧b ⚡ L’INVARIANCE D’ÉCHELLE D’ÉCRAN — la raison de s’écarter de three', () => {
+  // La géométrie ne dépend pas du zoom : rendre le MÊME sol deux fois plus près
+  // double `dFdx(P)` ET `dFdx(h)`, et la normale doit être INCHANGÉE.
+  const sx = [0.7, 0.1, 0]
+  const sy = [0.2, -0.05, 0.9]
+  const n = UNITE([0.2, 0.95, -0.1])
+  const a = normaleParDeplacement(sx, sy, n, 0.13, -0.04)
+  for (const k of [0.25, 2, 17]) {
+    const b = normaleParDeplacement(sx.map((v) => v * k), sy.map((v) => v * k), n, 0.13 * k, -0.04 * k)
+    for (let i = 0; i < 3; i++) assert.ok(Math.abs(a[i] - b[i]) < 1e-12, `k=${k} : ${b} contre ${a}`)
+  }
+  // ⛔ **ET LE CONTRE-EXEMPLE : LA VERSION DE `three`, REJOUÉE ICI, N'A PAS
+  // CETTE PROPRIÉTÉ.** C'est elle qui normalise `sigma` ; son commentaire dit
+  // pourquoi (« regardless of the texture's scale »), et c'est une convention
+  // d'ARTISTE. Sous elle, la même montagne s'aplatit en s'éloignant.
+  const troisJS = (sxx, syy, nn, dhx, dhy) => normaleParDeplacement(UNITE(sxx), UNITE(syy), nn, dhx, dhy)
+  const t1 = troisJS(sx, sy, n, 0.13, -0.04)
+  const t2 = troisJS(sx.map((v) => v * 2), sy.map((v) => v * 2), n, 0.13 * 2, -0.04 * 2)
+  assert.ok(Math.abs(t1[0] - t2[0]) > 0.02, 'la version de three serait invariante : le contre-exemple ne mord pas')
+})
+
+test('⑧c la référence est LUE DANS node_modules/three, et l’écart est nommé', () => {
+  const bump = readFileSync(
+    new URL('../node_modules/three/src/renderers/shaders/ShaderChunk/bumpmap_pars_fragment.glsl.js', import.meta.url),
+    'utf8'
+  ).replace(/\s+/g, ' ')
+  // les quatre termes de Mikkelsen sont bien ceux-là, chez three
+  assert.match(bump, /vec3 R1 = cross\( vSigmaY, vN \);/)
+  assert.match(bump, /vec3 R2 = cross\( vN, vSigmaX \);/)
+  assert.match(bump, /float fDet = dot\( vSigmaX, R1 \)/)
+  assert.match(bump, /vec3 vGrad = sign\( fDet \) \* \( dHdxy\.x \* R1 \+ dHdxy\.y \* R2 \);/)
+  assert.match(bump, /return normalize\( abs\( fDet \) \* surf_norm - vGrad \);/)
+  // ⚡ **ET L'ÉCART EST RÉEL** : c'est bien three qui normalise, et nous qui ne
+  // le faisons pas. Le jour où three cesse de normaliser, ce test rougit et le
+  // commentaire du module devient faux : il faudra le corriger.
+  assert.match(bump, /vec3 vSigmaX = normalize\( dFdx\( surf_pos\.xyz \) \);/)
+  const nu = GLSL_NORMALE_FINE.replace(/\/\/[^\n]*/g, '')
+  assert.ok(!/normalize\s*\(\s*sx\s*\)/.test(nu) && !/normalize\s*\(\s*sy\s*\)/.test(nu),
+    'le crop normalise sigma : il reprend la convention d\'artiste de three, et la pente suivrait le zoom')
+})
+
+test('⑧d le GLSL est la TRANSCRIPTION du jumeau JS — terme à terme, sans commentaires', () => {
+  // ⚠️ **SANS SES COMMENTAIRES** : la Tâche K ter a trouvé une assertion verte
+  // parce qu'elle lisait une formule DANS UN COMMENTAIRE.
+  const nu = GLSL_NORMALE_FINE.replace(/\/\/[^\n]*/g, '').replace(/\s+/g, ' ')
+  assert.match(nu, /vec3 normaleFineCrop\(vec3 sx, vec3 sy, vec3 n, float dhx, float dhy\) \{/)
+  assert.match(nu, /vec3 tx = sx - n \* dot\(sx, n\);/)
+  assert.match(nu, /vec3 ty = sy - n \* dot\(sy, n\);/)
+  assert.match(nu, /vec3 r1 = cross\(ty, n\);/)
+  assert.match(nu, /vec3 r2 = cross\(n, tx\);/)
+  assert.match(nu, /float det = dot\(tx, r1\);/)
+  assert.match(nu, /vec3 grad = sign\(det\) \* \(dhx \* r1 \+ dhy \* r2\);/)
+  assert.match(nu, /vec3 v = abs\(det\) \* n - grad;/)
+  assert.match(nu, /return l > 0\.0 \? v \/ l : n;/)
+  // et la transposée, qui n'existe pas en GLSL ES 1.0
+  assert.match(nu, /vec3 nMondeDepuisVue\(mat3 V, vec3 u\) \{ return normalize\(vec3\(dot\(V\[0\], u\), dot\(V\[1\], u\), dot\(V\[2\], u\)\)\); \}/)
+  // ⚠️ **CE QUI RESTE HORS DE PORTÉE, ET IL FAUT LE DIRE** : que le GPU exécute
+  // ce texte. Ce que ce fichier peut faire, c'est garantir que le JS que ⑧a
+  // vérifie contre un oracle et le GLSL disent la MÊME chose ; l'écran, lui, est
+  // dans `.banc/P9/` et dans le compte rendu de la tâche.
+})
+
+test('⑧e ⛔ LE BRANCHEMENT DANS LE NUANCEUR — garde, base, échelle, varying', () => {
+  const nu = FRAG_NU.replace(/\s+/g, ' ')
+  // ① la garde est un UNIFORME, déclaré, et le bloc est SOUS elle
+  assert.match(FRAG_NU, /uniform float uNormaleFineOn;/)
+  assert.match(FRAG_NU, /uniform float uUnitesParMetre;/)
+  assert.match(nu, /if \(uNormaleFineOn > 0\.5\) \{ vec3 nSphere/)
+  // ② ⛔ LA BASE EST LA SPHÈRE NUE, PAS `vNormalW` — c'est le point où un
+  // implémenteur pressé compterait deux fois la pente du maillage.
+  assert.match(nu, /vec3 nSphere = normalize\(vVue - vec3\(viewMatrix\[3\]\)\);/)
+  const bloc = nu.slice(nu.indexOf('if (uNormaleFineOn > 0.5)'), nu.indexOf('float nduCrop'))
+  assert.ok(!/vNormalW/.test(bloc), 'la normale fine part de vNormalW : la pente grossiere est comptee deux fois')
+  // ③ l'échelle est APPLIQUÉE aux DEUX dérivées, pas à une seule
+  assert.match(bloc, /dFdx\(h\) \* uUnitesParMetre, dFdy\(h\) \* uUnitesParMetre/)
+  // ④ et c'est bien `h`, la hauteur du fragment APRÈS le fond marin et le grain
+  assert.ok(nu.indexOf('if (uNormaleFineOn > 0.5)') > nu.indexOf('h += uGrainForceM'),
+    'la normale fine est calculee AVANT le grain : elle deriverait une autre surface')
+  // ⑤ le varying existe des DEUX côtés
+  const VERT_SRC = GLOBE_SRC.slice(GLOBE_SRC.indexOf('const VERT ='), GLOBE_SRC.indexOf('const FRAG ='))
+  assert.match(VERT_SRC.replace(/\/\/[^\n]*/g, ''), /varying vec3 vVue;/)
+  assert.match(VERT_SRC.replace(/\/\/[^\n]*/g, ''), /vVue = mv\.xyz;/)
+  assert.match(FRAG_NU, /varying vec3 vVue;/)
+  // ⑥ et le texte de la loi est INJECTÉ, pas recopié
+  assert.ok(GLOBE_NU.includes('${GLSL_NORMALE_FINE}'), 'le globe recopie la loi au lieu de l\'injecter')
+  assert.ok(!/vec3 normaleFineCrop\(vec3/.test(GLOBE_NU.replace('${GLSL_NORMALE_FINE}', '')),
+    'une SECONDE ecriture de normaleFineCrop vit dans globe.js')
+})
+
+test('⑧f ⛔ LE BRANCHEMENT DANS LA CHAÎNE — pose, retrait, veille, contexte, échelle', () => {
+  const g = new Globe({ radius: 100, globeExaggeration: 18 })
+  const u = g.uniforms
+  // ① le défaut est le dépôt au bit près
+  assert.equal(u.uNormaleFineOn.value, 0)
+  assert.equal(HABILLAGE_MONDE.normaleFine, false)
+  // ② POSÉE, elle s'allume ; POSÉE À FAUX, elle s'éteint — les deux sens.
+  g.poserHabillage({ normaleFine: true })
+  assert.equal(u.uNormaleFineOn.value, 1)
+  g.poserHabillage({ normaleFine: false })
+  assert.equal(u.uNormaleFineOn.value, 0, 'une pose a faux laisse la normale fine allumee')
+  // ③ et `retirerHabillage` la rend
+  g.poserHabillage({ normaleFine: true })
+  g.retirerHabillage()
+  assert.equal(u.uNormaleFineOn.value, 0)
+  // ④ la veille la SURVEILLE — sans quoi elle ne serait jamais reposée
+  assert.ok(CHAMPS_HABILLAGE.includes('normaleFine'), 'la veille ne surveille pas normaleFine')
+  assert.ok(habillageDifferent({ normaleFine: true }, { normaleFine: false }),
+    'la veille ne voit pas normaleFine changer')
+  // ⑤ ⚡ **ET `contexteCrop` LA PASSE** — c'est le maillon que ce chantier rate
+  // treize fois sur treize. On lit le texte de `main.js`, sans ses commentaires.
+  const ctx = MAIN_SRC.replace(/\/\/[^\n]*/g, '')
+  const i = ctx.indexOf('habillage: {')
+  assert.ok(i > 0, '`contexteCrop` n\'a plus d\'objet `habillage`')
+  const bloc = ctx.slice(i, ctx.indexOf('paroiCouleur', i) + 40)
+  assert.match(bloc, /normaleFine:\s*true/)
+  // ⑥ ⛔ L'ÉCHELLE DE RELIEF EST JUSTE, ET ELLE SUIT L'EXAGÉRATION. Une échelle
+  // fausse ne se voit pas : elle rend juste des pentes fausses. C'est la famille
+  // de fautes que `uMerHoule` (121,6×) et `skirtDrop` (10×) ont coûtée.
+  assert.ok(Math.abs(u.uUnitesParMetre.value - (100 / 6371000) * 18) < 1e-18,
+    `uUnitesParMetre vaut ${u.uUnitesParMetre.value} a la naissance`)
+  g._rechargeTuiles = () => {}
+  g.setExaggeration(2.8)
+  assert.ok(Math.abs(u.uUnitesParMetre.value - (100 / 6371000) * 2.8) < 1e-18,
+    'l\'echelle de relief n\'a pas suivi setExaggeration')
+  // ⑦ et elle est bien celle de `_buildMesh` — la MÊME formule, pas une voisine.
+  assert.match(GLOBE_NU, /const dispScale = \(R_GLOBE \/ EARTH_RADIUS_M\) \* this\.exaggeration/)
 })

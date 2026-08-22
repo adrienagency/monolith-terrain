@@ -430,3 +430,183 @@ vec3 eclairerCrop(vec3 mapCol, vec3 base, float teinte, float hn, float ndu, flo
   return albedo * irradianceCrop(ndl, ndu, soleil, ciel, sol) * ${RECIPROQUE_PI};
 }
 `
+
+// ══════════ 6. LA NORMALE PAR FRAGMENT — Tâche P9 ═══════════════════════════
+//
+// > **L'agent noteur, `notation-02.md` §5-5️⃣ :** *« Le crop rend 65,7 % de
+// > l'énergie de détail du socle. Et le levier que notation-01 désignait est
+// > désormais tiré sans effet : couper l'éclairage du crop ne lui coûte que
+// > 4,22 % de son modelé, quand couper le soleil du socle lui en coûte 45,39 %.
+// > Le crop est éclairé et reste plat. »*
+//
+// ⚡ **LA DÉCOMPOSITION QUI NOMME LA CAUSE**, mesurée dans la MÊME page, cadrage
+// intérieur, masques appariés à **−0,155 %** (`.banc/P9/S5-relief-P9.json`,
+// octet linéaire) :
+//
+// | | allumé | lumière coupée | part de la lumière |
+// |---|---|---|---|
+// | socle | **16,086** | **8,723** | **45,8 %** |
+// | crop | 10,972 | **10,250** | **6,6 %** |
+//
+// ⛔ **LA COULEUR DU CROP EST DONC DÉJÀ PLUS RICHE QUE CELLE DU SOCLE — 10,250
+// contre 8,723, soit +17,5 % — ET C'EST L'OMBRAGE QUI MANQUE, EN ENTIER.**
+// C'est l'inverse de ce que le chantier cherchait : il n'y a pas de détail à
+// AJOUTER à la peinture, il y a une lumière qui ne module rien.
+//
+// ⚠️ **ET LE GRAIN N'EST PAS LE LEVIER — MESURÉ, PAS SUPPOSÉ.** Le grain du
+// socle (`terrain.js`, `_makeDemSampler`) vaut `detail = 0,02` UNITÉ DE SCÈNE
+// sur `scale = 0,004 090` unité par mètre, c'est-à-dire **6,60 m de relief**,
+// de longueur d'onde **611 m**. Posé sur le crop à sa valeur convertie
+// (`grainForceM = 4,89`, `grainEchelle = 22,4`), il déplace l'énergie de détail
+// de **10,972 à 10,972 — 0,000 %** ; il faut **×50** (244 m de relief inventé,
+// 37 fois le socle) pour gagner **4,4 %**. Aller-retour à **0 canal**.
+//
+// ⚡ **UN OMBRAGE QUI NE MODULE PAS, C'EST UNE NORMALE QUI NE VARIE PAS — ET
+// L'ARITHMÉTIQUE SUFFIT À LE DIRE.** Le maillage d'une tuile du globe est
+// `gridFor(z) = 24` quads (`globe.js`), soit `(24 + 1)² = 625` sommets ; le crop
+// de La Réunion en fait **3 × 3 tuiles**, donc **5 625 sommets** sur le bloc.
+// Le socle, lui, maille le MÊME bloc à `resMaillage = 768`, soit **594 434
+// sommets relevés dans la page vivante**. ⛔ **CENT CINQ FOIS PLUS, 10,7 fois
+// par axe.** Relevé au même instant, la dispersion de `N · haut` : écart-type
+// **0,2447** au socle contre **0,1994** au crop, et surtout un minimum de
+// **−1** contre **0,2126** — le crop n'a AUCUNE face raide, elles ont toutes été
+// moyennées.
+//
+// ⚠️ **ET LA DONNÉE, ELLE, EST LÀ** : la texture de hauteur d'une tuile fait
+// **256 × 256**, que le nuanceur lit déjà par fragment (`decodeMetersAA`) pour
+// la rampe et pour les courbes de niveau. **La couleur voit le relief fin ; la
+// lumière ne le voyait pas.** D'où cette section : reconstruire la normale AU
+// FRAGMENT depuis la hauteur que le fragment tient déjà.
+//
+// ══════════ LA LOI EST CELLE DE MIKKELSEN, ET `three` LA PORTE ══════════════
+//
+// `three/src/renderers/shaders/ShaderChunk/bumpmap_pars_fragment.glsl.js`
+// (`perturbNormalArb`, d'après *Bump Mapping Unparametrized Surfaces on the
+// GPU*, Morten S. Mikkelsen). La dérivation, écrite ici parce qu'elle justifie
+// le seul point où l'on s'écarte de `three` :
+//
+//     S(x, y) = P(x, y) + N · h(x, y)
+//     dS/dx = sx + N·hx        dS/dy = sy + N·hy
+//     n = dS/dx × dS/dy = sx×sy − hx·R1 − hy·R2
+//         avec R1 = sy × N, R2 = N × sx, et sx×sy = det · N,
+//         det = sx · R1
+//
+// ⛔ **ET VOICI L'ÉCART, ASSUMÉ ET NÉCESSAIRE : `three` NORMALISE `sx` ET `sy`,
+// PAS NOUS.** Son commentaire le dit — *« normalize is done to ensure that the
+// bump map looks the same regardless of the texture's scale »* : c'est une
+// convention d'ARTISTE, qui rend la pente proportionnelle au dénivelé PAR PIXEL
+// D'ÉCRAN au lieu du dénivelé PAR MÈTRE DE SOL. Sous elle, la même montagne
+// s'aplatirait en s'éloignant et se creuserait en s'approchant. Le crop veut la
+// normale GÉOMÉTRIQUE, celle que `_buildMesh` calcule déjà par différences
+// centrées sur la surface déplacée — donc `sigma` non normalisé, et `h` dans la
+// même unité de longueur que `P`.
+//
+// ⚠️ **LE REPÈRE EST CELUI DE LA VUE, ET LA PRÉCISION L'EXIGE.** `VERT` explique
+// déjà pourquoi les sommets sont en RTC : *« ne pas payer l'ulp float32 à
+// magnitude 100 (0,486 m) »*. Une coordonnée MONDE de magnitude 100 a un ulp de
+// 0,38 m, quand `dFdx(P)` sur un pixel vaut ici quelques dizaines de mètres :
+// la dérivée serait bruitée de plusieurs pour cent. En espace de VUE, `P` est
+// relatif à la caméra — quelques unités — et la dérivée est nette.
+//
+// ⚠️ **LA NORMALE DE BASE EST CELLE DE LA SPHÈRE NUE, JAMAIS `vNormalW`.**
+// `vNormalW` PORTE DÉJÀ la pente du maillage : la perturber par le gradient
+// COMPLET de `h` compterait deux fois la composante grossière. La sphère est
+// centrée à l'origine du monde — `frontiere-rendu.js` l'écrit (*« une sphère de
+// rayon `R_GLOBE` = 100 centrée à l'origine »*) et le relevé le confirme
+// (`globe.group.matrixWorld` a une translation de **(0, 0, 0)**,
+// `.banc/P9/S6-normale-P9.json`) —, donc la normale de sphère en espace de vue
+// vaut `normalize(pVue − viewMatrix · (0, 0, 0, 1))`.
+//
+// ⚡ **CE QUE ÇA REND À L'ÉCRAN, MESURÉ AVANT D'ÊTRE ÉCRIT** (`.banc/P9/S6`,
+// rustine posée dans la page, témoin de compilation à **0 canal** éteinte) :
+// énergie de détail **10,966 → 15,733** contre **16,069** au socle, soit
+// **68,2 % → 97,9 %** ; et la part de la lumière dans le modelé du crop passe de
+// **6,6 % à 20,0 %**.
+
+/**
+ * La normale d'une surface déplacée en hauteur, au point où l'on est.
+ *
+ * ⚠️ **VECTEURS EN TABLEAUX DE TROIS, ET PAS DE `three`** : ce module est PUR
+ * (voir l'en-tête), et `test/crop-eclairage.test.js` le rejoue sous node contre
+ * un ORACLE INDÉPENDANT — la surface déplacée y est construite point par point
+ * et sa normale prise par un vrai produit vectoriel.
+ *
+ * ⛔ **LES DEUX TANGENTES SONT PROJETÉES SUR LE PLAN DE `n` AVANT TOUT, ET
+ * L'ORACLE A EXIGÉ CETTE LIGNE.** La formule de Mikkelsen suppose que
+ * `surf_norm` est la normale du plan que `surf_pos` engendre — chez `three`
+ * c'est vrai par construction, le même maillage porte les deux. **Ici c'est
+ * FAUX** : les tangentes viennent de la surface DÉPLACÉE (elles portent déjà la
+ * pente du maillage à 24 quads par tuile) tandis que `n` est la normale de la
+ * SPHÈRE NUE. Sans projection, `sx × sy` cesse d'être parallèle à `n` et la
+ * formule rend une normale fausse — le balayage de ⑧a l'a mise en défaut sur un
+ * repère incliné, avec **0,20 d'écart** sur la première composante.
+ *
+ * ⚡ **ET LA PROJECTION EST AUSSI CE QUI REND LE DÉNOMINATEUR JUSTE** : la pente
+ * cherchée est `dh / distance AU SOL`, et la distance au sol par pixel est
+ * exactement la composante TANGENTIELLE du déplacement, pas sa longueur oblique.
+ *
+ * @param {number[]} sx la tangente d'écran en x, dans l'unité de `P`
+ * @param {number[]} sy la tangente d'écran en y
+ * @param {number[]} n la normale de la surface de BASE (normalisée)
+ * @param {number} dhx la dérivée d'écran de `h` en x, dans la MÊME unité que `P`
+ * @param {number} dhy la dérivée d'écran de `h` en y
+ * @returns {number[]} la normale perturbée, normalisée
+ */
+export function normaleParDeplacement(sx, sy, n, dhx, dhy) {
+  const croix = (a, b) => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ]
+  const point = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+  const plan = (v) => {
+    const d = point(v, n)
+    return [v[0] - n[0] * d, v[1] - n[1] * d, v[2] - n[2] * d]
+  }
+  const tx = plan(sx)
+  const ty = plan(sy)
+  const r1 = croix(ty, n)
+  const r2 = croix(n, tx)
+  const det = point(tx, r1)
+  const s = det < 0 ? -1 : det > 0 ? 1 : 0
+  const v = [
+    Math.abs(det) * n[0] - s * (dhx * r1[0] + dhy * r2[0]),
+    Math.abs(det) * n[1] - s * (dhx * r1[1] + dhy * r2[1]),
+    Math.abs(det) * n[2] - s * (dhx * r1[2] + dhy * r2[2]),
+  ]
+  const l = Math.hypot(v[0], v[1], v[2])
+  if (!(l > 0)) return [n[0], n[1], n[2]]
+  return [v[0] / l, v[1] / l, v[2] / l]
+}
+
+/**
+ * Le texte GLSL de la même loi — INJECTÉ, jamais recopié.
+ *
+ * ⚠️ **`normaleFineCrop` REND SA NORMALE EN ESPACE DE VUE**, comme ses entrées.
+ * L'appelant la ramène au monde par la transposée de `mat3(viewMatrix)` (une
+ * rotation : sa transposée EST son inverse). GLSL ES 1.0 n'a pas `transpose()`,
+ * d'où `nMondeDepuisVue`, écrit ici plutôt que sur place.
+ */
+export const GLSL_NORMALE_FINE = /* glsl */ `
+// ═══ LA NORMALE PAR FRAGMENT — src/monde/eclairage-crop.js, Tache P9 ═══════
+// Loi de Mikkelsen, celle que porte three (bumpmap_pars_fragment.glsl.js),
+// SANS la normalisation de sigma : elle rendrait la pente proportionnelle au
+// denivele par PIXEL au lieu du denivele par METRE. Voir l'en-tete du module.
+vec3 normaleFineCrop(vec3 sx, vec3 sy, vec3 n, float dhx, float dhy) {
+  // ⛔ PROJETEES SUR LE PLAN DE n AVANT TOUT : les tangentes viennent de la
+  // surface DEPLACEE, n est la normale de la SPHERE NUE. Voir le module.
+  vec3 tx = sx - n * dot(sx, n);
+  vec3 ty = sy - n * dot(sy, n);
+  vec3 r1 = cross(ty, n);
+  vec3 r2 = cross(n, tx);
+  float det = dot(tx, r1);
+  vec3 grad = sign(det) * (dhx * r1 + dhy * r2);
+  vec3 v = abs(det) * n - grad;
+  float l = length(v);
+  return l > 0.0 ? v / l : n;
+}
+// La transposee d'une rotation EST son inverse : (V^T u)_i = dot(colonne_i, u).
+vec3 nMondeDepuisVue(mat3 V, vec3 u) {
+  return normalize(vec3(dot(V[0], u), dot(V[1], u), dot(V[2], u)));
+}
+`

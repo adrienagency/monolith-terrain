@@ -4830,9 +4830,22 @@ function majLoiTextureMonde() {
 //     près. Et la portée de la calotte n'est plus l'horizon (256 demi-largeurs)
 //     mais `PORTEE_CROP = 3`, l'emprise 3×3 du mode plat : c'est ce qui rend
 //     l'emprise de la mer réservable.
-//   · **le grain** reste à zéro : `HABILLAGE_MONDE.grainForceM` vaut 0 et rien
-//     dans les réglages du socle ne s'y traduit en mètres de relief sans une
-//     mesure qu'on n'a pas faite.
+//   · **le grain** reste à zéro — ⚡ **ET LA MESURE QUI MANQUAIT EXISTE
+//     MAINTENANT (Tâche P9), ELLE DIT QUE ÇA NE VAUT PAS LA CONVERSION.**
+//     `_makeDemSampler` ajoute `detail × fbm` en UNITÉS DE SCÈNE sur
+//     `scale = (span / dem.extentMeters) × exagération` : à la valeur vivante
+//     (`detail = 0,02`, `scale = 0,004 090`) cela fait **6,60 m de relief**, de
+//     longueur d'onde **611 m**. Posé sur le crop à sa conversion exacte
+//     (`grainForceM = detail × largeurCropM / COTE_CROP_UNITES / exagération`
+//     = **4,89 m** ; `grainEchelle = detailScale × COTE_CROP_UNITES / 2` =
+//     **22,4**, parce que `qCrop` couvre ±1 là où le socle indexe des unités de
+//     scène), il déplace l'énergie de détail de **10,972 à 10,972 — 0,000 %**,
+//     et la luminance moyenne de **0,002 octet**. Il faut **×50** (244 m de
+//     relief inventé) pour gagner 4,4 %, et le curseur, lui, est plafonné à
+//     `NATURAL_DETAIL_MAX = 0,15`, soit **36,7 m**. ⛔ **Une cinquième monnaie à
+//     convertir pour un zéro mesuré : non porté, et c'est une décision, pas un
+//     oubli.** La recette est ci-dessus pour qui la voudra.
+//     (`.banc/P9/S5-relief-P9.json`, aller-retour à 0 canal.)
 // Le LIEU et la LARGEUR du crop, seuls — extraits de `contexteCrop` par la
 // Tâche J. ⚠️ **PARCE QUE DEUX APPELANTS EN ONT BESOIN, ET QU'UNE SECONDE
 // ÉCRITURE DIVERGERAIT** : `contexteCrop` (ce que la chaîne reçoit) et
@@ -5005,6 +5018,14 @@ function contexteCrop() {
       amplitudeM: amplitudeM > 0 ? amplitudeM : null,
       contourOpacity: terrain.mapUniforms.uContourOpacity.value,
       contourWeight: terrain.mapUniforms.uContourWeight.value,
+      // ══════ LA NORMALE PAR FRAGMENT — Tâche P9 ═══════════════════════════
+      //
+      // ⚠️ **VRAI DÈS QU'IL Y A UN CROP, ET PAS UN RÉGLAGE.** Ce n'est pas une
+      // option d'utilisateur : c'est la réparation d'un désaccord de MAILLAGE
+      // entre les deux Terres — 5 625 sommets sur le bloc côté globe contre
+      // 594 434 côté socle. Le §6 de `monde/eclairage-crop.js` porte la mesure
+      // qui l'a nommé et celle de ce qu'il rend.
+      normaleFine: true,
       // ══════ LA COLORISATION NATURELLE — Tâche P2 ═════════════════════════
       //
       // ⚠️ **LES SEPT SOUS-RÉGLAGES D'ATLAS PASSENT ICI, ET LES DEUX CURSEURS DE
